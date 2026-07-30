@@ -41,7 +41,7 @@ function makeLane(overrides: Partial<FlowMapLane> = {}): FlowMapLane {
   return {
     epicId: 'e1', title: 'Epic 1', pastTotal: 0,
     nowNodes: [], queueNodesByDepth: new Map(), overflows: [], edges: [],
-    pastBundle: { total: 0, internalCount: 0, outgoingCount: 0 },
+    pastBundle: { total: 0, internalCount: 0, outgoingCount: 0 }, pastNodes: [],
     ...overrides,
   };
 }
@@ -60,7 +60,7 @@ afterEach(async () => {
 describe('FlowMapCanvas — edge line rendering (양성대조)', () => {
   it('renders no <svg> at all when the lane has no edges (오늘 org 0행 상태와 동형)', async () => {
     const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
     expect(container.querySelector('svg')).toBeNull();
   });
 
@@ -72,7 +72,7 @@ describe('FlowMapCanvas — edge line rendering (양성대조)', () => {
       queueNodesByDepth: new Map([[0, [queueNode]]]),
       edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1' })],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
     const line = container.querySelector('line[data-edge-kind]');
     expect(line).not.toBeNull();
     // 좌표가 실제로 계산돼 들어갔는지(값으로 닫는다 — "보인다"와 "계산됐다"가 다르다는
@@ -87,7 +87,7 @@ describe('FlowMapCanvas — edge line rendering (양성대조)', () => {
       nowNodes: [makeNode({ id: 'n1' })],
       edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'ghost-not-rendered' })],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
     expect(container.querySelector('line[data-edge-kind]')).toBeNull();
   });
 });
@@ -96,7 +96,7 @@ describe('FlowMapCanvas — node click → open story panel (선생님 지적 20
   it('clicking a node card calls onSelectStory with that node id', async () => {
     const onSelectStory = vi.fn();
     const lane = makeLane({ nowNodes: [makeNode({ id: 's-123' })] });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={onSelectStory} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={onSelectStory} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
     const button = container.querySelector('button');
     expect(button).not.toBeNull();
     await act(async () => { button?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
@@ -126,7 +126,7 @@ describe('FlowMapCanvas — 8종 양성대조(유나양 4×2 규격)', () => {
       queueNodesByDepth: new Map([[0, queueNodes]]),
       edges,
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
     const lines = Array.from(container.querySelectorAll('line[data-edge-kind]'));
     expect(lines).toHaveLength(8);
 
@@ -171,7 +171,7 @@ describe('FlowMapCanvas — 8종 양성대조(유나양 4×2 규격)', () => {
       queueNodesByDepth: new Map([[0, [queueNode]]]),
       edges: [makeEdge({ fromNodeId: 'old', toNodeId: 'new', kind: 'supersede', confirmed: true })],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
     const oldTitle = Array.from(container.querySelectorAll('div')).find((d) => d.textContent === '옛 스토리');
     expect(oldTitle?.className).toContain('line-through');
   });
@@ -184,7 +184,7 @@ describe('FlowMapCanvas — 8종 양성대조(유나양 4×2 규격)', () => {
       queueNodesByDepth: new Map([[0, [queueNode]]]),
       edges: [makeEdge({ fromNodeId: 'old', toNodeId: 'new', kind: 'supersede', confirmed: false })],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
     const oldTitle = Array.from(container.querySelectorAll('div')).find((d) => d.textContent === '옛 스토리');
     expect(oldTitle?.className).not.toContain('line-through');
   });
@@ -195,11 +195,11 @@ describe('FlowMapCanvas — 8종 양성대조(유나양 4×2 규격)', () => {
       queueNodesByDepth: new Map([[0, [makeNode({ id: 'u1', kind: 'queue' })]]]),
       edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1', kind: 'spawn', confirmed: true })],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[withEdges]} onSelectStory={() => {}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[withEdges]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
     expect(container.textContent).toContain('낳음');
 
     const noEdges = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[noEdges]} onSelectStory={() => {}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[noEdges]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
     expect(container.textContent).not.toContain('낳음');
   });
 });
@@ -212,7 +212,7 @@ describe('FlowMapCanvas — past-bundle card (묶음이 선을 통과시킨다)'
       nowNodes: [makeNode({ id: 'n1' })],
       pastBundle: { total: 46, internalCount: 73, outgoingCount: 3 },
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
     expect(container.textContent).toContain('완료 46');
     expect(container.textContent).toContain('안에서 이어진 것 73');
     expect(container.textContent).toContain('여기서 나온 다음 3건');
@@ -226,7 +226,7 @@ describe('FlowMapCanvas — past-bundle card (묶음이 선을 통과시킨다)'
       pastBundle: { total: 18, internalCount: 73, outgoingCount: 1 },
       edges: [makeEdge({ fromNodeId: '__past-bundle__', toNodeId: 'n1', kind: 'spawn', confirmed: false })],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
     const line = container.querySelector('line[data-edge-kind="spawn"]');
     expect(line).not.toBeNull();
     // 묶음 카드는 폭이 다르다(110px) — 좌표가 실제로 그 카드 좌상단(left:20)에서 시작해야 한다.
@@ -247,7 +247,7 @@ describe('FlowMapCanvas — grouped edges (여러 선이 한 점에 모이면 �
         makeEdge({ fromNodeId: '__past-bundle__', toNodeId: 'n1', kind: 'spawn', confirmed: true }),
       ],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
     const lines = container.querySelectorAll('line[data-edge-kind]');
     expect(lines).toHaveLength(1); // 3건이 겹쳐 하나로
     expect(lines[0]?.getAttribute('data-edge-count')).toBe('3');
@@ -266,7 +266,7 @@ describe('FlowMapCanvas — grouped edges (여러 선이 한 점에 모이면 �
         makeEdge({ fromNodeId: '__past-bundle__', toNodeId: 'n1', kind: 'then', confirmed: true }),
       ],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
     const line = container.querySelector('line[data-edge-kind="mixed"]');
     expect(line).not.toBeNull();
     expect(line?.getAttribute('stroke')).toBe('var(--muted-foreground)');
@@ -280,7 +280,7 @@ describe('FlowMapCanvas — grouped edges (여러 선이 한 점에 모이면 �
       pastBundle: { total: 5, internalCount: 0, outgoingCount: 1 },
       edges: [makeEdge({ fromNodeId: '__past-bundle__', toNodeId: 'n1', kind: 'spawn', confirmed: true })],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
     expect(container.querySelector('text')).toBeNull();
   });
 });

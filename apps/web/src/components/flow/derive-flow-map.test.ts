@@ -186,6 +186,40 @@ describe('deriveFlowMapLane', () => {
       expect(lane.pastBundle.internalCount).toBe(0);
     });
   });
+
+  // 유나양 규격(아티팩트 a125909a, "펼친 상태") — 묶음 카드를 누르면(pastItems가 채워지면)
+  // 과거 스토리도 개별 좌표를 갖고, 이전엔 안 그려지던(internalCount) 양끝-다-과거 간선도
+  // 이제 실제로 그려진다("안에서 이어진 것도 그 틀 안에서 보입니다").
+  describe('past-bundle expansion (묶음을 누르면 펼쳐진다 — 이것이 곧 줌인)', () => {
+    it('populates pastNodes from pastItems, kind="past"', () => {
+      const pastItems = [makeItem({ id: 'p1', story_number: 10, title: 'Old story' })];
+      const lane = deriveFlowMapLane('e1', 'Epic 1', 1, [], [], [], pastItems);
+      expect(lane.pastNodes).toEqual([{ id: 'p1', storyNumber: 10, title: 'Old story', status: 'backlog', kind: 'past', depth: 0 }]);
+    });
+
+    it('draws a direct edge between two past nodes once both are expanded (no longer counted in internalCount)', () => {
+      const pastItems = [makeItem({ id: 'past-a' }), makeItem({ id: 'past-b', story_number: 2 })];
+      const edges: FlowMapEdge[] = [edge('past-a', 'past-b')];
+      const lane = deriveFlowMapLane('e1', 'Epic 1', 2, [], [], edges, pastItems);
+      expect(lane.edges).toEqual([edge('past-a', 'past-b')]);
+      expect(lane.pastBundle.internalCount).toBe(0); // 접힌 상태였다면 1이었을 것.
+    });
+
+    it('draws a direct edge from a past node to an alive node once expanded (no bundle resolution needed)', () => {
+      const pastItems = [makeItem({ id: 'past-a' })];
+      const edges: FlowMapEdge[] = [edge('past-a', 'n1')];
+      const lane = deriveFlowMapLane('e1', 'Epic 1', 1, [makeItem({ id: 'n1' })], [], edges, pastItems);
+      expect(lane.edges).toEqual([edge('past-a', 'n1')]); // PAST_BUNDLE_NODE_ID로 안 바뀐다.
+      expect(lane.pastBundle.outgoingCount).toBe(0); // 집계는 접힌 상태에서만 의미가 있다.
+    });
+
+    it('drops an edge whose past endpoint is NOT among the fetched pastItems (partial/unexpanded reference)', () => {
+      const pastItems = [makeItem({ id: 'past-a' })]; // 'past-ghost'는 안 옴
+      const edges: FlowMapEdge[] = [edge('past-ghost', 'n1')];
+      const lane = deriveFlowMapLane('e1', 'Epic 1', 5, [makeItem({ id: 'n1' })], [], edges, pastItems);
+      expect(lane.edges).toEqual([]); // 묶음도 이미 사라졌고 개별 좌표도 없다 — 유령 선 방지.
+    });
+  });
 });
 
 describe('computeNodeLogicalPositions — past-bundle anchor', () => {
@@ -198,6 +232,15 @@ describe('computeNodeLogicalPositions — past-bundle anchor', () => {
   it('has no entry for PAST_BUNDLE_NODE_ID when pastTotal is 0 (no card to point to)', () => {
     const lane = deriveFlowMapLane('e1', 'Epic 1', 0, [], [], []);
     const positions = computeNodeLogicalPositions(lane);
+    expect(positions.has(PAST_BUNDLE_NODE_ID)).toBe(false);
+  });
+
+  it('positions each pastNode at column "past-expanded" stacked by row index, and drops the bundle anchor (펼치면 집계 카드가 사라진다)', () => {
+    const pastItems = [makeItem({ id: 'p1' }), makeItem({ id: 'p2', story_number: 2 })];
+    const lane = deriveFlowMapLane('e1', 'Epic 1', 2, [], [], [], pastItems);
+    const positions = computeNodeLogicalPositions(lane);
+    expect(positions.get('p1')).toEqual({ column: 'past-expanded', row: 0 });
+    expect(positions.get('p2')).toEqual({ column: 'past-expanded', row: 1 });
     expect(positions.has(PAST_BUNDLE_NODE_ID)).toBe(false);
   });
 });
@@ -384,7 +427,7 @@ function makeLane(overrides: Partial<FlowMapLane> = {}): FlowMapLane {
   return {
     epicId: 'e1', title: 'Epic 1', pastTotal: 0,
     nowNodes: [], queueNodesByDepth: new Map(), overflows: [], edges: [],
-    pastBundle: { total: 0, internalCount: 0, outgoingCount: 0 },
+    pastBundle: { total: 0, internalCount: 0, outgoingCount: 0 }, pastNodes: [],
     ...overrides,
   };
 }

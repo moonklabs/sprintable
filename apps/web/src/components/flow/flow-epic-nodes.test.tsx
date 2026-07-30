@@ -152,3 +152,99 @@ describe('FlowEpicNodes — merges dependencies-graph edges with reference-candi
     expect(container.textContent).not.toContain('불러오지 못했습니다');
   });
 });
+
+// 유나양 규격(아티팩트 a125909a, "누르면 펼쳐지는 것이 곧 줌인") — 묶음 카드 클릭이 실제로
+// `/api/stories?epic_id=&status=done`(project_id 없이)을 부르고, 그 결과로 과거 스토리가
+// 개별 카드로 서고 간선이 묶음이 아닌 개별 좌표로 다시 그려지는 것을 왕복 확認한다.
+describe('FlowEpicNodes — clicking the past-bundle card expands it (실제 fetch → 개별 노드)', () => {
+  it('fetches done stories WITHOUT project_id when the bundle card is clicked, and re-resolves edges to individual past nodes', async () => {
+    const calledUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calledUrls.push(url);
+      if (url.includes('/api/analytics/epic-flow-nodes')) {
+        return jsonResponse({
+          data: {
+            epic_id: 'e1', now: { total: 1, items: [NOW_ITEM] }, upcoming: { total: 0, shown: 0, items: [] },
+            past: { total: 1 }, blocked_count: 0, last_changed_at: null,
+          },
+        });
+      }
+      if (url.includes('/api/dependencies/graph')) return jsonResponse({ item_type: 'story', nodes: [], edges: [] });
+      if (url.includes('/api/goals/e1/reference-candidates')) {
+        return jsonResponse([
+          { id: 'c1', source_id: 'past-1', source_field: 'description', target_type: 'story', target_id: 'n1', relation_kind: 'spawned', matched_keyword: null, snippet: 's', status: 'declared', declared_by: null, declared_at: null, created_at: '2026-07-30T00:00:00Z' },
+        ]);
+      }
+      if (url.startsWith('/api/stories?')) {
+        expect(url).not.toContain('project_id'); // board 분기(7일/10건 캡) 함정 회피 확認.
+        expect(url).toContain('epic_id=e1');
+        expect(url).toContain('status=done');
+        return jsonResponse({
+          data: [{ id: 'past-1', story_number: 99, title: 'Past Story', status: 'done' }],
+          meta: { hasMore: false, nextCursor: null },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => {
+      root.render(wrap(<FlowEpicNodes projectId="p1" epicId="e1" epicTitle="Epic 1" onSelectStory={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    // 접힌 상태 — 묶음 해소된 선(from=bundle) 하나.
+    expect(container.querySelector('line[data-edge-kind="spawn"]')).not.toBeNull();
+    expect(container.textContent).toContain('완료 1');
+
+    const bundleButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('완료 1'));
+    expect(bundleButton).not.toBeUndefined();
+    await act(async () => {
+      bundleButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(calledUrls.some((u) => u.startsWith('/api/stories?'))).toBe(true);
+    // 펼친 뒤 — 개별 과거 카드가 실제로 서고(#99), 묶음 카드(3줄 텍스트)는 사라진다.
+    expect(container.textContent).toContain('Past Story');
+    expect(container.textContent).not.toContain('안에서 이어진 것');
+  });
+
+  it('collapses back when the expanded card is clicked again (다시 누르면 접힙니다)', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/analytics/epic-flow-nodes')) {
+        return jsonResponse({
+          data: {
+            epic_id: 'e1', now: { total: 1, items: [NOW_ITEM] }, upcoming: { total: 0, shown: 0, items: [] },
+            past: { total: 1 }, blocked_count: 0, last_changed_at: null,
+          },
+        });
+      }
+      if (url.includes('/api/dependencies/graph')) return jsonResponse({ item_type: 'story', nodes: [], edges: [] });
+      if (url.includes('/api/goals/e1/reference-candidates')) return jsonResponse([]);
+      if (url.startsWith('/api/stories?')) {
+        return jsonResponse({ data: [{ id: 'past-1', story_number: 99, title: 'Past Story', status: 'done' }], meta: { hasMore: false, nextCursor: null } });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => {
+      root.render(wrap(<FlowEpicNodes projectId="p1" epicId="e1" epicTitle="Epic 1" onSelectStory={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const bundleButton = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('완료 1'));
+    await act(async () => { bundleButton()?.dispatchEvent(new MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 0)); });
+    expect(container.textContent).toContain('Past Story');
+
+    const collapseButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('다시 누르면 접힙니다'));
+    expect(collapseButton).not.toBeUndefined();
+    await act(async () => { collapseButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 0)); });
+
+    expect(container.textContent).not.toContain('Past Story');
+    expect(bundleButton()).not.toBeUndefined(); // 묶음 카드가 다시 선다.
+  });
+});
