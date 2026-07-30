@@ -148,6 +148,18 @@ async def test_epics_progress_lane_buckets_correctly_and_one_call():
             assert body["stall_threshold_hours"] == 168
             assert body["stories_without_epic"] == 1, "epic 없는 story(story_no_epic) 1건이 응답에 실려야 함"
             assert call_count["n"] == 1, f"repo 메서드가 {call_count['n']}번 불림(N+1 의심)"
+
+            # 급추가(2026-07-30, 선생님 지적): past/now/upcoming(시간축) — epic-flow-nodes와
+            # 같은 정의(past=done, now=in-progress+in-review, upcoming=나머지).
+            zone = body["zones"][str(epic.id)]
+            assert zone["title"] == "Epic A"
+            assert zone["total"] == 6
+            assert zone["done"] == 1
+            assert zone["pct"] == 17  # round(1/6*100)
+            assert zone["past_cnt"] == 1  # story_done
+            assert zone["now_cnt"] == 4  # story_ip·story_wait(in-review)·story_blocked·story_not_blocked
+            assert zone["upcoming_cnt"] == 1  # story_stalled(backlog)
+            assert zone["past_cnt"] + zone["now_cnt"] + zone["upcoming_cnt"] == zone["total"]
         finally:
             await client.aclose()
     finally:
