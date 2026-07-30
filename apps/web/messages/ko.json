@@ -57,6 +57,7 @@
   "nav": {
     "dashboard": "대시보드",
     "sprintManagement": "스프린트 관리",
+    "flow": "흐름",
     "board": "보드",
     "settings": "설정",
     "standup": "스탠드업",
@@ -435,6 +436,24 @@
     "trustUnknownMember": "알 수 없는 구성원",
     "memorySlotTitle": "기억",
     "memorySlotBody": "조직 단위 축적 기억은 준비 중입니다."
+  },
+  "flow": {
+    "title": "흐름",
+    "loading": "불러오는 중…",
+    "viewFlow": "갈래",
+    "viewKanban": "칸반",
+    "laneHeading": "목표 · {n}",
+    "laneEmpty": "아직 목표가 없습니다.",
+    "canvasPast": "지나온 것",
+    "canvasNow": "지금",
+    "canvasUpcoming": "이어질 것",
+    "canvasEmpty": "아직 그릴 것이 없습니다.",
+    "canvasActiveMarker": "지금 도는 갈래",
+    "canvasScopeNotice": "이 화면은 아직 «에픽 단위»까지만 그립니다 — 개별 작업 노드와 시간축은 다음 판입니다.",
+    "canvasNotYetShown": "아직 표시하지 않습니다: 진행 중·대기·막힘·멈춤 건수.",
+    "edgesCount": "연결 {n}건 확인 대기",
+    "edgesEmptyHonest": "연결 0건 — 이 지도는 아직 이어지지 않았습니다.",
+    "drawerHeading": "게이트·막힘 신호 · {n}"
   },
   "board": {
     "title": "칸반 보드",
