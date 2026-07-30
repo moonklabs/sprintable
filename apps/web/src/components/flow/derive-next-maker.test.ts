@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
-  parseGoals, parseStories, parseNextUp,
+  parseGoals, parseStories, parseNextUp, filterActiveGoals,
   deriveGoalStems, deriveRecentlyClosedEpicIds, sortStemsByStallUrgency,
   deriveHeadline, deriveZeroStageStats,
   type NextMakerGoal, type NextMakerStory,
 } from './derive-next-maker';
 
 function goal(overrides: Partial<NextMakerGoal> = {}): NextMakerGoal {
-  return { id: 'e1', title: 'Epic 1', totalStories: 10, doneStories: 2, ...overrides };
+  return { id: 'e1', title: 'Epic 1', status: 'active', totalStories: 10, doneStories: 2, ...overrides };
 }
 
 function story(overrides: Partial<NextMakerStory> = {}): NextMakerStory {
@@ -20,8 +20,8 @@ function story(overrides: Partial<NextMakerStory> = {}): NextMakerStory {
 
 describe('parseGoals / parseStories / parseNextUp', () => {
   it('maps snake_case BE fields to camelCase', () => {
-    expect(parseGoals([{ id: 'e1', title: 'T', total_stories: 5, done_stories: 2 }]))
-      .toEqual([{ id: 'e1', title: 'T', totalStories: 5, doneStories: 2 }]);
+    expect(parseGoals([{ id: 'e1', title: 'T', status: 'active', total_stories: 5, done_stories: 2 }]))
+      .toEqual([{ id: 'e1', title: 'T', status: 'active', totalStories: 5, doneStories: 2 }]);
     expect(parseStories([{
       id: 's1', story_number: 1, title: 'S', status: 'backlog',
       assignee_id: 'u1', updated_at: '2026-07-01T00:00:00Z', epic_id: 'e1',
@@ -38,6 +38,22 @@ describe('parseGoals / parseStories / parseNextUp', () => {
       sourceClosedAt: '2026-07-20T00:00:00Z', targetId: 't1', targetStoryNumber: 11,
       targetTitle: 'T', relationKind: 'spawned', status: 'estimated', isRecent: true,
     }]);
+  });
+});
+
+describe('filterActiveGoals', () => {
+  it('keeps only status=active, drops done/archived/draft', () => {
+    const goals = [
+      goal({ id: 'a', status: 'active' }),
+      goal({ id: 'd', status: 'done' }),
+      goal({ id: 'ar', status: 'archived' }),
+      goal({ id: 'dr', status: 'draft' }),
+    ];
+    expect(filterActiveGoals(goals).map((g) => g.id)).toEqual(['a']);
+  });
+
+  it('empty input → empty output', () => {
+    expect(filterActiveGoals([])).toEqual([]);
   });
 });
 
