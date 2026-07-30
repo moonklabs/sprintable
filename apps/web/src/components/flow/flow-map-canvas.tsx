@@ -177,10 +177,15 @@ export function FlowMapCanvas({ lanes }: FlowMapCanvasProps) {
                   {/* ⑥ 조건부 문구(PO 판정 2026-07-30) — "그리지 않는 것"이 아니라 "왜 비었는지
                       말하는 것"이 0을 그리는 것의 완성형. 하드코딩된 텍스트가 아니라 depth≥1
                       항목이 실제로 없을 때만 뜨는 조건문 — 간선이 착지해 depth 2열이 생기는
-                      날 이 조건이 스스로 거짓이 되어 사라진다(거짓말이 될 위험 없음). */}
+                      날 이 조건이 스스로 거짓이 되어 사라진다(거짓말이 될 위험 없음).
+                      ⛔라이브 실측 발견 버그(2026-07-30, PR#2691 배포 검증 중) — `whitespace-nowrap`
+                      없이는 이 `<p>`가 `overflow-x-auto` 조상의 초기(스크롤 前) clientWidth를
+                      넘는 left에 놓일 때 shrink-to-fit 가용폭이 음수로 계산돼 한글이 글자 하나당
+                      한 줄로 쪼개져 세로로 줄바꿈됐다(실측: computed width 13px). 명시적으로
+                      한 줄 강제. */}
                   {shouldShowNoDeeperReason(lane) ? (
                     <p
-                      className="absolute font-mono text-[9px] text-brand"
+                      className="absolute whitespace-nowrap font-mono text-[9px] text-brand"
                       style={{ left: FLOW_MAP_DEPTH0_X + FLOW_MAP_GRID_STEP + 12, top: height / 2 - 6 }}
                     >
                       {t('flowMapNoDeeperReason')}

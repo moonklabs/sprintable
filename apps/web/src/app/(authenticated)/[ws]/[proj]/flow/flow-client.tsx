@@ -21,31 +21,38 @@ interface FlowPageClientProps {
   projSlug: string;
 }
 
-type FlowView = 'flow' | 'list' | 'goal';
+type FlowView = 'flow' | 'list';
 
 // PO 판정(2026-07-30) — 선생님 원 지시("보드+현황판 통합, `/plan`은 말실수·`/flow`가 그
-// 자리")에 따라 07-23 시안(`e15905e8`)의 「갈래|목록|목표」 3분할 세그를 되찾는다(IA 개정 때
-// 조용히 지워졌던 것 — 유나 지적). `kanban`은 지난 배포분(PR#2691/#2694) 링크가 이미 떠 있을
-// 수 있어 `list`의 레거시 별칭으로 계속 받는다(URL 하위호환 — 링크가 조용히 깨지지 않는다).
+// 자리")에 따라 07-23 시안(`e15905e8`)의 「갈래|목록」 세그를 되찾는다(IA 개정 때 조용히
+// 지워졌던 것 — 유나 지적). `kanban`은 지난 배포분(PR#2691/#2694) 링크가 이미 떠 있을 수 있어
+// `list`의 레거시 별칭으로 계속 받는다(URL 하위호환 — 링크가 조용히 깨지지 않는다).
+//
+// ⛔선생님 재정정(2026-07-30, PR#2696 CI 중에 도착 — 머지 前에 반영) — "현황판" 3번째 칸은
+// 지웠다(짓지 않은 게 아니라 "안 짓기로" 확定해 없앤 것). 근거: glance의 다섯 소스가 전부
+// 다른 자리로 흡수된다 — goals+focal→좌 레인+①초점 스트립, dashboard/overview 총계→관제
+// 범례 statusbar, glance/attention 예외→③관제, team-members 협업맵 재료→③관제의 원인
+// 하나로, 진행 궤적→시간축이 대체(따로 안 옮김). activity-logs만 목업 자체가 자리를
+// 정하지 않은 유일한 칸이라 판정 대기. 즉 현황판은 "갈래 캔버스가 더 잘 하는 것의 열등한
+// 판"이라 보기로도 남지 않는다.
 function parseView(raw: string | null): FlowView {
   if (raw === 'list' || raw === 'kanban') return 'list';
-  if (raw === 'goal') return 'goal';
   return 'flow';
 }
 
 /**
  * story #2224(IA v2.2 §7-3, 유나 정정 2026-07-30) — 통합 화면. ①초점 스트립(GlanceHero, A타입
  * 재사용) ②관제 서랍(ExceptionStream, A타입 재사용) 은 보기와 무관하게 항상 고정 — "전면에서
- * 내린다"는 뜻이 이것이다(보기를 전환해도 이 둘은 그대로 남는다). 보기 전환은 세 칸(갈래|목록|
- * 목표) 세그이며 `?view=` 쿼리파라미터가 정본(URL이 상태를 들고 있어 새로고침·공유 가능).
+ * 내린다"는 뜻이 이것이다(보기를 전환해도 이 둘은 그대로 남는다). 보기 전환은 두 칸(갈래|목록)
+ * 세그이며 `?view=` 쿼리파라미터가 정본(URL이 상태를 들고 있어 새로고침·공유 가능).
  *
  * PO 판정(2026-07-30, 선생님 정정 반영) — "보드+현황판 통합"의 실제 자리는 `/plan`이 아니라
  * `/flow`였다(`/plan`은 말실수). 남은 본체는 `/glance`·`/board`를 이 화면 «안으로» 들이고
  * 옛 라우트를 죽이는 것 하나 — 오늘은 그 1단계(세그먼트 셸)만: 갈래=이 캔버스(그대로) ·
- * 목록=`KanbanBoard`(그대로 마운트, 라벨만 이동) · 목표=`/glance` 롤업이 올 빈 칸(오늘은
- * 플레이스홀더 — canvasScopeNotice와 같은 규율로 "없다"가 아니라 "다음"이라 말한다).
- * 목표 칸의 실제 내용물(예외 스트림 재배치·협업맵·진행궤적 자리)은 후속 조각 — 협업맵·
- * 진행궤적은 목업 세 영역에 자리가 없어 유나양 확認 대기 중이다.
+ * 목록=`KanbanBoard`(그대로 마운트, 라벨만 이동). glance의 다섯 소스는 「현황판」이라는 별도
+ * 보기가 아니라 갈래 보기·관제 서랍의 기존 영역에 나눠 얹는다(선생님 재정정 — 진행 궤적은
+ * 시간축이 대체해 따로 옮기지 않고, `activity-logs`만 목업 자체가 자리를 정하지 않은 유일한
+ * 칸이라 판정 대기) — 이 나눠얹기 자체는 후속 조각.
  */
 export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPageClientProps) {
   const t = useTranslations('flow');
@@ -134,10 +141,12 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
       <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
 
       <div className="space-y-4 p-4">
-        {/* ② 세 칸 세그(갈래|칸반|현황판) — 07-23 시안(`e15905e8`)에서 되찾음(IA 개정 때 조용히
-            지워졌던 것, 유나 지적 2026-07-30). 모바일은 #2225의 갈래·막힘·멈춤 탭이 이 자리를
-            대신하므로 세그를 그리지 않는다(isMobile===undefined인 최초 렌더에서도 안전하게
-            숨김 — 하이드레이션 후 실값으로 켜진다). */}
+        {/* ② 두 칸 세그(갈래|칸반) — 07-23 시안(`e15905e8`)에서 되찾음(IA 개정 때 조용히
+            지워졌던 것, 유나 지적 2026-07-30). ⛔"현황판" 세 번째 칸은 선생님 재정정으로
+            지웠다(짓지 않은 게 아니라 "안 짓기로" 확定해 없앤 것 — glance의 다섯 소스가 전부
+            다른 자리로 흡수되어 열등한 세 번째 판이 필요 없어졌다). 모바일은 #2225의
+            갈래·막힘·멈춤 탭이 이 자리를 대신하므로 세그를 그리지 않는다(isMobile===undefined인
+            최초 렌더에서도 안전하게 숨김 — 하이드레이션 후 실값으로 켜진다). */}
         {isMobile ? null : (
           <div className="flex items-center gap-1 border-b border-border pb-2">
             <button
@@ -154,13 +163,6 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
             >
               {t('viewList')}
             </button>
-            <button
-              type="button"
-              onClick={() => setView('goal')}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${view === 'goal' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              {t('viewGoal')}
-            </button>
           </div>
         )}
 
@@ -170,14 +172,6 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           // 되돌리기 쉬운 쪽(칸반 그대로 임베드)으로 가정한다 — kanban-board.tsx를 새로 그리지
           // 않고 그대로 마운트, `?view=kanban`(레거시)도 이 칸으로 들어온다.
           <KanbanBoard projectId={projectId} wsSlug={wsSlug} projSlug={projSlug} />
-        ) : view === 'goal' ? (
-          // 「현황판」— `/glance` 잔여(협업/충돌맵·진행 궤적, 예외 스트림 제외 — 그건 이제
-          // ③관제 서랍으로 껍데기에 올라갔다)가 올 자리(구조 최종 확定, 2026-07-30). 오늘은
-          // 세그먼트 셸만(PO 지시 — "1️⃣ 껍데기부터, 2️⃣3️⃣는 그 다음") — canvasScopeNotice와
-          // 같은 규율로 "없다"가 아니라 "다음"이라 말한다. 지어내지 않는다.
-          <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-            {t('viewGoalNotMovedYet')}
-          </p>
         ) : (
           // 「갈래」보기 — 목업(`63b240a4`) 세 영역 중 ①초점 스트립+②L3 캔버스가 이 보기의
           // 규격이다(③관제만 보기 밖 껍데기로 승격, 구조 최종 확定 2026-07-30 — 유나양이 "목업

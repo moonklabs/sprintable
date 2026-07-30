@@ -442,8 +442,6 @@
     "loading": "Loading…",
     "viewFlow": "Flow",
     "viewList": "Kanban",
-    "viewGoal": "Status board",
-    "viewGoalNotMovedYet": "Not moved yet — the collaboration/conflict map and progress trajectory land here next.",
     "laneHeading": "Goals · {n}",
     "laneEmpty": "No goals yet.",
     "laneUnknown": "Status unknown yet (no stories).",
