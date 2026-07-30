@@ -13,7 +13,7 @@ import { loadGlanceData, type GlanceData } from '@/components/glance/load-glance
 import { useIsMobile } from '@/hooks/use-mobile';
 import { FlowLane } from '@/components/flow/flow-lane';
 import { FlowCanvas } from '@/components/flow/flow-canvas';
-import { deriveFlowLaneRows } from '@/components/flow/derive-flow';
+import { deriveFlowLaneRows, type EpicsProgressLaneResponse } from '@/components/flow/derive-flow';
 
 interface FlowPageClientProps {
   projectId: string;
@@ -49,14 +49,26 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
 
   const [data, setData] = useState<GlanceData | null>(null);
   const [loading, setLoading] = useState(true);
+  // L2 정정(유나 목업 eacf5b50, 2026-07-30) — 좌 레인 5분류(#2672)+시간축 3분류(#2686)의
+  // 단일 소스. loadGlanceData()와 별도 fetch인 이유: 그 함수는 /glance와 공유하는지라(§I-6
+  // "두 벌 서지 않는다") 건드리지 않는다 — 이 화면(/flow)만 쓰는 재료라 여기서 따로 부른다.
+  // 실패해도 laneRows는 hasLaneData=false로 정직하게 비고, 화면이 죽지 않는다(null 유지).
+  const [laneData, setLaneData] = useState<EpicsProgressLaneResponse | null>(null);
 
   const fetchData = useCallback((cancelledRef: { cancelled: boolean }) => {
     setLoading(true);
     void (async () => {
       try {
-        const result = await loadGlanceData(projectId);
+        const [result, laneResult] = await Promise.all([
+          loadGlanceData(projectId),
+          fetch(`/api/analytics/epics-progress-lane?project_id=${projectId}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((json: { data?: EpicsProgressLaneResponse } | null) => json?.data ?? null)
+            .catch(() => null),
+        ]);
         if (cancelledRef.cancelled) return;
         setData(result);
+        setLaneData(laneResult);
       } catch {
         if (cancelledRef.cancelled) return;
         setData(null);
@@ -98,7 +110,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
     return toExceptionQueueItems(data.attentionSignals as BeAttentionSignal[], labels);
   }, [data, tGlance]);
 
-  const laneRows = useMemo(() => deriveFlowLaneRows(data?.roadmap ?? []), [data]);
+  const laneRows = useMemo(() => deriveFlowLaneRows(data?.roadmap ?? [], laneData), [data, laneData]);
   const activeEpicId = useMemo(() => data?.roadmap.find((e) => e.roadmapStatus === 'active')?.id ?? null, [data]);
 
   // #2221(구조화된 연결 간선) 미착지 — 실제 배열 길이 0에서 나온 값이지 리터럴이 아니다.
