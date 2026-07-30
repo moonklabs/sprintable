@@ -447,6 +447,7 @@ async def test_process_webhook_event_legacy_repo_owner_org_feeds_resolver():
          patch.object(vmod, "resolve_story_for_pr", new=AsyncMock(return_value=rl)) as resolver, \
          patch.object(vmod, "capture_pr_ci_verdict",
                        new=AsyncMock(return_value={"recorded": ["pr"]})), \
+         patch.object(vmod, "merge_link_evidence", new=AsyncMock()), \
          patch.object(vmod.logger, "info"):
         await vmod._process_webhook_event(session, "legacy", "pull_request", payload, None, delivery)
     resolver.assert_awaited_once()
@@ -508,3 +509,87 @@ async def test_close_on_merge_skips_when_not_confident():
     # not-confident 는 suppressed 로그 대상이 아니다(로그 과다발생 방지) — legacy org resolve 로그만 1회.
     info_log.assert_called_once()
     assert "legacy org resolve" in info_log.call_args.args[0]
+
+
+# ── merge_link_evidence 자체(idempotent upsert, story #2327 후속 PR#2685 시험대 갭) ─────
+@pytest.mark.anyio
+async def test_merge_link_evidence_creates_when_no_existing_row():
+    """행이 없으면 patch만으로 신규 생성(link_source/confidence 그대로 실림)."""
+    from app.services.pr_story_link import merge_link_evidence
+
+    session = _session([_scalar(None)])  # existing 조회 → 없음.
+    link = await merge_link_evidence(
+        session, ORG_A, STORY_ID, "org/repo", 9,
+        link_source="sid", confidence="high", patch={"webhook_merge": {"recorded_at": "t1"}},
+    )
+    session.add.assert_called_once()
+    added = session.add.call_args.args[0]
+    assert added.link_source == "sid" and added.confidence == "high"
+    assert added.evidence == {"webhook_merge": {"recorded_at": "t1"}}
+
+
+@pytest.mark.anyio
+async def test_merge_link_evidence_idempotent_updates_existing_row_no_duplicate():
+    """행이 이미 있으면(예: synchronize 뒤 merge) 새로 안 만들고 evidence만 dict-merge —
+    두 번 불러도 행 하나(멱등, story #2327 PO 조건③)."""
+    from app.services.pr_story_link import merge_link_evidence
+
+    existing = MagicMock(evidence={"old_key": "kept"}, deleted_at=None, link_source="sid", confidence="high")
+    session = _session([_scalar(existing)])
+    result = await merge_link_evidence(
+        session, ORG_A, STORY_ID, "org/repo", 9,
+        link_source="sid", confidence="high", patch={"webhook_merge": {"recorded_at": "t2"}},
+    )
+    session.add.assert_not_called()  # 신규 생성 0 — 같은 행 재사용.
+    assert result is existing
+    assert result.evidence == {"old_key": "kept", "webhook_merge": {"recorded_at": "t2"}}  # dict-merge 보존.
+
+
+# ── _process_webhook_event: merge 시 PullRequestStoryLink 배선(story #2327 후속, PR#2685) ──
+@pytest.mark.anyio
+async def test_process_webhook_event_merge_writes_link_with_sid_label():
+    """merge + confident(sid) 링크 → merge_link_evidence가 link_source='sid'(사람이 명시한
+    'explicit' 아님)로 호출된다 — 오늘 소급 205건과 같은 라벨 규율(PO 조건①)."""
+    from app.routers import verdict_capture as vmod
+
+    session = AsyncMock()
+    delivery = _delivery()
+    rl = ResolvedLink(STORY_ID, ORG_A, "sid", "high", True, "sid_exact_by_number")
+    payload = {"action": "closed", "repository": {"full_name": "moonklabs/sprintable"},
+               "pull_request": {"number": 2685, "merged": True, "title": "[SID:2224] x"}}
+    with patch.object(vmod, "_resolve_legacy_org_by_repo_owner",
+                       new=AsyncMock(return_value=(ORG_A, "org_resolved_via_repo_owner"))), \
+         patch.object(vmod, "resolve_story_for_pr", new=AsyncMock(return_value=rl)), \
+         patch.object(vmod, "capture_pr_ci_verdict",
+                       new=AsyncMock(return_value={"recorded": ["pr", "ci"]})), \
+         patch.object(vmod, "merge_link_evidence", new=AsyncMock()) as link_write, \
+         patch.object(vmod.logger, "info"):
+        await vmod._process_webhook_event(session, "legacy", "pull_request", payload, None, delivery)
+    link_write.assert_awaited_once()
+    kwargs = link_write.call_args.kwargs
+    assert kwargs["link_source"] == "sid" and kwargs["link_source"] != "explicit"
+    assert kwargs["confidence"] == "high"
+    assert link_write.call_args.args[1:5] == (ORG_A, STORY_ID, "moonklabs/sprintable", 2685)
+
+
+@pytest.mark.anyio
+async def test_process_webhook_event_ci_only_does_not_write_link():
+    """merge가 아닌 CI-only 이벤트(merged=False)는 링크를 쓰지 않는다 — merge 분기로만
+    명시 스코프(PO 승인 범위, 「merge 분기」)."""
+    from app.routers import verdict_capture as vmod
+
+    session = AsyncMock()
+    delivery = _delivery()
+    rl = ResolvedLink(STORY_ID, ORG_A, "sid", "high", True, "sid_exact_by_number")
+    payload = {"repository": {"full_name": "moonklabs/sprintable"},
+               "workflow_run": {"conclusion": "failure", "head_sha": "sha1",
+                                "head_branch": "feat-[SID:2224]", "pull_requests": [{"number": 2685}]}}
+    with patch.object(vmod, "_resolve_legacy_org_by_repo_owner",
+                       new=AsyncMock(return_value=(ORG_A, "org_resolved_via_repo_owner"))), \
+         patch.object(vmod, "resolve_story_for_pr", new=AsyncMock(return_value=rl)), \
+         patch.object(vmod, "capture_pr_ci_verdict",
+                       new=AsyncMock(return_value={"recorded": ["ci"]})), \
+         patch.object(vmod, "merge_link_evidence", new=AsyncMock()) as link_write, \
+         patch.object(vmod.logger, "info"):
+        await vmod._process_webhook_event(session, "legacy", "workflow_run", payload, None, delivery)
+    link_write.assert_not_awaited()
