@@ -127,7 +127,9 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
   // ⛔불완전한 처방: active 에픽 52개 중에서도 여전히 roadmap 배열 순서상 «먼저 오는 하나»를
   // 고르는 것뿐 — "가장 최근에 움직인 에픽"으로 좁히려면 에픽의 updated_at이 필요한데
   // `BeEpicListItem`엔 created_at만 있고 updated_at이 없다(BE 계약에 없음). 그 필드가
-  // 오면(#미정, BE 후속) "focal_story 있음" 다음 tie-break로 최신순 정렬을 추가한다.
+  // 오면(#2341, BE 후속 — "상태 자가회수" 스토리 AC2) "focal_story 있음" 다음 tie-break로
+  // 최신순 정렬을 추가한다. #2341 AC1은 더 근본적으로 "active"를 파생값으로 바꾸는 방향도
+  // 검토 중 — 이 tie-break는 그 방향이 확정되기 전까지의 완화(PR#2680)에 그친다.
   const activeEpic =
     roadmap.find((e) => e.roadmapStatus === 'active' && rawById.get(e.id)?.focal_story) ??
     roadmap.find((e) => e.roadmapStatus === 'active') ??
