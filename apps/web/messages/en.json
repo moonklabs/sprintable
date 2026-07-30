@@ -466,6 +466,8 @@
     "flowMapNoDeeperReason": "Nothing past depth 1 yet — nothing has been connected.",
     "flowMapPastCount": "{n} done",
     "flowMapPastBundle": "bundled",
+    "flowMapPastInternalCount": "{n} linked inside",
+    "flowMapPastOutgoingCount": "{n} sent forward from here",
     "edgeLegendSpawn": "Spawn",
     "edgeLegendThen": "Then",
     "edgeLegendSupersede": "Supersede",

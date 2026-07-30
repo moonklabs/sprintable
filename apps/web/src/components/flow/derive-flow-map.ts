@@ -131,6 +131,24 @@ export function computeNodeDepth(nodeId: string, edges: FlowMapEdge[], seen: Set
   return 1 + Math.max(...incoming.map((e) => computeNodeDepth(e.fromNodeId, edges, nextSeen)));
 }
 
+// 유나양 규격(2026-07-30, 묶음-간선 후속) — 과거 묶음 카드("완료 N·묶음")를 «노드 하나»처럼
+// 취급하는 가상 id. BE past:{total}엔 개별 스토리 id가 없다(스키마 자체 없음, 의도적) — 그래도
+// 그 스토리를 향한/그 스토리발 간선은 실재하므로, 그 «id 하나»에 전부 몰아 그린다(잃지 않는다).
+export const PAST_BUNDLE_NODE_ID = '__past-bundle__';
+
+/** 과거 묶음 카드에 실리는 3줄 중 2·3줄의 재료(1줄 "완료 N"은 기존 pastTotal 그대로).
+ * ⛔"안에서 이어진 것"(internalCount)은 «그릴 수 없는» 것(양끝 다 묶음 안 — 카드에서 나와
+ * 카드로 돌아가는 고리라 그릴 좌표가 없다)의 «수»다 — 안 보이는 게 아니라 안 그려지되
+ * 세어진다("안 그리는 것과 없는 것은 다르다", 오늘 이 세션의 규율 그대로).
+ * "여기서 나온 다음"(outgoingCount)은 과거가 fromNodeId인(=source가 과거) 간선 중 target이
+ * 살아있는(now/queue에 그려지는) 것만 — 선생님 원 물음("후속 작업이 어떻게 준비되고
+ * 연결되어있는지")의 직접적인 답이라 별도로 센다. */
+export interface FlowMapBundleStats {
+  total: number;
+  internalCount: number;
+  outgoingCount: number;
+}
+
 export type FlowMapNodeKind = 'now' | 'queue';
 
 export interface FlowMapNode {
@@ -160,9 +178,13 @@ export interface FlowMapLane {
   overflows: FlowMapOverflow[];
   /** 선생님 지적(2026-07-30) — "edges=[]를 항상 넘기는" 하드코딩과 "실제로 받았는데 0건"은
    * 다른 사실이다. 렌더 레이어(FlowMapCanvas)가 실제로 선을 그릴 수 있도록, «양쪽 끝이 모두
-   * 화면에 그려지는 노드인» 간선만 여기 보존한다(TOP_N에 잘려 안 보이는 노드로 가는 선은
-   * 그릴 좌표가 없어 제외 — "숨은 노드로 가는 유령 선"을 만들지 않는다). */
+   * 화면에 그려지는 노드»(now/queue 개별 카드 «또는» 과거 묶음 카드)인 간선만 여기 보존한다
+   * — 과거 묶음에 닿은 간선은 그 끝점의 id가 `PAST_BUNDLE_NODE_ID`로 치환돼 있다(유나양
+   * 규격 2026-07-30, "묶음이 선을 통과시키게"). TOP_N에 잘린(과거는 아니지만 개별 카드가
+   * 없는) 노드로 가는 선만 여기서 제외된다 — "숨은 노드로 가는 유령 선"을 만들지 않는다. */
   edges: FlowMapEdge[];
+  /** 과거 묶음 카드 3줄 중 2·3줄의 재료 — 위 FlowMapBundleStats 참고. */
+  pastBundle: FlowMapBundleStats;
 }
 
 /** 정렬 규칙(판C) — "막힘 › 다음 지정됨 › 나머지". "다음 지정됨"에 대응하는 실 데이터
@@ -223,30 +245,140 @@ export function deriveFlowMapLane(
   for (const nodes of queueNodesByDepth.values()) {
     for (const n of nodes) renderedIds.add(n.id);
   }
-  const renderableEdges = edges.filter((e) => renderedIds.has(e.fromNodeId) && renderedIds.has(e.toNodeId));
+  // 유나양 규격(2026-07-30, "묶음이 선을 통과시키게") — «살아있는»(now/upcoming 어느 쪽으로든
+  // BE가 실제로 준) id의 전체 집합. renderedIds(TOP_N에 잘린 것 제외)보다 넓다 — 잘린 것과
+  // 과거는 다른 사정이라 가른다: 잘린 건 "그릴 좌표가 없어 오늘은 못 그림"(기존 그대로,
+  // 이 판에서 손 안 댐), 과거는 "카드 자체가 없어 «묶음»으로 몰아 그림"(이번 판의 신규).
+  const aliveIds = new Set<string>([...nowItems, ...upcomingItems].map((i) => i.id));
 
-  return { epicId, title, pastTotal, nowNodes, queueNodesByDepth, overflows, edges: renderableEdges };
+  // pastTotal=0이면 now+upcoming이 이 에픽의 전부라는 뜻 — 그 경우 aliveIds 밖의 id는
+  // "과거"가 아니라 «이 에픽 소속이 아니거나 실재하지 않는» 참조다(묶을 카드 자체가 없다).
+  // 그런 참조까지 묶음으로 몰면 존재하지 않는 카드로 선이 향하는 유령이 된다 — pastTotal>0
+  // 일 때만 "aliveIds 밖=과거"로 해석한다.
+  const hasPastBundle = pastTotal > 0;
+
+  const renderableEdges: FlowMapEdge[] = [];
+  let internalCount = 0;
+  let outgoingCount = 0;
+  for (const e of edges) {
+    const fromRendered = renderedIds.has(e.fromNodeId);
+    const toRendered = renderedIds.has(e.toNodeId);
+    if (fromRendered && toRendered) {
+      renderableEdges.push(e);
+    } else if (!hasPastBundle) {
+      continue; // 묶음 카드 자체가 없다 — 기존 동작 그대로 드롭.
+    } else if (!aliveIds.has(e.fromNodeId) && !aliveIds.has(e.toNodeId)) {
+      internalCount += 1; // 양끝 다 과거 — 카드에서 나와 카드로 돌아가는 고리, 그릴 수 없다.
+    } else if (!aliveIds.has(e.fromNodeId) && toRendered) {
+      renderableEdges.push({ ...e, fromNodeId: PAST_BUNDLE_NODE_ID }); // 과거 → 살아있음(나가는)
+      outgoingCount += 1;
+    } else if (!aliveIds.has(e.toNodeId) && fromRendered) {
+      renderableEdges.push({ ...e, toNodeId: PAST_BUNDLE_NODE_ID }); // 살아있음 → 과거(들어오는)
+    }
+    // 나머지(한쪽 또는 양쪽이 "살아있지만 TOP_N에 잘려 카드가 없는" 경우)는 기존 그대로 드롭
+    // — 이 판에서 손 안 댐(오르테가군 지시, 접기 임계는 축척 스토리 몫).
+  }
+
+  return {
+    epicId, title, pastTotal, nowNodes, queueNodesByDepth, overflows, edges: renderableEdges,
+    pastBundle: { total: pastTotal, internalCount, outgoingCount },
+  };
+}
+
+/** 노드 하나의 «논리 좌표» — 데이터가 정하는 것(축척과 무관). `column`이 `'now'`면 지금
+ * 클러스터(항상 지금선 바로 옆 고정 열, depth 개념 밖) · 숫자면 그 depth 열. `row`는 그
+ * 열 안에서의 순번(위에서부터 0,1,2…) — 오늘의 카드 렌더 순서(now는 nowNodes 순서, queue는
+ * queueNodesByDepth의 그 depth 배열 순서)와 정확히 같다. */
+export interface FlowMapLogicalPosition {
+  column: 'now' | 'past-bundle' | number;
+  row: number;
+}
+
+// 과거 묶음 카드의 고정 위치(px) — flow-map-canvas.tsx의 기존 하드코딩(left:20, top:4)과
+// 정확히 같은 값을 여기 단일 소스로 옮긴다(카드 렌더링과 간선 계산이 서로 다른 좌표를
+// 쓰면 언젠가 어긋난다 — computeNodePositions의 존재 이유 그대로).
+export const PAST_BUNDLE_LEFT = 20;
+export const PAST_BUNDLE_TOP = 4;
+// 유나양 규격(아티팩트 a125909a) 3줄(완료 N·묶음 / 안에서 이어진 것 M / 여기서 나온 다음 K건)
+// 반영 — 기존 2줄(90px 폭)보다 넓고 높아야 숫자가 안 잘린다. 일반 카드(110px)와 폭을
+// 맞춰 시각적으로도 "노드 하나"처럼 보이게 한다(유나양 규격 "묶음 카드가 노드 하나처럼
+// 행동한다"와 일치).
+export const PAST_BUNDLE_CARD_WIDTH = 110;
+export const PAST_BUNDLE_CARD_HEIGHT = 52;
+
+/** BE 응답(now/queue 노드) → 노드별 논리 좌표. 화면 픽셀이 «전혀» 등장하지 않는다 — 이
+ * 자리가 "데이터가 정하는 것"과 "축척이 정하는 것"의 경계(오르테가군 지시 2026-07-30,
+ * 축척 스토리 착수 前 정지 작업: "지금 x = depth × GRID_STEP로 논리 좌표가 곧 화면 픽셀이라
+ * 축척이 들어오면 그 계산이 통째로 흔들린다 — 그 둘을 가르는 자리를 하나 두시는"). */
+export function computeNodeLogicalPositions(lane: FlowMapLane): Map<string, FlowMapLogicalPosition> {
+  const positions = new Map<string, FlowMapLogicalPosition>();
+  lane.nowNodes.forEach((node, i) => {
+    positions.set(node.id, { column: 'now', row: i });
+  });
+  for (const [depth, nodes] of lane.queueNodesByDepth) {
+    nodes.forEach((node, i) => {
+      positions.set(node.id, { column: depth, row: i });
+    });
+  }
+  // 과거 묶음 카드 — pastTotal이 있을 때만 위치를 준다(그릴 카드 자체가 없으면 위치도 없다,
+  // "완료 N·묶음" 카드의 기존 조건부 렌더 `pastTotal > 0`과 정확히 같은 조건).
+  if (lane.pastTotal > 0) {
+    positions.set(PAST_BUNDLE_NODE_ID, { column: 'past-bundle', row: 0 });
+  }
+  return positions;
+}
+
+/** 논리→화면 변환에 필요한 값 전부(호출부가 명시로 넘긴다 — 상수에 암묵적으로 기대지 않는다).
+ * `scale`은 오늘 항상 1(축척 스토리가 아직 없다, 오르테가군 지시 — "축척 자체는 아직 안
+ * 지으시는") — 이 값이 들어오는 자리를 미리 두는 것이 이 리팩터의 전부다. gridStep과
+ * rowHeight «둘 다»에 곱해 열 간격·행 높이가 함께 줄고 늘도록 한다(하나만 축척 타면
+ * 카드 비율이 깨진다). */
+export interface FlowMapProjectionConfig {
+  gridStep: number;
+  depth0X: number;
+  nowClusterX: number;
+  rowHeight: number;
+  rowTopOffset: number;
+  scale: number;
+}
+
+/** 논리 좌표 하나 → 화면 픽셀 {left, top}. 이 함수 «한 곳»에서만 `scale`을 곱한다 — 축척이
+ * 착지하면 이 함수 안 곱셈 자리만 실제 배율을 받으면 된다(호출부 전부 무변경). */
+export function projectToScreen(
+  position: FlowMapLogicalPosition,
+  config: FlowMapProjectionConfig,
+): { left: number; top: number } {
+  if (position.column === 'past-bundle') {
+    // 과거 묶음 카드는 depth 그리드 밖의 고정 앵커 — flow-map-canvas.tsx의 카드 렌더링과
+    // 정확히 같은 값(PAST_BUNDLE_LEFT/TOP)을 쓴다(단일 소스, 위 now/queue와 동일 원칙).
+    return { left: PAST_BUNDLE_LEFT, top: PAST_BUNDLE_TOP };
+  }
+  const left = position.column === 'now'
+    ? config.nowClusterX
+    : config.depth0X + position.column * config.gridStep * config.scale;
+  const top = config.rowTopOffset + position.row * config.rowHeight * config.scale;
+  return { left, top };
 }
 
 /** 노드 하나가 화면에 그려질 {left, top}(카드 좌상단) — FlowMapCanvas의 카드 렌더링과
  * «같은 공식»을 간선 SVG 렌더링도 써야 선이 카드 위치와 어긋나지 않는다(위치 계산을 두 곳에
- * 따로 두면 언젠가 하나만 바뀌어 어긋난다 — 단일 소스). now 노드는 nowClusterX 고정열,
- * queue 노드는 depth × gridStep 열 — 카드 렌더링(flow-map-canvas.tsx)과 동일 순서로 순회해
- * 같은 top(= 4 + i × nodeRowHeight)을 낸다. */
+ * 따로 두면 언젠가 하나만 바뀌어 어긋난다 — 단일 소스). 내부적으로 논리 좌표(위
+ * `computeNodeLogicalPositions`) → 화면 좌표(`projectToScreen`)를 거친다 — `scale` 생략 시
+ * 1(오늘의 기존 동작과 완전히 동일, 이 리팩터로 픽셀값이 하나도 안 바뀐다). */
 export function computeNodePositions(
   lane: FlowMapLane,
   nodeRowHeight: number,
   nowClusterX: number,
+  scale = 1,
 ): Map<string, { left: number; top: number }> {
+  const logical = computeNodeLogicalPositions(lane);
+  const config: FlowMapProjectionConfig = {
+    gridStep: FLOW_MAP_GRID_STEP, depth0X: FLOW_MAP_DEPTH0_X, nowClusterX,
+    rowHeight: nodeRowHeight, rowTopOffset: 4, scale,
+  };
   const positions = new Map<string, { left: number; top: number }>();
-  lane.nowNodes.forEach((node, i) => {
-    positions.set(node.id, { left: nowClusterX, top: 4 + i * nodeRowHeight });
-  });
-  for (const [depth, nodes] of lane.queueNodesByDepth) {
-    const x = FLOW_MAP_DEPTH0_X + depth * FLOW_MAP_GRID_STEP;
-    nodes.forEach((node, i) => {
-      positions.set(node.id, { left: x, top: 4 + i * nodeRowHeight });
-    });
+  for (const [id, pos] of logical) {
+    positions.set(id, projectToScreen(pos, config));
   }
   return positions;
 }
@@ -258,23 +390,33 @@ export function computeNodePositions(
 // 렌더가 점이 되는 것은 진짜 병이다(라이브에서 x1===x2===732, y1===y2===16으로 직접 확認).
 const EDGE_MIN_VISIBLE_LENGTH = 6;
 
-/** 간선 하나의 SVG `<line>` 시작/끝 좌표. 두 끝점이 실질적으로 겹치면(위 사정) 최소 가시
- * 길이를 보장하도록 x축으로 살짝 벌린다(이 지도는 depth가 x축이라 "벌어져 보여야 하는"
- * 방향도 x축과 같다) — 카드 쪽으로 몇 px 파고드는 것이, 데이터가 왔는데 안 보이는 것보다
- * 낫다. 위치가 없는(TOP_N에 잘린) 노드로의 간선은 null(호출부가 그 자리를 건너뛴다). */
+export interface FlowMapNodeDimensions {
+  width: number;
+  height: number;
+}
+
+/** 간선 하나의 SVG `<line>` 시작/끝 좌표 — 항상 «카드 가장자리 중앙»(유나양 규격, 묶음-간선
+ * 후속 2026-07-30: "개별 노드 자리를 추정해 그리지 않는다 — 접힌 것의 속을 안다고 말하지
+ * 않기 위해서"). 두 끝점이 실질적으로 겹치면(FLOW_MAP_GRID_STEP===카드너비인 사정) 최소 가시
+ * 길이를 보장하도록 x축으로 살짝 벌린다 — 카드 쪽으로 몇 px 파고드는 것이, 데이터가 왔는데
+ * 안 보이는 것보다 낫다. 위치가 없는(TOP_N에 잘린) 노드로의 간선은 null(호출부가 그 자리를
+ * 건너뛴다). `dimensionOverrides`는 과거 묶음 카드처럼 «일반 노드 카드와 크기가 다른» 끝점을
+ * 위한 것(오늘은 묶음 하나뿐) — 생략된 노드는 `defaultDimensions`(일반 카드 크기)를 쓴다. */
 export function computeEdgeLineEndpoints(
   positions: Map<string, { left: number; top: number }>,
-  edge: FlowMapEdge,
-  cardWidth: number,
-  cardHeight: number,
+  edge: { fromNodeId: string; toNodeId: string },
+  defaultDimensions: FlowMapNodeDimensions,
+  dimensionOverrides?: Map<string, FlowMapNodeDimensions>,
 ): { x1: number; y1: number; x2: number; y2: number } | null {
   const from = positions.get(edge.fromNodeId);
   const to = positions.get(edge.toNodeId);
   if (!from || !to) return null;
-  let x1 = from.left + cardWidth;
-  const y1 = from.top + cardHeight / 2;
+  const fromDim = dimensionOverrides?.get(edge.fromNodeId) ?? defaultDimensions;
+  const toDim = dimensionOverrides?.get(edge.toNodeId) ?? defaultDimensions;
+  let x1 = from.left + fromDim.width;
+  const y1 = from.top + fromDim.height / 2;
   let x2 = to.left;
-  const y2 = to.top + cardHeight / 2;
+  const y2 = to.top + toDim.height / 2;
   const dx = x2 - x1;
   const dy = y2 - y1;
   if (Math.sqrt(dx * dx + dy * dy) < EDGE_MIN_VISIBLE_LENGTH) {
@@ -282,6 +424,54 @@ export function computeEdgeLineEndpoints(
     x2 += EDGE_MIN_VISIBLE_LENGTH / 2;
   }
   return { x1, y1, x2, y2 };
+}
+
+// 유나양 규격(2026-07-30, 묶음-간선 후속) — "여러 선이 한 점에 모이면 굵기 3단 + 수를 선
+// 위에". 굵기만으로는 몇 건인지 못 세므로 수를 같이 적는다(규격 원문). 색은 "여러 종이
+// 섮이면 무채 · 한 종뿐이면 그 종의 색"(섮인 것을 한 색으로 칠하면 단정이 된다).
+export const EDGE_GROUP_THIN_WIDTH = 1.4; // 1건
+export const EDGE_GROUP_MEDIUM_WIDTH = 2; // 2~3건
+export const EDGE_GROUP_THICK_WIDTH = 2.6; // 4건 이상
+
+export interface FlowMapEdgeGroup {
+  fromNodeId: string;
+  toNodeId: string;
+  count: number;
+  /** 그룹 내 모든 간선이 같은 종이면 그 종, 하나라도 다르면 null(무채로 그린다 — 섮인 것을
+   * 한 색으로 단정하지 않는다). */
+  uniformKind: FlowMapEdgeKind | 'mixed';
+  /** 그룹 내 «전부»가 확認일 때만 실선 — 하나라도 제안이면 점선(제안 하나를 확定인 척
+   * 그리지 않는다, 오늘 세션 전체의 "제안을 화면이 대신 확定하지 않는다" 규율 그대로). */
+  allConfirmed: boolean;
+}
+
+/** 같은 (from, to) 쌍으로 향하는 간선을 하나의 시각 단위로 묶는다 — 묶음 카드 하나로 여러
+ * 과거 스토리가 모이면 같은 (bundle, aliveNode) 쌍에 여러 간선이 겹쳐 그려질 수 있어(유나양
+ * 지적: "여러 선이 한 점에 모이는" 실제 사례), 겹친 채로 두면 몇 건인지 안 보인다. */
+export function groupEdgesByEndpoints(edges: FlowMapEdge[]): FlowMapEdgeGroup[] {
+  const groups = new Map<string, FlowMapEdge[]>();
+  for (const e of edges) {
+    const key = `${e.fromNodeId} ${e.toNodeId}`;
+    const list = groups.get(key) ?? [];
+    list.push(e);
+    groups.set(key, list);
+  }
+  return Array.from(groups.values()).map((group) => {
+    const kinds = new Set(group.map((e) => e.kind));
+    return {
+      fromNodeId: group[0]!.fromNodeId,
+      toNodeId: group[0]!.toNodeId,
+      count: group.length,
+      uniformKind: kinds.size === 1 ? group[0]!.kind : 'mixed',
+      allConfirmed: group.every((e) => e.confirmed),
+    };
+  });
+}
+
+export function edgeGroupStrokeWidth(count: number): number {
+  if (count >= 4) return EDGE_GROUP_THICK_WIDTH;
+  if (count >= 2) return EDGE_GROUP_MEDIUM_WIDTH;
+  return EDGE_GROUP_THIN_WIDTH;
 }
 
 /** 유나양 지적(2026-07-30, PO 전달) — "대체"(supersede)만 유일하게 «간선이 노드 렌더에
@@ -307,7 +497,10 @@ export function computeLaneHeight(lane: FlowMapLane, nodeRowHeight: number, minH
     return nodes.length + (hasOverflow ? 1 : 0); // 더보기 카드도 한 행을 차지한다
   });
   const maxColumnCount = Math.max(1, nowColumnCount, ...queueColumnCounts);
-  return Math.max(minHeight, maxColumnCount * nodeRowHeight);
+  // 과거 묶음 카드(묶음-간선 후속, 3줄로 늘어난 뒤 PAST_BUNDLE_CARD_HEIGHT가 한 행보다
+  // 커질 수 있다) — 그 높이도 레인 높이 후보에 넣는다(안 넣으면 카드가 레인 밖으로 넘친다).
+  const pastBundleHeight = lane.pastTotal > 0 ? PAST_BUNDLE_TOP + PAST_BUNDLE_CARD_HEIGHT : 0;
+  return Math.max(minHeight, maxColumnCount * nodeRowHeight, pastBundleHeight);
 }
 
 /** ⑥ 조건부 문구(PO 판정 2026-07-30) 트리거 — depth 0 열은 있는데 depth 1 이상이 «전혀»

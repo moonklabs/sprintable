@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeNodeDepth, deriveFlowMapLane, computeLaneHeight, shouldShowNoDeeperReason, computeNodePositions,
-  computeEdgeLineEndpoints, parseDependencyGraphEdges, parseReferenceCandidateEdges, FLOW_MAP_TOP_N,
-  FLOW_MAP_FOLD_THRESHOLD, FLOW_MAP_DEPTH0_X, FLOW_MAP_GRID_STEP,
+  computeNodeLogicalPositions, computeEdgeLineEndpoints, groupEdgesByEndpoints, edgeGroupStrokeWidth,
+  parseDependencyGraphEdges, parseReferenceCandidateEdges, FLOW_MAP_TOP_N, FLOW_MAP_FOLD_THRESHOLD,
+  FLOW_MAP_DEPTH0_X, FLOW_MAP_GRID_STEP, PAST_BUNDLE_NODE_ID,
   type FlowMapEdge, type FlowMapLane, type RawReferenceCandidate,
 } from './derive-flow-map';
 import type { EpicFlowNodeItem } from './derive-flow';
@@ -145,6 +146,104 @@ describe('deriveFlowMapLane', () => {
     const lane = deriveFlowMapLane('e1', 'Epic 1', 0, [makeItem({ id: 'n1' })], [], edges);
     expect(lane.edges).toEqual([]);
   });
+
+  // 유나양 규격(아티팩트 a125909a, "묶음이 선을 통과시킨다") — 89%(147건 중 131건)가 과거에
+  // 닿아 안 그려지던 것의 답. pastTotal>0(묶음 카드가 실재)일 때만 aliveIds 밖 id를 "과거"로
+  // 해석해 PAST_BUNDLE_NODE_ID로 해소한다.
+  describe('past-bundle edge resolution (묶음이 선을 통과시킨다)', () => {
+    it('resolves an edge FROM a past story TO a rendered node as outgoing (fromNodeId → PAST_BUNDLE_NODE_ID)', () => {
+      const edges: FlowMapEdge[] = [edge('past-story', 'n1')];
+      const lane = deriveFlowMapLane('e1', 'Epic 1', 5, [makeItem({ id: 'n1' })], [], edges);
+      expect(lane.edges).toEqual([{ fromNodeId: PAST_BUNDLE_NODE_ID, toNodeId: 'n1', kind: null, confirmed: true }]);
+      expect(lane.pastBundle.outgoingCount).toBe(1);
+      expect(lane.pastBundle.internalCount).toBe(0);
+    });
+
+    it('resolves an edge FROM a rendered node TO a past story as incoming (toNodeId → PAST_BUNDLE_NODE_ID) — not counted as outgoing', () => {
+      const edges: FlowMapEdge[] = [edge('n1', 'past-story')];
+      const lane = deriveFlowMapLane('e1', 'Epic 1', 5, [makeItem({ id: 'n1' })], [], edges);
+      expect(lane.edges).toEqual([{ fromNodeId: 'n1', toNodeId: PAST_BUNDLE_NODE_ID, kind: null, confirmed: true }]);
+      expect(lane.pastBundle.outgoingCount).toBe(0); // "여기서 나온 다음"이 아니다(과거가 source가 아님).
+    });
+
+    it('counts (but does not draw) an edge where BOTH endpoints are past — a loop the bundle card cannot draw to itself', () => {
+      const edges: FlowMapEdge[] = [edge('past-a', 'past-b')];
+      const lane = deriveFlowMapLane('e1', 'Epic 1', 10, [makeItem({ id: 'n1' })], [], edges);
+      expect(lane.edges).toEqual([]); // 그릴 수 없다 — 그러나 안 잃는다(아래).
+      expect(lane.pastBundle.internalCount).toBe(1);
+    });
+
+    it('exposes pastBundle.total equal to pastTotal (1줄 "완료 N·묶음"의 재료)', () => {
+      const lane = deriveFlowMapLane('e1', 'Epic 1', 46, [], [], []);
+      expect(lane.pastBundle.total).toBe(46);
+    });
+
+    it('does NOT resolve to the bundle when pastTotal is 0 (no bundle card exists to attach to)', () => {
+      const edges: FlowMapEdge[] = [edge('unknown', 'n1')];
+      const lane = deriveFlowMapLane('e1', 'Epic 1', 0, [makeItem({ id: 'n1' })], [], edges);
+      expect(lane.edges).toEqual([]);
+      expect(lane.pastBundle.outgoingCount).toBe(0);
+      expect(lane.pastBundle.internalCount).toBe(0);
+    });
+  });
+});
+
+describe('computeNodeLogicalPositions — past-bundle anchor', () => {
+  it('gives PAST_BUNDLE_NODE_ID a fixed position when pastTotal > 0', () => {
+    const lane = deriveFlowMapLane('e1', 'Epic 1', 5, [], [], []);
+    const positions = computeNodeLogicalPositions(lane);
+    expect(positions.get(PAST_BUNDLE_NODE_ID)).toEqual({ column: 'past-bundle', row: 0 });
+  });
+
+  it('has no entry for PAST_BUNDLE_NODE_ID when pastTotal is 0 (no card to point to)', () => {
+    const lane = deriveFlowMapLane('e1', 'Epic 1', 0, [], [], []);
+    const positions = computeNodeLogicalPositions(lane);
+    expect(positions.has(PAST_BUNDLE_NODE_ID)).toBe(false);
+  });
+});
+
+describe('groupEdgesByEndpoints', () => {
+  it('groups multiple edges sharing the same (from,to) pair into one group with the right count', () => {
+    const edges: FlowMapEdge[] = [
+      edge('a', 'b', { kind: 'spawn' }),
+      edge('a', 'b', { kind: 'spawn' }),
+      edge('a', 'b', { kind: 'spawn' }),
+    ];
+    const groups = groupEdgesByEndpoints(edges);
+    expect(groups).toEqual([{ fromNodeId: 'a', toNodeId: 'b', count: 3, uniformKind: 'spawn', allConfirmed: true }]);
+  });
+
+  it('keeps distinct (from,to) pairs as separate groups', () => {
+    const edges: FlowMapEdge[] = [edge('a', 'b'), edge('a', 'c')];
+    const groups = groupEdgesByEndpoints(edges);
+    expect(groups).toHaveLength(2);
+  });
+
+  it('marks uniformKind as "mixed" when a group contains different kinds (색을 한 종으로 단정하지 않는다)', () => {
+    const edges: FlowMapEdge[] = [edge('a', 'b', { kind: 'spawn' }), edge('a', 'b', { kind: 'then' })];
+    const [group] = groupEdgesByEndpoints(edges);
+    expect(group!.uniformKind).toBe('mixed');
+  });
+
+  it('marks allConfirmed false when any edge in the group is proposed (제안 하나를 확定인 척 그리지 않는다)', () => {
+    const edges: FlowMapEdge[] = [edge('a', 'b', { confirmed: true }), edge('a', 'b', { confirmed: false })];
+    const [group] = groupEdgesByEndpoints(edges);
+    expect(group!.allConfirmed).toBe(false);
+  });
+});
+
+describe('edgeGroupStrokeWidth', () => {
+  it('returns the thin width for exactly 1 edge', () => {
+    expect(edgeGroupStrokeWidth(1)).toBe(1.4);
+  });
+  it('returns the medium width for 2~3 edges', () => {
+    expect(edgeGroupStrokeWidth(2)).toBe(2);
+    expect(edgeGroupStrokeWidth(3)).toBe(2);
+  });
+  it('returns the thick width for 4+ edges', () => {
+    expect(edgeGroupStrokeWidth(4)).toBe(2.6);
+    expect(edgeGroupStrokeWidth(10)).toBe(2.6);
+  });
 });
 
 describe('parseDependencyGraphEdges', () => {
@@ -253,7 +352,7 @@ describe('computeNodePositions', () => {
 describe('computeEdgeLineEndpoints', () => {
   it('returns null when either endpoint has no position (truncated node)', () => {
     const positions = new Map([['a', { left: 0, top: 0 }]]);
-    expect(computeEdgeLineEndpoints(positions, edge('a', 'ghost'), 110, 24)).toBeNull();
+    expect(computeEdgeLineEndpoints(positions, edge('a', 'ghost'), { width: 110, height: 24 })).toBeNull();
   });
 
   it('connects a card\'s right edge to the target card\'s left edge for a normal (non-adjacent) gap', () => {
@@ -261,7 +360,7 @@ describe('computeEdgeLineEndpoints', () => {
       ['a', { left: 100, top: 0 }],
       ['b', { left: 300, top: 0 }],
     ]);
-    const coords = computeEdgeLineEndpoints(positions, edge('a', 'b'), 110, 24);
+    const coords = computeEdgeLineEndpoints(positions, edge('a', 'b'), { width: 110, height: 24 });
     expect(coords).toEqual({ x1: 210, y1: 12, x2: 300, y2: 12 });
   });
 
@@ -272,7 +371,7 @@ describe('computeEdgeLineEndpoints', () => {
       ['from', { left: 622, top: 4 }],
       ['to', { left: 732, top: 4 }],
     ]);
-    const coords = computeEdgeLineEndpoints(positions, edge('from', 'to'), 110, 24);
+    const coords = computeEdgeLineEndpoints(positions, edge('from', 'to'), { width: 110, height: 24 });
     expect(coords).not.toBeNull();
     const dx = coords!.x2 - coords!.x1;
     const dy = coords!.y2 - coords!.y1;
@@ -285,6 +384,7 @@ function makeLane(overrides: Partial<FlowMapLane> = {}): FlowMapLane {
   return {
     epicId: 'e1', title: 'Epic 1', pastTotal: 0,
     nowNodes: [], queueNodesByDepth: new Map(), overflows: [], edges: [],
+    pastBundle: { total: 0, internalCount: 0, outgoingCount: 0 },
     ...overrides,
   };
 }

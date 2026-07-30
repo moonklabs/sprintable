@@ -466,6 +466,8 @@
     "flowMapNoDeeperReason": "깊이 1 이후가 없습니다 — 아직 연결된 것이 없기 때문입니다.",
     "flowMapPastCount": "완료 {n}",
     "flowMapPastBundle": "묶음",
+    "flowMapPastInternalCount": "안에서 이어진 것 {n}",
+    "flowMapPastOutgoingCount": "여기서 나온 다음 {n}건",
     "edgeLegendSpawn": "낳음",
     "edgeLegendThen": "잇따름",
     "edgeLegendSupersede": "대체",
