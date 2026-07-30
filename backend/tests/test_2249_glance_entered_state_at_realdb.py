@@ -173,8 +173,8 @@ async def test_needs_input_and_verify_fail_use_new_gate_columns():
             ni_entered = datetime(2026, 7, 20, 0, 0, 0, tzinfo=timezone.utc)
             gate_ni = Gate(
                 id=uuid.uuid4(), org_id=seeded["org_id"], work_item_id=story_ni.id,
-                work_item_type="story", gate_type="review", status="pending",
-                status_entered_at=ni_entered, requires_human=True,
+                work_item_type="story", gate_type="doc_approval", status="pending",
+                status_entered_at=ni_entered, requires_human=True, evidence_status="insufficient",
                 # updated_at은 onupdate=func.now()라 커밋 시점이 됨 — status_entered_at과
                 # 다른 값이어야 "updated_at을 쓴 게 아니다"가 실증된다.
             )
@@ -200,6 +200,11 @@ async def test_needs_input_and_verify_fail_use_new_gate_columns():
             got_ni = datetime.fromisoformat(ni_item["entered_state_at"].replace("Z", "+00:00"))
             assert got_ni == ni_entered
             assert ni_item["entered_state_at_precision"] == "exact"
+            # ⛔story #2232(2026-07-30) — 값이 있는데 ref가 안 나르던 것을 고침. 값-레벨 증거로
+            # 닫는다("코드에 넣었다"가 아니라 "응답에 실제로 있다"가 증거, 오늘 아침 교훈).
+            assert ni_item["ref"]["gate_type"] == "doc_approval"
+            assert ni_item["ref"]["evidence_status"] == "insufficient"
+            assert ni_item["ref"]["gate_id"] == str(gate_ni.id)
 
             vf_item = next(i for i in items if i["kind"] == "verify_fail")
             got_vf = datetime.fromisoformat(vf_item["entered_state_at"].replace("Z", "+00:00"))
@@ -207,6 +212,47 @@ async def test_needs_input_and_verify_fail_use_new_gate_columns():
             assert vf_item["entered_state_at_precision"] == "exact"
 
             assert got_ni != got_vf  # 서로 다른 축(status vs evidence_status)임을 재확認.
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_needs_input_ref_carries_null_evidence_status_faithfully():
+    """story #2232 — evidence_status가 구조적으로 NULL인 게이트(예: artifact_canonicalize류)도
+    ref에 «None 그대로» 실려야 한다(빈 문자열로 뭉개거나 키 자체를 생략하면 FE가 "구조적 NULL"과
+    "값 없는 에러"를 못 가른다 — 실측: 37건 중 5건이 NULL, 그중 merge인데 NULL인 1건은 다른
+    의미라 FE가 갈라야 한다는 것이 오르테가 판정, BE는 값을 «그대로» 나르기만 한다)."""
+    from app.main import app
+    from app.models.gate import Gate
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_base(s)
+            story = _story(seeded["org_id"], seeded["project_id"], "No Evidence Status")
+            s.add(story)
+            await s.commit()
+
+            gate = Gate(
+                id=uuid.uuid4(), org_id=seeded["org_id"], work_item_id=story.id,
+                work_item_type="story", gate_type="artifact_canonicalize", status="pending",
+                requires_human=True,  # evidence_status 생략 — 구조적으로 None
+            )
+            s.add(gate)
+            await s.commit()
+
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/glance/attention?project_id={seeded['project_id']}")
+            assert resp.status_code == 200, resp.text
+            items = resp.json()["items"]
+            ni_item = next(i for i in items if i["kind"] == "needs_input")
+            assert ni_item["ref"]["gate_type"] == "artifact_canonicalize"
+            assert ni_item["ref"]["evidence_status"] is None
         finally:
             await client.aclose()
     finally:

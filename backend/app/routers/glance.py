@@ -222,9 +222,16 @@ async def glance_attention(
             ))
 
     # ④ needs_input = 프로젝트의 오픈 story 중 사람 판단 대기(§7 확定① — Gate(requires_human, pending)).
+    # ⛔story #2232(2026-07-30, PO 판정 — 실측으로 "degraded로 접을 이유 없음" 확認 후 지금 굴림):
+    # gate_type·evidence_status를 ref에 싣는다 — «있는데 안 나르던» 값. FE(derive-exception-
+    # signals.ts:96)가 지금은 ref.approval_id만 다음 마디로 넘겨 이 값들이 죽었으나, 그건
+    # FE 몫(미르코)이라 여기서는 BE 계약에만 싣는다.
     needs_input_rows = (
         await session.execute(
-            select(Story.id, Story.title, Gate.status_entered_at)
+            select(
+                Story.id, Story.title, Gate.status_entered_at, Gate.id,
+                Gate.gate_type, Gate.evidence_status,
+            )
             .select_from(Gate)
             .join(Story, (Story.id == Gate.work_item_id) & (Gate.work_item_type == "story"))
             .where(
@@ -238,9 +245,12 @@ async def glance_attention(
             .limit(_LIMIT)
         )
     ).all()
-    for story_id, title, entered_at in needs_input_rows:
+    for story_id, title, entered_at, gate_id, gate_type, evidence_status in needs_input_rows:
         items.append(AttentionItem(
             kind="needs_input", story_id=story_id, title=title, entered_state_at=entered_at,
+            ref={
+                "gate_id": str(gate_id), "gate_type": gate_type, "evidence_status": evidence_status,
+            },
             # 배포 前 생성된 기존 Gate 행은 status_entered_at이 아직 None일 수 있다(다음 전이
             # 때 채워짐) — 값 없을 땐 정밀도도 None(값과 정밀도는 항상 짝으로 움직인다).
             entered_state_at_precision=_PRECISION_EXACT if entered_at is not None else None,
