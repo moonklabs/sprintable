@@ -42,3 +42,48 @@ export interface EdgeSummary {
 export function deriveEdgeSummary(count: number): EdgeSummary {
   return { count, isEmpty: count === 0 };
 }
+
+// 노드 틀(2026-07-30, PO 판정 — 계약 착지 前에도 틀은 세운다) — GET
+// /api/v2/analytics/epic-flow-nodes?project_id=&epic_id=&upcoming_limit= 계약(까심 PR#2679)
+// 그대로 반영. "지금" = in-progress+in-review(ready-for-dev 안 섞임, BE가 보장). "이어질" 정렬 =
+// 막힘>ready-for-dev>나머지(그 안에서 최근순, BE 테스트로 고정 — FE가 재정렬하지 않는다).
+// "지나온"은 스키마에 items 필드가 아예 없어(past: {total}만) 노드로 못 그린다 — "지나온 것을
+// 노드로 안 그린다"가 타입이 강제하는 것이라 FE가 실수로 어길 수 없다.
+export const UPCOMING_LIMIT = 15;
+
+export interface EpicFlowNodeItem {
+  id: string;
+  story_number: number;
+  title: string;
+  status: string;
+  assignee_id: string | null;
+  updated_at: string;
+}
+
+export interface EpicFlowNodesResponse {
+  epic_id: string;
+  now: { total: number; items: EpicFlowNodeItem[] };
+  upcoming: { total: number; items: EpicFlowNodeItem[] };
+  past: { total: number };
+}
+
+export interface FlowNodeZones {
+  nowItems: EpicFlowNodeItem[];
+  nowTotal: number;
+  upcomingItems: EpicFlowNodeItem[];
+  upcomingTotal: number;
+  upcomingShown: number;
+  pastTotal: number;
+}
+
+/** BE 응답 → 화면이 쓰는 형태. 순수 매핑(정렬·필터 재적용 없음 — BE 계약이 이미 순서를 확定했다). */
+export function deriveFlowNodeZones(response: EpicFlowNodesResponse): FlowNodeZones {
+  return {
+    nowItems: response.now.items,
+    nowTotal: response.now.total,
+    upcomingItems: response.upcoming.items,
+    upcomingTotal: response.upcoming.total,
+    upcomingShown: response.upcoming.items.length,
+    pastTotal: response.past.total,
+  };
+}

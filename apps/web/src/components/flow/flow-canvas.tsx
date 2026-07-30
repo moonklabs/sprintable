@@ -1,8 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import type { FlowLaneRow } from './derive-flow';
 import { derivePastRatio, deriveEdgeSummary } from './derive-flow';
+import { FlowEpicNodes } from './flow-epic-nodes';
 
 interface FlowCanvasProps {
   rows: FlowLaneRow[];
@@ -12,18 +14,23 @@ interface FlowCanvasProps {
   /** 간선(구조화된 연결) 개수. #2221(BE) 미착지라 오늘은 항상 0 — 그러나 이 값은 실제
    * 배열 길이에서 온 것이라 #2221 착지 즉시 자동으로 갱신된다(하드코딩 금지, PO 2026-07-30). */
   edgeCount: number;
+  /** 노드 틀(2026-07-30) — 펼친 에픽의 스토리 노드를 부르는 데 필요. */
+  projectId: string;
 }
 
 /**
- * story #2224 — 갈래 캔버스 MVP. 개별 스토리 단위 노드는 아직 안 그린다: load-glance-data.ts가
- * story #2298(3단 웨이터폴 근절)에서 `roadmap.map(epic => /api/stories?epic_id=)` N+1 fetch를
- * 의도적으로 제거했고, 그 결정을 이 화면에서 다시 들여오면 회귀다. 그래서 "지나온 것 | 지금 |
- * 이어질 것"은 에픽 단위로 done/total 비율만 정직하게 그린다 — 실제 데이터(EpicProgress)가
- * 감당하는 정밀도가 여기까지다.
+ * story #2224 — 갈래 캔버스 MVP. 기본은 에픽 단위 done/total 비율 막대만 그린다(§2298이
+ * 없앤 `roadmap.map(epic => /api/stories?epic_id=)` N+1을 항상 켜 두면 회귀이므로). 개별
+ * 스토리 노드는 2026-07-30 후속(선생님 지적 — "다음 판이 다음 에픽?") 판정에 따라 행을
+ * 펼쳤을 때만 `?epic_id=` 단위 온디맨드로 부른다(FlowEpicNodes) — 179개 전체를 한 번에
+ * 부르지 않으므로 N+1 회귀가 아니다(펼친 «하나»만, PO 판정 명시).
  */
-export function FlowCanvas({ rows, activeEpicId, edgeCount }: FlowCanvasProps) {
+export function FlowCanvas({ rows, activeEpicId, edgeCount, projectId }: FlowCanvasProps) {
   const t = useTranslations('flow');
   const edges = deriveEdgeSummary(edgeCount);
+  // 접힌 상태 기본(PO 판정 2026-07-30) — 단일 아코디언(동시 여러 에픽 펼침 방지, 온디맨드
+  // fetch가 동시에 여러 건 나가는 것을 구조로 막는다).
+  const [expandedEpicId, setExpandedEpicId] = useState<string | null>(null);
 
   return (
     <div className="min-w-0 flex-1 space-y-4">
@@ -61,26 +68,35 @@ export function FlowCanvas({ rows, activeEpicId, edgeCount }: FlowCanvasProps) {
           {rows.map((row) => {
             const pastRatio = derivePastRatio(row.done, row.total);
             const isActive = row.id === activeEpicId;
+            const isExpanded = row.id === expandedEpicId;
             return (
               <li key={row.id} className="space-y-1">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="min-w-0 truncate text-foreground">{row.title}</span>
-                  {isActive ? (
-                    <span className="shrink-0 rounded border border-info/40 px-1.5 py-0.5 text-[10px] font-medium text-info">
-                      {t('canvasActiveMarker')}
-                    </span>
-                  ) : null}
-                </div>
-                <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted">
-                  <div className="h-full bg-foreground/30" style={{ width: `${pastRatio}%` }} />
-                  {isActive ? (
-                    <span
-                      aria-hidden="true"
-                      className="absolute top-0 h-full w-0.5 bg-info"
-                      style={{ left: `${pastRatio}%` }}
-                    />
-                  ) : null}
-                </div>
+                <button
+                  type="button"
+                  className="w-full space-y-1 text-left focus-inset"
+                  aria-expanded={isExpanded}
+                  onClick={() => setExpandedEpicId(isExpanded ? null : row.id)}
+                >
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="min-w-0 truncate text-foreground">{row.title}</span>
+                    {isActive ? (
+                      <span className="shrink-0 rounded border border-info/40 px-1.5 py-0.5 text-[10px] font-medium text-info">
+                        {t('canvasActiveMarker')}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted">
+                    <div className="h-full bg-foreground/30" style={{ width: `${pastRatio}%` }} />
+                    {isActive ? (
+                      <span
+                        aria-hidden="true"
+                        className="absolute top-0 h-full w-0.5 bg-info"
+                        style={{ left: `${pastRatio}%` }}
+                      />
+                    ) : null}
+                  </div>
+                </button>
+                {isExpanded ? <FlowEpicNodes projectId={projectId} epicId={row.id} /> : null}
               </li>
             );
           })}
