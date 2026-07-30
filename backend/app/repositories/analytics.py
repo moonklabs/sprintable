@@ -190,10 +190,23 @@ class AnalyticsRepository:
           ③진행(in_progress) = ①②가 아니고 status=='in-progress'
           ④멈춤(stalled)   = ①②③이 아니고 status!='done'이고 168시간(민 실측 — §7-③의 "48h"는
                               07-23 시안 값·미재측정, 문서로 남은 값은 168h) 넘게 updated_at 불변
-          ⑤그 외(other)    = ①~④ 어디에도 안 잡힘(backlog·ready-for-dev·in-review 중 최근
-                              변경된 것 · done) — ⛔PO 지적(2026-07-30): "합계≠total_stories는
+          ⑤그 외(other)    = ①~④ 어디에도 안 잡힘 — ⛔PO 지적(2026-07-30): "합계≠total_stories는
                               의도했어도 화면에서는 거짓말이 된다" — 그래서 이 칸도 명시로 낸다.
                               in_progress+waiting+blocked+stalled+other == total_stories 항상 성립.
+
+        ⛔`other`에 실제로 드는 것 둘(성질이 다름, PO 지적 2026-07-30 — dev 실측 2026-07-30):
+          ㉠정상적으로 네 칸 밖(최근 168h 이내 변경된 backlog/ready-for-dev/in-review · done)
+            — dev 실측 약 2050/2079건, 압도 다수.
+          ㉡pending Gate가 매여 있는데 requires_human=false 또는 evidence_status가
+            'insufficient'가 아니라 ①막힘에서 빠진 것 — dev 실측 **1건**
+            (requires_human=False·evidence_status=None). 「승인도 자동 통과도 안 되는 결재」
+            류와 같은 냄새(#2261 계열)나 n=1이라 이 함수에서 별도 칸을 새로 만들지 않는다
+            — 필요해지면(건수가 늘면) 그때 쪼갠다. 지금은 ㉠과 ㉡을 `other` 하나로 합친 채
+            이 사실만 기록해 둔다(다음 사람이 "other=잡동사니"로 오인하지 않게).
+          참고: ①막힘(narrow) dev 실측 28건 — 민 실측 32건과 4건 차이는 **확認됨**: 이
+          함수는 epic_id가 있는 story만 레인에 담는데(에픽 좌측 레인이 목적이므로), 막힌
+          32건 중 4건이 epic_id가 없다(dev 실측). 버그 아님 — 이 엔드포인트의 스코프
+          자체가 "에픽에 속한 것"이라 그 4건은 애초에 이 화면의 대상이 아니다.
 
         ⛔이 우선순위·168h 임계 둘 다 «잠정»이다 — #2218(S0-1)이 임계를 실측(8~12건 나오는
         값)해 재확定하기 전까지 쓰는 값. 화면에 "이 수는 잠정"이라는 신호를 실어야 한다면
