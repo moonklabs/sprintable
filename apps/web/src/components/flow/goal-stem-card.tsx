@@ -25,6 +25,11 @@ interface GoalStemCardProps {
   onGoalTransitioned: (epicId: string) => void;
   /** story #2354 — 순수 통과 prop(FlowMapCanvas 참고). */
   selectedNodeId?: string | null;
+  /** story #2224 AC1 후속(2026-07-31, PO 정정 — 「«수단»을 빼면 그 위에 탄 «다른 목적»이
+   * 같이 죽는다」) — 갈래 캔버스가 화면의 본체(FlowMultiLaneCanvas)로 옮겨간 뒤, 이 컴포넌트는
+   * 좁은 인라인 자리(NextActionsStrip)에서 승격/전환 «동사»만 쓰인다. false면 내장 단일-레인
+   * 캔버스(FlowEpicNodes)를 렌더하지 않는다 — 같은 정보를 두 번 그리지 않기 위함. */
+  showCanvas?: boolean;
 }
 
 type PickState =
@@ -55,7 +60,7 @@ const REASON_LABEL_KEY: Record<NextPickReasonKey, string> = {
  */
 export function GoalStemCard({
   stem, projectId, backlogStories, recentlyClosedTargetIds, memberMap,
-  onSelectStory, onStoryPromoted, onPromoteFailed, onGoalTransitioned, selectedNodeId = null,
+  onSelectStory, onStoryPromoted, onPromoteFailed, onGoalTransitioned, selectedNodeId = null, showCanvas = true,
 }: GoalStemCardProps) {
   const t = useTranslations('flow');
   const [pickState, setPickState] = useState<PickState>({ kind: 'loading' });
@@ -154,10 +159,15 @@ export function GoalStemCard({
       ) : null}
 
       {/* ①갈래(선·노드)가 이 화면의 몸통(PO 판정 2026-07-31, 선생님 "이게 뭔지.." 후속) —
-          픽 패널이 «위/작게», 캔버스가 «아래/크게»다. min-h로 시각 지배력을 명시로 준다. */}
-      <div className="min-h-[520px] rounded-lg border border-border">
-        <FlowEpicNodes projectId={projectId} epicId={stem.epicId} epicTitle={stem.title} onSelectStory={onSelectStory} selectedNodeId={selectedNodeId} memberMap={memberMap} />
-      </div>
+          픽 패널이 «위/작게», 캔버스가 «아래/크게»다. min-h로 시각 지배력을 명시로 준다.
+          단 이제 캔버스의 진짜 몸통은 FlowMultiLaneCanvas(story #2224 AC1)라, 이 컴포넌트가
+          좁은 인라인 자리(NextActionsStrip)에 설 때는 showCanvas=false로 이 블록을 끈다 —
+          같은 레인을 두 번 그리지 않는다. */}
+      {showCanvas && (
+        <div className="min-h-[520px] rounded-lg border border-border">
+          <FlowEpicNodes projectId={projectId} epicId={stem.epicId} epicTitle={stem.title} onSelectStory={onSelectStory} selectedNodeId={selectedNodeId} memberMap={memberMap} />
+        </div>
+      )}
     </div>
   );
 }

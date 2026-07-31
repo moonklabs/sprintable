@@ -5,17 +5,18 @@ import type { GoalStem } from './derive-next-maker';
 
 interface StemRowProps {
   stem: GoalStem;
-  isFocused: boolean;
-  onFocus: (epicId: string) => void;
+  isExpanded: boolean;
+  onToggle: () => void;
 }
 
 /**
- * 결함 fix(2026-07-31, 선생님 "이게 뭔지.." 지적 후속 — PO 판정 "①갈래를 화면 절반 이상으로,
- * 머리:갈래=1:3 이하") — 줄기 목록을 «좁은 왼쪽 열»로 내리고, 선택된 줄기의 갈래 캔버스가
- * «넓은 오른쪽»의 몸통이 되도록 분리했다. 이 컴포넌트는 그 왼쪽 열의 행 하나 — 클릭하면
- * 자기 캔버스를 펼치는 게 아니라 «포커스»만 바꾼다(펼침 로직은 GoalStemCard가 오른쪽에서 전담).
+ * story #2224 AC1 후속(2026-07-31, PO 정정 — 승격/전환 「동사」는 살리되 «화면 전체를 이
+ * 목표 하나로 바꾸는» 포커스는 뺀다) — 갈래 캔버스의 몸통은 FlowMultiLaneCanvas로 옮겨갔고,
+ * 이 행은 이제 NextActionsStrip 안에서 «이 목표의 승격/전환 패널을 펴고 접는» 토글이다
+ * (예전엔 클릭이 화면 오른쪽 전체를 이 목표의 캔버스로 바꿨다 — 지금은 그 자리에 캔버스가
+ * 없다, GoalStemCard가 showCanvas=false로 붙는다).
  */
-export function StemRow({ stem, isFocused, onFocus }: StemRowProps) {
+export function StemRow({ stem, isExpanded, onToggle }: StemRowProps) {
   const t = useTranslations('flow');
   const accentClass = stem.priority === 'about-to-stall'
     ? 'border-l-amber-500'
@@ -24,9 +25,10 @@ export function StemRow({ stem, isFocused, onFocus }: StemRowProps) {
   return (
     <button
       type="button"
-      onClick={() => onFocus(stem.epicId)}
+      onClick={onToggle}
+      aria-expanded={isExpanded}
       className={`w-full rounded-lg border border-l-[3px] px-2.5 py-2 text-left transition ${accentClass} ${
-        isFocused ? 'bg-muted' : 'hover:bg-muted/50'
+        isExpanded ? 'bg-muted' : 'hover:bg-muted/50'
       }`}
     >
       <div className="truncate text-[12.5px] font-semibold text-foreground">{stem.title}</div>

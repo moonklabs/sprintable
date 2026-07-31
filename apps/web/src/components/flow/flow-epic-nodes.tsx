@@ -39,6 +39,9 @@ interface RawStoryListPage {
   meta: unknown;
 }
 
+// 대부분의 렌더에서 로딩 중인 묶음이 없다 — 매 렌더 새 Set을 만들지 않고 이 상수를 재사용한다.
+const EMPTY_EPIC_ID_SET = new Set<string>();
+
 /** 유나양 규격(아티팩트 a125909a, "누르면 펼쳐지는 것이 곧 줌인") — 묶음 카드를 누르면 이
  * 에픽의 done 스토리 «전부»를 가져온다(잘라내지 않는다, PO 판정 2026-07-30 — "많으니 미리
  * 잘라 두자는 안 하시는"). 페이지가 나뉘면(FE 프록시 `maxLimit:100`) cursor를 따라간다.
@@ -153,6 +156,9 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory, sel
   // 이유: flow-canvas.tsx가 단일 아코디언(`isExpanded ? <FlowEpicNodes .../> : null`)이라
   // 다른 행을 펼치면 이 컴포넌트«전체»가 언마운트→새 마운트된다 — `epicId`가 이미 마운트된
   // 채로 바뀌는 경우 자체가 없다(pastItems 초기값 `[]`가 항상 새 마운트의 값).
+  // story #2224(멀티레인) — FlowMapCanvas가 onTogglePastBundle에 epicId를 실어 보낸다(여러
+  // 레인 중 어느 것인지 가르기 위해). 이 컴포넌트는 레인이 늘 하나(자기 epicId)뿐이라 값을
+  // 안 쓴다 — 그래도 시그니처는 맞춰야 한다.
   const handleTogglePastBundle = useCallback(() => {
     if (pastItems.length > 0) {
       setPastItems([]); // 다시 누르면 접힌다(유나양 규격 그대로).
@@ -227,7 +233,7 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory, sel
       lanes={[lane]}
       onSelectStory={onSelectStory}
       onTogglePastBundle={handleTogglePastBundle}
-      isPastBundleLoading={isPastBundleLoading}
+      loadingPastBundleEpicIds={isPastBundleLoading ? new Set([epicId]) : EMPTY_EPIC_ID_SET}
       selectedNodeId={selectedNodeId}
       onCreateLink={handleCreateLink}
       onDeleteLink={handleDeleteLink}

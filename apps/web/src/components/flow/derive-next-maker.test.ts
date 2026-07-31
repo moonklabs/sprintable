@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   parseGoals, parseStories, parseNextUp, filterActiveGoals,
   deriveGoalStems, deriveRecentlyClosedEpicIds, sortStemsByStallUrgency,
-  deriveHeadline, deriveZeroStageStats, deriveOrphanStories,
+  deriveHeadline, deriveZeroStageStats, deriveOrphanStories, deriveActiveLaneGoals,
   type NextMakerGoal, type NextMakerStory,
 } from './derive-next-maker';
 
@@ -212,5 +212,69 @@ describe('deriveOrphanStories', () => {
 
   it('empty input → empty output, no crash', () => {
     expect(deriveOrphanStories([])).toEqual([]);
+  });
+});
+
+// story #2224 AC1(멀티레인) — 「레인이 몇 개까지 서는가」는 수가 아니라 성질(30일 안 변화)로
+// 가른다. 스토리 0건은 이 함수에 아예 안 들어온다(호출부가 미리 거름) — expand/fold 둘 다
+// «스토리가 있는» 목표만의 문제다.
+describe('deriveActiveLaneGoals — 30일 안 변화로 펼침/접힘을 가른다(story #2224 AC1)', () => {
+  const NOW = new Date('2026-07-31T00:00:00Z').getTime();
+
+  it('expands a goal whose most recent active story updated within the last 30 days', () => {
+    const goals = [goal({ id: 'e1' })];
+    const stories = [story({ epicId: 'e1', updatedAt: '2026-07-20T00:00:00Z' })]; // 11일 전
+    const result = deriveActiveLaneGoals(goals, stories, NOW);
+    expect(result.expand.map((g) => g.id)).toEqual(['e1']);
+    expect(result.fold).toEqual([]);
+  });
+
+  it('folds a goal whose most recent active story updated more than 30 days ago', () => {
+    const goals = [goal({ id: 'e1' })];
+    const stories = [story({ epicId: 'e1', updatedAt: '2026-06-01T00:00:00Z' })]; // 60일 전
+    const result = deriveActiveLaneGoals(goals, stories, NOW);
+    expect(result.fold.map((g) => g.id)).toEqual(['e1']);
+    expect(result.expand).toEqual([]);
+  });
+
+  it('folds a goal with NO active stories at all (can\'t prove "recent" — does not guess)', () => {
+    const goals = [goal({ id: 'e1' })];
+    const result = deriveActiveLaneGoals(goals, [], NOW);
+    expect(result.fold.map((g) => g.id)).toEqual(['e1']);
+    expect(result.expand).toEqual([]);
+  });
+
+  it('uses the MOST RECENT of several active stories in the same goal — one old story does not fold a goal with a recent one', () => {
+    const goals = [goal({ id: 'e1' })];
+    const stories = [
+      story({ id: 's-old', epicId: 'e1', updatedAt: '2026-01-01T00:00:00Z' }),
+      story({ id: 's-new', epicId: 'e1', updatedAt: '2026-07-25T00:00:00Z' }), // 6일 전
+    ];
+    const result = deriveActiveLaneGoals(goals, stories, NOW);
+    expect(result.expand.map((g) => g.id)).toEqual(['e1']);
+  });
+
+  it('exactly at the 30-day boundary is still "expand" (<=, not <)', () => {
+    const goals = [goal({ id: 'e1' })];
+    const thirtyDaysAgo = new Date(NOW - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const stories = [story({ epicId: 'e1', updatedAt: thirtyDaysAgo })];
+    const result = deriveActiveLaneGoals(goals, stories, NOW);
+    expect(result.expand.map((g) => g.id)).toEqual(['e1']);
+  });
+
+  it('ignores stories belonging to a different epic', () => {
+    const goals = [goal({ id: 'e1' }), goal({ id: 'e2' })];
+    const stories = [story({ epicId: 'e2', updatedAt: '2026-07-30T00:00:00Z' })];
+    const result = deriveActiveLaneGoals(goals, stories, NOW);
+    expect(result.expand.map((g) => g.id)).toEqual(['e2']);
+    expect(result.fold.map((g) => g.id)).toEqual(['e1']);
+  });
+
+  it('every input goal ends up in exactly one of expand/fold (no goal dropped, no duplicate)', () => {
+    const goals = [goal({ id: 'e1' }), goal({ id: 'e2' }), goal({ id: 'e3' })];
+    const stories = [story({ epicId: 'e2', updatedAt: '2026-07-30T00:00:00Z' })];
+    const result = deriveActiveLaneGoals(goals, stories, NOW);
+    const all = [...result.expand, ...result.fold].map((g) => g.id).sort();
+    expect(all).toEqual(['e1', 'e2', 'e3']);
   });
 });

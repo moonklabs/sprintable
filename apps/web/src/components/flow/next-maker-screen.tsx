@@ -1,19 +1,20 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import {
   parseGoals, parseStories, parseNextUp, filterActiveGoals,
   deriveGoalStems, deriveRecentlyClosedEpicIds, sortStemsByStallUrgency,
-  deriveHeadline, deriveZeroStageStats, deriveOrphanStories,
+  deriveHeadline, deriveZeroStageStats, deriveOrphanStories, deriveActiveLaneGoals,
   type NextMakerGoal, type NextMakerStory, type RawGoal, type RawStoryLite, type RawNextUp,
   type GoalStem,
 } from './derive-next-maker';
 import { NextMakerHeader } from './next-maker-header';
-import { GoalStemCard, type MemberLite } from './goal-stem-card';
-import { StemRow } from './stem-row';
+import type { MemberLite } from './goal-stem-card';
+import { NextActionsStrip } from './next-actions-strip';
 import { OrphanStoriesPanel } from './orphan-stories-panel';
+import { FlowMultiLaneCanvas } from './flow-multi-lane-canvas';
 import { parseCursorMeta } from '@/lib/pagination';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 
@@ -76,35 +77,37 @@ type LoadState =
   | { kind: 'ready'; goals: NextMakerGoal[]; activeStories: NextMakerStory[]; recentlyClosedEpicIds: Set<string>; recentlyClosedTargetIds: Set<string>; blockedCount: number };
 
 /**
- * story #2224 후속(2026-07-31, PO 지시 — 아티팩트 a920c25f v2 "갈래 — 다음을 만드는 화면").
- * 기존 GlanceHero+FlowLane+FlowCanvas(에픽 아코디언 목록)를 대체한다 — flow-client.tsx가 이
- * 컴포넌트를 그 자리에 끼운다. 새 BE 계약 불요(PO 지시대로 "있는 것으로 되는지 먼저 재고"
- * 결과 next-up(PR#2707)·goals(total_stories/done_stories 기존 존재)·stories(status 필터
- * 기존 존재)만으로 충분함을 그라운딩 확認했다 — next-up FE 프록시(`/api/reference-candidates/
- * next-up`)만 신설(BE 계약은 그대로, 통과 라우트만 없었다).
+ * story #2224 AC1(2026-07-31, 목업 84abdf43 v5 "팀의 흐름이 한눈에") — 갈래 캔버스의 몸통을
+ * «목표 하나를 골라 보는 것»에서 «팀의 흐름을 한 번에 보는 것」으로 다시 짰다.
  *
- * ⛔done 스토리는 이 화면에서 fetch하지 않는다(goals.total_stories/done_stories로 충분 —
- * "과거는 한 카드"조차 필요 없이 계산에서 아예 제외). 5개 상태 중 4개(backlog·ready-for-dev·
- * in-progress·in-review)만 프로젝트 전체로 긁는다 — 실측(아티팩트 리드) "미래는 39개"라
- * project 규모 전체를 긁어도 가볍다.
+ * ⛔선대(2026-07-31 오전) 판과의 차이 — 그 판은 왼쪽 좁은 열에서 줄기 하나를 고르면
+ * 오른쪽에 «그 목표만»의 픽 패널+캔버스가 섰다(머리:갈래=1:3). 그 구조가 AC17-B가 잡은
+ * 결함의 원인이었다(픽 패널+줄기 목록이 캔버스 위 66%를 먹었다) — 그래서 「목표 하나를
+ * 고르는」 «단일-포커스»는 뺐다. 단, PO가 되돌린 것 — 그 패널이 실어 나르던 «동사 둘»
+ * (백로그 스토리 승격 / 조용한 목표 닫기·보관)은 «수단»(픽 패널)이 아니라 «목적»이라 같이
+ * 죽으면 안 된다(PO: 「«수단»을 빼면 그 위에 탄 «다른 목적»이 같이 죽는다」). 그래서
+ * `NextActionsStrip`(다음이 없는 목표만, 접힌 채 기본·펼치면 그 목표의 승격/전환 패널만)을
+ * 헤드라인과 캔버스 사이에 다시 세웠다 — 캔버스(FlowMultiLaneCanvas)는 여전히 이 화면의
+ * 몸통이고, 이 스트립은 그 위에 얹히는 «좁은» 자리다(고아 배정은 원래도 안 지웠다).
+ *
+ * 새 BE 계약 불요(next-up(PR#2707)·goals(total_stories/done_stories 기존 존재)·stories
+ * (status 필터 기존 존재)만으로 충분함을 그라운딩 확認했다).
+ *
+ * ⛔done 스토리는 이 화면에서 fetch하지 않는다(goals.total_stories/done_stories로 충분).
  */
 export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedNodeId = null }: NextMakerScreenProps) {
   const t = useTranslations('flow');
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   // 스토리 하나가 승격(backlog→ready-for-dev)되거나 목표가 전이(done/archived)되면, 전체
   // 재fetch 없이 로컬 상태만 갱신한다(PO 왕복 완료 조건 — 승격이 «즉시» 화면에 반영돼야
-  // "실제로 다음이 생겼다"가 눈으로 보인다). refetchNonce로 강제 전체 재계산은 별도 트리거.
+  // "실제로 다음이 생겼다"가 눈으로 보인다).
   const [promotedIds, setPromotedIds] = useState<Set<string>>(new Set());
   const [transitionedEpicIds, setTransitionedEpicIds] = useState<Set<string>>(new Set());
   const { toasts, addToast, dismissToast } = useToast();
   // 「목표 정하기」(PO 판정 2026-07-31) — 배정된 스토리는 로컬에서 즉시 그 목표 소속으로
-  // 반영한다(promotedIds와 같은 패턴). 재fetch 없이도 그 목표의 대기 칸이 즉시 늘고 orphan
-  // 목록에서 즉시 빠진다 — "안 보이면 잃는다"의 반대(배정하면 즉시 줄기에 서는 것이 보인다).
+  // 반영한다. 재fetch 없이도 그 목표의 레인이 즉시 그 스토리를 받고 orphan 목록에서 즉시
+  // 빠진다 — "안 보이면 잃는다"의 반대(배정하면 즉시 눈에 보이는 것).
   const [assignedEpicByStoryId, setAssignedEpicByStoryId] = useState<Map<string, string>>(new Map());
-  // ①갈래(선·노드)가 화면의 몸통(PO 판정 2026-07-31, 선생님 "이게 뭔지.." 후속) — 줄기
-  // «선택»은 왼쪽 좁은 열(StemRow)이 맡고, 선택된 줄기 하나의 캔버스가 오른쪽 넓은 본문에
-  // 선다. 명시로 고른 적 없으면 목록의 첫 번째(=가장 급한 것, 정렬 규격 그대로)가 기본.
-  const [focusedEpicId, setFocusedEpicId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -184,9 +187,9 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
     setAssignedEpicByStoryId((prev) => new Map(prev).set(storyId, epicId));
   }, []);
 
-  // 승격된 스토리는 로컬에서 즉시 ready-for-dev로 승격 반영, 배정된 스토리는 즉시 그
-  // 목표 소속으로 반영(재fetch 없이) — 왕복이 화면에 바로 보이는 것이 완료 조건(PO)이라
-  // 서버 재조회를 기다리게 하지 않는다.
+  // 승격된 스토리는 로컬에서 즉시 ready-for-dev로 반영, 배정된 스토리는 즉시 그 목표
+  // 소속으로 반영(재fetch 없이) — 왕복이 화면에 바로 보이는 것이 완료 조건(PO)이라 서버
+  // 재조회를 기다리게 하지 않는다.
   const effectiveActiveStories = useMemo(() => {
     if (state.kind !== 'ready') return [];
     if (promotedIds.size === 0 && assignedEpicByStoryId.size === 0) return state.activeStories;
@@ -228,14 +231,20 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
   }, [effectiveActiveStories]);
 
   const needsNextStems = useMemo(() => sortStemsByStallUrgency(stems.filter((s) => !s.hasNext)), [stems]);
-  const hasNextStems = useMemo(() => stems.filter((s) => s.hasNext), [stems]);
   const orphanStories = useMemo(() => deriveOrphanStories(effectiveActiveStories), [effectiveActiveStories]);
-  const allListedStems = useMemo(() => [...needsNextStems, ...hasNextStems], [needsNextStems, hasNextStems]);
-  // 명시 선택이 아직 없거나, 선택했던 줄기가 목록에서 사라졌으면(승격/전이로) 첫 번째로 낙하.
-  const effectiveFocusedEpicId = (focusedEpicId && allListedStems.some((s) => s.epicId === focusedEpicId))
-    ? focusedEpicId
-    : (allListedStems[0]?.epicId ?? null);
-  const focusedStem = allListedStems.find((s) => s.epicId === effectiveFocusedEpicId) ?? null;
+
+  // react-hooks/purity — Date.now()는 렌더(useMemo 포함) 밖에서 한 번만 잰다(마운트 시점의
+  // "지금"이면 충분하다, 30일 창이라 초 단위 정밀도가 안 중요하다). 매 렌더 다시 재면 순수성
+  // 규칙 위반이자 laneGrouping이 불필요하게 매번 다른 참조가 될 위험도 있다.
+  const [nowMs] = useState(() => Date.now());
+
+  // story #2224 AC1 — 스토리가 «정말 0건»인 목표는 레인 자체를 안 그린다(PO 정정: 접힘과
+  // 0건은 다른 사정이라 섞으면 뜻이 흐려진다). 나머지만 30일-변화 성질로 펼침/접힘을 가른다.
+  const laneGrouping = useMemo(() => {
+    if (state.kind !== 'ready') return { expand: [], fold: [] };
+    const goalsWithStories = effectiveGoals.filter((g) => g.totalStories > 0);
+    return deriveActiveLaneGoals(goalsWithStories, effectiveActiveStories, nowMs);
+  }, [state, effectiveGoals, effectiveActiveStories, nowMs]);
 
   if (state.kind === 'loading') {
     return (
@@ -253,84 +262,41 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
     <div className="space-y-4">
       <NextMakerHeader headline={headline} zeroStage={zeroStage} />
 
-      {/* ①갈래(선·노드)가 화면의 몸통(PO 판정 2026-07-31) — 왼쪽 좁은 열(목표 선택) : 오른쪽
-          넓은 본문(선택된 목표의 갈래 캔버스) = 대략 1:3, "머리:갈래=1:3 이하"와 같은 원칙을
-          가로축에도 적용. w-72(좁음) vs flex-1(남는 폭 전부)로 비율을 코드가 아니라 레이아웃이
-          말하게 한다. */}
-      <div className="flex gap-4">
-        {/* focus-inset(story #2062 가드) — overflow-y-auto 스크롤 컨테이너라 포커스 링이
-            잘릴 수 있다. 안에 solid bg-primary 버튼(OrphanStoriesPanel의 [배정])이 있어
-            그쪽엔 focus-outset도 짝으로 붙였다(그 파일 참고). */}
-        <div className="focus-inset w-72 shrink-0 space-y-3 overflow-y-auto">
-          <div className="space-y-1.5">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-              {t('nextMakerNeedsNextHeading', { n: headline.needsNextCount })}
-            </p>
-            {needsNextStems.length === 0 ? (
-              <p className="text-xs text-muted-foreground">{t('nextMakerAllHaveNext')}</p>
-            ) : (
-              needsNextStems.map((stem, i) => {
-                // PO 판정(2026-07-31, 2차) — 「N개는 이미 끝났을 수 있습니다」를 헤드라인에서
-                // 내려 3순위(quiet) 목표 목록 «옆»(바로 위)에 붙인다. 정렬이 이미 about-to-stall
-                // → recently-active → quiet 순이라 quiet는 항상 꼬리의 연속 구간이다.
-                const showQuietHint = stem.priority === 'quiet'
-                  && (i === 0 || needsNextStems[i - 1].priority !== 'quiet');
-                return (
-                  <div key={stem.epicId}>
-                    {showQuietHint && (
-                      <p className="mb-1 mt-2 text-[10px] text-muted-foreground">
-                        {t('nextMakerQuietHint', { n: headline.quietCount })}
-                      </p>
-                    )}
-                    <StemRow stem={stem} isFocused={stem.epicId === effectiveFocusedEpicId} onFocus={setFocusedEpicId} />
-                  </div>
-                );
-              })
-            )}
-          </div>
+      {/* PO 정정(2026-07-31) — 픽 패널의 «고르기»는 뺐지만 승격/전환 «동사»는 살린다. 접힌
+          채가 기본이라 이 스트립의 높이는 목표 수만큼이 아니라 늘 한 줄×목표 수(펼친 것만
+          예외) — AC17-B(캔버스가 위 어떤 블록보다 크다) 판정에 이 스트립이 걸리지 않는다. */}
+      <NextActionsStrip
+        needsNextStems={needsNextStems}
+        quietCount={headline.quietCount}
+        projectId={projectId}
+        backlogByEpic={backlogByEpic}
+        recentlyClosedTargetIds={state.kind === 'ready' ? state.recentlyClosedTargetIds : new Set()}
+        memberMap={memberMap}
+        onSelectStory={onSelectStory}
+        onStoryPromoted={handleStoryPromoted}
+        onPromoteFailed={handlePromoteFailed}
+        onGoalTransitioned={handleGoalTransitioned}
+      />
 
-          {hasNextStems.length > 0 && (
-            <div className="space-y-1.5">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-                {t('nextMakerHasNextHeading', { n: headline.hasNextCount })}
-              </p>
-              {hasNextStems.map((stem) => (
-                <StemRow key={stem.epicId} stem={stem} isFocused={stem.epicId === effectiveFocusedEpicId} onFocus={setFocusedEpicId} />
-              ))}
-            </div>
-          )}
+      {/* story #2224 AC17-B — 지도가 첫 화면에서 «가장 높은 블록»이어야 한다(위 어떤 블록보다
+          커야 한다는 «비교» 판정, % 아님). */}
+      <FlowMultiLaneCanvas
+        projectId={projectId}
+        expandGoals={laneGrouping.expand}
+        foldedCount={laneGrouping.fold.length}
+        onSelectStory={onSelectStory}
+        selectedNodeId={selectedNodeId}
+        memberMap={memberMap}
+      />
 
-          {/* 결함 fix(2026-07-31, PO 판정 — 선생님 "이게 뭔지.." 지적 후속, 자리를 «남는 곳»이
-              아니라 «성질»로 정한다: 목표별로 다음을 고르는 화면이라, 목표가 «없는» 것은 목표
-              목록을 다 보인 «다음» 순서다). */}
-          <OrphanStoriesPanel
-            orphanStories={orphanStories}
-            activeGoals={effectiveGoals}
-            onSelectStory={onSelectStory}
-            onAssigned={handleOrphanAssigned}
-          />
-        </div>
-
-        <div className="min-w-0 flex-1">
-          {focusedStem ? (
-            <GoalStemCard
-              key={focusedStem.epicId}
-              stem={focusedStem}
-              projectId={projectId}
-              backlogStories={backlogByEpic.get(focusedStem.epicId) ?? []}
-              recentlyClosedTargetIds={state.kind === 'ready' ? state.recentlyClosedTargetIds : new Set()}
-              memberMap={memberMap}
-              onSelectStory={onSelectStory}
-              selectedNodeId={selectedNodeId}
-              onStoryPromoted={handleStoryPromoted}
-              onPromoteFailed={handlePromoteFailed}
-              onGoalTransitioned={handleGoalTransitioned}
-            />
-          ) : (
-            <p className="text-xs text-muted-foreground">{t('nextMakerNoStems')}</p>
-          )}
-        </div>
-      </div>
+      {/* 목표가 «없는» 스토리 — 목표별 레인 캔버스 다음 순서(자리는 «남는 곳»이 아니라
+          «성질»로 정한다는 기존 판정 그대로, 이 화면의 몸통이 캔버스로 바뀌어도 유효). */}
+      <OrphanStoriesPanel
+        orphanStories={orphanStories}
+        activeGoals={effectiveGoals}
+        onSelectStory={onSelectStory}
+        onAssigned={handleOrphanAssigned}
+      />
 
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>

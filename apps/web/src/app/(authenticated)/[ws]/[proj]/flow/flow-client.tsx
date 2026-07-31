@@ -183,12 +183,12 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           // 않고 그대로 마운트, `?view=kanban`(레거시)도 이 칸으로 들어온다.
           <KanbanBoard projectId={projectId} wsSlug={wsSlug} projSlug={projSlug} />
         ) : (
-          // 「갈래」보기 — story #2224 후속(2026-07-31, PO 지시, 아티팩트 a920c25f v2 "다음을
-          // 만드는 화면"). GlanceHero(①초점 스트립)+FlowLane(좌 레인)+FlowCanvas(에픽 아코디언)
-          // 3종을 NextMakerScreen 하나로 교체한다 — 실측이 초점을 뒤집었다: 문제는 "다음이 안
-          // 보이는 것"이 아니라 "다음이 없는 것"이라 첫 줄이 그 사실을 직접 말하고, 이어짐(선)은
-          // 줄기를 펼쳤을 때만 보조로 붙는다(본체가 아니다 — PO note ⑤). memberMap은
-          // loadGlanceData가 이미 fetch한 것(GlanceHero가 쓰던 그 재료, §I-6 재사용).
+          // 「갈래」보기 — story #2224 AC1(2026-07-31) 멀티레인 본체. 30일 안 변화 있는 목표
+          // «전부»를 레인으로 동시에 그린다(목표 하나를 고르던 이전 판을 대체 — 그 판이
+          // AC17-B가 잡은 「지도가 18.7%로 눌림」의 원인이었다, next-maker-screen.tsx 문서
+          // 참고). PO 정정(같은 날 오후) — 그 판이 실어 나르던 승격/전환 «동사»는 되살려
+          // NextActionsStrip으로 옮겼고, memberMap은 그 안(GoalStemCard의 담당자 이름 표시)의
+          // 재료라 그대로 살아 있다.
           loading ? (
             <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
               <Loader2 className="size-4 animate-spin" aria-hidden="true" />

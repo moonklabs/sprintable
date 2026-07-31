@@ -41,6 +41,9 @@ function makeEdge(overrides: Partial<FlowMapEdge> = {}): FlowMapEdge {
 // flow-map-canvas-port-linking.test.tsx가 따로 본다). 여기선 안 쓰이는 no-op을 공유한다.
 const NOOP_CREATE_LINK = async () => ({ ok: true as const });
 const NOOP_DELETE_LINK = async () => ({ ok: true as const });
+// story #2224(멀티레인) — loadingPastBundleEpicIds는 epicId 기준 Set이라, "로딩 중 아님"을
+// 매번 새 Set으로 안 만들고 이 상수 하나를 공유한다(참조가 안정적이어야 불필요한 리렌더도 안 생긴다).
+const EMPTY_EPIC_ID_SET = new Set<string>();
 
 function makeLane(overrides: Partial<FlowMapLane> = {}): FlowMapLane {
   return {
@@ -65,7 +68,7 @@ afterEach(async () => {
 describe('FlowMapCanvas — edge line rendering (양성대조)', () => {
   it('renders no <svg> at all when the lane has no edges (오늘 org 0행 상태와 동형)', async () => {
     const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     expect(container.querySelector('svg')).toBeNull();
   });
 
@@ -77,7 +80,7 @@ describe('FlowMapCanvas — edge line rendering (양성대조)', () => {
       queueNodesByDepth: new Map([[0, [queueNode]]]),
       edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1' })],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     const line = container.querySelector('line[data-edge-kind]');
     expect(line).not.toBeNull();
     // 좌표가 실제로 계산돼 들어갔는지(값으로 닫는다 — "보인다"와 "계산됐다"가 다르다는
@@ -92,7 +95,7 @@ describe('FlowMapCanvas — edge line rendering (양성대조)', () => {
       nowNodes: [makeNode({ id: 'n1' })],
       edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'ghost-not-rendered' })],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     expect(container.querySelector('line[data-edge-kind]')).toBeNull();
   });
 });
@@ -101,7 +104,7 @@ describe('FlowMapCanvas — node click → open story panel (선생님 지적 20
   it('clicking a node card calls onSelectStory with that node id', async () => {
     const onSelectStory = vi.fn();
     const lane = makeLane({ nowNodes: [makeNode({ id: 's-123' })] });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={onSelectStory} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={onSelectStory} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     const button = container.querySelector('button');
     expect(button).not.toBeNull();
     await act(async () => { button?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
@@ -112,7 +115,7 @@ describe('FlowMapCanvas — node click → open story panel (선생님 지적 20
   // 속성이다(flow-node-story-panel.tsx가 `[data-node-id="..."]`로 querySelector한다).
   it('renders data-node-id on every node card so the overlay panel can anchor to it', async () => {
     const lane = makeLane({ nowNodes: [makeNode({ id: 's-anchor-123' })] });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     // story #2353 후속 — data-node-id는 카드를 감싸는 wrapper(div)에 있다(포트 버튼과
     // 카드-열기 버튼이 형제로 서는 구조라 wrapper 자체는 button이 아니다, flow-map-canvas.tsx
     // FlowMapNodeCard 문서 참고). 앵커 대상은 wrapper 자체로 충분(getBoundingClientRect는
@@ -130,7 +133,7 @@ describe('FlowMapCanvas — node click → open story panel (선생님 지적 20
       queueNodesByDepth: new Map([[0, [makeNode({ id: 'u1', kind: 'queue' })]]]),
     });
     await act(async () => {
-      root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} selectedNodeId="u1" onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />));
+      root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} selectedNodeId="u1" onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />));
     });
     // ring 클래스는 「카드 열기」버튼(wrapper의 첫 번째 button)에 있다 — 포트 버튼과 형제로
     // 서는 구조(story #2353) 그대로.
@@ -142,8 +145,34 @@ describe('FlowMapCanvas — node click → open story panel (선생님 지적 20
 
   it('highlights no node when selectedNodeId is omitted (default behavior unchanged)', async () => {
     const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     expect(container.querySelector('[data-node-id="n1"] button')?.className).not.toContain('ring-2');
+  });
+});
+
+describe('FlowMapCanvas — 노드 카드 한 줄 + 행 간격 32(story #2224 AC17-C)', () => {
+  it('renders exactly one line per node — no status text label (border-l color is now the sole status signal, §4-4)', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1', storyNumber: 42, title: '어떤 스토리', status: 'in-progress' })] });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    const card = container.querySelector('[data-node-id="n1"]')!;
+    // 상태를 사람이 읽는 낱말("진행 중" 등)이 더는 텍스트로 없다 — 색(border-l)만 남는다.
+    expect(card.textContent).not.toMatch(/진행 중|리뷰 중|개발 대기|백로그|완료/);
+    expect(card.textContent).toContain('#42');
+    expect(card.textContent).toContain('어떤 스토리');
+    // 카드 자체가 고정 한 줄 높이(h-6=24px)다 — 두 줄로 늘어나는 클래스가 없다.
+    expect(card.className).toContain('h-6');
+  });
+
+  it('spaces two now-nodes 32px apart vertically (NODE_ROW_HEIGHT — 8 lanes × 32 = 256px, per AC17-C)', async () => {
+    const lane = makeLane({
+      nowNodes: [makeNode({ id: 'first' }), makeNode({ id: 'second' })],
+    });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    const first = container.querySelector('[data-node-id="first"]') as HTMLElement;
+    const second = container.querySelector('[data-node-id="second"]') as HTMLElement;
+    const firstTop = parseFloat(first.style.top);
+    const secondTop = parseFloat(second.style.top);
+    expect(secondTop - firstTop).toBe(32);
   });
 });
 
@@ -169,7 +198,7 @@ describe('FlowMapCanvas — 8종 양성대조(유나양 4×2 규격)', () => {
       queueNodesByDepth: new Map([[0, queueNodes]]),
       edges,
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     const lines = Array.from(container.querySelectorAll('line[data-edge-kind]'));
     expect(lines).toHaveLength(8);
 
@@ -214,8 +243,8 @@ describe('FlowMapCanvas — 8종 양성대조(유나양 4×2 규격)', () => {
       queueNodesByDepth: new Map([[0, [queueNode]]]),
       edges: [makeEdge({ fromNodeId: 'old', toNodeId: 'new', kind: 'supersede', confirmed: true })],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
-    const oldTitle = Array.from(container.querySelectorAll('div')).find((d) => d.textContent === '옛 스토리');
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    const oldTitle = Array.from(container.querySelectorAll('span')).find((d) => d.textContent === '옛 스토리');
     expect(oldTitle?.className).toContain('line-through');
   });
 
@@ -227,8 +256,8 @@ describe('FlowMapCanvas — 8종 양성대조(유나양 4×2 규격)', () => {
       queueNodesByDepth: new Map([[0, [queueNode]]]),
       edges: [makeEdge({ fromNodeId: 'old', toNodeId: 'new', kind: 'supersede', confirmed: false })],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
-    const oldTitle = Array.from(container.querySelectorAll('div')).find((d) => d.textContent === '옛 스토리');
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    const oldTitle = Array.from(container.querySelectorAll('span')).find((d) => d.textContent === '옛 스토리');
     expect(oldTitle?.className).not.toContain('line-through');
   });
 
@@ -240,13 +269,13 @@ describe('FlowMapCanvas — 8종 양성대조(유나양 4×2 규격)', () => {
       queueNodesByDepth: new Map([[0, [makeNode({ id: 'u1', kind: 'queue' })]]]),
       edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1', kind: 'spawn', confirmed: true })],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[withEdges]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[withEdges]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     expect(container.textContent).toContain('기계가 찾아낸 후보 일부입니다');
     // 옛 4종×2축 문구(실선=확定 등)는 완전히 사라져야 한다.
     expect(container.textContent).not.toContain('실선=확定');
 
     const noEdges = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[noEdges]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[noEdges]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     expect(container.textContent).not.toContain('기계가 찾아낸 후보 일부입니다');
   });
 
@@ -259,7 +288,7 @@ describe('FlowMapCanvas — 8종 양성대조(유나양 4×2 규격)', () => {
       queueNodesByDepth: new Map([[0, [makeNode({ id: 'u1', kind: 'queue' })]]]),
       edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1', kind: 'spawn', confirmed: true })],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     expect(container.textContent).toContain('기계가 찾아낸 후보 일부입니다');
     expect(container.textContent).not.toContain('사람이 확인한 것은 아직 없습니다');
   });
@@ -270,7 +299,7 @@ describe('FlowMapCanvas — 8종 양성대조(유나양 4×2 규격)', () => {
       queueNodesByDepth: new Map([[0, [makeNode({ id: 'u1', kind: 'queue' })]]]),
       edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1', kind: 'spawn', confirmed: false })],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     expect(container.textContent).toContain('기계가 찾아낸 후보 일부입니다');
     expect(container.textContent).toContain('사람이 확인한 것은 아직 없습니다');
   });
@@ -286,7 +315,7 @@ describe('FlowMapCanvas — 8종 양성대조(유나양 4×2 규격)', () => {
       // toNodeId가 렌더되는 어떤 노드에도 없다 — 데이터 건수는 1이지만 그려지는 선은 0.
       edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'ghost-not-rendered', kind: 'spawn', confirmed: true })],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[ghostEdgeLane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[ghostEdgeLane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     expect(container.querySelector('line[data-edge-kind]')).toBeNull();
     expect(container.textContent).not.toContain('기계가 찾아낸 후보 일부입니다');
   });
@@ -300,7 +329,7 @@ describe('FlowMapCanvas — past-bundle card (묶음이 선을 통과시킨다)'
       nowNodes: [makeNode({ id: 'n1' })],
       pastBundle: { total: 46, internalCount: 73, outgoingCount: 3 },
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     expect(container.textContent).toContain('완료 46');
     expect(container.textContent).toContain('안에서 이어진 것 73');
     expect(container.textContent).toContain('여기서 나온 다음 3건');
@@ -314,7 +343,7 @@ describe('FlowMapCanvas — past-bundle card (묶음이 선을 통과시킨다)'
       pastBundle: { total: 18, internalCount: 73, outgoingCount: 1 },
       edges: [makeEdge({ fromNodeId: '__past-bundle__', toNodeId: 'n1', kind: 'spawn', confirmed: false })],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     const line = container.querySelector('line[data-edge-kind="spawn"]');
     expect(line).not.toBeNull();
     // 묶음 카드는 폭이 다르다(110px) — 좌표가 실제로 그 카드 좌상단(left:20)에서 시작해야 한다.
@@ -335,7 +364,7 @@ describe('FlowMapCanvas — grouped edges (여러 선이 한 점에 모이면 �
         makeEdge({ fromNodeId: '__past-bundle__', toNodeId: 'n1', kind: 'spawn', confirmed: true }),
       ],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     const lines = container.querySelectorAll('line[data-edge-kind]');
     expect(lines).toHaveLength(1); // 3건이 겹쳐 하나로
     expect(lines[0]?.getAttribute('data-edge-count')).toBe('3');
@@ -354,7 +383,7 @@ describe('FlowMapCanvas — grouped edges (여러 선이 한 점에 모이면 �
         makeEdge({ fromNodeId: '__past-bundle__', toNodeId: 'n1', kind: 'then', confirmed: true }),
       ],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     const line = container.querySelector('line[data-edge-kind="mixed"]');
     expect(line).not.toBeNull();
     expect(line?.getAttribute('stroke')).toBe('var(--muted-foreground)');
@@ -368,7 +397,7 @@ describe('FlowMapCanvas — grouped edges (여러 선이 한 점에 모이면 �
       pastBundle: { total: 5, internalCount: 0, outgoingCount: 1 },
       edges: [makeEdge({ fromNodeId: '__past-bundle__', toNodeId: 'n1', kind: 'spawn', confirmed: true })],
     });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     expect(container.querySelector('text')).toBeNull();
   });
 });

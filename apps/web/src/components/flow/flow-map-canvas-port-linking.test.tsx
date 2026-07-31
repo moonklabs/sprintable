@@ -82,7 +82,7 @@ async function renderCanvas(lane: FlowMapLane, overrides: { onCreateLink?: (p: {
         lanes={[lane]}
         onSelectStory={() => {}}
         onTogglePastBundle={() => {}}
-        isPastBundleLoading={false}
+        loadingPastBundleEpicIds={new Set()}
         onCreateLink={onCreateLink}
         onDeleteLink={onDeleteLink}
         memberMap={{ 'member-9': { name: '미르코' }, 'member-OTHER': { name: '디디' } }}
@@ -208,6 +208,27 @@ describe('FlowMapCanvas — 포인터 드래그 (AC3·AC4)', () => {
     // 일이지 selected 하나만으로 "놓을 자리"처럼 보이면 안 된다. 여기선 호버가 없으므로
     // (elementFromPoint가 기본 null) A에 어떤 ring도 없어야 한다.
     expect(selectButtonA.className).not.toContain('ring-2');
+  });
+
+  // 까심 QA 지적(2026-07-31, PR#2737) — 멀티레인의 findEpicIdForStoryId가 now/upcoming만
+  // 검색해, 과거 노드가 얽히면 POST는 성공(ok:true)하는데 화면은 조용한 "성공인데 반짝하고
+  // 사라지는" 결함이 났다. 그 조합 자체를 미리 막는다(flow-port-linking.ts 문서 참고) —
+  // ⚠️과거 노드는 원래도 항상 흐려져 있으므로(유나양 규격, dimmed 판정과 무관) 여기서 값으로
+  // 닫아야 하는 건 「놓아도 확認 다이얼로그가 안 열린다」쪽이다(놓기 자체가 막히는 것).
+  it('dropping the drag on a past node does NOT open the confirm dialog (silent-success guard)', async () => {
+    const lane = makeLane({
+      nowNodes: [makeNode({ id: 'n1' })],
+      pastNodes: [makeNode({ id: 'p1', kind: 'past' })],
+    });
+    await renderCanvas(lane);
+    const port = getPort('n1');
+    await act(async () => { dispatchPointer(port, 'pointerdown'); });
+
+    const targetWrapper = container.querySelector('[data-node-id="p1"]')!;
+    document.elementFromPoint = vi.fn(() => targetWrapper);
+    await act(async () => { dispatchPointer(window, 'pointerup', { clientX: 200, clientY: 10 }); });
+
+    expect(document.body.querySelector('[data-slot="dialog-title"]')).toBeNull();
   });
 });
 

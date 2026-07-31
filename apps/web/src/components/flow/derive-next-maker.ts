@@ -75,6 +75,60 @@ export function parseStories(raw: RawStoryLite[]): NextMakerStory[] {
   }));
 }
 
+export interface LaneGoalGrouping {
+  /** 최근(30일 안) 스토리 변화가 있는 목표 — 갈래 캔버스에 레인으로 «펼쳐» 그린다. */
+  expand: NextMakerGoal[];
+  /** 스토리는 있으나 30일 안에 변화가 없는(또는 남은 것이 전부 done이라 activeStories에
+   * 없는) 목표 — 레인 하나하나가 아니라 «접힘 줄» 하나로 묶는다. */
+  fold: NextMakerGoal[];
+}
+
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * story #2224 AC1(멀티레인, 2026-07-31, 목업 84abdf43 v5 + PO/미르코군 정정) — 「레인이 몇
+ * 개까지 서는가」의 답은 «수»가 아니라 «성질»이다: 목업의 "펼친 8"은 우연히 8이었을 뿐,
+ * 규격은 "최근 30일 안에 변화가 있었던 목표는 펼치고, 나머지는 하나의 접힘 줄로 묶는다"다
+ * (기존 과거-묶음 카드 패턴과 같은 결 — 개수를 하드코딩하지 않고 성질로 가른다).
+ *
+ * ⛔스토리가 «정말 0건»인 목표는 이 함수에 아예 안 들어온다(expand도 fold도 아님) — PO
+ * 정정(2026-07-31): 「접힘(활동은 있었으나 최근 안 움직인 것)」과 「0건(그릴 대상 자체가
+ * 없는 것)」은 다른 사정이라 같은 접힘 줄에 섞으면 뜻이 흐려진다. 호출부가 goals 목록
+ * 자체를 totalStories>0으로 미리 걸러 넘긴다(derive-flow-map.ts류 "없는 것은 안 그린다"
+ * 원칙과 같다).
+ *
+ * "최근 변화"는 이 목표 소속 «활성» 스토리(activeStories, done 제외 — 이 화면은 done을
+ * 애초에 안 부른다)의 `updatedAt` 중 최댓값이다. 활성 스토리가 하나도 없는 목표(전부
+ * done이거나, done 상태 자체를 이 화면이 안 물어봐 알 수 없는 경우)는 «최근 변화를 증명할
+ * 수 없다»로 보고 접힘 쪽에 둔다 — 모르는 것을 "최근"으로 단정하지 않는다.
+ */
+export function deriveActiveLaneGoals(
+  goals: NextMakerGoal[],
+  activeStories: NextMakerStory[],
+  now: number,
+): LaneGoalGrouping {
+  const lastActiveByEpic = new Map<string, number>();
+  for (const s of activeStories) {
+    if (!s.epicId) continue;
+    const t = new Date(s.updatedAt).getTime();
+    if (Number.isNaN(t)) continue;
+    const prev = lastActiveByEpic.get(s.epicId);
+    if (prev === undefined || t > prev) lastActiveByEpic.set(s.epicId, t);
+  }
+
+  const expand: NextMakerGoal[] = [];
+  const fold: NextMakerGoal[] = [];
+  for (const g of goals) {
+    const lastActive = lastActiveByEpic.get(g.id);
+    if (lastActive !== undefined && now - lastActive <= THIRTY_DAYS_MS) {
+      expand.push(g);
+    } else {
+      fold.push(g);
+    }
+  }
+  return { expand, fold };
+}
+
 export interface NextUpRow {
   id: string;
   sourceId: string;
