@@ -478,3 +478,5 @@ Full guide: [docs/self-hosting.md](docs/self-hosting.md)
 We chose AGPL because Sprintable is a product company, not a consulting company. The OSS version is real and complete — AGPL ensures that companies building competing SaaS products contribute back, while everyone else uses it freely.
 
 Commercial license: [dev1@moonklabs.com](mailto:dev1@moonklabs.com)
+
+<!-- #2364 qa-review-gate mutation-test touch (commit 1) — throwaway, will be reverted -->
