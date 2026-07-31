@@ -38,7 +38,7 @@ docstring이 스스로 막아 둔 것이 근거).
 `_reconcile_story_references_and_candidates()`를 한 번도 안 불렀던 버그(오르테가군, 오늘
 아침 수정)로 이 표가 선 뒤(2026-07-29 23:18~) 실제로 쌓인 행이 104건뿐(해소된 후보
 1349건 대비 7.7%)이었던 것이 실측으로 드러나 "소급"이 사실상 "첫 채우기"였다 — 그래서
-`backend/scripts/backfill_reference_semantic_candidates.py`(1회성, Cloud Run Job으로
+`backend/scripts/jobs/backfill_reference_semantic_candidates.py`(1회성, Cloud Run Job으로
 실행·재실행해도 멱등 — `store_semantic_candidates`의 ON CONFLICT DO NOTHING 그대로 재사용)
 가 생겼다. write-path(story 저장 시점)는 여전히 유일한 **상시** 경로다 — 백필은 그 경로를
 과거 데이터에 한 번 더 돌리는 것뿐, 별도 로직을 새로 만들지 않는다.
