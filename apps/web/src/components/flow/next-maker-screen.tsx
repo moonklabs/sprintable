@@ -87,8 +87,14 @@ type LoadState =
  * (백로그 스토리 승격 / 조용한 목표 닫기·보관)은 «수단»(픽 패널)이 아니라 «목적»이라 같이
  * 죽으면 안 된다(PO: 「«수단»을 빼면 그 위에 탄 «다른 목적»이 같이 죽는다」). 그래서
  * `NextActionsStrip`(다음이 없는 목표만, 접힌 채 기본·펼치면 그 목표의 승격/전환 패널만)을
- * 헤드라인과 캔버스 사이에 다시 세웠다 — 캔버스(FlowMultiLaneCanvas)는 여전히 이 화면의
- * 몸통이고, 이 스트립은 그 위에 얹히는 «좁은» 자리다(고아 배정은 원래도 안 지웠다).
+ * 다시 세웠다 — 캔버스(FlowMultiLaneCanvas)는 여전히 이 화면의 몸통이고, 이 스트립은 그
+ * «아래»에 얹히는 자리다(고아 배정은 원래도 안 지웠다).
+ *
+ * ⛔AC17-B 재정정(2026-07-31, 선생님 직접 지적) — 처음엔 헤드라인+스트립을 캔버스 «위»에
+ * 두고 "지도가 가장 높은 블록"이면 된다고 판단했는데, 그건 «높이» 판정이지 «자리» 판정이
+ * 아니었다. 선생님: "지도가 페이지 상단에 붙어야 맞을 것 같고, 나머지는 지도 하단에
+ * 붙어야 하지 않을지" — 순서 자체를 뒤집었다. 캔버스가 이 화면의 맨 위, 헤드라인+스트립+
+ * 고아 패널은 전부 그 아래.
  *
  * 새 BE 계약 불요(next-up(PR#2707)·goals(total_stories/done_stories 기존 존재)·stories
  * (status 필터 기존 존재)만으로 충분함을 그라운딩 확認했다).
@@ -260,11 +266,29 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
 
   return (
     <div className="space-y-4">
+      {/* story #2224 AC17-B 재정정(2026-07-31, 선생님 직접 지적) — AC17-B를 "지도가 첫
+          화면에서 가장 높은 블록"(높이 비교)으로만 쟀는데, 그건 «높이»를 줄이는 처방(스트립을
+          접는 것)에는 걸리되 «자리»(어디에 있는가) 문제는 안 풀었다. 지도가 맨 위, 나머지
+          (헤드라인·수 카드·다음-비어있음/조용함 목록)는 전부 그 아래로 — 순서 자체를
+          뒤집는다. 지도 pane 높이를 사용자가 조절하는 것(유나 소견 대기 — 기본 높이·저장
+          자리)은 후속 조각. */}
+      <FlowMultiLaneCanvas
+        projectId={projectId}
+        expandGoals={laneGrouping.expand}
+        foldedCount={laneGrouping.fold.length}
+        onSelectStory={onSelectStory}
+        selectedNodeId={selectedNodeId}
+        memberMap={memberMap}
+      />
+
       <NextMakerHeader headline={headline} zeroStage={zeroStage} />
 
-      {/* PO 정정(2026-07-31) — 픽 패널의 «고르기»는 뺐지만 승격/전환 «동사»는 살린다. 접힌
-          채가 기본이라 이 스트립의 높이는 목표 수만큼이 아니라 늘 한 줄×목표 수(펼친 것만
-          예외) — AC17-B(캔버스가 위 어떤 블록보다 크다) 판정에 이 스트립이 걸리지 않는다. */}
+      {/* PO 정정(2026-07-31) — 픽 패널의 «고르기»는 뺐지만 승격/전환 «동사»는 살린다. 이
+          스트립이 목표 수만큼 길어질 수 있다는 것(AC17-B 재발의 원인이었다 — next-maker-
+          screen.tsx 상단 문서 참고)은 그대로다 — 다만 이제 캔버스가 «맨 위»라 이 스트립이
+          아무리 길어도 첫 화면(캔버스)을 밀어내지 않는다. 접기(그룹 요약 한 줄)는 시도했다가
+          물렀다(PO: "지도가 위에 있으면 아래가 길어도 첫 화면은 안 밀린다") — 자리 문제를
+          자리로 풀었으니 높이를 줄이는 처방은 이제 안 필요하다. */}
       <NextActionsStrip
         needsNextStems={needsNextStems}
         quietCount={headline.quietCount}
@@ -276,17 +300,6 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
         onStoryPromoted={handleStoryPromoted}
         onPromoteFailed={handlePromoteFailed}
         onGoalTransitioned={handleGoalTransitioned}
-      />
-
-      {/* story #2224 AC17-B — 지도가 첫 화면에서 «가장 높은 블록»이어야 한다(위 어떤 블록보다
-          커야 한다는 «비교» 판정, % 아님). */}
-      <FlowMultiLaneCanvas
-        projectId={projectId}
-        expandGoals={laneGrouping.expand}
-        foldedCount={laneGrouping.fold.length}
-        onSelectStory={onSelectStory}
-        selectedNodeId={selectedNodeId}
-        memberMap={memberMap}
       />
 
       {/* 목표가 «없는» 스토리 — 목표별 레인 캔버스 다음 순서(자리는 «남는 곳»이 아니라

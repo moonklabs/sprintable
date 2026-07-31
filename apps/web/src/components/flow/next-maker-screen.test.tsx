@@ -205,6 +205,27 @@ describe('NextMakerScreen — real fetch orchestration + lane grouping', () => {
     expect(container.querySelector('[data-testid="folded-count"]')?.textContent).toBe('1');
   });
 
+  // 유나 라이브 실측(2026-07-31, AC17-B 재정정 — 선생님 직접 지적) — "지도가 가장 높은
+  // 블록"으로만 재던 판정이 «자리»(어디에 있는가)를 안 물어, 캔버스 y=2108(뷰포트
+  // 900) — 레인이 한 조각도 첫 화면에 없는 사고가 났다. 캔버스가 DOM에서 헤드라인보다
+  // «먼저» 오는 것 자체를 값으로 고정한다(순서가 바뀌면 다시 아래로 밀릴 수 있다).
+  it('AC17-B: the multi-lane canvas renders BEFORE the headline/strip in DOM order (canvas is the top block, not just the tallest)', async () => {
+    const calledUrls: string[] = [];
+    vi.stubGlobal('fetch', buildFetchMock(calledUrls));
+
+    await act(async () => {
+      root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const html = container.innerHTML;
+    const canvasIdx = html.indexOf('multi-lane-canvas-stub');
+    const headlineIdx = html.indexOf('목표 3개 중');
+    expect(canvasIdx).toBeGreaterThan(-1);
+    expect(headlineIdx).toBeGreaterThan(-1);
+    expect(canvasIdx).toBeLessThan(headlineIdx);
+  });
+
   it('orphan panel: assigning a goal PATCHes /api/stories/[id] with epic_id and the story disappears from the orphan list', async () => {
     const calledUrls: string[] = [];
     const patchBodies: unknown[] = [];
