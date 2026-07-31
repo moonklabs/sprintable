@@ -359,6 +359,31 @@ describe('FlowMapCanvas — 되돌리기 (AC7·AC8, 그 선 자체가 진입점)
     expect(line.getAttribute('data-edge-candidate-id')).toBeFalsy();
   });
 
+  // 오르테가 PO 지적(2026-07-31) — 과거 묶음 카드로 접힌 쪽에 닿은 «단일» 간선(count===1)은
+  // deriveFlowMapLane의 분류상 항상 반대편이 실재 story id다(양끝 다 과거인 경우는
+  // internalCount로 빠져 애초에 렌더 안 됨) — 그런 간선도 되돌리기가 되어야 한다. 이걸
+  // 안 하면 "클릭했는데 아무 반응 없음"이 «고장난 것»처럼 보인다.
+  it('a SINGLE candidate edge touching the past-bundle placeholder is still undoable, using the real (non-bundle) side as the DELETE anchor', async () => {
+    const lane = makeLane({
+      nowNodes: [makeNode({ id: 'n1' })],
+      pastTotal: 3,
+      pastBundle: { total: 3, internalCount: 0, outgoingCount: 1 },
+      edges: [makeEdge({ fromNodeId: '__past-bundle__', toNodeId: 'n1', confirmed: true, candidateId: 'cand-bundle' })],
+    });
+    const deleteLink = vi.fn(async () => ({ ok: true }) as DeleteLinkResult);
+    await renderCanvas(lane, { onDeleteLink: deleteLink });
+
+    const line = container.querySelector('line[data-edge-candidate-id="cand-bundle"]');
+    expect(line).not.toBeNull();
+    await act(async () => { line!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(document.body.querySelector('[data-slot="dialog-title"]')?.textContent).toBe('내가 만든 연결입니다');
+
+    const deleteBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '지우기')!;
+    await act(async () => { deleteBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // fromNodeId는 '__past-bundle__'이라 앵커로 못 쓴다 — 실재하는 toNodeId('n1')를 써야 한다.
+    expect(deleteLink).toHaveBeenCalledWith('cand-bundle', 'n1');
+  });
+
   it('clicking [지우기] calls onDeleteLink with the candidateId and an anchor story id, then closes on success', async () => {
     const lane = makeLane({
       nowNodes: [makeNode({ id: 'n1' })],

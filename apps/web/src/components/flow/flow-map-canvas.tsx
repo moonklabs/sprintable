@@ -399,7 +399,10 @@ export function FlowMapCanvas({
     if (!undoTarget) return;
     setUndoDeleting(true);
     setUndoDeleteError(null);
-    void onDeleteLink(undoTarget.candidateId, undoTarget.fromNodeId).then((result) => {
+    // 과거 묶음 카드 쪽(PAST_BUNDLE_NODE_ID)은 접근권한 앵커로 못 쓴다 — 실재하는 반대편을
+    // 쓴다(둘 중 최소 하나는 항상 실재 story id다, 위 isUndoable 문서 참고).
+    const anchorStoryId = undoTarget.fromNodeId === PAST_BUNDLE_NODE_ID ? undoTarget.toNodeId : undoTarget.fromNodeId;
+    void onDeleteLink(undoTarget.candidateId, anchorStoryId).then((result) => {
       setUndoDeleting(false);
       if (result.ok) {
         setUndoTarget(null);
@@ -497,13 +500,14 @@ export function FlowMapCanvas({
                           // story #2353(AC7·AC8) — 사람이 만든(candidateId 있는) 단일 간선만
                           // 클릭해서 되돌릴 수 있다. 얇은 실선은 클릭하기 어려우니 투명한
                           // 굵은 히트라인을 겹쳐 클릭 영역을 넓힌다(눈에 보이는 선은 그대로).
-                          // 되돌리기 DELETE는 «실재하는 story id»를 접근권한 앵커로 보내야
-                          // 하는데(위 onDeleteLink 문서 참고), 과거 묶음 카드로 접힌 쪽은
-                          // 어느 개별 story였는지 이 레이어에선 이미 잃었다(PAST_BUNDLE_NODE_ID로
-                          // 대체됨, deriveFlowMapLane) — 그런 간선은 되돌리기 대상에서 뺀다
-                          // (묶음을 펼치면 개별 좌표가 생기며 이 조건이 자연히 풀린다).
-                          const isUndoable = Boolean(group.candidateId)
-                            && group.fromNodeId !== PAST_BUNDLE_NODE_ID && group.toNodeId !== PAST_BUNDLE_NODE_ID;
+                          // ⛔오르테가 PO 지적(2026-07-31) — 과거 묶음 카드로 접힌 쪽에 닿은
+                          // 간선도 되돌리기 UI를 그대로 낸다. deriveFlowMapLane의 분류상
+                          // «양끝 다 과거»(internalCount)는 애초에 renderableEdges에 안
+                          // 들어오므로, 여기 실제로 그려지는 간선은 fromNodeId·toNodeId
+                          // «둘 중 최소 하나는 항상 실재 story id»다 — 앵커로 그 실재 쪽을
+                          // 쓰면 되므로 "묶음이면 통째로 제외"는 과보수적이었다(클릭해도
+                          // 아무 반응이 없어 "고장난 것"처럼 보이는 자리를 새로 심었다).
+                          const isUndoable = Boolean(group.candidateId);
                           return (
                             <g key={`${group.fromNodeId}-${group.toNodeId}`}>
                               {isUndoable ? (
