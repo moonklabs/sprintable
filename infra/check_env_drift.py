@@ -43,6 +43,17 @@ IaC∪라이브(그 서비스 것) 어디에도 없는 키를 위험 등급별�
 공개돼 있는 것, 예: `'https://dev-app.sprintable.ai'`)만 읽는다. 라이브 Cloud Run env
 value는 이 축도 절대 안 읽는다(①이 이미 뽑아 둔 키 «이름» 집합만 재사용).
 
+⑤ 후속(2026-07-31, 민 지적) — `env: NodeJS.ProcessEnv = process.env` DI 관례 블라인드스팟.
+⑤가 원래 `process.env['X']`/`process.env.X`만 봐서, process.env를 파라미터(관례상 이름
+`env`)로 받아 테스트 가능하게 만드는 함수 안의 읽기(`env['X']`)는 못 봤다. 이 코드베이스에
+9개 파일·12개 읽기가 이 패턴이고, `SPRINTABLE_RUNTIME_ROLE`이 정확히 이 구멍으로 빠져 있었다
+— apps/web/src/services/background-runtime.ts가 이 값으로 배경 워커(Discord/Slack/Teams
+아웃바운드+메모 디스패처) 기동 여부를 정하는데, 값이 없으면 프로덕션에서 `role='web'`으로
+조용히 떨어져 instrumentation.ts가 워커를 시작 안 하고 그냥 `return`한다(throw도 로그도
+없음). 라이브 실측(2026-07-31): `sprintable-frontend-{dev,prod}` 둘 다 이 값이 없다 —
+IaC에도 없다(스크립트 전수 grep 0건). 이 DI 관례를 실제로 선언한 파일에서만 `env[...]`도
+추가로 본다(무관 변수명 오탐 방지).
+
 로컬 수동 실행:
     python3 infra/check_env_drift.py
 
@@ -319,6 +330,18 @@ def _iac_covered_keys() -> set[str]:
 _WEB_SRC_DIR = _REPO_ROOT / "apps" / "web" / "src"
 _ENV_BRACKET_RE = re.compile(r"process\.env\[\s*['\"]([A-Z][A-Z0-9_]*)['\"]\s*\]")
 _ENV_DOT_RE = re.compile(r"process\.env\.([A-Z][A-Z0-9_]*)")
+
+# ⑤ 후속(2026-07-31) — `env: NodeJS.ProcessEnv = process.env` DI 관례 블라인드스팟. 함수가
+# process.env를 파라미터(관례상 이름 `env`)로 받아 테스트 가능하게 만드는 패턴이 이
+# 코드베이스에 9개 파일·12개 읽기로 실재한다 — 그 파라미터로 읽으면 문자열 리터럴
+# 「process.env」가 없어 위 두 정규식이 못 본다. `SPRINTABLE_RUNTIME_ROLE`이 정확히 이
+# 구멍으로 빠졌다(apps/web/src/services/background-runtime.ts:83, `env['SPRINTABLE_RUNTIME_ROLE']`
+# — 값이 없으면 apps/web/scripts/background-runtime-worker.ts가 즉시 throw한다).
+# ⛔무관 변수명 오탐을 막으려고 "이 DI 관례를 실제로 선언한 파일에서만" 추가로 본다 —
+# 아무 파일에서나 `env[...]`를 다 잡으면 관계없는 지역변수까지 오염된다.
+_ENV_PARAM_DI_RE = re.compile(r"\benv\s*:\s*NodeJS\.ProcessEnv\s*=\s*process\.env\b")
+_ENV_PARAM_BRACKET_RE = re.compile(r"(?<!process\.)\benv\[\s*['\"]([A-Z][A-Z0-9_]*)['\"]\s*\]")
+_ENV_PARAM_DOT_RE = re.compile(r"(?<!process\.)\benv\.([A-Z][A-Z0-9_]*)\b")
 # 매치 직후 200자 안에서 `?? '...'`/`|| '...'`(문자열 리터럴 폴백)만 인식한다 — 함수 호출·
 # 변수 등 리터럴이 아닌 폴백은 "기본값 없음"과 동일하게 취급(안전 쪽, ㉠으로 승격).
 _DEFAULT_LITERAL_RE = re.compile(r"""^\s*(?:\?\?|\|\|)\s*['"]([^'"]*)['"]""")
@@ -327,7 +350,12 @@ _DEFAULT_LITERAL_RE = re.compile(r"""^\s*(?:\?\?|\|\|)\s*['"]([^'"]*)['"]""")
 # NEXT_RUNTIME — Next.js가 빌드/런타임에 자동 주입(nodejs/edge 런타임 구분), 사람이 배포
 # 설정으로 "공급"하는 값이 아니다(2026-07-28 실측 확認 — instrumentation.ts가 읽지만 그
 # 값은 배포 SSOT/라이브 env var가 아니라 프레임워크가 실행 컨텍스트에 따라 스스로 세팅).
-_WEB_ENV_IGNORE = {"NODE_ENV", "NEXT_RUNTIME"}
+# VERCEL_URL·VERCEL_PROJECT_PRODUCTION_URL — Vercel 플랫폼이 배포 시 자동 주입하는
+# 값이다(app-url.ts의 Vercel-auto-env 폴백 계단). 이 저장소는 GCP Cloud Run으로 나가(
+# env-drift-guard.yml의 WIF 인증이 그 증거) Vercel에서 도는 일이 없으니 이 두 키는 «항상»
+# undefined가 정상이다 — ⑤ 후속(2026-07-31, env: NodeJS.ProcessEnv 파라미터 스캔 확장)에서
+# 새로 잡히기 시작해 여기 추가했다(NEXT_RUNTIME과 같은 이유).
+_WEB_ENV_IGNORE = {"NODE_ENV", "NEXT_RUNTIME", "VERCEL_URL", "VERCEL_PROJECT_PRODUCTION_URL"}
 
 # ⑤가 대상으로 삼는 서비스 — apps/web 코드베이스를 실제로 구동하는 라이브 서비스만.
 _WEB_CODE_SERVICES = {"sprintable-frontend-dev", "sprintable-frontend-prod"}
@@ -420,7 +448,12 @@ def _web_env_reads(src_dir: Path = _WEB_SRC_DIR) -> dict[str, list[tuple[str, st
             rel = str(path.relative_to(_REPO_ROOT))
         except ValueError:
             rel = str(path)  # src_dir이 repo 밖(테스트의 tmp_path 등)일 때의 폴백
-        for regex in (_ENV_BRACKET_RE, _ENV_DOT_RE):
+        regexes = [_ENV_BRACKET_RE, _ENV_DOT_RE]
+        # ⑤ 후속 — 이 파일이 `env: NodeJS.ProcessEnv = process.env` DI 관례를 실제로
+        # 선언했을 때만 env[...]/env.X도 process.env[...]와 같은 자리로 본다.
+        if _ENV_PARAM_DI_RE.search(text):
+            regexes += [_ENV_PARAM_BRACKET_RE, _ENV_PARAM_DOT_RE]
+        for regex in regexes:
             for m in regex.finditer(text):
                 key = m.group(1)
                 if key in _WEB_ENV_IGNORE:
