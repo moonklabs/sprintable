@@ -1,5 +1,6 @@
 'use client';
 
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import type { FlowMapLane, FlowMapNode, FlowMapEdgeKind, FlowMapEdgeGroup } from './derive-flow-map';
 import {
@@ -9,6 +10,11 @@ import {
   PAST_BUNDLE_CARD_WIDTH, PAST_BUNDLE_CARD_HEIGHT, PAST_EXPANDED_LEFT, PAST_EXPANDED_TOP_START,
   PAST_EXPANDED_ROW_HEIGHT, PAST_EXPANDED_BOX_WIDTH,
 } from './derive-flow-map';
+import { isValidPortDropTarget, PORT_LINK_KINDS, type PortLinkKind } from './flow-port-linking';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 
 // 카드 실측(FlowMapNodeCard): w-[110px], 높이는 두 줄 텍스트+padding으로 24px 안팎(NODE_ROW_HEIGHT
 // 28px 중 4px가 행간) — 선은 카드 "왼쪽 가장자리 중앙"→"오른쪽 가장자리 중앙"을 잇는다.
@@ -20,6 +26,18 @@ const HEADER_HEIGHT = 22; // .colhd
 const NODE_ROW_HEIGHT = 28; // .n(24px) + 행간
 const LANE_MIN_HEIGHT = 70;
 const NOW_CLUSTER_X = FLOW_MAP_NOW_LINE_X - 40; // "지금" 노드는 세로선 바로 왼쪽에 클러스터(착수시각순)
+
+/** story #2353 — 포트 잇기 상태기계. 포인터 드래그와 키보드(AC13)가 같은 phase들을 타되
+ * `via`만 다르다 — 「드래그로 되는 일은 키보드로도 같은 결과에 닿는다」(AC13)를 타입
+ * 레벨에서도 한 상태기계로 강제한다(두 벌을 안 짠다). */
+type LinkDraft =
+  | { phase: 'idle' }
+  | { phase: 'linking'; sourceId: string; via: 'pointer' | 'keyboard'; pointerClientX: number; pointerClientY: number; hoverTargetId: string | null }
+  | { phase: 'confirming'; sourceId: string; targetId: string }
+  | { phase: 'submitting'; sourceId: string; targetId: string }
+  // AC15 — 실패하면 점선이 사라지고 "왜인지" 한 줄. message는 서버 원문 그대로(진단을 새로
+  // 짓지 않는다) — 이 phase 자체가 "그 자리에 남는" 자리다(㉦-2, 토스트로 흘려보내지 않는다).
+  | { phase: 'error'; sourceId: string; targetId: string; message: string };
 
 interface FlowMapCanvasProps {
   lanes: FlowMapLane[];
@@ -41,7 +59,21 @@ interface FlowMapCanvasProps {
    * ring). URL의 `?story=`가 단일 소스 — 패널이 닫혀도 이 값은 지워지지 않는다(호출부가
    * 패널의 열림/닫힘만 별도 로컬 상태로 관리, 선택 자체는 URL 그대로). */
   selectedNodeId?: string | null;
+  /** story #2353 — 포트로 새 연결을 만든다. 실제 fetch·로컬 edges 갱신은 호출부(FlowEpicNodes)
+   * 책임(onSelectStory와 같은 원칙 — 이 컴포넌트는 순수 프레젠테이션+인터랙션이다). 서버
+   * 응답 전엔 절대 선을 확定하지 않는다(AC14, 낙관적 업데이트 금지) — 호출부가 실제로
+   * edges를 갱신해야 이 컴포넌트가 다음 렌더에서 실선을 그린다. */
+  onCreateLink: (params: { apiSourceId: string; targetId: string; relationKind: PortLinkKind | null }) => Promise<CreateLinkResult>;
+  /** story #2353(AC7·AC8) — 사람이 만든 선을 지운다. */
+  /** anchorStoryId — BE DELETE 라우트가 접근권한 확認에 쓰는 «실재하는 story id»(project
+   * access 앵커일 뿐, 어느 쪽 endpoint가 candidate를 만들었는지와 무관 — stories.py의
+   * undeclare_story_reference_candidate 문서 참고). fromNodeId/toNodeId 아무 쪽이나
+   * 유효한 story id면 되므로 호출부가 그중 하나를 골라 넘긴다. */
+  onDeleteLink: (candidateId: string, anchorStoryId: string) => Promise<DeleteLinkResult>;
 }
+
+export type CreateLinkResult = { ok: true } | { ok: false; error: string };
+export type DeleteLinkResult = { ok: true } | { ok: false; error: string };
 
 // PO 지적(2026-07-30) — 판을 갈아엎으며 색/모양(border-left)만 남기고 「status를 사람이
 // 읽는 말」이 조용히 사라질 뻔했다(구 FlowNodeCard의 상태 배지가 이 카드로 안 옮겨짐). 색은
@@ -62,43 +94,79 @@ function nodeToneClass(node: FlowMapNode): string {
   return 'border-l-border border-dashed'; // .n.queue — 아직 시작 안 한 것은 점선
 }
 
-function FlowMapNodeCard({ node, left, top, superseded, selected, onSelectStory }: { node: FlowMapNode; left: number; top: number; superseded: boolean; selected: boolean; onSelectStory: (storyId: string) => void }) {
+interface FlowMapNodeCardProps {
+  node: FlowMapNode;
+  left: number;
+  top: number;
+  superseded: boolean;
+  /** story #2354 AC6 — 패널을 닫아도 마지막으로 누른 노드가 선택된 채로 남는다(고리 강조). */
+  selected: boolean;
+  onSelectStory: (storyId: string) => void;
+  /** story #2353 — 이 노드가 현재 드래그/키보드 잇기의 «출발점»인가(포트를 크게+색있게 고정). */
+  isLinkSource: boolean;
+  /** 잇기 진행 중인데 이 노드가 «놓을 수 없는» 대상인가(AC3 — 자기 자신·이미 이어진 것 흐림). */
+  isInvalidDropTarget: boolean;
+  /** 잇기 진행 중이고 이 노드가 지금 가리키는(포인터 호버/키보드 포커스) 후보인가(AC3·AC13). */
+  isDropHover: boolean;
+  /** story #2353 — 방금 만든 선의 «반대편» 노드를 짧게 강조(㉣ "만든 직후 짧게 강조"). */
+  isJustLinked: boolean;
+  onPortPointerDown: (e: React.PointerEvent, nodeId: string) => void;
+  onPortKeyDown: (e: React.KeyboardEvent, nodeId: string) => void;
+}
+
+function FlowMapNodeCard({
+  node, left, top, superseded, selected, onSelectStory, isLinkSource, isInvalidDropTarget, isDropHover,
+  isJustLinked, onPortPointerDown, onPortKeyDown,
+}: FlowMapNodeCardProps) {
   const t = useTranslations('flow');
   const statusKey = STATUS_LABEL_KEY[node.status];
   // 유나양 규격(아티팩트 a125909a `.nd.past{opacity:.62}`) — 펼친 과거 카드는 항상 흐림
   // (대체-확認 흐림과 별개 사정 — 이미 끝난 일이라는 사실 자체를 흐림으로 나타낸다).
-  const dimmed = superseded || node.kind === 'past';
+  const dimmed = superseded || node.kind === 'past' || isInvalidDropTarget;
   return (
-    <button
-      type="button"
-      // story #2354 — data-node-id는 오버레이 패널이 "이 노드를 가리지 않는" 위/아래 반전
-      // 위치를 계산할 앵커(getBoundingClientRect)를 찾는 자리다. onSelectStory 시그니처를
-      // 건드리지 않는다(오르빈·목록 피커 등 «노드가 아닌» 호출부가 여럿이라, DOM 앵커
-      // 개념이 없는 그 호출부들까지 억지로 끌고 갈 이유가 없다 — 호출부는 storyId 하나만
-      // 안다). 패널을 닫아도 selected는 유지된다("누른 노드가 선택된 채로 남는다", AC6).
-      data-node-id={node.id}
-      onClick={() => onSelectStory(node.id)}
-      className={`focus-inset absolute w-[110px] cursor-pointer overflow-visible rounded border border-l-[3px] border-border bg-card px-1.5 py-1 text-left text-[11px] shadow-sm hover:border-info/60 ${nodeToneClass(node)} ${dimmed ? 'opacity-50' : ''} ${selected ? 'ring-2 ring-brand ring-offset-1 ring-offset-background' : ''}`}
-      style={{ left, top }}
-    >
-      <div className="flex items-center justify-between gap-1 font-mono text-[9px] text-muted-foreground">
-        <span className="truncate">#{node.storyNumber}</span>
-        <span className="shrink-0">{statusKey ? t(statusKey) : node.status}</span>
-      </div>
-      {/* 대체(확認됨)만 — "옛 노드"에 취소선(유나양 규격). 제안 상태는 절대 취소선을 넣지
-          않는다(computeSupersededNodeIds가 confirmed 간선만 모으므로 이 자리는 값만 받는다 —
-          "제안이면 안 흐린다"는 판단을 이 컴포넌트가 다시 하지 않는다). */}
-      <div className={`truncate ${superseded ? 'line-through' : ''}`}>{node.title}</div>
-      {/* ⑥ 포트(형태만, 2026-07-30 PO 판정) — 간선이 org 전체 0건인 지금이야말로 포트를
-          «먼저» 세워야 한다(포트가 첫 연결을 만드는 유일한 길 — 재료를 소비만 하는 것과
-          달리 재료를 만드는 것은 미룰수록 0이 굳는다). 오늘은 모양만: 실제 드래그로
-          `POST /api/v2/dependencies`(from=왼쪽/to=오른쪽/dep_type='blocks' 고정, 방향
-          PO 확定 2026-07-30)를 부르는 배선은 다음 조각. */}
-      <span
-        aria-hidden="true"
-        className="absolute right-[-5px] top-1/2 h-[9px] w-[9px] -translate-y-1/2 rounded-full border-[1.5px] border-info bg-card"
-      />
-    </button>
+    // story #2353 후속 — 포트가 «자기 카드를 여는 버튼»과 별개의 인터랙티브 요소가 되면서
+    // (드래그 시작점) 버튼 안에 버튼을 못 넣는다(중첩 버튼은 무효 HTML). 바깥은 위치만 잡는
+    // div, 안에 「카드 열기」버튼과 「포트」버튼 둘이 형제로 선다. data-node-id는 이 div에
+    // 둔다 — story #2354 오버레이 패널이 "이 노드를 가리지 않는" 위치를 계산할 앵커
+    // (getBoundingClientRect)이자, 포인터 드래그의 드롭 대상 판정(`closest('[data-node-id]')`)
+    // 자리이기도 하다.
+    <div className="absolute w-[110px] overflow-visible" style={{ left, top }} data-node-id={node.id}>
+      <button
+        type="button"
+        onClick={() => onSelectStory(node.id)}
+        // story #2354 AC6 — 패널을 닫아도 selected는 유지된다("누른 노드가 선택된 채로
+        // 남는다"). selected(패널 대상)와 isDropHover(잇기 대상 후보)는 뜻이 다르지만 같은
+        // 시각 신호(ring-brand)를 써도 안전하다 — 잇기 진행 중엔 패널이 안 열려 있으므로
+        // 두 상태가 동시에 참이 되는 경우가 없다.
+        className={`focus-inset w-full cursor-pointer rounded border border-l-[3px] border-border bg-card px-1.5 py-1 text-left text-[11px] shadow-sm hover:border-info/60 ${nodeToneClass(node)} ${dimmed ? 'opacity-50' : ''} ${selected || isDropHover ? 'ring-2 ring-brand ring-offset-1 ring-offset-background' : ''} ${isJustLinked ? 'ring-2 ring-success ring-offset-1 ring-offset-background' : ''}`}
+      >
+        <div className="flex items-center justify-between gap-1 font-mono text-[9px] text-muted-foreground">
+          <span className="truncate">#{node.storyNumber}</span>
+          <span className="shrink-0">{statusKey ? t(statusKey) : node.status}</span>
+        </div>
+        {/* 대체(확認됨)만 — "옛 노드"에 취소선(유나양 규격). 제안 상태는 절대 취소선을 넣지
+            않는다(computeSupersededNodeIds가 확認 간선만 모으므로 이 자리는 값만 받는다 —
+            "제안이면 안 흐린다"는 판단을 이 컴포넌트가 다시 하지 않는다). */}
+        <div className={`truncate ${superseded ? 'line-through' : ''}`}>{node.title}</div>
+      </button>
+      {/* ⑥ 포트(story #2353, doc `flow-port-slot-spec` ㉠) — 사람이 연결을 «만드는» 유일한
+          손잡이. 상시 보이되 아주 작게(3px, 무채) → 호버/포커스/드래그 원점일 때 커지고
+          색이 붙는다. 호버 전용이면 "있는 줄을 모른다"(AC1) — 그래서 기본 상태도 aria-hidden
+          없이 항상 렌더된다(스크린샷에 항상 잡힌다). 오른쪽 변 «하나만»(AC2) — 방향은
+          «끈 순서»가 정하므로 양쪽에 달지 않는다. */}
+      <button
+        type="button"
+        aria-label={t('portLinkStart', { n: node.storyNumber })}
+        onPointerDown={(e) => onPortPointerDown(e, node.id)}
+        onKeyDown={(e) => onPortKeyDown(e, node.id)}
+        className="focus-inset group absolute -right-2 top-1/2 flex h-4 w-4 -translate-y-1/2 cursor-crosshair items-center justify-center rounded-full"
+      >
+        <span
+          aria-hidden="true"
+          className={`rounded-full transition-all ${isLinkSource ? 'h-[7px] w-[7px] bg-info' : 'h-[3px] w-[3px] bg-muted-foreground group-hover:h-[7px] group-hover:w-[7px] group-hover:bg-info group-focus-visible:h-[7px] group-focus-visible:w-[7px] group-focus-visible:bg-info'}`}
+        />
+      </button>
+    </div>
   );
 }
 
@@ -150,14 +218,22 @@ function FlowEdgeMarkerDefs() {
  * 「67 중 15」와 같은 규율) · ④과거는 개별 카드 없이 건수만(BE `past:{total}` 스키마에
  * items 필드가 아예 없어 "최근 1건 낱개"는 오늘 데이터로 지을 수 없다 — 지어내지 않는다).
  *
- * 포트(⑥)는 «그림»만 서 있다 — 실제 저장 배선은 #2221(부산물형 간선 3종)이 착지한 뒤
- * (PO 정정 2026-07-30, 기존 `dependencies`(계획형)에 쓰면 6주 0건 운명을 물려받는다).
+ * 포트(⑥, story #2353 착지) — 사람이 연결을 «만드는» 유일한 손잡이. doc
+ * `flow-port-slot-spec` 그대로: 상시 보이는 3px 점(드래그 시작) → 놓으면 방향을 되읽는
+ * 확認 다이얼로그 → declared로 바로 생성(estimated 경유 없음, story #2355 BE) → 사람이
+ * 만든 선은 실선(기계 승인 선과 같은 모양, "출처가 아니라 확인 여부"가 축이라는 판정
+ * 그대로). 키보드 동등 경로(AC13)도 같은 상태기계를 탄다 — 포인터/키보드 둘 다
+ * `linkDraft.via`만 다르고 나머지 전이는 같다.
  *
  * `lanes`를 배열로 받는 것은 오늘의 단일-에픽 구조에 이미 «내일의 모양»을 맞춰 두는 것이다
  * (PO 지시 — "한 레인 전용으로 짜지 마시는, 처음부터 레인 배열을 받는 형태로"). 오늘은 이
  * 배열의 길이가 늘 1(펼친 에픽 하나) — 멀티레인 계약이 오면 호출부만 배열을 채워 넘기면 된다.
+ * ⛔포트 드래그 좌표계산은 이 단일-레인 현실에 맞춰 「레인 컨테이너 ref 하나」로 짰다(여러
+ * 레인이 오면 레인별 ref map으로 넓혀야 한다 — 아래 laneContainerRef 참고).
  */
-export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPastBundleLoading, selectedNodeId = null }: FlowMapCanvasProps) {
+export function FlowMapCanvas({
+  lanes, onSelectStory, onTogglePastBundle, isPastBundleLoading, selectedNodeId = null, onCreateLink, onDeleteLink,
+}: FlowMapCanvasProps) {
   const t = useTranslations('flow');
   const maxDepth = Math.max(0, ...lanes.flatMap((l) => Array.from(l.queueNodesByDepth.keys())));
   const canvasWidth = FLOW_MAP_DEPTH0_X + (maxDepth + 1) * FLOW_MAP_GRID_STEP + 20;
@@ -173,6 +249,171 @@ export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPast
   const hasAnyConfirmedRenderedEdge = lanes.some(
     (lane) => hasConfirmedRenderedEdgeLine(lane, NODE_ROW_HEIGHT, NOW_CLUSTER_X, { width: NODE_CARD_WIDTH, height: NODE_CARD_HEIGHT }),
   );
+
+  // story #2353 — 캔버스 가장자리 자동 가로 스크롤(AC3, "41%가 밖이라 없으면 못 잇는다")의
+  // 재료. 이 div가 overflow-x-auto 그 컨테이너다.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  // 오늘 레인은 늘 하나이므로 첫 레인의 컨테이너 하나만 추적(위 docblock 참고) — 포인터
+  // 좌표를 "그 레인 안의 논리 좌표"로 바꾸는 기준점(computeNodePositions와 같은 좌표계).
+  const laneContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const allEdges = useMemo(() => lanes.flatMap((l) => l.edges), [lanes]);
+  const nodesById = useMemo(() => {
+    const map = new Map<string, FlowMapNode>();
+    for (const lane of lanes) {
+      for (const n of lane.nowNodes) map.set(n.id, n);
+      for (const nodes of lane.queueNodesByDepth.values()) for (const n of nodes) map.set(n.id, n);
+      for (const n of lane.pastNodes) map.set(n.id, n);
+    }
+    return map;
+  }, [lanes]);
+  // 드래그 가능한(=화면에 실제로 카드로 그려진) 노드 id — 키보드 순회(AC13)의 모집단.
+  // Map 삽입 순서 = now→queue(depth순)→past 렌더 순서 그대로라 화면 순서와 일치한다.
+  const draggableNodeIds = useMemo(() => Array.from(nodesById.keys()), [nodesById]);
+
+  const [linkDraft, setLinkDraft] = useState<LinkDraft>({ phase: 'idle' });
+  const [justLinkedNodeId, setJustLinkedNodeId] = useState<string | null>(null);
+  const [undoTarget, setUndoTarget] = useState<{ candidateId: string; fromNodeId: string; toNodeId: string; declaredBy: string | null; declaredAt: string | null } | null>(null);
+  const [undoDeleteError, setUndoDeleteError] = useState<string | null>(null);
+  const [undoDeleting, setUndoDeleting] = useState(false);
+
+  const resetLinkDraft = useCallback(() => setLinkDraft({ phase: 'idle' }), []);
+
+  const handlePortPointerDown = useCallback((e: React.PointerEvent, sourceId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setLinkDraft({ phase: 'linking', sourceId, via: 'pointer', pointerClientX: e.clientX, pointerClientY: e.clientY, hoverTargetId: null });
+  }, []);
+
+  // story #2353 AC13 — 포트가 button이라 포커스가 선다(노드 카드가 이미 button이라 그
+  // 패턴을 그대로 잇는다). Enter=잇기 시작 · 화살표/Tab=대상 이동(놓을 수 있는 것만) ·
+  // Enter=놓기 · Esc=취소. 드래그로 되는 일과 «같은 결과»에 닿는다 — 놓으면 똑같이
+  // 'confirming' phase로 전이해 같은 확認 다이얼로그를 연다(두 벌이 아니다).
+  const handlePortKeyDown = useCallback((e: React.KeyboardEvent, sourceId: string) => {
+    if (linkDraft.phase === 'idle') {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      const validTargets = draggableNodeIds.filter((id) => isValidPortDropTarget(sourceId, id, allEdges));
+      setLinkDraft({ phase: 'linking', sourceId, via: 'keyboard', pointerClientX: 0, pointerClientY: 0, hoverTargetId: validTargets[0] ?? null });
+      return;
+    }
+    if (linkDraft.phase !== 'linking' || linkDraft.via !== 'keyboard' || linkDraft.sourceId !== sourceId) return;
+    const validTargets = draggableNodeIds.filter((id) => isValidPortDropTarget(sourceId, id, allEdges));
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      resetLinkDraft();
+      return;
+    }
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || (e.key === 'Tab' && !e.shiftKey)) {
+      e.preventDefault();
+      const idx = linkDraft.hoverTargetId ? validTargets.indexOf(linkDraft.hoverTargetId) : -1;
+      const next = validTargets[(idx + 1 + validTargets.length) % Math.max(1, validTargets.length)] ?? null;
+      setLinkDraft({ ...linkDraft, hoverTargetId: next });
+      return;
+    }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || (e.key === 'Tab' && e.shiftKey)) {
+      e.preventDefault();
+      const idx = linkDraft.hoverTargetId ? validTargets.indexOf(linkDraft.hoverTargetId) : 0;
+      const next = validTargets[(idx - 1 + validTargets.length) % Math.max(1, validTargets.length)] ?? null;
+      setLinkDraft({ ...linkDraft, hoverTargetId: next });
+      return;
+    }
+    if (e.key === 'Enter' && linkDraft.hoverTargetId) {
+      e.preventDefault();
+      setLinkDraft({ phase: 'confirming', sourceId, targetId: linkDraft.hoverTargetId });
+    }
+  }, [linkDraft, draggableNodeIds, allEdges, resetLinkDraft]);
+
+  // 포인터 드래그 진행 중 — 문서 전체에서 이동/놓기를 받는다(포트를 벗어나도 계속 추적).
+  // isPointerLinking을 밖에서 계산하는 이유 — deps 배열은 useEffect 콜백 밖의 별도 표현식이라
+  // 콜백 안의 `if (linkDraft.phase !== 'linking') return` 좁히기가 거기까지 안 미친다(TS가
+  // `linkDraft.via`를 유니언 전체에 대해 확인해 컴파일 에러를 낸다) — boolean으로 미리 접어
+  // 이 문제 자체를 없앤다.
+  const isPointerLinking = linkDraft.phase === 'linking' && linkDraft.via === 'pointer';
+  useEffect(() => {
+    if (!isPointerLinking) return undefined;
+
+    const AUTO_SCROLL_EDGE_PX = 48;
+    const AUTO_SCROLL_SPEED_PX = 14;
+
+    const onMove = (e: PointerEvent) => {
+      setLinkDraft((prev) => (prev.phase === 'linking' ? { ...prev, pointerClientX: e.clientX, pointerClientY: e.clientY } : prev));
+
+      // AC3 — 캔버스 가장자리 자동 가로 스크롤(레이아웃은 고정, 스크롤 위치만 움직인다).
+      const scrollEl = scrollRef.current;
+      if (scrollEl) {
+        const rect = scrollEl.getBoundingClientRect();
+        if (e.clientX > rect.right - AUTO_SCROLL_EDGE_PX) scrollEl.scrollLeft += AUTO_SCROLL_SPEED_PX;
+        else if (e.clientX < rect.left + AUTO_SCROLL_EDGE_PX) scrollEl.scrollLeft -= AUTO_SCROLL_SPEED_PX;
+      }
+
+      const hoverEl = (e.target as Element | null)?.ownerDocument
+        ?.elementFromPoint(e.clientX, e.clientY)
+        ?.closest('[data-node-id]');
+      const hoverId = hoverEl?.getAttribute('data-node-id') ?? null;
+      setLinkDraft((prev) => (prev.phase === 'linking' ? { ...prev, hoverTargetId: hoverId } : prev));
+    };
+
+    const onUp = (e: PointerEvent) => {
+      const dropEl = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-node-id]');
+      const targetId = dropEl?.getAttribute('data-node-id') ?? null;
+      setLinkDraft((prev) => {
+        if (prev.phase !== 'linking') return prev;
+        if (targetId && isValidPortDropTarget(prev.sourceId, targetId, allEdges)) {
+          return { phase: 'confirming', sourceId: prev.sourceId, targetId };
+        }
+        return { phase: 'idle' };
+      });
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- allEdges 변경 중 드래그가 이어지는 흔치 않은 경우까지 재구독할 필요 없다(놓는 순간의 최신 allEdges가 필요하면 closure가 이미 최신 렌더의 값을 잡는다).
+  }, [isPointerLinking]);
+
+  const handleConfirmLink = useCallback((relationKind: PortLinkKind | null) => {
+    if (linkDraft.phase !== 'confirming') return;
+    const { sourceId, targetId } = linkDraft;
+    setLinkDraft({ phase: 'submitting', sourceId, targetId });
+    void (async () => {
+      // 방향 매핑(followed/superseded는 API 호출 방향이 드래그 방향과 반대)은 flow-port-linking.ts
+      // 한 곳에서만 계산한다 — 여기서 다시 안 짠다.
+      const { resolveDeclareLinkCall } = await import('./flow-port-linking');
+      const call = resolveDeclareLinkCall(sourceId, targetId, relationKind);
+      const result = await onCreateLink(call);
+      if (result.ok) {
+        setJustLinkedNodeId(targetId);
+        setTimeout(() => setJustLinkedNodeId(null), 2500);
+        resetLinkDraft();
+      } else {
+        setLinkDraft({ phase: 'error', sourceId, targetId, message: result.error });
+      }
+    })();
+  }, [linkDraft, onCreateLink, resetLinkDraft]);
+
+  const handleUndoDelete = useCallback(() => {
+    if (!undoTarget) return;
+    setUndoDeleting(true);
+    setUndoDeleteError(null);
+    void onDeleteLink(undoTarget.candidateId, undoTarget.fromNodeId).then((result) => {
+      setUndoDeleting(false);
+      if (result.ok) {
+        setUndoTarget(null);
+      } else {
+        setUndoDeleteError(result.error);
+      }
+    });
+  }, [undoTarget, onDeleteLink]);
+
+  // AC3 — 잇기가 진행 중일 때만 소스/호버/무효 판정을 계산한다(그 외엔 전부 무해한 idle 값).
+  const linkSourceIdForDimming = linkDraft.phase === 'linking' ? linkDraft.sourceId : null;
+  const linkHoverTargetId = linkDraft.phase === 'linking' ? linkDraft.hoverTargetId : null;
+  const linkSourceIdForBadge = linkDraft.phase === 'linking' || linkDraft.phase === 'confirming'
+    || linkDraft.phase === 'submitting' || linkDraft.phase === 'error' ? linkDraft.sourceId : null;
 
   return (
     <div className="overflow-hidden rounded-md border border-border bg-card">
@@ -197,9 +438,9 @@ export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPast
         </div>
       </div>
 
-      <div className="focus-inset overflow-x-auto">
+      <div ref={scrollRef} className="focus-inset overflow-x-auto">
         <div className="relative" style={{ width: Math.max(canvasWidth, 400) }}>
-          {lanes.map((lane) => {
+          {lanes.map((lane, laneIndex) => {
             const height = computeLaneHeight(lane, NODE_ROW_HEIGHT, LANE_MIN_HEIGHT);
             const supersededIds = computeSupersededNodeIds(lane.edges);
             return (
@@ -207,7 +448,7 @@ export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPast
                 <div className="w-[150px] shrink-0 border-r border-border px-2 py-1.5">
                   <p className="truncate text-[11px] font-semibold text-foreground">{lane.title}</p>
                 </div>
-                <div className="relative min-w-0 flex-1">
+                <div ref={laneIndex === 0 ? laneContainerRef : undefined} className="relative min-w-0 flex-1">
                   {/* ②「지금」 세로선 — PO 정정(2026-07-30): 두께·색·불투명도는 통합 골격
                       목업 `63b240a4`(정본) 실측 그대로(2px · foreground · opacity .85) —
                       기존 값(1px · info · .5)은 `be8709a4`(②영역 내부 좌표세부 판) 것이었던
@@ -253,18 +494,47 @@ export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPast
                           const style = edgeKindStyle(group.uniformKind);
                           const midX = (x1 + x2) / 2;
                           const midY = (y1 + y2) / 2;
+                          // story #2353(AC7·AC8) — 사람이 만든(candidateId 있는) 단일 간선만
+                          // 클릭해서 되돌릴 수 있다. 얇은 실선은 클릭하기 어려우니 투명한
+                          // 굵은 히트라인을 겹쳐 클릭 영역을 넓힌다(눈에 보이는 선은 그대로).
+                          // 되돌리기 DELETE는 «실재하는 story id»를 접근권한 앵커로 보내야
+                          // 하는데(위 onDeleteLink 문서 참고), 과거 묶음 카드로 접힌 쪽은
+                          // 어느 개별 story였는지 이 레이어에선 이미 잃었다(PAST_BUNDLE_NODE_ID로
+                          // 대체됨, deriveFlowMapLane) — 그런 간선은 되돌리기 대상에서 뺀다
+                          // (묶음을 펼치면 개별 좌표가 생기며 이 조건이 자연히 풀린다).
+                          const isUndoable = Boolean(group.candidateId)
+                            && group.fromNodeId !== PAST_BUNDLE_NODE_ID && group.toNodeId !== PAST_BUNDLE_NODE_ID;
                           return (
                             <g key={`${group.fromNodeId}-${group.toNodeId}`}>
+                              {isUndoable ? (
+                                <line
+                                  aria-hidden="true"
+                                  x1={x1} y1={y1} x2={x2} y2={y2}
+                                  stroke="transparent"
+                                  strokeWidth={14}
+                                  style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+                                  onClick={() => setUndoTarget({
+                                    candidateId: group.candidateId!, fromNodeId: group.fromNodeId, toNodeId: group.toNodeId,
+                                    declaredBy: group.declaredBy ?? null, declaredAt: group.declaredAt ?? null,
+                                  })}
+                                />
+                              ) : null}
                               <line
                                 data-edge-kind={group.uniformKind === 'mixed' ? 'mixed' : (group.uniformKind ?? 'unknown')}
                                 data-edge-confirmed={group.allConfirmed}
                                 data-edge-count={group.count}
+                                data-edge-candidate-id={group.candidateId}
                                 x1={x1} y1={y1} x2={x2} y2={y2}
                                 stroke={style.color}
                                 strokeWidth={edgeGroupStrokeWidth(group.count)}
                                 strokeDasharray={group.allConfirmed ? undefined : '4 3'}
                                 markerEnd={style.markerEnd}
                                 markerStart={style.markerStart}
+                                style={isUndoable ? { pointerEvents: 'auto', cursor: 'pointer' } : undefined}
+                                onClick={isUndoable ? () => setUndoTarget({
+                                  candidateId: group.candidateId!, fromNodeId: group.fromNodeId, toNodeId: group.toNodeId,
+                                  declaredBy: group.declaredBy ?? null, declaredAt: group.declaredAt ?? null,
+                                }) : undefined}
                               />
                               {group.count > 1 ? (
                                 <text
@@ -282,6 +552,36 @@ export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPast
                       })()}
                     </svg>
                   ) : null}
+
+                  {/* story #2353(AC3) — 손끝을 따라오는 점선(㉡ "아직 확定 아니므로"). 오늘의
+                      단일-레인 현실을 그대로 반영해 첫 레인에서만 그린다(laneContainerRef와
+                      같은 사정, 위 컴포넌트 docblock 참고). */}
+                  {laneIndex === 0 && linkDraft.phase === 'linking' && linkDraft.sourceId ? (() => {
+                    const positions = computeNodePositions(lane, NODE_ROW_HEIGHT, NOW_CLUSTER_X);
+                    const from = positions.get(linkDraft.sourceId);
+                    if (!from) return null;
+                    const x1 = from.left + NODE_CARD_WIDTH;
+                    const y1 = from.top + NODE_CARD_HEIGHT / 2;
+                    let x2: number; let y2: number;
+                    if (linkDraft.hoverTargetId) {
+                      // 키보드/포인터 둘 다 — 후보 위에 있으면 그 카드 왼쪽 가장자리로 스냅.
+                      const to = positions.get(linkDraft.hoverTargetId);
+                      if (!to) return null;
+                      x2 = to.left;
+                      y2 = to.top + NODE_CARD_HEIGHT / 2;
+                    } else if (linkDraft.via === 'pointer' && laneContainerRef.current) {
+                      const rect = laneContainerRef.current.getBoundingClientRect();
+                      x2 = linkDraft.pointerClientX - rect.left;
+                      y2 = linkDraft.pointerClientY - rect.top;
+                    } else {
+                      return null; // 키보드 잇기인데 아직 후보가 없다(놓을 곳이 없는 경우) — 그릴 끝점이 없다.
+                    }
+                    return (
+                      <svg aria-hidden="true" className="pointer-events-none absolute inset-0" width="100%" height="100%">
+                        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="var(--info)" strokeWidth={1.6} strokeDasharray="4 3" />
+                      </svg>
+                    );
+                  })() : null}
 
                   {lane.pastTotal === 0 && lane.nowNodes.length === 0 && lane.queueNodesByDepth.size === 0 ? (
                     <p className="absolute left-3 top-2 text-[11px] text-muted-foreground">{t('flowMapLaneEmpty')}</p>
@@ -348,11 +648,31 @@ export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPast
                       superseded={supersededIds.has(node.id)}
                       selected={node.id === selectedNodeId}
                       onSelectStory={onSelectStory}
+                      isLinkSource={linkSourceIdForBadge === node.id}
+                      isInvalidDropTarget={linkSourceIdForDimming !== null && !isValidPortDropTarget(linkSourceIdForDimming, node.id, allEdges)}
+                      isDropHover={linkHoverTargetId === node.id}
+                      isJustLinked={justLinkedNodeId === node.id}
+                      onPortPointerDown={handlePortPointerDown}
+                      onPortKeyDown={handlePortKeyDown}
                     />
                   ))}
 
                   {lane.nowNodes.map((node, i) => (
-                    <FlowMapNodeCard key={node.id} node={node} left={NOW_CLUSTER_X} top={4 + i * NODE_ROW_HEIGHT} superseded={supersededIds.has(node.id)} selected={node.id === selectedNodeId} onSelectStory={onSelectStory} />
+                    <FlowMapNodeCard
+                      key={node.id}
+                      node={node}
+                      left={NOW_CLUSTER_X}
+                      top={4 + i * NODE_ROW_HEIGHT}
+                      superseded={supersededIds.has(node.id)}
+                      selected={node.id === selectedNodeId}
+                      onSelectStory={onSelectStory}
+                      isLinkSource={linkSourceIdForBadge === node.id}
+                      isInvalidDropTarget={linkSourceIdForDimming !== null && !isValidPortDropTarget(linkSourceIdForDimming, node.id, allEdges)}
+                      isDropHover={linkHoverTargetId === node.id}
+                      isJustLinked={justLinkedNodeId === node.id}
+                      onPortPointerDown={handlePortPointerDown}
+                      onPortKeyDown={handlePortKeyDown}
+                    />
                   ))}
 
                   {/* ①깊이 좌표 — x = FLOW_MAP_DEPTH0_X + depth × FLOW_MAP_GRID_STEP. depth는
@@ -363,7 +683,21 @@ export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPast
                     return (
                       <div key={depth}>
                         {nodes.map((node, i) => (
-                          <FlowMapNodeCard key={node.id} node={node} left={x} top={4 + i * NODE_ROW_HEIGHT} superseded={supersededIds.has(node.id)} selected={node.id === selectedNodeId} onSelectStory={onSelectStory} />
+                          <FlowMapNodeCard
+                            key={node.id}
+                            node={node}
+                            left={x}
+                            top={4 + i * NODE_ROW_HEIGHT}
+                            superseded={supersededIds.has(node.id)}
+                            selected={node.id === selectedNodeId}
+                            onSelectStory={onSelectStory}
+                            isLinkSource={linkSourceIdForBadge === node.id}
+                            isInvalidDropTarget={linkSourceIdForDimming !== null && !isValidPortDropTarget(linkSourceIdForDimming, node.id, allEdges)}
+                            isDropHover={linkHoverTargetId === node.id}
+                            isJustLinked={justLinkedNodeId === node.id}
+                            onPortPointerDown={handlePortPointerDown}
+                            onPortKeyDown={handlePortKeyDown}
+                          />
                         ))}
                         {/* ③「+N건」 더보기 카드(판C) — 잘린 수를 정직하게 보인다. "숨김"이
                             아니라 "있다는 걸 보여주며 접는 것"(오늘 「67 중 15」와 같은 규율). */}
@@ -391,11 +725,16 @@ export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPast
                       한 줄로 쪼개져 세로로 줄바꿈됐다(실측: computed width 13px). 명시적으로
                       한 줄 강제. */}
                   {shouldShowNoDeeperReason(lane) ? (
+                    // story #2353(AC9, doc ㉤) — 「아직 없습니다」(사실 진술)와 슬롯(초대)은
+                    // 뜻이 다르므로 같은 것으로 만들지 않되, 같은 자리에서 글만 바뀐다: 평소엔
+                    // 이 사실 문장, 잇기가 진행 중이면 "여기에 놓으면 다음이 됩니다"로 — 슬롯
+                    // 자체는 상시 있는 빈 상자가 아니라 «끌 때만» 나타나는 것이라 이 조건부
+                    // 문구(shouldShowNoDeeperReason)에 얹는다(새 상시 UI를 만들지 않는다).
                     <p
                       className="absolute whitespace-nowrap font-mono text-[9px] text-brand"
                       style={{ left: FLOW_MAP_DEPTH0_X + FLOW_MAP_GRID_STEP + 12, top: height / 2 - 6 }}
                     >
-                      {t('flowMapNoDeeperReason')}
+                      {linkDraft.phase === 'linking' ? t('flowMapSlotDragHint') : t('flowMapNoDeeperReason')}
                     </p>
                   ) : null}
                 </div>
@@ -424,6 +763,73 @@ export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPast
           {t('edgeLegendMachineFound')}
           {hasAnyConfirmedRenderedEdge ? null : ` — ${t('edgeLegendNoneConfirmedYet')}`}
         </div>
+      ) : null}
+
+      {/* story #2353(AC4·AC5·AC6·AC16, doc ㉢) — 놓으면 뜨는 확認. "이어졌습니까?"를 다시
+          안 묻는다(놓는 행위 자체가 그 답) — 묻는 건 «종류»뿐이다. */}
+      {(linkDraft.phase === 'confirming' || linkDraft.phase === 'submitting') ? (() => {
+        const fromNode = nodesById.get(linkDraft.sourceId);
+        const toNode = nodesById.get(linkDraft.targetId);
+        if (!fromNode || !toNode) return null;
+        const submitting = linkDraft.phase === 'submitting';
+        return (
+          <Dialog open onOpenChange={(open) => { if (!open && !submitting) resetLinkDraft(); }}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>{t('portConfirmSentence', { fromNumber: fromNode.storyNumber, toNumber: toNode.storyNumber })}</DialogTitle>
+                <DialogDescription>{fromNode.title} → {toNode.title}</DialogDescription>
+              </DialogHeader>
+              <div className="flex flex-col gap-1.5">
+                {PORT_LINK_KINDS.map((kind) => (
+                  <Button key={kind} type="button" variant="outline" disabled={submitting} onClick={() => handleConfirmLink(kind)}>
+                    {t(`portLinkKind_${kind}`)}
+                  </Button>
+                ))}
+                <Button type="button" variant="ghost" disabled={submitting} onClick={() => handleConfirmLink(null)}>
+                  {t('portLinkKindLater')}
+                </Button>
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="ghost" disabled={submitting} onClick={resetLinkDraft}>
+                  {t('portLinkCancel')}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        );
+      })() : null}
+
+      {/* story #2353(AC15) — 실패는 토스트로 흘려보내지 않는다(㉦-2, "그 자리에 남는다") —
+          여기 고정 배너가 그 "자리"다. message는 서버 원문 그대로(진단을 새로 안 짓는다). */}
+      {linkDraft.phase === 'error' ? (
+        <div role="alert" className="flex items-center justify-between gap-2 border-t border-destructive/30 bg-destructive/10 px-3 py-2 text-[11px] text-destructive">
+          <span>{linkDraft.message}</span>
+          <button type="button" onClick={resetLinkDraft} className="shrink-0 underline">{t('portLinkErrorDismiss')}</button>
+        </div>
+      ) : null}
+
+      {/* story #2353(AC7·AC8) — 되돌리기는 «그 선 자체가 진입점»이다(토스트 금지, ㉣). 「누가
+          언제 만들었는가」는 지워지지 않는 속성이라 여기 그대로 보인다. */}
+      {undoTarget ? (
+        <Dialog open onOpenChange={(open) => { if (!open) { setUndoTarget(null); setUndoDeleteError(null); } }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t('portUndoTitle')}</DialogTitle>
+              <DialogDescription>
+                {undoTarget.declaredAt ? t('portUndoSignature', { at: new Date(undoTarget.declaredAt).toLocaleString() }) : t('portUndoSignatureUnknown')}
+              </DialogDescription>
+            </DialogHeader>
+            {undoDeleteError ? <p role="alert" className="text-[11px] text-destructive">{undoDeleteError}</p> : null}
+            <DialogFooter>
+              <Button type="button" variant="ghost" disabled={undoDeleting} onClick={() => setUndoTarget(null)}>
+                {t('portUndoKeep')}
+              </Button>
+              <Button type="button" variant="destructive" disabled={undoDeleting} onClick={handleUndoDelete}>
+                {t('portUndoDelete')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       ) : null}
     </div>
   );

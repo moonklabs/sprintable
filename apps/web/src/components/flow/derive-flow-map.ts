@@ -35,6 +35,14 @@ export interface FlowMapEdge {
    * (#2223 본문 "자동 확定 금지" 원칙). 확認 여부와 무관하게 종은 가질 수 있다(예: 확認된
    * "낳음"도 있고 제안 상태의 "낳음"도 있다) — 두 축은 서로를 제약하지 않는다. */
   confirmed: boolean;
+  /** story #2353(AC7·AC8) — 되돌리기(`DELETE .../reference-candidates/{id}`)의 재료.
+   * reference-candidate 표에서 온 간선만 갖는다(계획형 dependencies는 다른 표라 없음 —
+   * 그쪽은 되돌릴 UI가 아직 이 스토리 범위 밖이다). */
+  candidateId?: string;
+  /** 「누가」— 지워지지 않는 서명(AC8). estimated(미확認) 간선은 항상 null. */
+  declaredBy?: string | null;
+  /** 「언제」 — ISO 문자열, declaredBy와 같은 사정. */
+  declaredAt?: string | null;
 }
 
 /** `GET /api/dependencies/graph` 원시 응답 엣지 하나 — `backend/app/services/dependency_graph.py
@@ -83,6 +91,10 @@ export interface RawReferenceCandidate {
   target_id: string;
   relation_kind: 'spawned' | 'cited_as_evidence' | 'similar_case' | 'followed' | 'explicitly_unrelated' | 'superseded' | null;
   status: 'estimated' | 'declared';
+  /** story #2353(AC7·AC8) — 되돌리기 팝오버의 "누가·언제" 재료. BE는 이미 낸다(goals.py/
+   * stories.py의 GET .../reference-candidates 둘 다) — FE가 지금까지 안 읽었을 뿐이다. */
+  declared_by?: string | null;
+  declared_at?: string | null;
 }
 
 /** 오르테가군 확定(2026-07-30, #2223 판정) — 6종 중 «시간 방향이 있는» 넷만 간선으로 그린다.
@@ -104,14 +116,18 @@ export function parseReferenceCandidateEdges(raw: RawReferenceCandidate[]): Flow
   const edges: FlowMapEdge[] = [];
   for (const c of raw) {
     const confirmed = c.status === 'declared';
+    // story #2353(AC7·AC8) — candidateId/declaredBy/declaredAt은 방향 뒤집기와 무관하게
+    // 그 candidate 행 자체의 속성이라 항상 c.id/c.declared_by/c.declared_at 그대로 싣는다
+    // (fromNodeId/toNodeId만 종류별로 뒤집힌다, 위 docblock).
+    const signature = { candidateId: c.id, declaredBy: c.declared_by ?? null, declaredAt: c.declared_at ?? null };
     if (c.relation_kind === 'spawned') {
-      edges.push({ fromNodeId: c.source_id, toNodeId: c.target_id, kind: 'spawn', confirmed });
+      edges.push({ fromNodeId: c.source_id, toNodeId: c.target_id, kind: 'spawn', confirmed, ...signature });
     } else if (c.relation_kind === 'followed') {
-      edges.push({ fromNodeId: c.target_id, toNodeId: c.source_id, kind: 'then', confirmed });
+      edges.push({ fromNodeId: c.target_id, toNodeId: c.source_id, kind: 'then', confirmed, ...signature });
     } else if (c.relation_kind === 'superseded') {
-      edges.push({ fromNodeId: c.target_id, toNodeId: c.source_id, kind: 'supersede', confirmed });
+      edges.push({ fromNodeId: c.target_id, toNodeId: c.source_id, kind: 'supersede', confirmed, ...signature });
     } else if (c.relation_kind === null) {
-      edges.push({ fromNodeId: c.source_id, toNodeId: c.target_id, kind: null, confirmed });
+      edges.push({ fromNodeId: c.source_id, toNodeId: c.target_id, kind: null, confirmed, ...signature });
     }
     // cited_as_evidence · similar_case · explicitly_unrelated — 의도적으로 드롭(위 docblock).
   }
@@ -487,6 +503,12 @@ export interface FlowMapEdgeGroup {
   /** 그룹 내 «전부»가 확認일 때만 실선 — 하나라도 제안이면 점선(제안 하나를 확定인 척
    * 그리지 않는다, 오늘 세션 전체의 "제안을 화면이 대신 확定하지 않는다" 규율 그대로). */
   allConfirmed: boolean;
+  /** story #2353(AC7·AC8) — 되돌리기 팝오버의 재료. count===1(겹친 간선이 없는 단일 관계)
+   * 일 때만 채운다 — 겹친 그룹(count>1)은 "이 선 하나"가 어느 candidate인지 화면이 대신
+   * 고를 수 없어(묶음 카드 뒤 여러 과거 스토리가 겹친 경우 등) 되돌리기 대상에서 뺀다. */
+  candidateId?: string;
+  declaredBy?: string | null;
+  declaredAt?: string | null;
 }
 
 /** 같은 (from, to) 쌍으로 향하는 간선을 하나의 시각 단위로 묶는다 — 묶음 카드 하나로 여러
@@ -502,12 +524,16 @@ export function groupEdgesByEndpoints(edges: FlowMapEdge[]): FlowMapEdgeGroup[] 
   }
   return Array.from(groups.values()).map((group) => {
     const kinds = new Set(group.map((e) => e.kind));
+    const solo = group.length === 1 ? group[0]! : null;
     return {
       fromNodeId: group[0]!.fromNodeId,
       toNodeId: group[0]!.toNodeId,
       count: group.length,
       uniformKind: kinds.size === 1 ? group[0]!.kind : 'mixed',
       allConfirmed: group.every((e) => e.confirmed),
+      candidateId: solo?.candidateId,
+      declaredBy: solo?.declaredBy,
+      declaredAt: solo?.declaredAt,
     };
   });
 }

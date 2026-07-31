@@ -7,7 +7,8 @@ import {
   deriveFlowMapLane, parseDependencyGraphEdges, parseReferenceCandidateEdges,
   type FlowMapEdge, type FlowMapLane, type RawDependencyEdge, type RawReferenceCandidate,
 } from './derive-flow-map';
-import { FlowMapCanvas } from './flow-map-canvas';
+import { FlowMapCanvas, type CreateLinkResult, type DeleteLinkResult } from './flow-map-canvas';
+import { declareResponseToEdge } from './flow-port-linking';
 import { parseCursorMeta } from '@/lib/pagination';
 
 interface FlowEpicNodesProps {
@@ -160,6 +161,49 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory, sel
       .finally(() => setIsPastBundleLoading(false));
   }, [epicId, pastItems.length]);
 
+  // story #2353(AC14) — 낙관적 업데이트 금지. 서버가 201/200을 준 «뒤»에만 edges를 갱신한다
+  // (FlowMapCanvas는 이 state.edges를 직접 그리므로, 여기서 안 바꾸면 화면도 안 바뀐다 —
+  // "서버가 받은 뒤에 선이 선다"가 자연히 성립하는 자리).
+  const handleCreateLink = useCallback(async (params: { apiSourceId: string; targetId: string; relationKind: string | null }): Promise<CreateLinkResult> => {
+    try {
+      const res = await fetch(`/api/stories/${params.apiSourceId}/reference-candidates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_id: params.targetId, relation_kind: params.relationKind }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        // AC15 — 서버가 준 원문 그대로. 새로 진단 문장을 짓지 않는다.
+        return { ok: false, error: typeof json?.detail === 'string' ? json.detail : t('portLinkErrorFallback') };
+      }
+      const edge = declareResponseToEdge(params.apiSourceId, {
+        target_id: json.target_id, relation_kind: json.relation_kind, status: json.status,
+      });
+      setState((prev) => (prev.kind === 'ready' ? { ...prev, edges: [...prev.edges, { ...edge, candidateId: json.id, declaredBy: json.declared_by, declaredAt: json.declared_at }] } : prev));
+      return { ok: true };
+    } catch {
+      return { ok: false, error: t('portLinkErrorFallback') };
+    }
+  }, [t]);
+
+  const handleDeleteLink = useCallback(async (candidateId: string, anchorStoryId: string): Promise<DeleteLinkResult> => {
+    try {
+      // {id}는 BE(stories.py undeclare_story_reference_candidate)가 project access 확認
+      // 앵커로만 쓴다(candidate_id 자체는 org 스코프로 별도 조회) — 그래도 실재하는 story
+      // id여야 한다(repo.get(id) 404 체크가 있다). epicId는 goal(에픽) id라 여기 못 쓴다 —
+      // 호출부(FlowMapCanvas)가 지운 간선의 실제 endpoint story id(anchorStoryId)를 넘긴다.
+      const res = await fetch(`/api/stories/${anchorStoryId}/reference-candidates/${candidateId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        return { ok: false, error: typeof json?.detail === 'string' ? json.detail : t('portLinkErrorFallback') };
+      }
+      setState((prev) => (prev.kind === 'ready' ? { ...prev, edges: prev.edges.filter((e) => e.candidateId !== candidateId) } : prev));
+      return { ok: true };
+    } catch {
+      return { ok: false, error: t('portLinkErrorFallback') };
+    }
+  }, [t]);
+
   const lane: FlowMapLane | null = useMemo(() => {
     if (state.kind !== 'ready') return null;
     return deriveFlowMapLane(
@@ -182,6 +226,8 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory, sel
       onTogglePastBundle={handleTogglePastBundle}
       isPastBundleLoading={isPastBundleLoading}
       selectedNodeId={selectedNodeId}
+      onCreateLink={handleCreateLink}
+      onDeleteLink={handleDeleteLink}
     />
   );
 }
