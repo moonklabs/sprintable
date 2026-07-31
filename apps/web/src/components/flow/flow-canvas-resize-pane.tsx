@@ -13,6 +13,12 @@ interface FlowCanvasResizePaneProps {
   laneMinHeight: number;
   headerHeight: number;
   children: ReactNode;
+  /** story #2369 QA 후속(2026-07-31) — 이 컴포넌트가 «세로로 실제 클리핑하는» 유일한 조상
+   * (`overflow-y-auto` + 고정 `displayHeightPx`)이다. 오프스크린(가로 잘림) 힌트처럼 "세로
+   * 스크롤 위치와 무관하게 항상 보여야 하는" 오버레이는 `children`(FlowMapCanvas, 클리핑
+   * 대상 그 자체 — 세로로는 클리핑 «되는» 쪽이라 자기 기준으로 붙이면 클리핑된 자리에
+   * 갇힌다) 안이 아니라 여기, 이 클리핑 컨테이너 자신의 «보이는 창» 기준으로 그려야 한다. */
+  overlay?: ReactNode;
 }
 
 // reference-candidates.ts의 readRejectedSet/writeRejectedSet과 같은 관례 — localStorage
@@ -55,7 +61,7 @@ function writeStoredLaneCount(value: string | null): void {
  * 보고 싶은가"라는 사용자의 «의도»이므로 매 렌더에서 현재 lanes로 다시 계산해도
  * 의미가 안 바뀐다.
  */
-export function FlowCanvasResizePane({ lanes, nodeRowHeight, laneMinHeight, headerHeight, children }: FlowCanvasResizePaneProps) {
+export function FlowCanvasResizePane({ lanes, nodeRowHeight, laneMinHeight, headerHeight, children, overlay }: FlowCanvasResizePaneProps) {
   const t = useTranslations('flow');
   const [laneCount, setLaneCount] = useState(() => readStoredLaneCount() ?? DEFAULT_LANE_COUNT);
   const [dragHeightPx, setDragHeightPx] = useState<number | null>(null);
@@ -140,8 +146,9 @@ export function FlowCanvasResizePane({ lanes, nodeRowHeight, laneMinHeight, head
 
   return (
     <div>
-      <div data-testid="flow-canvas-resize-pane" className="overflow-y-auto focus-inset" style={{ height: displayHeightPx }}>
+      <div data-testid="flow-canvas-resize-pane" className="relative overflow-y-auto focus-inset" style={{ height: displayHeightPx }}>
         {children}
+        {overlay}
       </div>
       <div className="flex items-center justify-center gap-2 border-t border-border bg-muted/20 py-1">
         <div

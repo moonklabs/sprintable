@@ -118,6 +118,11 @@ export function FlowMultiLaneCanvas({
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [pastItemsByEpic, setPastItemsByEpic] = useState<Map<string, EpicFlowNodeItem[]>>(new Map());
   const [loadingPastBundleEpicIds, setLoadingPastBundleEpicIds] = useState<Set<string>>(new Set());
+  // story #2369 QA 후속(2026-07-31) — FlowMapCanvas가 세는 오프스크린(가로 잘림) 수를 여기로
+  // 끌어올린다. FlowCanvasResizePane이 세로로 «실제 클리핑하는» 유일한 조상이라, 힌트는
+  // FlowMapCanvas 안이 아니라 그 조상의 «보이는 창» 기준(overlay prop)으로 그려야 항상
+  // 보인다(위 FlowCanvasResizePane/FlowMapCanvas 문서 참고).
+  const [offscreenCardCount, setOffscreenCardCount] = useState(0);
 
   const expandGoalIds = useMemo(() => expandGoals.map((g) => g.id).join(','), [expandGoals]);
 
@@ -273,7 +278,26 @@ export function FlowMultiLaneCanvas({
       {/* story #2224 AC18 — pane 높이를 사용자가 지정한다(레인 단위 스냅, 하한 1레인,
           기본=레인 3까지 누적, localStorage 영속, 되돌리기). FlowMapCanvas 자체는 높이를
           모른다 — 이 래퍼가 «몇 레인이 보이는가»만 결정하고 클리핑한다. */}
-      <FlowCanvasResizePane lanes={lanes} nodeRowHeight={NODE_ROW_HEIGHT} laneMinHeight={LANE_MIN_HEIGHT} headerHeight={HEADER_HEIGHT}>
+      <FlowCanvasResizePane
+        lanes={lanes}
+        nodeRowHeight={NODE_ROW_HEIGHT}
+        laneMinHeight={LANE_MIN_HEIGHT}
+        headerHeight={HEADER_HEIGHT}
+        overlay={offscreenCardCount > 0 ? (
+          // story #2369 QA 후속 — flow-map-canvas.tsx의 기존 배지와 «같은 꼴»(pointer-events-none·
+          // 아이콘+굵은 수+설명·같은 클래스). 여기 그리는 이유는 이 div가 FlowCanvasResizePane의
+          // «보이는 창»(overflow-y-auto 조상) 기준으로 붙기 때문 — FlowMapCanvas 안에 있었으면
+          // 세로 전체 콘텐츠 높이 기준이 돼 클리핑 밖(안 보이는 자리)에 갔다.
+          <div
+            data-testid="flow-canvas-offscreen-hint"
+            className="pointer-events-none absolute bottom-1 right-1 z-10 flex items-center gap-1.5 rounded border border-border bg-muted/90 px-2 py-1 text-[11px] text-muted-foreground shadow-sm"
+          >
+            <span aria-hidden="true">▸</span>
+            <b className="text-foreground">{t('flowCanvasOffscreenCount', { n: offscreenCardCount })}</b>
+            <span className="text-foreground">{t('flowCanvasOffscreenReason')}</span>
+          </div>
+        ) : null}
+      >
         <FlowMapCanvas
           lanes={lanes}
           onSelectStory={onSelectStory}
@@ -283,6 +307,7 @@ export function FlowMultiLaneCanvas({
           onCreateLink={handleCreateLink}
           onDeleteLink={handleDeleteLink}
           memberMap={memberMap}
+          onOffscreenCountChange={setOffscreenCardCount}
         />
       </FlowCanvasResizePane>
       {/* 접힘 줄(목업 그대로) — "숨긴 것이 아니라 접은 것입니다". 오늘은 펼치기 인터랙션이

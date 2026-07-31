@@ -270,3 +270,67 @@ describe('FlowMultiLaneCanvas — N개 레인 병렬 fetch', () => {
     expect(createLinkCalls).toHaveLength(0);
   });
 });
+
+// story #2369 QA 후속(2026-07-31, 라이브 실측 — dev-app 1440×900) — merged PR#2753가 AC를
+// 못 채웠다: 오프스크린(가로 잘림) 힌트가 `FlowMapCanvas`(세로 클리핑되는 쪽) 자신의
+// `absolute bottom-1`로 붙어 있어, 그 조상 `FlowCanvasResizePane`(`overflow-y-auto`로
+// 실제 세로 클리핑하는 «보이는 창»)의 전체 콘텐츠 맨 아래(스크롤 1814px 아래)로 가버려
+// 기본 상태에서 화면에 0%였다. 이 테스트는 힌트가 실제 클리핑 컨테이너
+// (`[data-testid="flow-canvas-resize-pane"]`)의 «직계 자식»으로 붙어(그 자신은 클리핑
+// «대상»이 아니라 클리핑하는 쪽이므로 세로 스크롤과 무관하게 항상 보인다) 정확히 하나만
+// 존재하는지 확認한다 — FlowMapCanvas 안에서 또 그려 중복되는 것도 여기서 잡힌다.
+describe('FlowMultiLaneCanvas — story #2369 QA 후속: 오프스크린 힌트가 실제 클리핑 창 기준으로 뜬다', () => {
+  let originalClientWidth: PropertyDescriptor | undefined;
+  let originalScrollWidth: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    originalClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    originalScrollWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth');
+    // depth 0 열의 기본 화면 좌표(FLOW_MAP_DEPTH0_X=402 + LANE_LABEL_WIDTH=150 = 552)보다
+    // 좁은 500으로 둬 depth-0 카드 하나만으로도(멀티 depth·edges 없이) 곧바로 offscreen이
+    // 되도록 한다 — LANE_LABEL_WIDTH 보정이 실제로 적용됐는지까지 같이 잡는 값.
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return 500; } });
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', { configurable: true, get() { return 1000; } });
+  });
+
+  afterEach(() => {
+    if (originalClientWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalClientWidth);
+    if (originalScrollWidth) Object.defineProperty(HTMLElement.prototype, 'scrollWidth', originalScrollWidth);
+  });
+
+  it('renders exactly one offscreen-hint, as a direct child of the resize-pane (the actual vertically-clipping ancestor) — not inside FlowMapCanvas', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/dependencies/graph')) return jsonResponse({ item_type: 'story', nodes: [], edges: [] });
+      if (url.includes('/api/analytics/epic-flow-nodes')) {
+        return jsonResponse({
+          data: {
+            epic_id: 'e1',
+            now: { total: 0, items: [] },
+            upcoming: { total: 1, shown: 1, items: [{ id: 'q1', story_number: 9, title: 'Queued Story', status: 'backlog', assignee_id: null, updated_at: '2026-07-31T00:00:00Z' }] },
+            past: { total: 0 }, blocked_count: 0, last_changed_at: null,
+          },
+        });
+      }
+      if (url.includes('/reference-candidates')) return jsonResponse([]);
+      throw new Error(`unexpected fetch: ${url}`);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <FlowMultiLaneCanvas projectId="p1" expandGoals={[goal({ id: 'e1' })]} foldedCount={0} onSelectStory={() => {}} />,
+      ));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const hints = container.querySelectorAll('[data-testid="flow-canvas-offscreen-hint"]');
+    expect(hints).toHaveLength(1);
+    expect(hints[0]?.textContent).toContain('카드 1장이 화면 밖');
+
+    const resizePane = container.querySelector('[data-testid="flow-canvas-resize-pane"]');
+    expect(resizePane).not.toBeNull();
+    // 직계 자식이어야 한다 — FlowMapCanvas(자식의 자식들) 안이 아니라 클리핑 컨테이너
+    // «자신»의 보이는 창 기준으로 붙어야 세로 스크롤과 무관하게 항상 보인다.
+    expect(Array.from(resizePane!.children)).toContain(hints[0]);
+  });
+});
