@@ -222,7 +222,10 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory }: NextMak
           가로축에도 적용. w-72(좁음) vs flex-1(남는 폭 전부)로 비율을 코드가 아니라 레이아웃이
           말하게 한다. */}
       <div className="flex gap-4">
-        <div className="w-72 shrink-0 space-y-3 overflow-y-auto">
+        {/* focus-inset(story #2062 가드) — overflow-y-auto 스크롤 컨테이너라 포커스 링이
+            잘릴 수 있다. 안에 solid bg-primary 버튼(OrphanStoriesPanel의 [배정])이 있어
+            그쪽엔 focus-outset도 짝으로 붙였다(그 파일 참고). */}
+        <div className="focus-inset w-72 shrink-0 space-y-3 overflow-y-auto">
           <div className="space-y-1.5">
             <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
               {t('nextMakerNeedsNextHeading', { n: headline.needsNextCount })}
