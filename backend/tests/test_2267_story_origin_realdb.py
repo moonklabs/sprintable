@@ -212,11 +212,17 @@ async def test_story_creation_with_origin_leaves_created_from_reference_visible_
         await engine.dispose()
 
 
-# ─── ②AC8 — registry 밖 source_type은 400 ───────────────────────────────────
+# ─── ②registry 밖 source_type — story #2222(AC5)부터 non-fatal로 뒤집힘 ─────
+#
+# ⚠️2026-07-31 수정(story #2222 AC5, 오르테가 확認 — "지금도 도는 결함"): 이 테스트는
+# 원래 "출처 검증 실패 = story 생성 전체 실패(400)"를 정상 동작으로 단정했다. 그런데 story
+# #2222부터 「낳음」 자동부착은 best-effort 부가기능이 됐다 — 자동부착 실패가 story 생성을
+# 막으면 안 된다(AC5). caller가 지금까지 0개라 이 결함이 안 터졌을 뿐, 실제로는 반대로
+# 서 있던 것이 맞았다. SAVEPOINT 격리로 이제 story는 성공(201)하고 참조 행만 안 생긴다.
 
 
 @pytest.mark.anyio
-async def test_story_creation_with_unregistered_origin_type_rejected_400():
+async def test_story_creation_with_unregistered_origin_type_succeeds_without_reference():
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -239,19 +245,39 @@ async def test_story_creation_with_unregistered_origin_type_rejected_400():
                     "origin_id": str(uuid.uuid4()),
                 },
             )
-            assert resp.status_code == 400, resp.text
+            # AC5 — 자동부착 실패가 story 생성 자체를 막지 않는다.
+            assert resp.status_code == 201, resp.text
+            story_id = uuid.UUID(resp.json()["id"])
 
-            # ⛔거절됐으면 스토리 자체도 안 생겨야 한다(부분 실패로 스토리만 남고 출처만
-            # 빠지는 것은 "출처 없음"과 "출처 거절됨"을 구분 못 하게 만든다).
             async with Session() as s:
                 from sqlalchemy import select as sa_select, func
                 from app.models.pm import Story
-                count = (
+                from app.models.reference import Reference
+
+                story_count = (
                     await s.execute(
-                        sa_select(func.count()).select_from(Story).where(Story.org_id == org.id)
+                        sa_select(func.count()).select_from(Story).where(Story.id == story_id)
                     )
                 ).scalar_one()
-                assert count == 0, "출처 검증 실패인데 스토리가 커밋된 채로 남아 있다"
+                assert story_count == 1, "출처 검증 실패로 story 생성 자체가 막혔다(AC5 위반)"
+
+                ref_count = (
+                    await s.execute(
+                        sa_select(func.count()).select_from(Reference).where(
+                            Reference.org_id == org.id, Reference.target_id == story_id,
+                        )
+                    )
+                ).scalar_one()
+                assert ref_count == 0, "잘못된 origin_type인데 참조 행이 생겼다"
+
+                # SAVEPOINT 롤백 뒤에도 세션이 poison되지 않고 이후 정상 write가 도는지 확認
+                # (feedback_savepoint_failopen_session_poison — 실패한 nested tx가 바깥 세션을
+                # 못 쓰게 만드는 재발 클래스).
+                story2 = await s.get(Story, story_id)
+                story2.title = "제목 갱신 — 세션 정상"
+                await s.commit()
+                refreshed = await s.get(Story, story_id)
+                assert refreshed.title == "제목 갱신 — 세션 정상"
         finally:
             await client.aclose()
             app.dependency_overrides.clear()

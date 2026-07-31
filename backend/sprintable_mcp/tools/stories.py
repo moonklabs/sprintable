@@ -31,9 +31,16 @@ class AddStoryInput(SprintableInput):
     # P0-05 후속(doc scope-violation-signal-design §1 확定): 선언 주체 제한 없음 — 에이전트
     # 자기신고 착수시점 파일-경로 글롭 선언(예: ["backend/app/routers/stories.py", "backend/tests/**"]).
     declared_scope_paths: list[str] | None = None
-    # story #2267(C-9): 이 스토리가 무엇에서 만들어졌는지(출처) — 선택. 이 대화(chat_message)
-    # 에서 나왔다면 그 메시지 id를 origin_type="chat_message"·origin_id로 넘긴다. 둘 다
-    # 지정해야 유효 — 하나만 있으면 무시된다(app/schemas/story.py StoryCreate와 동형).
+    # story #2267(C-9)·#2222(「낳음」 자동 부착): 이 스토리가 무엇에서 만들어졌는지(출처).
+    # ⭐호출하는 에이전트가 지금 다른 story/doc/chat_message 맥락 안에서 이 스토리를 만드는
+    # 것이라면(예: 어떤 스토리를 쪼개 후속 작업을 만들 때, 대화 중 나온 할 일을 스토리로
+    # 옮길 때) origin_type("story"|"doc"|"chat_message" 등)·origin_id를 **함께 채워 보낸다**
+    # — 이게 이 제품에서 「낳음」 연결이 손 안 대고 쌓이는 유일한 자동 경로다(#2222). 안
+    # 채우면 그 연결은 영영 안 남는다(사후 소급 없음) — 맥락을 아는 그 순간이 유일한 기회.
+    # 둘 다 지정해야 유효(하나만 있으면 서버가 무시 — app/schemas/story.py StoryCreate와 동형).
+    # origin_type 은 reference_registry의 등록된 타입만 허용(story/doc/epic/task/sprint/
+    # artifact/hypothesis/evidence/chat_message) — 잘못된 값이어도 story 생성 자체는 성공하고
+    # (#2222 AC5), 출처 연결만 조용히 안 남는다.
     origin_type: str | None = None
     origin_id: str | None = None
 
