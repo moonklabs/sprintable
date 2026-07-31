@@ -5,7 +5,9 @@ import {
   countDynamicKeyCalls,
   findSubstringCollisions,
   flattenMessages,
+  GRANDFATHER_BASELINE,
   isNumberAdjacent,
+  pairKey,
   parseKeyUsages,
   parseTranslationBindings,
 } from './verify-no-i18n-phrase-collision';
@@ -191,5 +193,27 @@ describe('AC7 — 실제 저장소의 첫 검거 재현(action-zone.tsx)', () =>
         new Set([c.keyA, c.keyB]).has('dashboard.ccAgentStuck'),
     );
     expect(hit).toBeDefined();
+  });
+});
+
+// CI 안전장치 — grandfather baseline이 실제로 「기존 채무는 안 막고 새 것만 막는다」를
+// 지키는지(모듈 코멘트 "CI 안전장치" 참조). 이게 없으면 이 스토리가 잡은 40건이 이 PR과
+// 다른 모든 PR을 영원히 막는다.
+describe('GRANDFATHER_BASELINE — 기존 채무는 통과, 새 충돌만 막는다', () => {
+  it('실제 첫 검거(ccWaitingGateReason/ccAgentStuck)는 baseline에 있다', () => {
+    expect(GRANDFATHER_BASELINE.has(pairKey('dashboard.ccAgentStuck', 'dashboard.ccWaitingGateReason'))).toBe(
+      true,
+    );
+  });
+
+  it('baseline에 없는 새 쌍은 여전히 진짜 충돌로 판정된다(신규 회귀는 여전히 잡힌다)', () => {
+    const phrases = new Map([
+      ['brandNew.blocked', { value: '막힘', numberAdjacent: false }],
+      ['brandNew.blockedCount', { value: '막힘 신호 · {n}', numberAdjacent: true }],
+    ]);
+    const collisions = findSubstringCollisions(phrases);
+    expect(collisions).toHaveLength(1);
+    const pk = pairKey(collisions[0]!.keyA, collisions[0]!.keyB);
+    expect(GRANDFATHER_BASELINE.has(pk)).toBe(false); // baseline 밖 — main()에서 FAIL로 승격되는 자리
   });
 });
