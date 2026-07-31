@@ -73,7 +73,7 @@ function dispatchPointer(el: Element | Document | Window, type: string, opts: { 
   el.dispatchEvent(ev);
 }
 
-async function renderCanvas(lane: FlowMapLane, overrides: { onCreateLink?: (p: { apiSourceId: string; targetId: string; relationKind: string | null }) => Promise<CreateLinkResult>; onDeleteLink?: (id: string, anchor: string) => Promise<DeleteLinkResult> } = {}) {
+async function renderCanvas(lane: FlowMapLane, overrides: { onCreateLink?: (p: { apiSourceId: string; targetId: string; relationKind: string | null }) => Promise<CreateLinkResult>; onDeleteLink?: (id: string, anchor: string) => Promise<DeleteLinkResult>; selectedNodeId?: string | null } = {}) {
   const onCreateLink = overrides.onCreateLink ?? (async () => ({ ok: true }) as CreateLinkResult);
   const onDeleteLink = overrides.onDeleteLink ?? (async () => ({ ok: true }) as DeleteLinkResult);
   await act(async () => {
@@ -86,6 +86,7 @@ async function renderCanvas(lane: FlowMapLane, overrides: { onCreateLink?: (p: {
         onCreateLink={onCreateLink}
         onDeleteLink={onDeleteLink}
         memberMap={{ 'member-9': { name: '미르코' }, 'member-OTHER': { name: '디디' } }}
+        selectedNodeId={overrides.selectedNodeId ?? null}
       />,
     ));
   });
@@ -182,6 +183,31 @@ describe('FlowMapCanvas — 포인터 드래그 (AC3·AC4)', () => {
 
     const targetSelectButton = container.querySelector('[data-node-id="u1"] button')!;
     expect(targetSelectButton.className).toContain('opacity-50');
+  });
+
+  // 유나 가디언 리뷰(2026-07-31, PR#2725 issuecomment-5139662978, 라이브 실측) — selected
+  // ring은 「패널이 열림」이 아니라 「URL에 ?story=가 있음」이라, 패널을 닫아도(#2354 AC6)
+  // 남는다. 그 상태에서 다른 포트로부터 «그 노드»를 향해 끌면, 무관한 selected ring이
+  // isDropHover ring과 겹쳐 "여기가 놓을 자리"로 오인된다. 재현: A(selectedNodeId)가 이미
+  // 선택된 채, B 포트에서 드래그를 시작하는 것만으로 A의 selected ring이 꺼져야 한다
+  // (isDropHover 판정과 무관하게 — 드래그 시작 자체가 트리거).
+  it('turns OFF the selected ring on ANY node the moment linking starts (AC6\'s "stays selected after close" must not masquerade as a drop target)', async () => {
+    const lane = makeLane({
+      nowNodes: [makeNode({ id: 'a' }), makeNode({ id: 'b' })],
+    });
+    await renderCanvas(lane, { selectedNodeId: 'a' });
+
+    const selectButtonA = container.querySelector('[data-node-id="a"] button')!;
+    expect(selectButtonA.className).toContain('ring-2'); // idle 상태 — selected ring이 보인다.
+
+    const portB = getPort('b');
+    await act(async () => { dispatchPointer(portB, 'pointerdown'); });
+
+    // 잇기가 시작된 순간 A의 selected ring은 꺼져야 한다 — A가 실제로 유효한 드롭 대상이라
+    // isDropHover로 다시 켜질 수 있지만, 그건 호버(마우스가 실제로 A 위에 있음)가 결정할
+    // 일이지 selected 하나만으로 "놓을 자리"처럼 보이면 안 된다. 여기선 호버가 없으므로
+    // (elementFromPoint가 기본 null) A에 어떤 ring도 없어야 한다.
+    expect(selectButtonA.className).not.toContain('ring-2');
   });
 });
 

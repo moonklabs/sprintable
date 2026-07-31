@@ -140,9 +140,15 @@ function FlowMapNodeCard({
         type="button"
         onClick={() => onSelectStory(node.id)}
         // story #2354 AC6 — 패널을 닫아도 selected는 유지된다("누른 노드가 선택된 채로
-        // 남는다"). selected(패널 대상)와 isDropHover(잇기 대상 후보)는 뜻이 다르지만 같은
-        // 시각 신호(ring-brand)를 써도 안전하다 — 잇기 진행 중엔 패널이 안 열려 있으므로
-        // 두 상태가 동시에 참이 되는 경우가 없다.
+        // 남는다"). selected(패널 대상)와 isDropHover(잇기 대상 후보)는 같은 시각 신호
+        // (ring-brand)를 쓴다.
+        // ⛔유나 가디언 리뷰(2026-07-31, PR#2725 issuecomment-5139662978) — 예전 주석은
+        // "잇기 중엔 패널이 안 열려 있어 둘이 동시에 참이 안 된다"고 주장했지만 틀렸다.
+        // selected는 «패널이 열림»이 아니라 «URL에 ?story=가 있음»이고 AC6이 정확히
+        // "닫아도 그 값을 안 지운다"로 만들었다 — A를 눌러 패널을 열고 닫은 뒤 B 포트에서
+        // A로 끌면 selected와 isDropHover가 동시에 참이 된다. 무관한 노드가 "놓을 자리"로
+        // 오인되므로, 이제 호출부(FlowMapCanvas)가 잇기 진행 중(linkDraft.phase !== 'idle')엔
+        // selected 자체를 false로 넘겨 이 컴포넌트에 도달하기 전에 막는다.
         className={`focus-inset w-full cursor-pointer rounded border border-l-[3px] border-border bg-card px-1.5 py-1 text-left text-[11px] shadow-sm hover:border-info/60 ${nodeToneClass(node)} ${dimmed ? 'opacity-50' : ''} ${selected || isDropHover ? 'ring-2 ring-brand ring-offset-1 ring-offset-background' : ''} ${isJustLinked ? 'ring-2 ring-success ring-offset-1 ring-offset-background' : ''}`}
       >
         <div className="flex items-center justify-between gap-1 font-mono text-[9px] text-muted-foreground">
@@ -423,6 +429,15 @@ export function FlowMapCanvas({
   const linkHoverTargetId = linkDraft.phase === 'linking' ? linkDraft.hoverTargetId : null;
   const linkSourceIdForBadge = linkDraft.phase === 'linking' || linkDraft.phase === 'confirming'
     || linkDraft.phase === 'submitting' || linkDraft.phase === 'error' ? linkDraft.sourceId : null;
+  // 유나 가디언 리뷰(2026-07-31, PR#2725 issuecomment-5139662978) — 「잇기 중엔 패널이 안
+  // 열려 있으므로 selected와 isDropHover가 동시에 참이 안 된다」는 주석의 전제가 라이브에서
+  // 깨졌다. selected는 「패널이 열림」이 아니라 「URL에 ?story=가 있음」이고, #2354 AC6이
+  // 정확히 "패널을 닫아도 그 값을 안 지운다"로 만들었다 — 그래서 A를 눌러 패널을 연 뒤
+  // 닫아도 ring은 남고, 그 상태에서 다른 포트로 A를 향해 끌면 selected와 isDropHover가
+  // «동시에 참»이 된다. 끄는 동안 화면이 답할 물음은 "어디에 놓나" 하나뿐인데, 무관한
+  // 노드가 같은 강조를 달고 있으면 그것이 "놓을 자리"로 읽힌다 — 잇기 진행 중(idle이
+  // 아닌 전체 phase)엔 selected ring을 끈다.
+  const isLinkingActive = linkDraft.phase !== 'idle';
 
   return (
     <div className="overflow-hidden rounded-md border border-border bg-card">
@@ -656,7 +671,7 @@ export function FlowMapCanvas({
                       left={PAST_EXPANDED_LEFT}
                       top={PAST_EXPANDED_TOP_START + i * PAST_EXPANDED_ROW_HEIGHT}
                       superseded={supersededIds.has(node.id)}
-                      selected={node.id === selectedNodeId}
+                      selected={!isLinkingActive && node.id === selectedNodeId}
                       onSelectStory={onSelectStory}
                       isLinkSource={linkSourceIdForBadge === node.id}
                       isInvalidDropTarget={linkSourceIdForDimming !== null && !isValidPortDropTarget(linkSourceIdForDimming, node.id, allEdges)}
@@ -674,7 +689,7 @@ export function FlowMapCanvas({
                       left={NOW_CLUSTER_X}
                       top={4 + i * NODE_ROW_HEIGHT}
                       superseded={supersededIds.has(node.id)}
-                      selected={node.id === selectedNodeId}
+                      selected={!isLinkingActive && node.id === selectedNodeId}
                       onSelectStory={onSelectStory}
                       isLinkSource={linkSourceIdForBadge === node.id}
                       isInvalidDropTarget={linkSourceIdForDimming !== null && !isValidPortDropTarget(linkSourceIdForDimming, node.id, allEdges)}
@@ -699,7 +714,7 @@ export function FlowMapCanvas({
                             left={x}
                             top={4 + i * NODE_ROW_HEIGHT}
                             superseded={supersededIds.has(node.id)}
-                            selected={node.id === selectedNodeId}
+                            selected={!isLinkingActive && node.id === selectedNodeId}
                             onSelectStory={onSelectStory}
                             isLinkSource={linkSourceIdForBadge === node.id}
                             isInvalidDropTarget={linkSourceIdForDimming !== null && !isValidPortDropTarget(linkSourceIdForDimming, node.id, allEdges)}
