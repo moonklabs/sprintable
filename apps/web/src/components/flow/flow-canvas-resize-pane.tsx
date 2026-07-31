@@ -147,7 +147,7 @@ export function FlowCanvasResizePane({ lanes, nodeRowHeight, laneMinHeight, head
         <div
           role="slider"
           tabIndex={0}
-          aria-orientation="horizontal"
+          aria-orientation="vertical"
           aria-label={t('canvasResizeHandleLabel')}
           aria-valuenow={clampedLaneCount}
           aria-valuemin={1}
