@@ -53,11 +53,22 @@ async def _session_factory():
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
-def _auth(agent_id: uuid.UUID, org_id: uuid.UUID, *, role: str = "member"):
+def _auth(
+    agent_id: uuid.UUID, org_id: uuid.UUID, *, role: str = "member",
+    stale_project_id: uuid.UUID | None = None,
+):
+    """`stale_project_id`(까심 실측, 2026-07-31) — 토큰 발급 시점에 구워진
+    `app_metadata.project_id`를 실제로 채운다. 이 값이 없으면(기본) old-code 경로도
+    `project_id=None`이 되어 어차피 못 찾아 404가 나므로, "되돌리면 샜을 것"을 재는
+    회귀 테스트가 old/new 양쪽에서 같은 결과를 내는 무판별 테스트가 된다 — 실제
+    공격 시나리오(토큰에 project_id가 채워져 있는 흔한 경우)를 그대로 갖는다."""
     from app.dependencies.auth import AuthContext
+    claims = {"app_metadata": {"org_id": str(org_id), "role": role}}
+    if stale_project_id is not None:
+        claims["app_metadata"]["project_id"] = str(stale_project_id)
     return AuthContext(
         user_id=str(agent_id), email=None,
-        claims={"app_metadata": {"org_id": str(org_id), "role": role}},
+        claims=claims,
         org_id=str(org_id),
     )
 
@@ -623,9 +634,15 @@ async def test_single_update_ambiguous_no_project_id_400_no_mutation():
 
 
 async def test_single_update_cross_project_stale_fallback_would_have_leaked_now_404s():
-    """⭐되돌리기 전 상태 재현 — 되기 前(raw claims fallback)이었다면 project_b agent가
-    project_a rule의 id를 알기만 하면(예: 다른 통로에서 유출) 수정할 수 있었다. 재해소 後엔
-    caller의 default_project_id(project_b)로 스코프되어 project_a 소유 rule에 404가 난다."""
+    """⭐되돌리기 전 상태 재현 — 까심 실측(2026-07-31): 이 시나리오는 토큰에 실제로
+    stale project_id(project_a)가 채워져 있어야만 old/new 코드가 «다른» 결과를 낸다
+    (`_auth()`가 project_id를 안 채우면 old 코드도 project_id=None이 되어 어차피 못
+    찾아 404가 나므로 무판별). caller의 «현재» 스코프는 default_project_id(project_b)
+    이지만 JWT엔 예전 세션의 project_a가 그대로 구워져 있다 — 흔한 stale-token 시나리오.
+
+    OLD 코드(raw claims 폴백) + project_a 구워진 토큰  ⇒ 200·rule_a priority 100→5
+    (실제로 샌다 — 까심이 직접 old 코드로 재현·확定)
+    NEW 코드(재해소, 이 테스트가 지금 검증하는 것)      ⇒ 404·priority 무변경(막힌다)"""
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
@@ -635,7 +652,7 @@ async def test_single_update_cross_project_stale_fallback_would_have_leaked_now_
         async with Session() as s:
             from app.models.member import Member
             member = await s.get(Member, seeded["agent_id"])
-            member.default_project_id = seeded["project_b"]  # caller 스코프 = project_b.
+            member.default_project_id = seeded["project_b"]  # caller «현재» 스코프 = project_b.
             await s.commit()
 
         async with Session() as s:
@@ -644,9 +661,12 @@ async def test_single_update_cross_project_stale_fallback_would_have_leaked_now_
 
             resp = await replace_or_update_rules(
                 request=_request(None),
-                # rule_a는 project_a 소유 — caller는 project_b로 재해소되므로 안 만져진다.
+                # rule_a는 project_a 소유 — caller의 JWT엔 예전 project_a가 구워져 있지만
+                # (stale_project_id) 재해소는 그 값을 안 쓰고 default_project_id로 스코프한다.
                 body={"id": str(rule_a), "priority": 5},
-                auth=_auth(seeded["agent_id"], seeded["org_id"]),
+                auth=_auth(
+                    seeded["agent_id"], seeded["org_id"], stale_project_id=seeded["project_a"],
+                ),
                 repo=AgentRoutingRuleRepository(s),
             )
             assert resp.status_code == 404
