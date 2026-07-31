@@ -528,3 +528,130 @@ async def test_reorder_items_ambiguous_no_project_id_400_no_mutation():
             assert await _rule_priority(s, rule_a) == 100  # 무변경.
     finally:
         await engine.dispose()
+
+
+# ── agent_routing_rules::replace_or_update_rules(단일-룰 update 분기, story #1831 후속) ──
+# 오르테가 실측(2026-07-31) — 이 분기만 §2.2 4단계로 미뤄져 있었다. 위 두 분기(items·
+# reorder-items)와 동일 계약으로 지금 이전한다.
+
+
+async def test_single_update_default_project_id_scopes_correctly_sibling_untouched():
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_two_project_agent(s, default_project_id=None)
+            rule_a = await _seed_rule(s, seeded["org_id"], seeded["project_a"], seeded["agent_id"])
+            rule_b = await _seed_rule(s, seeded["org_id"], seeded["project_b"], seeded["agent_id"])
+
+        async with Session() as s:
+            from app.models.member import Member
+            member = await s.get(Member, seeded["agent_id"])
+            member.default_project_id = seeded["project_a"]
+            await s.commit()
+
+        async with Session() as s:
+            from app.routers.agent_routing_rules import replace_or_update_rules
+            from app.repositories.agent_routing_rule import AgentRoutingRuleRepository
+
+            resp = await replace_or_update_rules(
+                request=_request(None),
+                body={"id": str(rule_a), "priority": 5},
+                auth=_auth(seeded["agent_id"], seeded["org_id"]),
+                repo=AgentRoutingRuleRepository(s),
+            )
+            assert resp.status_code == 200
+            await s.commit()
+
+        async with Session() as s:
+            assert await _rule_priority(s, rule_a) == 5
+            assert await _rule_priority(s, rule_b) == 100  # 형제 project 무변경.
+    finally:
+        await engine.dispose()
+
+
+async def test_single_update_header_scopes_correctly_sibling_untouched():
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_two_project_agent(s)
+            rule_a = await _seed_rule(s, seeded["org_id"], seeded["project_a"], seeded["agent_id"])
+            rule_b = await _seed_rule(s, seeded["org_id"], seeded["project_b"], seeded["agent_id"])
+
+        async with Session() as s:
+            from app.routers.agent_routing_rules import replace_or_update_rules
+            from app.repositories.agent_routing_rule import AgentRoutingRuleRepository
+
+            resp = await replace_or_update_rules(
+                request=_request(str(seeded["project_a"])),
+                body={"id": str(rule_a), "priority": 5},
+                auth=_auth(seeded["agent_id"], seeded["org_id"]),
+                repo=AgentRoutingRuleRepository(s),
+            )
+            assert resp.status_code == 200
+            await s.commit()
+
+        async with Session() as s:
+            assert await _rule_priority(s, rule_a) == 5
+            assert await _rule_priority(s, rule_b) == 100
+    finally:
+        await engine.dispose()
+
+
+async def test_single_update_ambiguous_no_project_id_400_no_mutation():
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_two_project_agent(s, default_project_id=None)
+            rule_a = await _seed_rule(s, seeded["org_id"], seeded["project_a"], seeded["agent_id"])
+
+        async with Session() as s:
+            from app.routers.agent_routing_rules import replace_or_update_rules
+            from app.repositories.agent_routing_rule import AgentRoutingRuleRepository
+
+            resp = await replace_or_update_rules(
+                request=_request(None),
+                body={"id": str(rule_a), "priority": 5},
+                auth=_auth(seeded["agent_id"], seeded["org_id"]),
+                repo=AgentRoutingRuleRepository(s),
+            )
+            assert resp.status_code == 400
+
+        async with Session() as s:
+            assert await _rule_priority(s, rule_a) == 100  # 무변경.
+    finally:
+        await engine.dispose()
+
+
+async def test_single_update_cross_project_stale_fallback_would_have_leaked_now_404s():
+    """⭐되돌리기 전 상태 재현 — 되기 前(raw claims fallback)이었다면 project_b agent가
+    project_a rule의 id를 알기만 하면(예: 다른 통로에서 유출) 수정할 수 있었다. 재해소 後엔
+    caller의 default_project_id(project_b)로 스코프되어 project_a 소유 rule에 404가 난다."""
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_two_project_agent(s, default_project_id=None)
+            rule_a = await _seed_rule(s, seeded["org_id"], seeded["project_a"], seeded["agent_id"])
+
+        async with Session() as s:
+            from app.models.member import Member
+            member = await s.get(Member, seeded["agent_id"])
+            member.default_project_id = seeded["project_b"]  # caller 스코프 = project_b.
+            await s.commit()
+
+        async with Session() as s:
+            from app.routers.agent_routing_rules import replace_or_update_rules
+            from app.repositories.agent_routing_rule import AgentRoutingRuleRepository
+
+            resp = await replace_or_update_rules(
+                request=_request(None),
+                # rule_a는 project_a 소유 — caller는 project_b로 재해소되므로 안 만져진다.
+                body={"id": str(rule_a), "priority": 5},
+                auth=_auth(seeded["agent_id"], seeded["org_id"]),
+                repo=AgentRoutingRuleRepository(s),
+            )
+            assert resp.status_code == 404
+
+        async with Session() as s:
+            assert await _rule_priority(s, rule_a) == 100  # 무변경 — cross-project 수정 0.
+    finally:
+        await engine.dispose()
