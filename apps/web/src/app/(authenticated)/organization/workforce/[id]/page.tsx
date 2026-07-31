@@ -644,13 +644,13 @@ export default function AgentDetailPage() {
 
           {freshApiKey ? (
             <>
-              <p className="text-xs text-emerald-500">{t('agentFakechatEnvKeyFreshNote')}</p>
+              <p className="text-xs text-success">{t('agentFakechatEnvKeyFreshNote')}</p>
               <code className="block overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
                 export AGENT_API_KEY={freshApiKey}
               </code>
             </>
           ) : !hasActiveKey ? (
-            <p className="text-xs text-amber-400">{t('agentFakechatEnvKeyRequired')}</p>
+            <p className="text-xs text-warning">{t('agentFakechatEnvKeyRequired')}</p>
           ) : (
             <p className="text-xs text-muted-foreground">{t('agentFakechatEnvKeySecurityNote')}</p>
           )}
