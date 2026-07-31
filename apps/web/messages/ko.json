@@ -2594,7 +2594,6 @@
     "steerReorderAria": "{title} 순서 변경",
     "steerHandoffReceived": "우선순위 접수",
     "steerHandoffOrchestrating": "반영 중",
-    "steerHandoffAgent": "오르테가군",
     "steerError": "재정렬을 저장하지 못했습니다. 다시 시도해 주세요.",
     "steerCappedNote": "상위 {count}개만 표시됩니다. 우선순위를 정하면 상위 항목이 앞으로 올라옵니다.",
     "steerCommit": "우선순위 보내기",
