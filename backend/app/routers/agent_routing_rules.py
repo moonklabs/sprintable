@@ -162,10 +162,18 @@ async def replace_or_update_rules(
             return _err("BAD_REQUEST", str(exc), 400)
         return _ok([r.model_dump(mode="json") for r in rules])
 
-    # 단일-룰 update 분기: 기존 raw project_id 폴백 그대로(Tier 1 fail-closed — id 매치 요구라
-    # 이번 스토리 스코프 아님, doc §2.2 4단계 후속).
-    project_id_str = auth.claims.get("app_metadata", {}).get("project_id")
-    project_id = uuid.UUID(str(project_id_str)) if project_id_str else None
+    # E-MCP-OPT 후속(story #1831·doc legacy-project-fallback-sweep-audit §2.2 4단계) — 위 items
+    # 분기와 동일하게 요청시점 재해소로 이전한다. UpdateRoutingRuleRequest엔 project_id 필드가
+    # 없어(스키마 그대로) explicit_project_id 없이 호출 — X-Project-Id 헤더 > member.
+    # default_project_id > 단일 접근가능 프로젝트 > 400 순으로 해소된다.
+    try:
+        project_id = await resolve_required_project_id(repo.session, request, auth, org_id)
+    except HTTPException as exc:
+        return _err(
+            exc.detail.get("code", "PROJECT_ID_REQUIRED") if isinstance(exc.detail, dict) else "FORBIDDEN",
+            exc.detail.get("message", str(exc.detail)) if isinstance(exc.detail, dict) else str(exc.detail),
+            exc.status_code,
+        )
     req_update = UpdateRoutingRuleRequest.model_validate(body)
     try:
         rule = await repo.update(
