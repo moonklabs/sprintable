@@ -32,9 +32,16 @@ name: Design Review Gate
 # ⛔사람을 인질로 잡지 않는다(AC5) — 이 가드는 CI 자리다. 런타임·요청경로에는 아무것도
 # 붙지 않는다. 라벨 두 개(design:pass·design:changes)는 유나가 이미 세웠다(2026-07-31).
 #
-# ⚠️이 워크플로우가 실제로 머지를 막으려면 GitHub 저장소 설정 > Branch protection의
-# required status checks에 아래 job 이름("Design review gate")을 등록해야 한다 — 그건
-# repo admin 권한이 필요해 이 PR 자체로는 못 하고, 별도로 요청해야 한다.
+# ✅등록됨(2026-07-31, 오르테가군) — develop의 Branch protection required status checks에
+# 이 job 이름("Design review gate")이 올라가 있다. 양성대조 완료(#2740): 라벨 없이 RED +
+# 실제 merge 시도가 "the base branch policy prohibits the merge"로 거절됨을 확認, 라벨을
+# 붙이면 각 체크가 개별로 GREEN 전환됨을 확認.
+#
+# ⚠️등록 «이전»에 이미 열려 있던 PR은 이 체크를 자동으로 못 받을 수 있다 — GitHub이 그
+# PR에 대해선 이 체크를 아예 "기대하지 않는" 상태로 남아 required인데도 «영원한 pending»이
+# 된다(실측 2026-07-31: #2737·#2294). 이것도 "안 잰 것"인데 앞서 잡은 스킵=통과 병의
+# 반대편(안 재면서 빨강)이다 — 고치는 법이 코드가 아니라 사람 손(새 커밋 push로 synchronize
+# 이벤트를 유발하거나, PR을 close 후 재오픈)이라는 게 다르다.
 
 on:
   pull_request:
