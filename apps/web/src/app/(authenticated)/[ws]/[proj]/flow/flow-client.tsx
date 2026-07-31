@@ -1,11 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { KanbanBoard } from '@/components/kanban/kanban-board';
+import { ExceptionStream } from '@/components/glance/exception-stream';
+import { toExceptionQueueItems, type BeAttentionSignal, type ExceptionLabels } from '@/components/glance/derive-exception-signals';
 import { loadGlanceData, type GlanceData } from '@/components/glance/load-glance-data';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { NextMakerScreen } from '@/components/flow/next-maker-screen';
@@ -45,16 +47,17 @@ function parseView(raw: string | null): FlowView {
  * 옛 라우트를 죽이는 것 하나 — 오늘은 그 1단계(세그먼트 셸)만: 갈래=이 캔버스(그대로) ·
  * 목록=`KanbanBoard`(그대로 마운트, 라벨만 이동).
  *
- * ⛔story #2352 후속(2026-07-31, 유나 적발) — ②관제 서랍(ExceptionStream, "게이트·막힘
- * 신호 · N")을 통째로 걷어냈다. 그 수가 세던 표(WorkflowLineStepApproval/ItemDependency
- * 기반 `/api/glance/attention`)가 0단계 카드의 「승인 대기」(Gate 표 기반, next-maker-
- * header.tsx)와 «다른 표»를 세면서 같은 낱말("막힘")을 써 화면이 자기모순했다(28 vs 0).
- * 유나 판정: 이 축이 세는 것은 "사람의 다음 발과 안 이어지는 제도 설정 상태"라 화면에
- * 설 자리가 없다 — 이름을 바꾸는 처방이 아니라 축 자체를 뺀 것. 되살리려면 "내가 결재해야
- * 하는 것 N건"(«나» 축, #2288)으로만 선다.
+ * ⛔story #2352(2026-07-31, 유나 적발 → PO 정정) — ②관제 서랍(ExceptionStream)의 원래
+ * 결함은 「게이트·막힘 신호 · N」이 0단계 카드의 「승인 대기 · 28」(Gate 표 기반)과 «다른
+ * 표»(WorkflowLineStepApproval/ItemDependency 기반 `/api/glance/attention`)를 세면서 같은
+ * 낱말("막힘")을 써 화면이 자기모순한 것(28 vs 0)이었다 — 지시는 «그 수»를 이름 없이 빼는
+ * 것이었는데 처음엔 «영역 전체»(ExceptionStream)를 걷어내 결함의 목적어가 넓어졌다(#2224
+ * AC4가 이 컴포넌트를 하단 관제와 «하나»로 요구하는 것과도 어긋났다). 서랍은 남는다 —
+ * 이름만 "막힘"과 안 겹치게 갈고, «수»(N)는 라벨에서 뺀다(영역은 남고 수만 안 보인다).
  */
 export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPageClientProps) {
   const t = useTranslations('flow');
+  const tGlance = useTranslations('glance');
   const router = useRouter();
   const searchParams = useSearchParams();
   const view = parseView(searchParams.get('view'));
@@ -112,6 +115,23 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
     if (selectedStoryId) setPanelOpen(true);
   }, [selectedStoryId]);
   const handleClosePanel = useCallback(() => setPanelOpen(false), []);
+
+  const exceptionItems = useMemo(() => {
+    if (!data) return [];
+    const labels: ExceptionLabels = {
+      kind: {
+        gate_pending: tGlance('exceptionKindGatePending'),
+        blocked: tGlance('exceptionKindBlocked'),
+        merge_ready: tGlance('exceptionKindMergeReady'),
+      },
+      action: {
+        gate_pending: tGlance('exceptionActionGatePending'),
+        blocked: tGlance('exceptionActionBlocked'),
+        merge_ready: tGlance('exceptionActionMergeReady'),
+      },
+    };
+    return toExceptionQueueItems(data.attentionSignals as BeAttentionSignal[], labels);
+  }, [data, tGlance]);
 
   // story #2354 후속(2026-07-31) — 예전엔 view를 'list'로 함께 갈아 끼워 KanbanBoard(그
   // 안의 StoryDetailPanel)를 마운트시켰는데, 그 view 전환 자체가 «갈래 캔버스를
@@ -192,6 +212,22 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           // loading 상태가 매번 자연히 맞다, flow-node-story-panel.tsx 문서 참고).
           <FlowNodeStoryPanel key={selectedStoryId} storyId={selectedStoryId} onClose={handleClosePanel} />
         ) : null}
+
+        {/* ③ 관제 서랍 — 보기 무관 고정, 접힘 기본(IA §2). ExceptionStream = #2100 예외 스트림
+            그대로 재사용(A타입, AC4 — #2224 AC4가 이 컴포넌트와 하단 관제를 "하나"로 요구).
+            ⛔story #2352(PO 정정) — 라벨을 "게이트·막힘 신호 · N"에서 갈았다. 그 N은
+            0단계 카드의 「승인 대기 · 28」(Gate 표)과 다른 표(WorkflowLineStepApproval/
+            ItemDependency 기반)를 세면서 같은 낱말("막힘")로 화면이 자기모순했다(28 vs 0) —
+            지시는 «그 수»를 이름 없이 빼는 것이었다(영역은 남긴다). 새 라벨은 숫자 없이
+            "승인 흐름에서 멈춘 것"만 말한다 — 두 「막힘」이 더는 안 겹친다. */}
+        <details className="rounded-lg border border-border">
+          <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-foreground">
+            {t('drawerHeadingNoCount')}
+          </summary>
+          <div className="border-t border-border p-3">
+            <ExceptionStream items={exceptionItems} />
+          </div>
+        </details>
       </div>
     </>
   );
