@@ -431,11 +431,23 @@ class CandidateNotDeclaredError(Exception):
 PORT_RELATION_KINDS = frozenset({"spawned", "followed", "superseded"})
 
 
+@dataclass(frozen=True)
+class DeclareNewResult:
+    """`declare_new_candidate`의 반환값 — candidate와 함께 «이번 호출이 실제로 뭔가를
+    바꿨는가»를 명시로 들고 간다(오르테가 지적, 2026-07-31: WHERE 가 거짓이라 no-op일 때도
+    호출자가 이걸 모르면 "바뀌었다"로 조용히 오독한다 — 오늘 종일 잡은 «조용히 깨지는 자리»
+    부류를 새로 심지 않는다). `created=True`는 신규 삽입이거나 이번 호출에서 estimated→
+    declared로 승격된 경우, `created=False`는 이미 declared라 아무것도 안 바뀐 경우다."""
+
+    candidate: ReferenceSemanticCandidate
+    created: bool
+
+
 async def declare_new_candidate(
     db: AsyncSession, *, org_id: uuid.UUID, source_type: str, source_field: str,
     source_id: uuid.UUID, target_type: str, target_id: uuid.UUID,
     relation_kind: str | None, declared_by: uuid.UUID,
-) -> ReferenceSemanticCandidate:
+) -> DeclareNewResult:
     """story #2355 — 사람이 «후보가 아예 없던» source↔target 쌍을 처음 잇는 write 경로.
     `store_semantic_candidates`(기계 write-path)의 형제 함수 — 같은 자연키(source_type/
     source_field/source_id/target_type/target_id/form)를 쓰지만, status='declared'를
@@ -449,6 +461,11 @@ async def declare_new_candidate(
     추정보다 우선), 안 주면(None) 기존 값을 그대로 둔다(COALESCE) — declare와 relation-kind가
     "다른 질문"이라는 계약은 신규 행 생성 축에서는 적용되지 않는다(이 호출 자체가 이미 둘을
     함께 받는 새 계약이므로 모순 없음).
+
+    ⛔이미 declared인 행에 재호출하면 WHERE가 거짓이라 UPDATE 자체가 no-op이다 — 그 사실을
+    호출자가 구별할 수 있도록 `RETURNING`으로 «이번 문장이 실제로 그 행을 건드렸는가»를
+    관측해 `DeclareNewResult.created`에 싣는다(오르테가 지적 — 409는 안 쓴다: 이미 이어진
+    것은 오류가 아니다).
 
     ⛔relation_kind는 PORT_RELATION_KINDS(3종)만 허용 — 그 외 값은 InvalidPortRelationKindError."""
     if relation_kind is not None and relation_kind not in PORT_RELATION_KINDS:
@@ -474,8 +491,9 @@ async def declare_new_candidate(
             ),
         },
         where=(ReferenceSemanticCandidate.status == "estimated"),
-    )
-    await db.execute(stmt)
+    ).returning(ReferenceSemanticCandidate.id)
+    write_result = await db.execute(stmt)
+    created = write_result.first() is not None
     result = await db.execute(
         select(ReferenceSemanticCandidate).where(
             ReferenceSemanticCandidate.org_id == org_id,
@@ -487,7 +505,7 @@ async def declare_new_candidate(
             ReferenceSemanticCandidate.form == "mention",
         )
     )
-    return result.scalar_one()
+    return DeclareNewResult(candidate=result.scalar_one(), created=created)
 
 
 async def undeclare_candidate(

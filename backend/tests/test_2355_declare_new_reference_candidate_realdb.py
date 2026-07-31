@@ -90,6 +90,7 @@ async def test_declare_new_creates_declared_row_directly():
             assert body["status"] == "declared"
             assert body["declared_by"] is not None
             assert body["declared_at"] is not None
+            assert body["created"] is True
 
             async with Session() as s:
                 row = await _candidate_row(s, org.id, source.id, target.id)
@@ -294,6 +295,7 @@ async def test_declare_new_on_existing_estimated_pair_promotes_not_duplicates():
             assert resp.status_code == 201, resp.text
             assert resp.json()["id"] == str(pre_id), "새 행이 만들어졌다 — 승격이 아니라 중복"
             assert resp.json()["status"] == "declared"
+            assert resp.json()["created"] is True, "승격도 «바뀜»이니 created=True여야 한다"
             # 사람이 이번 호출에서 명시로 준 relation_kind가 과거 기계 추정을 덮는다.
             assert resp.json()["relation_kind"] == "followed"
 
@@ -314,7 +316,11 @@ async def test_declare_new_on_existing_estimated_pair_promotes_not_duplicates():
 
 async def test_declare_new_is_idempotent_and_does_not_clobber_original_signer():
     """이미 declared된 행에 재호출해도 원래 declared_by/declared_at(사람 서명, AC3)가
-    지워지지 않는다 — WHERE status='estimated' 가드가 이미 declared인 행은 건드리지 않는다."""
+    지워지지 않는다 — WHERE status='estimated' 가드가 이미 declared인 행은 건드리지 않는다.
+
+    오르테가 지적(2026-07-31) — no-op을 조용히 201로 응답하면 호출자가 「바뀌었다」로
+    오독한다. 응답 status_code(200)와 `created:false` 둘 다로 이번 호출이 아무것도 안
+    바꿨음을 드러낸다(409 아님 — 이미 이어진 것은 오류가 아니다)."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -334,14 +340,16 @@ async def test_declare_new_is_idempotent_and_does_not_clobber_original_signer():
                 json={"target_id": str(target.id), "relation_kind": "spawned"},
             )
             assert first.status_code == 201, first.text
+            assert first.json()["created"] is True
             first_declared_at = first.json()["declared_at"]
 
             second = await client.post(
                 f"/api/v2/stories/{source.id}/reference-candidates",
                 json={"target_id": str(target.id), "relation_kind": "followed"},
             )
-            assert second.status_code == 201, second.text
             # WHERE status='estimated' 가드 — 이미 declared라 두 번째 호출은 no-op(원본 유지).
+            assert second.status_code == 200, second.text
+            assert second.json()["created"] is False
             assert second.json()["declared_at"] == first_declared_at
             assert second.json()["relation_kind"] == "spawned"
         finally:
