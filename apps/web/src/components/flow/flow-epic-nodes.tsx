@@ -15,6 +15,8 @@ interface FlowEpicNodesProps {
   epicId: string;
   epicTitle: string;
   onSelectStory: (storyId: string) => void;
+  /** story #2354 — 순수 통과 prop(FlowMapCanvas 참고). */
+  selectedNodeId?: string | null;
 }
 
 type LoadState =
@@ -76,7 +78,7 @@ async function fetchAllDonePastItems(epicId: string): Promise<EpicFlowNodeItem[]
  * 감싸 FlowMapCanvas에 넘긴다. 멀티레인 BE 계약이 착지하면 호출부가 여러 에픽을 fetch해
  * 배열을 채우는 것으로 끝난다(이 컴포넌트/FlowMapCanvas 모두 무변경).
  */
-export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory }: FlowEpicNodesProps) {
+export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory, selectedNodeId = null }: FlowEpicNodesProps) {
   const t = useTranslations('flow');
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   // 유나양 규격(아티팩트 a125909a) — 「펼침 상태」는 «묶음 단위»로 든다(오르테가군 지시:
@@ -179,6 +181,7 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory }: F
       onSelectStory={onSelectStory}
       onTogglePastBundle={handleTogglePastBundle}
       isPastBundleLoading={isPastBundleLoading}
+      selectedNodeId={selectedNodeId}
     />
   );
 }

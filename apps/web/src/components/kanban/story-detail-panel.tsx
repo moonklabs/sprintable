@@ -48,7 +48,7 @@ import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-h
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
-interface Task {
+export interface Task {
   id: string;
   title: string;
   status: string;
@@ -86,6 +86,14 @@ interface StoryDetailPanelProps {
   sprintMap?: Record<string, string>;
   onNavigate?: (storyId: string) => void;
   projectId?: string;
+  /** story #2354 — 갈래 보기의 «지도 위에 겹치는» 소형 팝오버 모드. 생략하면 기존 전체화면
+   * 드로어(칸반 그대로, 회귀 없음). 값을 주면 배경 딤을 없애고(지도를 «가리지» 않는다),
+   * «top+height 확정값»만 받아 그대로 스타일에 적용한다 — 위/아래 반전 판단(클릭한 노드가
+   * 뷰포트 위쪽/아래쪽인가)과 높이 상한 계산 자체는 이 컴포넌트의 책임이 아니다(캔버스
+   * 좌표 지식을 이 공용 컴포넌트에 들이지 않는다, 호출부=flow-client.tsx가 노드 DOM
+   * 위치를 안다). top+heightPx(px, 확정)를 쓰는 이유 — top/bottom 자동조합은 높이가
+   * 암묵값이 되어 내부 `h-full` flex 레이아웃(헤더 고정+본문 스크롤)이 깨진다. */
+  overlayPosition?: { top: number; heightPx: number };
 }
 
 function taskTone(status: string) {
@@ -315,7 +323,7 @@ export function DescriptionViewer({
   );
 }
 
-export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId }: StoryDetailPanelProps) {
+export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition }: StoryDetailPanelProps) {
   const t = useTranslations('board');
   // story #1959(P2-S3): 딥링크 매니페스트(story_detail→parentTab=all) — 콜드 진입 시 "전체"
   // 탭 루트를 BACK 대상으로 선주입. 카드 클릭으로 연 경우(history.length>1)는 no-op.
@@ -1072,21 +1080,27 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Backdrop — overlay 모드(story #2354)에선 완전히 투명한 클릭-바깥-닫기 레이어일 뿐,
+          지도를 시각적으로 가리지 않는다(blur/dim 없음 — AC2 "누른 노드를 가리지 않는다"). */}
       <div
-        className="fixed inset-0 z-40 bg-overlay-backdrop backdrop-blur-sm lg:bg-transparent"
+        className={overlayPosition ? 'fixed inset-0 z-40' : 'fixed inset-0 z-40 bg-overlay-backdrop backdrop-blur-sm lg:bg-transparent'}
         onClick={onClose}
         aria-hidden="true"
       />
 
-      {/* Panel */}
+      {/* Panel — overlay 모드에선 전체화면 드로어 대신 지도 위에 겹치는 소형 팝오버(호출부가
+          계산한 top/bottom + maxHeightPx). 내부 콘텐츠(작업목록·댓글·편집 등)는 완전히 동일 —
+          «재사용»이지 새 컴포넌트가 아니다(story #2354 AC7). */}
       <div
         ref={panelTrapRef}
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={story.title}
-        className="fixed inset-0 z-50 bg-background shadow-xl outline-none backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-3xl lg:border-l lg:border-border"
+        className={overlayPosition
+          ? 'fixed inset-x-4 z-50 mx-auto max-w-xl overflow-hidden rounded-lg border border-border bg-background shadow-xl outline-none backdrop-blur-xl sm:inset-x-auto sm:right-4 sm:w-full'
+          : 'fixed inset-0 z-50 bg-background shadow-xl outline-none backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-3xl lg:border-l lg:border-border'}
+        style={overlayPosition ? { top: overlayPosition.top, height: overlayPosition.heightPx } : undefined}
       >
       <div className="flex h-full flex-col">
         <div className="flex items-start justify-between border-b border-border p-5">
