@@ -520,8 +520,12 @@ export function FlowMapCanvas({
   return (
     <div className="relative overflow-hidden rounded-md border border-border bg-card">
       <div className="flex" style={{ height: HEADER_HEIGHT }}>
-        {/* LANE_LABEL_WIDTH와 같은 값(위 레인 타이틀 칸 주석 참고). */}
-        <div className="w-[150px] shrink-0 border-b border-r border-border" />
+        {/* 올리베이라군 리뷰(2026-07-31, PR#2757) — 이 칸 너비는 offscreen 카운트 보정에
+            쓰이는 LANE_LABEL_WIDTH와 같은 값이어야 하는데, Tailwind 클래스로 사본을 두면
+            "누가 이 칸만 고치고 그 상수는 안 고치는" 조용한 어긋남을 막을 자가 없다(오늘
+            고친 결함의 뿌리가 정확히 이 종류의 어긋남이었다) — 사본을 없애고 상수 하나에서
+            나오게 한다. */}
+        <div className="shrink-0 border-b border-r border-border" style={{ width: LANE_LABEL_WIDTH }} />
         <div className="relative min-w-0 flex-1 overflow-hidden border-b border-border">
           <span className="absolute top-[5px] text-[9.5px] uppercase tracking-[0.06em] text-muted-foreground" style={{ left: 10 }}>
             {t('canvasPast')}
@@ -548,10 +552,8 @@ export function FlowMapCanvas({
             const supersededIds = computeSupersededNodeIds(lane.edges);
             return (
               <div key={lane.epicId} className="relative flex border-b border-border last:border-b-0" style={{ height }}>
-                {/* ⛔story #2369 QA 후속 — 이 150px는 LANE_LABEL_WIDTH(derive-flow-map.ts)와
-                    반드시 같은 값이어야 한다(offscreen 카운트가 그 상수로 화면 좌표를
-                    보정한다) — 여길 바꾸면 그 상수도 같이 바꿔야 한다. */}
-                <div className="w-[150px] shrink-0 border-r border-border px-2 py-1.5">
+                {/* 위 헤더 칸과 같은 사정 — LANE_LABEL_WIDTH 하나에서 나온다(사본 없음). */}
+                <div className="shrink-0 border-r border-border px-2 py-1.5" style={{ width: LANE_LABEL_WIDTH }}>
                   <p className="truncate text-[11px] font-semibold text-foreground">{lane.title}</p>
                 </div>
                 <div ref={laneIndex === 0 ? laneContainerRef : undefined} className="relative min-w-0 flex-1">
