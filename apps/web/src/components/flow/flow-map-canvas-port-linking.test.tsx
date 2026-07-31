@@ -13,6 +13,14 @@ import { FlowMapCanvas, type CreateLinkResult, type DeleteLinkResult } from './f
 import type { FlowMapLane, FlowMapNode, FlowMapEdge } from './derive-flow-map';
 import koMessages from '../../../messages/ko.json';
 
+// story #2353 v1.1 정정 — 되돌리기 다이얼로그 제목이 declaredBy와 currentTeamMemberId(로그인
+// 본인) 비교로 갈린다(resolveUndoTitle, flow-port-linking.ts). 기본은 'member-9'를 "나"로
+// 둔다 — 대부분의 되돌리기 테스트가 declaredBy: 'member-9'로 "내가 만든" 케이스를 잰다.
+const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({
+  useDashboardContext: () => useDashboardContextMock(),
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -50,6 +58,7 @@ beforeEach(() => {
   // jsdom은 elementFromPoint를 항상 null로 낸다 — 드래그 놓기/호버 판정이 이걸로 대상을
   // 찾으므로, 테스트별로 재정의한다(기본은 항상 null: "아무 데도 아님").
   document.elementFromPoint = vi.fn(() => null);
+  useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'member-9' });
 });
 
 afterEach(async () => {
@@ -76,6 +85,7 @@ async function renderCanvas(lane: FlowMapLane, overrides: { onCreateLink?: (p: {
         isPastBundleLoading={false}
         onCreateLink={onCreateLink}
         onDeleteLink={onDeleteLink}
+        memberMap={{ 'member-9': { name: '미르코' }, 'member-OTHER': { name: '디디' } }}
       />,
     ));
   });
@@ -344,6 +354,45 @@ describe('FlowMapCanvas — 되돌리기 (AC7·AC8, 그 선 자체가 진입점)
     expect(dialogTitle?.textContent).toBe('내가 만든 연결입니다');
   });
 
+  // 유나 가디언 리뷰(2026-07-31, issuecomment-5139439284) — 「내가 만듦」이 조건 없이 떴다
+  // (남이 만든 선도 「내가 만든」으로 읽혀 파괴적 조작인 [지우기] 바로 앞에 오인이 섰다).
+  // doc v1.1 ㉣ 정정 — declaredBy로 갈라 「{이름}이 만든 연결입니다」를 보여야 한다.
+  it('shows "{name}이 만든 연결입니다" when declaredBy is a DIFFERENT member than the logged-in user', async () => {
+    const lane = makeLane({
+      nowNodes: [makeNode({ id: 'n1' })],
+      queueNodesByDepth: new Map([[0, [makeNode({ id: 'u1', kind: 'queue' })]]]),
+      edges: [makeEdge({
+        fromNodeId: 'n1', toNodeId: 'u1', confirmed: true,
+        candidateId: 'cand-2', declaredBy: 'member-OTHER', declaredAt: '2026-07-31T12:00:00Z',
+      })],
+    });
+    await renderCanvas(lane);
+    const line = container.querySelector('line[data-edge-candidate-id="cand-2"]')!;
+    await act(async () => { line.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const dialogTitle = document.body.querySelector('[data-slot="dialog-title"]');
+    expect(dialogTitle?.textContent).toBe('디디이 만든 연결입니다');
+  });
+
+  // doc v1.1 ㉣ — 모르는 채 「내가」로 단정하지 않는다(declaredBy가 없거나, memberMap에
+  // 이름이 없으면 중립).
+  it('falls back to the neutral "사람이 만든 연결입니다" when the author is unknown (declaredBy present but not in memberMap)', async () => {
+    const lane = makeLane({
+      nowNodes: [makeNode({ id: 'n1' })],
+      queueNodesByDepth: new Map([[0, [makeNode({ id: 'u1', kind: 'queue' })]]]),
+      edges: [makeEdge({
+        fromNodeId: 'n1', toNodeId: 'u1', confirmed: true,
+        candidateId: 'cand-3', declaredBy: 'member-UNKNOWN-TO-MAP', declaredAt: '2026-07-31T12:00:00Z',
+      })],
+    });
+    await renderCanvas(lane);
+    const line = container.querySelector('line[data-edge-candidate-id="cand-3"]')!;
+    await act(async () => { line.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const dialogTitle = document.body.querySelector('[data-slot="dialog-title"]');
+    expect(dialogTitle?.textContent).toBe('사람이 만든 연결입니다');
+  });
+
   it('does NOT make a group with count>1 (bundled) clickable — no data-edge-candidate-id, no hit-area', async () => {
     const lane = makeLane({
       nowNodes: [makeNode({ id: 'n1' })],
@@ -368,7 +417,7 @@ describe('FlowMapCanvas — 되돌리기 (AC7·AC8, 그 선 자체가 진입점)
       nowNodes: [makeNode({ id: 'n1' })],
       pastTotal: 3,
       pastBundle: { total: 3, internalCount: 0, outgoingCount: 1 },
-      edges: [makeEdge({ fromNodeId: '__past-bundle__', toNodeId: 'n1', confirmed: true, candidateId: 'cand-bundle' })],
+      edges: [makeEdge({ fromNodeId: '__past-bundle__', toNodeId: 'n1', confirmed: true, candidateId: 'cand-bundle', declaredBy: 'member-9' })],
     });
     const deleteLink = vi.fn(async () => ({ ok: true }) as DeleteLinkResult);
     await renderCanvas(lane, { onDeleteLink: deleteLink });

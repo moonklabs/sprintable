@@ -76,7 +76,7 @@ describe('FlowEpicNodes — merges dependencies-graph edges with reference-candi
     vi.stubGlobal('fetch', fetchMock);
 
     await act(async () => {
-      root.render(wrap(<FlowEpicNodes projectId="p1" epicId="e1" epicTitle="Epic 1" onSelectStory={() => {}} />));
+      root.render(wrap(<FlowEpicNodes projectId="p1" epicId="e1" epicTitle="Epic 1" onSelectStory={() => {}} memberMap={{}} />));
       await new Promise((r) => setTimeout(r, 0));
     });
 
@@ -117,7 +117,7 @@ describe('FlowEpicNodes — merges dependencies-graph edges with reference-candi
     vi.stubGlobal('fetch', fetchMock);
 
     await act(async () => {
-      root.render(wrap(<FlowEpicNodes projectId="p1" epicId="e1" epicTitle="Epic 1" onSelectStory={() => {}} />));
+      root.render(wrap(<FlowEpicNodes projectId="p1" epicId="e1" epicTitle="Epic 1" onSelectStory={() => {}} memberMap={{}} />));
       await new Promise((r) => setTimeout(r, 0));
     });
 
@@ -144,7 +144,7 @@ describe('FlowEpicNodes — merges dependencies-graph edges with reference-candi
     vi.stubGlobal('fetch', fetchMock);
 
     await act(async () => {
-      root.render(wrap(<FlowEpicNodes projectId="p1" epicId="e1" epicTitle="Epic 1" onSelectStory={() => {}} />));
+      root.render(wrap(<FlowEpicNodes projectId="p1" epicId="e1" epicTitle="Epic 1" onSelectStory={() => {}} memberMap={{}} />));
       await new Promise((r) => setTimeout(r, 0));
     });
 
@@ -190,7 +190,7 @@ describe('FlowEpicNodes — clicking the past-bundle card expands it (실제 fet
     vi.stubGlobal('fetch', fetchMock);
 
     await act(async () => {
-      root.render(wrap(<FlowEpicNodes projectId="p1" epicId="e1" epicTitle="Epic 1" onSelectStory={() => {}} />));
+      root.render(wrap(<FlowEpicNodes projectId="p1" epicId="e1" epicTitle="Epic 1" onSelectStory={() => {}} memberMap={{}} />));
       await new Promise((r) => setTimeout(r, 0));
     });
 
@@ -232,7 +232,7 @@ describe('FlowEpicNodes — clicking the past-bundle card expands it (실제 fet
     vi.stubGlobal('fetch', fetchMock);
 
     await act(async () => {
-      root.render(wrap(<FlowEpicNodes projectId="p1" epicId="e1" epicTitle="Epic 1" onSelectStory={() => {}} />));
+      root.render(wrap(<FlowEpicNodes projectId="p1" epicId="e1" epicTitle="Epic 1" onSelectStory={() => {}} memberMap={{}} />));
       await new Promise((r) => setTimeout(r, 0));
     });
 

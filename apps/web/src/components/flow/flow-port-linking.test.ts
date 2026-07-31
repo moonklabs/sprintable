@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  resolveDeclareLinkCall, declareResponseToEdge, isValidPortDropTarget, PORT_LINK_KINDS,
+  resolveDeclareLinkCall, declareResponseToEdge, isValidPortDropTarget, resolveUndoTitle, PORT_LINK_KINDS,
 } from './flow-port-linking';
 import type { FlowMapEdge } from './derive-flow-map';
 
@@ -83,5 +83,32 @@ describe('isValidPortDropTarget — AC16(한 쌍에 관계는 하나) + 자기 �
   it('관계없는 다른 쌍의 간선은 영향을 안 준다', () => {
     const edges = [makeEdge({ fromNodeId: 'x', toNodeId: 'y' })];
     expect(isValidPortDropTarget('a', 'b', edges)).toBe(true);
+  });
+});
+
+// doc `flow-port-slot-spec` ㉣ v1.1 정정(유나 가디언 리뷰, issuecomment-5139439284) —
+// 서명의 «누가»를 확認 없이 「내가」로 쓰지 않는다. declared_by/currentTeamMemberId 둘 다
+// 있어야 「내가」/「{이름}이」로 확定하고, 그 외엔 전부 중립으로 떨어진다.
+describe('resolveUndoTitle — declaredBy로 「내가/{이름}이/사람이 만든」을 가른다(확認 없이 「내가」로 단정하지 않는다)', () => {
+  const memberMap = { 'me-1': { name: '미르코' }, 'other-2': { name: '디디' } };
+
+  it('declaredBy가 나(currentTeamMemberId)와 같으면 "내가"', () => {
+    expect(resolveUndoTitle('me-1', 'me-1', memberMap)).toEqual({ key: 'portUndoTitle' });
+  });
+
+  it('declaredBy가 다른 멤버이고 memberMap에 이름이 있으면 "{이름}이"', () => {
+    expect(resolveUndoTitle('other-2', 'me-1', memberMap)).toEqual({ key: 'portUndoTitleOther', name: '디디' });
+  });
+
+  it('declaredBy가 null(BE가 누군지 안 남김)이면 중립 — "내가"로 단정하지 않는다', () => {
+    expect(resolveUndoTitle(null, 'me-1', memberMap)).toEqual({ key: 'portUndoTitleUnknownAuthor' });
+  });
+
+  it('currentTeamMemberId가 아직 없으면(레이스) 중립 — 비교 자체를 안 한다', () => {
+    expect(resolveUndoTitle('me-1', undefined, memberMap)).toEqual({ key: 'portUndoTitleUnknownAuthor' });
+  });
+
+  it('declaredBy는 있으나 memberMap에 이름이 없으면 중립 — "다른 사람"으로 지어내지 않는다', () => {
+    expect(resolveUndoTitle('ghost-3', 'me-1', memberMap)).toEqual({ key: 'portUndoTitleUnknownAuthor' });
   });
 });

@@ -18,6 +18,9 @@ interface FlowEpicNodesProps {
   onSelectStory: (storyId: string) => void;
   /** story #2354 — 순수 통과 prop(FlowMapCanvas 참고). */
   selectedNodeId?: string | null;
+  /** story #2353 되돌리기 다이얼로그의 「{이름}이 만든 연결입니다」 이름 조회용 — 호출부
+   * (goal-stem-card.tsx)가 이미 들고 있는 memberMap을 그대로 흘려보낸다(새 fetch 없음). */
+  memberMap: Record<string, { name: string }>;
 }
 
 type LoadState =
@@ -79,7 +82,7 @@ async function fetchAllDonePastItems(epicId: string): Promise<EpicFlowNodeItem[]
  * 감싸 FlowMapCanvas에 넘긴다. 멀티레인 BE 계약이 착지하면 호출부가 여러 에픽을 fetch해
  * 배열을 채우는 것으로 끝난다(이 컴포넌트/FlowMapCanvas 모두 무변경).
  */
-export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory, selectedNodeId = null }: FlowEpicNodesProps) {
+export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory, selectedNodeId = null, memberMap }: FlowEpicNodesProps) {
   const t = useTranslations('flow');
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   // 유나양 규격(아티팩트 a125909a) — 「펼침 상태」는 «묶음 단위»로 든다(오르테가군 지시:
@@ -228,6 +231,7 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory, sel
       selectedNodeId={selectedNodeId}
       onCreateLink={handleCreateLink}
       onDeleteLink={handleDeleteLink}
+      memberMap={memberMap}
     />
   );
 }

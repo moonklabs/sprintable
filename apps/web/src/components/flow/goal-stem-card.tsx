@@ -150,7 +150,7 @@ export function GoalStemCard({
       {/* ①갈래(선·노드)가 이 화면의 몸통(PO 판정 2026-07-31, 선생님 "이게 뭔지.." 후속) —
           픽 패널이 «위/작게», 캔버스가 «아래/크게»다. min-h로 시각 지배력을 명시로 준다. */}
       <div className="min-h-[520px] rounded-lg border border-border">
-        <FlowEpicNodes projectId={projectId} epicId={stem.epicId} epicTitle={stem.title} onSelectStory={onSelectStory} selectedNodeId={selectedNodeId} />
+        <FlowEpicNodes projectId={projectId} epicId={stem.epicId} epicTitle={stem.title} onSelectStory={onSelectStory} selectedNodeId={selectedNodeId} memberMap={memberMap} />
       </div>
     </div>
   );

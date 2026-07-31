@@ -61,6 +61,28 @@ export function declareResponseToEdge(
   return edge!;
 }
 
+export type UndoTitleResolution =
+  | { key: 'portUndoTitle' }
+  | { key: 'portUndoTitleOther'; name: string }
+  | { key: 'portUndoTitleUnknownAuthor' };
+
+/** doc `flow-port-slot-spec` ㉣ v1.1 정정 — 서명의 «누가»를 확認 없이 「내가」로 쓰지 않는다
+ * (되돌리기 다이얼로그의 확認 버튼이 「지우기」라, 남의 것을 내 것으로 읽히는 오인이 파괴적
+ * 조작 바로 앞에 선다 — 가디언 §H-2 위반). declaredBy와 currentTeamMemberId 둘 다 있어야만
+ * 「내가」/「{이름}이」로 확定하고, 어느 한쪽이라도 없거나(레이스로 currentTeamMemberId가 아직
+ * 안 실렸거나) memberMap에 이름이 없으면 중립(「사람이 만든 연결입니다」)으로 떨어진다 —
+ * 모르는 채 단정하지 않는다. */
+export function resolveUndoTitle(
+  declaredBy: string | null,
+  currentTeamMemberId: string | null | undefined,
+  memberMap: Record<string, { name: string }>,
+): UndoTitleResolution {
+  if (!declaredBy || !currentTeamMemberId) return { key: 'portUndoTitleUnknownAuthor' };
+  if (declaredBy === currentTeamMemberId) return { key: 'portUndoTitle' };
+  const name = memberMap[declaredBy]?.name;
+  return name ? { key: 'portUndoTitleOther', name } : { key: 'portUndoTitleUnknownAuthor' };
+}
+
 /** AC16 — 한 쌍에 관계는 하나. 자기 자신도 놓을 수 없는 대상이다(드래그 규격 ㉡). 방향
  * 무관 — 어느 쪽으로든 이미 이어져 있으면 새로 못 잇는다(종류를 바꾸려면 «기존 것을
  * 고치는» 것이지 새로 잇는 게 아니라는 스토리 규격 그대로). */

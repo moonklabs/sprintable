@@ -10,7 +10,8 @@ import {
   PAST_BUNDLE_CARD_WIDTH, PAST_BUNDLE_CARD_HEIGHT, PAST_EXPANDED_LEFT, PAST_EXPANDED_TOP_START,
   PAST_EXPANDED_ROW_HEIGHT, PAST_EXPANDED_BOX_WIDTH,
 } from './derive-flow-map';
-import { isValidPortDropTarget, PORT_LINK_KINDS, type PortLinkKind } from './flow-port-linking';
+import { isValidPortDropTarget, PORT_LINK_KINDS, resolveUndoTitle, type PortLinkKind } from './flow-port-linking';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -70,6 +71,10 @@ interface FlowMapCanvasProps {
    * undeclare_story_reference_candidate 문서 참고). fromNodeId/toNodeId 아무 쪽이나
    * 유효한 story id면 되므로 호출부가 그중 하나를 골라 넘긴다. */
   onDeleteLink: (candidateId: string, anchorStoryId: string) => Promise<DeleteLinkResult>;
+  /** story #2353 되돌리기 다이얼로그의 「{이름}이 만든 연결입니다」 이름 조회용(유나 가디언
+   * 리뷰 v1.1 정정, ㉣ — declaredBy가 나 아니면 실명, 못 찾으면 중립으로 떨어진다. 새 fetch
+   * 아님 — goal-stem-card.tsx가 이미 들고 있는 memberMap을 그대로 흘려보낸다). */
+  memberMap: Record<string, { name: string }>;
 }
 
 export type CreateLinkResult = { ok: true } | { ok: false; error: string };
@@ -232,9 +237,10 @@ function FlowEdgeMarkerDefs() {
  * 레인이 오면 레인별 ref map으로 넓혀야 한다 — 아래 laneContainerRef 참고).
  */
 export function FlowMapCanvas({
-  lanes, onSelectStory, onTogglePastBundle, isPastBundleLoading, selectedNodeId = null, onCreateLink, onDeleteLink,
+  lanes, onSelectStory, onTogglePastBundle, isPastBundleLoading, selectedNodeId = null, onCreateLink, onDeleteLink, memberMap,
 }: FlowMapCanvasProps) {
   const t = useTranslations('flow');
+  const { currentTeamMemberId } = useDashboardContext();
   const maxDepth = Math.max(0, ...lanes.flatMap((l) => Array.from(l.queueNodesByDepth.keys())));
   const canvasWidth = FLOW_MAP_DEPTH0_X + (maxDepth + 1) * FLOW_MAP_GRID_STEP + 20;
   // 범례 {n}·표시여부의 단일 진실 — countRenderedEdgeLines 하나로 아래 두 곳(조건·개수)이
@@ -814,11 +820,17 @@ export function FlowMapCanvas({
 
       {/* story #2353(AC7·AC8) — 되돌리기는 «그 선 자체가 진입점»이다(토스트 금지, ㉣). 「누가
           언제 만들었는가」는 지워지지 않는 속성이라 여기 그대로 보인다. */}
-      {undoTarget ? (
+      {undoTarget ? (() => {
+        const titleResolution = resolveUndoTitle(undoTarget.declaredBy, currentTeamMemberId, memberMap);
+        return (
         <Dialog open onOpenChange={(open) => { if (!open) { setUndoTarget(null); setUndoDeleteError(null); } }}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>{t('portUndoTitle')}</DialogTitle>
+              <DialogTitle>
+                {titleResolution.key === 'portUndoTitleOther'
+                  ? t('portUndoTitleOther', { name: titleResolution.name })
+                  : t(titleResolution.key)}
+              </DialogTitle>
               <DialogDescription>
                 {undoTarget.declaredAt ? t('portUndoSignature', { at: new Date(undoTarget.declaredAt).toLocaleString() }) : t('portUndoSignatureUnknown')}
               </DialogDescription>
@@ -834,7 +846,8 @@ export function FlowMapCanvas({
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      ) : null}
+        );
+      })() : null}
     </div>
   );
 }
