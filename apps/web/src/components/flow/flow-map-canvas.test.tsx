@@ -102,6 +102,38 @@ describe('FlowMapCanvas — node click → open story panel (선생님 지적 20
     await act(async () => { button?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(onSelectStory).toHaveBeenCalledWith('s-123');
   });
+
+  // story #2354 — 오버레이 패널이 클릭된 노드의 실제 화면 좌표를 찾는 유일한 방법이 이
+  // 속성이다(flow-node-story-panel.tsx가 `[data-node-id="..."]`로 querySelector한다).
+  it('renders data-node-id on every node card so the overlay panel can anchor to it', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 's-anchor-123' })] });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
+    const button = container.querySelector('[data-node-id="s-anchor-123"]');
+    expect(button).not.toBeNull();
+    expect(button?.tagName).toBe('BUTTON');
+  });
+
+  // story #2354 AC6(판정선) — 패널을 닫아도 「누른 노드가 선택된 채로」 남는다. 이 시각
+  // 신호(ring)가 없으면 "선택돼 있다"는 사실이 화면 어디에도 안 남는다.
+  it('highlights the node matching selectedNodeId with a ring, and no other node', async () => {
+    const lane = makeLane({
+      nowNodes: [makeNode({ id: 'n1' })],
+      queueNodesByDepth: new Map([[0, [makeNode({ id: 'u1', kind: 'queue' })]]]),
+    });
+    await act(async () => {
+      root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} selectedNodeId="u1" />));
+    });
+    const selectedButton = container.querySelector('[data-node-id="u1"]');
+    const otherButton = container.querySelector('[data-node-id="n1"]');
+    expect(selectedButton?.className).toContain('ring-2');
+    expect(otherButton?.className).not.toContain('ring-2');
+  });
+
+  it('highlights no node when selectedNodeId is omitted (default behavior unchanged)', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
+    expect(container.querySelector('[data-node-id="n1"]')?.className).not.toContain('ring-2');
+  });
 });
 
 // 8종 조합 — u0..u7을 큐 depth 0에 나란히 두고, n1(now)에서 각각으로 간선 하나씩.

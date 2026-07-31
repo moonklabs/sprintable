@@ -11,6 +11,7 @@ import { toExceptionQueueItems, type BeAttentionSignal, type ExceptionLabels } f
 import { loadGlanceData, type GlanceData } from '@/components/glance/load-glance-data';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { NextMakerScreen } from '@/components/flow/next-maker-screen';
+import { FlowNodeStoryPanel } from '@/components/flow/flow-node-story-panel';
 
 interface FlowPageClientProps {
   projectId: string;
@@ -102,17 +103,27 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
     router.push(`/${wsSlug}/${projSlug}/flow${qs ? `?${qs}` : ''}`);
   }, [router, searchParams, wsSlug, projSlug]);
 
-  // 선생님 지적(2026-07-30, 오르테가군 전달) — "노드를 눌러도 아무 일이 안 나는" 것이
-  // #2224 AC1의 두 번째 결함이었다(간선 그리기와 별개). PO 판정: 「패널을 연다」로 간다
-  // (캔버스 안 확장은 절대좌표라 레이아웃이 흔들리고, 곧 들어올 줌과도 정면충돌). 이미
-  // `KanbanBoard`가 `?story=` 를 읽어 패널을 여는 길이 있다(딥링크가 그 길을 쓴다) —
-  // 새 패널을 짓지 않고 «그 길을 그대로 타는» 것이 오늘의 배선. view를 list로 함께
-  // 바꿔야 KanbanBoard 자체가 마운트된다(list일 때만 렌더되는 조건부 마운트, 아래 참고).
+  // AC6(판정선) — 패널을 닫아도 URL의 story는 지우지 않는다("누른 노드가 선택된 채로
+  // 남는다" — selectedStoryId는 URL이 단일 소스, 열림/닫힘은 이 로컬 boolean만 관여). 다시
+  // 그 노드를 누르면 handleSelectStory가 다시 panelOpen=true로 돌린다.
+  const [panelOpen, setPanelOpen] = useState(false);
+  const selectedStoryId = searchParams.get('story');
+  useEffect(() => {
+    if (selectedStoryId) setPanelOpen(true);
+  }, [selectedStoryId]);
+  const handleClosePanel = useCallback(() => setPanelOpen(false), []);
+
+  // story #2354 후속(2026-07-31) — 예전엔 view를 'list'로 함께 갈아 끼워 KanbanBoard(그
+  // 안의 StoryDetailPanel)를 마운트시켰는데, 그 view 전환 자체가 «갈래 캔버스를
+  // 언마운트»시키는 원인이었다(선생님 "인터랙션이 없다"의 구조적 뿌리 — 조사 결론:
+  // 옛 flow-client.tsx:111 주석 "view를 list로 함께 바꿔야 KanbanBoard 자체가 마운트된다").
+  // 이제 `?story=`만 붙이고 view는 손대지 않는다 — 캔버스는 그대로 살아있고, 아래
+  // `FlowNodeStoryPanel`이 지도 위에 겹쳐 뜬다.
   const handleSelectStory = useCallback((storyId: string) => {
     const params = new URLSearchParams(searchParams.toString());
-    params.set('view', 'list');
     params.set('story', storyId);
-    router.push(`/${wsSlug}/${projSlug}/flow?${params.toString()}`);
+    router.push(`/${wsSlug}/${projSlug}/flow?${params.toString()}`, { scroll: false });
+    setPanelOpen(true);
   }, [router, searchParams, wsSlug, projSlug]);
 
   const exceptionItems = useMemo(() => {
@@ -181,9 +192,23 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
               {t('loading')}
             </div>
           ) : (
-            <NextMakerScreen projectId={projectId} memberMap={data?.memberMap ?? {}} onSelectStory={handleSelectStory} />
+            <NextMakerScreen
+              projectId={projectId}
+              memberMap={data?.memberMap ?? {}}
+              onSelectStory={handleSelectStory}
+              selectedNodeId={selectedStoryId}
+            />
           )
         )}
+
+        {/* story #2354 — 지도 위에 겹치는 패널. list 보기일 땐 KanbanBoard가 이미 자기
+            방식(전체화면 드로어)으로 같은 `?story=`를 읽어 여는 중이라(AC9 회귀 없음), 여기서
+            또 열면 두 벌이 뜬다 — view==='flow'일 때만 렌더한다. */}
+        {view !== 'list' && panelOpen && selectedStoryId ? (
+          // key={selectedStoryId} — 다른 노드를 연달아 누르면 통째로 다시 마운트시킨다(초기
+          // loading 상태가 매번 자연히 맞다, flow-node-story-panel.tsx 문서 참고).
+          <FlowNodeStoryPanel key={selectedStoryId} storyId={selectedStoryId} onClose={handleClosePanel} />
+        ) : null}
 
         {/* ③ 관제 서랍 — 보기 무관 고정, 접힘 기본(IA §2). ExceptionStream = #2100 예외 스트림
             그대로 재사용(A타입, AC4 — glance-board.tsx가 쓰는 그 컴포넌트 그대로, 새로 그린

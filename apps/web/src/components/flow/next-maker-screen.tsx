@@ -20,6 +20,8 @@ interface NextMakerScreenProps {
   projectId: string;
   memberMap: Record<string, MemberLite>;
   onSelectStory: (storyId: string) => void;
+  /** story #2354 — 순수 통과 prop(FlowMapCanvas 참고, 노드 선택 고리 강조). */
+  selectedNodeId?: string | null;
 }
 
 interface Envelope<T> { data: T; meta?: unknown }
@@ -85,7 +87,7 @@ type LoadState =
  * in-progress·in-review)만 프로젝트 전체로 긁는다 — 실측(아티팩트 리드) "미래는 39개"라
  * project 규모 전체를 긁어도 가볍다.
  */
-export function NextMakerScreen({ projectId, memberMap, onSelectStory }: NextMakerScreenProps) {
+export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedNodeId = null }: NextMakerScreenProps) {
   const t = useTranslations('flow');
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   // 스토리 하나가 승격(backlog→ready-for-dev)되거나 목표가 전이(done/archived)되면, 전체
@@ -285,6 +287,7 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory }: NextMak
               recentlyClosedTargetIds={state.kind === 'ready' ? state.recentlyClosedTargetIds : new Set()}
               memberMap={memberMap}
               onSelectStory={onSelectStory}
+              selectedNodeId={selectedNodeId}
               onStoryPromoted={handleStoryPromoted}
               onGoalTransitioned={handleGoalTransitioned}
             />

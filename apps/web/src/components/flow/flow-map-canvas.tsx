@@ -23,10 +23,11 @@ const NOW_CLUSTER_X = FLOW_MAP_NOW_LINE_X - 40; // "지금" 노드는 세로선 
 
 interface FlowMapCanvasProps {
   lanes: FlowMapLane[];
-  /** 노드 클릭 → 스토리 상세 패널(선생님 지적 2026-07-30 — 동사 0개였다). PO 판정:
-   * 「패널을 연다」— 캔버스 밖이라 곧 들어올 줌(축척)과 충돌하지 않고, 절대좌표 레이아웃도
-   * 안 흔들린다(이유 셋 중 둘째·셋째). `?view=list&story={id}`로 기존 KanbanBoard 오픈
-   * 경로를 그대로 탄다(딥링크가 이미 쓰는 그 길, 새 패널을 짓지 않는다). */
+  /** 노드 클릭 → 스토리 상세 패널(선생님 지적 2026-07-30 — 동사 0개였다). story #2354
+   * 후속(2026-07-31) — 예전엔 `?view=list&story={id}`로 칸반 오픈 경로를 탔으나, view를
+   * 갈아 끼우는 것 자체가 캔버스를 언마운트시키는 원인이었다(선생님 "인터랙션이 없다"의
+   * 구조적 뿌리). 지금은 호출부(flow-client.tsx)가 `?story={id}`만 붙이고 지도 «위»에
+   * 겹치는 팝오버로 같은 `StoryDetailPanel`을 재사용한다 — view는 그대로 둔다. */
   onSelectStory: (storyId: string) => void;
   /** 유나양 규격(아티팩트 a125909a, "누르면 펼쳐지는 것이 곧 줌인") — 묶음 카드를 누르면
    * 호출부(FlowEpicNodes)가 개별 과거 스토리를 fetch해 `pastItems`로 다시 넘긴다. 오늘은
@@ -36,6 +37,10 @@ interface FlowMapCanvasProps {
   onTogglePastBundle: () => void;
   /** fetch 진행 중 — 묶음 카드가 "불러오는 중…"을 보이는 자리. */
   isPastBundleLoading: boolean;
+  /** story #2354 AC6 — 패널을 «닫아도» 마지막으로 누른 노드가 선택된 채로 남는다(고리 강조
+   * ring). URL의 `?story=`가 단일 소스 — 패널이 닫혀도 이 값은 지워지지 않는다(호출부가
+   * 패널의 열림/닫힘만 별도 로컬 상태로 관리, 선택 자체는 URL 그대로). */
+  selectedNodeId?: string | null;
 }
 
 // PO 지적(2026-07-30) — 판을 갈아엎으며 색/모양(border-left)만 남기고 「status를 사람이
@@ -57,7 +62,7 @@ function nodeToneClass(node: FlowMapNode): string {
   return 'border-l-border border-dashed'; // .n.queue — 아직 시작 안 한 것은 점선
 }
 
-function FlowMapNodeCard({ node, left, top, superseded, onSelectStory }: { node: FlowMapNode; left: number; top: number; superseded: boolean; onSelectStory: (storyId: string) => void }) {
+function FlowMapNodeCard({ node, left, top, superseded, selected, onSelectStory }: { node: FlowMapNode; left: number; top: number; superseded: boolean; selected: boolean; onSelectStory: (storyId: string) => void }) {
   const t = useTranslations('flow');
   const statusKey = STATUS_LABEL_KEY[node.status];
   // 유나양 규격(아티팩트 a125909a `.nd.past{opacity:.62}`) — 펼친 과거 카드는 항상 흐림
@@ -66,8 +71,14 @@ function FlowMapNodeCard({ node, left, top, superseded, onSelectStory }: { node:
   return (
     <button
       type="button"
+      // story #2354 — data-node-id는 오버레이 패널이 "이 노드를 가리지 않는" 위/아래 반전
+      // 위치를 계산할 앵커(getBoundingClientRect)를 찾는 자리다. onSelectStory 시그니처를
+      // 건드리지 않는다(오르빈·목록 피커 등 «노드가 아닌» 호출부가 여럿이라, DOM 앵커
+      // 개념이 없는 그 호출부들까지 억지로 끌고 갈 이유가 없다 — 호출부는 storyId 하나만
+      // 안다). 패널을 닫아도 selected는 유지된다("누른 노드가 선택된 채로 남는다", AC6).
+      data-node-id={node.id}
       onClick={() => onSelectStory(node.id)}
-      className={`focus-inset absolute w-[110px] cursor-pointer overflow-visible rounded border border-l-[3px] border-border bg-card px-1.5 py-1 text-left text-[11px] shadow-sm hover:border-info/60 ${nodeToneClass(node)} ${dimmed ? 'opacity-50' : ''}`}
+      className={`focus-inset absolute w-[110px] cursor-pointer overflow-visible rounded border border-l-[3px] border-border bg-card px-1.5 py-1 text-left text-[11px] shadow-sm hover:border-info/60 ${nodeToneClass(node)} ${dimmed ? 'opacity-50' : ''} ${selected ? 'ring-2 ring-brand ring-offset-1 ring-offset-background' : ''}`}
       style={{ left, top }}
     >
       <div className="flex items-center justify-between gap-1 font-mono text-[9px] text-muted-foreground">
@@ -146,7 +157,7 @@ function FlowEdgeMarkerDefs() {
  * (PO 지시 — "한 레인 전용으로 짜지 마시는, 처음부터 레인 배열을 받는 형태로"). 오늘은 이
  * 배열의 길이가 늘 1(펼친 에픽 하나) — 멀티레인 계약이 오면 호출부만 배열을 채워 넘기면 된다.
  */
-export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPastBundleLoading }: FlowMapCanvasProps) {
+export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPastBundleLoading, selectedNodeId = null }: FlowMapCanvasProps) {
   const t = useTranslations('flow');
   const maxDepth = Math.max(0, ...lanes.flatMap((l) => Array.from(l.queueNodesByDepth.keys())));
   const canvasWidth = FLOW_MAP_DEPTH0_X + (maxDepth + 1) * FLOW_MAP_GRID_STEP + 20;
@@ -323,12 +334,13 @@ export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPast
                       left={PAST_EXPANDED_LEFT}
                       top={PAST_EXPANDED_TOP_START + i * PAST_EXPANDED_ROW_HEIGHT}
                       superseded={supersededIds.has(node.id)}
+                      selected={node.id === selectedNodeId}
                       onSelectStory={onSelectStory}
                     />
                   ))}
 
                   {lane.nowNodes.map((node, i) => (
-                    <FlowMapNodeCard key={node.id} node={node} left={NOW_CLUSTER_X} top={4 + i * NODE_ROW_HEIGHT} superseded={supersededIds.has(node.id)} onSelectStory={onSelectStory} />
+                    <FlowMapNodeCard key={node.id} node={node} left={NOW_CLUSTER_X} top={4 + i * NODE_ROW_HEIGHT} superseded={supersededIds.has(node.id)} selected={node.id === selectedNodeId} onSelectStory={onSelectStory} />
                   ))}
 
                   {/* ①깊이 좌표 — x = FLOW_MAP_DEPTH0_X + depth × FLOW_MAP_GRID_STEP. depth는
@@ -339,7 +351,7 @@ export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPast
                     return (
                       <div key={depth}>
                         {nodes.map((node, i) => (
-                          <FlowMapNodeCard key={node.id} node={node} left={x} top={4 + i * NODE_ROW_HEIGHT} superseded={supersededIds.has(node.id)} onSelectStory={onSelectStory} />
+                          <FlowMapNodeCard key={node.id} node={node} left={x} top={4 + i * NODE_ROW_HEIGHT} superseded={supersededIds.has(node.id)} selected={node.id === selectedNodeId} onSelectStory={onSelectStory} />
                         ))}
                         {/* ③「+N건」 더보기 카드(판C) — 잘린 수를 정직하게 보인다. "숨김"이
                             아니라 "있다는 걸 보여주며 접는 것"(오늘 「67 중 15」와 같은 규율). */}
