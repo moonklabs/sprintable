@@ -275,11 +275,17 @@ describe('FlowMultiLaneCanvas — N개 레인 병렬 fetch', () => {
 // 못 채웠다: 오프스크린(가로 잘림) 힌트가 `FlowMapCanvas`(세로 클리핑되는 쪽) 자신의
 // `absolute bottom-1`로 붙어 있어, 그 조상 `FlowCanvasResizePane`(`overflow-y-auto`로
 // 실제 세로 클리핑하는 «보이는 창»)의 전체 콘텐츠 맨 아래(스크롤 1814px 아래)로 가버려
-// 기본 상태에서 화면에 0%였다. 이 테스트는 힌트가 실제 클리핑 컨테이너
-// (`[data-testid="flow-canvas-resize-pane"]`)의 «직계 자식»으로 붙어(그 자신은 클리핑
-// «대상»이 아니라 클리핑하는 쪽이므로 세로 스크롤과 무관하게 항상 보인다) 정확히 하나만
-// 존재하는지 확認한다 — FlowMapCanvas 안에서 또 그려 중복되는 것도 여기서 잡힌다.
-describe('FlowMultiLaneCanvas — story #2369 QA 후속: 오프스크린 힌트가 실제 클리핑 창 기준으로 뜬다', () => {
+// 기본 상태에서 화면에 0%였다.
+//
+// ⛔유나 design:changes 재현(2026-07-31) — 1차 수정은 힌트를 `[data-testid="flow-canvas-
+// resize-pane"]`의 «직계 자식»으로만 옮겼는데, 그 div 자신이 `overflow-y-auto`(스크롤하는
+// 쪽)였다 — `position:absolute`는 기준점(containing block)만 그 조상으로 잡을 뿐, 조상
+// 자신이 스크롤하면 콘텐츠와 함께 그대로 딸려 움직인다(실측: scrollTop=350에서 350px 밀려
+// 화면 밖으로 사라짐). 「직계 자식인가」와 「세로 스크롤에 클리핑 안 되는가」는 같은 질문이
+// 아니었다 — 직계 자식이면서 클리핑 «되는» 것이 정확히 그 반례였다. 이 테스트는 그래서
+// 위치(자식 관계)가 아니라 «성질»을 잰다: 힌트의 조상 중 `overflow-y-auto` 클래스를 가진
+// 요소가 하나도 없어야 한다 — 이 성질은 DOM을 나중에 어떻게 재배치해도 뜻이 안 바뀐다.
+describe('FlowMultiLaneCanvas — story #2369 QA 후속: 오프스크린 힌트가 세로 스크롤에 클리핑되지 않는다', () => {
   let originalClientWidth: PropertyDescriptor | undefined;
   let originalScrollWidth: PropertyDescriptor | undefined;
 
@@ -298,7 +304,7 @@ describe('FlowMultiLaneCanvas — story #2369 QA 후속: 오프스크린 힌트�
     if (originalScrollWidth) Object.defineProperty(HTMLElement.prototype, 'scrollWidth', originalScrollWidth);
   });
 
-  it('renders exactly one offscreen-hint, as a direct child of the resize-pane (the actual vertically-clipping ancestor) — not inside FlowMapCanvas', async () => {
+  it('renders exactly one offscreen-hint, with no overflow-y-auto (vertically-scrolling) ancestor — not clipped regardless of scroll position', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/api/dependencies/graph')) return jsonResponse({ item_type: 'story', nodes: [], edges: [] });
@@ -327,10 +333,15 @@ describe('FlowMultiLaneCanvas — story #2369 QA 후속: 오프스크린 힌트�
     expect(hints).toHaveLength(1);
     expect(hints[0]?.textContent).toContain('카드 1장이 화면 밖');
 
-    const resizePane = container.querySelector('[data-testid="flow-canvas-resize-pane"]');
-    expect(resizePane).not.toBeNull();
-    // 직계 자식이어야 한다 — FlowMapCanvas(자식의 자식들) 안이 아니라 클리핑 컨테이너
-    // «자신»의 보이는 창 기준으로 붙어야 세로 스크롤과 무관하게 항상 보인다.
-    expect(Array.from(resizePane!.children)).toContain(hints[0]);
+    // 유나 design:changes 지적 — 「직계 자식인가」가 아니라 「세로로 스크롤하는 조상이
+    // 있는가」가 실제로 겨눠야 할 성질이다. 직계 자식이면서도 그 부모 자신이
+    // overflow-y-auto(스크롤하는 쪽)면 여전히 클리핑을 탄다(1차 수정이 정확히 이 반례였다).
+    let node = hints[0]!.parentElement;
+    let hasScrollingAncestor = false;
+    while (node) {
+      if (node.className.includes('overflow-y-auto')) hasScrollingAncestor = true;
+      node = node.parentElement;
+    }
+    expect(hasScrollingAncestor).toBe(false);
   });
 });

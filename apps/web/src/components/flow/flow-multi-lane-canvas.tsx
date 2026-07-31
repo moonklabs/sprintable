@@ -8,7 +8,7 @@ import {
   deriveFlowMapLane, parseDependencyGraphEdges, parseReferenceCandidateEdges,
   type FlowMapEdge, type RawDependencyEdge, type RawReferenceCandidate,
 } from './derive-flow-map';
-import { FlowMapCanvas, HEADER_HEIGHT, NODE_ROW_HEIGHT, LANE_MIN_HEIGHT, type CreateLinkResult, type DeleteLinkResult } from './flow-map-canvas';
+import { FlowMapCanvas, FlowCanvasOffscreenHint, HEADER_HEIGHT, NODE_ROW_HEIGHT, LANE_MIN_HEIGHT, type CreateLinkResult, type DeleteLinkResult } from './flow-map-canvas';
 import { FlowCanvasResizePane } from './flow-canvas-resize-pane';
 import { declareResponseToEdge } from './flow-port-linking';
 import type { NextMakerGoal } from './derive-next-maker';
@@ -283,20 +283,12 @@ export function FlowMultiLaneCanvas({
         nodeRowHeight={NODE_ROW_HEIGHT}
         laneMinHeight={LANE_MIN_HEIGHT}
         headerHeight={HEADER_HEIGHT}
-        overlay={offscreenCardCount > 0 ? (
-          // story #2369 QA 후속 — flow-map-canvas.tsx의 기존 배지와 «같은 꼴»(pointer-events-none·
-          // 아이콘+굵은 수+설명·같은 클래스). 여기 그리는 이유는 이 div가 FlowCanvasResizePane의
-          // «보이는 창»(overflow-y-auto 조상) 기준으로 붙기 때문 — FlowMapCanvas 안에 있었으면
-          // 세로 전체 콘텐츠 높이 기준이 돼 클리핑 밖(안 보이는 자리)에 갔다.
-          <div
-            data-testid="flow-canvas-offscreen-hint"
-            className="pointer-events-none absolute bottom-1 right-1 z-10 flex items-center gap-1.5 rounded border border-border bg-muted/90 px-2 py-1 text-[11px] text-muted-foreground shadow-sm"
-          >
-            <span aria-hidden="true">▸</span>
-            <b className="text-foreground">{t('flowCanvasOffscreenCount', { n: offscreenCardCount })}</b>
-            <span className="text-foreground">{t('flowCanvasOffscreenReason')}</span>
-          </div>
-        ) : null}
+        // story #2369 QA 후속(2026-07-31, 유나 design:changes ③) — 배지 마크업은
+        // FlowCanvasOffscreenHint(flow-map-canvas.tsx) 단일 소스에서만 나온다(예전엔 여기
+        // 손으로 복제한 사본이었다). overlay로 넘기는 이유는 FlowCanvasResizePane이 이 자리를
+        // 세로 클리핑 «밖»(스크롤 컨테이너의 형제)에 그리기 때문 — FlowMapCanvas 안에 있었으면
+        // 콘텐츠 전체 높이 기준이 돼 클리핑 안(스크롤해야 보이는 자리)에 갔다.
+        overlay={<FlowCanvasOffscreenHint count={offscreenCardCount} />}
       >
         <FlowMapCanvas
           lanes={lanes}

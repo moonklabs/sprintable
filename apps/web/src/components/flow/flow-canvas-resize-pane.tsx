@@ -146,8 +146,20 @@ export function FlowCanvasResizePane({ lanes, nodeRowHeight, laneMinHeight, head
 
   return (
     <div>
-      <div data-testid="flow-canvas-resize-pane" className="relative overflow-y-auto focus-inset" style={{ height: displayHeightPx }}>
-        {children}
+      {/* 유나 design:changes 재현(2026-07-31, PR#2757) — «반만» 고친 자리. `position:absolute`는
+          기준점(containing block)을 `position:relative` 조상으로 잡을 뿐, 그 조상 «자신»이
+          스크롤하면 콘텐츠와 함께 그대로 움직인다(overlay가 이 div의 자식이면서 이 div가
+          스크롤하니, overlay도 스크롤을 탄다 — 실측: scrollTop=350에서 overlay가 화면
+          밖으로 350px 밀려 사라짐). 클리핑(`overflow-y-auto`)과 기준점(`relative`+고정
+          height)을 같은 요소에 두면 이 병을 못 피한다 — 스크롤하는 요소(안쪽, `{children}`만)와
+          기준점 역할을 하는 요소(바깥쪽, 스크롤 안 함)를 갈라야 overlay가 안쪽의 스크롤과
+          무관해진다. `data-testid="flow-canvas-resize-pane"`와 `style={{ height }}`는 기존
+          테스트(paneHeightPx 등)가 참조하는 요소라 바깥쪽에 그대로 둔다 — 실제로 스크롤하는
+          것은 그 안의 새 `overflow-y-auto` div뿐이다. */}
+      <div data-testid="flow-canvas-resize-pane" className="relative" style={{ height: displayHeightPx }}>
+        <div className="h-full overflow-y-auto focus-inset">
+          {children}
+        </div>
         {overlay}
       </div>
       <div className="flex items-center justify-center gap-2 border-t border-border bg-muted/20 py-1">

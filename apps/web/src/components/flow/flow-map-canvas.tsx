@@ -232,6 +232,33 @@ function FlowEdgeMarkerDefs() {
 }
 
 /**
+ * story #2369 QA 후속(2026-07-31, 유나 design:changes 재현 코멘트) — 오프스크린(가로 잘림)
+ * 배지 마크업의 단일 소스. 올리베이라군 자기 지적(③) — `LANE_LABEL_WIDTH` 사본 셋을 잡으면서
+ * «같은 diff 안에서» 이 배지 마크업(클래스 문자열·아이콘·i18n 키)을 두 자리(FlowMapCanvas
+ * 내부 · flow-multi-lane-canvas.tsx의 overlay)에 손으로 복제하는 새 사본을 만들었다 — 그
+ * 사본을 여기 하나로 없앤다. 콜백이 있는 호출부(멀티레인)는 이 컴포넌트를 클리핑 밖(overlay
+ * 슬롯)에서 쓰고, 콜백이 없는 호출부(단일-레인)는 FlowMapCanvas 안에서 그대로 쓴다 — 마크업
+ * 자체는 어느 쪽이든 같다.
+ */
+export function FlowCanvasOffscreenHint({ count }: { count: number }) {
+  const t = useTranslations('flow');
+  if (count <= 0) return null;
+  return (
+    <div
+      data-testid="flow-canvas-offscreen-hint"
+      className="pointer-events-none absolute bottom-1 right-1 z-10 flex items-center gap-1.5 rounded border border-border bg-muted/90 px-2 py-1 text-[11px] text-muted-foreground shadow-sm"
+    >
+      <span aria-hidden="true">▸</span>
+      <b className="text-foreground">{t('flowCanvasOffscreenCount', { n: count })}</b>
+      {/* 유나 라이브 실측(2026-07-31) — 컨테이너의 text-muted-foreground를 상속한 이 설명
+          줄이 bg-muted/90 위에서 라이트 4.43:1로 AA 미달(다크는 5.78 통과 — 또 라이트에서만).
+          #2368의 같은 처방 — text-foreground로 올려 4.5:1을 넘긴다. */}
+      <span className="text-foreground">{t('flowCanvasOffscreenReason')}</span>
+    </div>
+  );
+}
+
+/**
  * story #2224 L3 — 갈래 «지도»(유나 목업 `be8709a4` 판A/판B/판C, PO 판정 2026-07-30).
  * ⑤레인 높이가 «내용에서 계산»(고정 아님) · ①노드가 «의존 깊이 좌표»(x = depth × 110px,
  * computeNodeDepth가 실제 계산 — 오늘은 간선이 없어 전부 depth 0) · ②「지금」 세로선
@@ -873,29 +900,13 @@ export function FlowMapCanvas({
         </div>
       </div>
 
-      {/* story #2369(2026-07-31) — 가로 잘림 발견성. 세로 접힘 줄과 «같은 꼴»(아이콘+굵은
-          수+설명)이되, 오른쪽 가장자리에 떠 있는 배지로 둔다(전체 폭 줄이면 스크롤 레이아웃
-          자체를 침범한다 — 세로 판은 캔버스 «아래»에 붙지만 가로 판은 캔버스 «가장자리
-          위»에 떠야 한다). pointer-events-none — 정보 전달용이지 클릭 대상이 아니다(세로
-          접힘 줄도 클릭 불가한 정적 안내문과 같은 성질). */}
       {/* story #2369 QA 후속(2026-07-31) — onOffscreenCountChange가 있으면(멀티레인 호출부)
-          호출부가 세로-클리핑 조상의 «보이는 창» 안에서 이 힌트를 직접 그린다(위
-          onOffscreenCountChange 문서 참고) — 여기서 또 그리면 세로로 클리핑돼 아무도 못
-          보는 자리에 중복으로 뜬다. 콜백이 없는(단일-레인, flow-epic-nodes.tsx) 호출부만
-          기존 그대로 여기서 그린다 — 그쪽은 세로 클리핑 조상이 없어 이 자리가 이미 맞다. */}
-      {!onOffscreenCountChange && offscreenCardCount > 0 ? (
-        <div
-          data-testid="flow-canvas-offscreen-hint"
-          className="pointer-events-none absolute bottom-1 right-1 z-10 flex items-center gap-1.5 rounded border border-border bg-muted/90 px-2 py-1 text-[11px] text-muted-foreground shadow-sm"
-        >
-          <span aria-hidden="true">▸</span>
-          <b className="text-foreground">{t('flowCanvasOffscreenCount', { n: offscreenCardCount })}</b>
-          {/* 유나 라이브 실측(2026-07-31) — 컨테이너의 text-muted-foreground를 상속한 이
-              설명 줄이 bg-muted/90 위에서 라이트 4.43:1로 AA 미달(다크는 5.78 통과 — 또
-              라이트에서만). #2368의 같은 처방 — text-foreground로 올려 4.5:1을 넘긴다. */}
-          <span className="text-foreground">{t('flowCanvasOffscreenReason')}</span>
-        </div>
-      ) : null}
+          호출부가 세로-클리핑 조상의 «보이는 창» 밖(overlay 슬롯)에서 FlowCanvasOffscreenHint를
+          직접 그린다(위 onOffscreenCountChange 문서 참고) — 여기서 또 그리면 세로로 클리핑돼
+          아무도 못 보는 자리에 중복으로 뜬다. 콜백이 없는(단일-레인, flow-epic-nodes.tsx)
+          호출부만 기존 그대로 여기서 그린다 — 그쪽은 세로 클리핑 조상이 없어 이 자리가 이미
+          맞다. */}
+      {!onOffscreenCountChange ? <FlowCanvasOffscreenHint count={offscreenCardCount} /> : null}
 
       {/* 하단 범례 — 유나신 정정(2026-07-31, 라이브 실측 후속, 세 번째·최終 문구 확定): 옛
           4종×2축 범례는 실선(확定)이 «한 번도 안 나오는데» "실선=확定"이라 적어 없는 것을
