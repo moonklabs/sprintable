@@ -671,3 +671,5 @@
 .tiptap [data-type="toggleSummary"] { cursor: pointer; }
 
 /* #2361 combined re-verify (fix+freshness merged) — throwaway, commit 1 */
+
+/* #2361 combined re-verify (commit 2 — makes stale) */
