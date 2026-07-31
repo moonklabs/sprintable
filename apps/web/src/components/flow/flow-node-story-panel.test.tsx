@@ -13,11 +13,15 @@ import { FlowNodeStoryPanel } from './flow-node-story-panel';
 import koMessages from '../../../messages/ko.json';
 
 vi.mock('@/components/kanban/story-detail-panel', () => ({
-  StoryDetailPanel: ({ story, onClose, overlayPosition }: { story: { title: string }; onClose: () => void; overlayPosition: { top: number; heightPx: number } }) => (
-    <div data-testid="story-detail-panel-stub">
+  StoryDetailPanel: ({ story, onClose, overlayPosition }: { story: { title: string }; onClose: () => void; overlayPosition?: { top: number; heightPx: number } }) => (
+    <div data-testid="story-detail-panel-stub" data-mode={overlayPosition ? 'overlay' : 'fullscreen'}>
       <span data-testid="stub-title">{story.title}</span>
-      <span data-testid="stub-top">{overlayPosition.top}</span>
-      <span data-testid="stub-height">{overlayPosition.heightPx}</span>
+      {overlayPosition ? (
+        <>
+          <span data-testid="stub-top">{overlayPosition.top}</span>
+          <span data-testid="stub-height">{overlayPosition.heightPx}</span>
+        </>
+      ) : null}
       <button type="button" onClick={onClose}>close</button>
     </div>
   ),
@@ -54,6 +58,20 @@ function setViewportHeight(h: number) {
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: h });
 }
 
+// useIsMobile()은 실제 판정값을 window.innerWidth<1024로 계산하고(use-mobile.ts), matchMedia는
+// addEventListener 배선용으로만 쓴다 — 그래서 둘 다 맞춰야 한다(matches만 바꿔선 안 갈린다).
+function stubMatchMedia() {
+  vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
+}
+
+function setViewportWidth(w: number) {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: w });
+}
+
 function placeAnchor(id: string, rect: Partial<DOMRect>) {
   const el = document.createElement('button');
   el.setAttribute('data-node-id', id);
@@ -70,6 +88,8 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   setViewportHeight(768);
+  setViewportWidth(1280); // 기본 데스크톱(1024 이상) — 모바일 테스트는 명시적으로 좁힌다.
+  stubMatchMedia();
   // 위치 계산 effect가 rAF로 미뤄져 있다(react-hooks/set-state-in-effect 회피 — 컴포넌트
   // 문서 참고). 테스트에서는 동기로 즉시 실행해 결정적으로 만든다.
   let rafId = 0;
@@ -163,5 +183,67 @@ describe('FlowNodeStoryPanel — 위/아래 반전(story #2354 AC4, 누른 노�
     expect(container.querySelector('[data-testid="story-detail-panel-stub"]')).not.toBeNull();
     const top = Number(container.querySelector('[data-testid="stub-top"]')?.textContent);
     expect(Number.isFinite(top)).toBe(true);
+  });
+});
+
+describe('FlowNodeStoryPanel — 로딩 표시(유나 가디언 리뷰 2026-07-31, issuecomment-5139371576, 침묵 구간 금지)', () => {
+  it('shows the nodesLoading text — NOT nothing — while the fetch is still pending', () => {
+    // fetch를 절대 안 풀리는 Promise로 스텁 — 이 시점의 렌더는 항상 loading 상태다.
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    placeAnchor('story-abc', { top: 100, bottom: 130 });
+
+    act(() => {
+      root.render(wrap(<FlowNodeStoryPanel storyId="story-abc" onClose={() => {}} />));
+    });
+
+    expect(container.textContent).toContain('노드를 불러오는 중');
+    // ⛔누른 직후 "아무 것도 안 뜬 것"처럼 보이면 침묵 구간이 선다 — StoryDetailPanel은
+    // 아직 마운트되지 않아야 정상이다(fetch가 안 끝났으므로).
+    expect(container.querySelector('[data-testid="story-detail-panel-stub"]')).toBeNull();
+  });
+});
+
+describe('FlowNodeStoryPanel — 모바일 게이트(유나 가디언 리뷰 2026-07-31, issuecomment-5139371576)', () => {
+  it('on mobile (<1024px), renders StoryDetailPanel WITHOUT overlayPosition — full-screen drawer mode, not the compact overlay', async () => {
+    setViewportWidth(375);
+    const calledUrls: string[] = [];
+    stubFetch(calledUrls);
+    placeAnchor('story-abc', { top: 100, bottom: 130 }); // 앵커가 있어도 모바일은 무시한다.
+
+    await act(async () => {
+      root.render(wrap(<FlowNodeStoryPanel storyId="story-abc" onClose={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const stub = container.querySelector('[data-testid="story-detail-panel-stub"]');
+    expect(stub?.getAttribute('data-mode')).toBe('fullscreen');
+    expect(container.querySelector('[data-testid="stub-top"]')).toBeNull();
+  });
+
+  it('on mobile, the loading indicator renders without waiting on the (unused) anchor position effect', () => {
+    setViewportWidth(375);
+    // 앵커를 배치하지 않는다 — 모바일은 앵커 좌표 자체가 필요 없으므로 여전히 안전해야 한다.
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+
+    act(() => {
+      root.render(wrap(<FlowNodeStoryPanel storyId="story-abc" onClose={() => {}} />));
+    });
+
+    expect(container.textContent).toContain('노드를 불러오는 중');
+  });
+
+  it('on desktop (>=1024px), still uses the compact overlay (regression guard — mobile gate does not leak to desktop)', async () => {
+    setViewportWidth(1280);
+    const calledUrls: string[] = [];
+    stubFetch(calledUrls);
+    placeAnchor('story-abc', { top: 100, bottom: 130 });
+
+    await act(async () => {
+      root.render(wrap(<FlowNodeStoryPanel storyId="story-abc" onClose={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const stub = container.querySelector('[data-testid="story-detail-panel-stub"]');
+    expect(stub?.getAttribute('data-mode')).toBe('overlay');
   });
 });

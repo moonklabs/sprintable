@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { StoryDetailPanel, type Task } from '@/components/kanban/story-detail-panel';
 import type { KanbanStory } from '@/components/kanban/types';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 const OVERLAY_GAP = 8; // 노드와 패널 사이 여백(px)
 const OVERLAY_EDGE_MARGIN = 16; // 뷰포트 가장자리 여백(px)
@@ -52,9 +53,17 @@ function computeOverlayPosition(rect: DOMRect | null, viewportHeight: number): {
  * 아래쪽 절반이면 «위»에 둔다. 앵커를 못 찾으면(오르빈 등 캔버스 밖 호출 — 오늘은 실제로
  * 안 일어난다, onSelectStory는 노드 클릭 전용 경로에서만 storyId를 이 컴포넌트로 올린다)
  * 뷰포트 중앙 폴백으로 안전하게 내려간다.
+ *
+ * ⛔유나 가디언 리뷰(2026-07-31, PR#2722 issuecomment-5139371576) — 모바일(390px)엔 이
+ * 소형 오버레이를 그대로 쓰지 않는다. 「지도를 살려 둔다」가 데스크톱서 값 있는 건 지도가
+ * «넓어서»다 — 모바일은 지도도 절반·상세도 절반이 되어 헤더+설명+작업+댓글이 못 들어간다
+ * (IA §5에 이미 선 판단: 겹침이 아니라 독립 화면). isMobile이면 앵커 위치 계산 자체를 건너
+ * 뛰고 `StoryDetailPanel`에 overlayPosition을 안 넘긴다 — 그러면 그 컴포넌트가 이미 갖고
+ * 있는 전체화면 드로어 모드(KanbanBoard가 쓰는 그 경로 그대로, 새 컴포넌트 아님)로 뜬다.
  */
 export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps) {
   const t = useTranslations('flow');
+  const isMobile = useIsMobile();
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [overlayPosition, setOverlayPosition] = useState<{ top: number; heightPx: number } | null>(null);
 
@@ -89,6 +98,7 @@ export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps
   // set-state-in-effect가 effect 본문 최상위의 무조건 setState를 막는다(mobile-selection-
   // menu.tsx의 "구독→콜백에서 setState" 관례와 같은 자리 — 여긴 구독 대상이 rAF 타이밍).
   useEffect(() => {
+    if (isMobile) return; // 모바일은 전체화면 드로어라 앵커 좌표가 필요 없다.
     let cancelled = false;
     const frame = requestAnimationFrame(() => {
       if (cancelled) return;
@@ -100,20 +110,36 @@ export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps
       setOverlayPosition(computeOverlayPosition(anchorEl?.getBoundingClientRect() ?? null, window.innerHeight));
     });
     return () => { cancelled = true; cancelAnimationFrame(frame); };
-  }, [storyId]);
+  }, [storyId, isMobile]);
 
-  if (state.kind === 'loading' || !overlayPosition) {
-    return null;
+  // ⛔유나 가디언 리뷰(2026-07-31) — loading 구간에서 null을 반환하면 누른 직후 "아무 변화
+  // 없는" 침묵 구간이 선다(실패보다 나쁘다 — 신호 자체가 없어서). 이미 있는 `nodesLoading`
+  // 키(flow-epic-nodes.tsx가 같은 뜻으로 쓰는 그 키, ko.json:463)를 그대로 재사용한다.
+  if (state.kind === 'loading' || (!isMobile && !overlayPosition)) {
+    return (
+      <div
+        className="fixed inset-x-4 top-4 z-50 mx-auto max-w-xl rounded-lg border border-border bg-background p-3 text-xs text-muted-foreground shadow-xl sm:inset-x-auto sm:right-4 sm:w-full"
+        style={!isMobile && overlayPosition ? { top: overlayPosition.top } : undefined}
+      >
+        {t('nodesLoading')}
+      </div>
+    );
   }
   if (state.kind === 'error') {
     return (
       <div
-        className="fixed inset-x-4 z-50 mx-auto max-w-xl rounded-lg border border-border bg-background p-3 text-xs text-muted-foreground shadow-xl sm:inset-x-auto sm:right-4 sm:w-full"
-        style={{ top: overlayPosition.top }}
+        className="fixed inset-x-4 top-4 z-50 mx-auto max-w-xl rounded-lg border border-border bg-background p-3 text-xs text-muted-foreground shadow-xl sm:inset-x-auto sm:right-4 sm:w-full"
+        style={!isMobile && overlayPosition ? { top: overlayPosition.top } : undefined}
       >
         {t('nodesError')}
       </div>
     );
+  }
+
+  if (isMobile) {
+    // IA §5 — 모바일은 겹침이 아니라 독립 화면. overlayPosition을 안 넘기면
+    // StoryDetailPanel이 이미 갖고 있는 전체화면 드로어 모드로 뜬다(KanbanBoard와 동일 경로).
+    return <StoryDetailPanel story={state.story} tasks={state.tasks} onClose={onClose} />;
   }
 
   return (
@@ -121,7 +147,7 @@ export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps
       story={state.story}
       tasks={state.tasks}
       onClose={onClose}
-      overlayPosition={{ top: overlayPosition.top, heightPx: overlayPosition.heightPx }}
+      overlayPosition={{ top: overlayPosition!.top, heightPx: overlayPosition!.heightPx }}
     />
   );
 }
