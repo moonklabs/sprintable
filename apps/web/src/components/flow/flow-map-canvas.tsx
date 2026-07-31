@@ -856,7 +856,10 @@ export function FlowMapCanvas({
         >
           <span aria-hidden="true">▸</span>
           <b className="text-foreground">{t('flowCanvasOffscreenCount', { n: offscreenCardCount })}</b>
-          <span>{t('flowCanvasOffscreenReason')}</span>
+          {/* 유나 라이브 실측(2026-07-31) — 컨테이너의 text-muted-foreground를 상속한 이
+              설명 줄이 bg-muted/90 위에서 라이트 4.43:1로 AA 미달(다크는 5.78 통과 — 또
+              라이트에서만). #2368의 같은 처방 — text-foreground로 올려 4.5:1을 넘긴다. */}
+          <span className="text-foreground">{t('flowCanvasOffscreenReason')}</span>
         </div>
       ) : null}
 
