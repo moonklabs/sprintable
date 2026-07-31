@@ -285,7 +285,6 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const [equipError, setEquipError] = useState<string | null>(null);
   const [equipResult, setEquipResult] = useState<{
     name: string;
-    fakechat_port: number | null;
     mcp_config: Record<string, unknown> | null;
     api_key: string | null;
   } | null>(null);
@@ -310,11 +309,10 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
       });
       if (res.ok) {
         const json = (await res.json()) as {
-          data?: { fakechat_port?: number | null; mcp_config?: Record<string, unknown> | null; api_key?: string | null };
+          data?: { mcp_config?: Record<string, unknown> | null; api_key?: string | null };
         };
         setEquipResult({
           name,
-          fakechat_port: json.data?.fakechat_port ?? null,
           mcp_config: json.data?.mcp_config ?? null,
           api_key: json.data?.api_key ?? null,
         });
@@ -999,19 +997,23 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   가드에서 최초 1회만 non-null이 되므로 polite 낭독으로 충분(흐름 차단 아님). */}
               <div role="status" aria-live="polite" aria-atomic="true" className="space-y-3 rounded-md border border-success-border bg-success-tint p-4">
                 <p className="text-sm font-semibold text-success">{t('equipCreatedTitle', { name: equipResult.name })}</p>
-                {equipResult.fakechat_port ? (
-                  <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <Badge variant="info">SSE</Badge>
-                    <span className="font-mono text-foreground">Port: {equipResult.fakechat_port}</span>
-                    <span className="text-muted-foreground">— fakechat http://localhost:{equipResult.fakechat_port}/sse</span>
-                  </div>
-                ) : null}
                 {equipResult.api_key ? (
                   <div className="space-y-1">
                     <p className="text-xs font-medium text-foreground">{t('equipKeyOnceLabel')}</p>
                     <code className="block break-all rounded border border-border bg-background p-2 font-mono text-xs text-foreground/80">
                       {equipResult.api_key}
                     </code>
+                    {/* story #2362(2026-07-31) — 여기 있던 「이 포트로 접속하세요」 안내는
+                        죽은 안내였다(fakechat은 다이얼아웃 방식, 포트를 안 쓴다). 이 화면이
+                        이미 쥔 위 키가 그대로 fakechat이 필요로 하는 그 키라 재사용한다. */}
+                    <div className="space-y-1 pt-1 text-xs text-muted-foreground">
+                      <p className="flex flex-wrap items-center gap-1.5">
+                        <Badge variant="info">SSE</Badge>
+                        {tSettings('agentFakechatEnvKeyInstruction')}
+                      </p>
+                      <p>{tSettings('agentFakechatWebhookOffNote')}</p>
+                      <p>{tSettings('agentFakechatSuccessCheck')}</p>
+                    </div>
                   </div>
                 ) : null}
                 {equipResult.mcp_config ? (

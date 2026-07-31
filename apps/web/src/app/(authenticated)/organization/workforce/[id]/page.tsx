@@ -48,6 +48,10 @@ interface AgentMember {
   is_active: boolean;
   webhook_url: string | null;
   created_by: string | null;
+  // story #2362(2026-07-31) — 이 필드는 렌더에서 더 안 쓴다(fakechat은 다이얼아웃 방식이라
+  // 포트를 리슨하지 않는다, packages/fakechat/server.ts 참고 — 「연결하라」고 안내하던 것이
+  // 거짓이었다). 컬럼(마이그 0037) 자체는 안 지운다 — 이 파일 밖 소비처 전수를 안 했다.
+  // 지울지는 그걸 센 뒤에 정한다.
   fakechat_port: number | null;
   runtime_type: string | null;
 }
@@ -113,7 +117,7 @@ export default function AgentDetailPage() {
   const [freshMcpConfig, setFreshMcpConfig] = useState<string | null>(null);
   const [hasActiveKey, setHasActiveKey] = useState(false);
   const [mcpCopied, setMcpCopied] = useState(false);
-  const [fakechatMcpCopied, setFakechatMcpCopied] = useState(false);
+  const [fakechatEnvKeyCopied, setFakechatEnvKeyCopied] = useState(false);
 
   const [projects, setProjects] = useState<ProjectOption[]>([]);
 
@@ -282,16 +286,14 @@ export default function AgentDetailPage() {
     }
   };
 
-  const handleCopyFakechatMcp = async () => {
-    if (!agent?.fakechat_port) return;
-    const config = JSON.stringify(
-      { mcpServers: { sprintable: { type: 'sse', url: `http://localhost:${agent.fakechat_port}/sse` } } },
-      null, 2,
-    );
+  // story #2362 — fakechat은 포트를 리슨하지 않는다(다이얼아웃 방식, packages/fakechat/
+  // server.ts 참고). 복사할 것은 접속 URL이 아니라 그 에이전트의 런치 셸 export 한 줄이다.
+  const handleCopyFakechatEnvKey = async () => {
+    if (!freshApiKey) return;
     try {
-      await navigator.clipboard.writeText(config);
-      setFakechatMcpCopied(true);
-      setTimeout(() => setFakechatMcpCopied(false), 2000);
+      await navigator.clipboard.writeText(`export AGENT_API_KEY=${freshApiKey}`);
+      setFakechatEnvKeyCopied(true);
+      setTimeout(() => setFakechatEnvKeyCopied(false), 2000);
     } catch {
       addToast({ type: 'error', title: tc('error') });
     }
@@ -596,20 +598,24 @@ export default function AgentDetailPage() {
         <SectionCardBody>
           {freshApiKey && freshMcpConfig ? (
             <>
-              <p className="text-xs text-emerald-500 mb-2">{t('agentMcpFreshKeyNote')}</p>
+              <p className="text-xs text-success mb-2">{t('agentMcpFreshKeyNote')}</p>
               <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
                 {freshMcpConfig}
               </pre>
             </>
           ) : !hasActiveKey ? (
-            <p className="text-xs text-amber-400">{t('agentMcpKeyRequired')}</p>
+            <p className="text-xs text-warning">{t('agentMcpKeyRequired')}</p>
           ) : (
             <p className="text-xs text-muted-foreground">{t('agentMcpSecurityNote')}</p>
           )}
         </SectionCardBody>
       </SectionCard>
 
-      {/* Fakechat 채널 (SSE) */}
+      {/* Fakechat 채널 (SSE) — story #2362(2026-07-31): 예전엔 여기가 "이 포트로 접속하라"고
+          안내했는데, fakechat은 다이얼아웃 방식이라 그 주소를 아무도 안 연다(포트를 안 쓴다).
+          진짜 필요한 건 런치 셸의 env 한 줄 — API Keys 섹션(위)이 이미 관리하는 그 키를
+          그대로 재사용한다(AC3 — 키 노출은 새 방식을 안 만들고 그 섹션의 fresh-key/masked
+          패턴을 그대로 쓴다). */}
       <SectionCard>
         <SectionCardHeader>
           <div className="flex items-center justify-between w-full">
@@ -622,35 +628,31 @@ export default function AgentDetailPage() {
                 {t('agentFakechatDescription')}
               </p>
             </div>
-            {agent.fakechat_port ? (
-              <Button variant="glass" size="sm" onClick={() => void handleCopyFakechatMcp()}>
-                {fakechatMcpCopied ? <Check className="h-3.5 w-3.5" /> : <><Copy className="h-3.5 w-3.5 mr-1" />Copy SSE Config</>}
+            {freshApiKey ? (
+              <Button variant="glass" size="sm" onClick={() => void handleCopyFakechatEnvKey()}>
+                {fakechatEnvKeyCopied ? <Check className="h-3.5 w-3.5" /> : <><Copy className="h-3.5 w-3.5 mr-1" />Copy export</>}
               </Button>
             ) : null}
           </div>
         </SectionCardHeader>
         <SectionCardBody className="space-y-3">
-          {agent.fakechat_port ? (
+          <div className="space-y-1.5 text-xs text-muted-foreground">
+            <p>{t('agentFakechatEnvKeyInstruction')}</p>
+            <p>{webhookActive ? t('agentFakechatWebhookActiveNote') : t('agentFakechatWebhookOffNote')}</p>
+            <p>{t('agentFakechatSuccessCheck')}</p>
+          </div>
+
+          {freshApiKey ? (
             <>
-              <div className="flex items-center gap-3 text-sm">
-                <span className="text-muted-foreground">Port</span>
-                <code className="rounded bg-muted px-2 py-0.5 font-mono text-foreground">{agent.fakechat_port}</code>
-                <span className="text-muted-foreground">SSE URL</span>
-                <code className="rounded bg-muted px-2 py-0.5 font-mono text-xs text-foreground">
-                  http://localhost:{agent.fakechat_port}/sse
-                </code>
-              </div>
-              <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
-                {JSON.stringify(
-                  { mcpServers: { sprintable: { type: 'sse', url: `http://localhost:${agent.fakechat_port}/sse` } } },
-                  null, 2,
-                )}
-              </pre>
+              <p className="text-xs text-success">{t('agentFakechatEnvKeyFreshNote')}</p>
+              <code className="block overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
+                export AGENT_API_KEY={freshApiKey}
+              </code>
             </>
+          ) : !hasActiveKey ? (
+            <p className="text-xs text-warning">{t('agentFakechatEnvKeyRequired')}</p>
           ) : (
-            <p className="text-xs text-muted-foreground">
-              {t('agentFakechatPortMissing')}
-            </p>
+            <p className="text-xs text-muted-foreground">{t('agentFakechatEnvKeySecurityNote')}</p>
           )}
         </SectionCardBody>
       </SectionCard>
