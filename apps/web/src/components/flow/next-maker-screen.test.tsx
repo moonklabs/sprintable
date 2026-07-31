@@ -162,6 +162,24 @@ describe('NextMakerScreen — real fetch orchestration', () => {
     expect(orphanIdx).toBeGreaterThan(lastGoalIdx);
   });
 
+  // story #2352 회귀 가드(2026-07-31, 유나 적발) — 옛 라벨 "문이 닫혀 막힌"이 관제서랍의
+  // "게이트·막힘 신호"와 같은 낱말("막힘")을 써서, 한 화면에 28과 0이 동시에 뜨는
+  // 자기모순이 났다(다른 표를 세면서 같은 말을 씀). 0단계 카드는 이제 "승인 대기"로
+  // 부르고, 관제서랍(다른 표를 세던 축) 자체는 화면에서 걷어냈다 — "막힘"이라는 문자열이
+  // 화면 어디에도 안 뜬다.
+  it('labels the Gate-based zero-stage card "승인 대기" (not "막힘") and shows no "막힘" text anywhere on screen', async () => {
+    const calledUrls: string[] = [];
+    vi.stubGlobal('fetch', buildFetchMock(calledUrls));
+
+    await act(async () => {
+      root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(container.textContent).toContain('승인 대기');
+    expect(container.textContent).not.toContain('막힘');
+  });
+
   it('the default-focused stem (most urgent) shows its reference-candidates fetch and pick panel with no click needed', async () => {
     // 결함 fix(2026-07-31, PO 판정 — "갈래가 화면의 몸통") 후속 — 가장 급한 줄기(about-to-stall
     // 인 e-stall)가 첫 렌더에서 바로 오른쪽 넓은 본문에 선다. 「다음 고르기」 클릭이 더 이상

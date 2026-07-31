@@ -168,3 +168,24 @@ describe('FlowPageClient — story #2354 (노드 클릭이 지도를 안 끈다)
     expect(container.querySelector('[data-testid="flow-node-story-panel-stub"]')).toBeNull();
   });
 });
+
+// PO 정정(2026-07-31) — story #2352의 원래 결함은 관제 서랍의 "게이트·막힘 신호 · N"
+// 라벨이 0단계 카드의 "승인 대기 · 28"과 다른 표를 세면서 같은 낱말("막힘")로 화면이
+// 자기모순한 것이었다. 지시는 «그 수»를 이름 없이 빼는 것이었는데, 처음 구현은 서랍
+// 영역(ExceptionStream) 자체를 통째로 걷어내 목적어가 넓어졌다 — #2224 AC4가 이 컴포넌트를
+// 하단 관제와 "하나"로 요구하는 것과도 어긋났다. 서랍은 남고, 라벨만 숫자 없이 갈린다.
+describe('FlowPageClient — story #2352 정정(PO, 2026-07-31) — 관제 서랍은 남긴다, 라벨만 간다', () => {
+  it('renders the ExceptionStream drawer (region survives) with a label that has NO count number and does not say "막힘"', async () => {
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="exception-stream-stub"]')).not.toBeNull();
+    const summary = Array.from(container.querySelectorAll('summary')).find(
+      (s) => container.contains(s),
+    );
+    expect(summary).toBeTruthy();
+    expect(summary!.textContent).not.toContain('막힘');
+    // "게이트·막힘 신호 · 0" 처럼 숫자를 붙이던 옛 라벨 자리 — 새 라벨은 그 어떤 아라비아
+    // 숫자도 달지 않는다(그 수 자체가 원래 결함이었다).
+    expect(summary!.textContent).not.toMatch(/\d/);
+  });
+});
