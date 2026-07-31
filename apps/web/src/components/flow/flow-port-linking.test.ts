@@ -110,6 +110,36 @@ describe('isValidPortDropTarget — 레인 간(목표↔목표) 잇기는 막는
   });
 });
 
+// 까심 QA 지적(2026-07-31, PR#2737) 회귀 가드 — 멀티레인의 findEpicIdForStoryId가
+// now/upcoming만 검색해, 과거 노드가 얽히면 어느 레인 edges에 얹을지 못 찾는다. 그러면
+// POST는 성공(ok:true)하는데 로컬 state가 조용히 안 바뀌어 "성공 토스트만 반짝하고 아무
+// 흔적도 없는" 결함이 난다("실패가 조용하다"의 성공판) — 그 조합 자체를 미리 막는다.
+describe('isValidPortDropTarget — 과거(past) 노드가 얽힌 잇기는 막는다', () => {
+  it('드래그 시작이 과거 노드면 막는다', () => {
+    const pastNodeIds = new Set(['a']);
+    expect(isValidPortDropTarget('a', 'b', [], new Map(), pastNodeIds)).toBe(false);
+  });
+
+  it('대상이 과거 노드면 막는다', () => {
+    const pastNodeIds = new Set(['b']);
+    expect(isValidPortDropTarget('a', 'b', [], new Map(), pastNodeIds)).toBe(false);
+  });
+
+  it('둘 다 과거 노드면(까심 지적의 정확한 재현) 막는다', () => {
+    const pastNodeIds = new Set(['a', 'b']);
+    expect(isValidPortDropTarget('a', 'b', [], new Map(), pastNodeIds)).toBe(false);
+  });
+
+  it('과거 노드 정보를 아예 안 넘기면(단일-레인 호출부처럼) 검사를 건너뛴다 — 기존 동작 그대로', () => {
+    expect(isValidPortDropTarget('a', 'b', [])).toBe(true);
+  });
+
+  it('둘 다 과거 노드가 아니면 이 검사는 관여 안 한다', () => {
+    const pastNodeIds = new Set(['x']);
+    expect(isValidPortDropTarget('a', 'b', [], new Map(), pastNodeIds)).toBe(true);
+  });
+});
+
 // doc `flow-port-slot-spec` ㉣ v1.1 정정(유나 가디언 리뷰, issuecomment-5139439284) —
 // 서명의 «누가»를 확認 없이 「내가」로 쓰지 않는다. declared_by/currentTeamMemberId 둘 다
 // 있어야 「내가」/「{이름}이」로 확定하고, 그 외엔 전부 중립으로 떨어진다.

@@ -87,20 +87,31 @@ export function resolveUndoTitle(
  * 무관 — 어느 쪽으로든 이미 이어져 있으면 새로 못 잇는다(종류를 바꾸려면 «기존 것을
  * 고치는» 것이지 새로 잇는 게 아니라는 스토리 규격 그대로).
  *
- * ⛔story #2224 AC1 후속(2026-07-31, 유나 가디언 리뷰) — 레인 간(목표↔목표) 포트 잇기는
- * 오늘은 막는다. `laneIdByNodeId`가 두 노드 다 알고 있는데 레인이 다르면 false — POST가
- * 나가도 deriveFlowMapLane이 다른 레인 좌표계의 선을 못 그려 "서버엔 생겼는데 화면은
- * 조용한"(㉦-2 "실패인데 선이 서면 안 된다"의 거울상) 결함이 나기 때문이다. **풀리는
- * 조건**: goal-edges(BE #2726/#2360, 목표↔목표 굵은 선)가 서면 이 검사를 뺀다 — 그때는
- * 레인 간 연결도 그릴 자리가 생긴다. `laneIdByNodeId`가 비어 있으면(단일-레인 호출부처럼
- * 레인 정보를 안 넘기면) 이 검사는 통과 — 원래 단일-레인 동작 그대로 유지한다. */
+ * ⛔story #2224 AC1 후속(2026-07-31, 유나+까심 가디언 리뷰, PR#2737) — 두 가지를 «미리»
+ * 막는다. 놓게 두고 「아직 안 됩니다」로 알리는 방식은 안 된다 — POST는 이미 서버에 남고,
+ * 「아직」은 만료일 있는 약속인데 그 조건이 코드에 없으면 문장만 남기 때문이다.
+ *
+ * ①레인 간(목표↔목표) 잇기 — `laneIdByNodeId`가 두 노드 다 알고 있는데 레인이 다르면
+ * false. POST가 나가도 deriveFlowMapLane이 다른 레인 좌표계의 선을 못 그려 "서버엔
+ * 생겼는데 화면은 조용한"(㉦-2 "실패인데 선이 서면 안 된다"의 거울상) 결함이 난다.
+ * **풀리는 조건**: goal-edges(BE #2726/#2360, 목표↔목표 굵은 선)가 서면 이 검사를 뺀다.
+ * `laneIdByNodeId`가 비어 있으면(단일-레인 호출부처럼 레인 정보를 안 넘기면) 통과한다.
+ *
+ * ②과거(past) 노드 — `pastNodeIds`에 있으면(드래그 시작이든 대상이든) false. 멀티레인의
+ * `findEpicIdForStoryId`(flow-multi-lane-canvas.tsx)가 now/upcoming만 검색하고 past를
+ * 안 보므로, 과거 노드가 얽히면 어느 레인의 edges에 얹을지 못 찾아 로컬 state가 조용히
+ * 안 바뀐다 — 그런데 서버 POST는 성공(ok:true)해 «반짝하고 사라지는» 성공 토스트만 남고
+ * 아무 흔적도 없다(까심 QA 지적 — "실패가 조용하다"의 성공판). **풀리는 조건**:
+ * `findEpicIdForStoryId`가 `pastItemsByEpic`까지 검색하도록 넓히면 이 제약을 뺄 수 있다. */
 export function isValidPortDropTarget(
   dragStartId: string,
   candidateId: string,
   existingEdges: FlowMapEdge[],
   laneIdByNodeId: Map<string, string> = new Map(),
+  pastNodeIds: Set<string> = new Set(),
 ): boolean {
   if (candidateId === dragStartId) return false;
+  if (pastNodeIds.has(dragStartId) || pastNodeIds.has(candidateId)) return false;
   const dragStartLane = laneIdByNodeId.get(dragStartId);
   const candidateLane = laneIdByNodeId.get(candidateId);
   if (dragStartLane !== undefined && candidateLane !== undefined && dragStartLane !== candidateLane) return false;

@@ -211,4 +211,62 @@ describe('FlowMultiLaneCanvas — N개 레인 병렬 fetch', () => {
     expect(container.textContent).not.toContain('Bad Epic');
     expect(container.textContent).toContain('Good Epic');
   });
+
+  // 유나+까심 가디언 리뷰(2026-07-31, PR#2737) 회귀 가드 — "레인 간 연결은 오늘 안 다룬다"고
+  // 문서에만 적고 실제로는 안 막던 결함의 정확한 재현. 레인 A의 포트를 레인 B의 노드로 끌면
+  // POST가 실제로 나가 서버에 candidate가 생기는데(ok:true), deriveFlowMapLane이 다른 레인
+  // 좌표계의 선을 못 그려 "성공했는데 화면은 조용한" 상태가 됐다 — 이젠 놓기 자체가 막힌다.
+  it('dragging a port from lane e1 to a node in lane e2 does NOT fire the create-link POST (cross-lane guard)', async () => {
+    const calledUrls: string[] = [];
+    const createLinkCalls: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calledUrls.push(url);
+      if (init?.method === 'POST' && url.includes('/reference-candidates')) {
+        createLinkCalls.push({ url, body: init.body });
+        return jsonResponse({ id: 'new-candidate', target_id: 'n2', relation_kind: null, status: 'declared', declared_by: 'm1', declared_at: '2026-07-31T00:00:00Z' });
+      }
+      if (url.includes('/api/dependencies/graph')) return jsonResponse({ item_type: 'story', nodes: [], edges: [] });
+      if (url.includes('/api/analytics/epic-flow-nodes')) {
+        const epicId = new URL(url, 'http://x').searchParams.get('epic_id')!;
+        if (epicId === 'e1') {
+          return jsonResponse({ data: { epic_id: 'e1', now: { total: 1, items: [{ id: 'n1', story_number: 1, title: 'Lane1 Story', status: 'in-progress', assignee_id: null, updated_at: '2026-07-30T00:00:00Z' }] }, upcoming: { total: 0, shown: 0, items: [] }, past: { total: 0 }, blocked_count: 0, last_changed_at: null } });
+        }
+        return jsonResponse({ data: { epic_id: 'e2', now: { total: 1, items: [{ id: 'n2', story_number: 2, title: 'Lane2 Story', status: 'in-progress', assignee_id: null, updated_at: '2026-07-30T00:00:00Z' }] }, upcoming: { total: 0, shown: 0, items: [] }, past: { total: 0 }, blocked_count: 0, last_changed_at: null } });
+      }
+      if (url.includes('/reference-candidates')) return jsonResponse([]);
+      throw new Error(`unexpected fetch: ${url}`);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <FlowMultiLaneCanvas
+          projectId="p1"
+          expandGoals={[goal({ id: 'e1', title: 'Epic 1' }), goal({ id: 'e2', title: 'Epic 2' })]}
+          foldedCount={0}
+          onSelectStory={() => {}}
+        />,
+      ));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const port = container.querySelector('[data-node-id="n1"] button[aria-label]') as HTMLElement;
+    expect(port).not.toBeNull();
+    const targetWrapper = container.querySelector('[data-node-id="n2"]')!;
+    document.elementFromPoint = vi.fn(() => targetWrapper);
+
+    await act(async () => {
+      const down = new Event('pointerdown', { bubbles: true, cancelable: true }) as PointerEvent;
+      Object.assign(down, { clientX: 10, clientY: 10, pointerId: 1 });
+      port.dispatchEvent(down);
+    });
+    await act(async () => {
+      const up = new Event('pointerup', { bubbles: true, cancelable: true }) as PointerEvent;
+      Object.assign(up, { clientX: 200, clientY: 10, pointerId: 1 });
+      window.dispatchEvent(up);
+    });
+
+    expect(document.body.querySelector('[data-slot="dialog-title"]')).toBeNull();
+    expect(createLinkCalls).toHaveLength(0);
+  });
 });
