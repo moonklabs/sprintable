@@ -68,7 +68,13 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          CHANGED="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" || true)"
+          # 까심군 QA 지적(#2730 REQUEST_CHANGES): 여기 `|| true`를 붙이면 grep 0-매치뿐
+          # 아니라 git diff 자체의 «모든» 실패(SHA 유실·객체 손상·merge-base 계산 실패)까지
+          # 삼켜 CHANGED=""→in_scope=false→조용히 통과가 된다 — 이 파일 자신의 AC8("미실행을
+          # 통과로 세지 않는다")을 어기는 자리라 뺐다. git diff가 실패하면 이 잡은 빨강으로
+          # 죽어야 맞는다(못 재면 빨강). 아래 grep 파이프라인의 `|| true`는 남겨 둔다 —
+          # 그쪽은 정적 정규식+printf뿐이라 실패 경로가 사실상 "0-매치"뿐이다(까심군 판정).
+          CHANGED="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")"
           echo "changed files:"
           echo "${CHANGED}"
           # AC2: 걸린 경로 — components/**·messages/**·app/**(globals.css는 app/**에 포함,
