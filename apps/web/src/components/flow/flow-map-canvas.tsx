@@ -273,6 +273,18 @@ export function FlowMapCanvas({
     }
     return map;
   }, [lanes]);
+  // story #2224 AC1 후속 — isValidPortDropTarget이 「같은 레인인가」를 판정할 재료. 레인이
+  // 늘 하나였던 시절엔 필요 없었지만, 멀티레인에서 이게 없으면 레인 A→B로도 끌 수 있어 보인다
+  // (flow-port-linking.ts 문서 참고 — goal-edges가 서기 전까진 막는 것이 맞다).
+  const laneIdByNodeId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const lane of lanes) {
+      for (const n of lane.nowNodes) map.set(n.id, lane.epicId);
+      for (const nodes of lane.queueNodesByDepth.values()) for (const n of nodes) map.set(n.id, lane.epicId);
+      for (const n of lane.pastNodes) map.set(n.id, lane.epicId);
+    }
+    return map;
+  }, [lanes]);
   // 드래그 가능한(=화면에 실제로 카드로 그려진) 노드 id — 키보드 순회(AC13)의 모집단.
   // Map 삽입 순서 = now→queue(depth순)→past 렌더 순서 그대로라 화면 순서와 일치한다.
   const draggableNodeIds = useMemo(() => Array.from(nodesById.keys()), [nodesById]);
@@ -299,12 +311,12 @@ export function FlowMapCanvas({
     if (linkDraft.phase === 'idle') {
       if (e.key !== 'Enter' && e.key !== ' ') return;
       e.preventDefault();
-      const validTargets = draggableNodeIds.filter((id) => isValidPortDropTarget(sourceId, id, allEdges));
+      const validTargets = draggableNodeIds.filter((id) => isValidPortDropTarget(sourceId, id, allEdges, laneIdByNodeId));
       setLinkDraft({ phase: 'linking', sourceId, via: 'keyboard', pointerClientX: 0, pointerClientY: 0, hoverTargetId: validTargets[0] ?? null });
       return;
     }
     if (linkDraft.phase !== 'linking' || linkDraft.via !== 'keyboard' || linkDraft.sourceId !== sourceId) return;
-    const validTargets = draggableNodeIds.filter((id) => isValidPortDropTarget(sourceId, id, allEdges));
+    const validTargets = draggableNodeIds.filter((id) => isValidPortDropTarget(sourceId, id, allEdges, laneIdByNodeId));
     if (e.key === 'Escape') {
       e.preventDefault();
       resetLinkDraft();
@@ -328,7 +340,7 @@ export function FlowMapCanvas({
       e.preventDefault();
       setLinkDraft({ phase: 'confirming', sourceId, targetId: linkDraft.hoverTargetId });
     }
-  }, [linkDraft, draggableNodeIds, allEdges, resetLinkDraft]);
+  }, [linkDraft, draggableNodeIds, allEdges, laneIdByNodeId, resetLinkDraft]);
 
   // 포인터 드래그 진행 중 — 문서 전체에서 이동/놓기를 받는다(포트를 벗어나도 계속 추적).
   // isPointerLinking을 밖에서 계산하는 이유 — deps 배열은 useEffect 콜백 밖의 별도 표현식이라
@@ -365,7 +377,7 @@ export function FlowMapCanvas({
       const targetId = dropEl?.getAttribute('data-node-id') ?? null;
       setLinkDraft((prev) => {
         if (prev.phase !== 'linking') return prev;
-        if (targetId && isValidPortDropTarget(prev.sourceId, targetId, allEdges)) {
+        if (targetId && isValidPortDropTarget(prev.sourceId, targetId, allEdges, laneIdByNodeId)) {
           return { phase: 'confirming', sourceId: prev.sourceId, targetId };
         }
         return { phase: 'idle' };
@@ -668,7 +680,7 @@ export function FlowMapCanvas({
                       selected={!isLinkingActive && node.id === selectedNodeId}
                       onSelectStory={onSelectStory}
                       isLinkSource={linkSourceIdForBadge === node.id}
-                      isInvalidDropTarget={linkSourceIdForDimming !== null && !isValidPortDropTarget(linkSourceIdForDimming, node.id, allEdges)}
+                      isInvalidDropTarget={linkSourceIdForDimming !== null && !isValidPortDropTarget(linkSourceIdForDimming, node.id, allEdges, laneIdByNodeId)}
                       isDropHover={linkHoverTargetId === node.id}
                       isJustLinked={justLinkedNodeId === node.id}
                       onPortPointerDown={handlePortPointerDown}
@@ -686,7 +698,7 @@ export function FlowMapCanvas({
                       selected={!isLinkingActive && node.id === selectedNodeId}
                       onSelectStory={onSelectStory}
                       isLinkSource={linkSourceIdForBadge === node.id}
-                      isInvalidDropTarget={linkSourceIdForDimming !== null && !isValidPortDropTarget(linkSourceIdForDimming, node.id, allEdges)}
+                      isInvalidDropTarget={linkSourceIdForDimming !== null && !isValidPortDropTarget(linkSourceIdForDimming, node.id, allEdges, laneIdByNodeId)}
                       isDropHover={linkHoverTargetId === node.id}
                       isJustLinked={justLinkedNodeId === node.id}
                       onPortPointerDown={handlePortPointerDown}
@@ -711,7 +723,7 @@ export function FlowMapCanvas({
                             selected={!isLinkingActive && node.id === selectedNodeId}
                             onSelectStory={onSelectStory}
                             isLinkSource={linkSourceIdForBadge === node.id}
-                            isInvalidDropTarget={linkSourceIdForDimming !== null && !isValidPortDropTarget(linkSourceIdForDimming, node.id, allEdges)}
+                            isInvalidDropTarget={linkSourceIdForDimming !== null && !isValidPortDropTarget(linkSourceIdForDimming, node.id, allEdges, laneIdByNodeId)}
                             isDropHover={linkHoverTargetId === node.id}
                             isJustLinked={justLinkedNodeId === node.id}
                             onPortPointerDown={handlePortPointerDown}

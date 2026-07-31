@@ -85,13 +85,25 @@ export function resolveUndoTitle(
 
 /** AC16 — 한 쌍에 관계는 하나. 자기 자신도 놓을 수 없는 대상이다(드래그 규격 ㉡). 방향
  * 무관 — 어느 쪽으로든 이미 이어져 있으면 새로 못 잇는다(종류를 바꾸려면 «기존 것을
- * 고치는» 것이지 새로 잇는 게 아니라는 스토리 규격 그대로). */
+ * 고치는» 것이지 새로 잇는 게 아니라는 스토리 규격 그대로).
+ *
+ * ⛔story #2224 AC1 후속(2026-07-31, 유나 가디언 리뷰) — 레인 간(목표↔목표) 포트 잇기는
+ * 오늘은 막는다. `laneIdByNodeId`가 두 노드 다 알고 있는데 레인이 다르면 false — POST가
+ * 나가도 deriveFlowMapLane이 다른 레인 좌표계의 선을 못 그려 "서버엔 생겼는데 화면은
+ * 조용한"(㉦-2 "실패인데 선이 서면 안 된다"의 거울상) 결함이 나기 때문이다. **풀리는
+ * 조건**: goal-edges(BE #2726/#2360, 목표↔목표 굵은 선)가 서면 이 검사를 뺀다 — 그때는
+ * 레인 간 연결도 그릴 자리가 생긴다. `laneIdByNodeId`가 비어 있으면(단일-레인 호출부처럼
+ * 레인 정보를 안 넘기면) 이 검사는 통과 — 원래 단일-레인 동작 그대로 유지한다. */
 export function isValidPortDropTarget(
   dragStartId: string,
   candidateId: string,
   existingEdges: FlowMapEdge[],
+  laneIdByNodeId: Map<string, string> = new Map(),
 ): boolean {
   if (candidateId === dragStartId) return false;
+  const dragStartLane = laneIdByNodeId.get(dragStartId);
+  const candidateLane = laneIdByNodeId.get(candidateId);
+  if (dragStartLane !== undefined && candidateLane !== undefined && dragStartLane !== candidateLane) return false;
   return !existingEdges.some(
     (e) => (e.fromNodeId === dragStartId && e.toNodeId === candidateId)
       || (e.fromNodeId === candidateId && e.toNodeId === dragStartId),

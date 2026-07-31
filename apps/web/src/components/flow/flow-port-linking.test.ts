@@ -86,6 +86,30 @@ describe('isValidPortDropTarget — AC16(한 쌍에 관계는 하나) + 자기 �
   });
 });
 
+// 유나 가디언 리뷰(2026-07-31, PR#2737) 회귀 가드 — 「막는다」고 문서만 적고 실제로는 안
+// 막던 결함: 레인 A→B로 끌면 POST가 서버에 실제로 나가고 성공하는데(ok:true), target이
+// 다른 레인이라 deriveFlowMapLane이 그 선을 못 그려 "성공했는데 화면은 조용한" 상태가 됐다.
+describe('isValidPortDropTarget — 레인 간(목표↔목표) 잇기는 막는다(story #2224, goal-edges가 서기 전까지)', () => {
+  it('레인 정보가 있고 서로 다른 레인이면 막는다(간선이 하나도 없어도)', () => {
+    const laneIdByNodeId = new Map([['a', 'epic-1'], ['b', 'epic-2']]);
+    expect(isValidPortDropTarget('a', 'b', [], laneIdByNodeId)).toBe(false);
+  });
+
+  it('레인 정보가 있고 같은 레인이면(기존 규칙 그대로) 놓을 수 있다', () => {
+    const laneIdByNodeId = new Map([['a', 'epic-1'], ['b', 'epic-1']]);
+    expect(isValidPortDropTarget('a', 'b', [], laneIdByNodeId)).toBe(true);
+  });
+
+  it('레인 정보를 아예 안 넘기면(단일-레인 호출부처럼) 검사를 건너뛴다 — 기존 동작 그대로', () => {
+    expect(isValidPortDropTarget('a', 'b', [])).toBe(true);
+  });
+
+  it('한쪽 노드만 레인 정보가 있으면(알 수 없는 쪽) 막지 않는다 — 모르는 것을 «다르다»로 단정하지 않는다', () => {
+    const laneIdByNodeId = new Map([['a', 'epic-1']]);
+    expect(isValidPortDropTarget('a', 'b', [], laneIdByNodeId)).toBe(true);
+  });
+});
+
 // doc `flow-port-slot-spec` ㉣ v1.1 정정(유나 가디언 리뷰, issuecomment-5139439284) —
 // 서명의 «누가»를 확認 없이 「내가」로 쓰지 않는다. declared_by/currentTeamMemberId 둘 다
 // 있어야 「내가」/「{이름}이」로 확定하고, 그 외엔 전부 중립으로 떨어진다.
