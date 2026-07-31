@@ -7,7 +7,12 @@ import type { AttentionQueueItem } from '@/components/attention-queue/derive-att
 interface ExceptionStreamProps {
   /**
    * 손이 필요한 것(승인 대기·막힘·병합 대기) = 실 gate-pending/blocked 신호만. project-scope gate
-   * fetch는 디디 병렬 BE(작음) — 미가용/BE 前엔 빈 배열로 정직 빈상태("손 필요한 것 없음") 렌더.
+   * fetch는 디디 병렬 BE(작음) — 미가용/BE 前엔 빈 배열로 정직 빈상태 렌더.
+   *
+   * ⛔story #2365(2026-07-31) — 빈상태 문구가 「손 필요한 것 없음」(주어 없음)이었는데, 이
+   * 서랍이 세는 표(WorkflowLineStepApproval, 승인 흐름/단계 결재)가 next-maker-header.tsx의
+   * 「게이트 승인 대기」 카드와 «같은 화면에서» 만난다 — 30과 0이 나란히 서면 주어 없인
+   * 자기모순으로 읽힌다. 「승인 흐름(단계 결재)에서 멈춘 것이 없습니다」로 주어를 박았다.
    */
   items?: AttentionQueueItem[];
 }

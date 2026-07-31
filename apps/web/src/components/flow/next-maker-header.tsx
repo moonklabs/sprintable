@@ -36,6 +36,14 @@ interface NextMakerHeaderProps {
  * 정의(derive-next-maker.ts 문서 참고). 관제서랍 쪽(WorkflowLineStepApproval 축)은
  * 사람의 다음 발과 안 이어져 화면에서 통째로 뺐다(flow-client.tsx 참고) — 이름을 바꾸는
  * 게 아니라 그 축 자체를 걷어낸 것.
+ *
+ * ⛔story #2365 재발(2026-07-31) — 관제서랍이 화면에서 빠졌어도(위 문단) glance 서랍
+ * (ExceptionStream, WorkflowLineStepApproval 축)은 여전히 다른 화면(flow-client.tsx)에
+ * 산다 — 그 서랍을 펼치면 「승인 대기 30」(이 카드)과 「손 필요한 것 없음」(그 서랍 빈상태)이
+ * «같은 화면에» 나란히 선다. 세 번째로 "낱말만 바꾸는" 재발을 막기 위해 이번엔 «무엇을
+ * 세는지»를 라벨에 직접 박았다 — 「승인 대기」 → 「게이트 승인 대기」(ccQueueGateApproval과
+ * 같은 문구 재사용, DRY). exception-stream.tsx의 「손 필요한 것 없음」도 「승인 흐름(단계
+ * 결재)에서 멈춘 것이 없습니다」로 같이 고쳤다 — 한쪽만 고치면 여전히 주어 없이 만난다.
  */
 export function NextMakerHeader({ headline, zeroStage }: NextMakerHeaderProps) {
   const t = useTranslations('flow');
