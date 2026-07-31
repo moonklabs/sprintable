@@ -103,7 +103,7 @@ function OrphanRow({
             type="button"
             disabled={!selectedEpicId || assigning}
             onClick={handleConfirm}
-            className="rounded-md border border-primary bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground disabled:opacity-50"
+            className="focus-outset rounded-md border border-primary bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground disabled:opacity-50"
           >
             {assigning ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : t('orphanAssignConfirm')}
           </button>

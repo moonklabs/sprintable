@@ -150,9 +150,22 @@ describe('NextMakerScreen — real fetch orchestration', () => {
     expect(container.textContent).toContain('E-Quiet');
     expect(container.textContent).not.toContain('E-Closed');
     expect(container.textContent).not.toContain('E-Archived');
+
+    // 결함 fix(2026-07-31, 선생님 "이게 뭔지.." 지적 후속) 회귀 가드 — backlogTotal은
+    // 카드가 아니라 목표 목록 위 한 줄로만 뜬다. 그리고 orphan 패널은 「목표 목록 맨 끝」
+    // (0단계와 목표 목록 «사이»가 아니다) — 텍스트 순서로 위치를 고정한다.
+    expect(container.textContent).toContain('아직 준비 안 된 일 3건 — 이 중 0건은 주인이 있습니다');
+    const fullText = container.textContent ?? '';
+    const lastGoalIdx = fullText.lastIndexOf('E-Ready'); // 목표 목록의 마지막 항목
+    const orphanIdx = fullText.indexOf('목표에 안 붙은 일이');
+    expect(lastGoalIdx).toBeGreaterThan(-1);
+    expect(orphanIdx).toBeGreaterThan(lastGoalIdx);
   });
 
-  it('clicking 다음 고르기 fetches this epic reference-candidates and renders the backlog candidate with a waiting-days reason', async () => {
+  it('the default-focused stem (most urgent) shows its reference-candidates fetch and pick panel with no click needed', async () => {
+    // 결함 fix(2026-07-31, PO 판정 — "갈래가 화면의 몸통") 후속 — 가장 급한 줄기(about-to-stall
+    // 인 e-stall)가 첫 렌더에서 바로 오른쪽 넓은 본문에 선다. 「다음 고르기」 클릭이 더 이상
+    // 필요 없다(그 버튼 자체가 없어졌다 — 줄기 «선택»과 «펼침»이 하나였던 게 갈렸다).
     const calledUrls: string[] = [];
     vi.stubGlobal('fetch', buildFetchMock(calledUrls));
 
@@ -161,15 +174,10 @@ describe('NextMakerScreen — real fetch orchestration', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    const pickButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '다음 고르기');
-    expect(pickButton).toBeTruthy();
-    await act(async () => {
-      pickButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await new Promise((r) => setTimeout(r, 0));
-    });
-
     expect(calledUrls.some((u) => u === '/api/goals/e-stall/reference-candidates')).toBe(true);
     expect(container.textContent).toContain('#101');
+    // 캔버스도 같이 뜬다 — FlowEpicNodes가 부르는 세 엔드포인트.
+    expect(calledUrls.some((u) => u.startsWith('/api/analytics/epic-flow-nodes'))).toBe(true);
   });
 
   it('promoting a candidate PATCHes /api/stories/[id]/status with ready-for-dev and the goal moves out of the needs-next list', async () => {
@@ -182,12 +190,7 @@ describe('NextMakerScreen — real fetch orchestration', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    const pickButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '다음 고르기');
-    await act(async () => {
-      pickButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await new Promise((r) => setTimeout(r, 0));
-    });
-
+    // e-stall is the default-focused stem — its pick panel (with b1) is already visible.
     const promoteButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '다음으로');
     expect(promoteButton).toBeTruthy();
     await act(async () => {
@@ -201,7 +204,7 @@ describe('NextMakerScreen — real fetch orchestration', () => {
     expect(container.textContent).toContain('목표 3개 중 1개에');
   });
 
-  it('quiet goal: clicking 닫는다 POSTs /api/goals/[id]/transition with status=done and the goal disappears', async () => {
+  it('quiet goal: clicking its row focuses it, then 닫는다 POSTs /api/goals/[id]/transition with status=done and the goal disappears', async () => {
     const calledUrls: string[] = [];
     vi.stubGlobal('fetch', buildFetchMock(calledUrls));
 
@@ -210,11 +213,11 @@ describe('NextMakerScreen — real fetch orchestration', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    const quietTitle = Array.from(container.querySelectorAll('span')).find((s) => s.textContent === 'E-Quiet');
-    const quietCard = quietTitle!.closest('.rounded-lg')!;
-    const openButton = Array.from(quietCard.querySelectorAll('button')).find((b) => b.textContent === '다음 고르기')!;
+    // e-quiet isn't the default focus (e-stall, about-to-stall, is) — click its row to focus it.
+    const quietRow = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('E-Quiet'));
+    expect(quietRow).toBeTruthy();
     await act(async () => {
-      openButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      quietRow!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await new Promise((r) => setTimeout(r, 0));
     });
 
