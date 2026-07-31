@@ -1264,7 +1264,7 @@
     "agentMcpSecurityNote": "For security, existing keys can't be shown again. Generate a new one in the API Keys section above to see the real config here.",
     "agentFakechatTitle": "Fakechat Channel",
     "agentFakechatDescription": "This agent dials out to the server — nothing listens on a port. Set the value below in its launch shell.",
-    "agentFakechatEnvKeyInstruction": "① In the launch shell, export AGENT_API_KEY=<this agent's key>.",
+    "agentFakechatEnvKeyInstruction": "① In the launch shell, export SPRINTABLE_API_KEY=<this agent's key>.",
     "agentFakechatWebhookActiveNote": "② This agent's webhook is currently on — launch it with HAS_WEBHOOK=\"true\" and it'll use the webhook path instead (SSE won't open).",
     "agentFakechatWebhookOffNote": "② If HAS_WEBHOOK=\"true\" is set, SSE won't open (the webhook path is used instead).",
     "agentFakechatSuccessCheck": "③ Confirm it worked — stderr should show \"[fakechat] SSE stream open\". If that line never appears, it failed silently (no error is thrown).",

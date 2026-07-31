@@ -1264,7 +1264,7 @@
     "agentMcpSecurityNote": "보안상 기존 키는 재표시되지 않습니다. 위 API Keys 섹션에서 새 키를 발급하면 실제 키가 포함된 Config가 여기에 자동으로 나타납니다.",
     "agentFakechatTitle": "Fakechat 채널",
     "agentFakechatDescription": "이 에이전트가 서버로 나가서 듣는 방식입니다(포트로 접속하는 것이 아닙니다). 런치 셸에 아래 값을 넣어 주세요.",
-    "agentFakechatEnvKeyInstruction": "① 런치 셸에 export AGENT_API_KEY=<이 에이전트의 키>를 넣으세요.",
+    "agentFakechatEnvKeyInstruction": "① 런치 셸에 export SPRINTABLE_API_KEY=<이 에이전트의 키>를 넣으세요.",
     "agentFakechatWebhookActiveNote": "② 이 에이전트는 지금 웹훅이 켜져 있습니다 — launch 셸에 HAS_WEBHOOK=\"true\"를 주면 SSE 대신 웹훅 경로를 씁니다(SSE는 열리지 않습니다).",
     "agentFakechatWebhookOffNote": "② HAS_WEBHOOK=\"true\"가 켜져 있으면 SSE가 열리지 않습니다(웹훅 경로를 대신 씁니다).",
     "agentFakechatSuccessCheck": "③ 성공 확인 — stderr에 「[fakechat] SSE stream open」이 뜨면 연결된 것입니다. 이 줄이 안 보이면 실패한 것입니다(오류 없이 조용히 실패할 수 있습니다).",

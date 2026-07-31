@@ -291,7 +291,7 @@ export default function AgentDetailPage() {
   const handleCopyFakechatEnvKey = async () => {
     if (!freshApiKey) return;
     try {
-      await navigator.clipboard.writeText(`export AGENT_API_KEY=${freshApiKey}`);
+      await navigator.clipboard.writeText(`export SPRINTABLE_API_KEY=${freshApiKey}`);
       setFakechatEnvKeyCopied(true);
       setTimeout(() => setFakechatEnvKeyCopied(false), 2000);
     } catch {
@@ -646,7 +646,7 @@ export default function AgentDetailPage() {
             <>
               <p className="text-xs text-success">{t('agentFakechatEnvKeyFreshNote')}</p>
               <code className="block overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
-                export AGENT_API_KEY={freshApiKey}
+                export SPRINTABLE_API_KEY={freshApiKey}
               </code>
             </>
           ) : !hasActiveKey ? (
