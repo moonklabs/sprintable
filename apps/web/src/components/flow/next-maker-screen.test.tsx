@@ -1,17 +1,27 @@
 // @vitest-environment jsdom
 //
-// story #2224 후속(2026-07-31) — "다음을 만드는 화면"의 실제 배선 왕복 시험. 오늘 하루
-// 반복 확定된 교훈(PR#2700/#2710 — "단위 시험은 통과해도 실제 배선 앞의 필터/누락이 죽일 수
-// 있다") 그대로: derive-next-maker.test.ts는 순수 계산만 검증하므로, 여기서는 실제
-// `NextMakerScreen` 컴포넌트를 렌더해 fetch 오케스트레이션→파생→렌더까지 실제 경로를 태운다.
+// story #2224 AC1(2026-07-31, 멀티레인 재구조) — 이 화면의 몸통이 「목표 하나를 고르는
+// 픽 패널+단일 캔버스」에서 「30일 안 변화 있는 목표 전부를 레인으로 동시에 그리는
+// FlowMultiLaneCanvas」로 바뀌었다. NextMakerScreen 자신의 책임(fetch 오케스트레이션→
+// 파생→헤드라인/그룹핑 계산→orphan 패널)만 값으로 닫는다 — 레인 자체의 fetch/렌더는
+// flow-multi-lane-canvas.test.tsx가 따로 본다(FlowMultiLaneCanvas는 여기서 얇은 스텁으로
+// 대체 — kanban-board/flow-node-story-panel을 얇게 스텁하는 flow-client.test.tsx와 같은 결).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
-import { NextMakerScreen } from './next-maker-screen';
 import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+vi.mock('./flow-multi-lane-canvas', () => ({
+  FlowMultiLaneCanvas: ({ expandGoals, foldedCount }: { expandGoals: { id: string; title: string }[]; foldedCount: number }) => (
+    <div data-testid="multi-lane-canvas-stub">
+      <span data-testid="expand-titles">{expandGoals.map((g) => g.title).join(',')}</span>
+      <span data-testid="folded-count">{foldedCount}</span>
+    </div>
+  ),
+}));
 
 let container: HTMLDivElement;
 let root: Root;
@@ -28,12 +38,18 @@ function jsonResponse(body: unknown, ok = true): Response {
   return { ok, json: async () => body } as Response;
 }
 
+// "지금"에 상대적인 날짜 — 30일 창 판정이 실행 시각에 안 흔들리게(고정 날짜 fixture는
+// 테스트를 실행하는 날에 따라 창을 넘나드는 취약점이 있다).
+function daysAgoIso(days: number): string {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
 const GOALS = [
-  { id: 'e-stall', title: 'E-Stall', status: 'active', total_stories: 10, done_stories: 2 },
-  { id: 'e-quiet', title: 'E-Quiet', status: 'active', total_stories: 5, done_stories: 5 },
-  { id: 'e-ready', title: 'E-Ready', status: 'active', total_stories: 8, done_stories: 3 },
+  { id: 'e-recent', title: 'E-Recent', status: 'active', total_stories: 10, done_stories: 2 },
+  { id: 'e-stale', title: 'E-Stale', status: 'active', total_stories: 5, done_stories: 1 },
+  { id: 'e-empty', title: 'E-Empty', status: 'active', total_stories: 0, done_stories: 0 },
   // 라이브 결함 fix(2026-07-31) 회귀 가드 — 이미 닫힌 목표가 "다음이 없는" 목표로 잘못
-  // 세지 않는지를 이 fixture가 지킨다. E-Closed는 next-up으로 표시하지 않는다.
+  // 세지 않는지를 이 fixture가 지킨다.
   { id: 'e-closed', title: 'E-Closed', status: 'done', total_stories: 3, done_stories: 3 },
   { id: 'e-archived', title: 'E-Archived', status: 'archived', total_stories: 4, done_stories: 4 },
 ];
@@ -44,7 +60,7 @@ function makeStory(overrides: Partial<{
 }> = {}) {
   return {
     id: 's1', story_number: 1, title: 'Story', status: 'backlog',
-    assignee_id: null, updated_at: '2026-07-01T00:00:00Z', epic_id: 'e-stall',
+    assignee_id: null, updated_at: daysAgoIso(5), epic_id: 'e-recent',
     ...overrides,
   };
 }
@@ -68,25 +84,19 @@ function buildFetchMock(
       if (url.includes('status=backlog')) {
         return jsonResponse({
           data: [
-            makeStory({ id: 'b1', story_number: 101, epic_id: 'e-stall', updated_at: '2026-06-01T00:00:00Z' }),
-            makeStory({ id: 'b2', story_number: 102, epic_id: 'e-quiet' }),
-            // 목표(epic) 없는 orphan — 「목표 정하기」패널의 대상(PO 판정 2026-07-31).
+            makeStory({ id: 'b1', story_number: 101, epic_id: 'e-recent', updated_at: daysAgoIso(5) }),
+            makeStory({ id: 'b2', story_number: 102, epic_id: 'e-stale', updated_at: daysAgoIso(60) }),
+            // 목표(epic) 없는 orphan — 「목표 정하기」패널의 대상.
             makeStory({ id: 'o1', story_number: 401, epic_id: null, title: 'Orphan Story' }),
           ],
           meta: { hasMore: false, nextCursor: null, limit: 100 },
         });
       }
       if (url.includes('status=ready-for-dev')) {
-        return jsonResponse({
-          data: [makeStory({ id: 'r1', story_number: 201, status: 'ready-for-dev', epic_id: 'e-ready', assignee_id: 'u1' })],
-          meta: { hasMore: false, nextCursor: null, limit: 100 },
-        });
+        return jsonResponse({ data: [], meta: { hasMore: false, nextCursor: null, limit: 100 } });
       }
       if (url.includes('status=in-progress')) {
-        return jsonResponse({
-          data: [makeStory({ id: 'p1', story_number: 301, status: 'in-progress', epic_id: 'e-stall' })],
-          meta: { hasMore: false, nextCursor: null, limit: 100 },
-        });
+        return jsonResponse({ data: [], meta: { hasMore: false, nextCursor: null, limit: 100 } });
       }
       if (url.includes('status=in-review')) {
         return jsonResponse({ data: [], meta: { hasMore: false, nextCursor: null, limit: 100 } });
@@ -96,13 +106,15 @@ function buildFetchMock(
       return jsonResponse([]);
     }
     if (url.startsWith('/api/analytics/epics-progress-lane')) {
-      return jsonResponse({ data: { epics: { 'e-stall': { in_progress: 1, waiting: 1, blocked: 2, stalled: 0, other: 0 } }, zones: {}, stall_threshold_hours: 168, stories_without_epic: 0 } });
+      return jsonResponse({ data: { epics: {}, zones: {}, stall_threshold_hours: 168, stories_without_epic: 0 } });
     }
+    // NextActionsStrip을 펼치면(GoalStemCard 마운트) 부르는 것들 — 승격 후보 계산 + 그 목표의
+    // 단일-레인 캔버스는 showCanvas=false라 여기선 안 뜨지만 reference-candidates는 그대로 부른다.
     if (url.startsWith('/api/goals/') && url.includes('/reference-candidates')) {
       return jsonResponse([]);
     }
     if (url.startsWith('/api/analytics/epic-flow-nodes')) {
-      return jsonResponse({ data: { epic_id: 'e-stall', now: { total: 0, items: [] }, upcoming: { total: 0, items: [] }, past: { total: 0 } } });
+      return jsonResponse({ data: { epic_id: 'e-recent', now: { total: 0, items: [] }, upcoming: { total: 0, items: [] }, past: { total: 0 } } });
     }
     if (url.startsWith('/api/dependencies/graph')) {
       return jsonResponse({ item_type: 'story', nodes: [], edges: [] });
@@ -117,7 +129,7 @@ function buildFetchMock(
       return jsonResponse({ data: { id: 'e-quiet', status: 'done' } });
     }
     if (/^\/api\/stories\/[^/]+$/.test(url) && init?.method === 'PATCH') {
-      return jsonResponse({ data: { id: 'o1', epic_id: 'e-stall' } });
+      return jsonResponse({ data: { id: 'o1', epic_id: 'e-recent' } });
     }
     throw new Error(`unexpected fetch: ${url}`);
   });
@@ -135,10 +147,11 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-describe('NextMakerScreen — real fetch orchestration', () => {
+describe('NextMakerScreen — real fetch orchestration + lane grouping', () => {
   it('fetches goals + 4 active-status story pages + next-up + lane data, and computes the headline from them', async () => {
     const calledUrls: string[] = [];
     vi.stubGlobal('fetch', buildFetchMock(calledUrls));
+    const { NextMakerScreen } = await import('./next-maker-screen');
 
     await act(async () => {
       root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));
@@ -151,24 +164,10 @@ describe('NextMakerScreen — real fetch orchestration', () => {
     expect(calledUrls.some((u) => u.startsWith('/api/reference-candidates/next-up'))).toBe(true);
     expect(calledUrls.some((u) => u.startsWith('/api/analytics/epics-progress-lane'))).toBe(true);
 
-    // e-stall: in-progress(p1) + no ready-for-dev → about-to-stall. e-quiet: neither → quiet.
-    // e-ready: has ready-for-dev(r1) → excluded from "다음이 비어 있는" count.
-    // e-closed(done)/e-archived(archived) must never enter the count — totalGoals stays 3, not 5.
-    expect(container.textContent).toContain('목표 3개 중 2개에');
-    expect(container.textContent).toContain('E-Stall');
-    expect(container.textContent).toContain('E-Quiet');
-    expect(container.textContent).not.toContain('E-Closed');
-    expect(container.textContent).not.toContain('E-Archived');
-
-    // 결함 fix(2026-07-31, 선생님 "이게 뭔지.." 지적 후속) 회귀 가드 — backlogTotal은
-    // 카드가 아니라 목표 목록 위 한 줄로만 뜬다. 그리고 orphan 패널은 「목표 목록 맨 끝」
-    // (0단계와 목표 목록 «사이»가 아니다) — 텍스트 순서로 위치를 고정한다.
-    expect(container.textContent).toContain('아직 준비 안 된 일 3건 — 이 중 0건은 주인이 있습니다');
-    const fullText = container.textContent ?? '';
-    const lastGoalIdx = fullText.lastIndexOf('E-Ready'); // 목표 목록의 마지막 항목
-    const orphanIdx = fullText.indexOf('목표에 안 붙은 일이');
-    expect(lastGoalIdx).toBeGreaterThan(-1);
-    expect(orphanIdx).toBeGreaterThan(lastGoalIdx);
+    // e-recent/e-stale/e-empty 셋 다 「다음이 없다」(ready-for-dev 없음 — 헤드라인은 스토리
+    // 유무와 무관하게 hasNext만 본다, 레인 그룹핑과는 다른 축) — e-closed(done)/e-archived
+    // (archived)는 절대 안 들어간다 — totalGoals는 3(active뿐)이지 5가 아니다.
+    expect(container.textContent).toContain('목표 3개 중 3개에');
   });
 
   // story #2352 회귀 가드(2026-07-31, 유나 적발) — 옛 라벨 "문이 닫혀 막힌"이 관제서랍의
@@ -189,83 +188,29 @@ describe('NextMakerScreen — real fetch orchestration', () => {
     expect(container.textContent).not.toContain('막힘');
   });
 
-  it('the default-focused stem (most urgent) shows its reference-candidates fetch and pick panel with no click needed', async () => {
-    // 결함 fix(2026-07-31, PO 판정 — "갈래가 화면의 몸통") 후속 — 가장 급한 줄기(about-to-stall
-    // 인 e-stall)가 첫 렌더에서 바로 오른쪽 넓은 본문에 선다. 「다음 고르기」 클릭이 더 이상
-    // 필요 없다(그 버튼 자체가 없어졌다 — 줄기 «선택»과 «펼침»이 하나였던 게 갈렸다).
+  it('splits goals into expand(30일 안 변화)/fold(그 외) and passes them to FlowMultiLaneCanvas — a totally empty goal (0 stories) goes into NEITHER', async () => {
     const calledUrls: string[] = [];
     vi.stubGlobal('fetch', buildFetchMock(calledUrls));
+    const { NextMakerScreen } = await import('./next-maker-screen');
 
     await act(async () => {
       root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    expect(calledUrls.some((u) => u === '/api/goals/e-stall/reference-candidates')).toBe(true);
-    expect(container.textContent).toContain('#101');
-    // 캔버스도 같이 뜬다 — FlowEpicNodes가 부르는 세 엔드포인트.
-    expect(calledUrls.some((u) => u.startsWith('/api/analytics/epic-flow-nodes'))).toBe(true);
-  });
-
-  it('promoting a candidate PATCHes /api/stories/[id]/status with ready-for-dev and the goal moves out of the needs-next list', async () => {
-    const calledUrls: string[] = [];
-    const patchBodies: unknown[] = [];
-    vi.stubGlobal('fetch', buildFetchMock(calledUrls, patchBodies));
-
-    await act(async () => {
-      root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));
-      await new Promise((r) => setTimeout(r, 0));
-    });
-
-    // e-stall is the default-focused stem — its pick panel (with b1) is already visible.
-    const promoteButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '다음으로');
-    expect(promoteButton).toBeTruthy();
-    await act(async () => {
-      promoteButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await new Promise((r) => setTimeout(r, 0));
-    });
-
-    expect(calledUrls.some((u) => u === '/api/stories/b1/status')).toBe(true);
-    expect(patchBodies).toContainEqual({ status: 'ready-for-dev' });
-    // e-stall now has a ready-for-dev story locally → moves to "다음이 정해진" section, headline drops to 1.
-    expect(container.textContent).toContain('목표 3개 중 1개에');
-  });
-
-  it('quiet goal: clicking its row focuses it, then 닫는다 POSTs /api/goals/[id]/transition with status=done and the goal disappears', async () => {
-    const calledUrls: string[] = [];
-    vi.stubGlobal('fetch', buildFetchMock(calledUrls));
-
-    await act(async () => {
-      root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));
-      await new Promise((r) => setTimeout(r, 0));
-    });
-
-    // e-quiet isn't the default focus (e-stall, about-to-stall, is) — click its row to focus it.
-    const quietRow = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('E-Quiet'));
-    expect(quietRow).toBeTruthy();
-    await act(async () => {
-      quietRow!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await new Promise((r) => setTimeout(r, 0));
-    });
-
-    expect(container.textContent).toContain('아직 하는 중입니까?');
-    const closeButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '닫는다');
-    expect(closeButton).toBeTruthy();
-    await act(async () => {
-      closeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await new Promise((r) => setTimeout(r, 0));
-    });
-
-    expect(calledUrls.some((u) => u === '/api/goals/e-quiet/transition')).toBe(true);
-    expect(container.textContent).not.toContain('E-Quiet');
-    // 3 goals total, e-quiet removed entirely → totalGoals in the headline drops to 2.
-    expect(container.textContent).toContain('목표 2개 중 1개에');
+    // e-recent(스토리 5일 전 변화)는 펼침, e-stale(60일 전)은 접힘, e-empty(스토리 0건)는
+    // «레인 캔버스»의 어느 쪽에도 안 들어간다(PO 정정 — 「접힘」과 「0건」은 다른 사정).
+    // NextActionsStrip(승격/전환 동사)은 별도 축이라 e-empty도 「다음이 없다」로 뜬다 —
+    // 스토리가 0건이라도 그 목표가 조용한지/승격 후보가 없는지는 여전히 물을 수 있다.
+    expect(container.querySelector('[data-testid="expand-titles"]')?.textContent).toBe('E-Recent');
+    expect(container.querySelector('[data-testid="folded-count"]')?.textContent).toBe('1');
   });
 
   it('orphan panel: assigning a goal PATCHes /api/stories/[id] with epic_id and the story disappears from the orphan list', async () => {
     const calledUrls: string[] = [];
     const patchBodies: unknown[] = [];
     vi.stubGlobal('fetch', buildFetchMock(calledUrls, patchBodies));
+    const { NextMakerScreen } = await import('./next-maker-screen');
 
     await act(async () => {
       root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));
@@ -292,7 +237,7 @@ describe('NextMakerScreen — real fetch orchestration', () => {
     expect(select).toBeTruthy();
     await act(async () => {
       const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
-      nativeSetter.call(select, 'e-stall');
+      nativeSetter.call(select, 'e-recent');
       select.dispatchEvent(new Event('change', { bubbles: true }));
       await new Promise((r) => setTimeout(r, 0));
     });
@@ -305,7 +250,7 @@ describe('NextMakerScreen — real fetch orchestration', () => {
     });
 
     expect(calledUrls.some((u) => u === '/api/stories/o1')).toBe(true);
-    expect(patchBodies).toContainEqual({ epic_id: 'e-stall' });
+    expect(patchBodies).toContainEqual({ epic_id: 'e-recent' });
     expect(container.textContent).not.toContain('목표에 안 붙은 일이');
     expect(container.textContent).not.toContain('Orphan Story');
   });
@@ -322,6 +267,14 @@ describe('NextMakerScreen — real fetch orchestration', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
+    // story #2224 AC1 후속(NextActionsStrip) — 승격 버튼은 그 목표 행을 펼쳐야 뜬다(예전
+    // 「기본-포커스」 화면과 다르다, next-maker-screen.tsx 문서 참고).
+    const stemRow = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('E-Recent'));
+    await act(async () => {
+      stemRow!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
     const promoteButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '다음으로');
     await act(async () => {
       promoteButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -329,8 +282,8 @@ describe('NextMakerScreen — real fetch orchestration', () => {
     });
 
     expect(container.textContent).toContain('처리에 실패했습니다');
-    // headline은 그대로 "목표 3개 중 2개에" — 로컬 상태가 조용히 바뀌지 않았다.
-    expect(container.textContent).toContain('목표 3개 중 2개에');
+    // headline은 그대로 "목표 3개 중 3개에" — 로컬 상태가 조용히 바뀌지 않았다.
+    expect(container.textContent).toContain('목표 3개 중 3개에');
   });
 
   it('promote network error (rejected fetch, no .catch() before this fix would unhandled-reject): still shows a failure toast', async () => {
@@ -342,6 +295,12 @@ describe('NextMakerScreen — real fetch orchestration', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
+    const stemRow = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('E-Recent'));
+    await act(async () => {
+      stemRow!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
     const promoteButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '다음으로');
     await act(async () => {
       promoteButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -349,7 +308,7 @@ describe('NextMakerScreen — real fetch orchestration', () => {
     });
 
     expect(container.textContent).toContain('처리에 실패했습니다');
-    expect(container.textContent).toContain('목표 3개 중 2개에');
+    expect(container.textContent).toContain('목표 3개 중 3개에');
   });
 
   // 까심 QA REQUEST_CHANGES(2026-07-31) 회귀 가드 — "성공 뒤에도 되돌리기 글자가 0건"이
@@ -365,13 +324,20 @@ describe('NextMakerScreen — real fetch orchestration', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
+    const stemRow = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('E-Recent'));
+    await act(async () => {
+      stemRow!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
     const promoteButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '다음으로');
     await act(async () => {
       promoteButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    expect(container.textContent).toContain('목표 3개 중 1개에');
+    // 승격 전 "3개 중 3개" → e-recent가 다음을 얻어 "3개 중 2개".
+    expect(container.textContent).toContain('목표 3개 중 2개에');
     const undoButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '되돌리기');
     expect(undoButton).toBeTruthy();
 
@@ -381,7 +347,7 @@ describe('NextMakerScreen — real fetch orchestration', () => {
     });
 
     expect(patchBodies).toContainEqual({ status: 'backlog' });
-    // 되돌리기 후 e-stall이 다시 "다음이 비어 있는" 목록으로 — headline이 2로 복귀.
-    expect(container.textContent).toContain('목표 3개 중 2개에');
+    // 되돌리기 후 e-recent가 다시 "다음이 비어 있는" 목록으로 — headline이 3으로 복귀.
+    expect(container.textContent).toContain('목표 3개 중 3개에');
   });
 });

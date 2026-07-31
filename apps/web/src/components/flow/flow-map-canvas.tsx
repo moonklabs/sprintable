@@ -17,14 +17,20 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 
-// 카드 실측(FlowMapNodeCard): w-[110px], 높이는 두 줄 텍스트+padding으로 24px 안팎(NODE_ROW_HEIGHT
-// 28px 중 4px가 행간) — 선은 카드 "왼쪽 가장자리 중앙"→"오른쪽 가장자리 중앙"을 잇는다.
+// 카드 실측(FlowMapNodeCard): w-[110px] · 높이 24px(한 줄) — 선은 카드 "왼쪽 가장자리
+// 중앙"→"오른쪽 가장자리 중앙"을 잇는다.
 const NODE_CARD_WIDTH = 110;
 const NODE_CARD_HEIGHT = 24;
 
 // 유나 목업(`be8709a4`) 실측 치수 — "그림이 정본"(2026-07-30), 비슷한 값이 아니라 그 숫자.
 const HEADER_HEIGHT = 22; // .colhd
-const NODE_ROW_HEIGHT = 28; // .n(24px) + 행간
+// ⛔story #2224 AC17-C(2026-07-31, 유나 라이브 실측 05:28Z·확定 05:34Z) — 노드가 두 줄
+// (「#2296 · In Progress」)이던 이유는 상태 글자였는데, 좌측 3px 색이 이미 §4-4의 상태
+// 정본이라 글자는 «중복»이었다. 상태 글자를 빼 한 줄(24px)로 줄이고 행 간격을 28→32로
+// 올린다(단순 「행 간격 ≥ 노드 높이 + 8」자를 지금 값에 그대로 대면 48이 되어 AC17-A(캔버스가
+// 레인 수 × 76을 따라간다)를 더 나쁘게 하므로, 노드를 줄이는 것과 «짝»으로 낸 값 — 8개 ×
+// 32 = 256px, 겹침 0쌍).
+const NODE_ROW_HEIGHT = 32;
 const LANE_MIN_HEIGHT = 70;
 const NOW_CLUSTER_X = FLOW_MAP_NOW_LINE_X - 40; // "지금" 노드는 세로선 바로 왼쪽에 클러스터(착수시각순)
 
@@ -49,13 +55,14 @@ interface FlowMapCanvasProps {
    * 겹치는 팝오버로 같은 `StoryDetailPanel`을 재사용한다 — view는 그대로 둔다. */
   onSelectStory: (storyId: string) => void;
   /** 유나양 규격(아티팩트 a125909a, "누르면 펼쳐지는 것이 곧 줌인") — 묶음 카드를 누르면
-   * 호출부(FlowEpicNodes)가 개별 과거 스토리를 fetch해 `pastItems`로 다시 넘긴다. 오늘은
-   * 레인이 늘 하나(펼친 에픽 하나)라 콜백에 lane 식별자가 없다 — `onSelectStory`와 같은
-   * 자리(오늘의 단일-레인 구조에 내일의 여러-레인 모양을 미리 맞추는 대신, 지금은 콜백
-   * 자체를 단순하게 둔다. 멀티레인이 오면 epicId 인자를 추가하는 것으로 끝난다). */
-  onTogglePastBundle: () => void;
-  /** fetch 진행 중 — 묶음 카드가 "불러오는 중…"을 보이는 자리. */
-  isPastBundleLoading: boolean;
+   * 호출부가 개별 과거 스토리를 fetch해 그 레인의 `pastItems`로 다시 넘긴다.
+   * ⛔story #2224 AC1(멀티레인, 2026-07-31) — 레인이 여럿이 되며 "어느 레인의 묶음인가"를
+   * 가려야 해 `epicId` 인자가 붙었다(예고된 그대로 — 이전 문서가 "멀티레인이 오면 epicId
+   * 인자를 추가하는 것으로 끝난다"고 적어 둔 자리). */
+  onTogglePastBundle: (epicId: string) => void;
+  /** 어느 레인(들)이 지금 fetch 중인지 — 묶음 카드가 "불러오는 중…"을 보이는 자리도
+   * 레인마다 갈린다(위와 같은 이유로 epicId 기준 Set으로 바뀌었다). */
+  loadingPastBundleEpicIds: Set<string>;
   /** story #2354 AC6 — 패널을 «닫아도» 마지막으로 누른 노드가 선택된 채로 남는다(고리 강조
    * ring). URL의 `?story=`가 단일 소스 — 패널이 닫혀도 이 값은 지워지지 않는다(호출부가
    * 패널의 열림/닫힘만 별도 로컬 상태로 관리, 선택 자체는 URL 그대로). */
@@ -79,18 +86,6 @@ interface FlowMapCanvasProps {
 
 export type CreateLinkResult = { ok: true } | { ok: false; error: string };
 export type DeleteLinkResult = { ok: true } | { ok: false; error: string };
-
-// PO 지적(2026-07-30) — 판을 갈아엎으며 색/모양(border-left)만 남기고 「status를 사람이
-// 읽는 말」이 조용히 사라질 뻔했다(구 FlowNodeCard의 상태 배지가 이 카드로 안 옮겨짐). 색은
-// 범례 없이는 뜻을 못 나르므로, 카드 자체에 라벨 텍스트를 그대로 유지한다(구 카드와 동형).
-const STATUS_LABEL_KEY: Record<string, string> = {
-  'in-progress': 'nodeStatusInProgress',
-  'in-review': 'nodeStatusInReview',
-  'ready-for-dev': 'nodeStatusReadyForDev',
-  blocked: 'nodeStatusBlocked',
-  backlog: 'nodeStatusBacklog',
-  done: 'nodeStatusDone',
-};
 
 function nodeToneClass(node: FlowMapNode): string {
   if (node.kind === 'now') return 'border-l-info';
@@ -124,7 +119,6 @@ function FlowMapNodeCard({
   isJustLinked, onPortPointerDown, onPortKeyDown,
 }: FlowMapNodeCardProps) {
   const t = useTranslations('flow');
-  const statusKey = STATUS_LABEL_KEY[node.status];
   // 유나양 규격(아티팩트 a125909a `.nd.past{opacity:.62}`) — 펼친 과거 카드는 항상 흐림
   // (대체-확認 흐림과 별개 사정 — 이미 끝난 일이라는 사실 자체를 흐림으로 나타낸다).
   const dimmed = superseded || node.kind === 'past' || isInvalidDropTarget;
@@ -135,7 +129,10 @@ function FlowMapNodeCard({
     // 둔다 — story #2354 오버레이 패널이 "이 노드를 가리지 않는" 위치를 계산할 앵커
     // (getBoundingClientRect)이자, 포인터 드래그의 드롭 대상 판정(`closest('[data-node-id]')`)
     // 자리이기도 하다.
-    <div className="absolute w-[110px] overflow-visible" style={{ left, top }} data-node-id={node.id}>
+    // ⛔story #2224 AC17-C(2026-07-31) — 카드를 두 줄(40px)→한 줄(24px, h-6)로. 상태 글자
+    // (「진행 중」 등)를 뺐다 — 좌측 3px border-l 색이 이미 §4-4의 상태 정본이라 글자는
+    // «중복»이었고, 그 중복이 8개 레인을 원리적으로 못 서게(384px 초과) 막고 있었다.
+    <div className="absolute h-6 w-[110px] overflow-visible" style={{ left, top }} data-node-id={node.id}>
       <button
         type="button"
         onClick={() => onSelectStory(node.id)}
@@ -149,16 +146,13 @@ function FlowMapNodeCard({
         // A로 끌면 selected와 isDropHover가 동시에 참이 된다. 무관한 노드가 "놓을 자리"로
         // 오인되므로, 이제 호출부(FlowMapCanvas)가 잇기 진행 중(linkDraft.phase !== 'idle')엔
         // selected 자체를 false로 넘겨 이 컴포넌트에 도달하기 전에 막는다.
-        className={`focus-inset w-full cursor-pointer rounded border border-l-[3px] border-border bg-card px-1.5 py-1 text-left text-[11px] shadow-sm hover:border-info/60 ${nodeToneClass(node)} ${dimmed ? 'opacity-50' : ''} ${selected || isDropHover ? 'ring-2 ring-brand ring-offset-1 ring-offset-background' : ''} ${isJustLinked ? 'ring-2 ring-success ring-offset-1 ring-offset-background' : ''}`}
+        className={`focus-inset flex h-6 w-full items-center gap-1 rounded border border-l-[3px] border-border bg-card px-1.5 text-left text-[11px] shadow-sm hover:border-info/60 ${nodeToneClass(node)} ${dimmed ? 'opacity-50' : ''} ${selected || isDropHover ? 'ring-2 ring-brand ring-offset-1 ring-offset-background' : ''} ${isJustLinked ? 'ring-2 ring-success ring-offset-1 ring-offset-background' : ''}`}
       >
-        <div className="flex items-center justify-between gap-1 font-mono text-[9px] text-muted-foreground">
-          <span className="truncate">#{node.storyNumber}</span>
-          <span className="shrink-0">{statusKey ? t(statusKey) : node.status}</span>
-        </div>
+        <span className="shrink-0 font-mono text-[9px] text-muted-foreground">#{node.storyNumber}</span>
         {/* 대체(확認됨)만 — "옛 노드"에 취소선(유나양 규격). 제안 상태는 절대 취소선을 넣지
             않는다(computeSupersededNodeIds가 확認 간선만 모으므로 이 자리는 값만 받는다 —
             "제안이면 안 흐린다"는 판단을 이 컴포넌트가 다시 하지 않는다). */}
-        <div className={`truncate ${superseded ? 'line-through' : ''}`}>{node.title}</div>
+        <span className={`truncate ${superseded ? 'line-through' : ''}`}>{node.title}</span>
       </button>
       {/* ⑥ 포트(story #2353, doc `flow-port-slot-spec` ㉠) — 사람이 연결을 «만드는» 유일한
           손잡이. 상시 보이되 아주 작게(3px, 무채) → 호버/포커스/드래그 원점일 때 커지고
@@ -243,7 +237,7 @@ function FlowEdgeMarkerDefs() {
  * 레인이 오면 레인별 ref map으로 넓혀야 한다 — 아래 laneContainerRef 참고).
  */
 export function FlowMapCanvas({
-  lanes, onSelectStory, onTogglePastBundle, isPastBundleLoading, selectedNodeId = null, onCreateLink, onDeleteLink, memberMap,
+  lanes, onSelectStory, onTogglePastBundle, loadingPastBundleEpicIds, selectedNodeId = null, onCreateLink, onDeleteLink, memberMap,
 }: FlowMapCanvasProps) {
   const t = useTranslations('flow');
   const { currentTeamMemberId } = useDashboardContext();
@@ -620,7 +614,7 @@ export function FlowMapCanvas({
                   {lane.pastTotal > 0 && lane.pastNodes.length === 0 ? (
                     <button
                       type="button"
-                      onClick={onTogglePastBundle}
+                      onClick={() => onTogglePastBundle(lane.epicId)}
                       className="focus-inset absolute cursor-pointer rounded border border-border bg-muted px-1.5 py-1 text-left opacity-75 hover:border-brand/60"
                       style={{ left: PAST_BUNDLE_LEFT, top: PAST_BUNDLE_TOP, width: PAST_BUNDLE_CARD_WIDTH }}
                     >
@@ -634,7 +628,7 @@ export function FlowMapCanvas({
                         {t('flowMapPastOutgoingCount', { n: lane.pastBundle.outgoingCount })}
                       </div>
                       <div className="text-[9px] text-muted-foreground">
-                        {isPastBundleLoading ? t('flowMapPastLoading') : t('flowMapPastExpandHint')}
+                        {loadingPastBundleEpicIds.has(lane.epicId) ? t('flowMapPastLoading') : t('flowMapPastExpandHint')}
                       </div>
                     </button>
                   ) : null}
@@ -656,7 +650,7 @@ export function FlowMapCanvas({
                       </span>
                       <button
                         type="button"
-                        onClick={onTogglePastBundle}
+                        onClick={() => onTogglePastBundle(lane.epicId)}
                         className="focus-inset absolute right-1 top-1 text-[9px] text-muted-foreground underline"
                       >
                         {t('flowMapPastCollapseHint')}
