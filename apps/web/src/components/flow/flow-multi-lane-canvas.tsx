@@ -8,7 +8,8 @@ import {
   deriveFlowMapLane, parseDependencyGraphEdges, parseReferenceCandidateEdges,
   type FlowMapEdge, type RawDependencyEdge, type RawReferenceCandidate,
 } from './derive-flow-map';
-import { FlowMapCanvas } from './flow-map-canvas';
+import { FlowMapCanvas, type CreateLinkResult, type DeleteLinkResult } from './flow-map-canvas';
+import { declareResponseToEdge } from './flow-port-linking';
 import type { NextMakerGoal } from './derive-next-maker';
 import { parseCursorMeta } from '@/lib/pagination';
 
@@ -23,6 +24,9 @@ interface FlowMultiLaneCanvasProps {
   foldedCount: number;
   onSelectStory: (storyId: string) => void;
   selectedNodeId?: string | null;
+  /** story #2353 되돌리기 다이얼로그의 「{이름}이 만든 연결입니다」 이름 조회용(goal-stem-card.tsx
+   * 참고 — 새 fetch 아님, 호출부가 이미 들고 있는 값을 그대로 흘려보낸다). */
+  memberMap?: Record<string, { name: string }>;
 }
 
 interface RawStoryListPage {
@@ -107,7 +111,7 @@ type LoadState =
  * 컴포넌트와 같은 안전성).
  */
 export function FlowMultiLaneCanvas({
-  projectId, expandGoals, foldedCount, onSelectStory, selectedNodeId = null,
+  projectId, expandGoals, foldedCount, onSelectStory, selectedNodeId = null, memberMap = {},
 }: FlowMultiLaneCanvasProps) {
   const t = useTranslations('flow');
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
@@ -166,6 +170,77 @@ export function FlowMultiLaneCanvas({
     });
   }, [pastItemsByEpic]);
 
+  // story #2353 포트 잇기 — flow-epic-nodes.tsx의 단일-레인 판과 같은 낙관적-업데이트-금지
+  // 원칙(AC14: 서버 200/201 뒤에만 edges를 갱신)이되, 레인이 여럿이라 «어느 레인의 edges에
+  // 얹을지»를 먼저 찾아야 한다 — apiSourceId(포트를 끈 쪽)가 now/upcoming 어디에 있는지로
+  // 판정한다(오늘은 레인 간 연결을 안 다룬다 — 그건 goal-edges, #25, BE 대기).
+  const findEpicIdForStoryId = useCallback((storyId: string): string | null => {
+    if (state.kind !== 'ready') return null;
+    for (const [epicId, ing] of state.ingredientsByEpic) {
+      if (ing.data.now.items.some((i) => i.id === storyId)) return epicId;
+      if (ing.data.upcoming.items.some((i) => i.id === storyId)) return epicId;
+    }
+    return null;
+  }, [state]);
+
+  const handleCreateLink = useCallback(async (params: { apiSourceId: string; targetId: string; relationKind: string | null }): Promise<CreateLinkResult> => {
+    try {
+      const res = await fetch(`/api/stories/${params.apiSourceId}/reference-candidates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_id: params.targetId, relation_kind: params.relationKind }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        return { ok: false, error: typeof json?.detail === 'string' ? json.detail : t('portLinkErrorFallback') };
+      }
+      const epicId = findEpicIdForStoryId(params.apiSourceId) ?? findEpicIdForStoryId(params.targetId);
+      if (epicId) {
+        const edge = declareResponseToEdge(params.apiSourceId, {
+          target_id: json.target_id, relation_kind: json.relation_kind, status: json.status,
+        });
+        setState((prev) => {
+          if (prev.kind !== 'ready') return prev;
+          const ing = prev.ingredientsByEpic.get(epicId);
+          if (!ing) return prev;
+          const nextIngredients = new Map(prev.ingredientsByEpic);
+          nextIngredients.set(epicId, {
+            ...ing,
+            edges: [...ing.edges, { ...edge, candidateId: json.id, declaredBy: json.declared_by, declaredAt: json.declared_at }],
+          });
+          return { ...prev, ingredientsByEpic: nextIngredients };
+        });
+      }
+      return { ok: true };
+    } catch {
+      return { ok: false, error: t('portLinkErrorFallback') };
+    }
+  }, [t, findEpicIdForStoryId]);
+
+  const handleDeleteLink = useCallback(async (candidateId: string, anchorStoryId: string): Promise<DeleteLinkResult> => {
+    try {
+      const res = await fetch(`/api/stories/${anchorStoryId}/reference-candidates/${candidateId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        return { ok: false, error: typeof json?.detail === 'string' ? json.detail : t('portLinkErrorFallback') };
+      }
+      setState((prev) => {
+        if (prev.kind !== 'ready') return prev;
+        const nextIngredients = new Map(prev.ingredientsByEpic);
+        for (const [epicId, ing] of nextIngredients) {
+          if (ing.edges.some((e) => e.candidateId === candidateId)) {
+            nextIngredients.set(epicId, { ...ing, edges: ing.edges.filter((e) => e.candidateId !== candidateId) });
+            break;
+          }
+        }
+        return { ...prev, ingredientsByEpic: nextIngredients };
+      });
+      return { ok: true };
+    } catch {
+      return { ok: false, error: t('portLinkErrorFallback') };
+    }
+  }, [t]);
+
   // 재료(fetch 결과)는 캐시하고, pastItems가 바뀔 때마다 deriveFlowMapLane(순수함수, 값싸다)을
   // «다시» 태운다 — 이미 파생된 lane 위에 pastNodes만 덮으면 과거-펼침 좌표·간선이 안 맞는다.
   const lanes = useMemo(() => {
@@ -200,6 +275,9 @@ export function FlowMultiLaneCanvas({
         onTogglePastBundle={handleTogglePastBundle}
         loadingPastBundleEpicIds={loadingPastBundleEpicIds}
         selectedNodeId={selectedNodeId}
+        onCreateLink={handleCreateLink}
+        onDeleteLink={handleDeleteLink}
+        memberMap={memberMap}
       />
       {/* 접힘 줄(목업 그대로) — "숨긴 것이 아니라 접은 것입니다". 오늘은 펼치기 인터랙션이
           없다(30일 재계산은 새로고침으로 자연히 갱신된다) — 화면이 «왜» 접었는지만 정직하게

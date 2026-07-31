@@ -82,7 +82,7 @@ async function renderCanvas(lane: FlowMapLane, overrides: { onCreateLink?: (p: {
         lanes={[lane]}
         onSelectStory={() => {}}
         onTogglePastBundle={() => {}}
-        isPastBundleLoading={false}
+        loadingPastBundleEpicIds={new Set()}
         onCreateLink={onCreateLink}
         onDeleteLink={onDeleteLink}
         memberMap={{ 'member-9': { name: '미르코' }, 'member-OTHER': { name: '디디' } }}

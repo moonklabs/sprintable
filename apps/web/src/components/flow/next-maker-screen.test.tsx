@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
+import { NextMakerScreen } from './next-maker-screen';
 import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -151,7 +152,6 @@ describe('NextMakerScreen — real fetch orchestration + lane grouping', () => {
   it('fetches goals + 4 active-status story pages + next-up + lane data, and computes the headline from them', async () => {
     const calledUrls: string[] = [];
     vi.stubGlobal('fetch', buildFetchMock(calledUrls));
-    const { NextMakerScreen } = await import('./next-maker-screen');
 
     await act(async () => {
       root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));
@@ -191,7 +191,6 @@ describe('NextMakerScreen — real fetch orchestration + lane grouping', () => {
   it('splits goals into expand(30일 안 변화)/fold(그 외) and passes them to FlowMultiLaneCanvas — a totally empty goal (0 stories) goes into NEITHER', async () => {
     const calledUrls: string[] = [];
     vi.stubGlobal('fetch', buildFetchMock(calledUrls));
-    const { NextMakerScreen } = await import('./next-maker-screen');
 
     await act(async () => {
       root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));
@@ -210,7 +209,6 @@ describe('NextMakerScreen — real fetch orchestration + lane grouping', () => {
     const calledUrls: string[] = [];
     const patchBodies: unknown[] = [];
     vi.stubGlobal('fetch', buildFetchMock(calledUrls, patchBodies));
-    const { NextMakerScreen } = await import('./next-maker-screen');
 
     await act(async () => {
       root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));

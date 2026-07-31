@@ -286,6 +286,7 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
         foldedCount={laneGrouping.fold.length}
         onSelectStory={onSelectStory}
         selectedNodeId={selectedNodeId}
+        memberMap={memberMap}
       />
 
       {/* 목표가 «없는» 스토리 — 목표별 레인 캔버스 다음 순서(자리는 «남는 곳»이 아니라

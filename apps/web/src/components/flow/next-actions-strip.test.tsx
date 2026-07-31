@@ -62,7 +62,7 @@ describe('NextActionsStrip — 접힌 채 기본, 펼치면 승격/전환 동사
         <NextActionsStrip
           needsNextStems={[]} quietCount={0} projectId="p1"
           backlogByEpic={new Map()} recentlyClosedTargetIds={new Set()} memberMap={{}}
-          onSelectStory={() => {}} onStoryPromoted={() => {}} onGoalTransitioned={() => {}}
+          onSelectStory={() => {}} onStoryPromoted={() => {}} onPromoteFailed={() => {}} onGoalTransitioned={() => {}}
         />,
       ));
     });
@@ -78,7 +78,7 @@ describe('NextActionsStrip — 접힌 채 기본, 펼치면 승격/전환 동사
         <NextActionsStrip
           needsNextStems={[stem()]} quietCount={0} projectId="p1"
           backlogByEpic={new Map([['e1', [backlogStory()]]])} recentlyClosedTargetIds={new Set()} memberMap={{}}
-          onSelectStory={() => {}} onStoryPromoted={() => {}} onGoalTransitioned={() => {}}
+          onSelectStory={() => {}} onStoryPromoted={() => {}} onPromoteFailed={() => {}} onGoalTransitioned={() => {}}
         />,
       ));
     });
@@ -106,7 +106,7 @@ describe('NextActionsStrip — 접힌 채 기본, 펼치면 승격/전환 동사
         <NextActionsStrip
           needsNextStems={[stem()]} quietCount={0} projectId="p1"
           backlogByEpic={new Map([['e1', [backlogStory()]]])} recentlyClosedTargetIds={new Set()} memberMap={{}}
-          onSelectStory={() => {}} onStoryPromoted={onStoryPromoted} onGoalTransitioned={() => {}}
+          onSelectStory={() => {}} onStoryPromoted={onStoryPromoted} onPromoteFailed={() => {}} onGoalTransitioned={() => {}}
         />,
       ));
     });
@@ -151,7 +151,7 @@ describe('NextActionsStrip — 접힌 채 기본, 펼치면 승격/전환 동사
         <NextActionsStrip
           needsNextStems={[stem({ priority: 'quiet' })]} quietCount={1} projectId="p1"
           backlogByEpic={new Map()} recentlyClosedTargetIds={new Set()} memberMap={{}}
-          onSelectStory={() => {}} onStoryPromoted={() => {}} onGoalTransitioned={onGoalTransitioned}
+          onSelectStory={() => {}} onStoryPromoted={() => {}} onPromoteFailed={() => {}} onGoalTransitioned={onGoalTransitioned}
         />,
       ));
     });
@@ -185,7 +185,7 @@ describe('NextActionsStrip — 접힌 채 기본, 펼치면 승격/전환 동사
         <NextActionsStrip
           needsNextStems={[stem()]} quietCount={0} projectId="p1"
           backlogByEpic={new Map()} recentlyClosedTargetIds={new Set()} memberMap={{}}
-          onSelectStory={() => {}} onStoryPromoted={() => {}} onGoalTransitioned={() => {}}
+          onSelectStory={() => {}} onStoryPromoted={() => {}} onPromoteFailed={() => {}} onGoalTransitioned={() => {}}
         />,
       ));
     });

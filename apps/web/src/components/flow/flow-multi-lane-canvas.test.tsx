@@ -175,7 +175,9 @@ describe('FlowMultiLaneCanvas — N개 레인 병렬 fetch', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    const button = container.querySelector('[data-node-id="n1"]') as HTMLElement;
+    // story #2353(포트) 후속 — data-node-id는 카드 wrapper(div)에 있고, 클릭 핸들러는 그
+    // 안의 「카드 열기」button에 있다(포트 버튼과 형제로 서는 구조, flow-map-canvas.tsx 참고).
+    const button = container.querySelector('[data-node-id="n1"] button') as HTMLElement;
     expect(button).not.toBeNull();
     await act(async () => { button.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(onSelectStory).toHaveBeenCalledWith('n1');
