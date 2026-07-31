@@ -112,10 +112,14 @@ describe('FlowMapCanvas — node click → open story panel (선생님 지적 20
   // 속성이다(flow-node-story-panel.tsx가 `[data-node-id="..."]`로 querySelector한다).
   it('renders data-node-id on every node card so the overlay panel can anchor to it', async () => {
     const lane = makeLane({ nowNodes: [makeNode({ id: 's-anchor-123' })] });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
-    const button = container.querySelector('[data-node-id="s-anchor-123"]');
-    expect(button).not.toBeNull();
-    expect(button?.tagName).toBe('BUTTON');
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    // story #2353 후속 — data-node-id는 카드를 감싸는 wrapper(div)에 있다(포트 버튼과
+    // 카드-열기 버튼이 형제로 서는 구조라 wrapper 자체는 button이 아니다, flow-map-canvas.tsx
+    // FlowMapNodeCard 문서 참고). 앵커 대상은 wrapper 자체로 충분(getBoundingClientRect는
+    // div든 button이든 동일하게 동작).
+    const wrapper = container.querySelector('[data-node-id="s-anchor-123"]');
+    expect(wrapper).not.toBeNull();
+    expect(wrapper?.querySelector('button')).not.toBeNull();
   });
 
   // story #2354 AC6(판정선) — 패널을 닫아도 「누른 노드가 선택된 채로」 남는다. 이 시각
@@ -126,18 +130,20 @@ describe('FlowMapCanvas — node click → open story panel (선생님 지적 20
       queueNodesByDepth: new Map([[0, [makeNode({ id: 'u1', kind: 'queue' })]]]),
     });
     await act(async () => {
-      root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} selectedNodeId="u1" />));
+      root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} selectedNodeId="u1" onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />));
     });
-    const selectedButton = container.querySelector('[data-node-id="u1"]');
-    const otherButton = container.querySelector('[data-node-id="n1"]');
+    // ring 클래스는 「카드 열기」버튼(wrapper의 첫 번째 button)에 있다 — 포트 버튼과 형제로
+    // 서는 구조(story #2353) 그대로.
+    const selectedButton = container.querySelector('[data-node-id="u1"] button');
+    const otherButton = container.querySelector('[data-node-id="n1"] button');
     expect(selectedButton?.className).toContain('ring-2');
     expect(otherButton?.className).not.toContain('ring-2');
   });
 
   it('highlights no node when selectedNodeId is omitted (default behavior unchanged)', async () => {
     const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
-    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
-    expect(container.querySelector('[data-node-id="n1"]')?.className).not.toContain('ring-2');
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    expect(container.querySelector('[data-node-id="n1"] button')?.className).not.toContain('ring-2');
   });
 });
 
