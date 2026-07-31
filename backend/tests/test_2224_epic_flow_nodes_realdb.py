@@ -135,8 +135,10 @@ async def test_epic_flow_nodes_three_zones_and_one_call():
             assert body["last_changed_at"] is not None
 
             for node in body["now"]["items"] + body["upcoming"]["items"]:
+                # story #2224 후속(2026-07-31) — gate_pending·gate_reason 신설(문 레이어).
                 assert set(node.keys()) == {
                     "id", "story_number", "title", "status", "assignee_id", "updated_at",
+                    "gate_pending", "gate_reason",
                 }
 
             assert call_count["n"] == 1, f"repo 메서드가 {call_count['n']}번 불림(N+1 의심)"

@@ -153,6 +153,12 @@ class FlowNode(BaseModel):
     status: str
     assignee_id: uuid.UUID | None
     updated_at: datetime
+    # ⛔story #2224 후속(오르테가 판정, 2026-07-31) — 문(게이트) 레이어. gate_pending=False면
+    # gate_reason은 항상 None(막히지 않은 노드에 원인이 있으면 거짓말이 된다). AnalyticsRepository
+    # ._blocked_story_evidence/_gate_reason이 SSOT — get_epics_progress_lane의 lane["blocked"]와
+    # 같은 조건(값을 두 번 안 적는다).
+    gate_pending: bool
+    gate_reason: str | None
 
 
 class FlowNodeZone(BaseModel):
