@@ -21,6 +21,7 @@ interface GoalStemCardProps {
   memberMap: Record<string, MemberLite>;
   onSelectStory: (storyId: string) => void;
   onStoryPromoted: (storyId: string, epicId: string) => void;
+  onPromoteFailed: (storyId: string) => void;
   onGoalTransitioned: (epicId: string) => void;
   /** story #2354 — 순수 통과 prop(FlowMapCanvas 참고). */
   selectedNodeId?: string | null;
@@ -54,7 +55,7 @@ const REASON_LABEL_KEY: Record<NextPickReasonKey, string> = {
  */
 export function GoalStemCard({
   stem, projectId, backlogStories, recentlyClosedTargetIds, memberMap,
-  onSelectStory, onStoryPromoted, onGoalTransitioned, selectedNodeId = null,
+  onSelectStory, onStoryPromoted, onPromoteFailed, onGoalTransitioned, selectedNodeId = null,
 }: GoalStemCardProps) {
   const t = useTranslations('flow');
   const [pickState, setPickState] = useState<PickState>({ kind: 'loading' });
@@ -90,10 +91,15 @@ export function GoalStemCard({
       body: JSON.stringify({ status: 'ready-for-dev' }),
     })
       .then((r) => {
+        // 까심 QA REQUEST_CHANGES(2026-07-31) — 실패를 조용히 삼키던 것을 고친다. 로컬 상태는
+        // 여전히 서버 200 후에만 반영한다(낙관적 업데이트 없음, 그대로 유지) — 실패면 그냥
+        // 사용자에게 «말하기»만 한다.
         if (r.ok) onStoryPromoted(storyId, stem.epicId);
+        else onPromoteFailed(storyId);
       })
+      .catch(() => onPromoteFailed(storyId))
       .finally(() => setPromotingId(null));
-  }, [stem.epicId, onStoryPromoted]);
+  }, [stem.epicId, onStoryPromoted, onPromoteFailed]);
 
   const handleGoalTransition = useCallback((status: 'done' | 'archived') => {
     setQuietBusy(true);

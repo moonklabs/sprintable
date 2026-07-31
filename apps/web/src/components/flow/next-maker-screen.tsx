@@ -15,6 +15,7 @@ import { GoalStemCard, type MemberLite } from './goal-stem-card';
 import { StemRow } from './stem-row';
 import { OrphanStoriesPanel } from './orphan-stories-panel';
 import { parseCursorMeta } from '@/lib/pagination';
+import { ToastContainer, useToast } from '@/components/ui/toast';
 
 interface NextMakerScreenProps {
   projectId: string;
@@ -95,6 +96,7 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
   // "실제로 다음이 생겼다"가 눈으로 보인다). refetchNonce로 강제 전체 재계산은 별도 트리거.
   const [promotedIds, setPromotedIds] = useState<Set<string>>(new Set());
   const [transitionedEpicIds, setTransitionedEpicIds] = useState<Set<string>>(new Set());
+  const { toasts, addToast, dismissToast } = useToast();
   // 「목표 정하기」(PO 판정 2026-07-31) — 배정된 스토리는 로컬에서 즉시 그 목표 소속으로
   // 반영한다(promotedIds와 같은 패턴). 재fetch 없이도 그 목표의 대기 칸이 즉시 늘고 orphan
   // 목록에서 즉시 빠진다 — "안 보이면 잃는다"의 반대(배정하면 즉시 줄기에 서는 것이 보인다).
@@ -140,9 +142,41 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
     return () => { cancelled = true; };
   }, [projectId]);
 
+  // 까심 QA REQUEST_CHANGES(2026-07-31) 후속 — 「다음으로」는 backlog→ready-for-dev로 상태를
+  // 바꾸는 동작이라 되돌릴 길이 없으면 누르기가 무서워진다. 되돌리기 자체도 진짜 서버 PATCH이지
+  // 로컬 상태만 뒤집는 낙관적 되돌림이 아니다(원래 승격도 서버 200 후에만 반영했던 것과 동형).
+  const handleUndoPromote = useCallback((storyId: string) => {
+    fetch(`/api/stories/${storyId}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'backlog' }),
+    })
+      .then((r) => {
+        if (r.ok) {
+          setPromotedIds((prev) => {
+            const next = new Set(prev);
+            next.delete(storyId);
+            return next;
+          });
+        } else {
+          addToast({ title: t('nextMakerUndoFailedToast'), type: 'error' });
+        }
+      })
+      .catch(() => addToast({ title: t('nextMakerUndoFailedToast'), type: 'error' }));
+  }, [addToast, t]);
   const handleStoryPromoted = useCallback((storyId: string) => {
     setPromotedIds((prev) => new Set(prev).add(storyId));
-  }, []);
+    // 오르테가 PO 판정(2026-07-31) — 「다음으로」는 되돌릴 일이 드문 동작이라 상시 되돌리기
+    // 버튼(행마다)은 화면을 무겁게 한다고 판단, undo 토스트(몇 초짜리 창) 쪽으로 간다.
+    addToast({
+      title: t('nextMakerPromoteSuccessToast'),
+      type: 'success',
+      action: { label: t('nextMakerUndoAction'), onClick: () => handleUndoPromote(storyId) },
+    });
+  }, [addToast, handleUndoPromote, t]);
+  const handlePromoteFailed = useCallback(() => {
+    addToast({ title: t('nextMakerPromoteFailedToast'), type: 'error' });
+  }, [addToast, t]);
   const handleGoalTransitioned = useCallback((epicId: string) => {
     setTransitionedEpicIds((prev) => new Set(prev).add(epicId));
   }, []);
@@ -289,6 +323,7 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
               onSelectStory={onSelectStory}
               selectedNodeId={selectedNodeId}
               onStoryPromoted={handleStoryPromoted}
+              onPromoteFailed={handlePromoteFailed}
               onGoalTransitioned={handleGoalTransitioned}
             />
           ) : (
@@ -296,6 +331,8 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
           )}
         </div>
       </div>
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

@@ -3,12 +3,18 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
 
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 export interface ToastItem {
   id: string;
   title: string;
   body?: string;
   type?: 'info' | 'warning' | 'success' | 'error';
   isHighlight?: boolean;
+  action?: ToastAction;
 }
 
 interface ToastProps {
@@ -19,9 +25,10 @@ interface ToastProps {
 function Toast({ item, onDismiss }: ToastProps) {
   const t = useTranslations('common');
   useEffect(() => {
-    const timer = setTimeout(() => onDismiss(item.id), 5000);
+    // action(예: 되돌리기)이 있으면 사용자가 읽고 누를 시간을 더 준다(5s→8s).
+    const timer = setTimeout(() => onDismiss(item.id), item.action ? 8000 : 5000);
     return () => clearTimeout(timer);
-  }, [item.id, onDismiss]);
+  }, [item.id, item.action, onDismiss]);
 
   const borderColor = item.isHighlight
     ? 'border-l-4 border-l-brand'
@@ -59,13 +66,24 @@ function Toast({ item, onDismiss }: ToastProps) {
             <p className="mt-1 text-xs text-muted-foreground">{item.body}</p>
           )}
         </div>
-        <button
-          onClick={() => onDismiss(item.id)}
-          aria-label={t('close')}
-          className="ml-3 text-muted-foreground hover:text-foreground"
-        >
-          ✕
-        </button>
+        <div className="ml-3 flex shrink-0 items-center gap-3">
+          {item.action && (
+            <button
+              type="button"
+              onClick={() => { item.action?.onClick(); onDismiss(item.id); }}
+              className="text-xs font-semibold text-primary hover:underline"
+            >
+              {item.action.label}
+            </button>
+          )}
+          <button
+            onClick={() => onDismiss(item.id)}
+            aria-label={t('close')}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            ✕
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -49,7 +49,13 @@ function makeStory(overrides: Partial<{
   };
 }
 
-function buildFetchMock(calledUrls: string[], patchBodies: unknown[] = []) {
+function buildFetchMock(
+  calledUrls: string[],
+  patchBodies: unknown[] = [],
+  // 까심 QA REQUEST_CHANGES(2026-07-31) 회귀 가드용 — 「다음으로」 PATCH의 응답을 시나리오별로
+  // 흔들기 위한 훅. 'fail'=HTTP 비-ok 응답, 'throw'=네트워크 자체가 끊김(unhandled rejection 재현).
+  promoteStatusMode: 'ok' | 'fail' | 'throw' = 'ok',
+) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     calledUrls.push(url);
@@ -102,7 +108,10 @@ function buildFetchMock(calledUrls: string[], patchBodies: unknown[] = []) {
       return jsonResponse({ item_type: 'story', nodes: [], edges: [] });
     }
     if (url.includes('/status') && init?.method === 'PATCH') {
-      return jsonResponse({ data: { id: 'b1', status: 'ready-for-dev' } });
+      const body = init.body ? JSON.parse(String(init.body)) : {};
+      if (body.status === 'ready-for-dev' && promoteStatusMode === 'throw') throw new Error('network down');
+      if (body.status === 'ready-for-dev' && promoteStatusMode === 'fail') return jsonResponse({ error: 'boom' }, false);
+      return jsonResponse({ data: { id: 'b1', status: body.status } });
     }
     if (url.includes('/transition') && init?.method === 'POST') {
       return jsonResponse({ data: { id: 'e-quiet', status: 'done' } });
@@ -281,5 +290,80 @@ describe('NextMakerScreen — real fetch orchestration', () => {
     expect(patchBodies).toContainEqual({ epic_id: 'e-stall' });
     expect(container.textContent).not.toContain('목표에 안 붙은 일이');
     expect(container.textContent).not.toContain('Orphan Story');
+  });
+
+  // 까심 QA REQUEST_CHANGES(2026-07-31) 회귀 가드 — "「다음으로」가 실패하면 «아무 말도 안
+  // 한다»"가 재발하지 않는지 고정한다. 로컬 상태는 서버 200 후에만 바뀌므로(낙관적 업데이트
+  // 없음) 실패 시엔 headline이 그대로여야 하고, 대신 실패 토스트가 «떠야» 한다.
+  it('promote HTTP failure: shows a failure toast and leaves the story in the needs-next list (no optimistic update)', async () => {
+    const calledUrls: string[] = [];
+    vi.stubGlobal('fetch', buildFetchMock(calledUrls, [], 'fail'));
+
+    await act(async () => {
+      root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const promoteButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '다음으로');
+    await act(async () => {
+      promoteButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(container.textContent).toContain('처리에 실패했습니다');
+    // headline은 그대로 "목표 3개 중 2개에" — 로컬 상태가 조용히 바뀌지 않았다.
+    expect(container.textContent).toContain('목표 3개 중 2개에');
+  });
+
+  it('promote network error (rejected fetch, no .catch() before this fix would unhandled-reject): still shows a failure toast', async () => {
+    const calledUrls: string[] = [];
+    vi.stubGlobal('fetch', buildFetchMock(calledUrls, [], 'throw'));
+
+    await act(async () => {
+      root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const promoteButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '다음으로');
+    await act(async () => {
+      promoteButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(container.textContent).toContain('처리에 실패했습니다');
+    expect(container.textContent).toContain('목표 3개 중 2개에');
+  });
+
+  // 까심 QA REQUEST_CHANGES(2026-07-31) 회귀 가드 — "성공 뒤에도 되돌리기 글자가 0건"이
+  // 재발하지 않는지 고정한다. 되돌리기는 로컬 상태만 뒤집는 게 아니라 실제 PATCH(backlog로)를
+  // 쏜다 — 원래 승격이 서버 200 후에만 반영됐던 것과 같은 원칙.
+  it('promote success shows an undo toast, and clicking 되돌리기 PATCHes status=backlog and reverts the goal to needs-next', async () => {
+    const calledUrls: string[] = [];
+    const patchBodies: unknown[] = [];
+    vi.stubGlobal('fetch', buildFetchMock(calledUrls, patchBodies));
+
+    await act(async () => {
+      root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const promoteButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '다음으로');
+    await act(async () => {
+      promoteButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(container.textContent).toContain('목표 3개 중 1개에');
+    const undoButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '되돌리기');
+    expect(undoButton).toBeTruthy();
+
+    await act(async () => {
+      undoButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(patchBodies).toContainEqual({ status: 'backlog' });
+    // 되돌리기 후 e-stall이 다시 "다음이 비어 있는" 목록으로 — headline이 2로 복귀.
+    expect(container.textContent).toContain('목표 3개 중 2개에');
   });
 });
