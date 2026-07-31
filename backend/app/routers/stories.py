@@ -847,7 +847,13 @@ async def declare_new_story_reference_candidate(
     실제로는 아무것도 안 바뀌는데, 응답이 늘 201·"바뀐 값처럼" 보이면 호출자가 조용히
     오독한다 — 409는 안 쓴다(이미 이어진 것은 오류가 아니다). 대신 `created`로 명시 구별하고
     (no-op이면 200으로 status_code도 함께 낮춘다), 부르는 쪽이 "이미 있었다"를 코드로
-    구별할 수 있게 한다."""
+    구별할 수 있게 한다.
+
+    ⛔IDOR 수정(오르테가 실측, 2026-07-31): target도 source와 «독립적으로» project 접근권을
+    검사한다(references.py create_reference의 양쪽-아이템 게이트와 동형 — "반쪽 금지").
+    이전엔 org_id만 걸러 접근 못 하는 프로젝트의 story를 target으로 연결할 수 있었고,
+    404(없음)/201(성공)이 갈려 존재 여부까지 샜다. 미존재·무권한 두 경우 모두 같은
+    404 "Target story not found"로 응답해 존재 비노출을 지킨다."""
     story = await repo.get(id)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
@@ -856,10 +862,14 @@ async def declare_new_story_reference_candidate(
     if body.target_id == id:
         raise HTTPException(status_code=400, detail="Cannot link a story to itself")
 
+    from app.services.project_auth import has_project_access
+
     target = (await repo.session.execute(
-        select(Story.id).where(Story.id == body.target_id, Story.org_id == repo.org_id)
-    )).scalar_one_or_none()
-    if target is None:
+        select(Story.id, Story.project_id).where(Story.id == body.target_id, Story.org_id == repo.org_id)
+    )).one_or_none()
+    if target is None or not await has_project_access(
+        repo.session, uuid.UUID(auth.user_id), target.project_id, repo.org_id
+    ):
         raise HTTPException(status_code=404, detail="Target story not found")
 
     from app.services.reference_semantic_candidates import (
@@ -914,7 +924,8 @@ async def declare_story_reference_candidate(
     actor_id = await _resolve_team_member_id(auth, repo.org_id, repo.session)
     try:
         candidate = await declare_candidate(
-            repo.session, org_id=repo.org_id, candidate_id=candidate_id, declared_by=actor_id,
+            repo.session, org_id=repo.org_id, source_id=id, candidate_id=candidate_id,
+            declared_by=actor_id,
         )
     except CandidateNotFoundError:
         raise HTTPException(status_code=404, detail="Reference candidate not found")
@@ -956,7 +967,7 @@ async def set_story_reference_candidate_relation_kind(
 
     try:
         candidate = await set_candidate_relation_kind(
-            repo.session, org_id=repo.org_id, candidate_id=candidate_id,
+            repo.session, org_id=repo.org_id, source_id=id, candidate_id=candidate_id,
             relation_kind=body.relation_kind,
         )
     except CandidateNotFoundError:
@@ -997,7 +1008,7 @@ async def reject_story_reference_candidate(
     actor_id = await _resolve_team_member_id(auth, repo.org_id, repo.session)
     try:
         await reject_candidate(
-            repo.session, org_id=repo.org_id, candidate_id=candidate_id,
+            repo.session, org_id=repo.org_id, source_id=id, candidate_id=candidate_id,
             rejected_by=actor_id, reason=body.reason,
         )
     except CandidateNotFoundError:
@@ -1030,7 +1041,9 @@ async def undeclare_story_reference_candidate(
     )
 
     try:
-        await undeclare_candidate(repo.session, org_id=repo.org_id, candidate_id=candidate_id)
+        await undeclare_candidate(
+            repo.session, org_id=repo.org_id, source_id=id, candidate_id=candidate_id,
+        )
     except CandidateNotFoundError:
         raise HTTPException(status_code=404, detail="Reference candidate not found")
     except CandidateNotDeclaredError:
