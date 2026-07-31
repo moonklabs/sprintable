@@ -17,6 +17,7 @@ from app.schemas.analytics import (
     EpicProgressResponse,
     EpicsProgressLaneResponse,
     EpicZoneCounts,
+    GoalEdge,
     MemberWorkloadResponse,
     ProjectHealthResponse,
     ProjectOverviewResponse,
@@ -152,6 +153,21 @@ async def get_epic_flow_nodes(
         raise HTTPException(status_code=400, detail="epic_ids가 비어 있습니다")
     batch_result = await repo.get_epic_flow_nodes_batch(project_id, parsed_ids, upcoming_limit)
     return EpicFlowNodesBatchResponse.model_validate(batch_result)
+
+
+@router.get("/analytics/goal-edges", response_model=list[GoalEdge])
+async def get_goal_edges(
+    project_id: uuid.UUID = Query(...),
+    repo: AnalyticsRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[GoalEdge]:
+    """story #2360 — 목표(에픽) 간 「낳음」 연결을 목표 쌍 단위로 집계해 낸다. 지금까지는
+    `GET /stories/{id}/backlinks`(스토리 한 건씩)로만 읽혀 목표 간 선 하나에 스토리 수만큼
+    콜이 들었다 — 이 엔드포인트는 스토리 수와 무관한 고정 쿼리로 대체한다(AC6).
+    빈 배열은 「연결이 없다」이지 「못 읽었다」가 아니다 — 오류는 그대로 오류 코드로 난다."""
+    await _assert_project_access(repo, auth, project_id)
+    rows = await repo.get_goal_edges(project_id)
+    return [GoalEdge.model_validate(r) for r in rows]
 
 
 @router.get("/analytics/agent-stats", response_model=AgentStatsResponse)

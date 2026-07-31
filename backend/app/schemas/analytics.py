@@ -272,3 +272,15 @@ class SprintVelocityResponse(BaseModel):
 class LeaderboardEntry(BaseModel):
     member_id: uuid.UUID
     balance: float
+
+
+class GoalEdge(BaseModel):
+    """story #2360 — 목표(에픽) 쌍을 잇는 「낳음」 연결의 집계 한 행. `count`는 그 목표
+    쌍을 잇는 «스토리 쌍»의 수(같은 스토리 쌍이 두 소스 표 모두에 걸려 있어도 1로 센다).
+    `kind`는 그 목표 쌍의 관계 종류가 단일값일 때만 채워지고, 섞이거나(created_from처럼
+    종류 축이 없는 것과 declared가 섞이는 경우 포함) 없으면 None이다."""
+
+    from_goal_id: uuid.UUID
+    to_goal_id: uuid.UUID
+    count: int
+    kind: str | None = None

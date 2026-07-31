@@ -739,3 +739,111 @@ class AnalyticsRepository:
         params2["lim"] = limit
         result2 = await self.session.execute(text(q2), params2)
         return [{"member_id": r[0], "balance": float(r[1])} for r in result2.all()]
+
+    async def get_goal_edges(self, project_id: uuid.UUID) -> list[dict]:
+        """story #2360 — 목표(에픽) 간 「낳음」 연결을 목표 쌍 단위로 집계한다. 지금까지
+        유일한 읽기 길은 `GET /stories/{id}/backlinks`(스토리 한 건씩·limit 200·최대
+        10페이지)뿐이라 목표 간 선 하나에 「스토리 수 × 1~10 콜」이 들었다 — 이 메서드는
+        스토리 수·건수와 무관한 «고정 2쿼리»로 낸다(AC6 — 그게 이 메서드의 존재 이유다).
+
+        두 소스를 합산한다(유나 축 판정 — 가르는 건 «사람이 봐야 하는가»이므로 둘 다
+        실선이다):
+          ① entity_references(relation='created_from') — 이 표엔 kind 축 자체가 없다
+             (relation 컬럼은 'none'|'created_from'뿐, spawned/followed/superseded는
+             reference_semantic_candidates에만 있는 별개 컬럼) — kind=None으로 집계.
+          ② reference_semantic_candidates(status='declared') — relation_kind를 kind로.
+
+        ⛔SQL에서 미리 GROUP BY 하지 않는다 — reference_semantic_candidates는 source_field
+        (description/acceptance_criteria)가 유니크 키에 포함돼 같은 스토리 쌍이 두 field
+        모두에서 발견되면 행이 2개일 수 있다. 그리고 같은 스토리 쌍이 entity_references와
+        reference_semantic_candidates 양쪽에 «동시에» 걸릴 수도 있다(created_from으로도
+        기록되고 별도로 declared로도 승격된 경우). "count = 스토리 «쌍»의 수"(AC 문구
+        그대로)를 지키려면 스토리 쌍 단위로 먼저 dedup한 뒤에 목표 쌍으로 올려야 한다 —
+        그래서 두 쿼리는 raw 행만 내고, dedup·kind 판정은 여기(파이썬)에서 한다(쿼리
+        개수는 여전히 고정 2개 — AC6 위반 아님).
+
+        A→A(같은 목표 안)·epic_id가 한쪽이라도 NULL인 쌍은 두 쿼리 WHERE 절에서 제외한다
+        (목표 «간» 연결의 정의 그대로, AC4/5)."""
+        from sqlalchemy.orm import aliased
+
+        from app.models.reference import Reference
+        from app.models.reference_semantic_candidate import ReferenceSemanticCandidate
+
+        src1, tgt1 = aliased(Story), aliased(Story)
+        created_from_rows = (await self.session.execute(
+            select(Reference.source_id, Reference.target_id, src1.epic_id, tgt1.epic_id)
+            .select_from(Reference)
+            .join(src1, src1.id == Reference.source_id)
+            .join(tgt1, tgt1.id == Reference.target_id)
+            .where(
+                Reference.org_id == self.org_id,
+                Reference.source_type == "story",
+                Reference.target_type == "story",
+                Reference.relation == "created_from",
+                src1.project_id == project_id,
+                tgt1.project_id == project_id,
+                src1.epic_id.is_not(None),
+                tgt1.epic_id.is_not(None),
+                src1.epic_id != tgt1.epic_id,
+            )
+        )).all()
+
+        src2, tgt2 = aliased(Story), aliased(Story)
+        declared_rows = (await self.session.execute(
+            select(
+                ReferenceSemanticCandidate.source_id, ReferenceSemanticCandidate.target_id,
+                ReferenceSemanticCandidate.relation_kind, src2.epic_id, tgt2.epic_id,
+            )
+            .select_from(ReferenceSemanticCandidate)
+            .join(src2, src2.id == ReferenceSemanticCandidate.source_id)
+            .join(tgt2, tgt2.id == ReferenceSemanticCandidate.target_id)
+            .where(
+                ReferenceSemanticCandidate.org_id == self.org_id,
+                ReferenceSemanticCandidate.source_type == "story",
+                ReferenceSemanticCandidate.target_type == "story",
+                ReferenceSemanticCandidate.status == "declared",
+                src2.project_id == project_id,
+                tgt2.project_id == project_id,
+                src2.epic_id.is_not(None),
+                tgt2.epic_id.is_not(None),
+                src2.epic_id != tgt2.epic_id,
+            )
+        )).all()
+
+        # story-쌍 단위 dedup: (source_id, target_id) -> {kinds seen for that pair}.
+        # created_from 기여분은 "종류 없음" sentinel로 None을 넣는다.
+        pair_kinds: dict[tuple[uuid.UUID, uuid.UUID], set] = {}
+        pair_epics: dict[tuple[uuid.UUID, uuid.UUID], tuple[uuid.UUID, uuid.UUID]] = {}
+
+        for source_id, target_id, src_epic, tgt_epic in created_from_rows:
+            key = (source_id, target_id)
+            pair_kinds.setdefault(key, set()).add(None)
+            pair_epics[key] = (src_epic, tgt_epic)
+
+        for source_id, target_id, relation_kind, src_epic, tgt_epic in declared_rows:
+            key = (source_id, target_id)
+            pair_kinds.setdefault(key, set()).add(relation_kind)
+            pair_epics[key] = (src_epic, tgt_epic)
+
+        # 목표 쌍 단위 롤업 — 위에서 이미 스토리 쌍 단위로 dedup됐으므로 여기서는 그
+        # 결과(쌍마다 정확히 1개)만 센다.
+        agg: dict[tuple[uuid.UUID, uuid.UUID], dict] = {}
+        for pair, kinds in pair_kinds.items():
+            epic_pair = pair_epics[pair]
+            bucket = agg.setdefault(epic_pair, {"count": 0, "kinds": set()})
+            bucket["count"] += 1
+            # 한 스토리 쌍 자체가 이미 여러 종류로 걸려 있으면(예: description은
+            # created_from, acceptance_criteria는 declared·다른 kind) 그 쌍 자체가
+            # 모호하다 — None으로 접어 목표 쌍 레벨의 「섞이면 null」로 자연히 흡수시킨다.
+            resolved_kind = next(iter(kinds)) if len(kinds) == 1 else None
+            bucket["kinds"].add(resolved_kind)
+
+        result: list[dict] = []
+        for (from_id, to_id), bucket in agg.items():
+            kinds = bucket["kinds"]
+            kind = next(iter(kinds)) if len(kinds) == 1 else None
+            result.append({
+                "from_goal_id": from_id, "to_goal_id": to_id,
+                "count": bucket["count"], "kind": kind,
+            })
+        return result
