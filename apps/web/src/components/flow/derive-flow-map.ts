@@ -628,6 +628,44 @@ export function computeLaneHeight(lane: FlowMapLane, nodeRowHeight: number, minH
   return Math.max(minHeight, maxColumnCount * nodeRowHeight, pastBundleHeight, pastExpandedHeight);
 }
 
+/** story #2224 AC18(2026-07-31) — 리사이즈 가능 캔버스 pane의 «기본/한계 높이»를 픽셀
+ * 하드코딩 없이 계산한다. 목업의 690px(레인 8×76) 식은 그 목업의 레인 수 기준이라 라이브
+ * (레인이 몇 개든 가변 높이)엔 안 선다 — 그래서 «레인 개수»를 단위로 받아 실제
+ * computeLaneHeight를 그대로 누적한다("레인 3"은 수이지 픽셀이 아니다, 픽셀은 계산된다).
+ * visibleLaneCount가 lanes.length보다 크면 있는 만큼만 더한다(전부 보이면 그 이상 잴 것이
+ * 없다 — clamp가 «잘못된 값»이 아니라 «다 보인다»는 뜻이다). */
+export function computeCumulativeLaneHeight(
+  lanes: FlowMapLane[], visibleLaneCount: number, nodeRowHeight: number, laneMinHeight: number, headerHeight: number,
+): number {
+  const count = Math.max(0, Math.min(visibleLaneCount, lanes.length));
+  let total = headerHeight;
+  for (let i = 0; i < count; i += 1) {
+    total += computeLaneHeight(lanes[i]!, nodeRowHeight, laneMinHeight);
+  }
+  return total;
+}
+
+/** story #2224 AC18 ① — 드래그는 자유 픽셀(손은 연속)이지만 «결과»는 레인 정수 경계에
+ * 스냅한다(자유 픽셀로 두면 "카드가 잘린 채로 멈추는" 것이 재발한다, AC17-C가 막 고친
+ * 겹침 결함과 같은 병). 후보 높이(레인 부분만, 헤더 제외)에 가장 가까운 «레인 몇 개까지의
+ * 누적 높이» 경계를 찾아 그 레인 수(1-indexed)를 돌려준다. 레인이 0개면 0을 돌려준다
+ * (호출부가 그 경우 드래그 UI 자체를 안 보여준다). */
+export function snapToNearestLaneCount(laneHeights: number[], candidateLanesOnlyHeight: number): number {
+  if (laneHeights.length === 0) return 0;
+  let bestCount = 1;
+  let bestDiff = Infinity;
+  let cumulative = 0;
+  for (let i = 0; i < laneHeights.length; i += 1) {
+    cumulative += laneHeights[i]!;
+    const diff = Math.abs(cumulative - candidateLanesOnlyHeight);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestCount = i + 1;
+    }
+  }
+  return bestCount;
+}
+
 /** ⑥ 조건부 문구(PO 판정 2026-07-30) 트리거 — depth 0 열은 있는데 depth 1 이상이 «전혀»
  * 없을 때만 참. 하드코딩된 상수가 아니라 실제 맵 상태에서 계산하므로, 간선이 착지해
  * depth≥1 노드가 생기는 날 이 함수가 스스로 false를 내 문구가 사라진다(거짓말 될 위험 없음). */

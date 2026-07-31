@@ -537,7 +537,9 @@
     "orphanHint": "목표를 정하면 줄기에 섭니다",
     "orphanPickAction": "목표 정하기",
     "orphanPickPlaceholder": "목표 선택",
-    "orphanAssignConfirm": "배정"
+    "orphanAssignConfirm": "배정",
+    "canvasResizeHandleLabel": "지도 pane 높이 조절 — 화살표 위/아래로 레인 단위 조절, Home/End로 최소/최대",
+    "canvasResizeReset": "기본 크기로"
   },
   "board": {
     "backlinksTitle": "이것을 가리키는 것들",
