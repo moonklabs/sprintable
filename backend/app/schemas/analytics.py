@@ -295,7 +295,12 @@ class PendingCandidateCountResponse(BaseModel):
 
     `requested_count`/`processed_count`/`skipped_epic_ids`는 `EpicFlowNodesBatchResponse`
     와 동일 계약(입력이 상한을 넘으면 앞쪽만 처리하고 나머지는 skipped로 정직하게
-    알린다) — 새 상한·새 필드 이름을 짓지 않는다."""
+    알린다) — 새 상한·새 필드 이름을 짓지 않는다.
+
+    ⛔FE가 「이 count가 전부인가」를 판정하는 자리(오르테가 지적, 2026-07-31 — cap이
+    실제로 걸리면 그 epic 쪽 대기 쌍이 count에서 «조용히» 빠진다): `skipped_epic_ids`가
+    비어 있지 않으면 count는 «부분»이다. 그 필드 하나로만 판정한다 — `count`가 0이라고
+    「대기 없음」으로 읽으면 안 된다(skipped가 있으면 그 0은 «못 잰 것»일 수 있다)."""
 
     count: int
     requested_count: int

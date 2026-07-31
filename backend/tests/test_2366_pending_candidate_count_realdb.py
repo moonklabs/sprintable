@@ -278,6 +278,97 @@ async def test_same_story_pair_across_two_source_fields_dedups_to_one():
         await engine.dispose()
 
 
+# ─── cap 경로 실측(오르테가 지적, 2026-07-31) — 8건 표본 어디도 30건을 안 넘겨
+# skipped_epic_ids를 채우는 두 줄이 「한 번도 실행되지 않는」 채로 초록이었다. 여기서
+# 실제로 EPIC_FLOW_NODES_BATCH_MAX(30)을 넘겨 그 경로를 밟는다. ─────────────
+
+
+async def test_cap_applies_when_epic_ids_exceeds_max_but_real_pair_stays_within_processed():
+    """실제 쌍의 두 epic이 상한 30 «안»에 들면 — 나머지가 fake로 채워져도 정상 집계되고,
+    skipped_epic_ids가 정확히 넘친 만큼만(가짜 것들) 채워진다."""
+    from app.repositories.analytics import AnalyticsRepository
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            _, user_id = await _make_human_member(s, org.id, project.id)
+            goal_a = await _make_goal(s, org.id, project.id, "A")
+            goal_b = await _make_goal(s, org.id, project.id, "B")
+            story_a = await _make_story(s, org.id, project.id, epic_id=goal_a.id)
+            story_b = await _make_story(s, org.id, project.id, epic_id=goal_b.id)
+            await _make_candidate(s, org.id, story_a.id, story_b.id, status="estimated")
+
+        max_batch = AnalyticsRepository.EPIC_FLOW_NODES_BATCH_MAX
+        fillers = [uuid.uuid4() for _ in range(max_batch - 2)]
+        overflow = [uuid.uuid4() for _ in range(5)]
+        # goal_a·goal_b를 앞쪽(처리되는 30개 안)에 두고, 뒤에 33개째부터 넘치게 채운다.
+        epic_ids = [goal_a.id, goal_b.id, *fillers, *overflow]
+        assert len(epic_ids) == max_batch + 5
+
+        await _setup_app_human(app, Session, user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await _call(client, project.id, epic_ids)
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["requested_count"] == max_batch + 5
+            assert body["processed_count"] == max_batch
+            assert set(body["skipped_epic_ids"]) == {str(e) for e in overflow}
+            # 실제 쌍의 두 epic이 processed 안에 있으므로 여전히 잡힌다.
+            assert body["count"] == 1
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_pair_silently_excluded_when_its_epics_fall_in_skipped_range():
+    """⭐이것이 오르테가군이 짚은 위험이다 — 실제 쌍의 두 epic이 «넘친 쪽»(skipped)에
+    있으면 count에 안 잡힌다. skipped_epic_ids가 비어 있지 않으면 그 count는 «부분»이라는
+    것을 FE가 그 필드로만 판정할 수 있어야 한다(응답에 재료가 있는지가 이 테스트의 요지)."""
+    from app.repositories.analytics import AnalyticsRepository
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            _, user_id = await _make_human_member(s, org.id, project.id)
+            goal_a = await _make_goal(s, org.id, project.id, "A")
+            goal_b = await _make_goal(s, org.id, project.id, "B")
+            story_a = await _make_story(s, org.id, project.id, epic_id=goal_a.id)
+            story_b = await _make_story(s, org.id, project.id, epic_id=goal_b.id)
+            await _make_candidate(s, org.id, story_a.id, story_b.id, status="estimated")
+
+        max_batch = AnalyticsRepository.EPIC_FLOW_NODES_BATCH_MAX
+        fillers = [uuid.uuid4() for _ in range(max_batch)]
+        # goal_a·goal_b를 상한 밖(31·32번째)에 둔다 — processed에서 빠진다.
+        epic_ids = [*fillers, goal_a.id, goal_b.id]
+        assert len(epic_ids) == max_batch + 2
+
+        await _setup_app_human(app, Session, user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await _call(client, project.id, epic_ids)
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["processed_count"] == max_batch
+            assert set(body["skipped_epic_ids"]) == {str(goal_a.id), str(goal_b.id)}
+            # ⭐실제로 존재하는 대기 쌍인데도 count=0 — skipped_epic_ids를 안 보면
+            # FE가 이 0을 「대기 없음」으로 오독한다(오르테가 지적 그대로).
+            assert body["count"] == 0
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 # ─── cross-project 404(기존 analytics 라우트와 동일 게이트) ─────────────────
 
 
