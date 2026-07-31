@@ -803,6 +803,73 @@ async def get_story_reference_candidates(
     ]
 
 
+class DeclareNewReferenceRequest(BaseModel):
+    target_id: uuid.UUID
+    relation_kind: str | None = None
+
+
+@router.post("/{id}/reference-candidates", status_code=201)
+async def declare_new_story_reference_candidate(
+    id: uuid.UUID,
+    body: DeclareNewReferenceRequest,
+    response: Response,
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """POST /api/v2/stories/{id}/reference-candidates — story #2355: 사람이 «후보가 아예
+    없던» 이 story(source) ↔ target_id(story) 연결을 처음 만든다. 기존 declare/relation-kind/
+    reject 셋 다 기존 candidate_id가 있어야만 쓰는 것과 달리, 이 엔드포인트는 그 candidate_id
+    자체를 새로 만든다(#2355 AC1). 방향은 «끈 순서» — id=source(«여기서 시작함»), target_id=
+    target(«여기로 놓음»).
+
+    ⛔오르테가 지적(2026-07-31): 이미 declared인 쌍에 재호출하면 ON CONFLICT WHERE가 거짓이라
+    실제로는 아무것도 안 바뀌는데, 응답이 늘 201·"바뀐 값처럼" 보이면 호출자가 조용히
+    오독한다 — 409는 안 쓴다(이미 이어진 것은 오류가 아니다). 대신 `created`로 명시 구별하고
+    (no-op이면 200으로 status_code도 함께 낮춘다), 부르는 쪽이 "이미 있었다"를 코드로
+    구별할 수 있게 한다."""
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    if body.target_id == id:
+        raise HTTPException(status_code=400, detail="Cannot link a story to itself")
+
+    target = (await repo.session.execute(
+        select(Story.id).where(Story.id == body.target_id, Story.org_id == repo.org_id)
+    )).scalar_one_or_none()
+    if target is None:
+        raise HTTPException(status_code=404, detail="Target story not found")
+
+    from app.services.reference_semantic_candidates import (
+        InvalidPortRelationKindError,
+        declare_new_candidate,
+    )
+
+    actor_id = await _resolve_team_member_id(auth, repo.org_id, repo.session)
+    try:
+        outcome = await declare_new_candidate(
+            repo.session, org_id=repo.org_id, source_type="story", source_field="body",
+            source_id=id, target_type="story", target_id=body.target_id,
+            relation_kind=body.relation_kind, declared_by=actor_id,
+        )
+    except InvalidPortRelationKindError:
+        raise HTTPException(status_code=400, detail="Invalid relation_kind")
+    await repo.session.commit()
+    candidate = outcome.candidate
+    if not outcome.created:
+        response.status_code = 200
+    return {
+        "id": str(candidate.id),
+        "target_id": str(candidate.target_id),
+        "relation_kind": candidate.relation_kind,
+        "status": candidate.status,
+        "declared_by": str(candidate.declared_by) if candidate.declared_by else None,
+        "declared_at": candidate.declared_at.isoformat() if candidate.declared_at else None,
+        "created": outcome.created,
+    }
+
+
 @router.post("/{id}/reference-candidates/{candidate_id}/declare")
 async def declare_story_reference_candidate(
     id: uuid.UUID,
@@ -914,6 +981,41 @@ async def reject_story_reference_candidate(
         )
     except CandidateNotFoundError:
         raise HTTPException(status_code=404, detail="Reference candidate not found")
+    await repo.session.commit()
+    return {"ok": True}
+
+
+@router.delete("/{id}/reference-candidates/{candidate_id}")
+async def undeclare_story_reference_candidate(
+    id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """DELETE .../reference-candidates/{candidate_id} — story #2355(AC8): 사람이 만든(또는
+    승격한) 연결을 지운다. ⛔`reject`와 다른 것이다 — reject는 `rejected_relations`에 기록해
+    다음 스캔에서도 영구히 거르지만, 이건 기록을 안 남긴다(실수로 지운 것을 영영 못 잇게
+    되면 안 되므로). status='declared'가 아닌 행(아직 estimated인 기계 후보)은 400 —
+    그런 행은 `reject`가 맞는 경로다."""
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.services.reference_semantic_candidates import (
+        CandidateNotDeclaredError,
+        CandidateNotFoundError,
+        undeclare_candidate,
+    )
+
+    try:
+        await undeclare_candidate(repo.session, org_id=repo.org_id, candidate_id=candidate_id)
+    except CandidateNotFoundError:
+        raise HTTPException(status_code=404, detail="Reference candidate not found")
+    except CandidateNotDeclaredError:
+        raise HTTPException(
+            status_code=400, detail="Only a declared reference can be removed this way; use reject",
+        )
     await repo.session.commit()
     return {"ok": True}
 
