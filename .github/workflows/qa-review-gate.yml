@@ -43,6 +43,19 @@ name: QA Review Gate
 # 않는다. qa:pass/qa:changes 라벨은 이 스토리 착수 시점에 없어서 새로 만들었다
 # (design:pass/design:changes와 같은 색·문구 관례로: pass=#0E8A16·changes=#D93F0B).
 #
+# ⭐AC8(유나신 지적, 뒤늦게 추가) — 라벨 «설명» 자신이 「무엇을 말하지 않는가」를 적는다.
+# 오늘 QA 없이 머지된 일곱 중 둘은 유나신 자신이 design:pass를 준 판이었는데, 리뷰 본문엔
+# "디자인 축만 통과"라 적어 놓고도 라벨 설명 자체엔 그 경계가 없었다 — 머지 누르는 사람은
+# 리뷰 본문이 아니라 라벨만 본다(라벨이 리뷰 본문보다 «멀리» 간다). 그래서 GitHub label
+# 자체의 description을 고쳤다: qa:pass = "QA 축(사람이 쓰는 경로)만 확認 — 디자인·성능·
+# 라이브 픽셀은 이 라벨이 말하지 않는다." 이 워크플로의 성공 메시지에도 같은 경계를 반복한다.
+#
+# ⭐AC9(유나신 지적) — design:pass·qa:pass 둘 다 초록이어도 "다 됐다"가 아니다. 둘을 합쳐도
+# 안 덮는 것: 라이브 픽셀(실제 렌더 회귀)·성능·접근성. 이 워크플로가 두 게이트 중 나중에
+# 도는 자리(머지 직전에 읽히는 자리)라 아래 freshness 스텝의 마지막 성공 로그에 이 문장을
+# 박아 둔다 — 안 적으면 "게이트 둘 다 초록"이 또 다른 거짓 안심(오늘 CI 초록이 그랬던 것과
+# 같은 모양)을 판다.
+#
 # ⚠️이 워크플로우가 실제로 머지를 막으려면 GitHub 저장소 설정 > Branch protection의
 # required status checks에 아래 job 이름("QA review gate")을 등록해야 한다 — repo admin
 # 권한이 필요해 이 PR로는 못 하고, 등록 자체의 양성대조(라벨 없는 PR이 실제로 merge 버튼이
@@ -81,7 +94,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${HAS_QA_PASS}" = "true" ]; then
-            echo "qa:pass present — QA reviewed this PR's user-facing path(s)."
+            echo "qa:pass present — QA axis (the paths a real user takes) reviewed. (AC8: this label speaks only to the QA axis — design, performance, and live-pixel rendering are not what it says.)"
           else
             echo "::error title=qa:pass missing::This PR has no qa:pass label. QA review is required before merge — CI green only proves the code runs, not that the paths a real user takes are correct (2026-07-31: authz gaps passed CI because the tests only checked same-project access; nobody checked cross-project)."
             exit 1
@@ -113,3 +126,4 @@ jobs:
             exit 1
           fi
           echo "qa:pass attached at ${LABEL_TS} — at or after the latest commit (${LAST_COMMIT_TS}). Fresh."
+          echo "(AC9: design:pass + qa:pass both green is not 'everything is done' — live-pixel rendering, performance, and accessibility are covered by neither gate.)"
