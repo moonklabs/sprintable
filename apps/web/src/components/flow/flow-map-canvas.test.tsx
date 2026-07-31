@@ -221,18 +221,38 @@ describe('FlowMapCanvas — 8종 양성대조(유나양 4×2 규격)', () => {
     expect(oldTitle?.className).not.toContain('line-through');
   });
 
-  it('shows the legend row only when at least one edge is actually drawn (빈 기능을 위한 상시 chrome을 만들지 않는다)', async () => {
+  // PO 정정(2026-07-31, 유나신 라이브 실측 후속·세 번째 최終 문구) — 옛 4종×2축 범례는
+  // "실선=확定"이라 적어 놓고 실선이 한 번도 안 나오는 거짓말이었다. 정직한 한 줄로 교체.
+  it('shows the honest one-line legend when at least one edge is actually drawn (빈 기능을 위한 상시 chrome을 만들지 않는다)', async () => {
     const withEdges = makeLane({
       nowNodes: [makeNode({ id: 'n1' })],
       queueNodesByDepth: new Map([[0, [makeNode({ id: 'u1', kind: 'queue' })]]]),
       edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1', kind: 'spawn', confirmed: true })],
     });
     await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[withEdges]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
-    expect(container.textContent).toContain('낳음');
+    expect(container.textContent).toContain('기계가 찾아낸 후보 일부입니다');
+    // 옛 4종×2축 문구(실선=확定 등)는 완전히 사라져야 한다.
+    expect(container.textContent).not.toContain('실선=확定');
 
     const noEdges = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
     await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[noEdges]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
-    expect(container.textContent).not.toContain('낳음');
+    expect(container.textContent).not.toContain('기계가 찾아낸 후보 일부입니다');
+  });
+
+  // 까심 QA REQUEST_CHANGES 원사유(2026-07-31, PO 전달) 그대로 재현·회귀 가드 — 옛 조건
+  // `lanes.some(l => l.edges.length > 0)`은 «데이터에 간선이 있는가»만 보므로, 좌표 없는
+  // 노드로 향해 실제로는 하나도 안 그려지는 경우에도 범례가 떴다(설명할 대상이 없는데 뜨는
+  // 거짓말). 새 조건(countRenderedEdgeLines)은 «실제로 그려진 선»을 세므로 이 경우 안 떠야
+  // 한다.
+  it('does NOT show the legend when data has edges but none actually resolves to a drawn line (옛 lanes.some(edges.length>0) 조건이 놓치던 거짓말)', async () => {
+    const ghostEdgeLane = makeLane({
+      nowNodes: [makeNode({ id: 'n1' })],
+      // toNodeId가 렌더되는 어떤 노드에도 없다 — 데이터 건수는 1이지만 그려지는 선은 0.
+      edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'ghost-not-rendered', kind: 'spawn', confirmed: true })],
+    });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[ghostEdgeLane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
+    expect(container.querySelector('line[data-edge-kind]')).toBeNull();
+    expect(container.textContent).not.toContain('기계가 찾아낸 후보 일부입니다');
   });
 });
 
