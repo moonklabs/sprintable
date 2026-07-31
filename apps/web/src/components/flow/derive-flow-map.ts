@@ -544,6 +544,28 @@ export function countRenderedEdgeLines(
   ).length;
 }
 
+/** 유나 가디언 리뷰(2026-07-31, PR#2720 issuecomment-5139624505) — 정직한 범례 문구의
+ * 뒤 절("사람이 확인한 것은 아직 없습니다")에 «만료 조건»이 코드에 없었다. #2725(포트)가
+ * 착지해 사람이 만든(declared) 선이 하나라도 실선으로 그려지면 그 순간 이 문장이 거짓이
+ * 된다 — 지금 고치는 "실선=확定"과 같은 거짓말의 반대 방향. `countRenderedEdgeLines`와
+ * «같은 순회»(groupEdgesByEndpoints → computeEdgeLineEndpoints)를 다시 태워 새 경로를
+ * 만들지 않는다 — 새로 짜면 두 계산이 갈릴 수 있다. */
+export function hasConfirmedRenderedEdgeLine(
+  lane: FlowMapLane,
+  nodeRowHeight: number,
+  nowClusterX: number,
+  defaultDimensions: FlowMapNodeDimensions,
+): boolean {
+  const positions = computeNodePositions(lane, nodeRowHeight, nowClusterX);
+  const dimensionOverrides = new Map([
+    [PAST_BUNDLE_NODE_ID, { width: PAST_BUNDLE_CARD_WIDTH, height: PAST_BUNDLE_CARD_HEIGHT }],
+  ]);
+  return groupEdgesByEndpoints(lane.edges).some(
+    (group) => group.allConfirmed
+      && computeEdgeLineEndpoints(positions, group, defaultDimensions, dimensionOverrides) !== null,
+  );
+}
+
 /** 유나양 지적(2026-07-30, PO 전달) — "대체"(supersede)만 유일하게 «간선이 노드 렌더에
  * 영향을 주는» 종류다(낳음·잇따름은 둘 다 살아있는 관계라 선만 그으면 되지만, 대체는 한쪽이
  * 죽는 관계라 «옛 노드»의 표시가 같이 바뀌어야 — 안 그러면 "대체됐는데 옛 것이 멀쩡히 살아

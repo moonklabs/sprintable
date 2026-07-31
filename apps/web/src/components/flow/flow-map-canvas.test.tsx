@@ -239,6 +239,31 @@ describe('FlowMapCanvas — 8종 양성대조(유나양 4×2 규격)', () => {
     expect(container.textContent).not.toContain('기계가 찾아낸 후보 일부입니다');
   });
 
+  // 유나 가디언 리뷰(2026-07-31, PR#2720 issuecomment-5139624505) — 뒤 절("사람이 확인한
+  // 것은 아직 없습니다")의 만료 조건 회귀 가드. #2725(포트)가 착지해 사람이 만든 declared
+  // 선이 실선으로 그려지면, 그 순간 이 절이 사라져야 한다(안 지우면 거짓말이 된다).
+  it('drops the "no one has confirmed yet" clause once at least one CONFIRMED edge line is actually drawn', async () => {
+    const lane = makeLane({
+      nowNodes: [makeNode({ id: 'n1' })],
+      queueNodesByDepth: new Map([[0, [makeNode({ id: 'u1', kind: 'queue' })]]]),
+      edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1', kind: 'spawn', confirmed: true })],
+    });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
+    expect(container.textContent).toContain('기계가 찾아낸 후보 일부입니다');
+    expect(container.textContent).not.toContain('사람이 확인한 것은 아직 없습니다');
+  });
+
+  it('keeps the "no one has confirmed yet" clause when every drawn edge line is still PROPOSED', async () => {
+    const lane = makeLane({
+      nowNodes: [makeNode({ id: 'n1' })],
+      queueNodesByDepth: new Map([[0, [makeNode({ id: 'u1', kind: 'queue' })]]]),
+      edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1', kind: 'spawn', confirmed: false })],
+    });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} isPastBundleLoading={false} />)); });
+    expect(container.textContent).toContain('기계가 찾아낸 후보 일부입니다');
+    expect(container.textContent).toContain('사람이 확인한 것은 아직 없습니다');
+  });
+
   // 까심 QA REQUEST_CHANGES 원사유(2026-07-31, PO 전달) 그대로 재현·회귀 가드 — 옛 조건
   // `lanes.some(l => l.edges.length > 0)`은 «데이터에 간선이 있는가»만 보므로, 좌표 없는
   // 노드로 향해 실제로는 하나도 안 그려지는 경우에도 범례가 떴다(설명할 대상이 없는데 뜨는

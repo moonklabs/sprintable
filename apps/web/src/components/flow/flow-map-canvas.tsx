@@ -5,7 +5,7 @@ import type { FlowMapLane, FlowMapNode, FlowMapEdgeKind, FlowMapEdgeGroup } from
 import {
   FLOW_MAP_GRID_STEP, FLOW_MAP_NOW_LINE_X, FLOW_MAP_DEPTH0_X, computeLaneHeight, shouldShowNoDeeperReason,
   computeNodePositions, computeSupersededNodeIds, computeEdgeLineEndpoints, groupEdgesByEndpoints,
-  edgeGroupStrokeWidth, countRenderedEdgeLines, PAST_BUNDLE_NODE_ID, PAST_BUNDLE_LEFT, PAST_BUNDLE_TOP,
+  edgeGroupStrokeWidth, countRenderedEdgeLines, hasConfirmedRenderedEdgeLine, PAST_BUNDLE_NODE_ID, PAST_BUNDLE_LEFT, PAST_BUNDLE_TOP,
   PAST_BUNDLE_CARD_WIDTH, PAST_BUNDLE_CARD_HEIGHT, PAST_EXPANDED_LEFT, PAST_EXPANDED_TOP_START,
   PAST_EXPANDED_ROW_HEIGHT, PAST_EXPANDED_BOX_WIDTH,
 } from './derive-flow-map';
@@ -166,6 +166,12 @@ export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPast
   const renderedEdgeLineCount = lanes.reduce(
     (sum, lane) => sum + countRenderedEdgeLines(lane, NODE_ROW_HEIGHT, NOW_CLUSTER_X, { width: NODE_CARD_WIDTH, height: NODE_CARD_HEIGHT }),
     0,
+  );
+  // 유나 가디언 리뷰(2026-07-31, PR#2720 issuecomment-5139624505) — 뒤 절("사람이 확인한
+  // 것은 아직 없습니다")의 만료 조건. #2725(포트)가 착지해 declared 선이 하나라도 실선으로
+  // 그려지면 이 조건이 스스로 거짓이 되어 문장에서 빠진다(만료일이 코드에 박힌 문장).
+  const hasAnyConfirmedRenderedEdge = lanes.some(
+    (lane) => hasConfirmedRenderedEdgeLine(lane, NODE_ROW_HEIGHT, NOW_CLUSTER_X, { width: NODE_CARD_WIDTH, height: NODE_CARD_HEIGHT }),
   );
 
   return (
@@ -408,10 +414,15 @@ export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPast
           인라인으로 묻는 UI가 아직 없다.
           표시 조건은 여전히 «데이터 건수»가 아니라 «실제로 그려진 선»이 있는가여야 한다
           (countRenderedEdgeLines, derive-flow-map.ts) — 0이면 설명할 대상이 없어 범례도 안
-          띄운다(빈 기능을 위한 상시 chrome을 만들지 않는다, 기존 원칙 그대로). */}
+          띄운다(빈 기능을 위한 상시 chrome을 만들지 않는다, 기존 원칙 그대로).
+          ⛔유나 가디언 리뷰(2026-07-31, issuecomment-5139624505) — 뒤 절("사람이 확인한 것은
+          아직 없습니다")에 만료 조건이 없어 #2725(포트)가 착지하는 순간 거짓이 될 뻔했다.
+          hasAnyConfirmedRenderedEdge가 참이면 그 뒤 절을 뗀다 — 앞 절만으로도 "일부"라는
+          말이 여전히 성립한다(전량 확認이 아니라는 뜻이므로). */}
       {renderedEdgeLineCount > 0 ? (
         <div className="border-t border-border px-2 py-1.5 text-[10px] text-muted-foreground">
-          {t('edgeLegendMachineFoundPartial')}
+          {t('edgeLegendMachineFound')}
+          {hasAnyConfirmedRenderedEdge ? null : ` — ${t('edgeLegendNoneConfirmedYet')}`}
         </div>
       ) : null}
     </div>
