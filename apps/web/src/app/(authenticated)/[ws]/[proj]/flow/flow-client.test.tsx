@@ -214,8 +214,29 @@ describe('FlowPageClient — story #2352 정정(PO, 2026-07-31) — 관제 서�
 // attentionSignals=[]인 채로는 이 조건이 실패할 «수가 없어» 양성대조가 안 섰다(오늘 세 번째로
 // 나온 그 클래스 — feedback_positive_control_must_be_able_to_fail). 항목이 «있는» 상태로
 // 재구성해 실제 라벨 충돌을 값으로 잡는다.
-describe('FlowPageClient — story #2365 후속(유나, 2026-07-31) — 서랍 «항목»의 kindLabel도 헤딩 카드와 안 겹친다', () => {
-  it('a gate_pending item\'s kindLabel is not a substring collision with the header card\'s "게이트 승인 대기" phrase', async () => {
+//
+// PO 실측 재정정(2026-07-31, 같은 판) — 첫 시도는 셋 중 둘이 «이름이 약속한 것을 안 쟀다»:
+// merge_ready는 length>0(실패할 수 없는 자)이었고, blocked는 toContain 이 아니라 not.toBe라
+// "다른 일에 막힘"이 실제로 「막힘」을 말하는데도 통과했다. 헤더가 쓰는 «실제» 문구 집합을
+// ko.json에서 그대로 끌어와 「어느 헤더 문구도 이 kindLabel을 부분문자열로 갖지 않는다」로
+// 셋을 한 자로 통일한다 — 손 타이핑 중복이 아니라 실 i18n 값에 기대므로 헤더 문구가 바뀌면
+// 이 가드도 같이 움직인다.
+describe('FlowPageClient — story #2365 후속(유나·PO, 2026-07-31) — 서랍 «항목»의 kindLabel도 헤딩 카드와 안 겹친다', () => {
+  // next-maker-header.tsx가 실제로 렌더하는 문구 전부(라벨+본문) — 이 중 어느 것도 서랍
+  // kindLabel을 부분문자열로 포함하면 주어 없이 겹쳐 읽힌다.
+  const headerPhrases = [
+    koMessages.flow.nextMakerCanDo,
+    koMessages.flow.nextMakerUnowned,
+    koMessages.flow.nextMakerPendingApproval,
+  ];
+
+  function expectNoCollisionWithHeader(kindText: string) {
+    for (const phrase of headerPhrases) {
+      expect(phrase).not.toContain(kindText);
+    }
+  }
+
+  it('a gate_pending item\'s kindLabel does not collide with any header phrase', async () => {
     loadGlanceDataMock.mockResolvedValue({
       memberMap: {},
       attentionSignals: [
@@ -227,15 +248,11 @@ describe('FlowPageClient — story #2365 후속(유나, 2026-07-31) — 서랍 �
     const item = container.querySelector('[data-testid="exception-item"]');
     expect(item).not.toBeNull();
     const kindText = container.querySelector('[data-testid="exception-item-kind"]')?.textContent ?? '';
-    // 실제 충돌 모양은 «축자 일치»가 아니라 «부분 문자열 겹침»이었다 — 옛 값 "승인 대기"가
-    // 헤딩 카드 "게이트 승인 대기"의 부분 문자열이라 나란히 서면 같은 말로 읽혔다. 정확한
-    // 값으로 고정한다(단순 부등호보다 강한 판정 — mutation self-check로 옛 값 복원 시 이
-    // assertion이 정확히 RED 되는 것 확認했다).
-    expect(kindText).toBe('결재 대기');
-    expect('게이트 승인 대기').not.toContain(kindText);
+    expect(kindText).toBe(koMessages.glance.exceptionKindGatePending);
+    expectNoCollisionWithHeader(kindText);
   });
 
-  it('a blocked item\'s kindLabel does not say "막힘" (banned word, story #2352) and states what is blocking it', async () => {
+  it('a blocked item\'s kindLabel does not collide with any header phrase, AND actually states what is blocking it (실제로 잰다, 이름만 적지 않는다)', async () => {
     loadGlanceDataMock.mockResolvedValue({
       memberMap: {},
       attentionSignals: [
@@ -245,10 +262,13 @@ describe('FlowPageClient — story #2365 후속(유나, 2026-07-31) — 서랍 �
     await renderFlowClient();
 
     const kindText = container.querySelector('[data-testid="exception-item-kind"]')?.textContent ?? '';
-    expect(kindText).not.toBe('막힘');
+    expectNoCollisionWithHeader(kindText);
+    // #2352가 금지한 것은 「막힘」 «단독형»이다 — "다른 일에 막힘"처럼 무엇에 막혔는지 말과
+    // 함께면 자기모순이 아니다. 이 assertion이 그 "무엇"이 실제로 있는지를 값으로 잰다.
+    expect(kindText).toContain('다른 일');
   });
 
-  it('a merge_ready item still renders its kindLabel plainly (no collision to fix here)', async () => {
+  it('a merge_ready item\'s kindLabel does not collide with any header phrase (헤더에 「머지」 문구가 «생기는 날» 이 자가 잡아낸다)', async () => {
     loadGlanceDataMock.mockResolvedValue({
       memberMap: {},
       attentionSignals: [
@@ -258,6 +278,6 @@ describe('FlowPageClient — story #2365 후속(유나, 2026-07-31) — 서랍 �
     await renderFlowClient();
 
     const kindText = container.querySelector('[data-testid="exception-item-kind"]')?.textContent ?? '';
-    expect(kindText.length).toBeGreaterThan(0);
+    expectNoCollisionWithHeader(kindText);
   });
 });
