@@ -323,22 +323,34 @@ function makeCandidate(overrides: Partial<RawReferenceCandidate> = {}): RawRefer
 describe('parseReferenceCandidateEdges', () => {
   it('keeps spawned(source→target) direction as-is — source spawned target, source is first', () => {
     const edges = parseReferenceCandidateEdges([makeCandidate({ source_id: 'a', target_id: 'b', relation_kind: 'spawned' })]);
-    expect(edges).toEqual([{ fromNodeId: 'a', toNodeId: 'b', kind: 'spawn', confirmed: false }]);
+    expect(edges).toEqual([{ fromNodeId: 'a', toNodeId: 'b', kind: 'spawn', confirmed: false, candidateId: 'c1', declaredBy: null, declaredAt: null }]);
   });
 
   it('flips followed(source→target) — source follows target, so target is first', () => {
     const edges = parseReferenceCandidateEdges([makeCandidate({ source_id: 'a', target_id: 'b', relation_kind: 'followed' })]);
-    expect(edges).toEqual([{ fromNodeId: 'b', toNodeId: 'a', kind: 'then', confirmed: false }]);
+    expect(edges).toEqual([{ fromNodeId: 'b', toNodeId: 'a', kind: 'then', confirmed: false, candidateId: 'c1', declaredBy: null, declaredAt: null }]);
   });
 
   it('flips superseded(source→target) — source supersedes target, so target is the OLD one, first', () => {
     const edges = parseReferenceCandidateEdges([makeCandidate({ source_id: 'a', target_id: 'b', relation_kind: 'superseded' })]);
-    expect(edges).toEqual([{ fromNodeId: 'b', toNodeId: 'a', kind: 'supersede', confirmed: false }]);
+    expect(edges).toEqual([{ fromNodeId: 'b', toNodeId: 'a', kind: 'supersede', confirmed: false, candidateId: 'c1', declaredBy: null, declaredAt: null }]);
   });
 
   it('keeps NULL(종 미정) direction as source→target — kind unknown but direction (who mentioned whom) is still known', () => {
     const edges = parseReferenceCandidateEdges([makeCandidate({ source_id: 'a', target_id: 'b', relation_kind: null })]);
-    expect(edges).toEqual([{ fromNodeId: 'a', toNodeId: 'b', kind: null, confirmed: false }]);
+    expect(edges).toEqual([{ fromNodeId: 'a', toNodeId: 'b', kind: null, confirmed: false, candidateId: 'c1', declaredBy: null, declaredAt: null }]);
+  });
+
+  // story #2353(AC7·AC8) 회귀 가드 — 되돌리기 팝오버의 재료(candidateId·declaredBy·declaredAt)가
+  // 방향 뒤집기와 무관하게 원본 candidate 그대로 실린다.
+  it('carries candidateId/declaredBy/declaredAt through regardless of direction flip (AC7·AC8 되돌리기 재료)', () => {
+    const edges = parseReferenceCandidateEdges([makeCandidate({
+      id: 'cand-42', source_id: 'a', target_id: 'b', relation_kind: 'followed',
+      declared_by: 'member-1', declared_at: '2026-07-31T00:00:00Z',
+    })]);
+    expect(edges[0]?.candidateId).toBe('cand-42');
+    expect(edges[0]?.declaredBy).toBe('member-1');
+    expect(edges[0]?.declaredAt).toBe('2026-07-31T00:00:00Z');
   });
 
   it('maps status=declared to confirmed=true and status=estimated to confirmed=false', () => {

@@ -94,7 +94,7 @@ export function FlowCanvas({ rows, activeEpicId, edgeCount, projectId, onSelectS
                     ) : null}
                   </div>
                 </button>
-                {isExpanded ? <FlowEpicNodes projectId={projectId} epicId={row.id} epicTitle={row.title} onSelectStory={onSelectStory} /> : null}
+                {isExpanded ? <FlowEpicNodes projectId={projectId} epicId={row.id} epicTitle={row.title} onSelectStory={onSelectStory} memberMap={{}} /> : null}
               </li>
             );
           })}
