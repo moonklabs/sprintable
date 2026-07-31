@@ -494,6 +494,8 @@
     "flowMapMoreCount": "+{n} more",
     "flowLaneFoldedCount": "{n} goals with no recent movement",
     "flowLaneFoldedReason": "— no change in 30 days. Not hidden, just folded.",
+    "flowCanvasOffscreenCount": "{n} cards off-screen",
+    "flowCanvasOffscreenReason": "— scroll right to see them.",
     "nextMakerHeadline": "{needsNext} of {total} goals have no \"next\" set",
     "nextMakerHeadlineStall": "{n} are about to stall",
     "nextMakerQuietHint": "{n} may already be finished",

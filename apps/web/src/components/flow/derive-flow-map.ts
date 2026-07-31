@@ -666,6 +666,19 @@ export function snapToNearestLaneCount(laneHeights: number[], candidateLanesOnly
   return bestCount;
 }
 
+/** story #2369 AC2(2026-07-31) — 가로로 «완전히» 화면 밖(오른쪽)인 카드 수를 실측으로
+ * 센다. 상수를 박지 않는다 — 지금 값(1440×900에서 12장)은 «이 데이터·이 뷰포트»의 수일
+ * 뿐이고 다음 렌더에서 달라진다. ⛔"걸친" 카드(오른쪽 경계에 한 픽셀이라도 걸린 카드)는
+ * 안 센다 — PO 물음(2026-07-31)에 대한 답: 걸친 카드는 스스로 자기 존재를 사용자에게 이미
+ * 알리고 있어(한 조각이라도 보인다) "화면이 아무 말도 안 한다"는 이 스토리의 병에 안
+ * 해당한다. 완전히 밖인 것만 "말 못 하는" 카드다. */
+export function countCardsBeyondRightEdge(
+  cardLefts: number[], cardWidth: number, scrollLeft: number, viewportWidth: number,
+): number {
+  const visibleRight = scrollLeft + viewportWidth;
+  return cardLefts.filter((left) => left >= visibleRight).length;
+}
+
 /** ⑥ 조건부 문구(PO 판정 2026-07-30) 트리거 — depth 0 열은 있는데 depth 1 이상이 «전혀»
  * 없을 때만 참. 하드코딩된 상수가 아니라 실제 맵 상태에서 계산하므로, 간선이 착지해
  * depth≥1 노드가 생기는 날 이 함수가 스스로 false를 내 문구가 사라진다(거짓말 될 위험 없음). */

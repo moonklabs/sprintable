@@ -439,3 +439,99 @@ describe('FlowMapCanvas — grouped edges (여러 선이 한 점에 모이면 �
     expect(container.querySelector('text')).toBeNull();
   });
 });
+
+// story #2369(2026-07-31) — "가로로는 못 움직인다"고 잘못 답했던 자리(overflow-x-auto는
+// 이미 있었는데 overlay 스크롤바라 안 보였을 뿐). 세로 접힘 줄과 같은 꼴로 대칭을 맞춘다.
+// jsdom은 clientWidth/scrollWidth를 항상 0으로 내므로(레이아웃 엔진 없음),
+// HTMLElement.prototype에 값을 주입해 재현한다.
+describe('FlowMapCanvas — story #2369 가로 잘림 발견성(세로 접힘 줄과 같은 꼴)', () => {
+  let originalClientWidth: PropertyDescriptor | undefined;
+  let originalScrollWidth: PropertyDescriptor | undefined;
+  let mockClientWidth = 0;
+  let mockScrollWidth = 0;
+
+  beforeEach(() => {
+    originalClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    originalScrollWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth');
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return mockClientWidth; } });
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', { configurable: true, get() { return mockScrollWidth; } });
+  });
+
+  afterEach(() => {
+    if (originalClientWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalClientWidth);
+    if (originalScrollWidth) Object.defineProperty(HTMLElement.prototype, 'scrollWidth', originalScrollWidth);
+  });
+
+  function scrollEl(): HTMLElement {
+    const el = container.querySelector('.focus-inset.overflow-x-auto');
+    expect(el).not.toBeNull();
+    return el as HTMLElement;
+  }
+
+  // FLOW_MAP_DEPTH0_X(402) + depth*FLOW_MAP_GRID_STEP(110) — 열마다 카드 하나씩, depth
+  // 0~4(5장)를 만들어 실제 computeNodePositions 좌표로 offscreen 판정을 태운다.
+  function makeQueueLane(depths: number[]): FlowMapLane {
+    const queueNodesByDepth = new Map<number, FlowMapNode[]>();
+    depths.forEach((d, i) => queueNodesByDepth.set(d, [makeNode({ id: `q${i}`, kind: 'queue', depth: d })]));
+    return makeLane({ queueNodesByDepth });
+  }
+
+  it('shows the real offscreen card count(양성대조 — 상수 아님, 실측) and hides it when everything fits', async () => {
+    mockScrollWidth = 1000;
+    // depth 0~4 → left = 402, 512, 622, 732, 842. clientWidth=700 → visibleRight=700.
+    // 완전히 밖(left>=700): 732, 842 → 2장.
+    mockClientWidth = 700;
+    const lane = makeQueueLane([0, 1, 2, 3, 4]);
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    const hint = container.querySelector('[data-testid="flow-canvas-offscreen-hint"]');
+    expect(hint).not.toBeNull();
+    expect(hint?.textContent).toContain('카드 2장이 화면 밖');
+
+    // 넓혀서 전부 보이게(clientWidth=1000, scrollLeft 0) — 힌트가 사라져야 한다(대칭:
+    // 세로 접힘 줄도 foldedCount===0이면 안 뜬다).
+    mockClientWidth = 1000;
+    await act(async () => { scrollEl().dispatchEvent(new Event('resize')); window.dispatchEvent(new Event('resize')); });
+    expect(container.querySelector('[data-testid="flow-canvas-offscreen-hint"]')).toBeNull();
+  });
+
+  it('the explanation span uses text-foreground (not the inherited text-muted-foreground, which fails AA 4.5:1 on bg-muted/90 in light mode — measured 4.43:1) (유나 라이브 실측 2026-07-31)', async () => {
+    mockClientWidth = 700;
+    mockScrollWidth = 1000;
+    const lane = makeQueueLane([0, 1, 2, 3, 4]);
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    const hint = container.querySelector('[data-testid="flow-canvas-offscreen-hint"]');
+    const reasonSpan = Array.from(hint?.querySelectorAll('span') ?? []).find((s) => s.textContent === '— 오른쪽으로 스크롤하면 보입니다.');
+    expect(reasonSpan?.getAttribute('class')).toContain('text-foreground');
+  });
+
+  it('recomputes the count as the user scrolls(실측 — 스크롤할수록 밖인 카드가 준다)', async () => {
+    mockClientWidth = 700;
+    mockScrollWidth = 1000;
+    const lane = makeQueueLane([0, 1, 2, 3, 4]); // lefts: 402,512,622,732,842
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    expect(container.querySelector('[data-testid="flow-canvas-offscreen-hint"]')?.textContent).toContain('카드 2장이 화면 밖');
+
+    const el = scrollEl();
+    Object.defineProperty(el, 'scrollLeft', { configurable: true, value: 300, writable: true });
+    await act(async () => { el.dispatchEvent(new Event('scroll')); });
+    // visibleRight = 300+700 = 1000 → 전부(402~842+110=952 이하) 안에 들어온다 → 0장.
+    expect(container.querySelector('[data-testid="flow-canvas-offscreen-hint"]')).toBeNull();
+  });
+
+  it('auto-scrolls on mount so the "지금" cluster is visible when the container is narrow(#2351과 공유하는 안전망)', async () => {
+    mockClientWidth = 356;
+    mockScrollWidth = 1660;
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1', kind: 'now' })] });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    // NOW_CLUSTER_X(FLOW_MAP_NOW_LINE_X-40=252) + NODE_CARD_WIDTH(110)=362 > 356 → 스크롤.
+    expect(scrollEl().scrollLeft).toBe(Math.max(0, 252 - 356 / 2));
+  });
+
+  it('does NOT touch scrollLeft on a wide desktop container(AC8 회귀 없음)', async () => {
+    mockClientWidth = 1440;
+    mockScrollWidth = 1660;
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1', kind: 'now' })] });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    expect(scrollEl().scrollLeft).toBe(0);
+  });
+});
