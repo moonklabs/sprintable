@@ -5,9 +5,9 @@ import type { FlowMapLane, FlowMapNode, FlowMapEdgeKind, FlowMapEdgeGroup } from
 import {
   FLOW_MAP_GRID_STEP, FLOW_MAP_NOW_LINE_X, FLOW_MAP_DEPTH0_X, computeLaneHeight, shouldShowNoDeeperReason,
   computeNodePositions, computeSupersededNodeIds, computeEdgeLineEndpoints, groupEdgesByEndpoints,
-  edgeGroupStrokeWidth, PAST_BUNDLE_NODE_ID, PAST_BUNDLE_LEFT, PAST_BUNDLE_TOP, PAST_BUNDLE_CARD_WIDTH,
-  PAST_BUNDLE_CARD_HEIGHT, PAST_EXPANDED_LEFT, PAST_EXPANDED_TOP_START, PAST_EXPANDED_ROW_HEIGHT,
-  PAST_EXPANDED_BOX_WIDTH,
+  edgeGroupStrokeWidth, countRenderedEdgeLines, hasConfirmedRenderedEdgeLine, PAST_BUNDLE_NODE_ID, PAST_BUNDLE_LEFT, PAST_BUNDLE_TOP,
+  PAST_BUNDLE_CARD_WIDTH, PAST_BUNDLE_CARD_HEIGHT, PAST_EXPANDED_LEFT, PAST_EXPANDED_TOP_START,
+  PAST_EXPANDED_ROW_HEIGHT, PAST_EXPANDED_BOX_WIDTH,
 } from './derive-flow-map';
 
 // 카드 실측(FlowMapNodeCard): w-[110px], 높이는 두 줄 텍스트+padding으로 24px 안팎(NODE_ROW_HEIGHT
@@ -161,6 +161,18 @@ export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPast
   const t = useTranslations('flow');
   const maxDepth = Math.max(0, ...lanes.flatMap((l) => Array.from(l.queueNodesByDepth.keys())));
   const canvasWidth = FLOW_MAP_DEPTH0_X + (maxDepth + 1) * FLOW_MAP_GRID_STEP + 20;
+  // 범례 {n}·표시여부의 단일 진실 — countRenderedEdgeLines 하나로 아래 두 곳(조건·개수)이
+  // 항상 같은 값을 본다(PO 지시 2026-07-31, derive-flow-map.ts 문서 참고).
+  const renderedEdgeLineCount = lanes.reduce(
+    (sum, lane) => sum + countRenderedEdgeLines(lane, NODE_ROW_HEIGHT, NOW_CLUSTER_X, { width: NODE_CARD_WIDTH, height: NODE_CARD_HEIGHT }),
+    0,
+  );
+  // 유나 가디언 리뷰(2026-07-31, PR#2720 issuecomment-5139624505) — 뒤 절("사람이 확인한
+  // 것은 아직 없습니다")의 만료 조건. #2725(포트)가 착지해 declared 선이 하나라도 실선으로
+  // 그려지면 이 조건이 스스로 거짓이 되어 문장에서 빠진다(만료일이 코드에 박힌 문장).
+  const hasAnyConfirmedRenderedEdge = lanes.some(
+    (lane) => hasConfirmedRenderedEdgeLine(lane, NODE_ROW_HEIGHT, NOW_CLUSTER_X, { width: NODE_CARD_WIDTH, height: NODE_CARD_HEIGHT }),
+  );
 
   return (
     <div className="overflow-hidden rounded-md border border-border bg-card">
@@ -393,22 +405,24 @@ export function FlowMapCanvas({ lanes, onSelectStory, onTogglePastBundle, isPast
         </div>
       </div>
 
-      {/* 하단 범례(유나양 규격, 2026-07-30 PO 전달) — 색을 지워도 4종이 갈리도록 화살촉/점/
-          막대 모양으로 설명한다. 순서는 «많은 것이 앞»(유나양 확定, 백필 실측 종 미정
-          85%) — [종 미정][낳음][잇따름][대체], 실제 분포 순으로 읽어야 눈에 먼저 든다.
-          그려진 선이 하나도 없으면(오늘 org 0행 그대로) 설명할 대상이 없어 범례도 안
-          띄운다(빈 기능을 위한 상시 chrome을 만들지 않는다).
-          ⛔카운트 줄("확認 N · 종 미정 N · 지금 볼 수 있는 후보 155 · 기각 N")은 디디군
-          벌크 엔드포인트(`/goals/{id}/reference-candidates`)가 착지해 실 카운트가
-          배선된 뒤에 얹는다 — 지금 숫자를 만들어 보이면 지어내는 것이라 이 판에서는 뺐다. */}
-      {lanes.some((l) => l.edges.length > 0) ? (
-        <div className="flex flex-wrap items-center gap-3 border-t border-border px-2 py-1.5 text-[10px] text-muted-foreground">
-          <span className="flex items-center gap-1"><span aria-hidden="true">—●</span>{t('edgeLegendUnknownKind')}</span>
-          <span className="flex items-center gap-1"><span aria-hidden="true" className="text-info">▷</span>{t('edgeLegendSpawn')}</span>
-          <span className="flex items-center gap-1"><span aria-hidden="true" className="text-brand">▶</span>{t('edgeLegendThen')}</span>
-          <span className="flex items-center gap-1"><span aria-hidden="true">⊣</span>{t('edgeLegendSupersede')}</span>
-          <span aria-hidden="true">│</span>
-          <span>{t('edgeLegendConfirmedVsProposed')}</span>
+      {/* 하단 범례 — 유나신 정정(2026-07-31, 라이브 실측 후속, 세 번째·최終 문구 확定): 옛
+          4종×2축 범례는 실선(확定)이 «한 번도 안 나오는데» "실선=확定"이라 적어 없는 것을
+          설명하고 있었다(종 미정 점선만 24/24). 종·확認축을 다 설명하는 대신 정직한 한 줄로
+          바꾼다 — 숫자도 버튼도 없다("일부입니다" 한 낱말이 범위를 말하는 것으로 족하다는
+          PO 판정, "보입니다"❌/숫자❌는 그대로 남는 위험이라 아예 뺀 것). [확認하기]는 이번
+          판에 안 붙인다 — 서버 엔드포인트는 있으나(backend/app/routers/stories.py:806·846·886)
+          인라인으로 묻는 UI가 아직 없다.
+          표시 조건은 여전히 «데이터 건수»가 아니라 «실제로 그려진 선»이 있는가여야 한다
+          (countRenderedEdgeLines, derive-flow-map.ts) — 0이면 설명할 대상이 없어 범례도 안
+          띄운다(빈 기능을 위한 상시 chrome을 만들지 않는다, 기존 원칙 그대로).
+          ⛔유나 가디언 리뷰(2026-07-31, issuecomment-5139624505) — 뒤 절("사람이 확인한 것은
+          아직 없습니다")에 만료 조건이 없어 #2725(포트)가 착지하는 순간 거짓이 될 뻔했다.
+          hasAnyConfirmedRenderedEdge가 참이면 그 뒤 절을 뗀다 — 앞 절만으로도 "일부"라는
+          말이 여전히 성립한다(전량 확認이 아니라는 뜻이므로). */}
+      {renderedEdgeLineCount > 0 ? (
+        <div className="border-t border-border px-2 py-1.5 text-[10px] text-muted-foreground">
+          {t('edgeLegendMachineFound')}
+          {hasAnyConfirmedRenderedEdge ? null : ` — ${t('edgeLegendNoneConfirmedYet')}`}
         </div>
       ) : null}
     </div>

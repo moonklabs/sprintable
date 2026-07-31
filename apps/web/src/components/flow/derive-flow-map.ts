@@ -518,6 +518,54 @@ export function edgeGroupStrokeWidth(count: number): number {
   return EDGE_GROUP_THIN_WIDTH;
 }
 
+/** 범례 표시 여부의 «단일 진실»(PO 지시 2026-07-31, 유나양 라이브 실측 후속) —
+ * `lane.edges.length`(데이터 건수)가 아니라 «실제로 SVG `<line>`으로 그려지는» 수를 센다.
+ * `lane.edges.length`로 세면 두 가지로 거짓말이 된다: ①그룹(`groupEdgesByEndpoints`)이
+ * 여러 간선을 한 선으로 겹쳐 그리므로 데이터 건수 > 그려진 선 개수일 수 있고, ②좌표 없는
+ * 노드로 향하는 간선(`computeEdgeLineEndpoints`가 null)은 데이터엔 있어도 화면엔 없다.
+ * 최종 문구(2026-07-31, 세 번째 확定)는 숫자를 안 싣지만("일부입니다" 한 낱말로 범위를
+ * 말하는 것으로 족하다는 PO 판정), 표시 조건 자체는 여전히 «그려진 선이 있는가»여야 한다
+ * (선 0개면 이 줄도 안 떠야 하는 — 문구가 숫자 없이도 "설명할 대상이 있다"를 전제하므로).
+ * FlowMapCanvas의 실제 렌더 루프와 «같은 순수함수 조합»(computeNodePositions →
+ * groupEdgesByEndpoints → computeEdgeLineEndpoints)을 그대로 재사용하므로 두 계산이 갈릴
+ * 수 없다 — 렌더 로직을 복제하지 않고 같은 자를 다시 대는 것. */
+export function countRenderedEdgeLines(
+  lane: FlowMapLane,
+  nodeRowHeight: number,
+  nowClusterX: number,
+  defaultDimensions: FlowMapNodeDimensions,
+): number {
+  const positions = computeNodePositions(lane, nodeRowHeight, nowClusterX);
+  const dimensionOverrides = new Map([
+    [PAST_BUNDLE_NODE_ID, { width: PAST_BUNDLE_CARD_WIDTH, height: PAST_BUNDLE_CARD_HEIGHT }],
+  ]);
+  return groupEdgesByEndpoints(lane.edges).filter(
+    (group) => computeEdgeLineEndpoints(positions, group, defaultDimensions, dimensionOverrides) !== null,
+  ).length;
+}
+
+/** 유나 가디언 리뷰(2026-07-31, PR#2720 issuecomment-5139624505) — 정직한 범례 문구의
+ * 뒤 절("사람이 확인한 것은 아직 없습니다")에 «만료 조건»이 코드에 없었다. #2725(포트)가
+ * 착지해 사람이 만든(declared) 선이 하나라도 실선으로 그려지면 그 순간 이 문장이 거짓이
+ * 된다 — 지금 고치는 "실선=확定"과 같은 거짓말의 반대 방향. `countRenderedEdgeLines`와
+ * «같은 순회»(groupEdgesByEndpoints → computeEdgeLineEndpoints)를 다시 태워 새 경로를
+ * 만들지 않는다 — 새로 짜면 두 계산이 갈릴 수 있다. */
+export function hasConfirmedRenderedEdgeLine(
+  lane: FlowMapLane,
+  nodeRowHeight: number,
+  nowClusterX: number,
+  defaultDimensions: FlowMapNodeDimensions,
+): boolean {
+  const positions = computeNodePositions(lane, nodeRowHeight, nowClusterX);
+  const dimensionOverrides = new Map([
+    [PAST_BUNDLE_NODE_ID, { width: PAST_BUNDLE_CARD_WIDTH, height: PAST_BUNDLE_CARD_HEIGHT }],
+  ]);
+  return groupEdgesByEndpoints(lane.edges).some(
+    (group) => group.allConfirmed
+      && computeEdgeLineEndpoints(positions, group, defaultDimensions, dimensionOverrides) !== null,
+  );
+}
+
 /** 유나양 지적(2026-07-30, PO 전달) — "대체"(supersede)만 유일하게 «간선이 노드 렌더에
  * 영향을 주는» 종류다(낳음·잇따름은 둘 다 살아있는 관계라 선만 그으면 되지만, 대체는 한쪽이
  * 죽는 관계라 «옛 노드»의 표시가 같이 바뀌어야 — 안 그러면 "대체됐는데 옛 것이 멀쩡히 살아
