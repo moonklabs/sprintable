@@ -115,6 +115,19 @@ jobs:
       # 본다)을 최신 커밋의 committer 시각과 비교한다.
       # ⚠️fail-closed: timeline 이벤트를 못 찾거나 API 호출 자체가 실패해도(레이트리밋 등)
       # 이 스텝은 그대로 실패(빨강)한다 — "몰라서 통과"를 만들지 않는다.
+      #
+      # ⭐유나신 지적(#2731 리뷰) — 이 fail-closed 자체가 만드는 «증상의 모양»: 권한 부족으로
+      # gh api가 실패해도 이 스텝은 빨강이 되는데, 그건 겉보기엔 "가드가 정상 작동 중"(라벨
+      # 없어서 빨강)과 «똑같은 모양»이다. 둘을 가르는 유일한 자리는 양성대조의 "라벨을 붙여서
+      # GREEN이 되는가" 단계다 — 거기서 timeline API를 실제로 호출해 성공해야 GREEN이 나오기
+      # 때문이다(#2731 뮤테이션 증거 ②단계가 실물로 이미 그 경로를 탔다 — 지금 permissions:
+      # pull-requests: read로 충분함이 그렇게 확認됨). 나중에 권한이 좁아지거나 GitHub이 정책을
+      # 바꾸면 라벨을 붙여도 GREEN이 안 되는 것으로 여기서 드러난다.
+      #
+      # ⭐유나신 지적 — 남는 한계 하나 더: LAST_COMMIT_TS는 «커밋을 만든 기계»의 committer
+      # 시각이다. 그 기계 시계가 앞서 있으면 방금 붙인 라벨도 stale로 읽힐 수 있다. 방향이
+      # 안전한 쪽(거짓 빨강이지 거짓 초록이 아님)이라 막을 일은 아니지만, 적어 두는 이유는
+      # "가드를 의심하지 않고 시계를 보게" 하기 위해서다.
       - name: Enforce design:pass label freshness (not stale vs latest commit)
         if: steps.scope.outputs.in_scope == 'true'
         env:
