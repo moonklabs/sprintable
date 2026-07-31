@@ -598,13 +598,13 @@ export default function AgentDetailPage() {
         <SectionCardBody>
           {freshApiKey && freshMcpConfig ? (
             <>
-              <p className="text-xs text-emerald-500 mb-2">{t('agentMcpFreshKeyNote')}</p>
+              <p className="text-xs text-success mb-2">{t('agentMcpFreshKeyNote')}</p>
               <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
                 {freshMcpConfig}
               </pre>
             </>
           ) : !hasActiveKey ? (
-            <p className="text-xs text-amber-400">{t('agentMcpKeyRequired')}</p>
+            <p className="text-xs text-warning">{t('agentMcpKeyRequired')}</p>
           ) : (
             <p className="text-xs text-muted-foreground">{t('agentMcpSecurityNote')}</p>
           )}
