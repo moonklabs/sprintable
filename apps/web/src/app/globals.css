@@ -671,3 +671,5 @@
 .tiptap [data-type="toggleSummary"] { cursor: pointer; }
 
 /* #2361 freshness mutation-test touch (commit 1) — throwaway, will be reverted */
+
+/* #2361 freshness mutation-test touch (commit 2 — makes design:pass stale) */
