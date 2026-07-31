@@ -133,6 +133,244 @@ jobs:
           fi
           echo "OK: existing-DB upgrade heads is a no-op"
 
+  # story #2330(CI·승격안전, 2026-07-30) — alembic-fresh-db(위)는 "빈 DB에서 baseline-stamp
+  # 후 나머지 리비전 전부를 «한 번의» command.upgrade() 호출(=한 트랜잭션 블록)"으로 올린다.
+  # 그런데 실배포(dev/prod)는 언제나 "이미 어떤 리비전에 있는 DB에 «새 리비전 하나»를 얹는"
+  # 별개의 job 실행이다 — 0217(story #2267)의 `autocommit_block()`이 정확히 이 차이로 갈렸다
+  # (빈 DB에서 한 번에 쭉 올릴 때는 통과, 0216까지 올려진 DB에 0217만 단독 적용할 때만
+  # `AssertionError(self._transaction is not None)`로 죽었다 — 민 로컬 재현, 2026-07-30).
+  # ⭐이 job은 alembic-fresh-db를 «대체»하지 않는다 — 둘은 다른 것을 잰다(fresh-db는 "전체
+  # 히스토리를 처음부터 재생할 수 있는가", 이 job은 "이미 마이그레이션된 기존 DB에 최신
+  # 리비전 «한 단»이 그대로 얹히는가" — prod 승격이 실제로 밟는 경로는 후자).
+  #
+  # ⛔이 job이 못 잡는 것(반드시 읽어야 하는 한계 — story #2330 AC4. 스크립트 docstring에도
+  # 같은 내용이 있다):
+  #   · 여러 리비전이 «한 배치»로 함께 올라갈 때만 나는 상호작용 — 이 job은 항상 "head(들)
+  #     직전까지 + head(들)만 단독" 두 단계만 재현한다(마지막 한 단만 단독으로 떼어 시험).
+  #   · 실제 prod 데이터 크기/분포에서만 나는 문제(락 경합·인덱스 빌드 시간) — CI DB는 비어 있다.
+  #   · downgrade(롤백) 경로 — upgrade만 잰다.
+  # 「이제 다 잡는다」로 읽으면 그것이 다음 사고다.
+  alembic-single-step-promotion:
+    name: Alembic upgrade head (existing DB, single-step)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sprintable
+          POSTGRES_PASSWORD: sprintable
+          POSTGRES_DB: sprintable_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+      JWT_SECRET: ci-test-secret-at-least-32-chars-long
+      SECRET_KEY: ci-test-secret-at-least-32-chars-long
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 'latest'
+
+      # story #2330 AC2(양성 대조는 이 잡 자체가 아니라 이 스토리를 구현한 PR 설명에 실측
+      # 기록 — 옛 0217(autocommit_block 쓰던 버전)로 이 스크립트를 로컬 재현하면 실제로
+      # RED, 지금 이 잡은 그 버그가 고쳐진 develop 상태를 잰다).
+      - name: alembic upgrade — existing DB, single-step (parent → head alone, 별개 호출 2회)
+        working-directory: backend
+        run: uv run python scripts/ci_alembic_single_step_promotion_check.py
+
+      - name: Verify reached heads
+        working-directory: backend
+        run: |
+          set -e
+          cur=$(uv run alembic current 2>/dev/null | grep -oE '^[0-9a-z_]+' | sort)
+          heads=$(uv run alembic heads 2>/dev/null | grep -oE '^[0-9a-z_]+' | sort)
+          echo "current=$cur"
+          echo "heads=$heads"
+          test -n "$cur"
+          diff <(echo "$cur") <(echo "$heads")
+
+  # story #2330 AC6 — env.py(PR#2661)의 "autocommit_block()은 이 프로젝트에서 원리적으로
+  # 못 쓴다" 주석은 «읽어야» 서는 것이었다(주석만으로는 다음 사람이 또 쓸 수 있다). grep
+  # 가드로 승격한다 — 마이그레이션 파일에 그 호출이 들어오면 CI가 빨개진다.
+  alembic-no-autocommit-block:
+    name: Alembic migrations — no autocommit_block() (guard)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: grep for autocommit_block() calls in migration files
+        run: |
+          # 실제 호출(`op.get_context().autocommit_block()`)만 잡는다 — docstring 산문에서
+          # backtick으로 `autocommit_block()`을 «설명」하는 것(이 파일들에도 있다, 0217의
+          # 사고 경위 서술)까지 걸리면 develop이 영구 RED가 된다. 실호출은 항상 앞에
+          # `.`(메서드 호출 점)이 오고, 산문 인용은 backtick이 오므로 `\.` 앵커로 가른다.
+          if grep -rnE '\.autocommit_block\s*\(' backend/alembic/versions/; then
+            echo "FAIL: autocommit_block()은 이 프로젝트 alembic/env.py 설정(transaction_per_migration=False)에서" \
+                 "원리적으로 못 쓴다(story #2330 — 0217 dev 배포 사고). CREATE INDEX CONCURRENTLY가 필요하면" \
+                 "마이그레이션에 넣지 말고 배포 후 별도 수동 psql 세션으로 돌리는(env.py 주석 참조)."
+            exit 1
+          fi
+          echo "OK: no autocommit_block() calls in migration files"
+
+  # story #2335([클래스 봉인]) — Query(default=None) 센티널이 «직접호출 테스트»를 통해 새는
+  # 클래스를 막는다. 같은 병이 #2191(테스트 주석에만 남고 코드가드 안 고침)→#2659(CI 21건
+  # 실패)로 두 번 났고, 오늘(2026-07-30) 전수 스윕에서 12건 전부 크래시(조용히 틀리는 것 0건)
+  # 임을 확認 — 그래서 41건 개별 수리는 안 하고(AC6, 크래시는 CI가 이미 잡는다) "이 클래스가
+  # 세 번째 나지 않게" 막는 lint만 짓는다. 순수 AST 정적분석 — DB/의존성 불요, python3 stdlib뿐.
+  #
+  # grandfather 베이스라인(scripts/query_sentinel_baseline.txt): lint 도입 시점 develop에
+  # 이미 있던 위반은 실패시키지 않는다(41건 개별 수리는 이 판이 아니라는 AC6 판정 그대로) —
+  # 베이스라인에 없는 **새** 위반만 여기서 빨개진다.
+  query-sentinel-direct-call-lint:
+    name: Query(None) sentinel direct-call lint (guard)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan for Query(...) params missing at router direct-call sites
+        working-directory: backend
+        run: python3 scripts/lint_query_sentinel_direct_calls.py
+      # ⭐PO 판정(2026-07-30): grandfather 베이스라인은 "지금 있는 걸 봐준다"이지 "앞으로도
+      # 여기 한 줄 더 넣고 넘어가도 된다"가 아니다 — 그러면 이 가드를 우회하는 «합법적인 문»이
+      # 된다. 베이스라인 파일은 «줄기만» 허용한다: base 브랜치(보통 develop) 대비 새로 추가된
+      # 줄이 있으면 실패시킨다(제거는 자유 — 사이트를 고쳐서 줄어드는 것은 언제나 환영).
+      - name: "Verify baseline can only shrink (story #2335 — no new grandfather entries)"
+        working-directory: backend
+        run: |
+          set -e
+          # PO 질문(2026-07-30): "PR은 develop 대비인데, develop 자신에 푸시될 때는 무엇과
+          # 견주는가?" — pull_request 이벤트는 PR의 base 브랜치(보통 develop)와, push
+          # 이벤트(예: develop에 직접 머지)는 그 push 직전 커밋(github.event.before)과
+          # 비교한다. 둘 다 없으면(예: 새 브랜치 최초 push) 비교 대상이 없어 검사를 스킵한다
+          # — 그 경로에서는 이 가드가 안 돈다(한계로 남김, "이제 다 잡는다"로 안 읽히게).
+          # ⛔실측(2026-07-30, CI 로그로 발견): `git fetch origin <branch> --depth=1`은
+          # `FETCH_HEAD`만 채운다 — `refs/remotes/origin/<branch>`(즉 `origin/develop`
+          # 이라는 이름)는 «만들지 않는다». 그래서 이 스텝이 처음 실렸을 때 PR_BASE_REF가
+          # 정확히 "develop"으로 치환됐는데도 `git show origin/develop:...`가 그런 ref가
+          # 없어 조용히 실패 → else(스킵) 분기로 떨어졌다(정확히 이 가드가 막으려던 그 모양
+          # — "실행되는데 바깥을 안 만나는" 것. 뮤테이션 없이 실전에서 스스로 걸린 사례).
+          # 고침: fetch 직후의 `FETCH_HEAD`를 그 자리에서 바로 쓴다(별도 remote-tracking
+          # ref 이름에 의존하지 않는다).
+          PR_BASE_REF="${{ github.event.pull_request.base.ref }}"
+          PUSH_BEFORE_SHA="${{ github.event.before }}"
+          COMPARE_REF=""
+          COMPARE_LABEL=""
+          if [ -n "$PR_BASE_REF" ]; then
+            git fetch origin "$PR_BASE_REF" --depth=1 2>&1 | tail -3 || true
+            COMPARE_REF="FETCH_HEAD"
+            COMPARE_LABEL="PR base:$PR_BASE_REF"
+          elif [ -n "$PUSH_BEFORE_SHA" ] && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            git fetch origin "$PUSH_BEFORE_SHA" --depth=1 2>&1 | tail -3 || true
+            COMPARE_REF="FETCH_HEAD"
+            COMPARE_LABEL="push-before:$PUSH_BEFORE_SHA"
+          fi
+          if [ -n "$COMPARE_REF" ] && git show "$COMPARE_REF:backend/scripts/query_sentinel_baseline.txt" > /tmp/base_baseline.txt 2>/dev/null; then
+            grep -vE '^#|^$' /tmp/base_baseline.txt | sort -u > /tmp/base_sorted.txt
+            grep -vE '^#|^$' scripts/query_sentinel_baseline.txt | sort -u > /tmp/head_sorted.txt
+            new_lines=$(comm -13 /tmp/base_sorted.txt /tmp/head_sorted.txt || true)
+            base_count=$(wc -l < /tmp/base_sorted.txt | tr -d ' ')
+            head_count=$(wc -l < /tmp/head_sorted.txt | tr -d ' ')
+            echo "baseline entries: base($COMPARE_LABEL)=$base_count head=$head_count"
+            if [ -n "$new_lines" ]; then
+              echo "FAIL: 베이스라인에 «새» 항목이 추가됐다 — 이 파일은 줄기만 허용한다(story #2335)." \
+                   "새 위반은 여기 grandfather로 넣지 말고 실제로 고치는(파라미터를 명시로 넘기는) 것이 맞다:"
+              echo "$new_lines"
+              exit 1
+            fi
+            echo "OK: baseline은 늘지 않았다(줄었으면 환영 — 그만큼 사이트가 고쳐진 것)"
+          elif [ -z "$COMPARE_REF" ]; then
+            # PO 지적(2026-07-30): 한계를 문서에만 적으면 "그 파일 여는 사람"만 안다(#2191이
+            # 그렇게 세 번째 재발했다) — 이 스킵도 CI stdout에 즉시·눈에 띄게 찍어야 그 자리로
+            # 들어온 사람이 바로 안다. grep하기 쉬운 고정 문구로 남긴다.
+            echo "baseline growth check skipped: no comparison base (PR context 아님 + push-before 미상 — 예: 새 브랜치 최초 push)"
+          else
+            # ⭐COMPARE_REF는 있었으나(PR base 또는 push-before를 정상 식별) git show가
+            # 실패한 경우 — 가장 흔한 정당한 사유는 "그 비교시점(base 브랜치)에는 이 베이스
+            # 라인 파일 자체가 아직 없었다"(예: 이 lint를 «처음» 들여오는 PR 자신). 이것도
+            # 앞의 것과 별개 이유이므로 다른 문구로 남긴다 — 다음 사람이 "PR context가 없어서
+            # 스킵됐나?"와 헷갈리지 않게.
+            echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 query_sentinel_baseline.txt 없음 — 이 PR이 그 파일을 «처음 도입»하는 중이면 정상이다, story #2335 자신이 그 경우다. 다음 PR부터는 develop에 파일이 있어 실제 비교가 돈다)"
+          fi
+
+  project-access-403-lint:
+    name: has_project_access 403 lint (guard, story #2342)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan for has_project_access denial raising 403 (should be 404)
+        working-directory: backend
+        run: python3 scripts/lint_project_access_403.py
+      # story #2335와 동일 계약 — 베이스라인은 «줄기만» 허용한다(2026-07-30 발견: #2342
+      # 스코프 밖에 22곳이 더 있어 지금 당장 못 고친다 — 새로 늘리는 것만 막는다).
+      - name: "Verify baseline can only shrink (story #2342 — no new grandfather entries)"
+        working-directory: backend
+        run: |
+          set -e
+          PR_BASE_REF="${{ github.event.pull_request.base.ref }}"
+          PUSH_BEFORE_SHA="${{ github.event.before }}"
+          COMPARE_REF=""
+          COMPARE_LABEL=""
+          if [ -n "$PR_BASE_REF" ]; then
+            git fetch origin "$PR_BASE_REF" --depth=1 2>&1 | tail -3 || true
+            COMPARE_REF="FETCH_HEAD"
+            COMPARE_LABEL="PR base:$PR_BASE_REF"
+          elif [ -n "$PUSH_BEFORE_SHA" ] && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            git fetch origin "$PUSH_BEFORE_SHA" --depth=1 2>&1 | tail -3 || true
+            COMPARE_REF="FETCH_HEAD"
+            COMPARE_LABEL="push-before:$PUSH_BEFORE_SHA"
+          fi
+          if [ -n "$COMPARE_REF" ] && git show "$COMPARE_REF:backend/scripts/project_access_403_baseline.txt" > /tmp/base_baseline.txt 2>/dev/null; then
+            grep -vE '^#|^$' /tmp/base_baseline.txt | sort -u > /tmp/base_sorted.txt
+            grep -vE '^#|^$' scripts/project_access_403_baseline.txt | sort -u > /tmp/head_sorted.txt
+            new_lines=$(comm -13 /tmp/base_sorted.txt /tmp/head_sorted.txt || true)
+            base_count=$(wc -l < /tmp/base_sorted.txt | tr -d ' ')
+            head_count=$(wc -l < /tmp/head_sorted.txt | tr -d ' ')
+            echo "baseline entries: base($COMPARE_LABEL)=$base_count head=$head_count"
+            if [ -n "$new_lines" ]; then
+              echo "FAIL: 베이스라인에 «새» 항목이 추가됐다 — 이 파일은 줄기만 허용한다(story #2342)." \
+                   "새 위반은 여기 grandfather로 넣지 말고 실제로 고치는(403→404) 것이 맞다:"
+              echo "$new_lines"
+              exit 1
+            fi
+            echo "OK: baseline은 늘지 않았다(줄었으면 환영 — 그만큼 사이트가 고쳐진 것)"
+          elif [ -z "$COMPARE_REF" ]; then
+            echo "baseline growth check skipped: no comparison base (PR context 아님 + push-before 미상 — 예: 새 브랜치 최초 push)"
+          else
+            echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 project_access_403_baseline.txt 없음 — 이 PR이 그 파일을 «처음 도입»하는 중이면 정상이다, story #2342 자신이 그 경우다. 다음 PR부터는 develop에 파일이 있어 실제 비교가 돈다)"
+          fi
+
+  candidate-source-ownership-lint:
+    name: candidate_id source_id ownership lint (guard, story #2363)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan reference_semantic_candidates.py for candidate_id lookups missing source_id ownership check
+        working-directory: backend
+        run: python3 scripts/lint_candidate_source_ownership.py
+
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
   # main이 develop과 다른 파일셋(ee_pricing 0146/0147 부재)일 때의 그래프 단절을 원천적으로
   # 못 잡는다(실제로 못 잡아서 prod 승격이 롤백된 그 사고). PR base가 main일 때만 도는 이
@@ -422,6 +660,13 @@ jobs:
       # 스크롤 컨테이너가 새로 들어오면 이 스텝이 실패한다(#2057 포커스 링 클리핑 재발 방지).
       - name: "Verify focus-inset coverage on scroll containers (story #2062 regression guard)"
         run: pnpm --filter web verify:focus-inset-coverage
+
+      # story #2367 회귀가드: 같은 파일이 렌더하는 두 문구가(한쪽이 {n}류 보간으로 수와
+      # 함께 서는 경우) 부분문자열로 겹치면 실패한다(#2352·#2365 — 「막힘 28↔0」·「승인 대기
+      # 30↔없음」과 같은 화면 자기모순 재발 방지). ⛔같은 화면이라도 다른 파일이 원인인
+      # 경우(#2352·#2365 원 사고 자체)는 이 v1 스코프 밖 — 스크립트 헤더 주석 참조.
+      - name: "Verify no i18n phrase substring collision (story #2367 regression guard)"
+        run: pnpm --filter web verify:no-i18n-phrase-collision
 
       - name: Test
         # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead

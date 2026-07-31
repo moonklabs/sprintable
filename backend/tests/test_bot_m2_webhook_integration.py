@@ -95,7 +95,13 @@ async def _post(payload, *, event="workflow_run", delivery="dlv-1", sign_secret=
         async with AsyncClient(transport=ASGITransport(app=fastapi_app), base_url="http://test") as c:
             with patch.object(mod.settings, "github_webhook_secret", legacy), \
                  patch.object(mod.settings, "github_app_webhook_secret", app), \
-                 patch.object(mod, "capture_pr_ci_verdict", new=cap):
+                 patch.object(mod, "capture_pr_ci_verdict", new=cap), \
+                 patch.object(mod, "_resolve_legacy_org_by_repo_owner",
+                              new=AsyncMock(return_value=(None, "repo_owner_unknown"))):
+                # story #2327 후속(legacy org repo-owner resolve) — 이 파일의 세션 mock 시퀀스는
+                # resolver 쿼리 수만 가정하므로, 그 앞의 새 org-resolve 쿼리는 여기서 고정
+                # bypass(org_id=None, 기존 legacy 무회귀 그대로) — org resolve 자체는
+                # test_bot_l1_pr_story_link.py 에서 단위로 커버.
                 resp = await c.post("/api/v2/internal/verdict/github-webhook", content=body, headers=headers)
         return resp, session, cap
     finally:

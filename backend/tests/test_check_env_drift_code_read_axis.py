@@ -81,6 +81,56 @@ def test_web_env_reads_ignores_test_files(tmp_path):
     assert "SOME_TEST_ONLY_KEY" not in reads
 
 
+# ── ⑤ 후속(2026-07-31) — `env: NodeJS.ProcessEnv = process.env` DI 관례 블라인드스팟 ──
+
+def test_web_env_reads_catches_di_pattern_when_declared(tmp_path):
+    """process.env를 파라미터(관례 이름 `env`)로 받는 함수 안의 `env['X']`도 이 DI 선언이
+    실제로 있는 파일이면 process.env['X']와 같은 자리로 잡혀야 한다 —
+    SPRINTABLE_RUNTIME_ROLE이 정확히 이 모양으로 못 잡히고 있었다."""
+    mod = _load_check_env_drift()
+    src = tmp_path / "background-runtime.ts"
+    src.write_text(
+        "export function resolveRole(env: NodeJS.ProcessEnv = process.env) {\n"
+        "  const rawRole = env['SPRINTABLE_RUNTIME_ROLE'];\n"
+        "  return rawRole;\n"
+        "}\n"
+    )
+    reads = mod._web_env_reads(tmp_path)
+    assert "SPRINTABLE_RUNTIME_ROLE" in reads
+    assert reads["SPRINTABLE_RUNTIME_ROLE"][0][1] is None  # 기본값 없음(㉠high)
+
+
+def test_web_env_reads_ignores_env_bracket_without_di_declaration(tmp_path):
+    """DI 선언(`env: NodeJS.ProcessEnv = process.env`)이 «없는» 파일에서 우연히 `env`라는
+    이름의 변수를 쓰면(env var와 무관한 지역변수) 잡지 않는다 — 오탐 방지가 이 스캔 확장의
+    전제 조건이다."""
+    mod = _load_check_env_drift()
+    src = tmp_path / "unrelated.ts"
+    src.write_text(
+        "function pick(env: Record<string, string>) {\n"
+        "  return env['SOME_UNRELATED_KEY'];\n"
+        "}\n"
+    )
+    reads = mod._web_env_reads(tmp_path)
+    assert "SOME_UNRELATED_KEY" not in reads
+
+
+def test_ac_sprintable_runtime_role_reproduces_via_real_repo_scan():
+    """실제 리포 소스(apps/web/src/services/background-runtime.ts)를 그대로 스캔 —
+    SPRINTABLE_RUNTIME_ROLE이 IaC 어디에도 없는 실제 상태에서 high로 잡혀야 한다(라이브
+    실측 2026-07-31: sprintable-frontend-{dev,prod} 둘 다 이 키가 없음 — gcloud로 직접 확認)."""
+    mod = _load_check_env_drift()
+    reads = mod._web_env_reads()  # 실제 apps/web/src 스캔
+    assert "SPRINTABLE_RUNTIME_ROLE" in reads
+
+    covered = mod._iac_covered_keys_for_service("sprintable-frontend-prod")
+    assert "SPRINTABLE_RUNTIME_ROLE" not in covered  # IaC 스크립트 전수에도 없음(실측)
+
+    highest, high, low = mod._unsupplied_code_read_findings(reads, covered, set())
+    high_keys = {k for k, _ in high}
+    assert "SPRINTABLE_RUNTIME_ROLE" in high_keys  # 기본값 없음(dev/localhost 문자열 아님) → high, highest 아님
+
+
 def test_web_env_reads_never_touches_live_values():
     """AC5 — 이 함수의 시그니처 자체가 소스 Path만 받는다(라이브 env 접근 불가능한 구조).
     함수가 아예 gcloud를 부를 방법이 없다는 것을 소스 검사로 고정."""
@@ -97,6 +147,20 @@ def test_web_env_reads_never_touches_live_values():
 # 재현하는 것이 목적이라 그 두 키만 빼서 사고 시점 상태를 흉내낸다(그 외 실제 IaC 상태는
 # 그대로 써서 NEXT_PUBLIC_FASTAPI_URL 같은 무관한 키가 findings에 섞이지 않게 한다).
 _INCIDENT_KEYS = {"MOBILE_APP_LINK_ORIGIN", "FIREBASE_BFF_INTERNAL_SECRET"}
+
+# ⑤ 후속(2026-07-31) — DI 패턴 확장으로 새로 잡히기 시작한 실제 미커버 값들. 이 아래
+# 포지티브컨트롤 테스트는 "그 두 사고 키가 커버되면 나머지는 실제로 이미 깨끗하다"는 원래
+# 시나리오를 재는 것이라 이 신규 발견들과는 별개 관심사(별도로
+# test_ac_sprintable_runtime_role_reproduces_via_real_repo_scan이 이걸 전담해서 잡는다) —
+# 그래서 여기서만 빼고, baseline에는 안 넣는다(SPRINTABLE_RUNTIME_ROLE은 PO 판단 대기 신규
+# 실사고 후보라 스스로 조용히 얼리지 않는다).
+_DI_FOLLOWUP_KEYS = {
+    "SPRINTABLE_RUNTIME_ROLE",
+    "SPRINTABLE_BACKGROUND_POLL_INTERVAL_MS",
+    "SPRINTABLE_MEMO_DISPATCHER_POLL_INTERVAL_MS",
+    "SPRINTABLE_DISCORD_OUTBOUND_POLL_INTERVAL_MS",
+    "SPRINTABLE_TEAMS_OUTBOUND_POLL_INTERVAL_MS",
+}
 
 
 def test_ac1_mobile_app_link_origin_reproduces_as_highest_fail():
@@ -178,6 +242,25 @@ def test_ac2_positive_control_full_main_passes_when_covered(monkeypatch, capsys)
         ],
     )
     monkeypatch.setattr(mod, "_load_allowlist", lambda: ({}, {}))
+    # ⑤ 후속(2026-07-31) — DI 패턴으로 새로 잡히기 시작한 키들을 이 테스트 안에서만 "이미
+    # baseline 처리된 것"으로 스텁한다(실제 infra/manual-env-allowlist.yml은 안 건드린다).
+    # ⛔`_live_env_entries`에 이 키들을 얹는 방식은 안 쓴다 — 그러면 ①키집합 대조(실제
+    # IaC와 비교)가 "라이브엔 있는데 IaC엔 없는 새 키"로 따로 잡아 이 테스트의 관심사(사고
+    # 두 키가 커버되면 나머지는 실제로 깨끗한가)와 무관한 실패가 섞인다. 이 신규 발견 자체는
+    # test_ac_sprintable_runtime_role_reproduces_via_real_repo_scan이 전담해서 잡는다.
+    from datetime import date, timedelta
+    _until = (date.today() + timedelta(days=10)).isoformat()
+    real_baseline = mod._load_code_read_high_baseline()
+    monkeypatch.setattr(
+        mod, "_load_code_read_high_baseline",
+        lambda: {
+            **real_baseline,
+            **{
+                k: {"key": k, "reason": "test stub — see ⑤ 후속 comment", "declared_by": "test", "until": _until}
+                for k in _DI_FOLLOWUP_KEYS
+            },
+        },
+    )
 
     exit_code = mod.main()
     out = capsys.readouterr().out
@@ -211,9 +294,15 @@ def test_ac4_real_repo_scan_counts_are_recorded():
         f"\n[AC4] 총 고유 env 키 {total_reads}개 · exempt {len(exempt)}개 · "
         f"미커버 findings {total_findings}개(highest={len(highest)}, high={len(high)}, low={len(low)})"
     )
-    # 정확한 숫자 고정(2026-07-28) — 스위트가 실패하면 숫자가 바뀐 것, 원인을 봐야 한다.
+    # 정확한 숫자 고정(2026-07-28, 2026-07-31 ⑤ DI-패턴 후속으로 high 15→20 갱신) — 스위트가
+    # 실패하면 숫자가 바뀐 것, 원인을 봐야 한다. +5는 SPRINTABLE_RUNTIME_ROLE·
+    # SPRINTABLE_{BACKGROUND,MEMO_DISPATCHER,DISCORD_OUTBOUND,TEAMS_OUTBOUND}_POLL_INTERVAL_MS
+    # — background-runtime.ts의 `env: NodeJS.ProcessEnv = process.env` DI 파라미터로 읽혀
+    # process.env 직접참조만 보던 스캔에 새로 잡히기 시작한 실제 미커버 값들(baseline에 일부러
+    # 안 넣었다 — SPRINTABLE_RUNTIME_ROLE은 PO 판단이 필요한 신규 실사고 후보라 스스로 baseline
+    # 처리하지 않는다).
     assert len(highest) == 1, highest
-    assert len(high) == 15, high
+    assert len(high) == 20, high
     assert len(low) == 9, low
     assert len(exempt) == 18
 

@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 # 뷰어 통합 재설계(story 1948d19d): 비정상 거대값 방어 상한. Figma류 대형 캔버스 툴의 실용 한계보다
 # 넉넉하되(20000px), 정수 오버플로/스토리지 남용성 값은 확실히 막는 값 — 특정 스펙 수치가 아니라
@@ -101,6 +101,18 @@ class VisualArtifactSummary(BaseModel):
     # denorm 캐시(latest_version_number와 동일 목적 — 버전 서브쿼리 회피). SSOT는
     # ArtifactVersion.canvas_bounds, 이 값은 항상 최신 버전 값과 동기화된다.
     canvas_bounds: CanvasBounds | None = None
+    # story #2262 AC9②(PO 판정 2026-07-29): visual_artifact는 status 컬럼이 없다 — 「지금
+    # 상태」대신 「미결」을 들고 오는 첫 실증. 이름이 세는 단위를 그대로 말한다(오르테가 확정):
+    # ArtifactComment(root+reply 전부, 스레드는 제품에 없는 개념) WHERE resolved=false 개수.
+    # 라우터가 model_validate 前 transient attr로 세팅(agent_delegate_ids 패턴 동형) — 항상
+    # 세팅되므로(N+1 방지 배치 조회, 0도 명시) 여기 기본값(0)이 실제로 쓰일 일은 없다.
+    unresolved_comment_count: int = 0
+    # ⛔story #2262(C-4, PO 판정 2026-07-29): 여기 있던 `next_action_code`(artifact_next_action
+    # 호출)를 뺐다 — `unresolved_comment_count`(바로 위)가 이미 원자 필드로 응답에 있어
+    # 완전히 같은 사실을 두 칸에 중복으로 실었던 것(한 사실이 두 칸에 살면 언젠가 갈라진다).
+    # 근거는 "응답에 있다"가 아니라 "FE가 이 원자 필드로 직접 판정할 수 있다"인 것 — 지금은
+    # 아무도 안 읽지만(next_action_code 소비 0%) 읽을 재료는 이미 서 있다. 빼도 없어지는
+    # 동작이 0인 이유가 바로 이것(FE 소비 0%였다는 사실 그대로).
 
 
 class VisualArtifactDetail(BaseModel):
@@ -126,6 +138,12 @@ class VisualArtifactDetail(BaseModel):
     # denorm 캐시가 아님).
     canvas_bounds: CanvasBounds | None = None
     nodes: list[ArtifactNodeOut]
+    # story #2262 AC9②: VisualArtifactSummary와 동형 — 여기 위 주석 참조. 이 클래스는
+    # from_attributes를 안 쓰므로(라우터가 키워드 인자로 직접 생성) 기본값 0이 실제로
+    # 쓰이지 않는다는 보장이 없다 — 호출부(_load_detail)가 항상 명시로 넘긴다.
+    unresolved_comment_count: int = 0
+    # ⛔story #2262(C-4, PO 판정 2026-07-29): VisualArtifactSummary와 동형 — 위 클래스의
+    # next_action_code 제거 사유 그대로(unresolved_comment_count 원자 필드와 중복).
 
 
 class CreateArtifactCommentRequest(BaseModel):

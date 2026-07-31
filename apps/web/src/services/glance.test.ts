@@ -1,12 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   deriveRoadmapStatus,
-  deriveVagueRecency,
   derivePhrase,
-  filterMilestoneEvents,
   mergeRoadmap,
   scopeRoadmapEpics,
-  type BeActivityLogItem,
   type BeEpicListItem,
 } from './glance';
 import type { EpicProgress } from '@/components/dashboard/command-center/types';
@@ -151,33 +148,6 @@ describe('derivePhrase (정성 진척 언어 — %는 보조)', () => {
   });
 });
 
-describe('filterMilestoneEvents ("누가"가 아닌 "무슨 일" — 허용목록 기반)', () => {
-  const base = { id: 'a1', actor_type: 'agent' as const, entity_type: 'story', entity_title: 'X', created_at: '2026-07-10T00:00:00Z' };
-
-  it('keeps known milestone actions', () => {
-    const items: BeActivityLogItem[] = [{ ...base, action: 'story.status_changed' }];
-    expect(filterMilestoneEvents(items)).toHaveLength(1);
-  });
-
-  it('drops unknown/noise actions (e.g. raw keystroke or heartbeat events)', () => {
-    const items: BeActivityLogItem[] = [{ ...base, action: 'agent.heartbeat' }];
-    expect(filterMilestoneEvents(items)).toHaveLength(0);
-  });
-});
-
-describe('deriveVagueRecency (목업 §④ 성긴 버킷 — 분 단위 정밀 경과 표시 0)', () => {
-  const NOW = new Date('2026-07-10T12:00:00Z').getTime();
-
-  it('buckets under 5 minutes as justNow', () => {
-    expect(deriveVagueRecency(NOW - 2 * 60_000, NOW)).toBe('justNow');
-  });
-  it('buckets under 1 hour (but over 5 min) as aWhileAgo', () => {
-    expect(deriveVagueRecency(NOW - 30 * 60_000, NOW)).toBe('aWhileAgo');
-  });
-  it('buckets under 24 hours (but over 1 hour) as today', () => {
-    expect(deriveVagueRecency(NOW - 5 * 60 * 60_000, NOW)).toBe('today');
-  });
-  it('buckets 24+ hours as earlier', () => {
-    expect(deriveVagueRecency(NOW - 2 * 24 * 60 * 60_000, NOW)).toBe('earlier');
-  });
-});
+// story #2224(선생님 정정 2026-07-30) — filterMilestoneEvents/deriveVagueRecency 테스트를
+// 제거했다. 유일 소비처(LiveStream, §6 생동 스트림)가 /glance 삭제와 함께 죽은 코드가 됐고,
+// 그 함수들 자체도 services/glance.ts에서 함께 삭제됐다(아래 참고).

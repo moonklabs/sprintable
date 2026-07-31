@@ -66,9 +66,7 @@ function InlineSaveIndicator({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (status === 'idle') { setShow(false); setFading(false); return; }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setShow(true);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFading(false);
     if (status !== 'saved') return;
     const t1 = setTimeout(() => setFading(true), 200);

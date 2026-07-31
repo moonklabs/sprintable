@@ -175,14 +175,15 @@ async def test_list_retro_sessions_no_project_id_filters_by_access():
 
 
 @pytest.mark.anyio
-async def test_list_retro_sessions_cross_project_403():
+async def test_list_retro_sessions_cross_project_404():
+    """story #2342(2026-07-30): 무권한을 403이 아닌 404로 — 존재 비노출 규율 통일."""
     client, session, app = await _client()
     try:
         with _deny_project_access():
             async with client as c:
                 resp = await c.get(f"/api/v2/retros?project_id={OTHER_PROJECT_ID}")
 
-        assert resp.status_code == 403
+        assert resp.status_code == 404
     finally:
         app.dependency_overrides.clear()
 
@@ -218,8 +219,9 @@ async def test_create_retro_session_201():
 
 
 @pytest.mark.anyio
-async def test_create_retro_session_cross_project_403():
-    """body.project_id를 검증 없이 신뢰하면 무권한 project에 session을 심을 수 있던 mutation IDOR."""
+async def test_create_retro_session_cross_project_404():
+    """body.project_id를 검증 없이 신뢰하면 무권한 project에 session을 심을 수 있던 mutation IDOR.
+    story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일."""
     client, session, app = await _client()
     try:
         with _deny_project_access():
@@ -230,7 +232,7 @@ async def test_create_retro_session_cross_project_403():
                     "title": "무단 생성 시도",
                 })
 
-        assert resp.status_code == 403
+        assert resp.status_code == 404
     finally:
         app.dependency_overrides.clear()
 
@@ -392,8 +394,10 @@ async def test_get_retro_session_404():
 
 
 @pytest.mark.anyio
-async def test_get_retro_session_cross_project_403():
-    """#1801 계열 — session은 org 내에 존재하나 caller가 그 project에 접근권 없음 → 403(404 아님)."""
+async def test_get_retro_session_cross_project_404():
+    """#1801 계열 — session은 org 내에 존재하나 caller가 그 project에 접근권 없음.
+    ⛔story #2342(2026-07-30)가 #1801의 "→403(404 아님)" 판단을 뒤집었다 — stories.py의
+    존재 비노출 규율(#2322)로 통일, 이제 404가 맞다."""
     client, session, app = await _client()
     try:
         mock_result = MagicMock()
@@ -404,7 +408,7 @@ async def test_get_retro_session_cross_project_403():
             async with client as c:
                 resp = await c.get(f"/api/v2/retros/{SESSION_ID}")
 
-        assert resp.status_code == 403
+        assert resp.status_code == 404
     finally:
         app.dependency_overrides.clear()
 
@@ -1046,8 +1050,9 @@ async def test_update_action_cross_org_assignee_400():
 
 
 @pytest.mark.anyio
-async def test_update_action_cross_project_403():
-    """#1801 원 적출 지점 — parent session이 caller 무권한 project 소속이면 403."""
+async def test_update_action_cross_project_404():
+    """#1801 원 적출 지점 — parent session이 caller 무권한 project 소속이면 404.
+    story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일."""
     client, session, app = await _client()
     try:
         mock_result = MagicMock()
@@ -1061,7 +1066,7 @@ async def test_update_action_cross_project_403():
                     json={"status": "done"},
                 )
 
-        assert resp.status_code == 403
+        assert resp.status_code == 404
     finally:
         app.dependency_overrides.clear()
 
@@ -1128,8 +1133,9 @@ async def test_export_markdown_200():
 # ── dc861e44: synthesize / recommend-next ────────────────────────────────────
 
 @pytest.mark.anyio
-async def test_synthesize_session_cross_project_403():
-    """IDOR 가드 상속(#1801) — synthesize도 _require_retro_project_access를 탐."""
+async def test_synthesize_session_cross_project_404():
+    """IDOR 가드 상속(#1801) — synthesize도 _require_retro_project_access를 탐.
+    story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일."""
     client, session, app = await _client()
     try:
         mock_result = MagicMock()
@@ -1140,7 +1146,7 @@ async def test_synthesize_session_cross_project_403():
             async with client as c:
                 resp = await c.post(f"/api/v2/retros/{SESSION_ID}/synthesize")
 
-        assert resp.status_code == 403
+        assert resp.status_code == 404
     finally:
         app.dependency_overrides.clear()
 
@@ -1294,7 +1300,8 @@ async def test_recommend_next_malformed_synthesis_409_not_crash(malformed_synthe
 
 
 @pytest.mark.anyio
-async def test_recommend_next_cross_project_403():
+async def test_recommend_next_cross_project_404():
+    """story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일."""
     client, session, app = await _client()
     try:
         mock_result = MagicMock()
@@ -1305,7 +1312,7 @@ async def test_recommend_next_cross_project_403():
             async with client as c:
                 resp = await c.post(f"/api/v2/retros/{SESSION_ID}/recommend-next")
 
-        assert resp.status_code == 403
+        assert resp.status_code == 404
     finally:
         app.dependency_overrides.clear()
 
@@ -1591,7 +1598,8 @@ async def test_adopt_requires_human_403():
 
 
 @pytest.mark.anyio
-async def test_adopt_cross_project_403():
+async def test_adopt_cross_project_404():
+    """story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일."""
     client, session, app = await _client()
     try:
         mock_result = MagicMock()
@@ -1602,7 +1610,7 @@ async def test_adopt_cross_project_403():
             async with client as c:
                 resp = await c.post(f"/api/v2/retros/{SESSION_ID}/next-hypotheses/adopt", json={"id": str(CANDIDATE_ID)})
 
-        assert resp.status_code == 403
+        assert resp.status_code == 404
     finally:
         app.dependency_overrides.clear()
 

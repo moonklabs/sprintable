@@ -43,6 +43,37 @@ def parse_story_id(text: str) -> uuid.UUID | None:
         return None
 
 
+# story #2327 후속(2026-07-30, 디디 실측 — PR 웹훅 2466건 ignored의 rl.reason 축 근본원인):
+# 팀이 실제로 쓰는 두 PR 제목 관례(`[SID:2288]`·`fix(#2288):`)는 위 `_SID_RE`가 요구하는
+# UUID(36자)와 애초에 다른 값(story_number, 사람이 읽는 프로젝트 내 순번)이라 「한 형식만
+# 인식」이 아니라 «둘 다 인식 안 됨»이었다 — 오늘 실제 PR 제목 3건으로 직접 실행해 확認.
+# ⛔story_number는 (project_id, story_number)만 유일(org 전체 유일 아님, uq_stories_project_id_
+# story_number) — org 안에 project가 여럿이면 같은 번호가 여러 project에 동시에 존재할 수 있다
+# (dev DB 실측: 저번호(1~10)는 실제로 최대 24-project 충돌, 1000+ 는 이 org에서 충돌 0건이지만
+# 구조적으로 안전하다고 «가정»할 수 없다). 그래서 이 파서는 숫자만 뽑고, **org-scope 조회 +
+# 정확히 1건일 때만 확定**은 호출자(pr_story_link.py, org_id를 가진 웹훅 경로)의 책임으로
+# 남긴다 — 여기(CRON 수동 캡처 `capture_pr_verdict`)처럼 org_id가 아직 없는 경로는 이 값을
+# 안전하게 못 푼다(그 경로는 이 함수를 그대로 안 쓴다 — 아래 parse_story_number 참고).
+_SID_NUMBER_RE = re.compile(r"\[SID:\s*(\d{1,6})\]|fix\(#(\d{1,6})\):", re.IGNORECASE)
+
+
+def parse_story_number(text: str) -> int | None:
+    """텍스트에서 story_number 태그 파싱 — `[SID:2288]` 또는 `fix(#2288):` 형식.
+
+    ⛔UUID로 확定 짓지 않는다(story_number는 org 전체 유일이 아니다) — 그냥 파싱된 정수만
+    반환한다. org-scope 조회 + 유일성 검증은 호출자 몫(_scoped_story_by_number 참조).
+    음성 대조: `fix: bump to 2288ms` 처럼 숫자만 있고 마커(`[SID:`·`fix(#`)가 없으면 None —
+    "숫자처럼 생겼다"와 "SID 태그다"를 구분한다(부분매치 아니라 마커 필수).
+    """
+    m = _SID_NUMBER_RE.search(text)
+    if not m:
+        return None
+    try:
+        return int(m.group(1) or m.group(2))
+    except (ValueError, TypeError):
+        return None
+
+
 async def resolve_implementation_participation(
     session: AsyncSession,
     org_id: uuid.UUID,

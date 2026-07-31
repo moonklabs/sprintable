@@ -425,6 +425,46 @@ async def get_goal_progress(
     return await repo.get_progress(id)
 
 
+@router.get("/{id}/reference-candidates")
+async def get_goal_reference_candidates(
+    id: uuid.UUID,
+    repo: GoalRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[dict]:
+    """GET .../goals/{id}/reference-candidates — story #2223 후속(오르테가군 판정,
+    2026-07-30): 캔버스가 에픽 하나치 「의미 후보」(간선 재료)를 한 번에 받는 자리.
+    story별 개별 조회(`/stories/{id}/reference-candidates`)는 N+1이라 캔버스엔 못 쓴다 —
+    이 엔드포인트는 그 에픽 소속 story 전체의 candidate를 한 번에 반환한다. 응답에
+    `source_id`를 명시로 싣는다(단건 story 엔드포인트는 URL이 이미 source를 담아 생략했지만,
+    여러 story가 섞이는 이 응답에선 각 행이 어느 story에서 왔는지를 알아야 간선을 그린다)."""
+    goal = await repo.get(id)
+    if goal is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    if not await has_project_access(repo.session, uuid.UUID(auth.user_id), goal.project_id, repo.org_id):
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    from app.services.reference_semantic_candidates import list_candidates_for_epic_stories
+
+    candidates = await list_candidates_for_epic_stories(repo.session, org_id=repo.org_id, epic_id=id)
+    return [
+        {
+            "id": str(c.id),
+            "source_id": str(c.source_id),
+            "source_field": c.source_field,
+            "target_type": c.target_type,
+            "target_id": str(c.target_id),
+            "relation_kind": c.relation_kind,
+            "matched_keyword": c.matched_keyword,
+            "snippet": c.snippet,
+            "status": c.status,
+            "declared_by": str(c.declared_by) if c.declared_by else None,
+            "declared_at": c.declared_at.isoformat() if c.declared_at else None,
+            "created_at": c.created_at.isoformat(),
+        }
+        for c in candidates
+    ]
+
+
 class GoalTransitionRequest(BaseModel):
     status: str
 

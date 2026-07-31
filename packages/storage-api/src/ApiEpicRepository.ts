@@ -14,12 +14,17 @@ export class ApiEpicRepository implements IEpicRepository {
     // story 8fc51517 AC5: BE B1(#2225) 라이브 확認 후 신 엔드포인트로 전환(/api/v2/epics는
     // deprecated 별칭으로 계속 서빙되나, 신규 소비는 /goals가 SSOT). 응답 필드명은 id 그대로
     // (goal_id 아님 — backend/app/schemas/goal.py GoalResponse 실측 확認, FE 타입 무변경).
+    // 결함 fix(2026-07-30) — `include`가 이 4번째 쿼리 인자로 빠져 있어 story #2298/#2303의
+    // `include=glance` 옵트인이 BE(`goal.py` `Query(...include...)`)까지 한 번도 도달하지
+    // 못했다. focal_story/participant_ids는 이 fix 이전엔 응답에 «키 자체가» 없었다(null도
+    // 아님) — #2224 초점 스트립이 항상 빈 이유의 진짜 근본.
     return fastapiCall<Epic[]>('GET', '/api/v2/goals', this.accessToken, {
       query: {
         project_id: filters.project_id,
         cursor: filters.cursor,
         limit: filters.limit,
         order_by: filters.order_by,
+        include: filters.include,
       },
     });
   }

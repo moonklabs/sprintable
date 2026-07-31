@@ -31,6 +31,8 @@ class CreateJudgmentRequest(BaseModel):
     target_id: uuid.UUID | None = None
     method: str | None = None
     statement: str
+    # ⛔2026-07-30 신설 — 이 판정이 나온 채팅 메시지(이미 적은 것을 다시 안 쓰게 하는 것이 목적).
+    source_message_id: uuid.UUID | None = None
 
 
 class JudgmentResponse(BaseModel):
@@ -46,17 +48,22 @@ class JudgmentResponse(BaseModel):
     statement: str
     created_by: uuid.UUID
     created_at: datetime
+    source_message_id: uuid.UUID | None = None
+    # story #2308 후속: 이 원소를 target으로 삼는 correction id들(list_judgments 전용 —
+    # POST 응답에선 항상 []. 한 목록만 읽어도 "이건 정정됐다"가 보이게, active·corrections
+    # 양쪽 다 이 필드를 갖는다).
+    correction_ids: list[uuid.UUID] = []
 
 
 class JudgmentListMeta(BaseModel):
     scope: str | None
-    capped: bool
-    cap_basis: str
-    omitted_count: int
+    active_capped: bool
+    active_cap_basis: str
+    active_omitted_count: int
 
 
 class JudgmentListResponse(BaseModel):
-    retractions: list[JudgmentResponse]
+    corrections: list[JudgmentResponse]
     active: list[JudgmentResponse]
     meta: JudgmentListMeta
 
@@ -82,6 +89,7 @@ async def create_judgment_endpoint(
             method=body.method,
             statement=body.statement,
             created_by=caller.id,
+            source_message_id=body.source_message_id,
         )
     except InvalidJudgmentError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e

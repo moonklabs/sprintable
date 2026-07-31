@@ -103,7 +103,8 @@ async def test_preview_same_project_returns_project_id_and_slugs():
 @pytest.mark.anyio
 async def test_preview_cross_project_forbidden():
     """#2168 조사 로그의 실제 결함: 링크가 project 없이 도착하면 receiver가 "현재 프로젝트"로
-    추측했다 — 그 갭을 막는 canonical 인가가 preview 에도 걸려야 한다(get_doc 과 동형 가드)."""
+    추측했다 — 그 갭을 막는 canonical 인가가 preview 에도 걸려야 한다(get_doc 과 동형 가드).
+    story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일."""
     from app.repositories.doc import DocRepository
     from app.routers.docs import get_doc_preview
     eng, Session = await _engine()
@@ -116,7 +117,7 @@ async def test_preview_cross_project_forbidden():
                 await get_doc_preview(
                     q=str(doc_b.id), db=s, auth=_auth(), repo=DocRepository(s, ORG)
                 )
-            assert ei.value.status_code == 403
+            assert ei.value.status_code == 404
     finally:
         await eng.dispose()
 
@@ -124,7 +125,8 @@ async def test_preview_cross_project_forbidden():
 @pytest.mark.anyio
 async def test_get_doc_cross_project_forbidden_same_project_ok():
     """get_doc(GET /{id}) org-scope happy path 가 project 인가 없이 즉시 반환하던 갭 — fix 검증.
-    fix 前(has_project_access 가드 제거)엔 이 테스트가 RED(200 반환)로 exploitability 실증."""
+    fix 前(has_project_access 가드 제거)엔 이 테스트가 RED(200 반환)로 exploitability 실증.
+    story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일."""
     from app.repositories.doc import DocRepository
     from app.routers.docs import get_doc
     eng, Session = await _engine()
@@ -135,7 +137,7 @@ async def test_get_doc_cross_project_forbidden_same_project_ok():
         async with Session() as s:
             with pytest.raises(HTTPException) as ei:
                 await get_doc(id=doc_b.id, session=s, auth=_auth(), repo=DocRepository(s, ORG))
-            assert ei.value.status_code == 403
+            assert ei.value.status_code == 404
         async with Session() as s:
             out = await get_doc(id=doc_a.id, session=s, auth=_auth(), repo=DocRepository(s, ORG))
             assert out.id == doc_a.id

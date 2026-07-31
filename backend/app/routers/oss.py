@@ -45,6 +45,10 @@ async def oss_seed(
     for story_data in _SAMPLE_STORIES:
         # story 9ac9b80f: StoryRepository.create()를 거치지 않는 직접 ORM 구성 경로 —
         # allocate_story_number를 여기서도 명시 호출해야 story_number NOT NULL을 채운다.
+        # ⛔story #2267(C-9) AC2 판정(오르테가군, 2026-07-30): 이 경로에 origin_type/
+        # origin_id를 일부러 안 붙인다 — 데모 시드는 실제 출처가 없는 데이터라 붙이면
+        # 거짓이 되고, AC6(기준선) 실측이 시드로 오염된다. "빠진 것"이 아니라 "빼야 할
+        # 것" — 다음 사람이 이 자리를 보고 배선을 추가하지 말 것.
         story_number = await allocate_story_number(session, project_id)
         session.add(
             Story(

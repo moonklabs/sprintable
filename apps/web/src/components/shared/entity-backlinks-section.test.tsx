@@ -155,6 +155,31 @@ describe('EntityBacklinksSection', () => {
     expect(container.textContent).not.toContain('S1 전용 문서'); // 전환 중엔 이전 결과가 안 보인다
   });
 
+  it('story #2267(C-9) AC4 — relation==="created_from" 항목은 이 목록에서 빠진다(출처는 별도 섹션 몫)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [
+        { id: 'r1', source_type: 'doc', source_id: 'd1', created_by: null, created_at: '2026-07-28T00:00:00Z', relation: 'created_from', still_exists: true, doc: { id: 'd1', title: '출처 문서' }, message: null, meeting: null, story: null },
+        { id: 'r2', source_type: 'doc', source_id: 'd2', created_by: null, created_at: '2026-07-28T00:00:00Z', relation: 'none', still_exists: true, doc: { id: 'd2', title: '그냥 멘션 문서' }, message: null, meeting: null, story: null },
+      ],
+      meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message', 'doc'], forms: 'all', excludes: [] } },
+    }))));
+    await render('story', 's1');
+    expect(container.textContent).not.toContain('출처 문서');
+    expect(container.textContent).toContain('그냥 멘션 문서');
+  });
+
+  it('story #2267(C-9) — relation==="created_from" 항목만 있으면(멘션 0건) 수집범위 0건 문구를 보인다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [
+        { id: 'r1', source_type: 'doc', source_id: 'd1', created_by: null, created_at: '2026-07-28T00:00:00Z', relation: 'created_from', still_exists: true, doc: { id: 'd1', title: '출처 문서' }, message: null, meeting: null, story: null },
+      ],
+      meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message', 'doc'], forms: 'all', excludes: [] } },
+    }))));
+    await render('story', 's1');
+    expect(container.textContent).not.toContain('출처 문서');
+    expect(container.textContent).toContain('관찰된 참조 0건');
+  });
+
   describe('entityType="doc" — 두 번째 자리 재사용 확인(불규칙복수 파생·재-mount 없이 컴포넌트 변경 0)', () => {
     it('doc 대상이면 /api/docs/{id}/backlinks를 부른다(story→stories와 다른 불규칙복수)', async () => {
       const fetchMock = vi.fn(async (url: string) => new Response(JSON.stringify({

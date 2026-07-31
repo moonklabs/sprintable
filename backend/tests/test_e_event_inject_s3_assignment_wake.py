@@ -34,6 +34,11 @@ def _story(assignee_id):
     # 검증 실패하므로 명시 세팅.
     s.human_owner_member_id = None
     s.agent_delegate_ids = []
+    # story #2315 AC1: references(transient, dict|None) — 위와 동일 이유로 명시 세팅.
+    s.references = None
+    # story #2328(C-11 ㉡층): 위와 동일 이유로 명시 세팅.
+    s.is_reference_candidate = False
+    s.matched_snippet = None
     s.meeting_id = None
     s.title = "Build login"
     s.description = "OAuth + password"

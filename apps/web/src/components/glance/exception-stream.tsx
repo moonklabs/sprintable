@@ -6,8 +6,21 @@ import type { AttentionQueueItem } from '@/components/attention-queue/derive-att
 
 interface ExceptionStreamProps {
   /**
-   * 손이 필요한 것(승인 대기·막힘·병합 대기) = 실 gate-pending/blocked 신호만. project-scope gate
-   * fetch는 디디 병렬 BE(작음) — 미가용/BE 前엔 빈 배열로 정직 빈상태("손 필요한 것 없음") 렌더.
+   * 손이 필요한 것(결재 대기·다른 일에 막힘·머지 가능) = 실 gate-pending/blocked/merge_ready
+   * 신호만. project-scope gate fetch는 디디 병렬 BE(작음) — 미가용/BE 前엔 빈 배열로 정직
+   * 빈상태 렌더.
+   *
+   * ⛔story #2365(2026-07-31) — 빈상태 문구가 「손 필요한 것 없음」(주어 없음)이었는데, 이
+   * 서랍이 세는 표(WorkflowLineStepApproval, 승인 흐름/단계 결재)가 next-maker-header.tsx의
+   * 「게이트 승인 대기」 카드와 «같은 화면에서» 만난다 — 30과 0이 나란히 서면 주어 없인
+   * 자기모순으로 읽힌다. 「승인 흐름(단계 결재)에서 멈춘 것이 없습니다」로 주어를 박았다.
+   *
+   * ⛔story #2365 후속(유나 지적) — 빈상태만 고치고 «항목이 있을 때»의 개별 kindLabel
+   * (`exceptionKindGatePending`="승인 대기")은 안 고쳐서, 서랍에 항목이 하나라도 생기면
+   * 헤딩 카드의 「게이트 승인 대기」와 다시 주어 없이 만났다("지금 통과처럼 보이는 이유가
+   * 서랍이 비어서" — 양성대조가 «실패할 수 없는» 표본이었다). kindLabel 셋을 한 번에
+   * 갈랐다 — 「결재 대기」(게이트와 축자 불일치)·「다른 일에 막힘」(#2352가 금지한 「막힘」
+   * 단독형을 안 씀)·「머지 가능」(그대로, 충돌 없음).
    */
   items?: AttentionQueueItem[];
 }

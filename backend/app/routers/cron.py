@@ -319,6 +319,60 @@ async def entity_references_orphan_check(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── GET /api/v2/internal/cron/zero-referenced-entities-check ─────────────────
+# story #2277(E-CONNECT) AC1/AC2/AC3 — "이것을 가리키는 참조가 0건"인 doc·story 수를 센다.
+# #2274와 동일 패턴(verify_cron·read-only·다른 인증 발명 없음, AC7 동형 근거).
+#
+# ⛔AC5(권한)는 이 cron에 안 붙는다(PO 판정 2026-07-29) — cron엔 「보는 사람」이 없어 권한
+# 축이 서지 않는다. AC5는 이 수를 사용자에게 노출하는 층이 생길 때 그 층에 붙는다.
+#
+# ⛔AC2 최종판정(PO, dev 실측 후 정정, 2026-07-29): 표·노출층은 «짓지 않는다». dev 실측
+# (`sprintable-verify-oneoff` job 재사용, CRON_SECRET 불필요 — job이 private-IP로 dev DB에
+# 직접 접속): doc 871/883·story 2497/2512가 zero_referenced였으나 `entity_references` 총
+# 행수가 62뿐이었다 — 이 수는 「고아」가 아니라 「참조추적 자체가 아직 안 돈 것」(분모미채움)
+# 이었다. 지금 표를 지으면 2497건이 「고아」로 보여 없는 문제를 만드는 거짓 지표가 된다.
+# AC2는 여기서 "지금은 없다"로 명시하고 닫는다 — ⭐만료 조건: `entity_references_total`이
+# 일감 수(story 총량) 대비 유의미해질 때(예: 1/10 초과) 이 수가 비로소 「고아」를 뜻하기
+# 시작하고, 그때 표·노출층을 짓는다. 그 전까지 이 cron의 응답+로그가 이 스토리의 「도는
+# 자리」 전부다.
+#
+# ⛔AC3 — 응답은 zero_referenced/total 절대값과 entity_references_total(분모)을 **항상 같이**
+# 싣는다(분모 없이 절대값만 보면 다음 사람이 "2497건 고아"로 오독한다 — 오늘 실제로 PO
+# 자신이 먼저 그 오독을 할 뻔했다가 스스로 잡았다). caveat 문안은 디디가 세운 것 그대로
+# (bare "출처 없음"/"참조 없음" 금지 — 미수집을 "없음"으로 표시하면 거짓이라는 게 핵심).
+_AC3_CAVEAT = (
+    "관찰된 참조 0건(수집범위: mention/embed, source=chat_message·doc만 — "
+    "PR/커밋/증거자유텍스트는 미수집이라 이 수에 없음)"
+)
+
+
+@router.get("/zero-referenced-entities-check")
+async def zero_referenced_entities_check(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.backlinks import count_entity_references_total, count_zero_referenced_entities
+
+        zero_referenced = await count_zero_referenced_entities(session)  # org_id=None → 전체 org
+        entity_references_total = await count_entity_references_total(session)
+        total = sum(zero_referenced.values())
+        logger.info(
+            "zero-referenced entities: %s (total=%d, entity_references_total=%d)",
+            zero_referenced, total, entity_references_total,
+        )
+        return _ok({
+            "zero_referenced": zero_referenced,
+            "total": total,
+            "entity_references_total": entity_references_total,
+            "caveat": _AC3_CAVEAT,
+        })
+    except Exception as exc:
+        logger.exception("cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── GET /api/v2/internal/cron/inbox-outbox ────────────────────────────────────
 
 @router.get("/inbox-outbox")

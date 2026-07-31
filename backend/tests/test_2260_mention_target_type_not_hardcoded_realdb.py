@@ -74,6 +74,36 @@ async def _seed_org_project_member(session):
     return org, project, member
 
 
+async def _make_doc(session, org_id, project_id, title="Doc"):
+    from app.models.doc import Doc
+
+    doc = Doc(
+        id=uuid.uuid4(), org_id=org_id, project_id=project_id, title=title,
+        slug=f"doc-{uuid.uuid4().hex[:8]}",
+    )
+    session.add(doc)
+    await session.commit()
+    return doc
+
+
+async def _make_story(session, org_id, project_id, title="Story"):
+    from app.models.pm import Story
+
+    story = Story(id=uuid.uuid4(), org_id=org_id, project_id=project_id, title=title, status="backlog")
+    session.add(story)
+    await session.commit()
+    return story
+
+
+async def _make_epic(session, org_id, project_id, title="Epic"):
+    from app.models.pm import Goal
+
+    goal = Goal(id=uuid.uuid4(), org_id=org_id, project_id=project_id, title=title, status="active")
+    session.add(goal)
+    await session.commit()
+    return goal
+
+
 @pytest.mark.anyio
 async def test_chat_mention_to_story_round_trips():
     """⭐AC1 핵심 — 메시지→스토리 임베드가 실제로 만들어지고 다시 읽힌다(죽은 경로 재현/해소)."""
@@ -86,9 +116,9 @@ async def test_chat_mention_to_story_round_trips():
     try:
         async with factory() as session:
             org, project, member = await _seed_org_project_member(session)
-            await session.commit()
+            target_story = await _make_story(session, org.id, project.id)
 
-            target_story_id = uuid.uuid4()
+            target_story_id = target_story.id
             message_id = uuid.uuid4()
             content = f"[관련 스토리](entity:story:{target_story_id})"
 
@@ -124,9 +154,11 @@ async def test_chat_mention_to_epic_round_trips():
     try:
         async with factory() as session:
             org, project, member = await _seed_org_project_member(session)
-            await session.commit()
+            doc = await _make_doc(session, org.id, project.id)
+            story = await _make_story(session, org.id, project.id)
+            epic = await _make_epic(session, org.id, project.id)
 
-            doc_id, story_id, epic_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+            doc_id, story_id, epic_id = doc.id, story.id, epic.id
             message_id = uuid.uuid4()
             content = (
                 f"[문서](entity:doc:{doc_id}) [스토리](entity:story:{story_id}) "
@@ -161,9 +193,10 @@ async def test_target_types_param_is_the_boundary_not_a_body_branch():
     try:
         async with factory() as session:
             org, project, member = await _seed_org_project_member(session)
-            await session.commit()
+            doc = await _make_doc(session, org.id, project.id)
+            story = await _make_story(session, org.id, project.id)
 
-            doc_id, story_id = uuid.uuid4(), uuid.uuid4()
+            doc_id, story_id = doc.id, story.id
             message_id = uuid.uuid4()
             content = f"[문서](entity:doc:{doc_id}) [스토리](entity:story:{story_id})"
 

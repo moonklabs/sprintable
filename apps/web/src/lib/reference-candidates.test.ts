@@ -59,7 +59,7 @@ describe('findReferenceCandidates', () => {
   });
 });
 
-describe('거절 기억(localStorage, durable 아님)', () => {
+describe('거절 기억(localStorage, durable 아님, #2313 토큰 단위 스코프)', () => {
   beforeEach(() => {
     stubLocalStorage();
   });
@@ -68,16 +68,30 @@ describe('거절 기억(localStorage, durable 아님)', () => {
   });
 
   it('거절 전엔 rejected가 아니다', () => {
-    expect(isCandidateRejected('msg-1', '#2249')).toBe(false);
+    expect(isCandidateRejected('#2249')).toBe(false);
   });
 
-  it('거절하면 같은 (messageId, raw) 쌍은 rejected로 남는다', () => {
-    rejectCandidate('msg-1', '#2249');
-    expect(isCandidateRejected('msg-1', '#2249')).toBe(true);
+  it('거절하면 그 토큰 문자열은 rejected로 남는다', () => {
+    rejectCandidate('#2249');
+    expect(isCandidateRejected('#2249')).toBe(true);
   });
 
-  it('다른 메시지의 같은 토큰 문자열은 거절 영향을 안 받는다(메시지 단위 스코프)', () => {
-    rejectCandidate('msg-1', '#2249');
-    expect(isCandidateRejected('msg-2', '#2249')).toBe(false);
+  it('다른 토큰은 거절 영향을 안 받는다(양성대조, AC5)', () => {
+    rejectCandidate('#2249');
+    expect(isCandidateRejected('#2250')).toBe(false);
+  });
+
+  it('#2313 — 한 메시지에서 거절한 토큰은 다른(새) 메시지에 다시 쳐도 기억된다(토큰 단위 스코프, 메시지 단위 아님)', () => {
+    // #2283 원 구현은 키가 `messageId::raw`라 이 경우 false가 나왔다 — 그게 #2313의 재현 결함.
+    rejectCandidate('#2249');
+    expect(isCandidateRejected('#2249')).toBe(true); // 어느 메시지에서 왔는지와 무관.
+  });
+
+  it('저장 키에 버전 프리픽스가 붙는다(#2313 PO 지시 — 키 모양 바뀌면 옛 값이 조용히 안 맞지 않고 깨끗이 무시)', () => {
+    rejectCandidate('#2249');
+    const raw = localStorage.getItem('sprintable:reference-candidates:rejected');
+    expect(raw).not.toBeNull();
+    const stored = JSON.parse(raw!) as string[];
+    expect(stored).toEqual(['v1:#2249']);
   });
 });

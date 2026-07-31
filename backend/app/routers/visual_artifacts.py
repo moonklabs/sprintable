@@ -4,7 +4,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -188,6 +188,42 @@ async def _get_artifact_or_404(
     )).scalar_one_or_none()
 
 
+async def _count_unresolved_comments(
+    session: AsyncSession, artifact_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, int]:
+    """story #2262 AC9②(PO 판정 2026-07-29): visual_artifact는 status 컬럼이 없다 — 「미결」이
+    유일한 «다음 발» 재료(§②). 단위는 코멘트(root+reply 전부) — 스레드는 제품에 없는 개념이라
+    (reply도 POST .../comments/{id}/resolve로 개별 resolve됨) 지어내지 않는다(오르테가 확정,
+    필드명 `unresolved_comment_count`가 그 단위를 그대로 말한다).
+
+    N+1 방지(#2619와 동형) — 호출자가 artifact_id 여러 개를 한 번에 넘기면 쿼리 1회로 전부
+    해소한다(list_artifacts가 artifact마다 따로 왕복하지 않는다). 반환에 없는 id는 0건으로
+    취급한다(호출자 책임 — fetch_stored_references와 동일 계약).
+
+    ⛔스코프: artifact_id로만 필터한다 — org_id/project_id는 안 건다. artifact_comments가
+    호출자의 org/project 안에서 이미 소유권 검증된 artifact_id 집합(`_get_artifact_or_404`·
+    list_artifacts의 org_id/project_id where절)에서만 나오므로, 여기서 다시 걸면 이중 검증일
+    뿐이다 — 그러나 **호출자가 이 함수에 넘기는 artifact_ids 자체가 이미 그 검증을 거친
+    것이어야 한다**는 불변식이 이 함수 밖에 있다(계약 위반 시 이 함수가 아니라 호출부가
+    새는 자리)."""
+    if not artifact_ids:
+        return {}
+    rows = (await session.execute(
+        select(ArtifactComment.artifact_id, func.count())
+        # ⛔뮤테이션 자가검증(#2623)으로 실측: 이 `.in_(artifact_ids)`를 지워도 아래
+        # `.group_by(ArtifactComment.artifact_id)`가 코멘트를 자기 artifact_id로만 묶어 주므로
+        # 다른 artifact의 미해결 코멘트가 섞여 들지 않는다(6/6 GREEN 유지 — 격리를 보장하는
+        # 것은 이 필터가 아니라 GROUP BY다). 그래도 지우지 않는 이유: 이 필터가 없으면 매
+        # 호출마다 **org 전체**(다른 org 포함) artifact_comments를 스캔·집계한 뒤 파이썬에서
+        # 필요한 id만 골라내는 꼴이 된다 — 스코프 축소(성능)가 이 줄의 실제 역할이지, 격리는
+        # 아니다. "성능 최적화라 지워도 안전"으로 읽지 말 것 — 안전은 유지되지만 스캔 범위가
+        # org 전체로 커진다.
+        .where(ArtifactComment.artifact_id.in_(artifact_ids), ArtifactComment.resolved.is_(False))
+        .group_by(ArtifactComment.artifact_id)
+    )).all()
+    return {artifact_id: count for artifact_id, count in rows}
+
+
 async def _load_detail(session: AsyncSession, artifact: VisualArtifact, version_number: int) -> VisualArtifactDetail | None:
     version = (await session.execute(
         select(ArtifactVersion).where(
@@ -199,6 +235,7 @@ async def _load_detail(session: AsyncSession, artifact: VisualArtifact, version_
     node_rows = (await session.execute(
         select(ArtifactNode).where(ArtifactNode.version_id == version.id).order_by(ArtifactNode.sort_order)
     )).scalars().all()
+    unresolved_counts = await _count_unresolved_comments(session, [artifact.id])
     return VisualArtifactDetail(
         id=artifact.id, org_id=artifact.org_id, project_id=artifact.project_id, title=artifact.title,
         story_id=artifact.story_id, epic_id=artifact.epic_id, doc_id=artifact.doc_id,
@@ -208,6 +245,7 @@ async def _load_detail(session: AsyncSession, artifact: VisualArtifact, version_
         version_number=version.version_number, version_summary=version.summary,
         version_source_comment_id=version.source_comment_id, canvas_bounds=version.canvas_bounds,
         nodes=[ArtifactNodeOut.model_validate(n) for n in node_rows],
+        unresolved_comment_count=unresolved_counts.get(artifact.id, 0),
     )
 
 
@@ -297,6 +335,11 @@ async def list_artifacts(
         q = q.where(VisualArtifact.doc_id == doc_id)
     q = q.order_by(VisualArtifact.created_at.desc())
     rows = (await session.execute(q)).scalars().all()
+    # story #2262 AC9②: 페이지 전체를 쿼리 1회로 해소(N+1 방지, #2619와 동형) — artifact마다
+    # 따로 COUNT 왕복하지 않는다.
+    unresolved_counts = await _count_unresolved_comments(session, [r.id for r in rows])
+    for r in rows:
+        r.unresolved_comment_count = unresolved_counts.get(r.id, 0)
     return _ok([VisualArtifactSummary.model_validate(r).model_dump(mode="json") for r in rows])
 
 

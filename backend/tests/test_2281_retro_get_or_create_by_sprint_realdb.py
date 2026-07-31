@@ -151,7 +151,8 @@ async def test_custom_title_used_on_create_realdb():
 
 
 @pytest.mark.anyio
-async def test_no_project_access_is_403_realdb():
+async def test_no_project_access_is_404_realdb():
+    """story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일."""
     from app.routers.retros import get_or_create_session_by_sprint
     from app.schemas.retro import GetOrCreateBySprint
 
@@ -165,7 +166,7 @@ async def test_no_project_access_is_403_realdb():
                 await get_or_create_session_by_sprint(
                     GetOrCreateBySprint(sprint_id=SPRINT), db=s, auth=_auth(USER_OUT), org_id=ORG,
                 )
-            assert ei.value.status_code == 403
+            assert ei.value.status_code == 404
     finally:
         await eng.dispose()
 

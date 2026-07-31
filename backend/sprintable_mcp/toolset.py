@@ -38,8 +38,11 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # (app/services/mcp_toolset.py 참고. "canonical_version"은 propose_canonical_version에
     # "artifact" substring이 없어 별도 키워드 필요, "spec_pin"은 핀 4종).
     ("canvas", ("artifact", "canonical_version", "spec_pin")),
+    # story #2311(2026-07-29): "delete_sprint" 제거 — E-SECURITY SEC-S8 확장으로 그 이름의
+    # 도구 자체가 이미 없다(원본 app/services/mcp_toolset.py에는 "제거했다"는 주석만 남아
+    # 있었는데 vendored 사본에만 실제 키워드로 잔존해 있었다 — 원본과 동기화).
     ("admin", ("give_reward", "emit_event", "trigger_ai", "activate_sprint",
-               "close_sprint", "delete_sprint", "create_sprint", "upsert_webhook", "delete_webhook")),
+               "close_sprint", "create_sprint", "upsert_webhook", "delete_webhook")),
 ]
 
 _CORE = "core"
@@ -70,6 +73,9 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # work_item_ids(다건 또는 0건 general)에 걸치는 cross-cutting 기록이라 add_evidence와
     # 동일 논리로 core 취급(백엔드 SSOT와 동기화, app/services/mcp_toolset.py 참고).
     "sprintable_add_judgment", "sprintable_list_judgments",
+    # story #2268(C-10, E-CONNECT — "세션 시작 컨텍스트"): get_session_context — my_dashboard/
+    # get_loop_context와 동형 core 취급(백엔드 SSOT와 동기화, app/services/mcp_toolset.py 참고).
+    "sprintable_get_session_context",
     # E-MCP-OPT(story ff6cb90d): list_projects/set_default_project — 키 자기 신원/스코프 조회·전환
     # 유틸(sprintable_my_dashboard·sprintable_ping과 동형: 특정 비즈니스 도메인 아닌 self-scope
     # 도구). set_default_project는 write지만 caller 자신의 기본 프로젝트 설정만 바꾸는 self-scope

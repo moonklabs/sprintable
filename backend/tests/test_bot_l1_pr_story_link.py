@@ -160,6 +160,119 @@ def test_normalize_repo_lowercase():
     assert normalize_repo("  MoonkLabs/Sprintable ") == "moonklabs/sprintable"
 
 
+# ── story_number SID(§2327 후속, 2026-07-30) — org-scope 조회 + 유일성 ─────────────
+# 실측 근거: _SID_RE(UUID 36자 전용)가 팀이 실제로 쓰는 두 PR 제목 형식(`[SID:2288]`·
+# `fix(#2288):`) 어느 쪽과도 안 맞았다 — 오늘 PR 제목 3건으로 직접 실행해 확認(story #2202).
+# story_number는 org 전체 유일이 아니므로(uq_stories_project_id_story_number) 여기서도 "정확히
+# 1건일 때만 확定"을 반드시 검증한다(0건·2건+는 오매치 방지를 위해 close 금지).
+
+@pytest.mark.anyio
+async def test_resolver_story_number_bracket_form_resolves_when_org_known():
+    """`[SID:2288]`(팀 실사용 형식1) + org 알 때 + 정확히 1건 → sid_exact_by_number·close 가능."""
+    story = _story(id=uuid.uuid4())
+    # explicit(None) → auto_match([]) → scoped_story_by_number([story]).
+    session = _session([_scalar(None), _scalars([]), _scalars([story])])
+    rl = await resolve_story_for_pr(session, ORG_A, "org/repo", 7, ["[SID:2288] 세 목록 상호참조 코멘트에 만료 조건 추가"])
+    assert rl.story_id == story.id and rl.source == "sid" and rl.confidence == "high"
+    assert rl.should_auto_close is True and rl.reason == "sid_exact_by_number"
+
+
+@pytest.mark.anyio
+async def test_resolver_story_number_fix_hash_form_resolves_when_org_known():
+    """`fix(#2328):`(팀 실사용 형식2) + org 알 때 + 정확히 1건 → 동일하게 해소."""
+    story = _story(id=uuid.uuid4())
+    session = _session([_scalar(None), _scalars([]), _scalars([story])])
+    rl = await resolve_story_for_pr(
+        session, ORG_A, "org/repo", 7, ["fix(#2328): 후보 머리글에 유나 규격의 em-dash 리터럴이 빠져 있었다"]
+    )
+    assert rl.story_id == story.id and rl.source == "sid" and rl.confidence == "high"
+    assert rl.should_auto_close is True
+
+
+@pytest.mark.anyio
+async def test_resolver_story_number_negative_no_marker_falls_through():
+    """숫자만 있고 마커 없으면(`fix: bump to 2288ms`) story_number 파싱 자체가 안 된다 — no_sid_tag로 귀결."""
+    session = _session([_scalar(None), _scalars([])])  # explicit(None) → auto_match([]) → 그 이상 안 감.
+    rl = await resolve_story_for_pr(session, ORG_A, "org/repo", 7, ["fix: bump timeout to 2288ms"])
+    assert rl.story_id is None and rl.reason == "no_sid_tag"
+
+
+@pytest.mark.anyio
+async def test_resolver_story_number_ambiguous_across_projects_no_resolve():
+    """같은 org 안 다른 project 에 같은 story_number 2건+ → 추측 안 함(close 금지·ambiguous 사유)."""
+    # explicit(None) → auto_match([]) → scoped_story_by_number(2건, len!=1 → None) → probe(2건, ambiguous 판정).
+    session = _session([_scalar(None), _scalars([]), _scalars([_story(), _story()]), _scalars([_story(), _story()])])
+    with patch.object(prl.logger, "warning") as warn:
+        rl = await resolve_story_for_pr(session, ORG_A, "org/repo", 7, ["[SID:1] title"])
+    assert rl.story_id is None and rl.should_auto_close is False
+    assert rl.reason == "story_number_ambiguous"
+    # PO 지적(2026-07-30) — 「조용히 안 붙는」것 방지: skip이 셀 수 있는 신호를 남겨야 한다.
+    warn.assert_called_once()
+    assert "story_number_ambiguous" in warn.call_args.args[0]
+
+
+@pytest.mark.anyio
+async def test_resolver_story_number_not_found_when_org_known():
+    """org 알고 번호 태그 있으나 0건 → story_number_not_found(추측 없이 skip)."""
+    session = _session([_scalar(None), _scalars([]), _scalars([]), _scalars([])])
+    with patch.object(prl.logger, "warning") as warn:
+        rl = await resolve_story_for_pr(session, ORG_A, "org/repo", 7, ["[SID:99999]"])
+    assert rl.story_id is None and rl.reason == "story_number_not_found"
+    warn.assert_not_called()  # not_found(0건)는 ambiguous가 아니다 — 경고 과다발생 방지.
+
+
+@pytest.mark.anyio
+async def test_resolver_story_number_requires_org_scope_when_org_none():
+    """legacy(org 미상) + 번호 태그 → «전역 조회로 오매치」를 막기 위해 DB 호출 자체를 안 함.
+
+    org_id None이면 explicit/auto_match/(uuid) global 조회 전부 미도달이고 number 축도 org
+    가드에 걸려 조회 자체가 없다 — execute 0회를 `_session([])`(빈 side_effect)로 직접 증명한다."""
+    session = _session([])
+    rl = await resolve_story_for_pr(session, None, "org/repo", 7, ["[SID:2288] title"])
+    assert rl.story_id is None and rl.reason == "story_number_requires_org_scope"
+    session.execute.assert_not_awaited()
+
+
+# ── legacy org resolve(repo owner→account_login, story #2327 후속) ──────────────
+@pytest.mark.anyio
+async def test_resolve_legacy_org_by_repo_owner_exact_one_match():
+    from app.routers.verdict_capture import _resolve_legacy_org_by_repo_owner
+
+    session = _session([_scalars([ORG_A])])
+    org_id, reason = await _resolve_legacy_org_by_repo_owner(session, "moonklabs/sprintable")
+    assert org_id == ORG_A and reason == "org_resolved_via_repo_owner"
+
+
+@pytest.mark.anyio
+async def test_resolve_legacy_org_by_repo_owner_ambiguous_two_matches():
+    """2건+ → 「첫 것을 고른다」 금지 — 거부(None)."""
+    from app.routers.verdict_capture import _resolve_legacy_org_by_repo_owner
+
+    session = _session([_scalars([ORG_A, ORG_B])])
+    org_id, reason = await _resolve_legacy_org_by_repo_owner(session, "shared/repo")
+    assert org_id is None and reason == "repo_owner_ambiguous"
+
+
+@pytest.mark.anyio
+async def test_resolve_legacy_org_by_repo_owner_zero_matches():
+    from app.routers.verdict_capture import _resolve_legacy_org_by_repo_owner
+
+    session = _session([_scalars([])])
+    org_id, reason = await _resolve_legacy_org_by_repo_owner(session, "unknown-owner/repo")
+    assert org_id is None and reason == "repo_owner_unknown"
+
+
+@pytest.mark.anyio
+async def test_resolve_legacy_org_by_repo_owner_malformed_repo_no_db_call():
+    """`owner/repo` 형식 아니면 추측 없이 즉시 unknown — DB 조회 자체를 안 함."""
+    from app.routers.verdict_capture import _resolve_legacy_org_by_repo_owner
+
+    session = _session([])
+    org_id, reason = await _resolve_legacy_org_by_repo_owner(session, "no-slash-here")
+    assert org_id is None and reason == "repo_owner_unknown"
+    session.execute.assert_not_awaited()
+
+
 # ── explicit-link endpoint (anti-IDOR) ───────────────────────────────────────────
 def _inst(account_login="org"):
     return MagicMock(account_login=account_login, suspended_at=None)
@@ -279,28 +392,204 @@ async def _merge_webhook(*, should_close: bool):
         async with AsyncClient(transport=ASGITransport(app=fastapi_app), base_url="http://test") as c:
             with patch.object(vmod.settings, "github_webhook_secret", _WH_SECRET), \
                  patch.object(vmod.settings, "github_app_webhook_secret", ""), \
+                 patch.object(vmod, "_resolve_legacy_org_by_repo_owner",
+                              new=AsyncMock(return_value=(None, "repo_owner_unknown"))), \
                  patch.object(vmod, "resolve_story_for_pr", new=AsyncMock(return_value=rl)), \
                  patch.object(vmod, "capture_pr_ci_verdict",
                               new=AsyncMock(return_value={"recorded": ["pr"], "skipped_reason": None})), \
-                 patch.object(vmod, "advance_story_to_done", new=AsyncMock(return_value=True)) as adv:
+                 patch.object(vmod.logger, "info") as info_log:
                 resp = await c.post("/api/v2/internal/verdict/github-webhook", content=body, headers=headers)
-        return resp, adv, session
+        return resp, session, info_log
     finally:
         fastapi_app.dependency_overrides.clear()
 
 
 @pytest.mark.anyio
-async def test_close_on_merge_confident_advances_story():
-    """merge + confident link(should_auto_close) → advance_story_to_done 호출(done)."""
-    resp, adv, session = await _merge_webhook(should_close=True)
+async def test_close_on_merge_confident_reports_would_close_but_does_not_mutate():
+    """story #2327 PO 판정(2026-07-30, 「머지≠done」규율) — merge + confident link여도 close-on-merge
+
+    정지됐다: session.get(Story)로 실제 조회·mutation을 하지 않고(story.status 안 건드림), 응답의
+    auto_close.closed=False·would_close=True로만 «벌어졌을 일」을 관측 가능하게 남긴다."""
+    resp, session, info_log = await _merge_webhook(should_close=True)
     assert resp.status_code == 200
-    adv.assert_awaited_once()  # 단일 헬퍼로 done 진행.
-    assert "auto_close" in resp.text
+    body = resp.json()["data"]
+    assert body["auto_close"] == {
+        "closed": False, "would_close": True, "source": "sid", "confidence": "high",
+        "note": "story #2327 PO 판정 2026-07-30: close-on-merge 정지 — done은 사람 확認 後",
+    }
+    session.get.assert_not_awaited()  # story mutation 경로 자체에 안 감(no-op).
+    # PO 지적(2026-07-30) — 웹훅 HTTP 응답은 아무도 안 읽는다. would_close를 로그로도 셀 수
+    # 있어야 #2339(자동 done on/off 설정) 크기를 잴 수 있다.
+    # story #2327 후속(legacy org repo-owner resolve)이 먼저 1회 로그 → suppressed 로그가 2번째.
+    assert info_log.call_count == 2
+    assert "legacy org resolve" in info_log.call_args_list[0].args[0]
+    assert "auto_close suppressed" in info_log.call_args_list[1].args[0]
+
+
+# ── _process_webhook_event: legacy org resolve 배선(story #2327 후속) ───────────
+def _delivery():
+    return MagicMock(org_id=None)
+
+
+@pytest.mark.anyio
+async def test_process_webhook_event_legacy_repo_owner_org_feeds_resolver():
+    """repo owner로 org가 풀리면 그 org_id가 resolve_story_for_pr에 그대로 전달된다(legacy도
+    app과 동등하게 org-scoped 해소를 탈 수 있게 되는 것 — 이 배선이 핵심 변경점)."""
+    from app.routers import verdict_capture as vmod
+
+    session = AsyncMock()
+    delivery = _delivery()
+    rl = ResolvedLink(STORY_ID, ORG_A, "sid", "high", True, "sid_exact_by_number")
+    payload = {"action": "closed", "repository": {"full_name": "moonklabs/sprintable"},
+               "pull_request": {"number": 9, "merged": True, "title": "fix(#2288): x"}}
+    with patch.object(vmod, "_resolve_legacy_org_by_repo_owner",
+                       new=AsyncMock(return_value=(ORG_A, "org_resolved_via_repo_owner"))), \
+         patch.object(vmod, "resolve_story_for_pr", new=AsyncMock(return_value=rl)) as resolver, \
+         patch.object(vmod, "capture_pr_ci_verdict",
+                       new=AsyncMock(return_value={"recorded": ["pr"]})), \
+         patch.object(vmod, "merge_link_evidence", new=AsyncMock()), \
+         patch.object(vmod.logger, "info"):
+        await vmod._process_webhook_event(session, "legacy", "pull_request", payload, None, delivery)
+    resolver.assert_awaited_once()
+    called_org_id = resolver.call_args.args[1]
+    assert called_org_id == ORG_A  # None이 아니라 repo-owner로 풀린 org가 실제로 전달됨.
+
+
+@pytest.mark.anyio
+async def test_process_webhook_event_legacy_repo_owner_ambiguous_overrides_skipped_reason():
+    """org 해소가 ambiguous(2건+)로 실패 + resolver도 그것 때문에(story_number_requires_org_scope)
+    skip → 최종 skipped_reason이 더 구체적인 repo_owner_ambiguous로 대체된다(세는 자리 확보)."""
+    from app.routers import verdict_capture as vmod
+
+    session = AsyncMock()
+    delivery = _delivery()
+    rl = ResolvedLink(None, None, None, None, False, "story_number_requires_org_scope")
+    payload = {"action": "closed", "repository": {"full_name": "shared/repo"},
+               "pull_request": {"number": 9, "merged": True, "title": "fix(#2288): x"}}
+    with patch.object(vmod, "_resolve_legacy_org_by_repo_owner",
+                       new=AsyncMock(return_value=(None, "repo_owner_ambiguous"))), \
+         patch.object(vmod, "resolve_story_for_pr", new=AsyncMock(return_value=rl)), \
+         patch.object(vmod.logger, "info"):
+        result, status = await vmod._process_webhook_event(
+            session, "legacy", "pull_request", payload, None, delivery
+        )
+    assert status == "ignored"
+    assert result["skipped_reason"] == "repo_owner_ambiguous"
+
+
+@pytest.mark.anyio
+async def test_process_webhook_event_legacy_repo_owner_unknown_unrelated_reason_not_overridden():
+    """org 해소는 실패(unknown)했지만 resolver의 실제 skip 사유가 그것과 무관(no_sid_tag)하면
+    그대로 둔다 — 관련 없는 skip까지 repo_owner 사유로 덮어써 원인을 흐리지 않는다."""
+    from app.routers import verdict_capture as vmod
+
+    session = AsyncMock()
+    delivery = _delivery()
+    rl = ResolvedLink(None, None, None, None, False, "no_sid_tag")
+    payload = {"action": "closed", "repository": {"full_name": "unknown/repo"},
+               "pull_request": {"number": 9, "merged": True, "title": "no tag here"}}
+    with patch.object(vmod, "_resolve_legacy_org_by_repo_owner",
+                       new=AsyncMock(return_value=(None, "repo_owner_unknown"))), \
+         patch.object(vmod, "resolve_story_for_pr", new=AsyncMock(return_value=rl)), \
+         patch.object(vmod.logger, "info"):
+        result, status = await vmod._process_webhook_event(
+            session, "legacy", "pull_request", payload, None, delivery
+        )
+    assert status == "ignored"
+    assert result["skipped_reason"] == "no_sid_tag"
 
 
 @pytest.mark.anyio
 async def test_close_on_merge_skips_when_not_confident():
-    """merge 라도 should_auto_close=False(med/low/text) → advance 미호출(오매치 done 0)."""
-    resp, adv, session = await _merge_webhook(should_close=False)
+    """merge 라도 should_auto_close=False(med/low/text) → auto_close 필드 자체가 안 실림."""
+    resp, session, info_log = await _merge_webhook(should_close=False)
     assert resp.status_code == 200
-    adv.assert_not_awaited()
+    assert "auto_close" not in resp.json()["data"]
+    session.get.assert_not_awaited()
+    # not-confident 는 suppressed 로그 대상이 아니다(로그 과다발생 방지) — legacy org resolve 로그만 1회.
+    info_log.assert_called_once()
+    assert "legacy org resolve" in info_log.call_args.args[0]
+
+
+# ── merge_link_evidence 자체(idempotent upsert, story #2327 후속 PR#2685 시험대 갭) ─────
+@pytest.mark.anyio
+async def test_merge_link_evidence_creates_when_no_existing_row():
+    """행이 없으면 patch만으로 신규 생성(link_source/confidence 그대로 실림)."""
+    from app.services.pr_story_link import merge_link_evidence
+
+    session = _session([_scalar(None)])  # existing 조회 → 없음.
+    link = await merge_link_evidence(
+        session, ORG_A, STORY_ID, "org/repo", 9,
+        link_source="sid", confidence="high", patch={"webhook_merge": {"recorded_at": "t1"}},
+    )
+    session.add.assert_called_once()
+    added = session.add.call_args.args[0]
+    assert added.link_source == "sid" and added.confidence == "high"
+    assert added.evidence == {"webhook_merge": {"recorded_at": "t1"}}
+
+
+@pytest.mark.anyio
+async def test_merge_link_evidence_idempotent_updates_existing_row_no_duplicate():
+    """행이 이미 있으면(예: synchronize 뒤 merge) 새로 안 만들고 evidence만 dict-merge —
+    두 번 불러도 행 하나(멱등, story #2327 PO 조건③)."""
+    from app.services.pr_story_link import merge_link_evidence
+
+    existing = MagicMock(evidence={"old_key": "kept"}, deleted_at=None, link_source="sid", confidence="high")
+    session = _session([_scalar(existing)])
+    result = await merge_link_evidence(
+        session, ORG_A, STORY_ID, "org/repo", 9,
+        link_source="sid", confidence="high", patch={"webhook_merge": {"recorded_at": "t2"}},
+    )
+    session.add.assert_not_called()  # 신규 생성 0 — 같은 행 재사용.
+    assert result is existing
+    assert result.evidence == {"old_key": "kept", "webhook_merge": {"recorded_at": "t2"}}  # dict-merge 보존.
+
+
+# ── _process_webhook_event: merge 시 PullRequestStoryLink 배선(story #2327 후속, PR#2685) ──
+@pytest.mark.anyio
+async def test_process_webhook_event_merge_writes_link_with_sid_label():
+    """merge + confident(sid) 링크 → merge_link_evidence가 link_source='sid'(사람이 명시한
+    'explicit' 아님)로 호출된다 — 오늘 소급 205건과 같은 라벨 규율(PO 조건①)."""
+    from app.routers import verdict_capture as vmod
+
+    session = AsyncMock()
+    delivery = _delivery()
+    rl = ResolvedLink(STORY_ID, ORG_A, "sid", "high", True, "sid_exact_by_number")
+    payload = {"action": "closed", "repository": {"full_name": "moonklabs/sprintable"},
+               "pull_request": {"number": 2685, "merged": True, "title": "[SID:2224] x"}}
+    with patch.object(vmod, "_resolve_legacy_org_by_repo_owner",
+                       new=AsyncMock(return_value=(ORG_A, "org_resolved_via_repo_owner"))), \
+         patch.object(vmod, "resolve_story_for_pr", new=AsyncMock(return_value=rl)), \
+         patch.object(vmod, "capture_pr_ci_verdict",
+                       new=AsyncMock(return_value={"recorded": ["pr", "ci"]})), \
+         patch.object(vmod, "merge_link_evidence", new=AsyncMock()) as link_write, \
+         patch.object(vmod.logger, "info"):
+        await vmod._process_webhook_event(session, "legacy", "pull_request", payload, None, delivery)
+    link_write.assert_awaited_once()
+    kwargs = link_write.call_args.kwargs
+    assert kwargs["link_source"] == "sid" and kwargs["link_source"] != "explicit"
+    assert kwargs["confidence"] == "high"
+    assert link_write.call_args.args[1:5] == (ORG_A, STORY_ID, "moonklabs/sprintable", 2685)
+
+
+@pytest.mark.anyio
+async def test_process_webhook_event_ci_only_does_not_write_link():
+    """merge가 아닌 CI-only 이벤트(merged=False)는 링크를 쓰지 않는다 — merge 분기로만
+    명시 스코프(PO 승인 범위, 「merge 분기」)."""
+    from app.routers import verdict_capture as vmod
+
+    session = AsyncMock()
+    delivery = _delivery()
+    rl = ResolvedLink(STORY_ID, ORG_A, "sid", "high", True, "sid_exact_by_number")
+    payload = {"repository": {"full_name": "moonklabs/sprintable"},
+               "workflow_run": {"conclusion": "failure", "head_sha": "sha1",
+                                "head_branch": "feat-[SID:2224]", "pull_requests": [{"number": 2685}]}}
+    with patch.object(vmod, "_resolve_legacy_org_by_repo_owner",
+                       new=AsyncMock(return_value=(ORG_A, "org_resolved_via_repo_owner"))), \
+         patch.object(vmod, "resolve_story_for_pr", new=AsyncMock(return_value=rl)), \
+         patch.object(vmod, "capture_pr_ci_verdict",
+                       new=AsyncMock(return_value={"recorded": ["ci"]})), \
+         patch.object(vmod, "merge_link_evidence", new=AsyncMock()) as link_write, \
+         patch.object(vmod.logger, "info"):
+        await vmod._process_webhook_event(session, "legacy", "workflow_run", payload, None, delivery)
+    link_write.assert_not_awaited()

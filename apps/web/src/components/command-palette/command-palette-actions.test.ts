@@ -17,19 +17,20 @@ describe('buildActionCommands — v1 inventory (route-first, no-fiction)', () =>
   });
 
   it('with a story context, the delegate command exists, ranked first, targeting the real story route', () => {
-    // story a539c649 S3d: targetRoute는 이제 호출부가 넘긴 boardHref를 그대로 쓴다(하드코딩
-    // '/board' 아님) — path 위계(ws/proj 해소됨) 케이스로 검증.
-    const items = buildActionCommands(t, { storyId: 's1', storyTitle: '웰컴 이메일 시안', boardHref: '/moonklabs/sprintable/board' });
+    // story #2224(선생님 정정 2026-07-30): targetRoute는 이제 호출부가 넘긴 boardHref를
+    // 그대로 쓴다(하드코딩 아님) — /board 삭제 후 boardHref 자체가 이미 `?view=list`를
+    // 포함하므로 story id는 `&`로 이어붙인다(path 위계 ws/proj 해소됨 케이스로 검증).
+    const items = buildActionCommands(t, { storyId: 's1', storyTitle: '웰컴 이메일 시안', boardHref: '/moonklabs/sprintable/flow?view=list' });
     expect(items[0]).toEqual(expect.objectContaining({
-      id: 'action-delegate-story', targetRoute: '/moonklabs/sprintable/board?story=s1', danger: false,
+      id: 'action-delegate-story', targetRoute: '/moonklabs/sprintable/flow?view=list&story=s1', danger: false,
     }));
     expect(items[0]!.label).toContain('웰컴 이메일 시안');
     expect(items[0]!.impact).toContain('웰컴 이메일 시안');
   });
 
-  it('falls back to bare /board when ws/proj slug not yet resolved (미들웨어 legacy-redirect 안전망 대상)', () => {
-    const items = buildActionCommands(t, { storyId: 's1', storyTitle: 'x', boardHref: '/board' });
-    expect(items[0]!.targetRoute).toBe('/board?story=s1');
+  it('falls back to bare /flow?view=list when ws/proj slug not yet resolved (proxy.ts MIGRATED_RESOURCES 안전망 대상)', () => {
+    const items = buildActionCommands(t, { storyId: 's1', storyTitle: 'x', boardHref: '/flow?view=list' });
+    expect(items[0]!.targetRoute).toBe('/flow?view=list&story=s1');
   });
 
   it('gate decision routes to the gate inbox and is flagged as a danger (amber) command', () => {
@@ -47,7 +48,7 @@ describe('buildActionCommands — v1 inventory (route-first, no-fiction)', () =>
   });
 
   it('never fabricates the 3 unwired commands (stop run / re-collect evidence / STEER priority) — dead-path guard', () => {
-    const items = buildActionCommands(t, { storyId: 's1', storyTitle: 'x', boardHref: '/board' });
+    const items = buildActionCommands(t, { storyId: 's1', storyTitle: 'x', boardHref: '/flow?view=list' });
     const ids = items.map((i) => i.id);
     expect(ids).not.toContain('action-stop-run');
     expect(ids).not.toContain('action-recollect-evidence');
@@ -55,7 +56,7 @@ describe('buildActionCommands — v1 inventory (route-first, no-fiction)', () =>
   });
 
   it('renders in English when given the en translator (ko/en parity)', () => {
-    const items = buildActionCommands(tEn, { storyId: 's1', storyTitle: 'Welcome email draft', boardHref: '/board' });
+    const items = buildActionCommands(tEn, { storyId: 's1', storyTitle: 'Welcome email draft', boardHref: '/flow?view=list' });
     expect(items[0]!.label).toContain('Welcome email draft');
     expect(items.find((i) => i.id === 'action-recruit-agent')!.label).not.toBe('');
   });

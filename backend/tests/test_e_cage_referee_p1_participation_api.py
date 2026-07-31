@@ -32,6 +32,11 @@ def _mock_story_obj(assignee_id=None):
     # 검증 실패하므로 명시 세팅.
     s.human_owner_member_id = None
     s.agent_delegate_ids = []
+    # story #2315 AC1: references(transient, dict|None) — 위와 동일 이유로 명시 세팅.
+    s.references = None
+    # story #2328(C-11 ㉡층): 위와 동일 이유로 명시 세팅.
+    s.is_reference_candidate = False
+    s.matched_snippet = None
     s.meeting_id = None
     s.title = "Story 1"
     s.status = "backlog"
@@ -136,9 +141,12 @@ async def test_create_story_without_assignee_no_participation():
     try:
         # story 9ac9b80f: StoryRepository.create()가 이제 BaseRepository.create() 前에
         # allocate_story_number()(실 DB 쿼리)를 먼저 호출한다 — 서브클래스 레벨을 patch해야
-        # mock 세션에 그 호출까지 안 부딪힌다(test_stories.py와 동형 수정).
+        # mock 세션에 그 호출까지 안 부딪힌다(test_stories.py와 동형 수정). story #2330
+        # (2026-07-30): create_story가 이제 _reconcile_story_references_and_candidates도
+        # 부른다 — 이 테스트는 그 호출도 no-op patch(행동검증은 별도 실PG 테스트).
         with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create, \
-             patch("app.routers.stories._upsert_assignee_participation", new_callable=AsyncMock) as mock_upsert:
+             patch("app.routers.stories._upsert_assignee_participation", new_callable=AsyncMock) as mock_upsert, \
+             patch("app.routers.stories._reconcile_story_references_and_candidates", new_callable=AsyncMock):
             mock_create.return_value = story
             async with client as c:
                 resp = await c.post("/api/v2/stories", json={
@@ -259,7 +267,8 @@ async def test_create_story_without_assignee_still_201():
 
     client, app = await _make_client(mock_session)
     try:
-        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create:
+        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create, \
+             patch("app.routers.stories._reconcile_story_references_and_candidates", new_callable=AsyncMock):
             mock_create.return_value = story
             async with client as c:
                 resp = await c.post("/api/v2/stories", json={

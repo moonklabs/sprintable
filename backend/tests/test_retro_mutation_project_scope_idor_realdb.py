@@ -115,14 +115,14 @@ async def test_update_action_cross_project_forbidden_same_project_ok():
             action_b = await action_repo.create(session_id=ids["session_b"], title="hack target")
             await s.commit()
 
-        # cross-project(PROJ_B·USER 무접근) → 403
+        # cross-project(PROJ_B·USER 무접근) → 404(story #2342, 2026-07-30: 403이 아니다)
         async with Session() as s:
             with pytest.raises(HTTPException) as ei:
                 await update_action(
                     id=ids["session_b"], action_id=action_b.id, body=UpdateAction(status="done"),
                     db=s, auth=_auth(), repo=RetroSessionRepository(s, ORG),
                 )
-            assert ei.value.status_code == 403
+            assert ei.value.status_code == 404
 
         # same-project(PROJ_A·grant) → 통과
         async with Session() as s:
@@ -176,7 +176,7 @@ async def test_get_session_cross_project_forbidden_same_project_ok():
                 await get_session(
                     id=ids["session_b"], db=s, auth=_auth(), repo=RetroSessionRepository(s, ORG)
                 )
-            assert ei.value.status_code == 403
+            assert ei.value.status_code == 404  # story #2342(2026-07-30): 403이 아니다
 
         async with Session() as s:
             out = await get_session(
@@ -205,7 +205,7 @@ async def test_create_session_untrusted_project_id_forbidden():
                     body=CreateSession(project_id=PROJ_B, org_id=ORG, title="무단 생성"),
                     db=s, auth=_auth(), org_id=ORG,
                 )
-            assert ei.value.status_code == 403
+            assert ei.value.status_code == 404  # story #2342(2026-07-30): 403이 아니다
 
         async with Session() as s:
             out = await create_session(
@@ -222,7 +222,7 @@ async def test_create_session_untrusted_project_id_forbidden():
 @pytest.mark.anyio
 async def test_agent_without_grant_cross_project_forbidden():
     """agent 키(grant 0)도 cross-project read/mutate 차단 — has_project_access agent 분기가
-    grant 없으면 False → 403(fail-open 아님)."""
+    grant 없으면 False → 404(fail-open 아님). story #2342(2026-07-30): 403이 아니다."""
     from app.repositories.retro import RetroSessionRepository
     from app.routers.retros import get_session
 
@@ -236,6 +236,6 @@ async def test_agent_without_grant_cross_project_forbidden():
                 await get_session(
                     id=ids["session_a1"], db=s, auth=_agent_auth(), repo=RetroSessionRepository(s, ORG)
                 )
-            assert ei.value.status_code == 403
+            assert ei.value.status_code == 404  # story #2342(2026-07-30): 403이 아니다
     finally:
         await eng.dispose()

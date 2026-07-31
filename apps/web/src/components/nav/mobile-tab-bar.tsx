@@ -16,9 +16,20 @@ import { MOBILE_BREAKPOINT } from '@/hooks/use-mobile';
 // route 매핑(오르테가군 확定, 2026-07-17): "지금"·"결재함" 탭은 셸-우선 원칙에 따라 최종 콘텐츠
 // (지금 홈=S8/#1964, 결재함 통합큐=S4/#1960) 없이 기존 라우트를 그대로 가리킨다 — 후속 스토리가
 // 그 자리에서 콘텐츠만 원자적으로 교체한다(빅뱅 전환 금지).
-const TABS = [
-  { key: 'now', href: '/glance', icon: CircleDot, labelKey: 'now' as const },
-  { key: 'approvals', href: '/inbox', icon: Inbox, labelKey: 'approvals' as const },
+// export: story #2279 회귀가드(href가 조용히 되돌아가지 않게 직접 단위테스트).
+// story #2224(선생님 정정 2026-07-30) — "지금" 탭의 href를 `/glance`에서 `/flow`로 갱신했다.
+// `/glance` 라우트 자체가 삭제됐고(PR#2698), bare `/glance`는 proxy.ts 안전망을 거쳐 결국
+// `/flow`로 착지하지만 — "은퇴한 주소가 진입점에 살아 있다"는 지적(선생님)에 따라 최종
+// 목적지를 직접 가리킨다(한 홉 절약 + 이름-목적지 일치, #2224 §④ "사람이 누르는 진입점"
+// 표면). `/flow`는 아직 모바일 전용 화면(#2225)이 없어 데스크톱과 같은 레이아웃을 그대로
+// 받는다 — 이번 판에서는 "폰에서 깨지지 않게"까지만 손대고, 본격 모바일 재설계는 #2225.
+export const TABS = [
+  { key: 'now', href: '/flow', icon: CircleDot, labelKey: 'now' as const },
+  // story #2279(PO 판정, 2026-07-29): 라벨("결재")·배지(게이트 대기 수)와 착지가 어긋나
+  // 있던 것 — 이름=가는 곳=세는 것 셋을 한 줄로 맞춘다. #2164가 세운 "진입점 라벨은 착지
+  // 탭과 일치" 규칙은 그대로 두고 착지 쪽을 게이트 탭으로 옮긴다(라벨을 규칙에 맞춘다).
+  // "알림" 탭은 안 없어진다 — /inbox 페이지 내부 탭 스위처로 한 번 더 탭하면 그대로 있다.
+  { key: 'approvals', href: '/inbox?tab=gates', icon: Inbox, labelKey: 'approvals' as const },
   { key: 'chat', href: '/chats', icon: MessageSquare, labelKey: 'chat' as const },
   // "전체"는 시안상 정식 목록화 대상(S9/#1965) — 기존 모바일 GNB Sheet(햄버거) 재사용은
   // blueprint §3.2 "모바일 사이드바 폐기" 방향과 충돌해 하지 않는다(오르테가군 확定). 이 스토리
@@ -33,8 +44,20 @@ const TABS = [
 // 상세→parentTab 매핑(useSyntheticParentTabHistory 호출부와 동일 SSOT)을 여기서도 재사용해
 // "이 경로는 소속상 어느 탭인가"를 판정하는 단일 함수로 교체한다.
 //
+// story #2224(선생님 정정 2026-07-30) — `/flow`는 다른 ws/proj-scoped 리소스(board·goals·
+// loops 등, 아래 ④ 참고)와 달리 "지금" 탭의 목적지 그 자체다 — `/{ws}/{proj}/flow`(3번째
+// 세그먼트)뿐 아니라 TABS의 `now.href` 자체가 «bare» `/flow`라 그 형태도 인식해야 한다
+// (선생님 실측 2026-07-30 — 탭을 누른 그 순간의 pathname은 bare, proxy.ts 301이 실 slug로
+// 착지시키기 «전»의 찰나에 하이라이트가 꺼졌다). `/glance`(옛 라우트)의 bare 인식과 대칭.
+function isFlowPath(pathname: string): boolean {
+  if (pathname === '/flow' || pathname.startsWith('/flow/')) return true;
+  const segments = pathname.split('/').filter(Boolean);
+  return segments[2] === 'flow';
+}
+
 // 판정 순서(구체적인 것부터, 마지막이 fallback):
-//  ① /glance — "지금" 탭 자기 자신(+하위 경로 있으면 포함).
+//  ① `/{ws}/{proj}/flow`(+하위) 또는 `/glance`(+하위, 옛 라우트 — 리다이렉트 경유로 도착할
+//     수 있어 계속 인식) — "지금" 탭 자기 자신.
 //  ② /inbox(정확일치) 또는 /gates/* — "결재함". gate 상세는 #1951에서 parentTab=/inbox로
 //     이미 확定(gates/[id]/page.tsx의 useSyntheticParentTabHistory('/inbox') 그대로).
 //  ③ /chats(+하위) — "채팅".
@@ -43,7 +66,7 @@ const TABS = [
 //     밖의 프로젝트/org 영역이라 more 페이지 자체가 이들의 진입점(ITEMS 목록, #1958 확定)
 //     — "전체"가 이 전부의 소속 탭이라는 게 이미 그 스텁 페이지 설계로 확定돼 있다.
 export function getActiveTabKey(pathname: string): (typeof TABS)[number]['key'] {
-  if (pathname === '/glance' || pathname.startsWith('/glance/')) return 'now';
+  if (isFlowPath(pathname) || pathname === '/glance' || pathname.startsWith('/glance/')) return 'now';
   if (pathname === '/inbox' || pathname.startsWith('/gates/')) return 'approvals';
   if (pathname === '/chats' || pathname.startsWith('/chats/')) return 'chat';
   return 'more';

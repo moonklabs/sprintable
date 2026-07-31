@@ -1,14 +1,12 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.models.pm import Story, Task
-from app.models.team import TeamMember
-from app.schemas.dashboard import DashboardResponse, StoryItem, TaskItem
+from app.schemas.dashboard import DashboardResponse
+from app.services.dashboard_core import MemberNotFoundError, get_my_work
 
 router = APIRouter(prefix="/api/v2/dashboard", tags=["dashboard", "Work"])
 
@@ -28,39 +26,15 @@ async def get_dashboard(
     자체가 생략돼 더 심했다. member가 caller org 소속인지 항상 검증(project_id 명시 여부 무관).
     assignee 기준 열람 자체는 stories/tasks 목록 필터와 동일한 프로젝트 협업 시야라 자기 자신으로
     제한하지 않는다(PO 확인).
+
+    ⛔story #2268: 쿼리 본체는 `dashboard_core.get_my_work`로 뽑았다(session_context_core.py가
+    같은 함수를 재사용 — 재구현 0). 이 라우터는 그 함수를 부르고 404로 번역하는 얇은 래퍼다.
     """
-    member_check = await session.execute(
-        select(TeamMember.project_id).where(
-            TeamMember.id == member_id, TeamMember.org_id == org_id, TeamMember.is_active.is_(True)
-        ).limit(1)
-    )
-    member_project_id = member_check.scalar_one_or_none()
-    if member_project_id is None:
-        raise HTTPException(status_code=404, detail="Member not found or inactive")
-    if project_id is None:
-        project_id = member_project_id
-
-    stories_r = await session.execute(
-        select(Story.id, Story.title, Story.status, Story.story_points).where(
-            Story.project_id == project_id,
-            Story.assignee_id == member_id,
-            Story.status != "done",
-            Story.deleted_at.is_(None),
+    try:
+        my_stories, my_tasks = await get_my_work(
+            session, org_id=org_id, member_id=member_id, project_id=project_id,
         )
-    )
-    story_rows = stories_r.all()
+    except MemberNotFoundError as e:
+        raise HTTPException(status_code=404, detail="Member not found or inactive") from e
 
-    tasks_r = await session.execute(
-        select(Task.id, Task.title, Task.status).where(
-            Task.assignee_id == member_id,
-            Task.status != "done",
-            Task.deleted_at.is_(None),
-        )
-    )
-    task_rows = tasks_r.all()
-
-    return DashboardResponse(
-        my_stories=[StoryItem(id=r[0], title=r[1], status=r[2], story_points=r[3]) for r in story_rows],
-        my_tasks=[TaskItem(id=r[0], title=r[1], status=r[2]) for r in task_rows],
-        open_memos=[],
-    )
+    return DashboardResponse(my_stories=my_stories, my_tasks=my_tasks, open_memos=[])

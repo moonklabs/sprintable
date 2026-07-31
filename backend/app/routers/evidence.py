@@ -3,7 +3,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, computed_field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,7 @@ from app.models.evidence import _CLIENT_CREATABLE_TYPES, Evidence
 from app.models.pm import Story, Task
 from app.services.member_resolver import resolve_member
 from app.services.project_auth import has_project_access
+from app.services.reference_registry import _project_id_of_evidence
 
 router = APIRouter(prefix="/api/v2/evidence", tags=["evidence", "Trust"])
 
@@ -58,8 +59,21 @@ class EvidenceResponse(BaseModel):
     note: str | None
     created_by: uuid.UUID
     created_at: Any
+    resolved_story_id: uuid.UUID | None = None
+    """story #2314 AC3② — embed 칩이 evidence의 «담긴 곳»으로 한 번에 건너뛸 자리.
+    work_item_type='story'면 work_item_id 그 자체, 'task'면 그 task의 부모 story_id(2단
+    조인) — FE가 evidence→task→story로 왕복 fetch하지 않도록 GET /{id} 응답에 얹는다."""
 
     model_config = {"from_attributes": True}
+
+    # story #2314 AC5 — MCP mention 경로(_resolve_mention_content)가 title-미지정 mention을
+    # 이 GET 응답의 reference_token으로 조립한다(DocResponse/StoryResponse와 동일 SSOT
+    # builder). evidence엔 title이 없어 ref를 대신 쓴다 — "[pr] https://..." 형태.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def reference_token(self) -> str | None:
+        from app.services.reference_token import build_reference_token
+        return build_reference_token("evidence", self.id, f"[{self.type}] {self.ref}")
 
 
 async def _assert_work_item_access(
@@ -141,6 +155,41 @@ async def list_evidence(
         ).order_by(Evidence.created_at.asc())
     )
     return list(result.scalars().all())
+
+
+@router.get("/{id}", response_model=EvidenceResponse)
+async def get_evidence(
+    id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
+) -> EvidenceResponse:
+    """story #2314 AC1 — 형제 단건 라우트(get_story 등)와 같은 관례. AC2: 못 보는 evidence는
+    「있다는 사실」도 새지 않는다 — org 안·project 밖도 404로 통일한다(#2322가 story 헬퍼에서
+    막 세운 그 방향과 동형 — evidence.py는 #2322의 4개 헬퍼 목록엔 없지만, 신규 라우트는
+    처음부터 그 방향을 따른다. 존재하지만 못 봄=404, 진짜 없음=404, 구분해 흘리지 않는다)."""
+    evidence = (await session.execute(
+        select(Evidence).where(Evidence.id == id, Evidence.org_id == org_id)
+    )).scalar_one_or_none()
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+
+    caller = await resolve_member(auth, org_id, session)
+    project_id = await _project_id_of_evidence(session, org_id, id)
+    if project_id is None or not await has_project_access(session, caller.id, project_id, org_id):
+        raise HTTPException(status_code=404, detail="Evidence not found")
+
+    resolved_story_id: uuid.UUID | None = None
+    if evidence.work_item_type == "story":
+        resolved_story_id = evidence.work_item_id
+    elif evidence.work_item_type == "task":
+        resolved_story_id = (await session.execute(
+            select(Task.story_id).where(Task.id == evidence.work_item_id, Task.org_id == org_id)
+        )).scalar_one_or_none()
+
+    return EvidenceResponse.model_validate(evidence, from_attributes=True).model_copy(
+        update={"resolved_story_id": resolved_story_id}
+    )
 
 
 @router.delete("/{id}", status_code=204)

@@ -17,8 +17,13 @@ export interface AttentionQueueItem {
   actionLabel: string;
   actionTone: 'primary' | 'neutral' | 'ready';
   href: string;
-  /** 정렬용 epoch ms. BE `/glance/attention`(P0-04)이 신호에 타임스탬프를 안 실어(정직 미가용)
-   * 전부 0 — 동급 티어 내 안정적 후순위(지어낸 최신순 아님). */
+  /** story #2249 — 「그 상태에 들어간 시각」epoch ms(모르면 null. blocked는 BE가 항상 값을
+   * 안 실어 null — glance.py 모듈 docstring: 재진입 시각 미기록이라 "모름"이지 근사 아님). FE는
+   * null 여부만으로 갈라 쓴다("exact"|null 두 상태뿐 — BE에 "approx"는 존재하지 않음, precision
+   * 필드는 그 값과 완전히 종속이라 별도로 안 읽는다). */
+  enteredStateAtMs: number | null;
+  /** 정렬용 경과시간(ms) — enteredStateAtMs 있으면 now-그값(체류시간이 위계를 만든다, 클수록
+   * 먼저), 없으면(모름) 0으로 동급 티어 내 안정적 후순위. */
   sortKey: number;
 }
 
@@ -40,6 +45,8 @@ export interface BeAttentionItem {
   story_id: string | null;
   title: string | null;
   ref: Record<string, unknown>;
+  /** story #2249 — glance.py `AttentionItem.entered_state_at`(UTC ISO). 없으면 null(모름). */
+  entered_state_at: string | null;
 }
 
 /** AQ가 소비하는 kind 전체(scope_violation은 BE가 §7 확定②로 미구현이라 kind 자체가 절대 미등장 —
@@ -81,9 +88,23 @@ export function parseAttentionQueueSignals(json: unknown): BeAttentionItem[] {
     const story_id = typeof rawStoryId === 'string' && rawStoryId ? rawStoryId : null;
     if (!story_id) continue; // href/집계 키를 지어낼 수 없으니 제외(no-fiction)
     const ref = isRecord(raw['ref']) ? (raw['ref'] as Record<string, unknown>) : {};
-    signals.push({ kind: kind as BeAttentionKind, story_id, title, ref });
+    const rawEnteredAt = raw['entered_state_at'];
+    const entered_state_at = typeof rawEnteredAt === 'string' ? rawEnteredAt : null;
+    signals.push({ kind: kind as BeAttentionKind, story_id, title, ref, entered_state_at });
   }
   return signals;
+}
+
+/** ISO 문자열 → epoch ms(모르면 null). 파싱 실패도 모름으로 취급(지어내지 않음). */
+function toEpochMs(iso: string | null): number | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/** enteredStateAtMs → 정렬키(경과시간 ms). 모르면 0(동급 티어 내 안정적 후순위). */
+function toSortKey(enteredStateAtMs: number | null): number {
+  return enteredStateAtMs === null ? 0 : Math.max(0, Date.now() - enteredStateAtMs);
 }
 
 const PROOF_STATE: Record<AttentionKind, ProofState> = {
@@ -107,48 +128,58 @@ export function buildAttentionQueueFromBe(
   t: AttentionQueueTranslator,
 ): AttentionQueueItem[] {
   const items: AttentionQueueItem[] = [];
-  const blockedByStory = new Map<string, { title: string; count: number }>();
-  const decisionNeededByStory = new Map<string, string>(); // story_id → title(첫 등장 것)
+  const blockedByStory = new Map<string, { title: string; count: number; enteredAtMs: number | null }>();
+  // story_id → { title, enteredAtMs }(첫 등장 것 — needs_input/gate_pending 중 먼저 온 신호 기준)
+  const decisionNeededByStory = new Map<string, { title: string; enteredAtMs: number | null }>();
 
   for (const sig of signals) {
     if (!sig.title || !sig.story_id) continue; // 방어적 재확인(parseAttentionQueueSignals가 이미 보장하지만 직접호출 대비)
+    const enteredAtMs = toEpochMs(sig.entered_state_at);
     if (sig.kind === 'blocked') {
-      const entry = blockedByStory.get(sig.story_id) ?? { title: sig.title, count: 0 };
+      // BE는 blocked에 entered_state_at을 항상 안 실어(재진입 시각 미기록 — glance.py 참조) 지금은
+      // 항상 null이지만, 나중에 재료가 생기면(#2256) 이 자리가 자동으로 값을 받는다 — "가장 먼저
+      // 막힌 엣지"가 이 story가 막힌 지 얼마나 됐는지를 가장 잘 대표하므로 min(가장 이른 시각)을 쓴다.
+      const entry = blockedByStory.get(sig.story_id) ?? { title: sig.title, count: 0, enteredAtMs: null };
       entry.count += 1;
+      if (enteredAtMs !== null && (entry.enteredAtMs === null || enteredAtMs < entry.enteredAtMs)) {
+        entry.enteredAtMs = enteredAtMs;
+      }
       blockedByStory.set(sig.story_id, entry);
     } else if (sig.kind === 'needs_input' || sig.kind === 'gate_pending') {
-      if (!decisionNeededByStory.has(sig.story_id)) decisionNeededByStory.set(sig.story_id, sig.title);
+      if (!decisionNeededByStory.has(sig.story_id)) {
+        decisionNeededByStory.set(sig.story_id, { title: sig.title, enteredAtMs });
+      }
     } else if (sig.kind === 'verify_fail') {
       items.push({
         id: `verify_fail-${sig.story_id}`, kind: 'verify_fail', kindLabel: t('kindVerifyFail'),
         proofState: PROOF_STATE.verify_fail, claim: t('claimVerifyFail', { title: sig.title }),
         actor: null, actionLabel: t('actionRework'), actionTone: 'neutral',
-        href: `/board?story=${sig.story_id}`, sortKey: 0,
+        href: `/board?story=${sig.story_id}`, enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
       });
     } else if (sig.kind === 'merge_ready') {
       items.push({
         id: `merge_ready-${sig.story_id}`, kind: 'merge_ready', kindLabel: t('kindMergeReady'),
         proofState: PROOF_STATE.merge_ready, claim: t('claimMergeReady', { title: sig.title }),
         actor: null, actionLabel: t('actionMerge'), actionTone: 'ready',
-        href: `/board?story=${sig.story_id}`, sortKey: 0,
+        href: `/board?story=${sig.story_id}`, enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
       });
     }
   }
 
-  for (const [storyId, { title, count }] of blockedByStory) {
+  for (const [storyId, { title, count, enteredAtMs }] of blockedByStory) {
     items.push({
       id: `blocked-${storyId}`, kind: 'blocked', kindLabel: t('kindBlocked'),
       proofState: PROOF_STATE.blocked, claim: t('claimBlocked', { title, count }),
       actor: null, actionLabel: t('actionCoordinate'), actionTone: 'neutral',
-      href: `/board?story=${storyId}`, sortKey: 0,
+      href: `/board?story=${storyId}`, enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
     });
   }
-  for (const [storyId, title] of decisionNeededByStory) {
+  for (const [storyId, { title, enteredAtMs }] of decisionNeededByStory) {
     items.push({
       id: `decision_needed-${storyId}`, kind: 'decision_needed', kindLabel: t('kindDecisionNeeded'),
       proofState: PROOF_STATE.decision_needed, claim: t('claimDecisionNeeded', { title }),
       actor: null, actionLabel: t('actionDecide'), actionTone: 'primary',
-      href: `/board?story=${storyId}`, sortKey: 0,
+      href: `/board?story=${storyId}`, enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
     });
   }
   return items;

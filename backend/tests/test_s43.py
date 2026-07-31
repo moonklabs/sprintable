@@ -133,7 +133,17 @@ async def test_replace_rules_200():
 async def test_update_rule_200():
     client, session, app = await _client()
     try:
-        with patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.update", new_callable=AsyncMock) as mock_update:
+        # story #1831 후속: 단일-룰 update 분기도 이제 요청시점 재해소(resolve_required_project_id)
+        # 를 거친다 — session mock의 내부 쿼리 체인까지 흉내내는 대신(test_disable_all_200과 달리
+        # 이 분기는 X-Project-Id/명시 project_id가 없어 _resolve_project_default 경로까지 타야
+        # 해서 그 흉내가 더 무겁다) 이 라우터가 실제로 무엇을 호출하는지만 확인하면 되므로
+        # resolve_required_project_id 자체를 직접 patch한다(그 함수 자신의 계약은
+        # test_f0c99070_critical_project_scope_realdb.py가 실PG로 따로 검증한다).
+        with patch("app.repositories.agent_routing_rule.AgentRoutingRuleRepository.update", new_callable=AsyncMock) as mock_update, \
+             patch(
+                 "app.routers.agent_routing_rules.resolve_required_project_id",
+                 new_callable=AsyncMock, return_value=PROJECT_ID,
+             ) as mock_resolve:
             updated = _make_rule()
             updated.name = "Updated Rule"
             mock_update.return_value = updated
@@ -142,6 +152,10 @@ async def test_update_rule_200():
                 resp = await c.put("/api/v2/agent-routing-rules", json=payload)
             assert resp.status_code == 200
             assert resp.json()["data"]["name"] == "Updated Rule"
+            # 오르테가 지적(2026-07-31): return_value만 걸면 이 유닛이 「그 함수를 실제로
+            # 타는가」를 안 잰다 — 호출이 나중에 사라져도 초록일 수 있다. assert_awaited_once로
+            # 그 자체를 고정한다.
+            mock_resolve.assert_awaited_once()
     finally:
         app.dependency_overrides.clear()
 

@@ -116,6 +116,12 @@ class StoryCreate(BaseModel):
     # E-FILE S4: 보드 스토리 첨부 (기본 [], 최대 10).
     attachments: list[StoryAttachment] = []
     meeting_id: uuid.UUID | None = None
+    # story #2267(C-9): 이 스토리가 «무엇에서» 만들어졌는지(출처) — 선택. epic_id/sprint_id/
+    # meeting_id(컨테이너·재배정 가능)와 다른 축이다. 제공되면 entity_references에
+    # relation='created_from' 한 줄이 생성 시점에 자동으로 남는다(불변 — 이후 컨테이너가
+    # 바뀌어도 이 사실은 안 흔들린다). ⛔둘 다 지정해야 유효(하나만 있으면 무시).
+    origin_type: str | None = None
+    origin_id: uuid.UUID | None = None
     status: str = "backlog"
     priority: str = "medium"
     story_points: int | None = None
@@ -165,6 +171,10 @@ class StoryUpdate(BaseModel):
     # outcome_status/outcome_result는 Update 제외 — 채점잡 전용
     # E-CAGE-REFEREE P1: 오염 마킹 (PO 직접 플래그, 자동 대량 마킹 금지)
     is_excluded: bool | None = None
+    # ⛔story #2346 AC7(2026-07-30, PO 판정 — 「사람 세기」에서 「기계 게이트」로 격상): 긴
+    # 텍스트 필드(description·acceptance_criteria)가 절반 이상 줄면 기본 거부한다(오늘 3건
+    # 모두 -80%대 급감 — 정당한 축약이면 이 플래그로 명시 승인한다).
+    allow_shrink: bool = False
 
     @field_validator("metric_definition")
     @classmethod
@@ -214,6 +224,23 @@ class StoryResponse(BaseModel):
     @classmethod
     def _coerce_agent_delegate_ids(cls, v):
         return v if isinstance(v, list) else []
+    # story #2315 AC1: 채팅 write 응답의 `references{stored, dropped[]}` 사이드밴드(#2294)와
+    # 같은 모양 — story PATCH도 description·acceptance_criteria에서 reconcile_entity_
+    # references를 돌리는데(#2599) 그 결과를 응답이 말 안 하던 형제 비대칭을 닫는다.
+    # ORM 컬럼 아님·update_story가 model_validate 前 transient attr로 세팅(agent_delegate_ids
+    # 패턴 동형) — GET/list 등 다른 경로는 세팅하지 않으므로 기본값 None으로 빠진다.
+    # ⛔읽기 경로의 참조 노출은 별건이다(#2262 AC9③) — 여기의 null은 "그 스토리에 참조가
+    # 없다"가 아니라 "이 응답이 그것을 안 싣는다"는 뜻이다(오르테가 판정 2026-07-29 아침 —
+    # 채팅 GET도 같은 침묵이라 새로고침한 메시지가 어느 참조가 걸렸는지 원리적으로 말 못
+    # 하는 것과 동일 갭). 이 필드 하나로 "참조가 걸렸었는지"를 되살릴 수 없다.
+    references: dict | None = None
+    # story #2328(C-11 ㉡층, 유나 규격 2026-07-29) — GET /api/stories?boost_candidates_from=
+    # 가 붙었을 때만 채워진다(다른 모든 경로는 기본값 False/None으로 빠진다 — agent_delegate_
+    # ids 패턴 동형, ORM 컬럼 아님, 라우터가 model_validate 前 transient attr로 세팅).
+    # ⛔후보가 아닌 항목엔 반드시 False/None으로 남는다(유나 규격 ①, FE가 섞지 않게).
+    # ⛔matched_snippet은 본문의 그 자리를 그대로 낸다 — 지어내지 않는다(유나 규격 ②).
+    is_reference_candidate: bool = False
+    matched_snippet: str | None = None
     # E-FILE S4: 보드 스토리 첨부 (column 값). list 아니면 [](레거시 None/mock 안전).
     attachments: list[dict] = []
     meeting_id: uuid.UUID | None = None
@@ -292,3 +319,26 @@ class StoryResponse(BaseModel):
     def reference_token(self) -> str | None:
         from app.services.reference_token import build_reference_token
         return build_reference_token("story", self.id, self.title)
+
+    # story #2262(C-4) AC9: 참조 카드의 「다음 행동」 재료 — SSOT는 app.services.next_action
+    # (조건식만, 문구는 유나 lane). None="디딜 것 없음"(positive 단방향, has_evidence와 동형).
+    # ⛔doc(e-connect-c4-trigger-condition-table)이 승인한 축은 outcome-measurement 하나뿐 —
+    # self_reported/human_verified(task와 동일 필드)도 story에 있다는 것을 구현 중 발견했지만,
+    # 그걸 story의 다음 행동으로도 쓸지는 리뷰 안 된 별건 판단이라 여기서 임의로 안 얹는다
+    # (지어내지 않는다 원칙 — PO 승인 없이 새 축 추가 금지).
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def next_action_code(self) -> str | None:
+        from app.services.next_action import outcome_measurement_next_action
+        return outcome_measurement_next_action(
+            outcome_status=self.outcome_status, measure_after=self.measure_after,
+            metric_definition=self.metric_definition, system_owned_sources=frozenset({"ga4"}),
+        )
+
+    # story #2262(C-4, PO 판정 2026-07-29): ㉠actionable/㉡waiting 분류 — SSOT는
+    # app.services.next_action.NEXT_ACTION_CATEGORIES(FE가 코드별로 각자 안 판단하게).
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def next_action_category(self) -> str | None:
+        from app.services.next_action import next_action_category
+        return next_action_category(self.next_action_code)

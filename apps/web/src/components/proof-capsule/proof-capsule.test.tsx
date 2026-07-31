@@ -130,6 +130,21 @@ describe('ProofCapsule (안티패턴 자체 체크 — 도크트린 준수 회�
     expect(markup).toContain('border-proof-green');
     expect(markup).not.toContain('위험도');
   });
+
+  it('story #2249 — row density renders a pre-formatted duration badge when given one', () => {
+    const markup = renderWithIntl(
+      <ProofCapsule {...BASE} density="row" gate={{ action: '조율' }} duration="3일 전" />,
+    );
+    expect(markup).toContain('3일 전');
+  });
+
+  it('story #2249 — row density renders no duration badge when duration is omitted(모름, 지어내지 않음)', () => {
+    const markup = renderWithIntl(
+      <ProofCapsule {...BASE} density="row" gate={{ action: '조율' }} />,
+    );
+    expect(markup).not.toContain('일 전');
+    expect(markup).not.toContain('시간 전');
+  });
 });
 
 describe('ProofCapsule (human optional — Board card 확산, bf9037cb) — 다중 담당자 등 human 필드로 표현 안 되는 실 기능을 위한 완화', () => {

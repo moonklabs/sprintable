@@ -57,14 +57,25 @@ async def test_doc_gate_enriched_with_title_slug():
 
 @pytest.mark.anyio
 async def test_non_doc_gate_no_enrich_no_extra_query():
-    """비-doc gate 는 enrich 0(work_item_summary None)·doc 쿼리 미발생(N+1 0)·can_approve enrich skip."""
-    org = uuid.uuid4()
+    """비-doc gate 는 work_item_summary enrich 0·doc 쿼리 미발생(N+1 0)·can_approve enrich skip(비휴먼/
+    resolve 실패 caller).
+
+    ⚠️2026-07-31 수정(오르테가 라이브 실측 — GET /api/v2/gates pending 37/37 project_id=None):
+    story/task/artifact project_id 배치 조회는 이제 caller 타입과 무관하게 항상 돈다(project_id는
+    authz 판정이 아니라 데이터 정합성이라 caller 의존이면 결함). 그래서 이 케이스도 session.execute
+    호출이 1(gates)→2(gates+story 배치)로 늘었다 —
+    "쿼리가 아예 안 남"이 아니라 "doc 전용 쿼리·can_approve 판정 쿼리가 안 남"으로 좁혀 재확認한다."""
+    org, story_id, pid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     gates_res = MagicMock()
-    gates_res.scalars.return_value.all.return_value = [_gate(org, uuid.uuid4(), "story")]
+    gates_res.scalars.return_value.all.return_value = [_gate(org, story_id, "story")]
+    story_batch_res = MagicMock()
+    story_batch_res.all.return_value = [(story_id, pid)]
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[gates_res])
+    session.execute = AsyncMock(side_effect=[gates_res, story_batch_res])
     with patch.object(gates_mod, "get_org_posture", AsyncMock(return_value=None)):
         out = await list_gates(work_item_id=None, work_item_type=None, status=None,
                                assigned_to_me=False, session=session, org_id=org, auth=None)
     assert out[0].work_item_summary is None
-    assert session.execute.await_count == 1  # gates 쿼리만(doc/can_approve enrich 쿼리 0·posture는 mocked)
+    assert out[0].can_approve is False  # 비휴먼/resolve 실패 caller — authz enrich 는 여전히 skip
+    assert out[0].project_id == pid  # ⭐데이터 enrich 는 caller 무관 — 근본수정 본체
+    assert session.execute.await_count == 2  # gates + story project_id 배치(doc 쿼리·posture 는 mocked)

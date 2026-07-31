@@ -30,6 +30,7 @@ from .toolset import is_tool_allowed
 from .tools.a2a import LinkGateToTaskInput, link_gate_to_task
 from .tools.evidence import AddEvidenceInput, add_evidence
 from .tools.judgments import AddJudgmentInput, ListJudgmentsInput, add_judgment, list_judgments
+from .tools.session_context import SessionContextInput, get_session_context
 from .tools.visual_artifacts import (
     AddArtifactCommentInput, CreateArtifactInput, CreateSpecPinInput, DeleteArtifactInput,
     DeleteSpecPinInput, EditArtifactInput, GetArtifactInput, ListArtifactCommentsInput,
@@ -328,7 +329,14 @@ _TOOL_DEFS: list[tuple] = [
      SprintableInput, list_backlog),
     ("sprintable_add_story",
      "[일감] 스토리 생성. 응답 reference_token 필드가 이 스토리를 가리키는 참조 토큰"
-     "([제목](entity:story:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
+     "([제목](entity:story:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282). "
+     "⭐story #2267(C-9): 이 스토리가 «무엇에서» 만들어졌는지 아는 건 만드는 당신뿐이다 — "
+     "채워라. 지금 이 대화(오르테가군의 지시·논의)에서 나온 것이면 "
+     "origin_type=\"chat_message\"·origin_id=<이 스토리를 만들게 한 그 메시지의 id>를 "
+     "같이 보내라. 다른 스토리를 쪼개거나 복제한 것이면 origin_type=\"story\"·"
+     "origin_id=<원본 스토리 id>. 회의에서 나온 것이면 origin_type=\"meeting\". "
+     "둘 다 줘야 유효(하나만 있으면 조용히 무시된다) — 안 채우면 이 스토리의 출처는 "
+     "영원히 «미수집」으로 남는다(소급 안 됨, story #2267 AC5).",
      AddStoryInput, add_story),
     ("sprintable_update_story",
      "[일감] 스토리 수정. 응답 reference_token은 sprintable_add_story와 동일.",
@@ -550,9 +558,18 @@ _TOOL_DEFS: list[tuple] = [
      "refinement/method_error는 target_id(무엇에 대한 말인지) 필수.",
      AddJudgmentInput, add_judgment),
     ("sprintable_list_judgments",
-     "판단/철회 pull 조회 — work_item_id·method·scope로 좁혀 묻는다. retractions는 상한과"
-     " 무관하게 항상 전체, active는 캡되며 meta.omitted_count로 잘린 건수를 알려준다.",
+     "판단/철회 pull 조회 — work_item_id·method·scope로 좁혀 묻는다. corrections(retraction/"
+     "refinement/method_error)는 상한과 무관하게 항상 전체, active는 캡되며"
+     " meta.active_omitted_count로 잘린 건수를 알려준다. 각 원소의 correction_ids가"
+     " 비어있지 않으면 이미 정정된 것이니 그대로 믿지 말 것.",
      ListJudgmentsInput, list_judgments),
+    # 세션 시작 컨텍스트 (1) — story #2268(C-10, E-CONNECT)
+    ("sprintable_get_session_context",
+     "세션 시작 컨텍스트 — 내 stories/tasks + 거기 붙은 판단/정정 + (since를 주면) 그 뒤"
+     " 최근 활동을 한 호출로 준다. since에 직전 세션 종료 시각(ISO 8601)을 주면 그 뒤"
+     " 활동만 옴 — 안 주면 recent_activity는 null(모름, 빈 목록 아님). progress.txt 같은"
+     " 제품 밖 파일 대신 이 도구가 그 자리를 대신한다.",
+     SessionContextInput, get_session_context),
     # Visual artifacts (12) — E-CANVAS C1-S3 + C2-S6(코멘트) + C3-S7(편집) + C4-S8(정본 제안) +
     # 핀 저작(story 7fe16274) + story #1922(delete_artifact, soft delete·생성자 전용)
     ("sprintable_create_artifact",
