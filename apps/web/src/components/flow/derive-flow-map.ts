@@ -337,8 +337,10 @@ export interface FlowMapLogicalPosition {
 // 정확히 같은 값을 여기 단일 소스로 옮긴다(카드 렌더링과 간선 계산이 서로 다른 좌표를
 // 쓰면 언젠가 어긋난다 — computeNodePositions의 존재 이유 그대로).
 // story #2369 QA 후속(2026-07-31, 라이브 실측 자가발견 — dev-app 1440×900) — 레인 라벨 칸
-// 너비. flow-map-canvas.tsx의 `w-[150px]`(헤더·레인 타이틀 칸) 두 곳과 반드시 같은 값이어야
-// 한다. computeNodePositions가 내는 `left`는 각 레인의 콘텐츠 영역(`flex-1`, 라벨 칸
+// 너비. flow-map-canvas.tsx의 헤더 스페이서·레인 타이틀 칸 두 자리(`style={{ width:
+// LANE_LABEL_WIDTH }}`)가 이 상수 하나에서 나온다(올리베이라군 리뷰 반영, PR#2757 — 예전엔
+// `w-[150px]` Tailwind 클래스로 사본이 있었으나 사본 자체를 없앴다). computeNodePositions가
+// 내는 `left`는 각 레인의 콘텐츠 영역(`flex-1`, 라벨 칸
 // «다음»부터) 기준 좌표인데, 카드가 실제로 그려지는 화면은 스크롤 컨테이너 원점(라벨 칸
 // «포함» 시작)이다 — 오프스크린 판정(countCardsBeyondRightEdge)이 이 상수를 안 더하면
 // 라벨 칸 폭만큼 "화면 밖"을 "아직 안 밖"으로 잘못 판정한다(실측: style.left=1062px인 카드가
