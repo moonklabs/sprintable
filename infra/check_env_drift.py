@@ -76,6 +76,24 @@ _REPO_ROOT = _find_repo_root(Path(__file__).resolve().parent)
 _REGION = "asia-northeast3"
 _ALLOWLIST_PATH = _REPO_ROOT / "infra" / "manual-env-allowlist.yml"
 
+
+def _env_for_service(service: str) -> str:
+    """story #2224 후속(오르테가 판정, 2026-07-31) — 서비스 이름으로 환경(dev/prod)을 가른다.
+    두 가지 명명 관례가 실제로 섞여 있다(둘 다 실측 확認):
+      ㉠`_SERVICE_SCRIPT_MAP`(마스터) 서비스들 — "-dev"·"-prod" 둘 다 명시(sprintable-
+        backend-dev/-prod류). ⛔단 `sprintable-realtime-dev`는 prod 짝이 없다(cloudbuild.yaml
+        단일 소스, dev 전용 서비스) — 짝이 없어도 접미사만으로 dev로 판별한다(짝의 존재
+        여부와 이 판별은 별개 문제).
+      ㉡allowlist의 `excluded_services`(sprintable-admin-web류, 별도 repo IaC 소관) —
+        prod는 «접미사 없음»(bare), dev만 "-dev"가 붙는다(sprintable-admin-web ↔
+        sprintable-admin-web-dev 쌍으로 실존 확認, manual-env-allowlist.yml 참조).
+    ⇒ "-dev"로 끝나면 dev, 그 외(= "-prod"로 끝나거나 접미사 자체가 없는 bare 이름)는
+    전부 prod로 취급한다 — ㉡류가 ①②축은 이미 제외돼 있어(별도 repo IaC) 이 구분이
+    실제로 영향을 주는 것은 ③(평문 시크릿)뿐인데, ③은 "어느 한 실행에 정확히 한 번" 걸리면
+    되므로(두 번 걸리면 중복 로그일 뿐 오탐은 아니나, 정확한 배정이 더 낫다) bare=prod로
+    고정한다."""
+    return "dev" if service.endswith("-dev") else "prod"
+
 # ④ Settings 커버리지 대상 — app.core.config.Settings를 실제로 임포트해서 쓰는 서비스만
 # (같은 이미지). frontend·mcp·admin은 이 클래스 자체를 안 쓰므로 제외(오탐 방지 핵심).
 _SETTINGS_CONSUMING_SERVICES = {
@@ -518,7 +536,19 @@ def _today():
     return datetime.now(timezone.utc).date()
 
 
-def main() -> int:
+def main(only_env: str | None = None) -> int:
+    """story #2224 후속(오르테가 판정, 2026-07-31) — `only_env`("dev"|"prod"|None). 배경:
+    이 가드는 스케줄 워크플로우가 checkout한 «한 브랜치»(GHA 스케줄 트리거는 default
+    branch=main을 checkout한다)만 보는데, IaC/allowlist의 정본은 dev는 develop·prod는
+    main으로 갈린다(#2320/#2205와 같은 클래스 — 스케줄이 checkout하는 브랜치 ≠ 대조해야
+    할 정본). 지금까지는 dev 서비스도 main 기준으로 대조돼 «거짓 빨강»이 났다(develop에만
+    있는 allowlist 수정이 반영 안 됨, PR#2678 실사례).
+
+    ⛔이 함수 자체는 여전히 «한 checkout 루트»(`_REPO_ROOT`, 이 파일이 실제로 놓인 위치)만
+    본다 — 두 브랜치를 한 프로세스에서 동시에 보는 게 아니라, 워크플로우가 **브랜치별로
+    이 스크립트를 두 번 따로 실행**(각각 그 브랜치의 checkout 안에 있는 이 파일을 부른다
+    — `_find_repo_root`가 그 checkout의 `.git`을 찾으므로 자동으로 맞는 루트가 잡힌다)하고,
+    `only_env`로 자기 브랜치가 담당하는 환경의 서비스만 걸러 그 서비스만 검사한다."""
     excluded_axes, allowlist_services = _load_allowlist()
     iac_keys = _iac_covered_keys()
     settings_field_keys = _settings_field_env_keys()
@@ -534,6 +564,8 @@ def main() -> int:
     )
 
     live_services = _list_live_services()
+    if only_env is not None:
+        live_services = [s for s in live_services if _env_for_service(s) == only_env]
     key_set_failures: list[str] = []
     value_check_failures: list[str] = []
     secret_shape_failures: list[str] = []
@@ -544,6 +576,7 @@ def main() -> int:
     code_read_report: list[str] = []  # ⑤㉢ — report-only(환경무관, 승격 대상 아님).
     unmapped: list[str] = []
 
+    env_label = f"[{only_env}] " if only_env else ""
     checked = 0
     value_checked = 0
     for service in live_services:
@@ -647,7 +680,10 @@ def main() -> int:
     )
 
     if has_fail or has_report_only:
-        print("❌ env 드리프트 발견:" if has_fail else "⚠️ env 드리프트 report-only 발견(FAIL 아님):")
+        print(
+            f"{env_label}❌ env 드리프트 발견:" if has_fail
+            else f"{env_label}⚠️ env 드리프트 report-only 발견(FAIL 아님):"
+        )
         if key_set_failures:
             print("  ①키집합 대조:")
             for line in key_set_failures:
@@ -724,7 +760,7 @@ def main() -> int:
             return 1
 
     print(
-        f"✅ 드리프트 없음(FAIL 기준) — ①{checked}개 서비스 키집합"
+        f"{env_label}✅ 드리프트 없음(FAIL 기준) — ①{checked}개 서비스 키집합"
         f"(제외 {sum(1 for a in excluded_axes.values() if 'key_set' in a)}개), "
         f"②{value_checked}개 서비스 값 대조, "
         f"③{len(live_services)}개 서비스 전체 평문시크릿 스캔 완료(제외 없음), "
@@ -737,5 +773,19 @@ def main() -> int:
     return 0
 
 
+def _parse_only_env(argv: list[str]) -> str | None:
+    """`--only-env dev|prod` — 없으면 None(모든 서비스, 옛 동작 그대로 보존). argparse를 안
+    쓴 이유: 이 스크립트는 이 플래그 하나뿐이라 의존성을 늘릴 이유가 없다."""
+    if "--only-env" not in argv:
+        return None
+    idx = argv.index("--only-env")
+    if idx + 1 >= len(argv):
+        raise SystemExit("--only-env 뒤에 dev 또는 prod가 와야 함")
+    value = argv[idx + 1]
+    if value not in ("dev", "prod"):
+        raise SystemExit(f"--only-env는 dev 또는 prod만 허용(받은 값: {value!r})")
+    return value
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(only_env=_parse_only_env(sys.argv[1:])))
