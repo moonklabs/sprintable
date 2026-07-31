@@ -18,15 +18,24 @@ interface NextMakerHeaderProps {
  * 됩니다」는 전부 «설명»이라 "화면이 변명으로 시작"했다(PO) — 각각 3순위 목표 목록 옆
  * (next-maker-screen.tsx)·다음 고르기가 실제로 열린 자리(goal-stem-card.tsx)로 옮겼다.
  *
- * backlogTotal(336)은 카드에서 뺐다 — 앞 셋(할 수 있는/주인 없는/막힘)은 «행동»(잡을 수
+ * backlogTotal(336)은 카드에서 뺐다 — 앞 셋(할 수 있는/주인 없는/승인 대기)은 «행동»(잡을 수
  * 있고·주인을 붙일 수 있고·문을 열 수 있는)인데 backlogTotal은 «배경»이면서 제일 큰 수라
  * 제일 먼저 눈에 들어와 "빚"으로 읽혔다(유나 "분자를 앞에" 원칙 위반) — 목표 목록 위 작은
  * 한 줄로 내렸다.
  *
- * 「문이 닫혀 막힌」 카드는 이제 `/inbox?tab=gates`로 가는 링크다(PO 판정 — 유나 지적:
+ * 「승인 대기」 카드는 이제 `/inbox?tab=gates`로 가는 링크다(PO 판정 — 유나 지적:
  * "넷 중 그것만 행동이 없었다", "진입점의 세 약속(이름·가는 곳·세는 것)" 중 가는 곳이
  * 비어 있었다. 게이트는 승인 한 번이면 풀려 다음 고르기보다 싸다). 기존 결재함
  * (reference-decision-gate-approval-ui-path 메모)을 그대로 재사용 — 새 목록 화면을 안 짓는다.
+ *
+ * story #2352 후속(2026-07-31, 유나 적발) — 이 카드 라벨을 「문이 닫혀 막힌」에서 「승인
+ * 대기」로 고쳤다. 옛 라벨의 "막힘"이라는 낱말이, «전혀 다른 표»(WorkflowLineStepApproval)를
+ * 세는 관제서랍의 "게이트·막힘 신호"와 같은 낱말을 쓰면서 화면이 자기모순했다(28 vs 0 —
+ * 다른 걸 세면서 같은 말을 썼다). 이 값은 `deriveZeroStageStats`의 `blocked` 필드 그대로
+ * — Gate 표(requires_human+pending) 기반, epics-progress-lane의 lane.blocked와 동일
+ * 정의(derive-next-maker.ts 문서 참고). 관제서랍 쪽(WorkflowLineStepApproval 축)은
+ * 사람의 다음 발과 안 이어져 화면에서 통째로 뺐다(flow-client.tsx 참고) — 이름을 바꾸는
+ * 게 아니라 그 축 자체를 걷어낸 것.
  */
 export function NextMakerHeader({ headline, zeroStage }: NextMakerHeaderProps) {
   const t = useTranslations('flow');
@@ -48,7 +57,7 @@ export function NextMakerHeader({ headline, zeroStage }: NextMakerHeaderProps) {
       <div className="flex flex-wrap gap-2">
         <ZeroStageCell tone="brand" value={zeroStage.canDo} label={t('nextMakerCanDo')} />
         <ZeroStageCell tone="info" value={zeroStage.unowned} label={t('nextMakerUnowned')} />
-        <ZeroStageCell tone="warn" value={zeroStage.blocked} label={t('nextMakerBlocked')} href="/inbox?tab=gates" />
+        <ZeroStageCell tone="warn" value={zeroStage.blocked} label={t('nextMakerPendingApproval')} href="/inbox?tab=gates" />
       </div>
 
       <p className="text-[11px] text-muted-foreground">

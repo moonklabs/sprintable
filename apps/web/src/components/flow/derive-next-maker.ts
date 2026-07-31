@@ -261,8 +261,12 @@ export interface ZeroStageStats {
   canDo: number;
   /** "준비됐는데 주인이 없는" — ready-for-dev + 주인 없음. */
   unowned: number;
-  /** "문이 닫혀 막힌" — Gate 기반 정의(epics-progress-lane의 lane.blocked와 동일 필터,
-   * 형제 화면과 다른 수를 말하지 않기 위해 여기서 새로 정의하지 않고 그 합을 그대로 받는다). */
+  /** "승인 대기"(story #2352 전 「문이 닫혀 막힌」) — Gate 표 기반 정의(requires_human+
+   * pending), epics-progress-lane의 lane.blocked와 동일 필터(형제 화면과 다른 수를 말하지
+   * 않기 위해 여기서 새로 정의하지 않고 그 합을 그대로 받는다). ⛔WorkflowLineStepApproval
+   * 표(관제서랍이 세던 것)와는 다른 표다 — 같은 "막힘"이라는 낱말을 썼다가 한 화면에서
+   * 28과 0이 동시에 뜨는 자기모순이 났다(story #2352). 이 필드는 «문 자체가 몇 개인가»만
+   * 센다. */
   blocked: number;
   /** "아직 준비 안 된" 전체(backlog). */
   backlogTotal: number;

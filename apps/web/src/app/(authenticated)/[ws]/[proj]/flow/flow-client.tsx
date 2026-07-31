@@ -1,13 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { KanbanBoard } from '@/components/kanban/kanban-board';
-import { ExceptionStream } from '@/components/glance/exception-stream';
-import { toExceptionQueueItems, type BeAttentionSignal, type ExceptionLabels } from '@/components/glance/derive-exception-signals';
 import { loadGlanceData, type GlanceData } from '@/components/glance/load-glance-data';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { NextMakerScreen } from '@/components/flow/next-maker-screen';
@@ -39,22 +37,24 @@ function parseView(raw: string | null): FlowView {
 }
 
 /**
- * story #2224(IA v2.2 §7-3, 유나 정정 2026-07-30) — 통합 화면. ①초점 스트립(GlanceHero, A타입
- * 재사용) ②관제 서랍(ExceptionStream, A타입 재사용) 은 보기와 무관하게 항상 고정 — "전면에서
- * 내린다"는 뜻이 이것이다(보기를 전환해도 이 둘은 그대로 남는다). 보기 전환은 두 칸(갈래|목록)
+ * story #2224(IA v2.2 §7-3, 유나 정정 2026-07-30) — 통합 화면. 보기 전환은 두 칸(갈래|목록)
  * 세그이며 `?view=` 쿼리파라미터가 정본(URL이 상태를 들고 있어 새로고침·공유 가능).
  *
  * PO 판정(2026-07-30, 선생님 정정 반영) — "보드+현황판 통합"의 실제 자리는 `/plan`이 아니라
  * `/flow`였다(`/plan`은 말실수). 남은 본체는 `/glance`·`/board`를 이 화면 «안으로» 들이고
  * 옛 라우트를 죽이는 것 하나 — 오늘은 그 1단계(세그먼트 셸)만: 갈래=이 캔버스(그대로) ·
- * 목록=`KanbanBoard`(그대로 마운트, 라벨만 이동). glance의 다섯 소스는 「현황판」이라는 별도
- * 보기가 아니라 갈래 보기·관제 서랍의 기존 영역에 나눠 얹는다(선생님 재정정 — 진행 궤적은
- * 시간축이 대체해 따로 옮기지 않고, `activity-logs`만 목업 자체가 자리를 정하지 않은 유일한
- * 칸이라 판정 대기) — 이 나눠얹기 자체는 후속 조각.
+ * 목록=`KanbanBoard`(그대로 마운트, 라벨만 이동).
+ *
+ * ⛔story #2352 후속(2026-07-31, 유나 적발) — ②관제 서랍(ExceptionStream, "게이트·막힘
+ * 신호 · N")을 통째로 걷어냈다. 그 수가 세던 표(WorkflowLineStepApproval/ItemDependency
+ * 기반 `/api/glance/attention`)가 0단계 카드의 「승인 대기」(Gate 표 기반, next-maker-
+ * header.tsx)와 «다른 표»를 세면서 같은 낱말("막힘")을 써 화면이 자기모순했다(28 vs 0).
+ * 유나 판정: 이 축이 세는 것은 "사람의 다음 발과 안 이어지는 제도 설정 상태"라 화면에
+ * 설 자리가 없다 — 이름을 바꾸는 처방이 아니라 축 자체를 뺀 것. 되살리려면 "내가 결재해야
+ * 하는 것 N건"(«나» 축, #2288)으로만 선다.
  */
 export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPageClientProps) {
   const t = useTranslations('flow');
-  const tGlance = useTranslations('glance');
   const router = useRouter();
   const searchParams = useSearchParams();
   const view = parseView(searchParams.get('view'));
@@ -126,23 +126,6 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
     setPanelOpen(true);
   }, [router, searchParams, wsSlug, projSlug]);
 
-  const exceptionItems = useMemo(() => {
-    if (!data) return [];
-    const labels: ExceptionLabels = {
-      kind: {
-        gate_pending: tGlance('exceptionKindGatePending'),
-        blocked: tGlance('exceptionKindBlocked'),
-        merge_ready: tGlance('exceptionKindMergeReady'),
-      },
-      action: {
-        gate_pending: tGlance('exceptionActionGatePending'),
-        blocked: tGlance('exceptionActionBlocked'),
-        merge_ready: tGlance('exceptionActionMergeReady'),
-      },
-    };
-    return toExceptionQueueItems(data.attentionSignals as BeAttentionSignal[], labels);
-  }, [data, tGlance]);
-
   return (
     <>
       <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
@@ -209,28 +192,6 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           // loading 상태가 매번 자연히 맞다, flow-node-story-panel.tsx 문서 참고).
           <FlowNodeStoryPanel key={selectedStoryId} storyId={selectedStoryId} onClose={handleClosePanel} />
         ) : null}
-
-        {/* ③ 관제 서랍 — 보기 무관 고정, 접힘 기본(IA §2). ExceptionStream = #2100 예외 스트림
-            그대로 재사용(A타입, AC4 — glance-board.tsx가 쓰는 그 컴포넌트 그대로, 새로 그린
-            코드 없음. 두 컴포넌트가 아니다). `<summary>`는 native하게 접힌 상태에서도 항상
-            보이므로 카운트는 접어도 보인다(PO 판정 2026-07-30 — AC8이 접힌 채로도 반쯤 성립).
-            ⚠️카운트 출처 — 지금은 `/api/glance/attention`의 gate_pending+blocked+merge_ready
-            (WorkflowLineStepApproval/ItemDependency 기반)다. 이것은 민 실측 "검증 필요 32건"
-            (Gate.requires_human+evidence_status=insufficient, PR#2672 blocked와 동일 정의로
-            맞춤) 과 다른 쿼리라 다른 수를 낼 수 있다 — 그래서 라벨을 "검증 필요"로 부르지 않고
-            "게이트·막힘 신호"로 남겨 둔다.
-            ⛔만료 조건(PO 2026-07-30, 안 적으면 이 이름이 영구가 된다): PR#2672 착지 시 A로
-            통일하고 · 이 자리의 B 라벨을 "검증 필요"로 되돌린다. 그때까지 좌 레인(flow-lane.tsx)
-            의 blocked/stalled 칸도 "모름"으로 비워 두고, 막힘류 수는 이 관제 서랍 한 곳에서만
-            보인다(같은 화면에 A·B 두 자가 동시에 서지 않게). */}
-        <details className="rounded-lg border border-border">
-          <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-foreground">
-            {t('drawerHeading', { n: exceptionItems.length })}
-          </summary>
-          <div className="border-t border-border p-3">
-            <ExceptionStream items={exceptionItems} />
-          </div>
-        </details>
       </div>
     </>
   );
