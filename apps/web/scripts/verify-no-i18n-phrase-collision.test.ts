@@ -217,3 +217,13 @@ describe('GRANDFATHER_BASELINE — 기존 채무는 통과, 새 충돌만 막는
     expect(GRANDFATHER_BASELINE.has(pk)).toBe(false); // baseline 밖 — main()에서 FAIL로 승격되는 자리
   });
 });
+
+// GRANDFATHER_BASELINE_COUNT_TEST(모듈 코멘트가 가리키는 그 테스트) — 오르테가군 지적,
+// 2026-07-31: 41번째 항목부터는 PO 승인 없이 조용히 못 들어온다. 크기를 40으로 고정해
+// 두면 누가 리뷰 없이 항목을 추가/삭제해도 이 테스트가 실패해 diff가 눈에 띈다(그 자체가
+// design:pass/qa:pass 리뷰를 거치게 만드는 자리).
+describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 PO 승인, 조용한 증감을 막는다', () => {
+  it('#2367 최초 스캔 스냅샷은 정확히 40건이다', () => {
+    expect(GRANDFATHER_BASELINE.size).toBe(40);
+  });
+});
