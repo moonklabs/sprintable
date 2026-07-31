@@ -847,3 +847,65 @@ class AnalyticsRepository:
                 "count": bucket["count"], "kind": kind,
             })
         return result
+
+    async def get_pending_candidate_count(
+        self, project_id: uuid.UUID, epic_ids: list[uuid.UUID],
+    ) -> dict:
+        """story #2366 — 화면이 지금 그리는 목표(epic) 집합 «안에서» 확認 대기 중인
+        reference_semantic_candidates(status='estimated') 후보 쌍 수를 낸다.
+
+        ⛔get_goal_edges(바로 위)가 세는 축(status='declared')은 안 건드린다 — #2360
+        AC3 「자동 확定 금지」의 대가를 이 메서드가 깨면 안 된다(estimated를 확定된
+        연결처럼 세는 것은 「실선=確定」의 재발이다). 그래서 완전히 별도 메서드·별도
+        엔드포인트로 둔다 — get_goal_edges 코드는 고치지 않는다.
+
+        epic_ids는 프로젝트 전체가 아니라 «화면이 지금 렌더 중인» 레인 집합이다
+        (오르테가 판정, 2026-07-31 — 297은 프로젝트 전체 수라 화면이 말해야 하는
+        「이 지도에서 N건」과는 다른 표다). get_epic_flow_nodes_batch와 동일하게
+        dedup+cap한다(같은 상한 EPIC_FLOW_NODES_BATCH_MAX 재사용 — 새 상한을 만들지
+        않는다).
+
+        project_id로도 양쪽을 건다(get_goal_edges와 동일 축 — cross-project epic_id를
+        넘겨도 다른 프로젝트 데이터가 안 새게, story #2363 IDOR 교훈과 같은 자리)."""
+        from sqlalchemy.orm import aliased
+
+        from app.models.reference_semantic_candidate import ReferenceSemanticCandidate
+
+        requested = list(dict.fromkeys(epic_ids))
+        processed = requested[: self.EPIC_FLOW_NODES_BATCH_MAX]
+        skipped = requested[self.EPIC_FLOW_NODES_BATCH_MAX:]
+
+        if not processed:
+            return {
+                "count": 0,
+                "requested_count": len(requested),
+                "processed_count": 0,
+                "skipped_epic_ids": skipped,
+            }
+
+        src, tgt = aliased(Story), aliased(Story)
+        rows = (await self.session.execute(
+            select(ReferenceSemanticCandidate.source_id, ReferenceSemanticCandidate.target_id)
+            .select_from(ReferenceSemanticCandidate)
+            .join(src, src.id == ReferenceSemanticCandidate.source_id)
+            .join(tgt, tgt.id == ReferenceSemanticCandidate.target_id)
+            .where(
+                ReferenceSemanticCandidate.org_id == self.org_id,
+                ReferenceSemanticCandidate.source_type == "story",
+                ReferenceSemanticCandidate.target_type == "story",
+                ReferenceSemanticCandidate.status == "estimated",
+                src.project_id == project_id,
+                tgt.project_id == project_id,
+                src.epic_id.in_(processed),
+                tgt.epic_id.in_(processed),
+                src.epic_id != tgt.epic_id,
+            )
+        )).all()
+
+        pairs = {(min(s, t), max(s, t)) for s, t in rows}
+        return {
+            "count": len(pairs),
+            "requested_count": len(requested),
+            "processed_count": len(processed),
+            "skipped_epic_ids": skipped,
+        }

@@ -19,6 +19,7 @@ from app.schemas.analytics import (
     EpicZoneCounts,
     GoalEdge,
     MemberWorkloadResponse,
+    PendingCandidateCountResponse,
     ProjectHealthResponse,
     ProjectOverviewResponse,
     RecentActivityResponse,
@@ -168,6 +169,29 @@ async def get_goal_edges(
     await _assert_project_access(repo, auth, project_id)
     rows = await repo.get_goal_edges(project_id)
     return [GoalEdge.model_validate(r) for r in rows]
+
+
+@router.get("/analytics/goal-edges/pending-count", response_model=PendingCandidateCountResponse)
+async def get_pending_candidate_count(
+    project_id: uuid.UUID = Query(...),
+    epic_ids: str = Query(..., description="콤마구분 UUID 목록 — 화면이 지금 그리는 레인 집합"),
+    repo: AnalyticsRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> PendingCandidateCountResponse:
+    """story #2366 — 주어진 목표(epic) 집합 «안에서» 확認 대기 중인 후보 쌍 수를 낸다.
+    ⛔`goal-edges`(바로 위)가 세는 축(`status='declared'`)은 안 건드린다 — 이 엔드포인트는
+    별도다(#2360 AC3 "자동 확定 금지"의 대가를 estimated를 확定된 연결처럼 세는 방식으로
+    깨지 않는다). `epic_ids`는 프로젝트 전체가 아니라 «화면이 지금 렌더 중인» 레인 집합
+    이다 — 프로젝트 전체 수가 필요하면 이 엔드포인트가 아니라 별도 판단이 필요하다."""
+    await _assert_project_access(repo, auth, project_id)
+    try:
+        parsed_ids = [uuid.UUID(s.strip()) for s in epic_ids.split(",") if s.strip()]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="epic_ids는 콤마구분 UUID 목록이어야 합니다")
+    if not parsed_ids:
+        raise HTTPException(status_code=400, detail="epic_ids가 비어 있습니다")
+    result = await repo.get_pending_candidate_count(project_id, parsed_ids)
+    return PendingCandidateCountResponse.model_validate(result)
 
 
 @router.get("/analytics/agent-stats", response_model=AgentStatsResponse)
