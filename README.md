@@ -480,3 +480,5 @@ We chose AGPL because Sprintable is a product company, not a consulting company.
 Commercial license: [dev1@moonklabs.com](mailto:dev1@moonklabs.com)
 
 <!-- #2364 qa-review-gate mutation-test touch (commit 1) — throwaway, will be reverted -->
+
+<!-- #2364 qa-review-gate mutation-test touch (commit 2 — makes qa:pass stale) -->
