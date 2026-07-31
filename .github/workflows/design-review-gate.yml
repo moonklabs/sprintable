@@ -94,6 +94,24 @@ jobs:
             echo "No changed file matches the design-review path list — this PR is out of this gate's scope (not a skip: it was evaluated and found empty)."
           fi
 
+      # ⭐유나신 지적(2026-07-31) — design:changes 라벨 설명은 "design:pass로 바뀌기 前에는
+      # 머지하지 않는다"고 약속하는데, 그 약속을 지키는 코드가 아무것도 없었다(가드는
+      # design:pass «존재»만 본다). design:pass와 design:changes가 같이 붙어 있으면(수정
+      # 요청이 아직 안 반영됐는데 pass도 남아 있는 경우) 그린이 뜨는 구멍이었다 — pass 유무와
+      # 무관하게 changes가 있으면 무조건 빨강으로 막는다. 게이트가 막 서서 아무도 위에 안
+      # 쌓았을 때가 이 구멍을 막기 제일 싼 자리라 지금 잡는다.
+      - name: Enforce design:changes blocks merge (unconditional — regardless of design:pass)
+        if: steps.scope.outputs.in_scope == 'true'
+        env:
+          HAS_DESIGN_CHANGES: ${{ contains(github.event.pull_request.labels.*.name, 'design:changes') }}
+        run: |
+          set -euo pipefail
+          if [ "${HAS_DESIGN_CHANGES}" = "true" ]; then
+            echo "::error title=design:changes open::A design guardian requested changes (design:changes) and they haven't been marked resolved yet. This blocks merge regardless of whether design:pass is also present — remove design:changes (or let the guardian replace it with design:pass) after the changes are addressed."
+            exit 1
+          fi
+          echo "design:changes not present."
+
       # AC1/AC6: design:pass가 있으면 초록, 없으면 빨강. labeled/unlabeled 이벤트가 트리거
       # 목록에 있어 라벨을 떼면 이 스텝이 다시 돌아 빨강으로 되돌아간다.
       - name: Enforce design:pass label when in scope

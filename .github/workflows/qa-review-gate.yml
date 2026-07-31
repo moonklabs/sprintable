@@ -86,6 +86,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      # ⭐design-review-gate.yml과 대칭(유나신 지적, 2026-07-31) — qa:changes가 열려 있으면
+      # qa:pass 유무와 무관하게 무조건 빨강. 두 changes 라벨이 기계적으로 배타가 되어 changes
+      # 라벨도 "하는 일"이 생긴다(전엔 설명뿐이었다).
+      - name: Enforce qa:changes blocks merge (unconditional — regardless of qa:pass)
+        env:
+          HAS_QA_CHANGES: ${{ contains(github.event.pull_request.labels.*.name, 'qa:changes') }}
+        run: |
+          set -euo pipefail
+          if [ "${HAS_QA_CHANGES}" = "true" ]; then
+            echo "::error title=qa:changes open::QA requested changes (qa:changes) and they haven't been marked resolved yet. This blocks merge regardless of whether qa:pass is also present — remove qa:changes (or let QA replace it with qa:pass) after the changes are addressed."
+            exit 1
+          fi
+          echo "qa:changes not present."
+
       # AC1: qa:pass가 없으면 빨강. labeled/unlabeled 이벤트가 트리거 목록에 있어 라벨을
       # 떼면 이 스텝이 다시 돌아 빨강으로 되돌아간다. ⛔경로 필터 없음 — 모든 PR에 적용(AC2).
       - name: Enforce qa:pass label (no path scoping — applies to every PR)
