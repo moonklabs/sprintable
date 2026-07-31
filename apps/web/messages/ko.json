@@ -494,6 +494,8 @@
     "flowMapMoreCount": "+{n}건 더 있습니다",
     "flowLaneFoldedCount": "움직임 없는 목표 {n}개",
     "flowLaneFoldedReason": "— 30일 안에 변화 없음. 숨긴 것이 아니라 접은 것입니다.",
+    "flowCanvasOffscreenCount": "카드 {n}장이 화면 밖",
+    "flowCanvasOffscreenReason": "— 오른쪽으로 스크롤하면 보입니다.",
     "nextMakerHeadline": "목표 {total}개 중 {needsNext}개에 「다음」이 정해지지 않았습니다",
     "nextMakerHeadlineStall": "{n}개는 곧 멈춥니다",
     "nextMakerQuietHint": "{n}개는 이미 끝났을 수 있습니다",

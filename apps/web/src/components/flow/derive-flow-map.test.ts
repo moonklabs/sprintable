@@ -4,7 +4,7 @@ import {
   computeNodeLogicalPositions, computeEdgeLineEndpoints, groupEdgesByEndpoints, edgeGroupStrokeWidth,
   parseDependencyGraphEdges, parseReferenceCandidateEdges, FLOW_MAP_TOP_N, FLOW_MAP_FOLD_THRESHOLD,
   FLOW_MAP_DEPTH0_X, FLOW_MAP_GRID_STEP, PAST_BUNDLE_NODE_ID,
-  computeCumulativeLaneHeight, snapToNearestLaneCount,
+  computeCumulativeLaneHeight, snapToNearestLaneCount, countCardsBeyondRightEdge,
   type FlowMapEdge, type FlowMapLane, type RawReferenceCandidate,
 } from './derive-flow-map';
 import type { EpicFlowNodeItem } from './derive-flow';
@@ -536,6 +536,39 @@ describe('snapToNearestLaneCount — story #2224 AC18 ①(자유 픽셀 드래�
   it('never returns less than 1 when at least one lane exists (하한 = 레인 1개, AC18 ②)', () => {
     const laneHeights = [50, 70, 80];
     expect(snapToNearestLaneCount(laneHeights, -9999)).toBe(1);
+  });
+});
+
+// story #2369 AC2(2026-07-31, PO 실측·물음) — "완전히 밖"인 카드만 센다, "걸친" 카드는
+// 안 센다(PO 물음에 대한 답 — 걸친 카드는 스스로 존재를 알리므로 이 스토리의 병에 안 걸림).
+describe('countCardsBeyondRightEdge — story #2369 AC2', () => {
+  it('counts a card as offscreen only when its LEFT edge is at/past the visible right boundary (완전히 밖)', () => {
+    const cardWidth = 110;
+    const scrollLeft = 0;
+    const viewportWidth = 400; // visibleRight = 400
+    // left=290: right=400 — 정확히 경계에 닿아 있다(오른쪽 끝이 딱 안 잘림) → 안 셈
+    // left=291: right=401 — 1px 걸침 → "완전히 밖"이 아니므로 안 셈(걸친 카드는 안 센다)
+    // left=400: right=510 — 완전히 밖 → 셈
+    const lefts = [290, 291, 400];
+    expect(countCardsBeyondRightEdge(lefts, cardWidth, scrollLeft, viewportWidth)).toBe(1);
+  });
+
+  it('a card straddling the right edge(왼쪽 일부만 보임) is NOT counted — only fully-hidden cards are (PO 물음에 대한 답)', () => {
+    const cardWidth = 110;
+    // 카드 left=350, viewportWidth=400 → 오른쪽 40px만 밖으로 잘림(왼쪽 70px은 보인다) → "걸침"
+    expect(countCardsBeyondRightEdge([350], cardWidth, 0, 400)).toBe(0);
+  });
+
+  it('respects scrollLeft — as the user scrolls right, fewer cards remain "beyond" the edge', () => {
+    const cardWidth = 110;
+    const viewportWidth = 400;
+    const lefts = [0, 500, 1000, 1500];
+    expect(countCardsBeyondRightEdge(lefts, cardWidth, 0, viewportWidth)).toBe(3); // 500,1000,1500 밖(visibleRight=400)
+    expect(countCardsBeyondRightEdge(lefts, cardWidth, 700, viewportWidth)).toBe(1); // visibleRight=1100 → 1500만 밖
+  });
+
+  it('returns 0 for an empty card list (org 0행과 동형 — 셀 것이 없다)', () => {
+    expect(countCardsBeyondRightEdge([], 110, 0, 400)).toBe(0);
   });
 });
 

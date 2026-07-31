@@ -6,7 +6,8 @@ import type { FlowMapLane, FlowMapNode, FlowMapEdgeKind, FlowMapEdgeGroup } from
 import {
   FLOW_MAP_GRID_STEP, FLOW_MAP_NOW_LINE_X, FLOW_MAP_DEPTH0_X, computeLaneHeight, shouldShowNoDeeperReason,
   computeNodePositions, computeSupersededNodeIds, computeEdgeLineEndpoints, groupEdgesByEndpoints,
-  edgeGroupStrokeWidth, countRenderedEdgeLines, hasConfirmedRenderedEdgeLine, PAST_BUNDLE_NODE_ID, PAST_BUNDLE_LEFT, PAST_BUNDLE_TOP,
+  edgeGroupStrokeWidth, countRenderedEdgeLines, hasConfirmedRenderedEdgeLine, countCardsBeyondRightEdge,
+  PAST_BUNDLE_NODE_ID, PAST_BUNDLE_LEFT, PAST_BUNDLE_TOP,
   PAST_BUNDLE_CARD_WIDTH, PAST_BUNDLE_CARD_HEIGHT, PAST_EXPANDED_LEFT, PAST_EXPANDED_TOP_START,
   PAST_EXPANDED_ROW_HEIGHT, PAST_EXPANDED_BOX_WIDTH,
 } from './derive-flow-map';
@@ -266,6 +267,42 @@ export function FlowMapCanvas({
   // 좌표를 "그 레인 안의 논리 좌표"로 바꾸는 기준점(computeNodePositions와 같은 좌표계).
   const laneContainerRef = useRef<HTMLDivElement | null>(null);
 
+  // story #2369(2026-07-31, PO 실측·유나 라이브 뒤집음) — "가로로는 못 움직인다"고 잘못
+  // 답했던 자리. 실은 overflow-x-auto가 이미 동작했는데(스크롤바가 overlay라 자리를 안
+  // 차지해 "안 보였을" 뿐) 아무 시각 신호가 없어 아무도 몰랐다 — 세로 접힘 줄(「움직임 없는
+  // 목표 N개 — 숨긴 것이 아니라 접은 것입니다」)과 «같은 꼴»로 대칭을 맞춘다.
+  // N은 "완전히" 화면 밖인 카드 수만 센다(countCardsBeyondRightEdge) — 상수 아님, 매 스크롤·
+  // 리사이즈마다 실측. 카드 위치는 lane마다 이미 순수함수로 계산해 두는 computeNodePositions를
+  // 재사용한다(간선 그리기와 같은 좌표계, 두 벌 안 만든다).
+  const allCardLefts = useMemo(
+    () => lanes.flatMap((lane) => Array.from(computeNodePositions(lane, NODE_ROW_HEIGHT, NOW_CLUSTER_X).values()).map((p) => p.left)),
+    [lanes],
+  );
+  const [offscreenCardCount, setOffscreenCardCount] = useState(0);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return undefined;
+    const check = () => setOffscreenCardCount(countCardsBeyondRightEdge(allCardLefts, NODE_CARD_WIDTH, el.scrollLeft, el.clientWidth));
+    check();
+    el.addEventListener('scroll', check, { passive: true });
+    window.addEventListener('resize', check);
+    return () => {
+      el.removeEventListener('scroll', check);
+      window.removeEventListener('resize', check);
+    };
+  }, [allCardLefts]);
+  // AC3 — "지금" 열이 기본 상태에서 보이게. 가로축이 시간축이므로 "지금"을 놓치면 좌우가
+  // 뜻을 잃는다. 컨테이너가 좁아 NOW_CLUSTER_X+카드폭이 clientWidth를 넘을 때만 스크롤을
+  // 옮긴다 — 이미 보이는 넓은 화면(대부분의 데스크톱)에서는 조건이 거짓이라 손 안 댐
+  // (AC8: 데스크톱 회귀 없음, 레인이 "처음" 채워질 때 1회만).
+  const hasLanes = lanes.length > 0;
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !hasLanes || el.clientWidth === 0) return;
+    if (NOW_CLUSTER_X + NODE_CARD_WIDTH <= el.clientWidth) return;
+    el.scrollLeft = Math.max(0, NOW_CLUSTER_X - el.clientWidth / 2);
+  }, [hasLanes]);
+
   const allEdges = useMemo(() => lanes.flatMap((l) => l.edges), [lanes]);
   const nodesById = useMemo(() => {
     const map = new Map<string, FlowMapNode>();
@@ -458,7 +495,7 @@ export function FlowMapCanvas({
   const isLinkingActive = linkDraft.phase !== 'idle';
 
   return (
-    <div className="overflow-hidden rounded-md border border-border bg-card">
+    <div className="relative overflow-hidden rounded-md border border-border bg-card">
       <div className="flex" style={{ height: HEADER_HEIGHT }}>
         <div className="w-[150px] shrink-0 border-b border-r border-border" />
         <div className="relative min-w-0 flex-1 overflow-hidden border-b border-border">
@@ -806,6 +843,22 @@ export function FlowMapCanvas({
           })}
         </div>
       </div>
+
+      {/* story #2369(2026-07-31) — 가로 잘림 발견성. 세로 접힘 줄과 «같은 꼴»(아이콘+굵은
+          수+설명)이되, 오른쪽 가장자리에 떠 있는 배지로 둔다(전체 폭 줄이면 스크롤 레이아웃
+          자체를 침범한다 — 세로 판은 캔버스 «아래»에 붙지만 가로 판은 캔버스 «가장자리
+          위»에 떠야 한다). pointer-events-none — 정보 전달용이지 클릭 대상이 아니다(세로
+          접힘 줄도 클릭 불가한 정적 안내문과 같은 성질). */}
+      {offscreenCardCount > 0 ? (
+        <div
+          data-testid="flow-canvas-offscreen-hint"
+          className="pointer-events-none absolute bottom-1 right-1 z-10 flex items-center gap-1.5 rounded border border-border bg-muted/90 px-2 py-1 text-[11px] text-muted-foreground shadow-sm"
+        >
+          <span aria-hidden="true">▸</span>
+          <b className="text-foreground">{t('flowCanvasOffscreenCount', { n: offscreenCardCount })}</b>
+          <span>{t('flowCanvasOffscreenReason')}</span>
+        </div>
+      ) : null}
 
       {/* 하단 범례 — 유나신 정정(2026-07-31, 라이브 실측 후속, 세 번째·최終 문구 확定): 옛
           4종×2축 범례는 실선(확定)이 «한 번도 안 나오는데» "실선=확定"이라 적어 없는 것을
