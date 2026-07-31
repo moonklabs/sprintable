@@ -360,6 +360,17 @@ jobs:
             echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 project_access_403_baseline.txt 없음 — 이 PR이 그 파일을 «처음 도입»하는 중이면 정상이다, story #2342 자신이 그 경우다. 다음 PR부터는 develop에 파일이 있어 실제 비교가 돈다)"
           fi
 
+  candidate-source-ownership-lint:
+    name: candidate_id source_id ownership lint (guard, story #2363)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan reference_semantic_candidates.py for candidate_id lookups missing source_id ownership check
+        working-directory: backend
+        run: python3 scripts/lint_candidate_source_ownership.py
+
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
   # main이 develop과 다른 파일셋(ee_pricing 0146/0147 부재)일 때의 그래프 단절을 원천적으로
   # 못 잡는다(실제로 못 잡아서 prod 승격이 롤백된 그 사고). PR base가 main일 때만 도는 이

@@ -360,17 +360,25 @@ class CandidateNotFoundError(Exception):
 
 
 async def declare_candidate(
-    db: AsyncSession, *, org_id: uuid.UUID, candidate_id: uuid.UUID, declared_by: uuid.UUID | None,
+    db: AsyncSession, *, org_id: uuid.UUID, source_id: uuid.UUID, candidate_id: uuid.UUID,
+    declared_by: uuid.UUID | None,
 ) -> ReferenceSemanticCandidate:
     """AC5 — 사람이 후보를 골라 「선언됨」으로 승격시킨다. ⛔AC4: 이 함수는 status·
     declared_by·declared_at **셋만** 바꾼다 — 그 외 어떤 부수효과(막힘·대기·종료·에이전트
     실행)도 일으키지 않는다(회귀 테스트+뮤테이션 자가검증이 이 계약을 지킨다).
     이미 declared된 것을 다시 declare해도 멱등(같은 값 재기록, 에러 아님) — 재클릭이
-    실패로 보이지 않게 한다."""
+    실패로 보이지 않게 한다.
+
+    ⛔IDOR 수정(story #2363, 오르테가/까심 실측 2026-07-31) — `source_id`가 필수 인자다.
+    caller(router)는 이미 project 접근권을 검사한 그 story의 id를 넘긴다. 이 조회가
+    `source_id`도 같이 걸어야 「접근 가능한 story 하나를 URL에 넣고 남의 candidate_id를
+    알면 그 행을 만진다」가 막힌다 — org_id만으로는 같은 org 다른 project의 candidate도
+    통과했다. 소유가 아니면 CandidateNotFoundError(404) — 존재 여부도 새지 않는다."""
     result = await db.execute(
         select(ReferenceSemanticCandidate).where(
             ReferenceSemanticCandidate.org_id == org_id,
             ReferenceSemanticCandidate.id == candidate_id,
+            ReferenceSemanticCandidate.source_id == source_id,
         )
     )
     candidate = result.scalar_one_or_none()
@@ -389,7 +397,8 @@ class InvalidRelationKindError(Exception):
 
 
 async def set_candidate_relation_kind(
-    db: AsyncSession, *, org_id: uuid.UUID, candidate_id: uuid.UUID, relation_kind: str | None,
+    db: AsyncSession, *, org_id: uuid.UUID, source_id: uuid.UUID, candidate_id: uuid.UUID,
+    relation_kind: str | None,
 ) -> ReferenceSemanticCandidate:
     """story #2223 판정(오르테가군, 2026-07-30) — "이 연결이 실재하는가"(declare)와 "무슨
     종류인가"(이 함수) 는 «다른 질문»이라 한 클릭에 안 묶는다. declare_candidate와 달리 이
@@ -398,13 +407,16 @@ async def set_candidate_relation_kind(
     무관하게 종 지정이 가능하다, 순서를 강제하지 않는다).
 
     relation_kind=None 허용 — 잘못 지정한 것을 「미분류」로 되돌리는 경로(AC10 정신: 모르는
-    것을 억지로 채운 채로 안 둔다)."""
+    것을 억지로 채운 채로 안 둔다).
+
+    ⛔IDOR 수정(story #2363) — `source_id` 필수(declare_candidate와 동형 이유)."""
     if relation_kind is not None and relation_kind not in RELATION_KINDS:
         raise InvalidRelationKindError(relation_kind)
     result = await db.execute(
         select(ReferenceSemanticCandidate).where(
             ReferenceSemanticCandidate.org_id == org_id,
             ReferenceSemanticCandidate.id == candidate_id,
+            ReferenceSemanticCandidate.source_id == source_id,
         )
     )
     candidate = result.scalar_one_or_none()
@@ -509,7 +521,7 @@ async def declare_new_candidate(
 
 
 async def undeclare_candidate(
-    db: AsyncSession, *, org_id: uuid.UUID, candidate_id: uuid.UUID,
+    db: AsyncSession, *, org_id: uuid.UUID, source_id: uuid.UUID, candidate_id: uuid.UUID,
 ) -> None:
     """story #2355(AC8) — 사람이 만든(또는 승격한) 연결을 지운다. ⛔`reject_candidate`와
     다르다 — reject는 `rejected_relations`에 쌍을 기록해 다음 스캔에서도 영구히 거르지만,
@@ -518,11 +530,14 @@ async def undeclare_candidate(
 
     ⛔status='declared'가 아닌 행(아직 estimated인 기계 후보)은 지울 수 없다 —
     CandidateNotDeclaredError. 그런 행을 지우고 싶으면 `reject_candidate`가 맞는 경로다(이
-    함수와 목적이 다르다: 그 표를 다음 스캔에서도 걸러야 하므로)."""
+    함수와 목적이 다르다: 그 표를 다음 스캔에서도 걸러야 하므로).
+
+    ⛔IDOR 수정(story #2363) — `source_id` 필수(declare_candidate와 동형 이유)."""
     result = await db.execute(
         select(ReferenceSemanticCandidate).where(
             ReferenceSemanticCandidate.org_id == org_id,
             ReferenceSemanticCandidate.id == candidate_id,
+            ReferenceSemanticCandidate.source_id == source_id,
         )
     )
     candidate = result.scalar_one_or_none()
@@ -538,7 +553,7 @@ class RejectedRelationNotFoundError(Exception):
 
 
 async def reject_candidate(
-    db: AsyncSession, *, org_id: uuid.UUID, candidate_id: uuid.UUID,
+    db: AsyncSession, *, org_id: uuid.UUID, source_id: uuid.UUID, candidate_id: uuid.UUID,
     rejected_by: uuid.UUID, reason: str | None = None,
 ) -> None:
     """story #2221 후속 — 관계 단위 기각. 클릭한 candidate 행의 (source, target) 쌍을
@@ -552,11 +567,14 @@ async def reject_candidate(
     ⛔rejected_by는 필수다(오르테가 지시, 2026-07-30) — 여러 사람이 같은 목록을 보므로
     「누가 기각했나」 없이는 되살릴 때 판단이 안 선다. caller(router)가 항상
     `_resolve_team_member_id`로 실제 team_member id를 넘긴다(그 함수는 non-optional
-    반환 계약이라 여기 None이 들어올 일이 없다)."""
+    반환 계약이라 여기 None이 들어올 일이 없다).
+
+    ⛔IDOR 수정(story #2363) — `source_id` 필수(declare_candidate와 동형 이유)."""
     result = await db.execute(
         select(ReferenceSemanticCandidate).where(
             ReferenceSemanticCandidate.org_id == org_id,
             ReferenceSemanticCandidate.id == candidate_id,
+            ReferenceSemanticCandidate.source_id == source_id,
         )
     )
     candidate = result.scalar_one_or_none()
