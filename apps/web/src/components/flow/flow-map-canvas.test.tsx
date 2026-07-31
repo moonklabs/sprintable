@@ -349,6 +349,41 @@ describe('FlowMapCanvas — past-bundle card (묶음이 선을 통과시킨다)'
     // 묶음 카드는 폭이 다르다(110px) — 좌표가 실제로 그 카드 좌상단(left:20)에서 시작해야 한다.
     expect(Number(line?.getAttribute('x1'))).toBeGreaterThanOrEqual(20);
   });
+
+  // story #2368(2026-07-31, 유나 라이브 실측) — 점선 무더기가 카드 글자를 덮었다. 원인은
+  // opacity-75가 «배경 자체»를 반투명하게 만들어 대비를 계산 불가능하게 한 것(DOM 순서상
+  // 카드가 SVG들보다 나중에 그려져도 opacity가 배경째로 얇으면 소용없다). 배경을 완전
+  // 불투명으로 고정 + z-index로 "선보다 위"를 DOM 순서에 기대지 않고 명시한다.
+  it('the past-bundle card has an OPAQUE background (no opacity utility) and an explicit z-index above the edge lines (story #2368)', async () => {
+    const lane = makeLane({
+      pastTotal: 99,
+      nowNodes: [makeNode({ id: 'n1' })],
+      pastBundle: { total: 99, internalCount: 99, outgoingCount: 8 },
+    });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    const card = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('안에서 이어진 것 99'));
+    expect(card).toBeTruthy();
+    const cls = card!.getAttribute('class') ?? '';
+    // opacity-75(또는 그 어떤 opacity 유틸)가 있으면 그 아래 지나가는 선이 카드 배경에
+    // 그대로 비쳐 "글자의 배경이 선"이던 그 병이 재발한다 — 완전 불투명이어야 한다.
+    expect(cls).not.toMatch(/\bopacity-\d/);
+    expect(cls).toContain('z-10');
+  });
+
+  it('the internal-count and hint lines use text-foreground (not text-muted-foreground, which fails AA 4.5:1 on bg-muted in light mode — measured 4.39:1) (story #2368 AC3)', async () => {
+    const lane = makeLane({
+      pastTotal: 99,
+      nowNodes: [makeNode({ id: 'n1' })],
+      pastBundle: { total: 99, internalCount: 99, outgoingCount: 8 },
+    });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    const internalCountEl = Array.from(container.querySelectorAll('div')).find((d) => d.textContent === '안에서 이어진 것 99');
+    const hintEl = Array.from(container.querySelectorAll('div')).find((d) => d.textContent === '누르면 펼쳐집니다');
+    expect(internalCountEl?.getAttribute('class')).toContain('text-foreground');
+    expect(internalCountEl?.getAttribute('class')).not.toContain('text-muted-foreground');
+    expect(hintEl?.getAttribute('class')).toContain('text-foreground');
+    expect(hintEl?.getAttribute('class')).not.toContain('text-muted-foreground');
+  });
 });
 
 describe('FlowMapCanvas — grouped edges (여러 선이 한 점에 모이면 굵기+수)', () => {

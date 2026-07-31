@@ -634,24 +634,40 @@ export function FlowMapCanvas({
                       접힌 상태(pastNodes 비어있음): 3줄(무엇이 몇 개 접혔나 · 접힌 것끼리
                       이어진 수(볼 수 없는 것, 수로 정직하게) · 접힌 것이 지금·미래로 보낸
                       수(볼 수 있는 것 — 선생님 "후속 작업이 어떻게 준비되는가" 물음의 답))
-                      + 클릭하면 펼쳐진다("누르면 펼쳐지는 것이 곧 줌인" — 별도 줌 컨트롤 불요). */}
+                      + 클릭하면 펼쳐진다("누르면 펼쳐지는 것이 곧 줌인" — 별도 줌 컨트롤 불요).
+                      ⛔story #2368(2026-07-31, 유나 실측) — 점선이 노드에서 왼쪽으로 뻗어
+                      이 카드가 있는 "지나온 것" 열을 통과한다. 옛 opacity-75는 카드 배경
+                      «자체»를 반투명하게 만들어 그 아래 지나가는 선이 글자 배경에 그대로
+                      비쳤다("글자의 배경이 «선»") — DOM 순서상 이 버튼이 SVG들보다 나중에
+                      그려져 시각적으로는 "위"였지만, opacity가 배경째로 얇아 대비를
+                      «계산할 수 없는» 상태였다. opacity를 빼 배경을 «완전 불투명»으로 고정
+                      (대비가 이제 bg-muted/text 고정값으로 계산 가능해진다) + z-10으로
+                      "선보다 위"를 DOM 순서에 기대지 않고 명시한다. */}
                   {lane.pastTotal > 0 && lane.pastNodes.length === 0 ? (
                     <button
                       type="button"
                       onClick={() => onTogglePastBundle(lane.epicId)}
-                      className="focus-inset absolute cursor-pointer rounded border border-border bg-muted px-1.5 py-1 text-left opacity-75 hover:border-brand/60"
+                      className="focus-inset absolute z-10 cursor-pointer rounded border border-border bg-muted px-1.5 py-1 text-left hover:border-brand/60"
                       style={{ left: PAST_BUNDLE_LEFT, top: PAST_BUNDLE_TOP, width: PAST_BUNDLE_CARD_WIDTH }}
                     >
                       <div className="font-mono text-[9px] font-semibold text-foreground">
                         {t('flowMapPastCount', { n: lane.pastTotal })} · {t('flowMapPastBundle')}
                       </div>
-                      <div className="text-[9px] text-muted-foreground">
+                      {/* story #2368 AC3 — 배경이 이제 고정(bg-muted, 완전 불투명)이라 대비가
+                          실제로 계산 가능해졌다: bg-muted 위 text-muted-foreground는 라이트
+                          4.39:1로 AA 4.5:1에 근소 미달이었다(측정, 2026-07-31) — 옆 줄과 같은
+                          text-foreground(18.07:1 라이트·14.26:1 다크)로 통일해 닫는다.
+                          text-brand(다음 줄, 「이어질 것」 강조색)는 4.27:1(라이트)/4.40:1(다크)로
+                          역시 근소 미달이지만 이 카드 안에서 유일한 강조 신호라 — 이 스토리의
+                          범위(「글자가 이긴다」까지, 색 조정은 별건)를 넘는 브랜드 토큰 변경이라
+                          그대로 두고 측정값만 기록한다(PO 판단 대기). */}
+                      <div className="text-[9px] text-foreground">
                         {t('flowMapPastInternalCount', { n: lane.pastBundle.internalCount })}
                       </div>
                       <div className="text-[9px] font-semibold text-brand">
                         {t('flowMapPastOutgoingCount', { n: lane.pastBundle.outgoingCount })}
                       </div>
-                      <div className="text-[9px] text-muted-foreground">
+                      <div className="text-[9px] text-foreground">
                         {loadingPastBundleEpicIds.has(lane.epicId) ? t('flowMapPastLoading') : t('flowMapPastExpandHint')}
                       </div>
                     </button>
