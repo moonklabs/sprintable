@@ -1,0 +1,107 @@
+name: Design Review Gate
+
+# story #2361: 시각·문구 PR이 「본 사람 없이」 나가는 것을 막는다 — design:pass 라벨 게이트.
+# 배경: 2026-07-31, PR 셋(#2720·#2722·#2725)이 reviews:0인 채로 서 있었고 CI 초록만 보고
+# "QA만 남았다"로 셌다. 시각·문구·카피는 CI가 원리적으로 못 보는 축이라 여덟 건이 샜다.
+#
+# 잰다(요약): apps/web/src/components/**·messages/**·app/**(globals.css 포함, api/** 제외)를
+# 건드린 PR에 design:pass 라벨이 없으면 이 체크는 빨강이다. 라벨이 붙으면 초록, 떼면 다시
+# 빨강이다(labeled/unlabeled 이벤트에도 돈다).
+#
+# ⛔⭐⭐AC8 — 트리거를 on.pull_request.paths로 거르지 않는다. paths로 거르면 무관 PR에선
+# 이 체크가 아예 안 뜨는데, required check으로 걸어 두면 GitHub이 그 미실행을 스킵=통과로
+# 셀 위험이 있다 — "안 재면서 초록"이 되는, 오늘 우리가 잡으려는 바로 그 병이다. 그래서 이
+# job은 트리거 경로 필터 없이 항상 돌고, 경로 판정은 아래 첫 스텝 안에서 git diff로 한다.
+#
+# 이 가드가 «못 잡는 것» — 넷(AC4). 선언 안 하면 다음 사람이 "이 가드가 다 본다"로 읽는다.
+#   ①라벨이 «옳게» 붙었는지는 못 본다 — 존재만 보고 내용은 안 본다. 계정이 하나라 "누가
+#     붙였나"로도 못 가른다 — 이건 의도다. 이 가드는 «틀린 판정»이 아니라 «비어 있음»을 막는다.
+#   ②⭐⭐라벨이 «언제» 붙었는지는 못 본다 — 제일 큰 구멍이다. 리뷰 뒤 라벨이 붙고 그 뒤
+#     커밋을 더 밀어도 라벨은 남는다 — 본 적 없는 코드가 pass를 달고 나갈 수 있다.
+#     (AC7) 이번 판(1차)에서는 이 구멍을 «선언만» 한다. 조이지 않는 이유: 라벨 부착 시각
+#     대조(timeline API로 "라벨링 시각 < 마지막 커밋 시각"이면 빨강)는 별도 API 호출과 별도
+#     실패 모드가 필요한 조각이라, 오늘 여덟 건이 요구하는 최소치(라벨 존재 자체가 없다)부터
+#     먼저 막는 게 값이 크다고 판단했다 — "없앤 것"이 아니라 "이번 판에서는 안 짓는 것"이다.
+#     2차에서 조인다.
+#   ③경로 밖의 시각 변화는 못 본다 — 위 패턴에 없는 자리(예: apps/web 밖 어디든)는 안 본다.
+#   ④디자인 축만 말한다 — QA·BE 축과는 무관하다. design:pass는 "디자인 축을 시각 담당이
+#     봤다"는 뜻이지 "이 PR이 전부 됐다"는 뜻이 아니다(AC6).
+#
+# ⛔사람을 인질로 잡지 않는다(AC5) — 이 가드는 CI 자리다. 런타임·요청경로에는 아무것도
+# 붙지 않는다. 라벨 두 개(design:pass·design:changes)는 유나가 이미 세웠다(2026-07-31).
+#
+# ⚠️이 워크플로우가 실제로 머지를 막으려면 GitHub 저장소 설정 > Branch protection의
+# required status checks에 아래 job 이름("Design review gate")을 등록해야 한다 — 그건
+# repo admin 권한이 필요해 이 PR 자체로는 못 하고, 별도로 요청해야 한다.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches: [main, develop]
+
+concurrency:
+  group: design-review-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  design-review-gate:
+    name: Design review gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # AC8: 잡은 항상 돈다 — 경로 판정은 여기, 잡 안에서 한다(트리거 레벨 paths 필터 없음).
+      # 세 줄 표기(triple-dot)로 head 기준 merge-base부터 diff한다 — base 브랜치가 그 사이
+      # 앞서 나간 커밋들이 "이 PR의 변경"으로 잘못 잡히는 것을 피한다.
+      - name: Determine if this PR touches design-review paths
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # 까심군 QA 지적(#2730 REQUEST_CHANGES): 여기 `|| true`를 붙이면 grep 0-매치뿐
+          # 아니라 git diff 자체의 «모든» 실패(SHA 유실·객체 손상·merge-base 계산 실패)까지
+          # 삼켜 CHANGED=""→in_scope=false→조용히 통과가 된다 — 이 파일 자신의 AC8("미실행을
+          # 통과로 세지 않는다")을 어기는 자리라 뺐다. git diff가 실패하면 이 잡은 빨강으로
+          # 죽어야 맞는다(못 재면 빨강). 아래 grep 파이프라인의 `|| true`는 남겨 둔다 —
+          # 그쪽은 정적 정규식+printf뿐이라 실패 경로가 사실상 "0-매치"뿐이다(까심군 판정).
+          CHANGED="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")"
+          echo "changed files:"
+          echo "${CHANGED}"
+          # AC2: 걸린 경로 — components/**·messages/**·app/**(globals.css는 app/**에 포함,
+          # 전역 토큰이 거기 산다) — 단 app/api/**는 시각이 아니므로 제외한다.
+          MATCHED="$(printf '%s\n' "${CHANGED}" \
+            | grep -E '^apps/web/src/components/|^apps/web/messages/|^apps/web/src/app/' \
+            | grep -Ev '^apps/web/src/app/api/' || true)"
+          if [ -n "${MATCHED}" ]; then
+            echo "in_scope=true" >> "$GITHUB_OUTPUT"
+            echo "This PR touches design-review paths:"
+            echo "${MATCHED}"
+          else
+            echo "in_scope=false" >> "$GITHUB_OUTPUT"
+            echo "No changed file matches the design-review path list — this PR is out of this gate's scope (not a skip: it was evaluated and found empty)."
+          fi
+
+      # AC1/AC6: design:pass가 있으면 초록, 없으면 빨강. labeled/unlabeled 이벤트가 트리거
+      # 목록에 있어 라벨을 떼면 이 스텝이 다시 돌아 빨강으로 되돌아간다.
+      - name: Enforce design:pass label when in scope
+        if: steps.scope.outputs.in_scope == 'true'
+        env:
+          HAS_DESIGN_PASS: ${{ contains(github.event.pull_request.labels.*.name, 'design:pass') }}
+        run: |
+          set -euo pipefail
+          if [ "${HAS_DESIGN_PASS}" = "true" ]; then
+            echo "design:pass present — design axis reviewed. (narrow scope: this means the visual/copy axis was looked at, not that QA/BE also passed.)"
+          else
+            echo "::error title=design:pass missing::This PR touches a visual/copy path (apps/web/src/components, apps/web/messages, or apps/web/src/app) without the design:pass label. A design guardian review is required before merge. This label means only 'the design axis was reviewed' — it does not mean the whole PR is done (QA/BE are separate axes)."
+            exit 1
+          fi
