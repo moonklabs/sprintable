@@ -627,28 +627,49 @@ async def create_story(
     # 필드에서 파싱된 게 아니라(그런 "필드"가 없다) 엔티티 전체가 원인이라는 sentinel
     # (source_field 기존 관례 "body"와 같은 원칙, 값만 다름 — app/models/reference.py 참조).
     # ⛔소급 없음(이 호출 자체가 신규 생성 시점에만 있다 — 옛 스토리는 그대로 「아직 모름」).
+    #
+    # ⭐story #2222(AC5, 2026-07-31 오르테가 확認 — 「지금도 도는 결함」): 예전엔 이 블록의
+    # 실패(예: registry 밖 origin_type)가 get_db의 단일 커밋/전체롤백 불변식을 그대로 타서
+    # **story 생성 전체를 실패시켰다**(부분성공 회피가 목적이었으나, 「낳음」 자동부착은
+    # story #2222부터 best-effort 부가기능이라 이 실패모드가 AC5와 정반대가 됐다 — caller가
+    # 0개라 지금까지 안 터졌을 뿐 이미 있던 결함). SAVEPOINT(begin_nested)로 격리해 이
+    # 블록만 롤백하고 story 생성은 그대로 진행한다(feedback_savepoint_failopen_session_
+    # poison 패턴 재사용 — 실패가 바깥 세션을 poison하지 않도록 격리).
     if body.origin_type is not None and body.origin_id is not None:
-        from app.services.reference_core import UnregisteredEntityTypeError, insert_reference
+        from app.services.reference_core import insert_reference
 
         try:
-            await insert_reference(
-                session,
-                org_id=org_id,
-                source_type=body.origin_type,
-                source_field="self",
-                source_id=body.origin_id,
-                target_type="story",
-                target_id=story.id,
-                form="mention",
-                created_by=await _resolve_team_member_id(auth, org_id, session),
-                relation="created_from",
+            async with session.begin_nested():
+                await insert_reference(
+                    session,
+                    org_id=org_id,
+                    source_type=body.origin_type,
+                    source_field="self",
+                    source_id=body.origin_id,
+                    target_type="story",
+                    target_id=story.id,
+                    form="mention",
+                    created_by=await _resolve_team_member_id(auth, org_id, session),
+                    relation="created_from",
+                )
+        except Exception:
+            # AC5: 자동부착 실패가 story 생성을 막지 않는다 — 조용히 삼키지 않고 로그로 남긴다.
+            logger.warning(
+                "story #2222: created_from 자동부착 실패(story_id=%s origin_type=%s origin_id=%s) "
+                "— story 생성은 그대로 진행",
+                story.id, body.origin_type, body.origin_id, exc_info=True,
             )
-        except UnregisteredEntityTypeError as exc:
-            # ⛔여기서 commit하지 않는다 — get_db 의존성이 요청 끝에 한 번만 commit하고,
-            # 예외가 나면 세션 전체(story 생성 flush 포함)를 rollback한다(app/core/database.py
-            # get_db). 부분성공(스토리는 남고 출처만 빠짐)을 만들지 않기 위해 그 불변식을
-            # 그대로 따른다 — 여기서 별도 commit을 하면 그 원자성이 깨진다.
-            raise HTTPException(status_code=400, detail=f"invalid origin_type: {exc}") from exc
+    elif body.origin_type is None and body.origin_id is None:
+        # ⚠️story #2222 AC3 — 「부모 없음」을 명시로 구분해 기록하는 것의 **약한 형태**다(오르테가
+        # 확認, 2026-07-31): entity_references는 행이 없으면 없는 것으로 두는 기존 철학을
+        # 그대로 따르므로(새 마킹 컬럼/행을 만들지 않는다), 이 로그만으로는 「진짜 최상위 생성」과
+        # 「에이전트가 알면서 origin을 안 채운 누락」이 데이터상 구분되지 않는다 — 나중에 셀 수
+        # 있게 로그로 남기는 것으로 **AC3을 갈음**할 뿐, 강한 형태(둘을 데이터로 구분)는 다음 판.
+        logger.info(
+            "story #2222: origin_type/origin_id 미지정(story_id=%s) — 최상위 생성으로 간주 "
+            "(AC3 약한 형태: 로그로만 구분, 강한 구분은 후속)",
+            story.id,
+        )
     # ⛔파울로 판정(2026-07-30, dev 전수스윕 0/420 사고): entity_references(#2259/#2301)·
     # reference_semantic_candidates(#2328) reconcile이 update_story()에만 있고 이 함수
     # (POST 생성)에는 «한 번도» 없었다 — 사람은 스토리를 «본문을 다 쓰고» 만드는 것이
