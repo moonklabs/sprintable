@@ -143,7 +143,7 @@ async def test_update_rule_200():
              patch(
                  "app.routers.agent_routing_rules.resolve_required_project_id",
                  new_callable=AsyncMock, return_value=PROJECT_ID,
-             ):
+             ) as mock_resolve:
             updated = _make_rule()
             updated.name = "Updated Rule"
             mock_update.return_value = updated
@@ -152,6 +152,10 @@ async def test_update_rule_200():
                 resp = await c.put("/api/v2/agent-routing-rules", json=payload)
             assert resp.status_code == 200
             assert resp.json()["data"]["name"] == "Updated Rule"
+            # 오르테가 지적(2026-07-31): return_value만 걸면 이 유닛이 「그 함수를 실제로
+            # 타는가」를 안 잰다 — 호출이 나중에 사라져도 초록일 수 있다. assert_awaited_once로
+            # 그 자체를 고정한다.
+            mock_resolve.assert_awaited_once()
     finally:
         app.dependency_overrides.clear()
 
