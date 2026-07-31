@@ -64,11 +64,17 @@ async def _engine():
 
 async def _seed(s) -> uuid.UUID:
     """ORG · PROJ(project_id 있음) · STORY(project_id=PROJ) · human owner(project_access) ·
-    agent team_member · merge 게이트 1건(work_item_type=story). gate_id 반환."""
+    agent team_member · merge 게이트 1건(work_item_type=story). gate_id 반환.
+
+    ⚠️team_members는 실 배포 스키마에서 members ⋈ project_access UNION 뷰라 직접 INSERT/
+    DELETE 불가(CI 실측: ObjectNotInPrerequisiteStateError — cannot delete from view). 로컬
+    create_all은 이 모델을 실 테이블로 지어 조용히 통과했었다(로컬 초록≠CI). 실 base 테이블인
+    members + project_access(member_id 경유)에 심으면 뷰가 자연히 반영한다 — test_2215_report_
+    done_owner_floor_agent_id_realdb.py `_seed_agent_with_grant`와 동일 관례."""
     for sql in [
         f"DELETE FROM gate WHERE org_id='{ORG}'",
-        f"DELETE FROM team_members WHERE org_id='{ORG}'",
         f"DELETE FROM project_access WHERE project_id='{PROJ}'",
+        f"DELETE FROM members WHERE org_id='{ORG}'",
         f"DELETE FROM org_members WHERE org_id='{ORG}'",
         f"DELETE FROM stories WHERE org_id='{ORG}'",
         f"DELETE FROM projects WHERE org_id='{ORG}'",
@@ -85,12 +91,12 @@ async def _seed(s) -> uuid.UUID:
         f"(gen_random_uuid(),'{PROJ}','{OWNER_OM}','granted','owner')",
         f"INSERT INTO stories (id,org_id,project_id,title,status,priority) VALUES "
         f"('{STORY}','{ORG}','{PROJ}','S','backlog','medium')",
+        f"INSERT INTO members (id,org_id,type,name,is_active) VALUES "
+        f"('{AGENT_TM}','{ORG}','agent','에이전트',true)",
+        f"INSERT INTO project_access (id,project_id,member_id,permission) VALUES "
+        f"(gen_random_uuid(),'{PROJ}','{AGENT_TM}','granted')",
     ]:
         await s.execute(text(sql))
-    from app.models.team import TeamMember
-    s.add(TeamMember(
-        id=AGENT_TM, org_id=ORG, project_id=PROJ, type="agent", name="에이전트", role="member",
-    ))
     from app.models.gate import Gate
     gate = Gate(
         id=uuid.uuid4(), org_id=ORG, work_item_id=STORY, work_item_type="story",
