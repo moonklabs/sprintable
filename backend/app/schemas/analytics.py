@@ -284,3 +284,20 @@ class GoalEdge(BaseModel):
     to_goal_id: uuid.UUID
     count: int
     kind: str | None = None
+
+
+class PendingCandidateCountResponse(BaseModel):
+    """story #2366 — 주어진 목표(epic) 집합 안에서 확認 대기 중인
+    `reference_semantic_candidates(status='estimated')` 후보 쌍 수. `GoalEdge`가 세는
+    `status='declared'` 축은 건드리지 않는 별도 지표다(#2360 AC3 "자동 확定 금지"의
+    대가를 이 응답이 깨지 않는다 — estimated는 여기서도 「확定된 연결」이 아니라
+    「대기 중인 제안」으로만 취급된다).
+
+    `requested_count`/`processed_count`/`skipped_epic_ids`는 `EpicFlowNodesBatchResponse`
+    와 동일 계약(입력이 상한을 넘으면 앞쪽만 처리하고 나머지는 skipped로 정직하게
+    알린다) — 새 상한·새 필드 이름을 짓지 않는다."""
+
+    count: int
+    requested_count: int
+    processed_count: int
+    skipped_epic_ids: list[uuid.UUID]
