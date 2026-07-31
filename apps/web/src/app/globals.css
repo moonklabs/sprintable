@@ -669,3 +669,5 @@
 .tiptap [data-type="toggleContent"] { padding-left: 1.25rem; margin-left: 0.875rem; border-left: 2px solid hsl(var(--border)); margin-top: 0.25rem; }
 [data-type="toggleSummary"],
 .tiptap [data-type="toggleSummary"] { cursor: pointer; }
+
+/* #2361 design-review-gate mutation-test touch — throwaway, will be reverted before merge */
