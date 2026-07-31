@@ -33,12 +33,30 @@ vi.mock('@/components/kanban/kanban-board', () => ({
   KanbanBoard: () => <div data-testid="kanban-board-stub">kanban</div>,
 }));
 
+// 유나 가디언 리뷰(2026-07-31, PR#2744 issuecomment) 회귀 가드 재료 — 옛 스텁은 items를
+// 안 받아 렌더했다("양성대조가 될 수 없는 표본"). 실제 kindLabel까지 텍스트로 노출해야
+// "항목이 «있는» 상태"에서 라벨 충돌을 값으로 잡을 수 있다.
 vi.mock('@/components/glance/exception-stream', () => ({
-  ExceptionStream: () => <div data-testid="exception-stream-stub" />,
+  ExceptionStream: ({ items = [] }: { items?: { id: string; kindLabel: string; claim: string }[] }) => (
+    <div data-testid="exception-stream-stub">
+      {items.map((it) => (
+        <div key={it.id} data-testid="exception-item">
+          <span data-testid="exception-item-kind">{it.kindLabel}</span>
+          <span data-testid="exception-item-claim">{it.claim}</span>
+        </div>
+      ))}
+    </div>
+  ),
 }));
 
+// vi.hoisted — loadGlanceData의 반환값을 테스트별로 오버라이드하기 위한 가변 mock. 기본은
+// attentionSignals: []다(대부분 테스트가 서랍 내용에 무관) — "항목이 있는" 케이스만 특정
+// 테스트에서 mockResolvedValueOnce로 덮어쓴다.
+const { loadGlanceDataMock } = vi.hoisted(() => ({
+  loadGlanceDataMock: vi.fn(async () => ({ memberMap: {}, attentionSignals: [] as unknown[] })),
+}));
 vi.mock('@/components/glance/load-glance-data', () => ({
-  loadGlanceData: async () => ({ memberMap: {}, attentionSignals: [] }),
+  loadGlanceData: loadGlanceDataMock,
 }));
 
 vi.mock('@/hooks/use-mobile', () => ({
@@ -81,6 +99,8 @@ function wrap(node: React.ReactNode) {
 beforeEach(() => {
   currentSearch = '';
   pushMock.mockClear();
+  loadGlanceDataMock.mockClear();
+  loadGlanceDataMock.mockResolvedValue({ memberMap: {}, attentionSignals: [] });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -187,5 +207,57 @@ describe('FlowPageClient — story #2352 정정(PO, 2026-07-31) — 관제 서�
     // "게이트·막힘 신호 · 0" 처럼 숫자를 붙이던 옛 라벨 자리 — 새 라벨은 그 어떤 아라비아
     // 숫자도 달지 않는다(그 수 자체가 원래 결함이었다).
     expect(summary!.textContent).not.toMatch(/\d/);
+  });
+});
+
+// 유나 가디언 리뷰(2026-07-31, PR#2744) — "지금 통과처럼 보이는 이유가 «서랍이 비어서»"였다.
+// attentionSignals=[]인 채로는 이 조건이 실패할 «수가 없어» 양성대조가 안 섰다(오늘 세 번째로
+// 나온 그 클래스 — feedback_positive_control_must_be_able_to_fail). 항목이 «있는» 상태로
+// 재구성해 실제 라벨 충돌을 값으로 잡는다.
+describe('FlowPageClient — story #2365 후속(유나, 2026-07-31) — 서랍 «항목»의 kindLabel도 헤딩 카드와 안 겹친다', () => {
+  it('a gate_pending item\'s kindLabel is not a substring collision with the header card\'s "게이트 승인 대기" phrase', async () => {
+    loadGlanceDataMock.mockResolvedValue({
+      memberMap: {},
+      attentionSignals: [
+        { kind: 'gate_pending', story_id: null, title: '결재 대기 중인 항목', ref: { approval_id: 'a1' } },
+      ],
+    });
+    await renderFlowClient();
+
+    const item = container.querySelector('[data-testid="exception-item"]');
+    expect(item).not.toBeNull();
+    const kindText = container.querySelector('[data-testid="exception-item-kind"]')?.textContent ?? '';
+    // 실제 충돌 모양은 «축자 일치»가 아니라 «부분 문자열 겹침»이었다 — 옛 값 "승인 대기"가
+    // 헤딩 카드 "게이트 승인 대기"의 부분 문자열이라 나란히 서면 같은 말로 읽혔다. 정확한
+    // 값으로 고정한다(단순 부등호보다 강한 판정 — mutation self-check로 옛 값 복원 시 이
+    // assertion이 정확히 RED 되는 것 확認했다).
+    expect(kindText).toBe('결재 대기');
+    expect('게이트 승인 대기').not.toContain(kindText);
+  });
+
+  it('a blocked item\'s kindLabel does not say "막힘" (banned word, story #2352) and states what is blocking it', async () => {
+    loadGlanceDataMock.mockResolvedValue({
+      memberMap: {},
+      attentionSignals: [
+        { kind: 'blocked', story_id: 's1', title: '막혀 있는 스토리', ref: {} },
+      ],
+    });
+    await renderFlowClient();
+
+    const kindText = container.querySelector('[data-testid="exception-item-kind"]')?.textContent ?? '';
+    expect(kindText).not.toBe('막힘');
+  });
+
+  it('a merge_ready item still renders its kindLabel plainly (no collision to fix here)', async () => {
+    loadGlanceDataMock.mockResolvedValue({
+      memberMap: {},
+      attentionSignals: [
+        { kind: 'merge_ready', story_id: 's2', title: '머지 준비된 스토리', ref: {} },
+      ],
+    });
+    await renderFlowClient();
+
+    const kindText = container.querySelector('[data-testid="exception-item-kind"]')?.textContent ?? '';
+    expect(kindText.length).toBeGreaterThan(0);
   });
 });
