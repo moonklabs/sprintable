@@ -1,0 +1,108 @@
+name: QA Review Gate
+
+# story #2364: QA 없이 머지되는 것을 막는다 — qa:pass 라벨 게이트.
+# 배경: 2026-07-31, PO가 PR 일곱(#2719·#2721·#2722·#2724·#2726·#2727·#2720)을 QA 없이
+# 눌렀다. 까심 사후검수: 여섯 APPROVE·하나(#2721) CRITICAL(authz 다섯 → #2363). CI는
+# "코드가 도는가"만 잰다 — authz 다섯 건은 테스트가 전부 초록이었다(그 테스트 자신이
+# "자기 프로젝트만" 쟀기 때문). "남의 프로젝트로 재는 사람"이 없었던 자리가 QA다.
+#
+# story #2361(design-review-gate.yml)과 같은 틀. 다른 점 하나(AC2): ⛔경로 필터가 없다 —
+# QA는 시각·문구뿐 아니라 «모든 PR»에 걸린다. 이번 판에서는 문서/CI 전용 PR도 예외로
+# 빼지 않는다(예외를 열면 그 예외가 자란다 — 필요해지면 그때 수를 세고 정한다).
+#
+# ⛔⭐⭐AC3 — 트리거를 on.pull_request.paths로 거르지 않는다(design-review-gate.yml AC8과
+# 같은 이유): required check에서 미실행이 스킵=통과로 세어지는 위험. 이 워크플로는 애초에
+# 경로 필터가 없으니 job은 항상 돌고, qa:pass 존재/신선도 판정만 아래 스텝에서 한다.
+#
+# ⭐AC4 — 라벨 신선도를 «처음부터» 건다(design-review-gate.yml #2731이 만든 판정을 그대로
+# 재사용 — 파일은 안 나누고 로직만 같은 패턴으로 복제했다. 근거: 2026-07-31 하루에 "승인
+# 뒤 코드가 바뀐" 실물이 셋 — #2725 라벨 뒤 develop 재당김·#2718 라벨 뒤 파일집합 변경·
+# 까심 QA APPROVE가 옛 SHA).
+#
+# 이 가드가 «못 잡는 것» — 셋(AC7). 선언 안 하면 다음 사람이 "이게 다 막는다"로 읽는다.
+#   ①라벨이 «옳게» 붙었는지는 못 본다 — 존재만 본다.
+#   ②계정이 하나라 "누가" 붙였는지로도 못 가른다.
+#   ③⭐⭐PO가 --admin으로 우회할 수 있는가 — required check도 admin merge는 못 막을 수
+#     있다. 실측(2026-07-31, gh api branches/{develop,main}/protection, repo rulesets 0건):
+#       develop: enforce_admins=true  → 지금은 admin도 required check을 못 건너뛴다
+#       main:    enforce_admins=false → admin은 지금도 required check을 건너뛸 수 있다
+#     (스토리 AC의 최초 문구는 "이 리포는 enforce_admins=false"였다 — 브랜치마다 갈리는
+#     것이 실측 결과라 블랑켓으로 안 쓴다. develop이 오늘 사고 PR들의 실제 merge base였다.)
+#     ⛔이 갭을 없애려면(main도 develop처럼) enforce_admins를 켜야 하는데 그건 이 스토리가
+#     안 짓는다 — "없앤다"가 아니라 "안 짓는다"다. 관리자가 스스로를 묶는 설정이라 그 판단은
+#     이 가드 밖(선생님/저장소 관리자 자리)이라고 본다.
+#
+# ⛔사람을 인질로 잡지 않는다 — 이 가드는 CI 자리다. 런타임·요청경로에는 아무것도 붙지
+# 않는다. qa:pass/qa:changes 라벨은 이 스토리 착수 시점에 없어서 새로 만들었다
+# (design:pass/design:changes와 같은 색·문구 관례로: pass=#0E8A16·changes=#D93F0B).
+#
+# ⚠️이 워크플로우가 실제로 머지를 막으려면 GitHub 저장소 설정 > Branch protection의
+# required status checks에 아래 job 이름("QA review gate")을 등록해야 한다 — repo admin
+# 권한이 필요해 이 PR로는 못 하고, 등록 자체의 양성대조(라벨 없는 PR이 실제로 merge 버튼이
+# 막히는지)까지 별도로 확認해야 "걸렸다"이다(AC6).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches: [main, develop]
+
+concurrency:
+  group: qa-review-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  qa-review-gate:
+    name: QA review gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # AC1: qa:pass가 없으면 빨강. labeled/unlabeled 이벤트가 트리거 목록에 있어 라벨을
+      # 떼면 이 스텝이 다시 돌아 빨강으로 되돌아간다. ⛔경로 필터 없음 — 모든 PR에 적용(AC2).
+      - name: Enforce qa:pass label (no path scoping — applies to every PR)
+        env:
+          HAS_QA_PASS: ${{ contains(github.event.pull_request.labels.*.name, 'qa:pass') }}
+        run: |
+          set -euo pipefail
+          if [ "${HAS_QA_PASS}" = "true" ]; then
+            echo "qa:pass present — QA reviewed this PR's user-facing path(s)."
+          else
+            echo "::error title=qa:pass missing::This PR has no qa:pass label. QA review is required before merge — CI green only proves the code runs, not that the paths a real user takes are correct (2026-07-31: authz gaps passed CI because the tests only checked same-project access; nobody checked cross-project)."
+            exit 1
+          fi
+
+      # AC4: qa:pass가 «있어도» 최신 커밋보다 먼저 붙었으면 stale이다(design-review-gate.yml
+      # #2731과 동일 로직 — 로직만 복제, 라벨 이름만 다르다). fail-closed: timeline 이벤트를
+      # 못 찾거나 gh api 자체가 실패해도 이 스텝은 그대로 실패(빨강)한다.
+      - name: Enforce qa:pass label freshness (not stale vs latest commit)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          LAST_COMMIT_TS="$(git log -1 --format=%cI "${HEAD_SHA}")"
+          LABEL_TS="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/events" --paginate \
+            --jq '[.[] | select(.event=="labeled" and .label.name=="qa:pass") | .created_at] | sort | last // empty')"
+          echo "latest commit (${HEAD_SHA}): ${LAST_COMMIT_TS}"
+          echo "qa:pass last attached: ${LABEL_TS:-<none found>}"
+          if [ -z "${LABEL_TS}" ]; then
+            echo "::error title=qa:pass timeline unreadable::qa:pass label is present but no matching 'labeled' timeline event was found for it — freshness can't be verified. Failing closed (treated as stale)."
+            exit 1
+          fi
+          LAST_COMMIT_EPOCH="$(date -d "${LAST_COMMIT_TS}" +%s)"
+          LABEL_EPOCH="$(date -d "${LABEL_TS}" +%s)"
+          if [ "${LABEL_EPOCH}" -lt "${LAST_COMMIT_EPOCH}" ]; then
+            echo "::error title=qa:pass is stale::qa:pass was attached at ${LABEL_TS}, before the latest commit (${LAST_COMMIT_TS}). Code has moved since QA reviewed — re-review and re-attach qa:pass."
+            exit 1
+          fi
+          echo "qa:pass attached at ${LABEL_TS} — at or after the latest commit (${LAST_COMMIT_TS}). Fresh."
