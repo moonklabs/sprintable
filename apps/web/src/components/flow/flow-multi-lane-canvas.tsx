@@ -8,7 +8,7 @@ import {
   deriveFlowMapLane, parseDependencyGraphEdges, parseReferenceCandidateEdges,
   type FlowMapEdge, type RawDependencyEdge, type RawReferenceCandidate,
 } from './derive-flow-map';
-import { FlowMapCanvas, HEADER_HEIGHT, NODE_ROW_HEIGHT, LANE_MIN_HEIGHT, type CreateLinkResult, type DeleteLinkResult } from './flow-map-canvas';
+import { FlowMapCanvas, FlowCanvasOffscreenHint, HEADER_HEIGHT, NODE_ROW_HEIGHT, LANE_MIN_HEIGHT, type CreateLinkResult, type DeleteLinkResult } from './flow-map-canvas';
 import { FlowCanvasResizePane } from './flow-canvas-resize-pane';
 import { declareResponseToEdge } from './flow-port-linking';
 import type { NextMakerGoal } from './derive-next-maker';
@@ -118,6 +118,11 @@ export function FlowMultiLaneCanvas({
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [pastItemsByEpic, setPastItemsByEpic] = useState<Map<string, EpicFlowNodeItem[]>>(new Map());
   const [loadingPastBundleEpicIds, setLoadingPastBundleEpicIds] = useState<Set<string>>(new Set());
+  // story #2369 QA 후속(2026-07-31) — FlowMapCanvas가 세는 오프스크린(가로 잘림) 수를 여기로
+  // 끌어올린다. FlowCanvasResizePane이 세로로 «실제 클리핑하는» 유일한 조상이라, 힌트는
+  // FlowMapCanvas 안이 아니라 그 조상의 «보이는 창» 기준(overlay prop)으로 그려야 항상
+  // 보인다(위 FlowCanvasResizePane/FlowMapCanvas 문서 참고).
+  const [offscreenCardCount, setOffscreenCardCount] = useState(0);
 
   const expandGoalIds = useMemo(() => expandGoals.map((g) => g.id).join(','), [expandGoals]);
 
@@ -273,7 +278,18 @@ export function FlowMultiLaneCanvas({
       {/* story #2224 AC18 — pane 높이를 사용자가 지정한다(레인 단위 스냅, 하한 1레인,
           기본=레인 3까지 누적, localStorage 영속, 되돌리기). FlowMapCanvas 자체는 높이를
           모른다 — 이 래퍼가 «몇 레인이 보이는가»만 결정하고 클리핑한다. */}
-      <FlowCanvasResizePane lanes={lanes} nodeRowHeight={NODE_ROW_HEIGHT} laneMinHeight={LANE_MIN_HEIGHT} headerHeight={HEADER_HEIGHT}>
+      <FlowCanvasResizePane
+        lanes={lanes}
+        nodeRowHeight={NODE_ROW_HEIGHT}
+        laneMinHeight={LANE_MIN_HEIGHT}
+        headerHeight={HEADER_HEIGHT}
+        // story #2369 QA 후속(2026-07-31, 유나 design:changes ③) — 배지 마크업은
+        // FlowCanvasOffscreenHint(flow-map-canvas.tsx) 단일 소스에서만 나온다(예전엔 여기
+        // 손으로 복제한 사본이었다). overlay로 넘기는 이유는 FlowCanvasResizePane이 이 자리를
+        // 세로 클리핑 «밖»(스크롤 컨테이너의 형제)에 그리기 때문 — FlowMapCanvas 안에 있었으면
+        // 콘텐츠 전체 높이 기준이 돼 클리핑 안(스크롤해야 보이는 자리)에 갔다.
+        overlay={<FlowCanvasOffscreenHint count={offscreenCardCount} />}
+      >
         <FlowMapCanvas
           lanes={lanes}
           onSelectStory={onSelectStory}
@@ -283,6 +299,7 @@ export function FlowMultiLaneCanvas({
           onCreateLink={handleCreateLink}
           onDeleteLink={handleDeleteLink}
           memberMap={memberMap}
+          onOffscreenCountChange={setOffscreenCardCount}
         />
       </FlowCanvasResizePane>
       {/* 접힘 줄(목업 그대로) — "숨긴 것이 아니라 접은 것입니다". 오늘은 펼치기 인터랙션이

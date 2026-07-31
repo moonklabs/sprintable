@@ -13,6 +13,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { FlowMapCanvas } from './flow-map-canvas';
+import { LANE_LABEL_WIDTH } from './derive-flow-map';
 import type { FlowMapLane, FlowMapNode, FlowMapEdge, FlowMapEdgeKind } from './derive-flow-map';
 import koMessages from '../../../messages/ko.json';
 
@@ -478,20 +479,39 @@ describe('FlowMapCanvas — story #2369 가로 잘림 발견성(세로 접힘 �
 
   it('shows the real offscreen card count(양성대조 — 상수 아님, 실측) and hides it when everything fits', async () => {
     mockScrollWidth = 1000;
-    // depth 0~4 → left = 402, 512, 622, 732, 842. clientWidth=700 → visibleRight=700.
-    // 완전히 밖(left>=700): 732, 842 → 2장.
+    // depth 0~4 → left = 402, 512, 622, 732, 842 — 그런데 이건 레인 콘텐츠(flex-1) 기준
+    // 좌표라, 실제 화면(스크롤 원점 기준)에서는 LANE_LABEL_WIDTH(150)만큼 더 오른쪽:
+    // 552, 662, 772, 882, 992(story #2369 QA 후속 — 라이브 실측으로 밝혀진 자리, 위
+    // allCardLefts 문서 참고). clientWidth=700 → visibleRight=700.
+    // 완전히 밖(adjustedLeft>=700): 772, 882, 992 → 3장.
     mockClientWidth = 700;
     const lane = makeQueueLane([0, 1, 2, 3, 4]);
     await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     const hint = container.querySelector('[data-testid="flow-canvas-offscreen-hint"]');
     expect(hint).not.toBeNull();
-    expect(hint?.textContent).toContain('카드 2장이 화면 밖');
+    expect(hint?.textContent).toContain('카드 3장이 화면 밖');
 
-    // 넓혀서 전부 보이게(clientWidth=1000, scrollLeft 0) — 힌트가 사라져야 한다(대칭:
-    // 세로 접힘 줄도 foldedCount===0이면 안 뜬다).
+    // 넓혀서 전부 보이게(clientWidth=1000, scrollLeft 0) — 가장 큰 adjustedLeft(992)도
+    // 1000 밑이라 전부 들어온다 — 힌트가 사라져야 한다(대칭: 세로 접힘 줄도 foldedCount===0
+    // 이면 안 뜬다).
     mockClientWidth = 1000;
     await act(async () => { scrollEl().dispatchEvent(new Event('resize')); window.dispatchEvent(new Event('resize')); });
     expect(container.querySelector('[data-testid="flow-canvas-offscreen-hint"]')).toBeNull();
+  });
+
+  // story #2369 QA 후속(2026-07-31, 라이브 실측 자가발견) — LANE_LABEL_WIDTH를 안 더하면
+  // 라벨 칸(150px) 폭만큼 "화면 밖"인 카드를 "아직 안 밖"으로 잘못 판정한다. 이 테스트는
+  // 그 경계에 정확히 걸치는 카드 하나로 회귀를 잡는다 — 라벨 칸을 «빼고» 재면(옛 버그) 이
+  // 카드는 "안 밖"으로 잘못 판정된다.
+  it('accounts for the lane label column width so a card sitting exactly at that boundary counts as offscreen(라벨 칸 폭 보정 회귀)', async () => {
+    mockScrollWidth = 1000;
+    // depth 0 하나만 → left(레인 콘텐츠 기준) = 402. 실제 화면 기준 = 402+150 = 552.
+    // clientWidth를 552로 두면(옛 버그: visibleRight=552, 402<552 → "안 밖"으로 오판)
+    // 보정 후엔 552>=552 → "밖"으로 잡혀야 한다.
+    mockClientWidth = LANE_LABEL_WIDTH + 402;
+    const lane = makeQueueLane([0]);
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
+    expect(container.querySelector('[data-testid="flow-canvas-offscreen-hint"]')?.textContent).toContain('카드 1장이 화면 밖');
   });
 
   it('the explanation span uses text-foreground (not the inherited text-muted-foreground, which fails AA 4.5:1 on bg-muted/90 in light mode — measured 4.43:1) (유나 라이브 실측 2026-07-31)', async () => {
@@ -507,14 +527,25 @@ describe('FlowMapCanvas — story #2369 가로 잘림 발견성(세로 접힘 �
   it('recomputes the count as the user scrolls(실측 — 스크롤할수록 밖인 카드가 준다)', async () => {
     mockClientWidth = 700;
     mockScrollWidth = 1000;
-    const lane = makeQueueLane([0, 1, 2, 3, 4]); // lefts: 402,512,622,732,842
+    // lefts(레인 콘텐츠 기준): 402,512,622,732,842 → 실제 화면 기준(+LANE_LABEL_WIDTH):
+    // 552,662,772,882,992.
+    const lane = makeQueueLane([0, 1, 2, 3, 4]);
     await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
-    expect(container.querySelector('[data-testid="flow-canvas-offscreen-hint"]')?.textContent).toContain('카드 2장이 화면 밖');
+    // visibleRight=700 → 772,882,992 밖 → 3장.
+    expect(container.querySelector('[data-testid="flow-canvas-offscreen-hint"]')?.textContent).toContain('카드 3장이 화면 밖');
 
     const el = scrollEl();
+    // story #2369 QA 후속(③) — 중간 스크롤에서도 여전히 밖인 카드가 있는데 라벨 칸 폭을
+    // 안 더하면 전부 "안에 들어온" 것으로 잘못 꺼졌었다(실측: scrollLeft=260에서 3장이
+    // 여전히 밖인데 힌트가 통째로 0으로 꺼짐). 여기 scrollLeft=250 → visibleRight=950 →
+    // 992(마지막 카드)만 여전히 밖 → 1장(0으로 꺼지면 안 된다).
+    Object.defineProperty(el, 'scrollLeft', { configurable: true, value: 250, writable: true });
+    await act(async () => { el.dispatchEvent(new Event('scroll')); });
+    expect(container.querySelector('[data-testid="flow-canvas-offscreen-hint"]')?.textContent).toContain('카드 1장이 화면 밖');
+
+    // 끝까지 밀면(scrollLeft=300 → visibleRight=1000) 992도 안에 들어와 0장 → 힌트 사라짐.
     Object.defineProperty(el, 'scrollLeft', { configurable: true, value: 300, writable: true });
     await act(async () => { el.dispatchEvent(new Event('scroll')); });
-    // visibleRight = 300+700 = 1000 → 전부(402~842+110=952 이하) 안에 들어온다 → 0장.
     expect(container.querySelector('[data-testid="flow-canvas-offscreen-hint"]')).toBeNull();
   });
 

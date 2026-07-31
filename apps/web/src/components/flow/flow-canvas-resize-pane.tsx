@@ -13,6 +13,12 @@ interface FlowCanvasResizePaneProps {
   laneMinHeight: number;
   headerHeight: number;
   children: ReactNode;
+  /** story #2369 QA 후속(2026-07-31) — 이 컴포넌트가 «세로로 실제 클리핑하는» 유일한 조상
+   * (`overflow-y-auto` + 고정 `displayHeightPx`)이다. 오프스크린(가로 잘림) 힌트처럼 "세로
+   * 스크롤 위치와 무관하게 항상 보여야 하는" 오버레이는 `children`(FlowMapCanvas, 클리핑
+   * 대상 그 자체 — 세로로는 클리핑 «되는» 쪽이라 자기 기준으로 붙이면 클리핑된 자리에
+   * 갇힌다) 안이 아니라 여기, 이 클리핑 컨테이너 자신의 «보이는 창» 기준으로 그려야 한다. */
+  overlay?: ReactNode;
 }
 
 // reference-candidates.ts의 readRejectedSet/writeRejectedSet과 같은 관례 — localStorage
@@ -55,7 +61,7 @@ function writeStoredLaneCount(value: string | null): void {
  * 보고 싶은가"라는 사용자의 «의도»이므로 매 렌더에서 현재 lanes로 다시 계산해도
  * 의미가 안 바뀐다.
  */
-export function FlowCanvasResizePane({ lanes, nodeRowHeight, laneMinHeight, headerHeight, children }: FlowCanvasResizePaneProps) {
+export function FlowCanvasResizePane({ lanes, nodeRowHeight, laneMinHeight, headerHeight, children, overlay }: FlowCanvasResizePaneProps) {
   const t = useTranslations('flow');
   const [laneCount, setLaneCount] = useState(() => readStoredLaneCount() ?? DEFAULT_LANE_COUNT);
   const [dragHeightPx, setDragHeightPx] = useState<number | null>(null);
@@ -140,8 +146,21 @@ export function FlowCanvasResizePane({ lanes, nodeRowHeight, laneMinHeight, head
 
   return (
     <div>
-      <div data-testid="flow-canvas-resize-pane" className="overflow-y-auto focus-inset" style={{ height: displayHeightPx }}>
-        {children}
+      {/* 유나 design:changes 재현(2026-07-31, PR#2757) — «반만» 고친 자리. `position:absolute`는
+          기준점(containing block)을 `position:relative` 조상으로 잡을 뿐, 그 조상 «자신»이
+          스크롤하면 콘텐츠와 함께 그대로 움직인다(overlay가 이 div의 자식이면서 이 div가
+          스크롤하니, overlay도 스크롤을 탄다 — 실측: scrollTop=350에서 overlay가 화면
+          밖으로 350px 밀려 사라짐). 클리핑(`overflow-y-auto`)과 기준점(`relative`+고정
+          height)을 같은 요소에 두면 이 병을 못 피한다 — 스크롤하는 요소(안쪽, `{children}`만)와
+          기준점 역할을 하는 요소(바깥쪽, 스크롤 안 함)를 갈라야 overlay가 안쪽의 스크롤과
+          무관해진다. `data-testid="flow-canvas-resize-pane"`와 `style={{ height }}`는 기존
+          테스트(paneHeightPx 등)가 참조하는 요소라 바깥쪽에 그대로 둔다 — 실제로 스크롤하는
+          것은 그 안의 새 `overflow-y-auto` div뿐이다. */}
+      <div data-testid="flow-canvas-resize-pane" className="relative" style={{ height: displayHeightPx }}>
+        <div className="h-full overflow-y-auto focus-inset">
+          {children}
+        </div>
+        {overlay}
       </div>
       <div className="flex items-center justify-center gap-2 border-t border-border bg-muted/20 py-1">
         <div

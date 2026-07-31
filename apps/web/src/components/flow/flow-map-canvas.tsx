@@ -7,7 +7,7 @@ import {
   FLOW_MAP_GRID_STEP, FLOW_MAP_NOW_LINE_X, FLOW_MAP_DEPTH0_X, computeLaneHeight, shouldShowNoDeeperReason,
   computeNodePositions, computeSupersededNodeIds, computeEdgeLineEndpoints, groupEdgesByEndpoints,
   edgeGroupStrokeWidth, countRenderedEdgeLines, hasConfirmedRenderedEdgeLine, countCardsBeyondRightEdge,
-  PAST_BUNDLE_NODE_ID, PAST_BUNDLE_LEFT, PAST_BUNDLE_TOP,
+  LANE_LABEL_WIDTH, PAST_BUNDLE_NODE_ID, PAST_BUNDLE_LEFT, PAST_BUNDLE_TOP,
   PAST_BUNDLE_CARD_WIDTH, PAST_BUNDLE_CARD_HEIGHT, PAST_EXPANDED_LEFT, PAST_EXPANDED_TOP_START,
   PAST_EXPANDED_ROW_HEIGHT, PAST_EXPANDED_BOX_WIDTH,
 } from './derive-flow-map';
@@ -86,6 +86,18 @@ interface FlowMapCanvasProps {
    * 리뷰 v1.1 정정, ㉣ — declaredBy가 나 아니면 실명, 못 찾으면 중립으로 떨어진다. 새 fetch
    * 아님 — goal-stem-card.tsx가 이미 들고 있는 memberMap을 그대로 흘려보낸다). */
   memberMap: Record<string, { name: string }>;
+  /** story #2369 QA 후속(2026-07-31) — 라이브 실측(dev-app, 1440×900): 이 컴포넌트 안에서
+   * `absolute bottom-1`로 띄우던 오프스크린 힌트가 멀티레인 호출부(flow-multi-lane-canvas.tsx)
+   * 에서는 `FlowCanvasResizePane`(`overflow-y-auto`로 세로를 «클리핑»하는 조상)의 «보이는
+   * 창»이 아니라 이 컴포넌트 자신의 루트(세로 클리핑 없이 전체 콘텐츠 높이만큼 자연히 커지는
+   * 상자) 기준으로 붙어, 화면 위 1814px 아래(콘텐츠의 «진짜 맨 아래»)에 가 있었다 —
+   * 「말한다」의 뜻은 「보이는 자리에서 말한다」인데 아무도 못 보는 자리에 있었던 것.
+   * 이 콜백이 있으면(멀티레인 판) 힌트를 이 컴포넌트 «안에서» 안 그리고 대신 수를 위로
+   * 보고한다 — 호출부가 실제로 세로로 클리핑되는 그 조상의 «보이는 창» 안에 직접 그린다
+   * (세로 접힘 줄「움직임 없는 목표 N개」과 정확히 같은 사정 — 그 줄도 클리핑 밖에 있어
+   * 항상 보인다). 콜백이 없으면(단일-레인 호출부, flow-epic-nodes.tsx — 세로 클리핑 조상이
+   * 아예 없다) 기존 그대로 이 컴포넌트 안에서 그린다. */
+  onOffscreenCountChange?: (count: number) => void;
 }
 
 export type CreateLinkResult = { ok: true } | { ok: false; error: string };
@@ -220,6 +232,33 @@ function FlowEdgeMarkerDefs() {
 }
 
 /**
+ * story #2369 QA 후속(2026-07-31, 유나 design:changes 재현 코멘트) — 오프스크린(가로 잘림)
+ * 배지 마크업의 단일 소스. 올리베이라군 자기 지적(③) — `LANE_LABEL_WIDTH` 사본 셋을 잡으면서
+ * «같은 diff 안에서» 이 배지 마크업(클래스 문자열·아이콘·i18n 키)을 두 자리(FlowMapCanvas
+ * 내부 · flow-multi-lane-canvas.tsx의 overlay)에 손으로 복제하는 새 사본을 만들었다 — 그
+ * 사본을 여기 하나로 없앤다. 콜백이 있는 호출부(멀티레인)는 이 컴포넌트를 클리핑 밖(overlay
+ * 슬롯)에서 쓰고, 콜백이 없는 호출부(단일-레인)는 FlowMapCanvas 안에서 그대로 쓴다 — 마크업
+ * 자체는 어느 쪽이든 같다.
+ */
+export function FlowCanvasOffscreenHint({ count }: { count: number }) {
+  const t = useTranslations('flow');
+  if (count <= 0) return null;
+  return (
+    <div
+      data-testid="flow-canvas-offscreen-hint"
+      className="pointer-events-none absolute bottom-1 right-1 z-10 flex items-center gap-1.5 rounded border border-border bg-muted/90 px-2 py-1 text-[11px] text-muted-foreground shadow-sm"
+    >
+      <span aria-hidden="true">▸</span>
+      <b className="text-foreground">{t('flowCanvasOffscreenCount', { n: count })}</b>
+      {/* 유나 라이브 실측(2026-07-31) — 컨테이너의 text-muted-foreground를 상속한 이 설명
+          줄이 bg-muted/90 위에서 라이트 4.43:1로 AA 미달(다크는 5.78 통과 — 또 라이트에서만).
+          #2368의 같은 처방 — text-foreground로 올려 4.5:1을 넘긴다. */}
+      <span className="text-foreground">{t('flowCanvasOffscreenReason')}</span>
+    </div>
+  );
+}
+
+/**
  * story #2224 L3 — 갈래 «지도»(유나 목업 `be8709a4` 판A/판B/판C, PO 판정 2026-07-30).
  * ⑤레인 높이가 «내용에서 계산»(고정 아님) · ①노드가 «의존 깊이 좌표»(x = depth × 110px,
  * computeNodeDepth가 실제 계산 — 오늘은 간선이 없어 전부 depth 0) · ②「지금」 세로선
@@ -242,6 +281,7 @@ function FlowEdgeMarkerDefs() {
  */
 export function FlowMapCanvas({
   lanes, onSelectStory, onTogglePastBundle, loadingPastBundleEpicIds, selectedNodeId = null, onCreateLink, onDeleteLink, memberMap,
+  onOffscreenCountChange,
 }: FlowMapCanvasProps) {
   const t = useTranslations('flow');
   const { currentTeamMemberId } = useDashboardContext();
@@ -274,8 +314,13 @@ export function FlowMapCanvas({
   // N은 "완전히" 화면 밖인 카드 수만 센다(countCardsBeyondRightEdge) — 상수 아님, 매 스크롤·
   // 리사이즈마다 실측. 카드 위치는 lane마다 이미 순수함수로 계산해 두는 computeNodePositions를
   // 재사용한다(간선 그리기와 같은 좌표계, 두 벌 안 만든다).
+  // ⛔story #2369 QA 후속(2026-07-31, 라이브 실측 자가발견) — computeNodePositions의 `left`는
+  // 레인 콘텐츠 영역(`flex-1`, 라벨 칸 «다음»부터) 기준이라 스크롤 원점(라벨 칸 «포함» 시작)
+  // 기준인 실제 화면 좌표보다 LANE_LABEL_WIDTH(150px)만큼 작다 — 이걸 안 더하면 라벨 칸
+  // 폭만큼 "화면 밖"인 카드를 "아직 안 밖"으로 잘못 판정한다(실측: style.left=1062px 카드가
+  // 실제 화면에서는 1212px에 그려져 있었다).
   const allCardLefts = useMemo(
-    () => lanes.flatMap((lane) => Array.from(computeNodePositions(lane, NODE_ROW_HEIGHT, NOW_CLUSTER_X).values()).map((p) => p.left)),
+    () => lanes.flatMap((lane) => Array.from(computeNodePositions(lane, NODE_ROW_HEIGHT, NOW_CLUSTER_X).values()).map((p) => p.left + LANE_LABEL_WIDTH)),
     [lanes],
   );
   const [offscreenCardCount, setOffscreenCardCount] = useState(0);
@@ -291,6 +336,11 @@ export function FlowMapCanvas({
       window.removeEventListener('resize', check);
     };
   }, [allCardLefts]);
+  // story #2369 QA 후속 — 멀티레인 호출부가 세로로 클리핑되는 «보이는 창» 안에서 이 힌트를
+  // 직접 그릴 수 있도록 수만 위로 보고한다(위 onOffscreenCountChange 문서 참고).
+  useEffect(() => {
+    onOffscreenCountChange?.(offscreenCardCount);
+  }, [offscreenCardCount, onOffscreenCountChange]);
   // AC3 — "지금" 열이 기본 상태에서 보이게. 가로축이 시간축이므로 "지금"을 놓치면 좌우가
   // 뜻을 잃는다. 컨테이너가 좁아 NOW_CLUSTER_X+카드폭이 clientWidth를 넘을 때만 스크롤을
   // 옮긴다 — 이미 보이는 넓은 화면(대부분의 데스크톱)에서는 조건이 거짓이라 손 안 댐
@@ -497,7 +547,12 @@ export function FlowMapCanvas({
   return (
     <div className="relative overflow-hidden rounded-md border border-border bg-card">
       <div className="flex" style={{ height: HEADER_HEIGHT }}>
-        <div className="w-[150px] shrink-0 border-b border-r border-border" />
+        {/* 올리베이라군 리뷰(2026-07-31, PR#2757) — 이 칸 너비는 offscreen 카운트 보정에
+            쓰이는 LANE_LABEL_WIDTH와 같은 값이어야 하는데, Tailwind 클래스로 사본을 두면
+            "누가 이 칸만 고치고 그 상수는 안 고치는" 조용한 어긋남을 막을 자가 없다(오늘
+            고친 결함의 뿌리가 정확히 이 종류의 어긋남이었다) — 사본을 없애고 상수 하나에서
+            나오게 한다. */}
+        <div className="shrink-0 border-b border-r border-border" style={{ width: LANE_LABEL_WIDTH }} />
         <div className="relative min-w-0 flex-1 overflow-hidden border-b border-border">
           <span className="absolute top-[5px] text-[9.5px] uppercase tracking-[0.06em] text-muted-foreground" style={{ left: 10 }}>
             {t('canvasPast')}
@@ -524,7 +579,8 @@ export function FlowMapCanvas({
             const supersededIds = computeSupersededNodeIds(lane.edges);
             return (
               <div key={lane.epicId} className="relative flex border-b border-border last:border-b-0" style={{ height }}>
-                <div className="w-[150px] shrink-0 border-r border-border px-2 py-1.5">
+                {/* 위 헤더 칸과 같은 사정 — LANE_LABEL_WIDTH 하나에서 나온다(사본 없음). */}
+                <div className="shrink-0 border-r border-border px-2 py-1.5" style={{ width: LANE_LABEL_WIDTH }}>
                   <p className="truncate text-[11px] font-semibold text-foreground">{lane.title}</p>
                 </div>
                 <div ref={laneIndex === 0 ? laneContainerRef : undefined} className="relative min-w-0 flex-1">
@@ -844,24 +900,13 @@ export function FlowMapCanvas({
         </div>
       </div>
 
-      {/* story #2369(2026-07-31) — 가로 잘림 발견성. 세로 접힘 줄과 «같은 꼴»(아이콘+굵은
-          수+설명)이되, 오른쪽 가장자리에 떠 있는 배지로 둔다(전체 폭 줄이면 스크롤 레이아웃
-          자체를 침범한다 — 세로 판은 캔버스 «아래»에 붙지만 가로 판은 캔버스 «가장자리
-          위»에 떠야 한다). pointer-events-none — 정보 전달용이지 클릭 대상이 아니다(세로
-          접힘 줄도 클릭 불가한 정적 안내문과 같은 성질). */}
-      {offscreenCardCount > 0 ? (
-        <div
-          data-testid="flow-canvas-offscreen-hint"
-          className="pointer-events-none absolute bottom-1 right-1 z-10 flex items-center gap-1.5 rounded border border-border bg-muted/90 px-2 py-1 text-[11px] text-muted-foreground shadow-sm"
-        >
-          <span aria-hidden="true">▸</span>
-          <b className="text-foreground">{t('flowCanvasOffscreenCount', { n: offscreenCardCount })}</b>
-          {/* 유나 라이브 실측(2026-07-31) — 컨테이너의 text-muted-foreground를 상속한 이
-              설명 줄이 bg-muted/90 위에서 라이트 4.43:1로 AA 미달(다크는 5.78 통과 — 또
-              라이트에서만). #2368의 같은 처방 — text-foreground로 올려 4.5:1을 넘긴다. */}
-          <span className="text-foreground">{t('flowCanvasOffscreenReason')}</span>
-        </div>
-      ) : null}
+      {/* story #2369 QA 후속(2026-07-31) — onOffscreenCountChange가 있으면(멀티레인 호출부)
+          호출부가 세로-클리핑 조상의 «보이는 창» 밖(overlay 슬롯)에서 FlowCanvasOffscreenHint를
+          직접 그린다(위 onOffscreenCountChange 문서 참고) — 여기서 또 그리면 세로로 클리핑돼
+          아무도 못 보는 자리에 중복으로 뜬다. 콜백이 없는(단일-레인, flow-epic-nodes.tsx)
+          호출부만 기존 그대로 여기서 그린다 — 그쪽은 세로 클리핑 조상이 없어 이 자리가 이미
+          맞다. */}
+      {!onOffscreenCountChange ? <FlowCanvasOffscreenHint count={offscreenCardCount} /> : null}
 
       {/* 하단 범례 — 유나신 정정(2026-07-31, 라이브 실측 후속, 세 번째·최終 문구 확定): 옛
           4종×2축 범례는 실선(확定)이 «한 번도 안 나오는데» "실선=확定"이라 적어 없는 것을

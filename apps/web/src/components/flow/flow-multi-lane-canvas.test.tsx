@@ -270,3 +270,78 @@ describe('FlowMultiLaneCanvas — N개 레인 병렬 fetch', () => {
     expect(createLinkCalls).toHaveLength(0);
   });
 });
+
+// story #2369 QA 후속(2026-07-31, 라이브 실측 — dev-app 1440×900) — merged PR#2753가 AC를
+// 못 채웠다: 오프스크린(가로 잘림) 힌트가 `FlowMapCanvas`(세로 클리핑되는 쪽) 자신의
+// `absolute bottom-1`로 붙어 있어, 그 조상 `FlowCanvasResizePane`(`overflow-y-auto`로
+// 실제 세로 클리핑하는 «보이는 창»)의 전체 콘텐츠 맨 아래(스크롤 1814px 아래)로 가버려
+// 기본 상태에서 화면에 0%였다.
+//
+// ⛔유나 design:changes 재현(2026-07-31) — 1차 수정은 힌트를 `[data-testid="flow-canvas-
+// resize-pane"]`의 «직계 자식»으로만 옮겼는데, 그 div 자신이 `overflow-y-auto`(스크롤하는
+// 쪽)였다 — `position:absolute`는 기준점(containing block)만 그 조상으로 잡을 뿐, 조상
+// 자신이 스크롤하면 콘텐츠와 함께 그대로 딸려 움직인다(실측: scrollTop=350에서 350px 밀려
+// 화면 밖으로 사라짐). 「직계 자식인가」와 「세로 스크롤에 클리핑 안 되는가」는 같은 질문이
+// 아니었다 — 직계 자식이면서 클리핑 «되는» 것이 정확히 그 반례였다. 이 테스트는 그래서
+// 위치(자식 관계)가 아니라 «성질»을 잰다: 힌트의 조상 중 `overflow-y-auto` 클래스를 가진
+// 요소가 하나도 없어야 한다 — 이 성질은 DOM을 나중에 어떻게 재배치해도 뜻이 안 바뀐다.
+describe('FlowMultiLaneCanvas — story #2369 QA 후속: 오프스크린 힌트가 세로 스크롤에 클리핑되지 않는다', () => {
+  let originalClientWidth: PropertyDescriptor | undefined;
+  let originalScrollWidth: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    originalClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    originalScrollWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth');
+    // depth 0 열의 기본 화면 좌표(FLOW_MAP_DEPTH0_X=402 + LANE_LABEL_WIDTH=150 = 552)보다
+    // 좁은 500으로 둬 depth-0 카드 하나만으로도(멀티 depth·edges 없이) 곧바로 offscreen이
+    // 되도록 한다 — LANE_LABEL_WIDTH 보정이 실제로 적용됐는지까지 같이 잡는 값.
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return 500; } });
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', { configurable: true, get() { return 1000; } });
+  });
+
+  afterEach(() => {
+    if (originalClientWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalClientWidth);
+    if (originalScrollWidth) Object.defineProperty(HTMLElement.prototype, 'scrollWidth', originalScrollWidth);
+  });
+
+  it('renders exactly one offscreen-hint, with no overflow-y-auto (vertically-scrolling) ancestor — not clipped regardless of scroll position', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/dependencies/graph')) return jsonResponse({ item_type: 'story', nodes: [], edges: [] });
+      if (url.includes('/api/analytics/epic-flow-nodes')) {
+        return jsonResponse({
+          data: {
+            epic_id: 'e1',
+            now: { total: 0, items: [] },
+            upcoming: { total: 1, shown: 1, items: [{ id: 'q1', story_number: 9, title: 'Queued Story', status: 'backlog', assignee_id: null, updated_at: '2026-07-31T00:00:00Z' }] },
+            past: { total: 0 }, blocked_count: 0, last_changed_at: null,
+          },
+        });
+      }
+      if (url.includes('/reference-candidates')) return jsonResponse([]);
+      throw new Error(`unexpected fetch: ${url}`);
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <FlowMultiLaneCanvas projectId="p1" expandGoals={[goal({ id: 'e1' })]} foldedCount={0} onSelectStory={() => {}} />,
+      ));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const hints = container.querySelectorAll('[data-testid="flow-canvas-offscreen-hint"]');
+    expect(hints).toHaveLength(1);
+    expect(hints[0]?.textContent).toContain('카드 1장이 화면 밖');
+
+    // 유나 design:changes 지적 — 「직계 자식인가」가 아니라 「세로로 스크롤하는 조상이
+    // 있는가」가 실제로 겨눠야 할 성질이다. 직계 자식이면서도 그 부모 자신이
+    // overflow-y-auto(스크롤하는 쪽)면 여전히 클리핑을 탄다(1차 수정이 정확히 이 반례였다).
+    let node = hints[0]!.parentElement;
+    let hasScrollingAncestor = false;
+    while (node) {
+      if (node.className.includes('overflow-y-auto')) hasScrollingAncestor = true;
+      node = node.parentElement;
+    }
+    expect(hasScrollingAncestor).toBe(false);
+  });
+});
