@@ -14,10 +14,56 @@ from app.models.team import TeamMember
 logger = logging.getLogger(__name__)
 
 
+def _gate_reason(evidence_status: str | None) -> str:
+    """story #2224 후속(오르테가 판정, 2026-07-31) — 「막힘」의 화면 표시용 원인 하나. DB
+    값은 식별자, 사람이 읽는 말은 FE 번역 몫(오늘 반복된 규율, #2328 relation_kind와 동일).
+
+    ⛔실측(2026-07-31): requires_human+pending 게이트 32건 전부 evidence_status=
+    'insufficient'라 지금은 이 함수가 사실상 "evidence_insufficient" 하나만 낸다 — 그래도
+    구조를 열어 두는 이유: doc_approval/artifact_canonicalize/qa 타입처럼 evidence_status가
+    구조적으로 항상 NULL인 게이트가 requires_human+pending으로 잡히는 날 "pending_approval"
+    이 저절로 뜬다(그때 이 함수를 다시 안 고쳐도 된다). "안 잰 0"과 "잰 0"은 다르다(오늘
+    규율) — 지금 한 값뿐인 것도 재서 나온 사실이라 화면이 말할 수 있어야 한다."""
+    return "evidence_insufficient" if evidence_status == "insufficient" else "pending_approval"
+
+
 class AnalyticsRepository:
     def __init__(self, session: AsyncSession, org_id: uuid.UUID) -> None:
         self.session = session
         self.org_id = org_id
+
+    async def _blocked_story_evidence(
+        self, story_ids: list[uuid.UUID],
+    ) -> dict[uuid.UUID, str | None]:
+        """story #2224 후속(오르테가 판정, 2026-07-31) — 「막힘」의 «단일 정의» 자리.
+        `get_epics_progress_lane`의 `lane["blocked"]`와 `get_epic_flow_nodes_batch`의
+        `blocked_count`/`gate_pending`이 «각자» 조건을 적으면 갈릴 수 있다(오늘 규율:
+        "값을 또 적지 말고 그 값 자체를 먹여라" — 여기서는 "조건을 또 적지 말고 같은
+        조건을 쓰라"). 그래서 두 자리 모두 이 메서드 하나를 부른다.
+
+        ⛔story #2224 후속(2026-07-31, PO 판정): 옛 필터는 `evidence_status='insufficient'`를
+        못박아 doc_approval/artifact_canonicalize/qa 타입 게이트(evidence_status가 구조적으로
+        항상 NULL — merge_verdict_gate만 그 필드를 채운다)를 «영영» 못 잡았다. "막힘"이라
+        이름 붙여 놓고 실제로는 merge 게이트만 세고 있었다(이름이 약속하는 축과 실제 축이
+        다른, 오늘 반복 관측된 병). 그 못박기를 뺐다 — 실측(2026-07-31): requires_human+
+        pending 32건이 전부 evidence_status='insufficient'라 이 변경으로 «지금은» 수가 안
+        바뀐다(회귀 없음, 아래 test_2224_blocked_definition_widened_no_count_change_realdb
+        가 이걸 고정한다).
+
+        반환: story_id -> evidence_status(원본 raw값, None 가능) — 호출자가 멤버십
+        (dict의 key)과 원인 표시(`_gate_reason` 입력) 둘 다 이 결과 하나에서 뽑는다."""
+        if not story_ids:
+            return {}
+        rows = (await self.session.execute(
+            select(Gate.work_item_id, Gate.evidence_status).where(
+                Gate.org_id == self.org_id,
+                Gate.work_item_type == "story",
+                Gate.work_item_id.in_(story_ids),
+                Gate.status == "pending",
+                Gate.requires_human.is_(True),
+            )
+        )).all()
+        return {row.work_item_id: row.evidence_status for row in rows}
 
     async def get_overview(self, project_id: uuid.UUID) -> dict:
         sprints_r = await self.session.execute(
@@ -183,11 +229,16 @@ class AnalyticsRepository:
         project 전체 에픽의 네 칸을 낸다.
 
         분류 우선순위(겹치는 신호를 하나로 정리하는 순서 — 다른 순서를 쓰면 답이 달라진다):
-          ①막힘(blocked)   = 그 story에 매인 pending Gate가 있고 requires_human=true·
-                              evidence_status='insufficient'다(§4-5 "문" · 민 실측 32건과
-                              같은 자로 맞춤 — PO 확認 요청에 따라 필터를 일치시켰다. 그냥
-                              "pending Gate 매임"만 쓰면 민 수와 다른 정의가 같은 화면에
-                              두 벌 서는 것이었다).
+          ①막힘(blocked)   = 그 story에 매인 pending Gate가 있고 requires_human=true다
+                              (§4-5 "문". ⛔2026-07-31 정의 넓힘 — 옛 정의는 여기에
+                              evidence_status='insufficient'까지 못박아 doc_approval/
+                              artifact_canonicalize/qa 타입 게이트(evidence_status가
+                              구조적으로 항상 NULL — merge_verdict_gate만 그 필드를
+                              채운다)를 영영 못 잡았다. "막힘"이라 이름 붙여 놓고 실제로는
+                              merge 게이트만 세고 있던 것 — 오늘 반복 관측된 "이름이
+                              약속하는 축과 실제 축이 다른" 병. `_blocked_story_evidence`가
+                              이 정의를 «한 곳»에서만 낸다(get_epic_flow_nodes_batch와
+                              공유 — 두 화면이 각자 조건을 적으면 갈린다).
           ②대기(waiting)   = ①이 아니고 next_action_category=='waiting'(#2262 SSOT 재사용 —
                               verification_pending: self_reported=True·아직 human_verified 안 됨)
           ③진행(in_progress) = ①②가 아니고 status=='in-progress'
@@ -200,16 +251,17 @@ class AnalyticsRepository:
         ⛔`other`에 실제로 드는 것 둘(성질이 다름, PO 지적 2026-07-30 — dev 실측 2026-07-30):
           ㉠정상적으로 네 칸 밖(최근 168h 이내 변경된 backlog/ready-for-dev/in-review · done)
             — dev 실측 약 2050/2079건, 압도 다수.
-          ㉡pending Gate가 매여 있는데 requires_human=false 또는 evidence_status가
-            'insufficient'가 아니라 ①막힘에서 빠진 것 — dev 실측 **1건**
-            (requires_human=False·evidence_status=None). 「승인도 자동 통과도 안 되는 결재」
-            류와 같은 냄새(#2261 계열)나 n=1이라 이 함수에서 별도 칸을 새로 만들지 않는다
-            — 필요해지면(건수가 늘면) 그때 쪼갠다. 지금은 ㉠과 ㉡을 `other` 하나로 합친 채
-            이 사실만 기록해 둔다(다음 사람이 "other=잡동사니"로 오인하지 않게).
-          참고: ①막힘(narrow) dev 실측 28건 — 민 실측 32건과 4건 차이는 **확認됨**: 이
-          함수는 epic_id가 있는 story만 레인에 담는데(에픽 좌측 레인이 목적이므로), 막힌
-          32건 중 4건이 epic_id가 없다(dev 실측). 버그 아님 — 이 엔드포인트의 스코프
-          자체가 "에픽에 속한 것"이라 그 4건은 애초에 이 화면의 대상이 아니다.
+          ㉡pending Gate가 매여 있는데 requires_human=false라 ①막힘에서 빠진 것(2026-07-31
+            정의 넓힘 後 — requires_human=True인데 evidence_status가 'insufficient'가
+            아닌 경우는 이제 ①에 들어간다). dev 실측 **1건**(requires_human=False·
+            evidence_status=None). 「승인도 자동 통과도 안 되는 결재」류와 같은 냄새
+            (#2261 계열)나 n=1이라 이 함수에서 별도 칸을 새로 만들지 않는다 — 필요해지면
+            (건수가 늘면) 그때 쪼갠다. 지금은 ㉠과 ㉡을 `other` 하나로 합친 채 이 사실만
+            기록해 둔다(다음 사람이 "other=잡동사니"로 오인하지 않게).
+          참고(2026-07-31 재실측 — 정의 넓힘 前후 수 동일): 정의를 넓혀도 requires_human+
+          pending 32건이 전부 evidence_status='insufficient'라 «지금은» 수가 안 바뀐다.
+          이 함수(에픽 있는 story만)와 민 실측(org 전체)의 4건 차이는 여전히 epic_id
+          유무 스코프 차이일 뿐(버그 아님, 이 엔드포인트 스코프가 "에픽에 속한 것"이라).
 
         ⛔이 우선순위·168h 임계 둘 다 «잠정»이다 — #2218(S0-1)이 임계를 실측(8~12건 나오는
         값)해 재확定하기 전까지 쓰는 값. 화면에 "이 수는 잠정"이라는 신호를 실어야 한다면
@@ -269,35 +321,28 @@ class AnalyticsRepository:
         evidence_ids = await batch_has_evidence(self.session, story_ids, "story")
         verified_map = await batch_human_verified(self.session, story_ids, "story")
 
-        blocked_r = await self.session.execute(
-            select(Gate.work_item_id.distinct()).where(
-                Gate.org_id == self.org_id,
-                Gate.work_item_type == "story",
-                Gate.work_item_id.in_(story_ids),
-                Gate.status == "pending",
-                Gate.requires_human.is_(True),
-                Gate.evidence_status == "insufficient",
-            )
-        )
-        blocked_ids = set(blocked_r.scalars().all())
+        blocked_evidence = await self._blocked_story_evidence(story_ids)
+        blocked_ids = set(blocked_evidence.keys())
 
-        # ⭐PO 지적(2026-07-30): ㉡류(pending Gate가 매였는데 위 좁힌 조건을 못 채워 blocked
-        # 밖으로 빠진 것)가 늘어나는 것을 "누가 아는가"가 남는다 — 칸(응답 필드)을 새로
-        # 만들지 않아도 «셀 수는» 있게, 매 호출마다 로그로 남긴다(dev 실측 2026-07-30: 1건).
+        # ⭐PO 지적(2026-07-30) — 2026-07-31 정의 넓힘에 맞춰 갱신: ㉡류는 이제 "pending
+        # Gate가 매였는데 requires_human=False라 blocked 밖으로 빠진 것" 하나뿐이다(예전엔
+        # requires_human=True인데 evidence_status가 'insufficient'가 아닌 경우도 ㉡이었으나,
+        # 그 경우는 이제 blocked에 들어간다 — 위 _blocked_story_evidence 참조). 늘어나는 것을
+        # "누가 아는가"가 남아 매 호출마다 로그로 남긴다(dev 실측 2026-07-30: 1건).
         gated_not_blocked_r = await self.session.execute(
             select(func.count(Gate.work_item_id.distinct())).where(
                 Gate.org_id == self.org_id,
                 Gate.work_item_type == "story",
                 Gate.work_item_id.in_(story_ids),
                 Gate.status == "pending",
-                ~((Gate.requires_human.is_(True)) & (Gate.evidence_status == "insufficient")),
+                Gate.requires_human.is_(False),
             )
         )
         gated_not_blocked_count = gated_not_blocked_r.scalar_one()
         if gated_not_blocked_count:
             logger.info(
                 "get_epics_progress_lane: gated-but-not-blocked(㉡) count=%d project_id=%s "
-                "(pending Gate 있으나 requires_human/evidence_status 조건 미충족 — other에 섞임, "
+                "(pending Gate 있으나 requires_human=False — other에 섞임, "
                 "story #2224 PO 지적 — 늘면 별도 칸 분리 검토)",
                 gated_not_blocked_count, project_id,
             )
@@ -395,13 +440,19 @@ class AnalyticsRepository:
 
         ⛔story #2679 후속(2026-07-30, PO 판정 — /flow 초점 스트립 4종 수치 중 둘): 새 쿼리 없이
         이미 fetch한 stories/blocked_ids에서 파생만 한다.
-          `blocked_count` — get_epics_progress_lane의 lane["blocked"](analytics.py 참조)와
-            «같은 Gate 필터»를 status와 무관하게 센다(형제 화면과 갈리지 않게).
+          `blocked_count` — get_epics_progress_lane의 lane["blocked"]와 «같은 자리»
+            (`_blocked_story_evidence`)에서 나온다 — 형제 화면과 갈릴 수 없다(조건을
+            두 번 안 적는다, 2026-07-31 정의 넓힘 때 한 곳으로 합쳤다).
           `last_changed_at` — ⛔「멈춘 시간」의 옳은 정의는 「마지막 머지/배포 이후」이나 그
             소스가 없다(merged_at 저장 안 됨·배포 추적 테이블 없음, PR 본문 참조). 지금 잴 수
             있는 것은 Story.updated_at 최댓값뿐이라 이름을 「마지막 변경 이후」로 좁혀 낸다 —
             «재는 것보다 이름이 넓으면 화면이 거짓말한다»(오늘 규율). ISO 문자열 그대로 반환
             (시간→N시간 환산은 FE 몫, 화면에 시계가 있다).
+
+        ⛔story #2224 후속(오르테가 판정, 2026-07-31) — 노드마다 `gate_pending`·`gate_reason`
+        신설(미르코가 노드 위에 문을 그리려면 «어느 노드가 막혔는지»가 필요, blocked_count는
+        에픽 단위 합계뿐이라 개별 노드에 못 붙는다). 새 쿼리 없음 — `_blocked_story_evidence`
+        가 이미 story_ids 전체를 한 번에 조회해 두므로 `_node()`에서 dict 조회만 한다.
         """
         requested = list(dict.fromkeys(epic_ids))  # 순서 보존 중복 제거
         processed = requested[: self.EPIC_FLOW_NODES_BATCH_MAX]
@@ -421,19 +472,11 @@ class AnalyticsRepository:
         stories = stories_r.all()
         story_ids = [s.id for s in stories]
 
-        blocked_r = await self.session.execute(
-            select(Gate.work_item_id.distinct()).where(
-                Gate.org_id == self.org_id,
-                Gate.work_item_type == "story",
-                Gate.work_item_id.in_(story_ids),
-                Gate.status == "pending",
-                Gate.requires_human.is_(True),
-                Gate.evidence_status == "insufficient",
-            )
-        )
-        blocked_ids = set(blocked_r.scalars().all())
+        blocked_evidence = await self._blocked_story_evidence(story_ids)
+        blocked_ids = set(blocked_evidence.keys())
 
         def _node(s) -> dict:
+            gate_pending = s.id in blocked_ids
             return {
                 "id": str(s.id),
                 "story_number": s.story_number,
@@ -441,6 +484,8 @@ class AnalyticsRepository:
                 "status": s.status,
                 "assignee_id": str(s.assignee_id) if s.assignee_id else None,
                 "updated_at": s.updated_at.isoformat(),
+                "gate_pending": gate_pending,
+                "gate_reason": _gate_reason(blocked_evidence[s.id]) if gate_pending else None,
             }
 
         by_epic: dict[uuid.UUID, dict] = {
@@ -452,9 +497,9 @@ class AnalyticsRepository:
         }
         for s in stories:
             bucket = by_epic[s.epic_id]
-            # ⛔story #2679(2026-07-30, PO 판정) — 초점 스트립 「문 앞 N」: 같은 Gate 필터를
-            # get_epics_progress_lane의 lane["blocked"](analytics.py:343)과 동일하게 status와
-            # 무관하게 센다(그 형제 메서드와 갈리면 두 화면이 다른 수를 말한다).
+            # ⛔story #2679(2026-07-30, PO 판정) — 초점 스트립 「문 앞 N」: blocked_ids가
+            # _blocked_story_evidence(위)에서 나와 get_epics_progress_lane의 lane["blocked"]와
+            # «같은 조건»이다(그 형제 메서드와 갈리면 두 화면이 다른 수를 말한다).
             if s.id in blocked_ids:
                 bucket["blocked_count"] += 1
             # ⛔story #2679 「멈춘 시간」 재료 — PO 판정(2026-07-30): 「최근 머지/배포 이후」가
