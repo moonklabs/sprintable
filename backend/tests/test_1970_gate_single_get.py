@@ -563,9 +563,13 @@ async def test_realdb_cold_get_task_gate_summary_none_when_soft_deleted():
 
 
 @pytest.mark.anyio
-async def test_list_gates_regression_doc_enrich_unaffected_by_project_id_field():
-    """GateResponse에 project_id 필드(default None) 추가가 list_gates 의 기존 doc-only enrich
-    응답을 깨지 않는지(project_id 는 list에서 채우지 않으므로 그대로 None)."""
+async def test_list_gates_doc_enrich_and_project_id_both_populated():
+    """⚠️2026-07-31 수정(오르테가 라이브 실측 — GET /api/v2/gates pending 37/37 project_id=None):
+    이 테스트는 원래 "list는 project_id를 채우지 않는다(GET /{id} 전용 enrich)"를 정상 동작으로
+    단정했었다 — 그게 바로 그 결함이었다(계산은 doc_proj로 이미 하는데 응답 필드로 흘려보내는
+    대입이 통째로 빠져 있었다). GateResponse.project_id 필드 추가가 doc-only work_item_summary
+    enrich 를 깨지 않는다는 원래 취지는 유지하되, project_id 도 이제 doc_proj 배치에서 정상
+    채워지는 것까지 함께 고정한다(단건 GET /{id}와 동형 — 회귀 시 재발 방지)."""
     from app.routers import gates as gates_mod
     from app.routers.gates import list_gates
 
@@ -584,4 +588,4 @@ async def test_list_gates_regression_doc_enrich_unaffected_by_project_id_field()
                                assigned_to_me=False, session=session, org_id=org, auth=auth)
 
     assert out[0].work_item_summary.title == "설계 문서"
-    assert out[0].project_id is None  # list는 project_id 를 채우지 않는다(GET /{id} 전용 enrich)
+    assert out[0].project_id == pid  # ⭐근본수정 본체 — doc_proj 배치가 응답 필드까지 흘러간다
