@@ -2594,7 +2594,6 @@
     "steerReorderAria": "Reorder {title}",
     "steerHandoffReceived": "Priorities received",
     "steerHandoffOrchestrating": "Applying",
-    "steerHandoffAgent": "Ortega",
     "steerError": "Couldn't save the new order. Please try again.",
     "steerCappedNote": "Showing the top {count}. Setting priorities floats items to the front.",
     "steerCommit": "Send priorities",
