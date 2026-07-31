@@ -115,7 +115,7 @@ async def test_list_and_single_gate_agree_on_project_id():
 
         async with Session() as s:
             listed = await list_gates(
-                work_item_id=None, work_item_type=None, status=None, assigned_to_me=False,
+                work_item_id=None, work_item_type=None, status=None, sort=None, assigned_to_me=False,
                 session=s, org_id=ORG, auth=_auth_human(OWNER_USER),
             )
         list_item = next(g for g in listed if g.id == gate_id)
@@ -147,7 +147,7 @@ async def test_list_gates_project_id_populated_for_agent_caller():
 
         async with Session() as s:
             listed = await list_gates(
-                work_item_id=None, work_item_type=None, status=None, assigned_to_me=False,
+                work_item_id=None, work_item_type=None, status=None, sort=None, assigned_to_me=False,
                 session=s, org_id=ORG, auth=_auth_agent(AGENT_TM),
             )
         list_item = next(g for g in listed if g.id == gate_id)
