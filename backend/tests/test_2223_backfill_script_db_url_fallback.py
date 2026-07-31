@@ -26,7 +26,7 @@ def _restore_env():
 
 
 def _reload_script():
-    import scripts.backfill_reference_semantic_candidates as mod
+    import scripts.jobs.backfill_reference_semantic_candidates as mod
     return importlib.reload(mod)
 
 

@@ -19,9 +19,16 @@ psycopg2 스킴이라 이 스크립트가 쓰는 async engine(asyncpg)용으로 
 넘어가지 않는다 — 어느 쪽을 썼는지(스킴+호스트만, 자격증명 제외) 첫 로그 줄에 남긴다.
 쓰기 작업.
 
-실행: cd backend && DATABASE_URL=... python -m scripts.backfill_reference_semantic_candidates
+실행: cd backend && DATABASE_URL=... python -m scripts.jobs.backfill_reference_semantic_candidates
       [--batch-size N] [--dry-run]
       (또는 ALEMBIC_URL만 있는 환경 — sprintable-verify-oneoff 잡 등 — 에서 그대로 실행)
+
+⚠️2026-07-31 오르테가 실측(#2727 후속) — 이 파일은 원래 `scripts/` 루트에 있었으나
+`backend/Dockerfile`이 `COPY scripts/jobs/`·`COPY scripts/migrate.sh`만 담아 scripts/ 루트는
+이미지에 안 들어갔다(#1666 의도적 축소 — deploy/setup/provision 등 비-런타임 제외).
+즉 이 스크립트가 backend:latest-dev 이미지 «안에 없어» Cloud Run Job이 못 열었다 —
+Dockerfile에 COPY를 더하지 않고 `scripts/jobs/`(같은 종류의 백필들이 이미 사는 자리)로
+옮기는 쪽이 근본이다.
 """
 from __future__ import annotations
 
