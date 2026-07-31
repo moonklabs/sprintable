@@ -537,7 +537,9 @@
     "orphanHint": "assign one and it joins that stem",
     "orphanPickAction": "Set goal",
     "orphanPickPlaceholder": "Select a goal",
-    "orphanAssignConfirm": "Assign"
+    "orphanAssignConfirm": "Assign",
+    "canvasResizeHandleLabel": "Resize map pane height — arrow up/down to adjust by lane, Home/End for minimum/maximum",
+    "canvasResizeReset": "Reset to default"
   },
   "board": {
     "backlinksTitle": "Things that point here",

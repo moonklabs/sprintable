@@ -4,6 +4,7 @@ import {
   computeNodeLogicalPositions, computeEdgeLineEndpoints, groupEdgesByEndpoints, edgeGroupStrokeWidth,
   parseDependencyGraphEdges, parseReferenceCandidateEdges, FLOW_MAP_TOP_N, FLOW_MAP_FOLD_THRESHOLD,
   FLOW_MAP_DEPTH0_X, FLOW_MAP_GRID_STEP, PAST_BUNDLE_NODE_ID,
+  computeCumulativeLaneHeight, snapToNearestLaneCount,
   type FlowMapEdge, type FlowMapLane, type RawReferenceCandidate,
 } from './derive-flow-map';
 import type { EpicFlowNodeItem } from './derive-flow';
@@ -475,6 +476,66 @@ describe('computeLaneHeight', () => {
       overflows: [{ depth: 0, hiddenCount: 5 }],
     });
     expect(computeLaneHeight(lane, 28, 0)).toBe(56); // (1 card + 1 overflow card) * 28
+  });
+});
+
+// story #2224 AC18(2026-07-31) — 지도 pane 리사이즈의 기본/한계 높이는 픽셀 하드코딩이
+// 아니라 실제 레인 높이(computeLaneHeight, 가변)를 누적한 계산값이다.
+describe('computeCumulativeLaneHeight', () => {
+  function makeLaneWithNowCount(epicId: string, nowCount: number): FlowMapLane {
+    return makeLane({
+      epicId,
+      nowNodes: Array.from({ length: nowCount }, (_, i) => ({
+        id: `${epicId}-n${i}`, storyNumber: i, title: 't', status: 'backlog', kind: 'now' as const, depth: 0,
+      })),
+    });
+  }
+
+  it('sums computeLaneHeight for the first N lanes, plus header height', () => {
+    const lanes = [makeLaneWithNowCount('e1', 1), makeLaneWithNowCount('e2', 1), makeLaneWithNowCount('e3', 1)];
+    // 각 레인 높이 = max(minHeight=70, 1*32) = 70(1개 노드는 32 < 70이라 최소값이 이긴다).
+    expect(computeCumulativeLaneHeight(lanes, 3, 32, 70, 22)).toBe(22 + 70 + 70 + 70);
+  });
+
+  it('clamps visibleLaneCount to lanes.length — asking for more than exist just returns "all of them"', () => {
+    const lanes = [makeLaneWithNowCount('e1', 1), makeLaneWithNowCount('e2', 1)];
+    expect(computeCumulativeLaneHeight(lanes, 99, 32, 70, 22)).toBe(computeCumulativeLaneHeight(lanes, 2, 32, 70, 22));
+  });
+
+  it('0 lanes requested (or 0 lanes exist) returns just the header height', () => {
+    const lanes = [makeLaneWithNowCount('e1', 1)];
+    expect(computeCumulativeLaneHeight(lanes, 0, 32, 70, 22)).toBe(22);
+    expect(computeCumulativeLaneHeight([], 3, 32, 70, 22)).toBe(22);
+  });
+
+  it('reflects each lane\'s own variable height (gate on content, not a flat multiply)', () => {
+    // e1은 노드 3개(96px > minHeight 70) · e2는 노드 1개(70px, 최소값 이김) — 균일하지 않다.
+    const lanes = [makeLaneWithNowCount('e1', 3), makeLaneWithNowCount('e2', 1)];
+    expect(computeCumulativeLaneHeight(lanes, 2, 32, 70, 22)).toBe(22 + 96 + 70);
+  });
+});
+
+describe('snapToNearestLaneCount — story #2224 AC18 ①(자유 픽셀 드래그, 결과는 레인 정수 경계)', () => {
+  it('snaps to the lane count whose cumulative height is closest to the candidate', () => {
+    // 누적: [50, 120, 200] (레인 1: 50 · 레인 2: +70=120 · 레인 3: +80=200)
+    const laneHeights = [50, 70, 80];
+    expect(snapToNearestLaneCount(laneHeights, 45)).toBe(1); // 50에 제일 가깝다
+    expect(snapToNearestLaneCount(laneHeights, 115)).toBe(2); // 120에 제일 가깝다
+    expect(snapToNearestLaneCount(laneHeights, 500)).toBe(3); // 그 이상은 마지막 경계(전부 보임)
+  });
+
+  it('an exact tie rounds to the SMALLER lane count (drag intent reads as "not quite there yet")', () => {
+    const laneHeights = [50, 50]; // 누적 [50, 100], 후보 75는 둘 다 25만큼 떨어짐
+    expect(snapToNearestLaneCount(laneHeights, 75)).toBe(1);
+  });
+
+  it('0 lanes returns 0 (호출부가 이 경우 드래그 UI 자체를 안 보여준다)', () => {
+    expect(snapToNearestLaneCount([], 999)).toBe(0);
+  });
+
+  it('never returns less than 1 when at least one lane exists (하한 = 레인 1개, AC18 ②)', () => {
+    const laneHeights = [50, 70, 80];
+    expect(snapToNearestLaneCount(laneHeights, -9999)).toBe(1);
   });
 });
 

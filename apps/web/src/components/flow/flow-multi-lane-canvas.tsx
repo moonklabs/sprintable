@@ -8,7 +8,8 @@ import {
   deriveFlowMapLane, parseDependencyGraphEdges, parseReferenceCandidateEdges,
   type FlowMapEdge, type RawDependencyEdge, type RawReferenceCandidate,
 } from './derive-flow-map';
-import { FlowMapCanvas, type CreateLinkResult, type DeleteLinkResult } from './flow-map-canvas';
+import { FlowMapCanvas, HEADER_HEIGHT, NODE_ROW_HEIGHT, LANE_MIN_HEIGHT, type CreateLinkResult, type DeleteLinkResult } from './flow-map-canvas';
+import { FlowCanvasResizePane } from './flow-canvas-resize-pane';
 import { declareResponseToEdge } from './flow-port-linking';
 import type { NextMakerGoal } from './derive-next-maker';
 import { parseCursorMeta } from '@/lib/pagination';
@@ -269,16 +270,21 @@ export function FlowMultiLaneCanvas({
 
   return (
     <div className="space-y-0">
-      <FlowMapCanvas
-        lanes={lanes}
-        onSelectStory={onSelectStory}
-        onTogglePastBundle={handleTogglePastBundle}
-        loadingPastBundleEpicIds={loadingPastBundleEpicIds}
-        selectedNodeId={selectedNodeId}
-        onCreateLink={handleCreateLink}
-        onDeleteLink={handleDeleteLink}
-        memberMap={memberMap}
-      />
+      {/* story #2224 AC18 — pane 높이를 사용자가 지정한다(레인 단위 스냅, 하한 1레인,
+          기본=레인 3까지 누적, localStorage 영속, 되돌리기). FlowMapCanvas 자체는 높이를
+          모른다 — 이 래퍼가 «몇 레인이 보이는가»만 결정하고 클리핑한다. */}
+      <FlowCanvasResizePane lanes={lanes} nodeRowHeight={NODE_ROW_HEIGHT} laneMinHeight={LANE_MIN_HEIGHT} headerHeight={HEADER_HEIGHT}>
+        <FlowMapCanvas
+          lanes={lanes}
+          onSelectStory={onSelectStory}
+          onTogglePastBundle={handleTogglePastBundle}
+          loadingPastBundleEpicIds={loadingPastBundleEpicIds}
+          selectedNodeId={selectedNodeId}
+          onCreateLink={handleCreateLink}
+          onDeleteLink={handleDeleteLink}
+          memberMap={memberMap}
+        />
+      </FlowCanvasResizePane>
       {/* 접힘 줄(목업 그대로) — "숨긴 것이 아니라 접은 것입니다". 오늘은 펼치기 인터랙션이
           없다(30일 재계산은 새로고침으로 자연히 갱신된다) — 화면이 «왜» 접었는지만 정직하게
           말한다. */}

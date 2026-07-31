@@ -23,15 +23,18 @@ const NODE_CARD_WIDTH = 110;
 const NODE_CARD_HEIGHT = 24;
 
 // 유나 목업(`be8709a4`) 실측 치수 — "그림이 정본"(2026-07-30), 비슷한 값이 아니라 그 숫자.
-const HEADER_HEIGHT = 22; // .colhd
+// story #2224 AC18(2026-07-31) — 이 셋을 export한다. flow-multi-lane-canvas.tsx가 리사이즈
+// 가능 pane의 기본/최소 높이를 «같은 상수»로 계산해야 한다(따로 값을 베끼면 그 사본이
+// 낡을 때 두 화면이 다른 수를 말하게 된다).
+export const HEADER_HEIGHT = 22; // .colhd
 // ⛔story #2224 AC17-C(2026-07-31, 유나 라이브 실측 05:28Z·확定 05:34Z) — 노드가 두 줄
 // (「#2296 · In Progress」)이던 이유는 상태 글자였는데, 좌측 3px 색이 이미 §4-4의 상태
 // 정본이라 글자는 «중복»이었다. 상태 글자를 빼 한 줄(24px)로 줄이고 행 간격을 28→32로
 // 올린다(단순 「행 간격 ≥ 노드 높이 + 8」자를 지금 값에 그대로 대면 48이 되어 AC17-A(캔버스가
 // 레인 수 × 76을 따라간다)를 더 나쁘게 하므로, 노드를 줄이는 것과 «짝»으로 낸 값 — 8개 ×
 // 32 = 256px, 겹침 0쌍).
-const NODE_ROW_HEIGHT = 32;
-const LANE_MIN_HEIGHT = 70;
+export const NODE_ROW_HEIGHT = 32;
+export const LANE_MIN_HEIGHT = 70;
 const NOW_CLUSTER_X = FLOW_MAP_NOW_LINE_X - 40; // "지금" 노드는 세로선 바로 왼쪽에 클러스터(착수시각순)
 
 /** story #2353 — 포트 잇기 상태기계. 포인터 드래그와 키보드(AC13)가 같은 phase들을 타되
