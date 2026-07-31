@@ -657,14 +657,18 @@ export function FlowMapCanvas({
                           실제로 계산 가능해졌다: bg-muted 위 text-muted-foreground는 라이트
                           4.39:1로 AA 4.5:1에 근소 미달이었다(측정, 2026-07-31) — 옆 줄과 같은
                           text-foreground(18.07:1 라이트·14.26:1 다크)로 통일해 닫는다.
-                          text-brand(다음 줄, 「이어질 것」 강조색)는 4.27:1(라이트)/4.40:1(다크)로
-                          역시 근소 미달이지만 이 카드 안에서 유일한 강조 신호라 — 이 스토리의
-                          범위(「글자가 이긴다」까지, 색 조정은 별건)를 넘는 브랜드 토큰 변경이라
-                          그대로 두고 측정값만 기록한다(PO 판단 대기). */}
+                          ⛔PO 재정정(2026-07-31, 유나 라이브 재측정) — text-brand(다음 줄)도
+                          라이트 4.27:1·다크 4.40:1로 «두 테마 다» AA 미달이었다(opacity-75가
+                          걷히며 «계산 가능해져 드러난» 것 — 이 PR이 만든 결함이 아니다). PO의
+                          첫 판정("이 판에서 안 고친다")은 «--brand 전역 토큰을 바꾸는 것»과
+                          «이 줄만 다른 토큰으로 옮기는 것»을 안 갈랐던 것이라 정정됐다 — 후자는
+                          토큰 무관·한 줄짜리 스코프다. 구분은 이미 "여기서 나온 다음"이라는
+                          말이 하고 있어 색은 보조 신호였다(유나) — text-foreground로 통일해도
+                          뜻이 안 죽는다. --brand 토큰 자체는 전역이라 안 건드린다. */}
                       <div className="text-[9px] text-foreground">
                         {t('flowMapPastInternalCount', { n: lane.pastBundle.internalCount })}
                       </div>
-                      <div className="text-[9px] font-semibold text-brand">
+                      <div className="text-[9px] font-semibold text-foreground">
                         {t('flowMapPastOutgoingCount', { n: lane.pastBundle.outgoingCount })}
                       </div>
                       <div className="text-[9px] text-foreground">

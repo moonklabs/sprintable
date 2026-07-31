@@ -370,7 +370,7 @@ describe('FlowMapCanvas — past-bundle card (묶음이 선을 통과시킨다)'
     expect(cls).toContain('z-10');
   });
 
-  it('the internal-count and hint lines use text-foreground (not text-muted-foreground, which fails AA 4.5:1 on bg-muted in light mode — measured 4.39:1) (story #2368 AC3)', async () => {
+  it('the internal-count, outgoing-count, and hint lines all use text-foreground — not text-muted-foreground(라이트 4.39:1 미달) or text-brand(라이트 4.27:1·다크 4.40:1 «두 테마 다» 미달) on bg-muted (story #2368 AC3, PO 재정정 2026-07-31)', async () => {
     const lane = makeLane({
       pastTotal: 99,
       nowNodes: [makeNode({ id: 'n1' })],
@@ -378,9 +378,12 @@ describe('FlowMapCanvas — past-bundle card (묶음이 선을 통과시킨다)'
     });
     await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} memberMap={{}} />)); });
     const internalCountEl = Array.from(container.querySelectorAll('div')).find((d) => d.textContent === '안에서 이어진 것 99');
+    const outgoingCountEl = Array.from(container.querySelectorAll('div')).find((d) => d.textContent === '여기서 나온 다음 8건');
     const hintEl = Array.from(container.querySelectorAll('div')).find((d) => d.textContent === '누르면 펼쳐집니다');
     expect(internalCountEl?.getAttribute('class')).toContain('text-foreground');
     expect(internalCountEl?.getAttribute('class')).not.toContain('text-muted-foreground');
+    expect(outgoingCountEl?.getAttribute('class')).toContain('text-foreground');
+    expect(outgoingCountEl?.getAttribute('class')).not.toMatch(/\btext-brand\b/);
     expect(hintEl?.getAttribute('class')).toContain('text-foreground');
     expect(hintEl?.getAttribute('class')).not.toContain('text-muted-foreground');
   });
