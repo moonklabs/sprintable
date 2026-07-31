@@ -661,6 +661,13 @@ jobs:
       - name: "Verify focus-inset coverage on scroll containers (story #2062 regression guard)"
         run: pnpm --filter web verify:focus-inset-coverage
 
+      # story #2367 회귀가드: 같은 파일이 렌더하는 두 문구가(한쪽이 {n}류 보간으로 수와
+      # 함께 서는 경우) 부분문자열로 겹치면 실패한다(#2352·#2365 — 「막힘 28↔0」·「승인 대기
+      # 30↔없음」과 같은 화면 자기모순 재발 방지). ⛔같은 화면이라도 다른 파일이 원인인
+      # 경우(#2352·#2365 원 사고 자체)는 이 v1 스코프 밖 — 스크립트 헤더 주석 참조.
+      - name: "Verify no i18n phrase substring collision (story #2367 regression guard)"
+        run: pnpm --filter web verify:no-i18n-phrase-collision
+
       - name: Test
         # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead
         # of being masked by tail's 0 — without it the unit-test gate was a no-op
