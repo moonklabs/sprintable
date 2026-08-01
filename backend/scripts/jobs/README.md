@@ -37,9 +37,13 @@ against dev is PO/infra-lane, same as any other Cloud Run job execution.
 `app.core.database` import) instead of checking `os.environ["DATABASE_URL"]` directly —
 see any of `backfill_reference_semantic_candidates.py`, `backfill_activity_events.py`, or
 `expire_undeliverable_pending_dispatched_events.py` for the pattern.
-`test_2384_scripts_jobs_alembic_url_fallback.py` guards this for the two scripts moved by
-#2384 after 카디르군 caught them shipping without it (documented the pattern, didn't follow
-it — 2026-08-01 REQUEST_CHANGES).
+`test_2384_scripts_jobs_alembic_url_fallback.py` guards this for the three scripts that
+had a hand-written test proving the exact runtime call order; story #2386 added a
+repo-wide static lint (`test_2386_scripts_jobs_db_url_fallback_lint.py`) that catches any
+`scripts/jobs/` script touching the DB (`app.core.database` import) without referencing
+`resolve_database_url` at all — so a future script added here without the fallback fails
+CI immediately instead of waiting for someone to run it against `sprintable-verify-oneoff`
+and discover it the hard way.
 
 ## Before you add a script here
 
@@ -54,10 +58,3 @@ it — 2026-08-01 REQUEST_CHANGES).
    `app.core.database` import, instead of checking `DATABASE_URL` directly? Otherwise it
    passes locally (where `DATABASE_URL` is always set) and only fails inside
    `sprintable-verify-oneoff`, where only `ALEMBIC_URL` exists.
-
-⚠️ Known gap (out of scope for #2384, not yet fixed): `backfill_doc_base64_assets.py`,
-`audit_apikey_member_anchor.py`, `backfill_void_empty_merge_gates.py`, and
-`purge_test_agents.py` still check `DATABASE_URL` directly with no `_db_env.py` fallback —
-they predate this helper and were never run against `sprintable-verify-oneoff`, so nobody's
-hit it yet. Same failure mode as the two #2384 fixed; worth a follow-up sweep before one of
-them is.

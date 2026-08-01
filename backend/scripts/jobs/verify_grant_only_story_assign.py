@@ -11,7 +11,9 @@
 
 전제(환경변수):
   BACKEND_URL   예) https://sprintable-backend-dev-57iommnikq-du.a.run.app
-  DATABASE_URL  백엔드와 동일 (postgresql+asyncpg://...  cloud-sql-proxy 경유 가능)
+  DATABASE_URL  있으면 그것을 쓴다(postgresql+asyncpg://... cloud-sql-proxy 경유 가능). 없으면
+                ALEMBIC_URL로 떨어진다(scripts/jobs/_db_env.py — sprintable-verify-oneoff
+                Cloud Run Job이 DATABASE_URL이 아니라 ALEMBIC_URL만 갖고 있다).
   JWT_SECRET    dev와 동일 secret (Secret Manager JWT_SECRET) — create_access_token 서명용
   ORG_ID        대상 조직 (실 dev org)
   PROJECT_ID    대상 프로젝트 (해당 org 소속)
@@ -21,6 +23,9 @@
       python -m scripts.jobs.verify_grant_only_story_assign
 
 ⚠️ 0079 migrate-dev 적용 후 실행할 것. (0078만 적용 시 의도적으로 500이 나며 FAIL로 표시된다.)
+
+story #2386(2026-08-01): resolve_database_url() 폴백 추가 — sprintable-verify-oneoff에서 한 번도
+안 돌려봐서 DATABASE_URL 직접 체크 상태로 남아 있었다(#2386 가드가 잡음).
 """
 from __future__ import annotations
 
@@ -32,12 +37,16 @@ import uuid
 import httpx
 from sqlalchemy import text
 
-from app.core.database import async_session_factory
-from app.core.security import create_access_token
-from app.models.pm import Story
-from app.models.project import OrgMember
-from app.models.project_access import ProjectAccess
-from app.models.user import User
+from scripts.jobs._db_env import resolve_database_url
+
+_db_url_summary = resolve_database_url()
+
+from app.core.database import async_session_factory  # noqa: E402 — 위 폴백이 먼저 돌아야 한다
+from app.core.security import create_access_token  # noqa: E402
+from app.models.pm import Story  # noqa: E402
+from app.models.project import OrgMember  # noqa: E402
+from app.models.project_access import ProjectAccess  # noqa: E402
+from app.models.user import User  # noqa: E402
 
 
 def _env(name: str) -> str:
@@ -52,7 +61,10 @@ async def main() -> int:
     backend = _env("BACKEND_URL").rstrip("/")
     org_id = uuid.UUID(_env("ORG_ID"))
     project_id = uuid.UUID(_env("PROJECT_ID"))
-    _env("DATABASE_URL")  # async_session_factory가 settings.database_url로 이미 바인딩
+    if _db_url_summary is None:
+        print("[FAIL] DATABASE_URL·ALEMBIC_URL 둘 다 미설정", file=sys.stderr)
+        sys.exit(2)
+    print(f"[db] {_db_url_summary}", file=sys.stderr)  # async_session_factory가 이미 바인딩된 값
     _env("JWT_SECRET")
 
     suffix = uuid.uuid4().hex[:10]

@@ -49,19 +49,27 @@ uuid 컬럼을 뽑고, 각각을 (a) `members` FK CASCADE/SET NULL(자동 처리
     DATABASE_URL=... python -m scripts.jobs.purge_test_agents --org-id 54bac162-... --execute       # 실행(단일 트랜잭션)
 
 dry-run 출력을 눈으로 검수(비가역) 후에만 --execute. 대상 0건이면 --execute 도 no-op.
+
+story #2386(2026-08-01): resolve_database_url() 폴백 추가 — DATABASE_URL이 없으면 ALEMBIC_URL로
+떨어진다(scripts/jobs/_db_env.py — sprintable-verify-oneoff Cloud Run Job이 DATABASE_URL이
+아니라 ALEMBIC_URL만 갖고 있다). 이 스크립트는 그 잡에서 한 번도 안 돌려봐서 DATABASE_URL 직접
+체크 상태로 남아 있었다(#2386 가드가 잡음).
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import sys
 import uuid
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import async_session_factory
+from scripts.jobs._db_env import resolve_database_url
+
+_db_url_summary = resolve_database_url()
+
+from app.core.database import async_session_factory  # noqa: E402 — 위 폴백이 먼저 돌아야 한다
 
 
 class _TargetsChangedError(Exception):
@@ -334,9 +342,10 @@ async def main() -> int:
     args = parser.parse_args()
     org_id: uuid.UUID | None = args.org_id
 
-    if not os.environ.get("DATABASE_URL"):
-        print("[FAIL] DATABASE_URL 필요", file=sys.stderr)
+    if _db_url_summary is None:
+        print("[FAIL] DATABASE_URL·ALEMBIC_URL 둘 다 미설정", file=sys.stderr)
         return 2
+    print(f"[db] {_db_url_summary}", file=sys.stderr)
 
     # 완전성 자가감사 — dry-run 조차 진행 전에 먼저. schema.sql 이 아니라 이 세션이 실제로 붙은
     # live DB 를 물어서, 정적 스냅샷이 미래에 또 stale 해져도 구조적으로 재발을 막는다.
