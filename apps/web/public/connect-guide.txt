@@ -1,0 +1,119 @@
+# Sprintable 연결 안내 — 내 에이전트를 팀에 붙이기
+
+이미 쓰고 있는 에이전트(Claude Code, Codex, Cursor, Gemini 등)를 Sprintable 팀에
+연결합니다. 세 단계이고, **셋을 다 해야 에이전트가 움직입니다.**
+
+> 이 문서는 «연결하는 사람»을 위한 것입니다.
+> 새 어댑터를 «만드는» 개발자는 `onboarding-guide.txt`(BYOA Agent Onboarding)를 보십시오.
+
+---
+
+## 0. 준비 — API 키 하나
+
+화면에서 발급합니다.
+
+```
+조직 → 워크포스 → 해당 에이전트 → API 키
+(또는 조직 → 워크포스 → API 키)
+```
+
+발급된 키는 **그 자리에서만 보입니다.** 복사해 두십시오.
+
+---
+
+## 1. 연결 — MCP 서버로 등록
+
+에이전트가 Sprintable의 도구(작업 조회·댓글·상태 변경 등)를 쓸 수 있게 합니다.
+
+```bash
+# Codex — 실제로 밟아 확인한 명령
+codex mcp add sprintable -- uvx sprintable
+```
+
+**다른 런타임은 MCP 등록 명령이 각각 다릅니다.** 그 런타임의 문서를 따르되, 등록할
+값은 아래 셋으로 같습니다 — 실행 명령 `uvx sprintable`, 그리고 환경변수 둘.
+
+```json
+{
+  "mcpServers": {
+    "sprintable": {
+      "command": "uvx",
+      "args": ["sprintable"],
+      "env": {
+        "SPRINTABLE_API_URL": "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app",
+        "AGENT_API_KEY": "<0단계에서 발급한 키>"
+      }
+    }
+  }
+}
+```
+
+**`SPRINTABLE_API_URL`은 백엔드 주소입니다.** 앱 도메인이 아닙니다 — SSE 연결이
+프록시 계층에서 끊기기 때문에 백엔드로 직접 붙어야 합니다.
+
+---
+
+## 2. ⭐깨우기 — 세션을 실제로 구동
+
+**1단계만 하면 에이전트는 깨어나지 않습니다.**
+
+MCP는 «에이전트가 Sprintable을 부르는 길»입니다. 반대 방향 — Sprintable에서 온
+메시지로 «세션이 시작되는 것»은 별개이고, 그것을 하는 것이 이 단계입니다.
+
+런타임마다 방법이 다릅니다.
+
+| 런타임 | 방식 | 실행할 것 |
+|---|---|---|
+| Claude Code | 채널 플러그인 | `packages/fakechat` |
+| Hermes | 채널 플러그인 | `connectors/hermes-sprintable/` |
+| OpenClaw | 채널 플러그인 | `connectors/openclaw-sprintable/` |
+| OpenCode | 채널 플러그인 | `connectors/opencode-sprintable/` |
+| Codex | 커넥터 호스트 | `connectors/codex-sprintable/` |
+| Gemini | 커넥터 호스트 | `connectors/gemini-sprintable/` |
+| Grok | 커넥터 호스트 | `connectors/grok-sprintable/` |
+| Pi | 커넥터 호스트 | `connectors/pi-sprintable/` |
+| Cursor | 사이드카 | `connectors/cursor-sprintable/` (클라우드 에이전트 전용) |
+| 그 외 | 직접 연동 | `connectors/sdk/` |
+
+**채널 플러그인**은 MCP만으로 세션이 시작되지 않아 별도 페어링이 필요합니다.
+**커넥터 호스트**는 그 경로를 실행하면 세션을 직접 구동합니다.
+
+채용 완료 화면의 ②「깨우기」 칸에도 같은 내용이 런타임별로 표시됩니다.
+
+---
+
+## 3. 지침 — 에이전트에게 무엇을 하는지 알려 주기
+
+채용 완료 화면에서 받은 `SPRINTABLE_ONBOARDING.md`를 에이전트에게 전달합니다.
+런타임에 따라 `CLAUDE.md` / `AGENTS.md` / `GEMINI.md`에 넣습니다.
+
+---
+
+## ⚠️ 성공을 어떻게 아는가
+
+**「Added」나 `enabled: true`는 1단계가 된 것이지, 에이전트가 깨어난 것이 아닙니다.**
+
+```bash
+codex mcp get sprintable      # → enabled: true   ← 1단계만 확인됨
+```
+
+실제로 확인하는 법:
+
+1. Sprintable 채팅에서 그 에이전트에게 말을 겁니다.
+2. 에이전트 세션이 «스스로 시작»되면 2단계까지 선 것입니다.
+3. 아무 일도 일어나지 않으면 **2단계가 안 된 것입니다** — MCP 설정을 다시 보지 말고
+   ②「깨우기」를 확인하십시오.
+
+## ⚠️ 안 될 때
+
+| 증상 | 보는 곳 |
+|---|---|
+| `uvx sprintable`이 실행되지 않음 | `uv`가 설치돼 있는지 · 패키지 이름은 `sprintable` |
+| 도구는 보이는데 세션이 안 깨어남 | **2단계** — MCP는 문제가 아닙니다 |
+| 인증 오류 | `AGENT_API_KEY`가 그 에이전트의 것인지 · 키는 에이전트마다 다릅니다 |
+| 연결이 자꾸 끊김 | `SPRINTABLE_API_URL`이 앱 도메인이 아니라 백엔드 주소인지 |
+
+---
+
+문서에 없는 것이 막히면 팀 채널에 그대로 붙여 주십시오. 이 문서는 «막히는 자리»를
+따라 고쳐 나갑니다.

@@ -1,11 +1,11 @@
 {
   "mcpServers": {
-    "sprintable-python": {
-      "command": "python",
-      "args": ["-m", "backend.sprintable_mcp"],
+    "sprintable": {
+      "command": "uvx",
+      "args": ["sprintable"],
       "env": {
-        "SPRINTABLE_API_URL": "https://api.sprintable.ai",
-        "AGENT_API_KEY": "sk_live_..."
+        "SPRINTABLE_API_URL": "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app",
+        "AGENT_API_KEY": "<조직 → 워크포스 → 에이전트 → API 키 에서 발급>"
       }
     }
   }
