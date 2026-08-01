@@ -27,6 +27,32 @@ export interface DisplayStep {
   reason?: string;
 }
 
+/** BE `GET /agents/{id}/verification-status` 응답의 한 단계 원본(라벨 미부여). */
+export interface RawStep {
+  state: RailState;
+  status: RailStatus;
+  reason?: string;
+}
+
+/**
+ * story #2404 후속(2026-08-02, 라이브 재확認 중 발견) — recruiter-client.tsx와
+ * onboarding/connect-step.tsx가 각자 이 파싱을 따로 구현했는데, 둘 다 `json.data.steps`를
+ * 읽고 있었다. 백엔드(`backend/app/routers/agents.py::agent_verification_status`)는 그런
+ * 필드를 준 적이 없다 — 실제 필드명은 `rail`이다(`{"data":{"verified":true,"rail":[...]}}`).
+ * `steps`는 항상 undefined였으므로 이 파싱은 «단 한 번도» 실 데이터를 낸 적이 없었다 —
+ * 검증이 실제로 성공해도(curl로 직접 확認: verified:true) 화면 레일은 초기 pending에
+ * 멈춰 있었다. 두 파일이 같은 파싱을 각자 구현하고 있었던 것 자체가 이 버그가 두 곳에서
+ * 동시에 존재하게 된 이유이므로, 여기 하나로 모아 그 재발 경로를 없앤다.
+ */
+export function parseVerificationRail(json: unknown): RawStep[] | null {
+  if (json === null || typeof json !== 'object') return null;
+  const data = (json as { data?: unknown }).data;
+  const rail = Array.isArray(data)
+    ? data
+    : (data as { rail?: unknown } | undefined)?.rail ?? (json as { rail?: unknown }).rail;
+  return Array.isArray(rail) ? (rail as RawStep[]) : null;
+}
+
 function StepIcon({ status }: { status: RailStatus }) {
   if (status === 'done') {
     return (

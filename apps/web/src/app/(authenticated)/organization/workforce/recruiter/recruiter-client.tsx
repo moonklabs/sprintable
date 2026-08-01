@@ -15,7 +15,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { cn } from '@/lib/utils';
 import {
-  VerifyRail, RAIL_ORDER, HTTP_RAIL_ORDER, type DisplayStep, type RailState, type RailStatus,
+  VerifyRail, RAIL_ORDER, HTTP_RAIL_ORDER, parseVerificationRail,
+  type DisplayStep, type RailState, type RailStatus, type RawStep,
 } from '@/app/onboarding/verify-rail';
 import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle, RuntimeCapabilityItem } from '@/services/recruit';
 import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FILENAME, resolveRuntimeWakeInfo } from '@/services/recruit';
@@ -145,12 +146,6 @@ function downloadTextFile(filename: string, content: string) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
-}
-
-interface RawStep {
-  state: RailState;
-  status: RailStatus;
-  reason?: string;
 }
 
 // ─── 재사용 하위 컴포넌트 ────────────────────────────────────────────────────
@@ -540,15 +535,20 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const [verifying, setVerifying] = useState(false);
   const railOrder = recruitResult?.default_transport === 'http' ? HTTP_RAIL_ORDER : RAIL_ORDER;
 
+  // story #2404 후속(2026-08-02, 라이브 재확認 중 발견) — 이 코드는 `data.steps`를 읽었지만
+  // 백엔드(`backend/app/routers/agents.py::agent_verification_status`)의 실제 필드명은
+  // `rail`이다. `steps`는 항상 undefined였으므로 `setBeSteps`가 «단 한 번도» 실호출되지
+  // 않았다 — 검증이 실제로 성공해도 화면 레일은 영원히 초기 pending으로 멈춰 있었다.
+  // 파싱은 `parseVerificationRail`(verify-rail.tsx) 하나로 모았다 — 이 파일과
+  // onboarding/connect-step.tsx가 독립적으로 재구현하지 않게(같은 필드명 버그가 두 곳에서
+  // 동시에 존재했던 이유, story #2415 참조).
   const pollStatus = useCallback(async () => {
     if (!recruitResult) return;
     try {
       const res = await fetch(`/api/agents/${recruitResult.agent_id}/verification-status?transport=${recruitResult.default_transport}`);
       if (!res.ok) return;
-      const json = (await res.json()) as { data?: { steps?: RawStep[] } | RawStep[]; steps?: RawStep[] };
-      const d = json?.data;
-      const raw = (Array.isArray(d) ? d : d?.steps) ?? json?.steps;
-      if (Array.isArray(raw)) setBeSteps(raw);
+      const raw = parseVerificationRail(await res.json());
+      if (raw) setBeSteps(raw);
     } catch {
       // swallow — graceful degradation
     }
