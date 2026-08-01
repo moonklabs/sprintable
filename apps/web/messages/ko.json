@@ -3280,7 +3280,7 @@
     "kitOrientingWakeBody_connector-sidecar": "{path}가 HTTP로 실행을 관리합니다(클라우드 에이전트 전용)",
     "kitOrientingWakeBody_connector-sdk": "{path}로 이 런타임을 직접 연동하세요",
     "kitOrientingWakeBodyUnknown": "이 런타임을 깨우는 방법은 아직 등록되어 있지 않습니다",
-    "kitOrientingWakeGuideLink": "런타임 안내 문서 전체 보기 →",
+    "kitOrientingWakeGuideLink": "연결 안내 전체 보기 →",
     "kitOrientingGuideLabel": "③ 지침",
     "kitOrientingGuideBody": "{filename}을(를) 에이전트에게 전달",
     "guideFileNote": "· 자율 운영 지침 · read-only",

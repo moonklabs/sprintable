@@ -1079,12 +1079,12 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                           ? t('kitOrientingWakeBodyUnknown')
                           : t(`kitOrientingWakeBody_${wakeInfo.method}`, { path: wakeInfo.path })}
                       </p>
-                      {/* story #2377 §4(발견 가능성) — onboarding-guide.txt로 가는 화면 링크가
+                      {/* story #2377 §4(발견 가능성) — 연결 안내로 가는 화면 링크가
                           이전엔 0건이었다(URL을 아는 사람만 볼 수 있어 "문서에 있다"가 화면에서는
                           "없다"와 같았다). 화면이 못 담는 런타임별 상세(전체 아홉 종 표)는 이
                           문서로 보내되, 그 «링크 자체»가 화면에 있어야 한다. */}
                       <a
-                        href="/onboarding-guide.txt"
+                        href="/connect-guide.txt"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="mt-0.5 inline-block text-xs text-info underline-offset-2 hover:underline"

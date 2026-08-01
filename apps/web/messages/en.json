@@ -3280,7 +3280,7 @@
     "kitOrientingWakeBody_connector-sidecar": "{path} manages the run over HTTP (cloud agents only)",
     "kitOrientingWakeBody_connector-sdk": "Use {path} to wire this runtime in yourself",
     "kitOrientingWakeBodyUnknown": "No wake-up method is registered for this runtime yet",
-    "kitOrientingWakeGuideLink": "See the full runtime guide →",
+    "kitOrientingWakeGuideLink": "See the full connect guide →",
     "kitOrientingGuideLabel": "③ Instructions",
     "kitOrientingGuideBody": "Deliver {filename} to your agent",
     "guideFileNote": "· autonomous operating guide · read-only",

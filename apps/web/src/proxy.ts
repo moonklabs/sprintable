@@ -22,6 +22,9 @@ const PUBLIC_EXACT = [
   // 45a5a006: 공개 정적 문서(app 자체 온보딩 가이드, 랜딩과 내용 상이해 리다이렉트 대상 아님) —
   // 누락 시 인증 미들웨어가 보호 라우트로 오인해 /login 307(공개 문서가 로그인 뒤에 묶이는 버그).
   '/onboarding-guide.txt',
+  // story #2405 — 사용자용 연결 안내(채용 완료 화면 ②「깨우기」 카드가 이리로 링크한다).
+  // 위와 같은 이유로 공개여야 한다 — 링크를 공유받은 사람이 로그인 벽에 막히면 안 된다.
+  '/connect-guide.txt',
 ];
 
 // Fully public paths — no token check at all
