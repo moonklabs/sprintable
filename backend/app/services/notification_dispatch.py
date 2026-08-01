@@ -342,6 +342,13 @@ async def dispatch_notification(
                                 recipient_type="human",
                                 payload={"title": title, "body": body, "event_type": event_type},
                                 status="delivered",
+                                # ⛔이 순간이 "배달 시도 순간"과 같다고 볼 수 있는 건 이 분기가
+                                # 지금 동기라서다 — 바로 다음 줄들이 실제 배달 행위(Notification
+                                # INSERT·개인 webhook 시도)를 같은 호출 안에서 한다. 이 경로가
+                                # 나중에 진짜 비동기(예: webhook 배달확認 콜백)가 되면 이 값도
+                                # 그 확認 시점으로 옮겨야 한다 — 여기 그대로 둔 채 비동기화하면
+                                # #2380이 고친 문제(delivered_at이 실제 배달 시점을 안 가리킴)가
+                                # 값이 없는 대신 "틀린 값"으로 재발한다.
                                 delivered_at=datetime.now(timezone.utc),
                             )
                             db.add(event)
