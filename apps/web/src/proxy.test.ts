@@ -751,7 +751,7 @@ describe('proxy — 폐기된 리소스 301(story #2378, 유나양 design:change
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('/{ws}/{proj}/mockups/{id}/edit도 동일 — 쿼리·하위세그먼트 전부 버리고 목록 루트로', async () => {
+  it('/{ws}/{proj}/mockups/{id}/edit도 동일 — 하위세그먼트 전부 버리고 목록 루트로', async () => {
     const token = await makeAccessToken({ orgId: 'org-1' });
     const response = await middleware(makeRequest('/moonklabs/sprintable/mockups/abc123/edit', {
       sp_at: token, sprintable_current_project_id: 'proj-1',
