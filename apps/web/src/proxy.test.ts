@@ -706,16 +706,6 @@ describe('proxy — 경로 리터럴 rename 301(story 8fc51517, 에픽→목표)
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('/{ws}/{proj}/mockups → 301 /{ws}/{proj}/artifacts(mockups 은퇴 — #2378, E-CANVAS가 후계 목록 화면으로 착지)', async () => {
-    const token = await makeAccessToken({ orgId: 'org-1' });
-    const response = await middleware(makeRequest('/moonklabs/sprintable/mockups', {
-      sp_at: token, sprintable_current_project_id: 'proj-1',
-    }));
-    expect(response.status).toBe(301);
-    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/artifacts');
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-
   it('이미 신 경로(/goals)로 들어온 요청은 재리다이렉트 없이 그대로 통과(무한루프 방지 확인)', async () => {
     const token = await makeAccessToken({ orgId: 'org-1' });
     mockFetch.mockResolvedValue({
@@ -726,5 +716,47 @@ describe('proxy — 경로 리터럴 rename 301(story 8fc51517, 에픽→목표)
       sp_at: token, sprintable_current_project_id: 'proj-1',
     }));
     expect(response.status).not.toBe(301);
+  });
+});
+
+describe('proxy — 폐기된 리소스 301(story #2378, 유나양 design:changes: rename과 다른 통) — mockups는 은퇴, id는 버린다', () => {
+  beforeEach(() => {
+    process.env['JWT_SECRET'] = JWT_SECRET;
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://localhost:8000';
+    mockFetch.mockReset();
+  });
+
+  afterEach(() => {
+    delete process.env['JWT_SECRET'];
+  });
+
+  it('/{ws}/{proj}/mockups → 301 /{ws}/{proj}/artifacts(mockups 은퇴 — E-CANVAS가 후계 목록 화면으로 착지)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const response = await middleware(makeRequest('/moonklabs/sprintable/mockups', {
+      sp_at: token, sprintable_current_project_id: 'proj-1',
+    }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/artifacts');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('/{ws}/{proj}/mockups/{id} → 301 /{ws}/{proj}/artifacts(id 하위 세그먼트는 «버린다» — mockup id≠artifact id라 들고 가면 남의 항목이 열릴 수 있다)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const response = await middleware(makeRequest('/moonklabs/sprintable/mockups/abc123', {
+      sp_at: token, sprintable_current_project_id: 'proj-1',
+    }));
+    expect(response.status).toBe(301);
+    // ⛔/artifacts/abc123 이 아니다 — RENAMED_RESOURCES(epics→goals)와 정확히 다른 지점.
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/artifacts');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('/{ws}/{proj}/mockups/{id}/edit도 동일 — 쿼리·하위세그먼트 전부 버리고 목록 루트로', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const response = await middleware(makeRequest('/moonklabs/sprintable/mockups/abc123/edit', {
+      sp_at: token, sprintable_current_project_id: 'proj-1',
+    }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/artifacts');
   });
 });

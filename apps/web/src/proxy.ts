@@ -238,15 +238,27 @@ const RENAMED_RESOURCES: Record<string, string> = {
   // 2026-08-01 지적: prod 승격 #2373에서 board 라우트만 지우고 이 줄을 빠뜨려 외부 딥링크
   // ~14곳이 404를 만날 뻔했다 — board/page.tsx:12-13 자체가 이 위험을 이미 적어 두고 있었다).
   board: 'flow',
-  // story #2378(2026-08-01) — `/mockups` 은퇴. E-CANVAS가 부분 후계(스토리 본문 — 시나리오
-  // 분기·자유배치 편집·버전 복원·9종 팔레트·category/slug는 안 옮겨짐, 별건 필요 시 재론).
-  // dev DB 실측: `mockups` 테이블 자체가 없고 mockup_scenarios/versions/pages 전부 0건이라
-  // 되살아날 실 데이터가 없다 — 그래도 목록 진입(`/mockups`)만큼은 실제 후계 화면(`/artifacts`)
-  // 에 정확히 닿는다. ⚠️epics→goals·board→flow(같은 행이 새 이름을 받은 rename)와 «성격이
-  // 다르다» — `/mockups/{id}`처럼 id 하위 세그먼트가 붙은 딥링크는 mockup id가 artifact id
-  // 공간과 다르므로 `/artifacts/{id}`가 그 특정 항목을 못 찾을 수 있다(다만 위 실측대로 그런
-  // id 자체가 존재하지 않는다 — 이론상의 잔여 위험이지 실측된 위험이 아니다). 「주소를 빈
-  // 채 두지 않는다」(AC3)의 최소 충족선이 이 줄이다.
+};
+
+/**
+ * story #2378(2026-08-01, 유나양 design:changes) — `RENAMED_RESOURCES`와 «성격이 다른» 은퇴.
+ * 위 표(epics/glance/board)는 같은 행이 새 이름을 받은 rename이라 id를 그대로 들고 가도 안전
+ * (mockups 3번째 세그먼트 뒤 id가 있으면 「그 id」로 다시 찾을 수 있다). 여기는 반대 —
+ * `RETIRED_RESOURCES`에 오르면 옛 리소스가 «폐기»되고 다른 리소스가 그 자리를 대신할 뿐이라
+ * id 공간이 다르다(mockup id ≠ artifact id). id를 그대로 옮기면 두 가지 결과가 갈리는데
+ * ①못 찾음(404)보다 ⭐②우연히 같은 id의 «남의 항목»이 열리는 쪽이 더 무겁다 — 사용자가
+ * 잘못된 항목을 보고 있다는 것을 알 방법이 없다. 그래서 이 표는 id를 «버리고» 목록 루트로만
+ * 보낸다(아래 `redirectRetiredResourcePath`가 segments[2] 뒤를 전부 잘라낸다).
+ *
+ * `mockups: 'artifacts'` — dev DB 실측(2026-08-01, PO)으로 `mockups` 테이블 자체가 없고
+ * mockup_scenarios/versions/pages 전부 0건이라 dev 기준으로는 되살아날 id 자체가 없다(⚠️
+ * prod는 안 쟀다 — 오늘 이 저장소에서 `board:'flow'`가 main에만 있고 develop엔 없었던 사례처럼
+ * 환경별로 실측이 갈릴 수 있다. 이 코드가 id를 버리는 것은 그 실측과 무관하게 안전한 처리라
+ * 결론 문장의 「dev 기준」 한정과는 별개로 방어적이다). E-CANVAS가 `mockups`의 부분 후계라
+ * (스토리 본문 — 시나리오 분기·자유배치 편집·버전 복원·9종 팔레트·category/slug는 안 옮겨짐,
+ * 필요 시 별건) 목록 화면(`/artifacts`)이 최소 충족선(AC3 「주소를 빈 채 두지 않는다」)이다.
+ */
+const RETIRED_RESOURCES: Record<string, string> = {
   mockups: 'artifacts',
 };
 
@@ -259,6 +271,19 @@ function redirectRenamedResourcePath(request: NextRequest, pathname: string): Ne
   const url = request.nextUrl.clone();
   segments[2] = newName;
   url.pathname = '/' + segments.join('/');
+  return NextResponse.redirect(url, 301);
+}
+
+function redirectRetiredResourcePath(request: NextRequest, pathname: string): NextResponse | null {
+  const segments = pathname.split('/').filter(Boolean);
+  const resourceName = segments[2]; // [ws]/[proj]/{resourceName}/...
+  if (!resourceName) return null;
+  const newName = RETIRED_RESOURCES[resourceName];
+  if (!newName) return null;
+  const url = request.nextUrl.clone();
+  // id 등 하위 세그먼트는 «버린다» — 폐기된 리소스의 id는 후계 리소스의 id 공간과 다르므로,
+  // 들고 가면 우연히 같은 id의 남의 항목이 열릴 위험이 있다(못 찾는 404보다 무겁다).
+  url.pathname = '/' + segments.slice(0, 2).join('/') + '/' + newName;
   return NextResponse.redirect(url, 301);
 }
 
@@ -489,6 +514,12 @@ async function resolveAndRespond(
   // 이미 URL에 있으므로 fetch 없이 순수 문자열 치환(legacyResourceRedirect보다 가벼움).
   const renamedResourceRedirect = redirectRenamedResourcePath(request, pathname);
   if (renamedResourceRedirect) return renamedResourceRedirect;
+
+  // story #2378 — 폐기된 리소스(RETIRED_RESOURCES). rename과 달리 id를 버리고 후계 리소스의
+  // 목록 루트로만 보낸다(위 redirectRetiredResourcePath 주석 참조 — id 공간이 다른데 그대로
+  // 옮기면 우연히 같은 id의 남의 항목이 열릴 수 있다).
+  const retiredResourceRedirect = redirectRetiredResourcePath(request, pathname);
+  if (retiredResourceRedirect) return retiredResourceRedirect;
 
   // story a539c649(S-route-project) S1 — path 위계 resolve. fwdHeaders 를 response 구성 *전에*
   // 채워야 downstream RSC/route handler 가 x-resolved-* 를 실제로 읽을 수 있다(x-pathname 과
