@@ -527,73 +527,95 @@ export function DocEditor({
           placeholder={labels.placeholder}
         />
       ) : (
-        <div
-          ref={editorContentRef as RefObject<HTMLDivElement>}
-          onDragEnter={onDragEnter}
-          onDragOver={(e) => { if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) e.preventDefault(); }}
-          onDragLeave={onDragLeave}
-          onDrop={onDrop}
-          className="tiptap-editor-wrapper relative flex-1 overflow-y-auto p-3 pl-9 max-md:pb-20 max-md:min-h-[50vh]"
-        >
-          <EditorContent editor={editor} className="tiptap-content h-full outline-none" />
+        // story #2372 QA 후속(2026-08-01) — #2757과 같은 병(같은 규격의 두 번째 적용 사례,
+        // AC7). 아래 안쪽 div가 이 편집기의 «유일한» relative 기준점이자 «유일한» 세로
+        // 스크롤 컨테이너였다 — 빈 문서 힌트(L~기존 542)·gutter "+"(551)·삽입 메뉴(569)는
+        // «콘텐츠를 따라가는 것이 맞아»(관련 위치가 캐럿·문서 좌표) 그 기준점이 그대로
+        // 필요하다(유나 판정 — 이 셋은 병이 아니다, relative를 옮기면 회귀). 반면 DnD 드롭
+        // 오버레이는 "세로 스크롤 위치와 무관하게 «보이는 창»을 덮어야" 하는데 같은
+        // 기준점(=스크롤하는 그 요소)에 얹혀 있어 스크롤과 함께 그대로 밀렸다(라이브 실측:
+        // scrollTop 1200 — 문서의 11% 지점 — 에서 가시비율 0%). 처방은 안쪽 relative를
+        // 옮기는 것이 아니라 relative를 «하나 더»(바깥, 스크롤 안 함) 두고 오버레이만 그
+        // 밖으로 — #2757(flow-canvas-resize-pane.tsx)에서 쓴 것과 같은 non-clipping wrapper
+        // 구조. 드래그 핸들러(onDragEnter/onDragOver/onDragLeave/onDrop)는 안쪽(실제 스크롤
+        // 컨테이너)에 그대로 둔다 — 오버레이가 pointer-events-none이라 그 아래 안쪽 div가
+        // 여전히 이벤트를 받으므로 드롭 자체는 구조 변경과 무관하게 그대로 동작한다(AC5).
+        <div className="relative flex-1">
+          <div
+            ref={editorContentRef as RefObject<HTMLDivElement>}
+            onDragEnter={onDragEnter}
+            onDragOver={(e) => { if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) e.preventDefault(); }}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
+            className="tiptap-editor-wrapper relative h-full overflow-y-auto p-3 pl-9 max-md:pb-20 max-md:min-h-[50vh]"
+          >
+            <EditorContent editor={editor} className="tiptap-content h-full outline-none" />
 
-          {/* 빈 문서 힌트 — 첨부 진입 discoverability(+ · / · DnD). */}
-          {editable && isEmpty ? (
-            <p className="pointer-events-none absolute left-9 top-3 select-none text-sm text-muted-foreground/50">
-              {tEditor('attachEmptyHint')}
-            </p>
-          ) : null}
+            {/* 빈 문서 힌트 — 첨부 진입 discoverability(+ · / · DnD). 콘텐츠를 따라가는 것이
+                맞다 — 안쪽 relative(스크롤 컨테이너) 기준 그대로 둔다. */}
+            {editable && isEmpty ? (
+              <p className="pointer-events-none absolute left-9 top-3 select-none text-sm text-muted-foreground/50">
+                {tEditor('attachEmptyHint')}
+              </p>
+            ) : null}
 
-          {/* gutter "+" — 현재 줄 좌측 거터·항상 표시·클릭 시 이미지/파일 삽입 메뉴 */}
-          {editable && gutterTop !== null ? (
-            <div
-              contentEditable={false}
-              className="absolute left-1.5 z-20"
-              style={{ top: gutterTop }}
-              onMouseDown={(e) => e.preventDefault()}
-            >
-              <button
-                type="button"
-                aria-label={tEditor('attachInsertMenu')}
-                aria-haspopup="menu"
-                aria-expanded={insertMenuOpen}
-                onClick={(e) => { e.stopPropagation(); setInsertMenuOpen((v) => !v); }}
-                className="flex size-6 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            {/* gutter "+" — 현재 줄 좌측 거터·항상 표시·클릭 시 이미지/파일 삽입 메뉴. 캐럿
+                위치를 따라가는 것이 맞다 — 안쪽 relative 기준 그대로 둔다. */}
+            {editable && gutterTop !== null ? (
+              <div
+                contentEditable={false}
+                className="absolute left-1.5 z-20"
+                style={{ top: gutterTop }}
+                onMouseDown={(e) => e.preventDefault()}
               >
-                <Plus className="size-3.5" />
-              </button>
-              {insertMenuOpen ? (
-                <div
-                  role="menu"
-                  onClick={(e) => e.stopPropagation()}
-                  className="absolute left-7 top-0 w-36 overflow-hidden rounded-lg border border-border bg-card p-1 shadow-lg"
+                <button
+                  type="button"
+                  aria-label={tEditor('attachInsertMenu')}
+                  aria-haspopup="menu"
+                  aria-expanded={insertMenuOpen}
+                  onClick={(e) => { e.stopPropagation(); setInsertMenuOpen((v) => !v); }}
+                  className="flex size-6 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={openImagePicker}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
+                  <Plus className="size-3.5" />
+                </button>
+                {insertMenuOpen ? (
+                  <div
+                    role="menu"
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute left-7 top-0 w-36 overflow-hidden rounded-lg border border-border bg-card p-1 shadow-lg"
                   >
-                    <ImageIcon className="size-4 text-muted-foreground" />
-                    {tEditor('attachImage')}
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={openFilePicker}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
-                  >
-                    <Paperclip className="size-4 text-muted-foreground" />
-                    {tEditor('attachFile')}
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={openImagePicker}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
+                    >
+                      <ImageIcon className="size-4 text-muted-foreground" />
+                      {tEditor('attachImage')}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={openFilePicker}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-muted"
+                    >
+                      <Paperclip className="size-4 text-muted-foreground" />
+                      {tEditor('attachFile')}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
 
-          {/* DnD active-zone 오버레이 — 파일 드래그 중(목업 .dnd.active). pointer-events-none 로 실 drop 통과. */}
+          {/* DnD active-zone 오버레이 — 파일 드래그 중(목업 .dnd.active). pointer-events-none
+              으로 실 drop 통과. story #2372 후속 — 바깥(스크롤 안 하는) relative 기준으로
+              옮겨 세로 스크롤 위치와 무관하게 «보이는 창»을 덮는다. */}
           {editable && isDragging ? (
-            <div className="pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-1.5 rounded-lg border-[1.5px] border-dashed border-info bg-info/10 text-center">
+            <div
+              data-testid="doc-editor-drop-overlay"
+              className="pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-1.5 rounded-lg border-[1.5px] border-dashed border-info bg-info/10 text-center"
+            >
               <span className="flex size-9 items-center justify-center rounded-full bg-info/10 text-info">
                 <Plus className="size-4" />
               </span>
