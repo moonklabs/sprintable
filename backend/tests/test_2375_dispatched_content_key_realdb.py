@@ -165,3 +165,84 @@ async def test_dispatched_event_falls_back_to_title_when_body_missing():
             assert event.payload["content"] == event.payload["title"]
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_dispatched_event_gets_recipient_seq_assigned():
+    """#2375 후속 회귀 — content를 채워도 recipient_seq가 없으면 이벤트가 여전히 「존재하지만
+    도달 불가」다. agent_gateway.py의 /stream 쿼리는 `recipient_seq > :after_seq`로 커서
+    필터링해 NULL을 절대 통과시키지 않는다 — 실측(dev, 2026-08-01): content 채운 뒤에도
+    agent-recipient dispatched의 delivered 건수가 여전히 0이었던 진짜 근본원인. 이 값이 없으면
+    fakechat/hermes 어댑터도 seq=0으로 떨어져 ack을 절대 안 보낸다(#2375 AC5가 고친 그 분기
+    자체가 트리거되지 않는다 — seq 0은 애초에 `if seq > 0` 조건을 못 만족)."""
+    from sqlalchemy import select
+
+    from app.models.event import Event
+    from app.services.notification_dispatch import dispatch_notification
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_org_project_agent(s)
+
+        async with Session() as s:
+            await dispatch_notification(
+                s, org_id=seeded["org_id"], event_type="story.status_changed",
+                target_member_ids=[seeded["agent_id"]],
+                title="스토리 상태 변경: seq 배정 회귀가드", body="ready-for-dev → in-progress",
+                source_project_id=seeded["project_id"],
+            )
+            await s.commit()
+
+        async with Session() as s:
+            rows = (await s.execute(
+                select(Event).where(
+                    Event.org_id == seeded["org_id"], Event.recipient_id == seeded["agent_id"],
+                )
+            )).scalars().all()
+            assert len(rows) == 1
+            event = rows[0]
+            assert event.recipient_seq is not None, (
+                "recipient_seq가 NULL — /stream 쿼리(recipient_seq > :after_seq)를 절대 통과 "
+                "못 하고, 어댑터도 seq=0으로 ack을 안 보낸다. content가 있어도 영구 도달불가."
+            )
+            assert event.recipient_seq >= 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_dispatched_recipient_seq_is_dense_per_recipient_across_multiple_dispatches():
+    """같은 수신자에게 두 번 dispatch하면 seq가 1, 2로 조밀하게 증가해야 한다(event_seq.py의
+    per-recipient counter 계약 — agent_dispatch.py 경로와 동일 SSOT 재사용 확인)."""
+    from sqlalchemy import select
+
+    from app.models.event import Event
+    from app.services.notification_dispatch import dispatch_notification
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_org_project_agent(s)
+
+        for i in range(2):
+            async with Session() as s:
+                await dispatch_notification(
+                    s, org_id=seeded["org_id"], event_type="story.status_changed",
+                    target_member_ids=[seeded["agent_id"]],
+                    title=f"디스패치 {i}", body=f"본문 {i}",
+                    source_project_id=seeded["project_id"],
+                )
+                await s.commit()
+
+        async with Session() as s:
+            rows = (await s.execute(
+                select(Event).where(
+                    Event.org_id == seeded["org_id"], Event.recipient_id == seeded["agent_id"],
+                ).order_by(Event.created_at)
+            )).scalars().all()
+            assert len(rows) == 2
+            seqs = [r.recipient_seq for r in rows]
+            assert seqs == [1, 2], f"seq가 조밀하게 증가하지 않음: {seqs}"
+    finally:
+        await engine.dispose()
