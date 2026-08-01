@@ -195,6 +195,10 @@
   --color-destructive-bg: var(--destructive-bg);
   --color-destructive-border: var(--destructive-border);
   --color-destructive-tint: var(--destructive-tint);
+  /* story #2419 — 옅은 destructive 배경(bg-destructive/10 등) 위 글자 전용. dark엔 정의하지
+     않는다(:root에만 존재) — 기존 --destructive가 dark에서 이미 AA를 통과하므로 여기서
+     매핑해도 .dark 쪽엔 이 변수 자체가 없어 값이 안 먹는다(의도적 — 아래 :root 선언부 주석 참조). */
+  --color-destructive-on-subtle: var(--destructive-on-subtle);
 
   /* E-UI-DAEGBYEON P0: Proof Capsule 시그니처 토큰(proof-capsule-fe-spec-handoff §3) — 리포트
      정확 hex값 그대로(기존 OKLCH 관례와 별개 네임스페이스, 브랜드 시그니처 의도적 예외). */
@@ -310,6 +314,14 @@
   --destructive-bg: oklch(0.97 0.02 27);
   --destructive-border: oklch(0.78 0.12 27);
   --destructive-tint: oklch(0.577 0.245 27.325 / 10%);
+  /* story #2419(유나 규격·PO 승인) — 옅은 destructive 배경(bg-destructive/10 등) 위 글자 전용.
+     명도만 0.577→0.50로 낮춰 글자↔박스 대비 3.97(AA 미달)을 확保(약 4.9)한다. 색상·채도는
+     그대로라 "실패"의 의미는 유지된다. bg-destructive(진한 배경) 위에는 절대 쓰지 않는다 —
+     거기는 --destructive-foreground(흰 글자) 자리이고, 이 토큰을 쓰면 대비가 반대로 무너진다.
+     ⛔dark는 의도적으로 정의하지 않는다 — 기존 --destructive가 dark에서 이미 AA를 통과한다
+     (5.82/5.38, 유나 실측). 이 토큰을 쓰는 자리는 반드시 `dark:text-destructive`로 되돌려야
+     한다(:root 전용 선언이라 안 그러면 dark에서도 이 light 값이 그대로 새어 나간다). */
+  --destructive-on-subtle: oklch(0.50 0.245 27.325);
 
   /* Tiptap editor */
   --tiptap-code-bg: oklch(0.22 0 0);

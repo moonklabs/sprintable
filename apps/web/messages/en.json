@@ -753,6 +753,7 @@
     "railEventDelivered": "Test event delivered",
     "railAck": "Response received (ack)",
     "railVerified": "Connection verified",
+    "verifyReasonUnknown": "The server didn't say why — try again, or refresh in a moment.",
     "verifiedBanner": "Your agent is actually working. Connection verified.",
     "advancedTitle": "Advanced",
     "advancedSubtitle": "Webhook notifications · alternate transports (HTTP, fakechat)",
