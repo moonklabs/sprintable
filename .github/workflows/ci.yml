@@ -668,6 +668,15 @@ jobs:
       - name: "Verify no i18n phrase substring collision (story #2367 regression guard)"
         run: pnpm --filter web verify:no-i18n-phrase-collision
 
+      # story #2376 회귀가드: 사이드바(app-sidebar.tsx)·⌘K 팔레트(command-palette.tsx)·모바일
+      # 더보기(more/page.tsx) 등이 조합(resourceLink/resourceHref)·리터럴(href=/href:) 어느
+      # 축으로 걸든, [ws]/[proj]/<resource> 라우트 실존과 어긋나면(양방향) 실패한다 — #2373
+      # 승격 당시 flow 진입점은 들어왔는데 라우트가 빠졌고(404), board는 반대로 라우트만
+      # 남고 진입점이 0이었던(도달 불가, 더 조용한 쪽) 재발 방지. 첫 스캔이 잡은 기존 채무
+      # 2건(mockups 도달 불가·memos 죽은 알림 링크)은 GRANDFATHER_BASELINE으로 얼려 신규만 막는다.
+      - name: "Verify no orphan resource routes (story #2376 regression guard)"
+        run: pnpm --filter web verify:no-orphan-resource-routes
+
       - name: Test
         # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead
         # of being masked by tail's 0 — without it the unit-test gate was a no-op
