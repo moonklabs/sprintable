@@ -10,6 +10,7 @@ import {
   pairKey,
   parseKeyUsages,
   parseTranslationBindings,
+  scanRepository,
 } from './verify-no-i18n-phrase-collision';
 
 describe('parseTranslationBindings — story #2367', () => {
@@ -285,5 +286,29 @@ describe('GRANDFATHER_BASELINE — 기존 채무는 통과, 새 충돌만 막는
 describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 PO 승인, 조용한 증감을 막는다', () => {
   it('#2367 최초 스캔 스냅샷은 정확히 40건이다', () => {
     expect(GRANDFATHER_BASELINE.size).toBe(40);
+  });
+});
+
+// story #2410(PO 지적, 2026-08-02): «선언된» 40건과 «실제로 지금 걸리는» 건수는 다른 축이다
+// (isNumberAdjacent 정밀화로 18건이 더 안 걸리게 됐다 — GRANDFATHER_BASELINE 상단 주석 참조).
+// console.log의 "안 걸림" 경고만으로는 다음 사람이 노이즈로 읽고 넘길 수 있어, 실제 저장소
+// 전체를 스캔해 «지금 몇 건이 실제로 걸리는지»를 이 테스트가 고정한다 — GRANDFATHER_BASELINE_
+// COUNT_TEST(선언 수 40)와 이 테스트(실 걸림 수 22)가 서로 다른 값을 지키는 것 자체가 그
+// 간극(18)이 조용히 사라지지 않게 하는 자리다.
+describe('GRANDFATHER_LIVE_COUNT_TEST — 「선언된 40」과 「지금 실제로 걸리는 수」는 다른 축이다', () => {
+  it('실제 저장소 스캔에서 지금 걸리는 grandfather는 22건이다(18건은 #2410으로 안 걸리게 됨)', () => {
+    const { grandfatherHit } = scanRepository();
+    expect(grandfatherHit.size).toBe(22);
+  });
+
+  it('새 FAIL은 없다(#2410 자체가 신규 회귀를 안 냈다는 증거)', () => {
+    const { newFindings } = scanRepository();
+    expect(newFindings.size).toBe(0);
+  });
+
+  it('EXEMPT_PAIRS는 이제 비어 있고, 그러니 exemptHit도 항상 빈 집합이다', () => {
+    expect(GRANDFATHER_BASELINE.size).toBeGreaterThan(0); // sanity: baseline은 안 비었다
+    const { exemptHit } = scanRepository();
+    expect(exemptHit.size).toBe(0);
   });
 });

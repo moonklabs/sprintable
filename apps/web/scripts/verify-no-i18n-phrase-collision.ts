@@ -139,6 +139,13 @@ export function flattenMessages(obj: Record<string, unknown>, prefix = ''): Map<
 //   teamId     — Slack 워크스페이스 ID(문자열 식별자, 카운트 아님)
 //   dir        — 방향 기호(↑/↓), 수치 아님
 //   sources·excludes — 수집 범위를 나타내는 라벨 목록
+// ⛔새 이름을 여기 더하기 前에(PO 지적, 2026-08-02): 그 이름이 실제로 채우는 ko.json 값을
+// 먼저 읽는다. 정말 이름·경로류(수가 아님)면 더한다. 그런데 만약 «숫자인» 값인데 여기 걸려
+// EXEMPT_PAIRS에 다시 나타난다면, 그건 denylist 후보가 아니라 «진짜 충돌»이다 — 그 경우
+// denylist를 늘려 조용히 덮지 말고 그 충돌 자체를 고치거나(문구 수정) EXEMPT_PAIRS에
+// 이유와 함께 등재한다. 이 목록은 "수가 아님이 확認된 것"만 오는 자리이지 "오탐을 없애는
+// 자리"가 아니다 — 그 둘을 섞으면 이 스토리(#2410)가 고친 바로 그 병(가드가 자기가 뭘
+// 재는지 모르게 되는 것)이 재발한다.
 const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   'name', 'runtime', 'filename', 'promptFile', 'gate', 'role', 'project', 'teamId', 'dir',
   'sources', 'excludes',
@@ -212,6 +219,23 @@ export const EXEMPT_PAIRS = new Set<string>([]);
 // 고치는 일이 아니다"(AC6)를 지키는
 // 방법이다 — 여기 있는 40건 «중 실제로 몇 건이 진짜 결함인지»는 이 스토리가 판정하지 않는다.
 // 그래도 매 실행 로그에 grandfather 카운트로 찍혀 "원래 그런 것"으로 조용히 묻히지 않는다.
+// story #2410(PO 지적, 2026-08-02): 이 40건 중 18건은 이제 이 스캔에 «안 걸린다» — isNumberAdjacent
+// 정밀화(이름·런타임류 배제) 여파로, 그동안 「진짜 결함인지 몰랐던」게 아니라 「애초에 numberAdjacent가
+// 아니었던」 것으로 밝혀졌다. Set 크기(40)는 #2367 최초 스캔 스냅샷이라 그대로 두지만("아래 40건" 문단
+// 그대로), 매 실행 로그의 "안 걸림" 경고만으로는 다음 사람이 노이즈로 읽고 넘길 수 있어 여기 명시로
+// 남긴다 — 실 걸림 수(22)는 GRANDFATHER_LIVE_COUNT_TEST가 고정한다(아래).
+// 안 걸리는 18건: board.backlinksEmptyFallback<->board.backlinksEmptyScoped · canvas.resolveAction<->
+// canvas.resolvedByNote · dashboard.ccAgentStuck<->dashboard.ccWaitingGateReason ·
+// recruiter.back<->recruiter.{guideFileDeliveryNoteConnector,guideFileDeliveryNoteMcp,kitOrientingGuideBody} ·
+// recruiter.equipCreatedTitle<->recruiter.{equipDone,stepComplete} ·
+// recruiter.equipDone<->recruiter.{guideFileDeliveryNoteConnector,kitOrientingTitle} ·
+// recruiter.guideFileDeliveryNoteConnector<->recruiter.{kitOrientingGuideBody,stepComplete} ·
+// recruiter.kitOrientingTitle<->recruiter.stepComplete · settings.projectCreated<->settings.tabProjects ·
+// settings.slackIntegration.{mappedElsewhereHint,pendingHint}<->settings.slackIntegration.saveLabel ·
+// settings.slackIntegration.workspaceConnectedSummary<->settings.slackIntegration.workspaceLabel ·
+// standup.feedback<->standup.feedbackDialogTitle
+// ⇒ 이 18건을 GRANDFATHER_BASELINE에서 걷어낼지(진짜 결함이 아니었다고 결론)는 이 PR이 정하지 않는다
+// (AC6과 같은 판단 — 이 스토리는 정밀화만, triage는 별도).
 export const GRANDFATHER_BASELINE = new Set<string>([
   'board.backlinksEmptyFallback <-> board.backlinksEmptyScoped',
   'cage.pendingSummary <-> cage.trustScorePending',
@@ -270,7 +294,19 @@ function walk(dir: string, out: string[]): void {
   }
 }
 
-function main(): void {
+export interface RepositoryScanResult {
+  files: string[];
+  totalDynamicCalls: number;
+  newFindings: Map<string, CollisionPair>;
+  grandfathered: Map<string, CollisionPair>;
+  exemptHit: Set<string>;
+  grandfatherHit: Set<string>;
+}
+
+/** main()에서 뽑아낸 전 저장소 스캔 — story #2410, GRANDFATHER_LIVE_COUNT_TEST가 이걸 불러
+ * "지금 실제로 걸리는 grandfather 수"를 고정한다(console.log 경고만으로는 다음 사람이
+ * 노이즈로 읽고 넘기는 것을 막는다, PO 지적). */
+export function scanRepository(): RepositoryScanResult {
   const files: string[] = [];
   walk(SRC_ROOT, files);
   const messages = flattenMessages(JSON.parse(readFileSync(MESSAGES_PATH, 'utf8')));
@@ -309,6 +345,12 @@ function main(): void {
       }
     }
   }
+
+  return { files, totalDynamicCalls, newFindings, grandfathered, exemptHit, grandfatherHit };
+}
+
+function main(): void {
+  const { files, totalDynamicCalls, newFindings, grandfathered, exemptHit, grandfatherHit } = scanRepository();
 
   const staleExempt = [...EXEMPT_PAIRS].filter((pk) => !exemptHit.has(pk));
   const staleGrandfather = [...GRANDFATHER_BASELINE].filter((pk) => !grandfatherHit.has(pk));
