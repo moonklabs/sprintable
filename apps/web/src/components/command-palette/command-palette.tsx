@@ -8,6 +8,7 @@ import {
   BookOpen,
   Bot,
   CalendarRange,
+  FolderKanban,
   GitPullRequest,
   Inbox,
   LayoutDashboard,
@@ -48,9 +49,7 @@ interface StoryTitleResult {
 const STATIC_ITEMS: CommandItem[] = [
   { id: 'go-inbox', group: 'navigate', icon: Inbox, labelKey: 'goInbox', href: '/inbox', shortcut: ['G', 'I'] },
   { id: 'go-dashboard', group: 'navigate', icon: LayoutDashboard, labelKey: 'goDashboard', href: '/dashboard', shortcut: ['G', 'D'] },
-  // go-board 제거(유나 2026-08-01) — /board→/flow 리다이렉트가 서면서 404는 안 나지만,
-  // ⌘G B 라는 board 단축키가 flow로 가는 「라벨은 죽은 화면, 목적지는 다른 화면」 자리라
-  // more/page.tsx의 같은 판정(항목을 내린다, flow가 그 자리를 대신하니)을 그대로 적용한다.
+  { id: 'go-board', group: 'navigate', icon: FolderKanban, labelKey: 'goBoard', href: '/board', shortcut: ['G', 'B'] },
   { id: 'go-sprints', group: 'navigate', icon: CalendarRange, labelKey: 'goSprints', href: '/sprints' },
   { id: 'go-chats', group: 'navigate', icon: MessageSquareMore, labelKey: 'goChats', href: '/chats', shortcut: ['G', 'M'] },
   { id: 'go-agents', group: 'navigate', icon: Bot, labelKey: 'goAgents', href: '/organization/workforce', shortcut: ['G', 'A'] },
