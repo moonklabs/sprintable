@@ -227,7 +227,11 @@ function redirectToProjectPicker(request: NextRequest, originalPathname: string)
  * URL을 org/project 재조회로 채워 넣는 것이고, 이건 ws/proj가 **이미 URL에 있으므로** 3번째
  * 세그먼트(리소스명)만 신 이름으로 교체하면 된다(org/project 재조회 fetch 불요, 훨씬 가벼움).
  */
-const RENAMED_RESOURCES: Record<string, string> = {
+// story #2387(2026-08-01) — export한다: scripts/verify-no-orphan-resource-routes.ts가 이 표
+// (+RETIRED_RESOURCES)에서 RENAMED_RESOURCE_ALIASES를 파생시킨다(예전엔 손으로 옮겨 적은
+// 스냅샷이었다 — proxy.ts가 바뀌어도 그 스냅샷은 안 바뀌어 조용히 어긋날 수 있었다, story
+// #2378 리뷰에서 유나양이 발견). export 자체는 이 미들웨어의 런타임 동작을 바꾸지 않는다.
+export const RENAMED_RESOURCES: Record<string, string> = {
   epics: 'goals',
   // story #2224(선생님 정정 2026-07-30) — glance는 이제 /flow 안의 한 조각. 위 MIGRATED_RESOURCES
   // 항목과 짝: bare `/glance` → (redirectLegacyResourcePath) → `/{ws}/{proj}/glance` →
@@ -258,7 +262,8 @@ const RENAMED_RESOURCES: Record<string, string> = {
  * (스토리 본문 — 시나리오 분기·자유배치 편집·버전 복원·9종 팔레트·category/slug는 안 옮겨짐,
  * 필요 시 별건) 목록 화면(`/artifacts`)이 최소 충족선(AC3 「주소를 빈 채 두지 않는다」)이다.
  */
-const RETIRED_RESOURCES: Record<string, string> = {
+// story #2387 — export한다(같은 이유, 위 RENAMED_RESOURCES 주석 참조).
+export const RETIRED_RESOURCES: Record<string, string> = {
   mockups: 'artifacts',
 };
 
