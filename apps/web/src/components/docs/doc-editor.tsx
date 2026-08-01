@@ -540,7 +540,19 @@ export function DocEditor({
         // 구조. 드래그 핸들러(onDragEnter/onDragOver/onDragLeave/onDrop)는 안쪽(실제 스크롤
         // 컨테이너)에 그대로 둔다 — 오버레이가 pointer-events-none이라 그 아래 안쪽 div가
         // 여전히 이벤트를 받으므로 드롭 자체는 구조 변경과 무관하게 그대로 동작한다(AC5).
-        <div className="relative flex-1">
+        //
+        // ⛔올리베이라군 리뷰(2026-08-01, PR#2760) — 옛 코드는 `flex-1`과 `overflow-y-auto`가
+        // «같은 요소»에 있어(flex item 자신이 overflow-y-auto) CSS 명세상 그 요소의
+        // `min-height:auto`가 0으로 처리돼(자동 최소 크기가 overflow≠visible일 때만 0이 되는
+        // 규칙) 정상적으로 축소됐다. 여기서는 `flex-1`이 바깥(overflow:visible인 채)으로
+        // 옮겨져 바깥의 `min-height:auto`가 콘텐츠 높이만큼 살아남을 뻔했다 — 로컬 puppeteer
+        // 실측(Tailwind와 같은 border-box 전제)으로 직접 확認: `min-h-0` 없이는 스크롤
+        // 컨테이너가 전체 콘텐츠 높이(2016px)만큼 그대로 커져 내부 스크롤이 아예 죽고
+        // 편집기 셸을 1748px 밀어낸다. `min-h-0`을 더하면 옛 구조와 동일하게(clientHeight
+        // 266·scrollHeight 2016·내부 스크롤 O) 돌아온다 — #2757은 바깥이 «고정 height»였어서
+        // 이 함정을 안 만났을 뿐, 같은 규격이라도 축(고정 height ↔ flex-1)이 다르면 같은
+        // 처방이 조용히 다른 결과를 낼 수 있다는 것이 이 리뷰의 요지.
+        <div className="relative min-h-0 flex-1">
           <div
             ref={editorContentRef as RefObject<HTMLDivElement>}
             onDragEnter={onDragEnter}

@@ -79,19 +79,13 @@ describe('DocEditor — story #2372: DnD 드롭 오버레이가 세로 스크롤
     const overlay = container.querySelector('[data-testid="doc-editor-drop-overlay"]');
     expect(overlay).not.toBeNull();
 
-    // story #2369 회귀 테스트(flow-multi-lane-canvas.test.tsx)와 같은 성질 — 오버레이의
-    // 조상 중 overflow-y-auto(세로로 스크롤하는 요소)가 없어야 한다. `.tiptap-editor-wrapper`
-    // 자신이 그 스크롤 컨테이너이므로, 오버레이가 «그 밖»(형제)에 있어야 이 성질이 선다.
-    let node = overlay!.parentElement;
-    let hasScrollingAncestor = false;
-    while (node) {
-      if (node.className.includes('overflow-y-auto')) hasScrollingAncestor = true;
-      node = node.parentElement;
-    }
-    expect(hasScrollingAncestor).toBe(false);
-
-    // 그리고 오버레이는 스크롤 컨테이너의 «형제»(같은 non-clipping relative wrapper의 자식)
-    // 여야 한다 — 스크롤 컨테이너 자신의 자손이면 안 된다.
+    // ⛔올리베이라군 리뷰(2026-08-01, PR#2760) — "조상 중 overflow-y-auto가 하나도 없다"는
+    // 실제 앱에서는 항상 거짓이다(페이지 셸 어딘가에 스크롤하는 조상이 늘 있다 — 유나양이
+    // flow-multi-lane-canvas.test.tsx에서 정확히 이 문장을 정정한 그 자리). 겨눠야 할
+    // 성질은 "오버레이와 그 containing block «사이»에 스크롤 조상이 없다"이고, 여기서는
+    // `.tiptap-editor-wrapper`(`.scrollContainer()`)가 정확히 그 스크롤하는 요소이므로,
+    // "오버레이가 그 요소의 자손이 아니다"만 재면 충분하다 — 더 넓게(조상 전체를) 약속하면
+    // 페이지 셸이 나중에 바뀔 때 이 결함과 무관하게 빨개질 수 있다.
     expect(scrollContainer().contains(overlay)).toBe(false);
   });
 
