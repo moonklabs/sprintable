@@ -53,6 +53,11 @@ class UpdateStoryInput(SprintableInput):
     description: str | None = None
     acceptance_criteria: str | None = None
     assignee_id: str | None = None
+    # story #2389 — 백엔드 StoryUpdate/repo에 이미 있던 복수 배정 필드가 이 스키마에 없어 조용히
+    # 버려졌다(200 OK·assignee_ids: [] 응답·updated_at 불변). extra="ignore"(SprintableInput)가
+    # 미선언 필드를 검증 단계에서 그냥 삼켜, args에 속성 자체가 안 생겼다 — "읽었는데 무시"가
+    # 아니라 "받을 방법이 없었다".
+    assignee_ids: list[str] | None = None
     epic_id: str | None = None
     # P0-05 후속: 도중 재선언/축소/해제(빈 배열)도 가능 — story.declared_scope_changed 감사 이벤트로 기록.
     declared_scope_paths: list[str] | None = None
@@ -153,6 +158,8 @@ async def update_story(args: UpdateStoryInput) -> list[TextContent]:
         updates["acceptance_criteria"] = args.acceptance_criteria
     if args.assignee_id is not None:
         updates["assignee_id"] = args.assignee_id
+    if args.assignee_ids is not None:
+        updates["assignee_ids"] = args.assignee_ids
     if args.epic_id is not None:
         updates["epic_id"] = args.epic_id
     if args.declared_scope_paths is not None:
