@@ -46,9 +46,19 @@ describe('resolveRuntimeWakeInfo — story #2377 §2', () => {
 // (슬러그 축에서 이미 쓴 처방과 같은 성질 — «사람이 기억해야» 하는 자리를 «상태가 스스로 서는»
 // 자리로 바꾼다).
 describe('kitOrientingWakeBody_<method> i18n coverage — story #2377 (유나양 design:pass 후속)', () => {
-  const NON_UNKNOWN_WAKE_METHODS: Exclude<RuntimeWakeMethod, 'unknown'>[] = [
-    'channel-plugin', 'connector-host', 'connector-sidecar', 'connector-sdk',
-  ];
+  // ⛔유나양 재지적(2026-08-01) — 위 배열 리터럴은 「원소가 유니온에 속하는가」만 보고 «완전성»은
+  // 안 요구한다. `RuntimeWakeMethod`에 method가 하나 늘어도 이 배열을 안 늘리면 그냥 통과했다 —
+  // 「method를 추가하고 이 줄을 안 늘리면 그 자리에서 빨개진다」던 위 주석이 «거짓»이었다(오늘
+  // 온종일 잡은 그 병 — 서술이 실제와 어긋남 — 의 재발). `Record<..., true>`는 유니온의 «모든»
+  // 키를 요구하므로, method가 늘고 이 객체를 안 늘리면 tsc가 즉시 빨개진다 — 주석이 약속한 것을
+  // 타입이 실제로 하게 만든다.
+  const NON_UNKNOWN_WAKE_METHOD_CHECK: Record<Exclude<RuntimeWakeMethod, 'unknown'>, true> = {
+    'channel-plugin': true,
+    'connector-host': true,
+    'connector-sidecar': true,
+    'connector-sdk': true,
+  };
+  const NON_UNKNOWN_WAKE_METHODS = Object.keys(NON_UNKNOWN_WAKE_METHOD_CHECK) as Exclude<RuntimeWakeMethod, 'unknown'>[];
 
   it('every non-unknown RuntimeWakeMethod has a kitOrientingWakeBody_<method> key in both en.json and ko.json', () => {
     const en = (enMessages as { recruiter: Record<string, string> }).recruiter;
