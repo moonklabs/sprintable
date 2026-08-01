@@ -238,6 +238,16 @@ const RENAMED_RESOURCES: Record<string, string> = {
   // 2026-08-01 지적: prod 승격 #2373에서 board 라우트만 지우고 이 줄을 빠뜨려 외부 딥링크
   // ~14곳이 404를 만날 뻔했다 — board/page.tsx:12-13 자체가 이 위험을 이미 적어 두고 있었다).
   board: 'flow',
+  // story #2378(2026-08-01) — `/mockups` 은퇴. E-CANVAS가 부분 후계(스토리 본문 — 시나리오
+  // 분기·자유배치 편집·버전 복원·9종 팔레트·category/slug는 안 옮겨짐, 별건 필요 시 재론).
+  // dev DB 실측: `mockups` 테이블 자체가 없고 mockup_scenarios/versions/pages 전부 0건이라
+  // 되살아날 실 데이터가 없다 — 그래도 목록 진입(`/mockups`)만큼은 실제 후계 화면(`/artifacts`)
+  // 에 정확히 닿는다. ⚠️epics→goals·board→flow(같은 행이 새 이름을 받은 rename)와 «성격이
+  // 다르다» — `/mockups/{id}`처럼 id 하위 세그먼트가 붙은 딥링크는 mockup id가 artifact id
+  // 공간과 다르므로 `/artifacts/{id}`가 그 특정 항목을 못 찾을 수 있다(다만 위 실측대로 그런
+  // id 자체가 존재하지 않는다 — 이론상의 잔여 위험이지 실측된 위험이 아니다). 「주소를 빈
+  // 채 두지 않는다」(AC3)의 최소 충족선이 이 줄이다.
+  mockups: 'artifacts',
 };
 
 function redirectRenamedResourcePath(request: NextRequest, pathname: string): NextResponse | null {

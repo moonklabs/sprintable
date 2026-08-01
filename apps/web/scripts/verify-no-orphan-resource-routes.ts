@@ -68,8 +68,16 @@
  * ⭐후속(story #2379, 2026-08-01) — `entryWithoutRoute: memos` 정리 완료. notification-
  * navigation.ts의 memo 분기 제거(기본 fallback href:null로 흡수) + backend EventType.
  * memo_created/memo_replied 화석 제거. baseline에서 뺐다 — staleness 체크가 「고쳐졌는데
- * 목록에 남음」을 잡아 주는 자리라 여기서 그 값이 실증된다. `routeWithoutEntry: mockups`는
- * #2378(별도, mockups=E-CANVAS 전신 화면 — 진입점 0이 의도인지 PO 판단 대기)로 남아 있다.
+ * 목록에 남음」을 잡아 주는 자리라 여기서 그 값이 실증된다.
+ *
+ * ⭐후속(story #2378, 2026-08-01) — `routeWithoutEntry: mockups`도 정리 완료. PO 판단: 은퇴
+ * (진입점 0이 「의도」가 아니라 dev DB 실측 결과 `mockups` 테이블 자체가 없고 scenarios/
+ * versions/pages 전부 0건 — 열어도 500인 «껍데기»였다). `[ws]/[proj]/mockups` 라우트 5파일 +
+ * `components/mockups/*` + `/api/mockups/*`·`/api/mcp/mockups`(백엔드 대응 라우트 자체가
+ * 없던 깨진 프록시) + i18n `mockup` 네임스페이스(69키)+`nav.mockup` 전부 제거, `proxy.ts`
+ * `RENAMED_RESOURCES`에 `mockups: 'artifacts'`(E-CANVAS 부분 후계)로 도착지를 남겼다.
+ * baseline에서 뺐다 — 라우트 자체가 없어졌으니 이 스캔에 다시 안 잡히는 것이 정상이고,
+ * staleness 체크가 그것을 확認한다. GRANDFATHER_BASELINE이 이제 빈 Set이다.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -115,19 +123,19 @@ export const KNOWN_NON_PROJECT_ROUTES = new Set<string>([
   'more', 'org-briefing', 'organization', 'rewards', 'settings',
 ]);
 
-// ── ②실측 — apps/web/src/proxy.ts RENAMED_RESOURCES 키 (2026-08-01 실측 스냅샷) ──
-export const RENAMED_RESOURCE_ALIASES = new Set<string>(['epics', 'glance', 'board']);
+// ── ②실측 — apps/web/src/proxy.ts RENAMED_RESOURCES 키 (2026-08-01 실측 스냅샷, story #2378
+// 후속으로 mockups 추가) ──
+export const RENAMED_RESOURCE_ALIASES = new Set<string>(['epics', 'glance', 'board', 'mockups']);
 
 export const EXEMPT_TARGETS = new Set<string>([...KNOWN_NON_PROJECT_ROUTES, ...RENAMED_RESOURCE_ALIASES]);
 
 // ── GRANDFATHER_BASELINE — 첫 스캔(2026-08-01)이 잡은 기존 채무. AC6: #2376 스토리는 안
 // 고친다. 새 항목부터는 PO 승인 없이 조용히 추가되지 않는다(#2367 관례 재사용) —
 // GRANDFATHER_BASELINE_COUNT_TEST가 크기를 고정, staleness 체크가 "고쳐졌는데 목록에
-// 남은" 항목을 잡는다. `entryWithoutRoute:memos`는 story #2379(2026-08-01)가 실제로
-// 고치고 여기서 뺐다 — staleness 체크가 그 자리에서 값을 한다.
-export const GRANDFATHER_BASELINE = new Set<string>([
-  'routeWithoutEntry:mockups',
-]);
+// 남은" 항목을 잡는다. `entryWithoutRoute:memos`는 story #2379가, `routeWithoutEntry:
+// mockups`는 story #2378이 실제로 고치고 여기서 뺐다 — 둘 다 staleness 체크가 그 자리에서
+// 값을 했다(빈 Set이 된 것 자체가 "지금 아는 채무 0건"이라는 사실이다).
+export const GRANDFATHER_BASELINE = new Set<string>([]);
 
 // ── 라우트 실존 — [ws]/[proj]/<resource>/page.tsx 직접 존재 ────────────────────
 

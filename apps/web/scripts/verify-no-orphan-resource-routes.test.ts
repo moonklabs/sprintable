@@ -115,30 +115,12 @@ describe('AC4 — 네 방향 mutation (단위테스트 고정)', () => {
 
 // AC7 — 실제 저장소의 첫 검거를 재현한다(지어낸 픽스처가 아니라 실제 파일 경로로).
 describe('AC7 — 실제 저장소 첫 스캔의 검거(GRANDFATHER_BASELINE)이 진짜인지 확認', () => {
-  it('mockups — [ws]/[proj]/mockups 라우트가 있고 KNOWN 진입점 목록엔 없다', () => {
-    // app-sidebar.tsx/command-palette.tsx/more/page.tsx 어디에도 resourceLink('mockups')·
-    // resourceHref('mockups')·literal '/mockups'가 없음을 실제 파일 3개로 확認(2026-08-01 grep 전수).
-    const knownEntryOwnerSnippets = [
-      `resourceLink('docs'); resourceLink('standup'); resourceLink('retro'); resourceLink('loops');
-       resourceLink('artifacts'); resourceLink('sprints'); resourceLink('storage'); resourceLink('goals');
-       resourceLink('flow');`, // app-sidebar.tsx 실제 호출 집합
-      `href: '/inbox' href: '/dashboard' href: '/board' href: '/sprints' href: '/chats'
-       resourceHref('docs') resourceHref('flow')`, // command-palette.tsx 실제 대상 집합
-      `href: '/sprints' href: '/goals' href: '/loops' href: '/standup' href: '/retro'
-       href: '/activity' href: '/docs' href: '/artifacts' href: '/storage' href: '/dashboard'
-       href: '/settings'`, // more/page.tsx 실제 ITEMS 집합
-    ].join('\n');
-    const composed = extractComposedTargets(knownEntryOwnerSnippets);
-    const literal = extractLiteralTargets(knownEntryOwnerSnippets);
-    expect([...composed, ...literal]).not.toContain('mockups');
-  });
-
-  // story #2379(2026-08-01) — entryWithoutRoute:memos는 실제로 고쳐져 baseline에서 빠졌다
-  // (notification-navigation.ts memo 분기 제거 + backend EventType 화석 제거). routeWithoutEntry:
-  // mockups만 남는다(#2378 별도 판정 대기).
-  it('GRANDFATHER_BASELINE 크기는 정확히 1이다(새 항목은 PO 승인 없이 조용히 못 들어온다)', () => {
-    expect(GRANDFATHER_BASELINE.size).toBe(1);
-    expect(GRANDFATHER_BASELINE.has('routeWithoutEntry:mockups')).toBe(true);
+  // story #2378(2026-08-01) — routeWithoutEntry:mockups는 실제로 고쳐져(라우트 자체를
+  // 제거 + proxy.ts RENAMED_RESOURCES로 도착지 이관) baseline에서 빠졌다. story #2379가
+  // entryWithoutRoute:memos를 먼저 뺐던 것과 같은 자리 — 이제 둘 다 빠져 Set이 빈다.
+  it('GRANDFATHER_BASELINE 크기는 정확히 0이다(둘 다 고쳐졌다 — 새 항목은 PO 승인 없이 조용히 못 들어온다)', () => {
+    expect(GRANDFATHER_BASELINE.size).toBe(0);
+    expect(GRANDFATHER_BASELINE.has('routeWithoutEntry:mockups')).toBe(false);
     expect(GRANDFATHER_BASELINE.has('entryWithoutRoute:memos')).toBe(false);
   });
 });

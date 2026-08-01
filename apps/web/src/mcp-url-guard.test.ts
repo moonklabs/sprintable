@@ -5,9 +5,12 @@
  * 이어졌다. 진짜 SSOT는 서버 `mcp_config`(POST /api/v2/agents/{id}/api-keys 응답)이며 FE는 이를
  * 그리기만 해야 한다(손조립 금지). 이 테스트는 그 손조립 패턴의 재유입을 봉쇄한다.
  *
- * 허용 예외: `app/api/mcp/mockups/route.ts`(및 `toolset-catalog/route.ts`)는 `/api/v2/mcp/<subpath>`
- * 형태의 정상 BE 프록시 라우트라 바닥(bare) 엔드포인트가 아니다 — 아래 정규식은 하위경로가 붙은
- * 형태는 매치하지 않으므로 자연히 제외된다.
+ * 허용 예외: `toolset-catalog/route.ts`류는 `/api/v2/mcp/<subpath>` 형태의 정상 BE 프록시
+ * 라우트라 바닥(bare) 엔드포인트가 아니다 — 아래 정규식은 하위경로가 붙은 형태는 매치하지
+ * 않으므로 자연히 제외된다. ⛔story #2378(2026-08-01)로 `app/api/mcp/mockups/route.ts`는
+ * 은퇴했다(백엔드에 대응 라우트 자체가 없던 깨진 프록시였다) — 아래 fixture의 `mockups`
+ * 예시는 이제 실재하는 파일이 아니라 «이 정규식이 하위경로 형태를 어떻게 다루는가»만 증명하는
+ * 순수 회귀값이다(regex 동작 자체는 은퇴와 무관).
  *
  * codex 리뷰(PR #2296) 반영: (1) 스캔이 실제로 파일을 훑었는지 자체 검증하는 sanity floor,
  * (2) `'/api/v2/' + 'mcp'` 같은 분할 문자열 손조립이 인접 리터럴 이음매(`' + '`)를 제거하는

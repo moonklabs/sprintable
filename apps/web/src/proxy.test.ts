@@ -706,6 +706,16 @@ describe('proxy — 경로 리터럴 rename 301(story 8fc51517, 에픽→목표)
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it('/{ws}/{proj}/mockups → 301 /{ws}/{proj}/artifacts(mockups 은퇴 — #2378, E-CANVAS가 후계 목록 화면으로 착지)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const response = await middleware(makeRequest('/moonklabs/sprintable/mockups', {
+      sp_at: token, sprintable_current_project_id: 'proj-1',
+    }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/artifacts');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it('이미 신 경로(/goals)로 들어온 요청은 재리다이렉트 없이 그대로 통과(무한루프 방지 확인)', async () => {
     const token = await makeAccessToken({ orgId: 'org-1' });
     mockFetch.mockResolvedValue({
