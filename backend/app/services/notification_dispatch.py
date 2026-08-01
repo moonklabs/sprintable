@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -323,6 +324,13 @@ async def dispatch_notification(
                 if member_row.project_id:
                     try:
                         async with db.begin_nested():
+                            # story #2380: 이 분기는 human Event를 생성 즉시 status="delivered"로
+                            # 박는다(human은 agent SSE ack 사이클을 안 타므로 pending을 안 거치는
+                            # 것 자체는 맞다) — 그런데 delivered_at을 한 번도 안 채워 왔다. dev
+                            # 실측(2026-08-01): 이 경로로 난 human Event의 74%가 status=delivered
+                            # 인데 delivered_at=NULL — "배달됐다"만 있고 "언제"가 없어, 이 값을
+                            # coalesce(delivered_at, now())로 지연을 재려던 첫 시도가 「p50 9.4일」
+                            # 이라는 거짓 수치를 냈다(실제로는 그 행들 나이가 now()로 치환된 것).
                             event = Event(
                                 project_id=member_row.project_id,
                                 org_id=org_id,
@@ -334,6 +342,14 @@ async def dispatch_notification(
                                 recipient_type="human",
                                 payload={"title": title, "body": body, "event_type": event_type},
                                 status="delivered",
+                                # ⛔이 순간이 "배달 시도 순간"과 같다고 볼 수 있는 건 이 분기가
+                                # 지금 동기라서다 — 바로 다음 줄들이 실제 배달 행위(Notification
+                                # INSERT·개인 webhook 시도)를 같은 호출 안에서 한다. 이 경로가
+                                # 나중에 진짜 비동기(예: webhook 배달확認 콜백)가 되면 이 값도
+                                # 그 확認 시점으로 옮겨야 한다 — 여기 그대로 둔 채 비동기화하면
+                                # #2380이 고친 문제(delivered_at이 실제 배달 시점을 안 가리킴)가
+                                # 값이 없는 대신 "틀린 값"으로 재발한다.
+                                delivered_at=datetime.now(timezone.utc),
                             )
                             db.add(event)
                         created_events.append(event)
