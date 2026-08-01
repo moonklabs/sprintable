@@ -288,7 +288,15 @@ async def dispatch_notification(
                         sender_id=None,
                         recipient_id=member_row.id,
                         recipient_type="agent",
-                        payload={"title": title, "body": body, "event_type": event_type},
+                        # #2375: content 키 없으면 SSE 어댑터(fakechat/server.ts·hermes adapter.py)가
+                        # 둘 다 ack 前에 조용히 드롭해 영구 pending — E-EVENT-INJECT S1이 만든
+                        # "content를 SSE top-level로 노출"(agent_gateway.py _row_to_payload) 방지장치가
+                        # 여기(생성부)에서 그 키를 안 채워 안 맞물려 있었다. body 없으면 title로
+                        # 폴백(title은 필수 파라미터라 항상 non-empty) — 절대 빈 content로 두지 않는다.
+                        payload={
+                            "title": title, "body": body, "event_type": event_type,
+                            "content": body or title,
+                        },
                         status="pending",
                     )
                     db.add(event)

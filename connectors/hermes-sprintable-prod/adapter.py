@@ -231,8 +231,35 @@ class SprintableProdAdapter(BasePlatformAdapter):
         if event_type not in INJECTABLE_EVENT_TYPES:
             return  # not a recommended inject type (e.g. status_changed FYI)
         content = (data.get("content") or payload.get("content") or "").strip()
+
+        # seq for ack + reconnect cursor — check SSE id, then several data locations.
+        # Computed before the content guard below so the empty-content branch
+        # (#2375 AC5) can still ack.
+        seq = 0
+        for cand in (ev_id, data.get("recipient_seq"), data.get("seq"), payload.get("recipient_seq")):
+            try:
+                if cand is not None and str(cand) != "":
+                    seq = int(cand)
+                    break
+            except (ValueError, TypeError):
+                continue
+        if ev_id:
+            self._last_event_id = ev_id
+
         if not content:
-            return  # nothing to inject (e.g. dispatched/system event without text)
+            # #2375 AC5 — a content-less injectable event is "nothing to show", not a
+            # delivery failure. Returning here without acking used to leave seq
+            # unconfirmed forever, so every reconnect re-sent the same event via
+            # backfill — exactly the flood the ack mechanism exists to prevent
+            # (root cause of the 20+ permanently-pending `dispatched` events,
+            # 2026-07-31~08-01, dev). The server now fills content for the one known
+            # producer (notification_dispatch.py); this stays as a safety net for
+            # any other injectable event that genuinely carries no text. Kept in
+            # sync with connectors/hermes-sprintable/adapter.py per this file's own
+            # docstring policy.
+            if seq:
+                await self._send_ack(seq)
+            return
 
         event_id = data.get("event_id") or payload.get("id") or ev_id or uuid.uuid4().hex
         if self._is_duplicate(event_id):
@@ -245,18 +272,6 @@ class SprintableProdAdapter(BasePlatformAdapter):
         sender = payload.get("sender") or data.get("sender") or {}
         sender_id = sender.get("id") or data.get("sender_id") or "sprintable"
         sender_name = sender.get("name") or sender_id
-
-        # seq for ack + reconnect cursor — check SSE id, then several data locations
-        seq = 0
-        for cand in (ev_id, data.get("recipient_seq"), data.get("seq"), payload.get("recipient_seq")):
-            try:
-                if cand is not None and str(cand) != "":
-                    seq = int(cand)
-                    break
-            except (ValueError, TypeError):
-                continue
-        if ev_id:
-            self._last_event_id = ev_id
 
         # AC2: model a Sprintable conversation as a shared Hermes *thread*, not a
         # regular group chat.  Hermes splits regular groups into per-sender
