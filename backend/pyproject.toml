@@ -19,7 +19,11 @@ dependencies = [
     "alembic>=1.13.0",
     "psycopg2-binary>=2.9.0",
     "slowapi>=0.1.9",
-    "mcp>=1.8.0",  # E-MCP-HTTP: streamable-http floor(sprintable-mcp-dev 서비스가 동 backend 이미지 사용)
+    # E-MCP-HTTP: streamable-http floor(sprintable-mcp-dev 서비스가 동 backend 이미지 사용).
+    # story #2382: <2.0.0 상한 — Docker 빌드는 uv sync --frozen(uv.lock 고정, 현재 1.27.1)이라
+    # 지금 당장 위험하진 않지만, 언젠가 uv lock --upgrade로 lock을 재생성하면 이 declared range가
+    # 그대로 mcp 2.0.0(FastMCP→MCPServer 개명)까지 열어 호스티드 MCP를 똑같이 깨뜨린다.
+    "mcp>=1.8.0,<2.0.0",
     "resend>=2.0.0",
     "google-analytics-data>=0.18.0",
     # R2 채팅 첨부 AI 컨텍스트(9d130c01): GCS 서비스계정 read + 문서 텍스트 추출

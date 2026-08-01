@@ -1,0 +1,60 @@
+name: sprintable-mcp PyPI smoke test
+
+# story #2382 (P0 RED, 2026-08-01): mcp SDK 2.0.0 broke `uvx sprintable` for every new
+# install starting 2026-07-28 (FastMCP renamed to MCPServer, mcp.server.fastmcp module
+# path removed) — and nothing caught it for 4 days, because our CI tests this repo's local
+# source, never the artifact PyPI actually serves users. This job closes exactly that gap:
+# it installs the real published package from PyPI (uvx, not a local checkout) and runs it
+# far enough to prove the whole import chain resolves — no live credentials needed, no
+# hang, because sprintable_mcp/__main__.py:main() exits early with a friendly message the
+# moment SPRINTABLE_API_URL is unset, *after* every import in the chain has already
+# succeeded. Reaching that message is proof positive the package installs and imports
+# cleanly; a traceback anywhere before it is proof it doesn't.
+#
+# Positive control (verified 2026-08-01, story #2382 PR): this exact check told the broken
+# state (mcp>=1.8.0 unbounded → resolves mcp 2.0.0 → ModuleNotFoundError, no message match)
+# apart from the fixed state (mcp>=1.8.0,<2.0.0 → resolves mcp 1.x → friendly message,
+# match) — both reproduced against real installs (PyPI for broken, a local wheel build for
+# fixed) before this workflow was written. See the PR body for the transcripts.
+
+on:
+  schedule:
+    # mcp SDK majors aren't frequent — daily is enough to catch drift within a day, not
+    # the 4-day blind spot this story found.
+    - cron: "0 3 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  smoke-test:
+    name: uvx sprintable (real PyPI, no cache) reaches its own config guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Run uvx sprintable from PyPI with a fully clean environment
+        id: run
+        run: |
+          set +e
+          # env -i: don't let ambient CI env vars accidentally supply SPRINTABLE_API_URL/
+          # AGENT_API_KEY — this must fail at main()'s own config check, never attempt a
+          # live network call. --no-cache: this run must reflect what a brand-new install
+          # gets right now, not whatever uv already has cached on this runner.
+          output=$(env -i PATH="$PATH" HOME="$HOME" uvx --no-cache sprintable 2>&1)
+          code=$?
+          echo "$output"
+          {
+            echo "output<<SMOKE_EOF"
+            echo "$output"
+            echo "SMOKE_EOF"
+            echo "exit_code=$code"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Assert the import chain actually resolved
+        run: |
+          if echo "${{ steps.run.outputs.output }}" | grep -q "SPRINTABLE_API_URL environment variable required"; then
+            echo "uvx sprintable resolves and reaches its own config guard — the published package installs and imports cleanly."
+            exit 0
+          fi
+          echo "::error::uvx sprintable did NOT reach its own config-check (see the log above for the actual failure) — the published PyPI package is broken for fresh installs. This is exactly story #2382's failure mode; check for an unbounded/newly-incompatible dependency."
+          exit 1
