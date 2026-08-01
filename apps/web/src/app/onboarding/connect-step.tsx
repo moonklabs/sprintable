@@ -111,6 +111,7 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
   const [beSteps, setBeSteps] = useState<RawStep[] | null>(null);
   const [hasCopiedMap, setHasCopiedMap] = useState<Partial<Record<Transport, boolean>>>({});
   const [justCopied, setJustCopied] = useState(false);
+  const [copiedVerifyPrompt, setCopiedVerifyPrompt] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const leftRef = useRef(false);
@@ -233,6 +234,18 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
     setJustCopied(true);
     setTimeout(() => setJustCopied(false), 2000);
     emitOnboardingEvent('config_copied', { agent_id: agentId });
+  };
+
+  // story #2404 — "설정만 넣으면 자동으로 된다"는 오해가 무한 대기의 실원인이었다(검증은 실제
+  // tool 호출로만 완료됨, AC5 PO 확定). 지금 할 일을 복사 가능한 한 줄로 그 자리에 쥐여 준다.
+  const handleCopyVerifyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(t('verifyExamplePrompt'));
+      setCopiedVerifyPrompt(true);
+      setTimeout(() => setCopiedVerifyPrompt(false), 2000);
+    } catch {
+      // ignore clipboard failure
+    }
   };
 
   const handleVerify = async () => {
@@ -412,6 +425,16 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
             <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
             {t('hostedVerifyNote')}
           </p>
+        )}
+        {transport === 'http' && !verified && (
+          <div className="flex items-center justify-between gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2 text-xs">
+            <span className="min-w-0 truncate text-info">
+              {t('verifyExampleLabel')} <span className="font-mono text-foreground">&ldquo;{t('verifyExamplePrompt')}&rdquo;</span>
+            </span>
+            <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0">
+              {copiedVerifyPrompt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copyConfig')}</>}
+            </Button>
+          </div>
         )}
         {verified && (
           // story #2105 2차 — 검증 성공 결과도 polite로 낭독(#2096/#2105 1차와 동일 원칙).
