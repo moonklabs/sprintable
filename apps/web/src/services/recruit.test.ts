@@ -3,7 +3,9 @@
 // 런타임별 실제 깨우기 경로가 어딘가 데이터로 있어야 한다. onboarding-guide.txt의 Runtime
 // catalog 표(:152-165)를 FE에 미러한 이 표가 그 자리다.
 import { describe, expect, it } from 'vitest';
-import { RUNTIME_WAKE_MECHANISM, resolveRuntimeWakeInfo } from './recruit';
+import { RUNTIME_WAKE_MECHANISM, resolveRuntimeWakeInfo, type RuntimeWakeMethod } from './recruit';
+import enMessages from '../../messages/en.json';
+import koMessages from '../../messages/ko.json';
 
 describe('resolveRuntimeWakeInfo — story #2377 §2', () => {
   it('maps each of the 9 named runtimes + the generic connector slug to their real wake mechanism(onboarding-guide.txt Runtime catalog 표와 대조)', () => {
@@ -31,5 +33,30 @@ describe('resolveRuntimeWakeInfo — story #2377 §2', () => {
       'claude-code', 'codex', 'connector', 'cursor', 'gemini',
       'grok', 'hermes', 'openclaw', 'opencode', 'pi',
     ]);
+  });
+});
+
+// ⛔유나양 지적(2026-08-01, PR#2768 design:pass 후속) — 슬러그 축(위 테스트)과 같은 갭이 method
+// 축에도 있다. `recruiter-client.tsx`가 `t(\`kitOrientingWakeBody_${method}\`)`로 i18n 키를
+// «동적 조합»하는데, `RuntimeWakeMethod` 유니온에 새 method를 추가하고 그 키를 en/ko에 안 넣으면
+// TS가 못 잡고(템플릿 리터럴 조합 키의 존재는 타입 레벨에서 안 재진다) 화면에 raw 키
+// ("kitOrientingWakeBody_그method")가 그대로 뜬다 — 조용한 실패. 지금은 완전하다(유니온 5종 중
+// unknown은 별도 분기라 나머지 4종이 en/ko 둘 다에 있음) — 다만 이 동적 조합 자체를 이 PR이
+// 도입했으므로, 다음 사람이 method를 추가하고 이 줄을 안 늘리면 그 자리에서 빨개지게 지금 막는다
+// (슬러그 축에서 이미 쓴 처방과 같은 성질 — «사람이 기억해야» 하는 자리를 «상태가 스스로 서는»
+// 자리로 바꾼다).
+describe('kitOrientingWakeBody_<method> i18n coverage — story #2377 (유나양 design:pass 후속)', () => {
+  const NON_UNKNOWN_WAKE_METHODS: Exclude<RuntimeWakeMethod, 'unknown'>[] = [
+    'channel-plugin', 'connector-host', 'connector-sidecar', 'connector-sdk',
+  ];
+
+  it('every non-unknown RuntimeWakeMethod has a kitOrientingWakeBody_<method> key in both en.json and ko.json', () => {
+    const en = (enMessages as { recruiter: Record<string, string> }).recruiter;
+    const ko = (koMessages as { recruiter: Record<string, string> }).recruiter;
+    for (const method of NON_UNKNOWN_WAKE_METHODS) {
+      const key = `kitOrientingWakeBody_${method}`;
+      expect(en[key], `en.json missing ${key}`).toBeTypeOf('string');
+      expect(ko[key], `ko.json missing ${key}`).toBeTypeOf('string');
+    }
   });
 });
