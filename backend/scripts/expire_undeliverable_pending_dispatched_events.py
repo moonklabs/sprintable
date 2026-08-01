@@ -17,19 +17,29 @@
   뒤늦은 알림이 된다.
 - ⇒ **만료가 맞다.**
 
-## 스코프 정정(2026-08-01, PO 지적) — content가 아니라 recipient_seq가 진짜 조건
+## 스코프 정정 2회(2026-08-01, PO 실측 두 번 다 반례로 잡음)
 ```sql
--- 이전(#2761 최초 판) — 47건만 잡고 8건을 놓쳤다:
+-- ①(#2761 최초 판) — 47건만 잡고 8건(content 있지만 seq 없음)을 놓쳤다:
 event_type = 'dispatched' AND status = 'pending' AND NOT (payload ? 'content')
--- 지금 — "스트림에 못 실린다" 그 자체를 조건으로:
+-- ②(#2764 1차 정정) — "human은 pending을 절대 안 거친다"를 근거로 recipient_type을 안 넣었다가
+--   dev 실측에서 반례가 나왔다: human-recipient pending dispatched 6건 존재, 그중 5건이
+--   PO가 측정하던 바로 그 순간(03:09:00~03:09:02) 방금 생성된 것 — 죽은 찌꺼기가 아니라
+--   지금도 도는 살아 있는 경로. 그 경로가 뭔지는 이 스크립트의 관심사 밖(아래 참조).
 event_type = 'dispatched' AND status = 'pending' AND recipient_seq IS NULL
+-- ③(지금) — recipient_type='agent'를 조건에 직접 넣는다. dry-run 출력에 "찍는" 것과 WHERE에
+--   "거는" 것은 다른 자리다: 찍히기만 하면 사람이 봐야 막히고, 조건에 있으면 구조적으로 안
+--   걸린다. 이 스크립트가 애초에 다루려는 건 agent 쪽(#2764가 고친 그 축)뿐이다.
+event_type = 'dispatched' AND status = 'pending' AND recipient_seq IS NULL AND recipient_type = 'agent'
 ```
-human 수신자는 `dispatch_notification()`에서 항상 `status="delivered"`로 즉시 생성되고(SSE를
-안 타 seq가 필요 없다) 결코 pending을 거치지 않으므로, `event_type='dispatched' AND
-status='pending'`은 이미 사실상 agent 전용 스코프다 — `recipient_seq IS NULL`을 더해도 human
-행을 잘못 잡을 여지가 없다(dry-run 출력에서 recipient_type을 같이 찍어 교차 확認한다).
 이 fix(#2764) 이후 생성되는 모든 agent-recipient dispatched Event는 항상 recipient_seq를
 받으므로, 이 조건은 향후에도 자동으로 "그 fix 이전 잔재"만 골라낸다 — 시간 컷오프 불필요.
+
+## ⚠️별개로 남겨 두는 것 — 이 PR/스크립트가 안 다루는 것
+human-recipient pending dispatched를 만드는 경로가 지금도 살아 있다(위 ② 참조,
+`payload->>'event_type'`이 NULL이라 `dispatch_notification()`이 만든 게 아니다 — 다른 생성처).
+그 seq=NULL이 human에게 정상(SSE를 안 타 애초에 불필요)인지, 아니면 그쪽도 별도 결함인지는
+**미판정**이다. 이 스크립트는 agent 축만 만료하므로 그 human 행들은 손대지 않지만, 판정 자체는
+별도로 추적해야 한다.
 
 ## 실행
 ```
@@ -71,6 +81,7 @@ async def main() -> int:
         Event.event_type == "dispatched",
         Event.status == "pending",
         Event.recipient_seq.is_(None),
+        Event.recipient_type == "agent",
     ]
     if args.org_id:
         where.append(Event.org_id == uuid.UUID(args.org_id))
@@ -80,10 +91,7 @@ async def main() -> int:
             rows = (await db.execute(
                 select(Event.id, Event.org_id, Event.recipient_type, Event.created_at).where(*where)
             )).all()
-            non_agent = [r for r in rows if r.recipient_type != "agent"]
             print(f"[dry-run] 만료 대상 {len(rows)}건 (--apply로 실제 만료)")
-            if non_agent:
-                print(f"  ⚠️ recipient_type != 'agent' 인 행 {len(non_agent)}건 — --apply 前 확認 필요")
             for r in rows[:30]:
                 print(f"  event_id={r.id} org_id={r.org_id} recipient_type={r.recipient_type} created_at={r.created_at}")
             if len(rows) > 30:
