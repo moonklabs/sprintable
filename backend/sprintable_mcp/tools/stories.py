@@ -83,6 +83,14 @@ class UpdateStoryInput(SprintableInput):
     success_hypothesis: str | None = None
     metric_definition: dict | None = None
     measure_after: str | None = None
+    # story #2389 재정정 — 이전 판이 이 필드를 "찾지 못함"으로 남겼는데, 원인은 제 grep이 이
+    # 저장소가 아니라 무관한 stale 체크아웃(다른 로컬 브랜치)을 봤기 때문이었다(제 실수, PO가
+    # 직접 찾아 정정). `allow_shrink`는 데이터 필드가 아니라 «조작 승인 플래그»다(story #2346
+    # AC7) — description/acceptance_criteria 등 긴 텍스트 필드가 50%↑·최소 글자수↑로 급감하면
+    # app/routers/stories.py가 400으로 거부한다(실사고 3건, 전부 -80%대, 이 게이트가 다 막았을
+    # 자리). 이 필드가 없으면 «의도적으로» 줄이려는 정당한 요청도 되돌릴 방법이 없어 도구가
+    # 그 상황에서 막다른 골목이 된다 — 단순 누락이 아니라 실제 워크플로우 차단이었다.
+    allow_shrink: bool | None = None
 
 
 class AssignStoryToSprintInput(SprintableInput):
@@ -196,6 +204,8 @@ async def update_story(args: UpdateStoryInput) -> list[TextContent]:
         updates["metric_definition"] = args.metric_definition
     if args.measure_after is not None:
         updates["measure_after"] = args.measure_after
+    if args.allow_shrink is not None:
+        updates["allow_shrink"] = args.allow_shrink
     if args.epic_id is not None:
         updates["epic_id"] = args.epic_id
     if args.declared_scope_paths is not None:
