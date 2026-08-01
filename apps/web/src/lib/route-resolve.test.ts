@@ -7,6 +7,7 @@ import {
   signResolveCache,
   verifyResolveCache,
 } from './route-resolve';
+import { MIGRATED_RESOURCES, RENAMED_RESOURCES, RETIRED_RESOURCES } from './legacy-resource-tables';
 
 const JWT_SECRET = 'test-secret-for-route-resolve-tests';
 
@@ -52,6 +53,40 @@ describe('looksLikeWorkspaceSegment', () => {
     expect(looksLikeWorkspaceSegment('-leading-hyphen')).toBe(true);
     expect(looksLikeWorkspaceSegment('trailing-hyphen-')).toBe(true);
   });
+});
+
+// story #2393 — AC1 실측으로 찾은 6개 드리프트(gates·more·apple-icon.png·manifest.webmanifest·
+// flow·goals)를 명시적으로 고정한다. 위 "rejects every current live flat-route literal" 은
+// RESERVED_FIRST_SEGMENTS 자신을 순회하므로 이 6개가 그 Set에서 통째로 사라져도 통과해 버린다
+// — 이름을 하드코딩해 그 실패 모드를 막는다.
+describe('RESERVED_FIRST_SEGMENTS — story #2393 AC1 드리프트 회귀 고정', () => {
+  it.each(['gates', 'more', 'apple-icon.png', 'manifest.webmanifest', 'flow', 'goals'])(
+    '%s는 예약 세그먼트다(2026-08-01 실측 당시 손 스냅샷에서 빠져 있던 6개 중 하나)',
+    (segment) => {
+      expect(RESERVED_FIRST_SEGMENTS.has(segment)).toBe(true);
+    },
+  );
+
+  // AC2 — 레거시 리소스명 축은 legacy-resource-tables.ts에서 파생된다(순수 데이터 참조,
+  // 스냅샷 아님). 그 표에 새 키가 추가되면 이 테스트가 자동으로 커버한다(하드코딩 목록 아님).
+  it('MIGRATED_RESOURCES · RENAMED_RESOURCES · RETIRED_RESOURCES 키 전부가 예약돼 있다(파생 축)', () => {
+    for (const key of Object.keys(MIGRATED_RESOURCES)) {
+      expect(RESERVED_FIRST_SEGMENTS.has(key), `MIGRATED_RESOURCES.${key}`).toBe(true);
+    }
+    for (const key of Object.keys(RENAMED_RESOURCES)) {
+      expect(RESERVED_FIRST_SEGMENTS.has(key), `RENAMED_RESOURCES.${key}`).toBe(true);
+    }
+    for (const key of Object.keys(RETIRED_RESOURCES)) {
+      expect(RESERVED_FIRST_SEGMENTS.has(key), `RETIRED_RESOURCES.${key}`).toBe(true);
+    }
+  });
+
+  // AC5 — 이 테스트가 못 잡는 것: 새 top-level 페이지 라우트(app/* 또는 app/(authenticated)/*)
+  // 가 추가돼도 이 파일(hand snapshot 축)이 자동으로 안 늘어난다 — readdirSync 파생을 의도적으로
+  // 안 하기 때문이다(edge 런타임 위험, 파일 헤더 주석 참조). 그 어긋남은 CI 가드
+  // (scripts/verify-reserved-first-segments-sync.ts)가 매 빌드마다 잡는다 — 이 테스트 파일이
+  // 아니다. 즉 "여기 테스트가 초록"이 "hand snapshot이 지금도 실제 라우트와 일치한다"를
+  // 보장하지 않는다 — 그 보장은 CI 가드 몫이다.
 });
 
 describe('signResolveCache / verifyResolveCache', () => {
