@@ -32,11 +32,16 @@
  *     ↔onboarding — 서로 링크를 주고받는 자리라 「단일 세그먼트 리터럴」축에 우르르 걸림)가
  *     오탐으로 뜬 것을 보고 `app/*` 전수로 넓혔다 — 그 자체가 AC4④(정상 케이스가 과잉살상
  *     안 되는지)의 실측 사례다.
- *   ②RENAMED_RESOURCE_ALIASES — `apps/web/src/proxy.ts`의 `RENAMED_RESOURCES` 키(실측) —
- *     `[ws]/[proj]/<resource>` 라우트 대신 미들웨어 301(`redirectRenamedResourcePath`)로
- *     해소되는 이름들이다. 지금(2026-08-01) 이 이름들을 직접 가리키는 진입점은 없지만(전부
- *     최종 목적지를 직접 가리키게 이미 고쳐짐 — command-palette.tsx의 `boardHref` 주석 참조),
- *     이 표에 있는 이름이 «장래에» 진입점 target으로 다시 등장해도 오탐이 아니게 미리 막는다.
+ *   ②RENAMED_RESOURCE_ALIASES — `apps/web/src/proxy.ts`가 `[ws]/[proj]/<resource>` 라우트
+ *     대신 미들웨어 301로 해소하는 이름들(실측) — `redirectRenamedResourcePath`(rename,
+ *     id 보존)와 `redirectRetiredResourcePath`(retire, id 폐기) «두 축을 뭉뚱그린» 이름이다.
+ *     ⚠️story #2378 리뷰(민군 지적, 2026-08-01)로 이 뭉뚱그림 자체가 드러났다 — `mockups`는
+ *     이름과 달리 retire 축인데 이 Set 이름만 보면 rename 축으로 잘못 읽힌다. story #2387이
+ *     이 Set을 `RENAMED_RESOURCES ∪ RETIRED_RESOURCES` 키에서 파생시켜 축을 가를 예정(아래
+ *     `RENAMED_RESOURCE_ALIASES` 정의 옆 주석 참조) — 지금(2026-08-01)은 표시만 해 둔다.
+ *     이 이름들을 직접 가리키는 진입점은 없지만(전부 최종 목적지를 직접 가리키게 이미 고쳐짐
+ *     — command-palette.tsx의 `boardHref` 주석 참조), 이 표에 있는 이름이 «장래에» 진입점
+ *     target으로 다시 등장해도 오탐이 아니게 미리 막는다.
  *
  * AC7 — 이 가드가 «못 잡는 것» (선언 없이 초록이면 「전부 봤다」로 읽힌다):
  *   ㉠런타임에 조립되는 경로 — `resourceLink(variable)`처럼 문자열 리터럴이 아닌 인자, 또는
@@ -68,8 +73,17 @@
  * ⭐후속(story #2379, 2026-08-01) — `entryWithoutRoute: memos` 정리 완료. notification-
  * navigation.ts의 memo 분기 제거(기본 fallback href:null로 흡수) + backend EventType.
  * memo_created/memo_replied 화석 제거. baseline에서 뺐다 — staleness 체크가 「고쳐졌는데
- * 목록에 남음」을 잡아 주는 자리라 여기서 그 값이 실증된다. `routeWithoutEntry: mockups`는
- * #2378(별도, mockups=E-CANVAS 전신 화면 — 진입점 0이 의도인지 PO 판단 대기)로 남아 있다.
+ * 목록에 남음」을 잡아 주는 자리라 여기서 그 값이 실증된다.
+ *
+ * ⭐후속(story #2378, 2026-08-01) — `routeWithoutEntry: mockups`도 정리 완료. PO 판단: 은퇴
+ * (진입점 0이 「의도」가 아니라 dev DB 실측 결과 `mockups` 테이블 자체가 없고 scenarios/
+ * versions/pages 전부 0건 — 열어도 500인 «껍데기»였다). `[ws]/[proj]/mockups` 라우트 5파일 +
+ * `components/mockups/*` + `/api/mockups/*`·`/api/mcp/mockups`(백엔드 대응 라우트 자체가
+ * 없던 깨진 프록시) + i18n `mockup` 네임스페이스(69키)+`nav.mockup` 전부 제거, `proxy.ts`
+ * `RETIRED_RESOURCES`(유나양 design:changes로 `RENAMED_RESOURCES`와 분리— id를 버리는 폐기
+ * 축)에 `mockups: 'artifacts'`(E-CANVAS 부분 후계)로 도착지를 남겼다.
+ * baseline에서 뺐다 — 라우트 자체가 없어졌으니 이 스캔에 다시 안 잡히는 것이 정상이고,
+ * staleness 체크가 그것을 확認한다. GRANDFATHER_BASELINE이 이제 빈 Set이다.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -115,19 +129,24 @@ export const KNOWN_NON_PROJECT_ROUTES = new Set<string>([
   'more', 'org-briefing', 'organization', 'rewards', 'settings',
 ]);
 
-// ── ②실측 — apps/web/src/proxy.ts RENAMED_RESOURCES 키 (2026-08-01 실측 스냅샷) ──
-export const RENAMED_RESOURCE_ALIASES = new Set<string>(['epics', 'glance', 'board']);
+// ── ②실측 — apps/web/src/proxy.ts가 미들웨어 301로 대신 처리하는 리소스명(rename+retire
+// 통합, 2026-08-01 실측 스냅샷) ── ⚠️`mockups`는 이름과 달리 `RENAMED_RESOURCES`가 아니라
+// `RETIRED_RESOURCES`(id를 버리고 목록 루트로만 보내는 폐기 축) 값이다 — 이 Set이 축을
+// 구분 없이 「proxy.ts가 다뤄서 라우트가 없어도 정상」만 뭉뚱그려 표시하는 지금 구조라 이름만
+// 보면 「mockups가 개명됐다」로 잘못 읽힌다(민군 지적, story #2378 리뷰). story #2387이 이
+// Set을 proxy.ts의 두 표(RENAMED_RESOURCES ∪ RETIRED_RESOURCES 키)에서 파생시키는 것으로
+// 바꿀 예정 — 지금은 축을 가르지 않고 표시만 남긴다(가르는 것은 #2387 몫).
+export const RENAMED_RESOURCE_ALIASES = new Set<string>(['epics', 'glance', 'board', 'mockups']);
 
 export const EXEMPT_TARGETS = new Set<string>([...KNOWN_NON_PROJECT_ROUTES, ...RENAMED_RESOURCE_ALIASES]);
 
 // ── GRANDFATHER_BASELINE — 첫 스캔(2026-08-01)이 잡은 기존 채무. AC6: #2376 스토리는 안
 // 고친다. 새 항목부터는 PO 승인 없이 조용히 추가되지 않는다(#2367 관례 재사용) —
 // GRANDFATHER_BASELINE_COUNT_TEST가 크기를 고정, staleness 체크가 "고쳐졌는데 목록에
-// 남은" 항목을 잡는다. `entryWithoutRoute:memos`는 story #2379(2026-08-01)가 실제로
-// 고치고 여기서 뺐다 — staleness 체크가 그 자리에서 값을 한다.
-export const GRANDFATHER_BASELINE = new Set<string>([
-  'routeWithoutEntry:mockups',
-]);
+// 남은" 항목을 잡는다. `entryWithoutRoute:memos`는 story #2379가, `routeWithoutEntry:
+// mockups`는 story #2378이 실제로 고치고 여기서 뺐다 — 둘 다 staleness 체크가 그 자리에서
+// 값을 했다(빈 Set이 된 것 자체가 "지금 아는 채무 0건"이라는 사실이다).
+export const GRANDFATHER_BASELINE = new Set<string>([]);
 
 // ── 라우트 실존 — [ws]/[proj]/<resource>/page.tsx 직접 존재 ────────────────────
 
