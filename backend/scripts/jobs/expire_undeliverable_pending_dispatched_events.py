@@ -43,9 +43,14 @@ human-recipient pending dispatched를 만드는 경로가 지금도 살아 있�
 
 ## 실행
 ```
-DATABASE_URL=postgresql+asyncpg://... python -m scripts.expire_undeliverable_pending_dispatched_events [--dry-run] [--org-id UUID]
+DATABASE_URL=postgresql+asyncpg://... python -m scripts.jobs.expire_undeliverable_pending_dispatched_events [--dry-run] [--org-id UUID]
 ```
 기본은 `--dry-run`(카운트만 출력, 미변경) — 실 만료는 `--apply` 명시 필요.
+
+story #2384: PO가 이 스크립트를 실제로 돌리려다 배포 이미지에 없는 것을 발견해 scripts/jobs/로
+옮겼다(원래 있던 scripts/ 루트는 Dockerfile이 명시적으로 배포 이미지에서 빼는 자리 — 자세한
+경위는 scripts/jobs/README.md 참고). PO는 이 스크립트를 못 쓴 채 같은 조건을 직접 세워 수동
+UPDATE로 만료를 돌렸다(49건, 사후 잔여 0 확認) — 이 이동 이후엔 스크립트 자체를 쓸 수 있다.
 
 ⚠️ 디디(이 스토리 담당)는 dev DB 직접 접근이 막혀 있어(VPC private-IP, 세션 샌드박스에 라우트
 없음 — [[reference_prod_db_query]] dev 항목) 이 스크립트를 스스로 실행하지 못했다. PO/QA가

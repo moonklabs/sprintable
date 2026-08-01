@@ -5,7 +5,12 @@ events를 (created_at ASC, id ASC)로 cursor scan하며 BE-2 extractor(upsert_ac
 멱등 — (org_id, dedup_key) unique + array_agg DISTINCT라 row count·source 누적이 안정.
 
 env: DATABASE_URL (백엔드 동일, cloud-sql-proxy/in-VPC 경유). 쓰기 작업.
-실행: cd backend && DATABASE_URL=... python -m scripts.backfill_activity_events [--batch-size N]
+실행: cd backend && DATABASE_URL=... python -m scripts.jobs.backfill_activity_events [--batch-size N]
+
+story #2384: scripts/jobs/ 로 이동(기존 scripts/ 루트는 Dockerfile이 명시적으로 배포 이미지에서
+빼는 자리라 — deploy/setup/provision .sh·RUNBOOK 등 비-런타임 전용, recon-surface 최소화 의도.
+운영 DB에 실제로 접속하는 스크립트는 여기(scripts/jobs/)에 둬야 sprintable-verify-oneoff 같은
+Cloud Run 잡에서 실행 가능하다 — 자세한 경위는 scripts/jobs/README.md 참고.
 """
 from __future__ import annotations
 
