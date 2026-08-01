@@ -351,6 +351,17 @@ async def _update_subscription(
             # 의도된 상태다). grandfather 기준점 없이 구독이 만들어진다는 뜻이라 결제 자체는
             # 안 막히지만(체크아웃·화면은 코드 상수 _POLAR_PRICE_IDS/_PLAN_CATALOG를 봐서
             # DB와 무관하게 도는 — 그래서 여태 아무도 못 알아챘다) 반드시 로그로는 남긴다.
+            #
+            # ⚠️여기 도달하는 tier는 항상 "team"|"pro"뿐이다(이 함수의 두 호출부 —
+            # checkout.completed·subscription.updated — 모두 tier를 그 둘로만 산출한다,
+            # PO 확認 2026-08-01). "free"로 이 함수가 불리는 경로는 없다(무료 티어는 Polar
+            # 구독/결제 이벤트 자체가 없어 upsert 대상이 아님) — 그러니 이 경고는 "free라서
+            # 원래 없는 행"이라는 잡음이 될 수 없다.
+            #
+            # ⛔이 경고가 «그쳐야 정상»인 시점: #2403이 실제 판매 정책(티어·통화·PG)을 확정하고
+            # 그에 맞는 pricing_versions 시드가 들어간 뒤. 그 후에도 이 경고가 뜨면 시드가
+            # 누락됐거나(새 tier/billing_cycle 조합 추가 시 시드 갱신을 잊음) 진짜 결함 신호다 —
+            # 계속 울리는데 아무도 안 본다면 이 로그가 무뎌진 것이니 다시 살펴봐야 한다.
             logger.warning(
                 "pricing_version_id 미배정 — pricing_versions에 (tier=%s, billing_cycle=%s, "
                 "currency=usd) 매칭 행 없음. org=%s는 grandfather 기준점 없이 구독됨.",
