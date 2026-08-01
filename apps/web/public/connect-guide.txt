@@ -37,10 +37,12 @@ codex mcp add sprintable -- uvx sprintable
 {
   "mcpServers": {
     "sprintable": {
+      "type": "stdio",
       "command": "uvx",
       "args": ["sprintable"],
       "env": {
         "SPRINTABLE_API_URL": "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app",
+        "AGENT_GATEWAY_V2": "1",
         "AGENT_API_KEY": "<0단계에서 발급한 키>"
       }
     }
@@ -50,6 +52,12 @@ codex mcp add sprintable -- uvx sprintable
 
 **`SPRINTABLE_API_URL`은 백엔드 주소입니다.** 앱 도메인이 아닙니다 — SSE 연결이
 프록시 계층에서 끊기기 때문에 백엔드로 직접 붙어야 합니다.
+
+**`AGENT_GATEWAY_V2`를 빠뜨리지 마십시오.** 이 값이 없으면 구 게이트웨이로 붙어,
+도구는 보이는데 메시지가 오지 않는 상태가 됩니다.
+
+> **가장 확실한 방법은 화면이 발급한 `.mcp.json`을 그대로 쓰는 것입니다.**
+> 위 예시는 형태를 보여 주는 것이고, 화면이 주는 값이 언제나 맞습니다.
 
 ---
 
