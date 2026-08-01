@@ -408,7 +408,10 @@ describe('proxy — resolve (story a539c649 S-route-project S1)', () => {
       ok: true,
       json: async () => ({ org_id: 'org-1', org_slug: 'moonklabs', org_role: 'admin', project_id: 'proj-1', project_slug: 'sprintable' }),
     });
-    const response = await middleware(makeRequest('/moonklabs/sprintable/board', { sp_at: token }));
+    // 리소스명은 이 테스트의 관심사(workspace/project resolve)와 무관 — RENAMED_RESOURCES에
+    // 없는 이름을 써야 redirectRenamedResourcePath가 가로채지 않는다(#2373 board→flow 편입 후
+    // 'board'를 쓰면 이 resolve 로직에 닿기 전에 301로 새는 회귀가 났다).
+    const response = await middleware(makeRequest('/moonklabs/sprintable/goals', { sp_at: token }));
     expect(response.status).toBe(200);
     expect(mockFetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/v2/resolve?workspace=moonklabs&project=sprintable'),
@@ -421,7 +424,7 @@ describe('proxy — resolve (story a539c649 S-route-project S1)', () => {
   it('resolve 실패(미존재/미소속) → 개입 없이 통과(200) — Next 자체 404 렌더에 위임', async () => {
     const token = await makeAccessToken();
     mockFetch.mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({}) });
-    const response = await middleware(makeRequest('/ghost-workspace/proj/board', { sp_at: token }));
+    const response = await middleware(makeRequest('/ghost-workspace/proj/goals', { sp_at: token }));
     expect(response.status).toBe(200);
     const setCookie = response.headers.get('set-cookie') ?? '';
     expect(setCookie).not.toContain('sp_resolve_cache=');
@@ -458,13 +461,16 @@ describe('proxy — resolve (story a539c649 S-route-project S1)', () => {
       ok: true,
       json: async () => ({ org_id: 'org-1', org_slug: 'moonklabs', org_role: 'admin', project_id: 'proj-1', redirect: { project: 'project-307152f3' } }),
     });
-    const response = await middleware(makeRequest('/moonklabs/%EC%9E%A5%EC%82%AC%EC%99%95/board', { sp_at: token }));
+    // 리소스명은 board 대신 goals — #2373로 board가 RENAMED_RESOURCES에 편입되면서 이 자리에
+    // board를 쓰면 redirectRenamedResourcePath가 workspace resolve보다 먼저 가로채 mockFetch가
+    // 0회 호출되는 회귀가 났다(이 테스트가 재려는 한글 slug 이중인코딩 가드 자체가 무력화된다).
+    const response = await middleware(makeRequest('/moonklabs/%EC%9E%A5%EC%82%AC%EC%99%95/goals', { sp_at: token }));
     expect(mockFetch).toHaveBeenCalledWith(
       'http://localhost:8000/api/v2/resolve?workspace=moonklabs&project=%EC%9E%A5%EC%82%AC%EC%99%95',
       expect.any(Object),
     );
     expect(response.status).toBe(301);
-    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/project-307152f3/board');
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/project-307152f3/goals');
   });
 
   it('캐시 hit(유효 sp_resolve_cache 쿠키+동일 slug) → resolve fetch 생략', async () => {
@@ -689,16 +695,15 @@ describe('proxy — 경로 리터럴 rename 301(story 8fc51517, 에픽→목표)
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/goals/e-123');
   });
 
-  it('다른 리소스(예: /{ws}/{proj}/board)는 스코프 밖이라 개입 없이 통과 — RENAMED_RESOURCES에 없는 이름은 무변경', async () => {
+  it('/{ws}/{proj}/board → 301 /{ws}/{proj}/flow(board도 RENAMED_RESOURCES 대상 — #2373 prod 승격 board 은퇴 회귀가드)', async () => {
     const token = await makeAccessToken({ orgId: 'org-1' });
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ org_id: 'org-1', org_slug: 'moonklabs', org_role: 'member', project_id: 'proj-1', project_slug: 'sprintable' }),
-    });
     const response = await middleware(makeRequest('/moonklabs/sprintable/board', {
       sp_at: token, sprintable_current_project_id: 'proj-1',
     }));
-    expect(response.status).not.toBe(301);
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
+    // 3번째 세그먼트만 교체하는 순수 문자열 치환이라 org/project fetch가 전혀 없어야 한다(epics→goals와 동형).
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('이미 신 경로(/goals)로 들어온 요청은 재리다이렉트 없이 그대로 통과(무한루프 방지 확인)', async () => {
