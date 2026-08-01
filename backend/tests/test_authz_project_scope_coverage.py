@@ -221,10 +221,8 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     "app.routers.agent_personas:update_persona": "동일 JWT project_id 스코프",
     "app.routers.agent_sessions:transition_session": "JWT project_id 스코프로 session fetch(비-스푸퍼블)",
     "app.routers.hitl:resolve_hitl_request": "JWT project_id 스코프로 HITL request fetch",
-    "app.routers.mockups:delete_mockup": "JWT project_id 스코프(비-스푸퍼블)+creator gate",
-    "app.routers.mockups:delete_scenario": "동일 JWT project_id 스코프",
-    "app.routers.mockups:update_mockup": "동일 JWT project_id 스코프",
-    "app.routers.mockups:update_scenario": "동일 JWT project_id 스코프",
+    # story #2394: mockups.py 라우터 자체가 삭제됐다(FE 은퇴 #2378/#2770 후속) — 아래 4개
+    # 엔트리는 test_id_mutation_baseline_entries_are_not_stale가 "rot된 라우트"로 잡는다.
     "app.routers.visual_artifacts:delete_artifact": "JWT project_id 스코프+creator gate",
     "app.routers.visual_artifacts:update_spec_pin": (
         "JWT project_id 스코프로 artifact(_get_artifact_or_404) 선조회 후 pin_id를 그 artifact.id로"

@@ -21,7 +21,7 @@ from app.models.gate import Gate
 from app.models.github_installation import GithubInstallation, GithubInstallNonce, GithubWebhookDelivery
 from app.models.hitl import HitlPolicy, HitlRequest
 from app.models.judgment import Judgment
-from app.models.mockup import MockupComponent, MockupPage, MockupScenario, MockupVersion, UsageMeter
+from app.models.usage_meter import UsageMeter
 from app.models.user import RefreshToken, User
 from app.models.workflow_version import WorkflowVersion
 from app.models.api_key import ApiKey
@@ -131,10 +131,6 @@ __all__ = [
     "Mention",
     "Reference",
     "ReferenceSemanticCandidate",
-    "MockupComponent",
-    "MockupPage",
-    "MockupScenario",
-    "MockupVersion",
     "UsageMeter",
     "ApiKey",
     "OrgSubscription",
