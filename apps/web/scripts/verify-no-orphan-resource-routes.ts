@@ -102,9 +102,17 @@
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { RENAMED_RESOURCES, RETIRED_RESOURCES } from '../src/proxy';
 
-const SRC_ROOT = path.resolve(process.cwd(), 'src');
+// story #2387 회귀 — SRC_ROOT를 `process.cwd()` 기준으로 잡았다가 실 CI에서 깨졌다: `pnpm
+// --filter web verify:...`(cwd=apps/web)로 직접 돌릴 때는 맞지만, monorepo 루트에서 도는
+// `pnpm vitest run`(CI의 "Test" 스텝)이 이 파일을 import하면 cwd가 레포 루트라 `KNOWN_NON_
+// PROJECT_ROUTES`(모듈 최상단에서 즉시 readdirSync하는 이 파생 로직 자신)가 ENOENT로 죽었다
+// — 로컬 검증은 매번 `pnpm --filter web`로 돌려서 이 cwd 차이를 못 봤고, 실 CI(PR #2774,
+// 2026-08-01)에서 처음 드러났다. 스크립트 자기 위치(import.meta.url) 기준으로 고정하면
+// 호출부의 cwd와 무관해진다.
+const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 const APP_ROOT = path.resolve(SRC_ROOT, 'app');
 const AUTHENTICATED_ROOT = path.resolve(APP_ROOT, '(authenticated)');
 const PROJECT_RESOURCE_ROOT = path.resolve(SRC_ROOT, 'app/(authenticated)/[ws]/[proj]');
