@@ -14,8 +14,10 @@ import enum
 
 
 class EventType(str, enum.Enum):
-    memo_created = "memo_created"
-    memo_replied = "memo_replied"
+    # story #2379 — memo_created/memo_replied 제거(2026-08-01). 전수 grep(프로덕션+테스트)
+    # 결과 `EventType.memo_created`/`EventType.memo_replied` 속성 접근이 어디에도 없었다 —
+    # events.event_type 컬럼 자체가 Text(native enum 아님)라 역직렬화 경로도 없다. 살아 있는
+    # memo 기능(SaaS webhook 발송 등)은 이 enum을 거치지 않으므로 영향 없음.
     dispatched = "dispatched"
     status_changed = "status_changed"
 

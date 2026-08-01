@@ -65,9 +65,11 @@ export async function attachNotificationHrefs<T extends NotificationReference>(
       return { ...notification, href: null };
     }
 
-    if (notification.reference_type === 'memo') {
-      return { ...notification, href: `/memos?id=${referenceId}` };
-    }
+    // story #2379 — '/memos' 라우트는 앱 어디에도 없다(#2376 가드 실측, 죽은 링크). memo 기능
+    // 자체는 SaaS에서 살아 있지만(memo-assignment-dispatch.ts·memo-reply-webhook-dispatch.ts가
+    // 직접 webhook으로 발송), 인앱 notifications 테이블(reference_type='memo') 생성 콜사이트는
+    // 0건이라(backend 전수 grep) 이 분기는 도달 불가였다. 지운 뒤엔 아래 기본 fallback(href:
+    // null)으로 떨어진다 — 다른 미매치 reference_type과 동일한 처리라 새 결함이 아니다.
 
     if (notification.reference_type === 'task') {
       // story a539c649 S3d 그라운딩 중 발견: '/boards'(오탈자·복수형)+task_id 자체 누락이라

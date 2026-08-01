@@ -61,9 +61,15 @@
  *     ⭐같은 파일의 바로 아래(`task` 케이스) 주석이 이미 "`/boards`(오탈자·복수형)라 알림
  *     클릭이 항상 무효였다"는 동형 사고를 한 번 고친 전례를 남기고 있다 — `memo`가 같은
  *     클래스의 두 번째 사례로 보인다.
- * ⛔AC6에 따라 이 스토리는 위 2건을 «고치지 않는다» — GRANDFATHER_BASELINE에 이유와 함께
- * 얼려 두고 별도 triage로 넘긴다(#2367의 GRANDFATHER_BASELINE·40건과 동일 관례). PO 승인
- * 없이 41번째(3번째) 항목이 조용히 추가되지 않게 COUNT_TEST로 크기(2)를 고정한다.
+ * ⛔AC6에 따라 이 스토리(#2376)는 위 2건을 «고치지 않는다» — GRANDFATHER_BASELINE에 이유와
+ * 함께 얼려 두고 별도 triage로 넘긴다(#2367의 GRANDFATHER_BASELINE·40건과 동일 관례). PO
+ * 승인 없이 조용히 추가되지 않게 COUNT_TEST로 크기를 고정한다.
+ *
+ * ⭐후속(story #2379, 2026-08-01) — `entryWithoutRoute: memos` 정리 완료. notification-
+ * navigation.ts의 memo 분기 제거(기본 fallback href:null로 흡수) + backend EventType.
+ * memo_created/memo_replied 화석 제거. baseline에서 뺐다 — staleness 체크가 「고쳐졌는데
+ * 목록에 남음」을 잡아 주는 자리라 여기서 그 값이 실증된다. `routeWithoutEntry: mockups`는
+ * #2378(별도, mockups=E-CANVAS 전신 화면 — 진입점 0이 의도인지 PO 판단 대기)로 남아 있다.
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -114,13 +120,13 @@ export const RENAMED_RESOURCE_ALIASES = new Set<string>(['epics', 'glance', 'boa
 
 export const EXEMPT_TARGETS = new Set<string>([...KNOWN_NON_PROJECT_ROUTES, ...RENAMED_RESOURCE_ALIASES]);
 
-// ── GRANDFATHER_BASELINE — 첫 스캔(2026-08-01)이 잡은 기존 채무 2건. AC6: 이 스토리는 안
-// 고친다. 41번째(3번째) 항목부터는 PO 승인 없이 조용히 추가되지 않는다(#2367 관례 재사용) —
-// GRANDFATHER_BASELINE_COUNT_TEST가 크기 2를 고정, staleness 체크가 "고쳐졌는데 목록에
-// 남은" 항목을 잡는다.
+// ── GRANDFATHER_BASELINE — 첫 스캔(2026-08-01)이 잡은 기존 채무. AC6: #2376 스토리는 안
+// 고친다. 새 항목부터는 PO 승인 없이 조용히 추가되지 않는다(#2367 관례 재사용) —
+// GRANDFATHER_BASELINE_COUNT_TEST가 크기를 고정, staleness 체크가 "고쳐졌는데 목록에
+// 남은" 항목을 잡는다. `entryWithoutRoute:memos`는 story #2379(2026-08-01)가 실제로
+// 고치고 여기서 뺐다 — staleness 체크가 그 자리에서 값을 한다.
 export const GRANDFATHER_BASELINE = new Set<string>([
   'routeWithoutEntry:mockups',
-  'entryWithoutRoute:memos',
 ]);
 
 // ── 라우트 실존 — [ws]/[proj]/<resource>/page.tsx 직접 존재 ────────────────────
@@ -241,7 +247,7 @@ function main(): void {
     console.log(`  ⚠️ grandfather로 등재됐으나 이번 스캔에서 안 걸린(고쳐졌다면 목록에서 빼도 되는): ${staleBaseline.join(', ')}`);
   }
   if (baselineHit.size > 0) {
-    console.log(`\n📋 grandfather(#2376 최초 스캔 2건 — AC6: 이 스토리는 안 고친다): ${[...baselineHit].join(', ')}`);
+    console.log(`\n📋 grandfather(#2376 최초 스캔·#2379 triage — AC6: 이 스토리는 안 고친다): ${[...baselineHit].join(', ')}`);
   }
 
   if (failed) {
