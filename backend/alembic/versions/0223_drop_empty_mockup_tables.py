@@ -24,11 +24,13 @@ FK 순서: mockup_scenarios·mockup_versions·mockup_components 셋 다 mockup_p
 자식 셋을 먼저, mockup_pages를 마지막에 명시적 순서로 지운다(CASCADE 한 방으로 묶지 않는 —
 "무엇이 같이 지워지는지"를 각 줄이 스스로 말하게 한다).
 
-`increment_mockup_version(_page_id uuid)` RPC 함수(mockup_pages를 몸체에서 참조)도 같이
-지운다 — 코드베이스 전수 grep으로 다른 호출자가 없는 것 확認(그 자신을 만든 마이그 밖에는
-아무 데도 안 나온다). 테이블을 지워도 함수 자체는 자동으로 안 지워지므로(Postgres가 함수
-본문의 테이블 의존을 추적하지 않음) 명시적으로 같이 정리한다 — 안 지우면 "부르면 에러 나는
-죽은 RPC"가 그대로 남는다.
+⚠️2026-08-01 정정(#2402 조사 중 PO 실측): `increment_mockup_version(uuid)`는 애초에 dev·prod
+어디에도 없었다 — `baseline/schema.sql`(alembic이 빈 DB에 적용하는 스냅샷)에 `CREATE
+FUNCTION`이 단 한 줄도 없다(RLS를 끈 0002_disable_rls.py 즈음 Supabase 시절 보조 함수들이
+함께 정리된 것으로 보인다). 그러니 아래 `DROP FUNCTION IF EXISTS`는 실제로 **아무것도 안
+지우는 no-op**이다 — "죽은 RPC를 청소한다"는 원래 서술은 틀렸다. 그래도 줄을 남긴다: 이
+스크립트는 다른 환경(예: baseline 스냅샷 이전 상태로 남은 아주 오래된 로컬/CI DB)에서 돌 수도
+있고, `IF EXISTS`라 있으면 지우고 없으면 조용히 넘어가므로 방어로 남겨두는 비용이 0이다.
 
 ⛔⛔IF EXISTS 가드 — 오늘 이 세션에서 "양쪽 환경이 같을 거라 가정했다가 달랐던" 자리를 두 번
 겪었다(dev/prod 실측 오독 두 번, PO 스스로 언급). 지금 실측(dev·prod 둘 다 넷 다 존재)으로는
