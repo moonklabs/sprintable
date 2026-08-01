@@ -391,9 +391,12 @@ def _build_message_summary(content: str | None, sender_name: str | None, has_att
     return f"{name}: {preview}" if preview else name
 
 
-def _msg_payload(msg: ConversationMessage, sender: "ResolvedMember | TeamMember | None") -> dict:
+def _msg_payload(
+    msg: ConversationMessage, sender: "ResolvedMember | TeamMember | None",
+    *, references: list[dict[str, str]] | None = None,
+) -> dict:
     attachments = msg.attachments if isinstance(msg.attachments, list) else []
-    return {
+    payload = {
         "id": str(msg.id),
         "conversation_id": str(msg.conversation_id),
         "thread_id": str(msg.thread_id) if msg.thread_id else None,
@@ -412,6 +415,17 @@ def _msg_payload(msg: ConversationMessage, sender: "ResolvedMember | TeamMember 
         "summary": _build_message_summary(msg.content, sender.name if sender else None, bool(attachments)),
         "created_at": msg.created_at.isoformat(),
     }
+    # story #2263 AC6(오르테가 판정 2026-07-29, 스레드 7256d5cc): 읽기 경로(list_messages·
+    # get_message·list_message_replies)만 이 키를 싣는다 — 그 셋만 호출부에서 `references=`
+    # 를 넘긴다(항상 list, 빈 배열도 명시). 다른 호출부(SSE 디스패치·POST 전송 응답)는 넘기지
+    # 않아 키 자체가 없다(기존 동작 무변경) — 그 표면들은 이미 별개의 write-time 사이드밴드
+    # (`response["references"] = {stored, dropped}`, #2294/#2315)를 갖고 있어 의미가 다르다.
+    # ⛔`references is None`(파라미터 미전달)과 `references=[]`(읽기 경로·저장된 참조 0건)를
+    # 여기서 구분한다 — 빈 배열도 없는 배열처럼 다뤄 키를 빼면, FE가 "옛 서버라 필드가 없다"와
+    # "이 메시지엔 참조가 없다"를 못 가른다(오늘 아침 유령 칩 사고의 뿌리와 같은 모양).
+    if references is not None:
+        payload["references"] = references
+    return payload
 
 
 async def _dispatch_conversation_event(
@@ -1395,8 +1409,17 @@ async def list_messages(
 
     sender_ids = {m.sender_id for m in msgs if m.sender_id}
     member_map = await lookup_members_by_ids(sender_ids, db)
+    # story #2263 AC6(오르테가 판정 2026-07-29): 페이지 전체를 쿼리 1회로 해소(N+1 방지) —
+    # 메시지별 왕복 없음.
+    from app.services.mention_parser import fetch_stored_references
+    refs_by_msg = await fetch_stored_references(
+        db, org_id=org_id, source_type="chat_message", source_ids=[m.id for m in msgs],
+    )
 
-    data = [_msg_payload(m, member_map.get(m.sender_id)) for m in msgs]
+    data = [
+        _msg_payload(m, member_map.get(m.sender_id), references=refs_by_msg.get(m.id, []))
+        for m in msgs
+    ]
     next_cursor = msgs[0].created_at.isoformat() if has_more and msgs else None
 
     return {"data": data, "meta": {"next_cursor": next_cursor, "has_more": has_more}}
@@ -1428,7 +1451,11 @@ async def get_message(
         raise HTTPException(status_code=404, detail="Message not found")
 
     sender_map = await lookup_members_by_ids({msg.sender_id} if msg.sender_id else set(), db)
-    return _msg_payload(msg, sender_map.get(msg.sender_id))
+    from app.services.mention_parser import fetch_stored_references
+    refs_by_msg = await fetch_stored_references(
+        db, org_id=org_id, source_type="chat_message", source_ids=[msg.id],
+    )
+    return _msg_payload(msg, sender_map.get(msg.sender_id), references=refs_by_msg.get(msg.id, []))
 
 
 @router.get("/{conversation_id}/messages/{message_id}/replies")
@@ -1470,8 +1497,16 @@ async def list_message_replies(
 
     sender_ids = {m.sender_id for m in msgs if m.sender_id}
     member_map = await lookup_members_by_ids(sender_ids, db)
+    # story #2263 AC6: list_messages와 동형 — 페이지 전체 쿼리 1회(N+1 방지).
+    from app.services.mention_parser import fetch_stored_references
+    refs_by_msg = await fetch_stored_references(
+        db, org_id=org_id, source_type="chat_message", source_ids=[m.id for m in msgs],
+    )
 
-    data = [_msg_payload(m, member_map.get(m.sender_id)) for m in msgs]
+    data = [
+        _msg_payload(m, member_map.get(m.sender_id), references=refs_by_msg.get(m.id, []))
+        for m in msgs
+    ]
     next_cursor = msgs[0].created_at.isoformat() if has_more and msgs else None
 
     return {"data": data, "meta": {"next_cursor": next_cursor, "has_more": has_more}}

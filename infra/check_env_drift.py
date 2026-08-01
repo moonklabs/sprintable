@@ -43,6 +43,17 @@ IaC∪라이브(그 서비스 것) 어디에도 없는 키를 위험 등급별�
 공개돼 있는 것, 예: `'https://dev-app.sprintable.ai'`)만 읽는다. 라이브 Cloud Run env
 value는 이 축도 절대 안 읽는다(①이 이미 뽑아 둔 키 «이름» 집합만 재사용).
 
+⑤ 후속(2026-07-31, 민 지적) — `env: NodeJS.ProcessEnv = process.env` DI 관례 블라인드스팟.
+⑤가 원래 `process.env['X']`/`process.env.X`만 봐서, process.env를 파라미터(관례상 이름
+`env`)로 받아 테스트 가능하게 만드는 함수 안의 읽기(`env['X']`)는 못 봤다. 이 코드베이스에
+9개 파일·12개 읽기가 이 패턴이고, `SPRINTABLE_RUNTIME_ROLE`이 정확히 이 구멍으로 빠져 있었다
+— apps/web/src/services/background-runtime.ts가 이 값으로 배경 워커(Discord/Slack/Teams
+아웃바운드+메모 디스패처) 기동 여부를 정하는데, 값이 없으면 프로덕션에서 `role='web'`으로
+조용히 떨어져 instrumentation.ts가 워커를 시작 안 하고 그냥 `return`한다(throw도 로그도
+없음). 라이브 실측(2026-07-31): `sprintable-frontend-{dev,prod}` 둘 다 이 값이 없다 —
+IaC에도 없다(스크립트 전수 grep 0건). 이 DI 관례를 실제로 선언한 파일에서만 `env[...]`도
+추가로 본다(무관 변수명 오탐 방지).
+
 로컬 수동 실행:
     python3 infra/check_env_drift.py
 
@@ -75,6 +86,24 @@ def _find_repo_root(start: Path) -> Path:
 _REPO_ROOT = _find_repo_root(Path(__file__).resolve().parent)
 _REGION = "asia-northeast3"
 _ALLOWLIST_PATH = _REPO_ROOT / "infra" / "manual-env-allowlist.yml"
+
+
+def _env_for_service(service: str) -> str:
+    """story #2224 후속(오르테가 판정, 2026-07-31) — 서비스 이름으로 환경(dev/prod)을 가른다.
+    두 가지 명명 관례가 실제로 섞여 있다(둘 다 실측 확認):
+      ㉠`_SERVICE_SCRIPT_MAP`(마스터) 서비스들 — "-dev"·"-prod" 둘 다 명시(sprintable-
+        backend-dev/-prod류). ⛔단 `sprintable-realtime-dev`는 prod 짝이 없다(cloudbuild.yaml
+        단일 소스, dev 전용 서비스) — 짝이 없어도 접미사만으로 dev로 판별한다(짝의 존재
+        여부와 이 판별은 별개 문제).
+      ㉡allowlist의 `excluded_services`(sprintable-admin-web류, 별도 repo IaC 소관) —
+        prod는 «접미사 없음»(bare), dev만 "-dev"가 붙는다(sprintable-admin-web ↔
+        sprintable-admin-web-dev 쌍으로 실존 확認, manual-env-allowlist.yml 참조).
+    ⇒ "-dev"로 끝나면 dev, 그 외(= "-prod"로 끝나거나 접미사 자체가 없는 bare 이름)는
+    전부 prod로 취급한다 — ㉡류가 ①②축은 이미 제외돼 있어(별도 repo IaC) 이 구분이
+    실제로 영향을 주는 것은 ③(평문 시크릿)뿐인데, ③은 "어느 한 실행에 정확히 한 번" 걸리면
+    되므로(두 번 걸리면 중복 로그일 뿐 오탐은 아니나, 정확한 배정이 더 낫다) bare=prod로
+    고정한다."""
+    return "dev" if service.endswith("-dev") else "prod"
 
 # ④ Settings 커버리지 대상 — app.core.config.Settings를 실제로 임포트해서 쓰는 서비스만
 # (같은 이미지). frontend·mcp·admin은 이 클래스 자체를 안 쓰므로 제외(오탐 방지 핵심).
@@ -301,6 +330,18 @@ def _iac_covered_keys() -> set[str]:
 _WEB_SRC_DIR = _REPO_ROOT / "apps" / "web" / "src"
 _ENV_BRACKET_RE = re.compile(r"process\.env\[\s*['\"]([A-Z][A-Z0-9_]*)['\"]\s*\]")
 _ENV_DOT_RE = re.compile(r"process\.env\.([A-Z][A-Z0-9_]*)")
+
+# ⑤ 후속(2026-07-31) — `env: NodeJS.ProcessEnv = process.env` DI 관례 블라인드스팟. 함수가
+# process.env를 파라미터(관례상 이름 `env`)로 받아 테스트 가능하게 만드는 패턴이 이
+# 코드베이스에 9개 파일·12개 읽기로 실재한다 — 그 파라미터로 읽으면 문자열 리터럴
+# 「process.env」가 없어 위 두 정규식이 못 본다. `SPRINTABLE_RUNTIME_ROLE`이 정확히 이
+# 구멍으로 빠졌다(apps/web/src/services/background-runtime.ts:83, `env['SPRINTABLE_RUNTIME_ROLE']`
+# — 값이 없으면 apps/web/scripts/background-runtime-worker.ts가 즉시 throw한다).
+# ⛔무관 변수명 오탐을 막으려고 "이 DI 관례를 실제로 선언한 파일에서만" 추가로 본다 —
+# 아무 파일에서나 `env[...]`를 다 잡으면 관계없는 지역변수까지 오염된다.
+_ENV_PARAM_DI_RE = re.compile(r"\benv\s*:\s*NodeJS\.ProcessEnv\s*=\s*process\.env\b")
+_ENV_PARAM_BRACKET_RE = re.compile(r"(?<!process\.)\benv\[\s*['\"]([A-Z][A-Z0-9_]*)['\"]\s*\]")
+_ENV_PARAM_DOT_RE = re.compile(r"(?<!process\.)\benv\.([A-Z][A-Z0-9_]*)\b")
 # 매치 직후 200자 안에서 `?? '...'`/`|| '...'`(문자열 리터럴 폴백)만 인식한다 — 함수 호출·
 # 변수 등 리터럴이 아닌 폴백은 "기본값 없음"과 동일하게 취급(안전 쪽, ㉠으로 승격).
 _DEFAULT_LITERAL_RE = re.compile(r"""^\s*(?:\?\?|\|\|)\s*['"]([^'"]*)['"]""")
@@ -309,7 +350,12 @@ _DEFAULT_LITERAL_RE = re.compile(r"""^\s*(?:\?\?|\|\|)\s*['"]([^'"]*)['"]""")
 # NEXT_RUNTIME — Next.js가 빌드/런타임에 자동 주입(nodejs/edge 런타임 구분), 사람이 배포
 # 설정으로 "공급"하는 값이 아니다(2026-07-28 실측 확認 — instrumentation.ts가 읽지만 그
 # 값은 배포 SSOT/라이브 env var가 아니라 프레임워크가 실행 컨텍스트에 따라 스스로 세팅).
-_WEB_ENV_IGNORE = {"NODE_ENV", "NEXT_RUNTIME"}
+# VERCEL_URL·VERCEL_PROJECT_PRODUCTION_URL — Vercel 플랫폼이 배포 시 자동 주입하는
+# 값이다(app-url.ts의 Vercel-auto-env 폴백 계단). 이 저장소는 GCP Cloud Run으로 나가(
+# env-drift-guard.yml의 WIF 인증이 그 증거) Vercel에서 도는 일이 없으니 이 두 키는 «항상»
+# undefined가 정상이다 — ⑤ 후속(2026-07-31, env: NodeJS.ProcessEnv 파라미터 스캔 확장)에서
+# 새로 잡히기 시작해 여기 추가했다(NEXT_RUNTIME과 같은 이유).
+_WEB_ENV_IGNORE = {"NODE_ENV", "NEXT_RUNTIME", "VERCEL_URL", "VERCEL_PROJECT_PRODUCTION_URL"}
 
 # ⑤가 대상으로 삼는 서비스 — apps/web 코드베이스를 실제로 구동하는 라이브 서비스만.
 _WEB_CODE_SERVICES = {"sprintable-frontend-dev", "sprintable-frontend-prod"}
@@ -402,7 +448,12 @@ def _web_env_reads(src_dir: Path = _WEB_SRC_DIR) -> dict[str, list[tuple[str, st
             rel = str(path.relative_to(_REPO_ROOT))
         except ValueError:
             rel = str(path)  # src_dir이 repo 밖(테스트의 tmp_path 등)일 때의 폴백
-        for regex in (_ENV_BRACKET_RE, _ENV_DOT_RE):
+        regexes = [_ENV_BRACKET_RE, _ENV_DOT_RE]
+        # ⑤ 후속 — 이 파일이 `env: NodeJS.ProcessEnv = process.env` DI 관례를 실제로
+        # 선언했을 때만 env[...]/env.X도 process.env[...]와 같은 자리로 본다.
+        if _ENV_PARAM_DI_RE.search(text):
+            regexes += [_ENV_PARAM_BRACKET_RE, _ENV_PARAM_DOT_RE]
+        for regex in regexes:
             for m in regex.finditer(text):
                 key = m.group(1)
                 if key in _WEB_ENV_IGNORE:
@@ -518,7 +569,19 @@ def _today():
     return datetime.now(timezone.utc).date()
 
 
-def main() -> int:
+def main(only_env: str | None = None) -> int:
+    """story #2224 후속(오르테가 판정, 2026-07-31) — `only_env`("dev"|"prod"|None). 배경:
+    이 가드는 스케줄 워크플로우가 checkout한 «한 브랜치»(GHA 스케줄 트리거는 default
+    branch=main을 checkout한다)만 보는데, IaC/allowlist의 정본은 dev는 develop·prod는
+    main으로 갈린다(#2320/#2205와 같은 클래스 — 스케줄이 checkout하는 브랜치 ≠ 대조해야
+    할 정본). 지금까지는 dev 서비스도 main 기준으로 대조돼 «거짓 빨강»이 났다(develop에만
+    있는 allowlist 수정이 반영 안 됨, PR#2678 실사례).
+
+    ⛔이 함수 자체는 여전히 «한 checkout 루트»(`_REPO_ROOT`, 이 파일이 실제로 놓인 위치)만
+    본다 — 두 브랜치를 한 프로세스에서 동시에 보는 게 아니라, 워크플로우가 **브랜치별로
+    이 스크립트를 두 번 따로 실행**(각각 그 브랜치의 checkout 안에 있는 이 파일을 부른다
+    — `_find_repo_root`가 그 checkout의 `.git`을 찾으므로 자동으로 맞는 루트가 잡힌다)하고,
+    `only_env`로 자기 브랜치가 담당하는 환경의 서비스만 걸러 그 서비스만 검사한다."""
     excluded_axes, allowlist_services = _load_allowlist()
     iac_keys = _iac_covered_keys()
     settings_field_keys = _settings_field_env_keys()
@@ -534,6 +597,8 @@ def main() -> int:
     )
 
     live_services = _list_live_services()
+    if only_env is not None:
+        live_services = [s for s in live_services if _env_for_service(s) == only_env]
     key_set_failures: list[str] = []
     value_check_failures: list[str] = []
     secret_shape_failures: list[str] = []
@@ -544,6 +609,7 @@ def main() -> int:
     code_read_report: list[str] = []  # ⑤㉢ — report-only(환경무관, 승격 대상 아님).
     unmapped: list[str] = []
 
+    env_label = f"[{only_env}] " if only_env else ""
     checked = 0
     value_checked = 0
     for service in live_services:
@@ -647,7 +713,10 @@ def main() -> int:
     )
 
     if has_fail or has_report_only:
-        print("❌ env 드리프트 발견:" if has_fail else "⚠️ env 드리프트 report-only 발견(FAIL 아님):")
+        print(
+            f"{env_label}❌ env 드리프트 발견:" if has_fail
+            else f"{env_label}⚠️ env 드리프트 report-only 발견(FAIL 아님):"
+        )
         if key_set_failures:
             print("  ①키집합 대조:")
             for line in key_set_failures:
@@ -724,7 +793,7 @@ def main() -> int:
             return 1
 
     print(
-        f"✅ 드리프트 없음(FAIL 기준) — ①{checked}개 서비스 키집합"
+        f"{env_label}✅ 드리프트 없음(FAIL 기준) — ①{checked}개 서비스 키집합"
         f"(제외 {sum(1 for a in excluded_axes.values() if 'key_set' in a)}개), "
         f"②{value_checked}개 서비스 값 대조, "
         f"③{len(live_services)}개 서비스 전체 평문시크릿 스캔 완료(제외 없음), "
@@ -737,5 +806,19 @@ def main() -> int:
     return 0
 
 
+def _parse_only_env(argv: list[str]) -> str | None:
+    """`--only-env dev|prod` — 없으면 None(모든 서비스, 옛 동작 그대로 보존). argparse를 안
+    쓴 이유: 이 스크립트는 이 플래그 하나뿐이라 의존성을 늘릴 이유가 없다."""
+    if "--only-env" not in argv:
+        return None
+    idx = argv.index("--only-env")
+    if idx + 1 >= len(argv):
+        raise SystemExit("--only-env 뒤에 dev 또는 prod가 와야 함")
+    value = argv[idx + 1]
+    if value not in ("dev", "prod"):
+        raise SystemExit(f"--only-env는 dev 또는 prod만 허용(받은 값: {value!r})")
+    return value
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(only_env=_parse_only_env(sys.argv[1:])))

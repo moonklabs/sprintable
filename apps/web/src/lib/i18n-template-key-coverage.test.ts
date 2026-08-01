@@ -63,7 +63,6 @@ const TEMPLATE_KEY_TABLE: Array<[string, string[], string]> = [
   ['canvas.galleryAxis', ['Epic', 'Story', 'Sprint', 'Doc'], 'artifact-gallery.ts GalleryAxis'],
   ['canvas.galleryFormat', ['Html', 'Tree', 'Image'], 'canvas.ts ArtifactFormat'],
   ['glance.phrase.', ['notStarted', 'justStarted', 'underway', 'almostThere', 'wrappingUp'], 'glance.ts derivePhrase() 반환값'],
-  ['glance.recency.', ['justNow', 'aWhileAgo', 'today', 'earlier'], 'glance.ts deriveVagueRecency() 반환값'],
   ['loops.status', ['Draft', 'Briefing', 'Generating', 'Deciding', 'Executing', 'Measuring', 'Closed', 'Abandoned'], 'loop-status-badge.tsx LoopStatus'],
   ['settings.notification_category_', ['story', 'task', 'sprint', 'system'], 'settings/page.tsx NOTIFICATION_CATEGORIES'],
   ['settings.event_', ['story', 'story_assigned', 'task', 'task_assigned', 'task_completed', 'sprint_closed', 'info', 'warning', 'system', 'standup_reminder', 'reward', 'invitation'], 'settings/page.tsx NOTIFICATION_CATEGORIES[].types'],

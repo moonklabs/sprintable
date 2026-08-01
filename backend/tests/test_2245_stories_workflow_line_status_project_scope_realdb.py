@@ -81,7 +81,7 @@ async def _seed(session):
 
 
 def _client_for(app):
-    from httpx import AsyncClient, ASGITransport
+    from httpx import ASGITransport, AsyncClient
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
@@ -135,8 +135,9 @@ async def test_get_workflow_line_status_own_project_200():
 
 
 @pytest.mark.anyio
-async def test_get_workflow_line_status_no_project_access_blocked_403():
-    """본체: 같은 org 이지만 project 접근권 없는 caller는 거부(기존엔 org-scope만이라 200)."""
+async def test_get_workflow_line_status_no_project_access_blocked_404():
+    """본체: 같은 org 이지만 project 접근권 없는 caller는 거부 — story #2322(2026-07-29):
+    404로 통일(예전엔 403이었으나 존재 비노출 규율로 정정, 기존엔 org-scope만이라 200이었음)."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -148,7 +149,7 @@ async def test_get_workflow_line_status_no_project_access_blocked_403():
         client = _client_for(app)
         try:
             resp = await client.get(f"/api/v2/stories/{seeded['story_b_id']}/workflow-line/status")
-            assert resp.status_code == 403, resp.text
+            assert resp.status_code == 404, resp.text
         finally:
             await client.aclose()
     finally:

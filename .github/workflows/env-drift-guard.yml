@@ -23,8 +23,24 @@ jobs:
     timeout-minutes: 5  # 설계 doc 비용축 목표(1분 미만) + 여유
 
     steps:
-      - name: Checkout
+      # story #2224 후속(오르테가 판정, 2026-07-31) — main(default branch, 이 스케줄 트리거가
+      # checkout하는 브랜치)만 보면 «develop에만 있는» IaC/allowlist 수정이 반영 안 된 채로
+      # dev 서비스가 매일 거짓 빨강을 낸다(#2320/#2205와 같은 클래스 — 스케줄이 checkout하는
+      # 브랜치 ≠ 대조해야 할 정본. PR#2678 allowlist 수정이 develop에만 있어 main 기준
+      # 대조는 그 수정을 영원히 못 보는 실사례). prod 서비스(main 기반 배포)는 main으로,
+      # dev 서비스(develop 기반 배포)는 develop으로 — 환경별로 정본 브랜치를 따로 checkout
+      # 한다. 이 첫 checkout이 main(default) — prod 대조는 여기서 그대로 돈다.
+      - name: Checkout (main — prod 대조용)
         uses: actions/checkout@v4
+
+      # develop을 별도 경로에 추가 checkout — dev 대조는 이 안의 스크립트/IaC/allowlist를
+      # 쓴다(check_env_drift.py의 _find_repo_root가 이 checkout의 .git을 찾아 자동으로
+      # develop 루트를 잡는다 — main 루트와 섞이지 않는다).
+      - name: Checkout (develop — dev 대조용)
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          path: develop-checkout
 
       # cloud-build.yml과 동일 WIF 패턴 재사용 — 신규 시크릿 불필요(이미 존재).
       - name: Authenticate to GCP (Workload Identity Federation)
@@ -49,9 +65,26 @@ jobs:
       # ⚠️ 값 자체는 여기서도 절대 로그에 안 남는다(check_env_drift.py가 매치 여부만 반환) —
       # 이 스텝 출력이 그대로 GHA 로그·아티팩트가 되니, 스크립트 쪽 보장이 이 워크플로우
       # 전체의 보장이기도 하다(설계 doc "③" 축 요구사항).
-      - name: Run drift check
+      #
+      # ⛔둘 다 실행하고 «둘 중 하나라도» FAIL이면 이 스텝 자체가 실패한다(continue-on-error
+      # 로 하나를 먼저 죽이고 다른 걸 스킵하면 안 됨 — 매일 두 축을 다 봐야 한다).
+      - name: Run drift check (prod — main)
+        id: drift_prod
+        run: python3 infra/check_env_drift.py --only-env prod
+
+      - name: Run drift check (dev — develop)
+        id: drift_dev
+        if: always()  # prod 스텝이 실패해도 dev 스텝은 반드시 돈다 — 한쪽이 다른 쪽을 가리면 안 됨.
+        run: python3 develop-checkout/infra/check_env_drift.py --only-env dev
+
+      - name: Combine drift results
         id: drift
-        run: python3 infra/check_env_drift.py
+        if: always()
+        run: |
+          if [ "${{ steps.drift_prod.outcome }}" = "failure" ] || [ "${{ steps.drift_dev.outcome }}" = "failure" ]; then
+            echo "::error::drift 발견 — prod=${{ steps.drift_prod.outcome }} dev=${{ steps.drift_dev.outcome }}"
+            exit 1
+          fi
 
       # FAIL 시에만 실행. 오르테가군 정정(2026-07-22): Sprintable story 자동생성은 뺀다 —
       # API 키를 GitHub secret에 하나 더 뿌리는 대가(오늘 하루 겪은 키 유출 사고 직후라
@@ -64,6 +97,12 @@ jobs:
       # 실패시켜 GHA 자체의 실패-워크플로우 알림(스케줄 워크플로우 실패 시 GitHub가 마지막
       # 수정자에게 기본 통지)을 최소 폴백 신호로 강제한다 — `::error::` 어노테이션으로 런
       # 요약 최상단에 뜨게(echo 한 줄로 로그에 묻히는 것과 다름).
+      # ⛔story #2205 AC7 — 이 스텝이 못 잡는 것: `curl -fsS`가 2xx를 받으면 "알림이 그
+      # 웹훅 채널에 «도달»했다"까지만 서는 것이지, 그 채널을 사람이 «보고 있는지»는 이
+      # 워크플로우가 모른다(#2205의 원 병 "감지는 했는데 아무도 못 들었다"가 alert 자체의
+      # 부재였다면, 이건 alert는 도착하는데 «구독자 없는 채널»로 가는 같은 병의 다음 얼굴일
+      # 수 있다). 그 웹훅이 실제로 사람이 상주하는 채널에 꽂혀 있는지는 이 스토리·이 워크플로우
+      # 밖의 운영 확認 사항이다.
       - name: Notify on drift (Discord)
         if: failure() && steps.drift.outcome == 'failure'
         env:

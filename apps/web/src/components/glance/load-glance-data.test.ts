@@ -10,10 +10,6 @@ function mockEmptyFetch() {
     if (url.startsWith('/api/goals')) return jsonResponse([]);
     if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
     if (url.startsWith('/api/team-members')) return jsonResponse([]);
-    // 실 BE shape(activity_logs.py ActivityLogListResponse) — flat 배열 아님. 이 mock이 예전엔
-    // jsonResponse([])(틀린 shape)였고, 그게 로드맵 blank의 진짜 근본(items.filter is not a
-    // function)을 이 테스트 스위트가 못 잡았던 이유였다(2026-07-11 grounding).
-    if (url.startsWith('/api/activity-logs')) return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 });
     // 예외 스트림(#2097) — BE AttentionResponse{items} shape. 프록시가 apiSuccess로 감싸 {data:{items}}.
     if (url.startsWith('/api/glance/attention')) return jsonResponse({ items: [] });
     return jsonResponse([]);
@@ -29,13 +25,14 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
     vi.stubGlobal('fetch', mockEmptyFetch());
     const data = await loadGlanceData('proj-a');
     // 2D 재설계(dee92c96): GlanceData에 hero 필드 추가(active 에픽/story 없으면 전부 빈값·no-fiction).
+    // story #2224(선생님 정정 2026-07-30): collaboration·events·activeEpicTitle 필드 삭제(소비처
+    // CollaborationMap·LiveStream·glance-board.tsx가 /glance 삭제와 함께 전부 죽은 코드였다).
     expect(data).toEqual({
-      roadmap: [], totalEpicCount: 0, collaboration: [], events: [],
-      activeEpicTitle: null, heroStory: null, memberMap: {}, attentionSignals: [], heroEnvelope: null,
+      roadmap: [], totalEpicCount: 0, heroStory: null, memberMap: {}, attentionSignals: [], heroEnvelope: null,
       // codex-silent-defect-sweep D-7 — 진짜 빈 데이터(fetch 성공, 내용 0건)는 partialErrors가
       // 전부 false여야 한다(fetch 실패와 구분되는 것이 이 필드의 존재 이유). story #2298: `stories`
       // 필드는 그 fetch 자체가 없어져 이 타입에서 삭제됐다.
-      partialErrors: { overview: false, members: false, activity: false, attention: false },
+      partialErrors: { overview: false, members: false, attention: false },
     });
   });
 
@@ -47,30 +44,25 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
     expect(goalsCall?.[0]).toContain('include=glance');
   });
 
-  it('derives collaboration from participant_ids on the goals(+glance) response — no per-epic story-list fetch', async () => {
+  it('does not fetch /api/activity-logs (story #2224 — 유일 소비처 LiveStream이 죽은 코드라 fetch 자체를 제거)', async () => {
+    const fetchMock = mockEmptyFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    await loadGlanceData('proj-a');
+    const calledUrls = fetchMock.mock.calls.map(([u]) => u as string);
+    expect(calledUrls.some((u) => u.startsWith('/api/activity-logs'))).toBe(false);
+  });
+
+  it('builds memberMap from /api/team-members (still consumed by GlanceHero human/agent display)', async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      if (url.startsWith('/api/goals')) {
-        return jsonResponse([
-          { id: 'e1', title: 'Epic One', status: 'active', created_at: '2026-07-01T00:00:00Z', participant_ids: ['m1', 'm2'], focal_story: null },
-        ]);
-      }
+      if (url.startsWith('/api/goals')) return jsonResponse([]);
       if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
-      if (url.startsWith('/api/team-members')) return jsonResponse([{ id: 'm1', name: '미르코 페트로비치' }, { id: 'm2', name: '유나 홀름' }]);
-      if (url.startsWith('/api/activity-logs')) return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 });
+      if (url.startsWith('/api/team-members')) return jsonResponse([{ id: 'm1', name: '미르코 페트로비치', type: 'agent' }]);
       if (url.startsWith('/api/glance/attention')) return jsonResponse({ items: [] });
       return jsonResponse([]);
     });
     vi.stubGlobal('fetch', fetchMock);
-    const data = await loadGlanceData('proj-collab');
-    expect(data.collaboration).toEqual([
-      { epicId: 'e1', collaborators: [{ id: 'm1', name: '미르코 페트로비치' }, { id: 'm2', name: '유나 홀름' }] },
-    ]);
-    // ⛔fetchJson()이 .catch(()=>null)로 예외를 삼키므로 mock 안에서 throw하는 방식은
-    // "회귀 시 조용히 통과하는 가드"가 된다(mutation-verify 중 직접 발견 — 삼켜진 예외는
-    // 테스트를 실패시키지 못했다). 실제로 나간 URL을 mock.calls에서 직접 세는 방식만 신뢰 가능.
-    const calledUrls = fetchMock.mock.calls.map(([u]) => u as string);
-    expect(calledUrls.some((u) => u.startsWith('/api/stories'))).toBe(false);
-    expect(calledUrls.some((u) => u.startsWith('/api/glance/hero'))).toBe(false);
+    const data = await loadGlanceData('proj-members');
+    expect(data.memberMap).toEqual({ m1: { name: '미르코 페트로비치', type: 'agent' } });
   });
 
   it('builds heroStory + heroEnvelope from focal_story on the active epic — no separate hero fetch', async () => {
@@ -89,7 +81,6 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
       }
       if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
       if (url.startsWith('/api/team-members')) return jsonResponse([]);
-      if (url.startsWith('/api/activity-logs')) return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 });
       if (url.startsWith('/api/glance/attention')) return jsonResponse({ items: [] });
       return jsonResponse([]);
     });
@@ -113,7 +104,6 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
       }
       if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
       if (url.startsWith('/api/team-members')) return jsonResponse([]);
-      if (url.startsWith('/api/activity-logs')) return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 });
       if (url.startsWith('/api/glance/attention')) return jsonResponse({ items: [] });
       return jsonResponse([]);
     }));
@@ -122,12 +112,49 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
     expect(data.heroEnvelope).toBeNull();
   });
 
+  it('picks an active epic that actually has a focal_story over an earlier active epic with none(결함 fix 2026-07-30 — 선생님 실측 "열린 스토리가 없다": active 에픽 다수 중 «첫 번째»가 무조건 뽑혀 실제 진행중 스토리가 있는 다른 active 에픽을 두고 빈 에픽이 hero로 선택되던 버그)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/goals')) {
+        return jsonResponse([
+          { id: 'e-empty', title: 'E-CHAT-REALTIME(진행중 없음)', status: 'active', created_at: '2026-07-01T00:00:00Z', participant_ids: [], focal_story: null },
+          { id: 'e-has-work', title: 'E-UI-DAEGBYEON(진행중 있음)', status: 'active', created_at: '2026-07-02T00:00:00Z', participant_ids: [], focal_story: {
+            id: 's-real', title: '실제 진행중 스토리', status: 'in-progress', assignee_id: null, assignee_ids: [],
+            proof_count: 0, auto_verify: null, gate: null,
+            trust: { self_reported: false, human_verified: false, human_verified_by: null, human_verified_at: null },
+          } },
+        ]);
+      }
+      if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
+      if (url.startsWith('/api/team-members')) return jsonResponse([]);
+      if (url.startsWith('/api/glance/attention')) return jsonResponse({ items: [] });
+      return jsonResponse([]);
+    }));
+    const data = await loadGlanceData('proj-multi-active');
+    expect(data.heroStory?.id).toBe('s-real');
+  });
+
+  it('falls back to the first active epic when none of the active epics have a focal_story(진짜 0건 — 정직한 빈 상태 유지)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/goals')) {
+        return jsonResponse([
+          { id: 'e1', title: 'Epic One', status: 'active', created_at: '2026-07-01T00:00:00Z', participant_ids: [], focal_story: null },
+          { id: 'e2', title: 'Epic Two', status: 'active', created_at: '2026-07-02T00:00:00Z', participant_ids: [], focal_story: null },
+        ]);
+      }
+      if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
+      if (url.startsWith('/api/team-members')) return jsonResponse([]);
+      if (url.startsWith('/api/glance/attention')) return jsonResponse({ items: [] });
+      return jsonResponse([]);
+    }));
+    const data = await loadGlanceData('proj-all-empty-active');
+    expect(data.heroStory).toBeNull();
+  });
+
   it('unwraps the attention envelope {data:{items}} into attentionSignals — 형상 불일치 crash 없이 실신호 배선', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.startsWith('/api/goals')) return jsonResponse([]);
       if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
       if (url.startsWith('/api/team-members')) return jsonResponse([]);
-      if (url.startsWith('/api/activity-logs')) return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 });
       if (url.startsWith('/api/glance/attention')) {
         return jsonResponse({ items: [
           { kind: 'merge_ready', story_id: 's1', title: '리뷰 대기 스토리', ref: {} },
@@ -147,7 +174,6 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
       if (url.startsWith('/api/goals')) return jsonResponse([]);
       if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
       if (url.startsWith('/api/team-members')) return jsonResponse([]);
-      if (url.startsWith('/api/activity-logs')) return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 });
       if (url.startsWith('/api/glance/attention')) return { ok: false, json: async () => ({}) } as Response;
       return jsonResponse([]);
     }));
@@ -155,28 +181,9 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
     expect(data.attentionSignals).toEqual([]);
   });
 
-  it('does not throw when activity-logs returns the real BE envelope shape {items,total,limit,offset} (not a flat array) — 로드맵 blank 진짜 근본 회귀가드', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url.startsWith('/api/goals')) return jsonResponse([]);
-      if (url.startsWith('/api/dashboard/overview')) return jsonResponse({ project_status: { epics: [] } });
-      if (url.startsWith('/api/team-members')) return jsonResponse([]);
-      if (url.startsWith('/api/activity-logs')) {
-        return jsonResponse({
-          items: [{ id: 'a1', actor_type: 'human', action: 'story.status_changed', entity_type: 'story', entity_title: 'x', created_at: '2026-07-10T00:00:00Z' }],
-          total: 1, limit: 20, offset: 0,
-        });
-      }
-      return jsonResponse([]);
-    }));
-    const data = await loadGlanceData('proj-b');
-    expect(data.events).toHaveLength(1);
-    expect(data.events[0]!.id).toBe('a1');
-  });
-
   it('rejects when the epics fetch fails (essential source — failure must not be mistaken for "0 epics")', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.startsWith('/api/goals')) return { ok: false, json: async () => ({}) } as Response;
-      if (url.startsWith('/api/activity-logs')) return jsonResponse({ items: [], total: 0, limit: 20, offset: 0 });
       return jsonResponse([]);
     }));
     await expect(loadGlanceData('proj-c')).rejects.toThrow();
@@ -186,10 +193,8 @@ describe('loadGlanceData (§10 데이터 소스 4종 단순 1회 fetch — dedup
     vi.stubGlobal('fetch', mockEmptyFetch());
     await loadGlanceData('proj-d');
     await loadGlanceData('proj-d');
-    // story #2298: 고정 엔드포인트 수(5: epics+glance·overview·members·activity·attention) 자체는
-    // 그대로다 — 줄어든 건 이 5개에 "얹혀 있던" 가변 웨이브다(에픽 수만큼의 story-list N건 +
-    // 조건부 hero 1건, 이 mock엔 아예 없어서 숫자로는 안 보인다 — 그 웨이브가 실제로 안 나가는
-    // 것은 위 "no per-epic story-list fetch"/"no separate hero fetch" 테스트가 throw로 잡는다).
-    expect(vi.mocked(fetch).mock.calls.length).toBe(10); // 5 endpoints × 2 calls (epics·overview·members·activity·attention)
+    // story #2224: 고정 엔드포인트 수가 5→4로 줄었다(activity-logs 제거) — epics+glance·
+    // overview·members·attention.
+    expect(vi.mocked(fetch).mock.calls.length).toBe(8); // 4 endpoints × 2 calls
   });
 });

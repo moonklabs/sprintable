@@ -78,6 +78,22 @@ async def _seed_org_project_member(session):
     return org, project, member
 
 
+async def _make_doc(session, org_id, project_id, title="Doc"):
+    """story #2294 후속(2026-07-29): reconcile_entity_references가 이제 target 실재를
+    검증하므로(오르테가 라이브 실측 — 존재하지 않는 대상이 그대로 저장되던 결함), 이
+    파일의 write-path 테스트들은 target으로 fabricated uuid.uuid4()가 아니라 실재하는
+    Doc 행을 써야 한다."""
+    from app.models.doc import Doc
+
+    doc = Doc(
+        id=uuid.uuid4(), org_id=org_id, project_id=project_id, title=title,
+        slug=f"doc-{uuid.uuid4().hex[:8]}",
+    )
+    session.add(doc)
+    await session.commit()
+    return doc
+
+
 # ─── AC4-1: 채팅 멘션 삽입 → mentions row ──────────────────────────────────────
 
 
@@ -89,9 +105,9 @@ async def test_chat_mention_insert_creates_row():
     try:
         async with factory() as session:
             org, project, member = await _seed_org_project_member(session)
-            await session.commit()
+            target_doc = await _make_doc(session, org.id, project.id)
 
-            target_doc_id = uuid.uuid4()
+            target_doc_id = target_doc.id
             message_id = uuid.uuid4()
             content = f"[참고 doc](entity:doc:{target_doc_id})"
 
@@ -127,11 +143,12 @@ async def test_doc_reconcile_adds_and_removes_stale_mentions():
     try:
         async with factory() as session:
             org, project, member = await _seed_org_project_member(session)
-            await session.commit()
+            target_b_doc = await _make_doc(session, org.id, project.id, title="B")
+            target_c_doc = await _make_doc(session, org.id, project.id, title="C")
 
             source_doc_id = uuid.uuid4()
-            target_b = uuid.uuid4()
-            target_c = uuid.uuid4()
+            target_b = target_b_doc.id
+            target_c = target_c_doc.id
 
             # 1차: B 를 wikiLink 로 멘션.
             html_v1 = f'<span data-type="wikiLink" data-doc-id="{target_b}">B</span>'
@@ -176,11 +193,12 @@ async def test_doc_reconcile_wikilink_and_page_embed_land_as_distinct_forms():
     try:
         async with factory() as session:
             org, project, member = await _seed_org_project_member(session)
-            await session.commit()
+            mention_target_doc = await _make_doc(session, org.id, project.id, title="M")
+            embed_target_doc = await _make_doc(session, org.id, project.id, title="E")
 
             source_doc_id = uuid.uuid4()
-            mention_target = uuid.uuid4()
-            embed_target = uuid.uuid4()
+            mention_target = mention_target_doc.id
+            embed_target = embed_target_doc.id
 
             html = (
                 f'<span data-type="wikiLink" data-doc-id="{mention_target}">M</span>'
@@ -213,10 +231,10 @@ async def test_doc_reconcile_switching_page_embed_to_wikilink_swaps_form_not_sta
     try:
         async with factory() as session:
             org, project, member = await _seed_org_project_member(session)
-            await session.commit()
+            target_doc = await _make_doc(session, org.id, project.id)
 
             source_doc_id = uuid.uuid4()
-            target = uuid.uuid4()
+            target = target_doc.id
 
             html_v1 = f'<div data-page-embed data-doc-id="{target}"></div>'
             await reconcile_doc_mentions(
@@ -295,9 +313,9 @@ async def test_duplicate_target_collapses_to_one_row_via_unique():
     try:
         async with factory() as session:
             org, project, member = await _seed_org_project_member(session)
-            await session.commit()
+            target_doc = await _make_doc(session, org.id, project.id)
 
-            target_doc_id = uuid.uuid4()
+            target_doc_id = target_doc.id
             message_id = uuid.uuid4()
             content = f"[A](entity:doc:{target_doc_id})"
 
@@ -436,10 +454,10 @@ async def test_mentions_rollback_when_enclosing_transaction_fails():
     try:
         async with factory() as session:
             org, project, member = await _seed_org_project_member(session)
-            await session.commit()
+            target_doc = await _make_doc(session, org.id, project.id)
 
             source_doc_id = uuid.uuid4()
-            target_doc_id = uuid.uuid4()
+            target_doc_id = target_doc.id
             html = f'<span data-type="wikiLink" data-doc-id="{target_doc_id}">X</span>'
 
             await reconcile_doc_mentions(
@@ -475,8 +493,9 @@ async def test_created_by_is_canonicalized_via_alias():
                 alias_id=legacy_alias_id, member_id=member.id, org_id=org.id, alias_source="human_team_member",
             ))
             await session.commit()
+            target_doc = await _make_doc(session, org.id, project.id)
 
-            target_doc_id = uuid.uuid4()
+            target_doc_id = target_doc.id
             message_id = uuid.uuid4()
             content = f"[A](entity:doc:{target_doc_id})"
 

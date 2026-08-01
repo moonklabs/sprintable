@@ -4,6 +4,23 @@ import { useEffect, useState } from 'react';
 import { applyEntity, entityTypeLabel, groupEntitiesByType, type EntityResult } from '@/components/chat/chat-input-entity-tokens';
 
 /**
+ * story #2263 BE 계약②(PR#2615) — FastAPI `/api/v2/entities/search`가 flat list에서
+ * `{data, types}`로 바뀌었다. 이 fetch는 Next.js route(`app/api/entities/search/route.ts`)의
+ * `apiSuccess(data)`를 한 겹 더 거친다 — 즉 이 hook이 받는 json은 항상
+ * `{data: <FastAPI 원본 바디>, error, meta}`다.
+ * ⛔예전 코드(`Array.isArray(json) ? json : (json.data ?? [])`)는 이 바깥 겹만 벗겨서 FastAPI가
+ * flat list이던 시절엔 우연히 맞았지만, `{data,types}`로 바뀐 뒤엔 `json.data`가 배열이 아니라
+ * `{data,types}` 객체가 되어 최종 결과가 매번 빈 배열로 떨어진다(검색 결과가 조용히 0건이 되는
+ * 회귀 — Next.js route 코드 추적 + 실제 응답 형상 대조로 확認). 안쪽 겹을 한 번 더 벗겨 두 모양
+ * (과거 flat list · 현재 `{data,types}`) 다 받는다.
+ */
+export function parseEntitySearchResults(json: unknown): EntityResult[] {
+  const outer = Array.isArray(json) ? json : ((json as { data?: unknown } | null)?.data ?? json);
+  const arr = Array.isArray(outer) ? outer : ((outer as { data?: EntityResult[] } | null)?.data ?? []);
+  return Array.isArray(arr) ? arr : [];
+}
+
+/**
  * story #2264(C-6) — `#` 엔티티 피커의 상태·검색·토큰조립을 채팅(chat-input.tsx)에서 뽑아낸
  * 재사용 hook. AC3(새 자리 비용 = 설정 한 줄) 판정의 핵심: 이 파일이 «참조 코어»고, 새 자리를
  * 여는 것은 이 hook을 부르고 렌더 3~4줄을 붙이는 것뿐이어야 한다.
@@ -28,10 +45,9 @@ export function useEntityPicker(projectId: string | undefined) {
       if (entityQuery) params.set('q', entityQuery);
       fetch(`/api/entities/search?${params}`)
         .then((r) => r.json())
-        .then((json: EntityResult[] | { data?: EntityResult[] }) => {
+        .then((json: unknown) => {
           if (cancelled) return;
-          const arr = Array.isArray(json) ? json : (json.data ?? []);
-          setEntityResults(groupEntitiesByType(Array.isArray(arr) ? arr : []));
+          setEntityResults(groupEntitiesByType(parseEntitySearchResults(json)));
           setEntityIndex(0);
         })
         .catch(() => {});

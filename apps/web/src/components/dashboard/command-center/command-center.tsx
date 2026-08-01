@@ -10,9 +10,15 @@ import { OverviewZone } from './overview-zone';
 import { derivePhrase } from '@/services/glance';
 
 /**
- * E-MODERN [Track C] 커맨드 센터 — 현 대시보드 위젯 교체. 2구역+헤더.
+ * E-MODERN [Track C/command-center] 커맨드 센터 — 현 대시보드 위젯 교체. 2구역+헤더.
  * "괜찮다 / 내가 OO 해야" 한눈에. canonical 부품·색=신호·pending_data graceful(mock-0 금지).
  * 데이터: org-scope BE 2엔드포인트(caller 쿠키 resolve·param 불요) + team-members(이름 resolve).
+ *
+ * ⚠️이 "Track C"는 command-center라는 «조각» 이름이지, E-MODERN 블루프린트
+ * (doc: e-modern-modernization-blueprint)의 전략 Track C("UI 갈아엎기" 전체 — 디자인시스템
+ * enforcement·god-component 분해·랜딩 편입·alert→ConfirmDialog 등)가 아니다. 같은 글자가
+ * 두 다른 체계에서 쓰여 "Track C 했다"가 어느 쪽인지 헷갈리던 것을 정정(2026-07-30) —
+ * 이 커맨드 센터는 전략 Track C의 «한 조각»일 뿐, 전체가 아니다.
  */
 
 function unwrap<T>(json: unknown): T | null {
@@ -71,8 +77,11 @@ export function CommandCenter({ projectName }: { projectName?: string | null }) 
         <div className="flex items-center gap-2">
           {activeEpic ? (
             <Link
-              href="/glance"
-              title={t('ccGlanceTooltip')}
+              // story #2224(선생님 정정 2026-07-30, 진입점 전수 스윕) — `/glance` 라우트가
+              // 삭제되고 `/flow`로 흡수됐다(PR#2698). bare `/flow`는 proxy.ts
+              // MIGRATED_RESOURCES 안전망(오늘 등록)이 org/project 쿠키로 해소한다.
+              href="/flow"
+              title={t('ccFlowTooltip')}
               className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
             >
               <Map className="size-3 shrink-0" aria-hidden="true" />
@@ -83,9 +92,16 @@ export function CommandCenter({ projectName }: { projectName?: string | null }) 
           {fleet ? (
             <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-[11px]">
               <span className="font-medium text-foreground">{t('ccFleet', { count: fleet.total_agents })}</span>
-              {isPending(fleet.status_breakdown) ? (
+              {/* story #2338 — BE는 status_breakdown을 실 객체로 보낸다(더 이상 통짜
+                  PendingData가 아니다). isPending에 걸면 이 실 객체와 영원히 안 맞아
+                  아래 실측값이 렌더 코드에 도달하지 못했다(#2338이 잡은 사고). */}
+              {!isPending(fleet.status_breakdown) ? (
+                <span className="text-muted-foreground/70">
+                  · {t('ccFleetOnlineWorking', { online: fleet.status_breakdown.online, working: fleet.status_breakdown.working })}
+                </span>
+              ) : (
                 <span className="text-muted-foreground/70">· {t('ccFleetBreakdownPending')}</span>
-              ) : null}
+              )}
             </div>
           ) : null}
         </div>

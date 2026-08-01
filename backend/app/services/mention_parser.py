@@ -34,12 +34,31 @@ design-org-knowledge-mentions-backlinks §2.
 기존 `mentioned_ids`(ConversationMessage 컬럼·멤버 알림용) 파이프라인은 이 모듈이 전혀
 참조하지 않는다 — 완전히 독립된 병행 경로.
 
-⛔story #2284: 이 모듈이 쓰는 form은 `mention`·`embed` 둘뿐이다. `proof`는 여기서 만들지
-않는다 — 「지원 안 함」이 아니라 「아직 안 만듦」이다: proof는 #2265(대화 일부를 view-only로
-잘라 박는 기능, 별도 write 경로)의 몫으로 설계돼 있고 그 write 경로 자체가 아직 없다(코드
-0줄). doc의 wikiLink→mention·pageEmbed→embed 구분은 파싱 시점에 이미 있던 재료를 저장
-시점에 버리지 않게 고친 것뿐이라 작은 일이었지만, proof는 새 UI 흐름(어느 대화 구간을
-자를지)과 새 write 경로가 통째로 필요해 크기가 다르다.
+⛔story #2284, 재정정(2026-07-29 · #2277 census가 적발한 자기모순 — PO 지시로 즉시 정정):
+이 모듈이 쓰는 form은 `mention`·`embed` 둘뿐이다. `proof`는 여기서 만들지 않는다 — **「아직
+안 만듦」이 아니라 채팅에 그것을 가를 재료가 없어서 안 만드는 것이다(설계)**: `proof`는
+C-7(#2265, 대화 일부를 view-only로 잘라 박는 기능)이 이 파서 write-path **밖**의 별도 경로로
+쓰는 form이다 — 이 파서가 만들 일이 아니다. doc의 wikiLink→mention·pageEmbed→embed 구분은
+파싱 시점에 이미 있던 재료를 저장 시점에 버리지 않게 고친 것뿐이라 작은 일이었지만, proof는
+새 UI 흐름(어느 대화 구간을 자를지)과 새 write 경로가 통째로 필요해 크기가 다르다 — 이건
+이 모듈의 미완이 아니라 다른 모듈의 몫이라는 뜻이다.
+
+⛔story #2316 AC5(미르코 문안, 디디 반영): 이 파서(`extract_chat_entity_mentions` 등 대괄호
+문법 추출기)가 «못 보는» 것:
+  ①맨 번호 — 본문의 `#2249`처럼 대괄호·`entity:` 문법이 **아예 없는** 참조. **이 대괄호
+    파서는** 그것을 한 건도 안 센다. 사람이 손으로 쓴 참조 대부분이 이 모양이다.
+  ②닫힌 문법 밖 — `](entity:`를 포함한 무관한 텍스트가 오탐을 낼 수 있다(기존).
+  ⇒ 즉 **대괄호 파서**의 수치는 「멘션 문법으로 쓰인 것」의 전수이지 「본문에 있는 참조」의
+    전수가 아니다. #2269(C-11)의 원석 830~1993건이 전부 ①모양이었다.
+
+⭐story #2269(C-11) AC1(2026-07-29): 위 ①갭 중 **story description/acceptance_criteria의
+"#<번호>"가 다른 story를 가리키는 경우만** `extract_bare_number_candidates` +
+`resolve_bare_number_story_refs`가 별도로 채운다(대괄호 파서를 고치지 않고 **더한다** — 함수
+안에 분기 추가 금지 원칙 유지). ⛔여전히 못 보는 것: (a) 채팅 메시지 본문의 맨 번호(이
+write-path는 story description/AC 전용 — conversations.py 쪽은 별건), (b) story가 아닌
+타입(task/doc/epic 등)을 가리키는 맨 번호(story_number 스코프만 지원), (c) 신규 story
+생성 시점(`create_story`는 애초에 이 reconcile 자체를 안 부른다 — 대괄호 멘션도 마찬가지
+기존 갭, 이 스토리가 만든 것 아님).
 """
 from __future__ import annotations
 
@@ -48,6 +67,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from html.parser import HTMLParser
+from typing import Any
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,6 +75,7 @@ from sqlalchemy import select
 
 from app.models.reference import Reference
 from app.services.member_resolver import canonicalize_member_id
+from app.services.reference_core import _batch_resolve_existence
 from app.services.reference_registry import ENTITY_RESOLVERS
 
 logger = logging.getLogger(__name__)
@@ -95,7 +116,16 @@ def extract_chat_entity_mentions(content: str) -> list[tuple[str, uuid.UUID]]:
     "토큰 모양"(`](entity:`)이 본문에 있는데 실제 추출 건수가 그보다 적으면 경고 로그를
     남긴다 — 재발해도 조용히 안 넘어가게 하는 최소 감시망(완벽한 검출은 아니다 — 우연히
     `](entity:`를 포함한 무관한 텍스트가 오탐을 낼 수 있다는 것도 안다, 그래도 "0신호"보다
-    낫다)."""
+    낫다).
+
+    ⛔story #2329(2026-07-30 실측, #2316 AC8): 이 경고가 95%(dev 14일 n=39 중 37건) 우리가
+    스토리/AC 본문·팀 채팅에서 `](entity:` 문법을 «인용·설명»할 때 울렸다 — 실제 파싱 실패가
+    아니라 코드펜스·인라인코드 안의 예시 텍스트였다. `shape_count`를 재기 前에
+    `_redact_code_spans()`(#2269가 만든 헬퍼, 지금까지 `extract_bare_number_candidates`
+    전용)를 통과시켜 코드펜스/인라인코드 안의 `](entity:`는 안 센다 — 새 헬퍼를 만들지
+    않는다(두 자리가 "코드블록이란 무엇인가"를 각자 정의하면 #2242의 "한 개념에 두 기준"이
+    된다). ⛔인용 블록(`>`)까지는 `_redact_code_spans()`가 안 덮는다 — 그 문법으로 인용된
+    `](entity:`는 여전히 shape_count에 잡힌다(넓히는 것은 이 스토리 범위 밖)."""
     if not content:
         return []
     seen: set[tuple[str, uuid.UUID]] = set()
@@ -110,7 +140,7 @@ def extract_chat_entity_mentions(content: str) -> list[tuple[str, uuid.UUID]]:
         if key not in seen:
             seen.add(key)
             result.append(key)
-    shape_count = content.count("](entity:")
+    shape_count = _redact_code_spans(content).count("](entity:")
     if len(result) < shape_count:
         logger.warning(
             "mention_parser: token-shaped substring count(%d) exceeds extracted count(%d) — "
@@ -118,6 +148,137 @@ def extract_chat_entity_mentions(content: str) -> list[tuple[str, uuid.UUID]]:
             shape_count, len(result), content[:200],
         )
     return result
+
+
+# story #2316(2026-07-29, 까심 라이브 실측 — dev, 읽기 전용): id 부분이 UUID 모양이 아닌
+# 토큰(`](entity:task:not-a-uuid)`)은 `_CHAT_TOKEN_RE`의 id 그룹이 `_UUID_RE`를 강제하므로
+# 매치 자체가 실패한다 — `try/except ValueError`(위 106-109행)는 그래서 사실상 도달 불가
+# 코드다. 그 결과 `count_phantom_task_mentions`(AC6)가 이 케이스를 영원히 "0건"으로
+# 보고한다 — "탐지가 없다"가 아니라 "탐지된 게(위 shape_count 경고 로그) 도달하는 자리가
+# 없다"(PO 표현). id를 느슨하게(`[^)]*`) 잡는 별도 정규식으로 "모양은 맞는데 못 파싱한"
+# 토큰만 골라 caller(`insert_chat_mentions`)에 반환 — 그쪽이 `dropped`에
+# `reason="malformed_token"`으로 얹는다. 코어(`reconcile_entity_references`)에 안 넣는
+# 이유: 코어는 이미 파싱된 `extracted_refs`만 받는 계약이라(#2301) 애초에 추출조차 안 된
+# 토큰은 코어의 시야 밖 — #2301의 "얇은 변환" 원칙 위반이 아니라 코어가 볼 수 없는 축이다.
+_CHAT_TOKEN_SHAPE_RE = re.compile(
+    r"\[(?:[^\]\\]|\\.)*\]\(entity:(?P<type>[a-z]+):(?P<id>[^)]*)\)"
+)
+
+
+def find_malformed_chat_tokens(content: str) -> list[dict[str, str]]:
+    """모양(`](entity:<type>:...)`)은 맞지만 id가 UUID가 아니라 `extract_chat_entity_
+    mentions`가 애초에 못 뽑은 토큰을 찾는다. 순서 무관, 중복 제거(동일 (type, raw_id)
+    반복은 한 건으로)."""
+    if not content:
+        return []
+    strict_matches = {
+        (m.group("type"), m.group("id")) for m in _CHAT_TOKEN_RE.finditer(content)
+    }
+    seen: set[tuple[str, str]] = set()
+    malformed: list[dict[str, str]] = []
+    for m in _CHAT_TOKEN_SHAPE_RE.finditer(content):
+        entity_type, raw_id = m.group("type"), m.group("id")
+        key = (entity_type, raw_id)
+        if key in strict_matches or key in seen:
+            continue
+        seen.add(key)
+        malformed.append({"target_type": entity_type, "target_id": raw_id, "reason": "malformed_token"})
+    return malformed
+
+
+# story #2269(C-11) AC0-3 세는 정의(doc `c11-2269-ac0-findings` 확定분) — word-boundary로
+# `##`·URL 프래그먼트 등 오탐을 배제한다. `(?<![\w#])`: 바로 앞이 단어문자·#이면 매치 안 함
+# (`##2258`이나 `foo#2258`은 스킵 — 후자는 URL 프래그먼트 패턴과 겹칠 수 있어 보수적으로 뺀다).
+_BARE_STORY_NUMBER_RE = re.compile(r"(?<![\w#])#(\d+)\b")
+_FENCED_CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
+_INLINE_CODE_SPAN_RE = re.compile(r"`[^`\n]*`")
+
+
+def _redact_code_spans(content: str) -> str:
+    """세는 정의: 코드블록/인라인 코드 안의 `#번호`는 참조가 아니다(예시·복사용 텍스트).
+    같은 길이의 공백으로 치환해 나머지 텍스트의 문자 위치는 그대로 유지한다(위치가 필요한
+    호출부는 아직 없지만, 치환 대신 삭제하면 인접 텍스트가 붙어 새 오탐을 만들 수 있어
+    길이 보존 쪽을 택했다)."""
+    def _blank(m: re.Match[str]) -> str:
+        return " " * len(m.group(0))
+    return _INLINE_CODE_SPAN_RE.sub(_blank, _FENCED_CODE_BLOCK_RE.sub(_blank, content))
+
+
+def extract_bare_number_candidates(content: str) -> list[int]:
+    """story #2269(C-11) AC0-3 — 대괄호·`entity:` 문법이 «없는» `#<번호>` 원석 후보를 순서
+    보존 + 중복 제거로 뽑는다(순수 함수, DB 왕복 없음 — 번호가 실제 존재하는 story를
+    가리키는지는 이 함수의 관심사가 아니다, `resolve_bare_number_story_refs` 참조). 코드블록/
+    인라인 코드 안의 매치는 제외한다(위 `_redact_code_spans`)."""
+    if not content:
+        return []
+    redacted = _redact_code_spans(content)
+    seen: set[int] = set()
+    result: list[int] = []
+    for m in _BARE_STORY_NUMBER_RE.finditer(redacted):
+        n = int(m.group(1))
+        if n not in seen:
+            seen.add(n)
+            result.append(n)
+    return result
+
+
+async def resolve_bare_number_story_targets(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    content: str,
+) -> dict[int, uuid.UUID]:
+    """story #2269(C-11) AC0-2 축B(2026-07-29 추가, PO 지적 — 축A만으로는 화면에 아무것도 안
+    뜬다: "번역만 하면 되겠지" 함정 재현) — `extract_bare_number_candidates`가 뽑은 번호를
+    **번호를 보존한 채** story로 해소한다(number → story_id). `resolve_bare_number_story_refs`
+    (축A, reconcile 3튜플 전용 — 번호를 버리고 target만 반환)와 같은 SELECT를 하지만, 화면
+    표시(render-time `#<번호>` → `entity:story:<uuid>` 치환)엔 어느 번호가 어느 대상인지가
+    필요해 번호를 살려 반환하는 별도 함수로 분리했다.
+
+    ⛔`story_number`는 **project_id 유일**이지 org 유일이 아니다 — 소스의 project_id로만
+    스코프(축A와 동일 규율, mutation self-check로 실증됨 — test_2269 참조)."""
+    numbers = extract_bare_number_candidates(content)
+    if not numbers:
+        return {}
+    from app.models.pm import Story
+
+    rows = (await db.execute(
+        select(Story.story_number, Story.id).where(
+            Story.org_id == org_id,
+            Story.project_id == project_id,
+            Story.story_number.in_(numbers),
+        )
+    )).all()
+    return {row.story_number: row.id for row in rows}
+
+
+async def resolve_bare_number_story_refs(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    content: str,
+) -> list[tuple[str, uuid.UUID, str]]:
+    """story #2269(C-11) AC0-2 축A — `resolve_bare_number_story_targets`가 준 number→id
+    매핑을 `reconcile_entity_references`가 바로 받는 (target_type, target_id, form) 3튜플로
+    변환한다(caller가 대괄호 파서 결과와 합쳐 한 번에 reconcile — 저장 시 원문 rewrite는
+    하지 않는다, doc `c11-2269-ac0-findings` AC0-2 축A/축B 구분 참조)."""
+    targets = await resolve_bare_number_story_targets(
+        db, org_id=org_id, project_id=project_id, content=content,
+    )
+    # ⛔story #2269 AC0-1 후속(오르테가군 판정, 2026-07-30): 대괄호 `entity:story:<uuid>`
+    # 멘션과 이 맨번호 결과가 여기서 같은 form="mention"으로 합쳐진다 — 서로 다른 문법(추출기
+    # 다름·존재검사 방식 다름)인데 저장되면 구분이 사라진다(#2284와 같은 병 재발). 실측
+    # 결과 지금은 "안 가른다"(대괄호 story-멘션 원문 2건뿐 — 둘 다 단일 검증용 story #2321
+    # 한 건에서 같은 순간 난 것, 조직 실사용 아님). ⭐다시 볼 조건(사건 기반, 날짜 아님):
+    # ①대괄호 story-멘션이 세 자리(100+)에 들어서거나, ②㉠(대괄호)·㉡(맨번호) 출처 참조를
+    # 실제로 다르게 다뤄야 할 일이 생기면 — 그때 form을 가른다(예: "mention_bracket"/
+    # "mention_bare" 또는 별도 discriminator 컬럼). 가르기 전 반드시 전수 확인할 자리:
+    # 이 함수의 existing-refs diff(reconcile_entity_references)·verify_backfill_complete
+    # (reference_backfill.py)·POST /api/v2/references·story 출처기록(#2267) 4곳 + FORMS
+    # CHECK 제약(app/models/reference.py) — story #2269 description 2026-07-30 섹션에 전수 기록됨.
+    return [("story", story_id, "mention") for story_id in targets.values()]
 
 
 def extract_chat_doc_mention_ids(content: str) -> list[uuid.UUID]:
@@ -273,7 +434,7 @@ async def reconcile_entity_references(
     AC4 원자성 계약과 동일)."""
     valid = [(tt, tid, form) for tt, tid, form in extracted_refs if tt in target_types]
     dropped = [
-        {"target_type": tt, "target_id": str(tid)}
+        {"target_type": tt, "target_id": str(tid), "reason": "unregistered_target_type"}
         for tt, tid, _form in extracted_refs if tt not in target_types
     ]
     if dropped:
@@ -287,6 +448,41 @@ async def reconcile_entity_references(
         (tt, tid, form) for tt, tid, form in valid
         if not (tt == source_type and tid == source_id)
     }
+
+    # ⛔story #2294 후속(2026-07-29, 오르테가 라이브 실측): 실재하지 않는(또는 이 org 밖)
+    # target_id가 그대로 저장되던 결함 — POST /references(insert_reference 호출부)·
+    # GET /entities/search는 이미 존재판정을 거치는데 이 write-path만 target_types(등록된
+    # «타입»인가)만 보고 target_id의 «실재»는 한 번도 확認하지 않았다(미르코 코드 추적으로
+    # 좁힌 자리, PO가 dev 라이브에서 직접 재현). `reference_core._batch_resolve_existence`
+    # (POST /references·GET /search와 같은 계열, ENTITY_RESOLVERS 그 자체)를 그대로 재사용
+    # — 세 번째 게이트를 새로 짓지 않는다(PO 지시). 각 resolver가 `WHERE org_id == org_id`로
+    # 스코프하므로 크로스-org 실재 UUID도 "없음"으로 걸린다(존재+org 소속을 한 번에 검증).
+    # 존재하지 않는 target은 `dropped`로(사유를 `unregistered_target_type`과 구분되게
+    # `target_not_found`로 — "타입이 미등록"과 "대상이 없음"은 사람이 할 일이 다르다는 PO
+    # 판단). ㉠target_refs가 비면 ids_by_type도 비어 `_batch_resolve_existence`가 session을
+    # 아예 안 건드린다 — known_new=True·db=None 자기검증 경로(아래 known_new 분기 참조)의
+    # "DB 왕복 0" 불변식을 이 게이트가 깨지 않는다.
+    if target_refs:
+        ids_by_type: dict[str, set[uuid.UUID]] = {}
+        for tt, tid, _form in target_refs:
+            ids_by_type.setdefault(tt, set()).add(tid)
+        existing_by_type = await _batch_resolve_existence(db, org_id, ids_by_type)
+        not_found = [
+            (tt, tid, form) for tt, tid, form in target_refs
+            if tid not in existing_by_type.get(tt, set())
+        ]
+        if not_found:
+            dropped.extend(
+                {"target_type": tt, "target_id": str(tid), "reason": "target_not_found"}
+                for tt, tid, _form in not_found
+            )
+            logger.warning(
+                "reconcile_entity_references: dropped %d ref(s) whose target does not exist "
+                "(source_type=%s, source_field=%s, source_id=%s) dropped=%s",
+                len(not_found), source_type, source_field, source_id,
+                [{"target_type": tt, "target_id": str(tid)} for tt, tid, _form in not_found],
+            )
+            target_refs -= set(not_found)
 
     if known_new:
         # insert-only 고속 경로 — existing-refs SELECT/stale-delete 자체를 건너뛴다(DB 왕복
@@ -338,9 +534,12 @@ async def reconcile_entity_references(
             for target_type, target_id, form in new_refs
         ])
         stmt = stmt.on_conflict_do_nothing(
+            # story #2267(C-9): relation이 유니크 인덱스에 추가돼 이 목록도 같이 늘어야
+            # 매치한다 — 이 write-path(멘션 추출)는 relation을 안 채우므로(위 dict 참조)
+            # 컬럼 기본값 'none'이 그대로 적용된다(창조-출처는 이 파서가 다루는 개념이 아니다).
             index_elements=[
                 Reference.source_type, Reference.source_field, Reference.source_id,
-                Reference.target_type, Reference.target_id, Reference.form,
+                Reference.target_type, Reference.target_id, Reference.form, Reference.relation,
             ],
             index_where=Reference.form != "proof",
         )
@@ -410,7 +609,16 @@ async def insert_chat_mentions(
         source_id=message_id, extracted_refs=extracted_refs, created_by=created_by,
         target_types=target_types, known_new=True,
     )
-    return ChatMentionResult(stored=result.stored, dropped=result.dropped)
+    # story #2316: 코어가 못 보는 축(추출조차 실패한 토큰) — 래퍼가 직접 찾아 dropped에
+    # 얹는다(위 find_malformed_chat_tokens docstring 참조, #2301 "얇은 변환" 예외 아님).
+    malformed = find_malformed_chat_tokens(content)
+    if malformed:
+        logger.warning(
+            "insert_chat_mentions: dropped %d malformed-id token(s) — shape matched but id "
+            "is not a UUID (message_id=%s) dropped=%s",
+            len(malformed), message_id, malformed,
+        )
+    return ChatMentionResult(stored=result.stored, dropped=[*result.dropped, *malformed])
 
 
 async def count_phantom_task_mentions(db: AsyncSession) -> int:
@@ -463,6 +671,14 @@ async def reconcile_doc_mentions(
     insert 로 귀결). 새 content 에 더 이상 없는 기존 참조는 삭제, 새로 생긴 건
     ON CONFLICT DO NOTHING 으로 insert. 자기참조(target doc == source doc)는 드롭.
 
+    ⛔story #2316 AC7(못 잡는 것 선언): 채팅 write-path의 `find_malformed_chat_tokens`
+    (모양은 맞는데 id가 UUID가 아닌 토큰을 `dropped(reason="malformed_token")`로 잡는
+    가드)는 이 함수(doc write-path)엔 없다 — `extract_doc_mention_targets`는 정규식이
+    아니라 `HTMLParser`로 `data-doc-id` attribute를 읽는 구조라 "모양은 맞는데 파싱
+    실패"라는 실패 축 자체가 성립하지 않는다(attribute가 없으면 그 태그를 그냥 못
+    본 것 — "본 것 같은데 못 뽑았다"가 없다). 그래서 doc write-path는 malformed_token
+    탐지 대상이 아니고, target 존재+org 소속 검증(story #2294 후속, 아래)만 적용된다.
+
     같은 트랜잭션(caller 세션 그대로) — 실패 시 예외 propagate 로 caller(doc 저장 트랜잭션)
     전체가 롤백된다(AC4 원자성).
 
@@ -472,7 +688,7 @@ async def reconcile_doc_mentions(
     story #2284: diff 단위가 target_id 하나였던 것을 **(target_id, form) 쌍**으로 넓혔다 —
     같은 대상이라도 wikiLink(mention)와 pageEmbed(embed)는 서로 다른 행이라(파서가 이제
     구분을 보존한다). ⛔이 함수는 mention/embed 두 form만 다룬다 — proof(form)는 이 write
-    경로가 만들지도 지우지도 않는다(#2265 전용 별도 write 경로 몫 — 아직 존재하지 않는다).
+    경로가 만들지도 지우지도 않는다(설계 — C-7(#2265) 전용, 이 파서 밖의 별도 write 경로 몫).
     그래서 존재-조회에 `Reference.form.in_(("mention", "embed"))`로 명시해 proof 행을
     이 diff의 시야 밖에 둔다(실수로 지우는 사고 원천 차단).
 
@@ -503,3 +719,60 @@ async def reconcile_doc_mentions(
         db, org_id=org_id, source_type="doc", source_field="body", source_id=doc_id,
         extracted_refs=extracted_refs, created_by=created_by,
     )
+
+
+async def fetch_stored_references(
+    db: AsyncSession, *, org_id: uuid.UUID, source_type: str, source_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, list[dict[str, str]]]:
+    """story #2263 AC6 / #2262(C-4) 첫 발(오르테가 판정 2026-07-29, 스레드 7256d5cc) — 읽기
+    경로용. 채팅 `#` 검색이 만든 칩은 write 응답(`references.dropped[]`, #2294)으로만
+    한 번 확인되고 새로고침하면 사라진다 — `get_chat_message`가 그 메시지가 실제로 건
+    참조를 다시 안 실어서(파서가 `content`를 재작성하지 않는 insert-only라 화면은 본문
+    정규식 매치만으로 칩을 그리므로, dropped된 참조도 저장된 것과 똑같은 칩으로 보인다).
+
+    ⛔이 함수는 **stored 참조만** 되살린다(`target_type`·`target_id` — "무엇을 가리키나"까지).
+    `dropped`는 그 저장 시점의 이야기라 영속이 아니다(오르테가 판정) — 복원 대상이 아니고,
+    FE는 "본문 토큰 N개 ↔ stored M개"를 대조해 어느 칩이 안 걸렸는지 스스로 가른다. 「지금
+    상태·다음 행동」(status 등)은 여기서 안 얹는다 — #2262 본체가 얹을 자리(그 순간부터는
+    새 노출이라 C-3/#2261 권한 게이트가 #2262 前에 서야 한다, 오르테가 판정 그대로).
+
+    N+1 방지 — 호출자가 여러 source_id(예: `list_messages`의 페이지 전체)를 한 번에 넘기면
+    쿼리 1회로 전부 해소한다(개별 message마다 왕복하지 않는다). `ix_entity_references_source`
+    (org_id, source_type, source_id)가 이 IN 쿼리를 커버한다.
+
+    반환: `source_id -> [{"target_type", "target_id", "form", "proof_payload"}, ...]`. 호출자는
+    이 dict에 없는 source_id를 **빈 리스트**로 취급해야 한다(그 source가 stored 참조 0건이라는
+    뜻 — "옛 서버라 필드가 없다"와 구분하기 위해 호출자가 payload에 항상 `references: []`를
+    싣는 것이 이 함수의 계약이 아니라 **호출자의 책임**이다, 아래 conversations.py 참조).
+
+    ⛔story #2262 후속(오르테가 지시, 2026-07-29): `form`·`proof_payload`를 추가한다 —
+    `insert_reference`는 form 매개변수·FORMS 검증·proof_payload 필드까지 이미 갖췄는데(쓰기는
+    갈리는데) 이 읽기 함수가 그 둘을 안 실어 와 화면이 mention/embed/proof를 못 갈랐다("저장·
+    쓰기·읽기·표시" 중 읽기에서 끊기는 이 에픽의 반복 패턴). C-7(#2265)이 이 값으로 세 형태를
+    가르는 첫 소비자가 된다.
+
+    ⛔story #2262 AC1(「지점」, PO 판정 2026-07-30): `Reference.created_at`을 `referenced_at`
+    으로 이름 붙여 추가한다 — **이 참조가 «언제 생겼나»**(본문에 그 토큰이 저장된 시각)이지
+    **가리키는 대상이 «언제 만들어졌나»가 아니다**. `created_at` 그대로 내면 "무엇의
+    created_at인가"가 안 갈려 오늘 반복된 그 병(한 이름이 두 뜻)이 또 난다. FE가 이 값을
+    실제로 보일지는 아직 안 정해졌다 — 이 함수는 나르기만 한다(판단은 카드 디자인 몫)."""
+    if not source_ids:
+        return {}
+    rows = (await db.execute(
+        select(
+            Reference.source_id, Reference.target_type, Reference.target_id,
+            Reference.form, Reference.proof_payload, Reference.created_at,
+        ).where(
+            Reference.org_id == org_id,
+            Reference.source_type == source_type,
+            Reference.source_id.in_(source_ids),
+        )
+    )).all()
+    result: dict[uuid.UUID, list[dict[str, Any]]] = {}
+    for source_id, target_type, target_id, form, proof_payload, created_at in rows:
+        result.setdefault(source_id, []).append({
+            "target_type": target_type, "target_id": str(target_id),
+            "form": form, "proof_payload": proof_payload,
+            "referenced_at": created_at.isoformat(),
+        })
+    return result

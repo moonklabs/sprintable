@@ -125,8 +125,9 @@ async def test_get_doc_owner_floor_via_fallback_succeeds():
 
 
 @pytest.mark.anyio
-async def test_get_doc_no_project_access_still_403():
-    """② 프로젝트 접근권 자체가 없는 outsider는 여전히 403(방어 안 헐거워짐)."""
+async def test_get_doc_no_project_access_still_404():
+    """② 프로젝트 접근권 자체가 없는 outsider는 여전히 404(방어 안 헐거워짐).
+    story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일."""
     from app.repositories.doc import DocRepository
     from app.routers.docs import get_doc
     eng, Session = await _engine()
@@ -136,7 +137,7 @@ async def test_get_doc_no_project_access_still_403():
         async with Session() as s:
             with pytest.raises(HTTPException) as ei:
                 await get_doc(id=doc_id, session=s, auth=_auth(OUTSIDER_USER), repo=DocRepository(s, FAKE_OTHER_ORG))
-        assert ei.value.status_code == 403
+        assert ei.value.status_code == 404
     finally:
         await eng.dispose()
 
@@ -164,6 +165,7 @@ async def test_get_doc_rejects_dangling_project_access_outside_org():
     앱 플로우로는 org_members.py의 delete_org_member가 project_access를 같이 지워 도달
     불가 — S-MBR-10 AC5) doc.org_id 스코프(human_grant_branch의 org_scope_human_grand=
     OrgMember.org_id==org_id)가 그 상태를 여전히 거부하는지 직접 증명한다.
+    ⛔story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일.
     ⛔team_member_branch(members⋈project_access, org 무관)로 새지 않도록 members 행은
     안 만든다 — 오직 org_members/project_access.org_member_id 축만 구성해 human_grant_
     branch 하나만 겨눈다. org_id=None(필터 완전 해제)이었다면 이 caller는 project_access
@@ -192,6 +194,6 @@ async def test_get_doc_rejects_dangling_project_access_outside_org():
         async with Session() as s:
             with pytest.raises(HTTPException) as ei:
                 await get_doc(id=doc_id, session=s, auth=_auth(OUTSIDER_USER), repo=DocRepository(s, FAKE_OTHER_ORG))
-        assert ei.value.status_code == 403
+        assert ei.value.status_code == 404
     finally:
         await eng.dispose()

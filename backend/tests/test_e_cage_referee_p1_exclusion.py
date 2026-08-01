@@ -99,6 +99,12 @@ async def test_patch_story_is_excluded_true():
     # 검증 실패하므로 명시 세팅.
     marked_story.human_owner_member_id = None
     marked_story.agent_delegate_ids = []
+    # story #2315 AC1: references(transient, dict|None) — 위와 동일 이유로 명시 세팅.
+    marked_story.references = None
+    # story #2328(C-11 ㉡층): 위와 동일 이유(MagicMock 자동 속성이 Pydantic bool/str|None
+    # 검증 실패)로 명시 세팅.
+    marked_story.is_reference_candidate = False
+    marked_story.matched_snippet = None
     marked_story.meeting_id = None
     # E-BOARD S5: update_story가 _attach_assignee_ids로 story_assignees 조회 → 빈 결과 모킹
     # E-SECURITY SEC-S8(G): update_story가 이제 먼저 repo.get(id)(access 체크용) +

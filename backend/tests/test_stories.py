@@ -25,6 +25,16 @@ def _mock_story(status: str = "backlog") -> MagicMock:
     # 검증 실패하므로 명시 세팅(위 outcome 필드와 동일 이유).
     s.human_owner_member_id = None
     s.agent_delegate_ids = []
+    # story #2315 AC1: references(transient, dict|None) — 위와 동일 이유(MagicMock 자동
+    # 속성이 Pydantic dict|None 검증 실패)로 명시 세팅.
+    s.references = None
+    # ⛔일반 함정(2026-07-29, PO 지적 — 오늘 두 번째로 같은 부류): MagicMock은 "모르는 속성"을
+    # 에러 없이 그럴싸한 MagicMock 값으로 «조용히» 채운다 — StoryResponse에 새 필드를 추가할
+    # 때마다 이 mock fixture(및 같은 패턴을 쓰는 다른 mock 기반 테스트 파일들)에도 그 필드를
+    # 명시로 세팅해야 한다(안 하면 Pydantic 검증에서 "Input should be a valid X"로 실패).
+    # story #2328(C-11 ㉡층): is_reference_candidate·matched_snippet(transient) — 명시 세팅.
+    s.is_reference_candidate = False
+    s.matched_snippet = None
     s.meeting_id = None
     s.title = "Story 1"
     s.status = status
@@ -108,7 +118,12 @@ async def test_create_story_201():
         # 그 호출까지 재현하지 않고 라우터 wiring만 검증하려면 서브클래스 레벨(StoryRepository.create)
         # 을 patch해야 한다(BaseRepository.create만 patch하면 allocate_story_number가 mock
         # session.execute()에 그대로 부딪혀 TypeError).
-        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create:
+        # story #2330(2026-07-30, dev 0/420 사고 수정): create_story가 이제
+        # _reconcile_story_references_and_candidates도 부른다(mention_parser/
+        # reference_semantic_candidates 실DB 쿼리) — 라우터 wiring만 보는 이 테스트는
+        # 그 호출 자체를 no-op으로 patch한다(행동 검증은 test_2328_candidate_hook_on_create_realdb.py).
+        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create, \
+             patch("app.routers.stories._reconcile_story_references_and_candidates", new_callable=AsyncMock):
             mock_create.return_value = story
 
             async with client as c:
@@ -389,7 +404,8 @@ async def test_create_story_with_intent_fields_201():
         # 그 호출까지 재현하지 않고 라우터 wiring만 검증하려면 서브클래스 레벨(StoryRepository.create)
         # 을 patch해야 한다(BaseRepository.create만 patch하면 allocate_story_number가 mock
         # session.execute()에 그대로 부딪혀 TypeError).
-        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create:
+        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create, \
+             patch("app.routers.stories._reconcile_story_references_and_candidates", new_callable=AsyncMock):
             mock_create.return_value = story
 
             async with client as c:
@@ -458,7 +474,8 @@ async def test_create_story_outcome_fields_ignored():
         # 그 호출까지 재현하지 않고 라우터 wiring만 검증하려면 서브클래스 레벨(StoryRepository.create)
         # 을 patch해야 한다(BaseRepository.create만 patch하면 allocate_story_number가 mock
         # session.execute()에 그대로 부딪혀 TypeError).
-        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create:
+        with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create, \
+             patch("app.routers.stories._reconcile_story_references_and_candidates", new_callable=AsyncMock):
             mock_create.return_value = story
 
             async with client as c:

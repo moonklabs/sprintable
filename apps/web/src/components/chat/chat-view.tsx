@@ -1,17 +1,21 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, RefreshCw } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChatBubble } from './chat-bubble';
 import type { PresenceStatus } from './presence-dot';
 import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
+import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from './reference-drop-notice';
 import { ChatInput, type CommandTarget } from './chat-input';
 import { ThreadPanel } from './thread-panel';
 import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { normalizeToMessage, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
+import { useMessageRangeSelection } from '@/hooks/use-message-range-selection';
+import { CitationComposeBar, type CitationSaveState } from './citation-compose-bar';
+import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 
 interface ChatViewProps {
@@ -61,6 +65,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const t = useTranslations('chats');
   const isMobile = useIsMobile();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // story #2265(C-7) 저장 조각(2026-07-29) — write 엔드포인트(#2632)가 서서 citeAction을
+  // 실제로 켠다. 선택 확定(confirming) 후 스토리 피커를 열어 골라진 스토리에 저장한다.
+  const citeSelection = useMessageRangeSelection();
+  const orderedMessageIds = useMemo(() => messages.map((m) => m.id), [messages]);
+  const [citationPickerOpen, setCitationPickerOpen] = useState(false);
+  const [citationSaveState, setCitationSaveState] = useState<CitationSaveState>('idle');
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -69,6 +79,11 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // S5: 미지원 런타임 커맨드 차단 hint — 트리거 메시지 id에 keyed된 ephemeral state.
   // POST 응답 command_gate.blocked에서만 적재(persist 안 함·reload 시 소멸).
   const [commandHints, setCommandHints] = useState<Record<string, BlockedHint[]>>({});
+  // story #2294 AC8 — 낙관적으로 링크만 그리고 저장 결과를 안 보던 침묵을 깬다. 응답 최상위
+  // (data의 형제, conversations.py:2165) references.dropped[]를 트리거 메시지 id에 keyed
+  // 적재(commandHints와 동일 ephemeral 패턴 — persist 안 함·reload 시 소멸, 저장 성공/실패
+  // 자체는 이미 DB에 반영돼 있어 잃을 정보가 없다).
+  const [referenceDropHints, setReferenceDropHints] = useState<Record<string, DroppedReference[]>>({});
   // 1aeecdde P2: 답장 생성 중 에이전트 typing — #1353 GET /working 폴링(BE 45s TTL) 결과.
   const [typingAgents, setTypingAgents] = useState<{ id: string; name: string }[]>([]);
   // Deeplink (ade2d6d5): 진입 메시지를 일시적으로 하이라이트(ring). null이면 미표시.
@@ -350,6 +365,56 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     setMessages((prev) => prev.filter((m) => m.id !== messageId));
   }, [apiPrefix, threadId]);
 
+  // story #2265(C-7) 저장 조각 — 확定된 range(rangeStartId~rangeEndId, orderedMessageIds
+  // 순서 기준 양끝 포함)를 스냅샷으로 얼려 골라진 스토리에 proof로 POST한다. 스냅샷을
+  // 얼리는 이유는 PO 판정(2026-07-29): "얼려야 대조가 가능하다" — proof_payload.snapshot
+  // 참조.
+  const handleSaveCitation = useCallback(async (storyId: string) => {
+    const { rangeStartId, rangeEndId } = citeSelection;
+    if (!rangeStartId || !rangeEndId) return;
+    const startIndex = orderedMessageIds.indexOf(rangeStartId);
+    const endIndex = orderedMessageIds.indexOf(rangeEndId);
+    if (startIndex === -1 || endIndex === -1) return;
+    const rangeMessages = messages.slice(startIndex, endIndex + 1);
+    if (rangeMessages.length === 0) return;
+
+    setCitationSaveState('saving');
+    try {
+      const res = await fetch(`/api/stories/${storyId}/references`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target_type: 'chat_message',
+          target_id: rangeStartId,
+          form: 'proof',
+          proof_payload: {
+            conversation_id: threadId,
+            start_message_id: rangeStartId,
+            end_message_id: rangeEndId,
+            snapshot: rangeMessages.map((m) => ({
+              message_id: m.id, author_id: m.created_by, content: m.content, created_at: m.created_at,
+            })),
+          },
+        }),
+      });
+      if (!res.ok) {
+        // story #2265(C-7), PO 지적(2026-07-29): 실패를 하나로 뭉치면 사용자가 무엇을
+        // 고쳐야 할지 못 가른다 — 원인별로 다른 상태를 세운다(재시도/취소는 항상 남긴다,
+        // 조용히 idle로 안 돌아간다 — "저장됐다"고 믿게 만드는 것이 제일 나쁜 자리).
+        setCitationSaveState(res.status === 404 ? 'error_permission' : res.status === 400 ? 'error_invalid' : 'error_network');
+        return;
+      }
+      setCitationSaveState('saved');
+      setCitationPickerOpen(false);
+      window.setTimeout(() => {
+        citeSelection.cancel();
+        setCitationSaveState('idle');
+      }, 1500);
+    } catch {
+      setCitationSaveState('error_network');
+    }
+  }, [citeSelection, orderedMessageIds, messages, threadId]);
+
   // P2 RC: 자신이 보낸 스레드 답글은 SSE 미수신 → 로컬에서 reply_count +1
   const handleReplyAdded = useCallback((parentId: string) => {
     setMessages((prev) =>
@@ -388,7 +453,25 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     if (blocked?.length) {
       setCommandHints((prev) => ({ ...prev, [sent.id]: blocked }));
     }
+    // story #2294 AC8/AC11 — references도 raw 최상위(data의 형제)에 실린다. 정상 경로에선
+    // dropped가 항상 빈 배열(#2294 AC1이 검색 허용목록을 registry에서 파생시켜 화면이 못
+    // 고르는 종류를 애초에 못 보내게 막는다) — 그래도 사람이 손으로 토큰을 치거나 에이전트가
+    // API로 본문을 직접 쓰는 경로는 여전히 열려 있어(PO 실측, 2026-07-28) dropped가 비지
+    // 않으면 그 자체가 결함 신호다.
+    const dropped = parseDroppedReferences(raw);
+    if (dropped.length) {
+      setReferenceDropHints((prev) => ({ ...prev, [sent.id]: dropped }));
+    }
   }, [threadId, addMessage, apiPrefix, pathname, router]);
+
+  const dismissReferenceDropHint = useCallback((messageId: string) => {
+    setReferenceDropHints((prev) => {
+      if (!(messageId in prev)) return prev;
+      const next = { ...prev };
+      delete next[messageId];
+      return next;
+    });
+  }, []);
 
   // chat-attach: 파일을 GCS에 업로드(서버사이드)하고 첨부 메타를 반환 — 유령경로(/api/chats/.../upload) 폐기.
   // 반환된 메타는 chat-input이 모아 handleSend의 attachments로 한 메시지에 함께 전송한다.
@@ -621,11 +704,27 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                             isWorking={typingAgents.some((a) => a.id === msg.created_by)}
                             highlight={msg.id === highlightId}
                             projectId={projectId}
+                            isCiteAnchor={citeSelection.isAnchor(msg.id)}
+                            isCiteInRange={citeSelection.isInRange(msg.id, orderedMessageIds)}
+                            citeAction={
+                              citeSelection.mode === 'confirming'
+                                ? undefined // 범위 확定 후엔 저장/취소를 먼저 끝내게(재선택은 취소부터).
+                                : citeSelection.mode === 'anchored'
+                                  ? { kind: 'end', onSelect: () => citeSelection.confirmEnd(msg.id, orderedMessageIds) }
+                                  : { kind: 'start', onSelect: () => citeSelection.startSelection(msg.id) }
+                            }
                           />
                           {/* S5: 트리거 메시지 직후 차단 hint notice(차단 에이전트별 1건) */}
                           {commandHints[msg.id]?.map((h) => (
                             <CommandHintNotice key={h.agent_id} hint={h} />
                           ))}
+                          {/* story #2294 AC8: 트리거 메시지 직후 참조 저장실패 notice(종류-무관 1건) */}
+                          {referenceDropHints[msg.id] && (
+                            <ReferenceDropNotice
+                              dropped={referenceDropHints[msg.id]!}
+                              onDismiss={() => dismissReferenceDropHint(msg.id)}
+                            />
+                          )}
                         </Fragment>
                       );
                     })}
@@ -666,6 +765,21 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             </div>
           )}
 
+          {/* story #2265(C-7) 저장 조각 — 선택 중/확定 후 안내+저장. idle이면 안 뜬다(무변화). */}
+          {citeSelection.mode !== 'idle' && (
+            <CitationComposeBar
+              mode={citeSelection.mode}
+              selectedCount={
+                citeSelection.rangeStartId && citeSelection.rangeEndId
+                  ? Math.max(0, orderedMessageIds.indexOf(citeSelection.rangeEndId) - orderedMessageIds.indexOf(citeSelection.rangeStartId) + 1)
+                  : 0
+              }
+              saveState={citationSaveState}
+              onCancel={() => { citeSelection.cancel(); setCitationSaveState('idle'); }}
+              onSave={() => { if (projectId) setCitationPickerOpen(true); }}
+            />
+          )}
+
           {/* Input */}
           <ChatInput
             threadId={threadId}
@@ -676,6 +790,18 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             placeholder={isMobile ? t('inputPlaceholderMobile') : t('inputPlaceholderFull')}
             onEscape={() => router.replace(backHref)}
           />
+
+          {/* story #2265(C-7) — 확定된 범위를 어느 스토리에 붙일지 고르는 자리. 기존
+              StoryPickerDialog 재사용(새 피커 0). projectId 없으면(비-프로젝트 DM 등)
+              저장 버튼 자체를 못 누르게 막지 않고 다이얼로그 진입만 막는다(방어적). */}
+          {projectId && (
+            <StoryPickerDialog
+              open={citationPickerOpen}
+              onOpenChange={setCitationPickerOpen}
+              projectId={projectId}
+              onSelect={(storyId) => void handleSaveCitation(storyId)}
+            />
+          )}
         </div>
 
         {/* AC7/AC8: 스레드 패널 — 데스크톱 사이드 패널 / 모바일 전체 뷰 */}

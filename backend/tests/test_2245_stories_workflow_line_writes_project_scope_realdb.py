@@ -88,7 +88,7 @@ async def _seed(session):
 
 
 def _client_for(app):
-    from httpx import AsyncClient, ASGITransport
+    from httpx import ASGITransport, AsyncClient
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
@@ -146,8 +146,9 @@ async def test_fallback_notify_own_project_passes_guard_404_step_run():
 
 
 @pytest.mark.anyio
-async def test_fallback_notify_no_project_access_blocked_403():
-    """본체: 같은 org 이지만 project 접근권 없는 caller는 서비스 레이어 도달 前 403으로 거부."""
+async def test_fallback_notify_no_project_access_blocked_404():
+    """본체: 같은 org 이지만 project 접근권 없는 caller는 서비스 레이어 도달 前 404로 거부
+    (story #2322, 2026-07-29 — 예전엔 403이었으나 존재 비노출 규율로 통일)."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -162,7 +163,7 @@ async def test_fallback_notify_no_project_access_blocked_403():
                 f"/api/v2/stories/{seeded['story_b_id']}/workflow-line/fallback-notify",
                 json={"step_run_id": str(uuid.uuid4())},
             )
-            assert resp.status_code == 403, resp.text
+            assert resp.status_code == 404, resp.text
         finally:
             await client.aclose()
     finally:
@@ -197,9 +198,9 @@ async def test_withdraw_own_project_passes_guard_404_step_run():
 
 
 @pytest.mark.anyio
-async def test_withdraw_no_project_access_blocked_403():
+async def test_withdraw_no_project_access_blocked_404():
     """본체(가장 아픈 자리 — 쓰기): 같은 org 이지만 project 접근권 없는 caller는 pending gate
-    run 철회 서비스에 도달하지도 못하고 403으로 거부."""
+    run 철회 서비스에 도달하지도 못하고 404로 거부(story #2322, 2026-07-29 — 예전엔 403)."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -214,7 +215,7 @@ async def test_withdraw_no_project_access_blocked_403():
                 f"/api/v2/stories/{seeded['story_b_id']}/workflow-line/withdraw",
                 json={"step_run_id": str(uuid.uuid4())},
             )
-            assert resp.status_code == 403, resp.text
+            assert resp.status_code == 404, resp.text
         finally:
             await client.aclose()
     finally:

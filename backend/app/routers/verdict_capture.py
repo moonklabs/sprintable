@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,7 +27,6 @@ from app.models.pm import Story
 from app.routers.cron import CRON_SECRET, _err, _ok, verify_cron
 from app.services.github_app import get_installation_token
 from app.services.pr_story_link import merge_link_evidence, resolve_story_for_pr
-from app.services.story_status_events import advance_story_to_done
 from app.services.verdict_capture import (
     capture_pr_ci_verdict,
     capture_review_verdict,
@@ -269,6 +268,49 @@ def _extract_pr_ci(event: str, payload: dict) -> tuple[int, bool, str | None, st
     return pr_number, merged, ci_conclusion, head_sha
 
 
+def _repo_owner(repo: str) -> str | None:
+    """`owner/repo` → `owner`. 형식 아니면 None(추측 금지)."""
+    if not repo or "/" not in repo:
+        return None
+    owner = repo.split("/", 1)[0]
+    return owner or None
+
+
+async def _resolve_legacy_org_by_repo_owner(
+    session: AsyncSession, repo: str
+) -> tuple[uuid.UUID | None, str]:
+    """legacy webhook(이미 legacy_secret HMAC 을 통과한 «검증된» 요청)에서 org_id 를 repo owner 로 해소.
+    (org_id, reason) 반환 — reason ∈ {org_resolved_via_repo_owner, repo_owner_ambiguous, repo_owner_unknown}.
+
+    ①왜 이 길을 열었나: story #2327 후속 실측(2026-07-30) — legacy 는 서명검증을 이미 통과했는데
+    org_id 를 못 풀어 story_number/PR-link/auto_match 등 org-scope 필요 경로 전체가 막혀 있었다
+    (`GITHUB_APP_WEBHOOK_SECRET` 미설정 확認 — app 경로 자체가 전무·2575건 legacy ignored 다수가
+    이 갭). repository.full_name 의 owner 는 모든 webhook payload 에 항상 있고, PO 판정(2026-07-30):
+    「검증된 요청인데 org 를 못 푼다」는 보안 경계가 아니라 결함이라 이 매치는 우회가 아니라 정공이다.
+    ②무엇을 안 하는가: 서명검증을 건너뛰지 않는다(이 함수는 `_resolve_webhook_source`가 이미
+    source='legacy'로 확정한 요청에만 불린다) · source 를 'app'으로 바꿔치지 않는다(그대로 legacy로
+    기록) · **정확히 1건 매치일 때만** 해소한다(0건·2건+ 는 거부 — 「첫 것을 고른다」 금지).
+    ③⭐만료 조건: `GITHUB_APP_WEBHOOK_SECRET` 이 설정돼 app 경로가 라이브로 도는 것이 확認되면,
+    이 폴백은 다중 org 안전성(exactly-1-match 전제가 org 여러 개일 때도 유지되는지 — 지금은
+    `github_installation` 이 1행이라 위험 없음)을 다시 재고 그때 유지 여부를 정한다."""
+    owner = _repo_owner(repo)
+    if owner is None:
+        return None, "repo_owner_unknown"
+    rows = (
+        await session.execute(
+            select(GithubInstallation.org_id).where(
+                func.lower(GithubInstallation.account_login) == owner.lower(),
+                GithubInstallation.suspended_at.is_(None),
+            )
+        )
+    ).scalars().all()
+    if len(rows) == 0:
+        return None, "repo_owner_unknown"
+    if len(rows) > 1:
+        return None, "repo_owner_ambiguous"
+    return rows[0], "org_resolved_via_repo_owner"
+
+
 async def _process_webhook_event(
     session: AsyncSession, source: str, event: str, payload: dict, installation_id: int | None,
     delivery: GithubWebhookDelivery,
@@ -276,9 +318,10 @@ async def _process_webhook_event(
     """검증·dedup 통과한 이벤트 처리(legacy/app 라우팅·Bot-L.1 resolver 체인). (result, status) 반환.
 
     org resolve: **app**=installation.id→github_installation(suspended 제외)→그 org_id만(anti-IDOR·payload
-    추론 금지·resolve 先). **legacy**=resolver 가 SID 전역→story.org_id(무회귀). story 해소=resolver 체인
-    (explicit>auto high>SID>text). **close-on-merge**=should_auto_close(confident)+merge → advance_story_to_done
-    (단일 idempotent 헬퍼). native CI(Bot-M.1)=installation 토큰. caller 가 동일 트랜잭션으로 commit/rollback.
+    추론 금지·resolve 先). **legacy**=repo owner→account_login exactly-1-match 시도(story #2327 후속) →
+    실패시 resolver 가 SID 전역→story.org_id(무회귀). story 해소=resolver 체인(explicit>auto high>SID>text).
+    **close-on-merge**=should_auto_close(confident)+merge → advance_story_to_done(단일 idempotent 헬퍼).
+    native CI(Bot-M.1)=installation 토큰. caller 가 동일 트랜잭션으로 commit/rollback.
 
     P0-05 후속(doc scope-violation-signal-design §2): scope-violation 판정은 머지/CI 액션가능신호와
     **독립**(PR 자체 이벤트에서 판정) — resolver를 그 skip보다 먼저 실행해 두 판정이 서로를 막지 않게 한다.
@@ -306,12 +349,34 @@ async def _process_webhook_event(
             return {"skipped_reason": "installation_not_registered_or_suspended", "recorded": []}, "ignored"
         org_id = installation.org_id
         delivery.org_id = org_id
+    elif source == "legacy":
+        # ⭐story #2327 후속(PO 판정 2026-07-30): legacy 도 검증된 요청 — repo owner 로 org 해소
+        # 시도(exactly-1-match 만). 실패해도 아래 resolver 는 org_id=None 무회귀 경로로 그대로 진행.
+        repo_owner_org_id, repo_owner_reason = await _resolve_legacy_org_by_repo_owner(session, repo)
+        logger.info(
+            "legacy org resolve: repo=%s reason=%s org_id=%s", repo, repo_owner_reason, repo_owner_org_id,
+        )
+        if repo_owner_org_id is not None:
+            org_id = repo_owner_org_id
+            delivery.org_id = org_id
 
-    # Bot-L.1 resolver 체인: explicit>auto high>SID>text. app=org-scoped(org 알려짐)·legacy=SID 전역→story.org_id.
+    # Bot-L.1 resolver 체인: explicit>auto high>SID>text. app/repo-owner-resolved legacy=org-scoped·
+    # 그 외 legacy=SID 전역→story.org_id(무회귀).
     # ⚠️행동가능신호(merged/ci) skip **前**에 실행 — scope-check(§2)가 그 신호와 무관하게 판정돼야 함.
     rl = await resolve_story_for_pr(session, org_id, repo, pr_number, texts)
     if rl.story_id is None:
-        return {"skipped_reason": rl.reason, "recorded": []}, "ignored"  # no_match/auto suggestion 등.
+        skipped_reason = rl.reason
+        # legacy 에서 org 해소 자체가 실패(ambiguous/unknown)했고 resolver 가 바로 그 이유(org 없어서
+        # story_number 시도조차 못 함)로 skip했으면, 더 구체적인 새 이유로 대체 — 「조용히 안 붙는」
+        # 것 방지(PO 지적, story #2327 후속): skipped_reason 이 세지는 이름이어야 나중에 판단 가능.
+        if (
+            source == "legacy"
+            and org_id is None
+            and repo_owner_reason in ("repo_owner_ambiguous", "repo_owner_unknown")
+            and rl.reason == "story_number_requires_org_scope"
+        ):
+            skipped_reason = repo_owner_reason
+        return {"skipped_reason": skipped_reason, "recorded": []}, "ignored"  # no_match/auto suggestion 등.
     story_id = rl.story_id
     org_id = rl.org_id  # app=입력 org·legacy=story.org_id(resolver 검증). 단일 진실원.
     delivery.org_id = org_id
@@ -377,17 +442,63 @@ async def _process_webhook_event(
     if native_ci_state is not None:
         result = {**result, "native_ci": {"state": native_ci_state, "reason": native_ci_reason}}
 
-    # Bot-L.1 close-on-merge: **confident link**(explicit·auto high·sid)+merge → story done(idempotent).
-    # med/low/text suggestion 은 should_auto_close=False → close 안 함(오매치 done 방지). gate-approve 와
-    # 동일 advance_story_to_done 헬퍼(단일 정책·중복 advance 0). actor=system(자동). already-done=no-op.
+    # ⭐story #2327 후속(PO 판정, 2026-07-30, PR#2685 실 웹훅 시험대가 드러낸 갭) — merge 시
+    # PullRequestStoryLink 에도 쓴다. `Verdict`(record_verdict, 위 capture_pr_ci_verdict 안)에도
+    # 쓰고 `PullRequestStoryLink`(여기)에도 쓴다 — 전자는 «신뢰/게이트 축» · 후자는 «UI 가 읽는
+    # 링크 축»(GET /api/v2/integrations/github/links, github_integration.py). **둘이 갈리면 화면과
+    # 판정이 다른 말을 한다** — 그래서 같은 이벤트에서 둘 다 쓴다(중복이 아니라 각자 다른 소비처).
+    # ⛔여기서 도달한 story_id는 항상 confident 매치(explicit/auto-high/sid)뿐이라 rl.source가
+    # 'sid'/'auto_match'/'explicit' 중 하나 — 사람이 명시한 게 아닌 이상 'explicit'로 «절대» 안
+    # 찍힌다(오늘 소급 205건과 동일 라벨 규율). merge_link_evidence는 이미 있는 함수(scope-check
+    # 용도로 open/synchronize에서 이미 쓰임)를 그대로 재사용 — 새 함수 0개, org+repo+pr_number
+    # 존재 확인 후 upsert(멱등 — synchronize 뒤 merge가 와도 행 하나).
+    # ⭐만료 조건: #2327의 「Verdict를 정본으로 삼고 PullRequestStoryLink를 은퇴」 판단이 실행되면,
+    # 이 두 번째 쓰기(PullRequestStoryLink)는 그때 정리 대상이 된다.
+    if merged:
+        await merge_link_evidence(
+            session, org_id, story_id, repo, pr_number,
+            link_source=rl.source, confidence=rl.confidence,
+            patch={"webhook_merge": {"recorded_at": datetime.now(timezone.utc).isoformat()}},
+        )
+
+    # ⛔story #2327 후속(PO 판정, 2026-07-30) — close-on-merge **정지**. 「머지 ≠ done, done은
+    # 사람 확認 後」가 팀 규율인데 이 블록은 explicit/auto-high/sid confident link + merge만으로
+    # 사람 확認 없이 즉시 done을 밀었다(advance_story_to_done 직접 호출) — 규율과 정면 충돌.
+    # 지금까지는 SID 링크 해소 자체가 거의 항상 실패해(story #2202/#2327 실측) 이 분기에 실제로
+    # 도달한 적이 드물어 드러나지 않았을 뿐, «게이트»가 아니라 **스위치 자체가 없는 무조건 실행**
+    # 이었다(should_auto_close는 org/workflow 설정이 아니라 매 PR confidence로 즉석 계산되는 값).
+    # SID 정규식 fix(story_number 인식, 이 PR)가 이 분기의 도달률을 정상적으로 되돌리면, 그 순간
+    # «거짓 done 자동화»가 라이브에서 돌기 시작한다 — 그래서 fix와 같은 PR에서 정지시킨다.
+    # ⛔advance_story_to_done()은 gate-approve(_advance_story_on_merge_approve)와 공유 헬퍼라
+    # 그 함수 자체는 손대지 않는다 — 이 호출부(webhook merge 분기) 하나만 멈춘다. `would_close`로
+    # "정지 안 했으면 벌어졌을 일"은 계속 보이게 남겨(관측 가능·소급 판단 재료), 실제 mutation만 뺀다.
+    #
+    # ⛔PO 지적(2026-07-30, em-dash PR#2668/2670 되돌림과 같은 교훈 — "지운 이유를 안 남기면
+    # 다음 사람이 «자동 done이 빠졌네」로 되살린다"): 여기 다시 advance_story_to_done()을 넣기
+    # 前에 반드시 확認할 것 —
+    #   ①왜 뺐나: 「머지 ≠ done. done은 AC 전량 대조 실측 後」가 이 조직의 규율이고, 이 블록은
+    #     explicit/auto-high/sid confident link + merge만으로 사람 확認 없이 즉시 done을 밀었다.
+    #   ②무엇이 없어졌나: explicit SID + merged → 자동 done. 지금은 사람이 판단한다(auto_close.
+    #     would_close로 "됐을 일"만 관측 가능하게 남김, 실제 전이는 0).
+    #   ③⭐만료 조건(되살릴 문): 조직이 "자동 done을 켜고 끄는" 설정(org/workflow 단위)을 갖게
+    #     되면, 그 설정을 읽어 조건부로 되살린다 — 그 설정 자체가 아직 없다(이 파일 존재 확認,
+    #     별건으로 PO가 세운다). 설정 없이 이 줄만 되돌리면 오늘과 같은 사고(사람 확認 없는
+    #     자동 done)가 재발한다.
     if merged and rl.should_auto_close:
-        story_obj = await session.get(Story, story_id)
-        closed = False
-        if story_obj is not None and story_obj.org_id == org_id:  # org-scope 재확인(anti-IDOR).
-            closed = await advance_story_to_done(session, org_id, story_obj, actor_type="system")
+        # PO 지적(2026-07-30): 웹훅 HTTP 응답은 아무도 안 읽는다(호출자가 GitHub) — would_close를
+        # «셀 수 있게» 로그에도 남긴다. 이 로그 건수가 #2339(자동 done on/off 설정)의 크기를
+        # 재는 자다(0이면 안 급함·많으면 급함).
+        logger.info(
+            "auto_close suppressed: story=%s source=%s confidence=%s",
+            story_id, rl.source, rl.confidence,
+        )
         result = {
             **result,
-            "auto_close": {"closed": closed, "source": rl.source, "confidence": rl.confidence},
+            "auto_close": {
+                "closed": False, "would_close": True,
+                "source": rl.source, "confidence": rl.confidence,
+                "note": "story #2327 PO 판정 2026-07-30: close-on-merge 정지 — done은 사람 확認 後",
+            },
         }
     if scope_result is not None:
         result = {**result, "scope_check": scope_result}
@@ -505,6 +616,9 @@ async def github_webhook(
             session, source, event, payload, installation_id, delivery
         )
         delivery.status = status_label
+        # story #2327(재정의): "ignored"의 실제 사유를 delivery 행에도 남긴다 — HTTP 응답
+        # 본문에만 있으면 웹훅 호출자(GitHub)만 보고 아무도 회고 측정을 못 한다.
+        delivery.skipped_reason = result.get("skipped_reason") if status_label == "ignored" else None
         delivery.processed_at = datetime.now(timezone.utc)
         await session.commit()
         return _ok(result)

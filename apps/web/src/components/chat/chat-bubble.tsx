@@ -14,7 +14,7 @@ import { getFileIcon } from '@/lib/file-icon';
 import { AttachmentImage } from './attachment-image';
 import { AttachmentMedia } from './attachment-media';
 import { AttachmentFile } from './attachment-file';
-import { MessageContextMenu } from './message-context-menu';
+import { MessageContextMenu, type CiteAction } from './message-context-menu';
 import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from './presence-dot';
 import { ReferenceSuggestionRow } from './reference-suggestion-row';
 
@@ -31,11 +31,32 @@ interface ChatBubbleProps {
   highlight?: boolean;
   /** story #2283: 참조 후보(#번호·#슬러그) 해소 스코프. 없으면 그 확인 UI가 시도를 안 한다. */
   projectId?: string;
+  /** story #2265(C-7) — 대화 인용(proof) 범위 선택 배선. 셋 다 생략하면(undefined) 기존
+   * 렌더와 완전히 동일하다 — 진입점(citeAction)을 호출부가 아직 안 넘기는 한 이 기능은
+   * 사용자에게 안 보인다("짓되 안 켜는다", PO 지시 2026-07-29). */
+  isCiteAnchor?: boolean;
+  isCiteInRange?: boolean;
+  citeAction?: CiteAction;
 }
 
 interface ContextMenuState {
   x: number;
   y: number;
+}
+
+// story #2263 AC6 — 본문 토큰(target_type+target_id)이 메시지의 stored 참조 목록에 있는지
+// 대조한다. `references === undefined`(옛 서버·SSE 디스패치 등 이 필드를 안 주는 경로)는
+// 판단 재료가 없다는 뜻이라 유령 처리를 보류한다(폴백 — 기존처럼 그대로 그린다). 대소문자
+// 차이(사용자가 UUID를 대문자로 쳐 넣는 경우)를 흡수하려 양쪽 다 lower-case로 비교한다.
+function isGhostReference(
+  references: ChatMessage['references'],
+  targetType: string,
+  targetId: string,
+): boolean {
+  if (references === undefined) return false;
+  const type = targetType.toLowerCase();
+  const id = targetId.toLowerCase();
+  return !references.some((r) => r.target_type.toLowerCase() === type && r.target_id.toLowerCase() === id);
 }
 
 // Convert @name tokens to markdown links so react-markdown v10 can render them via the `a` component.
@@ -98,7 +119,7 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
   );
 }
 
-function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean }) {
+function ChatMarkdown({ content, isMine, references }: { content: string; isMine: boolean; references: ChatMessage['references'] }) {
   const text = isMine ? 'text-primary-foreground' : 'text-foreground';
   const muted = isMine ? 'text-primary-foreground/70' : 'text-muted-foreground';
   const codeBg = isMine ? 'bg-primary-foreground/10 text-primary-foreground' : 'bg-muted text-foreground';
@@ -160,14 +181,18 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
       const m = href?.match(/^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
       if (m) {
         // S6: 자산 토큰은 컴팩트 칩 대신 리치 임베드 카드(썸네일+메타+화살표).
+        // ⛔asset은 reference_registry.ENTITY_RESOLVERS 밖의 FE 전용 타입이라(embed-card.tsx
+        // 주석 참조) mention_parser가 애초에 entity_references에 안 쓴다 — stored 참조와
+        // 대조하면 asset 임베드가 전부 유령으로 오판된다. 유령 판정 자체를 안 태운다.
         if (m[1]!.toLowerCase() === 'asset') {
           return <AssetEmbedCard entityId={m[2]!} label={String(children)} ownMessage={isMine} />;
         }
-        return <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} />;
+        const ghost = isGhostReference(references, m[1]!, m[2]!);
+        return <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} ghost={ghost} />;
       }
       return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
     },
-  }), [text, muted, codeBg, border, isMine]);
+  }), [text, muted, codeBg, border, isMine, references]);
 
   if (!hasMarkdown && !hasMention) {
     return (
@@ -194,7 +219,10 @@ function ChatMarkdown({ content, isMine }: { content: string; isMine: boolean })
 
 const LONG_PRESS_MS = 500;
 
-export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, onDelete, presenceStatus, isWorking = false, highlight = false, projectId }: ChatBubbleProps) {
+export function ChatBubble({
+  message, isMine, isGrouped = false, onOpenThread, onDelete, presenceStatus, isWorking = false,
+  highlight = false, projectId, isCiteAnchor = false, isCiteInRange = false, citeAction,
+}: ChatBubbleProps) {
   const t = useTranslations('chats');
   const isAgent = message.sender_type === 'agent';
   // S8: 슬래시 커맨드는 전용 버블(brand·mono·⌘). 리터럴(`//`)은 dequote된 일반 텍스트.
@@ -264,7 +292,7 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
     <>
       <div
         id={`msg-${message.id}`}
-        className={`flex scroll-mt-4 gap-2 transition-shadow ${isMine ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'} ${highlight ? 'rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background' : ''}`}
+        className={`flex scroll-mt-4 gap-2 transition-shadow ${isMine ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'} ${highlight ? 'rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background' : ''} ${(isCiteAnchor || isCiteInRange) ? 'border-l-[3px] border-l-primary pl-1' : ''}`}
         onContextMenu={handleContextMenu}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
@@ -331,7 +359,7 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
                 ? 'rounded-tr-sm bg-primary text-primary-foreground'
                 : 'rounded-tl-sm bg-muted text-foreground'
             }`}>
-              <ChatMarkdown content={displayContent} isMine={isMine} />
+              <ChatMarkdown content={displayContent} isMine={isMine} references={message.references} />
             </div>
           )}
 
@@ -407,6 +435,7 @@ export function ChatBubble({ message, isMine, isGrouped = false, onOpenThread, o
           onCopy={handleCopy}
           onDelete={handleDelete}
           onClose={() => setContextMenu(null)}
+          citeAction={citeAction}
         />
       )}
     </>

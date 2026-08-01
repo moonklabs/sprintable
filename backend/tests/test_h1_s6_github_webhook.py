@@ -120,8 +120,13 @@ async def _post(payload: dict, *, event: str, story=..., sign=True, installation
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             # legacy source(app secret 미설정 → app inert): 기존 무회귀 검증.
+            # story #2327 후속(legacy org repo-owner resolve) — 이 파일의 session.execute side_effect
+            # 시퀀스는 고정 순번을 가정하므로, 그 앞의 새 org-resolve 쿼리는 여기서 bypass(org_id=None,
+            # 기존 legacy 무회귀 그대로) — org resolve 자체는 test_bot_l1_pr_story_link.py 단위 커버.
             with patch.object(mod.settings, "github_webhook_secret", _SECRET), \
-                 patch.object(mod.settings, "github_app_webhook_secret", ""):
+                 patch.object(mod.settings, "github_app_webhook_secret", ""), \
+                 patch.object(mod, "_resolve_legacy_org_by_repo_owner",
+                              new=AsyncMock(return_value=(None, "repo_owner_unknown"))):
                 resp = await c.post("/api/v2/internal/verdict/github-webhook", content=body, headers=headers)
         return resp
     finally:

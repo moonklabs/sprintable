@@ -402,18 +402,14 @@ async def list_gates(
 
     # project_id 배치 해소(story #1968 resolve_work_item_project_id 의 IN-clause 배치 버전 — 개별
     # gate 마다 신규 쿼리 금지). doc 은 위에서 이미 배치 조회한 doc_proj 재사용(중복 쿼리 0).
-    # #2198: 이제 can_approve enrich(assigned_to_me 무관)와 assigned_to_me 필터링이 이 배치를
-    # 공유한다(예전엔 assigned_to_me=true 일 때만 계산했다). ⚠️전부 `resolved is not None and
-    # resolved.type == "human"` 게이트 **안**에서만 실행한다 — 캐치 안 되면(비휴먼/resolve 실패)
-    # eligible_ids 가 자연히 빈 채로 남고 can_approve=False(fail-closed)이므로 이 배치 쿼리들
-    # 자체가 불필요(N+1 0 철학과 동형 — "계산해도 결론이 안 바뀔 쿼리는 안 낸다").
+    # ⚠️2026-07-31 수정(오르테가 라이브 실측 — GET /api/v2/gates pending 37/37 project_id=None):
+    # 이 배치는 **caller 타입과 무관하게** 항상 돈다 — project_id 는 응답 데이터 정합성 문제지
+    # authz 판정이 아니다. 예전엔 `resolved.type == "human"` 게이트 안에서만 돌아서(can_approve
+    # 전용 배치인 줄 알고 얹었던 것) agent 호출은 story/task/artifact 케이스가 통째로 스킵되고,
+    # 게다가 human 호출이어도 이 dict 자체를 resp.project_id 에 대입하는 코드가 애초에 없었다
+    # (아래 enrich 루프 참조 — 그게 진짜 근본원인. 이 게이트 분리는 caller 의존성 제거용).
     project_id_by_work_item: dict[uuid.UUID, uuid.UUID | None] = dict(doc_proj)
-    # #2198(PO 판정): 캐시 키가 project_id 단독에서 (gate_type, project_id) 로 바뀌었다 — 승인
-    # 자격이 이제 gate_type 에도 의존한다(_non_doc_can_approve 표 참조. artifact_canonicalize
-    # 는 project_id 무관 항상 True).
-    approvable_cache: dict[tuple[str, uuid.UUID | None], bool] = {}
-    eligible_ids: set[uuid.UUID] = set()
-    if non_doc_gates and resolved is not None and resolved.type == "human":
+    if non_doc_gates:
         story_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "story"}
         task_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "task"}
         # story #2082: artifact_canonicalize 게이트(work_item_type="visual_artifact")가 이 배치에서
@@ -444,6 +440,20 @@ async def list_gates(
             )).all()
             project_id_by_work_item.update({aid: pid for aid, pid in rows})
 
+    # ⭐신규 enrich(원인 수정 본체): 위에서 이미 계산해 둔 project_id_by_work_item 을
+    # can_approve 판정뿐 아니라 응답 필드 자체에도 대입한다 — 지금까지 이 값이 어디에도 안
+    # 흘러가 GateResponse.project_id 가 Pydantic 기본값 None 그대로 나갔다(get_gate_endpoint
+    # 단건 조회만 resp.project_id 를 대입했고 목록은 빠져 있었다). doc/story/task/artifact 전부
+    # 이 한 dict 로 커버(project_id_by_work_item 은 dict(doc_proj) 로 시작).
+    for resp, g in zip(responses, gates):
+        resp.project_id = project_id_by_work_item.get(g.work_item_id)
+
+    # #2198(PO 판정): 캐시 키가 project_id 단독에서 (gate_type, project_id) 로 바뀌었다 — 승인
+    # 자격이 이제 gate_type 에도 의존한다(_non_doc_can_approve 표 참조. artifact_canonicalize
+    # 는 project_id 무관 항상 True).
+    approvable_cache: dict[tuple[str, uuid.UUID | None], bool] = {}
+    eligible_ids: set[uuid.UUID] = set()
+    if non_doc_gates and resolved is not None and resolved.type == "human":
         # N+1 방지: gate 여러 건이 같은 (gate_type, project_id) 를 가리켜도 _non_doc_can_approve 는
         # **고유 조합당 1회**만 호출(캐시) — gate 개수와 무관.
         for _resp, g in non_doc_gates:

@@ -67,6 +67,19 @@ async def _chat_message_source_access(
     return await _can_read_conversation(msg.conversation_id, session, auth, org_id)
 
 
+async def _story_source_access(
+    session: AsyncSession, source_id: uuid.UUID, org_id: uuid.UUID, auth: AuthContext
+) -> bool:
+    """story #2222 — origin_type="story"로 생긴 created_from 참조를 지우는 길을 연다(만드는
+    자가 자기 뒷정리도 낸다는 원칙, 오르테가 판정 2026-07-31). PROJECT_ID_RESOLVERS["story"]
+    (기존 target-side 해소기, reference_registry.py)를 그대로 재사용 — source-side 전용
+    새 쿼리를 짓지 않는다."""
+    project_id = await PROJECT_ID_RESOLVERS["story"](session, org_id, source_id)
+    if project_id is None:
+        return False
+    return await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id)
+
+
 SourceAccessGate = Callable[[AsyncSession, uuid.UUID, uuid.UUID, AuthContext], Awaitable[bool]]
 
 
@@ -77,14 +90,20 @@ class SourceTypeConfig(NamedTuple):
 
 # ⛔지금 실제로 게이트가 서 있는 source_type만 여기 등록한다(#2266 BACKLINKS_ALLOWED_TARGET_TYPES
 # 와 동형 원칙 — "허용목록=게이트가 실제로 선 것"). is_valid_source_type(reference_registry.py) 는
-# doc/story/epic 도 source-capable 로 인정하지만, 그 접근 게이트는 아직 안 지었다(#2269 몫으로
-# 계약서에 이미 예정) — 여기서 미리 짓지 않는다(#2260 이 고친 "도는 자리 없는 죽은 코드" 클래스
-# 재발 금지). 등록 안 된 source_type 은 400(미지원)으로 정직하게 거부 — 조용히 통과 금지.
+# doc/story/epic 도 source-capable 로 인정하지만, ⭐"story"는 story #2222(「낳음」 자동부착)가
+# 바로 이 PR 에서 origin_type="story" 소비자를 실제로 만들기 시작하므로(MCP 도구가 이 값을
+# 권장) 그 조건("소비자 없는 것을 미리 짓지 않는다")이 지금 충족돼 게이트를 연다(오르테가 판정
+# — 만드는 자가 지우는 길도 같이 낸다. story #2357 사슬과 동형: 되돌릴 길이 없으면 안 쓰인다).
+# ⛔doc/epic 은 그대로 손대지 않는다 — 그 둘은 아직 실제 소비자가 없어 정말 #2269 몫이다
+# (아래 pin 테스트가 그 둘이 열리는 날 빨개진다 = #2269 도래 신호). 등록 안 된 source_type 은
+# 400(미지원)으로 정직하게 거부 — 조용히 통과 금지.
 # ⛔source_field 를 access_gate 와 «같은 dict»에 묶은 것은 의도적 — 따로 두면 새 source_type을
 # 열 때 한쪽만(예: 게이트만) 추가하고 field 매핑은 깜빡할 수 있다(오늘 PROJECT_ID_RESOLVERS 에
-# 적용한 것과 동일한 twin-system drift 방지 원칙).
+# 적용한 것과 동일한 twin-system drift 방지 원칙). source_field="self"는 stories.py의 origin
+# insert가 이미 쓰는 값과 동형(app/models/reference.py sentinel 원칙 그대로).
 _SOURCE_TYPE_CONFIG: dict[str, SourceTypeConfig] = {
     "chat_message": SourceTypeConfig("body", _chat_message_source_access),
+    "story": SourceTypeConfig("self", _story_source_access),
 }
 
 
@@ -152,9 +171,12 @@ async def create_reference(
         created_by=canonical_created_by,
     )
     stmt = stmt.on_conflict_do_nothing(
+        # story #2267(C-9): relation이 유니크 인덱스에 추가돼 이 목록도 같이 늘어야 매치한다 —
+        # 이 라우트는 relation을 안 채우므로(위 .values() 참조) 컬럼 기본값 'none'이 그대로
+        # 적용된다("본문 참조", 이 라우트의 명시적 멘션 생성 용도 그대로).
         index_elements=[
             Reference.source_type, Reference.source_field, Reference.source_id,
-            Reference.target_type, Reference.target_id, Reference.form,
+            Reference.target_type, Reference.target_id, Reference.form, Reference.relation,
         ],
         index_where=Reference.form != "proof",
     ).returning(Reference.id)

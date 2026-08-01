@@ -1,39 +1,41 @@
 import type { EpicProgress } from '@/components/dashboard/command-center/types';
 import {
   mergeRoadmap,
-  filterMilestoneEvents,
   scopeRoadmapEpics,
-  type BeActivityLogItem,
   type BeEpicListItem,
-  type EpicCollaboration,
   type RoadmapEpic,
 } from '@/services/glance';
 import type { HeroStory, HeroMember } from './hero-logic';
 import type { HeroEnvelope } from './derive-hero-envelope';
 import { parseAttentionSignals, type BeAttentionSignal } from './derive-exception-signals';
 
-// codex-silent-defect-sweep D-7 — overview/멤버/활동/예외 fetch 실패를 `?? []`/`?? 0`으로
-// 실제 빈 데이터처럼 치환하면 "데이터가 없다"와 "못 가져왔다"가 화면에서 구분이 안 된다. 폴백
-// 자체(빈 배열로 렌더 지속)는 유지하되, 어떤 조각이 실패했는지 이 플래그로 caller에 넘겨 caller가
-// 그 영역만 "재시도 가능" 표시로 구분되게 그린다 — 전면 에러 화면으로 바꾸지 않는다(부분 실패는
+// codex-silent-defect-sweep D-7 — overview/멤버/예외 fetch 실패를 `?? []`/`?? 0`으로 실제 빈
+// 데이터처럼 치환하면 "데이터가 없다"와 "못 가져왔다"가 화면에서 구분이 안 된다. 폴백 자체(빈
+// 배열로 렌더 지속)는 유지하되, 어떤 조각이 실패했는지 이 플래그로 caller에 넘겨 caller가 그
+// 영역만 "재시도 가능" 표시로 구분되게 그린다 — 전면 에러 화면으로 바꾸지 않는다(부분 실패는
 // 부분만 표시).
 // story #2298(3단 웨이터폴 근절): `stories` 필드 삭제 — 예전엔 per-epic story-list fetch(웨이브②)의
-// 실패를 따로 추적했으나, 그 fetch 자체가 없어졌다(collaboration·heroStory 전부 epics(+glance)
-// 응답에서 나온다 — 그 fetch가 실패하면 epicsRaw가 null이 되어 이 함수 자체가 throw한다, 아래 참고).
+// 실패를 따로 추적했으나, 그 fetch 자체가 없어졌다(heroStory 전부 epics(+glance) 응답에서
+// 나온다 — 그 fetch가 실패하면 epicsRaw가 null이 되어 이 함수 자체가 throw한다, 아래 참고).
+//
+// story #2224(선생님 정정 2026-07-30) — `collaboration`·`events`·`activeEpicTitle` 필드와
+// `/api/activity-logs` fetch를 삭제했다. 소비처가 `CollaborationMap`·`LiveStream`·
+// `glance-board.tsx`(활동 카운터) 셋뿐이었는데, `/glance` 라우트 자체가 `/flow`로 흡수되며
+// 이 셋 다 죽은 코드가 됐다(grep 전수 확認 — 사용처 0). "진행 궤적"은 선생님 판정대로 시간축이
+// 대체하며 별도 이관하지 않는다. `/api/team-members` fetch는 «남는다» — `memberMap`(GlanceHero의
+// human/agent 참여자 표시)이 여전히 그걸 쓰기 때문에, 죽는 건 그 응답에서 파생하던
+// `collaboration` 배열 하나뿐이다. 이 함수의 caller는 이제 `flow-client.tsx`뿐이다(glance-board.tsx
+// 삭제로).
 export interface GlanceDataPartialErrors {
   overview: boolean;
   members: boolean;
-  activity: boolean;
   attention: boolean;
 }
 
 export interface GlanceData {
   roadmap: RoadmapEpic[];
   totalEpicCount: number;
-  collaboration: EpicCollaboration[];
-  events: BeActivityLogItem[];
   // E-GLANCE 2D 재설계(dee92c96): hero = 현재(active) 에픽의 focal 활성 story·없으면 null(hero 미표시).
-  activeEpicTitle: string | null;
   heroStory: HeroStory | null;
   memberMap: Record<string, HeroMember>;
   // 예외 스트림(story 0441a197): #2097 glance/attention 실신호(gate_pending·blocked·merge_ready).
@@ -57,8 +59,9 @@ async function fetchJson(url: string): Promise<unknown> {
 }
 
 /**
- * E-GLANCE 현황판 데이터 병합 — §10 소스 4종(이제 3종 fetch): `/api/goals?include=glance`
- * (순서 SSOT + 참여·hero 재료) · `/api/dashboard/overview`(진척) · `/api/activity-logs`(생동).
+ * E-GLANCE 현황판 데이터 병합 — 4개 fetch: `/api/goals?include=glance`(순서 SSOT + 참여·hero
+ * 재료) · `/api/dashboard/overview`(진척) · `/api/team-members`(memberMap) ·
+ * `/api/glance/attention`(예외 신호).
  * story #2298(3단 웨이터폴 근절, PO 실측 2026-07-28 — 로그인 後 2.07초가 이 웨이터폴에서
  * 나옴)+#2303(계약 확장): `roadmap.map(epic ⇒ /api/stories?epic_id=)`(N건, 예전 웨이브②)와
  * `/api/glance/hero?story_id=`(예전 웨이브③) 둘 다 제거 — `?include=glance`의
@@ -73,19 +76,20 @@ async function fetchJson(url: string): Promise<unknown> {
  * BE가 실제 gate 데이터로 그 분기를 처음 살린다. 지금까지는 in-progress 중 항상 첫 번째가
  * hero였는데, 이제부터는 gate-pending story가 있으면 그게 우선한다.
  *
- * activity-logs는 flat 배열이 아니라 `ActivityLogListResponse{items,total,limit,offset}` —
- * 로드맵 blank 재발(2026-07-11)의 진짜 근본이 이 처리였다(#c3d1565d). 단순 1회 fetch(dedup/캐시
- * 없음)로 유지.
+ * story #2224(선생님 정정 2026-07-30) — `/api/activity-logs` fetch를 제거했다(5종→4종). 유일한
+ * 소비처(`events`, LiveStream용)가 죽은 코드였다 — 그 fetch가 실측한 "로드맵 blank 재발"
+ * 회귀가드(#c3d1565d, ActivityLogListResponse가 flat 배열이 아니라던 그 사건)는 이 함수와 함께
+ * 사라지는 게 아니라, 그 방어적 unwrap 패턴 자체가 이제 이 파일에 없어도 된다는 뜻이다(다른
+ * activity-logs 소비처는 각자의 파일에서 이미 독립적으로 같은 방어를 갖고 있다).
  */
 export async function loadGlanceData(projectId: string): Promise<GlanceData> {
-  const [epicsJson, overviewJson, membersJson, activityJson, attentionJson] = await Promise.all([
+  const [epicsJson, overviewJson, membersJson, attentionJson] = await Promise.all([
     // wedge #2: order_by=position 옵트인 — 조타(큐레이션) 결과를 아크가 curated-first로 소비만
     // 반영(드래그 없음). position 모드는 커서 미발행이나 아크는 원래 전량로드(limit=100)라 무관.
     // story #2298/#2303: include=glance — participant_ids/focal_story를 같은 응답에 싣는다.
     fetchJson(`/api/goals?project_id=${projectId}&limit=100&order_by=position&include=glance`),
     fetchJson('/api/dashboard/overview'),
     fetchJson('/api/team-members'),
-    fetchJson(`/api/activity-logs?project_id=${projectId}&limit=20`),
     // 예외 스트림 실신호(#2097) — project-scope 가드는 BE(404). 실패/미가용은 null→[](정직 빈상태).
     fetchJson(`/api/glance/attention?project_id=${projectId}`),
   ]);
@@ -100,24 +104,32 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
   const roadmap = mergeRoadmap(arc.epics, overview?.project_status.epics ?? []);
 
   const memberRows = unwrap<{ id: string; name: string; type?: string }[]>(membersJson) ?? [];
-  const memberNames: Record<string, string> = {};
   const memberMap: Record<string, HeroMember> = {};
   for (const m of memberRows) {
-    memberNames[m.id] = m.name;
     memberMap[m.id] = { name: m.name, type: m.type ?? 'human' };
   }
 
-  // story #2298/#2303: collaboration은 이제 `participant_ids`(에픽별 고유 assignee_id 집합,
-  // BE가 이미 distinct로 계산)에서 바로 파생 — 추가 fetch·재-distinct 둘 다 불필요.
   const rawById = new Map(arc.epics.map((e) => [e.id, e]));
-  const collaboration: EpicCollaboration[] = roadmap.map((e) => {
-    const ids = rawById.get(e.id)?.participant_ids ?? [];
-    return { epicId: e.id, collaborators: ids.map((id) => ({ id, name: memberNames[id] ?? id })) };
-  });
 
   // 2D 재설계: hero = 현재(active) 에픽의 focal 활성 story. story #2298/#2303부터 story·
   // envelope 재료 전부 `focal_story`(같은 epics(+glance) 응답)에서 나온다 — 추가 fetch 0.
-  const activeEpic = roadmap.find((e) => e.roadmapStatus === 'active') ?? null;
+  //
+  // 결함 fix(2026-07-30, 선생님 직접 발견 — "열린 스토리가 없다고 나오던데"): 이전엔 roadmap
+  // 안에서 status==='active'인 «첫» 에픽을 무조건 집었다. 이 프로젝트엔 active 에픽이 52개나
+  // 동시에 있어(179개 중) "첫 번째"가 실제 진행 상황과 무관하게 뽑혔다 — E-UI-DAEGBYEON(진행중
+  // 스토리 실재)을 두고 E-CHAT-REALTIME(진행중 스토리 0건)이 "지금"으로 뽑혀 초점 스트립이
+  // 항상 빈 채로 뜬 사례가 실측됨. focal_story가 실재하는 active 에픽을 우선한다 — 그런 에픽이
+  // 하나도 없을 때만(=진짜 0건) 기존처럼 첫 active로 폴백(정직한 빈 상태).
+  // ⛔불완전한 처방: active 에픽 52개 중에서도 여전히 roadmap 배열 순서상 «먼저 오는 하나»를
+  // 고르는 것뿐 — "가장 최근에 움직인 에픽"으로 좁히려면 에픽의 updated_at이 필요한데
+  // `BeEpicListItem`엔 created_at만 있고 updated_at이 없다(BE 계약에 없음). 그 필드가
+  // 오면(#2341, BE 후속 — "상태 자가회수" 스토리 AC2) "focal_story 있음" 다음 tie-break로
+  // 최신순 정렬을 추가한다. #2341 AC1은 더 근본적으로 "active"를 파생값으로 바꾸는 방향도
+  // 검토 중 — 이 tie-break는 그 방향이 확정되기 전까지의 완화(PR#2680)에 그친다.
+  const activeEpic =
+    roadmap.find((e) => e.roadmapStatus === 'active' && rawById.get(e.id)?.focal_story) ??
+    roadmap.find((e) => e.roadmapStatus === 'active') ??
+    null;
   const focal = activeEpic ? (rawById.get(activeEpic.id)?.focal_story ?? null) : null;
   const heroStory: HeroStory | null = focal
     ? { id: focal.id, title: focal.title, status: focal.status, assignee_id: focal.assignee_id, assignee_ids: focal.assignee_ids }
@@ -129,13 +141,8 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
   const partialErrors: GlanceDataPartialErrors = {
     overview: overviewJson === null,
     members: membersJson === null,
-    activity: activityJson === null,
     attention: attentionJson === null,
   };
-
-  // activity-logs는 flat 배열이 아니라 {items,...} wrapper — 위 함수 doc 참고.
-  const activityItems = unwrap<{ items: BeActivityLogItem[] }>(activityJson)?.items ?? [];
-  const events = filterMilestoneEvents(activityItems);
 
   // 예외 스트림: {data:{items}} envelope를 방어적으로 unwrap+검증(형상 불일치=생략, throw 0).
   const attentionSignals = parseAttentionSignals(attentionJson);
@@ -143,9 +150,6 @@ export async function loadGlanceData(projectId: string): Promise<GlanceData> {
   return {
     roadmap,
     totalEpicCount: arc.totalCount,
-    collaboration,
-    events,
-    activeEpicTitle: activeEpic?.title ?? null,
     heroStory,
     memberMap,
     attentionSignals,

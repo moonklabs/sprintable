@@ -47,14 +47,20 @@ async def _assert_task_project_access(
     """E-SECURITY SEC-S8(story 83ea3d6a) G: Task는 project_id가 없어 story_id→project_id로
     해소(org-scope만 있고 project 접근권 미검증이던 갭 — 같은 org 다른 project 멤버가 개별
     task id만 알면 조회/수정 가능했다). upload_story_attachment와 동형으로 has_project_access
-    재사용(휴먼 team_member·에이전트 project_access grant 양쪽 처리)."""
+    재사용(휴먼 team_member·에이전트 project_access grant 양쪽 처리).
+
+    ⛔story #2342(2026-07-30, PR#2624 「미완의 롤아웃」 후속): 무권한을 403이 아닌 404로
+    낸다 — stories.py._assert_story_project_access와 같은 자로 통일한다(story #2322가 연
+    존재-비노출 규율, 이 파일은 그 PR의 1/4 분할에서 빠졌었다). 조직 경계(다른 org)는 이미
+    404다 — 이 함수가 새로 여는 것은 「조직 안·프로젝트 밖」과 「story_id 자체가 없음」 둘뿐이고,
+    둘 다 이제 404다."""
     from app.services.project_auth import has_project_access
 
     project_id = (
         await session.execute(select(Story.project_id).where(Story.id == story_id))
     ).scalar_one_or_none()
     if project_id is None or not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
-        raise HTTPException(status_code=403, detail="No access to this project")
+        raise HTTPException(status_code=404, detail="Task not found")
 
 
 @router.get("", response_model=list[TaskResponse])

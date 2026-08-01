@@ -69,9 +69,9 @@ export function ReferenceSuggestionRow({ messageId, content, isMine, projectId }
   const candidates = useMemo(() => {
     if (!isMine) return [];
     return findReferenceCandidates(content).filter(
-      (c) => !isCandidateRejected(messageId, c.raw) && !locallyDismissed.has(c.raw),
+      (c) => !isCandidateRejected(c.raw) && !locallyDismissed.has(c.raw),
     );
-  }, [isMine, content, messageId, locallyDismissed]);
+  }, [isMine, content, locallyDismissed]);
 
   if (candidates.length === 0) return null;
 
@@ -84,7 +84,7 @@ export function ReferenceSuggestionRow({ messageId, content, isMine, projectId }
   };
 
   const handleReject = (raw: string) => {
-    rejectCandidate(messageId, raw);
+    rejectCandidate(raw);
     setLocallyDismissed((prev) => new Set(prev).add(raw));
   };
 

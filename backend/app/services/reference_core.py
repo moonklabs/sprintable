@@ -23,8 +23,14 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.reference import FORMS, Reference
-from app.services.reference_registry import ENTITY_RESOLVERS, is_registered_entity_type, is_valid_source_type
+from app.models.reference import FORMS, NO_RELATION, RELATIONS, Reference
+from app.services.reference_registry import (
+    ENTITY_RESOLVERS,
+    TARGET_ONLY_RESOLVERS,
+    TARGET_ONLY_TYPES,
+    is_valid_source_type,
+    is_valid_target_type,
+)
 
 Direction = Literal["outgoing", "incoming"]
 
@@ -42,6 +48,10 @@ class ResolvedReference:
     target_type: str
     target_id: uuid.UUID
     form: str
+    # story #2267(C-9): 'none'(본문 참조, 기존 전부) 또는 'created_from'(target이 이 source
+    # 에서 만들어졌다 — "출처"). NOT NULL sentinel — form/source_field와 다른 축
+    # (app/models/reference.py 참조).
+    relation: str
     created_at: object
     # PO (b) — 읽는 시점 판정. **direction 에 따라 무엇을 가리키는지 달라진다** —
     # outgoing 이면 target 의 존재, incoming 이면 source 의 존재("반대편"이 항상 이 값의
@@ -50,6 +60,11 @@ class ResolvedReference:
     # (반대편 entity_type 이 registry 밖이라 존재판정 자체를 못 한 경우 — count_orphan_types
     # 가 잡는 그 케이스). True/False 만 신뢰.
     still_exists: bool | None
+    # story #2263(C-7, 2026-07-29 · PO 정정): 그대로 싣는다 — proof 소비처(C-7 섹션)가 카드를
+    # 여럿 펼쳐 보이는 자리라 단건 상세 라우트를 따로 지으면 N+1이 된다(PO 자기정정 — 소비
+    # 패턴을 안 보고 "무거우니 목록엔 빼자"로 먼저 갈랐던 것). 내부 구조는 안 읽는다(그대로
+    # 통과) — 크기 문제는 응답 shape이 아니라 저장 시점 범위 상한으로 막는다(#2263 AC).
+    proof_payload: dict | None = None
 
 
 async def insert_reference(
@@ -64,21 +79,26 @@ async def insert_reference(
     form: str,
     created_by: uuid.UUID | None,
     proof_payload: dict | None = None,
+    relation: str = NO_RELATION,
 ) -> Reference:
     if form not in FORMS:
         raise ValueError(f"form must be one of {sorted(FORMS)}, got {form!r}")
-    # ⛔source/target은 다른 기준 — source는 SOURCE_ONLY_TYPES(예: chat_message, target으로
-    # 안 쓰여 resolver가 없다)도 허용하지만 target은 존재판정이 가능한 타입만(reference_
-    # registry.py 모듈 docstring 참조, #2273 실측 발견).
+    if relation not in RELATIONS:
+        raise ValueError(f"relation must be one of {sorted(RELATIONS)}, got {relation!r}")
+    # ⛔source/target은 다른 기준 — source는 SOURCE_ONLY_TYPES(예: chat_message, 채팅
+    # write-path의 정당한 source지만 완전지원 엔티티는 아니다)도 허용하지만 target은
+    # ENTITY_RESOLVERS(완전지원) 또는 TARGET_ONLY_TYPES(target 전용, 예: chat_message가
+    # proof의 대상이 되는 자리 — story #2263)만 허용한다(reference_registry.py 모듈
+    # docstring 참조, #2273 실측 발견 + #2263 PO 판정).
     if not is_valid_source_type(source_type):
         raise UnregisteredEntityTypeError(f"source_type {source_type!r} not in reference_registry")
-    if not is_registered_entity_type(target_type):
+    if not is_valid_target_type(target_type):
         raise UnregisteredEntityTypeError(f"target_type {target_type!r} not in reference_registry")
 
     ref = Reference(
         id=uuid.uuid4(), org_id=org_id, source_type=source_type, source_field=source_field,
         source_id=source_id, target_type=target_type, target_id=target_id, form=form,
-        proof_payload=proof_payload, created_by=created_by,
+        proof_payload=proof_payload, created_by=created_by, relation=relation,
     )
     session.add(ref)
     return ref
@@ -87,10 +107,14 @@ async def insert_reference(
 async def _batch_resolve_existence(
     session: AsyncSession, org_id: uuid.UUID, ids_by_type: dict[str, set[uuid.UUID]],
 ) -> dict[str, set[uuid.UUID]]:
-    """㉡N+1 금지 — entity_type 별로 묶어 resolver 를 **한 번씩만** 호출한다."""
+    """㉡N+1 금지 — entity_type 별로 묶어 resolver 를 **한 번씩만** 호출한다.
+
+    ⛔story #2263: ENTITY_RESOLVERS(완전지원)뿐 아니라 TARGET_ONLY_RESOLVERS(target 전용,
+    예: chat_message)도 본다 — 둘 다 "존재판정 가능"이라는 같은 질문에 답하지만, 완전지원
+    여부(검색·MCP 등)는 이 함수의 관심사가 아니다."""
     existing_by_type: dict[str, set[uuid.UUID]] = {}
     for entity_type, ids in ids_by_type.items():
-        resolver = ENTITY_RESOLVERS.get(entity_type)
+        resolver = ENTITY_RESOLVERS.get(entity_type) or TARGET_ONLY_RESOLVERS.get(entity_type)
         if resolver is None:
             # registry 밖 타입 — 존재판정 불가(count_orphan_types 가 별도로 이 사고를 잡는다).
             existing_by_type[entity_type] = set()
@@ -146,7 +170,7 @@ async def list_references(
         other_type = r.target_type if direction == "outgoing" else r.source_type
         other_id = r.target_id if direction == "outgoing" else r.source_id
         still_exists: bool | None
-        if other_type not in ENTITY_RESOLVERS:
+        if other_type not in ENTITY_RESOLVERS and other_type not in TARGET_ONLY_TYPES:
             still_exists = None  # registry 밖 타입 — 판정 불가(orphan 점검이 별도로 잡음).
         else:
             still_exists = other_id in existing_by_type.get(other_type, set())
@@ -154,7 +178,8 @@ async def list_references(
             ResolvedReference(
                 id=r.id, source_type=r.source_type, source_field=r.source_field,
                 source_id=r.source_id, target_type=r.target_type, target_id=r.target_id,
-                form=r.form, created_at=r.created_at, still_exists=still_exists,
+                form=r.form, relation=r.relation, created_at=r.created_at, still_exists=still_exists,
+                proof_payload=r.proof_payload,
             )
         )
     return resolved

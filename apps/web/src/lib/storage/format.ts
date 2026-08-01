@@ -135,7 +135,6 @@ function safeInternalPath(path: string): string | null {
   // '/' 로 시작하되 '//'(프로토콜-상대) 아님 → 내부 경로
   if (!path.startsWith('/') || path.startsWith('//')) return null;
   // 제어문자(개행/탭 등) 포함 시 거부
-  // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f]/.test(path)) return null;
   return path;
 }

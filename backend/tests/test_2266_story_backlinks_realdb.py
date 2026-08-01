@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -71,10 +71,10 @@ async def _make_project(session, org_id, name="P"):
 async def _make_human_member(session, org_id, project_id):
     """test_1994의 동명 helper와 동일 anchor 패턴(members + org_members + project_access
     직접 write — team_members는 VIEW라 INSERT 불가)."""
-    from app.models.user import User
+    from app.models.member import Member
     from app.models.project import OrgMember
     from app.models.project_access import ProjectAccess
-    from app.models.member import Member
+    from app.models.user import User
 
     user = User(id=uuid.uuid4(), email=f"u-{uuid.uuid4().hex[:8]}@test.local", hashed_password="x")
     session.add(user)
@@ -116,7 +116,7 @@ async def _add_message(session, conv_id, sender_id, content, created_at=None):
     from app.models.conversation import ConversationMessage
     msg = ConversationMessage(
         id=uuid.uuid4(), conversation_id=conv_id, sender_id=sender_id,
-        content=content, created_at=created_at or datetime.now(timezone.utc),
+        content=content, created_at=created_at or datetime.now(UTC),
     )
     session.add(msg)
     await session.commit()
@@ -136,7 +136,7 @@ async def _make_reference(session, org_id, source_type, source_id, target_type, 
 
 
 def _client_for(app):
-    from httpx import AsyncClient, ASGITransport
+    from httpx import ASGITransport, AsyncClient
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
@@ -169,8 +169,11 @@ async def _setup_app_human(app, Session, user_id, org_id):
 @pytest.mark.anyio
 async def test_list_entity_backlinks_rejects_unsupported_target_type():
     """게이트가 안 선 타입(epic 등)은 허용목록 밖 — UnsupportedBacklinkTargetTypeError."""
-    from app.services.backlinks import list_entity_backlinks, UnsupportedBacklinkTargetTypeError
     from app.dependencies.auth import AuthContext
+    from app.services.backlinks import (
+        UnsupportedBacklinkTargetTypeError,
+        list_entity_backlinks,
+    )
 
     engine, Session = await _session_factory()
     try:
@@ -223,7 +226,8 @@ async def test_story_backlinks_404_for_nonexistent_story():
 async def test_story_backlinks_project_access_twin_comparison():
     """⭐AC2·AC5 핵심 — 양성대조(twin comparison, PO가 #2277에도 요구한 그 패턴): 같은
     story·같은 참조 데이터에 대해 project 접근이 «있는» caller는 200+데이터를 보고, 접근이
-    «없는» caller는 403을 받는다. 하나만 재면(0건만 확인) 권한 게이트가 실제로 도는지
+    «없는» caller는 404를 받는다(story #2322, 2026-07-29 — 예전엔 403이었으나 존재 비노출
+    규율로 통일). 하나만 재면(0건만 확인) 권한 게이트가 실제로 도는지
     "없어서 0건"인지 "막혀서 0건"인지 구분이 안 된다 — 이 테스트가 그 둘을 가른다."""
     from app.main import app
 
@@ -257,12 +261,13 @@ async def test_story_backlinks_project_access_twin_comparison():
             await client.aclose()
             app.dependency_overrides.clear()
 
-        # (2) 접근 없는 caller(다른 project) — 403, 데이터 유출 0
+        # (2) 접근 없는 caller(다른 project) — story #2322(2026-07-29): 404로 통일(존재
+        # 비노출 규율 — 예전엔 403이었다가 이 스토리에서 정정됨), 데이터 유출 0
         await _setup_app_human(app, Session, user_without_access, org.id)
         client = _client_for(app)
         try:
             resp = await client.get(f"/api/v2/stories/{story.id}/backlinks")
-            assert resp.status_code == 403, resp.text
+            assert resp.status_code == 404, resp.text
         finally:
             await client.aclose()
             app.dependency_overrides.clear()
@@ -310,12 +315,12 @@ async def test_story_backlinks_gate_red_green_mutation_self_check():
         finally:
             stories_module._assert_story_project_access = original_gate
 
-        # 원복 후 GREEN 재확인 — 같은 caller가 다시 403.
+        # 원복 후 GREEN 재확인 — 같은 caller가 다시 404(story #2322 통일).
         await _setup_app_human(app, Session, user_without_access, org.id)
         client = _client_for(app)
         try:
             resp = await client.get(f"/api/v2/stories/{story.id}/backlinks")
-            assert resp.status_code == 403, resp.text
+            assert resp.status_code == 404, resp.text
         finally:
             await client.aclose()
             app.dependency_overrides.clear()
@@ -348,7 +353,8 @@ async def test_story_backlinks_zero_result_still_carries_collection_scope():
             body = resp.json()
             assert body["data"] == []
             scope = body["meta"]["collection_scope"]
-            assert scope["source_types"] == ["chat_message", "doc"]
+            # story #2267(C-9): meeting·story가 창조-출처(relation='created_from') source로 추가됨.
+            assert scope["source_types"] == ["chat_message", "doc", "meeting", "story"]
             assert scope["forms"] == "all"
             assert "pr_sid_text_convention" in scope["excludes"]
             assert "evidence_free_text_reference" in scope["excludes"]

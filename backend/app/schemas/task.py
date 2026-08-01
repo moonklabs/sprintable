@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, computed_field, field_validator
 
 
 class TaskCreate(BaseModel):
@@ -62,3 +62,16 @@ class TaskResponse(BaseModel):
     @classmethod
     def _coerce_human_verified_at(cls, v):
         return v if isinstance(v, datetime) else None
+
+    # story #2262(C-4) AC9: 참조 카드의 「다음 행동」 재료 — SSOT는 app.services.next_action.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def next_action_code(self) -> str | None:
+        from app.services.next_action import verification_next_action
+        return verification_next_action(self_reported=self.self_reported, human_verified=self.human_verified)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def next_action_category(self) -> str | None:
+        from app.services.next_action import next_action_category
+        return next_action_category(self.next_action_code)

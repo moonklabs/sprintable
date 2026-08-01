@@ -247,7 +247,7 @@ async def test_assignee_filter_cannot_exfiltrate_cross_project():
 @pytest.mark.anyio
 async def test_story_id_branch_regression_unchanged():
     """회귀0: story_id 지정 분기는 round6 가드 그대로 — 접근권 있는 story_a는 200(task_a),
-    접근권 없는 story_b는 403."""
+    접근권 없는 story_b는 404(story #2342, 2026-07-30: 403이 아니다)."""
     from app.main import app
     engine, Session = await _session_factory()
     try:
@@ -261,7 +261,7 @@ async def test_story_id_branch_regression_unchanged():
             assert {t["id"] for t in ok.json()} == {str(seeded["task_a_id"])}
 
             blocked = await client.get(f"/api/v2/tasks?story_id={seeded['story_b_id']}")
-            assert blocked.status_code == 403, blocked.text
+            assert blocked.status_code == 404, blocked.text
             assert _SECRET_TASK_TITLE_B not in blocked.text
         finally:
             await client.aclose()

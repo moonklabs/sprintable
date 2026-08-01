@@ -56,6 +56,10 @@ export interface EpicListFilters extends PaginationOptions {
    * "position"(로드맵 조타·wedge #2)은 복합 정렬((position IS NULL) ASC, position ASC,
    * created_at DESC)이라 BE가 X-Next-Cursor를 내지 않는다 — 소비 측은 커서 이어달리기 금지. */
   order_by?: string;
+  /** 결함 fix(2026-07-30) — "glance"면 BE가 participant_ids/focal_story를 추가로 싣는다
+   * (story #2298 옵트인). 이 필드가 없어 route.ts→GoalService→ApiEpicRepository 4단 체인
+   * 전체가 이 파라미터를 한 번도 BE까지 실어 나르지 못했다(#2224 초점 스트립 결함의 진짜 근본). */
+  include?: string;
 }
 
 /** 로드맵 조타 재정렬(wedge #2·BE `PATCH /api/v2/epics/bulk`). 큐레이션한 에픽만 position 세팅. */

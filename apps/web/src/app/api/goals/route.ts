@@ -32,6 +32,12 @@ export async function GET(request: Request) {
       limit: positionMode ? pageInput.limit : pageInput.limit + 1,
       cursor: positionMode ? undefined : pageInput.cursor,
       order_by: orderBy,
+      // 결함 fix(2026-07-30) — `include=glance`가 여기서 한 번도 읽힌 적이 없어 story
+      // #2298/#2303의 participant_ids/focal_story 옵트인이 BE까지 한 번도 도달하지
+      // 못했다(선생님이 /flow에서 본 "열린 스토리가 없다"의 진짜 근본 — PR#2680의
+      // "focal_story 있는 active 에픽 우선" 로직은 focal_story가 애초에 안 오니 항상
+      // 폴백만 타는 죽은 코드였다). BE는 정확히 "glance" 리터럴만 특별취급하므로 그대로 전달.
+      include: searchParams.get('include') ?? undefined,
     });
     if (positionMode) {
       return apiSuccess(epics, { limit: pageInput.limit, hasMore: false, nextCursor: null });

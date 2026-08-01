@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, computed_field, field_validator, model_validator
 from app.schemas.story import _validate_metric_definition
 
 # E-DG S26: sprint status contract. de-facto(planning|active|done)에 review(선택)·archived(terminal) 신설.
@@ -112,6 +112,26 @@ class SprintResponse(SprintBase):
         if derived is not None:
             self.duration = derived
         return self
+
+    # story #2262(C-4) AC9: outcome-measurement 축만(doc `e-connect-c4-trigger-condition-
+    # table` 승인 범위) — internal_ops는 sprint close() 시점 즉시 채점(repositories/
+    # sprint.py) — cron 지연 아님. 그래도 「사람 몫이 아니다」는 동일하므로 system_owned_
+    # sources에 그대로 포함한다(④주체 판정은 "언제"가 아니라 "누구"라 이 축에선 영향 없음).
+    # ⛔「기간 지났는데 안 닫힘」 축은 별건(doc에 기록, 미구현).
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def next_action_code(self) -> str | None:
+        from app.services.next_action import outcome_measurement_next_action
+        return outcome_measurement_next_action(
+            outcome_status=self.outcome_status, measure_after=self.measure_after,
+            metric_definition=self.metric_definition, system_owned_sources=frozenset({"ga4", "internal_ops"}),
+        )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def next_action_category(self) -> str | None:
+        from app.services.next_action import next_action_category
+        return next_action_category(self.next_action_code)
 
 
 class KickoffBody(BaseModel):

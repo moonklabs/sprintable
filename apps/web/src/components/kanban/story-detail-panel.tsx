@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type ClipboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
 import { useTranslations } from 'next-intl';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import rehypeSanitize from 'rehype-sanitize';
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { AlertTriangle, ArrowLeftRight, Check, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
 import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
 import { normalizeAssigneePatch } from './types';
@@ -14,12 +14,15 @@ import { imageFilesFromClipboard } from '@/lib/clipboard-image';
 import { parseCursorMeta } from '@/lib/pagination';
 import { AttachmentImage } from '@/components/chat/attachment-image';
 import { AttachmentFile } from '@/components/chat/attachment-file';
+import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from '@/components/chat/reference-drop-notice';
 import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
 import { DependencyGraph } from './dependency-graph';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
 import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { EvidenceSection } from '@/components/verify/evidence-section';
+import { ChatProofSection } from '@/components/verify/chat-proof-section';
 import { deriveInFlightTrustChip } from '@/services/verify';
 import type { ProofState } from '@/components/proof-capsule/proof-capsule';
 import { Workcell, type WorkcellMessage } from '@/components/workcell/workcell';
@@ -27,6 +30,7 @@ import { initials } from '@/lib/storage/format';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
+import { StoryOriginSection } from '@/components/shared/story-origin-section';
 import { EntityAwareTextarea } from '@/components/shared/entity-aware-textarea';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { PrLinkSection } from '@/components/integrations/pr-link-section';
@@ -44,7 +48,7 @@ import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-h
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
-interface Task {
+export interface Task {
   id: string;
   title: string;
   status: string;
@@ -82,6 +86,14 @@ interface StoryDetailPanelProps {
   sprintMap?: Record<string, string>;
   onNavigate?: (storyId: string) => void;
   projectId?: string;
+  /** story #2354 — 갈래 보기의 «지도 위에 겹치는» 소형 팝오버 모드. 생략하면 기존 전체화면
+   * 드로어(칸반 그대로, 회귀 없음). 값을 주면 배경 딤을 없애고(지도를 «가리지» 않는다),
+   * «top+height 확정값»만 받아 그대로 스타일에 적용한다 — 위/아래 반전 판단(클릭한 노드가
+   * 뷰포트 위쪽/아래쪽인가)과 높이 상한 계산 자체는 이 컴포넌트의 책임이 아니다(캔버스
+   * 좌표 지식을 이 공용 컴포넌트에 들이지 않는다, 호출부=flow-client.tsx가 노드 DOM
+   * 위치를 안다). top+heightPx(px, 확정)를 쓰는 이유 — top/bottom 자동조합은 높이가
+   * 암묵값이 되어 내부 `h-full` flex 레이아웃(헤더 고정+본문 스크롤)이 깨진다. */
+  overlayPosition?: { top: number; heightPx: number };
 }
 
 function taskTone(status: string) {
@@ -92,6 +104,65 @@ function taskTone(status: string) {
 
 // BE _MAX_STORY_ATTACHMENTS 정합 (schemas/story.py)
 const STORY_ATTACHMENT_LIMIT = 10;
+
+// story #2269(C-11) AC0-2 보너스 발견: `entity:story:<uuid>` 새 형식 링크의 href가 두 겹
+// 필터에 막혀 있었다(EntityChip 경로가 chat-bubble.tsx 전용이던 이유 — description/AC
+// 뷰어엔 안 뚫려 있었다) —
+//   ①react-markdown 자체의 `urlTransform`(기본값 `defaultUrlTransform`)이 http/https 등
+//     "안전 프로토콜"이 아니면 href를 통째로 빈 문자열로 지운다(rehype 단계보다 먼저 작동).
+//   ②그걸 통과해도 rehype-sanitize의 defaultSchema가 protocols.href에 http/https/irc/ircs/
+//     mailto/xmpp만 허용해 다시 지운다.
+// 그래서 chat-bubble.tsx는 이미 `urlTransform` 오버라이드를 갖고 있었다(그쪽엔 ②가 아예
+// 없다 — 이 컴포넌트는 rehypeSanitize를 쓰는 게 다른 점) — 이 컴포넌트는 둘 다 뚫어야 한다.
+// `descriptionSanitizeSchema`는 ②를 위한 것이고, 아래 `DescriptionViewer`의 `urlTransform` prop이
+// ①을 위한 것 — 두 겹 다 `entity:` 하나만 추가로 열고 그 외(특히 javascript:/data:)는
+// 원래 막던 대로 둔다(뮤테이션 자가검증: description-viewer.test.tsx의 "javascript:/data:
+// href는 여전히 막힌다" 테스트가 그 증거).
+// story #2269(C-11) AC0-2 축B(2026-07-29, PO 지적) — `bare-number:` 도 같은 두 겹 필터를
+// 통과해야 한다(entity:와 동일 이유). `#<번호>`를 render-time에 `[#번호](bare-number:번호)`
+// 로 치환(`prepareBareNumberRefs`)해 이 스킴으로 태우므로 여기서도 열어야 한다.
+const descriptionSanitizeSchema = {
+  ...defaultSchema,
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href ?? []), 'entity', 'bare-number'],
+  },
+};
+
+// story #2269(C-11) AC0-3 세는 정의(backend `mention_parser._BARE_STORY_NUMBER_RE`/
+// `_redact_code_spans`와 1:1 대응 — 정의가 두 곳에 따로 있으면 그 자체가 드리프트 위험이라
+// 정규식을 문자 그대로 포트했다). word-boundary로 `##`·`foo#123` 오탐 배제, 코드블록/인라인
+// 코드 안은 참조 아님으로 제외.
+const BARE_STORY_NUMBER_RE = /(?<![\w#])#(\d+)\b/g;
+const FENCED_CODE_BLOCK_RE = /```[\s\S]*?```/g;
+const INLINE_CODE_SPAN_RE = /`[^`\n]*`/g;
+
+function redactCodeSpans(content: string): string {
+  const blank = (m: string) => ' '.repeat(m.length);
+  return content.replace(FENCED_CODE_BLOCK_RE, blank).replace(INLINE_CODE_SPAN_RE, blank);
+}
+
+// story #2269(C-11) AC0-2 축B — chat-bubble.tsx의 `prepareMentions()`(@name → [@name]
+// (mention:name))와 동형. `#2258` 을 `[#2258](bare-number:2258)` 마크다운 링크 문법으로
+// 바꿔 기존 `a` 오버라이드 경로에 태운다. ⛔치환은 redact된 사본에서 위치만 찾고, 실제
+// 삽입은 **원문**에 대해 한다(redact가 길이를 보존하므로 위치가 그대로 대응) — 코드블록
+// 안의 원문 백틱 등을 훼손하지 않기 위함.
+function prepareBareNumberRefs(content: string): string {
+  const redacted = redactCodeSpans(content);
+  let result = '';
+  let lastIndex = 0;
+  BARE_STORY_NUMBER_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = BARE_STORY_NUMBER_RE.exec(redacted)) !== null) {
+    const start = m.index;
+    const end = start + m[0].length;
+    result += content.slice(lastIndex, start);
+    result += `[#${m[1]}](bare-number:${m[1]})`;
+    lastIndex = end;
+  }
+  result += content.slice(lastIndex);
+  return result;
+}
 
 // story #2021 후속(PO 리뷰): components 객체를 렌더 함수 안에서 인라인으로 만들면 매 렌더
 // 새 함수 참조가 되어 react-markdown이 서브트리를 리마운트한다(chat-bubble 근본원인과 동형).
@@ -129,22 +200,130 @@ const descriptionViewerComponents = {
   hr: () => <hr className="my-2 border-border" />,
 };
 
+// story #2269(C-11) AC0 — chat-bubble.tsx의 isGhostReference와 동형(레지스트리 분리 이유는
+// ChatMessage['references']와 shape은 같지만 출처가 다른 엔드포인트라 별개 타입으로 둔다).
+export interface OutgoingReference {
+  target_type: string;
+  target_id: string;
+}
+
+function isGhostOutgoingReference(
+  references: OutgoingReference[] | undefined,
+  targetType: string,
+  targetId: string,
+): boolean {
+  if (references === undefined) return false;
+  const type = targetType.toLowerCase();
+  const id = targetId.toLowerCase();
+  return !references.some((r) => r.target_type.toLowerCase() === type && r.target_id.toLowerCase() === id);
+}
+
+// export: story #2328(C-11 ㉡층) — 후보/검색 전환 판정을 StoryDetailPanel 전체 마운트 없이
+// 격리 검증하기 위함(같은 이유로 huge prop surface라 전체 마운트 테스트가 비실용적). 유나
+// 규격 ①③: 2글자 미만(빈 입력·1글자·다 지운 것 — 한 상태)이면 후보, 아니면 검색 결과 —
+// 섞지 않는다. 트림 후 판정(공백만 있는 입력도 "미만"으로 취급).
+export function selectDepPickerItems<T>(
+  depQuery: string,
+  candidates: T[],
+  searchResults: T[],
+): { items: T[]; showingCandidates: boolean } {
+  const showingCandidates = depQuery.trim().length < 2;
+  return { items: showingCandidates ? candidates : searchResults, showingCandidates };
+}
+
+interface RawStoryRow {
+  id: string;
+  title: string;
+  is_reference_candidate?: boolean;
+  matched_snippet?: string | null;
+}
+
+// export: story #2328 — BE(PR#2659)는 필터링이 아니라 재정렬만 하므로(boost_candidates_from을
+// 줘도 전체 목록이 돌아온다), is_reference_candidate===true인 것만 FE가 직접 골라낸다.
+// 자기 자신 제외 + 상한 6(기존 검색 결과와 동일 cap, story-detail-panel.tsx:501)은 그대로.
+export function extractReferenceCandidates(rows: RawStoryRow[], selfId: string): { id: string; title: string; matched_snippet?: string | null }[] {
+  return rows
+    .filter((s) => s.id !== selfId && s.is_reference_candidate === true)
+    .slice(0, 6)
+    .map((s) => ({ id: s.id, title: s.title, matched_snippet: s.matched_snippet }));
+}
+
 // export: 회귀 테스트(부모 클릭=편집모드 진입 wrapper 안에서 링크 클릭이 전파를 끊는지)를
 // StoryDetailPanel 전체 마운트 없이 격리 검증하기 위함(story-detail-panel.tsx는 huge prop
 // surface라 전체 마운트 테스트가 비실용적) — 동작 변경 없는 순수 export 추가.
-export function DescriptionViewer({ description }: { description: string }) {
+//
+// story #2269(C-11) AC0: `references`는 GET /api/stories/{id}/references?direction=outgoing
+// 응답(이 story의 outgoing 참조 전체) — undefined면 유령 판정을 보류한다(#2622와 동일 폴백
+// 원칙). `bareNumberTargets`는 같은 응답의 형제 필드(번호→story_id, AC0-2 축B) — undefined면
+// `#<번호>` 치환 자체를 보류한다(축A 결과 없이 렌더하면 전부 거짓 유령이 된다). entity:/
+// bare-number: 링크 렌더는 `a` 오버라이드 하나만 이 값들에 의존하므로 그 함수만 useMemo로
+// 새로 만들고 나머지(descriptionViewerComponents)는 그대로 재사용해 리마운트 표면을 최소화.
+export function DescriptionViewer({
+  description, references, bareNumberTargets,
+}: {
+  description: string;
+  references?: OutgoingReference[];
+  bareNumberTargets?: Record<string, string>;
+}) {
+  const components = useMemo(() => ({
+    ...descriptionViewerComponents,
+    a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
+      // story #2269(C-11) AC0-2 축B — `prepareBareNumberRefs`가 만든 `bare-number:<번호>`
+      // 토큰. `bareNumberTargets`에 매칭되면 정상 칩(entityId=uuid), 없으면(미해소·미로드
+      // 둘 다) **유령 칩**으로 그린다 — entityId 없이 ghost=true(EntityChip의 ghost 분기는
+      // entityId를 아예 안 쓴다). ⛔"삭제됨"이 아니라 "대상이 없습니다"(EntityChip 기존
+      // 문구, 시제 중립) 그대로 재사용 — PO 우려(「삭제됨」처럼 보이면 거짓)를 위해 새 문구를
+      // 발명하지 않고 기존 문구가 이미 시제 중립임을 그대로 쓴다(문구 변경 0).
+      const bareMatch = href?.match(/^bare-number:(\d+)$/);
+      if (bareMatch) {
+        const number = bareMatch[1]!;
+        const targetId = bareNumberTargets?.[number];
+        return (
+          <span onClick={(e) => e.stopPropagation()}>
+            <EntityChip
+              entityType="story"
+              entityId={targetId}
+              label={`#${number}`}
+              href={targetId ? getEntityHref('story', targetId) : null}
+              ghost={!targetId}
+            />
+          </span>
+        );
+      }
+      // id는 UUID만 허용 — chat-bubble.tsx의 entity: 파싱 규칙과 동일.
+      const m = href?.match(/^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
+      // ⛔asset은 reference_registry.ENTITY_RESOLVERS 밖의 FE 전용 타입(mention_parser.py
+      // 주석 참조) — chat-bubble.tsx와 동일하게 일반 EntityChip 경로를 안 태운다.
+      if (m && m[1]!.toLowerCase() !== 'asset') {
+        const ghost = isGhostOutgoingReference(references, m[1]!, m[2]!);
+        return (
+          // 긴급 정정(2026-07-28) 재발 방지 — 부모 div의 편집모드 진입 onClick으로 버블링 금지.
+          <span onClick={(e) => e.stopPropagation()}>
+            <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} ghost={ghost} />
+          </span>
+        );
+      }
+      return descriptionViewerComponents.a({ href, children });
+    },
+  }), [references, bareNumberTargets]);
+
+  // bareNumberTargets가 아직 없으면(미로드) 치환을 보류 — #<번호>는 그대로 평문(#2622와
+  // 동일 폴백 원칙, 미판정을 유령으로 지어내지 않는다).
+  const prepared = bareNumberTargets !== undefined ? prepareBareNumberRefs(description) : description;
+
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeSanitize]}
-      components={descriptionViewerComponents}
+      rehypePlugins={[[rehypeSanitize, descriptionSanitizeSchema]]}
+      urlTransform={(url) => (url.startsWith('entity:') || url.startsWith('bare-number:') ? url : defaultUrlTransform(url))}
+      components={components}
     >
-      {description}
+      {prepared}
     </ReactMarkdown>
   );
 }
 
-export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId }: StoryDetailPanelProps) {
+export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap = {}, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition }: StoryDetailPanelProps) {
   const t = useTranslations('board');
   // story #1959(P2-S3): 딥링크 매니페스트(story_detail→parentTab=all) — 콜드 진입 시 "전체"
   // 탭 루트를 BACK 대상으로 선주입. 카드 클릭으로 연 경우(history.length>1)는 no-op.
@@ -181,6 +360,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [editingAC, setEditingAC] = useState(false);
   const [acDraft, setAcDraft] = useState(story.acceptance_criteria ?? '');
   const [savingAC, setSavingAC] = useState(false);
+  // story #2315 — description/acceptance_criteria PATCH가 참조를 조용히 거를 수 있다(#2294와
+  // 같은 병, story 저장 축). BE가 아직 사이드밴드를 안 실어도(parseDroppedReferences가 빈
+  // 배열로 폴백) 안 깨지고, 실으면 바로 뜬다 — ephemeral(persist 안 함·패널 재오픈 시 소멸).
+  const [referenceDropped, setReferenceDropped] = useState<DroppedReference[]>([]);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [attachError, setAttachError] = useState(false);
   const attachInputRef = useRef<HTMLInputElement>(null);
@@ -206,6 +389,13 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [showAddDep, setShowAddDep] = useState(false);
   const [depQuery, setDepQuery] = useState('');
   const [depQueryResults, setDepQueryResults] = useState<{ id: string; title: string }[]>([]);
+  // story #2328(C-11 ㉡층, 유나 규격 2026-07-29): 검색어 2글자 미만(빈 입력·1글자·다 지운
+  // 것 — 한 상태)일 때 "아무것도 안 함" 대신 이 스토리 본문에 나온 의미 후보를 보인다.
+  // 패널 열 때(showAddDep true 전이) «한 번»만 불러 상태로 들고 — 이후 쿼리를 지웠다 다시
+  // 비워도 재요청하지 않는다(depCandidatesFetchedRef). 후보와 검색 결과는 절대 안 섞는다 —
+  // 2글자 이상이면 이 배열이 아니라 depQueryResults를 그린다(아래 렌더 분기 참조).
+  const [depCandidates, setDepCandidates] = useState<{ id: string; title: string; matched_snippet?: string | null }[]>([]);
+  const depCandidatesFetchedRef = useRef(false);
   const [depType, setDepType] = useState<'blocks' | 'depends_on'>('blocks');
   const [addingDep, setAddingDep] = useState(false);
 
@@ -271,6 +461,41 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       .finally(() => setLoadingLabels(false));
   }, [story.id]);
 
+  // description/AC 본문의 entity: 링크 유령 판정용 outgoing 참조 목록. ChatProofSection과
+  // 같은 엔드포인트(GET /{id}/references?direction=outgoing)를 재사용한다(전용 라우트
+  // 신설 0). 실패·미로드 시 undefined 유지 — #2622와 동일하게 판단 재료가 없으면 유령
+  // 판정을 보류한다(false-ghost보다 미판정이 안전).
+  const [outgoingRefs, setOutgoingRefs] = useState<OutgoingReference[] | undefined>(undefined);
+  // story #2269(C-11) AC0-2 축B(2026-07-29, PO 지적) — 「#<번호>」 관찰 수집(축A, #2643)만
+  // 해서는 화면에 아무것도 안 뜬다. 같은 응답의 형제 필드 `bare_number_targets`(번호→story_id)
+  // 를 받아 DescriptionViewer의 render-time 치환에 넘긴다. undefined면 치환 자체를 보류(축A
+  // 미로드와 동형 폴백 — 안 뜨는 게 거짓 렌더보다 안전).
+  const [bareNumberTargets, setBareNumberTargets] = useState<Record<string, string> | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    setOutgoingRefs(undefined);
+    setBareNumberTargets(undefined);
+    fetch(`/api/stories/${story.id}/references?direction=outgoing`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: { data?: unknown; bare_number_targets?: unknown } | null) => {
+        if (cancelled || !json) return;
+        const rows = Array.isArray(json.data) ? json.data : [];
+        setOutgoingRefs(
+          rows
+            .filter((r): r is { target_type: string; target_id: string } =>
+              typeof (r as { target_type?: unknown })?.target_type === 'string'
+              && typeof (r as { target_id?: unknown })?.target_id === 'string')
+            .map((r) => ({ target_type: r.target_type, target_id: r.target_id })),
+        );
+        if (json.bare_number_targets && typeof json.bare_number_targets === 'object') {
+          setBareNumberTargets(json.bare_number_targets as Record<string, string>);
+        }
+      })
+      .catch(() => { /* undefined 유지 — 유령/치환 판정 보류 */ });
+    return () => { cancelled = true; };
+  }, [story.id]);
+
   const handleAttachLabel = async (labelId: string) => {
     if (storyLabels.some((l) => l.id === labelId)) return;
     const res = await fetch('/api/item-labels', {
@@ -325,6 +550,35 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     }, 300);
     return () => clearTimeout(tid);
   }, [depQuery, story.id, projectId]);
+
+  // story #2328(C-11 ㉡층): 기존 검색 게이트(위 useEffect의 `length < 2`)는 한 줄도 안
+  // 건드린다 — 그 "else"가 "아무것도 안 함"에서 "후보를 보임"으로 바뀌는 것뿐이라, 후보는
+  // 별도 소스(boost_candidates_from)로 따로 불러온다. BE는 필터링이 아니라 재정렬만 하므로
+  // (PR#2659) is_reference_candidate===true인 것만 FE가 직접 골라낸다.
+  //
+  // 패널을 닫으면 ref를 풀어 "다음에 열 때 다시 부른다" — 닫힘이 자연스러운 무효화 신호라
+  // (PO 지적, 2026-07-30). 호출 횟수는 여전히 "사람이 패널을 여는 횟수"만큼이라 늘지 않는다
+  // (타이핑마다 부르는 게 아님 — 스펙 ①이 금지하는 것은 그것 하나뿐).
+  // ⛔지금 안 하는 것 — 패널이 열린 채로 본문을 저장해 BE가 새 후보를 만들어도(write-path
+  // 훅) 이 패널은 갱신하지 않는다. 다음 판으로 미룬다(오늘 규율 — 갭을 적어 남긴다).
+  // ⚠️테스트 갭 — `depQuery` 길이에 따라 "무엇을 보이는가"는 순수 함수(selectDepPickerItems/
+  // extractReferenceCandidates)로 빼 dep-picker-candidates.test.ts가 잡지만, 이 effect의
+  // showAddDep 전이/ref 리셋 자체는 effect라 단위테스트가 못 잡는다 — 이 자리를 만지면
+  // "닫고 다시 열어 후보가 새로 오는지"를 손으로(라이브) 확認할 것.
+  useEffect(() => {
+    if (!showAddDep) { depCandidatesFetchedRef.current = false; return; }
+    if (depCandidatesFetchedRef.current) return;
+    depCandidatesFetchedRef.current = true;
+    const params = new URLSearchParams({ boost_candidates_from: story.id });
+    if (projectId) params.set('project_id', projectId);
+    fetch(`/api/stories?${params}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((json) => {
+        const results = (json?.data ?? []) as RawStoryRow[];
+        setDepCandidates(extractReferenceCandidates(results, story.id));
+      })
+      .catch(() => {});
+  }, [showAddDep, story.id, projectId]);
 
   const handleAddDep = async (targetId: string) => {
     setAddingDep(true);
@@ -489,15 +743,21 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     body: c.content,
   }));
 
-  const patchStory = async (body: Record<string, unknown>): Promise<KanbanStory | null> => {
+  // story #2315 — patchStory는 예전엔 `json.data`만 읽어 최상위 형제 필드를 전부 버렸다(채팅
+  // handleSend가 raw 최상위에서 command_gate를 읽는 것과 같은 자리인데, 여기는 그렇게 안 하고
+  // 있었다). description/acceptance_criteria PATCH는 BE가 참조를 추출하는데(#2599)
+  // 그 결과(`references.dropped[]`)를 아직 안 실어보내는 상태 — 그래도 미리 읽는 쪽을 갖춰
+  // 둔다: parseDroppedReferences는 필드가 없으면 빈 배열로 안전하게 폴백하므로(throw 0),
+  // BE가 나중에 사이드밴드를 실어도 FE를 따로 안 건드려도 되고, 지금 당장도 안 깨진다.
+  const patchStory = async (body: Record<string, unknown>): Promise<{ story: KanbanStory | null; dropped: DroppedReference[] }> => {
     const res = await fetch(`/api/stories/${story.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) return null;
+    if (!res.ok) return { story: null, dropped: [] };
     const json = await res.json();
-    return json.data as KanbanStory;
+    return { story: json.data as KanbanStory, dropped: parseDroppedReferences(json) };
   };
 
   const handleChangeStatus = async (newStatus: string) => {
@@ -538,7 +798,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       return;
     }
     setSavingTitle(true);
-    const updated = await patchStory({ title: titleDraft.trim() });
+    const { story: updated } = await patchStory({ title: titleDraft.trim() });
     setSavingTitle(false);
     setEditingTitle(false);
     if (updated) onStoryUpdate?.({ ...story, title: updated.title });
@@ -566,7 +826,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     assigneeIdsRef.current = next;   // 동기 갱신 → 연타 시 다음 클릭이 최신 기준으로 계산
     setLocalAssigneeIds(next);       // 옵티미스틱 — 체크마크/표시 즉시 반영
     // assignee_ids 전체 배열 교체(서버 last-write-wins) → 연타 시 마지막 로컬과 정합.
-    const updated = await patchStory({ assignee_ids: next });
+    const { story: updated } = await patchStory({ assignee_ids: next });
     if (updated) {
       // story #2133 — BE 응답(assignee_ids 우선, 없으면 로컬 next)을 normalizeAssigneePatch로
       // 통과시켜 assignee_id를 손으로 다시 계산하지 않는다.
@@ -586,7 +846,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     assigneeIdsRef.current = [];
     setLocalAssigneeIds([]);         // 옵티미스틱
     setEditingAssignee(false);
-    const updated = await patchStory({ assignee_ids: [] });
+    const { story: updated } = await patchStory({ assignee_ids: [] });
     if (updated) {
       onStoryUpdate?.({ ...story, ...normalizeAssigneePatch({ assignee_ids: [] }) });
     } else {
@@ -602,9 +862,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       return;
     }
     setSavingDescription(true);
-    const updated = await patchStory({ description: descriptionDraft || null });
+    const { story: updated, dropped } = await patchStory({ description: descriptionDraft || null });
     setSavingDescription(false);
     setEditingDescription(false);
+    setReferenceDropped(dropped);
     if (updated) onStoryUpdate?.({ ...story, description: updated.description });
   };
 
@@ -614,9 +875,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       return;
     }
     setSavingAC(true);
-    const updated = await patchStory({ acceptance_criteria: acDraft || null });
+    const { story: updated, dropped } = await patchStory({ acceptance_criteria: acDraft || null });
     setSavingAC(false);
     setEditingAC(false);
+    setReferenceDropped(dropped);
     if (updated) onStoryUpdate?.({ ...story, acceptance_criteria: updated.acceptance_criteria });
   };
 
@@ -639,7 +901,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
         uploaded.push(await res.json() as SendAttachment);
       }
       const next = [...current, ...uploaded]; // 전체 교체: 기존 보존 + 신규 누적
-      const updated = await patchStory({ attachments: next });
+      const { story: updated } = await patchStory({ attachments: next });
       onStoryUpdate?.({ ...story, attachments: updated?.attachments ?? next });
     } catch {
       setAttachError(true);
@@ -660,7 +922,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
   const handleRemoveAttachment = async (url: string) => {
     const next = (story.attachments ?? []).filter((a) => a.url !== url); // filter → 전체 교체
-    const updated = await patchStory({ attachments: next });
+    const { story: updated } = await patchStory({ attachments: next });
     onStoryUpdate?.({ ...story, attachments: updated?.attachments ?? next });
   };
 
@@ -818,21 +1080,27 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Backdrop — overlay 모드(story #2354)에선 완전히 투명한 클릭-바깥-닫기 레이어일 뿐,
+          지도를 시각적으로 가리지 않는다(blur/dim 없음 — AC2 "누른 노드를 가리지 않는다"). */}
       <div
-        className="fixed inset-0 z-40 bg-overlay-backdrop backdrop-blur-sm lg:bg-transparent"
+        className={overlayPosition ? 'fixed inset-0 z-40' : 'fixed inset-0 z-40 bg-overlay-backdrop backdrop-blur-sm lg:bg-transparent'}
         onClick={onClose}
         aria-hidden="true"
       />
 
-      {/* Panel */}
+      {/* Panel — overlay 모드에선 전체화면 드로어 대신 지도 위에 겹치는 소형 팝오버(호출부가
+          계산한 top/bottom + maxHeightPx). 내부 콘텐츠(작업목록·댓글·편집 등)는 완전히 동일 —
+          «재사용»이지 새 컴포넌트가 아니다(story #2354 AC7). */}
       <div
         ref={panelTrapRef}
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={story.title}
-        className="fixed inset-0 z-50 bg-background shadow-xl outline-none backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-3xl lg:border-l lg:border-border"
+        className={overlayPosition
+          ? 'fixed inset-x-4 z-50 mx-auto max-w-xl overflow-hidden rounded-lg border border-border bg-background shadow-xl outline-none backdrop-blur-xl sm:inset-x-auto sm:right-4 sm:w-full'
+          : 'fixed inset-0 z-50 bg-background shadow-xl outline-none backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-3xl lg:border-l lg:border-border'}
+        style={overlayPosition ? { top: overlayPosition.top, height: overlayPosition.heightPx } : undefined}
       >
       <div className="flex h-full flex-col">
         <div className="flex items-start justify-between border-b border-border p-5">
@@ -941,6 +1209,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               humanVerifiedAt={story.human_verified_at}
               memberMap={memberMap}
             />
+            {/* story #2265(C-7) PR1b — "대화 근거"(proof). EvidenceSection 바로 아래,
+                "근거" 계열 이름으로(구조 이름 "참조"·"임베드" 미노출, PO 확定). 0건이면
+                EvidenceSection과 동일하게 null 렌더. */}
+            <ChatProofSection storyId={story.id} />
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {/* story #2104 — BE stories.py:1056이 human-only로 hard-delete를 403 거부한다(되돌릴
@@ -1067,6 +1339,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
             {/* E-DG S12: handoff stuck UX — DISPATCH 직후·handoff_stuck일 때만 조건부 렌더(자체 게이트) */}
             <StuckHandoffSection storyId={story.id} memberMap={memberMap} />
 
+            {/* story #2267(C-9): 「무엇에서 만들었나」(출처) — 컨테이너(epic/sprint/meeting_id,
+                위 필드들)와 다른 축이라 별도 섹션. EntityBacklinksSection과 나란히 두되 먼저
+                — 출처가 "이 항목이 왜 여기 있는지"에 더 가까운 질문이라 위쪽에 둔다. */}
+            <StoryOriginSection storyId={story.id} />
+
             {/* story #2299(E-CONNECT): 이것을 가리키는 것들 — doc/chat_message 참조 목록 첫 자리
                 (doc [slug]/view는 후속 판). */}
             <EntityBacklinksSection entityType="story" entityId={story.id} />
@@ -1124,7 +1401,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 // ⛔이 div에 onClick을 다시 붙이지 않는다 — 편집 진입은 «수정 버튼»으로만.
                 // 본문 안의 링크·멘션·체크박스가 자기 일을 해야 하기 때문이다.
                 <div className="mt-2">
-                  <DescriptionViewer description={story.description} />
+                  <DescriptionViewer description={story.description} references={outgoingRefs} bareNumberTargets={bareNumberTargets} />
                 </div>
               ) : (
                 <button
@@ -1176,7 +1453,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 // ⛔이 div에 onClick을 다시 붙이지 않는다 — 본문 안의 링크·멘션·체크박스가
                 // 자기 일을 해야 하기 때문이다.
                 <div className="mt-2">
-                  <DescriptionViewer description={story.acceptance_criteria} />
+                  <DescriptionViewer description={story.acceptance_criteria} references={outgoingRefs} bareNumberTargets={bareNumberTargets} />
                 </div>
               ) : (
                 <button
@@ -1188,6 +1465,12 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 </button>
               )}
             </div>
+
+            {/* story #2315 — description/acceptance_criteria 저장이 참조를 조용히 거를 수
+                있다는 것을 화면이 말한다(#2294와 동일 컴포넌트·동일 규율 — 종류-무관 문구). */}
+            {referenceDropped.length > 0 && (
+              <ReferenceDropNotice dropped={referenceDropped} onDismiss={() => setReferenceDropped([])} />
+            )}
 
             {/* Attachments — chat-attach 자산 미러 (E-FILE S4) */}
             <div>
@@ -1514,22 +1797,44 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                     placeholder={t('dep.searchPlaceholder')}
                     className="w-full rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                   />
-                  {depQueryResults.length > 0 && (
-                    <ul className="focus-inset max-h-32 overflow-y-auto rounded border border-border bg-background">
-                      {depQueryResults.map((s) => (
-                        <li key={s.id}>
-                          <button
-                            type="button"
-                            onClick={() => void handleAddDep(s.id)}
-                            disabled={addingDep}
-                            className="w-full px-2 py-1.5 text-left text-xs hover:bg-muted truncate disabled:opacity-50"
-                          >
-                            {s.title}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                  {/* story #2328(C-11 ㉡층): 2글자 미만이면 후보(depCandidates), 2글자
+                      이상이면 검색 결과(depQueryResults) — 절대 안 섞는다(갈아치움). */}
+                  {(() => {
+                    const { items, showingCandidates } = selectDepPickerItems(depQuery, depCandidates, depQueryResults);
+                    if (items.length === 0) return null;
+                    return (
+                      <ul className="focus-inset max-h-32 overflow-y-auto rounded border border-border bg-background">
+                        {showingCandidates && (
+                          // story #2328 — 유나 규격 원문의 「── ... ──」는 "구분선이 있다"를
+                          // 아스키로 흉내낸 표기였지 문자로 넣으라는 뜻이 아니었다(2026-07-30
+                          // 확定, PR#2668 되돌림). 스크린리더가 "대시 대시 대시"로 읽고, 폰트별
+                          // 길이가 달라지고, 번역 시 좌우 정렬이 무너진다 — 선이 필요하면 CSS로
+                          // 긋고 문자는 머리글 텍스트만 남긴다.
+                          <li aria-hidden className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            {t('dep.candidatesHeader')}
+                          </li>
+                        )}
+                        {items.map((s) => (
+                          <li key={s.id}>
+                            <button
+                              type="button"
+                              onClick={() => void handleAddDep(s.id)}
+                              disabled={addingDep}
+                              className="w-full px-2 py-1.5 text-left text-xs hover:bg-muted disabled:opacity-50"
+                            >
+                              <span className="block truncate">{s.title}</span>
+                              {showingCandidates ? (
+                                <span className="block truncate text-[11px] text-muted-foreground">
+                                  {t('dep.candidateMentionHint')}
+                                  {'matched_snippet' in s && s.matched_snippet ? ` · ${s.matched_snippet}` : ''}
+                                </span>
+                              ) : null}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    );
+                  })()}
                 </div>
               )}
             </div>

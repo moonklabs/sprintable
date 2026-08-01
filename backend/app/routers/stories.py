@@ -92,6 +92,14 @@ async def list_stories(
     ids: str | None = Query(default=None, description="comma-separated story ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관)"),
     story_number: int | None = Query(default=None, description="프로젝트 내 사람-읽는 #N(project_id와 함께 사용 — N은 project 내에서만 유일)"),
     q: str | None = Query(default=None, description="title 부분검색(ILIKE) — 기존 필터와 AND 결합"),
+    boost_candidates_from: uuid.UUID | None = Query(
+        default=None,
+        description=(
+            "story #2328(C-11 ㉡층) — 이 story의 의미 후보(status=estimated) 대상을 결과 "
+            "맨 앞으로 재정렬(필터링 아님, q 비어도 동작). 해당 항목엔 is_reference_candidate="
+            "true·matched_snippet이 실린다(유나 규격, 2026-07-29)."
+        ),
+    ),
     limit: int = Query(default=1000, ge=1, le=2000),
     cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
     response: Response = None,  # type: ignore[assignment]
@@ -186,7 +194,50 @@ async def list_stories(
     stories = await repo.list(limit=limit, q=q, cursor=cursor_dt, **filters)
     await _attach_assignee_ids(repo.session, repo.org_id, stories)
     await _attach_has_evidence(repo.session, stories)
+    # ⛔일반 함정(2026-07-29, PO 지적 — "측정 경로 ≠ 실행 경로"): `Query(default=None, ...)`
+    # 기본값은 「값」이 아니라 「센티널 객체」다 — FastAPI가 실 HTTP 요청 경유에서만 그것을
+    # 실제 값(여기선 None)으로 해소한다. 이 라우터 함수를 FastAPI 경유 없이 직접 호출하는
+    # 테스트(이 새 파라미터를 모른 채 kwargs를 안 넘기는 기존 다수 — test_2188_*·
+    # test_2189_*·test_083176e8_* 등)는 그 센티널 객체 그대로를 받는다. 센티널은 `is not
+    # None` 가드를 «참»으로 통과시켜 버린다("None이 아니다"는 맞지만 "UUID다"는 아니다) —
+    # DB 쿼리에 UUID 자리로 새 나가 asyncpg가 깨진다. ⛔이 코드베이스 다른 곳에 `Query(...)`/
+    # `Depends(...)` 기본값을 옵셔널 파라미터로 받는 자리가 또 있으면 같은 함정이다 —
+    # `is not None`이 아니라 `isinstance(..., <실제타입>)`으로 검사할 것.
+    if isinstance(boost_candidates_from, uuid.UUID):
+        stories = await _boost_reference_candidates(
+            repo.session, repo.org_id, stories, boost_candidates_from,
+        )
     return [StoryResponse.model_validate(s) for s in stories]
+
+
+async def _boost_reference_candidates(
+    session: AsyncSession, org_id: uuid.UUID, stories: list[Story], source_id: uuid.UUID,
+) -> list[Story]:
+    """story #2328(C-11 ㉡층, 유나 규격 2026-07-29) — 의존성 고르기 검색결과 중 source_id
+    story의 의미 후보(status=estimated)를 맨 앞으로 재정렬한다. ⛔거르지 않는다(유나 규격
+    ③) — 전달받은 stories를 그대로 재정렬만 한다. 후보인 항목엔 transient attr(agent_
+    delegate_ids 패턴 동형)로 is_reference_candidate=True·matched_snippet을 세팅해
+    "왜 여기 있는지"를 응답에 싣는다(유나 규격 ①② — 뱃지가 아니라 이유, 지어내지 않는다)."""
+    from app.models.reference_semantic_candidate import ReferenceSemanticCandidate
+
+    result = await session.execute(
+        select(ReferenceSemanticCandidate.target_id, ReferenceSemanticCandidate.snippet).where(
+            ReferenceSemanticCandidate.org_id == org_id,
+            ReferenceSemanticCandidate.source_type == "story",
+            ReferenceSemanticCandidate.source_id == source_id,
+            ReferenceSemanticCandidate.target_type == "story",
+            ReferenceSemanticCandidate.status == "estimated",
+        )
+    )
+    snippet_by_target: dict[uuid.UUID, str] = {row.target_id: row.snippet for row in result.all()}
+    if not snippet_by_target:
+        return stories
+    for story in stories:
+        if story.id in snippet_by_target:
+            story.is_reference_candidate = True
+            story.matched_snippet = snippet_by_target[story.id]
+    # stable sort — 후보가 앞으로, 각 그룹 내 원래 상대순서는 그대로 유지(유나 규격 ③).
+    return sorted(stories, key=lambda s: 0 if s.id in snippet_by_target else 1)
 
 
 async def _attach_agent_delegate_ids(session: AsyncSession, stories: list[Story]) -> None:
@@ -258,11 +309,17 @@ async def _assert_story_project_access(
     """E-SECURITY SEC-S8(story 83ea3d6a) G: 개별-ID story 접근(get/update/status)이 org-scope만
     있고 project 접근권 미검증이던 갭 — 같은 org 다른 project 멤버가 story id만 알면 조회/수정
     가능했다. upload_story_attachment와 동형으로 has_project_access 재사용(휴먼 team_member·
-    에이전트 project_access grant 양쪽 처리). delete_story는 SEC-S3(#2014)가 별도 처리."""
+    에이전트 project_access grant 양쪽 처리). delete_story는 SEC-S3(#2014)가 별도 처리.
+
+    ⛔story #2322(2026-07-29, PO 판정): 무권한을 403이 아닌 404로 낸다 — 존재 비노출 규율을
+    이 파일 전체에서 통일한다(participation.py의 동명 헬퍼·gates.py get_gate_endpoint가 이미
+    이 규율이었다 — 「같은 엔티티가 경로마다 다른 답」을 내던 것이 진짜 결함이었다). 조직
+    경계(다른 org)는 이 함수 호출 前에 이미 404로 막혀 있다(repo.get()의 org 필터) — 이 함수가
+    새로 여는 것은 「조직 안·프로젝트 밖」 하나뿐이고, 그 답도 이제 404다."""
     from app.services.project_auth import has_project_access
 
     if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
-        raise HTTPException(status_code=403, detail="No access to this project")
+        raise HTTPException(status_code=404, detail="Story not found")
 
 
 async def _upsert_assignee_participation(
@@ -337,6 +394,21 @@ def _enforce_mcp_attachment_declared_limit(attachments: list[dict]) -> None:
 
 _STORY_LINK_TABLES = {"epic_id": "goals", "sprint_id": "sprints", "meeting_id": "meetings"}
 
+# ⛔story #2346 AC3(2026-07-30, story 하나만 먼저 — docs.py/agent_runs.py는 미착수, 아래
+# _STORY_UPDATED_ACTIVITY_TODO 참조): 「긴 텍스트 필드」의 정의를 한 자리 상수로 — 필드명을
+# 흩어 놓지 않는다. 나중에 필드가 늘면 여기만 고친다.
+_LENGTH_TRACKED_FIELDS = ("description", "acceptance_criteria")
+# ⛔story #2346 AC7(2026-07-30, PO 판정 — 사람 세기에서 기계 게이트로 격상): 같은 날 실제로
+# 난 3건의 급감 사고가 전부 -80%대였다(3619→437·4052→경고문구·2121→진행현황뿐) — 그보다
+# 훨씬 낮은 50%를 임계로 잡아도 셋 다 막혔을 것이다. `allow_shrink=true`로 명시 승인 가능.
+_SHRINK_BLOCK_THRESHOLD = 0.5
+# ⛔story #2346 AC7 정정(2026-07-30, PO 지적 — 「원본 길이」 floor는 구멍을 남긴다): 200자
+# 본문이 통째로 지워지는 것("읽지 않고 쓰는" 것 자체가 문제지 길이가 아니다)은 원본-길이
+# floor로는 안 막혔다. 「원본 길이」 대신 「손실 절대량」으로 자를 바꾼다 — floor가 필요
+# 없어진다: entity 토큰(~48자→14자, -70%지만 -34자)은 절대량이 작아 안 막히고, 200자→10자
+# (-95%·-190자)는 막힌다 — 특수 분기 없이 자연히 갈린다.
+_SHRINK_BLOCK_MIN_LOST_CHARS = 100
+
 
 async def _assert_story_link_targets_in_project(
     session: AsyncSession, project_id: uuid.UUID, body: "StoryCreate | StoryUpdate",
@@ -380,6 +452,74 @@ async def _assert_human_owner(
             status_code=400,
             detail="human_owner_member_id는 human member만 지정할 수 있습니다.",
         )
+
+
+async def _reconcile_story_references_and_candidates(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    story: Story,
+    check_description: bool,
+    check_acceptance_criteria: bool,
+    mention_actor_id: uuid.UUID | None,
+) -> None:
+    """story #2301/#2328 공용 코어 — description·acceptance_criteria의 `#`엔티티 토큰을
+    entity_references(#2259)로 걷고 reference_semantic_candidates(#2328)를 얹는다.
+
+    ⛔파울로 판정(2026-07-30, dev 전수스윕 0/420 사고 원인): 이 로직이 원래 update_story()
+    에만 있었다 — create_story()는 한 번도 부르지 않았다. "새 참조만(소급 안 함)"이라는
+    #2328 판정이 "저장 시점마다"를 의도했는데, 실제로는 "«수정» 시점마다"로만 구현된 것
+    (create가 빠짐 — 사람은 스토리를 만들 때 본문을 다 쓰고 만들므로 "새 것"의 대부분이
+    이 갭에 빠졌다). create_story·update_story 둘 다 **이 함수 하나**를 호출한다 — 로직을
+    두 벌 만들지 않는다(파울로 명시 지시)."""
+    from app.services.mention_parser import (
+        extract_chat_entity_mentions,
+        reconcile_entity_references,
+        resolve_bare_number_story_refs,
+    )
+    from app.services.reference_semantic_candidates import generate_and_store_candidates
+
+    _ref_stored = 0
+    _ref_dropped: list[dict[str, str]] = []
+    if check_description:
+        _desc_text = story.description or ""
+        _desc_pairs = extract_chat_entity_mentions(_desc_text)
+        _desc_bare_refs = await resolve_bare_number_story_refs(
+            db, org_id=org_id, project_id=story.project_id, content=_desc_text,
+        )
+        _desc_result = await reconcile_entity_references(
+            db, org_id=org_id, source_type="story", source_field="description",
+            source_id=story.id,
+            extracted_refs=[(t, i, "mention") for t, i in _desc_pairs] + _desc_bare_refs,
+            created_by=mention_actor_id,
+        )
+        _ref_stored += _desc_result.stored
+        _ref_dropped.extend(_desc_result.dropped)
+        await generate_and_store_candidates(
+            db, org_id=org_id, project_id=story.project_id, source_type="story",
+            source_field="description", source_id=story.id, content=_desc_text,
+        )
+    if check_acceptance_criteria:
+        _ac_text = story.acceptance_criteria or ""
+        _ac_pairs = extract_chat_entity_mentions(_ac_text)
+        _ac_bare_refs = await resolve_bare_number_story_refs(
+            db, org_id=org_id, project_id=story.project_id, content=_ac_text,
+        )
+        _ac_result = await reconcile_entity_references(
+            db, org_id=org_id, source_type="story", source_field="acceptance_criteria",
+            source_id=story.id,
+            extracted_refs=[(t, i, "mention") for t, i in _ac_pairs] + _ac_bare_refs,
+            created_by=mention_actor_id,
+        )
+        _ref_stored += _ac_result.stored
+        _ref_dropped.extend(_ac_result.dropped)
+        await generate_and_store_candidates(
+            db, org_id=org_id, project_id=story.project_id, source_type="story",
+            source_field="acceptance_criteria", source_id=story.id, content=_ac_text,
+        )
+    # 채팅(conversations.py)과 동일 게이트: 정상 경로(둘 다 0)에선 필드 자체를 안 싣는다.
+    if _ref_stored or _ref_dropped:
+        story.references = {"stored": _ref_stored, "dropped": _ref_dropped}
 
 
 @router.post("", response_model=StoryResponse, status_code=201)
@@ -481,6 +621,71 @@ async def create_story(
         entity_type="story", entity_id=story.id, project_id=story.project_id,
         title=story.title,
     )
+    # story #2267(C-9): 출처(「무엇에서 만들었나」) — 컨테이너(epic/sprint/meeting_id)와
+    # 다른 축. 둘 다 제공됐을 때만(하나만 있으면 무시 — 부분입력은 의미가 없다) entity_
+    # references에 relation='created_from' 한 줄을 심는다. source_field='self' — 텍스트
+    # 필드에서 파싱된 게 아니라(그런 "필드"가 없다) 엔티티 전체가 원인이라는 sentinel
+    # (source_field 기존 관례 "body"와 같은 원칙, 값만 다름 — app/models/reference.py 참조).
+    # ⛔소급 없음(이 호출 자체가 신규 생성 시점에만 있다 — 옛 스토리는 그대로 「아직 모름」).
+    #
+    # ⭐story #2222(AC5, 2026-07-31 오르테가 확認 — 「지금도 도는 결함」): 예전엔 이 블록의
+    # 실패(예: registry 밖 origin_type)가 get_db의 단일 커밋/전체롤백 불변식을 그대로 타서
+    # **story 생성 전체를 실패시켰다**(부분성공 회피가 목적이었으나, 「낳음」 자동부착은
+    # story #2222부터 best-effort 부가기능이라 이 실패모드가 AC5와 정반대가 됐다 — caller가
+    # 0개라 지금까지 안 터졌을 뿐 이미 있던 결함). SAVEPOINT(begin_nested)로 격리해 이
+    # 블록만 롤백하고 story 생성은 그대로 진행한다(feedback_savepoint_failopen_session_
+    # poison 패턴 재사용 — 실패가 바깥 세션을 poison하지 않도록 격리).
+    if body.origin_type is not None and body.origin_id is not None:
+        from app.services.reference_core import insert_reference
+
+        try:
+            async with session.begin_nested():
+                await insert_reference(
+                    session,
+                    org_id=org_id,
+                    source_type=body.origin_type,
+                    source_field="self",
+                    source_id=body.origin_id,
+                    target_type="story",
+                    target_id=story.id,
+                    form="mention",
+                    created_by=await _resolve_team_member_id(auth, org_id, session),
+                    relation="created_from",
+                )
+        except Exception:
+            # AC5: 자동부착 실패가 story 생성을 막지 않는다 — 조용히 삼키지 않고 로그로 남긴다.
+            logger.warning(
+                "story #2222: created_from 자동부착 실패(story_id=%s origin_type=%s origin_id=%s) "
+                "— story 생성은 그대로 진행",
+                story.id, body.origin_type, body.origin_id, exc_info=True,
+            )
+    elif body.origin_type is None and body.origin_id is None:
+        # ⚠️story #2222 AC3 — 「부모 없음」을 명시로 구분해 기록하는 것의 **약한 형태**다(오르테가
+        # 확認, 2026-07-31): entity_references는 행이 없으면 없는 것으로 두는 기존 철학을
+        # 그대로 따르므로(새 마킹 컬럼/행을 만들지 않는다), 이 로그만으로는 「진짜 최상위 생성」과
+        # 「에이전트가 알면서 origin을 안 채운 누락」이 데이터상 구분되지 않는다 — 나중에 셀 수
+        # 있게 로그로 남기는 것으로 **AC3을 갈음**할 뿐, 강한 형태(둘을 데이터로 구분)는 다음 판.
+        logger.info(
+            "story #2222: origin_type/origin_id 미지정(story_id=%s) — 최상위 생성으로 간주 "
+            "(AC3 약한 형태: 로그로만 구분, 강한 구분은 후속)",
+            story.id,
+        )
+    # ⛔파울로 판정(2026-07-30, dev 전수스윕 0/420 사고): entity_references(#2259/#2301)·
+    # reference_semantic_candidates(#2328) reconcile이 update_story()에만 있고 이 함수
+    # (POST 생성)에는 «한 번도» 없었다 — 사람은 스토리를 «본문을 다 쓰고» 만드는 것이
+    # 보통이라, 이 갭이 "새 것"의 대부분을 빠뜨렸다(#2330이 그 실물 증거 — 아래 참조).
+    # update_story와 같은 트랜잭션 원자성(같은 세션, commit 전 — 실패 시 story 생성
+    # 전체가 롤백)으로 붙인다.
+    _mention_actor_id: uuid.UUID | None = None
+    try:
+        _mention_actor_id = await _resolve_team_member_id(auth, org_id, session)
+    except Exception:
+        _mention_actor_id = None
+    await _reconcile_story_references_and_candidates(
+        session, org_id=org_id, story=story,
+        check_description=True, check_acceptance_criteria=True,
+        mention_actor_id=_mention_actor_id,
+    )
     return StoryResponse.model_validate(story)
 
 
@@ -579,6 +784,565 @@ async def get_story_backlinks(
         repo.session, org_id=repo.org_id, target_type="story", target_id=id,
         auth=auth, limit=limit, cursor=before,
     )
+
+
+# ─── 의미 후보(story #2328·C-11 ㉡층·E-CONNECT — 3단계 승격의 ②③) ─────
+@router.get("/{id}/reference-candidates")
+async def get_story_reference_candidates(
+    id: uuid.UUID,
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[dict]:
+    """GET /api/v2/stories/{id}/reference-candidates — 이 story의 본문/AC에서 관찰된 맨 번호
+    참조 위에 얹힌 「의미 후보」 목록(AC5: 별도 정리 화면이 아니라 story 상세 화면이 이 자리에서
+    직접 부른다). get_story_backlinks와 동일 접근 게이트(`_assert_story_project_access`)."""
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.services.reference_semantic_candidates import list_candidates_for_source
+
+    candidates = await list_candidates_for_source(
+        repo.session, org_id=repo.org_id, source_type="story", source_id=id,
+    )
+    return [
+        {
+            "id": str(c.id),
+            "source_field": c.source_field,
+            "target_type": c.target_type,
+            "target_id": str(c.target_id),
+            "relation_kind": c.relation_kind,
+            "matched_keyword": c.matched_keyword,
+            "snippet": c.snippet,
+            "status": c.status,
+            "declared_by": str(c.declared_by) if c.declared_by else None,
+            "declared_at": c.declared_at.isoformat() if c.declared_at else None,
+            "created_at": c.created_at.isoformat(),
+        }
+        for c in candidates
+    ]
+
+
+class DeclareNewReferenceRequest(BaseModel):
+    target_id: uuid.UUID
+    relation_kind: str | None = None
+
+
+@router.post("/{id}/reference-candidates", status_code=201)
+async def declare_new_story_reference_candidate(
+    id: uuid.UUID,
+    body: DeclareNewReferenceRequest,
+    response: Response,
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """POST /api/v2/stories/{id}/reference-candidates — story #2355: 사람이 «후보가 아예
+    없던» 이 story(source) ↔ target_id(story) 연결을 처음 만든다. 기존 declare/relation-kind/
+    reject 셋 다 기존 candidate_id가 있어야만 쓰는 것과 달리, 이 엔드포인트는 그 candidate_id
+    자체를 새로 만든다(#2355 AC1). 방향은 «끈 순서» — id=source(«여기서 시작함»), target_id=
+    target(«여기로 놓음»).
+
+    ⛔오르테가 지적(2026-07-31): 이미 declared인 쌍에 재호출하면 ON CONFLICT WHERE가 거짓이라
+    실제로는 아무것도 안 바뀌는데, 응답이 늘 201·"바뀐 값처럼" 보이면 호출자가 조용히
+    오독한다 — 409는 안 쓴다(이미 이어진 것은 오류가 아니다). 대신 `created`로 명시 구별하고
+    (no-op이면 200으로 status_code도 함께 낮춘다), 부르는 쪽이 "이미 있었다"를 코드로
+    구별할 수 있게 한다.
+
+    ⛔IDOR 수정(오르테가 실측, 2026-07-31): target도 source와 «독립적으로» project 접근권을
+    검사한다(references.py create_reference의 양쪽-아이템 게이트와 동형 — "반쪽 금지").
+    이전엔 org_id만 걸러 접근 못 하는 프로젝트의 story를 target으로 연결할 수 있었고,
+    404(없음)/201(성공)이 갈려 존재 여부까지 샜다. 미존재·무권한 두 경우 모두 같은
+    404 "Target story not found"로 응답해 존재 비노출을 지킨다."""
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    if body.target_id == id:
+        raise HTTPException(status_code=400, detail="Cannot link a story to itself")
+
+    from app.services.project_auth import has_project_access
+
+    target = (await repo.session.execute(
+        select(Story.id, Story.project_id).where(Story.id == body.target_id, Story.org_id == repo.org_id)
+    )).one_or_none()
+    if target is None or not await has_project_access(
+        repo.session, uuid.UUID(auth.user_id), target.project_id, repo.org_id
+    ):
+        raise HTTPException(status_code=404, detail="Target story not found")
+
+    from app.services.reference_semantic_candidates import (
+        InvalidPortRelationKindError,
+        declare_new_candidate,
+    )
+
+    actor_id = await _resolve_team_member_id(auth, repo.org_id, repo.session)
+    try:
+        outcome = await declare_new_candidate(
+            repo.session, org_id=repo.org_id, source_type="story", source_field="body",
+            source_id=id, target_type="story", target_id=body.target_id,
+            relation_kind=body.relation_kind, declared_by=actor_id,
+        )
+    except InvalidPortRelationKindError:
+        raise HTTPException(status_code=400, detail="Invalid relation_kind")
+    await repo.session.commit()
+    candidate = outcome.candidate
+    if not outcome.created:
+        response.status_code = 200
+    return {
+        "id": str(candidate.id),
+        "target_id": str(candidate.target_id),
+        "relation_kind": candidate.relation_kind,
+        "status": candidate.status,
+        "declared_by": str(candidate.declared_by) if candidate.declared_by else None,
+        "declared_at": candidate.declared_at.isoformat() if candidate.declared_at else None,
+        "created": outcome.created,
+    }
+
+
+@router.post("/{id}/reference-candidates/{candidate_id}/declare")
+async def declare_story_reference_candidate(
+    id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """POST .../declare — AC5: 사람이 후보를 골라 「선언됨」으로 승격. ⛔AC4: 이 엔드포인트가
+    바꾸는 것은 candidate.status/declared_by/declared_at 셋뿐이다 — 막힘·대기·종료·에이전트
+    실행 등 다른 어떤 부수효과도 일으키지 않는다(회귀 테스트가 이 계약을 지킨다)."""
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.services.reference_semantic_candidates import (
+        CandidateNotFoundError,
+        declare_candidate,
+    )
+
+    actor_id = await _resolve_team_member_id(auth, repo.org_id, repo.session)
+    try:
+        candidate = await declare_candidate(
+            repo.session, org_id=repo.org_id, source_id=id, candidate_id=candidate_id,
+            declared_by=actor_id,
+        )
+    except CandidateNotFoundError:
+        raise HTTPException(status_code=404, detail="Reference candidate not found")
+    await repo.session.commit()
+    return {
+        "id": str(candidate.id),
+        "status": candidate.status,
+        "declared_by": str(candidate.declared_by) if candidate.declared_by else None,
+        "declared_at": candidate.declared_at.isoformat() if candidate.declared_at else None,
+    }
+
+
+class SetReferenceCandidateRelationKindRequest(BaseModel):
+    relation_kind: str | None = None
+
+
+@router.post("/{id}/reference-candidates/{candidate_id}/relation-kind")
+async def set_story_reference_candidate_relation_kind(
+    id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    body: SetReferenceCandidateRelationKindRequest,
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """POST .../relation-kind — story #2223 판정(오르테가군, 2026-07-30): "이 연결이
+    실재하는가"(declare, 위)와 "무슨 종류인가"(이 엔드포인트)는 «다른 질문» — 한 클릭에
+    안 묶는다. declare 전후 아무 때나 호출 가능(순서 강제 없음). relation_kind=null로
+    미분류로 되돌릴 수 있다(AC10 정신)."""
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.services.reference_semantic_candidates import (
+        CandidateNotFoundError,
+        InvalidRelationKindError,
+        set_candidate_relation_kind,
+    )
+
+    try:
+        candidate = await set_candidate_relation_kind(
+            repo.session, org_id=repo.org_id, source_id=id, candidate_id=candidate_id,
+            relation_kind=body.relation_kind,
+        )
+    except CandidateNotFoundError:
+        raise HTTPException(status_code=404, detail="Reference candidate not found")
+    except InvalidRelationKindError:
+        raise HTTPException(status_code=400, detail="Invalid relation_kind")
+    await repo.session.commit()
+    return {"id": str(candidate.id), "relation_kind": candidate.relation_kind}
+
+
+class RejectRelationRequest(BaseModel):
+    reason: str | None = None
+
+
+@router.post("/{id}/reference-candidates/{candidate_id}/reject")
+async def reject_story_reference_candidate(
+    id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    body: RejectRelationRequest = RejectRelationRequest(),
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """POST .../reject — story #2221 후속(오르테가 판정, 2026-07-30): 관계 단위 기각(간선이
+    아니라 관계 — 유나 지적). 이 candidate 행이 가리키는 (source, target) 쌍 전체를
+    `rejected_relations`에 기록하고, 같은 쌍을 가리키는 다른 field/form의 candidate 행도
+    함께 지운다 — 그래야 「description에서 기각했는데 AC에서 또 뜬다」가 안 생긴다. 다음
+    산문 임포트부터 이 쌍은 후보 생성 단계에서 걸러진다(지우기가 아니라 기록이라 영속)."""
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.services.reference_semantic_candidates import (
+        CandidateNotFoundError,
+        reject_candidate,
+    )
+
+    actor_id = await _resolve_team_member_id(auth, repo.org_id, repo.session)
+    try:
+        await reject_candidate(
+            repo.session, org_id=repo.org_id, source_id=id, candidate_id=candidate_id,
+            rejected_by=actor_id, reason=body.reason,
+        )
+    except CandidateNotFoundError:
+        raise HTTPException(status_code=404, detail="Reference candidate not found")
+    await repo.session.commit()
+    return {"ok": True}
+
+
+@router.delete("/{id}/reference-candidates/{candidate_id}")
+async def undeclare_story_reference_candidate(
+    id: uuid.UUID,
+    candidate_id: uuid.UUID,
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """DELETE .../reference-candidates/{candidate_id} — story #2355(AC8): 사람이 만든(또는
+    승격한) 연결을 지운다. ⛔`reject`와 다른 것이다 — reject는 `rejected_relations`에 기록해
+    다음 스캔에서도 영구히 거르지만, 이건 기록을 안 남긴다(실수로 지운 것을 영영 못 잇게
+    되면 안 되므로). status='declared'가 아닌 행(아직 estimated인 기계 후보)은 400 —
+    그런 행은 `reject`가 맞는 경로다."""
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.services.reference_semantic_candidates import (
+        CandidateNotDeclaredError,
+        CandidateNotFoundError,
+        undeclare_candidate,
+    )
+
+    try:
+        await undeclare_candidate(
+            repo.session, org_id=repo.org_id, source_id=id, candidate_id=candidate_id,
+        )
+    except CandidateNotFoundError:
+        raise HTTPException(status_code=404, detail="Reference candidate not found")
+    except CandidateNotDeclaredError:
+        raise HTTPException(
+            status_code=400, detail="Only a declared reference can be removed this way; use reject",
+        )
+    await repo.session.commit()
+    return {"ok": True}
+
+
+@router.get("/{id}/rejected-relations")
+async def list_story_rejected_relations(
+    id: uuid.UUID,
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[dict]:
+    """GET .../rejected-relations — 이 story가 기각한 관계 목록(되살리기 UI용)."""
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from sqlalchemy import select as _select
+
+    from app.models.rejected_relation import RejectedRelation
+
+    rows = (await repo.session.execute(
+        _select(RejectedRelation).where(
+            RejectedRelation.org_id == repo.org_id,
+            RejectedRelation.source_type == "story",
+            RejectedRelation.source_id == id,
+        )
+    )).scalars().all()
+    return [
+        {
+            "id": str(r.id),
+            "target_type": r.target_type,
+            "target_id": str(r.target_id),
+            "reason": r.reason,
+            "rejected_by": str(r.rejected_by) if r.rejected_by else None,
+            "rejected_at": r.rejected_at.isoformat(),
+        }
+        for r in rows
+    ]
+
+
+@router.delete("/{id}/rejected-relations/{target_id}")
+async def undo_story_rejected_relation(
+    id: uuid.UUID,
+    target_id: uuid.UUID,
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """DELETE .../rejected-relations/{target_id} — 되살리기(오르테가 판정: 지금은 단순하게,
+    rejected_relations 행을 삭제한다 — 되살린 기록 자체는 안 남긴다). ⛔되살려도 candidate
+    행이 즉시 돌아오지 않는다 — 다음 story 저장이 있어야 새로 후보가 생긴다(이 모듈의
+    "새 참조만" 설계 원칙, #2328 ③)."""
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.services.reference_semantic_candidates import (
+        RejectedRelationNotFoundError,
+        undo_rejection,
+    )
+
+    try:
+        await undo_rejection(
+            repo.session, org_id=repo.org_id, source_type="story", source_id=id,
+            target_type="story", target_id=target_id,
+        )
+    except RejectedRelationNotFoundError:
+        raise HTTPException(status_code=404, detail="Rejected relation not found")
+    await repo.session.commit()
+    return {"ok": True}
+
+
+async def _visible_target_ids(
+    session: AsyncSession, org_id: uuid.UUID, caller_id: uuid.UUID,
+    ids_by_type: dict[str, set[uuid.UUID]], auth: AuthContext,
+    conversation_id_by_target_id: dict[uuid.UUID, uuid.UUID] | None = None,
+) -> dict[str, set[uuid.UUID]]:
+    """story #2263 AC6 — outgoing references의 TARGET 측 가시성. C-3(#2261)의 존재-비노출
+    규율 그대로: 등록되지 않은 target_type이거나 project_id를 못 구하면(row 없음) 안 보이는
+    쪽으로 fail-closed — reference_registry.PROJECT_ID_RESOLVERS(story #2314가 evidence에
+    이미 재사용한 그 SSOT)를 여기서도 그대로 쓴다, 새 인증경로 발명 없음.
+
+    ⛔chat_message는 예외 축 — project로 스코프되지 않는다(참여자 기반, #2261 시기부터 알려진
+    "넷째 경계"). PROJECT_ID_RESOLVERS에 없으므로 project 분기를 안 타고, POST 라우트이 이미
+    쓰는 `_can_read_conversation`(participant 기반 SSOT)를 그대로 재사용한다 — conversation_id
+    는 ConversationMessage row를 다시 join하지 않고 `Reference.proof_payload`에 이미 저장된
+    값을 호출부가 넘겨준다(그 payload가 유일한 SSOT — write 시점에 검증된 그 conversation_id
+    그대로, message row 존재 여부와 무관하게 일관된 값)."""
+    from app.services.project_auth import has_project_access
+    from app.services.reference_registry import PROJECT_ID_RESOLVERS
+
+    visible: dict[str, set[uuid.UUID]] = {}
+    conversation_id_by_target_id = conversation_id_by_target_id or {}
+    for target_type, target_ids in ids_by_type.items():
+        if target_type == "chat_message":
+            from app.routers.conversations import _can_read_conversation
+
+            for target_id in target_ids:
+                conv_id = conversation_id_by_target_id.get(target_id)
+                if conv_id is not None and await _can_read_conversation(conv_id, session, auth, org_id):
+                    visible.setdefault(target_type, set()).add(target_id)
+            continue
+
+        resolver = PROJECT_ID_RESOLVERS.get(target_type)
+        if resolver is None:
+            continue
+        for target_id in target_ids:
+            project_id = await resolver(session, org_id, target_id)
+            if project_id is not None and await has_project_access(session, caller_id, project_id, org_id):
+                visible.setdefault(target_type, set()).add(target_id)
+    return visible
+
+
+@router.get("/{id}/references")
+async def get_story_outgoing_references(
+    id: uuid.UUID,
+    direction: str = Query(default="outgoing"),
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """GET /api/v2/stories/{id}/references?direction=outgoing — story #2263 AC6(오르테가
+    판정 2026-07-29): 이 story가 가리키는 것(reference_core.list_references의 첫 실제
+    소비자 — 그때까지 이 함수를 부르는 라우터가 0곳이었다). `direction=incoming`은 이 라우트
+    범위 밖(그건 이미 GET /{id}/backlinks가 다른 응답 shape로 다룬다) — 명시 400으로 거부해
+    「둘 다 되는 척」을 안 한다.
+
+    TARGET(이 story 자신)은 get_story_backlinks와 동일 게이트(`_assert_story_project_access`
+    — 없으면 404, 있지만 project 밖이면 404, #2322 PR#1 통일 반영). 다시 가리키는 쪽(outgoing
+    의 반대편, 즉 이 story가 가리키는 대상들)의 가시성은 `_visible_target_ids`가 판정 —
+    C-3(#2261)이 세운 것과 같은 규율(못 보는 대상은 존재 사실도 새지 않는다).
+
+    응답은 proof_payload를 그대로 싣는다(PO 정정, 2026-07-29): 처음엔 "목록=메타만·단건=
+    payload전량"으로 갈랐으나, 그 갈림이 소비 패턴을 안 보고 낸 판단이었다 — C-7 proof
+    섹션은 카드를 여럿 펼쳐 보이는 자리라 단건 상세 라우트를 따로 지으면 N+1이 된다(그리고
+    아무도 그 단건 라우트를 지은 적이 없어 "저장은 되는데 읽을 길이 없다"는 상태이기도
+    했다). 크기 문제는 응답 shape이 아니라 저장 시점 범위 상한으로 막는다(PO: 지금은 하드
+    리밋 없이 로그만, 실사용 뒤 정한다)."""
+    if direction != "outgoing":
+        raise HTTPException(status_code=400, detail="direction must be 'outgoing' (incoming: use /backlinks)")
+
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.models.reference import Reference
+    from app.services.reference_core import list_references
+
+    raw_targets = (await repo.session.execute(
+        select(Reference.target_type, Reference.target_id, Reference.proof_payload).where(
+            Reference.org_id == repo.org_id, Reference.source_type == "story", Reference.source_id == id,
+        )
+    )).all()
+    ids_by_type: dict[str, set[uuid.UUID]] = {}
+    conversation_id_by_target_id: dict[uuid.UUID, uuid.UUID] = {}
+    for target_type, target_id, proof_payload in raw_targets:
+        ids_by_type.setdefault(target_type, set()).add(target_id)
+        if target_type == "chat_message" and proof_payload and proof_payload.get("conversation_id"):
+            conversation_id_by_target_id[target_id] = uuid.UUID(str(proof_payload["conversation_id"]))
+
+    caller_id = uuid.UUID(str(auth.user_id))
+    visible = await _visible_target_ids(
+        repo.session, repo.org_id, caller_id, ids_by_type, auth, conversation_id_by_target_id,
+    )
+
+    refs = await list_references(
+        repo.session, org_id=repo.org_id, entity_type="story", entity_id=id,
+        direction="outgoing", visible_ids_by_type=visible,
+    )
+
+    # story #2269(C-11) AC0-2 축B(2026-07-29, PO 지적): 「#<번호> 관찰 수집(축A, #2643)」만
+    # 해서는 화면에 아무것도 안 뜬다 — render-time 치환에 필요한 번호→story_id 매핑을 이
+    # 응답에 함께 싣는다. description+acceptance_criteria 둘 다 스캔해 하나로 합친다(번호는
+    # project 스코프라 필드와 무관하게 항상 같은 대상을 가리킨다). ⛔대괄호 참조(위 `refs`)와
+    # 달리 이 매핑은 가시성(visible) 필터를 거치지 않는다 — story는 이 write-path가 project
+    # 안에서만 해소하므로(project_id 스코프 자체가 가시성 경계와 같다) 별도 존재-비노출
+    # 판정이 이미 필요 없다(C-3 원칙과 충돌하지 않음 — target이 항상 caller와 같은 project다).
+    from app.services.mention_parser import resolve_bare_number_story_targets
+
+    bare_number_targets: dict[int, uuid.UUID] = {}
+    for field_text in (story.description, story.acceptance_criteria):
+        if not field_text:
+            continue
+        resolved = await resolve_bare_number_story_targets(
+            repo.session, org_id=repo.org_id, project_id=story.project_id, content=field_text,
+        )
+        bare_number_targets.update(resolved)
+
+    return {
+        "data": [
+            {
+                "id": str(r.id),
+                "form": r.form,
+                "target_type": r.target_type,
+                "target_id": str(r.target_id),
+                # story #2262 AC1(「지점」, PO 판정 2026-07-30): 「이 참조가 언제 생겼나」이지
+                # 「대상이 언제 만들어졌나」가 아니다 — mention_parser.fetch_stored_references()는
+                # 이미 referenced_at으로 나가는데(conversations.py 소비), 이 라우트(story의
+                # outgoing references)는 reference_core.list_references()를 써서 이름이 안 바뀐
+                # 채 남아 있었다(실 dev GET으로 발견 — 본문의 "이미 반환한다"는 처방이지 현재
+                # 상태가 아니었다).
+                "referenced_at": r.created_at.isoformat(),
+                "still_exists": r.still_exists,
+                "proof_payload": r.proof_payload,
+            }
+            for r in refs
+        ],
+        "bare_number_targets": {str(number): str(story_id) for number, story_id in bare_number_targets.items()},
+    }
+
+
+class CreateStoryProofReferenceRequest(BaseModel):
+    """story #2263 AC6(2026-07-29, 오르테가 판정) — C-7(#2265) 「선택→저장」 전용 write
+    계약. 지금은 target=chat_message·form=proof 조합 하나만 지원한다(다른 target_type/form은
+    이 라우트가 필요해지면 그때 넓힌다 — #2260/#2261이 반복한 "안 쓰는 라우터 미리 짓지
+    않는다" 원칙과 동형)."""
+
+    target_type: str
+    target_id: uuid.UUID
+    form: str
+    proof_payload: dict
+
+
+@router.post("/{id}/references", status_code=201)
+async def create_story_proof_reference(
+    id: uuid.UUID,
+    body: CreateStoryProofReferenceRequest,
+    repo: StoryRepository = Depends(_get_repo),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """POST /api/v2/stories/{id}/references — story #2263 AC6 후속(2026-07-29, 오르테가
+    판정): `insert_reference`가 프로덕션 호출부 0건이라 C-7(#2265, 대화 조각 인용)이 저장할
+    라우트가 없었다 — 그 첫 write 소비자를 연다. 읽기(GET /{id}/references)와 같은 PR —
+    write→read 왕복이 그 안에서 증명된다.
+
+    지금은 target_type="chat_message"·form="proof" 조합만 지원(위 스키마 docstring 참조) —
+    그 밖은 명시 400(조용한 무시 금지).
+
+    권한 셋:
+    ①source(이 story)는 get_story_backlinks/GET references와 동일 게이트
+      (`_assert_story_project_access`, #2322 통일).
+    ②target(인용되는 conversation) — 그 대화를 못 읽는 사람이 조각을 박으면 안 된다(PO
+      판정) — `conversations._can_read_conversation`(canonical 단건 predicate, SSOT 재사용
+      — 새 인증경로 발명 없음)로 `proof_payload["conversation_id"]`를 검사한다.
+    ③범위 상한 — C-7 규격("증거이지 대화 사본이 아니다")이 있으나 PO가 숫자를 아직 안
+      박았다(2026-07-29: "일단 안 막되 크기를 로그로 남긴다, 실사용 뒤 정한다") — 그래서
+      여기서 하드 리밋을 걸지 않고 `logger.info`로 snapshot 길이만 남긴다."""
+    if body.target_type != "chat_message" or body.form != "proof":
+        raise HTTPException(
+            status_code=400,
+            detail="이 라우트는 지금 target_type='chat_message'·form='proof' 조합만 지원합니다",
+        )
+
+    conversation_id = body.proof_payload.get("conversation_id")
+    if not conversation_id:
+        raise HTTPException(status_code=400, detail="proof_payload.conversation_id is required")
+
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    from app.routers.conversations import _can_read_conversation
+
+    can_read = await _can_read_conversation(
+        uuid.UUID(str(conversation_id)), repo.session, auth, repo.org_id,
+    )
+    if not can_read:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    snapshot = body.proof_payload.get("snapshot") or []
+    logger.info(
+        "create_story_proof_reference: story=%s snapshot_messages=%d", id, len(snapshot),
+    )
+
+    from app.services.reference_core import insert_reference
+
+    caller_id = uuid.UUID(str(auth.user_id))
+    ref = await insert_reference(
+        repo.session, org_id=repo.org_id, source_type="story", source_field="proof",
+        source_id=id, target_type=body.target_type, target_id=body.target_id,
+        form=body.form, created_by=caller_id, proof_payload=body.proof_payload,
+    )
+    await repo.session.commit()
+
+    return {
+        "id": str(ref.id),
+        "form": ref.form,
+        "target_type": ref.target_type,
+        "target_id": str(ref.target_id),
+        "created_at": ref.created_at.isoformat(),
+        "proof_payload": ref.proof_payload,
+    }
 
 
 class UploadStoryAttachmentRequest(BaseModel):
@@ -942,6 +1706,8 @@ async def update_story(
         if settings.is_ee_enabled:
             from ee.plan_limits import check_storage_capacity  # type: ignore[import]
             await check_storage_capacity(db, repo.org_id, data["attachments"])
+    # ⛔story #2346 AC7: allow_shrink는 stories 컬럼이 아니므로 repo.update 전에 분리(assignee_ids와 동형).
+    allow_shrink = data.pop("allow_shrink", False)
     # E-BOARD S5: assignee_ids는 stories 컬럼이 아니므로 repo.update 전에 분리.
     assignee_ids_in = data.pop("assignee_ids", None)
     # assignee_ids만 제공되면 단일 assignee_id(주담당)를 첫 요소로 동기화 → 기존 event/notify 로직 재사용.
@@ -949,13 +1715,44 @@ async def update_story(
         data["assignee_id"] = assignee_ids_in[0] if assignee_ids_in else None
     old_assignee_id: uuid.UUID | None = None
     old_position: int | None = None
+    old_field_lengths: dict[str, int] = {}
     story_before = None
     # story #2172 AC2: position 변경도 old-value 대조가 필요해 assignee_id와 같은 사전조회를 공유.
-    if "assignee_id" in data or "position" in data:
+    # story #2346 AC3: 긴 텍스트 필드 급감 기록도 같은 사전조회(repo.update() 前 old 값)가 필요.
+    if "assignee_id" in data or "position" in data or any(f in data for f in _LENGTH_TRACKED_FIELDS):
         story_before = await repo.get(id)
         if story_before:
             old_assignee_id = story_before.assignee_id
             old_position = story_before.position
+            # ⛔story_before는 같은 세션의 identity map이라 repo.update() 뒤 story와 «같은
+            # 객체»가 된다(속성이 그 자리서 덮어써짐) — old_assignee_id/old_position처럼
+            # «스칼라 값»으로 지금 떠 둬야 update 前 값을 실제로 보존한다.
+            for _f in _LENGTH_TRACKED_FIELDS:
+                if _f in data:
+                    old_field_lengths[_f] = len(getattr(story_before, _f) or "")
+    # ⛔story #2346 AC7: 긴 텍스트 필드가 50% 이상 줄면 거부 — 오늘 실제 3건 사고(모두 -80%대)가
+    # 전부 이 게이트에 막혔을 것이다. allow_shrink=true로 명시 승인(정당한 축약)만 통과.
+    if old_field_lengths and not allow_shrink:
+        for _f, _before_len in old_field_lengths.items():
+            if _before_len == 0:
+                continue
+            _after_len = len(data.get(_f) or "")
+            _lost_chars = _before_len - _after_len
+            _is_relative_shrink = _after_len < _before_len * (1 - _SHRINK_BLOCK_THRESHOLD)
+            if _is_relative_shrink and _lost_chars >= _SHRINK_BLOCK_MIN_LOST_CHARS:
+                # ⛔story #2346(PO 2026-07-30 08:12Z): 「가드 신호를 사용자 숙제로 번역하지
+                # 않는다」— 「거부되었습니다」만 오면 포기하거나 우회한다. «무엇이»(story_number)
+                # «어디가»(필드명) «얼마나»(전→후 길이) 줄었는지와 «다음에 뭘 할지»
+                # (allow_shrink=true)를 한 메시지 안에 전부 싣는다 — #2342형 대상 혼동 사고를
+                # 그 자리서 보이게 하는 목적도 겸한다.
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"#{story_before.story_number} {_f} shrank {_before_len}→{_after_len} chars "
+                        f"({round((1 - _after_len / _before_len) * 100)}% smaller) — "
+                        "if intentional, resend with allow_shrink=true"
+                    ),
+                )
     # H1-S5: PATCH /{id} 로 status=done 전이 시도도 board 경로와 동일하게 preflight 게이트(AC②).
     if data.get("status") == "done":
         gate_story = story_before or await repo.get(id)
@@ -990,30 +1787,21 @@ async def update_story(
     # 각각 독립적으로 reconcile — 같은 대상을 본문과 AC 양쪽에 걸면 두 행 다 남는다(멱등
     # 키에 source_field가 있어 서로 다른 참조로 선다). **같은 트랜잭션**(commit 전, 실패
     # 시 예외 propagate로 story 저장 전체가 롤백 — chat/doc과 동일 AC4 원자성).
+    # ⛔실제 reconcile·candidate 로직은 `_reconcile_story_references_and_candidates`
+    # (create_story와 공유) — 2026-07-30, create에 이 훅이 없던 결함 수정 시 두 벌 대신
+    # 공용 함수로 추출.
     if "description" in data or "acceptance_criteria" in data:
-        from app.services.mention_parser import extract_chat_entity_mentions, reconcile_entity_references
-
         _mention_actor_id: uuid.UUID | None = None
         try:
             _mention_actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
         except Exception:
             _mention_actor_id = None
-        if "description" in data:
-            _desc_pairs = extract_chat_entity_mentions(story.description or "")
-            await reconcile_entity_references(
-                db, org_id=repo.org_id, source_type="story", source_field="description",
-                source_id=story.id,
-                extracted_refs=[(t, i, "mention") for t, i in _desc_pairs],
-                created_by=_mention_actor_id,
-            )
-        if "acceptance_criteria" in data:
-            _ac_pairs = extract_chat_entity_mentions(story.acceptance_criteria or "")
-            await reconcile_entity_references(
-                db, org_id=repo.org_id, source_type="story", source_field="acceptance_criteria",
-                source_id=story.id,
-                extracted_refs=[(t, i, "mention") for t, i in _ac_pairs],
-                created_by=_mention_actor_id,
-            )
+        await _reconcile_story_references_and_candidates(
+            db, org_id=repo.org_id, story=story,
+            check_description="description" in data,
+            check_acceptance_criteria="acceptance_criteria" in data,
+            mention_actor_id=_mention_actor_id,
+        )
 
     # E-STORAGE-SSOT S2: 첨부 교체(attachments 제공) 시 asset registry 재동기화(reconcile·SSOT 정확).
     if "attachments" in data:
@@ -1116,6 +1904,19 @@ async def update_story(
     # S-C2: story_updated — actor가 agent인 경우 기록 (AC2, AC6)
     if actor_id:
         from app.services.activity_log import record_activity_bg
+        _context: dict = {"fields": list(data.keys()), "story_title": story.title}
+        # ⛔story #2346 AC3(2026-07-30): 「지워졌는지 원래 없었는지 구분할 수단이 없다」던
+        # 갭 — 전문 스냅샷은 비싸 「이전 길이 → 이후 길이」만 남긴다. 길이가 «안 변한» 경우엔
+        # 안 남긴다(양성 대조 — 매번 남으면 로그가 잡음이 된다). docs.py·agent_runs.py는
+        # 아직 activity 로깅 자체가 없어 미착수 — #2346 본문에 남은 항목으로 적어 둔다.
+        if old_field_lengths:
+            _length_changes = {}
+            for _f, _before_len in old_field_lengths.items():
+                _after_len = len(getattr(story, _f) or "")
+                if _before_len != _after_len:
+                    _length_changes[_f] = {"before": _before_len, "after": _after_len}
+            if _length_changes:
+                _context["length_changes"] = _length_changes
         background_tasks.add_task(
             record_activity_bg,
             org_id=repo.org_id,
@@ -1124,7 +1925,7 @@ async def update_story(
             project_id=story.project_id,
             entity_type="story",
             entity_id=id,
-            context={"fields": list(data.keys()), "story_title": story.title},
+            context=_context,
         )
 
     await _attach_assignee_ids(db, repo.org_id, [story])

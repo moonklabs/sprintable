@@ -1,0 +1,179 @@
+name: Design Review Gate
+
+# story #2361: 시각·문구 PR이 「본 사람 없이」 나가는 것을 막는다 — design:pass 라벨 게이트.
+# 배경: 2026-07-31, PR 셋(#2720·#2722·#2725)이 reviews:0인 채로 서 있었고 CI 초록만 보고
+# "QA만 남았다"로 셌다. 시각·문구·카피는 CI가 원리적으로 못 보는 축이라 여덟 건이 샜다.
+#
+# 잰다(요약): apps/web/src/components/**·messages/**·app/**(globals.css 포함, api/** 제외)를
+# 건드린 PR에 design:pass 라벨이 없으면 이 체크는 빨강이다. 라벨이 붙으면 초록, 떼면 다시
+# 빨강이다(labeled/unlabeled 이벤트에도 돈다).
+#
+# ⛔⭐⭐AC8 — 트리거를 on.pull_request.paths로 거르지 않는다. paths로 거르면 무관 PR에선
+# 이 체크가 아예 안 뜨는데, required check으로 걸어 두면 GitHub이 그 미실행을 스킵=통과로
+# 셀 위험이 있다 — "안 재면서 초록"이 되는, 오늘 우리가 잡으려는 바로 그 병이다. 그래서 이
+# job은 트리거 경로 필터 없이 항상 돌고, 경로 판정은 아래 첫 스텝 안에서 git diff로 한다.
+#
+# 이 가드가 «못 잡는 것» — 넷(AC4). 선언 안 하면 다음 사람이 "이 가드가 다 본다"로 읽는다.
+#   ①라벨이 «옳게» 붙었는지는 못 본다 — 존재만 보고 내용은 안 본다. 계정이 하나라 "누가
+#     붙였나"로도 못 가른다 — 이건 의도다. 이 가드는 «틀린 판정»이 아니라 «비어 있음»을 막는다.
+#   ②라벨이 «언제» 붙었는지는 (이 PR부터) 본다 — 아래 "Enforce design:pass label
+#     freshness" 스텝이 design:pass의 최근 labeled 시각을 최신 커밋과 대조해, 라벨이 그보다
+#     이르면(=리뷰 뒤 코드가 더 밀렸으면) 빨강으로 만든다.
+#     [경위] 애초 story #2361 1차 AC7은 "이번 판에서는 선언만, 조이는 건 2차"였다 — 같은 날
+#     되돌렸다(유나 지적): 하루에 실물이 셋 나왔다(#2725 라벨 뒤 develop 재당김·#2718 라벨 뒤
+#     파일집합 변경·까심 QA APPROVE가 옛 SHA). "나중에"가 설 자리가 없어 미루지 않았다.
+#     [그래도 남는 한계] timeline API가 재는 건 "labeled 이벤트 시각"이지 "리뷰어가 실제로
+#     그 diff를 봤다는 보증"이 아니다 — 시각 순서가 맞아도 라벨을 다는 사람이 안 보고 눌렀을
+#     가능성까지는 여전히 못 잡는다(①과 같은 종류의 한계 — 순서는 재도 «내용»은 못 잰다).
+#   ③경로 밖의 시각 변화는 못 본다 — 위 패턴에 없는 자리(예: apps/web 밖 어디든)는 안 본다.
+#   ④디자인 축만 말한다 — QA·BE 축과는 무관하다. design:pass는 "디자인 축을 시각 담당이
+#     봤다"는 뜻이지 "이 PR이 전부 됐다"는 뜻이 아니다(AC6).
+#
+# ⛔사람을 인질로 잡지 않는다(AC5) — 이 가드는 CI 자리다. 런타임·요청경로에는 아무것도
+# 붙지 않는다. 라벨 두 개(design:pass·design:changes)는 유나가 이미 세웠다(2026-07-31).
+#
+# ✅등록됨(2026-07-31, 오르테가군) — develop의 Branch protection required status checks에
+# 이 job 이름("Design review gate")이 올라가 있다. 양성대조 완료(#2740): 라벨 없이 RED +
+# 실제 merge 시도가 "the base branch policy prohibits the merge"로 거절됨을 확認, 라벨을
+# 붙이면 각 체크가 개별로 GREEN 전환됨을 확認.
+#
+# ⚠️등록 «이전»에 이미 열려 있던 PR은 이 체크를 자동으로 못 받을 수 있다 — GitHub이 그
+# PR에 대해선 이 체크를 아예 "기대하지 않는" 상태로 남아 required인데도 «영원한 pending»이
+# 된다(실측 2026-07-31: #2737·#2294). 이것도 "안 잰 것"인데 앞서 잡은 스킵=통과 병의
+# 반대편(안 재면서 빨강)이다 — 고치는 법이 코드가 아니라 사람 손(새 커밋 push로 synchronize
+# 이벤트를 유발하거나, PR을 close 후 재오픈)이라는 게 다르다.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches: [main, develop]
+
+concurrency:
+  group: design-review-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read  # AC7 개정분 — labeled 타임라인 이벤트 조회(issues/events)에 필요
+
+jobs:
+  design-review-gate:
+    name: Design review gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # AC8: 잡은 항상 돈다 — 경로 판정은 여기, 잡 안에서 한다(트리거 레벨 paths 필터 없음).
+      # 세 줄 표기(triple-dot)로 head 기준 merge-base부터 diff한다 — base 브랜치가 그 사이
+      # 앞서 나간 커밋들이 "이 PR의 변경"으로 잘못 잡히는 것을 피한다.
+      - name: Determine if this PR touches design-review paths
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # 까심군 QA 지적(#2730 REQUEST_CHANGES): 여기 `|| true`를 붙이면 grep 0-매치뿐
+          # 아니라 git diff 자체의 «모든» 실패(SHA 유실·객체 손상·merge-base 계산 실패)까지
+          # 삼켜 CHANGED=""→in_scope=false→조용히 통과가 된다 — 이 파일 자신의 AC8("미실행을
+          # 통과로 세지 않는다")을 어기는 자리라 뺐다. git diff가 실패하면 이 잡은 빨강으로
+          # 죽어야 맞는다(못 재면 빨강). 아래 grep 파이프라인의 `|| true`는 남겨 둔다 —
+          # 그쪽은 정적 정규식+printf뿐이라 실패 경로가 사실상 "0-매치"뿐이다(까심군 판정).
+          CHANGED="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")"
+          echo "changed files:"
+          echo "${CHANGED}"
+          # AC2: 걸린 경로 — components/**·messages/**·app/**(globals.css는 app/**에 포함,
+          # 전역 토큰이 거기 산다) — 단 app/api/**는 시각이 아니므로 제외한다.
+          MATCHED="$(printf '%s\n' "${CHANGED}" \
+            | grep -E '^apps/web/src/components/|^apps/web/messages/|^apps/web/src/app/' \
+            | grep -Ev '^apps/web/src/app/api/' || true)"
+          if [ -n "${MATCHED}" ]; then
+            echo "in_scope=true" >> "$GITHUB_OUTPUT"
+            echo "This PR touches design-review paths:"
+            echo "${MATCHED}"
+          else
+            echo "in_scope=false" >> "$GITHUB_OUTPUT"
+            echo "No changed file matches the design-review path list — this PR is out of this gate's scope (not a skip: it was evaluated and found empty)."
+          fi
+
+      # ⭐유나신 지적(2026-07-31) — design:changes 라벨 설명은 "design:pass로 바뀌기 前에는
+      # 머지하지 않는다"고 약속하는데, 그 약속을 지키는 코드가 아무것도 없었다(가드는
+      # design:pass «존재»만 본다). design:pass와 design:changes가 같이 붙어 있으면(수정
+      # 요청이 아직 안 반영됐는데 pass도 남아 있는 경우) 그린이 뜨는 구멍이었다 — pass 유무와
+      # 무관하게 changes가 있으면 무조건 빨강으로 막는다. 게이트가 막 서서 아무도 위에 안
+      # 쌓았을 때가 이 구멍을 막기 제일 싼 자리라 지금 잡는다.
+      - name: Enforce design:changes blocks merge (unconditional — regardless of design:pass)
+        if: steps.scope.outputs.in_scope == 'true'
+        env:
+          HAS_DESIGN_CHANGES: ${{ contains(github.event.pull_request.labels.*.name, 'design:changes') }}
+        run: |
+          set -euo pipefail
+          if [ "${HAS_DESIGN_CHANGES}" = "true" ]; then
+            echo "::error title=design:changes open::A design guardian requested changes (design:changes) and they haven't been marked resolved yet. This blocks merge regardless of whether design:pass is also present — remove design:changes (or let the guardian replace it with design:pass) after the changes are addressed."
+            exit 1
+          fi
+          echo "design:changes not present."
+
+      # AC1/AC6: design:pass가 있으면 초록, 없으면 빨강. labeled/unlabeled 이벤트가 트리거
+      # 목록에 있어 라벨을 떼면 이 스텝이 다시 돌아 빨강으로 되돌아간다.
+      - name: Enforce design:pass label when in scope
+        if: steps.scope.outputs.in_scope == 'true'
+        env:
+          HAS_DESIGN_PASS: ${{ contains(github.event.pull_request.labels.*.name, 'design:pass') }}
+        run: |
+          set -euo pipefail
+          if [ "${HAS_DESIGN_PASS}" = "true" ]; then
+            echo "design:pass present — design axis reviewed. (narrow scope: this means the visual/copy axis was looked at, not that QA/BE also passed.)"
+          else
+            echo "::error title=design:pass missing::This PR touches a visual/copy path (apps/web/src/components, apps/web/messages, or apps/web/src/app) without the design:pass label. A design guardian review is required before merge. This label means only 'the design axis was reviewed' — it does not mean the whole PR is done (QA/BE are separate axes)."
+            exit 1
+          fi
+
+      # AC7(개정) — design:pass가 «있어도» 최신 커밋보다 먼저 붙었으면 stale이다: 리뷰 뒤
+      # 코드가 더 밀렸다는 뜻이라 그 라벨은 지금 diff를 보증하지 않는다. timeline API에서
+      # design:pass의 가장 최근 labeled 이벤트 시각(뗐다 다시 붙인 이력이 있어도 최신 것만
+      # 본다)을 최신 커밋의 committer 시각과 비교한다.
+      # ⚠️fail-closed: timeline 이벤트를 못 찾거나 API 호출 자체가 실패해도(레이트리밋 등)
+      # 이 스텝은 그대로 실패(빨강)한다 — "몰라서 통과"를 만들지 않는다.
+      #
+      # ⭐유나신 지적(#2731 리뷰) — 이 fail-closed 자체가 만드는 «증상의 모양»: 권한 부족으로
+      # gh api가 실패해도 이 스텝은 빨강이 되는데, 그건 겉보기엔 "가드가 정상 작동 중"(라벨
+      # 없어서 빨강)과 «똑같은 모양»이다. 둘을 가르는 유일한 자리는 양성대조의 "라벨을 붙여서
+      # GREEN이 되는가" 단계다 — 거기서 timeline API를 실제로 호출해 성공해야 GREEN이 나오기
+      # 때문이다(#2731 뮤테이션 증거 ②단계가 실물로 이미 그 경로를 탔다 — 지금 permissions:
+      # pull-requests: read로 충분함이 그렇게 확認됨). 나중에 권한이 좁아지거나 GitHub이 정책을
+      # 바꾸면 라벨을 붙여도 GREEN이 안 되는 것으로 여기서 드러난다.
+      #
+      # ⭐유나신 지적 — 남는 한계 하나 더: LAST_COMMIT_TS는 «커밋을 만든 기계»의 committer
+      # 시각이다. 그 기계 시계가 앞서 있으면 방금 붙인 라벨도 stale로 읽힐 수 있다. 방향이
+      # 안전한 쪽(거짓 빨강이지 거짓 초록이 아님)이라 막을 일은 아니지만, 적어 두는 이유는
+      # "가드를 의심하지 않고 시계를 보게" 하기 위해서다.
+      - name: Enforce design:pass label freshness (not stale vs latest commit)
+        if: steps.scope.outputs.in_scope == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          LAST_COMMIT_TS="$(git log -1 --format=%cI "${HEAD_SHA}")"
+          LABEL_TS="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/events" --paginate \
+            --jq '[.[] | select(.event=="labeled" and .label.name=="design:pass") | .created_at] | sort | last // empty')"
+          echo "latest commit (${HEAD_SHA}): ${LAST_COMMIT_TS}"
+          echo "design:pass last attached: ${LABEL_TS:-<none found>}"
+          if [ -z "${LABEL_TS}" ]; then
+            echo "::error title=design:pass timeline unreadable::design:pass label is present but no matching 'labeled' timeline event was found for it — freshness can't be verified. Failing closed (treated as stale)."
+            exit 1
+          fi
+          LAST_COMMIT_EPOCH="$(date -d "${LAST_COMMIT_TS}" +%s)"
+          LABEL_EPOCH="$(date -d "${LABEL_TS}" +%s)"
+          if [ "${LABEL_EPOCH}" -lt "${LAST_COMMIT_EPOCH}" ]; then
+            echo "::error title=design:pass is stale::design:pass was attached at ${LABEL_TS}, before the latest commit (${LAST_COMMIT_TS}). Code has moved since the design review — re-review and re-attach design:pass."
+            exit 1
+          fi
+          echo "design:pass attached at ${LABEL_TS} — at or after the latest commit (${LAST_COMMIT_TS}). Fresh."

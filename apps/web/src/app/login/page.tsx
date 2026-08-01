@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { safeNextPath, SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
 import { FIREBASE_AUTH_ENABLED } from '@/lib/auth/firebase-client';
 import { signInAndExchangeFirebaseSession } from '@/lib/auth/firebase-login-flow';
+import { notifyContentPainted } from '@/lib/native-shell-bridge';
 
 export default function LoginPage() {
   const t = useTranslations('login');
@@ -38,6 +39,12 @@ export default function LoginPage() {
   );
   const [loading, setLoading] = useState(false);
   const [firebaseLoading, setFirebaseLoading] = useState(false);
+
+  // #2310(e-mobile-content-painted-contract): 이 화면은 서버 데이터 조회 없이 첫 렌더에
+  // 폼이 그대로 나온다(스켈레톤 단계 없음) — 마운트 직후가 "첫 유의미한 페인트"로 정확하다.
+  useEffect(() => {
+    notifyContentPainted();
+  }, []);
 
   // story a0118204: 스캐폴드 — NEXT_PUBLIC_FIREBASE_AUTH_ENABLED가 꺼져있으면(기본) 버튼 자체가
   // 안 보이니 호출 불가. 켜져 있어도 서버 플래그(FIREBASE_AUTH_ISSUE_SESSION)가 꺼져있으면

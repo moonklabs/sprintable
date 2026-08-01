@@ -46,18 +46,23 @@ export function findReferenceCandidates(content: string): ReferenceCandidate[] {
   return result;
 }
 
-// ── 거절 기억(AC3 ②) ─────────────────────────────────────────────────────────
-// ⛔이 세션이 짓는 만큼만 정직하게: BE에 거절 상태를 남길 표가 아직 없어(이 스토리의
-// 쓰기 경로 자체가 미해결 — 착수 보고 참조) 브라우저 localStorage에만 남긴다. 즉 다른
-// 기기·시크릿창·캐시삭제 후에는 다시 물을 수 있다 — durable하지 않다는 점을 명시한다.
-// 거절 기억은 "소음 억제"이지 "데이터"가 아니라 잃어버려도 손해는 "한 번 더 묻는 것"뿐이라
-// 지금은 이걸로 충분하다(PO 판정, 2026-07-28).
+// ── 거절 기억(AC3 ②, #2313 재확定) ───────────────────────────────────────────
+// 네 축 전부 PO 판정(2026-07-29):
+//   저장소=클라이언트 로컬(localStorage) — 잃어도 손해는 "한 번 더 묻는 것"뿐, 사고가
+//     아니다(반대로 서버 저장은 오클릭 거절이 영영 남는 위험이 있다).
+//   키    =원문 토큰 문자열 그대로(메시지 단위 아님) — #2049처럼 해소 안 되는 토큰도 키가 됨.
+//   범위  =사용자 × 브라우저(로컬 저장이라 자동으로 그렇게 된다).
+//   수명  =무기한(TTL 없음) — "며칠 뒤 다시 뜬다"는 사용자가 예측 못 하는 동작이라 금지.
+// ⛔이전(#2283) 구현은 키가 `messageId::raw`라 같은 토큰도 다른 메시지에서 다시 물었다 —
+// 그게 #2313의 재현 결함. 키에서 messageId를 뺐다(같은 토큰이면 어느 메시지에서 왔든 기억).
 //
-// ⛔이 선택이 부족해지는 조건(다음 사람이 "왜 localStorage지?"를 다시 판단하지 않도록 —
-// 조건이 오면 서버 쪽(거절 기억 전용 표 또는 Reference 신설 시 그 옆)으로 옮긴다):
-//   ①사람이 기기를 바꾸면 거절이 안 따라간다 — 같은 후보를 또 묻게 된다.
-//   ②제안이 잦아지면(#2269가 본문에 쌓인 기존 참조를 캐기 시작하면) 체감이 커진다.
+// ⛔다시 볼 조건(사람이 안 기억해도 사건으로 걸리는 것):
+//   ①에이전트 경로에서도 이 제안이 나가게 될 때 — 에이전트에겐 브라우저(localStorage)가 없다.
+//   ②사용자가 "또 떴다"를 실제로 불평할 때 — 그때가 서버 저장의 값이 증명되는 자리.
 const REJECTED_KEY = 'sprintable:reference-candidates:rejected';
+// 키 모양이 바뀌면(#2313 이전 messageId::raw 포함) 옛 값이 조용히 오매칭되지 않고 깨끗이
+// 무시되도록 버전 프리픽스를 둔다.
+const KEY_VERSION = 'v1';
 
 function readRejectedSet(): Set<string> {
   if (typeof window === 'undefined') return new Set();
@@ -80,16 +85,16 @@ function writeRejectedSet(s: Set<string>): void {
   }
 }
 
-function rejectionKey(messageId: string, raw: string): string {
-  return `${messageId}::${raw}`;
+function rejectionKey(raw: string): string {
+  return `${KEY_VERSION}:${raw}`;
 }
 
-export function isCandidateRejected(messageId: string, raw: string): boolean {
-  return readRejectedSet().has(rejectionKey(messageId, raw));
+export function isCandidateRejected(raw: string): boolean {
+  return readRejectedSet().has(rejectionKey(raw));
 }
 
-export function rejectCandidate(messageId: string, raw: string): void {
+export function rejectCandidate(raw: string): void {
   const s = readRejectedSet();
-  s.add(rejectionKey(messageId, raw));
+  s.add(rejectionKey(raw));
   writeRejectedSet(s);
 }

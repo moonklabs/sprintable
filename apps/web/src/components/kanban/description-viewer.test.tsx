@@ -68,3 +68,231 @@ describe('DescriptionViewer — 본문 링크 클릭이 부모(편집모드 진�
     expect(parentClicked).toBe(true);
   });
 });
+
+// story #2269(C-11) AC0-2 보너스 발견 — rehypeSanitize의 defaultSchema가 `entity:` scheme을
+// href protocol 허용 목록에 안 둬 EntityChip 새 형식 링크가 href=null로 무력화됐었다.
+// entity 하나만 허용 목록에 추가한 스키마로 고친 결과를 검증한다.
+describe('DescriptionViewer — entity: 링크가 EntityChip으로 그려지는지(AC0-2 보너스 수정)', () => {
+  const STORY_ID = '11111111-1111-1111-1111-111111111111';
+
+  it('references에 매칭되는 대상이 있으면 정상 칩(비-유령)으로 그린다', async () => {
+    await act(async () => {
+      root.render(
+        <DescriptionViewer
+          description={`이건 [스토리 제목](entity:story:${STORY_ID}) 참조인지라.`}
+          references={[{ target_type: 'story', target_id: STORY_ID }]}
+        />,
+      );
+    });
+
+    // 유령이면 '대상이 없습니다' 텍스트로 바뀐다 — 정상 칩은 label 그대로 유지.
+    expect(container.textContent).toContain('스토리 제목');
+    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.querySelector('button')).toBeTruthy();
+  });
+
+  it('references에 없는 대상이면 유령 칩(회색·클릭 불가)으로 그린다', async () => {
+    await act(async () => {
+      root.render(
+        <DescriptionViewer
+          description={`이건 [스토리 제목](entity:story:${STORY_ID}) 참조인지라.`}
+          references={[]}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('대상이 없습니다');
+    // 유령 칩은 button(모달 진입)이 없다 — embed-card.tsx EntityChip의 ghost 분기.
+    expect(container.querySelector('button')).toBeFalsy();
+  });
+
+  it('references가 undefined(미로드)면 유령 판정을 보류하고 정상 칩으로 그린다(#2622와 동형 폴백)', async () => {
+    await act(async () => {
+      root.render(
+        <DescriptionViewer description={`이건 [스토리 제목](entity:story:${STORY_ID}) 참조인지라.`} />,
+      );
+    });
+
+    expect(container.textContent).toContain('스토리 제목');
+    expect(container.textContent).not.toContain('대상이 없습니다');
+  });
+
+  it('entity: 링크 클릭도 부모(편집모드 진입) onClick으로 안 샌다', async () => {
+    let parentClicked = false;
+    await act(async () => {
+      root.render(
+        <div onClick={() => { parentClicked = true; }}>
+          <DescriptionViewer
+            description={`[스토리 제목](entity:story:${STORY_ID})`}
+            references={[{ target_type: 'story', target_id: STORY_ID }]}
+          />
+        </div>,
+      );
+    });
+
+    const button = container.querySelector('button') as HTMLButtonElement;
+    expect(button).toBeTruthy();
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    expect(parentClicked).toBe(false);
+  });
+});
+
+// ⛔뮤테이션 자가검증(PO 지시, 2026-07-29) — 「entity 스킴만 열었다」는 이 테스트가 안 서면
+// «주장»에 불과하다. entity: 하나만 허용 목록에 더했을 뿐, javascript:/data: 등 원래
+// defaultSchema가 막던 스킴은 그대로 막혀야 한다.
+describe('DescriptionViewer — entity: 허용 목록 추가가 다른 위험 scheme까지 안 여는지(뮤테이션 자가검증)', () => {
+  it('javascript: href는 sanitize로 여전히 제거된다', async () => {
+    await act(async () => {
+      root.render(
+        <DescriptionViewer description="[클릭](javascript:alert(1))" />,
+      );
+    });
+
+    const link = container.querySelector('a');
+    expect(link).toBeTruthy();
+    expect(link!.getAttribute('href')).toBeNull();
+  });
+
+  it('data: href도 sanitize로 여전히 제거된다', async () => {
+    await act(async () => {
+      root.render(
+        <DescriptionViewer description="[클릭](data:text/html,<script>alert(1)</script>)" />,
+      );
+    });
+
+    const link = container.querySelector('a');
+    expect(link).toBeTruthy();
+    expect(link!.getAttribute('href')).toBeNull();
+  });
+
+  it('일반 https: href는 그대로 통과한다(회귀 없음)', async () => {
+    await act(async () => {
+      root.render(
+        <DescriptionViewer description="[문서](https://sprintable.example/x)" />,
+      );
+    });
+
+    const link = container.querySelector('a');
+    expect(link!.getAttribute('href')).toBe('https://sprintable.example/x');
+  });
+});
+
+// story #2269(C-11) AC0-2 축B — bare_number_targets(번호→story_id)를 이용한 render-time
+// #<번호> 치환. 축A(entity_references 관찰수집)만으로는 화면에 아무것도 안 뜬다는 PO 지적
+// (2026-07-29)을 반영한 실제 표시 레이어.
+describe('DescriptionViewer — bare #<번호>가 bareNumberTargets로 렌더되는지(AC0-2 축B)', () => {
+  const TARGET_ID = '22222222-2222-2222-2222-222222222222';
+
+  it('bareNumberTargets에 매칭되는 번호는 정상 칩으로 그린다', async () => {
+    await act(async () => {
+      root.render(
+        <DescriptionViewer
+          description="이건 #2258 참조인지라"
+          bareNumberTargets={{ '2258': TARGET_ID }}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('#2258');
+    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.querySelector('button')).toBeTruthy();
+  });
+
+  it('bareNumberTargets에 없는 번호(미해소)는 유령 칩으로 그린다 — «삭제됨»이 아니라 시제 중립 문구', async () => {
+    await act(async () => {
+      root.render(
+        <DescriptionViewer
+          description="이건 #9999 참조인지라"
+          bareNumberTargets={{}}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('대상이 없습니다');
+    expect(container.textContent).not.toContain('삭제');
+    expect(container.querySelector('button')).toBeFalsy();
+  });
+
+  it('bareNumberTargets가 undefined(미로드)면 치환을 보류하고 #<번호>가 평문 그대로 남는다', async () => {
+    await act(async () => {
+      root.render(<DescriptionViewer description="이건 #2258 참조인지라" />);
+    });
+
+    expect(container.textContent).toContain('#2258');
+    expect(container.textContent).not.toContain('대상이 없습니다');
+    expect(container.querySelector('button')).toBeFalsy();
+    expect(container.querySelector('a')).toBeFalsy();
+  });
+
+  it('여러 번호 중 일부만 해소돼도 각자 독립적으로 정상/유령을 가른다', async () => {
+    await act(async () => {
+      root.render(
+        <DescriptionViewer
+          description="해소됨 #100, 미해소 #200"
+          bareNumberTargets={{ '100': TARGET_ID }}
+        />,
+      );
+    });
+
+    const html = container.innerHTML;
+    const buttons = container.querySelectorAll('button');
+    expect(buttons.length).toBe(1);
+    expect(html).toContain('대상이 없습니다');
+  });
+
+  it('코드블록 안의 #<번호>는 치환되지 않는다(AC0-3 세는 정의)', async () => {
+    await act(async () => {
+      root.render(
+        <DescriptionViewer
+          description={'실참조 #100.\n```\n예시 #200\n```'}
+          bareNumberTargets={{ '100': TARGET_ID, '200': TARGET_ID }}
+        />,
+      );
+    });
+
+    const buttons = container.querySelectorAll('button');
+    expect(buttons.length).toBe(1); // #100만 칩, #200은 코드블록 안이라 평문
+    expect(container.querySelector('code')?.textContent).toContain('#200');
+  });
+
+  it('bare-number: 링크 클릭도 부모(편집모드 진입) onClick으로 안 샌다', async () => {
+    let parentClicked = false;
+    await act(async () => {
+      root.render(
+        <div onClick={() => { parentClicked = true; }}>
+          <DescriptionViewer description="#2258" bareNumberTargets={{ '2258': TARGET_ID }} />
+        </div>,
+      );
+    });
+
+    const button = container.querySelector('button') as HTMLButtonElement;
+    expect(button).toBeTruthy();
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+
+    expect(parentClicked).toBe(false);
+  });
+});
+
+// ⛔뮤테이션 자가검증(PO 지시 패턴 재사용) — `bare-number:` 스킴 추가가 다른 위험 scheme까지
+// 안 여는지.
+describe('DescriptionViewer — bare-number: 허용 목록 추가가 다른 위험 scheme까지 안 여는지', () => {
+  it('bareNumberTargets가 있어도 javascript: href는 여전히 제거된다(치환 대상 아닌 일반 링크)', async () => {
+    await act(async () => {
+      root.render(
+        <DescriptionViewer
+          description="[클릭](javascript:alert(1))"
+          bareNumberTargets={{ '1': '11111111-1111-1111-1111-111111111111' }}
+        />,
+      );
+    });
+
+    const link = container.querySelector('a');
+    expect(link).toBeTruthy();
+    expect(link!.getAttribute('href')).toBeNull();
+  });
+});

@@ -158,14 +158,30 @@ async def _refs(session, org_id, story_id, source_field=None):
 def test_no_story_specific_mention_write_helper_added():
     """mention_parser.py에 "story" 전용 write 함수가 새로 생기지 않았는지 직접 확인 —
     공용 코어(`reconcile_entity_references`)만 있고, `insert_story_mentions`류 이름이
-    없어야 AC1이 선다."""
+    없어야 AC1이 선다.
+
+    ⛔story #2269(C-11) 후속 정정: 이름에 "story"가 들어가는 것과 "write 헬퍼"인 것은
+    다른 축이다 — #2269가 추가한 `resolve_bare_number_story_refs`는 이름에 "story"가
+    있지만 **SELECT만 하고** 그 결과를 그대로 이 파일 위 reconcile_entity_references(공용
+    코어)에 넘기는 resolver다(`extract_chat_entity_mentions`와 같은 역할 — 다만 uuid가
+    본문에 이미 있지 않아 번호→uuid 해소에 DB 조회가 필요할 뿐). 원래 이름 substring
+    체크는 "이 가드가 실제로 막으려는 것"(story 전용 INSERT/write 로직 재구현)의 근사치일
+    뿐이었다 — 근사치가 깨지자(정당한 resolver가 이름에 걸림) 근사치가 아니라 진짜 불변식
+    (write API를 직접 호출하는가)으로 판정을 옮긴다."""
+    import inspect
+
     import app.services.mention_parser as mp
 
-    public_funcs = [
+    story_named_funcs = [
         name for name in dir(mp)
         if callable(getattr(mp, name)) and not name.startswith("_") and "story" in name.lower()
     ]
-    assert public_funcs == [], f"story 전용 write 헬퍼가 생겼다: {public_funcs}"
+    _WRITE_SIGNALS = ("pg_insert(", "sa_delete(", "Reference(", "session.add(", "db.add(")
+    write_helpers = [
+        name for name in story_named_funcs
+        if any(sig in inspect.getsource(getattr(mp, name)) for sig in _WRITE_SIGNALS)
+    ]
+    assert write_helpers == [], f"story 전용 write 헬퍼가 생겼다: {write_helpers}"
 
 
 # ─── AC2: description·AC 각각 독립 reconcile ─────────────────────────────────

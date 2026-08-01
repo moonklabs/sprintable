@@ -117,6 +117,21 @@ class DocResponse(BaseModel):
         from app.services.reference_token import build_reference_token
         return build_reference_token("doc", self.id, self.title)
 
+    # story #2262(C-4) AC9: 참조 카드의 「다음 행동」 재료 — SSOT는 app.services.next_action.
+    # ⛔superseded는 여기서 안 낸다(PO 판정 2026-07-29) — superseded_by(위)가 이미 원자
+    # 필드라 FE가 그걸로 직접 판정한다.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def next_action_code(self) -> str | None:
+        from app.services.next_action import doc_next_action
+        return doc_next_action(status=self.status)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def next_action_category(self) -> str | None:
+        from app.services.next_action import next_action_category
+        return next_action_category(self.next_action_code)
+
 
 class ShareStatusResponse(BaseModel):
     """b1574f5a: 문서 공유 상태(관리 API). enabled=active 토큰 유무."""
