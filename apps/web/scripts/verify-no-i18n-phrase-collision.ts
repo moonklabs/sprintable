@@ -119,19 +119,51 @@ export function flattenMessages(obj: Record<string, unknown>, prefix = ''): Map<
   return flat;
 }
 
-// ko.json 값 자체가 보간 자리(`{n}`류)를 갖고 있으면 그 키는 "수와 함께 서는" 축이다
-// (예: "목표 · {n}"·"{count}개 문서 일치"). 이 신호 하나만 쓴다 — 위 모듈 코멘트 경위 참조
-// (호출 자리 근접 휴리스틱은 노이즈가 더 커서 뺐다).
-const PLACEHOLDER_VALUE_RE = /\{[a-zA-Z_][a-zA-Z0-9_]*\}/;
+// story #2410 — 이름(isNumberAdjacent)과 «재는 것»을 맞춘다. 예전 PLACEHOLDER_VALUE_RE는
+// 보간 자리가 «있기만 하면» true였다 — 그게 이름·런타임처럼 «수가 아닌» 보간까지 「수와
+// 함께 선다」로 잘못 읽어 EXEMPT_PAIRS가 7건까지 쌓인 근본원인이었다(#2404: {runtime} ·
+// #2406: {name}). 47개(GRANDFATHER_BASELINE 40 + EXEMPT_PAIRS 7)에 실제로 쓰이는 보간
+// 이름을 전수 대조해(2026-08-02) 「절대 수가 아님을 값을 직접 읽어 확認한」 이름만 배제
+// 목록에 올린다 — 나머지(미확認·모호한 것 포함)는 «안전한 쪽»(예전과 동일하게 true)으로
+// 남긴다. 모르는 이름을 마음대로 false로 내리면 그게 새 오탐이 아니라 새 «누락»(놓친 진짜
+// 충돌)이 되고, 이 가드는 놓치는 쪽보다 과하게 잡는 쪽이 안전하다(EXEMPT_PAIRS로 되돌릴
+// 수 있지만 누락은 그 자체로 안 보인다).
+//
+// 배제 근거(각 이름의 실제 ko.json 값을 직접 읽고 판정, 파일 하단 커밋 참조):
+//   name       — 사람/에이전트 이름("{name} 비활성화"·"{name}이(가)...")
+//   runtime    — MCP 런타임 이름("{runtime} MCP 설정" — claude-code 등)
+//   filename·promptFile — 파일 이름
+//   gate       — 게이트 이름/사유 문자열("{gate} 대기 중")
+//   role       — 역할 이름(PM/Engineer 등)
+//   project    — 프로젝트 이름
+//   teamId     — Slack 워크스페이스 ID(문자열 식별자, 카운트 아님)
+//   dir        — 방향 기호(↑/↓), 수치 아님
+//   sources·excludes — 수집 범위를 나타내는 라벨 목록
+const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
+  'name', 'runtime', 'filename', 'promptFile', 'gate', 'role', 'project', 'teamId', 'dir',
+  'sources', 'excludes',
+]);
+const PLACEHOLDER_NAME_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
 
 export function isNumberAdjacent(value: string): boolean {
-  return PLACEHOLDER_VALUE_RE.test(value);
+  for (const m of value.matchAll(PLACEHOLDER_NAME_RE)) {
+    if (!NON_NUMBER_PLACEHOLDER_NAMES.has(m[1]!)) return true;
+  }
+  return false;
 }
 
 // ── 충돌 판정 ────────────────────────────────────────────────────────────
 
 /** 서로 다른 키의 값이 부분문자열 관계(포함하거나 포함되는)면서 «최소 한쪽이 수와 함께
- * 서면» 그 쌍을 낸다. docs.save↔statusSaved류(수 없음)는 저절로 빠진다. */
+ * 서면» 그 쌍을 낸다. docs.save↔statusSaved류(수 없음)는 저절로 빠진다.
+ *
+ * ⛔story #2410에서 "값이 완전히 동일하면 numberAdjacent 무관하게 항상 잡는다"는 분기를
+ * 한 번 넣었다가 «되돌렸다» — 실측하니 완전동일-정적라벨 쌍(예: docs.preview="미리보기"
+ * <-> docs.formatPreview="미리보기", "완료"·"저장 중..." 등)이 29건 «신규 FAIL»로 쏟아졌다.
+ * 이건 이 가드가 원래부터 저절로 빼려던 그 모양(docs.save↔statusSaved류) 그 자체다 — 수와
+ * 무관하게 완전동일이면 다 잡는다는 건 이 가드의 존재 이유(#2352·#2365 — «수와 함께 서는»
+ * 축)를 무시한 과확장이었다. 값을 실행해 보지 않고 판단부터 넣으면 이렇게 걸린다는 걸
+ * 스스로 보인 자리라 남겨 둔다. */
 export function findSubstringCollisions(
   phrases: Map<string, { value: string; numberAdjacent: boolean }>,
 ): Array<{ keyA: string; keyB: string; valueA: string; valueB: string }> {
@@ -154,27 +186,16 @@ export function findSubstringCollisions(
 // «영구 정상»으로 코드로 확認된 것만 여기 온다 — GRANDFATHER_BASELINE(아래, 미triage 채무)과
 // 다르다.
 //
-// story #2404(2026-08-01, PO 승인) — `recruiter.verifyGuideMcp`(#2404가 신설한 온보딩 안내문)
-// 4건. `PLACEHOLDER_VALUE_RE`가 이름 보간(`{runtime}`)까지 "수와 함께 서는" 신호로 잡아
-// numberAdjacent=true가 됐지만, verifyGuideMcp는 숫자를 전혀 담지 않는 안내문(보간은 런타임
-// 이름뿐)이고 짝지어진 넷(stepComplete/stepVerify/next/equipDone)도 카운터가 아닌 고정
-// 내비게이션 라벨이다 — #2352/#2365가 잡으려는 "두 셈이 같은 말로 헷갈리는" 병이 아니다.
-// ⭐이 오탐의 근본 원인(`PLACEHOLDER_VALUE_RE`가 숫자·이름 보간을 구분 못 하는 것 자체)은
-// story #2410으로 별도 추적한다 — 여기서는 면제만.
-// story #2406 AC1(2026-08-02, PO 승인) — 비활성화 확認 다이얼로그 신규 키 3쌍.
-// ①왜 안전한가 — `{name}`은 카운터가 아니라 대상 이름 placeholder이고, 반복되는 낱말
-// ("비활성화")은 «한 다이얼로그 안»의 제목·버튼·기존 짧은 라벨일 뿐이라 사용자가 두 셈을
-// 헷갈릴 자리가 아니다(#2352/#2365가 잡으려는 병이 아니다) — #2410과 같은 근본원인 클래스.
-// ②언제 걷는가 — #2410(가드 자체의 `PLACEHOLDER_VALUE_RE` 수정) 머지 시 이 셋도 같이 재평가.
-export const EXEMPT_PAIRS = new Set<string>([
-  'recruiter.equipDone <-> recruiter.verifyGuideMcp',
-  'recruiter.next <-> recruiter.verifyGuideMcp',
-  'recruiter.stepComplete <-> recruiter.verifyGuideMcp',
-  'recruiter.stepVerify <-> recruiter.verifyGuideMcp',
-  'settings.deactivateAgent <-> settings.deactivateAgentDialogTitle',
-  'settings.activateAgent <-> settings.deactivateAgentDialogTitle',
-  'settings.deactivateAgentDialogConfirm <-> settings.deactivateAgentDialogTitle',
-]);
+// ✅story #2410(2026-08-02)에서 아래 일곱을 «재평가»해 전부 걷어냈다 — 예전엔 여기 있었다:
+//   recruiter.{equipDone,next,stepComplete,stepVerify} <-> recruiter.verifyGuideMcp (#2404, {runtime})
+//   settings.{deactivateAgent,activateAgent,deactivateAgentDialogConfirm} <-> settings.deactivateAgentDialogTitle (#2406, {name})
+// 근본원인(isNumberAdjacent가 이름·런타임 보간까지 "수와 함께 선다"로 오판)을 고치니 이
+// 일곱 전부 이 스캔에서 «다시 안 걸린다»(재현 확認 — tsx로 실행해 exemptHit 0/7, 신규
+// FAIL도 0건인 것까지 봤다). 즉 «지금 정말 안전한데 가드가 몰라서 면제해 둔» 상태에서
+// «가드가 스스로 안 겹친다는 걸 아는» 상태로 옮겨졌다 — EXEMPT_PAIRS는 이제 빈 목록이 맞고,
+// 앞으로 이름·런타임류 보간이 다시 오탐으로 걸리면 그건 NON_NUMBER_PLACEHOLDER_NAMES에
+// 새 이름을 더할 자리이지 여기 되돌아올 자리가 아니다.
+export const EXEMPT_PAIRS = new Set<string>([]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이
 // 넣지 않는다. 이 길을 그냥 열어 두면 "새 충돌이 FAIL 났을 때 담당이 baseline에 넣고 지나가는"
