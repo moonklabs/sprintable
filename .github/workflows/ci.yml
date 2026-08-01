@@ -668,6 +668,18 @@ jobs:
       - name: "Verify no i18n phrase substring collision (story #2367 regression guard)"
         run: pnpm --filter web verify:no-i18n-phrase-collision
 
+      # story #2371 회귀가드: `scripts/check-i18n-keys.js`(code→messages missing-key 축)를
+      # 처음으로 CI에 건다 — 이전엔 CI/husky/package.json 어디에도 안 걸려 있었고 손으로
+      # 돌리면 344 issues·exit 1이 나왔는데(2026-07-31 실측) 344건 전부 도구 결함(워드바운더리
+      # ㉠·네임스페이스 점 미지원+matchAll 미사용 ㉡·2단 이상 중첩 미지원 ㉢, 여기 더해 훅
+      # 변수명 t 하드코딩 ㉣·주석 안 예시코드 오인 ㉤ 둘을 새로 찾아 고쳤다)이라 걸어도 상시
+      # 빨간불이었다. 위 결함을 전부 고친 뒤 재측정한 missing 축은 0건(자가 재현) — 이제
+      # 걸어도 실사용 회귀만 잡는다. messages→코드 dead-key 축(AC3)은 이 스텝을 실패시키지
+      # 않는다(스크립트 자체가 non-zero exit을 missing 축에만 건다) — 후보 목록일 뿐 삭제
+      # 판단은 사람이 소비처를 하나씩 봐야 하는 별건(AC6)이라 CI 게이트로 강제하지 않는다.
+      - name: "Verify i18n translation keys (story #2371 regression guard)"
+        run: pnpm verify:i18n-keys
+
       # story #2376 회귀가드: 사이드바(app-sidebar.tsx)·⌘K 팔레트(command-palette.tsx)·모바일
       # 더보기(more/page.tsx) 등이 조합(resourceLink/resourceHref)·리터럴(href=/href:) 어느
       # 축으로 걸든, [ws]/[proj]/<resource> 라우트 실존과 어긋나면(양방향) 실패한다 — #2373
