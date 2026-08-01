@@ -322,7 +322,14 @@ async def agent_event_stream(
     since_timestamp: datetime | None = Query(default=None),
     last_event_id: uuid.UUID | None = Query(default=None),
 ):
-    """GET /api/v2/events/stream — 에이전트 전용 SSE 스트림.
+    """GET /api/v2/events/stream — SSE 스트림.
+
+    story #2391(2026-08-01) — "에이전트 전용"은 사실이 아니었다. 아래 `resolve_member_identity`
+    호출이 TeamMember(에이전트+레거시 휴먼) 다음으로 OrgMember(grant-only 휴먼)도 해소하므로,
+    이 스트림은 설계상 human도 실제로 붙는다(E-MEMBER-SSOT Phase 0 — team_member 강요를
+    의도적으로 없앤 것이지 사고가 아니다, `resolve_member_identity` 자신의 docstring 참조).
+    모듈 최상단 docstring(#2380)은 이미 이 사실을 적어 뒀었는데 이 함수 자신의 docstring만
+    안 따라왔었다.
 
     인증: Authorization: Bearer {API_KEY} 또는 JWT.
     API Key 사용 시 member_id 자동 추출 — 쿼리 파라미터 불필요.
