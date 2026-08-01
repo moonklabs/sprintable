@@ -1,7 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { spliceApiKey, splitRuntimeCapabilities, pickDefaultRuntime, groupAndFilterRoleTemplates, resolveKitFilename } from './recruiter-client';
 import type { McpConfigBundle, RuntimeCapabilityItem, RoleTemplateSummary } from '@/services/recruit';
 import { RUNTIME_CAPABILITIES_FALLBACK, KIT_FILENAME } from '@/services/recruit';
+import enMessages from '../../../../../../messages/en.json';
+import koMessages from '../../../../../../messages/ko.json';
 
 describe('spliceApiKey (까심 QA RC HIGH① — transport별 키 위치)', () => {
   it('replaces the key in headers.Authorization for the http (hosted) shape', () => {
@@ -216,5 +220,44 @@ describe('groupAndFilterRoleTemplates (E-RECRUIT 카탈로그 탐색성)', () =>
 
   it('handles an empty catalog', () => {
     expect(groupAndFilterRoleTemplates([], '')).toEqual([]);
+  });
+});
+
+// story #2377 A-1(규격 v1.2 §2) — "kitOrientingTitle 이 다시 수를 박지 않는다"의 회귀가드.
+// 예전엔 en="set up 2 things"/ko="2가지를 세팅하세요"였다 — 단계 축이 늘 때마다(예: 이번처럼
+// ①연결 ②지침 두 단계가 ①②③ 세 단계로 늘어나는 날) 그 수가 다시 거짓이 되는 재발 구조였다.
+// 이 테스트는 "숫자를 안 쓴다"는 «성질»을 재지 특정 문자열을 재지 않는다 — 카피가 나중에 또
+// 바뀌어도(이 PR처럼) 「숫자가 없다」는 성질만 지키면 계속 통과해야 값이 있다.
+describe('recruiter.kitOrientingTitle — story #2377 A-1(수 하드코딩 금지)', () => {
+  it('contains no digit in either locale — the step count must never be spelled out in the copy', () => {
+    const en = (enMessages as { recruiter: { kitOrientingTitle: string } }).recruiter.kitOrientingTitle;
+    const ko = (koMessages as { recruiter: { kitOrientingTitle: string } }).recruiter.kitOrientingTitle;
+    expect(en).not.toMatch(/\d/);
+    expect(ko).not.toMatch(/\d/);
+  });
+});
+
+// story #2377 §2·§4 — STEP4 오리엔팅 카드가 3단계(①연결·②깨우기·③지침)로 서고 §4 발견 가능성
+// 링크(onboarding-guide.txt)가 실제로 화면에 있는지의 회귀가드. RecruiterClient는 역할 선택→
+// 스코프→에이전트 생성→recruit() 다단 위저드라 이 컴포넌트 전체를 마운트하는 기존 테스트가
+// 없다(이 파일의 나머지 테스트도 전부 export된 순수 함수만 잰다) — 여기서도 그 관례를 따르되,
+// STEP4는 순수 함수로 안 빠져 있으므로 «소스 텍스트» 수준에서 잰다(verify-no-alpha-focus-ring.ts
+// 류의 정적 스캔과 같은 성질 — 렌더된 DOM이 아니라 「그 문자열이 소스에 있는가」). 이것으로
+// «렌더된다»까지 증명되진 않는다 — 그건 AC4가 요구하는 라이브 재확認의 몫이다.
+describe('recruiter-client STEP4 — story #2377 §2(단계 셋)·§4(발견 가능성 링크) 소스 회귀가드', () => {
+  const source = readFileSync(fileURLToPath(new URL('./recruiter-client.tsx', import.meta.url)), 'utf-8');
+
+  it('links to onboarding-guide.txt from the STEP4 card — a screen link, not just a file that exists', () => {
+    expect(source).toContain('href="/onboarding-guide.txt"');
+  });
+
+  it('renders three numbered steps (Connect·Wake up·Instructions), not the old two', () => {
+    expect(source).toContain("t('kitOrientingConnectLabel')");
+    expect(source).toContain("t('kitOrientingWakeLabel')");
+    expect(source).toContain("t('kitOrientingGuideLabel')");
+  });
+
+  it('shows an explicit "not registered yet" fallback for the wake-up step instead of staying silent', () => {
+    expect(source).toContain("t('kitOrientingWakeBodyUnknown')");
   });
 });
