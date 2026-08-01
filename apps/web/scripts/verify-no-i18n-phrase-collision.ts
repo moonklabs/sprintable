@@ -153,7 +153,20 @@ export function findSubstringCollisions(
 // AC5 — 지금은 실제로 안 겹치지만 이 스캔이 걸릴 수 있는 자리. 항목마다 이유+재검토 시점.
 // «영구 정상»으로 코드로 확認된 것만 여기 온다 — GRANDFATHER_BASELINE(아래, 미triage 채무)과
 // 다르다.
-export const EXEMPT_PAIRS = new Set<string>([]);
+//
+// story #2404(2026-08-01, PO 승인) — `recruiter.verifyGuideMcp`(#2404가 신설한 온보딩 안내문)
+// 4건. `PLACEHOLDER_VALUE_RE`가 이름 보간(`{runtime}`)까지 "수와 함께 서는" 신호로 잡아
+// numberAdjacent=true가 됐지만, verifyGuideMcp는 숫자를 전혀 담지 않는 안내문(보간은 런타임
+// 이름뿐)이고 짝지어진 넷(stepComplete/stepVerify/next/equipDone)도 카운터가 아닌 고정
+// 내비게이션 라벨이다 — #2352/#2365가 잡으려는 "두 셈이 같은 말로 헷갈리는" 병이 아니다.
+// ⭐이 오탐의 근본 원인(`PLACEHOLDER_VALUE_RE`가 숫자·이름 보간을 구분 못 하는 것 자체)은
+// story #2410으로 별도 추적한다 — 여기서는 면제만.
+export const EXEMPT_PAIRS = new Set<string>([
+  'recruiter.equipDone <-> recruiter.verifyGuideMcp',
+  'recruiter.next <-> recruiter.verifyGuideMcp',
+  'recruiter.stepComplete <-> recruiter.verifyGuideMcp',
+  'recruiter.stepVerify <-> recruiter.verifyGuideMcp',
+]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이
 // 넣지 않는다. 이 길을 그냥 열어 두면 "새 충돌이 FAIL 났을 때 담당이 baseline에 넣고 지나가는"

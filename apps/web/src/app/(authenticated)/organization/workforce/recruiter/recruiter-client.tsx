@@ -432,6 +432,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const [recruitResult, setRecruitResult] = useState<RecruitResponse | null>(null);
   const [copiedGuide, setCopiedGuide] = useState(false);
   const [copiedMcp, setCopiedMcp] = useState(false);
+  const [copiedVerifyPrompt, setCopiedVerifyPrompt] = useState(false);
   const [showRotateConfirm, setShowRotateConfirm] = useState(false);
   const [rotating, setRotating] = useState(false);
   const [rotateError, setRotateError] = useState<string | null>(null);
@@ -583,6 +584,18 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
       await pollStatus();
     } finally {
       setVerifying(false);
+    }
+  };
+
+  // story #2404 — 검증이 "설정만 넣으면 자동으로 된다"는 오해로 무한 대기하던 것의 처방(AC5, PO
+  // 확정): 지금 할 일을 그 자리에서 손에 쥐여 준다 — 복사 가능한 예시 프롬프트 하나.
+  const handleCopyVerifyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(t('verifyExamplePrompt'));
+      setCopiedVerifyPrompt(true);
+      setTimeout(() => setCopiedVerifyPrompt(false), 2000);
+    } catch {
+      // ignore clipboard failure
     }
   };
 
@@ -1199,6 +1212,20 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   : t('verifyGuideConnector')}
               </p>
 
+              {/* story #2404(AC5, PO 확定) — "설정만 넣으면 자동으로 된다"는 오해가 무한 대기의
+                  실원인이었다(검증은 실제 tool 호출로만 완료됨). 대기 문구를 지우고 "지금 할 일"을
+                  복사 가능한 한 줄로 그 자리에 쥐여 준다. */}
+              {!verified && (
+                <div className="flex items-center justify-between gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2 text-xs">
+                  <span className="min-w-0 truncate text-info">
+                    {t('verifyExampleLabel')} <span className="font-mono text-foreground">&ldquo;{t('verifyExamplePrompt')}&rdquo;</span>
+                  </span>
+                  <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0">
+                    {copiedVerifyPrompt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
+                  </Button>
+                </div>
+              )}
+
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-medium">
                   {t('verifyTitle')}{' '}
@@ -1211,6 +1238,12 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 </Button>
               </div>
               <VerifyRail steps={displaySteps} />
+              {/* story #2404(AC5, PO 확定) — "이미 가능한데 사용자가 모르는" 상태를 없앤다. 처음부터
+                  보인다(폴링 실패 N회 뒤가 아님) — 검증은 관문이 아니라 확인일 뿐이라는 것 자체가
+                  즉시 알려져야 하는 사실이다. 주 동선(위 예시 프롬프트)보다 약하게(muted). */}
+              {!verified && (
+                <p className="text-xs text-muted-foreground">{t('verifySkippableHint')}</p>
+              )}
 
               <div className="flex items-center gap-3 rounded-md border border-success/20 bg-success/10 p-3">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
