@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { RENAMED_RESOURCES, RETIRED_RESOURCES } from '../src/proxy';
 import {
   EXEMPT_TARGETS,
   extractComposedTargets,
@@ -125,7 +126,7 @@ describe('AC7 — 실제 저장소 첫 스캔의 검거(GRANDFATHER_BASELINE)이
   });
 });
 
-describe('EXEMPT_TARGETS — 실측 스냅샷 정합', () => {
+describe('EXEMPT_TARGETS — 파생 정합(story #2387)', () => {
   it('KNOWN_NON_PROJECT_ROUTES와 RENAMED_RESOURCE_ALIASES의 합집합이다', () => {
     expect(EXEMPT_TARGETS.size).toBe(KNOWN_NON_PROJECT_ROUTES.size + RENAMED_RESOURCE_ALIASES.size);
   });
@@ -134,5 +135,30 @@ describe('EXEMPT_TARGETS — 실측 스냅샷 정합', () => {
     for (const r of ['login', 'register', 'forgot-password', 'privacy', 'terms', 'verify-email', 'onboarding']) {
       expect(KNOWN_NON_PROJECT_ROUTES.has(r)).toBe(true);
     }
+  });
+});
+
+// story #2387 — RENAMED_RESOURCE_ALIASES는 이제 손 스냅샷이 아니라 proxy.ts를 직접 import해
+// 파생시킨다(AC1: 「어긋나는 길이 없어지는」 쪽). 아래는 그 파생이 실제로 두 표 모두를 보는지
+// 고정하는 회귀가드 — proxy.ts에 세 번째 키가 추가돼도(RENAMED_RESOURCES든 RETIRED_RESOURCES든)
+// 이 테스트가 같은 소스에서 다시 계산하므로 자동으로 통과한다. 실제 "proxy.ts가 바뀌면 자동
+// 반영되는가"는 CLI 뮤테이션으로 확인했다(PR 설명 — proxy.ts에 임시 키 추가 → 가드 재실행 →
+// exempt 수가 32로 늘어남(31→32) 확認 → 원복 → 31로 복귀. 커밋 없음).
+describe('RENAMED_RESOURCE_ALIASES — proxy.ts에서 실제로 파생되는지(AC1/AC2)', () => {
+  it('RENAMED_RESOURCES ∪ RETIRED_RESOURCES 키와 정확히 같다(같은 소스에서 다시 계산해도 일치)', () => {
+    const expected = new Set([...Object.keys(RENAMED_RESOURCES), ...Object.keys(RETIRED_RESOURCES)]);
+    expect(RENAMED_RESOURCE_ALIASES).toEqual(expected);
+  });
+
+  it('rename 축(id 보존)과 retire 축(id 폐기)이 겹치지 않는다(중복 키가 있으면 그 자체가 축 혼동)', () => {
+    const renameKeys = new Set(Object.keys(RENAMED_RESOURCES));
+    const retireKeys = new Set(Object.keys(RETIRED_RESOURCES));
+    const overlap = [...renameKeys].filter((k) => retireKeys.has(k));
+    expect(overlap).toEqual([]);
+  });
+
+  it('mockups는 RETIRED_RESOURCES 쪽이다(story #2378 리뷰가 잡은 그 축 혼동의 정답 확인)', () => {
+    expect(Object.keys(RETIRED_RESOURCES)).toContain('mockups');
+    expect(Object.keys(RENAMED_RESOURCES)).not.toContain('mockups');
   });
 });
