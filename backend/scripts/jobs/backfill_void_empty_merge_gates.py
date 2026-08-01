@@ -9,25 +9,33 @@
 (self-report only)' · neutral_facts.pr_number 가 없음/0. 실 PR 있는 게이트·approved/auto_passed·
 held 등은 건드리지 않는다. 재실행 멱등(이미 voided면 status가 pending이 아니라 재대상 아님).
 
-env: DATABASE_URL (백엔드 동일·cloud-sql-proxy/in-VPC). 쓰기 작업.
+env: DATABASE_URL이 있으면 그것을 쓴다(백엔드 동일·cloud-sql-proxy/in-VPC). 없으면 ALEMBIC_URL로
+떨어진다(scripts/jobs/_db_env.py — sprintable-verify-oneoff Cloud Run Job이 DATABASE_URL이
+아니라 ALEMBIC_URL만 갖고 있다). 쓰기 작업.
 실행:
   cd backend && DATABASE_URL=... python -m scripts.jobs.backfill_void_empty_merge_gates            # dry-run
   cd backend && DATABASE_URL=... python -m scripts.jobs.backfill_void_empty_merge_gates --apply     # 실제 void
 옵션: --org <uuid> 로 특정 org만.
+
+story #2386(2026-08-01): resolve_database_url() 폴백 추가 — sprintable-verify-oneoff에서 한 번도
+안 돌려봐서 DATABASE_URL 직접 체크 상태로 남아 있었다(#2386 가드가 잡음).
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import sys
 import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import select
 
-from app.core.database import async_session_factory
-from app.models.gate import Gate
+from scripts.jobs._db_env import resolve_database_url
+
+_db_url_summary = resolve_database_url()
+
+from app.core.database import async_session_factory  # noqa: E402 — 위 폴백이 먼저 돌아야 한다
+from app.models.gate import Gate  # noqa: E402
 
 MERGE_GATE_TYPE = "merge"
 _SHELL_BASIS = "CI unknown (self-report only)"
@@ -42,9 +50,10 @@ def _is_no_pr(neutral_facts: dict | None) -> bool:
 
 
 async def main() -> int:
-    if not os.environ.get("DATABASE_URL"):
-        print("DATABASE_URL 미설정", file=sys.stderr)
+    if _db_url_summary is None:
+        print("DATABASE_URL·ALEMBIC_URL 둘 다 미설정", file=sys.stderr)
         return 2
+    print(f"[db] {_db_url_summary}", file=sys.stderr)
 
     parser = argparse.ArgumentParser(description="void empty 'CI unknown' merge gate shells (idempotent)")
     parser.add_argument("--apply", action="store_true", help="실제 void 커밋 (미지정 시 dry-run)")

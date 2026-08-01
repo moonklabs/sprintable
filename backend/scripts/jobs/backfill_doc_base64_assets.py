@@ -8,7 +8,9 @@ legacy base64 노드를 GCS 업로드 + asset registry 등록 + 본문을 `data-
 register 는 additive(reconcile=False·같은 doc 기존 FE-업로드 link clobber 금지). size 는 head_object
 authoritative.
 
-env: DATABASE_URL (백엔드 동일·cloud-sql-proxy/in-VPC)·STORAGE_PROVIDER/버킷 설정. apply 시 GCS 쓰기.
+env: DATABASE_URL이 있으면 그것을 쓴다(백엔드 동일·cloud-sql-proxy/in-VPC). 없으면 ALEMBIC_URL로
+떨어진다(scripts/jobs/_db_env.py — sprintable-verify-oneoff Cloud Run Job이 DATABASE_URL이
+아니라 ALEMBIC_URL만 갖고 있다). STORAGE_PROVIDER/버킷 설정. apply 시 GCS 쓰기.
 실행:
   cd backend && DATABASE_URL=... python -m scripts.jobs.backfill_doc_base64_assets            # dry-run
   cd backend && DATABASE_URL=... python -m scripts.jobs.backfill_doc_base64_assets --apply     # 실제 이관
@@ -16,23 +18,30 @@ env: DATABASE_URL (백엔드 동일·cloud-sql-proxy/in-VPC)·STORAGE_PROVIDER/�
 
 ⚠️ run 전 미르코 FE 렌더러(data-asset-id 분기) 머지 + 이미지 노드 markup byte-exact(§1) 대조 필수.
 dev 먼저·prod 는 선생님 승인 시(PO 게이트).
+
+story #2386(2026-08-01): resolve_database_url() 폴백 추가 — sprintable-verify-oneoff에서 한 번도
+안 돌려봐서 DATABASE_URL 직접 체크 상태로 남아 있었다(#2386 가드가 잡음).
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import sys
 import uuid
 
-from app.core.database import async_session_factory
-from app.services.doc_asset_backfill import backfill_docs
+from scripts.jobs._db_env import resolve_database_url
+
+_db_url_summary = resolve_database_url()
+
+from app.core.database import async_session_factory  # noqa: E402 — 위 폴백이 먼저 돌아야 한다
+from app.services.doc_asset_backfill import backfill_docs  # noqa: E402
 
 
 async def main() -> int:
-    if not os.environ.get("DATABASE_URL"):
-        print("DATABASE_URL 미설정", file=sys.stderr)
+    if _db_url_summary is None:
+        print("DATABASE_URL·ALEMBIC_URL 둘 다 미설정", file=sys.stderr)
         return 2
+    print(f"[db] {_db_url_summary}", file=sys.stderr)
 
     parser = argparse.ArgumentParser(
         description="doc 본문 base64 첨부 → GCS 자산 이관 + ref rewrite (멱등·dry-run 기본)"

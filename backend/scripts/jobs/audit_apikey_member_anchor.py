@@ -18,18 +18,26 @@ dual-write 했고 0075는 type='agent' team_member만 members에 넣었으므로
   grant-only 누락/union 복제 회귀/0075 파손 감지.
 - 0건(a∩b∩FK) → flag-on 안전(dead 키 INFO 는 비차단). 1건+ → 처리(regression: 0075 정합/members 보정 · 드리프트: 정렬 정합).
 
-env: DATABASE_URL (백엔드 동일, cloud-sql-proxy/in-VPC 경유). 읽기 전용(조회만).
+env: DATABASE_URL이 있으면 그것을 쓴다(백엔드 동일, cloud-sql-proxy/in-VPC 경유). 없으면
+ALEMBIC_URL로 떨어진다(scripts/jobs/_db_env.py — sprintable-verify-oneoff Cloud Run Job이
+DATABASE_URL이 아니라 ALEMBIC_URL만 갖고 있다). 읽기 전용(조회만).
 실행: cd backend && DATABASE_URL=... python -m scripts.jobs.audit_apikey_member_anchor
+
+story #2386(2026-08-01): resolve_database_url() 폴백 추가 — 이 스크립트는 sprintable-verify-oneoff에서
+한 번도 안 돌려봐서 DATABASE_URL 직접 체크 상태로 남아 있었다(#2386 가드가 잡음).
 """
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 
 from sqlalchemy import text
 
-from app.core.database import async_session_factory
+from scripts.jobs._db_env import resolve_database_url
+
+_db_url_summary = resolve_database_url()
+
+from app.core.database import async_session_factory  # noqa: E402 — 위 폴백이 먼저 돌아야 한다
 
 # (a) cut REGRESSION: legacy 가 해소되는데(active team_members 존재) anchor 는 401(members(agent,active) 부재)
 # = flip 으로 **실제 깨지는 working 키**. legacy 도 이미 401 인 dead 키(inactive tm)는 flip 무관이라 제외(INFO).
@@ -124,9 +132,10 @@ ORDER BY ak.created_at
 
 
 async def main() -> int:
-    if not os.environ.get("DATABASE_URL"):
-        print("[FAIL] DATABASE_URL 필요", file=sys.stderr)
+    if _db_url_summary is None:
+        print("[FAIL] DATABASE_URL·ALEMBIC_URL 둘 다 미설정", file=sys.stderr)
         return 2
+    print(f"[db] {_db_url_summary}", file=sys.stderr)
     async with async_session_factory() as s:
         rows = (await s.execute(text(AUDIT_SQL))).mappings().all()
         fk_bad = (await s.execute(text(FK_VIOLATION_SQL))).scalar_one()
