@@ -16,6 +16,7 @@
     "verify:no-handrolled-modal": "tsx scripts/verify-no-handrolled-modal.ts",
     "verify:focus-inset-coverage": "tsx scripts/verify-focus-inset-coverage.ts",
     "verify:no-i18n-phrase-collision": "tsx scripts/verify-no-i18n-phrase-collision.ts",
+    "verify:no-orphan-resource-routes": "tsx scripts/verify-no-orphan-resource-routes.ts",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report"
