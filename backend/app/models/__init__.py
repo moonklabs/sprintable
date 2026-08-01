@@ -21,11 +21,12 @@ from app.models.gate import Gate
 from app.models.github_installation import GithubInstallation, GithubInstallNonce, GithubWebhookDelivery
 from app.models.hitl import HitlPolicy, HitlRequest
 from app.models.judgment import Judgment
-from app.models.mockup import MockupComponent, MockupPage, MockupScenario, MockupVersion, UsageMeter
+from app.models.usage_meter import UsageMeter
 from app.models.user import RefreshToken, User
 from app.models.workflow_version import WorkflowVersion
 from app.models.api_key import ApiKey
 from app.models.org_subscription import OrgSubscription
+from app.models.pricing_version import PricingVersion
 from app.models.plan_tier_limit import PlanTierLimit
 from app.models.policy_document import PolicyDocument
 from app.models.audit import AuditLog
@@ -130,13 +131,10 @@ __all__ = [
     "Mention",
     "Reference",
     "ReferenceSemanticCandidate",
-    "MockupComponent",
-    "MockupPage",
-    "MockupScenario",
-    "MockupVersion",
     "UsageMeter",
     "ApiKey",
     "OrgSubscription",
+    "PricingVersion",
     "PlanTierLimit",
     "PolicyDocument",
     "AuditLog",

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -288,7 +289,15 @@ async def dispatch_notification(
                         sender_id=None,
                         recipient_id=member_row.id,
                         recipient_type="agent",
-                        payload={"title": title, "body": body, "event_type": event_type},
+                        # #2375: content 키 없으면 SSE 어댑터(fakechat/server.ts·hermes adapter.py)가
+                        # 둘 다 ack 前에 조용히 드롭해 영구 pending — E-EVENT-INJECT S1이 만든
+                        # "content를 SSE top-level로 노출"(agent_gateway.py _row_to_payload) 방지장치가
+                        # 여기(생성부)에서 그 키를 안 채워 안 맞물려 있었다. body 없으면 title로
+                        # 폴백(title은 필수 파라미터라 항상 non-empty) — 절대 빈 content로 두지 않는다.
+                        payload={
+                            "title": title, "body": body, "event_type": event_type,
+                            "content": body or title,
+                        },
                         status="pending",
                     )
                     db.add(event)
@@ -315,6 +324,13 @@ async def dispatch_notification(
                 if member_row.project_id:
                     try:
                         async with db.begin_nested():
+                            # story #2380: 이 분기는 human Event를 생성 즉시 status="delivered"로
+                            # 박는다(human은 agent SSE ack 사이클을 안 타므로 pending을 안 거치는
+                            # 것 자체는 맞다) — 그런데 delivered_at을 한 번도 안 채워 왔다. dev
+                            # 실측(2026-08-01): 이 경로로 난 human Event의 74%가 status=delivered
+                            # 인데 delivered_at=NULL — "배달됐다"만 있고 "언제"가 없어, 이 값을
+                            # coalesce(delivered_at, now())로 지연을 재려던 첫 시도가 「p50 9.4일」
+                            # 이라는 거짓 수치를 냈다(실제로는 그 행들 나이가 now()로 치환된 것).
                             event = Event(
                                 project_id=member_row.project_id,
                                 org_id=org_id,
@@ -326,6 +342,14 @@ async def dispatch_notification(
                                 recipient_type="human",
                                 payload={"title": title, "body": body, "event_type": event_type},
                                 status="delivered",
+                                # ⛔이 순간이 "배달 시도 순간"과 같다고 볼 수 있는 건 이 분기가
+                                # 지금 동기라서다 — 바로 다음 줄들이 실제 배달 행위(Notification
+                                # INSERT·개인 webhook 시도)를 같은 호출 안에서 한다. 이 경로가
+                                # 나중에 진짜 비동기(예: webhook 배달확認 콜백)가 되면 이 값도
+                                # 그 확認 시점으로 옮겨야 한다 — 여기 그대로 둔 채 비동기화하면
+                                # #2380이 고친 문제(delivered_at이 실제 배달 시점을 안 가리킴)가
+                                # 값이 없는 대신 "틀린 값"으로 재발한다.
+                                delivered_at=datetime.now(timezone.utc),
                             )
                             db.add(event)
                         created_events.append(event)
@@ -335,6 +359,17 @@ async def dispatch_notification(
 
         if inserted:
             await db.flush()
+            # #2375 후속 — agent 수신 Event가 recipient_seq를 한 번도 배정받지 못했다(이 함수
+            # 어디에도 assign_recipient_seq() 호출이 없었다). agent_gateway.py의 /stream 쿼리는
+            # `recipient_seq > :after_seq`로 커서 필터링하는데 NULL은 그 비교를 절대 통과 못 해
+            # 라이브 스트림에도 backfill 재연결에도 안 잡힌다 — content 키를 채운 뒤에도(#2375
+            # 본 fix) agent 쪽 delivered=0건이 이어진 진짜 근본원인. agent_dispatch.py의
+            # _finalize_dispatch()가 이미 쓰는 패턴(Event INSERT+flush 後·commit 前)을 그대로
+            # 재사용한다 — 여기도 "flush 후" 시점이라 그 불변식을 만족한다.
+            from app.services.event_seq import assign_recipient_seq
+            for _ev in created_events:
+                if _ev.recipient_type == "agent":
+                    await assign_recipient_seq(db, _ev)
             # L1 BE-3: multi-recipient dispatch fan-out N행 → activity_events 1행 수렴
             # (best-effort·savepoint 격리라 추출 실패해도 delivery·Notification 무영향).
             from app.services.activity_stream import extract_activities_best_effort

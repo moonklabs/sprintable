@@ -423,13 +423,15 @@ jobs:
         run: |
           set -e
           test -f alembic/versions/0148_org_subscriptions_org_id_unique.py
-          if [ -f alembic/versions/0146_pricing_versions.py ] || [ -f alembic/versions/0147_pricing_versions_live_seed.py ]; then
-            echo "FAIL: ee_pricing migration(s) present in a main-bound file set"; exit 1
-          fi
-          if [ -f alembic/versions/0162_merge_ee_pricing_core_heads.py ]; then
-            echo "FAIL: develop-only merge node 0162 present in a main-bound file set (references ee_pricing 0147, which main doesn't have)"; exit 1
-          fi
-          echo "OK: main file set has 0148(core), no ee_pricing, no develop-only merge node"
+          # ⭐2026-08-01(promo #2783·PO): ee_pricing(0146/0147) + merge node 0162 «금지»를 걷었다.
+          # 걷은 이유 — 이 assert 는 「main 은 ee_pricing 을 «영원히» 안 가진다」를 단언했는데,
+          # 그것이 참일 수 없다. prod 실측(2026-08-01, 읽기전용 잡): pricing_versions 테이블이
+          # 없는데 ee/routers/billing.py 는 그것을 읽는다. 즉 「안 올린다」가 유지 가능한 상태가
+          # 아니었고, 그 사이 두 체인이 0163 에서 «같은 이름·다른 부모»로 갈렸다(#2397).
+          # ⇒ 승격을 막던 것이 이 assert 였고, 막힌 채로는 그 갈림이 영영 안 닫힌다.
+          # ⛔대신 이 잡의 나머지가 여전히 지킨다: 0148(core) 존재 · single head · fresh-DB upgrade.
+          #   0162 는 merge node 라 head 를 늘리지 않는다 — single head assert 로 그것이 계속 재진다.
+          echo "OK: main file set has 0148(core); ee_pricing/merge-node 금지는 promo #2783 에서 해제"
 
       - name: Build revision graph (single head expected)
         working-directory: backend
@@ -438,7 +440,7 @@ jobs:
           heads=$(uv run alembic heads 2>/dev/null | grep -oE '^[0-9a-z_]+')
           n=$(echo "$heads" | grep -c .)
           echo "heads=$heads (count=$n)"
-          test "$n" = "1"  # main never carries the ee_pricing branch — exactly one head
+          test "$n" = "1"  # 0162 는 merge node 라 ee_pricing 이 들어와도 head 는 하나여야 한다
 
       - name: Fresh-DB upgrade heads (main file set)
         working-directory: backend
@@ -667,6 +669,18 @@ jobs:
       # 경우(#2352·#2365 원 사고 자체)는 이 v1 스코프 밖 — 스크립트 헤더 주석 참조.
       - name: "Verify no i18n phrase substring collision (story #2367 regression guard)"
         run: pnpm --filter web verify:no-i18n-phrase-collision
+
+      # story #2371 회귀가드: `scripts/check-i18n-keys.js`(code→messages missing-key 축)를
+      # 처음으로 CI에 건다 — 이전엔 CI/husky/package.json 어디에도 안 걸려 있었고 손으로
+      # 돌리면 344 issues·exit 1이 나왔는데(2026-07-31 실측) 344건 전부 도구 결함(워드바운더리
+      # ㉠·네임스페이스 점 미지원+matchAll 미사용 ㉡·2단 이상 중첩 미지원 ㉢, 여기 더해 훅
+      # 변수명 t 하드코딩 ㉣·주석 안 예시코드 오인 ㉤ 둘을 새로 찾아 고쳤다)이라 걸어도 상시
+      # 빨간불이었다. 위 결함을 전부 고친 뒤 재측정한 missing 축은 0건(자가 재현) — 이제
+      # 걸어도 실사용 회귀만 잡는다. messages→코드 dead-key 축(AC3)은 이 스텝을 실패시키지
+      # 않는다(스크립트 자체가 non-zero exit을 missing 축에만 건다) — 후보 목록일 뿐 삭제
+      # 판단은 사람이 소비처를 하나씩 봐야 하는 별건(AC6)이라 CI 게이트로 강제하지 않는다.
+      - name: "Verify i18n translation keys (story #2371 regression guard)"
+        run: pnpm verify:i18n-keys
 
       # story #2376 회귀가드: 사이드바(app-sidebar.tsx)·⌘K 팔레트(command-palette.tsx)·모바일
       # 더보기(more/page.tsx) 등이 조합(resourceLink/resourceHref)·리터럴(href=/href:) 어느

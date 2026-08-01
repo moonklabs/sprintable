@@ -2,8 +2,14 @@
 
 C-S6: SSE 스트림 (메모 변경 이벤트 실시간 푸시)
 E-EVENTBUS S1: events 테이블 CRUD (이벤트버스 기반)
-E-EVENTBUS S2: MCP Streamable HTTP SSE 푸시 (에이전트 전용)
+E-EVENTBUS S2: MCP Streamable HTTP SSE 푸시 (에이전트 전용 — 단, `resolve_member_identity`가
+grant-only human(OrgMember)도 해소하므로 이 스트림 자체는 human도 실제로 붙을 수 있다. #2380)
 E-EVENTBUS S3: 이벤트 큐 + 오프라인 재전달 (at-least-once + 배치 + expired)
+
+story #2380: `Event.status`와 `Event.read_at`은 별개 축이다 — `status`는 "배달됐는가"(pending
+→delivered/expired), `read_at`은 "사람이 열람했는가"(event_notifications.py가 관리, status와
+무관하게 갱신). 두 값을 섞어 읽지 않는다 — status=delivered·read_at=NULL은 정상(배달됐지만
+아직 안 읽음)이지 결함이 아니다.
 """
 from __future__ import annotations
 
@@ -316,7 +322,14 @@ async def agent_event_stream(
     since_timestamp: datetime | None = Query(default=None),
     last_event_id: uuid.UUID | None = Query(default=None),
 ):
-    """GET /api/v2/events/stream — 에이전트 전용 SSE 스트림.
+    """GET /api/v2/events/stream — SSE 스트림.
+
+    story #2391(2026-08-01) — "에이전트 전용"은 사실이 아니었다. 아래 `resolve_member_identity`
+    호출이 TeamMember(에이전트+레거시 휴먼) 다음으로 OrgMember(grant-only 휴먼)도 해소하므로,
+    이 스트림은 설계상 human도 실제로 붙는다(E-MEMBER-SSOT Phase 0 — team_member 강요를
+    의도적으로 없앤 것이지 사고가 아니다, `resolve_member_identity` 자신의 docstring 참조).
+    모듈 최상단 docstring(#2380)은 이미 이 사실을 적어 뒀었는데 이 함수 자신의 docstring만
+    안 따라왔었다.
 
     인증: Authorization: Bearer {API_KEY} 또는 JWT.
     API Key 사용 시 member_id 자동 추출 — 쿼리 파라미터 불필요.

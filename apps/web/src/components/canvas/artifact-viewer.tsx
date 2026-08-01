@@ -101,6 +101,11 @@ export function ArtifactViewer({
               {t('provenanceImportedBadge')}
             </span>
           ) : null}
+          {/* story #2378(2026-08-01, 은퇴한 전신 `/mockups`와의 갭 기록) — 이 select는 과거
+           * 버전을 «열람»만 한다. 전신 `/mockups`엔 `POST /{id}/versions`(옛 버전을 다시
+           * 현재로 복원)가 있었는데 E-CANVAS엔 그 반대(rollback) 엔드포인트가 없다 — 열람과
+           * 복원은 다른 기능이다. 실사용에서 필요해지면 별건으로 서야 한다(#2378 AC1 조사
+           * 기록, 지금 새로 짓지 않는다 — 짓다 만 것이 아니라 «아직 안 지은 것»). */}
           <select
             value={selectedVersion}
             onChange={(e) => setSelectedVersion(Number(e.target.value))}

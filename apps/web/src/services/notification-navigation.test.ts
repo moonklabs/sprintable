@@ -34,9 +34,8 @@ function createDbStub() {
 }
 
 describe('attachNotificationHrefs', () => {
-  it('builds memo and doc comment deep links with safe docs fallback', async () => {
+  it('builds doc comment deep links with safe docs fallback', async () => {
     const notifications = await attachNotificationHrefs(createDbStub(), [
-      { id: 'notif-1', reference_type: 'memo', reference_id: 'memo-1' },
       { id: 'notif-2', reference_type: 'doc_comment', reference_id: 'comment-1' },
       { id: 'notif-3', reference_type: 'doc_comment', reference_id: 'missing-comment' },
       { id: 'notif-4', reference_type: 'doc', reference_id: 'doc-2' },
@@ -44,11 +43,23 @@ describe('attachNotificationHrefs', () => {
     ]);
 
     expect(notifications).toEqual([
-      expect.objectContaining({ id: 'notif-1', href: '/memos?id=memo-1' }),
       expect.objectContaining({ id: 'notif-2', href: '/docs/ops-guide?commentId=comment-1' }),
       expect.objectContaining({ id: 'notif-3', href: '/docs' }),
       expect.objectContaining({ id: 'notif-4', href: '/docs/runbook' }),
       expect.objectContaining({ id: 'notif-5', href: null }),
+    ]);
+  });
+
+  // story #2379 — '/memos' 라우트가 앱 어디에도 없어(#2376 가드 실측) 죽은 링크였다. memo
+  // 분기를 지운 뒤 다른 미매치 reference_type과 동일하게 href: null로 떨어지는 것을 고정한다
+  // (기본 fallback 재사용 — 새 결함이 아님을 회귀가드로 남긴다).
+  it('falls back to href: null for the retired memo notification path (story #2379)', async () => {
+    const notifications = await attachNotificationHrefs(createDbStub(), [
+      { id: 'notif-9', reference_type: 'memo', reference_id: 'memo-1' },
+    ]);
+
+    expect(notifications).toEqual([
+      expect.objectContaining({ id: 'notif-9', href: null }),
     ]);
   });
 

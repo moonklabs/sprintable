@@ -215,15 +215,8 @@ async function _onEvent(evType: string, evId: string, dataStr: string): Promise<
   // 있으면 세션에 주입되던 보안 갭을 닫는다.
   if (!isInjectableEventType(data, payload)) return
 
-  const content = ((data.content ?? payload.content ?? '') as string).trim()
-  if (!content) return
-
-  const eventId = (data.event_id ?? payload.id ?? evId ?? crypto.randomUUID()) as string
-  if (_isDuplicate(eventId)) return
-
-  if (evId) _lastEventId = evId
-
-  // recipient_seq for ack — data 최상위 우선, payload fallback
+  // recipient_seq for ack — data 최상위 우선, payload fallback. content 체크보다 먼저 계산해야
+  // 아래 빈-content 분기에서도 ack할 수 있다(#2375 AC5).
   let seq = 0
   for (const cand of [data.recipient_seq, payload.recipient_seq]) {
     const n = Number(cand)
@@ -232,6 +225,23 @@ async function _onEvent(evType: string, evId: string, dataStr: string): Promise<
       break
     }
   }
+
+  const content = ((data.content ?? payload.content ?? '') as string).trim()
+  if (!content) {
+    // #2375 AC5 — 내용 없는 injectable 이벤트는 "전달 실패"가 아니라 "보일 것 없음"이다.
+    // 예전엔 여기서 ack 없이 return해 seq가 영원히 미확인으로 남았다 — 재연결마다 backfill이
+    // 같은 이벤트를 다시 보내는데, 그 backfill flood를 막으려던 ack 메커니즘(주석 참조) 자체가
+    // 이 경로에서만 무력화돼 있었다(2026-07-31~08-01 dispatched 20건+ 영구 pending의 근본원인).
+    // 서버가 content를 채운 뒤(notification_dispatch.py)로도 이 분기는 남는다 — 어떤 injectable
+    // event가 정말로 텍스트를 안 실은 채 오는 경우의 안전망.
+    if (seq > 0) await _sendAck(seq)
+    return
+  }
+
+  const eventId = (data.event_id ?? payload.id ?? evId ?? crypto.randomUUID()) as string
+  if (_isDuplicate(eventId)) return
+
+  if (evId) _lastEventId = evId
 
   const conversationId = (
     payload.conversation_id ??

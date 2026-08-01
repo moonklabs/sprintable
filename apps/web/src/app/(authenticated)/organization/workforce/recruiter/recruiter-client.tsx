@@ -18,7 +18,7 @@ import {
   VerifyRail, RAIL_ORDER, HTTP_RAIL_ORDER, type DisplayStep, type RailState, type RailStatus,
 } from '@/app/onboarding/verify-rail';
 import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle, RuntimeCapabilityItem } from '@/services/recruit';
-import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FILENAME } from '@/services/recruit';
+import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FILENAME, resolveRuntimeWakeInfo } from '@/services/recruit';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
 
@@ -399,6 +399,10 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     const rc = runtimeCapabilities?.find((r) => r.slug === runtime);
     return rc ? runtimeDisplayName(rc) : runtime;
   })();
+
+  // story #2377 §2(규격 A) — 「깨우기」 축. MCP 연결(①)과 지침 전달(③)만으로는 «어떤 런타임도»
+  // 안 깨어난다(유나양 규격 §0, 실측 5/5) — 그 사이에 빠져 있던 ②를 명시한다.
+  const wakeInfo = resolveRuntimeWakeInfo(runtime);
 
   const [agentMode, setAgentMode] = useState<'new' | 'existing'>('new');
   const [newAgentName, setNewAgentName] = useState('');
@@ -1039,11 +1043,18 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
           {/* ── STEP 4 : 번들 프리뷰(파일 3종) ── */}
           {step === 4 && recruitResult && selectedRole && (
             <div className="space-y-4">
-              {/* story 5ea9bafe(P1-a): 오리엔팅 헤더 — 아래 두 아티팩트(연결/지침)를 왜·어떤 순서로
-                  세팅하는지 먼저 프레이밍(신 kit 모델이 구 "번들"보다 암묵적이라 유나 UX 지적). */}
+              {/* story 5ea9bafe(P1-a): 오리엔팅 헤더 — 아래 아티팩트를 왜·어떤 순서로 세팅하는지
+                  먼저 프레이밍(신 kit 모델이 구 "번들"보다 암묵적이라 유나 UX 지적).
+                  ⛔story #2377 후속(2026-08-01, 유나양 규격 v1.2 §2·§4) — 예전엔 「연결」·「지침」
+                  두 단계뿐이었는데, 그 «둘을 전부 정확히» 해도 아무 런타임도 안 깨어난다(실측
+                  5/5) — 세션을 실제로 깨우는 ②(「깨우기」)가 화면에 아예 없어 침묵하고 있었다.
+                  단계를 셋으로 갈라 ②가 «비어 있으면 그 자리에서 보이게»(A-2 판별선) 한다.
+                  A-1(수 하드코딩 금지) — kitOrientingTitle에서 "2가지"/count를 뺐다: 축이
+                  늘 때마다(예: 런타임별 단계 수가 갈리는 날) 그 수가 다시 거짓이 되는 재발
+                  구조이기 때문이다. */}
               <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3">
                 <p className="text-sm font-bold text-foreground">{t('kitOrientingTitle', { role: selectedRole.name })}</p>
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-2 sm:grid-cols-3">
                   <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">
                     <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">1</span>
                     <div className="min-w-0">
@@ -1055,8 +1066,35 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       </p>
                     </div>
                   </div>
+                  {/* ⭐②「깨우기」— 순서상 가장 중요하다(유나양 규격 §2: 없으면 ①③이 무의미).
+                      MCP 연결만으로는 세션이 안 깨어나므로, 이 런타임을 실제로 깨우는 방법을
+                      여기서 말한다. 매핑에 없는(아직 등재 안 된) 런타임이면 "아직 없다"를
+                      명시적으로 말한다 — 침묵하지 않는다(§2 처방 그대로). */}
                   <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">
                     <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">2</span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-foreground">{t('kitOrientingWakeLabel')}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {wakeInfo.method === 'unknown'
+                          ? t('kitOrientingWakeBodyUnknown')
+                          : t(`kitOrientingWakeBody_${wakeInfo.method}`, { path: wakeInfo.path })}
+                      </p>
+                      {/* story #2377 §4(발견 가능성) — onboarding-guide.txt로 가는 화면 링크가
+                          이전엔 0건이었다(URL을 아는 사람만 볼 수 있어 "문서에 있다"가 화면에서는
+                          "없다"와 같았다). 화면이 못 담는 런타임별 상세(전체 아홉 종 표)는 이
+                          문서로 보내되, 그 «링크 자체»가 화면에 있어야 한다. */}
+                      <a
+                        href="/onboarding-guide.txt"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-0.5 inline-block text-xs text-info underline-offset-2 hover:underline"
+                      >
+                        {t('kitOrientingWakeGuideLink')}
+                      </a>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">3</span>
                     <div className="min-w-0">
                       <p className="text-xs font-bold text-foreground">{t('kitOrientingGuideLabel')}</p>
                       <p className="text-xs text-muted-foreground">{t('kitOrientingGuideBody', { filename: guideFilename })}</p>

@@ -9,7 +9,8 @@
     "dev:be": "cd backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload",
     "lint": "turbo run lint",
     "type-check": "turbo run type-check",
-    "test": "vitest run"
+    "test": "vitest run",
+    "verify:i18n-keys": "node scripts/check-i18n-keys.js"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

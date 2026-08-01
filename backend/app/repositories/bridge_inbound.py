@@ -84,8 +84,16 @@ class BridgeInboundRepository:
         metadata: "dict[str, Any]",
         assigned_to: "uuid.UUID | None",
     ) -> str:
-        # Memos are retired (E-MEMO-RETIRE S3-3); channels should use conversation_id mapping.
-        raise NotImplementedError("Memo creation is retired. Configure conversation_id in channel mapping.")
+        # story #2379 AC5 (2026-08-01) — scoped per PO: this "retired" claim is about ONE
+        # narrow path only, inbound bridge/channel message → memo routing (E-MEMO-RETIRE
+        # S3-3; channels should use conversation_id mapping instead). Memo itself remains a
+        # live SaaS feature elsewhere (assignment/reply/webhook dispatch, agent-execution-loop
+        # HITL) — an unscoped reading of this comment led #2379 to briefly (and wrongly)
+        # conclude the whole memo feature was retired. Don't widen this without re-checking
+        # apps/web/src/services/memo*.ts and docs/oss-memo-repository.md first.
+        raise NotImplementedError(
+            "Inbound bridge→memo routing is retired for this channel. Configure conversation_id in channel mapping."
+        )
 
     async def find_fallback_author(self, org_id: uuid.UUID, project_id: uuid.UUID) -> uuid.UUID | None:
         for member_type in ("agent", "human"):

@@ -39,9 +39,11 @@ const STATUS_BADGE: Record<string, string> = {
   cancelled: 'bg-destructive-tint text-destructive',
 };
 
+// E-ADMIN B1(doc e-admin-b1-polar-live-price-ids) — Polar live 확정가와 일치.
+// yearly = 연간 결제 시 월 환산가($490/12·$1490/12 반올림, ~17% 할인).
 const PLAN_PRICES: Record<string, { monthly: number; yearly: number }> = {
-  team: { monthly: 29, yearly: 23 },
-  pro: { monthly: 79, yearly: 63 },
+  team: { monthly: 49, yearly: 41 },
+  pro: { monthly: 149, yearly: 124 },
 };
 
 export function BillingTab({ orgId }: { orgId: string }) {
@@ -137,7 +139,7 @@ export function BillingTab({ orgId }: { orgId: string }) {
                 className={`px-3 py-1 rounded text-sm font-medium border transition-colors ${selectedCycle === cycle ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:border-primary/50'}`}
               >
                 {cycle === 'monthly' ? '월간' : '연간'}
-                {cycle === 'yearly' && <span className="ml-1 text-xs text-green-600">(20% 할인)</span>}
+                {cycle === 'yearly' && <span className="ml-1 text-xs text-green-600">(17% 할인)</span>}
               </button>
             ))}
           </div>

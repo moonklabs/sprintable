@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -190,6 +191,52 @@ async def test_grant_only_human_gets_notification(mock_session, org_id):
     added = mock_session.add.call_args[0][0]
     assert added.user_id == user_id
     assert added.title == "그랜트 알림"
+
+
+# ─── story #2380: human Event는 status="delivered"와 함께 delivered_at도 찍혀야 한다 ──
+
+@pytest.mark.anyio
+async def test_human_dispatched_event_gets_delivered_at_stamped(mock_session, org_id):
+    """dev 실측(2026-08-01): 이 분기가 만드는 human Event의 74%가 status="delivered"인데
+    delivered_at=NULL이었다 — "배달됐다"만 있고 "언제"가 없어, delivered_at 대신 now()로
+    지연을 재려던 첫 측정이 실제와 무관한 거짓 수치(p50 9.4일)를 냈다. status="delivered"를
+    박는 바로 그 자리에서 delivered_at도 같이 찍여야 한다."""
+    from app.services.notification_dispatch import dispatch_notification
+
+    member_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+
+    settings = _settings_result([])
+    wh_result = MagicMock()
+    wh_result.scalars.return_value.all.return_value = []
+    members = _members_result([(member_id, user_id)], project_id=project_id)
+    mock_session.execute.side_effect = [settings, wh_result, members]
+
+    before = datetime.now(timezone.utc)
+    await dispatch_notification(
+        mock_session,
+        org_id=org_id,
+        event_type="dispatched",
+        target_member_ids=[member_id],
+        title="상태 변경",
+        body="pending → in-progress",
+        reference_type="story",
+        reference_id=uuid.uuid4(),
+    )
+    after = datetime.now(timezone.utc)
+
+    from app.models.event import Event
+
+    added_events = [
+        c.args[0] for c in mock_session.add.call_args_list if isinstance(c.args[0], Event)
+    ]
+    assert len(added_events) == 1, "이 경로는 human recipient당 Event를 정확히 하나 만들어야 한다"
+    event = added_events[0]
+    assert event.recipient_type == "human"
+    assert event.status == "delivered"
+    assert event.delivered_at is not None, "status=delivered인데 delivered_at이 없으면 #2380 재발"
+    assert before <= event.delivered_at <= after
 
 
 # ─── 빈 target → 즉시 반환 ────────────────────────────────────────────────────
