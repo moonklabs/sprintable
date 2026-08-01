@@ -238,7 +238,7 @@ describe('recruiter.kitOrientingTitle — story #2377 A-1(수 하드코딩 금�
 });
 
 // story #2377 §2·§4 — STEP4 오리엔팅 카드가 3단계(①연결·②깨우기·③지침)로 서고 §4 발견 가능성
-// 링크(onboarding-guide.txt)가 실제로 화면에 있는지의 회귀가드. RecruiterClient는 역할 선택→
+// 링크(connect-guide.txt)가 실제로 화면에 있는지의 회귀가드. RecruiterClient는 역할 선택→
 // 스코프→에이전트 생성→recruit() 다단 위저드라 이 컴포넌트 전체를 마운트하는 기존 테스트가
 // 없다(이 파일의 나머지 테스트도 전부 export된 순수 함수만 잰다) — 여기서도 그 관례를 따르되,
 // STEP4는 순수 함수로 안 빠져 있으므로 «소스 텍스트» 수준에서 잰다(verify-no-alpha-focus-ring.ts
@@ -247,8 +247,8 @@ describe('recruiter.kitOrientingTitle — story #2377 A-1(수 하드코딩 금�
 describe('recruiter-client STEP4 — story #2377 §2(단계 셋)·§4(발견 가능성 링크) 소스 회귀가드', () => {
   const source = readFileSync(fileURLToPath(new URL('./recruiter-client.tsx', import.meta.url)), 'utf-8');
 
-  it('links to onboarding-guide.txt from the STEP4 card — a screen link, not just a file that exists', () => {
-    expect(source).toContain('href="/onboarding-guide.txt"');
+  it('links to connect-guide.txt from the STEP4 card — a screen link, not just a file that exists', () => {
+    expect(source).toContain('href="/connect-guide.txt"');
   });
 
   it('renders three numbered steps (Connect·Wake up·Instructions), not the old two', () => {
