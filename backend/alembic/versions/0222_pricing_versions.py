@@ -16,22 +16,33 @@ head`가 **no-op**이 된다(두 head 이름이 같아 "이미 최신"으로 보
 dual-head 상황 자체가 없어 재현 대상이 아님)는 제외하고, 0146의 DDL만 그대로 재현한다(app/
 models/pricing_version.py·org_subscription.py의 현재 선언과 대조해 드리프트 없음 확認).
 
+⚠️2026-08-01 재번호: 원래 "0221"로 작성했으나, 같은 이름으로 story #2391(#2777, events.status
+CHECK 제약 추가 — events_status_check_constraint.py)이 독립적으로 먼저 "0221"을 먹었다 —
+#2397이 고치려는 바로 그 병(같은 id·다른 계보)이 같은 자리에서 즉시 재발한 것(PO 지적). #2777이
+qa:pass를 먼저 받아 down_revision="0221"로 재기반, 파일명도 0222로 옮겼다. AC1 검증 4종(아래)을
+전부 이 새 체인(0220→0221[events status]→0222[본 마이그])으로 다시 돌렸다.
+
 ⛔0147(실 Polar live 가격 10건 시드)은 이 마이그에 **의도적으로 포함하지 않는다** — 그 값이
 2026-07-07 당시의 실 가격인데 지금도 유효한지 이 세션에서 검증할 수 없다(Polar 쪽 상태). DDL과
 DML을 한 마이그로 묶으면 시드값이 틀렸을 때 되돌리기 어렵다(PO 판단) — 확認되는 대로 별도
-후속 마이그(0222 이후)로 붙인다. 이 마이그만으로는 org_subscriptions.pricing_version_id는
+후속 마이그(0223 이후)로 붙인다. 이 마이그만으로는 org_subscriptions.pricing_version_id는
 전부 NULL로 남는다(0146 설계상 nullable — free tier·아직 유료 미가입 구독 모두 정상 NULL).
+
+⭐참고(#2397 AC5): ee/routers/billing.py(develop)가 지금 실제로 쓰는 10개 Polar live price ID가
+0147의 시드값과 완전히 일치 — "지금 이 값으로 체크아웃이 실제로 도는 중"이라는 간접 근거(Polar
+쪽 자체 상태까지는 보장 못 함, 별도 확認 필요).
 
 이 리비전은 develop에만 존재한다 — main은 다음 승격(#2397 AC5 나머지 다섯 드리프트 판정 후)으로
 정상적으로 받는다. main에 직접 얹지 않는다(그것이 바로 이 사고를 만든 패턴이라 PO가 명시 금지).
 
 ⛔⛔**idempotent 가드 필수 — 두 서로 다른 실제 이력이 이 노드를 통과한다**:
-- **develop 자체의 진짜 이력**(0146→0147→...→0162→...→0220→0221)을 처음부터 순서대로 밟는
-  모든 DB(신규 CI/dev 인스턴스 등)는 0146이 **이미** pricing_versions를 만들었은 채로 이
+- **develop 자체의 진짜 이력**(0146→0147→...→0162→...→0220→0221→0222)을 처음부터 순서대로
+  밟는 모든 DB(신규 CI/dev 인스턴스 등)는 0146이 **이미** pricing_versions를 만들었은 채로 이
   리비전에 도달한다 — 그대로 create_table하면 DuplicateTable로 죽는다(로컬 alembic upgrade
   head 재현으로 실제로 확認: 이 파일을 무조건부로 작성했다가 이 에러로 즉시 잡았다).
 - **prod의 실제 이력**은 0146/0147/0162를 한 번도 거치지 않고 main의 갈래(0161→0163[down=
-  0161]→...→0220)로 왔다 — 이 리비전에서 pricing_versions가 진짜 처음 생긴다.
+  0161]→...→0220→0221[events status, #2391])로 왔다 — 이 리비전에서 pricing_versions가
+  진짜 처음 생긴다.
 같은 파일이 두 이력 모두를 통과해야 하므로, "이미 있으면 스킵"으로 양쪽 다 안전하게 만든다 —
 어느 이력을 밟았는지 알 필요 없이 최종 상태만 보장한다(idempotent = 이력 무관 수렴).
 """
@@ -41,8 +52,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "0221"
-down_revision = "0220"
+revision = "0222"
+down_revision = "0221"
 branch_labels = None
 depends_on = None
 
