@@ -2,8 +2,14 @@
 
 C-S6: SSE 스트림 (메모 변경 이벤트 실시간 푸시)
 E-EVENTBUS S1: events 테이블 CRUD (이벤트버스 기반)
-E-EVENTBUS S2: MCP Streamable HTTP SSE 푸시 (에이전트 전용)
+E-EVENTBUS S2: MCP Streamable HTTP SSE 푸시 (에이전트 전용 — 단, `resolve_member_identity`가
+grant-only human(OrgMember)도 해소하므로 이 스트림 자체는 human도 실제로 붙을 수 있다. #2380)
 E-EVENTBUS S3: 이벤트 큐 + 오프라인 재전달 (at-least-once + 배치 + expired)
+
+story #2380: `Event.status`와 `Event.read_at`은 별개 축이다 — `status`는 "배달됐는가"(pending
+→delivered/expired), `read_at`은 "사람이 열람했는가"(event_notifications.py가 관리, status와
+무관하게 갱신). 두 값을 섞어 읽지 않는다 — status=delivered·read_at=NULL은 정상(배달됐지만
+아직 안 읽음)이지 결함이 아니다.
 """
 from __future__ import annotations
 
