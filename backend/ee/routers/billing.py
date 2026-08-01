@@ -342,6 +342,20 @@ async def _update_subscription(
     try:
         now = datetime.now(timezone.utc)
         pricing_version_id = await _current_pricing_version_id(session, tier, billing_cycle)
+        if pricing_version_id is None:
+            # story #2411: 빈 조회(pricing_versions에 (tier, billing_cycle, "usd") 매칭 행이
+            # 없음)는 예외가 아니라서 위 try/except의 "조용한 실패 봉쇄"에 안 걸린다 —
+            # org_subscriptions.pricing_version_id가 nullable이라 그냥 NULL로 조용히 통과했다
+            # (prod 실측, 2026-08-01: pricing_versions가 #2397/0222로 테이블만 생기고 아직
+            # 시드가 없어 지금은 매번 이 분기를 탄다 — #2403이 실제 판매 정책을 정하기 前까지는
+            # 의도된 상태다). grandfather 기준점 없이 구독이 만들어진다는 뜻이라 결제 자체는
+            # 안 막히지만(체크아웃·화면은 코드 상수 _POLAR_PRICE_IDS/_PLAN_CATALOG를 봐서
+            # DB와 무관하게 도는 — 그래서 여태 아무도 못 알아챘다) 반드시 로그로는 남긴다.
+            logger.warning(
+                "pricing_version_id 미배정 — pricing_versions에 (tier=%s, billing_cycle=%s, "
+                "currency=usd) 매칭 행 없음. org=%s는 grandfather 기준점 없이 구독됨.",
+                tier, billing_cycle, org_id,
+            )
         await session.execute(
             pg_insert(OrgSubscription)
             .values(

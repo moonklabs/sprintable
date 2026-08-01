@@ -157,6 +157,57 @@ async def test_update_subscription_logs_error_and_reraises_on_db_failure(caplog)
     assert any(record.levelno == logging.ERROR for record in caplog.records)
 
 
+# ─── story #2411: pricing_versions 빈 조회가 예외가 아니라 조용히 NULL로 통과하던 것 ──
+# (org_subscriptions.pricing_version_id가 nullable이라 위 실패-로깅 try/except에 안 걸림 —
+# prod 실측 2026-08-01: #2397/0222로 테이블만 생기고 아직 시드가 없어 매번 이 분기를 탐)
+
+@pytest.mark.anyio
+async def test_update_subscription_warns_when_no_pricing_version_matches(caplog):
+    import logging
+    from unittest.mock import AsyncMock, MagicMock
+
+    from ee.routers import billing
+
+    org_id = uuid.uuid4()
+    session = AsyncMock()
+    empty_lookup = MagicMock()
+    empty_lookup.scalar_one_or_none.return_value = None
+    session.execute = AsyncMock(side_effect=[empty_lookup, MagicMock()])
+
+    with caplog.at_level(logging.WARNING, logger="ee.routers.billing"):
+        await billing._update_subscription(
+            session, org_id, "team", "monthly", "cus_x", "sub_x", "active"
+        )
+
+    assert any(
+        "pricing_version_id 미배정" in record.message and str(org_id) in record.message
+        for record in caplog.records
+    )
+    assert any(record.levelno == logging.WARNING for record in caplog.records)
+
+
+@pytest.mark.anyio
+async def test_update_subscription_no_warning_when_pricing_version_matches(caplog):
+    import logging
+    import uuid as uuid_mod
+    from unittest.mock import AsyncMock, MagicMock
+
+    from ee.routers import billing
+
+    org_id = uuid.uuid4()
+    session = AsyncMock()
+    found_lookup = MagicMock()
+    found_lookup.scalar_one_or_none.return_value = uuid_mod.uuid4()
+    session.execute = AsyncMock(side_effect=[found_lookup, MagicMock()])
+
+    with caplog.at_level(logging.WARNING, logger="ee.routers.billing"):
+        await billing._update_subscription(
+            session, org_id, "team", "monthly", "cus_x", "sub_x", "active"
+        )
+
+    assert not any("pricing_version_id 미배정" in record.message for record in caplog.records)
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
