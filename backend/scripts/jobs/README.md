@@ -32,10 +32,14 @@ against dev is PO/infra-lane, same as any other Cloud Run job execution.
 ⚠️ The job's environment supplies `ALEMBIC_URL` (psycopg2-scheme), not `DATABASE_URL`
 (asyncpg-scheme) — this was itself a prior footgun (오르테가 판정, 2026-07-31, on
 `backfill_reference_semantic_candidates.py`: *"손질이 한 번이면 코드로 넣고, 매번이면
-그건 손질이 아니라 결함이다"*). A script meant to run in this job should fall back to
-`ALEMBIC_URL` when `DATABASE_URL` is unset and convert the scheme itself — see
-`backfill_reference_semantic_candidates.py` for the reference implementation. Log which
-one it used (scheme+host only, never credentials) on its first line of output.
+그건 손질이 아니라 결함이다"*). A script meant to run in this job **must** call
+`resolve_database_url()` from `scripts/jobs/_db_env.py` (module-level, before any
+`app.core.database` import) instead of checking `os.environ["DATABASE_URL"]` directly —
+see any of `backfill_reference_semantic_candidates.py`, `backfill_activity_events.py`, or
+`expire_undeliverable_pending_dispatched_events.py` for the pattern.
+`test_2384_scripts_jobs_alembic_url_fallback.py` guards this for the two scripts moved by
+#2384 after 카디르군 caught them shipping without it (documented the pattern, didn't follow
+it — 2026-08-01 REQUEST_CHANGES).
 
 ## Before you add a script here
 
@@ -46,3 +50,14 @@ one it used (scheme+host only, never credentials) on its first line of output.
 3. Does its docstring state the exact invocation (`python -m scripts.jobs.<name>
    [args]`) and what env var it needs? The next person running it under time pressure
    won't read the source first.
+4. Does it call `resolve_database_url()` from `_db_env.py` before its first
+   `app.core.database` import, instead of checking `DATABASE_URL` directly? Otherwise it
+   passes locally (where `DATABASE_URL` is always set) and only fails inside
+   `sprintable-verify-oneoff`, where only `ALEMBIC_URL` exists.
+
+⚠️ Known gap (out of scope for #2384, not yet fixed): `backfill_doc_base64_assets.py`,
+`audit_apikey_member_anchor.py`, `backfill_void_empty_merge_gates.py`, and
+`purge_test_agents.py` still check `DATABASE_URL` directly with no `_db_env.py` fallback —
+they predate this helper and were never run against `sprintable-verify-oneoff`, so nobody's
+hit it yet. Same failure mode as the two #2384 fixed; worth a follow-up sweep before one of
+them is.

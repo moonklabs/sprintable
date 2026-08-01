@@ -46,11 +46,17 @@ human-recipient pending dispatched를 만드는 경로가 지금도 살아 있�
 DATABASE_URL=postgresql+asyncpg://... python -m scripts.jobs.expire_undeliverable_pending_dispatched_events [--dry-run] [--org-id UUID]
 ```
 기본은 `--dry-run`(카운트만 출력, 미변경) — 실 만료는 `--apply` 명시 필요.
+DATABASE_URL이 없으면 ALEMBIC_URL로 떨어진다(scripts/jobs/_db_env.py — sprintable-verify-oneoff
+잡이 실제로 갖고 있는 쪽).
 
 story #2384: PO가 이 스크립트를 실제로 돌리려다 배포 이미지에 없는 것을 발견해 scripts/jobs/로
 옮겼다(원래 있던 scripts/ 루트는 Dockerfile이 명시적으로 배포 이미지에서 빼는 자리 — 자세한
 경위는 scripts/jobs/README.md 참고). PO는 이 스크립트를 못 쓴 채 같은 조건을 직접 세워 수동
 UPDATE로 만료를 돌렸다(49건, 사후 잔여 0 확認) — 이 이동 이후엔 스크립트 자체를 쓸 수 있다.
+
+2026-08-01, 카디르군 REQUEST_CHANGES 후속: 옮기기만 하고 README가 문서화한 ALEMBIC_URL 폴백을
+안 붙였던 것을 놓쳤다 — 그대로 배포하면 sprintable-verify-oneoff에서 "No module named"가
+"DATABASE_URL 미설정"으로 바뀔 뿐 여전히 못 돈다. _db_env.py의 공용 헬퍼로 붙인다.
 
 ⚠️ 디디(이 스토리 담당)는 dev DB 직접 접근이 막혀 있어(VPC private-IP, 세션 샌드박스에 라우트
 없음 — [[reference_prod_db_query]] dev 항목) 이 스크립트를 스스로 실행하지 못했다. PO/QA가
@@ -60,17 +66,20 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import sys
 import uuid
 
 from sqlalchemy import select, update
 
+from scripts.jobs._db_env import resolve_database_url
+
 
 async def main() -> int:
-    if not os.environ.get("DATABASE_URL"):
-        print("DATABASE_URL 미설정", file=sys.stderr)
+    db_url_summary = resolve_database_url()
+    if db_url_summary is None:
+        print("DATABASE_URL·ALEMBIC_URL 둘 다 미설정", file=sys.stderr)
         return 2
+    print(f"[db] {db_url_summary}", file=sys.stderr)
 
     parser = argparse.ArgumentParser(
         description="recipient_seq 없는(=스트림에 영영 못 실리는) pending dispatched Event 만료(#2375 AC2)"
