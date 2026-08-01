@@ -13,10 +13,10 @@ const badgeVariants = cva(
         secondary:
           "border-border/70 bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
         // story #2419 — bg-destructive/10 위 text-destructive는 3.97(AA 4.5 미달, verify-rail.tsx
-        // 실패 박스와 동일 조합). text-destructive-on-subtle로 교체 + dark:text-destructive로
-        // 되돌린다(그 토큰은 :root 전용이라 안 되돌리면 dark에도 light 값이 새어 나간다).
+        // 실패 박스와 동일 조합). text-destructive-on-subtle로 교체 — .dark에도 이 변수가
+        // --destructive로 alias되어 있어(globals.css) dark: 짝을 따로 안 붙여도 안전하다.
         destructive:
-          "bg-destructive/10 text-destructive-on-subtle dark:text-destructive focus-visible:ring-destructive dark:bg-destructive/20 dark:focus-visible:ring-destructive [a]:hover:bg-destructive/20",
+          "bg-destructive/10 text-destructive-on-subtle focus-visible:ring-destructive dark:bg-destructive/20 dark:focus-visible:ring-destructive [a]:hover:bg-destructive/20",
         outline:
           "border-border/80 bg-background text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
         ghost:

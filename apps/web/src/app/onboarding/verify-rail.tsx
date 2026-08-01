@@ -140,11 +140,10 @@ export function VerifyRail({ steps }: { steps: DisplayStep[] }) {
                 </p>
                 {step.status === 'failed' && (
                   // story #2419(유나 규격) — text-destructive는 이 옅은 bg-destructive/10 박스
-                  // 위에서 3.97(AA 미달)이었다. text-destructive-on-subtle로 명도만 낮춰
-                  // 4.9로 확保한다. dark:text-destructive로 되돌리는 이유는 --destructive-
-                  // on-subtle이 :root 전용이라 안 되돌리면 dark에서도 light 값이 새어 나가기
-                  // 때문(기존 --destructive는 dark에서 이미 5.82/5.38로 AA 통과).
-                  <div className="mt-1.5 rounded-md border border-destructive/20 bg-destructive/10 px-2.5 py-2 text-xs text-destructive-on-subtle dark:text-destructive">
+                  // 위에서 3.97(AA 미달)이었다. text-destructive-on-subtle로 명도만 낮춰 4.9로
+                  // 확保한다. dark: 짝은 안 붙인다 — .dark에도 이 변수가 --destructive로
+                  // alias돼 있어(globals.css) 이 클래스 하나만으로 dark에서도 안전하다.
+                  <div className="mt-1.5 rounded-md border border-destructive/20 bg-destructive/10 px-2.5 py-2 text-xs text-destructive-on-subtle">
                     {/* story #2418 — reason 없이 침묵하지 않는다(#2415 이전과 같은 "화면이
                         상태를 못 말하는" 병). BE가 실제로 reason을 못 줄 때만 뜬다(음성대조:
                         done/pending/active엔 이 블록 자체가 없다). */}

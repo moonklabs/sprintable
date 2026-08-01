@@ -5,6 +5,10 @@
  * 실수(유나가 실제로 한 번 했다)를 피하려고, 이 모듈은 색공간 변환을 하지 않는다 — 입력은
  * 항상 실 브라우저 canvas 2d(fillStyle+getImageData)로 이미 sRGB로 환산된 픽셀이어야 한다.
  * (color-contrast.test.ts의 고정값들이 그렇게 캡처됐다.)
+ *
+ * ⚠️이것은 «계산기»다 — 두 색의 비만 낸다. «무엇을 재는지»(글자↔요소·요소↔배경의 두 층,
+ * rest/hover/focus 등 상태별 배경, 알파 합성)는 호출자가 정한다. 이 유틸이 있다고 대비가
+ * 검증되는 것은 아니다 — 그 판정은 호출자의 몫이다.
  */
 export function relativeLuminance([r, g, b]: readonly [number, number, number]): number {
   const linearize = (c: number) => {

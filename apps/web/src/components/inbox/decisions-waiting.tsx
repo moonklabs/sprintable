@@ -170,7 +170,7 @@ export function DecisionsWaiting({ onChange }: DecisionsWaitingProps = {}) {
                       {item.kind}
                     </Badge>
                     {item.priority === 'high' ? (
-                      <Badge className="bg-destructive/15 text-destructive-on-subtle dark:text-destructive text-[10px] uppercase">
+                      <Badge className="bg-destructive/15 text-destructive-on-subtle text-[10px] uppercase">
                         {t('priorityHigh')}
                       </Badge>
                     ) : null}

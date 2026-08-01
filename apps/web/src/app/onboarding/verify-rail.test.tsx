@@ -99,19 +99,18 @@ describe('VerifyRail — story #2418 (failed인데 reason이 없으면 침묵하
   });
 });
 
-// story #2419(유나 규격·PO 승인) — text-destructive는 bg-destructive/10 박스 위에서 3.97
-// (AA 4.5 미달, apps/web/src/lib/color-contrast.test.ts에서 실측 고정). text-destructive-
-// on-subtle로 교체해 약 4.98을 확保한다. dark:text-destructive로 되돌리는 이유는 --destructive-
-// on-subtle이 globals.css :root 전용 선언이라 안 되돌리면 dark에서도 light 값이 새어 나가기
-// 때문(기존 dark --destructive는 이미 5.82로 AA 통과 — 손대지 않는다).
+// story #2419(유나 규격·PO 승인, design:changes 반영) — text-destructive는 bg-destructive/10
+// 박스 위에서 3.97(AA 4.5 미달, apps/web/src/lib/color-contrast.test.ts에서 실측 고정).
+// text-destructive-on-subtle로 교체해 약 4.98을 확保한다. dark: 짝은 안 붙인다 — .dark에도
+// 이 변수가 --destructive로 alias돼 있어(globals.css) 이 클래스 하나만으로 dark에서도
+// 안전하다(짝을 깜빡하면 var()가 미정의라 상속값으로 조용히 빠지는 문제를 이 alias가 막는다).
 describe('VerifyRail — story #2419 (실패 사유 박스 텍스트 대비)', () => {
-  it('실패 사유 박스는 text-destructive-on-subtle과 dark:text-destructive를 함께 쓰고, 순수 text-destructive(대비 미달 조합)는 안 쓴다', () => {
+  it('실패 사유 박스는 text-destructive-on-subtle을 쓰고, 순수 text-destructive(대비 미달 조합)는 안 쓴다', () => {
     const markup = render([step({ status: 'failed', reason: '사유' })]);
     const classAttr = markup.match(/<div class="([^"]*)">사유<\/div>/)?.[1];
     expect(classAttr).toBeDefined();
     const classes = classAttr!.split(/\s+/);
     expect(classes).toContain('text-destructive-on-subtle');
-    expect(classes).toContain('dark:text-destructive');
     expect(classes).not.toContain('text-destructive');
   });
 });

@@ -294,7 +294,7 @@ export function DocContentRenderer({
       if (!latex.trim()) return;
       void renderKatex(latex, true).then(({ html: katexHtml, error }) => {
         if (error) {
-          block.innerHTML = `<div class="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive-on-subtle dark:text-destructive font-mono">${escapeHtmlText(error)}</div>`;
+          block.innerHTML = `<div class="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive-on-subtle font-mono">${escapeHtmlText(error)}</div>`;
         } else {
           // story #2165: 긴 수식도 코드와 같은 성격(가로로 잘리면 사용자가 잘린 줄 모름) — 예외.
           block.innerHTML = `<div class="flex justify-center overflow-x-auto scrollbar-visible py-3 [&_.katex]:text-foreground">${katexHtml}</div>`;
@@ -308,7 +308,7 @@ export function DocContentRenderer({
       if (!latex.trim()) return;
       void renderKatex(latex, false).then(({ html: katexHtml, error }) => {
         if (error) {
-          span.className = 'rounded bg-destructive/10 px-1 text-xs text-destructive-on-subtle dark:text-destructive font-mono';
+          span.className = 'rounded bg-destructive/10 px-1 text-xs text-destructive-on-subtle font-mono';
         } else {
           span.innerHTML = katexHtml;
         }

@@ -130,7 +130,7 @@ export function CreateOrganizationDialog({
           {error && (
             // story #2105 2차 — handleSubmit이 재시도 전 setError('')를 먼저 호출해(위 정의) 매
             // 시도마다 언마운트→리마운트된다.
-            <div role="alert" aria-live="assertive" aria-atomic="true" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive-on-subtle dark:text-destructive">
+            <div role="alert" aria-live="assertive" aria-atomic="true" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive-on-subtle">
               {error}
             </div>
           )}

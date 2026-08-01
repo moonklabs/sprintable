@@ -318,9 +318,11 @@
      명도만 0.577→0.50로 낮춰 글자↔박스 대비 3.97(AA 미달)을 확保(약 4.9)한다. 색상·채도는
      그대로라 "실패"의 의미는 유지된다. bg-destructive(진한 배경) 위에는 절대 쓰지 않는다 —
      거기는 --destructive-foreground(흰 글자) 자리이고, 이 토큰을 쓰면 대비가 반대로 무너진다.
-     ⛔dark는 의도적으로 정의하지 않는다 — 기존 --destructive가 dark에서 이미 AA를 통과한다
-     (5.82/5.38, 유나 실측). 이 토큰을 쓰는 자리는 반드시 `dark:text-destructive`로 되돌려야
-     한다(:root 전용 선언이라 안 그러면 dark에서도 이 light 값이 그대로 새어 나간다). */
+     dark엔 다른 "값"을 안 둔다 — 기존 --destructive가 dark에서 이미 AA를 통과한다(5.82/5.38,
+     유나 실측). ⚠️다만 "값을 다르게 두지 않는다"가 "변수를 아예 안 만든다"는 아니다 — .dark
+     블록에서도 이 변수 자체는 정의한다(아래, --destructive로 그대로 alias). 그러지 않으면
+     dark에서 `var(--destructive-on-subtle)`이 미정의라 "invalid at computed-value time" →
+     color가 상속값으로 빠진다 — 실패 표시가 조용히 빨강이 아니게 된다(에러도 경고도 없이). */
   --destructive-on-subtle: oklch(0.50 0.245 27.325);
 
   /* Tiptap editor */
@@ -442,6 +444,12 @@
   --destructive-bg: oklch(0.22 0.04 27);
   --destructive-border: oklch(0.48 0.15 27);
   --destructive-tint: oklch(0.704 0.191 22.216 / 12%);
+  /* story #2419(design:changes, PO·유나) — 값은 안 바꾸고 --destructive로 그대로 물려받는다.
+     :root에만 두면 var(--destructive-on-subtle)이 dark에서 미정의 → invalid at
+     computed-value time → color가 상속값으로 조용히 빠진다(에러 없이 "실패가 실패로 안
+     보이는" 병). 이 alias로 `text-destructive-on-subtle` 하나만 써도 dark에서 안전하다 —
+     짝지어 쓰던 `dark:text-destructive`는 더 이상 필수가 아니다. */
+  --destructive-on-subtle: var(--destructive);
 
   /* Tiptap editor (dark) */
   --tiptap-code-bg: oklch(0.22 0 0);
