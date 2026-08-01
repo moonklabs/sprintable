@@ -217,7 +217,7 @@ export default function GateDetailPage() {
                 <GateEvidence gate={gate} />
                 {transitionError ? (
                   <p
-                    className="rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-destructive"
+                    className="rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-destructive-on-subtle dark:text-destructive"
                     role="alert"
                     aria-live="assertive"
                     aria-atomic="true"
