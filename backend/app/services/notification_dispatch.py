@@ -343,6 +343,17 @@ async def dispatch_notification(
 
         if inserted:
             await db.flush()
+            # #2375 후속 — agent 수신 Event가 recipient_seq를 한 번도 배정받지 못했다(이 함수
+            # 어디에도 assign_recipient_seq() 호출이 없었다). agent_gateway.py의 /stream 쿼리는
+            # `recipient_seq > :after_seq`로 커서 필터링하는데 NULL은 그 비교를 절대 통과 못 해
+            # 라이브 스트림에도 backfill 재연결에도 안 잡힌다 — content 키를 채운 뒤에도(#2375
+            # 본 fix) agent 쪽 delivered=0건이 이어진 진짜 근본원인. agent_dispatch.py의
+            # _finalize_dispatch()가 이미 쓰는 패턴(Event INSERT+flush 後·commit 前)을 그대로
+            # 재사용한다 — 여기도 "flush 후" 시점이라 그 불변식을 만족한다.
+            from app.services.event_seq import assign_recipient_seq
+            for _ev in created_events:
+                if _ev.recipient_type == "agent":
+                    await assign_recipient_seq(db, _ev)
             # L1 BE-3: multi-recipient dispatch fan-out N행 → activity_events 1행 수렴
             # (best-effort·savepoint 격리라 추출 실패해도 delivery·Notification 무영향).
             from app.services.activity_stream import extract_activities_best_effort
