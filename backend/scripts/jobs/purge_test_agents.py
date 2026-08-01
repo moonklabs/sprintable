@@ -189,7 +189,6 @@ NULLIFY_SPECS: list[tuple[str, list[str]]] = [
     ("memo_doc_links", ["created_by"]),
     ("memos", ["resolved_by"]),
     ("messaging_bridge_org_auths", ["created_by"]),
-    ("mockup_pages", ["created_by"]),
     ("workflow_execution_logs", ["target_agent_id"]),
     ("workflow_versions", ["created_by"]),
     # PO direction-2 감사 발견(2026-07-07) — 위 DELETE_SPECS 주석 참조(schema.sql 구조적 stale).
