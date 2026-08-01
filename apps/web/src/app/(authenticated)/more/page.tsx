@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import {
-  FolderKanban,
   CalendarRange,
   Layers,
   Compass,
@@ -23,8 +22,9 @@ import {
 // P2-S9(story #1965)가 담당 — 이 페이지는 그때 교체된다(오르테가군 확定, 2026-07-17).
 // bare 경로만 씀 — 미들웨어의 bare→쿠키 default 해소 301 안전망이 ws/proj slug를 채운다
 // (app-sidebar.tsx의 resourceLink()와 동형 전제).
+// board 항목은 없다(유나 2026-08-01) — /board는 /flow로 리다이렉트되니(#2227 AC8·proxy.ts
+// RENAMED_RESOURCES) flow 링크가 따로 생기면 같은 화면으로 가는 항목이 두 개가 된다.
 const ITEMS = [
-  { href: '/board', icon: FolderKanban, labelKey: 'board' as const },
   { href: '/sprints', icon: CalendarRange, labelKey: 'sprints' as const },
   { href: '/goals', icon: Layers, labelKey: 'goals' as const },
   { href: '/loops', icon: FlaskConical, labelKey: 'loops' as const },
