@@ -423,13 +423,15 @@ jobs:
         run: |
           set -e
           test -f alembic/versions/0148_org_subscriptions_org_id_unique.py
-          if [ -f alembic/versions/0146_pricing_versions.py ] || [ -f alembic/versions/0147_pricing_versions_live_seed.py ]; then
-            echo "FAIL: ee_pricing migration(s) present in a main-bound file set"; exit 1
-          fi
-          if [ -f alembic/versions/0162_merge_ee_pricing_core_heads.py ]; then
-            echo "FAIL: develop-only merge node 0162 present in a main-bound file set (references ee_pricing 0147, which main doesn't have)"; exit 1
-          fi
-          echo "OK: main file set has 0148(core), no ee_pricing, no develop-only merge node"
+          # ⭐2026-08-01(promo #2783·PO): ee_pricing(0146/0147) + merge node 0162 «금지»를 걷었다.
+          # 걷은 이유 — 이 assert 는 「main 은 ee_pricing 을 «영원히» 안 가진다」를 단언했는데,
+          # 그것이 참일 수 없다. prod 실측(2026-08-01, 읽기전용 잡): pricing_versions 테이블이
+          # 없는데 ee/routers/billing.py 는 그것을 읽는다. 즉 「안 올린다」가 유지 가능한 상태가
+          # 아니었고, 그 사이 두 체인이 0163 에서 «같은 이름·다른 부모»로 갈렸다(#2397).
+          # ⇒ 승격을 막던 것이 이 assert 였고, 막힌 채로는 그 갈림이 영영 안 닫힌다.
+          # ⛔대신 이 잡의 나머지가 여전히 지킨다: 0148(core) 존재 · single head · fresh-DB upgrade.
+          #   0162 는 merge node 라 head 를 늘리지 않는다 — single head assert 로 그것이 계속 재진다.
+          echo "OK: main file set has 0148(core); ee_pricing/merge-node 금지는 promo #2783 에서 해제"
 
       - name: Build revision graph (single head expected)
         working-directory: backend
@@ -438,7 +440,7 @@ jobs:
           heads=$(uv run alembic heads 2>/dev/null | grep -oE '^[0-9a-z_]+')
           n=$(echo "$heads" | grep -c .)
           echo "heads=$heads (count=$n)"
-          test "$n" = "1"  # main never carries the ee_pricing branch — exactly one head
+          test "$n" = "1"  # 0162 는 merge node 라 ee_pricing 이 들어와도 head 는 하나여야 한다
 
       - name: Fresh-DB upgrade heads (main file set)
         working-directory: backend
