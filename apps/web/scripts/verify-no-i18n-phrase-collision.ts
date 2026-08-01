@@ -161,11 +161,19 @@ export function findSubstringCollisions(
 // 내비게이션 라벨이다 — #2352/#2365가 잡으려는 "두 셈이 같은 말로 헷갈리는" 병이 아니다.
 // ⭐이 오탐의 근본 원인(`PLACEHOLDER_VALUE_RE`가 숫자·이름 보간을 구분 못 하는 것 자체)은
 // story #2410으로 별도 추적한다 — 여기서는 면제만.
+// story #2406 AC1(2026-08-02, PO 승인) — 비활성화 확認 다이얼로그 신규 키 3쌍.
+// ①왜 안전한가 — `{name}`은 카운터가 아니라 대상 이름 placeholder이고, 반복되는 낱말
+// ("비활성화")은 «한 다이얼로그 안»의 제목·버튼·기존 짧은 라벨일 뿐이라 사용자가 두 셈을
+// 헷갈릴 자리가 아니다(#2352/#2365가 잡으려는 병이 아니다) — #2410과 같은 근본원인 클래스.
+// ②언제 걷는가 — #2410(가드 자체의 `PLACEHOLDER_VALUE_RE` 수정) 머지 시 이 셋도 같이 재평가.
 export const EXEMPT_PAIRS = new Set<string>([
   'recruiter.equipDone <-> recruiter.verifyGuideMcp',
   'recruiter.next <-> recruiter.verifyGuideMcp',
   'recruiter.stepComplete <-> recruiter.verifyGuideMcp',
   'recruiter.stepVerify <-> recruiter.verifyGuideMcp',
+  'settings.deactivateAgent <-> settings.deactivateAgentDialogTitle',
+  'settings.activateAgent <-> settings.deactivateAgentDialogTitle',
+  'settings.deactivateAgentDialogConfirm <-> settings.deactivateAgentDialogTitle',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이
