@@ -1256,7 +1256,7 @@
     "deactivateAgent": "Deactivate",
     "activateAgent": "Activate",
     "deactivateAgentDialogTitle": "Deactivate {name}",
-    "deactivateAgentDialogBody": "This agent's API key will fail authentication immediately. Work in progress may be interrupted.",
+    "deactivateAgentDialogBody": "All requests from this agent will be rejected immediately. The API key itself remains valid, so there's no need to reissue it. Work in progress may be interrupted.",
     "deactivateAgentDialogConfirm": "Deactivate",
     "agentDetailTitle": "Agent Detail",
     "agentWebhookTitle": "Webhook URL",
