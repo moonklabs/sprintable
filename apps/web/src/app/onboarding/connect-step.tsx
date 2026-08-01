@@ -7,7 +7,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
-import { VerifyRail, RAIL_ORDER, HTTP_RAIL_ORDER, type DisplayStep, type RailState, type RailStatus } from './verify-rail';
+import {
+  VerifyRail, RAIL_ORDER, HTTP_RAIL_ORDER, parseVerificationRail,
+  type DisplayStep, type RailState, type RailStatus, type RawStep,
+} from './verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from './onboarding-telemetry';
 
 const RAIL_LABEL_KEY: Record<RailState, string> = {
@@ -21,12 +24,6 @@ const RAIL_LABEL_KEY: Record<RailState, string> = {
 
 /** E-MCP-OPT S3: SaaS 기본=호스팅(http)·OSS 기본=로컬(stdio) — BE `default_transport_for_edition()` 따름. */
 export type Transport = 'http' | 'stdio';
-
-interface RawStep {
-  state: RailState;
-  status: RailStatus;
-  reason?: string;
-}
 
 /** connection-artifact content(JSON)의 `mcpServers.sprintable.type` 필드만 읽는다(재조립 아님) —
  * transport 미지정 최초 요청은 BE edition 기본을 반환하므로, 어느 탭을 pre-select할지 이걸로 판별. */
@@ -118,15 +115,22 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
 
   // OB-2 verification-status poll (SSE-우선은 OB-2 SSE 포맷 확정 후 follow-up·현재 poll). 404 graceful.
   // E-MCP-OPT S3: transport별 레일 shape 다름(호스팅=4단계, event/ack 없음) — 쿼리로 분기.
+  //
+  // story #2404 후속(2026-08-02, 라이브 재확認 중 발견) — 이 코드는 `data.steps`를 읽었지만
+  // 백엔드(`backend/app/routers/agents.py::agent_verification_status`)는 그런 필드를 준 적이
+  // 없다 — 실제 필드명은 `rail`이다(`{"data":{"verified":true,"rail":[...]}}`). `steps`는 항상
+  // undefined였으므로 `setBeSteps`가 «단 한 번도» 실호출되지 않았다 — 검증이 실제로 성공해도
+  // 화면 레일은 영원히 초기 pending으로 멈춰 있었다(curl로 백엔드 값 자체는 verified:true를
+  // 직접 확認했는데 화면만 안 바뀌는 것으로 발견 — API 레벨 확認과 실제 렌더 확認은 다르다).
+  // 파싱은 이제 `parseVerificationRail`(verify-rail.tsx) 하나로 모았다 — recruiter-client.tsx
+  // 가 독립적으로 재구현하지 않게(같은 버그가 두 곳에서 동시에 존재했던 이유).
   const pollStatus = useCallback(async (forTransport: Transport) => {
     if (!agentId) return;
     try {
       const res = await fetch(`/api/agents/${agentId}/verification-status?transport=${forTransport}`);
       if (!res.ok) return; // 미머지/404 → pending 유지(가짜 에러 안 띄움)
-      const json = (await res.json()) as { data?: { steps?: RawStep[] } | RawStep[]; steps?: RawStep[] };
-      const d = json?.data;
-      const raw = (Array.isArray(d) ? d : d?.steps) ?? json?.steps;
-      if (Array.isArray(raw)) setBeSteps(raw);
+      const raw = parseVerificationRail(await res.json());
+      if (raw) setBeSteps(raw);
     } catch {
       // swallow — graceful degradation
     }
