@@ -1,6 +1,7 @@
 'use client';
 
 import { Check, X, Loader2 } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 
 export type RailStatus = 'pending' | 'active' | 'done' | 'failed';
@@ -82,6 +83,13 @@ function StepIcon({ status }: { status: RailStatus }) {
 }
 
 export function VerifyRail({ steps }: { steps: DisplayStep[] }) {
+  // story #2418 — BE는 현재 어떤 rail 단계에도 status:"failed"를 내지 않는다(전수 확認:
+  // build_verification_rail/build_http_verification_rail이 만드는 값은 pending/active/done
+  // 뿐이고 reason 필드 자체가 없다). 즉 지금은 「reason이 가끔 빈다」가 아니라 「이 분기가
+  // 아직 한 번도 실행된 적이 없는 죽은 경로」다 — 그래도 미래에(타임아웃 등) failed가 생기면
+  // 그 순간 이 자리가 처음 뜨는데, reason 없이 침묵하면 #2415 이전과 같은 병(상태를 못
+  // 말하는 화면)이 재발한다. 방어적으로 지금 fallback을 세운다.
+  const t = useTranslations('onboarding');
   const activeStep = steps.find((s) => s.status === 'active');
   const failedStep = steps.find((s) => s.status === 'failed');
   const announce = failedStep?.label ?? activeStep?.label ?? '';
@@ -130,9 +138,16 @@ export function VerifyRail({ steps }: { steps: DisplayStep[] }) {
                   {step.label}
                   <span className="sr-only"> — {statusText}</span>
                 </p>
-                {step.status === 'failed' && step.reason && (
-                  <div className="mt-1.5 rounded-md border border-destructive/20 bg-destructive/10 px-2.5 py-2 text-xs text-destructive">
-                    {step.reason}
+                {step.status === 'failed' && (
+                  // story #2419(유나 규격) — text-destructive는 이 옅은 bg-destructive/10 박스
+                  // 위에서 3.97(AA 미달)이었다. text-destructive-on-subtle로 명도만 낮춰 4.9로
+                  // 확保한다. dark: 짝은 안 붙인다 — .dark에도 이 변수가 --destructive로
+                  // alias돼 있어(globals.css) 이 클래스 하나만으로 dark에서도 안전하다.
+                  <div className="mt-1.5 rounded-md border border-destructive/20 bg-destructive/10 px-2.5 py-2 text-xs text-destructive-on-subtle">
+                    {/* story #2418 — reason 없이 침묵하지 않는다(#2415 이전과 같은 "화면이
+                        상태를 못 말하는" 병). BE가 실제로 reason을 못 줄 때만 뜬다(음성대조:
+                        done/pending/active엔 이 블록 자체가 없다). */}
+                    {step.reason ?? t('verifyReasonUnknown')}
                   </div>
                 )}
                 {step.status !== 'failed' && step.reason && (

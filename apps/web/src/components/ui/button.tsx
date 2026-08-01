@@ -17,8 +17,12 @@ const buttonVariants = cva(
           "bg-secondary text-secondary-foreground hover:bg-secondary/80 aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
+        // story #2419 — rest 상태 bg-destructive/10 위 text-destructive는 3.97(AA 4.5 미달).
+        // text-destructive-on-subtle로 교체 — .dark에도 --destructive로 alias돼 있어 dark: 짝이
+        // 필요 없다. ⚠️hover(light bg-destructive/20·dark bg-destructive/30)는 이 토큰으로도
+        // 여전히 미달(각각 4.16·4.05, 실측) — #2420(호버 전용 알파 축소)에서 별도 처리한다.
         destructive:
-          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive",
+          "bg-destructive/10 text-destructive-on-subtle hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive",
         link: "text-primary underline-offset-4 hover:underline",
         hero: "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm",
         glass: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",

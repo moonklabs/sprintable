@@ -753,6 +753,7 @@
     "railEventDelivered": "테스트 이벤트 전달",
     "railAck": "응답 수신 (ack)",
     "railVerified": "연결 확인 완료",
+    "verifyReasonUnknown": "왜인지 서버가 말해주지 않았습니다 — 다시 시도하거나 잠시 후 새로고침해 보세요.",
     "verifiedBanner": "에이전트가 실제로 작동합니다. 연결이 확인되었습니다.",
     "advancedTitle": "고급 설정",
     "advancedSubtitle": "Webhook 알림 · 대체 연결 방식 (HTTP, fakechat)",
