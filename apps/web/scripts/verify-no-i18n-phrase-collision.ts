@@ -50,9 +50,15 @@
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const SRC_ROOT = path.resolve(process.cwd(), 'src');
-const MESSAGES_PATH = path.resolve(process.cwd(), 'messages', 'ko.json');
+// story #2410 회귀(카디르 QA, PR #2790, 2026-08-01) — SRC_ROOT를 `process.cwd()` 기준으로
+// 잡았다가 루트에서 도는 `pnpm vitest run`(CI)이 이 모듈을 import하는 순간 ENOENT로 죽었다.
+// scanRepository() 추출 전엔 main()이 CLI 전용이라 cwd가 항상 apps/web이라 안 터졌던 것 —
+// 같은 레포 같은 날 #2774(verify-no-orphan-resource-routes.ts)와 동일한 병. 스크립트 자기
+// 위치(import.meta.url) 기준으로 고정하면 호출부의 cwd와 무관해진다.
+const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
+const MESSAGES_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages', 'ko.json');
 const EXT_RE = /\.(tsx?|jsx?)$/;
 const TEST_RE = /\.(test|spec)\.[tj]sx?$/;
 
