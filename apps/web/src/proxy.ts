@@ -234,6 +234,10 @@ const RENAMED_RESOURCES: Record<string, string> = {
   // (여기) → `/{ws}/{proj}/flow`. `?story=`/`?task_id=` 등 쿼리는 두 함수 다 request.nextUrl을
   // clone해 그대로 들고 가므로 안전(RESOLVE_RETRY_PARAM 외엔 손대지 않는다).
   glance: 'flow',
+  // #2227 AC8(2026-07-27) 종료 조건 — board 제거는 flow 리다이렉트 포함이 조건이었다(유나
+  // 2026-08-01 지적: prod 승격 #2373에서 board 라우트만 지우고 이 줄을 빠뜨려 외부 딥링크
+  // ~14곳이 404를 만날 뻔했다 — board/page.tsx:12-13 자체가 이 위험을 이미 적어 두고 있었다).
+  board: 'flow',
 };
 
 function redirectRenamedResourcePath(request: NextRequest, pathname: string): NextResponse | null {
