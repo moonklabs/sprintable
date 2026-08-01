@@ -6,6 +6,14 @@
 // 그래서 useEditor/EditorContent/BubbleMenu만 얇게 스텁하고(editor=null — 실제로 tiptap이
 // 아직 준비 안 된 상태와 같은, 컴포넌트가 이미 처리하는 정상 분기) 이 파일의 진짜 관심사인
 // 주변 JSX 구조(스크롤 컨테이너·DnD 오버레이의 위치)만 잰다.
+//
+// ⛔이 테스트가 «못 잡는» 것을 스스로 말해 둔다(올리베이라군 리뷰, 2026-08-01) — jsdom엔
+// 레이아웃 엔진이 없어 scrollHeight/clientHeight가 항상 같은 값(뜻이 없는 수)을 낸다. 그래서
+// 이 파일은 «구조»(오버레이가 클리핑 밖인가)만 재고, «레이아웃»(min-h-0 누락처럼 편집기 내부
+// 스크롤이 실제로 죽는가)은 원리적으로 못 잰다 — 이 신규 테스트 110줄이 전부 초록이었을
+// 때도 그 회귀(바깥 flex-1이 overflow:visible이라 min-height:auto가 콘텐츠 높이만큼 살아남아
+// 내부 스크롤이 죽고 편집기 셸이 넘치는 것)를 못 잡았다. 후자는 실제 브라우저에서만 갈린다
+// (이 PR의 doc-editor.tsx 쪽 주석에 붙인 puppeteer 실측 수치 참고).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
