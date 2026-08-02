@@ -72,4 +72,28 @@ describe('POST /api/internal-dogfood/session', () => {
     expect(response.headers.get('location')).toContain('error=invalid_secret');
     expect(resolveInternalDogfoodActor).not.toHaveBeenCalled();
   });
+
+  // story #1933 — request.url을 base로 쓰면 Cloud Run 내부 주소가 샌다. resolveAppUrl(null)이
+  // 항상 공개 주소를 강제하는지 여기서 고정한다(요청이 내부 run.app 호스트로 들어와도 무관).
+  it('redirect Location uses the configured public app URL, never the request origin (Cloud Run internal address never leaks)', async () => {
+    const originalAppUrl = process.env['NEXT_PUBLIC_APP_URL'];
+    process.env['NEXT_PUBLIC_APP_URL'] = 'https://dev-app.sprintable.ai';
+    try {
+      const formData = new FormData();
+      formData.set('secret', 'wrong');
+      formData.set('team_member_id', 'tm-1');
+
+      const response = await POST(new Request(
+        'https://sprintable-frontend-dev-57iommnikq-du.a.run.app/api/internal-dogfood/session',
+        { method: 'POST', body: formData },
+      ));
+
+      const location = response.headers.get('location') ?? '';
+      expect(location).toBe('https://dev-app.sprintable.ai/internal-dogfood?error=invalid_secret');
+      expect(location).not.toContain('run.app');
+    } finally {
+      if (originalAppUrl === undefined) delete process.env['NEXT_PUBLIC_APP_URL'];
+      else process.env['NEXT_PUBLIC_APP_URL'] = originalAppUrl;
+    }
+  });
 });
