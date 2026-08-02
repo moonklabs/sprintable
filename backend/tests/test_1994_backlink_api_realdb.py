@@ -2366,3 +2366,168 @@ async def test_get_message_hides_attachments_after_delete():
             app.dependency_overrides.clear()
     finally:
         await engine.dispose()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# story #2319 미완 2차(미르코 dev 라이브 실측 2026-08-02) — attachments.py authorize의
+# asset_id 분기가 Asset.deleted_at만 보고 tombstone된 메시지는 안 봐서, 그 메시지의 첨부가
+# asset_id를 아는 쪽에겐 무기한(5분 TTL조차 아니라 재발급 가능) 계속 authorize됐다.
+# 정책(PO 승인): 모든 AssetLink가 conversation_message 타입이고 전부 삭제됐을 때만 거부 —
+# 다른 살아있는 링크(다른 메시지·doc 등)가 하나라도 있으면 허용(다른 문맥의 접근권은 안 건드림).
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+async def _link_asset_to_message(session, *, org_id, asset_id, message_id):
+    from app.models.asset import AssetLink
+    session.add(AssetLink(
+        id=uuid.uuid4(), org_id=org_id, asset_id=asset_id,
+        source_type="conversation_message", source_id=message_id,
+    ))
+    await session.commit()
+
+
+async def _make_asset(session, *, org_id, project_id, object_path="chat/x/y/z.mp4"):
+    from app.models.asset import Asset
+    asset = Asset(
+        id=uuid.uuid4(), org_id=org_id, project_id=project_id,
+        container="sprintable-memo-attachments", object_path=object_path,
+        name="z.mp4", content_type="video/mp4", size_bytes=3,
+    )
+    session.add(asset)
+    await session.commit()
+    return asset
+
+
+async def test_attachment_authorize_asset_id_403_when_sole_message_link_tombstoned():
+    """핵심 재현 — asset의 유일한 링크가 삭제된 메시지 하나뿐이면 asset_id 분기가 거부해야 한다.
+    #2808은 이 분기(asset_id)를 안 고쳤다 — 이 테스트가 그 갭을 pin한다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id], created_by=caller_id, conv_type="dm")
+            msg = await _add_message(s, conv_id, caller_id, "영상", _t(1))
+            asset = await _make_asset(s, org_id=org.id, project_id=project.id)
+            await _link_asset_to_message(s, org_id=org.id, asset_id=asset.id, message_id=msg.id)
+            msg_id, asset_id = msg.id, asset.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            before = await client.get(f"/api/v2/attachments/authorize?asset_id={asset_id}")
+            assert before.status_code == 200, before.text  # 양성대조 — 삭제 전엔 정상 authorize.
+
+            del_resp = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert del_resp.status_code == 200, del_resp.text
+
+            after = await client.get(f"/api/v2/attachments/authorize?asset_id={asset_id}")
+            assert after.status_code == 403, after.text
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_attachment_authorize_asset_id_200_when_another_message_link_alive():
+    """정책 확인 — 같은 asset이 메시지 둘에 걸려 있고 하나만 삭제되면 여전히 authorize된다
+    (다른 살아있는 문맥의 접근권은 이 정책이 안 건드린다)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id], created_by=caller_id, conv_type="dm")
+            msg_a = await _add_message(s, conv_id, caller_id, "영상 A", _t(1))
+            msg_b = await _add_message(s, conv_id, caller_id, "영상 B(같은 첨부 재사용)", _t(2))
+            asset = await _make_asset(s, org_id=org.id, project_id=project.id)
+            await _link_asset_to_message(s, org_id=org.id, asset_id=asset.id, message_id=msg_a.id)
+            await _link_asset_to_message(s, org_id=org.id, asset_id=asset.id, message_id=msg_b.id)
+            msg_a_id, asset_id = msg_a.id, asset.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            del_resp = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_a_id}")
+            assert del_resp.status_code == 200, del_resp.text
+
+            # msg_a만 지워졌다 — msg_b가 여전히 살아있으므로 authorize는 여전히 200.
+            resp = await client.get(f"/api/v2/attachments/authorize?asset_id={asset_id}")
+            assert resp.status_code == 200, resp.text
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_attachment_authorize_asset_id_200_when_non_message_link_present():
+    """정책 확인 — 메시지 링크가 삭제됐어도 non-message(예: doc) 링크가 하나라도 있으면
+    authorize된다(doc 등 다른 문맥의 접근권은 이 스토리가 안 건드린다는 정책의 직접 증거)."""
+    from app.main import app
+    from app.models.asset import AssetLink
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id], created_by=caller_id, conv_type="dm")
+            msg = await _add_message(s, conv_id, caller_id, "영상", _t(1))
+            asset = await _make_asset(s, org_id=org.id, project_id=project.id)
+            await _link_asset_to_message(s, org_id=org.id, asset_id=asset.id, message_id=msg.id)
+            # non-message 링크(doc — source_id는 임의 uuid로 충분, 이 분기는 존재 검증을 안 한다).
+            s.add(AssetLink(
+                id=uuid.uuid4(), org_id=org.id, asset_id=asset.id,
+                source_type="doc", source_id=uuid.uuid4(),
+            ))
+            await s.commit()
+            msg_id, asset_id = msg.id, asset.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            del_resp = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert del_resp.status_code == 200, del_resp.text
+
+            resp = await client.get(f"/api/v2/attachments/authorize?asset_id={asset_id}")
+            assert resp.status_code == 200, resp.text
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_attachment_authorize_asset_id_200_when_no_links_orphan():
+    """정책 확인 — 링크가 0건(orphan asset)이면 이 판 이전과 동일하게 그대로 authorize된다
+    (이 스토리가 새 거부를 만들지 않는다)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            asset = await _make_asset(s, org_id=org.id, project_id=project.id)
+            asset_id = asset.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/attachments/authorize?asset_id={asset_id}")
+            assert resp.status_code == 200, resp.text
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
