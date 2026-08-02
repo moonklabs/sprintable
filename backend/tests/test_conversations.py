@@ -369,9 +369,20 @@ async def test_list_messages_response_shape():
         refs_result = MagicMock()
         refs_result.all.return_value = []
 
+        # story #2349: list_messages가 마지막에 _viewer_blocked_sender_ids(viewer 차단 목록)를
+        # 1회 더 조회한다(_resolve_member의 TeamMember lookup) — 여기 mock_member는 실제
+        # TeamMember 인스턴스가 아니라 MagicMock이라 isinstance 체크가 실패해 빈 집합으로
+        # 즉시 리턴(추가 쿼리 없음), 그래도 이 첫 execute 1회는 소비된다.
+        blocked_sender_result = MagicMock()
+        # mock_member는 MagicMock이지 실제 TeamMember 인스턴스가 아니라 isinstance 체크가
+        # False로 나와 _viewer_blocked_sender_ids가 빈 집합으로 즉시 리턴한다(None을 주면
+        # _resolve_member가 grant-only 휴먼 폴백 경로(resolve_member)로 빠져 쿼리가 하나 더
+        # 필요해진다 — non-None으로 그 분기를 막는다).
+        blocked_sender_result.scalars.return_value.first.return_value = mock_member
+
         session.execute = AsyncMock(side_effect=[
             conv_project_result, member_result, pids_result, agents_result, msgs_result, sender_result,
-            refs_result,
+            refs_result, blocked_sender_result,
         ])
 
         async with client as c:
@@ -478,7 +489,14 @@ async def test_send_message_201():
         participant_result = MagicMock()
         participant_result.scalar_one_or_none.return_value = uuid.uuid4()
 
-        session.execute = AsyncMock(side_effect=[member_result, conv_result, participant_result])
+        # story #2349: send_message가 「발신자를 차단한 수신자」 집합을 1회 조회한다
+        # (user_blocker_ids, _command_capability_gate 이후·SSE dispatch 이전).
+        user_blocker_result = MagicMock()
+        user_blocker_result.scalars.return_value.all.return_value = []
+
+        session.execute = AsyncMock(
+            side_effect=[member_result, conv_result, participant_result, user_blocker_result]
+        )
 
         async def _refresh(obj):
             obj.id = mock_msg.id
@@ -553,8 +571,14 @@ async def test_send_message_filters_cross_org_mentions_group():
         participant_result = MagicMock()
         participant_result.scalar_one_or_none.return_value = uuid.uuid4()
 
-        # 실제 코드 순서: conv → _resolve_member(TM) → participant
-        session.execute = AsyncMock(side_effect=[conv_result, member_result, participant_result])
+        # story #2349: user_blocker_ids(발신자를 차단한 수신자) 1회 조회 추가.
+        user_blocker_result = MagicMock()
+        user_blocker_result.scalars.return_value.all.return_value = []
+
+        # 실제 코드 순서: conv → _resolve_member(TM) → participant → user_blocker_ids
+        session.execute = AsyncMock(
+            side_effect=[conv_result, member_result, participant_result, user_blocker_result]
+        )
 
         captured = {}
         def _capture_add(obj):

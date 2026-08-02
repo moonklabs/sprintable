@@ -2043,9 +2043,16 @@ async def send_message(
     # PO 경계(2026-08-02): 이건 conversations.py::send_message(대화)만이다 — 스토리 멘션(업무)은
     # 별도 경로라 안 건드린다. blocked_agent_ids(위, capability gate)와는 개념이 달라 이름을
     # 안 겹친다(이름이 겹쳐 합칠 뻔한 논의가 있었다 — 결론: 못 합침, PO 판정 참조).
-    user_blocker_ids = set((await db.execute(
-        select(UserBlock.blocker_member_id).where(UserBlock.blocked_member_id == sender.id)
-    )).scalars().all())
+    # 이 조회 하나가 실패했다고 메시지 전송 자체가 막히면 안 된다 — 아래 채널라우터 pre-check·
+    # 웹훅 타겟·멘션/알림 dispatch가 전부 같은 철학(best-effort, try/except+warning)이라 이
+    # 조회도 그 옆에 맞춘다(실패 시 fail-open=차단 미반영, 메시지 전송은 계속).
+    user_blocker_ids: set[uuid.UUID] = set()
+    try:
+        user_blocker_ids = set((await db.execute(
+            select(UserBlock.blocker_member_id).where(UserBlock.blocked_member_id == sender.id)
+        )).scalars().all())
+    except Exception:
+        logger.warning("user_blocker_ids lookup failed message_id=%s — fail-open(no exclusion)", msg.id, exc_info=True)
 
     # E-EVENT-1CONFIG: webhook 전달 대상을 요청 트랜잭션서 1회 산출(SSOT) — SSE-skip 결정과 실제
     # webhook delivery 가 **같은 snapshot/결정**을 쓰게 해 TOCTOU silent loss 를 차단한다(산티아고
