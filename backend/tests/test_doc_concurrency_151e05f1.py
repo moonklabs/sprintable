@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import BackgroundTasks
 
 from app.dependencies.auth import AuthContext
 from app.routers import docs as docs_mod
@@ -48,7 +49,9 @@ async def _call(body_kwargs, doc_updated_at=T1):
     # f69fcd91: update_doc 가 project authz(_require_doc_project_access) 선행 — 이 테스트는 409 동시성
     # 로직 검증이라 authz 게이트는 통과(doc 반환)로 패치.
     with patch.object(docs_mod, "_require_doc_project_access", AsyncMock(return_value=d)):
-        resp = await update_doc(d.id, DocUpdate(**body_kwargs), repo, session, auth=auth)
+        # story #2346: update_doc가 background_tasks(신규 필수 파라미터, AC3 activity 로깅용)를
+        # 받는다 — 이 테스트는 그 이전 시그니처를 positional로 호출하고 있었다.
+        resp = await update_doc(d.id, DocUpdate(**body_kwargs), BackgroundTasks(), repo, session, auth=auth)
     return resp, d
 
 
