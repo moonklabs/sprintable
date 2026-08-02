@@ -2,12 +2,14 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslations } from 'next-intl';
 import { ChevronDown, ChevronRight, FileText, Folder, FolderOpen, GripVertical, MoreVertical } from 'lucide-react';
 import { DndContext, DragEndEvent, closestCenter } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { cn } from '@/lib/utils';
 import { useTouchSafePointerSensor } from '@/hooks/use-touch-safe-pointer-sensor';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useTreeExpanded } from './use-tree-expanded';
 
 // ─── Preview Card ─────────────────────────────────────────────────────────────
@@ -142,11 +144,14 @@ function TreeNode({
   onToggleExpanded: (id: string) => void;
   sortMode?: DocSortMode;
 }) {
+  const t = useTranslations('docs');
   const childDocs = allDocs.filter((entry) => entry.parent_id === doc.id).sort((a, b) => compareDocsForSort(a, b, sortMode));
   const hasChildren = childDocs.length > 0;
   const isFolder = Boolean(doc.is_folder || hasChildren);
   const expanded = isExpanded(doc.id);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  // story #2416 — native confirm() 대체. 각 TreeNode가 자기 대상(doc)의 삭제-확認만 소유.
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const isSelected = selectedSlug === doc.slug;
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -219,11 +224,14 @@ function TreeNode({
   }, [doc, onRename]);
 
   const handleDelete = useCallback(() => {
-    if (confirm(`Delete "${doc.title}"?`) && onDelete) {
-      void onDelete(doc.id);
-    }
+    setDeleteConfirmOpen(true);
     setContextMenuOpen(false);
-  }, [doc, onDelete]);
+  }, []);
+
+  const confirmDelete = useCallback(() => {
+    setDeleteConfirmOpen(false);
+    if (onDelete) void onDelete(doc.id);
+  }, [doc.id, onDelete]);
 
   const handleAddChild = useCallback(() => {
     if (onAddChild) {
@@ -299,6 +307,19 @@ function TreeNode({
           <button onClick={handleDelete} className="w-full rounded-md px-3 py-2 text-left text-sm text-foreground hover:bg-destructive/10">Delete</button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title={t('docTreeDeleteTitle')}
+        description={t.rich('docTreeDeleteBody', {
+          title: doc.title,
+          b: (chunks) => <b className="font-semibold text-foreground">{chunks}</b>,
+        })}
+        cancelLabel={t('cancel')}
+        confirmLabel={t('deleteDoc')}
+        onConfirm={confirmDelete}
+      />
 
       {isFolder && expanded && (
         <>
