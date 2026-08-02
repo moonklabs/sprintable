@@ -92,8 +92,6 @@ _FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
         "_assert_self_or_org_admin(member_id,...) — 본인 잔액 또는 org admin만 조회 가능해 project_id 자체는 blast-radius가 self-data로 제한",
     "app.routers.current_project:set_current_project":
         "assert_caller_is_member self-scope 후 (member_id, body.project_id) TeamMember 행 존재를 요구 — has_project_access보다 엄격(IDOR 아님)",
-    "app.routers.project_settings:upsert_project_settings":
-        "has_project_role(body.project_id, min_role=admin) 가드",
     "app.routers.analytics:get_overview":
         "SEC-S8 DD(#2047)에서 추가된 로컬 _assert_project_access(repo,auth,project_id) wrapper가 has_project_access를 1-hop 아래서 호출",
     "app.routers.analytics:get_member_workload":
