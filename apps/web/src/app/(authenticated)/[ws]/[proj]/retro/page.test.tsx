@@ -126,10 +126,11 @@ describe('RetroPage — 오래 멈춘 phase 배지 렌더(story #2413)', () => {
 
   // 유나 규격(2026-08-02, #2791 design:changes) — warning tint 위 text-warning은 light에서
   // 2.06(AA 미달)이라 이 배지만 text-foreground로 덮는다. 회귀 가드.
-  // ⚠️이 가드가 보는 것은 «이 배지 한 자리»뿐이다 — badge.tsx의 warning variant 자체를 고치는
-  // 것이 아니라 호출부 className 오버라이드라, 다음에 누군가 새로 variant="warning"을 쓰면
-  // 이 가드는 그 자리를 못 잡는다(오버라이드 방식의 구조적 한계 — PO 지적). warning 전면은
-  // #2420이 badge.tsx에서 닫는다.
+  // ⚠️이 가드가 보는 것은 «이 파일의 warning 배지 콜사이트 하나»뿐이다(카디르 QA 이후 명시:
+  // "한 자리"가 파일 하나로도 콜사이트 하나로도 읽혀 sprints-client.tsx의 상세패널 콜사이트가
+  // 조용히 빠질 뻔했다 — 세는 단위를 여기서도 명확히 한다). badge.tsx의 warning variant
+  // 자체를 고치는 것도 아니라 호출부 className 오버라이드라, 다른 파일(sprints-client.tsx)이나
+  // 새 warning 배지 콜사이트는 이 가드가 못 본다. warning 전면은 #2420이 badge.tsx에서 닫는다.
   it('경고 배지는 text-foreground로 오버라이드돼 있다(유나 규격) — text-warning 단독이 아니다', async () => {
     stubFetch([{ id: 'r1', title: '회고제목', phase: 'action', created_at: '2020-01-01T00:00:00Z', updated_at: '2020-01-02T00:00:00Z' }]);
     await mount();
