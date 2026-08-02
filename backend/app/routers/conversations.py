@@ -9,12 +9,13 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import and_, func, select, text, update
+from sqlalchemy import and_, func, select, text, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.core.config import settings
+from app.core.pagination import assemble_page, decode_cursor
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
@@ -1382,6 +1383,11 @@ async def list_messages(
 
     thread_id 미지정: top-level 메시지만 반환 (thread_id IS NULL).
     thread_id 지정: 해당 thread의 reply 목록 반환.
+
+    story #2428: cursor가 `created_at` 단독이라 동률 시 페이지 경계에서 메시지가 누락/중복될
+    수 있었다(docs.py·backlinks.py가 각자 발견해 고친 것과 동형 결함 — #2231이 이 함수를
+    "참조 구현"으로 지목했는데 정작 이 결함을 안고 있었다). (created_at, id) 복합 cursor로
+    이관 — 순수 리팩터 아님, 기존 cursor 무효화.
     """
     await _authorize_message_read(conversation_id, db, auth, org_id)
 
@@ -1393,19 +1399,18 @@ async def list_messages(
     stmt = (
         select(ConversationMessage)
         .where(ConversationMessage.conversation_id == conversation_id, thread_filter)
-        .order_by(ConversationMessage.created_at.desc())
+        .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
         .limit(limit + 1)
     )
     if before:
-        try:
-            before_dt = datetime.fromisoformat(before)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid cursor format")
-        stmt = stmt.where(ConversationMessage.created_at < before_dt)
+        before_dt, before_id = decode_cursor(before)
+        stmt = stmt.where(tuple_(ConversationMessage.created_at, ConversationMessage.id) < tuple_(before_dt, before_id))
 
     rows = (await db.execute(stmt)).scalars().all()
-    has_more = len(rows) > limit
-    msgs = list(reversed(rows[:limit]))
+    page, has_more, next_cursor = assemble_page(rows, limit, lambda m: (m.created_at, m.id))
+    # 화면 표시는 오래된→최신 순(자연스러운 대화 순서) — cursor 경계 계산은 desc 원본
+    # `page`(assemble_page가 그 순서로 계산)에서 이미 끝났으니 여기서 reverse해도 안전.
+    msgs = list(reversed(page))
 
     sender_ids = {m.sender_id for m in msgs if m.sender_id}
     member_map = await lookup_members_by_ids(sender_ids, db)
@@ -1420,7 +1425,6 @@ async def list_messages(
         _msg_payload(m, member_map.get(m.sender_id), references=refs_by_msg.get(m.id, []))
         for m in msgs
     ]
-    next_cursor = msgs[0].created_at.isoformat() if has_more and msgs else None
 
     return {"data": data, "meta": {"next_cursor": next_cursor, "has_more": has_more}}
 
@@ -1472,6 +1476,9 @@ async def list_message_replies(
 
     story 3cf50d90: list_messages의 `?thread_id=` 파라미터와 동형 필터(discoverability용 전용
     서브리소스 — 호출자가 thread_id 쿼리파라미터의 존재를 몰라도 원문 리플 왕복이 가능하도록).
+
+    story #2428: list_messages와 동형 결함(단독 created_at cursor, 동률 시 페이지 경계
+    누락/중복) — (created_at, id) 복합 cursor로 이관. 순수 리팩터 아님, 기존 cursor 무효화.
     """
     await _authorize_message_read(conversation_id, db, auth, org_id)
 
@@ -1481,19 +1488,16 @@ async def list_message_replies(
             ConversationMessage.conversation_id == conversation_id,
             ConversationMessage.thread_id == message_id,
         )
-        .order_by(ConversationMessage.created_at.desc())
+        .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
         .limit(limit + 1)
     )
     if before:
-        try:
-            before_dt = datetime.fromisoformat(before)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid cursor format")
-        stmt = stmt.where(ConversationMessage.created_at < before_dt)
+        before_dt, before_id = decode_cursor(before)
+        stmt = stmt.where(tuple_(ConversationMessage.created_at, ConversationMessage.id) < tuple_(before_dt, before_id))
 
     rows = (await db.execute(stmt)).scalars().all()
-    has_more = len(rows) > limit
-    msgs = list(reversed(rows[:limit]))
+    page, has_more, next_cursor = assemble_page(rows, limit, lambda m: (m.created_at, m.id))
+    msgs = list(reversed(page))
 
     sender_ids = {m.sender_id for m in msgs if m.sender_id}
     member_map = await lookup_members_by_ids(sender_ids, db)
@@ -1507,7 +1511,6 @@ async def list_message_replies(
         _msg_payload(m, member_map.get(m.sender_id), references=refs_by_msg.get(m.id, []))
         for m in msgs
     ]
-    next_cursor = msgs[0].created_at.isoformat() if has_more and msgs else None
 
     return {"data": data, "meta": {"next_cursor": next_cursor, "has_more": has_more}}
 

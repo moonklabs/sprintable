@@ -6,10 +6,11 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, field_validator
-from sqlalchemy import or_, select, text
+from sqlalchemy import or_, select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.pagination import assemble_page, decode_cursor
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.deletion_audit import DeletionAuditLog
@@ -2242,6 +2243,13 @@ async def list_comments(
     죽은 파라미터) — FE(story-detail-panel.tsx)는 이미 이 파라미터로 「더보기」를 완결해
     두고 기다리고 있었다. #2231 정본 규약 A(limit+1 오버페치 + has_more/next_cursor body
     meta, 참조 구현: conversations.py::list_messages)로 실제 동작하게 한다.
+
+    story #2428: 그 "정본"이 사실 `created_at` 단독 정렬+cursor였다 — 동률(같은 created_at)
+    두 행이 페이지 경계에 걸치면 행이 누락/중복될 수 있었다(docs.py encode_doc_cursor·
+    backlinks.py encode_cursor가 각자 발견해 고친 것과 동형 결함인데 이 "정본"엔 한 번도
+    안 돌아갔었다). `app.core.pagination`의 (created_at, id) 복합 cursor로 이관 — 순수
+    리팩터가 아니라 수정이다. 기존(단독 평문) cursor는 이제 무효이며 `decode_cursor`가
+    명시로 거부한다(조용히 재해석해 틀린 페이지를 주지 않는다).
     """
     # SEC(story #2206, 까심 인가 전수 스윕 A급): 쿼리 술어가 StoryComment.story_id == id 뿐이라
     # org_id 조건 자체가 없었다(project-only 누락이 아니라 org 조건 부재 — 같은 파일 다른
@@ -2257,17 +2265,12 @@ async def list_comments(
     # 한다 — 이 함수를 FastAPI DI 없이 직접 호출하며 cursor= 를 누락하면 파이썬 기본값인
     # Query(...) 센티넬 객체(truthy) 가 그대로 들어온다. 문자열이 아니면 커서 없음으로 취급.
     if isinstance(cursor, str) and cursor:
-        try:
-            cursor_dt = datetime.fromisoformat(cursor)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid cursor format")
-        q = q.where(StoryComment.created_at < cursor_dt)
-    q = q.order_by(StoryComment.created_at.desc()).limit(limit + 1)
+        cursor_dt, cursor_id = decode_cursor(cursor)
+        q = q.where(tuple_(StoryComment.created_at, StoryComment.id) < tuple_(cursor_dt, cursor_id))
+    q = q.order_by(StoryComment.created_at.desc(), StoryComment.id.desc()).limit(limit + 1)
     result = await db.execute(q)
     rows = list(result.scalars())
-    has_more = len(rows) > limit
-    page = rows[:limit]
-    next_cursor = page[-1].created_at.isoformat() if has_more and page else None
+    page, has_more, next_cursor = assemble_page(rows, limit, lambda r: (r.created_at, r.id))
     return {
         "data": [CommentResponse.model_validate(r) for r in page],
         "meta": {"has_more": has_more, "next_cursor": next_cursor},
@@ -2403,6 +2406,9 @@ async def list_activities(
     이 엔드포인트에 cursor 자체가 없어 원천적으로 도달 불가였다(#2231 표 CAPPED-NO-NEXT-PAGE).
     #2231 정본 규약 A(limit+1 오버페치 + has_more/next_cursor body meta, 참조 구현:
     stories.py::list_comments — #2230에서 이미 같은 처방을 받은 형제 엔드포인트)로 도달 가능하게 한다.
+
+    story #2428: list_comments와 동형 결함(단독 created_at cursor, 동률 시 페이지 경계
+    누락/중복) — (created_at, id) 복합 cursor로 이관. 순수 리팩터 아님, 기존 cursor 무효화.
     """
     # SEC(story #2206) — list_comments(1339)와 동형 갭·동형 처방. 자세한 사유는 그쪽 주석 참조.
     story = await repo.get(id)
@@ -2414,17 +2420,12 @@ async def list_activities(
     # 한다 — 이 함수를 FastAPI DI 없이 직접 호출하며 cursor= 를 누락하면 파이썬 기본값인
     # Query(...) 센티넬 객체(truthy) 가 그대로 들어온다. 문자열이 아니면 커서 없음으로 취급.
     if isinstance(cursor, str) and cursor:
-        try:
-            cursor_dt = datetime.fromisoformat(cursor)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid cursor format")
-        q = q.where(StoryActivity.created_at < cursor_dt)
-    q = q.order_by(StoryActivity.created_at.desc()).limit(limit + 1)
+        cursor_dt, cursor_id = decode_cursor(cursor)
+        q = q.where(tuple_(StoryActivity.created_at, StoryActivity.id) < tuple_(cursor_dt, cursor_id))
+    q = q.order_by(StoryActivity.created_at.desc(), StoryActivity.id.desc()).limit(limit + 1)
     result = await db.execute(q)
     rows = list(result.scalars())
-    has_more = len(rows) > limit
-    page = rows[:limit]
-    next_cursor = page[-1].created_at.isoformat() if has_more and page else None
+    page, has_more, next_cursor = assemble_page(rows, limit, lambda r: (r.created_at, r.id))
     return {
         "data": [ActivityResponse.model_validate(r) for r in page],
         "meta": {"has_more": has_more, "next_cursor": next_cursor},

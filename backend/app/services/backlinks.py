@@ -171,8 +171,6 @@ org로 그대로 새는 IDOR이었다(row 자체를 숨기는 게 아니라, row
 """
 from __future__ import annotations
 
-import base64
-import json
 import uuid
 from datetime import datetime
 
@@ -180,6 +178,7 @@ from fastapi import HTTPException
 from sqlalchemy import and_, false as sa_false, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.pagination import decode_cursor, encode_cursor
 from app.dependencies.auth import AuthContext
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.doc import Doc
@@ -219,25 +218,6 @@ def _member_summary_same_org(resolved: ResolvedMember | None, org_id: uuid.UUID)
         return None
     return {"id": str(resolved.id), "name": resolved.name, "type": resolved.type}
 
-
-def encode_cursor(created_at: datetime, id_: uuid.UUID) -> str:
-    """story #1994 B3: opaque composite keyset cursor — `(created_at, id)` 둘 다 인코드해
-    같은 `created_at`을 가진 여러 mention이 페이지 경계에서 영구 드롭되지 않도록 한다.
-    클라이언트는 이 토큰을 절대 파싱하지 않고(불투명) 그대로 다음 요청의 `before`에 되돌려준다."""
-    payload = {"created_at": created_at.isoformat(), "id": str(id_)}
-    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii")
-
-
-def decode_cursor(token: str) -> tuple[datetime, uuid.UUID]:
-    """`encode_cursor`의 역함수. 손상/변조된 토큰은 400(Invalid cursor format) — 파싱 실패를
-    500으로 흘리지 않는다."""
-    try:
-        raw = base64.urlsafe_b64decode(token.encode("ascii"))
-        payload = json.loads(raw)
-        return datetime.fromisoformat(payload["created_at"]), uuid.UUID(str(payload["id"]))
-    except Exception as exc:  # noqa: BLE001 — 모든 파싱 실패를 균일하게 400으로 정규화
-        raise HTTPException(status_code=400, detail="Invalid cursor format") from exc
 
 
 async def _chat_predicate_inputs(
