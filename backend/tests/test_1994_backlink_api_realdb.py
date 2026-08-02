@@ -2231,3 +2231,57 @@ async def test_delete_message_wrong_conversation_id_404():
             app.dependency_overrides.clear()
     finally:
         await engine.dispose()
+
+
+async def test_delete_message_after_removed_from_participants_403():
+    """카디르 QA(2026-08-02, PR #2806) — canonical `_authorize_message_read` 재사용의 부수효과를
+    직접 pin: participant에서 제거된 뒤에는 예전에 자기가 보낸 메시지도 못 지운다(read-gate가
+    먼저 403을 raise — fail-closed, 못 읽는 대화의 메시지를 지울 수 있으면 그게 더 이상하다는
+    판단). 이전 구현(수기 `_resolve_member`+sender_id 대조)은 이 경계에 답이 없었다."""
+    from app.main import app
+    from sqlalchemy import delete as sa_delete
+    from app.models.conversation import ConversationParticipant
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            other_id, _ = await _make_human_member(s, org.id, project.id)
+            # group(=dm 아님)이라야 caller 제거 후에도 conversation 자체는 살아있다(dm은 애초에
+            # 2인 고정 개념이라 제거라는 조작이 자연스럽지 않다).
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id, other_id], created_by=caller_id, conv_type="group")
+            msg = await _add_message(s, conv_id, caller_id, "제거 전에 보낸 메시지", _t(1))
+            msg_id = msg.id
+
+            # caller를 이 conversation의 참가자 목록에서 제거(project 접근 자체는 유지 — project
+            # access 회수가 아니라 "이 대화방에서 나감"만 재현).
+            await s.execute(
+                sa_delete(ConversationParticipant).where(
+                    ConversationParticipant.conversation_id == conv_id,
+                    ConversationParticipant.member_id == caller_id,
+                )
+            )
+            await s.commit()
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert resp.status_code == 403, resp.text
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+
+        # 응답 status만 믿지 않는다 — DB를 직접 조회해 실제로 안 지워졌는지 재확認.
+        from sqlalchemy import select
+        from app.models.conversation import ConversationMessage
+        async with Session() as s:
+            fresh = (await s.execute(
+                select(ConversationMessage).where(ConversationMessage.id == msg_id)
+            )).scalar_one()
+            assert fresh.deleted_at is None, "403인데 실제로는 지워졌다 — 응답과 DB가 어긋난다"
+            assert fresh.content == "제거 전에 보낸 메시지"
+    finally:
+        await engine.dispose()

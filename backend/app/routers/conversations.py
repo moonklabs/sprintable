@@ -1477,16 +1477,24 @@ async def delete_message(
 
     PO 결정(2026-07-29 04:41Z): tombstone, hard delete 아님. 행은 남고 content만 실제로
     지운다(ConversationMessage.deleted_at — SoftDeleteMixin, 모델 docstring 참조: Doc/Story와
-    달리 목록에서 안 걸러낸다). 본인 메시지만 — FE의 isMine 게이트는 UI일 뿐이라 서버가
-    독립으로 강제한다(get_message와 동형 404 스코핑 + 소유자 403).
-    """
-    conv = (await db.execute(
-        select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
-    )).scalar_one_or_none()
-    if conv is None:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+    달리 목록에서 안 걸러낸다).
 
-    member = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    ⛔카디르 QA(2026-08-02, PR #2806 CI): 최초 구현은 인가를 이 함수 안에서 손으로
+    짰다(`_resolve_member` + sender_id 대조) — 지금 당장 「제3자가 남의 메시지를 못 지우는가」
+    답이 예여도, 이 저장소가 이 정확한 도메인(메시지 인가)에서 과거에 실제 결함(story #1994
+    B1, 산티아고 sabotage-probe)을 겪고 세운 canonical 경로(`_authorize_message_read`)를
+    우회했다는 사실 자체가 문제다 — "지금 안전한가"와 "세운 규율을 지켰는가"는 다른 질문이고,
+    이걸 그냥 두면 다음 사람이 또 우회한다. read-canonical을 재사용하고 그 위에 sender
+    소유권만 얹는다("읽을 수 있는 사람 중 자기 것만"이 삭제 인가의 자연스러운 형태) — 삭제가
+    읽기보다 더 좁아야 할 이유가 없다(삭제 대상은 이미 sender_id로 추가 제한된다).
+
+    ⭐부수효과(카디르가 짚은 미답 질문 해소): participant에서 제거된 뒤에는 예전에 보낸
+    메시지도 못 지운다 — `_authorize_message_read`가 먼저 403을 raise한다(read-gate와
+    동일 fail-closed). 의도적 결정이다: 못 읽는 대화의 메시지를 지울 수 있으면 그게 더
+    이상하다.
+    """
+    conv_project_id = await _authorize_message_read(conversation_id, db, auth, org_id)
+    member = await _resolve_member(auth, org_id, db, project_id=conv_project_id)
 
     msg = (await db.execute(
         select(ConversationMessage).where(
