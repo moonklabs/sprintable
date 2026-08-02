@@ -702,7 +702,14 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
                   <div className="flex items-center gap-2">
                   <Badge variant={statusVariant(sprint.status)}>{sprint.status}</Badge>
                   {isSprintOverdue(sprint, now) ? (
-                    <Badge variant="warning">{t('overdueBadge', { days: daysOverdue(sprint.end_date, now) })}</Badge>
+                    // 유나 규격(2026-08-02, #2791 design:changes) — Badge variant="warning"의
+                    // 계열색 텍스트(text-warning)는 light에서 2.06(AA 4.5의 절반 이하). 명도를
+                    // 낮추면 통과하지만 노랑이 갈색이 되어 "경고" 의미가 사라진다 — 문제는
+                    // 배경이 아니라 글자가 밝은 것. tint 배경 위에서는 foreground로 덮는다
+                    // (배경이 이미 "옅은 경고색"으로 의미를 말하므로 글자까지 계열색일 필요는
+                    // 없다). 이 오버라이드는 이 두 배지(#2413) 한정 — badge.tsx의 warning
+                    // variant 자체는 다른 4개 색 계열과 함께 #2420에서 다룬다.
+                    <Badge variant="warning" className="text-foreground">{t('overdueBadge', { days: daysOverdue(sprint.end_date, now) })}</Badge>
                   ) : null}
                   <ChevronRight className="size-4 text-muted-foreground" />
                   </div>
@@ -735,7 +742,9 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           <div className="mt-1 flex items-center gap-2">
             <Badge variant={statusVariant(selected.status)}>{selected.status}</Badge>
             {isSprintOverdue(selected, now) ? (
-              <Badge variant="warning">{t('overdueBadge', { days: daysOverdue(selected.end_date, now) })}</Badge>
+              // 유나 규격(2026-08-02, #2791) — warning tint 위 text-foreground. 위 목록 배지와
+              // 동일 근거(text-warning은 light에서 AA 미달, 문제는 배경이 아니라 글자).
+              <Badge variant="warning" className="text-foreground">{t('overdueBadge', { days: daysOverdue(selected.end_date, now) })}</Badge>
             ) : null}
           </div>
         </div>

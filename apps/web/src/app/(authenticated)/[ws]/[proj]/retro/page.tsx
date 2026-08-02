@@ -226,7 +226,13 @@ export default function RetroPage() {
                       );
                     })()}
                     {isRetroStale(session, now) ? (
-                      <Badge variant="warning">{t('staleBadge', { days: daysStale(session.updated_at, now) })}</Badge>
+                      // 유나 규격(2026-08-02, #2791 design:changes) — Badge variant="warning"의
+                      // 계열색 텍스트(text-warning)는 light에서 2.06(AA 4.5의 절반 이하). 명도를
+                      // 낮추면 통과하지만 노랑이 갈색이 되어 "경고" 의미가 사라진다 — 문제는
+                      // 배경이 아니라 글자가 밝은 것. tint 배경 위에서는 foreground로 덮는다.
+                      // 이 오버라이드는 이 배지(#2413) 한정 — badge.tsx의 warning variant
+                      // 자체는 다른 색 계열과 함께 #2420에서 다룬다.
+                      <Badge variant="warning" className="text-foreground">{t('staleBadge', { days: daysStale(session.updated_at, now) })}</Badge>
                     ) : null}
                   </div>
                 </Link>

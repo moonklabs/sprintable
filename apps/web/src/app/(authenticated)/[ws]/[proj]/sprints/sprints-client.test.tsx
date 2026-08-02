@@ -159,6 +159,18 @@ describe('SprintsClient — 종료일 지난 스프린트 배지 렌더(story #2
     expect(html).toContain('지남');
   });
 
+  // 유나 규격(2026-08-02, #2791 design:changes) — warning tint 위 text-warning은 light에서
+  // 2.06(AA 미달)이라 이 배지만 text-foreground로 덮는다. 회귀 가드: text-warning 단독으로
+  // 되돌아가지 않는다(badge.tsx variant 자체가 text-warning을 주므로, 오버라이드 className이
+  // 빠지면 이 배지가 다시 안 읽히는 조합으로 돌아간다).
+  it('경고 배지는 text-foreground로 오버라이드돼 있다(유나 규격) — text-warning 단독이 아니다', async () => {
+    stubFetch([{ id: 's1', title: 'Overdue Sprint', status: 'planning', start_date: '2020-01-01', end_date: '2020-01-14' }]);
+    await mount();
+    const badge = [...container.querySelectorAll('span')].find((el) => el.textContent?.includes('지남'));
+    expect(badge).not.toBeUndefined();
+    expect(badge!.className).toContain('text-foreground');
+  });
+
   it('음성대조 — 정상(미래 end_date) planning 스프린트는 경고 배지가 없다', async () => {
     stubFetch([{ id: 's1', title: 'Fresh Sprint', status: 'planning', start_date: '2099-01-01', end_date: '2099-01-14' }]);
     await mount();
