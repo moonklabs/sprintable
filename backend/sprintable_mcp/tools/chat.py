@@ -6,6 +6,7 @@ import re
 from typing import Literal
 
 from mcp.types import TextContent
+from pydantic import model_validator
 
 from ..api_client import client
 from ..response import err, ok
@@ -92,8 +93,44 @@ class MentionRef(SprintableInput):
     title: str | None = None
 
 
-class SendChatInput(SprintableInput):
-    thread_id: str
+class ConversationScopedInput(SprintableInput):
+    """story #2427 — send/list/get_chat_message 셋이 요청은 `thread_id`로 받으면서 실제로는
+    conversation_id를 뜻했다(URL 경로로 씀). 그런데 이 셋의 «응답」은 백엔드
+    `_msg_payload()`(app/routers/conversations.py)가 매번 `conversation_id`·`thread_id`
+    필드를 «둘 다» 싣는다 — 응답의 thread_id는 진짜 회신 스레드(nullable, 보통 null)라
+    요청의 thread_id(=conversation)와 다른 것을 가리킨다. 같은 이름이 요청·응답에서
+    다른 뜻이면, 응답을 보고 그 값을 그대로 다시 넣는 자연스러운 다음 행동이 조용히
+    틀린 값을 보내게 된다 — 그게 이 결함의 정의였다(PO 판정, 2026-08-02).
+
+    처방: 요청 쪽 정식 이름을 `conversation_id`로 맞춘다(응답이 이미 그 이름으로 준다).
+    `thread_id`는 «폐기 예정 별칭»으로 한동안 받는다 — extra="forbid"(story #2412)와는
+    안 부딪힌다(둘 다 «선언된» 필드라 미선언 인자를 막는 축과 다른 축이다). 둘 다 왔는데
+    값이 다르면 거부한다 — 조용히 하나를 고르면 이 판이 없애려는 병이 그대로 되살아난다.
+
+    ⛔걷을 조건 — 다음 판에서 실사용 로그(agent 호출)를 세어 `thread_id`(옛 이름) 사용이
+    0에 수렴하면 이 필드와 아래 검증을 뺀다. #2792에서 react-hooks lint disable에 붙인
+    것과 같은 형태(면제/별칭은 «언제 없앨 수 있는가»가 없으면 영원히 남는다).
+    """
+
+    conversation_id: str | None = None
+    thread_id: str | None = None  # 폐기 예정 별칭 — conversation_id를 쓰세요
+
+    @model_validator(mode="after")
+    def _resolve_conversation_id(self) -> "ConversationScopedInput":
+        if self.conversation_id and self.thread_id and self.conversation_id != self.thread_id:
+            raise ValueError(
+                "conversation_id와 thread_id가 둘 다 주어졌는데 값이 다릅니다 — "
+                "thread_id는 conversation_id의 폐기 예정 별칭입니다(응답의 thread_id와는 "
+                "다른 뜻이니 혼동하지 마세요). 하나만 쓰거나 같은 값을 주세요."
+            )
+        resolved = self.conversation_id or self.thread_id
+        if not resolved:
+            raise ValueError("conversation_id가 필요합니다.")
+        self.conversation_id = resolved
+        return self
+
+
+class SendChatInput(ConversationScopedInput):
     content: str
     reply_thread_id: str | None = None
     message_type: str | None = None
@@ -112,14 +149,12 @@ class CreateConversationInput(SprintableInput):
     title: str | None = None
 
 
-class ListChatMessagesInput(SprintableInput):
-    thread_id: str
+class ListChatMessagesInput(ConversationScopedInput):
     limit: int | None = None
     before: str | None = None
 
 
-class GetChatMessageInput(SprintableInput):
-    thread_id: str  # conversation_id — send/list_chat_message와 동일 네이밍 관례
+class GetChatMessageInput(ConversationScopedInput):
     message_id: str
 
 
@@ -178,7 +213,11 @@ async def _resolve_mention_content(args: SendChatInput) -> str:
 
 
 async def send_chat_message(args: SendChatInput) -> list[TextContent]:
-    """conversation thread에 채팅 메시지 발송."""
+    """conversation thread에 채팅 메시지 발송.
+
+    응답의 thread_id는 «회신 스레드» ID입니다(대화 ID가 아닙니다 — 대화 ID는
+    conversation_id입니다). 회신이 아닌 메시지는 보통 null입니다.
+    """
     uploaded_urls: list[str] = []
     try:
         content = await _resolve_mention_content(args) if args.mentions else args.content
@@ -195,7 +234,7 @@ async def send_chat_message(args: SendChatInput) -> list[TextContent]:
         if meta:
             payload["metadata"] = meta
         attachments = await upload_attachments(
-            f"/api/v2/conversations/{args.thread_id}/attachments", args.attachments,
+            f"/api/v2/conversations/{args.conversation_id}/attachments", args.attachments,
         )
         uploaded_urls = [a["url"] for a in attachments if isinstance(a, dict) and a.get("url")]
         if attachments:
@@ -209,7 +248,7 @@ async def send_chat_message(args: SendChatInput) -> list[TextContent]:
         # 원본을 받아 여기서 명시적으로 재구성한다 — 기존 MCP 호출부가 기대하는 평탄한
         # 메시지 필드 모양은 그대로 유지하면서 sibling 키만 얹는다(회귀 0: sibling이 없는
         # 평문 메시지는 이전과 byte-identical).
-        raw = await client.post_full(f"/api/v2/conversations/{args.thread_id}/messages", json=payload)
+        raw = await client.post_full(f"/api/v2/conversations/{args.conversation_id}/messages", json=payload)
         result: dict = dict(raw.get("data") or {}) if isinstance(raw, dict) else raw
         if isinstance(raw, dict):
             for sibling_key in ("references", "command_gate", "forked", "forked_conversation_id"):
@@ -247,21 +286,29 @@ async def create_conversation(args: CreateConversationInput) -> list[TextContent
 
 
 async def list_chat_messages(args: ListChatMessagesInput) -> list[TextContent]:
-    """conversation thread 메시지 목록 조회."""
+    """conversation thread 메시지 목록 조회.
+
+    각 메시지의 thread_id는 «회신 스레드» ID입니다(대화 ID가 아닙니다 — 대화 ID는
+    conversation_id입니다). 회신이 아닌 메시지는 보통 null입니다.
+    """
     params: dict = {}
     if args.limit is not None:
         params["limit"] = str(args.limit)
     if args.before:
         params["before"] = args.before
     try:
-        return ok(await client.get(f"/api/v2/conversations/{args.thread_id}/messages", params=params))
+        return ok(await client.get(f"/api/v2/conversations/{args.conversation_id}/messages", params=params))
     except Exception as exc:
         return err(str(exc))
 
 
 async def get_chat_message(args: GetChatMessageInput) -> list[TextContent]:
-    """메시지 단건 원문 조회 — 웹훅 payload가 잘렸을 때 message_id로 즉시 원문 픽업."""
+    """메시지 단건 원문 조회 — 웹훅 payload가 잘렸을 때 message_id로 즉시 원문 픽업.
+
+    응답의 thread_id는 «회신 스레드» ID입니다(대화 ID가 아닙니다 — 대화 ID는
+    conversation_id입니다). 회신이 아닌 메시지는 보통 null입니다.
+    """
     try:
-        return ok(await client.get(f"/api/v2/conversations/{args.thread_id}/messages/{args.message_id}"))
+        return ok(await client.get(f"/api/v2/conversations/{args.conversation_id}/messages/{args.message_id}"))
     except Exception as exc:
         return err(str(exc))
