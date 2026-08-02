@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { NextIntlClientProvider } from 'next-intl';
-import { parseVerificationRail, VerifyRail, type DisplayStep } from './verify-rail';
+import {
+  parseVerificationRail, VerifyRail, computeRailStageLabel, computeShowVerifyExamplePrompt,
+  type DisplayStep,
+} from './verify-rail';
 import ko from '../../../messages/ko.json';
 
 // story #2415(2026-08-02, 라이브 재확認 중 발견) — recruiter-client.tsx·connect-step.tsx가
@@ -112,5 +115,44 @@ describe('VerifyRail — story #2419 (실패 사유 박스 텍스트 대비)', (
     const classes = classAttr!.split(/\s+/);
     expect(classes).toContain('text-destructive-on-subtle');
     expect(classes).not.toContain('text-destructive');
+  });
+});
+
+// story #2407 — recruiter-client.tsx·connect-step.tsx가 검증 레일 상태파생·폴링·핸들러를
+// 각자 재구현하던 것을 useVerificationRail 하나로 모으면서, 근거 없이 갈려 있던 두 지점을
+// connect-step의 (기술적으로 더 정확한) 쪽으로 통일했다 — recruiter 쪽 동작이 실제로 바뀌는
+// 자리라 "판정이 아니라 실패하는 assert"로 고정한다(#2178 자).
+describe('computeRailStageLabel — story #2407 ②-3 (transport 무관 항상 채워짐)', () => {
+  const t = (key: 'railStageHosted' | 'railStageLocal') =>
+    key === 'railStageHosted' ? '호스팅 · 4단계' : '로컬 · 6단계';
+
+  it('http → 호스팅 라벨', () => {
+    expect(computeRailStageLabel('http', t)).toBe('호스팅 · 4단계');
+  });
+
+  it('stdio → 로컬 라벨(예전 recruiter는 여기서 빈 문자열이었다 — 그 회귀를 막는 자리)', () => {
+    expect(computeRailStageLabel('stdio', t)).toBe('로컬 · 6단계');
+  });
+
+  it('transport 미해소(null) → 로컬 라벨로 폴백(connect-step 기존 동작 그대로 보존)', () => {
+    expect(computeRailStageLabel(null, t)).toBe('로컬 · 6단계');
+  });
+});
+
+describe('computeShowVerifyExamplePrompt — story #2407 ②-4 (http에서만 인과적으로 정확)', () => {
+  it('http·미검증 → 노출', () => {
+    expect(computeShowVerifyExamplePrompt('http', false)).toBe(true);
+  });
+
+  it('http·검증완료 → 비노출', () => {
+    expect(computeShowVerifyExamplePrompt('http', true)).toBe(false);
+  });
+
+  it('stdio·미검증 → 비노출(예전 recruiter는 여기서 노출했다 — heartbeat 없는 축이라 부정확한 안내였다)', () => {
+    expect(computeShowVerifyExamplePrompt('stdio', false)).toBe(false);
+  });
+
+  it('transport 미해소(null) → 비노출', () => {
+    expect(computeShowVerifyExamplePrompt(null, false)).toBe(false);
   });
 });
