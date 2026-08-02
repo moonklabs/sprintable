@@ -10,7 +10,11 @@ from ..response import err, ok
 
 
 class ListProjectsInput(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    # story #2412 AC2: 이 파일 둘(ListProjectsInput·SetDefaultProjectInput)은 SprintableInput을
+    # 상속 안 해서(모듈 docstring 참조 — project_id 의미 충돌 회피) base의 extra="forbid" 변경이
+    # 자동으로 안 닿는다 — 여기서 손으로 맞춘다(안 맞추면 115개 중 이 둘만 계속 조용히 먹는
+    # 별도 병인이 된다).
+    model_config = ConfigDict(extra="forbid")
 
 
 async def list_projects(_args: ListProjectsInput) -> list:
@@ -24,7 +28,8 @@ async def list_projects(_args: ListProjectsInput) -> list:
 
 
 class SetDefaultProjectInput(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    # story #2412 AC2 — 위 ListProjectsInput과 동일 사유.
+    model_config = ConfigDict(extra="forbid")
     project_id: str
 
 

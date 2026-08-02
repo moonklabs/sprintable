@@ -38,7 +38,10 @@ class AddGoalInput(SprintableInput):
 class UpdateGoalInput(SprintableInput):
     # ⚠️deprecated 별칭(sprintable_update_epic)도 같은 스키마 재사용 — 구 필드명 epic_id도
     # 계속 받아야 무중단(hierarchy-rename-alias-mechanism-design §1/§3 동형).
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    # story #2412 AC2: extra="ignore"→"forbid" — populate_by_name=True(alias 수용)만 유지 목적으로
+    # override했던 자리라 extra는 base(SprintableInput)와 다시 맞춘다(subclass override는 base
+    # model_config를 병합이 아니라 대체하므로 여기서 안 맞추면 이 클래스만 계속 조용히 먹는다).
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
     goal_id: str = Field(validation_alias=AliasChoices("goal_id", "epic_id"))
     title: str | None = None
     status: GoalStatus | None = None
