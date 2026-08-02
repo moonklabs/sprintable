@@ -77,3 +77,41 @@ describe('MessageContextMenu — story #2265(C-7) PR2 citeAction 확장', () => 
     expect(container.textContent).toContain('복사');
   });
 });
+
+describe('MessageContextMenu — story #2349 사용자 차단', () => {
+  it('onBlock을 안 주면(기존 호출부) 「사용자 차단」 항목이 안 그려진다(회귀 0)', async () => {
+    await act(async () => {
+      root.render(
+        <MessageContextMenu x={0} y={0} isMine={false} onReply={NOOP} onCopy={NOOP} onDelete={NOOP} onClose={NOOP} />,
+      );
+    });
+    expect(container.textContent).not.toContain('사용자 차단');
+  });
+
+  it('onBlock을 주고 isMine=false면 「사용자 차단」이 뜨고 클릭 시 onBlock+onClose가 불린다', async () => {
+    const onBlock = vi.fn();
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(
+        <MessageContextMenu x={0} y={0} isMine={false} onReply={NOOP} onCopy={NOOP} onDelete={NOOP} onClose={onClose} onBlock={onBlock} />,
+      );
+    });
+    expect(container.textContent).toContain('사용자 차단');
+    const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('사용자 차단'));
+    expect(btn).not.toBeUndefined();
+    await act(async () => { btn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onBlock).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // ⛔자기 자신 차단 금지 — isMine=true면 onBlock을 줘도 항목 자체가 안 뜬다.
+  it('onBlock을 줘도 isMine=true면 「사용자 차단」이 안 뜬다(자기 자신 차단 금지)', async () => {
+    const onBlock = vi.fn();
+    await act(async () => {
+      root.render(
+        <MessageContextMenu x={0} y={0} isMine={true} onReply={NOOP} onCopy={NOOP} onDelete={NOOP} onClose={NOOP} onBlock={onBlock} />,
+      );
+    });
+    expect(container.textContent).not.toContain('사용자 차단');
+  });
+});

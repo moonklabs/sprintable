@@ -257,3 +257,93 @@ describe('ChatBubble — story #2265(C-7) 인용 범위 선택 배선(props 생�
     expect(document.body.textContent).toContain('여기부터 인용');
   });
 });
+
+describe('ChatBubble — story #2349 사용자 차단 마스킹', () => {
+  it('is_blocked_sender가 undefined(판단 재료 없음)면 본문이 그대로 보인다(tombstone과 다른 축)', async () => {
+    const msg = { ...baseMessage, content: '일반 텍스트' };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={msg} isMine={false} />));
+    });
+    expect(container.textContent).toContain('일반 텍스트');
+    expect(container.textContent).not.toContain('차단한 사용자의 메시지입니다');
+  });
+
+  it('is_blocked_sender=true면 본문 대신 마스킹 placeholder + "보기"가 뜬다', async () => {
+    const msg = { ...baseMessage, content: '숨겨야 할 내용', is_blocked_sender: true };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={msg} isMine={false} />));
+    });
+    expect(container.textContent).toContain('차단한 사용자의 메시지입니다');
+    expect(container.textContent).toContain('보기');
+    expect(container.textContent).not.toContain('숨겨야 할 내용');
+  });
+
+  it('마스킹 상태에서 "보기"를 누르면 본문이 드러난다(tombstone과 다르다 — 서버는 이미 내려줬다)', async () => {
+    const msg = { ...baseMessage, content: '숨겨야 할 내용', is_blocked_sender: true };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={msg} isMine={false} />));
+    });
+    const revealBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '보기');
+    expect(revealBtn).not.toBeUndefined();
+    await act(async () => { revealBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.textContent).toContain('숨겨야 할 내용');
+    expect(container.textContent).not.toContain('차단한 사용자의 메시지입니다');
+  });
+
+  // ⛔tombstone(삭제)이 차단 마스킹보다 우선 — 이미 지운 메시지는 "차단됐다"로 잘못 안내하지 않는다.
+  it('deleted_at과 is_blocked_sender=true가 동시에 있으면 삭제 placeholder가 이긴다', async () => {
+    const msg = { ...baseMessage, content: '', deleted_at: '2026-08-02T00:00:00.000Z', is_blocked_sender: true };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={msg} isMine={false} />));
+    });
+    expect(container.textContent).toContain('삭제된 메시지입니다');
+    expect(container.textContent).not.toContain('차단한 사용자의 메시지입니다');
+  });
+
+  it('onBlockUser를 안 주면(기존 호출부) 우클릭 메뉴에 「사용자 차단」이 안 뜬다(회귀 0)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={baseMessage} isMine={false} />));
+    });
+    const wrapperDiv = container.querySelector(`#msg-${baseMessage.id}`)!;
+    await act(async () => {
+      wrapperDiv.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 }));
+    });
+    expect(document.body.textContent).not.toContain('사용자 차단');
+  });
+
+  it('onBlockUser를 주면 우클릭 메뉴에 「사용자 차단」이 뜨고 클릭 시 호출된다', async () => {
+    const onBlockUser = vi.fn();
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={baseMessage} isMine={false} onBlockUser={onBlockUser} />));
+    });
+    const wrapperDiv = container.querySelector(`#msg-${baseMessage.id}`)!;
+    await act(async () => {
+      wrapperDiv.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 }));
+    });
+    const btn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('사용자 차단'));
+    expect(btn).not.toBeUndefined();
+    await act(async () => { btn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onBlockUser).toHaveBeenCalledTimes(1);
+  });
+
+  it('자기 메시지(isMine=true)엔 아바타/이름을 눌러도 상대 프로필 팝오버가 안 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, created_by: 'member-1' }} isMine={true} />));
+    });
+    const nameSpan = Array.from(container.querySelectorAll('span')).find((s) => s.textContent === '나');
+    expect(nameSpan).not.toBeUndefined();
+    await act(async () => { nameSpan!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('남의 메시지(isMine=false) 이름을 누르면 상대 프로필 팝오버가 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={baseMessage} isMine={false} />));
+    });
+    const nameSpan = Array.from(container.querySelectorAll('span')).find((s) => s.textContent === baseMessage.sender_name);
+    expect(nameSpan).not.toBeUndefined();
+    await act(async () => { nameSpan!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.body.textContent).toContain(baseMessage.sender_name);
+  });
+});
