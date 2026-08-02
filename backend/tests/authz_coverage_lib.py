@@ -52,6 +52,12 @@ PROJECT_PARAM_RE = re.compile(
 
 PROJECT_GUARD_FUNCTIONS: frozenset[str] = frozenset({
     "has_project_access",
+    # story #2340 실측(2026-08-02, 디디) — 이름·실동작 둘 다 project-scope 가드(project_id를
+    # 받아 그 project의 role을 검사)인데 이 목록에서만 누락돼 있었다(GUARD_FUNCTIONS(identity
+    # 축)엔 있었다 — 두 목록이 서로 다른 걸 보는 것 자체는 설계지만, 이 함수는 어느 쪽에도
+    # 실수로 안 빠져야 했다). project_settings.py:upsert_project_settings가 이걸 직접 호출하는데도
+    # allowlist에 올라 있던 원인이 이것 — 그 allowlist 엔트리는 이 추가와 함께 제거한다.
+    "has_project_role",
     "resolve_member",
     "accessible_project_ids_in_org",
     "get_project_role",
