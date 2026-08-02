@@ -550,7 +550,7 @@
     "rejectedRelationsTitle": "기각한 관계 {n}건",
     "rejectedRelationsTargetGone": "대상이 없습니다",
     "rejectedRelationsRestore": "되살리기",
-    "rejectedRelationsRestored": "다시 후보로 올라올 수 있습니다",
+    "rejectedRelationsRestored": "다음 스토리 저장에서 다시 후보로 오를 수 있습니다",
     "rejectedRelationsRestoreErrorFallback": "되살리지 못했습니다. 다시 시도해 주세요.",
     "backlinksTitle": "이것을 가리키는 것들",
     "backlinksTargetGone": "대상이 없습니다",

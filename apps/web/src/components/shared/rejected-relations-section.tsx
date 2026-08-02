@@ -36,8 +36,18 @@ type LoadState = { kind: 'loading' } | { kind: 'failed' } | { kind: 'ready'; row
  * scope가 없고 «상시 빈 상자»를 만들면 잡음이 된다는 것이 doc의 명시 판정이다).
  *
  * ⛔토스트 금지(㉣) — 되살리기 액션과 그 결과(성공/실패)는 이 목록 행 «그 자리»에 남는다.
- * ⛔되살린 뒤 "다시 후보로 올라올 수 있습니다"까지만 말한다 — "곧 다시 뜹니다"처럼 다음
- * 스캔 시점을 약속하지 않는다(BE가 그 시점을 모른다, DELETE 라우트 docstring 그대로).
+ * ⛔되살린 뒤 "다음 스토리 저장에서 다시 후보로 오를 수 있습니다"까지만 말한다 — "곧 다시
+ * 뜹니다"처럼 시점을 약속하지 않는다.
+ *
+ * PO 지적(2026-08-02) — "다시 후보로 올라올 수 있습니다"는 상태 변화를 «약속»하는 문장이라
+ * 이행처를 코드로 확認했다: `undo_rejection()`은 `rejected_relations` 행만 지운다
+ * (backend/app/services/reference_semantic_candidates.py:609-629) — candidate 행이
+ * «즉시» 돌아오지 않는다. 후보는 `build_candidate_rows()`(:125-167)가 story 저장
+ * (create/update, stories.py의 `_reconcile_story_references_and_candidates`)마다
+ * `_rejected_target_ids()`(:170-183)로 아직 기각된 쌍만 걸러 다시 만든다 — 되살린
+ * 직후엔 그 필터에서 빠지므로 «다음 저장»이 있으면 같은 산문이 다시 후보가 된다. 그래서
+ * 문구를 "다음 스토리 저장에서"로 조건까지 밝힌다 — "다시 후보로 올라올 수 있습니다"만
+ * 쓰면 되살리기 직후 즉시 뜨는 것처럼 읽혀 "됐다는데 아무 일도 안 일어난다"가 된다.
  */
 export function RejectedRelationsSection({ storyId }: { storyId: string }) {
   const t = useTranslations('board');

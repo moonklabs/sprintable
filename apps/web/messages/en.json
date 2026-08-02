@@ -550,7 +550,7 @@
     "rejectedRelationsTitle": "{n} rejected relations",
     "rejectedRelationsTargetGone": "Target no longer exists",
     "rejectedRelationsRestore": "Restore",
-    "rejectedRelationsRestored": "Can resurface as a candidate again",
+    "rejectedRelationsRestored": "Can resurface as a candidate on the next story save",
     "rejectedRelationsRestoreErrorFallback": "Couldn't restore it. Please try again.",
     "backlinksTitle": "Things that point here",
     "backlinksTargetGone": "Target no longer exists",

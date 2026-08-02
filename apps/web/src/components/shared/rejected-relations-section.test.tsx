@@ -118,9 +118,11 @@ describe('RejectedRelationsSection — 되살리기(restore) 왕복', () => {
     await act(async () => { restoreBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    // AC6 — "다시 후보로 올라올 수 있습니다" 수준의 사실 진술이 그 행 자리에 남는다.
-    // 시점을 약속하는 문구("곧 다시 뜹니다")가 아니라는 것도 같이 고정한다.
-    expect(container.textContent).toContain('다시 후보로 올라올 수 있습니다');
+    // AC6 — "다음 스토리 저장에서 다시 후보로 오를 수 있습니다" 수준의 사실 진술이 그
+    // 행 자리에 남는다(PO 지적 2026-08-02 — 되살리기가 candidate를 즉시 되살리지 않고
+    // 다음 story 저장이 있어야 한다는 실제 BE 동작을 문구에 반영). 시점을 약속하는
+    // 문구("곧 다시 뜹니다")가 아니라는 것도 같이 고정한다.
+    expect(container.textContent).toContain('다음 스토리 저장에서 다시 후보로 오를 수 있습니다');
     expect(container.textContent).not.toContain('곧');
     // 되살린 뒤에도 목록/제목은 사라지지 않는다(토스트처럼 없어지지 않는다).
     expect(container.textContent).toContain('되살릴 스토리');
