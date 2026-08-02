@@ -19,6 +19,7 @@
     "verify:no-orphan-resource-routes": "tsx scripts/verify-no-orphan-resource-routes.ts",
     "verify:reserved-first-segments-sync": "tsx scripts/verify-reserved-first-segments-sync.ts",
     "verify:tint-foreground-contrast": "tsx scripts/verify-tint-foreground-contrast.ts",
+    "verify:no-new-tint-color-text": "tsx scripts/verify-no-new-tint-color-text.ts",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report"
