@@ -8,22 +8,15 @@ import { Button } from '@/components/ui/button';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import {
-  VerifyRail, RAIL_ORDER, HTTP_RAIL_ORDER, parseVerificationRail,
-  type DisplayStep, type RailState, type RailStatus, type RawStep,
+  VerifyRail, useVerificationRail,
+  type Transport,
 } from './verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from './onboarding-telemetry';
 
-const RAIL_LABEL_KEY: Record<RailState, string> = {
-  config_copied: 'railConfigCopied',
-  waiting: 'railWaiting',
-  mcp_reachable: 'railMcpReachable',
-  event_delivered: 'railEventDelivered',
-  ack: 'railAck',
-  verified: 'railVerified',
-};
-
-/** E-MCP-OPT S3: SaaS 기본=호스팅(http)·OSS 기본=로컬(stdio) — BE `default_transport_for_edition()` 따름. */
-export type Transport = 'http' | 'stdio';
+// story #2407 — Transport는 이제 verify-rail.tsx가 소유(useVerificationRail이 그 값을 직접
+// 다룸). 이 re-export는 기존 소비자(onboarding-form.tsx 등)의 import 경로를 안 건드리려는
+// 하위호환 자리 — 새 소비자는 verify-rail에서 바로 import한다.
+export type { Transport };
 
 /** connection-artifact content(JSON)의 `mcpServers.sprintable.type` 필드만 읽는다(재조립 아님) —
  * transport 미지정 최초 요청은 BE edition 기본을 반환하므로, 어느 탭을 pre-select할지 이걸로 판별. */
@@ -105,44 +98,18 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
   // transport 미판별 상태(최초 default-resolve 요청)에서의 실패 — 이후엔 위 per-transport 에러로 대체.
   const [initialError, setInitialError] = useState(false);
   const [hostedUnavailable, setHostedUnavailable] = useState(false);
-  const [beSteps, setBeSteps] = useState<RawStep[] | null>(null);
   const [hasCopiedMap, setHasCopiedMap] = useState<Partial<Record<Transport, boolean>>>({});
   const [justCopied, setJustCopied] = useState(false);
-  const [copiedVerifyPrompt, setCopiedVerifyPrompt] = useState(false);
-  const [verifying, setVerifying] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const leftRef = useRef(false);
 
-  // OB-2 verification-status poll (SSE-우선은 OB-2 SSE 포맷 확정 후 follow-up·현재 poll). 404 graceful.
-  // E-MCP-OPT S3: transport별 레일 shape 다름(호스팅=4단계, event/ack 없음) — 쿼리로 분기.
-  //
-  // story #2404 후속(2026-08-02, 라이브 재확認 중 발견) — 이 코드는 `data.steps`를 읽었지만
-  // 백엔드(`backend/app/routers/agents.py::agent_verification_status`)는 그런 필드를 준 적이
-  // 없다 — 실제 필드명은 `rail`이다(`{"data":{"verified":true,"rail":[...]}}`). `steps`는 항상
-  // undefined였으므로 `setBeSteps`가 «단 한 번도» 실호출되지 않았다 — 검증이 실제로 성공해도
-  // 화면 레일은 영원히 초기 pending으로 멈춰 있었다(curl로 백엔드 값 자체는 verified:true를
-  // 직접 확認했는데 화면만 안 바뀌는 것으로 발견 — API 레벨 확認과 실제 렌더 확認은 다르다).
-  // 파싱은 이제 `parseVerificationRail`(verify-rail.tsx) 하나로 모았다 — recruiter-client.tsx
-  // 가 독립적으로 재구현하지 않게(같은 버그가 두 곳에서 동시에 존재했던 이유).
-  const pollStatus = useCallback(async (forTransport: Transport) => {
-    if (!agentId) return;
-    try {
-      const res = await fetch(`/api/agents/${agentId}/verification-status?transport=${forTransport}`);
-      if (!res.ok) return; // 미머지/404 → pending 유지(가짜 에러 안 띄움)
-      const raw = parseVerificationRail(await res.json());
-      if (raw) setBeSteps(raw);
-    } catch {
-      // swallow — graceful degradation
-    }
-  }, [agentId]);
-
-  useEffect(() => {
-    if (!agentId || !apiKey || !transport) return;
-    setBeSteps(null); // transport 전환 시 이전 transport의 레일 상태가 새 레일에 새는 것 방지
-    void pollStatus(transport);
-    const iv = setInterval(() => void pollStatus(transport), 2500);
-    return () => clearInterval(iv);
-  }, [agentId, apiKey, transport, pollStatus]);
+  const hasCopied = transport ? Boolean(hasCopiedMap[transport]) : false;
+  // misconfig 폴백(아래) — edition 기본이 http인데 배포가 없을 때 stdio로 명시 재요청해야
+  // 한다. useCallback으로 메모된 fetchArtifact가 자기 자신을 몸체 안에서 직접 호출하면
+  // eslint-plugin-react-hooks(immutability)가 "선언 前 접근"으로 잡는다(TDZ 우려 — 이 값이
+  // 시간에 따라 갱신될 때 몸체 안 참조가 갱신 前 클로저를 볼 수 있다는 경고) — effect로
+  // 한 단계 분리해 자기참조 자체를 없앤다.
+  const [needsStdioFallback, setNeedsStdioFallback] = useState(false);
 
   // OB-1 connection-artifact = 아티팩트 SSOT(구조+backend-direct URL). OB-1 라이브라 정상응답 디폴트.
   // 실패 시 클라빌드로 메우지 않고(§2 CF env 노출 금지·AC3) pending+재시도 유지.
@@ -162,9 +129,9 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
         }
         if (!reqTransport && res.status === 400) {
           // edition 기본이 http로 잡혔는데 이 환경엔 배포가 없는 misconfig — stdio는 항상 가능하다는
-          // BE invariant를 믿고 명시 폴백(무한 pending 방치 금지).
+          // BE invariant를 믿고 명시 폴백(무한 pending 방치 금지). 자기참조 없이 아래 effect가 잇는다.
           setHostedUnavailable(true);
-          void fetchArtifact('stdio');
+          setNeedsStdioFallback(true);
           return;
         }
         if (reqTransport) setArtifactErrors((p) => ({ ...p, [reqTransport]: true }));
@@ -189,31 +156,48 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
   }, [agentId]);
 
   // 최초 마운트 — transport 미지정 요청으로 BE edition 기본 판별.
+  // ⚠️story #2407 정리 中 처음 걸린 lint(react-hooks/set-state-in-effect) — fetchArtifact가
+  // 비동기로 setState하므로 정적분석이 "effect 안 setState"로 잡는다. 이 파일 다른 자리(§2
+  // 아티팩트 fetch 전체)와 동형인 기존 패턴(pristine origin/develop에도 있던 자리 — #2407가
+  // 만든 게 아니라 리팩터로 컴파일러 분석이 더 깊이 들어가면서 드러난 것)이라 이 스토리
+  // 범위에서 effect 아키텍처를 통째로 바꾸지 않는다 — 이 코드베이스 기존 관례(use-swipe-drawer.ts
+  // 등, PO 지적 2026-08-02 기준 이 PR로 여덟 번째)를 따라 disable로 명시한다.
+  // ⛔이 disable은 면제가 아니라 부채다 — «걷을 조건»: 이 세 effect(§아티팩트 fetch) 구조를
+  // 다시 손대는 판이 오면(예: fetchArtifact를 재설계·SWR류로 옮기는 스토리) 이 disable 세 개도
+  // 함께 재평가한다. 조용히 영구화하지 않는다.
   useEffect(() => {
     if (!agentId || !apiKey) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void fetchArtifact();
   }, [agentId, apiKey, fetchArtifact]);
+
+  useEffect(() => {
+    if (!needsStdioFallback) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setNeedsStdioFallback(false);
+    void fetchArtifact('stdio');
+  }, [needsStdioFallback, fetchArtifact]);
 
   // 탭 전환 — 아직 fetch 안 한 transport 만 재요청(§5 "탭 전환마다 재요청"·이미 캐시된 건 재요청 생략).
   useEffect(() => {
     if (!agentId || !apiKey || !transport) return;
     if (artifacts[transport]) return;
     if (transport === 'http' && hostedUnavailable) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void fetchArtifact(transport);
   }, [agentId, apiKey, transport, artifacts, hostedUnavailable, fetchArtifact]);
 
-  const railOrder = transport === 'http' ? HTTP_RAIL_ORDER : RAIL_ORDER;
-  const hasCopied = transport ? Boolean(hasCopiedMap[transport]) : false;
-  const displaySteps: DisplayStep[] = railOrder.map((state) => {
-    const be = beSteps?.find((s) => s.state === state);
-    let status: RailStatus = be?.status ?? 'pending';
-    // whichever-first: Copy 클릭 OR 첫 OB-2 신호 — config_copied done
-    if (state === 'config_copied' && hasCopied && status === 'pending') status = 'done';
-    // 복사했고 BE 신호 전이면 다음 단계(연결 대기) active로 표시
-    if (state === 'waiting' && hasCopied && !beSteps && status === 'pending') status = 'active';
-    return { state, status, label: t(RAIL_LABEL_KEY[state]), reason: be?.reason };
+  // story #2407 — 상태파생·폴링·핸들러는 verify-rail.tsx의 useVerificationRail로 이동(원래
+  // recruiter-client.tsx와 각자 재구현하던 자리 — #2404의 steps/rail 필드명 버그가 두 곳에
+  // 동시에 있었던 이유). enabled=Boolean(apiKey)로 기존 게이팅(agentId·apiKey·transport 전부
+  // 준비된 뒤에만 폴링 시작) 그대로 보존.
+  const rail = useVerificationRail({
+    agentId,
+    transport,
+    enabled: Boolean(apiKey),
+    configCopiedDone: hasCopied,
   });
-  const verified = displaySteps.find((s) => s.state === 'verified')?.status === 'done';
+  const { displaySteps, verified, verifying } = rail;
 
   // unload(탭닫기/이탈) best-effort — 미검증 시 abandoned_explicit 보조 신호(SoT는 BE 파생).
   useEffect(() => {
@@ -242,30 +226,13 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
 
   // story #2404 — "설정만 넣으면 자동으로 된다"는 오해가 무한 대기의 실원인이었다(검증은 실제
   // tool 호출로만 완료됨, AC5 PO 확定). 지금 할 일을 복사 가능한 한 줄로 그 자리에 쥐여 준다.
-  const handleCopyVerifyPrompt = async () => {
-    try {
-      await navigator.clipboard.writeText(t('verifyExamplePrompt'));
-      setCopiedVerifyPrompt(true);
-      setTimeout(() => setCopiedVerifyPrompt(false), 2000);
-    } catch {
-      // ignore clipboard failure
-    }
-  };
+  // #2407 후속: 복사 로직 자체는 useVerificationRail로 이동, 여기선 그대로 재노출.
+  const handleCopyVerifyPrompt = rail.handleCopyVerifyPrompt;
 
   const handleVerify = async () => {
     if (!agentId || !transport) return;
-    setVerifying(true);
     emitOnboardingEvent('verify_started', { agent_id: agentId });
-    try {
-      await fetch(`/api/agents/${agentId}/verify-connection?transport=${transport}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{}',
-      }).catch(() => {});
-      await pollStatus(transport);
-    } finally {
-      setVerifying(false);
-    }
+    await rail.handleVerify();
   };
 
   const handleDashboard = () => {
@@ -408,7 +375,7 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
           <p className="text-sm font-medium">
             {t('verifyTitle')}{' '}
             <span className={cn('text-xs font-normal', transport === 'http' ? 'text-info' : 'text-muted-foreground')}>
-              {transport === 'http' ? t('railStageHosted') : t('railStageLocal')}
+              {rail.railStageLabel}
             </span>
           </p>
           <Button
@@ -430,13 +397,13 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
             {t('hostedVerifyNote')}
           </p>
         )}
-        {transport === 'http' && !verified && (
+        {rail.showVerifyExamplePrompt && (
           <div className="flex items-center justify-between gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2 text-xs">
             <span className="min-w-0 truncate text-info">
               {t('verifyExampleLabel')} <span className="font-mono text-foreground">&ldquo;{t('verifyExamplePrompt')}&rdquo;</span>
             </span>
             <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0">
-              {copiedVerifyPrompt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copyConfig')}</>}
+              {rail.copiedVerifyPrompt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copyConfig')}</>}
             </Button>
           </div>
         )}

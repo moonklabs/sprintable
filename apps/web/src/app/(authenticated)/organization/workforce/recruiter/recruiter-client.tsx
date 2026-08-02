@@ -14,10 +14,7 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { Skeleton } from '@/components/ui/skeleton';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { cn } from '@/lib/utils';
-import {
-  VerifyRail, RAIL_ORDER, HTTP_RAIL_ORDER, parseVerificationRail,
-  type DisplayStep, type RailState, type RailStatus, type RawStep,
-} from '@/app/onboarding/verify-rail';
+import { VerifyRail, useVerificationRail } from '@/app/onboarding/verify-rail';
 import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle, RuntimeCapabilityItem } from '@/services/recruit';
 import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FILENAME, resolveRuntimeWakeInfo } from '@/services/recruit';
 
@@ -32,15 +29,6 @@ const CATEGORY_ICON: Record<string, typeof Palette> = {
   backend: Cog,
   qa: Search,
   pm: ClipboardList,
-};
-
-const RAIL_LABEL_KEY: Record<RailState, string> = {
-  config_copied: 'railConfigCopied',
-  waiting: 'railWaiting',
-  mcp_reachable: 'railMcpReachable',
-  event_delivered: 'railEventDelivered',
-  ack: 'railAck',
-  verified: 'railVerified',
 };
 
 /**
@@ -106,6 +94,21 @@ export function resolveKitFilename(
   _runtimeCapabilities: RuntimeCapabilityItem[] | null,
 ): string {
   return KIT_FILENAME;
+}
+
+/**
+ * story #2792 design:changes(카디르 QA, 2026-08-02) — STEP5 상단 안내문이 mcp_config 유무로만
+ * 갈리고 transport는 안 봤다. `verifyGuideMcp`("도구를 호출해야 검증이 완료된다")는 http
+ * heartbeat 축에만 인과적으로 맞는 문장(agent_verify.py — stdio는 SSE 연결만으로 자동 ack)이라
+ * stdio에 그대로 쓰면 없는 요구를 있다고 말하는 것이다. `showVerifyExamplePrompt`(verify-rail.tsx)
+ * 와 같은 근거·같은 축.
+ */
+export function resolveVerifyGuideKey(
+  hasMcpConfig: boolean,
+  transport: 'http' | 'stdio' | null,
+): 'verifyGuideConnector' | 'verifyGuideMcp' | 'verifyGuideMcpStdio' {
+  if (!hasMcpConfig) return 'verifyGuideConnector';
+  return transport === 'http' ? 'verifyGuideMcp' : 'verifyGuideMcpStdio';
 }
 
 export interface RoleGroup {
@@ -220,8 +223,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const tSettings = useTranslations('settings');
   // 오르테가 라이브 스모크 적출(2026-07-06): railXxx/railStageHosted 키는 connect-step이 원래
   // 정의한 'onboarding' 네임스페이스에 있는데 STEP4가 이걸 'agents'(tAgents)로 조회해 전부
-  // MISSING_MESSAGE였음 — S4 merge(#1900) 때부터의 잠재 버그. 발견 즉시 여기서 수정.
-  const tOnboarding = useTranslations('onboarding');
+  // MISSING_MESSAGE였음 — S4 merge(#1900) 때부터의 잠재 버그. story #2407로 useVerificationRail
+  // hook이 이 네임스페이스 조회를 내부로 흡수해, 이 파일에서 직접 useTranslations('onboarding')를
+  // 들 필요가 없어졌다(hook 쪽 t는 verify-rail.tsx 소유).
   const [step, setStep] = useState<Step>(1);
 
   // STEP 1 — role catalog (+ equip-skip: "역할 없이(키만)")
@@ -427,7 +431,6 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const [recruitResult, setRecruitResult] = useState<RecruitResponse | null>(null);
   const [copiedGuide, setCopiedGuide] = useState(false);
   const [copiedMcp, setCopiedMcp] = useState(false);
-  const [copiedVerifyPrompt, setCopiedVerifyPrompt] = useState(false);
   const [showRotateConfirm, setShowRotateConfirm] = useState(false);
   const [rotating, setRotating] = useState(false);
   const [rotateError, setRotateError] = useState<string | null>(null);
@@ -530,74 +533,25 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     }
   };
 
-  // STEP 4 — verify rail (connect-step 재사용 패턴)
-  const [beSteps, setBeSteps] = useState<RawStep[] | null>(null);
-  const [verifying, setVerifying] = useState(false);
-  const railOrder = recruitResult?.default_transport === 'http' ? HTTP_RAIL_ORDER : RAIL_ORDER;
-
-  // story #2404 후속(2026-08-02, 라이브 재확認 중 발견) — 이 코드는 `data.steps`를 읽었지만
-  // 백엔드(`backend/app/routers/agents.py::agent_verification_status`)의 실제 필드명은
-  // `rail`이다. `steps`는 항상 undefined였으므로 `setBeSteps`가 «단 한 번도» 실호출되지
-  // 않았다 — 검증이 실제로 성공해도 화면 레일은 영원히 초기 pending으로 멈춰 있었다.
-  // 파싱은 `parseVerificationRail`(verify-rail.tsx) 하나로 모았다 — 이 파일과
-  // onboarding/connect-step.tsx가 독립적으로 재구현하지 않게(같은 필드명 버그가 두 곳에서
-  // 동시에 존재했던 이유, story #2415 참조).
-  const pollStatus = useCallback(async () => {
-    if (!recruitResult) return;
-    try {
-      const res = await fetch(`/api/agents/${recruitResult.agent_id}/verification-status?transport=${recruitResult.default_transport}`);
-      if (!res.ok) return;
-      const raw = parseVerificationRail(await res.json());
-      if (raw) setBeSteps(raw);
-    } catch {
-      // swallow — graceful degradation
-    }
-  }, [recruitResult]);
-
-  useEffect(() => {
-    if (step !== 5 || !recruitResult) return;
-    void pollStatus();
-    const iv = setInterval(() => void pollStatus(), 2500);
-    return () => clearInterval(iv);
-  }, [step, recruitResult, pollStatus]);
-
-  const displaySteps: DisplayStep[] = railOrder.map((state) => {
-    const be = beSteps?.find((s) => s.state === state);
-    let status: RailStatus = be?.status ?? 'pending';
-    if (state === 'config_copied' && status === 'pending') status = 'done'; // 번들 다운로드=STEP3 완주로 이미 완료
-    // story 5ea9bafe §5.5: 크로스-플로우 SSOT 수렴 — recruiter만 로컬 오버라이드하던 라벨을 제거하고
-    // onboarding-connect와 동일한 공용 rail 라벨을 쓴다(공용 키 자체를 kit-model에 맞게 개정: "구성 적용").
-    const label = tOnboarding(RAIL_LABEL_KEY[state]);
-    return { state, status, label, reason: be?.reason };
+  // STEP 4/5 — verify rail. story #2407: 상태파생·폴링·핸들러는 verify-rail.tsx의
+  // useVerificationRail로 이동(connect-step.tsx와 각자 재구현하던 자리 — #2404의 steps/rail
+  // 필드명 버그가 두 곳에 동시에 있었던 이유). configCopiedDone=true 항상 — 번들 다운로드=STEP3
+  // 완주로 이미 완료(기존 판단 그대로, 이유는 hook 쪽 주석 참고).
+  //
+  // ⚠️②-3/②-4 두 지점은 이 통합으로 recruiter 쪽 동작이 바뀐다(#2407 조사에서 무근거
+  // 비대칭으로 판정 — connect-step의 더 정확한 쪽으로 통일):
+  //   railStageLabel — 예전엔 http만 라벨 표시·stdio는 빈 문자열. 이제 stdio도 "로컬 · 6단계" 표시.
+  //   showVerifyExamplePrompt — 예전엔 transport 무관 항상 노출. 이제 connect-step과 동일하게
+  //     http에서만(heartbeat=tool호출이 verify 메커니즘 자체인 쪽에만 인과적으로 맞는 안내라서).
+  const rail = useVerificationRail({
+    agentId: recruitResult?.agent_id ?? null,
+    transport: recruitResult?.default_transport ?? null,
+    enabled: step === 5 && Boolean(recruitResult),
+    configCopiedDone: true,
   });
-  const verified = displaySteps.find((s) => s.state === 'verified')?.status === 'done';
-
-  const handleVerify = async () => {
-    if (!recruitResult) return;
-    setVerifying(true);
-    try {
-      await fetch(`/api/agents/${recruitResult.agent_id}/verify-connection?transport=${recruitResult.default_transport}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{}',
-      }).catch(() => {});
-      await pollStatus();
-    } finally {
-      setVerifying(false);
-    }
-  };
-
-  // story #2404 — 검증이 "설정만 넣으면 자동으로 된다"는 오해로 무한 대기하던 것의 처방(AC5, PO
-  // 확정): 지금 할 일을 그 자리에서 손에 쥐여 준다 — 복사 가능한 예시 프롬프트 하나.
-  const handleCopyVerifyPrompt = async () => {
-    try {
-      await navigator.clipboard.writeText(t('verifyExamplePrompt'));
-      setCopiedVerifyPrompt(true);
-      setTimeout(() => setCopiedVerifyPrompt(false), 2000);
-    } catch {
-      // ignore clipboard failure
-    }
-  };
+  const { displaySteps, verified, verifying } = rail;
+  const handleVerify = rail.handleVerify;
+  const handleCopyVerifyPrompt = rail.handleCopyVerifyPrompt;
 
   const mcpConfigText = useMemo(
     () => (recruitResult ? JSON.stringify(recruitResult.mcp_config, null, 2) : ''),
@@ -1205,23 +1159,29 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
           {/* ── STEP 5 : 검증 + 배치(G5) ── */}
           {step === 5 && recruitResult && (
             <div className="space-y-4">
+              {/* story #2792 design:changes(카디르 QA, 2026-08-02) — ②를 「stdio에서 예시프롬프트
+                  게이팅」만 고치고 이 문구는 안 고쳐서 절반짜리였다. showVerifyExamplePrompt와
+                  같은 근거(agent_verify.py — http만 heartbeat=tool호출이 verify 메커니즘 자체,
+                  stdio는 세션 연결만으로 SSE ack가 자동 진행)를 이 안내에도 적용한다 — stdio는
+                  "tool을 호출해야 완료된다"가 아니라 "연결되면 자동 완료된다"가 맞는 문장이다. */}
               <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                {recruitResult.mcp_config
-                  ? t('verifyGuideMcp', { runtime: currentRuntimeDisplayName })
-                  : t('verifyGuideConnector')}
+                {t(
+                  resolveVerifyGuideKey(Boolean(recruitResult.mcp_config), recruitResult.default_transport),
+                  { runtime: currentRuntimeDisplayName },
+                )}
               </p>
 
               {/* story #2404(AC5, PO 확定) — "설정만 넣으면 자동으로 된다"는 오해가 무한 대기의
                   실원인이었다(검증은 실제 tool 호출로만 완료됨). 대기 문구를 지우고 "지금 할 일"을
                   복사 가능한 한 줄로 그 자리에 쥐여 준다. */}
-              {!verified && (
+              {rail.showVerifyExamplePrompt && (
                 <div className="flex items-center justify-between gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2 text-xs">
                   <span className="min-w-0 truncate text-info">
                     {t('verifyExampleLabel')} <span className="font-mono text-foreground">&ldquo;{t('verifyExamplePrompt')}&rdquo;</span>
                   </span>
                   <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0">
-                    {copiedVerifyPrompt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
+                    {rail.copiedVerifyPrompt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
                   </Button>
                 </div>
               )}
@@ -1230,7 +1190,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 <p className="text-sm font-medium">
                   {t('verifyTitle')}{' '}
                   <span className={cn('text-xs font-normal', recruitResult.default_transport === 'http' ? 'text-info' : 'text-muted-foreground')}>
-                    {recruitResult.default_transport === 'http' ? tOnboarding('railStageHosted') : ''}
+                    {rail.railStageLabel}
                   </span>
                 </p>
                 <Button variant="ghost" size="sm" onClick={() => void handleVerify()} disabled={verifying}>

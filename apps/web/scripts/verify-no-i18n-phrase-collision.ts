@@ -208,6 +208,12 @@ export function findSubstringCollisions(
 // «가드가 스스로 안 겹친다는 걸 아는» 상태로 옮겨졌다 — EXEMPT_PAIRS는 이제 빈 목록이 맞고,
 // 앞으로 이름·런타임류 보간이 다시 오탐으로 걸리면 그건 NON_NUMBER_PLACEHOLDER_NAMES에
 // 새 이름을 더할 자리이지 여기 되돌아올 자리가 아니다.
+//
+// story #2792(2026-08-02) — `recruiter.verifyGuideMcpStdio`(verifyGuideMcp의 stdio 전용
+// 짝)도 같은 `{runtime}` 보간을 쓴다. rebase 前(#2410/#2790 이전 기준 worktree)에는 이
+// denylist가 없어 신규 짝 4개를 여기 추가했었으나, rebase 뒤 재스캔(신규 0건·exempt 0건)으로
+// «필요 없음»이 실측 확認돼 다시 뺐다 — NON_NUMBER_PLACEHOLDER_NAMES의 `runtime`이 이미
+// 덮는다(PO 지적: rebase 안 하면 #2790이 오늘 한 일이 부분적으로 되돌아간다).
 export const EXEMPT_PAIRS = new Set<string>([]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

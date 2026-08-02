@@ -3311,6 +3311,7 @@
     "rotating": "Rotating…",
     "rotateFailed": "Rotate failed. Please try again.",
     "verifyGuideMcp": "Copy the .mcp.json shown below into {runtime}'s MCP settings as-is (don't retype it by hand — a dropped line is a common cause of silent failures), then open {runtime} and make it call any Sprintable tool — adding the config alone does not connect it, that first real tool call is what completes verification.",
+    "verifyGuideMcpStdio": "Copy the .mcp.json shown below into {runtime}'s MCP settings as-is (don't retype it by hand — a dropped line is a common cause of silent failures), then open {runtime} and connect — verification completes automatically once the connection is live.",
     "verifyGuideConnector": "Finish the connector setup, then have it make one real Sprintable tool call — finishing setup alone does not connect it, that first real tool call is what completes verification.",
     "verifyExampleLabel": "Try telling your agent:",
     "verifyExamplePrompt": "Show me my story list",
