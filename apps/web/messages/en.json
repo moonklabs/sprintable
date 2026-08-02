@@ -1489,7 +1489,7 @@
     "stageCollect": "Collect",
     "stageAction": "Action",
     "stageClosed": "Closed",
-    "staleBadge": "Stuck {days}d",
+    "staleBadge": "Same stage {days}d",
     "previousPhase": "Previous stage",
     "stageForwardConfirm": "Move to {stage}?",
     "stageBackConfirm": "Go back to {stage}? Your data is preserved.",

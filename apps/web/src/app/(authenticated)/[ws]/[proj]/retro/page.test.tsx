@@ -99,19 +99,19 @@ describe('RetroPage — 오래 멈춘 phase 배지 렌더(story #2413)', () => {
   it('action phase + 과거 updated_at(2020, 항상 stale) 회고는 목록에 경고 배지를 보인다', async () => {
     stubFetch([{ id: 'r1', title: '회고제목', phase: 'action', created_at: '2020-01-01T00:00:00Z', updated_at: '2020-01-02T00:00:00Z' }]);
     await mount();
-    expect(container.innerHTML).toContain('멈춤');
+    expect(container.innerHTML).toContain('같은 단계');
   });
 
   it('음성대조 — 방금 갱신된 회고는 경고 배지가 없다', async () => {
     const justNow = new Date().toISOString();
     stubFetch([{ id: 'r1', title: '진행중 회고', phase: 'vote', created_at: justNow, updated_at: justNow }]);
     await mount();
-    expect(container.innerHTML).not.toContain('멈춤');
+    expect(container.innerHTML).not.toContain('같은 단계');
   });
 
   it('음성대조 — closed 회고는 updated_at이 과거여도 경고 배지가 없다', async () => {
     stubFetch([{ id: 'r1', title: '끝난 회고', phase: 'closed', created_at: '2020-01-01T00:00:00Z', updated_at: '2020-01-02T00:00:00Z' }]);
     await mount();
-    expect(container.innerHTML).not.toContain('멈춤');
+    expect(container.innerHTML).not.toContain('같은 단계');
   });
 });

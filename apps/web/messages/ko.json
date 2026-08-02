@@ -1489,7 +1489,7 @@
     "stageCollect": "수집",
     "stageAction": "액션",
     "stageClosed": "완료",
-    "staleBadge": "{days}일째 멈춤",
+    "staleBadge": "{days}일째 같은 단계",
     "previousPhase": "이전 단계",
     "stageForwardConfirm": "{stage} 단계로 진행할지?",
     "stageBackConfirm": "{stage} 단계로 되돌아갈지? 데이터는 보존됩니다.",
