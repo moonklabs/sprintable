@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getInternalDogfoodContext } from '@/lib/internal-dogfood-server';
 import { createInternalDogfoodStoryInSprintable } from '@/services/internal-dogfood-sprintable';
+import { resolveAppUrl } from '@/services/app-url';
 
-function redirectToInternalDogfood(request: Request, params: Record<string, string>) {
-  const url = new URL('/internal-dogfood', request.url);
+// story #1933 — request.url을 base로 쓰면 Cloud Run 내부 주소가 샌다. resolveAppUrl(null)로
+// 공개 주소를 강제한다(request는 더 이상 필요 없다).
+function redirectToInternalDogfood(params: Record<string, string>) {
+  const url = new URL('/internal-dogfood', resolveAppUrl(null));
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
   return url;
 }
@@ -20,7 +23,7 @@ export async function POST(request: Request) {
   const priority = String(formData.get('priority') ?? '').trim() || 'medium';
 
   if (!title) {
-    return NextResponse.redirect(redirectToInternalDogfood(request, { error: 'story_title_required' }));
+    return NextResponse.redirect(redirectToInternalDogfood({ error: 'story_title_required' }));
   }
 
   const story = await createInternalDogfoodStoryInSprintable(context.db, context.actor, {
@@ -31,5 +34,5 @@ export async function POST(request: Request) {
     priority,
   });
 
-  return NextResponse.redirect(redirectToInternalDogfood(request, { created_story_id: String((story as { id: string }).id) }));
+  return NextResponse.redirect(redirectToInternalDogfood({ created_story_id: String((story as { id: string }).id) }));
 }
