@@ -108,3 +108,18 @@ def test_sprintable_input_extra_forbid_defense_in_depth():
 
     with pytest.raises(ValidationError):
         StandupHistoryInput(limit=5, totally_unknown_field=1)
+
+
+def test_days_ge_1_boundary_matches_backend():
+    """올리베이라군 QA 요청 — 배포 뒤 볼 것 ②(days 경계). MCP 쪽에 ge=1 없으면 days=0/음수가
+    MCP는 조용히 통과하고 BE(`Query(..., ge=1)`)에서만 422로 막혀 raw HTTP 에러 문자열이
+    호출자에게 그대로 샌다 — MCP 스키마 경계를 BE와 맞춰서 막는다."""
+    from sprintable_mcp.tools.standup import StandupHistoryInput
+    from pydantic import ValidationError
+
+    for bad in (0, -1, -100):
+        with pytest.raises(ValidationError):
+            StandupHistoryInput(limit=5, days=bad)
+
+    assert StandupHistoryInput(limit=5, days=1).days == 1
+    assert StandupHistoryInput(limit=5, days=365).days == 365  # 상한 없음(BE도 무상한 — 대칭)
