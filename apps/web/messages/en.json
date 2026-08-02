@@ -480,6 +480,10 @@
     "portUndoSignatureUnknown": "No record of when this was made",
     "portUndoKeep": "Keep it",
     "portUndoDelete": "Delete",
+    "portRejectTitle": "A relation the machine found",
+    "portRejectDescription": "Rejecting keeps this relation from resurfacing on future scans. You can restore it.",
+    "portRejectConfirm": "Reject",
+    "portRejectErrorFallback": "Couldn't reject it. Please try again.",
     "flowMapPastCount": "{n} done",
     "flowMapPastBundle": "bundled",
     "flowMapPastInternalCount": "{n} linked inside",
@@ -543,6 +547,11 @@
     "canvasResizeReset": "Reset to default"
   },
   "board": {
+    "rejectedRelationsTitle": "{n} rejected relations",
+    "rejectedRelationsTargetGone": "Target no longer exists",
+    "rejectedRelationsRestore": "Restore",
+    "rejectedRelationsRestored": "Can resurface as a candidate again",
+    "rejectedRelationsRestoreErrorFallback": "Couldn't restore it. Please try again.",
     "backlinksTitle": "Things that point here",
     "backlinksTargetGone": "Target no longer exists",
     "backlinksEmptyFallback": "0 references observed",

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
-import { FlowMapCanvas, type CreateLinkResult, type DeleteLinkResult } from './flow-map-canvas';
+import { FlowMapCanvas, type CreateLinkResult, type DeleteLinkResult, type RejectLinkResult } from './flow-map-canvas';
 import type { FlowMapLane, FlowMapNode, FlowMapEdge } from './derive-flow-map';
 import koMessages from '../../../messages/ko.json';
 
@@ -73,9 +73,10 @@ function dispatchPointer(el: Element | Document | Window, type: string, opts: { 
   el.dispatchEvent(ev);
 }
 
-async function renderCanvas(lane: FlowMapLane, overrides: { onCreateLink?: (p: { apiSourceId: string; targetId: string; relationKind: string | null }) => Promise<CreateLinkResult>; onDeleteLink?: (id: string, anchor: string) => Promise<DeleteLinkResult>; selectedNodeId?: string | null } = {}) {
+async function renderCanvas(lane: FlowMapLane, overrides: { onCreateLink?: (p: { apiSourceId: string; targetId: string; relationKind: string | null }) => Promise<CreateLinkResult>; onDeleteLink?: (id: string, anchor: string) => Promise<DeleteLinkResult>; onRejectLink?: (id: string, anchor: string) => Promise<RejectLinkResult>; selectedNodeId?: string | null } = {}) {
   const onCreateLink = overrides.onCreateLink ?? (async () => ({ ok: true }) as CreateLinkResult);
   const onDeleteLink = overrides.onDeleteLink ?? (async () => ({ ok: true }) as DeleteLinkResult);
+  const onRejectLink = overrides.onRejectLink ?? (async () => ({ ok: true }) as RejectLinkResult);
   await act(async () => {
     root.render(wrap(
       <FlowMapCanvas
@@ -85,12 +86,13 @@ async function renderCanvas(lane: FlowMapLane, overrides: { onCreateLink?: (p: {
         loadingPastBundleEpicIds={new Set()}
         onCreateLink={onCreateLink}
         onDeleteLink={onDeleteLink}
+        onRejectLink={onRejectLink}
         memberMap={{ 'member-9': { name: '미르코' }, 'member-OTHER': { name: '디디' } }}
         selectedNodeId={overrides.selectedNodeId ?? null}
       />,
     ));
   });
-  return { onCreateLink, onDeleteLink };
+  return { onCreateLink, onDeleteLink, onRejectLink };
 }
 
 function getPort(nodeId: string): HTMLButtonElement {
@@ -514,6 +516,81 @@ describe('FlowMapCanvas — 되돌리기 (AC7·AC8, 그 선 자체가 진입점)
 
     expect(document.body.textContent).toContain('Only a declared reference can be removed this way');
     expect(document.body.querySelector('[data-slot="dialog-title"]')).not.toBeNull();
+  });
+});
+
+// story #2357 — 제안(confirmed:false) 간선을 클릭하면 지우기(DELETE, declared 전용이라
+// BE가 400을 내는 경로)가 아니라 기각(reject) 다이얼로그가 떠야 한다. 오늘까지는 이 분기가
+// 없어 제안 간선을 클릭해도 "지우기"만 뜨고 눌러도 항상 실패했다(그 자체가 이 스토리의 근거).
+describe('FlowMapCanvas — 기각(reject) 다이얼로그 (story #2357, confirmed:false 간선)', () => {
+  it('clicking an unconfirmed (estimated) edge opens the reject dialog, not the delete one', async () => {
+    const lane = makeLane({
+      nowNodes: [makeNode({ id: 'n1' })],
+      queueNodesByDepth: new Map([[0, [makeNode({ id: 'u1', kind: 'queue' })]]]),
+      edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1', confirmed: false, candidateId: 'cand-est' })],
+    });
+    await renderCanvas(lane);
+    const line = container.querySelector('line[data-edge-candidate-id="cand-est"]')!;
+    await act(async () => { line.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(document.body.querySelector('[data-slot="dialog-title"]')?.textContent).toBe('기계가 찾아낸 관계입니다');
+    // 지우기 다이얼로그의 문구(작성자 서명)는 안 뜬다 — 서로 다른 다이얼로그다.
+    expect(document.body.textContent).not.toContain('만들었습니다');
+  });
+
+  it('clicking an unconfirmed edge and confirming [기각] calls onRejectLink (not onDeleteLink) with candidateId and anchor story id', async () => {
+    const lane = makeLane({
+      nowNodes: [makeNode({ id: 'n1' })],
+      queueNodesByDepth: new Map([[0, [makeNode({ id: 'u1', kind: 'queue' })]]]),
+      edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1', confirmed: false, candidateId: 'cand-est' })],
+    });
+    const rejectLink = vi.fn(async () => ({ ok: true }) as RejectLinkResult);
+    const deleteLink = vi.fn(async () => ({ ok: true }) as DeleteLinkResult);
+    await renderCanvas(lane, { onRejectLink: rejectLink, onDeleteLink: deleteLink });
+
+    const line = container.querySelector('line[data-edge-candidate-id="cand-est"]')!;
+    await act(async () => { line.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const rejectBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '기각')!;
+    await act(async () => { rejectBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(rejectLink).toHaveBeenCalledWith('cand-est', 'n1');
+    expect(deleteLink).not.toHaveBeenCalled();
+    expect(document.body.querySelector('[data-slot="dialog-title"]')).toBeNull();
+  });
+
+  it('on reject failure, shows the server error and keeps the dialog open', async () => {
+    const lane = makeLane({
+      nowNodes: [makeNode({ id: 'n1' })],
+      queueNodesByDepth: new Map([[0, [makeNode({ id: 'u1', kind: 'queue' })]]]),
+      edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1', confirmed: false, candidateId: 'cand-est' })],
+    });
+    const rejectLink = vi.fn(async () => ({ ok: false, error: 'Reference candidate not found' }) as RejectLinkResult);
+    await renderCanvas(lane, { onRejectLink: rejectLink });
+
+    const line = container.querySelector('line[data-edge-candidate-id="cand-est"]')!;
+    await act(async () => { line.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const rejectBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '기각')!;
+    await act(async () => { rejectBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(document.body.textContent).toContain('Reference candidate not found');
+    expect(document.body.querySelector('[data-slot="dialog-title"]')).not.toBeNull();
+  });
+
+  // 양성대조(회귀 방지) — confirmed:true 간선은 지금도 지우기 다이얼로그로 간다(분기를
+  // 잘못 뒤집으면 이 테스트가 잡는다).
+  it('a CONFIRMED edge still opens the delete dialog, not reject', async () => {
+    const lane = makeLane({
+      nowNodes: [makeNode({ id: 'n1' })],
+      queueNodesByDepth: new Map([[0, [makeNode({ id: 'u1', kind: 'queue' })]]]),
+      edges: [makeEdge({ fromNodeId: 'n1', toNodeId: 'u1', confirmed: true, candidateId: 'cand-declared' })],
+    });
+    await renderCanvas(lane);
+    const line = container.querySelector('line[data-edge-candidate-id="cand-declared"]')!;
+    await act(async () => { line.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(document.body.querySelector('[data-slot="dialog-title"]')?.textContent).not.toBe('기계가 찾아낸 관계입니다');
+    expect(Array.from(document.body.querySelectorAll('button')).some((b) => b.textContent === '지우기')).toBe(true);
+    expect(Array.from(document.body.querySelectorAll('button')).some((b) => b.textContent === '기각')).toBe(false);
   });
 });
 

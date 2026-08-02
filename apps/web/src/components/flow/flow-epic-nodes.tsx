@@ -7,7 +7,7 @@ import {
   deriveFlowMapLane, parseDependencyGraphEdges, parseReferenceCandidateEdges,
   type FlowMapEdge, type FlowMapLane, type RawDependencyEdge, type RawReferenceCandidate,
 } from './derive-flow-map';
-import { FlowMapCanvas, type CreateLinkResult, type DeleteLinkResult } from './flow-map-canvas';
+import { FlowMapCanvas, type CreateLinkResult, type DeleteLinkResult, type RejectLinkResult } from './flow-map-canvas';
 import { declareResponseToEdge } from './flow-port-linking';
 import { parseCursorMeta } from '@/lib/pagination';
 
@@ -213,6 +213,24 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory, sel
     }
   }, [t]);
 
+  // story #2357 — handleDeleteLink와 같은 형태, 다른 엔드포인트(reject: (source,target) 쌍을
+  // rejected_relations에 영속 기록해 다음 산문 임포트에서도 걸러지게 한다). 기각한 간선도
+  // 더는 유효한 후보가 아니므로 delete와 동일하게 edges에서 뺀다(BE가 같은 쌍의 다른
+  // field/form candidate 행도 함께 지우므로 화면도 그 사실을 따라간다).
+  const handleRejectLink = useCallback(async (candidateId: string, anchorStoryId: string): Promise<RejectLinkResult> => {
+    try {
+      const res = await fetch(`/api/stories/${anchorStoryId}/reference-candidates/${candidateId}/reject`, { method: 'POST' });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        return { ok: false, error: typeof json?.detail === 'string' ? json.detail : t('portRejectErrorFallback') };
+      }
+      setState((prev) => (prev.kind === 'ready' ? { ...prev, edges: prev.edges.filter((e) => e.candidateId !== candidateId) } : prev));
+      return { ok: true };
+    } catch {
+      return { ok: false, error: t('portRejectErrorFallback') };
+    }
+  }, [t]);
+
   const lane: FlowMapLane | null = useMemo(() => {
     if (state.kind !== 'ready') return null;
     return deriveFlowMapLane(
@@ -237,6 +255,7 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory, sel
       selectedNodeId={selectedNodeId}
       onCreateLink={handleCreateLink}
       onDeleteLink={handleDeleteLink}
+      onRejectLink={handleRejectLink}
       memberMap={memberMap}
     />
   );
