@@ -10,10 +10,18 @@ export type OnboardingEvent =
   | 'verify_started'
   | 'abandoned_explicit';
 
+// story(2026-08-02, 채용 흐름 텔레메트리 부재) — 두 흐름(onboarding/connect-step.tsx ·
+// recruiter STEP5)이 같은 이벤트 이름을 쏘게 되면서, 합계만 보고는 어느 흐름에서 온
+// 이벤트인지 구분이 안 된다. 확認: 백엔드 OnboardingEventBody(pydantic)에 이미
+// `meta: dict` 필드가 있고 OnboardingEvent 모델까지 JSONB로 실제 저장되는 것까지 이어진다
+// — 새 top-level 필드를 추가하는 것보다 안전한 확장 지점이라 flow는 meta 안에 담는다.
+export type OnboardingFlow = 'onboarding' | 'recruit';
+
 interface EventPayload {
   agent_id?: string | null;
   runtime?: string;
   failure_reason?: string;
+  flow?: OnboardingFlow;
 }
 
 /**
@@ -42,6 +50,7 @@ function buildBody(event: OnboardingEvent, payload?: EventPayload): string {
     runtime: payload?.runtime ?? 'claude-code',
     failure_reason: payload?.failure_reason ?? null,
     client_ts: new Date().toISOString(),
+    meta: payload?.flow ? { flow: payload.flow } : {},
   });
 }
 

@@ -1,11 +1,14 @@
 {
+  "_note": "이 값의 정본은 «화면이 발급하는 .mcp.json» 입니다 — 조직 → 워크포스 → 에이전트 → API 키 에서 받으십시오. 이 파일은 그 형태를 미리 보여 주는 사본이며, 갈리면 화면이 준 쪽이 맞습니다. 따라 하는 절차는 앱의 /connect-guide.txt 를 보십시오.",
   "mcpServers": {
-    "sprintable-python": {
-      "command": "python",
-      "args": ["-m", "backend.sprintable_mcp"],
+    "sprintable": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["sprintable"],
       "env": {
-        "SPRINTABLE_API_URL": "https://api.sprintable.ai",
-        "AGENT_API_KEY": "sk_live_..."
+        "SPRINTABLE_API_URL": "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app",
+        "AGENT_GATEWAY_V2": "1",
+        "AGENT_API_KEY": "<조직 → 워크포스 → 에이전트 → API 키 에서 발급>"
       }
     }
   }

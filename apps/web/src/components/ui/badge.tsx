@@ -12,8 +12,12 @@ const badgeVariants = cva(
         default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
         secondary:
           "border-border/70 bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
+        // story #2419 — bg-destructive/10 위 text-destructive는 3.97(AA 4.5 미달, verify-rail.tsx
+        // 실패 박스와 동일 조합). story #2420 v3 규칙(계열별 토큰 대신 규칙 하나) — tint 배경
+        // 위 글자는 text-foreground(16.72, scripts/verify-tint-foreground-contrast.ts가 정의
+        // 시점에 검증). --foreground 자체가 테마마다 값을 가지므로 dark: 짝이 따로 필요 없다.
         destructive:
-          "bg-destructive/10 text-destructive focus-visible:ring-destructive dark:bg-destructive/20 dark:focus-visible:ring-destructive [a]:hover:bg-destructive/20",
+          "bg-destructive/10 text-foreground focus-visible:ring-destructive dark:bg-destructive/20 dark:focus-visible:ring-destructive [a]:hover:bg-destructive/20",
         outline:
           "border-border/80 bg-background text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
         ghost:

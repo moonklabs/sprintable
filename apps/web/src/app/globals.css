@@ -298,6 +298,13 @@
   --accent-claim: oklch(0.55 0.18 200);
   --accent-claim-foreground: oklch(0.985 0 0);
   --highlight-search-bg: oklch(0.88 0.14 85 / 40%);
+  /* story #2420 v3(유나 규격 확定, 2026-08-02) — 규칙: tint 계열 배경(아래 --<X>-tint) 위의
+     글자는 계열마다 --<X>-on-subtle 같은 전용 토큰을 두지 않고 --foreground 하나로 통일한다.
+     #2419가 냈던 계열별 토큰(--destructive-on-subtle)은 warning에 못 쓰임이 실증돼(명도를
+     낮추면 갈색이 되어 "경고=노랑"이 사라짐) 걷었다 — 근거·실측은 #2420 본문. 이 규칙이
+     실제로 4.5(AA)를 넘는지는 코드가 아니라 «정의 시점»에 매번 검증한다
+     (apps/web/scripts/verify-tint-foreground-contrast.ts) — 새 --<X>-tint 토큰을 여기
+     추가하면 그 스크립트가 코드 수정 없이 자동으로 그 계열도 검사한다. */
   --success-bg: oklch(0.97 0.02 145);
   --success-border: oklch(0.80 0.10 145);
   --success-tint: oklch(0.55 0.16 145 / 10%);

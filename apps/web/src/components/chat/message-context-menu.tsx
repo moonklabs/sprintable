@@ -89,7 +89,7 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, onDelete, on
             type="button"
             role="menuitem"
             onClick={() => { onDelete(); onClose(); }}
-            className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-destructive hover:bg-destructive/10"
+            className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-destructive/10"
           >
             <Trash2 className="h-3.5 w-3.5" />
             삭제

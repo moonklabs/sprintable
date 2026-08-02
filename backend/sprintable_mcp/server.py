@@ -14,9 +14,10 @@ from mcp.server.transport_security import TransportSecuritySettings
 logger = logging.getLogger(__name__)
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.tools.base import Tool as _FastMCPTool
 from mcp.types import TextContent
 from mcp.types import Tool as MCPTool
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic.fields import PydanticUndefined
 
 from .api_client import _api_key_override, client, reset_project_override, set_project_override
@@ -284,7 +285,85 @@ _transport_security = TransportSecuritySettings(
 # 스킵해 시맨틱을 명확히 하고 매 stdio list_tools 호출마다 불필요한 manifest 캐시 조회도 피한다.
 # fail-open(scope=None → 비파괴셋)은 call-time(_flat wrapper)과 동일 철학 — 백엔드가 최종 SSOT라 list는
 # degrade(더 보여줌)해도 call은 여전히 403 차단.
+def _lock_down_extra_args(tool: _FastMCPTool) -> None:
+    """story #2412 AC2 — 실제 삼킴 지점은 SprintableInput.extra 가 아니라 한 겹 앞이다.
+
+    FastMCP가 도구 함수 시그니처(_flat()의 wrapper.__signature__)로 만드는 내부
+    arg_model(mcp SDK `func_metadata.py`)은 extra 를 명시 안 해 pydantic 기본값(=ignore와
+    동일)을 쓴다 — `Tool.run()`으로 끝까지 태워 실측 확認: wrapper()는 미선언 인자(`days` 등)를
+    아예 전달받지도 못한다. 그래서 SprintableInput 쪽만 forbid 로 바꿔선 이 증상엔 무효과 —
+    여기(등록 시점, arg_model 자체)를 고쳐야 실제로 막힌다. 벤더 파일은 안 건드리고 등록 루프
+    한 곳(add_tool 오버라이드)에서 전 도구 동시 적용 — SprintableInput 상속이냐
+    BaseModel 직접상속(projects.py 2종)이냐 안 갈라도 된다.
+
+    거부 메시지에 accepted 인자 목록을 넣는다(올리베이라군 요청, #2412) — "unexpected
+    keyword"로 끝나면 부른 쪽이 다음에 뭘 보내야 할지 모른다.
+
+    ⚠️`fn_metadata`/`arg_model`은 mcp SDK 비공개급 내부라 버전업 결합 리스크가 있다 — 구조가
+    바뀌면 아래 assert가 등록 시점(서버 부팅)에 크게 터진다. 조용히 원복(=다시 전부 조용히
+    먹는 상태로 폴백)해 green을 대신 만드는 것을 막기 위함(선생님 실기기 정신병 제로 원칙과
+    동형 — 검증 없이 통과를 만들지 않는다).
+    """
+    assert hasattr(tool, "fn_metadata") and hasattr(tool.fn_metadata, "arg_model"), (
+        f"mcp SDK 내부구조 변경 감지 — Tool.fn_metadata.arg_model 없음(tool={tool.name}). "
+        "story #2412 AC2 lockdown이 더 이상 안 먹는다 — _lock_down_extra_args를 새 mcp 버전에 맞춰 다시 봐야 한다."
+    )
+    arg_model = tool.fn_metadata.arg_model
+    assert hasattr(arg_model, "model_fields") and hasattr(arg_model, "model_config"), (
+        f"mcp SDK 내부구조 변경 감지 — arg_model이 더 이상 pydantic BaseModel 형태가 아님(tool={tool.name})."
+    )
+
+    allowed = sorted(arg_model.model_fields)
+    tool_name = tool.name
+
+    def _reject_unknown(cls: type, data: object) -> object:
+        if isinstance(data, dict):
+            unknown = sorted(set(data) - set(allowed))
+            if unknown:
+                raise ValueError(
+                    f"{tool_name}: unexpected argument(s) {unknown} — accepted arguments: {allowed}"
+                )
+        return data
+
+    strict_arg_model = type(
+        arg_model.__name__,
+        (arg_model,),
+        {
+            "model_config": ConfigDict(extra="forbid"),
+            "_reject_unknown_args_2412": model_validator(mode="before")(classmethod(_reject_unknown)),
+            "__module__": arg_model.__module__,
+        },
+    )
+    tool.fn_metadata.arg_model = strict_arg_model
+
+
 class SprintableFastMCP(FastMCP):
+    def add_tool(
+        self,
+        fn,
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        annotations=None,
+        icons=None,
+        meta: dict | None = None,
+        structured_output: bool | None = None,
+    ) -> None:
+        super().add_tool(
+            fn,
+            name=name,
+            title=title,
+            description=description,
+            annotations=annotations,
+            icons=icons,
+            meta=meta,
+            structured_output=structured_output,
+        )
+        # FastMCP.add_tool()은 -> None(내부 ToolManager.add_tool()의 Tool 반환값을 버린다) —
+        # 등록된 Tool을 다시 얻으려면 매니저에서 name으로 조회해야 한다(name 미지정 시 fn.__name__로
+        # 귀결되는 FastMCP 자체 규약과 동일하게 재현).
+        _lock_down_extra_args(self._tool_manager.get_tool(name or fn.__name__))
+
     async def list_tools(self) -> list[MCPTool]:
         tools = await super().list_tools()
         if (settings.mcp_transport or "stdio").strip().lower() != "http":
@@ -635,23 +714,28 @@ _TOOL_DEFS: list[tuple] = [
      ProposeCanonicalInput, propose_canonical_version),
     # Chat (4)
     ("sprintable_send_chat_message",
-     "[조직] conversation thread에 채팅 메시지 발송. mentions=[{type:\"doc\"|\"story\"|\"epic\", id,"
-     " title?}]로 human `#`-검색 mention과 동형인 `[title](entity:<type>:id)` 토큰을 content에"
-     " 합성(title 생략 시 서버가 canonical title로 만든 reference_token을 그대로 재사용 —"
-     " content에 직접 `[제목](entity:...)` 문자열을 손으로 짓지 말 것: 제목에 `]`가 들어가면"
-     " (예: \"[TAG] 제목\" 관례) 파서가 못 읽는다) — agent 발신 메시지에서도 링크/backlink가"
-     " 동작하게 한다.",
+     "[조직] conversation thread에 채팅 메시지 발송. conversation_id로 대화를 지정(thread_id는"
+     " 폐기 예정 별칭 — story #2427: 이 도구들의 «응답» thread_id는 대화 ID가 아니라 회신 스레드"
+     " ID이므로, 응답을 보고 그대로 다시 부를 때는 conversation_id를 쓸 것). mentions="
+     "[{type:\"doc\"|\"story\"|\"epic\", id, title?}]로 human `#`-검색 mention과 동형인"
+     " `[title](entity:<type>:id)` 토큰을 content에 합성(title 생략 시 서버가 canonical title로"
+     " 만든 reference_token을 그대로 재사용 — content에 직접 `[제목](entity:...)` 문자열을 손으로"
+     " 짓지 말 것: 제목에 `]`가 들어가면(예: \"[TAG] 제목\" 관례) 파서가 못 읽는다) — agent 발신"
+     " 메시지에서도 링크/backlink가 동작하게 한다.",
      SendChatInput, send_chat_message),
     ("sprintable_create_conversation",
      "[조직] 새 conversation thread 생성.",
      CreateConversationInput, create_conversation),
     ("sprintable_list_chat_messages",
-     "[조직] conversation thread 메시지 목록 조회.",
+     "[조직] conversation thread 메시지 목록 조회. conversation_id로 대화를 지정(thread_id는"
+     " 폐기 예정 별칭 — 응답의 thread_id는 대화 ID가 아니라 각 메시지의 회신 스레드 ID, story #2427).",
      ListChatMessagesInput, list_chat_messages),
     ("sprintable_get_chat_message",
      "[조직] conversation thread 내 메시지 단건 원문 조회(message_id로 즉시 픽업). ⭐웹훅 payload가"
-     " 잘렸거나 원문이 의심될 때 재발신 요청 대신 이걸로 먼저 확인 — thread_id=conversation_id,"
-     " message_id=조회할 메시지 id(top-level·리플 공용).",
+     " 잘렸거나 원문이 의심될 때 재발신 요청 대신 이걸로 먼저 확인 — conversation_id=대화 id"
+     "(thread_id는 폐기 예정 별칭), message_id=조회할 메시지 id(top-level·리플 공용). ⚠️응답의"
+     " thread_id는 대화 ID가 아니라 그 메시지의 회신 스레드 ID다(story #2427) — 응답을 보고 그대로"
+     " 다시 부를 때는 응답의 conversation_id를 쓸 것.",
      GetChatMessageInput, get_chat_message),
     # Meetings (6)
     ("sprintable_list_meetings",

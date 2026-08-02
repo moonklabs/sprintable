@@ -50,9 +50,15 @@
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const SRC_ROOT = path.resolve(process.cwd(), 'src');
-const MESSAGES_PATH = path.resolve(process.cwd(), 'messages', 'ko.json');
+// story #2410 회귀(카디르 QA, PR #2790, 2026-08-01) — SRC_ROOT를 `process.cwd()` 기준으로
+// 잡았다가 루트에서 도는 `pnpm vitest run`(CI)이 이 모듈을 import하는 순간 ENOENT로 죽었다.
+// scanRepository() 추출 전엔 main()이 CLI 전용이라 cwd가 항상 apps/web이라 안 터졌던 것 —
+// 같은 레포 같은 날 #2774(verify-no-orphan-resource-routes.ts)와 동일한 병. 스크립트 자기
+// 위치(import.meta.url) 기준으로 고정하면 호출부의 cwd와 무관해진다.
+const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
+const MESSAGES_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../messages', 'ko.json');
 const EXT_RE = /\.(tsx?|jsx?)$/;
 const TEST_RE = /\.(test|spec)\.[tj]sx?$/;
 
@@ -119,19 +125,58 @@ export function flattenMessages(obj: Record<string, unknown>, prefix = ''): Map<
   return flat;
 }
 
-// ko.json 값 자체가 보간 자리(`{n}`류)를 갖고 있으면 그 키는 "수와 함께 서는" 축이다
-// (예: "목표 · {n}"·"{count}개 문서 일치"). 이 신호 하나만 쓴다 — 위 모듈 코멘트 경위 참조
-// (호출 자리 근접 휴리스틱은 노이즈가 더 커서 뺐다).
-const PLACEHOLDER_VALUE_RE = /\{[a-zA-Z_][a-zA-Z0-9_]*\}/;
+// story #2410 — 이름(isNumberAdjacent)과 «재는 것»을 맞춘다. 예전 PLACEHOLDER_VALUE_RE는
+// 보간 자리가 «있기만 하면» true였다 — 그게 이름·런타임처럼 «수가 아닌» 보간까지 「수와
+// 함께 선다」로 잘못 읽어 EXEMPT_PAIRS가 7건까지 쌓인 근본원인이었다(#2404: {runtime} ·
+// #2406: {name}). 47개(GRANDFATHER_BASELINE 40 + EXEMPT_PAIRS 7)에 실제로 쓰이는 보간
+// 이름을 전수 대조해(2026-08-02) 「절대 수가 아님을 값을 직접 읽어 확認한」 이름만 배제
+// 목록에 올린다 — 나머지(미확認·모호한 것 포함)는 «안전한 쪽»(예전과 동일하게 true)으로
+// 남긴다. 모르는 이름을 마음대로 false로 내리면 그게 새 오탐이 아니라 새 «누락»(놓친 진짜
+// 충돌)이 되고, 이 가드는 놓치는 쪽보다 과하게 잡는 쪽이 안전하다(EXEMPT_PAIRS로 되돌릴
+// 수 있지만 누락은 그 자체로 안 보인다).
+//
+// 배제 근거(각 이름의 실제 ko.json 값을 직접 읽고 판정, 파일 하단 커밋 참조):
+//   name       — 사람/에이전트 이름("{name} 비활성화"·"{name}이(가)...")
+//   runtime    — MCP 런타임 이름("{runtime} MCP 설정" — claude-code 등)
+//   filename·promptFile — 파일 이름
+//   gate       — 게이트 이름/사유 문자열("{gate} 대기 중")
+//   role       — 역할 이름(PM/Engineer 등)
+//   project    — 프로젝트 이름
+//   teamId     — Slack 워크스페이스 ID(문자열 식별자, 카운트 아님)
+//   dir        — 방향 기호(↑/↓), 수치 아님
+//   sources·excludes — 수집 범위를 나타내는 라벨 목록
+// ⛔새 이름을 여기 더하기 前에(PO 지적, 2026-08-02): 그 이름이 실제로 채우는 ko.json 값을
+// 먼저 읽는다. 정말 이름·경로류(수가 아님)면 더한다. 그런데 만약 «숫자인» 값인데 여기 걸려
+// EXEMPT_PAIRS에 다시 나타난다면, 그건 denylist 후보가 아니라 «진짜 충돌»이다 — 그 경우
+// denylist를 늘려 조용히 덮지 말고 그 충돌 자체를 고치거나(문구 수정) EXEMPT_PAIRS에
+// 이유와 함께 등재한다. 이 목록은 "수가 아님이 확認된 것"만 오는 자리이지 "오탐을 없애는
+// 자리"가 아니다 — 그 둘을 섞으면 이 스토리(#2410)가 고친 바로 그 병(가드가 자기가 뭘
+// 재는지 모르게 되는 것)이 재발한다.
+const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
+  'name', 'runtime', 'filename', 'promptFile', 'gate', 'role', 'project', 'teamId', 'dir',
+  'sources', 'excludes',
+]);
+const PLACEHOLDER_NAME_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
 
 export function isNumberAdjacent(value: string): boolean {
-  return PLACEHOLDER_VALUE_RE.test(value);
+  for (const m of value.matchAll(PLACEHOLDER_NAME_RE)) {
+    if (!NON_NUMBER_PLACEHOLDER_NAMES.has(m[1]!)) return true;
+  }
+  return false;
 }
 
 // ── 충돌 판정 ────────────────────────────────────────────────────────────
 
 /** 서로 다른 키의 값이 부분문자열 관계(포함하거나 포함되는)면서 «최소 한쪽이 수와 함께
- * 서면» 그 쌍을 낸다. docs.save↔statusSaved류(수 없음)는 저절로 빠진다. */
+ * 서면» 그 쌍을 낸다. docs.save↔statusSaved류(수 없음)는 저절로 빠진다.
+ *
+ * ⛔story #2410에서 "값이 완전히 동일하면 numberAdjacent 무관하게 항상 잡는다"는 분기를
+ * 한 번 넣었다가 «되돌렸다» — 실측하니 완전동일-정적라벨 쌍(예: docs.preview="미리보기"
+ * <-> docs.formatPreview="미리보기", "완료"·"저장 중..." 등)이 29건 «신규 FAIL»로 쏟아졌다.
+ * 이건 이 가드가 원래부터 저절로 빼려던 그 모양(docs.save↔statusSaved류) 그 자체다 — 수와
+ * 무관하게 완전동일이면 다 잡는다는 건 이 가드의 존재 이유(#2352·#2365 — «수와 함께 서는»
+ * 축)를 무시한 과확장이었다. 값을 실행해 보지 않고 판단부터 넣으면 이렇게 걸린다는 걸
+ * 스스로 보인 자리라 남겨 둔다. */
 export function findSubstringCollisions(
   phrases: Map<string, { value: string; numberAdjacent: boolean }>,
 ): Array<{ keyA: string; keyB: string; valueA: string; valueB: string }> {
@@ -153,7 +198,39 @@ export function findSubstringCollisions(
 // AC5 — 지금은 실제로 안 겹치지만 이 스캔이 걸릴 수 있는 자리. 항목마다 이유+재검토 시점.
 // «영구 정상»으로 코드로 확認된 것만 여기 온다 — GRANDFATHER_BASELINE(아래, 미triage 채무)과
 // 다르다.
-export const EXEMPT_PAIRS = new Set<string>([]);
+//
+// ✅story #2410(2026-08-02)에서 아래 일곱을 «재평가»해 전부 걷어냈다 — 예전엔 여기 있었다:
+//   recruiter.{equipDone,next,stepComplete,stepVerify} <-> recruiter.verifyGuideMcp (#2404, {runtime})
+//   settings.{deactivateAgent,activateAgent,deactivateAgentDialogConfirm} <-> settings.deactivateAgentDialogTitle (#2406, {name})
+// 근본원인(isNumberAdjacent가 이름·런타임 보간까지 "수와 함께 선다"로 오판)을 고치니 이
+// 일곱 전부 이 스캔에서 «다시 안 걸린다»(재현 확認 — tsx로 실행해 exemptHit 0/7, 신규
+// FAIL도 0건인 것까지 봤다). 즉 «지금 정말 안전한데 가드가 몰라서 면제해 둔» 상태에서
+// «가드가 스스로 안 겹친다는 걸 아는» 상태로 옮겨졌다 — EXEMPT_PAIRS는 이제 빈 목록이 맞고,
+// 앞으로 이름·런타임류 보간이 다시 오탐으로 걸리면 그건 NON_NUMBER_PLACEHOLDER_NAMES에
+// 새 이름을 더할 자리이지 여기 되돌아올 자리가 아니다.
+//
+// story #2792(2026-08-02) — `recruiter.verifyGuideMcpStdio`(verifyGuideMcp의 stdio 전용
+// 짝)도 같은 `{runtime}` 보간을 쓴다. rebase 前(#2410/#2790 이전 기준 worktree)에는 이
+// denylist가 없어 신규 짝 4개를 여기 추가했었으나, rebase 뒤 재스캔(신규 0건·exempt 0건)으로
+// «필요 없음»이 실측 확認돼 다시 뺐다 — NON_NUMBER_PLACEHOLDER_NAMES의 `runtime`이 이미
+// 덮는다(PO 지적: rebase 안 하면 #2790이 오늘 한 일이 부분적으로 되돌아간다).
+//
+// story #2413(2026-08-02, PO 승인) — sprints.days <-> sprints.overdueBadge.
+// ①왜 안전한가 — sprints.days는 값이 "일"(한 글자 단위 접미사, 보간조차 없다)이라
+// «어떤 N일 문구에도» 부분문자열로 걸린다. #2352/#2365가 잡으려는 "두 셈이 헷갈리는" 병이
+// 아니라 «키 값이 너무 짧아» 생기는 것이다 — {days}(overdueBadge의 실제 보간)가 숫자라서
+// 면제하는 게 아니다(숫자면 오히려 #2410 규칙상 "진짜 충돌"로 읽혀야 한다). 충돌의 원인은
+// {days}가 아니라 짧은 단위-접미사 키 자체다 — 이 구별이 안 되면 #2410 후속에서 엉뚱한
+// 곳(보간 이름 쪽)을 고치게 된다.
+// ②언제 걷는가 — 가드가 "한 글자·단위 접미사 값의 키"를 부분문자열 검사 대상에서 빼면
+// 이 면제는 불필요해진다. #2410과는 다른 축(보간 이름이 아니라 키 길이)이라 별도 후속
+// 후보로 남긴다.
+// rebase 재확認(2026-08-02, PO 요청) — origin/develop 최신(#2790/#2792/#2793/#2794 반영)
+// 기준으로 재스캔해도 이 항목은 여전히 필요하다(아래 게이트 로그로 확認) — #2792의 임시
+// 항목과 달리 이건 #2410의 근본 fix로 해소되는 축이 아니라서 그대로 남는다.
+export const EXEMPT_PAIRS = new Set<string>([
+  'sprints.days <-> sprints.overdueBadge',
+]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이
 // 넣지 않는다. 이 길을 그냥 열어 두면 "새 충돌이 FAIL 났을 때 담당이 baseline에 넣고 지나가는"
@@ -170,6 +247,23 @@ export const EXEMPT_PAIRS = new Set<string>([]);
 // 고치는 일이 아니다"(AC6)를 지키는
 // 방법이다 — 여기 있는 40건 «중 실제로 몇 건이 진짜 결함인지»는 이 스토리가 판정하지 않는다.
 // 그래도 매 실행 로그에 grandfather 카운트로 찍혀 "원래 그런 것"으로 조용히 묻히지 않는다.
+// story #2410(PO 지적, 2026-08-02): 이 40건 중 18건은 이제 이 스캔에 «안 걸린다» — isNumberAdjacent
+// 정밀화(이름·런타임류 배제) 여파로, 그동안 「진짜 결함인지 몰랐던」게 아니라 「애초에 numberAdjacent가
+// 아니었던」 것으로 밝혀졌다. Set 크기(40)는 #2367 최초 스캔 스냅샷이라 그대로 두지만("아래 40건" 문단
+// 그대로), 매 실행 로그의 "안 걸림" 경고만으로는 다음 사람이 노이즈로 읽고 넘길 수 있어 여기 명시로
+// 남긴다 — 실 걸림 수(22)는 GRANDFATHER_LIVE_COUNT_TEST가 고정한다(아래).
+// 안 걸리는 18건: board.backlinksEmptyFallback<->board.backlinksEmptyScoped · canvas.resolveAction<->
+// canvas.resolvedByNote · dashboard.ccAgentStuck<->dashboard.ccWaitingGateReason ·
+// recruiter.back<->recruiter.{guideFileDeliveryNoteConnector,guideFileDeliveryNoteMcp,kitOrientingGuideBody} ·
+// recruiter.equipCreatedTitle<->recruiter.{equipDone,stepComplete} ·
+// recruiter.equipDone<->recruiter.{guideFileDeliveryNoteConnector,kitOrientingTitle} ·
+// recruiter.guideFileDeliveryNoteConnector<->recruiter.{kitOrientingGuideBody,stepComplete} ·
+// recruiter.kitOrientingTitle<->recruiter.stepComplete · settings.projectCreated<->settings.tabProjects ·
+// settings.slackIntegration.{mappedElsewhereHint,pendingHint}<->settings.slackIntegration.saveLabel ·
+// settings.slackIntegration.workspaceConnectedSummary<->settings.slackIntegration.workspaceLabel ·
+// standup.feedback<->standup.feedbackDialogTitle
+// ⇒ 이 18건을 GRANDFATHER_BASELINE에서 걷어낼지(진짜 결함이 아니었다고 결론)는 이 PR이 정하지 않는다
+// (AC6과 같은 판단 — 이 스토리는 정밀화만, triage는 별도).
 export const GRANDFATHER_BASELINE = new Set<string>([
   'board.backlinksEmptyFallback <-> board.backlinksEmptyScoped',
   'cage.pendingSummary <-> cage.trustScorePending',
@@ -228,7 +322,19 @@ function walk(dir: string, out: string[]): void {
   }
 }
 
-function main(): void {
+export interface RepositoryScanResult {
+  files: string[];
+  totalDynamicCalls: number;
+  newFindings: Map<string, CollisionPair>;
+  grandfathered: Map<string, CollisionPair>;
+  exemptHit: Set<string>;
+  grandfatherHit: Set<string>;
+}
+
+/** main()에서 뽑아낸 전 저장소 스캔 — story #2410, GRANDFATHER_LIVE_COUNT_TEST가 이걸 불러
+ * "지금 실제로 걸리는 grandfather 수"를 고정한다(console.log 경고만으로는 다음 사람이
+ * 노이즈로 읽고 넘기는 것을 막는다, PO 지적). */
+export function scanRepository(): RepositoryScanResult {
   const files: string[] = [];
   walk(SRC_ROOT, files);
   const messages = flattenMessages(JSON.parse(readFileSync(MESSAGES_PATH, 'utf8')));
@@ -267,6 +373,12 @@ function main(): void {
       }
     }
   }
+
+  return { files, totalDynamicCalls, newFindings, grandfathered, exemptHit, grandfatherHit };
+}
+
+function main(): void {
+  const { files, totalDynamicCalls, newFindings, grandfathered, exemptHit, grandfatherHit } = scanRepository();
 
   const staleExempt = [...EXEMPT_PAIRS].filter((pk) => !exemptHit.has(pk));
   const staleGrandfather = [...GRANDFATHER_BASELINE].filter((pk) => !grandfatherHit.has(pk));

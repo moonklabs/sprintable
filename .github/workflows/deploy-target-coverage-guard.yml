@@ -1,0 +1,45 @@
+# story #2426 (2026-08-02) — 「파이프라인이 배포하는 서비스」와 「실제 존재하는 Cloud Run
+# 서비스」가 갈리면 빨간불.
+#
+# ⛔이 가드가 없으면 무슨 일이 나는가: sprintable-mcp-{dev,prod} 가 cloudbuild.yaml 의 배포
+#   대상이 아니어서 dev 는 4일, prod 는 main HEAD 대비 449 커밋 뒤처진 채로 «요청을 받고»
+#   있었다. 아무 알림도 없었다 — 목록 밖은 아무도 안 보기 때문이다.
+#
+# ⚠️이 가드가 «못 잡는 것»(선언):
+#   - 손으로 만든 서비스는 다음 push 때까지 안 잡힌다(schedule 을 안 걸었다 — 매일 도는
+#     초록은 잡음이 되고, 그러면 진짜 빨강도 배경음이 된다).
+#   - 배포는 되는데 «환경변수»가 파이프라인 밖인 것은 안 본다.
+#   - 서비스가 «최신 이미지인지»는 안 본다 — 그건 각 deploy 스텝의 검산 몫이다.
+name: Deploy target coverage guard
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - 'cloudbuild.yaml'
+      - 'scripts/verify-deploy-target-coverage.sh'
+      - '.github/workflows/deploy-target-coverage-guard.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write  # Workload Identity Federation
+
+jobs:
+  coverage:
+    name: Cloud Run 배포 대상 누락 검사
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: 배포 대상 ↔ 실제 서비스 대조
+        run: bash scripts/verify-deploy-target-coverage.sh

@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.notification import InboxItem, Notification, NotificationSetting
@@ -21,16 +21,25 @@ class NotificationRepository(BaseRepository[Notification]):
         is_read: bool | None = None,
         limit: int = 200,
         before: datetime | None = None,
+        before_id: uuid.UUID | None = None,
     ) -> list[Notification]:  # type: ignore[override]
+        """story #2428: `before`(created_at) 단독 커서는 동률(같은 created_at) 시 페이지
+        경계에서 행이 누락/중복될 수 있었다 — `before_id`가 같이 오면 (created_at, id) 복합
+        비교로 전환한다(호출부 routers/notifications.py가 새 cursor 포맷 이관 시 항상 같이
+        넘김). `before_id` 없이 `before`만 오는 옛 호출부는 없다 — 있었다면 그게 바로 이
+        결함의 재현 경로였을 것.
+        """
         q = select(Notification).where(
             self._org_filter(),
             Notification.user_id == user_id,
         )
         if is_read is not None:
             q = q.where(Notification.is_read == is_read)
-        if before is not None:
+        if before is not None and before_id is not None:
+            q = q.where(tuple_(Notification.created_at, Notification.id) < tuple_(before, before_id))
+        elif before is not None:
             q = q.where(Notification.created_at < before)
-        q = q.order_by(Notification.created_at.desc()).limit(limit)
+        q = q.order_by(Notification.created_at.desc(), Notification.id.desc()).limit(limit)
         result = await self.session.execute(q)
         return list(result.scalars().all())
 

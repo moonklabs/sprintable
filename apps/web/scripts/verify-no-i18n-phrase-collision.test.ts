@@ -3,6 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   countDynamicKeyCalls,
+  EXEMPT_PAIRS,
   findSubstringCollisions,
   flattenMessages,
   GRANDFATHER_BASELINE,
@@ -10,6 +11,7 @@ import {
   pairKey,
   parseKeyUsages,
   parseTranslationBindings,
+  scanRepository,
 } from './verify-no-i18n-phrase-collision';
 
 describe('parseTranslationBindings — story #2367', () => {
@@ -166,18 +168,22 @@ describe('AC2 — 옛 값(#2352·#2365 모양) 되돌리면 파이프라인이 �
 });
 
 // AC7 — 첫 검거를 «지어낸 것»이 아니라 «실제 저장소에 있는 것»으로도 보인다(오르테가군
-// 지적, 2026-07-31) — action-zone.tsx의 ccWaitingGateReason과 ccAgentStuck이 완전히 같은
-// 템플릿("{gate} 대기 중")을 같은 파일에서 쓴다. 오늘 이 스토리가 실제로 처음 잡은 것 중
-// 하나 — 고치지 않고(AC6) 그대로 재현만 고정한다.
-describe('AC7 — 실제 저장소의 첫 검거 재현(action-zone.tsx)', () => {
-  it('ccWaitingGateReason과 ccAgentStuck이 완전히 같은 템플릿이라 잡힌다', () => {
-    const file = path.resolve(__dirname, '../src/components/dashboard/command-center/action-zone.tsx');
+// 지적, 2026-07-31) — notification-bell.tsx의 panelTitle("알림")이 bellAriaLabelCount
+// ("알림 {count}개")의 부분문자열이고 {count}는 진짜 카운터다. story #2410 전엔 이 자리가
+// action-zone.tsx의 ccWaitingGateReason/ccAgentStuck({gate} 대기 중)이었으나, {gate}는
+// 게이트 «이름»이지 수가 아니라는 게 #2410에서 밝혀져(아래 '이름·런타임류 보간은 더 이상
+// numberAdjacent가 아니다' 참조) 그 쌍은 더 이상 이 스캔에 안 걸린다 — AC7이 증명하려는
+// "실제 저장소에서 진짜로 걸린다"는 그 쌍으론 더 이상 못 서므로, 여전히 진짜 카운터인
+// 다른 실제 쌍으로 옮겼다.
+describe('AC7 — 실제 저장소의 첫 검거 재현(notification-bell.tsx)', () => {
+  it('panelTitle과 bellAriaLabelCount가 부분문자열+진짜 카운터라 잡힌다', () => {
+    const file = path.resolve(__dirname, '../src/components/nav/notification-bell.tsx');
     const content = readFileSync(file, 'utf8');
     const bindings = parseTranslationBindings(content);
-    expect(bindings.get('t')).toBe('dashboard');
+    expect(bindings.get('t')).toBe('inbox');
     const usages = parseKeyUsages(content, bindings);
-    expect(usages.has('dashboard.ccWaitingGateReason')).toBe(true);
-    expect(usages.has('dashboard.ccAgentStuck')).toBe(true);
+    expect(usages.has('inbox.panelTitle')).toBe(true);
+    expect(usages.has('inbox.bellAriaLabelCount')).toBe(true);
 
     const messagesPath = path.resolve(__dirname, '../messages/ko.json');
     const messages = flattenMessages(JSON.parse(readFileSync(messagesPath, 'utf8')));
@@ -189,10 +195,66 @@ describe('AC7 — 실제 저장소의 첫 검거 재현(action-zone.tsx)', () =>
     const collisions = findSubstringCollisions(phrases);
     const hit = collisions.find(
       (c) =>
-        new Set([c.keyA, c.keyB]).has('dashboard.ccWaitingGateReason') &&
-        new Set([c.keyA, c.keyB]).has('dashboard.ccAgentStuck'),
+        new Set([c.keyA, c.keyB]).has('inbox.panelTitle') &&
+        new Set([c.keyA, c.keyB]).has('inbox.bellAriaLabelCount'),
     );
     expect(hit).toBeDefined();
+  });
+});
+
+// ── story #2410 — isNumberAdjacent가 이름·런타임류 보간을 더 이상 "수와 함께 선다"로
+// 오판하지 않는다. #2404({runtime})·#2406({name})의 실제 오탐이었던 쌍을 실 ko.json 값으로
+// 재현해 이제 안 잡힌다는 것을 보이고, 그 근본원인 때문에 우연히 걸렸던
+// dashboard.ccWaitingGateReason/ccAgentStuck({gate})도 같은 이유로 안 잡힌다는 것을 확認한다.
+describe('story #2410 — isNumberAdjacent: 이름 보간은 numberAdjacent가 아니다', () => {
+  it('{name}·{runtime}류(사람/런타임 이름)는 false', () => {
+    expect(isNumberAdjacent('{name} 비활성화')).toBe(false);
+    expect(isNumberAdjacent('{runtime} MCP 설정')).toBe(false);
+    expect(isNumberAdjacent('{gate} 대기 중')).toBe(false);
+  });
+
+  it('{n}·{count}류(카운터)는 여전히 true', () => {
+    expect(isNumberAdjacent('목표 · {n}')).toBe(true);
+    expect(isNumberAdjacent('{count}개 문서 일치')).toBe(true);
+  });
+
+  it('알 수 없는 보간 이름은 «안전한 쪽»(true)으로 남는다 — 모르면 놓치지 않는다', () => {
+    expect(isNumberAdjacent('{somethingBrandNew} 상태')).toBe(true);
+  });
+
+  it('#2404 재현 — recruiter.verifyGuideMcp({runtime})와 짧은 라벨 넷은 이제 안 겹친다', () => {
+    const messagesPath = path.resolve(__dirname, '../messages/ko.json');
+    const messages = flattenMessages(JSON.parse(readFileSync(messagesPath, 'utf8')));
+    const keys = [
+      'recruiter.verifyGuideMcp',
+      'recruiter.equipDone',
+      'recruiter.next',
+      'recruiter.stepComplete',
+      'recruiter.stepVerify',
+    ];
+    const phrases = new Map(
+      keys
+        .filter((k) => messages.has(k))
+        .map((k) => [k, { value: messages.get(k)!, numberAdjacent: isNumberAdjacent(messages.get(k)!) }] as const),
+    );
+    expect(findSubstringCollisions(phrases)).toHaveLength(0);
+  });
+
+  it('#2406 재현 — settings.deactivateAgentDialogTitle({name})와 나머지 셋은 이제 안 겹친다', () => {
+    const messagesPath = path.resolve(__dirname, '../messages/ko.json');
+    const messages = flattenMessages(JSON.parse(readFileSync(messagesPath, 'utf8')));
+    const keys = [
+      'settings.deactivateAgentDialogTitle',
+      'settings.deactivateAgent',
+      'settings.activateAgent',
+      'settings.deactivateAgentDialogConfirm',
+    ];
+    const phrases = new Map(
+      keys
+        .filter((k) => messages.has(k))
+        .map((k) => [k, { value: messages.get(k)!, numberAdjacent: isNumberAdjacent(messages.get(k)!) }] as const),
+    );
+    expect(findSubstringCollisions(phrases)).toHaveLength(0);
   });
 });
 
@@ -225,5 +287,33 @@ describe('GRANDFATHER_BASELINE — 기존 채무는 통과, 새 충돌만 막는
 describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 PO 승인, 조용한 증감을 막는다', () => {
   it('#2367 최초 스캔 스냅샷은 정확히 40건이다', () => {
     expect(GRANDFATHER_BASELINE.size).toBe(40);
+  });
+});
+
+// story #2410(PO 지적, 2026-08-02): «선언된» 40건과 «실제로 지금 걸리는» 건수는 다른 축이다
+// (isNumberAdjacent 정밀화로 18건이 더 안 걸리게 됐다 — GRANDFATHER_BASELINE 상단 주석 참조).
+// console.log의 "안 걸림" 경고만으로는 다음 사람이 노이즈로 읽고 넘길 수 있어, 실제 저장소
+// 전체를 스캔해 «지금 몇 건이 실제로 걸리는지»를 이 테스트가 고정한다 — GRANDFATHER_BASELINE_
+// COUNT_TEST(선언 수 40)와 이 테스트(실 걸림 수 22)가 서로 다른 값을 지키는 것 자체가 그
+// 간극(18)이 조용히 사라지지 않게 하는 자리다.
+describe('GRANDFATHER_LIVE_COUNT_TEST — 「선언된 40」과 「지금 실제로 걸리는 수」는 다른 축이다', () => {
+  it('실제 저장소 스캔에서 지금 걸리는 grandfather는 22건이다(18건은 #2410으로 안 걸리게 됨)', () => {
+    const { grandfatherHit } = scanRepository();
+    expect(grandfatherHit.size).toBe(22);
+  });
+
+  it('새 FAIL은 없다(#2410 자체가 신규 회귀를 안 냈다는 증거)', () => {
+    const { newFindings } = scanRepository();
+    expect(newFindings.size).toBe(0);
+  });
+
+  // story #2413(2026-08-02) — #2410 직후엔 EXEMPT_PAIRS가 비어 있었지만 그게 "영구히 비어야
+  // 한다"는 규칙은 아니었다(#2410은 오탐 정밀화였지 EXEMPT_PAIRS 금지가 아니다). 이 테스트는
+  // "0건"이 아니라 "선언된 예외가 전부 실제로 쓰이고 있는가"(죽은 예외 없음)를 잰다 — sprints.days
+  // <-> sprints.overdueBadge(#2413, PO 승인)가 첫 실사용 사례다.
+  it('EXEMPT_PAIRS에 선언된 항목은 전부 실제로 걸린다(죽은 예외가 없다)', () => {
+    expect(GRANDFATHER_BASELINE.size).toBeGreaterThan(0); // sanity: baseline은 안 비었다
+    const { exemptHit } = scanRepository();
+    expect(exemptHit.size).toBe(EXEMPT_PAIRS.size);
   });
 });

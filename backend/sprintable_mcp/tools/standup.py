@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from mcp.types import TextContent
+from pydantic import Field
 
 from ..api_client import client
 from ..response import err, ok
@@ -14,6 +15,14 @@ class StandupDateInput(SprintableInput):
 
 class StandupHistoryInput(SprintableInput):
     limit: int | None = None
+    # story #2412 AC3 — 예전엔 여기 없는 `days`를 보내도(SprintableInput.extra="ignore" +
+    # FastMCP 내부 arg_model 둘 다 관대) 조용히 무시됐다(AC2 lockdown 후로는 애초에 미선언 인자가
+    # 전부 거부되지만, "최근 N일"은 실제 수요라 진짜 필드로 만든다). BE `/standups/history`의
+    # date>=오늘-(days-1) 필터로 전달(제출 시각이 아니라 스탠드업 실제 날짜 기준). ge=1 —
+    # BE(`Query(..., ge=1)`)와 경계를 맞춘다. 안 맞추면 days=0/음수가 MCP는 조용히 통과하고
+    # BE에서만 422로 막혀, 호출자에게 raw HTTP 에러 문자열이 그대로 새 나간다(올리베이라군
+    # 지적 — 배포 뒤 반드시 볼 것 ②).
+    days: int | None = Field(default=None, ge=1)
 
 
 class GetStandupInput(SprintableInput):
@@ -63,6 +72,8 @@ async def standup_history(args: StandupHistoryInput) -> list[TextContent]:
         params: dict = {"project_id": client.require_project_id()}
         if args.limit is not None:
             params["limit"] = str(args.limit)
+        if args.days is not None:
+            params["days"] = str(args.days)
         return ok(await client.get("/api/v2/standups/history", params=params))
     except Exception as exc:
         return err(str(exc))

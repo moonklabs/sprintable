@@ -1222,7 +1222,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               <button
                 type="button"
                 onClick={() => setShowDeleteConfirm(true)}
-                className="flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+                className="flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-foreground transition hover:bg-destructive/10"
                 aria-label={t('deleteStory')}
               >
                 <Trash2 className="h-3.5 w-3.5" />

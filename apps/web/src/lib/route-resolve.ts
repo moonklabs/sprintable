@@ -10,6 +10,7 @@
  * resolve 성공+캐시+301-chase 동작)만 증명한다.
  */
 import { SignJWT, jwtVerify } from 'jose';
+import { MIGRATED_RESOURCES, RENAMED_RESOURCES, RETIRED_RESOURCES } from './legacy-resource-tables';
 
 export const SP_RESOLVE_CACHE_COOKIE = 'sp_resolve_cache';
 
@@ -18,18 +19,56 @@ export const SP_RESOLVE_CACHE_COOKIE = 'sp_resolve_cache';
 export const RESOLVE_CACHE_TTL_SECONDS = 50;
 
 /**
- * 현재 라이브 flat 라우트 첫 세그먼트 전부(2026-07-15 grounding, apps/web/src/app/ 실측) — 이
- * 목록과 겹치는 첫 세그먼트는 workspace slug 시도 자체를 스킵한다. S2/S3 가 리소스를
- * `/{ws}/{proj}/{resource}` 로 이관하며 여기서 하나씩 제거해나간다(그 리소스가 이사하면 첫
- * 세그먼트가 더는 flat 라우트가 아니게 되므로).
+ * story #2393(2026-08-01) — 예전엔 아래 전부(레거시 리소스명 포함)가 "2026-07-15 grounding"
+ * 손 스냅샷 하나였다. story #2387이 같은 병(proxy.ts의 RENAMED_RESOURCE_ALIASES가 손 스냅샷
+ * 이라 리소스 표가 바뀌어도 안 따라옴)을 CI 가드 둘에서 고치며, 이 셋째는 «런타임 미들웨어
+ * 라우팅이 직접 쓰는 값»이라 리스크가 다르다는 이유로 후속 스토리로 남겼다(PR #2774) — 이
+ * 스토리가 그 후속이다.
+ *
+ * AC1 실측(2026-08-01, 코드 대조) — 손 스냅샷이 이미 6곳 어긋나 있었다:
+ *   ㉠`gates`·`more` — app/(authenticated)/ 밑에 실존하는 라이브 라우트인데 목록에 없었다.
+ *     이 둘이 워크스페이스 slug로 오인되면(리스크: 어떤 조직이 우연히 그 이름의 워크스페이스를
+ *     만들면 그 조직 사용자의 `/gates`·`/more` 요청이 실제 결재함/더보기 페이지 대신 워크스페이스
+ *     resolve 시도로 가로채진다) — 이번 판이 고치는 이유가 바로 이 자리다.
+ *   ㉡`apple-icon.png`·`manifest.webmanifest` — Next.js 메타데이터 파일 컨벤션이 실제로 그
+ *     경로에 라우트를 만든다(`pnpm build` 라우트 표로 직접 확認 — `manifest.ts`가 소스인데
+ *     서빙 경로는 파일명과 다른 `manifest.webmanifest`라는 것도 이번에 확認, story #2022가
+ *     인증 미들웨어 matcher에서 이미 한 번 겪은 것과 같은 함정).
+ *   ㉢`flow`·`goals` — `MIGRATED_RESOURCES`(proxy.ts의 bare-flat-URL 표)엔 있는데 여기 없었다.
+ *     정상 경로에선 `redirectLegacyResourcePath`가 먼저 가로채 실질 영향이 없지만, 그 함수가
+ *     이른 `return null`로 통과시키는 예외 경로(예: JWT에 org_id가 없는 경우, 있음 기록된
+ *     스토리 없이 이론상 가능)에서는 이 표까지 내려와야 안전하다.
+ *
+ * ⭐AC2 — 완전 자동파생은 하지 않는다(AC3 근거). 아래 두 갈래로 나눈 이유:
+ *   ①레거시 리소스명(MIGRATED_RESOURCES∪RENAMED_RESOURCES∪RETIRED_RESOURCES 키)은 순수 데이터
+ *     참조라 여기서 직접 import해 파생한다 — proxy.ts가 route-resolve.ts를 import하므로 반대
+ *     방향 import는 순환참조가 되고, 그래서 이 표들을 어느 쪽도 참조하지 않는 leaf 모듈
+ *     (`legacy-resource-tables.ts`)로 뺐다(proxy.ts는 거기서 import + 재수출). 이 부분은
+ *     스냅샷이 아니라 항상-동기화되는 참조라 «어긋날 수 없다».
+ *   ②라이브 top-level 페이지 라우트 + 메타데이터 파일 라우트는 `readdirSync`로 파생시키지
+ *     않는다 — 이 파일은 proxy.ts(Next.js 미들웨어)에 import돼 **edge 런타임 번들에 들어간다**
+ *     (`export const config = {...}`의 matcher가 있는 그 파일). CI 스크립트(`scripts/verify-
+ *     no-orphan-resource-routes.ts`)는 Node.js 프로세스로 도니 `readdirSync`가 안전하지만,
+ *     여기서 모듈 최상단에 `readdirSync`를 넣으면 edge 런타임(node:fs 미지원)에서 빌드/배포가
+ *     깨질 위험을 진다 — 실 요청 라우팅을 다루는 이 파일에서 그 위험을 질 이유가 없다(PO
+ *     지적과 동일 근거: "틀리면 사용자 요청이 다른 데로 간다"). 그래서 이 부분은 손 스냅샷으로
+ *     «남긴다»(AC3) — 대신 `scripts/verify-reserved-first-segments-sync.ts`(신규 CI 가드)가
+ *     이 목록과 실제 `app/` 구조의 어긋남을 매 빌드마다 잡는다(어긋나면 CI가 빨개진다 —
+ *     "남겨 둔다"로 끝내지 않는다).
  */
 export const RESERVED_FIRST_SEGMENTS = new Set([
-  'activity', 'api', 'artifacts', 'auth', 'board', 'channel', 'chats', 'dashboard',
-  'docs', 'epics', 'favicon.ico', 'forgot-password', 'glance', 'icon.svg', 'inbox',
-  'internal-dogfood', 'invite', 'login', 'loops', 'meetings', 'mfa', 'mockups',
-  'onboarding', 'org-briefing', 'organization', 'privacy', 'register', 'reset-password',
-  'retro', 'rewards', 'settings', 'share', 'sprints', 'standup', 'storage', 'terms',
-  'verify-email',
+  // ① 파생 — 레거시 리소스명. 순수 데이터 import라 항상 최신(위 주석 참조).
+  ...Object.keys(MIGRATED_RESOURCES),
+  ...Object.keys(RENAMED_RESOURCES),
+  ...Object.keys(RETIRED_RESOURCES),
+  // ② 손 스냅샷(의도적, 2026-08-01 재실측) — 라이브 top-level 페이지 라우트(`app/*`+
+  // `app/(authenticated)/*`, `[ws]`/`(authenticated)` 제외) + Next.js 메타데이터 파일
+  // 라우트. `scripts/verify-reserved-first-segments-sync.ts`가 어긋남을 CI에서 잡는다.
+  'activity', 'api', 'apple-icon.png', 'auth', 'channel', 'chats', 'dashboard',
+  'favicon.ico', 'forgot-password', 'gates', 'icon.svg', 'inbox', 'internal-dogfood',
+  'invite', 'login', 'manifest.webmanifest', 'meetings', 'mfa', 'more', 'onboarding',
+  'org-briefing', 'organization', 'privacy', 'register', 'reset-password', 'rewards',
+  'settings', 'share', 'terms', 'verify-email',
 ]);
 
 /**

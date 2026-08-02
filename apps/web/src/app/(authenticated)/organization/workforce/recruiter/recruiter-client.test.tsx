@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { spliceApiKey, splitRuntimeCapabilities, pickDefaultRuntime, groupAndFilterRoleTemplates, resolveKitFilename } from './recruiter-client';
+import { spliceApiKey, splitRuntimeCapabilities, pickDefaultRuntime, groupAndFilterRoleTemplates, resolveKitFilename, resolveVerifyGuideKey } from './recruiter-client';
 import type { McpConfigBundle, RuntimeCapabilityItem, RoleTemplateSummary } from '@/services/recruit';
 import { RUNTIME_CAPABILITIES_FALLBACK, KIT_FILENAME } from '@/services/recruit';
 import enMessages from '../../../../../../messages/en.json';
@@ -238,7 +238,7 @@ describe('recruiter.kitOrientingTitle — story #2377 A-1(수 하드코딩 금�
 });
 
 // story #2377 §2·§4 — STEP4 오리엔팅 카드가 3단계(①연결·②깨우기·③지침)로 서고 §4 발견 가능성
-// 링크(onboarding-guide.txt)가 실제로 화면에 있는지의 회귀가드. RecruiterClient는 역할 선택→
+// 링크(connect-guide.txt)가 실제로 화면에 있는지의 회귀가드. RecruiterClient는 역할 선택→
 // 스코프→에이전트 생성→recruit() 다단 위저드라 이 컴포넌트 전체를 마운트하는 기존 테스트가
 // 없다(이 파일의 나머지 테스트도 전부 export된 순수 함수만 잰다) — 여기서도 그 관례를 따르되,
 // STEP4는 순수 함수로 안 빠져 있으므로 «소스 텍스트» 수준에서 잰다(verify-no-alpha-focus-ring.ts
@@ -247,8 +247,8 @@ describe('recruiter.kitOrientingTitle — story #2377 A-1(수 하드코딩 금�
 describe('recruiter-client STEP4 — story #2377 §2(단계 셋)·§4(발견 가능성 링크) 소스 회귀가드', () => {
   const source = readFileSync(fileURLToPath(new URL('./recruiter-client.tsx', import.meta.url)), 'utf-8');
 
-  it('links to onboarding-guide.txt from the STEP4 card — a screen link, not just a file that exists', () => {
-    expect(source).toContain('href="/onboarding-guide.txt"');
+  it('links to connect-guide.txt from the STEP4 card — a screen link, not just a file that exists', () => {
+    expect(source).toContain('href="/connect-guide.txt"');
   });
 
   it('renders three numbered steps (Connect·Wake up·Instructions), not the old two', () => {
@@ -259,5 +259,54 @@ describe('recruiter-client STEP4 — story #2377 §2(단계 셋)·§4(발견 가
 
   it('shows an explicit "not registered yet" fallback for the wake-up step instead of staying silent', () => {
     expect(source).toContain("t('kitOrientingWakeBodyUnknown')");
+  });
+});
+
+// story #2792 design:changes(카디르 QA, 2026-08-02) — verifyGuideMcp가 transport 무관 항상
+// "tool을 호출해야 검증이 완료된다"고 말했다(http만 사실). stdio는 세션 연결만으로 SSE ack가
+// 자동 진행되므로 별개 문장(verifyGuideMcpStdio)이어야 한다 — 이 판정이 다시 안 갈리게 pin.
+describe('resolveVerifyGuideKey — story #2792 (STEP5 안내문도 showVerifyExamplePrompt와 같은 축)', () => {
+  it('no mcp_config → connector guide regardless of transport', () => {
+    expect(resolveVerifyGuideKey(false, 'http')).toBe('verifyGuideConnector');
+    expect(resolveVerifyGuideKey(false, null)).toBe('verifyGuideConnector');
+  });
+
+  it('mcp_config + http → the tool-call-completes-verification guide (accurate for heartbeat)', () => {
+    expect(resolveVerifyGuideKey(true, 'http')).toBe('verifyGuideMcp');
+  });
+
+  it('mcp_config + stdio → the auto-completes-on-connect guide, not the tool-call one', () => {
+    expect(resolveVerifyGuideKey(true, 'stdio')).toBe('verifyGuideMcpStdio');
+  });
+
+  it('both locales have the new key', () => {
+    const en = (enMessages as { recruiter: Record<string, string> }).recruiter.verifyGuideMcpStdio;
+    const ko = (koMessages as { recruiter: Record<string, string> }).recruiter.verifyGuideMcpStdio;
+    expect(en).toBeTruthy();
+    expect(ko).toBeTruthy();
+  });
+});
+
+// story #2410 ③-1(유나 판정, 2026-08-02) — connect-step에만 있던 verifiedBanner(aria-live 성공
+// 낭독)가 recruiter STEP5에는 없었다. 근거: ①같은 제품 안에서 왜 다른지가 코드 어디에도 안
+// 적혀 있었다(누락이지 판단이 아니다) ②recruiter STEP5는 채용할 때마다(반복) 뜨는 화면이라
+// connect-step(신규 가입 온보딩, 1회성)보다 없을 때의 대가가 크다. 소스 텍스트 수준으로
+// pin(이 파일의 기존 관례 — 컴포넌트 전체 마운트 테스트가 없다).
+describe('recruiter-client STEP5 — story #2410 ③-1(verifiedBanner)', () => {
+  const source = readFileSync(fileURLToPath(new URL('./recruiter-client.tsx', import.meta.url)), 'utf-8');
+
+  it('renders verifiedBanner with the same role/aria contract as connect-step (role=status aria-live=polite aria-atomic=true)', () => {
+    const m = /role="status" aria-live="polite" aria-atomic="true"[^>]*>\s*\{tOnboarding\('verifiedBanner'\)\}/.exec(source);
+    expect(m).not.toBeNull();
+  });
+
+  it('reuses the same i18n key as connect-step, not a recruiter-local one (single key per Yuna\'s judgment)', () => {
+    expect(source).toContain("tOnboarding('verifiedBanner')");
+    expect(source).not.toMatch(/t\('recruiterVerifiedBanner'\)|t\('verifiedBanner'\)/);
+  });
+
+  it('only renders when verified — does not duplicate the rail\'s own step-by-step aria-live announcements', () => {
+    // {verified && ( ... verifiedBanner ... )} — gated, not unconditional.
+    expect(source).toMatch(/\{verified && \([\s\S]{0,700}tOnboarding\('verifiedBanner'\)/);
   });
 });

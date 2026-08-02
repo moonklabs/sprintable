@@ -24,10 +24,12 @@ def anyio_backend():
 def test_schema_project_id_optional():
     from app.schemas.standup import StandupSelfUpdate, StandupUpsert
 
-    # project_id 생략해도 검증 통과(org-level)
-    u = StandupUpsert(author_id=uuid.uuid4(), date=_date(2026, 6, 5))
+    # project_id 생략해도 검증 통과(org-level). story #2414 후속 — done/plan/blockers 전부
+    # 빈 것은 이제 별개 사유(전부 blank)로 거부되므로, 이 테스트가 재는 축(project_id
+    # optionality)과 안 섞이게 done 하나는 채운다.
+    u = StandupUpsert(author_id=uuid.uuid4(), date=_date(2026, 6, 5), done="did stuff")
     assert u.project_id is None
-    s = StandupSelfUpdate(date=_date(2026, 6, 5))
+    s = StandupSelfUpdate(date=_date(2026, 6, 5), done="did stuff")
     assert s.project_id is None
 
 

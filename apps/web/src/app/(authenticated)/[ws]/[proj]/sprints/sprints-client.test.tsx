@@ -9,6 +9,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../../messages/ko.json';
+import { isSprintOverdue, daysOverdue } from './sprints-client';
 
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
@@ -122,5 +123,85 @@ describe('SprintsClient — 스프린트 first-touch 정체성', () => {
     expect(row).not.toBeUndefined();
     await act(async () => { row!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(container.querySelector('button[aria-label="스프린트 삭제"]')).toBeNull();
+  });
+});
+
+// story #2413 — 실측(Sprint 13: end_date 2026-06-08·planning, 오늘 대비 55일 지남)에서 나온
+// "종료일 지났는데 planning/active"를 화면이 말하는가.
+describe('isSprintOverdue/daysOverdue — story #2413', () => {
+  it('planning + end_date가 지남 → overdue(실측 Sprint 13과 같은 모양)', () => {
+    const now = new Date('2026-08-02T00:00:00Z');
+    expect(isSprintOverdue({ status: 'planning', end_date: '2026-06-08' }, now)).toBe(true);
+    expect(daysOverdue('2026-06-08', now)).toBe(55);
+  });
+
+  it('active + end_date가 지남 → overdue', () => {
+    const now = new Date('2026-08-02T00:00:00Z');
+    expect(isSprintOverdue({ status: 'active', end_date: '2026-07-01' }, now)).toBe(true);
+  });
+
+  it('closed면 end_date가 아무리 지나도 overdue 아님 — 닫힌 것은 판정 대상이 아니다', () => {
+    const now = new Date('2026-08-02T00:00:00Z');
+    expect(isSprintOverdue({ status: 'closed', end_date: '2020-01-01' }, now)).toBe(false);
+  });
+
+  it('음성대조 — end_date가 아직 안 지났으면 overdue 아니다', () => {
+    const now = new Date('2026-08-02T00:00:00Z');
+    expect(isSprintOverdue({ status: 'planning', end_date: '2026-12-31' }, now)).toBe(false);
+  });
+});
+
+describe('SprintsClient — 종료일 지난 스프린트 배지 렌더(story #2413)', () => {
+  it('planning + 과거 end_date(2020, 시간과 무관히 항상 지남) 스프린트는 목록에 경고 배지를 보인다', async () => {
+    stubFetch([{ id: 's1', title: 'Overdue Sprint', status: 'planning', start_date: '2020-01-01', end_date: '2020-01-14' }]);
+    await mount();
+    const html = container.innerHTML;
+    expect(html).toContain('지남');
+  });
+
+  // 유나 규격(2026-08-02, #2791 design:changes) — warning tint 위 text-warning은 light에서
+  // 2.06(AA 미달)이라 이 배지만 text-foreground로 덮는다. 회귀 가드: text-warning 단독으로
+  // 되돌아가지 않는다(badge.tsx variant 자체가 text-warning을 주므로, 오버라이드 className이
+  // 빠지면 이 배지가 다시 안 읽히는 조합으로 돌아간다).
+  // ⚠️카디르 QA(2026-08-02) — 이 파일엔 warning 배지 콜사이트가 «둘»(목록·상세패널)인데 이
+  // 테스트는 목록만 쟀다. 뮤테이션으로 셋(이 파일 둘 + retro 하나)을 동시에 제거하니 정확히
+  // 2개만 RED, 상세패널은 아무 테스트도 안 죽고 조용히 통과했다 — "만진 것 3곳·검사한 것 2곳"
+  // 차이가 조용히 되돌아갈 자리였다. 아래에 상세패널용을 추가해 그 차이를 없앤다.
+  // ⇒ 이 가드가 보는 것은 이 «파일의 warning 배지 콜사이트 둘(목록·상세패널)»뿐이다 — 다른
+  // 파일(retro/page.tsx)의 warning 배지는 이 가드가 못 본다. badge.tsx의 warning variant
+  // 자체를 고치는 것도 아니라 호출부 className 오버라이드라, 다음에 누군가 새로
+  // variant="warning"을 쓰면 이 가드는 그 자리를 못 잡는다(오버라이드 방식의 구조적 한계 —
+  // PO 지적). warning 전면은 #2420이 badge.tsx에서 닫는다.
+  it('목록의 경고 배지는 text-foreground로 오버라이드돼 있다(유나 규격) — text-warning 단독이 아니다', async () => {
+    stubFetch([{ id: 's1', title: 'Overdue Sprint', status: 'planning', start_date: '2020-01-01', end_date: '2020-01-14' }]);
+    await mount();
+    const badge = [...container.querySelectorAll('span')].find((el) => el.textContent?.includes('지남'));
+    expect(badge).not.toBeUndefined();
+    expect(badge!.className).toContain('text-foreground');
+  });
+
+  it('상세패널 헤더의 경고 배지도 text-foreground로 오버라이드돼 있다', async () => {
+    stubFetch([{ id: 's1', title: 'Overdue Sprint', status: 'planning', start_date: '2020-01-01', end_date: '2020-01-14' }]);
+    await mount();
+    const row = [...container.querySelectorAll('li')].find((li) => li.textContent?.includes('Overdue Sprint'));
+    expect(row).not.toBeUndefined();
+    await act(async () => { row!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const badges = [...container.querySelectorAll('span')].filter((el) => el.textContent?.includes('지남'));
+    expect(badges.length).toBeGreaterThanOrEqual(2); // 목록 + 상세패널
+    for (const badge of badges) {
+      expect(badge.className).toContain('text-foreground');
+    }
+  });
+
+  it('음성대조 — 정상(미래 end_date) planning 스프린트는 경고 배지가 없다', async () => {
+    stubFetch([{ id: 's1', title: 'Fresh Sprint', status: 'planning', start_date: '2099-01-01', end_date: '2099-01-14' }]);
+    await mount();
+    expect(container.innerHTML).not.toContain('지남');
+  });
+
+  it('음성대조 — closed 스프린트는 end_date가 과거여도 경고 배지가 없다', async () => {
+    stubFetch([{ id: 's1', title: 'Old Closed Sprint', status: 'closed', start_date: '2020-01-01', end_date: '2020-01-14' }]);
+    await mount();
+    expect(container.innerHTML).not.toContain('지남');
   });
 });

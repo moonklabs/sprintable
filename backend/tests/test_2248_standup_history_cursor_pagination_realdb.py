@@ -111,14 +111,14 @@ async def test_second_page_returns_different_rows_realdb():
 
         async with Session() as s:
             repo = StandupEntryRepository(s, ORG)
-            page1 = await list_standup_history(project_id=PROJ, limit=2, cursor=None, repo=repo, auth=_auth())
+            page1 = await list_standup_history(project_id=PROJ, limit=2, cursor=None, days=None, repo=repo, auth=_auth())
         assert [e.id for e in page1["data"]] == newest_first[0:2]
         assert page1["meta"]["has_more"] is True
 
         async with Session() as s:
             repo = StandupEntryRepository(s, ORG)
             page2 = await list_standup_history(
-                project_id=PROJ, limit=2, cursor=page1["meta"]["next_cursor"], repo=repo, auth=_auth(),
+                project_id=PROJ, limit=2, cursor=page1["meta"]["next_cursor"], days=None, repo=repo, auth=_auth(),
             )
         page2_ids = [e.id for e in page2["data"]]
         assert page2_ids == newest_first[2:4], "page2가 page1과 다른 행을 반환해야 한다(#2231 AC3 본체)"
@@ -127,7 +127,7 @@ async def test_second_page_returns_different_rows_realdb():
         async with Session() as s:
             repo = StandupEntryRepository(s, ORG)
             page3 = await list_standup_history(
-                project_id=PROJ, limit=2, cursor=page2["meta"]["next_cursor"], repo=repo, auth=_auth(),
+                project_id=PROJ, limit=2, cursor=page2["meta"]["next_cursor"], days=None, repo=repo, auth=_auth(),
             )
         assert [e.id for e in page3["data"]] == newest_first[4:5]
         assert page3["meta"]["has_more"] is False
@@ -148,7 +148,7 @@ async def test_no_cursor_under_limit_has_more_false_realdb():
 
         async with Session() as s:
             repo = StandupEntryRepository(s, ORG)
-            page = await list_standup_history(project_id=PROJ, limit=20, cursor=None, repo=repo, auth=_auth())
+            page = await list_standup_history(project_id=PROJ, limit=20, cursor=None, days=None, repo=repo, auth=_auth())
         assert [e.id for e in page["data"]] == seeded
         assert page["meta"]["has_more"] is False
         assert page["meta"]["next_cursor"] is None
@@ -177,7 +177,7 @@ async def test_non_string_truthy_cursor_treated_as_no_cursor_not_crash_realdb():
 
         async with Session() as s:
             repo = StandupEntryRepository(s, ORG)
-            page = await list_standup_history(project_id=PROJ, limit=20, cursor=fake_sentinel, repo=repo, auth=_auth())
+            page = await list_standup_history(project_id=PROJ, limit=20, cursor=fake_sentinel, days=None, repo=repo, auth=_auth())
         assert [e.id for e in page["data"]] == seeded, "커서 없음으로 취급돼 전체가 나와야 한다(크래시 아님)"
     finally:
         await eng.dispose()
@@ -197,7 +197,7 @@ async def test_invalid_cursor_format_400_realdb():
         async with Session() as s:
             repo = StandupEntryRepository(s, ORG)
             with pytest.raises(HTTPException) as ei:
-                await list_standup_history(project_id=PROJ, limit=20, cursor="not-a-date", repo=repo, auth=_auth())
+                await list_standup_history(project_id=PROJ, limit=20, cursor="not-a-date", days=None, repo=repo, auth=_auth())
             assert ei.value.status_code == 400
     finally:
         await eng.dispose()

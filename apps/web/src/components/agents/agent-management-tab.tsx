@@ -8,6 +8,14 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 interface OrgAgent {
   id: string;
@@ -31,6 +39,15 @@ interface AgentManagementTabProps {
 }
 
 /**
+ * story #2406 AC1 — 되돌릴 수 없는 방향(비활성화)에만 확認을 붙이고, 되돌릴 수 있는 방향
+ * (활성화)엔 안 붙인다(PO 설계 판단 ②: 양쪽에 붙이면 무게가 같아져 되돌릴 수 없는 쪽의 경고가
+ * 묽어진다). 실사고(2026-08-01) — 확認 없이 즉시 실행되어 PO 자신의 계정이 잘못 눌려 비활성화됐다.
+ */
+export function requiresDeactivateConfirm(agent: Pick<OrgAgent, 'is_active'>): boolean {
+  return agent.is_active;
+}
+
+/**
  * story d63d3f73 §5② — org 에이전트 목록(관리 탭). 접근 프로젝트 수 요약은 에이전트별
  * fan-out(A×P) 대신 프로젝트별 access 를 P 콜로 한 번만 조회해 member_id 기준으로 집계한다
  * (AgentProjectAccessSection 의 단일-에이전트 fan-out과 동일 원천, org 목록에 맞게 방향만 반전 —
@@ -50,6 +67,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   const [loadError, setLoadError] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [deactivateTarget, setDeactivateTarget] = useState<OrgAgent | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // settings/page.tsx 컨벤션과 동일: plain(비-useCallback) 헬퍼 — mount effect가 이를 호출하는
@@ -128,6 +146,23 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
     setTogglingId(null);
   };
 
+  // story #2406 AC1 — 되돌릴 수 없는 방향(비활성화)만 확認 다이얼로그로 가로챈다.
+  // 활성화는 되돌릴 수 있는 조작이라 즉시 실행(설계 판단 ②, PO 확認).
+  const requestToggle = (agent: OrgAgent) => {
+    if (requiresDeactivateConfirm(agent)) {
+      setDeactivateTarget(agent);
+      return;
+    }
+    void handleToggleActive(agent);
+  };
+
+  const confirmDeactivate = async () => {
+    if (!deactivateTarget) return;
+    const target = deactivateTarget;
+    setDeactivateTarget(null);
+    await handleToggleActive(target);
+  };
+
   return (
     <div className="p-6">
       <SectionCard>
@@ -188,7 +223,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                       <Button
                         variant="glass"
                         size="sm"
-                        onClick={() => void handleToggleActive(agent)}
+                        onClick={() => requestToggle(agent)}
                         disabled={togglingId === agent.id}
                       >
                         {togglingId === agent.id ? '...' : agent.is_active ? t('deactivateAgent') : t('activateAgent')}
@@ -204,6 +239,31 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
           )}
         </SectionCardBody>
       </SectionCard>
+
+      <Dialog open={!!deactivateTarget} onOpenChange={(o) => { if (!o) setDeactivateTarget(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            {/* story #2406 AC1 — 대상 이름은 «제목»에(본문에 두면 안 읽힌다). 실사고: 확認 없이
+                즉시 실행되어 목록 최상단 행(다른 사람)이 잘못 눌려 비활성화됐다. */}
+            <DialogTitle>
+              {deactivateTarget ? t('deactivateAgentDialogTitle', { name: deactivateTarget.name }) : ''}
+            </DialogTitle>
+            <DialogDescription>{t('deactivateAgentDialogBody')}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDeactivateTarget(null)} disabled={togglingId === deactivateTarget?.id}>
+              {tc('cancel')}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void confirmDeactivate()}
+              disabled={togglingId === deactivateTarget?.id}
+            >
+              {togglingId === deactivateTarget?.id ? '...' : t('deactivateAgentDialogConfirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
