@@ -62,6 +62,7 @@ def _fake_msg(attachments):
         id=uuid.uuid4(), conversation_id=uuid.uuid4(), thread_id=None,
         reply_count=0, last_reply_at=None, content="hi", mentioned_ids=[],
         attachments=attachments, created_at=datetime.now(timezone.utc),
+        deleted_at=None,  # story #2319 — _msg_payload가 이제 이 필드를 읽는다.
     )
 
 

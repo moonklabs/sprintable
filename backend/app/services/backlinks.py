@@ -365,13 +365,16 @@ async def list_entity_backlinks(
     `still_exists`(story #2299, E-CONNECT — "끊어진 참조 가시성" 배선): 이 backlink item의
     **SOURCE**(target이 아니다 — target은 URL의 id 자신이고, 이 함수에 도달했다는 것 자체가
     호출부의 404 게이트를 통과했다는 뜻이라 항상 존재한다. "끊어짐"이 있을 수 있는 쪽은
-    source뿐이다)가 아직 살아 있는지. doc source는 soft-delete 여부(`Doc.deleted_at`)로
-    판정 — 예전엔 이 조건이 JOIN에 있어 삭제된 source가 결과에서 통째로 빠졌다(PO가 "조용히
-    사라지는 것"으로 재판정, `test_soft_deleted_source_doc_excluded` 개정). chat_message
-    source는 SOURCE_ONLY_TYPES(불변, soft-delete 없음)라 항상 True — genuinely-missing
-    message row(하드삭제/오손 데이터)는 이 필드가 다루는 대상이 아니고 여전히 결과에서
-    제외된다(`test_missing_source_message_excluded_no_crash`, 이 스토리가 안 건드림 —
-    "삭제 lifecycle"과 "오손 데이터"는 다른 문제).
+    source뿐이다)가 아직 살아 있는지. doc/meeting/story source는 soft-delete 여부
+    (`*.deleted_at`)로 판정 — 예전엔 이 조건이 JOIN에 있어 삭제된 source가 결과에서 통째로
+    빠졌다(PO가 "조용히 사라지는 것"으로 재판정, `test_soft_deleted_source_doc_excluded` 개정).
+    ⛔story #2319(정정) — chat_message source도 이제 같은 패턴이다. 이 함수가 작성될 당시
+    chat_message는 "SOURCE_ONLY_TYPES(불변, soft-delete 없음)"라 가정해 항상 True를 하드코딩
+    했었으나, #2319가 메시지 삭제(tombstone — 행은 남고 content만 지워짐)를 도입하면서 그
+    가정이 깨졌다. `ConversationMessage.deleted_at`도 doc/meeting/story와 동형으로 판정한다.
+    genuinely-missing message row(하드삭제/오손 데이터, 이 필드가 다루는 대상이 아님)는
+    여전히 결과에서 제외된다(`test_missing_source_message_excluded_no_crash`, 이 스토리가
+    안 건드림 — "삭제 lifecycle"과 "오손 데이터"는 다른 문제).
 
     ⛔story #2299 AC⑥(이 판이 못 잡는 것 선언):
       · `reference_core.list_references`는 여전히 아무도 안 부른다(#2591이 증명한 채 그대로 —
@@ -471,6 +474,10 @@ async def list_entity_backlinks(
             ConversationMessage.conversation_id.label("msg_conversation_id"),
             ConversationMessage.content.label("msg_content"),
             ConversationMessage.sender_id.label("msg_sender_id"),
+            # story #2319: chat_message도 이제 soft-delete(tombstone)될 수 있다 — doc/meeting/
+            # story와 동형으로 deleted_at을 별도 컬럼으로 select(JOIN ON절엔 안 넣는다 — #2299
+            # 교훈 그대로, 넣으면 conversation_id가 NULL이 되어 authz가 깨진다).
+            ConversationMessage.deleted_at.label("msg_deleted_at"),
             # story #2267(C-9): meeting·story도 source가 될 수 있다(창조-출처, relation=
             # 'created_from') — Doc과 동형(직접 project_id 보유·soft-delete)이라 같은 패턴.
             # #2299 교훈 그대로: deleted_at은 JOIN ON절에 안 넣는다(soft-delete돼도 project_id는
@@ -596,8 +603,8 @@ async def list_entity_backlinks(
             "meeting": None,
             "story": None,
             # story #2299 AC⑤: 「끊어짐」은 색/경고가 아니라 사실 필드다 — 렌더(색·문구)는 FE
-            # 몫. chat_message는 SOURCE_ONLY_TYPES(불변·soft-delete 없음, reference_registry.py
-            # 참조)라 항상 True — doc·meeting·story만 아래서 실제 판정으로 덮어쓴다.
+            # 몫. 넷 다 아래서 각 source_type의 실제 판정으로 덮어쓴다(기본값 True는 그 사이
+            # 매치 실패한 source_type 없음 방어일 뿐 — 이 함수가 아는 네 타입은 전부 판정됨).
             "still_exists": True,
         }
         if m.source_type == "doc":
@@ -611,6 +618,11 @@ async def list_entity_backlinks(
                 "content_snippet": build_content_snippet(r.msg_content),
                 "sender": _member_summary_same_org(sender, org_id),
             }
+            # story #2319: tombstone된 메시지도 행은 살아있다(하드삭제 아님) — 그래서 아래는
+            # "행이 있는가"가 아니라 "지워졌는가"를 잰다. FE는 still_exists=False를 보면 기존
+            # 제네릭 렌더(entity-backlinks-section.tsx, "대상이 없습니다" 무채색 배지)를 그대로
+            # 태운다 — content_snippet이 빈 문자열이라도 별도 분기 불필요.
+            item["still_exists"] = r.msg_deleted_at is None
         elif m.source_type == "meeting":
             item["meeting"] = {"id": str(m.source_id), "title": r.meeting_title}
             item["still_exists"] = r.meeting_deleted_at is None

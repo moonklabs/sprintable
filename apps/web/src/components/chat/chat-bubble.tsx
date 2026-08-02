@@ -225,6 +225,8 @@ export function ChatBubble({
 }: ChatBubbleProps) {
   const t = useTranslations('chats');
   const isAgent = message.sender_type === 'agent';
+  // story #2319 — tombstone. content는 서버가 이미 ""로 스크럽했다(오발송 대응 목적).
+  const isDeleted = Boolean(message.deleted_at);
   // S8: 슬래시 커맨드는 전용 버블(brand·mono·⌘). 리터럴(`//`)은 dequote된 일반 텍스트.
   const isCmd = isCommand(message.content);
   const isLiteral = !isCmd && message.content.startsWith('//');
@@ -342,7 +344,15 @@ export function ChatBubble({
               무시하고 새어나간다(재현·측정 확認 — 아래 근거 참고). max-w-full로 컬럼의 269px
               상한을 이 자식에도 강제해야 안의 pre(overflow-x-auto)·표(overflow-x-auto 래퍼)가
               비로소 자기 박스 안에서 스크롤된다. */}
-          {isCmd ? (
+          {isDeleted ? (
+            // story #2319 — tombstone placeholder. 색/경고 없이 무채색(story #2299 AC⑤와 같은
+            // 규율 — 「끊어짐」은 사실 표시일 뿐 에러가 아니다).
+            <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm italic text-muted-foreground ${
+              isMine ? 'rounded-tr-sm bg-muted/50' : 'rounded-tl-sm bg-muted/50'
+            }`}>
+              {t('deletedMessagePlaceholder')}
+            </div>
+          ) : isCmd ? (
             <div className={`min-w-0 max-w-full rounded-xl border border-info/30 bg-info/8 px-3.5 py-2 ${isMine ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
               <div className="mb-1 flex items-center gap-1 text-[10px] font-medium text-info">
                 <Terminal className="h-3 w-3" aria-hidden />
@@ -364,8 +374,9 @@ export function ChatBubble({
           )}
 
           {/* story #2283 — 보낸 직후 그 메시지 바로 아래에서 한 번 제안(작성자 본인에게만,
-              isMine 게이트는 컴포넌트 내부에서 건다). ⛔남의 메시지엔 안 뜬다. */}
-          {!isCmd && <ReferenceSuggestionRow messageId={message.id} content={message.content} isMine={isMine} projectId={projectId} />}
+              isMine 게이트는 컴포넌트 내부에서 건다). ⛔남의 메시지엔 안 뜬다. tombstone된
+              메시지엔 제안할 실 내용이 없다(story #2319). */}
+          {!isCmd && !isDeleted && <ReferenceSuggestionRow messageId={message.id} content={message.content} isMine={isMine} projectId={projectId} />}
 
           {/* Attachments — a54ddc16: auth-gated 서명 라우트 경유(public 직링크 미사용).
               이미지=AttachmentImage(3상태 render)·오디오/비디오=AttachmentMedia(story #2051,
@@ -436,6 +447,7 @@ export function ChatBubble({
           onDelete={handleDelete}
           onClose={() => setContextMenu(null)}
           citeAction={citeAction}
+          isDeleted={isDeleted}
         />
       )}
     </>

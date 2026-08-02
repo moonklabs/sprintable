@@ -107,6 +107,50 @@ describe('ChatBubble — story #2263 AC6 유령 칩(stored 참조 대조)', () =
   });
 });
 
+describe('ChatBubble — story #2319 tombstone(메시지 삭제) 렌더', () => {
+  it('deleted_at이 있으면 원문 대신 placeholder를 그린다', async () => {
+    const deletedMsg: ChatMessage = { ...baseMessage, content: '', deleted_at: '2026-08-02T00:00:00.000Z' };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={deletedMsg} isMine={true} />));
+    });
+    expect(container.textContent).toContain('삭제된 메시지입니다');
+    expect(container.textContent).not.toContain('제안서.md');
+  });
+
+  it('음성대조 — deleted_at이 없으면(정상 메시지) placeholder가 안 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, deleted_at: null }} isMine={true} />));
+    });
+    expect(container.textContent).not.toContain('삭제된 메시지입니다');
+  });
+
+  it('본인 메시지도 이미 삭제됐으면 컨텍스트 메뉴에 「삭제」를 다시 제시하지 않는다', async () => {
+    const deletedMsg: ChatMessage = { ...baseMessage, content: '', deleted_at: '2026-08-02T00:00:00.000Z' };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={deletedMsg} isMine={true} />));
+    });
+    const bubbleRoot = container.querySelector('[id^="msg-"]');
+    expect(bubbleRoot).not.toBeNull();
+    await act(async () => {
+      bubbleRoot!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+    });
+    const menuItems = Array.from(document.body.querySelectorAll('[role="menuitem"]')).map((el) => el.textContent);
+    expect(menuItems).not.toContain('삭제');
+  });
+
+  it('음성대조 — 본인 메시지가 안 지워진 상태면 컨텍스트 메뉴에 「삭제」가 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, deleted_at: null }} isMine={true} />));
+    });
+    const bubbleRoot = container.querySelector('[id^="msg-"]');
+    await act(async () => {
+      bubbleRoot!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+    });
+    const menuItems = Array.from(document.body.querySelectorAll('[role="menuitem"]')).map((el) => el.textContent);
+    expect(menuItems).toContain('삭제');
+  });
+});
+
 describe('ChatBubble 문서 임베드 미리보기 모달 — 폴링 유발 리렌더 생존', () => {
   it('무관한 prop(presenceStatus)이 바뀌어 부모가 리렌더돼도 열린 모달이 유지된다', async () => {
     await act(async () => {

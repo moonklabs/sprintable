@@ -37,12 +37,19 @@ artifact(VisualArtifact)·hypothesis·evidence 4종을 더 연다 — doc·story
 
 ⛔story #2273(C-1b) 실측으로 발견: source(자리)와 target(대상)은 "존재판정이 필요한가"가
 다르다 — chat_message는 정당한 source_type(채팅 write-path가 실제로 매일 쓰는 값)이지만
-**target으로 가리켜질 일이 없어 resolver가 없다**(메시지는 불변·삭제돼도 backlinks
-read-path의 LEFT JOIN이 자연히 걸러낸다, 별도 존재판정 불필요). 이걸 ENTITY_RESOLVERS
-(target 전용 registry)에 없다고 "오타/미등록"으로 취급하면 **정상 데이터를 사고로 오탐**한다
+**target으로 가리켜질 일이 없어 resolver가 없다**. 이걸 ENTITY_RESOLVERS(target 전용
+registry)에 없다고 "오타/미등록"으로 취급하면 **정상 데이터를 사고로 오탐**한다
 (count_orphan_types 실측에서 직접 걸림 — chat_message가 source로 366건 "orphan"으로
 잡혔던 것). `SOURCE_ONLY_TYPES`가 그 구분을 명시한다: source로는 유효하나 target
 존재판정은 없는 타입.
+
+⚠️story #2319 정정: 위 "메시지는 불변" 서술은 이제 틀렸다 — #2319가 채팅 메시지 삭제
+(tombstone, ConversationMessage.deleted_at)를 도입했다. 그래도 이 상수·registry 로직
+자체는 안 바뀐다 — `SOURCE_ONLY_TYPES`는 "target으로 안 쓰인다"만 말하는 것이지 "안
+지워진다"를 말하는 게 아니다(그 둘은 별개 축이었고 우연히 같은 문장에 같이 적혀 있었을
+뿐). source의 존재판정(soft-delete 여부)은 `backend/app/services/backlinks.py`의
+`still_exists` 계산이 별도로 한다 — 그쪽이 #2319로 갱신됐다(더는 chat_message 하드코딩
+True가 아니다).
 """
 from __future__ import annotations
 

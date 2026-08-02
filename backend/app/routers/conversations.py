@@ -403,6 +403,9 @@ def _msg_payload(
         "thread_id": str(msg.thread_id) if msg.thread_id else None,
         "reply_count": msg.reply_count,
         "last_reply_at": msg.last_reply_at.isoformat() if msg.last_reply_at else None,
+        # story #2319 — tombstone. content는 삭제 시 이미 ""로 덮여 있다(스크럽); FE는 이
+        # 필드로 placeholder("삭제된 메시지입니다")를 렌더한다(i18n — 여기 문구를 안 심는다).
+        "deleted_at": msg.deleted_at.isoformat() if msg.deleted_at else None,
         "content": msg.content,
         "mentioned_ids": [str(m) for m in (msg.mentioned_ids or [])],
         # E-FILE S1: 첨부 직렬화 (SSE + GET messages 공통). list 아니면 [](레거시/None/mock 안전).
@@ -1460,6 +1463,55 @@ async def get_message(
         db, org_id=org_id, source_type="chat_message", source_ids=[msg.id],
     )
     return _msg_payload(msg, sender_map.get(msg.sender_id), references=refs_by_msg.get(msg.id, []))
+
+
+@router.delete("/{conversation_id}/messages/{message_id}", status_code=200)
+async def delete_message(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """DELETE /api/v2/conversations/{id}/messages/{message_id} — story #2319.
+
+    PO 결정(2026-07-29 04:41Z): tombstone, hard delete 아님. 행은 남고 content만 실제로
+    지운다(ConversationMessage.deleted_at — SoftDeleteMixin, 모델 docstring 참조: Doc/Story와
+    달리 목록에서 안 걸러낸다). 본인 메시지만 — FE의 isMine 게이트는 UI일 뿐이라 서버가
+    독립으로 강제한다(get_message와 동형 404 스코핑 + 소유자 403).
+    """
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    member = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+
+    msg = (await db.execute(
+        select(ConversationMessage).where(
+            ConversationMessage.id == message_id,
+            ConversationMessage.conversation_id == conversation_id,
+        )
+    )).scalar_one_or_none()
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if msg.sender_id != member.id:
+        raise HTTPException(status_code=403, detail="Not the message owner")
+
+    # ⛔AC7 블라인드스팟(의도적 범위 밖, 선언) — 이 삭제는 다른 참가자의 이미 열려 있는 화면에
+    # 실시간(SSE) 반영되지 않는다. send_message의 실시간 fan-out(_dispatch_conversation_event)은
+    # Event insert·recipient_seq·webhook-dedup까지 얽힌 별도 배선이라, 이 스토리 하나로 같이
+    # 만들면 그 정합성까지 새로 떠안는다 — 여기서는 안 한다. 새로고침/재조회 시에는 정확히
+    # 반영된다(AC5 ①의 실측 기준). 실시간 전파가 필요해지면 별도 스토리로 뗀다.
+    if msg.deleted_at is None:
+        msg.deleted_at = datetime.now(timezone.utc)
+        msg.content = ""  # ③ 오발송 스크럽 — 플레이스홀더 문구는 FE가 deleted_at 보고 렌더(i18n).
+        await db.flush()
+        await db.commit()
+
+    return {"id": str(msg.id), "deleted_at": msg.deleted_at.isoformat() if msg.deleted_at else None}
 
 
 @router.get("/{conversation_id}/messages/{message_id}/replies")
