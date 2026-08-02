@@ -9,6 +9,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../../messages/ko.json';
+import { isSprintOverdue, daysOverdue } from './sprints-client';
 
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
@@ -122,5 +123,51 @@ describe('SprintsClient — 스프린트 first-touch 정체성', () => {
     expect(row).not.toBeUndefined();
     await act(async () => { row!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(container.querySelector('button[aria-label="스프린트 삭제"]')).toBeNull();
+  });
+});
+
+// story #2413 — 실측(Sprint 13: end_date 2026-06-08·planning, 오늘 대비 55일 지남)에서 나온
+// "종료일 지났는데 planning/active"를 화면이 말하는가.
+describe('isSprintOverdue/daysOverdue — story #2413', () => {
+  it('planning + end_date가 지남 → overdue(실측 Sprint 13과 같은 모양)', () => {
+    const now = new Date('2026-08-02T00:00:00Z');
+    expect(isSprintOverdue({ status: 'planning', end_date: '2026-06-08' }, now)).toBe(true);
+    expect(daysOverdue('2026-06-08', now)).toBe(55);
+  });
+
+  it('active + end_date가 지남 → overdue', () => {
+    const now = new Date('2026-08-02T00:00:00Z');
+    expect(isSprintOverdue({ status: 'active', end_date: '2026-07-01' }, now)).toBe(true);
+  });
+
+  it('closed면 end_date가 아무리 지나도 overdue 아님 — 닫힌 것은 판정 대상이 아니다', () => {
+    const now = new Date('2026-08-02T00:00:00Z');
+    expect(isSprintOverdue({ status: 'closed', end_date: '2020-01-01' }, now)).toBe(false);
+  });
+
+  it('음성대조 — end_date가 아직 안 지났으면 overdue 아니다', () => {
+    const now = new Date('2026-08-02T00:00:00Z');
+    expect(isSprintOverdue({ status: 'planning', end_date: '2026-12-31' }, now)).toBe(false);
+  });
+});
+
+describe('SprintsClient — 종료일 지난 스프린트 배지 렌더(story #2413)', () => {
+  it('planning + 과거 end_date(2020, 시간과 무관히 항상 지남) 스프린트는 목록에 경고 배지를 보인다', async () => {
+    stubFetch([{ id: 's1', title: 'Overdue Sprint', status: 'planning', start_date: '2020-01-01', end_date: '2020-01-14' }]);
+    await mount();
+    const html = container.innerHTML;
+    expect(html).toContain('지남');
+  });
+
+  it('음성대조 — 정상(미래 end_date) planning 스프린트는 경고 배지가 없다', async () => {
+    stubFetch([{ id: 's1', title: 'Fresh Sprint', status: 'planning', start_date: '2099-01-01', end_date: '2099-01-14' }]);
+    await mount();
+    expect(container.innerHTML).not.toContain('지남');
+  });
+
+  it('음성대조 — closed 스프린트는 end_date가 과거여도 경고 배지가 없다', async () => {
+    stubFetch([{ id: 's1', title: 'Old Closed Sprint', status: 'closed', start_date: '2020-01-01', end_date: '2020-01-14' }]);
+    await mount();
+    expect(container.innerHTML).not.toContain('지남');
   });
 });

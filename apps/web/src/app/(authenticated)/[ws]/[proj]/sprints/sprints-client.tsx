@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Plus, X, Play, StopCircle, ChevronRight, Trash2, AlertTriangle, Target, Clock, Users, Calendar, Ban } from 'lucide-react';
@@ -97,6 +97,19 @@ function statusVariant(status: string): 'default' | 'secondary' | 'outline' {
   if (status === 'active') return 'default';
   if (status === 'closed') return 'secondary';
   return 'outline';
+}
+
+// story #2413 — 실측(2026-08-02): planning/active인데 end_date가 이미 지난 스프린트가 있었다
+// (Sprint 13 55일 지남·픽셀 로딩 시드 S99 16일 지남, 활성 스프린트는 0개). "닫혔다"와 "아직
+// 안 끝났다"가 화면에서 구분이 안 됐다 — 자동으로 닫지 않는다(그건 사람 판단), 다만 그 사실
+// 자체는 화면이 말해야 한다.
+export function isSprintOverdue(sprint: Pick<Sprint, 'status' | 'end_date'>, now: Date): boolean {
+  if (sprint.status === 'closed') return false;
+  return Date.parse(sprint.end_date) < now.getTime();
+}
+
+export function daysOverdue(endDate: string, now: Date): number {
+  return Math.max(0, Math.floor((now.getTime() - Date.parse(endDate)) / 86_400_000));
 }
 
 // ─── Create Dialog ────────────────────────────────────────────────────────────
@@ -341,6 +354,8 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
   const t = useTranslations('sprints');
   const tc = useTranslations('common');
   const searchParams = useSearchParams();
+  // story #2413 — 마운트 시점 1회 고정(실시간 tick 불필요, "페이지를 연 시점 기준 지났는가").
+  const now = useMemo(() => new Date(), []);
 
   const [sprints, setSprints] = useState<Sprint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -682,6 +697,9 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
                   <span className="font-medium text-foreground">{sprint.title}</span>
                   <div className="flex items-center gap-2">
                   <Badge variant={statusVariant(sprint.status)}>{sprint.status}</Badge>
+                  {isSprintOverdue(sprint, now) ? (
+                    <Badge variant="warning">{t('overdueBadge', { days: daysOverdue(sprint.end_date, now) })}</Badge>
+                  ) : null}
                   <ChevronRight className="size-4 text-muted-foreground" />
                   </div>
                 </div>
@@ -710,7 +728,12 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       <div className="mb-4 flex items-start justify-between gap-2">
         <div>
           <h2 className="text-lg font-semibold text-foreground">{selected.title}</h2>
-          <Badge variant={statusVariant(selected.status)} className="mt-1">{selected.status}</Badge>
+          <div className="mt-1 flex items-center gap-2">
+            <Badge variant={statusVariant(selected.status)}>{selected.status}</Badge>
+            {isSprintOverdue(selected, now) ? (
+              <Badge variant="warning">{t('overdueBadge', { days: daysOverdue(selected.end_date, now) })}</Badge>
+            ) : null}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {/* story #2104 — BE sprints.py:351이 human-only로 삭제를 403 거부한다(되돌릴 수 없는
