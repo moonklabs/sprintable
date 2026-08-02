@@ -45,11 +45,16 @@ def test_story_priority_enum_values():
     assert StoryPriority.low == "low"
 
 
-def test_extra_fields_ignored():
-    args = ListStoriesInput(unknown_field="should_be_ignored")
-    assert not hasattr(args, "unknown_field")
+def test_extra_fields_rejected():
+    """story #2412 AC2 — 예전엔 미선언 필드를 조용히 버렸다(hasattr()이 False가 되는 식으로만
+    드러남, 호출자에겐 무증상). 이제는 구성 시점에 ValidationError로 거부한다."""
+    with pytest.raises(ValueError):
+        ListStoriesInput(unknown_field="should_be_rejected")
 
 
 def test_sprintable_input_base():
+    """story #2412 AC2 — extra="ignore"→"forbid". (실제 MCP 호출 경로의 삼킴은 이 한 겹
+    앞(FastMCP 내부 arg_model, server.py::_lock_down_extra_args)에서 막힌다 — 여기는
+    defense-in-depth, 직접 `SprintableInput(**kwargs)` 구성 경로까지 잠근다.)"""
     base = SprintableInput()
-    assert base.model_config.get("extra") == "ignore"
+    assert base.model_config.get("extra") == "forbid"

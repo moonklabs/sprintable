@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import exists, select
@@ -256,6 +256,7 @@ async def list_standup_history(
     project_id: uuid.UUID = Query(...),
     limit: int = Query(default=30, ge=1, le=200),
     cursor: str | None = Query(default=None),
+    days: int | None = Query(default=None, ge=1),
     repo: StandupEntryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
 ) -> dict:
@@ -267,9 +268,18 @@ async def list_standup_history(
     story #2248: 이 엔드포인트엔 원래 cursor도 order_by도 없었다(repo.list()가 정렬 없이 limit만
     적용) — "최근 N개"라면서 결정적 순서 보장이 없었다(#2231 표 CAPPED-NO-NEXT-PAGE, ㉯✗). #2231
     정본 규약 A(참조 구현: stories.py::list_comments/list_activities)로 도달 가능하게 한다.
-    repo.list()는 다른 호출부(list_standups, line 181)와 공유하는 범용 메서드라 여기서 손대지
-    않고, 이 엔드포인트만 raw 쿼리로 바이패스한다(project_id EXISTS join은 repo.list()와 동일 로직
-    재현 — 규약 재발명 없음, 필터 로직만 재현).
+    repo.list()는 다른 호출부(list_standups, line 181)와 공유하는 범용 메서드라 그때는 여기서
+    손대지 않고 이 엔드포인트만 raw 쿼리로 바이패스했다(project_id EXISTS join은 repo.list()와
+    동일 로직 재현 — 규약 재발명 없음, 필터 로직만 재현). ⚠️story #2412 AC1: 그 "손대지 않은"
+    repo.list() 쪽이 결국 진짜 화면(FE `/api/standup`, list_standups)의 미정렬 버그였다 —
+    repositories/standup.py::list()에 order_by(date desc, created_at desc)를 직접 추가해서 고쳤다
+    (이 엔드포인트의 cursor 페이지네이션과 무관 — 이쪽은 그대로 raw 쿼리 유지, 커서 시맨틱이 달라
+    repo.list()로 합칠 이유 없음).
+
+    story #2412 AC3: `days` 추가 — MCP standup_history 도구가 실제로는 존재하지도 않는 `days`
+    인자를 조용히 삼키던 것(AC2)의 후속. `date`(스탠드업 실제 날짜) 기준 "최근 N일"— `created_at`
+    (제출 시각)이 아니다: 늦게 제출된 옛날 날짜 스탠드업을 "최근"으로 잘못 포함시키지 않기 위함.
+    cursor와 결합 가능(둘 다 독립 필터 — days=기간 창, cursor/limit=페이지네이션).
     """
     # ratchet round5(잔여 HIGH): 동일 패턴(project_id 필터 미검증) — resource-actual 직접검증.
     if not await has_project_access(repo.session, uuid.UUID(auth.user_id), project_id, repo.org_id):
@@ -282,6 +292,11 @@ async def list_standup_history(
             StandupEntryProject.project_id == project_id,
         ),
     )
+    # #2540 CI 교훈(오르테가군)과 동일 패턴 — 이 함수를 FastAPI DI 없이 직접 호출하며 days= 를
+    # 누락하면 파이썬 기본값인 Query(...) 센티넬 객체(정수 아님·truthy) 가 그대로 들어온다.
+    # int가 아니면 필터 없음으로 취급(cursor의 isinstance(..., str) 가드와 동형).
+    if isinstance(days, int):
+        q = q.where(StandupEntry.date >= date.today() - timedelta(days=days - 1))
     # #2540 CI 교훈(오르테가군): "값이 있는지"만 보면 안 되고 "그 값이 문자열인지"까지 봐야
     # 한다 — 이 함수를 FastAPI DI 없이 직접 호출하며 cursor= 를 누락하면 파이썬 기본값인
     # Query(...) 센티넬 객체(truthy) 가 그대로 들어온다. 문자열이 아니면 커서 없음으로 취급.

@@ -60,6 +60,17 @@ class StandupEntryRepository(BaseRepository[StandupEntry]):
         org-level 엔트리(project_id NULL·링크로 surface)도 링크된 프로젝트 뷰에 나타난다.
         EXISTS 라 double-count 없음. legacy 엔트리는 0099 백필 링크로 동일 커버(연속성).
         project_id 외 필터(author_id·sprint_id·date)는 기존대로 컬럼 일치.
+
+        story #2412 AC1 — order_by 없이 limit만 있었다("최근"을 요구하면서 결정적 순서 보장이
+        없었다, #2231 표 CAPPED-NO-NEXT-PAGE와 동형). #2248이 `/standups/history`(list_standup_history,
+        routers/standups.py)를 raw 쿼리로 우회 고칠 때 "이 메서드는 list_standups(routers/standups.py:181)와
+        공유하는 범용이라 여기서 손 안 댄다"고 명시 — 그 남겨둔 쪽을 여기서 고친다. 이 리포에서
+        `.list()` 실호출처는 코드베이스 전체에 **routers/standups.py:181(list_standups) 1곳뿐**
+        (grep 확認 — routers/sprints.py의 StandupEntryRepository 사용은 `.get_missing()`만, `.list()`
+        미호출). 그 1곳이 FE `/api/standup` 화면 프록시 대상이자 MCP get_standup/list_standup_entries
+        도구가 공유하는 자리라, 여기 한 번 고치면 셋 다 같이 고쳐진다(다른 소비처가 없어 "한쪽만
+        고치는" 분기가 아예 없다). `date`(스탠드업 실제 날짜) 우선 정렬 — `created_at`(제출 시각)은
+        같은 date 내 동석차 tiebreak로만(제출 늦은 순이 아니라 날짜 자체가 최근인 게 먼저).
         """
         project_id = filters.pop("project_id", None)
         q = select(StandupEntry).where(self._org_filter())
@@ -72,6 +83,7 @@ class StandupEntryRepository(BaseRepository[StandupEntry]):
                     StandupEntryProject.project_id == project_id,
                 )
             )
+        q = q.order_by(StandupEntry.date.desc(), StandupEntry.created_at.desc())
         result = await self.session.execute(q.limit(limit))
         return list(result.scalars().all())
 
