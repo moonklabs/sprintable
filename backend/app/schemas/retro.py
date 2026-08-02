@@ -2,7 +2,18 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
+
+from app.schemas.validators import is_blank
+
+# story #2413 AC3(PO 지시, 2026-08-02) — "회고제목"처럼 이름이 비어 있는 회고를 만들 수 없게
+# 서버가 거부한다.
+# ⭐이 가드는 «관측된 결함 수정»이 아니라 «방어»다 — 실측(dev, MCP list_retro_sessions):
+# 6건 중 blank title 0건. 지금 고장난 것을 고친 게 아니라, 아직 비어 있는 구멍을 미리 막은 것.
+# ⛔이 가드가 «못 잡는» 것: 그 실측 문제의 원 사례("회고제목")는 blank가 아니라 "지우지 않은
+# 기본값"이다 — 값이 있으니 이 가드를 그냥 통과한다(별건, FE placeholder 축). 나중에 "가드가
+# 있는데 왜 회고제목이 그대로냐"고 묻는다면 이게 답이다.
+_BLANK_TITLE_MSG = "title은 비어 있을 수 없습니다"
 
 
 class CreateSession(BaseModel):
@@ -12,12 +23,30 @@ class CreateSession(BaseModel):
     sprint_id: uuid.UUID | None = None
     created_by: uuid.UUID | None = None
 
+    @field_validator("title")
+    @classmethod
+    def _reject_blank_title(cls, v: str) -> str:
+        if is_blank(v):
+            raise ValueError(_BLANK_TITLE_MSG)
+        return v
+
 
 class GetOrCreateBySprint(BaseModel):
     """story #2281 AC3ⓐ — sprint_id 기준 get-or-create. project_id는 안 받는다 —
     sprint 자체가 project를 이미 알아 caller가 넘긴 값과 어긋날 여지가 없다."""
     sprint_id: uuid.UUID
     title: str | None = None
+
+    @field_validator("title")
+    @classmethod
+    def _reject_blank_title(cls, v: str | None) -> str | None:
+        # None(생략)은 통과 — 라우터(get_or_create_session_by_sprint)가 `body.title or
+        # f"{sprint.title} 회고"`로 자동 제목을 붙인다. 예전엔 ""도 이 `or`로 조용히
+        # 자동제목이 됐지만, story #2413 AC3는 "명시적으로 보낸 빈 값"을 거부하라는
+        # 것이라 여기서 먼저 막는다(자동생성 경로는 None 생략일 때만).
+        if v is not None and is_blank(v):
+            raise ValueError(_BLANK_TITLE_MSG)
+        return v
 
 
 class ItemResponse(BaseModel):

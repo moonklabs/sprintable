@@ -1,7 +1,9 @@
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
+
+from app.schemas.validators import reject_if_all_blank
 
 REVIEW_TYPES = ("comment", "approve", "request_changes")
 
@@ -19,6 +21,14 @@ class StandupUpsert(BaseModel):
     blockers: str | None = None
     plan_story_ids: list[uuid.UUID] = []
 
+    # story #2414(PO 지시, 2026-08-02) — 세 칸이 전부 빈 스탠드업이 저장돼 있었다(실측
+    # 2건). done만 빈 것(오늘 시작한 사람)은 정상이라 막지 않는다 — 실측 122건 중 73건이
+    # 이 모양이라 그것까지 막으면 과잉차단이다. 셋 다 빌 때만 거부.
+    @model_validator(mode="after")
+    def _reject_all_blank_content(self) -> "StandupUpsert":
+        reject_if_all_blank(done=self.done, plan=self.plan, blockers=self.blockers)
+        return self
+
 
 class StandupSelfUpdate(BaseModel):
     """self-save(PUT) 전용 — author_id는 서버가 인증 유저(resolve_member)에서 도출.
@@ -33,6 +43,12 @@ class StandupSelfUpdate(BaseModel):
     plan: str | None = None
     blockers: str | None = None
     plan_story_ids: list[uuid.UUID] = []
+
+    # story #2414 — POST(StandupUpsert)와 동일 규칙, PUT도 같은 결함을 낼 수 있어 동형 적용.
+    @model_validator(mode="after")
+    def _reject_all_blank_content(self) -> "StandupSelfUpdate":
+        reject_if_all_blank(done=self.done, plan=self.plan, blockers=self.blockers)
+        return self
 
 
 class StandupEntryResponse(BaseModel):
