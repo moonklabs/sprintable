@@ -223,9 +223,11 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const tSettings = useTranslations('settings');
   // 오르테가 라이브 스모크 적출(2026-07-06): railXxx/railStageHosted 키는 connect-step이 원래
   // 정의한 'onboarding' 네임스페이스에 있는데 STEP4가 이걸 'agents'(tAgents)로 조회해 전부
-  // MISSING_MESSAGE였음 — S4 merge(#1900) 때부터의 잠재 버그. story #2407로 useVerificationRail
-  // hook이 이 네임스페이스 조회를 내부로 흡수해, 이 파일에서 직접 useTranslations('onboarding')를
-  // 들 필요가 없어졌다(hook 쪽 t는 verify-rail.tsx 소유).
+  // MISSING_MESSAGE였음 — S4 merge(#1900) 때부터의 잠재 버그. story #2407로 railXxx/railStage
+  // 계열 조회는 useVerificationRail hook이 내부로 흡수했다(hook 쪽 t는 verify-rail.tsx 소유) —
+  // 다만 story #2410 ③-1이 connect-step과 «같은 키»를 그대로 재사용하는 verifiedBanner를
+  // 다시 필요로 해 이 바인딩을 되살린다(그 키도 'onboarding' 네임스페이스 소유).
+  const tOnboarding = useTranslations('onboarding');
   const [step, setStep] = useState<Step>(1);
 
   // STEP 1 — role catalog (+ equip-skip: "역할 없이(키만)")
@@ -1203,6 +1205,15 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   즉시 알려져야 하는 사실이다. 주 동선(위 예시 프롬프트)보다 약하게(muted). */}
               {!verified && (
                 <p className="text-xs text-muted-foreground">{t('verifySkippableHint')}</p>
+              )}
+              {verified && (
+                // story #2410 ③-1(유나 판정, 2026-08-02) — connect-step과 같은 키·같은 role/aria.
+                // recruiter STEP5는 채용할 때마다 반복되는 화면이라 접근성 누락의 대가가 connect-step
+                // (신규 가입 온보딩, 1회성)보다 크다는 것이 결함으로 판정된 근거. 레일이 이미 단계
+                // 전환을 aria-live로 말하므로 이 배너는 "완료" 한 마디만 — 중복 낭독하지 않는다.
+                <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-success/20 bg-success/10 px-3 py-2.5 text-sm text-success">
+                  {tOnboarding('verifiedBanner')}
+                </div>
               )}
 
               <div className="flex items-center gap-3 rounded-md border border-success/20 bg-success/10 p-3">
