@@ -714,23 +714,28 @@ _TOOL_DEFS: list[tuple] = [
      ProposeCanonicalInput, propose_canonical_version),
     # Chat (4)
     ("sprintable_send_chat_message",
-     "[조직] conversation thread에 채팅 메시지 발송. mentions=[{type:\"doc\"|\"story\"|\"epic\", id,"
-     " title?}]로 human `#`-검색 mention과 동형인 `[title](entity:<type>:id)` 토큰을 content에"
-     " 합성(title 생략 시 서버가 canonical title로 만든 reference_token을 그대로 재사용 —"
-     " content에 직접 `[제목](entity:...)` 문자열을 손으로 짓지 말 것: 제목에 `]`가 들어가면"
-     " (예: \"[TAG] 제목\" 관례) 파서가 못 읽는다) — agent 발신 메시지에서도 링크/backlink가"
-     " 동작하게 한다.",
+     "[조직] conversation thread에 채팅 메시지 발송. conversation_id로 대화를 지정(thread_id는"
+     " 폐기 예정 별칭 — story #2427: 이 도구들의 «응답» thread_id는 대화 ID가 아니라 회신 스레드"
+     " ID이므로, 응답을 보고 그대로 다시 부를 때는 conversation_id를 쓸 것). mentions="
+     "[{type:\"doc\"|\"story\"|\"epic\", id, title?}]로 human `#`-검색 mention과 동형인"
+     " `[title](entity:<type>:id)` 토큰을 content에 합성(title 생략 시 서버가 canonical title로"
+     " 만든 reference_token을 그대로 재사용 — content에 직접 `[제목](entity:...)` 문자열을 손으로"
+     " 짓지 말 것: 제목에 `]`가 들어가면(예: \"[TAG] 제목\" 관례) 파서가 못 읽는다) — agent 발신"
+     " 메시지에서도 링크/backlink가 동작하게 한다.",
      SendChatInput, send_chat_message),
     ("sprintable_create_conversation",
      "[조직] 새 conversation thread 생성.",
      CreateConversationInput, create_conversation),
     ("sprintable_list_chat_messages",
-     "[조직] conversation thread 메시지 목록 조회.",
+     "[조직] conversation thread 메시지 목록 조회. conversation_id로 대화를 지정(thread_id는"
+     " 폐기 예정 별칭 — 응답의 thread_id는 대화 ID가 아니라 각 메시지의 회신 스레드 ID, story #2427).",
      ListChatMessagesInput, list_chat_messages),
     ("sprintable_get_chat_message",
      "[조직] conversation thread 내 메시지 단건 원문 조회(message_id로 즉시 픽업). ⭐웹훅 payload가"
-     " 잘렸거나 원문이 의심될 때 재발신 요청 대신 이걸로 먼저 확인 — thread_id=conversation_id,"
-     " message_id=조회할 메시지 id(top-level·리플 공용).",
+     " 잘렸거나 원문이 의심될 때 재발신 요청 대신 이걸로 먼저 확인 — conversation_id=대화 id"
+     "(thread_id는 폐기 예정 별칭), message_id=조회할 메시지 id(top-level·리플 공용). ⚠️응답의"
+     " thread_id는 대화 ID가 아니라 그 메시지의 회신 스레드 ID다(story #2427) — 응답을 보고 그대로"
+     " 다시 부를 때는 응답의 conversation_id를 쓸 것.",
      GetChatMessageInput, get_chat_message),
     # Meetings (6)
     ("sprintable_list_meetings",
