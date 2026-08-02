@@ -48,10 +48,14 @@ from authz_coverage_lib import (  # noqa: E402
 #
 # story #2340 AC2(2026-08-02, 디디) — has_guard()가 1-hop 바디 헬퍼 + 1-hop Depends 바디까지
 # 인식하도록 넓히면서(authz_coverage_lib._body_helper_calls_guard/_depends_bodies_call_guard)
-# 여기 있던 40건 중 **32건**이 "실제로는 허용 헬퍼 1-hop 아래서 가드를 부르고 있었다"로
-# «스캐너가 직접 확認»하는 쪽으로 넘어가 제거됐다(더는 사람이 눈으로만 확인해 allowlist에
-# 박아 두지 않아도 스캐너 자신이 진실을 낸다). 남은 8건은 hop-recognition으로도 못 닫히는
-# «진짜 다른 이유»(admin-gate·self-scope·server-derived param·2-hop 등) — 개별 사유 유지.
+# 여기 있던 41건 중 **33건**이 스캐너로 "실제로는 이미 guarded"로 확認돼 제거됐다(더는 사람이
+# 눈으로만 확인해 allowlist에 박아 두지 않아도 스캐너 자신이 진실을 낸다) — 32건은 정확히
+# hop=1 wrapper 패턴, 1건(team_members:claim_story)은 hop-recognition과 무관하게 원래도
+# has_project_access를 **직접** 호출하고 있던 stale 엔트리(set_current_project와 동일 클래스 —
+# 코드는 고쳐졌는데 allowlist만 안 지워졌던 것). 남은 8건(41−33)은 hop-recognition으로도 못 닫히는
+# «진짜 다른 이유»(admin-gate·self-scope·server-derived param·2-hop·②인라인 비교식) — 개별
+# 사유 유지. (참고: 「41」은 오늘 아침 원 보고 「31」이 스크롤하며 눈으로 세다 놓친 오카운트였음이
+# 이후 소거법으로 확認됐다 — PO 판정 2026-08-02.)
 _FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     "app.routers.dispatch:dispatch_entity":
         "body.project_id는 사용되지 않는 dead field — entity_project_id는 서버가 엔티티 조회로 도출",
@@ -67,8 +71,6 @@ _FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
         # 이 라우트로 그 미탐을 실제로 심어 확認한다 — 2-hop 재귀를 넣기 前엔 안전(안전한 이유가
         # «다른» 가드이지 무가드가 아님)하지만, 이 allowlist 엔트리는 유지한다.
         "Depends(_get_repo)→Depends(get_project_scoped_org_id)로 실 가드까지 2-hop — hop=1 인식 밖(AC3 known-gap)",
-    "app.routers.team_members:claim_story":
-        "assert_caller_is_member(id,...)로 self-scope 강제 후 body.story_id는 Story.project_id==member.project_id로 서버파생 제약(클라 project 주입 불가)",
     "app.routers.rewards:get_balance":
         "_assert_self_or_org_admin(member_id,...) — 본인 잔액 또는 org admin만 조회 가능해 project_id 자체는 blast-radius가 self-data로 제한",
     "app.routers.workflow_executions:list_executions":
@@ -80,6 +82,18 @@ _FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     "app.routers.open_api_keys:revoke_project_api_key":
         "동일 require_admin + JWT-derived project_id, 추가로 key.project_id==project_id 소유권 검증(② 인라인 비교식 — 이름이 없어 hop-recognition 밖. 별도 축)",
 }
+
+
+def test_false_positive_allowlist_count_is_pinned():
+    """판정(41→8)을 눈이 아니라 이 assert로 고정한다(#2340, 2026-08-02) — 오늘 오전 「31건」
+    카운트가 스크롤하며 눈으로 세다 실측(41건)과 어긋난 바로 그 실패모드를 다시 반복하지 않기
+    위함. 엔트리를 추가/제거하면 이 숫자도 반드시 같이 고쳐야 한다 — 그게 이 테스트의 목적:
+    "다음 사람이 두 수를 보고 갈리지 않게"(PO)."""
+    assert len(_FALSE_POSITIVE_ALLOWLIST) == 8, (
+        f"_FALSE_POSITIVE_ALLOWLIST 엔트리 수가 8이 아니라 {len(_FALSE_POSITIVE_ALLOWLIST)}건 — "
+        "의도적 변경이면 이 숫자를 갱신하고 PR 본문에 왜 바뀌었는지 적을 것"
+    )
+
 
 # ── known debt: 실 GAP(HIGH/MEDIUM/LOW) — CRITICAL 3건(EE #2048)은 이미 fix, 나머지는
 # ratchet(PO 결 2026-07-11: baseline 동결 + 점진 상환). fix되면 이 dict에서 제거할 것.
