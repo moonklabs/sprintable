@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Plus, X } from 'lucide-react';
@@ -13,12 +13,14 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useRetroRoute } from './retro-context';
 import { RETRO_PHASE_TO_STAGE, RETRO_STAGE_VARIANTS, type RetroSessionPhase } from '@/services/retro-session';
+import { isRetroStale, daysStale } from './retro-staleness';
 
 interface RetroSession {
   id: string;
   title: string;
   phase: string;
   created_at: string;
+  updated_at: string;
 }
 
 interface RetroSprintOption {
@@ -35,6 +37,8 @@ export default function RetroPage() {
   // 가 SSOT — useDashboardContext()(전역 "현재 프로젝트")가 아니다. orgId 는 경로 무관 그대로.
   const { projectId, wsSlug, projSlug } = useRetroRoute();
   const { orgId } = useDashboardContext();
+  // story #2413 — 마운트 시점 1회 고정("페이지를 연 시점 기준 얼마나 멈췄는가").
+  const now = useMemo(() => new Date(), []);
   const [sessions, setSessions] = useState<RetroSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState('');
@@ -212,14 +216,25 @@ export default function RetroPage() {
                       {new Date(session.created_at).toLocaleDateString()}
                     </p>
                   </div>
-                  {(() => {
-                    const stage = RETRO_PHASE_TO_STAGE[session.phase as RetroSessionPhase];
-                    return (
-                      <Badge variant={stage ? RETRO_STAGE_VARIANTS[stage] : 'outline'}>
-                        {stage ? t(STAGE_KEYS[stage]) : session.phase}
-                      </Badge>
-                    );
-                  })()}
+                  <div className="flex shrink-0 items-center gap-2">
+                    {(() => {
+                      const stage = RETRO_PHASE_TO_STAGE[session.phase as RetroSessionPhase];
+                      return (
+                        <Badge variant={stage ? RETRO_STAGE_VARIANTS[stage] : 'outline'}>
+                          {stage ? t(STAGE_KEYS[stage]) : session.phase}
+                        </Badge>
+                      );
+                    })()}
+                    {isRetroStale(session, now) ? (
+                      // 유나 규격(2026-08-02, #2791 design:changes) — Badge variant="warning"의
+                      // 계열색 텍스트(text-warning)는 light에서 2.06(AA 4.5의 절반 이하). 명도를
+                      // 낮추면 통과하지만 노랑이 갈색이 되어 "경고" 의미가 사라진다 — 문제는
+                      // 배경이 아니라 글자가 밝은 것. tint 배경 위에서는 foreground로 덮는다.
+                      // 이 오버라이드는 이 배지(#2413) 한정 — badge.tsx의 warning variant
+                      // 자체는 다른 색 계열과 함께 #2420에서 다룬다.
+                      <Badge variant="warning" className="text-foreground">{t('staleBadge', { days: daysStale(session.updated_at, now) })}</Badge>
+                    ) : null}
+                  </div>
                 </Link>
               ))}
             </div>

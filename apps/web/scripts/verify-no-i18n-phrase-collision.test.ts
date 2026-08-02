@@ -3,6 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   countDynamicKeyCalls,
+  EXEMPT_PAIRS,
   findSubstringCollisions,
   flattenMessages,
   GRANDFATHER_BASELINE,
@@ -306,9 +307,13 @@ describe('GRANDFATHER_LIVE_COUNT_TEST — 「선언된 40」과 「지금 실제
     expect(newFindings.size).toBe(0);
   });
 
-  it('EXEMPT_PAIRS는 이제 비어 있고, 그러니 exemptHit도 항상 빈 집합이다', () => {
+  // story #2413(2026-08-02) — #2410 직후엔 EXEMPT_PAIRS가 비어 있었지만 그게 "영구히 비어야
+  // 한다"는 규칙은 아니었다(#2410은 오탐 정밀화였지 EXEMPT_PAIRS 금지가 아니다). 이 테스트는
+  // "0건"이 아니라 "선언된 예외가 전부 실제로 쓰이고 있는가"(죽은 예외 없음)를 잰다 — sprints.days
+  // <-> sprints.overdueBadge(#2413, PO 승인)가 첫 실사용 사례다.
+  it('EXEMPT_PAIRS에 선언된 항목은 전부 실제로 걸린다(죽은 예외가 없다)', () => {
     expect(GRANDFATHER_BASELINE.size).toBeGreaterThan(0); // sanity: baseline은 안 비었다
     const { exemptHit } = scanRepository();
-    expect(exemptHit.size).toBe(0);
+    expect(exemptHit.size).toBe(EXEMPT_PAIRS.size);
   });
 });
