@@ -62,19 +62,38 @@ jobs:
       - name: Install deps
         run: pip install --quiet pyyaml
 
+      # story #2422 — 나흘째 FAIL인데 아무도 못 알아챈 병의 처방. 어제 이 워크플로우가 남긴
+      # "FAIL 집합 지문"(dev·prod 각각, 값 없이 키 이름만)을 캐시에서 복원한다. 고정 키가
+      # 아니라 run_id로 매번 새 키를 쓰고 restore-keys 접두사로 "가장 최근 것"을 찾는다 —
+      # actions/cache는 같은 키 재저장을 지원하지 않으므로 이게 표준 "매일 갱신되는 상태"
+      # 패턴이다(오래된 캐시는 GitHub의 7일 미접근 LRU가 자연히 정리한다).
+      - name: Restore previous drift digest
+        uses: actions/cache/restore@v4
+        with:
+          path: env-drift-digest.json
+          key: env-drift-digest-${{ github.run_id }}  # 절대 히트 안 함(고의) — restore-keys로만 찾는다.
+          restore-keys: |
+            env-drift-digest-
+
       # ⚠️ 값 자체는 여기서도 절대 로그에 안 남는다(check_env_drift.py가 매치 여부만 반환) —
       # 이 스텝 출력이 그대로 GHA 로그·아티팩트가 되니, 스크립트 쪽 보장이 이 워크플로우
       # 전체의 보장이기도 하다(설계 doc "③" 축 요구사항).
       #
       # ⛔둘 다 실행하고 «둘 중 하나라도» FAIL이면 이 스텝 자체가 실패한다(continue-on-error
       # 로 하나를 먼저 죽이고 다른 걸 스킵하면 안 됨 — 매일 두 축을 다 봐야 한다).
+      # story #2422 — ENV_DRIFT_STATE_FILE을 줘서 이번 실행의 FAIL 집합을 파일로 남긴다
+      # (FAIL이든 성공이든 반드시 쓰임 — check_env_drift.py의 _write_state_file 계약).
       - name: Run drift check (prod — main)
         id: drift_prod
+        env:
+          ENV_DRIFT_STATE_FILE: ${{ github.workspace }}/env-drift-state-prod.json
         run: python3 infra/check_env_drift.py --only-env prod
 
       - name: Run drift check (dev — develop)
         id: drift_dev
         if: always()  # prod 스텝이 실패해도 dev 스텝은 반드시 돈다 — 한쪽이 다른 쪽을 가리면 안 됨.
+        env:
+          ENV_DRIFT_STATE_FILE: ${{ github.workspace }}/env-drift-state-dev.json
         run: python3 develop-checkout/infra/check_env_drift.py --only-env dev
 
       - name: Combine drift results
@@ -85,6 +104,32 @@ jobs:
             echo "::error::drift 발견 — prod=${{ steps.drift_prod.outcome }} dev=${{ steps.drift_dev.outcome }}"
             exit 1
           fi
+
+      # story #2422 — 오늘 지문을 어제 지문과 대조해 "새 실패"·"해소"·"동일 반복 N일째"를
+      # 가른다. always()로 돈다 — drift-check가 실패해도(오히려 그때 이 정보가 제일 필요),
+      # 성공해도(어제 FAIL이 오늘 해소됐는지는 알아야) 이 비교는 항상 의미가 있다. 두 state
+      # 파일이 항상 존재한다(위 두 스텝이 always()로 도니 — prod가 실패해도 파일은 남는다).
+      - name: Compare against yesterday's drift digest
+        id: compare
+        if: always()
+        run: |
+          python3 infra/compare_env_drift_state.py \
+            --dev-state env-drift-state-dev.json \
+            --prod-state env-drift-state-prod.json \
+            --previous-digest env-drift-digest.json \
+            --output-digest env-drift-digest.json \
+            --today "$(date -u +%Y-%m-%d)" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --github-output "$GITHUB_OUTPUT"
+
+      # 다음 실행이 오늘을 "어제"로 볼 수 있게 저장한다. always()로 — drift-check 결과와
+      # 무관하게 매일 갱신돼야 다음 대조가 최신 상태를 기준으로 선다.
+      - name: Save today's drift digest
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: env-drift-digest.json
+          key: env-drift-digest-${{ github.run_id }}
 
       # FAIL 시에만 실행. 오르테가군 정정(2026-07-22): Sprintable story 자동생성은 뺀다 —
       # API 키를 GitHub secret에 하나 더 뿌리는 대가(오늘 하루 겪은 키 유출 사고 직후라
@@ -103,17 +148,21 @@ jobs:
       # 부재였다면, 이건 alert는 도착하는데 «구독자 없는 채널»로 가는 같은 병의 다음 얼굴일
       # 수 있다). 그 웹훅이 실제로 사람이 상주하는 채널에 꽂혀 있는지는 이 스토리·이 워크플로우
       # 밖의 운영 확認 사항이다.
+      # story #2422 — 문구를 위 compare 스텝의 출력(새 실패 vs 동일 반복 N일째)으로 바꾼다.
+      # ⛔이 스텝은 여전히 "동일 반복"이어도 매일 그대로 발송한다 — 조용히 억제하지 않는다
+      # (오르테가 원칙과 동형). 바뀐 것은 문구의 정보량뿐, 발송 여부·job 실패는 무변경.
       - name: Notify on drift (Discord)
         if: failure() && steps.drift.outcome == 'failure'
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.ENV_DRIFT_GUARD_DISCORD_WEBHOOK_URL }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DRIFT_MESSAGE: ${{ steps.compare.outputs.message }}
         run: |
           set -euo pipefail
           if [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
             echo "::error::ENV_DRIFT_GUARD_DISCORD_WEBHOOK_URL 미등록 — drift를 감지했는데 알릴 방법이 없다. 이 자체가 실패여야 하는(PO 시크릿 등록 필요) — GHA 스케줄 워크플로우 실패 통지가 최소 폴백."
             exit 1
           fi
+          python3 -c "import json, os; print(json.dumps({'content': os.environ['DRIFT_MESSAGE']}))" > /tmp/discord-payload.json
           curl -fsS -X POST "${DISCORD_WEBHOOK_URL}" \
             -H "Content-Type: application/json" \
-            -d "$(printf '{"content":"⛔ env 드리프트 가드 FAIL — 상세: %s"}' "${RUN_URL}")"
+            -d @/tmp/discord-payload.json
