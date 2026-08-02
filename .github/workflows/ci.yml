@@ -676,6 +676,16 @@ jobs:
       - name: "Verify tint background × foreground contrast (story #2420 regression guard)"
         run: pnpm --filter web verify:tint-foreground-contrast
 
+      # story #2420 AC7 회귀가드: AC3(위)는 globals.css 정의만 본다 — 사용처(컴포넌트 파일)는
+      # 전혀 안 읽는다. 실제로 사용처 하나(goals-client.tsx:615)를 계열색으로 되돌려도 AC3·
+      # type-check·lint·해당 vitest 전부 그대로 초록이었다(실측, 디디). 이 스텝은 같은
+      # 문자열/템플릿 리터럴 안에 `bg-<X>-tint|알파`와 `text-<X>`(같은 계열)가 함께 있는 자리를
+      # 센다 — 지금 있는 90건(baseline, scripts/tint-color-text-baseline.json)은 실패시키지
+      # 않고, 그 밖의 «새» 자리만 잡는다. 기존 90건을 개별 수리하는 것은 이 스텝의 일이 아니다
+      # (#2093 lint_query_sentinel_direct_calls.py와 같은 baseline 계약).
+      - name: "Verify no new tint-background × family-color-text usage (story #2420 AC7 regression guard)"
+        run: pnpm --filter web verify:no-new-tint-color-text
+
       # story #2371 회귀가드: `scripts/check-i18n-keys.js`(code→messages missing-key 축)를
       # 처음으로 CI에 건다 — 이전엔 CI/husky/package.json 어디에도 안 걸려 있었고 손으로
       # 돌리면 344 issues·exit 1이 나왔는데(2026-07-31 실측) 344건 전부 도구 결함(워드바운더리
