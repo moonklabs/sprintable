@@ -471,6 +471,47 @@ steps:
           --quiet
     waitFor: [run-migrate-job]
 
+  # story #2426(2026-08-02) — MCP Cloud Run 서비스를 배포 대상에 넣는다.
+  # ⛔발견 경위: `sprintable-mcp-dev` 가 2026-07-29 코드(4일 전), `sprintable-mcp-prod` 가
+  # 2026-07-28 코드(main HEAD 대비 449 커밋 前)로 돌고 있었다. 넷이 **같은 backend 이미지**를
+  # 쓰도록 만들어진 짝인데, 이 파일이 backend·frontend·realtime 셋만 배포하고 mcp 둘은
+  # 목록 밖이었다. `.github` 전체에 `sprintable-mcp-dev` 문자열 0건 — 아무 자동화도 없었다.
+  # (`publish-mcp.yml` 은 PyPI 패키지 공개용이고 Cloud Run 과 무관하다. 「MCP 배포」라는 말이
+  #  두 가지를 가리켜, 처음엔 그쪽을 원인으로 짚었다가 이미지 태그를 열어 보고 갈렸다.)
+  # ⇒ 그래서 오늘 고친 MCP 인자 검증(#2412)이 **정작 그 도구를 쓰는 서버에는 안 닿아 있었다.**
+  #
+  # ⚠️이 스텝이 **하지 않는 것**(선언): `services update --image` 만 쓰므로 **환경변수는 안 건드린다.**
+  # mcp 서비스의 env 는 지금도 파이프라인 밖(손 설정)이다 — 그 SSOT 화는 별건이다.
+  # `run deploy` 를 안 쓰는 이유가 이것이다: 지정 안 한 설정이 기본값으로 되돌아가면
+  # 「배포가 손 고침을 지우는」 쪽 사고가 난다(deploy-realtime 주석의 #2078 사례와 같은 병).
+  #
+  # ⚠️realtime 과 달리 **prod 게이트를 두지 않는다** — `sprintable-mcp-prod` 는 이미 존재하고
+  # 실제로 요청을 받고 있다(2026-08-02 실측). backend-prod 가 이 파이프라인으로 갱신되는데
+  # mcp-prod 만 안 따라가는 것이 바로 이 스토리가 없애려는 «불일치»다.
+  - id: deploy-mcp
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        gcloud run services update sprintable-mcp-${_DEPLOY_ENV} \
+          --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
+          --region=${_AR_REGION} \
+          --quiet
+        # 검산: 「배포 success」가 아니라 «서빙 이미지가 backend 와 같은 태그인가»로 잰다.
+        served=$(gcloud run services describe sprintable-mcp-${_DEPLOY_ENV} \
+          --region=${_AR_REGION} --format='value(spec.template.spec.containers[0].image)')
+        expected="${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA}"
+        if [ "$served" != "$expected" ]; then
+          echo "FAIL: mcp-${_DEPLOY_ENV} 서빙 이미지가 기대와 다르다"
+          echo "  서빙: $served"
+          echo "  기대: $expected"
+          exit 1
+        fi
+        echo "OK: sprintable-mcp-${_DEPLOY_ENV} = backend:${COMMIT_SHA}"
+    waitFor: [run-migrate-job]
+
   # story #2185(2026-07-27) — GCE MIG(realtime-gateway) 자동배포. deploy-realtime(위, Cloud
   # Run 폴백)과 별개 타깃이다. ⛔dev 전용 하드게이트 — prod GCE 는 실사용 중(48h 정상응답
   # 353건)이라 승인 없는 자동 재배포가 되면 안 된다. prod 를 붙이는 시점엔 사람이 이 가드를
