@@ -308,7 +308,7 @@ export default function EpicDetailPage() {
               <button
                 type="button"
                 onClick={() => setShowDeleteConfirm(true)}
-                className="flex items-center gap-1.5 rounded-lg border border-destructive/40 px-2.5 py-1.5 text-xs font-medium text-destructive-on-subtle hover:bg-destructive/10 transition-colors"
+                className="flex items-center gap-1.5 rounded-lg border border-destructive/40 px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-destructive/10 transition-colors"
                 aria-label={t('deleteGoal')}
               >
                 <Trash2 className="h-3.5 w-3.5" />

@@ -99,18 +99,20 @@ describe('VerifyRail — story #2418 (failed인데 reason이 없으면 침묵하
   });
 });
 
-// story #2419(유나 규격·PO 승인, design:changes 반영) — text-destructive는 bg-destructive/10
-// 박스 위에서 3.97(AA 4.5 미달, apps/web/src/lib/color-contrast.test.ts에서 실측 고정).
-// text-destructive-on-subtle로 교체해 약 4.98을 확保한다. dark: 짝은 안 붙인다 — .dark에도
-// 이 변수가 --destructive로 alias돼 있어(globals.css) 이 클래스 하나만으로 dark에서도
-// 안전하다(짝을 깜빡하면 var()가 미정의라 상속값으로 조용히 빠지는 문제를 이 alias가 막는다).
-describe('VerifyRail — story #2419 (실패 사유 박스 텍스트 대비)', () => {
-  it('실패 사유 박스는 text-destructive-on-subtle을 쓰고, 순수 text-destructive(대비 미달 조합)는 안 쓴다', () => {
+// story #2419(유나 규격·PO 승인) — text-destructive는 bg-destructive/10 박스 위에서 3.97
+// (AA 4.5 미달, apps/web/src/lib/color-contrast.test.ts에서 실측 고정). story #2420 v3 —
+// 계열별 토큰(destructive-on-subtle) 대신 규칙 하나로: tint 배경 위 글자는 text-foreground
+// (destructive on tint: light 16.72·dark 15.58, 정의 시점 검증은
+// scripts/verify-tint-foreground-contrast.ts). --foreground 자체가 테마마다 값을 가지므로
+// dark: 짝이 따로 필요 없다.
+describe('VerifyRail — story #2419/#2420 (실패 사유 박스 텍스트 대비)', () => {
+  it('실패 사유 박스는 text-foreground를 쓰고, 계열색(text-destructive*, 대비 미달 조합)은 안 쓴다', () => {
     const markup = render([step({ status: 'failed', reason: '사유' })]);
     const classAttr = markup.match(/<div class="([^"]*)">사유<\/div>/)?.[1];
     expect(classAttr).toBeDefined();
     const classes = classAttr!.split(/\s+/);
-    expect(classes).toContain('text-destructive-on-subtle');
+    expect(classes).toContain('text-foreground');
     expect(classes).not.toContain('text-destructive');
+    expect(classes).not.toContain('text-destructive-on-subtle');
   });
 });

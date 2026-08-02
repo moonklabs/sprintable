@@ -18,11 +18,12 @@ const buttonVariants = cva(
         ghost:
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         // story #2419 — rest 상태 bg-destructive/10 위 text-destructive는 3.97(AA 4.5 미달).
-        // text-destructive-on-subtle로 교체 — .dark에도 --destructive로 alias돼 있어 dark: 짝이
-        // 필요 없다. ⚠️hover(light bg-destructive/20·dark bg-destructive/30)는 이 토큰으로도
-        // 여전히 미달(각각 4.16·4.05, 실측) — #2420(호버 전용 알파 축소)에서 별도 처리한다.
+        // story #2420 v3 — text-foreground로 교체(15.58~16.72, 정의 시점 검증은
+        // scripts/verify-tint-foreground-contrast.ts). --foreground 자체가 테마마다 값을
+        // 가져 dark: 짝이 필요 없다. ⚠️hover 알파(light /20·dark /30)는 #2420 1단계 범위
+        // 밖 — 사용처 스윕(AC7)에서 별도 처리한다.
         destructive:
-          "bg-destructive/10 text-destructive-on-subtle hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive",
+          "bg-destructive/10 text-foreground hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive",
         link: "text-primary underline-offset-4 hover:underline",
         hero: "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm",
         glass: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
