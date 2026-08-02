@@ -233,6 +233,11 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     "app.routers.conversations:set_conversation_mute": "participant-membership gate(caller 참가 대화만)",
     "app.routers.conversations:update_conversation": "participant-membership gate",
     "app.routers.conversations:update_conversation_status": "participant-membership gate",
+    "app.routers.conversations:delete_message": (
+        "story #2319 — _authorize_message_read(canonical, get_message과 동일)로 participant-"
+        "membership gate 후 sender_id 소유권 추가(1-hop 아래서 has_project_access류 호출 — "
+        "위 set_conversation_mute/update_conversation과 동일 패턴, v1 스캔 미인식)"
+    ),
     "app.routers.event_notifications:mark_read": "recipient-scoped(event.recipient_id==caller member)",
     "app.routers.notifications:mark_read": "owner user_id 스코프(caller 소유 알림만)",
     "app.routers.evidence:delete_evidence": "creator-only(created_by!=caller → 403)",
