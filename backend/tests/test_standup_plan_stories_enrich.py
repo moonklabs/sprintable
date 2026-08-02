@@ -141,7 +141,7 @@ async def test_history_endpoint_enriches_backlog_plan_story():
     session.execute = AsyncMock(return_value=result)
     repo = _repo(list_ret=[_entry([backlog])], session=session)
     with _accessible(PROJECT_ID):
-        out = await list_standup_history(project_id=uuid.uuid4(), limit=30, cursor=None, repo=repo, auth=_auth())
+        out = await list_standup_history(project_id=uuid.uuid4(), limit=30, cursor=None, days=None, repo=repo, auth=_auth())
     assert [ps.id for ps in out["data"][0].plan_stories] == [backlog]  # 백로그 노출(enrich)
 
 
