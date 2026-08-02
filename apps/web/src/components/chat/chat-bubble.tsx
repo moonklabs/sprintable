@@ -380,8 +380,11 @@ export function ChatBubble({
 
           {/* Attachments — a54ddc16: auth-gated 서명 라우트 경유(public 직링크 미사용).
               이미지=AttachmentImage(3상태 render)·오디오/비디오=AttachmentMedia(story #2051,
-              [재생] 누르기 전엔 fetch 0)·그 외=AttachmentFile(클릭 시 서명 다운로드). */}
-          {message.attachments && message.attachments.length > 0 && (
+              [재생] 누르기 전엔 fetch 0)·그 외=AttachmentFile(클릭 시 서명 다운로드).
+              story #2319 미완 — tombstone된 메시지의 첨부는 그리지 않는다(2차 방어. 서버가
+              이미 응답에서 빼고 authorize도 거부하므로 이 게이트가 빠져도 안전하지만, 화면이
+              서버 계약을 스스로 어기지 않는다는 것을 명시한다). */}
+          {!isDeleted && message.attachments && message.attachments.length > 0 && (
             <div className="flex flex-col gap-1.5">
               {message.attachments.map((att, i) => {
                 const href = att.url;

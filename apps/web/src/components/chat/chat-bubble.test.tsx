@@ -138,6 +138,31 @@ describe('ChatBubble — story #2319 tombstone(메시지 삭제) 렌더', () => 
     expect(menuItems).not.toContain('삭제');
   });
 
+  it('미완 봉합(미르코 dev 실측) — tombstone된 메시지는 attachments가 있어도 첨부 카드를 안 그린다', async () => {
+    const deletedMsgWithAttachment: ChatMessage = {
+      ...baseMessage,
+      content: '',
+      deleted_at: '2026-08-02T00:00:00.000Z',
+      attachments: [{ url: 'chat/proj/conv/report.pdf', name: 'report.pdf', content_type: 'application/pdf' }],
+    };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={deletedMsgWithAttachment} isMine={true} />));
+    });
+    expect(container.textContent).not.toContain('report.pdf');
+  });
+
+  it('음성대조 — 안 지워진 메시지는 attachments가 있으면 첨부 카드를 그린다', async () => {
+    const liveMsgWithAttachment: ChatMessage = {
+      ...baseMessage,
+      deleted_at: null,
+      attachments: [{ url: 'chat/proj/conv/report.pdf', name: 'report.pdf', content_type: 'application/pdf' }],
+    };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={liveMsgWithAttachment} isMine={true} />));
+    });
+    expect(container.textContent).toContain('report.pdf');
+  });
+
   it('음성대조 — 본인 메시지가 안 지워진 상태면 컨텍스트 메뉴에 「삭제」가 뜬다', async () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={{ ...baseMessage, deleted_at: null }} isMine={true} />));
