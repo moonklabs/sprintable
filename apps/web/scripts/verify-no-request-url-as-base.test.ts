@@ -26,4 +26,25 @@ describe('hasRequestUrlAsBase (story #1933 regression guard)', () => {
   it('does not flag unrelated new URL() calls', () => {
     expect(hasRequestUrlAsBase("const url = new URL('https://example.com/path', 'https://example.com');")).toBe(false);
   });
+
+  // PO 지적(2026-08-02) — 「넷을 다 잡았는가」가 아니라 「이 가드의 자가 어디까지인가」를
+  // 심어서 재는 것. 세 우회 형태를 실제로 넣어 봤다 — 결과는 아래 두 it()에서 보듯 갈린다.
+  describe('known evasions (PO-requested probe, 2026-08-02) — documents the guard\'s actual reach, not a spec to widen blindly', () => {
+    // req.url 단축형은 이미 (?:request|req) 대체로 잡힌다 — 새 우회가 아니라 기존 커버리지 재확認.
+    it('DOES catch req.url (short param name) — already covered, not a gap', () => {
+      expect(hasRequestUrlAsBase('const url = new URL(target, req.url);')).toBe(true);
+    });
+
+    // ⚠️알려진 미탐(未探) — 변수를 한 번 거치면 정규식이 이 줄 안에서 request.url 문자열을 못 본다.
+    it('MISSES variable indirection (const base = request.url; new URL(x, base)) — known gap, not caught', () => {
+      const code = "const base = request.url; const url = new URL(target, base);";
+      expect(hasRequestUrlAsBase(code)).toBe(false);
+    });
+
+    // ⚠️알려진 미탐(未探) — 대괄호 접근은 `.url` 리터럴이 아니라 정규식이 못 본다.
+    it("MISSES bracket-notation access (new URL(x, request['url'])) — known gap, not caught", () => {
+      const code = "const url = new URL(target, request['url']);";
+      expect(hasRequestUrlAsBase(code)).toBe(false);
+    });
+  });
 });

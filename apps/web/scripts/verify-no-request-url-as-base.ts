@@ -12,6 +12,14 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 
+// ⚠️알려진 미탐(PO 지적 2026-08-02, verify-no-request-url-as-base.test.ts에 실제로 심어 확認됨) —
+// 이 가드는 리터럴 `new URL(x, request.url)`/`new URL(x, req.url)` 형태만 잡는다. 아래 둘은
+// «못» 잡는다:
+//   1) 변수 경유:      const base = request.url; new URL(x, base)
+//   2) 대괄호 접근:    new URL(x, request['url'])
+// 정규식을 이 둘까지 넓히려면 AST 분석이 필요하다(문자열 매칭의 근본 한계) — 지금은 넓히지
+// 않는다(PO: "넓히라는 게 아니라 가드의 자를 재라는 것"). 리뷰에서 이 두 형태를 직접 눈으로
+// 잡는 것까지가 이 가드의 실제 커버리지다.
 export const REQUEST_URL_AS_BASE = /new URL\([^)]*,\s*(?:request|req)\.url\)/;
 
 export function hasRequestUrlAsBase(content: string): boolean {
