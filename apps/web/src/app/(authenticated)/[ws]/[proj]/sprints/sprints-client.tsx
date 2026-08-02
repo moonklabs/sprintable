@@ -103,6 +103,10 @@ function statusVariant(status: string): 'default' | 'secondary' | 'outline' {
 // (Sprint 13 55일 지남·픽셀 로딩 시드 S99 16일 지남, 활성 스프린트는 0개). "닫혔다"와 "아직
 // 안 끝났다"가 화면에서 구분이 안 됐다 — 자동으로 닫지 않는다(그건 사람 판단), 다만 그 사실
 // 자체는 화면이 말해야 한다.
+//
+// ⚠️`now`는 호출부의 `useMemo(() => new Date(), [])`에서 온다 — «클라이언트(브라우저) 로컬
+// 시계» 기준이다. end_date는 절대 날짜라 타임존 자체는 안전하지만, 기기 시계가 틀리면 이
+// 배지도 틀린다(저위험 UI 힌트로 판단 — 카디르 QA).
 export function isSprintOverdue(sprint: Pick<Sprint, 'status' | 'end_date'>, now: Date): boolean {
   if (sprint.status === 'closed') return false;
   return Date.parse(sprint.end_date) < now.getTime();

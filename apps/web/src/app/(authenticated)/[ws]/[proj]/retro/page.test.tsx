@@ -93,6 +93,28 @@ describe('isRetroStale/daysStale — story #2413', () => {
     const now = new Date('2026-08-02T00:00:00Z');
     expect(isRetroStale({ phase: 'action', updated_at: '2026-07-25T00:00:00Z' }, now)).toBe(false);
   });
+
+  // 카디르 QA(2026-08-02) — 뮤테이션(>=14 → >14, 하루 어긋난 회귀)이 7/7 GREEN인 채로 통과했다.
+  // 기존 테스트가 31일(참)·8일(거짓)만 재서 경계(13/14/15)를 아무도 안 쟀기 때문 — 코드 자체는
+  // 정확했지만(13→false·14→true·15→true, 카디르 직접 계산) 그 정확함을 지켜 줄 테스트가
+  // 없었다. "지금 맞다"와 "앞으로도 맞을 것이다"는 다른 축이라 경계값을 직접 고정한다.
+  it('경계 — 정확히 13일이면 stale 아니다(임계 미만)', () => {
+    const now = new Date('2026-08-02T00:00:00Z');
+    expect(daysStale('2026-07-20T00:00:00Z', now)).toBe(13);
+    expect(isRetroStale({ phase: 'action', updated_at: '2026-07-20T00:00:00Z' }, now)).toBe(false);
+  });
+
+  it('경계 — 정확히 14일이면 stale이다(임계 그 자체)', () => {
+    const now = new Date('2026-08-02T00:00:00Z');
+    expect(daysStale('2026-07-19T00:00:00Z', now)).toBe(14);
+    expect(isRetroStale({ phase: 'action', updated_at: '2026-07-19T00:00:00Z' }, now)).toBe(true);
+  });
+
+  it('경계 — 정확히 15일이면 stale이다(임계 초과)', () => {
+    const now = new Date('2026-08-02T00:00:00Z');
+    expect(daysStale('2026-07-18T00:00:00Z', now)).toBe(15);
+    expect(isRetroStale({ phase: 'action', updated_at: '2026-07-18T00:00:00Z' }, now)).toBe(true);
+  });
 });
 
 describe('RetroPage — 오래 멈춘 phase 배지 렌더(story #2413)', () => {

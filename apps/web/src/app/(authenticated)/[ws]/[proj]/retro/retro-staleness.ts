@@ -6,6 +6,10 @@
 //
 // 별도 모듈로 뺀 이유 — page.tsx(Next.js App Router 페이지)는 default export 외 임의의
 // named export를 허용하지 않는다("X is not a valid Page export field" 빌드 에러).
+//
+// ⚠️`now`는 호출부(page.tsx)의 `useMemo(() => new Date(), [])`에서 온다 — «클라이언트(브라우저)
+// 로컬 시계» 기준이다. updated_at은 절대 UTC라 타임존 자체는 안전하지만, 기기 시계가 틀리면
+// 이 배지도 틀린다(저위험 UI 힌트로 판단 — 카디르 QA).
 const RETRO_STALE_THRESHOLD_DAYS = 14;
 
 export function isRetroStale(session: { phase: string; updated_at: string }, now: Date): boolean {
