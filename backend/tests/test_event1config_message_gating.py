@@ -41,6 +41,7 @@ def _msg(mentioned=None):
         mentioned_ids=list(mentioned or []),
         attachments=[],
         created_at=datetime.now(timezone.utc),
+        deleted_at=None,  # story #2319 — _msg_payload가 이제 이 필드를 읽는다.
     )
 
 

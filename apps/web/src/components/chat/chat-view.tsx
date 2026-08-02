@@ -17,6 +17,7 @@ import { useMessageRangeSelection } from '@/hooks/use-message-range-selection';
 import { CitationComposeBar, type CitationSaveState } from './citation-compose-bar';
 import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ToastContainer, useToast } from '@/components/ui/toast';
 
 interface ChatViewProps {
   threadId: string;
@@ -64,6 +65,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const pathname = usePathname();
   const t = useTranslations('chats');
   const isMobile = useIsMobile();
+  const { toasts, addToast, dismissToast } = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   // story #2265(C-7) 저장 조각(2026-07-29) — write 엔드포인트(#2632)가 서서 citeAction을
   // 실제로 켠다. 선택 확定(confirming) 후 스토리 피커를 열어 골라진 스토리에 저장한다.
@@ -358,12 +360,25 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     };
   }, [fetchMessages]);
 
-  // CB-S9: 메시지 삭제 (본인 메시지만)
+  // CB-S9/story #2319: 메시지 삭제(본인 메시지만) — tombstone(PO 결정, hard delete 아님).
+  // 목록에서 빼지 않는다(행이 자리에 남아 placeholder로 보인다 — AC①의 근거: 대화는 여럿이
+  // 읽는 자리라 통째로 지우면 답글·맥락이 끊긴다). AC②: 실패는 무조건 사용자에게 보인다
+  // (404/500/네트워크 예외 전부) — 예전엔 `if (!res.ok) return`으로 조용히 아무 일도 없었다.
   const handleDeleteMessage = useCallback(async (messageId: string) => {
-    const res = await fetch(`${apiPrefix}/${threadId}/messages/${messageId}`, { method: 'DELETE' });
-    if (!res.ok) return;
-    setMessages((prev) => prev.filter((m) => m.id !== messageId));
-  }, [apiPrefix, threadId]);
+    try {
+      const res = await fetch(`${apiPrefix}/${threadId}/messages/${messageId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        addToast({ type: 'error', title: t('deleteMessageErrorTitle'), body: t('deleteMessageErrorBody') });
+        return;
+      }
+      const body = (await res.json()) as { deleted_at?: string | null };
+      setMessages((prev) => prev.map((m) => (
+        m.id === messageId ? { ...m, content: '', deleted_at: body.deleted_at ?? new Date().toISOString() } : m
+      )));
+    } catch {
+      addToast({ type: 'error', title: t('deleteMessageErrorTitle'), body: t('deleteMessageErrorBody') });
+    }
+  }, [apiPrefix, threadId, addToast, t]);
 
   // story #2265(C-7) 저장 조각 — 확定된 range(rangeStartId~rangeEndId, orderedMessageIds
   // 순서 기준 양끝 포함)를 스냅샷으로 얼려 골라진 스토리에 proof로 POST한다. 스냅샷을
@@ -820,6 +835,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
           </div>
         )}
       </div>
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

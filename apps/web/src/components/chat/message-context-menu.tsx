@@ -21,9 +21,11 @@ interface MessageContextMenuProps {
   onClose: () => void;
   /** 생략하면(undefined) 인용 항목 자체를 안 그린다 — 기존 호출부 무변경 보장. */
   citeAction?: CiteAction;
+  /** story #2319 — 이미 tombstone된 메시지는 「삭제」를 다시 제시하지 않는다(no-op 액션 노출 금지). */
+  isDeleted?: boolean;
 }
 
-export function MessageContextMenu({ x, y, isMine, onReply, onCopy, onDelete, onClose, citeAction }: MessageContextMenuProps) {
+export function MessageContextMenu({ x, y, isMine, onReply, onCopy, onDelete, onClose, citeAction, isDeleted = false }: MessageContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close on outside click or Escape
@@ -82,7 +84,7 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, onDelete, on
           {citeAction.kind === 'start' ? '여기부터 인용' : '여기까지 인용'}
         </button>
       )}
-      {isMine && (
+      {isMine && !isDeleted && (
         <>
           <div className="my-1 border-t border-border" />
           <button

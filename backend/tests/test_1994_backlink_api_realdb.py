@@ -560,6 +560,62 @@ async def test_chat_message_source_visible_to_participant():
         await engine.dispose()
 
 
+async def test_chat_message_source_still_exists_false_when_tombstoned():
+    """story #2319 — chat_message source가 tombstone(soft-delete)되면 still_exists=False.
+
+    이 함수가 작성될 당시(#2299) chat_message는 「불변」이라 가정해 still_exists를 항상
+    True로 하드코딩했다 — #2319가 메시지 삭제를 도입하며 그 가정이 깨졌다(backlinks.py
+    docstring 참조). 행 자체는 남아 있으므로(하드삭제 아님) item["message"]는 여전히
+    채워진다 — doc/meeting/story의 soft-delete-but-visible과 동형(#2299 규율 그대로
+    「끊어짐」이지 「없어짐」이 아니다)."""
+    from app.main import app
+    from app.models.conversation import ConversationMessage
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            other_id, _ = await _make_human_member(s, org.id, project.id)
+            target_doc = await _make_doc(s, org.id, project.id, title="Target")
+
+            conv_id = await _make_conversation(
+                s, org.id, project.id, [caller_id, other_id], created_by=caller_id, conv_type="dm",
+            )
+            msg = await _add_message(s, conv_id, other_id, "[링크](entity:doc:x) 참고", _t(1))
+            await _make_mention(s, org.id, "chat_message", msg.id, target_doc.id, created_by=other_id)
+
+            # tombstone — DELETE 핸들러가 하는 그대로(content 스크럽 + deleted_at 세팅), 이
+            # 테스트는 backlinks read-path만 겨냥하므로 라우터를 안 태우고 직접 재현한다.
+            row = (await s.execute(
+                select(ConversationMessage).where(ConversationMessage.id == msg.id)
+            )).scalar_one()
+            row.deleted_at = datetime.now(timezone.utc)
+            row.content = ""
+            await s.commit()
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert len(body["data"]) == 1, body
+            item = body["data"][0]
+            # 행은 살아 있다 — message 필드가 여전히 채워진다(하드삭제 됐다면 test_missing_
+            # source_message_excluded_no_crash처럼 결과에서 아예 빠졌을 것).
+            assert item["message"] is not None, "tombstone된 메시지도 행은 남아야 한다(하드삭제 아님)"
+            assert item["message"]["id"] == str(msg.id)
+            assert item["still_exists"] is False, "tombstone된 source는 still_exists=False여야 한다"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 # ─── (c) admin-bypass for agent-only conversation — 회귀 0 확인 ────────────────
 
 
@@ -2039,5 +2095,193 @@ async def test_backfilled_old_data_and_post_cutover_new_data_both_visible_in_bac
         finally:
             await client.aclose()
             app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# story #2319 — DELETE /{conversation_id}/messages/{message_id} (tombstone) 실증.
+# 이 파일의 기존 org/project/human/conversation/message anchor-fixture(§Issue A 3회차
+# QA로 이미 검증된 그것)를 그대로 재사용한다 — 새 파일에서 처음부터 다시 짜면 같은 종류의
+# anchor-table 함정을 다시 밟을 위험이 있다(재사용 > 재발명).
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+async def test_delete_message_owner_tombstones_content_and_sets_deleted_at():
+    """본인 메시지 — DELETE가 200을 주고, content는 스크럽(""), deleted_at이 세팅된다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id], created_by=caller_id, conv_type="dm")
+            msg = await _add_message(s, conv_id, caller_id, "삭제될 원문", _t(1))
+            msg_id = msg.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["id"] == str(msg_id)
+            assert body["deleted_at"] is not None
+
+            # get_message로 실제 DB 반영을 재확認 — write 응답만 믿지 않는다.
+            get_resp = await client.get(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert get_resp.status_code == 200, get_resp.text
+            fetched = get_resp.json()
+            assert fetched["content"] == "", "content가 스크럽되지 않았다 — 오발송 대응 목적이 안 선다"
+            assert fetched["deleted_at"] is not None
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_delete_message_not_owner_403():
+    """음성대조 — 남의 메시지는 지울 수 없다(서버가 독립으로 강제, FE의 isMine은 UI일 뿐)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            other_id, _ = await _make_human_member(s, org.id, project.id)
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id, other_id], created_by=caller_id, conv_type="dm")
+            msg = await _add_message(s, conv_id, other_id, "남의 메시지", _t(1))
+            msg_id = msg.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert resp.status_code == 403, resp.text
+
+            # 실제로 안 지워졌는지 원문으로 재확認.
+            get_resp = await client.get(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert get_resp.json()["content"] == "남의 메시지"
+            assert get_resp.json()["deleted_at"] is None
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_delete_message_idempotent_second_call_ok():
+    """이미 tombstone된 메시지를 다시 DELETE해도 에러 없이 200 — deleted_at은 최초값 유지."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id], created_by=caller_id, conv_type="dm")
+            msg = await _add_message(s, conv_id, caller_id, "원문", _t(1))
+            msg_id = msg.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            first = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert first.status_code == 200, first.text
+            first_deleted_at = first.json()["deleted_at"]
+
+            second = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert second.status_code == 200, second.text
+            assert second.json()["deleted_at"] == first_deleted_at, "재삭제가 deleted_at을 덮어썼다"
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_delete_message_wrong_conversation_id_404():
+    """다른 conversation_id로 스코핑하면 404 — get_message와 동형 스코핑(cross-conversation IDOR 방지)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            conv_a = await _make_conversation(s, org.id, project.id, [caller_id], created_by=caller_id, conv_type="dm")
+            conv_b = await _make_conversation(s, org.id, project.id, [caller_id], created_by=caller_id, conv_type="dm")
+            msg = await _add_message(s, conv_a, caller_id, "conv_a의 메시지", _t(1))
+            msg_id = msg.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.delete(f"/api/v2/conversations/{conv_b}/messages/{msg_id}")
+            assert resp.status_code == 404, resp.text
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_delete_message_after_removed_from_participants_403():
+    """카디르 QA(2026-08-02, PR #2806) — canonical `_authorize_message_read` 재사용의 부수효과를
+    직접 pin: participant에서 제거된 뒤에는 예전에 자기가 보낸 메시지도 못 지운다(read-gate가
+    먼저 403을 raise — fail-closed, 못 읽는 대화의 메시지를 지울 수 있으면 그게 더 이상하다는
+    판단). 이전 구현(수기 `_resolve_member`+sender_id 대조)은 이 경계에 답이 없었다."""
+    from app.main import app
+    from sqlalchemy import delete as sa_delete
+    from app.models.conversation import ConversationParticipant
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            other_id, _ = await _make_human_member(s, org.id, project.id)
+            # group(=dm 아님)이라야 caller 제거 후에도 conversation 자체는 살아있다(dm은 애초에
+            # 2인 고정 개념이라 제거라는 조작이 자연스럽지 않다).
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id, other_id], created_by=caller_id, conv_type="group")
+            msg = await _add_message(s, conv_id, caller_id, "제거 전에 보낸 메시지", _t(1))
+            msg_id = msg.id
+
+            # caller를 이 conversation의 참가자 목록에서 제거(project 접근 자체는 유지 — project
+            # access 회수가 아니라 "이 대화방에서 나감"만 재현).
+            await s.execute(
+                sa_delete(ConversationParticipant).where(
+                    ConversationParticipant.conversation_id == conv_id,
+                    ConversationParticipant.member_id == caller_id,
+                )
+            )
+            await s.commit()
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert resp.status_code == 403, resp.text
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+
+        # 응답 status만 믿지 않는다 — DB를 직접 조회해 실제로 안 지워졌는지 재확認.
+        from sqlalchemy import select
+        from app.models.conversation import ConversationMessage
+        async with Session() as s:
+            fresh = (await s.execute(
+                select(ConversationMessage).where(ConversationMessage.id == msg_id)
+            )).scalar_one()
+            assert fresh.deleted_at is None, "403인데 실제로는 지워졌다 — 응답과 DB가 어긋난다"
+            assert fresh.content == "제거 전에 보낸 메시지"
     finally:
         await engine.dispose()

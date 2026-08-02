@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
-from app.models.base import OrgScopedMixin, TimestampMixin
+from app.models.base import OrgScopedMixin, SoftDeleteMixin, TimestampMixin
 
 
 class Conversation(Base, OrgScopedMixin, TimestampMixin):
@@ -66,7 +66,14 @@ class ConversationParticipant(Base):
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="participants")
 
 
-class ConversationMessage(Base, TimestampMixin):
+class ConversationMessage(Base, TimestampMixin, SoftDeleteMixin):
+    """⚠️story #2319 — SoftDeleteMixin(deleted_at)이지만 Doc/Story와 다르게 읽는다.
+    Doc/Story의 관례(`.deleted_at.is_(None)`으로 목록·조회에서 통째로 걸러냄)를 여기 그대로
+    옮기지 않는다 — PO 결정(tombstone)은 「행이 남아 그 자리에서 삭제됨으로 보인다」이지
+    「안 보인다」가 아니다. list_messages/get_message는 deleted_at 무관하게 그대로 반환하고,
+    content만 DELETE 핸들러가 지운다. 이 테이블에 `.deleted_at.is_(None)` 필터를 추가하면
+    조용히 스레드에서 메시지가 사라져 이 결정을 뒤집는다 — 추가하지 말 것."""
+
     __tablename__ = "conversation_messages"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

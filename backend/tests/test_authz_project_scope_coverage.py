@@ -233,6 +233,14 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     "app.routers.conversations:set_conversation_mute": "participant-membership gate(caller 참가 대화만)",
     "app.routers.conversations:update_conversation": "participant-membership gate",
     "app.routers.conversations:update_conversation_status": "participant-membership gate",
+    "app.routers.conversations:delete_message": (
+        "story #2319 — _authorize_message_read(canonical, get_message과 동일)로 participant-"
+        "membership gate 후 sender_id 소유권 추가(1-hop 아래서 has_project_access류 호출 — "
+        "위 set_conversation_mute/update_conversation과 동일 패턴, v1 스캔 미인식). 이 면제를 "
+        "받치는 것은 test_delete_message_after_removed_from_participants_403"
+        "(test_1994_backlink_api_realdb.py) — participant 제거 시 403이 되는지 실증한다. "
+        "그 테스트를 지우거나 약화시키면 이 면제의 근거도 함께 사라진다."
+    ),
     "app.routers.event_notifications:mark_read": "recipient-scoped(event.recipient_id==caller member)",
     "app.routers.notifications:mark_read": "owner user_id 스코프(caller 소유 알림만)",
     "app.routers.evidence:delete_evidence": "creator-only(created_by!=caller → 403)",

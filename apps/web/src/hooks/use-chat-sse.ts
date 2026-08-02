@@ -23,6 +23,10 @@ export interface ChatMessage {
   sender_name: string;    // backend: sender.name
   sender_type: string;    // backend: sender.type ('human' | 'agent')
   content: string;
+  /** story #2319 — set이면 tombstone됨(행은 남고 content는 서버가 이미 ""로 스크럽했다).
+   * ChatBubble이 이 필드로 placeholder를 렌더한다(#2299 still_exists와 같은 축 — 「끊어짐」은
+   * 사실 필드, 렌더는 FE 몫). */
+  deleted_at?: string | null;
   review_type?: string;
   attachments: Array<{ url?: string; name?: string; content_type?: string; filename?: string }>;
   created_at: string;
@@ -49,6 +53,7 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     sender_name: (sender?.name ?? '') as string,
     sender_type: (sender?.type ?? 'human') as string,
     content: (raw.content ?? '') as string,
+    deleted_at: (raw.deleted_at ?? null) as string | null,
     attachments: (raw.attachments ?? []) as ChatMessage['attachments'],
     created_at: (raw.created_at ?? '') as string,
     // P1 RC: backend sends thread_id as parent pointer; raw.parent_id may be absent
