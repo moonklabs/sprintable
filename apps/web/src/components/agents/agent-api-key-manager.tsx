@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { ToolPermissionPicker } from '@/components/agents/tool-permission-picker';
@@ -48,6 +49,8 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   const [copiedOnboarding, setCopiedOnboarding] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
   const [revokeConfirmDialog, setRevokeConfirmDialog] = useState(false);
+  // story #2416 — 개별 키 revoke의 native confirm() 대체. null=닫힘, 아니면 대상 키 id.
+  const [revokeKeyId, setRevokeKeyId] = useState<string | null>(null);
   const { addToast } = useToast();
 
   // f44e2644: 랜딩 canonical 직지정(app.sprintable.ai CF 301 prod 미발동·앱 사본 onboarding-guide 깨짐).
@@ -131,7 +134,6 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
 
   const revokeApiKey = async (keyId: string) => {
     if (!agentId) return;
-    if (!confirm('Are you sure you want to revoke this API key?')) return;
 
     setLoading(true);
     try {
@@ -292,7 +294,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
                 <Button
                   variant="destructive"
                   size="sm"
-                  onClick={() => revokeApiKey(key.id)}
+                  onClick={() => setRevokeKeyId(key.id)}
                   disabled={loading}
                 >
                   Revoke
@@ -321,6 +323,20 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={revokeKeyId !== null}
+        onOpenChange={(open) => { if (!open) setRevokeKeyId(null); }}
+        title={t('agentApiKeySingleRevokeDialogTitle')}
+        description={t('agentApiKeySingleRevokeDialogBody')}
+        cancelLabel={tc('cancel')}
+        confirmLabel={t('agentApiKeySingleRevokeConfirmCta')}
+        onConfirm={() => {
+          const id = revokeKeyId;
+          setRevokeKeyId(null);
+          if (id) void revokeApiKey(id);
+        }}
+      />
 
       <Dialog open={newKeyDialog} onOpenChange={setNewKeyDialog}>
         <DialogContent className="sm:max-w-lg">

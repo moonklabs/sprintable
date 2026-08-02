@@ -9,6 +9,7 @@ import type { KanbanStory, KanbanMember, LineStatusSummary } from './types';
 import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, ChevronRight, EyeOff, History, Pause, Rocket, Zap, ZapOff, type LucideIcon } from 'lucide-react';
 import { LabelChip } from '@/components/ui/label-chip';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { TrustSeal } from '@/components/verify/trust-seal';
 import { deriveTrustStage } from '@/services/verify';
 import { formatRelativeTime } from '@/lib/storage/format';
@@ -122,6 +123,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   const lineBadgeMeta = lineBadge && lineBadge !== 'pending_gate' ? LINE_BADGE_META[lineBadge] : null;
   const pendingGateType = lineBadge === 'pending_gate' ? gates.find((g) => g.status === 'pending')?.gate_type : undefined;
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  // story #2416 — native confirm() 대체.
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [triggering, setTriggering] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -262,11 +265,14 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   }, [story.id, onAssign]);
 
   const handleDelete = useCallback(() => {
-    if (confirm(`Delete story "${story.title}"?`) && onDelete) {
-      onDelete(story.id);
-    }
+    setDeleteConfirmOpen(true);
     setContextMenuOpen(false);
-  }, [story, onDelete]);
+  }, []);
+
+  const confirmDelete = useCallback(() => {
+    setDeleteConfirmOpen(false);
+    if (onDelete) onDelete(story.id);
+  }, [story.id, onDelete]);
 
   const statuses = [
     { id: 'backlog', label: t('backlog') },
@@ -502,6 +508,19 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
         </div>,
         document.body,
       )}
+
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title={t('deleteStoryDialogTitle')}
+        description={t.rich('deleteStoryDialogBody', {
+          title: story.title,
+          b: (chunks) => <b className="font-semibold text-foreground">{chunks}</b>,
+        })}
+        cancelLabel={t('cancel')}
+        confirmLabel={t('deleteStory')}
+        onConfirm={confirmDelete}
+      />
     </div>
   );
 }
