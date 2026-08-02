@@ -45,79 +45,32 @@ from authz_coverage_lib import (  # noqa: E402
 )
 
 # ── false positive: 실제로는 안전 — 영구 allowlist(이유 주석 필수) ────────────────────
+#
+# story #2340 AC2(2026-08-02, 디디) — has_guard()가 1-hop 바디 헬퍼 + 1-hop Depends 바디까지
+# 인식하도록 넓히면서(authz_coverage_lib._body_helper_calls_guard/_depends_bodies_call_guard)
+# 여기 있던 40건 중 **32건**이 "실제로는 허용 헬퍼 1-hop 아래서 가드를 부르고 있었다"로
+# «스캐너가 직접 확認»하는 쪽으로 넘어가 제거됐다(더는 사람이 눈으로만 확인해 allowlist에
+# 박아 두지 않아도 스캐너 자신이 진실을 낸다). 남은 8건은 hop-recognition으로도 못 닫히는
+# «진짜 다른 이유»(admin-gate·self-scope·server-derived param·2-hop 등) — 개별 사유 유지.
 _FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     "app.routers.dispatch:dispatch_entity":
         "body.project_id는 사용되지 않는 dead field — entity_project_id는 서버가 엔티티 조회로 도출",
-    "app.routers.assets:list_assets":
-        "_scope_filter(auth,org_id,project_id) 헬퍼가 has_project_access/accessible_project_ids_in_org를 1-hop 아래서 호출",
-    "app.routers.conversations:list_conversations":
-        "_resolve_member(auth,org_id,db,project_id=) 로컬 wrapper가 resolve_member(project_id=)를 1-hop 아래서 호출",
-    "app.routers.goals:create_goal":
-        "enforce_body_context()가 has_project_access를 내부에서 호출(캐노니컬 가드, 이름만 다름)",
-    "app.routers.hypotheses:list_hypotheses":
-        "Depends(get_project_scoped_org_id)가 동일 project_id 쿼리파라미터로 has_project_access 검증",
-    "app.routers.loops:list_loops":
-        "Depends(get_project_scoped_org_id) 동일 패턴",
     "app.routers.gate_metrics:get_hitl_gate_metrics":
         "is_org_owner_or_admin 가드 — 거버넌스/오버사이트 데이터는 의도적으로 org 전체 admin 시야",
-    "app.routers.workflow_line_config:create_draft_version":
-        "_require_draft_author(session,actor,org_id,project_id)가 이름과 달리 admin-level project_auth 접근권을 강제(in-code 문서화됨)",
-    "app.routers.workflow_line_config:list_versions_endpoint":
-        "동일 _require_draft_author admin-gate",
-    "app.routers.workflow_line_config:resolve_preview":
-        "동일 _require_draft_author admin-gate",
-    "app.routers.workflow_line_config:get_active_line":
-        "동일 _require_draft_author admin-gate",
     "app.routers.docs:list_docs":
-        "Depends(get_project_scoped_org_id) 동일 패턴",
-    "app.routers.meetings:create_meeting":
-        "enforce_body_context()가 has_project_access를 내부에서 호출",
-    "app.routers.stories:list_stories":
-        "Depends(get_project_scoped_org_id) 동일 패턴",
-    "app.routers.project_access:list_project_access":
-        "_require_owner_or_admin(project_id,...)가 has_project_role(min_role=admin)을 1-hop 아래서 호출",
-    "app.routers.project_access:create_project_access":
-        "동일 _require_owner_or_admin/has_project_role 가드",
-    "app.routers.project_access:delete_project_access":
-        "동일 _require_owner_or_admin/has_project_role 가드",
+        # story #2340 AC3(2026-08-02) — 정정: 예전 사유("Depends(get_project_scoped_org_id) 동일
+        # 패턴")는 틀렸다. hypotheses/loops/stories는 get_project_scoped_org_id를 **자기 자신의**
+        # Depends로 직접 쓴다(1-hop). list_docs는 Depends(_get_repo)를 쓰고, _get_repo가 다시
+        # Depends(get_project_scoped_org_id)를 선언한다(_get_repo 자신은 가드를 안 부름) —
+        # 실제 가드(has_project_access)까지 **2-hop**(Depends→Depends→가드)이라 hop=1 인식으로는
+        # 원리적으로 안 닫힌다. AC3 known-gap 테스트(test_hop_recognition_misses_two_hop_depends_chain)가
+        # 이 라우트로 그 미탐을 실제로 심어 확認한다 — 2-hop 재귀를 넣기 前엔 안전(안전한 이유가
+        # «다른» 가드이지 무가드가 아님)하지만, 이 allowlist 엔트리는 유지한다.
+        "Depends(_get_repo)→Depends(get_project_scoped_org_id)로 실 가드까지 2-hop — hop=1 인식 밖(AC3 known-gap)",
     "app.routers.team_members:claim_story":
         "assert_caller_is_member(id,...)로 self-scope 강제 후 body.story_id는 Story.project_id==member.project_id로 서버파생 제약(클라 project 주입 불가)",
-    "app.routers.event_notifications:list_notifications":
-        "_resolve_member_id(auth,org_id,db,project_id=) 로컬 wrapper가 resolve_member(project_id=)를 1-hop 아래서 호출",
-    "app.routers.event_notifications:get_unread_count":
-        "동일 _resolve_member_id 가드",
-    "app.routers.event_notifications:mark_all_read":
-        "동일 _resolve_member_id 가드",
     "app.routers.rewards:get_balance":
         "_assert_self_or_org_admin(member_id,...) — 본인 잔액 또는 org admin만 조회 가능해 project_id 자체는 blast-radius가 self-data로 제한",
-    "app.routers.current_project:set_current_project":
-        "assert_caller_is_member self-scope 후 (member_id, body.project_id) TeamMember 행 존재를 요구 — has_project_access보다 엄격(IDOR 아님)",
-    "app.routers.analytics:get_overview":
-        "SEC-S8 DD(#2047)에서 추가된 로컬 _assert_project_access(repo,auth,project_id) wrapper가 has_project_access를 1-hop 아래서 호출",
-    "app.routers.analytics:get_member_workload":
-        "동일 _assert_project_access 가드",
-    "app.routers.analytics:get_velocity_history":
-        "동일 _assert_project_access 가드",
-    "app.routers.analytics:get_recent_activity":
-        "동일 _assert_project_access 가드",
-    "app.routers.analytics:get_epic_progress":
-        "동일 _assert_project_access 가드",
-    "app.routers.analytics:get_agent_stats":
-        "동일 _assert_project_access 가드",
-    "app.routers.analytics:get_project_health":
-        "동일 _assert_project_access 가드",
-    "app.routers.analytics:get_burndown":
-        "DD(#2047)에서 sprint.project_id 조회 후 _assert_project_access 호출(org_id 자체는 CRITICAL cross-org fix로 별도 봉인 완료)",
-    "app.routers.analytics:get_sprint_velocity":
-        "동일 패턴(sprint.project_id 조회 후 _assert_project_access)",
-    "app.routers.analytics:get_epics_progress_lane":
-        "story #2224(S2-1) 신규 — 동일 _assert_project_access 가드(다른 analytics 엔드포인트와 동일 패턴)",
-    "app.routers.analytics:get_epic_flow_nodes":
-        "story #2224 노드 계약 신규 — 동일 _assert_project_access 가드(다른 analytics 엔드포인트와 동일 패턴)",
-    "app.routers.analytics:get_goal_edges":
-        "story #2360 신규 — 동일 _assert_project_access 가드(다른 analytics 엔드포인트와 동일 패턴)",
-    "app.routers.analytics:get_pending_candidate_count":
-        "story #2366 신규 — 동일 _assert_project_access 가드(다른 analytics 엔드포인트와 동일 패턴)",
     "app.routers.workflow_executions:list_executions":
         "설계상 안전(SEC-S8 BB 정리) — non-admin은 target_agent_id==member_id로 self-scope, admin은 org 전체 권한으로 통과",
     "app.routers.visual_artifacts:list_artifacts":
@@ -125,7 +78,7 @@ _FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     "app.routers.open_api_keys:list_project_api_keys":
         "동일 require_admin + JWT-derived project_id",
     "app.routers.open_api_keys:revoke_project_api_key":
-        "동일 require_admin + JWT-derived project_id, 추가로 key.project_id==project_id 소유권 검증",
+        "동일 require_admin + JWT-derived project_id, 추가로 key.project_id==project_id 소유권 검증(② 인라인 비교식 — 이름이 없어 hop-recognition 밖. 별도 축)",
 }
 
 # ── known debt: 실 GAP(HIGH/MEDIUM/LOW) — CRITICAL 3건(EE #2048)은 이미 fix, 나머지는
@@ -199,6 +152,103 @@ def test_known_debt_allowlist_shrinks_are_welcome_no_assertion():
     """placeholder — known-debt 항목이 fix되면 baseline dict에서 제거하는 게 상환 진행의
     증거(별도 assertion 없음, 다음 fix PR이 이 dict를 줄이면 그걸로 충분)."""
     assert True
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# story #2340 AC2/AC3(2026-08-02, 디디) — 1-hop 인식(hop=1로 고정)이 실제로 «잡는다»는
+# 증거(양성, has_teeth) + hop=1을 넘어서면 «못 잡는다»는 증거(음성, known-gap 선언).
+# 실측 근거: 이 파일의 _FALSE_POSITIVE_ALLOWLIST 40건 중 32건이 정확히 hop=1(바디에서 직접
+# 부른 로컬 헬퍼, 또는 Depends 콜러블 자신)의 몸통에서 실 가드를 부르는 패턴이었고, 2단
+# 이상으로 내려가는 실례는 0건이었다 — 그래서 재귀 없이 hop=1로 고정한다.
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+async def _synthetic_scope_helper_2340(project_id) -> None:
+    # analytics._assert_project_access·assets._scope_filter 등과 동일 모양 — 헬퍼 자신의
+    # 바디에서 실 가드를 호출(라우트 바디에서는 헬퍼 «이름»만 보인다). `_body_helper_calls_guard`가
+    # `getattr(module, name)`로 이름을 해소하므로 **모듈 레벨**에 정의해야 한다(테스트 함수 안의
+    # 클로저는 모듈 attribute가 아니라 해소 안 됨 — 실 코드의 헬퍼들도 전부 모듈 레벨이라 이게
+    # 맞는 제약이다).
+    from app.services.project_auth import has_project_access
+    await has_project_access(None, None, project_id, None)  # noqa — 존재만 검증(AST 대상)
+
+
+async def _synthetic_inner_guard_2340(project_id) -> None:
+    await _synthetic_scope_helper_2340(project_id)
+
+
+async def _synthetic_outer_wrapper_2340(project_id) -> None:
+    # docs.py의 _get_repo→get_project_scoped_org_id와 동일 모양 — 래퍼 자신은 가드를 안
+    # 부르고, «자신이 부르는 다른 헬퍼»가 가드를 부른다(2단).
+    await _synthetic_inner_guard_2340(project_id)
+
+
+def test_hop_recognition_catches_one_hop_body_helper_synthetic():
+    """양성(has_teeth): 라우트 바디가 직접 부른 로컬 헬퍼 1단 아래서 실 가드를 부르면
+    has_guard가 잡아야 한다 — 못 잡으면 AC2의 1-hop 인식 로직 자체가 죽은 것(회귀)."""
+    import uuid
+
+    from fastapi import FastAPI
+
+    from authz_coverage_lib import PROJECT_GUARD_FUNCTIONS, enumerate_routes_matching, has_guard
+
+    app = FastAPI()
+
+    @app.get("/synthetic/one-hop")
+    async def _synthetic_one_hop(project_id: uuid.UUID):  # noqa: ANN202
+        await _synthetic_scope_helper_2340(project_id)
+        return {"ok": True}
+
+    routes = {r.qualname.split(".")[-1]: r for r in enumerate_routes_matching(app, PROJECT_PARAM_RE)}
+    assert "_synthetic_one_hop" in routes, "project_id 파라미터를 가진 라우트가 열거 안 됨(축 사각)"
+    assert has_guard(routes["_synthetic_one_hop"], PROJECT_GUARD_FUNCTIONS), (
+        "1-hop 바디 헬퍼 아래 실 가드 호출을 미탐지 — AC2 회귀(_body_helper_calls_guard 무력화)"
+    )
+
+
+def test_hop_recognition_misses_two_hop_wrapper_known_gap():
+    """⚠️알려진 미탐(known gap, not caught) — hop=1 인식은 «헬퍼의 헬퍼»(2단)까지는 못 잡는다.
+    합성 픽스처로 실제로 넣어 확認한다(#1933과 동일 철학 — 넓히라는 신호가 아니라 가드의 자를
+    재는 것). 재귀를 넣으면 이 테스트가 빨개지며 "hop=2까지 넓혔다"를 알려준다."""
+    import uuid
+
+    from fastapi import FastAPI
+
+    from authz_coverage_lib import PROJECT_GUARD_FUNCTIONS, enumerate_routes_matching, has_guard
+
+    app = FastAPI()
+
+    @app.get("/synthetic/two-hop")
+    async def _synthetic_two_hop(project_id: uuid.UUID):  # noqa: ANN202
+        await _synthetic_outer_wrapper_2340(project_id)
+        return {"ok": True}
+
+    routes = {r.qualname.split(".")[-1]: r for r in enumerate_routes_matching(app, PROJECT_PARAM_RE)}
+    assert "_synthetic_two_hop" in routes
+    assert not has_guard(routes["_synthetic_two_hop"], PROJECT_GUARD_FUNCTIONS), (
+        "2-hop 래퍼를 guarded로 판정 — hop=1 고정이 깨졌다(재귀가 들어간 것이라면 이 테스트를 "
+        "의도적으로 갱신하고 그 근거를 새로 남길 것)"
+    )
+
+
+def test_hop_recognition_misses_two_hop_depends_chain_real_route():
+    """⚠️알려진 미탐(known gap, not caught) — 실제 프로덕션 라우트로 재확認. `docs:list_docs`는
+    `Depends(_get_repo)`를 쓰고 `_get_repo`가 다시 `Depends(get_project_scoped_org_id)`를
+    선언한다(`_get_repo` 자신은 가드를 안 부름) — 실 가드(`has_project_access`)까지 정확히
+    2-hop이라 hop=1 인식 밖이다. `_FALSE_POSITIVE_ALLOWLIST["app.routers.docs:list_docs"]`가
+    이 사실을 문서화하는 근거가 바로 이 테스트다 — 둘 중 하나만 갱신되고 다른 게 안 갱신되면
+    다음 사람이 다시 헷갈린다."""
+    from app.main import app
+    from authz_coverage_lib import PROJECT_GUARD_FUNCTIONS, enumerate_routes_matching, has_guard
+
+    routes = {r.key: r for r in enumerate_routes_matching(app, PROJECT_PARAM_RE)}
+    target = routes.get("app.routers.docs:list_docs")
+    assert target is not None, "app.routers.docs:list_docs 라우트를 못 찾음(리네임/삭제 — 이 테스트와 allowlist 사유 정정 필요)"
+    assert not has_guard(target, PROJECT_GUARD_FUNCTIONS), (
+        "list_docs가 guarded로 판정됨 — 2-hop(Depends 안의 Depends) 인식이 이미 들어간 것이거나 "
+        "_get_repo/get_project_scoped_org_id 구조가 바뀐 것. 참이면 known-gap 문서화(이 테스트 + "
+        "allowlist 사유)를 함께 갱신할 것"
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
