@@ -4,6 +4,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, computed_field, field_validator, model_validator
 from app.schemas.story import _validate_metric_definition
+from app.schemas.validators import is_blank
+
+# story #2413 AC3(PO 지시, 2026-08-02) — 제목이 빈 스프린트를 만들 수 없게 서버가 거부한다.
+# 실측(dev, MCP list_sprints): 16건 중 blank title 0건.
+_BLANK_TITLE_MSG = "title은 비어 있을 수 없습니다"
 
 # E-DG S26: sprint status contract. de-facto(planning|active|done)에 review(선택)·archived(terminal) 신설.
 # ⭐review 선택(active→done 직행 허용·active→review→done도 OK). hypothesis/epic _VALID_TRANSITIONS 패턴.
@@ -56,6 +61,13 @@ class SprintBase(BaseModel):
     def validate_metric_definition(cls, v: dict | None) -> dict | None:
         return _validate_metric_definition(v)
 
+    @field_validator("title")
+    @classmethod
+    def _reject_blank_title(cls, v: str) -> str:
+        if is_blank(v):
+            raise ValueError(_BLANK_TITLE_MSG)
+        return v
+
 
 class SprintCreate(SprintBase):
     project_id: uuid.UUID
@@ -84,6 +96,15 @@ class SprintUpdate(BaseModel):
     @classmethod
     def validate_metric_definition(cls, v: dict | None) -> dict | None:
         return _validate_metric_definition(v)
+
+    @field_validator("title")
+    @classmethod
+    def _reject_blank_title(cls, v: str | None) -> str | None:
+        # None(생략 또는 명시 null)은 통과 — update_sprint가 model_dump(exclude_unset=True)라
+        # 생략 필드는 애초에 안 건드린다. 명시적으로 ""를 보낸 경우만 거부(story #2413 AC3).
+        if v is not None and is_blank(v):
+            raise ValueError(_BLANK_TITLE_MSG)
+        return v
 
 
 class SprintResponse(SprintBase):
