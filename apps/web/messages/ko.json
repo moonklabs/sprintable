@@ -3311,6 +3311,7 @@
     "rotating": "재발급 중…",
     "rotateFailed": "재발급에 실패했습니다. 다시 시도해 주세요.",
     "verifyGuideMcp": "아래 .mcp.json을 화면에 있는 그대로 {runtime} MCP 설정에 붙여넣으세요(손으로 옮겨 적지 마세요 — 한 줄이 빠지면 조용히 실패하는 흔한 원인입니다), 그런 다음 {runtime}을 열어 Sprintable 도구를 아무거나 한 번 실제로 호출하게 하세요 — 설정만으로는 연결되지 않고, 그 첫 실제 호출이 검증을 완료시킵니다.",
+    "verifyGuideMcpStdio": "아래 .mcp.json을 화면에 있는 그대로 {runtime} MCP 설정에 붙여넣으세요(손으로 옮겨 적지 마세요 — 한 줄이 빠지면 조용히 실패하는 흔한 원인입니다), 그런 다음 {runtime}을 열어 연결하세요 — 연결이 확인되면 자동으로 검증이 완료됩니다.",
     "verifyGuideConnector": "커넥터 연결 설정을 완료한 뒤, Sprintable 도구를 아무거나 한 번 실제로 호출하게 하세요 — 설정만으로는 연결되지 않고, 그 첫 실제 호출이 검증을 완료시킵니다.",
     "verifyExampleLabel": "에이전트에게 이렇게 말해 보세요:",
     "verifyExamplePrompt": "내 스토리 목록 보여줘",

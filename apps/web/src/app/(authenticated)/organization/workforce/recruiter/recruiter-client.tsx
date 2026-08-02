@@ -96,6 +96,21 @@ export function resolveKitFilename(
   return KIT_FILENAME;
 }
 
+/**
+ * story #2792 design:changes(카디르 QA, 2026-08-02) — STEP5 상단 안내문이 mcp_config 유무로만
+ * 갈리고 transport는 안 봤다. `verifyGuideMcp`("도구를 호출해야 검증이 완료된다")는 http
+ * heartbeat 축에만 인과적으로 맞는 문장(agent_verify.py — stdio는 SSE 연결만으로 자동 ack)이라
+ * stdio에 그대로 쓰면 없는 요구를 있다고 말하는 것이다. `showVerifyExamplePrompt`(verify-rail.tsx)
+ * 와 같은 근거·같은 축.
+ */
+export function resolveVerifyGuideKey(
+  hasMcpConfig: boolean,
+  transport: 'http' | 'stdio' | null,
+): 'verifyGuideConnector' | 'verifyGuideMcp' | 'verifyGuideMcpStdio' {
+  if (!hasMcpConfig) return 'verifyGuideConnector';
+  return transport === 'http' ? 'verifyGuideMcp' : 'verifyGuideMcpStdio';
+}
+
 export interface RoleGroup {
   label: string;
   roles: RoleTemplateSummary[];
@@ -1144,11 +1159,17 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
           {/* ── STEP 5 : 검증 + 배치(G5) ── */}
           {step === 5 && recruitResult && (
             <div className="space-y-4">
+              {/* story #2792 design:changes(카디르 QA, 2026-08-02) — ②를 「stdio에서 예시프롬프트
+                  게이팅」만 고치고 이 문구는 안 고쳐서 절반짜리였다. showVerifyExamplePrompt와
+                  같은 근거(agent_verify.py — http만 heartbeat=tool호출이 verify 메커니즘 자체,
+                  stdio는 세션 연결만으로 SSE ack가 자동 진행)를 이 안내에도 적용한다 — stdio는
+                  "tool을 호출해야 완료된다"가 아니라 "연결되면 자동 완료된다"가 맞는 문장이다. */}
               <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                {recruitResult.mcp_config
-                  ? t('verifyGuideMcp', { runtime: currentRuntimeDisplayName })
-                  : t('verifyGuideConnector')}
+                {t(
+                  resolveVerifyGuideKey(Boolean(recruitResult.mcp_config), recruitResult.default_transport),
+                  { runtime: currentRuntimeDisplayName },
+                )}
               </p>
 
               {/* story #2404(AC5, PO 확定) — "설정만 넣으면 자동으로 된다"는 오해가 무한 대기의

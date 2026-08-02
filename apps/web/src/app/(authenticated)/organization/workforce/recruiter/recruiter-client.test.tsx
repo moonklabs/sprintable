@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { spliceApiKey, splitRuntimeCapabilities, pickDefaultRuntime, groupAndFilterRoleTemplates, resolveKitFilename } from './recruiter-client';
+import { spliceApiKey, splitRuntimeCapabilities, pickDefaultRuntime, groupAndFilterRoleTemplates, resolveKitFilename, resolveVerifyGuideKey } from './recruiter-client';
 import type { McpConfigBundle, RuntimeCapabilityItem, RoleTemplateSummary } from '@/services/recruit';
 import { RUNTIME_CAPABILITIES_FALLBACK, KIT_FILENAME } from '@/services/recruit';
 import enMessages from '../../../../../../messages/en.json';
@@ -259,5 +259,30 @@ describe('recruiter-client STEP4 — story #2377 §2(단계 셋)·§4(발견 가
 
   it('shows an explicit "not registered yet" fallback for the wake-up step instead of staying silent', () => {
     expect(source).toContain("t('kitOrientingWakeBodyUnknown')");
+  });
+});
+
+// story #2792 design:changes(카디르 QA, 2026-08-02) — verifyGuideMcp가 transport 무관 항상
+// "tool을 호출해야 검증이 완료된다"고 말했다(http만 사실). stdio는 세션 연결만으로 SSE ack가
+// 자동 진행되므로 별개 문장(verifyGuideMcpStdio)이어야 한다 — 이 판정이 다시 안 갈리게 pin.
+describe('resolveVerifyGuideKey — story #2792 (STEP5 안내문도 showVerifyExamplePrompt와 같은 축)', () => {
+  it('no mcp_config → connector guide regardless of transport', () => {
+    expect(resolveVerifyGuideKey(false, 'http')).toBe('verifyGuideConnector');
+    expect(resolveVerifyGuideKey(false, null)).toBe('verifyGuideConnector');
+  });
+
+  it('mcp_config + http → the tool-call-completes-verification guide (accurate for heartbeat)', () => {
+    expect(resolveVerifyGuideKey(true, 'http')).toBe('verifyGuideMcp');
+  });
+
+  it('mcp_config + stdio → the auto-completes-on-connect guide, not the tool-call one', () => {
+    expect(resolveVerifyGuideKey(true, 'stdio')).toBe('verifyGuideMcpStdio');
+  });
+
+  it('both locales have the new key', () => {
+    const en = (enMessages as { recruiter: Record<string, string> }).recruiter.verifyGuideMcpStdio;
+    const ko = (koMessages as { recruiter: Record<string, string> }).recruiter.verifyGuideMcpStdio;
+    expect(en).toBeTruthy();
+    expect(ko).toBeTruthy();
   });
 });
