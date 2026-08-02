@@ -296,7 +296,7 @@ function TreeNode({
         >
           <button onClick={handleRename} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">Rename</button>
           {isFolder && <button onClick={handleAddChild} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">Add child</button>}
-          <button onClick={handleDelete} className="w-full rounded-md px-3 py-2 text-left text-sm text-destructive-on-subtle hover:bg-destructive/10">Delete</button>
+          <button onClick={handleDelete} className="w-full rounded-md px-3 py-2 text-left text-sm text-foreground hover:bg-destructive/10">Delete</button>
         </div>
       </div>
 

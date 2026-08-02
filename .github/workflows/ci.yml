@@ -668,6 +668,14 @@ jobs:
       - name: "Verify no i18n phrase substring collision (story #2367 regression guard)"
         run: pnpm --filter web verify:no-i18n-phrase-collision
 
+      # story #2420 AC3 회귀가드: globals.css의 `--<family>-tint` 배경 위에서 --foreground가
+      # AA(4.5)를 넘는지 «정의 시점»에 계산한다(oklch→sRGB 변환은 Yuna의 실 Chromium canvas
+      # 캡처값과 대조 검증된 순수함수 — 브라우저 불요, 빠르고 결정적). 새 계열(예: --info-tint)이
+      # globals.css에 추가되면 이 스텝이 코드 수정 없이 자동으로 그 계열도 검사한다 — #2419가
+      # 겪은 "이름이 늘 때마다 사용처 스윕을 다시 도는" 병을 정의 축에서 원천 차단한다.
+      - name: "Verify tint background × foreground contrast (story #2420 regression guard)"
+        run: pnpm --filter web verify:tint-foreground-contrast
+
       # story #2371 회귀가드: `scripts/check-i18n-keys.js`(code→messages missing-key 축)를
       # 처음으로 CI에 건다 — 이전엔 CI/husky/package.json 어디에도 안 걸려 있었고 손으로
       # 돌리면 344 issues·exit 1이 나왔는데(2026-07-31 실측) 344건 전부 도구 결함(워드바운더리

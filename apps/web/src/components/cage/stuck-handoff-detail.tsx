@@ -37,7 +37,7 @@ export function StuckHandoffDetail({ step }: StuckHandoffDetailProps) {
 
       {/* delivery_error 박스(있을 때만) */}
       {step.delivery_error ? (
-        <div className="flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1.5 text-[11px] text-destructive-on-subtle/85">
+        <div className="flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1.5 text-[11px] text-foreground/85">
           <AlertCircle className="mt-0.5 size-3 shrink-0" />
           <span>
             <span className="text-destructive/70">{t('deliveryError')}: </span>
