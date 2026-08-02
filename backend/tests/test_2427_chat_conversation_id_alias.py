@@ -62,6 +62,34 @@ class TestConversationIdResolution:
             SendChatInput(conversation_id=CONV, content="hi", bogus_field="x")
 
 
+class TestDeprecatedAliasUsageCounter:
+    """PO 요청(2026-08-02, #2799 리뷰) — 「걷을 조건」은 잴 수 있어야 선언이다.
+    thread_id로 들어오면 경고 로그가 남아야 나중에 "0에 수렴했는가"를 셀 수 있다."""
+
+    def test_thread_id_only_logs_deprecation_warning(self, caplog):
+        import logging
+        with caplog.at_level(logging.WARNING, logger="sprintable_mcp.tools.chat"):
+            SendChatInput(thread_id=CONV, content="hi")
+        assert any("deprecated thread_id alias" in r.message for r in caplog.records)
+        assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+    def test_conversation_id_only_does_not_log(self, caplog):
+        """음성대조 — 정식 이름을 쓰면 카운터가 조용해야 한다(안 그러면 카운터가 항상 시끄러워
+        「0에 수렴」을 못 판별한다)."""
+        import logging
+        with caplog.at_level(logging.WARNING, logger="sprintable_mcp.tools.chat"):
+            SendChatInput(conversation_id=CONV, content="hi")
+        assert not any("deprecated thread_id alias" in r.message for r in caplog.records)
+
+    def test_both_same_value_does_not_log(self, caplog):
+        """둘 다 주어졌고 conversation_id를 이미 쓰고 있다면 별칭에 «의존»하는 게 아니다 —
+        경고는 "conversation_id 없이 thread_id만" 자리에서만 의미가 있다."""
+        import logging
+        with caplog.at_level(logging.WARNING, logger="sprintable_mcp.tools.chat"):
+            SendChatInput(conversation_id=CONV, thread_id=CONV, content="hi")
+        assert not any("deprecated thread_id alias" in r.message for r in caplog.records)
+
+
 # ─── 판별(PO 요청) — 응답을 보고 그대로 다시 부르면 통하는가 ──────────────────
 
 class TestResponseRoundTrip:

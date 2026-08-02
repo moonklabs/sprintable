@@ -110,6 +110,12 @@ class ConversationScopedInput(SprintableInput):
     ⛔걷을 조건 — 다음 판에서 실사용 로그(agent 호출)를 세어 `thread_id`(옛 이름) 사용이
     0에 수렴하면 이 필드와 아래 검증을 뺀다. #2792에서 react-hooks lint disable에 붙인
     것과 같은 형태(면제/별칭은 «언제 없앨 수 있는가»가 없으면 영원히 남는다).
+
+    ⛔PO 지적(2026-08-02, #2799 리뷰) — 「걷을 조건」이 적혀만 있으면 그 조건이 «충족됐는지»를
+    아무도 못 잰다(호출자는 코드가 아니라 에이전트들의 습관이라 grep으로 못 센다). `thread_id`
+    로 들어오면 매번 경고 로그 한 줄을 남긴다 — 이 로그가 그 카운터다. Cloud Logging에서
+    `logger="sprintable_mcp.tools.chat"` + "deprecated thread_id alias"로 검색해 최근 N일간
+    발화 빈도를 센다. 0에 수렴하면(또는 특정 소수 소비처로만 좁혀지면) 그때 별칭을 걷는다.
     """
 
     conversation_id: str | None = None
@@ -123,9 +129,18 @@ class ConversationScopedInput(SprintableInput):
                 "thread_id는 conversation_id의 폐기 예정 별칭입니다(응답의 thread_id와는 "
                 "다른 뜻이니 혼동하지 마세요). 하나만 쓰거나 같은 값을 주세요."
             )
+        if self.thread_id and not self.conversation_id:
+            logger.warning(
+                "%s: deprecated thread_id alias used instead of conversation_id "
+                "(story #2427 — usage counter for when to remove the alias)",
+                self.__class__.__name__,
+            )
         resolved = self.conversation_id or self.thread_id
         if not resolved:
-            raise ValueError("conversation_id가 필요합니다.")
+            raise ValueError(
+                "conversation_id가 필요합니다 — thread_id는 폐기 예정 별칭이니 "
+                "conversation_id를 쓰세요."
+            )
         self.conversation_id = resolved
         return self
 
