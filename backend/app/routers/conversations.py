@@ -396,7 +396,11 @@ def _msg_payload(
     msg: ConversationMessage, sender: "ResolvedMember | TeamMember | None",
     *, references: list[dict[str, str]] | None = None,
 ) -> dict:
-    attachments = msg.attachments if isinstance(msg.attachments, list) else []
+    # story #2319 미완(미르코 dev 라이브 실측 2026-08-02) — tombstone인데 attachments가 응답에
+    # 그대로 남아 첨부(영상 등)가 계속 재생됐다. AC③(오발송 스크럽) 근거가 이걸로 무너진다 —
+    # 여기서 빈 배열로 덮는다(실제 근본은 attachments.py authorize의 belongs 쿼리에 deleted_at
+    # 필터를 추가한 것 — 이 payload 필터는 FE가 애초에 못 보게 하는 2차 방어).
+    attachments = (msg.attachments if isinstance(msg.attachments, list) else []) if msg.deleted_at is None else []
     payload = {
         "id": str(msg.id),
         "conversation_id": str(msg.conversation_id),

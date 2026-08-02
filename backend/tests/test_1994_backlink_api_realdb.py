@@ -2285,3 +2285,84 @@ async def test_delete_message_after_removed_from_participants_403():
             assert fresh.content == "제거 전에 보낸 메시지"
     finally:
         await engine.dispose()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# story #2319 미완(미르코 dev 라이브 실측 2026-08-02) — tombstone된 메시지의 첨부가
+# 화면 게이트 없이도(URL을 아는 사람은) 계속 authorize되던 결함. 근본은 attachments.py
+# authorize의 belongs 쿼리가 m.deleted_at을 안 보던 것 — 여기서 실 SQL로 재현·pin한다.
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+async def test_attachment_authorize_403_after_message_tombstoned():
+    """삭제 전엔 authorize 200(양성대조) → 삭제 후엔 403이어야 한다 — URL을 직접 아는 사람도
+    막혀야 한다(화면이 안 그리는 것과 별개로 서버가 거부해야 진짜 봉인)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id], created_by=caller_id, conv_type="dm")
+            path = f"chat/{project.id}/{conv_id}/u1-video.mp4"
+            msg = await _add_message(s, conv_id, caller_id, "영상 첨부", _t(1))
+            msg.attachments = [{"url": path, "content_type": "video/mp4"}]
+            await s.commit()
+            msg_id = msg.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            # 삭제 전 — 정상 authorize(양성대조, 회귀로 항상-403이 되는 것도 막는다).
+            before = await client.get(f"/api/v2/attachments/authorize?path={path}&conversation_id={conv_id}")
+            assert before.status_code == 200, before.text
+
+            del_resp = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert del_resp.status_code == 200, del_resp.text
+
+            # 삭제 후 — 이 테스트의 핵심 단언.
+            after = await client.get(f"/api/v2/attachments/authorize?path={path}&conversation_id={conv_id}")
+            assert after.status_code == 403, after.text
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_get_message_hides_attachments_after_delete():
+    """story #2319 미완 — _msg_payload가 tombstone된 메시지의 attachments를 빈 배열로 덮는다
+    (FE가 애초에 첨부 카드를 시도조차 안 하게, authorize 403의 2차 방어)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id], created_by=caller_id, conv_type="dm")
+            path = f"chat/{project.id}/{conv_id}/u1-video.mp4"
+            msg = await _add_message(s, conv_id, caller_id, "영상 첨부", _t(1))
+            msg.attachments = [{"url": path, "content_type": "video/mp4"}]
+            await s.commit()
+            msg_id = msg.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            before = await client.get(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert before.json()["attachments"] == [{"url": path, "content_type": "video/mp4"}]
+
+            del_resp = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert del_resp.status_code == 200, del_resp.text
+
+            after = await client.get(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert after.json()["attachments"] == [], "삭제 후에도 attachments가 응답에 남아있다"
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()

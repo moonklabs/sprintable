@@ -138,12 +138,17 @@ async def authorize_attachment(
             ):
                 raise HTTPException(status_code=403, detail="Not a participant of this conversation")
         # ② 정확 매치: stored url == bare path(신규) OR == legacy 전체 URL. substring 금지.
+        # story #2319 미완(미르코 dev 라이브 실측 2026-08-02) — tombstone된 메시지의 첨부가 여기서
+        # 계속 "belongs"로 잡혀 서명URL이 계속 발급됐다(URL을 아는 사람은 화면 게이트와 무관하게
+        # 계속 접근). 금지는 화면이 안 그리는 것이 아니라 서버가 거부하는 것이어야 한다 —
+        # m.deleted_at IS NULL을 이 쿼리 자체에 추가한다(FE 게이트는 2차 방어일 뿐 여기가 1차).
         belongs = (await db.execute(
             text(
                 "SELECT EXISTS ("
                 " SELECT 1 FROM conversation_messages m,"
                 " jsonb_array_elements(coalesce(m.attachments, '[]'::jsonb)) att"
-                " WHERE m.conversation_id = :cid AND att->>'url' IN (:path, :legacy))"
+                " WHERE m.conversation_id = :cid AND m.deleted_at IS NULL"
+                " AND att->>'url' IN (:path, :legacy))"
             ),
             {"cid": conversation_id, "path": path, "legacy": legacy_url},
         )).scalar()
