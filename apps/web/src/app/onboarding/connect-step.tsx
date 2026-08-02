@@ -161,7 +161,10 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
   // 아티팩트 fetch 전체)와 동형인 기존 패턴(pristine origin/develop에도 있던 자리 — #2407가
   // 만든 게 아니라 리팩터로 컴파일러 분석이 더 깊이 들어가면서 드러난 것)이라 이 스토리
   // 범위에서 effect 아키텍처를 통째로 바꾸지 않는다 — 이 코드베이스 기존 관례(use-swipe-drawer.ts
-  // 등 7곳)를 따라 disable로 명시한다.
+  // 등, PO 지적 2026-08-02 기준 이 PR로 여덟 번째)를 따라 disable로 명시한다.
+  // ⛔이 disable은 면제가 아니라 부채다 — «걷을 조건»: 이 세 effect(§아티팩트 fetch) 구조를
+  // 다시 손대는 판이 오면(예: fetchArtifact를 재설계·SWR류로 옮기는 스토리) 이 disable 세 개도
+  // 함께 재평가한다. 조용히 영구화하지 않는다.
   useEffect(() => {
     if (!agentId || !apiKey) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
