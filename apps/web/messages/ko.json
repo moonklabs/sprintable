@@ -480,6 +480,10 @@
     "portUndoSignatureUnknown": "언제 만들었는지 정보가 없습니다",
     "portUndoKeep": "그대로 둔다",
     "portUndoDelete": "지우기",
+    "portRejectTitle": "기계가 찾아낸 관계입니다",
+    "portRejectDescription": "기각하면 같은 관계가 다음에도 다시 뜨지 않습니다. 되살릴 수 있습니다.",
+    "portRejectConfirm": "기각",
+    "portRejectErrorFallback": "기각하지 못했습니다. 다시 시도해 주세요.",
     "flowMapPastCount": "완료 {n}",
     "flowMapPastBundle": "묶음",
     "flowMapPastInternalCount": "안에서 이어진 것 {n}",
@@ -543,6 +547,11 @@
     "canvasResizeReset": "기본 크기로"
   },
   "board": {
+    "rejectedRelationsTitle": "기각한 관계 {n}건",
+    "rejectedRelationsTargetGone": "대상이 없습니다",
+    "rejectedRelationsRestore": "되살리기",
+    "rejectedRelationsRestored": "다음 스토리 저장에서 다시 후보로 오를 수 있습니다",
+    "rejectedRelationsRestoreErrorFallback": "되살리지 못했습니다. 다시 시도해 주세요.",
     "backlinksTitle": "이것을 가리키는 것들",
     "backlinksTargetGone": "대상이 없습니다",
     "backlinksEmptyFallback": "관찰된 참조 0건",
