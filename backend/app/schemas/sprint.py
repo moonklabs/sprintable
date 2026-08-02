@@ -7,7 +7,8 @@ from app.schemas.story import _validate_metric_definition
 from app.schemas.validators import is_blank
 
 # story #2413 AC3(PO 지시, 2026-08-02) — 제목이 빈 스프린트를 만들 수 없게 서버가 거부한다.
-# 실측(dev, MCP list_sprints): 16건 중 blank title 0건.
+# ⭐관측된 결함 수정이 아니라 방어다 — 실측(dev, MCP list_sprints): 16건 중 blank title 0건.
+# 지금 고장난 것을 고친 게 아니라, 아직 빈 구멍을 미리 막은 것(#2413 retro.py 쪽 동형 주석 참고).
 _BLANK_TITLE_MSG = "title은 비어 있을 수 없습니다"
 
 # E-DG S26: sprint status contract. de-facto(planning|active|done)에 review(선택)·archived(terminal) 신설.

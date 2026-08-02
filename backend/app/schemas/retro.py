@@ -7,9 +7,12 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from app.schemas.validators import is_blank
 
 # story #2413 AC3(PO 지시, 2026-08-02) — "회고제목"처럼 이름이 비어 있는 회고를 만들 수 없게
-# 서버가 거부한다. 실측(dev, MCP list_retro_sessions): 6건 중 blank title 0건 — "회고제목"은
-# blank가 아니라 "지우지 않은 기본값"이라 이 가드로는 못 잡는다(별건, FE placeholder 축). 그래도
-# 앞으로의 진짜 빈 제목은 이 가드가 막는다.
+# 서버가 거부한다.
+# ⭐이 가드는 «관측된 결함 수정»이 아니라 «방어»다 — 실측(dev, MCP list_retro_sessions):
+# 6건 중 blank title 0건. 지금 고장난 것을 고친 게 아니라, 아직 비어 있는 구멍을 미리 막은 것.
+# ⛔이 가드가 «못 잡는» 것: 그 실측 문제의 원 사례("회고제목")는 blank가 아니라 "지우지 않은
+# 기본값"이다 — 값이 있으니 이 가드를 그냥 통과한다(별건, FE placeholder 축). 나중에 "가드가
+# 있는데 왜 회고제목이 그대로냐"고 묻는다면 이게 답이다.
 _BLANK_TITLE_MSG = "title은 비어 있을 수 없습니다"
 
 
