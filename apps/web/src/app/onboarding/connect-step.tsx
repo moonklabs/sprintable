@@ -203,7 +203,7 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
   useEffect(() => {
     const onHide = () => {
       if (leftRef.current || verified) return;
-      beaconOnboardingEvent('abandoned_explicit', { agent_id: agentId, failure_reason: 'abandoned_explicit' });
+      beaconOnboardingEvent('abandoned_explicit', { agent_id: agentId, failure_reason: 'abandoned_explicit', flow: 'onboarding' });
     };
     window.addEventListener('pagehide', onHide);
     return () => window.removeEventListener('pagehide', onHide);
@@ -221,7 +221,7 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
     setHasCopiedMap((p) => ({ ...p, [transport]: true }));
     setJustCopied(true);
     setTimeout(() => setJustCopied(false), 2000);
-    emitOnboardingEvent('config_copied', { agent_id: agentId });
+    emitOnboardingEvent('config_copied', { agent_id: agentId, flow: 'onboarding' });
   };
 
   // story #2404 — "설정만 넣으면 자동으로 된다"는 오해가 무한 대기의 실원인이었다(검증은 실제
@@ -231,14 +231,14 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
 
   const handleVerify = async () => {
     if (!agentId || !transport) return;
-    emitOnboardingEvent('verify_started', { agent_id: agentId });
+    emitOnboardingEvent('verify_started', { agent_id: agentId, flow: 'onboarding' });
     await rail.handleVerify();
   };
 
   const handleDashboard = () => {
     leftRef.current = true;
     if (!verified) {
-      emitOnboardingEvent('abandoned_explicit', { agent_id: agentId, failure_reason: 'abandoned_explicit' });
+      emitOnboardingEvent('abandoned_explicit', { agent_id: agentId, failure_reason: 'abandoned_explicit', flow: 'onboarding' });
     }
     onFinish();
   };

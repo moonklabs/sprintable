@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import {
@@ -15,6 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { cn } from '@/lib/utils';
 import { VerifyRail, useVerificationRail } from '@/app/onboarding/verify-rail';
+import { emitOnboardingEvent, beaconOnboardingEvent } from '@/app/onboarding/onboarding-telemetry';
 import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle, RuntimeCapabilityItem } from '@/services/recruit';
 import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FILENAME, resolveRuntimeWakeInfo } from '@/services/recruit';
 
@@ -552,8 +553,35 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     configCopiedDone: true,
   });
   const { displaySteps, verified, verifying } = rail;
-  const handleVerify = rail.handleVerify;
   const handleCopyVerifyPrompt = rail.handleCopyVerifyPrompt;
+
+  // story(2026-08-02, 채용 흐름 텔레메트리 부재) — connect-step.tsx는 config_copied·
+  // verify_started·abandoned_explicit 셋을 쏘는데 이 STEP5는 onboarding-telemetry import
+  // 자체가 없었다. connect-step과 같은 이름·같은 트리거 시점으로 맞추고 meta.flow로만
+  // 흐름을 가른다(리딩 쪽은 아직 없음 — 이 스토리 판정문에 명시).
+  const recruiterAgentId = recruitResult?.agent_id ?? null;
+  const leftRef = useRef(false);
+
+  const handleVerify = async () => {
+    emitOnboardingEvent('verify_started', { agent_id: recruiterAgentId, flow: 'recruit' });
+    await rail.handleVerify();
+  };
+
+  useEffect(() => {
+    const onHide = () => {
+      if (leftRef.current || verified || step !== 5) return;
+      beaconOnboardingEvent('abandoned_explicit', { agent_id: recruiterAgentId, failure_reason: 'abandoned_explicit', flow: 'recruit' });
+    };
+    window.addEventListener('pagehide', onHide);
+    return () => window.removeEventListener('pagehide', onHide);
+  }, [recruiterAgentId, verified, step]);
+
+  const handleFinish = () => {
+    leftRef.current = true;
+    if (!verified) {
+      emitOnboardingEvent('abandoned_explicit', { agent_id: recruiterAgentId, failure_reason: 'abandoned_explicit', flow: 'recruit' });
+    }
+  };
 
   const mcpConfigText = useMemo(
     () => (recruitResult ? JSON.stringify(recruitResult.mcp_config, null, 2) : ''),
@@ -1086,7 +1114,17 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 <div className="overflow-hidden rounded-md border border-border">
                   <div className="flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2">
                     <span className="font-mono text-xs text-foreground">📄 .mcp.json <span className="text-muted-foreground">{t('mcpFileNote')}</span></span>
-                    <CopyDownloadButtons content={mcpConfigText} filename=".mcp.json" copied={copiedMcp} onCopied={() => setCopiedMcp(true)} />
+                    <CopyDownloadButtons
+                      content={mcpConfigText}
+                      filename=".mcp.json"
+                      copied={copiedMcp}
+                      onCopied={() => {
+                        setCopiedMcp(true);
+                        // connect-step.tsx의 handleCopy와 같은 트리거(복사 버튼 클릭 — 다운로드는
+                        // 양쪽 다 텔레메트리 대상이 아니다)·같은 이름으로 맞춘다.
+                        emitOnboardingEvent('config_copied', { agent_id: recruitResult?.agent_id ?? null, flow: 'recruit' });
+                      }}
+                    />
                   </div>
                   <pre className="overflow-x-auto bg-muted/40 p-3 text-xs leading-relaxed">{mcpConfigText}</pre>
                 </div>
@@ -1241,7 +1279,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
 
               <div className="flex justify-between gap-2 pt-2">
                 <Button variant="ghost" onClick={() => setStep(4)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
-                <Link href="/dashboard"><Button variant={verified ? 'hero' : 'glass'}>{t('finish')}</Button></Link>
+                <Link href="/dashboard" onClick={handleFinish}><Button variant={verified ? 'hero' : 'glass'}>{t('finish')}</Button></Link>
               </div>
             </div>
           )}
