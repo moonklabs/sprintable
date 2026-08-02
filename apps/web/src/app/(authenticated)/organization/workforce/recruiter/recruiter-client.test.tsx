@@ -286,3 +286,27 @@ describe('resolveVerifyGuideKey — story #2792 (STEP5 안내문도 showVerifyEx
     expect(ko).toBeTruthy();
   });
 });
+
+// story #2410 ③-1(유나 판정, 2026-08-02) — connect-step에만 있던 verifiedBanner(aria-live 성공
+// 낭독)가 recruiter STEP5에는 없었다. 근거: ①같은 제품 안에서 왜 다른지가 코드 어디에도 안
+// 적혀 있었다(누락이지 판단이 아니다) ②recruiter STEP5는 채용할 때마다(반복) 뜨는 화면이라
+// connect-step(신규 가입 온보딩, 1회성)보다 없을 때의 대가가 크다. 소스 텍스트 수준으로
+// pin(이 파일의 기존 관례 — 컴포넌트 전체 마운트 테스트가 없다).
+describe('recruiter-client STEP5 — story #2410 ③-1(verifiedBanner)', () => {
+  const source = readFileSync(fileURLToPath(new URL('./recruiter-client.tsx', import.meta.url)), 'utf-8');
+
+  it('renders verifiedBanner with the same role/aria contract as connect-step (role=status aria-live=polite aria-atomic=true)', () => {
+    const m = /role="status" aria-live="polite" aria-atomic="true"[^>]*>\s*\{tOnboarding\('verifiedBanner'\)\}/.exec(source);
+    expect(m).not.toBeNull();
+  });
+
+  it('reuses the same i18n key as connect-step, not a recruiter-local one (single key per Yuna\'s judgment)', () => {
+    expect(source).toContain("tOnboarding('verifiedBanner')");
+    expect(source).not.toMatch(/t\('recruiterVerifiedBanner'\)|t\('verifiedBanner'\)/);
+  });
+
+  it('only renders when verified — does not duplicate the rail\'s own step-by-step aria-live announcements', () => {
+    // {verified && ( ... verifiedBanner ... )} — gated, not unconditional.
+    expect(source).toMatch(/\{verified && \([\s\S]{0,700}tOnboarding\('verifiedBanner'\)/);
+  });
+});
