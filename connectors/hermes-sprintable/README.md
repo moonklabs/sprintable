@@ -24,7 +24,7 @@ one working does not mean the other is:
 |---|---|---|
 | Purpose | **Receives** messages, **replies** | Calls PM API tools (create story, send chat, …) |
 | Transport | Outbound SSE `GET /api/v2/agent/stream` | MCP stdio / tool calls |
-| Auth env | `AGENT_API_KEY` (`sk_live_…`) | `PM_API_KEY`, `PM_API_URL`, `PM_PROJECT_ID` |
+| Auth env | `AGENT_API_KEY` (`sk_live_…`) | `AGENT_API_KEY`, `SPRINTABLE_API_URL` (same names — see below) |
 | "It works" signal | `stream open` in `gateway.log` + a real reply round-trip | `ping` returns ok |
 
 > **A successful MCP `ping` does NOT mean the agent is connected to the gateway.**
@@ -124,11 +124,16 @@ side by side. It is keyed entirely on `SPRINTABLE_PROD_*`
 cron delivery never cross with dev. See
 [`../hermes-sprintable-prod/README.md`](../hermes-sprintable-prod/README.md).
 
-### Group 3 — MCP server (PM API tools — a different channel)
+### Group 3 — MCP server (tool-call channel — a different channel)
 
-`PM_API_URL`, `PM_API_KEY`, `PM_PROJECT_ID`. These configure the `sprintable`
-MCP tools, **not** this adapter. Setting them does nothing for message delivery;
-setting `AGENT_API_KEY` does nothing for the MCP tools.
+The `sprintable` MCP tools are configured by `SPRINTABLE_API_URL` and
+`AGENT_API_KEY` (`backend/sprintable_mcp/config.py`) — the **same env var
+names** as this gateway adapter, not the separate `PM_API_URL`/`PM_API_KEY`/
+`PM_PROJECT_ID` an earlier version of this doc named (those don't exist in the
+codebase). They are still a functionally separate channel from this adapter
+(different process, different purpose — tool calls vs. message delivery), so
+confirm both independently rather than assuming one working implies the other
+does.
 
 ---
 
