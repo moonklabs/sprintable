@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass, field
 from typing import Sequence
@@ -14,6 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.notification_preference import NotificationPreference
 from app.models.team import TeamMember
+from app.models.user_block import UserBlock
+
+logger = logging.getLogger(__name__)
 
 
 class ChannelRouterError(Exception):
@@ -87,15 +91,13 @@ async def route_message(
         # 맞춰 "차단이 새는 빈도"를 하나의 문구로 셀 수 있게 한다).
         if msg.sender_id and recipient_ids:
             try:
-                from app.models.user_block import UserBlock
                 blocker_ids = set((await db.execute(
                     select(UserBlock.blocker_member_id).where(UserBlock.blocked_member_id == msg.sender_id)
                 )).scalars().all())
                 if blocker_ids:
                     recipient_ids = [pid for pid in recipient_ids if pid not in blocker_ids]
             except Exception:
-                import logging
-                logging.getLogger(__name__).warning(
+                logger.warning(
                     "user_blocker_ids lookup failed message_id=%s — fail-open(no exclusion)", msg.id,
                     exc_info=True,
                 )
