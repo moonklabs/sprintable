@@ -359,3 +359,66 @@ describe('recruiter-client equip-skip("역할 없이") 런타임 — story #2433
     expect(ko).toBeTruthy();
   });
 });
+
+// story #2434(유나 홀름 규격 v1, 2026-08-03) — ②「깨우기」의 "connectors/{runtime}-sprintable/를
+// 실행하세요" 같은 지시형은 그 경로를 어디서 구하는지 안내가 없는 채로 "되는 것"처럼 읽혀
+// "되는 줄 알고 끝냈다가 실제로는 안 깨어나는" 오탐(최악)을 만든다. 사실형("…이 세션을
+// 깨웁니다. 받는 경로는 아직 제공하지 않습니다")으로 정정 + path는 t.rich로 "명령 대상"이
+// 아니라 "이름"으로 강등(작게·무채색·링크 색 금지) + 3칸 그리드 아래 전폭 결과 문장(경고색
+// 금지 — 미제공이지 장애가 아니다) + connector-sdk(Custom/Other)만 실제로 지금 가능한 경로라
+// onboarding-guide.txt 링크 추가. 소스 텍스트 수준으로 pin(이 파일의 기존 관례).
+describe('recruiter-client STEP4 ②깨우기 — story #2434(정직한 "반쪽" 표시) 소스 회귀가드', () => {
+  const source = readFileSync(fileURLToPath(new URL('./recruiter-client.tsx', import.meta.url)), 'utf-8');
+
+  it('path를 t.rich(path 태그)로 렌더한다 — 지시형 t()가 아니라 명령 대상처럼 안 보이는 스타일로 강등', () => {
+    expect(source).toContain('t.rich(`kitOrientingWakeBody_${wakeInfo.method}`');
+    expect(source).toContain('font-mono text-[11px] break-all text-muted-foreground');
+    // 링크 색(text-info 등) 금지 — path 렌더러 바로 그 줄에 링크색 클래스가 없어야 한다.
+    const richCall = /t\.rich\(`kitOrientingWakeBody_\$\{wakeInfo\.method\}`[\s\S]{0,200}?\)/.exec(source);
+    expect(richCall).not.toBeNull();
+    expect(richCall![0]).not.toMatch(/text-info|text-primary|underline/);
+  });
+
+  it('3칸 그리드 밖에 전폭 결과 문장을 렌더하고, mcp_config 유무 분기를 재사용한다(신규 계약 0)', () => {
+    const start = source.indexOf("{t('kitOrientingWakeLabel')}");
+    const end = source.indexOf('kitOrientingWakeNoteConnector');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const block = source.slice(start, end + 'kitOrientingWakeNoteConnector'.length + 5);
+    expect(block).toContain("recruitResult.mcp_config ? t('kitOrientingWakeNoteMcp') : t('kitOrientingWakeNoteConnector')");
+  });
+
+  it('결과 문장에 warning/destructive 색을 안 쓴다 — 미제공이지 장애가 아니라서 오탐(자기 설정이 틀렸다는 오해)을 막는다', () => {
+    const start = source.indexOf('{recruitResult.mcp_config ? t(\'kitOrientingWakeNoteMcp\')');
+    const line = source.slice(Math.max(0, start - 200), start);
+    expect(line).not.toMatch(/warning|destructive/);
+  });
+
+  it('connector-sdk(Custom/Other)에서만 onboarding-guide.txt 링크를 추가로 보여준다', () => {
+    expect(source).toContain("wakeInfo.method === 'connector-sdk'");
+    expect(source).toContain('href="/onboarding-guide.txt"');
+  });
+
+  it('kitOrientingWakeBody_* / WakeNote* / WakeSdkGuideLink 번역키가 ko/en 둘 다 있다', () => {
+    const ko = (koMessages as { recruiter: Record<string, string> }).recruiter;
+    const en = (enMessages as { recruiter: Record<string, string> }).recruiter;
+    for (const key of [
+      'kitOrientingWakeBody_channel-plugin',
+      'kitOrientingWakeBody_connector-host',
+      'kitOrientingWakeBody_connector-sidecar',
+      'kitOrientingWakeBody_connector-sdk',
+      'kitOrientingWakeNoteMcp',
+      'kitOrientingWakeNoteConnector',
+      'kitOrientingWakeSdkGuideLink',
+    ]) {
+      expect(ko[key], `ko.${key}`).toBeTruthy();
+      expect(en[key], `en.${key}`).toBeTruthy();
+      // t.rich가 소비할 <path> 태그가 body 값들엔 살아있어야 한다(플레인 {path}로 되돌아가면
+      // t.rich가 렌더할 게 없어 조용히 깨진다).
+      if (key.startsWith('kitOrientingWakeBody_')) {
+        expect(ko[key]).toContain('<path>');
+        expect(en[key]).toContain('<path>');
+      }
+    }
+  });
+});
