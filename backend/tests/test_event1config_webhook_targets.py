@@ -103,6 +103,29 @@ async def test_no_mention_uses_participants_minus_sender():
     assert {t.member_id for t in targets} == {agent_a}
 
 
+@pytest.mark.anyio
+async def test_blocker_member_ids_excludes_recipient_who_blocked_sender():
+    """story #2349 — 라이브 검증(2026-08-03)서 발견한 갭: sender를 차단한 수신자는 webhook 대상에서
+    빠져야 한다. caller(conversations.py)가 이미 계산한 user_blocker_ids를 그대로 받아 거른다 —
+    이 함수 안에서 새 쿼리를 추가하지 않는다(파라미터 미전달 시 기본 동작은 기존과 동일)."""
+    org, proj, conv_id, sender, blocker, agent_a = (uuid.uuid4() for _ in range(6))
+    wh_a = _wh(agent_a)
+
+    db = SimpleNamespace(execute=AsyncMock(side_effect=[
+        _scalars([blocker, agent_a]),  # participant query (sender 제외 — blocker·agent_a 참가)
+        _scalars([wh_a]),              # project-scope — blocker webhook은 애초에 대상 아님
+        _scalars([wh_a]),              # member-global union
+    ]))
+
+    targets = await resolve_conversation_webhook_targets(
+        db, conversation_id=conv_id, org_id=org, project_id=proj,
+        sender_id=sender, mentioned_ids=None, blocker_member_ids={blocker},
+    )
+    member_ids = {t.member_id for t in targets}
+    assert blocker not in member_ids, "sender를 차단한 수신자는 webhook 대상에서 제외"
+    assert agent_a in member_ids, "차단과 무관한 수신자는 그대로 대상"
+
+
 # ─── 실DB 전체 predicate (project 독립·sender 제외·broadcast) ──────────────────
 
 _ASYNCPG_URL = (

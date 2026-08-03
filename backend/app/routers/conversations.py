@@ -2069,6 +2069,7 @@ async def send_message(
                 project_id=conv.project_id,
                 sender_id=sender.id,
                 mentioned_ids=list(msg.mentioned_ids) if msg.mentioned_ids else None,
+                blocker_member_ids=user_blocker_ids,
             )
         except Exception:
             logger.warning(
