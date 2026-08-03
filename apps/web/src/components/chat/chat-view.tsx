@@ -18,6 +18,7 @@ import { CitationComposeBar, type CitationSaveState } from './citation-compose-b
 import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ToastContainer, useToast } from '@/components/ui/toast';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 interface ChatViewProps {
   threadId: string;
@@ -380,6 +381,39 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     }
   }, [apiPrefix, threadId, addToast, t]);
 
+  // story #2349 — 사용자 차단. 낙관적 오버레이(blockedMemberIds)는 이미 로드된 메시지 목록을
+  // 새로고침 없이 즉시 마스킹하려는 것 — 서버 is_blocked_sender는 다음 fetch부터 반영된다.
+  const [blockConfirmTarget, setBlockConfirmTarget] = useState<{ memberId: string; memberName: string } | null>(null);
+  const [blockedMemberIds, setBlockedMemberIds] = useState<Set<string>>(new Set());
+  const [blockSubmitting, setBlockSubmitting] = useState(false);
+
+  const handleRequestBlockUser = useCallback((memberId: string, memberName: string) => {
+    setBlockConfirmTarget({ memberId, memberName });
+  }, []);
+
+  const handleConfirmBlockUser = useCallback(async () => {
+    if (!blockConfirmTarget) return;
+    setBlockSubmitting(true);
+    try {
+      const res = await fetch('/api/user-blocks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blocked_member_id: blockConfirmTarget.memberId }),
+      });
+      if (!res.ok) {
+        addToast({ type: 'error', title: t('blockUserErrorTitle'), body: t('blockUserErrorBody') });
+        return;
+      }
+      setBlockedMemberIds((prev) => new Set(prev).add(blockConfirmTarget.memberId));
+      addToast({ type: 'success', title: t('blockUserSuccessTitle') });
+    } catch {
+      addToast({ type: 'error', title: t('blockUserErrorTitle'), body: t('blockUserErrorBody') });
+    } finally {
+      setBlockSubmitting(false);
+      setBlockConfirmTarget(null);
+    }
+  }, [blockConfirmTarget, addToast, t]);
+
   // story #2265(C-7) 저장 조각 — 확定된 range(rangeStartId~rangeEndId, orderedMessageIds
   // 순서 기준 양끝 포함)를 스냅샷으로 얼려 골라진 스토리에 proof로 POST한다. 스냅샷을
   // 얼리는 이유는 PO 판정(2026-07-29): "얼려야 대조가 가능하다" — proof_payload.snapshot
@@ -710,11 +744,20 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                             </div>
                           )}
                           <ChatBubble
-                            message={msg}
+                            message={
+                              blockedMemberIds.has(msg.created_by) && msg.is_blocked_sender !== true
+                                ? { ...msg, is_blocked_sender: true }
+                                : msg
+                            }
                             isMine={msg.created_by === currentTeamMemberId}
                             isGrouped={isGrouped}
                             onOpenThread={openThread}
                             onDelete={handleDeleteMessage}
+                            onBlockUser={
+                              msg.created_by !== currentTeamMemberId
+                                ? () => handleRequestBlockUser(msg.created_by, msg.sender_name)
+                                : undefined
+                            }
                             presenceStatus={presenceById?.[msg.created_by]}
                             isWorking={typingAgents.some((a) => a.id === msg.created_by)}
                             highlight={msg.id === highlightId}
@@ -836,6 +879,16 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
         )}
       </div>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      {/* story #2349 — 「안 바뀌는 것」을 말하는 문장이 핵심(PO 규격, 빼지 않는다). */}
+      <ConfirmDialog
+        open={blockConfirmTarget !== null}
+        onOpenChange={(open) => { if (!open) setBlockConfirmTarget(null); }}
+        title={t('blockUserConfirmTitle')}
+        description={t('blockUserConfirmDescription', { name: blockConfirmTarget?.memberName ?? '' })}
+        cancelLabel={t('blockUserConfirmCancel')}
+        confirmLabel={t('blockUserConfirmConfirm')}
+        onConfirm={() => { if (!blockSubmitting) void handleConfirmBlockUser(); }}
+      />
     </div>
   );
 }

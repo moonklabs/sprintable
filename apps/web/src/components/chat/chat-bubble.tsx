@@ -15,6 +15,7 @@ import { AttachmentImage } from './attachment-image';
 import { AttachmentMedia } from './attachment-media';
 import { AttachmentFile } from './attachment-file';
 import { MessageContextMenu, type CiteAction } from './message-context-menu';
+import { SenderProfilePopover } from './sender-profile-popover';
 import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from './presence-dot';
 import { ReferenceSuggestionRow } from './reference-suggestion-row';
 
@@ -24,6 +25,10 @@ interface ChatBubbleProps {
   isGrouped?: boolean;
   onOpenThread?: (message: ChatMessage) => void;
   onDelete?: (messageId: string) => void;
+  /** story #2349 — 생략하면(undefined) 컨텍스트 메뉴에 「사용자 차단」 항목 자체가 안 뜬다
+   * (자기 메시지엔 호출부가 안 넘긴다). 실제 차단 확認/API 호출은 호출부(ChatView) 몫 —
+   * 여기는 의도만 위로 전달한다. */
+  onBlockUser?: () => void;
   // 1aeecdde P2: 2축 presence — 연결(dot) + 활동(working ring). 에이전트 sender만 적용.
   presenceStatus?: PresenceStatus | null;
   isWorking?: boolean;
@@ -220,7 +225,7 @@ function ChatMarkdown({ content, isMine, references }: { content: string; isMine
 const LONG_PRESS_MS = 500;
 
 export function ChatBubble({
-  message, isMine, isGrouped = false, onOpenThread, onDelete, presenceStatus, isWorking = false,
+  message, isMine, isGrouped = false, onOpenThread, onDelete, onBlockUser, presenceStatus, isWorking = false,
   highlight = false, projectId, isCiteAnchor = false, isCiteInRange = false, citeAction,
 }: ChatBubbleProps) {
   const t = useTranslations('chats');
@@ -238,8 +243,19 @@ export function ChatBubble({
   const lastReplyAt = message.last_reply_at;
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  // story #2349 — "상대 프로필" 진입점(자기 자신엔 없다, isMine 게이트).
+  const [profilePopover, setProfilePopover] = useState<ContextMenuState | null>(null);
+  const handleOpenProfilePopover = useCallback((e: { currentTarget: Element }) => {
+    if (isMine) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    setProfilePopover({ x: rect.left, y: rect.bottom + 4 });
+  }, [isMine]);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchPosRef = useRef<{ x: number; y: number } | null>(null);
+  // story #2349 — tombstone(deleted_at)과 다르다: 서버는 내용을 그대로 내려주고, 가리는 것은
+  // 클라 몫이다("보기"로 펼칠 수 있어야 한다 — PO 규격). 기본은 가린 상태.
+  const [blockedMessageRevealed, setBlockedMessageRevealed] = useState(false);
+  const isBlockedSender = message.is_blocked_sender === true;
 
   // AC1: 우클릭 컨텍스트 메뉴 (데스크톱)
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -305,13 +321,20 @@ export function ChatBubble({
           <div className="w-7 flex-shrink-0" />
         ) : (
           <div className="relative h-7 w-7 flex-shrink-0">
-            <div className={`flex h-full w-full items-center justify-center rounded-full text-xs font-medium ${
-              isAgent
-                ? 'bg-accent-claim/15 text-accent-claim'
-                : isMine
-                  ? 'bg-primary/20 text-primary'
-                  : 'bg-muted text-muted-foreground'
-            } ${isAgent && isWorking ? WORKING_RING_CLASS : ''}`}>
+            {/* story #2349 — "상대 프로필" 진입점. 자기 자신 아바타는 클릭 불가(role/tabIndex도 안 붙임). */}
+            <div
+              role={isMine ? undefined : 'button'}
+              tabIndex={isMine ? undefined : 0}
+              onClick={isMine ? undefined : handleOpenProfilePopover}
+              onKeyDown={isMine ? undefined : (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpenProfilePopover(e); } }}
+              className={`flex h-full w-full items-center justify-center rounded-full text-xs font-medium ${
+                isAgent
+                  ? 'bg-accent-claim/15 text-accent-claim'
+                  : isMine
+                    ? 'bg-primary/20 text-primary'
+                    : 'bg-muted text-muted-foreground'
+              } ${isAgent && isWorking ? WORKING_RING_CLASS : ''} ${isMine ? '' : 'cursor-pointer'}`}
+            >
               {isAgent ? <Bot className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
             </div>
             {isAgent && presenceStatus ? (
@@ -328,7 +351,15 @@ export function ChatBubble({
           {/* Sender name — hidden when grouped */}
           {!isGrouped && (
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-medium text-muted-foreground">{displayName}</span>
+              <span
+                role={isMine ? undefined : 'button'}
+                tabIndex={isMine ? undefined : 0}
+                onClick={isMine ? undefined : handleOpenProfilePopover}
+                onKeyDown={isMine ? undefined : (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpenProfilePopover(e); } }}
+                className={`text-[11px] font-medium text-muted-foreground ${isMine ? '' : 'cursor-pointer hover:underline'}`}
+              >
+                {displayName}
+              </span>
               {isAgent && (
                 <span className="rounded-sm bg-accent-claim/15 px-1 py-0.5 text-[9px] font-medium text-accent-claim">
                   Bot
@@ -352,6 +383,21 @@ export function ChatBubble({
             }`}>
               {t('deletedMessagePlaceholder')}
             </div>
+          ) : isBlockedSender && !blockedMessageRevealed ? (
+            // story #2349 — tombstone과 다르다: 서버는 내용을 그대로 내려준다. 여기서 클라가
+            // 가리고, "보기"로 펼칠 수 있어야 한다(PO 규격 — 되돌릴 수 없는 tombstone과 구분).
+            <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm italic text-muted-foreground ${
+              isMine ? 'rounded-tr-sm bg-muted/50' : 'rounded-tl-sm bg-muted/50'
+            }`}>
+              {t('blockedSenderMessagePlaceholder')}{' '}
+              <button
+                type="button"
+                onClick={() => setBlockedMessageRevealed(true)}
+                className="not-italic underline underline-offset-2 hover:text-foreground"
+              >
+                {t('blockedSenderMessageReveal')}
+              </button>
+            </div>
           ) : isCmd ? (
             <div className={`min-w-0 max-w-full rounded-xl border border-info/30 bg-info/8 px-3.5 py-2 ${isMine ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
               <div className="mb-1 flex items-center gap-1 text-[10px] font-medium text-info">
@@ -371,6 +417,19 @@ export function ChatBubble({
             }`}>
               <ChatMarkdown content={displayContent} isMine={isMine} references={message.references} />
             </div>
+          )}
+
+          {/* story #2349(유나 design:changes) — "보기"로 펼친 뒤 되돌릴 문턱이 없으면
+              "이걸 누르면 계속 보이나?"가 걸려 아예 안 누르게 된다(가리기+확認 가능을 둘 다
+              주려던 설계가 반만 서는 것). 되돌릴 수 있어야 눌러 볼 수 있다. */}
+          {!isDeleted && isBlockedSender && blockedMessageRevealed && (
+            <button
+              type="button"
+              onClick={() => setBlockedMessageRevealed(false)}
+              className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            >
+              {t('blockedSenderMessageHide')}
+            </button>
           )}
 
           {/* story #2283 — 보낸 직후 그 메시지 바로 아래에서 한 번 제안(작성자 본인에게만,
@@ -451,6 +510,19 @@ export function ChatBubble({
           onClose={() => setContextMenu(null)}
           citeAction={citeAction}
           isDeleted={isDeleted}
+          onBlock={onBlockUser}
+        />
+      )}
+
+      {/* story #2349 — "상대 프로필" 진입점 */}
+      {profilePopover && (
+        <SenderProfilePopover
+          x={profilePopover.x}
+          y={profilePopover.y}
+          name={displayName}
+          isAgent={isAgent}
+          onClose={() => setProfilePopover(null)}
+          onBlock={onBlockUser}
         />
       )}
     </>
