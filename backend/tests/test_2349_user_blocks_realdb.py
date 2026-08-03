@@ -11,6 +11,22 @@
   ②_msg_payload.is_blocked_sender — 읽기 경로(list_messages/get_message)에서 차단 여부 반영
   ③알림 감산 — conversations.py::send_message의 3개 제외 체인(SSE dispatch·mention_targets·
     candidate_targets)이 차단한 수신자에게 알림을 안 보낸다(실 HTTP POST로 실증)
+
+send_message 배달 경로 «전수» — 2026-08-03 라이브 자국표로 확定(dev DB 직접 조회, 페드루):
+  ①Event/SSE        → test_blocker_gets_no_notification_for_blocked_sender_mention
+  ②webhook targets  → test_send_message_webhook_delivery_excludes_blocker
+  ③ws 브로드캐스트   → test_send_message_ws_chat_broadcast_excludes_blocker
+  ④인앱 알림        → test_blocker_gets_no_notification_for_blocked_sender_plain_message
+⛔send_message에 dispatch를 더하면 이 표에 «줄을 먼저 더하라».
+
+⚠️events=0을 「차단이 먹었다」로 읽지 말 것 — 수신자가 webhook 커버면 SSE는 skip되어(E-EVENT-
+1CONFIG, webhook_covered_ids) events는 «원래» 0이다. 실측(2026-08-03, 페드루, dev DB 직접
+조회): 차단 中 발송 두 건(be57a797·d8745bca) 모두 events=0·webhook_deliveries=1 — events=0은
+차단의 증거가 아니라 그 수신자가 애초에 webhook 채널로 커버된다는 뜻일 뿐이다. 양성대조(차단
+없는 메시지 3건: 45fe87f7 events=0/webhook=1, 215ea7c1 events=1/webhook=0, 3febd22a events=0/
+webhook=1)가 events↔webhook 배타 관계(둘 중 하나만 1)를 보여준다 — 라이브 재검증 1차에서
+「events/pending 0건 → 차단이 막혔다」로 읽은 판단이 바로 이 오독이었다. 차단 여부는 반드시
+webhook_deliveries로 재라.
 """
 from __future__ import annotations
 
