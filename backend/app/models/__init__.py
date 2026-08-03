@@ -39,6 +39,7 @@ from app.models.reference_semantic_candidate import ReferenceSemanticCandidate
 from app.models.meeting import Meeting
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
+from app.models.user_block import UserBlock
 from app.models.notification import InboxItem, Notification, NotificationSetting
 from app.models.notification_preference import NotificationPreference
 from app.models.organization import Organization

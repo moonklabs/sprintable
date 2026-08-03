@@ -303,6 +303,15 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
         "(test_1994_backlink_api_realdb.py) — participant 제거 시 403이 되는지 실증한다. "
         "그 테스트를 지우거나 약화시키면 이 면제의 근거도 함께 사라진다."
     ),
+    "app.routers.user_blocks:delete_user_block": (
+        "story #2349 — path의 member_id는 「지울 행의 소유자」가 아니라 「차단 대상(blocked)」이다. "
+        "WHERE절이 항상 blocker_member_id=caller로 스코프되므로 cross-user 삭제가 구조적으로 "
+        "불가능(project 접근권 검증이 필요 없는 이유 — 대상 리소스가 project-소속이 아니라 "
+        "caller 자신 소유 관계행). 받치는 것은 "
+        "test_delete_user_block_cannot_delete_other_callers_block"
+        "(test_2349_user_blocks_realdb.py) — 타인의 차단행을 member_id로 지정해도 안 지워지는지 "
+        "실증한다. 그 테스트를 지우거나 약화시키면 이 면제의 근거도 함께 사라진다."
+    ),
     "app.routers.event_notifications:mark_read": "recipient-scoped(event.recipient_id==caller member)",
     "app.routers.notifications:mark_read": "owner user_id 스코프(caller 소유 알림만)",
     "app.routers.evidence:delete_evidence": "creator-only(created_by!=caller → 403)",
