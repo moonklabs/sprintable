@@ -81,6 +81,10 @@ async def test_unverified_blocked_when_flag_on():
     res = await _post_org(email_verified=False, require_flag=True)
     assert res.status_code == 403
     assert "Email verification required" in res.text
+    # story #2441 — FE가 code로 분기해 한국어 문안을 보이려면 dict-detail의 code가 실려야 한다
+    # (#2437 실측: 평문 detail이라 code가 없어 raw 영문이 그대로 노출됐었다).
+    body = res.json()
+    assert body["error"]["code"] == "EMAIL_VERIFICATION_REQUIRED"
 
 
 @pytest.mark.anyio

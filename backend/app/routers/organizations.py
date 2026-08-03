@@ -56,7 +56,17 @@ async def create_organization(
         user_result = await session.execute(select(User).where(User.id == uuid.UUID(auth.user_id)))
         user = user_result.scalar_one_or_none()
         if user and not user.email_verified:
-            raise HTTPException(status_code=403, detail="Email verification required to create organization")
+            # story #2441(PO 승인, 담당경계 예외 — 이 한 줄만) — 평문 영문 detail이라 FE가 code로
+            # 분기 못 해 raw 영문을 그대로 노출했다(#2437 실측: 다음 행동 안내 0인 막다른 UX).
+            # 이 파일에 이미 있는 dict-detail 패턴(SLUG_TAKEN 등)을 그대로 따른다 — 게이트 조건·
+            # 403·요구사항 자체는 무변경.
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "EMAIL_VERIFICATION_REQUIRED",
+                    "message": "Email verification required to create organization",
+                },
+            )
 
     # EE: Free 플랜 org 생성 제한 (OSS에서는 로드되지 않음)
     if settings.is_ee_enabled:
