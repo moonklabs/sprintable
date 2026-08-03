@@ -64,6 +64,42 @@ async def route_message(
             )
         )).scalars().all()
         recipient_ids = [pid for pid in participant_rows if pid != msg.sender_id]
+
+        # story #2349 AC3 — 라이브 검증(2026-08-03, PO+디디, 스레드 7256d5cc)에서 실측으로 발견:
+        # send_message의 user_blocker_ids exclusion은 _dispatch_conversation_event(Event row)·
+        # mention_targets·candidate_targets 3곳만 잡았고, 이 함수(route_message)는 별개 쿼리로
+        # recipient_ids를 처음부터 다시 뽑아 그 exclusion이 전혀 안 닿았다 — webhook-covered
+        # 수신자(에이전트 대다수의 실제 수신 경로)에게는 차단이 «전혀 안 먹는» 상태로 머지됐었다.
+        # route_message는 코드베이스 전체에서 정의 1곳·호출 2곳(pre-check용 별칭 _route L2033·
+        # 실 webhook 발송용 L702)뿐이고, decisions 소비 분기도 channel=="discord"(webhook)·
+        # 그 외(sse) 정확히 둘뿐이다(grep 전수 확認) — recipient_ids 원재료가 만들어지는 이
+        # 지점 한 곳이 sse·discord·향후 추가될 모든 채널의 공통 상류라, 여기서 한 번만 걸러도
+        # 채널 수와 무관하게 구조적으로 전부 막힌다.
+        #
+        # ⚠️recipient_ids는 이 함수 안에서만 쓰이는 local(decisions 계산 전용) — 이 목록을
+        # 밖으로 반환하거나 ConversationParticipant를 건드리지 않는다(PO 확認 요청, 2026-08-03).
+        # 즉 여기서 거르는 것은 «이 메시지의 알림/발송 대상»뿐이고 「대화 참가자」 관계 자체는
+        # 그대로다 — 참가자 목록·읽기 권한(list_messages/_authorize_message_read)은 이 함수를
+        # 전혀 거치지 않는 별도 경로라 안 끊긴다.
+        #
+        # #2814와 같은 결의 fail-open — 조회 실패해도 라우팅 자체는 안 막는다(대화 전송을
+        # 부수 조회 하나 때문에 죽이지 않는다는 동일 트레이드오프. 로그 문구도 동일 패턴으로
+        # 맞춰 "차단이 새는 빈도"를 하나의 문구로 셀 수 있게 한다).
+        if msg.sender_id and recipient_ids:
+            try:
+                from app.models.user_block import UserBlock
+                blocker_ids = set((await db.execute(
+                    select(UserBlock.blocker_member_id).where(UserBlock.blocked_member_id == msg.sender_id)
+                )).scalars().all())
+                if blocker_ids:
+                    recipient_ids = [pid for pid in recipient_ids if pid not in blocker_ids]
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "user_blocker_ids lookup failed message_id=%s — fail-open(no exclusion)", msg.id,
+                    exc_info=True,
+                )
+
         if not recipient_ids:
             return []
 
