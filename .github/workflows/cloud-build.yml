@@ -49,8 +49,14 @@ jobs:
 
       - name: Set deploy environment
         id: env
+        # #2829 후속(P0): github.ref_name을 env: 매핑으로 빼 이 run 블록의 GH 표현식을 0개로 만든다.
+        # run 블록이 GH 표현식을 하나라도 품으면 GitHub이 블록 전체를 하나로 템플릿 컴파일하는데,
+        # 이 스텝은 prod 승격 주석까지 포함해 큰 텍스트(main에서 24k+자)라 그 컴파일 단위가 파서
+        # 상한을 넘어 startup_failure가 난다. 표현식 0개면 컴파일 안 돼 크기와 무관해진다.
+        env:
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          if [[ "${{ github.ref_name }}" == "main" ]]; then
+          if [[ "$REF_NAME" == "main" ]]; then
             echo "target=prod" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-prod-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
             # ⚠️ minScale 1→3 (prod 콜드스타트 durable 봉합, 오르테가군 PO 2026-07-22): dev #2074 응급대응
