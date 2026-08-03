@@ -1,0 +1,55 @@
+name: Publish sprintable-connectors to PyPI
+
+# E-CONNECT-PKG S1(2026-08-03): publish-mcp.yml과 동형 — 새 PyPI 프로젝트
+# "sprintable-connectors"는 아직 존재하지 않는다. ⚠️최초 publish 전에 PyPI 쪽에 이 repo
+# (moonklabs/sprintable) + 이 워크플로 파일명(publish-connectors.yml) + environment(pypi)를
+# 지정한 pending trusted publisher가 사람 손으로 등록돼 있어야 한다(pypi.org 프로젝트 설정 —
+# GitHub Secrets/API 토큰이 아니라 OIDC 신뢰관계다. sprintable_mcp의 기존 신뢰관계는 그
+# 프로젝트 이름에만 걸려 있어 새 프로젝트로 자동 확장되지 않는다). 등록 전엔 이 워크플로가
+# 돌아도 PyPI가 403으로 거부한다.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    name: Build and publish sprintable-connectors
+    runs-on: ubuntu-latest
+    # First publish creates the PyPI project from the pending publisher — no API token needed,
+    # OIDC only (id-token: write below). Never add a token/twine step here.
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    # Defense-in-depth: this is a monorepo, `release: published` could in principle fire for a
+    # release unrelated to sprintable-connectors. Require an explicit
+    # sprintable-connectors-v* tag (manual workflow_dispatch runs skip this guard).
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'sprintable-connectors-v')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sanity-check release tag matches package version
+        if: github.event_name == 'release'
+        working-directory: connectors/connectors-pkg
+        run: |
+          pkg_version=$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
+          tag_version="${GITHUB_REF_NAME#sprintable-connectors-v}"
+          if [ "$pkg_version" != "$tag_version" ]; then
+            echo "::error::release tag sprintable-connectors-v$tag_version does not match pyproject.toml version $pkg_version — bump pyproject.toml before tagging"
+            exit 1
+          fi
+
+      - name: Build sdist and wheel
+        working-directory: connectors/connectors-pkg
+        run: uv build --out-dir dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: connectors/connectors-pkg/dist

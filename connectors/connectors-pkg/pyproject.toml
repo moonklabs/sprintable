@@ -3,13 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-# E-CONNECT-PKG S1(2026-08-03): 배포 수단은 PyPI로 정해졌다(기존 sprintable_mcp 파이프라인
-# 재사용 — .github/workflows/publish-mcp.yml, sprintable 0.1.2 실물). 다만 «실제 publish는
-# 아직»(페드루 지시) — PyPI 이름 등록은 되돌릴 수 없어 선생님 확認 뒤. 지금은 "빌드되는 상태"
-# 까지만. 이 `name`("sprintable-connectors")은 후보들 중 하나일 뿐 미확定 — 다른 후보:
-#   sprintable-agent-connectors / sprintable-connect / sprintable-runtime-bridge
-# 어느 것을 쓰든 [project.scripts] 진입점 이름(`sprintable-connector`)과 무관하게 바꿀 수 있다
-# (sprintable_mcp가 dist명="sprintable"≠모듈명=sprintable_mcp로 이미 분리해 둔 선례와 동형).
+# E-CONNECT-PKG S1(2026-08-03): 배포 수단 PyPI(기존 sprintable_mcp 파이프라인 재사용 —
+# .github/workflows/publish-mcp.yml, sprintable 0.1.2 실물). 이름 확定(페드루, 2026-08-03) —
+# 기존 PyPI 패키지 "sprintable"과 짝이 맞고 다른 후보가 더 나을 이유가 없어 "sprintable-connectors"로.
 name = "sprintable-connectors"
 version = "0.0.1"
 description = "Sprintable Gateway agent connectors (codex/gemini/grok/pi/cursor) — no repo clone required."
