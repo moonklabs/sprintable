@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+# E-CONNECT-PKG S1(2026-08-03): 배포 단위 이름·PyPI 등록은 아직 미확定(페드루 지시 — 1단계가
+# 실측으로 서기 전엔 정하지 않는다, uvx 실수 재발 방지). "sprintable-connectors"는 작업용 임시명.
+name = "sprintable-connectors"
+version = "0.0.1"
+description = "Sprintable Gateway agent connectors (codex/gemini/grok/pi/cursor) — no repo clone required."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "Sprintable" }]
+keywords = ["sprintable", "agent", "gateway", "sse"]
+dependencies = [
+    "httpx>=0.27",
+]
+
+[project.scripts]
+sprintable-connector = "sprintable_connectors.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sprintable_connectors"]
