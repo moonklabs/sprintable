@@ -36,6 +36,12 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
   const [error, setError] = useState('');
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [upgradeReason, setUpgradeReason] = useState('');
+  // story #2441 — #2437 실측: "Email verification required to create organization" 평문 영문
+  // 에러에 막혀 다음 행동 안내(재전송·메일함 확認)가 0이라 완주 불가했다. verify 게이트 자체는
+  // 그대로 두고(선생님 확認), 이 상태에 걸렸을 때만 "막다른 UX"를 정직하게 안내로 바꾼다.
+  const [emailVerifyBlocked, setEmailVerifyBlocked] = useState(false);
+  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [resendError, setResendError] = useState('');
 
   const stepIndex = STEPS.indexOf(step);
 
@@ -66,6 +72,9 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
     if (!orgName.trim() || !orgSlug.trim()) return;
     setLoading(true);
     setError('');
+    setEmailVerifyBlocked(false);
+    setResendState('idle');
+    setResendError('');
 
     // story #2000: 아래 fetch/json 파싱이 네트워크 단에서 throw하면(오프라인 등) try 없이는
     // setLoading(false)가 영영 안 불려 폼이 영구 로딩으로 멈춘다(온보딩 진입 자체를 막는 심각한
@@ -79,6 +88,14 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
       const json = await res.json();
 
       if (!res.ok) {
+        // story #2441 — code로 분기(문자열 매칭은 반창고: 이 문구를 한국어로 바꾸는 판이라
+        // 영문 매칭은 곧 깨진다). 이 케이스만 별도 UI(재전송+메일함 안내)로 갈아탄다 — 게이트
+        // 자체는 BE가 그대로 지킨다(요구 완화 아님).
+        if (json?.error?.code === 'EMAIL_VERIFICATION_REQUIRED') {
+          setEmailVerifyBlocked(true);
+          setError(t('emailVerifyRequiredError'));
+          return;
+        }
         setError(json?.error?.message ?? t('createOrgFailed'));
         return;
       }
@@ -93,6 +110,32 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
       setError(t('networkError'));
     } finally {
       setLoading(false);
+    }
+  };
+
+  // story #2441 — BE `/auth/resend-verification`(auth.py, 3/hour rate-limit)의 BFF 프록시만
+  // 새로 만들고, 여기서는 그 결과를 안내로 보여준다. 연타 방지는 BE 429가 최종 권위지만,
+  // sending 동안 버튼을 비활성화해 화면단에서도 헛클릭을 막는다.
+  const handleResendVerification = async () => {
+    setResendState('sending');
+    setResendError('');
+    try {
+      const res = await fetch('/api/auth/resend-verification', { method: 'POST' });
+      const json = await res.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
+      if (res.status === 429) {
+        setResendState('error');
+        setResendError(t('resendRateLimited'));
+        return;
+      }
+      if (!res.ok) {
+        setResendState('error');
+        setResendError(json?.error?.message ?? t('resendFailed'));
+        return;
+      }
+      setResendState('sent');
+    } catch {
+      setResendState('error');
+      setResendError(t('resendFailed'));
     }
   };
 
@@ -241,6 +284,31 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
           // setError('')를 먼저 호출해(위 정의) 매 시도마다 언마운트→리마운트된다.
           <div role="alert" aria-live="assertive" aria-atomic="true" className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-foreground">
             {error}
+          </div>
+        )}
+
+        {/* story #2441 — #2437 실측: 이 게이트에서 다음 행동 안내가 0이라 완주 불가했다. 게이트
+            자체(요구)는 안 건드리고, "막다른 UX"만 재전송+메일함 안내로 닫는다. */}
+        {emailVerifyBlocked && (
+          <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-3 text-sm">
+            <p className="text-foreground">{t('emailVerifyGuidance')}</p>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void handleResendVerification()}
+                disabled={resendState === 'sending'}
+              >
+                {resendState === 'sending' ? t('resending') : t('resendVerificationCta')}
+              </Button>
+              {resendState === 'sent' && (
+                <span role="status" aria-live="polite" className="text-xs text-success">{t('resendSent')}</span>
+              )}
+              {resendState === 'error' && (
+                <span role="alert" aria-live="assertive" className="text-xs text-destructive">{resendError}</span>
+              )}
+            </div>
           </div>
         )}
 
