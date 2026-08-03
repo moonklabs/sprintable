@@ -12,12 +12,22 @@
   ③알림 감산 — conversations.py::send_message의 3개 제외 체인(SSE dispatch·mention_targets·
     candidate_targets)이 차단한 수신자에게 알림을 안 보낸다(실 HTTP POST로 실증)
 
-send_message 배달 경로 «전수» — 2026-08-03 라이브 자국표로 확定(dev DB 직접 조회, 페드루):
-  ①Event/SSE        → test_blocker_gets_no_notification_for_blocked_sender_mention
-  ②webhook targets  → test_send_message_webhook_delivery_excludes_blocker
-  ③ws 브로드캐스트   → test_send_message_ws_chat_broadcast_excludes_blocker
-  ④인앱 알림        → test_blocker_gets_no_notification_for_blocked_sender_plain_message
+send_message 배달 경로 «전수» (2026-08-03, 카디르 QA 뮤테이션 재발견 후 정정):
+  ①Event/SSE          events 테이블                     → test_blocker_gets_no_notification_for_blocked_sender_plain_message·
+                                                            test_blocker_gets_no_notification_for_blocked_sender_mention(둘 다 events 직접 쿼리)
+  ②webhook targets    conversation_webhook_deliveries   → test_send_message_webhook_delivery_excludes_blocker
+  ③인앱 알림          notifications                      → test_blocker_gets_no_notification_for_blocked_sender_plain_message
+  ④ws 브로드캐스트     «테이블 없음»(순수 인메모리 WS)    → test_send_message_ws_chat_broadcast_excludes_blocker
+
+⛔inbox_items는 이 표에 «없다» — InboxItem 생성자 호출이 코드베이스 전체 0건(에이전트 의사결정용
+별개 기능, grep 확認).
+⭐⭐「저장소 축(DB를 훑는 법)」은 ④를 «원리상 못 본다» — DB row를 안 남기는지라. ④는 «코드 축
+(호출 그래프)»으로만 보인다 — 두 축이 서로의 사각을 덮는다.
 ⛔send_message에 dispatch를 더하면 이 표에 «줄을 먼저 더하라».
+⛔표에 «이름만» 거는 것을 조심 — 각 줄은 「그 테스트가 «그 저장소»를 실제로 쿼리하는가」로
+검산한다(카디르 뮤테이션: ①의 user_blocker_ids exclusion을 죽여도 처음엔 0/18 RED였다 — 이름만
+걸려 있고 실제로 events 테이블을 쿼리하는 assertion이 없었기 때문. 지금은 events를 직접
+쿼리하고, 뮤테이션으로 정확히 그 테스트만 RED가 되는 것까지 재확認했다).
 
 ⚠️events=0을 「차단이 먹었다」로 읽지 말 것 — 수신자가 webhook 커버면 SSE는 skip되어(E-EVENT-
 1CONFIG, webhook_covered_ids) events는 «원래» 0이다. 실측(2026-08-03, 페드루, dev DB 직접
@@ -402,6 +412,19 @@ async def _notification_count_for(session, user_id, event_type):
     )).scalar_one()
 
 
+async def _event_count_for(session, recipient_id, event_type):
+    """카디르 QA 뮤테이션 재발견(2026-08-03) — ①Event/SSE 자리는 표에 테스트 «이름만» 걸려
+    있었다(그 테스트는 Notification만 보고 events는 안 봄, _dispatch_conversation_event의
+    user_blocker_ids exclusion을 죽여도 0/18 RED였다). 이 헬퍼로 events 테이블을 직접 쿼리한다."""
+    from sqlalchemy import func, select
+    from app.models.event import Event
+    return (await session.execute(
+        select(func.count()).select_from(Event).where(
+            Event.recipient_id == recipient_id, Event.event_type == event_type,
+        )
+    )).scalar_one()
+
+
 async def test_blocker_gets_no_notification_for_blocked_sender_plain_message():
     """candidate_targets 축(conversation.message 알림) — 차단한 발신자의 평범한 메시지에는
     알림이 안 간다. 양성대조로 미차단 3자는 정상 수신하는지도 같은 사건에서 본다."""
@@ -437,21 +460,34 @@ async def test_blocker_gets_no_notification_for_blocked_sender_plain_message():
             other_count = await _notification_count_for(session, other_user, "conversation.message")
         assert blocker_count == 0, "차단한 발신자의 메시지 알림이 갔음 — 감산 실패"
         assert other_count == 1, "미차단 3자는 정상 수신해야 함(양성대조 — 전체가 죽은 게 아님을 확認)"
+
+        # ①Event/SSE 자리 — _dispatch_conversation_event의 user_blocker_ids exclusion을 events
+        # 테이블에서 직접 검산(카디르 QA 뮤테이션 재발견, 위 Notification assertion만으로는 이
+        # 지점을 안 지켰다: 그 exclusion을 죽여도 이 테스트를 포함한 18건 전부 GREEN이었다).
+        async with Session() as session:
+            blocker_events = await _event_count_for(session, blocker_id, "conversation.message_created")
+            other_events = await _event_count_for(session, other_id, "conversation.message_created")
+        assert blocker_events == 0, "차단한 발신자의 메시지 Event가 남음 — _dispatch_conversation_event 감산 실패"
+        assert other_events == 1, "미차단 3자는 Event도 정상 생성돼야 함(양성대조)"
     finally:
         await engine.dispose()
 
 
 async def test_blocker_gets_no_notification_for_blocked_sender_mention():
     """mention_targets 축(conversation.mention 알림 + SSE) — 차단한 발신자가 나를 멘션해도
-    알림이 안 간다."""
+    알림이 안 간다. other_id를 같이 멘션해 events 테이블 양성대조까지 같은 사건에서 본다
+    (카디르 QA 뮤테이션 재발견 — _dispatch_mention_events도 events를 직접 쿼리해 검산)."""
     engine, Session = await _session_factory()
     try:
         async with Session() as session:
             org = await _make_org(session)
             project = await _make_project(session, org.id)
             blocker_id, blocker_user = await _make_human_member(session, org.id, project.id)
+            other_id, _ = await _make_human_member(session, org.id, project.id)
             sender_id, sender_user = await _make_human_member(session, org.id, project.id)
-            conv_id = await _make_conversation(session, org.id, project.id, [blocker_id, sender_id], sender_id)
+            conv_id = await _make_conversation(
+                session, org.id, project.id, [blocker_id, other_id, sender_id], sender_id,
+            )
 
         from app.main import app
         await _setup_app_human(app, Session, blocker_user, org.id)
@@ -464,7 +500,7 @@ async def test_blocker_gets_no_notification_for_blocked_sender_mention():
         async with _client_for(app) as client:
             send_resp = await client.post(
                 f"/api/v2/conversations/{conv_id}/messages",
-                json={"content": "hey @you", "mentioned_ids": [str(blocker_id)]},
+                json={"content": "hey @you @other", "mentioned_ids": [str(blocker_id), str(other_id)]},
             )
         app.dependency_overrides.clear()
         assert send_resp.status_code == 201, send_resp.text
@@ -472,6 +508,13 @@ async def test_blocker_gets_no_notification_for_blocked_sender_mention():
         async with Session() as session:
             mention_count = await _notification_count_for(session, blocker_user, "conversation.mention")
         assert mention_count == 0, "차단한 발신자의 멘션 알림이 갔음 — 감산 실패(mention_targets 축)"
+
+        # ①Event/SSE 형제 경로(_dispatch_mention_events) — events 테이블 직접 검산.
+        async with Session() as session:
+            blocker_mention_events = await _event_count_for(session, blocker_id, "conversation:mention")
+            other_mention_events = await _event_count_for(session, other_id, "conversation:mention")
+        assert blocker_mention_events == 0, "차단한 발신자의 멘션 Event가 남음 — _dispatch_mention_events 감산 실패"
+        assert other_mention_events == 1, "미차단 3자는 멘션 Event도 정상 생성돼야 함(양성대조)"
     finally:
         await engine.dispose()
 
