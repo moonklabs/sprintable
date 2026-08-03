@@ -1118,7 +1118,7 @@
     "destinationsTitle": "Notification destinations",
     "destinationsSubtitle": "See, disable, and test where your notifications actually go — all in one place.",
     "blockedUsersTitle": "Blocked users",
-    "blockedUsersSubtitle": "Messages from blocked users are hidden. You can unblock anytime.",
+    "blockedUsersSubtitle": "Only their messages are hidden. Work assignments and notifications are unaffected.",
     "unblockUserAction": "Unblock",
     "unblockUserErrorTitle": "Failed to unblock user",
     "diagWhere": "Where do my notifications go?",
