@@ -290,7 +290,7 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
         {/* story #2441 — #2437 실측: 이 게이트에서 다음 행동 안내가 0이라 완주 불가했다. 게이트
             자체(요구)는 안 건드리고, "막다른 UX"만 재전송+메일함 안내로 닫는다. */}
         {emailVerifyBlocked && (
-          <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-3 text-sm">
+          <div className="space-y-3 rounded-lg border border-border p-3 text-sm">
             <p className="text-foreground">{t('emailVerifyGuidance')}</p>
             <div className="flex items-center gap-2">
               <Button
