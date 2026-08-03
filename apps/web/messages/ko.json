@@ -3330,7 +3330,7 @@
     "kitOrientingWakeBody_connector-sdk": "직접 연동으로 세션을 구동합니다. 참조 SDK(<code>{path}</code>)를 받는 경로는 아직 제공하지 않습니다.",
     "kitOrientingWakeBodyUnknown": "이 런타임을 깨우는 방법은 아직 등록되어 있지 않습니다",
     "kitOrientingWakeGuideLink": "연결 안내 전체 보기 →",
-    "kitOrientingWakeSdkGuideLink": "직접 연동(공유 SDK) 안내 보기 → (영문)",
+    "kitOrientingWakeSdkGuideLink": "직접 연동(공유 SDK) 안내 보기(영문) →",
     "kitOrientingWakeNoteMcp": "②를 끝내기 전에는 에이전트가 스스로 깨어나지 않습니다. ①·③은 지금 해 두면 그대로 쓰입니다 — 에이전트를 직접 열어 Sprintable 도구를 호출하는 것은 지금도 됩니다.",
     "kitOrientingWakeNoteConnector": "이 런타임은 ①「연결」도 같은 커넥터를 거칩니다 — 지금은 ①과 ②를 끝낼 수 없습니다. ③ 지침 파일과 발급한 키는 지금 받아 두면 그대로 쓰입니다.",
     "kitOrientingGuideLabel": "③ 지침",
