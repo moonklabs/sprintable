@@ -486,3 +486,68 @@ async def test_unblocked_sender_mention_still_notifies():
         assert mention_count == 1
     finally:
         await engine.dispose()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ④ route_message(channel_router.py) — webhook/채널 결정 축 (2026-08-03 라이브에서 발견된 갭)
+#
+# 실측(PO+디디, 라이브, 스레드 7256d5cc): send_message의 user_blocker_ids exclusion은
+# _dispatch_conversation_event/mention_targets/candidate_targets 3곳만 잡았고, route_message는
+# 별개 쿼리로 recipient_ids를 다시 뽑아 그 exclusion이 안 닿았다 — webhook-covered 수신자
+# (에이전트 대다수의 실제 수신 경로)에게는 차단이 «전혀 안 먹는» 상태로 머지됐었다. 이 절이
+# 그 갭을 직접 재현·고정한다.
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def test_route_message_excludes_recipient_who_blocked_sender():
+    """route_message가 발신자를 차단한 수신자를 decisions에서 뺀다(discord든 sse든 무관 —
+    recipient_ids 상류 한 곳에서 걸러지므로 채널 무관하게 빠져야 한다)."""
+    from app.services.channel_router import route_message
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as session:
+            org = await _make_org(session)
+            project = await _make_project(session, org.id)
+            blocker_id, _ = await _make_human_member(session, org.id, project.id)
+            other_id, _ = await _make_human_member(session, org.id, project.id)
+            sender_id, _ = await _make_human_member(session, org.id, project.id)
+            conv_id = await _make_conversation(
+                session, org.id, project.id, [blocker_id, other_id, sender_id], sender_id,
+            )
+            msg = await _add_message(session, conv_id, sender_id, "hello", datetime.now(timezone.utc))
+
+            from app.models.user_block import UserBlock
+            session.add(UserBlock(id=uuid.uuid4(), blocker_member_id=blocker_id, blocked_member_id=sender_id))
+            await session.commit()
+
+        async with Session() as session:
+            decisions = await route_message(msg.id, session)
+
+        decided_ids = {d.member_id for d in decisions}
+        assert blocker_id not in decided_ids, "차단한 수신자가 route_message decisions에 남아 있음 — #2349 갭 재발"
+        assert other_id in decided_ids, "차단 안 한 3자까지 같이 빠짐(양성대조 실패 — 전체가 죽은 것)"
+    finally:
+        await engine.dispose()
+
+
+async def test_route_message_no_block_all_recipients_present():
+    """양성대조 — 차단 관계가 전혀 없으면 route_message가 참가자 전원을 그대로 낸다."""
+    from app.services.channel_router import route_message
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as session:
+            org = await _make_org(session)
+            project = await _make_project(session, org.id)
+            a_id, _ = await _make_human_member(session, org.id, project.id)
+            b_id, _ = await _make_human_member(session, org.id, project.id)
+            sender_id, _ = await _make_human_member(session, org.id, project.id)
+            conv_id = await _make_conversation(session, org.id, project.id, [a_id, b_id, sender_id], sender_id)
+            msg = await _add_message(session, conv_id, sender_id, "hi all", datetime.now(timezone.utc))
+
+        async with Session() as session:
+            decisions = await route_message(msg.id, session)
+
+        assert {d.member_id for d in decisions} == {a_id, b_id}
+    finally:
+        await engine.dispose()
