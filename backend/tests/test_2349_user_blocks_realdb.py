@@ -11,6 +11,32 @@
   ②_msg_payload.is_blocked_sender — 읽기 경로(list_messages/get_message)에서 차단 여부 반영
   ③알림 감산 — conversations.py::send_message의 3개 제외 체인(SSE dispatch·mention_targets·
     candidate_targets)이 차단한 수신자에게 알림을 안 보낸다(실 HTTP POST로 실증)
+
+send_message 배달 경로 «전수» (2026-08-03, 카디르 QA 뮤테이션 재발견 후 정정):
+  ①Event/SSE          events 테이블                     → test_blocker_gets_no_notification_for_blocked_sender_plain_message·
+                                                            test_blocker_gets_no_notification_for_blocked_sender_mention(둘 다 events 직접 쿼리)
+  ②webhook targets    conversation_webhook_deliveries   → test_send_message_webhook_delivery_excludes_blocker
+  ③인앱 알림          notifications                      → test_blocker_gets_no_notification_for_blocked_sender_plain_message
+  ④ws 브로드캐스트     «테이블 없음»(순수 인메모리 WS)    → test_send_message_ws_chat_broadcast_excludes_blocker
+
+⛔inbox_items는 이 표에 «없다» — InboxItem 생성자 호출이 코드베이스 전체 0건(에이전트 의사결정용
+별개 기능, grep 확認).
+⭐⭐「저장소 축(DB를 훑는 법)」은 ④를 «원리상 못 본다» — DB row를 안 남기는지라. ④는 «코드 축
+(호출 그래프)»으로만 보인다 — 두 축이 서로의 사각을 덮는다.
+⛔send_message에 dispatch를 더하면 이 표에 «줄을 먼저 더하라».
+⛔표에 «이름만» 거는 것을 조심 — 각 줄은 「그 테스트가 «그 저장소»를 실제로 쿼리하는가」로
+검산한다(카디르 뮤테이션: ①의 user_blocker_ids exclusion을 죽여도 처음엔 0/18 RED였다 — 이름만
+걸려 있고 실제로 events 테이블을 쿼리하는 assertion이 없었기 때문. 지금은 events를 직접
+쿼리하고, 뮤테이션으로 정확히 그 테스트만 RED가 되는 것까지 재확認했다).
+
+⚠️events=0을 「차단이 먹었다」로 읽지 말 것 — 수신자가 webhook 커버면 SSE는 skip되어(E-EVENT-
+1CONFIG, webhook_covered_ids) events는 «원래» 0이다. 실측(2026-08-03, 페드루, dev DB 직접
+조회): 차단 中 발송 두 건(be57a797·d8745bca) 모두 events=0·webhook_deliveries=1 — events=0은
+차단의 증거가 아니라 그 수신자가 애초에 webhook 채널로 커버된다는 뜻일 뿐이다. 양성대조(차단
+없는 메시지 3건: 45fe87f7 events=0/webhook=1, 215ea7c1 events=1/webhook=0, 3febd22a events=0/
+webhook=1)가 events↔webhook 배타 관계(둘 중 하나만 1)를 보여준다 — 라이브 재검증 1차에서
+「events/pending 0건 → 차단이 막혔다」로 읽은 판단이 바로 이 오독이었다. 차단 여부는 반드시
+webhook_deliveries로 재라.
 """
 from __future__ import annotations
 
@@ -23,6 +49,7 @@ import pytest
 from tests.test_1994_backlink_api_realdb import (
     _add_message,
     _client_for,
+    _make_agent_member,
     _make_conversation,
     _make_human_member,
     _make_org,
@@ -385,6 +412,19 @@ async def _notification_count_for(session, user_id, event_type):
     )).scalar_one()
 
 
+async def _event_count_for(session, recipient_id, event_type):
+    """카디르 QA 뮤테이션 재발견(2026-08-03) — ①Event/SSE 자리는 표에 테스트 «이름만» 걸려
+    있었다(그 테스트는 Notification만 보고 events는 안 봄, _dispatch_conversation_event의
+    user_blocker_ids exclusion을 죽여도 0/18 RED였다). 이 헬퍼로 events 테이블을 직접 쿼리한다."""
+    from sqlalchemy import func, select
+    from app.models.event import Event
+    return (await session.execute(
+        select(func.count()).select_from(Event).where(
+            Event.recipient_id == recipient_id, Event.event_type == event_type,
+        )
+    )).scalar_one()
+
+
 async def test_blocker_gets_no_notification_for_blocked_sender_plain_message():
     """candidate_targets 축(conversation.message 알림) — 차단한 발신자의 평범한 메시지에는
     알림이 안 간다. 양성대조로 미차단 3자는 정상 수신하는지도 같은 사건에서 본다."""
@@ -420,21 +460,34 @@ async def test_blocker_gets_no_notification_for_blocked_sender_plain_message():
             other_count = await _notification_count_for(session, other_user, "conversation.message")
         assert blocker_count == 0, "차단한 발신자의 메시지 알림이 갔음 — 감산 실패"
         assert other_count == 1, "미차단 3자는 정상 수신해야 함(양성대조 — 전체가 죽은 게 아님을 확認)"
+
+        # ①Event/SSE 자리 — _dispatch_conversation_event의 user_blocker_ids exclusion을 events
+        # 테이블에서 직접 검산(카디르 QA 뮤테이션 재발견, 위 Notification assertion만으로는 이
+        # 지점을 안 지켰다: 그 exclusion을 죽여도 이 테스트를 포함한 18건 전부 GREEN이었다).
+        async with Session() as session:
+            blocker_events = await _event_count_for(session, blocker_id, "conversation.message_created")
+            other_events = await _event_count_for(session, other_id, "conversation.message_created")
+        assert blocker_events == 0, "차단한 발신자의 메시지 Event가 남음 — _dispatch_conversation_event 감산 실패"
+        assert other_events == 1, "미차단 3자는 Event도 정상 생성돼야 함(양성대조)"
     finally:
         await engine.dispose()
 
 
 async def test_blocker_gets_no_notification_for_blocked_sender_mention():
     """mention_targets 축(conversation.mention 알림 + SSE) — 차단한 발신자가 나를 멘션해도
-    알림이 안 간다."""
+    알림이 안 간다. other_id를 같이 멘션해 events 테이블 양성대조까지 같은 사건에서 본다
+    (카디르 QA 뮤테이션 재발견 — _dispatch_mention_events도 events를 직접 쿼리해 검산)."""
     engine, Session = await _session_factory()
     try:
         async with Session() as session:
             org = await _make_org(session)
             project = await _make_project(session, org.id)
             blocker_id, blocker_user = await _make_human_member(session, org.id, project.id)
+            other_id, _ = await _make_human_member(session, org.id, project.id)
             sender_id, sender_user = await _make_human_member(session, org.id, project.id)
-            conv_id = await _make_conversation(session, org.id, project.id, [blocker_id, sender_id], sender_id)
+            conv_id = await _make_conversation(
+                session, org.id, project.id, [blocker_id, other_id, sender_id], sender_id,
+            )
 
         from app.main import app
         await _setup_app_human(app, Session, blocker_user, org.id)
@@ -447,7 +500,7 @@ async def test_blocker_gets_no_notification_for_blocked_sender_mention():
         async with _client_for(app) as client:
             send_resp = await client.post(
                 f"/api/v2/conversations/{conv_id}/messages",
-                json={"content": "hey @you", "mentioned_ids": [str(blocker_id)]},
+                json={"content": "hey @you @other", "mentioned_ids": [str(blocker_id), str(other_id)]},
             )
         app.dependency_overrides.clear()
         assert send_resp.status_code == 201, send_resp.text
@@ -455,6 +508,13 @@ async def test_blocker_gets_no_notification_for_blocked_sender_mention():
         async with Session() as session:
             mention_count = await _notification_count_for(session, blocker_user, "conversation.mention")
         assert mention_count == 0, "차단한 발신자의 멘션 알림이 갔음 — 감산 실패(mention_targets 축)"
+
+        # ①Event/SSE 형제 경로(_dispatch_mention_events) — events 테이블 직접 검산.
+        async with Session() as session:
+            blocker_mention_events = await _event_count_for(session, blocker_id, "conversation:mention")
+            other_mention_events = await _event_count_for(session, other_id, "conversation:mention")
+        assert blocker_mention_events == 0, "차단한 발신자의 멘션 Event가 남음 — _dispatch_mention_events 감산 실패"
+        assert other_mention_events == 1, "미차단 3자는 멘션 Event도 정상 생성돼야 함(양성대조)"
     finally:
         await engine.dispose()
 
@@ -549,5 +609,125 @@ async def test_route_message_no_block_all_recipients_present():
             decisions = await route_message(msg.id, session)
 
         assert {d.member_id for d in decisions} == {a_id, b_id}
+    finally:
+        await engine.dispose()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ⑤ 실 webhook 배달 SSOT(resolve_conversation_webhook_targets) + ws_chat WS 브로드캐스트
+#
+# 라이브 재검증(2026-08-03, PO+디디, 스레드 7256d5cc) 후속 — ④(route_message)를 고친 뒤에도
+# 실 agent 게이트웨이 webhook 배달(ConversationWebhookDelivery의 SSOT인
+# conversation_webhook.py::resolve_conversation_webhook_targets)엔 exclusion이 안 걸려
+# 있었다(디디 발견) + ws_chat WebSocket 브로드캐스트(agent 참가자 room에 msg.content 원문
+# 실시간 전달)도 필터가 아예 없었다(카디르 QA 재발견). 둘 다 실 HTTP POST(send_message)로
+# 직접 재현·고정한다.
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def test_send_message_webhook_delivery_excludes_blocker():
+    """resolve_conversation_webhook_targets가 실제 webhook 배달 대상에서 sender를 차단한
+    수신자를 뺀다 — send_message가 자체 계산한 webhook_targets를 통해 실증(HTTP POST 경유)."""
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as session:
+            org = await _make_org(session)
+            project = await _make_project(session, org.id)
+            blocker_agent = await _make_agent_member(session, org.id, project.id)
+            other_agent = await _make_agent_member(session, org.id, project.id)
+            sender_id, sender_user = await _make_human_member(session, org.id, project.id)
+            conv_id = await _make_conversation(
+                session, org.id, project.id, [blocker_agent, other_agent, sender_id], sender_id,
+            )
+            from app.models.user_block import UserBlock
+            session.add(UserBlock(id=uuid.uuid4(), blocker_member_id=blocker_agent, blocked_member_id=sender_id))
+            await session.commit()
+
+            from app.models.webhook_config import WebhookConfig
+            session.add(WebhookConfig(
+                id=uuid.uuid4(), org_id=org.id, project_id=project.id, member_id=blocker_agent,
+                url=f"https://example.invalid/{uuid.uuid4()}", is_active=True, events=["conversation.message_created"],
+            ))
+            session.add(WebhookConfig(
+                id=uuid.uuid4(), org_id=org.id, project_id=project.id, member_id=other_agent,
+                url=f"https://example.invalid/{uuid.uuid4()}", is_active=True, events=["conversation.message_created"],
+            ))
+            await session.commit()
+
+        captured: list = []
+
+        async def _fake_deliver(*args, **kwargs):
+            captured.append(kwargs.get("targets"))
+
+        from app.services import conversation_webhook as conversation_webhook_module
+        original_deliver = conversation_webhook_module.deliver_conversation_message_webhook
+        conversation_webhook_module.deliver_conversation_message_webhook = _fake_deliver
+        # conversations.py는 함수 내부에서 `from app.services.conversation_webhook import
+        # deliver_conversation_message_webhook`을 매 호출 직전 새로 임포트하므로(top-level
+        # 캐시 없음) 모듈 속성만 바꿔도 background_tasks.add_task가 이 fake를 받는다.
+        try:
+            from app.main import app
+            await _setup_app_human(app, Session, sender_user, org.id)
+            async with _client_for(app) as client:
+                send_resp = await client.post(
+                    f"/api/v2/conversations/{conv_id}/messages", json={"content": "webhook 배달 실증"},
+                )
+            app.dependency_overrides.clear()
+            assert send_resp.status_code == 201, send_resp.text
+        finally:
+            conversation_webhook_module.deliver_conversation_message_webhook = original_deliver
+
+        assert captured, "deliver_conversation_message_webhook이 호출 안 됨 — 테스트 배선 확認 필요"
+        target_member_ids = {t.member_id for t in captured[0]}
+        assert blocker_agent not in target_member_ids, "sender를 차단한 수신자의 webhook이 배달 대상에 남음"
+        assert other_agent in target_member_ids, "차단 안 한 agent까지 같이 빠짐(양성대조 실패)"
+    finally:
+        await engine.dispose()
+
+
+async def test_send_message_ws_chat_broadcast_excludes_blocker():
+    """ws_chat WebSocket 브로드캐스트(agent room에 msg.content 원문 실시간 전달)가 sender를
+    차단한 agent 수신자를 뺀다 — _rooms/_broadcast를 실 WebSocket 없이 in-process로 실증
+    (모듈 전역 dict·함수라 conversations.py의 지연 import가 같은 객체를 참조한다)."""
+    from unittest.mock import AsyncMock
+
+    from app.routers import ws_chat as ws_chat_module
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as session:
+            org = await _make_org(session)
+            project = await _make_project(session, org.id)
+            blocker_agent = await _make_agent_member(session, org.id, project.id)
+            other_agent = await _make_agent_member(session, org.id, project.id)
+            sender_id, sender_user = await _make_human_member(session, org.id, project.id)
+            conv_id = await _make_conversation(
+                session, org.id, project.id, [blocker_agent, other_agent, sender_id], sender_id,
+            )
+            from app.models.user_block import UserBlock
+            session.add(UserBlock(id=uuid.uuid4(), blocker_member_id=blocker_agent, blocked_member_id=sender_id))
+            await session.commit()
+
+        blocker_key, other_key = str(blocker_agent), str(other_agent)
+        ws_chat_module._rooms[blocker_key] = {object()}
+        ws_chat_module._rooms[other_key] = {object()}
+        original_broadcast = ws_chat_module._broadcast
+        ws_chat_module._broadcast = AsyncMock()
+        try:
+            from app.main import app
+            await _setup_app_human(app, Session, sender_user, org.id)
+            async with _client_for(app) as client:
+                send_resp = await client.post(
+                    f"/api/v2/conversations/{conv_id}/messages", json={"content": "ws 브로드캐스트 실증"},
+                )
+            app.dependency_overrides.clear()
+            assert send_resp.status_code == 201, send_resp.text
+
+            broadcast_targets = {call.args[0] for call in ws_chat_module._broadcast.call_args_list}
+            assert blocker_key not in broadcast_targets, "sender를 차단한 agent의 room에 WS 브로드캐스트가 감"
+            assert other_key in broadcast_targets, "차단 안 한 agent까지 같이 빠짐(양성대조 실패)"
+        finally:
+            ws_chat_module._broadcast = original_broadcast
+            ws_chat_module._rooms.pop(blocker_key, None)
+            ws_chat_module._rooms.pop(other_key, None)
     finally:
         await engine.dispose()
