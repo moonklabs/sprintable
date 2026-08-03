@@ -1,5 +1,9 @@
 name: Cloud Build (GCP)
 
+# 2026-08-03 #2829(P0): substitutions 값은 별도 "Assemble Cloud Build substitutions" 스텝에서
+# 조립한다 — 단일 run 블록에 GH 표현식을 다수 담으면 GitHub 파서 상한(startup_failure)에 걸린다.
+# Submit 스텝에 인라인 나열 금지. 주석에도 리터럴 표현식 토큰 쓰지 말 것.
+
 on:
   push:
     branches: [main, develop]
