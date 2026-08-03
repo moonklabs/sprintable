@@ -22,6 +22,21 @@ substitutions:
   #    (PgBouncer 풀러: Cloud Run raw TCP 미지원으로 중앙 불가·관리형 풀링 Enterprise Plus 전용 → #1779
   #    폐기 이력 있음. 트래픽↑ 時 아키텍처 재검토(#2074) 필요.)
   _BACKEND_MAX_INSTANCES: '1'
+  _DB_POOL_SIZE: '3'
+  _DB_MAX_OVERFLOW: '1'
+  # ⚠️ story #2442(2026-08-03 P0) — dev-safe fallback(위와 동일 컨벤션, #2040에서 이미 검증된
+  #    dev 예산 그대로). prod override는 GHA cloud-build.yml에서 온다(_BACKEND_MAX_INSTANCES와
+  #    동일 배선 패턴). prod가 겪은 실제 P0(08:44Z, QueuePool 고갈·/api/v2/health 전면 타임아웃):
+  #    Cloud SQL sprintable-prod(max_connections 200)는 RUNNABLE·건강했으나, PgBouncer가 prod에
+  #    없거나 무력해(db_pgbouncer=False가 코드+배포 양쪽 기본값 — 위 주석의 "PgBouncer 풀러 불가"
+  #    참고) 인스턴스당 3+1=4로 tiny한 앱 풀이 Cloud SQL에 직결돼 실 동시성을 못 버텼다. PO가
+  #    gcloud로 20/10(rev 00257-wdz)까지 올려 즉시 회복 확認(health 8/8 200) — 그 손 값을 SSOT로
+  #    durable화한다("손 값은 다음 배포가 덮는다" 교훈 재적용).
+  #    안전식(AC4, 롤아웃 배수 없이): maxScale(5)×(pool+overflow)+raw(1) = 5×30+1 = 151 ≤ 200
+  #    (25% 여유). ⚠️잔여 리스크(문서화, 미해소) — `docs/db-connection-budget.md`의 롤아웃-인식
+  #    산식(2×N×per_instance, N=동시생존 리비전수)으로 보면 2×5×31=310>200. main 배포 빈도가
+  #    develop보다 훨씬 낮아 롤아웃 중첩 창이 짧다는 판단으로 이 잔여 리스크를 감수한다(PO 확認
+  #    필요 — 재검토 트리거: num_backends가 150에 근접하거나 main 연속배포가 잦아질 때).
   _GA4_MEASUREMENT_ID: ""  # dev 기본값 빈 문자열 — prod 트리거에서 G-RYHFE7XM3X 주입
   # story #2078(E-ARCH 0단계) — SSE 멀티플렉서 롤백 플래그. dev-safe 기본값 'false'(수동
   # `gcloud builds submit` override 없을 때 안전). GHA가 dev 브랜치에서만 'true' 주입 —
@@ -327,11 +342,12 @@ steps:
         # → 신규/리셋 시 allUsers invoker 유실로 403(2026-06-21 prod promotion 사건).
         # OB-1: 에이전트 onboarding generator 가 읽는 backend-direct URL 을 런타임 env 로 주입.
         # ⚠️ 반드시 --update-env-vars(additive·기존 backend env[DATABASE_URL 등] 보존).
-        # --set-env-vars 금지(전체 wipe). DB_POOL_SIZE=3/DB_MAX_OVERFLOW=1: config.py 기본과
-        # 동일하나 명시 주입으로 durable(과거 수동 설정·lingering env 가 기본을 덮는 것 방지).
-        # rollout 산식: 2×maxScale×(pool+overflow+pg_pubsub raw 1) ≤ DB max_conn (dev maxScale 8:
-        # 2×8×5=80 · prod maxScale 5: 2×5×5=50+admin). 변경 시 cloud-build.yml maxScale 와 짝으로
-        # 검토(PO rev 01256 dev 429 right-size durable 화).
+        # --set-env-vars 금지(전체 wipe). DB_POOL_SIZE/DB_MAX_OVERFLOW: story #2442(P0)부터
+        # env별 substitution(_DB_POOL_SIZE/_DB_MAX_OVERFLOW, GHA per-env override, 위
+        # _BACKEND_MAX_INSTANCES와 동일 배선 패턴) — dev는 #2040 검증값(3/1) 그대로, prod는
+        # P0 완화값(20/10) durable화. 근거·안전식은 위 substitutions 섹션 주석 참고.
+        # rollout 산식: 2×maxScale×(pool+overflow+pg_pubsub raw 1) ≤ DB max_conn — 값 바꿀 때
+        # cloud-build.yml maxScale·db_pool_size/db_max_overflow output과 짝으로 검토.
         # E-ARCH 1단계(story #2078): PG_LISTEN_ENABLED durable화(dev=false·prod=true, GHA per-env).
         # ⛔E-ARCH S2 정리(story #2078) 정정(#2123): EVENT_BROKER_REDIS_CONSUME_ENABLED/_DISPATCH_
         # ENABLED durable화 — "api는 SSE 미서빙" 전제가 틀렸음이 드러나 값을 true로 정정(에이전트
@@ -339,7 +355,7 @@ steps:
         # 에서 정정(구 `REDIS_CONSUME_ENABLED`는 Settings 필드와 안 맞아 무시되던 키) — 구 키는
         # --remove-env-vars로 명시 제거(안 지우면 두 키 공존, additive 함정).
         # story #2123 S0-b: FANOUT_WAKE_REDIS_ENABLED(dev만 true, prod는 손대지 않음).
-        ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED},PRESENCE_REDIS_ENABLED=${_BACKEND_PRESENCE_REDIS_ENABLED},PRESENCE_ONLINE_REDIS_ENABLED=${_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED},SSE_LEASE_REDIS_ENABLED=${_BACKEND_SSE_LEASE_REDIS_ENABLED},SSE_TRANSIENT_REPLAY_ENABLED=${_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}"
+        ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=${_DB_POOL_SIZE},DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW},PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED},PRESENCE_REDIS_ENABLED=${_BACKEND_PRESENCE_REDIS_ENABLED},PRESENCE_ONLINE_REDIS_ENABLED=${_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED},SSE_LEASE_REDIS_ENABLED=${_BACKEND_SSE_LEASE_REDIS_ENABLED},SSE_TRANSIENT_REPLAY_ENABLED=${_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}"
         # ⛔story #2141(2026-07-23, prod Redis Memorystore 전환): REDIS_URL을 여기서 이 스텝이
         # 예전엔 dev/prod 공용으로 plain env 넘겼다 — prod는 Secret Manager 바인딩(REDIS_URL_PROD,
         # AUTH 필요)으로 전환하는데, 같은 배포에 plain REDIS_URL 키까지 넘기면 Cloud Run이
@@ -459,6 +475,11 @@ steps:
         # 바뀌어 에이전트가 realtime-dev에도 붙게 되면 이 판정 전체를 재검토할 것** — 오늘 이
         # 사달(#2178)의 근본원인이 정확히 "전제가 어디에도 안 적혀 있었던 것"이라, 판정 근거뿐
         # 아니라 판정이 무너지는 조건까지 여기 남긴다.
+        # story #2442(P0) — 이 스텝은 위에서 이미 dev 아니면 skip 하므로 prod 값(20/10)은
+        # 여기 닿지 않는다(_DEPLOY_ENV=prod면 함수 진입 전에 exit 0). 그래도 하드코딩
+        # DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1을 그대로 뒀었다(PO forensic 적발 — 3곳 하드코딩 중
+        # 하나) — SSOT 원칙상 "우연히 같은 값"과 "명시로 같은 값"은 다르다. deploy-backend와
+        # 동일한 substitution으로 교체(dev 기본값 3/1 그대로 — 값 변경 아님, 배선만 정정).
         gcloud run deploy sprintable-realtime-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
           --region=${_AR_REGION} \
@@ -466,7 +487,7 @@ steps:
           --max-instances=${_REALTIME_MAX_INSTANCES} \
           --timeout=${_REALTIME_TIMEOUT} \
           --allow-unauthenticated \
-          --update-env-vars=FASTAPI_URL=${_REALTIME_URL},DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,PG_LISTEN_ENABLED=false,EVENT_BROKER_REDIS_CONSUME_ENABLED=true,REDIS_URL=${_REDIS_URL},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=true,EVENT_BROKER_REDIS_DISPATCH_ENABLED=true,SSE_TRANSIENT_REPLAY_ENABLED=true,SSE_LEASE_REDIS_ENABLED=true \
+          --update-env-vars=FASTAPI_URL=${_REALTIME_URL},DB_POOL_SIZE=${_DB_POOL_SIZE},DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW},PG_LISTEN_ENABLED=false,EVENT_BROKER_REDIS_CONSUME_ENABLED=true,REDIS_URL=${_REDIS_URL},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=true,EVENT_BROKER_REDIS_DISPATCH_ENABLED=true,SSE_TRANSIENT_REPLAY_ENABLED=true,SSE_LEASE_REDIS_ENABLED=true \
           --remove-env-vars=REDIS_CONSUME_ENABLED \
           --quiet
     waitFor: [run-migrate-job]
