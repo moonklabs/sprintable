@@ -281,11 +281,50 @@ jobs:
             echo "backend_sse_transient_replay_enabled=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # story #2827 P0 핫픽스 2차(2026-08-03, 페드루 dispatch-test 실측) — 1차 핫픽스가 조립
+      # 로직을 "Set deploy environment" 스텝(위, 이미 표현식 1개+대량 주석으로 16000자대) 안에
+      # 넣었더니 그 스텝이 "Exceeded max expression length 21000"으로 새로 걸렸다(주석 삭제로도
+      # 해결 안 됨 — 이 스텝 run 블록 자체가 GH 표현식을 하나라도 품으면 전체가 하나로 템플릿
+      # 컴파일되는 듯). ⇒ 대량 텍스트 스텝 안에 조립 로직을 더하는 대신, 이 별도의 작고 짧은
+      # 스텝에서 env: 매핑(각 항목이 독립된 짧은 표현식 — run 블록 문자열에 섞여 들어가지
+      # 않는다)으로 25개 값을 받아 순수 bash(GH 표현식 0개)로만 조립한다.
+      - name: Assemble Cloud Build substitutions
+        id: subst
+        env:
+          V_DEPLOY_ENV: ${{ steps.env.outputs.target }}
+          V_FASTAPI_URL: ${{ steps.env.outputs.fastapi_url }}
+          V_BACKEND_MIN_INSTANCES: ${{ steps.env.outputs.backend_min_instances }}
+          V_BACKEND_MAX_INSTANCES: ${{ steps.env.outputs.backend_max_instances }}
+          V_DB_POOL_SIZE: ${{ steps.env.outputs.db_pool_size }}
+          V_DB_MAX_OVERFLOW: ${{ steps.env.outputs.db_max_overflow }}
+          V_BACKEND_TIMEOUT: ${{ steps.env.outputs.backend_timeout }}
+          V_GA4_MEASUREMENT_ID: ${{ steps.env.outputs.ga4_measurement_id }}
+          V_REALTIME_MIN_INSTANCES: ${{ steps.env.outputs.realtime_min_instances }}
+          V_REALTIME_MAX_INSTANCES: ${{ steps.env.outputs.realtime_max_instances }}
+          V_REALTIME_TIMEOUT: ${{ steps.env.outputs.realtime_timeout }}
+          V_REALTIME_URL: ${{ steps.env.outputs.realtime_url }}
+          V_BACKEND_PG_LISTEN_ENABLED: ${{ steps.env.outputs.backend_pg_listen_enabled }}
+          V_BACKEND_REDIS_CONSUME_ENABLED: ${{ steps.env.outputs.backend_redis_consume_enabled }}
+          V_BACKEND_REDIS_DISPATCH_ENABLED: ${{ steps.env.outputs.backend_redis_dispatch_enabled }}
+          V_REDIS_URL: ${{ steps.env.outputs.redis_url }}
+          V_BACKEND_REDIS_DUAL_PUBLISH_ENABLED: ${{ steps.env.outputs.backend_redis_dual_publish_enabled }}
+          V_BACKEND_FANOUT_WAKE_REDIS_ENABLED: ${{ steps.env.outputs.backend_fanout_wake_redis_enabled }}
+          V_SSE_MULTIPLEX_ENABLED: ${{ steps.env.outputs.sse_multiplex_enabled }}
+          V_BACKEND_PRESENCE_REDIS_ENABLED: ${{ steps.env.outputs.backend_presence_redis_enabled }}
+          V_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED: ${{ steps.env.outputs.backend_presence_online_redis_enabled }}
+          V_BACKEND_SSE_LEASE_REDIS_ENABLED: ${{ steps.env.outputs.backend_sse_lease_redis_enabled }}
+          V_FRONTEND_MIN_INSTANCES: ${{ steps.env.outputs.frontend_min_instances }}
+          V_FRONTEND_MAX_INSTANCES: ${{ steps.env.outputs.frontend_max_instances }}
+          V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED: ${{ steps.env.outputs.backend_sse_transient_replay_enabled }}
+        run: |
+          SUBST="_DEPLOY_ENV=\"${V_DEPLOY_ENV}\",_FASTAPI_URL=\"${V_FASTAPI_URL}\",_BACKEND_MIN_INSTANCES=\"${V_BACKEND_MIN_INSTANCES}\",_BACKEND_MAX_INSTANCES=\"${V_BACKEND_MAX_INSTANCES}\",_DB_POOL_SIZE=\"${V_DB_POOL_SIZE}\",_DB_MAX_OVERFLOW=\"${V_DB_MAX_OVERFLOW}\",_BACKEND_TIMEOUT=\"${V_BACKEND_TIMEOUT}\",_GA4_MEASUREMENT_ID=\"${V_GA4_MEASUREMENT_ID}\",_REALTIME_MIN_INSTANCES=\"${V_REALTIME_MIN_INSTANCES}\",_REALTIME_MAX_INSTANCES=\"${V_REALTIME_MAX_INSTANCES}\",_REALTIME_TIMEOUT=\"${V_REALTIME_TIMEOUT}\",_REALTIME_URL=\"${V_REALTIME_URL}\",_BACKEND_PG_LISTEN_ENABLED=\"${V_BACKEND_PG_LISTEN_ENABLED}\",_BACKEND_REDIS_CONSUME_ENABLED=\"${V_BACKEND_REDIS_CONSUME_ENABLED}\",_BACKEND_REDIS_DISPATCH_ENABLED=\"${V_BACKEND_REDIS_DISPATCH_ENABLED}\",_REDIS_URL=\"${V_REDIS_URL}\",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED=\"${V_BACKEND_REDIS_DUAL_PUBLISH_ENABLED}\",_BACKEND_FANOUT_WAKE_REDIS_ENABLED=\"${V_BACKEND_FANOUT_WAKE_REDIS_ENABLED}\",_SSE_MULTIPLEX_ENABLED=\"${V_SSE_MULTIPLEX_ENABLED}\",_BACKEND_PRESENCE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_REDIS_ENABLED}\",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED}\",_BACKEND_SSE_LEASE_REDIS_ENABLED=\"${V_BACKEND_SSE_LEASE_REDIS_ENABLED}\",_FRONTEND_MIN_INSTANCES=\"${V_FRONTEND_MIN_INSTANCES}\",_FRONTEND_MAX_INSTANCES=\"${V_FRONTEND_MAX_INSTANCES}\",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED=\"${V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}\""
+          echo "substitutions=${SUBST}" >> "$GITHUB_OUTPUT"
+
       - name: Submit Cloud Build
         run: |
           gcloud builds submit \
             --config=cloudbuild.yaml \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_DB_POOL_SIZE="${{ steps.env.outputs.db_pool_size }}",_DB_MAX_OVERFLOW="${{ steps.env.outputs.db_max_overflow }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_REALTIME_MIN_INSTANCES="${{ steps.env.outputs.realtime_min_instances }}",_REALTIME_MAX_INSTANCES="${{ steps.env.outputs.realtime_max_instances }}",_REALTIME_TIMEOUT="${{ steps.env.outputs.realtime_timeout }}",_REALTIME_URL="${{ steps.env.outputs.realtime_url }}",_BACKEND_PG_LISTEN_ENABLED="${{ steps.env.outputs.backend_pg_listen_enabled }}",_BACKEND_REDIS_CONSUME_ENABLED="${{ steps.env.outputs.backend_redis_consume_enabled }}",_BACKEND_REDIS_DISPATCH_ENABLED="${{ steps.env.outputs.backend_redis_dispatch_enabled }}",_REDIS_URL="${{ steps.env.outputs.redis_url }}",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED="${{ steps.env.outputs.backend_redis_dual_publish_enabled }}",_BACKEND_FANOUT_WAKE_REDIS_ENABLED="${{ steps.env.outputs.backend_fanout_wake_redis_enabled }}",_SSE_MULTIPLEX_ENABLED="${{ steps.env.outputs.sse_multiplex_enabled }}",_BACKEND_PRESENCE_REDIS_ENABLED="${{ steps.env.outputs.backend_presence_redis_enabled }}",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED="${{ steps.env.outputs.backend_presence_online_redis_enabled }}",_BACKEND_SSE_LEASE_REDIS_ENABLED="${{ steps.env.outputs.backend_sse_lease_redis_enabled }}",_FRONTEND_MIN_INSTANCES="${{ steps.env.outputs.frontend_min_instances }}",_FRONTEND_MAX_INSTANCES="${{ steps.env.outputs.frontend_max_instances }}",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED="${{ steps.env.outputs.backend_sse_transient_replay_enabled }}" \
+            --substitutions=COMMIT_SHA="${{ github.sha }}",${{ steps.subst.outputs.substitutions }} \
             --suppress-logs \
             .
