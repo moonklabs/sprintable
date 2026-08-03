@@ -2239,6 +2239,12 @@ async def send_message(
             if conv.created_by:
                 agent_ids.add(str(conv.created_by))
 
+            # story #2349 AC3 — 카디르 QA 재발견(2026-08-03): 이 WS 브로드캐스트가 msg.content
+            # 원문을 필터 없이 agent 참가자 room 전원에게 보내고 있었다 — user_blocker_ids
+            # (위 L2049~2053, send_message 요청 트랜잭션서 이미 계산된 값) 미적용. #2814/#2817과
+            # 같은 결로 여기서도 뺀다(새 쿼리 없음, caller의 값 재사용).
+            agent_ids -= {str(bid) for bid in user_blocker_ids}
+
             if agent_ids:
                 ws_payload = json.dumps({
                     "id": str(msg.id),

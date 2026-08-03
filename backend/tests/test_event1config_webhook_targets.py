@@ -55,7 +55,7 @@ async def test_sender_excluded_from_mentioned_finding2():
 
     targets = await resolve_conversation_webhook_targets(
         db, conversation_id=uuid.uuid4(), org_id=org, project_id=proj,
-        sender_id=sender, mentioned_ids=[sender, agent_a],
+        sender_id=sender, mentioned_ids=[sender, agent_a], blocker_member_ids=set(),
     )
     member_ids = {t.member_id for t in targets}
     assert sender not in member_ids, "sender self-mention 제외(Finding 2)"
@@ -79,7 +79,7 @@ async def test_mention_only_sender_yields_no_member_target():
 
     targets = await resolve_conversation_webhook_targets(
         db, conversation_id=uuid.uuid4(), org_id=org, project_id=proj,
-        sender_id=sender, mentioned_ids=[sender],
+        sender_id=sender, mentioned_ids=[sender], blocker_member_ids=set(),
     )
     assert {t.member_id for t in targets} == {None}, "broadcast 만 — sender member webhook 제외"
 
@@ -98,7 +98,7 @@ async def test_no_mention_uses_participants_minus_sender():
 
     targets = await resolve_conversation_webhook_targets(
         db, conversation_id=conv_id, org_id=org, project_id=proj,
-        sender_id=sender, mentioned_ids=None,
+        sender_id=sender, mentioned_ids=None, blocker_member_ids=set(),
     )
     assert {t.member_id for t in targets} == {agent_a}
 
@@ -192,7 +192,7 @@ async def test_resolve_predicate_realdb():
             try:
                 targets = await resolve_conversation_webhook_targets(
                     db, conversation_id=uuid.uuid4(), org_id=org, project_id=proj_x,
-                    sender_id=sender, mentioned_ids=[sender, agent_a],
+                    sender_id=sender, mentioned_ids=[sender, agent_a], blocker_member_ids=set(),
                 )
                 member_ids = {t.member_id for t in targets}
                 assert agent_a in member_ids, "타 프로젝트 member-bound 도 union 으로 covered(project 독립)"
