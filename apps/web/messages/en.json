@@ -2862,6 +2862,7 @@
     "deletedMessagePlaceholder": "This message was deleted",
     "blockedSenderMessagePlaceholder": "Message from a blocked user",
     "blockedSenderMessageReveal": "View",
+    "blockedSenderMessageHide": "Hide",
     "blockUserConfirmTitle": "Block this user?",
     "blockUserConfirmDescription": "{name}'s messages will be hidden. Task assignments and notifications are unaffected. You can unblock anytime.",
     "blockUserConfirmCancel": "Cancel",

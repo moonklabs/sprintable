@@ -419,6 +419,19 @@ export function ChatBubble({
             </div>
           )}
 
+          {/* story #2349(유나 design:changes) — "보기"로 펼친 뒤 되돌릴 문턱이 없으면
+              "이걸 누르면 계속 보이나?"가 걸려 아예 안 누르게 된다(가리기+확認 가능을 둘 다
+              주려던 설계가 반만 서는 것). 되돌릴 수 있어야 눌러 볼 수 있다. */}
+          {!isDeleted && isBlockedSender && blockedMessageRevealed && (
+            <button
+              type="button"
+              onClick={() => setBlockedMessageRevealed(false)}
+              className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            >
+              {t('blockedSenderMessageHide')}
+            </button>
+          )}
+
           {/* story #2283 — 보낸 직후 그 메시지 바로 아래에서 한 번 제안(작성자 본인에게만,
               isMine 게이트는 컴포넌트 내부에서 건다). ⛔남의 메시지엔 안 뜬다. tombstone된
               메시지엔 제안할 실 내용이 없다(story #2319). */}

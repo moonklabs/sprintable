@@ -290,6 +290,33 @@ describe('ChatBubble — story #2349 사용자 차단 마스킹', () => {
     expect(container.textContent).not.toContain('차단한 사용자의 메시지입니다');
   });
 
+  // 유나 design:changes(2026-08-03) — "보기"가 한 방향이면 누르는 문턱이 생긴다(되돌릴 수
+  // 없다고 여기면 확인하고 싶어도 안 누른다). 되돌릴 수 있어야 눌러 볼 수 있다.
+  it('펼친 뒤 "숨기기"를 누르면 다시 마스킹 placeholder로 돌아간다', async () => {
+    const msg = { ...baseMessage, content: '숨겨야 할 내용', is_blocked_sender: true };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={msg} isMine={false} />));
+    });
+    const revealBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '보기');
+    await act(async () => { revealBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.textContent).toContain('숨겨야 할 내용');
+
+    const hideBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '숨기기');
+    expect(hideBtn).not.toBeUndefined();
+    await act(async () => { hideBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.textContent).toContain('차단한 사용자의 메시지입니다');
+    expect(container.textContent).toContain('보기');
+    expect(container.textContent).not.toContain('숨겨야 할 내용');
+  });
+
+  it('마스킹 안 된 일반 메시지엔 "숨기기" 버튼이 안 뜬다', async () => {
+    const msg = { ...baseMessage, content: '일반 텍스트' };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={msg} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('숨기기');
+  });
+
   // ⛔tombstone(삭제)이 차단 마스킹보다 우선 — 이미 지운 메시지는 "차단됐다"로 잘못 안내하지 않는다.
   it('deleted_at과 is_blocked_sender=true가 동시에 있으면 삭제 placeholder가 이긴다', async () => {
     const msg = { ...baseMessage, content: '', deleted_at: '2026-08-02T00:00:00.000Z', is_blocked_sender: true };
