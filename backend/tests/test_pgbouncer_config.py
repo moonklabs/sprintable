@@ -4,7 +4,9 @@ engine은 import-time 단일 생성이라 flag별 재생성이 어렵다 → 분
 database._build_engine_kwargs()로 추출해 settings 토글 → 인자 검증으로 커버한다.
 
 - off(기본): pool_size=3/overflow=1(rollout-safe·앱최소 4·ee7794eb) + connect_args 비움(statement_cache_size 없음)
-- on:        pool_size=2/overflow=1 + connect_args={"statement_cache_size": 0}
+- on:        pool_size=25/overflow=10 + connect_args={"statement_cache_size": 0}
+             (2026-08-03 #2836: 앱 풀 최소화(2/1)는 backwards — 부하에서 QueuePool 고갈. PgBouncer 가
+              멀티플렉싱하니 앱 풀을 «크게» 잡는 게 도입 취지. 자세히=config.py db_pgbouncer_pool_size 주석)
 """
 from __future__ import annotations
 
@@ -16,8 +18,8 @@ from app.core import database
 def test_settings_defaults_flag_off():
     s = Settings()
     assert s.db_pgbouncer is False
-    assert s.db_pgbouncer_pool_size == 2
-    assert s.db_pgbouncer_max_overflow == 1
+    assert s.db_pgbouncer_pool_size == 25
+    assert s.db_pgbouncer_max_overflow == 10
     assert s.db_pool_size == 3  # ee7794eb: rollout-safe·앱최소(≥4=3+1) default
     assert s.db_max_overflow == 1
 
