@@ -127,7 +127,15 @@ async def _enforce_agent_creator_policy(
                     )
                     raise HTTPException(
                         status_code=403,
-                        detail="Member is not in this agent's message allowlist",
+                        detail={
+                            "code": "AGENT_MESSAGE_POLICY_DENIED",
+                            "message": "Member is not in this agent's message allowlist",
+                            "details": {
+                                "agent_id": str(agent_tm.id),
+                                "member_id": str(member_id),
+                                "reason": "allowlist_miss",
+                            },
+                        },
                     )
             continue
 
@@ -137,13 +145,33 @@ async def _enforce_agent_creator_policy(
                 "agent creator policy 403: agent_id=%s sender_id=%s reason=created_by_none",
                 agent_tm.id, sender.id,
             )
-            raise HTTPException(status_code=403, detail="Agent has no creator — conversation not allowed")
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "AGENT_MESSAGE_POLICY_DENIED",
+                    "message": "Agent has no creator — conversation not allowed",
+                    "details": {
+                        "agent_id": str(agent_tm.id),
+                        "reason": "created_by_none",
+                    },
+                },
+            )
         if agent_tm.created_by not in human_user_ids:
             logger.warning(
                 "agent creator policy 403: agent_id=%s sender_id=%s reason=creator_not_participant created_by=%s",
                 agent_tm.id, sender.id, agent_tm.created_by,
             )
-            raise HTTPException(status_code=403, detail="Agent's creator must be a participant in this conversation")
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "AGENT_MESSAGE_POLICY_DENIED",
+                    "message": "Agent's creator must be a participant in this conversation",
+                    "details": {
+                        "agent_id": str(agent_tm.id),
+                        "reason": "creator_not_participant",
+                    },
+                },
+            )
 
 
 async def _resolve_member(
