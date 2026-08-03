@@ -270,14 +270,17 @@ jobs:
           fi
 
           # story #2827 P0 핫픽스(2026-08-03, 페드루 forensic 적발) — GH Actions 워크플로 파서가
-          # 단일 run 블록 안에 `${{ }}` 표현식을 다수(~25개) 담으면 "Exceeded max expression
+          # 단일 run 블록 안에 GH 표현식 보간 구문을 다수(~25개) 담으면 "Exceeded max expression
           # length 21000"(HTTP 422)로 워크플로 파싱 자체를 거부한다(미문서화 내부 상한 —
           # actionlint/PR CI는 이걸 안 재서 못 잡고 실 dispatch에서만 터진다). #2827이 substitutions=
           # 한 줄에 표현식 2개(_DB_POOL_SIZE/_DB_MAX_OVERFLOW)를 추가해 그 상한을 넘겨 dev/prod
           # 배포가 전부 startup_failure로 죽었다(prod는 구 리비전 유지로 안정·자동복구 아님).
-          # 해법: 25개 개별 `${{ steps.env.outputs.X }}` 표현식을 Submit 스텝에 나열하는 대신,
+          # ⛔이 주석 자체에 리터럴 GH 표현식 보간 토큰을 쓰지 말 것(2026-08-03 재발 — GitHub은
+          # run 블록 안 셸 주석도 보간 대상으로 훑어 빈 보간 토큰이 "An expression was expected"
+          # 로 워크플로 파싱을 또 거부시킨다. bash/actionlint 로컬 검증은 주석을 무시해 못 잡는다).
+          # 해법: 25개 개별 steps.env.outputs.X 참조를 Submit 스텝에 나열하는 대신,
           # 이 스텝이 방금 자신이 쓴 $GITHUB_OUTPUT 파일을 되읽어 순수 bash로 한 문자열
-          # 조립·단일 output(`substitutions`)으로 낸다 — Submit 스텝은 이제 이 표현식 하나만
+          # 조립·단일 output(substitutions)으로 낸다 — Submit 스텝은 이제 이 표현식 하나만
           # 참조(25+1개 → 2개: COMMIT_SHA·substitutions). dev/prod 값 배선 자체는 무변경.
           # 연관배열(bash4+ declare -A) 대신 POSIX 호환 grep/cut 조회 사용 — GH 러너 bash
           # 버전에 의존하지 않는다.
