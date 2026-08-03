@@ -37,6 +37,14 @@ substitutions:
   #    산식(2×N×per_instance, N=동시생존 리비전수)으로 보면 2×5×31=310>200. main 배포 빈도가
   #    develop보다 훨씬 낮아 롤아웃 중첩 창이 짧다는 판단으로 이 잔여 리스크를 감수한다(PO 확認
   #    필요 — 재검토 트리거: num_backends가 150에 근접하거나 main 연속배포가 잦아질 때).
+  # story #2445 Phase1(2026-08-03, 페드루 인프라) — dev VM PgBouncer(10.178.0.63:6432,
+  # transaction-mode) 라이브 검증 완료. dev-safe 기본값 'false'(현 동작 유지 — PgBouncer
+  # 미경유 시 database.py의 db_pgbouncer 코드 기본값과 동일). prod override는 없음(prod는
+  # #2442에서 이미 앱 풀 20/10으로 대응 — PgBouncer 도입은 이 스토리 스코프 밖, 별건).
+  # true 전환은 GHA cloud-build.yml dev 분기에서만(DATABASE_URL/DATABASE_URL_DIRECT 시크릿
+  # 재바인딩과 반드시 같은 배포에 동반 — 시크릿만 바뀌고 이 값이 false면 statement_cache
+  # 미비활성으로 PgBouncer 아래서 prepared statement reuse 깨짐, #1314류 재발).
+  _BACKEND_DB_PGBOUNCER: 'false'
   _GA4_MEASUREMENT_ID: ""  # dev 기본값 빈 문자열 — prod 트리거에서 G-RYHFE7XM3X 주입
   # story #2078(E-ARCH 0단계) — SSE 멀티플렉서 롤백 플래그. dev-safe 기본값 'false'(수동
   # `gcloud builds submit` override 없을 때 안전). GHA가 dev 브랜치에서만 'true' 주입 —
@@ -355,7 +363,7 @@ steps:
         # 에서 정정(구 `REDIS_CONSUME_ENABLED`는 Settings 필드와 안 맞아 무시되던 키) — 구 키는
         # --remove-env-vars로 명시 제거(안 지우면 두 키 공존, additive 함정).
         # story #2123 S0-b: FANOUT_WAKE_REDIS_ENABLED(dev만 true, prod는 손대지 않음).
-        ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=${_DB_POOL_SIZE},DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW},PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED},PRESENCE_REDIS_ENABLED=${_BACKEND_PRESENCE_REDIS_ENABLED},PRESENCE_ONLINE_REDIS_ENABLED=${_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED},SSE_LEASE_REDIS_ENABLED=${_BACKEND_SSE_LEASE_REDIS_ENABLED},SSE_TRANSIENT_REPLAY_ENABLED=${_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}"
+        ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},DB_POOL_SIZE=${_DB_POOL_SIZE},DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW},DB_PGBOUNCER=${_BACKEND_DB_PGBOUNCER},PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED},PRESENCE_REDIS_ENABLED=${_BACKEND_PRESENCE_REDIS_ENABLED},PRESENCE_ONLINE_REDIS_ENABLED=${_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED},SSE_LEASE_REDIS_ENABLED=${_BACKEND_SSE_LEASE_REDIS_ENABLED},SSE_TRANSIENT_REPLAY_ENABLED=${_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}"
         # ⛔story #2141(2026-07-23, prod Redis Memorystore 전환): REDIS_URL을 여기서 이 스텝이
         # 예전엔 dev/prod 공용으로 plain env 넘겼다 — prod는 Secret Manager 바인딩(REDIS_URL_PROD,
         # AUTH 필요)으로 전환하는데, 같은 배포에 plain REDIS_URL 키까지 넘기면 Cloud Run이
@@ -376,6 +384,14 @@ steps:
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},REDIS_URL=${_REDIS_URL}"
         fi
+        # story #2445 Phase1(2026-08-03) — dev만 DATABASE_URL/DATABASE_URL_DIRECT를 PgBouncer
+        # 경유 시크릿으로 재바인딩(--update-secrets=additive, 기존 다른 시크릿 preserve — REDIS_URL_
+        # PROD 등과 동일 컨벤션). prod는 이 플래그 자체를 안 넘겨 현재 DATABASE_URL_PROD 바인딩
+        # 무변경. 시크릿 자체(DATABASE_URL_DEV_PGBOUNCER/DATABASE_URL_DIRECT_DEV)는 PO가 생성.
+        SECRETS_FLAG=""
+        if [ "${_DEPLOY_ENV}" == "dev" ]; then
+          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV:latest"
+        fi
         gcloud run deploy sprintable-backend-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
           --region=${_AR_REGION} \
@@ -384,6 +400,7 @@ steps:
           --timeout=${_BACKEND_TIMEOUT} \
           --allow-unauthenticated \
           --update-env-vars="$${ENV_VARS}" \
+          $${SECRETS_FLAG} \
           --remove-env-vars=REDIS_CONSUME_ENABLED \
           --quiet
     # story dbda0baf: push-backend → run-migrate-job(위) 로 변경 — 신규 코드가 마이그 안 된
