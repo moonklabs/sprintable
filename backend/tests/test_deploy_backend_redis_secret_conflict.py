@@ -40,7 +40,7 @@ _CLOUDBUILD_YAML = _REPO_ROOT / "cloudbuild.yaml"
 # story #2421 핫픽스 테스트가 이 목록 밖의 `${...}` 참조를 전부 "이스케이프 안 된 셸 변수"로 간주한다.
 _DECLARED_SUBSTITUTIONS = {
     "_AR_REGION", "_AR_REPO", "_DEPLOY_ENV", "_FASTAPI_URL", "_BACKEND_MIN_INSTANCES",
-    "_BACKEND_MAX_INSTANCES", "_DB_POOL_SIZE", "_DB_MAX_OVERFLOW", "_BACKEND_TIMEOUT", "_REALTIME_MIN_INSTANCES",
+    "_BACKEND_MAX_INSTANCES", "_DB_POOL_SIZE", "_DB_MAX_OVERFLOW", "_BACKEND_DB_PGBOUNCER", "_BACKEND_TIMEOUT", "_REALTIME_MIN_INSTANCES",
     "_REALTIME_MAX_INSTANCES", "_REALTIME_TIMEOUT", "_REALTIME_URL", "_FRONTEND_TIMEOUT",
     "_BACKEND_PG_LISTEN_ENABLED", "_BACKEND_REDIS_CONSUME_ENABLED",
     "_BACKEND_REDIS_DISPATCH_ENABLED", "_BACKEND_REDIS_DUAL_PUBLISH_ENABLED", "_REDIS_URL",
@@ -100,6 +100,7 @@ def _run_env_vars_assembly(deploy_env: str, redis_url: str) -> str:
         "_FASTAPI_URL": "https://example.run.app",
         "_DB_POOL_SIZE": "3",
         "_DB_MAX_OVERFLOW": "1",
+        "_BACKEND_DB_PGBOUNCER": "false",
         "_BACKEND_PG_LISTEN_ENABLED": "true",
         "_BACKEND_REDIS_CONSUME_ENABLED": "false",
         "_BACKEND_REDIS_DISPATCH_ENABLED": "false",
@@ -181,6 +182,7 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
     result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
     assert result == (
         "FASTAPI_URL=https://example.run.app,DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1,"
+        "DB_PGBOUNCER=false,"
         "PG_LISTEN_ENABLED=true,EVENT_BROKER_REDIS_CONSUME_ENABLED=false,"
         "EVENT_BROKER_REDIS_DISPATCH_ENABLED=false,EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=false,"
         "FANOUT_WAKE_REDIS_ENABLED=false,PRESENCE_REDIS_ENABLED=false,"
