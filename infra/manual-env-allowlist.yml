@@ -496,6 +496,23 @@ code_read_exempt:
     reason: INTERNAL_DOGFOOD_ACCESS_ENABLED가 꺼져 있으면(기본) 실질 영향 없음 — 같은 기능군.
   - key: INTERNAL_DOGFOOD_DEFAULT_PROJECT_NAME
     reason: INTERNAL_DOGFOOD_ACCESS_ENABLED가 꺼져 있으면(기본) 실질 영향 없음 — 같은 기능군.
+  - key: SPRINTABLE_RUNTIME_ROLE
+    reason: >-
+      apps/web/src/services/background-runtime.ts:82-88 `resolveBackgroundRuntimeRole` —
+      미설정 시 `NODE_ENV==='production' ? 'web' : 'all'`로 떨어진다. frontend-dev/prod
+      둘 다 NODE_ENV=production(gcloud로 직접 확認, 2026-08-02)이라 기본값은 'web' —
+      instrumentation.ts의 `shouldStartBackgroundRuntime`이 role이 'worker'|'all'일 때만
+      true이므로 미설정 상태에서 백그라운드 워커(discord/teams/memo 아웃바운드 디스패처)는
+      항상 안 켜진다(story #2423, 페드루 판정 — 이 기능군은 은퇴 상태). 값을 채워야 도는
+      기능이 아니라, 안 채워야 지금 의도한 대로(web-only) 도는 스위치.
+  - key: SPRINTABLE_BACKGROUND_POLL_INTERVAL_MS
+    reason: SPRINTABLE_RUNTIME_ROLE이 web으로 떨어지면(기본) 워커 자체가 안 켜져 실질 영향 없음 — 같은 기능군.
+  - key: SPRINTABLE_DISCORD_OUTBOUND_POLL_INTERVAL_MS
+    reason: SPRINTABLE_RUNTIME_ROLE이 web으로 떨어지면(기본) 워커 자체가 안 켜져 실질 영향 없음 — 같은 기능군.
+  - key: SPRINTABLE_MEMO_DISPATCHER_POLL_INTERVAL_MS
+    reason: SPRINTABLE_RUNTIME_ROLE이 web으로 떨어지면(기본) 워커 자체가 안 켜져 실질 영향 없음 — 같은 기능군.
+  - key: SPRINTABLE_TEAMS_OUTBOUND_POLL_INTERVAL_MS
+    reason: SPRINTABLE_RUNTIME_ROLE이 web으로 떨어지면(기본) 워커 자체가 안 켜져 실질 영향 없음 — 같은 기능군.
 
 # ⑤㉠(story #2296 후속, 파울로군 지시 2026-07-28) — «알려진 채무» 래칫 baseline.
 # ⛔code_read_exempt(위)와 다르다 — exempt는 "코드로 확認해 영구히 정상"이고, 이건 "아직

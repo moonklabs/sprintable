@@ -13,7 +13,11 @@ const _CSP = [
   "font-src 'self' data:",
   // API 호출 (self = Next.js rewrites 경유, googleapis = Cloud KMS/AI)
   "connect-src 'self' https://*.googleapis.com",
-  "media-src 'self' blob:",
+  // story #2083 — 채팅 첨부 영상(GCS 서명 URL)이 <video>로 로드될 때 media-src에
+  // storage.googleapis.com이 없어 CSP가 통째로 차단하고 있었다(콘솔 실측). img-src에는
+  // 이미 같은 호스트가 허용돼 있다(story #2050, 서명 URL·노출 축 동일) — 새 origin을
+  // 여는 것이 아니라 media-src를 img-src와 같은 경계로 맞추는 것이다.
+  "media-src 'self' blob: https://storage.googleapis.com",
   "frame-src 'none'",
   "object-src 'none'",
   "base-uri 'self'",

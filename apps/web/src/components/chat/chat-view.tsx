@@ -17,6 +17,8 @@ import { useMessageRangeSelection } from '@/hooks/use-message-range-selection';
 import { CitationComposeBar, type CitationSaveState } from './citation-compose-bar';
 import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ToastContainer, useToast } from '@/components/ui/toast';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 interface ChatViewProps {
   threadId: string;
@@ -64,6 +66,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const pathname = usePathname();
   const t = useTranslations('chats');
   const isMobile = useIsMobile();
+  const { toasts, addToast, dismissToast } = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   // story #2265(C-7) 저장 조각(2026-07-29) — write 엔드포인트(#2632)가 서서 citeAction을
   // 실제로 켠다. 선택 확定(confirming) 후 스토리 피커를 열어 골라진 스토리에 저장한다.
@@ -358,12 +361,58 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     };
   }, [fetchMessages]);
 
-  // CB-S9: 메시지 삭제 (본인 메시지만)
+  // CB-S9/story #2319: 메시지 삭제(본인 메시지만) — tombstone(PO 결정, hard delete 아님).
+  // 목록에서 빼지 않는다(행이 자리에 남아 placeholder로 보인다 — AC①의 근거: 대화는 여럿이
+  // 읽는 자리라 통째로 지우면 답글·맥락이 끊긴다). AC②: 실패는 무조건 사용자에게 보인다
+  // (404/500/네트워크 예외 전부) — 예전엔 `if (!res.ok) return`으로 조용히 아무 일도 없었다.
   const handleDeleteMessage = useCallback(async (messageId: string) => {
-    const res = await fetch(`${apiPrefix}/${threadId}/messages/${messageId}`, { method: 'DELETE' });
-    if (!res.ok) return;
-    setMessages((prev) => prev.filter((m) => m.id !== messageId));
-  }, [apiPrefix, threadId]);
+    try {
+      const res = await fetch(`${apiPrefix}/${threadId}/messages/${messageId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        addToast({ type: 'error', title: t('deleteMessageErrorTitle'), body: t('deleteMessageErrorBody') });
+        return;
+      }
+      const body = (await res.json()) as { deleted_at?: string | null };
+      setMessages((prev) => prev.map((m) => (
+        m.id === messageId ? { ...m, content: '', deleted_at: body.deleted_at ?? new Date().toISOString() } : m
+      )));
+    } catch {
+      addToast({ type: 'error', title: t('deleteMessageErrorTitle'), body: t('deleteMessageErrorBody') });
+    }
+  }, [apiPrefix, threadId, addToast, t]);
+
+  // story #2349 — 사용자 차단. 낙관적 오버레이(blockedMemberIds)는 이미 로드된 메시지 목록을
+  // 새로고침 없이 즉시 마스킹하려는 것 — 서버 is_blocked_sender는 다음 fetch부터 반영된다.
+  const [blockConfirmTarget, setBlockConfirmTarget] = useState<{ memberId: string; memberName: string } | null>(null);
+  const [blockedMemberIds, setBlockedMemberIds] = useState<Set<string>>(new Set());
+  const [blockSubmitting, setBlockSubmitting] = useState(false);
+
+  const handleRequestBlockUser = useCallback((memberId: string, memberName: string) => {
+    setBlockConfirmTarget({ memberId, memberName });
+  }, []);
+
+  const handleConfirmBlockUser = useCallback(async () => {
+    if (!blockConfirmTarget) return;
+    setBlockSubmitting(true);
+    try {
+      const res = await fetch('/api/user-blocks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blocked_member_id: blockConfirmTarget.memberId }),
+      });
+      if (!res.ok) {
+        addToast({ type: 'error', title: t('blockUserErrorTitle'), body: t('blockUserErrorBody') });
+        return;
+      }
+      setBlockedMemberIds((prev) => new Set(prev).add(blockConfirmTarget.memberId));
+      addToast({ type: 'success', title: t('blockUserSuccessTitle') });
+    } catch {
+      addToast({ type: 'error', title: t('blockUserErrorTitle'), body: t('blockUserErrorBody') });
+    } finally {
+      setBlockSubmitting(false);
+      setBlockConfirmTarget(null);
+    }
+  }, [blockConfirmTarget, addToast, t]);
 
   // story #2265(C-7) 저장 조각 — 확定된 range(rangeStartId~rangeEndId, orderedMessageIds
   // 순서 기준 양끝 포함)를 스냅샷으로 얼려 골라진 스토리에 proof로 POST한다. 스냅샷을
@@ -695,11 +744,20 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                             </div>
                           )}
                           <ChatBubble
-                            message={msg}
+                            message={
+                              blockedMemberIds.has(msg.created_by) && msg.is_blocked_sender !== true
+                                ? { ...msg, is_blocked_sender: true }
+                                : msg
+                            }
                             isMine={msg.created_by === currentTeamMemberId}
                             isGrouped={isGrouped}
                             onOpenThread={openThread}
                             onDelete={handleDeleteMessage}
+                            onBlockUser={
+                              msg.created_by !== currentTeamMemberId
+                                ? () => handleRequestBlockUser(msg.created_by, msg.sender_name)
+                                : undefined
+                            }
                             presenceStatus={presenceById?.[msg.created_by]}
                             isWorking={typingAgents.some((a) => a.id === msg.created_by)}
                             highlight={msg.id === highlightId}
@@ -820,6 +878,17 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
           </div>
         )}
       </div>
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      {/* story #2349 — 「안 바뀌는 것」을 말하는 문장이 핵심(PO 규격, 빼지 않는다). */}
+      <ConfirmDialog
+        open={blockConfirmTarget !== null}
+        onOpenChange={(open) => { if (!open) setBlockConfirmTarget(null); }}
+        title={t('blockUserConfirmTitle')}
+        description={t('blockUserConfirmDescription', { name: blockConfirmTarget?.memberName ?? '' })}
+        cancelLabel={t('blockUserConfirmCancel')}
+        confirmLabel={t('blockUserConfirmConfirm')}
+        onConfirm={() => { if (!blockSubmitting) void handleConfirmBlockUser(); }}
+      />
     </div>
   );
 }

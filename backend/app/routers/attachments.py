@@ -15,13 +15,13 @@ import os
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
-from app.models.asset import Asset
-from app.models.conversation import Conversation, ConversationParticipant
+from app.models.asset import Asset, AssetLink
+from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.pm import Story
 from app.services.asset_registry import path_in_source_scope
 from app.services.member_resolver import resolve_member
@@ -88,6 +88,32 @@ async def authorize_attachment(
             db, uuid.UUID(auth.user_id), asset.project_id, org_id
         ):
             raise HTTPException(status_code=403, detail="No access to this project")
+
+        # story #2319 미완 2차(미르코 dev 라이브 실측 2026-08-02) — #2808이 conversation_id+path
+        # 분기(belongs SQL)만 고쳤고 이 asset_id 분기는 Asset.deleted_at만 봐서 tombstone된
+        # 메시지의 첨부도 asset_id를 아는 쪽에겐 «무기한» 재발급됐다(5분 TTL 문제가 아니라
+        # 매번 새로 발급받을 수 있는 더 나쁜 형태). 정책(PO 승인, 2026-08-02): asset은 여러
+        # source(conversation_message·story·doc·manual·loop_artifact)에 동시에 걸릴 수 있다
+        # (AssetLink UNIQUE(asset_id,source_type,source_id)) — 「모든 링크가
+        # conversation_message이고 그게 전부 삭제됐을 때만」 거부한다. doc/story 등 다른 살아있는
+        # 문맥에 걸린 자산의 접근권은 이 스토리가 안 건드린다. 링크가 0건(orphan)이면 이 판
+        # 이전과 동일하게 그대로 통과(새 거부를 만들지 않는다).
+        link_rows = (await db.execute(
+            select(AssetLink.source_type, AssetLink.source_id).where(AssetLink.asset_id == asset.id)
+        )).all()
+        if link_rows:
+            message_source_ids = [sid for (stype, sid) in link_rows if stype == "conversation_message"]
+            has_non_message_link = any(stype != "conversation_message" for (stype, sid) in link_rows)
+            if message_source_ids and not has_non_message_link:
+                alive_count = (await db.execute(
+                    select(func.count()).select_from(ConversationMessage).where(
+                        ConversationMessage.id.in_(message_source_ids),
+                        ConversationMessage.deleted_at.is_(None),
+                    )
+                )).scalar_one()
+                if alive_count == 0:
+                    raise HTTPException(status_code=403, detail="Attachment's message has been deleted")
+
         # BE 권위 좌표 반환 — FE 는 이걸로 signRead(외부URL/wrong-bucket 불가·AC3).
         return {"authorized": True, "container": asset.container, "object_path": asset.object_path}
 
@@ -138,12 +164,17 @@ async def authorize_attachment(
             ):
                 raise HTTPException(status_code=403, detail="Not a participant of this conversation")
         # ② 정확 매치: stored url == bare path(신규) OR == legacy 전체 URL. substring 금지.
+        # story #2319 미완(미르코 dev 라이브 실측 2026-08-02) — tombstone된 메시지의 첨부가 여기서
+        # 계속 "belongs"로 잡혀 서명URL이 계속 발급됐다(URL을 아는 사람은 화면 게이트와 무관하게
+        # 계속 접근). 금지는 화면이 안 그리는 것이 아니라 서버가 거부하는 것이어야 한다 —
+        # m.deleted_at IS NULL을 이 쿼리 자체에 추가한다(FE 게이트는 2차 방어일 뿐 여기가 1차).
         belongs = (await db.execute(
             text(
                 "SELECT EXISTS ("
                 " SELECT 1 FROM conversation_messages m,"
                 " jsonb_array_elements(coalesce(m.attachments, '[]'::jsonb)) att"
-                " WHERE m.conversation_id = :cid AND att->>'url' IN (:path, :legacy))"
+                " WHERE m.conversation_id = :cid AND m.deleted_at IS NULL"
+                " AND att->>'url' IN (:path, :legacy))"
             ),
             {"cid": conversation_id, "path": path, "legacy": legacy_url},
         )).scalar()

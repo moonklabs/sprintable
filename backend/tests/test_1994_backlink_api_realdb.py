@@ -560,6 +560,62 @@ async def test_chat_message_source_visible_to_participant():
         await engine.dispose()
 
 
+async def test_chat_message_source_still_exists_false_when_tombstoned():
+    """story #2319 — chat_message source가 tombstone(soft-delete)되면 still_exists=False.
+
+    이 함수가 작성될 당시(#2299) chat_message는 「불변」이라 가정해 still_exists를 항상
+    True로 하드코딩했다 — #2319가 메시지 삭제를 도입하며 그 가정이 깨졌다(backlinks.py
+    docstring 참조). 행 자체는 남아 있으므로(하드삭제 아님) item["message"]는 여전히
+    채워진다 — doc/meeting/story의 soft-delete-but-visible과 동형(#2299 규율 그대로
+    「끊어짐」이지 「없어짐」이 아니다)."""
+    from app.main import app
+    from app.models.conversation import ConversationMessage
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            other_id, _ = await _make_human_member(s, org.id, project.id)
+            target_doc = await _make_doc(s, org.id, project.id, title="Target")
+
+            conv_id = await _make_conversation(
+                s, org.id, project.id, [caller_id, other_id], created_by=caller_id, conv_type="dm",
+            )
+            msg = await _add_message(s, conv_id, other_id, "[링크](entity:doc:x) 참고", _t(1))
+            await _make_mention(s, org.id, "chat_message", msg.id, target_doc.id, created_by=other_id)
+
+            # tombstone — DELETE 핸들러가 하는 그대로(content 스크럽 + deleted_at 세팅), 이
+            # 테스트는 backlinks read-path만 겨냥하므로 라우터를 안 태우고 직접 재현한다.
+            row = (await s.execute(
+                select(ConversationMessage).where(ConversationMessage.id == msg.id)
+            )).scalar_one()
+            row.deleted_at = datetime.now(timezone.utc)
+            row.content = ""
+            await s.commit()
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/docs/{target_doc.id}/backlinks")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert len(body["data"]) == 1, body
+            item = body["data"][0]
+            # 행은 살아 있다 — message 필드가 여전히 채워진다(하드삭제 됐다면 test_missing_
+            # source_message_excluded_no_crash처럼 결과에서 아예 빠졌을 것).
+            assert item["message"] is not None, "tombstone된 메시지도 행은 남아야 한다(하드삭제 아님)"
+            assert item["message"]["id"] == str(msg.id)
+            assert item["still_exists"] is False, "tombstone된 source는 still_exists=False여야 한다"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 # ─── (c) admin-bypass for agent-only conversation — 회귀 0 확인 ────────────────
 
 
@@ -2036,6 +2092,440 @@ async def test_backfilled_old_data_and_post_cutover_new_data_both_visible_in_bac
                 "read-path가 새 표를 안 읽는 것"
             )
             assert len(body["data"]) == 2, body
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# story #2319 — DELETE /{conversation_id}/messages/{message_id} (tombstone) 실증.
+# 이 파일의 기존 org/project/human/conversation/message anchor-fixture(§Issue A 3회차
+# QA로 이미 검증된 그것)를 그대로 재사용한다 — 새 파일에서 처음부터 다시 짜면 같은 종류의
+# anchor-table 함정을 다시 밟을 위험이 있다(재사용 > 재발명).
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+async def test_delete_message_owner_tombstones_content_and_sets_deleted_at():
+    """본인 메시지 — DELETE가 200을 주고, content는 스크럽(""), deleted_at이 세팅된다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id], created_by=caller_id, conv_type="dm")
+            msg = await _add_message(s, conv_id, caller_id, "삭제될 원문", _t(1))
+            msg_id = msg.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["id"] == str(msg_id)
+            assert body["deleted_at"] is not None
+
+            # get_message로 실제 DB 반영을 재확認 — write 응답만 믿지 않는다.
+            get_resp = await client.get(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert get_resp.status_code == 200, get_resp.text
+            fetched = get_resp.json()
+            assert fetched["content"] == "", "content가 스크럽되지 않았다 — 오발송 대응 목적이 안 선다"
+            assert fetched["deleted_at"] is not None
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_delete_message_not_owner_403():
+    """음성대조 — 남의 메시지는 지울 수 없다(서버가 독립으로 강제, FE의 isMine은 UI일 뿐)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            other_id, _ = await _make_human_member(s, org.id, project.id)
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id, other_id], created_by=caller_id, conv_type="dm")
+            msg = await _add_message(s, conv_id, other_id, "남의 메시지", _t(1))
+            msg_id = msg.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert resp.status_code == 403, resp.text
+
+            # 실제로 안 지워졌는지 원문으로 재확認.
+            get_resp = await client.get(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert get_resp.json()["content"] == "남의 메시지"
+            assert get_resp.json()["deleted_at"] is None
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_delete_message_idempotent_second_call_ok():
+    """이미 tombstone된 메시지를 다시 DELETE해도 에러 없이 200 — deleted_at은 최초값 유지."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id], created_by=caller_id, conv_type="dm")
+            msg = await _add_message(s, conv_id, caller_id, "원문", _t(1))
+            msg_id = msg.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            first = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert first.status_code == 200, first.text
+            first_deleted_at = first.json()["deleted_at"]
+
+            second = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert second.status_code == 200, second.text
+            assert second.json()["deleted_at"] == first_deleted_at, "재삭제가 deleted_at을 덮어썼다"
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_delete_message_wrong_conversation_id_404():
+    """다른 conversation_id로 스코핑하면 404 — get_message와 동형 스코핑(cross-conversation IDOR 방지)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            conv_a = await _make_conversation(s, org.id, project.id, [caller_id], created_by=caller_id, conv_type="dm")
+            conv_b = await _make_conversation(s, org.id, project.id, [caller_id], created_by=caller_id, conv_type="dm")
+            msg = await _add_message(s, conv_a, caller_id, "conv_a의 메시지", _t(1))
+            msg_id = msg.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.delete(f"/api/v2/conversations/{conv_b}/messages/{msg_id}")
+            assert resp.status_code == 404, resp.text
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_delete_message_after_removed_from_participants_403():
+    """카디르 QA(2026-08-02, PR #2806) — canonical `_authorize_message_read` 재사용의 부수효과를
+    직접 pin: participant에서 제거된 뒤에는 예전에 자기가 보낸 메시지도 못 지운다(read-gate가
+    먼저 403을 raise — fail-closed, 못 읽는 대화의 메시지를 지울 수 있으면 그게 더 이상하다는
+    판단). 이전 구현(수기 `_resolve_member`+sender_id 대조)은 이 경계에 답이 없었다."""
+    from app.main import app
+    from sqlalchemy import delete as sa_delete
+    from app.models.conversation import ConversationParticipant
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            other_id, _ = await _make_human_member(s, org.id, project.id)
+            # group(=dm 아님)이라야 caller 제거 후에도 conversation 자체는 살아있다(dm은 애초에
+            # 2인 고정 개념이라 제거라는 조작이 자연스럽지 않다).
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id, other_id], created_by=caller_id, conv_type="group")
+            msg = await _add_message(s, conv_id, caller_id, "제거 전에 보낸 메시지", _t(1))
+            msg_id = msg.id
+
+            # caller를 이 conversation의 참가자 목록에서 제거(project 접근 자체는 유지 — project
+            # access 회수가 아니라 "이 대화방에서 나감"만 재현).
+            await s.execute(
+                sa_delete(ConversationParticipant).where(
+                    ConversationParticipant.conversation_id == conv_id,
+                    ConversationParticipant.member_id == caller_id,
+                )
+            )
+            await s.commit()
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert resp.status_code == 403, resp.text
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+
+        # 응답 status만 믿지 않는다 — DB를 직접 조회해 실제로 안 지워졌는지 재확認.
+        from sqlalchemy import select
+        from app.models.conversation import ConversationMessage
+        async with Session() as s:
+            fresh = (await s.execute(
+                select(ConversationMessage).where(ConversationMessage.id == msg_id)
+            )).scalar_one()
+            assert fresh.deleted_at is None, "403인데 실제로는 지워졌다 — 응답과 DB가 어긋난다"
+            assert fresh.content == "제거 전에 보낸 메시지"
+    finally:
+        await engine.dispose()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# story #2319 미완(미르코 dev 라이브 실측 2026-08-02) — tombstone된 메시지의 첨부가
+# 화면 게이트 없이도(URL을 아는 사람은) 계속 authorize되던 결함. 근본은 attachments.py
+# authorize의 belongs 쿼리가 m.deleted_at을 안 보던 것 — 여기서 실 SQL로 재현·pin한다.
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+async def test_attachment_authorize_403_after_message_tombstoned():
+    """삭제 전엔 authorize 200(양성대조) → 삭제 후엔 403이어야 한다 — URL을 직접 아는 사람도
+    막혀야 한다(화면이 안 그리는 것과 별개로 서버가 거부해야 진짜 봉인)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id], created_by=caller_id, conv_type="dm")
+            path = f"chat/{project.id}/{conv_id}/u1-video.mp4"
+            msg = await _add_message(s, conv_id, caller_id, "영상 첨부", _t(1))
+            msg.attachments = [{"url": path, "content_type": "video/mp4"}]
+            await s.commit()
+            msg_id = msg.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            # 삭제 전 — 정상 authorize(양성대조, 회귀로 항상-403이 되는 것도 막는다).
+            before = await client.get(f"/api/v2/attachments/authorize?path={path}&conversation_id={conv_id}")
+            assert before.status_code == 200, before.text
+
+            del_resp = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert del_resp.status_code == 200, del_resp.text
+
+            # 삭제 후 — 이 테스트의 핵심 단언.
+            after = await client.get(f"/api/v2/attachments/authorize?path={path}&conversation_id={conv_id}")
+            assert after.status_code == 403, after.text
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_get_message_hides_attachments_after_delete():
+    """story #2319 미완 — _msg_payload가 tombstone된 메시지의 attachments를 빈 배열로 덮는다
+    (FE가 애초에 첨부 카드를 시도조차 안 하게, authorize 403의 2차 방어)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id], created_by=caller_id, conv_type="dm")
+            path = f"chat/{project.id}/{conv_id}/u1-video.mp4"
+            msg = await _add_message(s, conv_id, caller_id, "영상 첨부", _t(1))
+            msg.attachments = [{"url": path, "content_type": "video/mp4"}]
+            await s.commit()
+            msg_id = msg.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            before = await client.get(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert before.json()["attachments"] == [{"url": path, "content_type": "video/mp4"}]
+
+            del_resp = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert del_resp.status_code == 200, del_resp.text
+
+            after = await client.get(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert after.json()["attachments"] == [], "삭제 후에도 attachments가 응답에 남아있다"
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# story #2319 미완 2차(미르코 dev 라이브 실측 2026-08-02) — attachments.py authorize의
+# asset_id 분기가 Asset.deleted_at만 보고 tombstone된 메시지는 안 봐서, 그 메시지의 첨부가
+# asset_id를 아는 쪽에겐 무기한(5분 TTL조차 아니라 재발급 가능) 계속 authorize됐다.
+# 정책(PO 승인): 모든 AssetLink가 conversation_message 타입이고 전부 삭제됐을 때만 거부 —
+# 다른 살아있는 링크(다른 메시지·doc 등)가 하나라도 있으면 허용(다른 문맥의 접근권은 안 건드림).
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+async def _link_asset_to_message(session, *, org_id, asset_id, message_id):
+    from app.models.asset import AssetLink
+    session.add(AssetLink(
+        id=uuid.uuid4(), org_id=org_id, asset_id=asset_id,
+        source_type="conversation_message", source_id=message_id,
+    ))
+    await session.commit()
+
+
+async def _make_asset(session, *, org_id, project_id, object_path="chat/x/y/z.mp4"):
+    from app.models.asset import Asset
+    asset = Asset(
+        id=uuid.uuid4(), org_id=org_id, project_id=project_id,
+        container="sprintable-memo-attachments", object_path=object_path,
+        name="z.mp4", content_type="video/mp4", size_bytes=3,
+    )
+    session.add(asset)
+    await session.commit()
+    return asset
+
+
+async def test_attachment_authorize_asset_id_403_when_sole_message_link_tombstoned():
+    """핵심 재현 — asset의 유일한 링크가 삭제된 메시지 하나뿐이면 asset_id 분기가 거부해야 한다.
+    #2808은 이 분기(asset_id)를 안 고쳤다 — 이 테스트가 그 갭을 pin한다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id], created_by=caller_id, conv_type="dm")
+            msg = await _add_message(s, conv_id, caller_id, "영상", _t(1))
+            asset = await _make_asset(s, org_id=org.id, project_id=project.id)
+            await _link_asset_to_message(s, org_id=org.id, asset_id=asset.id, message_id=msg.id)
+            msg_id, asset_id = msg.id, asset.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            before = await client.get(f"/api/v2/attachments/authorize?asset_id={asset_id}")
+            assert before.status_code == 200, before.text  # 양성대조 — 삭제 전엔 정상 authorize.
+
+            del_resp = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert del_resp.status_code == 200, del_resp.text
+
+            after = await client.get(f"/api/v2/attachments/authorize?asset_id={asset_id}")
+            assert after.status_code == 403, after.text
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_attachment_authorize_asset_id_200_when_another_message_link_alive():
+    """정책 확인 — 같은 asset이 메시지 둘에 걸려 있고 하나만 삭제되면 여전히 authorize된다
+    (다른 살아있는 문맥의 접근권은 이 정책이 안 건드린다)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id], created_by=caller_id, conv_type="dm")
+            msg_a = await _add_message(s, conv_id, caller_id, "영상 A", _t(1))
+            msg_b = await _add_message(s, conv_id, caller_id, "영상 B(같은 첨부 재사용)", _t(2))
+            asset = await _make_asset(s, org_id=org.id, project_id=project.id)
+            await _link_asset_to_message(s, org_id=org.id, asset_id=asset.id, message_id=msg_a.id)
+            await _link_asset_to_message(s, org_id=org.id, asset_id=asset.id, message_id=msg_b.id)
+            msg_a_id, asset_id = msg_a.id, asset.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            del_resp = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_a_id}")
+            assert del_resp.status_code == 200, del_resp.text
+
+            # msg_a만 지워졌다 — msg_b가 여전히 살아있으므로 authorize는 여전히 200.
+            resp = await client.get(f"/api/v2/attachments/authorize?asset_id={asset_id}")
+            assert resp.status_code == 200, resp.text
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_attachment_authorize_asset_id_200_when_non_message_link_present():
+    """정책 확인 — 메시지 링크가 삭제됐어도 non-message(예: doc) 링크가 하나라도 있으면
+    authorize된다(doc 등 다른 문맥의 접근권은 이 스토리가 안 건드린다는 정책의 직접 증거)."""
+    from app.main import app
+    from app.models.asset import AssetLink
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            conv_id = await _make_conversation(s, org.id, project.id, [caller_id], created_by=caller_id, conv_type="dm")
+            msg = await _add_message(s, conv_id, caller_id, "영상", _t(1))
+            asset = await _make_asset(s, org_id=org.id, project_id=project.id)
+            await _link_asset_to_message(s, org_id=org.id, asset_id=asset.id, message_id=msg.id)
+            # non-message 링크(doc — source_id는 임의 uuid로 충분, 이 분기는 존재 검증을 안 한다).
+            s.add(AssetLink(
+                id=uuid.uuid4(), org_id=org.id, asset_id=asset.id,
+                source_type="doc", source_id=uuid.uuid4(),
+            ))
+            await s.commit()
+            msg_id, asset_id = msg.id, asset.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            del_resp = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
+            assert del_resp.status_code == 200, del_resp.text
+
+            resp = await client.get(f"/api/v2/attachments/authorize?asset_id={asset_id}")
+            assert resp.status_code == 200, resp.text
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_attachment_authorize_asset_id_200_when_no_links_orphan():
+    """정책 확인 — 링크가 0건(orphan asset)이면 이 판 이전과 동일하게 그대로 authorize된다
+    (이 스토리가 새 거부를 만들지 않는다)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            asset = await _make_asset(s, org_id=org.id, project_id=project.id)
+            asset_id = asset.id
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/attachments/authorize?asset_id={asset_id}")
+            assert resp.status_code == 200, resp.text
         finally:
             await client.aclose()
             app.dependency_overrides.clear()

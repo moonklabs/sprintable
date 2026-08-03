@@ -53,6 +53,11 @@ class UpdateStoryInput(SprintableInput):
     description: str | None = None
     acceptance_criteria: str | None = None
     assignee_id: str | None = None
+    # story #2389 — 백엔드 StoryUpdate/repo에 이미 있던 복수 배정 필드가 이 스키마에 없어 조용히
+    # 버려졌다(200 OK·assignee_ids: [] 응답·updated_at 불변). extra="ignore"(SprintableInput)가
+    # 미선언 필드를 검증 단계에서 그냥 삼켜, args에 속성 자체가 안 생겼다 — "읽었는데 무시"가
+    # 아니라 "받을 방법이 없었다".
+    assignee_ids: list[str] | None = None
     epic_id: str | None = None
     # P0-05 후속: 도중 재선언/축소/해제(빈 배열)도 가능 — story.declared_scope_changed 감사 이벤트로 기록.
     declared_scope_paths: list[str] | None = None
@@ -60,6 +65,32 @@ class UpdateStoryInput(SprintableInput):
     # 기존 첨부에 **추가**된다(PATCH attachments 는 서버측 full-replace 라 update_story 가 먼저 기존
     # 첨부를 읽어 병합 — 새 첨부가 기존 걸 지우지 않는다).
     attachments: list[dict] | None = None
+    # story #2389 후속(민군 QA — 전수가 반쪽이었다는 지적) — StoryUpdate엔 이 스키마에 없는 필드가
+    # 여덟 더 있었다. 아래 넷은 「넣어야 한다」로 판단(각자 이유 붙임), 나머지 셋(position·
+    # is_excluded·meeting_id)은 「지금은 안 넣는다」로 판단(아래 update_story() 근처 주석 참조).
+    # human_owner_member_id — assignee 축의 짝(누가 배정됐나 vs 누가 최종 책임자인가, P0-03
+    # trust-pipeline-be-design §5). assignee_id/assignee_ids를 고치면서 이 짝만 빼면 절반짜리
+    # "담당자" 개념이 된다 — 같이 넣는다.
+    human_owner_member_id: str | None = None
+    # E-OUTCOME-LOOP 셋 — StoryUpdate에 goals와 «똑같은» 주석("의도 필드")이 달려 있다. goals
+    # 쪽(update_goal)은 #2389에서 이미 고쳤는데 story만 안 고치면, 같은 이름의 필드가 한쪽
+    # 엔티티에서만 도구로 도달 가능해져 "다른 쪽도 되겠지"라는 오판을 유발한다(비대칭이 대칭보다
+    # 더 헷갈린다). ⚠️다만 goals의 update_goal은 _resolve_outcome_status()로 이 세 필드가 바뀌면
+    # outcome_status를 자동전이시키는데(app/routers/goals.py:112,344), story 쪽 라우터에는 그
+    # 동형 함수 자체가 없다(grep 확認, 0건) — story는 필드가 «저장은 되지만» 어떤 자동전이도
+    # 트리거하지 않는다. "값을 못 보낸다"에서 "값은 보내지는데 아무 일도 안 난다"로 바뀌는
+    # 것이지, story에 goals와 동일한 채점 파이프라인이 생기는 것은 아니다.
+    success_hypothesis: str | None = None
+    metric_definition: dict | None = None
+    measure_after: str | None = None
+    # story #2389 재정정 — 이전 판이 이 필드를 "찾지 못함"으로 남겼는데, 원인은 제 grep이 이
+    # 저장소가 아니라 무관한 stale 체크아웃(다른 로컬 브랜치)을 봤기 때문이었다(제 실수, PO가
+    # 직접 찾아 정정). `allow_shrink`는 데이터 필드가 아니라 «조작 승인 플래그»다(story #2346
+    # AC7) — description/acceptance_criteria 등 긴 텍스트 필드가 50%↑·최소 글자수↑로 급감하면
+    # app/routers/stories.py가 400으로 거부한다(실사고 3건, 전부 -80%대, 이 게이트가 다 막았을
+    # 자리). 이 필드가 없으면 «의도적으로» 줄이려는 정당한 요청도 되돌릴 방법이 없어 도구가
+    # 그 상황에서 막다른 골목이 된다 — 단순 누락이 아니라 실제 워크플로우 차단이었다.
+    allow_shrink: bool | None = None
 
 
 class AssignStoryToSprintInput(SprintableInput):
@@ -139,7 +170,17 @@ async def add_story(args: AddStoryInput) -> list[TextContent]:
 
 
 async def update_story(args: UpdateStoryInput) -> list[TextContent]:
-    """스토리 수정."""
+    """스토리 수정.
+
+    story #2389 후속 — StoryUpdate에 있지만 이 도구에 «의도적으로 안 넣은» 셋:
+      - position: 보드 드래그앤드롭 순서(정수, 이웃 상대적 계산 전제) — 자연어로 지시된 절대
+        정수값을 그대로 넣으면 다른 카드들과의 순서가 어긋나기 쉽다. UI 드래그 전용으로 남긴다.
+      - is_excluded: 코드 주석 자체가 "PO 직접 플래그, 자동 대량 마킹 금지"(E-CAGE-REFEREE P1)
+        라고 명시한 오염 마킹 — 이 코멘트가 이미 "도구로 자동화하지 말라"는 뜻이라 그대로 존중.
+      - meeting_id: 이 스토리를 낳은 회의 링크(출처 성격) — 보통 생성 시점에 붙거나 회의 쪽
+        플로우에서 연결되는 값이라, update_story로 임의 재연결하게 열면 실수로 무관한 회의에
+        스토리가 붙는 사고를 만들 수 있다. 필요해지면 전용 도구로 별도 검토.
+    """
     updates: dict = {}
     if args.title is not None:
         updates["title"] = args.title
@@ -153,6 +194,18 @@ async def update_story(args: UpdateStoryInput) -> list[TextContent]:
         updates["acceptance_criteria"] = args.acceptance_criteria
     if args.assignee_id is not None:
         updates["assignee_id"] = args.assignee_id
+    if args.assignee_ids is not None:
+        updates["assignee_ids"] = args.assignee_ids
+    if args.human_owner_member_id is not None:
+        updates["human_owner_member_id"] = args.human_owner_member_id
+    if args.success_hypothesis is not None:
+        updates["success_hypothesis"] = args.success_hypothesis
+    if args.metric_definition is not None:
+        updates["metric_definition"] = args.metric_definition
+    if args.measure_after is not None:
+        updates["measure_after"] = args.measure_after
+    if args.allow_shrink is not None:
+        updates["allow_shrink"] = args.allow_shrink
     if args.epic_id is not None:
         updates["epic_id"] = args.epic_id
     if args.declared_scope_paths is not None:

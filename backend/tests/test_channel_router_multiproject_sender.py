@@ -57,6 +57,7 @@ async def test_multiproject_agent_sender_dispatches_without_crash():
         _scalar(msg),                       # 1 메시지
         _scalar("agent"),                   # 2 sender_type — .limit(1)로 단일 행(뷰 다중에도 안전)
         _scalars([sender, recipient]),      # 3 participants(발신자 포함)
+        _scalars([]),                       # 3b story #2349: user_blocker_ids 조회(차단 0건)
         _all([(recipient, "agent")]),       # 4 수신자 type 배치
         _scalar(proj),                      # 5 conv project_id
         _scalars([]),                       # 6 preferences

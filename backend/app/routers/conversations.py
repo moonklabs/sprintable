@@ -24,6 +24,7 @@ from app.models.project import OrgMember, Project
 from app.models.team import AgentMessageAllowlist, TeamMember
 from app.models.agent_deployment import AgentAuditLog
 from app.models.webhook_config import WebhookConfig
+from app.models.user_block import UserBlock
 from app.routers.events import _push_to_agent
 from app.schemas.attachment import validate_attachment_url
 from app.services import chat_presence
@@ -395,14 +396,22 @@ def _build_message_summary(content: str | None, sender_name: str | None, has_att
 def _msg_payload(
     msg: ConversationMessage, sender: "ResolvedMember | TeamMember | None",
     *, references: list[dict[str, str]] | None = None,
+    blocked_sender_ids: set[uuid.UUID] | None = None,
 ) -> dict:
-    attachments = msg.attachments if isinstance(msg.attachments, list) else []
+    # story #2319 미완(미르코 dev 라이브 실측 2026-08-02) — tombstone인데 attachments가 응답에
+    # 그대로 남아 첨부(영상 등)가 계속 재생됐다. AC③(오발송 스크럽) 근거가 이걸로 무너진다 —
+    # 여기서 빈 배열로 덮는다(실제 근본은 attachments.py authorize의 belongs 쿼리에 deleted_at
+    # 필터를 추가한 것 — 이 payload 필터는 FE가 애초에 못 보게 하는 2차 방어).
+    attachments = (msg.attachments if isinstance(msg.attachments, list) else []) if msg.deleted_at is None else []
     payload = {
         "id": str(msg.id),
         "conversation_id": str(msg.conversation_id),
         "thread_id": str(msg.thread_id) if msg.thread_id else None,
         "reply_count": msg.reply_count,
         "last_reply_at": msg.last_reply_at.isoformat() if msg.last_reply_at else None,
+        # story #2319 — tombstone. content는 삭제 시 이미 ""로 덮여 있다(스크럽); FE는 이
+        # 필드로 placeholder("삭제된 메시지입니다")를 렌더한다(i18n — 여기 문구를 안 심는다).
+        "deleted_at": msg.deleted_at.isoformat() if msg.deleted_at else None,
         "content": msg.content,
         "mentioned_ids": [str(m) for m in (msg.mentioned_ids or [])],
         # E-FILE S1: 첨부 직렬화 (SSE + GET messages 공통). list 아니면 [](레거시/None/mock 안전).
@@ -426,7 +435,28 @@ def _msg_payload(
     # "이 메시지엔 참조가 없다"를 못 가른다(오늘 아침 유령 칩 사고의 뿌리와 같은 모양).
     if references is not None:
         payload["references"] = references
+    # story #2349 AC3 — 마스킹은 tombstone(#2319)과 다르다: 서버가 안 내주는 게 아니라
+    # «내려주되 클라가 가린다»(펼쳐볼 수 있어야 하는 UX). references와 동형으로 읽기 경로
+    # (list_messages·get_message·list_message_replies)만 이 키를 싣는다 — viewer가 누구인지
+    # 모르는 SSE/write-response 경로는 넘기지 않아 키 자체가 없다(기존 references 규율 재사용).
+    if blocked_sender_ids is not None:
+        payload["is_blocked_sender"] = bool(sender and sender.id in blocked_sender_ids)
     return payload
+
+
+async def _viewer_blocked_sender_ids(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession) -> set[uuid.UUID]:
+    """story #2349 — 읽기 경로 전용. viewer(현재 caller)가 차단한 member_id 집합.
+
+    grant-only 휴먼(team_member 행 없음)은 차단 기능을 아직 못 쓴다(user_blocks.py의 동일
+    경계) — 여기서는 read 경로가 안 깨지게 빈 집합으로 조용히 폴백한다(차단 0건과 동치).
+    """
+    resolved = await _resolve_member(auth, org_id, db)
+    if not isinstance(resolved, TeamMember):
+        return set()
+    rows = (await db.execute(
+        select(UserBlock.blocked_member_id).where(UserBlock.blocker_member_id == resolved.id)
+    )).scalars().all()
+    return set(rows)
 
 
 async def _dispatch_conversation_event(
@@ -1420,9 +1450,13 @@ async def list_messages(
     refs_by_msg = await fetch_stored_references(
         db, org_id=org_id, source_type="chat_message", source_ids=[m.id for m in msgs],
     )
+    blocked_sender_ids = await _viewer_blocked_sender_ids(auth, org_id, db)
 
     data = [
-        _msg_payload(m, member_map.get(m.sender_id), references=refs_by_msg.get(m.id, []))
+        _msg_payload(
+            m, member_map.get(m.sender_id), references=refs_by_msg.get(m.id, []),
+            blocked_sender_ids=blocked_sender_ids,
+        )
         for m in msgs
     ]
 
@@ -1459,7 +1493,68 @@ async def get_message(
     refs_by_msg = await fetch_stored_references(
         db, org_id=org_id, source_type="chat_message", source_ids=[msg.id],
     )
-    return _msg_payload(msg, sender_map.get(msg.sender_id), references=refs_by_msg.get(msg.id, []))
+    blocked_sender_ids = await _viewer_blocked_sender_ids(auth, org_id, db)
+    return _msg_payload(
+        msg, sender_map.get(msg.sender_id), references=refs_by_msg.get(msg.id, []),
+        blocked_sender_ids=blocked_sender_ids,
+    )
+
+
+@router.delete("/{conversation_id}/messages/{message_id}", status_code=200)
+async def delete_message(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """DELETE /api/v2/conversations/{id}/messages/{message_id} — story #2319.
+
+    PO 결정(2026-07-29 04:41Z): tombstone, hard delete 아님. 행은 남고 content만 실제로
+    지운다(ConversationMessage.deleted_at — SoftDeleteMixin, 모델 docstring 참조: Doc/Story와
+    달리 목록에서 안 걸러낸다).
+
+    ⛔카디르 QA(2026-08-02, PR #2806 CI): 최초 구현은 인가를 이 함수 안에서 손으로
+    짰다(`_resolve_member` + sender_id 대조) — 지금 당장 「제3자가 남의 메시지를 못 지우는가」
+    답이 예여도, 이 저장소가 이 정확한 도메인(메시지 인가)에서 과거에 실제 결함(story #1994
+    B1, 산티아고 sabotage-probe)을 겪고 세운 canonical 경로(`_authorize_message_read`)를
+    우회했다는 사실 자체가 문제다 — "지금 안전한가"와 "세운 규율을 지켰는가"는 다른 질문이고,
+    이걸 그냥 두면 다음 사람이 또 우회한다. read-canonical을 재사용하고 그 위에 sender
+    소유권만 얹는다("읽을 수 있는 사람 중 자기 것만"이 삭제 인가의 자연스러운 형태) — 삭제가
+    읽기보다 더 좁아야 할 이유가 없다(삭제 대상은 이미 sender_id로 추가 제한된다).
+
+    ⭐부수효과(카디르가 짚은 미답 질문 해소): participant에서 제거된 뒤에는 예전에 보낸
+    메시지도 못 지운다 — `_authorize_message_read`가 먼저 403을 raise한다(read-gate와
+    동일 fail-closed). 의도적 결정이다: 못 읽는 대화의 메시지를 지울 수 있으면 그게 더
+    이상하다.
+    """
+    conv_project_id = await _authorize_message_read(conversation_id, db, auth, org_id)
+    member = await _resolve_member(auth, org_id, db, project_id=conv_project_id)
+
+    msg = (await db.execute(
+        select(ConversationMessage).where(
+            ConversationMessage.id == message_id,
+            ConversationMessage.conversation_id == conversation_id,
+        )
+    )).scalar_one_or_none()
+    if msg is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if msg.sender_id != member.id:
+        raise HTTPException(status_code=403, detail="Not the message owner")
+
+    # ⛔AC7 블라인드스팟(의도적 범위 밖, 선언) — 이 삭제는 다른 참가자의 이미 열려 있는 화면에
+    # 실시간(SSE) 반영되지 않는다. send_message의 실시간 fan-out(_dispatch_conversation_event)은
+    # Event insert·recipient_seq·webhook-dedup까지 얽힌 별도 배선이라, 이 스토리 하나로 같이
+    # 만들면 그 정합성까지 새로 떠안는다 — 여기서는 안 한다. 새로고침/재조회 시에는 정확히
+    # 반영된다(AC5 ①의 실측 기준). 실시간 전파가 필요해지면 별도 스토리로 뗀다.
+    if msg.deleted_at is None:
+        msg.deleted_at = datetime.now(timezone.utc)
+        msg.content = ""  # ③ 오발송 스크럽 — 플레이스홀더 문구는 FE가 deleted_at 보고 렌더(i18n).
+        await db.flush()
+        await db.commit()
+
+    return {"id": str(msg.id), "deleted_at": msg.deleted_at.isoformat() if msg.deleted_at else None}
 
 
 @router.get("/{conversation_id}/messages/{message_id}/replies")
@@ -1506,9 +1601,13 @@ async def list_message_replies(
     refs_by_msg = await fetch_stored_references(
         db, org_id=org_id, source_type="chat_message", source_ids=[m.id for m in msgs],
     )
+    blocked_sender_ids = await _viewer_blocked_sender_ids(auth, org_id, db)
 
     data = [
-        _msg_payload(m, member_map.get(m.sender_id), references=refs_by_msg.get(m.id, []))
+        _msg_payload(
+            m, member_map.get(m.sender_id), references=refs_by_msg.get(m.id, []),
+            blocked_sender_ids=blocked_sender_ids,
+        )
         for m in msgs
     ]
 
@@ -1940,6 +2039,21 @@ async def send_message(
     # 비-command 면 빈 결과 → 무영향. 차단 대상은 dispatch exclude 로 합쳐 주입 0.
     blocked_agent_ids, command_hints = await _command_capability_gate(db, conv, msg, sender, org_id)
 
+    # story #2349 AC3 — 「이 발신자를 차단한 수신자」는 대화 메시지 SSE/멘션/알림에서 감산한다.
+    # PO 경계(2026-08-02): 이건 conversations.py::send_message(대화)만이다 — 스토리 멘션(업무)은
+    # 별도 경로라 안 건드린다. blocked_agent_ids(위, capability gate)와는 개념이 달라 이름을
+    # 안 겹친다(이름이 겹쳐 합칠 뻔한 논의가 있었다 — 결론: 못 합침, PO 판정 참조).
+    # 이 조회 하나가 실패했다고 메시지 전송 자체가 막히면 안 된다 — 아래 채널라우터 pre-check·
+    # 웹훅 타겟·멘션/알림 dispatch가 전부 같은 철학(best-effort, try/except+warning)이라 이
+    # 조회도 그 옆에 맞춘다(실패 시 fail-open=차단 미반영, 메시지 전송은 계속).
+    user_blocker_ids: set[uuid.UUID] = set()
+    try:
+        user_blocker_ids = set((await db.execute(
+            select(UserBlock.blocker_member_id).where(UserBlock.blocked_member_id == sender.id)
+        )).scalars().all())
+    except Exception:
+        logger.warning("user_blocker_ids lookup failed message_id=%s — fail-open(no exclusion)", msg.id, exc_info=True)
+
     # E-EVENT-1CONFIG: webhook 전달 대상을 요청 트랜잭션서 1회 산출(SSOT) — SSE-skip 결정과 실제
     # webhook delivery 가 **같은 snapshot/결정**을 쓰게 해 TOCTOU silent loss 를 차단한다(산티아고
     # Finding 1). 산출된 target 을 그대로 delivery task 로 넘기고(post-commit requery 0), 그로부터
@@ -1955,6 +2069,7 @@ async def send_message(
                 project_id=conv.project_id,
                 sender_id=sender.id,
                 mentioned_ids=list(msg.mentioned_ids) if msg.mentioned_ids else None,
+                blocker_member_ids=user_blocker_ids,
             )
         except Exception:
             logger.warning(
@@ -1968,7 +2083,7 @@ async def send_message(
         async with db.begin_nested():
             pending_sse_pushes += await _dispatch_conversation_event(
                 db, conv, msg, org_id, sender,
-                exclude_ids=discord_exclude_ids | blocked_agent_ids,
+                exclude_ids=discord_exclude_ids | blocked_agent_ids | user_blocker_ids,
                 webhook_covered_ids=webhook_covered_ids,
             )
     except Exception as _dispatch_err:
@@ -1985,7 +2100,7 @@ async def send_message(
     # 기능·버그 아님). 즉 "진짜 비참가자에게 message_created 없이 mention만 감"이 실제로
     # 일어나는 건 group conversation에서 기존 비참가자를 멘션하는 경우뿐이다.
     if msg.mentioned_ids:
-        mention_targets = set(msg.mentioned_ids) - {sender.id} - discord_exclude_ids - blocked_agent_ids
+        mention_targets = set(msg.mentioned_ids) - {sender.id} - discord_exclude_ids - blocked_agent_ids - user_blocker_ids
         if mention_targets:
             try:
                 async with db.begin_nested():
@@ -2036,7 +2151,7 @@ async def send_message(
         )).all()
         candidate_targets = (
             {r[0] for r in participant_rows}
-            - {sender.id} - discord_exclude_ids - blocked_agent_ids - set(msg.mentioned_ids or [])
+            - {sender.id} - discord_exclude_ids - blocked_agent_ids - user_blocker_ids - set(msg.mentioned_ids or [])
         )
         if candidate_targets:
             human_message_rows = (await db.execute(
@@ -2123,6 +2238,12 @@ async def send_message(
             # ws-chat 전용 conv 호환 — created_by 포함 (participant 테이블에 없는 경우 대비)
             if conv.created_by:
                 agent_ids.add(str(conv.created_by))
+
+            # story #2349 AC3 — 카디르 QA 재발견(2026-08-03): 이 WS 브로드캐스트가 msg.content
+            # 원문을 필터 없이 agent 참가자 room 전원에게 보내고 있었다 — user_blocker_ids
+            # (위 L2049~2053, send_message 요청 트랜잭션서 이미 계산된 값) 미적용. #2814/#2817과
+            # 같은 결로 여기서도 뺀다(새 쿼리 없음, caller의 값 재사용).
+            agent_ids -= {str(bid) for bid in user_blocker_ids}
 
             if agent_ids:
                 ws_payload = json.dumps({

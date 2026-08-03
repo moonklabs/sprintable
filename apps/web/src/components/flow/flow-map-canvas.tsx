@@ -82,6 +82,10 @@ interface FlowMapCanvasProps {
    * undeclare_story_reference_candidate 문서 참고). fromNodeId/toNodeId 아무 쪽이나
    * 유효한 story id면 되므로 호출부가 그중 하나를 골라 넘긴다. */
   onDeleteLink: (candidateId: string, anchorStoryId: string) => Promise<DeleteLinkResult>;
+  /** story #2357 — 아직 확認 전(제안, confirmed:false)인 간선을 기각한다. `onDeleteLink`와
+   * 다른 엔드포인트(reject) — BE가 estimated 행에는 DELETE를 400으로 거절하므로(undeclare는
+   * declared 전용) 확認 여부로 두 액션을 가른다(아래 다이얼로그 분기 참고). */
+  onRejectLink: (candidateId: string, anchorStoryId: string) => Promise<RejectLinkResult>;
   /** story #2353 되돌리기 다이얼로그의 「{이름}이 만든 연결입니다」 이름 조회용(유나 가디언
    * 리뷰 v1.1 정정, ㉣ — declaredBy가 나 아니면 실명, 못 찾으면 중립으로 떨어진다. 새 fetch
    * 아님 — goal-stem-card.tsx가 이미 들고 있는 memberMap을 그대로 흘려보낸다). */
@@ -102,6 +106,7 @@ interface FlowMapCanvasProps {
 
 export type CreateLinkResult = { ok: true } | { ok: false; error: string };
 export type DeleteLinkResult = { ok: true } | { ok: false; error: string };
+export type RejectLinkResult = { ok: true } | { ok: false; error: string };
 
 function nodeToneClass(node: FlowMapNode): string {
   if (node.kind === 'now') return 'border-l-info';
@@ -280,7 +285,7 @@ export function FlowCanvasOffscreenHint({ count }: { count: number }) {
  * 레인이 오면 레인별 ref map으로 넓혀야 한다 — 아래 laneContainerRef 참고).
  */
 export function FlowMapCanvas({
-  lanes, onSelectStory, onTogglePastBundle, loadingPastBundleEpicIds, selectedNodeId = null, onCreateLink, onDeleteLink, memberMap,
+  lanes, onSelectStory, onTogglePastBundle, loadingPastBundleEpicIds, selectedNodeId = null, onCreateLink, onDeleteLink, onRejectLink, memberMap,
   onOffscreenCountChange,
 }: FlowMapCanvasProps) {
   const t = useTranslations('flow');
@@ -390,9 +395,14 @@ export function FlowMapCanvas({
 
   const [linkDraft, setLinkDraft] = useState<LinkDraft>({ phase: 'idle' });
   const [justLinkedNodeId, setJustLinkedNodeId] = useState<string | null>(null);
-  const [undoTarget, setUndoTarget] = useState<{ candidateId: string; fromNodeId: string; toNodeId: string; declaredBy: string | null; declaredAt: string | null } | null>(null);
+  // story #2357 — confirmed로 다이얼로그가 갈린다: true(사람이 만든 선)면 기존 지우기,
+  // false(아직 제안인 기계 후보)면 기각(reject) — BE가 estimated 행의 DELETE를 400으로
+  // 거절하므로 이 값 없이는 "지우기"를 눌러도 항상 실패한다(오늘까지 실제로 그랬던 자리).
+  const [undoTarget, setUndoTarget] = useState<{ candidateId: string; fromNodeId: string; toNodeId: string; declaredBy: string | null; declaredAt: string | null; confirmed: boolean } | null>(null);
   const [undoDeleteError, setUndoDeleteError] = useState<string | null>(null);
   const [undoDeleting, setUndoDeleting] = useState(false);
+  const [rejectError, setRejectError] = useState<string | null>(null);
+  const [rejecting, setRejecting] = useState(false);
 
   const resetLinkDraft = useCallback(() => setLinkDraft({ phase: 'idle' }), []);
 
@@ -529,6 +539,23 @@ export function FlowMapCanvas({
     });
   }, [undoTarget, onDeleteLink]);
 
+  // story #2357 — handleUndoDelete와 같은 형태, 다른 엔드포인트(reject). undoTarget.confirmed
+  // 가 false일 때만 다이얼로그가 이 경로를 부른다(아래 JSX 분기).
+  const handleRejectConfirm = useCallback(() => {
+    if (!undoTarget) return;
+    setRejecting(true);
+    setRejectError(null);
+    const anchorStoryId = undoTarget.fromNodeId === PAST_BUNDLE_NODE_ID ? undoTarget.toNodeId : undoTarget.fromNodeId;
+    void onRejectLink(undoTarget.candidateId, anchorStoryId).then((result) => {
+      setRejecting(false);
+      if (result.ok) {
+        setUndoTarget(null);
+      } else {
+        setRejectError(result.error);
+      }
+    });
+  }, [undoTarget, onRejectLink]);
+
   // AC3 — 잇기가 진행 중일 때만 소스/호버/무효 판정을 계산한다(그 외엔 전부 무해한 idle 값).
   const linkSourceIdForDimming = linkDraft.phase === 'linking' ? linkDraft.sourceId : null;
   const linkHoverTargetId = linkDraft.phase === 'linking' ? linkDraft.hoverTargetId : null;
@@ -652,6 +679,7 @@ export function FlowMapCanvas({
                                   onClick={() => setUndoTarget({
                                     candidateId: group.candidateId!, fromNodeId: group.fromNodeId, toNodeId: group.toNodeId,
                                     declaredBy: group.declaredBy ?? null, declaredAt: group.declaredAt ?? null,
+                                    confirmed: group.allConfirmed,
                                   })}
                                 />
                               ) : null}
@@ -670,6 +698,7 @@ export function FlowMapCanvas({
                                 onClick={isUndoable ? () => setUndoTarget({
                                   candidateId: group.candidateId!, fromNodeId: group.fromNodeId, toNodeId: group.toNodeId,
                                   declaredBy: group.declaredBy ?? null, declaredAt: group.declaredAt ?? null,
+                                  confirmed: group.allConfirmed,
                                 }) : undefined}
                               />
                               {group.count > 1 ? (
@@ -973,8 +1002,30 @@ export function FlowMapCanvas({
       ) : null}
 
       {/* story #2353(AC7·AC8) — 되돌리기는 «그 선 자체가 진입점»이다(토스트 금지, ㉣). 「누가
-          언제 만들었는가」는 지워지지 않는 속성이라 여기 그대로 보인다. */}
-      {undoTarget ? (() => {
+          언제 만들었는가」는 지워지지 않는 속성이라 여기 그대로 보인다.
+          story #2357 — confirmed:false(아직 기계 제안)면 다른 다이얼로그(기각)를 보인다.
+          BE가 estimated 행의 DELETE를 400으로 거절하므로, 여기서 안 가르면 "지우기"를 눌러도
+          제안 간선에서는 항상 실패했다. */}
+      {undoTarget && !undoTarget.confirmed ? (
+        <Dialog open onOpenChange={(open) => { if (!open) { setUndoTarget(null); setRejectError(null); } }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t('portRejectTitle')}</DialogTitle>
+              <DialogDescription>{t('portRejectDescription')}</DialogDescription>
+            </DialogHeader>
+            {rejectError ? <p role="alert" className="text-[11px] text-destructive">{rejectError}</p> : null}
+            <DialogFooter>
+              <Button type="button" variant="ghost" disabled={rejecting} onClick={() => setUndoTarget(null)}>
+                {t('portUndoKeep')}
+              </Button>
+              <Button type="button" variant="outline" disabled={rejecting} onClick={handleRejectConfirm}>
+                {t('portRejectConfirm')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+      {undoTarget && undoTarget.confirmed ? (() => {
         const titleResolution = resolveUndoTitle(undoTarget.declaredBy, currentTeamMemberId, memberMap);
         return (
         <Dialog open onOpenChange={(open) => { if (!open) { setUndoTarget(null); setUndoDeleteError(null); } }}>

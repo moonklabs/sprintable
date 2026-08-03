@@ -14,7 +14,7 @@ import os
 import uuid
 
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -160,12 +160,14 @@ async def test_update_cross_project_forbidden_same_project_ok():
             with pytest.raises(HTTPException) as ei:
                 await update_doc(
                     id=docs["b_upd"], body=DocUpdate(title="hacked"),
+                    background_tasks=BackgroundTasks(),
                     repo=DocRepository(s, ORG), session=s, auth=_auth(),
                 )
             assert ei.value.status_code == 403
         async with Session() as s:
             out = await update_doc(
                 id=docs["a_upd"], body=DocUpdate(title="ok-edit"),
+                background_tasks=BackgroundTasks(),
                 repo=DocRepository(s, ORG), session=s, auth=_auth(),
             )
             assert out.title == "ok-edit"

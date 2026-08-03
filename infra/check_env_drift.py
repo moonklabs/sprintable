@@ -569,6 +569,26 @@ def _today():
     return datetime.now(timezone.utc).date()
 
 
+def _write_state_file(fail_lines: list[str], *, only_env: str | None) -> None:
+    """story #2422 — `ENV_DRIFT_STATE_FILE` 환경변수가 설정돼 있으면(설계상 CI에서만 —
+    로컬 수동 실행은 이 변수를 안 주므로 파일을 안 남긴다) 이번 실행의 FAIL 집합을 정렬된
+    JSON 목록으로 적는다. 값 자체는 여기 안 실린다 — 이미 위 finding 문자열들이 «키 이름만»
+    (①②③⑤ 전부 이 파일 상단 docstring이 보장하는 계약) 담고 있으므로 그대로 옮겨 적어도
+    안전하다. FAIL이 0건이어도(빈 리스트) 반드시 쓴다 — "어제는 빨강, 오늘은 초록"이라는
+    해소 전이도 다음 실행이 알아야 하기 때문이다(파일 부재와 '빈 목록'을 구분 못 하면
+    캐시 미스와 '실제로 깨끗함'을 못 가른다)."""
+    import json
+    import os as _os
+
+    path = _os.environ.get("ENV_DRIFT_STATE_FILE")
+    if not path:
+        return
+    payload = {"env": only_env, "fail_lines": sorted(set(fail_lines))}
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2, sort_keys=True)
+        f.write("\n")
+
+
 def main(only_env: str | None = None) -> int:
     """story #2224 후속(오르테가 판정, 2026-07-31) — `only_env`("dev"|"prod"|None). 배경:
     이 가드는 스케줄 워크플로우가 checkout한 «한 브랜치»(GHA 스케줄 트리거는 default
@@ -704,6 +724,18 @@ def main(only_env: str | None = None) -> int:
         or service_subset_violations
     )
     has_report_only = bool(settings_coverage_report or code_read_report)
+
+    # story #2422 — 나흘째 FAIL이었는데 아무도 못 알아챈 원인: 매일 같은 모양의 알림이
+    # "어제와 같은 실패"인지 "새 실패"인지 말해 주지 않았다(빨강이 배경음이 되는 병 —
+    # 초록이 알리바이가 되는 것의 반대편). 이 FAIL 집합(has_fail을 만드는 바로 그 목록들)의
+    # 안정적인 지문을 남겨 워크플로우가 어제 지문과 대조할 수 있게 한다 — report-only
+    # 항목은 지문에 안 넣는다(FAIL 판정과 무관한 축이 바뀌었다고 "새 실패"로 오판하면 안 됨).
+    _write_state_file(
+        key_set_failures + value_check_failures + secret_shape_failures
+        + code_read_highest_failures + code_read_baseline_escalations
+        + service_subset_violations,
+        only_env=only_env,
+    )
 
     # ⭐파울로군 지시 ③ — baseline 수를 «매번» 찍는다(FAIL이든 성공이든 무관). baseline을
     # 묻어두는 곳으로 쓰지 않으려면 그 크기가 줄어드는지 매 실행 눈에 보여야 한다.

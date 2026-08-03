@@ -33,6 +33,7 @@ import { setFirebaseSessionCookie, SP_FS_COOKIE } from '@/lib/auth/firebase-sess
 import { safeNextPath } from '@/lib/auth/session-redirect';
 import { cookieBase } from '@/lib/auth/cookies';
 import { SP_AT_COOKIE, SP_RT_COOKIE, resolveFirebaseServerSession } from '@/lib/db/server';
+import { resolveAppUrl } from '@/services/app-url';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -158,7 +159,9 @@ export async function POST(request: Request) {
   // doc §9.1 6단계: 303 + 원래 딥링크 경로(허용목록 검증) + no-store + Referrer-Policy: no-referrer
   // (code가 이 응답 이전 요청의 body에만 있었으므로 여기선 이미 무관 — 그래도 방어적으로 설정).
   const target = safeNextPath(redirectPathInput);
-  const res = NextResponse.redirect(new URL(target, request.url), 303);
+  // story #1933 — request.url을 base로 쓰면 Cloud Run 내부 주소가 샌다(플랫폼 성질,
+  // 이 라우트만의 우연 아님). resolveAppUrl(null)로 공개 주소를 강제한다(oauth-handoff와 동일 패턴).
+  const res = NextResponse.redirect(new URL(target, resolveAppUrl(null)), 303);
   res.headers.set('Cache-Control', 'no-store');
   res.headers.set('Referrer-Policy', 'no-referrer');
   setFirebaseSessionCookie(res, consumeJson.session_cookie);

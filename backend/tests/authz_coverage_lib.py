@@ -52,6 +52,12 @@ PROJECT_PARAM_RE = re.compile(
 
 PROJECT_GUARD_FUNCTIONS: frozenset[str] = frozenset({
     "has_project_access",
+    # story #2340 실측(2026-08-02, 디디) — 이름·실동작 둘 다 project-scope 가드(project_id를
+    # 받아 그 project의 role을 검사)인데 이 목록에서만 누락돼 있었다(GUARD_FUNCTIONS(identity
+    # 축)엔 있었다 — 두 목록이 서로 다른 걸 보는 것 자체는 설계지만, 이 함수는 어느 쪽에도
+    # 실수로 안 빠져야 했다). project_settings.py:upsert_project_settings가 이걸 직접 호출하는데도
+    # allowlist에 올라 있던 원인이 이것 — 그 allowlist 엔트리는 이 추가와 함께 제거한다.
+    "has_project_role",
     "resolve_member",
     "accessible_project_ids_in_org",
     "get_project_role",
@@ -199,6 +205,49 @@ def _called_names(endpoint) -> set[str]:
     return names
 
 
+def _body_helper_calls_guard(endpoint, guard_set: frozenset[str]) -> bool:
+    """엔드포인트 **바디에서 직접 호출한** 로컬 헬퍼 함수의 바디를 1단만 들여다봐 guard_set
+    호출 여부 판정(#2340 AC2: hop=1로 고정 — 재귀 없음. `_called_names`의 v1 제약을 정확히
+    이 범위까지만 넓힌다).
+
+    hop=1로 고정하는 근거(실측, 2026-08-02): project-scope axis allowlist 40건 중 27건이
+    정확히 이 패턴(헬퍼 함수 1단 아래서 실 가드 호출)이었고, 그 27건이 쓰는 헬퍼 7종
+    (`_scope_filter`·`enforce_body_context`·`_require_draft_author`·`_require_owner_or_admin`·
+    `_resolve_member_id`·`_resolve_member`·`_assert_project_access`) 전부 실 가드 호출까지
+    정확히 1단이었다(2단 이상으로 내려가는 사례 0건) — 무한 재귀 대신 1단으로 고정해도 현재
+    allowlist의 wrapper-패턴 실례를 전량 커버한다. `_depends_bodies_call_guard`(Depends 콜러블
+    1단)와 동일 철학 — 그 이상은 findings 리뷰에서 수동 확認(재귀 콜그래프 분석의 자체
+    실패모드가 더 위험하다는 기존 판단 유지)."""
+    try:
+        src = textwrap.dedent(inspect.getsource(endpoint))
+        tree = ast.parse(src)
+    except (OSError, TypeError, SyntaxError):
+        return False
+    module = inspect.getmodule(endpoint)
+    if module is None:
+        return False
+    called: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            called.add(node.func.id)
+    for name in called - guard_set:
+        candidate = getattr(module, name, None)
+        if candidate is None:
+            continue
+        try:
+            helper_src = textwrap.dedent(inspect.getsource(candidate))
+            helper_tree = ast.parse(helper_src)
+        except (OSError, TypeError, SyntaxError):
+            continue
+        for hnode in ast.walk(helper_tree):
+            if isinstance(hnode, ast.Call):
+                hf = hnode.func
+                hname = hf.id if isinstance(hf, ast.Name) else (hf.attr if isinstance(hf, ast.Attribute) else "")
+                if hname in guard_set:
+                    return True
+    return False
+
+
 def _depends_callable_names(endpoint) -> set[str]:
     """시그니처의 ``Depends(...)`` 콜러블 이름 — 자가파생 의존성(SELF_DERIVING_DEPENDENCIES) 인식용.
 
@@ -255,8 +304,13 @@ def enumerate_identity_routes(app, methods: frozenset[str] = COVERED_METHODS) ->
 
 
 def has_guard(target: RouteTarget, guard_functions: frozenset[str] = GUARD_FUNCTIONS) -> bool:
-    """이름 registry 매치(바디 호출) 또는 self-deriving Depends 매치 — 둘 중 하나면 가드 有."""
+    """이름 registry 매치(바디 직접호출) · 1-hop 바디 헬퍼 · 1-hop Depends 바디 · self-deriving
+    Depends 매치 — 넷 중 하나면 가드 有(#2340 AC2: 1-hop 인식 추가. 재귀 없음)."""
     if _called_names(target.endpoint) & guard_functions:
+        return True
+    if _body_helper_calls_guard(target.endpoint, guard_functions):
+        return True
+    if _depends_bodies_call_guard(target.endpoint, guard_functions):
         return True
     if _depends_callable_names(target.endpoint) & SELF_DERIVING_DEPENDENCIES:
         return True

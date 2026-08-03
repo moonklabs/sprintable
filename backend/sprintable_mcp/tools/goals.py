@@ -51,6 +51,14 @@ class UpdateGoalInput(SprintableInput):
     success_criteria: str | None = None
     target_sp: int | None = None
     target_date: str | None = None
+    # story #2389 — 아래 넷은 백엔드 GoalUpdate에 이미 있고 라우터가 실제로 적용하는데(app/
+    # routers/goals.py) 이 스키마에 없어 조용히 버려지고 있었다(extra="ignore"가 검증 단계에서
+    # 삼켜, args에 속성 자체가 안 생김). measure_after는 특히 outcome_status 자동전이를 트리거
+    # 하는 값이라(goals.py) 빠뜨리면 값만이 아니라 그 전이도 조용히 스킵된다.
+    assignee_id: str | None = None
+    success_hypothesis: str | None = None
+    metric_definition: dict | None = None
+    measure_after: str | None = None
 
 
 async def list_goals(args: ListGoalsInput) -> list[TextContent]:
@@ -87,7 +95,10 @@ async def update_goal(args: UpdateGoalInput) -> list[TextContent]:
         updates["status"] = args.status.value
     if args.priority is not None:
         updates["priority"] = args.priority.value
-    for field in ("description", "objective", "success_criteria", "target_date"):
+    for field in (
+        "description", "objective", "success_criteria", "target_date",
+        "assignee_id", "success_hypothesis", "metric_definition", "measure_after",
+    ):
         val = getattr(args, field)
         if val is not None:
             updates[field] = val

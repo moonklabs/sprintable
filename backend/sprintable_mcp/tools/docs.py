@@ -47,6 +47,14 @@ class UpdateDocInput(SprintableInput):
     parent_id: str | None = None
     expected_updated_at: str | None = None
     force_overwrite: bool | None = None
+    # story #2389 — 아래 넷은 백엔드 DocUpdate에 이미 있고 라우터가 실제로 적용하는데(app/
+    # routers/docs.py) 이 스키마에 없어 조용히 버려지고 있었다(extra="ignore"가 검증 단계에서
+    # 삼켜, args에 속성 자체가 안 생김 — read-but-ignored가 아니라 애초에 못 받음).
+    slug: str | None = None
+    slug_locked: bool | None = None
+    sort_order: int | None = None
+    doc_type: str | None = None
+    assignee_id: str | None = None
     # [{content_base64, name, content_type}, ...] — 스샷/작은 문서(최대 5개·파일당 2MiB·총 6MiB).
     # 업로드 後 완성된 embed HTML(TipTap file-node/image-node 계약과 정확히 일치 — 에이전트가 마크업을
     # 몰라도 됨)을 content 끝에 append. 이 호출에 content 를 안 실었으면 현재 저장된 content 를 먼저
@@ -151,7 +159,10 @@ async def create_doc(args: CreateDocInput) -> list[TextContent]:
 async def update_doc(args: UpdateDocInput) -> list[TextContent]:
     """문서 수정."""
     updates: dict = {}
-    for field in ("title", "content", "content_format", "icon", "parent_id", "expected_updated_at"):
+    for field in (
+        "title", "content", "content_format", "icon", "parent_id", "expected_updated_at",
+        "slug", "slug_locked", "sort_order", "doc_type", "assignee_id",
+    ):
         val = getattr(args, field)
         if val is not None:
             updates[field] = val

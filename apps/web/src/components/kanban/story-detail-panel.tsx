@@ -30,6 +30,7 @@ import { initials } from '@/lib/storage/format';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
+import { RejectedRelationsSection } from '@/components/shared/rejected-relations-section';
 import { StoryOriginSection } from '@/components/shared/story-origin-section';
 import { EntityAwareTextarea } from '@/components/shared/entity-aware-textarea';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
@@ -1347,6 +1348,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
             {/* story #2299(E-CONNECT): 이것을 가리키는 것들 — doc/chat_message 참조 목록 첫 자리
                 (doc [slug]/view는 후속 판). */}
             <EntityBacklinksSection entityType="story" entityId={story.id} />
+
+            {/* story #2357 — 이 스토리가 기각한 관계 목록 + 되살리기(doc `flow-port-slot-spec`
+                ㉣, "되살리기 UI용" BE가 이미 있었는데 FE 소비처가 0건이었다). 빈 목록이면
+                아무것도 안 그린다(AC4). */}
+            <RejectedRelationsSection storyId={story.id} />
 
             {story.story_points != null ? (
               <div>

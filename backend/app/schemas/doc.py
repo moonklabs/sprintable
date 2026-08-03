@@ -37,6 +37,9 @@ class DocUpdate(BaseModel):
     # force_overwrite=True 면 검사 우회(last-write-wins 의도적). ⚠️ 이 2필드는 strip 금지(BE 수용).
     expected_updated_at: datetime | None = None
     force_overwrite: bool | None = None
+    # story #2346 AC7 — stories.py와 동형(50% 이상 급감+절대손실 100자 이상이면 기본 거부).
+    # 정당한 대규모 축약(예: 낡은 섹션 통째로 제거)은 이 플래그로 명시 승인한다.
+    allow_shrink: bool = False
 
 
 class DocSummaryResponse(BaseModel):

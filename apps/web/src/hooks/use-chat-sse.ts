@@ -23,6 +23,10 @@ export interface ChatMessage {
   sender_name: string;    // backend: sender.name
   sender_type: string;    // backend: sender.type ('human' | 'agent')
   content: string;
+  /** story #2319 — set이면 tombstone됨(행은 남고 content는 서버가 이미 ""로 스크럽했다).
+   * ChatBubble이 이 필드로 placeholder를 렌더한다(#2299 still_exists와 같은 축 — 「끊어짐」은
+   * 사실 필드, 렌더는 FE 몫). */
+  deleted_at?: string | null;
   review_type?: string;
   attachments: Array<{ url?: string; name?: string; content_type?: string; filename?: string }>;
   created_at: string;
@@ -36,6 +40,11 @@ export interface ChatMessage {
    * 실제로 0건을 확認)를 구분한다 — 전자는 "판단 재료 없음"이라 유령 판정을 보류(폴백,
    * 기존처럼 그대로 그린다)하고, 후자는 본문 토큰과 대조해 유령을 가른다. */
   references?: Array<{ target_type: string; target_id: string }>;
+  /** story #2349 — 「내가 이 메시지의 보낸이를 차단했는가」(주어=나). references와 같은 축:
+   * 서버가 내려주되(tombstone처럼 안 내려주는 게 아니다) 가리는 건 클라 몫이다. `undefined`는
+   * "판단 재료 없음"(이 필드를 안 주는 경로)이라 마스킹을 보류한다 — false로 기본값을 주면
+   * "차단 여부 모름"이 "차단 안 함"으로 뭉개진다. */
+  is_blocked_sender?: boolean;
 }
 
 // Normalize backend _to_chat_message format → ChatMessage
@@ -49,6 +58,7 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     sender_name: (sender?.name ?? '') as string,
     sender_type: (sender?.type ?? 'human') as string,
     content: (raw.content ?? '') as string,
+    deleted_at: (raw.deleted_at ?? null) as string | null,
     attachments: (raw.attachments ?? []) as ChatMessage['attachments'],
     created_at: (raw.created_at ?? '') as string,
     // P1 RC: backend sends thread_id as parent pointer; raw.parent_id may be absent
@@ -59,6 +69,8 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     // ?? []`처럼 기본값을 주면 "옛 서버라 필드가 없다"가 "참조 0건 확認됨"으로 뭉개져 유령
     // 판정이 항상 켜지는 회귀가 난다(오늘 아침 유령 칩 사고와 같은 모양).
     references: Array.isArray(raw.references) ? raw.references as ChatMessage['references'] : undefined,
+    // story #2349 — references와 동일 규율: 키 부재(undefined)와 false를 구분한다.
+    is_blocked_sender: typeof raw.is_blocked_sender === 'boolean' ? raw.is_blocked_sender : undefined,
   };
 }
 

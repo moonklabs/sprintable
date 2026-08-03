@@ -8,7 +8,7 @@ import {
   deriveFlowMapLane, parseDependencyGraphEdges, parseReferenceCandidateEdges,
   type FlowMapEdge, type RawDependencyEdge, type RawReferenceCandidate,
 } from './derive-flow-map';
-import { FlowMapCanvas, FlowCanvasOffscreenHint, HEADER_HEIGHT, NODE_ROW_HEIGHT, LANE_MIN_HEIGHT, type CreateLinkResult, type DeleteLinkResult } from './flow-map-canvas';
+import { FlowMapCanvas, FlowCanvasOffscreenHint, HEADER_HEIGHT, NODE_ROW_HEIGHT, LANE_MIN_HEIGHT, type CreateLinkResult, type DeleteLinkResult, type RejectLinkResult } from './flow-map-canvas';
 import { FlowCanvasResizePane } from './flow-canvas-resize-pane';
 import { declareResponseToEdge } from './flow-port-linking';
 import type { NextMakerGoal } from './derive-next-maker';
@@ -247,6 +247,32 @@ export function FlowMultiLaneCanvas({
     }
   }, [t]);
 
+  // story #2357 — handleDeleteLink와 같은 형태·같은 ingredientsByEpic 갱신 패턴, 다른
+  // 엔드포인트(reject).
+  const handleRejectLink = useCallback(async (candidateId: string, anchorStoryId: string): Promise<RejectLinkResult> => {
+    try {
+      const res = await fetch(`/api/stories/${anchorStoryId}/reference-candidates/${candidateId}/reject`, { method: 'POST' });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        return { ok: false, error: typeof json?.detail === 'string' ? json.detail : t('portRejectErrorFallback') };
+      }
+      setState((prev) => {
+        if (prev.kind !== 'ready') return prev;
+        const nextIngredients = new Map(prev.ingredientsByEpic);
+        for (const [epicId, ing] of nextIngredients) {
+          if (ing.edges.some((e) => e.candidateId === candidateId)) {
+            nextIngredients.set(epicId, { ...ing, edges: ing.edges.filter((e) => e.candidateId !== candidateId) });
+            break;
+          }
+        }
+        return { ...prev, ingredientsByEpic: nextIngredients };
+      });
+      return { ok: true };
+    } catch {
+      return { ok: false, error: t('portRejectErrorFallback') };
+    }
+  }, [t]);
+
   // 재료(fetch 결과)는 캐시하고, pastItems가 바뀔 때마다 deriveFlowMapLane(순수함수, 값싸다)을
   // «다시» 태운다 — 이미 파생된 lane 위에 pastNodes만 덮으면 과거-펼침 좌표·간선이 안 맞는다.
   const lanes = useMemo(() => {
@@ -298,6 +324,7 @@ export function FlowMultiLaneCanvas({
           selectedNodeId={selectedNodeId}
           onCreateLink={handleCreateLink}
           onDeleteLink={handleDeleteLink}
+          onRejectLink={handleRejectLink}
           memberMap={memberMap}
           onOffscreenCountChange={setOffscreenCardCount}
         />

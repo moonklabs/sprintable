@@ -135,7 +135,13 @@ export async function proxyToFastapi(
     const v = res.headers.get(h);
     if (v) resHeaders[h] = v;
   }
-  return new Response(resBody, {
+  // story #2349 라이브 검증(미르코) 실측 — null-body status(101/103/204/205/304)에는 Response
+  // 생성자가 bodyInit을 null/undefined 대신 빈 문자열('')로 받으면 던진다("Invalid response
+  // status code 204" — Node 25/undici). BE가 spec대로 204+빈 바디를 내면 이 프록시가 그걸
+  // 그대로 500으로 바꿔버리던 것 — 사용자는 "실패"로 보지만 실제로는 BE 쪽 작업이 이미 끝난
+  // 상태(예: DELETE user-blocks — 차단 해제는 됐는데 화면엔 에러 토스트가 뜨는 사고).
+  const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
+  return new Response(NULL_BODY_STATUSES.has(res.status) ? null : resBody, {
     status: res.status,
     headers: resHeaders,
   });

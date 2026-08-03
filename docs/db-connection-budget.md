@@ -329,3 +329,89 @@ rollout_worst_case(env) = 2 × maxScale(env) × 5                          (좀�
 
 AC2(SSE 평시 수명 상한 추가 조정)는 "이 timeout이 종료 시점 상한을 이미 강제해 재연결 폭증
 대가를 감수할 근거가 없다"는 판단으로 조치 없음(오르테가군 확인) — story #2060 done.
+
+## story #2442 — prod P0(2026-08-03) 후속: pool 3/1 → 20/10 승격 + "PgBouncer 전제" 폐기
+
+**사고**: 08:44Z prod가 DB 커넥션 풀 고갈로 뻗음(QueuePool 타임아웃·`/api/v2/health` 전면
+실패). PO가 gcloud로 `DB_POOL_SIZE=20,DB_MAX_OVERFLOW=10`(rev 00257-wdz)을 즉시 적용해
+회복(health 8/8 200) — 임시값, 다음 배포가 config 기본(3/1)으로 덮어 재발하는 상태였다.
+
+**AC1 — prod 실 DB 경로(페드루 인프라 실측, 2026-08-03 09:09Z)**: `DB_PGBOUNCER` 미설정(코드
+기본 `db_pgbouncer=False`) · prod Cloud Run **단일 컨테이너**(PgBouncer 사이드카 0) · GCE에는
+realtime-gateway VM만(pgbouncer VM 0) · 프로젝트에 pgbouncer Cloud Run 서비스 0. 직전 prod
+rev 00255 = `DB_POOL_SIZE=3·DB_MAX_OVERFLOW=1`(=4/인스턴스, Cloud SQL 직결) — **"PgBouncer가
+실 풀"이라는 이 문서 상단 산식의 전제가 prod에서 «성립한 적이 없었다».** 이 문서의 §1(2026-07-20
+작성 시점)도 이미 "PgBouncer 풀러: Cloud Run raw TCP 미지원으로 중앙 불가·관리형 풀링 Enterprise
+Plus 전용 → #1779 폐기 이력"이라 명시했었다 — prod 인시던트가 그 폐기 이력이 여전히 유효함을
+실물로 재확認한 셈이다.
+
+**AC2 — 결정: (b) app 풀을 실사용에 맞게 승격(PgBouncer 사이드카 신설 (a)는 기각)**:
+- (a) 기각 근거: Cloud Run은 인스턴스별 사이드카라 "PgBouncer 사이드카"를 세워도 **인스턴스마다
+  자기 풀만 갖는 구조**(중앙/공유 풀이 아님 — 이 문서 §1의 "Cloud Run raw TCP 미지원으로 중앙
+  불가"와 동형 함정) → 진짜 중앙 풀러는 별도 상시 VM/서비스(GCE Auth Proxy 프론트 등) 또는 Cloud
+  SQL Enterprise Plus 관리형 풀링(tier 업그레이드, 과금 변경)이 필요한 **더 큰 인프라 프로젝트**다.
+  P0 SSOT 고정이라는 이 스토리 스코프를 넘는다 — 별건 아키텍처 스토리로 분리 권고(SRE lane).
+- (b) 채택 근거(신규 도출, PO 급조값 20/10을 그대로 베끼지 않고 독립 재검증):
+  1. **안전식**(story #2442 AC4, 롤아웃 배수 없이, RAW=0 — 정정 ⑤ 참고): `maxScale(5)×
+     (pool+overflow)+raw(0) < 200` → `pool+overflow < 40`. 25% 여유선(`여유0` 회피, 이 문서가
+     dev/prod 전반에서 지켜온 관례)을 적용하면 `5×(pool+overflow) ≤ 150` → `pool+overflow ≤ 30`.
+  2. **웜/콜드 커넥션 재구성**: SQLAlchemy `QueuePool`은 `pool_size`(상시 유지·웜)와
+     `max_overflow`(수요 시 신규 오픈·콜드, 반납 시 보통 닫힘)의 성격이 다르다 — 이번 사고의
+     증상(부하 급증 시 타임아웃)은 **콜드 커넥션 신규 수립 지연**이 정확히 악화시키는 유형이다.
+     `pool_size`를 낮추고 `max_overflow`를 올리는 배분(예: 10/20)은 유휴 시 커넥션 수를 줄이는
+     장점은 있으나, 정확히 이 사고를 재현하는 부하 급증 구간에서 "웜 커넥션 부족→콜드 신규 수립
+     지연"을 오히려 늘린다 — **`pool_size`를 상대적으로 높게 유지하는 배분이 이 사고 유형에는
+     더 안전하다.**
+  3. **실측 정합**: PO의 20/10(합 30)이 라이브에서 실제로 회복시켰다는 것 자체가 "이 정도
+     동시성이면 충분하다"는 유일한 실 데이터 포인트다 — 위 1·2의 독립 추론이 **같은 총합(30)에
+     정확히 수렴**한다(RAW=0 정정 後 25% 여유선 상한이 정확히 30 — 우연한 근접이 아니라 상한
+     그 자체·웜 커넥션 우선 배분 논리가 20/10 분배와 합치).
+  4. **미확인 축(정직한 한계)**: 인스턴스당 실제 동시 DB-쿼리 개수를 실시간으로 측정할 prod
+     접근이 없다(디디는 prod 키/ADC/MCP 미보유 — 정책). 위 도출은 코드로 확認 가능한 사실
+     (`--concurrency=80` 플랫폼 상한, SSE는 대기 구간 풀 미점유, `pool_timeout` 대기가 실패가
+     아니라는 설계 의도)과 라이브 실측 1개 데이터 포인트의 조합이지 완전한 부하 모델링이 아니다 —
+     배포 후 라이브 재확認(AC7)이 최종 검증이다.
+  5. **⚠️정정(페드루 지적, 2026-08-03 09:18Z)**: 최초 초안이 이 문서 §1의 `RAW_LISTEN=1`
+     (`pg_pubsub.listen_loop` 상시 raw 연결) 산식을 그대로 가져다 썼으나, 그 산식은 **PG_LISTEN이
+     살아있던 시절 가정**이다 — prod는 이미 #2123/#2141 cutover로 `PG_LISTEN_ENABLED=false`
+     (backend-prod·realtime-prod·GCE realtime 셋 다 확認, `.github/workflows/cloud-build.yml`
+     의 `backend_pg_listen_enabled=false` prod 분기 + `deploy_realtime_gce.sh`의 `PG_LISTEN_
+     ENABLED=false` 하드코딩 참고)이고 Redis(MemoryStore)가 유일한 dispatch 경로다 ⇒
+     **prod 인스턴스당 RAW≈0**(LISTEN이 아예 안 뜬다). 아래 산식을 RAW=0으로 정정 — 실제로는
+     문서화한 것보다 여유가 조금 더 있다는 뜻이라 결론(20/10 채택)에 영향은 없다.
+
+**⇒ 채택값: `DB_POOL_SIZE=20 · DB_MAX_OVERFLOW=10`**(prod만 — dev는 #2040에서 이미 검증된
+3/1 유지, 조정 안 함). SSOT는 `cloudbuild.yaml`(`_DB_POOL_SIZE`/`_DB_MAX_OVERFLOW` 신규
+substitution) + `.github/workflows/cloud-build.yml`(prod 분기 `db_pool_size=20`/
+`db_max_overflow=10` output) — "손 값은 배포가 덮는다" 교훈 재적용.
+
+```
+per_instance(prod) = (20 + 10) + RAW_LISTEN(0, PG_LISTEN_ENABLED=false — 정정 ⑤) = 30
+안전식(AC4, 롤아웃 배수 없이) = maxScale(5) × 30 + 0 = 150 ≤ 200 (25% 여유)
+```
+
+**⚠️잔여 리스크(문서화, 미해소)** — 이 문서 §1의 롤아웃-인식 산식(`2×maxScale×per_instance`,
+old+new 리비전 동시 생존 대비)으로 다시 재면 `2×5×30=300>200`, 즉 **main 배포 rollout 창에서
+old+new 리비전이 동시에 풀스케일(5)이면 이론상 한도를 넘는다.** 이 리스크를 감수하는 근거:
+① main(prod) 배포 빈도가 develop(dev)보다 훨씬 낮아(dev의 §"AC6" 실측처럼 연속배포 5회가
+겹치는 상황이 prod에서는 드물다) 롤아웃 중첩 창 자체가 짧다. ② 지금 당장은 steady-state
+고갈(사고 원인)을 막는 것이 우선이고, 롤아웃 중첩은 "짧은 창의 낮은 확률" 리스크다. **재검토
+트리거**: prod `num_backends`가 150에 근접하거나, main 연속배포가 짧은 시간 내 여러 번 겹치는
+패턴이 관측되면 즉시 재조정(maxScale 축소 또는 PgBouncer/tier 업그레이드 프로젝트 착수).
+
+**⛔AC7 라이브 재확認 방법론(페드루 검증-함정 지적, 2026-08-03 09:14Z)**: 과거 #2040/#2060
+검증이 `pg_stat_activity` **총 커넥션 수(17/200)만** 재고 "여유 있음"으로 닫았는데, 그 판정이
+정확히 오늘 사고가 재현한 **인스턴스당 4-풀(pool 3/1) 고갈**을 놓쳤다(총합은 낮아도 burst가 한
+인스턴스에 몰리면 그 인스턴스만 즉시 타임아웃 — 총합 지표가 이 실패모드를 가린다). 같은 함정
+반복 금지 — 배포 후 재확認은 총합이 아니라 **`application_name`(`db_application_name()` 태그,
+`K_SERVICE:K_REVISION` 형식)별로 `pg_stat_activity`를 그룹핑해 인스턴스별 동시 커넥션 수를
+직접 재고**, 그 값이 `pool_size+max_overflow`(=30) 근처까지 붙는 인스턴스가 있는지로 판정한다
+(총합이 낮아도 특정 인스턴스가 30에 붙으면 그 인스턴스는 여전히 위험 — "여유 있음"의 기준은
+총합이 아니라 최댓값 인스턴스).
+
+**후속(별건 권고, 이 스토리 스코프 밖)** — 페드루 정정(2026-08-03 09:14Z): "중앙 PgBouncer
+사이드카"(a)는 Cloud Run이 raw TCP(:6432)를 지원하지 않아 2026-06-29 이미 **폐기 확定**된
+죽은 길(#1779·커밋 `e704d5154`) — 재시도 대상 아님. 진짜 근본 대안은 **(a') Cloud SQL
+Enterprise Plus 관리형 커넥션 풀링**(내부 아키텍처 평가 문서 `939f9cd5`가 "사이드카 PgBouncer
+트랩"의 해법으로 권고) — 트래픽 성장 시 이 tradeoff 자체를 없애는 tier 업그레이드·과금 변경
+프로젝트. SRE lane, 이 스토리 스코프 밖. (`2b0a75ac` = 폐기된 옛 blueprint, 참고만.)

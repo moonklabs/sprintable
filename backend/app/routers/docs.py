@@ -73,6 +73,11 @@ async def _enrich_doc_summary(doc, session: AsyncSession) -> DocSummaryResponse:
 
 router = APIRouter(prefix="/api/v2/docs", tags=["docs", "Knowledge"])
 
+# story #2346 AC7 — stories.py의 두 임계값을 그대로 재사용(2026-08-02 PO 지시로 doc content
+# 실측 후 재확認: 50%만 쓰면 짧은 필드가 걸리고 절대량만 쓰면 긴 필드가 새는 동일 문제).
+_SHRINK_BLOCK_THRESHOLD = 0.5
+_SHRINK_BLOCK_MIN_LOST_CHARS = 100
+
 
 def _get_repo(
     session: AsyncSession = Depends(get_db),
@@ -395,6 +400,7 @@ async def get_doc(
 async def update_doc(
     id: uuid.UUID,
     body: DocUpdate,
+    background_tasks: BackgroundTasks,
     repo: DocRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
@@ -408,6 +414,8 @@ async def update_doc(
     # 151e05f1: 동시성 제어 필드 — Doc 컬럼이 아니므로 분리(setattr 루프서 제외).
     expected_updated_at = data.pop("expected_updated_at", None)
     force_overwrite = data.pop("force_overwrite", None)
+    # story #2346 AC7: allow_shrink는 Doc 컬럼이 아니므로 repo mutate 前 분리(stories.py와 동형).
+    allow_shrink = data.pop("allow_shrink", False)
 
     doc = await repo.get(id)
     if doc is None:
@@ -430,6 +438,27 @@ async def update_doc(
                     "message": "문서가 다른 곳에서 수정됨 — 최신본을 다시 불러오세요",
                     "current_updated_at": doc.updated_at.isoformat(),
                 },
+            )
+
+    # ⛔story #2346 AC3/AC7(stories.py와 동형 — 이 라우터는 activity 로깅 자체가 없어 신규 배선):
+    # doc.content는 이미 위에서 조회돼 있어(항상 조회, stories.py처럼 조건부 필요 없음) old 길이를
+    # 지금 스칼라로 떠 둔다. 임계값(50%·절대손실 100자)은 stories.py 그대로 재사용 — doc content가
+    # story description보다 훨씬 길지만(실측 3000~4500자대 표본), 그 스케일에서는 퍼센트 임계가
+    # 실질적으로 작동하고(50% 손실이면 자연히 절대량도 100자를 훌쩍 넘음) 절대 floor는 짧은
+    # 문서에서만 의미가 있어 그대로 전이해도 무리가 없다(PO 지시 2026-08-02 — 재보고 정한 것).
+    old_content_length: int | None = len(doc.content or "") if "content" in data else None
+    if old_content_length is not None and old_content_length > 0 and not allow_shrink:
+        _after_len = len(data.get("content") or "")
+        _lost_chars = old_content_length - _after_len
+        _is_relative_shrink = _after_len < old_content_length * (1 - _SHRINK_BLOCK_THRESHOLD)
+        if _is_relative_shrink and _lost_chars >= _SHRINK_BLOCK_MIN_LOST_CHARS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"doc '{doc.title}' content shrank {old_content_length}→{_after_len} chars "
+                    f"({round((1 - _after_len / old_content_length) * 100)}% smaller) — "
+                    "if intentional, resend with allow_shrink=true"
+                ),
             )
 
     if "parent_id" in data:
@@ -527,6 +556,29 @@ async def update_doc(
         await reconcile_doc_mentions(
             session, org_id=repo.org_id, doc_id=doc.id, html_content=doc.content, created_by=actor_id,
         )
+
+        # story #2346 AC3 — content 길이가 실제로 바뀌면 doc_updated activity에 「이전 길이→이후
+        # 길이」를 얹는다(신규 장치 0, 전문 스냅샷 아님). 안 바뀌면 안 남긴다(양성 대조 — stories.py와
+        # 동형, 매번 남으면 잡음). old_content_length는 위에서 setattr 前에 이미 스칼라로 떠 뒀다.
+        if old_content_length is not None:
+            _after_content_len = len(doc.content or "")
+            if _after_content_len != old_content_length:
+                from app.services.activity_log import record_activity_bg
+                background_tasks.add_task(
+                    record_activity_bg,
+                    org_id=repo.org_id,
+                    action="doc_updated",
+                    actor_id=actor_id,
+                    project_id=doc.project_id,
+                    entity_type="doc",
+                    entity_id=id,
+                    context={
+                        "doc_title": doc.title,
+                        "length_changes": {
+                            "content": {"before": old_content_length, "after": _after_content_len},
+                        },
+                    },
+                )
 
     return DocResponse.model_validate(doc)
 

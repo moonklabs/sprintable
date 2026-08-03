@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,16 @@ router = APIRouter(prefix="/api/v2/agent-runs", tags=["agent-runs", "Work"])
 # story #2161: PATCH가 이 세 상태로 전이시키는데 클라가 finished_at을 안 보내면 서버가 채운다
 # (server-authority — MCP는 이미 finished_at을 보낼 수 있지만 항상 보낸다고 신뢰하지 않는다).
 _TERMINAL_STATUSES = {"completed", "failed", "abandoned"}
+
+# story #2346 AC3(범위: 기록만) — 「긴 텍스트 필드」 정의, stories.py/docs.py와 동형.
+_LENGTH_TRACKED_FIELDS = ("result_summary", "last_error_code")
+# ⛔story #2346 AC7을 여기 «의도적으로» 안 넣는다 — 넣지 않는 것 자체가 판단이라 이유를 남긴다.
+# stories.py/docs.py와 달리 이 라우터는 status 전이(_TERMINAL_STATUSES)와 얽혀 있다: 진행 중
+# 요약("작업 중... X... Y...")이 완료 시 짧고 확정적인 요약("완료: Z")으로 «의도적으로» 줄어드는
+# 것이 정상 흐름이다. stories.py의 급감 차단(50%+절대손실100자)을 그대로 이식하면 이 legitimate
+# 축약이 매번 막혀 allow_shrink=true를 상시 붙여야 하는 잡음이 된다(PO 판정 2026-08-02) — AC3
+# (기록)만으로 범위를 좁힌다. 나중에 이 라우터에 AC7을 넣고 싶으면 «완료 시 축약»과 «중간에
+# 읽지 않고 덮어씀」을 가르는 별도 판별자부터 세워야 한다(이 코멘트를 지우지 말 것).
 
 
 def _get_repo(session: AsyncSession = Depends(get_db)) -> AgentRunRepository:
@@ -131,6 +141,7 @@ async def create_agent_run(
 async def update_agent_run(
     id: uuid.UUID,
     body: UpdateAgentRun,
+    background_tasks: BackgroundTasks,
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
     repo: AgentRunRepository = Depends(_get_repo),
@@ -159,6 +170,12 @@ async def update_agent_run(
     # 비우기) 여전히 지워진다 — "생략"과 "명시적 null"을 이제 구분한다(repo.update()의 예외
     # 특례는 그 구분을 못 해 항상 지웠다 — 아래에서 제거).
     _explicit_fields = body.model_dump(exclude_unset=True, exclude={"status", "finished_at"})
+    # story #2346 AC3(범위: 기록만, AC7 차단 없음 — 위 모듈 상단 코멘트 참조): existing이 이미
+    # access-check용으로 조회돼 있어(stories.py처럼 조건부 재조회 불필요) old 길이를 지금 스칼라로
+    # 떠 둔다.
+    _old_lengths = {
+        f: len(getattr(existing, f) or "") for f in _LENGTH_TRACKED_FIELDS if f in _explicit_fields
+    }
     run = await repo.update(
         id,
         status=body.status,
@@ -167,4 +184,25 @@ async def update_agent_run(
     )
     if run is None:
         raise HTTPException(status_code=404, detail="Agent run not found")
+    if _old_lengths:
+        _length_changes = {}
+        for _f, _before_len in _old_lengths.items():
+            _after_len = len(getattr(run, _f) or "")
+            if _before_len != _after_len:
+                _length_changes[_f] = {"before": _before_len, "after": _after_len}
+        if _length_changes:
+            from app.services.activity_log import record_activity_bg
+            from app.services.member_resolver import resolve_member
+
+            _actor = await resolve_member(auth, org_id, repo.session, project_id=existing.project_id)
+            background_tasks.add_task(
+                record_activity_bg,
+                org_id=org_id,
+                action="agent_run_updated",
+                actor_id=_actor.id,
+                project_id=existing.project_id,
+                entity_type="agent_run",
+                entity_id=id,
+                context={"length_changes": _length_changes},
+            )
     return AgentRunResponse.model_validate(run)

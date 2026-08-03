@@ -9,7 +9,7 @@ const { getServerSessionMock } = vi.hoisted(() => ({
 
 vi.mock('@/lib/db/server', () => ({ getServerSession: getServerSessionMock }));
 
-import { proxyToFastapi, proxyToFastapiWithParams } from './fastapi-proxy';
+import { proxyToFastapi, proxyToFastapiWithParams, proxyToFastapiWrapped } from './fastapi-proxy';
 
 describe('fastapi-proxy — X-Project-Id override passthrough (story 7d6b770b 회귀가드)', () => {
   beforeEach(() => {
@@ -115,5 +115,45 @@ describe('fastapi-proxy — 응답 헤더 allowlist forward(story #2190)', () =>
     expect(res.headers.get('x-total-count')).toBeNull();
     expect(res.headers.get('x-next-cursor')).toBeNull();
     expect(res.headers.get('content-type')).toBe('application/json');
+  });
+});
+
+// story #2349 라이브 검증(미르코, 2026-08-03) 실측 — DELETE /api/user-blocks/{id}가 매번 500을
+// 냈다(빈 목록 API로는 실제로 지워진 것을 확認했으니 BE는 성공했다). 근본원인: BE가 spec대로
+// 204+빈 바디를 내는데, 이 프록시가 `new Response(resBody, {status:204})`로 재구성할 때
+// resBody가 null이 아니라 빈 문자열이라 Node/undici가 "Invalid response status code 204"로
+// 던졌다 — 사용자는 실패로 보지만 서버 쪽 작업은 이미 끝난 상태(차단은 풀렸는데 에러 토스트).
+describe('fastapi-proxy — null-body status(204 등) 재구성이 안 던진다(story #2349 회귀가드)', () => {
+  beforeEach(() => {
+    getServerSessionMock.mockReset();
+    getServerSessionMock.mockResolvedValue({ access_token: 'token-1', org_id: 'org-1', project_id: 'proj-1' });
+  });
+
+  it('BE가 204(spec대로 빈 바디)를 내도 던지지 않고 그대로 204를 돌려준다', async () => {
+    global.fetch = vi.fn(async () => new Response(null, { status: 204 }));
+    const request = new Request('http://localhost/api/user-blocks/member-1', { method: 'DELETE' });
+
+    const res = await proxyToFastapi(request, '/api/v2/user-blocks/member-1');
+
+    expect(res.status).toBe(204);
+  });
+
+  it('proxyToFastapiWrapped도 204를 그대로 통과시킨다(안 던짐)', async () => {
+    global.fetch = vi.fn(async () => new Response(null, { status: 204 }));
+    const request = new Request('http://localhost/api/user-blocks/member-1', { method: 'DELETE' });
+
+    const res = await proxyToFastapiWrapped(request, '/api/v2/user-blocks/member-1');
+
+    expect(res.status).toBe(204);
+  });
+
+  it('200(본문 있음)은 여전히 그대로 통과한다(회귀 없음 — null-body 처리가 일반 응답을 안 건드림)', async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const request = new Request('http://localhost/api/user-blocks', { method: 'POST', body: '{}' });
+
+    const res = await proxyToFastapi(request, '/api/v2/user-blocks');
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
   });
 });

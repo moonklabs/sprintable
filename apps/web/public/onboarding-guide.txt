@@ -22,10 +22,12 @@ Only the injection last mile (into the running agent's control loop) is per-runt
 A Sprintable login (JWT) is a *human* session token — an agent cannot mint one for itself.
 Ask the person who runs you to do the following once and hand you the resulting API key.
 
-> Any organization **member can do this — admin is not required**
-> (`POST /api/v2/team-members` and `POST /api/v2/agents/{id}/api-keys` both authorize with a
-> normal member session). Admin is only needed for *project-level* API keys (`POST /api/v2/api-keys`),
-> which are a different thing.
+> **Project admin/owner is required for Step 1-1** (`POST /api/v2/team-members` — registering the
+> agent): the route gates unconditionally on `has_project_role(min_role="admin")` for every caller
+> (a normal member session gets a 403). Step 1-2 (`POST /api/v2/agents/{id}/api-keys` — issuing the
+> key) allows either the agent's creator or an org admin/owner — in practice the same admin who
+> did Step 1-1 satisfies this too. Admin is also needed for *project-level* API keys
+> (`POST /api/v2/api-keys`), which are a different thing (org/project-scoped, not agent-scoped).
 
 | Item | Description |
 |------|-------------|
@@ -48,7 +50,7 @@ curl -s -X POST "$BASE_URL/api/v2/team-members" \
   -H "Authorization: Bearer $MEMBER_TOKEN" \
   -H "X-Org-Id: $ORG_ID" \
   -H "Content-Type: application/json" \
-  -d '{"type":"agent","name":"my-agent","role":"member","project_id":"'"$PROJECT_ID"'"}' \
+  -d '{"type":"agent","name":"my-agent","role":"member","project_id":"'"$PROJECT_ID"'","org_id":"'"$ORG_ID"'"}' \
   | tee /tmp/agent.json
 
 export AGENT_ID=$(jq -r '.id' /tmp/agent.json)
@@ -66,7 +68,7 @@ curl -s -X POST "$BASE_URL/api/v2/agents/$AGENT_ID/api-keys" \
 export AGENT_API_KEY=$(jq -r '.api_key' /tmp/apikey.json)
 ```
 
-> Key format: `sk_live_<32 random chars>`. Returned in plaintext **only once** — store it safely.
+> Key format: `sk_live_<64 hex chars>`. Returned in plaintext **only once** — store it safely.
 > The operator hands this key to the agent. From Step 2 on, the agent uses **only the API key**
 > (org and agent identity are derived from the key — no `X-Org-Id` needed).
 
@@ -89,10 +91,11 @@ curl -N \
 A connected stream yields SSE frames (RFC 8895):
 
 ```
-: connected
+event: heartbeat
+data: {}
 
 event: conversation.message_created
-id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+id: 42
 data: {"event_id":"3fa85f64-...","event_type":"conversation.message_created","recipient_seq":42,"is_backfill":false,"sender_id":"0caee743-...","content":"hello","source":{"type":"member","id":"0caee743-..."},"payload":{"conversation_id":"...","content":"hello"},"created_at":"2026-01-01T00:00:00Z"}
 ```
 
@@ -101,12 +104,17 @@ Key points:
   are at the **top level of `data`**; the original event fields (e.g. `conversation_id`) are nested
   inside the `payload` object, and `content` is also hoisted to the top level (connector-drop guard).
   `sender_id` is the sender's member id — a flat UUID, not a nested object.
-- The SSE `id:` field is the `event_id` UUID — distinct from `recipient_seq` (the integer cursor).
-  Deduplicate on `event_id`.
-- Ignore `event: heartbeat` frames (keep-alive).
-- To reconnect, send the last received `id:` value as the `Last-Event-ID` header; the server
-  backfills missed events (`is_backfill: true`). The same `event_id` is never sent twice
-  (server-side dedup).
+- **The SSE `id:` field is the `recipient_seq` integer — NOT the `event_id` UUID.** Send it back
+  verbatim as `Last-Event-ID` on reconnect. Sending a UUID there fails integer parsing and
+  silently degrades the reconnect to `header_seq=0` (full-history replay) — fixed at the root in
+  story #2143, but only on the server side; a client that copies `event_id` into `Last-Event-ID`
+  still hits this. `event_id` (a separate UUID inside `data`) is a stable per-event identifier —
+  use it for your own application-level dedup, not for the reconnect cursor.
+- Ignore `event: heartbeat` frames (keep-alive) — this is also the very first frame sent on connect.
+- To reconnect, send the last received `id:` value (the integer `recipient_seq`, not `event_id`)
+  as the `Last-Event-ID` header; the server backfills missed events (`is_backfill: true`) from
+  there. Non-durable/legacy direct-push events omit `id:` entirely (no `recipient_seq` to report)
+  rather than fabricating one — don't assume every frame carries an `id:`.
 
 ---
 
@@ -139,8 +147,9 @@ curl -s -X POST "$BASE_URL/api/v2/conversations/$CONVERSATION_ID/messages" \
   -d '{"content": "Done."}'
 ```
 
-`$CONVERSATION_ID` comes from the Step 2 event's `conversation_id`. Replies are idempotent and
-safe to retry.
+`$CONVERSATION_ID` comes from the Step 2 event's `conversation_id`. **This endpoint has no
+idempotency key** — a naive retry after a client-side timeout creates a duplicate message.
+Track whether your own POST completed before retrying.
 
 ---
 
@@ -172,11 +181,13 @@ and backoff are handled by the shared SDK; you only supply the runtime's injecti
 ### Example: Hermes
 
 > **The gateway adapter is not the MCP server.** A successful `sprintable` MCP
-> `ping` only proves the PM API tools are reachable — it does NOT mean the agent
+> `ping` only proves the tool-call channel is reachable — it does NOT mean the agent
 > is *receiving* conversation messages. Receiving requires this plugin loaded and
-> dialed out; verify with the checklist below, not with an MCP ping. The two
-> channels use different env vars: gateway = `AGENT_API_KEY`, MCP =
-> `PM_API_KEY`/`PM_API_URL`/`PM_PROJECT_ID`.
+> dialed out; verify with the checklist below, not with an MCP ping. Despite being
+> two separate channels, they currently read the **same** env vars —
+> `SPRINTABLE_API_URL` and `AGENT_API_KEY` (`backend/sprintable_mcp/config.py`) —
+> not the `PM_API_KEY`/`PM_API_URL`/`PM_PROJECT_ID` names an earlier version of this
+> doc claimed; those don't exist in this codebase.
 
 The plugin folder is **self-contained** (the inject allow-list is vendored), so
 copying just the folder is enough — no separate `connectors/sdk` step. Requires

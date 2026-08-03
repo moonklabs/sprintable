@@ -180,6 +180,7 @@ async def resolve_conversation_webhook_targets(
     project_id: uuid.UUID,
     sender_id: uuid.UUID | None,
     mentioned_ids: list[uuid.UUID] | None,
+    blocker_member_ids: set[uuid.UUID],
 ) -> list[_WebhookTarget]:
     """conversation.message_created 의 실 전달 대상 webhook 을 결정하는 SSOT.
 
@@ -191,6 +192,20 @@ async def resolve_conversation_webhook_targets(
     authorized = mentioned 우선(**sender 제외**)·없으면 참가자 전원(sender 제외). member-bound
     webhook 은 그 멤버가 authorized 일 때만, member_id=null 브로드캐스트는 무조건 포함(참가자
     게이팅 c2dfb823). sender 제외로 자기 self-mention webhook 비대칭도 제거(Finding 2).
+
+    story #2349 AC3 — 라이브 검증(2026-08-03, PO+디디, 스레드 7256d5cc)에서 실측으로 발견:
+    이 함수가 실제 agent 게이트웨이 webhook 배달(ConversationWebhookDelivery)의 SSOT인데,
+    「이 발신자를 차단한 수신자」exclusion(user_blocker_ids, #2814)이 conversations.py의
+    _dispatch_conversation_event(Event/SSE)·mention_targets에만 흘러가고 여기(실 webhook 배달
+    대상 산출)엔 한 번도 안 걸렸다 — #2817(channel_router.py::route_message, discord-channel
+    WebhookConfig 아웃바운드용)과는 완전히 별개 지점이라 그 수정도 이 갭을 안 덮었다. PO 재확認
+    (2026-08-03, origin/develop 실측): 값이 없던 게 아니라 caller(conversations.py:2049~2053)가
+    바로 옆에서 이미 계산해두고도 «전달을 안 했던» 것 — 그래서 여기서 재조회하지 않고
+    `blocker_member_ids` 파라미터로 caller의 값을 그대로 받는다(TOCTOU-safe한 단일 snapshot
+    원칙 유지, 이 함수 안에서 새 쿼리를 추가하지 않는다).
+
+    카디르 QA 재발견(2026-08-03) — 필수 키워드 인자로 승격: 옵셔널(기본값 None)이면 다음 caller가
+    또 "값은 있는데 전달을 잊는" 실수를 반복할 수 있다 — 타입 체커가 누락을 잡게 강제한다.
     """
     from sqlalchemy import select
 
@@ -199,7 +214,9 @@ async def resolve_conversation_webhook_targets(
     if mentioned_ids:
         # 멘션 있으면 멘션 대상만 — sender 제외(자기 메시지를 자기 webhook 으로 되받지 않도록·
         # SSE mention 경로[conversations.py]와 authorized set 통일). 멘션이 sender 뿐이면 전달 0.
-        member_ids_for_webhook: list[uuid.UUID] = [m for m in mentioned_ids if m != sender_id]
+        member_ids_for_webhook: list[uuid.UUID] = [
+            m for m in mentioned_ids if m != sender_id and m not in blocker_member_ids
+        ]
     else:
         participant_member_ids = (await db.execute(
             select(ConversationParticipant.member_id).where(
@@ -207,7 +224,7 @@ async def resolve_conversation_webhook_targets(
                 *([ConversationParticipant.member_id != sender_id] if sender_id else []),
             )
         )).scalars().all()
-        member_ids_for_webhook = list(participant_member_ids)
+        member_ids_for_webhook = [m for m in participant_member_ids if m not in blocker_member_ids]
 
     authorized_member_ids: set[uuid.UUID] = {
         mid for mid in member_ids_for_webhook if mid is not None
@@ -270,6 +287,20 @@ async def deliver_conversation_message_webhook(
     async with async_session_factory() as db:
         try:
             if targets is None:
+                # targets 미전달(구 호출자/방어) 경로 — 위 SSOT 호출부(conversations.py)처럼
+                # 미리 계산된 snapshot이 없으므로 여기서 직접 조회(fail-open, #2814/#2817과 동일 결).
+                blocker_member_ids: set[uuid.UUID] = set()
+                if sender_id:
+                    try:
+                        from app.models.user_block import UserBlock
+                        blocker_member_ids = set((await db.execute(
+                            select(UserBlock.blocker_member_id).where(UserBlock.blocked_member_id == sender_id)
+                        )).scalars().all())
+                    except Exception:
+                        logger.warning(
+                            "user_blocker_ids lookup failed conversation_id=%s — fail-open(no exclusion)",
+                            conversation_id, exc_info=True,
+                        )
                 targets = await resolve_conversation_webhook_targets(
                     db,
                     conversation_id=conversation_id,
@@ -277,6 +308,7 @@ async def deliver_conversation_message_webhook(
                     project_id=project_id,
                     sender_id=sender_id,
                     mentioned_ids=mentioned_ids,
+                    blocker_member_ids=blocker_member_ids,
                 )
 
             if not targets:

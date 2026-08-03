@@ -294,17 +294,20 @@ def test_ac4_real_repo_scan_counts_are_recorded():
         f"\n[AC4] 총 고유 env 키 {total_reads}개 · exempt {len(exempt)}개 · "
         f"미커버 findings {total_findings}개(highest={len(highest)}, high={len(high)}, low={len(low)})"
     )
-    # 정확한 숫자 고정(2026-07-28, 2026-07-31 ⑤ DI-패턴 후속으로 high 15→20 갱신) — 스위트가
-    # 실패하면 숫자가 바뀐 것, 원인을 봐야 한다. +5는 SPRINTABLE_RUNTIME_ROLE·
+    # 정확한 숫자 고정(2026-07-28, 2026-07-31 ⑤ DI-패턴 후속으로 high 15→20,
+    # 2026-08-02 story #2422 후속으로 high 20→15·exempt 18→23 갱신) — 스위트가 실패하면
+    # 숫자가 바뀐 것, 원인을 봐야 한다. 이번 -5/+5는 SPRINTABLE_RUNTIME_ROLE·
     # SPRINTABLE_{BACKGROUND,MEMO_DISPATCHER,DISCORD_OUTBOUND,TEAMS_OUTBOUND}_POLL_INTERVAL_MS
-    # — background-runtime.ts의 `env: NodeJS.ProcessEnv = process.env` DI 파라미터로 읽혀
-    # process.env 직접참조만 보던 스캔에 새로 잡히기 시작한 실제 미커버 값들(baseline에 일부러
-    # 안 넣었다 — SPRINTABLE_RUNTIME_ROLE은 PO 판단이 필요한 신규 실사고 후보라 스스로 baseline
-    # 처리하지 않는다).
+    # 다섯이 high(미triage)에서 code_read_exempt(영구 정상)로 승격된 것 — env 드리프트
+    # 가드가 나흘째 이 다섯을 FAIL로 잡던 것을 실측(gcloud)으로 추적한 결과, frontend-dev/
+    # prod 둘 다 NODE_ENV=production이라 SPRINTABLE_RUNTIME_ROLE 미설정 시 기본값이 'web'
+    # 으로 떨어져 이 값들을 쓰는 백그라운드 워커 자체가 안 켜진다(story #2423 — 이 기능군은
+    # 은퇴 상태). 값을 채워야 도는 게 아니라 안 채워야 지금 의도대로 도는 스위치라
+    # code_read_exempt가 정확한 분류다(baseline의 "아직 triage 안 됨"과 다르다).
     assert len(highest) == 1, highest
-    assert len(high) == 20, high
+    assert len(high) == 15, high
     assert len(low) == 9, low
-    assert len(exempt) == 18
+    assert len(exempt) == 23
 
 
 # ── AC5 — 값을 안 읽는다 ──────────────────────────────────────────────────────

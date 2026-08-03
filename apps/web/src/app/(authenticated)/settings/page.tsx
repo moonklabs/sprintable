@@ -14,6 +14,7 @@ import { ProjectAccessSection } from '@/components/settings/project-access-secti
 import { AiSettingsSection } from '@/components/settings/ai-settings';
 import { MyProfileSection } from '@/components/settings/my-profile-section';
 import { MyNotificationChannelSection } from '@/components/settings/my-notification-channel-section';
+import { BlockedUsersSection } from '@/components/settings/blocked-users-section';
 import { ByomKeyManagement } from '@/components/settings/byom-key-management';
 import { McpConnectionSettings } from '@/components/settings/mcp-connection-settings';
 import { WorkflowTriggerTypesSection } from '@/components/settings/workflow-trigger-types-section';
@@ -748,6 +749,7 @@ export default function SettingsPage() {
                     projectName={projects.find((p) => p.id === currentProjectId)?.name ?? currentProjectId}
                   />
                 )}
+                <BlockedUsersSection />
               </div>
             </TabsContent>
 

@@ -40,7 +40,7 @@ function makeUrlencodedRequest(fields: Record<string, string>): Request {
   });
 }
 
-const ENV_KEYS = ['FIREBASE_AUTH_MOBILE_ISSUE', 'FIREBASE_BFF_INTERNAL_SECRET', 'NEXT_PUBLIC_FASTAPI_URL'];
+const ENV_KEYS = ['FIREBASE_AUTH_MOBILE_ISSUE', 'FIREBASE_BFF_INTERNAL_SECRET', 'NEXT_PUBLIC_FASTAPI_URL', 'NEXT_PUBLIC_APP_URL', 'APP_BASE_URL'];
 
 describe('POST /auth/native', () => {
   beforeEach(() => {
@@ -49,6 +49,9 @@ describe('POST /auth/native', () => {
     h.resolveFirebaseServerSessionMock.mockReset();
     mockFetch.mockReset();
     for (const k of ENV_KEYS) delete process.env[k];
+    // resolveAppUrl(null) fallback 순서상 NEXT_PUBLIC_APP_URL이 최우선 실질값 — 기존 테스트들의
+    // request URL origin(http://localhost)과 동일하게 맞춰 기존 assertion을 그대로 둔다.
+    process.env['NEXT_PUBLIC_APP_URL'] = 'http://localhost';
   });
 
   afterEach(() => {
@@ -236,5 +239,26 @@ describe('POST /auth/native', () => {
     const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
     const sentBody = JSON.parse(opts.body as string) as { existing_session_user_id?: string };
     expect(sentBody.existing_session_user_id).toBeUndefined();
+  });
+
+  // story #1933 — Cloud Run은 컨테이너에 내부 주소로 요청을 전달한다(플랫폼 성질, 이 라우트의
+  // 우연이 아니다). request.url을 base로 쓰면 그 내부 주소가 그대로 redirect Location에 실려
+  // 나간다. resolveAppUrl(null)이 항상 공개 주소를 강제하는지 여기서 고정한다.
+  it('on success: redirect Location uses the configured public app URL, never the request origin (Cloud Run internal address never leaks)', async () => {
+    process.env['FIREBASE_AUTH_MOBILE_ISSUE'] = 'true';
+    process.env['NEXT_PUBLIC_APP_URL'] = 'https://dev-app.sprintable.ai';
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ session_cookie: 'c' }) });
+
+    // 실제 Cloud Run 컨테이너가 보는 request.url 형태 — 내부 run.app 호스트.
+    const internalHostRequest = new Request('https://sprintable-frontend-dev-57iommnikq-du.a.run.app/auth/native', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: 'x' }),
+    });
+    const res = await POST(internalHostRequest);
+
+    const location = res.headers.get('location') ?? '';
+    expect(location).toBe('https://dev-app.sprintable.ai/inbox');
+    expect(location).not.toContain('run.app');
   });
 });
