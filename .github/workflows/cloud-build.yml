@@ -63,6 +63,16 @@ jobs:
             # (PgBouncer 풀러 불필요/불가 — Cloud Run raw TCP 미지원으로 중앙 PgBouncer 불가·관리형 풀링은
             # Enterprise Plus 전용(#1779 폐기 이력). 트래픽↑ 시 아키텍처 재검토(#2074) 필요.)
             echo "backend_max_instances=5" >> "$GITHUB_OUTPUT"
+            # story #2442(P0, 2026-08-03) — prod DB 커넥션 풀 고갈 인시던트(08:44Z, QueuePool
+            # 타임아웃·/api/v2/health 전면 실패). PgBouncer가 prod에 없거나 무력해(db_pgbouncer=
+            # False 코드+배포 양쪽 기본값 — 위 "PgBouncer 풀러 불가" 참고) tiny 앱 풀(3+1=4)이
+            # Cloud SQL에 직결돼 즉시 고갈. PO가 gcloud로 20/10(rev 00257-wdz)까지 올려 즉시 회복
+            # 확認(health 8/8 200) — 그 손 값을 SSOT로 durable화("손 값은 배포가 덮는다" 교훈).
+            # 안전식(롤아웃 배수 없이): maxScale(5)×(pool+overflow)+raw(1)=5×30+1=151≤200(25%여유).
+            # ⚠️잔여 리스크(docs/db-connection-budget.md 롤아웃 산식 2×N×5로는 2×5×31=310>200) —
+            # main 배포 빈도가 낮아 감수(PO 확認 필요, 재검토 트리거는 위 문서 참고).
+            echo "db_pool_size=20" >> "$GITHUB_OUTPUT"
+            echo "db_max_overflow=10" >> "$GITHUB_OUTPUT"
             # story #2005: PO 라이브 gcloud 실측(2026-07-17) — backend-prod 현재 유효 Cloud Run
             # 요청 타임아웃=300s. 지금까지 `cloudbuild.yaml`에 `--timeout` 플래그가 없어 이
             # 값은 인프라 기본값이었을 뿐 어디에도 명시돼 있지 않았다 — 이제 이 워크플로우가
@@ -166,6 +176,13 @@ jobs:
             # 로 durable(lingering env 덮어씀).
             # (dev/prod는 별도 Cloud SQL 인스턴스로 확認됨(story #2040 PO gcloud 재확認) — 합산 불필요.)
             echo "backend_max_instances=8" >> "$GITHUB_OUTPUT"
+            # story #2442(P0) — cloudbuild.yaml `_DB_POOL_SIZE`/`_DB_MAX_OVERFLOW` 기본값(3/1)과
+            # 동일값. #2040에서 이미 검증된 dev 예산 그대로 — 값을 바꾸는 게 아니라
+            # `backend_max_instances`/`backend_timeout`과 동일하게 대칭 배선하는 것뿐(이 output이
+            # --substitutions= 에서 무조건 참조되므로 비워두면 빈 문자열로 cloudbuild.yaml 기본값을
+            # 덮어써버린다 — ga4_measurement_id가 dev에서 빈 문자열을 명시하는 것과 같은 이유).
+            echo "db_pool_size=3" >> "$GITHUB_OUTPUT"
+            echo "db_max_overflow=1" >> "$GITHUB_OUTPUT"
             # story #2005: PO 라이브 gcloud 실측(2026-07-17) — backend-dev 현재 유효 Cloud Run
             # 요청 타임아웃=3600s(Cloud Run 요청 타임아웃 상한). cloudbuild.yaml의
             # `_BACKEND_TIMEOUT` 기본값(3600)과 동일값이라 이 output이 없어도 기본값으로
@@ -257,6 +274,6 @@ jobs:
           gcloud builds submit \
             --config=cloudbuild.yaml \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_REALTIME_MIN_INSTANCES="${{ steps.env.outputs.realtime_min_instances }}",_REALTIME_MAX_INSTANCES="${{ steps.env.outputs.realtime_max_instances }}",_REALTIME_TIMEOUT="${{ steps.env.outputs.realtime_timeout }}",_REALTIME_URL="${{ steps.env.outputs.realtime_url }}",_BACKEND_PG_LISTEN_ENABLED="${{ steps.env.outputs.backend_pg_listen_enabled }}",_BACKEND_REDIS_CONSUME_ENABLED="${{ steps.env.outputs.backend_redis_consume_enabled }}",_BACKEND_REDIS_DISPATCH_ENABLED="${{ steps.env.outputs.backend_redis_dispatch_enabled }}",_REDIS_URL="${{ steps.env.outputs.redis_url }}",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED="${{ steps.env.outputs.backend_redis_dual_publish_enabled }}",_BACKEND_FANOUT_WAKE_REDIS_ENABLED="${{ steps.env.outputs.backend_fanout_wake_redis_enabled }}",_SSE_MULTIPLEX_ENABLED="${{ steps.env.outputs.sse_multiplex_enabled }}",_BACKEND_PRESENCE_REDIS_ENABLED="${{ steps.env.outputs.backend_presence_redis_enabled }}",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED="${{ steps.env.outputs.backend_presence_online_redis_enabled }}",_BACKEND_SSE_LEASE_REDIS_ENABLED="${{ steps.env.outputs.backend_sse_lease_redis_enabled }}",_FRONTEND_MIN_INSTANCES="${{ steps.env.outputs.frontend_min_instances }}",_FRONTEND_MAX_INSTANCES="${{ steps.env.outputs.frontend_max_instances }}",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED="${{ steps.env.outputs.backend_sse_transient_replay_enabled }}" \
+            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_DB_POOL_SIZE="${{ steps.env.outputs.db_pool_size }}",_DB_MAX_OVERFLOW="${{ steps.env.outputs.db_max_overflow }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_REALTIME_MIN_INSTANCES="${{ steps.env.outputs.realtime_min_instances }}",_REALTIME_MAX_INSTANCES="${{ steps.env.outputs.realtime_max_instances }}",_REALTIME_TIMEOUT="${{ steps.env.outputs.realtime_timeout }}",_REALTIME_URL="${{ steps.env.outputs.realtime_url }}",_BACKEND_PG_LISTEN_ENABLED="${{ steps.env.outputs.backend_pg_listen_enabled }}",_BACKEND_REDIS_CONSUME_ENABLED="${{ steps.env.outputs.backend_redis_consume_enabled }}",_BACKEND_REDIS_DISPATCH_ENABLED="${{ steps.env.outputs.backend_redis_dispatch_enabled }}",_REDIS_URL="${{ steps.env.outputs.redis_url }}",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED="${{ steps.env.outputs.backend_redis_dual_publish_enabled }}",_BACKEND_FANOUT_WAKE_REDIS_ENABLED="${{ steps.env.outputs.backend_fanout_wake_redis_enabled }}",_SSE_MULTIPLEX_ENABLED="${{ steps.env.outputs.sse_multiplex_enabled }}",_BACKEND_PRESENCE_REDIS_ENABLED="${{ steps.env.outputs.backend_presence_redis_enabled }}",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED="${{ steps.env.outputs.backend_presence_online_redis_enabled }}",_BACKEND_SSE_LEASE_REDIS_ENABLED="${{ steps.env.outputs.backend_sse_lease_redis_enabled }}",_FRONTEND_MIN_INSTANCES="${{ steps.env.outputs.frontend_min_instances }}",_FRONTEND_MAX_INSTANCES="${{ steps.env.outputs.frontend_max_instances }}",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED="${{ steps.env.outputs.backend_sse_transient_replay_enabled }}" \
             --suppress-logs \
             .

@@ -296,8 +296,14 @@ PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}GITHUB_APP_CLIENT_ID=${GITHUB_APP_
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}GITHUB_APP_SLUG=${GITHUB_APP_SLUG}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}FASTAPI_URL=${FASTAPI_URL}"
 PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}STORAGE_PROVIDER=gcs"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}DB_POOL_SIZE=3"
-PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}DB_MAX_OVERFLOW=1"
+# story #2442(P0, 2026-08-03) — PO forensic 적발: 이 값이 cloudbuild.yaml(backend·
+# deploy-realtime)과 나란히 「세 번째 하드코딩」이었다(SSOT 원칙상 우연히 같은 값≠명시로
+# 같은 값). 이 스택은 아직 prod 게이트 pending(#2185 dev만 완료, project 메모 참고)이라
+# 오늘의 20/10 승격은 안 닿지만, 미래에 prod로 승격될 때 이 리터럴만 남아 있으면 그 시점의
+# 판단(이 파일 위쪽 REDIS_URL과 동일 클래스 함정)없이 3/1이 조용히 굳는다 — 다른 값들과
+# 같은 `${VAR:-default}` 오버라이드 컨벤션으로 맞춰 최소한 명시적 손 override는 가능하게 한다.
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}DB_POOL_SIZE=${DB_POOL_SIZE:-3}"
+PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}DB_MAX_OVERFLOW=${DB_MAX_OVERFLOW:-1}"
 # story #2115(S6): 앱 per-instance SSE 소프트캡(events.py MAX_SSE_CONNECTIONS·기본 100)을 상향.
 # GCE는 Cloud Run concurrency 제약이 없어 실질 상한은 노드 fd/mem이고, 이 캡은 그 전에 걸리는
 # 앱 자체 소프트캡이라 env로 무료 확장 가능. 500으로 올려 ceiling이 실제 확장됨을 실증(3노드=1500 이론).
@@ -390,7 +396,8 @@ else
     PLAIN_ENV_SPEC="${PLAIN_ENV_SPEC}${_PLAIN_SEP}REDIS_URL=${REDIS_URL_VALUE}"
     SECRET_PAIRS_REDIS=""
 fi
-# DB_POOL_SIZE/DB_MAX_OVERFLOW는 위에서 이미 3/1로 명시(Cloud Run realtime과 동일).
+# DB_POOL_SIZE/DB_MAX_OVERFLOW는 위에서 dev-safe 기본값 3/1(env override 가능, story #2442) —
+# Cloud Run realtime과 동일 값. prod 승격 시 cloudbuild.yaml과 같은 근거로 재검토할 것.
 #
 # ⚠️의도적 제외(50개 라이브 실측 중 1개, 침묵 누락 아님) — OPS_RESTART_TS=1784527154:
 # Cloud Run 전용 "재배포 강제 트리거" 값(값 자체를 바꿔야 신규 리비전이 뜨는 그 서비스만의
