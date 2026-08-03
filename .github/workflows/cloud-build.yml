@@ -269,11 +269,27 @@ jobs:
             echo "backend_sse_transient_replay_enabled=true" >> "$GITHUB_OUTPUT"
           fi
 
+          # story #2827 P0 핫픽스(2026-08-03, 페드루 forensic 적발) — GH Actions 워크플로 파서가
+          # 단일 run 블록 안에 `${{ }}` 표현식을 다수(~25개) 담으면 "Exceeded max expression
+          # length 21000"(HTTP 422)로 워크플로 파싱 자체를 거부한다(미문서화 내부 상한 —
+          # actionlint/PR CI는 이걸 안 재서 못 잡고 실 dispatch에서만 터진다). #2827이 substitutions=
+          # 한 줄에 표현식 2개(_DB_POOL_SIZE/_DB_MAX_OVERFLOW)를 추가해 그 상한을 넘겨 dev/prod
+          # 배포가 전부 startup_failure로 죽었다(prod는 구 리비전 유지로 안정·자동복구 아님).
+          # 해법: 25개 개별 `${{ steps.env.outputs.X }}` 표현식을 Submit 스텝에 나열하는 대신,
+          # 이 스텝이 방금 자신이 쓴 $GITHUB_OUTPUT 파일을 되읽어 순수 bash로 한 문자열
+          # 조립·단일 output(`substitutions`)으로 낸다 — Submit 스텝은 이제 이 표현식 하나만
+          # 참조(25+1개 → 2개: COMMIT_SHA·substitutions). dev/prod 값 배선 자체는 무변경.
+          # 연관배열(bash4+ declare -A) 대신 POSIX 호환 grep/cut 조회 사용 — GH 러너 bash
+          # 버전에 의존하지 않는다.
+          _out() { grep "^$1=" "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-; }
+          SUBST="_DEPLOY_ENV=\"$(_out target)\",_FASTAPI_URL=\"$(_out fastapi_url)\",_BACKEND_MIN_INSTANCES=\"$(_out backend_min_instances)\",_BACKEND_MAX_INSTANCES=\"$(_out backend_max_instances)\",_DB_POOL_SIZE=\"$(_out db_pool_size)\",_DB_MAX_OVERFLOW=\"$(_out db_max_overflow)\",_BACKEND_TIMEOUT=\"$(_out backend_timeout)\",_GA4_MEASUREMENT_ID=\"$(_out ga4_measurement_id)\",_REALTIME_MIN_INSTANCES=\"$(_out realtime_min_instances)\",_REALTIME_MAX_INSTANCES=\"$(_out realtime_max_instances)\",_REALTIME_TIMEOUT=\"$(_out realtime_timeout)\",_REALTIME_URL=\"$(_out realtime_url)\",_BACKEND_PG_LISTEN_ENABLED=\"$(_out backend_pg_listen_enabled)\",_BACKEND_REDIS_CONSUME_ENABLED=\"$(_out backend_redis_consume_enabled)\",_BACKEND_REDIS_DISPATCH_ENABLED=\"$(_out backend_redis_dispatch_enabled)\",_REDIS_URL=\"$(_out redis_url)\",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED=\"$(_out backend_redis_dual_publish_enabled)\",_BACKEND_FANOUT_WAKE_REDIS_ENABLED=\"$(_out backend_fanout_wake_redis_enabled)\",_SSE_MULTIPLEX_ENABLED=\"$(_out sse_multiplex_enabled)\",_BACKEND_PRESENCE_REDIS_ENABLED=\"$(_out backend_presence_redis_enabled)\",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED=\"$(_out backend_presence_online_redis_enabled)\",_BACKEND_SSE_LEASE_REDIS_ENABLED=\"$(_out backend_sse_lease_redis_enabled)\",_FRONTEND_MIN_INSTANCES=\"$(_out frontend_min_instances)\",_FRONTEND_MAX_INSTANCES=\"$(_out frontend_max_instances)\",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED=\"$(_out backend_sse_transient_replay_enabled)\""
+          echo "substitutions=${SUBST}" >> "$GITHUB_OUTPUT"
+
       - name: Submit Cloud Build
         run: |
           gcloud builds submit \
             --config=cloudbuild.yaml \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${{ steps.env.outputs.target }}",_FASTAPI_URL="${{ steps.env.outputs.fastapi_url }}",_BACKEND_MIN_INSTANCES="${{ steps.env.outputs.backend_min_instances }}",_BACKEND_MAX_INSTANCES="${{ steps.env.outputs.backend_max_instances }}",_DB_POOL_SIZE="${{ steps.env.outputs.db_pool_size }}",_DB_MAX_OVERFLOW="${{ steps.env.outputs.db_max_overflow }}",_BACKEND_TIMEOUT="${{ steps.env.outputs.backend_timeout }}",_GA4_MEASUREMENT_ID="${{ steps.env.outputs.ga4_measurement_id }}",_REALTIME_MIN_INSTANCES="${{ steps.env.outputs.realtime_min_instances }}",_REALTIME_MAX_INSTANCES="${{ steps.env.outputs.realtime_max_instances }}",_REALTIME_TIMEOUT="${{ steps.env.outputs.realtime_timeout }}",_REALTIME_URL="${{ steps.env.outputs.realtime_url }}",_BACKEND_PG_LISTEN_ENABLED="${{ steps.env.outputs.backend_pg_listen_enabled }}",_BACKEND_REDIS_CONSUME_ENABLED="${{ steps.env.outputs.backend_redis_consume_enabled }}",_BACKEND_REDIS_DISPATCH_ENABLED="${{ steps.env.outputs.backend_redis_dispatch_enabled }}",_REDIS_URL="${{ steps.env.outputs.redis_url }}",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED="${{ steps.env.outputs.backend_redis_dual_publish_enabled }}",_BACKEND_FANOUT_WAKE_REDIS_ENABLED="${{ steps.env.outputs.backend_fanout_wake_redis_enabled }}",_SSE_MULTIPLEX_ENABLED="${{ steps.env.outputs.sse_multiplex_enabled }}",_BACKEND_PRESENCE_REDIS_ENABLED="${{ steps.env.outputs.backend_presence_redis_enabled }}",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED="${{ steps.env.outputs.backend_presence_online_redis_enabled }}",_BACKEND_SSE_LEASE_REDIS_ENABLED="${{ steps.env.outputs.backend_sse_lease_redis_enabled }}",_FRONTEND_MIN_INSTANCES="${{ steps.env.outputs.frontend_min_instances }}",_FRONTEND_MAX_INSTANCES="${{ steps.env.outputs.frontend_max_instances }}",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED="${{ steps.env.outputs.backend_sse_transient_replay_enabled }}" \
+            --substitutions=COMMIT_SHA="${{ github.sha }}",${{ steps.env.outputs.substitutions }} \
             --suppress-logs \
             .
