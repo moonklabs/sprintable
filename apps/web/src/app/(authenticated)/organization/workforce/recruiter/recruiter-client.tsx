@@ -1028,7 +1028,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
               <div role="status" aria-live="polite" aria-atomic="true" className="space-y-3 rounded-md border border-success-border bg-success-tint p-4">
                 <p className="text-sm font-semibold text-success">{t('equipCreatedTitle', { name: equipResult.name })}</p>
                 {equipRuntimeSaveWarning && (
-                  <p role="alert" className="flex items-start gap-1.5 rounded-md border border-warning-border bg-warning-tint p-2 text-xs text-warning">
+                  <p role="alert" className="flex items-start gap-1.5 rounded-md border border-warning-border bg-warning-tint p-2 text-xs text-foreground">
                     <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
                     {t('equipRuntimeSaveWarning')}
                   </p>
