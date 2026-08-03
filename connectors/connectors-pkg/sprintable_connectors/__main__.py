@@ -3,8 +3,9 @@
 auto-detect 안 함(2026-08-03 조사 결론 — 같은 머신에 여러 CLI가 공존해도 사용자가 이미
 어느 host.py를 실행할지로 명시 선택하던 것과 동형, 자동감지는 과설계).
 
-Stage 1: "codex"만 등록. gemini·grok·pi·cursor는 이 딕셔너리에 같은 방식으로 추가될 예정
-(각자 모듈의 `main()` 코루틴만 등록 — 프로토콜 로직은 계열별로 그대로 둔다, 4계열 반증 결론).
+Stage 1(2026-08-03) — 5종 전부 등록 완료: codex·cursor·gemini·grok·pi. 각자 모듈의 `main()`
+코루틴만 등록 — 프로토콜 로직은 계열별로 그대로 둔다(4계열 반증 결론, 원본과 byte-identical
+diff 확認 완료).
 """
 from __future__ import annotations
 
@@ -14,6 +15,10 @@ import sys
 
 _RUNTIMES: dict[str, str] = {
     "codex": "sprintable_connectors.codex",
+    "cursor": "sprintable_connectors.cursor",
+    "gemini": "sprintable_connectors.gemini",
+    "grok": "sprintable_connectors.grok",
+    "pi": "sprintable_connectors.pi",
 }
 
 
