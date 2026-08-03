@@ -370,13 +370,20 @@ describe('recruiter-client equip-skip("역할 없이") 런타임 — story #2433
 describe('recruiter-client STEP4 ②깨우기 — story #2434(정직한 "반쪽" 표시) 소스 회귀가드', () => {
   const source = readFileSync(fileURLToPath(new URL('./recruiter-client.tsx', import.meta.url)), 'utf-8');
 
-  it('path를 t.rich(path 태그)로 렌더한다 — 지시형 t()가 아니라 명령 대상처럼 안 보이는 스타일로 강등', () => {
-    expect(source).toContain('t.rich(`kitOrientingWakeBody_${wakeInfo.method}`');
-    expect(source).toContain('font-mono text-[11px] break-all text-muted-foreground');
-    // 링크 색(text-info 등) 금지 — path 렌더러 바로 그 줄에 링크색 클래스가 없어야 한다.
-    const richCall = /t\.rich\(`kitOrientingWakeBody_\$\{wakeInfo\.method\}`[\s\S]{0,200}?\)/.exec(source);
-    expect(richCall).not.toBeNull();
-    expect(richCall![0]).not.toMatch(/text-info|text-primary|underline/);
+  // 유나양 design:changes(2026-08-03) — 태그명이 ICU 인자명과 같으면(<path>{path}</path> +
+  // path: (chunks)=>...) next-intl이 값을 조용히 삼킨다. 태그명(code)과 값 인자(path)를
+  // 분리하는 규칙 자체는 소스로도 pin하되, "정말 렌더되는가"는 실 마운트
+  // (recruiter-client.wake-method-body.test.tsx)가 권위다 — 이 테스트만으로 안전을 주장하지
+  // 않는다(오늘 배운 것: 이름만 있는 가드는 자격이 없다).
+  it('STEP4가 WakeMethodBody(별도 컴포넌트)로 렌더하고, 그 안에서 code 태그+별도 path 값으로 t.rich를 호출한다', () => {
+    expect(source).toContain('<WakeMethodBody method={wakeInfo.method} path={wakeInfo.path} />');
+    const fnMatch = /export function WakeMethodBody[\s\S]*?\n}/.exec(source);
+    expect(fnMatch).not.toBeNull();
+    const fn = fnMatch![0];
+    expect(fn).toContain('t.rich(`kitOrientingWakeBody_${method}`');
+    expect(fn).toContain('font-mono text-[11px] break-all text-muted-foreground');
+    expect(fn).toMatch(/path,\s*\n\s*code: \(chunks\)/); // 태그명(code) ≠ 값 인자명(path)
+    expect(fn).not.toMatch(/text-info|text-primary|underline/); // 링크 색 금지
   });
 
   it('3칸 그리드 밖에 전폭 결과 문장을 렌더하고, mcp_config 유무 분기를 재사용한다(신규 계약 0)', () => {
@@ -413,11 +420,15 @@ describe('recruiter-client STEP4 ②깨우기 — story #2434(정직한 "반쪽"
     ]) {
       expect(ko[key], `ko.${key}`).toBeTruthy();
       expect(en[key], `en.${key}`).toBeTruthy();
-      // t.rich가 소비할 <path> 태그가 body 값들엔 살아있어야 한다(플레인 {path}로 되돌아가면
-      // t.rich가 렌더할 게 없어 조용히 깨진다).
+      // t.rich가 소비할 <code> 태그가 body 값들엔 살아있어야 한다(태그명이 인자명 path와
+      // 같아지거나 플레인 {path}로 되돌아가면 t.rich가 값을 삼키거나 조용히 깨진다 —
+      // 유나양 design:changes에서 실제로 걸린 자리, recruiter-client.wake-method-body.test.tsx가
+      // 실 렌더로 다시 확認한다).
       if (key.startsWith('kitOrientingWakeBody_')) {
-        expect(ko[key]).toContain('<path>');
-        expect(en[key]).toContain('<path>');
+        expect(ko[key]).toContain('<code>');
+        expect(en[key]).toContain('<code>');
+        expect(ko[key]).not.toContain('<path>');
+        expect(en[key]).not.toContain('<path>');
       }
     }
   });

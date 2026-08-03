@@ -201,6 +201,25 @@ function CopyDownloadButtons({
   );
 }
 
+// story #2434(유나양 design:changes, 2026-08-03) — ②「깨우기」 본문을 별도 컴포넌트로 뽑아
+// 렌더 테스트가 거대한 위저드 전체를 마운트하지 않고도 t.rich 출력(특히 태그명/인자명 충돌
+// 같은 실렌더 결함)을 직접 잡을 수 있게 한다. 소스 텍스트 매칭 가드만으로는 이 결함이 안
+// 잡혔다(초록인데 화면은 빈 괄호) — recruiter-client.wake-method-body.test.tsx 참고.
+export function WakeMethodBody({ method, path }: { method: import('@/services/recruit').RuntimeWakeMethod; path: string }) {
+  const t = useTranslations('recruiter');
+  if (method === 'unknown') return <>{t('kitOrientingWakeBodyUnknown')}</>;
+  return (
+    <>
+      {t.rich(`kitOrientingWakeBody_${method}`, {
+        // 태그명(code)이 ICU 인자명(path)과 겹치면 next-intl이 인자 값을 조용히 삼킨다(콘솔
+        // 에러도 없음, 실 렌더로만 잡힘) — 반드시 둘을 분리하고 둘 다 넘긴다.
+        path,
+        code: (chunks) => <span className="font-mono text-[11px] break-all text-muted-foreground">{chunks}</span>,
+      })}
+    </>
+  );
+}
+
 // ─── 메인 컴포넌트 ───────────────────────────────────────────────────────────
 
 interface RecruiterClientProps {
@@ -1114,11 +1133,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                           링크 색 금지 — 누를 수 있는 것처럼 보이면 안 된다). 디디군의 "한 줄
                           설치"가 착지하면 이 문구 뒷문장을 그 설치 명령으로 되돌린다(만료조건). */}
                       <p className="text-xs text-muted-foreground">
-                        {wakeInfo.method === 'unknown'
-                          ? t('kitOrientingWakeBodyUnknown')
-                          : t.rich(`kitOrientingWakeBody_${wakeInfo.method}`, {
-                              path: (chunks) => <span className="font-mono text-[11px] break-all text-muted-foreground">{chunks}</span>,
-                            })}
+                        <WakeMethodBody method={wakeInfo.method} path={wakeInfo.path} />
                       </p>
                       {/* story #2377 §4(발견 가능성) — 연결 안내로 가는 화면 링크가
                           이전엔 0건이었다(URL을 아는 사람만 볼 수 있어 "문서에 있다"가 화면에서는
