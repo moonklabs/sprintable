@@ -83,9 +83,13 @@ jobs:
             # main 배포 빈도가 낮아 감수(PO 확認 필요, 재검토 트리거는 위 문서 참고).
             echo "db_pool_size=20" >> "$GITHUB_OUTPUT"
             echo "db_max_overflow=10" >> "$GITHUB_OUTPUT"
-            # story #2445(2026-08-03) — prod는 PgBouncer 미도입(#2442에서 앱 풀 20/10으로
-            # 대응, 별건 스코프). 명시 false로 다른 플래그들과 동일 컨벤션 유지.
-            echo "backend_db_pgbouncer=false" >> "$GITHUB_OUTPUT"
+            # story #2445 Phase1(2026-08-04, 페드루) — prod PgBouncer cutover. dev 라이브 검증 + 부하테스트로
+            # 사이징 결함 둘(앱풀 2→25/10 · PgBouncer 서버풀 20/200→60/500)을 cutover 前에 교정, DB/PgBouncer
+            # 층 검증(60커넥션에 Cloud SQL CPU 9-21% idle). prod 중앙 PgBouncer HA(Regional MIG≥2 + Internal LB
+            # VIP 10.178.0.111:6432) 구축·「돌려서」 검증(SELECT 1 왕복·LB HEALTHY×2). 이 true는 아래
+            # cloudbuild.yaml deploy-backend의 prod --update-secrets(DATABASE_URL→VIP경유·DATABASE_URL_DIRECT→
+            # 직결)와 «같은 배포»에서 동반된다(짝이 깨지면 반쪽 상태 — dev 주석 참고).
+            echo "backend_db_pgbouncer=true" >> "$GITHUB_OUTPUT"
             # story #2005: PO 라이브 gcloud 실측(2026-07-17) — backend-prod 현재 유효 Cloud Run
             # 요청 타임아웃=300s. 지금까지 `cloudbuild.yaml`에 `--timeout` 플래그가 없어 이
             # 값은 인프라 기본값이었을 뿐 어디에도 명시돼 있지 않았다 — 이제 이 워크플로우가
