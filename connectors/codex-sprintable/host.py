@@ -89,29 +89,52 @@ class CodexAppServer:
         logger.info("codex app-server initialized")
 
     async def _read_loop(self) -> None:
-        """stdout JSON-RPC 라인 파싱 → response 매칭 + notification 처리."""
+        """stdout JSON-RPC 라인 파싱 → response 매칭 + notification 처리.
+
+        #2439 QA(카디르) — codex 프로세스가 turn 도중 죽으면(stdout EOF) completion도 error도
+        다시는 안 온다 — 그 경로는 _on_notification의 error 분기에 닿지 않는다. finally에서
+        루프 종료(EOF든 예외든) 시 남은 모든 pending turn/RPC를 fail-fast로 풀어 orphan hang을
+        막는다(그 hang이 self._turn_lock을 쥔 채라 이후 요청까지 막히는 것도 같이 막는다 —
+        예외가 run_turn의 `async with self._turn_lock:` 밖으로 전파되며 lock이 정상 해제된다).
+        """
         assert self._proc and self._proc.stdout
-        while True:
-            line = await self._proc.stdout.readline()
-            if not line:
-                break
-            try:
-                msg = json.loads(line.decode("utf-8"))
-            except json.JSONDecodeError:
-                continue
-            # response (id 있음 + result/error)
-            if "id" in msg and ("result" in msg or "error" in msg):
-                fut = self._pending.pop(msg["id"], None)
-                if fut and not fut.done():
-                    if "error" in msg:
-                        fut.set_exception(RuntimeError(str(msg["error"])))
-                    else:
-                        fut.set_result(msg.get("result"))
-                continue
-            # notification (method 있음, id 없음)
-            method = msg.get("method")
-            if method:
-                self._on_notification(method, msg.get("params") or {})
+        try:
+            while True:
+                line = await self._proc.stdout.readline()
+                if not line:
+                    break
+                try:
+                    msg = json.loads(line.decode("utf-8"))
+                except json.JSONDecodeError:
+                    continue
+                # response (id 있음 + result/error)
+                if "id" in msg and ("result" in msg or "error" in msg):
+                    fut = self._pending.pop(msg["id"], None)
+                    if fut and not fut.done():
+                        if "error" in msg:
+                            fut.set_exception(RuntimeError(str(msg["error"])))
+                        else:
+                            fut.set_result(msg.get("result"))
+                    continue
+                # notification (method 있음, id 없음)
+                method = msg.get("method")
+                if method:
+                    self._on_notification(method, msg.get("params") or {})
+        finally:
+            self._fail_all_pending("codex app-server stdout closed (process exited mid-turn?)")
+
+    def _fail_all_pending(self, reason: str) -> None:
+        """읽기 루프가 어떤 경로로든 끝나면(EOF·예외) 남은 pending turn/RPC를 전부 fail-fast."""
+        exc = RuntimeError(reason)
+        for turn_id, fut in list(self._pending_turns.items()):
+            if not fut.done():
+                fut.set_exception(exc)
+            self._pending_turns.pop(turn_id, None)
+            self._turn_texts.pop(turn_id, None)
+        for rid, fut in list(self._pending.items()):
+            if not fut.done():
+                fut.set_exception(exc)
+            self._pending.pop(rid, None)
 
     def _on_notification(self, method: str, params: dict) -> None:
         """ServerNotification 처리 — turn_id로 올바른 run_turn() 호출에 라우팅(#2439)."""
@@ -149,7 +172,7 @@ class CodexAppServer:
         assert self._proc and self._proc.stdin
         self._req_id += 1
         rid = self._req_id
-        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[rid] = fut
         payload = {"jsonrpc": "2.0", "id": rid, "method": method}
         if params is not None:
@@ -201,7 +224,7 @@ class CodexAppServer:
             if not turn_id:
                 raise RuntimeError(f"turn/start returned no turn id: {result}")
 
-            fut: asyncio.Future = asyncio.get_event_loop().create_future()
+            fut: asyncio.Future = asyncio.get_running_loop().create_future()
             self._pending_turns[turn_id] = fut
             self._turn_texts[turn_id] = []
             try:

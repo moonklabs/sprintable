@@ -44,11 +44,19 @@ class _FakeWriter:
 class _FakeReader:
     def __init__(self) -> None:
         self._queue: asyncio.Queue[bytes] = asyncio.Queue()
+        self._closed = False
 
     def push(self, obj: dict) -> None:
         self._queue.put_nowait((json.dumps(obj) + "\n").encode("utf-8"))
 
+    def close(self) -> None:
+        """#2439 QA(카디르) 재현용 — codex 프로세스가 죽어 stdout이 EOF되는 것을 흉내낸다."""
+        self._closed = True
+        self._queue.put_nowait(b"")  # 대기 중인 readline()을 즉시 깨움
+
     async def readline(self) -> bytes:
+        if self._closed and self._queue.empty():
+            return b""
         return await self._queue.get()
 
 
@@ -85,7 +93,7 @@ class FakeCodexAppServer:
                 self._active_turn_id = turn_id
                 self._active_turn_texts = [text]
                 self.stdout.push({"id": rid, "result": {"turn": {"id": turn_id, "status": "inProgress"}}})
-                asyncio.get_event_loop().create_task(self._finish_active_turn())
+                asyncio.get_running_loop().create_task(self._finish_active_turn())
             else:
                 # ⭐실측 재현: active turn 중 겹쳐 들어온 turn/start — phantom turn_id 반환,
                 # 실제로는 활성 turn 텍스트 목록에 merge(다시는 이 phantom turn_id로 신호 없음).
@@ -123,6 +131,16 @@ class FakeCodexAppServer:
         pass
 
 
+class FakeCodexAppServerDiesMidTurn(FakeCodexAppServer):
+    """#2439 QA(카디르) 재현 — turn/start 응답만 주고, completion/error «둘 다» 영원히 안 오는
+    채로 stdout이 죽는다(codex 프로세스가 turn 도중 크래시하는 것과 동형)."""
+
+    async def _finish_active_turn(self) -> None:
+        await asyncio.sleep(self._turn_delay)
+        # completion도 error도 안 보내고 그냥 프로세스가 죽는다 — stdout EOF.
+        self.stdout.close()
+
+
 async def _install_fake(monkeypatch, fake: FakeCodexAppServer):
     async def _fake_create_subprocess_exec(*args, **kwargs):
         return fake
@@ -154,6 +172,59 @@ async def test_overlapping_run_turn_both_resolve_without_hang(monkeypatch):
         assert r2 == "echo:msg-B", f"turn2 응답이 오염됨: {r2!r}"
     finally:
         await codex.stop()
+
+
+@pytest.mark.anyio
+async def test_process_death_mid_turn_fails_fast_not_hang(monkeypatch):
+    """#2439 QA(카디르) 재현 — codex 프로세스가 turn 진행 중 죽으면(stdout EOF, completion도
+    error도 다시는 안 옴) run_turn()이 그 자리서 즉시 실패해야 한다(hang 0).
+
+    수정 전(read_loop이 EOF에 그냥 break만 하고 _pending_turns를 아무도 안 풂): hang — RED.
+    수정 후(read_loop 종료 시 남은 pending turn 전부 fail-fast): 즉시 예외 — GREEN."""
+    import host
+
+    fake = FakeCodexAppServerDiesMidTurn(turn_delay=0.05)
+    await _install_fake(monkeypatch, fake)
+
+    codex = host.CodexAppServer(cwd="/tmp")
+    await codex.start()
+    try:
+        task = asyncio.create_task(codex.run_turn("msg-death"))
+        done, pending = await asyncio.wait({task}, timeout=2.0)
+        assert not pending, "codex 프로세스가 turn 중 죽었는데 run_turn이 hang — orphan 회귀"
+        with pytest.raises(Exception):
+            await task
+    finally:
+        await codex.stop()
+
+
+@pytest.mark.anyio
+async def test_turn_id_routing_is_defense_in_depth_correct():
+    """㉡ 카디르 QA 기록 — self._turn_lock이 겹침을 원천 차단하므로 정상 경로(run_turn 경유)
+    에서는 turn_id map의 라우팅 분기가 도달 불가(unreachable)하다. 그래도 그 층 자체가 옳게
+    동작하는지는 lock을 우회해 turn_id 두 개를 직접 등록·완료시켜 검증한다 — 방어적 설계가
+    "무엇으로부터" 방어하는지 그 층만 따로 고정한다(향후 lock이 우회/약화돼도 이 층이 산다)."""
+    import host
+
+    codex = host.CodexAppServer(cwd="/tmp")
+    fut_a: asyncio.Future = asyncio.get_running_loop().create_future()
+    fut_b: asyncio.Future = asyncio.get_running_loop().create_future()
+    codex._pending_turns["turn-A"] = fut_a
+    codex._turn_texts["turn-A"] = []
+    codex._pending_turns["turn-B"] = fut_b
+    codex._turn_texts["turn-B"] = []
+
+    codex._on_notification(
+        "item/completed", {"item": {"type": "agentMessage", "text": "for-A"}, "turnId": "turn-A"},
+    )
+    codex._on_notification(
+        "item/completed", {"item": {"type": "agentMessage", "text": "for-B"}, "turnId": "turn-B"},
+    )
+    codex._on_notification("turn/completed", {"turn": {"id": "turn-B"}})
+    codex._on_notification("turn/completed", {"turn": {"id": "turn-A"}})
+
+    assert await fut_a == ["for-A"], "turn-A 텍스트가 turn-B와 섞임 — turn_id 라우팅 회귀"
+    assert await fut_b == ["for-B"], "turn-B 텍스트가 turn-A와 섞임 — turn_id 라우팅 회귀"
 
 
 @pytest.mark.anyio
