@@ -474,3 +474,46 @@ async def test_recruit_vs_standalone_rotate_cross_endpoint_race_no_crash():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
         await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
+@pytest.mark.anyio
+async def test_recruit_persists_runtime_type_to_member():
+    """story #2433(A): recruit이 받은 runtime을 compose_kit에만 쓰고 member.runtime_type엔
+    한 번도 안 써서, 위저드에서 런타임을 골라 채용해도 관리화면(PATCH /team-members/{id}가
+    읽는 members.runtime_type)엔 "미설정"으로 남았다 — 실측(미르코, 2026-08-03, codex 표본)
+    으로 재현된 결함. recruit이 PATCH와 같은 anchor-routing(TeamMemberRepository.
+    apply_anchor_update → members.runtime_type)으로 직접 반영하는지 실 Postgres로 검증.
+
+    baseline은 team_members가 VIEW(members 위임)라 여기(destructive_schema, create_all 자체
+    스키마)는 TeamMember/Member가 분리된 실 테이블 — apply_anchor_update가 쓰는 members 행을
+    별도로 심어야 실 저장 여부를 읽어낼 수 있다(TeamMember만 심으면 update가 0행에 no-op해도
+    조용히 통과해버려 결함을 못 잡는 자리)."""
+    from sqlalchemy import select, text as _text
+    from app.core.database import Base
+    from app.models.member import Member
+    from app.services.recruit_service import recruit_agent
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            agent, backend_rt, _qa_rt, _bogus_rt, org_id = await _seed_agent_and_role_templates(s)
+            await s.execute(_text("SET session_replication_role = replica"))
+            s.add(Member(id=agent.id, org_id=org_id, type="agent", name=agent.name))
+            await s.commit()
+
+            await recruit_agent(
+                s, agent_member=agent, org_id=org_id, role_template=backend_rt,
+                runtime="codex", actor_id=uuid.uuid4(),
+            )
+            await s.commit()
+
+        async with Session() as s:
+            member = (await s.execute(
+                select(Member).where(Member.id == agent.id)
+            )).scalar_one()
+            assert member.runtime_type == "codex"
+    finally:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()

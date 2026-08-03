@@ -3277,6 +3277,7 @@
     "equipCreatedTitle": "{name} 생성 완료",
     "equipKeyOnceLabel": "API Key — 지금만 표시됩니다.",
     "equipMcpConfigLabel": "MCP Config",
+    "equipRuntimeSaveWarning": "런타임 저장에 실패했습니다 — 관리 화면에서 다시 설정해 주세요. 키·연결 정보는 그대로 유효합니다.",
     "roleQuestion": "어떤 직무로 채용하나요?",
     "roleLoading": "직무 카탈로그를 불러오는 중…",
     "roleLoadError": "직무 카탈로그를 불러오지 못했습니다.",

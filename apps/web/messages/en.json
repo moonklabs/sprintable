@@ -3277,6 +3277,7 @@
     "equipCreatedTitle": "{name} created",
     "equipKeyOnceLabel": "API key — shown only once.",
     "equipMcpConfigLabel": "MCP Config",
+    "equipRuntimeSaveWarning": "Failed to save the runtime — please set it again from the management screen. Your key and connection info are still valid.",
     "roleQuestion": "Which role are you hiring for?",
     "roleLoading": "Loading role catalog…",
     "roleLoadError": "Couldn't load the role catalog.",

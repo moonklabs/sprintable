@@ -291,6 +291,11 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     api_key: string | null;
   } | null>(null);
   const [equipMcpCopied, setEquipMcpCopied] = useState(false);
+  // story #2433(B) — OrgAgentCreate(POST /api/agents) 스키마엔 runtime_type이 없어(recruit 경로와
+  // 달리 생성 호출 하나로 못 묶는다) 생성 직후 PATCH /api/team-members/{id}(관리화면이 쓰는 것과
+  // 같은 경로)로 반영한다. 이 PATCH가 실패해도 키·MCP config는 이미 유효하므로 결과 화면 자체는
+  // 막지 않되, "반쪽으로 끝났다"를 숨기지 않고 알린다.
+  const [equipRuntimeSaveWarning, setEquipRuntimeSaveWarning] = useState(false);
 
   const handleEquipCreate = async () => {
     const name = equipName.trim();
@@ -298,6 +303,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     if (scopeMode === 'projects' && scopeProjectIds.length === 0) return;
     setEquipCreating(true);
     setEquipError(null);
+    setEquipRuntimeSaveWarning(false);
     try {
       const res = await fetch('/api/agents', {
         method: 'POST',
@@ -311,8 +317,23 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
       });
       if (res.ok) {
         const json = (await res.json()) as {
-          data?: { mcp_config?: Record<string, unknown> | null; api_key?: string | null };
+          data?: { id?: string; mcp_config?: Record<string, unknown> | null; api_key?: string | null };
         };
+        const agentId = json.data?.id;
+        if (agentId) {
+          try {
+            const runtimeRes = await fetch(`/api/team-members/${agentId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ runtime_type: runtime }),
+            });
+            if (!runtimeRes.ok) setEquipRuntimeSaveWarning(true);
+          } catch {
+            setEquipRuntimeSaveWarning(true);
+          }
+        } else {
+          setEquipRuntimeSaveWarning(true);
+        }
         setEquipResult({
           name,
           mcp_config: json.data?.mcp_config ?? null,
@@ -401,6 +422,85 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     const rc = runtimeCapabilities?.find((r) => r.slug === runtime);
     return rc ? runtimeDisplayName(rc) : runtime;
   })();
+
+  // story #2433(B) — equip-skip("역할 없이(키만)")도 STEP3(실행환경) 자체가 스킵돼 런타임을
+  // 고를 길이 없었다(equip-skip은 STEP2 이후 바로 생성). Full 경로 STEP3의 런타임 그리드를
+  // 공유 렌더러로 추출해 equip-skip 폼에도 배치한다 — 그리드 마크업 중복 방지.
+  const renderRuntimePicker = () => (
+    <div className="space-y-2">
+      <p className="text-sm font-semibold text-foreground">{t('runtimeQuestion')}</p>
+      {!runtimeCapabilities ? (
+        <div className="space-y-1">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
+          <div className="grid grid-cols-3 gap-2">
+            {[0, 1, 2].map((i) => <Skeleton key={i} className="h-14 rounded-xl" />)}
+          </div>
+        </div>
+      ) : runtimeCapabilitiesError ? (
+        <div role="alert" aria-live="assertive" aria-atomic="true" className="space-y-2 rounded-xl border border-border bg-muted/30 p-3">
+          <p className="text-sm font-medium text-foreground">{t('runtimeLoadError')}</p>
+          <p className="text-xs text-muted-foreground">{t('runtimeLoadErrorNote')}</p>
+          <Button variant="ghost" size="sm" onClick={() => void fetchRuntimeCapabilities()}>{t('retry')}</Button>
+        </div>
+      ) : (
+        <>
+          <div className="space-y-1">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
+            <div className="grid grid-cols-3 gap-2">
+              {displayedSupportedRuntimes.map((rc) => {
+                const sel = runtime === rc.slug;
+                return (
+                  <button
+                    key={rc.slug}
+                    type="button"
+                    onClick={() => setRuntime(rc.slug)}
+                    className={cn(
+                      'relative flex flex-col items-start gap-1 rounded-xl border p-2.5 text-left transition-colors',
+                      sel ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
+                    )}
+                  >
+                    {sel && <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" aria-hidden />}
+                    <span className={cn(
+                      'flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground',
+                      sel && 'bg-primary/15 text-primary',
+                    )}>
+                      {rc.icon ?? runtimeDisplayName(rc).charAt(0).toUpperCase()}
+                    </span>
+                    <span className="text-xs font-bold text-foreground">{runtimeDisplayName(rc)}</span>
+                    {rc.tier === 'experimental' && <Badge variant="info" className="text-[9px]">{t('runtimeExperimental')}</Badge>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeComingSoonLabel')}</p>
+            <div className="grid grid-cols-3 gap-2">
+              {comingSoonRuntimes.map((rc) => (
+                <button key={rc.slug} type="button" disabled className="flex cursor-not-allowed flex-col items-start gap-1 rounded-xl border border-border bg-muted/40 p-2.5 text-left opacity-55">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground">
+                    {rc.icon ?? runtimeDisplayName(rc).charAt(0).toUpperCase()}
+                  </span>
+                  <span className="text-xs font-bold text-foreground">{runtimeDisplayName(rc)}</span>
+                  <Badge variant="chip" className="text-[9px]">{t('runtimeComingSoonBadge')}</Badge>
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+      <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+        {t('runtimeGuide')}
+      </p>
+      {runtime === 'connector' && (
+        <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          {t('runtimeCustomOtherGuide')}
+        </p>
+      )}
+    </div>
+  );
 
   // story #2377 §2(규격 A) — 「깨우기」 축. MCP 연결(①)과 지침 전달(③)만으로는 «어떤 런타임도»
   // 안 깨어난다(유나양 규격 §0, 실측 5/5) — 그 사이에 빠져 있던 ②를 명시한다.
@@ -829,6 +929,10 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       <option value="admin">{tSettings('agentRoleAdmin')}</option>
                     </select>
                   </div>
+                  {/* story #2433(B) — "역할 없이(키만)"도 STEP3(실행환경)이 스킵돼 런타임을 고를
+                      길이 없었다(equip-skip은 STEP2 이후 바로 생성). 키만 받는 사람도 런타임은
+                      골라야 하므로 여기서도 노출한다(Full 경로 STEP3과 동일 렌더러 공유). */}
+                  {renderRuntimePicker()}
                   {equipError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{equipError}</p>}
                 </div>
               ) : null}
@@ -859,82 +963,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
           {/* ── STEP 3(Full 경로) : 실행환경 + 에이전트(G1) ── */}
           {step === 3 && !equipSkip && (
             <div className="space-y-4">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-foreground">{t('runtimeQuestion')}</p>
-                {!runtimeCapabilities ? (
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
-                    <div className="grid grid-cols-3 gap-2">
-                      {[0, 1, 2].map((i) => <Skeleton key={i} className="h-14 rounded-xl" />)}
-                    </div>
-                  </div>
-                ) : runtimeCapabilitiesError ? (
-                  // story #2105 2차 — fetchRuntimeCapabilities가 재시도 전 setRuntimeCapabilitiesError(false)를
-                  // 먼저 호출해(위 정의) 매 시도마다 언마운트→리마운트된다.
-                  <div role="alert" aria-live="assertive" aria-atomic="true" className="space-y-2 rounded-xl border border-border bg-muted/30 p-3">
-                    <p className="text-sm font-medium text-foreground">{t('runtimeLoadError')}</p>
-                    <p className="text-xs text-muted-foreground">{t('runtimeLoadErrorNote')}</p>
-                    <Button variant="ghost" size="sm" onClick={() => void fetchRuntimeCapabilities()}>{t('retry')}</Button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="space-y-1">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
-                      <div className="grid grid-cols-3 gap-2">
-                        {displayedSupportedRuntimes.map((rc) => {
-                          const sel = runtime === rc.slug;
-                          return (
-                            <button
-                              key={rc.slug}
-                              type="button"
-                              onClick={() => setRuntime(rc.slug)}
-                              className={cn(
-                                'relative flex flex-col items-start gap-1 rounded-xl border p-2.5 text-left transition-colors',
-                                sel ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
-                              )}
-                            >
-                              {sel && <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" aria-hidden />}
-                              <span className={cn(
-                                'flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground',
-                                sel && 'bg-primary/15 text-primary',
-                              )}>
-                                {rc.icon ?? runtimeDisplayName(rc).charAt(0).toUpperCase()}
-                              </span>
-                              <span className="text-xs font-bold text-foreground">{runtimeDisplayName(rc)}</span>
-                              {rc.tier === 'experimental' && <Badge variant="info" className="text-[9px]">{t('runtimeExperimental')}</Badge>}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    {/* 지원 예정(레지스트리 supported=false) — dimmed·disabled */}
-                    <div className="space-y-1">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeComingSoonLabel')}</p>
-                      <div className="grid grid-cols-3 gap-2">
-                        {comingSoonRuntimes.map((rc) => (
-                          <button key={rc.slug} type="button" disabled className="flex cursor-not-allowed flex-col items-start gap-1 rounded-xl border border-border bg-muted/40 p-2.5 text-left opacity-55">
-                            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground">
-                              {rc.icon ?? runtimeDisplayName(rc).charAt(0).toUpperCase()}
-                            </span>
-                            <span className="text-xs font-bold text-foreground">{runtimeDisplayName(rc)}</span>
-                            <Badge variant="chip" className="text-[9px]">{t('runtimeComingSoonBadge')}</Badge>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
-                <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                  {t('runtimeGuide')}
-                </p>
-                {runtime === 'connector' && (
-                  <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                    {t('runtimeCustomOtherGuide')}
-                  </p>
-                )}
-              </div>
+              {renderRuntimePicker()}
 
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-foreground">{t('agentQuestion')}</p>
@@ -998,6 +1027,12 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   가드에서 최초 1회만 non-null이 되므로 polite 낭독으로 충분(흐름 차단 아님). */}
               <div role="status" aria-live="polite" aria-atomic="true" className="space-y-3 rounded-md border border-success-border bg-success-tint p-4">
                 <p className="text-sm font-semibold text-success">{t('equipCreatedTitle', { name: equipResult.name })}</p>
+                {equipRuntimeSaveWarning && (
+                  <p role="alert" className="flex items-start gap-1.5 rounded-md border border-warning-border bg-warning-tint p-2 text-xs text-warning">
+                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                    {t('equipRuntimeSaveWarning')}
+                  </p>
+                )}
                 {equipResult.api_key ? (
                   <div className="space-y-1">
                     <p className="text-xs font-medium text-foreground">{t('equipKeyOnceLabel')}</p>
