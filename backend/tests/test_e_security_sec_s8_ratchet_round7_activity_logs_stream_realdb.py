@@ -106,7 +106,7 @@ def _client_for(app):
 
 async def _setup_app(app, Session, user_id, org_id):
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
+    from app.dependencies.database import get_db, get_read_db
 
     async def _db():
         async with Session() as s:
@@ -121,6 +121,8 @@ async def _setup_app(app, Session, user_id, org_id):
         return AuthContext(user_id=str(user_id), email="caller@test", claims={"app_metadata": {"org_id": str(org_id)}})
 
     app.dependency_overrides[get_db] = _db
+    # story #2451(§6 Phase3 A1): GET /activity-logs 가 get_read_db 로 라우팅됨 — 같은 세션으로.
+    app.dependency_overrides[get_read_db] = _db
     app.dependency_overrides[get_current_user] = _auth
 
 

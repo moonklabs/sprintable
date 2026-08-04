@@ -21,7 +21,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
-from app.dependencies.database import get_db
+from app.dependencies.database import get_db, get_read_db
 from app.models.activity_event import ActivityEvent
 from app.models.agent_run import AgentRun
 from app.models.dependency import ItemDependency
@@ -405,7 +405,8 @@ async def my_actions(
 async def overview(
     org_id: uuid.UUID = Depends(get_verified_org_id),
     _auth: AuthContext = Depends(get_current_user),
-    session: AsyncSession = Depends(get_db),
+    # story #2451(§6 Phase3 A1): 대시보드 집계·create→self-read 흐름 없음 → read replica.
+    session: AsyncSession = Depends(get_read_db),
 ) -> JSONResponse:
     """② 프로젝트 현황 + 헤더 함대. scope=org/team. 비용·기여는 org aggregate only(개인 노출 0)."""
     now = _now()

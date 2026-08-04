@@ -61,9 +61,12 @@ async def _client():
         return ctx
 
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db
+    from app.dependencies.database import get_db, get_read_db
 
     app.dependency_overrides[get_db] = override_db
+    # story #2451(§6 Phase3 A1/A2 스윕): get_db override 쓰는 테스트는 get_read_db 도 같이 걸어야
+    # 함(카디르 QA 지적 — 12개 다른 테스트 회귀). 대상 라우트가 이제 read replica 로 감.
+    app.dependency_overrides[get_read_db] = override_db
     app.dependency_overrides[get_current_user] = override_auth
 
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), mock_session, app
@@ -224,7 +227,7 @@ async def test_update_team_member_self_can_edit_profile_fields():
     """산티아고 Phase A SME (c): self가 프로필 필드(color 등)만 건드리면 org-admin 없이도 통과."""
     from app.main import app
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db
+    from app.dependencies.database import get_db, get_read_db
 
     self_user_id = uuid.uuid4()
     updated = _mock_member()
@@ -248,6 +251,9 @@ async def test_update_team_member_self_can_edit_profile_fields():
         return ctx
 
     app.dependency_overrides[get_db] = override_db
+    # story #2451(§6 Phase3 A1/A2 스윕): get_db override 쓰는 테스트는 get_read_db 도 같이 걸어야
+    # 함(카디르 QA 지적 — 12개 다른 테스트 회귀). 대상 라우트가 이제 read replica 로 감.
+    app.dependency_overrides[get_read_db] = override_db
     app.dependency_overrides[get_current_user] = override_auth
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
@@ -263,7 +269,7 @@ async def test_update_team_member_self_403_when_escalating_role():
     스스로 바꾸는 건 권한상승이라 org-admin 없이는 403 — 이전엔 self 경로가 전 필드를 허용했다."""
     from app.main import app
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db
+    from app.dependencies.database import get_db, get_read_db
 
     self_user_id = uuid.uuid4()
     target = _mock_member()
@@ -285,6 +291,9 @@ async def test_update_team_member_self_403_when_escalating_role():
         return ctx
 
     app.dependency_overrides[get_db] = override_db
+    # story #2451(§6 Phase3 A1/A2 스윕): get_db override 쓰는 테스트는 get_read_db 도 같이 걸어야
+    # 함(카디르 QA 지적 — 12개 다른 테스트 회귀). 대상 라우트가 이제 read replica 로 감.
+    app.dependency_overrides[get_read_db] = override_db
     app.dependency_overrides[get_current_user] = override_auth
     try:
         with patch("app.routers.team_members._is_org_admin", AsyncMock(return_value=False)):

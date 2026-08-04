@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
-from app.dependencies.database import get_db
+from app.dependencies.database import get_db, get_read_db
 from app.models.project import Project
 from app.repositories.project import ProjectRepository
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
@@ -30,7 +30,8 @@ router = APIRouter(prefix="/api/v2/projects", tags=["projects", "Organization"])
 async def list_projects(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    session: AsyncSession = Depends(get_db),
+    # story #2451(§6 Phase3 A1): org roster·create→self-read 흐름 없음 → read replica.
+    session: AsyncSession = Depends(get_read_db),
 ) -> list[ProjectResponse]:
     """정책B: 접근 가능한 프로젝트만 반환 — team_member ∪ project_access(granted) ∪ owner/admin org-wide.
     접근권 없는 멤버는 빈 목록(이전엔 org 전체 노출). owner/admin은 org 전체."""

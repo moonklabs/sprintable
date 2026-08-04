@@ -41,7 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
-from app.dependencies.database import get_db
+from app.dependencies.database import get_read_db
 from app.models.dependency import ItemDependency
 from app.models.evidence import Evidence
 from app.models.gate import AUTO_VERIFY_MAP as _GATE_AUTO_VERIFY_MAP
@@ -110,7 +110,8 @@ class AttentionResponse(BaseModel):
 @router.get("/attention", response_model=AttentionResponse)
 async def glance_attention(
     project_id: uuid.UUID = Query(...),
-    session: AsyncSession = Depends(get_db),
+    # story #2451(§6 Phase3 A1): 대시보드 집계·create→self-read 흐름 없음 → read replica.
+    session: AsyncSession = Depends(get_read_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> AttentionResponse:
@@ -332,7 +333,8 @@ class HeroResponse(BaseModel):
 @router.get("/hero", response_model=HeroResponse)
 async def glance_hero(
     story_id: uuid.UUID = Query(...),
-    session: AsyncSession = Depends(get_db),
+    # story #2451(§6 Phase3 A1): 대시보드 집계·create→self-read 흐름 없음 → read replica.
+    session: AsyncSession = Depends(get_read_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> HeroResponse:

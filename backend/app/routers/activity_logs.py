@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
-from app.dependencies.database import get_db
+from app.dependencies.database import get_read_db
 from app.models.activity_log import ActivityLog
 from app.services.project_auth import has_project_access
 
@@ -81,7 +81,8 @@ async def list_activity_logs(
     to: datetime | None = Query(default=None),
     limit: int = Query(default=30, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    db: AsyncSession = Depends(get_db),
+    # story #2451(§6 Phase3 A1): append-only 로그·create→self-read 흐름 없음 → read replica.
+    db: AsyncSession = Depends(get_read_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> ActivityLogListResponse:
