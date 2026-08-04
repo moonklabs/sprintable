@@ -8,12 +8,22 @@ refresh_token으로 동시 2요청을 쏴 원자 single-use rotation(switch_acco
 ⛔story cd10e123(P0, e5225c0a와 별개 신 클래스) 갱신: 원자 rotation 자체는 여전히
 single-use(위 불변식 유지)이나, "진 쪽에게 무엇을 응답하는지"가 바뀌었다 — 예전엔 하드
 401(TOKEN_REVOKED)로 FE가 clearAuthCookies() 실행해 강제 로그아웃됐다(멀티인스턴스 in-memory
-dedup 미공유 때문에 이게 진짜 race의 정상 경로로 발생). 이제는 grace window(config.py
-auth_refresh_grace_seconds, 기본 5s) 내 revoke된 토큰이면 진짜 stale/replay가 아니라 race
-패자로 판정해 독립적인 새 rotation(fork)을 발급, 200으로 응답한다 — 그래서 아래
+dedup 미공유 때문에 이게 진짜 race의 정상 경로로 발생). 이제는 해소 허용창(config.py
+auth_refresh_chain_resolve_window_seconds, 기본 180s) 내 revoke된 토큰이면 진짜 stale/replay가
+아니라 race 패자로 판정해 독립적인 새 rotation(fork)을 발급, 200으로 응답한다 — 그래서 아래
 `test_concurrent_refresh_same_token_exactly_one_succeeds_realdb`는 [200,401]이 아니라
 [200,200](양쪽 다 독립적으로 유효한, 그러나 서로 다른 토큰)을 기대하도록 갱신됐다.
-grace window 밖(진짜 stale)은 여전히 401 — 아래 `_after_grace` 테스트가 그 경계를 증명한다.
+창 밖(진짜 stale)은 여전히 401 — 아래 `_after_window` 테스트가 그 경계를 증명한다.
+
+story #2449(2026-08-04): 옛 이름 auth_refresh_grace_seconds(기본 5s)를
+auth_refresh_chain_resolve_window_seconds(기본 180s)로 단일화 — 「successor-chaining」(깊이
+무제한 replaced_by 체인 walk) 설계 검토 중 그 walk가 판정 결과엔 영향이 없고(제시 토큰
+자신의 revoked_at 하나만 창과 비교하면 다단계 walk와 결론이 같음) 오히려 아직 아무도 안 쓴
+살아있는 successor를 straggler가 먼저 소비해 정당한 소유자를 되레 401내는 하자가 있어
+「창 넓히기 + 승자 경로 replaced_by 감사기록(판정엔 미사용)」으로 수렴했다(디디 분석·PO
+승인). 아래 `test_refresh_success_records_replaced_by_on_winner_realdb`가 그 감사기록만
+검증한다 — 하나의 판정 로직도 안 바뀌었다는 뜻으로, 이 파일의 기존 테스트는 이름만
+`_grace_window`→`_window`로 바뀌고 기대값은 그대로다.
 """
 from __future__ import annotations
 
@@ -110,7 +120,7 @@ async def _setup_app(app, Session):
 @pytest.mark.anyio
 async def test_concurrent_refresh_same_token_exactly_one_succeeds_realdb():
     """까심 race 재현 — 갱신(story cd10e123): 동일 refresh_token 동시 2요청 → 이제 둘 다 200
-    (grace-window fork). 원자성 불변식은 "둘이 서로 다른 독립 토큰을 받는지"로 증명한다 —
+    (chain_resolve_window fork). 원자성 불변식은 "둘이 서로 다른 독립 토큰을 받는지"로 증명한다 —
     같은 토큰을 공유해 받으면 그건 그것대로 버그(양쪽이 같은 세션을 오인)."""
     from app.main import app
 
@@ -128,7 +138,7 @@ async def test_concurrent_refresh_same_token_exactly_one_succeeds_realdb():
             )
             statuses = sorted(r.status_code for r in results)
             assert statuses == [200, 200], (
-                f"grace-window fork 실패 — 동시 2요청 결과가 [200,200]이 아님: {statuses} "
+                f"chain_resolve_window fork 실패 — 동시 2요청 결과가 [200,200]이 아님: {statuses} "
                 f"(1건이라도 401이면 멀티인스턴스 race 강제로그아웃 재발)"
             )
             rt_a = results[0].json()["data"]["refresh_token"]
@@ -142,9 +152,10 @@ async def test_concurrent_refresh_same_token_exactly_one_succeeds_realdb():
 
 
 @pytest.mark.anyio
-async def test_refresh_replay_within_grace_window_forks_new_session_realdb():
-    """story cd10e123: grace window(기본 5s) 내 순차 재사용 → 200(fork) — race 패자가 강제
-    로그아웃되지 않고 독립적인 새 세션을 받는다는 게 이 신 클래스 fix의 핵심 계약."""
+async def test_refresh_replay_within_chain_resolve_window_forks_new_session_realdb():
+    """story cd10e123: 해소 허용창(기본 180s, story #2449 이전엔 5s) 내 순차 재사용 → 200(fork)
+    — race 패자가 강제 로그아웃되지 않고 독립적인 새 세션을 받는다는 게 이 신 클래스 fix의
+    핵심 계약."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -168,9 +179,12 @@ async def test_refresh_replay_within_grace_window_forks_new_session_realdb():
 
 
 @pytest.mark.anyio
-async def test_refresh_replay_after_grace_window_still_401_realdb():
-    """회귀 0(갱신): grace window *밖*의 진짜 stale replay는 여전히 401 — grace가 무기한
-    재사용을 허용하는 게 아님을 경계값으로 증명(revoked_at을 grace+1s 과거로 직접 backdate)."""
+async def test_refresh_replay_after_chain_resolve_window_still_401_realdb():
+    """회귀 0(갱신): 해소 허용창 *밖*의 진짜 stale replay는 여전히 401 — 창이 무기한 재사용을
+    허용하는 게 아님을 경계값으로 증명(revoked_at을 window+1s 과거로 직접 backdate). story
+    #2449: 이 assert는 auth_refresh_chain_resolve_window_seconds 값을 직접 읽어 경계를 잡으므로
+    값이 바뀌면(예: 선생님이 180→다른 값 확認) 이 테스트가 그 새 값 기준으로 재현된다 — 손값
+    하드코딩이면 값이 바뀌어도 조용히 안 잡히는 자리라 일부러 settings에서 읽는다."""
     from app.main import app
     from app.core.config import settings
 
@@ -188,7 +202,9 @@ async def test_refresh_replay_after_grace_window_still_401_realdb():
             from app.core.security import hash_token
             from app.models.user import RefreshToken
             from sqlalchemy import update as sa_update
-            stale_at = datetime.now(timezone.utc) - timedelta(seconds=settings.auth_refresh_grace_seconds + 1)
+            stale_at = datetime.now(timezone.utc) - timedelta(
+                seconds=settings.auth_refresh_chain_resolve_window_seconds + 1
+            )
             async with Session() as s:
                 await s.execute(
                     sa_update(RefreshToken)
@@ -209,8 +225,8 @@ async def test_refresh_replay_after_grace_window_still_401_realdb():
 
 @pytest.mark.anyio
 async def test_refresh_failure_logs_reason_and_correlation_key_realdb(caplog):
-    """산티아고 관측성 요구(item 3): grace window 밖 실패 시 reason+상관키가 로그에 남는지 실증
-    (story cd10e123 갱신: grace 안쪽은 이제 성공이라 이 테스트는 grace 밖 시나리오로 검증)."""
+    """산티아고 관측성 요구(item 3): 해소 허용창 밖 실패 시 reason+상관키가 로그에 남는지 실증
+    (story cd10e123 갱신: 창 안쪽은 이제 성공이라 이 테스트는 창 밖 시나리오로 검증)."""
     import logging
     from app.main import app
     from app.core.config import settings
@@ -229,7 +245,9 @@ async def test_refresh_failure_logs_reason_and_correlation_key_realdb(caplog):
             from app.core.security import hash_token
             from app.models.user import RefreshToken
             from sqlalchemy import update as sa_update
-            stale_at = datetime.now(timezone.utc) - timedelta(seconds=settings.auth_refresh_grace_seconds + 1)
+            stale_at = datetime.now(timezone.utc) - timedelta(
+                seconds=settings.auth_refresh_chain_resolve_window_seconds + 1
+            )
             async with Session() as s:
                 await s.execute(
                     sa_update(RefreshToken)
@@ -289,6 +307,169 @@ async def test_refresh_success_logs_rotation_old_new_key_realdb(caplog):
                 and f"user_id={seeded['user_id']}" in r.message
                 for r in caplog.records
             ), f"rotation 관측성 로그 누락: {[r.message for r in caplog.records]}"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_refresh_user_inactive_after_win_does_not_undo_atomic_revoke_realdb():
+    """story #2449 회귀(카디르 QA REQUEST_CHANGES, 2026-08-04): 1차 구현은 원자 revoke UPDATE에
+    replaced_by=<미리 생성한 새 id>를 «같은» 문장으로 얹었다 — 승자가 revoke까지 성공한 뒤
+    user 조회가 실패(예: 그새 계정 비활성화)해 새 row INSERT 前에 401로 조기 반환하면, deferred
+    FK가 커밋 시점에 위반되어 «트랜잭션 전체»(방금 성공한 revoke 포함)가 롤백됐다 — 같은 RT가
+    재사용 가능한 상태로 되돌아가는, e5225c0a P0가 막으려던 바로 그 single-use 불변식 파손을
+    재도입하는 회귀였다. 이 테스트는 그 정확한 시퀀스(원자 revoke 승 → user 비활성 → 401)를
+    재현해, old row가 USER_NOT_FOUND 응답 後에도 «계속 revoke된 채로» 남아있는지(재사용 불가)
+    직접 검증한다 — revoked_at이 NULL로 복귀하면 이 회귀가 재발한 것."""
+    from app.main import app
+    from app.core.security import hash_token
+    from app.models.user import RefreshToken, User
+    from sqlalchemy import select as sa_select, update as sa_update
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_user_with_refresh_token(s)
+            # 원자 revoke가 «성공한 뒤에» user 조회가 실패하는 상황을 재현 — 삭제(FK CASCADE로
+            # refresh_tokens까지 같이 날아가 이 시나리오 자체를 못 만든다)가 아니라 비활성화로,
+            # _get_user_by_id(is_active=True 필터)가 None을 반환하게 만든다.
+            await s.execute(
+                sa_update(User).where(User.id == seeded["user_id"]).values(is_active=False)
+            )
+            await s.commit()
+
+        await _setup_app(app, Session)
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                "/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]},
+            )
+            assert resp.status_code == 401
+            assert resp.json()["error"]["code"] == "USER_NOT_FOUND"
+
+            async with Session() as s:
+                old_row = (await s.execute(
+                    sa_select(RefreshToken).where(
+                        RefreshToken.token_hash == hash_token(seeded["raw_refresh"])
+                    )
+                )).scalar_one()
+            assert old_row.revoked_at is not None, (
+                "회귀 재발 — 원자 revoke가 조용히 롤백돼 old RT가 재사용 가능한 상태로 복귀함"
+            )
+
+            # 이중 확인: 같은 RT로 다시 refresh를 쏴도 여전히 거부돼야 한다(회귀 시엔 마치
+            # 한 번도 안 쓴 토큰처럼 통과해버렸다).
+            replay = await client.post(
+                "/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]},
+            )
+            assert replay.status_code == 401
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_refresh_success_records_replaced_by_on_winner_realdb():
+    """story #2449: 원자 rotation 승자 경로에서 old row.replaced_by가 새 row.id로 정확히
+    채워지는지 실증 — 이 값이 없으면 「정상 회전 死(승계자 有) vs logout 같은 명시적
+    dead-end(승계자 無)」를 구분할 감사열 자체가 비어 이 changeset의 핵심 주장(판정 로직은
+    안 바꾸고 감사기록만 추가)이 근거 없는 선언이 된다."""
+    from app.main import app
+    from app.core.security import hash_token
+    from app.models.user import RefreshToken
+    from sqlalchemy import select as sa_select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_user_with_refresh_token(s)
+
+        await _setup_app(app, Session)
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                "/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]},
+            )
+            assert resp.status_code == 200, resp.text
+            new_raw = resp.json()["data"]["refresh_token"]
+
+            async with Session() as s:
+                old_row = (await s.execute(
+                    sa_select(RefreshToken).where(
+                        RefreshToken.token_hash == hash_token(seeded["raw_refresh"])
+                    )
+                )).scalar_one()
+                new_row = (await s.execute(
+                    sa_select(RefreshToken).where(RefreshToken.token_hash == hash_token(new_raw))
+                )).scalar_one()
+
+            assert old_row.revoked_at is not None, "승자 rotation인데 old row가 revoke 안 됨"
+            assert old_row.replaced_by == new_row.id, (
+                f"replaced_by 미기록/불일치 — old.replaced_by={old_row.replaced_by} "
+                f"new.id={new_row.id}"
+            )
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_refresh_chain_resolve_window_fork_leaves_replaced_by_null_realdb():
+    """story #2449: 해소 허용창 안 fork(loser) 경로는 replaced_by를 «절대» 안 건드린다는 걸
+    실증한다 — 이게 이 changeset이 피한 하자(살아있는 successor를 straggler가 먼저 소비)의
+    반대증명: fork된 새 row 자신의 replaced_by는 NULL(아직 아무도 그걸 회전 안 함), 그리고
+    승자가 만든 old→new 링크는 loser 응답과 무관하게 그대로 유지된다."""
+    from app.main import app
+    from app.core.security import hash_token
+    from app.models.user import RefreshToken
+    from sqlalchemy import select as sa_select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_user_with_refresh_token(s)
+
+        await _setup_app(app, Session)
+        client = _client_for(app)
+        try:
+            winner = await client.post(
+                "/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]},
+            )
+            assert winner.status_code == 200, winner.text
+            winner_new_raw = winner.json()["data"]["refresh_token"]
+
+            # 원 토큰으로 재사용(창 안) — loser fork 경로를 태운다.
+            loser = await client.post(
+                "/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]},
+            )
+            assert loser.status_code == 200, loser.text
+            loser_new_raw = loser.json()["data"]["refresh_token"]
+            assert loser_new_raw != winner_new_raw
+
+            async with Session() as s:
+                old_row = (await s.execute(
+                    sa_select(RefreshToken).where(
+                        RefreshToken.token_hash == hash_token(seeded["raw_refresh"])
+                    )
+                )).scalar_one()
+                winner_row = (await s.execute(
+                    sa_select(RefreshToken).where(RefreshToken.token_hash == hash_token(winner_new_raw))
+                )).scalar_one()
+                loser_row = (await s.execute(
+                    sa_select(RefreshToken).where(RefreshToken.token_hash == hash_token(loser_new_raw))
+                )).scalar_one()
+
+            assert old_row.replaced_by == winner_row.id, "승자 링크가 loser fork로 덮어써짐"
+            assert loser_row.replaced_by is None, (
+                "loser fork row에 replaced_by가 채워짐 — 살아있는 노드를 건드리는 하자가 재발했을 수 있는 신호"
+            )
         finally:
             await client.aclose()
     finally:

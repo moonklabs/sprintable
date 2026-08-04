@@ -275,12 +275,17 @@ class Settings(BaseSettings):
     # (REFRESH_GRACE_MS=5000, proxy.ts)을 BE로 옮겨 인스턴스 개수/라우팅과 무관하게 만든다
     # (오르테가·미르코 판단: Redis로 FE 상태공유는 proxy.ts가 edge 런타임이라 과한 인프라 —
     # 배제. DB-only fork-rotation이 근본이면서 인프라 안 키우는 정공법).
-    # 2026-08-04 5→30 (#2449): 5초는 복귀 시 «병렬 refresh 다발»의 실 spread 를 다 못 덮었다 —
-    # FE 가 single-flight 없이(멀티인스턴스서 무의미해 제거) 매 요청 직접 refresh 하므로, 복귀 시
-    # N 병렬요청이 같은 RT 로 동시회전 → grace 밖 race-loser 가 하드 401 → clearAuthCookies(성공한
-    # 요청이 방금 심은 쿠키까지 삭제) → 로그아웃(선생님 실측 로그아웃 로그 01:41Z). 30초로 fork 창을
-    # 넓혀 완화. ⚠️완치 아님(근본=서버 successor-chaining or FE cross-tab single-flight·#2449).
-    auth_refresh_grace_seconds: int = 30
+    # story #2449(2026-08-04) 갱신 — #2838 즉효패치가 main에 직접 심은 auth_refresh_grace_
+    # seconds(기본 30, prod rev 00262 손값 SSOT 반영)를 폐지·단일화. 애초 이 필드는 "제시된
+    # (구) RT 자신의 revoked_at 기준 해소 허용창" 하나뿐이었다(다른 경로 미사용, grep 확認) —
+    # 「successor-chaining」 설계 검토 중 깊이-무제한 체인 walk 자체가 판정 결과에 영향이 없고
+    # (제시 토큰 자신의 revoked_at 하나만 이 창과 비교하면 다단계 walk와 결론이 같다) 오히려
+    # 아직 아무도 안 쓴 살아있는 successor를 straggler가 먼저 소비해 정당한 소유자를 다음
+    # rotation에서 되레 401내는 하자가 있어(디디 분석·PO 승인 2026-08-04) 「창 넓히기 + winner
+    # 경로 승계기록(감사용, 판정엔 미사용)」으로 수렴했다. 창 안이면 오늘처럼 독립적인 새
+    # 토큰을 fork(다른 row 무접촉) — 노출창은 여전히 «분» 오더(토큰 수명 30일 아님).
+    # N=180초(3분)는 선생님 확定값(2026-08-04, PR #2839 머지 게이트 통과).
+    auth_refresh_chain_resolve_window_seconds: int = 180
 
     firebase_project_id: str = ""  # Firebase/Identity Platform GCP 프로젝트 ID(dev/prod 분리)
 
