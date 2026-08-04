@@ -147,6 +147,9 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # 신설로 83→84 — 이메일 provider 미설정 셀프호스트에서 org 생성이 인증을 무조건 요구하던
     # 것을 완화하는 신규 설정(기본 True, 호스티드/prod 동작 불변). 이 가드가 설계대로 새
     # Settings 필드를 실제로 잡아낸 것 — 개수 자체가 늘어난 게 아니라 늘어난 게 정답이다.
+    # #2451(§6 Phase3 read replica): database_url_read 필드 신설로 84→85(DATABASE_URL_READ 포함).
+    # 미설정이면 primary 폴백·설정 시 read replica 라우팅. 가드가 신규 필드를 설계대로 잡은 것.
     assert "PRESENCE_REDIS_ENABLED" in keys and "SSE_TRANSIENT_REPLAY_ENABLED" in keys
     assert "REQUIRE_VERIFIED_EMAIL_FOR_ORG_CREATE" in keys
-    assert len(keys) == 84
+    assert "DATABASE_URL_READ" in keys
+    assert len(keys) == 85

@@ -35,9 +35,10 @@ async def _client():
         return ctx
 
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db
+    from app.dependencies.database import get_db, get_read_db
 
     app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_read_db] = override_db
     app.dependency_overrides[get_current_user] = override_auth
 
     from httpx import ASGITransport, AsyncClient

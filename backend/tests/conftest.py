@@ -203,7 +203,7 @@ def auth_ctx(org_id: uuid.UUID) -> MagicMock:
 async def test_client(mock_session: AsyncMock, auth_ctx: MagicMock):
     """AsyncClient with mocked DB session + auth. Clears dependency_overrides on teardown."""
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db
+    from app.dependencies.database import get_db, get_read_db
     from app.main import app
 
     async def _override_db():
@@ -213,6 +213,7 @@ async def test_client(mock_session: AsyncMock, auth_ctx: MagicMock):
         return auth_ctx
 
     app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_read_db] = _override_db
     app.dependency_overrides[get_current_user] = _override_auth
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

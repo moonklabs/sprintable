@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     # Cloud SQL URL 별도**로 우회. 미설정 시 database_url 폴백(non-PgBouncer 환경). on+미설정 = startup
     # fail-closed(pg_pubsub.check_listen_config·main lifespan).
     database_url_direct: str = ""
+    # Phase3(§6 read replica): 읽기 전용 DSN — DATABASE_URL_READ. 미설정이면 database_url(primary)로
+    # 폴백(replica 없거나 준비 前 «무해»). PgBouncer 경유 시 dbname=sprintable_read → replica 라우팅.
+    # ⚠️ get_read_db 는 «read-your-writes lag 허용» 읽기(목록·대시보드·타인 데이터)에만 — 방금 쓴 걸
+    #    즉시 읽는 경로는 get_db(primary) 유지(replica lag 로 «내 write 안 보임» 방지).
+    database_url_read: str = ""
 
     # Cloud SQL (D-S1: Phase D GCP 인프라)
     cloud_sql_instance_dev: str = "sprintable-494803:asia-northeast3:sprintable-dev"

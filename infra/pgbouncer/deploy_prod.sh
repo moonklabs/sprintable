@@ -20,6 +20,7 @@ REGION=asia-northeast3
 NETWORK=default
 SUBNET=default
 CLOUDSQL_PROD_IP=10.110.0.5
+CLOUDSQL_PROD_REPLICA_IP=10.110.0.16  # Phase3(#2451·§6): read replica sprintable-prod-replica(private·RUNNABLE)
 DB_NAME=sprintable
 DB_USER=postgres
 SECRET_NAME=DATABASE_URL_PROD       # VM SA 가 런타임에 읽어 비번 파싱
@@ -82,6 +83,10 @@ DBPASS=\$(python3 -c 'import urllib.parse,os;print(urllib.parse.urlparse(os.envi
 cat > /etc/pgbouncer/pgbouncer.ini <<INI
 [databases]
 ${DB_NAME} = host=${CLOUDSQL_PROD_IP} port=5432 dbname=${DB_NAME}
+# Phase3(#2451): read replica 풀 — 클라이언트가 dbname=${DB_NAME}_read 로 붙으면 replica 로 라우팅.
+# get_read_db(lag-tolerant 읽기)만 이 풀을 탄다. 풀당 default_pool_size(80)×MIG2 = 160 서버커넥션 → replica
+# max_connections(master 상속·200 가정, cutover 前 SHOW 로 確認) 안. primary 풀은 그대로(무영향·additive).
+${DB_NAME}_read = host=${CLOUDSQL_PROD_REPLICA_IP} port=5432 dbname=${DB_NAME}
 
 [pgbouncer]
 listen_addr = 0.0.0.0

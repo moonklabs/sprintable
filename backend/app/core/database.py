@@ -65,6 +65,20 @@ async_session_factory = async_sessionmaker(
     class_=AsyncSession,
 )
 
+# Phase3(§6 read replica): 읽기 전용 엔진/세션. DATABASE_URL_READ 설정 時 read replica(PgBouncer
+# dbname=sprintable_read)로 라우팅, 미설정 時 primary engine 재사용(폴백 — 별도 커넥션 안 늘림·«무해»).
+# ⚠️ get_read_db 는 lag-tolerant 읽기에만 (아래 docstring).
+read_engine = (
+    create_async_engine(settings.database_url_read, **_build_engine_kwargs())
+    if settings.database_url_read
+    else engine
+)
+read_session_factory = async_sessionmaker(
+    read_engine,
+    expire_on_commit=False,
+    class_=AsyncSession,
+)
+
 
 class Base(DeclarativeBase):
     pass
@@ -75,6 +89,23 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         try:
             yield session
             await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
+async def get_read_db() -> AsyncGenerator[AsyncSession, None]:
+    """Phase3(§6): 읽기 전용 세션 — read replica(DATABASE_URL_READ 설정 時) 또는 primary(폴백).
+
+    ⚠️ «read-your-writes lag 허용» 읽기(목록·대시보드·타인 데이터·집계)에만 쓴다 — 방금 쓴 걸
+    즉시 조회하는 경로(POST 直後 GET 등)는 get_db(primary)를 유지해야 replica lag 로 «내 write 가
+    안 보이는» 버그를 막는다. 라우터별 라우팅은 careful 판정(#2450).
+
+    커밋하지 않는다(읽기 전용) — 예외 時 rollback, 정상 時 세션 정리만.
+    """
+    async with read_session_factory() as session:
+        try:
+            yield session
         except Exception:
             await session.rollback()
             raise
