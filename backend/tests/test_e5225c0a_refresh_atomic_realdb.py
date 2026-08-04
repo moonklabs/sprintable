@@ -315,6 +315,65 @@ async def test_refresh_success_logs_rotation_old_new_key_realdb(caplog):
 
 
 @pytest.mark.anyio
+async def test_refresh_user_inactive_after_win_does_not_undo_atomic_revoke_realdb():
+    """story #2449 회귀(카디르 QA REQUEST_CHANGES, 2026-08-04): 1차 구현은 원자 revoke UPDATE에
+    replaced_by=<미리 생성한 새 id>를 «같은» 문장으로 얹었다 — 승자가 revoke까지 성공한 뒤
+    user 조회가 실패(예: 그새 계정 비활성화)해 새 row INSERT 前에 401로 조기 반환하면, deferred
+    FK가 커밋 시점에 위반되어 «트랜잭션 전체»(방금 성공한 revoke 포함)가 롤백됐다 — 같은 RT가
+    재사용 가능한 상태로 되돌아가는, e5225c0a P0가 막으려던 바로 그 single-use 불변식 파손을
+    재도입하는 회귀였다. 이 테스트는 그 정확한 시퀀스(원자 revoke 승 → user 비활성 → 401)를
+    재현해, old row가 USER_NOT_FOUND 응답 後에도 «계속 revoke된 채로» 남아있는지(재사용 불가)
+    직접 검증한다 — revoked_at이 NULL로 복귀하면 이 회귀가 재발한 것."""
+    from app.main import app
+    from app.core.security import hash_token
+    from app.models.user import RefreshToken, User
+    from sqlalchemy import select as sa_select, update as sa_update
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_user_with_refresh_token(s)
+            # 원자 revoke가 «성공한 뒤에» user 조회가 실패하는 상황을 재현 — 삭제(FK CASCADE로
+            # refresh_tokens까지 같이 날아가 이 시나리오 자체를 못 만든다)가 아니라 비활성화로,
+            # _get_user_by_id(is_active=True 필터)가 None을 반환하게 만든다.
+            await s.execute(
+                sa_update(User).where(User.id == seeded["user_id"]).values(is_active=False)
+            )
+            await s.commit()
+
+        await _setup_app(app, Session)
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                "/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]},
+            )
+            assert resp.status_code == 401
+            assert resp.json()["error"]["code"] == "USER_NOT_FOUND"
+
+            async with Session() as s:
+                old_row = (await s.execute(
+                    sa_select(RefreshToken).where(
+                        RefreshToken.token_hash == hash_token(seeded["raw_refresh"])
+                    )
+                )).scalar_one()
+            assert old_row.revoked_at is not None, (
+                "회귀 재발 — 원자 revoke가 조용히 롤백돼 old RT가 재사용 가능한 상태로 복귀함"
+            )
+
+            # 이중 확인: 같은 RT로 다시 refresh를 쏴도 여전히 거부돼야 한다(회귀 시엔 마치
+            # 한 번도 안 쓴 토큰처럼 통과해버렸다).
+            replay = await client.post(
+                "/api/v2/auth/refresh", json={"refresh_token": seeded["raw_refresh"]},
+            )
+            assert replay.status_code == 401
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_refresh_success_records_replaced_by_on_winner_realdb():
     """story #2449: 원자 rotation 승자 경로에서 old row.replaced_by가 새 row.id로 정확히
     채워지는지 실증 — 이 값이 없으면 「정상 회전 死(승계자 有) vs logout 같은 명시적

@@ -537,21 +537,17 @@ async def _store_refresh_token(
     user: User,
     raw_token: str,
     expires_at: datetime,
-    token_id: uuid.UUID | None = None,
-) -> None:
-    # story #2449: token_id는 /refresh 원자 rotation 승자 경로만 넘긴다(그 경로가 old row의
-    # replaced_by에 이미 이 id를 기록해뒀으니 새 row의 실제 id가 일치해야 함) — 그 외 모든
-    # 호출부(register/login/switch-account/grace-fork)는 생략해 모델 기본(uuid4) 그대로 둔다.
+) -> uuid.UUID:
     row = RefreshToken(
         user_id=user.id,
         token_hash=hash_token(raw_token),
         org_id=None,
         project_id=None,
         expires_at=expires_at,
-        **({"id": token_id} if token_id is not None else {}),
     )
     session.add(row)
     await session.commit()
+    return row.id
 
 
 # ─── POST /api/v2/auth/register ───────────────────────────────────────────────
@@ -769,9 +765,16 @@ async def refresh_token(
     # 비원자라 Cloud Run 멀티 인스턴스 간 동시 refresh가 둘 다 "아직 안 revoke"로 통과하는 race의
     # 근본 원인이었다(산티아고 prod 로그 실측: /auth/refresh 239건 중 230건 401). 검증+revoke를
     # 단일 UPDATE...WHERE revoked_at IS NULL...RETURNING으로 묶어 동시 요청 중 정확히 1건만 매치.
-    # story #2449: 승계 id를 이 원자 UPDATE와 «같은» 문장에서 미리 기록(replaced_by) — 이겼을
-    # 때만 실제로 그 id로 새 row를 만든다(패자 fork 경로는 이 id를 그냥 버림, 부작용 0).
-    won_new_token_id = uuid.uuid4()
+    #
+    # ⛔story #2449 회귀(카디르 QA REQUEST_CHANGES, 2026-08-04): 이 원자 UPDATE에 replaced_by=
+    # <미리 생성한 새 id>를 «같은» 문장으로 얹었던 1차 구현은, revoke 직후 user 조회가 실패
+    # (예: 그새 계정 비활성화)해 새 row INSERT 前에 401로 조기 반환하면 — deferred FK가 커밋
+    # 시점에 "그 id를 가진 row가 없다"로 위반돼 «트랜잭션 전체»(이 revoke 포함)가 롤백됐다.
+    # 즉 진짜 승자의 원자 revoke 자체가 무효화되어 같은 RT가 재사용 가능한 상태로 되돌아가는
+    # — e5225c0a P0가 막으려던 바로 그 single-use 불변식 파손을 재도입하는 회귀였다. 감사기록
+    # (replaced_by)의 성패가 anti-replay 불변식의 성패에 영향을 줘선 안 된다 — 그래서 이 revoke
+    # UPDATE는 replaced_by 없이 «독립적으로» 커밋되고, replaced_by는 새 row가 실제로 INSERT+
+    # commit된 «후에» 별개 문장으로 기록한다(아래 _store_refresh_token 호출부 이후).
     revoked_user_id = (await session.execute(
         update(RefreshToken)
         .where(
@@ -779,7 +782,7 @@ async def refresh_token(
             RefreshToken.revoked_at.is_(None),
             RefreshToken.expires_at > datetime.now(timezone.utc),
         )
-        .values(revoked_at=datetime.now(timezone.utc), replaced_by=won_new_token_id)
+        .values(revoked_at=datetime.now(timezone.utc))
         .returning(RefreshToken.user_id)
     )).scalar_one_or_none()
     won_atomic_rotation = revoked_user_id is not None
@@ -845,10 +848,17 @@ async def refresh_token(
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md)
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
-    await _store_refresh_token(
-        session, user, tokens["refresh_token"], refresh_exp,
-        token_id=won_new_token_id if won_atomic_rotation else None,
-    )
+    new_token_id = await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+    if won_atomic_rotation:
+        # story #2449(회귀 수정): 이 시점엔 새 row가 이미 INSERT+commit 완료라(_store_refresh_
+        # token 내부), old row의 이 UPDATE가 실패하거나 프로세스가 죽어도 원자 revoke(위)는
+        # 이미 별개로 확定돼 있어 anti-replay 불변식과 무관 — 순수 감사기록일 뿐이다.
+        await session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.token_hash == token_hash)
+            .values(replaced_by=new_token_id)
+        )
+        await session.commit()
     # #2124(관측성 보강): 성공 회전도 old_key→new_key로 로깅 — 지금까지 성공 경로엔 로그가
     # 아예 없어(까심발견류 '침묵이 결함을 오래 살린다'와 동형) "회전은 성공했는데 클라가 새
     # 토큰을 저장 못 했는가(㉮)"를 훗날 old_key의 하드 401과 new_key의 미사용 여부로 대조
