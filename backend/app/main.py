@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from limits.errors import StorageError
 from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
@@ -248,6 +249,26 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
     )
     resp.headers["Retry-After"] = retry_after
     return resp
+
+
+@app.exception_handler(StorageError)
+async def rate_limit_storage_error_handler(request: Request, exc: StorageError) -> JSONResponse:
+    """story #2444: resend-verification 전용 격리 limiter(Redis storage_uri·wrap_exceptions=
+    True)만 이 예외를 낸다 — 공유 in-memory limiter(login/refresh 등 8개, 무접촉)는 해당 없음.
+    어뷰징 방지가 목적(선생님 명시)이라 Redis 장애 時 요청을 통과시키지 않고 명시적으로
+    503 fail-closed — sse_lease(#2121, «429=fail-open» 컨벤션)와 정반대 정책을 의도적으로
+    적용하는 자리(AC3)."""
+    _logger.warning(
+        "Rate limit storage unavailable on %s %s: %s", request.method, request.url.path, exc
+    )
+    return JSONResponse(
+        status_code=503,
+        content={
+            "data": None,
+            "error": {"code": "RATE_LIMIT_UNAVAILABLE", "message": "Service temporarily unavailable"},
+            "meta": None,
+        },
+    )
 
 
 @app.exception_handler(Exception)
