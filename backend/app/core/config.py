@@ -275,7 +275,12 @@ class Settings(BaseSettings):
     # (REFRESH_GRACE_MS=5000, proxy.ts)을 BE로 옮겨 인스턴스 개수/라우팅과 무관하게 만든다
     # (오르테가·미르코 판단: Redis로 FE 상태공유는 proxy.ts가 edge 런타임이라 과한 인프라 —
     # 배제. DB-only fork-rotation이 근본이면서 인프라 안 키우는 정공법).
-    auth_refresh_grace_seconds: int = 5
+    # 2026-08-04 5→30 (#2449): 5초는 복귀 시 «병렬 refresh 다발»의 실 spread 를 다 못 덮었다 —
+    # FE 가 single-flight 없이(멀티인스턴스서 무의미해 제거) 매 요청 직접 refresh 하므로, 복귀 시
+    # N 병렬요청이 같은 RT 로 동시회전 → grace 밖 race-loser 가 하드 401 → clearAuthCookies(성공한
+    # 요청이 방금 심은 쿠키까지 삭제) → 로그아웃(선생님 실측 로그아웃 로그 01:41Z). 30초로 fork 창을
+    # 넓혀 완화. ⚠️완치 아님(근본=서버 successor-chaining or FE cross-tab single-flight·#2449).
+    auth_refresh_grace_seconds: int = 30
 
     firebase_project_id: str = ""  # Firebase/Identity Platform GCP 프로젝트 ID(dev/prod 분리)
 
