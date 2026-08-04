@@ -112,3 +112,52 @@ def test_redis_unreachable_raises_storage_error_not_silent_allow():
     strategy = FixedWindowRateLimiter(broken_storage)
     with pytest.raises(StorageError):
         strategy.hit(limit, "unreachable-key", "resend")
+
+
+def test_production_construction_wires_redis_storage_and_wrap_exceptions():
+    """카디르 QA REQUEST_CHANGES(2026-08-04): 위 5개 테스트는 `_fake_redis_storage`가
+    `resend_verification_limiter._storage`를 통째로 교체해버려, rate_limit.py의 실제
+    구성식(`storage_uri=settings.redis_url or "memory://"`, `storage_options={"wrap_
+    exceptions": True}`)«자체»는 한 번도 실행 경로에 들지 않았다 — 그 두 줄을 뮤테이션
+    (memory:// 하드코딩·wrap_exceptions 제거)해도 5/5 GREEN이 유지됨(양성대조 실패
+    가능성 0, 카디르 실측). 이 테스트는 fakeredis 스왑을 쓰지 않고 `importlib.reload`로
+    rate_limit.py의 모듈 최상단 코드를 REDIS_URL 설정 상태에서 실제로 다시 실행시켜,
+    그 결과 객체(`_storage`)가 RedisStorage인지·wrap_exceptions가 켜졌는지 직접 잰다 —
+    구성식이 조금이라도 바뀌면 이 assert가 그 변경을 그대로 반영해 잡아낸다(진짜 배선
+    타겟).
+
+    ⚠️격리: reload는 `app.core.rate_limit`의 module-level 객체 identity를 바꾼다 —
+    `app.routers.auth`가 import 시점에 캐시해둔 옛 `resend_verification_limiter` 참조와
+    어긋나면 다른 테스트(`test_resend_route_uses_isolated_limiter_not_shared`)가 깨질
+    수 있어, finally에서 REDIS_URL 해제 後 rate_limit.py와 auth.py 둘 다 재-reload해
+    원래 상태(memory://·auth.py가 새 객체를 다시 캐시)로 복원한다."""
+    import importlib
+
+    from app.core.config import settings
+
+    import app.core.rate_limit as rate_limit_module
+    import app.routers.auth as auth_module
+
+    original_redis_url = settings.redis_url
+    try:
+        settings.redis_url = "redis://fake-prod-wiring-check:6379/0"
+        importlib.reload(rate_limit_module)
+        importlib.reload(auth_module)
+
+        storage = rate_limit_module.resend_verification_limiter._storage
+        assert storage.__class__.__name__ == "RedisStorage", (
+            f"REDIS_URL 설정 상태인데 storage가 {storage.__class__.__name__} — "
+            "storage_uri 배선이 settings.redis_url을 안 타는 회귀(예: memory:// 하드코딩)"
+        )
+        assert storage.wrap_exceptions is True, (
+            "wrap_exceptions=True 미적용 — Redis 장애 時 StorageError 대신 원 redis-py "
+            "예외가 새 나가 main.py 핸들러가 못 잡는 회귀"
+        )
+    finally:
+        settings.redis_url = original_redis_url
+        importlib.reload(rate_limit_module)
+        importlib.reload(auth_module)
+        # 복원 확認 — 이 assert 자체가 실패하면 다른 테스트가 연쇄로 깨지므로 여기서 조기 실패.
+        assert rate_limit_module.resend_verification_limiter._storage.__class__.__name__ == (
+            "MemoryStorage"
+        )
