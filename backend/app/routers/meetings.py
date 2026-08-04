@@ -43,6 +43,10 @@ async def _get_repo(
 # story #2451(§6 Phase3 A2): list_meetings 전용 — 목록 조회는 create→self-read 흐름이 약함
 # (replica lag 0.86s, PO 승인). 위 _get_repo(get_db)의 인가검증 로직을 그대로 복제하되
 # session만 get_read_db로 — 다른 라우트(post/get-by-id/put/delete)는 무접촉.
+# ⚠️CI has_project_access-403-lint 지적: 위 _get_repo는 story #2342 baseline에 이미
+# 동결된 기존 403(구 정책·현재는 존재-비노출 원칙상 404가 맞음, 이 파일 자체 수정은
+# 이번 스코프 밖). 그 403을 그대로 복제하면 «새» 위반 site가 돼 CI가 잡는다(정확한 지적)
+# — 새로 짓는 코드는 옛 빚을 안 베끼고 현재 정책(404)을 따른다.
 async def _get_repo_read(
     session: AsyncSession = Depends(get_read_db),
     auth: AuthContext = Depends(get_current_user),
@@ -59,7 +63,7 @@ async def _get_repo_read(
 
     from app.services.project_auth import has_project_access
     if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
-        raise HTTPException(status_code=403, detail="No access to this project")
+        raise HTTPException(status_code=404, detail="Project not found")
 
     return MeetingRepository(session, project_id)
 
