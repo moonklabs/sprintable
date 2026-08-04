@@ -51,10 +51,15 @@ class Settings(BaseSettings):
     # PgBouncer ④: 사이드카(localhost:6432·pool_mode=transaction) 경유 여부(env DB_PGBOUNCER).
     # off(기본): 직접 Cloud SQL — 현 동작 100% 유지(사이드카 없어도 다운 X).
     # on: statement_cache 비활성(pooled conn 간 prepared statement reuse 깨짐 방지) +
-    #     app-side pool 최소화(PgBouncer default_pool_size가 실 풀 역할).
+    #     ⭐app-side pool 을 «충분히 크게»(인스턴스당 동시성 수용). PgBouncer 가 이 클라이언트
+    #     커넥션들을 «적은 Cloud SQL 서버커넥션(default_pool_size)»으로 묶으므로 큰 앱 풀이 안전하다.
+    #     ⛔2026-08-03 부하테스트 교훈(#2445): 앱 풀을 2로 «최소화」했더니 부하(200/s)에서 앱 내부
+    #     QueuePool 큐잉→30s 타임아웃→92% 500(08-03 사고 재현·단 PgBouncer/Cloud SQL 은 건강했음).
+    #     앱 풀은 «인스턴스당 동시성」을 정하지 PgBouncer 가 대신하지 않는다 — 최소화는 backwards고
+    #     PgBouncer 도입 취지(큰 앱 풀을 안전하게)를 무력화한다. (재테스트로 실측 튜닝.)
     db_pgbouncer: bool = False
-    db_pgbouncer_pool_size: int = 2  # flag on 時 app-side pool(PgBouncer가 실 풀)
-    db_pgbouncer_max_overflow: int = 1
+    db_pgbouncer_pool_size: int = 25   # ⭐앱 동시성 수용(크게). PgBouncer가 Cloud SQL 커넥션을 묶어 안전.
+    db_pgbouncer_max_overflow: int = 10
 
     # JWT
     jwt_secret: str = ""
