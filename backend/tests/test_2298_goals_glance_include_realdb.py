@@ -121,7 +121,7 @@ def _client_for(app):
 
 async def _setup_app_human(app, Session, user_id, org_id):
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
+    from app.dependencies.database import get_db, get_read_db
 
     async def _db():
         async with Session() as s:
@@ -139,6 +139,9 @@ async def _setup_app_human(app, Session, user_id, org_id):
         )
 
     app.dependency_overrides[get_db] = _db
+    # story #2451(§6 Phase3 A2 스윕): get_db override 쓰는 테스트는 get_read_db 도 같이
+    # 걸어야 함(A1서 겪은 카디르 QA 패턴 — 처음부터 전수로). 대상 라우트가 read replica 로 감.
+    app.dependency_overrides[get_read_db] = _db
     app.dependency_overrides[get_current_user] = _auth
 
 

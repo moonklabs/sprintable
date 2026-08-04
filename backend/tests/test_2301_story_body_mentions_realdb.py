@@ -117,7 +117,7 @@ def _client_for(app):
 
 async def _setup_app_human(app, Session, user_id, org_id):
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
+    from app.dependencies.database import get_db, get_read_db
 
     async def _db():
         async with Session() as s:
@@ -135,6 +135,11 @@ async def _setup_app_human(app, Session, user_id, org_id):
         )
 
     app.dependency_overrides[get_db] = _db
+    # story #2451(§6 Phase3 A2 스윕): 이 헬퍼를 재사용하는 모든 파일(test_2328·test_2224_*·
+    # test_2221·test_2269·test_2288·test_2355·test_2363 등)이 한 번에 커버되도록 소스
+    # 헬퍼에서 get_read_db도 같이 건다 — A1에서 파일별 개별 패치 후 「더 있었다」 재발을
+    # 겪은 교훈(카디르 QA)으로, 이번엔 공유 지점 하나를 고쳐 다운스트림 임포터 전체를 막는다.
+    app.dependency_overrides[get_read_db] = _db
     app.dependency_overrides[get_current_user] = _auth
 
 

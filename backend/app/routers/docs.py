@@ -8,7 +8,7 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
-from app.dependencies.database import get_db
+from app.dependencies.database import get_db, get_read_db
 from app.models.doc import Doc, DocComment, DocRevision
 from app.models.member import Member
 from app.models.team import TeamMember
@@ -86,6 +86,15 @@ def _get_repo(
     return DocRepository(session, org_id)
 
 
+# story #2451(§6 Phase3 A2): list_docs 전용 — 목록 조회는 create→self-read 흐름이 약함
+# (replica lag 0.86s, PO 승인). 다른 라우트가 공유하는 위 _get_repo(get_db)는 그대로.
+def _get_repo_read(
+    session: AsyncSession = Depends(get_read_db),
+    org_id: uuid.UUID = Depends(get_project_scoped_org_id),
+) -> DocRepository:
+    return DocRepository(session, org_id)
+
+
 def _doc_page_envelope(docs: list, limit: int) -> dict:
     """story #2191: #2231 정본 규약 A(limit+1 오버페치 + has_more/next_cursor body meta).
     docs 는 이미 limit+1 개까지 조회된 상태로 들어온다(호출부에서 overfetch)."""
@@ -110,7 +119,7 @@ async def list_docs(
     q: str | None = Query(default=None, description="전문 검색 — 제목 + 본문"),
     limit: int = Query(default=500, ge=1, le=1000),
     cursor: str | None = Query(default=None, description="(sort_order,id) 복합 커서 — 이전 페이지 meta.next_cursor 값 그대로"),
-    repo: DocRepository = Depends(_get_repo),
+    repo: DocRepository = Depends(_get_repo_read),
 ) -> dict:
     # AC1 + AC3: 전문 검색 — project_id 필수
     # story #2191: 의도적으로 커서 미지원(관련도순 + 위치커서 조합이 결과를 뒤섞음, repo단

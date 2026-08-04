@@ -50,9 +50,12 @@ async def _client():
         return ctx
 
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db
+    from app.dependencies.database import get_db, get_read_db
 
     app.dependency_overrides[get_db] = override_db
+    # story #2451(§6 Phase3 A2 스윕): get_db override 쓰는 테스트는 get_read_db 도 같이
+    # 걸어야 함(A1서 겪은 카디르 QA 패턴 — 처음부터 전수로). 대상 라우트가 read replica 로 감.
+    app.dependency_overrides[get_read_db] = override_db
     app.dependency_overrides[get_current_user] = override_auth
 
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), mock_session, app

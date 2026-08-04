@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
-from app.dependencies.database import get_db
+from app.dependencies.database import get_db, get_read_db
 from app.models.pm import Story
 from app.models.project import OrgMember
 from app.models.project_access import ProjectAccess
@@ -93,11 +93,20 @@ def _get_repo(
     return SprintRepository(session, org_id)
 
 
+# story #2451(§6 Phase3 A2): list_sprints 전용 — 목록 조회는 create→self-read 흐름이 약함
+# (replica lag 0.86s, PO 승인). 다른 라우트가 공유하는 위 _get_repo(get_db)는 그대로.
+def _get_repo_read(
+    session: AsyncSession = Depends(get_read_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> SprintRepository:
+    return SprintRepository(session, org_id)
+
+
 @router.get("", response_model=list[SprintResponse])
 async def list_sprints(
     project_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
-    repo: SprintRepository = Depends(_get_repo),
+    repo: SprintRepository = Depends(_get_repo_read),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[SprintResponse]:
     # E-SECURITY SEC-S8(story 83ea3d6a) CC(선생님 "sprint org-level=갭" 확定): 라우터 13개

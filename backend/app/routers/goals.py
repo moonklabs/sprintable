@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_verified_org_id
-from app.dependencies.database import get_db
+from app.dependencies.database import get_db, get_read_db
 from app.repositories.goal import GoalRepository
 from app.schemas.goal import GoalCreate, GoalProgressResponse, GoalResponse, GoalUpdate, GoalWithGlanceResponse
 from app.services.project_auth import has_project_access
@@ -24,6 +24,15 @@ router = APIRouter(tags=["goals", "Work"])
 
 def _get_repo(
     session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> GoalRepository:
+    return GoalRepository(session, org_id)
+
+
+# story #2451(§6 Phase3 A2): list_goals 전용 — 목록 조회는 create→self-read 흐름이 약함
+# (replica lag 0.86s, PO 승인). 다른 라우트가 공유하는 위 _get_repo(get_db)는 그대로.
+def _get_repo_read(
+    session: AsyncSession = Depends(get_read_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> GoalRepository:
     return GoalRepository(session, org_id)
@@ -41,7 +50,7 @@ async def list_goals(
         default=None,
         description='"glance"면 participant_ids/focal_story가 추가로 붙는다(story #2298, 옵트인).',
     ),
-    repo: GoalRepository = Depends(_get_repo),
+    repo: GoalRepository = Depends(_get_repo_read),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[GoalResponse] | JSONResponse:
