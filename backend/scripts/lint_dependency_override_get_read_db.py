@@ -25,11 +25,20 @@ tests/ 전역에 이미 raw get_db-only override 가 수백 건 있다(이 스�
 get_read_db 가 필요없는 라우트만 쓰는 테스트가 대부분이라 당장 문제는 아니다). 지금
 시점 전량을 베이스라인에 동결하고, **새 위반만** CI를 빨갛게 한다(#2335/#2342와 같은
 계약 — "지금 있는 걸 고쳐라"가 아니라 "새로 만들지 마라").
+
+⛔카디르 QA 재재발(2026-08-04, 구조 구멍①) — 초판 baseline은 (파일,함수명)만 키로
+써서 «있음/없음»만 봤다. 이미 grandfathered된 함수 안에 raw override를 «하나 더»
+추가해도(같은 함수·다른 위반 site) 키는 이미 baseline에 있으니 통과했다 — 카디르가
+실측(grandfathered 카운트만 254로 올라가고 CI green). ⇒ baseline을 «키당 허용 개수」
+(`key\tcount`)로 바꿔, 함수당 실제 raw override 개수가 baseline 기록보다 «늘면」
+그 함수 전체를 위반으로 보고한다(어느 특정 줄이 새 줄인지는 diff 없인 특정 불가 —
+함수 단위로 보수적으로 잡는다).
 """
 from __future__ import annotations
 
 import ast
 import sys
+from collections import Counter
 from pathlib import Path
 
 TESTS_DIR = Path(__file__).parent.parent / "tests"
@@ -96,13 +105,21 @@ def violation_key(file: str, func: str) -> str:
     return f"{rel}::{func}"
 
 
-def load_baseline() -> set[str]:
+def load_baseline() -> dict[str, int]:
+    """key\tcount 형식 — count 없이 key만 있는 옛 줄(구 포맷 잔존 대비)은 1로 취급."""
     if not BASELINE_PATH.exists():
-        return set()
-    return {
-        line.strip() for line in BASELINE_PATH.read_text().splitlines()
-        if line.strip() and not line.startswith("#")
-    }
+        return {}
+    baseline: dict[str, int] = {}
+    for line in BASELINE_PATH.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "\t" in stripped:
+            key, count_str = stripped.rsplit("\t", 1)
+            baseline[key] = int(count_str)
+        else:
+            baseline[stripped] = 1
+    return baseline
 
 
 def scan_repo() -> list[tuple[str, int, str]]:
@@ -117,8 +134,20 @@ def scan_repo() -> list[tuple[str, int, str]]:
 def main() -> int:
     violations = scan_repo()
     baseline = load_baseline()
-    new_violations = [v for v in violations if violation_key(v[0], v[2]) not in baseline]
-    grandfathered = len(violations) - len(new_violations)
+
+    by_key: dict[str, list[tuple[str, int, str]]] = {}
+    for v in violations:
+        key = violation_key(v[0], v[2])
+        by_key.setdefault(key, []).append(v)
+
+    new_violations: list[tuple[str, int, str]] = []
+    for key, entries in by_key.items():
+        allowed = baseline.get(key, 0)
+        if len(entries) > allowed:
+            # allowed 개까지는 grandfathered — 그 이후(늘어난 분)만 신규 위반으로 보고.
+            new_violations.extend(entries[allowed:])
+
+    grandfathered = sum(min(len(entries), baseline.get(key, 0)) for key, entries in by_key.items())
 
     print(f"grandfathered: {grandfathered}")
     if new_violations:
@@ -126,7 +155,9 @@ def main() -> int:
         print(
             "story #2451: get_db override는 반드시 tests.conftest.override_db_and_read(app, X)"
             " 를 통해서만 걸어야 한다 — get_read_db 를 놓치는 whack-a-mole(A1 12건·A2 epics"
-            " 7건·A2 QA 3차 3건, 총 세 번 재발)을 구조적으로 막는다."
+            " 7건·A2 QA 3·4차 재발, 총 네 번)을 구조적으로 막는다. baseline에 이미 있는"
+            " 함수라도 그 안에 raw override를 «더» 추가하면(개수 증가) 여기 걸린다(카디르"
+            " QA 구조 구멍① 수정)."
         )
         for file, lineno, func in new_violations:
             rel = Path(file).relative_to(Path(__file__).parent.parent)

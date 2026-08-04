@@ -87,7 +87,7 @@ def _client_for(app):
 
 async def _setup_app(app, Session, user_id, org_id):
     from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     async def _db():
         async with Session() as s:
@@ -104,7 +104,10 @@ async def _setup_app(app, Session, user_id, org_id):
     async def _org():
         return org_id
 
-    app.dependency_overrides[get_db] = _db
+    # story #2451(§6 Phase3, 카디르 QA 4차 2026-08-04): 이 파일은 /api/v2/glance/attention
+    # (A1이 get_read_db로 라우팅한 엔드포인트)을 5회 호출하는데 get_db만 override — 1차
+    # QA 때 「우연 통과」로 넘어갔던 진짜 latent bug. baseline에 얼리지 않고 지금 고친다.
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
 
