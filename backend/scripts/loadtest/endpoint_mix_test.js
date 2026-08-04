@@ -17,7 +17,12 @@
 // 기아인지 이 파일만 보고는 못 가른다(Run 1이 정확히 이 함정에 빠질 뻔했다). 반드시
 // generator_selfcheck.js 로 «생성기 단독 상한이 목표보다 높다»를 먼저 증명한 뒤에만
 // 이 스크립트의 achieved rate 부족을 「서버 캡」으로 해석한다 — run_loadtest.sh가 이
-// 순서를 강제한다.
+// 순서를 강제한다. ⚠️이 파일을 오케스트레이터 없이 `k6 run`으로 단독 실행해도 아래
+// `abortOnFail` threshold는 걸린다(카디르 QA 2026-08-04 지적 — 원인: 페드루가
+// 오케스트레이터 없이 맨손 k6로 이 축을 blast해 dev를 wedge시킨 실사고. run_loadtest.sh의
+// «스테이지 간» kill-switch만으론 스테이지 «내부»의 급붕괴를 못 막는다) — 그러나 이
+// native threshold는 「명백한 붕괴」만 잡는 last-resort고, 정밀한 rate 달성 여부 판정은
+// 여전히 run_loadtest.sh(+ramp_expected.py)의 몫이다.
 //
 // 실행(단독, 오케스트레이터 없이 한 스테이지만 보고 싶을 때):
 //   BASE_URL=... CREDS_FILE=./loadtest_creds.json RATE=200 STAGE_DURATION=60s \
@@ -27,12 +32,16 @@ import http from 'k6/http';
 import { check } from 'k6';
 import { SharedArray } from 'k6/data';
 
-const BASE_URL = __ENV.BASE_URL || 'https://sprintable-backend-dev-57iommnikq-du.a.run.app';
+const BASE_URL = __ENV.BASE_URL || 'https://sprintable-backend-dev-787818285179.asia-northeast3.run.app';
 const CREDS_FILE = __ENV.CREDS_FILE || './loadtest_creds.json';
 const RATE = Number(__ENV.RATE || 100); // 이 스테이지의 목표 rps(오케스트레이터가 ramp 단계마다 바꿔 호출)
 const STAGE_DURATION = __ENV.STAGE_DURATION || '60s';
 const RAMP_UP = __ENV.RAMP_UP || '10s';
 const RAMP_DOWN = __ENV.RAMP_DOWN || '5s';
+// run_loadtest.sh의 kill-switch와 동일 SSOT(env var 공유) — 오케스트레이터 없이 단독
+// 실행해도 같은 급붕괴 기준으로 abort(카디르 QA MUST①, dev wedge 사고의 구조적 원인 봉합).
+const KILL_ERROR_RATE = Number(__ENV.KILL_ERROR_RATE || 0.05);
+const KILL_P95_MS = Number(__ENV.KILL_P95_MS || 2000);
 // generator_selfcheck.js와 동일 근거(Run 1 VU 기아) — 이 스크립트도 넉넉하게 잡는다.
 // RATE가 커지면(최대 300 예상) 필요 VU도 늘어야 하므로 RATE에 비례한 하한을 둔다.
 const PRE_ALLOCATED_VUS = Number(__ENV.PRE_ALLOCATED_VUS || Math.max(1000, RATE * 5));
@@ -59,7 +68,13 @@ export const options = {
   // 엔드포인트별로 못 쪼개는 한계를 태그로 보완: k6 summary는 태그별 자동 분해를
   // 안 해줘서, 엔드포인트 이름별 http_req_duration을 별도 Trend 메트릭으로 직접 낸다).
   thresholds: {
-    http_req_failed: ['rate<0.05'], // 정보용 완화 게이트 — 실 kill-switch는 오케스트레이터가 스테이지 간에 검사
+    http_req_failed: [
+      { threshold: 'rate<0.05', abortOnFail: false }, // 정보용 — 진행 중 관측용
+      { threshold: `rate<${KILL_ERROR_RATE}`, abortOnFail: true, delayAbortEval: '10s' },
+    ],
+    http_req_duration: [
+      { threshold: `p(95)<${KILL_P95_MS}`, abortOnFail: true, delayAbortEval: '10s' },
+    ],
   },
   summaryTrendStats: ['avg', 'min', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
 };
@@ -74,7 +89,8 @@ for (const name of [
   'stories_list', 'docs_list', 'tasks_list', 'goals_list', 'sprints_list',
   'standups_list', 'meetings_list', 'hypotheses_list',
   'notifications_count', 'team_members_list', 'org_members_list', 'projects_list',
-  'activity_logs_list', 'glance_attention', 'story_create',
+  'activity_logs_list', 'glance_attention', 'audit_logs_list', 'command_center_overview',
+  'conversations_unread_count', 'event_notifications_unread_count', 'story_create',
 ]) {
   _endpointDuration[name] = new Trend(`endpoint_duration_${name}`, true);
   _endpointErrors[name] = new Rate(`endpoint_error_rate_${name}`);
@@ -100,9 +116,17 @@ const _LIST_ENDPOINTS = [
   { name: 'meetings_list', path: (c) => `/api/v2/meetings?project_id=${c.project_id}` },
   { name: 'hypotheses_list', path: (c) => `/api/v2/hypotheses?project_id=${c.project_id}` },
 ];
-// story #2451 A1이 get_read_db로 옮긴 것 중 이 harness가 다루는 부분집합(대시보드 제외,
-// 위 docstring 참조). 카운터·로스터·집계는 목록형보다 가볍지만 고빈도라 A1 확認 당시
-// SHOW POOLS에서 즉시 replica hit이 뜬 자리 — 섞어야 실사용 트래픽 구성에 가깝다.
+// story #2451 A1이 get_read_db로 옮긴 것 중 seeded identity({api_key,org_id,project_id})
+// 만으로 호출 가능한 부분집합(카디르 QA 2026-08-04 반영 — audit_logs/command_center/
+// conversations/event_notifications 4개 추가). 카운터·로스터·집계는 목록형보다 가볍지만
+// 고빈도라 A1 확認 당시 SHOW POOLS에서 즉시 replica hit이 뜬 자리 — 섞어야 실사용
+// 트래픽 구성에 가깝다.
+//
+// ⛔A1 전체가 아니라 «호출 가능한 부분집합»이다(README 과대주장 정정, 카디르 QA③) —
+// 제외: `GET /dashboard`(member_id 필수, 파일 상단 docstring), `GET /glance/hero`
+// (story_id: uuid.UUID = Query(...) 필수 — seeded identity엔 특정 story 참조가 없어
+// dashboard와 동일한 구조적 이유로 호출 불가. bootstrap하려면 먼저 story를 만들거나
+// 목록에서 하나 골라야 해서 스코프 밖).
 const _LIGHT_ENDPOINTS = [
   { name: 'notifications_count', path: () => `/api/v2/notifications/count` },
   { name: 'team_members_list', path: () => `/api/v2/team-members` },
@@ -110,6 +134,10 @@ const _LIGHT_ENDPOINTS = [
   { name: 'projects_list', path: () => `/api/v2/projects` },
   { name: 'activity_logs_list', path: () => `/api/v2/activity-logs` },
   { name: 'glance_attention', path: (c) => `/api/v2/glance/attention?project_id=${c.project_id}` },
+  { name: 'audit_logs_list', path: () => `/api/v2/audit-logs` },
+  { name: 'command_center_overview', path: () => `/api/v2/command-center/overview` },
+  { name: 'conversations_unread_count', path: () => `/api/v2/conversations/unread-count` },
+  { name: 'event_notifications_unread_count', path: () => `/api/v2/event-notifications/unread-count` },
 ];
 
 export default function () {

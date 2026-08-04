@@ -58,9 +58,10 @@ k6 run --summary-export=/tmp/selfcheck.json generator_selfcheck.js
 
 - **목록형 8종(A2, 60% 가중)** — `/stories` `/docs` `/tasks` `/goals` `/sprints`
   `/standups` `/meetings` `/hypotheses` (project_id 스코프, `get_read_db` 확인됨 #2451 A2)
-- **가벼운 카운터/로스터(A1, 30% 가중)** — `/notifications/count` `/team-members`
-  `/org-members` `/projects` `/activity-logs` `/glance/attention` (`get_read_db` 확인됨
-  #2451 A1)
+- **가벼운 카운터/로스터/집계 10종(A1, 30% 가중)** — `/notifications/count`
+  `/team-members` `/org-members` `/projects` `/activity-logs` `/glance/attention`
+  `/audit-logs` `/command-center/overview` `/conversations/unread-count`
+  `/event-notifications/unread-count` (`get_read_db` 확인됨 #2451 A1)
 - **쓰기(10% 가중)** — `POST /stories` (원본 dev_db_capacity_test.js와 동형 — 08-03
   인시던트가 「평범한 mutation 버스트」였으므로 write 축을 완전히 빼면 그 회귀를 이
   harness가 다시 못 잡는다)
@@ -69,10 +70,15 @@ k6 run --summary-export=/tmp/selfcheck.json generator_selfcheck.js
 `endpoint_error_rate_*` `endpoint_requests_*` 커스텀 메트릭으로 개별 노출(k6 summary는
 태그별 자동 분해가 없어서 직접 추가).
 
-⛔**v1 제외**: `GET /dashboard` — `member_id`가 필수 쿼리파라미터인데 seeded identity에
-member_id가 없다. `GET /me`로 bootstrap 가능(api-key 인증 시 `auth.user_id`=`team_member.id`)
-하나 k6 `setup()` 단계에서 신원마다 사전 호출이 필요해 이번 스코프 밖으로 미룬다 — 후속
-후보.
+⛔ **이건 A1/A2 «전체»가 아니라 seeded identity(`{api_key, org_id, project_id}`)만으로
+호출 가능한 부분집합이다**(카디르 QA 2026-08-04 — 이전 README가 「A1 전체 커버」로
+과대주장했던 것 정정). v1 제외:
+- `GET /dashboard` — `member_id`가 필수 쿼리파라미터, seeded identity엔 없음. `GET /me`로
+  bootstrap 가능(api-key 인증 시 `auth.user_id`=`team_member.id`)하나 k6 `setup()`
+  단계에서 신원마다 사전 호출이 필요해 스코프 밖 — 후속 후보.
+- `GET /glance/hero` — `story_id`가 필수 쿼리파라미터, seeded identity엔 특정 story
+  참조가 없음(dashboard와 동일한 구조적 이유). bootstrap하려면 story를 먼저 만들거나
+  목록에서 골라야 해서 스코프 밖 — 후속 후보.
 
 ## 오케스트레이터
 
@@ -88,9 +94,27 @@ STAGES="50 100 200 300" STAGE_DURATION=60s ./run_loadtest.sh
 중단**(exit 3). 결과는 `$OUT_DIR/summary_with_header.csv`(attempted/achieved rps·
 error_rate·p50/p95/p99), 스테이지별 raw k6 summary JSON·log도 `$OUT_DIR`에 보존.
 
-Kill-switch 자체는 2026-08-04 dev에서 실측 검증됨 — dead credentials로 강제
-error_rate=100% 상황을 만들어 exit code 3으로 정확히 중단하는 것을 확인(주입 실패
-케이스로 self-verify하는 팀 관례).
+Kill-switch(스테이지 «사이», run_loadtest.sh) 자체는 2026-08-04 dev에서 실측 검증됨 —
+dead credentials로 강제 error_rate=100% 상황을 만들어 exit code 3으로 정확히 중단하는
+것을 확인(주입 실패 케이스로 self-verify하는 팀 관례).
+
+### 스테이지 «내부» 방어(k6 native `abortOnFail`)
+
+⛔**카디르 QA 2026-08-04 REQUEST_CHANGES의 핵심 발견**: 위 kill-switch는 `run_loadtest.sh`
+«안에만» 있었다 — `endpoint_mix_test.js`/`generator_selfcheck.js`를 오케스트레이터 없이
+`k6 run`으로 «단독 실행»하면 안전장치가 0이었다(당시 threshold는 `http_req_failed<0.05`
+정보용 하나뿐, abort 없음). 이게 바로 같은 날 PO가 오케스트레이터 없이 맨손 k6로
+blast해 dev를 wedge시킨 사고의 «구조적 원인» 그 자체였다.
+
+⇒ 두 k6 스크립트에 **native `abortOnFail: true` threshold**(`http_req_failed`,
+`http_req_duration p(95)`, `KILL_ERROR_RATE`/`KILL_P95_MS`와 동일 SSOT — env var 공유)를
+직접 걸어, 오케스트레이터 유무와 무관하게 스크립트 자체가 급붕괴 시 즉시 멈추게 했다.
+
+실측 검증(2026-08-04, dev): `endpoint_mix_test.js`를 존재하지 않는 URL prefix로 강제
+100% 실패시켜 단독 실행 — 계획된 18초 중 **11.9초(66%)만에 자동 중단**, k6 로그에
+`"thresholds ... abortOnFail enabled, stopping test prematurely"` 확인, 프로세스 종료
+코드 **99**(k6의 threshold-abort 표준 코드), `--summary-export` JSON도 정상 기록됨(215
+iterations) — 오케스트레이터의 후속 분석과도 호환 확인.
 
 ## 생성기가 단일 머신 CPU/네트워크에 병목이면(분산)
 
@@ -113,12 +137,13 @@ key). 각 항목 `{api_key, org_id, project_id}`(org-level agent, `x-agent-api-k
 ]
 ```
 
-⚠️ **재시딩 필요(2026-08-04 확인)**: Run 1이 남긴 `loadtest_creds.json`의 20개 신원은
-현재 전부 `401 API key member not found`로 dev에서 죽어 있다(원인 미조사 — dev DB가
-이후 재구축/정리됐을 가능성). 재시딩은 `python -m scripts.jobs.seed_loadtest_identities`
-(`SEED_N` env로 개수 조절)이나, `scripts/jobs/README.md`에 명시된 대로 이건
-**PO/infra-lane**(`gcloud run jobs execute sprintable-verify-oneoff`) — 이 harness를
-실제 rate로 돌리려면 그 실행이 먼저 필요하다.
+재시딩은 `python -m scripts.jobs.seed_loadtest_identities`(`SEED_N` env로 개수 조절)이나,
+`scripts/jobs/README.md`에 명시된 대로 이건 **PO/infra-lane**
+(`gcloud run jobs execute sprintable-verify-oneoff`) — dev 크리덴셜이 만료/재구축으로
+죽으면(2026-08-04에 한 번 있었음 — Run 1의 신원 20개가 401로 죽어 있었고, PO가
+재시딩해 언블록함) 이 실행이 다시 필요하다. `loadtest_creds.json`은 gitignore되므로
+harness 코드 자체엔 만료 여부가 기록되지 않는다 — 돌리기 전 identity 1개를 curl로
+찔러 200이 오는지 먼저 확인하는 습관을 권장.
 
 API-key 인증은 자체 rate-limit 버킷(`x-agent-api-key`, `backend/app/core/rate_limit.py`)
 이라 재로그인/`/auth/token` 소모 없이 신원을 런 내내 재사용한다. `X-Org-Id`/
@@ -127,8 +152,9 @@ API-key 인증은 자체 rate-limit 버킷(`x-agent-api-key`, `backend/app/core/
 
 ## Gate(§6)
 
-`endpoint_mix_test.js`의 `options.thresholds`는 `http_req_failed<0.05`(정보용, 완화) —
-실제 pass/fail 판정과 kill-switch는 `run_loadtest.sh`가 스테이지 사이에 수행한다(위
+`endpoint_mix_test.js`의 `options.thresholds`는 3중 방어 — 정보용 관측(`http_req_failed
+<0.05`, abort 없음) + native abortOnFail(스테이지 «내부» 급붕괴 즉시 중단, 위 「스테이지
+내부 방어」 참조) + `run_loadtest.sh`의 kill-switch(스테이지 «사이» 판정, 위
 「오케스트레이터」 참조). 최종 목표 rps(200-300)에서의 p50/p95/p99·에러율은 `summary_
 with_header.csv`로 보고 — 절대 임계치(200/300 어느 쪽이 결승선인지)는 선생님 확定 대기
 (§6 스토리 스펙에 "200-300 잠정"으로 명시).

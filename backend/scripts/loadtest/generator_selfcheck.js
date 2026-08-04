@@ -22,13 +22,22 @@
 //
 // 실행:
 //   BASE_URL=https://sprintable-backend-dev-... TARGET_RATE=300 k6 run generator_selfcheck.js
-// 오케스트레이터(run_loadtest.sh)가 본 테스트 前에 자동으로 이걸 먼저 돌리고 게이트한다 —
-// 수동으로 이 파일만 돌릴 때도 동일한 통과 기준이 적용된다(별도 로직 없음).
+// 오케스트레이터(run_loadtest.sh)가 본 테스트 前에 자동으로 이걸 먼저 돌리고 ramp_expected.py
+// 기반 정밀 판정(achieved 개수 >= 기대개수*0.95)을 한다. ⚠️**이 파일을 k6로 단독 실행하면
+// 그 정밀 판정은 «없다»** — 아래 `abortOnFail` threshold(카디르 QA 2026-08-04 지적, 원인:
+// 오케스트레이터 없이 endpoint_mix_test.js를 맨손 k6로 blast해 dev를 wedge시킨 실사고)는
+// «명백한 급붕괴»만 잡는 last-resort 그물이지, 「생성기가 목표 rps를 정확히 달성했는가」의
+// 답은 아니다 — 정밀 판정이 필요하면 반드시 run_loadtest.sh를 통해 돌리거나, summary export
+// JSON을 ramp_expected.py로 직접 대조할 것.
 
 import http from 'k6/http';
 import { check } from 'k6';
 
-const BASE_URL = __ENV.BASE_URL || 'https://sprintable-backend-dev-57iommnikq-du.a.run.app';
+const BASE_URL = __ENV.BASE_URL || 'https://sprintable-backend-dev-787818285179.asia-northeast3.run.app';
+// run_loadtest.sh의 kill-switch(KILL_ERROR_RATE/KILL_P95_MS)와 동일 SSOT — 오케스트레이터
+// 없이 이 파일만 단독 실행해도 같은 급붕괴 기준으로 abort되게(카디르 QA MUST①).
+const KILL_ERROR_RATE = Number(__ENV.KILL_ERROR_RATE || 0.05);
+const KILL_P95_MS = Number(__ENV.KILL_P95_MS || 2000);
 // 본 테스트가 목표할 rps보다 «높게» 잡아야 「생성기가 목표보다 여유 있게 뽑을 수 있다」는
 // 걸 증명한다 — 자기 자신의 목표치를 간신히 맞추는 정도로는 다음 실 부하(추가 지연·재시도)
 // 아래서 재현 안 될 위험이 있다(20% 헤드룸).
@@ -60,12 +69,18 @@ export const options = {
       ],
     },
   },
-  // 여기 threshold는 「생성기가 스스로도 못 뽑는지」를 last-resort로 잡는다 — 진짜 판정은
-  // run_loadtest.sh가 summary JSON의 achieved rate를 직접 계산해서 한다(threshold만으론
-  // "시도 대비 달성 비율"을 못 표현함, http_req_duration/failed는 서버 응답 지표라 이
-  // 무부하 엔드포인트에선 항상 통과할 것 — dropped_iterations만이 생성기 기아의 신호).
+  // native abortOnFail — k6 프로세스 자체가 급붕괴 시 즉시 중단한다(오케스트레이터
+  // 유무 무관, 카디르 QA MUST①). GET /ping은 무부하 엔드포인트라 정상 상황에선 이 임계에
+  // 절대 안 걸린다 — 걸린다면 dev 자체가 죽었거나 네트워크가 끊긴 것. delayAbortEval로
+  // 램프업 구간의 초기 노이즈(워밍업 전 튐)로 인한 오탐 중단을 피한다.
   thresholds: {
-    http_req_failed: ['rate<0.01'],
+    http_req_failed: [
+      { threshold: 'rate<0.01', abortOnFail: false },
+      { threshold: `rate<${KILL_ERROR_RATE}`, abortOnFail: true, delayAbortEval: '5s' },
+    ],
+    http_req_duration: [
+      { threshold: `p(95)<${KILL_P95_MS}`, abortOnFail: true, delayAbortEval: '5s' },
+    ],
   },
 };
 

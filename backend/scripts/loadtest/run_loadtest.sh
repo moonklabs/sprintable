@@ -20,16 +20,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-BASE_URL="${BASE_URL:-https://sprintable-backend-dev-57iommnikq-du.a.run.app}"
+BASE_URL="${BASE_URL:-https://sprintable-backend-dev-787818285179.asia-northeast3.run.app}"
 CREDS_FILE="${CREDS_FILE:-./loadtest_creds.json}"
 STAGES="${STAGES:-50 100 200 300}"
 STAGE_DURATION="${STAGE_DURATION:-60s}"
 RAMP_UP="${RAMP_UP:-10s}"
 RAMP_DOWN="${RAMP_DOWN:-5s}"
-# kill-switch 임계 — README §Gate와 동일 기준(p95<500ms, error<0.1%)을 스테이지 사이에도
-# 적용한다. 이 값을 넘기면 다음(더 높은) 스테이지로 올라가지 않고 즉시 멈춘다.
-KILL_ERROR_RATE="${KILL_ERROR_RATE:-0.05}"    # 5% — 개별 스테이지 완주는 허용하되 다음 스테이지 진입은 막는 보수적 값
-KILL_P95_MS="${KILL_P95_MS:-2000}"            # 2s — 정상 가동 목표(500ms)의 4배, "명백히 무너짐"만 감지
+# kill-switch 임계 — 「명백히 무너짐」만 감지하는 보수적 값(§6 Gate의 정상가동 목표인
+# p95<500ms·error<0.1%보다 훨씬 느슨: 그 목표는 «pass/fail 판정» 기준이고, 이건 「계속
+# 진행해도 안전한가」의 kill 기준이라 다르다). 스테이지 «사이»(run_loadtest.sh)와 스테이지
+# «내부»(endpoint_mix_test.js/generator_selfcheck.js의 k6 native abortOnFail) 둘 다 이
+# 값을 env var로 공유(카디르 QA 2026-08-04 — SSOT 하나, 드리프트 방지).
+KILL_ERROR_RATE="${KILL_ERROR_RATE:-0.05}"    # 5%
+KILL_P95_MS="${KILL_P95_MS:-2000}"            # 2s
 OUT_DIR="${OUT_DIR:-/tmp/loadtest-run-$(date +%s 2>/dev/null || echo run)}"
 
 mkdir -p "$OUT_DIR"
@@ -59,6 +62,7 @@ SELFCHECK_JSON="$OUT_DIR/selfcheck.json"
 SELFCHECK_TARGET=$(python3 -c "import math; print(math.ceil(int('$MAX_TARGET') * 1.2))")
 BASE_URL="$BASE_URL" TARGET_RATE="$MAX_TARGET" SELFCHECK_DURATION="$SELFCHECK_DURATION" \
   SELFCHECK_RAMP_UP="$SELFCHECK_RAMP_UP" SELFCHECK_RAMP_DOWN="$SELFCHECK_RAMP_DOWN" \
+  KILL_ERROR_RATE="$KILL_ERROR_RATE" KILL_P95_MS="$KILL_P95_MS" \
   k6 run --summary-export="$SELFCHECK_JSON" generator_selfcheck.js | tee "$OUT_DIR/selfcheck.log"
 
 SELFCHECK_ACHIEVED_COUNT=$(python3 -c "
@@ -92,6 +96,7 @@ for RATE in $STAGES; do
   set +e
   BASE_URL="$BASE_URL" CREDS_FILE="$CREDS_FILE" RATE="$RATE" \
     STAGE_DURATION="$STAGE_DURATION" RAMP_UP="$RAMP_UP" RAMP_DOWN="$RAMP_DOWN" \
+    KILL_ERROR_RATE="$KILL_ERROR_RATE" KILL_P95_MS="$KILL_P95_MS" \
     k6 run --summary-export="$STAGE_JSON" endpoint_mix_test.js | tee "$OUT_DIR/stage_${RATE}.log"
   set -e
 
