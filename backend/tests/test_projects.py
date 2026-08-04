@@ -44,11 +44,11 @@ async def _client():
         return ctx
 
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db, get_read_db
 
-    app.dependency_overrides[get_db] = override_db
-    # story #2451(§6 Phase3 A1): GET /projects(목록)가 get_read_db 로 라우팅됨 — 같은 mock으로.
-    app.dependency_overrides[get_read_db] = override_db
+    from tests.conftest import override_db_and_read
+    # story #2451(§6 Phase3 root-fix): get_db+get_read_db 항상 같이 거는 공용
+    # 헬퍼 — legacy alias(예: /api/v2/epics=goals.router 재마운트) 누락 재발 차단.
+    override_db_and_read(app, override_db)
     app.dependency_overrides[get_current_user] = override_auth
 
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), mock_session, app

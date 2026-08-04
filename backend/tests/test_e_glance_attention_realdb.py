@@ -133,7 +133,6 @@ def _client_for(app):
 
 async def _setup_app(app, Session, user_id, org_id):
     from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
-    from app.dependencies.database import get_db, get_read_db
 
     async def _db():
         async with Session() as s:
@@ -150,10 +149,10 @@ async def _setup_app(app, Session, user_id, org_id):
     async def _org():
         return org_id
 
-    app.dependency_overrides[get_db] = _db
-    # story #2451(§6 Phase3 A1): /glance/attention 이 get_read_db 로 라우팅됨 — 같은 세션으로
-    # 걸어야 이 테스트가 직접 seed한(미커밋일 수 있는) 데이터가 요청 쪽에도 보인다.
-    app.dependency_overrides[get_read_db] = _db
+    from tests.conftest import override_db_and_read
+    # story #2451(§6 Phase3 root-fix): get_db+get_read_db 항상 같이 거는 공용
+    # 헬퍼 — legacy alias(예: /api/v2/epics=goals.router 재마운트) 누락 재발 차단.
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
 
