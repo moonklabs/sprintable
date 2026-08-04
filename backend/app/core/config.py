@@ -275,7 +275,19 @@ class Settings(BaseSettings):
     # (REFRESH_GRACE_MS=5000, proxy.ts)을 BE로 옮겨 인스턴스 개수/라우팅과 무관하게 만든다
     # (오르테가·미르코 판단: Redis로 FE 상태공유는 proxy.ts가 edge 런타임이라 과한 인프라 —
     # 배제. DB-only fork-rotation이 근본이면서 인프라 안 키우는 정공법).
-    auth_refresh_grace_seconds: int = 5
+    #
+    # story #2449(2026-08-04) 갱신 — 옛 이름 auth_refresh_grace_seconds(기본 5s, prod는
+    # rev 00262에서 30s 손값 적용 中이던 SSOT 드리프트 값) 폐지·단일화. 애초 이 필드는
+    # "제시된(구) RT 자신의 revoked_at 기준 해소 허용창" 하나뿐이었다(다른 경로 미사용,
+    # grep 확認) — 「successor-chaining」 설계 검토 중 깊이-무제한 체인 walk 자체가 판정
+    # 결과에 영향이 없고(제시 토큰 자신의 revoked_at 하나만 이 창과 비교하면 다단계 walk와
+    # 결론이 같다) 오히려 아직 아무도 안 쓴 살아있는 successor를 straggler가 먼저 소비해
+    # 정당한 소유자를 다음 rotation에서 되레 401내는 하자가 있어(디디 분석·PO 승인
+    # 2026-08-04) 「창 넓히기 + winner 경로 승계기록(감사용, 판정엔 미사용)」으로 수렴했다.
+    # 창 안이면 오늘처럼 독립적인 새 토큰을 fork(다른 row 무접촉) — 노출창은 여전히 «분»
+    # 오더(토큰 수명 30일 아님). 시작값 180초(3분)는 올리베이라·PO 제안값, 최종 확定은
+    # 선생님 확認 필요(PR 머지 게이트 — 승인 전 값 변경 가능).
+    auth_refresh_chain_resolve_window_seconds: int = 180
 
     firebase_project_id: str = ""  # Firebase/Identity Platform GCP 프로젝트 ID(dev/prod 분리)
 
