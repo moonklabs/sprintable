@@ -120,44 +120,53 @@ def test_production_construction_wires_redis_storage_and_wrap_exceptions():
     구성식(`storage_uri=settings.redis_url or "memory://"`, `storage_options={"wrap_
     exceptions": True}`)«자체»는 한 번도 실행 경로에 들지 않았다 — 그 두 줄을 뮤테이션
     (memory:// 하드코딩·wrap_exceptions 제거)해도 5/5 GREEN이 유지됨(양성대조 실패
-    가능성 0, 카디르 실측). 이 테스트는 fakeredis 스왑을 쓰지 않고 `importlib.reload`로
-    rate_limit.py의 모듈 최상단 코드를 REDIS_URL 설정 상태에서 실제로 다시 실행시켜,
-    그 결과 객체(`_storage`)가 RedisStorage인지·wrap_exceptions가 켜졌는지 직접 잰다 —
-    구성식이 조금이라도 바뀌면 이 assert가 그 변경을 그대로 반영해 잡아낸다(진짜 배선
-    타겟).
+    가능성 0, 카디르 실측).
 
-    ⚠️격리: reload는 `app.core.rate_limit`의 module-level 객체 identity를 바꾼다 —
-    `app.routers.auth`가 import 시점에 캐시해둔 옛 `resend_verification_limiter` 참조와
-    어긋나면 다른 테스트(`test_resend_route_uses_isolated_limiter_not_shared`)가 깨질
-    수 있어, finally에서 REDIS_URL 해제 後 rate_limit.py와 auth.py 둘 다 재-reload해
-    원래 상태(memory://·auth.py가 새 객체를 다시 캐시)로 복원한다."""
-    import importlib
+    ⛔2차 회귀(카디르 재QA, 2026-08-04): 1차 수정은 `importlib.reload`로 rate_limit.py
+    모듈 최상단을 재실행시켰으나(올리베이라군 본인이 제안한 방식·부작용 못 봄, 미안하다고
+    정정), 이게 **현재 pytest 프로세스의 전역 상태를 오염**시켰다 — reload가 만든 새
+    `resend_verification_limiter` 객체와, `app.main`이 이미 캐시해둔 `app.state.limiter`·
+    실제 라우트 핸들러가 물고 있는 «구» 객체가 조용히 갈라진다(codex+카디르가 identity
+    비교로 잡음 — 겉보기엔 통과하지만 진짜 요청 경로가 검사 대상 객체와 다른 것일 수
+    있는 위험한 거짓양성 자리).
 
-    from app.core.config import settings
+    ⇒ subprocess 격리(codex 제안)로 교체 — «별도 프로세스»에서 REDIS_URL을 설정한 채
+    `app.core.rate_limit`을 최초 1회 import해(reload 아님, 그 프로세스에선 첫 import라
+    구/신 객체 갈림 자체가 존재하지 않음) `_storage` 클래스명·wrap_exceptions만 stdout으로
+    보고받는다 — 탐지력(뮤테이션→RED)은 동일하게 유지하면서 현재 프로세스의 import 전역은
+    완전히 무접촉."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
 
-    import app.core.rate_limit as rate_limit_module
-    import app.routers.auth as auth_module
+    backend_dir = Path(__file__).resolve().parents[1]
+    child_script = (
+        "from app.core.rate_limit import resend_verification_limiter as _l\n"
+        "s = _l._storage\n"
+        "print('STORAGE_CLASS=' + s.__class__.__name__)\n"
+        "print('WRAP_EXCEPTIONS=' + str(s.wrap_exceptions))\n"
+    )
+    env = dict(os.environ)
+    env["REDIS_URL"] = "redis://fake-prod-wiring-check:6379/0"
 
-    original_redis_url = settings.redis_url
-    try:
-        settings.redis_url = "redis://fake-prod-wiring-check:6379/0"
-        importlib.reload(rate_limit_module)
-        importlib.reload(auth_module)
-
-        storage = rate_limit_module.resend_verification_limiter._storage
-        assert storage.__class__.__name__ == "RedisStorage", (
-            f"REDIS_URL 설정 상태인데 storage가 {storage.__class__.__name__} — "
-            "storage_uri 배선이 settings.redis_url을 안 타는 회귀(예: memory:// 하드코딩)"
-        )
-        assert storage.wrap_exceptions is True, (
-            "wrap_exceptions=True 미적용 — Redis 장애 時 StorageError 대신 원 redis-py "
-            "예외가 새 나가 main.py 핸들러가 못 잡는 회귀"
-        )
-    finally:
-        settings.redis_url = original_redis_url
-        importlib.reload(rate_limit_module)
-        importlib.reload(auth_module)
-        # 복원 확認 — 이 assert 자체가 실패하면 다른 테스트가 연쇄로 깨지므로 여기서 조기 실패.
-        assert rate_limit_module.resend_verification_limiter._storage.__class__.__name__ == (
-            "MemoryStorage"
-        )
+    result = subprocess.run(
+        [sys.executable, "-c", child_script],
+        cwd=str(backend_dir),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, (
+        f"자식 프로세스가 실패함(rc={result.returncode})\nstdout={result.stdout}\n"
+        f"stderr={result.stderr}"
+    )
+    assert "STORAGE_CLASS=RedisStorage" in result.stdout, (
+        f"REDIS_URL 설정 상태인데 RedisStorage가 아님 — storage_uri 배선이 settings."
+        f"redis_url을 안 타는 회귀(예: memory:// 하드코딩)\nstdout={result.stdout}"
+    )
+    assert "WRAP_EXCEPTIONS=True" in result.stdout, (
+        f"wrap_exceptions=True 미적용 — Redis 장애 時 StorageError 대신 원 redis-py "
+        f"예외가 새 나가 main.py 핸들러가 못 잡는 회귀\nstdout={result.stdout}"
+    )
