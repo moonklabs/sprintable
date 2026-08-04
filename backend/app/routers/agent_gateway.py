@@ -15,7 +15,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import delete, select, text, update
@@ -27,9 +27,9 @@ from app.core import shutdown as _shutdown_module
 from app.dependencies.database import get_db
 from app.models.agent_gateway import AgentEventCursor, AgentGatewaySession
 from app.models.event import Event
-from app.models.organization import Organization
+from app.models.org_subscription import OrgSubscription
 from app.models.team import TeamMember
-from app.routers.events import _agent_connections, _event_to_payload
+from app.routers.events import _agent_connections
 
 logger = logging.getLogger(__name__)
 
@@ -380,9 +380,15 @@ async def agent_stream(
         if tm is None:
             raise HTTPException(status_code=404, detail="Agent not found")
 
-        # E-INFRA S5: tier(=org.plan) 해소 — per-key 동시 스트림 cap 산정용 (free<paid)
+        # E-INFRA S5: active subscription tier 해소 — per-key 동시 스트림 cap 산정용
+        # (free<paid). organizations.plan 은 결제 갱신과 분리된 legacy 값이라 entitlement SSOT로
+        # 사용하지 않는다. inactive/unknown/missing subscription 은 fail-closed free.
         org_plan = (await db.execute(
-            select(Organization.plan).where(Organization.id == tm.org_id)
+            select(OrgSubscription.tier).where(
+                OrgSubscription.org_id == tm.org_id,
+                OrgSubscription.status == "active",
+                OrgSubscription.tier.in_(("team", "pro")),
+            )
         )).scalar_one_or_none() or "free"
         org_id_str = str(tm.org_id)  # R2: presence SSE 발행용(generate 클로저 캡처).
 

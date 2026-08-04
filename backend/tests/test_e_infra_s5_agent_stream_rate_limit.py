@@ -21,11 +21,17 @@ def anyio_backend():
 
 
 def _patch(monkeypatch, agent_id, org_plan="free"):
-    db = AsyncMock(); db.add = MagicMock(); db.commit = AsyncMock()
-    tm = MagicMock(); tm.org_id = uuid.uuid4()
-    res_agent = MagicMock(); res_agent.scalar_one_or_none.return_value = tm
-    res_plan = MagicMock(); res_plan.scalar_one_or_none.return_value = org_plan
-    res_cursor = MagicMock(); res_cursor.scalar_one_or_none.return_value = None
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+    tm = MagicMock()
+    tm.org_id = uuid.uuid4()
+    res_agent = MagicMock()
+    res_agent.scalar_one_or_none.return_value = tm
+    res_plan = MagicMock()
+    res_plan.scalar_one_or_none.return_value = org_plan
+    res_cursor = MagicMock()
+    res_cursor.scalar_one_or_none.return_value = None
     db.execute = AsyncMock(side_effect=[res_agent, res_plan, res_cursor])
 
     class _Ctx:
@@ -36,7 +42,9 @@ def _patch(monkeypatch, agent_id, org_plan="free"):
 
     monkeypatch.setattr(ag, "async_session_factory", lambda: _Ctx())
     monkeypatch.setattr(ag, "_agent_sse_connection_count", 0)  # global cap 여유
-    req = MagicMock(); req.headers = {}
+    req = MagicMock()
+    req.headers = {}
+    req._test_db = db
     auth = AuthContext(user_id=str(agent_id), email=None,
                        claims={"app_metadata": {"api_key_id": "k"}}, org_id=None)
     return req, auth, str(agent_id)
@@ -89,5 +97,10 @@ async def test_tier_aware_paid_allows_more(monkeypatch):
     try:
         resp = await ag.agent_stream(req, auth=auth)  # pro라 허용(free였으면 429)
         assert isinstance(resp, StreamingResponse)
+        tier_stmt = str(req._test_db.execute.await_args_list[1].args[0])
+        assert "org_subscriptions" in tier_stmt
+        assert "org_subscriptions.status" in tier_stmt
+        assert "org_subscriptions.tier" in tier_stmt
+        assert "organizations.plan" not in tier_stmt
     finally:
         ag._agent_connections.pop(aid_str, None)

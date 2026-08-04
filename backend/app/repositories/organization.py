@@ -3,11 +3,11 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import func, select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.organization import Organization
+from app.models.org_subscription import OrgSubscription
 from app.models.participation import ParticipationRole
 from app.models.project import OrgMember, Project
 
@@ -98,15 +98,29 @@ class OrganizationRepository:
 
     async def list_for_user(self, user_id: uuid.UUID) -> list[OrganizationWithRole]:
         """사용자가 org_members로 속한 Organization 목록 반환 (name ASC)."""
+        effective_plan = case(
+            (
+                OrgSubscription.status == "active",
+                case(
+                    (
+                        OrgSubscription.tier.in_(("team", "pro")),
+                        OrgSubscription.tier,
+                    ),
+                    else_="free",
+                ),
+            ),
+            else_="free",
+        ).label("plan")
         result = await self.session.execute(
             select(
                 Organization.id,
                 Organization.name,
                 Organization.slug,
-                Organization.plan,
+                effective_plan,
                 OrgMember.role,
             )
             .join(OrgMember, OrgMember.org_id == Organization.id)
+            .outerjoin(OrgSubscription, OrgSubscription.org_id == Organization.id)
             .where(
                 OrgMember.user_id == user_id,
                 OrgMember.deleted_at.is_(None),

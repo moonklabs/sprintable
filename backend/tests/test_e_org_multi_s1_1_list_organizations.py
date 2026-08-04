@@ -187,6 +187,18 @@ def test_list_for_user_filters_deleted_at():
     assert "deleted_at" in source
 
 
+def test_list_for_user_plan_uses_active_subscription_ssot():
+    """일반 설정 UI의 plan은 legacy organizations.plan이 아니라 active subscription에서 온다."""
+    import inspect
+    from app.repositories.organization import OrganizationRepository
+
+    source = inspect.getsource(OrganizationRepository.list_for_user)
+    assert "OrgSubscription" in source
+    assert 'OrgSubscription.status == "active"' in source
+    assert 'OrgSubscription.tier.in_(("team", "pro"))' in source
+    assert "Organization.plan" not in source
+
+
 @pytest.mark.anyio
 async def test_user_b_sees_only_own_org():
     """USER_B의 요청에는 USER_B의 Organization만 반환됨."""
