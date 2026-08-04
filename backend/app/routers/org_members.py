@@ -6,7 +6,7 @@ from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
-from app.dependencies.database import get_db
+from app.dependencies.database import get_db, get_read_db
 from app.models.user import RefreshToken
 from app.repositories.org_member import OrgMemberRepository
 from app.schemas.org_member import ORG_ROLES, OrgMemberCreate, OrgMemberResponse, OrgMemberUpdate
@@ -37,8 +37,9 @@ async def _require_admin(
 
 @router.get("", response_model=list[OrgMemberResponse])
 async def list_org_members(
-    repo: OrgMemberRepository = Depends(_get_repo),
-    session: AsyncSession = Depends(get_db),
+    # story #2451(§6 Phase3 A1): org roster·create→self-read 흐름 없음 → read replica.
+    # (repo 파라미터는 이 함수 본문에서 미사용이라 제거 — 아래 raw SQL이 session을 직접 씀.)
+    session: AsyncSession = Depends(get_read_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> list[OrgMemberResponse]:
     """org_members + users JOIN — email 포함 응답."""

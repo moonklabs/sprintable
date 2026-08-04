@@ -44,9 +44,11 @@ async def _client():
         return ctx
 
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db
+    from app.dependencies.database import get_db, get_read_db
 
     app.dependency_overrides[get_db] = override_db
+    # story #2451(§6 Phase3 A1): GET /projects(목록)가 get_read_db 로 라우팅됨 — 같은 mock으로.
+    app.dependency_overrides[get_read_db] = override_db
     app.dependency_overrides[get_current_user] = override_auth
 
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), mock_session, app
