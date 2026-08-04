@@ -95,7 +95,7 @@ def _client_for(app):
 
 async def _setup_app(app, Session, user_id, org_id):
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
+    from app.dependencies.database import get_db, get_read_db
 
     async def _db():
         async with Session() as s:
@@ -113,6 +113,7 @@ async def _setup_app(app, Session, user_id, org_id):
         )
 
     app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[get_read_db] = _db
     app.dependency_overrides[get_current_user] = _auth
 
 
