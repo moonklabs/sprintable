@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.pagination import assemble_page, decode_cursor
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
-from app.dependencies.database import get_db
+from app.dependencies.database import get_db, get_read_db
 from app.models.deletion_audit import DeletionAuditLog
 from app.models.pm import Goal, Story, StoryActivity, StoryComment
 from app.models.team import TeamMember
@@ -82,6 +82,16 @@ def _get_repo(
     return StoryRepository(session, org_id)
 
 
+# story #2451(§6 Phase3 A2): list_stories 전용 — kanban board 목록 조회는 create→self-read
+# 흐름이 약하고(replica lag 실측 0.86s, PO 승인) 최대 트래픽 자리라 read replica. 다른
+# 라우트가 공유하는 위 _get_repo(get_db)는 그대로 둔다(최소 diff).
+def _get_repo_read(
+    session: AsyncSession = Depends(get_read_db),
+    org_id: uuid.UUID = Depends(get_project_scoped_org_id),
+) -> StoryRepository:
+    return StoryRepository(session, org_id)
+
+
 @router.get("", response_model=list[StoryResponse])
 async def list_stories(
     project_id: uuid.UUID | None = Query(default=None),
@@ -104,7 +114,7 @@ async def list_stories(
     limit: int = Query(default=1000, ge=1, le=2000),
     cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
     response: Response = None,  # type: ignore[assignment]
-    repo: StoryRepository = Depends(_get_repo),
+    repo: StoryRepository = Depends(_get_repo_read),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[StoryResponse]:
     from datetime import datetime

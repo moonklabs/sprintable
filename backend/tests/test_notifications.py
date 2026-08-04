@@ -100,9 +100,12 @@ async def _client():
         return ctx
 
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
-    app.dependency_overrides[get_db] = override_db
+    # story #2451(§6 Phase3, 카디르 QA 4차 검산 중 자체 발견 2026-08-04): 이 파일이
+    # /api/v2/notifications/count(A1이 get_read_db로 라우팅)를 호출하는데 get_db만
+    # override — baseline에 얼리지 않고 지금 고친다(test_2249와 동형 latent bug).
+    override_db_and_read(app, override_db)
     app.dependency_overrides[get_current_user] = override_auth
 
     from httpx import ASGITransport, AsyncClient

@@ -5,7 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_verified_org_id
-from app.dependencies.database import get_db
+from app.dependencies.database import get_db, get_read_db
 from app.repositories.meeting import MeetingRepository
 from app.schemas.meeting import MeetingCreate, MeetingResponse, MeetingUpdate
 
@@ -40,10 +40,38 @@ async def _get_repo(
     return MeetingRepository(session, project_id)
 
 
+# story #2451(§6 Phase3 A2): list_meetings 전용 — 목록 조회는 create→self-read 흐름이 약함
+# (replica lag 0.86s, PO 승인). 위 _get_repo(get_db)의 인가검증 로직을 그대로 복제하되
+# session만 get_read_db로 — 다른 라우트(post/get-by-id/put/delete)는 무접촉.
+# ⚠️CI has_project_access-403-lint 지적: 위 _get_repo는 story #2342 baseline에 이미
+# 동결된 기존 403(구 정책·현재는 존재-비노출 원칙상 404가 맞음, 이 파일 자체 수정은
+# 이번 스코프 밖). 그 403을 그대로 복제하면 «새» 위반 site가 돼 CI가 잡는다(정확한 지적)
+# — 새로 짓는 코드는 옛 빚을 안 베끼고 현재 정책(404)을 따른다.
+async def _get_repo_read(
+    session: AsyncSession = Depends(get_read_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    project_id_q: uuid.UUID | None = Query(default=None, alias="project_id"),
+) -> MeetingRepository:
+    pid = (str(project_id_q) if project_id_q else None) or auth.claims.get("app_metadata", {}).get("project_id")
+    if not pid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="project_id required (query param or JWT app_metadata)",
+        )
+    project_id = uuid.UUID(str(pid))
+
+    from app.services.project_auth import has_project_access
+    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    return MeetingRepository(session, project_id)
+
+
 @router.get("", response_model=list[MeetingResponse])
 async def list_meetings(
     meeting_type: str | None = Query(default=None),
-    repo: MeetingRepository = Depends(_get_repo),
+    repo: MeetingRepository = Depends(_get_repo_read),
 ) -> list[MeetingResponse]:
     filters: dict = {}
     if meeting_type:

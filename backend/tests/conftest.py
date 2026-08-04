@@ -174,6 +174,24 @@ def org_id() -> uuid.UUID:
     return uuid.uuid4()
 
 
+def override_db_and_read(app, provider) -> None:
+    """story #2451(§6 Phase3): DB 세션 오버라이드 «root fix» — get_db 하나만 걸고
+    get_read_db 는 잊는 클래스의 회귀가 A1(사후 12건)·A2(사전 스윕에도 legacy alias
+    `/api/v2/epics`=goals.router 재마운트를 놓쳐 test_epics.py CI 7건 red, 카디르 QA
+    2026-08-04) 두 번 났다 — path-string grep 스윕은 «신규 경로만 잡고 dual-mount
+    legacy alias 는 구조적으로 못 본다»는 게 근본 원인.
+
+    처방: get_db 오버라이드를 다는 자리는 이 헬퍼 하나만 거치게 해 get_read_db 를
+    «구조적으로» 못 빠뜨리게 한다 — 어떤 path/alias 로 들어오든(라우터가 여러 prefix로
+    재마운트되든) 이 두 dependency key 가 항상 같은 provider 를 가리키므로 «놓칠 수
+    없다」. 세션 생성 로직(커밋/롤백 유무 등)은 파일마다 달라 통일하지 않는다 — provider
+    콜러블 자체를 받아 두 key 에 동일하게 건다."""
+    from app.dependencies.database import get_db, get_read_db
+
+    app.dependency_overrides[get_db] = provider
+    app.dependency_overrides[get_read_db] = provider
+
+
 @pytest.fixture
 def project_id() -> uuid.UUID:
     return uuid.uuid4()

@@ -103,7 +103,6 @@ async def test_patch_runtime_type_persists_and_get_returns():
     from httpx import ASGITransport, AsyncClient
     from app.main import app
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db, get_read_db
 
     engine = create_async_engine(_ASYNC_URL)
     Session = async_sessionmaker(engine, expire_on_commit=False)
@@ -121,10 +120,10 @@ async def test_patch_runtime_type_persists_and_get_returns():
                     await s.rollback()
                     raise
 
-        app.dependency_overrides[get_db] = override_db
-        # story #2451(§6 Phase3 A1/A2 스윕): get_db override 쓰는 테스트는 get_read_db 도 같이 걸어야
-        # 함(카디르 QA 지적 — 12개 다른 테스트 회귀). 대상 라우트가 이제 read replica 로 감.
-        app.dependency_overrides[get_read_db] = override_db
+        from tests.conftest import override_db_and_read
+        # story #2451(§6 Phase3 root-fix): get_db+get_read_db 항상 같이 거는 공용
+        # 헬퍼 — legacy alias(예: /api/v2/epics=goals.router 재마운트) 누락 재발 차단.
+        override_db_and_read(app, override_db)
         app.dependency_overrides[get_current_user] = lambda: _auth()
         try:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
@@ -157,7 +156,6 @@ async def test_patch_unrelated_field_does_not_touch_runtime_type():
     from httpx import ASGITransport, AsyncClient
     from app.main import app
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db, get_read_db
 
     engine = create_async_engine(_ASYNC_URL)
     Session = async_sessionmaker(engine, expire_on_commit=False)
@@ -177,10 +175,10 @@ async def test_patch_unrelated_field_does_not_touch_runtime_type():
                     await s.rollback()
                     raise
 
-        app.dependency_overrides[get_db] = override_db
-        # story #2451(§6 Phase3 A1/A2 스윕): get_db override 쓰는 테스트는 get_read_db 도 같이 걸어야
-        # 함(카디르 QA 지적 — 12개 다른 테스트 회귀). 대상 라우트가 이제 read replica 로 감.
-        app.dependency_overrides[get_read_db] = override_db
+        from tests.conftest import override_db_and_read
+        # story #2451(§6 Phase3 root-fix): get_db+get_read_db 항상 같이 거는 공용
+        # 헬퍼 — legacy alias(예: /api/v2/epics=goals.router 재마운트) 누락 재발 차단.
+        override_db_and_read(app, override_db)
         app.dependency_overrides[get_current_user] = lambda: _auth()
         try:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:

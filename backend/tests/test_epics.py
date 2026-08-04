@@ -68,9 +68,12 @@ async def _client():
         return ctx
 
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
-    app.dependency_overrides[get_db] = override_db
+    # story #2451(§6 Phase3): /api/v2/epics는 goals.router의 legacy alias(main.py 재마운트,
+    # deprecated=True) — list_goals가 이제 get_read_db를 쓰므로 이 경로도 같이 걸어야 한다
+    # (카디르 QA 2026-08-04, path-string 스윕이 dual-mount alias를 구조적으로 놓친 자리).
+    override_db_and_read(app, override_db)
     app.dependency_overrides[get_current_user] = override_auth
 
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), mock_session, app

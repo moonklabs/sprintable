@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_verified_org_id
-from app.dependencies.database import get_db
+from app.dependencies.database import get_db, get_read_db
 from app.models.pm import Story, Task
 from app.repositories.task import TaskRepository
 from app.schemas.task import TaskCreate, TaskResponse, TaskUpdate
@@ -17,6 +17,15 @@ router = APIRouter(prefix="/api/v2/tasks", tags=["tasks", "Work"])
 
 def _get_repo(
     session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> TaskRepository:
+    return TaskRepository(session, org_id)
+
+
+# story #2451(§6 Phase3 A2): list_tasks 전용 — 목록 조회는 create→self-read 흐름이 약함
+# (replica lag 0.86s, PO 승인). 다른 라우트가 공유하는 위 _get_repo(get_db)는 그대로.
+def _get_repo_read(
+    session: AsyncSession = Depends(get_read_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> TaskRepository:
     return TaskRepository(session, org_id)
@@ -68,7 +77,7 @@ async def list_tasks(
     story_id: uuid.UUID | None = Query(default=None),
     assignee_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
-    repo: TaskRepository = Depends(_get_repo),
+    repo: TaskRepository = Depends(_get_repo_read),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[TaskResponse]:

@@ -159,7 +159,7 @@ async def test_project_scoped_unique_constraint_enforced_at_db_level():
 async def test_oss_seed_assigns_sequential_numbers():
     from httpx import ASGITransport, AsyncClient
     from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
     from app.main import app
     from app.models.member import Member
     from app.models.project_access import ProjectAccess
@@ -188,7 +188,9 @@ async def test_oss_seed_assigns_sequential_numbers():
         async def _override_org():
             return org_id
 
-        app.dependency_overrides[get_db] = _override_db
+        # story #2451(§6 Phase3 QA 3차): 카디르가 잡은 누락 3파일 중 하나 —
+        # override_db_and_read 로 get_db+get_read_db 항상 함께.
+        override_db_and_read(app, _override_db)
         app.dependency_overrides[get_current_user] = _override_auth
         app.dependency_overrides[get_verified_org_id] = _override_org
         try:
@@ -214,7 +216,7 @@ async def test_oss_seed_assigns_sequential_numbers():
 async def test_response_exposes_story_number_and_filter_lookup_works():
     from httpx import ASGITransport, AsyncClient
     from app.dependencies.auth import AuthContext, get_current_user, get_project_scoped_org_id, get_verified_org_id
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
     from app.main import app
     from app.models.member import Member
     from app.models.project_access import ProjectAccess
@@ -243,7 +245,9 @@ async def test_response_exposes_story_number_and_filter_lookup_works():
         async def _override_org():
             return org_id
 
-        app.dependency_overrides[get_db] = _override_db
+        # story #2451(§6 Phase3 QA 3차): 카디르가 잡은 누락 3파일 중 하나 —
+        # override_db_and_read 로 get_db+get_read_db 항상 함께.
+        override_db_and_read(app, _override_db)
         app.dependency_overrides[get_current_user] = _override_auth
         app.dependency_overrides[get_verified_org_id] = _override_org
         # list_stories의 _get_repo는 get_verified_org_id가 아닌 get_project_scoped_org_id에
