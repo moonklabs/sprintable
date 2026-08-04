@@ -21,6 +21,10 @@ def upgrade() -> None:
         "refresh_tokens",
         sa.Column("replaced_by", UUID(as_uuid=True), nullable=True),
     )
+    # DEFERRABLE INITIALLY DEFERRED 필수 — /refresh 원자 rotation은 «같은 트랜잭션» 안에서
+    # old row.replaced_by=<미리 생성한 새 id> 를 먼저 UPDATE 하고, 그 id를 가진 새 row는
+    # 나중에(같은 트랜잭션 커밋 前) INSERT 한다. 즉시(non-deferred) FK면 UPDATE 시점에 참조
+    # 대상이 아직 없어 매번 ForeignKeyViolationError — 로컬 realdb 테스트로 실제로 잡았다.
     op.create_foreign_key(
         "fk_refresh_tokens_replaced_by",
         "refresh_tokens",
@@ -28,6 +32,8 @@ def upgrade() -> None:
         ["replaced_by"],
         ["id"],
         ondelete="SET NULL",
+        deferrable=True,
+        initially="DEFERRED",
     )
 
 

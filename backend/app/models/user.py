@@ -60,9 +60,13 @@ class RefreshToken(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # story #2449: 원자 rotation과 «같은» UPDATE 안에서 old row에 새 row의 (미리 생성한) id를
     # 기록 — winner rotation 계보 추적/향후 family-revoke 훅용. NULL=아직 회전 안 됐거나 logout
-    # 등 dead-end(승계자 없는 명시적 종료).
+    # 등 dead-end(승계자 없는 명시적 종료). deferrable=True/initially="DEFERRED" 필수 — 그 UPDATE
+    # 시점엔 참조 대상 새 row가 아직 INSERT 前이라, 즉시(non-deferred) FK면 매번
+    # ForeignKeyViolationError(로컬 realdb 테스트로 실측, 마이그 0226 주석 참조).
     replaced_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("refresh_tokens.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey("refresh_tokens.id", ondelete="SET NULL", deferrable=True, initially="DEFERRED"),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

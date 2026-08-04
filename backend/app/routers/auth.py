@@ -537,13 +537,18 @@ async def _store_refresh_token(
     user: User,
     raw_token: str,
     expires_at: datetime,
+    token_id: uuid.UUID | None = None,
 ) -> None:
+    # story #2449: token_id는 /refresh 원자 rotation 승자 경로만 넘긴다(그 경로가 old row의
+    # replaced_by에 이미 이 id를 기록해뒀으니 새 row의 실제 id가 일치해야 함) — 그 외 모든
+    # 호출부(register/login/switch-account/grace-fork)는 생략해 모델 기본(uuid4) 그대로 둔다.
     row = RefreshToken(
         user_id=user.id,
         token_hash=hash_token(raw_token),
         org_id=None,
         project_id=None,
         expires_at=expires_at,
+        **({"id": token_id} if token_id is not None else {}),
     )
     session.add(row)
     await session.commit()
@@ -764,6 +769,9 @@ async def refresh_token(
     # 비원자라 Cloud Run 멀티 인스턴스 간 동시 refresh가 둘 다 "아직 안 revoke"로 통과하는 race의
     # 근본 원인이었다(산티아고 prod 로그 실측: /auth/refresh 239건 중 230건 401). 검증+revoke를
     # 단일 UPDATE...WHERE revoked_at IS NULL...RETURNING으로 묶어 동시 요청 중 정확히 1건만 매치.
+    # story #2449: 승계 id를 이 원자 UPDATE와 «같은» 문장에서 미리 기록(replaced_by) — 이겼을
+    # 때만 실제로 그 id로 새 row를 만든다(패자 fork 경로는 이 id를 그냥 버림, 부작용 0).
+    won_new_token_id = uuid.uuid4()
     revoked_user_id = (await session.execute(
         update(RefreshToken)
         .where(
@@ -771,24 +779,36 @@ async def refresh_token(
             RefreshToken.revoked_at.is_(None),
             RefreshToken.expires_at > datetime.now(timezone.utc),
         )
-        .values(revoked_at=datetime.now(timezone.utc))
+        .values(revoked_at=datetime.now(timezone.utc), replaced_by=won_new_token_id)
         .returning(RefreshToken.user_id)
     )).scalar_one_or_none()
+    won_atomic_rotation = revoked_user_id is not None
     if revoked_user_id is None:
-        # ⛔P0 신 클래스(#1887 쿠키-Domain no-op과 별개 — config.py auth_refresh_grace_seconds
-        # 주석 참조): proxy.ts 의 FE 인스턴스-로컬 single-flight dedupe 는 Cloud Run 멀티인스턴스
-        # 간 공유가 안 돼, 하드리프레시의 병렬 인증요청이 인스턴스 분산되면 같은 RT 로 동시
-        # rotate 경합이 남는다 — 진 쪽은 방금(grace window 내) 이미 소비된 RT 를 만난 것뿐,
-        # 진짜 stale/탈취 replay 가 아니다. grace window 내 revoke 된 토큰이면 하드 401 로 FE
-        # clearAuthCookies()(강제 로그아웃)를 유발하는 대신 독립적인 새 rotation 을 한 번 더
-        # 발급(fork)한다 — 이미 소비된 old RT 를 재사용하는 게 아니라 그 자신만의 새 RT 를
-        # 새로 발급받을 뿐이라 원자 single-use 불변식 자체는 안 깨진다.
-        grace_cutoff = datetime.now(timezone.utc) - timedelta(seconds=settings.auth_refresh_grace_seconds)
+        # ⛔P0 신 클래스(#1887 쿠키-Domain no-op과 별개) — proxy.ts 의 FE 인스턴스-로컬
+        # single-flight dedupe 는 Cloud Run 멀티인스턴스 간 공유가 안 돼, 하드리프레시의 병렬
+        # 인증요청이 인스턴스 분산되면 같은 RT 로 동시 rotate 경합이 남는다 — 진 쪽은 방금(창
+        # 내) 이미 소비된 RT 를 만난 것뿐, 진짜 stale/탈취 replay 가 아니다.
+        #
+        # story #2449 설계 확定(2026-08-04, 디디 분석·PO 승인): 처음엔 replaced_by 체인을
+        # 끝까지 walk 해 "아직 아무도 안 쓴 살아있는 successor"까지 수렴시키는 안을 검토했으나,
+        # (a) 그 walk 깊이는 판정 결과에 영향이 없다 — 제시된 old RT «자신»의 revoked_at 하나만
+        # 이 창과 비교해도 몇 세대 뒤든 결론이 같다. (b) 오히려 그 살아있는 successor 는 아직
+        # 자기 소유자(그 rotation 을 실제로 받은 탭)가 한 번도 안 쓴 토큰이라, straggler 가
+        # 먼저 소비(walk-and-fork)해버리면 정당한 소유자가 나중에(다음 access-token 만료 시,
+        # 최대 60분 뒤) 그 토큰을 처음 쓸 때 되레 하드 401 — 문제를 근절이 아니라 한 세대
+        # 뒤로 떠넘기는 꼴이었다. (c) raw RT 는 hash-only 보관이라 애초에 "현재 살아있는 tip
+        # 의 실제 값"을 straggler 에게 돌려줄 방법도 없다. 그래서 설계는 「창 넓히기(grace_
+        # seconds→chain_resolve_window_seconds) + 통과 시 오늘과 동일한 독립 fork(다른 row
+        # 무접촉)」로 수렴했다 — replaced_by 는 «승자 경로에서만» 기록해 감사열(정상 회전 死
+        # vs logout 같은 명시적 dead-end 구분)·향후 family-revoke 훅 기반으로만 쓴다.
+        resolve_cutoff = datetime.now(timezone.utc) - timedelta(
+            seconds=settings.auth_refresh_chain_resolve_window_seconds
+        )
         revoked_user_id = (await session.execute(
             select(RefreshToken.user_id).where(
                 RefreshToken.token_hash == token_hash,
                 RefreshToken.revoked_at.is_not(None),
-                RefreshToken.revoked_at > grace_cutoff,
+                RefreshToken.revoked_at > resolve_cutoff,
                 RefreshToken.expires_at > datetime.now(timezone.utc),
             )
         )).scalar_one_or_none()
@@ -797,8 +817,8 @@ async def refresh_token(
             # 0이라 "누가 이 루프에 빠졌는지" 못 쫓았다(prod 실측: 같은 key가 ~20초 간격으로
             # 수십 회 반복 — "가끔 풀린다"가 아니라 "빠지면 못 나온다"). row 자체(만료/폐기든)가
             # 있으면 user_id를 읽기만(best-effort, 인가 판정에 영향 0 — 이미 위에서 거부 확定
-            # 後의 순수 로깅 조회) 해 로그에 싣는다. 새 규칙 발명 0 — grace_reuse가 이미 로깅하는
-            # user_id 축을 실패 로그에도 동일하게 확장하는 것뿐.
+            # 後의 순수 로깅 조회) 해 로그에 싣는다. 새 규칙 발명 0 — window_reuse가 이미
+            # 로깅하는 user_id 축을 실패 로그에도 동일하게 확장하는 것뿐.
             _diag_user_id = (await session.execute(
                 select(RefreshToken.user_id).where(RefreshToken.token_hash == token_hash)
             )).scalar_one_or_none()
@@ -808,7 +828,8 @@ async def refresh_token(
             )
             return _err("TOKEN_REVOKED", "Refresh token revoked or expired", 401)
         logger.info(
-            "auth.refresh grace_reuse key=%s user_id=%s reason=multi_instance_race_loser_fork_rotation",
+            "auth.refresh chain_resolve_window_reuse key=%s user_id=%s "
+            "reason=multi_instance_race_loser_fork_rotation",
             correlation_key, revoked_user_id,
         )
 
@@ -824,7 +845,10 @@ async def refresh_token(
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md)
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+    await _store_refresh_token(
+        session, user, tokens["refresh_token"], refresh_exp,
+        token_id=won_new_token_id if won_atomic_rotation else None,
+    )
     # #2124(관측성 보강): 성공 회전도 old_key→new_key로 로깅 — 지금까지 성공 경로엔 로그가
     # 아예 없어(까심발견류 '침묵이 결함을 오래 살린다'와 동형) "회전은 성공했는데 클라가 새
     # 토큰을 저장 못 했는가(㉮)"를 훗날 old_key의 하드 401과 new_key의 미사용 여부로 대조
