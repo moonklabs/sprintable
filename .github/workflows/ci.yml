@@ -360,6 +360,59 @@ jobs:
             echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 project_access_403_baseline.txt 없음 — 이 PR이 그 파일을 «처음 도입»하는 중이면 정상이다, story #2342 자신이 그 경우다. 다음 PR부터는 develop에 파일이 있어 실제 비교가 돈다)"
           fi
 
+  dependency-override-get-read-db-lint:
+    name: dependency_overrides get_read_db lint (guard, story #2451)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan for raw dependency_overrides[get_db] (must use override_db_and_read)
+        working-directory: backend
+        run: python3 scripts/lint_dependency_override_get_read_db.py
+      # story #2342/#2335와 동일 계약 — 베이스라인은 «줄기만» 허용한다(2026-08-04 도입 시점
+      # tests/ 전역에 이미 253곳 — 대부분 read-route 무관이라 당장 안 고친다. 새로 늘리는
+      # 것만 막는다. 카디르 QA 3차 재발: 이 게이트가 없으면 다음 슬라이스(Phase B 등)에서
+      # 네 번째로 같은 클래스가 샌다).
+      - name: "Verify baseline can only shrink (story #2451 — no new grandfather entries)"
+        working-directory: backend
+        run: |
+          set -e
+          PR_BASE_REF="${{ github.event.pull_request.base.ref }}"
+          PUSH_BEFORE_SHA="${{ github.event.before }}"
+          COMPARE_REF=""
+          COMPARE_LABEL=""
+          if [ -n "$PR_BASE_REF" ]; then
+            git fetch origin "$PR_BASE_REF" --depth=1 2>&1 | tail -3 || true
+            COMPARE_REF="FETCH_HEAD"
+            COMPARE_LABEL="PR base:$PR_BASE_REF"
+          elif [ -n "$PUSH_BEFORE_SHA" ] && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            git fetch origin "$PUSH_BEFORE_SHA" --depth=1 2>&1 | tail -3 || true
+            COMPARE_REF="FETCH_HEAD"
+            COMPARE_LABEL="push-before:$PUSH_BEFORE_SHA"
+          fi
+          if [ -n "$COMPARE_REF" ] && git show "$COMPARE_REF:backend/scripts/dependency_override_get_read_db_baseline.txt" > /tmp/base_baseline.txt 2>/dev/null; then
+            grep -vE '^#|^$' /tmp/base_baseline.txt | sort -u > /tmp/base_sorted.txt
+            grep -vE '^#|^$' scripts/dependency_override_get_read_db_baseline.txt | sort -u > /tmp/head_sorted.txt
+            new_lines=$(comm -13 /tmp/base_sorted.txt /tmp/head_sorted.txt || true)
+            base_count=$(wc -l < /tmp/base_sorted.txt | tr -d ' ')
+            head_count=$(wc -l < /tmp/head_sorted.txt | tr -d ' ')
+            echo "baseline entries: base($COMPARE_LABEL)=$base_count head=$head_count"
+            if [ -n "$new_lines" ]; then
+              echo "FAIL: 베이스라인에 «새» 항목이 추가됐다 — 이 파일은 줄기만 허용한다(story #2451)." \
+                   "새 raw override는 여기 grandfather로 넣지 말고 override_db_and_read로 고치는 것이 맞다:"
+              echo "$new_lines"
+              exit 1
+            fi
+            echo "OK: baseline은 늘지 않았다(줄었으면 환영 — 그만큼 사이트가 헬퍼로 옮겨진 것)"
+          elif [ -z "$COMPARE_REF" ]; then
+            echo "baseline growth check skipped: no comparison base (PR context 아님 + push-before 미상 — 예: 새 브랜치 최초 push)"
+          else
+            echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 dependency_override_get_read_db_baseline.txt 없음 — 이 PR이 그 파일을 «처음 도입»하는 중이면 정상이다, story #2451 자신이 그 경우다. 다음 PR부터는 develop에 파일이 있어 실제 비교가 돈다)"
+          fi
+
   candidate-source-ownership-lint:
     name: candidate_id source_id ownership lint (guard, story #2363)
     runs-on: ubuntu-latest
