@@ -1716,7 +1716,8 @@ CREATE TABLE public.refresh_tokens (
     project_id uuid,
     expires_at timestamp with time zone NOT NULL,
     revoked_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    replaced_by uuid
 );
 
 
@@ -5307,6 +5308,14 @@ ALTER TABLE ONLY public.project_api_keys
 
 ALTER TABLE ONLY public.refresh_tokens
     ADD CONSTRAINT refresh_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: refresh_tokens fk_refresh_tokens_replaced_by; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.refresh_tokens
+    ADD CONSTRAINT fk_refresh_tokens_replaced_by FOREIGN KEY (replaced_by) REFERENCES public.refresh_tokens(id) ON DELETE SET NULL;
 
 
 --

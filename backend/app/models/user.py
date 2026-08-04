@@ -58,6 +58,12 @@ class RefreshToken(Base):
     project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #2449: 원자 rotation과 «같은» UPDATE 안에서 old row에 새 row의 (미리 생성한) id를
+    # 기록 — winner rotation 계보 추적/향후 family-revoke 훅용. NULL=아직 회전 안 됐거나 logout
+    # 등 dead-end(승계자 없는 명시적 종료).
+    replaced_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("refresh_tokens.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

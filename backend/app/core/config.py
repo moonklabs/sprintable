@@ -275,7 +275,16 @@ class Settings(BaseSettings):
     # (REFRESH_GRACE_MS=5000, proxy.ts)을 BE로 옮겨 인스턴스 개수/라우팅과 무관하게 만든다
     # (오르테가·미르코 판단: Redis로 FE 상태공유는 proxy.ts가 edge 런타임이라 과한 인프라 —
     # 배제. DB-only fork-rotation이 근본이면서 인프라 안 키우는 정공법).
-    auth_refresh_grace_seconds: int = 5
+    # story #2449(2026-08-04): prod rev 00262 즉효패치로 5→30 손값 적용 후 SSOT 드리프트
+    # 상태였다 — 이 기본값을 30으로 올려 코드와 prod 실값을 다시 일치시킨다.
+    auth_refresh_grace_seconds: int = 30
+
+    # story #2449 근본치: grace(위)는 «직접 다음 rotation»만 덮는 짧은 창이라 wake 시 요청
+    # 산개가 grace 를 넘으면(느린 로드·다탭) 여전히 하드 401 이었다. 이 값은 제시된(구) RT
+    # 자신의 revoked_at 기준 «해소 허용창» — 이 안이면 몇 세대 전 RT든 독립 재발급(fork)을
+    # 허용해 강제 로그아웃을 막는다. 시작값 180초(3분)는 올리베이라·PO 제안값 — auth 보안
+    # posture 값이라 최종 확定은 선생님 확認 필요(PR 머지 게이트, 승인 전 값 변경 가능).
+    auth_refresh_chain_resolve_window_seconds: int = 180
 
     firebase_project_id: str = ""  # Firebase/Identity Platform GCP 프로젝트 ID(dev/prod 분리)
 
