@@ -58,6 +58,22 @@ class RefreshToken(Base):
     project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #2449: 원자 rotation 승자 경로에서, 새 row가 실제로 INSERT+commit된 «後» 별개
+    # UPDATE로 old row에 그 새 row의 id를 기록 — winner rotation 계보 추적/향후 family-revoke
+    # 훅용. NULL=아직 회전 안 됐거나 logout 등 dead-end(승계자 없는 명시적 종료).
+    #
+    # ⛔v1 설계(폐기, 카디르 QA REQUEST_CHANGES 2026-08-04)는 이 id를 원자 revoke UPDATE와
+    # «같은» 문장에 미리 얹었다 — revoke 성공 直後 user 조회가 실패(예: 그새 계정 비활성화)해
+    # 새 row INSERT 前에 401로 조기반환하면, deferred FK가 커밋 시점에 위반돼 트랜잭션 전체
+    # (방금 성공한 revoke 포함)가 롤백되는 회귀였다(e5225c0a P0 single-use 불변식 재파손).
+    # 지금은 별도 post-INSERT UPDATE라 그 결합 자체가 없다 — deferrable=True/initially=
+    # "DEFERRED"는 이제 판정에 필수는 아니지만(참조 대상이 이미 커밋된 뒤에만 이 UPDATE가
+    # 실행됨) 방어적으로 유지한다(카디르 확認, 마이그 0226 무접촉이 더 안전).
+    replaced_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("refresh_tokens.id", ondelete="SET NULL", deferrable=True, initially="DEFERRED"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
