@@ -197,6 +197,28 @@ def project_id() -> uuid.UUID:
     return uuid.uuid4()
 
 
+class FakeAsyncSessionCtx:
+    """story #2459(§6 봉합①): get_current_user/get_verified_org_id/get_project_scoped_org_id가
+    이제 요청-수명 Depends(get_db) 대신 함수 내부 `async with async_session_factory()` 단명
+    세션을 쓴다 — FastAPI dependency_overrides로는 이걸 가로챌 수 없다(Depends 그래프를 안
+    타므로). 이 함수들을 직접 호출하는 테스트는 대신 이 패턴으로 패치한다:
+
+        with patch.object(auth, "async_session_factory", return_value=FakeAsyncSessionCtx(mock_db)):
+            result = await get_verified_org_id(auth=..., x_org_id=..., x_project_id=..., request=...)
+
+    (test_sse_conn_leak.py의 _FakeSession과 동형 — 여러 파일이 필요로 해 conftest로 공용화.)
+    """
+
+    def __init__(self, session):
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, *exc):
+        return False
+
+
 @pytest.fixture
 def mock_session() -> AsyncMock:
     session = AsyncMock()

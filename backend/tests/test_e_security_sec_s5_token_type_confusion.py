@@ -33,22 +33,37 @@ def _mock_db_no_migration_row() -> AsyncMock:
 
 
 @pytest.mark.anyio
-async def test_access_token_passes_get_current_user():
+async def test_access_token_passes_get_current_user(monkeypatch):
+    """story #2459: get_current_user도 이제 자체 단명 세션(async_session_factory) —
+    streaming 변형 테스트와 동일 패턴."""
+    import app.dependencies.auth as auth_module
+
+    class _FakeSession:
+        async def __aenter__(self):
+            return _mock_db_no_migration_row()
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(auth_module, "async_session_factory", lambda: _FakeSession())
+
     user_id = str(uuid.uuid4())
     token = create_access_token(user_id, app_metadata={"org_id": str(uuid.uuid4())})
     ctx = await get_current_user(
-        credentials=_creds(token), x_agent_api_key=None, x_mcp_transport=None, db=_mock_db_no_migration_row()
+        credentials=_creds(token), x_agent_api_key=None, x_mcp_transport=None,
     )
     assert ctx.user_id == user_id
 
 
 @pytest.mark.anyio
 async def test_refresh_token_rejected_by_get_current_user():
-    """까심 재현 시나리오의 정확한 봉인 대상 — refresh 토큰이 Bearer로 더 이상 안 먹힌다."""
+    """까심 재현 시나리오의 정확한 봉인 대상 — refresh 토큰이 Bearer로 더 이상 안 먹힌다.
+
+    type!=access 거부는 DB 접근(async_session_factory) 이전 분기라 패치 불요."""
     user_id = str(uuid.uuid4())
     token, _exp = create_refresh_token(user_id, app_metadata={"org_id": str(uuid.uuid4())})
     with pytest.raises(HTTPException) as exc_info:
-        await get_current_user(credentials=_creds(token), x_agent_api_key=None, x_mcp_transport=None, db=AsyncMock())
+        await get_current_user(credentials=_creds(token), x_agent_api_key=None, x_mcp_transport=None)
     assert exc_info.value.status_code == 401
 
 

@@ -284,13 +284,17 @@ async def test_auth_me_valid_api_key_200():
     async def override_db():
         yield mock_session
 
+    from app.dependencies import auth as auth_module
+    from tests.conftest import FakeAsyncSessionCtx
+
     app.dependency_overrides[get_db] = override_db
     try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            resp = await c.get(
-                "/api/v2/auth/me",
-                headers={"Authorization": f"Bearer {_TEST_VALID}"},
-            )
+        with patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(mock_session)):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                resp = await c.get(
+                    "/api/v2/auth/me",
+                    headers={"Authorization": f"Bearer {_TEST_VALID}"},
+                )
         assert resp.status_code == 200
         data = resp.json()
         assert data["member_id"] == str(member_id)
@@ -315,13 +319,17 @@ async def test_auth_me_invalid_api_key_401():
     async def override_db():
         yield mock_session
 
+    from app.dependencies import auth as auth_module
+    from tests.conftest import FakeAsyncSessionCtx
+
     app.dependency_overrides[get_db] = override_db
     try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            resp = await c.get(
-                "/api/v2/auth/me",
-                headers={"Authorization": f"Bearer {_TEST_INVALID}"},
-            )
+        with patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(mock_session)):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                resp = await c.get(
+                    "/api/v2/auth/me",
+                    headers={"Authorization": f"Bearer {_TEST_INVALID}"},
+                )
         assert resp.status_code == 401
     finally:
         app.dependency_overrides.clear()
@@ -343,13 +351,17 @@ async def test_auth_me_expired_api_key_401():
     async def override_db():
         yield mock_session
 
+    from app.dependencies import auth as auth_module
+    from tests.conftest import FakeAsyncSessionCtx
+
     app.dependency_overrides[get_db] = override_db
     try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            resp = await c.get(
-                "/api/v2/auth/me",
-                headers={"Authorization": f"Bearer {_TEST_EXPIRED}"},
-            )
+        with patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(mock_session)):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                resp = await c.get(
+                    "/api/v2/auth/me",
+                    headers={"Authorization": f"Bearer {_TEST_EXPIRED}"},
+                )
         assert resp.status_code == 401
     finally:
         app.dependency_overrides.clear()
@@ -371,13 +383,17 @@ async def test_auth_me_revoked_api_key_401():
     async def override_db():
         yield mock_session
 
+    from app.dependencies import auth as auth_module
+    from tests.conftest import FakeAsyncSessionCtx
+
     app.dependency_overrides[get_db] = override_db
     try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            resp = await c.get(
-                "/api/v2/auth/me",
-                headers={"Authorization": f"Bearer {_TEST_REVOKED}"},
-            )
+        with patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(mock_session)):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                resp = await c.get(
+                    "/api/v2/auth/me",
+                    headers={"Authorization": f"Bearer {_TEST_REVOKED}"},
+                )
         assert resp.status_code == 401
     finally:
         app.dependency_overrides.clear()

@@ -99,8 +99,13 @@ async def test_list_stories_200():
         mock_result.scalar_one_or_none.return_value = ORG_ID
         session.execute = AsyncMock(return_value=mock_result)
 
-        async with client as c:
-            resp = await c.get(f"/api/v2/stories?project_id={PROJECT_ID}")
+        # story #2459: get_project_scoped_org_id가 전용 단명 세션(async_session_factory())을
+        # 쓰므로 override_db_and_read로는 못 가로챈다 — 별도 patch.
+        from app.dependencies import auth as auth_module
+        from tests.conftest import FakeAsyncSessionCtx
+        with patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(session)):
+            async with client as c:
+                resp = await c.get(f"/api/v2/stories?project_id={PROJECT_ID}")
 
         assert resp.status_code == 200
         data = resp.json()
