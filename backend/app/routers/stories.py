@@ -1941,6 +1941,13 @@ async def update_story(
 
     await _attach_assignee_ids(db, repo.org_id, [story])
     await _attach_has_evidence(db, [story])
+    # story #2459 prod 회귀(2026-08-05): model_validate는 동기 호출이라 story의 어떤 컬럼이
+    # unloaded 상태면(원인 미확定 — repo.update()가 flush+refresh 直後인데도 관측됨)
+    # MissingGreenlet 500(await_only 호출 불가 — sync 컨텍스트에서 lazy load 시도)으로
+    # 죽는다. 직렬화 直前 명시 refresh로 db가 아직 살아있는 async 컨텍스트에서 강제 재로드
+    # — 어떤 경로로 unload되든 안전(포지티브 컨트롤: test_2459_regression_full_request_cycle_
+    # realdb.py::test_update_story_survives_forced_attribute_expiry_before_serialize).
+    await db.refresh(story)
     return StoryResponse.model_validate(story)
 
 
@@ -2204,6 +2211,9 @@ async def update_story_status(
 
     await _attach_assignee_ids(db, repo.org_id, [story])
     await _attach_has_evidence(db, [story])
+    # story #2459 prod 회귀(2026-08-05): update_story와 동형 — model_validate 直前 명시
+    # refresh로 unloaded 컬럼(예: updated_at) MissingGreenlet 500을 막는다.
+    await db.refresh(story)
     resp = StoryResponse.model_validate(story)
     # 정공법 A: 비순차 점프면 응답에 violation flag(차단 없이 가시화·/bulk 와 동일 SSOT).
     resp.violation = build_violation_flag(old_status, story.status)
@@ -2398,6 +2408,8 @@ async def request_verification(
         project_id=story.project_id,
     )
     await db.commit()
+    # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+    await db.refresh(gate)
     return GateResponse.model_validate(gate)
 
 

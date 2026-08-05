@@ -138,6 +138,8 @@ async def create_draft_version(
     await _require_draft_author(session, actor, org_id, body.project_id)
     version = await create_draft(session, org_id, body.project_id, body.entity_type, body.config, actor)
     await session.commit()
+    # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+    await session.refresh(version)
     return VersionResponse.model_validate(version)
 
 
@@ -193,6 +195,8 @@ async def update_draft_version(
     try:
         updated = await update_draft_config(session, version, body.config)
         await session.commit()
+        # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+        await session.refresh(updated)
         return VersionResponse.model_validate(updated)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -226,6 +230,9 @@ async def request_publish_version(
         await session.commit()  # lint_status/errors persist
         raise HTTPException(status_code=422, detail={"error": "publish_lint_failed", "lint_errors": e.errors})
     await session.commit()
+    # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+    await session.refresh(version)
+    await session.refresh(gate)
     return PublishResponse(
         version=VersionResponse.model_validate(version), gate_id=gate.id, gate_status=gate.status
     )
@@ -264,6 +271,8 @@ async def approve_publish(
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     await session.commit()
+    # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+    await session.refresh(version)
     return VersionResponse.model_validate(version)
 
 
@@ -284,6 +293,8 @@ async def reject_publish(
             pass  # gate already resolved — version 전이만 반영
     version = await transition_version(session, version, "rejected")
     await session.commit()
+    # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+    await session.refresh(version)
     return VersionResponse.model_validate(version)
 
 
@@ -299,6 +310,8 @@ async def retire_version(
     version = await _load_version(session, org_id, version_id)
     version = await transition_version(session, version, "retired")
     await session.commit()
+    # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+    await session.refresh(version)
     return VersionResponse.model_validate(version)
 
 

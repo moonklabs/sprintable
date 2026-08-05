@@ -129,6 +129,8 @@ async def update_org_member(
     if member is None:
         raise HTTPException(status_code=404, detail="Org member not found")
     await repo.session.commit()
+    # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+    await repo.session.refresh(member)
     return OrgMemberResponse.model_validate(member)
 
 

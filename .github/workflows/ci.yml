@@ -424,6 +424,20 @@ jobs:
         working-directory: backend
         run: python3 scripts/lint_candidate_source_ownership.py
 
+  # story #2459 회귀(2026-08-05, PR #2851/#2461) — commit() 後 model_validate() 前 refresh
+  # 누락 클래스를 원천봉쇄. 스크립트 docstring(scripts/lint_commit_before_validate.py) 참조 —
+  # baseline 없음(도입 시점 위반 0건, app/routers·app/services·ee 전 스윕 후 확認).
+  commit-before-validate-lint:
+    name: commit-then-model_validate refresh lint (guard, story #2459)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan for model_validate() after commit() without intervening refresh
+        working-directory: backend
+        run: python3 scripts/lint_commit_before_validate.py
+
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
   # main이 develop과 다른 파일셋(ee_pricing 0146/0147 부재)일 때의 그래프 단절을 원천적으로
   # 못 잡는다(실제로 못 잡아서 prod 승격이 롤백된 그 사고). PR base가 main일 때만 도는 이
