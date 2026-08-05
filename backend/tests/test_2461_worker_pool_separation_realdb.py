@@ -54,6 +54,10 @@ async def test_outbox_publish_phase_holds_no_connection_from_claim_phase(monkeyp
         await _clean_event_outbox(engine)
         factory = async_sessionmaker(engine, expire_on_commit=False)
         monkeypatch.setattr("app.core.database.async_session_factory", factory)
+        # story #2461 part2: outbox claim/publish/finalize가 이제 worker_session_factory를
+        # 쓴다 — 이 테스트의 격리 엔진이 그쪽에도 걸리게 함께 patch(안 하면 CI의 실 DATABASE_URL
+        # 로 새 나가 "attached to a different loop" — 로컬 재현 완료).
+        monkeypatch.setattr("app.core.database.worker_session_factory", factory)
 
         async with AsyncSession(engine, expire_on_commit=False) as session:
             session.add(EventOutbox(
@@ -95,6 +99,10 @@ async def test_outbox_claim_commits_atomically(monkeypatch):
         await _clean_event_outbox(engine)
         factory = async_sessionmaker(engine, expire_on_commit=False)
         monkeypatch.setattr("app.core.database.async_session_factory", factory)
+        # story #2461 part2: outbox claim/publish/finalize가 이제 worker_session_factory를
+        # 쓴다 — 이 테스트의 격리 엔진이 그쪽에도 걸리게 함께 patch(안 하면 CI의 실 DATABASE_URL
+        # 로 새 나가 "attached to a different loop" — 로컬 재현 완료).
+        monkeypatch.setattr("app.core.database.worker_session_factory", factory)
 
         row_id = uuid.uuid4()
         async with AsyncSession(engine, expire_on_commit=False) as session:
@@ -126,6 +134,10 @@ async def test_outbox_finalize_marks_published(monkeypatch):
         await _clean_event_outbox(engine)
         factory = async_sessionmaker(engine, expire_on_commit=False)
         monkeypatch.setattr("app.core.database.async_session_factory", factory)
+        # story #2461 part2: outbox claim/publish/finalize가 이제 worker_session_factory를
+        # 쓴다 — 이 테스트의 격리 엔진이 그쪽에도 걸리게 함께 patch(안 하면 CI의 실 DATABASE_URL
+        # 로 새 나가 "attached to a different loop" — 로컬 재현 완료).
+        monkeypatch.setattr("app.core.database.worker_session_factory", factory)
 
         row_id = uuid.uuid4()
         async with AsyncSession(engine, expire_on_commit=False) as session:
