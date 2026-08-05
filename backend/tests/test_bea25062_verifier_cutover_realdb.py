@@ -131,6 +131,9 @@ async def test_legacy_token_rejected_when_issued_before_cutover(monkeypatch):
     # 지역 import로 매번 새로 참조한다 — 소스 모듈 쪽을 패치해야 이 테스트 DB를 실제로 본다
     # (app.dependencies.auth 쪽 바인딩과는 별개 지점 — 소스 vs 소비 모듈 패치 구분 주의).
     monkeypatch.setattr("app.core.database.async_session_factory", Session)
+    # story #2459: get_current_user 본체가 이제 자체 단명 세션(async_session_factory())을
+    # 쓰므로, 그 소비처인 app.dependencies.auth 쪽 바인딩도 이 테스트 DB로 패치해야 한다.
+    monkeypatch.setattr("app.dependencies.auth.async_session_factory", Session)
     try:
         async with Session() as s:
             user_id = await _seed_legacy_user(s)
@@ -141,10 +144,9 @@ async def test_legacy_token_rejected_when_issued_before_cutover(monkeypatch):
             await _set_auth_valid_after(s, user_id, cutover)
 
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-        async with Session() as s:
-            with pytest.raises(HTTPException) as exc_info:
-                await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None, db=s)
-            assert exc_info.value.status_code == 401
+        with pytest.raises(HTTPException) as exc_info:
+            await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None)
+        assert exc_info.value.status_code == 401
     finally:
         await engine.dispose()
 
@@ -156,6 +158,7 @@ async def test_legacy_token_accepted_when_issued_after_cutover(monkeypatch):
 
     engine, Session = await _session_factory()
     monkeypatch.setattr("app.core.database.async_session_factory", Session)
+    monkeypatch.setattr("app.dependencies.auth.async_session_factory", Session)
     try:
         async with Session() as s:
             user_id = await _seed_legacy_user(s)
@@ -164,8 +167,7 @@ async def test_legacy_token_accepted_when_issued_after_cutover(monkeypatch):
 
         token = create_access_token(str(user_id))
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-        async with Session() as s:
-            auth = await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None, db=s)
+        auth = await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None)
         assert auth.user_id == str(user_id)
     finally:
         await engine.dispose()
@@ -179,14 +181,14 @@ async def test_legacy_token_unaffected_when_no_migration_row(monkeypatch):
 
     engine, Session = await _session_factory()
     monkeypatch.setattr("app.core.database.async_session_factory", Session)
+    monkeypatch.setattr("app.dependencies.auth.async_session_factory", Session)
     try:
         async with Session() as s:
             user_id = await _seed_legacy_user(s)
 
         token = create_access_token(str(user_id))
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-        async with Session() as s:
-            auth = await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None, db=s)
+        auth = await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None)
         assert auth.user_id == str(user_id)
     finally:
         await engine.dispose()
@@ -210,6 +212,7 @@ async def test_firebase_session_rejected_when_auth_time_before_cutover(monkeypat
 
     engine, Session = await _session_factory()
     monkeypatch.setattr("app.core.database.async_session_factory", Session)
+    monkeypatch.setattr("app.dependencies.auth.async_session_factory", Session)
     try:
         async with Session() as s:
             user_id, firebase_uid = await _seed_firebase_user(s)
@@ -219,10 +222,9 @@ async def test_firebase_session_rejected_when_auth_time_before_cutover(monkeypat
         auth_time = int(time.time())
         cookie = _make_session_cookie(key_pem, firebase_uid, auth_time)
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=cookie)
-        async with Session() as s:
-            with pytest.raises(HTTPException) as exc_info:
-                await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None, db=s)
-            assert exc_info.value.status_code == 401
+        with pytest.raises(HTTPException) as exc_info:
+            await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None)
+        assert exc_info.value.status_code == 401
     finally:
         await engine.dispose()
 
@@ -243,6 +245,7 @@ async def test_firebase_session_accepted_when_auth_time_after_cutover(monkeypatc
 
     engine, Session = await _session_factory()
     monkeypatch.setattr("app.core.database.async_session_factory", Session)
+    monkeypatch.setattr("app.dependencies.auth.async_session_factory", Session)
     try:
         async with Session() as s:
             user_id, firebase_uid = await _seed_firebase_user(s)
@@ -252,8 +255,7 @@ async def test_firebase_session_accepted_when_auth_time_after_cutover(monkeypatc
         auth_time = int(time.time())
         cookie = _make_session_cookie(key_pem, firebase_uid, auth_time)
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=cookie)
-        async with Session() as s:
-            auth = await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None, db=s)
+        auth = await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None)
         assert auth.user_id == str(user_id)
     finally:
         await engine.dispose()
@@ -290,8 +292,10 @@ async def test_sse_streaming_legacy_rejected_when_before_cutover(monkeypatch):
 async def test_legacy_token_fails_closed_when_migration_lookup_raises(monkeypatch):
     """조건 ①: 캐시 제거 후 DB 조회 자체가 실패하면(콜드 스타트/장애) 예외가 그대로
     전파돼야 한다 — 절대 "허용"으로 떨어지면 안 된다(이전 캐시의 fail-open 반대편 증명)."""
+    import app.dependencies.auth as auth_module
     from app.core.security import create_access_token
     from app.dependencies.auth import get_current_user
+    from tests.conftest import FakeAsyncSessionCtx
 
     user_id = uuid.uuid4()
     token = create_access_token(str(user_id))
@@ -301,9 +305,12 @@ async def test_legacy_token_fails_closed_when_migration_lookup_raises(monkeypatc
         async def get(self, *a, **kw):
             raise ConnectionError("simulated DB outage")
 
+    monkeypatch.setattr(
+        auth_module, "async_session_factory", lambda: FakeAsyncSessionCtx(_ExplodingDb())
+    )
     with pytest.raises(ConnectionError):
         await get_current_user(
-            credentials=credentials, x_agent_api_key=None, x_mcp_transport=None, db=_ExplodingDb()
+            credentials=credentials, x_agent_api_key=None, x_mcp_transport=None
         )
 
 
@@ -316,6 +323,7 @@ async def test_legacy_token_rejected_when_state_reset_required_even_without_epoc
     from app.models.auth_identity import AuthMigration
 
     engine, Session = await _session_factory()
+    monkeypatch.setattr("app.dependencies.auth.async_session_factory", Session)
     try:
         async with Session() as s:
             user_id = await _seed_legacy_user(s)
@@ -324,10 +332,9 @@ async def test_legacy_token_rejected_when_state_reset_required_even_without_epoc
 
         token = create_access_token(str(user_id))
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-        async with Session() as s:
-            with pytest.raises(HTTPException) as exc_info:
-                await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None, db=s)
-            assert exc_info.value.status_code == 401
+        with pytest.raises(HTTPException) as exc_info:
+            await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None)
+        assert exc_info.value.status_code == 401
     finally:
         await engine.dispose()
 
