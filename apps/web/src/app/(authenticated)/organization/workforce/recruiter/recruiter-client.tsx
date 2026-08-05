@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils';
 import { VerifyRail, useVerificationRail } from '@/app/onboarding/verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from '@/app/onboarding/onboarding-telemetry';
 import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle, RuntimeCapabilityItem } from '@/services/recruit';
-import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FILENAME, resolveRuntimeWakeInfo } from '@/services/recruit';
+import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FILENAME, resolveRuntimeWakeInfo, RUNTIME_CONNECT_CLI, resolveConnectConfirm } from '@/services/recruit';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
 
@@ -215,6 +215,21 @@ export function WakeMethodBody({ method, path }: { method: import('@/services/re
         // 에러도 없음, 실 렌더로만 잡힘) — 반드시 둘을 분리하고 둘 다 넘긴다.
         path,
         code: (chunks) => <span className="font-mono text-[11px] break-all text-muted-foreground">{chunks}</span>,
+      })}
+    </>
+  );
+}
+
+// story #2377 v1.3 §1.5/⑤(2026-08-05) — ①「연결」 본문을 CLI 기반 런타임(hermes/openclaw 등)
+// 전용으로 분리. WakeMethodBody와 같은 이유로 별도 컴포넌트로 뽑는다 — t.rich 태그명(cmd)과
+// ICU 인자명(command)을 분리해 next-intl의 조용한 인자 삼킴(WakeMethodBody 주석 참고)을 피한다.
+export function ConnectCliBody({ command }: { command: string }) {
+  const t = useTranslations('recruiter');
+  return (
+    <>
+      {t.rich('kitOrientingConnectBodyCli', {
+        command,
+        cmd: (chunks) => <span className="font-mono text-[11px] break-all text-muted-foreground">{chunks}</span>,
       })}
     </>
   );
@@ -524,6 +539,11 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   // story #2377 §2(규격 A) — 「깨우기」 축. MCP 연결(①)과 지침 전달(③)만으로는 «어떤 런타임도»
   // 안 깨어난다(유나양 규격 §0, 실측 5/5) — 그 사이에 빠져 있던 ②를 명시한다.
   const wakeInfo = resolveRuntimeWakeInfo(runtime);
+  // story #2377 v1.3 §1.5/④(PO+유나 2026-08-05 정정) — ①이 "실제로 도착했다"는 확認 등급.
+  // 'confirmed'만 success 색 — 그 외(config-verified·unmeasured)는 전부 neutral(모름, 경고색
+  // 아님). 호스트 자기신고나 "config 저장 성공"만으로 success를 켜지 않는다(A-3 거짓성공의
+  // 화면판 방지).
+  const connectConfirm = resolveConnectConfirm(runtime);
 
   const [agentMode, setAgentMode] = useState<'new' | 'existing'>('new');
   const [newAgentName, setNewAgentName] = useState('');
@@ -1109,10 +1129,26 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">
                     <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">1</span>
                     <div className="min-w-0">
-                      <p className="text-xs font-bold text-foreground">{t('kitOrientingConnectLabel')}</p>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <p className="text-xs font-bold text-foreground">{t('kitOrientingConnectLabel')}</p>
+                        {/* story #2377 v1.3 §1.5/④ — 'confirmed'만 success(팀이 실제로 실측한
+                            날짜 있는 사실). 'config-verified'(openclaw 등)는 host가 config를
+                            유효로 저장한 것만 확認됐을 뿐이라 neutral(chip) — success 색을 쓰면
+                            A-3 거짓성공의 화면판이 된다(PO+유나 2026-08-05 정정). */}
+                        {connectConfirm.tier === 'confirmed' && (
+                          <Badge variant="success" className="text-[9px]">
+                            {t('connectConfirmedBadge', { date: connectConfirm.measuredAt ?? '' })}
+                          </Badge>
+                        )}
+                        {connectConfirm.tier === 'config-verified' && (
+                          <Badge variant="chip" className="text-[9px]">{t('connectConfigVerifiedBadge')}</Badge>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground">
                         {recruitResult.mcp_config
-                          ? t('kitOrientingConnectBodyMcp', { runtime: currentRuntimeDisplayName })
+                          ? (RUNTIME_CONNECT_CLI[runtime]
+                              ? <ConnectCliBody command={RUNTIME_CONNECT_CLI[runtime]} />
+                              : t('kitOrientingConnectBodyMcp', { runtime: currentRuntimeDisplayName }))
                           : t('kitOrientingConnectBodyConnector')}
                       </p>
                     </div>
@@ -1210,7 +1246,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   <pre className="overflow-x-auto bg-muted/40 p-3 text-xs leading-relaxed">{mcpConfigText}</pre>
                 </div>
               ) : (
-                // 커넥터-라우팅 런타임(connector/grok/pi/hermes/openclaw/opencode)은 mcp_config=null —
+                // 커넥터-라우팅 런타임(connector/grok/pi/openclaw/opencode)은 mcp_config=null —
+                // (story #2857 후속 — hermes는 이제 HTTP_MCP_CAPABLE_RUNTIMES 편입으로 mcp_config를
+                // 받아 이 분기를 안 탄다. 옛 목록에 남겨두면 주석이 실제와 어긋나 §0급 오도가 된다.)
                 // MCP transport가 없어 .mcp.json 자체가 무의미. 문자열 "null" 렌더/복사 방지(story 6f6ac081 후속).
                 <div className="rounded-md border border-dashed border-border bg-muted/20 p-3 text-xs text-muted-foreground">
                   {t('mcpNotApplicable')}
