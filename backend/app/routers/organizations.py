@@ -109,6 +109,8 @@ async def create_organization(
         if om_id is not None:
             await ensure_human_member(session, om_id)
         await session.commit()
+        # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+        await session.refresh(org)
 
     return OrganizationResponse.model_validate(org)
 
@@ -188,6 +190,10 @@ async def update_organization(
     await session.flush()
     await session.refresh(org)
     await session.commit()
+    # story #2459 회귀(2026-08-05): commit 前 refresh만으로는 불충분(commit 自體이 attr를
+    # 다시 unloaded로 되돌릴 수 있음, goals.py bulk_update_goals와 동형 관측) — commit 後
+    # 재refresh.
+    await session.refresh(org)
     return OrganizationResponse.model_validate(org)
 
 

@@ -105,6 +105,8 @@ async def create_project(
             await ensure_human_member(session, om_id)
 
     await session.commit()
+    # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+    await session.refresh(project)
 
     return ProjectResponse.model_validate(project)
 

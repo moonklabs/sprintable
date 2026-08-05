@@ -238,6 +238,9 @@ async def create_gate_endpoint(
         project_id=project_id,
     )
     await session.commit()
+    # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh —
+    # 트리거 미확定인 MissingGreenlet 클래스(unloaded attr sync 직렬화) 전체를 이 자리서 차단.
+    await session.refresh(gate)
     return GateResponse.model_validate(gate)
 
 
@@ -891,6 +894,8 @@ async def transition_gate_endpoint(
             pending_deliveries=_pending_deliveries,
         )
         await session.commit()
+        # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+        await session.refresh(gate)
         # ccbcd9da(A-1): doc/epic 자동재개 wake — commit(recipient_seq 확정) 후 발화(이중전달 방지).
         _schedule_pending_deliveries(background_tasks, _pending_deliveries)
         return GateResponse.model_validate(gate)
@@ -921,6 +926,8 @@ async def void_gate_endpoint(
     try:
         gate = await void_gate(session, org_id, id, resolved.id, body.reason)
         await session.commit()
+        # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+        await session.refresh(gate)
         return GateResponse.model_validate(gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -953,6 +960,8 @@ async def hold_gate_endpoint(
     try:
         gate = await hold_gate(session, org_id, id, resolved.id, body.reason, body.held_until)
         await session.commit()
+        # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+        await session.refresh(gate)
         return GateResponse.model_validate(gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -970,6 +979,8 @@ async def unhold_gate_endpoint(
     try:
         gate = await unhold_gate(session, org_id, id, resolved.id)
         await session.commit()
+        # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+        await session.refresh(gate)
         return GateResponse.model_validate(gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -1094,6 +1105,8 @@ async def override_gate_endpoint(
             pending_deliveries=_pending_deliveries,
         )
         await session.commit()
+        # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+        await session.refresh(gate)
         # ccbcd9da(A-1): override 도 transition_gate 재사용 경로라 동일하게 doc/epic wake 대상.
         _schedule_pending_deliveries(background_tasks, _pending_deliveries)
         return GateResponse.model_validate(gate)

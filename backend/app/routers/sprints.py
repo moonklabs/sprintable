@@ -395,6 +395,8 @@ async def activate_sprint(
     try:
         sprint = await transition_sprint(session, org_id, caller, id, "active")
         await session.commit()
+        # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+        await session.refresh(sprint)
     except SprintTransitionError as exc:
         # 까심 codex QA(2026-07-03, #1867): 위 update_sprint와 동일 갭 — 신규 code만
         # 422+구조화 detail(FE §5 graceful 계약), 기존 코드는 backward-compat 유지.
@@ -635,6 +637,8 @@ async def transition_sprint_endpoint(
     try:
         sprint = await transition_sprint(session, org_id, caller, id, body.status)
         await session.commit()
+        # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+        await session.refresh(sprint)
         return SprintResponse.model_validate(sprint)
     except SprintTransitionError as e:
         _codes = {"SPRINT_NOT_FOUND": 404, "HUMAN_CONFIRM_REQUIRED": 403,
