@@ -15,7 +15,7 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.dependencies.database import get_db
+from app.dependencies.database import get_db, get_worker_db
 from app.models.agent_run import AgentRun
 from app.models.agent_session import AgentSession
 from app.models.asset import Asset
@@ -217,7 +217,10 @@ async def onboarding_abandoned_sweep(
 @router.get("/workflow-handoff-watchdog")
 async def workflow_handoff_watchdog(
     request: Request,
-    session: AsyncSession = Depends(get_db),
+    # story #2461(§6 봉합③ part2, PO 승인 2026-08-05): get_db(요청 primary 풀) 대신
+    # get_worker_db(전용 워커풀) — reconcile_handoffs()의 FOR UPDATE SKIP LOCKED 트랜잭션이
+    # 요청 경로 풀 예산을 소모하지 않는다.
+    session: AsyncSession = Depends(get_worker_db),
 ) -> JSONResponse:
     verify_cron(request)
     try:
@@ -236,7 +239,8 @@ async def workflow_handoff_watchdog(
 @router.get("/workflow-sla")
 async def workflow_sla(
     request: Request,
-    session: AsyncSession = Depends(get_db),
+    # story #2461(§6 봉합③ part2): 위 workflow_handoff_watchdog와 동일 근거 — 전용 워커풀.
+    session: AsyncSession = Depends(get_worker_db),
 ) -> JSONResponse:
     verify_cron(request)
     try:
@@ -589,7 +593,12 @@ async def score_hypotheses_cron(
 @router.post("/embed-backlog")
 async def embed_backlog_cron(
     request: Request,
-    session: AsyncSession = Depends(get_db),
+    # story #2461(§6 봉합③ part2, PO 승인 2026-08-05): get_db 대신 get_worker_db — 이 함수
+    # 안에서 FOR UPDATE SKIP LOCKED 락을 쥔 채 동기 Vertex AI 호출(asyncio.to_thread로
+    # 이벤트루프는 안 막지만 세션/락 자체는 그 구간 내내 열려 있음, 유료 API 중복호출 방지
+    # 위해 의도적으로 유지 — embedding_backlog.py docstring 참조)이 요청 primary 풀이 아닌
+    # 전용 워커풀에서만 그 시간을 소모하게 한다.
+    session: AsyncSession = Depends(get_worker_db),
 ) -> JSONResponse:
     """E-LOOP-LEDGER P1-S3: embeddings 백로그(status pending/failed) 배치 임베딩(블루프린트 §P1).
 

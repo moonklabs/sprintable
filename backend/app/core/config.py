@@ -41,13 +41,25 @@ class Settings(BaseSettings):
     # ⚠️ 배포 rollout 時 old+new 리비전이 **동시 점유(2×)** — steady 산식만 쓰면 배포 중 max_connections
     #    초과(2026-06-29 dev TooManyConnections·#1766 rollout 전요청 500). **인스턴스당 실 커넥션은 pool
     #    밖의 raw 연결까지** 포함해야 한다(까심 적출): pg_pubsub.listen_loop = raw asyncpg **상시 1개**(pool
-    #    미점유). (l2_worker 는 engine.connect→pool 내·추가 0.) → **per_instance = (pool+overflow) + RAW(1) = 5.**
-    #    rollout-aware 산식: **2 × maxScale × ((pool+overflow) + RAW) + admin/migration headroom ≤ max_connections.**
+    #    미점유).
+    #    ⛔story #2461(§6 봉합③ part2, 2026-08-05) 갱신 — "l2_worker는 engine.connect→pool 내·
+    #    추가 0"이던 예전 문장은 더 이상 사실이 아니다. L2 advisory-lock 영구연결 + embedding_backlog/
+    #    workflow_sla_processor/workflow_handoff_watchdog/event_broker outbox의 claim/finalize 세션이
+    #    이제 `worker_engine`(별도 소형 풀, 기본 worker_db_pool_size+worker_db_max_overflow=2+1=3)으로
+    #    옮겨갔다 — **새 budget line으로 추가**해야 한다(RAW처럼 "pool 밖"은 아니지만 별개 풀이라
+    #    기존 primary pool 항과 합산 불가, 독립 항으로 더해야 함).
+    #    → **per_instance = (pool+overflow) + RAW(1) + (worker_pool+worker_overflow) = 4 + 1 + 3 = 8**
+    #    (기존 5에서 +3).
+    #    rollout-aware 산식: **2 × maxScale × per_instance + admin/migration headroom ≤ max_connections.**
     #   ① 앱 최소요구(실측): pool+overflow ≥ 4 (total 3 이면 send_message pool_timeout). ∴ pool 3/1=4 고정(밑으로 불가).
-    #   ② dev(f1-micro ~25·maxScale 실측 10→PO **1** 적용 rev 01240-hkc): 2×1×5+5 = 15 ≤ 25 (여유 10).
-    #      (maxScale 2 면 25/25 한계·1 로 여유 확보. 10 이면 2×10×5+5=105≫25 → pool 4 단독 불가·maxScale↓ 필수.)
-    #   ③ prod(g1-small 100·maxScale **실측 필수**): 2×10×5+20=120 > 100(가정 10이면 초과). 안전 상한 maxScale≤8
-    #      (2×8×5+20=100·여유 0). **prod 승격 前 PgBouncer(durable·연결 decouple) 또는 tier↑ 필수**(maxScale 캡만으론 0 headroom).
+    #   ② dev(f1-micro ~25·maxScale 실측 10→PO **1** 적용 rev 01240-hkc): 2×1×8+5 = 21 ≤ 25 (여유 4 — 기존
+    #      10에서 6 줄었다. maxScale 2로 올리면 2×2×8+5=37>25 → 즉시 초과, 이 풀 신설 前엔 여유 있었다).
+    #   ③ prod(g1-small 100·maxScale **실측 필수**·⛔디디는 prod 접근 없어 이 값 직접 확인 불가):
+    #      per_instance=8 기준 안전 상한 maxScale은 «옛 계산(per_instance=5, maxScale≤8)보다 낮아진다」
+    #      — **PO/infra가 이 변경을 prod 배포 前 반드시 재검산**할 것(옛 maxScale≤8 그대로 두면
+    #      2×8×8+20=148>100으로 즉시 초과 가능성). 이 워커풀을 쓰는 3개 cron 엔드포인트
+    #      (/embed-backlog·/workflow-sla·/workflow-handoff-watchdog)가 prod에서 이미 Cloud
+    #      Scheduler로 불리고 있다면 이 재검산이 **배포 前 필수**다.
     # ⚠️ 향후 always-on LISTEN/raw 연결 추가 시 RAW 카운트 ++ 동반(산식 누락 = 이번 false-PASS 재발).
     # ⚠️ --concurrency=80 과 별개: 풀은 DB op 점유 구간만 잡고 즉시 반납·초과분 pool_timeout 대기(실패 아님).
     db_pool_size: int = 3
@@ -65,6 +77,11 @@ class Settings(BaseSettings):
     db_pgbouncer: bool = False
     db_pgbouncer_pool_size: int = 25   # ⭐앱 동시성 수용(크게). PgBouncer가 Cloud SQL 커넥션을 묶어 안전.
     db_pgbouncer_max_overflow: int = 10
+
+    # story #2461(§6 봉합③ part2, PO 승인 2026-08-05): worker_engine(app/core/database.py)
+    # 전용 풀 크기 — 위 db_pool_size 산식 갱신 주석 참조(신규 budget line, prod 재검산 필요).
+    worker_db_pool_size: int = 2
+    worker_db_max_overflow: int = 1
 
     # JWT
     jwt_secret: str = ""

@@ -106,6 +106,9 @@ async def test_ensure_lock_disabled_always_true():
 
 @pytest.mark.anyio
 async def test_ensure_lock_holder_true_standby_false():
+    # story #2461(§6 봉합③ part2): _ensure_lock의 락 커넥션은 이제 요청 primary 엔진
+    # (app.core.database.engine)이 아니라 전용 worker_engine에서 나온다 — mock 대상도 그에
+    # 맞춰 patch한다(아니면 실 DB로 connect 시도해 OSError).
     # holder: pg_try_advisory_lock → True.
     w = L2TriggerWorker(use_advisory_lock=True)
     conn = AsyncMock()
@@ -113,7 +116,7 @@ async def test_ensure_lock_holder_true_standby_false():
     lock_res.scalar.return_value = True
     conn.execute = AsyncMock(return_value=lock_res)
     conn.execution_options = AsyncMock()
-    with patch("app.core.database.engine") as eng:
+    with patch("app.core.database.worker_engine") as eng:
         eng.connect = AsyncMock(return_value=conn)
         assert await w._ensure_lock() is True
         assert w._holds_lock is True
@@ -129,7 +132,7 @@ async def test_ensure_lock_holder_true_standby_false():
     res2.scalar.return_value = False
     conn2.execute = AsyncMock(return_value=res2)
     conn2.execution_options = AsyncMock()
-    with patch("app.core.database.engine") as eng2:
+    with patch("app.core.database.worker_engine") as eng2:
         eng2.connect = AsyncMock(return_value=conn2)
         assert await w2._ensure_lock() is False
         assert w2._holds_lock is False
@@ -328,7 +331,7 @@ async def test_run_cancels_gracefully_and_releases_lock():
          patch.object(w, "_poll_once", AsyncMock(return_value=[])), \
          patch.object(w, "_scan_deadlines", AsyncMock(return_value=[])), \
          patch.object(w, "_release_lock", AsyncMock()) as rel, \
-         patch("app.core.database.async_session_factory") as sf:
+         patch("app.core.database.worker_session_factory") as sf:  # story #2461: per-tick 세션도 전용 워커풀로
         sf.return_value.__aenter__ = AsyncMock(return_value=AsyncMock())
         sf.return_value.__aexit__ = AsyncMock(return_value=False)
         task = asyncio.create_task(w.run())

@@ -519,13 +519,16 @@ _OUTBOX_POLL_INTERVAL = 1.0
 async def _claim_outbox_batch(limit: int = _OUTBOX_BATCH_SIZE) -> list[dict]:
     """FOR UPDATE SKIP LOCKED로 미발행 batch를 골라 즉시 commit(락을 짧게만 쥔다 — 발행은
     여기서 안 함). 반환은 세션-독립적인 순수 dict라 다음 단계가 이 세션을 물고 다닐 필요가
-    없다(story #2461, §6 봉합③ — delivery_dispatcher.py와 동형 claim/work/finalize 분리)."""
+    없다(story #2461, §6 봉합③ — delivery_dispatcher.py와 동형 claim/work/finalize 분리).
+
+    §6 봉합③ part2(PO 승인 2026-08-05): 요청 primary 풀이 아니라 전용 `worker_session_factory`
+    사용 — 이 claim 트랜잭션이 요청 경로 풀 예산과 완전 무관해진다."""
     from sqlalchemy import select
 
-    from app.core.database import async_session_factory
+    from app.core.database import worker_session_factory
     from app.models.event_outbox import EventOutbox
 
-    async with async_session_factory() as session:
+    async with worker_session_factory() as session:
         rows = (
             await session.execute(
                 select(EventOutbox)
@@ -582,18 +585,18 @@ async def _publish_outbox_batch(claimed: list[dict]) -> list[uuid.UUID]:
 
 
 async def _finalize_outbox_published(published_ids: list[uuid.UUID]) -> None:
-    """발행 성공 row를 published_at으로 마킹(짧은 세션 — story #2461)."""
+    """발행 성공 row를 published_at으로 마킹(짧은 세션 — story #2461, 전용 워커풀 사용)."""
     from datetime import datetime, timezone
 
     from sqlalchemy import update
 
-    from app.core.database import async_session_factory
+    from app.core.database import worker_session_factory
     from app.models.event_outbox import EventOutbox
 
     if not published_ids:
         return
     now = datetime.now(timezone.utc)
-    async with async_session_factory() as session:
+    async with worker_session_factory() as session:
         await session.execute(
             update(EventOutbox).where(EventOutbox.id.in_(published_ids)).values(published_at=now)
         )

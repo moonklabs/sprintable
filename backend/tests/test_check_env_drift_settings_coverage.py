@@ -149,7 +149,11 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # Settings 필드를 실제로 잡아낸 것 — 개수 자체가 늘어난 게 아니라 늘어난 게 정답이다.
     # #2451(§6 Phase3 read replica): database_url_read 필드 신설로 84→85(DATABASE_URL_READ 포함).
     # 미설정이면 primary 폴백·설정 시 read replica 라우팅. 가드가 신규 필드를 설계대로 잡은 것.
+    # #2461(§6 봉합③ part2, PO 승인 2026-08-05): worker_db_pool_size/worker_db_max_overflow
+    # 필드 신설로 85→87(WORKER_DB_POOL_SIZE·WORKER_DB_MAX_OVERFLOW 포함) — L2/배치워커 전용
+    # worker_engine 풀 크기 설정. 가드가 신규 필드를 설계대로 잡은 것.
     assert "PRESENCE_REDIS_ENABLED" in keys and "SSE_TRANSIENT_REPLAY_ENABLED" in keys
     assert "REQUIRE_VERIFIED_EMAIL_FOR_ORG_CREATE" in keys
     assert "DATABASE_URL_READ" in keys
-    assert len(keys) == 85
+    assert "WORKER_DB_POOL_SIZE" in keys and "WORKER_DB_MAX_OVERFLOW" in keys
+    assert len(keys) == 87
