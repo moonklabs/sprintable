@@ -37,6 +37,58 @@ async def test_sla_notify_uses_via_outbox():
     assert mock_notify.call_args.kwargs["via_outbox"] is True
 
 
+@pytest.mark.anyio
+async def test_sla_notify_never_reaches_real_webhook_sender_positive_control():
+    """§6 봉합③의 「자」(PO 표현) — #2460 F1 pin과 동형 철학의 판별 테스트다. F1은 "세션이
+    발행 구간까지 살아있는가"(리소스 생애주기)를 pool_size=1로 쟀지만, SLA/watchdog의 결함은
+    "네트워크 함수가 락 안에서 실제로 불리는가"(호출 라우팅)라 성격이 다르다 — 여기선 그
+    호출 자체를 독약(poison) mock으로 잡는다.
+
+    ⚠️설계 노트(디버깅으로 확認한 함정): `_notify()` → 진짜 `dispatch_notification()` 전체를
+    태우는 end-to-end 버전을 처음 짰다가, mock 세션의 `execute` side_effect가 4개뿐이라
+    via_outbox=False 분기가 필요로 하는 5번째 호출(`_fetch_personal_webhook_targets`의
+    WebhookConfig SELECT)에서 `StopIteration`이 나고, 그게 `_notify`의 광범위한
+    `except Exception: pass`에 조용히 삼켜져 "poison 0번 호출"이 **via_outbox 덕이 아니라
+    mock 고갈 때문**에 나오는 거짓 통과였다(실제로 sabotage 후에도 여전히 pass — 그때
+    잡아냈다). 그래서 여기선 `_deliver_personal_webhooks()`(via_outbox 라우팅이 실제로
+    일어나는 자리)를 직접 호출해 이 판별을 짓는다 — `_notify`가 `via_outbox=True`를
+    정확히 그 함수에 넘긴다는 사실은 `test_sla_notify_uses_via_outbox`가 이미 별도로 고정."""
+    from app.services.notification_dispatch import _deliver_personal_webhooks
+
+    org_id = uuid.uuid4()
+    member_id = uuid.uuid4()
+
+    call_count = {"n": 0}
+
+    async def _poison(*args, **kwargs):
+        call_count["n"] += 1
+
+    def _fetch_session() -> AsyncMock:
+        fetch_result = MagicMock()
+        fetch_result.scalars.return_value.all.return_value = []  # 내용 무관(poison이 함수 자체를 가로챔)
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=fetch_result)
+        return session
+
+    # ① 고정된(via_outbox=True, 실제 코드가 넘기는 값) 경로 — 네트워크 경계가 절대 안 불림.
+    with patch("app.services.notification_dispatch._send_personal_webhook_targets", new=_poison):
+        await _deliver_personal_webhooks(
+            _fetch_session(), org_id, [member_id], title="t", body=None,
+            event_type="gate_reminder", via_outbox=True,
+        )
+    assert call_count["n"] == 0, "via_outbox=True 경로인데 실 webhook 발송 경계가 불렸다 — 회귀"
+
+    # ② 양성대조 — 예전 버그(via_outbox=False)를 직접 재현하면 같은 mock이 반드시 불려야
+    # 한다. 이게 실패하면(0번 호출) 위 ①의 "0번"이 「도달 못 해서 0」인지 「진짜 안전해서
+    # 0」인지 구별이 안 된다 — 이 블록이 그 구별을 만든다.
+    with patch("app.services.notification_dispatch._send_personal_webhook_targets", new=_poison):
+        await _deliver_personal_webhooks(
+            _fetch_session(), org_id, [member_id], title="t", body=None,
+            event_type="gate_reminder", via_outbox=False,
+        )
+    assert call_count["n"] == 1, "양성대조 실패 — 이 poison mock이 실제로 도달 가능한 경계가 아니다"
+
+
 def test_sla_batch_query_has_explicit_limit():
     """process_sla()의 SELECT가 명시 LIMIT을 갖는지 SQL 컴파일로 확認(finding #5 —
     이전엔 무제한 배치였다)."""
