@@ -38,6 +38,8 @@ const RATE = Number(__ENV.RATE || 100); // 이 스테이지의 목표 rps(오케
 const STAGE_DURATION = __ENV.STAGE_DURATION || '60s';
 const RAMP_UP = __ENV.RAMP_UP || '10s';
 const RAMP_DOWN = __ENV.RAMP_DOWN || '5s';
+// story #2457 진단 전용 파라미터 — 원본(10%)과 다르게 쓰기 비중을 올려 (a)/(b) 후보를 분리.
+const WRITE_RATIO = Number(__ENV.WRITE_RATIO || 0.1);
 // run_loadtest.sh의 kill-switch와 동일 SSOT(env var 공유) — 오케스트레이터 없이 단독
 // 실행해도 같은 급붕괴 기준으로 abort(카디르 QA MUST①, dev wedge 사고의 구조적 원인 봉합).
 const KILL_ERROR_RATE = Number(__ENV.KILL_ERROR_RATE || 0.05);
@@ -147,12 +149,16 @@ export default function () {
   // 가중 선택: 목록형(무거움·A2 hotspot)이 read 트래픽의 다수, 가벼운 A1 세트가 소수,
   // 쓰기가 드물게(원본 dev_db_capacity_test.js와 동형 — 실 인시던트가 「평범한 mutation
   // 버스트」였으므로 write 축을 아예 빼면 그 축의 회귀는 이 harness가 다시 못 잡는다).
+  // story #2457 진단: WRITE_RATIO env로 쓰기 비중 조절(기본 0.1=원본 동치) — (a)advisory_lock
+  // vs (b)/last_used_at 후보 분리용. LIGHT_RATIO는 남은 구간을 목록형:가벼움 6:3 비율로 나눔.
   const roll = Math.random();
-  if (roll < 0.6) {
+  const listBoundary = (1 - WRITE_RATIO) * (6 / 9);
+  const lightBoundary = 1 - WRITE_RATIO;
+  if (roll < listBoundary) {
     const ep = _LIST_ENDPOINTS[Math.floor(Math.random() * _LIST_ENDPOINTS.length)];
     const res = http.get(`${BASE_URL}${ep.path(cred)}`, { headers });
     _record(ep.name, res, 200);
-  } else if (roll < 0.9) {
+  } else if (roll < lightBoundary) {
     const ep = _LIGHT_ENDPOINTS[Math.floor(Math.random() * _LIGHT_ENDPOINTS.length)];
     const res = http.get(`${BASE_URL}${ep.path(cred)}`, { headers });
     _record(ep.name, res, 200);
