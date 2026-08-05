@@ -75,11 +75,21 @@ def _uuid_set_or_none(v: list[str] | None) -> set[uuid.UUID] | None:
 
 
 async def _deliver_one(job: dict) -> None:
-    """claim된 job 하나를 자기 세션으로 배달 + 상태갱신(이 함수 호출 동안만 커넥션 보유).
+    """claim된 job 하나를 배달 + 상태갱신.
 
-    개별 webhook/push target 실패는 각 ``_now`` 함수 내부가 이미 삼킨다(기존 in-request 동작과
-    동일 best-effort — per-target 실패는 job 레벨에는 안 보임). 여기서 "실패"로 잡는 경우는 이
-    함수 자체가 예외를 낸 경우뿐(DB 조회 실패·payload 역직렬화 오류·미지원 kind 등)."""
+    story #2460 PO 리뷰(2026-08-05, F1 — 머지 前 필수수정): 예전엔 이 함수 전체가 하나의
+    `async with async_session_factory() as session:` 블록 안에서 fetch도 하고 실제
+    webhook POST/Expo 발송(외부 I/O, 타깃당 최대 10s)까지 다 했다 — POST 자체는 session을
+    안 건드리지만 그 세션(커넥션)이 POST 루프 내내 idle-in-transaction으로 열려 있었다("배달
+    中 트랜잭션 안 잡는다"는 클래스 docstring 계약과 실제가 어긋난 한 겹 얕은 원본). 지금은
+    kind별로 **fetch(짧은 세션, 즉시 commit)→send(세션 없음, 순수 외부 I/O)→[expo_push만:
+    finalize(짧은 세션)]** 세 단계로 명시 분리 — 세션이 열려 있는 구간과 외부 I/O 구간이
+    절대 겹치지 않는다.
+
+    개별 webhook/push target 실패는 각 ``_send_*`` 함수 내부가 이미 삼킨다(기존 in-request
+    동작과 동일 best-effort — per-target 실패는 job 레벨에는 안 보임). 여기서 "실패"로 잡는
+    경우는 fetch/finalize의 DB 오류·payload 역직렬화 오류·미지원 kind 등 이 함수 자체가
+    예외를 낸 경우뿐."""
     from app.core.database import async_session_factory
     from app.models.delivery_job import DeliveryJob
 
@@ -90,43 +100,65 @@ async def _deliver_one(job: dict) -> None:
     attempts = job["attempts"] + 1  # claim에서 이미 +1 커밋됨 — 로컬에서도 동일 값 반영.
 
     try:
-        async with async_session_factory() as session:
-            if kind == "org_webhook":
-                from app.services.webhook_dispatch import _fire_webhooks_now
+        if kind == "org_webhook":
+            from app.services.webhook_dispatch import _fetch_webhook_targets, _send_webhook_targets
 
-                await _fire_webhooks_now(
-                    session, org_id, payload["event"], payload["data"],
+            async with async_session_factory() as session:
+                targets = await _fetch_webhook_targets(
+                    session, org_id, payload["event"],
                     recipient_member_ids=_uuid_set_or_none(payload.get("recipient_member_ids")),
                     preserve_broadcast=payload.get("preserve_broadcast", True),
                 )
-            elif kind == "personal_webhook":
-                from app.services.notification_dispatch import _deliver_personal_webhooks_now
+                await session.commit()
+            # ⬇ 이 구간은 세션이 닫혀 있다(커넥션 풀에 반납됨) — 외부 I/O만.
+            await _send_webhook_targets(targets, payload["event"], payload["data"])
+        elif kind == "personal_webhook":
+            from app.services.notification_dispatch import (
+                _fetch_personal_webhook_targets,
+                _send_personal_webhook_targets,
+            )
 
-                await _deliver_personal_webhooks_now(
+            async with async_session_factory() as session:
+                targets = await _fetch_personal_webhook_targets(
                     session, org_id, [uuid.UUID(m) for m in payload["member_ids"]],
-                    title=payload["title"], body=payload.get("body"), event_type=payload["event_type"],
-                    reference_type=payload.get("reference_type"),
-                    reference_id=_uuid_or_none(payload.get("reference_id")),
-                    context=payload.get("context"),
                     muted_member_ids=_uuid_set_or_none(payload.get("muted_member_ids")),
                 )
-            elif kind == "expo_push":
-                from ee.services.expo_push import _deliver_expo_push_now
+                await session.commit()
+            await _send_personal_webhook_targets(
+                targets, title=payload["title"], body=payload.get("body"),
+                event_type=payload["event_type"], reference_type=payload.get("reference_type"),
+                reference_id=_uuid_or_none(payload.get("reference_id")), context=payload.get("context"),
+            )
+        elif kind == "expo_push":
+            from ee.services.expo_push import (
+                _fetch_expo_push_targets,
+                _finalize_expo_push_dead_tokens,
+                _send_expo_push_targets,
+            )
 
-                await _deliver_expo_push_now(
+            async with async_session_factory() as session:
+                targets = await _fetch_expo_push_targets(
                     session, org_id, [uuid.UUID(m) for m in payload["member_ids"]],
-                    title=payload["title"], body=payload.get("body"), event_type=payload["event_type"],
-                    reference_type=payload.get("reference_type"),
-                    reference_id=_uuid_or_none(payload.get("reference_id")),
-                    context=payload.get("context"),
                     muted_member_ids=_uuid_set_or_none(payload.get("muted_member_ids")),
-                    project_id=_uuid_or_none(payload.get("project_id")),
-                    story_id=_uuid_or_none(payload.get("story_id")),
-                    sprint_id=_uuid_or_none(payload.get("sprint_id")),
                 )
-            else:
-                raise ValueError(f"unknown delivery_job kind: {kind}")
+                await session.commit()
+            dead_tokens = await _send_expo_push_targets(
+                targets, title=payload["title"], body=payload.get("body"),
+                event_type=payload["event_type"], org_id=org_id,
+                reference_type=payload.get("reference_type"),
+                reference_id=_uuid_or_none(payload.get("reference_id")),
+                project_id=_uuid_or_none(payload.get("project_id")),
+                story_id=_uuid_or_none(payload.get("story_id")),
+                sprint_id=_uuid_or_none(payload.get("sprint_id")),
+            )
+            if dead_tokens:
+                async with async_session_factory() as session:
+                    await _finalize_expo_push_dead_tokens(session, org_id, dead_tokens)
+                    await session.commit()
+        else:
+            raise ValueError(f"unknown delivery_job kind: {kind}")
 
+        async with async_session_factory() as session:
             await session.execute(
                 update(DeliveryJob).where(DeliveryJob.id == job_id).values(
                     status="delivered", delivered_at=datetime.now(timezone.utc),

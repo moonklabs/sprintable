@@ -119,12 +119,30 @@ async def _deliver_personal_webhooks_now(
 
     muted_member_ids: story 75570ab8 — 호출자가 이미 계산한 mute 집합을 넘기면 재조회 생략
     (Event-skip 판정과 동일 SSOT 재사용, 드리프트 방지). None이면 이 함수가 자체 조회.
-    """
-    if not member_ids:
-        return
-    from app.core.ssrf import validate_webhook_url_async
-    from app.services.dispatch_router import _post_with_retry
 
+    story #2460 PO 리뷰(2026-08-05, F1) — 예전엔 이 함수가 조회 直後 같은 함수 안에서 POST
+    루프를 돌아, 호출자(`_deliver_one`)의 세션이 POST 내내 idle-in-transaction으로 열려
+    있었다(webhook_dispatch.py `_fire_webhooks_now`와 동형 결함). `_fetch_personal_webhook_targets`
+    (세션 필요)/`_send_personal_webhook_targets`(세션 불요)로 쪼개 이 함수는 얇은 래퍼로
+    남긴다 — 기존 호출부(via_outbox=False) 시그니처·거동 무변경."""
+    targets = await _fetch_personal_webhook_targets(db, org_id, member_ids, muted_member_ids=muted_member_ids)
+    await _send_personal_webhook_targets(
+        targets, title=title, body=body, event_type=event_type,
+        reference_type=reference_type, reference_id=reference_id, context=context,
+    )
+
+
+async def _fetch_personal_webhook_targets(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    member_ids: list[uuid.UUID],
+    *,
+    muted_member_ids: set[uuid.UUID] | None = None,
+) -> list[dict]:
+    """활성 개인 WebhookConfig를 조회해 mute 필터까지 마친 순수 dict 리스트로 반환한다.
+    세션 I/O는 이 함수에서 끝(story #2460 PO 리뷰 F1)."""
+    if not member_ids:
+        return []
     wh_rows = await db.execute(
         select(WebhookConfig).where(
             WebhookConfig.org_id == org_id,
@@ -135,7 +153,7 @@ async def _deliver_personal_webhooks_now(
     )
     configs = list(wh_rows.scalars().all())
     if not configs:
-        return
+        return []
 
     # global mute 멤버 skip (CP②: 채널 막론 mute 우선)
     if muted_member_ids is None:
@@ -143,19 +161,37 @@ async def _deliver_personal_webhooks_now(
     else:
         muted = muted_member_ids
 
-    for cfg in configs:
-        if cfg.member_id in muted:
-            continue
+    return [
+        {"url": cfg.url, "secret": cfg.secret, "member_id": cfg.member_id}
+        for cfg in configs if cfg.member_id not in muted
+    ]
+
+
+async def _send_personal_webhook_targets(
+    targets: list[dict],
+    *,
+    title: str,
+    body: str | None,
+    event_type: str,
+    reference_type: str | None = None,
+    reference_id: uuid.UUID | None = None,
+    context: dict | None = None,
+) -> None:
+    """세션 없이 순수 HTTP POST만(story #2460 PO 리뷰 F1)."""
+    if not targets:
+        return
+    from app.core.ssrf import validate_webhook_url_async
+    from app.services.dispatch_router import _post_with_retry
+
+    for t in targets:
+        url, secret, member_id = t["url"], t["secret"], t["member_id"]
         # SSRF 재검증 (저장 후 DNS rebinding 방지)
         try:
-            await validate_webhook_url_async(cfg.url)
+            await validate_webhook_url_async(url)
         except Exception:
-            logger.warning("personal webhook SSRF reject member=%s", cfg.member_id)
+            logger.warning("personal webhook SSRF reject member=%s", member_id)
             continue
-        is_discord = (
-            "discord.com/api/webhooks" in cfg.url
-            or "discordapp.com/api/webhooks" in cfg.url
-        )
+        is_discord = "discord.com/api/webhooks" in url or "discordapp.com/api/webhooks" in url
         if is_discord:
             text = f"[{event_type}] {title}" + (f"\n{body}" if body else "")
             payload = {"content": text}
@@ -172,11 +208,10 @@ async def _deliver_personal_webhooks_now(
                 "reference_id": str(reference_id) if reference_id else None,
                 "context": context or {},
             }
-            secret = cfg.secret
         try:
-            await _post_with_retry(cfg.url, payload, secret, str(cfg.member_id))
+            await _post_with_retry(url, payload, secret, str(member_id))
         except Exception:
-            logger.warning("personal webhook POST failed (swallowed) member=%s", cfg.member_id)
+            logger.warning("personal webhook POST failed (swallowed) member=%s", member_id)
 
 
 async def dispatch_notification(

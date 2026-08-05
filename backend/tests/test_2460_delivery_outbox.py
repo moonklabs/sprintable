@@ -150,22 +150,31 @@ def _update_values(update_stmt) -> dict:
 
 @pytest.mark.anyio
 async def test_deliver_one_org_webhook_routes_to_now_and_marks_delivered():
+    """story #2460 PO 리뷰(F1) 후: _deliver_one이 fetch(세션)→send(세션 없음)로 쪼개졌으므로
+    fetch 단계의 session.execute가 빈 targets를 내도록 두고, send가 실제로 호출되는지만
+    확인 — 세션·send가 서로 다른 단계에서 불린다는 것 자체가 이 테스트의 핵심 계약."""
     from app.services.delivery_dispatcher import _deliver_one
 
     job = _job("org_webhook", event="story.status_changed", data={"a": 1}, preserve_broadcast=True)
 
+    fetch_result = MagicMock()
+    fetch_result.all.return_value = []  # WebhookConfig 0건 — send는 빈 targets로 호출됨
+
     session = AsyncMock()
-    session.execute = AsyncMock()
+    session.execute = AsyncMock(return_value=fetch_result)
     session.commit = AsyncMock()
     factory_cm = AsyncMock()
     factory_cm.__aenter__ = AsyncMock(return_value=session)
     factory_cm.__aexit__ = AsyncMock(return_value=False)
 
     with patch("app.core.database.async_session_factory", return_value=factory_cm), \
-         patch("app.services.webhook_dispatch._fire_webhooks_now", new=AsyncMock()) as mock_now:
+         patch("app.services.webhook_dispatch._send_webhook_targets", new=AsyncMock()) as mock_send:
         await _deliver_one(job)
 
-    mock_now.assert_awaited_once()
+    mock_send.assert_awaited_once()
+    assert mock_send.call_args[0][0] == []  # fetch가 빈 리스트를 그대로 send에 넘김
+    # 마지막 session.execute 호출이 status='delivered' UPDATE여야 한다(fetch의 SELECT는
+    # 첫 호출 — 두 호출 다 같은 mock session을 거치므로 call_args는 마지막 호출을 가리킨다).
     values = _update_values(session.execute.call_args[0][0])
     assert values["status"] == "delivered"
     assert values["delivered_at"] is not None
@@ -173,31 +182,24 @@ async def test_deliver_one_org_webhook_routes_to_now_and_marks_delivered():
 
 @pytest.mark.anyio
 async def test_deliver_one_unknown_kind_raises_and_retries():
-    """미지원 kind — 예외로 잡혀 attempts<MAX면 status='pending'로 되돌아간다(다음 tick 재시도)."""
+    """미지원 kind — 예외로 잡혀 attempts<MAX면 status='pending'로 되돌아간다(다음 tick 재시도).
+
+    story #2460 PO 리뷰(F1) 후: bogus_kind는 org_webhook/personal_webhook/expo_push
+    어느 분기에도 안 걸려 fetch용 세션 자체가 안 열린다(kind 판별이 전부 session-open 분기
+    「안」이라) — `ValueError`가 세션 밖에서 즉시 발생하므로 `async_session_factory()`는
+    except 블록의 상태갱신용 1회만 불린다(구조 변경 전엔 delivery용+상태갱신용 2회)."""
     from app.services.delivery_dispatcher import _deliver_one
 
     job = _job("bogus_kind")
 
-    delivery_session = AsyncMock()
-    delivery_session.execute = AsyncMock(side_effect=RuntimeError("should not reach update"))
-
     status_session = AsyncMock()
     status_session.execute = AsyncMock()
     status_session.commit = AsyncMock()
+    factory_cm = AsyncMock()
+    factory_cm.__aenter__ = AsyncMock(return_value=status_session)
+    factory_cm.__aexit__ = AsyncMock(return_value=False)
 
-    sessions = [delivery_session, status_session]
-
-    class _FakeFactory:
-        def __call__(self):
-            return self
-
-        async def __aenter__(self):
-            return sessions.pop(0)
-
-        async def __aexit__(self, *a):
-            return False
-
-    with patch("app.core.database.async_session_factory", _FakeFactory()):
+    with patch("app.core.database.async_session_factory", return_value=factory_cm):
         await _deliver_one(job)
 
     # status_session에서 status='pending' + last_error 세팅 UPDATE가 실행됐어야 한다.

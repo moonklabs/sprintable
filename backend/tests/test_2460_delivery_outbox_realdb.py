@@ -178,6 +178,52 @@ async def test_claim_batch_orders_by_created_at(monkeypatch):
         await engine.dispose()
 
 
+# ─── F1(PO 리뷰 2026-08-05, 머지 前 필수수정 pin): send 단계에 커넥션이 안 잡혀 있음 ─────
+
+@pytest.mark.anyio
+async def test_send_phase_holds_no_connection_from_fetch_phase(monkeypatch):
+    """PO 리뷰 F1 — 예전엔 fetch(SELECT)를 문 세션이 send(httpx POST 루프) 내내 idle-in
+    -transaction으로 열려 있었다(POST 자체는 세션을 안 건드리지만 세션 객체가 안 닫혀
+    있었다는 게 문제). 이걸 «docstring 주장」이 아니라 실측으로 고정한다: 엔진 풀을
+    `pool_size=1, max_overflow=0`으로 좁혀놓고, `_send_webhook_targets`가 실행되는 그
+    순간 **같은 엔진**으로 새 쿼리를 하나 더 띄운다 — fetch 단계 커넥션이 반납 안 됐으면
+    풀 고갈로 이 새 쿼리가 타임아웃(멈춤)한다. 반납됐으면 즉시 통과한다."""
+    from app.models.delivery_job import DeliveryJob
+    from app.services.delivery_dispatcher import _claim_batch, _deliver_one
+    from app.services.webhook_dispatch import fire_webhooks
+
+    engine = create_async_engine(_async_url(), pool_size=1, max_overflow=0, pool_timeout=3)
+    try:
+        await _clean_delivery_jobs(engine)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        monkeypatch.setattr("app.core.database.async_session_factory", factory)
+
+        org_id = uuid.uuid4()
+        async with AsyncSession(engine) as session:
+            await fire_webhooks(session, org_id, "story.status_changed", {"story_id": "s1"}, via_outbox=True)
+            await session.commit()
+
+        claimed = await _claim_batch(limit=10)
+        mine = [j for j in claimed if j["org_id"] == org_id]
+        assert len(mine) == 1
+
+        probe_succeeded = {"value": False}
+
+        async def _send_probe(targets, event, data):
+            # send가 실행되는 이 시점에 fetch 단계 커넥션이 반납돼 있어야, pool_size=1인
+            # 이 엔진으로 새 세션을 여는 이 호출이 안 멈추고 통과한다.
+            async with AsyncSession(engine) as probe_session:
+                await probe_session.execute(select(DeliveryJob.id).limit(1))
+            probe_succeeded["value"] = True
+
+        monkeypatch.setattr("app.services.webhook_dispatch._send_webhook_targets", _send_probe)
+        await _deliver_one(mine[0])
+
+        assert probe_succeeded["value"] is True  # 풀 고갈로 멈췄다면 여기 도달 자체가 실패(pytest timeout).
+    finally:
+        await engine.dispose()
+
+
 # ─── 전 사이클: enqueue → claim → 배달(mock _now) → status='delivered' ──────
 
 @pytest.mark.anyio
@@ -203,11 +249,14 @@ async def test_full_cycle_enqueue_claim_deliver_marks_delivered(monkeypatch):
         mine = [j for j in claimed if j["org_id"] == org_id]
         assert len(mine) == 1
 
-        mock_now = AsyncMock()
-        monkeypatch.setattr("app.services.webhook_dispatch._fire_webhooks_now", mock_now)
+        # story #2460 PO 리뷰(F1): _deliver_one의 fetch 단계는 실 PG로 그대로 태우고(빈
+        # WebhookConfig 목록을 실제로 조회), send 단계(순수 외부 I/O)만 mock — fetch/send가
+        # 서로 다른 세션 경계에 있다는 것 자체를 실 DB 라운드트립으로 실증한다.
+        mock_send = AsyncMock()
+        monkeypatch.setattr("app.services.webhook_dispatch._send_webhook_targets", mock_send)
         await _deliver_one(mine[0])
 
-        mock_now.assert_awaited_once()  # 실 HTTP 미발신(mock) — job 상태전이만 검증.
+        mock_send.assert_awaited_once()  # 실 HTTP 미발신(mock) — job 상태전이만 검증.
         async with AsyncSession(engine) as verify:
             row = (await verify.execute(
                 select(DeliveryJob).where(DeliveryJob.id == mine[0]["id"])
