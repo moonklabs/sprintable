@@ -90,6 +90,9 @@ async def test_resolve_org_id_agent_target_falls_back_to_org_members_lookup(monk
 
     engine, Session = await _session_factory()
     monkeypatch.setattr("app.core.database.async_session_factory", Session)
+    # story #2461(§6 봉합③ part2): outbox_dispatcher_loop의 claim/finalize가 이제
+    # worker_session_factory를 쓴다 — 이 테스트의 격리 엔진이 그쪽에도 걸리게 함께 patch.
+    monkeypatch.setattr("app.core.database.worker_session_factory", Session)
     try:
         org_id, member_id = await _seed_org_member(Session)
         resolved = await eb._resolve_org_id("agent", str(member_id), {})
@@ -108,6 +111,9 @@ async def test_resolve_org_id_unresolvable_returns_none(monkeypatch):
 
     engine, Session = await _session_factory()
     monkeypatch.setattr("app.core.database.async_session_factory", Session)
+    # story #2461(§6 봉합③ part2): outbox_dispatcher_loop의 claim/finalize가 이제
+    # worker_session_factory를 쓴다 — 이 테스트의 격리 엔진이 그쪽에도 걸리게 함께 patch.
+    monkeypatch.setattr("app.core.database.worker_session_factory", Session)
     try:
         resolved = await eb._resolve_org_id("agent", str(uuid.uuid4()), {})
         assert resolved is None
@@ -128,6 +134,9 @@ async def test_insert_outbox_row_creates_pending_row(monkeypatch):
 
     engine, Session = await _session_factory()
     monkeypatch.setattr("app.core.database.async_session_factory", Session)
+    # story #2461(§6 봉합③ part2): outbox_dispatcher_loop의 claim/finalize가 이제
+    # worker_session_factory를 쓴다 — 이 테스트의 격리 엔진이 그쪽에도 걸리게 함께 patch.
+    monkeypatch.setattr("app.core.database.worker_session_factory", Session)
     try:
         org_id = uuid.uuid4()
         await eb._insert_outbox_row("org", str(org_id), "story.status_changed", {"entity_id": "s1"})
@@ -157,6 +166,9 @@ async def test_insert_outbox_row_skips_silently_when_org_id_unresolvable(monkeyp
 
     engine, Session = await _session_factory()
     monkeypatch.setattr("app.core.database.async_session_factory", Session)
+    # story #2461(§6 봉합③ part2): outbox_dispatcher_loop의 claim/finalize가 이제
+    # worker_session_factory를 쓴다 — 이 테스트의 격리 엔진이 그쪽에도 걸리게 함께 patch.
+    monkeypatch.setattr("app.core.database.worker_session_factory", Session)
     try:
         await eb._insert_outbox_row("agent", str(uuid.uuid4()), "x", {})  # raise 안 해야
         async with Session() as s:
@@ -183,6 +195,9 @@ async def test_outbox_dispatcher_publishes_pending_rows_and_marks_published(monk
 
     engine, Session = await _session_factory()
     monkeypatch.setattr("app.core.database.async_session_factory", Session)
+    # story #2461(§6 봉합③ part2): outbox_dispatcher_loop의 claim/finalize가 이제
+    # worker_session_factory를 쓴다 — 이 테스트의 격리 엔진이 그쪽에도 걸리게 함께 patch.
+    monkeypatch.setattr("app.core.database.worker_session_factory", Session)
     monkeypatch.setattr("app.core.config.settings.redis_url", "redis://fake:6379/0")
 
     published = []
