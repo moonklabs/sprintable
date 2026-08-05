@@ -24,6 +24,10 @@ from app.models.workflow_line import (
 # SLA 가 독촉하는 미해소 human-gate 대기 상태.
 _SLA_GATE_STATUSES = ("gate_pending", "waiting_gate", "waiting_parallel", "reminded", "escalated", "held")
 _TERMINAL_GATE = frozenset({"approved", "rejected"})
+# §6 봉합③(story #2461, finding #5) — 이전엔 이 FOR UPDATE SKIP LOCKED 조회에 상한이 없었다
+# ("무제한 배치"). L2TriggerWorker.batch_limit(200)과 동급으로 tick당 상한을 명시한다 — 폭주
+# 방지(embedding_backlog.py/event_broker.py outbox 등 기존 배치워커도 전부 명시 상한 보유).
+_SLA_BATCH_SIZE = 200
 
 
 def _now() -> datetime:
@@ -75,7 +79,13 @@ def _record_event(session: AsyncSession, sr: WorkflowLineStepRun, event_type: st
 
 async def _notify(session: AsyncSession, sr: WorkflowLineStepRun, target_id: uuid.UUID | None,
                   event_type: str, title: str) -> None:
-    """best-effort notification(실패는 SLA processor 비중단)."""
+    """best-effort notification(실패는 SLA processor 비중단).
+
+    §6 봉합③(story #2461, finding #5) — 이 호출은 `process_sla()`의 FOR UPDATE SKIP LOCKED
+    락이 걸린 트랜잭션 안에서 일어난다. `via_outbox=True`(story #2460 인프라 재사용)로 개인
+    webhook·Expo push 실배달을 `delivery_jobs`에 enqueue만 하고 `delivery_dispatcher.py`
+    워커에 위임한다 — 이 락이 실 webhook POST/Expo 발송(외부 I/O, 대상당 최대 수 초) 동안
+    열려 있지 않게 된다(enqueue는 순수 INSERT라 빠름)."""
     if target_id is None:
         return
     try:
@@ -86,6 +96,7 @@ async def _notify(session: AsyncSession, sr: WorkflowLineStepRun, target_id: uui
             reference_type=sr.entity_type, reference_id=sr.entity_id,
             # story #1953: sr.project_id NOT NULL — 신규 조회 없이 그대로 실음.
             source_project_id=sr.project_id,
+            via_outbox=True,
         )
     except Exception:  # noqa: BLE001 — notification 실패는 비중단(best-effort).
         pass
@@ -120,7 +131,9 @@ async def process_sla(session: AsyncSession, now: datetime | None = None) -> dic
     rows = (await session.execute(
         select(WorkflowLineStepRun).where(
             WorkflowLineStepRun.status.in_(_SLA_GATE_STATUSES),
-        ).order_by(WorkflowLineStepRun.started_at.asc()).with_for_update(skip_locked=True)
+        ).order_by(WorkflowLineStepRun.started_at.asc())
+        .limit(_SLA_BATCH_SIZE)
+        .with_for_update(skip_locked=True)
     )).scalars().all()
 
     counts = {"reminded": 0, "escalated": 0, "auto_approved": 0, "kept_pending": 0,

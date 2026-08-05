@@ -516,12 +516,106 @@ _OUTBOX_BATCH_SIZE = 50
 _OUTBOX_POLL_INTERVAL = 1.0
 
 
+async def _claim_outbox_batch(limit: int = _OUTBOX_BATCH_SIZE) -> list[dict]:
+    """FOR UPDATE SKIP LOCKED로 미발행 batch를 골라 즉시 commit(락을 짧게만 쥔다 — 발행은
+    여기서 안 함). 반환은 세션-독립적인 순수 dict라 다음 단계가 이 세션을 물고 다닐 필요가
+    없다(story #2461, §6 봉합③ — delivery_dispatcher.py와 동형 claim/work/finalize 분리)."""
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.event_outbox import EventOutbox
+
+    async with async_session_factory() as session:
+        rows = (
+            await session.execute(
+                select(EventOutbox)
+                .where(EventOutbox.published_at.is_(None))
+                .order_by(EventOutbox.id)
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            )
+        ).scalars().all()
+        claimed = [
+            {"id": r.id, "target": r.target, "target_id": r.target_id,
+             "event_type": r.event_type, "payload": dict(r.payload)}
+            for r in rows
+        ]
+        await session.commit()
+        return claimed
+
+
+async def _publish_outbox_batch(claimed: list[dict]) -> list[uuid.UUID]:
+    """세션 없이 순수 Redis publish만(story #2461 — claim 트랜잭션이 이 구간 내내 열려 있지
+    않게). 반환 = 발행 성공 id 리스트(호출자가 `_finalize_outbox_published`로 반영)."""
+    import json
+
+    if not claimed:
+        return []
+    client = _get_redis_client()
+    published_ids: list[uuid.UUID] = []
+    for row in claimed:
+        inner = _slim_org_payload(row["payload"]) if row["target"] == "org" else dict(row["payload"])
+        # pg_notify()/_redis_publish()와 동형 envelope(파싱 대칭) — instance_id는 의도적으로
+        # None: outbox row는 폴링한 인스턴스가 원발행 인스턴스와 다를 수 있어(dispatcher가
+        # 어느 인스턴스에서 돌든 같은 DB row를 픽업) 신뢰 가능한 self-skip 신호가 없다.
+        # ⚠️알려진 갭(3b에서 해소 예정) — 이 경로가 아직 실 dispatch로 승격 안 된 이유이기도
+        # 하다(event_broker_redis_dispatch_enabled 를 outbox_enabled와 함께 켜면 self-skip
+        # 누락으로 인한 중복 dispatch 위험).
+        payload = {
+            "instance_id": None,
+            "target": row["target"],
+            "target_id": str(row["target_id"]),
+            "event_type": row["event_type"],
+            "_broker_event_id": str(row["id"]),
+            "data": inner,
+        }
+        try:
+            await client.publish(
+                _redis_channel(row["target"], str(row["target_id"])),
+                json.dumps(payload, default=str),
+            )
+        except Exception as exc:
+            logger.warning("event_broker outbox dispatch publish failed id=%s: %s", row["id"], exc)
+            continue  # published_at 미갱신 — 다음 폴링에서 재시도(at-least-once)
+        published_ids.append(row["id"])
+    return published_ids
+
+
+async def _finalize_outbox_published(published_ids: list[uuid.UUID]) -> None:
+    """발행 성공 row를 published_at으로 마킹(짧은 세션 — story #2461)."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import update
+
+    from app.core.database import async_session_factory
+    from app.models.event_outbox import EventOutbox
+
+    if not published_ids:
+        return
+    now = datetime.now(timezone.utc)
+    async with async_session_factory() as session:
+        await session.execute(
+            update(EventOutbox).where(EventOutbox.id.in_(published_ids)).values(published_at=now)
+        )
+        await session.commit()
+
+
 async def outbox_dispatcher_loop() -> None:
     """`event_outbox`의 미발행 row를 폴링해 Redis로 발행 — 3a단계 dispatcher.
 
     `FOR UPDATE SKIP LOCKED`로 멀티인스턴스 동시 폴링 시 중복발행을 방지한다(표준 outbox
     패턴). listen_loop()/redis_consume_loop()와 동형 에러 backoff(1s→2s→...→30s) —
     정상 시엔 고정 폴링 간격(`_OUTBOX_POLL_INTERVAL`)으로 반복한다.
+
+    story #2461(§6 봉합③, finding #5, PO 리뷰 2026-08-05) — 예전엔 claim(SELECT FOR UPDATE
+    SKIP LOCKED)과 실 발행(Redis publish, 네트워크 I/O)이 하나의 열린 세션/트랜잭션 안에서
+    돌아, 락이 그 배치 전체의 Redis publish 동안 열려 있었다(delivery_dispatcher.py F1과
+    동형 결함 — Redis는 webhook보다 지연이 짧지만 원리는 같다). `_claim_outbox_batch`(세션,
+    즉시 commit)/`_publish_outbox_batch`(세션 없음)/`_finalize_outbox_published`(세션)로
+    3분할 — claim 세션이 발행 구간까지 살아있지 않다. claim이 진짜 락은 아니므로(commit
+    後 published_at이 여전히 None) 좁은 창에서 중복발행 가능 — Redis publish는 멱등 소비
+    (self-skip 신호 등)를 전제하는 경로라 at-least-once 허용 범위(delivery_dispatcher.py와
+    동일 트레이드오프).
 
     ⚠️ `event_broker_redis_dual_publish_enabled`와 `event_broker_outbox_enabled`를 동시에
     켜면 같은 논리적 이벤트가 Redis에 두 번(즉시 shadow-publish + 나중 outbox dispatch) 발행될
@@ -530,14 +624,7 @@ async def outbox_dispatcher_loop() -> None:
     병행하는 게 아니다(오르테가군 시퀀싱 — dual-publish→shadow-consume→outbox 전환→LISTEN
     제거는 순차, 동시 아님). 두 플래그를 동시에 켜는 것은 3b 전환 실험 용도가 아니면 피할 것.
     """
-    import json
-    from datetime import datetime, timezone
-
-    from sqlalchemy import select
-
     from app.core.config import settings
-    from app.core.database import async_session_factory
-    from app.models.event_outbox import EventOutbox
 
     if not settings.redis_url:
         logger.warning("event_broker outbox dispatcher skipped: redis_url not configured")
@@ -548,53 +635,13 @@ async def outbox_dispatcher_loop() -> None:
 
     while True:
         try:
-            async with async_session_factory() as session:
-                rows = (
-                    await session.execute(
-                        select(EventOutbox)
-                        .where(EventOutbox.published_at.is_(None))
-                        .order_by(EventOutbox.id)
-                        .limit(_OUTBOX_BATCH_SIZE)
-                        .with_for_update(skip_locked=True)
-                    )
-                ).scalars().all()
-
-                if not rows:
-                    await session.commit()
-                    await asyncio.sleep(_OUTBOX_POLL_INTERVAL)
-                    continue
-
-                client = _get_redis_client()
-                now = datetime.now(timezone.utc)
-                for row in rows:
-                    inner = _slim_org_payload(row.payload) if row.target == "org" else dict(row.payload)
-                    # pg_notify()/_redis_publish()와 동형 envelope(파싱 대칭) — instance_id는
-                    # 의도적으로 None: outbox row는 폴링한 인스턴스가 원발행 인스턴스와 다를 수
-                    # 있어(dispatcher가 어느 인스턴스에서 돌든 같은 DB row를 픽업) 신뢰 가능한
-                    # self-skip 신호가 없다. ⚠️알려진 갭(3b에서 해소 예정) — 이 경로가 아직 실
-                    # dispatch로 승격 안 된 이유이기도 하다(event_broker_redis_dispatch_enabled
-                    # 를 outbox_enabled와 함께 켜면 self-skip 누락으로 인한 중복 dispatch 위험).
-                    payload = {
-                        "instance_id": None,
-                        "target": row.target,
-                        "target_id": str(row.target_id),
-                        "event_type": row.event_type,
-                        "_broker_event_id": str(row.id),
-                        "data": inner,
-                    }
-                    try:
-                        await client.publish(
-                            _redis_channel(row.target, str(row.target_id)),
-                            json.dumps(payload, default=str),
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "event_broker outbox dispatch publish failed id=%s: %s", row.id, exc
-                        )
-                        continue  # published_at 미갱신 — 다음 폴링에서 재시도(at-least-once)
-                    row.published_at = now
-
-                await session.commit()
+            claimed = await _claim_outbox_batch()
+            if not claimed:
+                await asyncio.sleep(_OUTBOX_POLL_INTERVAL)
+                delay = 1.0
+                continue
+            published_ids = await _publish_outbox_batch(claimed)
+            await _finalize_outbox_published(published_ids)
             delay = 1.0
         except asyncio.CancelledError:
             logger.info("event_broker outbox dispatcher cancelled — shutting down")
