@@ -24,6 +24,7 @@ terminal row는 embed_text가 나중에 정상화돼도 재선정 대상이 아�
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from typing import Any
@@ -46,6 +47,18 @@ async def process_embedding_backlog(session: AsyncSession, limit: int = _BATCH_S
 
     반환: scanned/embedded/pending_retry/failed/terminal 카운트(score_hypotheses 응답 스키마 미러
     +terminal 신규).
+
+    §6 봉합③(story #2461, finding #5) 판단 기록 — 이 함수는 delivery_dispatcher.py의
+    claim(짧은 트랜잭션·즉시 commit)→work(세션 없음)→finalize(짧은 트랜잭션) 패턴을 **그대로
+    적용하지 않았다.** 그 패턴을 적용하면 claim 직후 커밋해 FOR UPDATE SKIP LOCKED를 놓아야
+    하는데, 이 파일의 SKIP LOCKED는 원래 "중첩 cron invocation이 같은 pending row를 동시에
+    집어 **유료 Vertex AI API를 중복 호출**하는 것"을 막으려는 설계다(모듈 docstring 참조).
+    claim을 즉시 커밋하면 그 보호가 사라지고 「같은 row 중복 임베딩=중복 과금」 창이 열린다 —
+    이건 webhook 배달(중복=멱등·무료)과 달리 되돌릴 수 없는 비용 문제라, 패턴을 기계적으로
+    복붙하지 않고 대신: ①이벤트루프 블로킹(asyncio.to_thread, 위) 만 고쳤다 — 이건 무조건
+    이득(트레이드오프 없음). ②커넥션을 Vertex 호출 동안 계속 쥐는 것(이 함수 구조)은 **그대로
+    유지** — PO 검토 후 원하면 후속으로 claim-lease 컬럼(만료 타임스탬프) 추가 마이그레이션과
+    함께 완전 분리할 것(그 컬럼 없이는 안전하게 분리 못 함).
     """
     from app.core.config import EMBEDDING_DIMENSION
     from app.services.embedding_client import MODEL_VERSION, embed_text
@@ -68,7 +81,13 @@ async def process_embedding_backlog(session: AsyncSession, limit: int = _BATCH_S
 
     for row in rows:
         try:
-            vector = embed_text(row.embedding_text)
+            # §6 봉합③(story #2461, finding #5) — embed_text()는 google-genai SDK의 동기
+            # 블로킹 HTTP 호출이다(비-async). 그동안 `await` 없이 직접 호출해 이 함수를
+            # await하는 이벤트루프 전체가 Vertex AI 응답을 기다리는 동안 완전히 멈췄다 —
+            # 같은 프로세스의 다른 모든 동시 요청(다른 org의 API 호출 등)도 그 순간 멎는다.
+            # DB 커넥션 하나를 오래 쥐는 것보다 넓은 blast radius라 asyncio.to_thread로
+            # 스레드풀에 위임해 이벤트루프를 막지 않게 한다.
+            vector = await asyncio.to_thread(embed_text, row.embedding_text)
             if vector is None:
                 # 인증불가/API오류/응답이상 원인 구분 불가(embed_text가 전부 None으로 수렴).
                 row.retry_count += 1
