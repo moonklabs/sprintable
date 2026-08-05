@@ -239,9 +239,11 @@ async def emit_story_status_changed(
     try:
         # AC2: story.status_changed 의 member-bound webhook 은 관련자(notify_ids)만 수신 → org-wide
         # 과다 fan-out 차단. member_id=null 진짜 activity-feed 브로드캐스트는 보존(preserve_broadcast).
+        # story #2460(§6 봉합②): 외부 I/O(webhook POST)를 요청 트랜잭션 밖으로 — outbox 경유.
         await fire_webhooks(
             db, org_id, "story.status_changed", event_data,
             recipient_member_ids=notify_ids,
+            via_outbox=True,
         )
     except Exception:
         pass
@@ -275,6 +277,8 @@ async def emit_story_status_changed(
                 reference_id=story.id,
                 # S2: 멀티프로젝트 에이전트 assignee를 스토리 프로젝트로 정확 라우팅
                 source_project_id=story.project_id,
+                # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
+                via_outbox=True,
             )
         except Exception:
             pass

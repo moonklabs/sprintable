@@ -2134,6 +2134,8 @@ async def send_message(
                         body=(msg.content or "")[:200],
                         reference_type="conversation", reference_id=conversation_id,
                         source_project_id=conv.project_id,
+                        # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
+                        via_outbox=True,
                     )
             except Exception:
                 logger.warning(
@@ -2170,6 +2172,8 @@ async def send_message(
                     body=(msg.content or "")[:200],
                     reference_type="conversation", reference_id=conversation_id,
                     source_project_id=conv.project_id,
+                    # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
+                    via_outbox=True,
                 )
     except Exception:
         logger.warning("conversation.message notification failed conversation_id=%s", conversation_id, exc_info=True)

@@ -124,6 +124,28 @@ async def lifespan(app: FastAPI):
         from app.services.event_broker import outbox_dispatcher_loop
 
         outbox_dispatcher_task = asyncio.create_task(outbox_dispatcher_loop())
+    # story #2460(§6 봉합②): delivery_jobs 워커 — story_status_events.py/conversations.py
+    # send_message가 via_outbox=True로 무조건 enqueue하므로(플래그 없음, 두 콜사이트 하드코딩),
+    # 이 워커도 무조건 기동해야 그 job들이 드레인된다(옵션 아님 — listen_loop과 동형으로 조건부
+    # 게이팅 없이 기동).
+    # story #2460(§6 봉합②): delivery_jobs 워커 — story_status_events.py/conversations.py
+    # send_message가 via_outbox=True로 무조건 enqueue하므로(플래그 없음, 두 콜사이트 하드코딩),
+    # 이 워커도 실배포에선 무조건 기동해야 그 job들이 드레인된다(listen_loop과 동형으로 조건부
+    # 게이팅 없이 기동 — 단, listen_loop과 달리 이 워커는 SQLAlchemy 공용 풀(async_session_factory)
+    # 을 물기 때문에 pytest 하에서는 예외적으로 안 띄운다. pytest는 TestClient(app)로 lifespan을
+    # 매 테스트마다 «서로 다른 이벤트루프»로 반복 기동하는 관례가 있어(shutdown.py 모듈독스트링
+    # 참조), 이 워커의 폴링 루프가 그 사이를 가로질러 살아있으면 전역 커넥션 풀에 다른 루프의
+    # Future가 섞여 "attached to a different loop" 로 실측됐다(#2852 CI 첫 push에서 재현·
+    # 태스크 비활성화 시 24/24 재통과로 원인 확定 — listen_loop은 SQLAlchemy 풀을 안 쓰는
+    # raw asyncpg 전용 커넥션이라 이 클래스에 안 걸림, 이 워커와 다른 지점). `PYTEST_CURRENT_TEST`
+    # 는 신규 발명이 아니라 이 파일의 `is_really_local`이 이미 쓰는 같은 pytest 탐지 관례.
+    import os as _os
+
+    delivery_dispatcher_task = None
+    if not _os.environ.get("PYTEST_CURRENT_TEST"):
+        from app.services.delivery_dispatcher import delivery_dispatcher_loop
+
+        delivery_dispatcher_task = asyncio.create_task(delivery_dispatcher_loop())
     try:
         yield
     finally:
@@ -139,6 +161,8 @@ async def lifespan(app: FastAPI):
             redis_shadow_task.cancel()
         if outbox_dispatcher_task is not None:
             outbox_dispatcher_task.cancel()
+        if delivery_dispatcher_task is not None:
+            delivery_dispatcher_task.cancel()
         try:
             if task is not None:
                 try:
@@ -158,6 +182,11 @@ async def lifespan(app: FastAPI):
             if outbox_dispatcher_task is not None:
                 try:
                     await outbox_dispatcher_task
+                except asyncio.CancelledError:
+                    pass
+            if delivery_dispatcher_task is not None:
+                try:
+                    await delivery_dispatcher_task
                 except asyncio.CancelledError:
                     pass
         finally:
