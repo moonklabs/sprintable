@@ -30,6 +30,7 @@ from app.models.event import Event
 from app.models.organization import Organization
 from app.models.team import TeamMember
 from app.routers.events import _agent_connections, _event_to_payload
+from app.services.agent_onboarding_config import DEFAULT_RUNTIME
 
 logger = logging.getLogger(__name__)
 
@@ -485,11 +486,17 @@ async def agent_stream(
                 # OB-4b seam(stream_connected): V2 /agent/stream 연결 establish 1회(presence online과 동일
                 # tx). begin_nested 격리·non-blocking·fail-silent — savepoint라 emit 실패가 presence/세션
                 # write를 poison 안 함(단일경로·presence 무회귀). funnel mcp_reachable 직전 reachability.
+                # spec-2377 §3/§6 fix(2026-08-05, story #2466 별건): 이 리터럴 "claude-code"가
+                # 실제 연결 런타임과 무관하게 항상 찍혀 퍼널 raw 이 그 에이전트의 진짜 runtime_type
+                # 을 반영 못 했다 — tm(위에서 이미 로드된 TeamMember, 추가 쿼리 0)의 실제
+                # runtime_type을 쓴다. 이 엔드포인트 자체는 stdio 전용(AGENT_GATEWAY_V2 브리지가
+                # sse_bridge.py=stdio만 구동) — transport="stdio"는 하드코딩이 아니라 이 경로의
+                # 실제 불변 사실(무회귀).
                 from app.services.onboarding_funnel import emit_onboarding_event
                 await emit_onboarding_event(
                     _pdb, "stream_connected", agent_id=agent_id,
                     org_id=uuid.UUID(org_id_str), session_id=session_id,
-                    runtime="claude-code", transport="stdio",
+                    runtime=tm.runtime_type or DEFAULT_RUNTIME, transport="stdio",
                 )
                 await _pdb.commit()
             _presence_wired = True
