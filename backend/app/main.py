@@ -43,7 +43,7 @@ _logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.core import shutdown as shutdown_module
-    from app.core.database import engine, read_engine
+    from app.core.database import engine, read_engine, worker_engine
     from app.routers.auth_firebase_internal import check_internal_secret_config
     from app.routers.cron import check_cron_secret_config
     from app.routers.verdict_capture import warn_if_webhook_secret_misconfigured
@@ -202,6 +202,11 @@ async def lifespan(app: FastAPI):
             # 미설정이면 read_engine is engine 이라 위 dispose 로 이미 정리됨(중복 dispose 방지).
             if read_engine is not engine:
                 await read_engine.dispose()
+            # story #2461(§6 봉합③ part2): worker_engine도 별도 풀 객체라 독립 dispose 필요
+            # (read_engine과 동일 근거 — 안 하면 워커풀 쪽에서 좀비-연결 클래스 S:33e0c681 재발).
+            # L2의 advisory-lock 커넥션 자체는 l2_task.cancel→run finally에서 이미 반납되지만,
+            # 그건 "풀에 반납"이지 "풀 자체를 닫음"이 아니다 — 이 dispose가 그 나머지를 정리.
+            await worker_engine.dispose()
 
 
 from app.routers import a2a, account, activity_logs, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, assets, context_pack, deeplink_manifest, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, device_installations, dispatch, docs, entities, goals, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, judgments, labels, loops, mcp, me, meetings, members, merge_gate, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, project_access, project_settings, projects, public_docs, reference_candidates, references, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, session_context, sprints, standups, stories, subscription, tasks, team_members, team_presence, trust_scores, usage, user_blocks, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat

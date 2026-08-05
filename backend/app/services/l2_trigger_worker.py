@@ -149,9 +149,13 @@ class L2TriggerWorker:
                         await asyncio.sleep(self.poll_interval_s)
                         continue
 
-                    from app.core.database import async_session_factory
+                    # story #2461(§6 봉합③ part2, PO 승인 2026-08-05 안 A): per-tick 처리
+                    # 세션을 요청 primary 풀이 아니라 전용 워커풀에서 뜬다(finding #6 인접
+                    # 이슈 — _fire_one()이 이 세션 안에서 deliver_injected_event_webhook
+                    # 웹훅 POST를 await하는 구간이 요청풀이 아닌 여기서만 소모되게).
+                    from app.core.database import worker_session_factory
 
-                    async with async_session_factory() as db:
+                    async with worker_session_factory() as db:
                         await self._poll_once(db)
                         now_mono = time.monotonic()
                         if now_mono - last_deadline_scan >= self.deadline_scan_interval_s:
@@ -174,15 +178,23 @@ class L2TriggerWorker:
 
     # ── advisory lock (AC③) ──────────────────────────────────────────────────────
     async def _ensure_lock(self) -> bool:
-        """advisory lock 미사용 시 항상 True. 사용 시 holder만 True(전용 커넥션·AUTOCOMMIT)."""
+        """advisory lock 미사용 시 항상 True. 사용 시 holder만 True(전용 커넥션·AUTOCOMMIT).
+
+        story #2461(§6 봉합③ part2, PO 승인 2026-08-05 안 A — finding #6): 이 커넥션은 leader인
+        동안 절대 반납되지 않는다(session-level advisory lock의 생명주기가 곧 이 연결의 생명주기
+        — 이게 페일오버가 즉시·자동인 이유이기도 하다, 안 B 검토 문서 참조). 예전엔 요청
+        primary 엔진(`engine`)에서 checkout해 요청풀 예산을 영구히 1만큼 깎았다 — 이제 전용
+        `worker_engine`(pg_pubsub.listen_loop()과 같은 "요청 풀 밖 전용 연결" 원칙)에서 뜬다.
+        메커니즘·시맨틱스(pg_try_advisory_lock·크래시 시 자동해제·standby ≤poll_interval 승계)는
+        완전히 그대로 — 어느 풀에서 커넥션이 나오는지만 바뀐다."""
         if not self.use_advisory_lock:
             return True
         if self._holds_lock:
             return True
         if self._lock_conn is None:
-            from app.core.database import engine
+            from app.core.database import worker_engine
 
-            self._lock_conn = await engine.connect()
+            self._lock_conn = await worker_engine.connect()
             await self._lock_conn.execution_options(isolation_level="AUTOCOMMIT")
         got = (
             await self._lock_conn.execute(

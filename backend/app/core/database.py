@@ -79,6 +79,32 @@ read_session_factory = async_sessionmaker(
     class_=AsyncSession,
 )
 
+# story #2461(§6 봉합③ part2, PO 승인 2026-08-05): 요청 경로(engine/async_session_factory)와
+# 완전 분리된 전용 「워커풀」 — L2TriggerWorker의 advisory-lock 영구연결(finding #6) +
+# embedding_backlog/workflow_sla_processor/workflow_handoff_watchdog/event_broker outbox의
+# claim/finalize 세션(finding #5)이 여기로 옮겨간다. `pg_pubsub.listen_loop()`가 이미 쓰는
+# "요청 풀 밖 전용 연결" 원칙과 같은 결 — 단 listen_loop은 raw 커넥션 1개, 이건 여러 워커가
+# 나눠 쓰는 작은 풀(pool_size+max_overflow, 기본 2+1=3)이라는 차이만 있다.
+# ⛔이 풀도 db_application_name()에 별도 suffix("worker")를 달아 pg_stat_activity에서
+# 요청 세션(suffix 없음)·raw LISTEN(":listen")과 분리 집계되게 한다(SID f2fe1c5e/#2040 AC2
+# 관례 재사용 — 이 풀의 실제 커넥션 점유를 "요청과 무관"함을 관측으로 증명하는 축).
+worker_engine = create_async_engine(
+    settings.database_url,
+    pool_size=settings.worker_db_pool_size,
+    max_overflow=settings.worker_db_max_overflow,
+    pool_pre_ping=True,
+    echo=settings.debug,
+    connect_args={
+        **({"statement_cache_size": 0} if settings.db_pgbouncer else {}),
+        "server_settings": {"application_name": db_application_name("worker")},
+    },
+)
+worker_session_factory = async_sessionmaker(
+    worker_engine,
+    expire_on_commit=False,
+    class_=AsyncSession,
+)
+
 
 class Base(DeclarativeBase):
     pass
@@ -86,6 +112,21 @@ class Base(DeclarativeBase):
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with async_session_factory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
+async def get_worker_db() -> AsyncGenerator[AsyncSession, None]:
+    """story #2461(§6 봉합③ part2) — 배치워커 cron 엔드포인트(embed-backlog·workflow-sla·
+    workflow-handoff-watchdog) 전용. 요청 primary 풀이 아니라 `worker_engine`에서 세션을
+    뜬다 — FOR UPDATE SKIP LOCKED 락을 쥔 채 외부 서비스(Vertex AI 등)를 기다리는 구간이
+    요청풀이 아닌 이 전용 풀에서만 소모되게 한다(embedding_backlog.py의 잔여 pool-hold를
+    이 풀로 옮겨 해소 — PO 판단 2026-08-05, lease 마이그 불요·SKIP LOCKED dedup 보존)."""
+    async with worker_session_factory() as session:
         try:
             yield session
             await session.commit()
