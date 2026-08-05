@@ -310,3 +310,52 @@ describe('recruiter-client STEP5 — story #2410 ③-1(verifiedBanner)', () => {
     expect(source).toMatch(/\{verified && \([\s\S]{0,700}tOnboarding\('verifiedBanner'\)/);
   });
 });
+
+// story #2433(A/B) — 미르코 실측(codex 표본, 2026-08-03): 위저드에서 런타임을 골라 채용해도
+// 관리화면엔 "런타임 타입: 미설정"으로 떴다(A) + "역할 없이(키만)"는 실행환경(런타임) 단계
+// 자체가 스킵됐다(B). 소스 텍스트 수준으로 pin(이 파일의 기존 관례 — 컴포넌트 전체 마운트
+// 테스트가 없다). BE(recruit_agent → members.runtime_type anchor write)는
+// backend/tests/test_e_recruit_s3_recruit_service_realdb.py::test_recruit_persists_runtime_type_to_member
+// 가 실 Postgres로 커버한다(뮤테이션 셀프체크: 그 write 줄을 되돌려 RED 확認 후 복원).
+describe('recruiter-client equip-skip("역할 없이") 런타임 — story #2433(B) 소스 회귀가드', () => {
+  const source = readFileSync(fileURLToPath(new URL('./recruiter-client.tsx', import.meta.url)), 'utf-8');
+
+  it('equip-skip 폼(STEP2)이 Full 경로 STEP3과 같은 renderRuntimePicker()를 렌더한다 — 스킵되지 않는다', () => {
+    const start = source.indexOf('{equipSkip ? (');
+    const end = source.indexOf(') : null}', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const equipBlock = source.slice(start, end);
+    expect(equipBlock).toContain('{renderRuntimePicker()}');
+  });
+
+  it('Full 경로 STEP3도 같은 renderRuntimePicker() 호출로 통일됐다(그리드 마크업 중복 없음)', () => {
+    const step3Block = /step === 3 && !equipSkip[\s\S]{0,200}?\{renderRuntimePicker\(\)\}/.exec(source);
+    expect(step3Block).not.toBeNull();
+  });
+
+  it('handleEquipCreate가 생성 성공 직후 PATCH /api/team-members/{id}로 runtime_type을 반영한다(관리화면과 같은 anchor 경로)', () => {
+    const handlerMatch = /const handleEquipCreate = async \(\) => \{[\s\S]*?\n  \};/.exec(source);
+    expect(handlerMatch).not.toBeNull();
+    const body = handlerMatch![0];
+    expect(body).toContain('/api/team-members/${agentId}');
+    expect(body).toContain("method: 'PATCH'");
+    expect(body).toContain('runtime_type: runtime');
+  });
+
+  it('PATCH 실패해도 결과 화면을 막지 않되(키는 이미 유효) 반쪽 상태를 조용히 숨기지 않는다', () => {
+    const handlerMatch = /const handleEquipCreate = async \(\) => \{[\s\S]*?\n  \};/.exec(source);
+    const body = handlerMatch![0];
+    expect(body).toContain('setEquipRuntimeSaveWarning(true)');
+    expect(body).toContain('setStep(3)'); // PATCH 실패 분기에서도 결과 화면 진입은 유지
+    expect(source).toContain("equipRuntimeSaveWarning && (");
+    expect(source).toContain("t('equipRuntimeSaveWarning')");
+  });
+
+  it('equipRuntimeSaveWarning 번역키가 ko/en 둘 다 있다', () => {
+    const en = (enMessages as { recruiter: Record<string, string> }).recruiter.equipRuntimeSaveWarning;
+    const ko = (koMessages as { recruiter: Record<string, string> }).recruiter.equipRuntimeSaveWarning;
+    expect(en).toBeTruthy();
+    expect(ko).toBeTruthy();
+  });
+});
