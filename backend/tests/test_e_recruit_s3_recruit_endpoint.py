@@ -158,11 +158,15 @@ async def test_recruit_success_response_shape():
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("runtime", ["opencode", "openclaw", "hermes", "grok", "pi"])
+@pytest.mark.parametrize("runtime", ["opencode", "openclaw", "grok", "pi"])
 async def test_recruit_success_connector_only_runtime_mcp_config_null_no_crash(runtime):
-    """전 런타임 올지원(story 6f6ac081): 커넥터 전용 5종으로 recruit() — 실 SUPPORTED_RUNTIMES
+    """전 런타임 올지원(story 6f6ac081): 커넥터 전용 런타임으로 recruit() — 실 SUPPORTED_RUNTIMES
     가드 통과(400 아님) + 실 build_agent_mcp_config_bundle(mock 아님)이 mcp_config=None을
-    반환해도 응답 구성이 크래시 없이 완료돼야 한다."""
+    반환해도 응답 구성이 크래시 없이 완료돼야 한다.
+
+    hermes는 story #2466(P1-B, 유나 정렬 v1.3)로 HTTP_MCP_CAPABLE_RUNTIMES에 편입돼 이 그룹에서
+    빠졌다 — mcp_config가 이제 null이 아니므로 아래 별도 테스트
+    (test_recruit_success_hermes_http_capable_returns_real_mcp_config)로 검증."""
     from app.routers.agents import _recruit_agent_endpoint as recruit_agent_endpoint
     from app.schemas.recruit import RecruitRequest
 
@@ -190,6 +194,42 @@ async def test_recruit_success_connector_only_runtime_mcp_config_null_no_crash(r
     assert response["default_transport"] is None
     assert response["mcp_config"] is None
     assert response["mcp_config_alternatives"] == {}
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_recruit_success_hermes_http_capable_returns_real_mcp_config(monkeypatch):
+    """story #2466(P1-B, 유나 정렬 v1.3): hermes는 HTTP_MCP_CAPABLE_RUNTIMES에 편입돼 recruit()도
+    실 build_agent_mcp_config_bundle(mock 아님)에서 null이 아닌 mcp_config를 받아야 한다 —
+    바로 위 커넥터-전용 그룹과의 대조군(positive control)."""
+    monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.sprintable.ai/mcp")
+    from app.routers.agents import _recruit_agent_endpoint as recruit_agent_endpoint
+    from app.schemas.recruit import RecruitRequest
+
+    session = MagicMock()
+    session.commit = AsyncMock()
+    agent_id = uuid.uuid4()
+    member = SimpleNamespace(id=agent_id, project_id=uuid.uuid4())
+    role_template = SimpleNamespace(slug="backend", default_tool_groups=["stories", "tasks"])
+    persona = SimpleNamespace(id=uuid.uuid4(), system_prompt="합성된 지침 텍스트")
+    recruit_result = {
+        "persona": persona,
+        "api_key_plaintext": "sk_live_deadbeef",
+        "tool_allowlist": ["stories", "tasks"],
+    }
+
+    with patch("app.routers.agents.assert_agent_owner", AsyncMock(return_value=member)), \
+         patch("app.routers.agents.get_published_role_template", AsyncMock(return_value=role_template)), \
+         patch("app.routers.agents.recruit_agent", AsyncMock(return_value=recruit_result)), \
+         patch("app.routers.agents.emit_onboarding_event", AsyncMock()):
+        response = await recruit_agent_endpoint(
+            agent_id, RecruitRequest(role_template_slug="backend", runtime="hermes"), accept_language=None,
+            session=session, auth=_auth_ctx(), org_id=uuid.uuid4(),
+        )
+
+    assert response["default_transport"] in ("http", "stdio")
+    assert response["mcp_config"] is not None
+    assert response["mcp_config"]["mcpServers"]["sprintable"]["type"] in ("http", "stdio")
     session.commit.assert_awaited_once()
 
 
