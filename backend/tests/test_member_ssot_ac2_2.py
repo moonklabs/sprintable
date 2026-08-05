@@ -38,7 +38,9 @@ def test_notification_preferences_member_id_has_no_team_members_fk():
 @pytest.mark.anyio
 async def test_get_project_scoped_grant_only_allows():
     """grant-only 휴먼(team_member 없음, has_project_access=True)도 project org 접근 허용."""
+    from app.dependencies import auth as auth_module
     from app.dependencies.auth import get_project_scoped_org_id
+    from tests.conftest import FakeAsyncSessionCtx
 
     project_id = uuid.uuid4()
     project_org = uuid.uuid4()
@@ -52,9 +54,10 @@ async def test_get_project_scoped_grant_only_allows():
     db.execute = AsyncMock(return_value=proj_result)
 
     with patch("app.dependencies.auth.get_verified_org_id", new=AsyncMock(return_value=project_org)), \
-         patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=True)):
+         patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=True)), \
+         patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(db)):
         result = await get_project_scoped_org_id(
-            project_id=project_id, auth=ctx, x_org_id=None, db=db, request=None
+            project_id=project_id, auth=ctx, x_org_id=None, request=None
         )
     assert result == project_org
 
@@ -62,7 +65,9 @@ async def test_get_project_scoped_grant_only_allows():
 @pytest.mark.anyio
 async def test_get_project_scoped_no_access_403():
     """team_member·grant·owner/admin 어디에도 없으면 403."""
+    from app.dependencies import auth as auth_module
     from app.dependencies.auth import get_project_scoped_org_id
+    from tests.conftest import FakeAsyncSessionCtx
 
     project_id = uuid.uuid4()
     project_org = uuid.uuid4()
@@ -76,10 +81,11 @@ async def test_get_project_scoped_no_access_403():
     db.execute = AsyncMock(return_value=proj_result)
 
     with patch("app.dependencies.auth.get_verified_org_id", new=AsyncMock(return_value=project_org)), \
-         patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=False)):
+         patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=False)), \
+         patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(db)):
         with pytest.raises(HTTPException) as exc:
             await get_project_scoped_org_id(
-                project_id=project_id, auth=ctx, x_org_id=None, db=db, request=None
+                project_id=project_id, auth=ctx, x_org_id=None, request=None
             )
     assert exc.value.status_code == 403
 
@@ -93,7 +99,9 @@ async def test_get_project_scoped_cross_org_without_header_rejected():
     0-project org 로 switch 직후 옛 프로젝트 query(stale)가 옛 org 로 재진입(leak)하던
     경로 차단. has_project_access=True 여도 cross-org 가드가 먼저 거부함을 증명.
     """
+    from app.dependencies import auth as auth_module
     from app.dependencies.auth import get_project_scoped_org_id
+    from tests.conftest import FakeAsyncSessionCtx
 
     project_id = uuid.uuid4()
     project_org = uuid.uuid4()      # project 가 속한 (옛) org
@@ -109,10 +117,11 @@ async def test_get_project_scoped_cross_org_without_header_rejected():
 
     has_access = AsyncMock(return_value=True)
     with patch("app.dependencies.auth.get_verified_org_id", new=AsyncMock(return_value=scoped_org)), \
-         patch("app.services.project_auth.has_project_access", new=has_access):
+         patch("app.services.project_auth.has_project_access", new=has_access), \
+         patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(db)):
         with pytest.raises(HTTPException) as exc:
             await get_project_scoped_org_id(
-                project_id=project_id, auth=ctx, x_org_id=None, db=db, request=None
+                project_id=project_id, auth=ctx, x_org_id=None, request=None
             )
     assert exc.value.status_code == 403
     has_access.assert_not_awaited()  # cross-org 가드가 access 체크보다 먼저 차단
@@ -122,7 +131,9 @@ async def test_get_project_scoped_cross_org_without_header_rejected():
 async def test_get_project_scoped_cross_org_with_matching_header_allowed():
     """X-Org-Id 헤더로 cross-org 가 명시 요청되면(=get_verified_org_id 가 그 org 로 해소)
     project_org 와 일치하므로 허용 — unified-switcher cross-org 프리뷰 보존."""
+    from app.dependencies import auth as auth_module
     from app.dependencies.auth import get_project_scoped_org_id
+    from tests.conftest import FakeAsyncSessionCtx
 
     project_id = uuid.uuid4()
     project_org = uuid.uuid4()
@@ -137,9 +148,10 @@ async def test_get_project_scoped_cross_org_with_matching_header_allowed():
 
     # X-Org-Id=project_org 명시 → get_verified_org_id 가 membership 검증 후 project_org 반환
     with patch("app.dependencies.auth.get_verified_org_id", new=AsyncMock(return_value=project_org)), \
-         patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=True)):
+         patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=True)), \
+         patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(db)):
         result = await get_project_scoped_org_id(
-            project_id=project_id, auth=ctx, x_org_id=str(project_org), db=db, request=None
+            project_id=project_id, auth=ctx, x_org_id=str(project_org), request=None
         )
     assert result == project_org
 

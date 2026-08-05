@@ -67,6 +67,23 @@ def test_streaming_auth_deps_do_not_depend_on_get_db():
         assert "async_session_factory()" in src, f"{fn_name}은 자체 단명 세션을 써야 함"
 
 
+def test_default_auth_deps_do_not_depend_on_get_db():
+    """story #2459(§6 봉합①) 회귀 가드: get_current_user/get_verified_org_id/
+    get_project_scoped_org_id/get_scope_context — SSE 전용이 아닌 **기본** 경로도 이제
+    요청-수명 get_db를 점유하면 안 된다(§6 primary 풀 고갈의 구조적 root — read-routing을
+    깔아도 이 auth 세션이 따로 primary를 물어 무력화했다, PO probe로 44세션 락경합 실측
+    확定 후 last_used_at 부터·이 스토리에서 auth 세션 자체를 근절)."""
+    from app.dependencies import auth
+    for fn_name in (
+        "get_current_user", "get_verified_org_id", "get_project_scoped_org_id", "get_scope_context",
+    ):
+        fn = getattr(auth, fn_name)
+        params = inspect.signature(fn).parameters
+        for p in params.values():
+            dep_str = repr(p.default)
+            assert "get_db" not in dep_str, f"{fn_name}.{p.name} 가 get_db를 점유하면 안 됨"
+
+
 # ─── CP1: API key 경로에서 세션이 즉시 close 되는지 (점유 0) ───────────────────
 
 @pytest.mark.anyio

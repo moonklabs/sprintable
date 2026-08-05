@@ -125,12 +125,14 @@ async def test_persist_first_auth_seen_falls_back_to_stdio_when_no_header():
 
 @pytest.mark.anyio
 async def test_get_current_user_passes_x_mcp_transport_header_through():
+    from app.dependencies import auth as auth_module
     from app.dependencies.auth import get_current_user
+    from tests.conftest import FakeAsyncSessionCtx
 
-    with patch("app.dependencies.auth._resolve_api_key", new=AsyncMock()) as resolve:
+    with patch("app.dependencies.auth._resolve_api_key", new=AsyncMock()) as resolve, \
+         patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(AsyncMock())):
         await get_current_user(
             credentials=None, x_agent_api_key="sk_live_abc", x_mcp_transport="http",
-            db=AsyncMock(),
         )
     resolve.assert_awaited_once_with("sk_live_abc", resolve.await_args.args[1], transport="http")
 
