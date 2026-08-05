@@ -37,29 +37,38 @@ async def fire_webhooks(
     *,
     recipient_member_ids: set[uuid.UUID] | None = None,
     preserve_broadcast: bool = True,
+    via_outbox: bool = False,
 ) -> None:
-    """org webhook 발화 — story #2460(§6 봉합②): 이제 즉시 POST하지 않고 `delivery_jobs`에
-    job row만 insert한다(caller의 세션·트랜잭션에 그대로 실림, commit은 caller 책임). 실제
-    HTTP 배달은 `delivery_dispatcher.py` 워커가 `_fire_webhooks_now()`로 수행한다.
+    """org webhook 발화 (c60dd33c).
 
-    호출부(file_conflict·assignee_changed·workflow_violation·story_status_events 등)는 이미
-    전부 fire-and-forget(반환값 미사용·예외 삼킴)로 호출하고 있어 시그니처·호출 방식 무변경
-    (지연 배달만 새로 생김 — 워커 폴링 주기만큼, 초 단위)."""
-    from app.models.delivery_job import DeliveryJob
+    story #2460(§6 봉합②, PO 스코프 확定 2026-08-05): outbox 경유는 **opt-in**이다
+    (``via_outbox=True``) — story_status_events.py 단 한 콜사이트만 켠다. 나머지 호출부
+    (file_conflict·assignee_changed·workflow_violation 등)는 기본값 False로 기존과 동일하게
+    이 함수 안에서 즉시 POST한다(behavior 무변경). ``via_outbox=True``면 즉시 POST 대신
+    `delivery_jobs`에 job row만 insert(caller의 세션·트랜잭션에 그대로 실림 — commit은
+    caller 책임, at-least-once) — 실제 HTTP 배달은 `delivery_dispatcher.py` 워커가 자기
+    세션으로 `_fire_webhooks_now()`를 부른다(요청 트랜잭션 밖에서 외부 I/O)."""
+    if via_outbox:
+        from app.models.delivery_job import DeliveryJob
 
-    session.add(
-        DeliveryJob(
-            org_id=org_id,
-            kind="org_webhook",
-            payload={
-                "event": event,
-                "data": data,
-                "recipient_member_ids": (
-                    [str(m) for m in recipient_member_ids] if recipient_member_ids is not None else None
-                ),
-                "preserve_broadcast": preserve_broadcast,
-            },
+        session.add(
+            DeliveryJob(
+                org_id=org_id,
+                kind="org_webhook",
+                payload={
+                    "event": event,
+                    "data": data,
+                    "recipient_member_ids": (
+                        [str(m) for m in recipient_member_ids] if recipient_member_ids is not None else None
+                    ),
+                    "preserve_broadcast": preserve_broadcast,
+                },
+            )
         )
+        return
+    await _fire_webhooks_now(
+        session, org_id, event, data,
+        recipient_member_ids=recipient_member_ids, preserve_broadcast=preserve_broadcast,
     )
 
 

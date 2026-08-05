@@ -124,6 +124,13 @@ async def lifespan(app: FastAPI):
         from app.services.event_broker import outbox_dispatcher_loop
 
         outbox_dispatcher_task = asyncio.create_task(outbox_dispatcher_loop())
+    # story #2460(§6 봉합②): delivery_jobs 워커 — story_status_events.py/conversations.py
+    # send_message가 via_outbox=True로 무조건 enqueue하므로(플래그 없음, 두 콜사이트 하드코딩),
+    # 이 워커도 무조건 기동해야 그 job들이 드레인된다(옵션 아님 — listen_loop과 동형으로 조건부
+    # 게이팅 없이 기동).
+    from app.services.delivery_dispatcher import delivery_dispatcher_loop
+
+    delivery_dispatcher_task = asyncio.create_task(delivery_dispatcher_loop())
     try:
         yield
     finally:
@@ -139,6 +146,7 @@ async def lifespan(app: FastAPI):
             redis_shadow_task.cancel()
         if outbox_dispatcher_task is not None:
             outbox_dispatcher_task.cancel()
+        delivery_dispatcher_task.cancel()
         try:
             if task is not None:
                 try:
@@ -160,6 +168,10 @@ async def lifespan(app: FastAPI):
                     await outbox_dispatcher_task
                 except asyncio.CancelledError:
                     pass
+            try:
+                await delivery_dispatcher_task
+            except asyncio.CancelledError:
+                pass
         finally:
             # 좀비 연결 박멸(S:33e0c681): SIGTERM(Cloud Run 인스턴스 교체·스케일다운·리비전 삭제)
             # 시 SQLAlchemy 풀의 전 DB 연결을 정상 종료. dispose 누락 시 구 인스턴스가 연결을 안

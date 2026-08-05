@@ -106,35 +106,48 @@ async def deliver_expo_push(
     project_id: uuid.UUID | None = None,
     story_id: uuid.UUID | None = None,
     sprint_id: uuid.UUID | None = None,
+    via_outbox: bool = False,
 ) -> None:
-    """story #2460(§6 봉합②): Expo push 실발송을 즉시 하지 않고 `delivery_jobs`에 job row만
-    insert(caller 세션·트랜잭션에 실림, commit은 caller 책임) — 실 발송은
-    `delivery_dispatcher.py` 워커가 `_deliver_expo_push_now()`로 수행한다. 호출부
-    (dispatch_notification)는 이미 fire-and-forget이라 무변경."""
+    """story #2460(§6 봉합②, PO 스코프 확定 2026-08-05): outbox 경유는 **opt-in**이다
+    (``via_outbox=True``) — dispatch_notification 호출부 중 story_status_events.py·
+    conversations.py send_message 둘만 켠다. 나머지 dispatch_notification 호출부는 기본값
+    False로 기존과 동일하게 이 함수 안에서 즉시 발송한다(behavior 무변경).
+    ``via_outbox=True``면 즉시 발송 대신 `delivery_jobs`에 job row만 insert(caller
+    세션·트랜잭션에 실림, commit은 caller 책임 — at-least-once) — 실 발송은
+    `delivery_dispatcher.py` 워커가 자기 세션으로 `_deliver_expo_push_now()`를 수행한다
+    (요청 트랜잭션 밖에서 외부 I/O)."""
     if not member_ids:
         return
-    from app.models.delivery_job import DeliveryJob
+    if via_outbox:
+        from app.models.delivery_job import DeliveryJob
 
-    db.add(
-        DeliveryJob(
-            org_id=org_id,
-            kind="expo_push",
-            payload={
-                "member_ids": [str(m) for m in member_ids],
-                "title": title,
-                "body": body,
-                "event_type": event_type,
-                "reference_type": reference_type,
-                "reference_id": str(reference_id) if reference_id else None,
-                "context": context,
-                "muted_member_ids": (
-                    [str(m) for m in muted_member_ids] if muted_member_ids is not None else None
-                ),
-                "project_id": str(project_id) if project_id else None,
-                "story_id": str(story_id) if story_id else None,
-                "sprint_id": str(sprint_id) if sprint_id else None,
-            },
+        db.add(
+            DeliveryJob(
+                org_id=org_id,
+                kind="expo_push",
+                payload={
+                    "member_ids": [str(m) for m in member_ids],
+                    "title": title,
+                    "body": body,
+                    "event_type": event_type,
+                    "reference_type": reference_type,
+                    "reference_id": str(reference_id) if reference_id else None,
+                    "context": context,
+                    "muted_member_ids": (
+                        [str(m) for m in muted_member_ids] if muted_member_ids is not None else None
+                    ),
+                    "project_id": str(project_id) if project_id else None,
+                    "story_id": str(story_id) if story_id else None,
+                    "sprint_id": str(sprint_id) if sprint_id else None,
+                },
+            )
         )
+        return
+    await _deliver_expo_push_now(
+        db, org_id, member_ids, title=title, body=body, event_type=event_type,
+        reference_type=reference_type, reference_id=reference_id, context=context,
+        muted_member_ids=muted_member_ids, project_id=project_id, story_id=story_id,
+        sprint_id=sprint_id,
     )
 
 

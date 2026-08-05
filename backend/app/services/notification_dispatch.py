@@ -57,32 +57,44 @@ async def _deliver_personal_webhooks(
     reference_id: uuid.UUID | None = None,
     context: dict | None = None,
     muted_member_ids: set[uuid.UUID] | None = None,
+    via_outbox: bool = False,
 ) -> None:
-    """story #2460(§6 봉합②): 개인 webhook 실배달을 즉시 POST하지 않고 `delivery_jobs`에 job
-    row만 insert(caller 세션·트랜잭션에 실림, commit은 caller 책임) — 실 배달은
-    `delivery_dispatcher.py` 워커가 `_deliver_personal_webhooks_now()`로 수행한다. 호출부
-    (dispatch_notification)는 이미 fire-and-forget이라 무변경."""
+    """story #2460(§6 봉합②, PO 스코프 확定 2026-08-05): outbox 경유는 **opt-in**이다
+    (``via_outbox=True``) — dispatch_notification 호출부 중 story_status_events.py·
+    conversations.py send_message(멘션·메시지 알림) 둘만 켠다. 나머지 dispatch_notification
+    호출부는 기본값 False로 기존과 동일하게 즉시 POST한다(behavior 무변경).
+    ``via_outbox=True``면 즉시 POST 대신 `delivery_jobs`에 job row만 insert(caller
+    세션·트랜잭션에 실림, commit은 caller 책임 — at-least-once) — 실 배달은
+    `delivery_dispatcher.py` 워커가 자기 세션으로 `_deliver_personal_webhooks_now()`를
+    수행한다(요청 트랜잭션 밖에서 외부 I/O)."""
     if not member_ids:
         return
-    from app.models.delivery_job import DeliveryJob
+    if via_outbox:
+        from app.models.delivery_job import DeliveryJob
 
-    db.add(
-        DeliveryJob(
-            org_id=org_id,
-            kind="personal_webhook",
-            payload={
-                "member_ids": [str(m) for m in member_ids],
-                "title": title,
-                "body": body,
-                "event_type": event_type,
-                "reference_type": reference_type,
-                "reference_id": str(reference_id) if reference_id else None,
-                "context": context,
-                "muted_member_ids": (
-                    [str(m) for m in muted_member_ids] if muted_member_ids is not None else None
-                ),
-            },
+        db.add(
+            DeliveryJob(
+                org_id=org_id,
+                kind="personal_webhook",
+                payload={
+                    "member_ids": [str(m) for m in member_ids],
+                    "title": title,
+                    "body": body,
+                    "event_type": event_type,
+                    "reference_type": reference_type,
+                    "reference_id": str(reference_id) if reference_id else None,
+                    "context": context,
+                    "muted_member_ids": (
+                        [str(m) for m in muted_member_ids] if muted_member_ids is not None else None
+                    ),
+                },
+            )
         )
+        return
+    await _deliver_personal_webhooks_now(
+        db, org_id, member_ids, title=title, body=body, event_type=event_type,
+        reference_type=reference_type, reference_id=reference_id, context=context,
+        muted_member_ids=muted_member_ids,
     )
 
 
@@ -181,8 +193,16 @@ async def dispatch_notification(
     context: dict | None = None,
     story_id: uuid.UUID | None = None,
     sprint_id: uuid.UUID | None = None,
+    via_outbox: bool = False,
 ) -> None:
     """notification_settings 필터 후 enabled member에게 알림 발송.
+
+    ``via_outbox``(story #2460, §6 봉합②): True면 개인 webhook·Expo push 실배달을 이 호출
+    안에서 하지 않고 outbox(`delivery_jobs`)에 적재만 한다 — in-app Notification/Event
+    INSERT(아래 본문)는 원래도 순수 DB write라 이 플래그와 무관하게 그대로 caller의
+    트랜잭션에 실린다(바꿀 이유 없음). opt-in 스코프는 story_status_events.py·
+    conversations.py send_message 두 콜사이트뿐(PO 확定) — 기본 False로 다른 12+ 콜사이트는
+    behavior 무변경.
 
     human 멤버: Notification 테이블 INSERT (in-app 알림)
     agent 멤버: events 테이블 INSERT (event_type=dispatched, status=pending)
@@ -428,7 +448,7 @@ async def dispatch_notification(
         await _deliver_personal_webhooks(
             db, org_id, webhook_deliver_ids, title=title, body=body, event_type=event_type,
             reference_type=reference_type, reference_id=reference_id, context=context,
-            muted_member_ids=muted_member_ids,
+            muted_member_ids=muted_member_ids, via_outbox=via_outbox,
         )
 
         # E-MOBILE M0·S3: EE 푸시 채널(웹훅과 나란한 별개 채널) — 등록 push_devices 로 Expo 발송.
@@ -442,6 +462,7 @@ async def dispatch_notification(
                 reference_type=reference_type, reference_id=reference_id, context=context,
                 muted_member_ids=muted_member_ids,
                 project_id=_push_project_id, story_id=story_id, sprint_id=sprint_id,
+                via_outbox=via_outbox,
             )
 
     except Exception:
