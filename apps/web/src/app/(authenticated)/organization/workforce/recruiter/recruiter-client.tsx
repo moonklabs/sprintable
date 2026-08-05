@@ -201,6 +201,25 @@ function CopyDownloadButtons({
   );
 }
 
+// story #2434(유나양 design:changes, 2026-08-03) — ②「깨우기」 본문을 별도 컴포넌트로 뽑아
+// 렌더 테스트가 거대한 위저드 전체를 마운트하지 않고도 t.rich 출력(특히 태그명/인자명 충돌
+// 같은 실렌더 결함)을 직접 잡을 수 있게 한다. 소스 텍스트 매칭 가드만으로는 이 결함이 안
+// 잡혔다(초록인데 화면은 빈 괄호) — recruiter-client.wake-method-body.test.tsx 참고.
+export function WakeMethodBody({ method, path }: { method: import('@/services/recruit').RuntimeWakeMethod; path: string }) {
+  const t = useTranslations('recruiter');
+  if (method === 'unknown') return <>{t('kitOrientingWakeBodyUnknown')}</>;
+  return (
+    <>
+      {t.rich(`kitOrientingWakeBody_${method}`, {
+        // 태그명(code)이 ICU 인자명(path)과 겹치면 next-intl이 인자 값을 조용히 삼킨다(콘솔
+        // 에러도 없음, 실 렌더로만 잡힘) — 반드시 둘을 분리하고 둘 다 넘긴다.
+        path,
+        code: (chunks) => <span className="font-mono text-[11px] break-all text-muted-foreground">{chunks}</span>,
+      })}
+    </>
+  );
+}
+
 // ─── 메인 컴포넌트 ───────────────────────────────────────────────────────────
 
 interface RecruiterClientProps {
@@ -1106,10 +1125,15 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                     <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">2</span>
                     <div className="min-w-0">
                       <p className="text-xs font-bold text-foreground">{t('kitOrientingWakeLabel')}</p>
+                      {/* story #2434(유나양 규격 v1, 2026-08-03) — "실행하세요"류 지시형은 그 경로를
+                          «어디서 구하는지» 안내가 없는 상태에서 되는 것처럼 읽혀 "되는 줄 알고
+                          끝냈다가 실제로는 안 깨어나는" 오탐을 만든다. 사실형("…이 세션을
+                          깨웁니다. 받는 경로는 아직 제공하지 않습니다")으로 정정 — path는 «명령
+                          대상»이 아니라 «이름»으로 강등(t.rich path 태그: font-mono·작게·무채색,
+                          링크 색 금지 — 누를 수 있는 것처럼 보이면 안 된다). 디디군의 "한 줄
+                          설치"가 착지하면 이 문구 뒷문장을 그 설치 명령으로 되돌린다(만료조건). */}
                       <p className="text-xs text-muted-foreground">
-                        {wakeInfo.method === 'unknown'
-                          ? t('kitOrientingWakeBodyUnknown')
-                          : t(`kitOrientingWakeBody_${wakeInfo.method}`, { path: wakeInfo.path })}
+                        <WakeMethodBody method={wakeInfo.method} path={wakeInfo.path} />
                       </p>
                       {/* story #2377 §4(발견 가능성) — 연결 안내로 가는 화면 링크가
                           이전엔 0건이었다(URL을 아는 사람만 볼 수 있어 "문서에 있다"가 화면에서는
@@ -1123,6 +1147,20 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       >
                         {t('kitOrientingWakeGuideLink')}
                       </a>
+                      {/* story #2434 §3(2) — connector-sdk(Custom/Other)만은 "막힘"이 아니라
+                          "직접 만들 수 있음"이다(shared SDK 명세가 이미 public/onboarding-guide.txt에
+                          있다). 그 링크가 있어야 위 "아직 제공하지 않습니다" 문구가 과장이 아니게
+                          된다 — 이 갈래는 실제로 지금 진행 가능한 경로가 있다는 뜻이라. */}
+                      {wakeInfo.method === 'connector-sdk' && (
+                        <a
+                          href="/onboarding-guide.txt"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-0.5 block text-xs text-info underline-offset-2 hover:underline"
+                        >
+                          {t('kitOrientingWakeSdkGuideLink')}
+                        </a>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">
@@ -1133,6 +1171,14 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                     </div>
                   </div>
                 </div>
+                {/* story #2434 §2(유나양 규격) — 3칸 그리드 «아래» 전폭 한 줄. ②가 안 끝나면 전체가
+                    안 깨어난다는 사실을 블록 결과로 명시하되, warning/destructive 색은 금지(이건
+                    장애가 아니라 미제공 — 경고색을 쓰면 사용자가 "내 설정이 틀렸다"고 오해해 ①로
+                    되돌아가 헤맨다). recruitResult.mcp_config 분기는 STEP4 다른 자리(①연결 본문 등)
+                    가 이미 쓰는 것을 재사용 — 신규 계약 0. */}
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {recruitResult.mcp_config ? t('kitOrientingWakeNoteMcp') : t('kitOrientingWakeNoteConnector')}
+                </p>
               </div>
 
               <Alert variant="warning">
