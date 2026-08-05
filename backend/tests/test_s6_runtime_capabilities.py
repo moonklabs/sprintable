@@ -84,11 +84,23 @@ def test_instruction_filename_tiers_and_transport_by_runtime_class():
     for slug in ("claude-code", "codex", "gemini", "cursor"):
         assert caps[slug]["supports_event_push"] is True
         assert set(caps[slug]["mcp_transport"]) == {"stdio", "http"}
-    for slug in ("connector", "opencode", "openclaw", "hermes", "grok", "pi"):
+    for slug in ("connector", "opencode", "openclaw", "grok", "pi"):
         assert caps[slug]["mcp_transport"] == [], slug
         assert caps[slug]["supports_event_push"] is False, slug
         assert caps[slug]["transport"] is None, slug
         assert caps[slug]["guide_filename"] == "CONNECTOR_SETUP.md", slug
+
+    # story #2466(P1-B) + 유나 정렬 v1.3(spec-2377 §1.5): hermes는 ①(도구전달)=[라이브] 실증
+    # (자체 CLI로 http MCP 110개 도구 라이브 왕복)돼 HTTP_MCP_CAPABLE_RUNTIMES에 편입 — transport/
+    # mcp_transport는 채워지지만, ②(깨우기)는 미측정으로 남아 guide_filename은 그대로 유지된다
+    # (두 축이 hermes에서 동시에 참 — 나머지 커넥터-전용 그룹과 분리해서 검증).
+    assert set(caps["hermes"]["mcp_transport"]) == {"stdio", "http"}
+    assert caps["hermes"]["transport"] in ("stdio", "http")
+    assert caps["hermes"]["supports_event_push"] is False
+    assert caps["hermes"]["guide_filename"] == "CONNECTOR_SETUP.md"
+    # openclaw는 config-shape만 검증(PO 결정 2026-08-05, §1.5) — 완전 왕복 미확認이라 재분류 안 됨.
+    assert caps["openclaw"]["transport"] is None
+    assert caps["openclaw"]["mcp_transport"] == []
 
 
 def test_no_unsupported_runtimes_left_coming_soon_section_empty():

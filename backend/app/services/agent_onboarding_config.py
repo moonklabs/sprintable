@@ -25,6 +25,19 @@ CONNECTOR_RUNTIME = "connector"
 MCP_NATIVE_RUNTIMES = frozenset({"claude-code", "codex", "gemini", "cursor"})
 CONNECTOR_ONLY_RUNTIMES = frozenset({"opencode", "openclaw", "hermes", "grok", "pi"})
 SUPPORTED_RUNTIMES = MCP_NATIVE_RUNTIMES | CONNECTOR_ONLY_RUNTIMES | {CONNECTOR_RUNTIME}
+
+# story #2466(P1-B) + 유나 정렬 v1.3(2026-08-05, 문서 `runtime-connect-guidance-spec-2377` §1):
+# ①도구를 어떻게 받는가(http MCP capable)와 ②어떻게 깨어나는가(커넥터 필요)는 독립 축이다.
+# `MCP_NATIVE_RUNTIMES`는 "어댑터 없이 태생적으로 MCP"라는 원래 뜻으로 그대로 두고(재사용 금지 —
+# 유나 지적: 뜻이 다른 자리에 같은 이름을 쓰면 §0 "이름이 뜻하는 것과 쓰이는 자리가 어긋나는" 병
+# 재발), ①축만 담당하는 새 이름을 쓴다. hermes는 자체 CLI(`hermes mcp add --url --auth header`)로
+# http MCP에 라이브 왕복 성공(P1-B 실측, 110개 도구 실수신) — 이 집합에 편입해 http mcp_config를
+# 받되, ②축(CONNECTOR_ONLY_RUNTIMES 소속·깨우기 안내)은 그대로 유지한다(둘 다 emit — PO/유나
+# 정렬 결정, 한쪽이 풀렸다고 다른 쪽 disclaimer를 지우지 않는다).
+# openclaw는 config-shape만 검증됐고 완전 tools/list 왕복은 미확認(PO 결정 2026-08-05, Discord
+# 라이브배선 리스크로 유료 확認 보류) — 확認 전까지 이 집합에 넣지 않는다("config-accepted만으로
+# 재분류 금지").
+HTTP_MCP_CAPABLE_RUNTIMES = MCP_NATIVE_RUNTIMES | {"hermes"}
 STDIO = "stdio"
 HTTP = "http"
 SUPPORTED_TRANSPORTS = frozenset({STDIO, HTTP})
@@ -124,13 +137,18 @@ def list_runtime_capabilities() -> list[dict]:
     """S6(유나/미르코 정합용) `GET /api/v2/runtime-capabilities` 계약 SSOT.
 
     supported/tier는 **S5 emit 코드 실기준**(과대약속 금지) — recruiter/connection-artifact가
-    그 런타임으로 실제 아티팩트를 만들 수 있으면 supported=true. 전 런타임 올지원(story
-    6f6ac081) 이후: MCP-native 4종은 `.mcp.json`(transport 선택 가능), 나머지 지원 런타임
-    (커넥터 전용 5종 + 범용 connector 버킷)은 전부 SSE 커넥터 경로(CONNECTOR_SETUP.md, transport
-    개념 자체가 없음) — 이 두 그룹의 경계가 ``MCP_NATIVE_RUNTIMES``(``is_connector_routed``)다.
-    tier는 구체적으로 이름 붙은 런타임이면 "full", 범용 ``connector`` 버킷(특정 런타임을 못
-    찾았을 때의 안내-only 폴백)이면 "experimental" — 원래 의도(구체 런타임 vs 범용 폴백)를
-    직접 표현한다(``prompt_file``에 더는 얹지 않음 — 아래 참고).
+    그 런타임으로 실제 아티팩트를 만들 수 있으면 supported=true. tier는 구체적으로 이름 붙은
+    런타임이면 "full", 범용 ``connector`` 버킷(특정 런타임을 못 찾았을 때의 안내-only 폴백)이면
+    "experimental" — 원래 의도(구체 런타임 vs 범용 폴백)를 직접 표현한다(``prompt_file``에 더는
+    얹지 않음 — 아래 참고).
+
+    story #2466(P1-B) + 유나 정렬 v1.3: ①도구전달(http MCP)과 ②깨우기(커넥터)는 독립 축(spec-2377
+    §1) — 예전엔 ``is_connector_routed`` 하나가 둘 다 결정해 hermes 같은 "① 가능한데 ② 도 필요한"
+    런타임을 표현 못 했다. 이제 ``has_http_mcp``(=``HTTP_MCP_CAPABLE_RUNTIMES``, transport/
+    mcp_transport 결정)와 ``needs_connector_guide``(=``not in MCP_NATIVE_RUNTIMES``, guide_filename
+    결정)를 분리 — hermes 는 둘 다 참이라 transport 도 채워지고 guide_filename 도 채워진다.
+    ``supports_event_push`` 는 여전히 "태생적 MCP-native"만 참(hermes 포함 나머지는 AGENT_GATEWAY_V2
+    SSE 브리지를 안 타므로 tools-only, http variant 와 동일 성격).
 
     ``prompt_file``은 kit 파일명(KIT_FILENAME)이 **아니다** — 그 런타임 자신의 기존 정체성
     지침 파일명이다(resolve_runtime_prompt_filename() 참고, 유나 라이브픽셀 발견 fix).
@@ -146,7 +164,8 @@ def list_runtime_capabilities() -> list[dict]:
     all_slugs = sorted({rt.value for rt in RuntimeType} | SUPPORTED_RUNTIMES)
     for runtime in all_slugs:
         supported = runtime in SUPPORTED_RUNTIMES
-        is_connector_routed = supported and runtime not in MCP_NATIVE_RUNTIMES
+        has_http_mcp = supported and runtime in HTTP_MCP_CAPABLE_RUNTIMES
+        needs_connector_guide = supported and runtime not in MCP_NATIVE_RUNTIMES
         out.append({
             "slug": runtime,
             "display_name": _RUNTIME_DISPLAY_NAMES.get(runtime, runtime),
@@ -156,11 +175,11 @@ def list_runtime_capabilities() -> list[dict]:
                 else "experimental" if runtime == CONNECTOR_RUNTIME
                 else "full"
             ),
-            "transport": None if (is_connector_routed or not supported) else default_transport_for_hosting(),
-            "mcp_transport": [] if (is_connector_routed or not supported) else sorted(SUPPORTED_TRANSPORTS),
+            "transport": default_transport_for_hosting() if has_http_mcp else None,
+            "mcp_transport": sorted(SUPPORTED_TRANSPORTS) if has_http_mcp else [],
             "prompt_file": resolve_runtime_prompt_filename(runtime) if supported else None,
-            "guide_filename": "CONNECTOR_SETUP.md" if is_connector_routed else None,
-            "supports_event_push": supported and not is_connector_routed,
+            "guide_filename": "CONNECTOR_SETUP.md" if needs_connector_guide else None,
+            "supports_event_push": supported and runtime in MCP_NATIVE_RUNTIMES,
             "icon": None,
         })
     return out
@@ -346,17 +365,17 @@ def build_agent_mcp_config(
 ) -> dict | None:
     """`.mcp.json` 아티팩트 generator — transport 별 SSOT(E-MCP-OPT S3).
 
-    E-RECRUIT S5 + 전 런타임 올지원(story 6f6ac081): MCP-native 런타임(``MCP_NATIVE_RUNTIMES`` —
-    transport config 공통, PO 확정)만 `.mcp.json`을 받는다. 그 외(범용 ``connector`` 버킷 +
-    커넥터 전용 5종 ``CONNECTOR_ONLY_RUNTIMES``)는 전부 None(SSE dial-out은 완전 별개 프로토콜이라
-    `.mcp.json` 자체가 성립 안 함 — 호출부가 ``build_connector_guidance()``로 대체). 가드를
-    단일 sentinel(``== CONNECTOR_RUNTIME``) 대신 ``not in MCP_NATIVE_RUNTIMES``로 반전한 이유:
-    전자는 커넥터 전용 5종을 그냥 통과시켜 `.mcp.json`을 오emit했다(PO 크럭스 승인 fix).
+    E-RECRUIT S5 + 전 런타임 올지원(story 6f6ac081) + story #2466(P1-B, 유나 정렬 v1.3):
+    ``HTTP_MCP_CAPABLE_RUNTIMES``(태생 MCP-native 4종 + 라이브 실증된 hermes)만 mcp_config를
+    받는다. 그 외는 전부 None(SSE dial-out은 완전 별개 프로토콜이라 `.mcp.json` 자체가 성립 안
+    함 — 호출부가 ``build_connector_guidance()``로 대체). 예전엔 이 가드가 ``MCP_NATIVE_RUNTIMES``
+    였으나, 그건 "①도구전달"과 "②깨우기" 두 축을 한 이름으로 묶는 것이라(spec-2377 §1) hermes처럼
+    ①만 참인 런타임을 표현 못 했다 — ``HTTP_MCP_CAPABLE_RUNTIMES``로 분리.
 
     ``transport="http"`` 인데 이 환경에 호스팅 배포가 없으면(``MCP_PUBLIC_URL`` 미설정) None 반환 —
     호출부가 이를 "그 변형 생성 불가"로 취급(에러 아님).
     """
-    if runtime not in MCP_NATIVE_RUNTIMES:
+    if runtime not in HTTP_MCP_CAPABLE_RUNTIMES:
         return None
     if transport == HTTP:
         return _build_http_config(api_key_plaintext)
@@ -374,11 +393,11 @@ def build_agent_mcp_config_bundle(
     "mcp_config_alternatives": {<다른 transport>: <그 변형>, ...}}``. http 변형이 이 환경에서
     생성 불가(``MCP_PUBLIC_URL`` 미설정)면 alternatives 에서 생략(OSS 는 호스팅 탭 자체가 없음).
 
-    E-RECRUIT S5 + 전 런타임 올지원(story 6f6ac081): MCP-native가 아니면(범용 connector 버킷 +
-    커넥터 전용 5종) mcp_config 자체가 성립 안 하므로 전부 None/빈값(호출부가
-    ``build_connector_guidance()``로 안내 파일을 대신 emit — crash 대신 안전한 no-op).
+    E-RECRUIT S5 + 전 런타임 올지원(story 6f6ac081) + story #2466(P1-B): ``HTTP_MCP_CAPABLE_RUNTIMES``
+    가 아니면 mcp_config 자체가 성립 안 하므로 전부 None/빈값(호출부가 ``build_connector_guidance()``
+    로 안내 파일을 대신 emit — crash 대신 안전한 no-op). ``build_agent_mcp_config()`` 와 동일 가드.
     """
-    if runtime not in MCP_NATIVE_RUNTIMES:
+    if runtime not in HTTP_MCP_CAPABLE_RUNTIMES:
         return {"default_transport": None, "mcp_config": None, "mcp_config_alternatives": {}}
 
     default_transport = default_transport_for_hosting()
@@ -395,3 +414,54 @@ def build_agent_mcp_config_bundle(
         "mcp_config": default_config,
         "mcp_config_alternatives": alternatives,
     }
+
+
+_HTTP_MCP_CLI_SETUP_TEXT: dict[str, dict[str, str]] = {
+    "ko": {
+        "title": "# Hermes MCP 연결",
+        "intro": (
+            "hermes는 `.mcp.json` 파일을 자동으로 읽지 않습니다 — 자체 CLI로 MCP 서버를 등록해야\n"
+            "합니다(라이브 왕복 실측 완료: story #2466, 실제 도구 110개 수신 확認)."
+        ),
+        "command_heading": "## 등록 명령",
+        "command_note": "실행 중 인증 방식을 물으면 header를 선택하고, API key를 물으면 아래 값을 입력하세요.",
+        "api_key_heading": "## API Key",
+    },
+    "en": {
+        "title": "# Hermes MCP Connection",
+        "intro": (
+            "hermes doesn't read a `.mcp.json` file automatically — register the MCP server via\n"
+            "its own CLI instead (live round-trip verified: story #2466, 110 real tools returned)."
+        ),
+        "command_heading": "## Registration command",
+        "command_note": "When asked for an auth method choose header, then paste the API key below when prompted.",
+        "api_key_heading": "## API Key",
+    },
+}
+
+
+def build_hermes_mcp_cli_setup(
+    mcp_config: dict, api_key_plaintext: str | None, locale: str = DEFAULT_LOCALE,
+) -> str:
+    """hermes 전용 연결 안내 — story #2466(P1-B), 유나 정렬 v1.3 ⑤.
+
+    hermes는 claude-code 처럼 프로젝트 루트 `.mcp.json` 파일을 읽는 런타임이 아니라 자체 CLI
+    (``hermes mcp add``)로 서버를 등록해야 실제로 붙는다(P1-B 라이브 실측으로 확인). 그대로
+    `.mcp.json` 파일을 emit하면 "화면이 그 런타임에 안 맞는 것을 단정"하는 spec-2377 §0/§2 A-3
+    류 재발이라 — build_agent_mcp_config()가 만든 config의 값(url/headers 또는 command/args)만
+    그대로 가져와 hermes CLI 인자로 재구성한다(값 자체를 새로 만들지 않음 — SSOT 단일화).
+    """
+    text = _HTTP_MCP_CLI_SETUP_TEXT[resolve_locale(locale)]
+    server = mcp_config["mcpServers"]["sprintable"]
+    if server["type"] == HTTP:
+        command = f"hermes mcp add sprintable --url {server['url']} --auth header"
+    else:
+        args = " ".join(server.get("args", []))
+        command = f"hermes mcp add sprintable --command {server['command']} --args {args}"
+    lines = [
+        text["title"], "", text["intro"], "",
+        text["command_heading"], "```", command, "```", text["command_note"],
+    ]
+    if api_key_plaintext:
+        lines += ["", text["api_key_heading"], "```", api_key_plaintext, "```"]
+    return "\n".join(lines)
