@@ -38,7 +38,41 @@ async def fire_webhooks(
     recipient_member_ids: set[uuid.UUID] | None = None,
     preserve_broadcast: bool = True,
 ) -> None:
-    """org webhook 발화 (c60dd33c).
+    """org webhook 발화 — story #2460(§6 봉합②): 이제 즉시 POST하지 않고 `delivery_jobs`에
+    job row만 insert한다(caller의 세션·트랜잭션에 그대로 실림, commit은 caller 책임). 실제
+    HTTP 배달은 `delivery_dispatcher.py` 워커가 `_fire_webhooks_now()`로 수행한다.
+
+    호출부(file_conflict·assignee_changed·workflow_violation·story_status_events 등)는 이미
+    전부 fire-and-forget(반환값 미사용·예외 삼킴)로 호출하고 있어 시그니처·호출 방식 무변경
+    (지연 배달만 새로 생김 — 워커 폴링 주기만큼, 초 단위)."""
+    from app.models.delivery_job import DeliveryJob
+
+    session.add(
+        DeliveryJob(
+            org_id=org_id,
+            kind="org_webhook",
+            payload={
+                "event": event,
+                "data": data,
+                "recipient_member_ids": (
+                    [str(m) for m in recipient_member_ids] if recipient_member_ids is not None else None
+                ),
+                "preserve_broadcast": preserve_broadcast,
+            },
+        )
+    )
+
+
+async def _fire_webhooks_now(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    event: str,
+    data: dict[str, Any],
+    *,
+    recipient_member_ids: set[uuid.UUID] | None = None,
+    preserve_broadcast: bool = True,
+) -> None:
+    """org webhook 실배달(c60dd33c) — `delivery_dispatcher.py` 워커 전용, 자기 세션으로 호출.
 
     **Discord 정규화(AC1)**: discord URL 에는 raw envelope 대신 ``{content|embeds}`` 변환
     (``to_discord_event_payload``)을 보낸다 — 기존엔 raw envelope POST 라 discord 전원 400.
@@ -47,8 +81,7 @@ async def fire_webhooks(
     **타겟 게이팅(AC2·opt-in)**: ``recipient_member_ids`` 가 주어지면 member-bound webhook
     (``member_id`` != null)은 그 집합의 멤버만 수신해 story/activity 의 org-wide 과다 fan-out 을
     차단한다. ``member_id IS NULL`` 진짜 activity-feed 브로드캐스트는 ``preserve_broadcast`` 시
-    보존. **``recipient_member_ids`` 가 None(기본)이면 게이팅 없음 = 기존 fan-out 동작**이라 타
-    호출부(file_conflict·assignee_changed·workflow_violation)는 무회귀.
+    보존. **``recipient_member_ids`` 가 None(기본)이면 게이팅 없음 = 기존 fan-out 동작**.
     """
     result = await session.execute(
         select(

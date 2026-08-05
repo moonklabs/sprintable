@@ -58,16 +58,55 @@ async def _deliver_personal_webhooks(
     context: dict | None = None,
     muted_member_ids: set[uuid.UUID] | None = None,
 ) -> None:
-    """96af343e: 활성 개인(member-scoped) WebhookConfig 보유 휴먼에게 알림 webhook POST.
+    """story #2460(§6 봉합②): 개인 webhook 실배달을 즉시 POST하지 않고 `delivery_jobs`에 job
+    row만 insert(caller 세션·트랜잭션에 실림, commit은 caller 책임) — 실 배달은
+    `delivery_dispatcher.py` 워커가 `_deliver_personal_webhooks_now()`로 수행한다. 호출부
+    (dispatch_notification)는 이미 fire-and-forget이라 무변경."""
+    if not member_ids:
+        return
+    from app.models.delivery_job import DeliveryJob
 
-    in-app Notification 과 동일 flush 타이밍(best-effort·옵션 C). global mute 멤버는 skip
-    (채널 막론 mute 우선). SSRF 검증·HMAC 서명·Discord URL 포맷·retry 는
-    dispatch_router._post_with_retry / app.core.ssrf 재사용. agent SSE 경로
+    db.add(
+        DeliveryJob(
+            org_id=org_id,
+            kind="personal_webhook",
+            payload={
+                "member_ids": [str(m) for m in member_ids],
+                "title": title,
+                "body": body,
+                "event_type": event_type,
+                "reference_type": reference_type,
+                "reference_id": str(reference_id) if reference_id else None,
+                "context": context,
+                "muted_member_ids": (
+                    [str(m) for m in muted_member_ids] if muted_member_ids is not None else None
+                ),
+            },
+        )
+    )
+
+
+async def _deliver_personal_webhooks_now(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    member_ids: list[uuid.UUID],
+    *,
+    title: str,
+    body: str | None,
+    event_type: str,
+    reference_type: str | None = None,
+    reference_id: uuid.UUID | None = None,
+    context: dict | None = None,
+    muted_member_ids: set[uuid.UUID] | None = None,
+) -> None:
+    """96af343e: 활성 개인(member-scoped) WebhookConfig 보유 휴먼에게 알림 webhook 실POST.
+
+    `delivery_dispatcher.py` 워커 전용(자기 세션으로 호출). SSRF 검증·HMAC 서명·Discord URL
+    포맷·retry 는 dispatch_router._post_with_retry / app.core.ssrf 재사용. agent SSE 경로
     (route_dispatch_event)는 미변경(무회귀). 개별 POST 실패는 swallow → in-app 무영향.
 
-    muted_member_ids: story 75570ab8 — 호출자(dispatch_notification)가 이미 계산한 mute
-    집합을 넘기면 재조회 생략(Event-skip 판정과 동일 SSOT 재사용, 드리프트 방지). None이면
-    이 함수가 자체 조회(단독 호출 하위호환).
+    muted_member_ids: story 75570ab8 — 호출자가 이미 계산한 mute 집합을 넘기면 재조회 생략
+    (Event-skip 판정과 동일 SSOT 재사용, 드리프트 방지). None이면 이 함수가 자체 조회.
     """
     if not member_ids:
         return

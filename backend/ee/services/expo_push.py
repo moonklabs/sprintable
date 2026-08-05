@@ -107,7 +107,55 @@ async def deliver_expo_push(
     story_id: uuid.UUID | None = None,
     sprint_id: uuid.UUID | None = None,
 ) -> None:
-    """활성 push_devices 로 Expo push 발송(웹훅과 나란한 별개 채널).
+    """story #2460(§6 봉합②): Expo push 실발송을 즉시 하지 않고 `delivery_jobs`에 job row만
+    insert(caller 세션·트랜잭션에 실림, commit은 caller 책임) — 실 발송은
+    `delivery_dispatcher.py` 워커가 `_deliver_expo_push_now()`로 수행한다. 호출부
+    (dispatch_notification)는 이미 fire-and-forget이라 무변경."""
+    if not member_ids:
+        return
+    from app.models.delivery_job import DeliveryJob
+
+    db.add(
+        DeliveryJob(
+            org_id=org_id,
+            kind="expo_push",
+            payload={
+                "member_ids": [str(m) for m in member_ids],
+                "title": title,
+                "body": body,
+                "event_type": event_type,
+                "reference_type": reference_type,
+                "reference_id": str(reference_id) if reference_id else None,
+                "context": context,
+                "muted_member_ids": (
+                    [str(m) for m in muted_member_ids] if muted_member_ids is not None else None
+                ),
+                "project_id": str(project_id) if project_id else None,
+                "story_id": str(story_id) if story_id else None,
+                "sprint_id": str(sprint_id) if sprint_id else None,
+            },
+        )
+    )
+
+
+async def _deliver_expo_push_now(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    member_ids: list[uuid.UUID],
+    *,
+    title: str,
+    body: str | None,
+    event_type: str,
+    reference_type: str | None = None,
+    reference_id: uuid.UUID | None = None,
+    context: dict | None = None,
+    muted_member_ids: set[uuid.UUID] | None = None,
+    project_id: uuid.UUID | None = None,
+    story_id: uuid.UUID | None = None,
+    sprint_id: uuid.UUID | None = None,
+) -> None:
+    """활성 push_devices 로 Expo push 실발송(웹훅과 나란한 별개 채널) —
+    `delivery_dispatcher.py` 워커 전용(자기 세션으로 호출).
 
     - 대상 = enabled 멤버(설정 통과) − global mute(능동 push off). 웹훅 유무와 독립.
     - 디바이스당 1발(이중발송 0). 배치 ≤100·메시지 최소화(≤4096B).
