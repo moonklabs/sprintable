@@ -90,12 +90,16 @@ describe('RUNTIME_CONNECT_CLI — story #2377 v1.3 §1.5/⑤', () => {
 // «우리 팀이 실제로 실측한» 날짜 있는 사실만 'confirmed'다. 호스트 자기신고나 config-저장
 // 성공만으로는 절대 'confirmed'가 아니다 — A-3 거짓성공의 화면판을 막는 게 이 표의 목적이다.
 describe('resolveConnectConfirm — story #2377 v1.3 §1.5/④', () => {
-  it('codex/hermes만 confirmed(팀이 실제로 실측한 날짜 있음)', () => {
-    expect(resolveConnectConfirm('codex')).toEqual({ tier: 'confirmed', measuredAt: '2026-08-01' });
+  // PO+유나 정정(2026-08-05, #2856 design:changes) — codex ①은 matrix 정본상 [설정검증]뿐(도구
+  // 목록 미확인, #2382 인용) — confirmed로 두면 "거짓성공 방지 배지" 스스로가 거짓성공을 켜는
+  // 자리다. claude-code는 [라이브] 자기증명(이 세션 자체가 .mcp.json http 실사용 중)으로 추가.
+  it('claude-code/hermes만 confirmed(팀이 실제로 실측한 날짜 있음)', () => {
+    expect(resolveConnectConfirm('claude-code')).toEqual({ tier: 'confirmed', measuredAt: '2026-08-05' });
     expect(resolveConnectConfirm('hermes')).toEqual({ tier: 'confirmed', measuredAt: '2026-08-05' });
   });
 
-  it('openclaw는 config-verified — host가 config를 유효로 저장한 것만 확인됐을 뿐 실도착은 미확인이라 confirmed가 아니다', () => {
+  it('codex/openclaw는 config-verified — host가 config를 유효로 저장한 것만 확인됐을 뿐 실도착(도구 목록)은 미확인이라 confirmed가 아니다', () => {
+    expect(resolveConnectConfirm('codex')).toEqual({ tier: 'config-verified' });
     expect(resolveConnectConfirm('openclaw')).toEqual({ tier: 'config-verified' });
   });
 
@@ -104,7 +108,6 @@ describe('resolveConnectConfirm — story #2377 v1.3 §1.5/④', () => {
     expect(resolveConnectConfirm('grok')).toEqual({ tier: 'unmeasured' });
     expect(resolveConnectConfirm('pi')).toEqual({ tier: 'unmeasured' });
     expect(resolveConnectConfirm('cursor')).toEqual({ tier: 'unmeasured' });
-    expect(resolveConnectConfirm('claude-code')).toEqual({ tier: 'unmeasured' });
     expect(resolveConnectConfirm('some-future-runtime')).toEqual({ tier: 'unmeasured' });
   });
 });

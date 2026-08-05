@@ -171,8 +171,14 @@ export interface RuntimeConnectConfirm {
 }
 
 export const RUNTIME_CONNECT_CONFIRM: Record<string, RuntimeConnectConfirm> = {
-  codex: { tier: 'confirmed', measuredAt: '2026-08-01' },
+  // PO+유나 정정(2026-08-05, #2856 design:changes) — codex ①은 matrix 정본상 [설정검증]뿐(도구
+  // 목록 미확認 — spec-2377 §2가 #2382를 인용). 여기서 confirmed로 두면 "거짓성공 방지 배지"가
+  // 스스로 거짓성공을 켜는 자리라 config-verified로 내린다.
+  codex: { tier: 'config-verified' },
   hermes: { tier: 'confirmed', measuredAt: '2026-08-05' },
+  // claude-code — [라이브] 자기증명(이 세션 자체가 .mcp.json http를 실사용 중). matrix 정본에
+  // claude-code 행이 없어 안 넣으면 confirmed=hermes 한 종뿐으로 플래그십 런타임이 무배지가 된다.
+  'claude-code': { tier: 'confirmed', measuredAt: '2026-08-05' },
   openclaw: { tier: 'config-verified' },
 };
 
@@ -187,7 +193,10 @@ export const RUNTIME_CAPABILITIES_FALLBACK: RuntimeCapabilityItem[] = [
   { slug: 'cursor', display_name: 'Cursor', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'AGENTS.md', guide_filename: null, supports_event_push: true, icon: null },
   { slug: 'gemini', display_name: 'Gemini', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'GEMINI.md', guide_filename: null, supports_event_push: true, icon: null },
   { slug: 'grok', display_name: 'Grok', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
-  { slug: 'hermes', display_name: 'Hermes', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
+  // story #2857 후속 — hermes ①(http mcp_config)만 재분류·BE 실출력 그대로 미러(디디 실측).
+  // ⛔②(guide_filename/supports_event_push)는 claude-code 행과 다르게 «유지» — 복사하면
+  // hermes ②커넥터 안내가 조용히 사라진다(§7 "한 축이 두 물음" 함정, PO+유나 2026-08-05 정정).
+  { slug: 'hermes', display_name: 'Hermes', supported: true, tier: 'full', transport: 'http', mcp_transport: ['http', 'stdio'], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
   { slug: 'openclaw', display_name: 'OpenClaw', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
   { slug: 'opencode', display_name: 'OpenCode', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
   { slug: 'pi', display_name: 'Pi', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },

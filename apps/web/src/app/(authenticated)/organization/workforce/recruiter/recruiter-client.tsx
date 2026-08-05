@@ -1246,7 +1246,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   <pre className="overflow-x-auto bg-muted/40 p-3 text-xs leading-relaxed">{mcpConfigText}</pre>
                 </div>
               ) : (
-                // 커넥터-라우팅 런타임(connector/grok/pi/hermes/openclaw/opencode)은 mcp_config=null —
+                // 커넥터-라우팅 런타임(connector/grok/pi/openclaw/opencode)은 mcp_config=null —
+                // (story #2857 후속 — hermes는 이제 HTTP_MCP_CAPABLE_RUNTIMES 편입으로 mcp_config를
+                // 받아 이 분기를 안 탄다. 옛 목록에 남겨두면 주석이 실제와 어긋나 §0급 오도가 된다.)
                 // MCP transport가 없어 .mcp.json 자체가 무의미. 문자열 "null" 렌더/복사 방지(story 6f6ac081 후속).
                 <div className="rounded-md border border-dashed border-border bg-muted/20 p-3 text-xs text-muted-foreground">
                   {t('mcpNotApplicable')}
