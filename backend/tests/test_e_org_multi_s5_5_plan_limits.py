@@ -155,16 +155,18 @@ def test_api_overage_rates_defined():
 
 @pytest.mark.asyncio
 async def test_check_org_create_limit_raises_when_over():
-    """owner org 1개 이상 시 check_org_create_limit → 402 HTTPException."""
+    """paid membership 없이 owner org 1개 이상이면 402."""
     import uuid
-    from unittest.mock import AsyncMock, MagicMock, patch
+    from unittest.mock import AsyncMock, MagicMock
     from fastapi import HTTPException
     from ee.plan_limits import check_org_create_limit
 
     mock_session = AsyncMock()
-    mock_result = MagicMock()
-    mock_result.scalar.return_value = 1  # owner org 1개 이미 존재
-    mock_session.execute = AsyncMock(return_value=mock_result)
+    paid_result = MagicMock()
+    paid_result.first.return_value = None
+    count_result = MagicMock()
+    count_result.scalar.return_value = 1  # owner org 1개 이미 존재
+    mock_session.execute = AsyncMock(side_effect=[paid_result, count_result])
 
     with pytest.raises(HTTPException) as exc_info:
         await check_org_create_limit(mock_session, uuid.uuid4())
@@ -175,17 +177,72 @@ async def test_check_org_create_limit_raises_when_over():
 
 @pytest.mark.asyncio
 async def test_check_org_create_limit_passes_when_zero():
-    """owner org 0개 시 check_org_create_limit → 통과."""
+    """paid membership 없고 owner org 0개면 통과."""
     import uuid
     from unittest.mock import AsyncMock, MagicMock
     from ee.plan_limits import check_org_create_limit
 
     mock_session = AsyncMock()
-    mock_result = MagicMock()
-    mock_result.scalar.return_value = 0
-    mock_session.execute = AsyncMock(return_value=mock_result)
+    paid_result = MagicMock()
+    paid_result.first.return_value = None
+    count_result = MagicMock()
+    count_result.scalar.return_value = 0
+    mock_session.execute = AsyncMock(side_effect=[paid_result, count_result])
 
     await check_org_create_limit(mock_session, uuid.uuid4())  # 예외 없어야 함
+
+
+@pytest.mark.asyncio
+async def test_check_org_create_limit_paid_org_admin_skips_owner_limit():
+    """active Team/Pro org owner/admin은 별도 owner-count 조회 없이 생성 제한을 스킵."""
+    import uuid
+    from unittest.mock import AsyncMock, MagicMock
+    from ee.plan_limits import check_org_create_limit
+
+    mock_session = AsyncMock()
+    paid_result = MagicMock()
+    paid_result.first.return_value = (1,)
+    mock_session.execute = AsyncMock(return_value=paid_result)
+
+    await check_org_create_limit(mock_session, uuid.uuid4())
+
+    assert mock_session.execute.await_count == 1
+    sql = str(mock_session.execute.await_args.args[0])
+    assert "org_subscriptions" in sql
+    assert "om.role IN ('owner', 'admin')" in sql
+    assert "os.status = 'active'" in sql
+    assert "os.tier IN ('team', 'pro')" in sql
+
+
+@pytest.mark.asyncio
+async def test_get_org_tier_uses_active_paid_subscription_only():
+    import uuid
+    from unittest.mock import AsyncMock, MagicMock
+    from ee.plan_limits import _get_org_tier
+
+    session = AsyncMock()
+    result = MagicMock()
+    result.first.return_value = ("pro",)
+    session.execute = AsyncMock(return_value=result)
+
+    assert await _get_org_tier(session, uuid.uuid4()) == "pro"
+    sql = str(session.execute.await_args.args[0])
+    assert "status = 'active'" in sql
+    assert "tier IN ('team', 'pro')" in sql
+
+
+@pytest.mark.asyncio
+async def test_get_org_tier_missing_or_inactive_fails_closed_free():
+    import uuid
+    from unittest.mock import AsyncMock, MagicMock
+    from ee.plan_limits import _get_org_tier
+
+    session = AsyncMock()
+    result = MagicMock()
+    result.first.return_value = None
+    session.execute = AsyncMock(return_value=result)
+
+    assert await _get_org_tier(session, uuid.uuid4()) == "free"
 
 
 @pytest.fixture

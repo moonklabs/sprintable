@@ -39,9 +39,13 @@ def _plan_limit_error(resource: str, limit: int) -> HTTPException:
 
 
 async def _get_org_tier(session: AsyncSession, org_id) -> str:
-    """org_subscriptions에서 tier 조회. 레코드 없으면 free."""
+    """active org_subscriptions에서 paid tier 조회. 그 외는 fail-closed free."""
     result = await session.execute(
-        text("SELECT tier FROM org_subscriptions WHERE org_id = :oid"),
+        text(
+            "SELECT tier FROM org_subscriptions"
+            " WHERE org_id = :oid AND status = 'active'"
+            " AND tier IN ('team', 'pro')"
+        ),
         {"oid": str(org_id)},
     )
     row = result.first()
@@ -49,7 +53,26 @@ async def _get_org_tier(session: AsyncSession, org_id) -> str:
 
 
 async def check_org_create_limit(session: AsyncSession, user_id) -> None:
-    """Free: 사용자당 owner org 1개 제한."""
+    """Free: 사용자당 owner org 1개 제한.
+
+    활성 Team/Pro 조직의 owner/admin은 유료 entitlement를 상속해 제한을 스킵한다. Organization
+    생성은 아직 새 org_id가 없으므로 현재 조직을 인자로 받을 수 없다. 따라서 caller의 활성
+    org membership과 org_subscriptions를 조인하는 것이 이 경로의 paid SSOT다.
+    """
+    paid_result = await session.execute(
+        text(
+            "SELECT 1 FROM org_members om"
+            " JOIN org_subscriptions os ON os.org_id = om.org_id"
+            " WHERE om.user_id = :uid AND om.deleted_at IS NULL"
+            " AND om.role IN ('owner', 'admin')"
+            " AND os.status = 'active' AND os.tier IN ('team', 'pro')"
+            " LIMIT 1"
+        ),
+        {"uid": str(user_id)},
+    )
+    if paid_result.first() is not None:
+        return
+
     result = await session.execute(
         text(
             "SELECT COUNT(*) FROM org_members"
