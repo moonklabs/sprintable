@@ -138,6 +138,183 @@ async def test_get_agent_access_matrix_still_403_for_genuine_non_admin(
 
 
 @pytest.mark.anyio
+async def test_recruit_ignores_inaccessible_x_project_id_when_owner(
+    test_client, mock_session, monkeypatch, org_id
+):
+    """양성대조 — POST /{agent_id}/recruit (위저드 2단계, 라이브 재현 지점)."""
+    import app.routers.agents as agents_router
+
+    agent_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+    member = _mock_agent_member(org_id=org_id, project_id=project_id)
+    monkeypatch.setattr(agents_router, "assert_agent_owner", AsyncMock(return_value=member))
+
+    role_template = MagicMock()
+    role_template.slug = "backend-dev"
+    monkeypatch.setattr(
+        agents_router, "get_published_role_template", AsyncMock(return_value=role_template)
+    )
+
+    persona = MagicMock()
+    persona.id = uuid.uuid4()
+    persona.system_prompt = "probe prompt"
+    monkeypatch.setattr(
+        agents_router,
+        "recruit_agent",
+        AsyncMock(
+            return_value={
+                "persona": persona,
+                "api_key_plaintext": "sk_live_probe",
+                "tool_allowlist": ["stories", "chat"],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        agents_router,
+        "build_agent_mcp_config_bundle",
+        MagicMock(return_value={"mcp_config": {}, "default_transport": "stdio", "mcp_config_alternatives": {}}),
+    )
+    monkeypatch.setattr(agents_router, "emit_onboarding_event", AsyncMock(return_value=None))
+    mock_session.commit = AsyncMock(return_value=None)
+
+    inaccessible_project_id = str(uuid.uuid4())
+    resp = await test_client.post(
+        f"/api/v2/agents/{agent_id}/recruit",
+        json={"role_template_slug": "backend-dev", "runtime": "claude-code"},
+        headers={"X-Project-Id": inaccessible_project_id},
+    )
+    assert resp.status_code == 201
+
+
+@pytest.mark.anyio
+async def test_recruit_still_403_for_genuine_non_owner(test_client, mock_session, monkeypatch):
+    """음성대조 — recruit도 진짜 non-owner/non-admin이면 여전히 403(assert_agent_owner 그대로)."""
+    from fastapi import HTTPException
+
+    import app.routers.agents as agents_router
+
+    agent_id = uuid.uuid4()
+    monkeypatch.setattr(
+        agents_router,
+        "assert_agent_owner",
+        AsyncMock(side_effect=HTTPException(status_code=403, detail="Not the owner of this agent")),
+    )
+
+    resp = await test_client.post(
+        f"/api/v2/agents/{agent_id}/recruit",
+        json={"role_template_slug": "backend-dev", "runtime": "claude-code"},
+    )
+    assert resp.status_code == 403
+    assert "owner" in resp.json()["error"]["message"].lower()
+
+
+@pytest.mark.anyio
+async def test_verify_connection_ignores_inaccessible_x_project_id_when_owner(
+    test_client, mock_session, monkeypatch, org_id
+):
+    """양성대조 — POST /{agent_id}/verify-connection (transport=http, SSE 우회 최단경로)."""
+    import app.routers.agents as agents_router
+
+    agent_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+    member = _mock_agent_member(org_id=org_id, project_id=project_id)
+    monkeypatch.setattr(agents_router, "assert_agent_owner", AsyncMock(return_value=member))
+    monkeypatch.setattr(
+        agents_router,
+        "get_verification_state",
+        AsyncMock(return_value={"verified": False, "rail": []}),
+    )
+
+    inaccessible_project_id = str(uuid.uuid4())
+    resp = await test_client.post(
+        f"/api/v2/agents/{agent_id}/verify-connection",
+        params={"transport": "http"},
+        headers={"X-Project-Id": inaccessible_project_id},
+    )
+    assert resp.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_verification_status_ignores_inaccessible_x_project_id_when_owner(
+    test_client, mock_session, monkeypatch, org_id
+):
+    """양성대조 — GET /{agent_id}/verification-status."""
+    import app.routers.agents as agents_router
+
+    agent_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+    member = _mock_agent_member(org_id=org_id, project_id=project_id)
+    monkeypatch.setattr(agents_router, "_fetch_org_agent", AsyncMock(return_value=member))
+    monkeypatch.setattr(
+        agents_router,
+        "get_verification_state",
+        AsyncMock(return_value={"verified": False, "rail": [], "verify_seq": None}),
+    )
+
+    inaccessible_project_id = str(uuid.uuid4())
+    resp = await test_client.get(
+        f"/api/v2/agents/{agent_id}/verification-status",
+        headers={"X-Project-Id": inaccessible_project_id},
+    )
+    assert resp.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_connection_artifact_ignores_inaccessible_x_project_id_when_owner(
+    test_client, mock_session, monkeypatch, org_id
+):
+    """양성대조 — GET /{agent_id}/connection-artifact (org-scope anti-IDOR 조회, ownership 무관)."""
+    import app.routers.agents as agents_router
+    from app.repositories.agent_persona import AgentPersonaRepository
+
+    agent_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+    member = _mock_agent_member(org_id=org_id, project_id=project_id)
+    res = MagicMock()
+    res.scalar_one_or_none.return_value = member
+    mock_session.execute = AsyncMock(return_value=res)
+    monkeypatch.setattr(AgentPersonaRepository, "list", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        agents_router,
+        "build_agent_mcp_config",
+        MagicMock(return_value={"mcpServers": {}}),
+    )
+    monkeypatch.setattr(agents_router, "emit_onboarding_event", AsyncMock(return_value=None))
+    mock_session.commit = AsyncMock(return_value=None)
+
+    inaccessible_project_id = str(uuid.uuid4())
+    resp = await test_client.get(
+        f"/api/v2/agents/{agent_id}/connection-artifact",
+        headers={"X-Project-Id": inaccessible_project_id},
+    )
+    assert resp.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_no_project_gate_dependency_still_enforces_org_membership(monkeypatch, org_id):
+    """PO 리뷰 급소①(2026-08-06): ``get_verified_org_id_no_project_gate``가 project-gate만
+    뺐지 org membership 검증까지 열어버린 건 아님을 직접(dependency 단위) 확인 —
+    X-Org-Id 헤더로 실제 비멤버 org를 지정하면 여전히 403이어야 한다."""
+    from fastapi import HTTPException
+
+    import app.dependencies.auth as auth_module
+    from app.dependencies.auth import AuthContext, get_verified_org_id_no_project_gate
+
+    auth = AuthContext(user_id=str(uuid.uuid4()), email=None, claims={}, org_id=None)
+
+    async def _not_a_member(*args, **kwargs):
+        raise HTTPException(status_code=403, detail="해당 조직의 멤버가 아닌")
+
+    monkeypatch.setattr(auth_module, "_verify_org_membership", _not_a_member)
+
+    with pytest.raises(HTTPException) as ei:
+        await get_verified_org_id_no_project_gate(
+            auth=auth, x_org_id=str(org_id), request=None
+        )
+    assert ei.value.status_code == 403
+
+
+@pytest.mark.anyio
 async def test_agents_router_still_401_without_auth_http(mock_session):
     """unauth→401 — role_templates(#2875) 회귀 패턴 재사용. 이 라우터도 로그인 자체는
     여전히 필수임을 pin(대표로 create+access-matrix 2개)."""
