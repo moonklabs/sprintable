@@ -27,35 +27,37 @@ def test_webhook_in_ee_billing_router():
 
 
 # ─── AC2: Signature 검증 ─────────────────────────────────────────────────────
+# #2478(B): _verify_polar_signature는 PolarAdapter.verify_webhook으로 무회귀 이관됐다
+# (동일 로직) — patch 대상도 새 모듈의 settings import로 옮긴다.
 
 def test_verify_signature_correct():
     """올바른 HMAC-SHA256 signature → True."""
-    from ee.routers.billing import _verify_polar_signature
+    from app.services.payment.polar_adapter import PolarAdapter
     secret = "test_secret"
     body = b'{"type":"checkout.completed"}'
     sig = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     from unittest.mock import patch
-    with patch("ee.routers.billing.settings") as mock_settings:
+    with patch("app.services.payment.polar_adapter.settings") as mock_settings:
         mock_settings.polar_webhook_secret = secret
-        assert _verify_polar_signature(body, sig) is True
+        assert PolarAdapter().verify_webhook(body, sig) is True
 
 
 def test_verify_signature_wrong():
     """잘못된 signature → False."""
-    from ee.routers.billing import _verify_polar_signature
+    from app.services.payment.polar_adapter import PolarAdapter
     from unittest.mock import patch
-    with patch("ee.routers.billing.settings") as mock_settings:
+    with patch("app.services.payment.polar_adapter.settings") as mock_settings:
         mock_settings.polar_webhook_secret = "secret"
-        assert _verify_polar_signature(b"body", "sha256=wrongsig") is False
+        assert PolarAdapter().verify_webhook(b"body", "sha256=wrongsig") is False
 
 
 def test_verify_signature_no_secret_skips():
     """POLAR_WEBHOOK_SECRET 미설정 → 검증 스킵 (dev)."""
-    from ee.routers.billing import _verify_polar_signature
+    from app.services.payment.polar_adapter import PolarAdapter
     from unittest.mock import patch
-    with patch("ee.routers.billing.settings") as mock_settings:
+    with patch("app.services.payment.polar_adapter.settings") as mock_settings:
         mock_settings.polar_webhook_secret = ""
-        assert _verify_polar_signature(b"any", None) is True
+        assert PolarAdapter().verify_webhook(b"any", None) is True
 
 
 # ─── AC3: checkout.completed 처리 ────────────────────────────────────────────

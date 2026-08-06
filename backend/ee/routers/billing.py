@@ -2,14 +2,14 @@
 
 이 라우터는 EE_ENABLED 환경에서만 main.py에 등록됨.
 OSS 빌드(is_ee_enabled=False)에서는 import되지 않아 403 방어 불필요.
-"""
-import hashlib
-import hmac
+
+#2478(B): PG 호출부(체크아웃 API·웹훅 서명검증)는 app/services/payment/PolarAdapter로
+무회귀 이관됐다. 이 파일은 라우팅·권한·플랜 카탈로그·구독 upsert(도메인 로직)만 갖는다 —
+PG를 직접 모르게(design doc §1 원칙)."""
 import logging
 import uuid
 from datetime import datetime, timezone
 
-import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select, text
@@ -21,6 +21,7 @@ from app.dependencies.database import get_db
 from app.models.org_subscription import OrgSubscription
 from app.models.pricing_version import PricingVersion
 from app.models.project import OrgMember
+from app.services.payment.factory import get_payment_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -99,11 +100,6 @@ async def list_billing_plans(
     return _PLAN_CATALOG
 
 
-# Polar API 기본 URL (sandbox/prod 자동 전환)
-def _polar_api_url() -> str:
-    return "https://sandbox.api.polar.sh" if settings.polar_sandbox else "https://api.polar.sh"
-
-
 # 플랜별 Polar product_price_id 매핑 — Moonklabs live org(선생님 GO, doc
 # e-admin-b1-polar-live-price-ids SSOT). 체크아웃은 여전히 USD만 사용(currency 선택 API
 # 미구현, 이번 스코프 아님) — krw는 pricing_versions DB에 이미 있고 여기 미리 반영해둔다
@@ -158,56 +154,26 @@ async def create_checkout_session(
     success_url = body.success_url or f"{app_url}/settings?tab=billing&checkout=success"
     cancel_url = body.cancel_url or f"{app_url}/settings?tab=billing&checkout=cancelled"
 
-    if not settings.polar_access_token:
-        # sandbox 환경에서 토큰 없을 때 모의 응답
-        logger.warning("POLAR_ACCESS_TOKEN not set — returning mock checkout URL")
-        return {
-            "checkout_url": f"{_polar_api_url()}/checkout/mock?price={price_id}&success_url={success_url}",
-            "plan_id": body.plan_id,
-            "billing_cycle": body.billing_cycle,
-            "sandbox": settings.polar_sandbox,
-        }
-
-    # Polar Checkout API 호출
+    # #2478(B): 체크아웃은 여전히 USD만 다룬다(currency 선택 API 미구현, A1 그대로) —
+    # provider=f(currency) 규칙으로 어댑터를 고르되 지금은 "usd" 고정.
+    adapter = get_payment_adapter("usd")
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                f"{_polar_api_url()}/v1/checkouts/",
-                headers={"Authorization": f"Bearer {settings.polar_access_token}", "Content-Type": "application/json"},
-                json={
-                    "product_price_id": price_id,
-                    "success_url": success_url,
-                    "cancel_url": cancel_url,
-                    "metadata": {"org_id": str(org_id)},
-                },
-            )
-            if resp.status_code not in (200, 201):
-                logger.error("Polar checkout error: %s %s", resp.status_code, resp.text)
-                raise HTTPException(status_code=502, detail="Polar checkout API error")
-            data = resp.json()
-    except httpx.RequestError as exc:
-        logger.exception("Polar API request failed: %s", exc)
-        raise HTTPException(status_code=502, detail="Cannot reach Polar API")
+        result = await adapter.create_checkout(
+            price_id=price_id,
+            success_url=success_url,
+            cancel_url=cancel_url,
+            metadata={"org_id": str(org_id)},
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return {
-        "checkout_url": data.get("url"),
-        "checkout_id": data.get("id"),
+        "checkout_url": result.get("checkout_url"),
+        "checkout_id": result.get("checkout_id"),
         "plan_id": body.plan_id,
         "billing_cycle": body.billing_cycle,
-        "sandbox": settings.polar_sandbox,
+        "sandbox": result.get("sandbox"),
     }
-
-
-def _verify_polar_signature(raw_body: bytes, signature_header: str | None) -> bool:
-    """Polar HMAC-SHA256 signature 검증. secret 미설정 시 검증 스킵 (dev sandbox)."""
-    secret = settings.polar_webhook_secret
-    if not secret:
-        logger.warning("POLAR_WEBHOOK_SECRET not set — skipping signature verification (dev only)")
-        return True
-    if not signature_header:
-        return False
-    expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature_header.removeprefix("sha256="))
 
 
 @router.post("/webhook")
@@ -220,9 +186,10 @@ async def polar_webhook(
     """Polar 웹훅 수신 — signature 검증 + 이벤트별 Subscription 갱신 + 멱등 처리."""
     raw_body = await request.body()
 
-    # AC2: Signature 검증
+    # AC2: Signature 검증 — #2478(B): PolarAdapter.verify_webhook 이관(동일 로직).
     signature = request.headers.get("X-Polar-Webhook-Signature") or request.headers.get("webhook-signature")
-    if not _verify_polar_signature(raw_body, signature):
+    adapter = get_payment_adapter("usd")
+    if not adapter.verify_webhook(raw_body, signature):
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
     try:
