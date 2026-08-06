@@ -3,7 +3,7 @@
 // 런타임별 실제 깨우기 경로가 어딘가 데이터로 있어야 한다. onboarding-guide.txt의 Runtime
 // catalog 표(:152-165)를 FE에 미러한 이 표가 그 자리다.
 import { describe, expect, it } from 'vitest';
-import { RUNTIME_WAKE_MECHANISM, resolveRuntimeWakeInfo, type RuntimeWakeMethod } from './recruit';
+import { RUNTIME_WAKE_MECHANISM, resolveRuntimeWakeInfo, type RuntimeWakeMethod, RUNTIME_CONNECT_CLI, resolveConnectConfirm } from './recruit';
 import enMessages from '../../messages/en.json';
 import koMessages from '../../messages/ko.json';
 
@@ -68,5 +68,46 @@ describe('kitOrientingWakeBody_<method> i18n coverage — story #2377 (유나양
       expect(en[key], `en.json missing ${key}`).toBeTypeOf('string');
       expect(ko[key], `ko.json missing ${key}`).toBeTypeOf('string');
     }
+  });
+});
+
+// story #2377 v1.3 §1.5/⑤(2026-08-05, PO 確定) — ①(도구 전달) 축의 런타임별 정확한 CLI 명령.
+// hermes/openclaw는 파일이 아니라 자기 CLI로 등록하므로, generic ".mcp.json 파일" 프레이밍을
+// 쓰면 §0급 "화면이 틀린 것을 단정"이 재발한다.
+describe('RUNTIME_CONNECT_CLI — story #2377 v1.3 §1.5/⑤', () => {
+  it('hermes/openclaw는 정확한 CLI 명령을 갖는다(호스트 CLI 실측 그대로)', () => {
+    expect(RUNTIME_CONNECT_CLI.hermes).toBe('hermes mcp add --url --auth');
+    expect(RUNTIME_CONNECT_CLI.openclaw).toBe("openclaw mcp set '<json>'");
+  });
+
+  it('파일기반 MCP-native 런타임(claude-code 등)은 이 표에 없다 — 기존 file-framing이 정확하므로 대체하지 않는다', () => {
+    expect(RUNTIME_CONNECT_CLI['claude-code']).toBeUndefined();
+    expect(RUNTIME_CONNECT_CLI.cursor).toBeUndefined();
+  });
+});
+
+// story #2377 v1.3 §1.5/④(2026-08-05, PO+유나 홀름 정정) — ①이 "실제로 도착했다"는 확인 등급은
+// «우리 팀이 실제로 실측한» 날짜 있는 사실만 'confirmed'다. 호스트 자기신고나 config-저장
+// 성공만으로는 절대 'confirmed'가 아니다 — A-3 거짓성공의 화면판을 막는 게 이 표의 목적이다.
+describe('resolveConnectConfirm — story #2377 v1.3 §1.5/④', () => {
+  // PO+유나 정정(2026-08-05, #2856 design:changes) — codex ①은 matrix 정본상 [설정검증]뿐(도구
+  // 목록 미확인, #2382 인용) — confirmed로 두면 "거짓성공 방지 배지" 스스로가 거짓성공을 켜는
+  // 자리다. claude-code는 [라이브] 자기증명(이 세션 자체가 .mcp.json http 실사용 중)으로 추가.
+  it('claude-code/hermes만 confirmed(팀이 실제로 실측한 날짜 있음)', () => {
+    expect(resolveConnectConfirm('claude-code')).toEqual({ tier: 'confirmed', measuredAt: '2026-08-05' });
+    expect(resolveConnectConfirm('hermes')).toEqual({ tier: 'confirmed', measuredAt: '2026-08-05' });
+  });
+
+  it('codex/openclaw는 config-verified — host가 config를 유효로 저장한 것만 확인됐을 뿐 실도착(도구 목록)은 미확인이라 confirmed가 아니다', () => {
+    expect(resolveConnectConfirm('codex')).toEqual({ tier: 'config-verified' });
+    expect(resolveConnectConfirm('openclaw')).toEqual({ tier: 'config-verified' });
+  });
+
+  it('나머지(측정 안 된) 런타임은 전부 unmeasured로 떨어진다 — 침묵도 성급한 confirmed도 아니다', () => {
+    expect(resolveConnectConfirm('gemini')).toEqual({ tier: 'unmeasured' });
+    expect(resolveConnectConfirm('grok')).toEqual({ tier: 'unmeasured' });
+    expect(resolveConnectConfirm('pi')).toEqual({ tier: 'unmeasured' });
+    expect(resolveConnectConfirm('cursor')).toEqual({ tier: 'unmeasured' });
+    expect(resolveConnectConfirm('some-future-runtime')).toEqual({ tier: 'unmeasured' });
   });
 });

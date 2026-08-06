@@ -8,7 +8,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { useUnifiedSwitcher, type OrgSwitcherItem, type ProjectSwitcherItem } from './use-unified-switcher';
+import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
+import koMessages from '../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -39,10 +42,20 @@ const MOONKLABS_PROJECTS = [{ id: 'proj-sprintable', name: 'sprintable' }];
 
 let result: ReturnType<typeof useUnifiedSwitcher> | null = null;
 
-function TestComp() {
+function InnerTestComp() {
   const hook = useUnifiedSwitcher({ orgs: ORGS, currentOrgId: 'org-moonklabs', projects: STALE_PROJECTS, currentProjectId: undefined });
   useEffect(() => { result = hook; });
   return null;
+}
+
+// story #2468 — useUnifiedSwitcher가 이제 useTranslations('nav')를 쓴다(에러 문구).
+// NextIntlClientProvider 없이 렌더하면 "context ... was not found"로 즉시 죽는다.
+function TestComp() {
+  return (
+    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      <InnerTestComp />
+    </NextIntlClientProvider>
+  );
 }
 
 beforeEach(() => {
@@ -52,6 +65,7 @@ beforeEach(() => {
   result = null;
   routerPushMock.mockClear();
   searchParamsValueRef.current = '';
+  window.sessionStorage.clear(); // story #2468 — 테스트 간 stale project_id 오염 방지
 });
 
 afterEach(async () => {
@@ -127,5 +141,77 @@ describe('useUnifiedSwitcher — switchProject의 ?next= 복귀 (story #2212)', 
       const dest = String(call[0]);
       expect(dest.startsWith('/moonklabs/sprintable/board')).toBe(true); // 목적지 자체는 항상 내부 경로
     }
+  });
+});
+
+// story #2468(a)(2026-08-06 미르코 라이브 재현) — "새 프로젝트" 버튼 무반응의 정체는 조용한
+// 403이었다: org 전환 後에도 sessionStorage(TAB_PROJECT_STORAGE_KEY)가 전환 前 org의
+// project_id를 그대로 들고 있어, 전역 fetch 인터셉터(project-context-client.ts)가 그 stale
+// id를 X-Project-Id로 계속 실어 보내고 — 새 org엔 그 프로젝트가 없어 BE가 403을 낸다.
+describe('useUnifiedSwitcher — switchOrg의 stale sessionStorage 클리어 (story #2468 a)', () => {
+  it('org 전환 성공 시 TAB_PROJECT_STORAGE_KEY sessionStorage를 지운다(다음 org에 없는 project_id를 안 실어 보내게)', async () => {
+    window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, 'proj-from-previous-org');
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
+    await act(async () => { root.render(<TestComp />); });
+
+    await act(async () => { await result?.switchOrg('org-dogfood'); });
+
+    expect(window.sessionStorage.getItem(TAB_PROJECT_STORAGE_KEY)).toBeNull();
+  });
+
+  it('org 전환 실패(응답 실패) 時엔 sessionStorage를 안 건드린다 — 롤백된 org 그대로면 그 project_id는 여전히 유효하다', async () => {
+    window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, 'proj-still-valid');
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({ error: { code: 'SWITCH_FAILED' } }) })));
+    await act(async () => { root.render(<TestComp />); });
+
+    await act(async () => { await result?.switchOrg('org-dogfood'); });
+
+    expect(window.sessionStorage.getItem(TAB_PROJECT_STORAGE_KEY)).toBe('proj-still-valid');
+  });
+});
+
+// story #2468(b, 근본) — 실패를 침묵하지 않는다. 예전엔 createProject가 !res.ok에 그냥 false만
+// 반환했고, 호출부(unified-switcher.tsx·context-switcher-chip.tsx)가 그 값을 void로 버려
+// "버튼 무반응"으로 보였다. 원인이 뭐든(403/기타) 화면에 명시 에러가 뜨는지를 고정한다.
+describe('useUnifiedSwitcher — createProject 실패 표시 (story #2468 b)', () => {
+  it('생성 실패(403 등) 時 createProjectError가 채워지고, 다이얼로그는 안 닫히고, false를 반환한다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false,
+      json: async () => ({ error: { code: 'FORBIDDEN', message: 'No access to the specified project' } }),
+    })));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { result?.setCreateProjectOpen(true); });
+
+    let returned: boolean | undefined;
+    await act(async () => { returned = await result?.createProject('새 프로젝트', ''); });
+
+    expect(returned).toBe(false);
+    expect(result?.createProjectError).toBeTruthy();
+    expect(result?.createProjectOpen).toBe(true); // 조용히 닫히지 않는다 — 사용자가 에러를 본다
+  });
+
+  it('생성 성공 時엔 createProjectError가 null이고 다이얼로그가 닫힌다(회귀가드)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: { id: 'proj-new' } }) };
+      return { ok: true, json: async () => ({ data: { ok: true } }) }; // switch-project 등
+    }));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { result?.setCreateProjectOpen(true); });
+
+    await act(async () => { await result?.createProject('새 프로젝트', ''); });
+
+    expect(result?.createProjectError).toBeNull();
+    expect(result?.createProjectOpen).toBe(false);
+  });
+
+  it('다이얼로그를 다시 열면(setCreateProjectOpen) 이전 실패 문구가 지워진다 — 낡은 에러가 새 시도처럼 안 보인다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({ error: { code: 'FORBIDDEN' } }) })));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { result?.setCreateProjectOpen(true); });
+    await act(async () => { await result?.createProject('새 프로젝트', ''); });
+    expect(result?.createProjectError).toBeTruthy();
+
+    await act(async () => { result?.setCreateProjectOpen(false); });
+    expect(result?.createProjectError).toBeNull();
   });
 });

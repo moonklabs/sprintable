@@ -310,3 +310,126 @@ describe('recruiter-client STEP5 — story #2410 ③-1(verifiedBanner)', () => {
     expect(source).toMatch(/\{verified && \([\s\S]{0,700}tOnboarding\('verifiedBanner'\)/);
   });
 });
+
+// story #2433(A/B) — 미르코 실측(codex 표본, 2026-08-03): 위저드에서 런타임을 골라 채용해도
+// 관리화면엔 "런타임 타입: 미설정"으로 떴다(A) + "역할 없이(키만)"는 실행환경(런타임) 단계
+// 자체가 스킵됐다(B). 소스 텍스트 수준으로 pin(이 파일의 기존 관례 — 컴포넌트 전체 마운트
+// 테스트가 없다). BE(recruit_agent → members.runtime_type anchor write)는
+// backend/tests/test_e_recruit_s3_recruit_service_realdb.py::test_recruit_persists_runtime_type_to_member
+// 가 실 Postgres로 커버한다(뮤테이션 셀프체크: 그 write 줄을 되돌려 RED 확認 후 복원).
+describe('recruiter-client equip-skip("역할 없이") 런타임 — story #2433(B) 소스 회귀가드', () => {
+  const source = readFileSync(fileURLToPath(new URL('./recruiter-client.tsx', import.meta.url)), 'utf-8');
+
+  it('equip-skip 폼(STEP2)이 Full 경로 STEP3과 같은 renderRuntimePicker()를 렌더한다 — 스킵되지 않는다', () => {
+    const start = source.indexOf('{equipSkip ? (');
+    const end = source.indexOf(') : null}', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const equipBlock = source.slice(start, end);
+    expect(equipBlock).toContain('{renderRuntimePicker()}');
+  });
+
+  it('Full 경로 STEP3도 같은 renderRuntimePicker() 호출로 통일됐다(그리드 마크업 중복 없음)', () => {
+    const step3Block = /step === 3 && !equipSkip[\s\S]{0,200}?\{renderRuntimePicker\(\)\}/.exec(source);
+    expect(step3Block).not.toBeNull();
+  });
+
+  it('handleEquipCreate가 생성 성공 직후 PATCH /api/team-members/{id}로 runtime_type을 반영한다(관리화면과 같은 anchor 경로)', () => {
+    const handlerMatch = /const handleEquipCreate = async \(\) => \{[\s\S]*?\n  \};/.exec(source);
+    expect(handlerMatch).not.toBeNull();
+    const body = handlerMatch![0];
+    expect(body).toContain('/api/team-members/${agentId}');
+    expect(body).toContain("method: 'PATCH'");
+    expect(body).toContain('runtime_type: runtime');
+  });
+
+  it('PATCH 실패해도 결과 화면을 막지 않되(키는 이미 유효) 반쪽 상태를 조용히 숨기지 않는다', () => {
+    const handlerMatch = /const handleEquipCreate = async \(\) => \{[\s\S]*?\n  \};/.exec(source);
+    const body = handlerMatch![0];
+    expect(body).toContain('setEquipRuntimeSaveWarning(true)');
+    expect(body).toContain('setStep(3)'); // PATCH 실패 분기에서도 결과 화면 진입은 유지
+    expect(source).toContain("equipRuntimeSaveWarning && (");
+    expect(source).toContain("t('equipRuntimeSaveWarning')");
+  });
+
+  it('equipRuntimeSaveWarning 번역키가 ko/en 둘 다 있다', () => {
+    const en = (enMessages as { recruiter: Record<string, string> }).recruiter.equipRuntimeSaveWarning;
+    const ko = (koMessages as { recruiter: Record<string, string> }).recruiter.equipRuntimeSaveWarning;
+    expect(en).toBeTruthy();
+    expect(ko).toBeTruthy();
+  });
+});
+
+// story #2434(유나 홀름 규격 v1, 2026-08-03) — ②「깨우기」의 "connectors/{runtime}-sprintable/를
+// 실행하세요" 같은 지시형은 그 경로를 어디서 구하는지 안내가 없는 채로 "되는 것"처럼 읽혀
+// "되는 줄 알고 끝냈다가 실제로는 안 깨어나는" 오탐(최악)을 만든다. 사실형("…이 세션을
+// 깨웁니다. 받는 경로는 아직 제공하지 않습니다")으로 정정 + path는 t.rich로 "명령 대상"이
+// 아니라 "이름"으로 강등(작게·무채색·링크 색 금지) + 3칸 그리드 아래 전폭 결과 문장(경고색
+// 금지 — 미제공이지 장애가 아니다) + connector-sdk(Custom/Other)만 실제로 지금 가능한 경로라
+// onboarding-guide.txt 링크 추가. 소스 텍스트 수준으로 pin(이 파일의 기존 관례).
+describe('recruiter-client STEP4 ②깨우기 — story #2434(정직한 "반쪽" 표시) 소스 회귀가드', () => {
+  const source = readFileSync(fileURLToPath(new URL('./recruiter-client.tsx', import.meta.url)), 'utf-8');
+
+  // 유나양 design:changes(2026-08-03) — 태그명이 ICU 인자명과 같으면(<path>{path}</path> +
+  // path: (chunks)=>...) next-intl이 값을 조용히 삼킨다. 태그명(code)과 값 인자(path)를
+  // 분리하는 규칙 자체는 소스로도 pin하되, "정말 렌더되는가"는 실 마운트
+  // (recruiter-client.wake-method-body.test.tsx)가 권위다 — 이 테스트만으로 안전을 주장하지
+  // 않는다(오늘 배운 것: 이름만 있는 가드는 자격이 없다).
+  it('STEP4가 WakeMethodBody(별도 컴포넌트)로 렌더하고, 그 안에서 code 태그+별도 path 값으로 t.rich를 호출한다', () => {
+    expect(source).toContain('<WakeMethodBody method={wakeInfo.method} path={wakeInfo.path} />');
+    const fnMatch = /export function WakeMethodBody[\s\S]*?\n}/.exec(source);
+    expect(fnMatch).not.toBeNull();
+    const fn = fnMatch![0];
+    expect(fn).toContain('t.rich(`kitOrientingWakeBody_${method}`');
+    expect(fn).toContain('font-mono text-[11px] break-all text-muted-foreground');
+    expect(fn).toMatch(/path,\s*\n\s*code: \(chunks\)/); // 태그명(code) ≠ 값 인자명(path)
+    expect(fn).not.toMatch(/text-info|text-primary|underline/); // 링크 색 금지
+  });
+
+  it('3칸 그리드 밖에 전폭 결과 문장을 렌더하고, mcp_config 유무 분기를 재사용한다(신규 계약 0)', () => {
+    const start = source.indexOf("{t('kitOrientingWakeLabel')}");
+    const end = source.indexOf('kitOrientingWakeNoteConnector');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const block = source.slice(start, end + 'kitOrientingWakeNoteConnector'.length + 5);
+    expect(block).toContain("recruitResult.mcp_config ? t('kitOrientingWakeNoteMcp') : t('kitOrientingWakeNoteConnector')");
+  });
+
+  it('결과 문장에 warning/destructive 색을 안 쓴다 — 미제공이지 장애가 아니라서 오탐(자기 설정이 틀렸다는 오해)을 막는다', () => {
+    const start = source.indexOf('{recruitResult.mcp_config ? t(\'kitOrientingWakeNoteMcp\')');
+    const line = source.slice(Math.max(0, start - 200), start);
+    expect(line).not.toMatch(/warning|destructive/);
+  });
+
+  it('connector-sdk(Custom/Other)에서만 onboarding-guide.txt 링크를 추가로 보여준다', () => {
+    expect(source).toContain("wakeInfo.method === 'connector-sdk'");
+    expect(source).toContain('href="/onboarding-guide.txt"');
+  });
+
+  it('kitOrientingWakeBody_* / WakeNote* / WakeSdkGuideLink 번역키가 ko/en 둘 다 있다', () => {
+    const ko = (koMessages as { recruiter: Record<string, string> }).recruiter;
+    const en = (enMessages as { recruiter: Record<string, string> }).recruiter;
+    for (const key of [
+      'kitOrientingWakeBody_channel-plugin',
+      'kitOrientingWakeBody_connector-host',
+      'kitOrientingWakeBody_connector-sidecar',
+      'kitOrientingWakeBody_connector-sdk',
+      'kitOrientingWakeNoteMcp',
+      'kitOrientingWakeNoteConnector',
+      'kitOrientingWakeSdkGuideLink',
+    ]) {
+      expect(ko[key], `ko.${key}`).toBeTruthy();
+      expect(en[key], `en.${key}`).toBeTruthy();
+      // t.rich가 소비할 <code> 태그가 body 값들엔 살아있어야 한다(태그명이 인자명 path와
+      // 같아지거나 플레인 {path}로 되돌아가면 t.rich가 값을 삼키거나 조용히 깨진다 —
+      // 유나양 design:changes에서 실제로 걸린 자리, recruiter-client.wake-method-body.test.tsx가
+      // 실 렌더로 다시 확認한다).
+      if (key.startsWith('kitOrientingWakeBody_')) {
+        expect(ko[key]).toContain('<code>');
+        expect(en[key]).toContain('<code>');
+        expect(ko[key]).not.toContain('<path>');
+        expect(en[key]).not.toContain('<path>');
+      }
+    }
+  });
+});

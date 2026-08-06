@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
 
 export interface OrgSwitcherItem {
@@ -69,6 +70,7 @@ export function withSwitchedSlugs(
  * 훅이 들고 있지만 그 값을 어느 UI 프리미티브의 open/onOpenChange에 묶을지는 호출부 몫이다.
  */
 export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjectId }: UseUnifiedSwitcherArgs) {
+  const tSwitcher = useTranslations('nav');
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -82,6 +84,10 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
 
   const [otherOrgProjects, setOtherOrgProjects] = useState<Record<string, ProjectSwitcherItem[]>>({});
   const [loadingOrgIds, setLoadingOrgIds] = useState<Set<string>>(new Set());
+  // story #2468(P0, 2026-08-06 미르코 라이브 재현) — 프로젝트 생성 「무반응」의 정체는 조용한
+  // 403이었다. 실패를 담아 다이얼로그에 명시로 보여준다(어떤 실패든 침묵하지 않는 게 근본 — a
+  // 만으론 다음 다른 실패가 또 조용히 묻힌다).
+  const [createProjectError, setCreateProjectError] = useState<string | null>(null);
 
   const [localOrgId, setLocalOrgId] = useState<string | undefined>(currentOrgId);
 
@@ -147,6 +153,12 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
       });
       const json = await res.json().catch(() => null) as { data?: { ok?: boolean } } | null;
       if (res.ok && json?.data?.ok) {
+        // story #2468(a) — 이 경로는 대상 org의 특정 프로젝트를 아직 모른다(그건 이후
+        // switchProject/createProject가 정한다). 전환 前 org의 project_id를 그대로 두면
+        // fetch 인터셉터(project-context-client.ts)가 그 stale id를 X-Project-Id로 계속
+        // 실어 보내 — 새 org엔 없는 프로젝트라 BE가 403(멤버십 검증 실패)을 낸다. 실측:
+        // 0-프로젝트 org로 전환 후 "새 프로젝트" 생성 시도가 이 stale 헤더 때문에 조용히 막혔다.
+        if (typeof window !== 'undefined') window.sessionStorage.removeItem(TAB_PROJECT_STORAGE_KEY);
         router.refresh();
       } else {
         setLocalOrgId(prevOrgId);
@@ -238,6 +250,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
   async function createProject(name: string, description: string): Promise<boolean> {
     if (!name.trim() || creating) return false;
     setCreating(true);
+    setCreateProjectError(null);
     try {
       const res = await fetch('/api/projects', {
         method: 'POST',
@@ -248,15 +261,27 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
           ...(currentOrgId ? { org_id: currentOrgId } : {}),
         }),
       });
-      if (!res.ok) return false;
+      if (!res.ok) {
+        // story #2468(b, 근본) — 예전엔 여기서 그냥 false만 반환했다. 호출부(unified-switcher.tsx·
+        // context-switcher-chip.tsx)는 그 결과를 `void`로 버려 실패가 화면 어디에도 안 뜨고
+        // 다이얼로그만 그대로 남았다 — "버튼 무반응"으로 보인 정체. 원인이 뭐든(403/기타) 침묵
+        // 하지 않는다: (a)가 이번 원인(stale project_id 헤더)은 없앴지만, 다음 다른 실패가 또
+        // 조용히 묻히지 않도록 실패 표시 자체를 근본으로 남긴다.
+        setCreateProjectError(tSwitcher('switcherCreateProjectError'));
+        return false;
+      }
       const data = await res.json() as { id?: string; data?: { id: string } };
       const newId = data.id ?? data.data?.id;
       setCreateProjectOpen(false);
       setNewProjectName('');
       setNewProjectDesc('');
+      setCreateProjectError(null);
       if (newId) await switchProject(newId);
       else router.refresh();
       return true;
+    } catch {
+      setCreateProjectError(tSwitcher('switcherCreateProjectError'));
+      return false;
     } finally {
       setCreating(false);
     }
@@ -266,11 +291,19 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     window.location.href = `/onboarding?step=project&orgId=${orgId}`;
   }
 
+  // story #2468(b) — 다이얼로그를 열고 닫을 때마다 이전 실패 문구를 지운다. 안 지우면 재시도
+  // 성공 뒤 다시 열었을 때(취소→재오픈) 낡은 에러가 새 시도처럼 보일 수 있다.
+  function setCreateProjectOpenAndClearError(nextOpen: boolean) {
+    setCreateProjectError(null);
+    setCreateProjectOpen(nextOpen);
+  }
+
   return {
     pending,
     open, setOpen,
     createOrgOpen, setCreateOrgOpen,
-    createProjectOpen, setCreateProjectOpen,
+    createProjectOpen, setCreateProjectOpen: setCreateProjectOpenAndClearError,
+    createProjectError,
     newProjectName, setNewProjectName,
     newProjectDesc, setNewProjectDesc,
     creating,

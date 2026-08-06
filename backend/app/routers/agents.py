@@ -24,12 +24,14 @@ from app.schemas.recruit import RecruitRequest
 from app.schemas.team_member import OrgAgentCreate, TeamMemberResponse
 from app.services.agent_onboarding_config import (
     DEFAULT_RUNTIME,
+    HTTP_MCP_CAPABLE_RUNTIMES,
     MCP_NATIVE_RUNTIMES,
     SUPPORTED_RUNTIMES,
     SUPPORTED_TRANSPORTS,
     build_agent_mcp_config,
     build_agent_mcp_config_bundle,
     build_connector_guidance,
+    build_hermes_mcp_cli_setup,
     default_transport_for_hosting,
     resolve_instruction_filename,
     resolve_locale_from_request,
@@ -278,18 +280,24 @@ async def _connection_artifact(
             "content": default_persona.resolved_system_prompt,
         })
 
+    # story #2466(P1-B) + 유나 정렬 v1.3(2026-08-05, spec-2377 §1): ①도구전달(http MCP)과
+    # ②깨우기(커넥터)는 독립 축 — 예전엔 if/else 단일분기(둘 중 하나만 emit)였는데, 그게 바로
+    # §0가 지적하는 "한 축이 두 물음을 답한다" 병이었다. hermes 처럼 ①은 참·②도 참인 런타임은
+    # 두 파일을 다 받는다. ①이 풀렸다고 ②disclaimer를 지우지 않는다(유나 지적 — 안 그러면
+    # §7 거짓의 재판을 화면 카피에서 반복하는 것).
     if runtime not in MCP_NATIVE_RUNTIMES:
-        # Q2(PO 확정) + 전 런타임 올지원(story 6f6ac081, PO 크럭스 승인): 범용 connector 버킷 +
-        # 커넥터 전용 5종(opencode/openclaw/hermes/grok/pi) 전부 이 분기 — 포인터/안내만(SSE
-        # dial-out은 `.mcp.json`과 별개 프로토콜이라 transport 파라미터 자체가 의미 없음/무시).
-        # 가드를 단일 sentinel(`== CONNECTOR_RUNTIME`) 대신 `not in MCP_NATIVE_RUNTIMES`로
-        # 반전한 이유: 전자는 커넥터 전용 5종을 그냥 통과시켜 `.mcp.json`을 오emit했다.
-        resolved_transport = None
-        mcp_config: dict | None = None
+        # Q2(PO 확정) + 전 런타임 올지원(story 6f6ac081): ②깨우기 안내 — MCP_NATIVE 가 아닌 전부
+        # (hermes 포함) 이 안내를 받는다. ①이 http_mcp_capable 이어도 이 분기는 안 건드린다.
         files.append({
             "filename": "CONNECTOR_SETUP.md",
             "content": build_connector_guidance(runtime, resolved_locale),
         })
+
+    if runtime not in HTTP_MCP_CAPABLE_RUNTIMES:
+        # 가드를 단일 sentinel(`== CONNECTOR_RUNTIME`) 대신 `not in HTTP_MCP_CAPABLE_RUNTIMES`로
+        # 반전한 이유: 전자는 커넥터 전용 런타임을 그냥 통과시켜 `.mcp.json`을 오emit했다.
+        resolved_transport = None
+        mcp_config: dict | None = None
     else:
         resolved_transport = transport or default_transport_for_hosting()
         if resolved_transport not in SUPPORTED_TRANSPORTS:
@@ -300,10 +308,18 @@ async def _connection_artifact(
         if mcp_config is None:
             # http 요청됐으나 이 환경엔 호스팅 배포가 없음(MCP_PUBLIC_URL 미설정) — 명시 요청이라 400.
             raise HTTPException(status_code=400, detail=f"transport '{resolved_transport}' unavailable in this environment")
-        files.append({
-            "filename": ".mcp.json",
-            "content": json.dumps(mcp_config, indent=2, ensure_ascii=False),
-        })
+        if runtime == "hermes":
+            # hermes는 `.mcp.json` 파일을 자동으로 안 읽음 — 자체 CLI 등록 커맨드로 안내(유나
+            # 정렬 v1.3 ⑤). 그대로 `.mcp.json`을 주면 이 런타임에 안 맞는 것을 화면이 단정(§0).
+            files.append({
+                "filename": "HERMES_MCP_SETUP.md",
+                "content": build_hermes_mcp_cli_setup(mcp_config, _API_KEY_PLACEHOLDER, resolved_locale),
+            })
+        else:
+            files.append({
+                "filename": ".mcp.json",
+                "content": json.dumps(mcp_config, indent=2, ensure_ascii=False),
+            })
 
     # OB-4 seam: config_generated (generator 아티팩트 반환·funnel·non-blocking).
     await emit_onboarding_event(
