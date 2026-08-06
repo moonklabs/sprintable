@@ -134,7 +134,9 @@ export function BillingTab({ orgId }: { orgId: string }) {
 
       <PricingLimitsTable currentTier={currentTier} />
 
-      {TIER_DEFINITIONS[currentTier].limits.canPurchasePacks && (
+      {/* 팩 실가격(원)도 대표 승인 게이트 대상 — canPurchasePacks만 보면 승인 前에도 team/business
+          티어에서 실 KRW 가격이 샌다(카디르 QA #2866 발견). isPricePublic 없이는 살 것 자체가 없다. */}
+      {IS_PRICE_PUBLIC && TIER_DEFINITIONS[currentTier].limits.canPurchasePacks && (
         <PricingPacks onBuyPack={(kind, quantity) => canManage && setPackTarget({ kind, quantity })} />
       )}
 

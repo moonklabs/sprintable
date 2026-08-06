@@ -85,12 +85,20 @@ describe('BillingTab — 결제②-D 4티어 재편', () => {
     expect(container.textContent).not.toContain('추가 팩');
   });
 
-  it('현재 tier가 팩 구매 가능(Team)이면 팩 섹션을 보여준다', async () => {
-    await mount(async () => statusResponse({ tier: 'team' }));
-    expect(container.textContent).toContain('추가 팩');
-    expect(container.textContent).toContain('자동화 팩');
-    expect(container.textContent).toContain('저장 팩');
-  });
+  // 카디르 QA(#2866) 발견 회귀: canPurchasePacks만 보고 렌더하면 승인 前에도
+  // team/business 티어에서 팩 실가격(원)이 샌다. isPricePublic=false인 동안은
+  // 어떤 tier든 팩 섹션 자체가 렌더되면 안 된다.
+  it.each(['team', 'business'] as const)(
+    '승인 前(isPricePublic=false)이면 tier=%s 라도 팩 섹션·실가격을 노출하지 않는다',
+    async (tier) => {
+      await mount(async () => statusResponse({ tier }));
+      expect(container.textContent).not.toContain('추가 팩');
+      expect(container.textContent).not.toContain('자동화 팩');
+      expect(container.textContent).not.toContain('저장 팩');
+      expect(container.textContent).not.toContain('5,000원');
+      expect(container.textContent).not.toContain('3,000원');
+    },
+  );
 
   it('can_manage=false면 member 안내를 보여준다', async () => {
     await mount(async () => statusResponse({ can_manage: false }));
