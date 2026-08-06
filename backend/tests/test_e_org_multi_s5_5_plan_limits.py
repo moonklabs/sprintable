@@ -2,7 +2,7 @@
 
 AC1: Plan limit 정책은 EE/SaaS 환경에서만 로드
 AC2: OSS 환경에서는 plan limit 미들웨어가 로드되지 않아 제한 없음
-AC3: Free 플랜 — org 1개, project 1개, member 5명 제한
+AC3: Free 플랜 — org 1개, project 1개, member 3명 제한(#2471 A1: v2.3, 5→3)
 AC4: Team/Pro는 제한 없음
 AC5: 제한 초과 시 402 + upgrade_required=True
 AC6: API 과금 정책 기록 (Team $0.001, Pro $0.0005)
@@ -69,7 +69,7 @@ def test_free_limits_defined():
     from ee.plan_limits import FREE_LIMITS
     assert FREE_LIMITS["max_orgs_owned"] == 1
     assert FREE_LIMITS["max_projects"] == 1
-    assert FREE_LIMITS["max_members"] == 5
+    assert FREE_LIMITS["max_members"] == 3  # #2471(A1): v2.3 정책, 5→3(선생님 確定 04:00Z)
 
 
 def test_free_limits_org_check_exists():

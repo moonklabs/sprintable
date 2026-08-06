@@ -29,16 +29,20 @@ def anyio_backend():
 
 async def _reset(session):
     # 0147 마이그가 team/pro × monthly/yearly × usd/krw 실 시드를 이미 넣어두므로, 이 테스트가
-    # 쓰는 정확히 같은 계보(team/monthly/usd·pro/monthly/usd·pro/yearly/usd)를 명시적으로
-    # 비워야 테스트가 격리된다(안 그러면 실 시드 행이 effective_from 최신이라 테스트 행을
-    # 이겨버림 — 코드 버그가 아니라 테스트 격리 버그였음, 실증 중 발견해 수정).
+    # 쓰는 정확히 같은 계보(team/monthly/usd·business/monthly/usd·business/yearly/usd)를
+    # 명시적으로 비워야 테스트가 격리된다(안 그러면 실 시드 행이 effective_from 최신이라
+    # 테스트 행을 이겨버림 — 코드 버그가 아니라 테스트 격리 버그였음, 실증 중 발견해 수정).
+    # #2471(A1): pricing_versions.tier CHECK가 'pro'를 더는 허용하지 않아(은퇴, D12) 이
+    # 테스트의 tier 값도 'business'로 옮긴다 — _update_subscription 자체(ee/billing.py)는
+    # 이 스토리에서 안 건드렸으니 여기서 검증하는 건 여전히 "임의 tier 문자열에 대해 grandfather
+    # FK가 맞게 채워지는가"라는 일반 로직이다.
     for sql in [
         f"DELETE FROM org_subscriptions WHERE org_id='{ORG}'",
         f"DELETE FROM organizations WHERE id='{ORG}'",
         f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{ORG}','B1Org','b1org','free')",
-        "DELETE FROM pricing_versions WHERE polar_price_id LIKE 'test-b1-%'",
+        "DELETE FROM pricing_versions WHERE provider_price_ref LIKE 'test-b1-%'",
         "DELETE FROM pricing_versions WHERE (tier,billing_cycle,currency) IN "
-        "(('team','monthly','usd'),('pro','monthly','usd'),('pro','yearly','usd'))",
+        "(('team','monthly','usd'),('business','monthly','usd'),('business','yearly','usd'))",
     ]:
         await session.execute(text(sql))
     await session.commit()
@@ -60,8 +64,8 @@ async def test_update_subscription_sets_current_pricing_version_id():
             await session.execute(
                 text(
                     "INSERT INTO pricing_versions (id, tier, billing_cycle, currency, price_cents, "
-                    "polar_price_id, effective_from, created_by) VALUES "
-                    "(:id, 'team', 'monthly', 'usd', 4900, 'test-b1-team-monthly', :eff, 'test')"
+                    "provider, provider_price_ref, effective_from, created_by) VALUES "
+                    "(:id, 'team', 'monthly', 'usd', 4900, 'polar', 'test-b1-team-monthly', :eff, 'test')"
                 ),
                 {"id": pv_id, "eff": now - timedelta(days=1)},
             )
@@ -88,8 +92,8 @@ async def test_update_subscription_none_when_no_pricing_version_exists():
         async with Session() as session:
             await _reset(session)
 
-            # pro/yearly에 대해 아무 pricing_version도 시드하지 않음 — FK는 NULL이어야(에러 아님).
-            await _update_subscription(session, ORG, "pro", "yearly", "cus_test2", "sub_test2", "active")
+            # business/yearly에 대해 아무 pricing_version도 시드하지 않음 — FK는 NULL이어야(에러 아님).
+            await _update_subscription(session, ORG, "business", "yearly", "cus_test2", "sub_test2", "active")
 
             row = (
                 await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == ORG))
@@ -115,23 +119,23 @@ async def test_update_subscription_plan_change_refreshes_pricing_version_id():
             await session.execute(
                 text(
                     "INSERT INTO pricing_versions (id, tier, billing_cycle, currency, price_cents, "
-                    "polar_price_id, effective_from, created_by) VALUES "
-                    "(:id, 'team', 'monthly', 'usd', 4900, 'test-b1-team-monthly-2', :eff, 'test')"
+                    "provider, provider_price_ref, effective_from, created_by) VALUES "
+                    "(:id, 'team', 'monthly', 'usd', 4900, 'polar', 'test-b1-team-monthly-2', :eff, 'test')"
                 ),
                 {"id": team_pv, "eff": now - timedelta(days=1)},
             )
             await session.execute(
                 text(
                     "INSERT INTO pricing_versions (id, tier, billing_cycle, currency, price_cents, "
-                    "polar_price_id, effective_from, created_by) VALUES "
-                    "(:id, 'pro', 'monthly', 'usd', 14900, 'test-b1-pro-monthly', :eff, 'test')"
+                    "provider, provider_price_ref, effective_from, created_by) VALUES "
+                    "(:id, 'business', 'monthly', 'usd', 14900, 'polar', 'test-b1-pro-monthly', :eff, 'test')"
                 ),
                 {"id": pro_pv, "eff": now - timedelta(days=1)},
             )
             await session.commit()
 
             await _update_subscription(session, ORG, "team", "monthly", "cus_test3", "sub_test3", "active")
-            await _update_subscription(session, ORG, "pro", "monthly", "cus_test3", "sub_test3", "active")
+            await _update_subscription(session, ORG, "business", "monthly", "cus_test3", "sub_test3", "active")
 
             row = (
                 await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == ORG))
