@@ -101,18 +101,24 @@ def test_checkout_has_cancel_url():
 # ─── AC6: sandbox 모드 ───────────────────────────────────────────────────────
 
 def test_polar_api_url_uses_sandbox():
-    """polar_sandbox=True 시 sandbox API URL 사용."""
+    """polar_sandbox=True 시 sandbox API URL 사용.
+
+    #2478(B): _polar_api_url()은 PolarAdapter._api_url()로 무회귀 이관됐다(동일 로직) —
+    ee/routers/billing.py는 이제 PG URL을 직접 모른다(design doc §1)."""
     import inspect
-    from ee.routers import billing
-    source = inspect.getsource(billing._polar_api_url)
+    from app.services.payment.polar_adapter import PolarAdapter
+    source = inspect.getsource(PolarAdapter._api_url)
     assert "sandbox" in source
 
 
 def test_no_token_returns_mock_url():
-    """POLAR_ACCESS_TOKEN 없을 때 mock checkout URL 반환 로직 존재."""
+    """POLAR_ACCESS_TOKEN 없을 때 mock checkout URL 반환 로직 존재.
+
+    #2478(B): 이 로직은 PolarAdapter.create_checkout으로 이관됐다 — billing.py의
+    create_checkout_session은 이제 adapter.create_checkout()을 호출만 한다."""
     import inspect
-    from ee.routers import billing
-    source = inspect.getsource(billing.create_checkout_session)
+    from app.services.payment.polar_adapter import PolarAdapter
+    source = inspect.getsource(PolarAdapter.create_checkout)
     assert "polar_access_token" in source
     assert "mock" in source.lower() or "warning" in source.lower()
 
