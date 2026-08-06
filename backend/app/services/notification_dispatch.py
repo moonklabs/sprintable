@@ -57,23 +57,92 @@ async def _deliver_personal_webhooks(
     reference_id: uuid.UUID | None = None,
     context: dict | None = None,
     muted_member_ids: set[uuid.UUID] | None = None,
+    via_outbox: bool = False,
 ) -> None:
-    """96af343e: 활성 개인(member-scoped) WebhookConfig 보유 휴먼에게 알림 webhook POST.
-
-    in-app Notification 과 동일 flush 타이밍(best-effort·옵션 C). global mute 멤버는 skip
-    (채널 막론 mute 우선). SSRF 검증·HMAC 서명·Discord URL 포맷·retry 는
-    dispatch_router._post_with_retry / app.core.ssrf 재사용. agent SSE 경로
-    (route_dispatch_event)는 미변경(무회귀). 개별 POST 실패는 swallow → in-app 무영향.
-
-    muted_member_ids: story 75570ab8 — 호출자(dispatch_notification)가 이미 계산한 mute
-    집합을 넘기면 재조회 생략(Event-skip 판정과 동일 SSOT 재사용, 드리프트 방지). None이면
-    이 함수가 자체 조회(단독 호출 하위호환).
-    """
+    """story #2460(§6 봉합②, PO 스코프 확定 2026-08-05): outbox 경유는 **opt-in**이다
+    (``via_outbox=True``) — dispatch_notification 호출부 중 story_status_events.py·
+    conversations.py send_message(멘션·메시지 알림) 둘만 켠다. 나머지 dispatch_notification
+    호출부는 기본값 False로 기존과 동일하게 즉시 POST한다(behavior 무변경).
+    ``via_outbox=True``면 즉시 POST 대신 `delivery_jobs`에 job row만 insert(caller
+    세션·트랜잭션에 실림, commit은 caller 책임 — at-least-once) — 실 배달은
+    `delivery_dispatcher.py` 워커가 자기 세션으로 `_deliver_personal_webhooks_now()`를
+    수행한다(요청 트랜잭션 밖에서 외부 I/O)."""
     if not member_ids:
         return
-    from app.core.ssrf import validate_webhook_url_async
-    from app.services.dispatch_router import _post_with_retry
+    if via_outbox:
+        from app.models.delivery_job import DeliveryJob
 
+        db.add(
+            DeliveryJob(
+                org_id=org_id,
+                kind="personal_webhook",
+                payload={
+                    "member_ids": [str(m) for m in member_ids],
+                    "title": title,
+                    "body": body,
+                    "event_type": event_type,
+                    "reference_type": reference_type,
+                    "reference_id": str(reference_id) if reference_id else None,
+                    "context": context,
+                    "muted_member_ids": (
+                        [str(m) for m in muted_member_ids] if muted_member_ids is not None else None
+                    ),
+                },
+            )
+        )
+        return
+    await _deliver_personal_webhooks_now(
+        db, org_id, member_ids, title=title, body=body, event_type=event_type,
+        reference_type=reference_type, reference_id=reference_id, context=context,
+        muted_member_ids=muted_member_ids,
+    )
+
+
+async def _deliver_personal_webhooks_now(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    member_ids: list[uuid.UUID],
+    *,
+    title: str,
+    body: str | None,
+    event_type: str,
+    reference_type: str | None = None,
+    reference_id: uuid.UUID | None = None,
+    context: dict | None = None,
+    muted_member_ids: set[uuid.UUID] | None = None,
+) -> None:
+    """96af343e: 활성 개인(member-scoped) WebhookConfig 보유 휴먼에게 알림 webhook 실POST.
+
+    `delivery_dispatcher.py` 워커 전용(자기 세션으로 호출). SSRF 검증·HMAC 서명·Discord URL
+    포맷·retry 는 dispatch_router._post_with_retry / app.core.ssrf 재사용. agent SSE 경로
+    (route_dispatch_event)는 미변경(무회귀). 개별 POST 실패는 swallow → in-app 무영향.
+
+    muted_member_ids: story 75570ab8 — 호출자가 이미 계산한 mute 집합을 넘기면 재조회 생략
+    (Event-skip 판정과 동일 SSOT 재사용, 드리프트 방지). None이면 이 함수가 자체 조회.
+
+    story #2460 PO 리뷰(2026-08-05, F1) — 예전엔 이 함수가 조회 直後 같은 함수 안에서 POST
+    루프를 돌아, 호출자(`_deliver_one`)의 세션이 POST 내내 idle-in-transaction으로 열려
+    있었다(webhook_dispatch.py `_fire_webhooks_now`와 동형 결함). `_fetch_personal_webhook_targets`
+    (세션 필요)/`_send_personal_webhook_targets`(세션 불요)로 쪼개 이 함수는 얇은 래퍼로
+    남긴다 — 기존 호출부(via_outbox=False) 시그니처·거동 무변경."""
+    targets = await _fetch_personal_webhook_targets(db, org_id, member_ids, muted_member_ids=muted_member_ids)
+    await _send_personal_webhook_targets(
+        targets, title=title, body=body, event_type=event_type,
+        reference_type=reference_type, reference_id=reference_id, context=context,
+    )
+
+
+async def _fetch_personal_webhook_targets(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    member_ids: list[uuid.UUID],
+    *,
+    muted_member_ids: set[uuid.UUID] | None = None,
+) -> list[dict]:
+    """활성 개인 WebhookConfig를 조회해 mute 필터까지 마친 순수 dict 리스트로 반환한다.
+    세션 I/O는 이 함수에서 끝(story #2460 PO 리뷰 F1)."""
+    if not member_ids:
+        return []
     wh_rows = await db.execute(
         select(WebhookConfig).where(
             WebhookConfig.org_id == org_id,
@@ -84,7 +153,7 @@ async def _deliver_personal_webhooks(
     )
     configs = list(wh_rows.scalars().all())
     if not configs:
-        return
+        return []
 
     # global mute 멤버 skip (CP②: 채널 막론 mute 우선)
     if muted_member_ids is None:
@@ -92,19 +161,37 @@ async def _deliver_personal_webhooks(
     else:
         muted = muted_member_ids
 
-    for cfg in configs:
-        if cfg.member_id in muted:
-            continue
+    return [
+        {"url": cfg.url, "secret": cfg.secret, "member_id": cfg.member_id}
+        for cfg in configs if cfg.member_id not in muted
+    ]
+
+
+async def _send_personal_webhook_targets(
+    targets: list[dict],
+    *,
+    title: str,
+    body: str | None,
+    event_type: str,
+    reference_type: str | None = None,
+    reference_id: uuid.UUID | None = None,
+    context: dict | None = None,
+) -> None:
+    """세션 없이 순수 HTTP POST만(story #2460 PO 리뷰 F1)."""
+    if not targets:
+        return
+    from app.core.ssrf import validate_webhook_url_async
+    from app.services.dispatch_router import _post_with_retry
+
+    for t in targets:
+        url, secret, member_id = t["url"], t["secret"], t["member_id"]
         # SSRF 재검증 (저장 후 DNS rebinding 방지)
         try:
-            await validate_webhook_url_async(cfg.url)
+            await validate_webhook_url_async(url)
         except Exception:
-            logger.warning("personal webhook SSRF reject member=%s", cfg.member_id)
+            logger.warning("personal webhook SSRF reject member=%s", member_id)
             continue
-        is_discord = (
-            "discord.com/api/webhooks" in cfg.url
-            or "discordapp.com/api/webhooks" in cfg.url
-        )
+        is_discord = "discord.com/api/webhooks" in url or "discordapp.com/api/webhooks" in url
         if is_discord:
             text = f"[{event_type}] {title}" + (f"\n{body}" if body else "")
             payload = {"content": text}
@@ -121,11 +208,10 @@ async def _deliver_personal_webhooks(
                 "reference_id": str(reference_id) if reference_id else None,
                 "context": context or {},
             }
-            secret = cfg.secret
         try:
-            await _post_with_retry(cfg.url, payload, secret, str(cfg.member_id))
+            await _post_with_retry(url, payload, secret, str(member_id))
         except Exception:
-            logger.warning("personal webhook POST failed (swallowed) member=%s", cfg.member_id)
+            logger.warning("personal webhook POST failed (swallowed) member=%s", member_id)
 
 
 async def dispatch_notification(
@@ -142,8 +228,16 @@ async def dispatch_notification(
     context: dict | None = None,
     story_id: uuid.UUID | None = None,
     sprint_id: uuid.UUID | None = None,
+    via_outbox: bool = False,
 ) -> None:
     """notification_settings 필터 후 enabled member에게 알림 발송.
+
+    ``via_outbox``(story #2460, §6 봉합②): True면 개인 webhook·Expo push 실배달을 이 호출
+    안에서 하지 않고 outbox(`delivery_jobs`)에 적재만 한다 — in-app Notification/Event
+    INSERT(아래 본문)는 원래도 순수 DB write라 이 플래그와 무관하게 그대로 caller의
+    트랜잭션에 실린다(바꿀 이유 없음). opt-in 스코프는 story_status_events.py·
+    conversations.py send_message 두 콜사이트뿐(PO 확定) — 기본 False로 다른 12+ 콜사이트는
+    behavior 무변경.
 
     human 멤버: Notification 테이블 INSERT (in-app 알림)
     agent 멤버: events 테이블 INSERT (event_type=dispatched, status=pending)
@@ -389,7 +483,7 @@ async def dispatch_notification(
         await _deliver_personal_webhooks(
             db, org_id, webhook_deliver_ids, title=title, body=body, event_type=event_type,
             reference_type=reference_type, reference_id=reference_id, context=context,
-            muted_member_ids=muted_member_ids,
+            muted_member_ids=muted_member_ids, via_outbox=via_outbox,
         )
 
         # E-MOBILE M0·S3: EE 푸시 채널(웹훅과 나란한 별개 채널) — 등록 push_devices 로 Expo 발송.
@@ -403,6 +497,7 @@ async def dispatch_notification(
                 reference_type=reference_type, reference_id=reference_id, context=context,
                 muted_member_ids=muted_member_ids,
                 project_id=_push_project_id, story_id=story_id, sprint_id=sprint_id,
+                via_outbox=via_outbox,
             )
 
     except Exception:

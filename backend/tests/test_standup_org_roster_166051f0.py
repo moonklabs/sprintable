@@ -130,13 +130,15 @@ async def test_org_level_human_roster_from_org_members_not_view():
         from httpx import ASGITransport, AsyncClient
         from app.main import app
         from app.dependencies.auth import get_current_user
-        from app.dependencies.database import get_db
 
         async def override_db():
             async with Session() as s:
                 yield s
 
-        app.dependency_overrides[get_db] = override_db
+        from tests.conftest import override_db_and_read
+        # story #2451(§6 Phase3 root-fix): get_db+get_read_db 항상 같이 거는 공용
+        # 헬퍼 — legacy alias(예: /api/v2/epics=goals.router 재마운트) 누락 재발 차단.
+        override_db_and_read(app, override_db)
         app.dependency_overrides[get_current_user] = lambda: _auth()
         try:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:

@@ -61,9 +61,11 @@ async def _client():
         return ctx
 
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db
 
-    app.dependency_overrides[get_db] = override_db
+    from tests.conftest import override_db_and_read
+    # story #2451(§6 Phase3 root-fix): get_db+get_read_db 항상 같이 거는 공용
+    # 헬퍼 — legacy alias(예: /api/v2/epics=goals.router 재마운트) 누락 재발 차단.
+    override_db_and_read(app, override_db)
     app.dependency_overrides[get_current_user] = override_auth
 
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), mock_session, app
@@ -80,8 +82,14 @@ async def test_list_docs_200():
         mock_result.scalar_one_or_none.return_value = ORG_ID
         session.execute = AsyncMock(return_value=mock_result)
 
-        async with client as c:
-            resp = await c.get(f"/api/v2/docs?project_id={PROJECT_ID}")
+        # story #2459: get_project_scoped_org_id가 이제 요청-수명 get_db 대신 전용 단명
+        # 세션(async_session_factory())을 쓴다 — override_db_and_read(get_db/get_read_db)로는
+        # 못 가로채므로 별도 patch 필요.
+        from app.dependencies import auth as auth_module
+        from tests.conftest import FakeAsyncSessionCtx
+        with patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(session)):
+            async with client as c:
+                resp = await c.get(f"/api/v2/docs?project_id={PROJECT_ID}")
 
         assert resp.status_code == 200
         # story #2191: #2231 정본 규약 A — bare array → {data,meta} 봉투.
@@ -220,8 +228,11 @@ async def test_list_docs_with_parent_id_200():
         mock_result.scalar_one_or_none.return_value = ORG_ID
         session.execute = AsyncMock(return_value=mock_result)
 
-        async with client as c:
-            resp = await c.get(f"/api/v2/docs?project_id={PROJECT_ID}&parent_id={DOC_ID}")
+        from app.dependencies import auth as auth_module
+        from tests.conftest import FakeAsyncSessionCtx
+        with patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(session)):
+            async with client as c:
+                resp = await c.get(f"/api/v2/docs?project_id={PROJECT_ID}&parent_id={DOC_ID}")
 
         assert resp.status_code == 200
     finally:

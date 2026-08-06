@@ -1,5 +1,9 @@
 name: Cloud Build (GCP)
 
+# 2026-08-03 #2829(P0): substitutions 값은 별도 "Assemble Cloud Build substitutions" 스텝에서
+# 조립한다 — 단일 run 블록에 GH 표현식을 다수 담으면 GitHub 파서 상한(startup_failure)에 걸린다.
+# Submit 스텝에 인라인 나열 금지. 주석에도 리터럴 표현식 토큰 쓰지 말 것.
+
 on:
   push:
     branches: [main, develop]
@@ -62,26 +66,33 @@ jobs:
             # conn-safe: min 3 × per-instance 5 = 15 ≤ 200(maxScale 5·rollout 70 예산 불변·SSOT db-connection-budget.md).
             # 근본(커넥션 풀링/아키텍처 재검토)은 #2074 별도 — 이건 응급 봉합의 prod 반영분.
             echo "backend_min_instances=3" >> "$GITHUB_OUTPUT"
-            # ⚠️ maxScale 5 (ee7794eb ③·선생님 right-size): prod g1-small. per-instance 5(pool
-            # 3/1=4 + pg_pubsub raw 1). rollout(old+new 2×): 2×5×5+20(admin)=70.
-            # ⚠️ story #2040(2026-07-20) PO gcloud 실측 갱신 — max_connections=**200**(과거 100 가정 낡음,
-            # codex #2074 조사가 재적발). 70 ≤ 200(여유 65%). SSOT는 `docs/db-connection-budget.md`.
-            # (PgBouncer 풀러 불필요/불가 — Cloud Run raw TCP 미지원으로 중앙 PgBouncer 불가·관리형 풀링은
-            # Enterprise Plus 전용(#1779 폐기 이력). 트래픽↑ 시 아키텍처 재검토(#2074) 필요.)
-            echo "backend_max_instances=5" >> "$GITHUB_OUTPUT"
+            # ⚠️ maxScale 18 (#2448 앱티어 right-size, 2026-08-04) — §6 규모 검증 부하테스트(warm18)와
+            # 라이브(rev 00274 수동복원)에서 실증된 값. 과거 maxScale 5 는 앱→primary «직결» 커넥션 예산
+            # (5×(pool+overflow)+raw ≤ max_conn 200)에서 나온 값이었으나, 그 전제는 #2445 Phase1 prod
+            # PgBouncer cutover(아래 backend_db_pgbouncer=true)로 폐기됐다 — 지금은 앱→primary 가 «전부
+            # PgBouncer 경유»(client_addr=PgBouncer VM·직결 raw 0)라 primary max_conn 200 은 PgBouncer
+            # 서버풀(default_pool_size 80×2=160 ≤ 200)이 maxScale «무관»하게 보호한다. maxScale 의 예산은
+            # 이제 PgBouncer max_client_conn(3000)에 걸린다: client conn 18×70≈1260 ≤ 3000(#2448 실측·
+            # rollout 2×=2520 도 ≤ 3000). SSOT 미등재라 배포마다 5로 «명시» 덮여(§6 1차 테스트가 maxScale
+            # 5 로 돈 원인) 검증값이 회귀했다 — 여기 못박아 durable화("손 값은 배포가 덮는다").
+            echo "backend_max_instances=18" >> "$GITHUB_OUTPUT"
             # story #2442(P0, 2026-08-03) — prod DB 커넥션 풀 고갈 인시던트(08:44Z, QueuePool
             # 타임아웃·/api/v2/health 전면 실패). PgBouncer가 prod에 없거나 무력해(db_pgbouncer=
             # False 코드+배포 양쪽 기본값 — 위 "PgBouncer 풀러 불가" 참고) tiny 앱 풀(3+1=4)이
             # Cloud SQL에 직결돼 즉시 고갈. PO가 gcloud로 20/10(rev 00257-wdz)까지 올려 즉시 회복
             # 확認(health 8/8 200) — 그 손 값을 SSOT로 durable화("손 값은 배포가 덮는다" 교훈).
-            # 안전식(롤아웃 배수 없이): maxScale(5)×(pool+overflow)+raw(1)=5×30+1=151≤200(25%여유).
-            # ⚠️잔여 리스크(docs/db-connection-budget.md 롤아웃 산식 2×N×5로는 2×5×31=310>200) —
-            # main 배포 빈도가 낮아 감수(PO 확認 필요, 재검토 트리거는 위 문서 참고).
+            # ⚠️ 이 pool/overflow(20/10)의 커넥션 예산은 위 maxScale 주석대로 이제 primary «직결»이 아니라
+            # PgBouncer max_client_conn(3000) 기준이다(backend_db_pgbouncer=true). primary max_conn 200 은
+            # PgBouncer 서버풀(≤160)이 maxScale 무관 보호 — 과거 5×30≤200 직결 산식은 cutover 로 폐기됐다.
             echo "db_pool_size=20" >> "$GITHUB_OUTPUT"
             echo "db_max_overflow=10" >> "$GITHUB_OUTPUT"
-            # story #2445(2026-08-03) — prod는 PgBouncer 미도입(#2442에서 앱 풀 20/10으로
-            # 대응, 별건 스코프). 명시 false로 다른 플래그들과 동일 컨벤션 유지.
-            echo "backend_db_pgbouncer=false" >> "$GITHUB_OUTPUT"
+            # story #2445 Phase1(2026-08-04, 페드루) — prod PgBouncer cutover. dev 라이브 검증 + 부하테스트로
+            # 사이징 결함 둘(앱풀 2→25/10 · PgBouncer 서버풀 20/200→60/500)을 cutover 前에 교정, DB/PgBouncer
+            # 층 검증(60커넥션에 Cloud SQL CPU 9-21% idle). prod 중앙 PgBouncer HA(Regional MIG≥2 + Internal LB
+            # VIP 10.178.0.111:6432) 구축·「돌려서」 검증(SELECT 1 왕복·LB HEALTHY×2). 이 true는 아래
+            # cloudbuild.yaml deploy-backend의 prod --update-secrets(DATABASE_URL→VIP경유·DATABASE_URL_DIRECT→
+            # 직결)와 «같은 배포»에서 동반된다(짝이 깨지면 반쪽 상태 — dev 주석 참고).
+            echo "backend_db_pgbouncer=true" >> "$GITHUB_OUTPUT"
             # story #2005: PO 라이브 gcloud 실측(2026-07-17) — backend-prod 현재 유효 Cloud Run
             # 요청 타임아웃=300s. 지금까지 `cloudbuild.yaml`에 `--timeout` 플래그가 없어 이
             # 값은 인프라 기본값이었을 뿐 어디에도 명시돼 있지 않았다 — 이제 이 워크플로우가
@@ -164,6 +175,18 @@ jobs:
             # 손대지 않는다(#2120/#2121/#2122와 동일 단계적 승격 원칙). 명시 false로 다른
             # 플래그들과 동일 컨벤션 유지(암묵 fallback 대신 의도 명시).
             echo "backend_sse_transient_replay_enabled=false" >> "$GITHUB_OUTPUT"
+            # ⚠️승격 병합(promo/20260727·PO): 위 프론트 인스턴스 수·transient replay 스위치(develop #2077)와
+            # 아래 REALTIME_URL 전환(main #2142/#2439)은 **서로 무관한 prod env 출력**이라 둘 다 보존한다.
+            # 직전 승격(promo/backplane-20260723)이 같은 자리에서 같은 판단을 했고 그 근거가 아래 주석에 남아 있다.
+            # ⭐story #2142(2026-07-23) — prod 실시간 트래픽을 GCE 스택으로 전환한다.
+            # 이 한 줄이 prod 프론트의 REALTIME_URL 이 되고, `/api/event-stream` 프록시가
+            # 그 주소로 향한다(비우면 FASTAPI_URL 로 폴백 = 즉시 원복, 코드 변경 불요).
+            # 전환 근거(값 보기 前 선언한 기준으로 실측): GCE 3노드 전부 HEALTHY ·
+            # backendService timeout=3600 · 관리형 인증서 ACTIVE · 평문 80 차단 ·
+            # 단일세션 60분 무절단 + heartbeat 규칙성(dev 대조군 동시 측정).
+            # ⚠️승격 병합(promo/backplane-20260723): 위 백플레인 3플래그(develop)와 이 REALTIME_URL
+            # 전환(main #2439)은 서로 무관한 prod env 출력이라 둘 다 보존한다.
+            echo "realtime_url=https://realtime.sprintable.ai" >> "$GITHUB_OUTPUT"
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"

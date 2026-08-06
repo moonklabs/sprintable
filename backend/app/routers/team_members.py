@@ -8,7 +8,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
-from app.dependencies.database import get_db
+from app.dependencies.database import get_db, get_read_db
 from app.dependencies.ownership import _is_org_admin, assert_agent_owner
 from app.models.pm import Story
 from app.models.project import OrgMember
@@ -93,6 +93,16 @@ def _get_repo(
     return TeamMemberRepository(session, org_id)
 
 
+# story #2451(§6 Phase3 A1): list_team_members 전용 — org roster 조회는 create→self-read
+# 흐름이 없고 느리게 변해 read replica. 다른 라우트가 공유하는 위 _get_repo(get_db)는 그대로
+# 둔다(그 라우트들은 이번 스코프 밖 — 최소 diff).
+def _get_repo_read(
+    session: AsyncSession = Depends(get_read_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> TeamMemberRepository:
+    return TeamMemberRepository(session, org_id)
+
+
 # org-level 휴먼은 특정 프로젝트에 귀속되지 않는다(org_members SSOT 직접 해소). TeamMemberResponse.
 # project_id 가 required 라 nil sentinel 을 둔다 — FE 스탠드업 로스터는 id/name/type 만 읽고
 # 휴먼은 project 컬럼을 사용하지 않는다(S:166051f0). 응답 스키마(계약) 변경 0.
@@ -127,8 +137,8 @@ async def list_team_members(
     type_filter: str | None = Query(default=None, alias="type"),
     is_active: bool | None = Query(default=True),
     user_id: uuid.UUID | None = Query(default=None),
-    repo: TeamMemberRepository = Depends(_get_repo),
-    session: AsyncSession = Depends(get_db),
+    repo: TeamMemberRepository = Depends(_get_repo_read),
+    session: AsyncSession = Depends(get_read_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[TeamMemberResponse]:

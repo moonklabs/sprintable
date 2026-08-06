@@ -391,6 +391,15 @@ steps:
         SECRETS_FLAG=""
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
           SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV:latest"
+        elif [ "${_DEPLOY_ENV}" == "prod" ]; then
+          # story #2445 Phase1(2026-08-04) — prod cutover: DATABASE_URL→PgBouncer VIP(DATABASE_URL_PROD_PGBOUNCER,
+          # =10.178.0.111:6432), DATABASE_URL_DIRECT→직결(DATABASE_URL_PROD). _BACKEND_DB_PGBOUNCER=true와 짝.
+          # 시크릿은 PO 생성·backend-prod SA(cloudrun-runtime-prod)에 secretAccessor 부여됨.
+          # + DATABASE_URL_READ(#2451 §6 읽기 라우팅, rev 00266 라이브 flip): read replica DSN(PgBouncer
+          #   sprintable_read 풀 경유). 지금까지 라이브 «수동 바인딩»이라 배포 SSOT 어디에도 선언이 없어
+          #   env-drift-guard 축①이 매일 빨강이었다(additive --update-secrets 라 값은 보존됐으나 미선언=fragile:
+          #   --set-secrets 리팩터·서비스 재생성 時 조용히 소실→reads가 primary 로 새 병목 악화). 여기 편입해 durable화.
+          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_PROD_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_PROD:latest,DATABASE_URL_READ=DATABASE_URL_READ:latest"
         fi
         gcloud run deploy sprintable-backend-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \

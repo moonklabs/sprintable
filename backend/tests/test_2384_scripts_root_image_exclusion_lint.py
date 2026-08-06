@@ -30,6 +30,8 @@ _SCRIPTS_ROOT = Path(__file__).resolve().parent.parent / "scripts"
 _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
     "ci_alembic_single_step_promotion_check.py",  # story #2330 — CI 전용 fresh-DB 재현
     "lint_candidate_source_ownership.py",         # story #2363 AC6 — CI lint 게이트
+    "lint_commit_before_validate.py",             # story #2459 — CI lint 게이트(AST 정적분석, 운영 DB 무접속)
+    "lint_dependency_override_get_read_db.py",    # story #2451 — CI lint 게이트(tests/ override 스캔, 운영 DB 무접속)
     "lint_project_access_403.py",                 # story #2342 AC7 — CI lint 게이트
     "lint_query_sentinel_direct_calls.py",        # story #2335 — CI lint 게이트
     "model_db_drift_audit.py",                    # story #2181 — 로컬 1회성 감사(읽기 전용)

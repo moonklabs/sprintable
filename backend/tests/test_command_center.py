@@ -48,7 +48,6 @@ def _r_one(tup):
 
 async def _get(path, *, execute_seq, member=MEMBER, org=ORG_A, resolve_raises=None):
     from app.dependencies.auth import get_current_user, get_verified_org_id
-    from app.dependencies.database import get_db
     from app.main import app as fastapi_app
     from app.routers import command_center as mod
 
@@ -58,7 +57,10 @@ async def _get(path, *, execute_seq, member=MEMBER, org=ORG_A, resolve_raises=No
     async def override_db():
         yield session
 
-    fastapi_app.dependency_overrides[get_db] = override_db
+    from tests.conftest import override_db_and_read
+    # story #2451(§6 Phase3 root-fix): get_db+get_read_db 항상 같이 거는 공용
+    # 헬퍼 — legacy alias(예: /api/v2/epics=goals.router 재마운트) 누락 재발 차단.
+    override_db_and_read(fastapi_app, override_db)
     fastapi_app.dependency_overrides[get_verified_org_id] = lambda: org
     # ⭐auth.user_id 를 일부러 member 와 다른 값(=users.id 모사)으로 둬, 엔드포인트가 raw user_id 가 아니라
     # canonical resolve_member 로 member.id 를 쓰는지 증명(HIGH1). resolve_member 는 patch.

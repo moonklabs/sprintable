@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.pagination import assemble_page, decode_cursor
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
-from app.dependencies.database import get_db
+from app.dependencies.database import get_db, get_read_db
 from app.models.deletion_audit import DeletionAuditLog
 from app.models.pm import Goal, Story, StoryActivity, StoryComment
 from app.models.team import TeamMember
@@ -82,6 +82,16 @@ def _get_repo(
     return StoryRepository(session, org_id)
 
 
+# story #2451(§6 Phase3 A2): list_stories 전용 — kanban board 목록 조회는 create→self-read
+# 흐름이 약하고(replica lag 실측 0.86s, PO 승인) 최대 트래픽 자리라 read replica. 다른
+# 라우트가 공유하는 위 _get_repo(get_db)는 그대로 둔다(최소 diff).
+def _get_repo_read(
+    session: AsyncSession = Depends(get_read_db),
+    org_id: uuid.UUID = Depends(get_project_scoped_org_id),
+) -> StoryRepository:
+    return StoryRepository(session, org_id)
+
+
 @router.get("", response_model=list[StoryResponse])
 async def list_stories(
     project_id: uuid.UUID | None = Query(default=None),
@@ -104,7 +114,7 @@ async def list_stories(
     limit: int = Query(default=1000, ge=1, le=2000),
     cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
     response: Response = None,  # type: ignore[assignment]
-    repo: StoryRepository = Depends(_get_repo),
+    repo: StoryRepository = Depends(_get_repo_read),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[StoryResponse]:
     from datetime import datetime
@@ -1931,6 +1941,13 @@ async def update_story(
 
     await _attach_assignee_ids(db, repo.org_id, [story])
     await _attach_has_evidence(db, [story])
+    # story #2459 prod 회귀(2026-08-05): model_validate는 동기 호출이라 story의 어떤 컬럼이
+    # unloaded 상태면(원인 미확定 — repo.update()가 flush+refresh 直後인데도 관측됨)
+    # MissingGreenlet 500(await_only 호출 불가 — sync 컨텍스트에서 lazy load 시도)으로
+    # 죽는다. 직렬화 直前 명시 refresh로 db가 아직 살아있는 async 컨텍스트에서 강제 재로드
+    # — 어떤 경로로 unload되든 안전(포지티브 컨트롤: test_2459_regression_full_request_cycle_
+    # realdb.py::test_update_story_survives_forced_attribute_expiry_before_serialize).
+    await db.refresh(story)
     return StoryResponse.model_validate(story)
 
 
@@ -2194,6 +2211,9 @@ async def update_story_status(
 
     await _attach_assignee_ids(db, repo.org_id, [story])
     await _attach_has_evidence(db, [story])
+    # story #2459 prod 회귀(2026-08-05): update_story와 동형 — model_validate 直前 명시
+    # refresh로 unloaded 컬럼(예: updated_at) MissingGreenlet 500을 막는다.
+    await db.refresh(story)
     resp = StoryResponse.model_validate(story)
     # 정공법 A: 비순차 점프면 응답에 violation flag(차단 없이 가시화·/bulk 와 동일 SSOT).
     resp.violation = build_violation_flag(old_status, story.status)
@@ -2388,6 +2408,8 @@ async def request_verification(
         project_id=story.project_id,
     )
     await db.commit()
+    # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+    await db.refresh(gate)
     return GateResponse.model_validate(gate)
 
 

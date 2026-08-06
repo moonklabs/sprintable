@@ -94,7 +94,7 @@ def _client_for(app):
 
 async def _setup_app(app, Session, user_id, org_id):
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     async def _db():
         async with Session() as s:
@@ -108,7 +108,9 @@ async def _setup_app(app, Session, user_id, org_id):
     async def _auth():
         return AuthContext(user_id=str(user_id), email="caller@test", claims={"app_metadata": {"org_id": str(org_id)}})
 
-    app.dependency_overrides[get_db] = _db
+    # story #2451(§6 Phase3 QA 3차): 카디르가 잡은 누락 3파일 중 하나 —
+    # override_db_and_read 로 get_db+get_read_db 항상 함께.
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
 
 

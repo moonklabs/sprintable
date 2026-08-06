@@ -93,7 +93,6 @@ def _client_for(app):
 
 async def _setup_app(app, Session, user_id, org_id=None):
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
 
     async def _db():
         async with Session() as s:
@@ -111,7 +110,10 @@ async def _setup_app(app, Session, user_id, org_id=None):
     async def _auth():
         return AuthContext(user_id=str(user_id), email="caller@test", claims=claims)
 
-    app.dependency_overrides[get_db] = _db
+    from tests.conftest import override_db_and_read
+    # story #2451(§6 Phase3 root-fix): get_db+get_read_db 항상 같이 거는 공용
+    # 헬퍼 — legacy alias(예: /api/v2/epics=goals.router 재마운트) 누락 재발 차단.
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
 
 

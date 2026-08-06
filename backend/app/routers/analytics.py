@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
-from app.dependencies.database import get_db
+from app.dependencies.database import get_read_db
 from app.models.pm import Sprint
 from app.repositories.analytics import AnalyticsRepository
 from app.schemas.analytics import (
@@ -31,8 +31,10 @@ from app.services.project_auth import has_project_access
 router = APIRouter(prefix="/api/v2", tags=["analytics", "Work"])
 
 
+# Phase3(#2451): analytics 전 엔드포인트는 순수 집계/대시보드(이 파일 write 0·read-your-writes 기대 없음)
+# → read replica(get_read_db)로 라우팅해 primary 부하를 던다. DATABASE_URL_READ 미설정이면 primary 폴백(무해).
 def _get_repo(
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_read_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> AnalyticsRepository:
     return AnalyticsRepository(session, org_id)

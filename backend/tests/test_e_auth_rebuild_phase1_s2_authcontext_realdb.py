@@ -126,6 +126,9 @@ async def test_admin_firebase_user_gets_real_role_not_default_member_realdb(monk
     monkeypatch.setattr(fv, "_fetch_public_keys", fake_fetch)
 
     engine, Session = await _session_factory()
+    # story #2459: get_current_user가 이제 자체 단명 세션(async_session_factory())을 쓴다 —
+    # app.dependencies.auth 모듈 바인딩을 패치해야 이 테스트 DB를 실제로 본다.
+    monkeypatch.setattr("app.dependencies.auth.async_session_factory", Session)
     try:
         async with Session() as s:
             seeded = await _seed(s, org_role="admin")
@@ -133,8 +136,7 @@ async def test_admin_firebase_user_gets_real_role_not_default_member_realdb(monk
         cookie = _make_session_cookie(key_pem, seeded["firebase_uid"])
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=cookie)
 
-        async with Session() as s:
-            auth = await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None, db=s)
+        auth = await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None)
 
         assert auth.user_id == str(seeded["user_id"])
         assert auth.org_id == str(seeded["org_id"])
@@ -166,6 +168,7 @@ async def test_member_firebase_user_rejected_by_require_admin_realdb(monkeypatch
     monkeypatch.setattr(fv, "_fetch_public_keys", fake_fetch)
 
     engine, Session = await _session_factory()
+    monkeypatch.setattr("app.dependencies.auth.async_session_factory", Session)
     try:
         async with Session() as s:
             seeded = await _seed(s, org_role="member")
@@ -173,8 +176,7 @@ async def test_member_firebase_user_rejected_by_require_admin_realdb(monkeypatch
         cookie = _make_session_cookie(key_pem, seeded["firebase_uid"])
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=cookie)
 
-        async with Session() as s:
-            auth = await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None, db=s)
+        auth = await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None)
 
         assert auth.claims["app_metadata"]["role"] == "member"
         with pytest.raises(HTTPException) as exc_info:
@@ -199,6 +201,7 @@ async def test_get_org_scope_reads_live_org_id_realdb(monkeypatch):
     monkeypatch.setattr(fv, "_fetch_public_keys", fake_fetch)
 
     engine, Session = await _session_factory()
+    monkeypatch.setattr("app.dependencies.auth.async_session_factory", Session)
     try:
         async with Session() as s:
             seeded = await _seed(s, org_role="member")
@@ -206,8 +209,7 @@ async def test_get_org_scope_reads_live_org_id_realdb(monkeypatch):
         cookie = _make_session_cookie(key_pem, seeded["firebase_uid"])
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=cookie)
 
-        async with Session() as s:
-            auth = await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None, db=s)
+        auth = await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None)
 
         org_id = get_org_scope(auth=auth, x_org_id=None)
         assert str(org_id) == str(seeded["org_id"])
@@ -232,6 +234,7 @@ async def test_disabled_user_rejected_despite_valid_firebase_token_realdb(monkey
     monkeypatch.setattr(fv, "_fetch_public_keys", fake_fetch)
 
     engine, Session = await _session_factory()
+    monkeypatch.setattr("app.dependencies.auth.async_session_factory", Session)
     try:
         async with Session() as s:
             seeded = await _seed(s, user_active=False)
@@ -239,10 +242,9 @@ async def test_disabled_user_rejected_despite_valid_firebase_token_realdb(monkey
         cookie = _make_session_cookie(key_pem, seeded["firebase_uid"])
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=cookie)
 
-        async with Session() as s:
-            with pytest.raises(HTTPException) as exc_info:
-                await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None, db=s)
-            assert exc_info.value.status_code == 401
+        with pytest.raises(HTTPException) as exc_info:
+            await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None)
+        assert exc_info.value.status_code == 401
     finally:
         await engine.dispose()
 
@@ -268,13 +270,13 @@ async def test_unmapped_firebase_identity_rejected_realdb():
         mp.setattr(settings, "firebase_auth_accept_session", True)
         mp.setattr(settings, "firebase_project_id", PROJECT_ID)
         mp.setattr(fv, "_fetch_public_keys", fake_fetch)
+        mp.setattr("app.dependencies.auth.async_session_factory", Session)
         try:
             cookie = _make_session_cookie(key_pem, "never-provisioned-uid")
             credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=cookie)
-            async with Session() as s:
-                with pytest.raises(HTTPException) as exc_info:
-                    await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None, db=s)
-                assert exc_info.value.status_code == 401
+            with pytest.raises(HTTPException) as exc_info:
+                await get_current_user(credentials=credentials, x_agent_api_key=None, x_mcp_transport=None)
+            assert exc_info.value.status_code == 401
         finally:
             mp.undo()
     finally:

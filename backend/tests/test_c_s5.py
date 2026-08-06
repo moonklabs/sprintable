@@ -142,7 +142,9 @@ def test_require_project_access_allows_legacy_token_without_project_ids():
 
 @pytest.mark.anyio
 async def test_get_scope_context_returns_org_and_project():
+    from app.dependencies import auth as auth_module
     from app.dependencies.auth import get_scope_context
+    from tests.conftest import FakeAsyncSessionCtx
     org = uuid.uuid4()
     proj = uuid.uuid4()
     uid = str(uuid.uuid4())
@@ -155,10 +157,11 @@ async def test_get_scope_context_returns_org_and_project():
     mock_request = MagicMock()
     mock_request.state = types.SimpleNamespace()
 
-    ctx = await get_scope_context(
-        auth=auth, x_org_id=None, x_project_id=str(proj),
-        db=mock_db, request=mock_request,
-    )
+    with patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(mock_db)):
+        ctx = await get_scope_context(
+            auth=auth, x_org_id=None, x_project_id=str(proj),
+            request=mock_request,
+        )
     assert ctx["org_id"] == org
     assert ctx["project_id"] == proj
     assert ctx["user_id"] == uid
@@ -169,7 +172,7 @@ async def test_get_scope_context_project_none_when_not_provided():
     from app.dependencies.auth import get_scope_context
     org = uuid.uuid4()
     auth = _make_auth(org_id=str(org))
-    ctx = await get_scope_context(auth=auth, x_org_id=None, x_project_id=None, db=None, request=None)
+    ctx = await get_scope_context(auth=auth, x_org_id=None, x_project_id=None, request=None)
     assert ctx["org_id"] == org
     assert ctx["project_id"] is None
 
@@ -179,7 +182,9 @@ async def test_get_scope_context_project_none_when_not_provided():
 @pytest.mark.anyio
 async def test_get_verified_org_id_403_on_foreign_org():
     """X-Org-Id 헤더로 비소속 org 접근 시 403."""
+    from app.dependencies import auth as auth_module
     from app.dependencies.auth import get_verified_org_id
+    from tests.conftest import FakeAsyncSessionCtx
     caller_id = str(uuid.uuid4())
     auth = _make_auth(org_id=None, user_id=caller_id)  # JWT에 org_id 없음 → 헤더 fallback
 
@@ -190,21 +195,23 @@ async def test_get_verified_org_id_403_on_foreign_org():
     mock_request = MagicMock()
     mock_request.state = types.SimpleNamespace()
 
-    with pytest.raises(HTTPException) as exc_info:
-        await get_verified_org_id(
-            auth=auth,
-            x_org_id=str(uuid.uuid4()),
-            x_project_id=None,
-            db=mock_db,
-            request=mock_request,
-        )
+    with patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(mock_db)):
+        with pytest.raises(HTTPException) as exc_info:
+            await get_verified_org_id(
+                auth=auth,
+                x_org_id=str(uuid.uuid4()),
+                x_project_id=None,
+                request=mock_request,
+            )
     assert exc_info.value.status_code == 403
 
 
 @pytest.mark.anyio
 async def test_get_verified_org_id_pass_when_member():
     """X-Org-Id 헤더로 소속 org 접근 시 정상 통과."""
+    from app.dependencies import auth as auth_module
     from app.dependencies.auth import get_verified_org_id
+    from tests.conftest import FakeAsyncSessionCtx
     org = uuid.uuid4()
     caller_id = str(uuid.uuid4())
     auth = _make_auth(org_id=None, user_id=caller_id)
@@ -216,20 +223,22 @@ async def test_get_verified_org_id_pass_when_member():
     mock_request = MagicMock()
     mock_request.state = types.SimpleNamespace()
 
-    result = await get_verified_org_id(
-        auth=auth,
-        x_org_id=str(org),
-        x_project_id=None,
-        db=mock_db,
-        request=mock_request,
-    )
+    with patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(mock_db)):
+        result = await get_verified_org_id(
+            auth=auth,
+            x_org_id=str(org),
+            x_project_id=None,
+            request=mock_request,
+        )
     assert result == org
 
 
 @pytest.mark.anyio
 async def test_get_verified_org_id_jwt_org_skips_db():
     """JWT에 org_id 있으면 DB 조회 없이 통과 (N+1 방지 경로 확인)."""
+    from app.dependencies import auth as auth_module
     from app.dependencies.auth import get_verified_org_id
+    from tests.conftest import FakeAsyncSessionCtx
     org = uuid.uuid4()
     auth = _make_auth(org_id=str(org))
 
@@ -237,9 +246,10 @@ async def test_get_verified_org_id_jwt_org_skips_db():
     mock_request = MagicMock()
     mock_request.state = types.SimpleNamespace()
 
-    result = await get_verified_org_id(
-        auth=auth, x_org_id=None, x_project_id=None, db=mock_db, request=mock_request,
-    )
+    with patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(mock_db)):
+        result = await get_verified_org_id(
+            auth=auth, x_org_id=None, x_project_id=None, request=mock_request,
+        )
     assert result == org
     mock_db.execute.assert_not_called()
 
@@ -247,7 +257,9 @@ async def test_get_verified_org_id_jwt_org_skips_db():
 @pytest.mark.anyio
 async def test_get_verified_org_id_403_on_foreign_project():
     """X-Project-Id 헤더로 비소속(has_project_access=False) project 접근 시 403."""
+    from app.dependencies import auth as auth_module
     from app.dependencies.auth import get_verified_org_id
+    from tests.conftest import FakeAsyncSessionCtx
     org = uuid.uuid4()
     auth = _make_auth(org_id=str(org), user_id=str(uuid.uuid4()))  # JWT에 org_id 있음 (org 검증 skip)
 
@@ -258,14 +270,14 @@ async def test_get_verified_org_id_403_on_foreign_project():
     mock_request = MagicMock()
     mock_request.state = types.SimpleNamespace()
 
-    with pytest.raises(HTTPException) as exc_info:
-        await get_verified_org_id(
-            auth=auth,
-            x_org_id=None,
-            x_project_id=str(uuid.uuid4()),
-            db=mock_db,
-            request=mock_request,
-        )
+    with patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(mock_db)):
+        with pytest.raises(HTTPException) as exc_info:
+            await get_verified_org_id(
+                auth=auth,
+                x_org_id=None,
+                x_project_id=str(uuid.uuid4()),
+                request=mock_request,
+            )
     assert exc_info.value.status_code == 403
 
 
@@ -360,9 +372,13 @@ def test_auth_context_includes_org_id_from_jwt():
     mock_db.get = AsyncMock(return_value=None)
 
     import asyncio
-    with patch.dict("os.environ", {"JWT_SECRET": "test-secret"}):
+
+    from app.dependencies import auth as auth_module
+    from tests.conftest import FakeAsyncSessionCtx
+    with patch.dict("os.environ", {"JWT_SECRET": "test-secret"}), \
+         patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(mock_db)):
         from app.dependencies.auth import get_current_user
-        ctx = asyncio.run(get_current_user(credentials=creds, x_agent_api_key=None, db=mock_db))
+        ctx = asyncio.run(get_current_user(credentials=creds, x_agent_api_key=None))
 
     assert ctx.org_id == "org-abc"
     assert ctx.user_id == user_id

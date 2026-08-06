@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import assemble_page, decode_cursor
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
-from app.dependencies.database import get_db
+from app.dependencies.database import get_db, get_read_db
 from app.dependencies.ownership import _is_org_admin
 from app.models.team import TeamMember
 from app.repositories.notification import InboxRepository, NotificationRepository, NotificationSettingRepository
@@ -69,6 +69,17 @@ def _notif_repo(
     return NotificationRepository(session, org_id)
 
 
+# story #2451(§6 Phase3 A1): /notifications/count 전용 — 카운터 조회는 create→self-read
+# 흐름이 없고(타인 이벤트로 갱신) 고빈도라 read replica 로 던진다. list_notifications 등
+# 다른 라우트가 공유하는 위 _notif_repo(get_db)는 그대로 둔다(그 라우트들은 이번 스코프
+# 밖 — 최소 diff).
+def _notif_repo_read(
+    session: AsyncSession = Depends(get_read_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> NotificationRepository:
+    return NotificationRepository(session, org_id)
+
+
 def _inbox_repo(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -119,9 +130,9 @@ async def list_notifications(
 
 @router.get("/notifications/count")
 async def count_unread(
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_read_db),
     auth: AuthContext = Depends(get_current_user),
-    repo: NotificationRepository = Depends(_notif_repo),
+    repo: NotificationRepository = Depends(_notif_repo_read),
 ) -> dict:
     user_id = await _resolve_notification_user_id(auth, db)
     count = await repo.count_unread(user_id=user_id)

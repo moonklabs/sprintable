@@ -17,7 +17,7 @@ from sqlalchemy.orm import aliased
 from app.core.config import settings
 from app.core.pagination import assemble_page, decode_cursor
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
-from app.dependencies.database import get_db
+from app.dependencies.database import get_db, get_read_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.event import Event
 from app.models.project import OrgMember, Project
@@ -1077,7 +1077,8 @@ async def list_conversations(
 
 @router.get("/unread-count")
 async def get_unread_count_total(
-    db: AsyncSession = Depends(get_db),
+    # story #2451(§6 Phase3 A1): 고빈도 카운터·create→self-read 흐름 없음 → read replica.
+    db: AsyncSession = Depends(get_read_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
@@ -2133,6 +2134,8 @@ async def send_message(
                         body=(msg.content or "")[:200],
                         reference_type="conversation", reference_id=conversation_id,
                         source_project_id=conv.project_id,
+                        # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
+                        via_outbox=True,
                     )
             except Exception:
                 logger.warning(
@@ -2169,6 +2172,8 @@ async def send_message(
                     body=(msg.content or "")[:200],
                     reference_type="conversation", reference_id=conversation_id,
                     source_project_id=conv.project_id,
+                    # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
+                    via_outbox=True,
                 )
     except Exception:
         logger.warning("conversation.message notification failed conversation_id=%s", conversation_id, exc_info=True)

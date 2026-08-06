@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     # Cloud SQL URL 별도**로 우회. 미설정 시 database_url 폴백(non-PgBouncer 환경). on+미설정 = startup
     # fail-closed(pg_pubsub.check_listen_config·main lifespan).
     database_url_direct: str = ""
+    # Phase3(§6 read replica): 읽기 전용 DSN — DATABASE_URL_READ. 미설정이면 database_url(primary)로
+    # 폴백(replica 없거나 준비 前 «무해»). PgBouncer 경유 시 dbname=sprintable_read → replica 라우팅.
+    # ⚠️ get_read_db 는 «read-your-writes lag 허용» 읽기(목록·대시보드·타인 데이터)에만 — 방금 쓴 걸
+    #    즉시 읽는 경로는 get_db(primary) 유지(replica lag 로 «내 write 안 보임» 방지).
+    database_url_read: str = ""
 
     # Cloud SQL (D-S1: Phase D GCP 인프라)
     cloud_sql_instance_dev: str = "sprintable-494803:asia-northeast3:sprintable-dev"
@@ -36,13 +41,25 @@ class Settings(BaseSettings):
     # ⚠️ 배포 rollout 時 old+new 리비전이 **동시 점유(2×)** — steady 산식만 쓰면 배포 중 max_connections
     #    초과(2026-06-29 dev TooManyConnections·#1766 rollout 전요청 500). **인스턴스당 실 커넥션은 pool
     #    밖의 raw 연결까지** 포함해야 한다(까심 적출): pg_pubsub.listen_loop = raw asyncpg **상시 1개**(pool
-    #    미점유). (l2_worker 는 engine.connect→pool 내·추가 0.) → **per_instance = (pool+overflow) + RAW(1) = 5.**
-    #    rollout-aware 산식: **2 × maxScale × ((pool+overflow) + RAW) + admin/migration headroom ≤ max_connections.**
+    #    미점유).
+    #    ⛔story #2461(§6 봉합③ part2, 2026-08-05) 갱신 — "l2_worker는 engine.connect→pool 내·
+    #    추가 0"이던 예전 문장은 더 이상 사실이 아니다. L2 advisory-lock 영구연결 + embedding_backlog/
+    #    workflow_sla_processor/workflow_handoff_watchdog/event_broker outbox의 claim/finalize 세션이
+    #    이제 `worker_engine`(별도 소형 풀, 기본 worker_db_pool_size+worker_db_max_overflow=2+1=3)으로
+    #    옮겨갔다 — **새 budget line으로 추가**해야 한다(RAW처럼 "pool 밖"은 아니지만 별개 풀이라
+    #    기존 primary pool 항과 합산 불가, 독립 항으로 더해야 함).
+    #    → **per_instance = (pool+overflow) + RAW(1) + (worker_pool+worker_overflow) = 4 + 1 + 3 = 8**
+    #    (기존 5에서 +3).
+    #    rollout-aware 산식: **2 × maxScale × per_instance + admin/migration headroom ≤ max_connections.**
     #   ① 앱 최소요구(실측): pool+overflow ≥ 4 (total 3 이면 send_message pool_timeout). ∴ pool 3/1=4 고정(밑으로 불가).
-    #   ② dev(f1-micro ~25·maxScale 실측 10→PO **1** 적용 rev 01240-hkc): 2×1×5+5 = 15 ≤ 25 (여유 10).
-    #      (maxScale 2 면 25/25 한계·1 로 여유 확보. 10 이면 2×10×5+5=105≫25 → pool 4 단독 불가·maxScale↓ 필수.)
-    #   ③ prod(g1-small 100·maxScale **실측 필수**): 2×10×5+20=120 > 100(가정 10이면 초과). 안전 상한 maxScale≤8
-    #      (2×8×5+20=100·여유 0). **prod 승격 前 PgBouncer(durable·연결 decouple) 또는 tier↑ 필수**(maxScale 캡만으론 0 headroom).
+    #   ② dev(f1-micro ~25·maxScale 실측 10→PO **1** 적용 rev 01240-hkc): 2×1×8+5 = 21 ≤ 25 (여유 4 — 기존
+    #      10에서 6 줄었다. maxScale 2로 올리면 2×2×8+5=37>25 → 즉시 초과, 이 풀 신설 前엔 여유 있었다).
+    #   ③ prod(g1-small 100·maxScale **실측 필수**·⛔디디는 prod 접근 없어 이 값 직접 확인 불가):
+    #      per_instance=8 기준 안전 상한 maxScale은 «옛 계산(per_instance=5, maxScale≤8)보다 낮아진다」
+    #      — **PO/infra가 이 변경을 prod 배포 前 반드시 재검산**할 것(옛 maxScale≤8 그대로 두면
+    #      2×8×8+20=148>100으로 즉시 초과 가능성). 이 워커풀을 쓰는 3개 cron 엔드포인트
+    #      (/embed-backlog·/workflow-sla·/workflow-handoff-watchdog)가 prod에서 이미 Cloud
+    #      Scheduler로 불리고 있다면 이 재검산이 **배포 前 필수**다.
     # ⚠️ 향후 always-on LISTEN/raw 연결 추가 시 RAW 카운트 ++ 동반(산식 누락 = 이번 false-PASS 재발).
     # ⚠️ --concurrency=80 과 별개: 풀은 DB op 점유 구간만 잡고 즉시 반납·초과분 pool_timeout 대기(실패 아님).
     db_pool_size: int = 3
@@ -60,6 +77,11 @@ class Settings(BaseSettings):
     db_pgbouncer: bool = False
     db_pgbouncer_pool_size: int = 25   # ⭐앱 동시성 수용(크게). PgBouncer가 Cloud SQL 커넥션을 묶어 안전.
     db_pgbouncer_max_overflow: int = 10
+
+    # story #2461(§6 봉합③ part2, PO 승인 2026-08-05): worker_engine(app/core/database.py)
+    # 전용 풀 크기 — 위 db_pool_size 산식 갱신 주석 참조(신규 budget line, prod 재검산 필요).
+    worker_db_pool_size: int = 2
+    worker_db_max_overflow: int = 1
 
     # JWT
     jwt_secret: str = ""
@@ -275,18 +297,16 @@ class Settings(BaseSettings):
     # (REFRESH_GRACE_MS=5000, proxy.ts)을 BE로 옮겨 인스턴스 개수/라우팅과 무관하게 만든다
     # (오르테가·미르코 판단: Redis로 FE 상태공유는 proxy.ts가 edge 런타임이라 과한 인프라 —
     # 배제. DB-only fork-rotation이 근본이면서 인프라 안 키우는 정공법).
-    #
-    # story #2449(2026-08-04) 갱신 — 옛 이름 auth_refresh_grace_seconds(기본 5s, prod는
-    # rev 00262에서 30s 손값 적용 中이던 SSOT 드리프트 값) 폐지·단일화. 애초 이 필드는
-    # "제시된(구) RT 자신의 revoked_at 기준 해소 허용창" 하나뿐이었다(다른 경로 미사용,
-    # grep 확認) — 「successor-chaining」 설계 검토 중 깊이-무제한 체인 walk 자체가 판정
-    # 결과에 영향이 없고(제시 토큰 자신의 revoked_at 하나만 이 창과 비교하면 다단계 walk와
-    # 결론이 같다) 오히려 아직 아무도 안 쓴 살아있는 successor를 straggler가 먼저 소비해
-    # 정당한 소유자를 다음 rotation에서 되레 401내는 하자가 있어(디디 분석·PO 승인
-    # 2026-08-04) 「창 넓히기 + winner 경로 승계기록(감사용, 판정엔 미사용)」으로 수렴했다.
-    # 창 안이면 오늘처럼 독립적인 새 토큰을 fork(다른 row 무접촉) — 노출창은 여전히 «분»
-    # 오더(토큰 수명 30일 아님). 시작값 180초(3분)는 올리베이라·PO 제안값, 최종 확定은
-    # 선생님 확認 필요(PR 머지 게이트 — 승인 전 값 변경 가능).
+    # story #2449(2026-08-04) 갱신 — #2838 즉효패치가 main에 직접 심은 auth_refresh_grace_
+    # seconds(기본 30, prod rev 00262 손값 SSOT 반영)를 폐지·단일화. 애초 이 필드는 "제시된
+    # (구) RT 자신의 revoked_at 기준 해소 허용창" 하나뿐이었다(다른 경로 미사용, grep 확認) —
+    # 「successor-chaining」 설계 검토 중 깊이-무제한 체인 walk 자체가 판정 결과에 영향이 없고
+    # (제시 토큰 자신의 revoked_at 하나만 이 창과 비교하면 다단계 walk와 결론이 같다) 오히려
+    # 아직 아무도 안 쓴 살아있는 successor를 straggler가 먼저 소비해 정당한 소유자를 다음
+    # rotation에서 되레 401내는 하자가 있어(디디 분석·PO 승인 2026-08-04) 「창 넓히기 + winner
+    # 경로 승계기록(감사용, 판정엔 미사용)」으로 수렴했다. 창 안이면 오늘처럼 독립적인 새
+    # 토큰을 fork(다른 row 무접촉) — 노출창은 여전히 «분» 오더(토큰 수명 30일 아님).
+    # N=180초(3분)는 선생님 확定값(2026-08-04, PR #2839 머지 게이트 통과).
     auth_refresh_chain_resolve_window_seconds: int = 180
 
     firebase_project_id: str = ""  # Firebase/Identity Platform GCP 프로젝트 ID(dev/prod 분리)

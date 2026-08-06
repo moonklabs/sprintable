@@ -27,11 +27,19 @@ from app.models.workflow_line import WorkflowLineStepRun
 
 _OPEN_DELIVERY = ("queued", "delivered")
 DEFAULT_STUCK_MINUTES = 10
+# §6 봉합③(story #2461, finding #5) — 이전엔 이 FOR UPDATE SKIP LOCKED 조회에 상한이 없었다
+# ("무제한 배치"). L2TriggerWorker.batch_limit(200)과 동급으로 tick당 상한을 명시한다.
+_WATCHDOG_BATCH_SIZE = 200
 
 
 async def _fallback_notify(session: AsyncSession, sr: WorkflowLineStepRun,
                            recipient_id: uuid.UUID | None) -> None:
-    """stuck handoff 의 fallback human notification(best-effort·실패는 삼킴)."""
+    """stuck handoff 의 fallback human notification(best-effort·실패는 삼킴).
+
+    §6 봉합③(story #2461, finding #5) — 이 호출은 `reconcile_handoffs()`의 FOR UPDATE SKIP
+    LOCKED 락이 걸린 트랜잭션 안에서 일어난다. `via_outbox=True`(story #2460 인프라 재사용)로
+    실배달을 `delivery_dispatcher.py` 워커에 위임 — 락이 외부 I/O(webhook POST/Expo 발송)
+    동안 열려 있지 않게 된다."""
     if recipient_id is None:
         return
     try:
@@ -57,6 +65,7 @@ async def _fallback_notify(session: AsyncSession, sr: WorkflowLineStepRun,
             # story #1953: sr.project_id는 함수 파라미터로 이미 갖고 있음(신규 조회 0).
             source_project_id=sr.project_id,
             sprint_id=_sprint_id,
+            via_outbox=True,
         )
     except Exception:  # noqa: BLE001 — notification 실패는 watchdog 비중단(best-effort).
         sr.delivery_error = (sr.delivery_error or "") + "; notify_failed"
@@ -76,7 +85,7 @@ async def reconcile_handoffs(
         select(WorkflowLineStepRun).where(
             WorkflowLineStepRun.delivery_status.in_(_OPEN_DELIVERY),
             WorkflowLineStepRun.created_at < cutoff,
-        ).with_for_update(skip_locked=True)
+        ).limit(_WATCHDOG_BATCH_SIZE).with_for_update(skip_locked=True)
     )).scalars().all()
 
     acked = stuck = missing = 0

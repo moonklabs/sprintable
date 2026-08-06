@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_verified_org_id
-from app.dependencies.database import get_db
+from app.dependencies.database import get_db, get_read_db
 from app.repositories.goal import GoalRepository
 from app.schemas.goal import GoalCreate, GoalProgressResponse, GoalResponse, GoalUpdate, GoalWithGlanceResponse
 from app.services.project_auth import has_project_access
@@ -24,6 +24,15 @@ router = APIRouter(tags=["goals", "Work"])
 
 def _get_repo(
     session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> GoalRepository:
+    return GoalRepository(session, org_id)
+
+
+# story #2451(§6 Phase3 A2): list_goals 전용 — 목록 조회는 create→self-read 흐름이 약함
+# (replica lag 0.86s, PO 승인). 다른 라우트가 공유하는 위 _get_repo(get_db)는 그대로.
+def _get_repo_read(
+    session: AsyncSession = Depends(get_read_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> GoalRepository:
     return GoalRepository(session, org_id)
@@ -41,7 +50,7 @@ async def list_goals(
         default=None,
         description='"glance"면 participant_ids/focal_story가 추가로 붙는다(story #2298, 옵트인).',
     ),
-    repo: GoalRepository = Depends(_get_repo),
+    repo: GoalRepository = Depends(_get_repo_read),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[GoalResponse] | JSONResponse:
@@ -234,6 +243,11 @@ async def bulk_update_goals(
     for e in updated:
         await session.refresh(e)
     await session.commit()
+    # story #2459 회귀(2026-08-05): commit 前 refresh만으로는 불충분했다 — commit 自體이
+    # (expire_on_commit=False에도 불구하고 관측상) attr를 다시 unloaded로 되돌릴 수 있어
+    # commit 後에도 model_validate 前 재refresh가 필요하다(gates.py/stories.py와 동형).
+    for e in updated:
+        await session.refresh(e)
 
     # STEER 커밋-모델(ff662876·선생님 재정의): 드래그 재정렬은 **이벤트 0**(순수 초안 저장)이다.
     # 인간이 로드맵을 A→B→다시A로 번복하는 사고과정은 사적 초안이라 실시간 이벤트로 새면 안 된다.
@@ -496,6 +510,8 @@ async def transition_goal_endpoint(
         goal = await transition_goal(session, org_id, caller, id, body.status)
         await session.commit()
         await emit_goal_status_changed(session, org_id, goal, _old_status, actor_id=caller.id)
+        # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+        await session.refresh(goal)
         return GoalResponse.model_validate(goal)
     except GoalTransitionError as e:
         _codes = {

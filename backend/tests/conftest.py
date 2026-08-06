@@ -174,9 +174,49 @@ def org_id() -> uuid.UUID:
     return uuid.uuid4()
 
 
+def override_db_and_read(app, provider) -> None:
+    """story #2451(§6 Phase3): DB 세션 오버라이드 «root fix» — get_db 하나만 걸고
+    get_read_db 는 잊는 클래스의 회귀가 A1(사후 12건)·A2(사전 스윕에도 legacy alias
+    `/api/v2/epics`=goals.router 재마운트를 놓쳐 test_epics.py CI 7건 red, 카디르 QA
+    2026-08-04) 두 번 났다 — path-string grep 스윕은 «신규 경로만 잡고 dual-mount
+    legacy alias 는 구조적으로 못 본다»는 게 근본 원인.
+
+    처방: get_db 오버라이드를 다는 자리는 이 헬퍼 하나만 거치게 해 get_read_db 를
+    «구조적으로» 못 빠뜨리게 한다 — 어떤 path/alias 로 들어오든(라우터가 여러 prefix로
+    재마운트되든) 이 두 dependency key 가 항상 같은 provider 를 가리키므로 «놓칠 수
+    없다」. 세션 생성 로직(커밋/롤백 유무 등)은 파일마다 달라 통일하지 않는다 — provider
+    콜러블 자체를 받아 두 key 에 동일하게 건다."""
+    from app.dependencies.database import get_db, get_read_db
+
+    app.dependency_overrides[get_db] = provider
+    app.dependency_overrides[get_read_db] = provider
+
+
 @pytest.fixture
 def project_id() -> uuid.UUID:
     return uuid.uuid4()
+
+
+class FakeAsyncSessionCtx:
+    """story #2459(§6 봉합①): get_current_user/get_verified_org_id/get_project_scoped_org_id가
+    이제 요청-수명 Depends(get_db) 대신 함수 내부 `async with async_session_factory()` 단명
+    세션을 쓴다 — FastAPI dependency_overrides로는 이걸 가로챌 수 없다(Depends 그래프를 안
+    타므로). 이 함수들을 직접 호출하는 테스트는 대신 이 패턴으로 패치한다:
+
+        with patch.object(auth, "async_session_factory", return_value=FakeAsyncSessionCtx(mock_db)):
+            result = await get_verified_org_id(auth=..., x_org_id=..., x_project_id=..., request=...)
+
+    (test_sse_conn_leak.py의 _FakeSession과 동형 — 여러 파일이 필요로 해 conftest로 공용화.)
+    """
+
+    def __init__(self, session):
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, *exc):
+        return False
 
 
 @pytest.fixture
@@ -203,7 +243,7 @@ def auth_ctx(org_id: uuid.UUID) -> MagicMock:
 async def test_client(mock_session: AsyncMock, auth_ctx: MagicMock):
     """AsyncClient with mocked DB session + auth. Clears dependency_overrides on teardown."""
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db
+    from app.dependencies.database import get_db, get_read_db
     from app.main import app
 
     async def _override_db():
@@ -213,6 +253,7 @@ async def test_client(mock_session: AsyncMock, auth_ctx: MagicMock):
         return auth_ctx
 
     app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_read_db] = _override_db
     app.dependency_overrides[get_current_user] = _override_auth
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

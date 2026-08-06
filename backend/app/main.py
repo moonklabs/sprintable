@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from limits.errors import StorageError
 from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
@@ -42,7 +43,7 @@ _logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.core import shutdown as shutdown_module
-    from app.core.database import engine
+    from app.core.database import engine, read_engine, worker_engine
     from app.routers.auth_firebase_internal import check_internal_secret_config
     from app.routers.cron import check_cron_secret_config
     from app.routers.verdict_capture import warn_if_webhook_secret_misconfigured
@@ -123,6 +124,28 @@ async def lifespan(app: FastAPI):
         from app.services.event_broker import outbox_dispatcher_loop
 
         outbox_dispatcher_task = asyncio.create_task(outbox_dispatcher_loop())
+    # story #2460(§6 봉합②): delivery_jobs 워커 — story_status_events.py/conversations.py
+    # send_message가 via_outbox=True로 무조건 enqueue하므로(플래그 없음, 두 콜사이트 하드코딩),
+    # 이 워커도 무조건 기동해야 그 job들이 드레인된다(옵션 아님 — listen_loop과 동형으로 조건부
+    # 게이팅 없이 기동).
+    # story #2460(§6 봉합②): delivery_jobs 워커 — story_status_events.py/conversations.py
+    # send_message가 via_outbox=True로 무조건 enqueue하므로(플래그 없음, 두 콜사이트 하드코딩),
+    # 이 워커도 실배포에선 무조건 기동해야 그 job들이 드레인된다(listen_loop과 동형으로 조건부
+    # 게이팅 없이 기동 — 단, listen_loop과 달리 이 워커는 SQLAlchemy 공용 풀(async_session_factory)
+    # 을 물기 때문에 pytest 하에서는 예외적으로 안 띄운다. pytest는 TestClient(app)로 lifespan을
+    # 매 테스트마다 «서로 다른 이벤트루프»로 반복 기동하는 관례가 있어(shutdown.py 모듈독스트링
+    # 참조), 이 워커의 폴링 루프가 그 사이를 가로질러 살아있으면 전역 커넥션 풀에 다른 루프의
+    # Future가 섞여 "attached to a different loop" 로 실측됐다(#2852 CI 첫 push에서 재현·
+    # 태스크 비활성화 시 24/24 재통과로 원인 확定 — listen_loop은 SQLAlchemy 풀을 안 쓰는
+    # raw asyncpg 전용 커넥션이라 이 클래스에 안 걸림, 이 워커와 다른 지점). `PYTEST_CURRENT_TEST`
+    # 는 신규 발명이 아니라 이 파일의 `is_really_local`이 이미 쓰는 같은 pytest 탐지 관례.
+    import os as _os
+
+    delivery_dispatcher_task = None
+    if not _os.environ.get("PYTEST_CURRENT_TEST"):
+        from app.services.delivery_dispatcher import delivery_dispatcher_loop
+
+        delivery_dispatcher_task = asyncio.create_task(delivery_dispatcher_loop())
     try:
         yield
     finally:
@@ -138,6 +161,8 @@ async def lifespan(app: FastAPI):
             redis_shadow_task.cancel()
         if outbox_dispatcher_task is not None:
             outbox_dispatcher_task.cancel()
+        if delivery_dispatcher_task is not None:
+            delivery_dispatcher_task.cancel()
         try:
             if task is not None:
                 try:
@@ -159,6 +184,11 @@ async def lifespan(app: FastAPI):
                     await outbox_dispatcher_task
                 except asyncio.CancelledError:
                     pass
+            if delivery_dispatcher_task is not None:
+                try:
+                    await delivery_dispatcher_task
+                except asyncio.CancelledError:
+                    pass
         finally:
             # 좀비 연결 박멸(S:33e0c681): SIGTERM(Cloud Run 인스턴스 교체·스케일다운·리비전 삭제)
             # 시 SQLAlchemy 풀의 전 DB 연결을 정상 종료. dispose 누락 시 구 인스턴스가 연결을 안
@@ -167,6 +197,16 @@ async def lifespan(app: FastAPI):
             # raw 커넥션은 task.cancel→listen_loop finally 에서 이미 close. L2 워커는
             # l2_task.cancel→run finally 에서 advisory lock 해제·전용 커넥션 close.
             await engine.dispose()
+            # Phase3(#2451): DATABASE_URL_READ 설정 시 read_engine 은 primary 와 «다른» 객체(별도 replica
+            # 커넥션풀)라 별도 dispose 필요 — 안 하면 위 좀비-연결 클래스(S:33e0c681)가 replica 쪽에서 재발.
+            # 미설정이면 read_engine is engine 이라 위 dispose 로 이미 정리됨(중복 dispose 방지).
+            if read_engine is not engine:
+                await read_engine.dispose()
+            # story #2461(§6 봉합③ part2): worker_engine도 별도 풀 객체라 독립 dispose 필요
+            # (read_engine과 동일 근거 — 안 하면 워커풀 쪽에서 좀비-연결 클래스 S:33e0c681 재발).
+            # L2의 advisory-lock 커넥션 자체는 l2_task.cancel→run finally에서 이미 반납되지만,
+            # 그건 "풀에 반납"이지 "풀 자체를 닫음"이 아니다 — 이 dispose가 그 나머지를 정리.
+            await worker_engine.dispose()
 
 
 from app.routers import a2a, account, activity_logs, activity_stream, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, assets, context_pack, deeplink_manifest, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, device_installations, dispatch, docs, entities, goals, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, judgments, labels, loops, mcp, me, meetings, members, merge_gate, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_members, organizations, oss, participation, plan_features, policy_documents, project_access, project_settings, projects, public_docs, reference_candidates, references, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, session_context, sprints, standups, stories, subscription, tasks, team_members, team_presence, trust_scores, usage, user_blocks, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_recipes, workflow_report, workflow_templates, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
@@ -243,6 +283,26 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
     )
     resp.headers["Retry-After"] = retry_after
     return resp
+
+
+@app.exception_handler(StorageError)
+async def rate_limit_storage_error_handler(request: Request, exc: StorageError) -> JSONResponse:
+    """story #2444: resend-verification 전용 격리 limiter(Redis storage_uri·wrap_exceptions=
+    True)만 이 예외를 낸다 — 공유 in-memory limiter(login/refresh 등 8개, 무접촉)는 해당 없음.
+    어뷰징 방지가 목적(선생님 명시)이라 Redis 장애 時 요청을 통과시키지 않고 명시적으로
+    503 fail-closed — sse_lease(#2121, «429=fail-open» 컨벤션)와 정반대 정책을 의도적으로
+    적용하는 자리(AC3)."""
+    _logger.warning(
+        "Rate limit storage unavailable on %s %s: %s", request.method, request.url.path, exc
+    )
+    return JSONResponse(
+        status_code=503,
+        content={
+            "data": None,
+            "error": {"code": "RATE_LIMIT_UNAVAILABLE", "message": "Service temporarily unavailable"},
+            "meta": None,
+        },
+    )
 
 
 @app.exception_handler(Exception)

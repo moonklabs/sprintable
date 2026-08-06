@@ -96,11 +96,21 @@ def test_first_auth_seen_wired_with_dedup_and_isolation():
     assert "_first_auth_seen = api_key.last_used_at is None" in src  # 첫인증 dedup 캡처
     # 까심 RC-1: streaming auth(commit 없음) 미persist 차단 — 전용 committed 세션.
     assert "_persist_first_auth_seen" in src and '"first_auth_seen"' in src
-    # 산티아고 RC-1(deadlock): api_key row 무접촉(caller dirty와 cross-conn 데드락 회피) +
-    # onboarding_events 존재 dedup + advisory lock 직렬화(TOCTOU).
-    assert "update(ApiKey)" not in src               # api_key row UPDATE 금지(데드락 회피)
-    assert "pg_advisory_xact_lock" in src            # 동시 첫인증 직렬화
-    assert "OnboardingEvent" in src                  # 이벤트 존재 dedup
+    # 산티아고 RC-1(deadlock): _persist_first_auth_seen 전용 세션은 api_key row 무접촉
+    # (caller dirty와 cross-conn 데드락 회피) + onboarding_events 존재 dedup + advisory
+    # lock 직렬화(TOCTOU). 이 가드는 _persist_first_auth_seen 함수 자체로 스코프한다 —
+    # story #2457로 신설된 _touch_api_key_last_used(별도 함수, 아래 assert)는 api_key row를
+    # UPDATE하지만, 데드락 전제 자체(caller db 세션이 같은 row를 dirty로 들고 있는 것)가
+    # story #2457에서 제거됐다(caller는 더 이상 `api_key.last_used_at = now`를 하지 않는다
+    # — 아래 assert로 그 전제 부재를 같이 고정).
+    persist_src = inspect.getsource(auth._persist_first_auth_seen)
+    assert "update(ApiKey)" not in persist_src        # api_key row UPDATE 금지(데드락 회피)
+    assert "pg_advisory_xact_lock" in persist_src     # 동시 첫인증 직렬화
+    assert "OnboardingEvent" in persist_src           # 이벤트 존재 dedup
+    # story #2457: caller db 세션은 api_key row를 dirty-set 하지 않는다(데드락 전제 제거 —
+    # 부재 시 _touch_api_key_last_used의 update(ApiKey)가 caller와 충돌할 수 없다).
+    assert "api_key.last_used_at = now" not in src
+    assert "update(ApiKey)" in inspect.getsource(auth._touch_api_key_last_used)
 
 
 def test_stream_connected_wired_one_time_isolated():

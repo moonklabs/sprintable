@@ -338,6 +338,10 @@ async def transition_hypothesis(
         if _decision is not None and not _decision.proceeds:
             # enforcing: human-gate pending. hyp proposed 유지·gate 가 confirm 대기 가시화(에러 아님).
             await session.commit()  # gate/step_run 보존(stories.py:736 패턴·예외 시 rollback 방지).
+            # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate(_to_response→
+            # from_model) 前 명시 refresh — 이 경로는 AST 스캐너가 못 잡는 간접 호출(_to_response
+            # 헬퍼 경유)이라 수동 발견.
+            await session.refresh(hyp)
             return await _to_response(repo, hyp)
 
     # 'active' 확정은 휴먼만(§2.5.2). org admin/owner 검증은 라우터(S3)에서 보강.

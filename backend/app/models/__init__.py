@@ -17,6 +17,7 @@ from app.models.embedding import Embedding
 from app.models.evidence import Evidence
 from app.models.event import Event
 from app.models.event_outbox import EventOutbox
+from app.models.delivery_job import DeliveryJob
 from app.models.gate import Gate
 from app.models.github_installation import GithubInstallation, GithubInstallNonce, GithubWebhookDelivery
 from app.models.hitl import HitlPolicy, HitlRequest
@@ -121,6 +122,7 @@ __all__ = [
     "BridgeUserMapping",
     "Embedding",
     "EventOutbox",
+    "DeliveryJob",
     "Gate",
     "GithubInstallation",
     "GithubInstallNonce",

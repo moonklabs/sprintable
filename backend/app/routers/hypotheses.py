@@ -21,7 +21,7 @@ from app.dependencies.auth import (
     get_project_scoped_org_id,
     get_verified_org_id,
 )
-from app.dependencies.database import get_db
+from app.dependencies.database import get_db, get_read_db
 from app.repositories.hypothesis import HypothesisRepository
 from app.schemas.hypothesis import (
     HypothesisCreate,
@@ -117,7 +117,9 @@ async def list_hypotheses(
     status_filter: str | None = Query(default=None, alias="status"),
     owner_member_id: uuid.UUID | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=2000),
-    session: AsyncSession = Depends(get_db),
+    # story #2451(§6 Phase3 A2): 목록 조회는 create→self-read 흐름이 약함(replica lag
+    # 0.86s, PO 승인) — 다른 라우트(create/get/update/delete)의 get_db는 그대로 무접촉.
+    session: AsyncSession = Depends(get_read_db),
     org_id: uuid.UUID = Depends(get_project_scoped_org_id),
 ) -> list[HypothesisResponse]:
     """story fca4723d(C1): project_id 생략 시 org 전체 가설 조회 — retro list_sessions와

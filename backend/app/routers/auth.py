@@ -48,7 +48,7 @@ from app.core.security import (
     REFRESH_TOKEN_EXPIRE_DAYS,
     create_refresh_token,
 )
-from app.core.rate_limit import limiter
+from app.core.rate_limit import limiter, resend_verification_limiter
 from app.dependencies.auth import AuthContext, get_current_user
 from app.services.project_auth import (
     accessible_project_ids_in_org, first_accessible_project_id, has_project_access,
@@ -1298,7 +1298,10 @@ async def verify_email(
 
 
 @router.post("/resend-verification")
-@limiter.limit("3/hour")
+# story #2444: 어뷰징 방지 목적(선생님 명시) — 공유 in-memory limiter(다른 8개 auth 라우트,
+# login/refresh 가용성 우선으로 무접촉) 대신 격리된 Redis-backed limiter로 인스턴스 수와
+# 무관한 전역 3/hour 강제(AC1) + Redis 장애 시 fail-closed(AC3, main.py StorageError 핸들러).
+@resend_verification_limiter.limit("3/hour")
 async def resend_verification(
     request: Request,
     session: AsyncSession = Depends(get_db),

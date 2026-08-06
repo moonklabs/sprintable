@@ -360,6 +360,59 @@ jobs:
             echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 project_access_403_baseline.txt 없음 — 이 PR이 그 파일을 «처음 도입»하는 중이면 정상이다, story #2342 자신이 그 경우다. 다음 PR부터는 develop에 파일이 있어 실제 비교가 돈다)"
           fi
 
+  dependency-override-get-read-db-lint:
+    name: dependency_overrides get_read_db lint (guard, story #2451)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan for raw dependency_overrides[get_db] (must use override_db_and_read)
+        working-directory: backend
+        run: python3 scripts/lint_dependency_override_get_read_db.py
+      # story #2342/#2335와 동일 계약 — 베이스라인은 «줄기만» 허용한다(2026-08-04 도입 시점
+      # tests/ 전역에 이미 253곳 — 대부분 read-route 무관이라 당장 안 고친다. 새로 늘리는
+      # 것만 막는다. 카디르 QA 3차 재발: 이 게이트가 없으면 다음 슬라이스(Phase B 등)에서
+      # 네 번째로 같은 클래스가 샌다).
+      - name: "Verify baseline can only shrink (story #2451 — no new grandfather entries)"
+        working-directory: backend
+        run: |
+          set -e
+          PR_BASE_REF="${{ github.event.pull_request.base.ref }}"
+          PUSH_BEFORE_SHA="${{ github.event.before }}"
+          COMPARE_REF=""
+          COMPARE_LABEL=""
+          if [ -n "$PR_BASE_REF" ]; then
+            git fetch origin "$PR_BASE_REF" --depth=1 2>&1 | tail -3 || true
+            COMPARE_REF="FETCH_HEAD"
+            COMPARE_LABEL="PR base:$PR_BASE_REF"
+          elif [ -n "$PUSH_BEFORE_SHA" ] && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            git fetch origin "$PUSH_BEFORE_SHA" --depth=1 2>&1 | tail -3 || true
+            COMPARE_REF="FETCH_HEAD"
+            COMPARE_LABEL="push-before:$PUSH_BEFORE_SHA"
+          fi
+          if [ -n "$COMPARE_REF" ] && git show "$COMPARE_REF:backend/scripts/dependency_override_get_read_db_baseline.txt" > /tmp/base_baseline.txt 2>/dev/null; then
+            grep -vE '^#|^$' /tmp/base_baseline.txt | sort -u > /tmp/base_sorted.txt
+            grep -vE '^#|^$' scripts/dependency_override_get_read_db_baseline.txt | sort -u > /tmp/head_sorted.txt
+            new_lines=$(comm -13 /tmp/base_sorted.txt /tmp/head_sorted.txt || true)
+            base_count=$(wc -l < /tmp/base_sorted.txt | tr -d ' ')
+            head_count=$(wc -l < /tmp/head_sorted.txt | tr -d ' ')
+            echo "baseline entries: base($COMPARE_LABEL)=$base_count head=$head_count"
+            if [ -n "$new_lines" ]; then
+              echo "FAIL: 베이스라인에 «새» 항목이 추가됐다 — 이 파일은 줄기만 허용한다(story #2451)." \
+                   "새 raw override는 여기 grandfather로 넣지 말고 override_db_and_read로 고치는 것이 맞다:"
+              echo "$new_lines"
+              exit 1
+            fi
+            echo "OK: baseline은 늘지 않았다(줄었으면 환영 — 그만큼 사이트가 헬퍼로 옮겨진 것)"
+          elif [ -z "$COMPARE_REF" ]; then
+            echo "baseline growth check skipped: no comparison base (PR context 아님 + push-before 미상 — 예: 새 브랜치 최초 push)"
+          else
+            echo "baseline growth check skipped: no comparison base ($COMPARE_LABEL에 dependency_override_get_read_db_baseline.txt 없음 — 이 PR이 그 파일을 «처음 도입»하는 중이면 정상이다, story #2451 자신이 그 경우다. 다음 PR부터는 develop에 파일이 있어 실제 비교가 돈다)"
+          fi
+
   candidate-source-ownership-lint:
     name: candidate_id source_id ownership lint (guard, story #2363)
     runs-on: ubuntu-latest
@@ -370,6 +423,20 @@ jobs:
       - name: Scan reference_semantic_candidates.py for candidate_id lookups missing source_id ownership check
         working-directory: backend
         run: python3 scripts/lint_candidate_source_ownership.py
+
+  # story #2459 회귀(2026-08-05, PR #2851/#2461) — commit() 後 model_validate() 前 refresh
+  # 누락 클래스를 원천봉쇄. 스크립트 docstring(scripts/lint_commit_before_validate.py) 참조 —
+  # baseline 없음(도입 시점 위반 0건, app/routers·app/services·ee 전 스윕 후 확認).
+  commit-before-validate-lint:
+    name: commit-then-model_validate refresh lint (guard, story #2459)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan for model_validate() after commit() without intervening refresh
+        working-directory: backend
+        run: python3 scripts/lint_commit_before_validate.py
 
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
   # main이 develop과 다른 파일셋(ee_pricing 0146/0147 부재)일 때의 그래프 단절을 원천적으로
@@ -423,13 +490,15 @@ jobs:
         run: |
           set -e
           test -f alembic/versions/0148_org_subscriptions_org_id_unique.py
-          if [ -f alembic/versions/0146_pricing_versions.py ] || [ -f alembic/versions/0147_pricing_versions_live_seed.py ]; then
-            echo "FAIL: ee_pricing migration(s) present in a main-bound file set"; exit 1
-          fi
-          if [ -f alembic/versions/0162_merge_ee_pricing_core_heads.py ]; then
-            echo "FAIL: develop-only merge node 0162 present in a main-bound file set (references ee_pricing 0147, which main doesn't have)"; exit 1
-          fi
-          echo "OK: main file set has 0148(core), no ee_pricing, no develop-only merge node"
+          # ⭐2026-08-01(promo #2783·PO): ee_pricing(0146/0147) + merge node 0162 «금지»를 걷었다.
+          # 걷은 이유 — 이 assert 는 「main 은 ee_pricing 을 «영원히» 안 가진다」를 단언했는데,
+          # 그것이 참일 수 없다. prod 실측(2026-08-01, 읽기전용 잡): pricing_versions 테이블이
+          # 없는데 ee/routers/billing.py 는 그것을 읽는다. 즉 「안 올린다」가 유지 가능한 상태가
+          # 아니었고, 그 사이 두 체인이 0163 에서 «같은 이름·다른 부모»로 갈렸다(#2397).
+          # ⇒ 승격을 막던 것이 이 assert 였고, 막힌 채로는 그 갈림이 영영 안 닫힌다.
+          # ⛔대신 이 잡의 나머지가 여전히 지킨다: 0148(core) 존재 · single head · fresh-DB upgrade.
+          #   0162 는 merge node 라 head 를 늘리지 않는다 — single head assert 로 그것이 계속 재진다.
+          echo "OK: main file set has 0148(core); ee_pricing/merge-node 금지는 promo #2783 에서 해제"
 
       - name: Build revision graph (single head expected)
         working-directory: backend
@@ -438,7 +507,7 @@ jobs:
           heads=$(uv run alembic heads 2>/dev/null | grep -oE '^[0-9a-z_]+')
           n=$(echo "$heads" | grep -c .)
           echo "heads=$heads (count=$n)"
-          test "$n" = "1"  # main never carries the ee_pricing branch — exactly one head
+          test "$n" = "1"  # 0162 는 merge node 라 ee_pricing 이 들어와도 head 는 하나여야 한다
 
       - name: Fresh-DB upgrade heads (main file set)
         working-directory: backend
@@ -692,6 +761,7 @@ jobs:
       - name: "Verify no new tint-background × family-color-text usage (story #2420 AC7 regression guard)"
         run: pnpm --filter web verify:no-new-tint-color-text
 
+
       # story #2371 회귀가드: `scripts/check-i18n-keys.js`(code→messages missing-key 축)를
       # 처음으로 CI에 건다 — 이전엔 CI/husky/package.json 어디에도 안 걸려 있었고 손으로
       # 돌리면 344 issues·exit 1이 나왔는데(2026-07-31 실측) 344건 전부 도구 결함(워드바운더리
@@ -712,7 +782,6 @@ jobs:
       # 2건(mockups 도달 불가·memos 죽은 알림 링크)은 GRANDFATHER_BASELINE으로 얼려 신규만 막는다.
       - name: "Verify no orphan resource routes (story #2376 regression guard)"
         run: pnpm --filter web verify:no-orphan-resource-routes
-
       # story #2393 회귀가드: route-resolve.ts의 RESERVED_FIRST_SEGMENTS(런타임 미들웨어가
       # 워크스페이스 slug 후보 여부를 직접 판정하는 값)가 실제 app/ 구조와 어긋나면 실패한다.
       # 레거시 리소스명 축(MIGRATED_RESOURCES 등)은 파생이라 어긋날 수 없고, 라이브 top-level

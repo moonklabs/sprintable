@@ -60,7 +60,12 @@ async def test_docs_list_via_conftest(test_client, mock_session, project_id, org
     mock_result.scalar_one_or_none.return_value = org_id
     mock_session.execute = AsyncMock(return_value=mock_result)
 
-    resp = await test_client.get(f"/api/v2/docs?project_id={project_id}")
+    # story #2459: get_project_scoped_org_id가 전용 단명 세션(async_session_factory())을
+    # 쓰므로 test_client fixture의 get_db override로는 못 가로챈다 — 별도 patch.
+    from app.dependencies import auth as auth_module
+    from tests.conftest import FakeAsyncSessionCtx
+    with patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(mock_session)):
+        resp = await test_client.get(f"/api/v2/docs?project_id={project_id}")
     assert resp.status_code == 200
     assert resp.json()["data"] == []
 
@@ -389,7 +394,6 @@ async def _make_full_client_s7(mock_session):
     from httpx import ASGITransport, AsyncClient
     from app.main import app
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db
     ctx = MagicMock()
     ctx.user_id = uuid.uuid4()
     ctx.claims = {"app_metadata": {"org_id": str(uuid.uuid4()), "project_id": str(uuid.uuid4())}}
@@ -400,7 +404,10 @@ async def _make_full_client_s7(mock_session):
     async def _auth():
         return ctx
 
-    app.dependency_overrides[get_db] = _db
+    from tests.conftest import override_db_and_read
+    # story #2451(§6 Phase3 root-fix): get_db+get_read_db 항상 같이 거는 공용
+    # 헬퍼 — legacy alias(예: /api/v2/epics=goals.router 재마운트) 누락 재발 차단.
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), app
 

@@ -3,12 +3,12 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from fastapi import Depends, Header, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import func, select, union
+from sqlalchemy import func, select, union, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_factory
@@ -44,12 +44,15 @@ async def _persist_first_auth_seen(
     emit 은 rollback 으로 미persist(V2 통일로 에이전트 첫 인증이 ``/agent/stream`` 인 게 가장 흔함) →
     **전용 committed 세션**에서 persist.
 
-    ⚠️ RC-1(산티아고 concurrency): caller ``_resolve_api_key`` 는 ``api_key.last_used_at = now`` 로
-    api_key row 를 dirty 로 들고 있고(autoflush 가 다음 조회 시 그 row lock 획득), 이 _persist 가 같은
-    api_key row 를 건드리면 **cross-connection 데드락**(전용 세션이 caller lock 대기 ↔ caller 는 이
-    await 끝나야 close). → **api_key row 를 일절 건드리지 않는다.** dedup 은 ``onboarding_events`` 존재로
-    판정하고, 동시 첫 인증은 agent-scoped advisory xact lock 으로 직렬화(TOCTOU 중복 emit 방지).
-    인증 무중단(fail-silent).
+    ⚠️ RC-1(산티아고 concurrency, story #2457 이전 히스토리): 과거엔 caller ``_resolve_api_key``
+    가 caller ``db`` 세션에서 api_key row 를 dirty 로 들고 있어(``last_used_at`` 갱신, autoflush
+    가 다음 조회 시 그 row lock 획득), 이 _persist 가 같은 api_key row 를 건드리면 **cross-connection
+    데드락**(전용 세션이 caller lock 대기 ↔ caller 는 이 await 끝나야 close) 위험이 있었다 →
+    **api_key row 를 일절 건드리지 않는다.** dedup 은 ``onboarding_events`` 존재로 판정하고,
+    동시 첫 인증은 agent-scoped advisory xact lock 으로 직렬화(TOCTOU 중복 emit 방지). 인증
+    무중단(fail-silent). (story #2457로 caller ``db`` 세션의 api_key dirty-set 자체가 없어져
+    이 데드락 전제는 현재 존재하지 않지만, api_key row 무접촉은 이 함수의 최소 책임 원칙으로도
+    유지한다 — 실 last_used_at 갱신은 아래 ``_touch_api_key_last_used`` 전담.)
     """
     from app.core.database import async_session_factory
     from app.models.onboarding_event import OnboardingEvent
@@ -79,6 +82,31 @@ async def _persist_first_auth_seen(
         logger.warning("first_auth_seen persist failed agent=%s", member_id, exc_info=True)
 
 
+_LAST_USED_AT_THROTTLE = timedelta(minutes=5)
+
+
+async def _touch_api_key_last_used(api_key_id: uuid.UUID) -> None:
+    """story #2457(§6 primary 풀 고갈 근본원인): 부하 中 pg_stat_activity 실측(PO probe,
+    2026-08-05) — ``last_used_at`` 갱신을 caller ``db``(primary) 세션에서 dirty-set 하면
+    그 row-lock 이 caller 트랜잭션 커밋(=응답 전체 완료)까지 유지된다. 20개 시드 identity가
+    공유되는 부하테스트에서 ~44 세션이 이 row-lock 대기로 막혀 있었다(같은 row 재사용이
+    prod 보다 과장되긴 하나, «읽기 요청도 last_used_at UPDATE 로 primary 커넥션을 응답
+    끝까지 문다»는 구조 자체는 prod에도 동일).
+
+    ``_persist_first_auth_seen``(OB-4b)과 동형으로 전용 세션 + 단독 짧은 트랜잭션으로
+    분리 — lock hold를 이 UPDATE 자체의 찰나로 줄인다. 인증 무중단(fail-silent).
+    """
+    from app.models.api_key import ApiKey
+    try:
+        async with async_session_factory() as s:
+            await s.execute(
+                update(ApiKey).where(ApiKey.id == api_key_id).values(last_used_at=datetime.now(timezone.utc))
+            )
+            await s.commit()
+    except Exception:
+        logger.warning("_touch_api_key_last_used failed api_key_id=%s", api_key_id, exc_info=True)
+
+
 async def _resolve_api_key(
     raw_key: str, db: AsyncSession, transport: str | None = None,
 ) -> AuthContext:
@@ -102,8 +130,11 @@ async def _resolve_api_key(
     # OB-4b seam(first_auth_seen): 이 키의 최초 인증(last_used_at None)을 갱신 전 캡처 — 1회 dedup.
     # api_key 경로 = 에이전트 인증(휴먼은 JWT). 실제 emit 은 member_id/org_id 해소 후(return 직전).
     _first_auth_seen = api_key.last_used_at is None
-    # fire-and-forget last_used_at 업데이트
-    api_key.last_used_at = now
+    # story #2457: caller `db`(primary) 세션에서 더 이상 dirty-set 하지 않는다(autoflush가
+    # 다음 SELECT 前 UPDATE를 내보내 caller 커밋까지 row-lock을 물던 것이 primary 풀 고갈의
+    # 지배 원인이었다 — pg_stat_activity 실측 확認). 스로틀(5분)도 여기서 메모리 값으로
+    # 판정해 대부분의 요청은 아래 _touch_api_key_last_used 호출 자체를 스킵한다.
+    _needs_touch = api_key.last_used_at is None or (now - api_key.last_used_at) > _LAST_USED_AT_THROTTLE
     scope: list[str] = api_key.scope or ["read", "write"]
 
     # AC3-1: 신원 해소를 플래그로 cut. ⚠️ 생명선 — 0075 1:1(member.id=team_member.id)로
@@ -191,6 +222,8 @@ async def _resolve_api_key(
     # 미persist + dedup 깨짐(까심 RC-1) → 전용 committed 세션에서 atomic 처리(경로 무관·race-safe·무중단).
     if _first_auth_seen:
         await _persist_first_auth_seen(member_id, org_id, project_id, transport=transport)
+    if _needs_touch:
+        await _touch_api_key_last_used(api_key.id)
 
     return AuthContext(
         user_id=str(member_id),
@@ -313,11 +346,21 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     x_agent_api_key: str | None = Header(default=None, alias="x-agent-api-key"),
     x_mcp_transport: str | None = Header(default=None, alias="X-MCP-Transport"),
-    db: AsyncSession = Depends(get_db),
 ) -> AuthContext:
+    """story #2459(§6 봉합①): 요청-수명 ``Depends(get_db)`` 대신 브랜치별 전용 단명 세션 —
+    get_current_user_streaming(SSE 전용 변형, 아래)과 동일 패턴을 기본 경로에도 적용한다.
+
+    ⚠️ 이 전환이 안전한 전제(story #2457로 이미 성립): 이 함수가 건드리는 모든 DB 접근
+    (``_resolve_api_key``·``_reject_if_before_cutover``·``_resolve_firebase_session``)이
+    현재 순수 읽기 전용이다 — `_resolve_api_key`의 ``last_used_at`` 갱신은 #2457로 이미
+    ``_touch_api_key_last_used``(별도 committed 세션)로 분리되어 caller 세션에 write가 없다.
+    caller 세션에 write가 남아있었다면 여기서 명시 커밋 없이 `async with`만 쓰는 건 그 write를
+    조용히 롤백시키는 회귀였을 것 — 이 순서(② #2457 → #2459) 자체가 안전장치다.
+    """
     # x-agent-api-key 헤더 우선 처리 (SSE 브릿지 직접 연결용)
     if x_agent_api_key and x_agent_api_key.startswith("sk_live_"):
-        return await _resolve_api_key(x_agent_api_key, db, transport=x_mcp_transport)
+        async with async_session_factory() as db:
+            return await _resolve_api_key(x_agent_api_key, db, transport=x_mcp_transport)
 
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
@@ -326,7 +369,8 @@ async def get_current_user(
 
     # sk_live_* prefix → API key 경로 (DB 조회)
     if token.startswith("sk_live_"):
-        return await _resolve_api_key(token, db, transport=x_mcp_transport)
+        async with async_session_factory() as db:
+            return await _resolve_api_key(token, db, transport=x_mcp_transport)
 
     # story 455e528d(E-AUTH-REBUILD Phase1-S2·doc §4.2): Firebase 세션(RS256)은 alg 헤더로
     # 정확 분기 — 순차 fallback 아님. FIREBASE_AUTH_ACCEPT_SESSION=false(기본)면 이 분기는
@@ -335,7 +379,8 @@ async def get_current_user(
     from app.services.firebase_verifier import looks_like_rs256
 
     if _settings.firebase_auth_accept_session and looks_like_rs256(token):
-        return await _resolve_firebase_session(token, db)
+        async with async_session_factory() as db:
+            return await _resolve_firebase_session(token, db)
 
     # JWT 경로 (기존)
     try:
@@ -356,7 +401,8 @@ async def get_current_user(
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing sub claim")
 
-    await _reject_if_before_cutover(user_id, payload.get("iat"), db)
+    async with async_session_factory() as db:
+        await _reject_if_before_cutover(user_id, payload.get("iat"), db)
 
     org_id: str | None = payload.get("app_metadata", {}).get("org_id")
 
@@ -457,11 +503,13 @@ async def get_verified_org_id(
     auth: AuthContext = Depends(get_current_user),
     x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
     x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
-    db: AsyncSession = Depends(get_db),
     request: Request = None,
 ) -> uuid.UUID:
     """org_id 추출 — X-Org-Id 헤더 fallback 시 DB membership 검증, X-Project-Id 헤더 시 project 소속 검증.
-    API Key 경로는 HTTP method 기반 scope 자동 체크."""
+    API Key 경로는 HTTP method 기반 scope 자동 체크.
+
+    story #2459(§6 봉합①): 요청-수명 ``Depends(get_db)`` 대신 검증마다 전용 단명 세션 —
+    get_current_user와 동일 근거(호출 대상이 전부 읽기 전용, #2457로 이미 성립)."""
     # API Key scope 체크 (request 있을 때만 — 직접 단위 테스트 호출 시 스킵)
     if request is not None:
         _check_api_key_scope(auth, request.method, request.url.path)
@@ -481,7 +529,8 @@ async def get_verified_org_id(
 
     if x_org_id:
         # 헤더 사용 시 항상 membership 검증 (JWT org_id와 다를 수 있음)
-        await _verify_org_membership(auth.user_id, org_id, db, request)
+        async with async_session_factory() as db:
+            await _verify_org_membership(auth.user_id, org_id, db, request)
 
     # X-Project-Id 헤더 = per-request 프로젝트 스코프 **override**(d802da27/85614dd9).
     # JWT project_id 는 탭 공유라, 같은 유저가 여러 프로젝트 탭을 열어도 mutation 이 JWT 의 단일
@@ -499,7 +548,9 @@ async def get_verified_org_id(
         except ValueError:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid X-Project-Id format")
         from app.services.project_auth import has_project_access
-        if not await has_project_access(db, uuid.UUID(auth.user_id), header_project_id, org_id):
+        async with async_session_factory() as db:
+            allowed = await has_project_access(db, uuid.UUID(auth.user_id), header_project_id, org_id)
+        if not allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="No access to the specified project",
@@ -513,7 +564,6 @@ async def get_project_scoped_org_id(
     project_id: uuid.UUID | None = Query(default=None),
     auth: AuthContext = Depends(get_current_user),
     x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
-    db: AsyncSession = Depends(get_db),
     request: Request = None,
 ) -> uuid.UUID:
     """project_id query param 으로 project 스코프 org_id를 해소.
@@ -524,18 +574,21 @@ async def get_project_scoped_org_id(
     project_id(JWT 스코프와 불일치)는 거부한다(403).
 
     has_project_access(team_member ∪ grant ∪ owner/admin) 로 project 멤버십 검증.
-    project_id 가 없으면 get_verified_org_id 동작과 동일."""
+    project_id 가 없으면 get_verified_org_id 동작과 동일.
+
+    story #2459(§6 봉합①): 요청-수명 ``Depends(get_db)`` 대신 검증마다 전용 단명 세션."""
     base_org_id = await get_verified_org_id(
-        auth=auth, x_org_id=x_org_id, x_project_id=None, db=db, request=request
+        auth=auth, x_org_id=x_org_id, x_project_id=None, request=request
     )
     if not project_id:
         return base_org_id
 
     from app.models.project import Project
-    result = await db.execute(
-        select(Project.org_id).where(Project.id == project_id)
-    )
-    project_org_id = result.scalar_one_or_none()
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(Project.org_id).where(Project.id == project_id)
+        )
+        project_org_id = result.scalar_one_or_none()
     if not project_org_id:
         return base_org_id
 
@@ -556,7 +609,9 @@ async def get_project_scoped_org_id(
     #   - grant-only 휴먼(project_access)도 project 접근 허용 (740e3b7e 에픽403 해소)
     #   - 동일 org 내 다른 project 미멤버 우회 방지(project 스코프)는 그대로 유지
     from app.services.project_auth import has_project_access
-    if not await has_project_access(db, uuid.UUID(auth.user_id), project_id, project_org_id):
+    async with async_session_factory() as db:
+        allowed = await has_project_access(db, uuid.UUID(auth.user_id), project_id, project_org_id)
+    if not allowed:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="해당 프로젝트의 멤버가 아닌",
@@ -696,12 +751,14 @@ async def get_scope_context(
     auth: AuthContext = Depends(get_current_user),
     x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
     x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
-    db: AsyncSession = Depends(get_db),
     request: Request = None,
 ) -> dict:
-    """org_id + project_id 컨텍스트를 한번에 추출 — 헤더 fallback 시 membership/소속 검증."""
+    """org_id + project_id 컨텍스트를 한번에 추출 — 헤더 fallback 시 membership/소속 검증.
+
+    story #2459(§6 봉합①): get_verified_org_id가 이제 자체 단명 세션을 쓰므로 이 함수는
+    db 의존 자체가 불요."""
     # x_project_id를 get_verified_org_id에 전달해서 project 소속 검증도 위임
-    org_id = await get_verified_org_id(auth=auth, x_org_id=x_org_id, x_project_id=x_project_id, db=db, request=request)
+    org_id = await get_verified_org_id(auth=auth, x_org_id=x_org_id, x_project_id=x_project_id, request=request)
     jwt_project_id = auth.claims.get("app_metadata", {}).get("project_id")
     project_id_raw = jwt_project_id or x_project_id
     project_id = uuid.UUID(str(project_id_raw)) if project_id_raw else None

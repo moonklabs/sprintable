@@ -6,7 +6,7 @@ from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
-from app.dependencies.database import get_db
+from app.dependencies.database import get_db, get_read_db
 from app.models.pm import Sprint, Story
 from app.models.standup import StandupEntry, StandupEntryProject, StandupFeedback
 from app.repositories.standup import StandupEntryRepository, StandupFeedbackRepository
@@ -136,13 +136,22 @@ def _get_repo(
     return StandupEntryRepository(session, org_id)
 
 
+# story #2451(§6 Phase3 A2): list_standups 전용 — 목록 조회는 create→self-read 흐름이 약함
+# (replica lag 0.86s, PO 승인). 다른 라우트가 공유하는 위 _get_repo(get_db)는 그대로.
+def _get_repo_read(
+    session: AsyncSession = Depends(get_read_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> StandupEntryRepository:
+    return StandupEntryRepository(session, org_id)
+
+
 @router.get("", response_model=list[StandupEntryResponse])
 async def list_standups(
     project_id: uuid.UUID | None = Query(default=None),
     author_id: uuid.UUID | None = Query(default=None),
     sprint_id: uuid.UUID | None = Query(default=None),
     date_filter: date | None = Query(default=None, alias="date"),
-    repo: StandupEntryRepository = Depends(_get_repo),
+    repo: StandupEntryRepository = Depends(_get_repo_read),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[StandupEntryResponse]:
     # ratchet round5(잔여 HIGH) + 까심 QA REQUEST_CHANGES fix: project_id·sprint_id 둘 다
