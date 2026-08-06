@@ -56,7 +56,15 @@ export default function LoginPage() {
     try {
       const result = await signInAndExchangeFirebaseSession(email.trim(), password);
       if (result.error) {
-        setError(result.error.message);
+        // story #2484 — result.error.message는 BFF/클라 SDK가 만든 raw 영문 문자열이라
+        // code로 분기(코드 자체는 신원 열거를 피하려 이미 소수·중립으로 설계돼 있음).
+        if (result.error.code === 'NETWORK_ERROR') {
+          setError(t('firebaseNetworkError'));
+        } else if (result.error.code === 'FIREBASE_DISABLED') {
+          setError(t('firebaseDisabled'));
+        } else {
+          setError(t('firebaseSignInFailed'));
+        }
         return;
       }
       // story #1959(P2-S3) AC: 로그인 복귀 후 /login history 잔존 0 — push 는 스택에 남아
@@ -80,7 +88,21 @@ export default function LoginPage() {
           setError(t('totpRequired'));
           return;
         }
-        setError(result.error.message);
+        // story #2484 — 나머지 code는 backend _err()가 직접 발급하는 안정 값이라(auth.py
+        // login()) 전부 분기한다. 알려지지 않은 code만 안전 폴백(raw message 미노출).
+        if (result.error.code === 'INVALID_CREDENTIALS') {
+          setError(t('loginInvalidCredentials'));
+        } else if (result.error.code === 'ACCOUNT_LOCKED') {
+          setError(t('loginAccountLocked'));
+        } else if (result.error.code === 'TOTP_LOCKED') {
+          setError(t('loginTotpLocked'));
+        } else if (result.error.code === 'INVALID_TOTP') {
+          setError(t('loginInvalidTotpCode'));
+        } else if (result.error.code === 'TOTP_REPLAYED') {
+          setError(t('loginTotpReplayed'));
+        } else {
+          setError(t('loginFailed'));
+        }
         return;
       }
       // story #1959(P2-S3): 위와 동일 사유 — replace 로 /login history 잔존 방지.

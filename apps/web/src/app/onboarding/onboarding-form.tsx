@@ -106,7 +106,11 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
           setShowUpgrade(true);
           return;
         }
-        setError(json?.error?.message ?? t('createOrgFailed'));
+        // story #2484 — 유나 design:changes(2026-08-06): 위 두 code는 분기하지만 그 «외»
+        // code는 raw 서버 message가 그대로 샜다(형제 3핸들러(resend/create-project/
+        // create-agent)만 고치고 이 자리를 놓친 것 — 가드도 위에 .code 토큰이 있어 못 잡는
+        // 사각이었다). 알려지지 않은 code는 다른 핸들러와 동일하게 generic 폴백만 쓴다.
+        setError(t('createOrgFailed'));
         return;
       }
 
@@ -138,8 +142,14 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
         return;
       }
       if (!res.ok) {
+        // story #2484 — code로 분기(backend auth.py resend_verification()이 _err()로
+        // 직접 발급하는 안정 값). 알려지지 않은 code만 안전 폴백.
         setResendState('error');
-        setResendError(json?.error?.message ?? t('resendFailed'));
+        if (json?.error?.code === 'USER_NOT_FOUND') {
+          setResendError(t('resendUserNotFound'));
+        } else {
+          setResendError(t('resendFailed'));
+        }
         return;
       }
       setResendState('sent');
@@ -172,12 +182,19 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
       const json = await res.json();
 
       if (!res.ok) {
-        if (json?.error?.code === 'UPGRADE_REQUIRED') {
-          setUpgradeReason(json.error.message);
+        // story #2484 — 실측(#2484 그라운딩): 이 분기는 'UPGRADE_REQUIRED'를 봤으나 backend
+        // projects.py create_project()는 그 코드를 절대 내지 않는다(존재하지 않는 문자열이라
+        // FastAPI 어디에도 없음 grep 확認) — organizations.py의 PLAN_LIMIT_EXCEEDED와 정확히
+        // 같은 클래스(resource:"project")를 실제로 낸다. 그래서 이 UpgradeModal 경로는 지금껏
+        // 한 번도 안 탄 죽은 분기였다(항상 아래 raw fallback으로 샜음). 코드를 바로잡는다.
+        if (json?.error?.code === 'PLAN_LIMIT_EXCEEDED') {
+          setUpgradeReason(t('projectLimitExceededError', { limit: json.error.limit ?? 1 }));
           setShowUpgrade(true);
           return;
         }
-        setError(json?.error?.message ?? t('createProjectFailed'));
+        // 그 외(400 Invalid slug format·409 Slug already exists 등 — 온보딩은 explicit slug를
+        // 안 보내 실질 도달 희박하나 방어적으로) code만 보고 raw message는 안 씀.
+        setError(t('createProjectFailed'));
         return;
       }
 
@@ -227,15 +244,17 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
           role: agentRole,
         }),
       });
-      const memberJson = await memberRes.json() as { data?: { id: string; api_key?: string }; error?: { message?: string } };
+      const memberJson = await memberRes.json() as { data?: { id: string; api_key?: string }; error?: { code?: string; message?: string } };
+      // story #2484 — 이 정확한 호출 형태(온보딩·human 호출자·user_id 없음)에서 도달 가능한
+      // 고유 code가 없어(그라운딩 확認) raw message 대신 통일된 안전 폴백만 사용.
       if (!memberRes.ok) {
-        setError(memberJson?.error?.message ?? 'Failed to create agent');
+        setError(t('createAgentFailed'));
         return;
       }
 
       const newAgentId = memberJson.data?.id;
       if (!newAgentId) {
-        setError('Failed to create agent');
+        setError(t('createAgentFailed'));
         return;
       }
       setAgentId(newAgentId);
@@ -342,6 +361,8 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
                 placeholder={t('slugPlaceholder')}
               />
               {orgSlug && !slugValid ? (
+                // ⚠️Phase2 i18n·#2485 — 클라 측 정규식 검증 문구가 하드코딩 한국어다(t() 아님,
+                // 서버 응답과 무관 — raw 서버 누수는 아님). #2484 스코프 밖, 유나 design 확認.
                 <p className="text-xs text-destructive">영소문자, 숫자, 하이픈만 사용 가능합니다</p>
               ) : (
                 <p className="text-xs text-muted-foreground">sprintable.app/{orgSlug || '...'}</p>

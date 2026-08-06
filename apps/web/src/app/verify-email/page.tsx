@@ -26,13 +26,28 @@ export default function VerifyEmailPage() {
       body: JSON.stringify({ token }),
     })
       .then((res) => res.json())
-      .then((json: { data?: { message: string }; error?: { message: string } }) => {
+      .then((json: { data?: { message: string }; error?: { code?: string; message: string } }) => {
         if (json.data) {
           setStatus('success');
-          setMessage(json.data.message);
+          // story #2484 — 유나 design:changes(2026-08-06): 성공 분기도 raw 서버 message를
+          // 그대로 노출했다("Email verified successfully"/"Email already verified" 둘
+          // 다 하드코딩 영문). 성공은 code가 없어 분기 불가하니 우리 자체 한국어 문구
+          // 하나로 통일한다(신규/기존 인증 둘 다 "인증됨" 결과는 동일하므로 구분 불요).
+          setMessage('이메일 인증이 완료되었습니다.');
         } else {
           setStatus('error');
-          setMessage(json.error?.message ?? '인증에 실패했습니다.');
+          // story #2484 — code로 분기(backend auth.py verify_email()이 _err()로 직접
+          // 발급하는 안정 값). 알려지지 않은 code만 안전 폴백(raw message 미노출).
+          // ⚠️Phase2 i18n·#2485 — 이 페이지가 next-intl 미배선이라 아래 문구도 하드코딩
+          // 한국어다(t() 아님, raw 서버 누수는 아님). #2484는 "raw 서버 노출 제거"만
+          // 스코프라 여기서 전면 i18n 전환은 안 함 — 유나 design 확認.
+          if (json.error?.code === 'INVALID_TOKEN') {
+            setMessage('인증 링크가 유효하지 않거나 만료되었습니다.');
+          } else if (json.error?.code === 'USER_NOT_FOUND') {
+            setMessage('사용자를 찾을 수 없습니다.');
+          } else {
+            setMessage('인증에 실패했습니다.');
+          }
         }
       })
       .catch(() => {

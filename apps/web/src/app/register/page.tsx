@@ -50,9 +50,17 @@ export default function RegisterPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password, display_name: displayName.trim(), tos_accepted: true }),
       });
-      const json = await res.json() as { data?: { ok: boolean }; error?: { message: string } };
+      const json = await res.json() as { data?: { ok: boolean }; error?: { code?: string; message: string } };
       if (!res.ok || !json.data?.ok) {
-        setError(json.error?.message ?? t('registrationFailed'));
+        // story #2484 — code로 분기(backend auth.py register()가 _err()로 직접 발급하는
+        // 안정 값). 알려지지 않은 code(pydantic 422 등)만 안전 폴백.
+        if (json.error?.code === 'EMAIL_TAKEN') {
+          setError(t('registerEmailTaken'));
+        } else if (json.error?.code === 'TOS_NOT_ACCEPTED') {
+          setError(t('registerTosRequired'));
+        } else {
+          setError(t('registrationFailed'));
+        }
         return;
       }
       const meRes = await fetch('/api/me');

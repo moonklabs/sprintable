@@ -22,6 +22,7 @@
     "verify:tint-foreground-contrast": "tsx scripts/verify-tint-foreground-contrast.ts",
     "verify:no-new-tint-color-text": "tsx scripts/verify-no-new-tint-color-text.ts",
     "verify:muted-foreground-contrast": "tsx scripts/verify-muted-foreground-contrast.ts",
+    "verify:no-raw-error-message": "tsx scripts/verify-no-raw-error-message.ts",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report"
