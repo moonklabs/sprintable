@@ -30,6 +30,7 @@ from app.models.org_subscription import OrgSubscription
 from app.models.pricing_version import PricingVersion
 from app.models.offering_version import OfferingVersion
 from app.models.grandfather_policy import GrandfatherPolicy
+from app.models.billing_ledger_entry import BillingLedgerEntry
 from app.models.plan_tier_limit import PlanTierLimit
 from app.models.policy_document import PolicyDocument
 from app.models.audit import AuditLog
@@ -142,6 +143,7 @@ __all__ = [
     "PricingVersion",
     "OfferingVersion",
     "GrandfatherPolicy",
+    "BillingLedgerEntry",
     "PlanTierLimit",
     "PolicyDocument",
     "AuditLog",
