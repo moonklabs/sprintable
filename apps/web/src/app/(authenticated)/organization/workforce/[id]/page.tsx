@@ -202,11 +202,12 @@ export default function AgentDetailPage() {
       addToast({ type: 'success', title: tc('saved') });
     } else {
       const status = res.status;
-      const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+      // story #2485 — backend update_team_member()는 generic HTTP상태 코드만 낸다
+      // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
       if (status === 403) {
         addToast({ type: 'error', title: t('ownershipDenied') });
       } else {
-        addToast({ type: 'error', title: json?.error?.message ?? tc('error') });
+        addToast({ type: 'error', title: tc('error') });
       }
     }
     setSavingEdit(false);
@@ -233,8 +234,9 @@ export default function AgentDetailPage() {
           body: JSON.stringify({ member_id: id, url: trimmed, project_id: agent.project_id, is_active: webhookActive }),
         });
         if (!res.ok) {
-          const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-          addToast({ type: 'error', title: json?.error?.message ?? tc('error') });
+          // story #2485 — backend upsert_webhook_config()는 generic HTTP상태 코드만
+          // 낸다(진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 제거.
+          addToast({ type: 'error', title: tc('error') });
           return;
         }
       }
@@ -263,8 +265,9 @@ export default function AgentDetailPage() {
       });
       if (!res.ok) {
         setWebhookActive(!next);
-        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        addToast({ type: 'error', title: json?.error?.message ?? tc('error') });
+        // story #2485 — backend upsert_webhook_config()는 generic HTTP상태 코드만
+        // 낸다(진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 제거.
+        addToast({ type: 'error', title: tc('error') });
         return;
       }
       await fetchWebhookConfigs(agent.project_id);
@@ -332,11 +335,12 @@ export default function AgentDetailPage() {
         addToast({ type: 'success', title: t('runtimeTypeSaved') });
       } else {
         const status = res.status;
-        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+        // story #2485 — backend update_team_member()는 generic HTTP상태 코드만 낸다
+        // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
         if (status === 403) {
           addToast({ type: 'error', title: t('ownershipDenied') });
         } else {
-          addToast({ type: 'error', title: json?.error?.message ?? tc('error') });
+          addToast({ type: 'error', title: tc('error') });
         }
       }
     } finally {
@@ -357,11 +361,12 @@ export default function AgentDetailPage() {
       addToast({ type: 'success', title: next ? t('agentActivated') : t('agentDeactivated') });
     } else {
       const status = res.status;
-      const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+      // story #2485 — backend update_team_member()는 generic HTTP상태 코드만 낸다
+      // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
       if (status === 403) {
         addToast({ type: 'error', title: t('ownershipDenied') });
       } else {
-        addToast({ type: 'error', title: json?.error?.message ?? tc('error') });
+        addToast({ type: 'error', title: tc('error') });
       }
     }
   };

@@ -182,8 +182,11 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory, sel
       });
       const json = await res.json().catch(() => null);
       if (!res.ok) {
-        // AC15 — 서버가 준 원문 그대로. 새로 진단 문장을 짓지 않는다.
-        return { ok: false, error: typeof json?.detail === 'string' ? json.detail : t('portLinkErrorFallback') };
+        // story #2485 — 이전 AC15("서버 원문 그대로") 의도는 `json.detail`을 읽는 것이었으나
+        // 그 필드는 실 envelope({data,error,meta})에 없어 이 분기는 처음부터 항상 죽어
+        // 있었다(그라운딩 확認) — 즉 raw 원문이 실제로 노출된 적은 없다. backend
+        // create_story_reference_candidate()는 generic HTTP상태 코드만 낸다 — 고정 폴백만 사용.
+        return { ok: false, error: t('portLinkErrorFallback') };
       }
       const edge = declareResponseToEdge(params.apiSourceId, {
         target_id: json.target_id, relation_kind: json.relation_kind, status: json.status,
@@ -203,8 +206,10 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory, sel
       // 호출부(FlowMapCanvas)가 지운 간선의 실제 endpoint story id(anchorStoryId)를 넘긴다.
       const res = await fetch(`/api/stories/${anchorStoryId}/reference-candidates/${candidateId}`, { method: 'DELETE' });
       if (!res.ok) {
-        const json = await res.json().catch(() => null);
-        return { ok: false, error: typeof json?.detail === 'string' ? json.detail : t('portLinkErrorFallback') };
+        // story #2485 — `json.detail`은 실 envelope에 없는 필드라 이 분기는 항상
+        // 죽어있었다(그라운딩 확認). backend undeclare_story_reference_candidate()는
+        // generic HTTP상태 코드만 낸다 — 고정 폴백만 사용.
+        return { ok: false, error: t('portLinkErrorFallback') };
       }
       setState((prev) => (prev.kind === 'ready' ? { ...prev, edges: prev.edges.filter((e) => e.candidateId !== candidateId) } : prev));
       return { ok: true };
@@ -221,8 +226,10 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory, sel
     try {
       const res = await fetch(`/api/stories/${anchorStoryId}/reference-candidates/${candidateId}/reject`, { method: 'POST' });
       if (!res.ok) {
-        const json = await res.json().catch(() => null);
-        return { ok: false, error: typeof json?.detail === 'string' ? json.detail : t('portRejectErrorFallback') };
+        // story #2485 — `json.detail`은 실 envelope에 없는 필드라 이 분기는 항상
+        // 죽어있었다(그라운딩 확認). backend reject_story_reference_candidate()는
+        // generic HTTP상태 코드만 낸다 — 고정 폴백만 사용.
+        return { ok: false, error: t('portRejectErrorFallback') };
       }
       setState((prev) => (prev.kind === 'ready' ? { ...prev, edges: prev.edges.filter((e) => e.candidateId !== candidateId) } : prev));
       return { ok: true };

@@ -1,40 +1,20 @@
 {
-  "_comment": "story #2484 — verify-no-raw-error-message.ts의 baseline. 여기 등재된 파일은 '.code 분기 없이 error.message/json.detail을 노출'하는 기존 채무로 알려져 있다. #2485(Phase 2)에서 정리 예정. 새 파일/새 자리만 넛지 대상이다.",
+  "_comment": "story #2484/#2485 — verify-no-raw-error-message.ts의 baseline. #2485(Phase 2)에서 knownDebt 대부분을 실제로 정리했다 — 아래는 그 결과 남은, 진짜 새 채무가 아닌 항목들이다. story-detail-panel.tsx만 아직 실채무(방금 발견한 별도 dead-detail-field 버그, 수정 예정)로 남아있다.",
   "knownDebt": [
-    "src/app/(authenticated)/[ws]/[proj]/goals/[id]/page.tsx",
-    "src/app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx",
-    "src/app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx",
-    "src/app/(authenticated)/organization/workforce/[id]/page.tsx",
-    "src/app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx",
-    "src/app/(authenticated)/settings/page.tsx",
-    "src/components/agents/agent-management-tab.tsx",
-    "src/components/agents/agent-run-detail.tsx",
-    "src/components/agents/messaging-policy-section.tsx",
-    "src/components/kanban/kanban-board.tsx",
-    "src/components/kanban/story-detail-panel.tsx",
-    "src/components/loops/loop-create-dialog.tsx",
-    "src/components/loops/variant-gallery.tsx",
-    "src/components/settings/add-member-modal.tsx",
-    "src/components/settings/ai-settings.tsx",
-    "src/components/settings/byom-key-management.tsx",
-    "src/components/settings/mcp-connection-settings.tsx",
-    "src/components/settings/my-notification-channel-section.tsx",
-    "src/components/settings/org-members-section.tsx",
-    "src/components/settings/set-password-section.tsx",
-    "src/components/settings/slack-integration-settings.tsx",
-    "src/components/settings/two-factor-section.tsx"
+    "src/components/kanban/story-detail-panel.tsx"
   ],
   "deliberateByDesign": [
     "src/components/epics/epic-status-transition.tsx"
   ],
-  "deadFieldFalsePositive": [
+  "deadFieldFalsePositive": [],
+  "reviewedSafe": [
+    "src/components/agents/agent-api-key-manager.tsx",
+    "src/components/ui/route-error-state.tsx",
+    "src/components/settings/mcp-connection-settings.tsx",
+    "src/components/settings/slack-integration-settings.tsx",
     "src/components/shared/rejected-relations-section.tsx",
     "src/components/flow/flow-epic-nodes.tsx",
     "src/components/flow/flow-multi-lane-canvas.tsx"
   ],
-  "reviewedSafe": [
-    "src/components/agents/agent-api-key-manager.tsx",
-    "src/components/ui/route-error-state.tsx"
-  ],
-  "_reviewedSafeNote": "agent-api-key-manager.tsx: error.message은 하드코딩 클라 literal(throw new Error('Failed to load API keys'))이지 서버 응답이 아니다. route-error-state.tsx: Next.js 라우트 에러 바운더리 fallback — 특정 fetch 응답을 렌더하는 게 아니라 임의 JS Error를 보여주는 다른 버그 클래스(#2484 그라운딩에서 확認)."
+  "_reviewedSafeNote": "agent-api-key-manager.tsx: error.message은 하드코딩 클라 literal(throw new Error('Failed to load API keys'))이지 서버 응답이 아니다. route-error-state.tsx: Next.js 라우트 에러 바운더리 fallback — 임의 JS Error를 보여주는 다른 버그 클래스. mcp-connection-settings.tsx/slack-integration-settings.tsx(#2485): `error instanceof Error ? error.message : t(...)` 패턴 — catch가 잡는 Error는 우리가 직접 `throw new Error(t('...'))`로 만든 것이라 이미 번역된 문구다(raw 서버 텍스트 아님), guard의 단순 regex가 이 안전한 관용구를 오탐한다. rejected-relations-section.tsx/flow-epic-nodes.tsx/flow-multi-lane-canvas.tsx(#2485): 실제 버그는 고쳐졌고, 그 사실을 설명하는 코드 주석 안의 'json.detail' 문자열 자체가 guard 정규식에 걸리는 오탐이다."
 }

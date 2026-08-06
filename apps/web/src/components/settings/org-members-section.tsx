@@ -113,9 +113,19 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole, project_ids: inviteProjectIds }),
     });
-    const json = await res.json() as { data?: { invite_url?: string }; error?: { message?: string } };
+    const json = await res.json() as {
+      data?: { invite_url?: string };
+      error?: { code?: string; message?: string; limit?: number };
+    };
     if (!res.ok) {
-      setInviteResult({ type: 'error', text: json.error?.message ?? '초대 발송에 실패했습니다.' });
+      // story #2485 — EE plan_limits.check_member_invite_limit()가 실제로 이 code를
+      // 낸다(그라운딩 확認). 그 외 code는 backend가 generic HTTP상태만 준다 — raw
+      // 서버 message 노출 대신 고정 문구.
+      if (json.error?.code === 'PLAN_LIMIT_EXCEEDED') {
+        setInviteResult({ type: 'error', text: t('memberLimitExceededError', { limit: json.error.limit ?? 1 }) });
+      } else {
+        setInviteResult({ type: 'error', text: t('memberInviteFailed') });
+      }
     } else {
       setInviteResult({ type: 'success', text: `초대 발송 완료${json.data?.invite_url ? ` — ${json.data.invite_url}` : ''}` });
       setInviteEmail('');
@@ -138,8 +148,9 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       setActionMessage({ type: 'success', text: '역할이 변경됐습니다.' });
       await refreshData();
     } else {
-      const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-      setActionMessage({ type: 'error', text: json?.error?.message ?? '역할 변경에 실패했습니다.' });
+      // story #2485 — backend update_org_member()는 generic HTTP상태 코드만 낸다
+      // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
+      setActionMessage({ type: 'error', text: t('memberRoleChangeFailed') });
     }
     setChangingRoleId(null);
   };
@@ -151,8 +162,9 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
       setActionMessage({ type: 'success', text: '멤버가 제거됐습니다.' });
       await refreshData();
     } else {
-      const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-      setActionMessage({ type: 'error', text: json?.error?.message ?? '멤버 제거에 실패했습니다.' });
+      // story #2485 — backend delete_org_member()는 generic HTTP상태 코드만 낸다
+      // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
+      setActionMessage({ type: 'error', text: t('memberRemoveFailed') });
     }
   };
 

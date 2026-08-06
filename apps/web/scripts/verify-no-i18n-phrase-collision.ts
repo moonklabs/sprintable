@@ -228,8 +228,15 @@ export function findSubstringCollisions(
 // rebase 재확認(2026-08-02, PO 요청) — origin/develop 최신(#2790/#2792/#2793/#2794 반영)
 // 기준으로 재스캔해도 이 항목은 여전히 필요하다(아래 게이트 로그로 확認) — #2792의 임시
 // 항목과 달리 이건 #2410의 근본 fix로 해소되는 축이 아니라서 그대로 남는다.
+// story #2485(2026-08-06) — settings.tabProjects/roleMember <-> onboarding/settings의
+// PLAN_LIMIT_EXCEEDED 안내문 2쌍. sprints.days와 같은 축(길이 짧은 일반명사 키가 긴
+// 문장에 우연히 포함) — #2352/#2365가 잡으려는 "같은 화면에 선 두 «수»가 헷갈리는" 병이
+// 아니다: tabProjects/roleMember 양쪽 다 그 자체엔 수가 없다(단순 라벨). 겹치는 건 오직
+// "프로젝트"/"멤버"라는 공통 명사 부분이지, 두 카운트가 시각적으로 혼동되는 상황이 아니다.
 export const EXEMPT_PAIRS = new Set<string>([
   'sprints.days <-> sprints.overdueBadge',
+  'onboarding.projectLimitExceededError <-> settings.tabProjects',
+  'settings.memberLimitExceededError <-> settings.roleMember',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

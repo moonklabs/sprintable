@@ -375,8 +375,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
         });
         setStep(3);
       } else {
-        const json = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
-        setEquipError(json?.error?.message ?? t('recruitFailed'));
+        // story #2485 — backend create_org_agent()는 generic HTTP상태 코드만 낸다
+        // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
+        setEquipError(t('recruitFailed'));
       }
     } catch {
       setEquipError(t('recruitFailed'));
