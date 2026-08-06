@@ -128,13 +128,42 @@ async def test_polar_adapter_create_checkout_error_status_raises_runtime_error()
 
 
 # ─── 엔드투엔드: 실 HTTP 파이프라인이 어댑터까지 관통하는지 ─────────────────
+# #2481(B후속, 카디르 QA 거짓-green 지적): CI「Backend pytest」job env엔 LICENSE_CONSENT가
+# 없다(ci.yml backend-test job) — settings.is_ee_enabled는 app.main import 시점(모듈
+# 스코프 `if settings.is_ee_enabled:`)에 이미 확定돼 billing 라우터가 app.routes에 아예
+# 안 실린다. 그 뒤 아무리 settings를 patch해도 이미 안 실린 라우터는 안 돌아온다 —
+# 원래 테스트는 그래서 항상 404로 새고 "401 실증"이 거짓이었다(HMAC 로직 자체의 정확성은
+# test_verify_signature_* 가 별도로 실증하므로 기능 갭은 없었지만, 이 테스트의 "관통"
+# 주장은 공허했다). 처방: import-time 게이트를 우회해 라우터를 직접 마운트하고 진짜
+# 401을 받는다 — LICENSE_CONSENT env 주입/앱 재기동보다 훨씬 결정적이고 CI job 설정을
+# 안 건드린다.
+
+
+def _ensure_billing_router_mounted(app) -> None:
+    from ee.routers import billing as billing_module
+
+    if not any(getattr(r, "path", "").startswith("/api/v2/billing") for r in app.routes):
+        app.include_router(billing_module.router, prefix="/api/v2/billing")
+
+
+async def _post_webhook_with_signature(app, signature: str | None) -> "httpx.Response":
+    from httpx import ASGITransport, AsyncClient
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        headers = {"X-Polar-Webhook-Signature": signature} if signature is not None else {}
+        return await c.post(
+            "/api/v2/billing/webhook",
+            content=b'{"type":"checkout.completed"}',
+            headers=headers,
+        )
+
 
 @pytest.mark.anyio
 async def test_webhook_endpoint_rejects_invalid_signature_through_adapter():
-    """POST /api/v2/billing/webhook — 잘못된 서명이면 401. 라우터→factory→PolarAdapter.
-    verify_webhook 전체 파이프라인이 실제로 관통해야 실패(mock 아님)."""
+    """POST /api/v2/billing/webhook — 잘못된 서명이면 실제로 401. 라우터→factory→
+    PolarAdapter.verify_webhook 전체 파이프라인이 관통한다(mock 아님) — 404 이스케이프
+    없음(#2481)."""
     from app.main import app
-    from httpx import ASGITransport, AsyncClient
 
     from tests.conftest import override_db_and_read
 
@@ -144,21 +173,50 @@ async def test_webhook_endpoint_rejects_invalid_signature_through_adapter():
         yield mock_session
 
     override_db_and_read(app, override_db)
+    _ensure_billing_router_mounted(app)
 
-    from app.core.config import Settings
     try:
-        with patch.object(type(Settings()), "is_ee_enabled", new_callable=MagicMock, create=True):
-            with patch("app.services.payment.polar_adapter.settings") as mock_settings:
-                mock_settings.polar_webhook_secret = "real_secret"
-                mock_settings.is_ee_enabled = True
-                with patch("ee.routers.billing.settings") as mock_router_settings:
-                    mock_router_settings.is_ee_enabled = True
-                    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-                        resp = await c.post(
-                            "/api/v2/billing/webhook",
-                            content=b'{"type":"checkout.completed"}',
-                            headers={"X-Polar-Webhook-Signature": "sha256=wrongsignature"},
-                        )
-        assert resp.status_code in (401, 404)  # 404면 EE 라우터 미등록(무관), 401이 목표 증명
+        with patch("app.services.payment.polar_adapter.settings") as mock_settings:
+            mock_settings.polar_webhook_secret = "real_secret"
+            with patch("ee.routers.billing.settings") as mock_router_settings:
+                mock_router_settings.is_ee_enabled = True
+                resp = await _post_webhook_with_signature(app, "sha256=wrongsignature")
+        assert resp.status_code == 401
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_webhook_endpoint_accepts_valid_signature_positive_control():
+    """양성대조 — HMAC 검증을 실제로 깨면(서명 미검증) 위 테스트가 RED 나야 한다는 것을
+    증명하기 위해, 반대로 «올바른» 서명은 401 없이 통과해야 한다(#2481 AC). 이 테스트가
+    통과 + 위 테스트가 wrong-signature로 401 → 둘 다 서야 "서명 검증이 실제로 갈린다"가
+    증명된다(둘 다 같은 응답이면 그게 바로 거짓-green)."""
+    import hashlib
+    import hmac
+
+    from app.main import app
+
+    from tests.conftest import override_db_and_read
+
+    mock_session = AsyncMock()
+
+    async def override_db():
+        yield mock_session
+
+    override_db_and_read(app, override_db)
+    _ensure_billing_router_mounted(app)
+
+    secret = "real_secret"
+    body = b'{"type":"checkout.completed"}'
+    valid_sig = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
+    try:
+        with patch("app.services.payment.polar_adapter.settings") as mock_settings:
+            mock_settings.polar_webhook_secret = secret
+            with patch("ee.routers.billing.settings") as mock_router_settings:
+                mock_router_settings.is_ee_enabled = True
+                resp = await _post_webhook_with_signature(app, valid_sig)
+        assert resp.status_code != 401  # 서명 검증은 통과 — 이후 JSON payload 처리로 진행
     finally:
         app.dependency_overrides.clear()
