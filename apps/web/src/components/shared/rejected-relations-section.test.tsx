@@ -129,10 +129,13 @@ describe('RejectedRelationsSection — 되살리기(restore) 왕복', () => {
     expect(container.querySelectorAll('button').length).toBe(0); // 되살리기 버튼은 사실 문장으로 대체됨
   });
 
-  it('on restore failure, shows the server error next to that row and keeps the restore button', async () => {
+  it('on restore failure, shows the generic fallback next to that row and keeps the restore button', async () => {
+    // story #2485 — 예전엔 `{ detail: '...' }`(실 envelope엔 없는 필드)를 mock해 죽은 분기가
+    // 마치 동작하는 것처럼 검증했다. 실 backend는 {data,error,meta}만 준다 — 그 모양으로
+    // 교정하고, raw 서버 message 미노출(고정 폴백)을 검증한다.
     stubFetch((url, init) => {
       if (url.includes('/rejected-relations/t1') && init?.method === 'DELETE') {
-        return { ok: false, json: async () => ({ detail: 'Rejected relation not found' }) } as Response;
+        return { ok: false, json: async () => ({ error: { code: 'NOT_FOUND', message: 'Rejected relation not found' } }) } as Response;
       }
       if (url.includes('/rejected-relations')) {
         return {
@@ -150,7 +153,8 @@ describe('RejectedRelationsSection — 되살리기(restore) 왕복', () => {
     await act(async () => { restoreBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain('Rejected relation not found');
+    expect(container.textContent).not.toContain('Rejected relation not found');
+    expect(container.textContent).toContain('되살리지 못했습니다. 다시 시도해 주세요.');
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '되살리기')).toBe(true);
   });
 });

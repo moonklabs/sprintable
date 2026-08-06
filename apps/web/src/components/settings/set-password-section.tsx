@@ -56,9 +56,18 @@ export function SetPasswordSection() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ new_password: password }),
       });
-      const json = await res.json() as { data?: { ok: boolean }; error?: { message: string } };
+      const json = await res.json() as { data?: { ok: boolean }; error?: { code?: string; message: string } };
       if (!res.ok) {
-        setMessage({ type: 'error', text: json.error?.message ?? 'Failed to set password.' });
+        // story #2485 — code로 분기(backend auth.py set_password()가 _err()로 직접
+        // 발급하는 안정 값). 이 컴포넌트는 next-intl 미배선(하드코딩 영문)이라 기존
+        // 톤에 맞춰 인라인 영문 문구로 분기한다 — 알려지지 않은 code만 안전 폴백.
+        if (json.error?.code === 'ALREADY_HAS_PASSWORD') {
+          setMessage({ type: 'error', text: 'A password is already set for this account.' });
+        } else if (json.error?.code === 'USER_NOT_FOUND') {
+          setMessage({ type: 'error', text: 'We could not find your account.' });
+        } else {
+          setMessage({ type: 'error', text: 'Failed to set password.' });
+        }
         return;
       }
       setMessage({ type: 'success', text: 'Password set successfully. You can now sign in with email and password.' });

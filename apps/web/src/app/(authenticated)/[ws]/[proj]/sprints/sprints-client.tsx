@@ -537,7 +537,11 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           setActivateGateBlocked(true);
           setAddingHypothesis(true);
         } else {
-          setActionError(json.error?.message ?? t('activateError'));
+          // story #2485 — HYPOTHESIS_REQUIRED_FOR_ACTIVATION 외 나머지는 backend가
+          // generic HTTP상태 코드만 낸다(그라운딩 확認) — raw 서버 message 노출 제거.
+          // ⚠️이 code 자체도 packages/storage-api mapApiError가 404/403 외 다 뭉개
+          // 실제로는 도달 안 하는 상태(별도 이슈로 보고) — 그 버그가 고쳐지면 바로 동작.
+          setActionError(t('activateError'));
         }
         return;
       }
@@ -584,8 +588,9 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     try {
       const res = await fetch(`/api/sprints/${selected.id}/close`, { method: 'POST' });
       if (!res.ok) {
-        const json = await res.json().catch(() => ({})) as { error?: { message?: string } };
-        setActionError(json.error?.message ?? t('closeError'));
+        // story #2485 — backend close_sprint()는 code 자체를 안 낸다(그라운딩 확認,
+        // 의도적으로 discard) — raw 서버 message 노출 대신 고정 문구.
+        setActionError(t('closeError'));
         return;
       }
       await loadSprints();
@@ -602,8 +607,9 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     try {
       const res = await fetch(`/api/sprints/${selected.id}`, { method: 'DELETE' });
       if (!res.ok) {
-        const json = await res.json().catch(() => ({})) as { error?: { message?: string } };
-        setDeleteError(json.error?.message ?? t('deleteError'));
+        // story #2485 — backend delete_sprint()는 generic HTTP상태 코드만 낸다
+        // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
+        setDeleteError(t('deleteError'));
         return;
       }
       // 삭제 성공 — 목록에서 제거하고 상세 패널·다이얼로그를 닫는다.

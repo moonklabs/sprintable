@@ -87,8 +87,9 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
         body: JSON.stringify({ mode: stagedMode }),
       });
       if (!res.ok) {
-        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        addToast({ type: 'error', title: json?.error?.message ?? t('messagingPolicySaveError') });
+        // story #2485 — backend update_message_policy()는 generic HTTP상태 코드만
+        // 낸다(진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
+        addToast({ type: 'error', title: t('messagingPolicySaveError') });
         return;
       }
       setMode(stagedMode);
@@ -107,8 +108,9 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
         body: JSON.stringify({ member_id: memberId }),
       });
       if (!res.ok) {
-        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        addToast({ type: 'error', title: json?.error?.message ?? tc('error') });
+        // story #2485 — backend add_allowlist_member()는 generic HTTP상태 코드만
+        // 낸다(진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
+        addToast({ type: 'error', title: tc('error') });
         return;
       }
       const json = await res.json() as { data?: { allowlist?: string[] } };
@@ -124,8 +126,9 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
     try {
       const res = await fetch(`/api/agents/${agentId}/message-policy/allowlist/${memberId}`, { method: 'DELETE' });
       if (!res.ok) {
-        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        addToast({ type: 'error', title: json?.error?.message ?? tc('error') });
+        // story #2485 — backend remove_allowlist_member()는 generic HTTP상태 코드만
+        // 낸다(진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
+        addToast({ type: 'error', title: tc('error') });
         return;
       }
       const json = await res.json() as { data?: { allowlist?: string[] } };

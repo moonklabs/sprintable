@@ -64,8 +64,10 @@ export function McpConnectionSettings({ projectId }: { projectId: string }) {
     try {
       const response = await fetch(`/api/projects/${projectId}/mcp-connections`, { cache: 'no-store' });
       const json = await response.json().catch(() => null);
+      // story #2485 — 이 Next.js 라우트는 OSS에서 빈 배열 하드리턴 stub이라 실제로는
+      // 거의 항상 200이다(그라운딩 확認) — 방어적으로 raw 서버 message 노출만 제거.
       if (!response.ok) {
-        throw new Error(json?.error?.message ?? t('loadError'));
+        throw new Error(t('loadError'));
       }
       const nextConnections = (json?.data?.connections ?? []) as McpConnectionSummary[];
       setConnections(nextConnections);
@@ -115,9 +117,12 @@ export function McpConnectionSettings({ projectId }: { projectId: string }) {
           label: labelDrafts[serverKey]?.trim() || undefined,
         }),
       });
+      // story #2485 — 그라운딩(2026-08-06): 이 라우트는 backend에 존재하지 않아 항상
+      // 404다(BE 미구현 — 별도 이슈로 보고, FE에서 code로 갈라도 해결 안 됨). raw 서버
+      // message 노출만 우선 제거.
       const json = await response.json().catch(() => null);
       if (!response.ok) {
-        throw new Error(json?.error?.message ?? t('connectError'));
+        throw new Error(t('connectError'));
       }
       setSecretDrafts((current) => ({ ...current, [serverKey]: '' }));
       setMessage({ type: 'success', text: t('connectSuccess', { server: json?.data?.displayName ?? serverKey }) });
@@ -134,9 +139,11 @@ export function McpConnectionSettings({ projectId }: { projectId: string }) {
     setMessage(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/mcp-connections/${serverKey}`, { method: 'DELETE' });
-      const json = await response.json().catch(() => null);
+      // story #2485 — 그라운딩(2026-08-06): 이 라우트는 backend에 존재하지 않아 항상
+      // 404다(BE 미구현 — 별도 이슈로 보고, FE에서 code로 갈라도 해결 안 됨). raw 서버
+      // message 노출만 우선 제거.
       if (!response.ok) {
-        throw new Error(json?.error?.message ?? t('disconnectError'));
+        throw new Error(t('disconnectError'));
       }
       setMessage({ type: 'success', text: t('disconnectSuccess') });
       await loadConnections();
@@ -162,9 +169,11 @@ export function McpConnectionSettings({ projectId }: { projectId: string }) {
           notes: requestNotes.trim() || undefined,
         }),
       });
-      const json = await response.json().catch(() => null);
+      // story #2485 — 그라운딩(2026-08-06): 이 라우트는 backend에 존재하지 않아 항상
+      // 404다(BE 미구현 — 별도 이슈로 보고, FE에서 code로 갈라도 해결 안 됨). raw 서버
+      // message 노출만 우선 제거.
       if (!response.ok) {
-        throw new Error(json?.error?.message ?? t('requestError'));
+        throw new Error(t('requestError'));
       }
       setRequestName('');
       setRequestUrl('');

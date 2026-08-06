@@ -946,8 +946,9 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
     try {
       const res = await fetch(`/api/goals/${id}`, { method: 'DELETE' });
       if (!res.ok) {
-        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        addToast({ type: 'error', title: json?.error?.message ?? '목표 삭제에 실패했습니다.' });
+        // story #2485 — backend delete_goal()은 generic HTTP상태 코드만 낸다
+        // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
+        addToast({ type: 'error', title: '목표 삭제에 실패했습니다.' });
         void fetchGoals();
       }
     } catch {

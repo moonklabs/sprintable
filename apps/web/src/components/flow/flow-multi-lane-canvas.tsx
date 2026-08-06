@@ -197,8 +197,11 @@ export function FlowMultiLaneCanvas({
         body: JSON.stringify({ target_id: params.targetId, relation_kind: params.relationKind }),
       });
       const json = await res.json().catch(() => null);
+      // story #2485 — `json.detail`은 실 envelope에 없는 필드라 이 분기는 항상
+      // 죽어있었다(그라운딩 확認). backend create_story_reference_candidate()는
+      // generic HTTP상태 코드만 낸다 — 고정 폴백만 사용.
       if (!res.ok) {
-        return { ok: false, error: typeof json?.detail === 'string' ? json.detail : t('portLinkErrorFallback') };
+        return { ok: false, error: t('portLinkErrorFallback') };
       }
       const epicId = findEpicIdForStoryId(params.apiSourceId) ?? findEpicIdForStoryId(params.targetId);
       if (epicId) {
@@ -227,8 +230,10 @@ export function FlowMultiLaneCanvas({
     try {
       const res = await fetch(`/api/stories/${anchorStoryId}/reference-candidates/${candidateId}`, { method: 'DELETE' });
       if (!res.ok) {
-        const json = await res.json().catch(() => null);
-        return { ok: false, error: typeof json?.detail === 'string' ? json.detail : t('portLinkErrorFallback') };
+        // story #2485 — `json.detail`은 실 envelope에 없는 필드라 이 분기는 항상
+        // 죽어있었다(그라운딩 확認). backend undeclare_story_reference_candidate()는
+        // generic HTTP상태 코드만 낸다 — 고정 폴백만 사용.
+        return { ok: false, error: t('portLinkErrorFallback') };
       }
       setState((prev) => {
         if (prev.kind !== 'ready') return prev;
@@ -253,8 +258,10 @@ export function FlowMultiLaneCanvas({
     try {
       const res = await fetch(`/api/stories/${anchorStoryId}/reference-candidates/${candidateId}/reject`, { method: 'POST' });
       if (!res.ok) {
-        const json = await res.json().catch(() => null);
-        return { ok: false, error: typeof json?.detail === 'string' ? json.detail : t('portRejectErrorFallback') };
+        // story #2485 — `json.detail`은 실 envelope에 없는 필드라 이 분기는 항상
+        // 죽어있었다(그라운딩 확認). backend reject_story_reference_candidate()는
+        // generic HTTP상태 코드만 낸다 — 고정 폴백만 사용.
+        return { ok: false, error: t('portRejectErrorFallback') };
       }
       setState((prev) => {
         if (prev.kind !== 'ready') return prev;
