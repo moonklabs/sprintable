@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 
 function checkPasswordRules(pw: string) {
@@ -20,6 +21,7 @@ function countCategories(rules: ReturnType<typeof checkPasswordRules>) {
 }
 
 export default function RegisterPage() {
+  const t = useTranslations('register');
   const router = useRouter();
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
@@ -50,7 +52,7 @@ export default function RegisterPage() {
       });
       const json = await res.json() as { data?: { ok: boolean }; error?: { message: string } };
       if (!res.ok || !json.data?.ok) {
-        setError(json.error?.message ?? 'Registration failed. Please try again.');
+        setError(json.error?.message ?? t('registrationFailed'));
         return;
       }
       const meRes = await fetch('/api/me');
@@ -58,7 +60,7 @@ export default function RegisterPage() {
       router.push(meJson.data?.org_id ? '/inbox' : '/onboarding');
       router.refresh();
     } catch {
-      setError('Registration failed. Please try again.');
+      setError(t('registrationFailed'));
     } finally {
       setLoading(false);
     }
@@ -76,13 +78,13 @@ export default function RegisterPage() {
             markClassName="h-14"
             wordmarkClassName="h-5"
           />
-          <p className="text-sm text-muted-foreground">Create your account</p>
+          <p className="text-sm text-muted-foreground">{t('subtitle')}</p>
         </div>
 
         <div className="space-y-3">
           <input
             type="text"
-            placeholder="Name"
+            placeholder={t('namePlaceholder')}
             autoComplete="name"
             className="w-full rounded-lg border border-border px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
             value={displayName}
@@ -92,7 +94,7 @@ export default function RegisterPage() {
           />
           <input
             type="email"
-            placeholder="Email"
+            placeholder={t('emailPlaceholder')}
             autoComplete="email"
             className="w-full rounded-lg border border-border px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
             value={email}
@@ -102,7 +104,7 @@ export default function RegisterPage() {
           />
           <input
             type="password"
-            placeholder="Password"
+            placeholder={t('passwordPlaceholder')}
             autoComplete="new-password"
             className={`w-full rounded-lg border px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand ${
               showRules && !isPasswordValid ? 'border-destructive' : 'border-border'
@@ -114,10 +116,10 @@ export default function RegisterPage() {
           />
           {showRules && (
             <ul className="space-y-1 text-xs">
-              <RuleItem met={rules.length} label="At least 8 characters" />
+              <RuleItem met={rules.length} label={t('ruleLength')} />
               <li className={`flex items-center gap-1.5 ${categoriesMet >= 3 ? 'text-success' : 'text-muted-foreground/60'}`}>
                 <span>{categoriesMet >= 3 ? '✓' : '○'}</span>
-                <span>At least 3 of: uppercase, lowercase, digit, special character ({categoriesMet}/3)</span>
+                <span>{t('ruleCategories', { count: categoriesMet })}</span>
               </li>
             </ul>
           )}
@@ -131,13 +133,13 @@ export default function RegisterPage() {
               disabled={loading}
             />
             <span className="text-xs text-muted-foreground">
-              I agree to the{' '}
+              {t('tosPrefix')}{' '}
               <Link href="/terms" target="_blank" className="font-medium text-brand hover:text-brand/80">
-                Terms of Service
+                {t('termsOfService')}
               </Link>{' '}
-              and{' '}
+              {t('and')}{' '}
               <Link href="/privacy" target="_blank" className="font-medium text-brand hover:text-brand/80">
-                Privacy Policy
+                {t('privacyPolicy')}
               </Link>
             </span>
           </label>
@@ -152,7 +154,7 @@ export default function RegisterPage() {
             disabled={loading || !displayName.trim() || !email.trim() || !password.trim() || !tosAccepted}
             className="flex w-full min-h-[44px] items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 disabled:opacity-50"
           >
-            {loading ? 'Creating account...' : 'Sign up'}
+            {loading ? t('creatingAccount') : t('submit')}
           </button>
         </div>
 
@@ -160,13 +162,13 @@ export default function RegisterPage() {
           <div className="space-y-3">
             <div className="relative flex items-center">
               <div className="flex-grow border-t border-border/50" />
-              <span className="mx-3 flex-shrink text-xs text-muted-foreground/60">or continue with</span>
+              <span className="mx-3 flex-shrink text-xs text-muted-foreground/60">{t('orContinueWith')}</span>
               <div className="flex-grow border-t border-border/50" />
             </div>
 
             <a
               href={tosAccepted ? '/auth/login?provider=google&tos_accepted=true' : undefined}
-              onClick={!tosAccepted ? (e) => { e.preventDefault(); setError('Please agree to the Terms of Service and Privacy Policy first.'); } : undefined}
+              onClick={!tosAccepted ? (e) => { e.preventDefault(); setError(t('tosRequiredError')); } : undefined}
               className={`flex w-full min-h-[44px] items-center justify-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-foreground/80 transition hover:bg-muted/50 ${!tosAccepted ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24">
@@ -175,15 +177,15 @@ export default function RegisterPage() {
                 <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
                 <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
               </svg>
-              Continue with Google
+              {t('continueWithGoogle')}
             </a>
           </div>
         )}
 
         <p className="text-center text-sm text-muted-foreground">
-          Already have an account?{' '}
+          {t('alreadyHaveAccount')}{' '}
           <Link href="/login" className="font-medium text-brand hover:text-brand/80">
-            Sign in
+            {t('signIn')}
           </Link>
         </p>
       </div>

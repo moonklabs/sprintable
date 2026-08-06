@@ -717,6 +717,26 @@
     "invalidProvider": "Invalid OAuth provider.",
     "oauthNativeIssueFailed": "Failed to hand off your login to the app. Please try again."
   },
+  "register": {
+    "subtitle": "Create your account",
+    "namePlaceholder": "Name",
+    "emailPlaceholder": "Email",
+    "passwordPlaceholder": "Password",
+    "ruleLength": "At least 8 characters",
+    "ruleCategories": "At least 3 of: uppercase, lowercase, digit, special character ({count}/3)",
+    "tosPrefix": "I agree to the",
+    "termsOfService": "Terms of Service",
+    "and": "and",
+    "privacyPolicy": "Privacy Policy",
+    "creatingAccount": "Creating account...",
+    "submit": "Sign up",
+    "orContinueWith": "or continue with",
+    "continueWithGoogle": "Continue with Google",
+    "tosRequiredError": "Please agree to the Terms of Service and Privacy Policy first.",
+    "registrationFailed": "Registration failed. Please try again.",
+    "alreadyHaveAccount": "Already have an account?",
+    "signIn": "Sign in"
+  },
   "onboarding": {
     "createOrg": "Create Organization",
     "welcome": "Welcome to Sprintable!",
