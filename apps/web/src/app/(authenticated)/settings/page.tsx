@@ -495,10 +495,11 @@ export default function SettingsPage() {
       setProjectActionMessage({ type: 'success', text: t('projectUpdated') });
       router.refresh();
     } else {
-      // story #2485 — ⚠️backend update_project()가 슬러그형식(400)·중복(409) 등 실제
-      // code를 낼 수 있으나 packages/storage-api의 mapApiError가 404/403 외 전부
-      // INTERNAL_ERROR로 뭉개 지금은 FE에 절대 안 도달한다(#2488로 별도 보고) — 여기서
-      // code 분기를 지으면 죽은 분기가 되니 짓지 않는다. generic 폴백만.
+      // story #2485 — backend update_project()가 슬러그형식(400)·중복(409) 등 실제
+      // code를 낼 수 있다. story #2488 — 그 code가 여기까지 도달 못 하던 근본원인
+      // (packages/storage-api mapApiError가 404/403 외 전부 뭉갬)은 고쳤다. 다만
+      // «그 code로 실제 분기 짓기»는 이 story의 follow-up 범위(PO 확定) — 지금은
+      // 여전히 generic 폴백만(dead branch를 새로 짓지 않되, pipe 자체는 이제 정상).
       setProjectActionMessage({ type: 'error', text: t('projectUpdateFailed') });
     }
     setSavingProject(false);

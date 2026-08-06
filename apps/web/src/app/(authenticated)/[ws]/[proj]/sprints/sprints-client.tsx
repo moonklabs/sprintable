@@ -539,8 +539,8 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         } else {
           // story #2485 — HYPOTHESIS_REQUIRED_FOR_ACTIVATION 외 나머지는 backend가
           // generic HTTP상태 코드만 낸다(그라운딩 확認) — raw 서버 message 노출 제거.
-          // ⚠️이 code 자체도 packages/storage-api mapApiError가 404/403 외 다 뭉개
-          // 실제로는 도달 안 하는 상태(별도 이슈로 보고) — 그 버그가 고쳐지면 바로 동작.
+          // story #2488 — 위 code 체크가 도달 못 하던 근본원인(packages/storage-api
+          // mapApiError가 404/403 외 다 뭉갬)을 고쳤다 — 이 분기는 이제 실동작한다.
           setActionError(t('activateError'));
         }
         return;
