@@ -1,18 +1,22 @@
 
 import type { ISprintRepository, Sprint, CreateSprintInput, UpdateSprintInput } from '@sprintable/core-storage';
+import { NotFoundError, ForbiddenError } from '@sprintable/core-storage';
 import { ApiSprintRepository, fastapiCall } from '@sprintable/storage-api';
 import { requireOrgAdmin } from '@/lib/admin-check';
 import { NotificationService } from './notification.service';
 
 export { CreateSprintInput, UpdateSprintInput };
 
-export class NotFoundError extends Error {
-  constructor(message: string) { super(message); this.name = 'NotFoundError'; }
-}
-
-export class ForbiddenError extends Error {
-  constructor(message: string) { super(message); this.name = 'ForbiddenError'; }
-}
+// story #2488 — 이 파일이 독자적으로 정의하던 동명 클래스는 mapApiError(packages/
+// storage-api)가 던지는 @sprintable/core-storage의 NotFoundError/ForbiddenError와
+// 클래스ID가 달라 handleApiError(api-error.ts)의 instanceof 체크를 통과 못 하고
+// 조용히 generic 400으로 샜다(task.ts는 이미 이 재-export 패턴 — 여기만 어긋나 있었다).
+// core-storage 것을 import+재-export해 통일한다(shape 동일: message만 받는 생성자,
+// name 세팅 — 기존 `new NotFoundError(...)` 호출부·`err.name === 'NotFoundError'`
+// 체크 전부 무변화로 계속 동작). `export { X } from 'Y'`(재-export 전용 문법)는 이
+// 파일 안에서 로컬 바인딩을 안 만들어 아래 `throw new NotFoundError(...)` 호출부가
+// 깨진다 — import 후 재-export해야 둘 다 된다.
+export { NotFoundError, ForbiddenError };
 
 async function getSpAt(): Promise<string> {
   try {
