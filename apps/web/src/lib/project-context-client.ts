@@ -98,5 +98,11 @@ export function resolveEffectiveProjectId(
     const stored = window.sessionStorage.getItem(TAB_PROJECT_STORAGE_KEY);
     if (stored && accessibleIds.has(stored)) return stored;
   }
-  return serverProjectId;
+  // story #2490 — 이전엔 이 마지막 폴백(serverProjectId, me.project_id=쿠키/JWT 유래)만
+  // accessibleIds 체크가 없었다. stale한 값이 비멤버 프로젝트를 가리키면 무검증으로
+  // 채택돼(fire #2486 재현, 퍼펫티어 실측) X-Project-Id로 실려 project-gated 엔드포인트를
+  // 오작동시켰다 — 다른 멤버 프로젝트로 «조용히 점프»하지 않고 미선택(undefined) 상태로
+  // 떨어뜨린다(호출부 대부분이 이미 `!projectId` 가드로 graceful 폴백 UI를 갖고 있다).
+  if (serverProjectId && accessibleIds.has(serverProjectId)) return serverProjectId;
+  return undefined;
 }

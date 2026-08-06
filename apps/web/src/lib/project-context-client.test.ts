@@ -39,6 +39,21 @@ describe('resolveEffectiveProjectId (hydrated 게이팅 — SSR/첫 CSR 렌더 d
     expect(resolveEffectiveProjectId(null, 'server-id', accessible, true)).toBe('server-id');
   });
 
+  // story #2490 — fire #2486 재현(PO 퍼펫티어, 2026-08-06)에서 발견: serverProjectId(=me.
+  // project_id, 쿠키/JWT 유래)만 accessibleIds 체크가 빠져있어, stale해 비멤버 프로젝트를
+  // 가리켜도 무검증 채택됐다. 다른 멤버 프로젝트로 조용히 점프하지 않고 undefined(미선택)로
+  // 떨어뜨린다 — 호출부 대부분이 이미 `!projectId` 가드로 graceful 폴백을 갖고 있다.
+  it('양성대조 — serverProjectId가 비멤버 프로젝트를 가리키면 undefined로 떨어진다(다른 프로젝트로 조용히 점프하지 않는다)', () => {
+    const accessible = new Set(['some-other-member-project']);
+    expect(resolveEffectiveProjectId(null, 'non-member-project', accessible, true)).toBeUndefined();
+  });
+
+  it('sessionStorage에 남은 비멤버 stale 값도 undefined로 떨어진다(자기강화 루프의 시작점 차단)', () => {
+    window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, 'non-member-project');
+    const accessible = new Set(['some-other-member-project']);
+    expect(resolveEffectiveProjectId(null, 'non-member-project', accessible, true)).toBeUndefined();
+  });
+
   it('rejects an inaccessible stored value even when hydrated', () => {
     window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, 'not-a-member-project');
     const accessible = new Set(['server-id']);
