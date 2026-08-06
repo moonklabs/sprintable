@@ -499,17 +499,14 @@ def require_api_scope(required_scope: str):
     return _check
 
 
-async def get_verified_org_id(
-    auth: AuthContext = Depends(get_current_user),
-    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
-    x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
-    request: Request = None,
+async def _resolve_verified_org_id(
+    auth: AuthContext,
+    x_org_id: str | None,
+    request: Request | None,
 ) -> uuid.UUID:
-    """org_id 추출 — X-Org-Id 헤더 fallback 시 DB membership 검증, X-Project-Id 헤더 시 project 소속 검증.
-    API Key 경로는 HTTP method 기반 scope 자동 체크.
-
-    story #2459(§6 봉합①): 요청-수명 ``Depends(get_db)`` 대신 검증마다 전용 단명 세션 —
-    get_current_user와 동일 근거(호출 대상이 전부 읽기 전용, #2457로 이미 성립)."""
+    """``get_verified_org_id``/``get_verified_org_id_no_project_gate`` 공유 atom — X-Org-Id 헤더
+    fallback 시 DB membership 검증까지의 org_id 해소. X-Project-Id 프로젝트-멤버십 체크는
+    여기 없다(호출부가 필요할 때만 추가로 얹는다 — 아래 두 함수 참고)."""
     # API Key scope 체크 (request 있을 때만 — 직접 단위 테스트 호출 시 스킵)
     if request is not None:
         _check_api_key_scope(auth, request.method, request.url.path)
@@ -531,6 +528,43 @@ async def get_verified_org_id(
         # 헤더 사용 시 항상 membership 검증 (JWT org_id와 다를 수 있음)
         async with async_session_factory() as db:
             await _verify_org_membership(auth.user_id, org_id, db, request)
+
+    return org_id
+
+
+async def get_verified_org_id_no_project_gate(
+    auth: AuthContext = Depends(get_current_user),
+    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+    request: Request = None,
+) -> uuid.UUID:
+    """org_id 추출 — ``get_verified_org_id``와 org 해소/membership 검증은 동일하나,
+    X-Project-Id 헤더가 있어도 project-membership 을 검사하지 **않는다**.
+
+    story #2486 그라운딩(2026-08-06) — role_templates 에 이어 ``agents.py`` 라우터에서도
+    재현: BFF(``fastapi-proxy.ts``)가 모든 프록시 호출에 브라우저 탭의 "effective project"를
+    X-Project-Id 로 무조건 실어 보내는데, ``agents.py`` 6개 엔드포인트(생성/recruit/
+    connection-artifact/verify-connection/verification-status/access-matrix)는 전부 agent_id
+    소유권(``assert_agent_owner``)·요청 body(scope_mode/project_ids)·org owner/admin 여부로
+    인가를 자체 판정한다 — "지금 탭이 보고 있는 프로젝트"와는 무관하다. 그런데
+    ``get_verified_org_id``를 그대로 썼던 탓에, org owner라도 탭이 자신이 속하지 않은
+    프로젝트를 가리키고 있으면 이 엔드포인트들이 project-access 403으로 막혔다(라이브 재현:
+    채용 위저드 1단계 role-catalog 다음, 2단계 "채용하기"에서 재발). project 스코프가 실제로
+    필요한 호출은 (이 함수가 아니라) ``get_verified_org_id``를 그대로 쓴다."""
+    return await _resolve_verified_org_id(auth, x_org_id, request)
+
+
+async def get_verified_org_id(
+    auth: AuthContext = Depends(get_current_user),
+    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+    x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
+    request: Request = None,
+) -> uuid.UUID:
+    """org_id 추출 — X-Org-Id 헤더 fallback 시 DB membership 검증, X-Project-Id 헤더 시 project 소속 검증.
+    API Key 경로는 HTTP method 기반 scope 자동 체크.
+
+    story #2459(§6 봉합①): 요청-수명 ``Depends(get_db)`` 대신 검증마다 전용 단명 세션 —
+    get_current_user와 동일 근거(호출 대상이 전부 읽기 전용, #2457로 이미 성립)."""
+    org_id = await _resolve_verified_org_id(auth, x_org_id, request)
 
     # X-Project-Id 헤더 = per-request 프로젝트 스코프 **override**(d802da27/85614dd9).
     # JWT project_id 는 탭 공유라, 같은 유저가 여러 프로젝트 탭을 열어도 mutation 이 JWT 의 단일
