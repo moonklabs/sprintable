@@ -495,12 +495,19 @@ export default function SettingsPage() {
       setProjectActionMessage({ type: 'success', text: t('projectUpdated') });
       router.refresh();
     } else {
-      // story #2485 — backend update_project()가 슬러그형식(400)·중복(409) 등 실제
-      // code를 낼 수 있다. story #2488 — 그 code가 여기까지 도달 못 하던 근본원인
-      // (packages/storage-api mapApiError가 404/403 외 전부 뭉갬)은 고쳤다. 다만
-      // «그 code로 실제 분기 짓기»는 이 story의 follow-up 범위(PO 확定) — 지금은
-      // 여전히 generic 폴백만(dead branch를 새로 짓지 않되, pipe 자체는 이제 정상).
-      setProjectActionMessage({ type: 'error', text: t('projectUpdateFailed') });
+      // story #2485 — backend update_project()는 슬러그형식(400→BAD_REQUEST)·중복
+      // (409→CONFLICT) plain-string 에러를 낸다(dict-coded 아니라 진짜 business code는
+      // 없음, generic HTTP상태 매핑만). story #2488 전엔 packages/storage-api의
+      // mapApiError가 404/403 외 전부 뭉개 이 code 자체가 여기 도달 못 했다 — 그 pipe를
+      // #2488이 고쳐 이제 실분기 가능(#2489, 이 story가 그 follow-up).
+      const json = await res.json().catch(() => null) as { error?: { code?: string } } | null;
+      if (json?.error?.code === 'CONFLICT') {
+        setProjectActionMessage({ type: 'error', text: t('projectSlugTaken') });
+      } else if (json?.error?.code === 'BAD_REQUEST') {
+        setProjectActionMessage({ type: 'error', text: t('projectSlugInvalid') });
+      } else {
+        setProjectActionMessage({ type: 'error', text: t('projectUpdateFailed') });
+      }
     }
     setSavingProject(false);
   };
