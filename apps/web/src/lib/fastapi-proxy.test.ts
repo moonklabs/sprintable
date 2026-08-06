@@ -9,7 +9,32 @@ const { getServerSessionMock } = vi.hoisted(() => ({
 
 vi.mock('@/lib/db/server', () => ({ getServerSession: getServerSessionMock }));
 
-import { proxyToFastapi, proxyToFastapiWithParams, proxyToFastapiWrapped } from './fastapi-proxy';
+import { proxyToFastapi, proxyToFastapiWithParams, proxyToFastapiWrapped, mapApiError } from './fastapi-proxy';
+import { NotFoundError, ForbiddenError } from '@sprintable/core-storage';
+
+// story #2488 — packages/storage-api/src/utils.ts와 완전 동일한 사본(중복 구현)이라
+// 같은 회귀가드를 여기도 둔다(합치는 consolidation은 별개, PO 확定).
+describe('fastapi-proxy — mapApiError code/status 보존 (story #2488)', () => {
+  it('404 — NotFoundError instanceof 유지 + code/status 보존', () => {
+    const err = mapApiError(404, { error: { code: 'STORY_NOT_FOUND', message: 'Story not found' } });
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err.code).toBe('STORY_NOT_FOUND');
+    expect(err.status).toBe(404);
+  });
+
+  it('403 — ForbiddenError instanceof 유지 + code/status 보존', () => {
+    const err = mapApiError(403, { error: { code: 'FORBIDDEN', message: 'No access' } });
+    expect(err).toBeInstanceOf(ForbiddenError);
+    expect(err.code).toBe('FORBIDDEN');
+    expect(err.status).toBe(403);
+  });
+
+  it('그 외(422) — 이전엔 generic Error(message만)로 뭉갰다. 이제 code·status가 보존된다', () => {
+    const err = mapApiError(422, { error: { code: 'SOME_CODE', message: 'x' } });
+    expect(err.code).toBe('SOME_CODE');
+    expect(err.status).toBe(422);
+  });
+});
 
 describe('fastapi-proxy — X-Project-Id override passthrough (story 7d6b770b 회귀가드)', () => {
   beforeEach(() => {

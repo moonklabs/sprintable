@@ -8,11 +8,20 @@ import { apiSuccess, ApiErrors } from '@/lib/api-response';
 
 import { NotFoundError, ForbiddenError } from '@sprintable/core-storage';
 
-export function mapApiError(status: number, body: { error?: { code?: string; message?: string } }): Error {
+/** story #2488 — packages/storage-api/src/utils.ts의 mapApiError와 완전 동일한
+ * 버그(404/403 외 code·status discard)를 가진 사본. 같은 fix를 여기도 적용한다
+ * (PO 확定: 이번 PR 스코프, 두 파일 합치는 consolidation은 별개). */
+export interface ApiCallError extends Error {
+  code?: string;
+  status?: number;
+}
+
+export function mapApiError(status: number, body: { error?: { code?: string; message?: string } }): ApiCallError {
   const msg = body.error?.message ?? `HTTP ${status}`;
-  if (status === 404) return new NotFoundError(msg);
-  if (status === 403) return new ForbiddenError(msg);
-  return new Error(msg);
+  const code = body.error?.code;
+  if (status === 404) return Object.assign(new NotFoundError(msg), { code: code ?? 'NOT_FOUND', status });
+  if (status === 403) return Object.assign(new ForbiddenError(msg), { code: code ?? 'FORBIDDEN', status });
+  return Object.assign(new Error(msg), { code: code ?? `HTTP_${status}`, status });
 }
 
 export async function fastapiCall<T>(
