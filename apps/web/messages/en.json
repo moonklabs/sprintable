@@ -104,7 +104,9 @@
     "switcherProjectDescPlaceholder": "A short description of the project",
     "switcherCreating": "Creating…",
     "switcherCreateButton": "Create",
-    "switcherCreateProjectError": "Couldn't create the project. Please try again in a moment."
+    "switcherCreateProjectError": "Couldn't create the project. Please try again in a moment.",
+    "orgLimitBannerTitle": "Upgrade required",
+    "orgLimitUpgradeLink": "Upgrade plan →"
   },
   "storage": {
     "title": "Storage",
@@ -768,6 +770,7 @@
     "skip": "Skip",
     "stepOf": "{current} / {total}",
     "createOrgFailed": "Failed to create organization",
+    "orgLimitExceededError": "The free plan allows up to {limit} organization(s). Upgrade your plan to continue.",
     "emailVerifyRequiredError": "Email verification is required — please verify your email before creating an organization.",
     "emailVerifyGuidance": "Check your inbox (including spam) for the address you signed up with, and click the verification link. If you don't see it, you can resend it below.",
     "resendVerificationCta": "Resend verification email",

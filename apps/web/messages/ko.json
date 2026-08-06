@@ -104,7 +104,9 @@
     "switcherProjectDescPlaceholder": "프로젝트에 대한 간단한 설명",
     "switcherCreating": "생성 중…",
     "switcherCreateButton": "만들기",
-    "switcherCreateProjectError": "프로젝트를 만들지 못했습니다. 잠시 후 다시 시도해 주세요."
+    "switcherCreateProjectError": "프로젝트를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    "orgLimitBannerTitle": "업그레이드가 필요합니다",
+    "orgLimitUpgradeLink": "요금제 업그레이드 →"
   },
   "storage": {
     "title": "스토리지",
@@ -768,6 +770,7 @@
     "skip": "건너뛰기",
     "stepOf": "{current} / {total}",
     "createOrgFailed": "조직 생성에 실패했습니다",
+    "orgLimitExceededError": "무료 플랜은 조직을 {limit}개까지 만들 수 있습니다. 계속하려면 요금제를 업그레이드해 주세요.",
     "emailVerifyRequiredError": "이메일 인증이 필요합니다 — 조직을 만들려면 먼저 이메일 인증을 완료해 주세요.",
     "emailVerifyGuidance": "가입하신 이메일 받은편지함(스팸함 포함)을 확인하고, 인증 링크를 클릭해 주세요. 메일이 안 보이면 아래에서 다시 보낼 수 있습니다.",
     "resendVerificationCta": "인증 메일 재전송",

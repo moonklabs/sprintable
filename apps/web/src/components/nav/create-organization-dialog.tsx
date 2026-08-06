@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useTranslations } from 'next-intl';
 import {
   Dialog,
   DialogContent,
@@ -34,6 +35,13 @@ export function CreateOrganizationDialog({
   onOpenChange,
   onCreated,
 }: CreateOrganizationDialogProps) {
+  const t = useTranslations('nav');
+  // story #2470 후속(유나 홀름 design:changes) — 온보딩 wizard 경로(#2470 본체)는 완전
+  // i18n인데 이 dialog의 한도 배너 본문은 별도로 하드코딩 영한혼용이었다("Free 플랜
+  // Organization 한도 초과"). 같은 개념(무료 플랜 조직 한도)을 두 곳에서 따로 번역해 두면
+  // 나중에 한쪽만 고쳐지는 갈림이 재발하므로, 온보딩과 같은 키(orgLimitExceededError)를
+  // 재사용한다 — 문구가 실제로 하나의 출처를 갖는다.
+  const tOnboarding = useTranslations('onboarding');
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [slugTouched, setSlugTouched] = useState(false);
@@ -83,10 +91,15 @@ export function CreateOrganizationDialog({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim(), slug: slug.trim() }),
       });
-      const json = await res.json() as { data?: { id: string; name: string; slug: string }; error?: { message?: string }; detail?: { code?: string; message?: string } | string };
+      const json = await res.json() as { data?: { id: string; name: string; slug: string }; error?: { code?: string; message?: string }; detail?: { code?: string; message?: string } | string };
       if (!res.ok) {
+        // story #2470 — 실측(2026-08-06): 응답 envelope은 `{error:{code,...}}`다(BE
+        // HTTPException(detail=...)이 exception handler를 거쳐 `error`로 재포장된다).
+        // `json.detail`만 보던 이전 체크는 실제 응답에 그 필드가 없어 항상 죽은 분기였고
+        // (한도 초과여도 이 브랜치를 못 타 raw 영문 message로 계속 폴백) — `error.code`를
+        // 1순위로, `detail`은 하위호환 폴백으로 남긴다.
         const detail = typeof json.detail === 'object' ? json.detail : null;
-        if (res.status === 402 && detail?.code === 'PLAN_LIMIT_EXCEEDED') {
+        if (res.status === 402 && (json.error?.code === 'PLAN_LIMIT_EXCEEDED' || detail?.code === 'PLAN_LIMIT_EXCEEDED')) {
           bumpPlanLimitNonce();
           setPlanLimitHit(true);
           return;
@@ -116,14 +129,14 @@ export function CreateOrganizationDialog({
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
           {planLimitHit && (
             <div key={planLimitNonce} role="alert" aria-live="assertive" aria-atomic="true" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm space-y-1">
-              <p className="font-medium text-amber-800">Free 플랜 Organization 한도 초과</p>
-              <p className="text-amber-700">Free 플랜은 Organization 1개까지만 생성할 수 있습니다.</p>
+              <p className="font-medium text-amber-800">{t('orgLimitBannerTitle')}</p>
+              <p className="text-amber-700">{tOnboarding('orgLimitExceededError', { limit: 1 })}</p>
               {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2 오탐, invite-accept-client.tsx 주석 참고 */}
               <a
                 href="/settings?tab=billing"
                 className="inline-block mt-1 text-xs font-medium text-amber-800 underline underline-offset-2 hover:text-amber-900"
               >
-                Team 또는 Pro로 업그레이드하기 →
+                {t('orgLimitUpgradeLink')}
               </a>
             </div>
           )}
