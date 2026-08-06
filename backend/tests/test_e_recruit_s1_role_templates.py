@@ -495,14 +495,13 @@ async def test_role_templates_still_401_without_auth_http(mock_session):
     ``get_current_user``(Authorization 헤더 없으면 401)를 그대로 태운다."""
     from httpx import ASGITransport, AsyncClient
 
-    from app.dependencies.database import get_db, get_read_db
     from app.main import app
+    from tests.conftest import override_db_and_read
 
     async def _override_db():
         yield mock_session
 
-    app.dependency_overrides[get_db] = _override_db
-    app.dependency_overrides[get_read_db] = _override_db
+    override_db_and_read(app, _override_db)
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             list_resp = await client.get("/api/v2/role-templates")
