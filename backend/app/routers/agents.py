@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.dependencies.ownership import assert_agent_owner
 from app.models.project import Project
@@ -91,7 +91,7 @@ async def create_org_agent(
     body: OrgAgentCreate,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     """org-level 에이전트 생성 + scope_mode 프로젝트 집합 grant. 응답에 api_key 1회 노출."""
     # 권한: create_team_member 와 동일 규칙 재사용(agent actor 제약).
@@ -186,7 +186,7 @@ async def get_agent_connection_artifact(
     accept_language: str | None = Header(None, alias="Accept-Language"),
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     """OB-1 AC3 + E-RECRUIT S5(story 4fca5a3e): 에이전트 activation 번들 — 同 SSOT generator 소비.
 
@@ -356,7 +356,7 @@ async def recruit_agent_endpoint(
     accept_language: str | None = Header(None, alias="Accept-Language"),
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     """E-RECRUIT S3(story ff2996d0): role_template + runtime → 자율 운영 지침 합성(S2) + persona
     upsert(G7) + role-derived scope 로 키 회전(G2/G3) + 활성화 번들(``.mcp.json`` + 실 key 1회) 반환.
@@ -449,7 +449,7 @@ async def verify_agent_connection(
     transport: str | None = None,
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     """OB-2 AC1: 합성 connection_test Event 를 **실 SSE 경로**로 발사 → 라운드트립 verify 시작.
 
@@ -512,7 +512,7 @@ async def agent_verification_status(
     transport: str = "stdio",
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     """OB-2 AC2: 레일 폴링/조회(BE↔FE 계약 락). SSE 우선·이 poll 은 fallback.
 
@@ -537,14 +537,14 @@ async def agent_verification_status(
 async def get_agent_access_matrix(
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> list[dict]:
     """[에이전트 관리 IA·Phase 2] org-wide 에이전트×프로젝트 접근권한 매트릭스 시드(story da4c6b2d).
 
     PO crux 승인(2026-07-07): 후보 A 채택 — 프로젝트별 fan-out(N agents × M projects 왕복) 대신
     단일 인덱스드 쿼리로 org 전체 grant 를 한 번에 반환. FE 는 이미 별도로 가진 org 에이전트
     전체 목록·org 프로젝트 전체 목록에 이 sparse grant 목록만 겹쳐 매트릭스 셀 상태를 정한다
-    (record_id 있음=허용, 없음=차단). 경로에 org path-param 을 안 둔다 — `get_verified_org_id` 로
+    (record_id 있음=허용, 없음=차단). 경로에 org path-param 을 안 둔다 — `get_verified_org_id_no_project_gate` 로
     caller 의 검증된 org 만 암묵 사용(클라이언트가 org id 조작해 타org 조회하는 경로 원천 차단).
 
     **에이전트 격리(PO 승인조건 #1)**: `project_access.member_id` 는 에이전트 전용이 아니다 —
