@@ -134,15 +134,16 @@ async def test_webhook_endpoint_rejects_invalid_signature_through_adapter():
     """POST /api/v2/billing/webhook — 잘못된 서명이면 401. 라우터→factory→PolarAdapter.
     verify_webhook 전체 파이프라인이 실제로 관통해야 실패(mock 아님)."""
     from app.main import app
-    from app.dependencies.database import get_db
     from httpx import ASGITransport, AsyncClient
+
+    from tests.conftest import override_db_and_read
 
     mock_session = AsyncMock()
 
     async def override_db():
         yield mock_session
 
-    app.dependency_overrides[get_db] = override_db
+    override_db_and_read(app, override_db)
 
     from app.core.config import Settings
     try:
