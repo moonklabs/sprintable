@@ -468,3 +468,20 @@ async def test_list_role_templates_ignores_inaccessible_x_project_id_http(test_c
         "/api/v2/role-templates", headers={"X-Project-Id": inaccessible_project_id}
     )
     assert resp.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_get_role_template_ignores_inaccessible_x_project_id_http(test_client, mock_session):
+    """위 list 회귀 테스트의 단건-조회 짝 — PO 확인 요청(2026-08-06): «role_templates 두
+    엔드포인트 다 커버됐는지». ``/{slug}``도 동일하게 ``get_verified_org_id``를 뺐으니
+    비접근 X-Project-Id로도 200이어야 한다."""
+    import uuid
+    from unittest.mock import AsyncMock
+
+    rt = _mock_role_template()
+    mock_session.execute = AsyncMock(return_value=_scalar_result(rt))
+    inaccessible_project_id = str(uuid.uuid4())
+    resp = await test_client.get(
+        "/api/v2/role-templates/http-probe", headers={"X-Project-Id": inaccessible_project_id}
+    )
+    assert resp.status_code == 200
