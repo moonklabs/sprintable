@@ -152,8 +152,14 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # #2461(§6 봉합③ part2, PO 승인 2026-08-05): worker_db_pool_size/worker_db_max_overflow
     # 필드 신설로 85→87(WORKER_DB_POOL_SIZE·WORKER_DB_MAX_OVERFLOW 포함) — L2/배치워커 전용
     # worker_engine 풀 크기 설정. 가드가 신규 필드를 설계대로 잡은 것.
+    # #2491(결제②-C0, PO 승인 2026-08-06): toss_payments_secret_key/toss_payments_client_key/
+    # toss_payments_crypto_key/toss_merchant_id 필드 신설로 87→91(TOSS_PAYMENTS_SECRET_KEY·
+    # TOSS_PAYMENTS_CLIENT_KEY·TOSS_PAYMENTS_CRYPTO_KEY·TOSS_MERCHANT_ID 포함) — TossAdapter
+    # (story C1~) 원화 정기결제용 시크릿, polar_* 동형. 가드가 신규 필드를 설계대로 잡은 것.
     assert "PRESENCE_REDIS_ENABLED" in keys and "SSE_TRANSIENT_REPLAY_ENABLED" in keys
     assert "REQUIRE_VERIFIED_EMAIL_FOR_ORG_CREATE" in keys
     assert "DATABASE_URL_READ" in keys
     assert "WORKER_DB_POOL_SIZE" in keys and "WORKER_DB_MAX_OVERFLOW" in keys
-    assert len(keys) == 87
+    assert "TOSS_PAYMENTS_SECRET_KEY" in keys and "TOSS_PAYMENTS_CLIENT_KEY" in keys
+    assert "TOSS_PAYMENTS_CRYPTO_KEY" in keys and "TOSS_MERCHANT_ID" in keys
+    assert len(keys) == 91
