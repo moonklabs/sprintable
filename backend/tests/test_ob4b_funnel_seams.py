@@ -121,6 +121,20 @@ def test_stream_connected_wired_one_time_isolated():
     assert "emit_onboarding_event(" in src
 
 
+def test_stream_connected_runtime_not_hardcoded_to_claude_code():
+    """spec-2377 §3/§6(story #2466 별건 c 스코프): `stream_connected`가 실제 연결 에이전트의
+    `runtime_type`과 무관하게 항상 `runtime="claude-code"`로 찍히던 하드코딩을 걷어냄 — 이제
+    이미 로드된 team_member(`tm`)의 실제 `runtime_type`을 쓴다(추가 쿼리 0). sabotage: 이 문자열
+    리터럴이 다시 생기면 이 테스트가 잡는다."""
+    from app.routers import agent_gateway
+    src = inspect.getsource(agent_gateway)
+    assert 'runtime="claude-code", transport="stdio"' not in src
+    assert "runtime=tm.runtime_type" in src
+    # transport="stdio"는 하드코딩 버그가 아니라 이 엔드포인트(AGENT_GATEWAY_V2, sse_bridge.py=
+    # stdio 전용)의 실제 불변 사실 — 그대로 유지돼야 한다(무회귀).
+    assert 'transport="stdio"' in src
+
+
 # ─── RC-1(산티아고): 전용 세션·api_key 무접촉·event 존재 dedup·advisory lock ──────
 
 def _sess_cm(exists_row):

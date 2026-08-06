@@ -169,11 +169,49 @@ async def test_connection_artifact_connector_runtime_real_db():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
 @pytest.mark.anyio
-@pytest.mark.parametrize("runtime", ["opencode", "openclaw", "hermes", "grok", "pi"])
+async def test_connection_artifact_hermes_http_capable_real_db():
+    """story #2466(P1-B, 유나 정렬 v1.3) — hermes는 HTTP_MCP_CAPABLE_RUNTIMES 편입으로 이 그룹에서
+    빠짐(카디르 QA 지적, #2857 REQUEST_CHANGES 후속: 「빼기」가 아니라 실 동작을 realdb 층에서도
+    「옮겨」 검증). mcp_config는 non-None + HERMES_MCP_SETUP.md(①)와 CONNECTOR_SETUP.md(②) 둘 다
+    emit — 실 Postgres·실 AgentPersonaRepository 경로에서도 두 축 동시성립을 확認한다."""
+    from unittest.mock import MagicMock
+    from sqlalchemy import text as _text
+    from app.core.database import Base
+    from app.routers.agents import _connection_artifact as get_agent_connection_artifact
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            agent, org_id = await _seed_agent(s, with_persona=True)
+
+        async with Session() as s:
+            await s.execute(_text("SET session_replication_role = replica"))
+            out = await get_agent_connection_artifact(
+                agent.id, runtime="hermes", session=s,
+                accept_language=None, auth=MagicMock(), org_id=org_id,
+            )
+
+        assert out["mcp_config"] is not None
+        assert out["mcp_config"]["mcpServers"]["sprintable"]["type"] in ("http", "stdio")
+        filenames = {f["filename"] for f in out["files"]}
+        assert filenames == {"SPRINTABLE_ONBOARDING.md", "HERMES_MCP_SETUP.md", "CONNECTOR_SETUP.md"}
+        assert ".mcp.json" not in filenames  # hermes는 파일 드롭인이 아님(§0 재발 방지)
+    finally:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
+@pytest.mark.anyio
+@pytest.mark.parametrize("runtime", ["opencode", "openclaw", "grok", "pi"])
 async def test_connection_artifact_connector_only_runtimes_real_db(runtime):
-    """전 런타임 올지원(story 6f6ac081): 커넥터 전용 5종도 connector 버킷과 동형 — mcp_config는
+    """전 런타임 올지원(story 6f6ac081): 커넥터 전용 런타임도 connector 버킷과 동형 — mcp_config는
     None, CONNECTOR_SETUP.md 포인터 파일 emit. 채용-kit 재설계(story b1fe41cf) 이후 instruction
-    파일명은 런타임 무관 SPRINTABLE_ONBOARDING.md 단일 상수."""
+    파일명은 런타임 무관 SPRINTABLE_ONBOARDING.md 단일 상수.
+
+    hermes는 story #2466(P1-B)로 HTTP_MCP_CAPABLE_RUNTIMES 편입돼 이 그룹에서 빠짐 — 별도
+    test_connection_artifact_hermes_http_capable_real_db 참조(카디르 QA #2857 지적 후속)."""
     from unittest.mock import MagicMock
     from sqlalchemy import text as _text
     from app.core.database import Base

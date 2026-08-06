@@ -145,6 +145,47 @@ export function resolveRuntimeWakeInfo(runtime: string): RuntimeWakeInfo {
   return RUNTIME_WAKE_MECHANISM[runtime] ?? { method: 'unknown', path: '' };
 }
 
+/** story #2377 v1.3 §1.5/§3(③)/⑤ — ①(도구 전달) 축의 런타임별 «정확한 CLI 문구». 파일기반
+ * MCP-native(claude-code 등)는 기존 kitOrientingConnectBodyMcp(".mcp.json → add to X")가 이미
+ * 정확하다(진짜 파일을 붙이는 게 맞음). hermes/openclaw는 파일이 아니라 자기 CLI 명령으로
+ * 등록하므로 "파일" 프레이밍을 쓰면 §0급 "화면이 틀린 것을 단정"이 재발한다 — 여기 등재된
+ * 런타임만 그 정확한 명령으로 대체한다(등재 안 된 런타임은 기존 file-framing 그대로, 무회귀). */
+export const RUNTIME_CONNECT_CLI: Record<string, string> = {
+  hermes: 'hermes mcp add --url --auth',
+  openclaw: "openclaw mcp set '<json>'",
+};
+
+/** story #2377 v1.3 §1.5/④(PO+유나 2026-08-05 정정) — ①이 "실제로 도착했다"는 확認 등급.
+ * 호스트 자기신고("Added"/"enabled")나 "config가 유효하게 저장됨"만으로는 success를 켜지
+ * 않는다 — 그게 A-3(§2) 거짓성공의 화면판이다. 'confirmed'는 «우리 팀이 실제로 실측해
+ * 도구가 왔음을 확認한» 날짜 있는 사실만(codex/hermes) — 'config-verified'(openclaw)는 host가
+ * config를 유효로 저장한 것만 확認됐을 뿐 실제 도구 도착은 미확認이라 success 색을 쓰지 않는다.
+ * 나머지 전부(gemini/grok/pi/cursor 등)는 'unmeasured' — 아직 안 쟀음(§6). 별건 C(BE 실호출
+ * 도착 신호)가 서면 이 표는 그 신호로 교체된다(지금은 정적 스냅샷). */
+export type ConnectConfirmTier = 'confirmed' | 'config-verified' | 'unmeasured';
+
+export interface RuntimeConnectConfirm {
+  tier: ConnectConfirmTier;
+  /** 'confirmed'일 때만 — 팀이 실제로 실측한 날짜(호스트 주장이 아니라 우리 쪽 실측). */
+  measuredAt?: string;
+}
+
+export const RUNTIME_CONNECT_CONFIRM: Record<string, RuntimeConnectConfirm> = {
+  // PO+유나 정정(2026-08-05, #2856 design:changes) — codex ①은 matrix 정본상 [설정검증]뿐(도구
+  // 목록 미확認 — spec-2377 §2가 #2382를 인용). 여기서 confirmed로 두면 "거짓성공 방지 배지"가
+  // 스스로 거짓성공을 켜는 자리라 config-verified로 내린다.
+  codex: { tier: 'config-verified' },
+  hermes: { tier: 'confirmed', measuredAt: '2026-08-05' },
+  // claude-code — [라이브] 자기증명(이 세션 자체가 .mcp.json http를 실사용 중). matrix 정본에
+  // claude-code 행이 없어 안 넣으면 confirmed=hermes 한 종뿐으로 플래그십 런타임이 무배지가 된다.
+  'claude-code': { tier: 'confirmed', measuredAt: '2026-08-05' },
+  openclaw: { tier: 'config-verified' },
+};
+
+export function resolveConnectConfirm(runtime: string): RuntimeConnectConfirm {
+  return RUNTIME_CONNECT_CONFIRM[runtime] ?? { tier: 'unmeasured' };
+}
+
 export const RUNTIME_CAPABILITIES_FALLBACK: RuntimeCapabilityItem[] = [
   { slug: 'claude-code', display_name: 'Claude Code', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'CLAUDE.md', guide_filename: null, supports_event_push: true, icon: null },
   { slug: 'codex', display_name: 'Codex', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'AGENTS.md', guide_filename: null, supports_event_push: true, icon: null },
@@ -152,7 +193,10 @@ export const RUNTIME_CAPABILITIES_FALLBACK: RuntimeCapabilityItem[] = [
   { slug: 'cursor', display_name: 'Cursor', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'AGENTS.md', guide_filename: null, supports_event_push: true, icon: null },
   { slug: 'gemini', display_name: 'Gemini', supported: true, tier: 'full', transport: 'stdio', mcp_transport: ['http', 'stdio'], prompt_file: 'GEMINI.md', guide_filename: null, supports_event_push: true, icon: null },
   { slug: 'grok', display_name: 'Grok', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
-  { slug: 'hermes', display_name: 'Hermes', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
+  // story #2857 후속 — hermes ①(http mcp_config)만 재분류·BE 실출력 그대로 미러(디디 실측).
+  // ⛔②(guide_filename/supports_event_push)는 claude-code 행과 다르게 «유지» — 복사하면
+  // hermes ②커넥터 안내가 조용히 사라진다(§7 "한 축이 두 물음" 함정, PO+유나 2026-08-05 정정).
+  { slug: 'hermes', display_name: 'Hermes', supported: true, tier: 'full', transport: 'http', mcp_transport: ['http', 'stdio'], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
   { slug: 'openclaw', display_name: 'OpenClaw', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
   { slug: 'opencode', display_name: 'OpenCode', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },
   { slug: 'pi', display_name: 'Pi', supported: true, tier: 'full', transport: null, mcp_transport: [], prompt_file: 'AGENTS.md', guide_filename: 'CONNECTOR_SETUP.md', supports_event_push: false, icon: null },

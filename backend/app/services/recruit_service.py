@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.role_template import RoleTemplate
 from app.repositories.agent_persona import AgentPersonaRepository
 from app.repositories.api_key import ApiKeyRepository
+from app.repositories.team_member import TeamMemberRepository
 from app.schemas.agent_persona import PersonaSummaryResponse
 from app.services.agent_recruiter import compose_kit, validate_tool_groups
 from app.services.model_family import render_kit_for_family, resolve_model_family
@@ -99,6 +100,17 @@ async def recruit_agent(
     "family 미지정 시 기존 동작과 사실상 동일"이라는 회귀 요건도 자연히 충족한다.
     """
     await acquire_agent_mutation_lock(session, agent_member.id)
+
+    # story #2433(A, PO 예외 승인 2026-08-03 — 담당경계는 backend/=디디군이나 이 한 자리만
+    # 예외로 미르코가 고침, 근거는 PR 본문 참고): recruit 은 runtime 을 받아 compose_kit·
+    # resolve_model_family 에만 쓰고 member 레코드엔 한 번도 쓰지 않았다 — 그래서 위저드에서
+    # 런타임을 골라 채용해도 관리화면엔 "런타임 타입: 미설정"으로 떴다(PATCH /team-members/{id}
+    # 로 나중에 따로 골라야만 반영). PATCH 가 쓰는 것과 같은 anchor-routing 경로
+    # (TeamMemberRepository.apply_anchor_update → members.runtime_type)를 그대로 재사용해
+    # recruit 한 번의 호출로 같이 반영한다 — 새 write 경로를 만들지 않는다.
+    await TeamMemberRepository(session, org_id).apply_anchor_update(
+        agent_member, {"runtime_type": runtime}
+    )
 
     tool_allowlist = list(role_template.default_tool_groups)
     validate_tool_groups(tool_allowlist)  # fail-closed — ValueError 전파, 호출부가 400 매핑

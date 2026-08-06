@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils';
 import { VerifyRail, useVerificationRail } from '@/app/onboarding/verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from '@/app/onboarding/onboarding-telemetry';
 import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle, RuntimeCapabilityItem } from '@/services/recruit';
-import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FILENAME, resolveRuntimeWakeInfo } from '@/services/recruit';
+import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FILENAME, resolveRuntimeWakeInfo, RUNTIME_CONNECT_CLI, resolveConnectConfirm } from '@/services/recruit';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
 
@@ -201,6 +201,40 @@ function CopyDownloadButtons({
   );
 }
 
+// story #2434(유나양 design:changes, 2026-08-03) — ②「깨우기」 본문을 별도 컴포넌트로 뽑아
+// 렌더 테스트가 거대한 위저드 전체를 마운트하지 않고도 t.rich 출력(특히 태그명/인자명 충돌
+// 같은 실렌더 결함)을 직접 잡을 수 있게 한다. 소스 텍스트 매칭 가드만으로는 이 결함이 안
+// 잡혔다(초록인데 화면은 빈 괄호) — recruiter-client.wake-method-body.test.tsx 참고.
+export function WakeMethodBody({ method, path }: { method: import('@/services/recruit').RuntimeWakeMethod; path: string }) {
+  const t = useTranslations('recruiter');
+  if (method === 'unknown') return <>{t('kitOrientingWakeBodyUnknown')}</>;
+  return (
+    <>
+      {t.rich(`kitOrientingWakeBody_${method}`, {
+        // 태그명(code)이 ICU 인자명(path)과 겹치면 next-intl이 인자 값을 조용히 삼킨다(콘솔
+        // 에러도 없음, 실 렌더로만 잡힘) — 반드시 둘을 분리하고 둘 다 넘긴다.
+        path,
+        code: (chunks) => <span className="font-mono text-[11px] break-all text-muted-foreground">{chunks}</span>,
+      })}
+    </>
+  );
+}
+
+// story #2377 v1.3 §1.5/⑤(2026-08-05) — ①「연결」 본문을 CLI 기반 런타임(hermes/openclaw 등)
+// 전용으로 분리. WakeMethodBody와 같은 이유로 별도 컴포넌트로 뽑는다 — t.rich 태그명(cmd)과
+// ICU 인자명(command)을 분리해 next-intl의 조용한 인자 삼킴(WakeMethodBody 주석 참고)을 피한다.
+export function ConnectCliBody({ command }: { command: string }) {
+  const t = useTranslations('recruiter');
+  return (
+    <>
+      {t.rich('kitOrientingConnectBodyCli', {
+        command,
+        cmd: (chunks) => <span className="font-mono text-[11px] break-all text-muted-foreground">{chunks}</span>,
+      })}
+    </>
+  );
+}
+
 // ─── 메인 컴포넌트 ───────────────────────────────────────────────────────────
 
 interface RecruiterClientProps {
@@ -291,6 +325,11 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     api_key: string | null;
   } | null>(null);
   const [equipMcpCopied, setEquipMcpCopied] = useState(false);
+  // story #2433(B) — OrgAgentCreate(POST /api/agents) 스키마엔 runtime_type이 없어(recruit 경로와
+  // 달리 생성 호출 하나로 못 묶는다) 생성 직후 PATCH /api/team-members/{id}(관리화면이 쓰는 것과
+  // 같은 경로)로 반영한다. 이 PATCH가 실패해도 키·MCP config는 이미 유효하므로 결과 화면 자체는
+  // 막지 않되, "반쪽으로 끝났다"를 숨기지 않고 알린다.
+  const [equipRuntimeSaveWarning, setEquipRuntimeSaveWarning] = useState(false);
 
   const handleEquipCreate = async () => {
     const name = equipName.trim();
@@ -298,6 +337,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     if (scopeMode === 'projects' && scopeProjectIds.length === 0) return;
     setEquipCreating(true);
     setEquipError(null);
+    setEquipRuntimeSaveWarning(false);
     try {
       const res = await fetch('/api/agents', {
         method: 'POST',
@@ -311,8 +351,23 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
       });
       if (res.ok) {
         const json = (await res.json()) as {
-          data?: { mcp_config?: Record<string, unknown> | null; api_key?: string | null };
+          data?: { id?: string; mcp_config?: Record<string, unknown> | null; api_key?: string | null };
         };
+        const agentId = json.data?.id;
+        if (agentId) {
+          try {
+            const runtimeRes = await fetch(`/api/team-members/${agentId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ runtime_type: runtime }),
+            });
+            if (!runtimeRes.ok) setEquipRuntimeSaveWarning(true);
+          } catch {
+            setEquipRuntimeSaveWarning(true);
+          }
+        } else {
+          setEquipRuntimeSaveWarning(true);
+        }
         setEquipResult({
           name,
           mcp_config: json.data?.mcp_config ?? null,
@@ -402,9 +457,93 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     return rc ? runtimeDisplayName(rc) : runtime;
   })();
 
+  // story #2433(B) — equip-skip("역할 없이(키만)")도 STEP3(실행환경) 자체가 스킵돼 런타임을
+  // 고를 길이 없었다(equip-skip은 STEP2 이후 바로 생성). Full 경로 STEP3의 런타임 그리드를
+  // 공유 렌더러로 추출해 equip-skip 폼에도 배치한다 — 그리드 마크업 중복 방지.
+  const renderRuntimePicker = () => (
+    <div className="space-y-2">
+      <p className="text-sm font-semibold text-foreground">{t('runtimeQuestion')}</p>
+      {!runtimeCapabilities ? (
+        <div className="space-y-1">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
+          <div className="grid grid-cols-3 gap-2">
+            {[0, 1, 2].map((i) => <Skeleton key={i} className="h-14 rounded-xl" />)}
+          </div>
+        </div>
+      ) : runtimeCapabilitiesError ? (
+        <div role="alert" aria-live="assertive" aria-atomic="true" className="space-y-2 rounded-xl border border-border bg-muted/30 p-3">
+          <p className="text-sm font-medium text-foreground">{t('runtimeLoadError')}</p>
+          <p className="text-xs text-muted-foreground">{t('runtimeLoadErrorNote')}</p>
+          <Button variant="ghost" size="sm" onClick={() => void fetchRuntimeCapabilities()}>{t('retry')}</Button>
+        </div>
+      ) : (
+        <>
+          <div className="space-y-1">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
+            <div className="grid grid-cols-3 gap-2">
+              {displayedSupportedRuntimes.map((rc) => {
+                const sel = runtime === rc.slug;
+                return (
+                  <button
+                    key={rc.slug}
+                    type="button"
+                    onClick={() => setRuntime(rc.slug)}
+                    className={cn(
+                      'relative flex flex-col items-start gap-1 rounded-xl border p-2.5 text-left transition-colors',
+                      sel ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
+                    )}
+                  >
+                    {sel && <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" aria-hidden />}
+                    <span className={cn(
+                      'flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground',
+                      sel && 'bg-primary/15 text-primary',
+                    )}>
+                      {rc.icon ?? runtimeDisplayName(rc).charAt(0).toUpperCase()}
+                    </span>
+                    <span className="text-xs font-bold text-foreground">{runtimeDisplayName(rc)}</span>
+                    {rc.tier === 'experimental' && <Badge variant="info" className="text-[9px]">{t('runtimeExperimental')}</Badge>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeComingSoonLabel')}</p>
+            <div className="grid grid-cols-3 gap-2">
+              {comingSoonRuntimes.map((rc) => (
+                <button key={rc.slug} type="button" disabled className="flex cursor-not-allowed flex-col items-start gap-1 rounded-xl border border-border bg-muted/40 p-2.5 text-left opacity-55">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground">
+                    {rc.icon ?? runtimeDisplayName(rc).charAt(0).toUpperCase()}
+                  </span>
+                  <span className="text-xs font-bold text-foreground">{runtimeDisplayName(rc)}</span>
+                  <Badge variant="chip" className="text-[9px]">{t('runtimeComingSoonBadge')}</Badge>
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+      <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+        {t('runtimeGuide')}
+      </p>
+      {runtime === 'connector' && (
+        <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          {t('runtimeCustomOtherGuide')}
+        </p>
+      )}
+    </div>
+  );
+
   // story #2377 §2(규격 A) — 「깨우기」 축. MCP 연결(①)과 지침 전달(③)만으로는 «어떤 런타임도»
   // 안 깨어난다(유나양 규격 §0, 실측 5/5) — 그 사이에 빠져 있던 ②를 명시한다.
   const wakeInfo = resolveRuntimeWakeInfo(runtime);
+  // story #2377 v1.3 §1.5/④(PO+유나 2026-08-05 정정) — ①이 "실제로 도착했다"는 확認 등급.
+  // 'confirmed'만 success 색 — 그 외(config-verified·unmeasured)는 전부 neutral(모름, 경고색
+  // 아님). 호스트 자기신고나 "config 저장 성공"만으로 success를 켜지 않는다(A-3 거짓성공의
+  // 화면판 방지).
+  const connectConfirm = resolveConnectConfirm(runtime);
 
   const [agentMode, setAgentMode] = useState<'new' | 'existing'>('new');
   const [newAgentName, setNewAgentName] = useState('');
@@ -829,6 +968,10 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       <option value="admin">{tSettings('agentRoleAdmin')}</option>
                     </select>
                   </div>
+                  {/* story #2433(B) — "역할 없이(키만)"도 STEP3(실행환경)이 스킵돼 런타임을 고를
+                      길이 없었다(equip-skip은 STEP2 이후 바로 생성). 키만 받는 사람도 런타임은
+                      골라야 하므로 여기서도 노출한다(Full 경로 STEP3과 동일 렌더러 공유). */}
+                  {renderRuntimePicker()}
                   {equipError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{equipError}</p>}
                 </div>
               ) : null}
@@ -859,82 +1002,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
           {/* ── STEP 3(Full 경로) : 실행환경 + 에이전트(G1) ── */}
           {step === 3 && !equipSkip && (
             <div className="space-y-4">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-foreground">{t('runtimeQuestion')}</p>
-                {!runtimeCapabilities ? (
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
-                    <div className="grid grid-cols-3 gap-2">
-                      {[0, 1, 2].map((i) => <Skeleton key={i} className="h-14 rounded-xl" />)}
-                    </div>
-                  </div>
-                ) : runtimeCapabilitiesError ? (
-                  // story #2105 2차 — fetchRuntimeCapabilities가 재시도 전 setRuntimeCapabilitiesError(false)를
-                  // 먼저 호출해(위 정의) 매 시도마다 언마운트→리마운트된다.
-                  <div role="alert" aria-live="assertive" aria-atomic="true" className="space-y-2 rounded-xl border border-border bg-muted/30 p-3">
-                    <p className="text-sm font-medium text-foreground">{t('runtimeLoadError')}</p>
-                    <p className="text-xs text-muted-foreground">{t('runtimeLoadErrorNote')}</p>
-                    <Button variant="ghost" size="sm" onClick={() => void fetchRuntimeCapabilities()}>{t('retry')}</Button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="space-y-1">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
-                      <div className="grid grid-cols-3 gap-2">
-                        {displayedSupportedRuntimes.map((rc) => {
-                          const sel = runtime === rc.slug;
-                          return (
-                            <button
-                              key={rc.slug}
-                              type="button"
-                              onClick={() => setRuntime(rc.slug)}
-                              className={cn(
-                                'relative flex flex-col items-start gap-1 rounded-xl border p-2.5 text-left transition-colors',
-                                sel ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
-                              )}
-                            >
-                              {sel && <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" aria-hidden />}
-                              <span className={cn(
-                                'flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground',
-                                sel && 'bg-primary/15 text-primary',
-                              )}>
-                                {rc.icon ?? runtimeDisplayName(rc).charAt(0).toUpperCase()}
-                              </span>
-                              <span className="text-xs font-bold text-foreground">{runtimeDisplayName(rc)}</span>
-                              {rc.tier === 'experimental' && <Badge variant="info" className="text-[9px]">{t('runtimeExperimental')}</Badge>}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    {/* 지원 예정(레지스트리 supported=false) — dimmed·disabled */}
-                    <div className="space-y-1">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeComingSoonLabel')}</p>
-                      <div className="grid grid-cols-3 gap-2">
-                        {comingSoonRuntimes.map((rc) => (
-                          <button key={rc.slug} type="button" disabled className="flex cursor-not-allowed flex-col items-start gap-1 rounded-xl border border-border bg-muted/40 p-2.5 text-left opacity-55">
-                            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground">
-                              {rc.icon ?? runtimeDisplayName(rc).charAt(0).toUpperCase()}
-                            </span>
-                            <span className="text-xs font-bold text-foreground">{runtimeDisplayName(rc)}</span>
-                            <Badge variant="chip" className="text-[9px]">{t('runtimeComingSoonBadge')}</Badge>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
-                <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                  {t('runtimeGuide')}
-                </p>
-                {runtime === 'connector' && (
-                  <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                    {t('runtimeCustomOtherGuide')}
-                  </p>
-                )}
-              </div>
+              {renderRuntimePicker()}
 
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-foreground">{t('agentQuestion')}</p>
@@ -998,6 +1066,12 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   가드에서 최초 1회만 non-null이 되므로 polite 낭독으로 충분(흐름 차단 아님). */}
               <div role="status" aria-live="polite" aria-atomic="true" className="space-y-3 rounded-md border border-success-border bg-success-tint p-4">
                 <p className="text-sm font-semibold text-success">{t('equipCreatedTitle', { name: equipResult.name })}</p>
+                {equipRuntimeSaveWarning && (
+                  <p role="alert" className="flex items-start gap-1.5 rounded-md border border-warning-border bg-warning-tint p-2 text-xs text-foreground">
+                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                    {t('equipRuntimeSaveWarning')}
+                  </p>
+                )}
                 {equipResult.api_key ? (
                   <div className="space-y-1">
                     <p className="text-xs font-medium text-foreground">{t('equipKeyOnceLabel')}</p>
@@ -1055,10 +1129,26 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">
                     <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">1</span>
                     <div className="min-w-0">
-                      <p className="text-xs font-bold text-foreground">{t('kitOrientingConnectLabel')}</p>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <p className="text-xs font-bold text-foreground">{t('kitOrientingConnectLabel')}</p>
+                        {/* story #2377 v1.3 §1.5/④ — 'confirmed'만 success(팀이 실제로 실측한
+                            날짜 있는 사실). 'config-verified'(openclaw 등)는 host가 config를
+                            유효로 저장한 것만 확認됐을 뿐이라 neutral(chip) — success 색을 쓰면
+                            A-3 거짓성공의 화면판이 된다(PO+유나 2026-08-05 정정). */}
+                        {connectConfirm.tier === 'confirmed' && (
+                          <Badge variant="success" className="text-[9px]">
+                            {t('connectConfirmedBadge', { date: connectConfirm.measuredAt ?? '' })}
+                          </Badge>
+                        )}
+                        {connectConfirm.tier === 'config-verified' && (
+                          <Badge variant="chip" className="text-[9px]">{t('connectConfigVerifiedBadge')}</Badge>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground">
                         {recruitResult.mcp_config
-                          ? t('kitOrientingConnectBodyMcp', { runtime: currentRuntimeDisplayName })
+                          ? (RUNTIME_CONNECT_CLI[runtime]
+                              ? <ConnectCliBody command={RUNTIME_CONNECT_CLI[runtime]} />
+                              : t('kitOrientingConnectBodyMcp', { runtime: currentRuntimeDisplayName }))
                           : t('kitOrientingConnectBodyConnector')}
                       </p>
                     </div>
@@ -1071,10 +1161,15 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                     <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">2</span>
                     <div className="min-w-0">
                       <p className="text-xs font-bold text-foreground">{t('kitOrientingWakeLabel')}</p>
+                      {/* story #2434(유나양 규격 v1, 2026-08-03) — "실행하세요"류 지시형은 그 경로를
+                          «어디서 구하는지» 안내가 없는 상태에서 되는 것처럼 읽혀 "되는 줄 알고
+                          끝냈다가 실제로는 안 깨어나는" 오탐을 만든다. 사실형("…이 세션을
+                          깨웁니다. 받는 경로는 아직 제공하지 않습니다")으로 정정 — path는 «명령
+                          대상»이 아니라 «이름»으로 강등(t.rich path 태그: font-mono·작게·무채색,
+                          링크 색 금지 — 누를 수 있는 것처럼 보이면 안 된다). 디디군의 "한 줄
+                          설치"가 착지하면 이 문구 뒷문장을 그 설치 명령으로 되돌린다(만료조건). */}
                       <p className="text-xs text-muted-foreground">
-                        {wakeInfo.method === 'unknown'
-                          ? t('kitOrientingWakeBodyUnknown')
-                          : t(`kitOrientingWakeBody_${wakeInfo.method}`, { path: wakeInfo.path })}
+                        <WakeMethodBody method={wakeInfo.method} path={wakeInfo.path} />
                       </p>
                       {/* story #2377 §4(발견 가능성) — 연결 안내로 가는 화면 링크가
                           이전엔 0건이었다(URL을 아는 사람만 볼 수 있어 "문서에 있다"가 화면에서는
@@ -1088,6 +1183,20 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       >
                         {t('kitOrientingWakeGuideLink')}
                       </a>
+                      {/* story #2434 §3(2) — connector-sdk(Custom/Other)만은 "막힘"이 아니라
+                          "직접 만들 수 있음"이다(shared SDK 명세가 이미 public/onboarding-guide.txt에
+                          있다). 그 링크가 있어야 위 "아직 제공하지 않습니다" 문구가 과장이 아니게
+                          된다 — 이 갈래는 실제로 지금 진행 가능한 경로가 있다는 뜻이라. */}
+                      {wakeInfo.method === 'connector-sdk' && (
+                        <a
+                          href="/onboarding-guide.txt"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-0.5 block text-xs text-info underline-offset-2 hover:underline"
+                        >
+                          {t('kitOrientingWakeSdkGuideLink')}
+                        </a>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">
@@ -1098,6 +1207,14 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                     </div>
                   </div>
                 </div>
+                {/* story #2434 §2(유나양 규격) — 3칸 그리드 «아래» 전폭 한 줄. ②가 안 끝나면 전체가
+                    안 깨어난다는 사실을 블록 결과로 명시하되, warning/destructive 색은 금지(이건
+                    장애가 아니라 미제공 — 경고색을 쓰면 사용자가 "내 설정이 틀렸다"고 오해해 ①로
+                    되돌아가 헤맨다). recruitResult.mcp_config 분기는 STEP4 다른 자리(①연결 본문 등)
+                    가 이미 쓰는 것을 재사용 — 신규 계약 0. */}
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {recruitResult.mcp_config ? t('kitOrientingWakeNoteMcp') : t('kitOrientingWakeNoteConnector')}
+                </p>
               </div>
 
               <Alert variant="warning">
@@ -1129,7 +1246,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   <pre className="overflow-x-auto bg-muted/40 p-3 text-xs leading-relaxed">{mcpConfigText}</pre>
                 </div>
               ) : (
-                // 커넥터-라우팅 런타임(connector/grok/pi/hermes/openclaw/opencode)은 mcp_config=null —
+                // 커넥터-라우팅 런타임(connector/grok/pi/openclaw/opencode)은 mcp_config=null —
+                // (story #2857 후속 — hermes는 이제 HTTP_MCP_CAPABLE_RUNTIMES 편입으로 mcp_config를
+                // 받아 이 분기를 안 탄다. 옛 목록에 남겨두면 주석이 실제와 어긋나 §0급 오도가 된다.)
                 // MCP transport가 없어 .mcp.json 자체가 무의미. 문자열 "null" 렌더/복사 방지(story 6f6ac081 후속).
                 <div className="rounded-md border border-dashed border-border bg-muted/20 p-3 text-xs text-muted-foreground">
                   {t('mcpNotApplicable')}
