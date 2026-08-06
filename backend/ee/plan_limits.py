@@ -3,7 +3,9 @@
 Free 플랜 제한:
   - Org: 사용자당 1개 (owner 기준)
   - Project: org당 1개
-  - Member: org당 5명
+  - Member: org당 3명 (#2471 A1 — v2.3 정책·선생님 確定 2026-08-06 04:00Z. 강제 마이그
+    아님: 기존 3명 초과 Free org는 멤버를 그대로 두고 신규 초대만 막는다 — 이 파일의 다른
+    모든 초과-자원 처리(storage: 신규 업로드만 차단·기존 파일 유지)와 동일한 패턴.)
 
 Team/Pro: 제한 없음.
 """
@@ -14,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 FREE_LIMITS: dict[str, int] = {
     "max_orgs_owned": 1,
     "max_projects": 1,
-    "max_members": 5,
+    "max_members": 3,
 }
 
 # API 초과 과금 정책 (per call, USD)

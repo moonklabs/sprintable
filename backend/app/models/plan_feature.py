@@ -8,7 +8,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 
-TierEnum = Enum("free", "team", "pro", name="plan_feature_tier")
+# v2.3(#2471 A1): free/starter/team/business로 재편(기존 free/team/pro 대체). solo/pro
+# enum은 신설하지 않는다(v2.3 D12) — pro는 은퇴, business가 그 자리를 대신한다. 이 Enum은
+# 어떤 컬럼에도 바인딩되지 않은 선언뿐이라(plan_feature.tier는 String(16)) 실제 DB CHECK는
+# 각 테이블(offering_versions·pricing_versions)이 개별로 가진다.
+TierEnum = Enum("free", "starter", "team", "business", name="plan_feature_tier")
 
 
 class PlanFeature(Base):

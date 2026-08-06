@@ -9,9 +9,15 @@ free tier는 가격이 항상 0이라 버전 이력 대상에서 제외(tier CHE
 grandfather: org_subscriptions.pricing_version_id가 가입(플랜변경) 시점의 이 테이블 행을
 참조 — 이후 가격이 바뀌어도 기존 구독은 그 시점 행의 price_cents를 유지한다.
 
-currency: Polar가 USD/KRW를 별개 price 객체(각자 polar_price_id)로 관리해 (tier,
+currency: PG가 USD/KRW를 별개 price 객체(각자 provider_price_ref)로 관리해 (tier,
 billing_cycle, currency)가 계보 키다 — 통화별 독립 grandfather. price_cents는 그 통화의
-최소단위 그대로(USD=센트·KRW=원, Polar 자체 규칙과 동일)."""
+최소단위 그대로(USD=센트·KRW=원, Polar 자체 규칙과 동일).
+
+#2471(A1) provider-agnostic화: polar_price_id(NOT NULL) → provider_price_ref(nullable) +
+provider(NOT NULL, toss/polar). provider는 currency로부터만 파생된다는 불변식을 CHECK
+제약으로 DB가 직접 강제(krw→toss·usd→polar, 03:41Z 確定). tier CHECK에서 'pro'는 은퇴하고
+'starter'/'business'가 대신한다(v2.3 D12) — 이 테이블은 마이그 시점에 0행이라 무손실
+전환이다."""
 from __future__ import annotations
 
 import uuid
@@ -32,7 +38,8 @@ class PricingVersion(Base):
     billing_cycle: Mapped[str] = mapped_column(Text, nullable=False)
     currency: Mapped[str] = mapped_column(Text, nullable=False, default="usd")
     price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
-    polar_price_id: Mapped[str] = mapped_column(Text, nullable=False)
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_price_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[str] = mapped_column(Text, nullable=False)
