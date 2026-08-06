@@ -106,7 +106,13 @@
     "switcherCreateButton": "Create",
     "switcherCreateProjectError": "Couldn't create the project. Please try again in a moment.",
     "orgLimitBannerTitle": "Upgrade required",
-    "orgLimitUpgradeLink": "Upgrade plan →"
+    "orgLimitUpgradeLink": "Upgrade plan →",
+    "createOrgNameLabel": "Name",
+    "createOrgNamePlaceholder": "e.g. My Company",
+    "createOrgSlugLabel": "Slug",
+    "createOrgSlugPlaceholder": "my-company",
+    "createOrgSlugError": "Only lowercase letters, numbers, and hyphens are allowed (must start/end with a letter or number)",
+    "createOrgGenericError": "Couldn't create the organization. Please try again in a moment."
   },
   "storage": {
     "title": "Storage",

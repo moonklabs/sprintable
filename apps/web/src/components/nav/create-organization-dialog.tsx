@@ -42,6 +42,7 @@ export function CreateOrganizationDialog({
   // 나중에 한쪽만 고쳐지는 갈림이 재발하므로, 온보딩과 같은 키(orgLimitExceededError)를
   // 재사용한다 — 문구가 실제로 하나의 출처를 갖는다.
   const tOnboarding = useTranslations('onboarding');
+  const tc = useTranslations('common');
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [slugTouched, setSlugTouched] = useState(false);
@@ -54,7 +55,7 @@ export function CreateOrganizationDialog({
   const [planLimitNonce, bumpPlanLimitNonce] = useRenderNonce();
 
   const slugError = slug && !SLUG_REGEX.test(slug)
-    ? '영소문자, 숫자, 하이픈만 사용 가능합니다 (시작/끝은 영소문자 또는 숫자)'
+    ? t('createOrgSlugError')
     : '';
 
   function handleNameChange(value: string) {
@@ -104,11 +105,11 @@ export function CreateOrganizationDialog({
           setPlanLimitHit(true);
           return;
         }
-        setError(json.error?.message ?? (typeof json.detail === 'string' ? json.detail : null) ?? 'Organization 생성에 실패했습니다.');
+        setError(json.error?.message ?? (typeof json.detail === 'string' ? json.detail : null) ?? t('createOrgGenericError'));
         return;
       }
       if (!json.data) {
-        setError('Organization 생성에 실패했습니다.');
+        setError(t('createOrgGenericError'));
         return;
       }
       handleClose(false);
@@ -124,7 +125,7 @@ export function CreateOrganizationDialog({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>새 Organization 만들기</DialogTitle>
+          <DialogTitle>{t('switcherNewOrganization')}</DialogTitle>
         </DialogHeader>
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
           {planLimitHit && (
@@ -149,12 +150,12 @@ export function CreateOrganizationDialog({
           )}
           <div className="space-y-1">
             <label className="text-sm font-medium" htmlFor="org-name">
-              이름 <span className="text-destructive">*</span>
+              {t('createOrgNameLabel')} <span className="text-destructive">*</span>
             </label>
             <input
               id="org-name"
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder="예: My Company"
+              placeholder={t('createOrgNamePlaceholder')}
               value={name}
               onChange={(e) => handleNameChange(e.target.value)}
               required
@@ -163,12 +164,12 @@ export function CreateOrganizationDialog({
           </div>
           <div className="space-y-1">
             <label className="text-sm font-medium" htmlFor="org-slug">
-              Slug <span className="text-destructive">*</span>
+              {t('createOrgSlugLabel')} <span className="text-destructive">*</span>
             </label>
             <input
               id="org-slug"
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              placeholder="my-company"
+              placeholder={t('createOrgSlugPlaceholder')}
               value={slug}
               onChange={(e) => handleSlugChange(e.target.value)}
               required
@@ -182,9 +183,9 @@ export function CreateOrganizationDialog({
             )}
           </div>
           <DialogFooter>
-            <DialogClose render={<Button type="button" variant="ghost" disabled={creating}>취소</Button>} />
+            <DialogClose render={<Button type="button" variant="ghost" disabled={creating}>{tc('cancel')}</Button>} />
             <Button type="submit" disabled={!canSubmit}>
-              {creating ? '생성 중…' : '만들기'}
+              {creating ? t('switcherCreating') : t('switcherCreateButton')}
             </Button>
           </DialogFooter>
         </form>
