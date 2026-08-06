@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import get_current_user, get_verified_org_id
+from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_db
 from app.models.role_template import RoleTemplate
 from app.schemas.a2a import AgentSkill
@@ -122,10 +122,18 @@ async def list_role_templates(
     locale: str | None = None,
     accept_language: str | None = Header(None, alias="Accept-Language"),
     session: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
     _auth=Depends(get_current_user),
 ) -> list[RoleTemplateSummary]:
     """발행된(is_published) role_template 카탈로그 — org/project 무관 전역 조회.
+
+    story #2486 후속(그라운딩 2026-08-06): ``get_verified_org_id``를 썼었는데, 이 엔드포인트는
+    org_id를 실제로 쓰지 않는다(RoleTemplate 모델 자체가 org_id/project_id 없는 전역 카탈로그 —
+    pricing_versions와 동형). 그런데 ``get_verified_org_id``는 ``X-Project-Id`` 헤더가 오면
+    project 멤버십을 강제하는 부작용이 있어(FE ``fastapi-proxy.ts``가 모든 BFF 프록시 호출에
+    브라우저 탭의 "effective project"를 무조건 실어 보냄), org owner라도 그 탭이 자기가 속하지
+    않은 프로젝트를 가리키고 있으면 이 org-wide 카탈로그 조회가 403으로 막혔다(라이브 재현:
+    org owner가 role-catalog를 못 열어 채용 위저드 1단계 자체가 막힘). ``get_current_user``만
+    남겨 로그인 여부만 확인 — org/project 스코프는 애초에 이 리소스와 무관.
 
     Header() DI 마커는 라우트 경계에서만 받고 실 로직은 ``_list_role_templates()``(plain
     str만)로 위임 — 직접-호출 realdb 테스트가 ASGI 파이프라인 없이도 Header sentinel leak
@@ -153,11 +161,11 @@ async def get_role_template(
     locale: str | None = None,
     accept_language: str | None = Header(None, alias="Accept-Language"),
     session: AsyncSession = Depends(get_db),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
     _auth=Depends(get_current_user),
 ) -> RoleTemplateDetail:
     """단건 조회 — Header() DI 마커는 라우트 경계에서만, 실 로직은 ``_get_role_template()``
-    (plain str)로 위임(위 list와 동일 이유)."""
+    (plain str)로 위임(위 list와 동일 이유). org_id 미의존 사유는 ``list_role_templates``
+    docstring 참고(동일 근본)."""
     return await _get_role_template(slug, session=session, locale=locale, accept_language=accept_language)
 
 
