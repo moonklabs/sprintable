@@ -38,6 +38,24 @@ async function mountAndWait() {
 }
 
 describe('VerifyEmailPage — error.code 분기 (story #2484)', () => {
+  it('성공(신규 인증) — raw 서버 문구 대신 한국어 문구(유나 design:changes 델타)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      json: async () => ({ data: { message: 'Email verified successfully' } }),
+    })));
+    await mountAndWait();
+    expect(container.textContent).not.toContain('Email verified successfully');
+    expect(container.textContent).toContain('이메일 인증이 완료되었습니다.');
+  });
+
+  it('성공(이미 인증됨) — raw 서버 문구 대신 동일 한국어 문구(유나 design:changes 델타)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      json: async () => ({ data: { message: 'Email already verified' } }),
+    })));
+    await mountAndWait();
+    expect(container.textContent).not.toContain('Email already verified');
+    expect(container.textContent).toContain('이메일 인증이 완료되었습니다.');
+  });
+
   it('INVALID_TOKEN — raw 영문 대신 한국어 문구', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       json: async () => ({ error: { code: 'INVALID_TOKEN', message: 'Verification link is invalid or expired' } }),

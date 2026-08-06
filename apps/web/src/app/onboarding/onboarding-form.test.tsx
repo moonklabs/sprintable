@@ -50,6 +50,26 @@ async function flush() {
 }
 
 describe('OnboardingForm — error.code 분기 (story #2484)', () => {
+  it('create-org 알려지지 않은 code — 안전 폴백, raw message 미노출(유나 design:changes 델타)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/onboarding/events') return { ok: true, json: async () => ({}) };
+      if (url === '/api/organizations') {
+        return { ok: false, json: async () => ({ error: { code: 'SOME_NEW_CODE', message: 'brand new raw string' } }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<OnboardingForm />)); });
+
+    const nameInput = container.querySelector('input') as HTMLInputElement;
+    await act(async () => { setNativeValue(nameInput, 'My Org'); });
+    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.onboarding.createOrg);
+    await act(async () => { createBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(container.textContent).not.toContain('brand new raw string');
+    expect(container.textContent).toContain(koMessages.onboarding.createOrgFailed);
+  });
+
   it('resend-verification 비-429 실패(USER_NOT_FOUND) — raw 영문 대신 번역 문구', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === '/api/onboarding/events') return { ok: true, json: async () => ({}) };

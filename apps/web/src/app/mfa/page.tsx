@@ -26,6 +26,9 @@ export default function MfaPage() {
         // 안정 값). 알려지지 않은 code만 안전 폴백(raw message 미노출). ⚠️이 라우트는
         // 현재 앱 내 어떤 링크·리다이렉트도 가리키지 않는 고아 경로로 그라운딩됨(#2484) —
         // 동작 검증 실익이 낮지만 요청 스코프대로 동일 원칙 적용.
+        // ⚠️Phase2 i18n·#2485 — 이 페이지 전체(제목·라벨·버튼 포함)가 next-intl 미배선이라
+        // 아래 문구도 자체 하드코딩 영문이다(raw 서버 누수는 아님·i18n 완성도 축). #2484는
+        // "raw 서버 노출 제거"만 스코프라 여기서 전면 i18n 전환은 안 함 — 유나 design 확認.
         if (json.error?.code === 'USER_NOT_FOUND') {
           setError('We could not find your account. Please sign in again.');
         } else if (json.error?.code === 'TOTP_NOT_SETUP') {

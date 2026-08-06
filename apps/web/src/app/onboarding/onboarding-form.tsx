@@ -106,7 +106,11 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
           setShowUpgrade(true);
           return;
         }
-        setError(json?.error?.message ?? t('createOrgFailed'));
+        // story #2484 — 유나 design:changes(2026-08-06): 위 두 code는 분기하지만 그 «외»
+        // code는 raw 서버 message가 그대로 샜다(형제 3핸들러(resend/create-project/
+        // create-agent)만 고치고 이 자리를 놓친 것 — 가드도 위에 .code 토큰이 있어 못 잡는
+        // 사각이었다). 알려지지 않은 code는 다른 핸들러와 동일하게 generic 폴백만 쓴다.
+        setError(t('createOrgFailed'));
         return;
       }
 
@@ -357,6 +361,8 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
                 placeholder={t('slugPlaceholder')}
               />
               {orgSlug && !slugValid ? (
+                // ⚠️Phase2 i18n·#2485 — 클라 측 정규식 검증 문구가 하드코딩 한국어다(t() 아님,
+                // 서버 응답과 무관 — raw 서버 누수는 아님). #2484 스코프 밖, 유나 design 확認.
                 <p className="text-xs text-destructive">영소문자, 숫자, 하이픈만 사용 가능합니다</p>
               ) : (
                 <p className="text-xs text-muted-foreground">sprintable.app/{orgSlug || '...'}</p>
