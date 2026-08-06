@@ -751,6 +751,13 @@ jobs:
       - name: "Verify tint background × foreground contrast (story #2420 regression guard)"
         run: pnpm --filter web verify:tint-foreground-contrast
 
+      # story #2480(유나 규격) 회귀가드: `--muted-foreground`는 bg-muted·background·card
+      # 위에서 전부 쓰인다(테이블 헤더·플레이스홀더·칩·보조텍스트 도처). 라이트 bg-muted 위
+      # 실측 4.39:1로 AA 미달이 발견돼(#2866 가디언 리뷰 중) 토큰을 L 0.552→0.52로 조정했다.
+      # 이 스텝이 재도입(값이 다시 4.39 쪽으로 밀림)을 정의 시점에 잡는다.
+      - name: "Verify muted-foreground contrast (story #2480 regression guard)"
+        run: pnpm --filter web verify:muted-foreground-contrast
+
       # story #2420 AC7 회귀가드: AC3(위)는 globals.css 정의만 본다 — 사용처(컴포넌트 파일)는
       # 전혀 안 읽는다. 실제로 사용처 하나(goals-client.tsx:615)를 계열색으로 되돌려도 AC3·
       # type-check·lint·해당 vitest 전부 그대로 초록이었다(실측, 디디). 이 스텝은 같은
