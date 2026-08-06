@@ -242,6 +242,18 @@ class Settings(BaseSettings):
     polar_sandbox: bool = True  # dev=True(sandbox), prod=False
     polar_webhook_secret: str = ""  # HMAC signature 검증용
 
+    # 결제②-C0(story #2491): Toss Payments — 원화 정기결제(빌링키) 어댑터(TossAdapter, story C1~).
+    # provider = 통화의 함수(원화→Toss·달러→Polar, billing-arch-modular-pg-ledger-v0-1 §2) — polar_*와
+    # 동형 패턴. dev는 Secret Manager에 TOSS_PAYMENTS_SECRET_KEY_DEV 등으로 등록·Cloud Run env
+    # TOSS_PAYMENTS_SECRET_KEY(이 필드명 대문자화)로 secretKeyRef 매핑(PO, 2026-08-06 — 인프라 lane,
+    # DATABASE_URL_DIRECT/GITHUB_APP_CLIENT_SECRET 등과 동일 바인딩 컨벤션). prod(live_*)는 정식출시
+    # 확認 전까지 미배선 — 값이 비어 있으면 PolarAdapter의 "토큰 없으면 mock" 분기와 동형으로 TossAdapter
+    # 도 fail-safe해야 한다(C1 구현 시 준수).
+    toss_payments_secret_key: str = ""
+    toss_payments_client_key: str = ""
+    toss_payments_crypto_key: str = ""
+    toss_merchant_id: str = "bill_sprint1d9"  # 비민감 — Secret Manager 대상 아님(PO 확認)
+
     # E-H1-S6: GitHub webhook(PR/CI verdict 캡처) HMAC 검증 시크릿. 미설정이면 webhook 거부(inert).
     github_webhook_secret: str = ""
 
