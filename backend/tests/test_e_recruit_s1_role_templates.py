@@ -447,3 +447,24 @@ async def test_list_role_templates_locale_query_param_http(test_client, mock_ses
     body = resp.json()
     assert body[0]["division"] == "엔지니어링"
     assert body[0]["description"] == "한글 설명"
+
+
+@pytest.mark.anyio
+async def test_list_role_templates_ignores_inaccessible_x_project_id_http(test_client, mock_session):
+    """story #2486 그라운딩(2026-08-06) 회귀 고정 — org owner라도 브라우저 탭의 effective
+    project(X-Project-Id)가 자기가 속하지 않은 프로젝트를 가리키면 이 org-wide 카탈로그가
+    403으로 막혔다(``get_verified_org_id``의 project-membership 부작용). role_templates는
+    org_id/project_id 없는 전역 카탈로그라 이 헤더와 무관해야 — 임의(비접근) project_id를
+    실어 보내도 여전히 200이어야 한다."""
+    import uuid
+    from unittest.mock import AsyncMock, MagicMock
+
+    rt = _mock_role_template()
+    res = MagicMock()
+    res.scalars.return_value.all.return_value = [rt]
+    mock_session.execute = AsyncMock(return_value=res)
+    inaccessible_project_id = str(uuid.uuid4())
+    resp = await test_client.get(
+        "/api/v2/role-templates", headers={"X-Project-Id": inaccessible_project_id}
+    )
+    assert resp.status_code == 200
