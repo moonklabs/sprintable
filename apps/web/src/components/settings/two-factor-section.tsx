@@ -40,7 +40,18 @@ export function TwoFactorSection() {
     try {
       const res = await fetch('/api/auth/2fa/setup', { method: 'POST' });
       const json = await res.json() as { data?: { secret: string; uri: string }; error?: { code: string; message: string } };
-      if (!res.ok) { setMessage({ type: 'error', text: json.error?.message ?? t('twoFactorSetupFailed') }); return; }
+      // story #2485 — code로 분기(backend auth.py totp_setup()이 _err()로 직접
+      // 발급하는 안정 값). 알려지지 않은 code만 안전 폴백(raw message 미노출).
+      if (!res.ok) {
+        if (json.error?.code === 'TOTP_ALREADY_ENABLED') {
+          setMessage({ type: 'error', text: t('twoFactorAlreadyEnabled') });
+        } else if (json.error?.code === 'USER_NOT_FOUND') {
+          setMessage({ type: 'error', text: t('twoFactorUserNotFound') });
+        } else {
+          setMessage({ type: 'error', text: t('twoFactorSetupFailed') });
+        }
+        return;
+      }
       setProvUri(json.data?.uri ?? null);
       setSecret(json.data?.secret ?? null);
       setState('enrolling');
@@ -59,8 +70,19 @@ export function TwoFactorSection() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: otpCode }),
       });
-      const json = await res.json() as { data?: { ok: boolean }; error?: { message: string } };
-      if (!res.ok) { setMessage({ type: 'error', text: json.error?.message ?? t('twoFactorInvalidCode') }); return; }
+      const json = await res.json() as { data?: { ok: boolean }; error?: { code?: string; message: string } };
+      // story #2485 — code로 분기(backend auth.py totp_verify()가 _err()로 직접
+      // 발급하는 안정 값). 알려지지 않은 code만 안전 폴백(raw message 미노출).
+      if (!res.ok) {
+        if (json.error?.code === 'USER_NOT_FOUND') {
+          setMessage({ type: 'error', text: t('twoFactorUserNotFound') });
+        } else if (json.error?.code === 'TOTP_NOT_SETUP') {
+          setMessage({ type: 'error', text: t('twoFactorNotSetUp') });
+        } else {
+          setMessage({ type: 'error', text: t('twoFactorInvalidCode') });
+        }
+        return;
+      }
       setState('enabled');
       setProvUri(null);
       setSecret(null);
@@ -81,8 +103,10 @@ export function TwoFactorSection() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: otpCode }),
       });
-      const json = await res.json() as { error?: { message: string } };
-      if (!res.ok) { setMessage({ type: 'error', text: json.error?.message ?? t('twoFactorInvalidCode') }); return; }
+      // story #2485 — 그라운딩(2026-08-06): 이 라우트(POST .../2fa/disable)는 backend에
+      // 존재하지 않아 항상 404다(setup/verify는 있지만 disable만 미구현 — 별도 이슈로
+      // 보고, FE에서 code로 갈라도 해결 안 됨). raw 서버 message 노출만 우선 제거.
+      if (!res.ok) { setMessage({ type: 'error', text: t('twoFactorSetupFailed') }); return; }
       setState('disabled');
       setOtpCode('');
       setMessage({ type: 'success', text: t('twoFactorDisabledMsg') });

@@ -103,8 +103,32 @@ function VariantSlot({
         setReasons({});
         onDecided();
       } else {
-        const json = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
-        setError(json?.error?.message ?? t('decisionError'));
+        // story #2485 — code로 분기(backend loops.py decide_loop()가 dict{code,message}로
+        // 직접 발급 — route.ts 주석대로 순수 passthrough, mapApiError 경유 아님). 알려지지
+        // 않은 code만 안전 폴백(raw message 미노출).
+        const json = (await res.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null;
+        switch (json?.error?.code) {
+          case 'LOOP_NOT_FOUND':
+            setError(t('decisionErrorLoopNotFound'));
+            break;
+          case 'DECISION_HUMAN_ONLY':
+            setError(t('decisionErrorHumanOnly'));
+            break;
+          case 'LOOP_NOT_IN_DECIDING_STATE':
+            setError(t('decisionErrorNotDeciding'));
+            break;
+          case 'GATE_ALREADY_RESOLVED':
+            setError(t('decisionErrorGateResolved'));
+            break;
+          case 'NO_PENDING_ARTIFACTS_IN_GROUP':
+            setError(t('decisionErrorNoPendingArtifacts'));
+            break;
+          case 'ARTIFACT_SET_MISMATCH':
+            setError(t('decisionErrorArtifactSetMismatch'));
+            break;
+          default:
+            setError(t('decisionError'));
+        }
       }
     } catch {
       setError(t('decisionError'));

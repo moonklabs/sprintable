@@ -131,8 +131,9 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
         body: JSON.stringify({ member_id: memberId, url: c.url, project_id: c.project_id, is_active: next }),
       });
       if (!res.ok) {
-        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        addToast({ type: 'error', title: json?.error?.message ?? tc('error') });
+        // story #2485 — backend upsert_webhook_config()는 generic HTTP상태 코드만
+        // 낸다(진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 제거.
+        addToast({ type: 'error', title: tc('error') });
       }
       await fetchWebhookConfigs();
     } finally {
@@ -146,8 +147,9 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
     try {
       const res = await fetch(`/api/webhooks/config?id=${encodeURIComponent(c.id)}`, { method: 'DELETE' });
       if (!res.ok) {
-        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        addToast({ type: 'error', title: json?.error?.message ?? tc('error') });
+        // story #2485 — backend delete_webhook_config()는 generic HTTP상태 코드만
+        // 낸다(진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 제거.
+        addToast({ type: 'error', title: tc('error') });
         setDeleteConfirmId(null);
         return;
       }
@@ -205,8 +207,9 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
         }),
       });
       if (!res.ok) {
-        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        addToast({ type: 'error', title: json?.error?.message ?? tc('error') });
+        // story #2485 — backend upsert_webhook_config()는 generic HTTP상태 코드만
+        // 낸다(진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 제거.
+        addToast({ type: 'error', title: tc('error') });
         return;
       }
       addToast({ type: 'success', title: 'Webhook URL saved' });

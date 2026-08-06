@@ -114,6 +114,9 @@ function resolveSettingsTab(tab: string | null): string {
 export default function SettingsPage() {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
+  // story #2485 — projectLimitExceededError는 onboarding-form.tsx(#2484)와 동일 개념
+  // (resource:"project" PLAN_LIMIT_EXCEEDED)이라 새 키를 만들지 않고 재사용한다.
+  const tOnboarding = useTranslations('onboarding');
   const router = useRouter();
   const searchParamsHook = useSearchParams();
   const { orgId: ctxOrgId, orgMemberships } = useDashboardContext();
@@ -210,8 +213,9 @@ export default function SettingsPage() {
       if (res.ok) {
         window.location.href = '/onboarding';
       } else {
-        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        addToast({ type: 'error', title: json?.error?.message ?? 'Organization 삭제에 실패했습니다.' });
+        // story #2485 — backend delete_organization()은 generic HTTP상태 코드만
+        // 낸다(진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
+        addToast({ type: 'error', title: t('orgDeleteFailed') });
         setShowDeleteOrgConfirm(false);
       }
     } finally {
@@ -231,7 +235,9 @@ export default function SettingsPage() {
       });
       const json = await res.json() as { data?: { name: string }; error?: { message?: string } };
       if (!res.ok) {
-        setOrgNameError(json.error?.message ?? t('orgNameSaveFailed'));
+        // story #2485 — backend update_organization()은 generic HTTP상태 코드만
+        // 낸다(진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 제거.
+        setOrgNameError(t('orgNameSaveFailed'));
       } else {
         setOrgInfo((prev) => prev ? { ...prev, name: json.data?.name ?? editOrgName.trim() } : prev);
         addToast({ type: 'success', title: t('orgNameSaved') });
@@ -489,8 +495,11 @@ export default function SettingsPage() {
       setProjectActionMessage({ type: 'success', text: t('projectUpdated') });
       router.refresh();
     } else {
-      const json = await res.json().catch(() => null);
-      setProjectActionMessage({ type: 'error', text: json?.error?.message ?? t('projectUpdateFailed') });
+      // story #2485 — ⚠️backend update_project()가 슬러그형식(400)·중복(409) 등 실제
+      // code를 낼 수 있으나 packages/storage-api의 mapApiError가 404/403 외 전부
+      // INTERNAL_ERROR로 뭉개 지금은 FE에 절대 안 도달한다(#2488로 별도 보고) — 여기서
+      // code 분기를 지으면 죽은 분기가 되니 짓지 않는다. generic 폴백만.
+      setProjectActionMessage({ type: 'error', text: t('projectUpdateFailed') });
     }
     setSavingProject(false);
   };
@@ -515,12 +524,20 @@ export default function SettingsPage() {
       }),
     });
 
-    const json = await res.json().catch(() => null);
+    const json = await res.json().catch(() => null) as {
+      data?: ProjectOption;
+      error?: { code?: string; message?: string; limit?: number };
+    } | null;
 
     if (!res.ok) {
+      // story #2485 — EE plan_limits.check_project_create_limit()이 실제로 이 code를
+      // 낸다(verbatim proxy — mapApiError 경유 아님, 그라운딩 확認). 그 외 code는
+      // backend가 generic HTTP상태만 준다 — raw 서버 message 노출 대신 고정 문구.
       setProjectActionMessage({
         type: 'error',
-        text: json?.error?.message ?? t('projectCreateFailed'),
+        text: json?.error?.code === 'PLAN_LIMIT_EXCEEDED'
+          ? tOnboarding('projectLimitExceededError', { limit: json.error.limit ?? 1 })
+          : t('projectCreateFailed'),
       });
       setCreatingProject(false);
       return;
@@ -558,8 +575,9 @@ export default function SettingsPage() {
       setProjectActionMessage({ type: 'success', text: t('projectDeleted') });
       router.refresh();
     } else {
-      const json = await res.json().catch(() => null);
-      setProjectActionMessage({ type: 'error', text: json?.error?.message ?? t('projectDeleteFailed') });
+      // story #2485 — backend delete_project()는 generic HTTP상태 코드만 낸다
+      // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
+      setProjectActionMessage({ type: 'error', text: t('projectDeleteFailed') });
     }
 
     setDeletingProjectId(null);
@@ -592,8 +610,9 @@ export default function SettingsPage() {
           body: JSON.stringify({ member_id: memberId, url, project_id: currentProjectId, is_active: true }),
         });
         if (!res.ok) {
-          const json = await res.json().catch(() => ({})) as { error?: { message?: string } };
-          setWebhookErrors((prev) => ({ ...prev, [memberId]: json.error?.message ?? 'Webhook URL 저장 실패' }));
+          // story #2485 — backend upsert_webhook_config()는 generic HTTP상태 코드만
+          // 낸다(진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 제거.
+          setWebhookErrors((prev) => ({ ...prev, [memberId]: t('webhookSaveFailed') }));
           return;
         }
       }

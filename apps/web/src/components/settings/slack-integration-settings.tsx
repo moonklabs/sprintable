@@ -100,8 +100,11 @@ export function SlackIntegrationSettingsSection() {
     setLoading(true);
     try {
       const response = await fetch('/api/settings/slack-integration', { cache: 'no-store' });
+      // story #2485 — 그라운딩(2026-08-06): 이 엔드포인트는 OSS에서 항상 503
+      // NOT_AVAILABLE 하드코딩 stub이다(backend 미구현 — 별도 이슈로 보고, FE에서
+      // code로 갈라도 해결 안 됨). raw 서버 message 노출만 우선 제거.
       const json = await response.json();
-      if (!response.ok) throw new Error(json?.error?.message ?? t('loadFailed'));
+      if (!response.ok) throw new Error(t('loadFailed'));
       const nextData = (json.data ?? EMPTY_STATE) as SlackIntegrationPayload;
       setData(nextData);
       hydrateSelections(nextData);
@@ -163,6 +166,9 @@ export function SlackIntegrationSettingsSection() {
 
     const json = await response.json();
 
+    // story #2485 — 그라운딩(2026-08-06): 이 엔드포인트는 OSS에서 항상 503
+    // NOT_AVAILABLE 하드코딩 stub이다(backend 미구현) — 아래 409 분기는 지금
+    // 도달 불가능한 죽은 코드다(별도 이슈로 보고, 제거는 스코프 밖이라 유지).
     if (response.status === 409) {
       setRemapConflict({
         channelId: channel.id,
@@ -174,7 +180,7 @@ export function SlackIntegrationSettingsSection() {
     }
 
     if (!response.ok) {
-      throw new Error(json?.error?.message ?? t('saveFailed'));
+      throw new Error(t('saveFailed'));
     }
 
     upsertMapping(json.data as { channel_id: string; channel_name: string; project_id: string; project_name: string; id: string });

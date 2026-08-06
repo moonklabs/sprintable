@@ -92,8 +92,10 @@ export function RejectedRelationsSection({ storyId }: { storyId: string }) {
             : prev));
           return;
         }
-        const json = await res.json().catch(() => null);
-        const error = typeof json?.detail === 'string' ? json.detail : t('rejectedRelationsRestoreErrorFallback');
+        // story #2485 — `json.detail`은 실 envelope({data,error,meta})에 없는 필드라 이
+        // 분기는 항상 죽어있었다(그라운딩 확認). backend undo_story_rejected_relation()은
+        // generic HTTP상태 코드(NOT_FOUND, 3가지 원인 구분불가)만 낸다 — 고정 폴백만 사용.
+        const error = t('rejectedRelationsRestoreErrorFallback');
         setState((prev) => (prev.kind === 'ready'
           ? { ...prev, rows: prev.rows.map((r) => (r.item.target_id === targetId ? { ...r, restoring: false, error } : r)) }
           : prev));
