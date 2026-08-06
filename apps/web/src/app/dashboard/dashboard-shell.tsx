@@ -7,6 +7,7 @@ import {
   installProjectHeaderInterceptor,
   resolveEffectiveProjectId,
   setEffectiveProjectId,
+  setEffectiveOrgId,
 } from '@/lib/project-context-client';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
@@ -272,6 +273,11 @@ export function DashboardShell({
   // story #2093 — 경로(`[ws]/[proj]`) resolve 결과가 최우선(화면이 실제로 그리는 것의 정본).
   // 계정 상태(orgId, server prop)는 flat 라우트(경로에 org/project가 없는 화면)에서만 쓰인다.
   const effectiveOrgId = pathOrgId ?? orgId;
+  // story #2497 — 인터셉터가 X-Project-Id 옆에 X-Org-Id도 함께 실어야 하는 자리(fire #2486
+  // 근본원인: 멀티-org 유저의 stale JWT org가 탭의 실제 org와 달라 has_project_access가
+  // 엉뚱한 org로 검증됨). setEffectiveProjectId와 동일하게 렌더 단계에서 동기화 —
+  // 인터셉터 설치(useProjectSsot 내부)보다 먼저 ref가 채워져 있어야 첫 자식 fetch도 커버된다.
+  setEffectiveOrgId(effectiveOrgId);
   // R2: URL `?p=` = flat 라우트의 탭별 SSOT. pathProjectId(경로 resolve)가 있으면 그게 최우선.
   const effectiveProjectId = useProjectSsot(projectId, projectMemberships, pathProjectId);
   const effectiveProjectName = projectMemberships.find((m) => m.projectId === effectiveProjectId)?.projectName ?? projectName;
