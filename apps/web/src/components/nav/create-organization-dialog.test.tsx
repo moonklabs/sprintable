@@ -138,3 +138,70 @@ describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470
     expect(document.body.textContent).toContain('The free plan allows up to 1 organization');
   });
 });
+
+// story #2482 — 카디르가 #2861 QA 때 플래그한 잔여: 제목/라벨/버튼/에러문구가 하드코딩
+// 영한혼용이었다("새 Organization 만들기"·"이름"·"취소" 등, i18n 키 없이 리터럴). 순수
+// 문자열 i18n화(다이얼로그 로직 무변경) — 기존 nav.switcher* 키를 재사용(사이드바 스위처의
+// "새 조직 만들기" 트리거와 같은 개념이라 새 키 대신 공유, #2470 fold-in과 동일 원칙)하고
+// 나머지 필드는 신규 키.
+describe('CreateOrganizationDialog — i18n (story #2482)', () => {
+  it('ko locale: 제목·라벨·placeholder·버튼이 전부 한국어로 렌더된다', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+    await mount('ko');
+
+    expect(document.body.textContent).toContain('새 Organization 만들기');
+    expect(document.body.textContent).toContain('이름');
+    expect(document.body.textContent).toContain('Slug');
+    expect(document.body.textContent).toContain('취소');
+    expect(document.body.textContent).toContain('만들기');
+    const nameInput = document.body.querySelector('#org-name') as HTMLInputElement;
+    expect(nameInput.placeholder).toBe('예: My Company');
+    const slugInput = document.body.querySelector('#org-slug') as HTMLInputElement;
+    expect(slugInput.placeholder).toBe('my-company');
+  });
+
+  it('en locale: 제목·라벨·placeholder·버튼이 전부 영문으로 렌더된다(회귀 없음)', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+    await mount('en');
+
+    expect(document.body.textContent).toContain('Create new organization');
+    expect(document.body.textContent).toContain('Name');
+    expect(document.body.textContent).toContain('Cancel');
+    expect(document.body.textContent).toContain('Create');
+    const nameInput = document.body.querySelector('#org-name') as HTMLInputElement;
+    expect(nameInput.placeholder).toBe('e.g. My Company');
+  });
+
+  it('slug 형식 에러도 로케일을 따라간다(ko/en)', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+    await mount('ko');
+    const slugInput = document.body.querySelector('#org-slug') as HTMLInputElement;
+    // handleSlugChange가 [a-z0-9-] 외 문자는 이미 걸러내므로(공백·특수문자), SLUG_REGEX를
+    // 실제로 깨는 값은 "시작/끝이 하이픈"류뿐이다.
+    await act(async () => { setNativeValue(slugInput, '-bad-'); });
+    expect(document.body.textContent).toContain('영소문자, 숫자, 하이픈만 사용 가능합니다');
+  });
+
+  it('제출 실패(일반 에러, code 없음)도 i18n 문구로 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      json: async () => ({ data: null, error: {}, meta: null }),
+    })));
+    await mount('ko');
+    await fillAndSubmit();
+    expect(document.body.textContent).toContain('Organization을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.');
+  });
+
+  // 양성대조(AC) — 라벨 하나를 하드코딩으로 되돌리면 이 검사가 실제로 빨간불이어야 한다.
+  // next-intl은 없는 키를 요청하면 키 이름 그대로를 렌더하므로(throw하지 않음), "제목이
+  // t()로 번역된 실제 문구를 담고 있는가"를 직접 확認하는 이 테스트 자체가 그 반례 역할을
+  // 한다 — 소스에서 t('switcherNewOrganization') 대신 하드코딩 문자열로 되돌리면 en
+  // locale 테스트가 "Create new organization" 대신 한국어를 보게 되어 즉시 깨진다.
+  it('양성대조 — 하드코딩 되돌림을 가정: en에서 한국어 문구가 섞이면 실패한다', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+    await mount('en');
+    expect(document.body.textContent).not.toContain('새 Organization 만들기');
+    expect(document.body.textContent).not.toContain('이름 *');
+  });
+});
