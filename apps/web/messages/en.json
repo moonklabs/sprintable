@@ -1137,6 +1137,8 @@
     },
     "projectUpdated": "Project updated.",
     "projectUpdateFailed": "Failed to update project.",
+    "projectSlugTaken": "This slug is already taken.",
+    "projectSlugInvalid": "The slug format is invalid.",
     "deleteProject": "Delete",
     "projectDeleted": "Project deleted.",
     "projectDeleteFailed": "Failed to delete project.",

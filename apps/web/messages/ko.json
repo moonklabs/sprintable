@@ -1137,6 +1137,8 @@
     },
     "projectUpdated": "프로젝트가 업데이트되었습니다.",
     "projectUpdateFailed": "프로젝트 업데이트에 실패했습니다.",
+    "projectSlugTaken": "이미 사용 중인 슬러그입니다.",
+    "projectSlugInvalid": "슬러그 형식이 올바르지 않습니다.",
     "deleteProject": "삭제",
     "projectDeleted": "프로젝트를 삭제했습니다.",
     "projectDeleteFailed": "프로젝트 삭제에 실패했습니다.",
