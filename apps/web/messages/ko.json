@@ -112,7 +112,7 @@
     "createOrgSlugLabel": "Slug",
     "createOrgSlugPlaceholder": "my-company",
     "createOrgSlugError": "영소문자, 숫자, 하이픈만 사용 가능합니다 (시작/끝은 영소문자 또는 숫자)",
-    "createOrgGenericError": "Organization 생성에 실패했습니다."
+    "createOrgGenericError": "Organization을 만들지 못했습니다. 잠시 후 다시 시도해 주세요."
   },
   "storage": {
     "title": "스토리지",

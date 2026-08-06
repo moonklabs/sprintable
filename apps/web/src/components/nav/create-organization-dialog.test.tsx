@@ -190,7 +190,7 @@ describe('CreateOrganizationDialog — i18n (story #2482)', () => {
     })));
     await mount('ko');
     await fillAndSubmit();
-    expect(document.body.textContent).toContain('Organization 생성에 실패했습니다.');
+    expect(document.body.textContent).toContain('Organization을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.');
   });
 
   // 양성대조(AC) — 라벨 하나를 하드코딩으로 되돌리면 이 검사가 실제로 빨간불이어야 한다.
