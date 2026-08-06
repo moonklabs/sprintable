@@ -229,6 +229,10 @@ export function UnifiedSwitcher({
                 onChange={(e) => s.setNewProjectDesc(e.target.value)}
               />
             </div>
+            {/* story #2468(b) — 실패를 침묵하지 않는다("버튼 무반응"의 정체가 이 자리였다). */}
+            {s.createProjectError && (
+              <p role="alert" className="text-sm text-destructive">{s.createProjectError}</p>
+            )}
             <DialogFooter>
               <DialogClose render={<Button type="button" variant="ghost" disabled={s.creating}>{tCommon('cancel')}</Button>} />
               <Button type="submit" disabled={!s.newProjectName.trim() || s.creating}>

@@ -103,7 +103,8 @@
     "switcherOptionalLabel": "(선택)",
     "switcherProjectDescPlaceholder": "프로젝트에 대한 간단한 설명",
     "switcherCreating": "생성 중…",
-    "switcherCreateButton": "만들기"
+    "switcherCreateButton": "만들기",
+    "switcherCreateProjectError": "프로젝트를 만들지 못했습니다. 잠시 후 다시 시도해 주세요."
   },
   "storage": {
     "title": "스토리지",

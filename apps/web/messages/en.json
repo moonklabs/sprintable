@@ -103,7 +103,8 @@
     "switcherOptionalLabel": "(optional)",
     "switcherProjectDescPlaceholder": "A short description of the project",
     "switcherCreating": "Creating…",
-    "switcherCreateButton": "Create"
+    "switcherCreateButton": "Create",
+    "switcherCreateProjectError": "Couldn't create the project. Please try again in a moment."
   },
   "storage": {
     "title": "Storage",
