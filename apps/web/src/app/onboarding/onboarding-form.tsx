@@ -96,6 +96,16 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
           setError(t('emailVerifyRequiredError'));
           return;
         }
+        // story #2470 — #2441과 같은 클래스: BE는 이미 구조화 에러(code:PLAN_LIMIT_EXCEEDED·
+        // limit·upgrade_required)를 주는데 이전엔 여기서 raw 영문 message를 그대로 찍었다
+        // ("Free plan org limit (1) reached. Upgrade to Team or Pro."). upgrade_required가
+        // 있으면 UpgradeModal(이미 존재·다른 한도 케이스에서 재사용 중인 컴포넌트)로 안내한다 —
+        // showUpgrade/upgradeReason state는 이 스토리 前엔 세팅부가 없어 죽어있던 자리였다.
+        if (json?.error?.code === 'PLAN_LIMIT_EXCEEDED' && json?.error?.upgrade_required) {
+          setUpgradeReason(t('orgLimitExceededError', { limit: json.error.limit ?? 1 }));
+          setShowUpgrade(true);
+          return;
+        }
         setError(json?.error?.message ?? t('createOrgFailed'));
         return;
       }

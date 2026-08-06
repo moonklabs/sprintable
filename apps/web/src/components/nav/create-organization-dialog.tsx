@@ -83,10 +83,15 @@ export function CreateOrganizationDialog({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim(), slug: slug.trim() }),
       });
-      const json = await res.json() as { data?: { id: string; name: string; slug: string }; error?: { message?: string }; detail?: { code?: string; message?: string } | string };
+      const json = await res.json() as { data?: { id: string; name: string; slug: string }; error?: { code?: string; message?: string }; detail?: { code?: string; message?: string } | string };
       if (!res.ok) {
+        // story #2470 — 실측(2026-08-06): 응답 envelope은 `{error:{code,...}}`다(BE
+        // HTTPException(detail=...)이 exception handler를 거쳐 `error`로 재포장된다).
+        // `json.detail`만 보던 이전 체크는 실제 응답에 그 필드가 없어 항상 죽은 분기였고
+        // (한도 초과여도 이 브랜치를 못 타 raw 영문 message로 계속 폴백) — `error.code`를
+        // 1순위로, `detail`은 하위호환 폴백으로 남긴다.
         const detail = typeof json.detail === 'object' ? json.detail : null;
-        if (res.status === 402 && detail?.code === 'PLAN_LIMIT_EXCEEDED') {
+        if (res.status === 402 && (json.error?.code === 'PLAN_LIMIT_EXCEEDED' || detail?.code === 'PLAN_LIMIT_EXCEEDED')) {
           bumpPlanLimitNonce();
           setPlanLimitHit(true);
           return;
