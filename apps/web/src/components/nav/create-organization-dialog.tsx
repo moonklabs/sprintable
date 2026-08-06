@@ -105,7 +105,17 @@ export function CreateOrganizationDialog({
           setPlanLimitHit(true);
           return;
         }
-        setError(json.error?.message ?? (typeof json.detail === 'string' ? json.detail : null) ?? t('createOrgGenericError'));
+        // story #2484 — 잔여 폴백도 code로 분기(organizations.py create_organization()이
+        // 낼 수 있는 나머지: 400 "Invalid slug format"/409 "Slug already exists", 둘 다
+        // plain-string detail이라 제네릭 매핑됨). 알려지지 않은 code만 안전 폴백.
+        const code = json.error?.code ?? detail?.code;
+        if (code === 'CONFLICT') {
+          setError(t('createOrgSlugTaken'));
+        } else if (code === 'BAD_REQUEST') {
+          setError(t('createOrgSlugError'));
+        } else {
+          setError(t('createOrgGenericError'));
+        }
         return;
       }
       if (!json.data) {

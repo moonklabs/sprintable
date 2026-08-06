@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { inviteErrorMessage } from '@/lib/invite-error-message';
 
 interface InviteAcceptClientProps {
   token: string;
@@ -31,9 +32,11 @@ export function InviteAcceptClient({ token, orgName, role, email, projects }: In
     setAccepting(true);
     try {
       const res = await fetch(`/api/invites/${token}/accept`, { method: 'POST' });
-      const json = await res.json() as { error?: { message?: string } };
+      const json = await res.json() as { error?: { code?: string; message?: string } };
       if (!res.ok) {
-        setResult({ type: 'error', text: json.error?.message ?? tInvite('acceptFailed') });
+        // story #2484 — code로 분기(invite/page.tsx의 acceptInvite와 같은 백엔드·같은
+        // 매핑 재사용, 2벌 방지).
+        setResult({ type: 'error', text: inviteErrorMessage(tInvite, json.error?.code, 'acceptFailed') });
       } else {
         setResult({ type: 'success', text: `${tInvite('success')} ${tInvite('redirecting')}` });
         setTimeout(() => { window.location.href = '/dashboard'; }, 1500);

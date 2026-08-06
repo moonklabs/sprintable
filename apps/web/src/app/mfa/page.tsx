@@ -20,9 +20,21 @@ export default function MfaPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: code.trim() }),
       });
-      const json = await res.json() as { data?: { ok: boolean }; error?: { message: string } };
+      const json = await res.json() as { data?: { ok: boolean }; error?: { code?: string; message: string } };
       if (!res.ok || !json.data?.ok) {
-        setError(json.error?.message ?? 'Invalid verification code. Please try again.');
+        // story #2484 — code로 분기(backend auth.py totp_verify()가 _err()로 직접 발급하는
+        // 안정 값). 알려지지 않은 code만 안전 폴백(raw message 미노출). ⚠️이 라우트는
+        // 현재 앱 내 어떤 링크·리다이렉트도 가리키지 않는 고아 경로로 그라운딩됨(#2484) —
+        // 동작 검증 실익이 낮지만 요청 스코프대로 동일 원칙 적용.
+        if (json.error?.code === 'USER_NOT_FOUND') {
+          setError('We could not find your account. Please sign in again.');
+        } else if (json.error?.code === 'TOTP_NOT_SETUP') {
+          setError('Two-factor authentication has not been set up yet.');
+        } else if (json.error?.code === 'INVALID_TOTP') {
+          setError('That code did not match. Please try again.');
+        } else {
+          setError('Invalid verification code. Please try again.');
+        }
         return;
       }
       router.push('/dashboard');

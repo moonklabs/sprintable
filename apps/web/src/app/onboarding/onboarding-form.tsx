@@ -138,8 +138,14 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
         return;
       }
       if (!res.ok) {
+        // story #2484 — code로 분기(backend auth.py resend_verification()이 _err()로
+        // 직접 발급하는 안정 값). 알려지지 않은 code만 안전 폴백.
         setResendState('error');
-        setResendError(json?.error?.message ?? t('resendFailed'));
+        if (json?.error?.code === 'USER_NOT_FOUND') {
+          setResendError(t('resendUserNotFound'));
+        } else {
+          setResendError(t('resendFailed'));
+        }
         return;
       }
       setResendState('sent');
@@ -172,12 +178,19 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
       const json = await res.json();
 
       if (!res.ok) {
-        if (json?.error?.code === 'UPGRADE_REQUIRED') {
-          setUpgradeReason(json.error.message);
+        // story #2484 — 실측(#2484 그라운딩): 이 분기는 'UPGRADE_REQUIRED'를 봤으나 backend
+        // projects.py create_project()는 그 코드를 절대 내지 않는다(존재하지 않는 문자열이라
+        // FastAPI 어디에도 없음 grep 확認) — organizations.py의 PLAN_LIMIT_EXCEEDED와 정확히
+        // 같은 클래스(resource:"project")를 실제로 낸다. 그래서 이 UpgradeModal 경로는 지금껏
+        // 한 번도 안 탄 죽은 분기였다(항상 아래 raw fallback으로 샜음). 코드를 바로잡는다.
+        if (json?.error?.code === 'PLAN_LIMIT_EXCEEDED') {
+          setUpgradeReason(t('projectLimitExceededError', { limit: json.error.limit ?? 1 }));
           setShowUpgrade(true);
           return;
         }
-        setError(json?.error?.message ?? t('createProjectFailed'));
+        // 그 외(400 Invalid slug format·409 Slug already exists 등 — 온보딩은 explicit slug를
+        // 안 보내 실질 도달 희박하나 방어적으로) code만 보고 raw message는 안 씀.
+        setError(t('createProjectFailed'));
         return;
       }
 
@@ -227,15 +240,17 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
           role: agentRole,
         }),
       });
-      const memberJson = await memberRes.json() as { data?: { id: string; api_key?: string }; error?: { message?: string } };
+      const memberJson = await memberRes.json() as { data?: { id: string; api_key?: string }; error?: { code?: string; message?: string } };
+      // story #2484 — 이 정확한 호출 형태(온보딩·human 호출자·user_id 없음)에서 도달 가능한
+      // 고유 code가 없어(그라운딩 확認) raw message 대신 통일된 안전 폴백만 사용.
       if (!memberRes.ok) {
-        setError(memberJson?.error?.message ?? 'Failed to create agent');
+        setError(t('createAgentFailed'));
         return;
       }
 
       const newAgentId = memberJson.data?.id;
       if (!newAgentId) {
-        setError('Failed to create agent');
+        setError(t('createAgentFailed'));
         return;
       }
       setAgentId(newAgentId);

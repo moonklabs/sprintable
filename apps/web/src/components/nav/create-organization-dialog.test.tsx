@@ -116,8 +116,25 @@ describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470
     await mount();
     await fillAndSubmit();
 
-    expect(document.body.textContent).toContain('Slug already exists');
+    // story #2484 — CONFLICT(=슬러그 중복)도 이제 code로 분기해 raw 영문 대신 번역 문구를
+    // 쓴다(이전엔 여기서 raw message가 그대로 노출됐음 — 회귀가드 겸함).
+    expect(document.body.textContent).not.toContain('Slug already exists');
+    expect(document.body.textContent).toContain('이미 사용 중인 슬러그입니다');
     expect(document.body.textContent).not.toContain('업그레이드가 필요합니다');
+  });
+
+  it('알려지지 않은 code — 안전 폴백, raw message 미노출 (story #2484)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      json: async () => ({ data: null, error: { code: 'SOME_NEW_CODE', message: 'brand new raw string' }, meta: null }),
+    })));
+
+    await mount();
+    await fillAndSubmit();
+
+    expect(document.body.textContent).not.toContain('brand new raw string');
+    expect(document.body.textContent).toContain('Organization을 만들지 못했습니다');
   });
 
   it('en locale에선 영문 배너로 렌더된다(회귀 없음)', async () => {
