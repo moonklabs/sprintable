@@ -485,3 +485,30 @@ async def test_get_role_template_ignores_inaccessible_x_project_id_http(test_cli
         "/api/v2/role-templates/http-probe", headers={"X-Project-Id": inaccessible_project_id}
     )
     assert resp.status_code == 200
+
+
+@pytest.mark.anyio
+async def test_role_templates_still_401_without_auth_http(mock_session):
+    """PO QA 급소 지적(2026-08-06): ``get_verified_org_id``를 뺀 게 project-gating만 제거한
+    것이지 로그인 자체를 열어버린 게 아님을 pin — ``test_client`` fixture는 ``get_current_user``
+    를 항상 override하므로 이 케이스를 못 본다. 여기서만 그 override를 빼고 실제
+    ``get_current_user``(Authorization 헤더 없으면 401)를 그대로 태운다."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.dependencies.database import get_db, get_read_db
+    from app.main import app
+
+    async def _override_db():
+        yield mock_session
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_read_db] = _override_db
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            list_resp = await client.get("/api/v2/role-templates")
+            detail_resp = await client.get("/api/v2/role-templates/http-probe")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert list_resp.status_code == 401
+    assert detail_resp.status_code == 401
