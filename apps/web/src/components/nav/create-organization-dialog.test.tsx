@@ -6,11 +6,19 @@
 // `/api/organizations` 라이브 호출로 확認). `json.detail`은 실제 응답에 없는 필드라 이
 // 분기가 항상 죽어있었고, 한도 초과여도 매번 raw `error.message`(영문) 폴백으로 샜다.
 // 소스매칭(코드가 "있는지")만으론 이 결함이 안 잡힌다 — 실제로 마운트해 배너가 뜨는지 본다.
+//
+// story #2470 후속(유나 홀름 design:changes) — 한도 배너 문구가 하드코딩 영한혼용
+// ("Free 플랜 Organization 한도 초과")이었다가 온보딩 wizard와 같은 i18n 키
+// (`onboarding.orgLimitExceededError`)를 공유하도록 정정 — useTranslations를 쓰므로
+// NextIntlClientProvider 없이 마운트하면 "context ... was not found"로 즉시 죽는다.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { CreateOrganizationDialog } from './create-organization-dialog';
+import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -35,13 +43,18 @@ function setNativeValue(el: HTMLInputElement, value: string) {
   el.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-async function mount() {
+async function mount(locale: 'ko' | 'en' = 'ko') {
   const onOpenChange = vi.fn();
   const onCreated = vi.fn();
+  const messages = locale === 'ko' ? koMessages : enMessages;
   // Dialog(base-ui)는 body에 portal되므로 container 밖(document.body)에서 내용을 찾는다
   // (create-organization-dialog는 <Dialog open> 자체가 portal 루트라 여기서도 동일 함정).
   await act(async () => {
-    root.render(<CreateOrganizationDialog open onOpenChange={onOpenChange} onCreated={onCreated} />);
+    root.render(
+      <NextIntlClientProvider locale={locale} messages={messages} timeZone="Asia/Seoul">
+        <CreateOrganizationDialog open onOpenChange={onOpenChange} onCreated={onCreated} />
+      </NextIntlClientProvider>,
+    );
   });
   return { onOpenChange, onCreated };
 }
@@ -74,7 +87,8 @@ describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470
     await fillAndSubmit();
 
     expect(document.body.textContent).not.toContain('Free plan org limit (1) reached');
-    expect(document.body.textContent).toContain('Free 플랜 Organization 한도 초과');
+    expect(document.body.textContent).toContain('업그레이드가 필요합니다');
+    expect(document.body.textContent).toContain('무료 플랜은 조직을 1개까지 만들 수 있습니다');
     expect(document.body.querySelector('a[href="/settings?tab=billing"]')).not.toBeNull();
   });
 
@@ -88,7 +102,8 @@ describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470
     await mount();
     await fillAndSubmit();
 
-    expect(document.body.textContent).toContain('Free 플랜 Organization 한도 초과');
+    expect(document.body.textContent).toContain('업그레이드가 필요합니다');
+    expect(document.body.textContent).toContain('무료 플랜은 조직을 1개까지 만들 수 있습니다');
   });
 
   it('다른 에러는 기존 일반 배너로 간다(회귀 없음)', async () => {
@@ -102,6 +117,24 @@ describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470
     await fillAndSubmit();
 
     expect(document.body.textContent).toContain('Slug already exists');
-    expect(document.body.textContent).not.toContain('Free 플랜 Organization 한도 초과');
+    expect(document.body.textContent).not.toContain('업그레이드가 필요합니다');
+  });
+
+  it('en locale에선 영문 배너로 렌더된다(회귀 없음)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false,
+      status: 402,
+      json: async () => ({
+        data: null,
+        error: { code: 'PLAN_LIMIT_EXCEEDED', message: 'x', limit: 1, upgrade_required: true },
+        meta: null,
+      }),
+    })));
+
+    await mount('en');
+    await fillAndSubmit();
+
+    expect(document.body.textContent).toContain('Upgrade required');
+    expect(document.body.textContent).toContain('The free plan allows up to 1 organization');
   });
 });
