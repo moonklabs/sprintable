@@ -95,9 +95,12 @@ describe('InvitePage — joinHeading t.rich() 렌더 (story #2084)', () => {
 // invalidLink와 달리) aria-live 대상이다.
 describe('InvitePage — 결과 피드백 접근성(story #2105 2차)', () => {
   it('프리뷰 로드 실패 시 role="alert" aria-live="assertive"로 사유가 렌더된다', async () => {
+    // story #2484 — 이 preview 엔드포인트가 실제로 낼 수 있는 유일한 코드는 NOT_FOUND지만,
+    // 여기선 code 기반 분기 자체가 동작하는지(raw message 대신 번역 문구)가 핵심이라 임의
+    // 코드로 대표 검증한다.
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/invites/tok-1') && !url.includes('accept')) {
-        return { ok: false, json: async () => ({ error: { message: '초대가 만료되었습니다.' } }) };
+        return { ok: false, json: async () => ({ error: { code: 'NOT_FOUND', message: 'Invite not found' } }) };
       }
       throw new Error('unexpected fetch: ' + url);
     }));
@@ -106,7 +109,8 @@ describe('InvitePage — 결과 피드백 접근성(story #2105 2차)', () => {
 
     const alertEl = container.querySelector('[role="alert"]');
     expect(alertEl).not.toBeNull();
-    expect(alertEl?.textContent).toContain('초대가 만료되었습니다.');
+    expect(alertEl?.textContent).not.toContain('Invite not found');
+    expect(alertEl?.textContent).toContain(koMessages.invite.inviteNotFound);
     expect(alertEl?.getAttribute('aria-live')).toBe('assertive');
   });
 
@@ -146,5 +150,85 @@ describe('InvitePage — 결과 피드백 접근성(story #2105 2차)', () => {
     expect(statusEl).not.toBeNull();
     expect(statusEl?.getAttribute('aria-live')).toBe('polite');
     expect(statusEl?.textContent).toContain('뭉클랩');
+  });
+});
+
+// story #2484 — acceptInvite·handleSubmit 둘 다 error.code 분기 없이 raw message를 쓰던
+// 자리. code별 번역 문구가 뜨고, 알려지지 않은 code는 안전 폴백만 뜬다(raw 미노출).
+describe('InvitePage — error.code 분기 (story #2484)', () => {
+  it('초대 수락 실패 CONFLICT — raw 영문 대신 번역 문구(로그인 경로에서 acceptInvite 호출)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, opts?: RequestInit) => {
+      if (url.includes('/api/invites/tok-1') && !url.includes('accept')) {
+        return { ok: true, json: async () => ({ data: PREVIEW }) };
+      }
+      if (url === '/api/me') return { ok: false } as Response;
+      if (url === '/api/auth/login' && opts?.method === 'POST') {
+        return { ok: true, json: async () => ({}) };
+      }
+      if (url.includes('/accept')) {
+        return { ok: false, json: async () => ({ error: { code: 'CONFLICT', message: 'Invite already accepted' } }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap('ko', <InvitePage />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const emailInput = container.querySelector('input[type="email"]') as HTMLInputElement;
+    const passwordInput = container.querySelector('input[type="password"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    // 기본 탭이 signup이라 login으로 전환
+    const loginTab = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.login.signIn);
+    await act(async () => { loginTab?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {
+      setter.call(emailInput, 'a@b.com');
+      emailInput.dispatchEvent(new Event('input', { bubbles: true }));
+      setter.call(passwordInput, 'password123!');
+      passwordInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const submitBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.invite.submit);
+    await act(async () => {
+      submitBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+
+    const alertEl = container.querySelector('[role="alert"]');
+    expect(alertEl?.textContent).not.toContain('Invite already accepted');
+    expect(alertEl?.textContent).toContain(koMessages.invite.inviteAlreadyAccepted);
+  });
+
+  it('가입 실패 EMAIL_TAKEN — raw 영문 대신 register 네임스페이스 문구 재사용', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, opts?: RequestInit) => {
+      if (url.includes('/api/invites/tok-1') && !url.includes('accept')) {
+        return { ok: true, json: async () => ({ data: PREVIEW }) };
+      }
+      if (url === '/api/me') return { ok: false } as Response;
+      if (url === '/api/auth/register' && opts?.method === 'POST') {
+        return { ok: false, json: async () => ({ error: { code: 'EMAIL_TAKEN', message: 'Email already registered' } }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap('ko', <InvitePage />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const nameInput = container.querySelector('input[type="text"]') as HTMLInputElement;
+    const passwordInput = container.querySelector('input[type="password"]') as HTMLInputElement;
+    const tosCheckbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(nameInput, '홍길동');
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+      setter.call(passwordInput, 'password123!');
+      passwordInput.dispatchEvent(new Event('input', { bubbles: true }));
+      tosCheckbox.click();
+    });
+    const submitBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.invite.submit);
+    await act(async () => {
+      submitBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+
+    const alertEl = container.querySelector('[role="alert"]');
+    expect(alertEl?.textContent).not.toContain('Email already registered');
+    expect(alertEl?.textContent).toBe(koMessages.register.registerEmailTaken);
   });
 });

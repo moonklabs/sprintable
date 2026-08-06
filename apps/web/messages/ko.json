@@ -112,6 +112,7 @@
     "createOrgSlugLabel": "Slug",
     "createOrgSlugPlaceholder": "my-company",
     "createOrgSlugError": "영소문자, 숫자, 하이픈만 사용 가능합니다 (시작/끝은 영소문자 또는 숫자)",
+    "createOrgSlugTaken": "이미 사용 중인 슬러그입니다.",
     "createOrgGenericError": "Organization을 만들지 못했습니다. 잠시 후 다시 시도해 주세요."
   },
   "storage": {
@@ -723,7 +724,15 @@
     "csrfMismatch": "보안 검증에 실패했습니다. 다시 시도해 주세요.",
     "oauthNoToken": "인증 토큰을 받지 못했습니다. 다시 시도해 주세요.",
     "invalidProvider": "유효하지 않은 OAuth 제공자입니다.",
-    "oauthNativeIssueFailed": "앱으로 로그인 정보를 전달하는 데 실패했습니다. 다시 시도해 주세요."
+    "oauthNativeIssueFailed": "앱으로 로그인 정보를 전달하는 데 실패했습니다. 다시 시도해 주세요.",
+    "loginInvalidCredentials": "이메일 또는 비밀번호가 올바르지 않습니다.",
+    "loginAccountLocked": "너무 많은 시도로 계정이 잠겼습니다. 잠시 후 다시 시도해 주세요.",
+    "loginTotpLocked": "인증 실패가 너무 많아 잠겼습니다. 잠시 후 다시 시도해 주세요.",
+    "loginInvalidTotpCode": "인증 코드가 올바르지 않습니다.",
+    "loginTotpReplayed": "이미 사용된 인증 코드입니다. 새 코드를 입력해 주세요.",
+    "firebaseNetworkError": "네트워크 오류로 로그인할 수 없습니다. 다시 시도해 주세요.",
+    "firebaseSignInFailed": "로그인에 실패했습니다. 이메일과 비밀번호를 확인해 주세요.",
+    "firebaseDisabled": "이 로그인 방식은 현재 사용할 수 없습니다."
   },
   "register": {
     "subtitle": "계정 만들기",
@@ -742,6 +751,8 @@
     "continueWithGoogle": "Google로 계속",
     "tosRequiredError": "먼저 이용약관과 개인정보처리방침에 동의해 주세요.",
     "registrationFailed": "가입에 실패했습니다. 다시 시도해 주세요.",
+    "registerEmailTaken": "이미 가입된 이메일입니다.",
+    "registerTosRequired": "서비스 이용약관에 동의해야 합니다.",
     "alreadyHaveAccount": "이미 계정이 있으신가요?",
     "signIn": "로그인"
   },
@@ -784,6 +795,9 @@
     "resendSent": "인증 메일을 다시 보냈습니다.",
     "resendRateLimited": "너무 자주 요청했습니다 — 잠시 후 다시 시도해 주세요.",
     "resendFailed": "인증 메일 재전송에 실패했습니다.",
+    "resendUserNotFound": "사용자를 찾을 수 없습니다.",
+    "projectLimitExceededError": "무료 플랜은 프로젝트를 {limit}개까지 만들 수 있습니다. 계속하려면 요금제를 업그레이드해 주세요.",
+    "createAgentFailed": "에이전트 생성에 실패했습니다.",
     "networkError": "네트워크 오류 — 연결을 확인하고 다시 시도해 주세요",
     "apiKeyFailedMembers": "API Key 발급에 실패했습니다. Settings > Members > Agents에서 수동으로 발급하세요.",
     "goToMembersAgents": "Members > Agents에서 관리하기",
@@ -1942,6 +1956,11 @@
     "acceptFailed": "초대 수락에 실패했습니다.",
     "accepting": "수락 중...",
     "authFailed": "인증에 실패했습니다. 다시 시도해주세요.",
+    "inviteNotFound": "초대를 찾을 수 없습니다.",
+    "inviteAlreadyAccepted": "이미 수락된 초대입니다.",
+    "inviteExpired": "초대가 만료되었습니다.",
+    "inviteEmailMismatch": "가입한 이메일이 초대받은 이메일과 다릅니다.",
+    "inviteCannotAccept": "이 초대는 수락할 수 없습니다.",
     "backToLogin": "로그인 페이지로 →",
     "joinedOrg": "{org}에 합류했어요",
     "joinHeading": "<b>{org}</b>에 합류하세요",
@@ -1965,7 +1984,9 @@
     "invalidLink": "링크가 만료되었거나 유효하지 않습니다.",
     "strengthHint": "대문자·소문자·숫자·특수문자 중 3가지 이상 ({met}/3)",
     "lengthHint": "8자 이상",
-    "submitFailed": "비밀번호를 변경하지 못했습니다. 잠시 후 다시 시도해 주세요."
+    "submitFailed": "비밀번호를 변경하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    "resetInvalidToken": "재설정 링크가 유효하지 않거나 만료되었습니다.",
+    "resetUserNotFound": "사용자를 찾을 수 없습니다."
   },
   "meeting": {
     "title": "회의록",
