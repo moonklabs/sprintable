@@ -313,6 +313,7 @@ async def list_artifacts(
     story_id: uuid.UUID | None = Query(default=None),
     epic_id: uuid.UUID | None = Query(default=None),
     doc_id: uuid.UUID | None = Query(default=None),
+    ids: str | None = Query(default=None, description="comma-separated artifact ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관, story #2262 PR② 칩 상태 배치조회)"),
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
@@ -327,6 +328,19 @@ async def list_artifacts(
         VisualArtifact.org_id == org_id, VisualArtifact.project_id == project_id,
         VisualArtifact.deleted_at.is_(None),
     )
+    # story #2262 PR②(칩 상태 배치조회) — stories.py list_stories의 ids= 패턴 미러링. 이
+    # 라우터는 이미 caller 컨텍스트의 project_id로만 스코프하므로(위 SEC-S8 fix) 별도
+    # accessible_project_ids_in_org 조회 없이 그 org_id/project_id WHERE에 IN을 더하면 된다.
+    if ids is not None:
+        try:
+            artifact_ids = [uuid.UUID(x) for x in ids.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(status_code=422, detail="invalid artifact id in ids")
+        if not artifact_ids:
+            return _ok([])
+        if len(artifact_ids) > 200:
+            raise HTTPException(status_code=422, detail="too many ids (max 200)")
+        q = q.where(VisualArtifact.id.in_(artifact_ids))
     if story_id is not None:
         q = q.where(VisualArtifact.story_id == story_id)
     if epic_id is not None:
