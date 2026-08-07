@@ -138,7 +138,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
               <Button variant="ghost" size="sm" className="flex-1 text-muted-foreground" onClick={() => setWithdraw('idle')}>
                 {t('withdrawCancel')}
               </Button>
-              <Button variant="ghost" size="sm" className="flex-1 gap-1 text-destructive hover:bg-destructive/10" onClick={() => void handleWithdraw()}>
+              <Button variant="ghost" size="sm" className="flex-1 gap-1 text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60" onClick={() => void handleWithdraw()}>
                 <XCircle className="size-3.5 shrink-0" />
                 {t('withdrawConfirm')}
               </Button>
