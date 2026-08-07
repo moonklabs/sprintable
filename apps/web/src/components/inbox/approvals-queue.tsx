@@ -123,7 +123,7 @@ export function ApprovalsQueue() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-7 gap-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    className="h-7 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
                     disabled={resolving === item.id}
                     onClick={() => void resolveHitl(item.id, 'rejected')}
                   >

@@ -1133,7 +1133,7 @@ export default function SettingsPage() {
                                       <Button
                                         variant="ghost"
                                         size="sm"
-                                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                        className="text-destructive hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
                                         onClick={() => setDeleteProjectConfirmId(project.id)}
                                         disabled={deletingProjectId === project.id}
                                       >
