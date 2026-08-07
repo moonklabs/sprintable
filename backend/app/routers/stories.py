@@ -1611,6 +1611,11 @@ async def bulk_update_stories(
     # "미배정→배정"의 유효한 old값이라 .get() 대신 멤버십(`in`)으로 "실제 변경 있었음"을 판정한다
     # (status_by_id는 status가 None일 수 없어 .get()만으로 충분했던 것과 다른 지점).
     old_assignee_by_id: dict[uuid.UUID, uuid.UUID | None] = {}
+    # story #2521 후속(카디르 QA③, PO 2026-08-08 확정 — (a)안): 게이트 차단 item도 결과에
+    # 남기되 원래 status 유지 + StoryResponse.violation(신규 필드 아님·#2173이 이미 세운
+    # 「이례적」 표기 그 필드 재사용)에 차단 사유를 담는다. has_project_access 미충족(존재
+    # 비노출)과 달리 이건 「존재하고 접근권도 있는데 승인 대기」라 조용하면 #2067 재현.
+    gate_pending_by_id: dict[uuid.UUID, dict] = {}
     for item in payload.items:
         # E-SECURITY SEC-S8(story 83ea3d6a) W(까심 QA, CRITICAL·실HTTP 확定): 이 raw 쿼리가
         # org_id 필터 자체가 없어(정상 repo.get()은 self._org_filter() 명시·RLS도 0002서 off)
@@ -1638,9 +1643,14 @@ async def bulk_update_stories(
         #
         # 차단 시 처리: 단건은 HTTPException(409)로 요청 전체를 거절하지만, bulk는 한 item이
         # 막혔다고 나머지 정당한 item까지 통째로 실패시키면 안 된다(다건성 — #2173이 emit 쪽에
-        # 이미 세운 그 원칙과 동형). has_project_access 미충족 item과 동일하게 **그 item만
-        # continue로 조용히 스킵**(status뿐 아니라 그 item의 다른 필드 변경도 함께 스킵 —
-        # "게이트가 막은 전이를 일부만 우회해 다른 필드로 들여보내는" 여지를 안 남긴다).
+        # 이미 세운 그 원칙과 동형). has_project_access 미충족 item(존재 비노출 규율)과 달리
+        # ⭐이건 응답에서까지 조용하면 안 된다(PO 지적, 2026-08-07) — "5개 done 했는데 2개가
+        # 조용히 안 바뀌면" 사용자가 「됐겠지」 오해하는 게 #2067(조용한 경로)의 또 다른 얼굴이다.
+        # story는 그대로 `updated`에 포함(현재 상태 그대로 응답에 보이게)하되 status/다른 필드
+        # 변경은 스킵하고, 사유를 `gate_pending_by_id`에 담아 아래서 응답의 기존 `violation`
+        # 필드로 노출한다(신규 필드 아님, PO 확정 2026-08-08 — 단건 409 body와 같은 shape:
+        # code/message/decision/gate_id/requires_human).
+        gate_blocked_reason: dict | None = None
         if "status" in update_data and update_data["status"] != story.status:
             _line_owns_done_gate = False
             try:
@@ -1665,19 +1675,26 @@ async def bulk_update_stories(
                             work_type="done", actor_type=_g_actor_type, actor_id=actor_id,
                             work_item_id=story.id, work_item_title=story.title,
                         )
-                except HTTPException:
-                    continue  # 게이트 차단/park — 이 item 전체 스킵(다른 정당 item은 계속 진행).
-        # status 변경이면 전이 前 old_status 포착(violation 판정용·setattr 前).
-        if "status" in update_data and update_data["status"] != story.status:
-            old_status_by_id[story.id] = story.status
-        if "assignee_id" in update_data and update_data["assignee_id"] != story.assignee_id:
-            old_assignee_by_id[story.id] = story.assignee_id
-        for k, v in update_data.items():
-            setattr(story, k, v)
-        # E-BOARD S5: 단일 assignee_id 변경 시 join 미러(단일↔복수 공존 정합)
-        if "assignee_id" in update_data:
-            single = [story.assignee_id] if story.assignee_id else []
-            await StoryAssigneeRepository(db, repo.org_id).set_for_story(story.id, single)
+                except HTTPException as exc:
+                    gate_blocked_reason = (
+                        exc.detail if isinstance(exc.detail, dict)
+                        else {"code": "MERGE_GATE_PENDING", "message": str(exc.detail), "requires_human": True}
+                    )
+
+        if gate_blocked_reason is not None:
+            gate_pending_by_id[story.id] = gate_blocked_reason
+        else:
+            # status 변경이면 전이 前 old_status 포착(violation 판정용·setattr 前).
+            if "status" in update_data and update_data["status"] != story.status:
+                old_status_by_id[story.id] = story.status
+            if "assignee_id" in update_data and update_data["assignee_id"] != story.assignee_id:
+                old_assignee_by_id[story.id] = story.assignee_id
+            for k, v in update_data.items():
+                setattr(story, k, v)
+            # E-BOARD S5: 단일 assignee_id 변경 시 join 미러(단일↔복수 공존 정합)
+            if "assignee_id" in update_data:
+                single = [story.assignee_id] if story.assignee_id else []
+                await StoryAssigneeRepository(db, repo.org_id).set_for_story(story.id, single)
         updated.append(story)
     # P0/MissingGreenlet: setattr 후 server-onupdate `updated_at` 등은 flush 시 expire 되어,
     # model_validate(sync)가 lazy-reload 를 async greenlet 밖에서 시도 → MissingGreenlet 500.
@@ -1697,7 +1714,9 @@ async def bulk_update_stories(
         r = StoryResponse.model_validate(s)
         old = old_status_by_id.get(s.id)
         flag = build_violation_flag(old, s.status) if old is not None else None
-        r.violation = flag
+        # 게이트 차단 item은 old_status_by_id에 애초에 안 담겨(위 setattr 스킵) flag가 항상
+        # None이라 겹칠 일이 없다 — gate_pending_by_id가 있으면 그걸 violation으로 노출.
+        r.violation = gate_pending_by_id.get(s.id, flag)
         results.append(r)
         if flag is not None:
             _ev = build_violation_event(

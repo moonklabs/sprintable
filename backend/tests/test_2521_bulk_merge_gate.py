@@ -70,19 +70,26 @@ def _common_patches():
 
 @pytest.mark.anyio
 async def test_bulk_status_done_blocked_by_preflight_merge_gate_item_skipped():
-    """⭐본체 — _preflight_merge_gate가 차단(HTTPException)하면 그 item은 조용히 스킵되고
-    (setattr 미적용·결과 리스트에 없음) 나머지 요청은 안 죽는다(다건성, #2173과 동형 원칙)."""
+    """⭐본체(PO 확정 2026-08-08, 카디르 QA③) — _preflight_merge_gate가 차단(HTTPException)하면
+    그 item은 status 변경만 스킵(setattr 미적용)되고, 결과 리스트에는 «그대로 남아»
+    StoryResponse.violation에 차단 사유가 표기된다. 예전 「결과에서 통째로 사라짐」(result==[])은
+    #2067과 동형인 조용한 실패였다 — 이제는 사용자가 응답만 보고도 "이 item은 승인 필요라
+    안 바뀌었다"를 알 수 있어야 한다."""
     story = _story(status="in-review")
     db = _mock_db(story)
     repo = MagicMock()
     repo.org_id = story.org_id
 
+    gate_detail = {
+        "code": "MERGE_GATE_PENDING", "message": "human approval required",
+        "decision": "ASK_HUMAN", "gate_id": str(uuid.uuid4()), "requires_human": True,
+    }
     patches = _common_patches()
     with (
         patches[0], patches[1], patches[2], patches[3], patches[4],
         patch.object(
             stories_mod, "_preflight_merge_gate",
-            AsyncMock(side_effect=HTTPException(status_code=409, detail="blocked")),
+            AsyncMock(side_effect=HTTPException(status_code=409, detail=gate_detail)),
         ) as preflight_spy,
         patch("app.services.gate_enforce.enforce_gate", AsyncMock()) as enforce_spy,
     ):
@@ -95,7 +102,9 @@ async def test_bulk_status_done_blocked_by_preflight_merge_gate_item_skipped():
 
     preflight_spy.assert_awaited_once()
     enforce_spy.assert_not_awaited()  # 차단됐으니 그 뒤 enforce_gate까지 안 감.
-    assert result == [], "게이트가 차단했는데 status가 그대로 적용/반환됨 — #2521 미수복"
+    assert len(result) == 1, "차단된 item이 응답에서 통째로 사라짐 — #2067과 동형인 조용한 실패"
+    assert result[0].status == "in-review", "차단된 item의 status가 바뀌어 응답에 나가면 승인 우회"
+    assert result[0].violation == gate_detail, "차단 사유가 violation에 표기되지 않음 — #2067 재현"
     assert story.status == "in-review", "차단된 item의 story.status가 setattr로 바뀌면 안 됨"
 
 
@@ -131,7 +140,9 @@ async def test_bulk_status_done_passes_preflight_then_calls_enforce_gate():
 @pytest.mark.anyio
 async def test_bulk_status_done_blocked_by_enforce_gate_item_skipped():
     """⭐본체 — _preflight_merge_gate는 통과했는데 enforce_gate(S-GATE-2)가 차단하면 그
-    item도 동일하게 스킵된다(둘 다 게이트 축이라 어느 쪽이 막든 같은 결과여야 함)."""
+    item도 동일하게(결과에 남고 violation 표기) 처리된다 — 어느 쪽 게이트가 막든 응답
+    계약은 같아야 한다. detail이 str(비-dict)이면 라우터가 code/message/requires_human
+    dict로 정규화하는 것까지 함께 확認."""
     story = _story(status="in-review")
     db = _mock_db(story)
     repo = MagicMock()
@@ -153,7 +164,11 @@ async def test_bulk_status_done_blocked_by_enforce_gate_item_skipped():
             ),
         )
 
-    assert result == []
+    assert len(result) == 1
+    assert result[0].status == "in-review"
+    assert result[0].violation == {
+        "code": "MERGE_GATE_PENDING", "message": "parked", "requires_human": True,
+    }
     assert story.status == "in-review"
 
 
