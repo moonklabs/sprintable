@@ -4,6 +4,7 @@ import { useRef, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { Hash } from 'lucide-react';
 import { ENTITY_ICONS } from '@/components/chat/embed-card';
 import { entityTypeLabel, getEntityQuery, type EntityResult } from '@/components/chat/chat-input-entity-tokens';
+import { translateEntityStatus } from '@/components/chat/entity-status-labels';
 import { useEntityPicker } from '@/hooks/use-entity-picker';
 
 interface EntityAwareTextareaProps {
@@ -79,6 +80,9 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
           {entityPicker.entityResults.map((entity, idx) => {
             const EntityIcon = ENTITY_ICONS[entity.entity_type] ?? Hash;
             const isNewGroup = idx === 0 || entityPicker.entityResults[idx - 1]!.entity_type !== entity.entity_type;
+            // story #2522 — 원시값(in-review 등) 노출 금지, EmbedCard와 같은 클래스의 같은
+            // fix(# 피커도 같은 처방이 통한다·close-the-class).
+            const statusLabel = entity.status ? translateEntityStatus(entity.entity_type, entity.status) : null;
             return (
               <li key={`${entity.entity_type}:${entity.entity_id}`}>
                 {isNewGroup && (
@@ -99,8 +103,8 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
                 >
                   <EntityIcon className="mr-1.5 size-3.5 shrink-0" aria-hidden />
                   <span className="font-medium">{entity.title}</span>
-                  {entity.status ? (
-                    <span className="ml-2 rounded px-1.5 py-0.5 text-xs bg-muted text-muted-foreground">{entity.status}</span>
+                  {statusLabel ? (
+                    <span className="ml-2 rounded px-1.5 py-0.5 text-xs bg-muted text-muted-foreground">{statusLabel}</span>
                   ) : null}
                 </button>
               </li>
