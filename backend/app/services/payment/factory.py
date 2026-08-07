@@ -3,12 +3,13 @@
 backend Python으로 정식화한다(06:14Z 미르코 그라운딩 정정 — 실 연동은 처음부터 backend에
 있었다).
 
-TossAdapter는 아직 없다(story C) — krw 요청은 조용히 잘못된 어댑터를 주는 대신 명시적으로
-실패한다."""
+#2492(C1): TossAdapter 연결 — create_billing_key만 실 구현(나머지는 어댑터 자체가
+NotImplementedError, factory는 관여 안 함)."""
 from __future__ import annotations
 
 from app.services.payment.base import PaymentProvider
 from app.services.payment.polar_adapter import PolarAdapter
+from app.services.payment.toss_adapter import TossAdapter
 
 _CURRENCY_PROVIDER = {"usd": "polar", "krw": "toss"}
 
@@ -19,4 +20,4 @@ def get_payment_adapter(currency: str) -> PaymentProvider:
         raise ValueError(f"unsupported currency: {currency!r}")
     if provider == "polar":
         return PolarAdapter()
-    raise NotImplementedError(f"TossAdapter not yet implemented (story C) — currency={currency!r}")
+    return TossAdapter()
