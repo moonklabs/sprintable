@@ -1,0 +1,26 @@
+"""결제②-C2(story #2493) — orderId-먼저-기록 pending/confirmed/failed. 되돌릴 수 없는 Toss
+호출 前에 의도를 먼저 남겨 크래시/타임아웃도 복구 가능하게 한다(C1 authKey nit과 동일 규율).
+billing_ledger_entries(A2, append-only)는 「승인 대기」 상태를 못 담아 이 테이블이 따로 있다."""
+from __future__ import annotations
+
+import uuid
+
+from sqlalchemy import BigInteger, Text
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.database import Base
+from app.models.base import OrgScopedMixin, TimestampMixin
+
+
+class BillingOrder(Base, TimestampMixin, OrgScopedMixin):
+    __tablename__ = "billing_orders"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # org_id: OrgScopedMixin(index만 — 한 org가 여러 주문을 가지므로 unique 아님, org_billing_keys와 다름).
+    order_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    currency: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    payment_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
