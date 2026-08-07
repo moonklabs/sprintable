@@ -1611,6 +1611,11 @@ async def bulk_update_stories(
     # "미배정→배정"의 유효한 old값이라 .get() 대신 멤버십(`in`)으로 "실제 변경 있었음"을 판정한다
     # (status_by_id는 status가 None일 수 없어 .get()만으로 충분했던 것과 다른 지점).
     old_assignee_by_id: dict[uuid.UUID, uuid.UUID | None] = {}
+    # story #2521 후속(카디르 QA③, PO 2026-08-08 확정 — (a)안): 게이트 차단 item도 결과에
+    # 남기되 원래 status 유지 + StoryResponse.violation(신규 필드 아님·#2173이 이미 세운
+    # 「이례적」 표기 그 필드 재사용)에 차단 사유를 담는다. has_project_access 미충족(존재
+    # 비노출)과 달리 이건 「존재하고 접근권도 있는데 승인 대기」라 조용하면 #2067 재현.
+    gate_pending_by_id: dict[uuid.UUID, dict] = {}
     for item in payload.items:
         # E-SECURITY SEC-S8(story 83ea3d6a) W(까심 QA, CRITICAL·실HTTP 확定): 이 raw 쿼리가
         # org_id 필터 자체가 없어(정상 repo.get()은 self._org_filter() 명시·RLS도 0002서 off)
@@ -1629,17 +1634,67 @@ async def bulk_update_stories(
         if not await has_project_access(db, uuid.UUID(auth.user_id), story.project_id, repo.org_id):
             continue
         update_data = item.model_dump(exclude={"id"}, exclude_none=True)
-        # status 변경이면 전이 前 old_status 포착(violation 판정용·setattr 前).
+        # story #2521(2026-08-07, 카디르 QA 적출) 근본수정 — bulk가 status를 setattr로 그대로
+        # 써 merge-gate(H1 Cage)를 아예 안 거쳤다. 단건 PATCH /{id}/status(update_story_status)
+        # 와 동일하게 line_merge_gate_active(라인 엔진이 이 전이를 이미 거버닝하면 이중평가
+        # 방지) → _preflight_merge_gate(H1 merge verdict gate) → enforce_gate(S-GATE-2 config
+        # 게이트) 순으로 지나게 한다. ⛔#2067 판정(PO 2026-08-07) 그대로 — ②emit_story_status_
+        # changed는 #2131이 이미 닫아 여기서 안 건드림(아래 emit 블록 무변경), ①게이트만 스코프.
+        #
+        # 차단 시 처리: 단건은 HTTPException(409)로 요청 전체를 거절하지만, bulk는 한 item이
+        # 막혔다고 나머지 정당한 item까지 통째로 실패시키면 안 된다(다건성 — #2173이 emit 쪽에
+        # 이미 세운 그 원칙과 동형). has_project_access 미충족 item(존재 비노출 규율)과 달리
+        # ⭐이건 응답에서까지 조용하면 안 된다(PO 지적, 2026-08-07) — "5개 done 했는데 2개가
+        # 조용히 안 바뀌면" 사용자가 「됐겠지」 오해하는 게 #2067(조용한 경로)의 또 다른 얼굴이다.
+        # story는 그대로 `updated`에 포함(현재 상태 그대로 응답에 보이게)하되 status/다른 필드
+        # 변경은 스킵하고, 사유를 `gate_pending_by_id`에 담아 아래서 응답의 기존 `violation`
+        # 필드로 노출한다(신규 필드 아님, PO 확정 2026-08-08 — 단건 409 body와 같은 shape:
+        # code/message/decision/gate_id/requires_human).
+        gate_blocked_reason: dict | None = None
         if "status" in update_data and update_data["status"] != story.status:
-            old_status_by_id[story.id] = story.status
-        if "assignee_id" in update_data and update_data["assignee_id"] != story.assignee_id:
-            old_assignee_by_id[story.id] = story.assignee_id
-        for k, v in update_data.items():
-            setattr(story, k, v)
-        # E-BOARD S5: 단일 assignee_id 변경 시 join 미러(단일↔복수 공존 정합)
-        if "assignee_id" in update_data:
-            single = [story.assignee_id] if story.assignee_id else []
-            await StoryAssigneeRepository(db, repo.org_id).set_for_story(story.id, single)
+            _line_owns_done_gate = False
+            try:
+                from app.services.workflow_line_engine import line_merge_gate_active
+                _line_owns_done_gate = await line_merge_gate_active(
+                    db, org_id=repo.org_id, project_id=story.project_id,
+                    entity_type="story", from_status=story.status, to_status=update_data["status"],
+                )
+            except Exception:  # noqa: BLE001 — 불명 시 현행 게이트 유지(skip 안 함, 단건과 동형).
+                _line_owns_done_gate = False
+            if not _line_owns_done_gate:
+                try:
+                    await _preflight_merge_gate(db, repo.org_id, story, update_data["status"])
+                    if update_data["status"] == "done":
+                        from app.services.gate_enforce import enforce_gate
+                        _g_actor_type = (
+                            "agent" if auth.claims.get("app_metadata", {}).get("api_key_id")
+                            else "human"
+                        )
+                        await enforce_gate(
+                            db, org_id=repo.org_id, project_id=story.project_id,
+                            work_type="done", actor_type=_g_actor_type, actor_id=actor_id,
+                            work_item_id=story.id, work_item_title=story.title,
+                        )
+                except HTTPException as exc:
+                    gate_blocked_reason = (
+                        exc.detail if isinstance(exc.detail, dict)
+                        else {"code": "MERGE_GATE_PENDING", "message": str(exc.detail), "requires_human": True}
+                    )
+
+        if gate_blocked_reason is not None:
+            gate_pending_by_id[story.id] = gate_blocked_reason
+        else:
+            # status 변경이면 전이 前 old_status 포착(violation 판정용·setattr 前).
+            if "status" in update_data and update_data["status"] != story.status:
+                old_status_by_id[story.id] = story.status
+            if "assignee_id" in update_data and update_data["assignee_id"] != story.assignee_id:
+                old_assignee_by_id[story.id] = story.assignee_id
+            for k, v in update_data.items():
+                setattr(story, k, v)
+            # E-BOARD S5: 단일 assignee_id 변경 시 join 미러(단일↔복수 공존 정합)
+            if "assignee_id" in update_data:
+                single = [story.assignee_id] if story.assignee_id else []
+                await StoryAssigneeRepository(db, repo.org_id).set_for_story(story.id, single)
         updated.append(story)
     # P0/MissingGreenlet: setattr 후 server-onupdate `updated_at` 등은 flush 시 expire 되어,
     # model_validate(sync)가 lazy-reload 를 async greenlet 밖에서 시도 → MissingGreenlet 500.
@@ -1659,7 +1714,9 @@ async def bulk_update_stories(
         r = StoryResponse.model_validate(s)
         old = old_status_by_id.get(s.id)
         flag = build_violation_flag(old, s.status) if old is not None else None
-        r.violation = flag
+        # 게이트 차단 item은 old_status_by_id에 애초에 안 담겨(위 setattr 스킵) flag가 항상
+        # None이라 겹칠 일이 없다 — gate_pending_by_id가 있으면 그걸 violation으로 노출.
+        r.violation = gate_pending_by_id.get(s.id, flag)
         results.append(r)
         if flag is not None:
             _ev = build_violation_event(
