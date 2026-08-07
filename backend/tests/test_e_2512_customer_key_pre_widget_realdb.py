@@ -125,3 +125,36 @@ async def test_ensure_customer_key_is_idempotent_across_calls_realdb():
             assert count == 1  # 두 번 불러도 1행만
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_awaiting_auth_placeholder_is_never_treated_as_active_billing_key_realdb():
+    """PO/카디르 결함사냥 축② 사전 pin — awaiting_auth placeholder(위젯 인증 前, 실
+    빌링키 없음)를 charge_org가 "활성 빌링키"로 오인해 청구를 시도하면 안 된다.
+    org_subscription이 active라도(예: 과거 다른 경로로 active가 됐거나 테스트 조작)
+    billing_key가 없으면 명시 실패해야지, 조용히 청구가 나가면 안 된다."""
+    from app.services.billing_charge import charge_org
+    from app.services.org_billing_key import ensure_customer_key
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session:
+            org_id = uuid.uuid4()
+            # placeholder만 있고(실 빌링키 없음) — 위젯 인증 前 상태 그대로.
+            await ensure_customer_key(session, org_id=org_id)
+
+            row = (
+                await session.execute(
+                    text("SELECT status FROM org_billing_keys WHERE org_id=:oid"), {"oid": org_id}
+                )
+            ).first()
+            assert row.status == "awaiting_auth"
+
+            with pytest.raises(RuntimeError, match="no active billing key"):
+                await charge_org(
+                    session, org_id=org_id, order_id=f"test-{uuid.uuid4()}",
+                    amount_minor=59_000, currency="krw",
+                )
+    finally:
+        await engine.dispose()
