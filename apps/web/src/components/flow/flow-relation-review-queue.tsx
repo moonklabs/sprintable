@@ -113,17 +113,17 @@ export function FlowRelationReviewQueue({
     onSuccess();
   };
 
+  // 카디르 QA(PR#2900, HIGH) → 디디 BE 원자화(PR#2901) — declare에 relation_kind를 같이
+  // 실으면 같은 트랜잭션·커밋 1회로 둘 다 반영된다(하나라도 실패하면 커밋 前이라 아무것도
+  // 안 남는다). 이전엔 declare 성공→relation-kind 호출을 별도로 보내 부분실패 時
+  // status=declared·relation_kind=NULL 영구 고아가 났다 — 단일 호출로 그 창을 원천 봉쇄.
   const handleDeclareWithKind = (candidate: RawReferenceCandidate, relationKind: PortLinkKind) => {
     void submit(
-      () => fetch(`/api/stories/${storyId}/reference-candidates/${candidate.id}/declare`, { method: 'POST' })
-        .then((declareRes) => {
-          if (!declareRes.ok) return declareRes;
-          return fetch(`/api/stories/${storyId}/reference-candidates/${candidate.id}/relation-kind`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ relation_kind: relationKind }),
-          });
-        }),
+      () => fetch(`/api/stories/${storyId}/reference-candidates/${candidate.id}/declare`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ relation_kind: relationKind }),
+      }),
       'portLinkErrorFallback',
       () => advance(true),
     );

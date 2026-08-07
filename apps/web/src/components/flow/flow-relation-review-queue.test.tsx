@@ -105,7 +105,12 @@ describe('FlowRelationReviewQueue — 진행 표시 및 되읽기 문장(§㉥)'
 });
 
 describe('FlowRelationReviewQueue — 답하면 다음 후보가 같은 자리에 바로 온다(왕복 1)', () => {
-  it('declaring with a kind calls declare then relation-kind, then advances to the next candidate', async () => {
+  // 디디 BE 원자화(PR#2901, #2358 HIGH 후속) — declare 단일 호출에 relation_kind를 실어
+  // 보낸다. 두 번 호출(declare→relation-kind)로 짜면 부분실패 時 status=declared·
+  // relation_kind=NULL 영구 고아가 나던 것을 원천 봉쇄한다(NULL 고아 재현은 BE realdb
+  // 테스트(test_declare_with_invalid_relation_kind_rolls_back_declare_too)가 잡는다 —
+  // FE는 "단일 호출로 보내는가"만 값으로 잰다).
+  it('declares with a kind via a SINGLE atomic call (declare body carries relation_kind), then advances', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     stubFetch(calls);
     const onCandidateResolved = vi.fn();
@@ -117,10 +122,11 @@ describe('FlowRelationReviewQueue — 답하면 다음 후보가 같은 자리�
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    expect(calls.some((c) => c.url === '/api/stories/s1/reference-candidates/c1/declare')).toBe(true);
-    const kindCall = calls.find((c) => c.url === '/api/stories/s1/reference-candidates/c1/relation-kind');
-    expect(kindCall).toBeDefined();
-    expect(JSON.parse(kindCall!.init!.body as string)).toEqual({ relation_kind: 'spawned' });
+    // ⛔relation-kind 별도 엔드포인트를 부르지 않는다 — declare 단일 호출뿐이어야 한다.
+    expect(calls.some((c) => c.url.includes('/relation-kind'))).toBe(false);
+    const declareCall = calls.find((c) => c.url === '/api/stories/s1/reference-candidates/c1/declare');
+    expect(declareCall).toBeDefined();
+    expect(JSON.parse(declareCall!.init!.body as string)).toEqual({ relation_kind: 'spawned' });
     expect(onCandidateResolved).toHaveBeenCalledTimes(1);
     // 다음 후보(#102)로 자동 전진 — 다시 열지 않았다(왕복 1).
     expect(document.body.textContent).toContain('#1에서 #102로 잇습니다');
