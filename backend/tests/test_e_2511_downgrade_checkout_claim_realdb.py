@@ -88,6 +88,74 @@ async def test_downgrade_to_free_does_not_clobber_org_with_active_checkout_claim
 
 
 @pytest.mark.anyio
+async def test_downgrade_to_free_write_time_where_catches_claim_landing_after_select_realdb():
+    """카디르 재QA(codex, #2896 리뷰, 2026-08-07) 잔여 TOCTOU 재현+fix 검증 —
+    has_active_checkout_claim SELECT 시점엔 claim이 없었지만, 그 뒤(offering 조회로
+    가는 await 사이) 다른 커넥션이 새 claim을 세우면, SELECT 결과만 믿는 게 아니라
+    free-upsert 자체의 write-time WHERE(원자적 UPSERT 가드)가 이를 잡아야 한다."""
+    from app.services.billing_scheduler import downgrade_to_free
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    claim_engine = create_async_engine(_ASYNC)
+    ClaimSession = async_sessionmaker(claim_engine, expire_on_commit=False)
+
+    try:
+        async with Session() as session:
+            org_id = uuid.uuid4()
+            now = datetime.now(timezone.utc)
+            order_id = await _seed_stale_failed_order(session, org_id=org_id, now=now)
+
+            # claim 없는 상태로 org_subscriptions 행을 먼저 만든다 — has_active_checkout_
+            # claim SELECT는 여기서 False를 본다(TOCTOU의 "SELECT 시점" 스냅샷).
+            await session.execute(
+                text(
+                    "INSERT INTO org_subscriptions (id, org_id, tier, status, provider, currency) "
+                    "VALUES (:id, :org_id, 'starter', 'active', 'toss', 'krw')"
+                ),
+                {"id": uuid.uuid4(), "org_id": org_id},
+            )
+            await session.commit()
+
+            real_execute = session.execute
+            claim_landed = {"done": False}
+
+            async def _paused_execute(stmt, *args, **kwargs):
+                # offering_versions 조회(SELECT 통과 後·UPSERT 前) 직전에 다른 커넥션이
+                # 끼어들어 claim을 세운다 — 정확히 codex가 지적한 그 창.
+                if not claim_landed["done"] and "offering_versions" in str(stmt):
+                    claim_landed["done"] = True
+                    async with ClaimSession() as claim_session:
+                        await claim_session.execute(
+                            text("UPDATE org_subscriptions SET checkout_claimed_at=:t WHERE org_id=:oid"),
+                            {"t": datetime.now(timezone.utc), "oid": org_id},
+                        )
+                        await claim_session.commit()
+                return await real_execute(stmt, *args, **kwargs)
+
+            session.execute = _paused_execute
+            try:
+                await downgrade_to_free(session, org_id, order_id)
+            finally:
+                session.execute = real_execute
+
+            assert claim_landed["done"]  # 정말로 그 창에서 claim이 섰는지 확인(테스트 자체 검증)
+
+            row = (
+                await session.execute(
+                    text("SELECT tier, status, checkout_claimed_at FROM org_subscriptions WHERE org_id=:oid"),
+                    {"oid": org_id},
+                )
+            ).first()
+            # 핵심 단정 — SELECT는 놓쳤어도(TOCTOU) write-time WHERE가 잡아 free로 안 덮였다.
+            assert row.tier == "starter"
+            assert row.checkout_claimed_at is not None  # 새로 선 claim도 그대로 살아있다(안 지워짐)
+    finally:
+        await engine.dispose()
+        await claim_engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_downgrade_to_free_proceeds_when_checkout_claim_is_stale_realdb():
     """staleness를 넘긴(=죽은/멈춘) claim은 무시하고 정상 downgrade — 자기치유 회귀 없음."""
     from app.services.billing_scheduler import downgrade_to_free

@@ -22,7 +22,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -135,6 +135,12 @@ async def downgrade_to_free(session: AsyncSession, org_id: uuid.UUID, order_id: 
         )
     ).first() is not None
 
+    # ⚠️카디르 재QA(codex, #2896 리뷰, 2026-08-07) — 위 has_active_checkout_claim은 SELECT
+    # 一 write-time 가드가 아니다. SELECT 시점엔 claim이 없었어도 그 뒤(offering 조회 등
+    # await 2번) 새 claim이 서면 이 조건은 이미 지나간 값을 보고 있어 무시된다. 이 early-
+    # return SELECT는 "명백히 막힌 경우 Toss/offering 조회 낭비를 피하는" 최적화일 뿐,
+    # 실제 안전장치는 아래 UPSERT 자체의 WHERE(원래 checkout claim UPSERT와 동일 패턴)다
+    # — SELECT-then-write가 아니라 write-time 원자적 가드로 이 창을 완전히 닫는다.
     if not (has_newer_confirmed_order or has_newly_issued_billing_key or has_active_checkout_claim):
         free_offering = (
             await session.execute(
@@ -156,6 +162,10 @@ async def downgrade_to_free(session: AsyncSession, org_id: uuid.UUID, order_id: 
                 "tier": "free", "status": "active",
                 "offering_version_id": free_offering.id if free_offering else None,
             },
+            where=or_(
+                OrgSubscription.checkout_claimed_at.is_(None),
+                OrgSubscription.checkout_claimed_at < now - STALE_CLAIM_WINDOW,
+            ),
         )
         await session.execute(stmt)
 
