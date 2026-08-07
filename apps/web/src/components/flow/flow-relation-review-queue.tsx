@@ -8,7 +8,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { PORT_LINK_KINDS, type PortLinkKind } from './flow-port-linking';
 import type { RawReferenceCandidate } from './derive-flow-map';
-import { selectUnconfirmedCandidates } from './flow-relation-review';
+import { selectUnconfirmedCandidates, buildReviewQueue } from './flow-relation-review';
 
 interface TargetStoryInfo {
   storyNumber: number | null;
@@ -27,9 +27,15 @@ type ItemState = { kind: 'idle' } | { kind: 'submitting' } | { kind: 'error'; me
 interface FlowRelationReviewQueueProps {
   storyId: string;
   storyNumber: number;
+  /** 이 story의 epic — AC12 "지금 보는 갈래"의 재료(같은 갈래 target 우선 노출). */
+  epicId: string | null;
   onClose: () => void;
   /** 해소된 관계 하나가 처리될 때마다 호출 — 지도가 실선을 다시 그리도록 부모에게 알린다. */
   onCandidateResolved?: () => void;
+  /** 테스트 전용 — 기본은 `RELATION_REVIEW_QUEUE_CAP`(20). AC12 검증은 상한을 실제로
+   * 넘겨야 하므로(#2366 AC9와 같은 규율 — "지금 통과"가 아니라 "초과 상태를 만들어") 값을
+   * 주입할 수 있게 둔다. */
+  queueCap?: number;
 }
 
 /**
@@ -38,8 +44,13 @@ interface FlowRelationReviewQueueProps {
  * 연달아 훑는다. §J-2-1 카피 그대로: 종류 3버튼(같은 무게) → 「종류는 모르겠지만 이어진 건
  * 맞습니다」(declare만, 바로 아래·낮은 무게이되 버튼) → 「관계가 아닙니다」·「나중에」.
  * ⛔일괄 확定 없음(#2269) — 답할 때마다 다음 후보가 «같은 자리»에 바로 온다(왕복 1).
+ * AC11·12(2026-08-07 착수 시 재측정 후 추가·디디 dev DB 실측 max=17·p90=4·total=1277) —
+ * 한 번에 노출하는 묶음은 `queueCap`으로 상한을 두고, 넘으면 지금 훑는 story의 epic과
+ * 같은 target을 우선 보인다(기계확신 정렬 재료 자체가 없다 — DB에 confidence 필드 無).
  */
-export function FlowRelationReviewQueue({ storyId, storyNumber, onClose, onCandidateResolved }: FlowRelationReviewQueueProps) {
+export function FlowRelationReviewQueue({
+  storyId, storyNumber, epicId, onClose, onCandidateResolved, queueCap,
+}: FlowRelationReviewQueueProps) {
   const t = useTranslations('flow');
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [targetInfo, setTargetInfo] = useState<Record<string, TargetStoryInfo>>({});
@@ -54,22 +65,27 @@ export function FlowRelationReviewQueue({ storyId, storyNumber, onClose, onCandi
       const raw = (await res.json().catch(() => null)) as RawReferenceCandidate[] | null;
       if (cancelled) return;
       if (!raw) { setState({ kind: 'error' }); return; }
-      const queue = selectUnconfirmedCandidates(raw);
-      if (queue.length === 0) { setState({ kind: 'empty' }); return; }
+      const unconfirmed = selectUnconfirmedCandidates(raw);
+      if (unconfirmed.length === 0) { setState({ kind: 'empty' }); return; }
 
-      const targetIds = Array.from(new Set(queue.map((c) => c.target_id)));
+      const targetIds = Array.from(new Set(unconfirmed.map((c) => c.target_id)));
       const storiesRes = await fetch(`/api/stories?ids=${targetIds.join(',')}`).catch(() => null);
       if (cancelled) return;
       const storiesJson = storiesRes && storiesRes.ok ? await storiesRes.json().catch(() => null) : null;
-      const list = (storiesJson?.data ?? []) as Array<{ id: string; story_number: number | null; title: string }>;
-      const map: Record<string, TargetStoryInfo> = {};
-      for (const s of list) map[s.id] = { storyNumber: s.story_number, title: s.title };
+      const list = (storiesJson?.data ?? []) as Array<{ id: string; story_number: number | null; title: string; epic_id: string | null }>;
+      const infoMap: Record<string, TargetStoryInfo> = {};
+      const epicMap: Record<string, string | null> = {};
+      for (const s of list) {
+        infoMap[s.id] = { storyNumber: s.story_number, title: s.title };
+        epicMap[s.id] = s.epic_id;
+      }
       if (cancelled) return;
-      setTargetInfo(map);
+      const queue = buildReviewQueue(raw, epicId, epicMap, queueCap);
+      setTargetInfo(infoMap);
       setState({ kind: 'reviewing', queue, index: 0, handledCount: 0 });
     })();
     return () => { cancelled = true; };
-  }, [storyId]);
+  }, [storyId, epicId, queueCap]);
 
   const advance = (handled: boolean) => {
     setItemState({ kind: 'idle' });

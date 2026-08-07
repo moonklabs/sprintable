@@ -29,21 +29,27 @@ const CANDIDATES = [
   { id: 'c2', source_id: 's1', target_id: 't2', relation_kind: null, status: 'estimated' },
 ];
 const STORIES = [
-  { id: 't1', story_number: 101, title: 'Target One' },
-  { id: 't2', story_number: 102, title: 'Target Two' },
+  { id: 't1', story_number: 101, title: 'Target One', epic_id: 'epic-1' },
+  { id: 't2', story_number: 102, title: 'Target Two', epic_id: 'epic-1' },
 ];
 
-function stubFetch(calls: Array<{ url: string; init?: RequestInit }>, overrides: Record<string, () => { ok: boolean; json: () => Promise<unknown> }> = {}) {
+function stubFetch(
+  calls: Array<{ url: string; init?: RequestInit }>,
+  overrides: Record<string, () => { ok: boolean; json: () => Promise<unknown> }> = {},
+  data: { candidates?: unknown[]; stories?: unknown[] } = {},
+) {
+  const candidates = data.candidates ?? CANDIDATES;
+  const stories = data.stories ?? STORIES;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     calls.push({ url, init });
     for (const [pattern, handler] of Object.entries(overrides)) {
       if (url.includes(pattern)) return handler();
     }
     if (url === '/api/stories/s1/reference-candidates') {
-      return { ok: true, json: async () => CANDIDATES };
+      return { ok: true, json: async () => candidates };
     }
     if (url.startsWith('/api/stories?ids=')) {
-      return { ok: true, json: async () => ({ data: STORIES }) };
+      return { ok: true, json: async () => ({ data: stories }) };
     }
     if (url.includes('/declare') || url.includes('/relation-kind') || url.includes('/reject')) {
       return { ok: true, json: async () => ({ id: 'x' }) };
@@ -64,10 +70,21 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function renderQueue(onClose = () => {}, onCandidateResolved?: () => void) {
+async function renderQueue(
+  onClose = () => {},
+  onCandidateResolved?: () => void,
+  extraProps: Partial<React.ComponentProps<typeof FlowRelationReviewQueue>> = {},
+) {
   await act(async () => {
     root.render(wrap(
-      <FlowRelationReviewQueue storyId="s1" storyNumber={1} onClose={onClose} onCandidateResolved={onCandidateResolved} />,
+      <FlowRelationReviewQueue
+        storyId="s1"
+        storyNumber={1}
+        epicId="epic-1"
+        onClose={onClose}
+        onCandidateResolved={onCandidateResolved}
+        {...extraProps}
+      />,
     ));
     await new Promise((r) => setTimeout(r, 0));
   });
@@ -195,5 +212,50 @@ describe('FlowRelationReviewQueue — 실패 처리(고정 폴백, #2485 그라�
     expect(document.body.textContent).toContain('연결하지 못했습니다');
     // 실패했으니 여전히 1번째 후보 자리 그대로다.
     expect(document.body.textContent).toContain('1 / 2');
+  });
+});
+
+describe('FlowRelationReviewQueue — 묶음 상한·정렬(AC11·12, 2026-08-07 디디 실측 후속)', () => {
+  // ⛔"cap(기본 20) > 실측 max(17)라 초과 경로가 원천 안 걸린다"로 닫지 않는다(#2366 AC9
+  // 규율) — queueCap을 일부러 낮춰 실제 초과 상태를 만들고 정렬이 도는지 값으로 잰다.
+  const CANDIDATES_3 = [
+    { id: 'c1', source_id: 's1', target_id: 'other-epic', relation_kind: null, status: 'estimated' },
+    { id: 'c2', source_id: 's1', target_id: 't1', relation_kind: null, status: 'estimated' },
+    { id: 'c3', source_id: 's1', target_id: 't2', relation_kind: null, status: 'estimated' },
+  ];
+  const STORIES_3 = [
+    { id: 'other-epic', story_number: 999, title: 'Different Branch', epic_id: 'epic-OTHER' },
+    { id: 't1', story_number: 101, title: 'Target One', epic_id: 'epic-1' },
+    { id: 't2', story_number: 102, title: 'Target Two', epic_id: 'epic-1' },
+  ];
+
+  it('caps the working queue and shows same-epic ("지금 보는 갈래") targets before others', async () => {
+    const calls: Array<{ url: string }> = [];
+    stubFetch(calls, {}, { candidates: CANDIDATES_3, stories: STORIES_3 });
+    // cap=2로 낮춰 3건 중 2건만 노출되는 실제 초과 경로를 강제한다.
+    await renderQueue(() => {}, undefined, { queueCap: 2 });
+
+    // 상한이 걸렸으므로 진행 표시는 "N / 2"다(전체 3건이 아니라).
+    expect(document.body.textContent).toContain('1 / 2');
+    // 같은 갈래(epic-1)의 두 후보(#101·#102)가 먼저 오고, 다른 갈래(#999)는 이번 묶음에서 빠진다.
+    expect(document.body.textContent).toContain('#1에서 #101로 잇습니다');
+
+    await act(async () => {
+      Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '나중에')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(document.body.textContent).toContain('#1에서 #102로 잇습니다');
+    expect(document.body.textContent).not.toContain('#999');
+  });
+
+  it('does not cap or reorder when the unconfirmed count is at or below the cap (regression guard)', async () => {
+    const calls: Array<{ url: string }> = [];
+    stubFetch(calls, {}, { candidates: CANDIDATES_3, stories: STORIES_3 });
+    // cap=3(정확히 후보 수) — 전부 노출되고, 원래 순서(도착 순)가 그대로 유지된다.
+    await renderQueue(() => {}, undefined, { queueCap: 3 });
+
+    expect(document.body.textContent).toContain('1 / 3');
+    // 정렬을 안 타므로 원래 배열 순서 그대로 첫 항목은 다른 갈래(#999)다.
+    expect(document.body.textContent).toContain('#999');
   });
 });

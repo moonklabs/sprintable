@@ -176,6 +176,7 @@ export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps
     <FlowRelationReviewQueue
       storyId={storyId}
       storyNumber={state.story.story_number ?? 0}
+      epicId={state.story.epic_id}
       onClose={() => { setReviewQueueOpen(false); refetchUnconfirmedCount(); }}
       onCandidateResolved={refetchUnconfirmedCount}
     />
