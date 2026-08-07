@@ -105,12 +105,15 @@ async def test_purchase_packs_raises_when_exceeding_max_packs():
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=[
         _exec_result(sub),          # sub lookup
-        _exec_result(4 * 5_000),    # 이미 4개(20,000원어치) 구매 이력
+        MagicMock(),                # advisory xact lock 획득
+        _exec_result(4 * 5_000),    # 이미 4개(20,000원어치) 예약/구매
     ])
     session.get = AsyncMock(return_value=offering)
 
     with pytest.raises(PackPurchaseError, match="max_packs"):
         await purchase_packs(session, org_id=org_id, resource="au", quantity=2, idempotency_key="k1")  # 4+2 > 5
+
+    session.rollback.assert_awaited_once()  # 락을 즉시 해제
 
 
 @pytest.mark.anyio
@@ -127,7 +130,8 @@ async def test_purchase_packs_allows_up_to_max_packs_exactly():
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=[
         _exec_result(sub),
-        _exec_result(3 * 5_000),  # 3개 이미 구매
+        MagicMock(),              # advisory xact lock 획득
+        _exec_result(3 * 5_000),  # 3개 이미 예약/구매
     ])
     session.get = AsyncMock(return_value=offering)
 
@@ -173,7 +177,7 @@ async def test_purchase_packs_charges_price_times_quantity_with_pack_purchase_en
     confirmed_order.status = "confirmed"
 
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_exec_result(sub), _exec_result(0)])
+    session.execute = AsyncMock(side_effect=[_exec_result(sub), MagicMock(), _exec_result(0)])
     session.get = AsyncMock(return_value=offering)
 
     with patch("app.services.billing_pack.charge_org", new=AsyncMock(return_value=confirmed_order)) as mock_charge:
@@ -184,7 +188,7 @@ async def test_purchase_packs_charges_price_times_quantity_with_pack_purchase_en
     assert kwargs["currency"] == "krw"
     assert kwargs["entry_type"] == "pack_purchase"
     assert kwargs["ledger_metadata"] == {"resource": "au", "quantity": 3, "unit": 150_000}
-    assert kwargs["order_id"] == f"pack:{org_id}:click-1"
+    assert kwargs["order_id"] == f"pack:{org_id}:au:click-1"
 
 
 @pytest.mark.anyio
@@ -198,7 +202,10 @@ async def test_purchase_packs_same_idempotency_key_is_deterministic_order_id():
     confirmed_order.status = "confirmed"
 
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_exec_result(sub), _exec_result(0), _exec_result(sub), _exec_result(5_000)])
+    session.execute = AsyncMock(side_effect=[
+        _exec_result(sub), MagicMock(), _exec_result(0),
+        _exec_result(sub), MagicMock(), _exec_result(5_000),
+    ])
     session.get = AsyncMock(return_value=offering)
 
     with patch("app.services.billing_pack.charge_org", new=AsyncMock(return_value=confirmed_order)) as mock_charge:
@@ -221,7 +228,7 @@ async def test_purchase_packs_declined_raises_with_order_attached():
     failed_order.status = "failed"
 
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_exec_result(sub), _exec_result(0), _exec_result(failed_order)])
+    session.execute = AsyncMock(side_effect=[_exec_result(sub), MagicMock(), _exec_result(0), _exec_result(failed_order)])
     session.get = AsyncMock(return_value=offering)
 
     with patch(
