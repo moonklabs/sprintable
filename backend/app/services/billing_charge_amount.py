@@ -86,6 +86,15 @@ async def compute_charge_amount(session: AsyncSession, *, org_id: uuid.UUID) -> 
     if offering is None:
         raise ChargeAmountError(f"offering_version {sub.offering_version_id}를 찾을 수 없음")
 
+    # 카디르 결함사냥(#2509, 2026-08-07) — org_subscriptions.billing_cycle에 DB CHECK가
+    # 없어(Text nullable) NULL·'Annual'·'yearly'·오타가 조용히 monthly로 폴백해 annual
+    # 구독을 10배 저청구할 수 있었다. "annual 아니면 monthly=안전한 기본값"이라는 판단
+    # 자체가 틀렸다 — 불명확한 값은 명시 실패로.
+    if sub.billing_cycle not in ("monthly", "annual"):
+        raise ChargeAmountError(
+            f"org_subscription(org_id={org_id}).billing_cycle={sub.billing_cycle!r}이 "
+            "'monthly'/'annual' 둘 다 아님 — monthly로 조용히 폴백하지 않는다"
+        )
     base_amount = (
         offering.annual_price_minor if sub.billing_cycle == "annual" else offering.monthly_price_minor
     )
@@ -110,5 +119,14 @@ async def compute_charge_amount(session: AsyncSession, *, org_id: uuid.UUID) -> 
         period_start=sub.current_period_start,
         period_end=sub.current_period_end,
     )
+
+    # 카디르 결함사냥(#2509) — offering.currency와 sub.currency 사이엔 FK만 있고 값 일치
+    # 제약이 없다(구조적 갭). 반환 직전 대조해 불일치를 명시 실패로 잡는다(예: USD
+    # offering이 KRW sub에 잘못 바인딩된 상태로 조용히 금액만 나가는 것 방지).
+    if offering.currency != sub.currency:
+        raise ChargeAmountError(
+            f"offering_version.currency={offering.currency!r} != "
+            f"org_subscription.currency={sub.currency!r} for org_id={org_id}"
+        )
 
     return base_amount + seat_amount + pack_amount, offering.currency
