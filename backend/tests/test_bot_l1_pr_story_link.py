@@ -390,6 +390,10 @@ async def _merge_webhook(*, should_close: bool):
     rl = ResolvedLink(STORY_ID, ORG_A, "sid", "high", should_close, "sid_exact")
     try:
         async with AsyncClient(transport=ASGITransport(app=fastapi_app), base_url="http://test") as c:
+            # story #2520 후속(카디르 QA, 2026-08-08): reconcile이 이제 무조건 호출돼(#2520) 이
+            # 테스트의 무관 대상(close-on-merge 배선)까지 evaluate_merge_gate 내부 session.execute
+            # 체인을 실제로 타게 만든다 — 이 파일의 얕은 session mock은 그 내부 쿼리를 감당하도록
+            # 설계되지 않았다. 이 테스트의 관심사가 아니므로 patch.
             with patch.object(vmod.settings, "github_webhook_secret", _WH_SECRET), \
                  patch.object(vmod.settings, "github_app_webhook_secret", ""), \
                  patch.object(vmod, "_resolve_legacy_org_by_repo_owner",
@@ -397,6 +401,7 @@ async def _merge_webhook(*, should_close: bool):
                  patch.object(vmod, "resolve_story_for_pr", new=AsyncMock(return_value=rl)), \
                  patch.object(vmod, "capture_pr_ci_verdict",
                               new=AsyncMock(return_value={"recorded": ["pr"], "skipped_reason": None})), \
+                 patch.object(vmod, "reconcile_merge_gate_with_real_evidence", new=AsyncMock()), \
                  patch.object(vmod.logger, "info") as info_log:
                 resp = await c.post("/api/v2/internal/verdict/github-webhook", content=body, headers=headers)
         return resp, session, info_log
@@ -442,12 +447,14 @@ async def test_process_webhook_event_legacy_repo_owner_org_feeds_resolver():
     rl = ResolvedLink(STORY_ID, ORG_A, "sid", "high", True, "sid_exact_by_number")
     payload = {"action": "closed", "repository": {"full_name": "moonklabs/sprintable"},
                "pull_request": {"number": 9, "merged": True, "title": "fix(#2288): x"}}
+    # story #2520 후속: reconcile 무조건 호출(#2520)이 이 테스트 무관 내부 쿼리를 실제로 태우니 patch.
     with patch.object(vmod, "_resolve_legacy_org_by_repo_owner",
                        new=AsyncMock(return_value=(ORG_A, "org_resolved_via_repo_owner"))), \
          patch.object(vmod, "resolve_story_for_pr", new=AsyncMock(return_value=rl)) as resolver, \
          patch.object(vmod, "capture_pr_ci_verdict",
                        new=AsyncMock(return_value={"recorded": ["pr"]})), \
          patch.object(vmod, "merge_link_evidence", new=AsyncMock()), \
+         patch.object(vmod, "reconcile_merge_gate_with_real_evidence", new=AsyncMock()), \
          patch.object(vmod.logger, "info"):
         await vmod._process_webhook_event(session, "legacy", "pull_request", payload, None, delivery)
     resolver.assert_awaited_once()
@@ -557,12 +564,14 @@ async def test_process_webhook_event_merge_writes_link_with_sid_label():
     rl = ResolvedLink(STORY_ID, ORG_A, "sid", "high", True, "sid_exact_by_number")
     payload = {"action": "closed", "repository": {"full_name": "moonklabs/sprintable"},
                "pull_request": {"number": 2685, "merged": True, "title": "[SID:2224] x"}}
+    # story #2520 후속: reconcile 무조건 호출(#2520)이 이 테스트 무관 내부 쿼리를 실제로 태우니 patch.
     with patch.object(vmod, "_resolve_legacy_org_by_repo_owner",
                        new=AsyncMock(return_value=(ORG_A, "org_resolved_via_repo_owner"))), \
          patch.object(vmod, "resolve_story_for_pr", new=AsyncMock(return_value=rl)), \
          patch.object(vmod, "capture_pr_ci_verdict",
                        new=AsyncMock(return_value={"recorded": ["pr", "ci"]})), \
          patch.object(vmod, "merge_link_evidence", new=AsyncMock()) as link_write, \
+         patch.object(vmod, "reconcile_merge_gate_with_real_evidence", new=AsyncMock()), \
          patch.object(vmod.logger, "info"):
         await vmod._process_webhook_event(session, "legacy", "pull_request", payload, None, delivery)
     link_write.assert_awaited_once()
@@ -584,12 +593,14 @@ async def test_process_webhook_event_ci_only_does_not_write_link():
     payload = {"repository": {"full_name": "moonklabs/sprintable"},
                "workflow_run": {"conclusion": "failure", "head_sha": "sha1",
                                 "head_branch": "feat-[SID:2224]", "pull_requests": [{"number": 2685}]}}
+    # story #2520 후속: reconcile 무조건 호출(#2520)이 이 테스트 무관 내부 쿼리를 실제로 태우니 patch.
     with patch.object(vmod, "_resolve_legacy_org_by_repo_owner",
                        new=AsyncMock(return_value=(ORG_A, "org_resolved_via_repo_owner"))), \
          patch.object(vmod, "resolve_story_for_pr", new=AsyncMock(return_value=rl)), \
          patch.object(vmod, "capture_pr_ci_verdict",
                        new=AsyncMock(return_value={"recorded": ["ci"]})), \
          patch.object(vmod, "merge_link_evidence", new=AsyncMock()) as link_write, \
+         patch.object(vmod, "reconcile_merge_gate_with_real_evidence", new=AsyncMock()), \
          patch.object(vmod.logger, "info"):
         await vmod._process_webhook_event(session, "legacy", "workflow_run", payload, None, delivery)
     link_write.assert_not_awaited()

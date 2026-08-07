@@ -26,10 +26,7 @@ from app.models.github_installation import GithubInstallation, GithubWebhookDeli
 from app.models.pm import Story
 from app.routers.cron import CRON_SECRET, _err, _ok, verify_cron
 from app.services.github_app import get_installation_token
-from app.services.merge_verdict_gate import (
-    merge_gate_active,
-    reconcile_merge_gate_with_real_evidence,
-)
+from app.services.merge_verdict_gate import reconcile_merge_gate_with_real_evidence
 from app.services.pr_story_link import merge_link_evidence, resolve_story_for_pr
 from app.services.verdict_capture import (
     capture_pr_ci_verdict,
@@ -453,15 +450,29 @@ async def _process_webhook_event(
     # 반영한다. ⚠️capture_pr_ci_verdict 리턴 後 별도 호출(evaluate_merge_gate가 내부에서
     # capture_pr_ci_verdict를 다시 부르므로, 그 함수 안에서 이걸 부르면 무한 재귀가 된다).
     #
+    # story #2520(2026-08-08) 근본수정 — 이전엔 이 호출을 `merge_gate_active(org_id)`(H1
+    # 레거시 플래그+allowlist)로 게이팅했는데, merge-type Gate row는 H1 경로(board preflight·
+    # report-done)뿐 아니라 workflow_line_engine._merge_gate_wrapper(라인엔진 merge-gate step,
+    # `line_merge_gate_active()` — H1과 **완전히 별개**인 runtime_mode+published_config
+    # 활성판정)에서도 만들어진다(evaluate_merge_gate→create_gate가 둘의 단일 chokepoint,
+    # gate_type="merge" 공유). H1_MERGE_GATE_ENABLED=False인 org라도 라인 merge-gate step이
+    # enforcing이면 실제 Gate row가 생기는데, 그 org는 merge_gate_active()가 항상 False라
+    # 이 reconcile이 영원히 스킵됐다 — #2156이 고치려던 "증거 기록됐는데 게이트에 CI unknown"
+    # 증상이 라인 경로서 그대로 재현(카디르 #2902 QA·codex 019fdc4f 적출). reconcile 자신의
+    # 쿼리(아래 existing Gate row: org_id+story_id+gate_type="merge"+status pending/auto_passed)가
+    # 이미 "이 story에 실제로 반영할 게이트가 있는가"를 정확히 판별하므로(없으면 즉시 None
+    # 반환, 저렴한 단건 조회) 바깥에서 org-level 활성판정으로 다시 게이팅할 필요가 없다 —
+    # H1도 라인도 「Gate row 존재」라는 같은 사실로 자연히 커버된다(두 활성판정 통합 = 애초에
+    # 이 바깥 게이트가 불필요했다는 것).
+    #
     # ⭐카디르 QA(PR#2902, 2026-08-07)③: try/except로 여기서 삼키면 일시적 DB 오류가 "이번
     # 배달은 영구 no-op(processed로 커밋)"이 돼 GitHub 재시도를 못 받는다(delivery 모델
     # 자체 계약 — "실패=rollback→retry 보존"). 이 함수 밖(github_webhook)이 이미 예외를
     # 전체 rollback+500으로 처리해 GitHub가 재시도하므로, 여기서 삼키지 않고 그대로 올린다.
-    if merge_gate_active(org_id):
-        await reconcile_merge_gate_with_real_evidence(
-            session, org_id, story_id,
-            pr_number=pr_number, repo=repo, ci_result=ci_conclusion, merged=merged,
-        )
+    await reconcile_merge_gate_with_real_evidence(
+        session, org_id, story_id,
+        pr_number=pr_number, repo=repo, ci_result=ci_conclusion, merged=merged,
+    )
 
     # ⭐story #2327 후속(PO 판정, 2026-07-30, PR#2685 실 웹훅 시험대가 드러낸 갭) — merge 시
     # PullRequestStoryLink 에도 쓴다. `Verdict`(record_verdict, 위 capture_pr_ci_verdict 안)에도
