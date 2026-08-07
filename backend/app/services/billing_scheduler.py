@@ -22,7 +22,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +35,7 @@ from app.services.billing_charge import (
     _mark_failed_if_not_confirmed,
     charge_org,
 )
+from app.services.org_subscription_checkout import STALE_CLAIM_WINDOW
 from app.services.payment.toss_adapter import TossAdapter
 
 logger = logging.getLogger(__name__)
@@ -114,7 +115,33 @@ async def downgrade_to_free(session: AsyncSession, org_id: uuid.UUID, order_id: 
         )
     ).first() is not None
 
-    if not (has_newer_confirmed_order or has_newly_issued_billing_key):
+    # PO 지적(#2896 리뷰, 2026-08-07) — #2511이 만든 checkout_claimed_at도 같은 「claim
+    # 정합」 축이라 이 함수도 존중해야 한다. 위 두 신호(has_newer_confirmed_order·
+    # has_newly_issued_billing_key)는 checkout이 이미 뭔가를 "완성"했을 때만 감지한다 —
+    # claim은 성공했지만 아직 issue_billing_key/charge_org가 끝나기 前인(아무 새 증거도
+    # 아직 없는) 딱 그 창에서는 둘 다 놓친다. 그 창에 이 스윕이 끼어들면 free upsert가
+    # checkout이 진행 中인 org의 tier를 조용히 덮어써 — 나중에 그 checkout의 charge가
+    # 실제로 confirmed돼도(#2511 step④ CAS는 통과— 이 함수가 checkout_claimed_at 자체는
+    # 안 건드리므로) "유료청구는 됐는데 tier는 free"라는 영구 오염이 남는다. staleness
+    # 윈도(#2511과 동일 SSOT)를 넘긴 claim은 죽은/멈춘 걸로 보고 무시한다(자기치유 그대로).
+    now = datetime.now(timezone.utc)
+    has_active_checkout_claim = (
+        await session.execute(
+            select(OrgSubscription.id).where(
+                OrgSubscription.org_id == org_id,
+                OrgSubscription.checkout_claimed_at.is_not(None),
+                OrgSubscription.checkout_claimed_at >= now - STALE_CLAIM_WINDOW,
+            ).limit(1)
+        )
+    ).first() is not None
+
+    # ⚠️카디르 재QA(codex, #2896 리뷰, 2026-08-07) — 위 has_active_checkout_claim은 SELECT
+    # 一 write-time 가드가 아니다. SELECT 시점엔 claim이 없었어도 그 뒤(offering 조회 등
+    # await 2번) 새 claim이 서면 이 조건은 이미 지나간 값을 보고 있어 무시된다. 이 early-
+    # return SELECT는 "명백히 막힌 경우 Toss/offering 조회 낭비를 피하는" 최적화일 뿐,
+    # 실제 안전장치는 아래 UPSERT 자체의 WHERE(원래 checkout claim UPSERT와 동일 패턴)다
+    # — SELECT-then-write가 아니라 write-time 원자적 가드로 이 창을 완전히 닫는다.
+    if not (has_newer_confirmed_order or has_newly_issued_billing_key or has_active_checkout_claim):
         free_offering = (
             await session.execute(
                 select(OfferingVersion).where(
@@ -135,6 +162,10 @@ async def downgrade_to_free(session: AsyncSession, org_id: uuid.UUID, order_id: 
                 "tier": "free", "status": "active",
                 "offering_version_id": free_offering.id if free_offering else None,
             },
+            where=or_(
+                OrgSubscription.checkout_claimed_at.is_(None),
+                OrgSubscription.checkout_claimed_at < now - STALE_CLAIM_WINDOW,
+            ),
         )
         await session.execute(stmt)
 

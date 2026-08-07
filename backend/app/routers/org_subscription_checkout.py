@@ -18,6 +18,7 @@ from app.models.org_subscription import OrgSubscription
 from app.services.org_subscription_checkout import (
     CheckoutDeclined,
     CheckoutError,
+    CheckoutInProgress,
     checkout_subscription,
 )
 
@@ -73,6 +74,10 @@ async def checkout(
         )
     except CheckoutDeclined as exc:
         return _to_response(exc.subscription, declined_reason=str(exc))
+    except CheckoutInProgress as exc:
+        # #2511 — 같은 org의 다른 checkout이 진행 中. 사용자 입력·내부 상태 오류가 아니라
+        # 타이밍 충돌이라 409(재시도 가능함을 뜻함).
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except CheckoutError as exc:
         # 이 지점 도달 시 tier/billing_cycle 자체는 이미 Pydantic Literal이 걸렀다 —
         # 남은 원인은 offering_version 카탈로그 갭 같은 내부 상태 문제(사용자 입력 오류

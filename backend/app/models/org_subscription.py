@@ -32,6 +32,10 @@ class OrgSubscription(Base):
     current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # S8 Phase 2: 80% storage 경고 메일 dedup 마커(마지막 발송 시각·NULL=미발송).
     storage_warn_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # #2511: 진행 중 checkout의 서버 정본 claim 마커(org_subscription_checkout.py 참고).
+    # NULL=진행 중 아님·값 있음=그 시각에 어떤 checkout이 이 org를 claim했다는 뜻(원자적
+    # UPSERT WHERE 가드로 동시 다른 tier/cycle 재제출의 이중청구를 막는다).
+    checkout_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # E-ADMIN B1: grandfather — 가입(플랜변경)시점 pricing_version 참조. free tier·백필 전
     # 기존 구독은 NULL(0146은 구조만, 값 백필은 가격 확정 후 별도 마이그).
     pricing_version_id: Mapped[uuid.UUID | None] = mapped_column(
