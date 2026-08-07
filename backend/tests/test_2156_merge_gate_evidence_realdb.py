@@ -376,7 +376,6 @@ async def test_process_webhook_event_does_not_swallow_reconcile_exception():
         ),
         patch("app.routers.verdict_capture.merge_link_evidence", AsyncMock()),
         patch("app.routers.verdict_capture.get_installation_token", AsyncMock(return_value=None)),
-        patch("app.routers.verdict_capture.merge_gate_active", lambda _org_id: True),
         patch(
             "app.routers.verdict_capture.reconcile_merge_gate_with_real_evidence",
             AsyncMock(side_effect=RuntimeError("transient db error")),
