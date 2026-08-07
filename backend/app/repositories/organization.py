@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
@@ -12,6 +13,7 @@ from app.models.deletion_audit import DeletionAuditLog
 from app.models.organization import Organization
 from app.models.participation import ParticipationRole
 from app.models.project import OrgMember, Project
+from app.services.org_subscription_checkout import STALE_CLAIM_WINDOW
 
 logger = logging.getLogger(__name__)
 
@@ -143,8 +145,32 @@ class OrganizationRepository:
         await self.session.refresh(org)
         return org
 
+    async def _has_active_or_in_flight_subscription(self, org_id: uuid.UUID) -> bool:
+        """구독 status='active'뿐 아니라 #2511(결제②-D후속) checkout_claimed_at이
+        STALE_CLAIM_WINDOW 안(=진행 中)인 claim도 "활성"으로 취급한다.
+
+        카디르 결함사냥 HIGH②(#2898 재QA, 2026-08-07) — checkout claim 성공 直後(구독
+        status는 아직 'pending', active 아님)의 그 창에서는 이 체크가 놓쳤다: org 삭제가
+        (구독 status='active' 아님이라) 통과해버리면, 뒤늦게 그 checkout의 charge가
+        confirmed돼도 org가 이미 사라진 뒤라 **삭제된 org에 실 청구가 완료**될 수 있었다
+        (#2896 step④ CAS는 org_id 매칭이라 org 삭제 자체는 못 막는 축). #2511과 동일
+        STALE_CLAIM_WINDOW/SSOT로 "진행 中"을 판정 — 죽은/멈춘(stale) claim은 여전히
+        무시(자기치유 회귀 없음)."""
+        now = datetime.now(timezone.utc)
+        row = await self.session.execute(
+            text(
+                "SELECT 1 FROM org_subscriptions WHERE org_id = :org_id AND ("
+                " status = 'active'"
+                " OR (checkout_claimed_at IS NOT NULL AND checkout_claimed_at >= :stale_cutoff)"
+                ") LIMIT 1"
+            ),
+            {"org_id": str(org_id), "stale_cutoff": now - STALE_CLAIM_WINDOW},
+        )
+        return row.first() is not None
+
     async def get_impact(self, org_id: uuid.UUID) -> OrgImpact:
-        """삭제 전 영향도 조회 — project 수, member 수, 활성 subscription 여부."""
+        """삭제 전 영향도 조회 — project 수, member 수, 활성(또는 진행 中 checkout claim)
+        subscription 여부."""
         proj_count_row = await self.session.execute(
             select(func.count()).select_from(Project).where(
                 Project.org_id == org_id,
@@ -161,14 +187,7 @@ class OrganizationRepository:
         )
         member_count = member_count_row.scalar() or 0
 
-        sub_row = await self.session.execute(
-            text(
-                "SELECT 1 FROM org_subscriptions"
-                " WHERE org_id = :org_id AND status = 'active' LIMIT 1"
-            ),
-            {"org_id": str(org_id)},
-        )
-        has_active_subscription = sub_row.first() is not None
+        has_active_subscription = await self._has_active_or_in_flight_subscription(org_id)
 
         return OrgImpact(
             project_count=project_count,
@@ -204,19 +223,24 @@ class OrganizationRepository:
         if confirmation != org.name:
             return {"ok": False, "reason": "confirmation_mismatch"}
 
-        sub_check = await self.session.execute(
-            text(
-                "SELECT 1 FROM org_subscriptions"
-                " WHERE org_id = :org_id AND status = 'active' LIMIT 1"
-            ),
-            {"org_id": str(org_id)},
-        )
-        if sub_check.first() is not None:
+        if await self._has_active_or_in_flight_subscription(org_id):
             return {"ok": False, "reason": "active_subscription"}
 
+        # 카디르 결함사냥 HIGH①(#2898 재QA, 2026-08-07) — get_impact()가 진짜 Postgres
+        # 에러(mock RuntimeError가 아니라 실 SQL 에러)로 실패하면 그 커넥션의 트랜잭션
+        # 자체가 "aborted" 상태로 오염된다. override(confirm_without_impact=True)로
+        # 진행해도 그 아래 audit-log insert·org delete가 같은(오염된) 트랜잭션 위에서
+        # 실행되므로 조용히 실패하거나, 이 함수는 {"ok": True}를 반환했는데 실제로는
+        # 아무것도 안 지워지고 라우터의 후속 commit(try/except 없음)에서야 500이 터졌다
+        # — override라는 탈출구가 정작 가장 현실적인 실패(진짜 DB 에러)에서 "깨끗한
+        # 성공도 깨끗한 실패도 아닌 500"이 되는 게 근본 결함. get_impact() 호출을
+        # SAVEPOINT(begin_nested)로 감싸 실패해도 그 실패가 SAVEPOINT 안에서만 롤백되고
+        # 바깥 트랜잭션(이미 끝난 존재/권한/confirmation/구독 체크 포함)은 오염되지 않게
+        # 한다 — 그 아래 audit insert·delete는 항상 깨끗한 트랜잭션 위에서 실행된다.
         impact_note: str | None = None
         try:
-            await self.get_impact(org_id=org_id)
+            async with self.session.begin_nested():
+                await self.get_impact(org_id=org_id)
         except Exception:
             logger.warning(
                 "org.delete.impact_check_failed org_id=%s confirm_without_impact=%s",
@@ -234,31 +258,10 @@ class OrganizationRepository:
         await self.session.delete(org)
         return {"ok": True}
 
-    async def delete(self, org_id: uuid.UUID, requester_member_id: uuid.UUID) -> dict:
-        org = await self.get(org_id)
-        if org is None:
-            return {"ok": False, "reason": "not_found"}
-
-        owner_check = await self.session.execute(
-            text(
-                "SELECT 1 FROM org_members om"
-                " JOIN team_members tm ON tm.user_id = om.user_id"
-                " WHERE om.org_id = :org_id AND tm.id = :member_id AND om.role = 'owner'"
-            ),
-            {"org_id": str(org_id), "member_id": str(requester_member_id)},
-        )
-        if owner_check.first() is None:
-            return {"ok": False, "reason": "forbidden"}
-
-        sub_check = await self.session.execute(
-            text(
-                "SELECT 1 FROM org_subscriptions"
-                " WHERE org_id = :org_id AND status = 'active' LIMIT 1"
-            ),
-            {"org_id": str(org_id)},
-        )
-        if sub_check.first() is not None:
-            return {"ok": False, "reason": "active_subscription"}
-
-        await self.session.delete(org)
-        return {"ok": True}
+    # #2092(카디르 결함사냥, #2898 리뷰, 2026-08-07) — 구 delete(org_id, requester_member_id)
+    # 메서드를 제거했다. 이 fix가 새로 만든 안전장치(impact 재조회+savepoint 격리·human-only
+    # 강제(라우터)·checkout_claimed_at 인지·DeletionAuditLog 기입) 전부가 이 메서드에는
+    # 하나도 없었다 — 호출부가 현재 0곳(grep 확認, 죽은 코드)이지만, 살려두면 향후 누군가
+    # "더 짧으니까" 실수로 이걸 다시 배선해 이번 fix 전체를 조용히 무력화하는 "부활 경로"가
+    # 된다. 그 경로 자체를 없앤다 — private화(밑줄)가 아니라 삭제, 죽은 트랩은 존재 자체가
+    # 위험이라 남겨둘 이유가 없다.

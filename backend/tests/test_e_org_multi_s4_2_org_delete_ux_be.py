@@ -26,6 +26,18 @@ def _resolved_human() -> MagicMock:
     return m
 
 
+def _stub_begin_nested(session: AsyncMock) -> None:
+    """#2092(카디르 결함사냥 HIGH①) — delete_by_user가 get_impact()를
+    `async with self.session.begin_nested():`로 감싸므로, 실 SQLAlchemy
+    AsyncSession.begin_nested()와 동형(비동기 호출이 아니라 async-context-manager를
+    "동기적으로" 반환)으로 session mock을 보강한다. 이거 없이 bare AsyncMock()이면
+    session.begin_nested()가 코루틴을 반환해 `async with`가 TypeError로 깨진다."""
+    nested_ctx = MagicMock()
+    nested_ctx.__aenter__ = AsyncMock(return_value=nested_ctx)
+    nested_ctx.__aexit__ = AsyncMock(return_value=False)
+    session.begin_nested = MagicMock(return_value=nested_ctx)
+
+
 def _mock_org() -> MagicMock:
     o = MagicMock()
     o.id = ORG_ID
@@ -309,6 +321,7 @@ async def test_delete_by_user_rejects_when_impact_query_raises_and_no_override()
     from app.repositories.organization import OrganizationRepository
 
     session = AsyncMock()
+    _stub_begin_nested(session)
     repo = OrganizationRepository(session)
     repo.get = AsyncMock(return_value=_mock_org())
     repo.get_member_role = AsyncMock(return_value="owner")
@@ -329,6 +342,7 @@ async def test_delete_by_user_proceeds_with_override_and_records_audit_note():
     from app.repositories.organization import OrganizationRepository
 
     session = AsyncMock()
+    _stub_begin_nested(session)
     repo = OrganizationRepository(session)
     repo.get = AsyncMock(return_value=_mock_org())
     repo.get_member_role = AsyncMock(return_value="owner")
@@ -358,6 +372,7 @@ async def test_delete_by_user_succeeds_normally_records_audit_without_note():
     from app.repositories.organization import OrganizationRepository, OrgImpact
 
     session = AsyncMock()
+    _stub_begin_nested(session)
     repo = OrganizationRepository(session)
     repo.get = AsyncMock(return_value=_mock_org())
     repo.get_member_role = AsyncMock(return_value="owner")
