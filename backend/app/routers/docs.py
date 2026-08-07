@@ -117,10 +117,40 @@ async def list_docs(
     tags: str | None = Query(default=None, description="comma-separated tags"),
     slug: str | None = Query(default=None),
     q: str | None = Query(default=None, description="전문 검색 — 제목 + 본문"),
+    ids: str | None = Query(default=None, description="comma-separated doc ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관, story #2262 PR② 칩 상태 배치조회)"),
     limit: int = Query(default=500, ge=1, le=1000),
     cursor: str | None = Query(default=None, description="(sort_order,id) 복합 커서 — 이전 페이지 meta.next_cursor 값 그대로"),
     repo: DocRepository = Depends(_get_repo_read),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
+    # story #2262 PR②(칩 상태 배치조회) — stories.py list_stories의 ids= 패턴 미러링(검색/slug/
+    # tags/tree 분기보다 먼저 — 정확한 집합 요청이라 다른 필터와 무관하게 우선).
+    # ⭐카디르 QA(PR#2905, 2026-08-07) — Query(default=None, ...) 기본값은 「값」이 아니라
+    # 「센티널 객체」다. FastAPI 경유 없이 이 함수를 직접 호출하는 기존 테스트(test_2191·
+    # test_2193 — cursor에 대해 이미 같은 경고 주석이 있던 그 자리)가 ids를 명시로 안 넘기면
+    # 그 센티널 그대로를 받는다 — `is not None`은 센티널도 통과시켜 `.split`이 터졌다(CI red
+    # 실크래시). isinstance로 실제 str만 통과시킨다(stories.py list_stories의 동형 함정과
+    # 같은 처방 — boost_candidates_from 주석 참조).
+    if isinstance(ids, str):
+        try:
+            doc_ids = [uuid.UUID(x) for x in ids.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(status_code=422, detail="invalid doc id in ids")
+        if not doc_ids:
+            return {"data": [], "meta": {"has_more": False, "next_cursor": None}}
+        if len(doc_ids) > 200:
+            raise HTTPException(status_code=422, detail="too many ids (max 200)")
+        docs = await repo.list_by_ids(doc_ids)
+        # 인가 스코프: org 소속이어도 caller가 접근 못 하는 project의 doc은 조용히 필터링
+        # (stories.py list_stories와 동일 SSOT).
+        from app.services.project_auth import accessible_project_ids_in_org
+        accessible = await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), repo.org_id)
+        docs = [d for d in docs if d.project_id in accessible]
+        return {
+            "data": [DocSummaryResponse.model_validate(d) for d in docs],
+            "meta": {"has_more": False, "next_cursor": None},
+        }
+
     # AC1 + AC3: 전문 검색 — project_id 필수
     # story #2191: 의도적으로 커서 미지원(관련도순 + 위치커서 조합이 결과를 뒤섞음, repo단
     # search_full_text 주석 참조) — has_more/next_cursor는 항상 False/None으로 봉투만 맞춘다.

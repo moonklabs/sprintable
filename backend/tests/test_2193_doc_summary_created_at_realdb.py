@@ -86,7 +86,7 @@ async def test_doc_summary_response_exposes_created_at_distinct_from_updated_at(
             # parse_doc_cursor 가 그걸 문자열로 착각해 터진다 — 반드시 명시로 넘긴다.
             result = await list_docs(
                 project_id=seeded["project_id"], parent_id=None, doc_type=None,
-                tags=None, slug=None, q=None, limit=500, cursor=None, repo=repo,
+                tags=None, slug=None, q=None, ids=None, limit=500, cursor=None, repo=repo,
             )
         # story #2191: 응답이 bare list → {data,meta}(#2231 규약 A)로 바뀜.
         assert len(result["data"]) == 1
