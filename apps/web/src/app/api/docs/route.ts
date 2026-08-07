@@ -14,6 +14,20 @@ export async function GET(request: Request) {
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
     const dbClient = undefined;
     const { searchParams } = new URL(request.url);
+
+    // story #2262 PR②(BE #2905) — ids 배치 lookup은 project_id 없이 org 전체에서 조회한다
+    // (stories/goals/tasks route.ts의 ids 분기와 동일 패턴) — 그래서 project_id 필수 검사
+    // 前에 먼저 갈라야 한다.
+    const IDS_BATCH_CAP = 200;
+    const idsParam = searchParams.get('ids');
+    const parsedIds = idsParam ? idsParam.split(',').map((id) => id.trim()).filter(Boolean).slice(0, IDS_BATCH_CAP) : [];
+    if (parsedIds.length > 0) {
+      const repo = await createDocRepository();
+      const service = new DocsService(repo, dbClient);
+      const result = await service.listByIds(parsedIds);
+      return apiSuccess(result.items);
+    }
+
     const projectId = searchParams.get('project_id');
     if (!projectId) return ApiErrors.badRequest('project_id required');
     const repo = await createDocRepository();

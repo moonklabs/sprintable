@@ -9,6 +9,7 @@ import { useTranslations } from 'next-intl';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
 import { AssetEmbedCard } from '@/components/chat/asset-embed-card';
 import { getFileIcon } from '@/lib/file-icon';
 import { AttachmentImage } from './attachment-image';
@@ -42,6 +43,10 @@ interface ChatBubbleProps {
   isCiteAnchor?: boolean;
   isCiteInRange?: boolean;
   citeAction?: CiteAction;
+  /** story #2262 AC2 PR② — chat-view.tsx가 배치조회한 「타입:id → 상태」 캐시(대화 전체
+   * 메시지에 걸쳐 하나만 존재 — 같은 엔티티를 여러 메시지가 참조해도 fetch는 타입당 1회).
+   * 생략하면(undefined) `EntityChip`이 기존처럼 `{kind:'loading'}`으로 안전 폴백한다. */
+  entityStatusByKey?: Record<string, EntityStatusFetchState>;
 }
 
 interface ContextMenuState {
@@ -142,7 +147,10 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
   );
 }
 
-function ChatMarkdown({ content, isMine, references }: { content: string; isMine: boolean; references: ChatMessage['references'] }) {
+function ChatMarkdown({ content, isMine, references, entityStatusByKey }: {
+  content: string; isMine: boolean; references: ChatMessage['references'];
+  entityStatusByKey?: Record<string, EntityStatusFetchState>;
+}) {
   const text = isMine ? 'text-primary-foreground' : 'text-foreground';
   const muted = isMine ? 'text-primary-foreground/70' : 'text-muted-foreground';
   const codeBg = isMine ? 'bg-primary-foreground/10 text-primary-foreground' : 'bg-muted text-foreground';
@@ -220,12 +228,13 @@ function ChatMarkdown({ content, isMine, references }: { content: string; isMine
             href={getEntityHref(m[1]!, m[2]!)}
             ghost={ghost}
             referenceMeta={referenceMeta}
+            entityStatus={entityStatusByKey?.[`${m[1]!.toLowerCase()}:${m[2]!.toLowerCase()}`]}
           />
         );
       }
       return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
     },
-  }), [text, muted, codeBg, border, isMine, references]);
+  }), [text, muted, codeBg, border, isMine, references, entityStatusByKey]);
 
   if (!hasMarkdown && !hasMention) {
     return (
@@ -254,7 +263,7 @@ const LONG_PRESS_MS = 500;
 
 export function ChatBubble({
   message, isMine, isGrouped = false, onOpenThread, onDelete, onBlockUser, presenceStatus, isWorking = false,
-  highlight = false, projectId, isCiteAnchor = false, isCiteInRange = false, citeAction,
+  highlight = false, projectId, isCiteAnchor = false, isCiteInRange = false, citeAction, entityStatusByKey,
 }: ChatBubbleProps) {
   const t = useTranslations('chats');
   const isAgent = message.sender_type === 'agent';
@@ -443,7 +452,7 @@ export function ChatBubble({
                 ? 'rounded-tr-sm bg-primary text-primary-foreground'
                 : 'rounded-tl-sm bg-muted text-foreground'
             }`}>
-              <ChatMarkdown content={displayContent} isMine={isMine} references={message.references} />
+              <ChatMarkdown content={displayContent} isMine={isMine} references={message.references} entityStatusByKey={entityStatusByKey} />
             </div>
           )}
 

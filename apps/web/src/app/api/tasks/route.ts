@@ -47,6 +47,19 @@ export async function GET(request: Request) {
     const dbClient = undefined as DbClient | undefined;
 
     const { searchParams } = new URL(request.url);
+    // story #2262 PR②(BE #2905) — ids는 task 자신의 id로 배치 lookup(story ca37b2b0과
+    // 동일 계약). ⛔story_ids(아래, 부모 story로 묶어 자식 task들을 찾는 기존 기능)와
+    // 다른 축이다 — 이건 "이 id들 자체가 task다"라는 뜻.
+    const IDS_BATCH_CAP = 200;
+    const idsParam = searchParams.get('ids');
+    const parsedIds = idsParam ? idsParam.split(',').map((id) => id.trim()).filter(Boolean).slice(0, IDS_BATCH_CAP) : [];
+    if (parsedIds.length > 0) {
+      const repo = await createTaskRepository();
+      const service = new TaskService(repo);
+      const tasks = await service.list({ ids: parsedIds, limit: parsedIds.length });
+      return apiSuccess(tasks);
+    }
+
     const storyId = searchParams.get('story_id') ?? undefined;
     const storyIdsRaw = searchParams.get('story_ids');
     const storyIds = storyIdsRaw ? storyIdsRaw.split(',').map((s) => s.trim()).filter(Boolean) : undefined;

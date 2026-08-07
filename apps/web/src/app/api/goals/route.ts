@@ -7,6 +7,9 @@ import { getAuthContext } from '@/lib/auth-helpers';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 import { createGoalRepository } from '@/lib/storage/factory';
 
+// story #2262 PR②(BE #2905) — story ca37b2b0과 동일 상한, FE에서 먼저 잘라 BE 422를 피한다.
+const IDS_BATCH_CAP = 200;
+
 export async function GET(request: Request) {
   try {
     const me = await getAuthContext(request);
@@ -14,6 +17,18 @@ export async function GET(request: Request) {
     if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
 
     const { searchParams } = new URL(request.url);
+
+    // story #2262 PR② — ids 배치 lookup은 커서 페이지네이션과 무관한 고정 집합 조회
+    // (stories/route.ts의 ids 분기와 동일 패턴 — project_id 없이도 org 전체에서 조회한다).
+    const idsParam = searchParams.get('ids');
+    const parsedIds = idsParam ? idsParam.split(',').map((id) => id.trim()).filter(Boolean).slice(0, IDS_BATCH_CAP) : [];
+    if (parsedIds.length > 0) {
+      const repo = await createGoalRepository();
+      const service = new GoalService(repo);
+      const epics = await service.list({ ids: parsedIds, limit: parsedIds.length });
+      return apiSuccess(epics);
+    }
+
     const orderBy = searchParams.get('order_by') ?? undefined;
     // 로드맵 조타(wedge #2): order_by="position"은 복합 정렬((position IS NULL) ASC, position ASC,
     // created_at DESC)이라 BE가 X-Next-Cursor를 내지 않는다 → 커서 이어달리기 불가. 이 모드는

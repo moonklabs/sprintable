@@ -12,7 +12,7 @@ export class GoalService {
     return this.repository.create(input);
   }
 
-  async list(filters: { project_id?: string; limit?: number; cursor?: string | null; order_by?: string; include?: string }) {
+  async list(filters: { project_id?: string; limit?: number; cursor?: string | null; order_by?: string; include?: string; ids?: string[] }) {
     return this.repository.list(filters);
   }
 

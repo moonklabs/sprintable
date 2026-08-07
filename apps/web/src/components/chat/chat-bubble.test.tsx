@@ -145,6 +145,93 @@ describe('ChatBubble — story #2262 AC1(사실성·표면·지점 표기, doc f
   });
 });
 
+describe('ChatBubble — story #2262 AC2 PR② 1단계(2026-08-07 유나양 카피 판정, BE 배치조회 前 하드코딩)', () => {
+  it('has-status 타입(doc) 칩은 실 배치조회가 없는 오늘은 "아직 모름"을 보인다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, references: undefined }} isMine={false} />));
+    });
+    expect(container.textContent).toContain('아직 모름');
+    expect(container.textContent).not.toContain('상태 없음');
+  });
+
+  it('no-status-concept 타입(hypothesis) 칩은 "상태 없음"을 보인다(로딩이 아니라 구조적 부재)', async () => {
+    const hypothesisId = '22222222-2222-2222-2222-222222222222';
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, content: `[가설 A](entity:hypothesis:${hypothesisId})`, references: undefined }}
+          isMine={false}
+        />,
+      ));
+    });
+    expect(container.textContent).toContain('상태 없음');
+    expect(container.textContent).not.toContain('아직 모름');
+  });
+
+  it('유령 칩에는 상태 라벨을 안 보인다(대상 자체가 없는데 상태를 말할 수 없다)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, references: [] }} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('아직 모름');
+    expect(container.textContent).not.toContain('상태 없음');
+  });
+});
+
+describe('ChatBubble — story #2262 AC2 PR② 2단계(chat-view.tsx 실 배치조회 결과 prop 소비)', () => {
+  it('entityStatusByKey에 resolved 항목이 있으면 하드코딩 loading 대신 번역된 실 상태를 보인다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, references: undefined }}
+          isMine={false}
+          entityStatusByKey={{ [`doc:${DOC_ID}`]: { kind: 'resolved', raw: 'confirmed' } }}
+        />,
+      ));
+    });
+    expect(container.textContent).toContain('확定');
+    expect(container.textContent).not.toContain('아직 모름');
+  });
+
+  it('entityId가 대문자 UUID 토큰이어도 소문자로 정규화해 캐시 키와 매칭한다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, content: `[제안서.md](entity:doc:${DOC_ID.toUpperCase()})`, references: undefined }}
+          isMine={false}
+          entityStatusByKey={{ [`doc:${DOC_ID}`]: { kind: 'resolved', raw: 'draft' } }}
+        />,
+      ));
+    });
+    expect(container.textContent).toContain('초안');
+  });
+
+  it('entityStatusByKey에 그 키가 아직 없으면(다른 타입 fetch 진행 중) 폴백과 동일하게 "아직 모름"이다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, references: undefined }}
+          isMine={false}
+          entityStatusByKey={{ 'story:다른-엔티티': { kind: 'resolved', raw: 'done' } }}
+        />,
+      ));
+    });
+    expect(container.textContent).toContain('아직 모름');
+  });
+
+  it('배치조회가 error로 끝나면 loading과 같은 급인 "아직 모름"을 보인다(가짜 "확認 중" 아님)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, references: undefined }}
+          isMine={false}
+          entityStatusByKey={{ [`doc:${DOC_ID}`]: { kind: 'error' } }}
+        />,
+      ));
+    });
+    expect(container.textContent).toContain('아직 모름');
+  });
+});
+
 describe('ChatBubble — story #2319 tombstone(메시지 삭제) 렌더', () => {
   it('deleted_at이 있으면 원문 대신 placeholder를 그린다', async () => {
     const deletedMsg: ChatMessage = { ...baseMessage, content: '', deleted_at: '2026-08-02T00:00:00.000Z' };
