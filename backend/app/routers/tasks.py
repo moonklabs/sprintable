@@ -86,7 +86,9 @@ async def list_tasks(
     # project_id 컬럼이 없어(story_id NN) list_in_projects와 동형으로 Story JOIN을 거쳐야
     # 접근권 스코프를 낼 수 있다 — repo.list_by_ids(org-scope만)로 앵커 조회 後, 결과의
     # story_id→project_id를 별도 조회해 caller 접근권 project 집합으로 result-level narrowing.
-    if ids is not None:
+    # 카디르 QA(PR#2905, 2026-08-07): Query(...) 기본값 센티널 함정(goals.py와 동형) —
+    # isinstance로 실제 str만 통과시킨다.
+    if isinstance(ids, str):
         try:
             task_ids = [uuid.UUID(x) for x in ids.split(",") if x.strip()]
         except ValueError:

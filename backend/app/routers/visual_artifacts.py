@@ -331,7 +331,9 @@ async def list_artifacts(
     # story #2262 PR②(칩 상태 배치조회) — stories.py list_stories의 ids= 패턴 미러링. 이
     # 라우터는 이미 caller 컨텍스트의 project_id로만 스코프하므로(위 SEC-S8 fix) 별도
     # accessible_project_ids_in_org 조회 없이 그 org_id/project_id WHERE에 IN을 더하면 된다.
-    if ids is not None:
+    # 카디르 QA(PR#2905, 2026-08-07): Query(...) 기본값 센티널 함정(goals.py/docs.py와 동형) —
+    # isinstance로 실제 str만 통과시킨다.
+    if isinstance(ids, str):
         try:
             artifact_ids = [uuid.UUID(x) for x in ids.split(",") if x.strip()]
         except ValueError:

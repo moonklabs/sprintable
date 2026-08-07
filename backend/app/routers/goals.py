@@ -70,7 +70,11 @@ async def list_goals(
     같다(같은 모델에 얹으면 기본값이라도 JSON에 항상 찍혀 계약이 깨진다)."""
     # story #2262 PR②(칩 상태 배치조회) — stories.py list_stories의 ids= 패턴 그대로 미러링.
     # cursor/glance/order_by 등 페이지네이션 로직 전부 우회(정확한 집합 요청이라 무관).
-    if ids is not None:
+    # 카디르 QA(PR#2905, 2026-08-07): Query(default=None, ...) 기본값은 「값」이 아니라
+    # 「센티널 객체」 — FastAPI 경유 없이 이 함수를 직접 호출하는 테스트가 ids를 안 넘기면
+    # 그 센티널 그대로를 받는다. `is not None`은 센티널도 통과시켜 버려 `.split`이 터진다
+    # (stories.py list_stories가 이미 겪은 동형 함정) — isinstance로 실제 타입을 검사한다.
+    if isinstance(ids, str):
         try:
             goal_ids = [uuid.UUID(x) for x in ids.split(",") if x.strip()]
         except ValueError:

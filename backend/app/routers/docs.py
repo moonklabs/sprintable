@@ -125,7 +125,13 @@ async def list_docs(
 ) -> dict:
     # story #2262 PR②(칩 상태 배치조회) — stories.py list_stories의 ids= 패턴 미러링(검색/slug/
     # tags/tree 분기보다 먼저 — 정확한 집합 요청이라 다른 필터와 무관하게 우선).
-    if ids is not None:
+    # ⭐카디르 QA(PR#2905, 2026-08-07) — Query(default=None, ...) 기본값은 「값」이 아니라
+    # 「센티널 객체」다. FastAPI 경유 없이 이 함수를 직접 호출하는 기존 테스트(test_2191·
+    # test_2193 — cursor에 대해 이미 같은 경고 주석이 있던 그 자리)가 ids를 명시로 안 넘기면
+    # 그 센티널 그대로를 받는다 — `is not None`은 센티널도 통과시켜 `.split`이 터졌다(CI red
+    # 실크래시). isinstance로 실제 str만 통과시킨다(stories.py list_stories의 동형 함정과
+    # 같은 처방 — boost_candidates_from 주석 참조).
+    if isinstance(ids, str):
         try:
             doc_ids = [uuid.UUID(x) for x in ids.split(",") if x.strip()]
         except ValueError:
