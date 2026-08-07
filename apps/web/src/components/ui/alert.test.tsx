@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { Alert, AlertDescription } from './alert';
+import { Alert, AlertDescription, AlertTitle } from './alert';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -86,5 +86,22 @@ describe('Alert 접근성 (story #2149)', () => {
     });
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
     expect(container.querySelector('[role="status"]')).toBeNull();
+  });
+
+  // 유나 지적(error-display 폴리시) — 공백 없는 초장문(토큰·URL 등)이 grid 1fr 트랙을
+  // 넘어 넘쳐흘렀다. AlertTitle/AlertDescription 둘 다 anywhere로 어디서나 끊을 여지를 준다.
+  it('AlertTitle/AlertDescription이 overflow-wrap:anywhere를 갖는다(초장문 overflow 회귀가드)', async () => {
+    await act(async () => {
+      root.render(
+        <Alert variant="destructive">
+          <AlertTitle>제목</AlertTitle>
+          <AlertDescription>본문</AlertDescription>
+        </Alert>,
+      );
+    });
+    const title = container.querySelector('p');
+    const description = container.querySelectorAll('p')[1];
+    expect(title?.className).toContain('[overflow-wrap:anywhere]');
+    expect(description?.className).toContain('[overflow-wrap:anywhere]');
   });
 });
