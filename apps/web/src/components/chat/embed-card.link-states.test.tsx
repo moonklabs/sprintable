@@ -173,3 +173,45 @@ describe('AC4 — 조회 실패(대상 사라짐)는 "대상이 없습니다"로
     expect(document.body.textContent).not.toContain('열 수 있는 화면이 없습니다');
   });
 });
+
+describe('story #2262 AC2(2026-08-08, 쉬운 절반) — 모달이 자기 fetch한 detail.status를 물린다', () => {
+  // entity_type="task"를 쓴다 — EntityDetail이 story/epic에는 자기 status 뱃지(MdBadge)를
+  // 이미 body에 그리지만 task엔 그 분기가 없어(embed-card.tsx EntityDetail), 헤더 배선만
+  // 값으로 깨끗하게 격리해 잰다.
+  it('status prop이 null(EntityChip 호출부처럼 status를 모름)이어도 fetch한 detail.status를 헤더 뱃지로 보인다', async () => {
+    stubFetch(async (url) => {
+      expect(url).toContain('/api/tasks/');
+      return { ok: true, json: async () => ({ data: { status: 'in-review', story_id: 's-parent' } }) };
+    });
+    await act(async () => {
+      root.render(<EmbedCard entity_type="task" entity_id="t1" title="작업 A" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.body.textContent).toContain('in-review');
+  });
+
+  it('status prop이 이미 실려 있으면(EmbedCard 자신의 write-response 경로) 그 값을 헤더가 우선한다', async () => {
+    stubFetch(async () => ({ ok: true, json: async () => ({ data: { status: 'done', story_id: 's-parent' } }) }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="task" entity_id="t1" title="작업 A" status="ready-for-dev" />);
+    });
+    await openCard();
+    await flush();
+    // 헤더는 카드 자체에도 뜨고(inner) 모달에도 뜬다 — 둘 다 prop 값이어야 하고, fetch가 준
+    // "done"은 헤더 어디에도 안 나타나야 한다(task는 EntityDetail 자기 status 표시가 없다).
+    const readyForDevCount = (document.body.textContent!.match(/ready-for-dev/g) ?? []).length;
+    expect(readyForDevCount).toBeGreaterThanOrEqual(2);
+    expect(document.body.textContent).not.toContain('done');
+  });
+
+  it('fetch가 실패해도(대상 없음) status 뱃지를 지어내지 않는다 — 모르는 것을 단정하지 않는다', async () => {
+    stubFetch(async () => ({ ok: false, json: async () => ({}) }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="task" entity_id="t-gone" title="사라진 작업" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.body.textContent).toContain('대상이 없습니다');
+  });
+});
