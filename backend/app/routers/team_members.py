@@ -136,6 +136,7 @@ async def list_team_members(
     project_id: uuid.UUID | None = Query(default=None),
     type_filter: str | None = Query(default=None, alias="type"),
     is_active: bool | None = Query(default=True),
+    include_inactive: bool = Query(default=False),
     user_id: uuid.UUID | None = Query(default=None),
     repo: TeamMemberRepository = Depends(_get_repo_read),
     session: AsyncSession = Depends(get_read_db),
@@ -146,6 +147,18 @@ async def list_team_members(
     # (team_members 뷰=members⋈project_access 비의존 → project_access.member_id NULL 인
     # grant-only/owner 휴먼도 포함, 곱연산 0). 에이전트는 기존 뷰(type=agent) 그대로.
     # project-scoped(project_id 지정)는 기존 뷰 경로 무변경 → 다른 consumer 무회귀(AC3).
+    #
+    # story #2406 AC2(critical, 미르코 라이브 실측 2026-08-07) — FE는 AC1 커밋 이전부터
+    # `?type=agent&include_inactive=true`를 이미 보내고 있었는데, 이 함수는 그 파라미터
+    # 자체를 몰랐다(FastAPI는 선언 안 된 쿼리파라미터를 조용히 무시 — 200은 나오되 아무
+    # 효과가 없다). 결과: is_active가 Query(default=True)라 include_inactive 값과 무관하게
+    # 항상 활성만 반환(16→15건 실측) — 비활성화한 에이전트가 목록에서 완전히 사라져
+    # "재활성화" 토글 자체를 누를 행이 없는, 원래 사고("한 번 잘못 누르면 영영 못
+    # 되돌림")가 그대로 살아있는 상태였다. include_inactive=True면 is_active 필터 자체를
+    # 안 건다(기존 is_active 파라미터 값과 무관 — FE가 실제로 보내는 값 그대로 존중).
+    # include_inactive 생략/False(기본)면 기존 동작 완전 동일(회귀 0).
+    effective_is_active = None if include_inactive else is_active
+
     if project_id is None:
         result: list[TeamMemberResponse] = []
         if type_filter in (None, "human"):
@@ -153,8 +166,8 @@ async def list_team_members(
             result.extend(_build_org_human_response(r, org_id) for r in human_rows)
         if type_filter in (None, "agent"):
             agent_filters: dict = {"type": "agent"}
-            if is_active is not None:
-                agent_filters["is_active"] = is_active
+            if effective_is_active is not None:
+                agent_filters["is_active"] = effective_is_active
             if user_id:
                 agent_filters["user_id"] = user_id
             agents = await repo.list(**agent_filters)
@@ -170,8 +183,8 @@ async def list_team_members(
     filters: dict = {"project_id": project_id}
     if type_filter:
         filters["type"] = type_filter
-    if is_active is not None:
-        filters["is_active"] = is_active
+    if effective_is_active is not None:
+        filters["is_active"] = effective_is_active
     if user_id:
         filters["user_id"] = user_id
     members = await repo.list(**filters)
