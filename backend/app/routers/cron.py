@@ -872,3 +872,24 @@ async def db_connection_stats(
     except Exception as exc:
         logger.exception("db-connection-stats cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── GET /api/v2/internal/cron/toss-billing-maintenance ───────────────────────
+# 결제②-C3(story #2494): dunning 재시도(pricing-policy-proposal-v1 §12.1) + pending
+# 대사(reconciliation). "신규 결제 주기 도래" 트리거는 스코프 밖(story #2502 대기) —
+# billing_scheduler.trigger_due_charges()가 그 자리를 NotImplementedError로 명시해둔다.
+@router.get("/toss-billing-maintenance")
+async def toss_billing_maintenance(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.billing_scheduler import sweep_dunning_retries, sweep_stale_pending_orders
+
+        dunning_result = await sweep_dunning_retries(session)
+        reconciliation_result = await sweep_stale_pending_orders(session)
+        return _ok({"dunning": dunning_result, "reconciliation": reconciliation_result})
+    except Exception as exc:
+        logger.exception("toss-billing-maintenance cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
