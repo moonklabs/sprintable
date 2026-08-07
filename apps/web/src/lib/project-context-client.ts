@@ -22,15 +22,31 @@ export function setEffectiveProjectId(id: string | undefined): void {
   effectiveProjectIdRef.current = id;
 }
 
+// story #2497 — fire #2486 근본원인(라이브 실증): 인터셉터가 X-Project-Id만 보내고
+// X-Org-Id는 안 보내, backend get_verified_org_id가 org_id=(X-Org-Id ?? JWT
+// app_metadata.org_id)로 스코프하는 자리에서 멀티-org 유저의 stale JWT org가 현재
+// 탭의 실제 org와 달라 has_project_access가 엉뚱한 org로 검증돼 정당한 프로젝트도
+// 403 났다(#2490의 "25d3a6df는 out-of-org stale" 전제는 틀렸음 — in-org·정당 접근권,
+// 진짜 원인은 이 헤더 누락). effectiveProjectIdRef와 대칭으로 탭의 effective org도
+// 추적해 같이 실어 보낸다.
+const effectiveOrgIdRef: { current: string | undefined } = { current: undefined };
+
+export function setEffectiveOrgId(id: string | undefined): void {
+  effectiveOrgIdRef.current = id;
+}
+
 let interceptorInstalled = false;
 
 /**
- * same-origin `/api/*` 요청에 `X-Project-Id`(탭 effective project)를 주입하는 단일 chokepoint.
- * 호출부 전수 마이그레이션 대신 window.fetch 1점 패치 — raw fetch 호출까지 빠짐없이 커버.
+ * same-origin `/api/*` 요청에 `X-Project-Id`+`X-Org-Id`(탭 effective project/org)를
+ * 주입하는 단일 chokepoint. 호출부 전수 마이그레이션 대신 window.fetch 1점 패치 —
+ * raw fetch 호출까지 빠짐없이 커버.
  *
  * - string/URL input 만 처리(코드베이스 호출 패턴). Request input 은 body 유실 방지 위해 무가공 통과.
  * - 이미 `X-Project-Id`/`X-Org-Id` 를 명시한 요청(예: switcher 의 cross-org 프로젝트 로드)은
  *   스킵 — 명시 스코프를 덮지 않는다.
+ * - story #2497 — 둘을 항상 «함께» 싣는다(하나만 실으면 멀티-org 유저에서 org_id가
+ *   JWT stale org로 새는 이 fire의 정확한 재발 형태다).
  */
 export function installProjectHeaderInterceptor(): void {
   if (interceptorInstalled || typeof window === 'undefined') return;
@@ -43,12 +59,14 @@ export function installProjectHeaderInterceptor(): void {
         const url = typeof input === 'string' ? input : input.href;
         const path = url.startsWith('http') ? new URL(url).pathname : url.split('?')[0];
         const projectId = effectiveProjectIdRef.current;
+        const orgId = effectiveOrgIdRef.current;
         // 컨텍스트 제어 엔드포인트(`/api/switch-*`)는 자체 컨텍스트를 관리하므로 주입 제외.
         const isApi = path.startsWith('/api/') && !path.startsWith('/api/switch-');
         if (isApi && projectId) {
           const headers = new Headers(init?.headers);
           if (!headers.has('X-Project-Id') && !headers.has('X-Org-Id')) {
             headers.set('X-Project-Id', projectId);
+            if (orgId) headers.set('X-Org-Id', orgId);
             return originalFetch(input, { ...init, headers });
           }
         }
