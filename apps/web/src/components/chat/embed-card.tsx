@@ -293,6 +293,12 @@ function EntityPreviewModal({
 
   const colorClass = ENTITY_COLORS[entityType] ?? GRAY_STATE_COLOR;
   const label = title ?? entityId;
+  // story #2262 AC2(2026-08-08, 쉬운 절반) — 호출부(EntityChip)는 status를 모르고 항상
+  // null을 넘긴다(칩 자체는 fetch를 안 하므로). 이 모달은 이미 자기 detail을 fetch하므로
+  // (위 effect) 그 안의 status를 물린다 — prop이 실려 오면(EmbedCard 경로처럼 이미 아는
+  // 값이 있으면) 그걸 우선한다. 칩 자체(모달 열기 前)에 상태를 보이는 건 별건(PR②,
+  // 타입별 배치조회 인프라 필요 — references 사이드밴드엔 status가 없다).
+  const resolvedStatus = status ?? (typeof (detail as { status?: unknown } | null)?.status === 'string' ? (detail as { status: string }).status : null);
 
   // story #2302 AC3 — ①own-href(정적) / ②via-parent(레코드 fetch 필요) / ③없음, 세 갈래를
   // "카드 전체를 죽이지 않는다"(AC4) 원칙대로 여기서만 계산 — 헤더의 아이콘·제목·상태는 이 값과
@@ -353,8 +359,8 @@ function EntityPreviewModal({
           <div className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm ${colorClass} flex-1 min-w-0`}>
             <EntityGlyph Icon={resolveEntityIcon(entityType)} label={label} />
             <DialogTitle className="font-semibold truncate text-sm">{label}</DialogTitle>
-            {status ? (
-              <span className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs bg-black/10 dark:bg-white/10">{status}</span>
+            {resolvedStatus ? (
+              <span className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs bg-black/10 dark:bg-white/10">{resolvedStatus}</span>
             ) : null}
           </div>
           <button
@@ -518,12 +524,30 @@ export function EmbedCard({ entity_type, entity_id, title, status }: EmbedCardDa
   );
 }
 
+// story #2262 AC1(2026-08-08) — doc `flow-map-blueprint-v1` §2-3 표기 세 조각의 「표면」.
+// 스토리 본문의 AC1 정의 그대로: form은 'mention'|'embed'|'proof' 셋뿐(FORMS,
+// backend/app/models/reference.py) — 채팅 멘션 파서는 오늘 "mention"만 낸다(다른 값은
+// 문서·증빙 경로가 낼 수 있어 표는 셋 다 갖춘다).
+const FORM_LABELS: Record<string, string> = { mention: '멘션', embed: '임베드', proof: '근거' };
+
+// 「지점」 — referenced_at(이 참조가 «언제 생겼나»)을 짧게. 블루프린트 예시("7/26 스레드")와
+// 같은 월/일 압축 표기 — 채팅 칩은 그 자체가 스레드 맥락이라 별도 "스레드" 접미어를 안 붙인다.
+function formatReferencePoint(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  // Intl 로케일 포맷("7. 26.")은 블루프린트 예시("7/26")와 안 맞다 — 직접 M/D로 고정한다.
+  // UTC 기준(로컬 타임존에 따라 날짜가 하루 밀리는 것을 피한다 — referenced_at은 대략적인
+  // 「언제」 지표라 타임존 정밀도가 필요 없다).
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+}
+
 export function EntityChip({
   entityType,
   entityId,
   label,
   href,
   ghost = false,
+  referenceMeta = null,
 }: {
   entityType: string;
   entityId?: string;
@@ -534,6 +558,9 @@ export function EntityChip({
    * 회색 하나(GRAY_STATE_COLOR)·행동 0(클릭·모달 없음)·기본 커서·문구는 이미 선 "대상이
    * 없습니다"(신규 문구 발명 금지). */
   ghost?: boolean;
+  /** story #2262 AC1 — 「사실성 · 표면 · 지점」. null이면(유령이거나 references 자체가
+   * 없는 경로) 표기하지 않는다 — 모르는 것을 지어내지 않는다(가디언 §H-2와 같은 원칙). */
+  referenceMeta?: { form: string; referencedAt: string } | null;
 }) {
   const [showModal, setShowModal] = useState(false);
   const colorClass = ghost ? GRAY_STATE_COLOR : (ENTITY_COLORS[entityType] ?? GRAY_STATE_COLOR);
@@ -542,6 +569,13 @@ export function EntityChip({
     <span className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-xs font-medium ${colorClass}`}>
       <EntityGlyph Icon={resolveEntityIcon(entityType)} label={label} className="size-3 shrink-0" />
       <span>{ghost ? '대상이 없습니다' : label}</span>
+      {/* AC1 — 사실성(상수 "관찰됨": entity_references 자체가 관찰됨 tier) · 표면 · 지점.
+          ⛔색으로만 구분하지 않고 글자로 적는다(가디언 규율 재사용). */}
+      {referenceMeta ? (
+        <span className="opacity-70">
+          · 관찰됨 · {FORM_LABELS[referenceMeta.form] ?? referenceMeta.form} · {formatReferencePoint(referenceMeta.referencedAt)}
+        </span>
+      ) : null}
     </span>
   );
 

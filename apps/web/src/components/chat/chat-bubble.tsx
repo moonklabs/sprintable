@@ -64,6 +64,24 @@ function isGhostReference(
   return !references.some((r) => r.target_type.toLowerCase() === type && r.target_id.toLowerCase() === id);
 }
 
+// story #2262 AC1(2026-08-08) — doc `flow-map-blueprint-v1` §2-3 「사실성 · 표면 · 지점」의
+// «표면·지점» 재료. isGhostReference와 같은 대조를 한 번 더 해 form·referenced_at까지
+// 끌어온다(스토리 자신의 AC1 정의: 표면=form('mention'|'embed'|'proof'), 지점=referenced_at —
+// "이 참조가 «언제 생겼나»"이지 대상이 「언제 만들어졌나」가 아니다). 매칭 없으면(유령이거나
+// references 자체가 없으면) null — 그때는 칩에 표기하지 않는다(모르는 것을 지어내지 않는다).
+function findReferenceMeta(
+  references: ChatMessage['references'],
+  targetType: string,
+  targetId: string,
+): { form: string; referencedAt: string } | null {
+  if (!references) return null;
+  const type = targetType.toLowerCase();
+  const id = targetId.toLowerCase();
+  const match = references.find((r) => r.target_type.toLowerCase() === type && r.target_id.toLowerCase() === id);
+  if (!match || !match.form || !match.referenced_at) return null;
+  return { form: match.form, referencedAt: match.referenced_at };
+}
+
 // Convert @name tokens to markdown links so react-markdown v10 can render them via the `a` component.
 // Uses negative lookbehind to skip already-linked mentions (e.g. inside [...]).
 function prepareMentions(content: string): string {
@@ -193,7 +211,17 @@ function ChatMarkdown({ content, isMine, references }: { content: string; isMine
           return <AssetEmbedCard entityId={m[2]!} label={String(children)} ownMessage={isMine} />;
         }
         const ghost = isGhostReference(references, m[1]!, m[2]!);
-        return <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} ghost={ghost} />;
+        const referenceMeta = ghost ? null : findReferenceMeta(references, m[1]!, m[2]!);
+        return (
+          <EntityChip
+            entityType={m[1]!}
+            entityId={m[2]!}
+            label={String(children)}
+            href={getEntityHref(m[1]!, m[2]!)}
+            ghost={ghost}
+            referenceMeta={referenceMeta}
+          />
+        );
       }
       return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
     },
