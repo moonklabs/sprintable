@@ -436,6 +436,14 @@ async def create_gate(
         work_item_type=work_item_type,
         gate_type=gate_type,
         status=status,
+        # #2156 AC3(2026-08-07) — merge-type만 evaluate_merge_gate가 이후 이 필드를 정확히
+        # 채웠고(decision 기반), 그 외 gate_type(qa·pr_review·deploy 등)은 create_gate가 여태
+        # requires_human을 아예 대입하지 않아 DB 컬럼 기본값 False가 그대로 남았다 — status는
+        # disposition대로 정확히 pending인데 requires_human=False가 "안 봐도 됨"으로 잘못
+        # 신호를 내 인박스에 안 뜨는 원인이었다(유나 실측 "축 없음 4건"). status==pending이면
+        # 사람 결재가 필요하다는 뜻이니 그대로 반영 — merge-type은 evaluate_merge_gate가 바로
+        # 뒤에서 더 정확한 값(decision != AUTO_MERGE)으로 덮어써 이 기본값은 초기값일 뿐이다.
+        requires_human=(status == "pending"),
         # #2249: 신규 행이라 값 비교(set_gate_status)가 필요 없다 — 생성 시점이 곧 최초 진입 시각.
         status_entered_at=datetime.now(timezone.utc),
         neutral_facts=neutral_facts,
