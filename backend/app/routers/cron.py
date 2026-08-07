@@ -893,3 +893,22 @@ async def toss_billing_maintenance(
     except Exception as exc:
         logger.exception("toss-billing-maintenance cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── GET /api/v2/internal/cron/toss-daily-reconciliation ──────────────────────
+# 결제②-C4(story #2495): confirmed billing_orders가 실제로 Toss와 금액이 맞는지 재확認
+# (§2 step8) — C3의 sweep_stale_pending_orders(pending 축)와 짝인 별개 축이라 별도 잡.
+@router.get("/toss-daily-reconciliation")
+async def toss_daily_reconciliation(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.billing_reconciliation import daily_reconcile_confirmed_orders
+
+        result = await daily_reconcile_confirmed_orders(session)
+        return _ok(result)
+    except Exception as exc:
+        logger.exception("toss-daily-reconciliation cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)

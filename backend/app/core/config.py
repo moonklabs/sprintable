@@ -254,6 +254,11 @@ class Settings(BaseSettings):
     toss_payments_crypto_key: str = ""
     toss_merchant_id: str = "bill_sprint1d9"  # 비민감 — Secret Manager 대상 아님(PO 확認)
 
+    # 결제②-C4(story #2495): Toss 웹훅(BILLING_DELETED 등 보조 이벤트) HMAC 서명 검증
+    # 시크릿 — PolarAdapter의 polar_webhook_secret과 동형. 미설정이면 TossAdapter.
+    # verify_webhook이 dev 한정으로 통과(경고 로그) — 해당 write가 멱등이라 안전한 폴백.
+    toss_webhook_secret: str = ""
+
     # 결제②-C1(story #2492): org_billing_keys.encrypted_billing_key 암호화 키(들).
     # MultiFernet 회전 지원 — 콤마구분 다건, **맨 앞이 암호화에 쓰이는 현재 키**(나머지는
     # 복호 전용으로만 남아 옛 값 복호 유지). PO 결정(2026-08-07): 같은 신뢰모델(Toss 시크릿

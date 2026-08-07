@@ -11,6 +11,8 @@ cancel/verify_webhook)는 후속 스토리(C2~C4) 대상으로 `NotImplementedEr
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import logging
 from typing import Any
 
@@ -52,13 +54,20 @@ class TossAdapter(PaymentProvider):
         token = base64.b64encode(f"{settings.toss_payments_secret_key}:".encode()).decode()
         return {"Authorization": f"Basic {token}", "Content-Type": "application/json"}
 
-    async def _post(self, path: str, *, json: dict, timeout: float, op_label: str) -> dict:
-        """공용 POST 왕복 — create_billing_key/charge가 공유하는 에러 처리(⛔응답 바디를
-        그대로 로깅하지 않는다 — Toss 에러 응답이 요청 파라미터를 echo하는 경우가 있어
-        customerKey 등 민감정보 유출 표면을 늘릴 수 있다. code/status만 남긴다)."""
+    async def _post(
+        self, path: str, *, json: dict, timeout: float, op_label: str, idempotency_key: str | None = None,
+    ) -> dict:
+        """공용 POST 왕복 — create_billing_key/charge/refund가 공유하는 에러 처리(⛔응답
+        바디를 그대로 로깅하지 않는다 — Toss 에러 응답이 요청 파라미터를 echo하는 경우가
+        있어 customerKey 등 민감정보 유출 표면을 늘릴 수 있다. code/status만 남긴다).
+        idempotency_key가 있으면 `Idempotent-Key` 헤더로 전송(공식 문서 확認, 2026-08-07 —
+        재시도가 같은 취소/승인을 중복 처리하지 않게 하는 Toss 측 멱등키)."""
+        headers = self._auth_header()
+        if idempotency_key is not None:
+            headers["Idempotent-Key"] = idempotency_key
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(f"{_API_BASE}{path}", headers=self._auth_header(), json=json)
+                resp = await client.post(f"{_API_BASE}{path}", headers=headers, json=json)
         except httpx.RequestError as exc:
             logger.exception("Toss %s request failed", op_label)
             raise RuntimeError("Cannot reach Toss API") from exc
@@ -145,10 +154,50 @@ class TossAdapter(PaymentProvider):
         )
 
     def verify_webhook(self, raw_body: bytes, signature: str | None) -> bool:
-        raise NotImplementedError("TossAdapter.verify_webhook — story C4 대상(BILLING_DELETED 보조 이벤트).")
+        """서명 검증 — PolarAdapter(HMAC-SHA256)와 형태는 동일하나, Toss는 이 보조
+        이벤트(BILLING_DELETED 등)의 서명 헤더/스킴을 공식 문서가 명시하지 않는다(재확認,
+        2026-08-07 — 결제취소 API처럼 레퍼런스가 명확한 축과 다름).
 
-    async def refund(self, **kwargs: Any) -> dict:
-        raise NotImplementedError("TossAdapter.refund — story C4 대상.")
+        PO 판단(2026-08-07, story #2495): BILLING_DELETED가 트리거하는 유일한 write는
+        org_billing_keys.status='deleted' 멱등 UPDATE — 원장·이중청구를 못 건드리는 축이라
+        서명이 약해도 최악은 "재인증 유도"뿐. 그래서:
+        ①secret이 설정돼 있으면 검증 필수(있는데 signature가 틀리면 거부)
+        ②secret 미설정이면 dev 한정 통과(경고 로그) — **prod로 이 시크릿을 올리기 前에
+        Toss가 실제로 이 헤더를 보내는지 라이브로 확인해야 한다**(지금은 미확認, §부록)."""
+        secret = settings.toss_webhook_secret
+        if not secret:
+            logger.warning(
+                "TOSS_WEBHOOK_SECRET not set — skipping signature verification (dev only; "
+                "BILLING_DELETED write is idempotent so worst case is a spurious re-auth prompt)"
+            )
+            return True
+        if not signature:
+            return False
+        expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(expected, signature)
+
+    async def refund(
+        self,
+        *,
+        payment_key: str,
+        cancel_reason: str,
+        cancel_amount_minor: int | None = None,
+        idempotency_key: str,
+    ) -> dict:
+        """POST /v1/payments/{paymentKey}/cancel — 결제취소(전액/부분, story #2495 C4).
+        국내는 취소 웹훅도 안 옴(§0) — 이 동기 응답이 정본. cancel_amount_minor 생략 시
+        전액환불(Toss 관례). idempotency_key는 호출자가 결정적으로(예: order_id 기반)
+        넘겨야 재시도가 중복 취소를 만들지 않는다."""
+        body: dict[str, Any] = {"cancelReason": cancel_reason}
+        if cancel_amount_minor is not None:
+            body["cancelAmount"] = cancel_amount_minor
+        return await self._post(
+            f"/v1/payments/{payment_key}/cancel",
+            json=body,
+            timeout=15,
+            op_label="refund",
+            idempotency_key=idempotency_key,
+        )
 
     async def open_portal(self, **kwargs: Any) -> dict:
         raise NotImplementedError(
