@@ -8,12 +8,12 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.org_billing_key import OrgBillingKey
-from app.services.billing_key_crypto import encrypt_billing_key
+from app.services.billing_key_crypto import encrypt_billing_key, ensure_configured
 from app.services.payment.toss_adapter import TossAdapter
 
 
@@ -32,6 +32,11 @@ async def issue_billing_key(
     기존 행이 있으면(재발급 = 카드 교체) 그 customer_key를 재사용 — Toss 쪽 고객 식별을
     유지한다. 새 billingKey로 UPDATE(이전 빌링키의 Toss측 폐기는 story C4 대상, 여기서는
     저장 갱신만)."""
+    # PO nit①(#2880 리뷰, 2026-08-07 — C2에서 함께 정리): 되돌릴 수 없는 authKey 소모(아래
+    # create_billing_key) 前에 암호화 키 가용성부터 확認 — 순서를 바꾸면 authKey를 태우고도
+    # encrypt 단계에서 502가 나는 낭비가 생긴다.
+    ensure_configured()
+
     existing = (
         await session.execute(select(OrgBillingKey).where(OrgBillingKey.org_id == org_id))
     ).scalar_one_or_none()
@@ -63,7 +68,13 @@ async def issue_billing_key(
     stmt = pg_insert(OrgBillingKey).values(id=uuid.uuid4(), **values)
     stmt = stmt.on_conflict_do_update(
         index_elements=["org_id"],
-        set_={k: v for k, v in values.items() if k not in ("org_id", "customer_key")},
+        # 재발급(UPDATE 경로) — TimestampMixin의 onupdate=func.now()는 ORM UPDATE 문에만
+        # 붙는 파이썬 레벨 훅이라 raw INSERT..ON CONFLICT DO UPDATE는 안 거친다(PO nit②,
+        # #2880 리뷰). updated_at을 SET 절에 명시로 넣어 재발급 시에도 갱신되게 한다.
+        set_={
+            **{k: v for k, v in values.items() if k not in ("org_id", "customer_key")},
+            "updated_at": func.now(),
+        },
     )
     await session.execute(stmt)
     await session.commit()

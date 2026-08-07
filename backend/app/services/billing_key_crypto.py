@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from cryptography.fernet import Fernet, InvalidToken, MultiFernet
+from cryptography.fernet import Fernet, MultiFernet
 
 from app.core.config import settings
 
@@ -42,6 +42,14 @@ def _get_multi_fernet() -> MultiFernet:
     return MultiFernet([Fernet(k) for k in keys])
 
 
+def ensure_configured() -> None:
+    """PO nit①(C1 리뷰, #2880 — 2026-08-07): 되돌릴 수 없는 외부 호출(Toss authKey 소모·
+    charge 승인) 前에 암호화 키 가용성을 먼저 확認한다 — 호출 後에야 encrypt 실패로 502가
+    나면 1회용 authKey/승인 시도를 헛되이 태운 것이 된다. C1의 issue_billing_key와 C2의
+    charge_org 둘 다 Toss 호출 直前에 이 함수를 먼저 부른다."""
+    _parse_keys(settings.org_billing_key_encryption_key)
+
+
 def encrypt_billing_key(plaintext: str) -> str:
     """평문 빌링키 → Fernet 토큰(맨 앞 키로 암호화). DB 저장용."""
     token = _get_multi_fernet().encrypt(plaintext.encode())
@@ -51,8 +59,5 @@ def encrypt_billing_key(plaintext: str) -> str:
 def decrypt_billing_key(token: str) -> str:
     """Fernet 토큰 → 평문 빌링키. ⛔호출자는 이 반환값을 charge 요청 구성에만 즉시 쓰고
     변수를 더 들고 있거나 로깅하지 않는다. 등록된 키 어느 것으로도 복호 실패 시
-    ``InvalidToken``을 그대로 전파(회전 중 옛 키가 빠졌다는 신호 — 조용히 삼키지 않는다)."""
-    try:
-        return _get_multi_fernet().decrypt(token.encode()).decode()
-    except InvalidToken:
-        raise
+    ``InvalidToken``이 그대로 전파된다(회전 중 옛 키가 빠졌다는 신호 — 조용히 삼키지 않는다)."""
+    return _get_multi_fernet().decrypt(token.encode()).decode()

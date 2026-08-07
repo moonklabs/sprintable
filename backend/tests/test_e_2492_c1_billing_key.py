@@ -19,7 +19,7 @@ from tests.conftest import override_db_and_read
     [
         ("create_customer", {}),
         ("create_checkout", {}),
-        ("charge", {}),
+        # charge는 #2493(C2)로 실 구현됨 — test_e_2493_c2_charge_ledger.py로 이동.
         ("refund", {}),
         ("open_portal", {}),
         ("cancel", {}),
@@ -175,6 +175,7 @@ async def test_issue_billing_key_new_org_generates_customer_key_and_persists(mon
     session.execute = AsyncMock(side_effect=[no_existing, MagicMock(), persisted])
     session.commit = AsyncMock()
 
+    monkeypatch.setattr(svc, "ensure_configured", MagicMock())
     monkeypatch.setattr(
         svc.TossAdapter, "create_billing_key",
         AsyncMock(return_value={
@@ -209,6 +210,7 @@ async def test_issue_billing_key_reuses_existing_customer_key(monkeypatch):
     session.execute = AsyncMock(side_effect=[existing_result, MagicMock(), persisted])
     session.commit = AsyncMock()
 
+    monkeypatch.setattr(svc, "ensure_configured", MagicMock())
     create_billing_key_mock = AsyncMock(return_value={
         "billingKey": "plaintext_bk2", "authenticatedAt": "2026-08-07T00:00:00+09:00", "card": {},
     })
@@ -218,6 +220,59 @@ async def test_issue_billing_key_reuses_existing_customer_key(monkeypatch):
     await svc.issue_billing_key(session, org_id=org_id, auth_key="auth_y")
 
     create_billing_key_mock.assert_awaited_once_with(auth_key="auth_y", customer_key="org-existing-key")
+
+
+@pytest.mark.anyio
+async def test_issue_billing_key_checks_crypto_before_consuming_auth_key(monkeypatch):
+    """PO nit①(#2880 리뷰) 회귀 고정 — 암호화 키 미설정이면 1회용 authKey를 소모하는
+    create_billing_key 호출 자체를 하지 않는다(호출 순서 증명)."""
+    from app.services import org_billing_key as svc
+    from app.services.billing_key_crypto import BillingKeyEncryptionNotConfigured
+
+    session = AsyncMock()
+    monkeypatch.setattr(
+        svc, "ensure_configured", MagicMock(side_effect=BillingKeyEncryptionNotConfigured("x"))
+    )
+    create_billing_key_mock = AsyncMock()
+    monkeypatch.setattr(svc.TossAdapter, "create_billing_key", create_billing_key_mock)
+
+    with pytest.raises(BillingKeyEncryptionNotConfigured):
+        await svc.issue_billing_key(session, org_id=uuid.uuid4(), auth_key="auth_never_used")
+
+    create_billing_key_mock.assert_not_awaited()
+    session.execute.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_issue_billing_key_reissue_bumps_updated_at(monkeypatch):
+    """PO nit②(#2880 리뷰) 회귀 고정 — ON CONFLICT DO UPDATE 재발급 경로도 updated_at을
+    명시로 갱신한다(ORM onupdate는 raw INSERT..ON CONFLICT를 안 거쳐 무력했던 것)."""
+    from app.services import org_billing_key as svc
+
+    org_id = uuid.uuid4()
+    existing_row = MagicMock()
+    existing_row.customer_key = "org-existing-key"
+    session = AsyncMock()
+    existing_result = MagicMock()
+    existing_result.scalar_one_or_none.return_value = existing_row
+    persisted = MagicMock()
+    session.execute = AsyncMock(side_effect=[existing_result, MagicMock(), persisted])
+    session.commit = AsyncMock()
+
+    monkeypatch.setattr(svc, "ensure_configured", MagicMock())
+    monkeypatch.setattr(
+        svc.TossAdapter, "create_billing_key",
+        AsyncMock(return_value={"billingKey": "bk3", "authenticatedAt": "2026-08-07T00:00:00+09:00", "card": {}}),
+    )
+    monkeypatch.setattr(svc, "encrypt_billing_key", MagicMock(return_value="enc-token3"))
+
+    await svc.issue_billing_key(session, org_id=org_id, auth_key="auth_z")
+
+    insert_call = session.execute.call_args_list[1]
+    stmt = insert_call.args[0]
+    on_conflict_set = stmt._post_values_clause.update_values_to_set
+    set_columns = {c if isinstance(c, str) else c.name for c, _ in on_conflict_set}
+    assert "updated_at" in set_columns
 
 
 # ─── POST /api/v2/org-billing-keys — 엔드포인트(양성/음성/unauth/X-Project-Id 무관) ──

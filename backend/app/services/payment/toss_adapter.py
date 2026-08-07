@@ -22,7 +22,7 @@ from app.services.payment.base import PaymentProvider
 logger = logging.getLogger(__name__)
 
 _API_BASE = "https://api.tosspayments.com"
-# docs.tosspayments.com/reference — 빌링키 발급(2026-08-07 공식 문서 직접 대조).
+# docs.tosspayments.com/reference — 2026-08-07 공식 문서 직접 대조(훈련데이터만 안 믿음).
 _ISSUE_BILLING_KEY_PATH = "/v1/billing/authorizations/issue"
 
 
@@ -36,32 +36,34 @@ class TossAdapter(PaymentProvider):
         token = base64.b64encode(f"{settings.toss_payments_secret_key}:".encode()).decode()
         return {"Authorization": f"Basic {token}", "Content-Type": "application/json"}
 
+    async def _post(self, path: str, *, json: dict, timeout: float, op_label: str) -> dict:
+        """공용 POST 왕복 — create_billing_key/charge가 공유하는 에러 처리(⛔응답 바디를
+        그대로 로깅하지 않는다 — Toss 에러 응답이 요청 파라미터를 echo하는 경우가 있어
+        customerKey 등 민감정보 유출 표면을 늘릴 수 있다. code/status만 남긴다)."""
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(f"{_API_BASE}{path}", headers=self._auth_header(), json=json)
+        except httpx.RequestError as exc:
+            logger.exception("Toss %s request failed", op_label)
+            raise RuntimeError("Cannot reach Toss API") from exc
+
+        if resp.status_code not in (200, 201):
+            body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+            logger.error("Toss %s error: status=%s code=%s", op_label, resp.status_code, body.get("code"))
+            raise RuntimeError(f"Toss {op_label} failed: {body.get('code', resp.status_code)}")
+
+        return resp.json()
+
     async def create_billing_key(self, *, auth_key: str, customer_key: str) -> dict:
         """POST /v1/billing/authorizations/issue — FE 위젯이 넘긴 authKey + customerKey로
         재사용 가능한 billingKey를 발급받는다. 응답 그대로 반환(billingKey 평문 포함 —
         호출자가 즉시 암호화해 저장하고 이 dict를 더 들고 있지 않아야 한다, 로깅 금지)."""
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.post(
-                    f"{_API_BASE}{_ISSUE_BILLING_KEY_PATH}",
-                    headers=self._auth_header(),
-                    json={"authKey": auth_key, "customerKey": customer_key},
-                )
-        except httpx.RequestError as exc:
-            logger.exception("Toss billing key issuance request failed")
-            raise RuntimeError("Cannot reach Toss API") from exc
-
-        if resp.status_code not in (200, 201):
-            # ⛔응답 바디를 그대로 로깅하지 않는다 — Toss 에러 응답이 요청 파라미터를 echo하는
-            # 경우가 있어(예: customerKey) 민감정보 유출 표면을 늘릴 수 있다. code/status만.
-            body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-            logger.error(
-                "Toss billing key issuance error: status=%s code=%s",
-                resp.status_code, body.get("code"),
-            )
-            raise RuntimeError(f"Toss billing key issuance failed: {body.get('code', resp.status_code)}")
-
-        return resp.json()
+        return await self._post(
+            _ISSUE_BILLING_KEY_PATH,
+            json={"authKey": auth_key, "customerKey": customer_key},
+            timeout=15,
+            op_label="billing key issuance",
+        )
 
     async def create_customer(self, **kwargs: Any) -> dict:
         raise NotImplementedError(
@@ -75,8 +77,28 @@ class TossAdapter(PaymentProvider):
             "위젯 플로우(create_billing_key 참고). 해당 없음."
         )
 
-    async def charge(self, **kwargs: Any) -> dict:
-        raise NotImplementedError("TossAdapter.charge — story C2 대상(billing_orders+원장 연동).")
+    async def charge(
+        self, *, billing_key: str, customer_key: str, order_id: str, amount_minor: int, order_name: str,
+    ) -> dict:
+        """POST /v1/billing/{billingKey} — 빌링키 자동결제 승인(story #2493 C2). 성공 웹훅이
+        없으므로(§0) **이 동기 응답이 정본**. 최대 60초 소요 가능(Toss 문서 명시) — 호출자
+        (org_billing_key.py의 charge_org 등)가 이 함수를 부르기 前에 billing_orders를
+        pending으로 먼저 기록해둬야 타임아웃/크래시에도 복구 가능하다(이 어댑터 자체는 그
+        규율을 강제하지 않는다 — 순수 PG 왕복 레이어).
+
+        amount_minor: KRW는 무소수 통화라 minor unit이 곧 원 단위 정수 — Toss의 `amount`
+        필드에 그대로 넘긴다(달러처럼 /100 환산 불요)."""
+        return await self._post(
+            f"/v1/billing/{billing_key}",
+            json={
+                "customerKey": customer_key,
+                "orderId": order_id,
+                "amount": amount_minor,
+                "orderName": order_name,
+            },
+            timeout=65,  # Toss 문서: 최대 60초 소요 가능 — 여유 5초.
+            op_label="charge",
+        )
 
     def verify_webhook(self, raw_body: bytes, signature: str | None) -> bool:
         raise NotImplementedError("TossAdapter.verify_webhook — story C4 대상(BILLING_DELETED 보조 이벤트).")
