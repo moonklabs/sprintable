@@ -66,18 +66,24 @@ def _stale_order_row(created_at):
 
 
 def _no_recovery_evidence_side_effects(order_created_at, free_offering):
-    """회복 증거(더 나중 confirmed order·더 나중 발급 billing_key) 둘 다 없는 표준 경로."""
+    """회복 증거(더 나중 confirmed order·더 나중 발급 billing_key·#2511 진행 中 checkout
+    claim) 셋 다 없는 표준 경로."""
     order_result = MagicMock()
     order_result.scalar_one_or_none.return_value = _stale_order_row(order_created_at)
     confirmed_check = MagicMock()
     confirmed_check.first.return_value = None
     key_check = MagicMock()
     key_check.first.return_value = None
+    checkout_claim_check = MagicMock()
+    checkout_claim_check.first.return_value = None
     offering_result = MagicMock()
     offering_result.scalar_one_or_none.return_value = free_offering
     upsert_result = MagicMock()
     close_order_result = MagicMock()
-    return [order_result, confirmed_check, key_check, offering_result, upsert_result, close_order_result]
+    return [
+        order_result, confirmed_check, key_check, checkout_claim_check,
+        offering_result, upsert_result, close_order_result,
+    ]
 
 
 @pytest.mark.anyio
@@ -98,7 +104,7 @@ async def test_downgrade_to_free_upserts_free_tier(monkeypatch):
 
     await downgrade_to_free(session, org_id, order_id)
 
-    upsert_call = session.execute.call_args_list[4]
+    upsert_call = session.execute.call_args_list[5]
     compiled = upsert_call.args[0].compile().params
     assert compiled["org_id"] == org_id
     assert compiled["tier"] == "free"
@@ -120,7 +126,7 @@ async def test_downgrade_to_free_handles_missing_offering_gracefully(monkeypatch
 
     await downgrade_to_free(session, uuid.uuid4(), "ord-downgrade-2")
 
-    upsert_call = session.execute.call_args_list[4]
+    upsert_call = session.execute.call_args_list[5]
     compiled = upsert_call.args[0].compile().params
     assert compiled["offering_version_id"] is None
 
@@ -144,8 +150,8 @@ async def test_downgrade_to_free_closes_the_order_po_blocker_fix(monkeypatch):
 
     await downgrade_to_free(session, org_id, order_id)
 
-    # 마지막(6번째) 호출이 billing_orders를 'downgraded'로 닫는 UPDATE여야.
-    close_call = session.execute.call_args_list[5]
+    # 마지막(7번째) 호출이 billing_orders를 'downgraded'로 닫는 UPDATE여야.
+    close_call = session.execute.call_args_list[6]
     compiled = close_call.args[0].compile().params
     assert compiled["status"] == "downgraded"
 
@@ -167,17 +173,21 @@ async def test_downgrade_to_free_skips_upsert_when_newer_confirmed_order_exists_
     confirmed_check.first.return_value = (uuid.uuid4(),)  # 더 나중 confirmed order 존재
     key_check = MagicMock()
     key_check.first.return_value = None
+    checkout_claim_check = MagicMock()
+    checkout_claim_check.first.return_value = None
     close_order_result = MagicMock()
 
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[order_result, confirmed_check, key_check, close_order_result])
+    session.execute = AsyncMock(
+        side_effect=[order_result, confirmed_check, key_check, checkout_claim_check, close_order_result]
+    )
     session.commit = AsyncMock()
 
     await downgrade_to_free(session, org_id, order_id)
 
-    # execute가 4번만 불렸다 = offering 조회·upsert가 스킵됐다(회복 증거로 free upsert 건너뜀).
-    assert session.execute.await_count == 4
-    close_call = session.execute.call_args_list[3]
+    # execute가 5번만 불렸다 = offering 조회·upsert가 스킵됐다(회복 증거로 free upsert 건너뜀).
+    assert session.execute.await_count == 5
+    close_call = session.execute.call_args_list[4]
     assert close_call.args[0].compile().params["status"] == "downgraded"
 
 
@@ -197,15 +207,55 @@ async def test_downgrade_to_free_skips_upsert_when_newly_issued_billing_key_exis
     confirmed_check.first.return_value = None
     key_check = MagicMock()
     key_check.first.return_value = (uuid.uuid4(),)  # 더 나중 발급된 활성 billing_key 존재
+    checkout_claim_check = MagicMock()
+    checkout_claim_check.first.return_value = None
     close_order_result = MagicMock()
 
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[order_result, confirmed_check, key_check, close_order_result])
+    session.execute = AsyncMock(
+        side_effect=[order_result, confirmed_check, key_check, checkout_claim_check, close_order_result]
+    )
     session.commit = AsyncMock()
 
     await downgrade_to_free(session, org_id, order_id)
 
-    assert session.execute.await_count == 4
+    assert session.execute.await_count == 5
+
+
+@pytest.mark.anyio
+async def test_downgrade_to_free_skips_upsert_when_checkout_claim_in_progress():
+    """#2511/#2896 PO 지적(2026-08-07) — 「유료청구는 됐는데 tier free」 오염 방지: 다른
+    두 신호(더 나중 confirmed order·더 나중 발급 billing_key) 둘 다 없어도, org에 진행
+    中인(=staleness 안 넘긴) checkout_claimed_at이 있으면 free upsert를 건너뛴다. claim은
+    성공했지만 issue_billing_key/charge_org가 아직 안 끝나 다른 두 신호가 아직 안 생긴
+    딱 그 창을 이 신호가 커버한다."""
+    from app.services.billing_scheduler import downgrade_to_free
+
+    org_id = uuid.uuid4()
+    order_id = "ord-stale-3"
+    now = datetime(2026, 8, 15, tzinfo=timezone.utc)
+
+    order_result = MagicMock()
+    order_result.scalar_one_or_none.return_value = _stale_order_row(now - timedelta(days=9))
+    confirmed_check = MagicMock()
+    confirmed_check.first.return_value = None
+    key_check = MagicMock()
+    key_check.first.return_value = None
+    checkout_claim_check = MagicMock()
+    checkout_claim_check.first.return_value = (uuid.uuid4(),)  # 진행 中인 checkout claim 존재
+    close_order_result = MagicMock()
+
+    session = AsyncMock()
+    session.execute = AsyncMock(
+        side_effect=[order_result, confirmed_check, key_check, checkout_claim_check, close_order_result]
+    )
+    session.commit = AsyncMock()
+
+    await downgrade_to_free(session, org_id, order_id)
+
+    assert session.execute.await_count == 5  # offering 조회·upsert가 스킵됨
+    close_call = session.execute.call_args_list[4]
+    assert close_call.args[0].compile().params["status"] == "downgraded"
 
 
 @pytest.mark.anyio
