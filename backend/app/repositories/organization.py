@@ -211,8 +211,26 @@ class OrganizationRepository:
         실패했다"고 주장하는 걸 신뢰하지 않는다 — 서버 자신의 조회 성패만 신뢰). 그 재조회
         자체가 실패하면 confirm_without_impact=True(사용자가 "확認하지 못한 상태로
         삭제합니다"를 명시 인정)가 아닌 한 거부한다. override로 진행된 삭제는
-        DeletionAuditLog.note에 그 사실을 남긴다(AC3 "확認 없이 삭제한 것으로 기록됩니다")."""
-        org = await self.get(org_id)
+        DeletionAuditLog.note에 그 사실을 남긴다(AC3 "확認 없이 삭제한 것으로 기록됩니다").
+
+        카디르 결함사냥 TOCTOU-fix(3차 재QA, #2898 리뷰, 2026-08-07) — 이전엔 "재확認"
+        헬퍼 체크가 실제로는 딱 한 번뿐이었고, savepoint로 감싼 두 번째 get_impact()
+        호출은 반환값을 버려("에러 안 났나"만 보는 부작용용) 재확認이 실은 재확認이
+        아니었다. 그 헬퍼 통과~실 delete 사이(여러 statement)에 별도 커넥션이 checkout
+        claim을 UPSERT+commit해도(org_subscriptions.org_id는 organizations에 FK가
+        없어 DB가 이 경쟁을 원천 차단 안 함, READ COMMITTED) 못 잡는 TOCTOU였다.
+
+        근본 fix: org 행 자체를 `FOR UPDATE`로 잠근다(함수 시작, 다른 모든 체크보다
+        먼저) — checkout claim UPSERT 경로(org_subscription_checkout.py)도 자기
+        claim 시작 前에 같은 org 행을 FOR UPDATE로 잠그므로, 이 행을 두고 둘이
+        Postgres 자체의 행 잠금으로 직렬화된다. 어느 쪽이 먼저 잠그든 "창"이 없다 —
+        삭제가 먼저면 checkout이 커밋된 삭제 後 org 없음으로 실패, checkout이 먼저면
+        삭제가 그 lock 해제(=claim 커밋) 後에야 재조회해 "진행 中"을 정확히 본다.
+        재조회(get_impact) 반환값도 이제 실제 게이트로 쓴다(버리지 않는다)."""
+        lock_result = await self.session.execute(
+            select(Organization).where(Organization.id == org_id).with_for_update()
+        )
+        org = lock_result.scalar_one_or_none()
         if org is None:
             return {"ok": False, "reason": "not_found"}
 
@@ -223,24 +241,21 @@ class OrganizationRepository:
         if confirmation != org.name:
             return {"ok": False, "reason": "confirmation_mismatch"}
 
-        if await self._has_active_or_in_flight_subscription(org_id):
-            return {"ok": False, "reason": "active_subscription"}
-
-        # 카디르 결함사냥 HIGH①(#2898 재QA, 2026-08-07) — get_impact()가 진짜 Postgres
-        # 에러(mock RuntimeError가 아니라 실 SQL 에러)로 실패하면 그 커넥션의 트랜잭션
-        # 자체가 "aborted" 상태로 오염된다. override(confirm_without_impact=True)로
-        # 진행해도 그 아래 audit-log insert·org delete가 같은(오염된) 트랜잭션 위에서
-        # 실행되므로 조용히 실패하거나, 이 함수는 {"ok": True}를 반환했는데 실제로는
-        # 아무것도 안 지워지고 라우터의 후속 commit(try/except 없음)에서야 500이 터졌다
-        # — override라는 탈출구가 정작 가장 현실적인 실패(진짜 DB 에러)에서 "깨끗한
+        # 카디르 결함사냥 HIGH①(#2898 2차 재QA, 2026-08-07) — get_impact()가 진짜
+        # Postgres 에러로 실패하면 그 커넥션의 트랜잭션 자체가 "aborted" 상태로
+        # 오염된다. override(confirm_without_impact=True)로 진행해도 그 아래
+        # audit-log insert·org delete가 같은(오염된) 트랜잭션 위에서 실행되므로
+        # 조용히 실패하거나, 이 함수는 {"ok": True}를 반환했는데 실제로는 아무것도
+        # 안 지워지고 라우터의 후속 commit(try/except 없음)에서야 500이 터졌다 —
+        # override라는 탈출구가 정작 가장 현실적인 실패(진짜 DB 에러)에서 "깨끗한
         # 성공도 깨끗한 실패도 아닌 500"이 되는 게 근본 결함. get_impact() 호출을
-        # SAVEPOINT(begin_nested)로 감싸 실패해도 그 실패가 SAVEPOINT 안에서만 롤백되고
-        # 바깥 트랜잭션(이미 끝난 존재/권한/confirmation/구독 체크 포함)은 오염되지 않게
-        # 한다 — 그 아래 audit insert·delete는 항상 깨끗한 트랜잭션 위에서 실행된다.
+        # SAVEPOINT(begin_nested)로 감싸 실패해도 바깥 트랜잭션(FOR UPDATE 락 포함)은
+        # 오염되지 않게 한다 — 그 아래 audit insert·delete는 항상 깨끗한 트랜잭션
+        # 위에서 실행된다.
         impact_note: str | None = None
         try:
             async with self.session.begin_nested():
-                await self.get_impact(org_id=org_id)
+                impact = await self.get_impact(org_id=org_id)
         except Exception:
             logger.warning(
                 "org.delete.impact_check_failed org_id=%s confirm_without_impact=%s",
@@ -249,6 +264,11 @@ class OrganizationRepository:
             if not confirm_without_impact:
                 return {"ok": False, "reason": "impact_unavailable"}
             impact_note = "영향도(impact) 확認 없이 삭제됨 — 조회 실패 상태에서 사용자가 명시적으로 진행을 인정"
+        else:
+            # 반환값을 실제로 쓴다 — FOR UPDATE로 잠근 이 시점 기준 최신 상태(checkout이
+            # 락 대기 中이었다면 이 재조회 前에 이미 커밋 완료된 뒤이므로 여기 반영됨).
+            if impact.has_active_subscription:
+                return {"ok": False, "reason": "active_subscription"}
 
         self.session.add(DeletionAuditLog(
             id=uuid.uuid4(), org_id=org_id, actor_id=user_id,

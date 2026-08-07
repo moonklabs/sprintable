@@ -323,10 +323,11 @@ async def test_delete_by_user_rejects_when_impact_query_raises_and_no_override()
     session = AsyncMock()
     _stub_begin_nested(session)
     repo = OrganizationRepository(session)
-    repo.get = AsyncMock(return_value=_mock_org())
     repo.get_member_role = AsyncMock(return_value="owner")
     repo.get_impact = AsyncMock(side_effect=RuntimeError("db timeout"))
-    session.execute = AsyncMock(return_value=MagicMock(first=lambda: None))  # active_subscription 체크 통과
+    # #2092 TOCTOU-fix(3차) — delete_by_user가 이제 repo.get() 대신 FOR UPDATE 락-SELECT를
+    # session.execute로 직접 호출한다. scalar_one_or_none()이 org를 반환하게 stub.
+    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=lambda: _mock_org()))
 
     result = await repo.delete_by_user(org_id=ORG_ID, user_id=USER_ID, confirmation=ORG_NAME)
 
@@ -344,10 +345,9 @@ async def test_delete_by_user_proceeds_with_override_and_records_audit_note():
     session = AsyncMock()
     _stub_begin_nested(session)
     repo = OrganizationRepository(session)
-    repo.get = AsyncMock(return_value=_mock_org())
     repo.get_member_role = AsyncMock(return_value="owner")
     repo.get_impact = AsyncMock(side_effect=RuntimeError("db timeout"))
-    session.execute = AsyncMock(return_value=MagicMock(first=lambda: None))
+    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=lambda: _mock_org()))
     session.delete = AsyncMock()
 
     result = await repo.delete_by_user(
@@ -374,10 +374,9 @@ async def test_delete_by_user_succeeds_normally_records_audit_without_note():
     session = AsyncMock()
     _stub_begin_nested(session)
     repo = OrganizationRepository(session)
-    repo.get = AsyncMock(return_value=_mock_org())
     repo.get_member_role = AsyncMock(return_value="owner")
     repo.get_impact = AsyncMock(return_value=OrgImpact(project_count=1, member_count=2, has_active_subscription=False))
-    session.execute = AsyncMock(return_value=MagicMock(first=lambda: None))
+    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=lambda: _mock_org()))
     session.delete = AsyncMock()
 
     result = await repo.delete_by_user(org_id=ORG_ID, user_id=USER_ID, confirmation=ORG_NAME)
@@ -386,3 +385,45 @@ async def test_delete_by_user_succeeds_normally_records_audit_without_note():
     audit_entry = session.add.call_args.args[0]
     assert isinstance(audit_entry, DeletionAuditLog)
     assert audit_entry.note is None
+
+
+@pytest.mark.anyio
+async def test_delete_by_user_rejects_when_impact_return_value_shows_active_subscription():
+    """#2092 TOCTOU-fix(3차) — get_impact()가 예외 없이 성공해도, 그 반환값의
+    has_active_subscription=True를 실제로 읽어 거부해야 한다(예전엔 반환값을 버려
+    "에러 안 났나"만 봤다 — 재확認이 실은 재확認이 아니었다)."""
+    from app.repositories.organization import OrganizationRepository, OrgImpact
+
+    session = AsyncMock()
+    _stub_begin_nested(session)
+    repo = OrganizationRepository(session)
+    repo.get_member_role = AsyncMock(return_value="owner")
+    repo.get_impact = AsyncMock(
+        return_value=OrgImpact(project_count=0, member_count=1, has_active_subscription=True)
+    )
+    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=lambda: _mock_org()))
+    session.delete = AsyncMock()
+
+    result = await repo.delete_by_user(org_id=ORG_ID, user_id=USER_ID, confirmation=ORG_NAME)
+
+    assert result == {"ok": False, "reason": "active_subscription"}
+    session.delete.assert_not_called()
+    session.add.assert_not_called()
+
+
+def test_delete_by_user_locks_organization_row_for_update_in_source():
+    """#2092 TOCTOU-fix(3차) — delete_by_user 소스에 organizations 행 FOR UPDATE 락이
+    존재(checkout claim 경로와 그 행 위에서 직렬화하는 근본 메커니즘)."""
+    import inspect
+    from app.repositories.organization import OrganizationRepository
+    source = inspect.getsource(OrganizationRepository.delete_by_user)
+    assert "with_for_update" in source
+
+
+def test_checkout_subscription_locks_organization_row_for_update_in_source():
+    """#2092 TOCTOU-fix(3차) — checkout_subscription도 같은 org 행을 FOR UPDATE로
+    잠근다(claim UPSERT 前) — organizations.py delete_by_user와 대칭."""
+    import inspect
+    from app.services.org_subscription_checkout import checkout_subscription
+    source = inspect.getsource(checkout_subscription)
+    assert "FOR UPDATE" in source

@@ -311,3 +311,173 @@ async def test_get_impact_reflects_in_flight_checkout_claim_realdb():
             assert impact.has_active_subscription is True
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_org_delete_vs_checkout_claim_real_race_no_window_realdb():
+    """카디르 3차 재QA 요청(#2898 리뷰, 2026-08-07) — 두 커넥션 **실경쟁**(asyncio.gather,
+    이벤트로 스테이징하지 않음 — 순서를 강제하지 않고 Postgres 자체의 FOR UPDATE 행잠금이
+    직렬화하는지를 실증)으로 #2092 조직삭제와 #2511/#2896 checkout claim UPSERT 사이
+    TOCTOU 창이 실제로 닫혔는지 확認한다.
+
+    organizations 행 FOR UPDATE로 양쪽이 직렬화되므로, 어느 쪽이 이기든 다음 불변식이
+    항상 성립해야 한다 — 결과가 모순(둘 다 성공 또는 판정 불일치)이면 안 된다:
+    ①org가 삭제됐다 ⟹ checkout은 CheckoutError로 실패(claim조차 못 섬)
+    ②org가 살아있다 ⟹ delete_by_user는 반드시 reason=active_subscription으로 거부
+
+    타이밍을 강제하지 않으므로 여러 회 반복해 두 순서(delete 먼저/checkout 먼저) 다
+    실제로 일어날 확률을 높인다."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from app.repositories.organization import OrganizationRepository
+    from app.services.org_subscription_checkout import CheckoutError, checkout_subscription
+
+    for i in range(8):
+        engine_a = create_async_engine(_ASYNC)
+        engine_b = create_async_engine(_ASYNC)
+        Session_a = async_sessionmaker(engine_a, expire_on_commit=False)
+        Session_b = async_sessionmaker(engine_b, expire_on_commit=False)
+        seed_engine = create_async_engine(_ASYNC)
+        try:
+            async with async_sessionmaker(seed_engine, expire_on_commit=False)() as seed_session:
+                org_id, user_id, org_name = await _seed_org_with_owner(seed_session)
+
+            toss_billing_key_response = {
+                "billingKey": f"billing-key-race-{i}",
+                "card": {"issuerCode": "61", "acquirerCode": "31", "number": "12345678****000*", "cardType": "신용", "ownerType": "개인"},
+                "authenticatedAt": "2026-08-07T00:00:00+09:00",
+            }
+            toss_charge_response = {"paymentKey": f"pay-race-{i}-{uuid.uuid4()}", "totalAmount": 5_000}
+
+            async def _run_checkout():
+                async with Session_a() as session:
+                    with patch("app.services.payment.toss_adapter.TossAdapter._post", new=AsyncMock(
+                        side_effect=[toss_billing_key_response, toss_charge_response]
+                    )):
+                        try:
+                            sub = await checkout_subscription(
+                                session, org_id=org_id, auth_key=f"ak-race-{i}",
+                                tier="starter", billing_cycle="monthly",
+                            )
+                            return ("ok", sub.status)
+                        except CheckoutError as exc:
+                            return ("checkout_error", str(exc))
+                        except Exception as exc:  # CheckoutInProgress·CheckoutDeclined 등 — 이 테스트 관심사 아님
+                            return ("other_failure", str(exc))
+
+            async def _run_delete():
+                async with Session_b() as session:
+                    repo = OrganizationRepository(session)
+                    result = await repo.delete_by_user(org_id=org_id, user_id=user_id, confirmation=org_name)
+                    await session.commit()
+                    return result
+
+            checkout_result, delete_result = await asyncio.gather(_run_checkout(), _run_delete())
+
+            verify_engine = create_async_engine(_ASYNC)
+            try:
+                async with async_sessionmaker(verify_engine, expire_on_commit=False)() as vs:
+                    org_row = (
+                        await vs.execute(text("SELECT id FROM organizations WHERE id=:oid"), {"oid": org_id})
+                    ).first()
+                    org_deleted = org_row is None
+            finally:
+                await verify_engine.dispose()
+
+            if org_deleted:
+                assert delete_result["ok"] is True, f"iter{i}: org 삭제됐는데 delete_result={delete_result}"
+                assert checkout_result[0] != "ok", (
+                    f"iter{i}: 모순 — org가 삭제됐는데 checkout도 성공(claim이 죽은 org에 섬): {checkout_result}"
+                )
+            else:
+                assert delete_result == {"ok": False, "reason": "active_subscription"}, (
+                    f"iter{i}: 모순 — org가 살아있는데 delete가 active_subscription으로 안 막음: {delete_result}"
+                )
+        finally:
+            await engine_a.dispose()
+            await engine_b.dispose()
+
+
+@pytest.mark.anyio
+async def test_org_delete_vs_checkout_claim_deterministic_staged_race_realdb():
+    """카디르 3차 재QA — 결정론적 스테이징으로 정확히 위험했던 그 순서(delete가 impact
+    체크를 통과한 直後·아직 커밋 前 그 사이로 checkout claim이 끼어드는지)를 강제
+    재현한다. fix(FOR UPDATE) 前엔 checkout의 claim UPSERT가 delete의 락과 무관하게
+    즉시 진행돼버렸다(위 비결정론적 실경쟁 테스트가 못 잡을 만큼 창이 좁았다 — 로컬
+    라운드트립이 빨라 우연히 안전한 순서로만 끝나곤 했음, 실측 확認). fix 後엔
+    checkout의 FOR UPDATE 시도 자체가 delete가 그 org 행 락을 쥐고 있는 한 반드시
+    block돼야 한다 — "안 끝난다"는 것 자체를 타임아웃으로 직접 증명한다."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from app.repositories.organization import OrganizationRepository
+    from app.services.org_subscription_checkout import checkout_subscription
+
+    engine_a = create_async_engine(_ASYNC)
+    engine_b = create_async_engine(_ASYNC)
+    Session_a = async_sessionmaker(engine_a, expire_on_commit=False)  # delete
+    Session_b = async_sessionmaker(engine_b, expire_on_commit=False)  # checkout
+    seed_engine = create_async_engine(_ASYNC)
+    try:
+        async with async_sessionmaker(seed_engine, expire_on_commit=False)() as seed_session:
+            org_id, user_id, org_name = await _seed_org_with_owner(seed_session)
+
+        impact_checked = asyncio.Event()    # delete가 impact 체크(FOR UPDATE 락 보유 中)를 통과했다.
+        delete_may_finish = asyncio.Event()  # 테스트가 delete에게 "이제 커밋해도 된다"를 허가.
+
+        real_get_impact = OrganizationRepository.get_impact
+
+        async def _paced_get_impact(self, org_id):
+            result = await real_get_impact(self, org_id=org_id)
+            impact_checked.set()
+            # FOR UPDATE 락을 계속 쥔 채 대기 — 바로 이 구간이 fix 前엔 checkout이
+            # 자유롭게 끼어들 수 있던 그 창(재확認 直後~실 delete/commit 前).
+            await delete_may_finish.wait()
+            return result
+
+        async def _run_delete():
+            async with Session_a() as session:
+                with patch.object(OrganizationRepository, "get_impact", _paced_get_impact):
+                    repo = OrganizationRepository(session)
+                    result = await repo.delete_by_user(org_id=org_id, user_id=user_id, confirmation=org_name)
+                    await session.commit()
+                    return result
+
+        async def _run_checkout():
+            await impact_checked.wait()  # delete가 impact 체크를 통과(그러나 아직 커밋 前, 락 보유 中)한 뒤에 시작.
+            async with Session_b() as session:
+                with patch("app.services.payment.toss_adapter.TossAdapter._post", new=AsyncMock(side_effect=[
+                    {
+                        "billingKey": "billing-key-staged", "card": {"issuerCode": "61", "acquirerCode": "31", "number": "12345678****000*", "cardType": "신용", "ownerType": "개인"},
+                        "authenticatedAt": "2026-08-07T00:00:00+09:00",
+                    },
+                    {"paymentKey": f"pay-staged-{uuid.uuid4()}", "totalAmount": 5_000},
+                ])):
+                    try:
+                        sub = await checkout_subscription(
+                            session, org_id=org_id, auth_key="ak-staged", tier="starter", billing_cycle="monthly",
+                        )
+                        return ("ok", sub.status)
+                    except Exception as exc:
+                        return ("failed", str(exc))
+
+        delete_task = asyncio.ensure_future(_run_delete())
+        checkout_task = asyncio.ensure_future(_run_checkout())
+
+        await impact_checked.wait()  # delete가 impact 체크를 통과할 때까지(FOR UPDATE 락 보유 中) 대기.
+
+        # 핵심 검증 — delete가 아직 커밋 前(락 보유 中)인 동안 checkout은 그 락에 막혀
+        # 완결되지 못해야 한다(짧은 타임아웃 안에 안 끝남 = 진짜로 blocked됨을 직접 증명).
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.shield(checkout_task), timeout=0.5)
+
+        delete_may_finish.set()  # 이제 delete가 커밋하도록 허가.
+        delete_result, checkout_result = await asyncio.gather(delete_task, checkout_task)
+
+        assert delete_result == {"ok": True}
+        assert checkout_result[0] == "failed"
+        assert "찾을 수 없음" in checkout_result[1]  # 락 해제 後 org 없음으로 실패(claim 못 섬) — 죽은 org에 claim 안 섬
+    finally:
+        await engine_a.dispose()
+        await engine_b.dispose()

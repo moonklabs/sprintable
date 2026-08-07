@@ -35,7 +35,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -113,6 +113,19 @@ async def checkout_subscription(
 
     now = datetime.now(timezone.utc)
     period_start, period_end = new_subscription_period(now=now, billing_cycle=billing_cycle)
+
+    # 카디르 결함사냥 TOCTOU-fix(#2898 3차 재QA, 2026-08-07) — org_subscriptions.org_id는
+    # organizations에 FK가 없어(provider-agnostic 구조, #2471 A1) DB가 "이 org가 지금
+    # 삭제 진행 中인가"를 write 시점에 원천 차단하지 못한다. 이 claim UPSERT와 #2092의
+    # 조직 삭제(organizations 행 FOR UPDATE)를 **같은 org 행 위에서 직렬화**한다 — 삭제가
+    # 먼저 이 행을 잠그면 이 SELECT가 대기하다 삭제 커밋 後 0행(org 없음)으로 실패해
+    # 죽은 org에 claim이 서는 걸 원천에서 막는다. 이 claim이 먼저면 삭제 쪽 FOR UPDATE가
+    # 대기하다 이 UPSERT 커밋 後에야 재조회하므로 "진행 中"을 놓치지 않는다.
+    org_exists = await session.execute(
+        text("SELECT 1 FROM organizations WHERE id = :org_id FOR UPDATE"), {"org_id": str(org_id)},
+    )
+    if org_exists.first() is None:
+        raise CheckoutError(f"org_id={org_id} 조직을 찾을 수 없음")
 
     # ⭐#2511 — 원자적 claim(=② 구독을 'pending'으로 생성/전이를 겸한다). WHERE 가드가
     # 걸린 단일 UPSERT라 동시에 여러 tier/cycle이 도착해도 Postgres 행단위 write
