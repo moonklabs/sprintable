@@ -177,6 +177,61 @@ describe('ChatBubble — story #2262 AC2 PR② 1단계(2026-08-07 유나양 카�
   });
 });
 
+describe('ChatBubble — story #2262 AC2 PR② 2단계(chat-view.tsx 실 배치조회 결과 prop 소비)', () => {
+  it('entityStatusByKey에 resolved 항목이 있으면 하드코딩 loading 대신 번역된 실 상태를 보인다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, references: undefined }}
+          isMine={false}
+          entityStatusByKey={{ [`doc:${DOC_ID}`]: { kind: 'resolved', raw: 'confirmed' } }}
+        />,
+      ));
+    });
+    expect(container.textContent).toContain('확定');
+    expect(container.textContent).not.toContain('아직 모름');
+  });
+
+  it('entityId가 대문자 UUID 토큰이어도 소문자로 정규화해 캐시 키와 매칭한다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, content: `[제안서.md](entity:doc:${DOC_ID.toUpperCase()})`, references: undefined }}
+          isMine={false}
+          entityStatusByKey={{ [`doc:${DOC_ID}`]: { kind: 'resolved', raw: 'draft' } }}
+        />,
+      ));
+    });
+    expect(container.textContent).toContain('초안');
+  });
+
+  it('entityStatusByKey에 그 키가 아직 없으면(다른 타입 fetch 진행 중) 폴백과 동일하게 "아직 모름"이다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, references: undefined }}
+          isMine={false}
+          entityStatusByKey={{ 'story:다른-엔티티': { kind: 'resolved', raw: 'done' } }}
+        />,
+      ));
+    });
+    expect(container.textContent).toContain('아직 모름');
+  });
+
+  it('배치조회가 error로 끝나면 loading과 같은 급인 "아직 모름"을 보인다(가짜 "확認 중" 아님)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, references: undefined }}
+          isMine={false}
+          entityStatusByKey={{ [`doc:${DOC_ID}`]: { kind: 'error' } }}
+        />,
+      ));
+    });
+    expect(container.textContent).toContain('아직 모름');
+  });
+});
+
 describe('ChatBubble — story #2319 tombstone(메시지 삭제) 렌더', () => {
   it('deleted_at이 있으면 원문 대신 placeholder를 그린다', async () => {
     const deletedMsg: ChatMessage = { ...baseMessage, content: '', deleted_at: '2026-08-02T00:00:00.000Z' };

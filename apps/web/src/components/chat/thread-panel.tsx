@@ -6,6 +6,7 @@ import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { normalizeToMessage } from '@/hooks/use-chat-sse';
 import { ChatBubble } from './chat-bubble';
 import { ChatInput } from './chat-input';
+import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
 
 interface ThreadPanelProps {
   parentMessage: ChatMessage;
@@ -17,6 +18,9 @@ interface ThreadPanelProps {
   incomingMessage?: ChatMessage | null;
   // P2 RC: notify parent to increment reply_count when own reply sent
   onReplyAdded?: (parentId: string) => void;
+  /** story #2262 AC2 PR② — ChatView가 배치조회한 캐시를 그대로 물려받는다(스레드 패널도
+   * 같은 EntityChip을 그리므로 같은 캐시를 공유해야 일관된다·별도 fetch 안 함). */
+  entityStatusByKey?: Record<string, EntityStatusFetchState>;
 }
 
 export function ThreadPanel({
@@ -27,6 +31,7 @@ export function ThreadPanel({
   onClose,
   incomingMessage,
   onReplyAdded,
+  entityStatusByKey,
 }: ThreadPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -120,6 +125,7 @@ export function ThreadPanel({
           isMine={parentMessage.created_by === currentTeamMemberId}
           isGrouped={false}
           projectId={projectId}
+          entityStatusByKey={entityStatusByKey}
         />
       </div>
 
@@ -141,6 +147,7 @@ export function ThreadPanel({
                   isMine={msg.created_by === currentTeamMemberId}
                   isGrouped={isGrouped}
                   projectId={projectId}
+                  entityStatusByKey={entityStatusByKey}
                 />
               );
             })}

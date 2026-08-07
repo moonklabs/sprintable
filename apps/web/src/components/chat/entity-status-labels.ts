@@ -12,12 +12,14 @@
 export type StatusBearingEntityType = 'story' | 'task' | 'doc' | 'hypothesis' | 'sprint' | 'epic';
 
 /** ⛔이 배치조회 가능 여부(PR② v1 스코프)와 「AC2가 정의한 status 어휘가 있는 타입」은
- * 다른 축이다 — hypothesis는 어휘는 있지만(STATUS_LABELS에 있음, 미래의 실 데이터 소비를
- * 위해 유지) 오늘 FE엔 fetch 경로 자체가 없어(ENTITY_API에 없음) PR② v1이 배치조회 대상에서
- * 뺀다(설계 문서 그대로). `entityStatusAvailability`(칩 렌더 판정)는 이 「지금 채울 수
- * 있는가」 축을 써야 한다 — 안 그러면 hypothesis 칩이 영원히 안 채워질 "아직 모름"에 갇힌다
- * (실제로는 "이 판에선 원래 없음"이 맞는 그림이다). */
-const PR2_V1_FETCHABLE_TYPES: ReadonlySet<string> = new Set(['story', 'task', 'doc', 'sprint', 'epic']);
+ * 다른 축이다 — hypothesis·sprint는 어휘는 있지만(STATUS_LABELS에 있음, 미래의 실 데이터
+ * 소비를 위해 유지) 오늘 FE엔 fetch 경로 자체가 없어 PR② v1이 배치조회 대상에서 뺀다.
+ * hypothesis는 ENTITY_API에 의도적으로 없고(embed-card.tsx 주석), sprint는 **단건조차**
+ * 없다(ENTITY_API에 키 자체가 없음 — grep 재확認, BE #2905도 epic·task·doc·artifact
+ * 넷만 배치 endpoint를 냈지 sprint는 범위 밖이었다). `entityStatusAvailability`(칩 렌더
+ * 판정)는 이 「지금 채울 수 있는가」 축을 써야 한다 — 안 그러면 그 타입 칩이 영원히 안
+ * 채워질 "아직 모름"에 갇힌다(실제로는 "이 판에선 원래 없음"이 맞는 그림이다). */
+const PR2_V1_FETCHABLE_TYPES: ReadonlySet<string> = new Set(['story', 'task', 'doc', 'epic']);
 
 /** ⛔맵에 없는 값이 오면(신규 status 추가 등) 칸을 비운다 — 원시값을 그대로 노출하지 않는다
  * (gate_type 사고 재발 방지, #2156 requires_human/gate_type 교훈 재사용). "terminal" 개념이
@@ -97,4 +99,41 @@ export function renderEntityStatusLabel(entityType: string, state: EntityStatusF
   if (entityStatusAvailability(entityType) === 'no-status-concept') return ENTITY_STATUS_NO_CONCEPT_LABEL;
   if (state.kind === 'loading' || state.kind === 'error') return ENTITY_STATUS_UNKNOWN_LABEL;
   return translateEntityStatus(entityType, state.raw);
+}
+
+/** story #2262 PR② — chat-view.tsx의 배치조회가 타입별로 부를 `?ids=` 엔드포인트.
+ * PR2_V1_FETCHABLE_TYPES와 정확히 같은 네 타입만 키를 가진다(그 밖 타입은 애초에 이
+ * 맵을 조회할 일이 없다 — entityStatusAvailability가 먼저 걸러준다). */
+export type BatchFetchableEntityType = 'story' | 'task' | 'doc' | 'epic';
+export const ENTITY_STATUS_BATCH_API_PATH: Record<BatchFetchableEntityType, string> = {
+  story: '/api/stories',
+  task: '/api/tasks',
+  doc: '/api/docs',
+  epic: '/api/goals',
+};
+
+/** story #2262 PR② — chat-view.tsx의 배치조회 effect가 매 렌더 훑는 「메시지 목록 →
+ * 타입별 아직 안 부른 id 묶음」 순수 로직만 분리했다(fetch·setState 없음 — React/SSE/네트워크
+ * 전부 안 건드리는 순수함수라 chat-view.tsx 전체를 마운트하지 않고도 유닛테스트 가능,
+ * flow-relation-review.ts와 같은 이유의 같은 패턴). `alreadyRequestedKeys`는 호출부가
+ * 관리하는 ref의 Set — 이 함수는 그 Set을 직접 변형(mutate)해 다음 호출에서 중복을
+ * 막는다(호출부가 매번 새 Set을 만들 필요 없게). */
+export function groupUnresolvedReferencesByType(
+  messages: Array<{ references?: Array<{ target_type: string; target_id: string }> }>,
+  alreadyRequestedKeys: Set<string>,
+): Map<BatchFetchableEntityType, string[]> {
+  const idsByType = new Map<BatchFetchableEntityType, string[]>();
+  for (const msg of messages) {
+    for (const ref of msg.references ?? []) {
+      if (entityStatusAvailability(ref.target_type) !== 'has-status') continue;
+      const type = ref.target_type as BatchFetchableEntityType;
+      const key = `${type}:${ref.target_id}`.toLowerCase();
+      if (alreadyRequestedKeys.has(key)) continue;
+      alreadyRequestedKeys.add(key);
+      const list = idsByType.get(type) ?? [];
+      list.push(ref.target_id);
+      idsByType.set(type, list);
+    }
+  }
+  return idsByType;
 }

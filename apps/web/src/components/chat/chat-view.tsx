@@ -13,6 +13,9 @@ import { ThreadPanel } from './thread-panel';
 import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { normalizeToMessage, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
+import {
+  groupUnresolvedReferencesByType, ENTITY_STATUS_BATCH_API_PATH, type EntityStatusFetchState,
+} from '@/components/chat/entity-status-labels';
 import { useMessageRangeSelection } from '@/hooks/use-message-range-selection';
 import { CitationComposeBar, type CitationSaveState } from './citation-compose-bar';
 import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
@@ -87,6 +90,13 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // 적재(commandHints와 동일 ephemeral 패턴 — persist 안 함·reload 시 소멸, 저장 성공/실패
   // 자체는 이미 DB에 반영돼 있어 잃을 정보가 없다).
   const [referenceDropHints, setReferenceDropHints] = useState<Record<string, DroppedReference[]>>({});
+  // story #2262 PR② — 참조 칩 「지금 상태」 배치조회 캐시. 대화 전체에서 하나(같은 엔티티를
+  // 여러 메시지가 참조해도 fetch는 「타입:id」당 1회) — 키는 `${entityType}:${entityId}`(소문자).
+  const [entityStatusByKey, setEntityStatusByKey] = useState<Record<string, EntityStatusFetchState>>({});
+  // fetch 이미 시작한 키(loading/resolved/error 무관) — React state가 아니라 ref인 이유는
+  // 이 값을 읽어 effect의 재실행 여부를 판단하지 않기 때문(state로 하면 setState가 effect를
+  // 재트리거해 순환 위험). messages만 dependency로 두고 "새로 보인 참조가 있는가"만 본다.
+  const requestedEntityStatusKeysRef = useRef<Set<string>>(new Set());
   // 1aeecdde P2: 답장 생성 중 에이전트 typing — #1353 GET /working 폴링(BE 45s TTL) 결과.
   const [typingAgents, setTypingAgents] = useState<{ id: string; name: string }[]>([]);
   // Deeplink (ade2d6d5): 진입 메시지를 일시적으로 하이라이트(ring). null이면 미표시.
@@ -143,6 +153,50 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       setMarkerBoundary(initialLastReadAt);
     }
   }, [initialLastReadAt, markerBoundary]);
+
+  // story #2262 PR② — 참조 칩 「지금 상태」 배치조회. 대화에 보이는 모든 메시지의
+  // references를 훑어 has-status 타입(entityStatusAvailability)만, 타입별로 묶어 `?ids=`
+  // 배치 endpoint를 한 번씩 부른다(메시지마다 N+1 아님 — 대화 전체에서 타입당 1회, 새
+  // 메시지가 로드되면(SSE·더보기) 그 메시지가 처음 들여온 아직 안 본 참조만 추가로 부른다).
+  useEffect(() => {
+    const idsByType = groupUnresolvedReferencesByType(messages, requestedEntityStatusKeysRef.current);
+    if (idsByType.size === 0) return;
+
+    setEntityStatusByKey((prev) => {
+      const next = { ...prev };
+      for (const [type, ids] of idsByType) {
+        for (const id of ids) next[`${type}:${id}`.toLowerCase()] = { kind: 'loading' };
+      }
+      return next;
+    });
+
+    let cancelled = false;
+    for (const [type, ids] of idsByType) {
+      fetch(`${ENTITY_STATUS_BATCH_API_PATH[type]}?ids=${ids.map(encodeURIComponent).join(',')}`)
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`status ${res.status}`))))
+        .then((body: { data?: Array<{ id: string; status?: string | null }> }) => {
+          if (cancelled) return;
+          const items = body.data ?? [];
+          setEntityStatusByKey((prev) => {
+            const next = { ...prev };
+            for (const id of ids) {
+              const found = items.find((it) => it.id === id);
+              next[`${type}:${id}`.toLowerCase()] = { kind: 'resolved', raw: found?.status ?? null };
+            }
+            return next;
+          });
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setEntityStatusByKey((prev) => {
+            const next = { ...prev };
+            for (const id of ids) next[`${type}:${id}`.toLowerCase()] = { kind: 'error' };
+            return next;
+          });
+        });
+    }
+    return () => { cancelled = true; };
+  }, [messages]);
   // story #1977: mark-read 중복 POST 가드 — 이미 이 up_to까지 보냈으면 재전송 안 함(멱등이라
   // 서버는 안전하지만, 스크롤/신규메시지마다 매번 쏘는 낭비 방지).
   const markedReadUpToRef = useRef<string | null>(null);
@@ -762,6 +816,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                             isWorking={typingAgents.some((a) => a.id === msg.created_by)}
                             highlight={msg.id === highlightId}
                             projectId={projectId}
+                            entityStatusByKey={entityStatusByKey}
                             isCiteAnchor={citeSelection.isAnchor(msg.id)}
                             isCiteInRange={citeSelection.isInRange(msg.id, orderedMessageIds)}
                             citeAction={
@@ -874,6 +929,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               onClose={closeThread}
               incomingMessage={threadIncoming?.parent_id === activeThread.id ? threadIncoming : null}
               onReplyAdded={handleReplyAdded}
+              entityStatusByKey={entityStatusByKey}
             />
           </div>
         )}
