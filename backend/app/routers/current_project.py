@@ -24,7 +24,16 @@ async def get_current_project(
 ) -> CurrentProjectResponse:
     """S20(authz-coverage 스캐너 발견 — S19 Phase C서 no-op으로 skip 판단했던 그 오라클):
     member_id로 임의 member의 project_id/org_id/project_name을 caller-ownership 검증 없이
-    조회할 수 있었다(membership-existence 오라클). self-scope 추가."""
+    조회할 수 있었다(membership-existence 오라클). self-scope 추가.
+
+    story #2217(2026-08-07) 근본수정 — TeamMember row가 없으면(owner-floor 휴먼, #2216: 명시
+    grant 없이 has_project_access의 admin_branch로만 접근하는 org owner/admin) `org_id`까지
+    None으로 버렸다. 그런데 `org_id`는 애초에 TeamMember 조회와 무관하게 이 함수 자신의
+    `Depends(get_verified_org_id)`(JWT claims 유래)로 이미 들고 있다 — POST 핸들러가 바로
+    아래서 `org_id=org_id`로 정확히 그렇게 쓰는 것과 대칭이 깨져 있었다. `project_id`는 여전히
+    None이 맞다(백엔드는 "사용자가 지금 뭘 골랐나"를 모른다 — 그 정본은 FE 전용 쿠키
+    `sprintable_current_project_id`다. 안 골랐으면 None이 사실이고, 서버가 project_id를
+    지어내면 그게 거짓이 된다 — #2217 AC2/AC3 판단, PO 승인 2026-08-07)."""
     await assert_caller_is_member(member_id, auth, session, org_id)
     tm_r = await session.execute(
         select(TeamMember.project_id, TeamMember.org_id).where(
@@ -33,7 +42,7 @@ async def get_current_project(
     )
     row = tm_r.first()
     if row is None:
-        return CurrentProjectResponse(project_id=None, project_name=None, org_id=None)
+        return CurrentProjectResponse(project_id=None, project_name=None, org_id=org_id)
 
     proj_r = await session.execute(
         select(Project.name).where(Project.id == row[0])
