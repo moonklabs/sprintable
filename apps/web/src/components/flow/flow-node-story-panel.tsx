@@ -5,6 +5,10 @@ import { useTranslations } from 'next-intl';
 import { StoryDetailPanel, type Task } from '@/components/kanban/story-detail-panel';
 import type { KanbanStory } from '@/components/kanban/types';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { Button } from '@/components/ui/button';
+import type { RawReferenceCandidate } from './derive-flow-map';
+import { selectUnconfirmedCandidates } from './flow-relation-review';
+import { FlowRelationReviewQueue } from './flow-relation-review-queue';
 
 const OVERLAY_GAP = 8; // 노드와 패널 사이 여백(px)
 const OVERLAY_EDGE_MARGIN = 16; // 뷰포트 가장자리 여백(px)
@@ -66,6 +70,11 @@ export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps
   const isMobile = useIsMobile();
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [overlayPosition, setOverlayPosition] = useState<{ top: number; heightPx: number } | null>(null);
+  // story #2358 — 「확認하기」 훑기 큐 진입점. 이 story가 source인 미확認 후보 건수(별도
+  // fetch — StoryDetailPanel의 story/tasks 로드와 관심사가 달라 묶지 않는다. 목록이 커야
+  // 17건이라 중복 GET 비용이 무시할 만하다).
+  const [unconfirmedCount, setUnconfirmedCount] = useState(0);
+  const [reviewQueueOpen, setReviewQueueOpen] = useState(false);
 
   // 「story가 바뀔 때 loading으로 되돌리는」 것은 여기서 수동으로 안 한다 — 호출부
   // (flow-client.tsx)가 `key={storyId}`로 이 컴포넌트를 통째로 다시 마운트시킨다(초기값
@@ -89,6 +98,18 @@ export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps
       setState({ kind: 'ready', story, tasks });
     })();
     return () => { cancelled = true; };
+  }, [storyId]);
+
+  const refetchUnconfirmedCount = () => {
+    void fetch(`/api/stories/${storyId}/reference-candidates`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((raw: RawReferenceCandidate[] | null) => setUnconfirmedCount(raw ? selectUnconfirmedCandidates(raw).length : 0))
+      .catch(() => setUnconfirmedCount(0));
+  };
+
+  useEffect(() => {
+    refetchUnconfirmedCount();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetchUnconfirmedCount identity churns every render; storyId is the real trigger.
   }, [storyId]);
 
   // 앵커 위치는 클릭된 실 DOM(data-node-id)에서 한 번 잰다 — 패널이 열려 있는 동안 캔버스가
@@ -136,18 +157,52 @@ export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps
     );
   }
 
+  // story #2358 — 「확認하기」 훑기 진입점. StoryDetailPanel은 kanban과 공유하는 컴포넌트라
+  // children을 안 받는다(#2354 관례 유지) — 별도 fixed pill로 겹쳐 그린다. z-[60]으로
+  // 패널(z-50)보다 위에 둬 모바일 전체화면 드로어에서도 항상 눌린다.
+  const reviewEntry = unconfirmedCount > 0 ? (
+    <Button
+      type="button"
+      size="sm"
+      variant="secondary"
+      className="fixed right-4 top-4 z-[60] shadow-md"
+      onClick={() => setReviewQueueOpen(true)}
+    >
+      {t('relationReviewEntryButton', { count: unconfirmedCount })}
+    </Button>
+  ) : null;
+
+  const reviewDialog = reviewQueueOpen ? (
+    <FlowRelationReviewQueue
+      storyId={storyId}
+      storyNumber={state.story.story_number ?? 0}
+      onClose={() => { setReviewQueueOpen(false); refetchUnconfirmedCount(); }}
+      onCandidateResolved={refetchUnconfirmedCount}
+    />
+  ) : null;
+
   if (isMobile) {
     // IA §5 — 모바일은 겹침이 아니라 독립 화면. overlayPosition을 안 넘기면
     // StoryDetailPanel이 이미 갖고 있는 전체화면 드로어 모드로 뜬다(KanbanBoard와 동일 경로).
-    return <StoryDetailPanel story={state.story} tasks={state.tasks} onClose={onClose} />;
+    return (
+      <>
+        <StoryDetailPanel story={state.story} tasks={state.tasks} onClose={onClose} />
+        {reviewEntry}
+        {reviewDialog}
+      </>
+    );
   }
 
   return (
-    <StoryDetailPanel
-      story={state.story}
-      tasks={state.tasks}
-      onClose={onClose}
-      overlayPosition={{ top: overlayPosition!.top, heightPx: overlayPosition!.heightPx }}
-    />
+    <>
+      <StoryDetailPanel
+        story={state.story}
+        tasks={state.tasks}
+        onClose={onClose}
+        overlayPosition={{ top: overlayPosition!.top, heightPx: overlayPosition!.heightPx }}
+      />
+      {reviewEntry}
+      {reviewDialog}
+    </>
   );
 }
