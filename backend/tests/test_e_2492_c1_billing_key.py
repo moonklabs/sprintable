@@ -168,14 +168,15 @@ async def test_issue_billing_key_new_org_generates_customer_key_and_persists(mon
 
     org_id = uuid.uuid4()
     session = AsyncMock()
-    no_existing = MagicMock()
-    no_existing.scalar_one_or_none.return_value = None
     persisted = MagicMock()
     persisted.scalar_one.return_value = MagicMock(spec=OrgBillingKey)
-    session.execute = AsyncMock(side_effect=[no_existing, MagicMock(), persisted])
+    session.execute = AsyncMock(side_effect=[MagicMock(), persisted])
     session.commit = AsyncMock()
 
     monkeypatch.setattr(svc, "ensure_configured", MagicMock())
+    # #2512 카디르 fix — issue_billing_key는 이제 ensure_customer_key()에 위임한다
+    # (크로스-커넥션 레이스 근본 fix, #2892 리뷰).
+    monkeypatch.setattr(svc, "ensure_customer_key", AsyncMock(return_value="org-generated-key"))
     monkeypatch.setattr(
         svc.TossAdapter, "create_billing_key",
         AsyncMock(return_value={
@@ -188,29 +189,29 @@ async def test_issue_billing_key_new_org_generates_customer_key_and_persists(mon
     result = await svc.issue_billing_key(session, org_id=org_id, auth_key="auth_x")
 
     assert result is not None
-    insert_call = session.execute.call_args_list[1]
+    insert_call = session.execute.call_args_list[0]
     compiled_params = insert_call.args[0].compile().params
     assert compiled_params["org_id"] == org_id
+    assert compiled_params["customer_key"] == "org-generated-key"
     assert compiled_params["encrypted_billing_key"] == "enc-token"
     assert compiled_params["status"] == "active"
 
 
 @pytest.mark.anyio
 async def test_issue_billing_key_reuses_existing_customer_key(monkeypatch):
-    """재발급(카드 교체) — 기존 행이 있으면 새 customerKey를 만들지 않고 재사용한다."""
+    """재발급(카드 교체) — 기존 행이 있으면 새 customerKey를 만들지 않고 재사용한다.
+    #2512 카디르 fix — 이 재사용 판단은 이제 ensure_customer_key()가 진다(issue_billing_key
+    는 스스로 SELECT하지 않는다, #2892 리뷰 크로스-커넥션 레이스 fix)."""
     from app.services import org_billing_key as svc
 
     org_id = uuid.uuid4()
-    existing_row = MagicMock()
-    existing_row.customer_key = "org-existing-key"
     session = AsyncMock()
-    existing_result = MagicMock()
-    existing_result.scalar_one_or_none.return_value = existing_row
     persisted = MagicMock()
-    session.execute = AsyncMock(side_effect=[existing_result, MagicMock(), persisted])
+    session.execute = AsyncMock(side_effect=[MagicMock(), persisted])
     session.commit = AsyncMock()
 
     monkeypatch.setattr(svc, "ensure_configured", MagicMock())
+    monkeypatch.setattr(svc, "ensure_customer_key", AsyncMock(return_value="org-existing-key"))
     create_billing_key_mock = AsyncMock(return_value={
         "billingKey": "plaintext_bk2", "authenticatedAt": "2026-08-07T00:00:00+09:00", "card": {},
     })
