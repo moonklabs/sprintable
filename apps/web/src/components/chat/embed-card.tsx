@@ -12,7 +12,7 @@ import {
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { docViewUrl } from '@/components/docs/lib/doc-project-url';
 import { initials } from '@/lib/storage/format';
-import { renderEntityStatusLabel, type EntityStatusFetchState } from './entity-status-labels';
+import { renderEntityStatusLabel, translateEntityStatus, type EntityStatusFetchState } from './entity-status-labels';
 
 // story #2302 — 이 8종은 BE reference_registry.py ENTITY_RESOLVERS 와 키 집합이 같아야 한다
 // (AC2·AC5, entity-icons.registry-parity.test.ts 가 코드스캔으로 대조). `asset`은 registry
@@ -164,10 +164,11 @@ const MdBody = ({ content }: { content: string }) => (
 function EntityDetail({ entityType, detail }: { entityType: string; detail: Record<string, unknown> }) {
   if (entityType === 'story') {
     const d = detail as { status?: string; priority?: string; story_points?: number; description?: string; acceptance_criteria?: string };
+    const statusLabel = d.status ? translateEntityStatus('story', d.status) : null;
     return (
       <div className="space-y-3">
         <div className="flex flex-wrap gap-1.5">
-          {d.status && <MdBadge label={d.status} />}
+          {statusLabel && <MdBadge label={statusLabel} />}
           {d.priority && <MdBadge label={d.priority} />}
           {d.story_points != null && <MdBadge label={`${d.story_points} SP`} />}
         </div>
@@ -184,10 +185,11 @@ function EntityDetail({ entityType, detail }: { entityType: string; detail: Reco
 
   if (entityType === 'epic') {
     const d = detail as { status?: string; priority?: string; objective?: string; description?: string; target_date?: string; story_points_target?: number };
+    const statusLabel = d.status ? translateEntityStatus('epic', d.status) : null;
     return (
       <div className="space-y-3">
         <div className="flex flex-wrap gap-1.5">
-          {d.status && <MdBadge label={d.status} />}
+          {statusLabel && <MdBadge label={statusLabel} />}
           {d.priority && <MdBadge label={d.priority} />}
           {d.story_points_target != null && <MdBadge label={`목표 ${d.story_points_target} SP`} />}
           {d.target_date && <MdBadge label={d.target_date} />}
@@ -300,6 +302,10 @@ function EntityPreviewModal({
   // 값이 있으면) 그걸 우선한다. 칩 자체(모달 열기 前)에 상태를 보이는 건 별건(PR②,
   // 타입별 배치조회 인프라 필요 — references 사이드밴드엔 status가 없다).
   const resolvedStatus = status ?? (typeof (detail as { status?: unknown } | null)?.status === 'string' ? (detail as { status: string }).status : null);
+  // story #2522 — 원시값(raw status enum, 예: "in-review")을 그대로 뱃지에 노출하던 기존
+  // gap(#2903 design review 발견). translateEntityStatus로 반드시 통과시킨다 — 맵에 없으면
+  // (미매핑 status) null이 나와 뱃지 자체를 안 그린다(원시값 폴백 절대 금지, 빈칸이 정답).
+  const resolvedStatusLabel = resolvedStatus ? translateEntityStatus(entityType, resolvedStatus) : null;
 
   // story #2302 AC3 — ①own-href(정적) / ②via-parent(레코드 fetch 필요) / ③없음, 세 갈래를
   // "카드 전체를 죽이지 않는다"(AC4) 원칙대로 여기서만 계산 — 헤더의 아이콘·제목·상태는 이 값과
@@ -360,8 +366,8 @@ function EntityPreviewModal({
           <div className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm ${colorClass} flex-1 min-w-0`}>
             <EntityGlyph Icon={resolveEntityIcon(entityType)} label={label} />
             <DialogTitle className="font-semibold truncate text-sm">{label}</DialogTitle>
-            {resolvedStatus ? (
-              <span className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs bg-black/10 dark:bg-white/10">{resolvedStatus}</span>
+            {resolvedStatusLabel ? (
+              <span className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs bg-black/10 dark:bg-white/10">{resolvedStatusLabel}</span>
             ) : null}
           </div>
           <button
@@ -420,6 +426,9 @@ export function EmbedCard({ entity_type, entity_id, title, status }: EmbedCardDa
   const colorClass = ENTITY_COLORS[entity_type] ?? GRAY_STATE_COLOR;
   const href = getEntityHref(entity_type, entity_id);
   const label = title ?? entity_id;
+  // story #2522 — EmbedCard 자신의 인라인 카드(모달과 별개 렌더 경로)도 원시값을 그대로
+  // 노출하던 같은 클래스의 gap. translateEntityStatus로 통과시킨다(미매핑=null=뱃지 안 그림).
+  const statusLabel = status ? translateEntityStatus(entity_type, status) : null;
 
   const handleDocClick = useCallback(async () => {
     setNavigating(true);
@@ -451,8 +460,8 @@ export function EmbedCard({ entity_type, entity_id, title, status }: EmbedCardDa
     <div className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${colorClass}`}>
       <EntityGlyph Icon={resolveEntityIcon(entity_type)} label={label} />
       <span className="font-medium">{label}</span>
-      {status ? (
-        <span className="ml-auto rounded px-1.5 py-0.5 text-xs bg-black/10 dark:bg-white/10">{status}</span>
+      {statusLabel ? (
+        <span className="ml-auto rounded px-1.5 py-0.5 text-xs bg-black/10 dark:bg-white/10">{statusLabel}</span>
       ) : null}
       {navigating && <span className="ml-auto h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />}
     </div>
@@ -473,8 +482,8 @@ export function EmbedCard({ entity_type, entity_id, title, status }: EmbedCardDa
           >
             <EntityGlyph Icon={resolveEntityIcon(entity_type)} label={label} />
             <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
-            {status ? (
-              <span className="shrink-0 rounded px-1.5 py-0.5 text-xs bg-black/10 dark:bg-white/10">{status}</span>
+            {statusLabel ? (
+              <span className="shrink-0 rounded px-1.5 py-0.5 text-xs bg-black/10 dark:bg-white/10">{statusLabel}</span>
             ) : null}
             {navigating && <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent" />}
           </button>

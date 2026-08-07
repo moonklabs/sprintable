@@ -24,18 +24,24 @@ const PR2_V1_FETCHABLE_TYPES: ReadonlySet<string> = new Set(['story', 'task', 'd
 /** ⛔맵에 없는 값이 오면(신규 status 추가 등) 칸을 비운다 — 원시값을 그대로 노출하지 않는다
  * (gate_type 사고 재발 방지, #2156 requires_human/gate_type 교훈 재사용). "terminal" 개념이
  * 이 제품에 없다는 판정(파울로, 2026-07-30)이 이미 서 있어 done류 라벨에 시각 차등(흐리게·
- * 취소선)을 안 준다 — 번역은 문구만 바꾸고 무게는 그대로다. */
+ * 취소선)을 안 준다 — 번역은 문구만 바꾸고 무게는 그대로다.
+ *
+ * story #2522(유나양 DS 어휘 규격, doc ds-entity-status-label-map-2522, 2026-08-07) 그대로 —
+ * 이 스토리 이전 값과 몇 군데 다르다(예: story.backlog은 "백로그"가 아니라 "대기", hypothesis
+ * 는 명사 어미 "됨"을 전부 뗀다). ⛔hypothesis.active="검증 중"은 sprint/epic.active="진행 중"과
+ * **원시값(active)은 같지만 다른 말**이 되도록 스펙이 명시한 지점 — hypothesis는 「검증」이
+ * 본질이라 "진행 중"으로 뭉개면 모호해진다(엔티티별 맵이라 이 구분이 가능하다). */
 const STATUS_LABELS: Record<StatusBearingEntityType, Record<string, string>> = {
   story: {
-    done: '완료', backlog: '백로그', 'in-review': '검토 중', 'in-progress': '진행 중', 'ready-for-dev': '착수 대기',
+    backlog: '대기', 'ready-for-dev': '착수 대기', 'in-progress': '진행 중', 'in-review': '검토 중', done: '완료',
   },
-  task: { todo: '할 일', done: '완료', 'in-progress': '진행 중' },
-  doc: { draft: '초안', confirmed: '확定', pending: '검토 대기' },
+  task: { todo: '할 일', 'in-progress': '진행 중', done: '완료' },
+  doc: { draft: '초안', pending: '검토 중', confirmed: '확定' },
   hypothesis: {
-    proposed: '제안됨', archived: '보관됨', active: '진행 중', measuring: '측정 중', falsified: '반증됨', verified: '검증됨',
+    proposed: '제안', active: '검증 중', measuring: '측정 중', verified: '입증', falsified: '반증', archived: '보관',
   },
-  sprint: { closed: '종료', active: '진행 중', planning: '계획 중' },
-  epic: { archived: '보관됨', done: '완료', active: '진행 중' },
+  sprint: { planning: '계획', active: '진행 중', closed: '종료' },
+  epic: { active: '진행 중', done: '완료', archived: '보관' },
 };
 
 /** 「지금 상태」를 **PR② v1이 실제로 채울 수 있는** 타입인가(구조적 판정, AC2/AC7의
