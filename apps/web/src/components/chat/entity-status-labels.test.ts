@@ -2,15 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { entityStatusAvailability, translateEntityStatus } from './entity-status-labels';
 
 describe('entityStatusAvailability — 「아직 모름」↔「없음」을 가르는 구조적 판정(AC2·AC7)', () => {
-  it.each(['story', 'task', 'doc', 'hypothesis', 'sprint', 'epic'])(
-    '%s는 has-status(실측된 status 어휘가 있다)',
+  it.each(['story', 'task', 'doc', 'sprint', 'epic'])(
+    '%s는 has-status(PR② v1이 실제로 배치조회할 타입)',
     (type) => {
       expect(entityStatusAvailability(type)).toBe('has-status');
     },
   );
 
-  it.each(['artifact', 'evidence', 'asset', 'unknown-type'])(
-    '%s는 no-status-concept(status 컬럼·fetch 경로 자체가 없다)',
+  // hypothesis는 AC2 어휘(STATUS_LABELS)엔 있지만 오늘 fetch 경로가 없어(ENTITY_API 부재)
+  // PR② v1 칩 렌더 관점에선 no-status-concept다 — 「어휘 있음」≠「지금 채울 수 있음」(두 축이
+  // 다르다는 것을 값으로 고정, 이 구분을 놓치면 hypothesis 칩이 영원히 "아직 모름"에 갇힌다).
+  it.each(['hypothesis', 'evidence', 'artifact', 'asset', 'unknown-type'])(
+    '%s는 no-status-concept(PR② v1 fetch 경로 자체가 없다·hypothesis는 어휘는 있어도 fetch가 없다)',
     (type) => {
       expect(entityStatusAvailability(type)).toBe('no-status-concept');
     },
@@ -21,6 +24,12 @@ describe('translateEntityStatus — 원시값 노출 금지(gate_type 사고 재
   it('has-status 타입의 매핑된 값은 사람이 읽는 한 줄로 번역된다', () => {
     expect(translateEntityStatus('story', 'in-review')).toBe('검토 중');
     expect(translateEntityStatus('epic', 'active')).toBe('진행 중');
+  });
+
+  // translateEntityStatus는 entityStatusAvailability(PR② v1 fetch 가능 여부)와 별개 축이다
+  // (파일 상단 주석 참고) — hypothesis는 칩 렌더에선 no-status-concept("상태 없음")이지만,
+  // 어휘 맵 자체는 있어서 rawStatus가 (미래의 다른 경로로) 주어지면 이 함수는 정상 번역한다.
+  it('hypothesis는 칩 렌더 관점에선 no-status-concept이지만 어휘 맵 번역 자체는 독립적으로 동작한다', () => {
     expect(translateEntityStatus('hypothesis', 'falsified')).toBe('반증됨');
   });
 

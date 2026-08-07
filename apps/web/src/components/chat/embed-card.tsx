@@ -12,6 +12,7 @@ import {
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { docViewUrl } from '@/components/docs/lib/doc-project-url';
 import { initials } from '@/lib/storage/format';
+import { renderEntityStatusLabel } from './entity-status-labels';
 
 // story #2302 — 이 8종은 BE reference_registry.py ENTITY_RESOLVERS 와 키 집합이 같아야 한다
 // (AC2·AC5, entity-icons.registry-parity.test.ts 가 코드스캔으로 대조). `asset`은 registry
@@ -565,6 +566,14 @@ export function EntityChip({
   const [showModal, setShowModal] = useState(false);
   const colorClass = ghost ? GRAY_STATE_COLOR : (ENTITY_COLORS[entityType] ?? GRAY_STATE_COLOR);
 
+  // story #2262 AC2(PR② 1단계, 2026-08-07 유나양 카피 판정 반영) — 실 배치조회(BE `?ids=`,
+  // 디디군 대기)가 아직 없어 오늘은 항상 `{kind:'loading'}`으로 판정한다. has-status 타입은
+  // "아직 모름"(로딩 중과 미래의 조회 실패를 같은 문구로 다룬다는 판정), no-status-concept
+  // 타입(hypothesis·evidence·artifact)은 "상태 없음" — 둘 다 «모르는 것을 단정하지 않는다»
+  // 원칙의 표현이지 실패가 아니다. BE 착지 後 이 하드코딩 state를 실제 배치조회 결과로
+  // 바꾸기만 하면 된다(카피·판정 로직은 이미 최종형).
+  const statusLabel = ghost ? null : renderEntityStatusLabel(entityType, { kind: 'loading' });
+
   const inner = (
     <span className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-xs font-medium ${colorClass}`}>
       <EntityGlyph Icon={resolveEntityIcon(entityType)} label={label} className="size-3 shrink-0" />
@@ -576,6 +585,7 @@ export function EntityChip({
           · 관찰됨 · {FORM_LABELS[referenceMeta.form] ?? referenceMeta.form} · {formatReferencePoint(referenceMeta.referencedAt)}
         </span>
       ) : null}
+      {statusLabel ? <span className="opacity-70">· {statusLabel}</span> : null}
     </span>
   );
 

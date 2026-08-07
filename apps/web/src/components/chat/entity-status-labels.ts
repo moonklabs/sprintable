@@ -11,9 +11,13 @@
  * 키는 "epic"으로 둔다(story #2262 PO 판정 — "epic 카드 한 벌만 그린다"와 같은 이유). */
 export type StatusBearingEntityType = 'story' | 'task' | 'doc' | 'hypothesis' | 'sprint' | 'epic';
 
-const STATUS_BEARING_TYPES: ReadonlySet<string> = new Set<StatusBearingEntityType>([
-  'story', 'task', 'doc', 'hypothesis', 'sprint', 'epic',
-]);
+/** ⛔이 배치조회 가능 여부(PR② v1 스코프)와 「AC2가 정의한 status 어휘가 있는 타입」은
+ * 다른 축이다 — hypothesis는 어휘는 있지만(STATUS_LABELS에 있음, 미래의 실 데이터 소비를
+ * 위해 유지) 오늘 FE엔 fetch 경로 자체가 없어(ENTITY_API에 없음) PR② v1이 배치조회 대상에서
+ * 뺀다(설계 문서 그대로). `entityStatusAvailability`(칩 렌더 판정)는 이 「지금 채울 수
+ * 있는가」 축을 써야 한다 — 안 그러면 hypothesis 칩이 영원히 안 채워질 "아직 모름"에 갇힌다
+ * (실제로는 "이 판에선 원래 없음"이 맞는 그림이다). */
+const PR2_V1_FETCHABLE_TYPES: ReadonlySet<string> = new Set(['story', 'task', 'doc', 'sprint', 'epic']);
 
 /** ⛔맵에 없는 값이 오면(신규 status 추가 등) 칸을 비운다 — 원시값을 그대로 노출하지 않는다
  * (gate_type 사고 재발 방지, #2156 requires_human/gate_type 교훈 재사용). "terminal" 개념이
@@ -32,34 +36,33 @@ const STATUS_LABELS: Record<StatusBearingEntityType, Record<string, string>> = {
   epic: { archived: '보관됨', done: '완료', active: '진행 중' },
 };
 
-/** 「지금 상태」가 존재할 수 있는 타입인가(구조적 판정, AC2/AC7의 「아직 모름」↔「없음」을
- * 가르는 재료). `has-status`(status 개념이 있는 여섯 타입) 밖은 전부 `no-status-concept` —
- * artifact는 status 컬럼 자체가 없다(대신 `unresolved_comment_count`로 미결을 센다, PR②
- * v1이 짊어지지 않는 AC3의 재료). hypothesis·evidence는 오늘 fetch 경로 자체가 없다
- * (`ENTITY_API`에 의도적으로 빠져있음 — embed-card.tsx `ENTITY_API`/`EntityPreviewModal`
- * 주석 참고) — PR② v1은 이 둘을 배치조회 대상에서 뺀다(갭으로 문서화, 회귀 없음). asset은
- * FE 전용 타입이라 reference_registry 밖(원래 이 판정 대상이 아니다). */
+/** 「지금 상태」를 **PR② v1이 실제로 채울 수 있는** 타입인가(구조적 판정, AC2/AC7의
+ * 「아직 모름」↔「없음」을 가르는 재료 — 칩 렌더링이 이 함수로 판정한다). ⛔"AC2가 정의한
+ * status 어휘가 있나"와는 다른 축이다(STATUS_LABELS 주석 참고) — hypothesis는 어휘는
+ * 있어도 fetch 경로가 없어 여기선 no-status-concept다. artifact는 status 컬럼 자체가
+ * 없다(대신 unresolved_comment_count로 미결을 센다, PR②가 짊어지지 않는 AC3의 재료).
+ * evidence·asset도 마찬가지로 no-status-concept. */
 export function entityStatusAvailability(entityType: string): 'has-status' | 'no-status-concept' {
-  return STATUS_BEARING_TYPES.has(entityType) ? 'has-status' : 'no-status-concept';
+  return PR2_V1_FETCHABLE_TYPES.has(entityType) ? 'has-status' : 'no-status-concept';
 }
 
-/** rawStatus를 사람이 읽는 한 줄로 평평하게 바꾼다. has-status 타입이 아니거나, 매핑에 없는
- * 값이거나, rawStatus 자체가 없으면(아직 안 왔다) null — 호출부가 null을 "아직 모름"으로
- * 표시할지 "없음"으로 표시할지는 `entityStatusAvailability`로 미리 가른 뒤에 결정한다(이
- * 함수 혼자서는 그 둘을 구분할 재료가 없다 — status bearing 타입인데 rawStatus가 아직 없는
- * 것과, 애초에 status 개념이 없는 것은 다른 함수(entityStatusAvailability)가 가른다). */
+/** rawStatus를 사람이 읽는 한 줄로 평평하게 바꾼다. STATUS_LABELS에 그 타입 맵 자체가
+ * 없거나, 매핑에 없는 값이거나, rawStatus 자체가 없으면(아직 안 왔다) null — ⛔이 함수는
+ * `entityStatusAvailability`(PR② v1 fetch 가능 여부)와 별도다: hypothesis처럼 오늘 fetch
+ * 경로는 없어도 어휘 맵은 있는 타입에 실제 rawStatus가 (미래에 다른 경로로) 들어오면 이
+ * 함수는 정상 번역한다 — 「지금 채울 수 있나」는 칩 렌더 쪽(entityStatusAvailability) 책임,
+ * 「번역할 수 있나」는 이 함수 책임으로 나눈다. */
 export function translateEntityStatus(entityType: string, rawStatus: string | null | undefined): string | null {
   if (!rawStatus) return null;
-  if (entityStatusAvailability(entityType) === 'no-status-concept') return null;
   const map = STATUS_LABELS[entityType as StatusBearingEntityType];
+  if (!map) return null;
   return map[rawStatus] ?? null;
 }
 
-/** story #2262 PR② — `EntityChip`이 받을 「칩 자체 상태」 prop의 예정 계약(타입만, 미배선).
- * PO 지시(2026-08-07): 카피(㉠no-status-concept "비었다고 말한다"·㉡loading "아직 모름"의
- * 정확한 문구)는 유나양 디자인 판정 대기, 배치조회는 BE `?ids=`(디디군) 대기 — 둘 다 오면
- * 한 번에 배선한다(지금 카피를 지어 배선하면 판정과 어긋나 다시 갈아엎을 위험). 이 타입은
- * 그 배선이 맞춰 낄 자리를 미리 정해 두는 것 — `EntityChip`은 아직 이 prop을 안 받는다.
+/** story #2262 PR② — `EntityChip`이 받을 「칩 자체 상태」 prop의 예정 계약. 배치조회
+ * 배선(chat-view.tsx, BE `?ids=` — 디디군 대기)만 아직 안 됐다 — 카피는 유나양 판정
+ * 완료(2026-08-07)로 아래 세 상수에 이미 반영. `EntityChip`은 아직 이 prop을 안 받는다
+ * (BE 오면 그때 prop 추가+`renderEntityStatusLabel` 호출을 한 번에 배선).
  *
  * `undefined`(prop 자체를 안 넘김) = 이 호출부에서 칩 상태 기능이 아직 안 켜짐(오늘의
  * 기본, 회귀 없음). 값이 오면:
@@ -72,3 +75,26 @@ export type EntityStatusFetchState =
   | { kind: 'loading' }
   | { kind: 'resolved'; raw: string | null }
   | { kind: 'error' };
+
+/** 유나양 카피 판정(2026-08-07, #2262 AC2):
+ * ① 상태 개념 자체가 없는 타입(hypothesis·evidence·artifact) → "상태 없음"
+ *    (「없음」과 「아직 모름」이 나란히 렌더될 때 시각적으로 안 갈리면 "해당 없음"으로 대체
+ *    검토 — 라이브 배선 後 유나 재확認 필요, 아직 미확定).
+ * ② 배치조회 미완(loading) **또는 실패(error)** → "아직 모름" — ⛔"확認 중"은 쓰지 않는다
+ *    (fetch가 실패한 순간엔 "확認 중"이 거짓이 된다 — 미완이든 실패든 "지금 모름"인 것은
+ *    같은 사실이라 문구를 하나로 통일한다).
+ * ③ has-status 타입인데 rawStatus가 매핑에 없음(신규 status 미반영 등) → 빈칸(문구 없음,
+ *    `translateEntityStatus`가 이미 null을 낸다 — 새 문구를 안 만든다). */
+export const ENTITY_STATUS_NO_CONCEPT_LABEL = '상태 없음';
+export const ENTITY_STATUS_UNKNOWN_LABEL = '아직 모름';
+
+/** `EntityStatusFetchState`(배치조회 결과)를 칩에 그대로 쓸 한 줄로 접는다. 반환 null은
+ * "이 칩엔 상태 관련 문구를 아예 안 그린다"는 뜻(③ 매핑 안 된 값 — 빈칸도 「아직 모름」과는
+ * 다르다, 매핑 자체가 없는 것은 새 status 추가를 놓친 FE 버그 신호이지 사용자에게 알릴
+ * 정보가 아니다). state가 `undefined`(호출부가 기능 자체를 안 켬)면 이 함수를 안 부르는
+ * 것이 호출부 관례 — 이 함수는 state가 실제로 있을 때만 호출된다는 전제다. */
+export function renderEntityStatusLabel(entityType: string, state: EntityStatusFetchState): string | null {
+  if (entityStatusAvailability(entityType) === 'no-status-concept') return ENTITY_STATUS_NO_CONCEPT_LABEL;
+  if (state.kind === 'loading' || state.kind === 'error') return ENTITY_STATUS_UNKNOWN_LABEL;
+  return translateEntityStatus(entityType, state.raw);
+}

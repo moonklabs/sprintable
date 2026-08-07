@@ -145,6 +145,38 @@ describe('ChatBubble — story #2262 AC1(사실성·표면·지점 표기, doc f
   });
 });
 
+describe('ChatBubble — story #2262 AC2 PR② 1단계(2026-08-07 유나양 카피 판정, BE 배치조회 前 하드코딩)', () => {
+  it('has-status 타입(doc) 칩은 실 배치조회가 없는 오늘은 "아직 모름"을 보인다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, references: undefined }} isMine={false} />));
+    });
+    expect(container.textContent).toContain('아직 모름');
+    expect(container.textContent).not.toContain('상태 없음');
+  });
+
+  it('no-status-concept 타입(hypothesis) 칩은 "상태 없음"을 보인다(로딩이 아니라 구조적 부재)', async () => {
+    const hypothesisId = '22222222-2222-2222-2222-222222222222';
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, content: `[가설 A](entity:hypothesis:${hypothesisId})`, references: undefined }}
+          isMine={false}
+        />,
+      ));
+    });
+    expect(container.textContent).toContain('상태 없음');
+    expect(container.textContent).not.toContain('아직 모름');
+  });
+
+  it('유령 칩에는 상태 라벨을 안 보인다(대상 자체가 없는데 상태를 말할 수 없다)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, references: [] }} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('아직 모름');
+    expect(container.textContent).not.toContain('상태 없음');
+  });
+});
+
 describe('ChatBubble — story #2319 tombstone(메시지 삭제) 렌더', () => {
   it('deleted_at이 있으면 원문 대신 placeholder를 그린다', async () => {
     const deletedMsg: ChatMessage = { ...baseMessage, content: '', deleted_at: '2026-08-02T00:00:00.000Z' };
