@@ -107,6 +107,44 @@ describe('ChatBubble — story #2263 AC6 유령 칩(stored 참조 대조)', () =
   });
 });
 
+describe('ChatBubble — story #2262 AC1(사실성·표면·지점 표기, doc flow-map-blueprint-v1 §2-3)', () => {
+  it('stored 참조가 form·referenced_at을 실으면 칩에 "관찰됨 · {표면} · {지점}"이 표기된다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{
+            ...baseMessage,
+            references: [{ target_type: 'doc', target_id: DOC_ID, form: 'mention', referenced_at: '2026-07-26T00:00:00.000Z' }],
+          }}
+          isMine={false}
+        />,
+      ));
+    });
+    expect(container.textContent).toContain('관찰됨');
+    expect(container.textContent).toContain('멘션');
+    expect(container.textContent).toContain('7/26');
+  });
+
+  it('매칭되는 stored 참조가 있어도 form·referenced_at이 없으면(구서버 폴백) 표기를 지어내지 않는다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, references: [{ target_type: 'doc', target_id: DOC_ID }] }}
+          isMine={false}
+        />,
+      ));
+    });
+    expect(container.textContent).not.toContain('관찰됨');
+  });
+
+  it('유령 칩(매칭 없음)에는 사실성·표면·지점을 표기하지 않는다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, references: [] }} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('관찰됨');
+  });
+});
+
 describe('ChatBubble — story #2319 tombstone(메시지 삭제) 렌더', () => {
   it('deleted_at이 있으면 원문 대신 placeholder를 그린다', async () => {
     const deletedMsg: ChatMessage = { ...baseMessage, content: '', deleted_at: '2026-08-02T00:00:00.000Z' };
