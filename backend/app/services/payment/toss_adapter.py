@@ -25,6 +25,22 @@ _API_BASE = "https://api.tosspayments.com"
 # docs.tosspayments.com/reference — 2026-08-07 공식 문서 직접 대조(훈련데이터만 안 믿음).
 _ISSUE_BILLING_KEY_PATH = "/v1/billing/authorizations/issue"
 
+# PO 리뷰 블로커(2026-08-07, #2882) — orderId 중복(재시도가 이미 성공한 charge를 다시
+# 침) 시 실제 Toss 에러 코드. "ALREADY_PROCESSED_PAYMENT"는 구어체 표기였고 공식 문서
+# 재대조 결과 정확한 코드는 이것 — charge_org가 이 값으로 분기(재확認 필요).
+DUPLICATED_ORDER_ID = "DUPLICATED_ORDER_ID"
+
+
+class TossApiError(RuntimeError):
+    """Toss 에러 응답(code/message) 구조화 — 호출자가 특정 code(예: DUPLICATED_ORDER_ID)로
+    분기해야 하는 경우(charge_org의 중복 재시도 처리) bare RuntimeError 문자열 매칭보다
+    안전하다."""
+
+    def __init__(self, code: str, message: str, *, status_code: int):
+        self.code = code
+        self.status_code = status_code
+        super().__init__(f"{code}: {message}" if message else code)
+
 
 class TossAdapter(PaymentProvider):
     def _auth_header(self) -> dict[str, str]:
@@ -49,8 +65,26 @@ class TossAdapter(PaymentProvider):
 
         if resp.status_code not in (200, 201):
             body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-            logger.error("Toss %s error: status=%s code=%s", op_label, resp.status_code, body.get("code"))
-            raise RuntimeError(f"Toss {op_label} failed: {body.get('code', resp.status_code)}")
+            code = body.get("code", str(resp.status_code))
+            logger.error("Toss %s error: status=%s code=%s", op_label, resp.status_code, code)
+            raise TossApiError(code, f"Toss {op_label} failed", status_code=resp.status_code)
+
+        return resp.json()
+
+    async def _get(self, path: str, *, timeout: float, op_label: str) -> dict:
+        """공용 GET 왕복 — 결제 조회(get_payment_by_order_id)용. _post와 동일 에러 처리."""
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(f"{_API_BASE}{path}", headers=self._auth_header())
+        except httpx.RequestError as exc:
+            logger.exception("Toss %s request failed", op_label)
+            raise RuntimeError("Cannot reach Toss API") from exc
+
+        if resp.status_code != 200:
+            body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+            code = body.get("code", str(resp.status_code))
+            logger.error("Toss %s error: status=%s code=%s", op_label, resp.status_code, code)
+            raise TossApiError(code, f"Toss {op_label} failed", status_code=resp.status_code)
 
         return resp.json()
 
@@ -98,6 +132,16 @@ class TossAdapter(PaymentProvider):
             },
             timeout=65,  # Toss 문서: 최대 60초 소요 가능 — 여유 5초.
             op_label="charge",
+        )
+
+    async def get_payment_by_order_id(self, *, order_id: str) -> dict:
+        """GET /v1/payments/orders/{orderId} — PaymentProvider 8메서드 밖의 보조 조회
+        (story #2493 C2, PO 리뷰 권장). charge가 `DUPLICATED_ORDER_ID`로 실패했을 때(=
+        이 orderId가 이미 처리된 적이 있다는 뜻이지 신규 실패가 아니다) 실제 결제 상태·
+        paymentKey를 여기서 확認한다 — Toss 에러 응답 자체엔 그 정보가 없어(공식 문서
+        확認) 조회가 유일한 경로."""
+        return await self._get(
+            f"/v1/payments/orders/{order_id}", timeout=15, op_label="payment lookup",
         )
 
     def verify_webhook(self, raw_body: bytes, signature: str | None) -> bool:

@@ -46,8 +46,14 @@ def ensure_configured() -> None:
     """PO nit①(C1 리뷰, #2880 — 2026-08-07): 되돌릴 수 없는 외부 호출(Toss authKey 소모·
     charge 승인) 前에 암호화 키 가용성을 먼저 확認한다 — 호출 後에야 encrypt 실패로 502가
     나면 1회용 authKey/승인 시도를 헛되이 태운 것이 된다. C1의 issue_billing_key와 C2의
-    charge_org 둘 다 Toss 호출 直前에 이 함수를 먼저 부른다."""
-    _parse_keys(settings.org_billing_key_encryption_key)
+    charge_org 둘 다 Toss 호출 直前에 이 함수를 먼저 부른다.
+
+    PO 재지적(#2882 C2 리뷰, 2026-08-07 — 얕은 가드): 예전엔 ``_parse_keys``(문자열
+    존재 여부)만 봤다 — 키가 「있지만 malformed」(Fernet이 기대하는 base64 형식이 아님)면
+    이 가드를 통과한 뒤 Toss 호출 後 ``_get_multi_fernet()``에서야 터졌다(가드가 지키려던
+    바로 그 순서 위반이 malformed 키 케이스에서 그대로 재발). ``_get_multi_fernet()``을
+    실제로 구성해 Fernet 파싱 자체까지 이 시점에 검증한다."""
+    _get_multi_fernet()
 
 
 def encrypt_billing_key(plaintext: str) -> str:

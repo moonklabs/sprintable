@@ -81,7 +81,30 @@ async def test_toss_charge_no_secret_fails_closed():
             )
 
 
-# ─── charge_org — orderId-먼저-기록 오케스트레이션 ──────────────────────────
+# ─── TossAdapter.get_payment_by_order_id ───────────────────────────────────
+
+@pytest.mark.anyio
+async def test_toss_get_payment_by_order_id_success():
+    from app.services.payment.toss_adapter import TossAdapter
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"paymentKey": "pay_key_recovered", "status": "DONE", "totalAmount": 29000}
+
+    with patch("app.services.payment.toss_adapter.settings") as mock_settings:
+        mock_settings.toss_payments_secret_key = "test_sk_dummy"
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value.get = AsyncMock(return_value=mock_resp)
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            adapter = TossAdapter()
+            result = await adapter.get_payment_by_order_id(order_id="ord-dup1")
+
+    assert result["paymentKey"] == "pay_key_recovered"
+    call_args = mock_client.__aenter__.return_value.get.call_args
+    assert call_args.args[0].endswith("/v1/payments/orders/ord-dup1")
+
+
+# ─── charge_org — 원자적 claim + orderId-먼저-기록 오케스트레이션 ──────────
 
 def _mock_billing_key_row(*, org_id: uuid.UUID):
     row = MagicMock()
@@ -90,6 +113,19 @@ def _mock_billing_key_row(*, org_id: uuid.UUID):
     row.customer_key = "cust_existing"
     row.encrypted_billing_key = "enc-token"
     return row
+
+
+def _claimed_result(rowcount: int) -> MagicMock:
+    r = MagicMock()
+    r.rowcount = rowcount
+    return r
+
+
+def _row_result(row) -> MagicMock:
+    r = MagicMock()
+    r.scalar_one_or_none.return_value = row
+    r.scalar_one.return_value = row
+    return r
 
 
 @pytest.mark.anyio
@@ -104,16 +140,14 @@ async def test_charge_org_rejects_non_positive_amount():
 
 @pytest.mark.anyio
 async def test_charge_org_confirmed_order_short_circuits_no_toss_call(monkeypatch):
-    """진짜 멱등 — 이미 confirmed면 Toss를 다시 안 부른다."""
+    """진짜 멱등 — claim이 conflict(rowcount=0)나고 기존 행이 confirmed면 Toss를 안 부른다."""
     from app.models.billing_order import BillingOrder
     import app.services.billing_charge as svc
 
     confirmed_row = MagicMock(spec=BillingOrder)
     confirmed_row.status = "confirmed"
     session = AsyncMock()
-    existing_result = MagicMock()
-    existing_result.scalar_one_or_none.return_value = confirmed_row
-    session.execute = AsyncMock(return_value=existing_result)
+    session.execute = AsyncMock(side_effect=[_claimed_result(0), _row_result(confirmed_row)])
 
     charge_mock = AsyncMock()
     monkeypatch.setattr(svc.TossAdapter, "charge", charge_mock)
@@ -122,7 +156,87 @@ async def test_charge_org_confirmed_order_short_circuits_no_toss_call(monkeypatc
 
     assert result is confirmed_row
     charge_mock.assert_not_awaited()
-    session.execute.assert_awaited_once()  # existing-check만, pending insert도 안 함
+    assert session.execute.await_count == 2  # claim(conflict) + 기존행 조회. 그 이상 안 감.
+
+
+@pytest.mark.anyio
+async def test_charge_org_pending_owned_by_other_returns_without_toss_call(monkeypatch):
+    """블로커1 근본fix 확인 — claim에 지고 기존 행이 pending이면(다른 호출이 소유 중) 이
+    호출은 끼어들지 않고 그대로 반환한다(동시 Toss 이중호출 원천 차단)."""
+    from app.models.billing_order import BillingOrder
+    import app.services.billing_charge as svc
+
+    pending_row = MagicMock(spec=BillingOrder)
+    pending_row.status = "pending"
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[_claimed_result(0), _row_result(pending_row)])
+
+    charge_mock = AsyncMock()
+    monkeypatch.setattr(svc.TossAdapter, "charge", charge_mock)
+
+    result = await svc.charge_org(session, org_id=uuid.uuid4(), order_id="ord-inflight", amount_minor=29000, currency="krw")
+
+    assert result is pending_row
+    charge_mock.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_charge_org_failed_order_reclaimed_and_retried(monkeypatch):
+    """failed였던 order는 CAS(failed→pending)로 재claim에 성공하면 재시도한다."""
+    import app.services.billing_charge as svc
+
+    org_id = uuid.uuid4()
+    order_id = "ord-retry"
+    failed_row = MagicMock()
+    failed_row.status = "failed"
+    billing_key_row = _mock_billing_key_row(org_id=org_id)
+    confirmed_row = MagicMock()
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[
+        _claimed_result(0),           # claim insert — 이미 존재(conflict)
+        _row_result(failed_row),      # 기존 행 조회 — failed
+        _claimed_result(1),           # CAS(failed→pending) 성공
+        _row_result(billing_key_row),  # billing key 조회
+        _row_result(confirmed_row),   # _confirm_with_ledger의 update
+        _row_result(confirmed_row),   # _confirm_with_ledger의 refetch
+    ])
+
+    monkeypatch.setattr(svc, "ensure_configured", MagicMock())
+    monkeypatch.setattr(svc, "decrypt_billing_key", MagicMock(return_value="plaintext_bk"))
+    monkeypatch.setattr(svc.TossAdapter, "charge", AsyncMock(return_value={"paymentKey": "pay_retry_1"}))
+    monkeypatch.setattr(svc, "record_ledger_entry", AsyncMock())
+
+    result = await svc.charge_org(session, org_id=org_id, order_id=order_id, amount_minor=29000, currency="krw")
+
+    assert result is confirmed_row
+    svc.TossAdapter.charge.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_charge_org_failed_reclaim_race_lost_returns_existing(monkeypatch):
+    """failed→pending CAS가 레이스에서 졌으면(다른 호출이 먼저 낚아챔) 이 호출은 포기하고
+    현재 상태를 그대로 반환한다 — Toss를 부르지 않는다."""
+    import app.services.billing_charge as svc
+
+    other_owned_row = MagicMock()
+    other_owned_row.status = "pending"
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[
+        _claimed_result(0),
+        _row_result(MagicMock(status="failed")),
+        _claimed_result(0),  # CAS 레이스 패배
+        _row_result(other_owned_row),
+    ])
+
+    charge_mock = AsyncMock()
+    monkeypatch.setattr(svc.TossAdapter, "charge", charge_mock)
+
+    result = await svc.charge_org(session, org_id=uuid.uuid4(), order_id="ord-race", amount_minor=29000, currency="krw")
+
+    assert result is other_owned_row
+    charge_mock.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -131,11 +245,11 @@ async def test_charge_org_no_active_billing_key_raises(monkeypatch):
 
     org_id = uuid.uuid4()
     session = AsyncMock()
-    no_existing_order = MagicMock()
-    no_existing_order.scalar_one_or_none.return_value = None
-    no_billing_key = MagicMock()
-    no_billing_key.scalar_one_or_none.return_value = None
-    session.execute = AsyncMock(side_effect=[no_existing_order, no_billing_key])
+    session.execute = AsyncMock(side_effect=[
+        _claimed_result(1),       # claim 성공(신규)
+        _row_result(None),        # billing key 없음
+        _claimed_result(0),       # _mark_failed_if_not_confirmed의 update
+    ])
 
     monkeypatch.setattr(svc, "ensure_configured", MagicMock())
 
@@ -145,15 +259,13 @@ async def test_charge_org_no_active_billing_key_raises(monkeypatch):
 
 @pytest.mark.anyio
 async def test_charge_org_checks_crypto_before_calling_toss(monkeypatch):
-    """PO nit①과 동형 규율 — charge도 되돌릴 수 없는 외부호출 前에 crypto 가용성 확認."""
+    """PO nit①과 동형 규율 — claim에 성공한 뒤에도, Toss 호출 前에 crypto 가용성부터 확認."""
     import app.services.billing_charge as svc
     from app.services.billing_key_crypto import BillingKeyEncryptionNotConfigured
 
     org_id = uuid.uuid4()
     session = AsyncMock()
-    no_existing_order = MagicMock()
-    no_existing_order.scalar_one_or_none.return_value = None
-    session.execute = AsyncMock(return_value=no_existing_order)
+    session.execute = AsyncMock(side_effect=[_claimed_result(1)])
 
     monkeypatch.setattr(
         svc, "ensure_configured", MagicMock(side_effect=BillingKeyEncryptionNotConfigured("x"))
@@ -165,33 +277,26 @@ async def test_charge_org_checks_crypto_before_calling_toss(monkeypatch):
         await svc.charge_org(session, org_id=org_id, order_id="ord-x", amount_minor=29000, currency="krw")
 
     charge_mock.assert_not_awaited()
-    # existing-check(1)만 — billing key 조회·pending insert 전부 crypto 확認보다 먼저 안 감.
-    assert session.execute.await_count == 1
+    assert session.execute.await_count == 1  # claim(성공)만 — billing key 조회도 안 감.
 
 
 @pytest.mark.anyio
 async def test_charge_org_writes_pending_before_calling_toss(monkeypatch):
-    """⭐orderId-먼저-기록 — Toss charge 호출 前에 billing_orders가 pending으로 먼저
-    기록되는지 순서를 직접 증명한다."""
+    """⭐orderId-먼저-기록 — 원자적 claim(INSERT) 자체가 Toss charge 호출 前에 커밋되는지
+    순서를 직접 증명한다."""
     import app.services.billing_charge as svc
 
     org_id = uuid.uuid4()
     order_id = "ord-order1"
-    session = AsyncMock()
-
-    no_existing_order = MagicMock()
-    no_existing_order.scalar_one_or_none.return_value = None
-    billing_key_result = MagicMock()
-    billing_key_result.scalar_one_or_none.return_value = _mock_billing_key_row(org_id=org_id)
-    pending_insert_result = MagicMock()
-    confirmed_update_result = MagicMock()
-    final_select_result = MagicMock()
+    billing_key_row = _mock_billing_key_row(org_id=org_id)
     final_row = MagicMock()
-    final_select_result.scalar_one.return_value = final_row
 
+    session = AsyncMock()
     session.execute = AsyncMock(side_effect=[
-        no_existing_order, billing_key_result, pending_insert_result,
-        confirmed_update_result, final_select_result,
+        _claimed_result(1),          # ⭐claim insert(성공) — 가장 먼저.
+        _row_result(billing_key_row),
+        _row_result(final_row),      # _confirm_with_ledger의 confirmed update
+        _row_result(final_row),      # _confirm_with_ledger의 refetch
     ])
     session.commit = AsyncMock()
 
@@ -207,54 +312,147 @@ async def test_charge_org_writes_pending_before_calling_toss(monkeypatch):
     result = await svc.charge_org(session, org_id=org_id, order_id=order_id, amount_minor=29000, currency="krw")
 
     assert result is final_row
-    # 3번째 session.execute 호출(pending insert)이 pg_insert INSERT..ON CONFLICT문이었는지.
-    pending_insert_call = session.execute.call_args_list[2]
-    compiled = pending_insert_call.args[0].compile().params
+    # 1번째 호출(claim)이 pg_insert INSERT..ON CONFLICT DO NOTHING이었는지 — Toss charge
+    # 는 그 뒤에야(mock side_effect 순서가 이를 강제) 호출됨.
+    claim_call = session.execute.call_args_list[0]
+    compiled = claim_call.args[0].compile().params
     assert compiled["order_id"] == order_id
     assert compiled["status"] == "pending"
-    # 4번째 호출(confirmed update)이 결제 성공 뒤에야 실행됨 — call_args_list 순서 자체가
-    # pending(2번째 인덱스)이 먼저, Toss 결과 반영 update(3번째 인덱스)가 그 다음임을 보증
-    # (mock side_effect가 순서대로 소비되므로 이 assert가 실패하면 순서가 깨진 것).
-    confirmed_update_call = session.execute.call_args_list[3]
-    update_compiled = confirmed_update_call.args[0].compile().params
-    assert update_compiled["status"] == "confirmed"
-    assert update_compiled["payment_key"] == "pay_key_xyz"
 
+    # ⛔블로커2 순서 확인 — record_ledger_entry가 confirmed-update보다 먼저 불려야(코드
+    # 순서상 항상 그렇지만, AsyncMock 호출 자체가 일어났는지+kwargs로 재확認).
     svc.record_ledger_entry.assert_awaited_once()
     ledger_kwargs = svc.record_ledger_entry.call_args.kwargs
     assert ledger_kwargs["provider_ref"] == "pay_key_xyz"
     assert ledger_kwargs["entry_type"] == "charge"
 
+    confirmed_update_call = session.execute.call_args_list[2]
+    update_compiled = confirmed_update_call.args[0].compile().params
+    assert update_compiled["status"] == "confirmed"
+    assert update_compiled["payment_key"] == "pay_key_xyz"
+
 
 @pytest.mark.anyio
 async def test_charge_org_toss_failure_marks_order_failed_and_reraises(monkeypatch):
     import app.services.billing_charge as svc
+    from app.services.payment.toss_adapter import TossApiError
 
     org_id = uuid.uuid4()
+    billing_key_row = _mock_billing_key_row(org_id=org_id)
     session = AsyncMock()
-    no_existing_order = MagicMock()
-    no_existing_order.scalar_one_or_none.return_value = None
-    billing_key_result = MagicMock()
-    billing_key_result.scalar_one_or_none.return_value = _mock_billing_key_row(org_id=org_id)
-    pending_insert_result = MagicMock()
-    failed_update_result = MagicMock()
     session.execute = AsyncMock(side_effect=[
-        no_existing_order, billing_key_result, pending_insert_result, failed_update_result,
+        _claimed_result(1), _row_result(billing_key_row), _claimed_result(1),
     ])
-    session.commit = AsyncMock()
 
     monkeypatch.setattr(svc, "ensure_configured", MagicMock())
     monkeypatch.setattr(svc, "decrypt_billing_key", MagicMock(return_value="plaintext_bk"))
     monkeypatch.setattr(
-        svc.TossAdapter, "charge", AsyncMock(side_effect=RuntimeError("Toss charge failed: EXCEED_MAX_DAILY_PAYMENT_COUNT"))
+        svc.TossAdapter, "charge",
+        AsyncMock(side_effect=TossApiError("EXCEED_MAX_DAILY_PAYMENT_COUNT", "too many", status_code=400)),
     )
     monkeypatch.setattr(svc, "record_ledger_entry", AsyncMock())
 
-    with pytest.raises(RuntimeError, match="EXCEED_MAX_DAILY_PAYMENT_COUNT"):
+    with pytest.raises(TossApiError, match="EXCEED_MAX_DAILY_PAYMENT_COUNT"):
         await svc.charge_org(session, org_id=org_id, order_id="ord-fail", amount_minor=29000, currency="krw")
 
-    failed_call = session.execute.call_args_list[3]
+    failed_call = session.execute.call_args_list[2]
     compiled = failed_call.args[0].compile().params
     assert compiled["status"] == "failed"
     assert "EXCEED_MAX_DAILY_PAYMENT_COUNT" in compiled["failure_reason"]
+    svc.record_ledger_entry.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_charge_org_missing_payment_key_marks_failed(monkeypatch):
+    """PO nit — Toss 응답에 paymentKey가 없으면(malformed) crash 대신 명시 failed."""
+    import app.services.billing_charge as svc
+
+    org_id = uuid.uuid4()
+    billing_key_row = _mock_billing_key_row(org_id=org_id)
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[
+        _claimed_result(1), _row_result(billing_key_row), _claimed_result(1),
+    ])
+
+    monkeypatch.setattr(svc, "ensure_configured", MagicMock())
+    monkeypatch.setattr(svc, "decrypt_billing_key", MagicMock(return_value="plaintext_bk"))
+    monkeypatch.setattr(svc.TossAdapter, "charge", AsyncMock(return_value={"status": "DONE"}))  # paymentKey 없음
+    monkeypatch.setattr(svc, "record_ledger_entry", AsyncMock())
+
+    with pytest.raises(RuntimeError, match="missing paymentKey"):
+        await svc.charge_org(session, org_id=org_id, order_id="ord-malformed", amount_minor=29000, currency="krw")
+
+    svc.record_ledger_entry.assert_not_awaited()
+
+
+# ─── DUPLICATED_ORDER_ID — 재시도가 이미 성공한 charge를 다시 치는 케이스 ──
+
+@pytest.mark.anyio
+async def test_charge_org_duplicated_order_id_reconciles_as_success(monkeypatch):
+    """⚠️PO 권장 처리 — DUPLICATED_ORDER_ID는 진짜 실패가 아니다. 조회해서 DONE이면
+    confirmed+원장으로 매핑(failed로 오마킹하지 않는다)."""
+    import app.services.billing_charge as svc
+    from app.services.payment.toss_adapter import TossApiError
+
+    org_id = uuid.uuid4()
+    billing_key_row = _mock_billing_key_row(org_id=org_id)
+    confirmed_row = MagicMock()
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[
+        _claimed_result(1), _row_result(billing_key_row),
+        _row_result(confirmed_row),  # _confirm_with_ledger의 update
+        _row_result(confirmed_row),  # _confirm_with_ledger의 refetch
+    ])
+
+    monkeypatch.setattr(svc, "ensure_configured", MagicMock())
+    monkeypatch.setattr(svc, "decrypt_billing_key", MagicMock(return_value="plaintext_bk"))
+    monkeypatch.setattr(
+        svc.TossAdapter, "charge",
+        AsyncMock(side_effect=TossApiError("DUPLICATED_ORDER_ID", "dup", status_code=400)),
+    )
+    monkeypatch.setattr(
+        svc.TossAdapter, "get_payment_by_order_id",
+        AsyncMock(return_value={"status": "DONE", "paymentKey": "pay_recovered"}),
+    )
+    monkeypatch.setattr(svc, "record_ledger_entry", AsyncMock())
+
+    result = await svc.charge_org(session, org_id=org_id, order_id="ord-dup2", amount_minor=29000, currency="krw")
+
+    assert result is confirmed_row
+    svc.record_ledger_entry.assert_awaited_once()
+    assert svc.record_ledger_entry.call_args.kwargs["provider_ref"] == "pay_recovered"
+
+
+@pytest.mark.anyio
+async def test_charge_org_duplicated_order_id_not_done_marks_failed(monkeypatch):
+    """조회 결과가 DONE이 아니면(취소 등) — 이번엔 진짜 failed로 정합."""
+    import app.services.billing_charge as svc
+    from app.services.payment.toss_adapter import TossApiError
+
+    org_id = uuid.uuid4()
+    billing_key_row = _mock_billing_key_row(org_id=org_id)
+    failed_row = MagicMock()
+    failed_row.status = "failed"
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[
+        _claimed_result(1), _row_result(billing_key_row),
+        _claimed_result(1),  # _mark_failed_if_not_confirmed
+        _row_result(failed_row),  # refetch
+    ])
+
+    monkeypatch.setattr(svc, "ensure_configured", MagicMock())
+    monkeypatch.setattr(svc, "decrypt_billing_key", MagicMock(return_value="plaintext_bk"))
+    monkeypatch.setattr(
+        svc.TossAdapter, "charge",
+        AsyncMock(side_effect=TossApiError("DUPLICATED_ORDER_ID", "dup", status_code=400)),
+    )
+    monkeypatch.setattr(
+        svc.TossAdapter, "get_payment_by_order_id",
+        AsyncMock(return_value={"status": "CANCELED"}),
+    )
+    monkeypatch.setattr(svc, "record_ledger_entry", AsyncMock())
+
+    result = await svc.charge_org(session, org_id=org_id, order_id="ord-dup3", amount_minor=29000, currency="krw")
+
+    assert result.status == "failed"
     svc.record_ledger_entry.assert_not_awaited()

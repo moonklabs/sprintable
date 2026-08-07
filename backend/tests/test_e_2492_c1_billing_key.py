@@ -159,6 +159,15 @@ def test_billing_key_crypto_not_configured_raises(monkeypatch):
         crypto.encrypt_billing_key("x")
 
 
+def test_ensure_configured_catches_malformed_key_not_just_missing(monkeypatch):
+    """PO 재지적(#2882 C2 리뷰) — 「있지만 malformed」 키(Fernet이 기대하는 base64 형식이
+    아님)도 ensure_configured()가 실제 MultiFernet 구성까지 해봐서 이 시점에 잡아야 한다
+    (문자열 존재 여부만 보는 얕은 체크였으면 여길 통과하고 Toss 호출 後에야 터졌을 것)."""
+    crypto = _fresh_crypto_module_with_keys(monkeypatch, "not-a-valid-fernet-key")
+    with pytest.raises(ValueError, match="Fernet key"):
+        crypto.ensure_configured()
+
+
 # ─── org_billing_key.issue_billing_key — 오케스트레이션 ────────────────────
 
 @pytest.mark.anyio
