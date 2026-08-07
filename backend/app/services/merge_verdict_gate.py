@@ -478,10 +478,20 @@ async def reconcile_merge_gate_with_real_evidence(
     (`_preflight_merge_gate`/board-done 경로는 컨텍스트가 없어 ci_result=None으로만 게이트를
     만드니 매번 "CI unknown (self-report only)"로 굳는 게 근본).
 
-    pending인 merge-type 게이트가 있을 때만 `evaluate_merge_gate`를 실 증거로 재호출 —
-    새 판정 로직 0개, 기존 `_decide()`/trust/outcome을 그대로 재사용한다. story가 이미
-    board-done으로 먼저 넘어가 있어도 이 재평가는 gate row(audit) 갱신만 하고 story.status는
-    건드리지 않는다 — advisory(관측)/enforcing(집행) 축과 분리(그건 선생님 판단 축).
+    pending 또는 auto_passed인 merge-type 게이트가 있을 때만 `evaluate_merge_gate`를 실
+    증거로 재호출 — 새 판정 로직 0개, 기존 `_decide()`/trust/outcome을 그대로 재사용한다.
+    story가 이미 board-done으로 먼저 넘어가 있어도 이 재평가는 gate row(audit) 갱신만 하고
+    story.status는 건드리지 않는다 — advisory(관측)/enforcing(집행) 축과 분리(그건 선생님
+    판단 축).
+
+    ⭐카디르 QA(PR#2902, 2026-08-07)②: `status` 축(정책 disposition)과 `requires_human` 축
+    (증거 기반 decision)이 서로 다른 필드다 — `create_gate` 시점 `status="auto_passed"`(정책이
+    allow_auto)였어도 이후 `evaluate_merge_gate`가 self-report(ci=None) 등으로 재평가하며
+    `requires_human=True`(decision=ask_human)를 남겼을 수 있다. `status=="pending"`만 보면
+    이런 "auto_passed인데 실은 사람이 봐야 하는" 게이트를 놓친다 — `status IN
+    (pending, auto_passed)`로 넓힌다. `rejected`/`voided`/`held`는 의도적으로 제외한다(사람이
+    이미 명시 결정했거나 일시정지한 것을 CI 이벤트로 조용히 재오픈/간섭하면 안 된다 —
+    `create_gate`의 rejected 멱등 재오픈 분기가 웹훅 이벤트로 우발 트리거되는 것을 막는다).
 
     ⚠️호출 위치 주의 — `evaluate_merge_gate` 자신이 내부에서 `capture_pr_ci_verdict`를 이미
     부른다. 이 함수를 `capture_pr_ci_verdict` 본문 안에서 부르면 무한 재귀가 된다 — 반드시
@@ -493,7 +503,7 @@ async def reconcile_merge_gate_with_real_evidence(
             Gate.work_item_id == story_id,
             Gate.work_item_type == "story",
             Gate.gate_type == MERGE_GATE_TYPE,
-            Gate.status == "pending",
+            Gate.status.in_(("pending", "auto_passed")),
         ).limit(1)
     )
     if existing.scalar_one_or_none() is None:

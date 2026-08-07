@@ -449,20 +449,19 @@ async def _process_webhook_event(
     # story #2156 AC2(2026-08-07) — 위 capture_pr_ci_verdict가 Verdict(신뢰축)엔 이미 실
     # 증거를 정확히 기록했는데, resolve_gate_from_verdict(capture_pr_ci_verdict 내부)의
     # _SOURCE_TO_GATE_TYPE엔 merge 매핑이 없어 그 증거가 merge-type 게이트엔 안 닿았다 —
-    # pending merge 게이트가 있을 때만 evaluate_merge_gate를 실 증거로 재호출해 반영한다.
-    # ⚠️capture_pr_ci_verdict 리턴 後 별도 호출(evaluate_merge_gate가 내부에서 capture_pr_
-    # ci_verdict를 다시 부르므로, 그 함수 안에서 이걸 부르면 무한 재귀가 된다).
+    # pending/auto_passed merge 게이트가 있을 때만 evaluate_merge_gate를 실 증거로 재호출해
+    # 반영한다. ⚠️capture_pr_ci_verdict 리턴 後 별도 호출(evaluate_merge_gate가 내부에서
+    # capture_pr_ci_verdict를 다시 부르므로, 그 함수 안에서 이걸 부르면 무한 재귀가 된다).
+    #
+    # ⭐카디르 QA(PR#2902, 2026-08-07)③: try/except로 여기서 삼키면 일시적 DB 오류가 "이번
+    # 배달은 영구 no-op(processed로 커밋)"이 돼 GitHub 재시도를 못 받는다(delivery 모델
+    # 자체 계약 — "실패=rollback→retry 보존"). 이 함수 밖(github_webhook)이 이미 예외를
+    # 전체 rollback+500으로 처리해 GitHub가 재시도하므로, 여기서 삼키지 않고 그대로 올린다.
     if merge_gate_active(org_id):
-        try:
-            await reconcile_merge_gate_with_real_evidence(
-                session, org_id, story_id,
-                pr_number=pr_number, repo=repo, ci_result=ci_conclusion, merged=merged,
-            )
-        except Exception:
-            logger.warning(
-                "merge gate reconcile failed story=%s (swallowed·best-effort)",
-                story_id, exc_info=True,
-            )
+        await reconcile_merge_gate_with_real_evidence(
+            session, org_id, story_id,
+            pr_number=pr_number, repo=repo, ci_result=ci_conclusion, merged=merged,
+        )
 
     # ⭐story #2327 후속(PO 판정, 2026-07-30, PR#2685 실 웹훅 시험대가 드러낸 갭) — merge 시
     # PullRequestStoryLink 에도 쓴다. `Verdict`(record_verdict, 위 capture_pr_ci_verdict 안)에도

@@ -285,6 +285,108 @@ async def test_create_gate_sets_requires_human_true_for_pending_non_merge_gate_r
 
 
 @pytest.mark.anyio
+async def test_reconcile_picks_up_auto_passed_gate_with_requires_human_true_realdb():
+    """⭐카디르 QA(PR#2902, 2026-08-07)② — status="pending"만 보면 "정책은 allow_auto(status=
+    auto_passed)였는데 이후 self-report 재평가가 requires_human=True를 남긴" 게이트를
+    reconcile이 놓친다. 이 케이스를 실제로 재현(disposition=allow_auto+pr_number>0으로
+    status=auto_passed 게이트 생성 → ci=None 재평가로 requires_human=True만 남음)하고,
+    reconcile이 그런 게이트도 실 증거로 갱신함을 고정한다."""
+    from app.services.merge_verdict_gate import evaluate_merge_gate, reconcile_merge_gate_with_real_evidence
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_story_with_participation(s)
+
+            with patch(
+                "app.services.gate_service.resolve_disposition",
+                AsyncMock(return_value=("allow_auto", "org_policy")),
+            ):
+                # pr_number>0(no-substance 단축 회피) + ci=None → status=auto_passed로
+                # 생성되지만 _decide()는 ci=None이라 무조건 ASK_HUMAN → requires_human=True.
+                # ⚠️patch 대상은 create_gate가 실제로 부르는 gate_service.py의 자기 바인딩
+                # (merge_verdict_gate.py의 no-substance 체크용 바인딩과 다르다 — pr_number>0
+                # 이라 그 체크는 안 거친다).
+                await evaluate_merge_gate(
+                    s, seeded["org_id"], seeded["story_id"],
+                    pr_number=99, repo="moonklabs/sprintable", ci_result=None, pr_result=None,
+                )
+                await s.commit()
+
+                gate = await _gate_row(s, seeded["story_id"])
+                assert gate.status == "auto_passed"
+                assert gate.requires_human is True, "카디르가 짚은 그 불일치 상태 재현 실패"
+
+                decision = await reconcile_merge_gate_with_real_evidence(
+                    s, seeded["org_id"], seeded["story_id"],
+                    pr_number=99, repo="moonklabs/sprintable", ci_result="pass", merged=True,
+                )
+            await s.commit()
+
+            assert decision is not None, (
+                "status=='pending'만 보면 auto_passed+requires_human=True 게이트를 놓친다"
+            )
+            gate = await _gate_row(s, seeded["story_id"])
+            assert gate.decision_basis != "CI unknown (self-report only)"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_process_webhook_event_does_not_swallow_reconcile_exception():
+    """⭐카디르 QA(PR#2902, 2026-08-07)③ — reconcile 실패를 이 함수 안에서 삼키면 일시 DB
+    오류가 그 배달을 "processed"로 영구 커밋시켜 GitHub 재시도를 못 받는다. github_webhook
+    (바깥 핸들러)이 이미 예외를 rollback+500으로 처리해 GitHub가 재시도하므로, 여기선 그대로
+    올려야 한다."""
+    from app.models.github_installation import GithubInstallation, GithubWebhookDelivery
+    from app.routers.verdict_capture import _process_webhook_event
+    from app.services.pr_story_link import ResolvedLink
+
+    story_id = uuid.uuid4()
+    org_id = uuid.uuid4()
+    installation = GithubInstallation(
+        id=uuid.uuid4(), installation_id=123, org_id=org_id, account_login="moonklabs",
+    )
+    delivery = GithubWebhookDelivery(
+        id=uuid.uuid4(), source="app", delivery_id="d1", event="pull_request", status="received",
+    )
+    payload = {
+        "repository": {"full_name": "moonklabs/sprintable"},
+        "pull_request": {
+            "number": 42, "merged": True, "title": "fix(#1): x",
+            "head": {"ref": "fix/1-x", "sha": "abc"},
+        },
+        "action": "closed",
+        "installation": {"id": 123},
+    }
+
+    session = AsyncMock()
+    exec_result = AsyncMock()
+    exec_result.scalar_one_or_none = lambda: installation
+    session.execute = AsyncMock(return_value=exec_result)
+
+    with (
+        patch(
+            "app.routers.verdict_capture.resolve_story_for_pr",
+            AsyncMock(return_value=ResolvedLink(story_id, org_id, "sid", "high", True, "sid_exact")),
+        ),
+        patch(
+            "app.routers.verdict_capture.capture_pr_ci_verdict",
+            AsyncMock(return_value={"recorded": ["pr"], "skipped_reason": None}),
+        ),
+        patch("app.routers.verdict_capture.merge_link_evidence", AsyncMock()),
+        patch("app.routers.verdict_capture.get_installation_token", AsyncMock(return_value=None)),
+        patch("app.routers.verdict_capture.merge_gate_active", lambda _org_id: True),
+        patch(
+            "app.routers.verdict_capture.reconcile_merge_gate_with_real_evidence",
+            AsyncMock(side_effect=RuntimeError("transient db error")),
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="transient db error"):
+            await _process_webhook_event(session, "app", "pull_request", payload, 123, delivery)
+
+
+@pytest.mark.anyio
 async def test_create_gate_sets_requires_human_false_for_auto_passed_gate_realdb():
     """회귀 0 — disposition=allow_auto(status=auto_passed)면 requires_human=False가 여전히
     맞다(사람이 볼 필요 없는 게 사실)."""
