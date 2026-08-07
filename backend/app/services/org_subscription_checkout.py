@@ -161,9 +161,22 @@ async def checkout_subscription(
 
         # ④ 청구 성공 時에만 active — 그 외(pending=경쟁 중·failed 도달 안 함, 위에서 잡힘)는
         # active로 안 올린다.
+        #
+        # 카디르 결함사냥(codex, #2896 리뷰, 2026-08-07) CRITICAL — 이 UPDATE가 org_id로만
+        # 매칭하면 이 호출의 claim이 STALE_CLAIM_WINDOW를 넘겨 이미 다른 요청에게 뺏긴
+        # 뒤(자기는 안 죽고 그냥 느렸을 뿐 — Toss charge 65초+issue 15초 정상 왕복만으로도
+        # 합이 STALE_CLAIM_WINDOW에 근접·초과할 수 있다, 이론이 아니라 실 타임아웃 스펙)
+        # 늦게 도착한 confirmed 결과가, 그 사이 새로 claim을 쥐고 아직 자기 charge를
+        # confirm받지 못한(status='pending') 다른 요청의 tier 행을 소유권 재확認 없이
+        # active로 밀어버릴 수 있었다 — release와 동일한 CAS(checkout_claimed_at==이
+        # 호출이 claim한 그 값)를 걸어, 이미 뺏긴 뒤라면(rowcount==0) active로 안 올린다
+        # (이 호출 자신의 charge_org 청구 자체는 이미 confirmed로 남아 있다 — 그 청구를
+        # 취소하는 건 이 fix의 범위 밖, C4/화불 축).
         if order.status == "confirmed":
             await session.execute(
-                update(OrgSubscription).where(OrgSubscription.org_id == org_id).values(status="active")
+                update(OrgSubscription)
+                .where(OrgSubscription.org_id == org_id, OrgSubscription.checkout_claimed_at == now)
+                .values(status="active")
             )
             await session.commit()
 

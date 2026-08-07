@@ -121,6 +121,13 @@ async def test_checkout_activates_subscription_when_charge_confirmed():
     assert compiled["tier"] == "team"
     assert compiled["billing_cycle"] == "monthly"
 
+    # 카디르 CRITICAL fix(codex, #2896 리뷰) — ④ activate UPDATE도 release와 동일한
+    # CAS(checkout_claimed_at==이 호출이 claim한 값)가 걸려 있어야 한다. 세 번째 execute
+    # 호출(claim 다음).
+    activate_call = session.execute.call_args_list[2]
+    activate_where_literal = str(activate_call.args[0].whereclause)
+    assert "checkout_claimed_at" in activate_where_literal
+
 
 @pytest.mark.anyio
 async def test_checkout_rejects_when_another_checkout_already_in_progress():

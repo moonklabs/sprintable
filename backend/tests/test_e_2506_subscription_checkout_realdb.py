@@ -263,6 +263,127 @@ async def test_checkout_concurrent_different_tier_charges_at_most_once_realdb():
 
 
 @pytest.mark.anyio
+async def test_checkout_stale_reclaimed_late_confirm_does_not_premature_activate_realdb():
+    """#2511 — 카디르 재QA(codex, #2896 리뷰, 2026-08-07) CRITICAL 재현+fix 검증.
+
+    시나리오: A(starter)가 claim한 直後 STALE_CLAIM_WINDOW를 넘겨(Toss charge 65초+
+    issue 15초 정상 왕복만으로도 합이 근접·초과할 수 있음 — A는 죽은 게 아니라 그냥
+    느린 것) B(team)가 claim을 정당하게 뺏어 자기 흐름을 진행 中(아직 자기 charge는
+    confirm 前, status='pending')인데, 그 사이 A의 원래 charge가 뒤늦게 confirmed로
+    돌아온다. fix 前엔 step④ activate UPDATE가 org_id로만 매칭해 A의 뒤늦은 confirm이
+    B의 아직 미확定 tier 행을 소유권 재확認 없이 곧장 active로 밀어버렸다 — 그 뒤 B의
+    실제 charge가 카드 거절로 실패해도(TossApiError) declined 경로는 status를 다시
+    되돌리지 않으므로, "확정된 결제가 하나도 없는데 active"라는 영구 오염이 남는다.
+
+    이 테스트는 정확히 그 타이밍을 asyncio.Event 2개로 결정론적으로 강제한다(진짜
+    시간 경과 대신 STALE_CLAIM_WINDOW를 음수로 monkeypatch해 "이미 지남" 조건만
+    재현 — 3분을 실제로 기다리지 않는다)."""
+    import asyncio
+    from datetime import timedelta
+
+    import app.services.org_subscription_checkout as checkout_module
+    from app.services.org_subscription_checkout import CheckoutDeclined, checkout_subscription
+    from app.services.payment.toss_adapter import TossApiError
+
+    org_id = uuid.uuid4()
+    engine_a = create_async_engine(_ASYNC)
+    engine_b = create_async_engine(_ASYNC)
+    Session_a = async_sessionmaker(engine_a, expire_on_commit=False)
+    Session_b = async_sessionmaker(engine_b, expire_on_commit=False)
+
+    seed_engine = create_async_engine(_ASYNC)
+    try:
+        async with async_sessionmaker(seed_engine, expire_on_commit=False)() as seed_session:
+            # _seed_org_with_members는 매번 새 org_id를 만들어버리므로(여기선 미리 정한
+            # org_id가 필요) 직접 멤버만 심는다.
+            for _ in range(3):
+                await seed_session.execute(
+                    text("INSERT INTO org_members (id, org_id, user_id, role) VALUES (:id, :org_id, :uid, 'member')"),
+                    {"id": uuid.uuid4(), "org_id": org_id, "uid": uuid.uuid4()},
+                )
+            await seed_session.commit()
+    finally:
+        await seed_engine.dispose()
+
+    b_ready = asyncio.Event()   # B가 claim(뺏기)+issuance까지 끝냈다 — A는 이제 진행해도 됨
+    a_done = asyncio.Event()    # A가 자기 흐름(step④ 포함)을 완전히 끝냈다 — B는 이제 charge해도 됨
+    charge_call_count = {"n": 0}
+
+    async def _post_mock(self, path, *, json, timeout, op_label, idempotency_key=None):
+        auth = json.get("authKey")
+        if op_label == "billing key issuance" and auth == "ak-b-fast":
+            b_ready.set()
+            await a_done.wait()  # B는 A가 완전히 끝날 때까지 자기 charge를 미룬다.
+            return {
+                "billingKey": "billing-key-B", "card": {"issuerCode": "61", "acquirerCode": "31", "number": "12345678****000*", "cardType": "신용", "ownerType": "개인"},
+                "authenticatedAt": "2026-08-07T00:00:00+09:00",
+            }
+        if op_label == "billing key issuance" and auth == "ak-a-slow":
+            await b_ready.wait()  # A는 B가 claim을 뺏어갈 시간을 번다(=STALE_CLAIM_WINDOW 초과 흉내).
+            return {
+                "billingKey": "billing-key-A", "card": {"issuerCode": "61", "acquirerCode": "31", "number": "12345678****000*", "cardType": "신용", "ownerType": "개인"},
+                "authenticatedAt": "2026-08-07T00:00:00+09:00",
+            }
+        if op_label == "charge":
+            charge_call_count["n"] += 1
+            if charge_call_count["n"] == 1:
+                return {"paymentKey": f"pay-a-{uuid.uuid4()}", "totalAmount": json["amount"]}  # A — 뒤늦게 confirmed.
+            raise TossApiError("CARD_DECLINED", "카드 거절", status_code=400)  # B — 실제로는 거절.
+        raise AssertionError(f"unexpected _post call: op_label={op_label!r} json={json!r}")
+
+    async def _run_a():
+        result = await checkout_subscription(
+            Session_a(), org_id=org_id, auth_key="ak-a-slow", tier="starter", billing_cycle="monthly",
+        )
+        a_done.set()
+        return result
+
+    async def _run_b():
+        with pytest.raises(CheckoutDeclined) as exc_info:
+            await checkout_subscription(
+                Session_b(), org_id=org_id, auth_key="ak-b-fast", tier="team", billing_cycle="monthly",
+            )
+        return exc_info.value
+
+    try:
+        with patch.object(checkout_module, "STALE_CLAIM_WINDOW", timedelta(seconds=-60)), \
+             patch("app.services.payment.toss_adapter.TossAdapter._post", new=_post_mock):
+            result_a, declined_b = await asyncio.gather(_run_a(), _run_b())
+
+        # A 자신의 반환값도 «현재 org의 실제 상태»(pending — 더 이상 A 소유 아님)를 정직히
+        # 반영한다. A의 charge_org 청구 자체는 confirmed로 남아 있고(별도 축, C4/환불
+        # 대상) — 아래에서 billing_orders로 직접 확認한다.
+        assert result_a.status == "pending"
+
+        verify_engine = create_async_engine(_ASYNC)
+        try:
+            async with async_sessionmaker(verify_engine, expire_on_commit=False)() as verify_session:
+                row = (
+                    await verify_session.execute(
+                        text("SELECT tier, status FROM org_subscriptions WHERE org_id=:oid"), {"oid": org_id}
+                    )
+                ).first()
+                # 핵심 단정 — B의 실제 charge는 거절됐으므로 org의 최종 상태는 «확정된 결제
+                # 없음»을 정직하게 반영해야 한다. A의 뒤늦은 confirm이 여기 status를
+                # active로 밀어버리면(fix 前 버그) 이 assert가 깨진다.
+                assert row.tier == "team"  # B의 claim이 마지막으로 쥔 tier(오염 없음)
+                assert row.status == "pending"  # active로 오염되지 않음(fix 검증 핵심)
+
+                confirmed_orders = (
+                    await verify_session.execute(
+                        text("SELECT COUNT(*) FROM billing_orders WHERE org_id=:oid AND status='confirmed'"),
+                        {"oid": org_id},
+                    )
+                ).scalar_one()
+                assert confirmed_orders == 1  # A의 charge 자체는 실제로 confirmed(별도 축)
+        finally:
+            await verify_engine.dispose()
+    finally:
+        await engine_a.dispose()
+        await engine_b.dispose()
+
+
+@pytest.mark.anyio
 async def test_checkout_unexpected_exception_mid_flow_still_releases_claim_realdb():
     """#2511 — PO/카디르가 못박은 핵심 질문: "claim 성공 요청이 실패하면 claimed_at이
     풀려 재시도되나(락 영구 점유 함정)?" TossApiError(CheckoutDeclined로 잡히는 경로)
