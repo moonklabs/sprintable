@@ -215,6 +215,32 @@ describe('FlowRelationReviewQueue — 실패 처리(고정 폴백, #2485 그라�
   });
 });
 
+describe('FlowRelationReviewQueue — target 조회 실패 방어(PR#2900 카디르 QA LOW①)', () => {
+  it('disables declare/reject when the target story lookup failed — only "나중에"(skip) stays enabled', async () => {
+    const calls: Array<{ url: string }> = [];
+    // /api/stories?ids= 자체가 실패해 targetInfo가 빈 채로 남는 상황을 재현한다.
+    stubFetch(calls, { '/api/stories?ids=': () => ({ ok: false, json: async () => null }) });
+    await renderQueue();
+
+    expect(document.body.textContent).toContain('상대 스토리 정보를 불러오지 못해');
+    const buttons = Array.from(document.querySelectorAll('button'));
+    for (const label of ['여기서 나온 일', '다음에 할 일', '대신하는 일', '종류는 모르겠지만 이어진 건 맞습니다', '관계가 아닙니다']) {
+      const btn = buttons.find((b) => b.textContent === label);
+      expect(btn?.disabled, `${label} should be disabled`).toBe(true);
+    }
+    const laterBtn = buttons.find((b) => b.textContent === '나중에');
+    expect(laterBtn?.disabled).toBe(false);
+
+    // 스킵은 여전히 되고, 서버에 declare/reject 호출은 하나도 안 나간다.
+    await act(async () => {
+      laterBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(calls.some((c) => c.url.includes('/declare') || c.url.includes('/reject'))).toBe(false);
+    expect(document.body.textContent).toContain('2 / 2');
+  });
+});
+
 describe('FlowRelationReviewQueue — 묶음 상한·정렬(AC11·12, 2026-08-07 디디 실측 후속)', () => {
   // ⛔"cap(기본 20) > 실측 max(17)라 초과 경로가 원천 안 걸린다"로 닫지 않는다(#2366 AC9
   // 규율) — queueCap을 일부러 낮춰 실제 초과 상태를 만들고 정렬이 도는지 값으로 잰다.

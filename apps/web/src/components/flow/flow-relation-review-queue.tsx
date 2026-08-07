@@ -177,6 +177,11 @@ export function FlowRelationReviewQueue({
   const candidate = state.queue[state.index];
   const target = targetInfo[candidate.target_id];
   const submitting = itemState.kind === 'submitting';
+  // 카디르 QA(PR#2900, LOW①) — target 조회가 실패하면(전체 실패 또는 이 id만 누락) target이
+  // undefined다. 그때 "#·"만 뜬 채 declare/reject를 활성으로 두면 «상대가 누군지 모르는
+  // 채로 판단»을 허용하는 것 — 종류/기각 응답은 그 판단을 하는 행위라 반드시 막는다.
+  // 「나중에」(스킵, 서버 호출 없음)만 열어 둔다.
+  const targetUnresolved = !target;
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !submitting) onClose(); }}>
@@ -190,14 +195,18 @@ export function FlowRelationReviewQueue({
         <p className="text-xs text-muted-foreground">
           {t('relationReviewProgress', { current: state.index + 1, total: state.queue.length })}
         </p>
-        <p className="text-sm font-medium">{t('relationReviewQuestion')}</p>
+        {targetUnresolved ? (
+          <p role="alert" className="text-xs text-destructive">{t('relationReviewTargetUnresolved')}</p>
+        ) : (
+          <p className="text-sm font-medium">{t('relationReviewQuestion')}</p>
+        )}
         <div className="flex flex-col gap-1.5">
           {PORT_LINK_KINDS.map((kind) => (
             <Button
               key={kind}
               type="button"
               variant="outline"
-              disabled={submitting}
+              disabled={submitting || targetUnresolved}
               onClick={() => handleDeclareWithKind(candidate, kind)}
             >
               {t(`portLinkKind_${kind}`)}
@@ -206,7 +215,7 @@ export function FlowRelationReviewQueue({
           <Button
             type="button"
             variant="ghost"
-            disabled={submitting}
+            disabled={submitting || targetUnresolved}
             onClick={() => handleDeclareUnknownKind(candidate)}
           >
             {t('relationReviewUnknownKind')}
@@ -216,7 +225,7 @@ export function FlowRelationReviewQueue({
           <p role="alert" className="text-xs text-destructive">{itemState.message}</p>
         ) : null}
         <DialogFooter className="flex-row justify-between sm:justify-between">
-          <Button type="button" variant="ghost" disabled={submitting} onClick={() => handleReject(candidate)}>
+          <Button type="button" variant="ghost" disabled={submitting || targetUnresolved} onClick={() => handleReject(candidate)}>
             {t('relationReviewReject')}
           </Button>
           <Button type="button" variant="ghost" disabled={submitting} onClick={handleLater}>

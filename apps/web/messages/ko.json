@@ -503,6 +503,7 @@
     "relationReviewProgress": "{current} / {total}",
     "relationReviewDone": "{count}건 확인함",
     "relationReviewLoadError": "후보를 불러오지 못했습니다",
+    "relationReviewTargetUnresolved": "상대 스토리 정보를 불러오지 못해 판단할 수 없습니다 — 나중에로 넘어가 주세요",
     "flowMapPastCount": "완료 {n}",
     "flowMapPastBundle": "묶음",
     "flowMapPastInternalCount": "안에서 이어진 것 {n}",
