@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
-from app.services.org_billing_key import issue_billing_key
+from app.services.org_billing_key import ensure_customer_key, issue_billing_key
 
 router = APIRouter(prefix="/api/v2/org-billing-keys", tags=["billing", "Organization"])
 
@@ -33,6 +33,31 @@ class BillingKeyResponse(BaseModel):
     card_type: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class CustomerKeyResponse(BaseModel):
+    customer_key: str
+
+
+@router.post("/customer-key", response_model=CustomerKeyResponse)
+async def get_or_create_customer_key(
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+) -> CustomerKeyResponse:
+    """#2512 — FE가 Toss 위젯(`payment({customerKey})`)을 열기 前에 먼저 호출한다.
+    멱등: 이미 발급된 org면 그 값을 그대로 반환, 처음이면 status='awaiting_auth'
+    placeholder 행을 만들어 customer_key만 발급한다. 위젯 인증이 끝나면 FE는 이 값을
+    그대로 들고 authKey와 함께 checkout(`POST /api/v2/org-subscriptions/checkout`)을
+    호출 — 서버는 issue_billing_key()가 이 org의 기존 customer_key를 재사용해 placeholder
+    를 실 빌링키로 덮어쓴다(추가 배선 불요)."""
+    from app.services.project_auth import is_org_owner_or_admin
+
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(status_code=403, detail="org admin/owner role required")
+
+    customer_key = await ensure_customer_key(session, org_id=org_id)
+    return CustomerKeyResponse(customer_key=customer_key)
 
 
 @router.post("", status_code=201, response_model=BillingKeyResponse)

@@ -24,6 +24,36 @@ def generate_customer_key(org_id: uuid.UUID) -> str:
     return f"org-{uuid.uuid4()}"
 
 
+async def ensure_customer_key(session: AsyncSession, *, org_id: uuid.UUID) -> str:
+    """#2512(결제②-D선행, 미르코 FE 연동 발견 2026-08-07) — Toss 위젯은 시작 前에
+    customerKey가 필요한데, 기존 issue_billing_key()는 authKey를 받은 "뒤"에야 생성했다
+    (FE가 위젯 열 순간엔 아직 authKey가 없다). 이 함수가 그 순서를 뒤집는 진입점 —
+    기존 행(placeholder든 실 발급 완료든)이 있으면 그 customer_key를 그대로 반환(멱등),
+    없으면 status='awaiting_auth' placeholder 행을 새로 만든다(encrypted_billing_key/
+    issued_at은 NULL — 아직 위젯 인증 前). 이후 issue_billing_key()가 이 placeholder를
+    찾아 실 빌링키로 덮어쓴다(기존 재사용 로직 그대로, 코드 변경 불요)."""
+    existing = (
+        await session.execute(select(OrgBillingKey.customer_key).where(OrgBillingKey.org_id == org_id))
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    customer_key = generate_customer_key(org_id)
+    stmt = pg_insert(OrgBillingKey).values(
+        id=uuid.uuid4(), org_id=org_id, customer_key=customer_key, status="awaiting_auth",
+    ).on_conflict_do_nothing(index_elements=["org_id"])
+    result = await session.execute(stmt)
+    await session.commit()
+
+    if result.rowcount == 0:
+        # 레이스 패배(동시에 다른 요청이 먼저 만듦) — 그 행의 customer_key를 그대로 쓴다.
+        return (
+            await session.execute(select(OrgBillingKey.customer_key).where(OrgBillingKey.org_id == org_id))
+        ).scalar_one()
+
+    return customer_key
+
+
 async def issue_billing_key(
     session: AsyncSession, *, org_id: uuid.UUID, auth_key: str
 ) -> OrgBillingKey:
