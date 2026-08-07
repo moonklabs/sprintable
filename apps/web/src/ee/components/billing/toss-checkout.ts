@@ -57,6 +57,10 @@ export async function startBillingAuth({ tier, cycle }: BillingCycleParam): Prom
 
   await payment.requestBillingAuth({
     method: 'CARD',
+    // windowTarget 명시 — SDK 기본값(PC=iframe)은 CSP frame-src 'none'과 충돌한다(라이브
+    // 실측 확認). 'self'로 고정해 데스크톱/모바일 모두 전체페이지 리다이렉트로 통일 —
+    // frame-src를 열지 않고도 동작(더 좁은 CSP 변경, script-src/connect-src만 확장).
+    windowTarget: 'self',
     successUrl: `${origin}/settings?${returnParams.toString()}&checkout=success`,
     failUrl: `${origin}/settings?${returnParams.toString()}&checkout=fail`,
   });

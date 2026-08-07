@@ -54,8 +54,11 @@ describe('startBillingAuth — 위젯 인증 시작(story #2510)', () => {
     await startBillingAuth({ tier: 'starter', cycle: 'yearly' });
 
     expect(requestBillingAuthMock).toHaveBeenCalledTimes(1);
-    const arg = requestBillingAuthMock.mock.calls[0]?.[0] as { method: string; successUrl: string; failUrl: string };
+    const arg = requestBillingAuthMock.mock.calls[0]?.[0] as { method: string; windowTarget: string; successUrl: string; failUrl: string };
     expect(arg.method).toBe('CARD');
+    // 라이브 실측(2026-08-07) — SDK 기본값(PC=iframe)이 CSP frame-src 'none'과 충돌해
+    // 실제로 막혔다. 'self' 고정으로 frame-src를 열지 않고 우회.
+    expect(arg.windowTarget).toBe('self');
     // billing_cycle API 값은 yearly(FE 내부 표기) -> annual(BE 계약, #2890)로 변환돼야 한다.
     expect(arg.successUrl).toBe(`${ORIGIN}/settings?tab=billing&tier=starter&cycle=annual&checkout=success`);
     expect(arg.failUrl).toBe(`${ORIGIN}/settings?tab=billing&tier=starter&cycle=annual&checkout=fail`);
