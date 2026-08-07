@@ -210,4 +210,33 @@ describe('ChatInput — `#` 엔티티 피커 종류별 그룹화(story #2263 ㉠
     expect(text).toContain('sprint');
     expect(text).toContain('스프린트 하나');
   });
+
+  // story #2522 — EmbedCard와 같은 클래스의 같은 gap(close-the-class, PO 지시 2026-08-08):
+  // `#` 피커도 entity.status 원시값을 그대로 노출하고 있었다.
+  it('후보 status가 번역된 말로 뜬다(원시값 in-review 노출 금지)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/entities/search')) {
+        return new Response(JSON.stringify({
+          data: [{ entity_type: 'story', entity_id: 's1', title: '스토리 하나', status: 'in-review' }],
+        }));
+      }
+      return new Response(JSON.stringify({ data: [] }));
+    }));
+
+    await act(async () => {
+      root.render(withIntl(<ChatInput threadId="c1" projectId="p1" onSend={vi.fn()} />));
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '#');
+      el.selectionStart = 1;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
+
+    const listbox = container.querySelector('[role="listbox"]');
+    expect(listbox!.textContent).toContain('검토 중');
+    expect(listbox!.textContent).not.toContain('in-review');
+  });
 });

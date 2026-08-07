@@ -113,4 +113,26 @@ describe('EntityAwareTextarea — story #2264', () => {
     expect(listbox).not.toBeNull();
     expect(listbox!.className).toContain('focus-inset');
   });
+
+  // story #2522 — EmbedCard와 같은 클래스의 같은 gap(close-the-class, PO 지시 2026-08-08):
+  // `#` 피커도 entity.status 원시값을 그대로 노출하고 있었다.
+  it('후보 status가 번역된 말로 뜬다(원시값 in-review 노출 금지)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{ entity_type: 'story', entity_id: '11111111-1111-1111-1111-111111111111', title: '제목', status: 'in-review' }],
+    }))));
+    await act(async () => {
+      root.render(<ControlledHarness initial="" projectId="p1" onValueChange={() => {}} />);
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '#');
+      el.selectionStart = 1;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
+
+    expect(container.textContent).toContain('검토 중');
+    expect(container.textContent).not.toContain('in-review');
+  });
 });
