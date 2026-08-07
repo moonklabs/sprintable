@@ -141,13 +141,17 @@ export function WorkflowTemplateGallerySection({
           overwrite_existing: overwrite || !!appliedSlug,
         }),
       });
-      const data = await res.json() as { ok?: boolean; rules_created?: number; detail?: string };
+      // story #2500 — `data.detail`은 실 envelope({data,error,meta})에 없는 필드라 이
+      // 분기는 항상 죽어있었다(그라운딩 확認 — backend apply_template()은 generic
+      // HTTP상태 코드만 낸다, dict-coded 아님) — 실패 사유가 한 번도 화면에 안 뜨고
+      // 항상 '적용 실패'만 보여줬다. 올바른 필드(error.message)로 교정.
+      const data = await res.json() as { ok?: boolean; rules_created?: number; error?: { message?: string } };
       if (res.ok && data.ok) {
         setApplyResult({ ok: true, message: `규칙 ${String(data.rules_created ?? 0)}개 생성 완료` });
         setAppliedSlug(selected.slug);
         setOverwriteConfirm(false);
       } else {
-        setApplyResult({ ok: false, message: (data.detail as string | undefined) ?? '적용 실패' });
+        setApplyResult({ ok: false, message: data.error?.message ?? '적용 실패' });
       }
     } catch {
       setApplyResult({ ok: false, message: '네트워크 오류' });
