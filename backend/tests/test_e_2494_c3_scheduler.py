@@ -56,6 +56,29 @@ def test_next_dunning_action_same_day_retry_not_repeated():
 
 
 # ─── downgrade_to_free ──────────────────────────────────────────────────────
+# 호출 순서(#2509 가드 fix 後): ①order 조회 ②newer-confirmed-order 체크 ③newer-billing-key
+# 체크 ④(회복증거 없을 때만)offering 조회 ⑤(동일)upsert ⑥order 종결 UPDATE.
+
+def _stale_order_row(created_at):
+    o = MagicMock()
+    o.created_at = created_at
+    return o
+
+
+def _no_recovery_evidence_side_effects(order_created_at, free_offering):
+    """회복 증거(더 나중 confirmed order·더 나중 발급 billing_key) 둘 다 없는 표준 경로."""
+    order_result = MagicMock()
+    order_result.scalar_one_or_none.return_value = _stale_order_row(order_created_at)
+    confirmed_check = MagicMock()
+    confirmed_check.first.return_value = None
+    key_check = MagicMock()
+    key_check.first.return_value = None
+    offering_result = MagicMock()
+    offering_result.scalar_one_or_none.return_value = free_offering
+    upsert_result = MagicMock()
+    close_order_result = MagicMock()
+    return [order_result, confirmed_check, key_check, offering_result, upsert_result, close_order_result]
+
 
 @pytest.mark.anyio
 async def test_downgrade_to_free_upserts_free_tier(monkeypatch):
@@ -63,20 +86,19 @@ async def test_downgrade_to_free_upserts_free_tier(monkeypatch):
 
     org_id = uuid.uuid4()
     order_id = "ord-downgrade-1"
+    now = datetime(2026, 8, 15, tzinfo=timezone.utc)
     free_offering = MagicMock()
     free_offering.id = uuid.uuid4()
 
     session = AsyncMock()
-    offering_result = MagicMock()
-    offering_result.scalar_one_or_none.return_value = free_offering
-    upsert_result = MagicMock()
-    close_order_result = MagicMock()
-    session.execute = AsyncMock(side_effect=[offering_result, upsert_result, close_order_result])
+    session.execute = AsyncMock(
+        side_effect=_no_recovery_evidence_side_effects(now - timedelta(days=9), free_offering)
+    )
     session.commit = AsyncMock()
 
     await downgrade_to_free(session, org_id, order_id)
 
-    upsert_call = session.execute.call_args_list[1]
+    upsert_call = session.execute.call_args_list[4]
     compiled = upsert_call.args[0].compile().params
     assert compiled["org_id"] == org_id
     assert compiled["tier"] == "free"
@@ -89,15 +111,16 @@ async def test_downgrade_to_free_handles_missing_offering_gracefully(monkeypatch
     """free offering_version 시드가 없어도(방어) crash하지 않고 offering_version_id=None으로 진행."""
     from app.services.billing_scheduler import downgrade_to_free
 
+    now = datetime(2026, 8, 15, tzinfo=timezone.utc)
     session = AsyncMock()
-    offering_result = MagicMock()
-    offering_result.scalar_one_or_none.return_value = None
-    session.execute = AsyncMock(side_effect=[offering_result, MagicMock(), MagicMock()])
+    session.execute = AsyncMock(
+        side_effect=_no_recovery_evidence_side_effects(now - timedelta(days=9), None)
+    )
     session.commit = AsyncMock()
 
     await downgrade_to_free(session, uuid.uuid4(), "ord-downgrade-2")
 
-    upsert_call = session.execute.call_args_list[1]
+    upsert_call = session.execute.call_args_list[4]
     compiled = upsert_call.args[0].compile().params
     assert compiled["offering_version_id"] is None
 
@@ -112,18 +135,95 @@ async def test_downgrade_to_free_closes_the_order_po_blocker_fix(monkeypatch):
 
     org_id = uuid.uuid4()
     order_id = "ord-downgrade-3"
+    now = datetime(2026, 8, 15, tzinfo=timezone.utc)
     session = AsyncMock()
-    offering_result = MagicMock()
-    offering_result.scalar_one_or_none.return_value = None
-    session.execute = AsyncMock(side_effect=[offering_result, MagicMock(), MagicMock()])
+    session.execute = AsyncMock(
+        side_effect=_no_recovery_evidence_side_effects(now - timedelta(days=9), None)
+    )
     session.commit = AsyncMock()
 
     await downgrade_to_free(session, org_id, order_id)
 
-    # 3번째 호출이 billing_orders를 'downgraded'로 닫는 UPDATE여야.
-    close_call = session.execute.call_args_list[2]
+    # 마지막(6번째) 호출이 billing_orders를 'downgraded'로 닫는 UPDATE여야.
+    close_call = session.execute.call_args_list[5]
     compiled = close_call.args[0].compile().params
     assert compiled["status"] == "downgraded"
+
+
+@pytest.mark.anyio
+async def test_downgrade_to_free_skips_upsert_when_newer_confirmed_order_exists_po_2509_fix():
+    """카디르 결함사냥(#2509①) 회귀 고정 — "다른-order 재구독 클로버": 이 stale order보다
+    나중에 confirmed된 order가 있으면(=이미 다른 경로로 재구독 성공) free upsert를
+    건너뛴다. 재처리 방지 목적은 그대로 유지(order는 여전히 닫음)."""
+    from app.services.billing_scheduler import downgrade_to_free
+
+    org_id = uuid.uuid4()
+    order_id = "ord-stale-1"
+    now = datetime(2026, 8, 15, tzinfo=timezone.utc)
+
+    order_result = MagicMock()
+    order_result.scalar_one_or_none.return_value = _stale_order_row(now - timedelta(days=9))
+    confirmed_check = MagicMock()
+    confirmed_check.first.return_value = (uuid.uuid4(),)  # 더 나중 confirmed order 존재
+    key_check = MagicMock()
+    key_check.first.return_value = None
+    close_order_result = MagicMock()
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[order_result, confirmed_check, key_check, close_order_result])
+    session.commit = AsyncMock()
+
+    await downgrade_to_free(session, org_id, order_id)
+
+    # execute가 4번만 불렸다 = offering 조회·upsert가 스킵됐다(회복 증거로 free upsert 건너뜀).
+    assert session.execute.await_count == 4
+    close_call = session.execute.call_args_list[3]
+    assert close_call.args[0].compile().params["status"] == "downgraded"
+
+
+@pytest.mark.anyio
+async def test_downgrade_to_free_skips_upsert_when_newly_issued_billing_key_exists():
+    """order 생성 이후 새로 발급된 활성 billing_key가 있으면(재인증 진행 중 race
+    윈도) 마찬가지로 free upsert를 건너뛴다."""
+    from app.services.billing_scheduler import downgrade_to_free
+
+    org_id = uuid.uuid4()
+    order_id = "ord-stale-2"
+    now = datetime(2026, 8, 15, tzinfo=timezone.utc)
+
+    order_result = MagicMock()
+    order_result.scalar_one_or_none.return_value = _stale_order_row(now - timedelta(days=9))
+    confirmed_check = MagicMock()
+    confirmed_check.first.return_value = None
+    key_check = MagicMock()
+    key_check.first.return_value = (uuid.uuid4(),)  # 더 나중 발급된 활성 billing_key 존재
+    close_order_result = MagicMock()
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[order_result, confirmed_check, key_check, close_order_result])
+    session.commit = AsyncMock()
+
+    await downgrade_to_free(session, org_id, order_id)
+
+    assert session.execute.await_count == 4
+
+
+@pytest.mark.anyio
+async def test_downgrade_to_free_returns_early_when_order_missing():
+    """order가 이미 존재하지 않으면(동시처리 등) 아무 것도 안 하고 조용히 리턴 —
+    org_subscriptions를 건드리지 않는다."""
+    from app.services.billing_scheduler import downgrade_to_free
+
+    order_result = MagicMock()
+    order_result.scalar_one_or_none.return_value = None
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=order_result)
+    session.commit = AsyncMock()
+
+    await downgrade_to_free(session, uuid.uuid4(), "ord-gone")
+
+    assert session.execute.await_count == 1
+    session.commit.assert_not_awaited()
 
 
 # ─── sweep_dunning_retries ──────────────────────────────────────────────────

@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.billing_order import BillingOrder
 from app.models.offering_version import OfferingVersion
+from app.models.org_billing_key import OrgBillingKey
 from app.models.org_subscription import OrgSubscription
 from app.services.billing_charge import (
     _confirm_with_ledger,
@@ -75,29 +76,70 @@ async def downgrade_to_free(session: AsyncSession, org_id: uuid.UUID, order_id: 
     (age≫8)를 보고 org를 다시 free로 upsert해 **새 유료 구독을 clobber**한다. order를
     종결 상태 'downgraded'로 전이시켜(status!='confirmed' 가드) failed-스윕 대상에서
     영구히 뺀다 — 'failed' 그대로 두거나 'confirmed'를 재사용하지 않는 이유는 이게 실제
-    Toss 승인이 아니라 강제 강등이라 원장 의미가 다르기 때문(0232 마이그로 CHECK 확장)."""
-    free_offering = (
-        await session.execute(
-            select(OfferingVersion).where(
-                OfferingVersion.tier == "free",
-                OfferingVersion.currency == "krw",
-                OfferingVersion.effective_to.is_(None),
-            )
-        )
-    ).scalar_one_or_none()
+    Toss 승인이 아니라 강제 강등이라 원장 의미가 다르기 때문(0232 마이그로 CHECK 확장).
 
-    stmt = pg_insert(OrgSubscription).values(
-        id=uuid.uuid4(), org_id=org_id, tier="free", status="active",
-        provider="toss", currency="krw", billing_cycle=None,
-        offering_version_id=free_offering.id if free_offering else None,
-    ).on_conflict_do_update(
-        index_elements=["org_id"],
-        set_={
-            "tier": "free", "status": "active",
-            "offering_version_id": free_offering.id if free_offering else None,
-        },
-    )
-    await session.execute(stmt)
+    카디르 결함사냥(#2509, 2026-08-07) — "다른-order 재구독 클로버": 이 함수가 org의
+    현재 상태를 안 보고 무조건 free upsert했다. cron이 여러 org를 Toss 콜 포함해 순회하는
+    동안(창이 실재) org가 다른 order_id로 재구독(pro)을 성공시키면, 뒤늦게 처리되는 이
+    stale order가 방금 성립한 pro 구독을 free로 덮어썼다. 재확認: 이 stale order보다
+    "나중에" confirmed된 order가 있거나, 이 stale order 생성 이후 새로 발급된 활성
+    billing_key가 있으면(재인증 진행 중 — 아직 charge는 안 끝났을 수 있는 그 race
+    윈도) 이미 다른 경로로 회복 중/완료된 것이니 free upsert를 건너뛴다.
+    ⚠️"활성 billing_key 존재" 자체는 쓰지 않는다 — dunning 재시도(+1/+3/+5일)는 원래
+    billing_key로 하므로 실패 시퀀스 내내 키가 active인 게 정상이라, 그것만으로 걸면
+    진짜 8일 지난 미해결 delinquent도 영원히 강등 안 되는 회귀가 난다. 반드시 order.
+    created_at *이후* 시점(newer)으로 앵커링된 신호만 "회복 증거"로 인정한다."""
+    order = (
+        await session.execute(select(BillingOrder).where(BillingOrder.order_id == order_id))
+    ).scalar_one_or_none()
+    if order is None:
+        return  # 이미 존재 안 함(동시 처리 등) — 할 일 없음.
+
+    has_newer_confirmed_order = (
+        await session.execute(
+            select(BillingOrder.id).where(
+                BillingOrder.org_id == org_id,
+                BillingOrder.status == "confirmed",
+                BillingOrder.created_at > order.created_at,
+            ).limit(1)
+        )
+    ).first() is not None
+    has_newly_issued_billing_key = (
+        await session.execute(
+            select(OrgBillingKey.id).where(
+                OrgBillingKey.org_id == org_id,
+                OrgBillingKey.status == "active",
+                OrgBillingKey.issued_at > order.created_at,
+            ).limit(1)
+        )
+    ).first() is not None
+
+    if not (has_newer_confirmed_order or has_newly_issued_billing_key):
+        free_offering = (
+            await session.execute(
+                select(OfferingVersion).where(
+                    OfferingVersion.tier == "free",
+                    OfferingVersion.currency == "krw",
+                    OfferingVersion.effective_to.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+
+        stmt = pg_insert(OrgSubscription).values(
+            id=uuid.uuid4(), org_id=org_id, tier="free", status="active",
+            provider="toss", currency="krw", billing_cycle=None,
+            offering_version_id=free_offering.id if free_offering else None,
+        ).on_conflict_do_update(
+            index_elements=["org_id"],
+            set_={
+                "tier": "free", "status": "active",
+                "offering_version_id": free_offering.id if free_offering else None,
+            },
+        )
+        await session.execute(stmt)
+
+    # 회복 증거가 있어 free upsert는 건너뛰었어도, 이 stale order 자체는 여전히 닫는다
+    # (재처리 방지 목적은 그대로 달성 — 매 스윕마다 같은 order가 다시 안 골라지게).
     await session.execute(
         update(BillingOrder)
         .where(BillingOrder.order_id == order_id, BillingOrder.status != "confirmed")

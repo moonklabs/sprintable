@@ -150,3 +150,81 @@ async def test_pack_purchase_ledger_entries_included_when_period_set_realdb():
             assert amount == 59_000 + 7_000
     finally:
         await engine.dispose()
+
+
+# ─── #2509 카디르 결함사냥 — billing_cycle 비검증·currency 불일치(실PG) ─────────
+
+@pytest.mark.anyio
+async def test_null_billing_cycle_raises_instead_of_silent_monthly_realdb():
+    """실측(카디르, 2026-08-07): business annual 2,190,000 → billing_cycle이 NULL이면
+    조용히 monthly(219,000)로 10배 저청구되던 결함. 이제 명시 실패."""
+    from app.services.billing_charge_amount import ChargeAmountError, compute_charge_amount
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session:
+            org_id = await _seed_org(session, tier="business", billing_cycle="annual", human_seats=15)
+            await session.execute(
+                text("UPDATE org_subscriptions SET billing_cycle = NULL WHERE org_id=:oid"),
+                {"oid": org_id},
+            )
+            await session.commit()
+            with pytest.raises(ChargeAmountError, match="billing_cycle"):
+                await compute_charge_amount(session, org_id=org_id)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_typo_billing_cycle_raises_realdb():
+    from app.services.billing_charge_amount import ChargeAmountError, compute_charge_amount
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session:
+            org_id = await _seed_org(session, tier="business", billing_cycle="Annual", human_seats=15)
+            with pytest.raises(ChargeAmountError, match="billing_cycle"):
+                await compute_charge_amount(session, org_id=org_id)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_offering_currency_mismatch_raises_realdb():
+    """offering.currency ↔ sub.currency 사이 FK만 있고 값 일치 제약이 없던 구조적 갭 —
+    (provider→currency CHECK가 sub.currency 자체의 오염은 막아주지만, offering_version_id
+    가 다른 통화의 offering을 가리키는 «바인딩 실수»는 아무것도 막지 않는다. 그 실제
+    시나리오를 재현: krw/toss sub는 그대로 두고 offering_version_id만 usd offering으로
+    돌린다)."""
+    from app.services.billing_charge_amount import ChargeAmountError, compute_charge_amount
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session:
+            org_id = await _seed_org(session, tier="team", billing_cycle="monthly", human_seats=5)
+
+            usd_offering_id = uuid.uuid4()
+            await session.execute(
+                text(
+                    "INSERT INTO offering_versions (id, tier, currency, version_label, "
+                    "monthly_price_minor, annual_price_minor, included_seats, extra_seat_price_minor, "
+                    "au_limit, realtime_connection_limit, storage_mb_limit, max_file_mb, "
+                    "lab_credit_minor, rate_limit_per_min, automation_rule_limit, webhook_limit, "
+                    "event_replay_days, overage_allowed, effective_from, created_by) VALUES "
+                    "(:id, 'team', 'usd', 'usd_v1_test', 4900, 49000, 5, 1100, 100000, 10, 1000, "
+                    "100, 0, 60, 10, 10, 7, true, now(), 'test')"
+                ),
+                {"id": usd_offering_id},
+            )
+            await session.execute(
+                text("UPDATE org_subscriptions SET offering_version_id = :oid2 WHERE org_id=:oid"),
+                {"oid2": usd_offering_id, "oid": org_id},
+            )
+            await session.commit()
+            with pytest.raises(ChargeAmountError, match="currency"):
+                await compute_charge_amount(session, org_id=org_id)
+    finally:
+        await engine.dispose()

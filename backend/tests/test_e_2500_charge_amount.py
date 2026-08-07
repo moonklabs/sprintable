@@ -10,11 +10,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 
-def _subscription(*, billing_cycle="monthly", offering_version_id=None, period_start=None, period_end=None):
+def _subscription(
+    *, billing_cycle="monthly", currency="krw", offering_version_id=None,
+    period_start=None, period_end=None,
+):
     sub = MagicMock()
     sub.id = uuid.uuid4()
     sub.org_id = uuid.uuid4()
     sub.billing_cycle = billing_cycle
+    sub.currency = currency
     sub.offering_version_id = offering_version_id or uuid.uuid4()
     sub.current_period_start = period_start
     sub.current_period_end = period_end
@@ -263,3 +267,40 @@ async def test_compute_charge_amount_raises_when_offering_version_dangling():
 
     with pytest.raises(ChargeAmountError, match="찾을 수 없음"):
         await compute_charge_amount(session, org_id=uuid.uuid4())
+
+
+# ─── #2509 카디르 결함사냥 — billing_cycle 비검증·currency 불일치 ───────────────
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("bogus_cycle", [None, "Annual", "yearly", "", "MONTHLY"])
+async def test_compute_charge_amount_raises_on_non_monthly_annual_billing_cycle(bogus_cycle):
+    """조용히 monthly로 폴백해 annual 구독을 10배 저청구하던 결함(#2509①) — 명시 실패로."""
+    from app.services.billing_charge_amount import ChargeAmountError, compute_charge_amount
+
+    org_id = uuid.uuid4()
+    sub = _subscription(billing_cycle=bogus_cycle)
+    offering = _offering()
+
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=_exec_result(sub))
+    session.get = AsyncMock(return_value=offering)
+
+    with pytest.raises(ChargeAmountError, match="billing_cycle"):
+        await compute_charge_amount(session, org_id=org_id)
+
+
+@pytest.mark.anyio
+async def test_compute_charge_amount_raises_when_offering_currency_mismatches_subscription():
+    """offering.currency와 sub.currency 사이 값 일치 제약이 없던 구조적 갭(#2509②)."""
+    from app.services.billing_charge_amount import ChargeAmountError, compute_charge_amount
+
+    org_id = uuid.uuid4()
+    sub = _subscription(billing_cycle="monthly", currency="usd")
+    offering = _offering(currency="krw", included_seats=5, extra_seat_price_minor=11_000)
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[_exec_result(sub), _exec_result(5)])
+    session.get = AsyncMock(return_value=offering)
+
+    with pytest.raises(ChargeAmountError, match="currency"):
+        await compute_charge_amount(session, org_id=org_id)
