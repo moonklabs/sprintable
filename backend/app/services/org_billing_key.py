@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -82,3 +82,17 @@ async def issue_billing_key(
     return (
         await session.execute(select(OrgBillingKey).where(OrgBillingKey.org_id == org_id))
     ).scalar_one()
+
+
+async def mark_billing_key_deleted(session: AsyncSession, *, customer_key: str) -> None:
+    """결제②-C4(story #2495) — Toss BILLING_DELETED 웹훅 수신 시 호출. 멱등 UPDATE(몇 번
+    재생돼도 최종 상태는 동일 — PO 확認 2026-08-07, 웹훅 서명이 상시 보장 안 되는 축이라
+    별도 dedup 테이블 없이 이 자체-멱등성이 안전망). 이후 billing_charge.charge_org가
+    이 org의 활성 빌링키를 조회할 때(status='active' 필터) 걸리지 않아 "no active billing
+    key" 로 명시 실패한다(기존 가드 재사용, 신규 분기 불요)."""
+    await session.execute(
+        update(OrgBillingKey)
+        .where(OrgBillingKey.customer_key == customer_key)
+        .values(status="deleted", updated_at=func.now())
+    )
+    await session.commit()

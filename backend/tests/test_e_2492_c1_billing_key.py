@@ -20,7 +20,7 @@ from tests.conftest import override_db_and_read
         ("create_customer", {}),
         ("create_checkout", {}),
         # charge는 #2493(C2)로 실 구현됨 — test_e_2493_c2_charge_ledger.py로 이동.
-        ("refund", {}),
+        # refund/verify_webhook은 #2495(C4)로 실 구현됨 — test_e_2495_c4_refund_reconciliation.py로 이동.
         ("open_portal", {}),
         ("cancel", {}),
     ],
@@ -32,15 +32,6 @@ async def test_toss_adapter_unimplemented_methods_raise_explicitly(method_name, 
     method = getattr(adapter, method_name)
     with pytest.raises(NotImplementedError):
         await method(**kwargs)
-
-
-def test_toss_adapter_verify_webhook_raises_explicitly():
-    """동기 메서드(순수 계산이라 async 아님) — 별도 케이스."""
-    from app.services.payment.toss_adapter import TossAdapter
-
-    adapter = TossAdapter()
-    with pytest.raises(NotImplementedError):
-        adapter.verify_webhook(b"{}", "sig")
 
 
 # ─── TossAdapter.create_billing_key — 실 HTTP 파이프라인 ───────────────────
