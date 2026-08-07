@@ -92,6 +92,32 @@ def _get_repo_read(
     return StoryRepository(session, org_id)
 
 
+def _parse_stories_cursor(cursor: str | None) -> datetime | None:
+    """story #2207 근본수정(2026-08-07) — list_stories의 board/generic 두 분기가 각자
+    `datetime.fromisoformat(cursor)`를 예외처리 없이 불렀다. 원시 ISO 커서 값이 `+`를
+    포함하는데(timezone offset) URL 쿼리스트링에서 인코딩되지 않은 `+`는 공백으로 디코드
+    되는 것이 웹의 오래된 규칙 — FE 다섯 호출부 중 둘이 실제로 이 인코딩을 잊었다(까심
+    발견, dev 라이브 스택트레이스로 확定). 그 결과 `ValueError`가 그대로 500으로 올라갔다
+    (잘못된 커서는 클라이언트 잘못이라 400이어야 함 — 500은 "서버가 깨졌다"는 뜻이라
+    장애 지표를 오염시킨다).
+
+    ⛔커서 포맷 자체(원시 ISO·URL-unsafe)를 바꾸는 근본안은 이 fix에서 채택하지 않는다
+    (판단·근거, story #2207 AC2) — 서버+FE+MCP+모바일 등 모든 커서 소비처가 함께
+    움직여야 하는 비용 큰 변경이고, 진행 중이던 커서가 전부 무효화된다(일회성이라 무해
+    하다곤 해도). 이 400 검증만으로 지금 증상(500·조용한 무반응)은 완전히 사라진다 —
+    "인코딩을 한 번 잊는" 실수 자체를 originate 못 하게 막는 것(포맷 변경)은 비용 대비
+    이 스토리 스코프에서 이득이 작다고 판단(①②만으로 충분, PO 승인 없이 포맷을 바꾸면
+    다른 클라이언트를 조용히 깨뜨릴 위험도 있음)."""
+    if not cursor:
+        return None
+    try:
+        return datetime.fromisoformat(cursor)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="invalid cursor: expected ISO 8601 datetime",
+        ) from exc
+
+
 @router.get("", response_model=list[StoryResponse])
 async def list_stories(
     project_id: uuid.UUID | None = Query(default=None),
@@ -165,7 +191,7 @@ async def list_stories(
     # story #2188: sprint_id/assignee_id만 넘기고 epic_id/story_number/q는 조용히 빠뜨리던
     # 자리 — 이 분기로 빠지는 조합에서도 제네릭 블록(:148 이하)과 동일하게 전 필터를 넘긴다.
     if status_filter and project_id:
-        cursor_dt = datetime.fromisoformat(cursor) if cursor else None
+        cursor_dt = _parse_stories_cursor(cursor)
         stories, total = await repo.list_board(
             project_id=project_id,
             status=status_filter,
@@ -201,7 +227,7 @@ async def list_stories(
     # story #2189: 이 분기도 board 분기(:131)와 동형으로 cursor를 파싱해 넘긴다 — 안 넘기면
     # FE(buildCursorPageMeta)가 계산한 nextCursor가 다음 요청에서 조용히 무시돼 같은 페이지가
     # 반복된다(sprints/standup "더 보기" 중복 누적의 원인).
-    cursor_dt = datetime.fromisoformat(cursor) if cursor else None
+    cursor_dt = _parse_stories_cursor(cursor)
     stories = await repo.list(limit=limit, q=q, cursor=cursor_dt, **filters)
     await _attach_assignee_ids(repo.session, repo.org_id, stories)
     await _attach_has_evidence(repo.session, stories)
