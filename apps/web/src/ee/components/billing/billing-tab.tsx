@@ -169,9 +169,13 @@ export function BillingTab({ orgId }: { orgId: string }) {
         </Alert>
       )}
       {!checkoutProcessing && checkoutOutcome?.kind === 'declined' && (
-        <Alert variant="destructive">
+        // 유나 design 가디언(2026-08-07) — declined(카드거절)는 502 등 시스템오류와 색으로
+        // 구분돼야 한다(내 카드 문제 vs 서비스 문제). destructive(red)가 아니라 warning.
+        <Alert variant="warning">
           <AlertDescription>
             {t('checkoutDeclinedBanner', { reason: checkoutOutcome.result.declined_reason ?? '' })}
+            {' '}
+            {t('checkoutDeclinedReassurance')}
           </AlertDescription>
         </Alert>
       )}

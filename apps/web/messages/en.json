@@ -2182,6 +2182,7 @@
     "checkoutProcessing": "Processing your payment. Please wait.",
     "checkoutSuccessBanner": "Your {tier} subscription has started.",
     "checkoutDeclinedBanner": "Your card was declined ({reason}). Please try again.",
+    "checkoutDeclinedReassurance": "Your subscription has not started and you have not been charged.",
     "checkoutErrorBanner": "Something went wrong processing your payment. Please try again shortly.",
     "checkoutWidgetFailedBanner": "Card authentication was not completed. Please try again.",
     "packDialogTitle": "Buy {count} × {pack}",

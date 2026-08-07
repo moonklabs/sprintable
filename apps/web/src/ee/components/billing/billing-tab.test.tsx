@@ -166,6 +166,11 @@ describe('BillingTab — Toss 체크아웃 리다이렉트 왕복(story #2510)',
     const alertEl = container.querySelector('[role="alert"]');
     expect(alertEl?.textContent).toContain('카드 승인이 거절되었습니다');
     expect(alertEl?.textContent).toContain('한도초과');
+    // 유나 design 가디언(2026-08-07) — declined는 502 등 시스템오류(destructive)와 색으로
+    // 구분돼야 한다. warning이어야지 destructive면 안 된다.
+    expect(alertEl?.className).toContain('warning-tint');
+    expect(alertEl?.className).not.toContain('destructive-tint');
+    expect(alertEl?.textContent).toContain('구독은 시작되지 않았고 청구된 금액도 없습니다');
   });
 
   it('checkout=success 이지만 completeCheckout이 HTTP 에러를 반환하면 에러 배너를 보인다', async () => {
