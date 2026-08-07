@@ -60,6 +60,10 @@ export interface EpicListFilters extends PaginationOptions {
    * (story #2298 옵트인). 이 필드가 없어 route.ts→GoalService→ApiEpicRepository 4단 체인
    * 전체가 이 파라미터를 한 번도 BE까지 실어 나르지 못했다(#2224 초점 스트립 결함의 진짜 근본). */
   include?: string;
+  /** story #2262 PR②(BE #2905) — 배치 lookup(comma-separated로 ApiEpicRepository가 그대로
+   * 전달). story `ids`(ca37b2b0)와 동일 계약: project_id 없이도 org 전체에서 exact-id IN
+   * 조회, accessible_project_ids_in_org로 접근권만 걸린다. */
+  ids?: string[];
 }
 
 /** 로드맵 조타 재정렬(wedge #2·BE `PATCH /api/v2/epics/bulk`). 큐레이션한 에픽만 position 세팅. */

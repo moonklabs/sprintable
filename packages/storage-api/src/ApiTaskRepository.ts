@@ -10,7 +10,11 @@ export class ApiTaskRepository implements ITaskRepository {
 
   async list(filters: TaskListFilters): Promise<Task[]> {
     return fastapiCall<Task[]>('GET', '/api/v2/tasks', this.accessToken, {
-      query: { story_id: filters.story_id, assignee_id: filters.assignee_id, status: filters.status },
+      query: {
+        story_id: filters.story_id, assignee_id: filters.assignee_id, status: filters.status,
+        // story #2262 PR②(BE #2905) — story ids(ca37b2b0)와 동일 계약, comma-separated.
+        ids: filters.ids?.join(','),
+      },
     });
   }
 

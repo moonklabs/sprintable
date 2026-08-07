@@ -19,6 +19,10 @@ export class ApiDocRepository implements IDocRepository {
         cursor: filters.cursor ?? undefined,
         tags: filters.tags?.join(','),
         q: filters.q,
+        // story #2262 PR②(BE #2905) — ids 분기는 project_id 없이도 {data,meta} 봉투로 온다
+        // (docs.py list_docs 실측 — 다른 분기와 같은 envelope, has_more/next_cursor는
+        // 항상 false/null이라 이 함수의 기존 res.meta 읽기 코드가 그대로 안전하다).
+        ids: filters.ids?.join(','),
       },
     });
     return { items: res.data, hasMore: res.meta.has_more, nextCursor: res.meta.next_cursor };
