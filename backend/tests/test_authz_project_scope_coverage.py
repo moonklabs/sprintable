@@ -61,16 +61,6 @@ _FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
         "body.project_id는 사용되지 않는 dead field — entity_project_id는 서버가 엔티티 조회로 도출",
     "app.routers.gate_metrics:get_hitl_gate_metrics":
         "is_org_owner_or_admin 가드 — 거버넌스/오버사이트 데이터는 의도적으로 org 전체 admin 시야",
-    "app.routers.docs:list_docs":
-        # story #2340 AC3(2026-08-02) — 정정: 예전 사유("Depends(get_project_scoped_org_id) 동일
-        # 패턴")는 틀렸다. hypotheses/loops/stories는 get_project_scoped_org_id를 **자기 자신의**
-        # Depends로 직접 쓴다(1-hop). list_docs는 Depends(_get_repo)를 쓰고, _get_repo가 다시
-        # Depends(get_project_scoped_org_id)를 선언한다(_get_repo 자신은 가드를 안 부름) —
-        # 실제 가드(has_project_access)까지 **2-hop**(Depends→Depends→가드)이라 hop=1 인식으로는
-        # 원리적으로 안 닫힌다. AC3 known-gap 테스트(test_hop_recognition_misses_two_hop_depends_chain)가
-        # 이 라우트로 그 미탐을 실제로 심어 확認한다 — 2-hop 재귀를 넣기 前엔 안전(안전한 이유가
-        # «다른» 가드이지 무가드가 아님)하지만, 이 allowlist 엔트리는 유지한다.
-        "Depends(_get_repo)→Depends(get_project_scoped_org_id)로 실 가드까지 2-hop — hop=1 인식 밖(AC3 known-gap)",
     "app.routers.rewards:get_balance":
         "_assert_self_or_org_admin(member_id,...) — 본인 잔액 또는 org admin만 조회 가능해 project_id 자체는 blast-radius가 self-data로 제한",
     "app.routers.workflow_executions:list_executions":
@@ -85,12 +75,18 @@ _FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
 
 
 def test_false_positive_allowlist_count_is_pinned():
-    """판정(41→8)을 눈이 아니라 이 assert로 고정한다(#2340, 2026-08-02) — 오늘 오전 「31건」
+    """판정(41→8→7)을 눈이 아니라 이 assert로 고정한다(#2340, 2026-08-02) — 오늘 오전 「31건」
     카운트가 스크롤하며 눈으로 세다 실측(41건)과 어긋난 바로 그 실패모드를 다시 반복하지 않기
     위함. 엔트리를 추가/제거하면 이 숫자도 반드시 같이 고쳐야 한다 — 그게 이 테스트의 목적:
-    "다음 사람이 두 수를 보고 갈리지 않게"(PO)."""
-    assert len(_FALSE_POSITIVE_ALLOWLIST) == 8, (
-        f"_FALSE_POSITIVE_ALLOWLIST 엔트리 수가 8이 아니라 {len(_FALSE_POSITIVE_ALLOWLIST)}건 — "
+    "다음 사람이 두 수를 보고 갈리지 않게"(PO).
+
+    8→7(#2262, 2026-08-07, 카디르 QA 발견): `app.routers.docs:list_docs`가 새 `?ids=`
+    배치조회 경로에서 `accessible_project_ids_in_org`(PROJECT_GUARD_FUNCTIONS)를 라우트
+    자기 바디에서 직접 호출하게 되면서, 2-hop이라 hop=1 스캐너에 안 잡히던 그 known-gap이
+    실제로 닫혔다(스캐너도 이제 guarded로 인식) — allowlist 엔트리 제거. 아래
+    test_list_docs_ids_branch_closed_the_two_hop_known_gap이 이 닫힘을 회귀가드로 고정한다."""
+    assert len(_FALSE_POSITIVE_ALLOWLIST) == 7, (
+        f"_FALSE_POSITIVE_ALLOWLIST 엔트리 수가 7이 아니라 {len(_FALSE_POSITIVE_ALLOWLIST)}건 — "
         "의도적 변경이면 이 숫자를 갱신하고 PR 본문에 왜 바뀌었는지 적을 것"
     )
 
@@ -245,23 +241,35 @@ def test_hop_recognition_misses_two_hop_wrapper_known_gap():
     )
 
 
-def test_hop_recognition_misses_two_hop_depends_chain_real_route():
-    """⚠️알려진 미탐(known gap, not caught) — 실제 프로덕션 라우트로 재확認. `docs:list_docs`는
-    `Depends(_get_repo)`를 쓰고 `_get_repo`가 다시 `Depends(get_project_scoped_org_id)`를
-    선언한다(`_get_repo` 자신은 가드를 안 부름) — 실 가드(`has_project_access`)까지 정확히
-    2-hop이라 hop=1 인식 밖이다. `_FALSE_POSITIVE_ALLOWLIST["app.routers.docs:list_docs"]`가
-    이 사실을 문서화하는 근거가 바로 이 테스트다 — 둘 중 하나만 갱신되고 다른 게 안 갱신되면
-    다음 사람이 다시 헷갈린다."""
+def test_list_docs_ids_branch_closed_the_two_hop_known_gap():
+    """⭐known-gap 닫힘 회귀가드(#2262, 2026-08-07, 카디르 QA 발견). 원래(story #2340 AC3,
+    2026-08-02) `docs:list_docs`는 `Depends(_get_repo)`를 쓰고 `_get_repo`가 다시
+    `Depends(get_project_scoped_org_id)`를 선언해(`_get_repo` 자신은 가드를 안 부름) 실 가드
+    (`has_project_access`)까지 2-hop이라 hop=1 스캐너 인식 밖이었다 — 그래서
+    `_FALSE_POSITIVE_ALLOWLIST`에 실 가드 있음을 수동 문서화한 채 남아 있었다.
+
+    #2262가 `?ids=` 배치조회를 추가하며 `accessible_project_ids_in_org`(PROJECT_GUARD_
+    FUNCTIONS 소속)를 **list_docs 자기 바디에서 직접** 호출하게 됐다 — 2-hop DI 뒤에 숨은
+    게 아니라 스캐너가 보는 AST 바디에 그대로 있으므로, 스캐너도 이제 guarded로 정확히
+    인식한다(진짜 가드가 새로 생긴 게 아니라 **기존에 있던 가드가 스캐너 가시권 안으로
+    들어온 것** — has_project_access류는 여전히 2-hop 그대로다). 이 테스트는 그 닫힘을
+    고정한다 — list_docs가 다시 unguarded로 판정되면(예: ids= 분기를 리팩터링하며 이 직접
+    호출이 사라지면) 여기서 즉시 RED.
+
+    ⚠️이 2-hop 인식 사각 자체(hop=1 스캐너가 원리적으로 2-hop 체인을 못 본다는 사실)는 여전히
+    유효한 스캐너 한계다 — 지금 이 population(get_project_scoped_org_id 사용 5개 라우터
+    16개 라우트, 2026-08-07 전수 실측)엔 다른 실사례가 없어 별도 known-gap 앵커는 안 둔다.
+    새 2-hop 전용 래퍼가 생기고 그 라우트가 body에서 가드를 직접 안 부르면 이 사각이 다시
+    실사례를 갖는다 — 그때 새 known-gap 테스트를 추가할 것."""
     from app.main import app
     from authz_coverage_lib import PROJECT_GUARD_FUNCTIONS, enumerate_routes_matching, has_guard
 
     routes = {r.key: r for r in enumerate_routes_matching(app, PROJECT_PARAM_RE)}
     target = routes.get("app.routers.docs:list_docs")
-    assert target is not None, "app.routers.docs:list_docs 라우트를 못 찾음(리네임/삭제 — 이 테스트와 allowlist 사유 정정 필요)"
-    assert not has_guard(target, PROJECT_GUARD_FUNCTIONS), (
-        "list_docs가 guarded로 판정됨 — 2-hop(Depends 안의 Depends) 인식이 이미 들어간 것이거나 "
-        "_get_repo/get_project_scoped_org_id 구조가 바뀐 것. 참이면 known-gap 문서화(이 테스트 + "
-        "allowlist 사유)를 함께 갱신할 것"
+    assert target is not None, "app.routers.docs:list_docs 라우트를 못 찾음(리네임/삭제 — 이 테스트 정정 필요)"
+    assert has_guard(target, PROJECT_GUARD_FUNCTIONS), (
+        "list_docs가 다시 unguarded로 판정됨 — #2262의 accessible_project_ids_in_org 직접호출이 "
+        "사라졌거나 구조가 바뀐 것. 의도적 회귀라면 known-gap을 allowlist에 다시 등록할 것"
     )
 
 
