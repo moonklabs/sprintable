@@ -167,9 +167,28 @@ services:
           "값 자체가 무의미·재시작 트리거용 더미"로 추정(키 이름상) — 값 비교 자체가 무의미해
           skip. 존재 여부만 추적.
         owner: TBD
+      - key: ORG_BILLING_KEY_ENCRYPTION_KEY
+        reason: >-
+          결제②-C1(#2492) MultiFernet 암호화 키 — org_billing_keys.encrypted_billing_key
+          봉인용(billing_key_crypto.py). Secret Manager 등록·Cloud Run env 배선 PO 수동
+          프로비저닝(2026-08-06, C1 착수 GO 메시지) — 부트스트랩 스크립트 미편입.
+        owner: TBD
       - key: STORAGE_PROVIDER
         value_check: skip
         reason: 스토리지 프로바이더 선택 플래그 — 수동 토글.
+        owner: TBD
+      - key: TOSS_PAYMENTS_CLIENT_KEY
+        reason: >-
+          결제②-C0(#2491) Toss Payments 클라이언트 키 — state/shared/credentials/
+          toss-payments-keys.md(dev=test_ck)에 이미 발급돼 있던 값. app/core/config.py
+          Settings.toss_payments_client_key로 읽음. Secret Manager 등록 PO 수동
+          프로비저닝(2026-08-06) — 부트스트랩 스크립트 미편입.
+        owner: TBD
+      - key: TOSS_PAYMENTS_CRYPTO_KEY
+        reason: dev와 동일 사유(TOSS_PAYMENTS_CLIENT_KEY 참고) — test_crypto 값, Settings.toss_payments_crypto_key.
+        owner: TBD
+      - key: TOSS_PAYMENTS_SECRET_KEY
+        reason: dev와 동일 사유(TOSS_PAYMENTS_CLIENT_KEY 참고) — test_sk 값, Settings.toss_payments_secret_key.
         owner: TBD
 
   sprintable-backend-prod:
