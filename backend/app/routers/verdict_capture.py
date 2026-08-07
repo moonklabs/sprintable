@@ -26,6 +26,10 @@ from app.models.github_installation import GithubInstallation, GithubWebhookDeli
 from app.models.pm import Story
 from app.routers.cron import CRON_SECRET, _err, _ok, verify_cron
 from app.services.github_app import get_installation_token
+from app.services.merge_verdict_gate import (
+    merge_gate_active,
+    reconcile_merge_gate_with_real_evidence,
+)
 from app.services.pr_story_link import merge_link_evidence, resolve_story_for_pr
 from app.services.verdict_capture import (
     capture_pr_ci_verdict,
@@ -441,6 +445,24 @@ async def _process_webhook_event(
     )
     if native_ci_state is not None:
         result = {**result, "native_ci": {"state": native_ci_state, "reason": native_ci_reason}}
+
+    # story #2156 AC2(2026-08-07) — 위 capture_pr_ci_verdict가 Verdict(신뢰축)엔 이미 실
+    # 증거를 정확히 기록했는데, resolve_gate_from_verdict(capture_pr_ci_verdict 내부)의
+    # _SOURCE_TO_GATE_TYPE엔 merge 매핑이 없어 그 증거가 merge-type 게이트엔 안 닿았다 —
+    # pending merge 게이트가 있을 때만 evaluate_merge_gate를 실 증거로 재호출해 반영한다.
+    # ⚠️capture_pr_ci_verdict 리턴 後 별도 호출(evaluate_merge_gate가 내부에서 capture_pr_
+    # ci_verdict를 다시 부르므로, 그 함수 안에서 이걸 부르면 무한 재귀가 된다).
+    if merge_gate_active(org_id):
+        try:
+            await reconcile_merge_gate_with_real_evidence(
+                session, org_id, story_id,
+                pr_number=pr_number, repo=repo, ci_result=ci_conclusion, merged=merged,
+            )
+        except Exception:
+            logger.warning(
+                "merge gate reconcile failed story=%s (swallowed·best-effort)",
+                story_id, exc_info=True,
+            )
 
     # ⭐story #2327 후속(PO 판정, 2026-07-30, PR#2685 실 웹훅 시험대가 드러낸 갭) — merge 시
     # PullRequestStoryLink 에도 쓴다. `Verdict`(record_verdict, 위 capture_pr_ci_verdict 안)에도

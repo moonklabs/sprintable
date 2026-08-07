@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models.gate import set_gate_evidence_status, set_gate_status
+from app.models.gate import Gate, set_gate_evidence_status, set_gate_status
 from app.models.participation import ParticipationRole
 from app.services.gate_resolver import (
     SOURCE_MEMBER_OVERRIDE,
@@ -455,4 +455,51 @@ async def evaluate_merge_gate(
         outcome_pending=outcome.pending,
         outcome_lower_bound=round(outcome.lower_bound, 4),
         outcome_regret=outcome.regret,
+    )
+
+
+async def reconcile_merge_gate_with_real_evidence(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    story_id: uuid.UUID,
+    *,
+    pr_number: int,
+    repo: str,
+    ci_result: str | None,
+    merged: bool,
+) -> MergeGateDecision | None:
+    """story #2156 AC2(2026-08-07) — GitHub 웹훅이 잡은 실 CI/PR verdict를 merge-type
+    게이트에 반영한다.
+
+    그라운딩(디디, 2026-08-07 라이브 DB 조회): SID/#번호 해소(story #2327, 07-30)는 이미
+    완결이라 `Verdict`엔 실 증거가 정확히 쌓이는데(dev 118건 ci/pr pass 확認), `resolve_
+    gate_from_verdict`의 `_SOURCE_TO_GATE_TYPE`엔 ci/pr→pr_review 매핑만 있고 **merge는
+    없다** — 그래서 그 증거가 done 전이를 막는 merge-type 게이트엔 한 번도 안 닿았다
+    (`_preflight_merge_gate`/board-done 경로는 컨텍스트가 없어 ci_result=None으로만 게이트를
+    만드니 매번 "CI unknown (self-report only)"로 굳는 게 근본).
+
+    pending인 merge-type 게이트가 있을 때만 `evaluate_merge_gate`를 실 증거로 재호출 —
+    새 판정 로직 0개, 기존 `_decide()`/trust/outcome을 그대로 재사용한다. story가 이미
+    board-done으로 먼저 넘어가 있어도 이 재평가는 gate row(audit) 갱신만 하고 story.status는
+    건드리지 않는다 — advisory(관측)/enforcing(집행) 축과 분리(그건 선생님 판단 축).
+
+    ⚠️호출 위치 주의 — `evaluate_merge_gate` 자신이 내부에서 `capture_pr_ci_verdict`를 이미
+    부른다. 이 함수를 `capture_pr_ci_verdict` 본문 안에서 부르면 무한 재귀가 된다 — 반드시
+    그 호출부(웹훅 핸들러 등) 쪽에서, `capture_pr_ci_verdict` 리턴 後에 별도로 부를 것.
+    """
+    existing = await session.execute(
+        select(Gate).where(
+            Gate.org_id == org_id,
+            Gate.work_item_id == story_id,
+            Gate.work_item_type == "story",
+            Gate.gate_type == MERGE_GATE_TYPE,
+            Gate.status == "pending",
+        ).limit(1)
+    )
+    if existing.scalar_one_or_none() is None:
+        return None
+    return await evaluate_merge_gate(
+        session, org_id, story_id,
+        pr_number=pr_number, repo=repo, ci_result=ci_result,
+        pr_result=("pass" if merged else None),
     )
