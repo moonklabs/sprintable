@@ -106,6 +106,104 @@ async def test_list_filter_by_type_200():
         app.dependency_overrides.clear()
 
 
+# ─── #2406 AC2(critical) — include_inactive 파라미터 존중 ────────────────────
+
+@pytest.mark.anyio
+async def test_list_team_members_include_inactive_true_omits_is_active_filter_org_level():
+    """org-level(project_id 없음, FE 실 호출 형태 — ?type=agent&include_inactive=true).
+    fix 前엔 이 파라미터를 몰라 조용히 무시하고 is_active=True(기본)만 걸었다 — 비활성
+    에이전트가 응답서 완전히 빠져(16→15건 미르코 실측) 재활성화 토글을 누를 행 자체가
+    없었다. fix 後엔 is_active 필터 자체를 안 걸어야(agent_filters에 키 부재) 한다."""
+    from app.routers.team_members import _get_repo_read
+
+    client, session, app = await _client()
+    try:
+        mock_repo = MagicMock()
+        mock_repo.list = AsyncMock(return_value=[_mock_member(type_="agent"), _mock_member(type_="agent", is_active=False)])
+        app.dependency_overrides[_get_repo_read] = lambda: mock_repo
+
+        async with client as c:
+            resp = await c.get("/api/v2/team-members?type=agent&include_inactive=true")
+
+        assert resp.status_code == 200
+        assert len(resp.json()) == 2  # 활성+비활성 둘 다
+        mock_repo.list.assert_awaited_once()
+        call_kwargs = mock_repo.list.await_args.kwargs
+        assert "is_active" not in call_kwargs  # 필터 자체를 안 걸었다(=DB에서 전부 반환)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_team_members_include_inactive_omitted_preserves_default_active_only():
+    """include_inactive 생략(기본 False) — 기존 동작 완전 동일(회귀 0). is_active=True가
+    그대로 걸려야 한다."""
+    from app.routers.team_members import _get_repo_read
+
+    client, session, app = await _client()
+    try:
+        mock_repo = MagicMock()
+        mock_repo.list = AsyncMock(return_value=[_mock_member(type_="agent")])
+        app.dependency_overrides[_get_repo_read] = lambda: mock_repo
+
+        async with client as c:
+            resp = await c.get("/api/v2/team-members?type=agent")
+
+        assert resp.status_code == 200
+        call_kwargs = mock_repo.list.await_args.kwargs
+        assert call_kwargs.get("is_active") is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_team_members_typo_param_silently_ignored_confirms_root_cause():
+    """PO 진단 판별 축 — 존재하지 않는 쿼리파라미터(오타 등)를 보내도 FastAPI가 200으로
+    조용히 무시하는 것(=선언 안 된 쿼리파라미터가 효과 없이 사라지는 것 자체가 원래
+    결함의 근본원인이었다는 진단을 실증). 이건 FastAPI 표준 동작이라 "버그 fix" 대상이
+    아니라 「그래서 include_inactive를 명시 선언해야 한다」는 이 PR의 근거를 고정하는
+    회귀 anchor."""
+    from app.routers.team_members import _get_repo_read
+
+    client, session, app = await _client()
+    try:
+        mock_repo = MagicMock()
+        mock_repo.list = AsyncMock(return_value=[_mock_member(type_="agent")])
+        app.dependency_overrides[_get_repo_read] = lambda: mock_repo
+
+        async with client as c:
+            resp = await c.get("/api/v2/team-members?type=agent&include_inactivee=true")  # 오타
+
+        assert resp.status_code == 200  # 조용히 무시 — 에러 안 남(오타를 잡아주지 않음)
+        call_kwargs = mock_repo.list.await_args.kwargs
+        assert call_kwargs.get("is_active") is True  # 오타라 include_inactive 미인식 → 기본(활성만) 그대로
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_team_members_include_inactive_true_omits_is_active_filter_project_scoped():
+    """project_id 지정 분기도 동일 — include_inactive=true면 is_active 필터를 안 건다."""
+    from app.routers.team_members import _get_repo_read
+
+    client, session, app = await _client()
+    try:
+        mock_repo = MagicMock()
+        mock_repo.list = AsyncMock(return_value=[_mock_member(), _mock_member(is_active=False)])
+        app.dependency_overrides[_get_repo_read] = lambda: mock_repo
+
+        with patch("app.routers.team_members.has_project_access", new=AsyncMock(return_value=True)):
+            async with client as c:
+                resp = await c.get(f"/api/v2/team-members?project_id={PROJECT_ID}&include_inactive=true")
+
+        assert resp.status_code == 200
+        assert len(resp.json()) == 2
+        call_kwargs = mock_repo.list.await_args.kwargs
+        assert "is_active" not in call_kwargs
+    finally:
+        app.dependency_overrides.clear()
+
+
 @pytest.mark.anyio
 async def test_create_team_member_201():
     client, session, app = await _client()
