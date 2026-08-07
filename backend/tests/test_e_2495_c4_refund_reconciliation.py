@@ -355,7 +355,7 @@ async def test_toss_webhook_billing_deleted_marks_key_deleted(monkeypatch):
     from fastapi.testclient import TestClient
     import app.core.config as config_module
     from app.main import app
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     monkeypatch.setattr(config_module.settings, "toss_webhook_secret", "")  # dev 통과
 
@@ -364,7 +364,8 @@ async def test_toss_webhook_billing_deleted_marks_key_deleted(monkeypatch):
     async def _override_get_db():
         yield fake_session
 
-    app.dependency_overrides[get_db] = _override_get_db
+    # story #2451(§6 Phase3 root-fix): get_db+get_read_db 항상 같이 거는 공용 헬퍼.
+    override_db_and_read(app, _override_get_db)
     try:
         with patch("app.routers.toss_webhooks.mark_billing_key_deleted", new=AsyncMock()) as mock_mark:
             with TestClient(app) as client:
@@ -376,7 +377,7 @@ async def test_toss_webhook_billing_deleted_marks_key_deleted(monkeypatch):
         assert resp.status_code == 200
         mock_mark.assert_awaited_once_with(fake_session, customer_key="cust-1")
     finally:
-        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.clear()
 
 
 @pytest.mark.anyio
@@ -384,14 +385,14 @@ async def test_toss_webhook_rejects_invalid_signature_when_secret_set(monkeypatc
     from fastapi.testclient import TestClient
     import app.core.config as config_module
     from app.main import app
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     monkeypatch.setattr(config_module.settings, "toss_webhook_secret", "shh")
 
     async def _override_get_db():
         yield AsyncMock()
 
-    app.dependency_overrides[get_db] = _override_get_db
+    override_db_and_read(app, _override_get_db)
     try:
         with TestClient(app) as client:
             resp = client.post(
@@ -401,7 +402,7 @@ async def test_toss_webhook_rejects_invalid_signature_when_secret_set(monkeypatc
             )
         assert resp.status_code == 401
     finally:
-        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.clear()
 
 
 @pytest.mark.anyio
@@ -409,14 +410,14 @@ async def test_toss_webhook_ignores_unknown_event_type(monkeypatch):
     from fastapi.testclient import TestClient
     import app.core.config as config_module
     from app.main import app
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     monkeypatch.setattr(config_module.settings, "toss_webhook_secret", "")
 
     async def _override_get_db():
         yield AsyncMock()
 
-    app.dependency_overrides[get_db] = _override_get_db
+    override_db_and_read(app, _override_get_db)
     try:
         with patch("app.routers.toss_webhooks.mark_billing_key_deleted", new=AsyncMock()) as mock_mark:
             with TestClient(app) as client:
@@ -428,4 +429,4 @@ async def test_toss_webhook_ignores_unknown_event_type(monkeypatch):
         assert resp.status_code == 200
         mock_mark.assert_not_awaited()
     finally:
-        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.clear()
