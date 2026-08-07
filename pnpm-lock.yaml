@@ -111,6 +111,9 @@ importers:
       '@tiptap/suggestion':
         specifier: ^3.22.3
         version: 3.22.3(@tiptap/core@3.22.3(@tiptap/pm@3.22.3))(@tiptap/pm@3.22.3)
+      '@tosspayments/tosspayments-sdk':
+        specifier: ^2.7.1
+        version: 2.7.1
       '@types/turndown':
         specifier: ^5.0.6
         version: 5.0.6
@@ -2541,6 +2544,9 @@ packages:
   '@tootallnate/once@2.0.0':
     resolution: {integrity: sha512-XCuKFP5PS55gnMVu3dty8KPatLqUoy/ZYzDzAGCQ8JNFCkLXzmI7vNHCR+XpbZaMWQK/vQubr7PkYq8g470J/A==}
     engines: {node: '>= 10'}
+
+  '@tosspayments/tosspayments-sdk@2.7.1':
+    resolution: {integrity: sha512-nHInxgFvFGm1VtaCS+IPLdtmE+B2a+MCYE9Meq0aR/0L0hAgoGllLS4ciQGb1RtLvp3mHcj3lL80XMi4BqQ7uw==}
 
   '@ts-morph/common@0.27.0':
     resolution: {integrity: sha512-Wf29UqxWDpc+i61k3oIOzcUfQt79PIT9y/MWfAGlrkjg6lBC1hwDECLXPVJAhWjiGbfBCxZd65F/LIZF3+jeJQ==}
@@ -8713,6 +8719,8 @@ snapshots:
       '@tiptap/pm': 3.22.3
 
   '@tootallnate/once@2.0.0': {}
+
+  '@tosspayments/tosspayments-sdk@2.7.1': {}
 
   '@ts-morph/common@0.27.0':
     dependencies:
