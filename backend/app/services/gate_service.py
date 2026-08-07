@@ -340,6 +340,16 @@ async def _reopen_rejected_gate(
         new_status = "pending"
 
     set_gate_status(gate, new_status, now=datetime.now(timezone.utc))
+    # story #2524(2026-08-08, codex 지적·#2520 QA 파생) — create_gate()의 신규 생성 분기는
+    # requires_human=(status=="pending")을 채우는데(#2156 AC3), 이 재오픈 분기는 여태 status만
+    # 갱신하고 requires_human은 안 건드렸다. rejected 게이트는 항상 requires_human이 "그
+    # rejected가 되던 시점의" 값을 그대로 물려받으므로(대개 창설 시 deny 정책이면 애초에
+    # False) — 정책이 그 사이(deny→ask 등) 바뀌어 재오픈이 pending으로 열리면 「status=pending
+    # (사람 승인 필요)인데 requires_human=False(안 필요로 표기)」로 어긋난다. merge-type은
+    # evaluate_merge_gate가 재오픈 직후 이 필드를 다시 정확히 덮어써(decision 기반) 이 갭이
+    # 안 보였지만(#2520 조사로 non-issue 확인), qa 등 non-merge gate_type은 이 재오픈이
+    # requires_human의 유일한 갱신 지점이라 여기서 직접 재기록한다(create_gate와 동일 규칙).
+    gate.requires_human = (new_status == "pending")
     gate.resolver_id = None
     gate.resolution_note = None
     gate.resolved_at = datetime.now(timezone.utc) if new_status != "pending" else None
