@@ -43,6 +43,7 @@ async def list_goals(
     response: Response,
     project_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    ids: str | None = Query(default=None, description="comma-separated goal ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관, story #2262 PR② 칩 상태 배치조회)"),
     limit: int | None = Query(default=None, ge=1, le=2000),
     cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
     order_by: str = Query(default="created_at"),
@@ -67,6 +68,29 @@ async def list_goals(
     이전과 byte-identical — `test_2298_goals_glance_include_realdb.py`가 그걸 고정한다).
     `GoalResponse`에 optional 필드를 얹지 않고 별도 `GoalWithGlanceResponse`로 가른 이유도
     같다(같은 모델에 얹으면 기본값이라도 JSON에 항상 찍혀 계약이 깨진다)."""
+    # story #2262 PR②(칩 상태 배치조회) — stories.py list_stories의 ids= 패턴 그대로 미러링.
+    # cursor/glance/order_by 등 페이지네이션 로직 전부 우회(정확한 집합 요청이라 무관).
+    # 카디르 QA(PR#2905, 2026-08-07): Query(default=None, ...) 기본값은 「값」이 아니라
+    # 「센티널 객체」 — FastAPI 경유 없이 이 함수를 직접 호출하는 테스트가 ids를 안 넘기면
+    # 그 센티널 그대로를 받는다. `is not None`은 센티널도 통과시켜 버려 `.split`이 터진다
+    # (stories.py list_stories가 이미 겪은 동형 함정) — isinstance로 실제 타입을 검사한다.
+    if isinstance(ids, str):
+        try:
+            goal_ids = [uuid.UUID(x) for x in ids.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(status_code=422, detail="invalid goal id in ids")
+        if not goal_ids:
+            return []
+        if len(goal_ids) > 200:
+            raise HTTPException(status_code=422, detail="too many ids (max 200)")
+        goals = await repo.list_by_ids(goal_ids)
+        # 인가 스코프: org 소속이어도 caller가 접근 못 하는 project의 goal은 조용히 필터링
+        # (stories.py list_stories와 동일 SSOT — accessible_project_ids_in_org).
+        from app.services.project_auth import accessible_project_ids_in_org
+        accessible = await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), org_id)
+        goals = [g for g in goals if g.project_id in accessible]
+        return [GoalResponse.model_validate(g) for g in goals]
+
     # ratchet round8(잔여 HIGH): project_id 필터(지정 시)에 caller 접근권 검증이 없어
     # same-org cross-project goal(제목/목표/전략의도)이 노출됐다 — resource-actual
     # project_id 직접검증. EE 훅 없음(이 엔드포인트는 EE RBAC 미적용 확認).

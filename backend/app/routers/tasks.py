@@ -77,10 +77,43 @@ async def list_tasks(
     story_id: uuid.UUID | None = Query(default=None),
     assignee_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    ids: str | None = Query(default=None, description="comma-separated task ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관, story #2262 PR② 칩 상태 배치조회)"),
     repo: TaskRepository = Depends(_get_repo_read),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[TaskResponse]:
+    # story #2262 PR②(칩 상태 배치조회) — stories.py list_stories의 ids= 패턴 미러링. Task엔
+    # project_id 컬럼이 없어(story_id NN) list_in_projects와 동형으로 Story JOIN을 거쳐야
+    # 접근권 스코프를 낼 수 있다 — repo.list_by_ids(org-scope만)로 앵커 조회 後, 결과의
+    # story_id→project_id를 별도 조회해 caller 접근권 project 집합으로 result-level narrowing.
+    # 카디르 QA(PR#2905, 2026-08-07): Query(...) 기본값 센티널 함정(goals.py와 동형) —
+    # isinstance로 실제 str만 통과시킨다.
+    if isinstance(ids, str):
+        try:
+            task_ids = [uuid.UUID(x) for x in ids.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(status_code=422, detail="invalid task id in ids")
+        if not task_ids:
+            return []
+        if len(task_ids) > 200:
+            raise HTTPException(status_code=422, detail="too many ids (max 200)")
+        tasks = await repo.list_by_ids(task_ids)
+        from app.services.project_auth import accessible_project_ids_in_org
+
+        accessible = await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), org_id)
+        story_ids = {t.story_id for t in tasks}
+        project_by_story: dict = {}
+        if story_ids:
+            rows = (
+                await repo.session.execute(
+                    select(Story.id, Story.project_id).where(Story.id.in_(story_ids))
+                )
+            ).all()
+            project_by_story = {sid: pid for sid, pid in rows}
+        tasks = [t for t in tasks if project_by_story.get(t.story_id) in accessible]
+        await _attach_has_evidence(repo.session, tasks)
+        return [TaskResponse.model_validate(t) for t in tasks]
+
     # story_id 지정 시: round6(#2072)에서 _assert_task_project_access(기존 G-fix 재사용)로
     # caller의 story project 접근권을 직접 검증(단일 story 스코프).
     if story_id is not None:
