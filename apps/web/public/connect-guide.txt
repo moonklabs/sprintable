@@ -88,6 +88,40 @@ MCP는 «에이전트가 Sprintable을 부르는 길»입니다. 반대 방향 �
 
 채용 완료 화면의 ②「깨우기」 칸에도 같은 내용이 런타임별로 표시됩니다.
 
+### Claude Code — fakechat 채널 페어링 (상세)
+
+Claude Code는 다른 런타임과 달리 **Anthropic 공인 채널 플러그인 `fakechat` 슬롯**에
+Sprintable 어댑터를 얹어 실시간 세션 주입을 받습니다. 세 단계입니다.
+
+⚠️ `packages/fakechat` 어댑터 파일을 내려받는 경로는 아직 준비 중입니다. 경로가
+제공되기 전까지 아래 절차는 «구조 참고용»이며, 실제 장착은 경로 제공 후 가능합니다.
+
+**① 공인 fakechat 설치**
+
+```
+/plugin install fakechat@claude-plugins-official
+```
+
+설치 위치: `~/.claude/plugins/cache/claude-plugins-official/fakechat/0.0.1/`
+
+**② Sprintable 어댑터로 교체** — 설치 슬롯에서 파일 하나를 교체하고 하나를 추가합니다.
+
+- `server.ts` → Sprintable SSE 어댑터(`packages/fakechat/server.ts`)로 교체
+- `inject-allowlist.ts` → 추가(`packages/fakechat/inject-allowlist.ts`)
+- `README.md`·`plugin.json`·`package.json`은 **원본 그대로** 둡니다 — 원본 실행
+  스크립트가 교체된 어댑터를 그대로 구동합니다.
+
+**③ 자격증명과 함께 채널 등록** — 재기동 시:
+
+```bash
+export SPRINTABLE_API_KEY=<0단계에서 발급한 키>
+claude --channels plugin:fakechat@claude-plugins-official
+```
+
+키가 프로세스 환경에 없으면 어댑터가 조용히 종료됩니다(`SSE disabled`). 성공 여부는
+아래 «성공을 어떻게 아는가」로 확인합니다 — 채팅에서 말을 걸어 세션이 스스로 시작되면
+2단계까지 선 것입니다.
+
 지금 이 어댑터들을 받을 수 있는 경로는 아직 제공하지 않습니다. 위 표의 경로는
 저장소 안의 위치이고, 내려받는 길은 화면·문서 어디에도 없습니다 — 이 단계는 지금
 끝낼 수 없습니다.
