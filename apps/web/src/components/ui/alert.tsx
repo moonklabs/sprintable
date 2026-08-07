@@ -8,14 +8,16 @@ const alertVariants = cva(
     variants: {
       variant: {
         default: 'border-border bg-muted/40 text-foreground',
+        // story #2513 — 글자는 text-foreground로 통일(라이트 테마 AA 미달 fix, warning과
+        // 동형). variant 정체성은 border-*-border·아이콘·bg-*-tint로만 표현한다.
         success:
-          'border-success-border bg-success-tint text-success',
+          'border-success-border bg-success-tint text-foreground',
         warning:
           'border-warning-border bg-warning-tint text-foreground',
         destructive:
-          'border-destructive-border bg-destructive-tint text-destructive',
+          'border-destructive-border bg-destructive-tint text-foreground',
         info:
-          'border-info-border bg-info-tint text-info',
+          'border-info-border bg-info-tint text-foreground',
       },
     },
     defaultVariants: {
