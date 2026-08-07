@@ -5,6 +5,7 @@ import { X, Check } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { readApiClientError } from '@/lib/api-client-error';
 
 interface Member {
   id: string;
@@ -57,11 +58,24 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
           project_id: projectId,
         }),
       });
-      if (!res.ok) throw new Error('Failed to create conversation');
+      if (!res.ok) {
+        const apiError = await readApiClientError(res, t('createFailed'));
+        if (apiError.code === 'AGENT_MESSAGE_POLICY_DENIED') {
+          const agentId = typeof apiError.details?.agent_id === 'string' ? apiError.details.agent_id : null;
+          const memberId = typeof apiError.details?.member_id === 'string' ? apiError.details.member_id : null;
+          const agentName = members.find((member) => member.id === agentId)?.name ?? t('unknownAgent');
+          const memberName = members.find((member) => member.id === memberId)?.name;
+          setError(memberName
+            ? t('messagePolicyDeniedForMember', { agent: agentName, member: memberName })
+            : t('messagePolicyDenied', { agent: agentName }));
+          return;
+        }
+        throw new Error(apiError.message);
+      }
       const data = await res.json() as { id: string };
       onCreated(data.id);
     } catch {
-      setError('대화 생성에 실패했습니다. 다시 시도해보세요.');
+      setError(t('createFailed'));
     } finally {
       setCreating(false);
     }
