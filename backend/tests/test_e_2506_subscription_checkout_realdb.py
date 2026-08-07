@@ -275,9 +275,16 @@ async def test_checkout_stale_reclaimed_late_confirm_does_not_premature_activate
     실제 charge가 카드 거절로 실패해도(TossApiError) declined 경로는 status를 다시
     되돌리지 않으므로, "확정된 결제가 하나도 없는데 active"라는 영구 오염이 남는다.
 
-    이 테스트는 정확히 그 타이밍을 asyncio.Event 2개로 결정론적으로 강제한다(진짜
+    이 테스트는 정확히 그 타이밍을 asyncio.Event 3개로 결정론적으로 강제한다(진짜
     시간 경과 대신 STALE_CLAIM_WINDOW를 음수로 monkeypatch해 "이미 지남" 조건만
-    재현 — 3분을 실제로 기다리지 않는다)."""
+    재현 — 3분을 실제로 기다리지 않는다).
+
+    카디르 재QA(codex, #2896 리뷰, 2026-08-07) — CI 20% 플레이키 재현+fix: 원래는
+    billing-key issuance 단계만 코디네이션해 "A가 먼저 claim한다"는 전제를 코드가
+    강제하지 않았다(asyncio.gather가 두 태스크의 claim UPSERT 순서까지 보장하진
+    않음 — B가 먼저 claim하면 시나리오가 뒤집혀 assert가 반대로 실패). a_claimed
+    이벤트로 "A의 claim이 이미 커밋됐다"를 B가 시작하기 前에 명시 확인시켜 claim
+    경쟁 자체를 결정화한다(레이스에 안 기대는 재현)."""
     import asyncio
     from datetime import timedelta
 
@@ -305,6 +312,7 @@ async def test_checkout_stale_reclaimed_late_confirm_does_not_premature_activate
     finally:
         await seed_engine.dispose()
 
+    a_claimed = asyncio.Event()  # A의 claim UPSERT가 이미 커밋됐다(issue_billing_key는 claim 커밋 後에만 호출됨).
     b_ready = asyncio.Event()   # B가 claim(뺏기)+issuance까지 끝냈다 — A는 이제 진행해도 됨
     a_done = asyncio.Event()    # A가 자기 흐름(step④ 포함)을 완전히 끝냈다 — B는 이제 charge해도 됨
     charge_call_count = {"n": 0}
@@ -319,6 +327,9 @@ async def test_checkout_stale_reclaimed_late_confirm_does_not_premature_activate
                 "authenticatedAt": "2026-08-07T00:00:00+09:00",
             }
         if op_label == "billing key issuance" and auth == "ak-a-slow":
+            # issue_billing_key는 claim UPSERT+commit이 끝난 뒤에만 호출되므로, 여기
+            # 도달했다는 것 자체가 "A의 claim이 이미 DB에 커밋됐다"는 명시 증거다.
+            a_claimed.set()
             await b_ready.wait()  # A는 B가 claim을 뺏어갈 시간을 번다(=STALE_CLAIM_WINDOW 초과 흉내).
             return {
                 "billingKey": "billing-key-A", "card": {"issuerCode": "61", "acquirerCode": "31", "number": "12345678****000*", "cardType": "신용", "ownerType": "개인"},
@@ -339,6 +350,11 @@ async def test_checkout_stale_reclaimed_late_confirm_does_not_premature_activate
         return result
 
     async def _run_b():
+        # #2511 CI 플레이키 fix(카디르/codex) — A의 claim이 이미 커밋된 뒤에야 B 자신의
+        # claim 시도를 시작한다. claim UPSERT 순서 자체를 asyncio.gather의 스케줄링
+        # 우연에 맡기지 않고 명시 이벤트로 결정화 — "B가 먼저 claim"하는 경우가 원천
+        # 배제돼 시나리오가 뒤집힐 수 없다.
+        await a_claimed.wait()
         with pytest.raises(CheckoutDeclined) as exc_info:
             await checkout_subscription(
                 Session_b(), org_id=org_id, auth_key="ak-b-fast", tier="team", billing_cycle="monthly",
