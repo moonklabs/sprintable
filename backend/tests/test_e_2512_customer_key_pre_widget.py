@@ -94,18 +94,15 @@ async def test_ensure_customer_key_handles_concurrent_race_loss():
 
 
 @pytest.mark.anyio
-async def test_issue_billing_key_reuses_placeholder_customer_key():
-    """issue_billing_key()가 ensure_customer_key()가 만든 placeholder 행을 찾아 실
-    빌링키로 덮어쓰는지 — 기존 재사용 로직(existing.customer_key)이 placeholder에도
-    그대로 통하는지 회귀 실증."""
+async def test_issue_billing_key_delegates_customer_key_to_ensure_customer_key():
+    """카디르 결함사냥 fix(#2892 리뷰, 2026-08-07) — issue_billing_key가 더 이상 스스로
+    SELECT+generate로 customer_key를 정하지 않고, ensure_customer_key()가 반환한 값을
+    그대로 Toss 호출에 쓰는지 회귀 실증(크로스-커넥션 레이스의 근본 fix)."""
     from app.services.org_billing_key import issue_billing_key
 
     org_id = uuid.uuid4()
-    placeholder = MagicMock()
-    placeholder.customer_key = "org-placeholder-key"
-
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_exec_result(placeholder), MagicMock(), _exec_result(MagicMock())])
+    session.execute = AsyncMock(side_effect=[MagicMock(), _exec_result(MagicMock())])
     session.commit = AsyncMock()
 
     toss_response = {
@@ -116,17 +113,23 @@ async def test_issue_billing_key_reuses_placeholder_customer_key():
 
     with patch("app.services.org_billing_key.TossAdapter") as MockAdapter, \
          patch("app.services.org_billing_key.encrypt_billing_key", return_value="encrypted-value"), \
-         patch("app.services.org_billing_key.ensure_configured"):
+         patch("app.services.org_billing_key.ensure_configured"), \
+         patch(
+             "app.services.org_billing_key.ensure_customer_key",
+             new=AsyncMock(return_value="org-converged-key"),
+         ) as mock_ensure:
         MockAdapter.return_value.create_billing_key = AsyncMock(return_value=toss_response)
         await issue_billing_key(session, org_id=org_id, auth_key="widget-auth-key")
 
+    mock_ensure.assert_awaited_once_with(session, org_id=org_id)
     create_call_kwargs = MockAdapter.return_value.create_billing_key.await_args.kwargs
-    assert create_call_kwargs["customer_key"] == "org-placeholder-key"  # placeholder 재사용
+    assert create_call_kwargs["customer_key"] == "org-converged-key"  # ensure_customer_key 값 그대로
 
-    upsert_call = session.execute.call_args_list[1]
+    upsert_call = session.execute.call_args_list[0]
     compiled = upsert_call.args[0].compile().params
     assert compiled["status"] == "active"
     assert compiled["encrypted_billing_key"] == "encrypted-value"
+    assert compiled["customer_key"] == "org-converged-key"
 
 
 # ─── router ───────────────────────────────────────────────────────────────

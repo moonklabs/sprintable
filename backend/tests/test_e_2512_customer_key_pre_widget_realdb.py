@@ -197,3 +197,74 @@ async def test_ensure_customer_key_concurrent_calls_create_exactly_one_row_reald
     finally:
         await engine_a.dispose()
         await engine_b.dispose()
+
+
+@pytest.mark.anyio
+async def test_ensure_customer_key_vs_issue_billing_key_cross_function_race_converges_realdb():
+    """카디르 결함사냥 HIGH fix 검증(#2892 리뷰, 2026-08-07) — «동일함수」가 아니라
+    «교차함수» 레이스: 위젯을 연 요청(ensure_customer_key, 커넥션 A)과 거의 동시에
+    도착한 checkout(issue_billing_key, 커넥션 B)이 같은 신규 org를 놓고 경쟁한다.
+    fix 前엔 issue_billing_key가 스스로 SELECT로 "행 없음"을 보고 새 키로 Toss를
+    불러 DB customer_key(ensure_customer_key가 나중에 커밋한 값)와 영구 불일치가
+    났다 — fix 後엔 issue_billing_key도 ensure_customer_key()를 거치므로 둘이 반드시
+    같은 customer_key로 수렴하고, Toss에 실제로 등록된 키(create_billing_key 호출
+    인자)와 최종 DB customer_key가 항상 일치해야 한다."""
+    import asyncio
+    from app.services.org_billing_key import ensure_customer_key, issue_billing_key
+
+    org_id = uuid.uuid4()
+    engine_a = create_async_engine(_ASYNC)
+    engine_b = create_async_engine(_ASYNC)
+    Session_a = async_sessionmaker(engine_a, expire_on_commit=False)
+    Session_b = async_sessionmaker(engine_b, expire_on_commit=False)
+
+    captured_toss_customer_key = {}
+
+    async def _fake_post(self, path, *, json, timeout, op_label, idempotency_key=None):
+        captured_toss_customer_key["value"] = json["customerKey"]
+        return {
+            "billingKey": "real-billing-key",
+            "card": {"issuerCode": "61", "number": "1234****", "cardType": "신용", "ownerType": "개인"},
+            "authenticatedAt": "2026-08-07T00:00:00+09:00",
+        }
+
+    async def _widget_open():
+        async with Session_a() as session:
+            return await ensure_customer_key(session, org_id=org_id)
+
+    async def _checkout_issue():
+        async with Session_b() as session:
+            row = await issue_billing_key(session, org_id=org_id, auth_key="widget-auth-key")
+            return row.customer_key
+
+    try:
+        with patch("app.services.payment.toss_adapter.TossAdapter._post", new=_fake_post):
+            widget_key, checkout_key = await asyncio.gather(_widget_open(), _checkout_issue())
+
+        assert widget_key == checkout_key  # 두 함수가 같은 값으로 수렴
+        assert captured_toss_customer_key["value"] == widget_key  # Toss 등록 키 == 최종 DB 키(불일치 없음)
+
+        verify_engine = create_async_engine(_ASYNC)
+        try:
+            async with async_sessionmaker(verify_engine, expire_on_commit=False)() as verify_session:
+                row = (
+                    await verify_session.execute(
+                        text("SELECT COUNT(*) as cnt FROM org_billing_keys WHERE org_id=:oid"),
+                        {"oid": org_id},
+                    )
+                ).first()
+                assert row.cnt == 1  # 행도 1개만(중복 생성 없음)
+
+                final = (
+                    await verify_session.execute(
+                        text("SELECT customer_key, status FROM org_billing_keys WHERE org_id=:oid"),
+                        {"oid": org_id},
+                    )
+                ).first()
+                assert final.customer_key == widget_key
+                assert final.status == "active"  # issue_billing_key가 실제로 완료됨
+        finally:
+            await verify_engine.dispose()
+    finally:
+        await engine_a.dispose()
+        await engine_b.dispose()

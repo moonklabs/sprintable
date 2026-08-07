@@ -61,16 +61,21 @@ async def issue_billing_key(
 
     기존 행이 있으면(재발급 = 카드 교체) 그 customer_key를 재사용 — Toss 쪽 고객 식별을
     유지한다. 새 billingKey로 UPDATE(이전 빌링키의 Toss측 폐기는 story C4 대상, 여기서는
-    저장 갱신만)."""
+    저장 갱신만).
+
+    카디르 결함사냥 fix(#2892 리뷰, 2026-08-07) — 크로스-커넥션 레이스: 예전엔 이 함수가
+    raw SELECT로 스스로 customer_key를 결정했다. ensure_customer_key()의 원자적 INSERT..
+    ON CONFLICT 커밋 前에(#2512, 별도 커넥션에서 진행 중인 동시 요청) 이 SELECT가 끼어들면
+    "아직 아무 행도 없다"고 잘못 판단해 새 랜덤 키로 Toss를 불러버렸다 — Toss엔 키 A로
+    등록되는데 DB엔(ensure_customer_key가 나중에 커밋한) 키 B가 최종 저장돼 영구 불일치
+    (실측: asyncio.gather 진짜 동시성). 이제 이 함수도 ensure_customer_key()를 거쳐 "모든
+    호출자가 항상 같은 customer_key로 수렴"하게 한다 — 스스로 새 키를 발명하지 않는다."""
     # PO nit①(#2880 리뷰, 2026-08-07 — C2에서 함께 정리): 되돌릴 수 없는 authKey 소모(아래
     # create_billing_key) 前에 암호화 키 가용성부터 확認 — 순서를 바꾸면 authKey를 태우고도
     # encrypt 단계에서 502가 나는 낭비가 생긴다.
     ensure_configured()
 
-    existing = (
-        await session.execute(select(OrgBillingKey).where(OrgBillingKey.org_id == org_id))
-    ).scalar_one_or_none()
-    customer_key = existing.customer_key if existing is not None else generate_customer_key(org_id)
+    customer_key = await ensure_customer_key(session, org_id=org_id)
 
     result = await TossAdapter().create_billing_key(auth_key=auth_key, customer_key=customer_key)
 
