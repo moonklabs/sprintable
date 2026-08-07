@@ -39,6 +39,13 @@ def _crypto_key(monkeypatch):
 
 async def _seed_org_with_members(session, *, human_seats=5):
     org_id = uuid.uuid4()
+    # #2092 TOCTOU-fix(3차) — checkout_subscription이 이제 organizations 행을 FOR UPDATE로
+    # 잠근다(존재 확인 겸함) — 실제 org 행 없이는 checkout 자체가 명시 실패한다(정확히
+    # 프로덕션과 동일 — org_id는 항상 실 org를 가리켜야 한다).
+    await session.execute(
+        text("INSERT INTO organizations (id, name, slug, plan) VALUES (:id, :name, :slug, 'free')"),
+        {"id": org_id, "name": f"test-org-{org_id}", "slug": f"slug-{org_id}"},
+    )
     for _ in range(human_seats):
         await session.execute(
             text("INSERT INTO org_members (id, org_id, user_id, role) VALUES (:id, :org_id, :uid, 'member')"),
@@ -303,6 +310,10 @@ async def test_checkout_stale_reclaimed_late_confirm_does_not_premature_activate
         async with async_sessionmaker(seed_engine, expire_on_commit=False)() as seed_session:
             # _seed_org_with_members는 매번 새 org_id를 만들어버리므로(여기선 미리 정한
             # org_id가 필요) 직접 멤버만 심는다.
+            await seed_session.execute(
+                text("INSERT INTO organizations (id, name, slug, plan) VALUES (:id, :name, :slug, 'free')"),
+                {"id": org_id, "name": f"test-org-{org_id}", "slug": f"slug-{org_id}"},
+            )
             for _ in range(3):
                 await seed_session.execute(
                     text("INSERT INTO org_members (id, org_id, user_id, role) VALUES (:id, :org_id, :uid, 'member')"),

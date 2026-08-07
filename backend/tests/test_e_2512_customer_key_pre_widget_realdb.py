@@ -49,6 +49,12 @@ async def test_ensure_customer_key_then_checkout_reuses_placeholder_realdb():
     try:
         async with Session() as session:
             org_id = uuid.uuid4()
+            # #2092 TOCTOU-fix(3차) — checkout_subscription이 organizations 행을 FOR
+            # UPDATE로 잠근다(존재 확인 겸함) — 실 org 행 필요.
+            await session.execute(
+                text("INSERT INTO organizations (id, name, slug, plan) VALUES (:id, :name, :slug, 'free')"),
+                {"id": org_id, "name": f"test-org-{org_id}", "slug": f"slug-{org_id}"},
+            )
             for _ in range(3):  # starter included_seats=3 — 초과 없이
                 await session.execute(
                     text("INSERT INTO org_members (id, org_id, user_id, role) VALUES (:id, :oid, :uid, 'member')"),
