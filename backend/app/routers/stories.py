@@ -1629,6 +1629,44 @@ async def bulk_update_stories(
         if not await has_project_access(db, uuid.UUID(auth.user_id), story.project_id, repo.org_id):
             continue
         update_data = item.model_dump(exclude={"id"}, exclude_none=True)
+        # story #2521(2026-08-07, 카디르 QA 적출) 근본수정 — bulk가 status를 setattr로 그대로
+        # 써 merge-gate(H1 Cage)를 아예 안 거쳤다. 단건 PATCH /{id}/status(update_story_status)
+        # 와 동일하게 line_merge_gate_active(라인 엔진이 이 전이를 이미 거버닝하면 이중평가
+        # 방지) → _preflight_merge_gate(H1 merge verdict gate) → enforce_gate(S-GATE-2 config
+        # 게이트) 순으로 지나게 한다. ⛔#2067 판정(PO 2026-08-07) 그대로 — ②emit_story_status_
+        # changed는 #2131이 이미 닫아 여기서 안 건드림(아래 emit 블록 무변경), ①게이트만 스코프.
+        #
+        # 차단 시 처리: 단건은 HTTPException(409)로 요청 전체를 거절하지만, bulk는 한 item이
+        # 막혔다고 나머지 정당한 item까지 통째로 실패시키면 안 된다(다건성 — #2173이 emit 쪽에
+        # 이미 세운 그 원칙과 동형). has_project_access 미충족 item과 동일하게 **그 item만
+        # continue로 조용히 스킵**(status뿐 아니라 그 item의 다른 필드 변경도 함께 스킵 —
+        # "게이트가 막은 전이를 일부만 우회해 다른 필드로 들여보내는" 여지를 안 남긴다).
+        if "status" in update_data and update_data["status"] != story.status:
+            _line_owns_done_gate = False
+            try:
+                from app.services.workflow_line_engine import line_merge_gate_active
+                _line_owns_done_gate = await line_merge_gate_active(
+                    db, org_id=repo.org_id, project_id=story.project_id,
+                    entity_type="story", from_status=story.status, to_status=update_data["status"],
+                )
+            except Exception:  # noqa: BLE001 — 불명 시 현행 게이트 유지(skip 안 함, 단건과 동형).
+                _line_owns_done_gate = False
+            if not _line_owns_done_gate:
+                try:
+                    await _preflight_merge_gate(db, repo.org_id, story, update_data["status"])
+                    if update_data["status"] == "done":
+                        from app.services.gate_enforce import enforce_gate
+                        _g_actor_type = (
+                            "agent" if auth.claims.get("app_metadata", {}).get("api_key_id")
+                            else "human"
+                        )
+                        await enforce_gate(
+                            db, org_id=repo.org_id, project_id=story.project_id,
+                            work_type="done", actor_type=_g_actor_type, actor_id=actor_id,
+                            work_item_id=story.id, work_item_title=story.title,
+                        )
+                except HTTPException:
+                    continue  # 게이트 차단/park — 이 item 전체 스킵(다른 정당 item은 계속 진행).
         # status 변경이면 전이 前 old_status 포착(violation 판정용·setattr 前).
         if "status" in update_data and update_data["status"] != story.status:
             old_status_by_id[story.id] = story.status
