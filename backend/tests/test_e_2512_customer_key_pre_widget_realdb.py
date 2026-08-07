@@ -158,3 +158,42 @@ async def test_awaiting_auth_placeholder_is_never_treated_as_active_billing_key_
                 )
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_ensure_customer_key_concurrent_calls_create_exactly_one_row_realdb():
+    """PO/카디르 결함사냥 축① 사전 pin — 진짜 동시성 하네스(#2505 max_packs와 동형).
+    같은(신규) org에 대해 완전히 독립된 두 커넥션이 동시에 customer-key를 요청해도
+    org_billing_keys에는 정확히 1행만 남고, 둘 다 «같은» customer_key를 받아야 한다
+    (ON CONFLICT DO NOTHING + 레이스 패배 시 재조회가 실제로 직렬화하는지 실증)."""
+    import asyncio
+    from app.services.org_billing_key import ensure_customer_key
+
+    org_id = uuid.uuid4()
+    engine_a = create_async_engine(_ASYNC)
+    engine_b = create_async_engine(_ASYNC)
+    Session_a = async_sessionmaker(engine_a, expire_on_commit=False)
+    Session_b = async_sessionmaker(engine_b, expire_on_commit=False)
+
+    async def _attempt(session_factory):
+        async with session_factory() as session:
+            return await ensure_customer_key(session, org_id=org_id)
+
+    try:
+        key_a, key_b = await asyncio.gather(_attempt(Session_a), _attempt(Session_b))
+        assert key_a == key_b
+
+        verify_engine = create_async_engine(_ASYNC)
+        try:
+            async with async_sessionmaker(verify_engine, expire_on_commit=False)() as verify_session:
+                count = (
+                    await verify_session.execute(
+                        text("SELECT COUNT(*) FROM org_billing_keys WHERE org_id=:oid"), {"oid": org_id}
+                    )
+                ).scalar_one()
+                assert count == 1
+        finally:
+            await verify_engine.dispose()
+    finally:
+        await engine_a.dispose()
+        await engine_b.dispose()
