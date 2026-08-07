@@ -74,6 +74,12 @@ async def test_checkout_raises_when_offering_not_found():
 
 # ─── checkout_subscription — 상태기계 happy path ────────────────────────────
 
+def _claim_result(rowcount=1):
+    r = MagicMock()
+    r.rowcount = rowcount
+    return r
+
+
 @pytest.mark.anyio
 async def test_checkout_activates_subscription_when_charge_confirmed():
     from app.services.org_subscription_checkout import checkout_subscription
@@ -85,9 +91,10 @@ async def test_checkout_activates_subscription_when_charge_confirmed():
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=[
         _exec_result(offering),   # ① offering lookup
-        MagicMock(),              # ② upsert pending
+        _claim_result(1),         # #2511 claim(=구독 pending 전이 겸함) — 성공
         MagicMock(),              # ④ update active
         _exec_result(active_sub), # 최종 refetch
+        MagicMock(),              # #2511 finally — claim 해제
     ])
 
     confirmed_order = MagicMock()
@@ -107,12 +114,40 @@ async def test_checkout_activates_subscription_when_charge_confirmed():
     assert charge_kwargs["amount_minor"] == 59_000
     assert charge_kwargs["currency"] == "krw"
 
-    # ② upsert pending 확認 — 두 번째 execute 호출.
-    upsert_call = session.execute.call_args_list[1]
-    compiled = upsert_call.args[0].compile().params
+    # claim(=구독 pending 전이 겸함) 확認 — 두 번째 execute 호출.
+    claim_call = session.execute.call_args_list[1]
+    compiled = claim_call.args[0].compile().params
     assert compiled["status"] == "pending"
     assert compiled["tier"] == "team"
     assert compiled["billing_cycle"] == "monthly"
+
+
+@pytest.mark.anyio
+async def test_checkout_rejects_when_another_checkout_already_in_progress():
+    """#2511 — claim UPSERT의 WHERE 가드에 걸려 rowcount=0(다른 checkout이 이미
+    checkout_claimed_at을 쥐고 있음) — Toss를 한 번도 부르지 않고(issue_billing_key조차)
+    즉시 CheckoutInProgress로 거부돼야 한다."""
+    from app.services.org_subscription_checkout import CheckoutInProgress, checkout_subscription
+
+    org_id = uuid.uuid4()
+    offering = _offering(tier="team")
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[
+        _exec_result(offering),  # ① offering lookup
+        _claim_result(0),        # #2511 claim 실패 — 다른 요청이 진행 中
+    ])
+
+    with patch("app.services.org_subscription_checkout.issue_billing_key", new=AsyncMock()) as mock_issue, \
+         patch("app.services.org_subscription_checkout.charge_org", new=AsyncMock()) as mock_charge:
+        with pytest.raises(CheckoutInProgress, match="진행"):
+            await checkout_subscription(
+                session, org_id=org_id, auth_key="ak-x", tier="team", billing_cycle="monthly",
+            )
+
+    mock_issue.assert_not_awaited()
+    mock_charge.assert_not_awaited()
+    assert session.execute.await_count == 2  # offering + claim뿐, finally release도 없음(claim 자체가 실패)
 
 
 @pytest.mark.anyio
@@ -146,8 +181,9 @@ async def test_checkout_declined_leaves_subscription_pending_not_active():
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=[
         _exec_result(offering),    # ① offering lookup
-        MagicMock(),               # ② upsert pending
+        _claim_result(1),          # #2511 claim 성공
         _exec_result(pending_sub), # except 블록 안 refetch
+        MagicMock(),               # #2511 finally — claim 해제(CheckoutDeclined도 거친다)
     ])
 
     with patch("app.services.org_subscription_checkout.issue_billing_key", new=AsyncMock()), \
@@ -162,8 +198,8 @@ async def test_checkout_declined_leaves_subscription_pending_not_active():
             )
 
     assert exc_info.value.subscription.status == "pending"
-    # 4번째(active로 올리는) execute가 없어야 — 즉, 딱 3번만 불렸다.
-    assert session.execute.await_count == 3
+    # 4번째(active로 올리는) execute가 없어야 — offering+claim+refetch+release 딱 4번.
+    assert session.execute.await_count == 4
 
 
 @pytest.mark.anyio
@@ -179,8 +215,9 @@ async def test_checkout_does_not_activate_when_order_not_confirmed_race_loss():
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=[
         _exec_result(offering),
-        MagicMock(),
-        _exec_result(pending_sub),  # 최종 refetch(active-update 없음 — 3번만 호출)
+        _claim_result(1),
+        _exec_result(pending_sub),  # 최종 refetch(active-update 없음)
+        MagicMock(),                # #2511 finally — claim 해제
     ])
 
     racing_order = MagicMock()
@@ -194,4 +231,4 @@ async def test_checkout_does_not_activate_when_order_not_confirmed_race_loss():
         )
 
     assert result.status == "pending"
-    assert session.execute.await_count == 3
+    assert session.execute.await_count == 4

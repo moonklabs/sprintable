@@ -166,3 +166,154 @@ async def test_checkout_retry_same_day_does_not_double_charge_realdb():
             assert ledger_count == 1  # 이중청구 안 됨
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_checkout_concurrent_different_tier_charges_at_most_once_realdb():
+    """#2511 — 카디르 #2890 결함사냥 재QA 발견 재현+fix 검증: 같은 org에 «다른» tier/cycle
+    로 진짜 동시(asyncio.gather, 완전히 독립된 두 커넥션) checkout이 도착해도 charge는
+    최대 1회·구독은 1개로 수렴해야 한다(story #2511 AC1, "카디르 #2890 동시성 하네스"
+    재사용 — 진짜 크로스-커넥션 레이스, 같은 세션 mock이 아니다)."""
+    import asyncio
+
+    from app.services.org_subscription_checkout import CheckoutInProgress, checkout_subscription
+
+    engine_a = create_async_engine(_ASYNC)
+    engine_b = create_async_engine(_ASYNC)
+    Session_a = async_sessionmaker(engine_a, expire_on_commit=False)
+    Session_b = async_sessionmaker(engine_b, expire_on_commit=False)
+
+    seed_engine = create_async_engine(_ASYNC)
+    try:
+        async with async_sessionmaker(seed_engine, expire_on_commit=False)() as seed_session:
+            org_id = await _seed_org_with_members(seed_session, human_seats=3)
+    finally:
+        await seed_engine.dispose()
+
+    # 승자만 Toss를 부른다(billing-key 발급 1회 + charge 1회) — 패자는 claim 실패로
+    # issue_billing_key조차 도달 못 해야 하므로, 이 응답 목록이 2번 넘게 쓰이면(=패자도
+    # Toss를 불렀다는 뜻) 즉시 StopIteration으로 실패한다.
+    toss_billing_key_response = {
+        "billingKey": "billing-key-plaintext-concurrent",
+        "card": {"issuerCode": "61", "acquirerCode": "31", "number": "12345678****000*", "cardType": "신용", "ownerType": "개인"},
+        "authenticatedAt": "2026-08-07T00:00:00+09:00",
+    }
+    toss_charge_response = {"paymentKey": f"pay-{uuid.uuid4()}", "totalAmount": 59_000}
+
+    async def _checkout_starter():
+        async with Session_a() as session:
+            try:
+                return await checkout_subscription(
+                    session, org_id=org_id, auth_key="ak-starter", tier="starter", billing_cycle="monthly",
+                )
+            except CheckoutInProgress:
+                return "rejected"
+
+    async def _checkout_team():
+        async with Session_b() as session:
+            try:
+                return await checkout_subscription(
+                    session, org_id=org_id, auth_key="ak-team", tier="team", billing_cycle="annual",
+                )
+            except CheckoutInProgress:
+                return "rejected"
+
+    try:
+        with patch("app.services.payment.toss_adapter.TossAdapter._post", new=AsyncMock(
+            side_effect=[toss_billing_key_response, toss_charge_response]
+        )):
+            result_a, result_b = await asyncio.gather(_checkout_starter(), _checkout_team())
+
+        results = [result_a, result_b]
+        winners = [r for r in results if r != "rejected"]
+        losers = [r for r in results if r == "rejected"]
+        assert len(winners) == 1  # 정확히 하나만 성공
+        assert len(losers) == 1   # 정확히 하나만 거부(CheckoutInProgress)
+        assert winners[0].status == "active"
+
+        verify_engine = create_async_engine(_ASYNC)
+        try:
+            async with async_sessionmaker(verify_engine, expire_on_commit=False)() as verify_session:
+                ledger_count = (
+                    await verify_session.execute(
+                        text("SELECT COUNT(*) FROM billing_ledger_entries WHERE org_id=:oid AND entry_type='charge'"),
+                        {"oid": org_id},
+                    )
+                ).scalar_one()
+                assert ledger_count == 1  # 이중청구 안 됨(AC1 핵심)
+
+                sub_count = (
+                    await verify_session.execute(
+                        text("SELECT COUNT(*) FROM org_subscriptions WHERE org_id=:oid"), {"oid": org_id}
+                    )
+                ).scalar_one()
+                assert sub_count == 1  # 구독도 1개로 수렴
+
+                claim_state = (
+                    await verify_session.execute(
+                        text("SELECT checkout_claimed_at FROM org_subscriptions WHERE org_id=:oid"), {"oid": org_id}
+                    )
+                ).scalar_one()
+                assert claim_state is None  # 승자의 finally가 claim을 해제함(다음 checkout 안 막힘)
+        finally:
+            await verify_engine.dispose()
+    finally:
+        await engine_a.dispose()
+        await engine_b.dispose()
+
+
+@pytest.mark.anyio
+async def test_checkout_sequential_different_tier_after_completion_not_blocked_realdb():
+    """#2511 AC2 — 정상 순차(1차 완결 後 다른 tier로 재구독)는 막지 않는다. 진행 中
+    claim은 1차가 finally에서 해제하므로, 겹치지 않는 순차 2차 checkout은 정상 성공해야
+    한다(회귀 0 — «미완결 진행 중»에만 걸리는 락)."""
+    from app.services.org_subscription_checkout import checkout_subscription
+
+    # 두 호출에 별개 세션을 쓴다 — 실제로도 서로 다른 HTTP 요청은 각자 새 세션을 받는다
+    # (같은 세션을 재사용하면 expire_on_commit=False identity map이 1차 refetch 시
+    # 캐싱한 객체를 2차 조회에서도 그대로 돌려줘 "진짜 DB 상태"가 아니라 "세션이 기억하는
+    # 상태"를 검증하게 되는 착시가 생긴다 — 이 테스트가 검증하려는 건 claim 해제 그 자체).
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session1:
+            org_id = await _seed_org_with_members(session1, human_seats=3)
+
+            toss_billing_key_response = {
+                "billingKey": "billing-key-seq-1",
+                "card": {"issuerCode": "61", "acquirerCode": "31", "number": "12345678****000*", "cardType": "신용", "ownerType": "개인"},
+                "authenticatedAt": "2026-08-07T00:00:00+09:00",
+            }
+            toss_charge_response_1 = {"paymentKey": f"pay-{uuid.uuid4()}", "totalAmount": 5_000}
+
+            with patch("app.services.payment.toss_adapter.TossAdapter._post", new=AsyncMock(
+                side_effect=[toss_billing_key_response, toss_charge_response_1]
+            )):
+                sub1 = await checkout_subscription(
+                    session1, org_id=org_id, auth_key="ak-seq-1", tier="starter", billing_cycle="monthly",
+                )
+            assert sub1.status == "active"
+            assert sub1.tier == "starter"
+
+        # 1차가 완전히 끝난 後(claim 해제됨) — 다른 tier로 순차 재구독(새 세션, 새 요청
+        # 흉내). 막히면 안 된다.
+        async with Session() as session2:
+            toss_charge_response_2 = {"paymentKey": f"pay-{uuid.uuid4()}", "totalAmount": 59_000}
+            with patch("app.services.payment.toss_adapter.TossAdapter._post", new=AsyncMock(
+                side_effect=[toss_billing_key_response, toss_charge_response_2]
+            )):
+                sub2 = await checkout_subscription(
+                    session2, org_id=org_id, auth_key="ak-seq-2", tier="team", billing_cycle="monthly",
+                )
+            assert sub2.status == "active"
+            assert sub2.tier == "team"
+
+            charge_count = (
+                await session2.execute(
+                    text("SELECT COUNT(*) FROM billing_ledger_entries WHERE org_id=:oid AND entry_type='charge'"),
+                    {"oid": org_id},
+                )
+            ).scalar_one()
+            assert charge_count == 2  # 둘 다 정당한 별개 청구(순차·비중첩)
+    finally:
+        await engine.dispose()
