@@ -912,16 +912,34 @@ async def declare_new_story_reference_candidate(
     }
 
 
+class DeclareStoryReferenceCandidateRequest(BaseModel):
+    """#2358 QA(카디르, 2026-08-07 HIGH) — declare와 relation-kind가 독립된 두 커밋이라,
+    FE가 순차 호출(declare 성공→relation-kind 실패)하면 candidate가 status=declared·
+    relation_kind=NULL로 영구 고아가 된다(관계 훑기 큐가 relation_kind IS NULL 걸린 후보만
+    보여주므로 다시 안 뜬다). relation_kind는 옵션 — 생략하면 기존 계약(declare만, 「종류는
+    나중에」)이 그대로 유지된다(#2223 오르테가군 판정 "한 클릭에 안 묶는다"를 어기지 않음
+    — 이 필드는 강제가 아니라 「같이 낼 값이 이미 있으면 같은 트랜잭션에 실어 보내는」
+    선택지)."""
+
+    relation_kind: str | None = None
+
+
 @router.post("/{id}/reference-candidates/{candidate_id}/declare")
 async def declare_story_reference_candidate(
     id: uuid.UUID,
     candidate_id: uuid.UUID,
+    body: DeclareStoryReferenceCandidateRequest = DeclareStoryReferenceCandidateRequest(),
     repo: StoryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
 ) -> dict:
     """POST .../declare — AC5: 사람이 후보를 골라 「선언됨」으로 승격. ⛔AC4: 이 엔드포인트가
     바꾸는 것은 candidate.status/declared_by/declared_at 셋뿐이다 — 막힘·대기·종료·에이전트
-    실행 등 다른 어떤 부수효과도 일으키지 않는다(회귀 테스트가 이 계약을 지킨다)."""
+    실행 등 다른 어떤 부수효과도 일으키지 않는다(회귀 테스트가 이 계약을 지킨다).
+
+    #2358 QA 원자화(2026-08-07) — body.relation_kind가 실려 오면 같은 트랜잭션(같은
+    session, 커밋 1회)에서 relation_kind도 함께 쓴다. 둘 중 하나라도 실패하면(404·400) 커밋
+    전이라 아무것도 안 남는다(전부 아니면 전무) — status=declared인데 relation_kind만 못
+    쓴 반쪽 상태가 생기지 않는다."""
     story = await repo.get(id)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
@@ -929,7 +947,9 @@ async def declare_story_reference_candidate(
 
     from app.services.reference_semantic_candidates import (
         CandidateNotFoundError,
+        InvalidRelationKindError,
         declare_candidate,
+        set_candidate_relation_kind,
     )
 
     actor_id = await _resolve_team_member_id(auth, repo.org_id, repo.session)
@@ -938,12 +958,20 @@ async def declare_story_reference_candidate(
             repo.session, org_id=repo.org_id, source_id=id, candidate_id=candidate_id,
             declared_by=actor_id,
         )
+        if body.relation_kind is not None:
+            candidate = await set_candidate_relation_kind(
+                repo.session, org_id=repo.org_id, source_id=id, candidate_id=candidate_id,
+                relation_kind=body.relation_kind,
+            )
     except CandidateNotFoundError:
         raise HTTPException(status_code=404, detail="Reference candidate not found")
+    except InvalidRelationKindError:
+        raise HTTPException(status_code=400, detail="Invalid relation_kind")
     await repo.session.commit()
     return {
         "id": str(candidate.id),
         "status": candidate.status,
+        "relation_kind": candidate.relation_kind,
         "declared_by": str(candidate.declared_by) if candidate.declared_by else None,
         "declared_at": candidate.declared_at.isoformat() if candidate.declared_at else None,
     }
