@@ -134,11 +134,18 @@ async def test_owner_floor_get_org_id_matches_injected_dependency_not_hardcoded_
 async def test_team_member_user_unaffected_realdb():
     """회귀 0 — TeamMember가 있는 기존 사용자는 그대로 project_id/org_id 둘 다 채워진다
     (team_member 픽스처로만 도는 테스트가 이 결함을 못 잡는다는 AC4 경고와 대칭 — 이건
-    "기존 동작이 안 깨지는가"를 재는 별도 축이라 team_member로 도는 게 맞다)."""
+    "기존 동작이 안 깨지는가"를 재는 별도 축이라 team_member로 도는 게 맞다).
+
+    ⭐카디르 QA(PR#2908, 2026-08-07) 정정 — CI는 alembic 마이그(0106)를 태워 `team_members`가
+    「members ⋈ project_access UNION 뷰」다(테이블 아님, INSERT 불가). 로컬 `Base.metadata.
+    create_all()` 스크래치 DB는 TeamMember ORM 모델을 그대로 테이블로 만들어 이 차이를
+    못 잡았다(셀프 실PG였지만 CI와 다른 스키마를 잰 것) — `members`+`project_access`에
+    직접 INSERT(뷰가 join하는 그 원천 테이블)로 재작성, `TeamMember`/`team_members`는
+    안 건드린다(#2262/#2217의 다른 owner-floor 헬퍼와 동일 패턴)."""
+    from app.models.member import Member
     from app.models.organization import Organization
-    from app.models.pm import Story  # noqa: F401 — import 순서 안전(순환 회피 확인용, 실사용 없음)
     from app.models.project import OrgMember, Project
-    from app.models.team import TeamMember
+    from app.models.project_access import ProjectAccess
     from app.models.user import User
 
     engine, Session = await _session_factory()
@@ -156,13 +163,18 @@ async def test_team_member_user_unaffected_realdb():
             om = OrgMember(id=uuid.uuid4(), org_id=org.id, user_id=user.id, role="member")
             s.add(om)
             await s.commit()
-            tm = TeamMember(
-                id=uuid.uuid4(), org_id=org.id, project_id=project.id, user_id=user.id,
-                type="human", name="TM", is_active=True,
-            )
-            s.add(tm)
+            # 「members 앵커」 컨벤션 — Member.id == OrgMember.id(이 코드베이스 전반의 canonical
+            # id, /api/v2/me의 owner-floor 폴백과 동일 패턴).
+            member = Member(id=om.id, org_id=org.id, type="human", user_id=user.id, name="TM")
+            s.add(member)
             await s.commit()
-            seeded = {"org_id": org.id, "user_id": user.id, "project_id": project.id, "tm_id": tm.id}
+            s.add(ProjectAccess(
+                project_id=project.id, org_member_id=om.id, member_id=member.id, role="member",
+            ))
+            await s.commit()
+            seeded = {
+                "org_id": org.id, "user_id": user.id, "project_id": project.id, "tm_id": member.id,
+            }
 
         async with Session() as s:
             resp = await _call_get_current_project(s, seeded["tm_id"], seeded["user_id"], seeded["org_id"])
