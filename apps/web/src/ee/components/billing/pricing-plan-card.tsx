@@ -76,10 +76,14 @@ export function PricingPlanCard({
         <Button variant="outline" size="sm" disabled className="mb-4 w-full border-dashed">
           {t('currentPlanCta')}
         </Button>
-      ) : isPricePublic ? (
+      ) : isPricePublic && tier.id !== 'free' ? (
+        // free는 체크아웃 대상이 아니다(Toss 인증 불요 — story #2510) — 다운그레이드 흐름은
+        // 이 D단계 스코프 밖(정책 미정, toss-adapter-c-plan-v0-1 §7).
         <Button variant="default" size="sm" className="mb-4 w-full bg-brand text-brand-foreground hover:bg-brand/90" onClick={() => onUpgrade(tier.id)}>
           {t('upgradeCta')}
         </Button>
+      ) : isPricePublic ? (
+        <div className="mb-4 h-8 w-full" aria-hidden="true" />
       ) : (
         <Button variant="ghost" size="sm" disabled className="mb-4 w-full bg-muted text-muted-foreground">
           <Lock className="h-3.5 w-3.5" data-icon="inline-start" />

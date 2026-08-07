@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -27,6 +28,7 @@ import { Button } from '@/components/ui/button';
 import { PricingPlanCard } from './pricing-plan-card';
 import { PricingLimitsTable } from './pricing-limits-table';
 import { PricingPacks, type PackKind } from './pricing-packs';
+import { completeCheckout, startBillingAuth, type CheckoutOutcome } from './toss-checkout';
 import {
   AUTOMATION_PACK,
   STORAGE_PACK,
@@ -59,20 +61,69 @@ function toTierId(raw: string | undefined): TierId {
 export function BillingTab({ orgId }: { orgId: string }) {
   const t = useTranslations('pricingPlans');
   const tc = useTranslations('common');
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [status, setStatus] = useState<BillingStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cycle, setCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [upgradeTarget, setUpgradeTarget] = useState<TierId | null>(null);
   const [packTarget, setPackTarget] = useState<{ kind: PackKind; quantity: number } | null>(null);
+  const [checkoutProcessing, setCheckoutProcessing] = useState(false);
+  const [checkoutOutcome, setCheckoutOutcome] = useState<CheckoutOutcome | { kind: 'widgetFailed' } | null>(null);
 
-  useEffect(() => {
+  const refetchStatus = () => {
+    setLoading(true);
     fetch(`${FASTAPI_URL()}/api/v2/billing/status`, { credentials: 'include' })
       .then((r) => r.json() as Promise<BillingStatus>)
       .then(setStatus)
       .catch(() => setError(t('loadError')))
       .finally(() => setLoading(false));
-  }, [orgId, t]);
+  };
+
+  useEffect(() => {
+    refetchStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId]);
+
+  // 결제②-D(#2510) — Toss 위젯 리다이렉트 왕복 복귀 처리. successUrl/failUrl 둘 다
+  // /settings?tab=billing 으로 돌아오므로 여기서 쿼리파라미터로 왕복 결과를 판별한다.
+  // 처리 後 즉시 쿼리를 지워 새로고침 시 같은 authKey로 이중 체크아웃되는 것을 막는다.
+  useEffect(() => {
+    const checkoutParam = searchParams.get('checkout');
+    if (checkoutParam == null) return;
+
+    const clearQuery = () => router.replace('/settings?tab=billing');
+
+    if (checkoutParam === 'fail') {
+      setCheckoutOutcome({ kind: 'widgetFailed' });
+      clearQuery();
+      return;
+    }
+    if (checkoutParam !== 'success') return;
+
+    const authKey = searchParams.get('authKey');
+    const tier = searchParams.get('tier');
+    const billingCycleParam = searchParams.get('cycle');
+    if (!authKey || !tier || (billingCycleParam !== 'monthly' && billingCycleParam !== 'annual')) {
+      setCheckoutOutcome({ kind: 'widgetFailed' });
+      clearQuery();
+      return;
+    }
+
+    setCheckoutProcessing(true);
+    completeCheckout({ authKey, tier: tier as Exclude<TierId, 'free'>, billingCycle: billingCycleParam })
+      .then((outcome) => {
+        setCheckoutOutcome(outcome);
+        if (outcome.kind === 'active') refetchStatus();
+      })
+      .catch(() => setCheckoutOutcome({ kind: 'error', status: 0 }))
+      .finally(() => {
+        setCheckoutProcessing(false);
+        clearQuery();
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (loading) {
     return (
@@ -100,6 +151,42 @@ export function BillingTab({ orgId }: { orgId: string }) {
       {!IS_PRICE_PUBLIC && (
         <Alert variant="info">
           <AlertDescription>{t('statePendingBanner')}</AlertDescription>
+        </Alert>
+      )}
+
+      {checkoutProcessing && (
+        <Alert variant="info">
+          <AlertDescription className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {t('checkoutProcessing')}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {!checkoutProcessing && checkoutOutcome?.kind === 'active' && (
+        <Alert variant="success">
+          <AlertDescription>{t('checkoutSuccessBanner', { tier: t(`tierName_${checkoutOutcome.result.tier}`) })}</AlertDescription>
+        </Alert>
+      )}
+      {!checkoutProcessing && checkoutOutcome?.kind === 'declined' && (
+        // 유나 design 가디언(2026-08-07) — declined(카드거절)는 502 등 시스템오류와 색으로
+        // 구분돼야 한다(내 카드 문제 vs 서비스 문제). destructive(red)가 아니라 warning.
+        <Alert variant="warning">
+          <AlertDescription>
+            {t('checkoutDeclinedBanner', { reason: checkoutOutcome.result.declined_reason ?? '' })}
+            {' '}
+            {t('checkoutDeclinedReassurance')}
+          </AlertDescription>
+        </Alert>
+      )}
+      {!checkoutProcessing && checkoutOutcome?.kind === 'error' && (
+        <Alert variant="destructive">
+          <AlertDescription>{t('checkoutErrorBanner')}</AlertDescription>
+        </Alert>
+      )}
+      {!checkoutProcessing && checkoutOutcome?.kind === 'widgetFailed' && (
+        <Alert variant="destructive">
+          <AlertDescription>{t('checkoutWidgetFailedBanner')}</AlertDescription>
         </Alert>
       )}
 
@@ -157,7 +244,7 @@ export function BillingTab({ orgId }: { orgId: string }) {
   );
 }
 
-function UpgradeCheckoutDialog({
+export function UpgradeCheckoutDialog({
   tierId,
   cycle,
   currentSeats,
@@ -169,14 +256,29 @@ function UpgradeCheckoutDialog({
   onClose: () => void;
 }) {
   const t = useTranslations('pricingPlans');
-  if (tierId == null) return null;
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(false);
+  if (tierId == null || tierId === 'free') return null;
   const tier = TIER_DEFINITIONS[tierId];
   const monthlyKrw = cycle === 'yearly' ? yearlyMonthlyEquivalentKrw(tier.priceMonthlyKrw) : tier.priceMonthlyKrw;
   const chargeKrw = withVatKrw(monthlyKrw);
   const nextBillingDay = new Date().getDate();
 
+  // story #2510 — 위젯이 열리면 이 페이지를 이탈하므로 정상 흐름에서 setSubmitting(false)로
+  // 돌아오지 않는다(리다이렉트 복귀 後 새 마운트가 처리). 실패(예: 카드 인증창 자체가 안
+  // 열림)만 여기서 잡아 재시도 가능한 상태로 되돌린다 — 이중제출 방어(유나 시안 v2).
+  const handleConfirm = () => {
+    if (submitting) return;
+    setSubmitting(true);
+    setSubmitError(false);
+    startBillingAuth({ tier: tierId, cycle }).catch(() => {
+      setSubmitting(false);
+      setSubmitError(true);
+    });
+  };
+
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
+    <Dialog open onOpenChange={(open) => !open && !submitting && onClose()}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{t('checkoutDialogTitle', { tier: t(`tierName_${tierId}`) })}</DialogTitle>
@@ -200,12 +302,24 @@ function UpgradeCheckoutDialog({
           </div>
         </dl>
         <p className="text-[11px] text-muted-foreground">{t('checkoutDialogTossNote')}</p>
+        {submitError && (
+          <Alert variant="destructive">
+            <AlertDescription>{t('checkoutWidgetOpenErrorInline')}</AlertDescription>
+          </Alert>
+        )}
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={onClose} disabled={submitting}>
             {t('checkoutDialogCancel')}
           </Button>
-          {/* Toss 실결제 연동은 결제②-C(TossAdapter) 범위 — 그 前까지 셸만 확인용으로 닫는다. */}
-          <Button variant="default" className="bg-brand text-brand-foreground hover:bg-brand/90" onClick={onClose}>
+          <Button
+            variant="default"
+            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            onClick={handleConfirm}
+            disabled={submitting}
+          >
+            {submitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" data-icon="inline-start" />
+            ) : null}
             {t('checkoutDialogConfirm')}
           </Button>
         </DialogFooter>
