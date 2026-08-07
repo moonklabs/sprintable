@@ -358,7 +358,9 @@ export function AgentRunDetail({
             {/* Error message for failed runs */}
             {run.status === 'failed' && errorDisplay.message && (
               <Alert variant="destructive" className="mb-4">
-                <AlertTriangle className="size-4" />
+                {/* story #2513 — Alert 글자가 text-foreground로 통일된 후, 색-미지정
+                    아이콘은 부모의 currentColor를 상속해 variant 색을 잃는다. 명시. */}
+                <AlertTriangle className="size-4 text-destructive" />
                 <AlertDescription>
                   <p className="font-semibold">{t('errorLabel')}</p>
                   <p className="mt-1">{errorDisplay.message}</p>
