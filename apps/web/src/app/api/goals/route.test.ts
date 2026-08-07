@@ -40,3 +40,38 @@ describe('/api/goals GET — include(story #2298 glance 옵트인) forwarding', 
     expect(calledWith.include).toBeUndefined();
   });
 });
+
+// story #2262 PR②(BE #2905) — ids 배치 lookup 분기. stories/route.test.ts(ca37b2b0)와
+// 동일한 회귀가드 패턴 — project_id 없이도 배치 경로를 타는지가 핵심(다른 축이라는 것을
+// 값으로 고정한다).
+describe('/api/goals GET — ids 배치 lookup 분기(#2262 PR②)', () => {
+  beforeEach(() => {
+    Object.values(h).forEach((m) => m.mockReset());
+    h.getAuthContext.mockResolvedValue(agent());
+    h.createGoalRepository.mockResolvedValue({});
+  });
+
+  it('no ids param → existing cursor-paginated path, ids not sent', async () => {
+    h.list.mockResolvedValue([]);
+    await GET(new Request('http://localhost/api/goals?project_id=p'));
+    const calledWith = h.list.mock.calls[0]![0] as { ids?: string[] };
+    expect(calledWith.ids).toBeUndefined();
+  });
+
+  it('ids param present → batch lookup WITHOUT project_id, ids forwarded verbatim', async () => {
+    h.list.mockResolvedValue([{ id: 'e1' }, { id: 'e2' }]);
+    const res = await GET(new Request('http://localhost/api/goals?ids=e1,e2'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data).toHaveLength(2);
+    expect(h.list).toHaveBeenCalledWith({ ids: ['e1', 'e2'], limit: 2 });
+  });
+
+  it('caps ids at 200 before calling the service(BE 200개 cap 방어, 422 회피)', async () => {
+    h.list.mockResolvedValue([]);
+    const manyIds = Array.from({ length: 250 }, (_, i) => `id${i}`).join(',');
+    await GET(new Request(`http://localhost/api/goals?ids=${manyIds}`));
+    const calledWith = h.list.mock.calls[0]![0] as { ids: string[] };
+    expect(calledWith.ids).toHaveLength(200);
+  });
+});

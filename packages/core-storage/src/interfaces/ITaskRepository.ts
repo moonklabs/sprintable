@@ -37,6 +37,9 @@ export interface TaskListFilters extends PaginationOptions {
   status?: string;
   status_ne?: string;
   days_since?: number;
+  /** story #2262 PR②(BE #2905) — 배치 lookup(comma-separated). Task엔 project_id 컬럼이
+   * 없어(story_id NN) BE가 org-scope lookup 後 story_id→project_id로 접근권을 건다. */
+  ids?: string[];
 }
 
 export interface ITaskRepository {

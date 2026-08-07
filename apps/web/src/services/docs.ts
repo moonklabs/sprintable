@@ -19,6 +19,13 @@ export class DocsService {
     return this.repo.list({ project_id: projectId, limit: input?.limit, cursor: input?.cursor ?? undefined, tags: input?.tags });
   }
 
+  /** story #2262 PR②(BE #2905) — ids 배치 lookup은 project_id 없이 org 전체에서
+   * exact-id IN 조회한다(list()와 별도 메서드로 둔다 — projectId 필수 계약을 안 건드리기
+   * 위해서다, 호출부가 안 헷갈리게 "이건 project 무관"임을 이름으로도 밝힌다). */
+  async listByIds(ids: string[]) {
+    return this.repo.list({ ids, limit: ids.length });
+  }
+
   async getDoc(projectId: string, slug: string) {
     return this.repo.getBySlug(projectId, slug);
   }
