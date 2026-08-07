@@ -40,9 +40,12 @@ function wrap(node: React.ReactNode) {
   );
 }
 
-function stubFetch(calledUrls: string[]) {
+function stubFetch(calledUrls: string[], candidates: unknown[] = []) {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     calledUrls.push(url);
+    if (url.endsWith('/reference-candidates')) {
+      return { ok: true, json: async () => candidates };
+    }
     if (url.startsWith('/api/stories/')) {
       return { ok: true, json: async () => ({ data: { id: 'story-abc', title: '앵커 시험 스토리', status: 'backlog' } }) };
     }
@@ -105,7 +108,7 @@ afterEach(async () => {
 });
 
 describe('FlowNodeStoryPanel — 자립 fetch (story #2354 AC8, 새 BE 0)', () => {
-  it('fetches exactly GET /api/stories/{id} and GET /api/tasks?story_id= — no other endpoints', async () => {
+  it('fetches GET /api/stories/{id} and GET /api/tasks?story_id= — no other story/task endpoints', async () => {
     const calledUrls: string[] = [];
     stubFetch(calledUrls);
     placeAnchor('story-abc', { top: 100, bottom: 130 });
@@ -117,7 +120,14 @@ describe('FlowNodeStoryPanel — 자립 fetch (story #2354 AC8, 새 BE 0)', () =
 
     expect(calledUrls).toContain('/api/stories/story-abc');
     expect(calledUrls.some((u) => u.startsWith('/api/tasks?story_id=story-abc'))).toBe(true);
-    expect(calledUrls).toHaveLength(2);
+    // story #2358 후속 — 미확認 후보 건수를 위한 reference-candidates 호출이 하나 더 붙는다
+    // (#2354의 "새 BE 0" 계약은 story/tasks 두 엔드포인트에 대한 것이지, 이 파일 전체가
+    // 영구히 2콜 고정이라는 뜻은 아니다). 정확히 이 3개만 있고 다른 건 없음을 잰다.
+    expect(calledUrls.sort()).toEqual([
+      '/api/stories/story-abc',
+      '/api/stories/story-abc/reference-candidates',
+      '/api/tasks?story_id=story-abc&limit=20',
+    ]);
     expect(container.querySelector('[data-testid="stub-title"]')?.textContent).toBe('앵커 시험 스토리');
   });
 });
@@ -245,5 +255,38 @@ describe('FlowNodeStoryPanel — 모바일 게이트(유나 가디언 리뷰 202
 
     const stub = container.querySelector('[data-testid="story-detail-panel-stub"]');
     expect(stub?.getAttribute('data-mode')).toBe('overlay');
+  });
+});
+
+describe('FlowNodeStoryPanel — 「확認하기」 훑기 진입점 (story #2358)', () => {
+  it('shows the review-entry button with the unconfirmed count when candidates exist', async () => {
+    const calledUrls: string[] = [];
+    stubFetch(calledUrls, [
+      { id: 'c1', source_id: 'story-abc', target_id: 't1', relation_kind: null, status: 'estimated' },
+      { id: 'c2', source_id: 'story-abc', target_id: 't2', relation_kind: null, status: 'estimated' },
+      { id: 'c3', source_id: 'story-abc', target_id: 't3', relation_kind: 'spawned', status: 'estimated' },
+    ]);
+    placeAnchor('story-abc', { top: 100, bottom: 130 });
+
+    await act(async () => {
+      root.render(wrap(<FlowNodeStoryPanel storyId="story-abc" onClose={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    // relation_kind가 이미 있는 c3은 훑기 대상이 아니므로 2건만 셈(selectUnconfirmedCandidates).
+    expect(container.textContent).toContain('미확인 후보 2건');
+  });
+
+  it('renders no review-entry button when there are no unconfirmed candidates', async () => {
+    const calledUrls: string[] = [];
+    stubFetch(calledUrls, []);
+    placeAnchor('story-abc', { top: 100, bottom: 130 });
+
+    await act(async () => {
+      root.render(wrap(<FlowNodeStoryPanel storyId="story-abc" onClose={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(container.textContent).not.toContain('훑기');
   });
 });

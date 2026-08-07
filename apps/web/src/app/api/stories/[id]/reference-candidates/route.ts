@@ -1,6 +1,17 @@
 import { proxyToFastapiWithParams } from '@/lib/fastapi-proxy';
 
 /**
+ * GET /api/stories/{id}/reference-candidates — story #2358. BE
+ * `GET /api/v2/stories/{id}/reference-candidates`(story #2328 C-11)를 그대로 통과시킨다.
+ * 이 story가 source인 후보 전량(원시 어휘, 래핑 없음) — 「확認하기」 훑기 큐(#2358)가
+ * relation_kind=null·status=estimated만 골라 쓴다.
+ */
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }): Promise<Response> {
+  const { id } = await params;
+  return proxyToFastapiWithParams(request, '/api/v2/stories/[id]/reference-candidates', { id });
+}
+
+/**
  * POST /api/stories/{id}/reference-candidates — story #2353 후속(2026-07-31). BE
  * `POST /api/v2/stories/{id}/reference-candidates`(story #2355, PR#2721)를 그대로
  * 통과시킨다 — `goals/[id]/reference-candidates/route.ts`와 동일 패턴(원시 JSON,
