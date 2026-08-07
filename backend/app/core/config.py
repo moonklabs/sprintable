@@ -254,6 +254,15 @@ class Settings(BaseSettings):
     toss_payments_crypto_key: str = ""
     toss_merchant_id: str = "bill_sprint1d9"  # 비민감 — Secret Manager 대상 아님(PO 확認)
 
+    # 결제②-C1(story #2492): org_billing_keys.encrypted_billing_key 암호화 키(들).
+    # MultiFernet 회전 지원 — 콤마구분 다건, **맨 앞이 암호화에 쓰이는 현재 키**(나머지는
+    # 복호 전용으로만 남아 옛 값 복호 유지). PO 결정(2026-08-07): 같은 신뢰모델(Toss 시크릿
+    # 키도 이미 Secret Manager 단일값으로 앱이 읽음)이라 KMS/HSM 대신 Fernet — 신규 의존성 0
+    # (cryptography는 python-jose[cryptography] 경유로 이미 설치돼 있음). 빌링키는 PG 발급
+    # 토큰(원본 카드 아님)이라 PCI상 HSM 강제도 없음. 평문은 charge 호출 그 순간에만 메모리에
+    # 존재해야 한다 — 로그·API 응답·DB 어디에도 남기지 않는다(app/services/billing_key_crypto.py).
+    org_billing_key_encryption_key: str = ""
+
     # E-H1-S6: GitHub webhook(PR/CI verdict 캡처) HMAC 검증 시크릿. 미설정이면 webhook 거부(inert).
     github_webhook_secret: str = ""
 

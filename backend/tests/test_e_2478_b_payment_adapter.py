@@ -21,12 +21,15 @@ def test_factory_usd_returns_polar_adapter():
     assert isinstance(adapter, PolarAdapter)
 
 
-def test_factory_krw_not_implemented_yet():
-    """TossAdapter는 story C — krw는 조용히 잘못된 어댑터를 주지 않고 명시적으로 실패."""
+def test_factory_krw_returns_toss_adapter():
+    """#2492(C1)로 TossAdapter 연결됨 — krw는 이제 명시적 실패 대신 실 어댑터를 준다.
+    (어댑터 자체의 미구현 메서드는 각 메서드 호출 시 NotImplementedError로 개별 실패한다,
+    test_e_2492_c1_billing_key.py 참고.)"""
     from app.services.payment.factory import get_payment_adapter
+    from app.services.payment.toss_adapter import TossAdapter
 
-    with pytest.raises(NotImplementedError):
-        get_payment_adapter("krw")
+    adapter = get_payment_adapter("krw")
+    assert isinstance(adapter, TossAdapter)
 
 
 def test_factory_unsupported_currency_raises_value_error():

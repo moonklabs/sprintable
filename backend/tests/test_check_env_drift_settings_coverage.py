@@ -156,10 +156,14 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # toss_payments_crypto_key/toss_merchant_id 필드 신설로 87→91(TOSS_PAYMENTS_SECRET_KEY·
     # TOSS_PAYMENTS_CLIENT_KEY·TOSS_PAYMENTS_CRYPTO_KEY·TOSS_MERCHANT_ID 포함) — TossAdapter
     # (story C1~) 원화 정기결제용 시크릿, polar_* 동형. 가드가 신규 필드를 설계대로 잡은 것.
+    # #2492(결제②-C1, PO 승인 2026-08-07): org_billing_key_encryption_key 필드 신설로 91→92
+    # (ORG_BILLING_KEY_ENCRYPTION_KEY 포함) — org_billing_keys.encrypted_billing_key를
+    # 암복호화하는 MultiFernet 키(들, 회전 지원 콤마구분). 가드가 신규 필드를 설계대로 잡은 것.
     assert "PRESENCE_REDIS_ENABLED" in keys and "SSE_TRANSIENT_REPLAY_ENABLED" in keys
     assert "REQUIRE_VERIFIED_EMAIL_FOR_ORG_CREATE" in keys
     assert "DATABASE_URL_READ" in keys
     assert "WORKER_DB_POOL_SIZE" in keys and "WORKER_DB_MAX_OVERFLOW" in keys
     assert "TOSS_PAYMENTS_SECRET_KEY" in keys and "TOSS_PAYMENTS_CLIENT_KEY" in keys
     assert "TOSS_PAYMENTS_CRYPTO_KEY" in keys and "TOSS_MERCHANT_ID" in keys
-    assert len(keys) == 91
+    assert "ORG_BILLING_KEY_ENCRYPTION_KEY" in keys
+    assert len(keys) == 92
