@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 
@@ -7,9 +8,12 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.deletion_audit import DeletionAuditLog
 from app.models.organization import Organization
 from app.models.participation import ParticipationRole
 from app.models.project import OrgMember, Project
+
+logger = logging.getLogger(__name__)
 
 # SID 265f5b13/#2049 AC1: 신규 조직 생성 직후 참여 역할 세트가 하나도 안 만들어져
 # `resolve_implementation_participation`(app/services/verdict_capture.py:55-63)이 항상
@@ -172,8 +176,23 @@ class OrganizationRepository:
             has_active_subscription=has_active_subscription,
         )
 
-    async def delete_by_user(self, org_id: uuid.UUID, user_id: uuid.UUID, confirmation: str) -> dict:
-        """owner 전용 삭제 — user_id로 직접 권한 검증 + confirmation 문자열 검사."""
+    async def delete_by_user(
+        self, org_id: uuid.UUID, user_id: uuid.UUID, confirmation: str,
+        confirm_without_impact: bool = False,
+    ) -> dict:
+        """owner 전용 삭제 — user_id로 직접 권한 검증 + confirmation 문자열 검사.
+
+        #2092(P0 보안, 유나 발견 2026-07-22) — 이전엔 GET /{id}/impact(영향도 미리보기)와
+        이 삭제 자체가 서버에서 완전히 무관계였다. 화면이 조회 실패 상태에서도 "계속
+        진행해도 됩니다"라고 권했고, 설령 화면 카피를 고쳐도 서버가 impact 조회 성공
+        여부를 아예 안 보므로 API 직접 호출로 그대로 뚫렸다(카피 수정만으론 동작 결함이
+        안 닫힌다는 게 story 원문 핵심).
+
+        fix: 삭제 직전 서버가 **직접** get_impact()를 재조회한다(클라이언트가 "조회
+        실패했다"고 주장하는 걸 신뢰하지 않는다 — 서버 자신의 조회 성패만 신뢰). 그 재조회
+        자체가 실패하면 confirm_without_impact=True(사용자가 "확認하지 못한 상태로
+        삭제합니다"를 명시 인정)가 아닌 한 거부한다. override로 진행된 삭제는
+        DeletionAuditLog.note에 그 사실을 남긴다(AC3 "확認 없이 삭제한 것으로 기록됩니다")."""
         org = await self.get(org_id)
         if org is None:
             return {"ok": False, "reason": "not_found"}
@@ -195,6 +214,23 @@ class OrganizationRepository:
         if sub_check.first() is not None:
             return {"ok": False, "reason": "active_subscription"}
 
+        impact_note: str | None = None
+        try:
+            await self.get_impact(org_id=org_id)
+        except Exception:
+            logger.warning(
+                "org.delete.impact_check_failed org_id=%s confirm_without_impact=%s",
+                org_id, confirm_without_impact, exc_info=True,
+            )
+            if not confirm_without_impact:
+                return {"ok": False, "reason": "impact_unavailable"}
+            impact_note = "영향도(impact) 확認 없이 삭제됨 — 조회 실패 상태에서 사용자가 명시적으로 진행을 인정"
+
+        self.session.add(DeletionAuditLog(
+            id=uuid.uuid4(), org_id=org_id, actor_id=user_id,
+            entity_type="organization", entity_id=org_id, entity_title=org.name,
+            note=impact_note,
+        ))
         await self.session.delete(org)
         return {"ok": True}
 

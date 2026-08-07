@@ -23,6 +23,10 @@ class DeletionAuditLog(Base):
     entity_type: Mapped[str] = mapped_column(Text, nullable=False)
     entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     entity_title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # #2092: 삭제가 일반 조건(전체 확認 완료)과 다른 특이 사정으로 진행된 경우의 범용 비고란
+    # — 예: 조직 삭제가 영향도(impact) 조회 실패 상태에서 명시적 override로 진행된 경우.
+    # entity_type을 그 용도로 오버로드하지 않는다(엔티티 종류 축과 사유 축은 별개).
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

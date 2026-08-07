@@ -10,13 +10,20 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 ORG_ID = uuid.uuid4()
 USER_ID = uuid.uuid4()
 ORG_NAME = "Test Org"
+
+
+def _resolved_human() -> MagicMock:
+    """#2092 human-only 가드용 — resolve_member 반환값 mock."""
+    m = MagicMock()
+    m.type = "human"
+    return m
 
 
 def _mock_org() -> MagicMock:
@@ -125,12 +132,14 @@ async def test_owner_can_delete_with_correct_confirmation():
         from app.routers.organizations import _get_repo
 
         mock_repo = MagicMock()
+        mock_repo.get_member_role = AsyncMock(return_value="owner")
         mock_repo.delete_by_user = AsyncMock(return_value={"ok": True})
         app.dependency_overrides[_get_repo] = lambda: mock_repo
         session.commit = AsyncMock()
 
-        async with client as c:
-            resp = await c.request("DELETE", f"/api/v2/organizations/{ORG_ID}", json={"confirmation": ORG_NAME})
+        with patch("app.services.member_resolver.resolve_member", new=AsyncMock(return_value=_resolved_human())):
+            async with client as c:
+                resp = await c.request("DELETE", f"/api/v2/organizations/{ORG_ID}", json={"confirmation": ORG_NAME})
 
         assert resp.status_code == 200
         assert resp.json() == {"ok": True}
@@ -146,6 +155,7 @@ async def test_non_owner_delete_returns_403():
         from app.routers.organizations import _get_repo
 
         mock_repo = MagicMock()
+        mock_repo.get_member_role = AsyncMock(return_value="admin")  # owner 아님 — human-only 체크 스킵
         mock_repo.delete_by_user = AsyncMock(return_value={"ok": False, "reason": "forbidden"})
         app.dependency_overrides[_get_repo] = lambda: mock_repo
 
@@ -153,6 +163,30 @@ async def test_non_owner_delete_returns_403():
             resp = await c.request("DELETE", f"/api/v2/organizations/{ORG_ID}", json={"confirmation": ORG_NAME})
 
         assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_agent_owner_cannot_delete_org_human_only():
+    """#2092 — org owner 역할이어도 에이전트(non-human)면 403(human-only)."""
+    client, session, app = await _client()
+    try:
+        from app.routers.organizations import _get_repo
+
+        mock_repo = MagicMock()
+        mock_repo.get_member_role = AsyncMock(return_value="owner")
+        mock_repo.delete_by_user = AsyncMock(return_value={"ok": True})  # 도달하면 안 됨
+        app.dependency_overrides[_get_repo] = lambda: mock_repo
+
+        agent_resolved = MagicMock()
+        agent_resolved.type = "agent"
+        with patch("app.services.member_resolver.resolve_member", new=AsyncMock(return_value=agent_resolved)):
+            async with client as c:
+                resp = await c.request("DELETE", f"/api/v2/organizations/{ORG_ID}", json={"confirmation": ORG_NAME})
+
+        assert resp.status_code == 403
+        mock_repo.delete_by_user.assert_not_awaited()  # human-only에서 막혀 delete_by_user 자체를 안 부름
     finally:
         app.dependency_overrides.clear()
 
@@ -167,13 +201,65 @@ async def test_wrong_confirmation_returns_422():
         from app.routers.organizations import _get_repo
 
         mock_repo = MagicMock()
+        mock_repo.get_member_role = AsyncMock(return_value="owner")
         mock_repo.delete_by_user = AsyncMock(return_value={"ok": False, "reason": "confirmation_mismatch"})
         app.dependency_overrides[_get_repo] = lambda: mock_repo
 
-        async with client as c:
-            resp = await c.request("DELETE", f"/api/v2/organizations/{ORG_ID}", json={"confirmation": "Wrong Name"})
+        with patch("app.services.member_resolver.resolve_member", new=AsyncMock(return_value=_resolved_human())):
+            async with client as c:
+                resp = await c.request("DELETE", f"/api/v2/organizations/{ORG_ID}", json={"confirmation": "Wrong Name"})
 
         assert resp.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ─── #2092 AC1 — impact 재조회 실패 시 서버 거부 ─────────────────────────────
+
+@pytest.mark.anyio
+async def test_delete_rejected_when_impact_unavailable_and_no_override():
+    """impact 재조회 실패 + confirm_without_impact 없음(기본 False) → 409(impact_unavailable)."""
+    client, session, app = await _client()
+    try:
+        from app.routers.organizations import _get_repo
+
+        mock_repo = MagicMock()
+        mock_repo.get_member_role = AsyncMock(return_value="owner")
+        mock_repo.delete_by_user = AsyncMock(return_value={"ok": False, "reason": "impact_unavailable"})
+        app.dependency_overrides[_get_repo] = lambda: mock_repo
+
+        with patch("app.services.member_resolver.resolve_member", new=AsyncMock(return_value=_resolved_human())):
+            async with client as c:
+                resp = await c.request("DELETE", f"/api/v2/organizations/{ORG_ID}", json={"confirmation": ORG_NAME})
+
+        assert resp.status_code == 409
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_delete_proceeds_with_explicit_override_when_impact_unavailable():
+    """impact 재조회 실패 + confirm_without_impact=True → repo에 그 값이 그대로 전달돼 진행 허용."""
+    client, session, app = await _client()
+    try:
+        from app.routers.organizations import _get_repo
+
+        mock_repo = MagicMock()
+        mock_repo.get_member_role = AsyncMock(return_value="owner")
+        mock_repo.delete_by_user = AsyncMock(return_value={"ok": True})
+        app.dependency_overrides[_get_repo] = lambda: mock_repo
+        session.commit = AsyncMock()
+
+        with patch("app.services.member_resolver.resolve_member", new=AsyncMock(return_value=_resolved_human())):
+            async with client as c:
+                resp = await c.request(
+                    "DELETE", f"/api/v2/organizations/{ORG_ID}",
+                    json={"confirmation": ORG_NAME, "confirm_without_impact": True},
+                )
+
+        assert resp.status_code == 200
+        mock_repo.delete_by_user.assert_awaited_once()
+        assert mock_repo.delete_by_user.await_args.kwargs["confirm_without_impact"] is True
     finally:
         app.dependency_overrides.clear()
 
@@ -211,3 +297,77 @@ def test_delete_organization_schema():
     from app.schemas.organization import DeleteOrganization
     fields = set(DeleteOrganization.model_fields.keys())
     assert "confirmation" in fields
+    assert "confirm_without_impact" in fields
+    assert DeleteOrganization.model_fields["confirm_without_impact"].default is False
+
+
+# ─── #2092 — delete_by_user 자체(mock session)로 impact 가드 직접 검증 ──────────
+
+@pytest.mark.anyio
+async def test_delete_by_user_rejects_when_impact_query_raises_and_no_override():
+    """get_impact()가 예외를 던지면(=재조회 실패) confirm_without_impact 없이는 거부."""
+    from app.repositories.organization import OrganizationRepository
+
+    session = AsyncMock()
+    repo = OrganizationRepository(session)
+    repo.get = AsyncMock(return_value=_mock_org())
+    repo.get_member_role = AsyncMock(return_value="owner")
+    repo.get_impact = AsyncMock(side_effect=RuntimeError("db timeout"))
+    session.execute = AsyncMock(return_value=MagicMock(first=lambda: None))  # active_subscription 체크 통과
+
+    result = await repo.delete_by_user(org_id=ORG_ID, user_id=USER_ID, confirmation=ORG_NAME)
+
+    assert result == {"ok": False, "reason": "impact_unavailable"}
+    session.delete.assert_not_called()
+    session.add.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_delete_by_user_proceeds_with_override_and_records_audit_note():
+    """confirm_without_impact=True면 get_impact() 실패에도 진행하고, 감사로그에 note를 남긴다."""
+    from app.models.deletion_audit import DeletionAuditLog
+    from app.repositories.organization import OrganizationRepository
+
+    session = AsyncMock()
+    repo = OrganizationRepository(session)
+    repo.get = AsyncMock(return_value=_mock_org())
+    repo.get_member_role = AsyncMock(return_value="owner")
+    repo.get_impact = AsyncMock(side_effect=RuntimeError("db timeout"))
+    session.execute = AsyncMock(return_value=MagicMock(first=lambda: None))
+    session.delete = AsyncMock()
+
+    result = await repo.delete_by_user(
+        org_id=ORG_ID, user_id=USER_ID, confirmation=ORG_NAME, confirm_without_impact=True,
+    )
+
+    assert result == {"ok": True}
+    session.delete.assert_awaited_once()
+    session.add.assert_called_once()
+    audit_entry = session.add.call_args.args[0]
+    assert isinstance(audit_entry, DeletionAuditLog)
+    assert audit_entry.entity_type == "organization"
+    assert audit_entry.entity_id == ORG_ID
+    assert audit_entry.actor_id == USER_ID
+    assert audit_entry.note is not None and "확認 없이" in audit_entry.note
+
+
+@pytest.mark.anyio
+async def test_delete_by_user_succeeds_normally_records_audit_without_note():
+    """get_impact()가 정상 성공하면 confirm_without_impact 값과 무관하게 정상 진행 — note는 None."""
+    from app.models.deletion_audit import DeletionAuditLog
+    from app.repositories.organization import OrganizationRepository, OrgImpact
+
+    session = AsyncMock()
+    repo = OrganizationRepository(session)
+    repo.get = AsyncMock(return_value=_mock_org())
+    repo.get_member_role = AsyncMock(return_value="owner")
+    repo.get_impact = AsyncMock(return_value=OrgImpact(project_count=1, member_count=2, has_active_subscription=False))
+    session.execute = AsyncMock(return_value=MagicMock(first=lambda: None))
+    session.delete = AsyncMock()
+
+    result = await repo.delete_by_user(org_id=ORG_ID, user_id=USER_ID, confirmation=ORG_NAME)
+
+    assert result == {"ok": True}
+    audit_entry = session.add.call_args.args[0]
+    assert isinstance(audit_entry, DeletionAuditLog)
+    assert audit_entry.note is None

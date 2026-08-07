@@ -226,11 +226,27 @@ async def delete_organization(
     repo: OrganizationRepository = Depends(_get_repo),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Organization 삭제 — owner만 가능, org name 확인 입력 필수."""
+    """Organization 삭제 — owner만 가능, org name 확인 입력 필수.
+
+    #2092(P0 보안) — human-only 강제: project.py/docs.py 등 다른 파괴적 삭제 엔드포인트와
+    동형(org_members는 human 전용 테이블이라 사실상 이미 막혀 있었으나, story #2058 축과
+    같은 이유로 암묵적 부산물에 기대지 않고 명시 확認한다). org owner 판정(get_member_role)
+    보다 뒤에 두는 이유는 존재/권한 판정이 더 근본적이라 우선하기 때문 — 순서를 바꾸면
+    "org 없음"인데 "휴먼만 가능" 오류가 먼저 뜨는 오정보가 될 수 있다."""
+    from app.services.member_resolver import resolve_member
+
+    org_id = id
+    role = await repo.get_member_role(org_id=org_id, user_id=uuid.UUID(auth.user_id))
+    if role == "owner":
+        resolved = await resolve_member(auth, org_id, session)
+        if resolved.type != "human":
+            raise HTTPException(status_code=403, detail="조직 삭제는 휴먼 멤버만 가능합니다 (에이전트 API키 차단)")
+
     result = await repo.delete_by_user(
-        org_id=id,
+        org_id=org_id,
         user_id=uuid.UUID(auth.user_id),
         confirmation=body.confirmation,
+        confirm_without_impact=body.confirm_without_impact,
     )
     if not result["ok"]:
         reason = result.get("reason")
@@ -242,5 +258,13 @@ async def delete_organization(
             raise HTTPException(status_code=422, detail="Confirmation does not match organization name")
         if reason == "active_subscription":
             raise HTTPException(status_code=409, detail="Cannot delete organization with active subscription")
+        if reason == "impact_unavailable":
+            # #2092 AC1/AC3 — FE는 이 reason으로 "재시도" 또는 "확認 없이 삭제" 탈출구
+            # UI를 띄운다(confirm_without_impact=True로 재호출). detail 문자열 자체는
+            # 계약이 아니다 — 정확한 사용자 카피는 FE(유나 규격)가 진다.
+            raise HTTPException(
+                status_code=409,
+                detail="Impact preview unavailable — retry, or resubmit with confirm_without_impact=true to proceed without it",
+            )
     await session.commit()
     return {"ok": True}
