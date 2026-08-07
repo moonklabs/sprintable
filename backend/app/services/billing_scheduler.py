@@ -22,7 +22,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -64,10 +64,18 @@ def next_dunning_action(order: BillingOrder, *, now: datetime) -> str:
     return "wait"
 
 
-async def downgrade_to_free(session: AsyncSession, org_id: uuid.UUID) -> None:
+async def downgrade_to_free(session: AsyncSession, org_id: uuid.UUID, order_id: str) -> None:
     """§12.1 +8일 — Free 권리로 전환. 기존 데이터는 절대 지우지 않는다(정책 명시) — 이
     함수는 구독 tier만 되돌린다, 데이터 삭제/에이전트 강제해제는 정책상 없음(§12.1 원문:
-    "이미 등록된 에이전트를 강제 해제하지 않는다")."""
+    "이미 등록된 에이전트를 강제 해제하지 않는다").
+
+    PO 리뷰 블로커(#2884, 2026-08-07) — "상태 자가회수 부재": org_subscriptions만 바꾸고
+    이 order를 'failed'로 그대로 두면 ①매 스윕마다 같은 order가 다시 골라져 재처리되고
+    ②더 심각하게, 이 org가 나중에 카드 고쳐 재구독(유료)해도 다음 스윕이 이 옛 order
+    (age≫8)를 보고 org를 다시 free로 upsert해 **새 유료 구독을 clobber**한다. order를
+    종결 상태 'downgraded'로 전이시켜(status!='confirmed' 가드) failed-스윕 대상에서
+    영구히 뺀다 — 'failed' 그대로 두거나 'confirmed'를 재사용하지 않는 이유는 이게 실제
+    Toss 승인이 아니라 강제 강등이라 원장 의미가 다르기 때문(0232 마이그로 CHECK 확장)."""
     free_offering = (
         await session.execute(
             select(OfferingVersion).where(
@@ -90,6 +98,11 @@ async def downgrade_to_free(session: AsyncSession, org_id: uuid.UUID) -> None:
         },
     )
     await session.execute(stmt)
+    await session.execute(
+        update(BillingOrder)
+        .where(BillingOrder.order_id == order_id, BillingOrder.status != "confirmed")
+        .values(status="downgraded", updated_at=func.now())
+    )
     await session.commit()
 
 
@@ -116,7 +129,7 @@ async def sweep_dunning_retries(session: AsyncSession, *, now: datetime | None =
                 logger.exception("dunning retry failed for order_id=%s", order.order_id)
             retried += 1
         elif action == "downgrade_to_free":
-            await downgrade_to_free(session, order.org_id)
+            await downgrade_to_free(session, order.org_id, order.order_id)
             downgraded += 1
 
     return {"failed_orders_seen": len(failed_orders), "retried": retried, "downgraded": downgraded}
@@ -134,14 +147,17 @@ async def sweep_stale_pending_orders(session: AsyncSession, *, now: datetime | N
         )
     ).scalars().all()
 
-    confirmed = failed = 0
+    confirmed = failed = skipped = 0
     for order in stale_orders:
         try:
             lookup = await TossAdapter().get_payment_by_order_id(order_id=order.order_id)
         except Exception:
-            logger.exception("stale pending reconciliation lookup failed for order_id=%s", order.order_id)
-            await _mark_failed_if_not_confirmed(session, order.order_id, "reconciliation lookup failed")
-            failed += 1
+            # PO fix-forward(#2884 리뷰) — 조회 자체가 실패(네트워크 일시 장애 등)한 것과
+            # "Toss가 이 주문을 모른다/실패로 안다"는 다른 신호다. 전자를 failed로 찍으면
+            # 실은 성공했을 수도 있는 charge를 오분류한다 — pending 그대로 두고 다음
+            # 스윕이 다시 조회하게 한다(무한 대기 아님 — lookup이 언젠가 성공하면 정리됨).
+            logger.exception("stale pending reconciliation lookup failed for order_id=%s — leaving pending", order.order_id)
+            skipped += 1
             continue
 
         if lookup.get("status") == "DONE" and lookup.get("paymentKey"):
@@ -157,7 +173,10 @@ async def sweep_stale_pending_orders(session: AsyncSession, *, now: datetime | N
             )
             failed += 1
 
-    return {"stale_pending_seen": len(stale_orders), "confirmed": confirmed, "failed": failed}
+    return {
+        "stale_pending_seen": len(stale_orders), "confirmed": confirmed,
+        "failed": failed, "skipped_lookup_error": skipped,
+    }
 
 
 async def trigger_due_charges(session: AsyncSession) -> dict:

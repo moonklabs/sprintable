@@ -62,6 +62,7 @@ async def test_downgrade_to_free_upserts_free_tier(monkeypatch):
     from app.services.billing_scheduler import downgrade_to_free
 
     org_id = uuid.uuid4()
+    order_id = "ord-downgrade-1"
     free_offering = MagicMock()
     free_offering.id = uuid.uuid4()
 
@@ -69,10 +70,11 @@ async def test_downgrade_to_free_upserts_free_tier(monkeypatch):
     offering_result = MagicMock()
     offering_result.scalar_one_or_none.return_value = free_offering
     upsert_result = MagicMock()
-    session.execute = AsyncMock(side_effect=[offering_result, upsert_result])
+    close_order_result = MagicMock()
+    session.execute = AsyncMock(side_effect=[offering_result, upsert_result, close_order_result])
     session.commit = AsyncMock()
 
-    await downgrade_to_free(session, org_id)
+    await downgrade_to_free(session, org_id, order_id)
 
     upsert_call = session.execute.call_args_list[1]
     compiled = upsert_call.args[0].compile().params
@@ -90,14 +92,38 @@ async def test_downgrade_to_free_handles_missing_offering_gracefully(monkeypatch
     session = AsyncMock()
     offering_result = MagicMock()
     offering_result.scalar_one_or_none.return_value = None
-    session.execute = AsyncMock(side_effect=[offering_result, MagicMock()])
+    session.execute = AsyncMock(side_effect=[offering_result, MagicMock(), MagicMock()])
     session.commit = AsyncMock()
 
-    await downgrade_to_free(session, uuid.uuid4())
+    await downgrade_to_free(session, uuid.uuid4(), "ord-downgrade-2")
 
     upsert_call = session.execute.call_args_list[1]
     compiled = upsert_call.args[0].compile().params
     assert compiled["offering_version_id"] is None
+
+
+@pytest.mark.anyio
+async def test_downgrade_to_free_closes_the_order_po_blocker_fix(monkeypatch):
+    """PO 리뷰 블로커(#2884, 2026-08-07) 회귀 고정 — "상태 자가회수 부재": order를
+    'downgraded'(종결)로 전이시켜 failed-스윕 집합에서 영구히 뺀다. 이걸 안 하면(예전
+    버그) ①매 스윕 재처리 ②org가 나중에 재구독해도 옛 failed order가 다시 골라져
+    새 유료 구독을 free로 clobber — 둘 다 이 전이 하나로 막힌다."""
+    from app.services.billing_scheduler import downgrade_to_free
+
+    org_id = uuid.uuid4()
+    order_id = "ord-downgrade-3"
+    session = AsyncMock()
+    offering_result = MagicMock()
+    offering_result.scalar_one_or_none.return_value = None
+    session.execute = AsyncMock(side_effect=[offering_result, MagicMock(), MagicMock()])
+    session.commit = AsyncMock()
+
+    await downgrade_to_free(session, org_id, order_id)
+
+    # 3번째 호출이 billing_orders를 'downgraded'로 닫는 UPDATE여야.
+    close_call = session.execute.call_args_list[2]
+    compiled = close_call.args[0].compile().params
+    assert compiled["status"] == "downgraded"
 
 
 # ─── sweep_dunning_retries ──────────────────────────────────────────────────
@@ -128,7 +154,7 @@ async def test_sweep_dunning_retries_retries_and_downgrades(monkeypatch):
         session, org_id=retry_order.org_id, order_id=retry_order.order_id,
         amount_minor=retry_order.amount_minor, currency=retry_order.currency,
     )
-    downgrade_mock.assert_awaited_once_with(session, downgrade_order.org_id)
+    downgrade_mock.assert_awaited_once_with(session, downgrade_order.org_id, downgrade_order.order_id)
 
 
 @pytest.mark.anyio
@@ -177,7 +203,7 @@ async def test_sweep_stale_pending_confirms_when_toss_lookup_done(monkeypatch):
 
     result = await sched.sweep_stale_pending_orders(session, now=now)
 
-    assert result == {"stale_pending_seen": 1, "confirmed": 1, "failed": 0}
+    assert result == {"stale_pending_seen": 1, "confirmed": 1, "failed": 0, "skipped_lookup_error": 0}
     confirm_mock.assert_awaited_once_with(
         session, org_id=stale_order.org_id, order_id=stale_order.order_id,
         amount_minor=stale_order.amount_minor, currency=stale_order.currency,
@@ -209,13 +235,16 @@ async def test_sweep_stale_pending_marks_failed_when_toss_lookup_not_done(monkey
 
     result = await sched.sweep_stale_pending_orders(session, now=now)
 
-    assert result == {"stale_pending_seen": 1, "confirmed": 0, "failed": 1}
+    assert result == {"stale_pending_seen": 1, "confirmed": 0, "failed": 1, "skipped_lookup_error": 0}
     confirm_mock.assert_not_awaited()
     fail_mock.assert_awaited_once()
 
 
 @pytest.mark.anyio
-async def test_sweep_stale_pending_marks_failed_when_lookup_errors(monkeypatch):
+async def test_sweep_stale_pending_leaves_pending_on_transient_lookup_error(monkeypatch):
+    """PO fix-forward(#2884 리뷰) — 조회 자체가 실패(네트워크 등)한 것과 "Toss가 실패로
+    안다"는 다른 신호다. 실제로는 성공했을 charge를 failed로 오분류하지 않도록, 조회
+    예외는 order를 건드리지 않고 그냥 skip(다음 스윕이 재조회)."""
     import app.services.billing_scheduler as sched
 
     now = datetime(2026, 8, 15, tzinfo=timezone.utc)
@@ -231,13 +260,15 @@ async def test_sweep_stale_pending_marks_failed_when_lookup_errors(monkeypatch):
         AsyncMock(side_effect=RuntimeError("Cannot reach Toss API")),
     )
     fail_mock = AsyncMock()
+    confirm_mock = AsyncMock()
     monkeypatch.setattr(sched, "_mark_failed_if_not_confirmed", fail_mock)
-    monkeypatch.setattr(sched, "_confirm_with_ledger", AsyncMock())
+    monkeypatch.setattr(sched, "_confirm_with_ledger", confirm_mock)
 
     result = await sched.sweep_stale_pending_orders(session, now=now)
 
-    assert result["failed"] == 1
-    fail_mock.assert_awaited_once()
+    assert result == {"stale_pending_seen": 1, "confirmed": 0, "failed": 0, "skipped_lookup_error": 1}
+    fail_mock.assert_not_awaited()
+    confirm_mock.assert_not_awaited()
 
 
 # ─── trigger_due_charges — 명시 스코프 밖 ───────────────────────────────────
