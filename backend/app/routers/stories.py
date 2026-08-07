@@ -1792,28 +1792,17 @@ async def update_story(
                         "if intentional, resend with allow_shrink=true"
                     ),
                 )
-    # H1-S5: PATCH /{id} 로 status=done 전이 시도도 board 경로와 동일하게 preflight 게이트(AC②).
-    if data.get("status") == "done":
-        gate_story = story_before or await repo.get(id)
-        await _preflight_merge_gate(db, repo.org_id, gate_story, "done")
-        # S-GATE-2: config 게이트 집행(done) — flag-off면 no-op(무회귀). block→409·ask→HitlRequest park.
-        if gate_story is not None:
-            from app.services.gate_enforce import enforce_gate
-            # HIGH②: actor_type 은 인증 컨텍스트에서 신뢰 도출 — API 키(app_metadata.api_key_id)=agent,
-            # 아니면 human(JWT). 보안 결정 신호라 fragile DB resolve-then-swallow(None→human) 지양.
-            _g_actor_type = (
-                "agent" if auth.claims.get("app_metadata", {}).get("api_key_id") else "human"
-            )
-            _g_actor_id: uuid.UUID | None = None
-            try:  # actor_id 는 HitlRequest 귀속용(비보안)·best-effort.
-                _g_actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
-            except Exception:
-                pass
-            await enforce_gate(
-                db, org_id=repo.org_id, project_id=getattr(gate_story, "project_id", None),
-                work_type="done", actor_type=_g_actor_type, actor_id=_g_actor_id,
-                work_item_id=gate_story.id, work_item_title=getattr(gate_story, "title", None),
-            )
+    # story #2067(2026-08-07 근본수정 — 죽은 주소 정리): 이 블록(H1-S5, 원래 "PATCH /{id}로
+    # status=done 전이 시도도 board 경로와 동일하게 preflight 게이트") 은 실측으로 **애초에
+    # 도달 불가능한 dead code**였다 — `StoryUpdate`(이 엔드포인트의 body 스키마)에 `status`
+    # 필드 자체가 없어 Pydantic이 조용히 드롭한다(extra=ignore 기본값):
+    #   StoryUpdate(**{"status": "done", "title": "x"}).model_dump(exclude_unset=True)
+    #   → {"title": "x"}  — status 없음.
+    # 즉 `data.get("status")`는 이 함수 안에서 항상 None이라 이 if는 절대 True가 될 수 없었다
+    # (git 이력 전체에서 StoryUpdate에 status가 있던 적이 없다 — "은퇴한 게 아니라 애초에
+    # 살아 있던 적이 없는" dead code). PATCH /{id}는 구조적으로 status를 못 바꾸므로 이
+    # 게이트는 지킬 것이 없다 — status 전이는 오직 PATCH /{id}/status(update_story_status,
+    # 이미 자기 게이트 보유)와 PATCH /bulk(#2131, 이미 자기 게이트 보유)로만 일어난다.
     story = await repo.update(id, **data)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
