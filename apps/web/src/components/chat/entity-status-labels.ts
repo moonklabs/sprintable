@@ -54,3 +54,21 @@ export function translateEntityStatus(entityType: string, rawStatus: string | nu
   const map = STATUS_LABELS[entityType as StatusBearingEntityType];
   return map[rawStatus] ?? null;
 }
+
+/** story #2262 PR② — `EntityChip`이 받을 「칩 자체 상태」 prop의 예정 계약(타입만, 미배선).
+ * PO 지시(2026-08-07): 카피(㉠no-status-concept "비었다고 말한다"·㉡loading "아직 모름"의
+ * 정확한 문구)는 유나양 디자인 판정 대기, 배치조회는 BE `?ids=`(디디군) 대기 — 둘 다 오면
+ * 한 번에 배선한다(지금 카피를 지어 배선하면 판정과 어긋나 다시 갈아엎을 위험). 이 타입은
+ * 그 배선이 맞춰 낄 자리를 미리 정해 두는 것 — `EntityChip`은 아직 이 prop을 안 받는다.
+ *
+ * `undefined`(prop 자체를 안 넘김) = 이 호출부에서 칩 상태 기능이 아직 안 켜짐(오늘의
+ * 기본, 회귀 없음). 값이 오면:
+ *   `{ kind: 'loading' }`        — 배치fetch 진행 중(has-status 타입에서만 의미 있음)
+ *   `{ kind: 'resolved', raw }`  — 배치fetch 완료, raw를 `translateEntityStatus`로 번역해 쓴다
+ *   `{ kind: 'error' }`          — 배치fetch 실패(네트워크 등) — "아직 모름"과 같은 급으로 다룬다
+ * no-status-concept 타입(entityStatusAvailability로 미리 가른다)엔 이 prop 자체를 안 넘기는
+ * 것을 호출부 관례로 삼는다(구조적으로 없는 것과 "아직 못 잰 것"을 prop 유무로도 가른다). */
+export type EntityStatusFetchState =
+  | { kind: 'loading' }
+  | { kind: 'resolved'; raw: string | null }
+  | { kind: 'error' };
