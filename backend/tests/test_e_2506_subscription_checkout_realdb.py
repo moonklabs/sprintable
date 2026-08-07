@@ -263,6 +263,61 @@ async def test_checkout_concurrent_different_tier_charges_at_most_once_realdb():
 
 
 @pytest.mark.anyio
+async def test_checkout_unexpected_exception_mid_flow_still_releases_claim_realdb():
+    """#2511 — PO/카디르가 못박은 핵심 질문: "claim 성공 요청이 실패하면 claimed_at이
+    풀려 재시도되나(락 영구 점유 함정)?" TossApiError(CheckoutDeclined로 잡히는 경로)
+    말고 «완전히 예상 밖» 예외(여기선 compute_charge_amount가 던지는 RuntimeError로
+    시뮬레이트 — issue_billing_key 다음·charge_org 前, 어떤 명시 except 절도 안 잡는
+    지점)가 나도 finally가 release를 보장하는지, 그리고 release된 뒤 즉시 재시도가
+    실제로 성공하는지까지 실DB로 실증한다."""
+    from app.services.org_subscription_checkout import checkout_subscription
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session1:
+            org_id = await _seed_org_with_members(session1, human_seats=3)
+
+            toss_billing_key_response = {
+                "billingKey": "billing-key-unexpected-1",
+                "card": {"issuerCode": "61", "acquirerCode": "31", "number": "12345678****000*", "cardType": "신용", "ownerType": "개인"},
+                "authenticatedAt": "2026-08-07T00:00:00+09:00",
+            }
+
+            with patch("app.services.payment.toss_adapter.TossAdapter._post", new=AsyncMock(
+                side_effect=[toss_billing_key_response]
+            )), patch(
+                "app.services.org_subscription_checkout.compute_charge_amount",
+                new=AsyncMock(side_effect=RuntimeError("simulated unexpected mid-flow failure")),
+            ):
+                with pytest.raises(RuntimeError, match="simulated unexpected"):
+                    await checkout_subscription(
+                        session1, org_id=org_id, auth_key="ak-unexpected", tier="starter", billing_cycle="monthly",
+                    )
+
+            # 예외가 명시 except 어디에도 안 잡혔어도 claim은 release돼야 한다.
+            claim_state = (
+                await session1.execute(
+                    text("SELECT checkout_claimed_at FROM org_subscriptions WHERE org_id=:oid"), {"oid": org_id}
+                )
+            ).scalar_one()
+            assert claim_state is None
+
+        # release가 실제로 "다음 요청을 막지 않는지"까지 — 새 세션으로 즉시 재시도.
+        async with Session() as session2:
+            toss_charge_response = {"paymentKey": f"pay-{uuid.uuid4()}", "totalAmount": 5_000}
+            with patch("app.services.payment.toss_adapter.TossAdapter._post", new=AsyncMock(
+                side_effect=[toss_billing_key_response, toss_charge_response]
+            )):
+                retried = await checkout_subscription(
+                    session2, org_id=org_id, auth_key="ak-retry", tier="starter", billing_cycle="monthly",
+                )
+            assert retried.status == "active"  # 영구 점유 함정 없음 — 재시도가 정상 완결됨
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_checkout_sequential_different_tier_after_completion_not_blocked_realdb():
     """#2511 AC2 — 정상 순차(1차 완결 後 다른 tier로 재구독)는 막지 않는다. 진행 中
     claim은 1차가 finally에서 해제하므로, 겹치지 않는 순차 2차 checkout은 정상 성공해야
