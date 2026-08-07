@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { EmbedCard, getEntityHref } from './embed-card';
+import { translateEntityStatus } from './entity-status-labels';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -178,31 +179,36 @@ describe('story #2262 AC2(2026-08-08, 쉬운 절반) — 모달이 자기 fetch�
   // entity_type="task"를 쓴다 — EntityDetail이 story/epic에는 자기 status 뱃지(MdBadge)를
   // 이미 body에 그리지만 task엔 그 분기가 없어(embed-card.tsx EntityDetail), 헤더 배선만
   // 값으로 깨끗하게 격리해 잰다.
-  it('status prop이 null(EntityChip 호출부처럼 status를 모름)이어도 fetch한 detail.status를 헤더 뱃지로 보인다', async () => {
+  // story #2522 — resolvedStatus는 이제 translateEntityStatus를 반드시 거친다(원시값 노출
+  // 금지). 그래서 아래 두 테스트는 원시값 문자열이 아니라 「번역된」 사람 말을 검증한다.
+  it('status prop이 null(EntityChip 호출부처럼 status를 모름)이어도 fetch한 detail.status를 번역해 헤더 뱃지로 보인다', async () => {
     stubFetch(async (url) => {
       expect(url).toContain('/api/tasks/');
-      return { ok: true, json: async () => ({ data: { status: 'in-review', story_id: 's-parent' } }) };
+      return { ok: true, json: async () => ({ data: { status: 'in-progress', story_id: 's-parent' } }) };
     });
     await act(async () => {
       root.render(<EmbedCard entity_type="task" entity_id="t1" title="작업 A" status={null} />);
     });
     await openCard();
     await flush();
-    expect(document.body.textContent).toContain('in-review');
+    expect(document.body.textContent).toContain('진행 중');
+    expect(document.body.textContent).not.toContain('in-progress');
   });
 
-  it('status prop이 이미 실려 있으면(EmbedCard 자신의 write-response 경로) 그 값을 헤더가 우선한다', async () => {
+  it('status prop이 이미 실려 있으면(EmbedCard 자신의 write-response 경로) 그 값을 번역해 헤더가 우선한다', async () => {
     stubFetch(async () => ({ ok: true, json: async () => ({ data: { status: 'done', story_id: 's-parent' } }) }));
     await act(async () => {
-      root.render(<EmbedCard entity_type="task" entity_id="t1" title="작업 A" status="ready-for-dev" />);
+      root.render(<EmbedCard entity_type="task" entity_id="t1" title="작업 A" status="todo" />);
     });
     await openCard();
     await flush();
-    // 헤더는 카드 자체에도 뜨고(inner) 모달에도 뜬다 — 둘 다 prop 값이어야 하고, fetch가 준
-    // "done"은 헤더 어디에도 안 나타나야 한다(task는 EntityDetail 자기 status 표시가 없다).
-    const readyForDevCount = (document.body.textContent!.match(/ready-for-dev/g) ?? []).length;
-    expect(readyForDevCount).toBeGreaterThanOrEqual(2);
-    expect(document.body.textContent).not.toContain('done');
+    // 헤더는 카드 자체에도 뜨고(inner) 모달에도 뜬다 — 둘 다 prop 값(todo→"할 일")이어야
+    // 하고, fetch가 준 "done"(→"완료")은 헤더 어디에도 안 나타나야 한다(task는 EntityDetail
+    // 자기 status 표시가 없다).
+    const label = translateEntityStatus('task', 'todo')!;
+    const labelCount = (document.body.textContent!.match(new RegExp(label, 'g')) ?? []).length;
+    expect(labelCount).toBeGreaterThanOrEqual(2);
+    expect(document.body.textContent).not.toContain(translateEntityStatus('task', 'done'));
   });
 
   it('fetch가 실패해도(대상 없음) status 뱃지를 지어내지 않는다 — 모르는 것을 단정하지 않는다', async () => {
@@ -213,5 +219,44 @@ describe('story #2262 AC2(2026-08-08, 쉬운 절반) — 모달이 자기 fetch�
     await openCard();
     await flush();
     expect(document.body.textContent).toContain('대상이 없습니다');
+  });
+});
+
+// story #2522 — EntityDetail(모달 본문)의 story/epic 자기 status 뱃지도 「클래스 전체」에
+// 포함된다(위 describe는 task 헤더 배선만 격리해 쟀다 — task는 EntityDetail 자기 status
+// 뱃지 분기가 아예 없다). 여기서 story·epic 본문 뱃지를 직접 잰다.
+describe('story #2522 — EntityDetail(모달 본문) story·epic 자기 status 뱃지도 원시값 노출 금지', () => {
+  it('story 본문 status 뱃지가 번역된 말로 뜬다(원시값 in-review 안 남음)', async () => {
+    stubFetch(async () => ({ ok: true, json: async () => ({ data: { status: 'in-review', description: '설명' } }) }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="story" entity_id="s1" title="스토리 A" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.body.textContent).toContain('검토 중');
+    expect(document.body.textContent).not.toContain('in-review');
+  });
+
+  it('epic 본문 status 뱃지가 번역된 말로 뜬다(원시값 active 자체는 겹치므로 archived로 격리해 확認)', async () => {
+    stubFetch(async () => ({ ok: true, json: async () => ({ data: { status: 'archived', objective: '목표' } }) }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="epic" entity_id="e1" title="에픽 A" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.body.textContent).toContain('보관');
+    expect(document.body.textContent).not.toContain('archived');
+  });
+
+  // AC — 「미매핑 status는 빈칸(지어내지 않음)」. 맵에 없는 신규 status가 서빙돼도 원시값이
+  // 새지 않는다는 fail-safe 계약을 값으로 고정한다.
+  it('맵에 없는(미매핑) status는 원시값도 새 라벨도 안 뜬다 — 빈칸', async () => {
+    stubFetch(async () => ({ ok: true, json: async () => ({ data: { status: 'some-brand-new-status', description: '설명' } }) }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="story" entity_id="s2" title="스토리 B" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.body.textContent).not.toContain('some-brand-new-status');
   });
 });

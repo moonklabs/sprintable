@@ -31,7 +31,17 @@ describe('translateEntityStatus — 원시값 노출 금지(gate_type 사고 재
   // (파일 상단 주석 참고) — hypothesis는 칩 렌더에선 no-status-concept("상태 없음")이지만,
   // 어휘 맵 자체는 있어서 rawStatus가 (미래의 다른 경로로) 주어지면 이 함수는 정상 번역한다.
   it('hypothesis는 칩 렌더 관점에선 no-status-concept이지만 어휘 맵 번역 자체는 독립적으로 동작한다', () => {
-    expect(translateEntityStatus('hypothesis', 'falsified')).toBe('반증됨');
+    expect(translateEntityStatus('hypothesis', 'falsified')).toBe('반증');
+  });
+
+  // story #2522 — hypothesis.active와 sprint/epic.active는 원시값(raw)은 같지만 다른 말이다
+  // (유나양 스펙 명시 지점). 이 구분이 실수로 뭉개지면(예: hypothesis도 "진행 중"으로 번역)
+  // "가설이 진행 중"이라는 모호한 문구가 뜬다 — 「검증」이 본질이라는 것을 잃는다.
+  it('hypothesis.active="검증 중"·epic/sprint.active="진행 중" — 같은 원시값, 엔티티별로 다른 말', () => {
+    expect(translateEntityStatus('hypothesis', 'active')).toBe('검증 중');
+    expect(translateEntityStatus('epic', 'active')).toBe('진행 중');
+    expect(translateEntityStatus('sprint', 'active')).toBe('진행 중');
+    expect(translateEntityStatus('hypothesis', 'active')).not.toBe(translateEntityStatus('epic', 'active'));
   });
 
   it('매핑에 없는 값(신규 status 추가 등)은 원시값을 그대로 내지 않고 null이다', () => {
