@@ -409,7 +409,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                         {resendingId === invite.id ? '...' : '재발송'}
                       </Button>
                       <Button size="sm" variant="glass" disabled={revokingId === invite.id} onClick={() => void handleRevokeInvite(invite.id)}
-                        className="text-destructive hover:bg-destructive/10">
+                        className="text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60">
                         {revokingId === invite.id ? '...' : '취소'}
                       </Button>
                     </div>

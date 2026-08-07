@@ -591,7 +591,7 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
                 type="button"
                 aria-label={t('deleteGoal')}
                 onClick={(e) => { e.stopPropagation(); onDeleteRequest(epic.id); }}
-                className="hidden group-hover:flex items-center justify-center rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                className="hidden group-hover:flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 transition-colors"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>

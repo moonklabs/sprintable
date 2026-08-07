@@ -157,7 +157,7 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
         <Button
           variant="outline"
           size="sm"
-          className="flex-1 justify-center border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive"
+          className="flex-1 justify-center border-destructive text-destructive hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
           onClick={() => onRequestDelete(asset)}
         >
           <Trash2 className="size-4" />

@@ -121,7 +121,7 @@ export function HypothesisGateBadge({ hypothesis, gate, resolveName = (id) => id
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 gap-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              className="h-7 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
               disabled={resolving}
               onClick={() => setRejectNote('')}
             >
@@ -144,7 +144,7 @@ export function HypothesisGateBadge({ hypothesis, gate, resolveName = (id) => id
           <Button
             size="sm"
             variant="ghost"
-            className="h-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            className="h-7 text-destructive hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
             disabled={resolving}
             onClick={() => void transition('rejected', rejectNote)}
           >
