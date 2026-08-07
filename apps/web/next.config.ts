@@ -6,13 +6,17 @@ const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
 
 const _CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  // story #2510 — Toss 결제위젯 SDK(js.tosspayments.com)가 script-src에 없으면 카드
+  // 인증창 자체가 CSP로 막힌다(라이브 실측 중 실물 확認 — 유닛테스트는 브라우저 CSP를
+  // 실행하지 않아 이 클래스를 못 잡는다).
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.tosspayments.com",
   "style-src 'self' 'unsafe-inline'",
   // GCS 파일, Google/GitHub 아바타 이미지
   "img-src 'self' data: blob: https://storage.googleapis.com https://*.googleusercontent.com https://avatars.githubusercontent.com",
   "font-src 'self' data:",
-  // API 호출 (self = Next.js rewrites 경유, googleapis = Cloud KMS/AI)
-  "connect-src 'self' https://*.googleapis.com",
+  // API 호출 (self = Next.js rewrites 경유, googleapis = Cloud KMS/AI, tosspayments = 결제
+  // 위젯 SDK 자체 통신 — story #2510)
+  "connect-src 'self' https://*.googleapis.com https://*.tosspayments.com",
   // story #2083 — 채팅 첨부 영상(GCS 서명 URL)이 <video>로 로드될 때 media-src에
   // storage.googleapis.com이 없어 CSP가 통째로 차단하고 있었다(콘솔 실측). img-src에는
   // 이미 같은 호스트가 허용돼 있다(story #2050, 서명 URL·노출 축 동일) — 새 origin을
