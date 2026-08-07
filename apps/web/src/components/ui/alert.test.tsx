@@ -105,3 +105,40 @@ describe('Alert 접근성 (story #2149)', () => {
     expect(description?.className).toContain('[overflow-wrap:anywhere]');
   });
 });
+
+// story #2513 — 유나 design 스펙(ds-alert-variant-contrast-unify-2513): 라이트 테마
+// success/destructive/info의 「tint 배경 위 색-글자」가 AA(4.5) 미달이었다(3.99~4.18
+// FAIL, warning만 text-foreground라 18.40 PASS). 글자를 text-foreground로 통일하되
+// variant 색 정체성은 border-*-border/bg-*-tint로 유지한다.
+describe('Alert variant 라이트 대비 통일 (story #2513)', () => {
+  it.each(['success', 'destructive', 'info', 'warning'] as const)(
+    'variant=%s — 글자는 text-foreground로 통일된다(색-글자 AA 미달 재발 방지)',
+    async (variant) => {
+      await act(async () => {
+        root.render(<Alert variant={variant}><AlertDescription>메시지</AlertDescription></Alert>);
+      });
+      const el = container.firstElementChild;
+      expect(el?.className).toContain('text-foreground');
+      expect(el?.className).not.toContain('text-success');
+      expect(el?.className).not.toContain('text-destructive');
+      expect(el?.className).not.toContain('text-info');
+    },
+  );
+
+  // 글자만 foreground로 통일됐을 뿐 variant 구분(색 정체성) 자체는 border/tint로 남아야
+  // 한다 — 넷이 서로 다른 border-*-border/bg-*-tint를 갖는지 직접 대조.
+  it('variant별 색 정체성(border·tint)은 서로 다르게 유지된다(글자 통일이 구분을 지우지 않는다)', async () => {
+    const variants = ['success', 'destructive', 'info', 'warning'] as const;
+    const classNames: string[] = [];
+    for (const variant of variants) {
+      await act(async () => {
+        root.render(<Alert variant={variant}><AlertDescription>메시지</AlertDescription></Alert>);
+      });
+      classNames.push(container.firstElementChild?.className ?? '');
+    }
+    const borderTintOnly = classNames.map((c) =>
+      c.split(' ').filter((tok) => tok.includes('-border') || tok.includes('-tint')).sort().join(' '),
+    );
+    expect(new Set(borderTintOnly).size).toBe(variants.length);
+  });
+});

@@ -57,7 +57,10 @@ export function DocSyncBanner({
 
   return (
     <Alert variant={isConflict ? 'warning' : 'info'} role={isConflict ? 'alert' : 'status'}>
-      {isConflict ? <AlertTriangle className="size-4" /> : <RotateCw className="size-4" />}
+      {/* story #2513 — Alert 글자가 text-foreground로 통일된 후 색-미지정 아이콘은
+          currentColor를 상속해 variant 색을 잃는다. info 분기만 명시 필요(warning은
+          이미 text-foreground라 무영향). */}
+      {isConflict ? <AlertTriangle className="size-4" /> : <RotateCw className="size-4 text-info" />}
       <AlertTitle>{labels.title}</AlertTitle>
       {showDiscardWarning && <AlertDescription>{labels.discardWarning}</AlertDescription>}
       <div className="col-start-2 mt-2 flex flex-wrap gap-2">

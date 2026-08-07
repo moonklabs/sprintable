@@ -109,7 +109,10 @@ export function StorageCapacityBanner() {
 
   return (
     <Alert variant={isBlock ? 'destructive' : 'warning'}>
-      {isBlock ? <AlertOctagon className="size-4" /> : <AlertTriangle className="size-4" />}
+      {/* story #2513 — Alert 글자가 text-foreground로 통일된 후 색-미지정 아이콘은
+          currentColor를 상속해 variant 색을 잃는다. destructive 분기만 명시 필요
+          (warning은 이미 text-foreground라 무영향). */}
+      {isBlock ? <AlertOctagon className="size-4 text-destructive" /> : <AlertTriangle className="size-4" />}
       <AlertTitle>{title}</AlertTitle>
       <AlertDescription>{desc}</AlertDescription>
 
