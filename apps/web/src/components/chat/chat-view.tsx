@@ -13,9 +13,8 @@ import { ThreadPanel } from './thread-panel';
 import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { normalizeToMessage, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
-import {
-  groupUnresolvedReferencesByType, ENTITY_STATUS_BATCH_API_PATH, type EntityStatusFetchState,
-} from '@/components/chat/entity-status-labels';
+import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
+import { useEntityStatusBatchFetch } from '@/hooks/use-entity-status-batch';
 import { useMessageRangeSelection } from '@/hooks/use-message-range-selection';
 import { CitationComposeBar, type CitationSaveState } from './citation-compose-bar';
 import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
@@ -154,49 +153,11 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     }
   }, [initialLastReadAt, markerBoundary]);
 
-  // story #2262 PR② — 참조 칩 「지금 상태」 배치조회. 대화에 보이는 모든 메시지의
-  // references를 훑어 has-status 타입(entityStatusAvailability)만, 타입별로 묶어 `?ids=`
-  // 배치 endpoint를 한 번씩 부른다(메시지마다 N+1 아님 — 대화 전체에서 타입당 1회, 새
-  // 메시지가 로드되면(SSE·더보기) 그 메시지가 처음 들여온 아직 안 본 참조만 추가로 부른다).
-  useEffect(() => {
-    const idsByType = groupUnresolvedReferencesByType(messages, requestedEntityStatusKeysRef.current);
-    if (idsByType.size === 0) return;
-
-    setEntityStatusByKey((prev) => {
-      const next = { ...prev };
-      for (const [type, ids] of idsByType) {
-        for (const id of ids) next[`${type}:${id}`.toLowerCase()] = { kind: 'loading' };
-      }
-      return next;
-    });
-
-    let cancelled = false;
-    for (const [type, ids] of idsByType) {
-      fetch(`${ENTITY_STATUS_BATCH_API_PATH[type]}?ids=${ids.map(encodeURIComponent).join(',')}`)
-        .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`status ${res.status}`))))
-        .then((body: { data?: Array<{ id: string; status?: string | null }> }) => {
-          if (cancelled) return;
-          const items = body.data ?? [];
-          setEntityStatusByKey((prev) => {
-            const next = { ...prev };
-            for (const id of ids) {
-              const found = items.find((it) => it.id === id);
-              next[`${type}:${id}`.toLowerCase()] = { kind: 'resolved', raw: found?.status ?? null };
-            }
-            return next;
-          });
-        })
-        .catch(() => {
-          if (cancelled) return;
-          setEntityStatusByKey((prev) => {
-            const next = { ...prev };
-            for (const id of ids) next[`${type}:${id}`.toLowerCase()] = { kind: 'error' };
-            return next;
-          });
-        });
-    }
-    return () => { cancelled = true; };
-  }, [messages]);
+  // story #2262 PR② — 참조 칩 「지금 상태」 배치조회(메인 채널 메시지 담당). requestedEntityStatusKeysRef·
+  // setEntityStatusByKey를 ThreadPanel에도 그대로 물려줘(아래 렌더부) 스레드 답글 전용 참조도
+  // 같은 장부·같은 캐시로 잡힌다(PO 지적 2026-08-08 — 이전엔 스레드 전용 참조가 영원히
+  // "아직 모름"에 고착됐었다).
+  useEntityStatusBatchFetch(messages, requestedEntityStatusKeysRef, setEntityStatusByKey);
   // story #1977: mark-read 중복 POST 가드 — 이미 이 up_to까지 보냈으면 재전송 안 함(멱등이라
   // 서버는 안전하지만, 스크롤/신규메시지마다 매번 쏘는 낭비 방지).
   const markedReadUpToRef = useRef<string | null>(null);
@@ -930,6 +891,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               incomingMessage={threadIncoming?.parent_id === activeThread.id ? threadIncoming : null}
               onReplyAdded={handleReplyAdded}
               entityStatusByKey={entityStatusByKey}
+              requestedEntityStatusKeysRef={requestedEntityStatusKeysRef}
+              setEntityStatusByKey={setEntityStatusByKey}
             />
           </div>
         )}

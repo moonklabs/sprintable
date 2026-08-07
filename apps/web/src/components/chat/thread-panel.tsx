@@ -1,12 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { X } from 'lucide-react';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { normalizeToMessage } from '@/hooks/use-chat-sse';
 import { ChatBubble } from './chat-bubble';
 import { ChatInput } from './chat-input';
 import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
+import { useEntityStatusBatchFetch } from '@/hooks/use-entity-status-batch';
+
+// story #2262 PR② — 배치조회가 꺼진(구 호출부) 경우 훅에 넘길 안정적인 빈 배열 참조(매
+// 렌더 새 배열을 만들면 useEntityStatusBatchFetch의 effect가 messages 변경으로 오인해
+// 매번 재실행된다 — 어차피 빈 배열이라 fetch는 안 나가지만 불필요한 재실행 자체를 막는다).
+const EMPTY_THREAD_MESSAGES: ChatMessage[] = [];
 
 interface ThreadPanelProps {
   parentMessage: ChatMessage;
@@ -18,9 +24,15 @@ interface ThreadPanelProps {
   incomingMessage?: ChatMessage | null;
   // P2 RC: notify parent to increment reply_count when own reply sent
   onReplyAdded?: (parentId: string) => void;
-  /** story #2262 AC2 PR② — ChatView가 배치조회한 캐시를 그대로 물려받는다(스레드 패널도
-   * 같은 EntityChip을 그리므로 같은 캐시를 공유해야 일관된다·별도 fetch 안 함). */
+  /** story #2262 AC2 PR② — ChatView가 만든 「대화 전체 1개」 캐시·요청장부를 그대로
+   * 물려받는다(별도로 안 만든다) — 부모 메시지는 이미 채워진 캐시를 그리기만 하지만,
+   * 스레드 답글 자신의 참조는 이 훅으로 직접 배치조회한다(같은 requestedKeysRef를
+   * 공유해 중복 fetch 방지, PO 지적 2026-08-08 — 스레드 전용 참조가 예전엔 영원히
+   * "아직 모름"에 고착됐었다). 둘 다 생략하면(undefined) 스레드 패널 배치조회 자체가
+   * 꺼진다(기존 회귀 없음 — 옛 테스트 호출부 대비). */
   entityStatusByKey?: Record<string, EntityStatusFetchState>;
+  requestedEntityStatusKeysRef?: RefObject<Set<string>>;
+  setEntityStatusByKey?: (updater: (prev: Record<string, EntityStatusFetchState>) => Record<string, EntityStatusFetchState>) => void;
 }
 
 export function ThreadPanel({
@@ -32,12 +44,25 @@ export function ThreadPanel({
   incomingMessage,
   onReplyAdded,
   entityStatusByKey,
+  requestedEntityStatusKeysRef,
+  setEntityStatusByKey,
 }: ThreadPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
   // AC6: CB-S8 패턴 — render 후 DOM 반영된 직후 스크롤 보장
   const shouldScrollToBottomRef = useRef(false);
+
+  // story #2262 PR② — ChatView가 안 물려주면(구 호출부·테스트) 배치조회 기능 자체를 끈다
+  // (fetch 자체가 안 나가게 messages를 빈 배열로 훅에 넘긴다 — hook 자체는 rules-of-hooks
+  // 때문에 조건부 호출 불가라 항상 부르되 입력으로 무력화한다).
+  const localRequestedKeysRef = useRef<Set<string>>(new Set());
+  const noopSetEntityStatusByKey = useCallback(() => {}, []);
+  useEntityStatusBatchFetch(
+    setEntityStatusByKey ? messages : EMPTY_THREAD_MESSAGES,
+    requestedEntityStatusKeysRef ?? localRequestedKeysRef,
+    setEntityStatusByKey ?? noopSetEntityStatusByKey,
+  );
 
   const fetchThreadMessages = useCallback(async () => {
     try {
