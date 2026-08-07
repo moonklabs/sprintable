@@ -54,11 +54,17 @@ async def _refetch(session: AsyncSession, order_id: str) -> BillingOrder:
 async def _confirm_with_ledger(
     session: AsyncSession, *, org_id: uuid.UUID, order_id: str,
     amount_minor: int, currency: str, payment_key: str,
+    entry_type: str = "charge", ledger_metadata: dict | None = None,
 ) -> BillingOrder:
-    """⛔블로커2 fix — 원장을 confirmed-update **前**에 먼저(멱등 provider_ref)."""
+    """⛔블로커2 fix — 원장을 confirmed-update **前**에 먼저(멱등 provider_ref).
+
+    entry_type(#2505, story 확장): 기본 "charge"(정기결제)지만 팩 구매처럼 별개
+    entry_type으로 원장에 남겨야 하는 호출자를 위해 파라미터화 — direction은 여전히
+    "credit"(돈이 들어옴)로 고정, 팩/정기결제 둘 다 매출이라 방향은 같다."""
     await record_ledger_entry(
-        session, org_id=org_id, entry_type="charge", amount_minor=amount_minor,
+        session, org_id=org_id, entry_type=entry_type, amount_minor=amount_minor,
         currency=currency, direction="credit", provider="toss", provider_ref=payment_key,
+        metadata=ledger_metadata,
     )
     await session.execute(
         update(BillingOrder)
@@ -71,6 +77,7 @@ async def _confirm_with_ledger(
 
 async def _reconcile_duplicated_order(
     session: AsyncSession, *, org_id: uuid.UUID, order_id: str, amount_minor: int, currency: str,
+    entry_type: str = "charge", ledger_metadata: dict | None = None,
 ) -> BillingOrder:
     """Toss가 DUPLICATED_ORDER_ID를 낸 경우 — 실 상태를 조회해 정합시킨다. DONE이면
     "이미 성공"이었던 것(진짜 실패 아님) — confirmed+원장. 그 외(취소 등)면 failed."""
@@ -88,7 +95,7 @@ async def _reconcile_duplicated_order(
 
     return await _confirm_with_ledger(
         session, org_id=org_id, order_id=order_id, amount_minor=amount_minor,
-        currency=currency, payment_key=payment_key,
+        currency=currency, payment_key=payment_key, entry_type=entry_type, ledger_metadata=ledger_metadata,
     )
 
 
@@ -100,9 +107,16 @@ async def charge_org(
     amount_minor: int,
     currency: str,
     order_name: str = "Sprintable 정기결제",
+    entry_type: str = "charge",
+    ledger_metadata: dict | None = None,
 ) -> BillingOrder:
-    """org의 활성 빌링키로 결제를 승인한다. 호출자(story C3 스케줄러)가 amount/currency/
-    order_id를 이미 계산해 넘긴다 — 여기는 그 값을 안전하게 집행하는 메커니즘만 진다."""
+    """org의 활성 빌링키로 결제를 승인한다. 호출자(story C3 스케줄러·#2506 체크아웃·#2505
+    팩 구매)가 amount/currency/order_id를 이미 계산해 넘긴다 — 여기는 그 값을 안전하게
+    집행하는 메커니즘만 진다.
+
+    entry_type/ledger_metadata(#2505 확장): 원장에 남길 entry_type을 파라미터화 — 정기
+    결제는 기본값 "charge" 그대로, 팩 구매 같은 별개 매출 종류는 호출자가 지정한다
+    (예: "pack_purchase" + metadata={"resource":..., "quantity":...})."""
     if amount_minor <= 0:
         raise ValueError(f"amount_minor must be positive: {amount_minor!r}")
 
@@ -163,6 +177,7 @@ async def charge_org(
             return await _reconcile_duplicated_order(
                 session, org_id=org_id, order_id=order_id,
                 amount_minor=amount_minor, currency=currency,
+                entry_type=entry_type, ledger_metadata=ledger_metadata,
             )
         await _mark_failed_if_not_confirmed(session, order_id, str(exc)[:500])
         raise
@@ -180,5 +195,5 @@ async def charge_org(
 
     return await _confirm_with_ledger(
         session, org_id=org_id, order_id=order_id, amount_minor=amount_minor,
-        currency=currency, payment_key=payment_key,
+        currency=currency, payment_key=payment_key, entry_type=entry_type, ledger_metadata=ledger_metadata,
     )
