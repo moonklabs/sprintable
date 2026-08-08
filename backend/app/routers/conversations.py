@@ -2028,11 +2028,17 @@ async def send_message(
             await db.flush()
 
     # AC10: Discord 수신자 파악 → SSE dispatch에서 제외 (동일 db 세션, flush 완료 상태)
+    # ⛔P0(message-loss, 2026-08-08 diagnosed): 이 블록이 SAVEPOINT 없이 bare except였을 때는
+    # 실패 시 Postgres 트랜잭션이 ABORTED로 남고, 그 뒤 최종 commit()이 예외 없이 조용히
+    # ROLLBACK 처리되어(asyncpg 실측 확認) msg insert까지 통째로 사라졌다 — "성공 id 반환하는데
+    # 저장 안 됨" 증상의 근본. `_dispatch_conversation_event` 호출부와 동형으로 begin_nested()
+    # SAVEPOINT 격리 — 여기서 실패해도 이 nested만 롤백되고 바깥 트랜잭션(msg insert)은 안전.
     discord_exclude_ids: set[uuid.UUID] = set()
     try:
-        from app.services.channel_router import ChannelRouterError, route_message as _route
-        decisions = await _route(msg.id, db)
-        discord_exclude_ids = {d.member_id for d in decisions if d.channel == "discord"}
+        async with db.begin_nested():
+            from app.services.channel_router import ChannelRouterError, route_message as _route
+            decisions = await _route(msg.id, db)
+            discord_exclude_ids = {d.member_id for d in decisions if d.channel == "discord"}
     except Exception:
         logger.warning("ChannelRouter pre-check failed message_id=%s — no SSE exclusion", msg.id)
 
@@ -2047,11 +2053,14 @@ async def send_message(
     # 이 조회 하나가 실패했다고 메시지 전송 자체가 막히면 안 된다 — 아래 채널라우터 pre-check·
     # 웹훅 타겟·멘션/알림 dispatch가 전부 같은 철학(best-effort, try/except+warning)이라 이
     # 조회도 그 옆에 맞춘다(실패 시 fail-open=차단 미반영, 메시지 전송은 계속).
+    # P0 message-loss savepoint 격리(위 discord_exclude_ids 블록과 동일 근거) — 이 SELECT 자체는
+    # 저위험이나 실패 시 트랜잭션을 poison하지 않도록 통일.
     user_blocker_ids: set[uuid.UUID] = set()
     try:
-        user_blocker_ids = set((await db.execute(
-            select(UserBlock.blocker_member_id).where(UserBlock.blocked_member_id == sender.id)
-        )).scalars().all())
+        async with db.begin_nested():
+            user_blocker_ids = set((await db.execute(
+                select(UserBlock.blocker_member_id).where(UserBlock.blocked_member_id == sender.id)
+            )).scalars().all())
     except Exception:
         logger.warning("user_blocker_ids lookup failed message_id=%s — fail-open(no exclusion)", msg.id, exc_info=True)
 
@@ -2063,15 +2072,17 @@ async def send_message(
     webhook_targets: list = []
     if conv.project_id:
         try:
-            webhook_targets = await resolve_conversation_webhook_targets(
-                db,
-                conversation_id=conversation_id,
-                org_id=org_id,
-                project_id=conv.project_id,
-                sender_id=sender.id,
-                mentioned_ids=list(msg.mentioned_ids) if msg.mentioned_ids else None,
-                blocker_member_ids=user_blocker_ids,
-            )
+            # P0 message-loss savepoint 격리 — 위 blocks와 동일 근거.
+            async with db.begin_nested():
+                webhook_targets = await resolve_conversation_webhook_targets(
+                    db,
+                    conversation_id=conversation_id,
+                    org_id=org_id,
+                    project_id=conv.project_id,
+                    sender_id=sender.id,
+                    mentioned_ids=list(msg.mentioned_ids) if msg.mentioned_ids else None,
+                    blocker_member_ids=user_blocker_ids,
+                )
         except Exception:
             logger.warning(
                 "webhook target resolve failed conversation_id=%s — SSE 유지(skip 0·fail-open)",
@@ -2119,24 +2130,27 @@ async def send_message(
         # best-effort.
         if mention_targets:
             try:
-                human_mention_rows = (await db.execute(
-                    select(TeamMember.id).where(
-                        TeamMember.id.in_(mention_targets), TeamMember.type == "human",
-                    )
-                )).all()
-                human_mention_targets = [r[0] for r in human_mention_rows]
-                if human_mention_targets:
-                    from app.services.notification_dispatch import dispatch_notification
-                    await dispatch_notification(
-                        db, org_id=org_id, event_type="conversation.mention",
-                        target_member_ids=human_mention_targets,
-                        title=f"{sender.name}님이 회원님을 멘션했습니다",
-                        body=(msg.content or "")[:200],
-                        reference_type="conversation", reference_id=conversation_id,
-                        source_project_id=conv.project_id,
-                        # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
-                        via_outbox=True,
-                    )
+                # P0 message-loss savepoint 격리 — dispatch_notification 이 실제 write(outbox)를
+                # 하는 유력 용의자 지점(위 blocks와 동일 근거).
+                async with db.begin_nested():
+                    human_mention_rows = (await db.execute(
+                        select(TeamMember.id).where(
+                            TeamMember.id.in_(mention_targets), TeamMember.type == "human",
+                        )
+                    )).all()
+                    human_mention_targets = [r[0] for r in human_mention_rows]
+                    if human_mention_targets:
+                        from app.services.notification_dispatch import dispatch_notification
+                        await dispatch_notification(
+                            db, org_id=org_id, event_type="conversation.mention",
+                            target_member_ids=human_mention_targets,
+                            title=f"{sender.name}님이 회원님을 멘션했습니다",
+                            body=(msg.content or "")[:200],
+                            reference_type="conversation", reference_id=conversation_id,
+                            source_project_id=conv.project_id,
+                            # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
+                            via_outbox=True,
+                        )
             except Exception:
                 logger.warning(
                     "conversation.mention notification failed conversation_id=%s", conversation_id, exc_info=True,
@@ -2148,33 +2162,37 @@ async def send_message(
     # 이미 conversation.mention으로 알림 받은 대상은 제외(중복 push 방지 — 멘션이 더 구체적).
     # best-effort.
     try:
-        participant_rows = (await db.execute(
-            select(ConversationParticipant.member_id)
-            .where(ConversationParticipant.conversation_id == conversation_id)
-        )).all()
-        candidate_targets = (
-            {r[0] for r in participant_rows}
-            - {sender.id} - discord_exclude_ids - blocked_agent_ids - user_blocker_ids - set(msg.mentioned_ids or [])
-        )
-        if candidate_targets:
-            human_message_rows = (await db.execute(
-                select(TeamMember.id).where(
-                    TeamMember.id.in_(candidate_targets), TeamMember.type == "human",
-                )
+        # P0 message-loss savepoint 격리 — dispatch_notification 이 실제 write(outbox)를
+        # 하는 유력 용의자 지점(위 blocks와 동일 근거). 이 블록이 4곳 중 처음엔 빠져 있었다 —
+        # PR 셀프게이트 뮤테이션 체크(테스트 파일 참조) 중 발견해 즉시 보강.
+        async with db.begin_nested():
+            participant_rows = (await db.execute(
+                select(ConversationParticipant.member_id)
+                .where(ConversationParticipant.conversation_id == conversation_id)
             )).all()
-            message_targets = [r[0] for r in human_message_rows]
-            if message_targets:
-                from app.services.notification_dispatch import dispatch_notification
-                await dispatch_notification(
-                    db, org_id=org_id, event_type="conversation.message",
-                    target_member_ids=message_targets,
-                    title=f"{sender.name}님의 새 메시지",
-                    body=(msg.content or "")[:200],
-                    reference_type="conversation", reference_id=conversation_id,
-                    source_project_id=conv.project_id,
-                    # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
-                    via_outbox=True,
-                )
+            candidate_targets = (
+                {r[0] for r in participant_rows}
+                - {sender.id} - discord_exclude_ids - blocked_agent_ids - user_blocker_ids - set(msg.mentioned_ids or [])
+            )
+            if candidate_targets:
+                human_message_rows = (await db.execute(
+                    select(TeamMember.id).where(
+                        TeamMember.id.in_(candidate_targets), TeamMember.type == "human",
+                    )
+                )).all()
+                message_targets = [r[0] for r in human_message_rows]
+                if message_targets:
+                    from app.services.notification_dispatch import dispatch_notification
+                    await dispatch_notification(
+                        db, org_id=org_id, event_type="conversation.message",
+                        target_member_ids=message_targets,
+                        title=f"{sender.name}님의 새 메시지",
+                        body=(msg.content or "")[:200],
+                        reference_type="conversation", reference_id=conversation_id,
+                        source_project_id=conv.project_id,
+                        # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
+                        via_outbox=True,
+                    )
     except Exception:
         logger.warning("conversation.message notification failed conversation_id=%s", conversation_id, exc_info=True)
 
