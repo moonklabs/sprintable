@@ -270,6 +270,25 @@ async def my_actions(
     # 「나의 것」 정의(AC2 명시 요구): 지금은 **담당(assignee_id)** 하나만 — 결재자·멘션·claim
     # 은 포함 안 함(추측으로 넓히지 않는다, 대조표가 곧 명세라는 PO 지시 그대로).
     _WaitingStory = aliased(Story)
+    # story #2527(까심 QA 확認 대기, PO 오르테가 AC 락 2026-08-08): S9 쿼럼 gate(한 approval_group_id에
+    # approver row N개)에서 member_id 가 assignee 이면서 동시에 그 gate의 pending blocking 승인자
+    # 중 한 명이면, 위 `approver_member_id != member_id` 필터는 «내» row만 걸러낼 뿐 «다른»
+    # 승인자 row는 그대로 남아 story가 waiting_on_others로 잡혔다(내 승인 행동이 실제로 남아
+    # 있는데도 "행동 없음"으로 오분류 — 그 행동은 이미 위 gate_approval 큐에 별도로 뜬다).
+    # NOT EXISTS로 "이 step_run에 내 pending blocking 승인 row가 하나라도 있으면" 그 story
+    # 자체를 이 버킷에서 제외한다(단일승인자·비쿼럼 케이스는 기존에도 애초에 이 row가 없어 무회귀).
+    # ⚠️outer join이 이미 (별칭 없는) WorkflowLineStepApproval을 FROM에 물고 있어, 이 서브쿼리가
+    # 같은 클래스를 맨 클래스 그대로 참조하면 SQLAlchemy 자동상관이 그것까지 상관관계로 착각해
+    # FROM 자체를 통째로 비워버린다(`no FROM clauses due to auto-correlation`) — 별도 alias로
+    # "이건 다른 row를 찾는 별개 서브쿼리"임을 명시해야 한다.
+    _MyApproval = aliased(WorkflowLineStepApproval)
+    _my_pending_approval_on_step = select(_MyApproval.id).where(
+        _MyApproval.org_id == org_id,
+        _MyApproval.step_run_id == WorkflowLineStepRun.id,
+        _MyApproval.approver_member_id == member_id,
+        _MyApproval.status == "pending",
+        _MyApproval.blocking.is_(True),
+    )
     waiting_rows = (
         await session.execute(
             select(
@@ -297,6 +316,7 @@ async def my_actions(
                 _WaitingStory.assignee_id == member_id,
                 _WaitingStory.deleted_at.is_(None),
                 WorkflowLineStepApproval.approver_member_id != member_id,
+                ~exists(_my_pending_approval_on_step),
             )
             .order_by(_WaitingStory.updated_at.desc())
             .limit(100)
