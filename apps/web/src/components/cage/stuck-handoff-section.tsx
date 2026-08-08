@@ -98,7 +98,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
     idle: { cls: 'bg-destructive text-destructive-foreground hover:bg-destructive/90', Icon: AlertTriangle, label: t('fallbackNotifyOwner'), disabled: false },
     notifying: { cls: 'bg-destructive/10 text-destructive', Icon: Loader2, label: t('fallbackNotifying'), disabled: true },
     notified: { cls: 'bg-muted text-muted-foreground', Icon: Check, label: t('fallbackNotified'), disabled: true },
-    failed: { cls: 'border border-destructive text-destructive hover:bg-destructive/10', Icon: RotateCcw, label: t('fallbackRetry'), disabled: false },
+    failed: { cls: 'border border-destructive text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60', Icon: RotateCcw, label: t('fallbackRetry'), disabled: false },
   }[fallback];
   const BtnIcon = btn.Icon;
 
@@ -138,7 +138,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
               <Button variant="ghost" size="sm" className="flex-1 text-muted-foreground" onClick={() => setWithdraw('idle')}>
                 {t('withdrawCancel')}
               </Button>
-              <Button variant="ghost" size="sm" className="flex-1 gap-1 text-destructive hover:bg-destructive/10" onClick={() => void handleWithdraw()}>
+              <Button variant="ghost" size="sm" className="flex-1 gap-1 text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60" onClick={() => void handleWithdraw()}>
                 <XCircle className="size-3.5 shrink-0" />
                 {t('withdrawConfirm')}
               </Button>

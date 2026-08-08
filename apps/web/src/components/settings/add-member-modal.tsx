@@ -61,8 +61,19 @@ export function AddMemberModal({ open, onClose, orgId, projects, onAdded }: AddM
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), role, project_ids: projectIds }),
       });
-      const json = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-      if (!res.ok) { bumpErrorNonce(); setError(json.error?.message ?? t('addMemberInviteError')); return; }
+      const json = (await res.json().catch(() => ({}))) as { error?: { code?: string; message?: string; limit?: number } };
+      if (!res.ok) {
+        bumpErrorNonce();
+        // story #2485 — EE plan_limits.check_member_invite_limit()가 실제로 이 code를
+        // 낸다(그라운딩 확認, org-members-section.tsx와 동일 엔드포인트). 그 외 code는
+        // backend가 generic HTTP상태만 준다 — raw 서버 message 노출 대신 고정 문구.
+        if (json.error?.code === 'PLAN_LIMIT_EXCEEDED') {
+          setError(t('memberLimitExceededError', { limit: json.error.limit ?? 1 }));
+        } else {
+          setError(t('addMemberInviteError'));
+        }
+        return;
+      }
       onAdded(t('addMemberInviteSuccess'));
       close();
     } catch {

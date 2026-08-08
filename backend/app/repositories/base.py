@@ -32,6 +32,19 @@ class BaseRepository(Generic[T]):
         )
         return result.scalar_one_or_none()
 
+    async def list_by_ids(self, ids: list[uuid.UUID]) -> list[T]:
+        """배치 앵커 조회(story ca37b2b0 ②의 `StoryRepository.list_by_ids`와 동일 계약을
+        제네릭화 — story #2262 PR② 칩 상태 배치조회가 epic/task/doc/artifact에도 같은
+        `?ids=` 패턴을 요구해 여기로 승격한다). org-scoped exact-id IN 조회. ORDER BY
+        없음(호출자가 id 집합 그대로를 필요로 하는 용도, "첫 N건" 비결정 순서 문제와 무관)."""
+        if not ids:
+            return []
+        q = select(self.model).where(self._org_filter(), self.model.id.in_(ids))  # type: ignore[attr-defined]
+        if issubclass(self.model, SoftDeleteMixin):
+            q = q.where(self.model.deleted_at.is_(None))  # type: ignore[attr-defined]
+        result = await self.session.execute(q)
+        return list(result.scalars().all())
+
     async def list(self, limit: int = 1000, **filters: Any) -> list[T]:
         q = select(self.model).where(self._org_filter())
         if issubclass(self.model, SoftDeleteMixin):

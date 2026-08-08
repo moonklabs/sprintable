@@ -121,9 +121,12 @@ export default function GateDetailPage() {
         return;
       }
       // story #2043 AC3: 서버 거부(예: #2027 — 고위험 승인은 note 필수, 422)를 사람이 읽을
-      // 문구로 보여준다. BE HTTPException(detail=...)은 평문 문자열을 반환(gates.py:553-556).
-      const body = await res.json().catch(() => null) as { detail?: unknown } | null;
-      const reason = typeof body?.detail === 'string' ? body.detail : `HTTP ${res.status}`;
+      // 문구로 보여준다. story #2500 — `body.detail`은 실 envelope({data,error,meta})에
+      // 없는 필드라 이 분기는 항상 죽어있었다(그라운딩 확認 — BE HTTPException(detail=...)은
+      // 평문 문자열이지만 handler가 error.message로 재포장한다, gates.py:885). 올바른
+      // 필드로 교정 — #2027의 "고위험 승인 사유 필수" 문구가 실제로 화면에 뜨게 된다.
+      const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+      const reason = body?.error?.message ?? `HTTP ${res.status}`;
       setTransitionError(reason);
     } finally {
       setResolving(false);

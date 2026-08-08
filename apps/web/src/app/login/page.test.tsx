@@ -99,3 +99,47 @@ describe('LoginPage — 실패 사유 접근성 (story #2105 1차)', () => {
     expect(first).not.toBe(second);
   });
 });
+
+// story #2484 — code로 분기하지 않으면 result.error.message(서버/BFF raw 영문)가 그대로
+// 뜬다. 각 케이스에서 raw 영문 message는 화면에 없어야 하고, 대신 번역된 한국어 문구가
+// 떠야 한다(메시지를 일부러 실제와 다른 raw 영문으로 줘서 "raw가 새면 바로 드러나게" 함).
+describe('LoginPage — error.code 분기 (story #2484)', () => {
+  it('ACCOUNT_LOCKED — raw 영문 대신 번역 문구', async () => {
+    loginWithPasswordMock.mockResolvedValue({ error: { code: 'ACCOUNT_LOCKED', message: 'Account locked. Try again in 287 seconds' } });
+    await mount();
+    await submit();
+    const alertEl = container.querySelector('[role="alert"]');
+    expect(alertEl?.textContent).not.toContain('Account locked');
+    expect(alertEl?.textContent).toBe(koMessages.login.loginAccountLocked);
+  });
+
+  it('TOTP_LOCKED — raw 영문 대신 번역 문구', async () => {
+    loginWithPasswordMock.mockResolvedValue({ error: { code: 'TOTP_LOCKED', message: 'Too many failures. Retry after 300s' } });
+    await mount();
+    await submit();
+    const alertEl = container.querySelector('[role="alert"]');
+    expect(alertEl?.textContent).not.toContain('Too many failures');
+    expect(alertEl?.textContent).toBe(koMessages.login.loginTotpLocked);
+  });
+
+  it('INVALID_TOTP — raw 영문 대신 번역 문구', async () => {
+    loginWithPasswordMock.mockResolvedValue({ error: { code: 'INVALID_TOTP', message: 'Invalid TOTP code' } });
+    await mount();
+    await submit();
+    const alertEl = container.querySelector('[role="alert"]');
+    expect(alertEl?.textContent).not.toContain('Invalid TOTP');
+    expect(alertEl?.textContent).toBe(koMessages.login.loginInvalidTotpCode);
+  });
+
+  it('알려지지 않은 code — 안전 폴백(loginFailed), raw message 미노출', async () => {
+    loginWithPasswordMock.mockResolvedValue({ error: { code: 'SOME_NEW_BACKEND_CODE', message: 'a brand new raw server string' } });
+    await mount();
+    await submit();
+    const alertEl = container.querySelector('[role="alert"]');
+    expect(alertEl?.textContent).not.toContain('brand new raw server string');
+    expect(alertEl?.textContent).toBe(koMessages.login.loginFailed);
+  });
+
+  // 양성대조(AC) — 가드 없이 raw message를 그대로 쓰면 이 테스트가 RED여야 한다.
+  // (수동 mutation self-check로 확認 — 아래 PR 설명 참고. 이 테스트 자체가 그 반례 역할.)
+});

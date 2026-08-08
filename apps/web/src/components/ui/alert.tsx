@@ -8,14 +8,16 @@ const alertVariants = cva(
     variants: {
       variant: {
         default: 'border-border bg-muted/40 text-foreground',
+        // story #2513 — 글자는 text-foreground로 통일(라이트 테마 AA 미달 fix, warning과
+        // 동형). variant 정체성은 border-*-border·아이콘·bg-*-tint로만 표현한다.
         success:
-          'border-success-border bg-success-tint text-success',
+          'border-success-border bg-success-tint text-foreground',
         warning:
           'border-warning-border bg-warning-tint text-foreground',
         destructive:
-          'border-destructive-border bg-destructive-tint text-destructive',
+          'border-destructive-border bg-destructive-tint text-foreground',
         info:
-          'border-info-border bg-info-tint text-info',
+          'border-info-border bg-info-tint text-foreground',
       },
     },
     defaultVariants: {
@@ -52,13 +54,17 @@ const Alert = React.forwardRef<
 ));
 Alert.displayName = 'Alert';
 
+// 유나 지적(error-display 폴리시) — 공백 없는 초장문(토큰·URL·해시 등)이 grid의
+// 1fr 트랙을 넘어 넘쳐흘렀다. grid/flex 아이템은 기본 min-width:auto라 트랙 크기
+// 지정만으론 안 막히고, 텍스트에 실제로 줄바꿈 여지를 줘야 한다 — break-word 대신
+// anywhere(공백 없어도 어디서나 끊음, min-content 계산에도 안전)를 쓴다.
 const AlertTitle = React.forwardRef<
   HTMLParagraphElement,
   React.HTMLAttributes<HTMLHeadingElement>
 >(({ className, ...props }, ref) => (
   <p
     ref={ref}
-    className={cn('col-start-2 font-medium leading-5', className)}
+    className={cn('col-start-2 font-medium leading-5 [overflow-wrap:anywhere]', className)}
     {...props}
   />
 ));
@@ -70,7 +76,7 @@ const AlertDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <p
     ref={ref}
-    className={cn('col-start-2 text-xs leading-relaxed opacity-90', className)}
+    className={cn('col-start-2 text-xs leading-relaxed opacity-90 [overflow-wrap:anywhere]', className)}
     {...props}
   />
 ));

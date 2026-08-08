@@ -340,6 +340,16 @@ async def _reopen_rejected_gate(
         new_status = "pending"
 
     set_gate_status(gate, new_status, now=datetime.now(timezone.utc))
+    # story #2524(2026-08-08, codex 지적·#2520 QA 파생) — create_gate()의 신규 생성 분기는
+    # requires_human=(status=="pending")을 채우는데(#2156 AC3), 이 재오픈 분기는 여태 status만
+    # 갱신하고 requires_human은 안 건드렸다. rejected 게이트는 항상 requires_human이 "그
+    # rejected가 되던 시점의" 값을 그대로 물려받으므로(대개 창설 시 deny 정책이면 애초에
+    # False) — 정책이 그 사이(deny→ask 등) 바뀌어 재오픈이 pending으로 열리면 「status=pending
+    # (사람 승인 필요)인데 requires_human=False(안 필요로 표기)」로 어긋난다. merge-type은
+    # evaluate_merge_gate가 재오픈 직후 이 필드를 다시 정확히 덮어써(decision 기반) 이 갭이
+    # 안 보였지만(#2520 조사로 non-issue 확인), qa 등 non-merge gate_type은 이 재오픈이
+    # requires_human의 유일한 갱신 지점이라 여기서 직접 재기록한다(create_gate와 동일 규칙).
+    gate.requires_human = (new_status == "pending")
     gate.resolver_id = None
     gate.resolution_note = None
     gate.resolved_at = datetime.now(timezone.utc) if new_status != "pending" else None
@@ -436,6 +446,14 @@ async def create_gate(
         work_item_type=work_item_type,
         gate_type=gate_type,
         status=status,
+        # #2156 AC3(2026-08-07) — merge-type만 evaluate_merge_gate가 이후 이 필드를 정확히
+        # 채웠고(decision 기반), 그 외 gate_type(qa·pr_review·deploy 등)은 create_gate가 여태
+        # requires_human을 아예 대입하지 않아 DB 컬럼 기본값 False가 그대로 남았다 — status는
+        # disposition대로 정확히 pending인데 requires_human=False가 "안 봐도 됨"으로 잘못
+        # 신호를 내 인박스에 안 뜨는 원인이었다(유나 실측 "축 없음 4건"). status==pending이면
+        # 사람 결재가 필요하다는 뜻이니 그대로 반영 — merge-type은 evaluate_merge_gate가 바로
+        # 뒤에서 더 정확한 값(decision != AUTO_MERGE)으로 덮어써 이 기본값은 초기값일 뿐이다.
+        requires_human=(status == "pending"),
         # #2249: 신규 행이라 값 비교(set_gate_status)가 필요 없다 — 생성 시점이 곧 최초 진입 시각.
         status_entered_at=datetime.now(timezone.utc),
         neutral_facts=neutral_facts,

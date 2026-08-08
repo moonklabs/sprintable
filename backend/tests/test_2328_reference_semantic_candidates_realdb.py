@@ -369,6 +369,159 @@ async def test_declare_only_changes_status_declared_by_declared_at():
         await engine.dispose()
 
 
+# story #2358 QA(카디르, 2026-08-07 HIGH) — declare/relation-kind가 독립된 두 커밋이라 FE의
+# 순차 호출(declare 성공→relation-kind 실패)이 status=declared·relation_kind=NULL 영구 고아를
+# 만든다(관계 훑기 큐는 relation_kind IS NULL인 estimated만 다시 보여준다 — buildReviewQueue).
+# declare에 relation_kind를 옵션으로 실어 같은 트랜잭션(커밋 1회)으로 묶는다. 아래 셋이 그
+# 원자성을 실PG로 고정한다 — 특히 세 번째가 핵심(전부 아니면 전무).
+
+
+async def test_declare_with_relation_kind_atomically_sets_both():
+    """relation_kind가 body에 실리면 한 번의 POST·한 번의 커밋으로 status=declared와
+    relation_kind가 동시에 반영된다(중간 상태 없음)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            target = await _make_story(s, org.id, project.id, title="Target")
+            target.story_number = 5010
+            await s.commit()
+            story = await _make_story(s, org.id, project.id, title="Source")
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.patch(
+                f"/api/v2/stories/{story.id}",
+                json={"description": "#5010 아무 단서 없음"},
+            )
+            assert resp.status_code == 200, resp.text
+            candidate_id = (
+                await client.get(f"/api/v2/stories/{story.id}/reference-candidates")
+            ).json()[0]["id"]
+
+            declare_resp = await client.post(
+                f"/api/v2/stories/{story.id}/reference-candidates/{candidate_id}/declare",
+                json={"relation_kind": "spawned"},
+            )
+            assert declare_resp.status_code == 200, declare_resp.text
+            body = declare_resp.json()
+            assert body["status"] == "declared"
+            assert body["relation_kind"] == "spawned"
+            assert body["declared_by"] is not None
+
+            async with Session() as s:
+                cands = await _candidates(s, org.id, story.id, source_field="description")
+                assert cands[0].status == "declared"
+                assert cands[0].relation_kind == "spawned"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_declare_without_relation_kind_body_stays_declare_only():
+    """회귀 0 — body 자체를 안 보내는 기존 호출부(순서 강제 없음 계약)는 그대로 declare만
+    한다. relation_kind는 손대지 않는다(None인 채)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            target = await _make_story(s, org.id, project.id, title="Target")
+            target.story_number = 5011
+            await s.commit()
+            story = await _make_story(s, org.id, project.id, title="Source")
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.patch(
+                f"/api/v2/stories/{story.id}",
+                json={"description": "#5011 아무 단서 없음"},
+            )
+            assert resp.status_code == 200, resp.text
+            candidate_id = (
+                await client.get(f"/api/v2/stories/{story.id}/reference-candidates")
+            ).json()[0]["id"]
+
+            declare_resp = await client.post(
+                f"/api/v2/stories/{story.id}/reference-candidates/{candidate_id}/declare"
+            )
+            assert declare_resp.status_code == 200, declare_resp.text
+            body = declare_resp.json()
+            assert body["status"] == "declared"
+            assert body["relation_kind"] is None
+
+            async with Session() as s:
+                cands = await _candidates(s, org.id, story.id, source_field="description")
+                assert cands[0].status == "declared"
+                assert cands[0].relation_kind is None
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_declare_with_invalid_relation_kind_rolls_back_declare_too():
+    """⭐핵심 — relation_kind가 잘못돼(400) 원자화 전이었다면 declare(status→declared)만
+    먼저 커밋되고 kind만 실패하는 «반쪽 고아»가 생겼을 자리. 한 트랜잭션·한 커밋이면 kind
+    검증 실패 시 declare까지 전부 안 남는다(status는 estimated 그대로) — #2358 QA가 지적한
+    그 고아 상태가 애초에 만들어지지 않음을 실PG로 고정한다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id)
+            target = await _make_story(s, org.id, project.id, title="Target")
+            target.story_number = 5012
+            await s.commit()
+            story = await _make_story(s, org.id, project.id, title="Source")
+
+        await _setup_app_human(app, Session, caller_user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.patch(
+                f"/api/v2/stories/{story.id}",
+                json={"description": "#5012 아무 단서 없음"},
+            )
+            assert resp.status_code == 200, resp.text
+            candidate_id = (
+                await client.get(f"/api/v2/stories/{story.id}/reference-candidates")
+            ).json()[0]["id"]
+
+            declare_resp = await client.post(
+                f"/api/v2/stories/{story.id}/reference-candidates/{candidate_id}/declare",
+                json={"relation_kind": "not_a_real_kind"},
+            )
+            assert declare_resp.status_code == 400, declare_resp.text
+
+            async with Session() as s:
+                cands = await _candidates(s, org.id, story.id, source_field="description")
+                # ⭐고아 방지 핵심 단언 — declare도 함께 롤백돼 estimated 그대로다.
+                assert cands[0].status == "estimated"
+                assert cands[0].declared_by is None
+                assert cands[0].declared_at is None
+                assert cands[0].relation_kind is None
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 # story #2223(2026-07-30, 오르테가군 판정) — relation_kind 지정은 declare와 «다른 질문»이라
 # 별도 엔드포인트로 분리됐다. 아래 넷이 그 계약을 실PG로 고정한다.
 

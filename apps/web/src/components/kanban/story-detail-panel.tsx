@@ -413,8 +413,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     try {
       const res = await fetch(`/api/stories/${story.id}`, { method: 'DELETE' });
       if (!res.ok) {
-        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        addToast({ type: 'error', title: json?.error?.message ?? '스토리 삭제에 실패했습니다.' });
+        // story #2485 — backend delete_story()는 generic HTTP상태 코드만 낸다(진짜
+        // 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
+        addToast({ type: 'error', title: '스토리 삭제에 실패했습니다.' });
         return;
       }
       onDeleteSuccess?.(story.id);
@@ -598,8 +599,17 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       } else if (res.status === 409) {
         addToast({ type: 'warning', title: t('dep.duplicateConnection') });
       } else if (res.status === 422) {
-        const json = await res.json().catch(() => null) as { detail?: string } | null;
-        addToast({ type: 'error', title: json?.detail?.includes('사이클') ? t('dep.cycleDetected') : t('dep.invalidSelf') });
+        // story #2485 — 그라운딩(2026-08-06): `json.detail`은 실 envelope에 없는 필드라
+        // 이 분기는 항상 false였다(사이클/자기참조 구분이 한 번도 실제로 안 됐다 —
+        // 항상 dep.invalidSelf로 샘). backend create_dependency()는 두 케이스 모두
+        // 동일 generic code(UNPROCESSABLE_ENTITY)를 내고 구분용 code가 따로 없다
+        // (그라운딩 확認) — 지금은 message 원문("사이클이 발생하는...")에 실제로 그
+        // 한국어 문구가 있어 올바른 필드(error.message)로 고치면 최소한 이 구분은
+        // 다시 동작한다. 다만 message 문자열 매칭은 여전히 반창고다 — backend가
+        // CYCLE_DETECTED/SELF_REFERENCE 같은 explicit code를 내도록 하는 게 근본
+        // fix(별도 이슈로 보고, backend/ 스코프).
+        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+        addToast({ type: 'error', title: json?.error?.message?.includes('사이클') ? t('dep.cycleDetected') : t('dep.invalidSelf') });
       } else {
         addToast({ type: 'error', title: t('dep.addFailed') });
       }
@@ -1232,7 +1242,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
             <button type="button" onClick={onClose} className="rounded-md border border-border px-3 py-2 text-muted-foreground transition hover:text-foreground hover:bg-muted/50">✕</button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-5">
+        {/* story #2528 — 전역 스크롤바 숨김(#2165) 하에선 스크롤은 되나 바가 안 보여 하단
+            (완료조건·댓글)을 인지할 신호가 없었다. .scrollbar-visible은 globals.css의 범용
+            옵트인(신규 CSS 아님) — .tableWrapper(#2203)가 이미 라이브 양성으로 검증한 패턴. */}
+        <div className="scrollbar-visible flex-1 overflow-y-auto p-5">
           <div className="space-y-5">
             {/* E-UI-DAEGBYEON P0 — Workcell 4층 데뷔(최소 실화면 배선, story `e5310d1b`).
                 Evidence는 null(정직한 "아직 증거 없음" — EvidenceSection/StoryMergeGate 실

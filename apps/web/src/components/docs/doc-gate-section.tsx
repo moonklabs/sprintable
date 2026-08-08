@@ -215,7 +215,7 @@ export function DocGateSection({
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-7 gap-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                className="h-7 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
                 disabled={busy}
                 onClick={() => setRejectOpen(true)}
               >
@@ -337,7 +337,7 @@ export function DocGateSection({
               <Button
                 variant="ghost"
                 size="sm"
-                className="gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                className="gap-1 text-destructive hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
                 disabled={busy}
                 onClick={() => void submitReject()}
               >

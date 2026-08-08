@@ -6,50 +6,12 @@
 import { getServerSession } from '@/lib/db/server';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 
-import { NotFoundError, ForbiddenError } from '@sprintable/core-storage';
-
-export function mapApiError(status: number, body: { error?: { code?: string; message?: string } }): Error {
-  const msg = body.error?.message ?? `HTTP ${status}`;
-  if (status === 404) return new NotFoundError(msg);
-  if (status === 403) return new ForbiddenError(msg);
-  return new Error(msg);
-}
-
-export async function fastapiCall<T>(
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE' | 'PUT',
-  path: string,
-  accessToken: string,
-  options?: {
-    body?: unknown;
-    query?: Record<string, string | number | boolean | null | undefined>;
-    orgId?: string;
-  },
-): Promise<T> {
-  const url = new URL(path, FASTAPI_URL());
-  if (options?.query) {
-    for (const [k, v] of Object.entries(options.query)) {
-      if (v != null) url.searchParams.set(k, String(v));
-    }
-  }
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
-  if (options?.orgId) headers['X-Org-Id'] = options.orgId;
-
-  const res = await fetch(url.toString(), {
-    method,
-    headers,
-    body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
-  });
-
-  if (!res.ok) {
-    let errBody: { error?: { code?: string; message?: string } } = {};
-    try { errBody = await res.json(); } catch { /* ignore */ }
-    throw mapApiError(res.status, errBody);
-  }
-
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
-}
+// story #2499 — 이 파일이 packages/storage-api/src/utils.ts와 완전 동일한 mapApiError/
+// fastapiCall 사본을 따로 갖고 있어(#2488에서 같은 버그를 두 곳에 각각 고쳐야 했다),
+// 다음 소비처가 조용히 옛 버그를 다시 밟을 위험이 있었다. 단일 구현으로 합친다 —
+// storage-api 쪽이 더 견고함(AbortSignal.timeout(30s) 포함)도 이 자리에서 얻는다.
+export { fastapiCall, mapApiError } from '@sprintable/storage-api';
+export type { ApiCallError } from '@sprintable/storage-api';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 

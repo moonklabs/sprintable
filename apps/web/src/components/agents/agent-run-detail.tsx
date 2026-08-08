@@ -225,8 +225,10 @@ export function AgentRunDetail({
       if (res.ok) {
         addToast({ title: t('retrySuccessTitle'), body: t('retrySuccessBody'), type: 'success' });
       } else {
-        const json = await res.json().catch(() => null);
-        addToast({ title: t('retryFailedTitle'), body: json?.error?.message ?? t('retryFailedBody'), type: 'warning' });
+        // story #2485 — 그라운딩(2026-08-06): 이 라우트(POST .../retry)는 backend에
+        // 존재하지 않아 항상 404다(BE 미구현 — 별도 이슈로 보고, FE에서 code로 갈라도
+        // 해결 안 됨). raw 서버 message 노출만 우선 제거.
+        addToast({ title: t('retryFailedTitle'), body: t('retryFailedBody'), type: 'warning' });
       }
     } catch {
       addToast({ title: t('retryFailedTitle'), body: t('retryFailedBody'), type: 'warning' });
@@ -356,7 +358,9 @@ export function AgentRunDetail({
             {/* Error message for failed runs */}
             {run.status === 'failed' && errorDisplay.message && (
               <Alert variant="destructive" className="mb-4">
-                <AlertTriangle className="size-4" />
+                {/* story #2513 — Alert 글자가 text-foreground로 통일된 후, 색-미지정
+                    아이콘은 부모의 currentColor를 상속해 variant 색을 잃는다. 명시. */}
+                <AlertTriangle className="size-4 text-destructive" />
                 <AlertDescription>
                   <p className="font-semibold">{t('errorLabel')}</p>
                   <p className="mt-1">{errorDisplay.message}</p>

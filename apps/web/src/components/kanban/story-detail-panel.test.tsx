@@ -100,3 +100,28 @@ describe('StoryDetailPanel — overlayPosition (story #2354, 지도 위에 겹�
     expect(container.textContent).toContain('겹침 패널 시험용 스토리');
   });
 });
+
+// story #2528 — 전역 스크롤바 숨김(#2165) 하에 상세패널 본문 스크롤 컨테이너가 예외 목록에
+// 없어 스크롤바가 안 보이던 결함. globals.css 범용 옵트인 `.scrollbar-visible` 클래스 적용
+// 계약을 고정한다. jsdom은 실 스크롤바 렌더를 계산하지 않으므로 실제 가시성은 라이브 QA 몫
+// (스토리 AC의 "라이브 픽셀 양성대조"가 결정적 게이트).
+describe('StoryDetailPanel — #2528 본문 스크롤바 가시성', () => {
+  it('본문 overflow-y-auto 컨테이너에 scrollbar-visible 클래스가 적용된다', async () => {
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} />));
+    });
+    const body = Array.from(container.querySelectorAll('div')).find((d) => d.className.includes('overflow-y-auto'));
+    expect(body).toBeTruthy();
+    expect(body?.className).toContain('scrollbar-visible');
+  });
+
+  it('겹침 팝오버 모드에서도 본문 스크롤 컨테이너의 클래스는 회귀 없이 유지된다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} overlayPosition={{ top: 0, heightPx: 300 }} />,
+      ));
+    });
+    const body = Array.from(container.querySelectorAll('div')).find((d) => d.className.includes('overflow-y-auto'));
+    expect(body?.className).toContain('scrollbar-visible');
+  });
+});

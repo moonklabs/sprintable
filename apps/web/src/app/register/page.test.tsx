@@ -96,3 +96,53 @@ describe('RegisterPage (story #2469) — ko locale이 실제로 렌더된다(raw
     expect(container.textContent).toContain('Sign up');
   });
 });
+
+// story #2484 — error.code 분기 없이 json.error?.message를 그대로 쓰면 raw 서버 문자열이
+// 샌다. code가 있으면 번역 문구, 없으면 안전 폴백(registrationFailed)만 떠야 한다.
+describe('RegisterPage — error.code 분기 (story #2484)', () => {
+  async function fillAndSubmit() {
+    const nameInput = container.querySelector('input[type="text"]') as HTMLInputElement;
+    const emailInput = container.querySelector('input[type="email"]') as HTMLInputElement;
+    const pwInput = container.querySelector('input[type="password"]') as HTMLInputElement;
+    const tosCheckbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    await act(async () => {
+      setNativeValue(nameInput, 'Test User');
+      setNativeValue(emailInput, 'a@b.com');
+      setNativeValue(pwInput, 'Abc123!!');
+      tosCheckbox.click();
+    });
+    const submitBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.register.submit);
+    await act(async () => {
+      submitBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('EMAIL_TAKEN — raw 영문 대신 번역 문구', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false,
+      json: async () => ({ error: { code: 'EMAIL_TAKEN', message: 'Email already registered' } }),
+    })));
+    await mount('ko');
+    await fillAndSubmit();
+    const alertEl = container.querySelector('[role="alert"]');
+    expect(alertEl?.textContent).not.toContain('Email already registered');
+    expect(alertEl?.textContent).toBe(koMessages.register.registerEmailTaken);
+  });
+
+  it('알려지지 않은 code — 안전 폴백, raw message 미노출', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false,
+      json: async () => ({ error: { code: 'SOME_NEW_CODE', message: 'brand new raw string' } }),
+    })));
+    await mount('ko');
+    await fillAndSubmit();
+    const alertEl = container.querySelector('[role="alert"]');
+    expect(alertEl?.textContent).not.toContain('brand new raw string');
+    expect(alertEl?.textContent).toBe(koMessages.register.registrationFailed);
+  });
+});

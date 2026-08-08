@@ -204,7 +204,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
                 onClick={() => void unlink(l)}
                 disabled={busyId === l.id}
                 aria-label={t('unlinkAria')}
-                className="ml-auto inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                className="ml-auto inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 disabled:opacity-50"
               >
                 {busyId === l.id ? <Loader2 className="size-3 animate-spin" /> : <X className="size-3" />}
               </button>

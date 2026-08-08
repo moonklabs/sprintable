@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { cn } from '@/lib/utils';
+import { InviteError, inviteErrorMessage } from '@/lib/invite-error-message';
 
 // d3619e80: invite_accept canonical InvitePreviewResponse 정합(org_name·role·status·expires_at·email).
 // inviter_name/email은 canonical 미제공(optional·미제공 시 generic 안내로 graceful degrade).
@@ -25,6 +26,7 @@ type PageState = 'preview-loading' | 'preview-error' | 'auth' | 'accepting' | 's
 export default function InvitePage() {
   const t = useTranslations('invite');
   const t2 = useTranslations('login');
+  const t3 = useTranslations('register');
   const searchParams = useSearchParams();
   const router = useRouter();
   const token = searchParams.get('token');
@@ -50,8 +52,10 @@ export default function InvitePage() {
     fetch(`/api/invites/${encodeURIComponent(token)}`)
       .then(async (res) => {
         if (!res.ok) {
-          const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-          throw new Error(json?.error?.message ?? 'preview failed');
+          const json = await res.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
+          // story #2484 — 미리보기 실패는 사실상 NOT_FOUND뿐이지만(backend
+          // invite_accept.py get_invite_preview), 코드 기반 분기를 그대로 적용.
+          throw new InviteError(json?.error?.code);
         }
         const json = await res.json() as { data: InvitePreview };
         setPreview(json.data);
@@ -63,9 +67,9 @@ export default function InvitePage() {
           setPageState('auth');
         }
       })
-      .catch((err: Error) => {
+      .catch((err: InviteError) => {
         setPageState('preview-error');
-        setErrorMsg(err.message);
+        setErrorMsg(inviteErrorMessage(t, err.code, 'invalidToken'));
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
@@ -80,9 +84,9 @@ export default function InvitePage() {
       setPageState('success');
       setTimeout(() => router.push('/dashboard'), 1500);
     } else {
-      const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+      const json = await res.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
       setPageState('preview-error');
-      setErrorMsg(json?.error?.message ?? t('acceptFailed'));
+      setErrorMsg(inviteErrorMessage(t, json?.error?.code, 'acceptFailed'));
     }
   };
 
@@ -111,9 +115,20 @@ export default function InvitePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+      const json = await res.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
       if (!res.ok) {
-        setErrorMsg(json?.error?.message ?? t('authFailed'));
+        // story #2484 — code로 분기. authMode에 따라 register/login 각자의 안정 코드 재사용
+        // (신규 키 대신 register/login 페이지와 같은 키 — 2벌 번역 갈림 방지).
+        const code = json?.error?.code;
+        if (authMode === 'signup' && code === 'EMAIL_TAKEN') {
+          setErrorMsg(t3('registerEmailTaken'));
+        } else if (authMode === 'login' && code === 'INVALID_CREDENTIALS') {
+          setErrorMsg(t2('loginInvalidCredentials'));
+        } else if (authMode === 'login' && code === 'ACCOUNT_LOCKED') {
+          setErrorMsg(t2('loginAccountLocked'));
+        } else {
+          setErrorMsg(t('authFailed'));
+        }
         return;
       }
       if (authMode === 'signup') {

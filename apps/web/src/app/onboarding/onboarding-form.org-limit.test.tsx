@@ -145,7 +145,10 @@ describe('OnboardingForm — PLAN_LIMIT_EXCEEDED (story #2470)', () => {
     await act(async () => { submitButton().click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain('Slug already exists');
+    // story #2484 — 유나 design:changes(2026-08-06): 이 폴백은 raw 서버 message를 그대로
+    // 노출했었다(같은 병). 지금은 generic 번역 문구로 간다 — raw는 절대 안 보여야 한다.
+    expect(container.textContent).not.toContain('Slug already exists');
+    expect(container.textContent).toContain('조직 생성에 실패했습니다');
     expect(document.body.querySelector('a[href="/dashboard/settings"]')).toBeNull();
   });
 });

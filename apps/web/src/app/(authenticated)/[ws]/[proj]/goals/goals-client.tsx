@@ -591,7 +591,7 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
                 type="button"
                 aria-label={t('deleteGoal')}
                 onClick={(e) => { e.stopPropagation(); onDeleteRequest(epic.id); }}
-                className="hidden group-hover:flex items-center justify-center rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                className="hidden group-hover:flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 transition-colors"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
@@ -946,8 +946,9 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
     try {
       const res = await fetch(`/api/goals/${id}`, { method: 'DELETE' });
       if (!res.ok) {
-        const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        addToast({ type: 'error', title: json?.error?.message ?? '목표 삭제에 실패했습니다.' });
+        // story #2485 — backend delete_goal()은 generic HTTP상태 코드만 낸다
+        // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
+        addToast({ type: 'error', title: '목표 삭제에 실패했습니다.' });
         void fetchGoals();
       }
     } catch {

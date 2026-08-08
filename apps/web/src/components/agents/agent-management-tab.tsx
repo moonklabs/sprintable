@@ -140,8 +140,9 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
       setMessage({ type: 'success', text: agent.is_active ? t('agentDeactivated') : t('agentActivated') });
       await refreshAgents();
     } else {
-      const json = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-      setMessage({ type: 'error', text: json?.error?.message ?? t('agentActionFailed') });
+      // story #2485 — backend update_team_member()는 generic HTTP상태 코드만 낸다
+      // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
+      setMessage({ type: 'error', text: t('agentActionFailed') });
     }
     setTogglingId(null);
   };

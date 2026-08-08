@@ -11,11 +11,14 @@ const { createDbServerClient, createAdminClient, getAuthContext } = vi.hoisted((
 const listMock = vi.fn();
 const searchMock = vi.fn();
 const getDocMock = vi.fn();
+const listByIdsMock = vi.fn();
 
 vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
 vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext }));
-vi.mock('@/services/docs', () => ({ DocsService: class { list = listMock; search = searchMock; getDoc = getDocMock; } }));
+vi.mock('@/services/docs', () => ({
+  DocsService: class { list = listMock; search = searchMock; getDoc = getDocMock; listByIds = listByIdsMock; },
+}));
 
 import { GET } from './route';
 
@@ -124,5 +127,42 @@ describe('GET /api/docs', () => {
     getAuthContext.mockResolvedValue({ ...mockAuth, rateLimitExceeded: true, rateLimitRemaining: 0, rateLimitResetAt: 9999 });
     const response = await GET(new Request('http://localhost/api/docs?project_id=project-1'));
     expect(response.status).toBe(429);
+  });
+});
+
+// story #2262 PR②(BE #2905) — ids 배치 lookup 분기. ⛔project_id 필수 검사(다른 모든 분기의
+// 전제)보다 먼저 갈라져야 한다 — org 전체에서 조회하는 게 계약이다(stories와 동일 축).
+describe('GET /api/docs — ids 배치 lookup 분기(#2262 PR②)', () => {
+  beforeEach(() => {
+    createDbServerClient.mockReset();
+    createAdminClient.mockReset();
+    getAuthContext.mockReset();
+    listMock.mockReset();
+    listByIdsMock.mockReset();
+    getAuthContext.mockResolvedValue(mockAuth);
+  });
+
+  it('project_id 없이 ids만 있어도 400이 아니라 배치 경로를 탄다(project_id 필수 검사를 우회)', async () => {
+    listByIdsMock.mockResolvedValue({ items: [{ id: 'd1' }, { id: 'd2' }], hasMore: false, nextCursor: null });
+    const res = await GET(new Request('http://localhost/api/docs?ids=d1,d2'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data).toHaveLength(2);
+    expect(listByIdsMock).toHaveBeenCalledWith(['d1', 'd2']);
+    expect(listMock).not.toHaveBeenCalled();
+  });
+
+  it('caps ids at 200 before calling the service', async () => {
+    listByIdsMock.mockResolvedValue({ items: [], hasMore: false, nextCursor: null });
+    const manyIds = Array.from({ length: 250 }, (_, i) => `id${i}`).join(',');
+    await GET(new Request(`http://localhost/api/docs?ids=${manyIds}`));
+    const calledWith = listByIdsMock.mock.calls[0]![0] as string[];
+    expect(calledWith).toHaveLength(200);
+  });
+
+  it('no ids param → project_id required error stays intact(회귀 없음)', async () => {
+    const res = await GET(new Request('http://localhost/api/docs'));
+    expect(res.status).toBe(400);
+    expect(listByIdsMock).not.toHaveBeenCalled();
   });
 });

@@ -259,13 +259,19 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
           {apiKeys.map((key) => (
             <div
               key={key.id}
-              className="flex items-center justify-between p-3 border rounded-md"
+              className="flex flex-wrap items-center justify-between gap-2 p-3 border rounded-md"
             >
-              <div>
-                <div className="flex items-center gap-2">
-                  <p className="font-mono text-sm">{key.key_prefix}...</p>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="font-mono text-sm shrink-0">{key.key_prefix}...</p>
                   {(key.scope ?? ['read', 'write']).map((s) => (
-                    <span key={s} className={`text-xs px-1.5 py-0.5 rounded font-medium ${s === 'admin' ? 'bg-orange-100 text-orange-700' : 'bg-muted text-muted-foreground'}`}>{s}</span>
+                    <span
+                      key={s}
+                      title={s}
+                      className={`max-w-full truncate rounded px-1.5 py-0.5 text-xs font-medium ${s === 'admin' ? 'bg-orange-100 text-orange-700' : 'bg-muted text-muted-foreground'}`}
+                    >
+                      {s}
+                    </span>
                   ))}
                 </div>
                 <p className="text-xs text-muted-foreground">

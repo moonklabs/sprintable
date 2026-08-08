@@ -47,20 +47,20 @@ export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: St
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
           showCloseButton={false}
-          className="w-[440px] max-w-[calc(100%-2rem)] gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[440px]"
+          className="flex w-[440px] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[440px]"
         >
           {asset ? (
             <>
-              {/* Header */}
-              <div className="flex items-center gap-[9px] px-[18px] pb-[6px] pt-[18px] text-[15px] font-[650] text-foreground">
+              {/* Header — 고정(scroll 영역 밖) */}
+              <div className="flex shrink-0 items-center gap-[9px] px-[18px] pb-[6px] pt-[18px] text-[15px] font-[650] text-foreground">
                 <span className="grid size-[30px] shrink-0 place-items-center rounded-full bg-destructive/10 text-destructive">
                   <AlertTriangle className="size-[15px]" />
                 </span>
                 {t('deleteTitle')}
               </div>
 
-              {/* Body */}
-              <div className="px-[18px] pb-[14px] pt-[4px] text-[13px] leading-[1.55] text-muted-foreground">
+              {/* Body — usage list가 길면 이 영역만 내부 스크롤(footer는 항상 노출) */}
+              <div className="min-h-0 flex-1 overflow-y-auto px-[18px] pb-[14px] pt-[4px] text-[13px] leading-[1.55] text-muted-foreground">
                 {t.rich('deleteBody', {
                   name: asset.name,
                   b: (chunks) => <b className="font-semibold text-foreground">{chunks}</b>,
@@ -79,8 +79,8 @@ export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: St
                 ) : null}
               </div>
 
-              {/* Footer */}
-              <div className="flex justify-end gap-2 border-t border-border px-[18px] py-3">
+              {/* Footer — shrink-0로 스크롤 영역 밖에 고정, 항상 노출 */}
+              <div className="flex shrink-0 justify-end gap-2 border-t border-border px-[18px] py-3">
                 <DialogClose
                   render={
                     <Button variant="ghost" size="sm">

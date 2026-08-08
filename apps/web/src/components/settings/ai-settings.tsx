@@ -122,10 +122,13 @@ export function AiSettingsSection({ projectId }: { projectId: string }) {
         }),
       });
 
-      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(json?.error?.message ?? json?.message ?? 'Save failed');
+        // story #2485 — 그라운딩(2026-08-06): `/api/v2/projects/ai-settings`가 backend에
+        // 존재하지 않아 항상 404다(BE 미구현 — 별도 이슈로 보고, FE에서 code로 갈라도
+        // 해결 안 됨). raw 서버 message 노출만 우선 제거.
+        throw new Error('Save failed');
       }
+      const json = await res.json().catch(() => ({}));
 
       const llmConfig = json?.data?.llm_config ?? {
         model,

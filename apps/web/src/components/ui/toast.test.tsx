@@ -91,4 +91,17 @@ describe('Toast 접근성 (story #2096)', () => {
     expect(container.querySelectorAll('[role="status"]').length).toBe(1);
     expect(container.querySelectorAll('[role="alert"]').length).toBe(1);
   });
+
+  // 유나 지적(error-display 폴리시) — 공백 없는 초장문(토큰·URL 등)이 토스트 폭을 넘어
+  // 넘쳐흘렀다. 텍스트 wrapper에 min-w-0(flex 아이템 기본 min-width:auto 트랩 해제)+
+  // 텍스트 자체에 anywhere(어디서나 끊음)가 함께 있어야 실제로 줄바꿈된다.
+  it('제목/본문 텍스트가 overflow-wrap:anywhere를 갖고, wrapper가 min-w-0이다(초장문 overflow 회귀가드)', async () => {
+    await act(async () => {
+      root.render(wrap(<ToastContainer toasts={[toast({ body: '본문' })]} onDismiss={() => {}} />));
+    });
+    const paragraphs = container.querySelectorAll('p');
+    expect(paragraphs.length).toBe(2);
+    paragraphs.forEach((p) => expect(p.className).toContain('[overflow-wrap:anywhere]'));
+    expect(container.querySelector('.min-w-0')).not.toBeNull();
+  });
 });

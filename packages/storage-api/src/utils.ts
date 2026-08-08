@@ -6,11 +6,22 @@ export function mapSupabaseError(error: { code?: string; message: string }): Err
   return new Error(error.message);
 }
 
-export function mapApiError(status: number, body: { error?: { code?: string; message?: string } }): Error {
+/** story #2488 — mapApiError는 404/403 외 status·error.code를 전부 discard해
+ * FE의 error.code 분기가 원천적으로 도달 불가능했다(#2484/#2485 error.code 하드닝의
+ * 전제를 깨는 병). code·status를 던지는 에러 객체에 실어 보존한다 — NotFoundError/
+ * ForbiddenError instanceof 특례는 그대로 유지(전수 소비처 그라운딩 확認: 아무도
+ * property 개수·JSON.stringify 모양에 의존하지 않음, 안전한 additive 변경). */
+export interface ApiCallError extends Error {
+  code?: string;
+  status?: number;
+}
+
+export function mapApiError(status: number, body: { error?: { code?: string; message?: string } }): ApiCallError {
   const msg = body.error?.message ?? `HTTP ${status}`;
-  if (status === 404) return new NotFoundError(msg);
-  if (status === 403) return new ForbiddenError(msg);
-  return new Error(msg);
+  const code = body.error?.code;
+  if (status === 404) return Object.assign(new NotFoundError(msg), { code: code ?? 'NOT_FOUND', status });
+  if (status === 403) return Object.assign(new ForbiddenError(msg), { code: code ?? 'FORBIDDEN', status });
+  return Object.assign(new Error(msg), { code: code ?? `HTTP_${status}`, status });
 }
 
 function getBaseUrl(): string {

@@ -59,9 +59,14 @@ export interface UpdateDocInput {
 }
 
 export interface DocListFilters extends PaginationOptions {
-  project_id: string;
+  // story #2262 PR②(BE #2905) — ids 배치 lookup은 project_id 없이 org 전체에서 exact-id
+  // IN 조회한다(story ca37b2b0과 동일 계약) — 그래서 project_id를 optional로 넓힌다.
+  // ids가 없는 기존 호출부는 지금처럼 project_id를 계속 필수로 넘겨야 한다(BE가 그 경로엔
+  // project_id를 그대로 요구한다 — 타입만 넓어졌지 기존 계약은 안 바뀐다).
+  project_id?: string;
   tags?: string[];
   q?: string;
+  ids?: string[];
 }
 
 // story #2191(#2231 규약 A) — BE가 has_more/next_cursor를 body meta로 직접 계산해 낸다

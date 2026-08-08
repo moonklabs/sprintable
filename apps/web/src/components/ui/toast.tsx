@@ -60,10 +60,14 @@ function Toast({ item, onDismiss }: ToastProps) {
       className={`animate-slide-in rounded-lg border border-border bg-popover p-4 shadow-lg ${borderColor}`}
     >
       <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm font-semibold text-popover-foreground">{item.title}</p>
+        {/* 유나 지적(error-display 폴리시) — 공백 없는 초장문(토큰·URL 등)이 토스트 폭을
+            넘어 넘쳐흘렀다. flex 아이템은 기본 min-width:auto라 min-w-0 없이는 안 줄어들고,
+            텍스트 자체도 anywhere로 어디서나 끊을 여지를 줘야 한다(break-word는 min-content
+            계산에서 여전히 안 줄어드는 경우가 있다). */}
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-popover-foreground [overflow-wrap:anywhere]">{item.title}</p>
           {item.body && (
-            <p className="mt-1 text-xs text-muted-foreground">{item.body}</p>
+            <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{item.body}</p>
           )}
         </div>
         <div className="ml-3 flex shrink-0 items-center gap-3">

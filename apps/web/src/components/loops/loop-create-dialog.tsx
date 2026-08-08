@@ -227,10 +227,21 @@ export function LoopCreateDialog({
         return;
       }
       const json = (await res.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null;
+      // story #2485 — 나머지 4종도 code로 분기(backend loops.py create_loop()가 dict
+      // {code,message}로 직접 발급 — router의 _raise()가 전부 그대로 통과시킨다,
+      // mapApiError 경유 아님). 알려지지 않은 code만 안전 폴백(raw message 미노출).
       if (json?.error?.code === 'LOOP_HYPOTHESIS_REQUIRED') {
         setError(t('createLoopErrorHypothesisRequired'));
+      } else if (json?.error?.code === 'HUMAN_OWNER_REQUIRED') {
+        setError(t('createLoopErrorHumanOwnerRequired'));
+      } else if (json?.error?.code === 'INVALID_CREATE_STATUS') {
+        setError(t('createLoopErrorInvalidStatus'));
+      } else if (json?.error?.code === 'HYPOTHESIS_NOT_FOUND') {
+        setError(t('createLoopErrorHypothesisNotFound'));
+      } else if (json?.error?.code === 'HYPOTHESIS_PROJECT_MISMATCH') {
+        setError(t('createLoopErrorHypothesisProjectMismatch'));
       } else {
-        setError(json?.error?.message ?? t('createLoopErrorGeneric'));
+        setError(t('createLoopErrorGeneric'));
       }
     } catch {
       setError(t('createLoopErrorGeneric'));

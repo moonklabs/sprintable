@@ -120,3 +120,33 @@ describe('GateDetailPage — can_approve 게이팅 (story #2091)', () => {
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
   });
 });
+
+// story #2500 — `body.detail`은 실 envelope({data,error,meta})에 없는 필드라 이 분기는
+// 항상 죽어있었다(그라운딩 확認) — #2027의 "고위험 승인 사유 필수" 서버 거부 문구가 한 번도
+// 실제로 화면에 뜬 적 없이 항상 "HTTP 422"만 보였다. error.message로 교정.
+describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () => {
+  it('422 거부 사유(#2027 고위험 승인 사유 필수)가 raw "HTTP 422" 대신 실 메시지로 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => ({ data: gate({ can_approve: true, risk_grade: 'low' }) }) };
+      if (url === '/api/gates/gate-1/transition') {
+        return {
+          ok: false,
+          status: 422,
+          json: async () => ({ data: null, error: { code: 'UNPROCESSABLE_ENTITY', message: '고위험(risk_grade=high) 게이트 승인은 사유(note) 입력이 필수입니다.' }, meta: null }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const approveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    await act(async () => { approveBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).not.toContain('HTTP 422');
+    expect(container.textContent).toContain('고위험(risk_grade=high) 게이트 승인은 사유(note) 입력이 필수입니다.');
+  });
+});

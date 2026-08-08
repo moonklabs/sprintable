@@ -92,6 +92,32 @@ def _get_repo_read(
     return StoryRepository(session, org_id)
 
 
+def _parse_stories_cursor(cursor: str | None) -> datetime | None:
+    """story #2207 근본수정(2026-08-07) — list_stories의 board/generic 두 분기가 각자
+    `datetime.fromisoformat(cursor)`를 예외처리 없이 불렀다. 원시 ISO 커서 값이 `+`를
+    포함하는데(timezone offset) URL 쿼리스트링에서 인코딩되지 않은 `+`는 공백으로 디코드
+    되는 것이 웹의 오래된 규칙 — FE 다섯 호출부 중 둘이 실제로 이 인코딩을 잊었다(까심
+    발견, dev 라이브 스택트레이스로 확定). 그 결과 `ValueError`가 그대로 500으로 올라갔다
+    (잘못된 커서는 클라이언트 잘못이라 400이어야 함 — 500은 "서버가 깨졌다"는 뜻이라
+    장애 지표를 오염시킨다).
+
+    ⛔커서 포맷 자체(원시 ISO·URL-unsafe)를 바꾸는 근본안은 이 fix에서 채택하지 않는다
+    (판단·근거, story #2207 AC2) — 서버+FE+MCP+모바일 등 모든 커서 소비처가 함께
+    움직여야 하는 비용 큰 변경이고, 진행 중이던 커서가 전부 무효화된다(일회성이라 무해
+    하다곤 해도). 이 400 검증만으로 지금 증상(500·조용한 무반응)은 완전히 사라진다 —
+    "인코딩을 한 번 잊는" 실수 자체를 originate 못 하게 막는 것(포맷 변경)은 비용 대비
+    이 스토리 스코프에서 이득이 작다고 판단(①②만으로 충분, PO 승인 없이 포맷을 바꾸면
+    다른 클라이언트를 조용히 깨뜨릴 위험도 있음)."""
+    if not cursor:
+        return None
+    try:
+        return datetime.fromisoformat(cursor)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="invalid cursor: expected ISO 8601 datetime",
+        ) from exc
+
+
 @router.get("", response_model=list[StoryResponse])
 async def list_stories(
     project_id: uuid.UUID | None = Query(default=None),
@@ -165,7 +191,7 @@ async def list_stories(
     # story #2188: sprint_id/assignee_id만 넘기고 epic_id/story_number/q는 조용히 빠뜨리던
     # 자리 — 이 분기로 빠지는 조합에서도 제네릭 블록(:148 이하)과 동일하게 전 필터를 넘긴다.
     if status_filter and project_id:
-        cursor_dt = datetime.fromisoformat(cursor) if cursor else None
+        cursor_dt = _parse_stories_cursor(cursor)
         stories, total = await repo.list_board(
             project_id=project_id,
             status=status_filter,
@@ -201,7 +227,7 @@ async def list_stories(
     # story #2189: 이 분기도 board 분기(:131)와 동형으로 cursor를 파싱해 넘긴다 — 안 넘기면
     # FE(buildCursorPageMeta)가 계산한 nextCursor가 다음 요청에서 조용히 무시돼 같은 페이지가
     # 반복된다(sprints/standup "더 보기" 중복 누적의 원인).
-    cursor_dt = datetime.fromisoformat(cursor) if cursor else None
+    cursor_dt = _parse_stories_cursor(cursor)
     stories = await repo.list(limit=limit, q=q, cursor=cursor_dt, **filters)
     await _attach_assignee_ids(repo.session, repo.org_id, stories)
     await _attach_has_evidence(repo.session, stories)
@@ -912,16 +938,34 @@ async def declare_new_story_reference_candidate(
     }
 
 
+class DeclareStoryReferenceCandidateRequest(BaseModel):
+    """#2358 QA(카디르, 2026-08-07 HIGH) — declare와 relation-kind가 독립된 두 커밋이라,
+    FE가 순차 호출(declare 성공→relation-kind 실패)하면 candidate가 status=declared·
+    relation_kind=NULL로 영구 고아가 된다(관계 훑기 큐가 relation_kind IS NULL 걸린 후보만
+    보여주므로 다시 안 뜬다). relation_kind는 옵션 — 생략하면 기존 계약(declare만, 「종류는
+    나중에」)이 그대로 유지된다(#2223 오르테가군 판정 "한 클릭에 안 묶는다"를 어기지 않음
+    — 이 필드는 강제가 아니라 「같이 낼 값이 이미 있으면 같은 트랜잭션에 실어 보내는」
+    선택지)."""
+
+    relation_kind: str | None = None
+
+
 @router.post("/{id}/reference-candidates/{candidate_id}/declare")
 async def declare_story_reference_candidate(
     id: uuid.UUID,
     candidate_id: uuid.UUID,
+    body: DeclareStoryReferenceCandidateRequest = DeclareStoryReferenceCandidateRequest(),
     repo: StoryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
 ) -> dict:
     """POST .../declare — AC5: 사람이 후보를 골라 「선언됨」으로 승격. ⛔AC4: 이 엔드포인트가
     바꾸는 것은 candidate.status/declared_by/declared_at 셋뿐이다 — 막힘·대기·종료·에이전트
-    실행 등 다른 어떤 부수효과도 일으키지 않는다(회귀 테스트가 이 계약을 지킨다)."""
+    실행 등 다른 어떤 부수효과도 일으키지 않는다(회귀 테스트가 이 계약을 지킨다).
+
+    #2358 QA 원자화(2026-08-07) — body.relation_kind가 실려 오면 같은 트랜잭션(같은
+    session, 커밋 1회)에서 relation_kind도 함께 쓴다. 둘 중 하나라도 실패하면(404·400) 커밋
+    전이라 아무것도 안 남는다(전부 아니면 전무) — status=declared인데 relation_kind만 못
+    쓴 반쪽 상태가 생기지 않는다."""
     story = await repo.get(id)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
@@ -929,7 +973,9 @@ async def declare_story_reference_candidate(
 
     from app.services.reference_semantic_candidates import (
         CandidateNotFoundError,
+        InvalidRelationKindError,
         declare_candidate,
+        set_candidate_relation_kind,
     )
 
     actor_id = await _resolve_team_member_id(auth, repo.org_id, repo.session)
@@ -938,12 +984,20 @@ async def declare_story_reference_candidate(
             repo.session, org_id=repo.org_id, source_id=id, candidate_id=candidate_id,
             declared_by=actor_id,
         )
+        if body.relation_kind is not None:
+            candidate = await set_candidate_relation_kind(
+                repo.session, org_id=repo.org_id, source_id=id, candidate_id=candidate_id,
+                relation_kind=body.relation_kind,
+            )
     except CandidateNotFoundError:
         raise HTTPException(status_code=404, detail="Reference candidate not found")
+    except InvalidRelationKindError:
+        raise HTTPException(status_code=400, detail="Invalid relation_kind")
     await repo.session.commit()
     return {
         "id": str(candidate.id),
         "status": candidate.status,
+        "relation_kind": candidate.relation_kind,
         "declared_by": str(candidate.declared_by) if candidate.declared_by else None,
         "declared_at": candidate.declared_at.isoformat() if candidate.declared_at else None,
     }
@@ -1557,6 +1611,11 @@ async def bulk_update_stories(
     # "미배정→배정"의 유효한 old값이라 .get() 대신 멤버십(`in`)으로 "실제 변경 있었음"을 판정한다
     # (status_by_id는 status가 None일 수 없어 .get()만으로 충분했던 것과 다른 지점).
     old_assignee_by_id: dict[uuid.UUID, uuid.UUID | None] = {}
+    # story #2521 후속(카디르 QA③, PO 2026-08-08 확정 — (a)안): 게이트 차단 item도 결과에
+    # 남기되 원래 status 유지 + StoryResponse.violation(신규 필드 아님·#2173이 이미 세운
+    # 「이례적」 표기 그 필드 재사용)에 차단 사유를 담는다. has_project_access 미충족(존재
+    # 비노출)과 달리 이건 「존재하고 접근권도 있는데 승인 대기」라 조용하면 #2067 재현.
+    gate_pending_by_id: dict[uuid.UUID, dict] = {}
     for item in payload.items:
         # E-SECURITY SEC-S8(story 83ea3d6a) W(까심 QA, CRITICAL·실HTTP 확定): 이 raw 쿼리가
         # org_id 필터 자체가 없어(정상 repo.get()은 self._org_filter() 명시·RLS도 0002서 off)
@@ -1575,17 +1634,67 @@ async def bulk_update_stories(
         if not await has_project_access(db, uuid.UUID(auth.user_id), story.project_id, repo.org_id):
             continue
         update_data = item.model_dump(exclude={"id"}, exclude_none=True)
-        # status 변경이면 전이 前 old_status 포착(violation 판정용·setattr 前).
+        # story #2521(2026-08-07, 카디르 QA 적출) 근본수정 — bulk가 status를 setattr로 그대로
+        # 써 merge-gate(H1 Cage)를 아예 안 거쳤다. 단건 PATCH /{id}/status(update_story_status)
+        # 와 동일하게 line_merge_gate_active(라인 엔진이 이 전이를 이미 거버닝하면 이중평가
+        # 방지) → _preflight_merge_gate(H1 merge verdict gate) → enforce_gate(S-GATE-2 config
+        # 게이트) 순으로 지나게 한다. ⛔#2067 판정(PO 2026-08-07) 그대로 — ②emit_story_status_
+        # changed는 #2131이 이미 닫아 여기서 안 건드림(아래 emit 블록 무변경), ①게이트만 스코프.
+        #
+        # 차단 시 처리: 단건은 HTTPException(409)로 요청 전체를 거절하지만, bulk는 한 item이
+        # 막혔다고 나머지 정당한 item까지 통째로 실패시키면 안 된다(다건성 — #2173이 emit 쪽에
+        # 이미 세운 그 원칙과 동형). has_project_access 미충족 item(존재 비노출 규율)과 달리
+        # ⭐이건 응답에서까지 조용하면 안 된다(PO 지적, 2026-08-07) — "5개 done 했는데 2개가
+        # 조용히 안 바뀌면" 사용자가 「됐겠지」 오해하는 게 #2067(조용한 경로)의 또 다른 얼굴이다.
+        # story는 그대로 `updated`에 포함(현재 상태 그대로 응답에 보이게)하되 status/다른 필드
+        # 변경은 스킵하고, 사유를 `gate_pending_by_id`에 담아 아래서 응답의 기존 `violation`
+        # 필드로 노출한다(신규 필드 아님, PO 확정 2026-08-08 — 단건 409 body와 같은 shape:
+        # code/message/decision/gate_id/requires_human).
+        gate_blocked_reason: dict | None = None
         if "status" in update_data and update_data["status"] != story.status:
-            old_status_by_id[story.id] = story.status
-        if "assignee_id" in update_data and update_data["assignee_id"] != story.assignee_id:
-            old_assignee_by_id[story.id] = story.assignee_id
-        for k, v in update_data.items():
-            setattr(story, k, v)
-        # E-BOARD S5: 단일 assignee_id 변경 시 join 미러(단일↔복수 공존 정합)
-        if "assignee_id" in update_data:
-            single = [story.assignee_id] if story.assignee_id else []
-            await StoryAssigneeRepository(db, repo.org_id).set_for_story(story.id, single)
+            _line_owns_done_gate = False
+            try:
+                from app.services.workflow_line_engine import line_merge_gate_active
+                _line_owns_done_gate = await line_merge_gate_active(
+                    db, org_id=repo.org_id, project_id=story.project_id,
+                    entity_type="story", from_status=story.status, to_status=update_data["status"],
+                )
+            except Exception:  # noqa: BLE001 — 불명 시 현행 게이트 유지(skip 안 함, 단건과 동형).
+                _line_owns_done_gate = False
+            if not _line_owns_done_gate:
+                try:
+                    await _preflight_merge_gate(db, repo.org_id, story, update_data["status"])
+                    if update_data["status"] == "done":
+                        from app.services.gate_enforce import enforce_gate
+                        _g_actor_type = (
+                            "agent" if auth.claims.get("app_metadata", {}).get("api_key_id")
+                            else "human"
+                        )
+                        await enforce_gate(
+                            db, org_id=repo.org_id, project_id=story.project_id,
+                            work_type="done", actor_type=_g_actor_type, actor_id=actor_id,
+                            work_item_id=story.id, work_item_title=story.title,
+                        )
+                except HTTPException as exc:
+                    gate_blocked_reason = (
+                        exc.detail if isinstance(exc.detail, dict)
+                        else {"code": "MERGE_GATE_PENDING", "message": str(exc.detail), "requires_human": True}
+                    )
+
+        if gate_blocked_reason is not None:
+            gate_pending_by_id[story.id] = gate_blocked_reason
+        else:
+            # status 변경이면 전이 前 old_status 포착(violation 판정용·setattr 前).
+            if "status" in update_data and update_data["status"] != story.status:
+                old_status_by_id[story.id] = story.status
+            if "assignee_id" in update_data and update_data["assignee_id"] != story.assignee_id:
+                old_assignee_by_id[story.id] = story.assignee_id
+            for k, v in update_data.items():
+                setattr(story, k, v)
+            # E-BOARD S5: 단일 assignee_id 변경 시 join 미러(단일↔복수 공존 정합)
+            if "assignee_id" in update_data:
+                single = [story.assignee_id] if story.assignee_id else []
+                await StoryAssigneeRepository(db, repo.org_id).set_for_story(story.id, single)
         updated.append(story)
     # P0/MissingGreenlet: setattr 후 server-onupdate `updated_at` 등은 flush 시 expire 되어,
     # model_validate(sync)가 lazy-reload 를 async greenlet 밖에서 시도 → MissingGreenlet 500.
@@ -1605,7 +1714,9 @@ async def bulk_update_stories(
         r = StoryResponse.model_validate(s)
         old = old_status_by_id.get(s.id)
         flag = build_violation_flag(old, s.status) if old is not None else None
-        r.violation = flag
+        # 게이트 차단 item은 old_status_by_id에 애초에 안 담겨(위 setattr 스킵) flag가 항상
+        # None이라 겹칠 일이 없다 — gate_pending_by_id가 있으면 그걸 violation으로 노출.
+        r.violation = gate_pending_by_id.get(s.id, flag)
         results.append(r)
         if flag is not None:
             _ev = build_violation_event(
@@ -1764,28 +1875,21 @@ async def update_story(
                         "if intentional, resend with allow_shrink=true"
                     ),
                 )
-    # H1-S5: PATCH /{id} 로 status=done 전이 시도도 board 경로와 동일하게 preflight 게이트(AC②).
-    if data.get("status") == "done":
-        gate_story = story_before or await repo.get(id)
-        await _preflight_merge_gate(db, repo.org_id, gate_story, "done")
-        # S-GATE-2: config 게이트 집행(done) — flag-off면 no-op(무회귀). block→409·ask→HitlRequest park.
-        if gate_story is not None:
-            from app.services.gate_enforce import enforce_gate
-            # HIGH②: actor_type 은 인증 컨텍스트에서 신뢰 도출 — API 키(app_metadata.api_key_id)=agent,
-            # 아니면 human(JWT). 보안 결정 신호라 fragile DB resolve-then-swallow(None→human) 지양.
-            _g_actor_type = (
-                "agent" if auth.claims.get("app_metadata", {}).get("api_key_id") else "human"
-            )
-            _g_actor_id: uuid.UUID | None = None
-            try:  # actor_id 는 HitlRequest 귀속용(비보안)·best-effort.
-                _g_actor_id = await _resolve_team_member_id(auth, repo.org_id, db)
-            except Exception:
-                pass
-            await enforce_gate(
-                db, org_id=repo.org_id, project_id=getattr(gate_story, "project_id", None),
-                work_type="done", actor_type=_g_actor_type, actor_id=_g_actor_id,
-                work_item_id=gate_story.id, work_item_title=getattr(gate_story, "title", None),
-            )
+    # story #2067(2026-08-07 근본수정 — 죽은 주소 정리): 이 블록(H1-S5, 원래 "PATCH /{id}로
+    # status=done 전이 시도도 board 경로와 동일하게 preflight 게이트") 은 실측으로 **애초에
+    # 도달 불가능한 dead code**였다 — `StoryUpdate`(이 엔드포인트의 body 스키마)에 `status`
+    # 필드 자체가 없어 Pydantic이 조용히 드롭한다(extra=ignore 기본값):
+    #   StoryUpdate(**{"status": "done", "title": "x"}).model_dump(exclude_unset=True)
+    #   → {"title": "x"}  — status 없음.
+    # 즉 `data.get("status")`는 이 함수 안에서 항상 None이라 이 if는 절대 True가 될 수 없었다
+    # (git 이력 전체에서 StoryUpdate에 status가 있던 적이 없다 — "은퇴한 게 아니라 애초에
+    # 살아 있던 적이 없는" dead code). PATCH /{id}는 구조적으로 status를 못 바꾸므로 이
+    # 게이트는 지킬 것이 없다 — status 전이는 PATCH /{id}/status(update_story_status, 이미
+    # 자기 게이트 보유)와 PATCH /bulk(bulk_update_stories)로 일어난다.
+    # ⚠️카디르 QA(PR#2906, 2026-08-07) 정정 — PATCH /bulk은 merge-gate를 **안 거친다**(setattr로
+    # status를 그대로 씀, #2131은 status_changed **emit** 갭만 닫았지 게이트 자체는 다른 축).
+    # 단건은 게이트를 거치는데 bulk는 안 거쳐 사람 승인을 우회할 수 있는 별건 갭 — #2521로
+    # 후속 분리(#2156 advisory→enforcing flip 前에 닫아야 flip이 실효).
     story = await repo.update(id, **data)
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")

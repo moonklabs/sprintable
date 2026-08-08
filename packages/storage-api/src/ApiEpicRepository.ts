@@ -25,6 +25,8 @@ export class ApiEpicRepository implements IEpicRepository {
         limit: filters.limit,
         order_by: filters.order_by,
         include: filters.include,
+        // story #2262 PR②(BE #2905) — story ids(ca37b2b0)와 동일 계약, comma-separated.
+        ids: filters.ids?.join(','),
       },
     });
   }

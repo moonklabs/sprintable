@@ -89,7 +89,7 @@ async def test_second_page_no_overlap_and_full_union_matches_realdb():
                 assert pages_fetched <= 10, "무한루프 방지 — has_more가 계속 True로 나오면 커서 전진 실패"
                 page = await list_docs(
                     project_id=PROJ, parent_id=None, doc_type=None, tags=None, slug=None, q=None,
-                    limit=2, cursor=cursor, repo=repo,
+                    ids=None, limit=2, cursor=cursor, repo=repo,
                 )
                 page_ids = {d.id for d in page["data"]}
                 overlap = page_ids & collected
@@ -124,7 +124,7 @@ async def test_no_cursor_under_limit_has_more_false_realdb():
             repo = DocRepository(s, ORG)
             page = await list_docs(
                 project_id=PROJ, parent_id=None, doc_type=None, tags=None, slug=None, q=None,
-                limit=50, cursor=None, repo=repo,
+                ids=None, limit=50, cursor=None, repo=repo,
             )
         assert {d.id for d in page["data"]} == set(seeded_ids)
         assert page["meta"]["has_more"] is False

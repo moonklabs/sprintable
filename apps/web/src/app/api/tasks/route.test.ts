@@ -79,3 +79,37 @@ describe('/api/tasks (직접 서비스 TaskService)', () => {
     expect((await res.json()).data).toMatchObject({ id: 't1' });
   });
 });
+
+// story #2262 PR②(BE #2905) — ids 배치 lookup(task 자신의 id로) 분기. ⛔story_ids(부모
+// story로 묶어 자식 task들을 찾는 기존 기능)와 다른 축이라는 것도 값으로 고정한다.
+describe('/api/tasks GET — ids 배치 lookup 분기(#2262 PR②, task 자신의 id)', () => {
+  beforeEach(() => {
+    Object.values(h).forEach((m) => m.mockReset());
+    h.getAuthContext.mockResolvedValue(agent());
+    h.createTaskRepository.mockResolvedValue({});
+  });
+
+  it('no ids param → existing path, ids not sent', async () => {
+    h.list.mockResolvedValue([]);
+    await GET(new Request('http://localhost/api/tasks?story_id=s1'));
+    const calledWith = h.list.mock.calls[0]![0] as { ids?: string[] };
+    expect(calledWith.ids).toBeUndefined();
+  });
+
+  it('ids param present → batch lookup by task id, distinct from story_ids', async () => {
+    h.list.mockResolvedValue([task('t1'), task('t2')]);
+    const res = await GET(new Request('http://localhost/api/tasks?ids=t1,t2'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data).toHaveLength(2);
+    expect(h.list).toHaveBeenCalledWith({ ids: ['t1', 't2'], limit: 2 });
+  });
+
+  it('caps ids at 200 before calling the service', async () => {
+    h.list.mockResolvedValue([]);
+    const manyIds = Array.from({ length: 250 }, (_, i) => `id${i}`).join(',');
+    await GET(new Request(`http://localhost/api/tasks?ids=${manyIds}`));
+    const calledWith = h.list.mock.calls[0]![0] as { ids: string[] };
+    expect(calledWith.ids).toHaveLength(200);
+  });
+});

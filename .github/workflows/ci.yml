@@ -751,6 +751,22 @@ jobs:
       - name: "Verify tint background × foreground contrast (story #2420 regression guard)"
         run: pnpm --filter web verify:tint-foreground-contrast
 
+      # story #2480(유나 규격) 회귀가드: `--muted-foreground`는 bg-muted·background·card
+      # 위에서 전부 쓰인다(테이블 헤더·플레이스홀더·칩·보조텍스트 도처). 라이트 bg-muted 위
+      # 실측 4.39:1로 AA 미달이 발견돼(#2866 가디언 리뷰 중) 토큰을 L 0.552→0.52로 조정했다.
+      # 이 스텝이 재도입(값이 다시 4.39 쪽으로 밀림)을 정의 시점에 잡는다.
+      - name: "Verify muted-foreground contrast (story #2480 regression guard)"
+        run: pnpm --filter web verify:muted-foreground-contrast
+
+      # story #2484 advisory 넛지(⛔blocker 아님·PO 確定) — FE가 error.code를 안 갈라
+      # 서버 raw message/json.detail을 그대로 노출하는 병이 #2441·#2470·create-org로
+      # 3번 반복됐다. 이 스텝은 그 병의 단순형(주변에 .code 분기가 없는 경우)만 잡아
+      # 로그로 알린다. baseline(raw-error-message-baseline.json) 밖의 새 자리가 있어도
+      # 이 스텝 자체는 항상 성공한다(스크립트가 always exit 0) — 리뷰어가 로그를 보고
+      # 판단하는 넛지이지 머지 게이트가 아니다.
+      - name: "Verify no new raw error.message exposure (story #2484 advisory nudge)"
+        run: pnpm --filter web verify:no-raw-error-message
+
       # story #2420 AC7 회귀가드: AC3(위)는 globals.css 정의만 본다 — 사용처(컴포넌트 파일)는
       # 전혀 안 읽는다. 실제로 사용처 하나(goals-client.tsx:615)를 계열색으로 되돌려도 AC3·
       # type-check·lint·해당 vitest 전부 그대로 초록이었다(실측, 디디). 이 스텝은 같은
