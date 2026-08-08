@@ -1242,7 +1242,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
             <button type="button" onClick={onClose} className="rounded-md border border-border px-3 py-2 text-muted-foreground transition hover:text-foreground hover:bg-muted/50">✕</button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-5">
+        {/* story #2528 — 전역 스크롤바 숨김(#2165) 하에선 스크롤은 되나 바가 안 보여 하단
+            (완료조건·댓글)을 인지할 신호가 없었다. .scrollbar-visible은 globals.css의 범용
+            옵트인(신규 CSS 아님) — .tableWrapper(#2203)가 이미 라이브 양성으로 검증한 패턴. */}
+        <div className="scrollbar-visible flex-1 overflow-y-auto p-5">
           <div className="space-y-5">
             {/* E-UI-DAEGBYEON P0 — Workcell 4층 데뷔(최소 실화면 배선, story `e5310d1b`).
                 Evidence는 null(정직한 "아직 증거 없음" — EvidenceSection/StoryMergeGate 실
