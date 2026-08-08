@@ -32,6 +32,17 @@ def mock_session():
     session.add = MagicMock()
     session.execute = AsyncMock()
     session.commit = AsyncMock()
+    # P0(message-loss class fix, 2026-08-08): dispatch_notification()이 이제 본문 전체를
+    # begin_nested() SAVEPOINT로 감싸는데(app/services/notification_dispatch.py), 이 fixture는
+    # 그걸 async context manager로 안 만들어 bare AsyncMock이 coroutine을 반환 —
+    # `async with db.begin_nested():`가 TypeError로 죽어 이 파일의 두 테스트가 dispatch_notification
+    # 본문 전체를 건너뛰었다(이전엔 그 예외가 human-branch 내부 try/except에 삼켜져 우연히
+    # 안 드러났을 뿐 — RuntimeWarning으로 이미 징후가 있었다). test_notification_dispatch.py의
+    # 검증된 패턴 그대로 맞춘다.
+    nested_cm = AsyncMock()
+    nested_cm.__aenter__ = AsyncMock(return_value=None)
+    nested_cm.__aexit__ = AsyncMock(return_value=False)
+    session.begin_nested = MagicMock(return_value=nested_cm)
     return session
 
 

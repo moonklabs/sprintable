@@ -262,243 +262,251 @@ async def dispatch_notification(
         return
 
     try:
-        # notification_settings 조회 (해당 member + event_type + in_app)
-        settings_result = await db.execute(
-            select(NotificationSetting.member_id, NotificationSetting.enabled).where(
-                NotificationSetting.org_id == org_id,
-                NotificationSetting.member_id.in_(target_member_ids),
-                NotificationSetting.event_type == event_type,
-                NotificationSetting.channel == "in_app",
-            )
-        )
-        settings = {row.member_id: row.enabled for row in settings_result.all()}
-
-        # 설정 없으면 기본 enabled → enabled인 member만 필터
-        enabled_member_ids = [
-            mid for mid in target_member_ids
-            if settings.get(mid, True)
-        ]
-
-        if not enabled_member_ids:
-            return
-
-        # 활성 webhook_configs가 있는 멤버 집합 — 웹훅 채널로 전달되므로 내장 알림 스킵.
-        # E-EVENT-1CONFIG: 메시지 경로 SSE-skip과 공용 SSOT(active_webhook_member_ids) —
-        # member-bound(project-독립) 활성 webhook 보유 멤버. fail-open(조회 실패=빈 집합).
-        webhook_member_ids = await active_webhook_member_ids(
-            db, org_id, enabled_member_ids
-        )
-        # story 75570ab8: mute+webhook 동시보유 재판정 — active_webhook_member_ids는 mute를
-        # 모른다. 그래서 muted 에이전트가 "webhook이 커버한다"고 오판돼 Event insert도 스킵되고,
-        # 뒤이어 _deliver_personal_webhooks 자체 mute 체크로 webhook도 스킵돼 **총 무전달**이었다
-        # (그라운딩 0f428e1e 때 확인한 dispatch_notification 경로 지식 재사용). mute의 옳은
-        # 의미론 = "능동 push(webhook)만 끔" — 수동 backlog(Event/poll_events로 나중에 발견 가능)
-        # 까지 지우면 안 됨(webhook_targeting.py 자체가 명시한 "silent loss 방지" 설계 철학과
-        # 정합). 따라서 muted 멤버는 webhook-covered 취급에서 제외해 Event insert 경로로 폴백.
-        muted_member_ids = await _query_muted_member_ids(db, list(webhook_member_ids))
-        event_skip_member_ids = webhook_member_ids - muted_member_ids
-
-        # BUG-2 수정: user_id.isnot(None) 필터 제거 — agent는 user_id=NULL이므로 제외됐던 문제
-        # type 및 project_id도 함께 조회
-        members_result = await db.execute(
-            select(TeamMember.id, TeamMember.user_id, TeamMember.type, TeamMember.project_id).where(
-                TeamMember.id.in_(enabled_member_ids),
-                TeamMember.org_id == org_id,
-            )
-        )
-        members = list(members_result.all())
-
-        # E-MEMBER-SSOT AC2-2: grant-only 휴먼(team_member 없음)은 org_member로 해소해
-        # in-app Notification 누락(silent drop) 방지. org_member는 project 스코프가 없으므로
-        # human Notification만 생성(Event는 project_id 필요 → skip). Notification은 user_id
-        # 기반이고 FK가 없어 org_member.id 사용에 제약 없음.
-        matched_ids = {m.id for m in members}
-        missing_ids = [mid for mid in enabled_member_ids if mid not in matched_ids]
-        if missing_ids:
-            from types import SimpleNamespace
-
-            from app.models.project import OrgMember
-            om_result = await db.execute(
-                select(OrgMember.id, OrgMember.user_id).where(
-                    OrgMember.id.in_(missing_ids),
-                    OrgMember.org_id == org_id,
-                    OrgMember.deleted_at.is_(None),
+        # P0(message-loss class fix, 2026-08-08): 이 함수 전체를 SAVEPOINT로 감싼다 — 이전엔
+        # 이 try 가 caller의 ambient 트랜잭션에서 그대로 도는데, agent Event insert(db.add) 등
+        # 일부 write가 개별 begin_nested 없이 실행되다 실패하면 Postgres 트랜잭션이 ABORTED로
+        # 남고, 그 뒤 caller의 최종 commit()이 예외 없이 조용히 ROLLBACK 처리되어(asyncpg 실측
+        # 확認) caller가 방금 flush한 write(예: conversations.py send_message의 메시지 insert)
+        # 까지 통째로 사라졌다 — "성공 응답인데 저장 안 됨" 클래스의 근본. 14+ 콜사이트 전체를
+        # 한 번에 보호하는 게 개별 콜사이트를 매번 감싸는 것보다 근본적이다(클래스를 닫는다).
+        async with db.begin_nested():
+            # notification_settings 조회 (해당 member + event_type + in_app)
+            settings_result = await db.execute(
+                select(NotificationSetting.member_id, NotificationSetting.enabled).where(
+                    NotificationSetting.org_id == org_id,
+                    NotificationSetting.member_id.in_(target_member_ids),
+                    NotificationSetting.event_type == event_type,
+                    NotificationSetting.channel == "in_app",
                 )
             )
-            for om in om_result.all():
-                members.append(
-                    SimpleNamespace(id=om.id, user_id=om.user_id, type="human", project_id=None)
+            settings = {row.member_id: row.enabled for row in settings_result.all()}
+
+            # 설정 없으면 기본 enabled → enabled인 member만 필터
+            enabled_member_ids = [
+                mid for mid in target_member_ids
+                if settings.get(mid, True)
+            ]
+
+            if not enabled_member_ids:
+                return
+
+            # 활성 webhook_configs가 있는 멤버 집합 — 웹훅 채널로 전달되므로 내장 알림 스킵.
+            # E-EVENT-1CONFIG: 메시지 경로 SSE-skip과 공용 SSOT(active_webhook_member_ids) —
+            # member-bound(project-독립) 활성 webhook 보유 멤버. fail-open(조회 실패=빈 집합).
+            webhook_member_ids = await active_webhook_member_ids(
+                db, org_id, enabled_member_ids
+            )
+            # story 75570ab8: mute+webhook 동시보유 재판정 — active_webhook_member_ids는 mute를
+            # 모른다. 그래서 muted 에이전트가 "webhook이 커버한다"고 오판돼 Event insert도 스킵되고,
+            # 뒤이어 _deliver_personal_webhooks 자체 mute 체크로 webhook도 스킵돼 **총 무전달**이었다
+            # (그라운딩 0f428e1e 때 확인한 dispatch_notification 경로 지식 재사용). mute의 옳은
+            # 의미론 = "능동 push(webhook)만 끔" — 수동 backlog(Event/poll_events로 나중에 발견 가능)
+            # 까지 지우면 안 됨(webhook_targeting.py 자체가 명시한 "silent loss 방지" 설계 철학과
+            # 정합). 따라서 muted 멤버는 webhook-covered 취급에서 제외해 Event insert 경로로 폴백.
+            muted_member_ids = await _query_muted_member_ids(db, list(webhook_member_ids))
+            event_skip_member_ids = webhook_member_ids - muted_member_ids
+
+            # BUG-2 수정: user_id.isnot(None) 필터 제거 — agent는 user_id=NULL이므로 제외됐던 문제
+            # type 및 project_id도 함께 조회
+            members_result = await db.execute(
+                select(TeamMember.id, TeamMember.user_id, TeamMember.type, TeamMember.project_id).where(
+                    TeamMember.id.in_(enabled_member_ids),
+                    TeamMember.org_id == org_id,
                 )
+            )
+            members = list(members_result.all())
 
-        # 회귀 버그 fix: team_members는 0088 이후 projection VIEW라 멤버당 **프로젝트별 1행**(동일 id)을
-        # 반환한다. dedup 없이 루프하면 멀티프로젝트 멤버에게 알림이 **프로젝트 수만큼 중복 생성**됨
-        # (Story Assign 시 Inbox 알림 3개 증상 = 담당자가 3개 프로젝트 소속). member id로 dedup해
-        # 멤버당 1 알림/이벤트만 생성. (view-cutover multi-row 트랩)
-        # source_project_id 주어지면 그 프로젝트 행을 우선(멀티프로젝트 에이전트 = 트리거 프로젝트로
-        # 정확 라우팅). 미지정 시 첫 행(기존 거동). 어느 경우든 member당 정확히 1행 → 휴먼 N-알림 무회귀.
-        _picked: dict[uuid.UUID, object] = {}
-        for _m in members:
-            cur = _picked.get(_m.id)
-            if cur is None:
-                _picked[_m.id] = _m
-            elif source_project_id is not None and getattr(_m, "project_id", None) == source_project_id:
-                _picked[_m.id] = _m  # 트리거 프로젝트 행으로 교체
-        members = list(_picked.values())
+            # E-MEMBER-SSOT AC2-2: grant-only 휴먼(team_member 없음)은 org_member로 해소해
+            # in-app Notification 누락(silent drop) 방지. org_member는 project 스코프가 없으므로
+            # human Notification만 생성(Event는 project_id 필요 → skip). Notification은 user_id
+            # 기반이고 FK가 없어 org_member.id 사용에 제약 없음.
+            matched_ids = {m.id for m in members}
+            missing_ids = [mid for mid in enabled_member_ids if mid not in matched_ids]
+            if missing_ids:
+                from types import SimpleNamespace
 
-        # story #1953: Expo push data payload용 project_id 해소. source_project_id가 명시되면
-        # 그대로 우선 사용(신뢰 가능한 트리거 프로젝트). 없으면 위에서 이미 조회한 members의
-        # project_id가 전부 동일할 때만(모호성 0) 그 값으로 폴백 — 신규 쿼리 없이 기존 조회
-        # 결과만 재사용. 여러 프로젝트가 섞여 있으면(org-wide 브로드캐스트 등) None으로 둬
-        # 오라우팅(잘못된 프로젝트로 딥링크) 방지.
-        _push_project_id = source_project_id
-        if _push_project_id is None:
-            _member_project_ids = {
-                getattr(_m, "project_id", None) for _m in members
-            } - {None}
-            if len(_member_project_ids) == 1:
-                _push_project_id = next(iter(_member_project_ids))
-
-        inserted = False
-        created_events: list[Event] = []  # L1 BE-3: fan-out 수렴용 event 수집
-        for member_row in members:
-            if member_row.type == "agent":
-                # 활성 웹훅 있는 에이전트 → 외부 채널로 전달되므로 내장 Event 스킵(단, muted면
-                # webhook도 안 나가므로 Event insert로 폴백 — 위 event_skip_member_ids 참고).
-                if member_row.id in event_skip_member_ids:
-                    logger.debug(
-                        "dispatch_notification: skip agent %s — has active webhook", member_row.id
+                from app.models.project import OrgMember
+                om_result = await db.execute(
+                    select(OrgMember.id, OrgMember.user_id).where(
+                        OrgMember.id.in_(missing_ids),
+                        OrgMember.org_id == org_id,
+                        OrgMember.deleted_at.is_(None),
                     )
-                    continue
-                # BUG-3 수정: agent → Notification 대신 events 테이블 INSERT.
-                # 트리거 프로젝트(source_project_id) 우선 — 멀티프로젝트 에이전트가 임의 프로젝트로
-                # 이벤트 받는 오라우팅 방지. 미지정 시 뷰 행의 project_id(기존 거동).
-                _agent_proj = source_project_id or member_row.project_id
-                if _agent_proj:
-                    event = Event(
-                        project_id=_agent_proj,
-                        org_id=org_id,
-                        event_type="dispatched",
-                        source_entity_type=reference_type,
-                        source_entity_id=reference_id,
-                        sender_id=None,
-                        recipient_id=member_row.id,
-                        recipient_type="agent",
-                        # #2375: content 키 없으면 SSE 어댑터(fakechat/server.ts·hermes adapter.py)가
-                        # 둘 다 ack 前에 조용히 드롭해 영구 pending — E-EVENT-INJECT S1이 만든
-                        # "content를 SSE top-level로 노출"(agent_gateway.py _row_to_payload) 방지장치가
-                        # 여기(생성부)에서 그 키를 안 채워 안 맞물려 있었다. body 없으면 title로
-                        # 폴백(title은 필수 파라미터라 항상 non-empty) — 절대 빈 content로 두지 않는다.
-                        payload={
-                            "title": title, "body": body, "event_type": event_type,
-                            "content": body or title,
-                        },
-                        status="pending",
+                )
+                for om in om_result.all():
+                    members.append(
+                        SimpleNamespace(id=om.id, user_id=om.user_id, type="human", project_id=None)
                     )
-                    db.add(event)
-                    created_events.append(event)
-                    inserted = True
-            elif member_row.user_id:
-                # human: Notification + Event 각각 독립 savepoint — 하나 실패해도 다른 쪽 롤백 방지
-                try:
-                    async with db.begin_nested():
-                        notification = Notification(
-                            org_id=org_id,
-                            user_id=member_row.user_id,
-                            type=event_type,
-                            title=title,
-                            body=body,
-                            is_read=False,
-                            reference_type=reference_type,
-                            reference_id=reference_id,
+
+            # 회귀 버그 fix: team_members는 0088 이후 projection VIEW라 멤버당 **프로젝트별 1행**(동일 id)을
+            # 반환한다. dedup 없이 루프하면 멀티프로젝트 멤버에게 알림이 **프로젝트 수만큼 중복 생성**됨
+            # (Story Assign 시 Inbox 알림 3개 증상 = 담당자가 3개 프로젝트 소속). member id로 dedup해
+            # 멤버당 1 알림/이벤트만 생성. (view-cutover multi-row 트랩)
+            # source_project_id 주어지면 그 프로젝트 행을 우선(멀티프로젝트 에이전트 = 트리거 프로젝트로
+            # 정확 라우팅). 미지정 시 첫 행(기존 거동). 어느 경우든 member당 정확히 1행 → 휴먼 N-알림 무회귀.
+            _picked: dict[uuid.UUID, object] = {}
+            for _m in members:
+                cur = _picked.get(_m.id)
+                if cur is None:
+                    _picked[_m.id] = _m
+                elif source_project_id is not None and getattr(_m, "project_id", None) == source_project_id:
+                    _picked[_m.id] = _m  # 트리거 프로젝트 행으로 교체
+            members = list(_picked.values())
+
+            # story #1953: Expo push data payload용 project_id 해소. source_project_id가 명시되면
+            # 그대로 우선 사용(신뢰 가능한 트리거 프로젝트). 없으면 위에서 이미 조회한 members의
+            # project_id가 전부 동일할 때만(모호성 0) 그 값으로 폴백 — 신규 쿼리 없이 기존 조회
+            # 결과만 재사용. 여러 프로젝트가 섞여 있으면(org-wide 브로드캐스트 등) None으로 둬
+            # 오라우팅(잘못된 프로젝트로 딥링크) 방지.
+            _push_project_id = source_project_id
+            if _push_project_id is None:
+                _member_project_ids = {
+                    getattr(_m, "project_id", None) for _m in members
+                } - {None}
+                if len(_member_project_ids) == 1:
+                    _push_project_id = next(iter(_member_project_ids))
+
+            inserted = False
+            created_events: list[Event] = []  # L1 BE-3: fan-out 수렴용 event 수집
+            for member_row in members:
+                if member_row.type == "agent":
+                    # 활성 웹훅 있는 에이전트 → 외부 채널로 전달되므로 내장 Event 스킵(단, muted면
+                    # webhook도 안 나가므로 Event insert로 폴백 — 위 event_skip_member_ids 참고).
+                    if member_row.id in event_skip_member_ids:
+                        logger.debug(
+                            "dispatch_notification: skip agent %s — has active webhook", member_row.id
                         )
-                        db.add(notification)
-                    inserted = True
-                except Exception:
-                    logger.warning("Notification INSERT failed member_id=%s event_type=%s", member_row.id, event_type)
-                if member_row.project_id:
-                    try:
-                        async with db.begin_nested():
-                            # story #2380: 이 분기는 human Event를 생성 즉시 status="delivered"로
-                            # 박는다(human은 agent SSE ack 사이클을 안 타므로 pending을 안 거치는
-                            # 것 자체는 맞다) — 그런데 delivered_at을 한 번도 안 채워 왔다. dev
-                            # 실측(2026-08-01): 이 경로로 난 human Event의 74%가 status=delivered
-                            # 인데 delivered_at=NULL — "배달됐다"만 있고 "언제"가 없어, 이 값을
-                            # coalesce(delivered_at, now())로 지연을 재려던 첫 시도가 「p50 9.4일」
-                            # 이라는 거짓 수치를 냈다(실제로는 그 행들 나이가 now()로 치환된 것).
-                            event = Event(
-                                project_id=member_row.project_id,
-                                org_id=org_id,
-                                event_type="dispatched",
-                                source_entity_type=reference_type,
-                                source_entity_id=reference_id,
-                                sender_id=None,
-                                recipient_id=member_row.id,
-                                recipient_type="human",
-                                payload={"title": title, "body": body, "event_type": event_type},
-                                status="delivered",
-                                # ⛔이 순간이 "배달 시도 순간"과 같다고 볼 수 있는 건 이 분기가
-                                # 지금 동기라서다 — 바로 다음 줄들이 실제 배달 행위(Notification
-                                # INSERT·개인 webhook 시도)를 같은 호출 안에서 한다. 이 경로가
-                                # 나중에 진짜 비동기(예: webhook 배달확認 콜백)가 되면 이 값도
-                                # 그 확認 시점으로 옮겨야 한다 — 여기 그대로 둔 채 비동기화하면
-                                # #2380이 고친 문제(delivered_at이 실제 배달 시점을 안 가리킴)가
-                                # 값이 없는 대신 "틀린 값"으로 재발한다.
-                                delivered_at=datetime.now(timezone.utc),
-                            )
-                            db.add(event)
+                        continue
+                    # BUG-3 수정: agent → Notification 대신 events 테이블 INSERT.
+                    # 트리거 프로젝트(source_project_id) 우선 — 멀티프로젝트 에이전트가 임의 프로젝트로
+                    # 이벤트 받는 오라우팅 방지. 미지정 시 뷰 행의 project_id(기존 거동).
+                    _agent_proj = source_project_id or member_row.project_id
+                    if _agent_proj:
+                        event = Event(
+                            project_id=_agent_proj,
+                            org_id=org_id,
+                            event_type="dispatched",
+                            source_entity_type=reference_type,
+                            source_entity_id=reference_id,
+                            sender_id=None,
+                            recipient_id=member_row.id,
+                            recipient_type="agent",
+                            # #2375: content 키 없으면 SSE 어댑터(fakechat/server.ts·hermes adapter.py)가
+                            # 둘 다 ack 前에 조용히 드롭해 영구 pending — E-EVENT-INJECT S1이 만든
+                            # "content를 SSE top-level로 노출"(agent_gateway.py _row_to_payload) 방지장치가
+                            # 여기(생성부)에서 그 키를 안 채워 안 맞물려 있었다. body 없으면 title로
+                            # 폴백(title은 필수 파라미터라 항상 non-empty) — 절대 빈 content로 두지 않는다.
+                            payload={
+                                "title": title, "body": body, "event_type": event_type,
+                                "content": body or title,
+                            },
+                            status="pending",
+                        )
+                        db.add(event)
                         created_events.append(event)
                         inserted = True
+                elif member_row.user_id:
+                    # human: Notification + Event 각각 독립 savepoint — 하나 실패해도 다른 쪽 롤백 방지
+                    try:
+                        async with db.begin_nested():
+                            notification = Notification(
+                                org_id=org_id,
+                                user_id=member_row.user_id,
+                                type=event_type,
+                                title=title,
+                                body=body,
+                                is_read=False,
+                                reference_type=reference_type,
+                                reference_id=reference_id,
+                            )
+                            db.add(notification)
+                        inserted = True
                     except Exception:
-                        logger.warning("Event INSERT failed member_id=%s event_type=%s", member_row.id, event_type)
+                        logger.warning("Notification INSERT failed member_id=%s event_type=%s", member_row.id, event_type)
+                    if member_row.project_id:
+                        try:
+                            async with db.begin_nested():
+                                # story #2380: 이 분기는 human Event를 생성 즉시 status="delivered"로
+                                # 박는다(human은 agent SSE ack 사이클을 안 타므로 pending을 안 거치는
+                                # 것 자체는 맞다) — 그런데 delivered_at을 한 번도 안 채워 왔다. dev
+                                # 실측(2026-08-01): 이 경로로 난 human Event의 74%가 status=delivered
+                                # 인데 delivered_at=NULL — "배달됐다"만 있고 "언제"가 없어, 이 값을
+                                # coalesce(delivered_at, now())로 지연을 재려던 첫 시도가 「p50 9.4일」
+                                # 이라는 거짓 수치를 냈다(실제로는 그 행들 나이가 now()로 치환된 것).
+                                event = Event(
+                                    project_id=member_row.project_id,
+                                    org_id=org_id,
+                                    event_type="dispatched",
+                                    source_entity_type=reference_type,
+                                    source_entity_id=reference_id,
+                                    sender_id=None,
+                                    recipient_id=member_row.id,
+                                    recipient_type="human",
+                                    payload={"title": title, "body": body, "event_type": event_type},
+                                    status="delivered",
+                                    # ⛔이 순간이 "배달 시도 순간"과 같다고 볼 수 있는 건 이 분기가
+                                    # 지금 동기라서다 — 바로 다음 줄들이 실제 배달 행위(Notification
+                                    # INSERT·개인 webhook 시도)를 같은 호출 안에서 한다. 이 경로가
+                                    # 나중에 진짜 비동기(예: webhook 배달확認 콜백)가 되면 이 값도
+                                    # 그 확認 시점으로 옮겨야 한다 — 여기 그대로 둔 채 비동기화하면
+                                    # #2380이 고친 문제(delivered_at이 실제 배달 시점을 안 가리킴)가
+                                    # 값이 없는 대신 "틀린 값"으로 재발한다.
+                                    delivered_at=datetime.now(timezone.utc),
+                                )
+                                db.add(event)
+                            created_events.append(event)
+                            inserted = True
+                        except Exception:
+                            logger.warning("Event INSERT failed member_id=%s event_type=%s", member_row.id, event_type)
 
-        if inserted:
-            await db.flush()
-            # #2375 후속 — agent 수신 Event가 recipient_seq를 한 번도 배정받지 못했다(이 함수
-            # 어디에도 assign_recipient_seq() 호출이 없었다). agent_gateway.py의 /stream 쿼리는
-            # `recipient_seq > :after_seq`로 커서 필터링하는데 NULL은 그 비교를 절대 통과 못 해
-            # 라이브 스트림에도 backfill 재연결에도 안 잡힌다 — content 키를 채운 뒤에도(#2375
-            # 본 fix) agent 쪽 delivered=0건이 이어진 진짜 근본원인. agent_dispatch.py의
-            # _finalize_dispatch()가 이미 쓰는 패턴(Event INSERT+flush 後·commit 前)을 그대로
-            # 재사용한다 — 여기도 "flush 후" 시점이라 그 불변식을 만족한다.
-            from app.services.event_seq import assign_recipient_seq
-            for _ev in created_events:
-                if _ev.recipient_type == "agent":
-                    await assign_recipient_seq(db, _ev)
-            # L1 BE-3: multi-recipient dispatch fan-out N행 → activity_events 1행 수렴
-            # (best-effort·savepoint 격리라 추출 실패해도 delivery·Notification 무영향).
-            from app.services.activity_stream import extract_activities_best_effort
-            await extract_activities_best_effort(db, [e.id for e in created_events])
+            if inserted:
+                await db.flush()
+                # #2375 후속 — agent 수신 Event가 recipient_seq를 한 번도 배정받지 못했다(이 함수
+                # 어디에도 assign_recipient_seq() 호출이 없었다). agent_gateway.py의 /stream 쿼리는
+                # `recipient_seq > :after_seq`로 커서 필터링하는데 NULL은 그 비교를 절대 통과 못 해
+                # 라이브 스트림에도 backfill 재연결에도 안 잡힌다 — content 키를 채운 뒤에도(#2375
+                # 본 fix) agent 쪽 delivered=0건이 이어진 진짜 근본원인. agent_dispatch.py의
+                # _finalize_dispatch()가 이미 쓰는 패턴(Event INSERT+flush 後·commit 前)을 그대로
+                # 재사용한다 — 여기도 "flush 후" 시점이라 그 불변식을 만족한다.
+                from app.services.event_seq import assign_recipient_seq
+                for _ev in created_events:
+                    if _ev.recipient_type == "agent":
+                        await assign_recipient_seq(db, _ev)
+                # L1 BE-3: multi-recipient dispatch fan-out N행 → activity_events 1행 수렴
+                # (best-effort·savepoint 격리라 추출 실패해도 delivery·Notification 무영향).
+                from app.services.activity_stream import extract_activities_best_effort
+                await extract_activities_best_effort(db, [e.id for e in created_events])
 
-        # 96af343e(옵션 C) + C0-S2(8bace49e 부활): 개인 webhook 발송 — 휴먼 + agent(활성 webhook).
-        # ⭐agent(활성 webhook)는 위에서 Event INSERT를 스킵했다("외부 채널로 전달" 전제). 그런데 그
-        # webhook을 여기서 실제로 쏘지 않으면 Event도 스킵·webhook도 미발송 = comment.created가
-        # webhook-agent에 미도달(죽은 경로). 이 경로를 부활시켜 에이전트 반응 왕복을 잇는다 —
-        # member-bound WebhookConfig·mute(NotificationPreference)·SSRF 재검증 기존 SSOT 재사용·
-        # Event-skip 유지라 이중배달 0(webhook 단일 채널).
-        webhook_deliver_ids = [
-            m.id for m in members
-            if (m.type != "agent" and getattr(m, "user_id", None))
-            or (m.type == "agent" and m.id in webhook_member_ids)
-        ]
-        await _deliver_personal_webhooks(
-            db, org_id, webhook_deliver_ids, title=title, body=body, event_type=event_type,
-            reference_type=reference_type, reference_id=reference_id, context=context,
-            muted_member_ids=muted_member_ids, via_outbox=via_outbox,
-        )
-
-        # E-MOBILE M0·S3: EE 푸시 채널(웹훅과 나란한 별개 채널) — 등록 push_devices 로 Expo 발송.
-        # 대상 = enabled(설정 통과) − mute 멤버(deliver_expo_push 내부 필터). 웹훅 유무와 독립.
-        # EE 게이트(비-EE 무동작·core 무영향)·best-effort(발송 실패가 파이프라인 안 되돌림).
-        from app.core.config import settings as _settings
-        if _settings.is_ee_enabled:
-            from ee.services.expo_push import deliver_expo_push
-            await deliver_expo_push(
-                db, org_id, enabled_member_ids, title=title, body=body, event_type=event_type,
+            # 96af343e(옵션 C) + C0-S2(8bace49e 부활): 개인 webhook 발송 — 휴먼 + agent(활성 webhook).
+            # ⭐agent(활성 webhook)는 위에서 Event INSERT를 스킵했다("외부 채널로 전달" 전제). 그런데 그
+            # webhook을 여기서 실제로 쏘지 않으면 Event도 스킵·webhook도 미발송 = comment.created가
+            # webhook-agent에 미도달(죽은 경로). 이 경로를 부활시켜 에이전트 반응 왕복을 잇는다 —
+            # member-bound WebhookConfig·mute(NotificationPreference)·SSRF 재검증 기존 SSOT 재사용·
+            # Event-skip 유지라 이중배달 0(webhook 단일 채널).
+            webhook_deliver_ids = [
+                m.id for m in members
+                if (m.type != "agent" and getattr(m, "user_id", None))
+                or (m.type == "agent" and m.id in webhook_member_ids)
+            ]
+            await _deliver_personal_webhooks(
+                db, org_id, webhook_deliver_ids, title=title, body=body, event_type=event_type,
                 reference_type=reference_type, reference_id=reference_id, context=context,
-                muted_member_ids=muted_member_ids,
-                project_id=_push_project_id, story_id=story_id, sprint_id=sprint_id,
-                via_outbox=via_outbox,
+                muted_member_ids=muted_member_ids, via_outbox=via_outbox,
             )
+
+            # E-MOBILE M0·S3: EE 푸시 채널(웹훅과 나란한 별개 채널) — 등록 push_devices 로 Expo 발송.
+            # 대상 = enabled(설정 통과) − mute 멤버(deliver_expo_push 내부 필터). 웹훅 유무와 독립.
+            # EE 게이트(비-EE 무동작·core 무영향)·best-effort(발송 실패가 파이프라인 안 되돌림).
+            from app.core.config import settings as _settings
+            if _settings.is_ee_enabled:
+                from ee.services.expo_push import deliver_expo_push
+                await deliver_expo_push(
+                    db, org_id, enabled_member_ids, title=title, body=body, event_type=event_type,
+                    reference_type=reference_type, reference_id=reference_id, context=context,
+                    muted_member_ids=muted_member_ids,
+                    project_id=_push_project_id, story_id=story_id, sprint_id=sprint_id,
+                    via_outbox=via_outbox,
+                )
 
     except Exception:
         # BUG-1 수정: 에러 삼킴 제거 → 스택 트레이스 로깅
