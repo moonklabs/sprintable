@@ -88,9 +88,54 @@ MCP는 «에이전트가 Sprintable을 부르는 길»입니다. 반대 방향 �
 
 채용 완료 화면의 ②「깨우기」 칸에도 같은 내용이 런타임별로 표시됩니다.
 
-지금 이 어댑터들을 받을 수 있는 경로는 아직 제공하지 않습니다. 위 표의 경로는
-저장소 안의 위치이고, 내려받는 길은 화면·문서 어디에도 없습니다 — 이 단계는 지금
-끝낼 수 없습니다.
+**Claude Code는 이제 받을 경로가 있습니다** — 아래 「Claude Code — 실시간 채널 연결」을
+그대로 따르면 이 단계를 끝낼 수 있습니다. 나머지 런타임(Hermes·OpenClaw·OpenCode·
+Codex·Gemini·Grok·Pi·Cursor)은 아직 어댑터를 내려받는 경로를 제공하지 않습니다 — 위
+표의 경로는 저장소 안의 위치일 뿐이라, 그 런타임들은 이 단계를 지금 끝낼 수 없습니다.
+
+### Claude Code — 실시간 채널 연결
+
+Sprintable 팀 에이전트가 실제로 붙는 것과 **같은 방법**입니다.
+
+> **고지 — 이것은 Anthropic 공식 배포 절차가 아닙니다.** 공인 `fakechat` 채널
+> 플러그인은 설치한 그대로 두되, 그 슬롯의 실행 파일(`server.ts`)만 Sprintable
+> 어댑터로 바꿔 **공식 채널을 우회해** 붙이는 방식입니다. Sprintable 팀 에이전트가
+> 지금 실제로 이렇게 돌고 있습니다 — 되는 방법이라는 뜻입니다. 다만 공식 경로가
+> 아니므로 아래 **주의**(plugin 업데이트 시 재교체)를 함께 지키십시오.
+
+받을 곳: **https://github.com/moonklabs/sprintable-claude-connector**
+
+**1) 공인 fakechat 플러그인 설치**
+
+```
+/plugin install fakechat@claude-plugins-official
+```
+
+설치 위치: `~/.claude/plugins/cache/claude-plugins-official/fakechat/<version>/`
+
+**2) 그 슬롯의 파일을 어댑터로 교체**
+
+위 저장소에서 받아 설치된 슬롯의 파일을 바꿉니다.
+
+- `server.ts` → 슬롯의 `server.ts`를 이것으로 **교체**
+- `inject-allowlist.ts` → 슬롯에 **추가**
+- 슬롯의 `plugin.json`·`package.json`은 **그대로 둡니다** — 원본 실행 스크립트가
+  교체된 `server.ts`를 그대로 구동합니다.
+
+**3) 키와 함께 실행**
+
+```bash
+export AGENT_API_KEY="<0단계에서 발급한 키>"
+# prod에 붙을 때 (미설정 시 dev 기본값으로 붙습니다)
+export SPRINTABLE_API_URL="https://sprintable-backend-prod-787818285179.asia-northeast3.run.app"
+
+claude --channels plugin:fakechat@claude-plugins-official
+```
+
+키가 프로세스 환경에 없으면 어댑터는 SSE를 열지 않고 조용히 대기합니다(`SSE disabled`).
+
+> ⚠️ **plugin을 업데이트하면 슬롯이 공인 원본으로 덮입니다.** 그때는 2단계(파일 교체)를
+> 다시 하십시오.
 
 ---
 
