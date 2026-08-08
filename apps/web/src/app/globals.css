@@ -32,6 +32,16 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+2074, U+20A0-20BF, U+2122, U+2190-2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
+/* story #2529(유나 핸드오프 §4): 브랜드 워드마크(SprintableTypeWordmark) 전용 서체.
+   CSP가 외부 CDN 폰트를 막아 self-host — 앱 CSS의 --font-sans(Pretendard)와 완전히
+   분리된 자리이므로 전역 font-family에는 절대 섞지 않는다(핸드오프 명시). */
+@font-face {
+  font-family: 'Rajdhani';
+  src: url('/fonts/rajdhani-600.woff2') format('woff2');
+  font-weight: 600;
+  font-display: swap;
+}
+
 
 /* Toast animation */
 @keyframes slide-in {
@@ -114,6 +124,8 @@
   --font-sans: var(--font-sans);
   --font-serif: var(--font-serif);
   --font-mono: var(--font-mono);
+  /* story #2529: 워드마크 전용(font-wordmark 유틸리티) — 전역 font-sans와 분리. */
+  --font-wordmark: var(--font-wordmark);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -136,6 +148,10 @@
   --color-info: var(--info);
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
+  /* story #2529: 마크 v2(2단 듀오톤) 색 토큰 — Tailwind 유틸(fill-brand-mark-primary 등)로도
+     쓸 수 있게 매핑. SprintableMark 자체는 raw var()로 SVG fill을 직접 참조한다. */
+  --color-brand-mark-primary: var(--brand-mark-primary);
+  --color-brand-mark-accent: var(--brand-mark-accent);
   /* story #2023(ⓐ): 값은 :root/.dark에 있었으나 @theme inline 매핑이 없어 Tailwind
      유틸리티(bg-brand-soft 등)가 생성되지 않던 죽은 토큰 — 매핑 추가로 되살린다. */
   --color-brand-soft: var(--brand-soft);
@@ -223,6 +239,8 @@
   /* story #2026: 라틴 전용 폰트를 앞에 두지 않는다(Inter 제거) — 문자 단위 폰트 선택으로
      한글/라틴이 갈리는 것이 이 스토리의 원인이다(유나 규격 §1). */
   --font-sans: "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  /* story #2529: 브랜드 워드마크 전용(sprintable-logo.tsx의 SprintableTypeWordmark에만). */
+  --font-wordmark: "Rajdhani", "Pretendard Variable", sans-serif;
   --background: oklch(1 0 0);
   --foreground: oklch(0.141 0.005 285.823);
   --card: oklch(1 0 0);
@@ -273,6 +291,12 @@
   /* story #2318: 4.50:1(턱걸이)→순백으로 4.69:1 확保 */
   --brand-foreground: oklch(1 0 0);
   --primary-tint: oklch(0.97 0.02 255);
+
+  /* story #2529(유나 핸드오프 brand-mark-v2-handoff-2529 §3-1): 마크 v2 — 2단 듀오톤.
+     Figma 실측 sRGB HEX가 정본(SVG/ICO 등 정적 자산이 이 값에서 빌드타임으로 파생됨,
+     §3-2 참조) — OKLCH 변환은 안 씀(정본이 HEX라 이중 변환 오차를 안 만든다). */
+  --brand-mark-primary: #42549B; /* 상단 셰브론(라이트) — 인디고. OKLCH참고 oklch(0.40 0.11 274) */
+  --brand-mark-accent: #00A3D1;  /* 하단 셰브론(라이트) — 시안. OKLCH참고 oklch(0.63 0.13 220) */
 
   /* Semantic status tokens */
   --success: oklch(0.55 0.16 145);
@@ -402,6 +426,11 @@
      미달. --primary-foreground(다크)와 동일 패턴(어두운 남색)으로 보정해 5.74:1 확保. */
   --brand-foreground: oklch(0.16 0.038 262);
   --primary-tint: oklch(0.28 0.075 260);
+
+  /* story #2529(유나 핸드오프 §1): 다크 표면에선 라이트용 인디고(#42549B)가 제품 다크배경
+     (#111114) 위에서 대비가 부족해 Figma가 의도적으로 모노(흰+회)로 뺐다 — 듀오톤 아님. */
+  --brand-mark-primary: #FFFFFF;
+  --brand-mark-accent: #ADADAD;
 
   /* Semantic status tokens */
   --success: oklch(0.65 0.15 145);
