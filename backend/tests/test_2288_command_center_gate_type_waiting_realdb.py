@@ -241,6 +241,62 @@ async def test_waiting_on_others_absent_when_not_assignee_realdb():
         await engine.dispose()
 
 
+async def test_waiting_on_others_absent_when_i_am_quorum_approver_among_others_realdb():
+    """story #2527(까심 QA 확認 대기, PO 오르테가 AC 락 2026-08-08): 내가 assignee 이면서
+    동시에 쿼럼(멀티어프루버) gate의 pending blocking 승인자 중 한 명이면 — 다른 승인자의
+    pending row가 waiting_on_others를 오노출시키면 안 된다(내 승인 행동이 실제로 남아있으므로
+    gate_approval로만 떠야 한다). quorum_policy.type(all/any/count) 무관하게 동일해야 한다 —
+    개별 approver row의 pending 여부는 quorum 집계 타입과 무관한 축이기 때문.
+
+    ⛔뮤테이션 자가검증(2026-08-08): command_center.py의 `~exists(_my_pending_approval_on_step)`
+    가드를 실제로 지우고 이 테스트를 돌려 RED 確認함(waiting_on_others에 이 story가 새는 것을
+    직접 관측 — 재현조건 그대로) → 복원 → GREEN 재확認."""
+    from app.main import app
+
+    for qtype in ("all", "any", "count"):
+        engine, Session = await _session_factory()
+        try:
+            async with Session() as s:
+                org = await _make_org(s)
+                project = await _make_project(s, org.id)
+                caller_id, caller_user_id = await _make_member(s, org.id, project.id)
+                other_id, _ = await _make_member(s, org.id, project.id)
+                story = await _make_story(s, org.id, project.id, title=f"QuorumIAmApprover-{qtype}")
+                story.assignee_id = caller_id
+                await s.commit()
+                run = await _make_step_run(s, org.id, project.id, entity_type="story", entity_id=story.id)
+                run.quorum_policy = {"type": qtype, "count": 2 if qtype == "count" else None}
+                await s.commit()
+                group_id = uuid.uuid4()
+                await _make_approval(
+                    s, org.id, project.id, step_run_id=run.id, approver_member_id=caller_id,
+                    approval_group_id=group_id,
+                )
+                await _make_approval(
+                    s, org.id, project.id, step_run_id=run.id, approver_member_id=other_id,
+                    approval_group_id=group_id,
+                )
+
+            await _setup_app_human(app, Session, caller_user_id, org.id)
+            client = _client_for(app)
+            try:
+                resp = await client.get("/api/v2/command-center/my-actions")
+                assert resp.status_code == 200, resp.text
+                items = resp.json()["action_queue"]["items"]
+                assert not any(
+                    i["type"] == "waiting_on_others" and i["context"]["story_id"] == str(story.id)
+                    for i in items
+                ), f"quorum type={qtype}: waiting_on_others falsely surfaced (story #2527 regression)"
+                assert any(i["type"] == "gate_approval" for i in items), (
+                    f"quorum type={qtype}: gate_approval missing — my own pending approval should still surface there"
+                )
+            finally:
+                await client.aclose()
+        finally:
+            app.dependency_overrides.clear()
+            await engine.dispose()
+
+
 async def test_waiting_on_others_dedupes_multi_approver_quorum_realdb():
     from app.main import app
 
