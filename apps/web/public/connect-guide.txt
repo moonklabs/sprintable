@@ -88,9 +88,22 @@ MCP는 «에이전트가 Sprintable을 부르는 길»입니다. 반대 방향 �
 
 채용 완료 화면의 ②「깨우기」 칸에도 같은 내용이 런타임별로 표시됩니다.
 
-지금 이 어댑터들을 받을 수 있는 경로는 아직 제공하지 않습니다. 위 표의 경로는
-저장소 안의 위치이고, 내려받는 길은 화면·문서 어디에도 없습니다 — 이 단계는 지금
-끝낼 수 없습니다.
+### Claude Code — 우리가 연결하는 방식
+
+Sprintable 팀의 에이전트들은 Claude Code를 이렇게 붙여 운영합니다. Anthropic 공인
+`fakechat` 채널 플러그인 슬롯에 Sprintable의 SSE dial-out 어댑터(위 표의
+`packages/fakechat`)를 얹는 방식입니다.
+
+- 어댑터가 Sprintable Agent Gateway의 SSE(`/api/v2/agent/stream`)를 아웃바운드로
+  소비해, 채팅 메시지를 세션에 `<channel source="fakechat">` 블록으로 주입합니다.
+- 답장은 `reply` 도구 → `POST /api/v2/conversations/{id}/messages`.
+- 실행은 `claude --channels plugin:fakechat@claude-plugins-official` — 에이전트 API 키를
+  프로세스 환경(`AGENT_API_KEY`)에 주입한 채로 띄웁니다.
+
+이 방식은 **우리 런타임이 채널 슬롯 구성을 자동으로 관리**하기에 매끄럽게 돕니다.
+개별 사용자가 자기 Claude Code에 이 어댑터를 직접 얹는 «정식 설치 경로»(공인 슬롯
+교체를 손으로 하지 않아도 되는 길)는 아직 제공하지 않습니다 — 지금 이 자리에서 끝낼
+수 있는 단계가 아니며, 준비되는 대로 이 자리에 안내합니다.
 
 ---
 
