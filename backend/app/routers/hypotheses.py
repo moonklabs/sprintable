@@ -27,6 +27,7 @@ from app.schemas.hypothesis import (
     HypothesisCreate,
     HypothesisDraftRequest,
     HypothesisDraftResponse,
+    HypothesisLifecycleResponse,
     HypothesisLinkRequest,
     HypothesisResponse,
     HypothesisTransition,
@@ -170,6 +171,23 @@ async def get_hypothesis(
     await _assert_hypothesis_project_access(session, uuid.UUID(auth.user_id), org_id, hypothesis_id)
     try:
         return await svc.get_hypothesis(session, org_id, hypothesis_id)
+    except svc.HypothesisServiceError as err:
+        _raise(err)
+
+
+@router.get("/{hypothesis_id}/lifecycle", response_model=HypothesisLifecycleResponse)
+async def get_hypothesis_lifecycle(
+    hypothesis_id: uuid.UUID,
+    session: AsyncSession = Depends(get_read_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> HypothesisLifecycleResponse:
+    """story #2533(E-FLOW-V4 S3) — 5축 수직 서사 조립(N+1 회피). get_read_db: 순수 읽기
+    조립이고 create→self-read 흐름이 아니다(hypothesis/story/goal 전부 이미 커밋된 것만
+    본다 — Phase3 §6 read replica 기준과 정합)."""
+    await _assert_hypothesis_project_access(session, uuid.UUID(auth.user_id), org_id, hypothesis_id)
+    try:
+        return await svc.get_hypothesis_lifecycle(session, org_id, hypothesis_id)
     except svc.HypothesisServiceError as err:
         _raise(err)
 

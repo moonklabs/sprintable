@@ -100,6 +100,14 @@ class Hypothesis(Base, OrgScopedMixin, TimestampMixin):
     # §3.10 archive=soft. hard delete는 마이그/감사 정책 확정 전까지 금지.
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # story #2533(E-FLOW-V4 S3, migration 0237): 정반합 self-FK — 이 가설이 falsified된 뒤
+    # 대체된 새 가설을 가리킨다. 명시 확認된 페어만 채워진다(텍스트 자동 페어링 없음 —
+    # write path는 후속 스토리, 지금은 스키마+확認 백필까지만). FK 조건 없음(nullable, ondelete
+    # SET NULL) — refresh_tokens.replaced_by(0226)와 동형 패턴.
+    superseded_by_hypothesis_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("hypotheses.id", ondelete="SET NULL"), nullable=True
+    )
+
     __table_args__ = (
         # §2.3 제약
         CheckConstraint(

@@ -15,9 +15,11 @@ import math
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.evidence import Evidence
+from app.models.gate import Gate
 from app.models.hypothesis import HYPOTHESIS_STATUSES, Hypothesis, HypothesisStoryLink, is_valid_transition
 from app.models.pm import Goal, Sprint, Story
 
@@ -27,6 +29,11 @@ from app.schemas.hypothesis import (
     HypothesisCreate,
     HypothesisDraftRequest,
     HypothesisDraftResponse,
+    HypothesisLifecycleGoal,
+    HypothesisLifecycleResponse,
+    HypothesisLifecycleStory,
+    HypothesisLifecycleSuccessor,
+    HypothesisLifecycleTimeline,
     HypothesisLinkRequest,
     HypothesisResponse,
     HypothesisTransition,
@@ -235,6 +242,97 @@ async def get_hypothesis(
     if hyp is None:
         raise HypothesisServiceError("HYPOTHESIS_NOT_FOUND", "가설을 찾을 수 없습니다.")
     return await _to_response(repo, hyp)
+
+
+async def get_hypothesis_lifecycle(
+    session: AsyncSession, org_id: uuid.UUID, hypothesis_id: uuid.UUID
+) -> HypothesisLifecycleResponse:
+    """story #2533(E-FLOW-V4 S3, doc flow-board-v4-hypothesis-scale §3): 5축 수직 서사 조립
+    — 질문(hypothesis)·목표(goals)·검증(stories)·증명(stories의 gate_status/evidence_count)·
+    정반합(superseded_by/supersedes)·시간선(timeline). N+1 회피 배치 조회.
+
+    ⛔지어내지 않는다: 증명이 실사용 0인 story는 gate_status=None·evidence_count=0("아직"),
+    정반합은 migration 0237이 명시 백필한 페어 외엔 항상 None/빈 리스트, 시간선은 진짜 전이
+    이력이 아니라 3점(created/measure_after/updated)뿐임을 스키마 docstring이 못박는다."""
+    repo = HypothesisRepository(session, org_id)
+    hyp = await repo.get(hypothesis_id)
+    if hyp is None:
+        raise HypothesisServiceError("HYPOTHESIS_NOT_FOUND", "가설을 찾을 수 없습니다.")
+    hyp_response = await _to_response(repo, hyp)
+
+    goal_rows = []
+    if hyp_response.epic_ids:
+        goal_rows = (await session.execute(
+            select(Goal.id, Goal.title, Goal.status).where(Goal.id.in_(hyp_response.epic_ids))
+        )).all()
+    goals = [HypothesisLifecycleGoal(id=r.id, title=r.title, status=r.status) for r in goal_rows]
+
+    story_rows = []
+    if hyp_response.story_ids:
+        story_rows = (await session.execute(
+            select(Story.id, Story.title, Story.status, Story.metric_definition, Story.outcome_status)
+            .where(Story.id.in_(hyp_response.story_ids))
+        )).all()
+    story_ids = [r.id for r in story_rows]
+
+    # 증명(gate/evidence) — hypothesis에 직접 안 달림(그라운딩 확認, 2026-08-09) →
+    # work_item_type='story'로 간접 배치 조회. story당 최신 gate 1건만(여러 건이면 created_at
+    # 최신 우선 — 이 축은 "지금 상태"만 보이면 되고 이력은 시간선의 정직한 한계와 동형으로 스코프 밖).
+    gate_map: dict[uuid.UUID, str] = {}
+    evidence_count_map: dict[uuid.UUID, int] = {}
+    if story_ids:
+        gate_rows = (await session.execute(
+            select(Gate.work_item_id, Gate.status, Gate.created_at)
+            .where(Gate.org_id == org_id, Gate.work_item_type == "story", Gate.work_item_id.in_(story_ids))
+            .order_by(Gate.work_item_id, Gate.created_at.desc())
+        )).all()
+        for wid, status, _created_at in gate_rows:
+            gate_map.setdefault(wid, status)  # 정렬상 첫 행 = 그 story의 최신 gate
+        ev_rows = (await session.execute(
+            select(Evidence.work_item_id, func.count())
+            .where(
+                Evidence.org_id == org_id, Evidence.work_item_type == "story",
+                Evidence.work_item_id.in_(story_ids),
+            )
+            .group_by(Evidence.work_item_id)
+        )).all()
+        evidence_count_map = {wid: cnt for wid, cnt in ev_rows}
+
+    stories = [
+        HypothesisLifecycleStory(
+            id=r.id, title=r.title, status=r.status, metric_definition=r.metric_definition,
+            outcome_status=r.outcome_status, gate_status=gate_map.get(r.id),
+            evidence_count=evidence_count_map.get(r.id, 0),
+        )
+        for r in story_rows
+    ]
+
+    # 정반합 — 양방향(migration 0237 확認 백필 외엔 항상 빈 값).
+    superseded_by = None
+    if hyp.superseded_by_hypothesis_id:
+        succ = await session.get(Hypothesis, hyp.superseded_by_hypothesis_id)
+        if succ is not None:
+            superseded_by = HypothesisLifecycleSuccessor(
+                id=succ.id, statement=succ.statement, status=succ.status,
+            )
+    predecessor_rows = (await session.execute(
+        select(Hypothesis.id, Hypothesis.statement, Hypothesis.status).where(
+            Hypothesis.superseded_by_hypothesis_id == hypothesis_id, Hypothesis.org_id == org_id,
+        )
+    )).all()
+    supersedes = [
+        HypothesisLifecycleSuccessor(id=r.id, statement=r.statement, status=r.status)
+        for r in predecessor_rows
+    ]
+
+    timeline = HypothesisLifecycleTimeline(
+        created_at=hyp.created_at, measure_after=hyp.measure_after, updated_at=hyp.updated_at,
+    )
+
+    return HypothesisLifecycleResponse(
+        hypothesis=hyp_response, goals=goals, stories=stories,
+        superseded_by=superseded_by, supersedes=supersedes, timeline=timeline,
+    )
 
 
 async def list_hypotheses(
