@@ -645,6 +645,32 @@ async def embed_backfill_cron(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── POST /api/v2/internal/cron/unattached-snapshot ────────────────────────────
+
+@router.post("/unattached-snapshot")
+async def unattached_snapshot_cron(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """story #2536(E-FLOW-V4 S4): 프로젝트별 unattached_count 일별 스냅샷 append.
+
+    v4 강제(S2, #2532)가 신규 story의 가설/목표 부착을 요구하므로 기존 미매달림 총량이
+    시간에 걸쳐 줄어야 하고, 그 추세(스파크라인)를 그리려면 시계열이 필요 — 이 cron이
+    매일 실행되며 그 시계열을 쌓는다. append-only(재실행해도 새 행만 추가, upsert 없음).
+    """
+    verify_cron(request)
+
+    from app.services.unattached_snapshot import compute_and_record_unattached_snapshots
+
+    try:
+        results = await compute_and_record_unattached_snapshots(session)
+        await session.commit()
+        return _ok({"projects": len(results), "results": results})
+    except Exception as exc:
+        logger.exception("unattached-snapshot cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── S8: storage capacity lifecycle crons ─────────────────────────────────────
 
 _ASSET_GRACE_DAYS = 7
