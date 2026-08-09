@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.hypothesis import HYPOTHESIS_STATUSES, Hypothesis, is_valid_transition
+from app.models.hypothesis import HYPOTHESIS_STATUSES, Hypothesis, HypothesisStoryLink, is_valid_transition
 from app.models.pm import Goal, Sprint, Story
 
 logger = logging.getLogger(__name__)
@@ -68,6 +68,22 @@ def _has_valid_outcome_evidence(outcome_result: dict | None) -> bool:
         return False
     reason = outcome_result.get("reason")
     return isinstance(reason, str) and bool(reason.strip())
+
+
+async def batch_stories_with_hypothesis_link(
+    session: AsyncSession, story_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """story #2532(E-FLOW-V4 S2): hypothesis_story_links가 1건이라도 있는 story_id 집합
+    (N+1 회피 배치 조회) — `StoryResponse.has_hypothesis_or_goal`(positive 단방향)의
+    한 축. `evidence_service.batch_has_evidence`와 동형 패턴."""
+    if not story_ids:
+        return set()
+    result = await session.execute(
+        select(HypothesisStoryLink.story_id.distinct()).where(
+            HypothesisStoryLink.story_id.in_(story_ids)
+        )
+    )
+    return set(result.scalars().all())
 
 
 def map_legacy_outcome_status(outcome_status: str | None) -> str | None:

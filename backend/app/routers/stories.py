@@ -22,7 +22,15 @@ from app.routers.agent_gateway import wake_agent
 from app.routers.gates import GateResponse
 from app.services import mcp_attachment_upload
 from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
-from app.schemas.story import StoryAttachment, StoryCreate, StoryResponse, StoryStatusUpdate, StoryUpdate
+from app.schemas.story import (
+    AttachmentCandidate,
+    AttachmentSuggestionResponse,
+    StoryAttachment,
+    StoryCreate,
+    StoryResponse,
+    StoryStatusUpdate,
+    StoryUpdate,
+)
 from app.services.member_resolver import canonicalize_member_id, filter_org_member_ids, resolve_member
 from app.services.merge_verdict_gate import (
     AUTO_MERGE,
@@ -126,6 +134,13 @@ async def list_stories(
     assignee_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
     no_sprint: bool = Query(default=False, description="sprint 미배정 스토리만 반환"),
+    unattached: bool = Query(
+        default=False,
+        description=(
+            "story #2532(E-FLOW-V4 S2) — 가설·목표 둘 다 안 매달린 story만 반환(기존 필터와 "
+            "AND 결합, has_hypothesis_or_goal 계산 後 후필터라 다른 필터의 SQL 최적화엔 무영향)."
+        ),
+    ),
     ids: str | None = Query(default=None, description="comma-separated story ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관)"),
     story_number: int | None = Query(default=None, description="프로젝트 내 사람-읽는 #N(project_id와 함께 사용 — N은 project 내에서만 유일)"),
     q: str | None = Query(default=None, description="title 부분검색(ILIKE) — 기존 필터와 AND 결합"),
@@ -144,6 +159,12 @@ async def list_stories(
     auth: AuthContext = Depends(get_current_user),
 ) -> list[StoryResponse]:
     from datetime import datetime
+
+    # story #2532: 아래 :247 주석과 동일 Query(...) 센티널 함정 — FastAPI 경유 없이 이
+    # 함수를 직접 호출하는 기존 테스트가 `unattached`를 안 넘기면 bool 대신 센티널 객체가
+    # 오는데, 센티널은 항상 truthy라 `if unattached:`가 무조건 참이 돼 기존 테스트 전부가
+    # 조용히 필터링당한다 — `isinstance` 가드로 실제 bool일 때만 필터를 켠다.
+    unattached = unattached if isinstance(unattached, bool) else False
 
     if ids is not None:
         # story ca37b2b0 ②: 갤러리 등 정확한 story 집합이 필요한 소비자용 — base.list()의
@@ -164,6 +185,8 @@ async def list_stories(
         stories = [s for s in stories if s.project_id in accessible]
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
         await _attach_has_evidence(repo.session, stories)
+        await _attach_has_hypothesis_or_goal(repo.session, stories)
+        stories = _filter_unattached(stories, unattached)
         return [StoryResponse.model_validate(s) for s in stories]
 
     # story #2188 ④-b(2026-07-25, 오르테가군 판정 — 의도된 제약, 코드 고칠 이유 없음):
@@ -185,6 +208,8 @@ async def list_stories(
         )
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
         await _attach_has_evidence(repo.session, stories)
+        await _attach_has_hypothesis_or_goal(repo.session, stories)
+        stories = _filter_unattached(stories, unattached)
         return [StoryResponse.model_validate(s) for s in stories]
 
     # CB-S4: status + project_id 조합 시 board 쿼리 (order_by + cursor + done 7일 제한)
@@ -209,6 +234,8 @@ async def list_stories(
                 response.headers["X-Next-Cursor"] = stories[-1].created_at.isoformat()
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
         await _attach_has_evidence(repo.session, stories)
+        await _attach_has_hypothesis_or_goal(repo.session, stories)
+        stories = _filter_unattached(stories, unattached)
         return [StoryResponse.model_validate(s) for s in stories]
 
     filters: dict = {}
@@ -244,6 +271,8 @@ async def list_stories(
         stories = await _boost_reference_candidates(
             repo.session, repo.org_id, stories, boost_candidates_from,
         )
+    await _attach_has_hypothesis_or_goal(repo.session, stories)
+    stories = _filter_unattached(stories, unattached)
     return [StoryResponse.model_validate(s) for s in stories]
 
 
@@ -339,6 +368,31 @@ async def _attach_has_evidence(session: AsyncSession, stories: list[Story]) -> N
             s.human_verified_by = verified.created_by
             s.human_verified_at = verified.created_at
 
+
+async def _attach_has_hypothesis_or_goal(session: AsyncSession, stories: list[Story]) -> None:
+    """story #2532(E-FLOW-V4 S2, doc flow-board-v4-hypothesis-scale §4-1): 「가설 OR 목표
+    매달림」 신호(transient attr) — epic_id 존재 OR hypothesis_story_links 존재 시에만 True,
+    없으면 미설정(StoryResponse 기본값 None 유지, positive 단방향·부정 신호 0 — has_evidence와
+    동형 규율). _attach_has_evidence와 동형 배치 패턴."""
+    if not stories:
+        return
+    from app.services.hypothesis import batch_stories_with_hypothesis_link
+
+    story_ids = [s.id for s in stories]
+    ids_with_hypothesis = await batch_stories_with_hypothesis_link(session, story_ids)
+    for s in stories:
+        if s.epic_id is not None or s.id in ids_with_hypothesis:
+            s.has_hypothesis_or_goal = True
+
+
+def _filter_unattached(stories: list[Story], unattached: bool) -> list[Story]:
+    """story #2532: unattached=true 필터 — has_hypothesis_or_goal이 세팅 안 된(=None,
+    미매달림) story만 남긴다. _attach_has_hypothesis_or_goal 호출 後에만 의미 있다(호출
+    전이면 전부 미설정이라 전부 통과 — 호출 순서 오류를 조용히 숨기지 않도록 호출부에서
+    항상 attach 직후 이 함수를 쓴다)."""
+    if not unattached:
+        return stories
+    return [s for s in stories if not getattr(s, "has_hypothesis_or_goal", False)]
 
 async def _assert_story_project_access(
     session: AsyncSession, auth: AuthContext, org_id: uuid.UUID, project_id: uuid.UUID
@@ -723,6 +777,11 @@ async def create_story(
         check_description=True, check_acceptance_criteria=True,
         mention_actor_id=_mention_actor_id,
     )
+    # story #2532: 생성 시점엔 hypothesis_story_links가 있을 수 없다(별도 링크 API라 방금
+    # 생성된 story.id를 아직 아무도 못 건다) — DB 쿼리 없이 epic_id만으로 판정(_attach_
+    # has_hypothesis_or_goal의 배치쿼리는 목록/재조회 경로 전용, 여기선 불필요).
+    if story.epic_id is not None:
+        story.has_hypothesis_or_goal = True
     return StoryResponse.model_validate(story)
 
 
@@ -790,7 +849,68 @@ async def get_story(
     await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     await _attach_assignee_ids(repo.session, repo.org_id, [story])
     await _attach_has_evidence(repo.session, [story])
+    await _attach_has_hypothesis_or_goal(repo.session, [story])
     return StoryResponse.model_validate(story)
+
+
+# story #2532(E-FLOW-V4 S2, doc flow-board-v4-hypothesis-scale §4-1): 무거운 가설 생성
+# (metric_definition NOT NULL)을 강요하지 않는다 — 이 엔드포인트는 **기존** open goal/
+# hypothesis 후보만 제시한다. 새 가설이 필요하면 클라이언트가 기존 `/hypotheses/draft`
+# (AI 초안 경로)를 재사용한다(마찰 0 — v3.4 §3-3 "매번 폼 금지"와 정합).
+_ATTACHMENT_SUGGESTION_TOP_N = 5
+_OPEN_GOAL_STATUSES = ("draft", "active")
+_OPEN_HYPOTHESIS_STATUSES = ("proposed", "active", "measuring")
+
+
+@router.get("/{id}/attachment-suggestions", response_model=AttachmentSuggestionResponse)
+async def get_story_attachment_suggestions(
+    id: uuid.UUID,
+    repo: StoryRepository = Depends(_get_repo_read),
+    auth: AuthContext = Depends(get_current_user),
+) -> AttachmentSuggestionResponse:
+    from app.models.hypothesis import Hypothesis
+    from app.services.attachment_suggestion import (
+        RankableCandidate,
+        classify_attachment_type,
+        rank_candidates,
+    )
+
+    story = await repo.get(id)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
+
+    goal_rows = (await repo.session.execute(
+        select(Goal.id, Goal.title).where(
+            Goal.project_id == story.project_id, Goal.status.in_(_OPEN_GOAL_STATUSES),
+        )
+    )).all()
+    hyp_rows = (await repo.session.execute(
+        select(Hypothesis.id, Hypothesis.statement).where(
+            Hypothesis.project_id == story.project_id,
+            Hypothesis.status.in_(_OPEN_HYPOTHESIS_STATUSES),
+        )
+    )).all()
+
+    goal_candidates = rank_candidates(
+        story.title, story.description,
+        [RankableCandidate(id=r.id, text=r.title) for r in goal_rows],
+        top_n=_ATTACHMENT_SUGGESTION_TOP_N,
+    )
+    hypothesis_candidates = rank_candidates(
+        story.title, story.description,
+        [RankableCandidate(id=r.id, text=r.statement) for r in hyp_rows],
+        top_n=_ATTACHMENT_SUGGESTION_TOP_N,
+    )
+    return AttachmentSuggestionResponse(
+        suggested_type=classify_attachment_type(story.title, story.description),
+        goal_candidates=[
+            AttachmentCandidate(id=c.id, text=c.text, score=c.score) for c in goal_candidates
+        ],
+        hypothesis_candidates=[
+            AttachmentCandidate(id=c.id, text=c.text, score=c.score) for c in hypothesis_candidates
+        ],
+    )
 
 
 # ─── Backlinks (story #2266·C-8·E-CONNECT — target_type 일반화의 첫 사용처) ─────
@@ -1705,6 +1825,7 @@ async def bulk_update_stories(
     # refresh 後 transient assignee_ids 세팅(refresh 는 매핑 컬럼만 reload·transient 보존).
     await _attach_assignee_ids(db, repo.org_id, updated)
     await _attach_has_evidence(db, updated)
+    await _attach_has_hypothesis_or_goal(db, updated)
 
     # 응답(violation flag 포함) + violation 이벤트 페이로드를 commit 前에 빌드(commit 시 attr expire→
     # MissingGreenlet 방지·기존 results 빌드와 동일 시점). 이벤트 발화는 commit 後(/status 와 동일 순서).
@@ -2045,6 +2166,7 @@ async def update_story(
 
     await _attach_assignee_ids(db, repo.org_id, [story])
     await _attach_has_evidence(db, [story])
+    await _attach_has_hypothesis_or_goal(db, [story])
     # story #2459 prod 회귀(2026-08-05): model_validate는 동기 호출이라 story의 어떤 컬럼이
     # unloaded 상태면(원인 미확定 — repo.update()가 flush+refresh 直後인데도 관측됨)
     # MissingGreenlet 500(await_only 호출 불가 — sync 컨텍스트에서 lazy load 시도)으로
@@ -2315,6 +2437,7 @@ async def update_story_status(
 
     await _attach_assignee_ids(db, repo.org_id, [story])
     await _attach_has_evidence(db, [story])
+    await _attach_has_hypothesis_or_goal(db, [story])
     # story #2459 prod 회귀(2026-08-05): update_story와 동형 — model_validate 直前 명시
     # refresh로 unloaded 컬럼(예: updated_at) MissingGreenlet 500을 막는다.
     await db.refresh(story)
