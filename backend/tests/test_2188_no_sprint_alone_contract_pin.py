@@ -65,7 +65,9 @@ async def test_actual_behavior_no_sprint_without_project_id_falls_through_to_gen
     repo.org_id = "org-1"
     repo.session = MagicMock()
     repo.list_backlog = AsyncMock(side_effect=AssertionError("backlog 분기가 호출되면 안 됨"))
-    repo.list = AsyncMock(return_value=[])
+    # story #2537: repo.list()가 (stories, total) 튜플을 반환하도록 계약 변경(X-Total-Count
+    # 미설정 결함 fix) — 이 mock도 새 계약을 반영해야 언패킹이 안 깨진다.
+    repo.list = AsyncMock(return_value=([], 0))
 
     async def _noop(*args, **kwargs):
         return None

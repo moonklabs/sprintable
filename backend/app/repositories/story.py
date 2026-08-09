@@ -64,8 +64,17 @@ class StoryRepository(BaseRepository[Story]):
     async def list(
         self, limit: int = 1000, *, q: str | None = None, cursor: datetime | None = None,
         unattached: bool = False, **filters,
-    ) -> list[Story]:
-        """story 083176e8(까심 #2148 QA 적출): 갤러리 피커 실검색 — `q`는 title ILIKE 부분일치로
+    ) -> tuple[list[Story], int]:
+        """story #2537(카디르 QA #2932 실측, 2026-08-09) — `list_board()`와 동형으로
+        `(stories, total)` 튜플을 반환한다. 이전엔 `list[Story]`만 반환해 이 분기(status
+        없이 project_id+unattached=true 등으로 오는 generic 필터 경로)로 빠지는 요청은
+        X-Total-Count를 아예 못 냈다 — unattached-bucket이 정확히 이 경로를 타는데
+        FE(meta.total)가 항상 undefined를 받아 HIGH로 보고됐다. count는 board 분기와
+        동형으로 필터 適用 後·limit 適用 前에 계산한다(cursor 필터까지 포함해야 "이 필터
+        조건에서 남은 전체 건수"가 정확하다). 실 콜러는 `app/routers/stories.py`(제네릭
+        분기) 단 1곳뿐이라(grep 확認, 직접-호출 테스트 0건) 시그니처 변경이 안전하다.
+
+        story 083176e8(까심 #2148 QA 적출): 갤러리 피커 실검색 — `q`는 title ILIKE 부분일치로
         기존 동등비교 필터(**filters, base.list() 상속)와 AND 결합. BaseRepository.list()는
         범용(모든 리포지토리 공유)이라 q ILIKE 개념을 거기 얹지 않고 story 전용으로 오버라이드
         (list_board/list_by_ids와 동일하게 자체 쿼리 구성 — 기존 관례).
@@ -102,9 +111,13 @@ class StoryRepository(BaseRepository[Story]):
             query = query.where(Story.created_at < cursor)
         if unattached:
             query = query.where(_unattached_clause())
+
+        count_q = select(func.count()).select_from(query.subquery())
+        total = (await self.session.execute(count_q)).scalar_one()
+
         query = query.order_by(Story.created_at.desc(), Story.id.desc()).limit(limit)
         result = await self.session.execute(query)
-        return list(result.scalars().all())
+        return list(result.scalars().all()), total
 
     async def list_by_ids(self, ids: list[uuid.UUID], *, unattached: bool = False) -> list[Story]:
         """배치 앵커 조회(story ca37b2b0 ② — 갤러리 등 정확한 story 집합 필요 소비자용).
