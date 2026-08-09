@@ -96,7 +96,7 @@ export interface HypothesisGuidedCreateInput {
   statement: string;
   metric: string;
   target: number;
-  direction: string;
+  direction: 'up' | 'down';
 }
 
 export interface HypothesisDraftInput {
