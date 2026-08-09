@@ -216,15 +216,36 @@ export async function resolveLegacyResourcePath(
   accessToken: string,
 ): Promise<{ orgSlug: string; projectSlug: string } | null> {
   try {
+    const authHeader = { Authorization: `Bearer ${accessToken}` };
+    // ⛔카디르 QA 근본 재진단(2026-08-09, 실측 8회 재현) — 이 함수의 project 조회(단건·리스트
+    // 둘 다)가 X-Org-Id 없이 나가면 BE get_verified_org_id가 **JWT 기본 org**로 스코프한다.
+    // 세션의 현재/타겟 org(이 함수의 orgId 파라미터)가 JWT 기본 org와 다른 멀티org 계정에선
+    // 엉뚱한 org로 스코프돼 빈 결과/404가 난다(curl로 X-Org-Id 붙이면 정상 확認됨) — 위
+    // 리스트 폴백 fix가 이 헤더 없이는 애초에 못 먹었던 진짜 근본원인.
+    const authHeaderWithOrg = { ...authHeader, 'X-Org-Id': orgId };
     const [orgRes, projRes] = await Promise.all([
-      fetch(`${fastapiUrl}/api/v2/organizations/${orgId}`, { headers: { Authorization: `Bearer ${accessToken}` } }),
-      fetch(`${fastapiUrl}/api/v2/projects/${projectId}`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+      fetch(`${fastapiUrl}/api/v2/organizations/${orgId}`, { headers: authHeader }),
+      fetch(`${fastapiUrl}/api/v2/projects/${projectId}`, { headers: authHeaderWithOrg }),
     ]);
-    if (!orgRes.ok || !projRes.ok) return null;
+    if (!orgRes.ok) return null;
     const org = await orgRes.json() as { slug?: string };
-    const proj = await projRes.json() as { slug?: string | null };
-    if (!org.slug || !proj.slug) return null;
-    return { orgSlug: org.slug, projectSlug: proj.slug };
+    if (!org.slug) return null;
+
+    let projectSlug = projRes.ok ? ((await projRes.json() as { slug?: string | null }).slug ?? null) : null;
+    // ⛔실측 결함(2026-08-09, PO puppeteer 재현 — 흐름 메뉴→/flow bare→dead-end 404) — 단건조회
+    // (GET /projects/{id})가 정상 프로젝트(slug 有)인데도 이따금 slug 없이/실패 응답해 이 자리가
+    // dead-end 404였다(근본원인=위 X-Org-Id 누락). 리스트 엔드포인트(GET /projects)는 같은
+    // 프로젝트를 직접 대조로 항상 정확히 낸다는 걸 확認했다 — 단건조회가 비면 그 자리에서
+    // 정직하게 포기하지 않고 리스트에서 안전하게 한 번 더 찾는다.
+    if (!projectSlug) {
+      const listRes = await fetch(`${fastapiUrl}/api/v2/projects`, { headers: authHeaderWithOrg });
+      if (listRes.ok) {
+        const list = await listRes.json() as Array<{ id?: string; slug?: string | null }>;
+        projectSlug = list.find((p) => p.id === projectId)?.slug ?? null;
+      }
+    }
+    if (!projectSlug) return null;
+    return { orgSlug: org.slug, projectSlug };
   } catch {
     return null;
   }
