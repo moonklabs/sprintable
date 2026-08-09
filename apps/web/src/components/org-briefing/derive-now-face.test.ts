@@ -66,6 +66,27 @@ describe('parseMyActions', () => {
     expect(raw.attention[1]).toMatchObject({ type: 'unanswered_blocker', blocked_story_id: 's4' });
   });
 
+  // story #2539(BE)/#2541(FE) — 4번째 attention type. severity=info이지만 이 파서는 severity를
+  // 안 읽는다(전부 kind=signal로 매핑, priority만 내부적으로 다르게 — §2539 스코프: "방금
+  // 반증으로 종결" 결과 통보뿐, in-flight 이상감지 아님).
+  it('reads hypothesis_id/statement/outcome_result/falsified_days/superseded_by_hypothesis_id for hypothesis_falsified', () => {
+    const raw = parseMyActions({
+      action_queue: { items: [] },
+      attention: { items: [
+        {
+          type: 'hypothesis_falsified', hypothesis_id: 'h1', statement: '결제 완료율 개선',
+          outcome_result: { metric: 'checkout_rate', target: 60, actual: 52, direction: 'up' },
+          falsified_days: 2, superseded_by_hypothesis_id: 'h2',
+        },
+      ] },
+    });
+    expect(raw.attention[0]).toMatchObject({
+      type: 'hypothesis_falsified', hypothesis_id: 'h1', statement: '결제 완료율 개선',
+      falsified_days: 2, superseded_by_hypothesis_id: 'h2',
+    });
+    expect(raw.attention[0]!.outcome_result).toEqual({ metric: 'checkout_rate', target: 60, actual: 52, direction: 'up' });
+  });
+
   it('returns empty arrays for malformed shapes (no-fiction, throw 0)', () => {
     expect(parseMyActions(null)).toEqual(emptyRaw());
     expect(parseMyActions(undefined)).toEqual(emptyRaw());
@@ -111,9 +132,9 @@ describe('buildNowFace', () => {
         { type: 'my_blockers', priority: null, title: null, context: { blocked_story_id: 's2' } },
       ],
       attention: [
-        { type: 'agent_stuck', entity_type: 'story', entity_id: 's3', gate_type: 'merge', story_id: null, blocked_story_id: null, title: null },
-        { type: 'story_stalled', entity_type: null, entity_id: null, gate_type: null, story_id: 's4', blocked_story_id: null, title: null },
-        { type: 'unanswered_blocker', entity_type: null, entity_id: null, gate_type: null, story_id: null, blocked_story_id: 's5', title: null },
+        { type: 'agent_stuck', entity_type: 'story', entity_id: 's3', gate_type: 'merge', story_id: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null },
+        { type: 'story_stalled', entity_type: null, entity_id: null, gate_type: null, story_id: 's4', blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null },
+        { type: 'unanswered_blocker', entity_type: null, entity_id: null, gate_type: null, story_id: null, blocked_story_id: 's5', title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null },
       ],
     };
     const notifications = [{ id: 'n1', title: 'Contract done', body: 'evidence attached', href: '/inbox' }];
@@ -128,7 +149,7 @@ describe('buildNowFace', () => {
     const raw: RawMyActions = {
       queue: [],
       attention: [
-        { type: 'story_stalled', entity_type: null, entity_id: null, gate_type: null, story_id: 's9', blocked_story_id: null, title: '결제 완료율 개선' },
+        { type: 'story_stalled', entity_type: null, entity_id: null, gate_type: null, story_id: 's9', blocked_story_id: null, title: '결제 완료율 개선', hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null },
       ],
     };
     const items = buildNowFace(raw, [], t);
@@ -142,7 +163,7 @@ describe('buildNowFace', () => {
     const raw: RawMyActions = {
       queue: [],
       attention: [
-        { type: 'story_stalled', entity_type: null, entity_id: null, gate_type: null, story_id: 's9', blocked_story_id: null, title: null },
+        { type: 'story_stalled', entity_type: null, entity_id: null, gate_type: null, story_id: 's9', blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null },
       ],
     };
     const items = buildNowFace(raw, [], t);
@@ -155,7 +176,7 @@ describe('buildNowFace', () => {
     const raw: RawMyActions = {
       queue: [],
       attention: [
-        { type: 'unanswered_blocker', entity_type: null, entity_id: null, gate_type: null, story_id: null, blocked_story_id: 's7', title: null },
+        { type: 'unanswered_blocker', entity_type: null, entity_id: null, gate_type: null, story_id: null, blocked_story_id: 's7', title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null },
       ],
     };
     const items = buildNowFace(raw, [], t);
@@ -164,10 +185,63 @@ describe('buildNowFace', () => {
     expect(signal?.id).toBe('unanswered_blocker-s7');
   });
 
+  it('hypothesis_falsified — title은 statement, href는 /flow?hypothesis={id}, context는 실측/목표를 보인다', () => {
+    const raw: RawMyActions = {
+      queue: [],
+      attention: [{
+        type: 'hypothesis_falsified', entity_type: null, entity_id: null, gate_type: null,
+        story_id: null, blocked_story_id: null, title: null,
+        hypothesis_id: 'h1', statement: '결제 완료율 개선',
+        outcome_result: { metric: 'checkout_rate', target: 60, actual: 52, direction: 'up' },
+        falsified_days: 2, superseded_by_hypothesis_id: null,
+      }],
+    };
+    const items = buildNowFace(raw, [], t);
+    const signal = items.find((i) => i.kind === 'signal');
+    expect(signal?.title).toBe('결제 완료율 개선');
+    expect(signal?.href).toBe('/flow?hypothesis=h1');
+    expect(signal?.id).toBe('hypothesis_falsified-h1');
+    expect(signal?.context).toContain('52');
+    expect(signal?.context).toContain('60');
+  });
+
+  it('hypothesis_falsified — superseded_by_hypothesis_id가 있으면 "낳음" 정반합 톤, 없으면 실측/목표', () => {
+    const raw: RawMyActions = {
+      queue: [],
+      attention: [{
+        type: 'hypothesis_falsified', entity_type: null, entity_id: null, gate_type: null,
+        story_id: null, blocked_story_id: null, title: null,
+        hypothesis_id: 'h1', statement: '결제 완료율 개선',
+        outcome_result: { metric: 'checkout_rate', target: 60, actual: 52, direction: 'up' },
+        falsified_days: 2, superseded_by_hypothesis_id: 'h2',
+      }],
+    };
+    const items = buildNowFace(raw, [], t);
+    const signal = items.find((i) => i.kind === 'signal');
+    expect(signal?.context).toBe('이 반증이 다음 질문을 낳았습니다');
+  });
+
+  it('hypothesis_falsified 카피는 "이상감지"/"예상과 다르게" 금지어를 안 쓴다(#2539 그라운딩 — in-flight 이상감지는 스코프 밖)', () => {
+    const raw: RawMyActions = {
+      queue: [],
+      attention: [{
+        type: 'hypothesis_falsified', entity_type: null, entity_id: null, gate_type: null,
+        story_id: null, blocked_story_id: null, title: null,
+        hypothesis_id: 'h1', statement: null,
+        outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: 'h2',
+      }],
+    };
+    const items = buildNowFace(raw, [], t);
+    const signal = items.find((i) => i.kind === 'signal');
+    const copy = `${signal!.title} ${signal!.context}`;
+    expect(copy).not.toContain('이상감지');
+    expect(copy).not.toContain('예상과 다르게');
+  });
+
   it('never leaks raw elapsed-time text into signal context copy (surveillance framing ban — doc §1.5/§1.7)', () => {
     const raw: RawMyActions = {
       queue: [],
-      attention: [{ type: 'agent_stuck', entity_type: 'story', entity_id: 's1', gate_type: 'merge', story_id: null, blocked_story_id: null, title: null }],
+      attention: [{ type: 'agent_stuck', entity_type: 'story', entity_id: 's1', gate_type: 'merge', story_id: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null }],
     };
     const items = buildNowFace(raw, [], t);
     const signal = items.find((i) => i.kind === 'signal');
@@ -191,7 +265,7 @@ describe('buildNowFace', () => {
   });
 
   it('produces no primary action when there are no decide items', () => {
-    const raw: RawMyActions = { queue: [], attention: [{ type: 'agent_stuck', entity_type: null, entity_id: 's1', gate_type: null, story_id: null, blocked_story_id: null, title: null }] };
+    const raw: RawMyActions = { queue: [], attention: [{ type: 'agent_stuck', entity_type: null, entity_id: 's1', gate_type: null, story_id: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null }] };
     const items = buildNowFace(raw, [], t);
     expect(items.every((i) => i.actionTone === 'ghost')).toBe(true);
   });
@@ -199,7 +273,7 @@ describe('buildNowFace', () => {
   it('sorts decide before signal before done', () => {
     const raw: RawMyActions = {
       queue: [{ type: 'review_merge', priority: 'info', title: 'x', context: {} }],
-      attention: [{ type: 'agent_stuck', entity_type: null, entity_id: 's1', gate_type: null, story_id: null, blocked_story_id: null, title: null }],
+      attention: [{ type: 'agent_stuck', entity_type: null, entity_id: 's1', gate_type: null, story_id: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null }],
     };
     const items = buildNowFace(raw, [{ id: 'n1', title: 'done', body: null, href: null }], t);
     expect(items.map((i) => i.kind)).toEqual(['decide', 'signal', 'done']);

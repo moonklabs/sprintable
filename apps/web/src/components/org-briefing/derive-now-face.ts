@@ -44,6 +44,14 @@ function str(v: unknown): string | null {
   return typeof v === 'string' && v.length > 0 ? v : null;
 }
 
+function num(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+function record(v: unknown): Record<string, unknown> | null {
+  return isRecord(v) ? v : null;
+}
+
 interface RawQueueItem {
   type: string;
   priority: string | null;
@@ -63,8 +71,17 @@ interface RawAttentionItem {
   // href가 매번 제네릭 /board로 떨어지고 id도 배열 index로 새 렌더마다 안 안정됐다.
   story_id: string | null;
   blocked_story_id: string | null;
-  // title은 story_stalled 전용(디디 BE 후속 추가 예정, 아직 미배선) — 없으면 폴백 문구.
+  // title은 story_stalled/unanswered_blocker(#2938)가 이미 배선함 — 없으면 폴백 문구.
   title: string | null;
+  // story #2539(BE PR#2939) — 4번째 attention type `hypothesis_falsified`. "진행 중 가설이
+  // 어긋나는 조짐"(in-flight)은 데이터 구조상 불가로 확認됐다(hypothesis_scorer.py가
+  // outcome_result를 종결 분기에서만 채움) — 그래서 스코프는 "방금 반증으로 종결된 가설"
+  // 결과 통보 하나뿐이다. severity=info(경고 아님), "이상감지" 뉘앙스 배제.
+  hypothesis_id: string | null;
+  statement: string | null;
+  outcome_result: Record<string, unknown> | null;
+  falsified_days: number | null;
+  superseded_by_hypothesis_id: string | null;
 }
 
 export interface RawMyActions {
@@ -109,6 +126,11 @@ export function parseMyActions(json: unknown): RawMyActions {
         story_id: str(raw['story_id']),
         blocked_story_id: str(raw['blocked_story_id']),
         title: str(raw['title']),
+        hypothesis_id: str(raw['hypothesis_id']),
+        statement: str(raw['statement']),
+        outcome_result: record(raw['outcome_result']),
+        falsified_days: num(raw['falsified_days']),
+        superseded_by_hypothesis_id: str(raw['superseded_by_hypothesis_id']),
       });
     }
   }
@@ -223,6 +245,28 @@ export function buildNowFace(raw: RawMyActions, notifications: RawCompletionNoti
         actionLabel: t('actionOpen'), actionTone: 'ghost',
         href: a.blocked_story_id ? `/board?story=${a.blocked_story_id}` : '/board',
         priority: 22,
+      });
+    } else if (a.type === 'hypothesis_falsified') {
+      // story #2539(BE) — "방금 반증으로 종결된 가설" 결과 통보뿐(in-flight 이상감지는 데이터
+      // 구조상 불가로 확認 완료, PR#2939 본문). severity=info라 이 화면에서도 경고 톤이
+      // 아니라 정반합 톤("낳음")으로 — hypothesis-status-badge/hypothesis-narrative-panel의
+      // 기존 결정("반증에 빨강 금지·닫힘 아니라 낳음")과 같은 결을 여기서도 지킨다.
+      const outcome = record(a.outcome_result);
+      const actual = outcome ? num(outcome['actual']) : null;
+      const target = outcome ? num(outcome['target']) : null;
+      const hasOutcome = actual !== null && target !== null;
+      items.push({
+        id: `hypothesis_falsified-${a.hypothesis_id ?? items.length}`,
+        kind: 'signal', kindLabel: t('kindSignal'),
+        title: a.statement ?? t('signalHypothesisFalsifiedTitle'),
+        context: a.superseded_by_hypothesis_id
+          ? t('signalHypothesisFalsifiedSupersededContext')
+          : hasOutcome
+            ? t('signalHypothesisFalsifiedOutcomeContext', { actual, target })
+            : t('signalHypothesisFalsifiedContext'),
+        actionLabel: t('actionOpen'), actionTone: 'ghost',
+        href: a.hypothesis_id ? `/flow?hypothesis=${a.hypothesis_id}` : '/flow',
+        priority: 19,
       });
     }
   }
