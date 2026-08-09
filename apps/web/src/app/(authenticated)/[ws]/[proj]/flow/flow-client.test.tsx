@@ -65,8 +65,11 @@ vi.mock('@/components/glance/load-glance-data', () => ({
   loadGlanceData: loadGlanceDataMock,
 }));
 
+// story #2531 — 카디르 ①HIGH 회귀가드 재료(모바일 기본값 분기 테스트)가 isMobile을 true로
+// 뒤집을 수 있어야 해서 mutable로 바꾼다. 기본은 false(기존 스펙 전부 그대로 통과).
+let isMobileMock = false;
 vi.mock('@/hooks/use-mobile', () => ({
-  useIsMobile: () => false,
+  useIsMobile: () => isMobileMock,
 }));
 
 // NextMakerScreen 스텁 — onSelectStory 호출 버튼 + selectedNodeId를 텍스트로 노출(threading 검증용).
@@ -104,6 +107,7 @@ function wrap(node: React.ReactNode) {
 
 beforeEach(() => {
   currentSearch = '';
+  isMobileMock = false;
   pushMock.mockClear();
   loadGlanceDataMock.mockClear();
   loadGlanceDataMock.mockResolvedValue({ memberMap: {}, attentionSignals: [] });
@@ -344,5 +348,41 @@ describe('FlowPageClient — story #2531(E-FLOW-V4 S1) 가설이 기본·최상�
 
     const pushedUrl = pushMock.mock.calls[0]?.[0] as string;
     expect(pushedUrl).not.toContain('view=');
+  });
+});
+
+// 카디르 라이브 QA(2026-08-09, S1) — REQUEST_CHANGES 2건 회귀가드.
+describe('FlowPageClient — 카디르 QA fix(2026-08-09) ①모바일 dead-end', () => {
+  it('모바일(isMobile=true)·?view= 없음 이면 기본값이 가설이 아니라 flow(NextMakerScreen)다 — 갈래·목록으로 갈 UI 경로가 0이 되는 dead-end 방지', async () => {
+    isMobileMock = true;
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="next-maker-screen-stub"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).toBeNull();
+  });
+
+  it('데스크톱(isMobile=false)·?view= 없음 이면 기존대로 가설이 기본값이다(회귀 없음)', async () => {
+    isMobileMock = false;
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).not.toBeNull();
+  });
+
+  it('모바일이라도 ?view=hypothesis가 URL에 명시돼 있으면 그대로 존중한다(주소로는 진입 가능)', async () => {
+    isMobileMock = true;
+    currentSearch = 'view=hypothesis';
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).not.toBeNull();
+  });
+});
+
+describe('FlowPageClient — 카디르 QA fix(2026-08-09) ②패널 경계(구 2값 FlowView 잔재)', () => {
+  it('기본(가설) 뷰에서 ?story=<id>가 있어도 FlowNodeStoryPanel이 새지 않는다(가설 뷰엔 선택 UI 자체가 없다)', async () => {
+    currentSearch = 'story=story-leak';
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="flow-node-story-panel-stub"]')).toBeNull();
   });
 });

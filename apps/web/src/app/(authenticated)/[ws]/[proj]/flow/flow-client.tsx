@@ -39,10 +39,18 @@ type FlowView = 'hypothesis' | 'flow' | 'list';
 // 랜딩(?view= 없음)으로 최상위를 차지하는가»로 판정 — 그래서 default가 'flow'(갈래·
 // NextMakerScreen)에서 'hypothesis'로 이동한다. 갈래·목록은 폐기 아님 — 나란한 탭으로
 // 남아 v3.4 계승(§6)을 만족한다. 가설→갈래 드릴다운은 S5(축척 전환) 몫이라 이번엔 병렬.
-function parseView(raw: string | null): FlowView {
+//
+// ⛔카디르 라이브 QA(2026-08-09, ①HIGH) — 모바일(390px)은 세그 자체를 안 그리므로(#2225
+// 탭이 대신함), 기본값을 데스크톱과 똑같이 가설로 바꾸면 모바일에서 갈래(NextMakerScreen
+// 상호작용 보드)·목록(칸반)으로 갈 UI 경로가 0이 되는 dead-end였다. 모바일 가설 축척은
+// #2225(모바일 3화면)/S5 몫이라 — 데스크톱만 가설 기본, 모바일은 기존(flow=NextMakerScreen)
+// 유지한다. `?view=`가 URL에 명시돼 있으면(모바일도 주소로는 들어올 수 있으므로) 그 값을
+// 그대로 존중 — 이 폴백은 «파라미터가 아예 없을 때»만 개입한다.
+function parseView(raw: string | null, isMobile: boolean): FlowView {
   if (raw === 'list' || raw === 'kanban') return 'list';
   if (raw === 'flow') return 'flow';
-  return 'hypothesis';
+  if (raw === 'hypothesis') return 'hypothesis';
+  return isMobile ? 'flow' : 'hypothesis';
 }
 
 /**
@@ -67,12 +75,14 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
   const tGlance = useTranslations('glance');
   const router = useRouter();
   const searchParams = useSearchParams();
-  const view = parseView(searchParams.get('view'));
   // 유나 지적(2026-07-30) — 모바일은 갈래|칸반 세그를 그리지 않는다(#2225의 갈래·막힘·멈춤
   // 탭이 그 자리를 대신함). CSS로 숨기면 DOM에 둘 다 남아 스크린리더·탭 순서가 겹친다(#2225
   // AC3와 같은 규율) — useIsMobile로 렌더 자체를 가른다. `?view=`는 모바일에서도 URL 정본
   // 그대로라 세그가 없어도 주소로 칸반 진입은 가능하다.
   const isMobile = useIsMobile();
+  // story #2531 — 기본값(파라미터 없음) 판정이 데스크톱/모바일에 따라 갈리므로 isMobile이
+  // 정해진 뒤에 view를 센다(카디르 ①HIGH fix).
+  const view = parseView(searchParams.get('view'), isMobile);
 
   const [data, setData] = useState<GlanceData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -225,8 +235,13 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
 
         {/* story #2354 — 지도 위에 겹치는 패널. list 보기일 땐 KanbanBoard가 이미 자기
             방식(전체화면 드로어)으로 같은 `?story=`를 읽어 여는 중이라(AC9 회귀 없음), 여기서
-            또 열면 두 벌이 뜬다 — view==='flow'일 때만 렌더한다. */}
-        {view !== 'list' && panelOpen && selectedStoryId ? (
+            또 열면 두 벌이 뜬다 — view==='flow'일 때만 렌더한다.
+            ⛔카디르 라이브 QA(2026-08-09, ②MEDIUM) — 조건이 `view !== 'list'`(구 2값
+            FlowView 시절 잔재)로 남아있어, story #2531로 view가 3값이 된 뒤 기본(가설) 뷰
+            에서도 `/flow?story=<id>`면 패널이 샜다. 주석이 원래 말하던 대로 정확히
+            `view === 'flow'`로 좁힌다 — 가설 뷰엔 story 선택 UI 자체가 없어 패널이 뜰
+            이유가 없다. */}
+        {view === 'flow' && panelOpen && selectedStoryId ? (
           // key={selectedStoryId} — 다른 노드를 연달아 누르면 통째로 다시 마운트시킨다(초기
           // loading 상태가 매번 자연히 맞다, flow-node-story-panel.tsx 문서 참고).
           <FlowNodeStoryPanel key={selectedStoryId} storyId={selectedStoryId} onClose={handleClosePanel} />
