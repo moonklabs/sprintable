@@ -225,18 +225,26 @@ async def test_my_actions_my_blockers_member_private():
 
 @pytest.mark.anyio
 async def test_my_actions_stalled_and_unanswered_blocker_enum_only():
-    """CC-BE.2 이상감지: story_stalled + unanswered_blocker(org attention·enum/ids/age·raw text 0)."""
+    """CC-BE.2 이상감지: story_stalled + unanswered_blocker(org attention·enum/ids/age·raw text 0).
+
+    story #2538: title 추가(FE "제목+N일" 구별용) — 가설과 무관한 카피 오라벨링 정정의
+    전제 데이터."""
     sid, blocker_id, blocked_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     resp, session, resolver = await _get(
         "/api/v2/command-center/my-actions",
-        execute_seq=_ma_seq(stalled=[(sid, _OLD)], unanswered=[(blocker_id, blocked_id, _OLD)]))
+        execute_seq=_ma_seq(
+            stalled=[(sid, _OLD, "정체된 스토리")],
+            unanswered=[(blocker_id, blocked_id, _OLD, "막힌 스토리")],
+        ))
     assert resp.status_code == 200
     types = {i["type"] for i in _data(resp)["attention"]["items"]}
     assert {"story_stalled", "unanswered_blocker"} <= types
     items = _data(resp)["attention"]["items"]
     stalled_item = next(i for i in items if i["type"] == "story_stalled")
     assert stalled_item["story_id"] == str(sid) and isinstance(stalled_item["stalled_days"], int)
+    assert stalled_item["title"] == "정체된 스토리"
     ub = next(i for i in items if i["type"] == "unanswered_blocker")
+    assert ub["blocked_story_title"] == "막힌 스토리"
     assert ub["blocked_story_id"] == str(blocked_id) and isinstance(ub["age_days"], int)
 
 
