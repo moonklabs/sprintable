@@ -36,7 +36,22 @@ vi.mock('@/components/kanban/kanban-board', () => ({
 // story #2531 — 지구층은 default view가 됐으니 view=flow/list 를 테스트하는 기존 스펙들이
 // 실제 fetch를 안 타게 얇은 스텁으로 대체한다(지구층 자체 스펙은 별도 테스트 파일).
 vi.mock('@/components/flow/hypothesis-earth-layer', () => ({
-  HypothesisEarthLayer: () => <div data-testid="hypothesis-earth-layer-stub">earth</div>,
+  HypothesisEarthLayer: ({ onSelectHypothesis }: { onSelectHypothesis: (id: string) => void }) => (
+    <div data-testid="hypothesis-earth-layer-stub">
+      earth
+      <button type="button" onClick={() => onSelectHypothesis('hyp-abc')}>select-hypothesis</button>
+    </div>
+  ),
+}));
+
+// story #2533 — 서사 패널 스텁(자기 fetch를 exercise 안 함, hypothesisId threading만 검증).
+vi.mock('@/components/flow/hypothesis-narrative-panel', () => ({
+  HypothesisNarrativePanel: ({ hypothesisId, onClose }: { hypothesisId: string; onClose: () => void }) => (
+    <div data-testid="hypothesis-narrative-panel-stub">
+      <span data-testid="narrative-hypothesis-id">{hypothesisId}</span>
+      <button type="button" onClick={onClose}>close-narrative</button>
+    </div>
+  ),
 }));
 
 // 유나 가디언 리뷰(2026-07-31, PR#2744 issuecomment) 회귀 가드 재료 — 옛 스텁은 items를
@@ -375,6 +390,25 @@ describe('FlowPageClient — 카디르 QA fix(2026-08-09) ①모바일 dead-end'
 
     expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).not.toBeNull();
   });
+
+  // 카디르 재QA 비차단②(2026-08-09, #2930) — 모바일 공유링크/새로고침이 ?hypothesis=만
+  // 들고 오면(흔한 형태) 위 모바일 기본값(flow)이 이겨 서사 패널이 안 떴다.
+  it('모바일이라도 ?hypothesis=<id>만 있고 ?view= 없으면 가설 뷰로 추론해 패널이 뜬다(공유링크/새로고침 fix)', async () => {
+    isMobileMock = true;
+    currentSearch = 'hypothesis=h-shared';
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="hypothesis-narrative-panel-stub"]')).not.toBeNull();
+  });
+
+  it('모바일·?hypothesis= 있어도 ?view=flow가 명시돼 있으면 그 값을 그대로 존중한다(회귀 없음)', async () => {
+    isMobileMock = true;
+    currentSearch = 'hypothesis=h-shared&view=flow';
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="next-maker-screen-stub"]')).not.toBeNull();
+  });
 });
 
 describe('FlowPageClient — 카디르 QA fix(2026-08-09) ②패널 경계(구 2값 FlowView 잔재)', () => {
@@ -384,5 +418,52 @@ describe('FlowPageClient — 카디르 QA fix(2026-08-09) ②패널 경계(구 2
 
     expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="flow-node-story-panel-stub"]')).toBeNull();
+  });
+});
+
+// story #2533(E-FLOW-V4 S3) — 가설 카드 클릭→수직 서사 패널.
+describe('FlowPageClient — story #2533 가설 카드 클릭이 서사 패널을 연다', () => {
+  it('가설 카드를 선택하면 ?hypothesis=<id>가 URL에 붙고 패널이 뜬다(view는 안 건드림)', async () => {
+    await renderFlowClient();
+    expect(container.querySelector('[data-testid="hypothesis-narrative-panel-stub"]')).toBeNull();
+
+    const selectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'select-hypothesis');
+    expect(selectButton).toBeTruthy();
+    await act(async () => {
+      selectButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    const pushedUrl = pushMock.mock.calls[0]?.[0] as string;
+    expect(pushedUrl).toContain('hypothesis=hyp-abc');
+    expect(pushedUrl).not.toContain('view=');
+  });
+
+  it('?hypothesis=<id>가 이미 URL에 있으면(딥링크) 마운트 즉시 패널이 열린다', async () => {
+    currentSearch = 'hypothesis=hyp-deep';
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="hypothesis-narrative-panel-stub"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="narrative-hypothesis-id"]')?.textContent).toBe('hyp-deep');
+  });
+
+  it('패널을 닫으면 URL에서 ?hypothesis= 파라미터가 지워진다', async () => {
+    currentSearch = 'hypothesis=hyp-deep';
+    await renderFlowClient();
+
+    const closeButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'close-narrative');
+    await act(async () => {
+      closeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const pushedUrl = pushMock.mock.calls[0]?.[0] as string;
+    expect(pushedUrl).not.toContain('hypothesis=');
+  });
+
+  it('갈래(view=flow) 뷰에서는 ?hypothesis=<id>가 있어도 서사 패널이 안 뜬다(가설 뷰 전용)', async () => {
+    currentSearch = 'view=flow&hypothesis=hyp-abc';
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="hypothesis-narrative-panel-stub"]')).toBeNull();
   });
 });

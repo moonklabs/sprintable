@@ -13,6 +13,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { NextMakerScreen } from '@/components/flow/next-maker-screen';
 import { FlowNodeStoryPanel } from '@/components/flow/flow-node-story-panel';
 import { HypothesisEarthLayer } from '@/components/flow/hypothesis-earth-layer';
+import { HypothesisNarrativePanel } from '@/components/flow/hypothesis-narrative-panel';
 
 interface FlowPageClientProps {
   projectId: string;
@@ -46,10 +47,15 @@ type FlowView = 'hypothesis' | 'flow' | 'list';
 // #2225(모바일 3화면)/S5 몫이라 — 데스크톱만 가설 기본, 모바일은 기존(flow=NextMakerScreen)
 // 유지한다. `?view=`가 URL에 명시돼 있으면(모바일도 주소로는 들어올 수 있으므로) 그 값을
 // 그대로 존중 — 이 폴백은 «파라미터가 아예 없을 때»만 개입한다.
-function parseView(raw: string | null, isMobile: boolean): FlowView {
+// ⛔카디르 재QA 비차단②(2026-08-09, S3) — 모바일에서 `?hypothesis=<id>`만 있고 `?view=`가
+// 없으면(공유 링크·새로고침의 흔한 형태) 위 모바일 기본값(flow)이 이겨 서사 패널이
+// 렌더되지 않았다(패널은 view==='hypothesis'에서만 뜬다). hypothesis 파라미터가 있으면
+// «명시 view»와 동급으로 존중 — 모바일이어도 그 가설을 보러 온 것이 명백하므로.
+function parseView(raw: string | null, isMobile: boolean, hasHypothesisParam: boolean): FlowView {
   if (raw === 'list' || raw === 'kanban') return 'list';
   if (raw === 'flow') return 'flow';
   if (raw === 'hypothesis') return 'hypothesis';
+  if (hasHypothesisParam) return 'hypothesis';
   return isMobile ? 'flow' : 'hypothesis';
 }
 
@@ -81,8 +87,9 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
   // 그대로라 세그가 없어도 주소로 칸반 진입은 가능하다.
   const isMobile = useIsMobile();
   // story #2531 — 기본값(파라미터 없음) 판정이 데스크톱/모바일에 따라 갈리므로 isMobile이
-  // 정해진 뒤에 view를 센다(카디르 ①HIGH fix).
-  const view = parseView(searchParams.get('view'), isMobile);
+  // 정해진 뒤에 view를 센다(카디르 ①HIGH fix). hasHypothesisParam은 카디르 재QA 비차단②
+  // (S3) — 모바일에서 `?hypothesis=`만 있는 공유링크/새로고침이 패널을 못 열던 것 fix.
+  const view = parseView(searchParams.get('view'), isMobile, searchParams.get('hypothesis') !== null);
 
   const [data, setData] = useState<GlanceData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -132,6 +139,22 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
     if (selectedStoryId) setPanelOpen(true);
   }, [selectedStoryId]);
   const handleClosePanel = useCallback(() => setPanelOpen(false), []);
+
+  // story #2533(E-FLOW-V4 S3) — 가설 생애 수직 서사 패널. story 패널(위)과 달리 「닫아도
+  // 선택 유지」 뉘앙스가 AC에 없어 훨씬 단순하게: URL의 `?hypothesis=`가 곧 열림 상태의
+  // 단일 소스다(별도 panelOpen 불필요) — 닫으면 파라미터 자체를 지운다.
+  const selectedHypothesisId = searchParams.get('hypothesis');
+  const handleSelectHypothesis = useCallback((id: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('hypothesis', id);
+    router.push(`/${wsSlug}/${projSlug}/flow?${params.toString()}`, { scroll: false });
+  }, [router, searchParams, wsSlug, projSlug]);
+  const handleCloseHypothesisPanel = useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('hypothesis');
+    const qs = params.toString();
+    router.push(`/${wsSlug}/${projSlug}/flow${qs ? `?${qs}` : ''}`, { scroll: false });
+  }, [router, searchParams, wsSlug, projSlug]);
 
   const exceptionItems = useMemo(() => {
     if (!data) return [];
@@ -204,7 +227,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
         {view === 'hypothesis' ? (
           // story #2531(E-FLOW-V4 S1) — 새 기본 랜딩. 가설(질문)을 최상위 조직 단위로 삼는
           // 지구 층. 드릴다운(가설→갈래)은 S5 몫이라 지금은 독립 탭으로만 존재한다.
-          <HypothesisEarthLayer projectId={projectId} />
+          <HypothesisEarthLayer projectId={projectId} onSelectHypothesis={handleSelectHypothesis} />
         ) : view === 'list' ? (
           // 2026-07-30 PO 확認 대기 — 07-23 시안의 「목록」이 칸반과 동일한지 디디군이 확認
           // 중(단순 표라면 드래그로 상태를 바꾸는 길이 사라지는지라 다르다). 답 오기 前엔
@@ -245,6 +268,12 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           // key={selectedStoryId} — 다른 노드를 연달아 누르면 통째로 다시 마운트시킨다(초기
           // loading 상태가 매번 자연히 맞다, flow-node-story-panel.tsx 문서 참고).
           <FlowNodeStoryPanel key={selectedStoryId} storyId={selectedStoryId} onClose={handleClosePanel} />
+        ) : null}
+
+        {/* story #2533(E-FLOW-V4 S3) — 가설 생애 수직 서사. 가설 뷰에서만(다른 탭엔 가설 카드
+            자체가 없어 selectedHypothesisId가 그 탭에서 생길 일이 없다) */}
+        {view === 'hypothesis' && selectedHypothesisId ? (
+          <HypothesisNarrativePanel key={selectedHypothesisId} hypothesisId={selectedHypothesisId} onClose={handleCloseHypothesisPanel} />
         ) : null}
 
         {/* ③ 관제 서랍 — 보기 무관 고정, 접힘 기본(IA §2). ExceptionStream = #2100 예외 스트림
