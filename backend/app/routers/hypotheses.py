@@ -27,6 +27,7 @@ from app.schemas.hypothesis import (
     HypothesisCreate,
     HypothesisDraftRequest,
     HypothesisDraftResponse,
+    HypothesisGuidedCreate,
     HypothesisLifecycleResponse,
     HypothesisLinkRequest,
     HypothesisResponse,
@@ -61,6 +62,7 @@ _ADMIN_ROLES = frozenset({"owner", "admin"})
 _ERROR_STATUS: dict[str, int] = {
     "HUMAN_OWNER_REQUIRED": 400,
     "HUMAN_CONFIRM_REQUIRED": 403,
+    "HUMAN_ONLY": 403,  # story #2542 — guided 생성은 휴먼 전용.
     "INVALID_CREATE_STATUS": 422,
     "INVALID_STATUS": 422,
     "OUTCOME_RESULT_REQUIRED": 422,  # story #2038
@@ -153,6 +155,25 @@ async def create_hypothesis(
     caller = await resolve_member(auth, org_id, session, project_id=body.project_id)
     try:
         return await svc.create_hypothesis(session, org_id, caller, body)
+    except svc.HypothesisServiceError as err:
+        _raise(err)
+
+
+# story #2542(v4 «가설 축척» ②첫 가설, 유나 SSOT ae75a8ff): /draft와 동일 이유로 /{id}
+# 계열보다 먼저 선언 — "guided"가 hypothesis_id UUID로 오파싱되는 걸 막는다.
+@router.post("/guided", response_model=HypothesisResponse, status_code=201)
+async def create_hypothesis_guided(
+    body: HypothesisGuidedCreate,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> HypothesisResponse:
+    """guided 3부 폼(statement·metric·target·direction) → status=measuring까지 1콜.
+    응답은 표준 HypothesisResponse(FE가 읽을 필드는 다른 생성 경로와 동일 — id/statement/
+    metric_definition/status/measure_after 등, status가 "measuring"으로 확定됨)."""
+    caller = await resolve_member(auth, org_id, session, project_id=body.project_id)
+    try:
+        return await svc.create_hypothesis_guided(session, org_id, caller, body)
     except svc.HypothesisServiceError as err:
         _raise(err)
 

@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, computed_field, field_validator, model_validator
 
-from app.schemas.story import _validate_metric_definition
+from app.schemas.story import _METRIC_DIRECTIONS, _validate_metric_definition
 
 # §2.5 상태 7종 (모델 HYPOTHESIS_STATUSES와 동기)
 HYPOTHESIS_STATUSES = (
@@ -42,6 +42,28 @@ class HypothesisCreate(BaseModel):
     def _check_metric(cls, v: dict[str, Any]) -> dict[str, Any]:
         # NOT NULL — None은 Pydantic 타입에서 이미 거부. 구조는 Story validator 재사용.
         return _validate_metric_definition(v)  # type: ignore[return-value]
+
+
+class HypothesisGuidedCreate(BaseModel):
+    """story #2542(v4 «가설 축척» ②첫 가설, 유나 SSOT ae75a8ff) — guided 3부 폼 전용 생성.
+
+    HypothesisCreate의 얇은 특수화: statement + {metric,target,direction} 3부만 받는다
+    (source·measure_after는 폼에 없음 — 서버가 source="manual"·measure_after=+14일로
+    보완). 생성 즉시 status=measuring까지 간다(빈 마찰 없는 «첫 성공») — _CREATE_STATUSES
+    를 넓히는 대신 기존 검증된 상태기계를 그대로 두 단계(active 생성 → measuring 전이)
+    재사용한다(app/services/hypothesis.py의 create_hypothesis_guided 참고)."""
+    project_id: uuid.UUID
+    statement: str
+    metric: str
+    target: float
+    direction: str
+
+    @field_validator("direction")
+    @classmethod
+    def _check_direction(cls, v: str) -> str:
+        if v not in _METRIC_DIRECTIONS:
+            raise ValueError(f"direction must be one of {sorted(_METRIC_DIRECTIONS)}")
+        return v
 
 
 class HypothesisUpdate(BaseModel):

@@ -29,6 +29,7 @@ from app.schemas.hypothesis import (
     HypothesisCreate,
     HypothesisDraftRequest,
     HypothesisDraftResponse,
+    HypothesisGuidedCreate,
     HypothesisLifecycleGoal,
     HypothesisLifecycleResponse,
     HypothesisLifecycleStory,
@@ -232,6 +233,46 @@ async def create_hypothesis(
     )
 
     return await _to_response(repo, hyp)
+
+
+async def create_hypothesis_guided(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    caller: ResolvedMember,
+    payload: HypothesisGuidedCreate,
+) -> HypothesisResponse:
+    """story #2542(v4 «가설 축척» ②첫 가설, 유나 SSOT ae75a8ff) — guided 3부 폼 →
+    status=measuring까지 낮은 마찰 1콜. _CREATE_STATUSES를 넓히지 않고(measuring은
+    여전히 transition 전용) 기존 검증된 상태기계를 그대로 두 단계 재사용한다:
+    create_hypothesis(status="active", 게이트 오버레이 없음 — proposed→active
+    workflow-line 오버레이는 transition 경로에만 있고 create에는 없다) →
+    transition_hypothesis(active→measuring, 게이트/outcome_result 요건 없는 단순 전이).
+
+    폼엔 없는 필드는 서버가 정직하게 보완한다: source="manual"(guided 3부가 GA4/
+    internal_ops 계측을 안 묻는다 — 지어내지 않는다), measure_after=+_DEFAULT_MEASURE_DAYS일
+    (draft() 자동초안과 동일 기본값, story #2038 계열과 동형)."""
+    if caller.type != "human":
+        raise HypothesisServiceError(
+            "HUMAN_ONLY", "guided 가설 생성은 휴먼 전용입니다."
+        )
+
+    metric_definition = {
+        "metric": payload.metric, "source": "manual",
+        "target": payload.target, "direction": payload.direction,
+    }
+    measure_after = datetime.now(timezone.utc) + timedelta(days=_DEFAULT_MEASURE_DAYS)
+
+    created = await create_hypothesis(
+        session, org_id, caller,
+        HypothesisCreate(
+            project_id=payload.project_id, statement=payload.statement,
+            metric_definition=metric_definition, measure_after=measure_after,
+            owner_member_id=caller.id, status="active",
+        ),
+    )
+    return await transition_hypothesis(
+        session, org_id, caller, created.id, HypothesisTransition(status="measuring"),
+    )
 
 
 async def get_hypothesis(
