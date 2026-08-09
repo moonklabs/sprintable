@@ -390,6 +390,25 @@ describe('FlowPageClient — 카디르 QA fix(2026-08-09) ①모바일 dead-end'
 
     expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).not.toBeNull();
   });
+
+  // 카디르 재QA 비차단②(2026-08-09, #2930) — 모바일 공유링크/새로고침이 ?hypothesis=만
+  // 들고 오면(흔한 형태) 위 모바일 기본값(flow)이 이겨 서사 패널이 안 떴다.
+  it('모바일이라도 ?hypothesis=<id>만 있고 ?view= 없으면 가설 뷰로 추론해 패널이 뜬다(공유링크/새로고침 fix)', async () => {
+    isMobileMock = true;
+    currentSearch = 'hypothesis=h-shared';
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="hypothesis-narrative-panel-stub"]')).not.toBeNull();
+  });
+
+  it('모바일·?hypothesis= 있어도 ?view=flow가 명시돼 있으면 그 값을 그대로 존중한다(회귀 없음)', async () => {
+    isMobileMock = true;
+    currentSearch = 'hypothesis=h-shared&view=flow';
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="next-maker-screen-stub"]')).not.toBeNull();
+  });
 });
 
 describe('FlowPageClient — 카디르 QA fix(2026-08-09) ②패널 경계(구 2값 FlowView 잔재)', () => {

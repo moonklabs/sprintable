@@ -177,25 +177,39 @@ export function HypothesisNarrativePanel({
             </NarrativeStep>
 
             <NarrativeStep label={t('narrativeStepProof')} title={t('narrativeStepProof')}>
-              {state.data.hypothesis.outcome_result ? (
-                <p className="mb-1.5">
-                  {t('narrativeActual')}{' '}
-                  <span className={cn('font-semibold', state.data.hypothesis.status === 'verified' ? 'text-success' : 'text-info')}>
-                    {String((state.data.hypothesis.outcome_result as Record<string, unknown>).actual ?? '')}
-                  </span>
-                  {' / '}
-                  {t('narrativeTarget')} {String((state.data.hypothesis.outcome_result as Record<string, unknown>).target ?? '')}
-                  {/* story #2533 follow-up②(유나 design 재검, 2026-08-09) — falsified는 색이
-                      아니라 «결론 방향»(목표 미달)으로 읽히게. 방향(↑/↓)은 hypothesis 자기
-                      metric_definition에서(outcome_result에도 direction이 있지만 재확認 없이
-                      두 소스를 섞지 않는다 — hypothesis 레벨을 SSOT로 고정). */}
-                  {state.data.hypothesis.status === 'falsified' ? (
-                    <span className="ml-1.5 font-semibold text-info">
-                      · {t('narrativeMissedTarget')} {state.data.hypothesis.metric_definition?.direction === 'down' ? '↓' : '↑'}
+              {(() => {
+                const outcome = state.data.hypothesis.outcome_result as Record<string, unknown> | null;
+                if (!outcome) return null;
+                // 카디르 재QA 비차단①(2026-08-09) — killed 전이는 outcome_result가
+                // {reason}뿐이라(actual/target 없음, backend/app/services/hypothesis.py:493)
+                // 기존 actual/target 렌더가 빈 값으로 나왔다. actual이 없으면 reason으로
+                // 폴백 — 둘 다 없으면 정직하게 아무것도 안 그린다(지어내지 않는다).
+                if (outcome.actual === undefined) {
+                  const reason = outcome.reason;
+                  return typeof reason === 'string' && reason.trim() ? (
+                    <p className="mb-1.5">{t('narrativeKilledReason', { reason })}</p>
+                  ) : null;
+                }
+                return (
+                  <p className="mb-1.5">
+                    {t('narrativeActual')}{' '}
+                    <span className={cn('font-semibold', state.data.hypothesis.status === 'verified' ? 'text-success' : 'text-info')}>
+                      {String(outcome.actual ?? '')}
                     </span>
-                  ) : null}
-                </p>
-              ) : null}
+                    {' / '}
+                    {t('narrativeTarget')} {String(outcome.target ?? '')}
+                    {/* story #2533 follow-up②(유나 design 재검, 2026-08-09) — falsified는 색이
+                        아니라 «결론 방향»(목표 미달)으로 읽히게. 방향(↑/↓)은 hypothesis 자기
+                        metric_definition에서(outcome_result에도 direction이 있지만 재확認 없이
+                        두 소스를 섞지 않는다 — hypothesis 레벨을 SSOT로 고정). */}
+                    {state.data.hypothesis.status === 'falsified' ? (
+                      <span className="ml-1.5 font-semibold text-info">
+                        · {t('narrativeMissedTarget')} {state.data.hypothesis.metric_definition?.direction === 'down' ? '↓' : '↑'}
+                      </span>
+                    ) : null}
+                  </p>
+                );
+              })()}
               {/* PR#2930 리뷰② — 스토리별 gate/evidence 간접조회(hypothesis_story_links 거쳐).
                   매칭이 없으면 gate_status=null·evidence_count=0("아직") 그대로 정직하게. */}
               {state.data.stories.length > 0 ? (

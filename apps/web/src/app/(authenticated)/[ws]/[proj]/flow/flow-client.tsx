@@ -47,10 +47,15 @@ type FlowView = 'hypothesis' | 'flow' | 'list';
 // #2225(모바일 3화면)/S5 몫이라 — 데스크톱만 가설 기본, 모바일은 기존(flow=NextMakerScreen)
 // 유지한다. `?view=`가 URL에 명시돼 있으면(모바일도 주소로는 들어올 수 있으므로) 그 값을
 // 그대로 존중 — 이 폴백은 «파라미터가 아예 없을 때»만 개입한다.
-function parseView(raw: string | null, isMobile: boolean): FlowView {
+// ⛔카디르 재QA 비차단②(2026-08-09, S3) — 모바일에서 `?hypothesis=<id>`만 있고 `?view=`가
+// 없으면(공유 링크·새로고침의 흔한 형태) 위 모바일 기본값(flow)이 이겨 서사 패널이
+// 렌더되지 않았다(패널은 view==='hypothesis'에서만 뜬다). hypothesis 파라미터가 있으면
+// «명시 view»와 동급으로 존중 — 모바일이어도 그 가설을 보러 온 것이 명백하므로.
+function parseView(raw: string | null, isMobile: boolean, hasHypothesisParam: boolean): FlowView {
   if (raw === 'list' || raw === 'kanban') return 'list';
   if (raw === 'flow') return 'flow';
   if (raw === 'hypothesis') return 'hypothesis';
+  if (hasHypothesisParam) return 'hypothesis';
   return isMobile ? 'flow' : 'hypothesis';
 }
 
@@ -82,8 +87,9 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
   // 그대로라 세그가 없어도 주소로 칸반 진입은 가능하다.
   const isMobile = useIsMobile();
   // story #2531 — 기본값(파라미터 없음) 판정이 데스크톱/모바일에 따라 갈리므로 isMobile이
-  // 정해진 뒤에 view를 센다(카디르 ①HIGH fix).
-  const view = parseView(searchParams.get('view'), isMobile);
+  // 정해진 뒤에 view를 센다(카디르 ①HIGH fix). hasHypothesisParam은 카디르 재QA 비차단②
+  // (S3) — 모바일에서 `?hypothesis=`만 있는 공유링크/새로고침이 패널을 못 열던 것 fix.
+  const view = parseView(searchParams.get('view'), isMobile, searchParams.get('hypothesis') !== null);
 
   const [data, setData] = useState<GlanceData | null>(null);
   const [loading, setLoading] = useState(true);

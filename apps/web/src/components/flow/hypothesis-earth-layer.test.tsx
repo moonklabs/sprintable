@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
 //
-// story #2531(E-FLOW-V4 S1) — 지구 층 규칙(AC): measuring 선명·proposed 흐림·나머지
-// 상태(verified/falsified/killed/archived)는 그리드에 아예 안 뜬다("더미 미표시").
-// fold는 story_ids.length만(task fold는 데이터 자체가 없어 스킵). 없는 데이터는
-// 정직한 빈 상태로 말한다(더미로 안 채운다).
+// story #2531(E-FLOW-V4 S1) — 지구 층 규칙(AC): measuring 선명·proposed 흐림·archived는
+// 그리드에 아예 안 뜬다("더미 미표시"). fold는 story_ids.length만(task fold는 데이터
+// 자체가 없어 스킵). 없는 데이터는 정직한 빈 상태로 말한다(더미로 안 채운다).
+//
+// ⛔카디르 재QA HIGH(2026-08-09, #2930) — verified/falsified/killed("결론난 가설")도
+// 처음엔 이 필터에 걸려 지구층에서 완전히 사라졌었다. measuring이 나중에 falsified로
+// 넘어가면 그 카드가 없어져 정반합 서사를 열 클릭 경로가 없었다(story #2533 헤드라인
+// 실사용 도달 0). 결론난 가설은 기본 접힘 섹션으로 남아, 펼치면 여전히 클릭 가능하다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -91,20 +95,52 @@ describe('HypothesisEarthLayer — story #2531 AC(measuring 선명·proposed 흐
     expect(card?.className).toContain('opacity-60');
   });
 
-  it('verified/falsified/killed/archived는 그리드에 아예 안 뜬다(더미 미표시)', async () => {
+  it('archived는 그리드·결론난 섹션 어디에도 안 뜬다(더미 미표시)', async () => {
     await renderLayer(vi.fn(() => jsonResponse([
-      makeHypothesis({ id: 'h3', status: 'verified', statement: 'DEAD-verified' }),
-      makeHypothesis({ id: 'h4', status: 'falsified', statement: 'DEAD-falsified' }),
-      makeHypothesis({ id: 'h5', status: 'killed', statement: 'DEAD-killed' }),
       makeHypothesis({ id: 'h6', status: 'archived', statement: 'DEAD-archived' }),
     ])));
 
-    expect(container.textContent).not.toContain('DEAD-verified');
-    expect(container.textContent).not.toContain('DEAD-falsified');
-    expect(container.textContent).not.toContain('DEAD-killed');
     expect(container.textContent).not.toContain('DEAD-archived');
-    // 전부 걸러진 뒤엔 빈 상태 문구가 정직하게 뜬다.
+    // measuring/proposed 둘 다 0이니 지구층 그리드는 빈 상태 문구를 정직하게 뜬다.
     expect(container.textContent).toContain(koMessages.flow.earthEmpty);
+  });
+
+  it('verified/falsified/killed는 «결론난 가설» 접힘 섹션에 뜨고, 클릭하면 onSelectHypothesis가 호출된다', async () => {
+    const onSelect = vi.fn();
+    await renderLayer(
+      vi.fn(() => jsonResponse([
+        makeHypothesis({ id: 'h3', status: 'verified', statement: 'CONCLUDED-verified' }),
+        makeHypothesis({ id: 'h4', status: 'falsified', statement: 'CONCLUDED-falsified' }),
+        makeHypothesis({ id: 'h5', status: 'killed', statement: 'CONCLUDED-killed' }),
+      ])),
+      onSelect,
+    );
+
+    expect(container.textContent).toContain('CONCLUDED-verified');
+    expect(container.textContent).toContain('CONCLUDED-falsified');
+    expect(container.textContent).toContain('CONCLUDED-killed');
+    expect(container.textContent).toContain(koMessages.flow.earthConcludedHeading.replace('{n}', '3'));
+
+    const details = container.querySelector('details');
+    expect(details).toBeTruthy();
+    expect(details?.hasAttribute('open')).toBe(false); // 기본 접힘(카드 폭발 회피 유지)
+
+    const card = Array.from(container.querySelectorAll('[role="button"]')).find(
+      (el) => el.textContent?.includes('CONCLUDED-falsified'),
+    );
+    expect(card).toBeTruthy();
+    await act(async () => {
+      card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onSelect).toHaveBeenCalledWith('h4');
+  });
+
+  it('결론난 가설이 없으면 «결론난 가설» 섹션 자체를 안 그린다', async () => {
+    await renderLayer(vi.fn(() => jsonResponse([
+      makeHypothesis({ id: 'h1', status: 'measuring', statement: 'Q1' }),
+    ])));
+
+    expect(container.querySelector('details')).toBeFalsy();
   });
 
   it('fold count는 story_ids.length를 그대로 쓴다', async () => {

@@ -136,6 +136,21 @@ describe('HypothesisNarrativePanel — story #2533, lifecycle 단일 응답 소�
     expect(document.body.textContent).not.toContain(koMessages.flow.narrativeMissedTarget);
   });
 
+  it('killed면 outcome_result가 {reason}뿐이라 종료 사유로 렌더된다(카디르 재QA 비차단①)', async () => {
+    await renderPanel(rawFetch(makeLifecycle({
+      hypothesis: { status: 'killed', outcome_result: { reason: '우선순위 밀림' } },
+    })));
+    expect(document.body.textContent).toContain(koMessages.flow.narrativeKilledReason.replace('{reason}', '우선순위 밀림'));
+  });
+
+  it('killed인데 reason도 없으면 증명 절이 빈 값을 지어내지 않고 아무것도 안 그린다', async () => {
+    await renderPanel(rawFetch(makeLifecycle({
+      hypothesis: { status: 'killed', outcome_result: {} },
+    })));
+    const proofSection = Array.from(document.querySelectorAll('h3')).find((h) => h.textContent === koMessages.flow.narrativeStepProof);
+    expect(proofSection?.closest('div')?.textContent).not.toContain('undefined');
+  });
+
   it('증명 절이 스토리별 gate/evidence를 간접조회로 보여준다(PR#2930 리뷰② 해소)', async () => {
     await renderPanel(rawFetch(makeLifecycle({
       stories: [{ id: 's1', title: '스토리A', status: 'done', metric_definition: null, outcome_status: 'verified', gate_status: 'approved', evidence_count: 3 }],

@@ -136,10 +136,17 @@ export function HypothesisEarthLayer({
     return () => { cancelled = true; };
   }, [projectId]);
 
-  // 지구 층 = measuring(선명) + proposed(흐림)만. verified/falsified/killed/archived는
-  // 서사·정반합 층(S3~S5) 몫이라 여기 그리드엔 아예 안 그린다("더미 미표시").
+  // 지구 층 = measuring(선명) + proposed(흐림)만 기본 노출. archived는 여기 그리드엔
+  // 아예 안 그린다("더미 미표시").
+  //
+  // ⛔카디르 재QA HIGH(2026-08-09) — verified/falsified/killed("결론난 가설")도 처음엔
+  // 이 필터에 걸려 지구층에서 완전히 사라졌다. measuring이던 가설이 나중에 falsified로
+  // 넘어가면 카드 자체가 없어져 정반합(falsified→대체) 서사를 열 «클릭 경로»가 URL 손조작
+  // 말고는 없었다 — S3의 정반합 UI가 실사용 도달 0이었던 원인. 결론난 가설은 기본 접힘
+  // 섹션(카드 폭발 회피 유지)으로 아래에 남겨, 펼치면 여전히 클릭→서사 패널로 갈 수 있다.
   const measuring = hypotheses?.filter((h) => h.status === 'measuring') ?? [];
   const proposed = hypotheses?.filter((h) => h.status === 'proposed') ?? [];
+  const concluded = hypotheses?.filter((h) => h.status === 'verified' || h.status === 'falsified' || h.status === 'killed') ?? [];
 
   return (
     <div className="space-y-4">
@@ -180,6 +187,19 @@ export function HypothesisEarthLayer({
           </div>
         )}
       </div>
+
+      {concluded.length > 0 ? (
+        <details className="rounded-lg border border-border">
+          <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-foreground">
+            {t('earthConcludedHeading', { n: concluded.length })}
+          </summary>
+          <div className="grid grid-cols-1 gap-3 border-t border-border p-3 sm:grid-cols-2 lg:grid-cols-3">
+            {concluded.map((h) => (
+              <HypothesisCard key={h.id} hypothesis={h} dim={false} onSelect={onSelectHypothesis} />
+            ))}
+          </div>
+        </details>
+      ) : null}
     </div>
   );
 }
