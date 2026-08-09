@@ -3,9 +3,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.hypothesis import HypothesisStoryLink
 from app.models.pm import Story
 from app.repositories.base import BaseRepository
 from app.schemas.story import STATUS_TRANSITIONS
@@ -17,6 +18,19 @@ _PRIORITY_ORDER = case(
     (Story.priority == "low", 3),
     else_=4,
 )
+
+
+def _unattached_clause():
+    """story #2532(카디르 QA REQUEST_CHANGES, 2026-08-09) — unattached 필터는 반드시 SQL
+    WHERE 레벨이어야 한다. 최초 구현(라우터의 Python 후필터 `_filter_unattached`)은 SQL
+    limit 後 필터라 ①페이지 경계 밖 유실(SQL이 20건만 뽑았는데 그중 3건만 unattached면 3건만
+    반환 — 다음 페이지에 더 있어도 판단 근거가 없다) ②X-Total-Count/X-Next-Cursor가 필터 前
+    값이라 거짓 신호(board 분기에서 재현)를 냈다. «미매달림=뷰 결부 재료» 자체가 정확해야
+    하는 값이라 이 결함은 못 넘긴다 — WHERE 절로 옮겨 페이지네이션·헤더가 전부 필터 後
+    진실을 말하게 한다."""
+    return Story.epic_id.is_(None) & ~exists(
+        select(HypothesisStoryLink.id).where(HypothesisStoryLink.story_id == Story.id)
+    )
 
 
 async def allocate_story_number(session: AsyncSession, project_id: uuid.UUID) -> int:
@@ -48,7 +62,8 @@ class StoryRepository(BaseRepository[Story]):
         return await super().create(story_number=story_number, **data)
 
     async def list(
-        self, limit: int = 1000, *, q: str | None = None, cursor: datetime | None = None, **filters,
+        self, limit: int = 1000, *, q: str | None = None, cursor: datetime | None = None,
+        unattached: bool = False, **filters,
     ) -> list[Story]:
         """story 083176e8(까심 #2148 QA 적출): 갤러리 피커 실검색 — `q`는 title ILIKE 부분일치로
         기존 동등비교 필터(**filters, base.list() 상속)와 AND 결합. BaseRepository.list()는
@@ -85,11 +100,13 @@ class StoryRepository(BaseRepository[Story]):
             query = query.where(Story.title.ilike(f"%{q}%"))
         if cursor:
             query = query.where(Story.created_at < cursor)
+        if unattached:
+            query = query.where(_unattached_clause())
         query = query.order_by(Story.created_at.desc(), Story.id.desc()).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    async def list_by_ids(self, ids: list[uuid.UUID]) -> list[Story]:
+    async def list_by_ids(self, ids: list[uuid.UUID], *, unattached: bool = False) -> list[Story]:
         """배치 앵커 조회(story ca37b2b0 ② — 갤러리 등 정확한 story 집합 필요 소비자용).
 
         org-scoped exact-id IN 조회. ORDER BY 없음 — 호출자가 id 집합 그대로를 필요로 하는
@@ -97,11 +114,12 @@ class StoryRepository(BaseRepository[Story]):
         """
         if not ids:
             return []
-        result = await self.session.execute(
-            select(Story).where(
-                self._org_filter(), Story.id.in_(ids), Story.deleted_at.is_(None),
-            )
+        query = select(Story).where(
+            self._org_filter(), Story.id.in_(ids), Story.deleted_at.is_(None),
         )
+        if unattached:
+            query = query.where(_unattached_clause())
+        result = await self.session.execute(query)
         return list(result.scalars().all())
 
     async def list_board(
@@ -115,6 +133,7 @@ class StoryRepository(BaseRepository[Story]):
         epic_id: uuid.UUID | None = None,
         story_number: int | None = None,
         q_text: str | None = None,
+        unattached: bool = False,
     ) -> tuple[list[Story], int]:
         """CB-S4: 보드 상태별 쿼리 — created_at DESC + priority 보조 정렬 + cursor 페이징.
 
@@ -142,6 +161,8 @@ class StoryRepository(BaseRepository[Story]):
             q = q.where(Story.story_number == story_number)
         if q_text:
             q = q.where(Story.title.ilike(f"%{q_text}%"))
+        if unattached:
+            q = q.where(_unattached_clause())
 
         # done: 최근 7일 제한
         if status == "done":
@@ -169,6 +190,7 @@ class StoryRepository(BaseRepository[Story]):
         status: str | None = None,
         story_number: int | None = None,
         q: str | None = None,
+        unattached: bool = False,
     ) -> list[Story]:
         """sprint 미배정 + 삭제되지 않은 스토리만 서버사이드 필터.
 
@@ -203,6 +225,8 @@ class StoryRepository(BaseRepository[Story]):
             query = query.where(Story.story_number == story_number)
         if q:
             query = query.where(Story.title.ilike(f"%{q}%"))
+        if unattached:
+            query = query.where(_unattached_clause())
         result = await self.session.execute(query.limit(limit))
         return list(result.scalars().all())
 
