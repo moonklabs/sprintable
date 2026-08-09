@@ -14,6 +14,7 @@ import { NextMakerScreen } from '@/components/flow/next-maker-screen';
 import { FlowNodeStoryPanel } from '@/components/flow/flow-node-story-panel';
 import { HypothesisEarthLayer } from '@/components/flow/hypothesis-earth-layer';
 import { HypothesisNarrativePanel } from '@/components/flow/hypothesis-narrative-panel';
+import { ScaleLadder } from '@/components/flow/scale-ladder';
 
 interface FlowPageClientProps {
   projectId: string;
@@ -156,6 +157,19 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
     router.push(`/${wsSlug}/${projSlug}/flow${qs ? `?${qs}` : ''}`, { scroll: false });
   }, [router, searchParams, wsSlug, projSlug]);
 
+  // story #2535(E-FLOW-V4 S5) — 지구→대륙→도시 드릴다운. `?goal=<id>`가 착지점(NextMakerScreen
+  // focusGoalId로 흘러가 그 레인만 강제 펼침+스크롤+하이라이트, next-maker-screen.tsx 문서
+  // 참고). 가설 패널에서 넘어오는 경로라 `hypothesis` 파라미터는 지우고 view=flow로 간다
+  // (지구층에 남아있으면 도시층 레인이 안 보인다).
+  const focusGoalId = searchParams.get('goal');
+  const handleNavigateToGoal = useCallback((goalId: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('hypothesis');
+    params.set('view', 'flow');
+    params.set('goal', goalId);
+    router.push(`/${wsSlug}/${projSlug}/flow?${params.toString()}`, { scroll: false });
+  }, [router, searchParams, wsSlug, projSlug]);
+
   const exceptionItems = useMemo(() => {
     if (!data) return [];
     const labels: ExceptionLabels = {
@@ -224,6 +238,11 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           </div>
         )}
 
+        {/* story #2535(E-FLOW-V4 S5) — 축척 브레드크럼. 가설 뷰는 HypothesisEarthLayer가
+            자기 안에서 이미 사다리를 그리므로(지구=활성) 여기서 중복 안 그린다. 갈래=도시·
+            목록=건물 — 「지금 보는 층 = 묻는 질문 전환」을 탭 전환마다 같은 자리에서 보인다. */}
+        {view !== 'hypothesis' ? <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'building'} /> : null}
+
         {view === 'hypothesis' ? (
           // story #2531(E-FLOW-V4 S1) — 새 기본 랜딩. 가설(질문)을 최상위 조직 단위로 삼는
           // 지구 층. 드릴다운(가설→갈래)은 S5 몫이라 지금은 독립 탭으로만 존재한다.
@@ -252,6 +271,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
               memberMap={data?.memberMap ?? {}}
               onSelectStory={handleSelectStory}
               selectedNodeId={selectedStoryId}
+              focusGoalId={focusGoalId}
             />
           )
         )}
@@ -273,7 +293,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
         {/* story #2533(E-FLOW-V4 S3) — 가설 생애 수직 서사. 가설 뷰에서만(다른 탭엔 가설 카드
             자체가 없어 selectedHypothesisId가 그 탭에서 생길 일이 없다) */}
         {view === 'hypothesis' && selectedHypothesisId ? (
-          <HypothesisNarrativePanel key={selectedHypothesisId} hypothesisId={selectedHypothesisId} onClose={handleCloseHypothesisPanel} />
+          <HypothesisNarrativePanel key={selectedHypothesisId} hypothesisId={selectedHypothesisId} onClose={handleCloseHypothesisPanel} onNavigateToGoal={handleNavigateToGoal} />
         ) : null}
 
         {/* ③ 관제 서랍 — 보기 무관 고정, 접힘 기본(IA §2). ExceptionStream = #2100 예외 스트림

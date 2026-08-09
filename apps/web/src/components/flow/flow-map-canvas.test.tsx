@@ -152,6 +152,42 @@ describe('FlowMapCanvas — node click → open story panel (선생님 지적 20
   });
 });
 
+// story #2535(E-FLOW-V4 S5) — 지구→대륙→도시 드릴다운 착지. focusGoalId가 가리키는 레인만
+// 고리로 강조하고 스크롤한다 — 다른 레인은 손대지 않는다(카드 폭발 회피를 구조로).
+describe('FlowMapCanvas — story #2535 focusGoalId(드릴다운 착지 레인 강조)', () => {
+  it('renders data-lane-epic-id on every lane so the focus effect can target it', async () => {
+    const lanes = [makeLane({ epicId: 'e-a' }), makeLane({ epicId: 'e-b' })];
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={lanes} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    expect(container.querySelector('[data-lane-epic-id="e-a"]')).not.toBeNull();
+    expect(container.querySelector('[data-lane-epic-id="e-b"]')).not.toBeNull();
+  });
+
+  it('highlights ONLY the lane matching focusGoalId with a ring, not the other lane', async () => {
+    const lanes = [makeLane({ epicId: 'e-a' }), makeLane({ epicId: 'e-b' })];
+    await act(async () => {
+      root.render(wrap(<FlowMapCanvas lanes={lanes} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} focusGoalId="e-b" />));
+    });
+    expect(container.querySelector('[data-lane-epic-id="e-a"]')?.className).not.toContain('ring-2');
+    expect(container.querySelector('[data-lane-epic-id="e-b"]')?.className).toContain('ring-2');
+  });
+
+  it('highlights no lane when focusGoalId is omitted (default behavior unchanged)', async () => {
+    const lanes = [makeLane({ epicId: 'e-a' })];
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={lanes} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    expect(container.querySelector('[data-lane-epic-id="e-a"]')?.className).not.toContain('ring-2');
+  });
+
+  it('calls scrollIntoView on the target lane when focusGoalId matches', async () => {
+    const lanes = [makeLane({ epicId: 'e-a' }), makeLane({ epicId: 'e-b' })];
+    const scrollIntoViewMock = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoViewMock;
+    await act(async () => {
+      root.render(wrap(<FlowMapCanvas lanes={lanes} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} focusGoalId="e-b" />));
+    });
+    expect(scrollIntoViewMock).toHaveBeenCalled();
+  });
+});
+
 describe('FlowMapCanvas — 노드 카드 한 줄 + 행 간격 32(story #2224 AC17-C)', () => {
   it('renders exactly one line per node — no status text label (border-l color is now the sole status signal, §4-4)', async () => {
     const lane = makeLane({ nowNodes: [makeNode({ id: 'n1', storyNumber: 42, title: '어떤 스토리', status: 'in-progress' })] });

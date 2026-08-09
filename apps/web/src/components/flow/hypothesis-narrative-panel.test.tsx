@@ -65,10 +65,14 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function renderPanel(fetchImpl: typeof fetch, onClose: () => void = vi.fn()) {
+async function renderPanel(
+  fetchImpl: typeof fetch,
+  onClose: () => void = vi.fn(),
+  onNavigateToGoal?: (goalId: string) => void,
+) {
   vi.stubGlobal('fetch', fetchImpl);
   await act(async () => {
-    root.render(wrap(<HypothesisNarrativePanel hypothesisId="h1" onClose={onClose} />));
+    root.render(wrap(<HypothesisNarrativePanel hypothesisId="h1" onClose={onClose} onNavigateToGoal={onNavigateToGoal} />));
     await new Promise((r) => setTimeout(r, 0));
   });
 }
@@ -101,6 +105,32 @@ describe('HypothesisNarrativePanel — story #2533, lifecycle 단일 응답 소�
   it('goals가 비어있으면 목표 절이 정직한 "아직"을 보인다', async () => {
     await renderPanel(rawFetch(makeLifecycle({ goals: [] })));
     expect(document.body.textContent).toContain(koMessages.flow.narrativeNotYet);
+  });
+
+  // story #2535(E-FLOW-V4 S5) — 지구→대륙 다리. onNavigateToGoal이 주어지면 목표 항목이
+  // 클릭 가능해지고, 누르면 그 목표 id로 콜백이 온다(네비게이션 자체는 호출부 책임).
+  it('onNavigateToGoal이 있으면 목표 항목이 클릭 가능하고, 누르면 goalId로 호출된다', async () => {
+    const onNavigateToGoal = vi.fn();
+    await renderPanel(
+      rawFetch(makeLifecycle({ goals: [{ id: 'g1', title: '결제 전환 목표', status: 'active' }] })),
+      vi.fn(),
+      onNavigateToGoal,
+    );
+
+    const goalButton = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('결제 전환 목표'));
+    expect(goalButton).toBeTruthy();
+    await act(async () => {
+      goalButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onNavigateToGoal).toHaveBeenCalledWith('g1');
+  });
+
+  it('onNavigateToGoal이 없으면(옵셔널) 목표 항목은 그냥 텍스트로만 렌더된다(회귀 없음)', async () => {
+    await renderPanel(rawFetch(makeLifecycle({ goals: [{ id: 'g1', title: '결제 전환 목표', status: 'active' }] })));
+
+    expect(document.body.textContent).toContain('결제 전환 목표');
+    const goalButton = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('결제 전환 목표'));
+    expect(goalButton).toBeUndefined();
   });
 
   it('검증(stories[].title)이 렌더된다', async () => {
