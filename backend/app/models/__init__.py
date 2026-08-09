@@ -84,6 +84,7 @@ from app.models.role_template import RoleTemplate
 # "등재를 미루는 것"이 아니라 "파일마다 전체 스키마를 create_all/drop_all하는 구조 자체를
 # 먼저 손보는 것"이 그 스토리의 실제 과제.
 from app.models.trust_snapshot import OrgMemberTrustSnapshot
+from app.models.unattached_snapshot import UnattachedStorySnapshot
 from app.models.visual_artifact import ArtifactNode, ArtifactVersion, VisualArtifact
 # fix(2026-07-20, #2058 후속 CI 적출): 이 두 모듈이 여기 없어 `import app.models`만으로는
 # Base.metadata에 등록 안 됐다 — participation_role을 참조하는 FK(hitl_config.OrgGateOverride/
@@ -184,6 +185,7 @@ __all__ = [
     "StoryAssignee",
     "Task",
     "TeamMember",
+    "UnattachedStorySnapshot",
     "LoginAuditLog",
     "RefreshToken",
     "User",
