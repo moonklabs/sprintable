@@ -13,6 +13,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { NextMakerScreen } from '@/components/flow/next-maker-screen';
 import { FlowNodeStoryPanel } from '@/components/flow/flow-node-story-panel';
 import { HypothesisEarthLayer } from '@/components/flow/hypothesis-earth-layer';
+import { HypothesisNarrativePanel } from '@/components/flow/hypothesis-narrative-panel';
 
 interface FlowPageClientProps {
   projectId: string;
@@ -133,6 +134,22 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
   }, [selectedStoryId]);
   const handleClosePanel = useCallback(() => setPanelOpen(false), []);
 
+  // story #2533(E-FLOW-V4 S3) — 가설 생애 수직 서사 패널. story 패널(위)과 달리 「닫아도
+  // 선택 유지」 뉘앙스가 AC에 없어 훨씬 단순하게: URL의 `?hypothesis=`가 곧 열림 상태의
+  // 단일 소스다(별도 panelOpen 불필요) — 닫으면 파라미터 자체를 지운다.
+  const selectedHypothesisId = searchParams.get('hypothesis');
+  const handleSelectHypothesis = useCallback((id: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('hypothesis', id);
+    router.push(`/${wsSlug}/${projSlug}/flow?${params.toString()}`, { scroll: false });
+  }, [router, searchParams, wsSlug, projSlug]);
+  const handleCloseHypothesisPanel = useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('hypothesis');
+    const qs = params.toString();
+    router.push(`/${wsSlug}/${projSlug}/flow${qs ? `?${qs}` : ''}`, { scroll: false });
+  }, [router, searchParams, wsSlug, projSlug]);
+
   const exceptionItems = useMemo(() => {
     if (!data) return [];
     const labels: ExceptionLabels = {
@@ -204,7 +221,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
         {view === 'hypothesis' ? (
           // story #2531(E-FLOW-V4 S1) — 새 기본 랜딩. 가설(질문)을 최상위 조직 단위로 삼는
           // 지구 층. 드릴다운(가설→갈래)은 S5 몫이라 지금은 독립 탭으로만 존재한다.
-          <HypothesisEarthLayer projectId={projectId} />
+          <HypothesisEarthLayer projectId={projectId} onSelectHypothesis={handleSelectHypothesis} />
         ) : view === 'list' ? (
           // 2026-07-30 PO 확認 대기 — 07-23 시안의 「목록」이 칸반과 동일한지 디디군이 확認
           // 중(단순 표라면 드래그로 상태를 바꾸는 길이 사라지는지라 다르다). 답 오기 前엔
@@ -245,6 +262,12 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           // key={selectedStoryId} — 다른 노드를 연달아 누르면 통째로 다시 마운트시킨다(초기
           // loading 상태가 매번 자연히 맞다, flow-node-story-panel.tsx 문서 참고).
           <FlowNodeStoryPanel key={selectedStoryId} storyId={selectedStoryId} onClose={handleClosePanel} />
+        ) : null}
+
+        {/* story #2533(E-FLOW-V4 S3) — 가설 생애 수직 서사. 가설 뷰에서만(다른 탭엔 가설 카드
+            자체가 없어 selectedHypothesisId가 그 탭에서 생길 일이 없다) */}
+        {view === 'hypothesis' && selectedHypothesisId ? (
+          <HypothesisNarrativePanel key={selectedHypothesisId} hypothesisId={selectedHypothesisId} onClose={handleCloseHypothesisPanel} />
         ) : null}
 
         {/* ③ 관제 서랍 — 보기 무관 고정, 접힘 기본(IA §2). ExceptionStream = #2100 예외 스트림

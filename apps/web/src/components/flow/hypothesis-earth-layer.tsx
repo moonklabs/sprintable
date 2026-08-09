@@ -52,15 +52,29 @@ function ScaleLadder() {
   );
 }
 
-function HypothesisCard({ hypothesis, dim }: { hypothesis: Hypothesis; dim: boolean }) {
+function HypothesisCard({
+  hypothesis,
+  dim,
+  onSelect,
+}: {
+  hypothesis: Hypothesis;
+  dim: boolean;
+  onSelect: (id: string) => void;
+}) {
   const t = useTranslations('flow');
   const linkedStoryCount = hypothesis.story_ids?.length ?? 0;
   const linkedEpicCount = hypothesis.epic_ids?.length ?? 0;
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect(hypothesis.id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(hypothesis.id); }
+      }}
       className={cn(
-        'flex flex-col gap-2.5 rounded-xl border border-border bg-card p-4',
+        'flex cursor-pointer flex-col gap-2.5 rounded-xl border border-border bg-card p-4 text-left transition hover:border-brand/60 hover:shadow-sm',
         dim && 'opacity-60',
       )}
     >
@@ -91,7 +105,13 @@ function HypothesisCard({ hypothesis, dim }: { hypothesis: Hypothesis; dim: bool
   );
 }
 
-export function HypothesisEarthLayer({ projectId }: { projectId: string }) {
+export function HypothesisEarthLayer({
+  projectId,
+  onSelectHypothesis,
+}: {
+  projectId: string;
+  onSelectHypothesis: (id: string) => void;
+}) {
   const t = useTranslations('flow');
   const [hypotheses, setHypotheses] = useState<Hypothesis[] | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -146,14 +166,14 @@ export function HypothesisEarthLayer({ projectId }: { projectId: string }) {
             {measuring.length > 0 ? (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {measuring.map((h) => (
-                  <HypothesisCard key={h.id} hypothesis={h} dim={false} />
+                  <HypothesisCard key={h.id} hypothesis={h} dim={false} onSelect={onSelectHypothesis} />
                 ))}
               </div>
             ) : null}
             {proposed.length > 0 ? (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {proposed.map((h) => (
-                  <HypothesisCard key={h.id} hypothesis={h} dim />
+                  <HypothesisCard key={h.id} hypothesis={h} dim onSelect={onSelectHypothesis} />
                 ))}
               </div>
             ) : null}

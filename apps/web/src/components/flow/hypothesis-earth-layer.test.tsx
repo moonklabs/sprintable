@@ -63,10 +63,10 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function renderLayer(fetchImpl: typeof fetch) {
+async function renderLayer(fetchImpl: typeof fetch, onSelectHypothesis: (id: string) => void = vi.fn()) {
   vi.stubGlobal('fetch', fetchImpl);
   await act(async () => {
-    root.render(wrap(<HypothesisEarthLayer projectId="p1" />));
+    root.render(wrap(<HypothesisEarthLayer projectId="p1" onSelectHypothesis={onSelectHypothesis} />));
     await new Promise((r) => setTimeout(r, 0));
   });
 }
@@ -147,5 +147,23 @@ describe('HypothesisEarthLayer — story #2531 AC(measuring 선명·proposed 흐
     await renderLayer(fetchMock);
 
     expect(fetchMock).toHaveBeenCalledWith('/api/hypotheses?project_id=p1', { cache: 'no-store' });
+  });
+
+  it('카드를 클릭하면 onSelectHypothesis(id)가 호출된다(story #2533 서사 패널 진입점)', async () => {
+    const onSelect = vi.fn();
+    await renderLayer(
+      vi.fn(() => jsonResponse([makeHypothesis({ id: 'h-click', status: 'measuring', statement: 'Q-click' })])),
+      onSelect,
+    );
+
+    const card = Array.from(container.querySelectorAll('[role="button"]')).find(
+      (el) => el.textContent?.includes('Q-click'),
+    );
+    expect(card).toBeTruthy();
+    await act(async () => {
+      card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(onSelect).toHaveBeenCalledWith('h-click');
   });
 });
