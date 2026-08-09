@@ -397,7 +397,7 @@
     "gateGeneric": "승인",
     "signalAgentStuckTitle": "에이전트가 다음 단계를 기다립니다",
     "signalAgentStuckContext": "승인을 기다리고 있습니다 — 확인이 필요합니다",
-    "signalStalledTitle": "가설이 예상과 다르게 진행됩니다",
+    "signalStalledTitle": "스토리가 오래 멈춰 있습니다",
     "signalStalledContext": "확인이 필요합니다",
     "signalBlockerTitle": "막힌 업무가 응답을 기다립니다",
     "signalBlockerContext": "확인이 필요합니다",
