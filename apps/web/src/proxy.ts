@@ -83,11 +83,18 @@ async function verifyAccessToken(token: string): Promise<{ exp?: number } | null
 // 복제(둘 다 이 문자열이 바뀔 일은 없음 — 서버-발급 세션 쿠키 이름).
 const CURRENT_PROJECT_COOKIE = 'sprintable_current_project_id';
 
-async function getOrgIdFromAccessToken(token: string): Promise<string | null> {
+// ⛔카디르 QA 2차 재진단(2026-08-09, 실측 8회 재현 — bare /flow·되돌이 전부 여전히 org-briefing
+// 튕김) — 옛 getOrgIdFromAccessToken()이 JWT app_metadata.org_id 클레임을 직접 디코드했는데,
+// 멀티org 계정은 이 클레임이 **로그인 시점 org로 고정**돼 세션이 실제로 일하는 org(=/api/v2/me
+// 검증값)와 달라질 수 있다(curl 대조: JWT org로 X-Org-Id 조회→404, me.org_id로 조회→200 —
+// layout.tsx는 이미 /api/v2/me를 써서 이 함정을 안 밟았다). 같은 SSOT(/api/v2/me)로 맞춘다 —
+// JWT 클레임 직접 디코드 대신 실 조회.
+async function getVerifiedOrgId(fastapiUrl: string, accessToken: string): Promise<string | null> {
   try {
-    const { payload } = await jwtVerify(token, getJwtSecretBytes());
-    const orgId = (payload['app_metadata'] as Record<string, unknown> | undefined)?.['org_id'];
-    return typeof orgId === 'string' ? orgId : null;
+    const res = await fetch(`${fastapiUrl}/api/v2/me`, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) return null;
+    const me = await res.json() as { org_id?: string };
+    return typeof me.org_id === 'string' ? me.org_id : null;
   } catch {
     return null;
   }
@@ -136,7 +143,8 @@ async function redirectLegacyResourcePath(
   const excluded = MIGRATED_RESOURCES[resourceName] ?? [];
   if (excluded.some((sub) => pathname.startsWith(`/${resourceName}/${sub}`))) return null;
 
-  const orgId = await getOrgIdFromAccessToken(accessToken);
+  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+  const orgId = await getVerifiedOrgId(fastapiUrl, accessToken);
   // story #1998: 쿠키 우선(명시 switch-project 결과) — 없으면 JWT app_metadata.project_id로 fallback.
   const projectId = request.cookies.get(CURRENT_PROJECT_COOKIE)?.value
     ?? await getProjectIdFromAccessToken(accessToken);
@@ -157,7 +165,6 @@ async function redirectLegacyResourcePath(
     return redirectToProjectPicker(request, pathname);
   }
 
-  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
   const slugs = await resolveLegacyResourcePath(fastapiUrl, orgId, projectId, accessToken);
   // org/project는 둘 다 확定됐는데 BE 해소만 실패한 경우(예: 그 project가 삭제/접근철회)도
   // 같은 안내로 보낸다(AC4: "404가 맞는 경우에도 다음 발이 붙는다") — 단, 이것도 되돌이 방지 적용.
