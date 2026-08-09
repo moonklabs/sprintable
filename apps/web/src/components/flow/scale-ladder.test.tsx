@@ -43,6 +43,14 @@ describe('ScaleLadder', () => {
     expect(container.textContent).toContain(koMessages.flow.ladderName_building);
   });
 
+  // 유나 design 재규격(2026-08-09) — 행성-은유 legend 줄(지구/대륙/도시/거리/건물) 제거,
+  // rung은 이름+질문 둘만.
+  it('legend 줄("지구"류 행성 이름표)은 더 이상 렌더되지 않는다', () => {
+    act(() => { root.render(wrap(<ScaleLadder />)); });
+    expect(container.textContent).not.toContain('지구');
+    expect(container.textContent).not.toContain('대륙');
+  });
+
   it('activeLevel 기본값은 지구(S1 회귀 없음 — 이전엔 하드코딩이었다)', () => {
     act(() => { root.render(wrap(<ScaleLadder />)); });
     // 사다리는 5개 direct child rung — 텍스트 포함 검색은 바깥 flex 컨테이너까지 걸리므로
@@ -50,6 +58,14 @@ describe('ScaleLadder', () => {
     const rungs = Array.from(container.querySelector('.flex.overflow-hidden')?.children ?? []);
     const earthRung = rungs.find((d) => d.textContent?.includes(koMessages.flow.ladderName_earth));
     expect(earthRung?.className).toContain('bg-gradient-to-b');
+  });
+
+  it('active 강조는 이름(ladderName) 텍스트 쪽에 걸린다(legend 줄 제거로 옮겨온 자리)', () => {
+    act(() => { root.render(wrap(<ScaleLadder />)); });
+    const nameEl = Array.from(container.querySelectorAll('div')).find(
+      (d) => d.textContent === koMessages.flow.ladderName_earth,
+    );
+    expect(nameEl?.className).toContain('text-brand');
   });
 
   it('activeLevel="city"를 주면 도시 rung만 강조되고 지구는 강조되지 않는다', () => {
