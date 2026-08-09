@@ -74,6 +74,8 @@ export async function GET(request: Request) {
       project_id: searchParams.get('project_id') ?? undefined,
       q: searchParams.get('q') ?? undefined,
       unassigned: searchParams.get('unassigned') === 'true' ? true : undefined,
+      // story #2534(E-FLOW-V4 S4) — 가설/목표 둘 다 미매달림(unassigned와 다른 축).
+      unattached: searchParams.get('unattached') === 'true' ? true : undefined,
       story_number: storyNumberParam ? Number(storyNumberParam) : undefined,
       // story #2328(C-11 ㉡층) — 083176e8/story_number와 같은 클래스(있는 필드가 프록시에서
       // 빠지는 것) 재발 방지로 처음부터 포함.
