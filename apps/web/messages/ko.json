@@ -508,6 +508,7 @@
     "bucketHideSuggestion": "접기",
     "bucketNoSuggestion": "제안할 후보가 없습니다.",
     "bucketSuggestionError": "제안을 불러오지 못했습니다.",
+    "bucketAttachError": "매달기에 실패했습니다. 다시 시도해주세요.",
     "bucketGoalChip": "목표로 · {text}",
     "bucketHypothesisChip": "가설로 · {text}",
     "laneHeading": "목표 · {n}",

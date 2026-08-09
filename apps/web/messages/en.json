@@ -508,6 +508,7 @@
     "bucketHideSuggestion": "Hide",
     "bucketNoSuggestion": "No candidates to suggest.",
     "bucketSuggestionError": "Failed to load suggestions.",
+    "bucketAttachError": "Failed to attach. Please try again.",
     "bucketGoalChip": "As goal · {text}",
     "bucketHypothesisChip": "As hypothesis · {text}",
     "laneHeading": "Goals · {n}",

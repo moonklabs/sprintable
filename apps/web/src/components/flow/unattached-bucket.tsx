@@ -60,8 +60,15 @@ function SuggestionChips({
     return () => { cancelled = true; };
   }, [storyId]);
 
+  // 카디르 QA MEDIUM(2026-08-09) — 매달기는 실패 응답을 catch 안 해 unhandled rejection·
+  // 무언 실패였다. res.ok일 때만 onAttached를 부르는 건 원래도 success-gated였지(버킷에서
+  // 지우는 게 «낙관적 제거»가 아니라 200 응답 확認 後 제거) — 빠졌던 건 실패 «표시» 쪽이라
+  // attachError 상태를 신설해 사용자에게 명시한다.
+  const [attachError, setAttachError] = useState(false);
+
   const attachGoal = useCallback(async (goalId: string) => {
     setAttachingId(goalId);
+    setAttachError(false);
     try {
       const res = await fetch(`/api/stories/${storyId}`, {
         method: 'PATCH',
@@ -69,6 +76,9 @@ function SuggestionChips({
         body: JSON.stringify({ epic_id: goalId }),
       });
       if (res.ok) onAttached(storyId);
+      else setAttachError(true);
+    } catch {
+      setAttachError(true);
     } finally {
       setAttachingId(null);
     }
@@ -76,6 +86,7 @@ function SuggestionChips({
 
   const attachHypothesis = useCallback(async (hypothesisId: string) => {
     setAttachingId(hypothesisId);
+    setAttachError(false);
     try {
       const res = await fetch(`/api/hypotheses/${hypothesisId}/links`, {
         method: 'POST',
@@ -83,6 +94,9 @@ function SuggestionChips({
         body: JSON.stringify({ story_ids: [storyId], link_type: 'supports' }),
       });
       if (res.ok) onAttached(storyId);
+      else setAttachError(true);
+    } catch {
+      setAttachError(true);
     } finally {
       setAttachingId(null);
     }
@@ -105,33 +119,38 @@ function SuggestionChips({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {suggestions.goal_candidates.map((c) => (
-        <button
-          key={c.id}
-          type="button"
-          disabled={attachingId !== null}
-          onClick={() => void attachGoal(c.id)}
-          className={cn(
-            'rounded-full border border-brand/40 bg-brand/5 px-2.5 py-1 text-[11px] text-brand transition hover:bg-brand/10 disabled:opacity-50',
-          )}
-        >
-          {t('bucketGoalChip', { text: c.text })}
-        </button>
-      ))}
-      {suggestions.hypothesis_candidates.map((c) => (
-        <button
-          key={c.id}
-          type="button"
-          disabled={attachingId !== null}
-          onClick={() => void attachHypothesis(c.id)}
-          className={cn(
-            'rounded-full border border-info-border bg-info-tint px-2.5 py-1 text-[11px] text-foreground transition hover:opacity-80 disabled:opacity-50',
-          )}
-        >
-          {t('bucketHypothesisChip', { text: c.text })}
-        </button>
-      ))}
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {suggestions.goal_candidates.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            disabled={attachingId !== null}
+            onClick={() => void attachGoal(c.id)}
+            className={cn(
+              'rounded-full border border-brand/40 bg-brand/5 px-2.5 py-1 text-[11px] text-brand transition hover:bg-brand/10 disabled:opacity-50',
+            )}
+          >
+            {t('bucketGoalChip', { text: c.text })}
+          </button>
+        ))}
+        {suggestions.hypothesis_candidates.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            disabled={attachingId !== null}
+            onClick={() => void attachHypothesis(c.id)}
+            className={cn(
+              'rounded-full border border-info-border bg-info-tint px-2.5 py-1 text-[11px] text-foreground transition hover:opacity-80 disabled:opacity-50',
+            )}
+          >
+            {t('bucketHypothesisChip', { text: c.text })}
+          </button>
+        ))}
+      </div>
+      {attachError ? (
+        <p role="alert" className="text-[11px] text-destructive">{t('bucketAttachError')}</p>
+      ) : null}
     </div>
   );
 }
@@ -164,6 +183,11 @@ function BucketRow({ story, onAttached }: { story: BucketStory; onAttached: (sto
 export function UnattachedBucket({ projectId }: { projectId: string }) {
   const t = useTranslations('flow');
   const [stories, setStories] = useState<BucketStory[] | null>(null);
+  // 카디르 QA HIGH(2026-08-09) — 서랍 요약의 카운트는 stories.length(limit=100에 잘린
+  // 페이지 길이)가 아니라 BE X-Total-Count(unattached WHERE 레벨 필터의 «정확한 전체
+  // 총계»)로 잰다. total===null인 동안(응답에 헤더가 없던 예외 상황) stories.length로
+  // 안전 폴백 — 그 외엔 항상 total이 SSOT.
+  const [total, setTotal] = useState<number | null>(null);
   const [loadError, setLoadError] = useState(false);
 
   const load = useCallback(() => {
@@ -173,8 +197,11 @@ export function UnattachedBucket({ projectId }: { projectId: string }) {
       try {
         const res = await fetch(`/api/stories?project_id=${projectId}&unattached=true&limit=100`, { cache: 'no-store' });
         if (!res.ok) throw new Error('failed');
-        const json = await res.json() as { data?: BucketStory[] };
-        if (!cancelled) setStories(json.data ?? []);
+        const json = await res.json() as { data?: BucketStory[]; meta?: { total?: number } };
+        if (!cancelled) {
+          setStories(json.data ?? []);
+          setTotal(typeof json.meta?.total === 'number' ? json.meta.total : null);
+        }
       } catch {
         if (!cancelled) { setStories([]); setLoadError(true); }
       }
@@ -186,9 +213,10 @@ export function UnattachedBucket({ projectId }: { projectId: string }) {
 
   const handleAttached = useCallback((storyId: string) => {
     setStories((prev) => (prev ? prev.filter((s) => s.id !== storyId) : prev));
+    setTotal((prev) => (prev !== null ? Math.max(0, prev - 1) : prev));
   }, []);
 
-  const count = stories?.length ?? 0;
+  const count = total ?? stories?.length ?? 0;
 
   return (
     <details className="rounded-lg border border-border">
