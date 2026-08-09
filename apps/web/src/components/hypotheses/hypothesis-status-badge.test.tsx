@@ -55,12 +55,21 @@ describe('HypothesisStatusBadge — falsified(유나 design 재검, 2026-08-09 �
   });
 });
 
-describe('HypothesisStatusBadge — killed(falsified와 글리프는 같아도 variant/라벨로 구분)', () => {
-  it('killed도 ✕ 글리프를 쓰지만 chip variant + 다른 라벨이라 falsified와 안 헷갈린다', () => {
+describe('HypothesisStatusBadge — killed(색 규율 완성, 유나 design 2026-08-09, #2930 재QA)', () => {
+  it('색은 destructive(빨강) — 색 규율에서 빨강의 유일한 자리', () => {
     act(() => root.render(wrap(<HypothesisStatusBadge status="killed" />)));
     const badge = container.querySelector('[data-slot="badge"]');
-    expect(container.textContent).toContain('✕');
-    expect(badge?.className).not.toContain('bg-info-tint');
-    expect(container.textContent).not.toBe(koMessages.hypotheses.statusFalsified);
+    expect(badge?.className).toContain('bg-destructive');
+  });
+
+  it('글리프는 ⊘ — falsified(✕)와 안 겹친다', () => {
+    act(() => root.render(wrap(<HypothesisStatusBadge status="killed" />)));
+    expect(container.textContent).toContain('⊘');
+    expect(container.textContent).not.toContain('✕');
+  });
+
+  it('라벨 텍스트("종료")를 항상 동반한다(AC8)', () => {
+    act(() => root.render(wrap(<HypothesisStatusBadge status="killed" />)));
+    expect(container.textContent).toContain(koMessages.hypotheses.statusKilled);
   });
 });

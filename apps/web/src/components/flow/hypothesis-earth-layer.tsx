@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import type { Hypothesis } from '@sprintable/core-storage';
 import { HypothesisStatusBadge } from '@/components/hypotheses/hypothesis-status-badge';
@@ -105,6 +105,46 @@ function HypothesisCard({
   );
 }
 
+/**
+ * story #2530(#2930 재QA HIGH, 유나 design 규격 2026-08-09 04:22) — 결론난 가설 한 줄.
+ * 전체 카드가 아니라 compact 행(질문+배지+결론 시각)만 — 접힌 섹션은 스크롤 부담 없이
+ * "무엇이 결론났나"만 훑는 자리이지 지구층 카드와 같은 무게가 아니다.
+ */
+function ConcludedRow({
+  hypothesis,
+  onSelect,
+  locale,
+}: {
+  hypothesis: Hypothesis;
+  onSelect: (id: string) => void;
+  locale: string;
+}) {
+  const t = useTranslations('flow');
+  const concludedDate = new Date(hypothesis.updated_at).toLocaleDateString(locale);
+  // falsified인데 이미 대체 가설(정반합)이 있으면 접힌 채로도 "낳음"이 예고돼야 한다
+  // (유나 지적 — 정반합 서사가 펼쳐야만 보이면 여전히 발견성이 낮다).
+  const showSupersededHint = hypothesis.status === 'falsified' && Boolean(hypothesis.superseded_by_hypothesis_id);
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect(hypothesis.id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(hypothesis.id); }
+      }}
+      className="flex cursor-pointer items-center gap-2 px-3 py-2 text-left transition hover:bg-muted/60"
+    >
+      <HypothesisStatusBadge status={hypothesis.status} />
+      <p className="min-w-0 flex-1 truncate text-sm text-foreground">{hypothesis.statement}</p>
+      {showSupersededHint ? (
+        <span className="shrink-0 text-[11px] font-semibold text-info">{t('earthSupersededHint')}</span>
+      ) : null}
+      <span className="shrink-0 text-[11px] text-muted-foreground">{t('earthConcludedAt', { date: concludedDate })}</span>
+    </div>
+  );
+}
+
 export function HypothesisEarthLayer({
   projectId,
   onSelectHypothesis,
@@ -113,6 +153,7 @@ export function HypothesisEarthLayer({
   onSelectHypothesis: (id: string) => void;
 }) {
   const t = useTranslations('flow');
+  const locale = useLocale();
   const [hypotheses, setHypotheses] = useState<Hypothesis[] | null>(null);
   const [loadError, setLoadError] = useState(false);
 
@@ -146,7 +187,14 @@ export function HypothesisEarthLayer({
   // 섹션(카드 폭발 회피 유지)으로 아래에 남겨, 펼치면 여전히 클릭→서사 패널로 갈 수 있다.
   const measuring = hypotheses?.filter((h) => h.status === 'measuring') ?? [];
   const proposed = hypotheses?.filter((h) => h.status === 'proposed') ?? [];
-  const concluded = hypotheses?.filter((h) => h.status === 'verified' || h.status === 'falsified' || h.status === 'killed') ?? [];
+  // 유나 design 규격(2026-08-09 04:22) — 최근 결론순(updated_at desc, 그 상태로 전이된
+  // 가장 최근 시점 — BE가 결론 전이 시각을 별도로 안 주므로 지어내지 않고 이 필드를 쓴다).
+  const concluded = (hypotheses ?? [])
+    .filter((h) => h.status === 'verified' || h.status === 'falsified' || h.status === 'killed')
+    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+  const verifiedCount = concluded.filter((h) => h.status === 'verified').length;
+  const falsifiedCount = concluded.filter((h) => h.status === 'falsified').length;
+  const killedCount = concluded.filter((h) => h.status === 'killed').length;
 
   return (
     <div className="space-y-4">
@@ -190,12 +238,17 @@ export function HypothesisEarthLayer({
 
       {concluded.length > 0 ? (
         <details className="rounded-lg border border-border">
-          <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-foreground">
-            {t('earthConcludedHeading', { n: concluded.length })}
+          <summary className="flex cursor-pointer items-baseline gap-2 px-3 py-2 text-xs font-semibold text-foreground">
+            {t('earthConcludedHeading')}
+            {/* 접힌 채로도 무엇이 결론났나 읽히는 소계 — 펼쳐야만 알 수 있으면 발견성이 낮다.
+                (글리프+숫자 자체가 내용이라 aria-hidden 안 함 — AC8 색만으로 구분 금지와 같은 결) */}
+            <span className="font-normal text-muted-foreground">
+              {t('earthConcludedSubtotal', { verified: verifiedCount, falsified: falsifiedCount, killed: killedCount })}
+            </span>
           </summary>
-          <div className="grid grid-cols-1 gap-3 border-t border-border p-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="divide-y divide-border border-t border-border">
             {concluded.map((h) => (
-              <HypothesisCard key={h.id} hypothesis={h} dim={false} onSelect={onSelectHypothesis} />
+              <ConcludedRow key={h.id} hypothesis={h} onSelect={onSelectHypothesis} locale={locale} />
             ))}
           </div>
         </details>

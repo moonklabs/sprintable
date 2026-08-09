@@ -105,13 +105,13 @@ describe('HypothesisEarthLayer — story #2531 AC(measuring 선명·proposed 흐
     expect(container.textContent).toContain(koMessages.flow.earthEmpty);
   });
 
-  it('verified/falsified/killed는 «결론난 가설» 접힘 섹션에 뜨고, 클릭하면 onSelectHypothesis가 호출된다', async () => {
+  it('verified/falsified/killed는 «결론난 가설» 접힘 섹션에 최근 결론순으로 뜨고, 소계·클릭이 동작한다(유나 design 규격, 2026-08-09)', async () => {
     const onSelect = vi.fn();
     await renderLayer(
       vi.fn(() => jsonResponse([
-        makeHypothesis({ id: 'h3', status: 'verified', statement: 'CONCLUDED-verified' }),
-        makeHypothesis({ id: 'h4', status: 'falsified', statement: 'CONCLUDED-falsified' }),
-        makeHypothesis({ id: 'h5', status: 'killed', statement: 'CONCLUDED-killed' }),
+        makeHypothesis({ id: 'h3', status: 'verified', statement: 'CONCLUDED-verified', updated_at: '2026-08-01T00:00:00Z' }),
+        makeHypothesis({ id: 'h4', status: 'falsified', statement: 'CONCLUDED-falsified', updated_at: '2026-08-05T00:00:00Z' }),
+        makeHypothesis({ id: 'h5', status: 'killed', statement: 'CONCLUDED-killed', updated_at: '2026-08-03T00:00:00Z' }),
       ])),
       onSelect,
     );
@@ -119,20 +119,54 @@ describe('HypothesisEarthLayer — story #2531 AC(measuring 선명·proposed 흐
     expect(container.textContent).toContain('CONCLUDED-verified');
     expect(container.textContent).toContain('CONCLUDED-falsified');
     expect(container.textContent).toContain('CONCLUDED-killed');
-    expect(container.textContent).toContain(koMessages.flow.earthConcludedHeading.replace('{n}', '3'));
+    expect(container.textContent).toContain(koMessages.flow.earthConcludedHeading);
+    // 소계 «✓X ✕Y ⊘Z» — 접힌 채로도 무엇이 결론났나 읽힌다.
+    expect(container.textContent).toContain('✓1 ✕1 ⊘1');
 
     const details = container.querySelector('details');
     expect(details).toBeTruthy();
     expect(details?.hasAttribute('open')).toBe(false); // 기본 접힘(카드 폭발 회피 유지)
 
-    const card = Array.from(container.querySelectorAll('[role="button"]')).find(
+    // 최근 결론순: falsified(08-05) → killed(08-03) → verified(08-01).
+    const rowTexts = Array.from(details!.querySelectorAll('[role="button"]')).map((el) => el.textContent ?? '');
+    const falsifiedIdx = rowTexts.findIndex((t) => t.includes('CONCLUDED-falsified'));
+    const killedIdx = rowTexts.findIndex((t) => t.includes('CONCLUDED-killed'));
+    const verifiedIdx = rowTexts.findIndex((t) => t.includes('CONCLUDED-verified'));
+    expect(falsifiedIdx).toBeLessThan(killedIdx);
+    expect(killedIdx).toBeLessThan(verifiedIdx);
+
+    const row = Array.from(container.querySelectorAll('[role="button"]')).find(
       (el) => el.textContent?.includes('CONCLUDED-falsified'),
     );
-    expect(card).toBeTruthy();
+    expect(row).toBeTruthy();
     await act(async () => {
-      card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      row!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(onSelect).toHaveBeenCalledWith('h4');
+  });
+
+  it('falsified가 대체 가설(superseded_by_hypothesis_id)이 있으면 «→ 대체» 힌트가 접힌 섹션에서도 보인다', async () => {
+    await renderLayer(vi.fn(() => jsonResponse([
+      makeHypothesis({ id: 'h4', status: 'falsified', statement: 'Q-superseded', superseded_by_hypothesis_id: 'h-next' }),
+    ])));
+
+    expect(container.textContent).toContain(koMessages.flow.earthSupersededHint);
+  });
+
+  it('falsified인데 대체 가설이 없으면 «→ 대체» 힌트가 안 뜬다', async () => {
+    await renderLayer(vi.fn(() => jsonResponse([
+      makeHypothesis({ id: 'h4', status: 'falsified', statement: 'Q-not-superseded', superseded_by_hypothesis_id: null }),
+    ])));
+
+    expect(container.textContent).not.toContain(koMessages.flow.earthSupersededHint);
+  });
+
+  it('verified/killed는 대체가 있어도(오배선 방어) «→ 대체» 힌트가 안 뜬다(falsified 전용)', async () => {
+    await renderLayer(vi.fn(() => jsonResponse([
+      makeHypothesis({ id: 'h3', status: 'verified', statement: 'Q-verified', superseded_by_hypothesis_id: 'h-next' }),
+    ])));
+
+    expect(container.textContent).not.toContain(koMessages.flow.earthSupersededHint);
   });
 
   it('결론난 가설이 없으면 «결론난 가설» 섹션 자체를 안 그린다', async () => {

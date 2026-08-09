@@ -31,6 +31,10 @@ export interface Hypothesis {
   // HypothesisResponse가 미노출 — optional로 두어 노출 전까지 graceful degrade.
   draft_metadata?: Record<string, unknown> | null;
   drafted_by_member_id?: string | null;
+  // story #2533-BE(migration 0237) — 정반합 self-FK. HypothesisResponse가 이미 노출한다
+  // (backend/app/schemas/hypothesis.py:117, list 응답 포함) — optional은 이 필드가 붙기 전
+  // 스냅샷/목업 데이터와의 graceful degrade용.
+  superseded_by_hypothesis_id?: string | null;
   created_at: string;
   updated_at: string;
 }
