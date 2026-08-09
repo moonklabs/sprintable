@@ -397,7 +397,7 @@
     "gateGeneric": "approval",
     "signalAgentStuckTitle": "An agent is waiting to proceed",
     "signalAgentStuckContext": "Waiting on approval — needs a look",
-    "signalStalledTitle": "A hypothesis is going differently than expected",
+    "signalStalledTitle": "A story hasn't moved in a while",
     "signalStalledContext": "Needs a look",
     "signalBlockerTitle": "A blocked item is waiting on a response",
     "signalBlockerContext": "Needs a look",

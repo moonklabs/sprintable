@@ -56,6 +56,15 @@ interface RawAttentionItem {
   entity_type: string | null;
   entity_id: string | null;
   gate_type: string | null;
+  // ⛔PO 실측 결함(2026-08-09, 디디 그라운딩) — story_stalled/unanswered_blocker는
+  // entity_type/entity_id를 아예 안 낸다(backend/app/routers/command_center.py:379-406).
+  // story_stalled = {story_id, stalled_days} · unanswered_blocker = {blocked_story_id,
+  // blocker_id, age_days} — 별개 키명이라 위 entity_id 파싱은 이 둘에선 항상 null이었고,
+  // href가 매번 제네릭 /board로 떨어지고 id도 배열 index로 새 렌더마다 안 안정됐다.
+  story_id: string | null;
+  blocked_story_id: string | null;
+  // title은 story_stalled 전용(디디 BE 후속 추가 예정, 아직 미배선) — 없으면 폴백 문구.
+  title: string | null;
 }
 
 export interface RawMyActions {
@@ -97,6 +106,9 @@ export function parseMyActions(json: unknown): RawMyActions {
         entity_type: str(raw['entity_type']),
         entity_id: str(raw['entity_id']),
         gate_type: str(raw['gate_type']),
+        story_id: str(raw['story_id']),
+        blocked_story_id: str(raw['blocked_story_id']),
+        title: str(raw['title']),
       });
     }
   }
@@ -192,22 +204,24 @@ export function buildNowFace(raw: RawMyActions, notifications: RawCompletionNoti
       });
     } else if (a.type === 'story_stalled') {
       items.push({
-        id: `story_stalled-${a.entity_id ?? items.length}`,
+        id: `story_stalled-${a.story_id ?? items.length}`,
         kind: 'signal', kindLabel: t('kindSignal'),
-        title: t('signalStalledTitle'),
+        // title은 BE가 아직 안 보내면(디디 후속 배선 전) 폴백 문구 — surveillance framing
+        // ban(§1.5/§1.7, derive-now-face.test.ts)이 아직 유효해 날짜/기간 수치는 안 붙인다.
+        title: a.title ?? t('signalStalledTitle'),
         context: t('signalStalledContext'),
         actionLabel: t('actionOpen'), actionTone: 'ghost',
-        href: a.entity_id ? `/board?story=${a.entity_id}` : '/board',
+        href: a.story_id ? `/board?story=${a.story_id}` : '/board',
         priority: 21,
       });
     } else if (a.type === 'unanswered_blocker') {
       items.push({
-        id: `unanswered_blocker-${a.entity_id ?? items.length}`,
+        id: `unanswered_blocker-${a.blocked_story_id ?? items.length}`,
         kind: 'signal', kindLabel: t('kindSignal'),
         title: t('signalBlockerTitle'),
         context: t('signalBlockerContext'),
         actionLabel: t('actionOpen'), actionTone: 'ghost',
-        href: a.entity_id ? `/board?story=${a.entity_id}` : '/board',
+        href: a.blocked_story_id ? `/board?story=${a.blocked_story_id}` : '/board',
         priority: 22,
       });
     }
