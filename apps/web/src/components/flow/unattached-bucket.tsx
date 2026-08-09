@@ -126,7 +126,7 @@ function SuggestionChips({
           disabled={attachingId !== null}
           onClick={() => void attachHypothesis(c.id)}
           className={cn(
-            'rounded-full border border-info-border bg-info-tint px-2.5 py-1 text-[11px] text-info transition hover:opacity-80 disabled:opacity-50',
+            'rounded-full border border-info-border bg-info-tint px-2.5 py-1 text-[11px] text-foreground transition hover:opacity-80 disabled:opacity-50',
           )}
         >
           {t('bucketHypothesisChip', { text: c.text })}
