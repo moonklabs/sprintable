@@ -6,6 +6,7 @@ import { Loader2 } from 'lucide-react';
 import type { Hypothesis } from '@sprintable/core-storage';
 import { HypothesisStatusBadge } from '@/components/hypotheses/hypothesis-status-badge';
 import { ScaleLadder } from '@/components/flow/scale-ladder';
+import { UnattachedBucket } from '@/components/flow/unattached-bucket';
 import { cn } from '@/lib/utils';
 
 /**
@@ -222,6 +223,10 @@ export function HypothesisEarthLayer({
           </div>
         </details>
       ) : null}
+
+      {/* story #2534(E-FLOW-V4 S4) — 이행기. 미매달림 작업은 지구 지도(위 그리드) 안에
+          안 섞고 접힌 별도 버킷으로 뺀다(지도 오염 방지, doc §7-1). */}
+      <UnattachedBucket projectId={projectId} />
     </div>
   );
 }

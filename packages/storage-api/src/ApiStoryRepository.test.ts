@@ -65,3 +65,34 @@ describe('ApiStoryRepository.list — story_number(#2283 참조해소) 파라미
     expect(requestedUrl).not.toContain('story_number=');
   });
 });
+
+describe('ApiStoryRepository.list — unattached(story #2534 E-FLOW-V4 S4) 파라미터가 실제 요청 URL에 실린다', () => {
+  // BE(stories.py:137)는 이미 unattached 쿼리를 받는데 이 query 객체엔 없었다 — q 소실
+  // (083176e8)·story_number 소실(#2283)과 같은 클래스, 이번엔 unattached가 빠져 있었다.
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: [] }),
+    })) as unknown as ReturnType<typeof vi.fn>;
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  it('includes unattached in the outgoing query string when filters.unattached is true', async () => {
+    const repo = new ApiStoryRepository('token');
+    await repo.list({ project_id: 'proj-1', unattached: true });
+
+    const requestedUrl = (fetchMock.mock.calls[0]![0] as URL | string).toString();
+    expect(requestedUrl).toContain('unattached=true');
+  });
+
+  it('omits unattached from the query string when filters.unattached is undefined', async () => {
+    const repo = new ApiStoryRepository('token');
+    await repo.list({ project_id: 'proj-1' });
+
+    const requestedUrl = (fetchMock.mock.calls[0]![0] as URL | string).toString();
+    expect(requestedUrl).not.toContain('unattached=');
+  });
+});

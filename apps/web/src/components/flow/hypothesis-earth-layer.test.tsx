@@ -79,6 +79,15 @@ function jsonResponse(data: unknown) {
   return Promise.resolve(new Response(JSON.stringify({ data }), { status: 200 }));
 }
 
+// story #2534(S4) 머지 후 — HypothesisEarthLayer가 UnattachedBucket(자기 own <details>)도
+// 함께 렌더하므로, «결론난 가설» 섹션의 <details>는 querySelector('details')로 첫 매치를
+// 우연에 기대지 말고 summary 텍스트로 정확히 찾는다(그 details만 대상으로 검증).
+function findConcludedDetails() {
+  return Array.from(container.querySelectorAll('details')).find(
+    (d) => d.querySelector('summary')?.textContent?.includes(koMessages.flow.earthConcludedHeading),
+  );
+}
+
 describe('HypothesisEarthLayer — story #2531 AC(measuring 선명·proposed 흐림·나머지 미표시)', () => {
   it('measuring 가설은 선명(opacity-60 없이) 렌더된다', async () => {
     await renderLayer(vi.fn(() => jsonResponse([makeHypothesis({ id: 'h1', status: 'measuring', statement: 'Q1' })])));
@@ -123,7 +132,7 @@ describe('HypothesisEarthLayer — story #2531 AC(measuring 선명·proposed 흐
     // 소계 «✓X ✕Y ⊘Z» — 접힌 채로도 무엇이 결론났나 읽힌다.
     expect(container.textContent).toContain('✓1 ✕1 ⊘1');
 
-    const details = container.querySelector('details');
+    const details = findConcludedDetails();
     expect(details).toBeTruthy();
     expect(details?.hasAttribute('open')).toBe(false); // 기본 접힘(카드 폭발 회피 유지)
 
@@ -174,7 +183,7 @@ describe('HypothesisEarthLayer — story #2531 AC(measuring 선명·proposed 흐
       makeHypothesis({ id: 'h1', status: 'measuring', statement: 'Q1' }),
     ])));
 
-    expect(container.querySelector('details')).toBeFalsy();
+    expect(findConcludedDetails()).toBeFalsy();
   });
 
   it('fold count는 story_ids.length를 그대로 쓴다', async () => {

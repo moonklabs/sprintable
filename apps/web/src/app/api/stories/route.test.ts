@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // 목킹해 (a) ids 없으면 기존 커서 페이지네이션 경로 (b) ids 있으면 meta 없는 배치 응답
 // (c) 200개 cap 방어 (d) 빈/공백 ids는 무시하고 기존 경로로 폴백을 검증한다.
 const h = vi.hoisted(() => ({
-  getAuthContext: vi.fn(), createStoryRepository: vi.fn(), list: vi.fn(),
+  getAuthContext: vi.fn(), createStoryRepository: vi.fn(), list: vi.fn(), proxyToFastapi: vi.fn(),
 }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext: h.getAuthContext }));
 vi.mock('@/lib/storage/factory', () => ({ createStoryRepository: h.createStoryRepository }));
@@ -12,6 +12,9 @@ vi.mock('@/services/story', async (importActual) => ({
   ...(await importActual<typeof import('@/services/story')>()),
   StoryService: class { list = h.list; },
 }));
+// story #2534 카디르 QA HIGH fix — unattached=true 분기는 StoryService를 안 거치고
+// proxyToFastapi로 raw 통과(backlog route와 동형) — X-Total-Count 헤더 forwarding 검증용 목.
+vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi: h.proxyToFastapi }));
 
 import { GET } from './route';
 
@@ -65,5 +68,40 @@ describe('/api/stories GET — ids 배치 lookup 분기', () => {
     await GET(new Request('http://localhost/api/stories?ids=  ,  '));
     const calledWith = h.list.mock.calls[0]![0] as { ids?: string[] };
     expect(calledWith.ids).toBeUndefined();
+  });
+});
+
+describe('/api/stories GET — unattached=true 분기(story #2534, 카디르 QA HIGH fix)', () => {
+  beforeEach(() => {
+    Object.values(h).forEach((m) => m.mockReset());
+    h.getAuthContext.mockResolvedValue(agent());
+    h.createStoryRepository.mockResolvedValue({});
+  });
+
+  it('StoryService를 안 거치고 raw proxy로 통과하며, X-Total-Count 헤더를 meta.total로 옮긴다', async () => {
+    h.proxyToFastapi.mockResolvedValue(new Response(
+      JSON.stringify([story('1')]),
+      { status: 200, headers: { 'x-total-count': '2180' } },
+    ));
+    const res = await GET(new Request('http://localhost/api/stories?project_id=p&unattached=true&limit=100'));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.meta.total).toBe(2180);
+    expect(body.data).toHaveLength(1);
+    // StoryService.list()가 이 분기에서 호출되지 않는다(raw proxy 경로).
+    expect(h.list).not.toHaveBeenCalled();
+  });
+
+  it('X-Total-Count 헤더가 없으면(예외 상황) meta.total을 안 지어낸다(meta=null)', async () => {
+    h.proxyToFastapi.mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }));
+    const res = await GET(new Request('http://localhost/api/stories?project_id=p&unattached=true'));
+    const body = await res.json();
+    expect(body.meta).toBeNull();
+  });
+
+  it('BE 에러 응답이면 그대로 통과시킨다(200 아닌 응답 삼키지 않음)', async () => {
+    h.proxyToFastapi.mockResolvedValue(new Response('boom', { status: 500 }));
+    const res = await GET(new Request('http://localhost/api/stories?project_id=p&unattached=true'));
+    expect(res.status).toBe(500);
   });
 });
