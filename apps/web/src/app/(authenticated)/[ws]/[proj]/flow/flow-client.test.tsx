@@ -33,6 +33,12 @@ vi.mock('@/components/kanban/kanban-board', () => ({
   KanbanBoard: () => <div data-testid="kanban-board-stub">kanban</div>,
 }));
 
+// story #2531 — 지구층은 default view가 됐으니 view=flow/list 를 테스트하는 기존 스펙들이
+// 실제 fetch를 안 타게 얇은 스텁으로 대체한다(지구층 자체 스펙은 별도 테스트 파일).
+vi.mock('@/components/flow/hypothesis-earth-layer', () => ({
+  HypothesisEarthLayer: () => <div data-testid="hypothesis-earth-layer-stub">earth</div>,
+}));
+
 // 유나 가디언 리뷰(2026-07-31, PR#2744 issuecomment) 회귀 가드 재료 — 옛 스텁은 items를
 // 안 받아 렌더했다("양성대조가 될 수 없는 표본"). 실제 kindLabel까지 텍스트로 노출해야
 // "항목이 «있는» 상태"에서 라벨 충돌을 값으로 잡을 수 있다.
@@ -59,8 +65,11 @@ vi.mock('@/components/glance/load-glance-data', () => ({
   loadGlanceData: loadGlanceDataMock,
 }));
 
+// story #2531 — 카디르 ①HIGH 회귀가드 재료(모바일 기본값 분기 테스트)가 isMobile을 true로
+// 뒤집을 수 있어야 해서 mutable로 바꾼다. 기본은 false(기존 스펙 전부 그대로 통과).
+let isMobileMock = false;
 vi.mock('@/hooks/use-mobile', () => ({
-  useIsMobile: () => false,
+  useIsMobile: () => isMobileMock,
 }));
 
 // NextMakerScreen 스텁 — onSelectStory 호출 버튼 + selectedNodeId를 텍스트로 노출(threading 검증용).
@@ -98,6 +107,7 @@ function wrap(node: React.ReactNode) {
 
 beforeEach(() => {
   currentSearch = '';
+  isMobileMock = false;
   pushMock.mockClear();
   loadGlanceDataMock.mockClear();
   loadGlanceDataMock.mockResolvedValue({ memberMap: {}, attentionSignals: [] });
@@ -122,6 +132,7 @@ async function renderFlowClient() {
 
 describe('FlowPageClient — story #2354 (노드 클릭이 지도를 안 끈다)', () => {
   it('handleSelectStory pushes ?story=<id> WITHOUT touching view — 옛 버그(view=list 강제)가 재발하지 않는다', async () => {
+    currentSearch = 'view=flow';
     await renderFlowClient();
 
     const selectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'select-node');
@@ -134,10 +145,13 @@ describe('FlowPageClient — story #2354 (노드 클릭이 지도를 안 끈다)
     const pushedUrl = pushMock.mock.calls[0]?.[0] as string;
     expect(pushedUrl).toContain('story=story-abc');
     // 이게 이 회귀가드의 핵심 — 옛 코드는 여기서 반드시 view=list를 같이 붙였다.
-    expect(pushedUrl).not.toContain('view=');
+    // story #2531 이후 view=flow는 (테스트가 이미 그 탭에 있었으므로) 유지되는 게 맞다 —
+    // 지켜야 하는 것은 "list로 강제 전환되지 않는다"는 것 하나.
+    expect(pushedUrl).not.toContain('view=list');
   });
 
   it('clicking a node opens the overlay panel while the flow canvas stub stays mounted (캔버스가 언마운트되지 않는다)', async () => {
+    currentSearch = 'view=flow';
     await renderFlowClient();
     expect(container.querySelector('[data-testid="next-maker-screen-stub"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="flow-node-story-panel-stub"]')).toBeNull();
@@ -154,7 +168,7 @@ describe('FlowPageClient — story #2354 (노드 클릭이 지도를 안 끈다)
   });
 
   it('deep link (?story=<id> already in URL) opens the panel on mount without needing a click', async () => {
-    currentSearch = 'story=story-deep';
+    currentSearch = 'view=flow&story=story-deep';
     await renderFlowClient();
 
     expect(container.querySelector('[data-testid="flow-node-story-panel-stub"]')).not.toBeNull();
@@ -164,7 +178,7 @@ describe('FlowPageClient — story #2354 (노드 클릭이 지도를 안 끈다)
   });
 
   it('closing the panel keeps the node selected (AC6 판정선) — selectedNodeId survives close, only panel visibility toggles', async () => {
-    currentSearch = 'story=story-abc';
+    currentSearch = 'view=flow&story=story-abc';
     await renderFlowClient();
     expect(container.querySelector('[data-testid="flow-node-story-panel-stub"]')).not.toBeNull();
 
@@ -279,5 +293,96 @@ describe('FlowPageClient — story #2365 후속(유나·PO, 2026-07-31) — 서�
 
     const kindText = container.querySelector('[data-testid="exception-item-kind"]')?.textContent ?? '';
     expectNoCollisionWithHeader(kindText);
+  });
+});
+
+// story #2531(E-FLOW-V4 S1, PO 게이트 2026-08-08 재정의) — 「본체가 지도로 서는가」는
+// 이제 «칸반 탈피»가 아니라 «가설이 기본 랜딩(?view= 없음)으로 최상위를 차지하는가»다.
+// 그라운딩으로 밝혀진 대로 NextMakerScreen(갈래)은 이미 07-31에 칸반을 대체했었으므로,
+// 이 스토리가 실제로 바꾸는 것은 «기본값이 flow에서 hypothesis로 이동»한다는 것 하나 —
+// 그 값을 정확히 잰다.
+describe('FlowPageClient — story #2531(E-FLOW-V4 S1) 가설이 기본·최상위로 선다', () => {
+  it('?view= 없이 진입하면 기본으로 지구층(HypothesisEarthLayer)이 렌더된다 — 갈래·칸반이 아니다', async () => {
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="next-maker-screen-stub"]')).toBeNull();
+    expect(container.querySelector('[data-testid="kanban-board-stub"]')).toBeNull();
+  });
+
+  it('세그에 가설·갈래·목록 3탭이 모두 뜨고, 가설 탭이 기본 활성 상태다', async () => {
+    await renderFlowClient();
+
+    const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
+    expect(buttons).toContain(koMessages.flow.viewHypothesis);
+    expect(buttons).toContain(koMessages.flow.viewFlow);
+    expect(buttons).toContain(koMessages.flow.viewList);
+  });
+
+  it('갈래 탭(?view=flow)을 누르면 URL이 view=flow로 바뀌고(가설 기본에서 벗어남을 push로 확認)', async () => {
+    await renderFlowClient();
+
+    const flowTabButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === koMessages.flow.viewFlow,
+    );
+    expect(flowTabButton).toBeTruthy();
+    await act(async () => {
+      flowTabButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    const pushedUrl = pushMock.mock.calls[0]?.[0] as string;
+    expect(pushedUrl).toContain('view=flow');
+  });
+
+  it('가설 탭으로 돌아가면(setView("hypothesis")) URL에서 view= 쿼리를 지운다(기본값=파라미터 없음)', async () => {
+    currentSearch = 'view=flow';
+    await renderFlowClient();
+
+    const hypothesisTabButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === koMessages.flow.viewHypothesis,
+    );
+    await act(async () => {
+      hypothesisTabButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const pushedUrl = pushMock.mock.calls[0]?.[0] as string;
+    expect(pushedUrl).not.toContain('view=');
+  });
+});
+
+// 카디르 라이브 QA(2026-08-09, S1) — REQUEST_CHANGES 2건 회귀가드.
+describe('FlowPageClient — 카디르 QA fix(2026-08-09) ①모바일 dead-end', () => {
+  it('모바일(isMobile=true)·?view= 없음 이면 기본값이 가설이 아니라 flow(NextMakerScreen)다 — 갈래·목록으로 갈 UI 경로가 0이 되는 dead-end 방지', async () => {
+    isMobileMock = true;
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="next-maker-screen-stub"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).toBeNull();
+  });
+
+  it('데스크톱(isMobile=false)·?view= 없음 이면 기존대로 가설이 기본값이다(회귀 없음)', async () => {
+    isMobileMock = false;
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).not.toBeNull();
+  });
+
+  it('모바일이라도 ?view=hypothesis가 URL에 명시돼 있으면 그대로 존중한다(주소로는 진입 가능)', async () => {
+    isMobileMock = true;
+    currentSearch = 'view=hypothesis';
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).not.toBeNull();
+  });
+});
+
+describe('FlowPageClient — 카디르 QA fix(2026-08-09) ②패널 경계(구 2값 FlowView 잔재)', () => {
+  it('기본(가설) 뷰에서 ?story=<id>가 있어도 FlowNodeStoryPanel이 새지 않는다(가설 뷰엔 선택 UI 자체가 없다)', async () => {
+    currentSearch = 'story=story-leak';
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="flow-node-story-panel-stub"]')).toBeNull();
   });
 });
