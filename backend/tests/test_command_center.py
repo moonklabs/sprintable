@@ -94,7 +94,7 @@ def _data(resp):
 # my_blockers를 채운 테스트만 다음 호출들이 전부 밀려 엉뚱한 mock을 받는다).
 def _ma_seq(
     approvals=(), reviews=(), my_blockers=(), waiting=(), stuck=(), stalled=(), unanswered=(),
-    my_tasks=(), approval_group_counts=(), blocker_weight_counts=(),
+    my_tasks=(), approval_group_counts=(), blocker_weight_counts=(), falsified=(),
 ):
     seq = [_r_all(approvals)]
     if approvals:
@@ -108,6 +108,7 @@ def _ma_seq(
     seq.append(_r_scalars(stuck))
     seq.append(_r_all(stalled))
     seq.append(_r_all(unanswered))
+    seq.append(_r_all(falsified))  # story #2539
     return seq
 
 
@@ -246,6 +247,40 @@ async def test_my_actions_stalled_and_unanswered_blocker_enum_only():
     ub = next(i for i in items if i["type"] == "unanswered_blocker")
     assert ub["blocked_story_title"] == "막힌 스토리"
     assert ub["blocked_story_id"] == str(blocked_id) and isinstance(ub["age_days"], int)
+
+
+@pytest.mark.anyio
+async def test_my_actions_hypothesis_falsified_result_notification():
+    """story #2539: 최근 falsified 가설 결과 통보(in-flight 이상감지 아님 — severity=info,
+    story_stalled/unanswered_blocker의 severity=warn과 의도적으로 다름)."""
+    hyp_id, succ_id = uuid.uuid4(), uuid.uuid4()
+    outcome = {"metric": "signups", "target": 100, "actual": 42, "direction": "increase"}
+    resp, session, resolver = await _get(
+        "/api/v2/command-center/my-actions",
+        execute_seq=_ma_seq(falsified=[(hyp_id, "체크아웃 2단계면 가입 늘 것", outcome, _OLD, succ_id)]))
+    assert resp.status_code == 200
+    items = _data(resp)["attention"]["items"]
+    hf = next(i for i in items if i["type"] == "hypothesis_falsified")
+    assert hf["severity"] == "info"
+    assert hf["hypothesis_id"] == str(hyp_id)
+    assert hf["statement"] == "체크아웃 2단계면 가입 늘 것"
+    assert hf["outcome_result"] == outcome
+    assert isinstance(hf["falsified_days"], int)
+    assert hf["superseded_by_hypothesis_id"] == str(succ_id)
+
+
+@pytest.mark.anyio
+async def test_my_actions_hypothesis_falsified_superseded_by_null_when_unconfirmed():
+    """AC — 확認된 대체 페어 없으면 superseded_by_hypothesis_id는 None(지어내지 않는다)."""
+    hyp_id = uuid.uuid4()
+    resp, session, resolver = await _get(
+        "/api/v2/command-center/my-actions",
+        execute_seq=_ma_seq(falsified=[(hyp_id, "S", None, _OLD, None)]))
+    assert resp.status_code == 200
+    items = _data(resp)["attention"]["items"]
+    hf = next(i for i in items if i["type"] == "hypothesis_falsified")
+    assert hf["superseded_by_hypothesis_id"] is None
+    assert hf["outcome_result"] is None
 
 
 @pytest.mark.anyio
