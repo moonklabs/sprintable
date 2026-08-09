@@ -489,6 +489,8 @@
     "narrativeTarget": "Target",
     "narrativeGate": "Gate",
     "narrativeEvidence": "Evidence",
+    "narrativeMissedTarget": "Missed target",
+    "narrativeSpawned": "The question this refutation spawned",
     "narrativeTimelineCaption": "This is not the full status-transition history — just these 3 points.",
     "narrativeCreatedAt": "Proposed {date}",
     "narrativeMeasureAfter": "Deadline {date}",

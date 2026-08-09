@@ -185,6 +185,15 @@ export function HypothesisNarrativePanel({
                   </span>
                   {' / '}
                   {t('narrativeTarget')} {String((state.data.hypothesis.outcome_result as Record<string, unknown>).target ?? '')}
+                  {/* story #2533 follow-up②(유나 design 재검, 2026-08-09) — falsified는 색이
+                      아니라 «결론 방향»(목표 미달)으로 읽히게. 방향(↑/↓)은 hypothesis 자기
+                      metric_definition에서(outcome_result에도 direction이 있지만 재확認 없이
+                      두 소스를 섞지 않는다 — hypothesis 레벨을 SSOT로 고정). */}
+                  {state.data.hypothesis.status === 'falsified' ? (
+                    <span className="ml-1.5 font-semibold text-info">
+                      · {t('narrativeMissedTarget')} {state.data.hypothesis.metric_definition?.direction === 'down' ? '↓' : '↑'}
+                    </span>
+                  ) : null}
                 </p>
               ) : null}
               {/* PR#2930 리뷰② — 스토리별 gate/evidence 간접조회(hypothesis_story_links 거쳐).
@@ -202,8 +211,13 @@ export function HypothesisNarrativePanel({
               ) : null}
             </NarrativeStep>
 
+            {/* story #2533 follow-up③(유나 design 재검, 2026-08-09) — falsified는 «닫힘»이
+                아니라 «낳음»(다음 질문을 낳는다)이 진짜 차이다. verified는 이 절 자체가 없어
+                「닫힘」을 침묵으로 말하고, falsified는 이 절이 도드라져 「낳음」을 명시로
+                말한다 — 색이 아니라 이 대비 자체가 신호. */}
             {state.data.superseded_by ? (
               <NarrativeStep label={t('narrativeStepAntithesis')} title={state.data.superseded_by.statement}>
+                <p className="mb-1 font-medium text-info">{t('narrativeSpawned')}</p>
                 <HypothesisStatusBadge status={state.data.superseded_by.status as HypothesisStatus} />
               </NarrativeStep>
             ) : null}

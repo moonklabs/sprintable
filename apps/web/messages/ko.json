@@ -489,6 +489,8 @@
     "narrativeTarget": "목표",
     "narrativeGate": "결재",
     "narrativeEvidence": "증거",
+    "narrativeMissedTarget": "목표 미달",
+    "narrativeSpawned": "이 반증이 낳은 다음 질문",
     "narrativeTimelineCaption": "상태 전이 이력 전체가 아니라 아래 3개 시점만 기록됩니다.",
     "narrativeCreatedAt": "제안 {date}",
     "narrativeMeasureAfter": "기한 {date}",

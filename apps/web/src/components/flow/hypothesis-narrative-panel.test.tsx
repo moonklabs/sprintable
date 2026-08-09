@@ -122,6 +122,20 @@ describe('HypothesisNarrativePanel — story #2533, lifecycle 단일 응답 소�
     expect(document.body.textContent).toContain('60');
   });
 
+  it('falsified면 증명 절에 "목표 미달"이 명시된다(follow-up②, 색 아니라 방향으로 읽힘)', async () => {
+    await renderPanel(rawFetch(makeLifecycle({
+      hypothesis: { status: 'falsified', outcome_result: { actual: 52, target: 60 } },
+    })));
+    expect(document.body.textContent).toContain(koMessages.flow.narrativeMissedTarget);
+  });
+
+  it('verified면 "목표 미달" 문구가 안 뜬다(falsified 전용)', async () => {
+    await renderPanel(rawFetch(makeLifecycle({
+      hypothesis: { status: 'verified', outcome_result: { actual: 65, target: 60 } },
+    })));
+    expect(document.body.textContent).not.toContain(koMessages.flow.narrativeMissedTarget);
+  });
+
   it('증명 절이 스토리별 gate/evidence를 간접조회로 보여준다(PR#2930 리뷰② 해소)', async () => {
     await renderPanel(rawFetch(makeLifecycle({
       stories: [{ id: 's1', title: '스토리A', status: 'done', metric_definition: null, outcome_status: 'verified', gate_status: 'approved', evidence_count: 3 }],
@@ -172,6 +186,14 @@ describe('HypothesisNarrativePanel — 정반합 양방향(superseded_by/superse
     })));
     expect(document.body.textContent).toContain('대체 가설 문장');
     expect(document.body.textContent).toContain(koMessages.flow.narrativeStepAntithesis);
+  });
+
+  it('superseded_by가 있으면 "낳음" 프레이밍 문구가 도드라진다(follow-up③ — 닫힘 아니라 낳음)', async () => {
+    await renderPanel(rawFetch(makeLifecycle({
+      hypothesis: { status: 'falsified' },
+      superseded_by: { id: 'h2', statement: '대체 가설 문장', status: 'proposed' },
+    })));
+    expect(document.body.textContent).toContain(koMessages.flow.narrativeSpawned);
   });
 
   it('supersedes가 있으면(이 가설이 이전 가설을 대체함, 역방향) 전신 가설 문장이 뜬다', async () => {

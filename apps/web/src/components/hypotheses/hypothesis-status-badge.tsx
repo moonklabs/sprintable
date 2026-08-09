@@ -16,7 +16,10 @@ const MARK: Record<HypothesisStatus, string> = {
   active: '•',
   measuring: '◷',
   verified: '✓',
-  falsified: '⊘',
+  // story #2533 follow-up(유나 design 재검, 2026-08-09) — 색은 info(청) 유지하되(반증=학습
+  // 신호, red는 kill 전용 원칙 그대로) ✕ 글리프로 "닫힘 아니라 낳음"이 즉시 읽히게. killed와
+  // 글리프는 같아도(✕) variant(info vs chip)·라벨("반증됨" vs 종료)로 구분된다(AC8).
+  falsified: '✕',
   killed: '✕',
   archived: '🗄',
 };
