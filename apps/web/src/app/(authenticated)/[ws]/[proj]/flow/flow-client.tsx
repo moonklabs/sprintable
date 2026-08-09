@@ -12,6 +12,7 @@ import { loadGlanceData, type GlanceData } from '@/components/glance/load-glance
 import { useIsMobile } from '@/hooks/use-mobile';
 import { NextMakerScreen } from '@/components/flow/next-maker-screen';
 import { FlowNodeStoryPanel } from '@/components/flow/flow-node-story-panel';
+import { HypothesisEarthLayer } from '@/components/flow/hypothesis-earth-layer';
 
 interface FlowPageClientProps {
   projectId: string;
@@ -19,7 +20,7 @@ interface FlowPageClientProps {
   projSlug: string;
 }
 
-type FlowView = 'flow' | 'list';
+type FlowView = 'hypothesis' | 'flow' | 'list';
 
 // PO 판정(2026-07-30) — 선생님 원 지시("보드+현황판 통합, `/plan`은 말실수·`/flow`가 그
 // 자리")에 따라 07-23 시안(`e15905e8`)의 「갈래|목록」 세그를 되찾는다(IA 개정 때 조용히
@@ -33,9 +34,15 @@ type FlowView = 'flow' | 'list';
 // 하나로, 진행 궤적→시간축이 대체(따로 안 옮김). activity-logs만 목업 자체가 자리를
 // 정하지 않은 유일한 칸이라 판정 대기. 즉 현황판은 "갈래 캔버스가 더 잘 하는 것의 열등한
 // 판"이라 보기로도 남지 않는다.
+// story #2531(E-FLOW-V4 S1, PO 2026-08-08) — v4 조직원리(flow-board-v4-hypothesis-scale
+// §2): 축척 최상위(지구 층)는 가설이다. 「본체가 지도로 서는가」 게이트를 «가설이 기본
+// 랜딩(?view= 없음)으로 최상위를 차지하는가»로 판정 — 그래서 default가 'flow'(갈래·
+// NextMakerScreen)에서 'hypothesis'로 이동한다. 갈래·목록은 폐기 아님 — 나란한 탭으로
+// 남아 v3.4 계승(§6)을 만족한다. 가설→갈래 드릴다운은 S5(축척 전환) 몫이라 이번엔 병렬.
 function parseView(raw: string | null): FlowView {
   if (raw === 'list' || raw === 'kanban') return 'list';
-  return 'flow';
+  if (raw === 'flow') return 'flow';
+  return 'hypothesis';
 }
 
 /**
@@ -100,7 +107,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
 
   const setView = useCallback((next: FlowView) => {
     const params = new URLSearchParams(searchParams.toString());
-    if (next === 'flow') params.delete('view');
+    if (next === 'hypothesis') params.delete('view');
     else params.set('view', next);
     const qs = params.toString();
     router.push(`/${wsSlug}/${projSlug}/flow${qs ? `?${qs}` : ''}`);
@@ -151,14 +158,22 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
       <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
 
       <div className="space-y-4 p-4">
-        {/* ② 두 칸 세그(갈래|칸반) — 07-23 시안(`e15905e8`)에서 되찾음(IA 개정 때 조용히
-            지워졌던 것, 유나 지적 2026-07-30). ⛔"현황판" 세 번째 칸은 선생님 재정정으로
-            지웠다(짓지 않은 게 아니라 "안 짓기로" 확定해 없앤 것 — glance의 다섯 소스가 전부
-            다른 자리로 흡수되어 열등한 세 번째 판이 필요 없어졌다). 모바일은 #2225의
-            갈래·막힘·멈춤 탭이 이 자리를 대신하므로 세그를 그리지 않는다(isMobile===undefined인
-            최초 렌더에서도 안전하게 숨김 — 하이드레이션 후 실값으로 켜진다). */}
+        {/* ② 세 칸 세그(가설|갈래|칸반) — story #2531(E-FLOW-V4 S1)에서 「가설」 칸을
+            맨 앞에 신설(v4 조직원리 §2, 축척 최상위=가설). 갈래·칸반 두 칸은 07-23
+            시안(`e15905e8`)에서 되찾은 것(IA 개정 때 조용히 지워졌던 것, 유나 지적
+            2026-07-30) 그대로 — 폐기 아니라 나란한 탭으로 유지(v3.4 계승). ⛔"현황판" 세
+            번째 칸은 선생님 재정정으로 지웠었다(그 자리에 이제 "가설"이 대신 선다 — 다른
+            이유·다른 칸). 모바일은 #2225의 갈래·막힘·멈춤 탭이 이 자리를 대신하므로 세그를
+            그리지 않는다(isMobile===undefined인 최초 렌더에서도 안전하게 숨김). */}
         {isMobile ? null : (
           <div className="flex items-center gap-1 border-b border-border pb-2">
+            <button
+              type="button"
+              onClick={() => setView('hypothesis')}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${view === 'hypothesis' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              {t('viewHypothesis')}
+            </button>
             <button
               type="button"
               onClick={() => setView('flow')}
@@ -176,7 +191,11 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           </div>
         )}
 
-        {view === 'list' ? (
+        {view === 'hypothesis' ? (
+          // story #2531(E-FLOW-V4 S1) — 새 기본 랜딩. 가설(질문)을 최상위 조직 단위로 삼는
+          // 지구 층. 드릴다운(가설→갈래)은 S5 몫이라 지금은 독립 탭으로만 존재한다.
+          <HypothesisEarthLayer projectId={projectId} />
+        ) : view === 'list' ? (
           // 2026-07-30 PO 확認 대기 — 07-23 시안의 「목록」이 칸반과 동일한지 디디군이 확認
           // 중(단순 표라면 드래그로 상태를 바꾸는 길이 사라지는지라 다르다). 답 오기 前엔
           // 되돌리기 쉬운 쪽(칸반 그대로 임베드)으로 가정한다 — kanban-board.tsx를 새로 그리지
