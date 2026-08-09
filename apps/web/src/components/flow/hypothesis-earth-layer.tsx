@@ -171,8 +171,9 @@ export function HypothesisEarthLayer({
       <ScaleLadder />
 
       <div>
-        <div className="mb-2 flex items-baseline gap-2">
-          <span className="text-xs font-bold tracking-wide text-brand">{t('earthSectionLabel')}</span>
+        <div className="mb-2">
+          {/* 유나 design 재규격(2026-08-09) — "지구 층" 행성-은유 eyebrow 제거(ScaleLadder
+              legend 정리와 같은 결, earthSectionLabel i18n 키도 함께 폐기). */}
           <h2 className="text-sm font-semibold text-foreground">{t('earthSectionTitle')}</h2>
         </div>
 
