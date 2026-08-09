@@ -263,7 +263,8 @@ async def get_hypothesis_lifecycle(
     goal_rows = []
     if hyp_response.epic_ids:
         goal_rows = (await session.execute(
-            select(Goal.id, Goal.title, Goal.status).where(Goal.id.in_(hyp_response.epic_ids))
+            select(Goal.id, Goal.title, Goal.status)
+            .where(Goal.org_id == org_id, Goal.id.in_(hyp_response.epic_ids))
         )).all()
     goals = [HypothesisLifecycleGoal(id=r.id, title=r.title, status=r.status) for r in goal_rows]
 
@@ -271,7 +272,7 @@ async def get_hypothesis_lifecycle(
     if hyp_response.story_ids:
         story_rows = (await session.execute(
             select(Story.id, Story.title, Story.status, Story.metric_definition, Story.outcome_status)
-            .where(Story.id.in_(hyp_response.story_ids))
+            .where(Story.org_id == org_id, Story.id.in_(hyp_response.story_ids))
         )).all()
     story_ids = [r.id for r in story_rows]
 
