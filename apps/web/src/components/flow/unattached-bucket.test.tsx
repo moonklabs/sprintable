@@ -215,6 +215,73 @@ describe('UnattachedBucket — story #2534', () => {
     expect(container.textContent).toContain('작업A');
   });
 
+  it('카디르 QA MEDIUM fix(3차, 2026-08-09) — 페이지(limit=100)에 로드된 것만 다 매달아도 total이 남으면 빈 상태를 안 보인다(요약줄과 본문 정직성 불일치 방지)', async () => {
+    // 실사례 재현: total=2(limit보다 훨씬 작은 값으로도 같은 결함 재현 가능)인데
+    // 페이지에 로드된 1건을 매달면 stories.length는 0이 되지만 total은 1로 남는다 —
+    // 요약줄 "1"과 본문 "미매달림 없습니다"가 동시에 뜨면 안 된다(unattached-bucket.tsx:234
+    // 는 원래 stories.length===0을 봐서 이 모순이 났다).
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.startsWith('/api/stories?project_id=p1&unattached=true') && (!init || init.method === undefined)) {
+        return jsonResWithTotal([{ id: 's1', title: '작업A' }], 2);
+      }
+      if (url === '/api/stories/s1/attachment-suggestions') {
+        return rawRes({ suggested_type: 'goal', goal_candidates: [{ id: 'g1', text: '목표 후보', score: 3 }], hypothesis_candidates: [] });
+      }
+      if (url === '/api/stories/s1' && init?.method === 'PATCH') {
+        return Promise.resolve(new Response(JSON.stringify({ data: { id: 's1' } }), { status: 200 }));
+      }
+      return Promise.resolve(new Response('not found', { status: 404 }));
+    });
+    await renderBucket(fetchMock);
+
+    const showButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === koMessages.flow.bucketShowSuggestion);
+    await act(async () => {
+      showButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const chip = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('목표 후보'));
+    await act(async () => {
+      chip!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const summary = container.querySelector('summary');
+    expect(summary?.textContent).toContain(koMessages.flow.bucketHeading.replace('{n}', '1'));
+    // total이 1로 남아있으니(페이지 밖에 더 있다) 빈 상태 문구가 뜨면 모순이다.
+    expect(container.textContent).not.toContain(koMessages.flow.bucketEmpty);
+  });
+
+  it('total이 실제로 0이 되면(마지막 1건을 매달아 소진) 빈 상태를 정직하게 보인다', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.startsWith('/api/stories?project_id=p1&unattached=true') && (!init || init.method === undefined)) {
+        return jsonResWithTotal([{ id: 's1', title: '작업A' }], 1);
+      }
+      if (url === '/api/stories/s1/attachment-suggestions') {
+        return rawRes({ suggested_type: 'goal', goal_candidates: [{ id: 'g1', text: '목표 후보', score: 3 }], hypothesis_candidates: [] });
+      }
+      if (url === '/api/stories/s1' && init?.method === 'PATCH') {
+        return Promise.resolve(new Response(JSON.stringify({ data: { id: 's1' } }), { status: 200 }));
+      }
+      return Promise.resolve(new Response('not found', { status: 404 }));
+    });
+    await renderBucket(fetchMock);
+
+    const showButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === koMessages.flow.bucketShowSuggestion);
+    await act(async () => {
+      showButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const chip = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('목표 후보'));
+    await act(async () => {
+      chip!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(container.textContent).toContain(koMessages.flow.bucketEmpty);
+  });
+
   it('가설 후보 칩을 클릭하면 POST /api/hypotheses/{id}/links {story_ids,link_type}로 매단다', async () => {
     const linkCalls: unknown[] = [];
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {

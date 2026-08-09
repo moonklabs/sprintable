@@ -231,7 +231,7 @@ export function UnattachedBucket({ projectId }: { projectId: string }) {
           </div>
         ) : loadError ? (
           <p className="py-2 text-xs text-muted-foreground">{t('bucketLoadError')}</p>
-        ) : stories.length === 0 ? (
+        ) : count === 0 ? (
           <p className="py-2 text-xs text-muted-foreground">{t('bucketEmpty')}</p>
         ) : (
           <div className="space-y-1.5">
