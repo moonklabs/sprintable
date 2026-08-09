@@ -85,6 +85,20 @@ export interface HypothesisUnlinkInput {
   story_ids?: string[];
 }
 
+/**
+ * story #2542(BE PR#2942, v4 «가설 축척» ②첫 가설, 유나 SSOT ae75a8ff) — guided 3부 폼
+ * 전용 생성. CreateHypothesisInput의 얇은 특수화 — statement + {metric,target,direction}
+ * 3부만 받는다(source·measure_after는 폼에 없음, BE가 source="manual"·+14일로 보완).
+ * BE `HypothesisGuidedCreate` 스키마와 1:1(backend/app/schemas/hypothesis.py:47-66).
+ */
+export interface HypothesisGuidedCreateInput {
+  project_id: string;
+  statement: string;
+  metric: string;
+  target: number;
+  direction: string;
+}
+
 export interface HypothesisDraftInput {
   project_id: string;
   source_type: string;
@@ -118,6 +132,7 @@ export interface HypothesisListFilters extends PaginationOptions {
 export interface IHypothesisRepository {
   list(filters: HypothesisListFilters): Promise<Hypothesis[]>;
   create(input: CreateHypothesisInput): Promise<Hypothesis>;
+  createGuided(input: HypothesisGuidedCreateInput): Promise<Hypothesis>;
   getById(id: string, scope?: RepositoryScopeContext): Promise<Hypothesis>;
   update(id: string, input: UpdateHypothesisInput): Promise<Hypothesis>;
   transition(id: string, input: HypothesisTransitionInput): Promise<Hypothesis>;

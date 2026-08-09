@@ -28,6 +28,19 @@ export const createHypothesisSchema = z.object({
 });
 
 /**
+ * story #2542(BE PR#2942, v4 «가설 축척» ②첫 가설, 유나 SSOT ae75a8ff) — guided 3부 폼.
+ * createHypothesisSchema의 얇은 특수화 — statement + {metric,target,direction} 3부만
+ * (source·measure_after는 폼에 없음, BE가 보완). BE `HypothesisGuidedCreate`와 1:1.
+ */
+export const hypothesisGuidedCreateSchema = z.object({
+  project_id: z.string().min(1),
+  statement: z.string().min(1),
+  metric: z.string().min(1),
+  target: z.number(),
+  direction: z.enum(['up', 'down']),
+});
+
+/**
  * §3.5 update allowlist — `status`/`outcome_result`는 transition endpoint 전용이라 제외.
  * 이 스키마 키는 `HypothesisService.update`의 ALLOWED_FIELDS·core `UpdateHypothesisInput`과
  * 1:1 동기화되어야 한다 (E1-S7 AC① — silent strip 함정 방지).

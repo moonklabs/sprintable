@@ -7,6 +7,7 @@ import type {
   HypothesisTransitionInput,
   HypothesisLinkInput,
   HypothesisUnlinkInput,
+  HypothesisGuidedCreateInput,
   HypothesisDraftInput,
   HypothesisDraft,
   RepositoryScopeContext,
@@ -43,6 +44,13 @@ export class ApiHypothesisRepository implements IHypothesisRepository {
 
   async create(input: CreateHypothesisInput): Promise<Hypothesis> {
     return fastapiCall<Hypothesis>('POST', '/api/v2/hypotheses', this.accessToken, { body: input });
+  }
+
+  // story #2542(BE PR#2942) — guided 3부 폼 전용 생성. `/guided`는 BE 라우터에서
+  // `/{hypothesis_id}`보다 먼저 선언돼 있어(그 파일 주석) 문자열 "guided"가 UUID로
+  // 오파싱될 걱정 없다 — 여기선 그냥 별도 경로로 fastapiCall.
+  async createGuided(input: HypothesisGuidedCreateInput): Promise<Hypothesis> {
+    return fastapiCall<Hypothesis>('POST', '/api/v2/hypotheses/guided', this.accessToken, { body: input });
   }
 
   async getById(id: string, _scope?: RepositoryScopeContext): Promise<Hypothesis> {
