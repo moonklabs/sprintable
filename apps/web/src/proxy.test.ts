@@ -577,6 +577,58 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
     expect(response.headers.get('location')).toBe('https://app.example.com/org-briefing?next=%2Fdocs%2Fmy-doc%3F_prRetry%3D1');
   });
 
+  // ⛔실측 결함(2026-08-09, PO puppeteer 재현 — 흐름 메뉴→/flow bare→dead-end 404) — 단건조회
+  // (GET /projects/{id})가 slug 有인 정상 프로젝트인데도 이따금 실패해 이 자리가 dead-end
+  // 404였다(원인 미확定, BE 로그 확認 별건). 리스트 엔드포인트(GET /projects)로 안전하게
+  // 폴백해 org-briefing 되돌이 없이 바로 301 성공하는지 잠근다.
+  it('단건조회(GET /projects/{id})만 실패해도 리스트(GET /projects)에서 찾아 301 성공한다(단건조회 불안정 dead-end fix)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/organizations/org-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+      }
+      if (url.includes('/api/v2/projects/proj-1')) {
+        return Promise.resolve({ ok: false, status: 404 }); // 단건조회는 실패
+      }
+      if (url.endsWith('/api/v2/projects')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [{ id: 'other-proj', slug: 'other' }, { id: 'proj-1', slug: 'sprintable' }],
+        });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    const response = await middleware(makeRequest('/docs/my-doc', {
+      sp_at: token, sprintable_current_project_id: 'proj-1',
+    }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs/my-doc');
+  });
+
+  // PO 실제 재현(2026-08-09) — org-briefing 배너대로 프로젝트를 선택해 next(_prRetry=1 달고)로
+  // 돌아온 요청. fix 전에는 단건조회 실패 + retry-guard가 겹쳐 정직한 404로 막다른 dead-end였다
+  // (선택해도 못 빠져나옴) — 리스트 폴백이 이 재시도 요청에서도 먹혀 301로 뚫리는지 잠근다.
+  it('되돌이(재시도, _prRetry=1) 요청에서도 단건조회 실패+리스트 성공이면 301로 정상 착지한다(PO 실제 재현 dead-end fix)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/organizations/org-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+      }
+      if (url.includes('/api/v2/projects/proj-1')) {
+        return Promise.resolve({ ok: false, status: 404 });
+      }
+      if (url.endsWith('/api/v2/projects')) {
+        return Promise.resolve({ ok: true, json: async () => [{ id: 'proj-1', slug: 'sprintable' }] });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    const response = await middleware(makeRequest('/docs/my-doc?_prRetry=1', {
+      sp_at: token, sprintable_current_project_id: 'proj-1',
+    }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs/my-doc');
+  });
+
   // story #2212(오르테가 지적, 되돌이 방지) — 프로젝트를 골라 next로 돌아왔는데도(=이 요청 자체가
   // _prRetry=1을 달고 옴) 여전히 해소가 실패하면, 다시 /org-briefing으로 튕기지 않고 정직하게
   // 멈춘다(Next 자체 404) — 무한 왕복 대신 "여기서 안 된다"는 신호.

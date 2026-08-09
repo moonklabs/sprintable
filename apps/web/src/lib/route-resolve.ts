@@ -216,15 +216,30 @@ export async function resolveLegacyResourcePath(
   accessToken: string,
 ): Promise<{ orgSlug: string; projectSlug: string } | null> {
   try {
+    const authHeader = { Authorization: `Bearer ${accessToken}` };
     const [orgRes, projRes] = await Promise.all([
-      fetch(`${fastapiUrl}/api/v2/organizations/${orgId}`, { headers: { Authorization: `Bearer ${accessToken}` } }),
-      fetch(`${fastapiUrl}/api/v2/projects/${projectId}`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+      fetch(`${fastapiUrl}/api/v2/organizations/${orgId}`, { headers: authHeader }),
+      fetch(`${fastapiUrl}/api/v2/projects/${projectId}`, { headers: authHeader }),
     ]);
-    if (!orgRes.ok || !projRes.ok) return null;
+    if (!orgRes.ok) return null;
     const org = await orgRes.json() as { slug?: string };
-    const proj = await projRes.json() as { slug?: string | null };
-    if (!org.slug || !proj.slug) return null;
-    return { orgSlug: org.slug, projectSlug: proj.slug };
+    if (!org.slug) return null;
+
+    let projectSlug = projRes.ok ? ((await projRes.json() as { slug?: string | null }).slug ?? null) : null;
+    // ⛔실측 결함(2026-08-09, PO puppeteer 재현 — 흐름 메뉴→/flow bare→dead-end 404) — 단건조회
+    // (GET /projects/{id})가 정상 프로젝트(slug 有)인데도 이따금 slug 없이/실패 응답해 이 자리가
+    // dead-end 404였다(원인 미확定, BE 로그 확認 별건 — Cloud Run 로그로 디디군 확認 中). 리스트
+    // 엔드포인트(GET /projects)는 같은 프로젝트를 직접 대조로 항상 정확히 낸다는 걸 확認했다 —
+    // 단건조회가 비면 그 자리에서 정직하게 포기하지 않고 리스트에서 안전하게 한 번 더 찾는다.
+    if (!projectSlug) {
+      const listRes = await fetch(`${fastapiUrl}/api/v2/projects`, { headers: authHeader });
+      if (listRes.ok) {
+        const list = await listRes.json() as Array<{ id?: string; slug?: string | null }>;
+        projectSlug = list.find((p) => p.id === projectId)?.slug ?? null;
+      }
+    }
+    if (!projectSlug) return null;
+    return { orgSlug: org.slug, projectSlug };
   } catch {
     return null;
   }
