@@ -360,9 +360,13 @@ async def my_actions(
             "stuck_since": r.started_at.isoformat() if r.started_at else None,
         })
     # 2) CC-BE.2 스토리 N일 정체(org-visible 필드만).
+    # story #2538(2026-08-09): title 추가 — FE ko.json "가설이 예상과 다르게 진행됩니다"
+    # 카피가 이 신호(가설과 무관한 제네릭 story 정체 감지)에 잘못 매핑돼 있었다(PO 그라운딩
+    # 확認). 카피 정정+dedup+개별 구별("제목+N일")은 FE 몫, 그 구별에 필요한 title을 여기서
+    # additive로 채운다.
     stalled = (
         await session.execute(
-            select(Story.id, Story.updated_at)
+            select(Story.id, Story.updated_at, Story.title)
             .where(
                 Story.org_id == org_id,
                 Story.status.not_in(("done", "backlog")),
@@ -374,17 +378,22 @@ async def my_actions(
             .limit(20)
         )
     ).all()
-    for sid, updated_at in stalled:
+    for sid, updated_at, title in stalled:
         attention_items.append({
             "type": "story_stalled", "severity": "warn", "auto_detected": True,
+            "title": title,
             "story_id": str(sid),
             "stalled_days": (now - updated_at).days if updated_at else None,
         })
     # 3) CC-BE.2 답없는 블로커(enum/ids/age — raw blocker text 0).
+    # story #2538: story_stalled와 동형으로 title 추가(막힌 story 제목) — FE 구별용.
     _BlockedU = aliased(Story)
     unanswered = (
         await session.execute(
-            select(ItemDependency.from_id, ItemDependency.to_id, ItemDependency.created_at)
+            select(
+                ItemDependency.from_id, ItemDependency.to_id, ItemDependency.created_at,
+                _BlockedU.title,
+            )
             .select_from(ItemDependency)
             .join(_BlockedU, _BlockedU.id == ItemDependency.to_id)
             .where(
@@ -400,10 +409,11 @@ async def my_actions(
             .limit(20)
         )
     ).all()
-    for blocker_id, blocked_id, created_at in unanswered:
+    for blocker_id, blocked_id, created_at, blocked_title in unanswered:
         attention_items.append({
             "type": "unanswered_blocker", "severity": "warn", "auto_detected": True,
             "blocked_story_id": str(blocked_id), "blocker_id": str(blocker_id),
+            "blocked_story_title": blocked_title,
             "age_days": (now - created_at).days if created_at else None,
         })
 
