@@ -92,20 +92,26 @@ export default async function AuthenticatedLayout({
   // 단건 조회(name+slug 동시)로 보강한다 — 사이드바/⌘K "문서" 바로가기 slug(story a539c649 S2)
   // 와 표시 이름이 같은 project를 가리키므로 PO 리뷰(§확認②) 지적대로 fetch 하나로 합쳤다.
   // pathProjectId가 없으면(flat 라우트) 계정 상태 project 기준으로 조회한다(기존 동작 유지).
+  // ⛔카디르 QA 근본 재진단(2026-08-09, 실측 8회 재현) — 아래 project 조회(단건·리스트 둘 다)를
+  // X-Org-Id 없이 부르면 BE get_verified_org_id가 **JWT 기본 org**로 스코프한다. 세션의
+  // 현재/타겟 org(pathOrgId ?? me.org_id)가 JWT 기본 org와 다른 멀티org 계정에선 엉뚱한
+  // org로 스코프돼 빈 결과/404가 난다(curl로 X-Org-Id 붙이면 정상 확認됨) — 이게 사이드바
+  // bare-link 결함의 진짜 근본원인.
+  const projectAuthHeader = { ...authHeader, 'X-Org-Id': pathOrgId ?? me?.org_id ?? '' };
   const projectInfoTargetId = pathProjectId ?? me?.project_id;
   const projectInfo = projectInfoTargetId
-    ? await fetch(`${fastapiUrl}/api/v2/projects/${projectInfoTargetId}`, { headers: authHeader, cache: 'no-store' })
+    ? await fetch(`${fastapiUrl}/api/v2/projects/${projectInfoTargetId}`, { headers: projectAuthHeader, cache: 'no-store' })
         .then((r) => (r.ok ? r.json() : null))
         .then((json: { name?: string; slug?: string | null } | null) => json)
         .catch(() => null)
     : null;
   // ⛔실측 결함(2026-08-09, PO puppeteer 재현 — 흐름 메뉴→/flow bare→dead-end 404) — 위 단건조회
   // (GET /projects/{id})가 정상 프로젝트(slug 有)인데도 이따금 slug 없이/실패 응답해 사이드바가
-  // slug 없는 bare 링크만 만들었다(원인 미확定, BE 로그 확認 별건). 리스트 엔드포인트(GET
-  // /projects)는 같은 프로젝트를 직접 대조로 항상 정확히 낸다는 걸 확認했다 — 단건조회가 비면
-  // 그 자리에서 포기하지 않고 리스트에서 한 번 더 찾는다.
+  // slug 없는 bare 링크만 만들었다(근본원인=위 X-Org-Id 누락). 리스트 엔드포인트(GET /projects)는
+  // 같은 프로젝트를 직접 대조로 항상 정확히 낸다는 걸 확認했다 — 단건조회가 비면 그 자리에서
+  // 포기하지 않고 리스트에서 한 번 더 찾는다.
   const projectInfoFallback = projectInfoTargetId && !projectInfo?.slug
-    ? await fetch(`${fastapiUrl}/api/v2/projects`, { headers: authHeader, cache: 'no-store' })
+    ? await fetch(`${fastapiUrl}/api/v2/projects`, { headers: projectAuthHeader, cache: 'no-store' })
         .then((r) => (r.ok ? r.json() : null))
         .then((list: Array<{ id?: string; name?: string; slug?: string | null }> | null) =>
           list?.find((p) => p.id === projectInfoTargetId) ?? null)

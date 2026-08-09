@@ -605,6 +605,33 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs/my-doc');
   });
 
+  // ⛔카디르 QA 근본 재진단(2026-08-09, 실측 8회 재현) — 위 리스트 폴백 fix는 이 헤더 없이는
+  // 애초에 못 먹었다: X-Org-Id 없는 project 조회는 BE get_verified_org_id가 JWT 기본 org로
+  // 스코프해, 세션의 현재/타겟 org가 그와 다른 멀티org 계정에선 엉뚱한 org로 스코프돼 빈
+  // 결과/404가 난다(curl로 X-Org-Id 붙이면 정상 확認됨) — 단건조회·리스트 조회 둘 다 X-Org-Id
+  // 를 보내는지 직접 잠근다(회귀 시 다시 dead-end로 돌아간다).
+  it('project 단건조회·리스트조회 둘 다 X-Org-Id 헤더를 보낸다(멀티org 계정 cross-org 스코프 오류 방지)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/organizations/org-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+      }
+      if (url.includes('/api/v2/projects/proj-1')) {
+        return Promise.resolve({ ok: false, status: 404 }); // 단건조회는 실패 → 리스트 폴백 유도
+      }
+      if (url.endsWith('/api/v2/projects')) {
+        return Promise.resolve({ ok: true, json: async () => [{ id: 'proj-1', slug: 'sprintable' }] });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    await middleware(makeRequest('/docs/my-doc', { sp_at: token, sprintable_current_project_id: 'proj-1' }));
+
+    const singleItemCall = mockFetch.mock.calls.find((args: unknown[]) => (args[0] as string).includes('/api/v2/projects/proj-1'));
+    const listCall = mockFetch.mock.calls.find((args: unknown[]) => (args[0] as string).endsWith('/api/v2/projects'));
+    expect((singleItemCall?.[1] as { headers?: Record<string, string> })?.headers?.['X-Org-Id']).toBe('org-1');
+    expect((listCall?.[1] as { headers?: Record<string, string> })?.headers?.['X-Org-Id']).toBe('org-1');
+  });
+
   // PO 실제 재현(2026-08-09) — org-briefing 배너대로 프로젝트를 선택해 next(_prRetry=1 달고)로
   // 돌아온 요청. fix 전에는 단건조회 실패 + retry-guard가 겹쳐 정직한 404로 막다른 dead-end였다
   // (선택해도 못 빠져나옴) — 리스트 폴백이 이 재시도 요청에서도 먹혀 301로 뚫리는지 잠근다.
