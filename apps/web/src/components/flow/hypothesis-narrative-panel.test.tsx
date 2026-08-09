@@ -1,14 +1,13 @@
 // @vitest-environment jsdom
 //
-// story #2533(E-FLOW-V4 S3) — 가설 생애 수직 서사 패널. base-ui Dialog는 document.body에
-// portal 렌더하므로(storage-delete-dialog.test.tsx와 동일 관례) document 전체를 대상으로
-// 검증한다. 4축(질문/목표/검증/증명/시간선)이 실 데이터로 조립되는지, 정반합은 필드
-// 부재 시 통째로 생략되는지(추측 연결 금지) 값으로 잰다.
+// story #2533(E-FLOW-V4 S3) — 가설 생애 수직 서사 패널. 리라이트(2026-08-09): BE
+// `GET /hypotheses/{id}/lifecycle`(story #2533-BE, PR#2931) 단일 응답을 소비한다(이전
+// N+1 goals/{id}·stories?ids= 조합을 교체). base-ui Dialog는 document.body에 portal
+// 렌더하므로(storage-delete-dialog.test.tsx와 동일 관례) document 전체를 대상으로 검증한다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
-import type { Hypothesis } from '@sprintable/core-storage';
 import koMessages from '../../../messages/ko.json';
 import { HypothesisNarrativePanel } from './hypothesis-narrative-panel';
 
@@ -25,29 +24,32 @@ function wrap(node: React.ReactNode) {
   );
 }
 
-function makeHypothesis(overrides: Partial<Hypothesis>): Hypothesis {
+interface LifecycleFixtureOverrides {
+  hypothesis?: Partial<{
+    id: string; statement: string; status: string;
+    metric_definition: { metric?: string; target?: number; direction?: string } | null;
+    outcome_result: Record<string, unknown> | null;
+  }>;
+  goals?: Array<{ id: string; title: string; status: string }>;
+  stories?: Array<{ id: string; title: string; status: string; metric_definition: unknown; outcome_status: string; gate_status: string | null; evidence_count: number }>;
+  superseded_by?: { id: string; statement: string; status: string } | null;
+  supersedes?: Array<{ id: string; statement: string; status: string }>;
+  timeline?: { created_at: string; measure_after: string; updated_at: string };
+}
+
+function makeLifecycle(overrides: LifecycleFixtureOverrides = {}) {
   return {
-    id: 'h-default',
-    org_id: 'org-1',
-    project_id: 'p1',
-    owner_member_id: 'm1',
-    created_by_member_id: null,
-    confirmed_by_member_id: null,
-    statement: '기본 진술',
-    metric_definition: { metric: 'm', source: 'manual', target: 0, direction: 'down' },
-    measure_after: '2026-08-01T00:00:00Z',
-    status: 'measuring',
-    outcome_result: null,
-    confidence: null,
-    source_type: null,
-    source_id: null,
-    human_accounting: {},
-    gate_contract: {},
-    epic_ids: [],
-    story_ids: [],
-    created_at: '2026-07-01T00:00:00Z',
-    updated_at: '2026-07-15T00:00:00Z',
-    ...overrides,
+    hypothesis: {
+      id: 'h1', statement: '기본 진술', status: 'measuring',
+      metric_definition: { metric: 'm', target: 0, direction: 'down' },
+      outcome_result: null,
+      ...overrides.hypothesis,
+    },
+    goals: overrides.goals ?? [],
+    stories: overrides.stories ?? [],
+    superseded_by: overrides.superseded_by ?? null,
+    supersedes: overrides.supersedes ?? [],
+    timeline: overrides.timeline ?? { created_at: '2026-07-01T00:00:00Z', measure_after: '2026-08-01T00:00:00Z', updated_at: '2026-07-15T00:00:00Z' },
   };
 }
 
@@ -71,80 +73,83 @@ async function renderPanel(fetchImpl: typeof fetch, onClose: () => void = vi.fn(
   });
 }
 
-function jsonRes(data: unknown) {
-  return Promise.resolve(new Response(JSON.stringify({ data }), { status: 200 }));
+// lifecycle 라우트는 reference-candidates/attachment-suggestions와 동형 raw thin-proxy
+// (래핑 없음) — {data} 봉투를 안 씌운다.
+function rawFetch(data: unknown) {
+  return vi.fn(() => Promise.resolve(new Response(JSON.stringify(data), { status: 200 })));
 }
 
-function routedFetch(routes: Record<string, unknown>) {
-  return vi.fn((input: RequestInfo | URL) => {
-    const url = typeof input === 'string' ? input : input.toString();
-    for (const [prefix, data] of Object.entries(routes)) {
-      if (url.startsWith(prefix)) return jsonRes(data);
-    }
-    return Promise.resolve(new Response('not found', { status: 404 }));
+describe('HypothesisNarrativePanel — story #2533, lifecycle 단일 응답 소비', () => {
+  it('/api/hypotheses/{id}/lifecycle 하나만 호출한다(N+1 없음)', async () => {
+    const fetchMock = rawFetch(makeLifecycle());
+    await renderPanel(fetchMock);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith('/api/hypotheses/h1/lifecycle', { cache: 'no-store' });
   });
-}
 
-describe('HypothesisNarrativePanel — story #2533 4축(질문/목표/검증/증명/시간선)', () => {
   it('질문(statement)이 렌더된다', async () => {
-    await renderPanel(routedFetch({
-      '/api/hypotheses/h1': makeHypothesis({ id: 'h1', statement: '결제 완료율 가설' }),
-    }));
+    await renderPanel(rawFetch(makeLifecycle({ hypothesis: { statement: '결제 완료율 가설' } })));
     expect(document.body.textContent).toContain('결제 완료율 가설');
   });
 
-  it('목표(epic_ids→goals) 제목이 렌더된다', async () => {
-    await renderPanel(routedFetch({
-      '/api/hypotheses/h1': makeHypothesis({ id: 'h1', epic_ids: ['g1'] }),
-      '/api/goals/g1': { id: 'g1', title: '결제 전환 목표', status: 'active' },
-    }));
+  it('목표(goals[].title)가 렌더된다', async () => {
+    await renderPanel(rawFetch(makeLifecycle({ goals: [{ id: 'g1', title: '결제 전환 목표', status: 'active' }] })));
     expect(document.body.textContent).toContain('결제 전환 목표');
   });
 
-  it('epic_ids가 비어있으면 목표 절이 정직한 "아직"을 보인다', async () => {
-    await renderPanel(routedFetch({
-      '/api/hypotheses/h1': makeHypothesis({ id: 'h1', epic_ids: [] }),
-    }));
+  it('goals가 비어있으면 목표 절이 정직한 "아직"을 보인다', async () => {
+    await renderPanel(rawFetch(makeLifecycle({ goals: [] })));
     expect(document.body.textContent).toContain(koMessages.flow.narrativeNotYet);
   });
 
-  it('검증(story_ids→stories 배치조회) 제목이 렌더된다', async () => {
-    await renderPanel(routedFetch({
-      '/api/hypotheses/h1': makeHypothesis({ id: 'h1', story_ids: ['s1', 's2'] }),
-      '/api/stories?ids=s1,s2': [
-        { id: 's1', title: '스토리A', status: 'in-progress' },
-        { id: 's2', title: '스토리B', status: 'done' },
+  it('검증(stories[].title)이 렌더된다', async () => {
+    await renderPanel(rawFetch(makeLifecycle({
+      stories: [
+        { id: 's1', title: '스토리A', status: 'in-progress', metric_definition: null, outcome_status: 'n_a', gate_status: null, evidence_count: 0 },
+        { id: 's2', title: '스토리B', status: 'done', metric_definition: null, outcome_status: 'n_a', gate_status: null, evidence_count: 0 },
       ],
-    }));
+    })));
     expect(document.body.textContent).toContain('스토리A');
     expect(document.body.textContent).toContain('스토리B');
   });
 
   it('증명(outcome_result)이 실측/목표로 렌더된다', async () => {
-    await renderPanel(routedFetch({
-      '/api/hypotheses/h1': makeHypothesis({
-        id: 'h1', status: 'falsified',
-        outcome_result: { actual: 52, target: 60, metric: 'x', direction: 'up' },
-      }),
-    }));
+    await renderPanel(rawFetch(makeLifecycle({
+      hypothesis: { status: 'falsified', outcome_result: { actual: 52, target: 60, metric: 'x', direction: 'up' } },
+    })));
     expect(document.body.textContent).toContain('52');
     expect(document.body.textContent).toContain('60');
   });
 
-  it('outcome_result가 없으면(아직 측정 전) "아직"을 정직하게 보인다(지어내지 않는다)', async () => {
-    await renderPanel(routedFetch({
-      '/api/hypotheses/h1': makeHypothesis({ id: 'h1', status: 'proposed', outcome_result: null }),
-    }));
-    // narrativeNotYet이 목표·검증·증명 세 곳 모두에 뜰 수 있으니 최소 1회 이상만 확인.
-    const occurrences = document.body.textContent?.split(koMessages.flow.narrativeNotYet).length ?? 1;
-    expect(occurrences).toBeGreaterThan(1);
+  it('증명 절이 스토리별 gate/evidence를 간접조회로 보여준다(PR#2930 리뷰② 해소)', async () => {
+    await renderPanel(rawFetch(makeLifecycle({
+      stories: [{ id: 's1', title: '스토리A', status: 'done', metric_definition: null, outcome_status: 'verified', gate_status: 'approved', evidence_count: 3 }],
+    })));
+    expect(document.body.textContent).toContain('approved');
+    expect(document.body.textContent).toContain('3');
   });
 
-  it('시간선 3점(제안·검증기한·최근갱신)이 모두 렌더된다', async () => {
-    await renderPanel(routedFetch({
-      '/api/hypotheses/h1': makeHypothesis({ id: 'h1' }),
-    }));
-    expect(document.body.textContent).toContain(koMessages.flow.narrativeStepTimeline);
+  it('gate_status가 null이면(매칭 없음) 정직하게 "아직"을 보인다(지어내지 않는다)', async () => {
+    await renderPanel(rawFetch(makeLifecycle({
+      stories: [{ id: 's1', title: '스토리A', status: 'in-progress', metric_definition: null, outcome_status: 'n_a', gate_status: null, evidence_count: 0 }],
+    })));
+    const proofSection = Array.from(document.querySelectorAll('h3')).find((h) => h.textContent === koMessages.flow.narrativeStepProof);
+    expect(proofSection).toBeTruthy();
+    expect(document.body.textContent).toContain(koMessages.flow.narrativeNotYet);
+  });
+
+  it('시간선 캡션(전이 이력 전체 아님, PR#2930 리뷰①)이 렌더된다', async () => {
+    await renderPanel(rawFetch(makeLifecycle()));
+    expect(document.body.textContent).toContain(koMessages.flow.narrativeTimelineCaption);
+  });
+
+  it('시간선 3점이 렌더되고, 로케일에 맞춰 날짜가 포맷된다(PR#2930 리뷰④ — 하드코딩 ko-KR 제거)', async () => {
+    await renderPanel(rawFetch(makeLifecycle({
+      timeline: { created_at: '2026-07-01T00:00:00Z', measure_after: '2026-08-01T00:00:00Z', updated_at: '2026-07-15T00:00:00Z' },
+    })));
+    const expected = new Date('2026-07-01T00:00:00Z').toLocaleDateString('ko');
+    expect(document.body.textContent).toContain(expected);
   });
 
   it('fetch 실패 시 에러 문구를 보이고 크래시하지 않는다', async () => {
@@ -153,54 +158,49 @@ describe('HypothesisNarrativePanel — story #2533 4축(질문/목표/검증/증
   });
 });
 
-describe('HypothesisNarrativePanel — 정반합(추측 연결 금지)', () => {
-  it('superseded_by_hypothesis_id 필드가 없으면(현재 BE 상태) 정반합 절 자체가 안 뜬다', async () => {
-    await renderPanel(routedFetch({
-      '/api/hypotheses/h1': makeHypothesis({ id: 'h1', status: 'falsified' }),
-    }));
+describe('HypothesisNarrativePanel — 정반합 양방향(superseded_by/supersedes)', () => {
+  it('둘 다 비어있으면(대부분의 가설) 정반합 절 자체가 안 뜬다', async () => {
+    await renderPanel(rawFetch(makeLifecycle({ superseded_by: null, supersedes: [] })));
     expect(document.body.textContent).not.toContain(koMessages.flow.narrativeStepAntithesis);
+    expect(document.body.textContent).not.toContain(koMessages.flow.narrativeStepSupersedes);
   });
 
-  it('falsified + superseded_by_hypothesis_id가 있으면(디디 BE 백필 후) 대체 가설 문장이 뜬다', async () => {
-    await renderPanel(routedFetch({
-      '/api/hypotheses/h1': {
-        ...makeHypothesis({ id: 'h1', status: 'falsified' }),
-        superseded_by_hypothesis_id: 'h2',
-      },
-      '/api/hypotheses/h2': makeHypothesis({ id: 'h2', status: 'proposed', statement: '대체 가설 문장' }),
-    }));
+  it('superseded_by가 있으면(이 가설이 대체됨) 대체 가설 문장이 뜬다', async () => {
+    await renderPanel(rawFetch(makeLifecycle({
+      hypothesis: { status: 'falsified' },
+      superseded_by: { id: 'h2', statement: '대체 가설 문장', status: 'proposed' },
+    })));
     expect(document.body.textContent).toContain('대체 가설 문장');
     expect(document.body.textContent).toContain(koMessages.flow.narrativeStepAntithesis);
   });
 
-  it('proposed(falsified 아님) + superseded_by가 있어도(있을 리 없지만 방어) 정반합 절은 falsified 전용이라 안 뜬다', async () => {
-    await renderPanel(routedFetch({
-      '/api/hypotheses/h1': {
-        ...makeHypothesis({ id: 'h1', status: 'proposed' }),
-        superseded_by_hypothesis_id: 'h2',
-      },
-      '/api/hypotheses/h2': makeHypothesis({ id: 'h2', statement: '대체 가설 문장' }),
-    }));
-    expect(document.body.textContent).not.toContain(koMessages.flow.narrativeStepAntithesis);
+  it('supersedes가 있으면(이 가설이 이전 가설을 대체함, 역방향) 전신 가설 문장이 뜬다', async () => {
+    await renderPanel(rawFetch(makeLifecycle({
+      supersedes: [{ id: 'h0', statement: '전신 가설 문장', status: 'falsified' }],
+    })));
+    expect(document.body.textContent).toContain('전신 가설 문장');
+    expect(document.body.textContent).toContain(koMessages.flow.narrativeStepSupersedes);
+  });
+
+  it('백필 실사례(2cbdd1a9 falsified↔724dde46 proposed) 형태를 값으로 재현한다', async () => {
+    await renderPanel(rawFetch(makeLifecycle({
+      hypothesis: { id: '2cbdd1a9', statement: '체크아웃을 2단계로 줄이면 결제 완료율이 오른다', status: 'falsified', outcome_result: { actual: 52, target: 60 } },
+      superseded_by: { id: '724dde46', statement: '[유나 편집] 결제 완료율은 단계 수보다 신뢰 신호에 더 크게 좌우될 것이다', status: 'proposed' },
+    })));
+    expect(document.body.textContent).toContain('체크아웃을 2단계로 줄이면 결제 완료율이 오른다');
+    expect(document.body.textContent).toContain('신뢰 신호');
   });
 });
 
 describe('HypothesisNarrativePanel — 닫기', () => {
   it('닫기 상호작용 시 onClose가 호출된다(base-ui Dialog onOpenChange 경로)', async () => {
     const onClose = vi.fn();
-    await renderPanel(routedFetch({
-      '/api/hypotheses/h1': makeHypothesis({ id: 'h1' }),
-    }), onClose);
+    await renderPanel(rawFetch(makeLifecycle()), onClose);
 
-    const closeButton = Array.from(document.querySelectorAll('button')).find(
-      (b) => b.getAttribute('aria-label')?.toLowerCase().includes('close') || b.textContent === '',
-    );
-    // base-ui DialogContent의 기본 close 버튼(아이콘만, 텍스트 없음)을 찾아 클릭.
     const candidates = Array.from(document.querySelectorAll('[data-slot="dialog-content"] button'));
-    const target = candidates[0] ?? closeButton;
-    expect(target).toBeTruthy();
+    expect(candidates[0]).toBeTruthy();
     await act(async () => {
-      target!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      candidates[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(onClose).toHaveBeenCalled();
   });

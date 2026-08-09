@@ -1,9 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 import { Loader2 } from 'lucide-react';
-import type { Hypothesis } from '@sprintable/core-storage';
 import {
   Dialog,
   DialogContent,
@@ -11,46 +10,70 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { HypothesisStatusBadge } from '@/components/hypotheses/hypothesis-status-badge';
+import type { HypothesisStatus } from '@sprintable/core-storage';
 import { cn } from '@/lib/utils';
 
 /**
  * story #2533(E-FLOW-V4 S3) — 가설 생애 수직 서사. 지구층 가설 카드를 열면 그 가설의
  * 생애를 축척을 관통해 세로로 펼친다: 질문→목표→검증→증명→(정반합)→시간선.
  *
- * ⭐status enum이 이미 담은 생애를 «비추기»(없던 것 만들기 아님) — 새 상태·새 엔티티 0개,
- * 전부 기존 Hypothesis 필드+기존 API(goals/stories)의 재조립.
+ * ⭐status enum이 이미 담은 생애를 「비추기」(없던 상태·엔티티 신설 0).
  *
- * 정반합(falsified→대체)은 그라운딩 결과 DB에 구조적 링크가 없었다(디디 BE #2533-후속
- * `superseded_by_hypothesis_id` 대기 中) — 필드가 오기 전까진 옵셔널로 안전히 읽고,
- * 없으면 그 절만 통째로 생략한다(추측 연결 금지·없는 데이터에 화면 안 깎기).
+ * 리라이트(2026-08-09) — BE `GET /hypotheses/{id}/lifecycle`(story #2533-BE, PR#2931)이
+ * self-FK 정반합 양방향(superseded_by/supersedes) + 목표 이름 + 스토리별 gate/evidence
+ * 간접조회 + 시간선을 한 번에 준다. 이전 판(N+1: goals/{id}·stories?ids= 개별 조합)을
+ * 이 단일 요청으로 교체 — PR#2930 리뷰②(증명 절이 gate/evidence를 빠뜨림)가 이 교체로
+ * 자연히 풀린다.
  */
-type HypothesisWithSupersession = Hypothesis & {
-  superseded_by_hypothesis_id?: string | null;
-};
-
-interface GoalSummary {
+interface LifecycleGoal {
   id: string;
   title: string;
   status: string;
 }
 
-interface StorySummary {
+interface LifecycleStory {
   id: string;
-  story_number?: number;
   title: string;
   status: string;
+  metric_definition: { metric?: string; target?: number; direction?: string } | null;
+  outcome_status: string;
+  gate_status: string | null;
+  evidence_count: number;
+}
+
+interface LifecycleSuccessor {
+  id: string;
+  statement: string;
+  status: string;
+}
+
+interface LifecycleTimeline {
+  created_at: string;
+  measure_after: string;
+  updated_at: string;
+}
+
+interface LifecycleHypothesis {
+  id: string;
+  statement: string;
+  status: HypothesisStatus;
+  metric_definition: { metric?: string; target?: number; direction?: string } | null;
+  outcome_result: Record<string, unknown> | null;
+}
+
+interface LifecycleResponse {
+  hypothesis: LifecycleHypothesis;
+  goals: LifecycleGoal[];
+  stories: LifecycleStory[];
+  superseded_by: LifecycleSuccessor | null;
+  supersedes: LifecycleSuccessor[];
+  timeline: LifecycleTimeline;
 }
 
 type LoadState =
   | { kind: 'loading' }
   | { kind: 'error' }
-  | {
-      kind: 'ready';
-      hypothesis: HypothesisWithSupersession;
-      goals: GoalSummary[];
-      stories: StorySummary[];
-      supersededBy: HypothesisWithSupersession | null;
-    };
+  | { kind: 'ready'; data: LifecycleResponse };
 
 function NarrativeStep({
   label,
@@ -81,49 +104,26 @@ export function HypothesisNarrativePanel({
   onClose: () => void;
 }) {
   const t = useTranslations('flow');
+  const locale = useLocale();
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const hypRes = await fetch(`/api/hypotheses/${hypothesisId}`, { cache: 'no-store' });
-        if (!hypRes.ok) throw new Error('hypothesis fetch failed');
-        const hypJson = await hypRes.json() as { data?: HypothesisWithSupersession };
-        const hypothesis = hypJson.data;
-        if (!hypothesis) throw new Error('hypothesis missing');
+        const res = await fetch(`/api/hypotheses/${hypothesisId}/lifecycle`, { cache: 'no-store' });
+        if (!res.ok) throw new Error('lifecycle fetch failed');
+        const data = await res.json() as LifecycleResponse;
         if (cancelled) return;
-
-        const [goals, stories, supersededBy] = await Promise.all([
-          Promise.all(
-            (hypothesis.epic_ids ?? []).map((id) =>
-              fetch(`/api/goals/${id}`, { cache: 'no-store' })
-                .then((r) => (r.ok ? r.json() : null))
-                .then((j: { data?: GoalSummary } | null) => j?.data ?? null)
-                .catch(() => null),
-            ),
-          ).then((list) => list.filter((g): g is GoalSummary => g !== null)),
-          hypothesis.story_ids?.length
-            ? fetch(`/api/stories?ids=${hypothesis.story_ids.join(',')}`, { cache: 'no-store' })
-                .then((r) => (r.ok ? r.json() : null))
-                .then((j: { data?: StorySummary[] } | null) => j?.data ?? [])
-                .catch(() => [])
-            : Promise.resolve([]),
-          hypothesis.superseded_by_hypothesis_id
-            ? fetch(`/api/hypotheses/${hypothesis.superseded_by_hypothesis_id}`, { cache: 'no-store' })
-                .then((r) => (r.ok ? r.json() : null))
-                .then((j: { data?: HypothesisWithSupersession } | null) => j?.data ?? null)
-                .catch(() => null)
-            : Promise.resolve(null),
-        ]);
-        if (cancelled) return;
-        setState({ kind: 'ready', hypothesis, goals, stories, supersededBy });
+        setState({ kind: 'ready', data });
       } catch {
         if (!cancelled) setState({ kind: 'error' });
       }
     })();
     return () => { cancelled = true; };
   }, [hypothesisId]);
+
+  const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(locale);
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -141,14 +141,14 @@ export function HypothesisNarrativePanel({
           <p className="py-4 text-xs text-muted-foreground">{t('narrativeLoadError')}</p>
         ) : (
           <div className="mt-2">
-            <NarrativeStep label={t('narrativeStepQuestion')} title={state.hypothesis.statement}>
-              <HypothesisStatusBadge status={state.hypothesis.status} />
+            <NarrativeStep label={t('narrativeStepQuestion')} title={state.data.hypothesis.statement}>
+              <HypothesisStatusBadge status={state.data.hypothesis.status} />
             </NarrativeStep>
 
             <NarrativeStep label={t('narrativeStepGoal')} title={t('narrativeStepGoal')}>
-              {state.goals.length > 0 ? (
+              {state.data.goals.length > 0 ? (
                 <ul className="space-y-1">
-                  {state.goals.map((g) => (
+                  {state.data.goals.map((g) => (
                     <li key={g.id}>{g.title}</li>
                   ))}
                 </ul>
@@ -158,14 +158,16 @@ export function HypothesisNarrativePanel({
             </NarrativeStep>
 
             <NarrativeStep label={t('narrativeStepVerify')} title={t('narrativeStepVerify')}>
-              <p className="mb-1">
-                {t('earthMetric')} <span className="text-foreground">{state.hypothesis.metric_definition?.metric}</span>
-                {' · '}
-                {t('earthTarget')} <span className="text-foreground">{state.hypothesis.metric_definition?.target}</span>
-              </p>
-              {state.stories.length > 0 ? (
+              {state.data.hypothesis.metric_definition?.metric ? (
+                <p className="mb-1">
+                  {t('earthMetric')} <span className="text-foreground">{state.data.hypothesis.metric_definition.metric}</span>
+                  {' · '}
+                  {t('earthTarget')} <span className="text-foreground">{state.data.hypothesis.metric_definition.target}</span>
+                </p>
+              ) : null}
+              {state.data.stories.length > 0 ? (
                 <ul className="space-y-1">
-                  {state.stories.map((s) => (
+                  {state.data.stories.map((s) => (
                     <li key={s.id}>{s.title}</li>
                   ))}
                 </ul>
@@ -175,31 +177,57 @@ export function HypothesisNarrativePanel({
             </NarrativeStep>
 
             <NarrativeStep label={t('narrativeStepProof')} title={t('narrativeStepProof')}>
-              {state.hypothesis.outcome_result ? (
-                <p>
+              {state.data.hypothesis.outcome_result ? (
+                <p className="mb-1.5">
                   {t('narrativeActual')}{' '}
-                  <span className={cn('font-semibold', state.hypothesis.status === 'verified' ? 'text-success' : 'text-info')}>
-                    {String((state.hypothesis.outcome_result as Record<string, unknown>).actual ?? '')}
+                  <span className={cn('font-semibold', state.data.hypothesis.status === 'verified' ? 'text-success' : 'text-info')}>
+                    {String((state.data.hypothesis.outcome_result as Record<string, unknown>).actual ?? '')}
                   </span>
                   {' / '}
-                  {t('narrativeTarget')} {String((state.hypothesis.outcome_result as Record<string, unknown>).target ?? '')}
+                  {t('narrativeTarget')} {String((state.data.hypothesis.outcome_result as Record<string, unknown>).target ?? '')}
                 </p>
-              ) : (
+              ) : null}
+              {/* PR#2930 리뷰② — 스토리별 gate/evidence 간접조회(hypothesis_story_links 거쳐).
+                  매칭이 없으면 gate_status=null·evidence_count=0("아직") 그대로 정직하게. */}
+              {state.data.stories.length > 0 ? (
+                <ul className="space-y-1">
+                  {state.data.stories.map((s) => (
+                    <li key={s.id}>
+                      {s.title} — {t('narrativeGate')} {s.gate_status ?? t('narrativeNotYet')} · {t('narrativeEvidence')} {s.evidence_count}
+                    </li>
+                  ))}
+                </ul>
+              ) : state.data.hypothesis.outcome_result === null ? (
                 t('narrativeNotYet')
-              )}
+              ) : null}
             </NarrativeStep>
 
-            {state.hypothesis.status === 'falsified' && state.supersededBy ? (
-              <NarrativeStep label={t('narrativeStepAntithesis')} title={state.supersededBy.statement}>
-                <HypothesisStatusBadge status={state.supersededBy.status} />
+            {state.data.superseded_by ? (
+              <NarrativeStep label={t('narrativeStepAntithesis')} title={state.data.superseded_by.statement}>
+                <HypothesisStatusBadge status={state.data.superseded_by.status as HypothesisStatus} />
+              </NarrativeStep>
+            ) : null}
+            {state.data.supersedes.length > 0 ? (
+              <NarrativeStep label={t('narrativeStepSupersedes')} title={t('narrativeStepSupersedes')}>
+                <ul className="space-y-1">
+                  {state.data.supersedes.map((h) => (
+                    <li key={h.id} className="flex items-center gap-1.5">
+                      <HypothesisStatusBadge status={h.status as HypothesisStatus} />
+                      {h.statement}
+                    </li>
+                  ))}
+                </ul>
               </NarrativeStep>
             ) : null}
 
             <NarrativeStep label={t('narrativeStepTimeline')} title={t('narrativeStepTimeline')}>
+              {/* PR#2930 리뷰① — 이 3점은 전이 이력 «전체»가 아니다(BE도 동일 docstring으로
+                  경계선을 박아둠, hypotheses.py HypothesisLifecycleTimeline). 정직하게 명시. */}
+              <p className="mb-1.5 italic">{t('narrativeTimelineCaption')}</p>
               <ul className="space-y-0.5">
-                <li>{t('narrativeCreatedAt', { date: new Date(state.hypothesis.created_at).toLocaleDateString('ko-KR') })}</li>
-                <li>{t('narrativeMeasureAfter', { date: new Date(state.hypothesis.measure_after).toLocaleDateString('ko-KR') })}</li>
-                <li>{t('narrativeUpdatedAt', { date: new Date(state.hypothesis.updated_at).toLocaleDateString('ko-KR') })}</li>
+                <li>{t('narrativeCreatedAt', { date: fmtDate(state.data.timeline.created_at) })}</li>
+                <li>{t('narrativeMeasureAfter', { date: fmtDate(state.data.timeline.measure_after) })}</li>
+                <li>{t('narrativeUpdatedAt', { date: fmtDate(state.data.timeline.updated_at) })}</li>
               </ul>
             </NarrativeStep>
           </div>
