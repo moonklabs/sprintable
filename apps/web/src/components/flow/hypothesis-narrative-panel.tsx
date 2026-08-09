@@ -99,9 +99,14 @@ function NarrativeStep({
 export function HypothesisNarrativePanel({
   hypothesisId,
   onClose,
+  onNavigateToGoal,
 }: {
   hypothesisId: string;
   onClose: () => void;
+  /** story #2535(E-FLOW-V4 S5) — 지구→대륙 다리. 목표 항목을 누르면 그 목표의 갈래(도시
+   * 층)로 이동한다 — 호출부(flow-client.tsx)가 네비게이션을 책임진다(onSelectStory와
+   * 같은 원칙, 이 컴포넌트는 순수 프레젠테이션). */
+  onNavigateToGoal?: (goalId: string) => void;
 }) {
   const t = useTranslations('flow');
   const locale = useLocale();
@@ -149,7 +154,17 @@ export function HypothesisNarrativePanel({
               {state.data.goals.length > 0 ? (
                 <ul className="space-y-1">
                   {state.data.goals.map((g) => (
-                    <li key={g.id}>{g.title}</li>
+                    <li key={g.id}>
+                      {onNavigateToGoal ? (
+                        <button
+                          type="button"
+                          onClick={() => onNavigateToGoal(g.id)}
+                          className="text-left text-brand underline-offset-2 hover:underline"
+                        >
+                          {g.title} <span aria-hidden="true">→</span> {t('narrativeGoalDrilldownHint')}
+                        </button>
+                      ) : g.title}
+                    </li>
                   ))}
                 </ul>
               ) : (

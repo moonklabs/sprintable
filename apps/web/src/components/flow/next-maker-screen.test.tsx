@@ -205,6 +205,37 @@ describe('NextMakerScreen — real fetch orchestration + lane grouping', () => {
     expect(container.querySelector('[data-testid="folded-count"]')?.textContent).toBe('1');
   });
 
+  // story #2535(E-FLOW-V4 S5) — 지구→대륙→도시 드릴다운 착지. focusGoalId가 fold 쪽에
+  // 떨어진 목표(e-stale)를 가리키면 «그 목표 하나만» 강제로 expand로 옮긴다 — 다른 레인은
+  // 안 건드린다(카드 폭발 회피를 구조로).
+  it('focusGoalId — a normally-folded goal is force-expanded when it matches, and only that one', async () => {
+    const calledUrls: string[] = [];
+    vi.stubGlobal('fetch', buildFetchMock(calledUrls));
+
+    await act(async () => {
+      root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} focusGoalId="e-stale" />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const expandTitles = container.querySelector('[data-testid="expand-titles"]')?.textContent;
+    expect(expandTitles).toContain('E-Recent');
+    expect(expandTitles).toContain('E-Stale');
+    expect(container.querySelector('[data-testid="folded-count"]')?.textContent).toBe('0');
+  });
+
+  it('focusGoalId that matches an already-expanded goal changes nothing(no duplicate)', async () => {
+    const calledUrls: string[] = [];
+    vi.stubGlobal('fetch', buildFetchMock(calledUrls));
+
+    await act(async () => {
+      root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} focusGoalId="e-recent" />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(container.querySelector('[data-testid="expand-titles"]')?.textContent).toBe('E-Recent');
+    expect(container.querySelector('[data-testid="folded-count"]')?.textContent).toBe('1');
+  });
+
   // 유나 라이브 실측(2026-07-31, AC17-B 재정정 — 선생님 직접 지적) — "지도가 가장 높은
   // 블록"으로만 재던 판정이 «자리»(어디에 있는가)를 안 물어, 캔버스 y=2108(뷰포트
   // 900) — 레인이 한 조각도 첫 화면에 없는 사고가 났다. 캔버스가 DOM에서 헤드라인보다

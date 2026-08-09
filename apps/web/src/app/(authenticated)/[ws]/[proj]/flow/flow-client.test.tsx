@@ -46,10 +46,11 @@ vi.mock('@/components/flow/hypothesis-earth-layer', () => ({
 
 // story #2533 — 서사 패널 스텁(자기 fetch를 exercise 안 함, hypothesisId threading만 검증).
 vi.mock('@/components/flow/hypothesis-narrative-panel', () => ({
-  HypothesisNarrativePanel: ({ hypothesisId, onClose }: { hypothesisId: string; onClose: () => void }) => (
+  HypothesisNarrativePanel: ({ hypothesisId, onClose, onNavigateToGoal }: { hypothesisId: string; onClose: () => void; onNavigateToGoal?: (goalId: string) => void }) => (
     <div data-testid="hypothesis-narrative-panel-stub">
       <span data-testid="narrative-hypothesis-id">{hypothesisId}</span>
       <button type="button" onClick={onClose}>close-narrative</button>
+      <button type="button" onClick={() => onNavigateToGoal?.('goal-xyz')}>navigate-to-goal</button>
     </div>
   ),
 }));
@@ -89,9 +90,10 @@ vi.mock('@/hooks/use-mobile', () => ({
 
 // NextMakerScreen 스텁 — onSelectStory 호출 버튼 + selectedNodeId를 텍스트로 노출(threading 검증용).
 vi.mock('@/components/flow/next-maker-screen', () => ({
-  NextMakerScreen: ({ onSelectStory, selectedNodeId }: { onSelectStory: (id: string) => void; selectedNodeId?: string | null }) => (
+  NextMakerScreen: ({ onSelectStory, selectedNodeId, focusGoalId }: { onSelectStory: (id: string) => void; selectedNodeId?: string | null; focusGoalId?: string | null }) => (
     <div data-testid="next-maker-screen-stub">
       <span data-testid="selected-node-id">{selectedNodeId ?? 'none'}</span>
+      <span data-testid="focus-goal-id">{focusGoalId ?? 'none'}</span>
       <button type="button" onClick={() => onSelectStory('story-abc')}>select-node</button>
     </div>
   ),
@@ -465,5 +467,60 @@ describe('FlowPageClient — story #2533 가설 카드 클릭이 서사 패널�
     await renderFlowClient();
 
     expect(container.querySelector('[data-testid="hypothesis-narrative-panel-stub"]')).toBeNull();
+  });
+});
+
+// story #2535(E-FLOW-V4 S5) — 지구→대륙→도시 드릴다운.
+describe('FlowPageClient — story #2535 지구→대륙→도시 드릴다운', () => {
+  it('?goal=<id>가 URL에 있으면 NextMakerScreen에 focusGoalId로 흘러간다', async () => {
+    currentSearch = 'view=flow&goal=goal-123';
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="focus-goal-id"]')?.textContent).toBe('goal-123');
+  });
+
+  it('?goal= 없으면 focusGoalId가 null(기존 동작 무회귀)', async () => {
+    currentSearch = 'view=flow';
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="focus-goal-id"]')?.textContent).toBe('none');
+  });
+
+  it('가설 패널의 "목표로 이동"을 누르면 view=flow&goal=<id>로 이동하고 hypothesis 파라미터는 지운다', async () => {
+    currentSearch = 'hypothesis=hyp-abc';
+    await renderFlowClient();
+
+    const navButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'navigate-to-goal');
+    expect(navButton).toBeTruthy();
+    await act(async () => {
+      navButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const pushedUrl = pushMock.mock.calls[0]?.[0] as string;
+    expect(pushedUrl).toContain('view=flow');
+    expect(pushedUrl).toContain('goal=goal-xyz');
+    expect(pushedUrl).not.toContain('hypothesis=');
+  });
+
+  it('축척 브레드크럼은 가설 뷰에서는 flow-client 레벨에서 안 뜬다(HypothesisEarthLayer가 자기 안에서 이미 그림, 중복 방지)', async () => {
+    await renderFlowClient();
+    // HypothesisEarthLayer는 얇은 스텁이라 사다리를 자체적으로 안 그린다 — 그런데도 사다리
+    // 특유 라벨(대륙/건물)이 뜨면 flow-client.tsx가 중복으로 그리고 있다는 뜻이다.
+    expect(container.textContent).not.toContain(koMessages.flow.ladderName_continent);
+    expect(container.textContent).not.toContain(koMessages.flow.ladderName_building);
+  });
+
+  it('갈래(view=flow) 뷰에서는 축척 브레드크럼이 "도시"를 활성으로 보인다', async () => {
+    currentSearch = 'view=flow';
+    await renderFlowClient();
+
+    expect(container.textContent).toContain(koMessages.flow.ladderName_city);
+  });
+
+  it('목록(view=list) 뷰에서는 축척 브레드크럼이 "건물"을 활성으로 보인다', async () => {
+    currentSearch = 'view=list';
+    await renderFlowClient();
+
+    expect(container.textContent).toContain(koMessages.flow.ladderName_building);
   });
 });

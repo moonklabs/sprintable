@@ -28,6 +28,9 @@ interface FlowMultiLaneCanvasProps {
   /** story #2353 되돌리기 다이얼로그의 「{이름}이 만든 연결입니다」 이름 조회용(goal-stem-card.tsx
    * 참고 — 새 fetch 아님, 호출부가 이미 들고 있는 값을 그대로 흘려보낸다). */
   memberMap?: Record<string, { name: string }>;
+  /** story #2535(E-FLOW-V4 S5) — 드릴다운 착지점. 순수 통과(FlowMapCanvas가 실제 스크롤+
+   * 하이라이트를 한다, next-maker-screen.tsx 문서 참고). */
+  focusGoalId?: string | null;
 }
 
 interface RawStoryListPage {
@@ -112,7 +115,7 @@ type LoadState =
  * 컴포넌트와 같은 안전성).
  */
 export function FlowMultiLaneCanvas({
-  projectId, expandGoals, foldedCount, onSelectStory, selectedNodeId = null, memberMap = {},
+  projectId, expandGoals, foldedCount, onSelectStory, selectedNodeId = null, memberMap = {}, focusGoalId = null,
 }: FlowMultiLaneCanvasProps) {
   const t = useTranslations('flow');
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
@@ -334,6 +337,7 @@ export function FlowMultiLaneCanvas({
           onRejectLink={handleRejectLink}
           memberMap={memberMap}
           onOffscreenCountChange={setOffscreenCardCount}
+          focusGoalId={focusGoalId}
         />
       </FlowCanvasResizePane>
       {/* 접힘 줄(목업 그대로) — "숨긴 것이 아니라 접은 것입니다". 오늘은 펼치기 인터랙션이

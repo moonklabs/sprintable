@@ -492,6 +492,7 @@
     "narrativeActual": "실측",
     "narrativeTarget": "목표",
     "narrativeGate": "결재",
+    "narrativeGoalDrilldownHint": "갈래 보기",
     "narrativeEvidence": "증거",
     "narrativeMissedTarget": "목표 미달",
     "narrativeKilledReason": "종료 사유 — {reason}",

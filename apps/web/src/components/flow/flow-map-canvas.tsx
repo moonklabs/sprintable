@@ -17,6 +17,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 // 카드 실측(FlowMapNodeCard): w-[110px] · 높이 24px(한 줄) — 선은 카드 "왼쪽 가장자리
 // 중앙"→"오른쪽 가장자리 중앙"을 잇는다.
@@ -102,6 +103,10 @@ interface FlowMapCanvasProps {
    * 항상 보인다). 콜백이 없으면(단일-레인 호출부, flow-epic-nodes.tsx — 세로 클리핑 조상이
    * 아예 없다) 기존 그대로 이 컴포넌트 안에서 그린다. */
   onOffscreenCountChange?: (count: number) => void;
+  /** story #2535(E-FLOW-V4 S5) — 지구(가설)→대륙(목표)→도시(갈래) 드릴다운 착지점. 마운트
+   * 시(또는 값이 바뀔 때) 해당 레인으로 스크롤하고 짧게 고리로 강조한다 — 다른 레인은
+   * 손대지 않는다(카드 폭발 회피를 구조로: 숨기지 않고 시선만 유도). */
+  focusGoalId?: string | null;
 }
 
 export type CreateLinkResult = { ok: true } | { ok: false; error: string };
@@ -286,7 +291,7 @@ export function FlowCanvasOffscreenHint({ count }: { count: number }) {
  */
 export function FlowMapCanvas({
   lanes, onSelectStory, onTogglePastBundle, loadingPastBundleEpicIds, selectedNodeId = null, onCreateLink, onDeleteLink, onRejectLink, memberMap,
-  onOffscreenCountChange,
+  onOffscreenCountChange, focusGoalId = null,
 }: FlowMapCanvasProps) {
   const t = useTranslations('flow');
   const { currentTeamMemberId } = useDashboardContext();
@@ -357,6 +362,19 @@ export function FlowMapCanvas({
     if (NOW_CLUSTER_X + NODE_CARD_WIDTH <= el.clientWidth) return;
     el.scrollLeft = Math.max(0, NOW_CLUSTER_X - el.clientWidth / 2);
   }, [hasLanes]);
+
+  // story #2535(E-FLOW-V4 S5) — 지구→대륙→도시 드릴다운 착지. FlowCanvasResizePane(세로
+  // 클리핑 조상, 이 컴포넌트 밖)이든 이 컴포넌트 자신의 overflow-x-auto든, scrollIntoView는
+  // 가장 가까운 스크롤 가능 조상을 알아서 찾아 스크롤한다 — 어느 호출부(단일/멀티레인)든
+  // 안전하다. lanes가 로드된 «후»에 타겟 레인 DOM이 실재해야 하므로 lanes를 의존성에 둔다.
+  // CSS.escape 기반 셀렉터 대신 속성값을 직접 비교한다(flow-node-story-panel.tsx와 동형
+  // 관례 — CSS.escape 전역이 없는 실행환경(jsdom 테스트 등)에도 안 깨진다).
+  useEffect(() => {
+    if (!focusGoalId) return;
+    const el = Array.from(document.querySelectorAll('[data-lane-epic-id]'))
+      .find((node) => node.getAttribute('data-lane-epic-id') === focusGoalId);
+    el?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  }, [focusGoalId, lanes]);
 
   const allEdges = useMemo(() => lanes.flatMap((l) => l.edges), [lanes]);
   const nodesById = useMemo(() => {
@@ -605,7 +623,16 @@ export function FlowMapCanvas({
             const height = computeLaneHeight(lane, NODE_ROW_HEIGHT, LANE_MIN_HEIGHT);
             const supersededIds = computeSupersededNodeIds(lane.edges);
             return (
-              <div key={lane.epicId} className="relative flex border-b border-border last:border-b-0" style={{ height }}>
+              <div
+                key={lane.epicId}
+                data-lane-epic-id={lane.epicId}
+                className={cn(
+                  'relative flex border-b border-border last:border-b-0',
+                  // story #2535 — 착지 레인만 고리 강조(다른 레인은 그대로, 카드 폭발 회피).
+                  focusGoalId === lane.epicId && 'ring-2 ring-inset ring-brand',
+                )}
+                style={{ height }}
+              >
                 {/* 위 헤더 칸과 같은 사정 — LANE_LABEL_WIDTH 하나에서 나온다(사본 없음). */}
                 <div className="shrink-0 border-r border-border px-2 py-1.5" style={{ width: LANE_LABEL_WIDTH }}>
                   <p className="truncate text-[11px] font-semibold text-foreground">{lane.title}</p>

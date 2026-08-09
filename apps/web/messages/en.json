@@ -492,6 +492,7 @@
     "narrativeActual": "Actual",
     "narrativeTarget": "Target",
     "narrativeGate": "Gate",
+    "narrativeGoalDrilldownHint": "View branch",
     "narrativeEvidence": "Evidence",
     "narrativeMissedTarget": "Missed target",
     "narrativeKilledReason": "Killed — {reason}",

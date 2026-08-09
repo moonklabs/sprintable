@@ -5,6 +5,7 @@ import { useTranslations, useLocale } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import type { Hypothesis } from '@sprintable/core-storage';
 import { HypothesisStatusBadge } from '@/components/hypotheses/hypothesis-status-badge';
+import { ScaleLadder } from '@/components/flow/scale-ladder';
 import { cn } from '@/lib/utils';
 
 /**
@@ -19,38 +20,6 @@ import { cn } from '@/lib/utils';
  *   Hypothesis 타입에 task_ids 필드 자체가 없어 스킵 — 없는 데이터를 지어내지 않는다.
  * - 드릴다운(가설→갈래 이동)은 S5(축척 전환) 몫 — 이 카드는 지금은 순수 표시.
  */
-
-const LADDER_LEVELS = ['earth', 'continent', 'city', 'street', 'building'] as const;
-
-function ScaleLadder() {
-  const t = useTranslations('flow');
-  return (
-    <div className="flex overflow-hidden rounded-xl border border-border bg-card">
-      {LADDER_LEVELS.map((level) => {
-        const active = level === 'earth';
-        return (
-          <div
-            key={level}
-            className={cn(
-              'relative flex-1 border-r border-border px-3 py-2.5 last:border-r-0',
-              active && 'bg-gradient-to-b from-brand/10 to-transparent',
-            )}
-          >
-            <div className={cn('text-[10px] font-semibold tracking-wide text-muted-foreground', active && 'text-brand')}>
-              {t(`ladderLevel_${level}`)}
-            </div>
-            <div className="mt-0.5 text-sm font-semibold text-foreground">{t(`ladderName_${level}`)}</div>
-            <div className="mt-1 text-[11px] leading-snug text-muted-foreground">{t(`ladderQuestion_${level}`)}</div>
-            <span
-              aria-hidden="true"
-              className={cn('absolute top-2.5 right-2.5 size-2 rounded-full bg-border', active && 'bg-brand')}
-            />
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 function HypothesisCard({
   hypothesis,
