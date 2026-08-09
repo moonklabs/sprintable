@@ -37,6 +37,13 @@ router = APIRouter(prefix="/api/v2/command-center", tags=["command-center", "Wor
 _AGENT_STUCK_MINUTES = 30
 _STORY_STALLED_DAYS = 3
 _BLOCKER_UNANSWERED_DAYS = 2
+# story #2539: 최근 반증(falsified)된 가설 — story_stalled와 동형 시간창 패턴.
+# ⛔in-flight 이상감지(측정 중 목표 이탈)가 아니다 — hypothesis_scorer.py 실측 확認:
+# outcome_result는 status가 verified/falsified로 "종결"되는 순간에만 채워진다("measuring
+# 이면서 outcome_result가 있는" 상태는 데이터 구조상 존재 안 함). 그래서 이 신호는 "방금
+# 반증으로 종결된 가설" 결과 통보이지, "진행 중 이상 조짐" 경고가 아니다 — 카피/타입명에
+# "이상감지" 뉘앙스를 쓰지 않는다(story_stalled 카피 오라벨링 재발 방지, PO/선생님 결).
+_HYPOTHESIS_FALSIFIED_DAYS = 7
 _PENDING = {"status": "pending_data"}  # mock-0: 미구현 집계 — 가짜 수치 대신 명시.
 # recent_changes 의미 이벤트 allowlist(저신호 conversation.* 등 제외·unknown 기본 제외).
 _MEANINGFUL_VERB_PREFIXES = ("story.", "gate.", "pr.", "epic.", "sprint.", "dependency.", "merge")
@@ -415,6 +422,30 @@ async def my_actions(
             "blocked_story_id": str(blocked_id), "blocker_id": str(blocker_id),
             "blocked_story_title": blocked_title,
             "age_days": (now - created_at).days if created_at else None,
+        })
+    # 4) story #2539: 최근 반증(falsified) 가설 — 결과 통보(in-flight 감지 아님, 위 주석 참조).
+    falsified_hyps = (
+        await session.execute(
+            select(
+                Hypothesis.id, Hypothesis.statement, Hypothesis.outcome_result,
+                Hypothesis.updated_at, Hypothesis.superseded_by_hypothesis_id,
+            )
+            .where(
+                Hypothesis.org_id == org_id,
+                Hypothesis.status == "falsified",
+                Hypothesis.updated_at >= now - timedelta(days=_HYPOTHESIS_FALSIFIED_DAYS),
+            )
+            .order_by(Hypothesis.updated_at.desc())
+            .limit(20)
+        )
+    ).all()
+    for hyp_id, statement, outcome_result, updated_at, superseded_by in falsified_hyps:
+        attention_items.append({
+            "type": "hypothesis_falsified", "severity": "info", "auto_detected": True,
+            "hypothesis_id": str(hyp_id), "statement": statement,
+            "outcome_result": outcome_result,
+            "falsified_days": (now - updated_at).days if updated_at else None,
+            "superseded_by_hypothesis_id": str(superseded_by) if superseded_by else None,
         })
 
     return JSONResponse(content={
