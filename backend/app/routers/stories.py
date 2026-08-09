@@ -137,8 +137,10 @@ async def list_stories(
     unattached: bool = Query(
         default=False,
         description=(
-            "story #2532(E-FLOW-V4 S2) — 가설·목표 둘 다 안 매달린 story만 반환(기존 필터와 "
-            "AND 결합, has_hypothesis_or_goal 계산 後 후필터라 다른 필터의 SQL 최적화엔 무영향)."
+            "story #2532(E-FLOW-V4 S2) — 가설·목표 둘 다 안 매달린 story만 반환. SQL WHERE "
+            "레벨 필터(epic_id IS NULL AND NOT EXISTS hypothesis_story_links)라 limit/cursor/"
+            "X-Total-Count 전부 필터 後 값을 정확히 반영한다(카디르 QA REQUEST_CHANGES,\n"
+            "2026-08-09 — 최초 구현이던 Python 후필터는 페이지 경계 밖 유실+헤더 거짓값 결함)."
         ),
     ),
     ids: str | None = Query(default=None, description="comma-separated story ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관)"),
@@ -177,7 +179,7 @@ async def list_stories(
             return []
         if len(story_ids) > 200:  # 워크플로우-라인 배치와 동형 방어(과대 IN 금지).
             raise HTTPException(status_code=422, detail="too many ids (max 200)")
-        stories = await repo.list_by_ids(story_ids)
+        stories = await repo.list_by_ids(story_ids, unattached=unattached)
         # 인가 스코프: org 소속이어도 caller가 접근 못 하는 project의 story는 조용히 필터링
         # (타 project id가 섞여 들어와도 유출 0 — has_project_access와 동일 SSOT 배치 버전 재사용).
         from app.services.project_auth import accessible_project_ids_in_org
@@ -186,7 +188,6 @@ async def list_stories(
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
         await _attach_has_evidence(repo.session, stories)
         await _attach_has_hypothesis_or_goal(repo.session, stories)
-        stories = _filter_unattached(stories, unattached)
         return [StoryResponse.model_validate(s) for s in stories]
 
     # story #2188 ④-b(2026-07-25, 오르테가군 판정 — 의도된 제약, 코드 고칠 이유 없음):
@@ -204,12 +205,11 @@ async def list_stories(
         # board 분기로 감).
         stories = await repo.list_backlog(
             project_id, limit=limit, epic_id=epic_id, assignee_id=assignee_id,
-            status=status_filter, story_number=story_number, q=q,
+            status=status_filter, story_number=story_number, q=q, unattached=unattached,
         )
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
         await _attach_has_evidence(repo.session, stories)
         await _attach_has_hypothesis_or_goal(repo.session, stories)
-        stories = _filter_unattached(stories, unattached)
         return [StoryResponse.model_validate(s) for s in stories]
 
     # CB-S4: status + project_id 조합 시 board 쿼리 (order_by + cursor + done 7일 제한)
@@ -227,6 +227,7 @@ async def list_stories(
             epic_id=epic_id,
             story_number=story_number,
             q_text=q,
+            unattached=unattached,
         )
         if response is not None:
             response.headers["X-Total-Count"] = str(total)
@@ -235,7 +236,6 @@ async def list_stories(
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
         await _attach_has_evidence(repo.session, stories)
         await _attach_has_hypothesis_or_goal(repo.session, stories)
-        stories = _filter_unattached(stories, unattached)
         return [StoryResponse.model_validate(s) for s in stories]
 
     filters: dict = {}
@@ -255,7 +255,7 @@ async def list_stories(
     # FE(buildCursorPageMeta)가 계산한 nextCursor가 다음 요청에서 조용히 무시돼 같은 페이지가
     # 반복된다(sprints/standup "더 보기" 중복 누적의 원인).
     cursor_dt = _parse_stories_cursor(cursor)
-    stories = await repo.list(limit=limit, q=q, cursor=cursor_dt, **filters)
+    stories = await repo.list(limit=limit, q=q, cursor=cursor_dt, unattached=unattached, **filters)
     await _attach_assignee_ids(repo.session, repo.org_id, stories)
     await _attach_has_evidence(repo.session, stories)
     # ⛔일반 함정(2026-07-29, PO 지적 — "측정 경로 ≠ 실행 경로"): `Query(default=None, ...)`
@@ -272,7 +272,6 @@ async def list_stories(
             repo.session, repo.org_id, stories, boost_candidates_from,
         )
     await _attach_has_hypothesis_or_goal(repo.session, stories)
-    stories = _filter_unattached(stories, unattached)
     return [StoryResponse.model_validate(s) for s in stories]
 
 
@@ -384,15 +383,6 @@ async def _attach_has_hypothesis_or_goal(session: AsyncSession, stories: list[St
         if s.epic_id is not None or s.id in ids_with_hypothesis:
             s.has_hypothesis_or_goal = True
 
-
-def _filter_unattached(stories: list[Story], unattached: bool) -> list[Story]:
-    """story #2532: unattached=true 필터 — has_hypothesis_or_goal이 세팅 안 된(=None,
-    미매달림) story만 남긴다. _attach_has_hypothesis_or_goal 호출 後에만 의미 있다(호출
-    전이면 전부 미설정이라 전부 통과 — 호출 순서 오류를 조용히 숨기지 않도록 호출부에서
-    항상 attach 직후 이 함수를 쓴다)."""
-    if not unattached:
-        return stories
-    return [s for s in stories if not getattr(s, "has_hypothesis_or_goal", False)]
 
 async def _assert_story_project_access(
     session: AsyncSession, auth: AuthContext, org_id: uuid.UUID, project_id: uuid.UUID

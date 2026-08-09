@@ -212,6 +212,59 @@ async def test_unattached_filter_returns_only_unlinked_stories_realdb():
         await engine.dispose()
 
 
+async def test_unattached_filter_is_sql_where_level_not_post_page_realdb():
+    """⭐카디르 QA REQUEST_CHANGES(2026-08-09) 재현+회귀방지 — unattached 필터가 SQL limit
+    後 Python 후필터였을 때의 두 결함을 정확히 겨눈다:
+    ①페이지 경계 밖 유실 — board 분기(status+project_id)에서 attached 2건이 SQL 순서상
+      먼저 오고 unattached 1건이 뒤에 있을 때, limit=1(SQL이 attached만 1건 뽑음)이면
+      후필터는 0건을 반환했을 것이다(실제로 unattached가 있는데도). WHERE 레벨이면 SQL
+      자체가 unattached 1건만 대상으로 삼아 정확히 1건을 반환해야 한다.
+    ②X-Total-Count 거짓값 — 후필터였다면 total이 «필터 前»(3건)이었을 것. WHERE
+      레벨이면 total도 필터 後 값(1건)이어야 한다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user = await _make_human_member(s, org.id, project.id)
+            goal = await _make_goal(s, org.id, project.id)
+            # SQL 정렬(created_at DESC)상 attached 둘이 먼저 오게 순서를 맞춘다(unattached
+            # 가 가장 나중에 생성 → created_at 최댓값 → DESC 정렬에서 맨 앞). 이러면 반대로
+            # unattached가 SQL 상단에 와 버려 결함이 안 드러나므로, 대신 status/필터로 board
+            # 분기를 타면서 limit=1로 강제해 "SQL이 딱 1건만 실제로 스캔·반환"하는 경계를
+            # 만든다 — 그 1건이 정확히 unattached여야 한다(후필터였다면 attached가 먼저 SQL
+            # 결과에 담겨 0건을 냈을 자리).
+            attached_1 = await _make_story(s, org.id, project.id, title="A1")
+            attached_1.status = "backlog"
+            attached_1.epic_id = goal.id
+            attached_2 = await _make_story(s, org.id, project.id, title="A2")
+            attached_2.status = "backlog"
+            attached_2.epic_id = goal.id
+            unattached_story = await _make_story(s, org.id, project.id, title="U1")
+            unattached_story.status = "backlog"
+            await s.commit()
+
+        await _setup_app_human(app, Session, caller_user, org.id)
+        async with _client_for(app) as client:
+            resp = await client.get(
+                f"/api/v2/stories?project_id={project.id}&status=backlog&unattached=true&limit=1"
+            )
+            assert resp.status_code == 200, resp.text
+            items = resp.json()
+            assert len(items) == 1, "SQL WHERE 레벨이면 unattached 1건이 SQL 자체에서 걸러져 정확히 1건이어야 한다"
+            assert items[0]["id"] == str(unattached_story.id)
+            # ⭐X-Total-Count가 필터 後 값(1)인지 — 필터 前(3)이면 거짓 신호(카디르가 잡은 결함).
+            assert resp.headers.get("x-total-count") == "1", (
+                f"X-Total-Count가 필터 後 값이 아니다: {resp.headers.get('x-total-count')!r}"
+            )
+        app.dependency_overrides.clear()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 # ─── ③ attachment-suggestions ───────────────────────────────────────────────────
 
 
