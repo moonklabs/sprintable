@@ -843,8 +843,7 @@ SECRET_KEY=<32+ chars>
 NEXT_PUBLIC_APP_URL=http://localhost:3108
 NEXT_PUBLIC_FASTAPI_URL=http://localhost:8000
 
-# Agent communication
-SPRINTABLE_AGENT_ID=<your-agent-team-member-id>
+# Agent communication (fakechat SSE adapter — identified by API key only)
 SPRINTABLE_API_KEY=sk_live_...
 SPRINTABLE_API_URL=http://localhost:8000   # backend-direct; the fakechat SSE adapter dials this
 

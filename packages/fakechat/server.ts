@@ -296,29 +296,26 @@ async function _consumeStream(): Promise<void> {
   if (_lastEventId) headers['Last-Event-ID'] = _lastEventId
 
   const resp = await fetch(`${API_URL}/api/v2/agent/stream`, { headers })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-  if (!resp.body) throw new Error('no response body')
-
-  // 게이트웨이는 키당 동시 스트림 한도를 넘기면 HTTP 200 + JSON 에러 본문으로 응답한다
-  // (content-type=application/json, text/event-stream 아님). 이를 "열린 스트림"으로 오인하면
-  // 바로 아래 backoff 리셋(=2000)이 매번 걸려 2초마다 재연결하며 슬롯을 계속 되물어 한도가
-  // 영영 안 풀리고, stderr 에도 아무 흔적이 안 남는다. content-type 으로 가려 retry_after 를
-  // backoff 하한으로 삼아 물러선다(throw → _runStream 지수 backoff).
-  const ctype = resp.headers.get('content-type') ?? ''
-  if (!ctype.includes('text/event-stream')) {
-    const body = await resp.text().catch(() => '')
-    let code = 'non-SSE response'
-    let retryAfter = 0
+  if (!resp.ok) {
+    // 게이트웨이는 동시 스트림 한도초과를 «상태코드»로 알린다 — per-key=429, global=503
+    // (agent_gateway.py). 429 는 `Retry-After` 헤더 + `{error:{code,retry_after}}` 본문을
+    // 싣는다. 서버가 준 retry_after 를 backoff 하한으로 삼아, 흔적만 남기고 슬롯을 계속
+    // 되무는 재연결 대신 서버 계약대로 물러선다(throw → _runStream 지수 backoff).
+    let retryAfter = Number(resp.headers.get('retry-after')) || 0
+    let code = `HTTP ${resp.status}`
     try {
-      const j = JSON.parse(body) as { error?: { code?: string; retry_after?: number } }
+      const j = (await resp.json()) as { error?: { code?: string; retry_after?: number } }
       if (j?.error?.code) code = j.error.code
-      const ra = Number(j?.error?.retry_after)
-      if (Number.isFinite(ra) && ra > 0) retryAfter = ra
+      if (retryAfter <= 0) {
+        const ra = Number(j?.error?.retry_after)
+        if (Number.isFinite(ra) && ra > 0) retryAfter = ra
+      }
     } catch {}
     if (retryAfter > 0) _reconnectDelay = Math.max(_reconnectDelay, retryAfter * 1000)
-    process.stderr.write(`[fakechat] stream refused: ${code} (ctype=${ctype || '?'}) — backoff ${_reconnectDelay}ms\n`)
-    throw new Error(`stream refused: ${code}`)
+    process.stderr.write(`[fakechat] stream refused: ${code} (HTTP ${resp.status}) — backoff ${_reconnectDelay}ms\n`)
+    throw new Error(`stream refused: ${code} (HTTP ${resp.status})`)
   }
+  if (!resp.body) throw new Error('no response body')
 
   process.stderr.write('[fakechat] SSE stream open\n')
   _reconnectDelay = 2000 // 성공 시 backoff 리셋
