@@ -117,6 +117,18 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
 
 await mcp.connect(new StdioServerTransport())
 
+// ── parent-death guard ───────────────────────────────────────────────────────
+// stdin 은 호스트 세션(claude)이 물려준 MCP transport 파이프다. 세션이 죽으면 stdin 이
+// EOF 를 맞는다. 이 가드가 없으면 아래 SSE 재연결 루프(while true)가 프로세스를 영원히
+// 살려 둬 고아(PPID→1)로 남고, Agent Gateway 스트림 슬롯을 영구히 물어 재기동 뒤 "키당
+// 동시 스트림" 한도를 포화시킨다(2026-08-10 10일 고아가 한 키를 통째로 막은 근본원인).
+// 부모와 함께 죽는다.
+process.stdin.on('end', () => process.exit(0))
+process.stdin.on('close', () => process.exit(0))
+// 백스톱: stdin EOF 를 못 받은 채 init(PID 1)로 재양육되면(=완전 고아) 자진 종료.
+// unref 로 이 타이머 자체가 프로세스를 살려 두진 않게 한다.
+setInterval(() => { if (process.ppid === 1) process.exit(0) }, 15_000).unref()
+
 // ── channel deliver ──────────────────────────────────────────────────────────
 
 function deliver(
@@ -286,6 +298,27 @@ async function _consumeStream(): Promise<void> {
   const resp = await fetch(`${API_URL}/api/v2/agent/stream`, { headers })
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   if (!resp.body) throw new Error('no response body')
+
+  // 게이트웨이는 키당 동시 스트림 한도를 넘기면 HTTP 200 + JSON 에러 본문으로 응답한다
+  // (content-type=application/json, text/event-stream 아님). 이를 "열린 스트림"으로 오인하면
+  // 바로 아래 backoff 리셋(=2000)이 매번 걸려 2초마다 재연결하며 슬롯을 계속 되물어 한도가
+  // 영영 안 풀리고, stderr 에도 아무 흔적이 안 남는다. content-type 으로 가려 retry_after 를
+  // backoff 하한으로 삼아 물러선다(throw → _runStream 지수 backoff).
+  const ctype = resp.headers.get('content-type') ?? ''
+  if (!ctype.includes('text/event-stream')) {
+    const body = await resp.text().catch(() => '')
+    let code = 'non-SSE response'
+    let retryAfter = 0
+    try {
+      const j = JSON.parse(body) as { error?: { code?: string; retry_after?: number } }
+      if (j?.error?.code) code = j.error.code
+      const ra = Number(j?.error?.retry_after)
+      if (Number.isFinite(ra) && ra > 0) retryAfter = ra
+    } catch {}
+    if (retryAfter > 0) _reconnectDelay = Math.max(_reconnectDelay, retryAfter * 1000)
+    process.stderr.write(`[fakechat] stream refused: ${code} (ctype=${ctype || '?'}) — backoff ${_reconnectDelay}ms\n`)
+    throw new Error(`stream refused: ${code}`)
+  }
 
   process.stderr.write('[fakechat] SSE stream open\n')
   _reconnectDelay = 2000 // 성공 시 backoff 리셋

@@ -16,7 +16,7 @@ Sprintable (SSoT)
   │     └── ConversationMessage: persisted, multi-participant
   ├── MCP Server: https://mcp.sprintable.ai/mcp (streamable-http) — agent interface (89 tools)
   ├── Event Bus: story/task/conversation events → workflow rules → agent dispatch
-  ├── WebSocket Hub: real-time message delivery to agents
+  ├── WebSocket Hub: real-time chat delivery to browser clients (agents receive via SSE dial-out — see Agent SSE Stream)
   └── Webhook Engine: fires on conversation messages → wakes agents
 ```
 
@@ -282,8 +282,20 @@ On message received (JSON):
   → Broadcasts to all subscribers in agent room
 ```
 
-### HTTP Channel Relay (fakechat)
-For agents that prefer HTTP over WebSocket:
+### Agent SSE Stream (dial-out — how fakechat / Claude Code receives)
+The **fakechat** channel plugin (and other agent runtimes) receive messages over a
+long-lived **outbound** SSE connection to the Agent Gateway — not the WebSocket Hub above:
+```
+GET /api/v2/agent/stream
+  Authorization: Bearer sk_live_...
+  Accept: text/event-stream
+  ↓
+  Server-sent events → injected into the session as <channel source="fakechat"> tags
+  Reply → POST /api/v2/conversations/{id}/messages
+```
+
+### HTTP Channel Relay
+Server-side send path (persists a message, fans out to subscribers):
 ```
 POST /api/v2/channel/deliver
   { agent_id, content }
@@ -834,7 +846,7 @@ NEXT_PUBLIC_FASTAPI_URL=http://localhost:8000
 # Agent communication
 SPRINTABLE_AGENT_ID=<your-agent-team-member-id>
 SPRINTABLE_API_KEY=sk_live_...
-SPRINTABLE_WS_URL=ws://localhost:8000
+SPRINTABLE_API_URL=http://localhost:8000   # backend-direct; the fakechat SSE adapter dials this
 
 # Optional: AI features
 ANTHROPIC_API_KEY=sk-ant-...
