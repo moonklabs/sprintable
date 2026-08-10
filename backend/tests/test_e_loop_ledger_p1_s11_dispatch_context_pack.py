@@ -159,7 +159,6 @@ def _patches(context_pack_value):
         patch.object(svc, "assign_recipient_seq", _assign_seq),
         patch.object(svc, "extract_activities_best_effort", AsyncMock()),
         patch.object(svc, "dispatch_notification", AsyncMock()),
-        patch.object(svc, "wake_agent", MagicMock()),
         patch("app.services.hypothesis.resolve_dispatch_anchor", AsyncMock(return_value=None)),
         patch("app.services.hypothesis.resolve_dispatch_context_pack", AsyncMock(return_value=context_pack_value)),
     ]
