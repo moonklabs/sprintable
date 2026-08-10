@@ -258,7 +258,8 @@ describe('HypothesisEarthLayer — org-sync 성공 後 재요청 (story #2545)',
     let hypothesesCalls = 0;
     // 컴포넌트가 UnattachedBucket(자기 own /api/stories fetch)도 함께 렌더하므로 URL로
     // hypotheses 호출만 골라 센다 — 그 형제 fetch의 호출 횟수는 이 회귀가드 대상이 아니다.
-    const fetchMock = vi.fn((url: string) => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
       if (url.startsWith('/api/hypotheses')) {
         hypothesesCalls += 1;
         // 1차 = switch-org 前(옛 org 403 확定 상황을 빈 목록으로 모사) · 2차 = switch-org
