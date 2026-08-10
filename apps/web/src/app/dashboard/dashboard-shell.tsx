@@ -63,10 +63,13 @@ interface DashboardShellProps extends DashboardContext {
   // 이 값을 우선한다. 경로 세그먼트가 없는 flat 라우트(/glance 등)에선 undefined.
   pathOrgId?: string;
   pathProjectId?: string;
-  // story #2545(카디르 라이브 재QA) — JWT top-level `app_metadata.org_id` 클레임을 직접
-  // 읽은 값(getServerSession, 신규 fetch 0). `orgId`(=me?.org_id)는 실제로는 주로
-  // `app_metadata.project_id` 클레임으로 찾은 TeamMember 행의 org라 두 클레임이 부분적으로
-  // stale하면(org_id는 reset·project_id는 옛 org 그대로) `orgId`와 갈릴 수 있다 — 아래
+  // story #2545(카디르 라이브 재QA) — JWT `app_metadata.org_id` 클레임을 직접 읽은 값
+  // (getServerSession, 신규 fetch 0). #2544가 "top-level org_id"라 부른 바로 그 필드
+  // (backend/app/dependencies/auth.py의 `jwt_org_id = auth.claims.get("app_metadata",
+  // {}).get("org_id")`와 동일 — "top-level"은 app_metadata 안에서 org_id가 최상위라는
+  // 뜻이지 JWT payload 자체의 최상위 필드라는 뜻이 아니다). `orgId`(=me?.org_id)는 실제로는
+  // 주로 `app_metadata.project_id` 클레임으로 찾은 TeamMember 행의 org라 두 클레임이
+  // 부분적으로 stale하면(org_id는 reset·project_id는 옛 org 그대로) `orgId`와 갈릴 수 있다 — 아래
   // 자동 switch-org effect의 불일치 판정은 이 값을 우선한다(없으면 `orgId`로 폴백).
   jwtOrgId?: string;
   children: React.ReactNode;
@@ -297,11 +300,12 @@ export function DashboardShell({
   //
   // ⚠️카디르 라이브 재QA(2026-08-10, qa:changes) — 이 비교엔 `orgId`(me?.org_id)가 아니라
   // `jwtOrgId`를 쓴다. `orgId`는 실제로는 대개 `app_metadata.project_id` 클레임으로 찾은
-  // TeamMember 행의 org라 JWT top-level `org_id` 클레임과 다른 신호다 — 부분-stale JWT(org_id는
-  // reset됐는데 project_id는 옛 org를 여전히 가리키는 경우) 라이브 재현에서 orgId가 이미
-  // pathOrgId와 "우연히" 같아져 이 effect가 조기 return하고, 그 순간 실제 서명된 top-level
-  // org_id는 여전히 달라 switch-org가 0회 발화했다. jwtOrgId(getServerSession이 jwtVerify
-  // 직후 읽어둔 진짜 top-level 클레임)를 우선하고, 그 클레임이 없는 인증경로(Firebase 세션 —
+  // TeamMember 행의 org라 `app_metadata.org_id` 클레임(위 jwtOrgId 정의 참고)과 다른
+  // 신호다 — 부분-stale JWT(org_id는 reset됐는데 project_id는 옛 org를 여전히 가리키는
+  // 경우) 라이브 재현에서 orgId가 이미 pathOrgId와 "우연히" 같아져 이 effect가 조기
+  // return하고, 그 순간 실제 서명된 app_metadata.org_id 클레임은 여전히 달라 switch-org가
+  // 0회 발화했다. jwtOrgId(getServerSession이 jwtVerify 직후 읽어둔 그 클레임)를 우선하고,
+  // 그 클레임이 없는 인증경로(Firebase 세션 —
   // db/server.ts 참고)에서만 orgId로 폴백한다.
   const actualTokenOrgId = jwtOrgId ?? orgId;
   const orgSyncAttemptedRef = useRef<string | null>(null);
