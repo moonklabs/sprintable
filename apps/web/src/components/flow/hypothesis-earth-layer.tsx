@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import type { Hypothesis } from '@sprintable/core-storage';
 import { HypothesisStatusBadge } from '@/components/hypotheses/hypothesis-status-badge';
 import { ScaleLadder } from '@/components/flow/scale-ladder';
 import { UnattachedBucket } from '@/components/flow/unattached-bucket';
+import { GuidedHypothesisEntry } from '@/components/flow/guided-hypothesis-entry';
 import { cn } from '@/lib/utils';
 
 /**
@@ -25,10 +26,12 @@ import { cn } from '@/lib/utils';
 function HypothesisCard({
   hypothesis,
   dim,
+  justPlanted = false,
   onSelect,
 }: {
   hypothesis: Hypothesis;
   dim: boolean;
+  justPlanted?: boolean;
   onSelect: (id: string) => void;
 }) {
   const t = useTranslations('flow');
@@ -46,6 +49,9 @@ function HypothesisCard({
       className={cn(
         'flex cursor-pointer flex-col gap-2.5 rounded-xl border border-border bg-card p-4 text-left transition hover:border-brand/60 hover:shadow-sm',
         dim && 'opacity-60',
+        // story #2543 — 방금 심은 가설(guided 생성 직후) 하이라이트. mockup .hcard.new와
+        // 같은 결(브랜드 링 + 배지) — 가설 반증에 빨강을 못 쓰는 규율과 무관한 순수 강조색.
+        justPlanted && 'border-primary ring-2 ring-primary/20',
       )}
     >
       <div className="flex items-center gap-2">
@@ -54,6 +60,9 @@ function HypothesisCard({
           <span className="text-[11px] text-muted-foreground">
             {t('earthEpicCount', { n: linkedEpicCount })}
           </span>
+        ) : null}
+        {justPlanted ? (
+          <span className="ml-auto shrink-0 text-[10.5px] font-semibold text-primary">{t('earthJustPlanted')}</span>
         ) : null}
       </div>
       <p className="text-sm font-medium leading-snug text-foreground">{hypothesis.statement}</p>
@@ -126,26 +135,29 @@ export function HypothesisEarthLayer({
   const locale = useLocale();
   const [hypotheses, setHypotheses] = useState<Hypothesis[] | null>(null);
   const [loadError, setLoadError] = useState(false);
+  // story #2543 — guided 생성 직후 지구층 카드에 "방금 심음" 하이라이트를 달 대상 id.
+  // 세션 로컬 상태(재조회로만 초기화·타이머 없음) — 다음 방문·새로고침까지 그대로 유지돼도
+  // 무해하다(카드가 measuring에서 벗어나면 이 하이라이트 자체가 더는 그 자리에 안 뜬다).
+  const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
+  const [successBannerDismissed, setSuccessBannerDismissed] = useState(false);
+
+  const reload = useCallback(async () => {
+    if (!projectId) return;
+    setLoadError(false);
+    try {
+      const res = await fetch(`/api/hypotheses?project_id=${projectId}`, { cache: 'no-store' });
+      if (!res.ok) throw new Error('failed');
+      const json = await res.json() as { data?: Hypothesis[] };
+      setHypotheses(json.data ?? []);
+    } catch {
+      setHypotheses([]);
+      setLoadError(true);
+    }
+  }, [projectId]);
 
   useEffect(() => {
-    if (!projectId) return;
-    let cancelled = false;
-    setLoadError(false);
-    void (async () => {
-      try {
-        const res = await fetch(`/api/hypotheses?project_id=${projectId}`, { cache: 'no-store' });
-        if (!res.ok) throw new Error('failed');
-        const json = await res.json() as { data?: Hypothesis[] };
-        if (cancelled) return;
-        setHypotheses(json.data ?? []);
-      } catch {
-        if (cancelled) return;
-        setHypotheses([]);
-        setLoadError(true);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [projectId]);
+    void reload();
+  }, [reload]);
 
   // 지구 층 = measuring(선명) + proposed(흐림)만 기본 노출. archived는 여기 그리드엔
   // 아예 안 그린다("더미 미표시").
@@ -171,39 +183,81 @@ export function HypothesisEarthLayer({
       <ScaleLadder />
 
       <div>
-        <div className="mb-2">
-          {/* 유나 design 재규격(2026-08-09) — "지구 층" 행성-은유 eyebrow 제거(ScaleLadder
-              legend 정리와 같은 결, earthSectionLabel i18n 키도 함께 폐기). */}
-          <h2 className="text-sm font-semibold text-foreground">{t('earthSectionTitle')}</h2>
-        </div>
-
-        {hypotheses === null ? (
-          <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-            {t('loading')}
-          </div>
-        ) : loadError ? (
-          <p className="py-4 text-xs text-muted-foreground">{t('earthLoadError')}</p>
-        ) : measuring.length === 0 && proposed.length === 0 ? (
-          // 없는 데이터에 화면 안 깎기 — 정직하게 빈 상태를 말한다(더미로 안 채움).
-          <p className="py-4 text-xs text-muted-foreground">{t('earthEmpty')}</p>
+        {hypotheses !== null && !loadError && hypotheses.length === 0 ? (
+          // story #2543 — 빈 지도(가설 0건 전체 — measuring/proposed뿐 아니라 결론난 것도
+          // 0). "죽은 0" 대신 첫 질문을 심자는 초대가 이 자리를 대신한다.
+          <GuidedHypothesisEntry
+            projectId={projectId}
+            onCreated={(created) => {
+              setJustCreatedId(created.id);
+              setSuccessBannerDismissed(false);
+              void reload();
+            }}
+          />
         ) : (
-          <div className="space-y-3">
-            {measuring.length > 0 ? (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {measuring.map((h) => (
-                  <HypothesisCard key={h.id} hypothesis={h} dim={false} onSelect={onSelectHypothesis} />
-                ))}
+          <>
+            {justCreatedId && !successBannerDismissed && measuring.some((h) => h.id === justCreatedId) ? (
+              // story #2543 — 첫 성공 화면(SSOT ae75a8ff 3화면 중 마지막). 방금 심은 가설이
+              // 이 렌더에서 이미 지구층 measuring 그리드에 있으므로(reload 완료), 배너는
+              // 그 위에 「생겼다」를 한 번 확인시켜주는 정직한 확인 신호일 뿐이다.
+              <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-info/30 bg-info/10 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">{t('guidedSuccessTitle')}</p>
+                  <p className="text-xs text-muted-foreground">{t('guidedSuccessSubtitle')}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSuccessBannerDismissed(true)}
+                  className="shrink-0 text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  {t('guidedSuccessDismiss')}
+                </button>
               </div>
             ) : null}
-            {proposed.length > 0 ? (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {proposed.map((h) => (
-                  <HypothesisCard key={h.id} hypothesis={h} dim onSelect={onSelectHypothesis} />
-                ))}
+            <div className="mb-2">
+              {/* 유나 design 재규격(2026-08-09) — "지구 층" 행성-은유 eyebrow 제거(ScaleLadder
+                  legend 정리와 같은 결, earthSectionLabel i18n 키도 함께 폐기). */}
+              <h2 className="text-sm font-semibold text-foreground">{t('earthSectionTitle')}</h2>
+            </div>
+
+            {hypotheses === null ? (
+              <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                {t('loading')}
               </div>
-            ) : null}
-          </div>
+            ) : loadError ? (
+              <p className="py-4 text-xs text-muted-foreground">{t('earthLoadError')}</p>
+            ) : measuring.length === 0 && proposed.length === 0 ? (
+              // 없는 데이터에 화면 안 깎기 — 정직하게 빈 상태를 말한다(더미로 안 채움). 이
+              // 가지는 «결론난 가설은 있지만 지금 활성인 것은 없는» 경우만 남는다(전체
+              // 0건은 위 GuidedHypothesisEntry 분기가 이미 잡는다) — 첫 질문 초대를 다시
+              // 띄우면 "또 처음"처럼 읽혀 오히려 거짓이라 가벼운 문구만 남긴다.
+              <p className="py-4 text-xs text-muted-foreground">{t('earthEmpty')}</p>
+            ) : (
+              <div className="space-y-3">
+                {measuring.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {measuring.map((h) => (
+                      <HypothesisCard
+                        key={h.id}
+                        hypothesis={h}
+                        dim={false}
+                        justPlanted={h.id === justCreatedId}
+                        onSelect={onSelectHypothesis}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                {proposed.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {proposed.map((h) => (
+                      <HypothesisCard key={h.id} hypothesis={h} dim onSelect={onSelectHypothesis} />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </>
         )}
       </div>
 

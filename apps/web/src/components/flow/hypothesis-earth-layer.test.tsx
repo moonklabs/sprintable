@@ -59,6 +59,13 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  // story #2543 — 빈 지도 분기가 GuidedHypothesisEntry(useIsMobile)를 렌더한다.
+  // jsdom엔 matchMedia가 없어 flow-node-story-panel.test.tsx와 같은 스텁이 필요하다.
+  vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
 });
 
 afterEach(async () => {
@@ -202,10 +209,20 @@ describe('HypothesisEarthLayer — story #2531 AC(measuring 선명·proposed 흐
     expect(container.textContent).toContain(koMessages.flow.earthFoldEmpty);
   });
 
-  it('데이터가 아예 없으면(measuring/proposed 둘 다 0) 더미로 안 채우고 빈 상태를 말한다', async () => {
+  it('가설이 아예 0건이면(story #2543) 더미로 안 채우고 빈 지도 초대(첫 질문 심기)를 보인다', async () => {
     await renderLayer(vi.fn(() => jsonResponse([])));
 
+    expect(container.textContent).toContain(koMessages.flow.earthEmptyInviteTitle);
+    expect(container.textContent).toContain(koMessages.flow.earthEmptyInviteCta);
+    expect(container.textContent).not.toContain(koMessages.flow.earthEmpty);
+  });
+
+  it('결론난 가설은 있지만 지금 활성(measuring/proposed)이 0이면 초대 아닌 가벼운 빈 상태 문구를 보인다', async () => {
+    const concludedOnly = [makeHypothesis({ id: 'h-verified', status: 'verified' })];
+    await renderLayer(vi.fn(() => jsonResponse(concludedOnly)));
+
     expect(container.textContent).toContain(koMessages.flow.earthEmpty);
+    expect(container.textContent).not.toContain(koMessages.flow.earthEmptyInviteCta);
   });
 
   it('fetch 실패시 로드 에러 문구를 보이고 크래시하지 않는다', async () => {

@@ -134,6 +134,7 @@ export const updateSprintSchema = z.object({
 export { createStorySchema, updateStorySchema, bulkUpdateStoriesSchema as bulkUpdateStorySchema, VALID_STORY_TRANSITIONS, STORY_STATUSES, STORY_PRIORITIES, STORY_SP_VALUES } from './stories';
 export {
   createHypothesisSchema,
+  hypothesisGuidedCreateSchema,
   updateHypothesisSchema,
   transitionHypothesisSchema,
   linkHypothesisSchema,

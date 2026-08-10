@@ -31,6 +31,7 @@ export type {
   HypothesisTransitionInput,
   HypothesisLinkInput,
   HypothesisUnlinkInput,
+  HypothesisGuidedCreateInput,
   HypothesisDraftInput,
   HypothesisDraft,
   HypothesisListFilters,
