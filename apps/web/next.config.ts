@@ -75,12 +75,11 @@ const nextConfig: NextConfig = {
     return [
       { source: '/memos', destination: '/inbox', permanent: true },
       { source: '/memos/:path*', destination: '/inbox', permanent: true },
-      // 단일 도메인 위생(45a5a006): 호스티드 app.sprintable.ai의 공개 LLM 문서는 랜딩(canonical)으로 301.
-      // host 스코프로 한정해 self-hosted/dev 인스턴스는 영향받지 않고 자체 public 파일을 계속 서빙한다
-      // (onboarding-form 등이 getAppOrigin()/llms.txt를 참조하므로 파일 자체는 유지). onboarding-guide.txt는
-      // app(한)↔랜딩(영) 내용 상이로 별도 콘텐츠 스토리에서 처리한다.
-      { source: '/llms.txt', destination: 'https://sprintable.ai/llms.txt', statusCode: 301, has: [{ type: 'host', value: 'app.sprintable.ai' }] },
-      { source: '/llms-full.txt', destination: 'https://sprintable.ai/llms-full.txt', statusCode: 301, has: [{ type: 'host', value: 'app.sprintable.ai' }] },
+      // 문서 단일화(2026-08-10 선생님 지시): 에이전트 공개 문서(llms.txt·llms-full.txt·
+      // connect-guide.txt·onboarding-guide.txt)의 유일 canonical 은 «앱 안»(apps/web/public)이다.
+      // 랜딩(sprintable.ai)은 의도적으로 분리된 별도 레포라, 이전의 app→랜딩 301 을 제거해
+      // app 이 자기 public 파일을 직접(canonical) 서빙한다 — 랜딩의 옛 사본으로 넘기지 않는다.
+      // (제거 前엔 llms.txt/llms-full.txt 만 랜딩으로 301 하던 반쪽 통일이라 오히려 갈렸다.)
       // story c4980e70(조직 1급화 IA·doc org-1st-class-surface-ia-design-b §1): 에이전트 관리가
       // /agents → /organization/workforce(조직=1급 구역)로 승격. 서브라우트 전체(상세·runs·recruiter 등) 보존.
       { source: '/agents', destination: '/organization/workforce', permanent: true },

@@ -53,8 +53,8 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   const [revokeKeyId, setRevokeKeyId] = useState<string | null>(null);
   const { addToast } = useToast();
 
-  // f44e2644: 랜딩 canonical 직지정(app.sprintable.ai CF 301 prod 미발동·앱 사본 onboarding-guide 깨짐).
-  const LLMS_URL = 'https://sprintable.ai/llms.txt';
+  // 문서 app 단일화(2026-08-10 선생님 지시): app 자기 도메인 canonical 직지정(랜딩 301 제거로 app.sprintable.ai 가 자기 /llms.txt 를 직접 서빙).
+  const LLMS_URL = 'https://app.sprintable.ai/llms.txt';
 
   const buildOnboardingMessage = (apiKey: string, mcpConfig?: string | null) =>
     t('agentApiKeyOnboardingMessageBase', { agentName, apiKey, llmsUrl: LLMS_URL }) +
