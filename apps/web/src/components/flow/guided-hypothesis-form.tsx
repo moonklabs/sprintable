@@ -83,7 +83,10 @@ export function GuidedHypothesisForm({
 
   return (
     <form
-      className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto"
+      // story #2062 회귀가드 — overflow 스크롤 컨테이너는 패딩 또는 focus-inset 필수
+      // (링 클리핑 방지, verify-focus-inset-coverage.ts). 탭 이동 대상(예시 칩·입력·버튼)이
+      // 많은 폼이라 focus-inset으로 안쪽에 링을 그린다.
+      className="focus-inset flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto"
       onSubmit={(e) => {
         e.preventDefault();
         if (canSubmit) onSubmit({ statement: value.statement, metric: value.metric, target: Number(target), direction: value.direction });
