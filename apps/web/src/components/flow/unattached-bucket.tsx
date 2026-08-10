@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
+import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { cn } from '@/lib/utils';
 
 /**
@@ -189,6 +190,9 @@ export function UnattachedBucket({ projectId }: { projectId: string }) {
   // 안전 폴백 — 그 외엔 항상 total이 SSOT.
   const [total, setTotal] = useState<number | null>(null);
   const [loadError, setLoadError] = useState(false);
+  // story #2545(카디르 라이브 재QA 2단계) — org 불일치 자동교정(switch-org)이 이 fetch 直後
+  // 성공하면 project는 안 바뀌므로 재요청 트리거가 없었다(project-context-client.ts 참고).
+  const orgSyncVersion = useOrgSyncVersion();
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -207,7 +211,10 @@ export function UnattachedBucket({ projectId }: { projectId: string }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [projectId]);
+    // orgSyncVersion은 콜백 안에서 안 읽는다 — switch-org 성공 直後 이 콜백 새 참조를
+    // 강제해 재요청시키기 위한 의도적 invalidation 트리거다(story #2545, project-context-
+    // client.ts 참고).
+  }, [projectId, orgSyncVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => load(), [load]);
 

@@ -4,6 +4,7 @@ import { createContext, useContext, useCallback, useEffect, useMemo, useRef, use
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   TAB_PROJECT_STORAGE_KEY,
+  bumpOrgSyncVersion,
   installProjectHeaderInterceptor,
   resolveEffectiveProjectId,
   setEffectiveProjectId,
@@ -322,6 +323,12 @@ export function DashboardShell({
         });
         const json = await res.json().catch(() => null) as { data?: { ok?: boolean } } | null;
         if (res.ok && json?.data?.ok) {
+          // story #2545(카디르 라이브 재QA 2단계) — router.refresh()는 서버 컴포넌트만
+          // 재실행한다. `useEffect(fetch, [projectId])`형 클라이언트 fetch(hypotheses·goals
+          // 등)는 project는 안 바뀌어 재요청이 안 되고 switch-org 前 확定된 403/404에
+          // 고정된다 — bumpOrgSyncVersion()으로 그걸 구독하는 컴포넌트만 재요청시킨다
+          // (project-context-client.ts 참고, 전체 fetch 게이트는 스코프 밖).
+          bumpOrgSyncVersion();
           router.refresh();
         }
       } catch {
