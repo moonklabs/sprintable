@@ -59,7 +59,7 @@ interface RawQueueItem {
   context: Record<string, unknown>;
 }
 
-interface RawAttentionItem {
+export interface RawAttentionItem {
   type: string;
   entity_type: string | null;
   entity_id: string | null;
@@ -70,6 +70,12 @@ interface RawAttentionItem {
   // blocker_id, age_days} — 별개 키명이라 위 entity_id 파싱은 이 둘에선 항상 null이었고,
   // href가 매번 제네릭 /board로 떨어지고 id도 배열 index로 새 렌더마다 안 안정됐다.
   story_id: string | null;
+  // story #2541 — 정체 클러스터 "일수순" 정렬·"N일째" 표시에 필요(BE가 이미 낸다,
+  // command_center.py:379-406). 옛 NowFace 플랫 행은 감시-프레이밍 금지(§1.5/§1.7)로
+  // 경과시간을 일부러 숨겼지만, 클러스터 보드는 유나 v4(PO (가) 결정, f01fa94a)가 "정체 N건"
+  // dedup·정렬축으로 명시 채택 — «개별 신호마다 경과를 드러내 감시처럼 읽힌다»는 옛 금지의
+  // 근거가, «묶어서 하나의 정체 지표로 보여준다»는 이 클러스터 형태에는 적용되지 않는다.
+  stalled_days: number | null;
   blocked_story_id: string | null;
   // title은 story_stalled/unanswered_blocker(#2938)가 이미 배선함 — 없으면 폴백 문구.
   title: string | null;
@@ -124,6 +130,7 @@ export function parseMyActions(json: unknown): RawMyActions {
         entity_id: str(raw['entity_id']),
         gate_type: str(raw['gate_type']),
         story_id: str(raw['story_id']),
+        stalled_days: num(raw['stalled_days']),
         blocked_story_id: str(raw['blocked_story_id']),
         title: str(raw['title']),
         hypothesis_id: str(raw['hypothesis_id']),
@@ -224,18 +231,6 @@ export function buildNowFace(raw: RawMyActions, notifications: RawCompletionNoti
         href: a.entity_type === 'story' && a.entity_id ? `/board?story=${a.entity_id}` : '/inbox?tab=gates',
         priority: 20,
       });
-    } else if (a.type === 'story_stalled') {
-      items.push({
-        id: `story_stalled-${a.story_id ?? items.length}`,
-        kind: 'signal', kindLabel: t('kindSignal'),
-        // title은 BE가 아직 안 보내면(디디 후속 배선 전) 폴백 문구 — surveillance framing
-        // ban(§1.5/§1.7, derive-now-face.test.ts)이 아직 유효해 날짜/기간 수치는 안 붙인다.
-        title: a.title ?? t('signalStalledTitle'),
-        context: t('signalStalledContext'),
-        actionLabel: t('actionOpen'), actionTone: 'ghost',
-        href: a.story_id ? `/board?story=${a.story_id}` : '/board',
-        priority: 21,
-      });
     } else if (a.type === 'unanswered_blocker') {
       items.push({
         id: `unanswered_blocker-${a.blocked_story_id ?? items.length}`,
@@ -246,29 +241,10 @@ export function buildNowFace(raw: RawMyActions, notifications: RawCompletionNoti
         href: a.blocked_story_id ? `/board?story=${a.blocked_story_id}` : '/board',
         priority: 22,
       });
-    } else if (a.type === 'hypothesis_falsified') {
-      // story #2539(BE) — "방금 반증으로 종결된 가설" 결과 통보뿐(in-flight 이상감지는 데이터
-      // 구조상 불가로 확認 완료, PR#2939 본문). severity=info라 이 화면에서도 경고 톤이
-      // 아니라 정반합 톤("낳음")으로 — hypothesis-status-badge/hypothesis-narrative-panel의
-      // 기존 결정("반증에 빨강 금지·닫힘 아니라 낳음")과 같은 결을 여기서도 지킨다.
-      const outcome = record(a.outcome_result);
-      const actual = outcome ? num(outcome['actual']) : null;
-      const target = outcome ? num(outcome['target']) : null;
-      const hasOutcome = actual !== null && target !== null;
-      items.push({
-        id: `hypothesis_falsified-${a.hypothesis_id ?? items.length}`,
-        kind: 'signal', kindLabel: t('kindSignal'),
-        title: a.statement ?? t('signalHypothesisFalsifiedTitle'),
-        context: a.superseded_by_hypothesis_id
-          ? t('signalHypothesisFalsifiedSupersededContext')
-          : hasOutcome
-            ? t('signalHypothesisFalsifiedOutcomeContext', { actual, target })
-            : t('signalHypothesisFalsifiedContext'),
-        actionLabel: t('actionOpen'), actionTone: 'ghost',
-        href: a.hypothesis_id ? `/flow?hypothesis=${a.hypothesis_id}` : '/flow',
-        priority: 19,
-      });
     }
+    // story #2541 — story_stalled·hypothesis_falsified는 여기서 더는 flat 행으로 안 올린다.
+    // 20줄 flood(story_stalled) 원인이 바로 이 자리였다 — 이제 attention-cluster-board.tsx
+    // (deriveAttentionClusters)가 같은 raw.attention을 별도로 읽어 유형별 클러스터로 묶는다.
   }
 
   for (const n of notifications) {

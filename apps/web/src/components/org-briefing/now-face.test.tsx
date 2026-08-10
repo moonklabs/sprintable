@@ -104,13 +104,20 @@ describe('NowFace', () => {
     expect(container.innerHTML).not.toContain('3개 더 보기');
   });
 
-  it('never leaks raw elapsed-time digits into the anomaly row copy (surveillance framing ban)', async () => {
+  // story #2541(PO (가) 결정, 유나 v4 SSOT f01fa94a) — story_stalled는 이제 NowFace 플랫
+  // 행이 아니라 AttentionClusterBoard의 "정체" 클러스터로 옮겨갔고, 그 클러스터는 "N일째"
+  // (개별 카드)·"3일+"(카드 헤더 임계값 설명)를 의도적으로 보인다 — 옛 감시-프레이밍 금지가
+  // 「개별 신호마다 경과를 드러내면 감시처럼 읽힌다」는 근거였는데, 유형별로 묶어 "정체 N건"
+  // 지표로 보여주는 이 클러스터 형태엔 그 근거가 적용되지 않는다는 게 PO 판단(§derive-now-face.ts
+  // stalled_days 주석과 동일 근거). 그래서 이 가드는 "일째"·"일+" 두 의도된 패턴만 허용하고,
+  // 그 밖의 경과시간 포맷(예: agent_stuck에 "N시간 전"류가 새로 붙는 회귀)은 여전히 잡는다.
+  it('never leaks raw elapsed-time digits into the anomaly row copy, except the intentional stalled-cluster day-count (story #2541)', async () => {
     stubFetch(
       { action_queue: { items: [] }, attention: { items: [{ type: 'story_stalled', entity_type: null, entity_id: 's1', gate_type: null }] } },
       { data: [] },
     );
     await mount();
-    expect(container.innerHTML).not.toMatch(/\d+\s*(분|시간|일)(?!건)/);
+    expect(container.innerHTML).not.toMatch(/\d+\s*(분|시간|일)(?!건|째|\+)/);
   });
 
   it('story 64b9a879 — "지금" hero 뱃지가 타이틀 옆에 렌더된다(정보 위계 강조)', async () => {
