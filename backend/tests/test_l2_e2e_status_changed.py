@@ -74,9 +74,15 @@ def _chain_patches(worker, added, *, claim_results):
         patch.object(dispatch_mod, "resolve_member_identity",
                      AsyncMock(return_value=SimpleNamespace(id=ASSIGNEE, type="agent")))
     )
-    stack.enter_context(patch.object(dispatch_mod, "assign_recipient_seq", _assign_seq))
+    # story #2381 AC5: wake_agent()는 더 이상 _finalize_dispatch()가 직접 부르지 않는다 —
+    # assign_recipient_seq()(event_seq.py)의 after-commit 자동예약이 유일한 발화 경로다. 그
+    # 실제 발화(post-commit)는 realdb 스트림 테스트(test_2381_wake_after_commit_race_realdb.py·
+    # test_2381_ac4_live_wake_delivery_realdb.py)가 커버 — 여기(mocked db)선 "wake 게이트인
+    # assign_recipient_seq가 정확히 한 번 불렸다"까지만 관측한다.
+    wake = stack.enter_context(
+        patch.object(dispatch_mod, "assign_recipient_seq", AsyncMock(side_effect=_assign_seq))
+    )
     stack.enter_context(patch.object(dispatch_mod, "extract_activities_best_effort", AsyncMock()))
-    wake = stack.enter_context(patch.object(dispatch_mod, "wake_agent", MagicMock()))
     stack.enter_context(patch("app.services.hypothesis.resolve_dispatch_anchor", AsyncMock(return_value=None)))
     stack.enter_context(patch.object(webhook_mod, "deliver_injected_event_webhook", AsyncMock()))
     return stack, wake
@@ -103,10 +109,12 @@ async def test_status_changed_produces_exactly_one_dispatched_event_and_wake():
     ev = dispatched[0]
     assert ev.recipient_type == "agent" and ev.recipient_id == ASSIGNEE
 
-    # AC②: recipient_seq 有 + commit 후 wake_agent 1회.
+    # AC②: recipient_seq 有 + wake 게이트(assign_recipient_seq) 정확히 1회 — 그 게이트를
+    # 통과하면 commit 후 wake_agent가 자동 발화된다는 것은 event_seq.py 자체의 realdb 테스트가
+    # 증명(story #2381 AC5, 위 _chain_patches 주석 참조).
     assert ev.recipient_seq == 42
     wake.assert_called_once()
-    assert wake.call_args.args[0] == str(ASSIGNEE) and wake.call_args.args[1] == 42
+    assert wake.call_args.args[1] is ev  # assign_recipient_seq(db, event) — 바로 이 event로 호출
 
     # AC③: payload에 trigger_metadata(L2 출처) + anchor(entity).
     tm = ev.payload["trigger_metadata"]
