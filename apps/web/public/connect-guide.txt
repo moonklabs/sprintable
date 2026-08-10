@@ -59,8 +59,9 @@ codex mcp add sprintable -- uvx sprintable
 > **가장 확실한 방법은 화면이 발급한 `.mcp.json`을 그대로 쓰는 것입니다.**
 > 위 예시는 형태를 보여 주는 것이고, 화면이 주는 값이 언제나 맞습니다.
 >
-> `uvx sprintable`은 MCP 서버를 «로컬»에서 돌리는 방식(self-host·로컬 개발용)입니다.
-> 호스티드(SaaS)로 붙을 때는 화면이 주는 config를 그대로 쓰십시오.
+> `uvx sprintable`은 MCP 서버를 «로컬 프로세스»로 돌리는 방식입니다 — 백엔드는
+> `SPRINTABLE_API_URL`로 지정하며 로컬 self-host든 원격 호스티드든 붙을 수 있습니다.
+> 어느 쪽이든 화면이 주는 config를 그대로 쓰는 게 가장 확실합니다.
 
 ---
 
@@ -114,9 +115,12 @@ Sprintable의 Claude Code 채널 플러그인을 **정식으로 설치**해 붙�
 /sprintable:configure <0단계에서 발급한 키>
 ```
 
-키는 `~/.claude/channels/sprintable/.env`에 저장됩니다. 두 번째 인자로 백엔드 URL을 줄 수
-있고(생략 시 호스티드 백엔드), prod는
-`https://sprintable-backend-prod-787818285179.asia-northeast3.run.app`입니다.
+키는 `~/.claude/channels/sprintable/.env`에 저장됩니다. ⚠️ **두 번째 인자를 생략하면 dev
+백엔드에 붙습니다** — 정식(prod) 서비스에 붙으려면 prod 백엔드 URL을 반드시 함께 주십시오:
+
+```
+/sprintable:configure <0단계에서 발급한 키> https://sprintable-backend-prod-787818285179.asia-northeast3.run.app
+```
 
 **3) 채널과 함께 실행**
 
@@ -127,9 +131,14 @@ claude --dangerously-load-development-channels plugin:sprintable@moonklabs
 > **`--dangerously-load-development-channels`가 왜 필요한가** — 채널 플러그인은 세션에
 > 메시지를 «주입»할 수 있어, Claude Code는 Anthropic 공식 마켓(`claude-plugins-official`)의
 > 채널 플러그인만 `--channels`로 자동 신뢰합니다. Sprintable 플러그인은 우리 마켓
-> (`moonklabs`)에서 오므로 이 플래그로 명시 로드합니다. 위험한 «코드»를 받는 게 아니라
-> «우리가 만든 플러그인을 신뢰한다»는 선언일 뿐입니다. `settings.json`에
-> `"skipDangerousModePermissionPrompt": true`를 두면 확인 다이얼로그도 뜨지 않습니다.
+> (`moonklabs`)에서 설치하는 third-party 채널이라, 현재로선 이 플래그로 명시 로드해야 합니다.
+>
+> ⚠️ **주의 — 이 플래그는 Claude Code가 「로컬 채널 개발용」으로 두고, 「인터넷에서 받은
+> 채널에는 쓰지 말라」고 경고하는 옵션입니다.** Sprintable 플러그인도 «인터넷에서 받는»
+> 채널이므로, **Sprintable 플러그인을 신뢰할 때만** 쓰십시오. 플러그인 코드는 공개돼 있어
+> (`github.com/moonklabs/sprintable-claude-plugin`) 설치 전에 직접 확인할 수 있습니다. 이
+> 플래그를 쓰면 세션 시작 시 확인 다이얼로그가 뜨며, 위 저장소를 확인한 뒤 승인하면 됩니다.
+> (경고 없는 `--channels` 경로는 Anthropic 공식 마켓 등재가 전제라 현재는 제공되지 않습니다.)
 
 어댑터는 SSE dial-out으로 동작합니다 — 게이트웨이의 SSE(`GET /api/v2/agent/stream`)를
 아웃바운드로 소비해 채팅 메시지를 세션에 `<channel source="sprintable">` 블록으로 주입하고,
