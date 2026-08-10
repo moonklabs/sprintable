@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useCallback, useEffect, useMemo, useState, startTransition } from 'react';
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState, startTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   TAB_PROJECT_STORAGE_KEY,
@@ -267,6 +267,7 @@ export function DashboardShell({
   children,
 }: DashboardShellProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const showTopBar = !pathname.startsWith('/settings');
   const tabletCentered = isTabRootPage(pathname);
 
@@ -278,6 +279,38 @@ export function DashboardShell({
   // 엉뚱한 org로 검증됨). setEffectiveProjectId와 동일하게 렌더 단계에서 동기화 —
   // 인터셉터 설치(useProjectSsot 내부)보다 먼저 ref가 채워져 있어야 첫 자식 fetch도 커버된다.
   setEffectiveOrgId(effectiveOrgId);
+
+  // story #2545 — pathOrgId(URL이 그리는 org)가 orgId(실 JWT의 org, me.org_id)와 다르면
+  // displayOrg는 이미 pathOrgId로 "현재 조직"처럼 보이는데(바로 위 effectiveOrgId), 그건
+  // X-Org-Id **헤더 오버라이드**일 뿐 실제 토큰은 여전히 홈org다. #2544 grounding(dev Cloud
+  // Run 로그 실측)이 보인 대로 이 헤더 경로는 컴포넌트별 마운트 타이밍에 따라 레이스가
+  // 나 간헐적으로 403이 난다(같은 project_id로 호출해도 어떤 컴포넌트는 통과·어떤 컴포넌트는
+  // 실패 — story #2544 AC3가 지적한 "두 판정"의 정체는 별개 함수가 아니라 이 헤더 타이밍
+  // 자체였다). 근본: 헤더로 매 요청 우회하는 대신, 불일치를 발견하는 즉시 실제 토큰을
+  // pathOrgId로 재발급해 그 뒤 모든 요청(헤더 有無 무관)이 처음부터 맞게 만든다 — AC2가
+  // 명시 허용한 두 방법(헤더 신뢰 / 토큰 재발급) 중 후자. 실패해도(권한 없음 등) 기존
+  // 헤더 오버라이드가 그대로 폴백 — 이 effect는 추가 안전망이지 유일한 경로가 아니다.
+  const orgSyncAttemptedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pathOrgId || pathOrgId === orgId) return;
+    if (orgSyncAttemptedRef.current === pathOrgId) return;
+    orgSyncAttemptedRef.current = pathOrgId;
+    void (async () => {
+      try {
+        const res = await fetch('/api/switch-org', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ org_id: pathOrgId }),
+        });
+        const json = await res.json().catch(() => null) as { data?: { ok?: boolean } } | null;
+        if (res.ok && json?.data?.ok) {
+          router.refresh();
+        }
+      } catch {
+        // best-effort — 실패해도 기존 X-Org-Id 헤더 오버라이드가 그대로 폴백.
+      }
+    })();
+  }, [pathOrgId, orgId, router]);
   // R2: URL `?p=` = flat 라우트의 탭별 SSOT. pathProjectId(경로 resolve)가 있으면 그게 최우선.
   const effectiveProjectId = useProjectSsot(projectId, projectMemberships, pathProjectId);
   const effectiveProjectName = projectMemberships.find((m) => m.projectId === effectiveProjectId)?.projectName ?? projectName;
