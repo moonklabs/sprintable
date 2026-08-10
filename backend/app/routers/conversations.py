@@ -441,7 +441,41 @@ def _msg_payload(
     # 모르는 SSE/write-response 경로는 넘기지 않아 키 자체가 없다(기존 references 규율 재사용).
     if blocked_sender_ids is not None:
         payload["is_blocked_sender"] = bool(sender and sender.id in blocked_sender_ids)
+    # E-ACTIVATION S1: typed activation 필드 top-level 노출(없으면 None). connector 헤더 주입용.
+    payload.update(_activation_payload(msg))
     return payload
+
+
+_ACTIVATION_KINDS = frozenset({"request", "handoff", "result", "ack"})
+
+
+def _activation_meta(req: "SendMessageRequest") -> dict | None:
+    """E-ACTIVATION S1: typed-activation 필드 → msg_metadata['activation']. 없으면 None(완전 additive).
+    audience는 빈/None이면 저장 안 함(=all·현행) — 서버가 org 필터한 값을 받는다(호출부).
+    message_kind는 4개 enum만 수용(개행/자유텍스트 헤더 오염 차단 — 까디르 QA)."""
+    act: dict = {}
+    if req.audience:
+        act["audience"] = [str(a) for a in req.audience]
+    if req.message_kind in _ACTIVATION_KINDS:
+        act["kind"] = req.message_kind
+    if req.expects_response is not None:
+        act["expects_response"] = bool(req.expects_response)
+    return {"activation": act} if act else None
+
+
+def _activation_payload(msg: "ConversationMessage") -> dict:
+    """msg_metadata['activation'] → payload top-level(audience/message_kind/expects_response).
+    ⚠️ __dict__ 로 «이미 로드된 값만» 읽는다 — `getattr(msg, 'msg_metadata')`는 미로드 컬럼에
+    async lazy-load(refresh)를 유발해 sync _msg_payload 안에서 greenlet_spawn 크래시(realdb GET/list).
+    __dict__.get = 로드 안 됐으면 None·SimpleNamespace fake 안전·dispatch 경로는 방금 set해 값 있음."""
+    meta = (getattr(msg, "__dict__", None) or {}).get("msg_metadata")
+    act = meta.get("activation") if isinstance(meta, dict) else None
+    act = act or {}
+    return {
+        "audience": act.get("audience"),
+        "message_kind": act.get("kind"),
+        "expects_response": act.get("expects_response"),
+    }
 
 
 async def _viewer_blocked_sender_ids(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession) -> set[uuid.UUID]:
@@ -548,7 +582,7 @@ async def _dispatch_conversation_event(
     from app.services.activity_stream import extract_activities_best_effort
     await extract_activities_best_effort(db, [event.id for _, event in events_to_push])
     return [(pid_str, {"event_id": str(event.id), "event_type": "conversation.message_created", **payload,
-                       "recipient_seq": event.recipient_seq})
+                       "recipient_seq": event.recipient_seq, "recipient_id": pid_str})
             for pid_str, event in events_to_push]
 
 
@@ -610,7 +644,11 @@ async def _dispatch_mention_events(
     # L1 BE-3: mention fan-out N행 → activity_events 1행 수렴(best-effort·delivery 무영향).
     from app.services.activity_stream import extract_activities_best_effort
     await extract_activities_best_effort(db, [event.id for _, event in events_to_push])
-    return [(pid_str, {"event_id": str(event.id), "event_type": "conversation:mention", **payload})
+    # E-ACTIVATION S1(까디르 QA blocker): 멘션 반환도 recipient_seq/recipient_id를 실어야
+    # direct-push↔wake-rescan 활성화 판정이 동형이 된다(안 실으면 대상 본인한테도 addressed_to_you=no로 새고
+    # 리플레이 시 뒤집힘 — 이 기능이 막으려던 과소/과잉참여를 오히려 만든다).
+    return [(pid_str, {"event_id": str(event.id), "event_type": "conversation:mention", **payload,
+                       "recipient_seq": event.recipient_seq, "recipient_id": pid_str})
             for pid_str, event in events_to_push]
 
 
@@ -842,6 +880,12 @@ class SendMessageRequest(BaseModel):
     mentioned_ids: list[uuid.UUID] = []
     thread_id: uuid.UUID | None = None
     attachments: list[MessageAttachment] = []
+    # E-ACTIVATION S1 (typed activation · additive): 발신자가 «응답 의무»를 구조로 선언.
+    # audience=응답 대상 member_ids(빈/None=all·현행 유지·서버가 org 필터) · message_kind=의미유형
+    # (라우팅 event_type과 별개인 새 의미 필드·4개 enum만 저장) · expects_response. connector가 헤더로 주입(Y).
+    audience: list[uuid.UUID] | None = None
+    message_kind: str | None = None  # request | handoff | result | ack
+    expects_response: bool | None = None
 
     @field_validator("attachments")
     @classmethod
@@ -1891,6 +1935,13 @@ async def send_message(
                 _seen.add(mid)
                 valid_mentioned_ids.append(mid)
 
+    # E-ACTIVATION S1(까디르 QA): audience 도 cross-org/삭제 id 차단 — mentioned_ids 와 동형 org 필터.
+    # 안 하면 삭제·타조직 member_id 를 audience 에 넣어 «실 수신자 전원이 addressed=no» 메시지를 만들 수 있다.
+    # 전량 필터돼 []가 되면 어댑터에서 `not audience`=True → all-addressed(현행)로 안전 degrade.
+    if body.audience:
+        _aud_ok = await filter_org_member_ids(set(body.audience), org_id, db)
+        body.audience = [a for a in body.audience if a in _aud_ok]
+
     # CB-S2: DM + 비참여자 멘션 → 자동 그룹 conversation fork (AC1, AC2)
     fork_info: dict | None = None
     if conv.type == "dm" and valid_mentioned_ids:
@@ -1978,6 +2029,8 @@ async def send_message(
         # E-FILE S1: 첨부 메타(URL+name+content_type+size)를 0093 attachments JSONB에 저장.
         # S7: client 제공 asset_id 는 strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.
         attachments=[{**a.model_dump(), "asset_id": None} for a in body.attachments],
+        # E-ACTIVATION S1: typed-activation(audience/kind/expects_response) → metadata(additive·마이그레이션 불요).
+        msg_metadata=_activation_meta(body),
     )
     db.add(msg)
 

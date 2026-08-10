@@ -284,6 +284,7 @@ async def _fetch_events(
                 e.source_entity_type,
                 e.source_entity_id::text AS source_entity_id,
                 e.sender_id::text     AS sender_id,
+                e.recipient_id::text  AS recipient_id,
                 e.payload,
                 e.created_at,
                 e.project_id::text    AS project_id,
@@ -331,6 +332,12 @@ def _row_to_payload(row: object) -> dict:
         "org_id": getattr(row, "org_id", None),
         "conversation_title": getattr(row, "conversation_title", None),
         "sender_name": getattr(row, "sender_name", None),
+        # E-ACTIVATION S1: typed-activation top-level 노출(wake-rescan 경로도 direct-push와 동형).
+        # audience/message_kind/expects_response 는 저장된 event payload(_msg_payload) 안에서 온다.
+        "audience": (_payload or {}).get("audience"),
+        "message_kind": (_payload or {}).get("message_kind"),
+        "expects_response": (_payload or {}).get("expects_response"),
+        "recipient_id": getattr(row, "recipient_id", None),
     }
 
 
