@@ -10,7 +10,6 @@ import { CheckCircle, XCircle } from 'lucide-react';
 import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
 import { gateNeedsAction } from '@/components/cage/gate-evidence';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { cn } from '@/lib/utils';
 import type { GateInboxItem, GateItem, HitlInboxItem } from '@/components/kanban/types';
 
 // story #1960(P2-S4) — 결재함 통합 큐. Gate 3종(게이트·문서결재·머지게이트, gate_type/
@@ -241,9 +240,18 @@ export function ApprovalsQueue() {
                   {gateBody}
                 </button>
                 <div className="mt-2 flex items-center justify-between gap-2 border-t border-border pt-2">
-                  <span className={cn('flex items-center gap-1 text-xs font-medium', resolved === 'approved' ? 'text-success' : 'text-muted-foreground')}>
-                    {resolved === 'approved' ? <CheckCircle className="size-3.5" /> : <XCircle className="size-3.5" />}
-                    {t(resolved === 'approved' ? 'queueResolvedApproved' : 'queueResolvedRejected')}
+                  {/* 유나 design:changes(2026-08-10) — 승인 텍스트 text-success on bg-card(흰)는
+                      light AA 미달(text-xs). 의미는 아이콘 색으로 전하고, 글자는 항상
+                      text-foreground(반려는 원래 muted-foreground로 AA 통과·그대로 유지). */}
+                  <span className="flex items-center gap-1 text-xs font-medium">
+                    {resolved === 'approved' ? (
+                      <CheckCircle className="size-3.5 text-success" />
+                    ) : (
+                      <XCircle className="size-3.5 text-muted-foreground" />
+                    )}
+                    <span className={resolved === 'approved' ? 'text-foreground' : 'text-muted-foreground'}>
+                      {t(resolved === 'approved' ? 'queueResolvedApproved' : 'queueResolvedRejected')}
+                    </span>
                   </span>
                   <Link href={`/gates/${gate.id}`} className="text-xs font-medium text-primary hover:underline">
                     {t('queueViewRecord')}
