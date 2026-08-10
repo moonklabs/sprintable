@@ -117,6 +117,18 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
 
 await mcp.connect(new StdioServerTransport())
 
+// ── parent-death guard ───────────────────────────────────────────────────────
+// stdin 은 호스트 세션(claude)이 물려준 MCP transport 파이프다. 세션이 죽으면 stdin 이
+// EOF 를 맞는다. 이 가드가 없으면 아래 SSE 재연결 루프(while true)가 프로세스를 영원히
+// 살려 둬 고아(PPID→1)로 남고, Agent Gateway 스트림 슬롯을 영구히 물어 재기동 뒤 "키당
+// 동시 스트림" 한도를 포화시킨다(2026-08-10 10일 고아가 한 키를 통째로 막은 근본원인).
+// 부모와 함께 죽는다.
+process.stdin.on('end', () => process.exit(0))
+process.stdin.on('close', () => process.exit(0))
+// 백스톱: stdin EOF 를 못 받은 채 init(PID 1)로 재양육되면(=완전 고아) 자진 종료.
+// unref 로 이 타이머 자체가 프로세스를 살려 두진 않게 한다.
+setInterval(() => { if (process.ppid === 1) process.exit(0) }, 15_000).unref()
+
 // ── channel deliver ──────────────────────────────────────────────────────────
 
 function deliver(
@@ -284,7 +296,25 @@ async function _consumeStream(): Promise<void> {
   if (_lastEventId) headers['Last-Event-ID'] = _lastEventId
 
   const resp = await fetch(`${API_URL}/api/v2/agent/stream`, { headers })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  if (!resp.ok) {
+    // 게이트웨이는 동시 스트림 한도초과를 «상태코드»로 알린다 — per-key=429, global=503
+    // (agent_gateway.py). 429 는 `Retry-After` 헤더 + `{error:{code,retry_after}}` 본문을
+    // 싣는다. 서버가 준 retry_after 를 backoff 하한으로 삼아, 흔적만 남기고 슬롯을 계속
+    // 되무는 재연결 대신 서버 계약대로 물러선다(throw → _runStream 지수 backoff).
+    let retryAfter = Number(resp.headers.get('retry-after')) || 0
+    let code = `HTTP ${resp.status}`
+    try {
+      const j = (await resp.json()) as { error?: { code?: string; retry_after?: number } }
+      if (j?.error?.code) code = j.error.code
+      if (retryAfter <= 0) {
+        const ra = Number(j?.error?.retry_after)
+        if (Number.isFinite(ra) && ra > 0) retryAfter = ra
+      }
+    } catch {}
+    if (retryAfter > 0) _reconnectDelay = Math.max(_reconnectDelay, retryAfter * 1000)
+    process.stderr.write(`[fakechat] stream refused: ${code} (HTTP ${resp.status}) — backoff ${_reconnectDelay}ms\n`)
+    throw new Error(`stream refused: ${code} (HTTP ${resp.status})`)
+  }
   if (!resp.body) throw new Error('no response body')
 
   process.stderr.write('[fakechat] SSE stream open\n')

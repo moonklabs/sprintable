@@ -9,7 +9,7 @@ import {
   injectFakechatPowerShell,
 } from "./onboard.js";
 
-const FAKECHAT_CHANNEL = "plugin:fakechat:ws://localhost:8787";
+const FAKECHAT_CHANNEL = "plugin:fakechat@claude-plugins-official";
 
 // ─── AC1: 에이전트 선택 ───────────────────────────────────────────────────────
 
