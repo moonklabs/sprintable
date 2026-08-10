@@ -288,6 +288,27 @@ class SprintableProdAdapter(BasePlatformAdapter):
             user_id=sender_id,
             user_name=sender_name,
         )
+        # E-ACTIVATION S1 (Y · flag-gated · dev 어댑터와 동기): typed-activation 메타를 구조화 헤더로 주입.
+        # 기본 OFF → 라이브 fleet 무영향. SPRINTABLE_ACTIVATION_HEADER=1 인 인스턴스만 헤더를 본다.
+        if os.getenv("SPRINTABLE_ACTIVATION_HEADER") == "1":
+            audience = data.get("audience") or payload.get("audience")
+            message_kind = data.get("message_kind") or payload.get("message_kind")
+            expects_response = data.get("expects_response")
+            if expects_response is None:
+                expects_response = payload.get("expects_response")
+            recipient_id = data.get("recipient_id") or payload.get("recipient_id")
+            addressed = (not audience) or (
+                recipient_id is not None and str(recipient_id) in {str(a) for a in audience}
+            )
+            header = (
+                f"[sprintable] from={sender_name}"
+                f" · audience={'all' if not audience else 'targeted'}"
+                f" · addressed_to_you={'yes' if addressed else 'no'}"
+                f" · kind={message_kind or '-'}"
+                f" · expects_response={'-' if expects_response is None else str(bool(expects_response)).lower()}"
+            )
+            content = f"{header}\n{content}" if content else header
+
         message_event = MessageEvent(
             text=content,
             message_type=MessageType.TEXT,

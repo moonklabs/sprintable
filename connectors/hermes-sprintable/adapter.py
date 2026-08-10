@@ -354,6 +354,28 @@ class SprintableAdapter(BasePlatformAdapter):
         if attachment_notes:
             content = "\n".join(attachment_notes + ([content] if content else []))
 
+        # E-ACTIVATION S1 (Y · flag-gated): typed-activation 메타를 «구조화 헤더»로 주입한다.
+        # 기본 OFF → 라이브 fleet 무영향. SPRINTABLE_ACTIVATION_HEADER=1 인 인스턴스만 헤더를 본다.
+        # 헤더가 「너를 향한 메시지인지·응답 요구인지」를 명시 → 비지정 에이전트가 난입 안 하도록.
+        if os.getenv("SPRINTABLE_ACTIVATION_HEADER") == "1":
+            audience = data.get("audience") or payload.get("audience")
+            message_kind = data.get("message_kind") or payload.get("message_kind")
+            expects_response = data.get("expects_response")
+            if expects_response is None:
+                expects_response = payload.get("expects_response")
+            recipient_id = data.get("recipient_id") or payload.get("recipient_id")
+            addressed = (not audience) or (
+                recipient_id is not None and str(recipient_id) in {str(a) for a in audience}
+            )
+            header = (
+                f"[sprintable] from={sender_name}"
+                f" · audience={'all' if not audience else 'targeted'}"
+                f" · addressed_to_you={'yes' if addressed else 'no'}"
+                f" · kind={message_kind or '-'}"
+                f" · expects_response={'-' if expects_response is None else str(bool(expects_response)).lower()}"
+            )
+            content = f"{header}\n{content}" if content else header
+
         message_event = MessageEvent(
             text=content,
             message_type=MessageType.PHOTO if media_urls else MessageType.TEXT,
