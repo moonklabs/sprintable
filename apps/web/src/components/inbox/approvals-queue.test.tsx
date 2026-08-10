@@ -277,4 +277,128 @@ describe('ApprovalsQueue', () => {
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateReject))).toBe(true);
   });
+
+  // story #1961(P2-S5) — 저위험 gate 인라인 승인/반려. gates/[id]/page.tsx의 canAct 판정
+  // (needsAction && can_approve===true)과 risk==='low'(usesSignatureFlow===false)를 모두
+  // 충족해야 승인/반려 버튼이 뜬다.
+  function lowRiskActionable(overrides: Partial<GateItem> = {}): GateItem {
+    return gate({
+      id: 'g-low', gate_type: 'merge_gate', status: 'pending', requires_human: true,
+      can_approve: true, risk_grade: 'low', work_item_summary: { title: '저위험 항목', slug: null },
+      ...overrides,
+    });
+  }
+
+  it('AC — 저위험(risk_grade=low)·승인권한 있는 gate는 인라인 승인/반려 버튼이 뜬다', async () => {
+    mockFetches([lowRiskActionable()], []);
+    await mount();
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateReject))).toBe(true);
+  });
+
+  it('AC "고위험 항목 인라인 승인 버튼 0" — risk_grade=high는 인라인 버튼이 아예 없고 행 전체가 상세 이동 버튼 하나뿐이다', async () => {
+    mockFetches([lowRiskActionable({ id: 'g-high', risk_grade: 'high' })], []);
+    await mount();
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateReject))).toBe(false);
+    expect(container.querySelectorAll('button').length).toBe(1);
+  });
+
+  it('risk_grade가 unknown(미배선)이어도 인라인 버튼이 안 뜬다(보수적 고위험 취급, gate-risk.ts 정책)', async () => {
+    mockFetches([lowRiskActionable({ id: 'g-unknown', risk_grade: null })], []);
+    await mount();
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+  });
+
+  it('can_approve=false면 저위험이어도 인라인 버튼이 안 뜬다(per-caller 권한 게이팅)', async () => {
+    mockFetches([lowRiskActionable({ id: 'g-noperm', can_approve: false })], []);
+    await mount();
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+  });
+
+  it('AC "승인 후 완료 상태+서명 기록 링크 즉시" — 승인 클릭 시 POST /api/gates/{id}/transition을 호출하고, 재조회 없이 완료 배지+기록 링크로 즉시 바뀐다', async () => {
+    const calls = mockFetches([lowRiskActionable()], []);
+    await mount();
+    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    await act(async () => { approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const postCall = calls.find((c) => c.method === 'POST');
+    expect(postCall?.url).toBe('/api/gates/g-low/transition');
+    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'approved', note: null });
+
+    expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
+    expect(container.textContent).toContain(koMessages.cage.queueViewRecord);
+    // 승인/반려 버튼 자체가 사라진다(재클릭 물리적으로 불가 — 중복 실행 방지의 두 번째 층).
+    const buttonsAfter = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttonsAfter.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+    // 재조회(fetchGates) 없이 이 렌더만으로 반영됐다 — GET 호출 수가 mount 시점(pending+held
+    // 각 1회=2)에서 늘지 않았다.
+    expect(calls.filter((c) => c.method === undefined || c.method === 'GET')).toHaveLength(2);
+  });
+
+  it('AC "중복 탭 중복 실행 0" — 승인 요청이 아직 안 끝난 상태에서 버튼이 비활성화돼 재클릭이 두 번째 요청을 만들지 않는다', async () => {
+    let resolveResponse: (() => void) | null = null;
+    const calls: { url: string; method?: string }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      calls.push({ url, method: init?.method });
+      if (init?.method === 'POST') {
+        return new Promise((resolve) => {
+          resolveResponse = () => resolve({ ok: true, json: async () => ({}) });
+        });
+      }
+      if (url.includes('status=pending')) return { ok: true, json: async () => [lowRiskActionable()] };
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+
+    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    await act(async () => { approveButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(approveButton.disabled).toBe(true);
+    // 응답 오기 전 재클릭 — disabled라 브라우저가 클릭을 무시하지만, 방어적으로 핸들러를
+    // 직접 다시 불러도 두 번째 POST가 안 나가야 한다는 것까지 확認하진 않는다(React가 disabled
+    // 버튼 클릭 이벤트 자체를 억제 — jsdom도 동일). 여기선 "그 시점까지 POST가 1건뿐"만 고정.
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
+
+    await act(async () => { resolveResponse?.(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
+  });
+
+  it('반려 클릭 시 status=rejected로 호출하고 반려됨 배지를 보인다', async () => {
+    const calls = mockFetches([lowRiskActionable({ id: 'g-rej' })], []);
+    await mount();
+    const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateReject));
+    await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const postCall = calls.find((c) => c.method === 'POST');
+    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'rejected', note: null });
+    expect(container.textContent).toContain(koMessages.cage.queueResolvedRejected);
+  });
+
+  it('서버가 거부하면(예: 이미 처리됨) 에러 문구를 보이고 완료 상태로 바뀌지 않는다(버튼 그대로 재시도 가능)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST') {
+        return { ok: false, status: 409, json: async () => ({ error: { message: '이미 처리된 게이트입니다' } }) };
+      }
+      if (url.includes('status=pending')) return { ok: true, json: async () => [lowRiskActionable()] };
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    await act(async () => { approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.textContent).toContain('이미 처리된 게이트입니다');
+    expect(container.textContent).not.toContain(koMessages.cage.queueResolvedApproved);
+    const buttonsAfter = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttonsAfter.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
+  });
+
+  it('held gate는 저위험이어도 인라인 버튼이 안 뜬다(보류 상태는 원탭 대상 아님)', async () => {
+    mockFetches([], [lowRiskActionable({ id: 'g-held-low', status: 'held' })]);
+    await mount();
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+  });
 });
