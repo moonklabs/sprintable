@@ -88,6 +88,12 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
   // 403이었다. 실패를 담아 다이얼로그에 명시로 보여준다(어떤 실패든 침묵하지 않는 게 근본 — a
   // 만으론 다음 다른 실패가 또 조용히 묻힌다).
   const [createProjectError, setCreateProjectError] = useState<string | null>(null);
+  // story #2544 — switchOrg/switchOrgAndProject는 `localOrgId`를 optimistic으로 먼저 찍고
+  // (아래 참고) try에 catch 없이 finally만 있었다. `fetch` 자체가 던지면(네트워크 실패 등)
+  // else 분기(revert)를 절대 못 타 — 실제 전환은 실패했는데 드롭다운은 "전환됨"으로 영구
+  // 고정된다(카디르 QA 라이브 재현의 정확한 모양: 선택·체크는 되는데 다음 org로 실제 안 감).
+  // #2468이 프로젝트 생성 경로에서 이미 고친 것과 같은 클래스(침묵 실패) — 여기 재발.
+  const [switchOrgError, setSwitchOrgError] = useState<string | null>(null);
 
   const [localOrgId, setLocalOrgId] = useState<string | undefined>(currentOrgId);
 
@@ -144,6 +150,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     if (!nextOrgId || nextOrgId === localOrgId || pending) return;
     const prevOrgId = localOrgId;
     setPending(true);
+    setSwitchOrgError(null);
     setLocalOrgId(nextOrgId);
     try {
       const res = await fetch('/api/switch-org', {
@@ -162,7 +169,13 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
         router.refresh();
       } else {
         setLocalOrgId(prevOrgId);
+        setSwitchOrgError(tSwitcher('switcherSwitchOrgError'));
       }
+    } catch {
+      // story #2544 — fetch 자체 실패(네트워크 등)도 실패다. catch 없이 finally만 있으면
+      // 위 optimistic setLocalOrgId(nextOrgId)가 절대 안 풀린다(핵심 재현 지점).
+      setLocalOrgId(prevOrgId);
+      setSwitchOrgError(tSwitcher('switcherSwitchOrgError'));
     } finally {
       setPending(false);
     }
@@ -172,6 +185,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     if (pending) return;
     const prevOrgId = localOrgId;
     setPending(true);
+    setSwitchOrgError(null);
     setLocalOrgId(nextOrgId);
     try {
       const orgRes = await fetch('/api/switch-org', {
@@ -181,6 +195,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
       });
       if (!orgRes.ok) {
         setLocalOrgId(prevOrgId);
+        setSwitchOrgError(tSwitcher('switcherSwitchOrgError'));
         return;
       }
       await fetch('/api/switch-project', {
@@ -206,6 +221,12 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
       const switchedPath = newOrgSlug && newSlug ? withSwitchedSlugs(pathname, currentOrg?.orgSlug, newOrgSlug, newSlug) : null;
       router.push(`${switchedPath ?? pathname}?${sp.toString()}`);
       router.refresh();
+    } catch {
+      // story #2544 — switchOrg와 동일 함정: orgRes 이후(switch-project/slug 해소/router.push)
+      // 어디서든 던지면 org는 이미 전환됐는데 UI만 이전 상태로 안 돌아가는 반쪽짜리 실패가 된다.
+      // org 전환 자체는 이미 성공했을 수 있어 prevOrgId로 되돌리지 않는다 — 다음 router.refresh
+      // (사용자가 재시도·재진입 시)가 실제 서버 상태를 다시 반영하게 둔다. 에러만 명시한다.
+      setSwitchOrgError(tSwitcher('switcherSwitchOrgError'));
     } finally {
       setPending(false);
     }
@@ -304,6 +325,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     createOrgOpen, setCreateOrgOpen,
     createProjectOpen, setCreateProjectOpen: setCreateProjectOpenAndClearError,
     createProjectError,
+    switchOrgError,
     newProjectName, setNewProjectName,
     newProjectDesc, setNewProjectDesc,
     creating,

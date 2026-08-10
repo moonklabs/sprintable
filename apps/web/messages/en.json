@@ -105,6 +105,7 @@
     "switcherCreating": "Creating…",
     "switcherCreateButton": "Create",
     "switcherCreateProjectError": "Couldn't create the project. Please try again in a moment.",
+    "switcherSwitchOrgError": "Couldn't switch organizations. Please try again in a moment.",
     "orgLimitBannerTitle": "Upgrade required",
     "orgLimitUpgradeLink": "Upgrade plan →",
     "createOrgNameLabel": "Name",

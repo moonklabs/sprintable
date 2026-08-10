@@ -190,6 +190,12 @@ export function UnifiedSwitcher({
         </DropdownMenuContent>
       </DropdownMenu>
 
+      {/* story #2544 — org 전환 실패를 명시(침묵 실패 금지, #2468과 동일 원칙). DropdownMenuItem
+          클릭이 메뉴를 즉시 닫으므로 메뉴 바깥(트리거 인접)에 둬 닫힌 뒤에도 보이게 한다. */}
+      {s.switchOrgError && (
+        <p role="alert" className="mt-1 px-1 text-xs text-destructive">{s.switchOrgError}</p>
+      )}
+
       <CreateOrganizationDialog
         open={s.createOrgOpen}
         onOpenChange={s.setCreateOrgOpen}
