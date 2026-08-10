@@ -137,6 +137,15 @@ export default async function AuthenticatedLayout({
     <DashboardShell
       currentTeamMemberId={me?.id}
       orgId={me?.org_id}
+      // story #2545(카디르 라이브 재QA, 2026-08-10) — `me?.org_id`는 JWT top-level
+      // `app_metadata.org_id` 클레임이 아니라 `/api/v2/me`가 (주로) `app_metadata.project_id`
+      // 클레임으로 찾은 TeamMember 행의 org다(backend/app/routers/me.py). 두 클레임이 갈리면
+      // (예: org_id는 reset됐는데 project_id는 옛 org를 여전히 가리키는 부분-stale JWT)
+      // me.org_id가 «이미 pathOrgId와 같다»고 잘못 보고해 아래 자동 switch-org effect가
+      // 조기 return — 그 순간 실제 서명된 JWT top-level org_id는 여전히 다르다(카디르 실측).
+      // getServerSession()이 이미 jwtVerify로 이 클레임을 직접 읽어둔 값을 그대로 흘려보낸다
+      // (신규 fetch/디코드 0) — DashboardShell의 불일치 판정은 이 값을 우선한다.
+      jwtOrgId={session.org_id ?? undefined}
       projectId={me?.project_id}
       projectName={projectNameForDisplay}
       currentProjectSlug={currentProjectSlug}
