@@ -286,20 +286,18 @@ sprintable_add_story({
 
 ## 에이전트 채팅 (fakechat)
 
-fakechat은 에이전트를 Sprintable의 실시간 WebSocket 채팅 채널에 연결하는 MCP 플러그인입니다. 설정을 마치면, 에이전트에게 보낸 메시지가 세션 안에 `<channel source="fakechat" ...>` 태그로 나타나고, 답장도 같은 채널로 돌아갑니다.
+fakechat은 에이전트를 Sprintable의 실시간 채팅에 연결하는 MCP **채널 플러그인**입니다. 설정을 마치면, 에이전트에게 보낸 메시지가 세션 안에 `<channel source="fakechat" ...>` 태그로 나타나고, 답장도 같은 채널로 돌아갑니다.
+
+**SSE dial-out** 어댑터로 동작합니다 — 플러그인이 Sprintable Agent Gateway로 아웃바운드 스트림을 열어 이벤트를 받으며, 인바운드 포트나 로컬 WebSocket 서버는 없습니다.
 
 ### 사전 요구사항
 
 - Sprintable 실행 중 (`docker compose up -d --build`)
 - Sprintable에 등록된 에이전트 (에이전트(Agents) → 채용(Recruit))
 
-### 1단계 — Agent ID와 API Key 확인
+### 1단계 — Agent API Key 확인
 
-Sprintable에서: **에이전트(Agents) → [에이전트]**
-
-복사할 항목:
-- **Agent ID** — 에이전트 상세 페이지에 표시되는 UUID
-- **API Key** — `sk_live_...` 토큰 (한 번만 발급되므로 안전하게 보관)
+Sprintable에서: **에이전트(Agents) → [에이전트]**. **API Key**(`sk_live_...` 토큰, 한 번만 발급되므로 안전하게 보관)를 복사합니다. 키가 에이전트를 식별하며, 스트림과 답장은 그 키에 귀속됩니다.
 
 ### 2단계 — MCP 설정에 fakechat 추가
 
@@ -313,16 +311,15 @@ Sprintable에서: **에이전트(Agents) → [에이전트]**
       "command": "bun",
       "args": ["packages/fakechat/server.ts"],
       "env": {
-        "SPRINTABLE_AGENT_ID": "YOUR_AGENT_UUID",
         "SPRINTABLE_API_KEY": "sk_live_...",
-        "SPRINTABLE_WS_URL": "ws://localhost:8000"
+        "SPRINTABLE_API_URL": "http://localhost:8000"
       }
     }
   }
 }
 ```
 
-> 에이전트가 Docker 네트워크 **내부**에서 실행된다면 `SPRINTABLE_WS_URL=ws://backend:8000`으로 설정하세요.
+> `SPRINTABLE_API_URL`은 앱 도메인이 아니라 **백엔드** 주소입니다 — SSE 스트림은 백엔드로 직접 붙어야 합니다. 에이전트가 Docker 네트워크 **내부**에서 실행된다면 `http://backend:8000`을 사용하세요.
 
 ### 3단계 — 채팅 시작
 
@@ -330,28 +327,26 @@ Sprintable과 fakechat이 둘 다 실행 중이라면, Sprintable UI의 **채널
 
 ```
 Sprintable UI / API
-      │  POST /api/v2/channel/deliver
+      │  에이전트로 이벤트 적재
       ▼
-Backend WebSocket Hub (/ws/chat/{agent_id})
-      │  broadcast
+Agent Gateway  GET /api/v2/agent/stream   (SSE, dial-out)
+      │  server-sent event
       ▼
-fakechat (WS client) → mcp.notification → Claude Code <channel> tag
+fakechat (SSE client) → mcp.notification → Claude Code <channel source="fakechat"> tag
 ```
 
 응답 경로 (에이전트 → UI):
 
 ```
 Claude Code reply tool
-      │  ws.send({ content })
+      │  POST /api/v2/conversations/{id}/messages
       ▼
-Backend WebSocket Hub → broadcast to all room members
-      ▼
-Sprintable UI / other WS clients
+Agent Gateway → Sprintable UI / 다른 채널 참여자
 ```
 
 ### 재연결
 
-백엔드가 재시작되면 fakechat은 exponential backoff(1초 → 30초)로 자동 재연결합니다.
+연결이 끊기거나 백엔드가 재시작되면 fakechat은 SSE 스트림을 exponential backoff로 자동 재연결합니다. 호스트 세션이 끝나면 깔끔하게 종료되어, 스트림 슬롯을 문 채 고아로 남지 않습니다.
 
 ---
 

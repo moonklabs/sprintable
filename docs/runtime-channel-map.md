@@ -11,7 +11,7 @@
 | **MCP** | 에이전트 → Sprintable (outbound) | 에이전트가 Sprintable tool을 호출하는 유일한 경로 — stdio transport |
 | **webhook** | Sprintable → 에이전트 (inbound, push) | Sprintable이 이벤트 발생 시 에이전트 URL로 직접 POST |
 | **SSE** | Sprintable → 에이전트 (inbound, pull) | 에이전트가 long-lived HTTP 스트림으로 이벤트 구독 |
-| **fakechat** | Sprintable WS → Claude Code 세션 (inbound, inject) | Bun shim이 WS 수신 메시지를 MCP notification으로 Claude Code stdio에 주입 |
+| **fakechat** | Sprintable Agent Gateway → Claude Code 세션 (inbound, inject) | Bun shim이 SSE dial-out으로 받은 메시지를 MCP notification으로 Claude Code stdio에 주입 |
 
 ---
 
@@ -107,21 +107,21 @@ poll_events MCP tool: SSE를 열 수 없는 환경에서 동일 이벤트를 폴
 
 ---
 
-### fakechat — Claude Code 세션 주입 (WS → MCP stdio shim)
+### fakechat — Claude Code 세션 주입 (SSE dial-out → MCP stdio shim)
 
 `packages/fakechat/server.ts` — Bun 로컬 프로세스. Claude Code와 Sprintable 사이를 중계하는 MCP stdio shim.
 
 **동작 원리:**
 1. Bun 프로세스 기동 시 `StdioServerTransport`로 Claude Code stdio에 MCP 서버로 연결
-2. 동시에 Sprintable 백엔드 WS에 **클라이언트**로 접속 (`ws://{host}/ws/chat/{agent_id}?api_key=...`)
-3. WS 메시지 수신 → `mcp.notification({ method: 'notifications/claude/channel' })` → Claude Code 세션에 `<channel ...>` 태그로 주입
+2. 동시에 Sprintable Agent Gateway의 SSE 스트림에 **아웃바운드 클라이언트**로 접속 (`GET ${SPRINTABLE_API_URL}/api/v2/agent/stream`, `Authorization: Bearer <AGENT_API_KEY>`)
+3. SSE 이벤트 수신 → `mcp.notification({ method: 'notifications/claude/channel' })` → Claude Code 세션에 `<channel ...>` 태그로 주입
 
 ```
-Sprintable 백엔드 WS Hub
-  │  ws://{SPRINTABLE_WS_BASE}/ws/chat/{agent_id}
-  │  (WS push — 대화 메시지)
+Sprintable Agent Gateway
+  │  GET ${SPRINTABLE_API_URL}/api/v2/agent/stream
+  │  (SSE dial-out — 대화 메시지)
   ▼
-fakechat server (Bun, WS client)
+fakechat server (Bun, SSE client)
   │  mcp.notification({ method: 'notifications/claude/channel',
   │    params: { content, meta: { chat_id, message_id, thread_id, ... } } })
   ▼
@@ -131,7 +131,7 @@ Claude Code 세션 (MCP stdio)
 역방향 (Claude Code → Sprintable):
   Claude Code (reply tool)
     │  fetch(replyCallbackUrl, { method: 'POST' })
-    │  ← fakechat이 WS payload의 conversation_id로 URL 직접 구성 (server.ts:183)
+    │  ← fakechat이 SSE 이벤트의 conversation_id로 reply URL 직접 구성
     │    `${SPRINTABLE_API_URL}/api/v2/conversations/${msg.conversation_id}/messages`
     ▼
   Sprintable Backend
@@ -143,7 +143,7 @@ Claude Code 세션 (MCP stdio)
 
 | 에이전트 유형 | Outbound (보내기) | Inbound (받기) | 비고 |
 |--------------|------------------|----------------|------|
-| **Claude Code** | MCP (stdio) | fakechat — WS→MCP notification 주입 | 이 harness 세션이 이 패턴 |
+| **Claude Code** | MCP (stdio) | fakechat — SSE dial-out→MCP notification 주입 | 이 harness 세션이 이 패턴 |
 | **Hermes** (장기 실행 서버) | MCP (stdio) | SSE (`GET /api/v2/events/stream`) | 상시 연결 유지, backfill 지원 |
 | **Webhook 에이전트** (서버리스·슬리핑) | MCP (stdio) | webhook (`webhook_configs.url` POST) | 이벤트 수신 시만 깨어남 |
 | **외부 통합** (Slack·Discord 봇 등) | MCP (stdio) | Inbox webhook (`/agent-inbox/{id}/webhook`) → EventBus → SSE relay | HMAC 검증 필수 |
@@ -161,20 +161,20 @@ Claude Code 세션 (MCP stdio)
 │                              │                                      │
 │         ┌────────────────────┼──────────────────┐                  │
 │         │                   │                   │                  │
-│   WebhookEngine      SSE /events/stream    WS Hub /ws/chat/*       │
+│   WebhookEngine      SSE /events/stream    SSE /agent/stream       │
 │  (점 이벤트명)        (콜론, 2종 relay)                            │
 │         │                   │                   │                  │
 └─────────┼───────────────────┼───────────────────┼──────────────────┘
           │                   │                   │
-    push POST           SSE stream           WS push
-    (event_type:        (event_type:          (JSON msg)
+    push POST           SSE stream           SSE dial-out
+    (event_type:        (event_type:          (agent/stream)
 conversation.           conversation
 message_created)        :message)
           │                   │                   │
           ▼                   ▼                   ▼
    ┌────────────┐     ┌──────────────┐     ┌─────────────────────────┐
    │  Webhook   │     │  SSE Agent   │     │  fakechat (Bun, stdio)  │
-   │  Agent     │     │  (Hermes 등) │     │  WS client              │
+   │  Agent     │     │  (Hermes 등) │     │  SSE client             │
    │  (서버리스)│     │  + MCP stdio │     │  → mcp.notification     │
    └─────┬──────┘     └──────┬───────┘     │  → Claude Code stdio    │
          │                   │             └──────────┬──────────────┘
