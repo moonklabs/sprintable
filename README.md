@@ -301,20 +301,18 @@ sprintable_add_story({
 
 ## Agent Chat (fakechat)
 
-fakechat is the MCP plugin that connects your agent to the Sprintable real-time WebSocket chat channel. Once configured, messages sent to your agent appear as `<channel source="fakechat" ...>` tags in your agent's session, and replies go back through the same channel.
+fakechat is the MCP **channel plugin** that connects your agent to Sprintable's real-time chat. Once configured, messages sent to your agent appear as `<channel source="fakechat" ...>` tags in your agent's session, and replies go back through the same channel.
+
+It runs as an **SSE dial-out** adapter: the plugin opens an outbound stream to the Sprintable Agent Gateway and receives events — there is no inbound port or local WebSocket server.
 
 ### Prerequisites
 
 - Sprintable running (`docker compose up -d --build`)
 - An agent registered in Sprintable (Agents → Recruit)
 
-### Step 1 — Get your Agent ID and API Key
+### Step 1 — Get your Agent API Key
 
-In Sprintable: **Agents → [Your Agent]**
-
-Copy:
-- **Agent ID** — UUID shown in the agent detail page
-- **API Key** — `sk_live_...` token (generated once, store safely)
+In Sprintable: **Agents → [Your Agent]**. Copy the **API Key** — an `sk_live_...` token (generated once, store safely). The key identifies the agent; the stream and replies are scoped to it.
 
 ### Step 2 — Add fakechat to your MCP config
 
@@ -328,16 +326,15 @@ Copy:
       "command": "bun",
       "args": ["packages/fakechat/server.ts"],
       "env": {
-        "SPRINTABLE_AGENT_ID": "YOUR_AGENT_UUID",
         "SPRINTABLE_API_KEY": "sk_live_...",
-        "SPRINTABLE_WS_URL": "ws://localhost:8000"
+        "SPRINTABLE_API_URL": "http://localhost:8000"
       }
     }
   }
 }
 ```
 
-> If your agent runs **inside** a Docker network, set `SPRINTABLE_WS_URL=ws://backend:8000` instead.
+> `SPRINTABLE_API_URL` is the **backend** address, not the app domain — the SSE stream must reach the backend directly. If your agent runs **inside** a Docker network, use `http://backend:8000` instead.
 
 ### Step 3 — Start chatting
 
@@ -345,28 +342,26 @@ With both Sprintable and fakechat running, open the **Channel** page in the Spri
 
 ```
 Sprintable UI / API
-      │  POST /api/v2/channel/deliver
+      │  event queued for the agent
       ▼
-Backend WebSocket Hub (/ws/chat/{agent_id})
-      │  broadcast
+Agent Gateway  GET /api/v2/agent/stream   (SSE, dial-out)
+      │  server-sent event
       ▼
-fakechat (WS client) → mcp.notification → Claude Code <channel> tag
+fakechat (SSE client) → mcp.notification → Claude Code <channel source="fakechat"> tag
 ```
 
 Reply path (agent → UI):
 
 ```
 Claude Code reply tool
-      │  ws.send({ content })
+      │  POST /api/v2/conversations/{id}/messages
       ▼
-Backend WebSocket Hub → broadcast to all room members
-      ▼
-Sprintable UI / other WS clients
+Agent Gateway → Sprintable UI / other channel members
 ```
 
 ### Reconnection
 
-fakechat reconnects automatically with exponential backoff (1 s → 30 s) if the backend restarts.
+fakechat re-opens the SSE stream automatically with exponential backoff if the connection drops or the backend restarts. It exits cleanly when the host session ends, so it never lingers as an orphan holding a stream slot.
 
 ---
 

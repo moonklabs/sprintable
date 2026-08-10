@@ -26,7 +26,7 @@ export type OnboardAgentType =
 
 export type SupportedPlatform = "win32" | "darwin" | "linux" | "unsupported";
 
-const FAKECHAT_CHANNEL = "plugin:fakechat:ws://localhost:8787";
+const FAKECHAT_CHANNEL = "plugin:fakechat@claude-plugins-official";
 const FAKECHAT_PLUGIN = "@sprintable/fakechat";
 
 // ─── 플랫폼 감지 ──────────────────────────────────────────────────────────────
