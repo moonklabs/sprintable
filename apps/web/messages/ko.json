@@ -105,6 +105,7 @@
     "switcherCreating": "생성 중…",
     "switcherCreateButton": "만들기",
     "switcherCreateProjectError": "프로젝트를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    "switcherSwitchOrgError": "조직을 전환하지 못했습니다. 잠시 후 다시 시도해 주세요.",
     "orgLimitBannerTitle": "업그레이드가 필요합니다",
     "orgLimitUpgradeLink": "요금제 업그레이드 →",
     "createOrgNameLabel": "이름",
