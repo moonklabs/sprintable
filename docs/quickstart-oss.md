@@ -51,7 +51,7 @@ To use the MCP server with Claude Code, Codex, Windsurf, or Cursor:
 ```json
 {
   "mcpServers": {
-    "sprintable": {
+    "sprintable-mcp": {
       "type": "http",
       "url": "http://localhost:3108/mcp",
       "headers": {

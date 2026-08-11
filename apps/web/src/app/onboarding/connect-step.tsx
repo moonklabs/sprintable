@@ -18,12 +18,13 @@ import { emitOnboardingEvent, beaconOnboardingEvent } from './onboarding-telemet
 // 하위호환 자리 — 새 소비자는 verify-rail에서 바로 import한다.
 export type { Transport };
 
-/** connection-artifact content(JSON)의 `mcpServers.sprintable.type` 필드만 읽는다(재조립 아님) —
- * transport 미지정 최초 요청은 BE edition 기본을 반환하므로, 어느 탭을 pre-select할지 이걸로 판별. */
+/** connection-artifact content(JSON)의 `mcpServers['sprintable-mcp'].type` 필드만 읽는다(재조립 아님) —
+ * transport 미지정 최초 요청은 BE edition 기본을 반환하므로, 어느 탭을 pre-select할지 이걸로 판별.
+ * #2577: 서버키 sprintable -> sprintable-mcp (BE agent_onboarding_config.py SSOT). */
 export function inferTransport(content: string): Transport {
   try {
-    const parsed = JSON.parse(content) as { mcpServers?: { sprintable?: { type?: string } } };
-    return parsed?.mcpServers?.sprintable?.type === 'http' ? 'http' : 'stdio';
+    const parsed = JSON.parse(content) as { mcpServers?: { 'sprintable-mcp'?: { type?: string } } };
+    return parsed?.mcpServers?.['sprintable-mcp']?.type === 'http' ? 'http' : 'stdio';
   } catch {
     return 'stdio';
   }
@@ -54,9 +55,9 @@ function renderArtifact(baseContent: string | null, apiKey: string, mask: boolea
   const key = mask ? maskApiKey(apiKey) : apiKey;
   try {
     const parsed = JSON.parse(baseContent) as {
-      mcpServers?: { sprintable?: { env?: Record<string, string> } };
+      mcpServers?: { 'sprintable-mcp'?: { env?: Record<string, string> } };
     };
-    const env = parsed?.mcpServers?.sprintable?.env;
+    const env = parsed?.mcpServers?.['sprintable-mcp']?.env;
     if (env && 'AGENT_API_KEY' in env) {
       env.AGENT_API_KEY = key;
       return JSON.stringify(parsed, null, 2);

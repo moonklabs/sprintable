@@ -32,7 +32,7 @@ def anyio_backend():
 def test_stdio_default_unchanged_when_no_transport_kwarg():
     """기존 호출부(회귀0) — transport 미지정이면 여전히 stdio."""
     out = cfg.build_agent_mcp_config(api_key_plaintext="k")
-    assert out["mcpServers"]["sprintable"]["type"] == "stdio"
+    assert out["mcpServers"]["sprintable-mcp"]["type"] == "stdio"
 
 
 def test_http_variant_none_when_mcp_public_url_unset(monkeypatch):
@@ -45,7 +45,7 @@ def test_http_variant_shape_with_key(monkeypatch):
     monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.sprintable.ai/mcp/")
     assert cfg.resolve_mcp_public_url() == "https://mcp.sprintable.ai/mcp"  # trailing slash 제거
     out = cfg.build_agent_mcp_config(api_key_plaintext="sk_live_abc", transport="http")
-    server = out["mcpServers"]["sprintable"]
+    server = out["mcpServers"]["sprintable-mcp"]
     assert server == {
         "type": "http",
         "url": "https://mcp.sprintable.ai/mcp",
@@ -56,7 +56,7 @@ def test_http_variant_shape_with_key(monkeypatch):
 def test_http_variant_no_auth_header_when_key_absent(monkeypatch):
     monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.sprintable.ai/mcp")
     out = cfg.build_agent_mcp_config(api_key_plaintext=None, transport="http")
-    assert out["mcpServers"]["sprintable"]["headers"] == {}
+    assert out["mcpServers"]["sprintable-mcp"]["headers"] == {}
 
 
 def test_default_transport_for_hosting(monkeypatch):
@@ -71,7 +71,7 @@ def test_bundle_hosted_with_mcp_public_url_set(monkeypatch):
     monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.sprintable.ai/mcp")
     bundle = cfg.build_agent_mcp_config_bundle(api_key_plaintext="k")
     assert bundle["default_transport"] == "http"
-    assert bundle["mcp_config"]["mcpServers"]["sprintable"]["type"] == "http"
+    assert bundle["mcp_config"]["mcpServers"]["sprintable-mcp"]["type"] == "http"
     assert set(bundle["mcp_config_alternatives"]) == {"stdio"}
 
 
@@ -80,7 +80,7 @@ def test_bundle_self_hosted_no_mcp_public_url_defaults_stdio(monkeypatch):
     monkeypatch.delenv("MCP_PUBLIC_URL", raising=False)
     bundle = cfg.build_agent_mcp_config_bundle(api_key_plaintext="k")
     assert bundle["default_transport"] == "stdio"
-    assert bundle["mcp_config"]["mcpServers"]["sprintable"]["type"] == "stdio"
+    assert bundle["mcp_config"]["mcpServers"]["sprintable-mcp"]["type"] == "stdio"
     assert bundle["mcp_config_alternatives"] == {}
 
 
@@ -183,7 +183,7 @@ async def test_connection_artifact_transport_http_returns_http_content(monkeypat
         )
     mcp_file = next(f for f in out["files"] if f["filename"] == ".mcp.json")
     parsed = json.loads(mcp_file["content"])
-    assert parsed["mcpServers"]["sprintable"]["type"] == "http"
+    assert parsed["mcpServers"]["sprintable-mcp"]["type"] == "http"
 
 
 @pytest.mark.anyio

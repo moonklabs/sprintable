@@ -48,7 +48,7 @@ describe('RecruiterClient equip-skip — PATCH 실패 시 경고 배너 실제 �
 
       if (url === '/api/agents' && method === 'POST') {
         return jsonResponse({
-          data: { id: 'agent-under-test', mcp_config: { mcpServers: { sprintable: {} } }, api_key: 'sk_test_placeholder' },
+          data: { id: 'agent-under-test', mcp_config: { mcpServers: { 'sprintable-mcp': {} } }, api_key: 'sk_test_placeholder' },
         });
       }
 
@@ -131,7 +131,7 @@ describe('RecruiterClient equip-skip — PATCH 실패 시 경고 배너 실제 �
       if (url === '/api/runtime-capabilities') return jsonResponse({ data: [] });
       if (url.startsWith('/api/team-members?')) return jsonResponse({ data: [] });
       if (url === '/api/agents' && method === 'POST') {
-        return jsonResponse({ data: { id: 'agent-2', mcp_config: { mcpServers: { sprintable: {} } }, api_key: 'sk_test' } });
+        return jsonResponse({ data: { id: 'agent-2', mcp_config: { mcpServers: { 'sprintable-mcp': {} } }, api_key: 'sk_test' } });
       }
       if (url === '/api/team-members/agent-2' && method === 'PATCH') return jsonResponse({ data: {} }, true, 200);
       throw new Error(`unmocked fetch: ${method} ${url}`);
