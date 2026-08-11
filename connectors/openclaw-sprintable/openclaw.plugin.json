@@ -1,0 +1,33 @@
+{
+  "id": "sprintable",
+  "channels": ["sprintable"],
+  "name": "Sprintable",
+  "description": "Sprintable Gateway channel — real-time team chat (SSE dial-out, no inbound webhook).",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "channelConfigs": {
+    "sprintable": {
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "apiKey": { "type": "string" },
+          "apiUrl": { "type": "string" }
+        }
+      },
+      "uiHints": {
+        "apiKey": {
+          "label": "Sprintable Agent API Key",
+          "sensitive": true
+        },
+        "apiUrl": {
+          "label": "Sprintable API URL",
+          "sensitive": false
+        }
+      }
+    }
+  }
+}
