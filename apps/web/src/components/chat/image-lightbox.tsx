@@ -221,7 +221,7 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
             {signState === 'ok' && signedUrl && (
               // AC2: touch-action: pinch-zoom — 네이티브 두손가락 확대·팬을 브라우저에 위임.
               <div
-                className="relative h-full w-full overflow-auto [touch-action:pinch-zoom]"
+                className="relative h-full w-full overflow-auto focus-inset [touch-action:pinch-zoom]"
                 onClick={handleImageClick}
               >
                 <div
