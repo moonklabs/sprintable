@@ -82,15 +82,28 @@ export const sprintablePlugin: ChannelPlugin<SprintableAccount> = createChatChan
       },
     },
     setup: {
-      applyAccountConfig: ({ cfg, input }) => ({
-        ...cfg,
-        channels: {
-          ...(cfg as Record<string, unknown>).channels,
-          [CHANNEL_ID]: { ...((cfg as Record<string, unknown>).channels as any)?.[CHANNEL_ID], ...input },
-        },
-      }),
+      applyAccountConfig: ({ cfg, input }) => {
+        const existingChannels = (cfg as Record<string, unknown>).channels as Record<string, unknown> | undefined
+        const existingSection = (existingChannels?.[CHANNEL_ID] ?? {}) as Record<string, unknown>
+        const inputSection = (input ?? {}) as Record<string, unknown>
+        return {
+          ...cfg,
+          channels: {
+            ...existingChannels,
+            [CHANNEL_ID]: { ...existingSection, ...inputSection },
+          },
+        }
+      },
     },
     reload: { configPrefixes: [`channels.${CHANNEL_ID}`] },
+    // #2563 QA fix: this connector's own reply path (`msg.reply()` inside gateway.startAccount)
+    // doesn't go through outbound target resolution at all — `messaging` here only helps OTHER
+    // channels forward a message *to* sprintable (e.g. `sprintable:<conv-id>` targets), a
+    // cross-channel-forwarding use case this package doesn't need for the verified dial-out
+    // path. `resolveOutboundSessionRoute` was ported from the old pre-SDK code with the wrong
+    // param shape (`{to}` — real signature takes `{cfg, agentId, target, ...}` and must return
+    // a full ChannelOutboundSessionRoute, not `{agentId, sessionKey}`) — dropped rather than
+    // hand-guessed, since it's optional and unexercised by any verified path.
     messaging: {
       targetPrefixes: [CHANNEL_ID],
       normalizeTarget: (target: string) => target.replace(/^sprintable:/, ''),
@@ -98,10 +111,6 @@ export const sprintablePlugin: ChannelPlugin<SprintableAccount> = createChatChan
         looksLikeId: (target: string) => target.startsWith('sprintable:') || target.includes('/'),
         hint: 'sprintable:<conversation_id>',
       },
-      resolveOutboundSessionRoute: ({ to }: { to: string }) => ({
-        agentId: DEFAULT_ACCOUNT_ID,
-        sessionKey: to.replace(/^sprintable:/, ''),
-      }),
     },
     gateway: {
       startAccount: async (ctx) => {
@@ -142,7 +151,7 @@ export const sprintablePlugin: ChannelPlugin<SprintableAccount> = createChatChan
               channel: CHANNEL_ID,
               accountId: account.accountId,
               messageId: msg.eventId,
-              timestamp: new Date(),
+              timestamp: Date.now(),
               from: `sprintable:${msg.conversationId || msg.senderId}`,
               sender: { id: msg.senderId, name: msg.senderName },
               conversation: { kind: 'group', id: msg.conversationId, label: msg.conversationId },
@@ -162,7 +171,14 @@ export const sprintablePlugin: ChannelPlugin<SprintableAccount> = createChatChan
               cfg: ctx.cfg,
               agentId,
               routeSessionKey: msg.conversationId,
-              storePath: undefined,
+              // `AssembledChannelTurn.storePath` is typed as required `string`, but this
+              // dispatch goes through the loosely-typed `PluginRuntime['channel']` compat
+              // surface (per docs/plugins/sdk-channel-inbound.md — "gateway startup supplies
+              // a richer untyped runtime object" than the narrow public type). Live-verified
+              // (#2563/S8 isolated gateway e2e): passing undefined here does not crash —
+              // dispatchReply proceeds through to the agent-turn attempt correctly. Cast
+              // rather than fabricate a fake path that could silently change real behavior.
+              storePath: undefined as unknown as string,
               ctxPayload,
               recordInboundSession: rt.session?.recordInboundSession,
               dispatchReplyWithBufferedBlockDispatcher: rt.reply?.dispatchReplyWithBufferedBlockDispatcher,
@@ -187,7 +203,10 @@ export const sprintablePlugin: ChannelPlugin<SprintableAccount> = createChatChan
   outbound: {
     deliveryMode: 'direct',
     textChunkLimit: 4000,
-    resolveTarget: ({ to }: { to: string }) => ({ ok: true, target: to.replace(/^sprintable:/, '') }),
+    resolveTarget: ({ to }: { to?: string }) =>
+      to
+        ? { ok: true as const, to: to.replace(/^sprintable:/, '') }
+        : { ok: false as const, error: new Error('missing target') },
     deliveryCapabilities: { durableFinal: { text: true } },
   },
 })
