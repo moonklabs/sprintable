@@ -166,7 +166,7 @@ and backoff are handled by the shared SDK; you only supply the runtime's injecti
 | **Hermes Agent** | A (platform plugin) | `connectors/hermes-sprintable/` | `handle_message()` |
 | **OpenClaw** | A (ChannelPlugin) | `connectors/openclaw-sprintable/` | `runtime.channel.inbound` |
 | **OpenCode** | A (plugin SDK) | `connectors/opencode-sprintable/` | `client.session.prompt()` |
-| **Codex** | B (stdio JSON-RPC host) | `connectors/codex-sprintable/` | spawns & owns `codex app-server`, injects via stdio JSON-RPC |
+| **Codex** | A (channel plugin) | `sprintable-codex@moonklabs` (`moonklabs/sprintable-agent-plugins`) | Codex hooks (`SessionStart`/`Stop`/`UserPromptSubmit`) — see `connect-guide.txt` |
 | **Gemini** | B (ACP stdio JSON-RPC host) | `connectors/gemini-sprintable/` | spawns `gemini --acp` (Agent Client Protocol) |
 | **Grok** (xAI Grok Build) | B (Zed ACP stdio host) | `connectors/grok-sprintable/` | spawns `grok agent stdio` (same ACP as Gemini) |
 | **Pi** | B (JSONL/stdio host) | `connectors/pi-sprintable/` | spawns `pi --mode rpc` (line-delimited JSON, supports mid-stream `steer`) |
@@ -177,6 +177,12 @@ and backoff are handled by the shared SDK; you only supply the runtime's injecti
 > run), not a local interactive editor session — e.g. the Cursor adapter only reaches
 > Cursor's Cloud (Background) Agents API, not a local Cursor editor. Each adapter's own
 > README states exactly what it does and doesn't reach.
+
+> **Codex also has a Category B option**, `connectors/codex-sprintable/` — spawns &
+> owns `codex app-server`, injects via stdio JSON-RPC. It predates the channel plugin
+> above and is a genuine architectural alternative (headless app-server automation you
+> drive yourself), not a deprecated path — use it if you specifically need that shape
+> rather than an interactive Codex session with the plugin's hooks attached.
 
 ### Example: Hermes
 
