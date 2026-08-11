@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -59,6 +60,60 @@ INJECTABLE_EVENT_TYPES = frozenset({
     "handoff",
 })
 
+# ── E-ACTIVATION Phase 2 (X · system-side non-invoke) ─────────────────────────
+# 배달을 «관찰(observation)»과 «호출(activation)»로 가른다. 활성화 프로토콜(설계문서
+# agent-agent-loop-termination-research §3·§4·§7)의 X: 「관찰」로 온 메시지는 모델을
+# «아예 안 돌린다» → 비지정 에이전트가 난입할 «기회 자체»가 없다(자제 의존 아님).
+#
+# 판정(모델 불요·결정적):
+#   audience 미지정(broadcast) → addressed=True  (전체 대상 = 현행 보존)
+#   audience 지정 & 내 recipient_id ∈ audience → addressed=True  (나를 호출)
+#   audience 지정 & 내 recipient_id ∉ audience → addressed=False (관찰 = non-invoke)
+# 백엔드가 이벤트에 audience/recipient_id 를 실어 보낸다(Y 스파인 #2953). recipient_id 는
+# per-recipient fan-out 이라 «이 스트림 소유자(나)»다 — 별도 신원 주입 불필요.
+#
+# 순수 드롭이면 설계문서 §6-B(강등된 problem B)로 회귀한다("안 깨운 메시지는 hydrate
+# 안 해 다음에도 못 봄"). 그래서 X 는 관찰을 «버퍼»에 쌓아 두고 다음 «활성화» 턴에
+# context 로 hydrate 한다("다 봄"은 보존, "즉답 강제"만 제거). seq 는 ack 해 backfill
+# 재범람(#2375)을 막는다.
+#
+# 게이트는 SPRINTABLE_NONINVOKE_OBSERVATIONS=1 일 때만 작동 — 기본 OFF = 라이브 fleet
+# 무영향(모든 이벤트 현행대로 주입). Y(SPRINTABLE_ACTIVATION_HEADER)와 독립·조합 가능.
+NONINVOKE_FLAG_ENV = "SPRINTABLE_NONINVOKE_OBSERVATIONS"
+OBS_BUFFER_MAX = 20          # 대화별 버퍼 최대 항목(오래된 것부터 폐기)
+OBS_ENTRY_MAXLEN = 500       # 항목 1건 최대 길이
+
+
+def classify_activation(
+    data: dict[str, Any], payload: dict[str, Any]
+) -> tuple[bool, bool, Any, Any]:
+    """이벤트를 «관찰 vs 호출»로 분류. 단일 출처(Y 헤더 + X 게이트가 공유).
+
+    Returns ``(audience_targeted, addressed, message_kind, expects_response)``.
+    - ``audience_targeted``: audience 가 지정됐는가(비어있지 않은가).
+    - ``addressed``: 이 이벤트가 나를 «호출»하는가(True) / 단순 «관찰»인가(False).
+    """
+    audience = data.get("audience") or payload.get("audience")
+    message_kind = data.get("message_kind") or payload.get("message_kind")
+    expects_response = data.get("expects_response")
+    if expects_response is None:
+        expects_response = payload.get("expects_response")
+    recipient_id = data.get("recipient_id") or payload.get("recipient_id")
+    audience_targeted = bool(audience)
+    addressed = (not audience_targeted) or (
+        recipient_id is not None and str(recipient_id) in {str(a) for a in audience}
+    )
+    return audience_targeted, addressed, message_kind, expects_response
+
+
+def render_observation_block(entries: list[str]) -> str:
+    """버퍼된 관찰들을 다음 활성화 턴에 붙일 context 블록으로 렌더."""
+    lines = "\n".join(f"- {e}" for e in entries)
+    return (
+        f"[읽음 · 당신이 대상이 아니어서 응답하지 않은 메시지 {len(entries)}건]\n"
+        f"{lines}\n[/읽음]"
+    )
+
 
 # ── Public types ─────────────────────────────────────────────────────────────
 
@@ -81,6 +136,12 @@ class MessageContext:
     is_backfill: bool
     images: list[MessageImage]
     raw: dict[str, Any]
+
+    # E-ACTIVATION Phase 2 분류(기본값 = 현행 보존: 늘 호출로 취급).
+    addressed: bool = True
+    audience_targeted: bool = False
+    message_kind: Any = None
+    expects_response: Any = None
 
     # reply() 지원을 위해 내부 주입
     _reply_url: str = field(default="", repr=False)
@@ -142,9 +203,26 @@ class SprintableSSEClient:
         self._last_event_id = ""
         self._last_acked = 0
         self._seen: dict[str, float] = {}
+        # E-ACTIVATION Phase 2 (X): conversation_id -> 관찰 메시지 버퍼(다음 활성화 때 hydrate).
+        self._obs_buffer: dict[str, list[str]] = {}
 
     def _auth(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._api_key}", "x-agent-api-key": self._api_key}
+
+    def _buffer_observation(self, ctx: "MessageContext") -> None:
+        """관찰 이벤트를 대화별 버퍼에 쌓는다(오래된 것부터 폐기)."""
+        buf = self._obs_buffer.setdefault(ctx.conversation_id, [])
+        buf.append(f"{ctx.sender_name}: {ctx.content}"[:OBS_ENTRY_MAXLEN])
+        if len(buf) > OBS_BUFFER_MAX:
+            del buf[:-OBS_BUFFER_MAX]
+
+    def _flush_observations_into(self, ctx: "MessageContext") -> None:
+        """이 대화의 버퍼된 관찰을 활성화 ctx.content 앞에 context 로 hydrate 후 비운다."""
+        buf = self._obs_buffer.pop(ctx.conversation_id, None)
+        if not buf:
+            return
+        block = render_observation_block(buf)
+        ctx.content = f"{block}\n{ctx.content}" if ctx.content else block
 
     def _is_dup(self, event_id: str) -> bool:
         now = time.time()
@@ -223,6 +301,8 @@ class SprintableSSEClient:
             if conversation_id else ""
         )
 
+        audience_targeted, addressed, message_kind, expects_response = classify_activation(data, payload)
+
         return MessageContext(
             content=content,
             conversation_id=conversation_id,
@@ -233,10 +313,36 @@ class SprintableSSEClient:
             is_backfill=is_backfill,
             images=images,
             raw=data,
+            addressed=addressed,
+            audience_targeted=audience_targeted,
+            message_kind=message_kind,
+            expects_response=expects_response,
             _reply_url=reply_url,
             _api_key=self._api_key,
             _http=self._http,
         )
+
+    async def _dispatch_event(self, ctx: "MessageContext", on_message: MessageHandler) -> None:
+        """E-ACTIVATION Phase 2 (X): 관찰이면 버퍼+ack(모델 미주입), 호출이면 버퍼 flush 후 주입+ack.
+
+        SPRINTABLE_NONINVOKE_OBSERVATIONS=1 일 때만 게이팅 — 기본 OFF = 모든 이벤트 현행대로 주입.
+        """
+        if os.getenv(NONINVOKE_FLAG_ENV) == "1":
+            if not ctx.addressed:
+                # 관찰 → 모델을 «아예 안 깨운다». 버퍼에 쌓고 seq 만 ack(backfill 재범람 방지).
+                self._buffer_observation(ctx)
+                logger.info("observation (non-invoke) seq=%d conv=%s from=%s",
+                            ctx.seq, ctx.conversation_id, ctx.sender_name)
+                if ctx.seq:
+                    await self._ack(ctx.seq)
+                return
+            # 호출 → 쌓인 관찰을 context 로 hydrate 후 정상 주입.
+            self._flush_observations_into(ctx)
+        logger.info("inbound seq=%d conv=%s: %s",
+                    ctx.seq, ctx.conversation_id, ctx.content[:80])
+        await on_message(ctx)
+        if ctx.seq:
+            await self._ack(ctx.seq)
 
     async def _consume(self, on_message: MessageHandler) -> None:
         assert self._http is not None
@@ -257,11 +363,7 @@ class SprintableSSEClient:
                     if data_lines:
                         ctx = await self._parse_event(ev_type, ev_id, "\n".join(data_lines))
                         if ctx is not None:
-                            logger.info("inbound seq=%d conv=%s: %s",
-                                        ctx.seq, ctx.conversation_id, ctx.content[:80])
-                            await on_message(ctx)
-                            if ctx.seq:
-                                await self._ack(ctx.seq)
+                            await self._dispatch_event(ctx, on_message)
                     ev_type, ev_id, data_lines = "message", "", []
                 elif line.startswith(":"):
                     pass
