@@ -26,12 +26,18 @@
 에이전트가 Sprintable의 도구(작업 조회·댓글·상태 변경 등)를 쓸 수 있게 합니다.
 
 ```bash
-# Codex — 실제로 밟아 확인한 명령
-codex mcp add sprintable -- uvx sprintable
+# Codex — 실제로 밟아 확인한 명령(호스티드 MCP, 로컬 프로세스 없음)
+codex mcp add sprintable --url https://mcp.sprintable.ai/mcp --bearer-token-env-var SPRINTABLE_API_KEY
+export SPRINTABLE_API_KEY=<0단계에서 발급한 키>   # codex mcp가 이 env var를 직접 읽습니다
 ```
 
-**다른 런타임은 MCP 등록 명령이 각각 다릅니다.** 그 런타임의 문서를 따르되, 등록할
-값은 아래 셋으로 같습니다 — 실행 명령 `uvx sprintable`, 그리고 환경변수 둘.
+`codex mcp get sprintable`로 등록을 확인할 수 있습니다(`transport: streamable_http`).
+클론도, 로컬에서 띄울 프로세스도 없습니다 — self-host로 직접 서버를 돌리는 경우만
+아래(다른 런타임과 같은 패턴)의 `uvx sprintable`로 자신의 백엔드를 가리키면 됩니다.
+
+**다른 런타임은 MCP 등록 명령이 각각 다릅니다.** 그 런타임의 문서를 따르되, SaaS를
+쓴다면 등록할 값은 아래 셋으로 같습니다 — 실행 명령 `uvx sprintable`, 그리고
+환경변수 둘.
 
 ```json
 {
@@ -77,10 +83,10 @@ MCP는 «에이전트가 Sprintable을 부르는 길»입니다. 반대 방향 �
 | 런타임 | 방식 | 실행할 것 |
 |---|---|---|
 | Claude Code | 채널 플러그인 | `sprintable@moonklabs` (`/plugin install` 정식 설치) |
+| Codex | 채널 플러그인 | `sprintable-codex@moonklabs` (`codex plugin add` 정식 설치) |
 | Hermes | 채널 플러그인 | `connectors/hermes-sprintable/` |
 | OpenClaw | 채널 플러그인 | `connectors/openclaw-sprintable/` |
 | OpenCode | 채널 플러그인 | `connectors/opencode-sprintable/` |
-| Codex | 커넥터 호스트 | `connectors/codex-sprintable/` |
 | Gemini | 커넥터 호스트 | `connectors/gemini-sprintable/` |
 | Grok | 커넥터 호스트 | `connectors/grok-sprintable/` |
 | Pi | 커넥터 호스트 | `connectors/pi-sprintable/` |
@@ -92,10 +98,11 @@ MCP는 «에이전트가 Sprintable을 부르는 길»입니다. 반대 방향 �
 
 채용 완료 화면의 ②「깨우기」 칸에도 같은 내용이 런타임별로 표시됩니다.
 
-**Claude Code는 정식 플러그인이 있습니다** — 아래 「Claude Code — 실시간 채널 연결」을
-그대로 따르면(`/plugin install`) 이 단계를 끝낼 수 있습니다. 나머지 런타임(Hermes·OpenClaw·
-OpenCode·Codex·Gemini·Grok·Pi·Cursor)은 아직 정식 설치 경로를 제공하지 않습니다 — 위 표의
-경로는 저장소 안의 위치일 뿐이라, 그 런타임들은 이 단계를 지금 끝낼 수 없습니다.
+**Claude Code와 Codex는 정식 플러그인이 있습니다** — 아래 각 절을 그대로 따르면
+(`/plugin install` 또는 `codex plugin add`) 이 단계를 끝낼 수 있습니다. 나머지
+런타임(Hermes·OpenClaw·OpenCode·Gemini·Grok·Pi·Cursor)은 아직 정식 설치 경로를
+제공하지 않습니다 — 위 표의 경로는 저장소 안의 위치일 뿐이라, 그 런타임들은 이
+단계를 지금 끝낼 수 없습니다.
 
 ### Claude Code — 실시간 채널 연결 (정식 플러그인 설치)
 
@@ -105,7 +112,7 @@ Sprintable의 Claude Code 채널 플러그인을 **정식으로 설치**해 붙�
 **1) 마켓플레이스 추가 + 플러그인 설치** (Claude Code 안에서)
 
 ```
-/plugin marketplace add moonklabs/sprintable-claude-plugin
+/plugin marketplace add moonklabs/sprintable-agent-plugins
 /plugin install sprintable@moonklabs
 ```
 
@@ -115,11 +122,12 @@ Sprintable의 Claude Code 채널 플러그인을 **정식으로 설치**해 붙�
 /sprintable:configure <0단계에서 발급한 키>
 ```
 
-키는 `~/.claude/channels/sprintable/.env`에 저장됩니다. ⚠️ **두 번째 인자를 생략하면 dev
-백엔드에 붙습니다** — 정식(prod) 서비스에 붙으려면 prod 백엔드 URL을 반드시 함께 주십시오:
+키는 `~/.claude/channels/sprintable/.env`에 저장됩니다. **두 번째 인자를 생략하면
+SaaS(`https://app.sprintable.ai`)에 붙습니다** — dev나 self-host 백엔드에 붙으려면
+그 URL을 반드시 함께 주십시오:
 
 ```
-/sprintable:configure <0단계에서 발급한 키> https://sprintable-backend-prod-787818285179.asia-northeast3.run.app
+/sprintable:configure <0단계에서 발급한 키> https://sprintable-backend-dev-57iommnikq-du.a.run.app
 ```
 
 **3) 채널과 함께 실행**
@@ -136,7 +144,7 @@ claude --dangerously-load-development-channels plugin:sprintable@moonklabs
 > ⚠️ **주의 — 이 플래그는 Claude Code가 「로컬 채널 개발용」으로 두고, 「인터넷에서 받은
 > 채널에는 쓰지 말라」고 경고하는 옵션입니다.** Sprintable 플러그인도 «인터넷에서 받는»
 > 채널이므로, **Sprintable 플러그인을 신뢰할 때만** 쓰십시오. 플러그인 코드는 공개돼 있어
-> (`github.com/moonklabs/sprintable-claude-plugin`) 설치 전에 직접 확인할 수 있습니다. 이
+> (`github.com/moonklabs/sprintable-agent-plugins`) 설치 전에 직접 확인할 수 있습니다. 이
 > 플래그를 쓰면 세션 시작 시 확인 다이얼로그가 뜨며, 위 저장소를 확인한 뒤 승인하면 됩니다.
 > (경고 없는 `--channels` 경로는 Anthropic 공식 마켓 등재가 전제라 현재는 제공되지 않습니다.)
 
@@ -146,6 +154,61 @@ claude --dangerously-load-development-channels plugin:sprintable@moonklabs
 SSE를 열지 않고 조용히 대기합니다(`SSE disabled`).
 
 > `/plugin update`로 플러그인을 갱신해도 정식 설치라 **파일을 다시 만질 일이 없습니다.**
+
+### Codex — 실시간 채널 연결 (정식 플러그인 설치)
+
+Sprintable의 Codex 채널 플러그인을 **정식으로 설치**해 붙입니다. 로컬에 저장소를
+clone하거나 스크립트를 직접 띄울 필요가 없습니다 — 2명령이면 됩니다.
+
+**1) 마켓플레이스 추가 + 플러그인 설치** (터미널에서)
+
+```bash
+codex plugin marketplace add moonklabs/sprintable-agent-plugins
+codex plugin add sprintable-codex@moonklabs
+```
+
+**2) API 키 설정**
+
+```
+/sprintable:configure <0단계에서 발급한 키>
+```
+
+**두 번째 인자를 생략하면 SaaS(`https://app.sprintable.ai`)에 붙습니다** — dev나
+self-host 백엔드에 붙으려면 그 URL을 함께 주십시오.
+
+키가 저장되는 위치는 우선순위대로: `$SPRINTABLE_STATE_DIR/.env`(명시했다면 그것만,
+자동 폴백 없음) → `<프로젝트 경로>/.sprintable/.env`(있으면) → `$CODEX_HOME/sprintable/.env`
+(기본값, `$CODEX_HOME`은 보통 `~/.codex`). 한 머신에 Codex 에이전트를 여러 개 붙이고
+각자 `CODEX_HOME`을 이미 분리해 쓰고 있다면 격리가 자동으로 됩니다 — 따로 손댈 것
+없습니다.
+
+**3) `codex` 정상 실행**
+
+추가 플래그가 필요 없습니다 — `codex`를 평소처럼 실행하십시오.
+
+> **처음 한 번, hook 신뢰 승인 프롬프트가 뜹니다.** 이 플러그인은 세션에 메시지를
+> «주입»하기 위해 Codex의 hooks 기능(`SessionStart`/`Stop`/`UserPromptSubmit`)을
+> 씁니다 — Codex는 플러그인이 등록한 hook을 처음 실행하기 전에 신뢰 여부를 묻습니다.
+> 플러그인 코드는 공개돼 있어(`github.com/moonklabs/sprintable-agent-plugins`) 승인
+> 전에 직접 확인할 수 있습니다. 승인하면 그다음부터는 묻지 않습니다.
+>
+> ⚠️ **hooks는 Codex 쪽에서도 비교적 새로운 기능입니다.** 이 채널은 실제 세션(headless·
+> 인터랙티브 TUI 모두)에서 왕복 검증을 마쳤지만(E-CODEX-CHANNEL S1/S2), Codex CLI
+> 자체의 hooks 지원 표면이 넓게 굳어진 상태는 아닙니다 — Codex 버전에 따라 동작이
+> 달라질 수 있습니다.
+
+> **MCP 도구는 별도로 인증해야 합니다.** 위 `/sprintable:configure`가 저장하는 키는
+> «채널»(hooks 스크립트)만 읽습니다. Sprintable MCP 도구(작업 조회·댓글 등)까지 쓰려면
+> 같은 키를 Codex 프로세스 자체 환경변수로도 노출해야 합니다:
+> ```bash
+> export SPRINTABLE_API_KEY=<0단계에서 발급한 키>
+> ```
+> 노출하지 않아도 채널(메시지 왕복)은 정상 동작합니다 — 이 둘은 별개 경로입니다.
+
+채널은 `SessionStart` hook이 백그라운드 SSE 리스너를 띄우고(`GET /api/v2/agent/stream`),
+`Stop` hook이 매 턴 끝에 큐를 확인해 밀린 메시지를 하나로 합쳐 다음 턴으로 주입한 뒤,
+응답을 `POST /api/v2/conversations/{id}/messages`로 돌려보내는 방식으로 동작합니다.
+키가 없으면 모든 hook이 조용히 아무 것도 하지 않습니다 — 기존 Codex 사용에 영향 없음.
 
 ---
 
@@ -179,6 +242,7 @@ codex mcp get sprintable      # → enabled: true   ← 1단계만 확인됨
 | 도구는 보이는데 세션이 안 깨어남 | **2단계** — MCP는 문제가 아닙니다 |
 | 인증 오류 | `AGENT_API_KEY`가 그 에이전트의 것인지 · 키는 에이전트마다 다릅니다 |
 | 연결이 자꾸 끊김 | `SPRINTABLE_API_URL`이 앱 도메인이 아니라 백엔드 주소인지 |
+| Codex: 채널(메시지 왕복)은 되는데 Sprintable MCP 도구 호출이 `AuthRequired`로 실패 | `SPRINTABLE_API_KEY`를 Codex 프로세스 자체 환경변수로 export했는지 — `.env` 파일과는 별개 경로입니다 |
 
 ---
 
