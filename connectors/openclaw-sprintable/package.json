@@ -1,11 +1,58 @@
 {
-  "name": "@sprintable/openclaw-adapter",
+  "name": "@moonklabs/openclaw-sprintable",
   "version": "0.1.0",
-  "description": "Sprintable Gateway adapter for OpenClaw",
+  "description": "Sprintable Gateway channel plugin for OpenClaw — real-time team chat via SSE dial-out (no inbound webhook required).",
+  "keywords": [
+    "openclaw-plugin",
+    "sprintable",
+    "channel"
+  ],
   "type": "module",
-  "main": "./index.ts",
-  "peerDependencies": {
-    "openclaw": ">=2026.1.0"
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moonklabs/sprintable.git",
+    "directory": "connectors/openclaw-sprintable"
   },
-  "dependencies": {}
+  "license": "MIT",
+  "scripts": {
+    "build": "tsup index.ts setup-entry.ts --format esm --dts --out-dir dist --clean",
+    "test": "bun test src/channel.test.ts"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "runtimeExtensions": [
+      "./dist/index.js"
+    ],
+    "setupEntry": "./setup-entry.ts",
+    "runtimeSetupEntry": "./dist/setup-entry.js",
+    "channel": {
+      "id": "sprintable",
+      "label": "Sprintable",
+      "blurb": "Sprintable project management — dial-out SSE gateway"
+    },
+    "compat": {
+      "pluginApi": ">=2026.7.1"
+    },
+    "install": {
+      "clawhubSpec": "@moonklabs/openclaw-sprintable",
+      "npmSpec": "@moonklabs/openclaw-sprintable"
+    }
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.7.1"
+  },
+  "devDependencies": {
+    "openclaw": "^2026.7.1-2",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  }
 }
