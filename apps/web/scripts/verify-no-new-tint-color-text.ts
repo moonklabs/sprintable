@@ -5,11 +5,16 @@
  * 봤더니 정의 검사·type-check·lint·해당 vitest 전부 그대로 초록이었다 — "정의가 옳다"와
  * "사용처가 정의를 지킨다"는 서로 다른 사실이고, 지금까지 후자를 재는 자가 없었다.
  *
+ * story #2575 AC2 — bg 패턴에 `-bg`(불투명 status 배경, 예 `bg-warning-bg`)를 추가한다.
+ * #2960(HITL 승인카드) 헤더 라벨이 정확히 이 모양(`bg-warning-bg` + `text-warning`, 같은
+ * className 리터럴)이었는데 이 스캐너가 안 잡았다 — bg 패턴이 `-tint`/`/알파`만 알고
+ * `-bg`를 몰랐기 때문. baseline은 이 확장 시점(#2575)에 맞춰 재생성한다(§AC2 결과 참고).
+ *
  * 이 스크립트가 세는 것 — 유나의 스윕과 같은 자: 같은 문자열/템플릿 리터럴 안에
- * `bg-<X>-tint` 또는 `bg-<X>/<알파>` 와 `text-<X>`(같은 계열 X)가 함께 있는 자리.
+ * `bg-<X>-bg`·`bg-<X>-tint` 또는 `bg-<X>/<알파>` 와 `text-<X>`(같은 계열 X)가 함께 있는 자리.
  * X ∈ {destructive, info, success, warning} — #2420 규칙(§본문)이 지금 다루는 네 계열.
  * (primary는 이 스토리의 "네 계열" 표에 없어 대상 밖 — primary-tint는 story #2420 범위
- * 밖이라는 것이 스토리 본문 자체의 판정이다.)
+ * 밖이라는 것이 스토리 본문 자체의 판정이다. primary-bg는 애초에 정의되지 않는다.)
  *
  * baseline 방식(story #2093 lint_query_sentinel_direct_calls.py와 동일 계약) — 지금
  * 걸리는 수(이 스캐너 기준 90건, 유나 수동 스윕은 112건 — 아래 ①·baseline 파일 _comment
@@ -47,7 +52,10 @@ export type Family = (typeof FAMILIES)[number];
 const LITERAL_RE = /'([^'\\]*(?:\\.[^'\\]*)*)'|"([^"\\]*(?:\\.[^"\\]*)*)"|`([^`\\]*(?:\\.[^`\\]*)*)`/g;
 
 function familyBgRe(family: Family): RegExp {
-  return new RegExp(`(?<![\\w-])bg-${family}(?:-tint|/\\d+)(?![\\w-])`);
+  // story #2575 AC2 — `-bg`(불투명 status 배경) 추가. `-bg`가 `-tint`보다 먼저 와도/나중에
+  // 와도 매칭엔 무관(교대일 뿐)이지만, `-bg`를 앞에 둔 이유는 스캔 결과 로그에서 그대로
+  // 눈에 먼저 띄게 하려는 것 — 판정에는 순서가 영향 없다.
+  return new RegExp(`(?<![\\w-])bg-${family}(?:-bg|-tint|/\\d+)(?![\\w-])`);
 }
 
 function familyTextRe(family: Family): RegExp {
