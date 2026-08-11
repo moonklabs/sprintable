@@ -162,7 +162,7 @@ and backoff are handled by the shared SDK; you only supply the runtime's injecti
 
 | Runtime | Category | Adapter | Injection |
 |---------|----------|---------|-----------|
-| **Claude Code** | A (channel plugin) | `packages/fakechat` | `notifications/claude/channel` (requires fakechat pairing) |
+| **Claude Code** | A (channel plugin) | `sprintable@moonklabs` (`moonklabs/sprintable-agent-plugins`) | Claude Code channel plugin — see `connect-guide.txt` |
 | **Hermes Agent** | A (platform plugin) | `connectors/hermes-sprintable/` | `handle_message()` |
 | **OpenClaw** | A (ChannelPlugin) | `connectors/openclaw-sprintable/` | `runtime.channel.inbound` |
 | **OpenCode** | A (plugin SDK) | `connectors/opencode-sprintable/` | `client.session.prompt()` |
