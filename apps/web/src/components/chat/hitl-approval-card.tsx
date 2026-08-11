@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Check, Lock, X } from 'lucide-react';
+import { Check, Clock, Lock, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -58,13 +58,12 @@ export function HitlApprovalCard({ request, createdAt, answer, onRespond }: Hitl
     }
   };
 
-  const statusLabel = isSettled
-    ? answer.decision === 'allow' ? t('hitlApproved') : t('hitlDenied')
-    : isExpired ? t('hitlExpired') : null;
-
   return (
     <div className="min-w-0 max-w-full rounded-xl rounded-tl-sm border border-warning-border bg-warning-bg px-3.5 py-3">
-      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-warning">
+      {/* 유나 design:changes(2026-08-11) — tint 배경 위 계열색 글자(text-warning)는 라이트에서
+          2.06:1로 AA 미달(DS 규칙 #2420 v3: tint/subtle 배경 위 글자는 --foreground). 경고
+          정체성은 bg-warning-bg+border+아이콘이 이미 싣는다. */}
+      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-foreground">
         <Lock className="h-3 w-3" aria-hidden />
         {t('hitlRequestLabel')}
       </div>
@@ -77,11 +76,18 @@ export function HitlApprovalCard({ request, createdAt, answer, onRespond }: Hitl
         {request.inputSummary}
       </pre>
 
-      {statusLabel ? (
+      {isSettled ? (
         <div className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-foreground">
-          {isSettled && (answer.decision === 'allow' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />)}
-          {statusLabel}
-          {isSettled && answer.reason && <span className="font-normal text-muted-foreground">— {answer.reason}</span>}
+          {answer.decision === 'allow' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />}
+          {answer.decision === 'allow' ? t('hitlApproved') : t('hitlDenied')}
+          {answer.reason && <span className="font-normal text-muted-foreground">— {answer.reason}</span>}
+        </div>
+      ) : isExpired ? (
+        // 유나 design:changes — 만료는 사람의 결정(허용/거부)과 다른 성질(시스템 종료)이라
+        // 같은 무게를 주지 않는다: muted + Clock으로 위계를 낮춘다.
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Clock className="h-3.5 w-3.5" aria-hidden />
+          {t('hitlExpired')}
         </div>
       ) : showDenyInput ? (
         <div className="flex flex-col gap-1.5 sm:flex-row">
@@ -136,7 +142,8 @@ export function HitlApprovalCard({ request, createdAt, answer, onRespond }: Hitl
       )}
 
       {sendError && (
-        <p role="alert" aria-live="assertive" className="mt-1.5 text-[11px] text-destructive">
+        // 유나 design:changes — text-destructive on bg-warning-bg = 4.37:1(AA 4.5 미달, 라이트).
+        <p role="alert" aria-live="assertive" className="mt-1.5 text-[11px] text-foreground">
           {t('hitlSendFailed')}
         </p>
       )}
