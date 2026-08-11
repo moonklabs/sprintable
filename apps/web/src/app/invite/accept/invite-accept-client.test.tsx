@@ -72,3 +72,32 @@ describe('InviteAcceptClient — error.code 분기 (story #2484)', () => {
     expect(container.textContent).toContain(koMessages.invite.acceptFailed);
   });
 });
+
+// story #2576 — #2575 가드(verify-tint-foreground-contrast/-bg)가 드러낸 라이트 AA 미달
+// (text-success/text-destructive on -bg = 4.20/4.30, AA 4.5 미달)의 사용처 회귀가드.
+// text-foreground로 바뀐 뒤에도 -bg 배경(status 정체성)은 그대로 유지되는지까지 함께 본다.
+describe('InviteAcceptClient — story #2576 AA 수리(계열색 텍스트 대신 text-foreground)', () => {
+  it('실패 상태 — text-destructive가 아니라 text-foreground를 쓴다(bg-destructive-bg는 유지)', async () => {
+    await mountAndAccept(async () => ({
+      ok: false,
+      json: async () => ({ error: { code: 'HTTP_410', message: 'Invite has expired' } }),
+    }));
+    const resultBox = container.querySelector('.bg-destructive-bg');
+    expect(resultBox).not.toBeNull();
+    expect(resultBox!.className).toContain('text-foreground');
+    expect(resultBox!.className).not.toContain('text-destructive ');
+    expect(resultBox!.className.endsWith('text-destructive')).toBe(false);
+  });
+
+  it('성공 상태 — text-success가 아니라 text-foreground를 쓴다(bg-success-bg는 유지)', async () => {
+    await mountAndAccept(async () => ({
+      ok: true,
+      json: async () => ({}),
+    }));
+    const resultBox = container.querySelector('.bg-success-bg');
+    expect(resultBox).not.toBeNull();
+    expect(resultBox!.className).toContain('text-foreground');
+    expect(resultBox!.className).not.toContain('text-success ');
+    expect(resultBox!.className.endsWith('text-success')).toBe(false);
+  });
+});
