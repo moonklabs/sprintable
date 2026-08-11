@@ -18,7 +18,7 @@ from app.services import agent_onboarding_config as gen
 
 def test_stdio_shape_with_key():
     cfg = gen.build_agent_mcp_config(api_key_plaintext="sk_live_abc")
-    server = cfg["mcpServers"]["sprintable"]
+    server = cfg["mcpServers"]["sprintable-mcp"]
     assert server["type"] == "stdio"
     assert server["command"] == "uvx"
     assert server["args"] == ["sprintable"]
@@ -32,14 +32,14 @@ def test_no_phantom_keys():
     blob = json.dumps(cfg)
     for phantom in ("SPRINTABLE_AGENT_ID", "WS_URL", "WEBSOCKET", "\"port\"", "fakechat"):
         assert phantom not in blob, f"{phantom} 가 아티팩트에 노출되면 안 됨"
-    server = cfg["mcpServers"]["sprintable"]
+    server = cfg["mcpServers"]["sprintable-mcp"]
     assert set(server.keys()) == {"type", "command", "args", "env"}
 
 
 def test_key_omitted_when_absent():
     """api_key 없으면 AGENT_API_KEY 키 생략(미발급 시 비노출·AC4 호환)."""
     cfg = gen.build_agent_mcp_config(api_key_plaintext=None)
-    env = cfg["mcpServers"]["sprintable"]["env"]
+    env = cfg["mcpServers"]["sprintable-mcp"]["env"]
     assert "AGENT_API_KEY" not in env
     assert "SPRINTABLE_API_URL" in env  # URL 은 항상
 
@@ -48,7 +48,7 @@ def test_url_from_fastapi_url_env(monkeypatch):
     """backend-direct URL = FASTAPI_URL env(배포 주입)·trailing slash 제거."""
     monkeypatch.setenv("FASTAPI_URL", "https://sprintable-backend-dev-x.run.app/")
     cfg = gen.build_agent_mcp_config(api_key_plaintext="k")
-    assert cfg["mcpServers"]["sprintable"]["env"]["SPRINTABLE_API_URL"] == \
+    assert cfg["mcpServers"]["sprintable-mcp"]["env"]["SPRINTABLE_API_URL"] == \
         "https://sprintable-backend-dev-x.run.app"
 
 
@@ -103,7 +103,7 @@ async def test_connection_artifact_returns_stdio_with_placeholder():
     assert mcp_file["filename"] == ".mcp.json"
     assert isinstance(mcp_file["content"], str), "content 는 paste-ready json 문자열이어야(dict 아님)"
     parsed = json.loads(mcp_file["content"])
-    server = parsed["mcpServers"]["sprintable"]
+    server = parsed["mcpServers"]["sprintable-mcp"]
     assert server["type"] == "stdio"
     assert server["env"]["AGENT_API_KEY"] == "<YOUR_AGENT_API_KEY>"  # placeholder
     assert out["mcp_config"] == parsed

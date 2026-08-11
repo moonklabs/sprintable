@@ -17,7 +17,7 @@ export function writeMcpServersFormat(
 ): void {
   const config = readJsonFile(configPath);
   const servers = (config.mcpServers ?? {}) as Record<string, unknown>;
-  servers["sprintable"] = {
+  servers["sprintable-mcp"] = {
     command: "uvx",
     args: ["sprintable-mcp"],
     env: {
@@ -38,7 +38,7 @@ export function writeMcpSectionFormat(
   const config = readJsonFile(configPath);
   const mcp = (config.mcp ?? {}) as Record<string, unknown>;
   const servers = (mcp.servers ?? {}) as Record<string, unknown>;
-  servers["sprintable"] = {
+  servers["sprintable-mcp"] = {
     command: "uvx",
     args: ["sprintable-mcp"],
     env: {

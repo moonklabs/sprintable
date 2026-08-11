@@ -53,7 +53,7 @@ describe("pingApi — fetch 동작", () => {
 describe("writeMcpConfig — 구조 검증", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("기존 mcpServers에 sprintable 항목 추가", () => {
+  it("기존 mcpServers에 sprintable-mcp 항목 추가", () => {
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockReturnValue(
       JSON.stringify({ mcpServers: { other: { command: "other" } } }) as unknown as ReturnType<typeof readFileSync>
@@ -63,7 +63,8 @@ describe("writeMcpConfig — 구조 검증", () => {
     const existing = JSON.parse(
       JSON.stringify({ mcpServers: { other: { command: "other" } } })
     );
-    existing.mcpServers["sprintable"] = {
+    // #2577: 서버키 sprintable -> sprintable-mcp
+    existing.mcpServers["sprintable-mcp"] = {
       command: "uvx",
       args: ["sprintable-mcp"],
       env: {
@@ -71,9 +72,9 @@ describe("writeMcpConfig — 구조 검증", () => {
         AGENT_API_KEY: "sk_test",
       },
     };
-    expect(existing.mcpServers).toHaveProperty("sprintable");
+    expect(existing.mcpServers).toHaveProperty("sprintable-mcp");
     expect(existing.mcpServers).toHaveProperty("other");
-    expect(existing.mcpServers.sprintable.command).toBe("uvx");
+    expect(existing.mcpServers["sprintable-mcp"].command).toBe("uvx");
   });
 
   it("API URL 후행 슬래시 제거", () => {

@@ -27,11 +27,15 @@
 
 ```bash
 # Codex — 실제로 밟아 확인한 명령(호스티드 MCP, 로컬 프로세스 없음)
-codex mcp add sprintable --url https://mcp.sprintable.ai/mcp --bearer-token-env-var SPRINTABLE_API_KEY
+codex mcp add sprintable-mcp --url https://mcp.sprintable.ai/mcp --bearer-token-env-var SPRINTABLE_API_KEY
 export SPRINTABLE_API_KEY=<0단계에서 발급한 키>   # codex mcp가 이 env var를 직접 읽습니다
 ```
 
-`codex mcp get sprintable`로 등록을 확인할 수 있습니다(`transport: streamable_http`).
+> 등록명이 `sprintable-mcp`인 이유: Claude Code 채널 플러그인이 별도로 쓰는 MCP 서버
+> (`sprintable-channel`)와 이름이 같으면 `/mcp` 목록·로그에서 분간이 안 됩니다(#2577).
+> 이 문서의 예시는 항상 이 개명 이후 이름을 씁니다.
+
+`codex mcp get sprintable-mcp`로 등록을 확인할 수 있습니다(`transport: streamable_http`).
 클론도, 로컬에서 띄울 프로세스도 없습니다 — self-host로 직접 서버를 돌리는 경우만
 아래(다른 런타임과 같은 패턴)의 `uvx sprintable`로 자신의 백엔드를 가리키면 됩니다.
 
@@ -42,7 +46,7 @@ export SPRINTABLE_API_KEY=<0단계에서 발급한 키>   # codex mcp가 이 env
 ```json
 {
   "mcpServers": {
-    "sprintable": {
+    "sprintable-mcp": {
       "type": "stdio",
       "command": "uvx",
       "args": ["sprintable"],
@@ -224,7 +228,7 @@ self-host 백엔드에 붙으려면 그 URL을 함께 주십시오.
 **「Added」나 `enabled: true`는 1단계가 된 것이지, 에이전트가 깨어난 것이 아닙니다.**
 
 ```bash
-codex mcp get sprintable      # → enabled: true   ← 1단계만 확인됨
+codex mcp get sprintable-mcp   # → enabled: true   ← 1단계만 확인됨
 ```
 
 실제로 확인하는 법:
