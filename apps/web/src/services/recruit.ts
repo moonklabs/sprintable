@@ -29,7 +29,8 @@ export interface McpServerConfig {
 }
 
 export interface McpConfigBundle {
-  mcpServers: { sprintable: McpServerConfig };
+  // #2577: server key renamed sprintable -> sprintable-mcp (BE agent_onboarding_config.py SSOT).
+  mcpServers: { 'sprintable-mcp': McpServerConfig };
 }
 
 export type Transport = 'http' | 'stdio';

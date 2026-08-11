@@ -171,7 +171,7 @@ Sprintable에서: **에이전트(Agents) → 채용(Recruit) → API 키 복사*
 ```json
 {
   "mcpServers": {
-    "sprintable": {
+    "sprintable-mcp": {
       "type": "http",
       "url": "http://localhost:3108/mcp",
       "headers": {
@@ -186,7 +186,7 @@ Sprintable에서: **에이전트(Agents) → 채용(Recruit) → API 키 복사*
 ```json
 {
   "mcpServers": {
-    "sprintable": {
+    "sprintable-mcp": {
       "url": "http://localhost:3108/mcp",
       "headers": {
         "Authorization": "Bearer YOUR_AGENT_API_KEY"
@@ -232,7 +232,7 @@ Sprintable은 로컬 서버 없이도 외부 클라이언트(예: [Poke](https:/
 ```json
 {
   "mcpServers": {
-    "sprintable": {
+    "sprintable-mcp": {
       "type": "http",
       "url": "https://dev-mcp.sprintable.ai/mcp",
       "headers": {

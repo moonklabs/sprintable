@@ -5,14 +5,14 @@ import { RAIL_ORDER, HTTP_RAIL_ORDER } from './verify-rail';
 describe('inferTransport (E-MCP-OPT S3 — transport 미지정 default-resolve 응답 판별)', () => {
   it('reads type:"http" from a hosted artifact', () => {
     const content = JSON.stringify({
-      mcpServers: { sprintable: { type: 'http', url: 'https://mcp.sprintable.ai/mcp', headers: {} } },
+      mcpServers: { 'sprintable-mcp': { type: 'http', url: 'https://mcp.sprintable.ai/mcp', headers: {} } },
     });
     expect(inferTransport(content)).toBe('http');
   });
 
   it('reads type:"stdio" from a local artifact', () => {
     const content = JSON.stringify({
-      mcpServers: { sprintable: { type: 'stdio', command: 'uvx', args: ['sprintable-mcp'] } },
+      mcpServers: { 'sprintable-mcp': { type: 'stdio', command: 'uvx', args: ['sprintable-mcp'] } },
     });
     expect(inferTransport(content)).toBe('stdio');
   });

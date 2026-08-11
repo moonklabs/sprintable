@@ -98,7 +98,7 @@ async def test_connection_artifact_emits_persona_file_real_decorate_path():
         assert "백엔드 엔지니어" in instruction["content"]
         mcp_file = next(f for f in out["files"] if f["filename"] == ".mcp.json")
         parsed = json.loads(mcp_file["content"])
-        assert parsed["mcpServers"]["sprintable"]["type"] in ("stdio", "http")
+        assert parsed["mcpServers"]["sprintable-mcp"]["type"] in ("stdio", "http")
         assert out["mcp_config"] == parsed
         assert out["api_key"] is None
     finally:
@@ -192,7 +192,7 @@ async def test_connection_artifact_hermes_http_capable_real_db():
             )
 
         assert out["mcp_config"] is not None
-        assert out["mcp_config"]["mcpServers"]["sprintable"]["type"] in ("http", "stdio")
+        assert out["mcp_config"]["mcpServers"]["sprintable-mcp"]["type"] in ("http", "stdio")
         filenames = {f["filename"] for f in out["files"]}
         assert filenames == {"SPRINTABLE_ONBOARDING.md", "HERMES_MCP_SETUP.md", "CONNECTOR_SETUP.md"}
         assert ".mcp.json" not in filenames  # hermes는 파일 드롭인이 아님(§0 재발 방지)

@@ -19,13 +19,13 @@ function makeAdapter(
     hasExistingServer: () => {
       const cfg = readJsonFile(configPath);
       if (mode === "mcpServers") {
-        return !!(cfg.mcpServers as Record<string, unknown> | undefined)?.["sprintable"];
+        return !!(cfg.mcpServers as Record<string, unknown> | undefined)?.["sprintable-mcp"];
       }
       return !!(
         (cfg.mcp as Record<string, unknown> | undefined)?.servers as
           | Record<string, unknown>
           | undefined
-      )?.["sprintable"];
+      )?.["sprintable-mcp"];
     },
   };
 }

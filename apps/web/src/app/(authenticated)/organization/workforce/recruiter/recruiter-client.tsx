@@ -39,18 +39,18 @@ const CATEGORY_ICON: Record<string, typeof Palette> = {
  * stale(회전된 옛 키 그대로 노출)해진다 — 둘 다 처리하고, 어느 쪽도 못 찾으면 null(호출부가 에러로 취급).
  */
 export function spliceApiKey(bundle: McpConfigBundle, newKey: string): McpConfigBundle | null {
-  const server = bundle.mcpServers.sprintable;
+  const server = bundle.mcpServers['sprintable-mcp'];
   if (server.headers && 'Authorization' in server.headers) {
     return {
       mcpServers: {
-        sprintable: { ...server, headers: { ...server.headers, Authorization: `Bearer ${newKey}` } },
+        'sprintable-mcp': { ...server, headers: { ...server.headers, Authorization: `Bearer ${newKey}` } },
       },
     };
   }
   if (server.env && 'AGENT_API_KEY' in server.env) {
     return {
       mcpServers: {
-        sprintable: { ...server, env: { ...server.env, AGENT_API_KEY: newKey } },
+        'sprintable-mcp': { ...server, env: { ...server.env, AGENT_API_KEY: newKey } },
       },
     };
   }

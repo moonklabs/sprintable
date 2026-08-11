@@ -182,7 +182,7 @@ Add Sprintable as an MCP server in your agent's config. This gives the agent acc
 ```json
 {
   "mcpServers": {
-    "sprintable": {
+    "sprintable-mcp": {
       "type": "http",
       "url": "http://localhost:3108/mcp",
       "headers": {
@@ -197,7 +197,7 @@ Add Sprintable as an MCP server in your agent's config. This gives the agent acc
 ```json
 {
   "mcpServers": {
-    "sprintable": {
+    "sprintable-mcp": {
       "url": "http://localhost:3108/mcp",
       "headers": {
         "Authorization": "Bearer YOUR_AGENT_API_KEY"
@@ -247,7 +247,7 @@ Sprintable also runs a **hosted Streamable HTTP MCP** so external clients (e.g. 
 ```json
 {
   "mcpServers": {
-    "sprintable": {
+    "sprintable-mcp": {
       "type": "http",
       "url": "https://dev-mcp.sprintable.ai/mcp",
       "headers": {
