@@ -223,6 +223,27 @@ describe('ImageLightbox — story #2037 AC2(더블탭 확대 토글)', () => {
     const newZoomWrapper = document.querySelector('img[data-next-image="true"]')!.parentElement as HTMLElement;
     expect(newZoomWrapper.style.transform).toBe('');
   });
+
+  // 유나 design:changes(2026-08-11) — lightboxZoomHint가 렌더 0인 고아 키였다. 힌트가 실제로
+  // 뜨고, 확대 상태에 따라(스와이프 비활성 안내 포함) 바뀌는지 고정한다.
+  it('더블탭 힌트가 보이고, 확대되면 "스와이프 비활성" 힌트로 바뀐다', async () => {
+    mockFetchFor({ 'att-1.png': SIGNED1 });
+    await act(async () => {
+      root.render(wrap(<ImageLightbox items={[IMG1]} startIndex={0} conversationId="conv-1" onClose={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(document.body.textContent).toContain(koMessages.chats.lightboxZoomHint);
+    expect(document.body.textContent).not.toContain(koMessages.chats.lightboxZoomedHint);
+
+    const zoomContainer = document.querySelector('img[data-next-image="true"]')!.parentElement!.parentElement as HTMLElement;
+    await act(async () => {
+      zoomContainer.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      zoomContainer.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(document.body.textContent).toContain(koMessages.chats.lightboxZoomedHint);
+    expect(document.body.textContent).not.toContain(koMessages.chats.lightboxZoomHint);
+  });
 });
 
 describe('ImageLightbox — story #2037 상태(denied/expired) — AttachmentImage와 같은 축', () => {

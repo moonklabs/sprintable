@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
 import Image from 'next/image';
-import { ChevronLeft, ChevronRight, Download, Loader2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ExternalLink, Loader2, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Dialog, DialogPortal } from '@/components/ui/dialog';
 
@@ -168,7 +168,7 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
                   title={t('lightboxOpenOriginal')}
                   className="flex size-9 items-center justify-center rounded-full text-white/80 transition hover:bg-white/10 hover:text-white"
                 >
-                  <Download className="h-4.5 w-4.5" aria-hidden />
+                  <ExternalLink className="h-4.5 w-4.5" aria-hidden />
                 </a>
               )}
               <DialogPrimitive.Close
@@ -187,7 +187,7 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
                 type="button"
                 onClick={goPrev}
                 aria-label={t('lightboxPrev')}
-                className="absolute left-2 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white transition hover:bg-black/60 md:left-4"
+                className="absolute left-2 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white transition hover:bg-black/60 md:left-4"
               >
                 <ChevronLeft className="h-6 w-6" aria-hidden />
               </button>
@@ -197,7 +197,7 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
                 type="button"
                 onClick={goNext}
                 aria-label={t('lightboxNext')}
-                className="absolute right-2 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white transition hover:bg-black/60 md:right-4"
+                className="absolute right-2 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white transition hover:bg-black/60 md:right-4"
               >
                 <ChevronRight className="h-6 w-6" aria-hidden />
               </button>
@@ -236,6 +236,15 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
                     className="object-contain"
                     priority
                   />
+                </div>
+
+                {/* 유나 design:changes(2026-08-11) — lightboxZoomHint가 고아 키였다(더블탭이
+                    핵심 제스처인데 아무 데도 안 뜸). 확대 상태에 따라 힌트를 바꿔 스와이프가
+                    확대 중 비활성화된다는 것도 같이 알린다. 이미지 클릭(더블탭 토글)을 막지
+                    않도록 pointer-events-none. 대비: 텍스트라 AA 4.5 필요 — bg-black/70(밝은
+                    스크린샷이 주 시나리오라는 유나 지적과 같은 이유로 nav보다 더 진하게). */}
+                <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/70 px-3 py-1 text-[11px] text-white">
+                  {zoomed ? t('lightboxZoomedHint') : t('lightboxZoomHint')}
                 </div>
               </div>
             )}

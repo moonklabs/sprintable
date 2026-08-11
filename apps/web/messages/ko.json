@@ -3165,6 +3165,7 @@
     "lightboxOpenOriginal": "원본 새 탭에서 열기",
     "lightboxCounter": "{current} / {total}",
     "lightboxZoomHint": "더블탭으로 확대",
+    "lightboxZoomedHint": "확대 중엔 스와이프가 비활성입니다 · 더블탭하면 축소",
     "attachMenuLabel": "첨부",
     "attachMenuUpload": "파일 업로드",
     "attachMenuStorage": "스토리지에서 선택",
