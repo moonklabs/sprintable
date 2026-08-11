@@ -19,6 +19,8 @@ import { MessageContextMenu, type CiteAction } from './message-context-menu';
 import { SenderProfilePopover } from './sender-profile-popover';
 import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from './presence-dot';
 import { ReferenceSuggestionRow } from './reference-suggestion-row';
+import { parseHitlRequest } from '@/lib/hitl-classifier';
+import { HitlApprovalCard, type HitlAnswer } from './hitl-approval-card';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -47,6 +49,14 @@ interface ChatBubbleProps {
    * 메시지에 걸쳐 하나만 존재 — 같은 엔티티를 여러 메시지가 참조해도 fetch는 타입당 1회).
    * 생략하면(undefined) `EntityChip`이 기존처럼 `{kind:'loading'}`으로 안전 폴백한다. */
   entityStatusByKey?: Record<string, EntityStatusFetchState>;
+  /** story #2572 — 이 메시지가 HITL 승인요청이고 이미 답이 관측됐으면(다른 기기 포함) 전달.
+   * chat-view.tsx가 전체 messages를 훑어 계산한다(이 컴포넌트는 단일 메시지만 봄). */
+  hitlAnswer?: HitlAnswer | null;
+  /** story #2572 AC2 — 카드의 허용/거부 클릭이 규약 메시지(「allow」/「deny <사유>」)를 human
+   * 발신으로 게시하는 기존 전송 경로(handleSend) 그대로 재사용. 생략하면(undefined) 카드
+   * 자체가 안 뜬다(일반 텍스트로 폴백) — 호출부가 아직 안 넘기는 화면에서 깨진 카드가
+   * 뜨지 않게 하는 안전장치. */
+  onRespondHitl?: (content: string) => Promise<void>;
 }
 
 interface ContextMenuState {
@@ -264,11 +274,16 @@ const LONG_PRESS_MS = 500;
 export function ChatBubble({
   message, isMine, isGrouped = false, onOpenThread, onDelete, onBlockUser, presenceStatus, isWorking = false,
   highlight = false, projectId, isCiteAnchor = false, isCiteInRange = false, citeAction, entityStatusByKey,
+  hitlAnswer = null, onRespondHitl,
 }: ChatBubbleProps) {
   const t = useTranslations('chats');
   const isAgent = message.sender_type === 'agent';
   // story #2319 — tombstone. content는 서버가 이미 ""로 스크럽했다(오발송 대응 목적).
   const isDeleted = Boolean(message.deleted_at);
+  // story #2572 — sniffing 조건: 에이전트 발신(사람이 같은 텍스트를 쳐도 카드화 금지, PO 가드①)
+  // + 플러그인 고정 포맷 정확 매칭(패턴이 안 맞으면 null → 일반 텍스트 폴백, PO 가드②)
+  // + 응답 핸들러가 실제로 있을 때만(없는 화면=스레드 패널 등에서 깨진 카드 방지).
+  const hitlRequest = !isDeleted && isAgent && onRespondHitl ? parseHitlRequest(message.content) : null;
   // S8: 슬래시 커맨드는 전용 버블(brand·mono·⌘). 리터럴(`//`)은 dequote된 일반 텍스트.
   const isCmd = isCommand(message.content);
   const isLiteral = !isCmd && message.content.startsWith('//');
@@ -435,6 +450,13 @@ export function ChatBubble({
                 {t('blockedSenderMessageReveal')}
               </button>
             </div>
+          ) : hitlRequest ? (
+            <HitlApprovalCard
+              request={hitlRequest}
+              createdAt={message.created_at}
+              answer={hitlAnswer}
+              onRespond={onRespondHitl!}
+            />
           ) : isCmd ? (
             <div className={`min-w-0 max-w-full rounded-xl border border-info/30 bg-info/8 px-3.5 py-2 ${isMine ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
               <div className="mb-1 flex items-center gap-1 text-[10px] font-medium text-info">
@@ -472,7 +494,7 @@ export function ChatBubble({
           {/* story #2283 — 보낸 직후 그 메시지 바로 아래에서 한 번 제안(작성자 본인에게만,
               isMine 게이트는 컴포넌트 내부에서 건다). ⛔남의 메시지엔 안 뜬다. tombstone된
               메시지엔 제안할 실 내용이 없다(story #2319). */}
-          {!isCmd && !isDeleted && <ReferenceSuggestionRow messageId={message.id} content={message.content} isMine={isMine} projectId={projectId} />}
+          {!isCmd && !isDeleted && !hitlRequest && <ReferenceSuggestionRow messageId={message.id} content={message.content} isMine={isMine} projectId={projectId} />}
 
           {/* Attachments — a54ddc16: auth-gated 서명 라우트 경유(public 직링크 미사용).
               이미지=AttachmentImage(3상태 render)·오디오/비디오=AttachmentMedia(story #2051,
