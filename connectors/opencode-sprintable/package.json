@@ -1,11 +1,19 @@
 {
-  "name": "@sprintable/opencode-adapter",
+  "name": "opencode-sprintable",
   "version": "0.1.0",
-  "description": "Sprintable Gateway adapter for OpenCode",
+  "description": "Sprintable Gateway channel plugin for OpenCode — two-way chat between an OpenCode session and its Sprintable team, dial-out (no inbound domain/webhook/tunnel required).",
+  "keywords": ["opencode-plugin", "sprintable"],
   "type": "module",
   "main": "./index.ts",
+  "files": ["index.ts", "sprintable-sse.ts", "README.md"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moonklabs/sprintable.git",
+    "directory": "connectors/opencode-sprintable"
+  },
+  "license": "MIT",
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.0.0",
-    "@opencode-ai/sdk": ">=1.0.0"
+    "@opencode-ai/plugin": "^1.18.0",
+    "@opencode-ai/sdk": "^1.18.0"
   }
 }

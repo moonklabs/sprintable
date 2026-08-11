@@ -6,9 +6,13 @@
  */
 
 import type { Plugin } from "@opencode-ai/plugin"
-import { runSprintableSSE } from "../sdk/sprintable-sse.js"
+import { runSprintableSSE } from "./sprintable-sse.js"
 
-const API_URL = (process.env.SPRINTABLE_API_URL ?? "https://sprintable-backend-dev-57iommnikq-du.a.run.app").replace(/\/$/, "")
+// #2568-style npm-publish fix: this file used to import ../sdk/sprintable-sse.js — a path
+// that only resolves inside the monorepo. Published standalone, node_modules/opencode-sprintable
+// has no sibling ../sdk directory, so that import would 404 at runtime for every real install.
+// The SDK is now vendored into this package (sprintable-sse.ts, same directory) instead.
+const API_URL = (process.env.SPRINTABLE_API_URL ?? "https://app.sprintable.ai").replace(/\/$/, "")
 const API_KEY = (process.env.SPRINTABLE_API_KEY ?? process.env.AGENT_API_KEY ?? "").trim()
 
 /**
@@ -87,8 +91,14 @@ export const plugin: Plugin = async ({ client }) => {
   })
 
   return {
-    // plugin 종료 시 SSE stream 정리
-    // (opencode plugin lifecycle에 shutdown hook이 없으므로 process 종료 시 자동 정리)
+    // #2562 QA fix: Hooks.dispose *does* exist in the real @opencode-ai/plugin type
+    // (confirmed against the installed 1.18.16 types — the old comment claiming no
+    // shutdown hook exists was wrong) — wire it to actually stop the SSE loop instead
+    // of leaving it to process exit, so a plugin reload/disable doesn't leak a
+    // dangling long-lived stream connection.
+    dispose: async () => {
+      controller.abort()
+    },
   }
 }
 
