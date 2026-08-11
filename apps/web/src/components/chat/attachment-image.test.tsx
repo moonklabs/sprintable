@@ -123,4 +123,36 @@ describe('AttachmentImage — story #2050', () => {
     const img = container.querySelector('img[data-next-image="true"]');
     expect(img?.getAttribute('src')).toBe(SIGNED_URL);
   });
+
+  // story #2037 — onOpen이 있으면(라이트박스 진입점) 새 탭 앵커 대신 버튼으로 렌더되고
+  // 클릭이 콜백을 부른다(새 탭 네비게이션 없음).
+  describe('onOpen prop(story #2037 — 라이트박스 진입점)', () => {
+    it('onOpen이 없으면(기존 호출부) 여전히 <a target="_blank">다 — 회귀 0', async () => {
+      await act(async () => {
+        root.render(wrap(<AttachmentImage storedUrl="att-1.png" conversationId="conv-1" alt="사진" />));
+      });
+      await act(async () => {
+        ioCallback?.([{ isIntersecting: true }]);
+        await Promise.resolve(); await Promise.resolve();
+      });
+      expect(container.querySelector('a')).not.toBeNull();
+      expect(container.querySelector('button')).toBeNull();
+    });
+
+    it('onOpen이 있으면 <a> 대신 버튼으로 렌더되고 클릭이 onOpen을 부른다(새 탭 없음)', async () => {
+      const onOpen = vi.fn();
+      await act(async () => {
+        root.render(wrap(<AttachmentImage storedUrl="att-1.png" conversationId="conv-1" alt="사진" onOpen={onOpen} />));
+      });
+      await act(async () => {
+        ioCallback?.([{ isIntersecting: true }]);
+        await Promise.resolve(); await Promise.resolve();
+      });
+      expect(container.querySelector('a')).toBeNull();
+      const btn = container.querySelector('button');
+      expect(btn).not.toBeNull();
+      await act(async () => { btn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(onOpen).toHaveBeenCalledTimes(1);
+    });
+  });
 });

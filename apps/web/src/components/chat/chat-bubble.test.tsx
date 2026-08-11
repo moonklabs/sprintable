@@ -21,6 +21,14 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => ({ projectId: 'proj-1', currentTeamMemberId: 'member-1' }),
 }));
 
+// story #2037 — 라이트박스 진입점 테스트용. 다른 describe들은 이미지 첨부를 렌더하지 않으므로
+// (문서 미리보기·PDF 등) 이 mock이 그쪽 동작에 영향을 안 준다.
+vi.mock('next/image', () => ({
+  default: ({ src, alt }: { src?: string; alt?: string }) =>
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={src} alt={alt} data-next-image="true" />,
+}));
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -596,5 +604,63 @@ describe('ChatBubble — story #2572 HITL 승인 요청 버튼 카드', () => {
     });
     expect(container.textContent).toContain('만료됨');
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '허용')).toBe(false);
+  });
+});
+
+// story #2037 — 이미지 첨부 클릭 → 라이트박스 진입점 배선. 비-이미지 첨부가 섞여 있어도
+// 이미지끼리의 상대 순번(imageIndex)이 정확한지가 이 통합의 핵심 회귀 지점(off-by-one 위험).
+describe('ChatBubble — story #2037 이미지 라이트박스 진입점', () => {
+  let ioCallbacks: Array<(entries: Array<{ isIntersecting: boolean }>) => void>;
+
+  beforeEach(() => {
+    ioCallbacks = [];
+    class FakeIntersectionObserver {
+      constructor(cb: (entries: Array<{ isIntersecting: boolean }>) => void) {
+        ioCallbacks.push(cb);
+      }
+      observe = vi.fn();
+      disconnect = vi.fn();
+    }
+    (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = FakeIntersectionObserver;
+
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      const url = new URL(String(input), 'http://localhost');
+      const path = url.searchParams.get('path') ?? '';
+      return { ok: true, status: 200, json: async () => ({ data: { url: `https://signed/${path}` } }) };
+    }));
+  });
+
+  const twoImagesAndAFile: ChatMessage = {
+    ...baseMessage,
+    content: '스크린샷 두 장',
+    attachments: [
+      { url: 'report.pdf', name: 'report.pdf', content_type: 'application/pdf' },
+      { url: 'shot-1.png', name: 'shot-1.png', content_type: 'image/png' },
+      { url: 'shot-2.png', name: 'shot-2.png', content_type: 'image/png' },
+    ],
+  };
+
+  it('두 번째 이미지(비-이미지 첨부가 앞에 섞여 있음)를 클릭하면 라이트박스가 "2 / 2"로 그 이미지를 연다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={twoImagesAndAFile} isMine={false} />));
+    });
+    // 두 이미지 썸네일 모두 뷰포트 진입 → 서명 fetch 완료.
+    await act(async () => {
+      ioCallbacks.forEach((cb) => cb([{ isIntersecting: true }]));
+      await Promise.resolve(); await Promise.resolve();
+    });
+
+    const thumbButtons = container.querySelectorAll('button');
+    // shot-2.png 썸네일(두 번째 이미지)을 alt로 식별해 클릭.
+    const secondThumb = Array.from(thumbButtons).find((b) => b.getAttribute('aria-label') === 'shot-2.png');
+    expect(secondThumb).toBeDefined();
+    await act(async () => {
+      secondThumb!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve(); await Promise.resolve();
+    });
+
+    expect(document.body.textContent).toContain('2 / 2');
+    const openedImg = document.querySelector('img[data-next-image="true"][alt="shot-2.png"]');
+    expect(openedImg?.getAttribute('src')).toBe('https://signed/shot-2.png');
   });
 });
