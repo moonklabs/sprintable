@@ -66,6 +66,16 @@ def test_classify_missing_recipient_targeted_is_observation():
     assert at is True and addressed is False
 
 
+def test_classify_int_str_recipient_normalized_is_addressed():
+    # str() 정규화가 «매칭을 성사»시키는 True-분기 실증 — 양성대조가 «틀릴 수 있어야».
+    # 코드가 str() 없이 `recipient_id in audience` 였다면 int↔str 불일치로 addressed=False 가
+    # 되어 이 테스트가 빨개진다 → 정규화 축을 «실제로» 잰다(카디르 QA Note 1 반영).
+    at, addressed, _, _ = classify_activation({"audience": [123], "recipient_id": "123"}, {})
+    assert at is True and addressed is True
+    _, addressed, _, _ = classify_activation({"audience": ["123"], "recipient_id": 123}, {})
+    assert addressed is True
+
+
 # ── _parse_event 가 분류 결과를 MessageContext 에 실음 ─────────────────────────
 
 @pytest.mark.anyio
@@ -225,7 +235,8 @@ _CASES = [
     ({"audience": ["other"], "recipient_id": "me"}, {}),
     ({"recipient_id": "me"}, {"audience": ["me"], "message_kind": "request", "expects_response": True}),
     ({"audience": ["A", "B"]}, {}),
-    ({"audience": ["me"], "recipient_id": 123}, {}),  # 타입 혼합(int) — str() 정규화 확認
+    ({"audience": [123], "recipient_id": "123"}, {}),  # int audience ↔ str recipient: 정규화로 매칭(addressed=True)
+    ({"audience": ["me"], "recipient_id": 123}, {}),   # 타입 혼합·관찰(밖) 유지(addressed=False)
 ]
 
 
