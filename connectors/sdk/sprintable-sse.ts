@@ -20,6 +20,19 @@
  * ```
  */
 
+/**
+ * 일반 첨부(이미지 포함 전체) — #2578: Python SDK(#2568)만 첨부 정규화를 갖고 있었고
+ * 이 TS SDK엔 처음부터 없었다(images 개념 자체도 없음 — 그건 별개의, 여전히 남은 갭).
+ * 백엔드는 payload.attachments에 이미 이걸 싣는다(mime 필터 없음 — 첨부는 전 타입 대상).
+ */
+export type MessageAttachment = {
+  url: string
+  name: string
+  contentType: string
+  size: number | null
+  assetId: string
+}
+
 export type MessageContext = {
   content: string
   conversationId: string
@@ -28,6 +41,7 @@ export type MessageContext = {
   eventId: string
   seq: number
   isBackfill: boolean
+  attachments: MessageAttachment[]
   raw: Record<string, unknown>
   /** POST /api/v2/conversations/{id}/messages */
   reply(text: string): Promise<void>
@@ -42,6 +56,42 @@ const DEDUP_TTL_MS = 300_000
 
 function _authHeaders(apiKey: string): Record<string, string> {
   return { Authorization: `Bearer ${apiKey}`, 'x-agent-api-key': apiKey }
+}
+
+/** #2578: Python _normalize_attachments 이식. mime 필터 없음 — 전 타입 대상. */
+export function normalizeAttachments(value: unknown): MessageAttachment[] {
+  if (!Array.isArray(value)) return []
+  const out: MessageAttachment[] = []
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null) continue
+    const rec = item as Record<string, unknown>
+    const url = String(rec.url ?? '').trim()
+    if (!url) continue
+    const rawSize = rec.size
+    const size = typeof rawSize === 'number' && Number.isFinite(rawSize) ? rawSize : null
+    out.push({
+      url,
+      name: String(rec.name ?? ''),
+      contentType: String(rec.content_type ?? ''),
+      size,
+      assetId: String(rec.asset_id ?? ''),
+    })
+  }
+  return out
+}
+
+/**
+ * #2578 AC1: 첨부 존재+회수 경로(asset text API)를 에이전트가 알 수 있게 텍스트로 안내.
+ * asset_id가 있으면(정상 케이스) 그 경로를, 없으면(레거시/미등록) url을 안내.
+ */
+export function renderAttachmentNotice(attachments: MessageAttachment[]): string {
+  const lines = attachments.map((a) => {
+    const label = a.name || a.url
+    return a.assetId
+      ? `- ${label} (${a.contentType || 'unknown type'}) — 본문 회수: GET /api/v2/assets/${a.assetId}/text`
+      : `- ${label} (${a.contentType || 'unknown type'}) — url: ${a.url}`
+  })
+  return `[첨부 ${attachments.length}건]\n${lines.join('\n')}\n[/첨부]`
 }
 
 export async function runSprintableSSE(opts: {
@@ -157,8 +207,15 @@ export async function runSprintableSSE(opts: {
       typeof data.payload === 'object' && data.payload !== null ? data.payload : {}
     ) as Record<string, unknown>
 
-    const content = ((data.content ?? payload.content ?? '') as string).trim()
-    if (!content) return null
+    let content = ((data.content ?? payload.content ?? '') as string).trim()
+    const attachments = normalizeAttachments(data.attachments ?? payload.attachments)
+    if (!content && attachments.length === 0) return null
+    // #2578 AC1/AC2: 첨부가 있으면 안내 블록을 content에 병합 — 어댑터마다 따로 렌더하게
+    // 하지 않고 SDK 단일 지점에서 처리(Python SDK #2568과 동형, 어댑터 코드 수정 0으로 전파).
+    if (attachments.length > 0) {
+      const notice = renderAttachmentNotice(attachments)
+      content = content ? `${content}\n\n${notice}` : notice
+    }
 
     const eventId = String(data.event_id ?? payload.id ?? evId ?? crypto.randomUUID())
     if (isDup(eventId)) return null
@@ -185,7 +242,7 @@ export async function runSprintableSSE(opts: {
       : ''
 
     return {
-      content, conversationId, senderId, senderName, eventId, seq, isBackfill, raw: data,
+      content, conversationId, senderId, senderName, eventId, seq, isBackfill, attachments, raw: data,
       async reply(text: string) {
         if (!replyUrl) throw new Error('no conversation_id')
         const r = await fetch(replyUrl, {
