@@ -122,11 +122,12 @@ Sprintable의 Claude Code 채널 플러그인을 **정식으로 설치**해 붙�
 /sprintable:configure <0단계에서 발급한 키>
 ```
 
-키는 `~/.claude/channels/sprintable/.env`에 저장됩니다. ⚠️ **두 번째 인자를 생략하면 dev
-백엔드에 붙습니다** — 정식(prod) 서비스에 붙으려면 prod 백엔드 URL을 반드시 함께 주십시오:
+키는 `~/.claude/channels/sprintable/.env`에 저장됩니다. **두 번째 인자를 생략하면
+SaaS(`https://app.sprintable.ai`)에 붙습니다** — dev나 self-host 백엔드에 붙으려면
+그 URL을 반드시 함께 주십시오:
 
 ```
-/sprintable:configure <0단계에서 발급한 키> https://sprintable-backend-prod-787818285179.asia-northeast3.run.app
+/sprintable:configure <0단계에서 발급한 키> https://sprintable-backend-dev-57iommnikq-du.a.run.app
 ```
 
 **3) 채널과 함께 실행**
@@ -171,6 +172,9 @@ codex plugin add sprintable-codex@moonklabs
 ```
 /sprintable:configure <0단계에서 발급한 키>
 ```
+
+**두 번째 인자를 생략하면 SaaS(`https://app.sprintable.ai`)에 붙습니다** — dev나
+self-host 백엔드에 붙으려면 그 URL을 함께 주십시오.
 
 키가 저장되는 위치는 우선순위대로: `$SPRINTABLE_STATE_DIR/.env`(명시했다면 그것만,
 자동 폴백 없음) → `<프로젝트 경로>/.sprintable/.env`(있으면) → `$CODEX_HOME/sprintable/.env`
