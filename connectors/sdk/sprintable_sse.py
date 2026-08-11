@@ -125,6 +125,19 @@ class MessageImage:
 
 
 @dataclass
+class MessageAttachment:
+    """일반 첨부(이미지 포함 전체) — #2568: 서버는 payload.attachments에 이미 이걸 싣지만
+    이 SDK가 `images`(mime.startswith("image/") 필터)만 읽고 있어 .md 등 비-이미지
+    첨부가 여기서 조용히 사라졌다(백엔드 _msg_payload/_dispatch_conversation_event는
+    attachments를 정상 포함 — 실측 확認, 드롭 지점은 여기뿐)."""
+    url: str
+    name: str = ""
+    content_type: str = ""
+    size: int | None = None
+    asset_id: str = ""
+
+
+@dataclass
 class MessageContext:
     """어댑터 `on_message` 콜백에 전달되는 메시지 컨텍스트."""
     content: str
@@ -135,6 +148,7 @@ class MessageContext:
     seq: int
     is_backfill: bool
     images: list[MessageImage]
+    attachments: list[MessageAttachment]
     raw: dict[str, Any]
 
     # E-ACTIVATION Phase 2 분류(기본값 = 현행 보존: 늘 호출로 취급).
@@ -183,6 +197,48 @@ def _normalize_images(value: Any) -> list[MessageImage]:
             mime=mime,
         ))
     return images
+
+
+def _normalize_attachments(value: Any) -> list[MessageAttachment]:
+    """`images`와 달리 mime 필터 없음 — 첨부는 전 타입(.md 등)이 대상(#2568)."""
+    if not isinstance(value, list):
+        return []
+    out: list[MessageAttachment] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        if not url:
+            continue
+        size = item.get("size")
+        try:
+            size = int(size) if size is not None else None
+        except (TypeError, ValueError):
+            size = None
+        out.append(MessageAttachment(
+            url=url,
+            name=str(item.get("name") or ""),
+            content_type=str(item.get("content_type") or ""),
+            size=size,
+            asset_id=str(item.get("asset_id") or ""),
+        ))
+    return out
+
+
+def render_attachment_notice(attachments: list[MessageAttachment]) -> str:
+    """#2568 AC3: 첨부 존재+회수 경로(asset text API)를 에이전트가 알 수 있게 텍스트로
+    안내. asset_id가 있으면(정상 케이스) 그 경로를, 없으면(레거시/미등록) url을 안내."""
+    lines = []
+    for a in attachments:
+        label = a.name or a.url
+        if a.asset_id:
+            lines.append(
+                f"- {label} ({a.content_type or 'unknown type'}) — "
+                f"본문 회수: GET /api/v2/assets/{a.asset_id}/text"
+            )
+        else:
+            lines.append(f"- {label} ({a.content_type or 'unknown type'}) — url: {a.url}")
+    return f"[첨부 {len(attachments)}건]\n" + "\n".join(lines) + "\n[/첨부]"
 
 
 # ── SDK client ────────────────────────────────────────────────────────────────
@@ -265,8 +321,14 @@ class SprintableSSEClient:
             return None
         content = (data.get("content") or payload.get("content") or "").strip()
         images = _normalize_images(data.get("images") or payload.get("images"))
-        if not content and not images:
+        attachments = _normalize_attachments(data.get("attachments") or payload.get("attachments"))
+        if not content and not images and not attachments:
             return None
+        # #2568 AC2/AC3: 첨부가 있으면 안내 블록을 content에 병합 — 어댑터마다 따로
+        # 렌더하게 하지 않고 SDK 단일 지점에서 처리(어댑터 코드 수정 0으로 전파).
+        if attachments:
+            notice = render_attachment_notice(attachments)
+            content = f"{content}\n\n{notice}" if content else notice
 
         event_id = str(data.get("event_id") or payload.get("id") or ev_id or uuid.uuid4())
         if self._is_dup(event_id):
@@ -312,6 +374,7 @@ class SprintableSSEClient:
             seq=seq,
             is_backfill=is_backfill,
             images=images,
+            attachments=attachments,
             raw=data,
             addressed=addressed,
             audience_targeted=audience_targeted,
