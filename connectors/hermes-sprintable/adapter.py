@@ -68,6 +68,51 @@ try:  # pragma: no cover - prefer the canonical SDK copy when it is on the path
 except ImportError:
     pass
 
+# ── E-ACTIVATION Phase 2 (X · system-side non-invoke) ─────────────────────────
+# 관찰(비지정)이면 모델을 «아예 안 깨우고» 버퍼에 쌓아 다음 활성화 때 hydrate 한다.
+# 설계문서 agent-agent-loop-termination-research §3·§4·§7. 게이트는
+# SPRINTABLE_NONINVOKE_OBSERVATIONS=1 일 때만 — 기본 OFF = 라이브 fleet 무영향.
+# 분류 로직은 SDK(sprintable_sse.classify_activation)가 정본. 단일-폴더 fresh install
+# (SDK 미임포트) 대비 vendored 사본을 두고, SDK 가 path 에 있으면 그 사본을 선호(drift 0).
+NONINVOKE_FLAG_ENV = "SPRINTABLE_NONINVOKE_OBSERVATIONS"
+OBS_BUFFER_MAX = 20
+OBS_ENTRY_MAXLEN = 500
+
+
+def classify_activation(data, payload):
+    """이벤트를 «관찰 vs 호출»로 분류 → (audience_targeted, addressed, message_kind, expects_response).
+    audience 미지정=broadcast → addressed=True(현행 보존). audience 지정 & recipient_id ∈ audience →
+    addressed=True(나를 호출). 그 외 → addressed=False(관찰). vendored copy — SDK 가 정본."""
+    audience = data.get("audience") or payload.get("audience")
+    message_kind = data.get("message_kind") or payload.get("message_kind")
+    expects_response = data.get("expects_response")
+    if expects_response is None:
+        expects_response = payload.get("expects_response")
+    recipient_id = data.get("recipient_id") or payload.get("recipient_id")
+    audience_targeted = bool(audience)
+    addressed = (not audience_targeted) or (
+        recipient_id is not None and str(recipient_id) in {str(a) for a in audience}
+    )
+    return audience_targeted, addressed, message_kind, expects_response
+
+
+def render_observation_block(entries) -> str:
+    """버퍼된 관찰들을 다음 활성화 턴에 붙일 context 블록으로 렌더."""
+    lines = "\n".join(f"- {e}" for e in entries)
+    return (
+        f"[읽음 · 당신이 대상이 아니어서 응답하지 않은 메시지 {len(entries)}건]\n"
+        f"{lines}\n[/읽음]"
+    )
+
+
+try:  # pragma: no cover - prefer the canonical SDK copy when it is on the path
+    from sprintable_sse import (  # noqa: F811
+        classify_activation,
+        render_observation_block,
+    )
+except ImportError:
+    pass
+
 from gateway.config import Platform, PlatformConfig
 from gateway.platforms.base import (
     BasePlatformAdapter,
@@ -144,6 +189,23 @@ class SprintableAdapter(BasePlatformAdapter):
         self._last_event_id: str = ""       # SSE Last-Event-ID for reconnect
         self._last_acked: int = 0           # highest seq acked
         self._seen: Dict[str, float] = {}   # event_id -> ts (dedup)
+        # E-ACTIVATION Phase 2 (X): conversation_id -> 관찰 버퍼(다음 활성화 때 hydrate).
+        self._obs_buffer: Dict[str, list] = {}
+
+    # -- E-ACTIVATION Phase 2 (X) buffer helpers ----------------------------
+
+    def _buffer_observation(self, conversation_id: str, sender_name: str, content: str) -> None:
+        buf = self._obs_buffer.setdefault(conversation_id, [])
+        buf.append(f"{sender_name}: {content}"[:OBS_ENTRY_MAXLEN])
+        if len(buf) > OBS_BUFFER_MAX:
+            del buf[:-OBS_BUFFER_MAX]
+
+    def _flush_observations(self, conversation_id: str, content: str) -> str:
+        buf = self._obs_buffer.pop(conversation_id, None)
+        if not buf:
+            return content
+        block = render_observation_block(buf)
+        return f"{block}\n{content}" if content else block
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -335,6 +397,19 @@ class SprintableAdapter(BasePlatformAdapter):
         sender_id = sender.get("id") or data.get("sender_id") or "sprintable"
         sender_name = sender.get("name") or sender_id
 
+        # E-ACTIVATION Phase 2 (X · flag-gated): 관찰 vs 호출 분류.
+        audience_targeted, addressed, message_kind, expects_response = classify_activation(data, payload)
+        noninvoke = os.getenv(NONINVOKE_FLAG_ENV) == "1"
+        if noninvoke and not addressed:
+            # 관찰 → 모델을 «아예 안 깨운다». 버퍼에 쌓아 다음 활성화 때 hydrate + seq ack
+            # (재범람 방지). handle_message 를 부르지 않으므로 이 turn 은 열리지 않는다.
+            self._buffer_observation(conversation_id, sender_name, content)
+            logger.info("[%s] observation (non-invoke) seq=%s conv=%s from=%s",
+                        self.name, seq, conversation_id, sender_name)
+            if seq:
+                await self._send_ack(seq)
+            return
+
         # AC2: model a Sprintable conversation as a shared Hermes *thread*, not a
         # regular group chat.  Hermes splits regular groups into per-sender
         # sessions when ``group_sessions_per_user`` is enabled; a Sprintable
@@ -353,6 +428,24 @@ class SprintableAdapter(BasePlatformAdapter):
         media_urls, media_types, attachment_notes = await self._fetch_image_attachments(images)
         if attachment_notes:
             content = "\n".join(attachment_notes + ([content] if content else []))
+
+        # E-ACTIVATION Phase 2 (X): 이 대화에 쌓인 관찰을 활성화 턴 context 로 hydrate("다 봄" 보존).
+        if noninvoke:
+            content = self._flush_observations(conversation_id, content)
+
+        # E-ACTIVATION S1 (Y · flag-gated): typed-activation 메타를 «구조화 헤더»로 주입한다.
+        # 기본 OFF → 라이브 fleet 무영향. SPRINTABLE_ACTIVATION_HEADER=1 인 인스턴스만 헤더를 본다.
+        # 헤더가 「너를 향한 메시지인지·응답 요구인지」를 명시 → 비지정 에이전트가 난입 안 하도록.
+        # 분류는 위 classify_activation 결과 재사용(X 게이트와 단일 출처).
+        if os.getenv("SPRINTABLE_ACTIVATION_HEADER") == "1":
+            header = (
+                f"[sprintable] from={sender_name}"
+                f" · audience={'all' if not audience_targeted else 'targeted'}"
+                f" · addressed_to_you={'yes' if addressed else 'no'}"
+                f" · kind={message_kind or '-'}"
+                f" · expects_response={'-' if expects_response is None else str(bool(expects_response)).lower()}"
+            )
+            content = f"{header}\n{content}" if content else header
 
         message_event = MessageEvent(
             text=content,
