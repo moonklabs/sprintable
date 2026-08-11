@@ -499,3 +499,102 @@ describe('ChatBubble — story #2349 사용자 차단 마스킹', () => {
     expect(document.body.textContent).toContain(baseMessage.sender_name);
   });
 });
+
+describe('ChatBubble — story #2572 HITL 승인 요청 버튼 카드', () => {
+  const HITL_CONTENT = '🔒 승인 요청: `Bash`\n입력: {"command":"rm -rf /tmp/x"}\n\n「allow」 또는 「deny <사유>」로 답해주세요 (600초 내 무응답 시 자동 거부).';
+  const hitlMessage: ChatMessage = {
+    ...baseMessage,
+    content: HITL_CONTENT,
+    sender_type: 'agent',
+    created_at: new Date().toISOString(),
+  };
+
+  it('에이전트 발신 + 고정 포맷 매칭이면 버튼 카드로 렌더된다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={hitlMessage} isMine={false} onRespondHitl={async () => {}} />));
+    });
+    expect(container.textContent).toContain('승인 요청');
+    expect(container.textContent).toContain('Bash');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '허용')).toBe(true);
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '거부')).toBe(true);
+  });
+
+  it('PO 가드① — 사람이 같은 텍스트를 쳐도(sender_type=human) 카드화되지 않는다', async () => {
+    const humanMsg = { ...hitlMessage, sender_type: 'human' };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={humanMsg} isMine={false} onRespondHitl={async () => {}} />));
+    });
+    // 카드였다면 있었을 「허용」/「거부」 버튼이 없다 — 원문 그대로 일반 텍스트로만 렌더된다.
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '허용')).toBe(false);
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '거부')).toBe(false);
+    expect(container.textContent).toContain('승인 요청');
+  });
+
+  it('PO 가드② — 문구가 살짝 어긋나면(플러그인 드리프트) 일반 텍스트로 폴백한다(깨진 카드 금지)', async () => {
+    const driftedMsg = { ...hitlMessage, content: HITL_CONTENT.replace('🔒 승인 요청', '🔒 승인요청') };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={driftedMsg} isMine={false} onRespondHitl={async () => {}} />));
+    });
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '허용')).toBe(false);
+    expect(container.textContent).toContain('승인요청');
+  });
+
+  it('onRespondHitl을 안 주면(호출부가 아직 안 넘긴 화면) 카드 대신 일반 텍스트로 폴백한다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={hitlMessage} isMine={false} />));
+    });
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '허용')).toBe(false);
+  });
+
+  it('AC2 — 「허용」 클릭 시 onRespondHitl이 규약 문자열 "allow"로 호출된다', async () => {
+    const onRespondHitl = vi.fn(async () => {});
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={hitlMessage} isMine={false} onRespondHitl={onRespondHitl} />));
+    });
+    const allowBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '허용')!;
+    await act(async () => { allowBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onRespondHitl).toHaveBeenCalledWith('allow');
+  });
+
+  it('AC2 — 「거부」 클릭 → 사유 입력 → 「거부 전송」 시 onRespondHitl이 "deny <사유>"로 호출된다', async () => {
+    const onRespondHitl = vi.fn(async () => {});
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={hitlMessage} isMine={false} onRespondHitl={onRespondHitl} />));
+    });
+    const denyBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '거부')!;
+    await act(async () => { denyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const input = container.querySelector('input') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeSetter.call(input, '위험한 명령');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const submitBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '거부 전송')!;
+    await act(async () => { submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onRespondHitl).toHaveBeenCalledWith('deny 위험한 명령');
+  });
+
+  it('AC3 — hitlAnswer가 있으면(다른 기기 포함) 버튼 대신 상태만 보이고 재클릭이 불가하다', async () => {
+    const onRespondHitl = vi.fn(async () => {});
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble message={hitlMessage} isMine={false} onRespondHitl={onRespondHitl} hitlAnswer={{ decision: 'allow' }} />,
+      ));
+    });
+    expect(container.textContent).toContain('허용됨');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '허용')).toBe(false);
+    expect(onRespondHitl).not.toHaveBeenCalled();
+  });
+
+  it('AC3 — 타임아웃 경과 후엔 "만료됨"이 뜨고 버튼이 사라진다', async () => {
+    const expiredMsg = { ...hitlMessage, created_at: new Date(Date.now() - 700_000).toISOString() };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={expiredMsg} isMine={false} onRespondHitl={async () => {}} />));
+    });
+    expect(container.textContent).toContain('만료됨');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '허용')).toBe(false);
+  });
+});
