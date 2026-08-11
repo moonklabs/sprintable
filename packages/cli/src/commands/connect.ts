@@ -130,7 +130,7 @@ export async function connectCommand(opts: ConnectOptions = {}): Promise<void> {
   // ── 8. 설정 파일 기록 ────────────────────────────────────────────────────
   if (adapter.hasExistingServer()) {
     const overwrite = await confirm({
-      message: `${adapter.configPath}에 이미 'sprintable' 서버가 있습니다. 덮어쓰시겠습니까?`,
+      message: `${adapter.configPath}에 이미 'sprintable-mcp' 서버가 있습니다. 덮어쓰시겠습니까?`,
       default: true,
     });
     if (!overwrite) {
@@ -144,7 +144,7 @@ export async function connectCommand(opts: ConnectOptions = {}): Promise<void> {
 }
 
 function _printSuccess(configPath: string, agent: string): void {
-  console.log(`\n✅ ${configPath}에 'sprintable' 서버가 추가되었습니다.`);
+  console.log(`\n✅ ${configPath}에 'sprintable-mcp' 서버가 추가되었습니다.`);
   console.log("\n다음 단계:");
   const clientName =
     agent === "claude-code" ? "Claude Code"

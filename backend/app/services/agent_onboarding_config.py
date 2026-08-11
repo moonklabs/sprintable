@@ -323,10 +323,14 @@ def _build_stdio_config(api_key_plaintext: str | None) -> dict:
         env["AGENT_API_KEY"] = api_key_plaintext
     return {
         "mcpServers": {
-            "sprintable": {
+            # #2577: server key sprintable -> sprintable-mcp (this is always the
+            # hosted-*tools* MCP, never the channel — collided with the Claude Code
+            # plugin's separate bundled channel MCP, which is also named sprintable
+            # there; distinct keys now).
+            "sprintable-mcp": {
                 "type": "stdio",
                 "command": "uvx",
-                "args": ["sprintable"],
+                "args": ["sprintable"],  # PyPI package/console-script name — unchanged.
                 "env": env,
             }
         }
@@ -348,7 +352,8 @@ def _build_http_config(api_key_plaintext: str | None) -> dict | None:
         headers["Authorization"] = f"Bearer {api_key_plaintext}"
     return {
         "mcpServers": {
-            "sprintable": {
+            # #2577: same rename as the stdio variant above.
+            "sprintable-mcp": {
                 "type": "http",
                 "url": url,
                 "headers": headers,
@@ -452,12 +457,12 @@ def build_hermes_mcp_cli_setup(
     그대로 가져와 hermes CLI 인자로 재구성한다(값 자체를 새로 만들지 않음 — SSOT 단일화).
     """
     text = _HTTP_MCP_CLI_SETUP_TEXT[resolve_locale(locale)]
-    server = mcp_config["mcpServers"]["sprintable"]
+    server = mcp_config["mcpServers"]["sprintable-mcp"]  # #2577: renamed from "sprintable"
     if server["type"] == HTTP:
-        command = f"hermes mcp add sprintable --url {server['url']} --auth header"
+        command = f"hermes mcp add sprintable-mcp --url {server['url']} --auth header"
     else:
         args = " ".join(server.get("args", []))
-        command = f"hermes mcp add sprintable --command {server['command']} --args {args}"
+        command = f"hermes mcp add sprintable-mcp --command {server['command']} --args {args}"
     lines = [
         text["title"], "", text["intro"], "",
         text["command_heading"], "```", command, "```", text["command_note"],

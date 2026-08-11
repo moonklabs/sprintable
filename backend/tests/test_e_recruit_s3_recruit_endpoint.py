@@ -133,7 +133,7 @@ async def test_recruit_success_response_shape():
     }
     bundle = {
         "default_transport": "stdio",
-        "mcp_config": {"mcpServers": {"sprintable": {"type": "stdio"}}},
+        "mcp_config": {"mcpServers": {"sprintable-mcp": {"type": "stdio"}}},
         "mcp_config_alternatives": {},
     }
 
@@ -229,7 +229,7 @@ async def test_recruit_success_hermes_http_capable_returns_real_mcp_config(monke
 
     assert response["default_transport"] in ("http", "stdio")
     assert response["mcp_config"] is not None
-    assert response["mcp_config"]["mcpServers"]["sprintable"]["type"] in ("http", "stdio")
+    assert response["mcp_config"]["mcpServers"]["sprintable-mcp"]["type"] in ("http", "stdio")
     session.commit.assert_awaited_once()
 
 

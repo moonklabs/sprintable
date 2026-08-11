@@ -44,7 +44,7 @@ def test_build_agent_mcp_config_hermes_http(monkeypatch):
     monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.sprintable.ai/mcp")
     cfg = gen.build_agent_mcp_config(api_key_plaintext="sk_test", runtime="hermes", transport="http")
     assert cfg is not None
-    server = cfg["mcpServers"]["sprintable"]
+    server = cfg["mcpServers"]["sprintable-mcp"]
     assert server["type"] == "http"
     assert server["url"] == "https://mcp.sprintable.ai/mcp"
     assert server["headers"]["Authorization"] == "Bearer sk_test"
@@ -53,7 +53,7 @@ def test_build_agent_mcp_config_hermes_http(monkeypatch):
 def test_build_agent_mcp_config_hermes_stdio():
     cfg = gen.build_agent_mcp_config(api_key_plaintext="sk_test", runtime="hermes", transport="stdio")
     assert cfg is not None
-    server = cfg["mcpServers"]["sprintable"]
+    server = cfg["mcpServers"]["sprintable-mcp"]
     assert server["type"] == "stdio"
     assert server["command"] == "uvx"
     assert server["args"] == ["sprintable"]
@@ -71,18 +71,18 @@ def test_build_agent_mcp_config_bundle_hermes_includes_both_transports(monkeypat
     monkeypatch.setenv("MCP_PUBLIC_URL", "https://mcp.sprintable.ai/mcp")
     bundle = gen.build_agent_mcp_config_bundle(api_key_plaintext="sk_test", runtime="hermes")
     assert bundle["default_transport"] == "http"
-    assert bundle["mcp_config"]["mcpServers"]["sprintable"]["type"] == "http"
+    assert bundle["mcp_config"]["mcpServers"]["sprintable-mcp"]["type"] == "http"
     assert "stdio" in bundle["mcp_config_alternatives"]
 
 
 def test_build_hermes_mcp_cli_setup_http_command():
-    cfg = {"mcpServers": {"sprintable": {
+    cfg = {"mcpServers": {"sprintable-mcp": {
         "type": "http", "url": "https://mcp.sprintable.ai/mcp",
         "headers": {"Authorization": "Bearer sk_test"},
     }}}
     text = gen.build_hermes_mcp_cli_setup(cfg, "sk_test")
     command_line = next(line for line in text.splitlines() if line.startswith("hermes mcp add"))
-    assert command_line == "hermes mcp add sprintable --url https://mcp.sprintable.ai/mcp --auth header"
+    assert command_line == "hermes mcp add sprintable-mcp --url https://mcp.sprintable.ai/mcp --auth header"
     assert "sk_test" in text
     # 실행 커맨드 자체는 파일 드롭인이 아니다 — .mcp.json은 설명 문구에만 등장해야지
     # 커맨드로 오인될 자리(등록 명령 코드블록)엔 나오면 안 된다(§0 재발 방지).
@@ -91,11 +91,11 @@ def test_build_hermes_mcp_cli_setup_http_command():
 
 
 def test_build_hermes_mcp_cli_setup_stdio_command():
-    cfg = {"mcpServers": {"sprintable": {
+    cfg = {"mcpServers": {"sprintable-mcp": {
         "type": "stdio", "command": "uvx", "args": ["sprintable"], "env": {},
     }}}
     text = gen.build_hermes_mcp_cli_setup(cfg, None)
-    assert "hermes mcp add sprintable --command uvx --args sprintable" in text
+    assert "hermes mcp add sprintable-mcp --command uvx --args sprintable" in text
 
 
 def test_list_runtime_capabilities_hermes_has_both_axes(monkeypatch):
@@ -131,10 +131,10 @@ async def test_connection_artifact_hermes_emits_mcp_setup_and_connector_setup(mo
     assert filenames == {"HERMES_MCP_SETUP.md", "CONNECTOR_SETUP.md"}
     assert ".mcp.json" not in filenames  # hermes는 파일 드롭인이 아니므로 이 이름이 나오면 안 됨
     assert out["mcp_config"] is not None
-    assert out["mcp_config"]["mcpServers"]["sprintable"]["type"] in ("http", "stdio")
+    assert out["mcp_config"]["mcpServers"]["sprintable-mcp"]["type"] in ("http", "stdio")
 
     mcp_setup = next(f for f in out["files"] if f["filename"] == "HERMES_MCP_SETUP.md")
-    assert "hermes mcp add sprintable" in mcp_setup["content"]
+    assert "hermes mcp add sprintable-mcp" in mcp_setup["content"]
     connector_setup = next(f for f in out["files"] if f["filename"] == "CONNECTOR_SETUP.md")
     assert "connectors/" in connector_setup["content"]
 

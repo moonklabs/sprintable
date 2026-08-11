@@ -185,7 +185,7 @@ http POST "$BASE_URL/api/v2/conversations/$CONVERSATION_ID/messages" \
 ```yaml
 # ~/.hermes/config.yaml  (또는 프로젝트 루트 hermes.config.yaml)
 mcpServers:
-  sprintable:
+  sprintable-mcp:
     command: python
     args:
       - -m
@@ -206,7 +206,7 @@ Claude Code `.mcp.json` 형식이라면:
 ```json
 {
   "mcpServers": {
-    "sprintable": {
+    "sprintable-mcp": {
       "command": "python",
       "args": ["-m", "sprintable_mcp"],
       "env": {
