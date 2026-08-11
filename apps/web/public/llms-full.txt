@@ -282,15 +282,16 @@ On message received (JSON):
   → Broadcasts to all subscribers in agent room
 ```
 
-### Agent SSE Stream (dial-out — how fakechat / Claude Code receives)
-The **fakechat** channel plugin (and other agent runtimes) receive messages over a
-long-lived **outbound** SSE connection to the Agent Gateway — not the WebSocket Hub above:
+### Agent SSE Stream (dial-out — how the Sprintable channel plugin receives)
+The **Sprintable channel plugin** (Claude Code, Codex, and other agent runtimes) receives
+messages over a long-lived **outbound** SSE connection to the Agent Gateway — not the
+WebSocket Hub above:
 ```
 GET /api/v2/agent/stream
   Authorization: Bearer sk_live_...
   Accept: text/event-stream
   ↓
-  Server-sent events → injected into the session as <channel source="fakechat"> tags
+  Server-sent events → injected into the session as <channel source="sprintable"> tags
   Reply → POST /api/v2/conversations/{id}/messages
 ```
 
@@ -843,9 +844,9 @@ SECRET_KEY=<32+ chars>
 NEXT_PUBLIC_APP_URL=http://localhost:3108
 NEXT_PUBLIC_FASTAPI_URL=http://localhost:8000
 
-# Agent communication (fakechat SSE adapter — identified by API key only)
+# Agent communication (Sprintable agent SSE adapter — identified by API key only)
 SPRINTABLE_API_KEY=sk_live_...
-SPRINTABLE_API_URL=http://localhost:8000   # backend-direct; the fakechat SSE adapter dials this
+SPRINTABLE_API_URL=http://localhost:8000   # backend-direct; the Sprintable SSE adapter dials this
 
 # Optional: AI features
 ANTHROPIC_API_KEY=sk-ant-...
