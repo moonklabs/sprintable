@@ -23,6 +23,7 @@
   "license": "MIT",
   "scripts": {
     "build": "tsup index.ts setup-entry.ts --format esm --dts --out-dir dist --clean",
+    "prepack": "npm run build",
     "test": "bun test src/channel.test.ts"
   },
   "openclaw": {
