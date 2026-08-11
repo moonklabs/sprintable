@@ -187,7 +187,7 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
                 type="button"
                 onClick={goPrev}
                 aria-label={t('lightboxPrev')}
-                className="absolute left-2 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white transition hover:bg-black/60 md:left-4"
+                className="absolute left-2 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white transition hover:bg-black/60 lg:left-4"
               >
                 <ChevronLeft className="h-6 w-6" aria-hidden />
               </button>
@@ -197,7 +197,7 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
                 type="button"
                 onClick={goNext}
                 aria-label={t('lightboxNext')}
-                className="absolute right-2 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white transition hover:bg-black/60 md:right-4"
+                className="absolute right-2 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white transition hover:bg-black/60 lg:right-4"
               >
                 <ChevronRight className="h-6 w-6" aria-hidden />
               </button>
