@@ -15,6 +15,7 @@ import { getFileIcon } from '@/lib/file-icon';
 import { AttachmentImage } from './attachment-image';
 import { AttachmentMedia } from './attachment-media';
 import { AttachmentFile } from './attachment-file';
+import { ImageLightbox, type LightboxItem } from './image-lightbox';
 import { MessageContextMenu, type CiteAction } from './message-context-menu';
 import { SenderProfilePopover } from './sender-profile-popover';
 import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from './presence-dot';
@@ -297,6 +298,26 @@ export function ChatBubble({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   // story #2349 — "상대 프로필" 진입점(자기 자신엔 없다, isMine 게이트).
   const [profilePopover, setProfilePopover] = useState<ContextMenuState | null>(null);
+  // story #2037 — 라이트박스. 이 메시지의 이미지 첨부에만 국한된 순번(AC3, 여러 장 넘기기는
+  // 메시지 단위 스코프)을 attachments 원 배열 순서 그대로 매겨 둔다(비-이미지 첨부가 섞여
+  // 있어도 이미지끼리의 상대 순서만 쓰면 되므로). react-hooks/immutability가 render 중
+  // 변수 재대입을 막아 카운터를 안 쓴다 — 대신 "이 위치 앞의 이미지 개수"를 순수하게 센다
+  // (한 메시지 첨부 수는 항상 소수라 O(n²)는 무관하다).
+  const imageAttachmentEntries = useMemo(() => {
+    const atts = message.attachments ?? [];
+    const isImageAtt = (a: (typeof atts)[number]) => Boolean(a.url) && a.content_type?.startsWith('image/');
+    return atts.map((att, pos) => ({
+      att,
+      imageIndex: isImageAtt(att) ? atts.slice(0, pos).filter(isImageAtt).length : undefined,
+    }));
+  }, [message.attachments]);
+  const lightboxItems: LightboxItem[] = useMemo(
+    () => imageAttachmentEntries
+      .filter((e) => e.imageIndex !== undefined)
+      .map((e) => ({ storedUrl: e.att.url!, alt: e.att.name ?? e.att.filename ?? '첨부파일' })),
+    [imageAttachmentEntries],
+  );
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const handleOpenProfilePopover = useCallback((e: { currentTarget: Element }) => {
     if (isMine) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -504,13 +525,20 @@ export function ChatBubble({
               서버 계약을 스스로 어기지 않는다는 것을 명시한다). */}
           {!isDeleted && message.attachments && message.attachments.length > 0 && (
             <div className="flex flex-col gap-1.5">
-              {message.attachments.map((att, i) => {
+              {imageAttachmentEntries.map(({ att, imageIndex }, i) => {
                 const href = att.url;
                 if (!href) return null;
                 const label = att.name ?? att.filename ?? '첨부파일';
-                const isImage = att.content_type?.startsWith('image/');
-                if (isImage) {
-                  return <AttachmentImage key={href ?? i} storedUrl={href} conversationId={message.memo_id} alt={label} />;
+                if (imageIndex !== undefined) {
+                  return (
+                    <AttachmentImage
+                      key={href ?? i}
+                      storedUrl={href}
+                      conversationId={message.memo_id}
+                      alt={label}
+                      onOpen={() => setLightboxIndex(imageIndex)}
+                    />
+                  );
                 }
                 const isAudio = att.content_type?.startsWith('audio/');
                 const isVideo = att.content_type?.startsWith('video/');
@@ -582,6 +610,16 @@ export function ChatBubble({
           isAgent={isAgent}
           onClose={() => setProfilePopover(null)}
           onBlock={onBlockUser}
+        />
+      )}
+
+      {/* story #2037 — 이미지 첨부 확대 뷰 */}
+      {lightboxIndex !== null && (
+        <ImageLightbox
+          items={lightboxItems}
+          startIndex={lightboxIndex}
+          conversationId={message.memo_id}
+          onClose={() => setLightboxIndex(null)}
         />
       )}
     </>
