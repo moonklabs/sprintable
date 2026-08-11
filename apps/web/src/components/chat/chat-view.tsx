@@ -13,6 +13,8 @@ import { ThreadPanel } from './thread-panel';
 import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { normalizeToMessage, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
+import { isHitlReply, parseHitlRequest } from '@/lib/hitl-classifier';
+import type { HitlAnswer } from './hitl-approval-card';
 import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
 import { useEntityStatusBatchFetch } from '@/hooks/use-entity-status-batch';
 import { useMessageRangeSelection } from '@/hooks/use-message-range-selection';
@@ -650,6 +652,28 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     return () => observer.disconnect();
   }, [loading, hasMore, loadingMore, handleLoadMore]);
 
+  // story #2572 AC3: 이미 답변된 승인 요청은 버튼을 잠근다(다른 기기·새로고침 후에도 유지).
+  // 요청(에이전트 발신, 고정 포맷) 다음에 오는 첫 human allow/deny 답을 그 요청의 답으로
+  // 짝짓는다 — 새 요청이 끼어들면 미답변인 채로 넘어간다(그 사이 pendingRequestId 재대입).
+  const hitlAnswers = useMemo(() => {
+    const map = new Map<string, HitlAnswer>();
+    let pendingRequestId: string | null = null;
+    for (const m of messages) {
+      if (m.sender_type === 'agent' && parseHitlRequest(m.content)) {
+        pendingRequestId = m.id;
+        continue;
+      }
+      if (pendingRequestId && m.sender_type === 'human') {
+        const reply = isHitlReply(m.content);
+        if (reply) {
+          map.set(pendingRequestId, reply);
+          pendingRequestId = null;
+        }
+      }
+    }
+    return map;
+  }, [messages]);
+
   const groups = groupByDate(messages);
 
   // story #1977: "여기부터 안읽음" 마커 위치 — markerBoundary(동결된 진입 시점 last_read_at)
@@ -778,6 +802,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                             highlight={msg.id === highlightId}
                             projectId={projectId}
                             entityStatusByKey={entityStatusByKey}
+                            hitlAnswer={hitlAnswers.get(msg.id) ?? null}
+                            onRespondHitl={(content) => handleSend(content)}
                             isCiteAnchor={citeSelection.isAnchor(msg.id)}
                             isCiteInRange={citeSelection.isInRange(msg.id, orderedMessageIds)}
                             citeAction={
