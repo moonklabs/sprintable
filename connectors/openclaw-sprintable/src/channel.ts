@@ -56,6 +56,7 @@ export const sprintablePlugin: ChannelPlugin<SprintableAccount> = createChatChan
     meta: {
       id: CHANNEL_ID,
       label: 'Sprintable',
+      selectionLabel: 'Sprintable Agent Gateway',
       docsPath: '/channels/sprintable',
       blurb: 'Sprintable project management — dial-out SSE gateway',
     },
