@@ -93,7 +93,7 @@ export async function runSprintableSSE(opts: {
     }
     if (lastEventId) headers['Last-Event-ID'] = lastEventId
 
-    const resp = await fetch(`${apiUrl}/api/v2/agent/stream`, { headers })
+    const resp = await fetch(`${apiUrl}/api/v2/agent/stream`, { headers, signal: opts.signal })
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     if (!resp.body) throw new Error('no body')
 
@@ -106,6 +106,10 @@ export async function runSprintableSSE(opts: {
     let evType = 'message', evId = '', dataLines: string[] = []
 
     while (true) {
+      if (opts.signal?.aborted) {
+        await reader.cancel()
+        return
+      }
       const { done, value } = await reader.read()
       if (done) break
       buf += dec.decode(value, { stream: true })
