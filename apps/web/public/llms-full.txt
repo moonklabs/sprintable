@@ -283,9 +283,10 @@ On message received (JSON):
 ```
 
 ### Agent SSE Stream (dial-out — how the Sprintable channel plugin receives)
-The **Sprintable channel plugin** (Claude Code, Codex, and other agent runtimes) receives
-messages over a long-lived **outbound** SSE connection to the Agent Gateway — not the
-WebSocket Hub above:
+The **Sprintable channel plugin** receives messages over a long-lived **outbound** SSE
+connection to the Agent Gateway — not the WebSocket Hub above. Formal install exists for
+Claude Code, Codex, Grok Build, Gemini CLI, Hermes Agent, OpenClaw, and OpenCode; see
+`connect-guide.txt` for the exact command per runtime (Pi and Cursor are not yet shipped):
 ```
 GET /api/v2/agent/stream
   Authorization: Bearer sk_live_...
