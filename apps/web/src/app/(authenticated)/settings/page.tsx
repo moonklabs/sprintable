@@ -28,6 +28,7 @@ import { GateLevelMatrix } from '@/components/settings/gate-level-matrix';
 import { TwoFactorSection } from '@/components/settings/two-factor-section';
 import { SetPasswordSection } from '@/components/settings/set-password-section';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { canSubmitOrgDelete } from './org-delete-gate';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -145,6 +146,15 @@ export default function SettingsPage() {
   const [deletingOrg, setDeletingOrg] = useState(false);
   const [orgImpact, setOrgImpact] = useState<{ project_count: number; member_count: number; has_active_subscription: boolean } | null>(null);
   const [orgImpactLoading, setOrgImpactLoading] = useState(false);
+  // story #2092(P0) — orgImpact===null 하나로는 "아직 안 물었다"와 "물었는데 실패했다"를
+  // 구분 못 해, 조회 실패가 곧 "영향도 없음"인 것처럼 버튼을 열어줬다(has_active_subscription
+  // 기본값 false가 실패 케이스에도 그대로 적용). 이 플래그로 실패 상태를 명시적으로 갈라
+  // 삭제 진행을 1차로 막는다(AC2) — 서버 거부(#2898, 이미 배포됨)가 최종 방어선이지만
+  // 화면도 "안내이지 방어가 아니다"에서 "안내"쪽은 최소한 정확해야 한다.
+  const [orgImpactFailed, setOrgImpactFailed] = useState(false);
+  // AC3 탈출구 — 조회 실패가 계속될 때만 의미를 갖는 명시적 인정 체크. 재조회가 성공하면
+  // (fetchOrgImpact 재호출) 무의미해지므로 그때마다 초기화한다.
+  const [confirmWithoutImpact, setConfirmWithoutImpact] = useState(false);
   const [projectMemberships] = useState<Array<{ projectId: string; projectName: string }>>([]);
   const [settings, setSettings] = useState<NotificationSetting[]>([]);
   // story #2272 — 알림 설정(형제: 이벤트타입별 채널토글, 위 settings)과 같은 자리에 선다.
@@ -184,31 +194,67 @@ export default function SettingsPage() {
   const ctxRole = orgMemberships.find(o => o.orgId === (orgId ?? ctxOrgId))?.role;
   const currentOrgRole = (orgInfo?.role ?? ctxRole ?? 'member') as string;
 
-  const handleOpenDeleteOrg = async () => {
+  // story #2092(P0) — 삭제 다이얼로그를 열 때·재시도할 때 공통으로 쓰는 영향도 조회.
+  // 실패(네트워크 에러든 non-2xx든)를 orgImpactFailed로 명시 구분 — orgImpact===null은
+  // 더 이상 "실패"의 대리 신호가 아니다(위 상태 선언 주석 참고).
+  const fetchOrgImpact = async () => {
     if (!orgInfo) return;
-    setShowDeleteOrgConfirm(true);
-    setDeleteOrgConfirmName('');
-    setOrgImpact(null);
     setOrgImpactLoading(true);
+    setOrgImpactFailed(false);
+    setConfirmWithoutImpact(false);
     try {
       const res = await fetch(`/api/organizations/${orgInfo.id}/impact`).catch(() => null);
-      if (res?.ok) {
-        const json = await res.json() as { data?: { project_count: number; member_count: number; has_active_subscription: boolean } };
-        setOrgImpact(json.data ?? null);
+      if (!res?.ok) {
+        setOrgImpact(null);
+        setOrgImpactFailed(true);
+        return;
       }
+      const json = await res.json() as { data?: { project_count: number; member_count: number; has_active_subscription: boolean } };
+      if (!json.data) {
+        setOrgImpact(null);
+        setOrgImpactFailed(true);
+        return;
+      }
+      setOrgImpact(json.data);
     } finally {
       setOrgImpactLoading(false);
     }
   };
 
+  const handleOpenDeleteOrg = async () => {
+    if (!orgInfo) return;
+    setShowDeleteOrgConfirm(true);
+    setDeleteOrgConfirmName('');
+    setOrgImpact(null);
+    setOrgImpactFailed(false);
+    setConfirmWithoutImpact(false);
+    await fetchOrgImpact();
+  };
+
   const handleDeleteOrg = async () => {
-    if (!orgInfo || deleteOrgConfirmName !== orgInfo.name || deletingOrg) return;
+    if (!orgInfo) return;
+    if (!canSubmitOrgDelete({
+      orgName: orgInfo.name,
+      confirmName: deleteOrgConfirmName,
+      deletingOrg,
+      orgImpactLoading,
+      hasActiveSubscription: orgImpact?.has_active_subscription ?? false,
+      orgImpactFailed,
+      confirmWithoutImpact,
+    })) return;
     setDeletingOrg(true);
     try {
       const res = await fetch(`/api/organizations/${orgInfo.id}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirmation: orgInfo.name }),
+        // story #2092 AC3 — 영향도 조회가 실패한 채로 사용자가 명시 인정했을 때만 true.
+        // 서버(#2898)가 이 신호와 무관하게 자체 재조회로 최종 판정한다 — 이 필드는
+        // "재조회도 실패하면 그때 이 인정을 참고하라"는 사용자 신호일 뿐, 화면이 서버를
+        // 대신 판정하지 않는다.
+        body: JSON.stringify({
+          confirmation: orgInfo.name,
+          confirm_without_impact: orgImpactFailed && confirmWithoutImpact,
+        }),
       });
       if (res.ok) {
         window.location.href = '/onboarding';
@@ -1403,7 +1449,35 @@ export default function SettingsPage() {
                 </ul>
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">영향도 정보를 불러올 수 없습니다. 계속 진행해도 됩니다.</p>
+              // story #2092(P0) — 예전엔 "계속 진행해도 됩니다"로 되돌릴 수 없는 삭제를
+              // 권했다(동작 결함, 문구만으로 안 닫힘). 이제 1차로 진행을 막고(버튼 disabled,
+              // 아래), 재시도 또는 명시 인정(탈출구)만 남긴다. 서버(#2898)가 최종 방어선.
+              <Alert variant="warning">
+                <AlertDescription className="space-y-3">
+                  <p>영향 범위를 확인할 수 없습니다. 지금은 삭제를 진행할 수 없습니다.</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void fetchOrgImpact()}
+                    disabled={orgImpactLoading}
+                  >
+                    다시 시도
+                  </Button>
+                  <label className="flex items-start gap-2 pt-1">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={confirmWithoutImpact}
+                      onChange={(e) => setConfirmWithoutImpact(e.target.checked)}
+                    />
+                    <span className="space-y-0.5">
+                      <span className="block">영향 범위를 확인하지 못한 상태로 삭제합니다.</span>
+                      <span className="block text-xs">확인 없이 삭제한 것으로 기록됩니다.</span>
+                    </span>
+                  </label>
+                </AlertDescription>
+              </Alert>
             )}
 
             <div className="space-y-1.5">
@@ -1432,7 +1506,15 @@ export default function SettingsPage() {
                 variant="destructive"
                 className="flex-1"
                 onClick={() => void handleDeleteOrg()}
-                disabled={deleteOrgConfirmName !== orgInfo.name || deletingOrg || (orgImpact?.has_active_subscription ?? false)}
+                disabled={!canSubmitOrgDelete({
+                  orgName: orgInfo.name,
+                  confirmName: deleteOrgConfirmName,
+                  deletingOrg,
+                  orgImpactLoading,
+                  hasActiveSubscription: orgImpact?.has_active_subscription ?? false,
+                  orgImpactFailed,
+                  confirmWithoutImpact,
+                })}
               >
                 {deletingOrg ? '삭제 중…' : '영구 삭제'}
               </Button>
