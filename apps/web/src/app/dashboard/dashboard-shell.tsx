@@ -1,9 +1,10 @@
 'use client';
 
-import { createContext, useContext, useCallback, useEffect, useMemo, useState, startTransition } from 'react';
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState, startTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   TAB_PROJECT_STORAGE_KEY,
+  bumpOrgSyncVersion,
   installProjectHeaderInterceptor,
   resolveEffectiveProjectId,
   setEffectiveProjectId,
@@ -63,6 +64,15 @@ interface DashboardShellProps extends DashboardContext {
   // 이 값을 우선한다. 경로 세그먼트가 없는 flat 라우트(/glance 등)에선 undefined.
   pathOrgId?: string;
   pathProjectId?: string;
+  // story #2545(카디르 라이브 재QA) — JWT `app_metadata.org_id` 클레임을 직접 읽은 값
+  // (getServerSession, 신규 fetch 0). #2544가 "top-level org_id"라 부른 바로 그 필드
+  // (backend/app/dependencies/auth.py의 `jwt_org_id = auth.claims.get("app_metadata",
+  // {}).get("org_id")`와 동일 — "top-level"은 app_metadata 안에서 org_id가 최상위라는
+  // 뜻이지 JWT payload 자체의 최상위 필드라는 뜻이 아니다). `orgId`(=me?.org_id)는 실제로는
+  // 주로 `app_metadata.project_id` 클레임으로 찾은 TeamMember 행의 org라 두 클레임이
+  // 부분적으로 stale하면(org_id는 reset·project_id는 옛 org 그대로) `orgId`와 갈릴 수 있다 — 아래
+  // 자동 switch-org effect의 불일치 판정은 이 값을 우선한다(없으면 `orgId`로 폴백).
+  jwtOrgId?: string;
   children: React.ReactNode;
 }
 
@@ -264,9 +274,11 @@ export function DashboardShell({
   orgMemberships,
   pathOrgId,
   pathProjectId,
+  jwtOrgId,
   children,
 }: DashboardShellProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const showTopBar = !pathname.startsWith('/settings');
   const tabletCentered = isTabRootPage(pathname);
 
@@ -278,6 +290,52 @@ export function DashboardShell({
   // 엉뚱한 org로 검증됨). setEffectiveProjectId와 동일하게 렌더 단계에서 동기화 —
   // 인터셉터 설치(useProjectSsot 내부)보다 먼저 ref가 채워져 있어야 첫 자식 fetch도 커버된다.
   setEffectiveOrgId(effectiveOrgId);
+
+  // story #2545 — pathOrgId(URL이 그리는 org)가 실제 토큰의 org와 다르면 displayOrg는 이미
+  // pathOrgId로 "현재 조직"처럼 보이는데(바로 위 effectiveOrgId), 그건 X-Org-Id **헤더
+  // 오버라이드**일 뿐 실제 토큰은 여전히 다른 org일 수 있다. #2544 grounding(dev Cloud Run
+  // 로그 실측)이 보인 대로 이 헤더 경로는 컴포넌트별 마운트 타이밍에 따라 레이스가 나
+  // 간헐적으로 403이 난다. 근본: 헤더로 매 요청 우회하는 대신, 불일치를 발견하는 즉시 실제
+  // 토큰을 pathOrgId로 재발급해 그 뒤 모든 요청(헤더 有無 무관)이 처음부터 맞게 만든다 —
+  // AC2가 명시 허용한 두 방법(헤더 신뢰 / 토큰 재발급) 중 후자.
+  //
+  // ⚠️카디르 라이브 재QA(2026-08-10, qa:changes) — 이 비교엔 `orgId`(me?.org_id)가 아니라
+  // `jwtOrgId`를 쓴다. `orgId`는 실제로는 대개 `app_metadata.project_id` 클레임으로 찾은
+  // TeamMember 행의 org라 `app_metadata.org_id` 클레임(위 jwtOrgId 정의 참고)과 다른
+  // 신호다 — 부분-stale JWT(org_id는 reset됐는데 project_id는 옛 org를 여전히 가리키는
+  // 경우) 라이브 재현에서 orgId가 이미 pathOrgId와 "우연히" 같아져 이 effect가 조기
+  // return하고, 그 순간 실제 서명된 app_metadata.org_id 클레임은 여전히 달라 switch-org가
+  // 0회 발화했다. jwtOrgId(getServerSession이 jwtVerify 직후 읽어둔 그 클레임)를 우선하고,
+  // 그 클레임이 없는 인증경로(Firebase 세션 —
+  // db/server.ts 참고)에서만 orgId로 폴백한다.
+  const actualTokenOrgId = jwtOrgId ?? orgId;
+  const orgSyncAttemptedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pathOrgId || pathOrgId === actualTokenOrgId) return;
+    if (orgSyncAttemptedRef.current === pathOrgId) return;
+    orgSyncAttemptedRef.current = pathOrgId;
+    void (async () => {
+      try {
+        const res = await fetch('/api/switch-org', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ org_id: pathOrgId }),
+        });
+        const json = await res.json().catch(() => null) as { data?: { ok?: boolean } } | null;
+        if (res.ok && json?.data?.ok) {
+          // story #2545(카디르 라이브 재QA 2단계) — router.refresh()는 서버 컴포넌트만
+          // 재실행한다. `useEffect(fetch, [projectId])`형 클라이언트 fetch(hypotheses·goals
+          // 등)는 project는 안 바뀌어 재요청이 안 되고 switch-org 前 확定된 403/404에
+          // 고정된다 — bumpOrgSyncVersion()으로 그걸 구독하는 컴포넌트만 재요청시킨다
+          // (project-context-client.ts 참고, 전체 fetch 게이트는 스코프 밖).
+          bumpOrgSyncVersion();
+          router.refresh();
+        }
+      } catch {
+        // best-effort — 실패해도 기존 X-Org-Id 헤더 오버라이드가 그대로 폴백.
+      }
+    })();
+  }, [pathOrgId, actualTokenOrgId, router]);
   // R2: URL `?p=` = flat 라우트의 탭별 SSOT. pathProjectId(경로 resolve)가 있으면 그게 최우선.
   const effectiveProjectId = useProjectSsot(projectId, projectMemberships, pathProjectId);
   const effectiveProjectName = projectMemberships.find((m) => m.projectId === effectiveProjectId)?.projectName ?? projectName;

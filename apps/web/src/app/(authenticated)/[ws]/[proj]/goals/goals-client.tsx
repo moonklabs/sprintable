@@ -8,6 +8,7 @@ import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors, cl
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { computeReorderPatch } from '@/lib/epic-steer';
+import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { useGoalsRoute } from './goals-context';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -871,6 +872,9 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   const [justDispatched, setJustDispatched] = useState(false);
   const [dispatchedTo, setDispatchedTo] = useState<string[]>([]); // 지정 수신자 이름(핸드오프 표시용)
   const sensors = useSensors(useSensor(MousePointerSensor, { activationConstraint: { distance: 8 } }));
+  // story #2545(카디르 라이브 재QA 2단계) — org 불일치 자동교정(switch-org)이 이 fetch 直後
+  // 성공하면 project는 안 바뀌므로 재요청 트리거가 없었다(project-context-client.ts 참고).
+  const orgSyncVersion = useOrgSyncVersion();
 
   // wedge #2: order_by=position 옵트인 — 큐레이션 prefix + 자동(NULL) tail. position 모드는 BE가
   // 커서를 발행하지 않으므로 이어달리기(cursor pagination) 없이 전량(상위 STEER_LIMIT) 로드한다(AC4).
@@ -888,7 +892,10 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+    // orgSyncVersion은 콜백 안에서 안 읽는다 — switch-org 성공 直後 이 콜백 새 참조를
+    // 강제해 재요청시키기 위한 의도적 invalidation 트리거다(story #2545, project-context-
+    // client.ts 참고).
+  }, [projectId, orgSyncVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     const { active, over } = event;

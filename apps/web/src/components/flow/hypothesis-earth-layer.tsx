@@ -8,6 +8,7 @@ import { HypothesisStatusBadge } from '@/components/hypotheses/hypothesis-status
 import { ScaleLadder } from '@/components/flow/scale-ladder';
 import { UnattachedBucket } from '@/components/flow/unattached-bucket';
 import { GuidedHypothesisEntry } from '@/components/flow/guided-hypothesis-entry';
+import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { cn } from '@/lib/utils';
 
 /**
@@ -155,9 +156,15 @@ export function HypothesisEarthLayer({
     }
   }, [projectId]);
 
+  // story #2545(카디르 라이브 재QA 2단계) — org 불일치 자동교정(switch-org, DashboardShell)이
+  // 이 effect *後*에 성공하면(같은 ms대 레이스로 이 fetch가 먼저 옛 org 403을 이미 확定한
+  // 경우) project는 안 바뀌므로 재요청 트리거가 없었다. orgSyncVersion을 의존성에 얹어
+  // switch-org 성공 直後 정확히 한 번 재요청되게 한다(다른 세 컴포넌트와 동일 패턴).
+  const orgSyncVersion = useOrgSyncVersion();
+
   useEffect(() => {
     void reload();
-  }, [reload]);
+  }, [reload, orgSyncVersion]);
 
   // 지구 층 = measuring(선명) + proposed(흐림)만 기본 노출. archived는 여기 그리드엔
   // 아예 안 그린다("더미 미표시").

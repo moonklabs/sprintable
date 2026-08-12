@@ -263,3 +263,42 @@ describe('HypothesisEarthLayer — story #2531 AC(measuring 선명·proposed 흐
     expect(onSelect).toHaveBeenCalledWith('h-click');
   });
 });
+
+// story #2545(카디르 라이브 재QA 2단계) — DashboardShell의 자동 org 재발급(switch-org)이
+// 이 fetch *後*에 성공하면(같은 ms대 레이스로 이 fetch가 먼저 옛 org 403을 이미 확定한 경우),
+// projectId는 안 바뀌므로 예전엔 재요청 트리거가 전혀 없었다(RED — 카디르 실측: 8초 관측·
+// hypotheses fetch 총 1회뿐). bumpOrgSyncVersion()이 이걸 구독하는 컴포넌트만 재요청시키는지
+// 고정한다.
+describe('HypothesisEarthLayer — org-sync 성공 後 재요청 (story #2545)', () => {
+  it('bumpOrgSyncVersion() 호출 時 projectId가 그대로여도 재요청되고, 새 결과로 갱신된다', async () => {
+    const { bumpOrgSyncVersion } = await import('@/lib/project-context-client');
+    let hypothesesCalls = 0;
+    // 컴포넌트가 UnattachedBucket(자기 own /api/stories fetch)도 함께 렌더하므로 URL로
+    // hypotheses 호출만 골라 센다 — 그 형제 fetch의 호출 횟수는 이 회귀가드 대상이 아니다.
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.startsWith('/api/hypotheses')) {
+        hypothesesCalls += 1;
+        // 1차 = switch-org 前(옛 org 403 확定 상황을 모사) · 2차 = switch-org 성공 後(진짜
+        // 데이터). 1차는 결론난 가설 1건만 둬서(완전 0건이 아니게) story #2543의 "전체
+        // 0건→첫 질문 초대" 분기를 피하고 earthEmpty 문구 분기를 그대로 태운다.
+        return hypothesesCalls === 1
+          ? jsonResponse([makeHypothesis({ id: 'h-old-concluded', status: 'verified' })])
+          : jsonResponse([makeHypothesis({ id: 'h-recovered', status: 'measuring', statement: 'Q-recovered' })]);
+      }
+      return jsonResponse([]); // UnattachedBucket의 /api/stories — 이 테스트와 무관, 빈 목록.
+    });
+    await renderLayer(fetchMock);
+    expect(hypothesesCalls).toBe(1);
+    expect(container.textContent).toContain(koMessages.flow.earthEmpty);
+
+    await act(async () => {
+      bumpOrgSyncVersion();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(hypothesesCalls).toBe(2);
+    expect(container.textContent).toContain('Q-recovered');
+    expect(container.textContent).not.toContain(koMessages.flow.earthEmpty);
+  });
+});
