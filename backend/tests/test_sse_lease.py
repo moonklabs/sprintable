@@ -126,3 +126,24 @@ async def test_earliest_expiry_skips_already_expired(_flag_on_fakeredis):
     earliest = await sse_lease.earliest_expiry("g")
     assert earliest is not None
     assert abs(earliest - (time.time() + 50)) < 2
+
+
+async def test_earliest_expiry_none_when_live_full(_flag_on_fakeredis):
+    """PO 리뷰(2026-08-12) — 가장 이른 lease조차 막 갱신돼(remaining이 [TTL-heartbeat, TTL]
+    구간) 아직 beat를 놓친 게 아니면(=live-full, 한도를 채운 살아있는 세션들), 만료 기반
+    예측이 성립하지 않는다 — None으로 호출부가 flat default로 폴백하게 한다."""
+    key = sse_lease._key("g")
+    # TTL=90, heartbeat=30 (테스트 기본 env) — 셋 다 막 갱신돼 [60,90] 구간 안.
+    await _flag_on_fakeredis.zadd(key, {
+        "live-0": time.time() + 85, "live-1": time.time() + 88, "live-2": time.time() + 90,
+    })
+    assert await sse_lease.earliest_expiry("g") is None
+
+
+async def test_earliest_expiry_computed_exactly_at_orphan_threshold(_flag_on_fakeredis):
+    """remaining == TTL-heartbeat(정확히 beat 1회분 경과) — orphan 쪽 경계, 여전히 computed."""
+    key = sse_lease._key("g")
+    threshold = sse_lease._TTL_SEC - sse_lease._HEARTBEAT_SEC
+    await _flag_on_fakeredis.zadd(key, {"edge": time.time() + threshold})
+    earliest = await sse_lease.earliest_expiry("g")
+    assert earliest is not None

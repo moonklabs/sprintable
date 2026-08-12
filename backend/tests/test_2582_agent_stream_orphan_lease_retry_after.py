@@ -112,6 +112,33 @@ async def test_retry_after_reflects_actual_earliest_expiry_not_flat_default(monk
 
 
 @pytest.mark.anyio
+async def test_retry_after_falls_back_to_flat_default_when_leases_are_live_full(monkeypatch, _flag_on_fakeredis):
+    """PO 리뷰(2026-08-12) [blocking] fix — 한도(3)를 «막 갱신된 살아있는» 세션들이 채운
+    live-full 상황(heartbeat마다 score가 계속 now+TTL로 밀림)에서는 만료 기반 계산이
+    성립하지 않는다(그 세션들이 계속 갱신되면 계산값만큼 기다려도 안 빌 수 있고, 오히려
+    다른 세션의 즉시 정상종료를 최대 TTL만큼 놓친다) — flat default로 폴백해야 한다."""
+    aid = uuid.uuid4()
+    req, auth, aid_str = _patch_route(monkeypatch, aid, org_plan="free")
+    limit = ag._AGENT_STREAM_TIER_LIMITS["free"]
+    scope = f"perkey:{aid_str}"
+    await _leave_orphans(scope, limit)
+    # orphan이 아니라 방금 heartbeat 갱신된 live 세션들 — 전부 [TTL-heartbeat, TTL] 구간.
+    key = sse_lease._key(scope)
+    await _flag_on_fakeredis.zadd(key, {
+        "live-0": time.time() + 85, "live-1": time.time() + 88, "live-2": time.time() + 90,
+    })
+    try:
+        with pytest.raises(HTTPException) as exc:
+            await ag.agent_stream(req, auth=auth)
+        assert exc.value.status_code == 429
+        retry_after = int(exc.value.headers["Retry-After"])
+        assert retry_after == ag._AGENT_STREAM_RETRY_AFTER  # flat default로 폴백 — computed 아님
+        assert exc.value.detail["retry_after"] == ag._AGENT_STREAM_RETRY_AFTER
+    finally:
+        ag._agent_connections.pop(aid_str, None)
+
+
+@pytest.mark.anyio
 async def test_reconnect_succeeds_after_orphan_leases_expire(monkeypatch, _flag_on_fakeredis):
     """AC1 재현 — 영구 lockout이 아니라 TTL 지나면(비정상 종료 orphan 자가회수) 같은 키가
     재접속 성공한다. real-time sleep 대신 score를 과거로 밀어 TTL 경과를 흉내(lupa Lua eval이
