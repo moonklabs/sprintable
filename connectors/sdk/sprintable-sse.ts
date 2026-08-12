@@ -43,6 +43,14 @@ export type MessageContext = {
   isBackfill: boolean
   attachments: MessageAttachment[]
   raw: Record<string, unknown>
+  /**
+   * story #2583 S1 — envelope 규격 필드. 원 이벤트에 값이 없으면 빈 문자열('')로 둔다 —
+   * 지어내지 않는다(AC1 "값 없음의 정직 표기"). formatEnvelopeText()가 렌더 시
+   * 'unknown'으로 표기한다.
+   */
+  senderType: string
+  eventKind: string
+  ts: string
   /** POST /api/v2/conversations/{id}/messages */
   reply(text: string): Promise<void>
 }
@@ -92,6 +100,30 @@ export function renderAttachmentNotice(attachments: MessageAttachment[]): string
       : `- ${label} (${a.contentType || 'unknown type'}) — url: ${a.url}`
   })
   return `[첨부 ${attachments.length}건]\n${lines.join('\n')}\n[/첨부]`
+}
+
+/**
+ * story #2583 S1: 주입 envelope 표준 렌더.
+ *
+ * 배경: #2583 정찰(doc 2583-injection-envelope-recon-20260812) — 8개 커넥터 中 6개가
+ * senderId/senderName을(이 SDK가 이미 정확히 파싱해 두는데도) 모델에 실제로 보이는
+ * 텍스트 조립 단계에서 조용히 버렸다(댄 어윈 오호칭 사고와 동일 코드 경로). 이 함수는
+ * 그 "조립" 단계를 SDK 안 단일 지점으로 끌어와, 텍스트-only 주입 런타임(6곳)이 전부
+ * 이 함수를 부르면 사본마다 발신자를 흘리는 사고를 구조적으로 막는다. Hermes/OpenClaw
+ * 처럼 호스트가 이미 구조화 sender 파라미터를 받는 런타임은 필요 없다.
+ *
+ * ⚠️ 언어 경계(Python ↔ TS) — `sprintable_sse.py`의 `format_envelope_text()`와
+ * **동일한 렌더 규칙**이어야 한다(값 배치 순서·구분자·'unknown' 폴백 문자열까지). 양쪽에
+ * 같은 샘플을 핀 고정해 뒀다(#2589 패턴) — 한쪽만 고치면 그쪽 테스트가 깨진다. 정직 표기
+ * 원칙(AC1): 값이 없으면 'unknown'이라고 명시하지, 빈칸으로 뭉개거나 지어내지 않는다.
+ */
+export function formatEnvelopeText(ctx: MessageContext): string {
+  const senderType = ctx.senderType || 'unknown'
+  const eventKind = ctx.eventKind || 'unknown'
+  const ts = ctx.ts || 'unknown'
+  const conv = ctx.conversationId || 'unknown'
+  const header = `[${eventKind}] ${ctx.senderName} (${senderType}) · conv=${conv} · ts=${ts}`
+  return `${header}\n${ctx.content}`
 }
 
 export async function runSprintableSSE(opts: {
@@ -235,6 +267,9 @@ export async function runSprintableSSE(opts: {
     ) as Record<string, unknown>
     const senderId = String(sender.id ?? data.sender_id ?? 'sprintable')
     const senderName = String(sender.name ?? senderId)
+    const senderType = String(sender.type ?? '')
+    const eventKind = String(data.event_type ?? payload.event_type ?? '')
+    const ts = String(data.created_at ?? payload.created_at ?? '')
     const isBackfill = Boolean(data.is_backfill)
 
     const replyUrl = conversationId
@@ -243,6 +278,7 @@ export async function runSprintableSSE(opts: {
 
     return {
       content, conversationId, senderId, senderName, eventId, seq, isBackfill, attachments, raw: data,
+      senderType, eventKind, ts,
       async reply(text: string) {
         if (!replyUrl) throw new Error('no conversation_id')
         const r = await fetch(replyUrl, {
