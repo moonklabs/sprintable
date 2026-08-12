@@ -23,6 +23,9 @@ _CORE_NO_PREFIX = {
     "sprintable_add_evidence", "sprintable_list_projects", "sprintable_set_default_project",
     "sprintable_add_judgment", "sprintable_list_judgments",
     "sprintable_get_session_context",
+    # story #2597: list_agent_cards — mcp_toolset.py _ALWAYS_ALLOWED와 동기화(core 취급 사유는
+    # 거기 주석 참조 — 어떤 role이든 필요한 cross-cutting 발견 유틸, 단일 축 아님).
+    "sprintable_list_agent_cards",
 }
 
 
@@ -45,7 +48,7 @@ def test_core_tools_have_no_axis_prefix():
 
 
 def test_bidirectional_coverage_no_silent_gap():
-    """전체 106개 중 core 제외 전부가 프리픽스 대상 — 한쪽만 확인하면 신규 툴 누락을 못 잡는다."""
+    """전체 도구 중 core 제외 전부가 프리픽스 대상 — 한쪽만 확인하면 신규 툴 누락을 못 잡는다."""
     prefixed = {n for n, d in _TOOLS.items() if d.startswith(_VALID_PREFIXES)}
     expected_prefixed = set(_TOOLS.keys()) - _CORE_NO_PREFIX
     assert prefixed == expected_prefixed
@@ -68,6 +71,7 @@ def test_tool_names_and_param_models_untouched():
     sprintable_delete_artifact 1종 신설(artifact soft delete, 생성자 전용) — 111→112. story #2268
     (D단계): sprintable_add_judgment/list_judgments 2종 신설(판단 칸 pull 진입점) — 112→114.
     story #2268(C-10): sprintable_get_session_context 1종 신설(세션 시작 컨텍스트 MCP 노출) —
-    114→115."""
-    assert len(_TOOL_DEFS) == 115
+    114→115. story #2597(E-AGENT-ONBOARD·A2A발견 P0-1): sprintable_list_agent_cards 1종
+    신설(A2A AgentCard 발견) — 115→116."""
+    assert len(_TOOL_DEFS) == 116
     assert all(name.startswith("sprintable_") for name in _TOOLS)

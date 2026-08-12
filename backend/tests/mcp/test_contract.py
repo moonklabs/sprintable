@@ -91,6 +91,8 @@ EXPECTED_TOOLS = {
     "sprintable_lock_files", "sprintable_unlock_files",
     # a2a HITL writer (1) — E-A2A-완성 S-A3
     "sprintable_link_gate_to_task",
+    # a2a 발견 (1) — E-AGENT-ONBOARD·A2A발견 P0-1(story #2597)
+    "sprintable_list_agent_cards",
     # evidence (1) — E-VERIFY V0-S1
     "sprintable_add_evidence",
     # 판단 칸 (2) — story #2268(D단계, E-CONNECT)
@@ -121,7 +123,9 @@ def test_total_tool_count():
     # 전용) — 112→113. story #2268(D단계): sprintable_add_judgment/list_judgments 2종 신설
     # (판단 칸 pull 진입점 MCP 노출) — 113→115. story #2268(C-10): sprintable_get_session_context
     # 1종 신설(세션 시작 컨텍스트 REST를 MCP로 노출 — PO 판정: REST뿐이면 못 쓴다) — 115→116.
-    assert len(_TOOLS) == 116
+    # story #2597(E-AGENT-ONBOARD·A2A발견 P0-1): sprintable_list_agent_cards 1종 신설
+    # (A2A AgentCard 발견 — 「누구에게 청할지」를 스스로 찾는 MCP 도구) — 116→117.
+    assert len(_TOOLS) == 117
 
 
 def test_all_expected_tools_registered():
