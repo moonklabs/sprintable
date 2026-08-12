@@ -688,12 +688,11 @@ CREATE TABLE public.docs (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     deleted_at timestamp with time zone,
     content_format text DEFAULT 'markdown'::text NOT NULL,
-    is_folder boolean DEFAULT false NOT NULL,
     tags text[] DEFAULT '{}'::text[] NOT NULL,
     doc_type text DEFAULT 'general'::text NOT NULL,
     assignee_id uuid,
     search_vector tsvector GENERATED ALWAYS AS (to_tsvector('simple'::regconfig, ((COALESCE(title, ''::text) || ' '::text) || COALESCE(content, ''::text)))) STORED,
-    CONSTRAINT docs_doc_type_check CHECK ((doc_type = ANY (ARRAY['prd'::text, 'ac'::text, 'spec'::text, 'policy'::text, 'general'::text, 'page'::text, 'sprint_report'::text])))
+    CONSTRAINT docs_doc_type_check CHECK ((doc_type = ANY (ARRAY['prd'::text, 'ac'::text, 'spec'::text, 'policy'::text, 'general'::text, 'page'::text, 'sprint_report'::text, 'folder'::text])))
 );
 
 
