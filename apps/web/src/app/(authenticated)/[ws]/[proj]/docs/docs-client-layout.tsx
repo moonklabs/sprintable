@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { ChevronDown, ChevronLeft, ChevronRight, FileText, Plus, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, FileText, FolderPlus, Plus, X } from 'lucide-react';
 import { DocsLayoutContext, type Doc, type DocSortMode, type DocUpdate } from './docs-context';
 import { useSwipeDrawer } from '@/lib/use-swipe-drawer';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
@@ -258,6 +258,64 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   const handleNewDoc = useCallback(() => { void createDoc(null); }, [createDoc]);
   const handleAddChild = useCallback((parentId: string) => createDoc(parentId), [createDoc]);
 
+  // story #1950(prod-에스컬레이트 #43) — createDoc()은 항상 is_folder 없이 "Untitled" 문서를
+  // 만들고 바로 편집기로 보내(제목은 그 화면에서 정함) — 폴더는 컨테이너라 트리 안에 머무는
+  // 채로 이름부터 받는 게 맞다(storage-folder-tree.tsx #1939 인라인 폼과 동일 결). 팝오버
+  // 대신 사이드바 안에 그대로 펼치는 인라인 폼(#1942 결함 클래스 회피 — 뷰포트 clamp 불요).
+  const [folderCreation, setFolderCreation] = useState<{ parentId: string | null } | null>(null);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [folderSubmitting, setFolderSubmitting] = useState(false);
+  const [folderCreateError, setFolderCreateError] = useState<string | null>(null);
+  const folderCreationParentTitle = folderCreation?.parentId
+    ? (tree.find((d) => d.id === folderCreation.parentId)?.title ?? null)
+    : null;
+
+  const startCreateFolder = useCallback((parentId: string | null) => {
+    setFolderCreation({ parentId });
+    setNewFolderName('');
+    setFolderCreateError(null);
+  }, []);
+  const cancelCreateFolder = useCallback(() => {
+    setFolderCreation(null);
+    setNewFolderName('');
+    setFolderCreateError(null);
+  }, []);
+  const submitCreateFolder = useCallback(async () => {
+    if (!projectId || !folderCreation) return;
+    const title = newFolderName.trim();
+    if (!title) { setFolderCreateError(t('newFolderEmptyError')); return; }
+    setFolderSubmitting(true);
+    setFolderCreateError(null);
+    const slug = `folder-${Date.now()}`;
+    try {
+      const res = await fetch('/api/docs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId, title, slug, content: '', content_format: 'markdown', parent_id: folderCreation.parentId, is_folder: true }),
+      });
+      if (!res.ok) throw new Error('Failed to create folder');
+      const { data } = await res.json();
+      setTree((prev) => [{ id: data.id, parent_id: data.parent_id || null, title: data.title, slug: data.slug, icon: data.icon || null, sort_order: data.sort_order || 0, is_folder: true, updated_at: data.updated_at }, ...prev]);
+      if (folderCreation.parentId) expandFolder(folderCreation.parentId);
+      setFolderCreation(null);
+      setNewFolderName('');
+    } catch {
+      setFolderCreateError(t('newFolderCreateFailed'));
+    } finally {
+      setFolderSubmitting(false);
+    }
+  }, [projectId, folderCreation, newFolderName, t, expandFolder]);
+
+  // 유나 design:changes(2026-08-12, PR#2974 차단) — 인라인 폼은 sidebarContent 안에만 렌더되는데
+  // 데스크톱 aside는 모바일서 숨겨지고 드로어는 기본 닫힘이라, topbar "새 폴더"가 모바일에서
+  // no-op이었다(루트 폴더 생성 진입점이 이 버튼뿐이라 모바일서 원천 차단). isMobile이면 드로어도
+  // 같이 연다 — openDrawer와 동일 동작이나 아래에서 선언돼 훅 선언 순서상 setter를 직접 쓴다.
+  const handleNewFolder = useCallback(() => {
+    startCreateFolder(null);
+    if (isMobile) setTreeDrawerOpen(true);
+  }, [startCreateFolder, isMobile]);
+  const handleAddChildFolder = useCallback((parentId: string) => startCreateFolder(parentId), [startCreateFolder]);
+
   const openDrawer = useCallback(() => setTreeDrawerOpen(true), []);
   const closeDrawer = useCallback(() => setTreeDrawerOpen(false), []);
   const { progress: drawerProgress, dragging: drawerDragging } = useSwipeDrawer(treeDrawerOpen, openDrawer, closeDrawer);
@@ -272,12 +330,18 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   );
   const topBarActions = useMemo(
     () => (
-      <Button size="sm" variant="outline" onClick={handleNewDoc} disabled={isCreating}>
-        <Plus className="mr-1.5 h-3.5 w-3.5" />
-        {isCreating ? t('loading') : t('newDoc')}
-      </Button>
+      <div className="flex items-center gap-1.5">
+        <Button size="sm" variant="ghost" onClick={handleNewFolder} disabled={folderSubmitting}>
+          <FolderPlus className="mr-1.5 h-3.5 w-3.5" />
+          {t('newFolder')}
+        </Button>
+        <Button size="sm" variant="outline" onClick={handleNewDoc} disabled={isCreating}>
+          <Plus className="mr-1.5 h-3.5 w-3.5" />
+          {isCreating ? t('loading') : t('newDoc')}
+        </Button>
+      </div>
     ),
-    [handleNewDoc, isCreating, t]
+    [handleNewDoc, isCreating, handleNewFolder, folderSubmitting, t]
   );
 
   const sidebarContent = (
@@ -293,6 +357,38 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         noResultsLabel={t('searchNoResults')}
         resultCountLabel={(n) => t('searchResultCount', { count: n })}
       />
+      {/* story #1950 — 새 폴더 인라인 폼(팝오버 아님, #1942 결함 클래스 회피). 검색 중이어도
+          "새 폴더" 버튼은 항상 접근 가능하므로 isSearching과 무관하게 렌더한다. */}
+      {folderCreation ? (
+        <div className="mx-2 mt-1.5 space-y-1.5 rounded-lg border border-border bg-card p-2">
+          {folderCreationParentTitle ? (
+            <p className="truncate text-[11px] text-muted-foreground">{t('newFolderTarget', { title: folderCreationParentTitle })}</p>
+          ) : null}
+          <input
+            autoFocus
+            value={newFolderName}
+            onChange={(e) => { setNewFolderName(e.target.value); if (folderCreateError) setFolderCreateError(null); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); void submitCreateFolder(); }
+              if (e.key === 'Escape') { e.preventDefault(); cancelCreateFolder(); }
+            }}
+            placeholder={t('newFolderPlaceholder')}
+            disabled={folderSubmitting}
+            className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
+          />
+          {folderCreateError ? (
+            <p className="text-[11px] text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{folderCreateError}</p>
+          ) : null}
+          <div className="flex items-center justify-end gap-1.5">
+            <Button size="sm" variant="ghost" onClick={cancelCreateFolder} disabled={folderSubmitting}>
+              {t('newFolderCancel')}
+            </Button>
+            <Button size="sm" onClick={() => void submitCreateFolder()} disabled={folderSubmitting}>
+              {t('newFolderConfirm')}
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {/* story #2193 — "자동 묶음"(slug 접두어) / "내 폴더"(기존 트리) 전환. 검색 중엔
           숨긴다(서버 전문검색 결과가 이미 답이라 그룹/트리 뷰 자체가 무의미 — sortMode
           토글과 동일한 판단). */}
@@ -402,7 +498,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
                 moreLabel={(count) => t('groupMore', { count })}
               />
             ) : (
-              <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} projectId={projectId} sortMode={sortMode} />
+              <DocTree docs={tree} selectedSlug={currentSlug} onSelect={handleSelectDoc} onReorder={handleReorder} onMove={handleMove} onMoveDenied={handleMoveDenied} onRename={handleRename} onDelete={handleDeleteDoc} onAddChild={handleAddChild} onAddChildFolder={handleAddChildFolder} projectId={projectId} sortMode={sortMode} />
             )}
             {viewMode === 'folders' && docsHasMore && (
               <div className="px-2 py-1">
