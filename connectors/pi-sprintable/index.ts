@@ -25,7 +25,7 @@
  * message."
  */
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
-import { runSprintableSSE, type MessageContext } from './sprintable-sse.js'
+import { runSprintableSSE, formatEnvelopeText, type MessageContext } from './sprintable-sse.js'
 
 /**
  * Pi's extension factory. Per the SDK's own documented discipline (and this
@@ -65,7 +65,9 @@ export default function sprintableExtension(pi: ExtensionAPI): void {
       signal: controller.signal,
       onMessage: async (ctx) => {
         lastCtx = ctx
-        pi.sendUserMessage(ctx.content, { deliverAs: 'steer' })
+        // story #2583 — 발신자/이벤트종류/ts를 조립 단계에서 버리지 않고 표준 envelope로
+        // 렌더(ctx.content만 보내면 모델이 발신자를 모른 채 진행 — 댄 어윈 오호칭 사고 클래스).
+        pi.sendUserMessage(formatEnvelopeText(ctx), { deliverAs: 'steer' })
       },
     }).catch((err) => {
       if (!controller.signal.aborted) {

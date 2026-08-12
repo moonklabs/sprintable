@@ -89,7 +89,12 @@ test('inbound SSE message injects via sendUserMessage(deliverAs: steer), then ag
   await new Promise((resolve) => setTimeout(resolve, 300))
 
   expect(api.sentMessages).toHaveLength(1)
-  expect(api.sentMessages[0].content).toBe('hello from sprintable')
+  // story #2583 — sendUserMessage now carries formatEnvelopeText(ctx), not bare ctx.content,
+  // so the sender ("tester") reaches the model instead of being dropped at this exact point
+  // (the line the #2583 recon identified as pi's assembly-stage defect).
+  expect(api.sentMessages[0].content).toBe(
+    '[dispatched] tester (unknown) · conv=conv-test-1 · ts=unknown\nhello from sprintable',
+  )
   expect(api.sentMessages[0].options).toEqual({ deliverAs: 'steer' })
 
   // Simulate agent_end with a mocked assistant response — bypasses the real LLM entirely,
