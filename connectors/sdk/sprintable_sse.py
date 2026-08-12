@@ -267,12 +267,16 @@ def render_attachment_notice(attachments: list[MessageAttachment]) -> str:
 # 패턴 그대로. 정직 표기 원칙(AC1): 값이 없으면 "unknown"이라고 명시하지, 빈칸으로
 # 뭉개거나 그럴듯한 값을 지어내지 않는다.
 def format_envelope_text(ctx: "MessageContext") -> str:
+    # PO 리뷰(2026-08-12, PR #2984) — sender_name만 다른 필드와 폴백이 비대칭이었다(다른
+    # 필드는 전부 or "unknown"인데 이건 그대로 노출 → 명시적 빈 이름이면 헤더 이름칸이
+    # 빈 채 렌더돼 오호칭 봉쇄 취지에 어긋남). name → id → "unknown" 순으로 일관화.
+    sender_name = ctx.sender_name or ctx.sender_id or "unknown"
     sender_type = ctx.sender_type or "unknown"
     event_kind = ctx.event_kind or "unknown"
     ts = ctx.ts or "unknown"
     conv = ctx.conversation_id or "unknown"
     header = (
-        f"[{event_kind}] {ctx.sender_name} ({sender_type}) "
+        f"[{event_kind}] {sender_name} ({sender_type}) "
         f"· conv={conv} · ts={ts}"
     )
     return f"{header}\n{ctx.content}"

@@ -36,6 +36,14 @@ test('missing fields render as "unknown", never fabricated (AC1)', () => {
   expect(out).toContain('conv=conv-known') // 채워진 필드는 unknown으로 안 덮임
 })
 
+test('empty senderName falls back to senderId, then "unknown" (PO review, PR #2984)', () => {
+  const withId = ctx({ content: 'x', senderName: '', senderId: 'agent-42', conversationId: 'c' })
+  expect(formatEnvelopeText(withId).startsWith('[unknown] agent-42 (unknown)')).toBe(true)
+
+  const withoutId = ctx({ content: 'x', senderName: '', senderId: '', conversationId: 'c' })
+  expect(formatEnvelopeText(withoutId).startsWith('[unknown] unknown (unknown)')).toBe(true)
+})
+
 test('misaddressing scenario blocked (AC2) — sender never leaks across two sends', () => {
   const first = ctx({
     content: '통신점검', conversationId: 'conv-1',

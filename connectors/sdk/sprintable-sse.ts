@@ -118,11 +118,15 @@ export function renderAttachmentNotice(attachments: MessageAttachment[]): string
  * 원칙(AC1): 값이 없으면 'unknown'이라고 명시하지, 빈칸으로 뭉개거나 지어내지 않는다.
  */
 export function formatEnvelopeText(ctx: MessageContext): string {
+  // PO 리뷰(2026-08-12, PR #2984) — senderName만 다른 필드와 폴백이 비대칭이었다(다른
+  // 필드는 전부 || 'unknown'인데 이건 그대로 노출 → 명시적 빈 이름이면 헤더 이름칸이
+  // 빈 채 렌더돼 오호칭 봉쇄 취지에 어긋남). name → id → 'unknown' 순으로 일관화.
+  const senderName = ctx.senderName || ctx.senderId || 'unknown'
   const senderType = ctx.senderType || 'unknown'
   const eventKind = ctx.eventKind || 'unknown'
   const ts = ctx.ts || 'unknown'
   const conv = ctx.conversationId || 'unknown'
-  const header = `[${eventKind}] ${ctx.senderName} (${senderType}) · conv=${conv} · ts=${ts}`
+  const header = `[${eventKind}] ${senderName} (${senderType}) · conv=${conv} · ts=${ts}`
   return `${header}\n${ctx.content}`
 }
 

@@ -50,6 +50,16 @@ def test_missing_fields_render_as_unknown_not_fabricated():
     assert "conv=conv-known" in out  # 채워진 필드는 그대로 나옴 — unknown으로 안 덮임
 
 
+def test_empty_sender_name_falls_back_to_id_then_unknown():
+    """PO 리뷰(PR #2984) — sender_name만 다른 필드와 폴백이 비대칭이던 결함. 명시적으로
+    빈 이름이 와도 헤더 이름칸이 빈 채 렌더되면 안 된다(오호칭 봉쇄 취지 위반)."""
+    with_id = _ctx(content="x", sender_name="", sender_id="agent-42", conversation_id="c")
+    assert format_envelope_text(with_id).startswith("[unknown] agent-42 (unknown)")
+
+    without_id = _ctx(content="x", sender_name="", sender_id="", conversation_id="c")
+    assert format_envelope_text(without_id).startswith("[unknown] unknown (unknown)")
+
+
 def test_misaddressing_scenario_blocked_ac2():
     """story #2583 AC2 — 오호칭 시나리오 봉쇄: 같은 세션에 발신자만 바꿔 두 번 보내도
     렌더된 envelope에서 발신자가 명확히 갈린다(본문과 분리된 규격 필드). 댄 어윈 사고
