@@ -1,5 +1,5 @@
 {
-  "name": "@moonklabs/openclaw-sprintable",
+  "name": "openclaw-sprintable",
   "version": "0.1.0",
   "description": "Sprintable Gateway channel plugin for OpenClaw — real-time team chat via SSE dial-out (no inbound webhook required).",
   "keywords": [
@@ -44,8 +44,8 @@
       "pluginApi": ">=2026.7.1"
     },
     "install": {
-      "clawhubSpec": "@moonklabs/openclaw-sprintable",
-      "npmSpec": "@moonklabs/openclaw-sprintable"
+      "clawhubSpec": "openclaw-sprintable",
+      "npmSpec": "openclaw-sprintable"
     }
   },
   "peerDependencies": {
