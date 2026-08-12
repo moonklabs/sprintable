@@ -152,7 +152,13 @@ async def test_migration_backfills_legacy_is_folder_true_rows_to_doc_type_folder
 @pytest.mark.anyio
 async def test_is_folder_column_dropped_and_derived_from_doc_type():
     """죽은 is_folder boolean 컬럼이 실제로 은퇴됐는지(0239 마이그) — information_schema
-    직조회로 컬럼 부재를 확인한다(derived property로만 존재해야 한다)."""
+    직조회로 컬럼 부재를 확인한다(derived property로만 존재해야 한다).
+
+    0239는 backfill-then-drop(무조건)이다 — 실데이터가 있으면 drop을 보류하던 초기(83건
+    실측 前) 설계가 아니라, is_folder=true 행을 doc_type='folder'로 먼저 옮겨(위
+    test_migration_backfills_...) 데이터 손실 없이 항상 drop한다. 그래서 이 realdb 픽스처가
+    가리키는 DB가 0239까지 정상 적용됐다면 컬럼은 반드시 없어야 한다 — 존재 여부를 그냥
+    관측만 하지 않고 단정한다."""
     eng, Session = await _engine()
     try:
         async with Session() as s:
@@ -162,10 +168,8 @@ async def test_is_folder_column_dropped_and_derived_from_doc_type():
                     "WHERE table_name = 'docs' AND column_name = 'is_folder'"
                 )
             )).scalar()
-        # 0239가 조건부 drop이므로(실데이터 있으면 보류) 부재를 강제하지 않고, 대신 있다면
-        # true 행이 0건이어야만(=drop 대상인데 아직 안 됐다면 그 자체가 이상) 하는 모순을
-        # 만들지 않도록 "있으면 스킵 사유(로그) 확인은 사람 몫" — 여기선 컬럼이 있는 상태에서도
-        # ORM.is_folder derived 값이 doc_type과 항상 일치하는지만 고정(부재/존재 양쪽에서 다 참).
+        assert not exists, "docs.is_folder should be fully retired after 0239 (backfill-then-drop)"
+
         async with Session() as s:
             await _seed(s)
             from app.repositories.doc import DocRepository
@@ -176,7 +180,5 @@ async def test_is_folder_column_dropped_and_derived_from_doc_type():
             )
             await s.commit()
             assert doc.is_folder is False  # doc_type='page' → derived is_folder=False
-        if exists:
-            print("NOTE: docs.is_folder column still present in this DB — retirement pending (has live true rows)")
     finally:
         await eng.dispose()
