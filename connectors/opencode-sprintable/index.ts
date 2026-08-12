@@ -6,14 +6,12 @@
  */
 
 import type { Plugin } from "@opencode-ai/plugin"
-import { runSprintableSSE } from "./sprintable-sse.js"
+import { runSprintableSSE, formatEnvelopeText } from "./sprintable-sse.js"
 
 // #2568-style npm-publish fix: this file used to import ../sdk/sprintable-sse.js — a path
 // that only resolves inside the monorepo. Published standalone, node_modules/opencode-sprintable
 // has no sibling ../sdk directory, so that import would 404 at runtime for every real install.
 // The SDK is now vendored into this package (sprintable-sse.ts, same directory) instead.
-const API_URL = (process.env.SPRINTABLE_API_URL ?? "https://app.sprintable.ai").replace(/\/$/, "")
-const API_KEY = (process.env.SPRINTABLE_API_KEY ?? process.env.AGENT_API_KEY ?? "").trim()
 
 /**
  * Sprintable Gateway OpenCode plugin.
@@ -24,6 +22,15 @@ const API_KEY = (process.env.SPRINTABLE_API_KEY ?? process.env.AGENT_API_KEY ?? 
  * 3. session.prompt 응답 → POST /api/v2/conversations/{id}/messages (ack는 SDK 처리)
  */
 export const plugin: Plugin = async ({ client }) => {
+  // story #2583 (found while writing this story's regression test) — API_URL/API_KEY used
+  // to be module-level consts, frozen at import time. Real deployments happen to survive
+  // this (env vars are set before the process starts, so the freeze already sees the right
+  // value) — but it's a latent trap the sibling pi-sprintable connector's own comment
+  // explicitly calls out and avoids ("a module-level const would freeze at first import
+  // rather than reflecting the environment at actual extension-load time"). Resolved fresh
+  // per plugin-init call instead, matching that pattern.
+  const API_URL = (process.env.SPRINTABLE_API_URL ?? "https://app.sprintable.ai").replace(/\/$/, "")
+  const API_KEY = (process.env.SPRINTABLE_API_KEY ?? process.env.AGENT_API_KEY ?? "").trim()
   if (!API_KEY) {
     console.error("[sprintable] SPRINTABLE_API_KEY or AGENT_API_KEY not set — plugin disabled")
     return {}
@@ -58,13 +65,15 @@ export const plugin: Plugin = async ({ client }) => {
         sessionMap.set(conversationId, sessionId)
       }
 
-      // Turn 주입 — session.prompt는 AI 응답 완성까지 대기
+      // Turn 주입 — session.prompt는 AI 응답 완성까지 대기.
+      // story #2583 — 발신자/이벤트종류/ts를 표준 envelope로 렌더해 실음(msg.content만
+      // 보내면 모델이 발신자를 모른 채 진행 — 댄 어윈 오호칭 사고와 동일 코드 경로였다).
       let responseText = ""
       try {
         const promptResp = await client.session.prompt({
           path: { id: sessionId },
           body: {
-            parts: [{ type: "text", text: msg.content }],
+            parts: [{ type: "text", text: formatEnvelopeText(msg) }],
           },
         })
         // 응답에서 텍스트 추출
