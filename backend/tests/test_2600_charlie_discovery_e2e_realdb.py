@@ -114,7 +114,8 @@ async def test_charlie_discovers_qa_without_prior_injection_and_reaches_them():
     from app.models.organization import Organization
     from app.models.project import Project
     from app.models.role_template import RoleTemplate
-    from app.dependencies.database import get_db
+
+    from tests.conftest import override_db_and_read
 
     engine, Session = await _session_factory()
     try:
@@ -171,7 +172,9 @@ async def test_charlie_discovers_qa_without_prior_injection_and_reaches_them():
                 except Exception:
                     await sess.rollback()
                     raise
-        app.dependency_overrides[get_db] = _db
+        # story #2451: get_db만 걸고 get_read_db를 잊는 회귀 클래스를 구조적으로 막는
+        # 유일한 통로 — 두 dependency key를 항상 같이 오버라이드한다(conftest.py 참조).
+        override_db_and_read(app, _db)
 
         client = _client_with_key(app, charlie["raw_key"])
         try:
