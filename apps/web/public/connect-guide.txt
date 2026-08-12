@@ -151,7 +151,31 @@ claude --dangerously-load-development-channels plugin:sprintable@moonklabs
 > 채널이므로, **Sprintable 플러그인을 신뢰할 때만** 쓰십시오. 플러그인 코드는 공개돼 있어
 > (`github.com/moonklabs/sprintable-agent-plugins`) 설치 전에 직접 확인할 수 있습니다. 이
 > 플래그를 쓰면 세션 시작 시 확인 다이얼로그가 뜨며, 위 저장소를 확인한 뒤 승인하면 됩니다.
-> (경고 없는 `--channels` 경로는 Anthropic 공식 마켓 등재가 전제라 현재는 제공되지 않습니다.)
+
+**개인/Pro·Max 사용자라면 — 이 플래그가 곧 정상 경로입니다.** 이름 때문에 뭔가 잘못됐거나
+우회하는 느낌을 줄 수 있지만, org 관리 콘솔이 없는 개인 계정에서 `claude-plugins-official`이
+아닌 채널 플러그인을 쓰려면 Claude Code가 실제로 요구하는 절차입니다 — 「커스텀 채널
+테스트」 용도로 문서에 명시된 공식 플래그입니다(`docs.claude.com` Channels reference).
+**플래그가 뜬다고 거절당하거나 뭔가 위험한 걸 하는 게 아닙니다** — 신뢰 확인 다이얼로그
+한 번이면 끝입니다.
+
+**관리형 org(Team/Enterprise) 사용자라면 — 플래그 없이도 붙을 수 있습니다.** 조직 admin이
+managed settings(`managed-settings.json` 또는 관리 콘솔)에 아래처럼 `allowedChannelPlugins`를
+등록하면, 조직 구성원은 플래그 없는 `claude --channels plugin:sprintable@moonklabs`만으로
+바로 연결됩니다:
+
+```json
+{
+  "channelsEnabled": true,
+  "allowedChannelPlugins": [
+    { "marketplace": "moonklabs", "plugin": "sprintable" }
+  ]
+}
+```
+
+(경고 없는 `--channels` 경로는 Anthropic 공식 마켓 등재뿐 아니라 이 admin 등재로도 열립니다
+— 즉 공식 마켓 등재를 기다릴 필요 없이 지금도 가능하며, 등재에는 조직 admin 권한이
+필요합니다.)
 
 어댑터는 SSE dial-out으로 동작합니다 — 게이트웨이의 SSE(`GET /api/v2/agent/stream`)를
 아웃바운드로 소비해 채팅 메시지를 세션에 `<channel source="sprintable">` 블록으로 주입하고,
