@@ -62,13 +62,58 @@ language-boundary comment in each file):
 
 ### 2. Structured-native sender APIs
 
-Hermes (`handle_message(..., user_id=, user_name=)`, rendered by the
-hermes-agent framework itself as `[sender_name] body`) and OpenClaw
-(`rt.inbound.buildContext({..., sender: {id, name}})`) already accept sender
-as a first-class parameter on the host's own injection call. These
-connectors don't need `formatEnvelopeText()` — the standard for them is
-simply: **populate the native field, don't drop it.** Both were confirmed
-already doing this correctly as of the #2583 recon.
+Hermes and OpenClaw's host runtimes accept sender as a first-class,
+**typed** parameter on their own injection call — verified against the
+actual installed/published type definitions, not assumed. These connectors
+don't need `formatEnvelopeText()` — the standard for them is: **populate the
+native field, don't drop it.** Both confirmed already doing this correctly
+(S4, story #2583).
+
+**Hermes** (`connectors/hermes-sprintable/adapter.py`) — the contract is
+three calls deep, confirmed by reading `~/.hermes/hermes-agent` directly
+(gateway/platforms/base.py, gateway/session.py):
+
+```python
+source = self.build_source(         # BasePlatformAdapter.build_source(...)
+    chat_id=conversation_id, chat_type="thread", thread_id=conversation_id,
+    user_id=sender_id, user_name=sender_name,
+) -> SessionSource
+message_event = MessageEvent(text=content, source=source, ...)
+await self.handle_message(message_event)
+```
+
+The framework renders `source.user_name` into the turn context verbatim —
+`gateway/session.py`: `f"**User:** {_format_untrusted_prompt_value(source.user_name)}"`
+for a single sender, or `"messages are prefixed with [sender name]"` for a
+multi-user thread (the Sprintable case — every adapter call uses
+`chat_type="thread"`). **Gap identified, not fixed here (S4 is docs +
+verification, not new code):** `build_source` also accepts `is_bot: bool`,
+but the adapter's call site doesn't pass it — Hermes has no rendered
+human/agent distinction today even though the field exists. Worth a future
+slice; out of scope for #2583 S4.
+
+**OpenClaw** (`connectors/openclaw-sprintable/src/channel.ts`) — confirmed
+against the actual published `openclaw` npm package's `.d.ts`
+(`BuildChannelInboundEventContextParams`, this repo's node_modules were
+never meant to ship this connector's own tests against a fake type):
+
+```ts
+type SenderFacts = { id?: string; name?: string; username?: string; tag?: string;
+                      roles?: string[]; isBot?: boolean; isSelf?: boolean; displayLabel?: string }
+type BuildChannelInboundEventContextParams = { ...; sender: SenderFacts; ... }  // required, not optional
+
+rt.inbound.buildContext({
+  ..., sender: { id: msg.senderId, name: msg.senderName }, ...
+})
+```
+
+`sender` is a **required** field on the params type (not optional) — this
+connector correctly populates it. **Same gap as Hermes:** `SenderFacts` has
+no `type: "human"|"agent"` field at all (only `isBot`, which the connector
+doesn't populate), so OpenClaw has no native human/agent distinction to
+surface either. Both frameworks converge on the same structural limitation
+independently — worth flagging together in any future slice, not fixed
+here.
 
 ## Attachments manifest
 
