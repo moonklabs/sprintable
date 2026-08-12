@@ -17,6 +17,12 @@ class DocCreate(BaseModel):
     doc_type: str = "page"
     content_format: str = "markdown"
     tags: list[str] = []
+    # story #2974 QA(카디르) — Doc.is_folder(models/doc.py)는 저장 컬럼이 아니라
+    # doc_type=="folder"의 derived property다. FE(apps/web/src/app/api/docs/route.ts)가
+    # 요청에 is_folder를 실어 보내는데 이 스키마엔 그 필드가 없어 Pydantic이 조용히 버렸다 —
+    # 클라가 true를 보내도 항상 doc_type="page"(폴더 아님)로 생성됐다. 라우터가 True면
+    # doc_type을 "folder"로 강제한다(create_doc 참고).
+    is_folder: bool = False
 
 
 class DocUpdate(BaseModel):
