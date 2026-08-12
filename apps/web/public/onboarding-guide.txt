@@ -169,7 +169,7 @@ and backoff are handled by the shared SDK; you only supply the runtime's injecti
 | **Hermes Agent** | A (platform plugin) | `hermes plugins install moonklabs/sprintable/connectors/hermes-sprintable --enable` | `handle_message()` |
 | **OpenClaw** | A (ChannelPlugin) | `openclaw plugins install npm:openclaw-sprintable` | `runtime.channel.inbound` |
 | **OpenCode** | A (plugin SDK) | `opencode plugin opencode-sprintable` | `client.session.prompt()` |
-| **Pi** | — | 아직 없음 — #2574(신규 in-process ExtensionAPI 확장) 진행 中, 머지·npm 게시 前 | `pi.sendMessage(deliverAs:"steer")` (설계만, 미출하) |
+| **Pi** | — | 아직 없음 — 신규 in-process ExtensionAPI 확장 준비 中, 머지·npm 게시 前 | `pi.sendMessage(deliverAs:"steer")` (설계만, 미출하) |
 | **Cursor** (Cloud Agents only) | — | 아직 없음 — install-제로(키 등록) 서버측 통합은 설계 스파이크만 완료, 구현 미착수 | Cursor Cloud Agents API (설계만, 미출하) |
 | Custom (LangChain, etc.) | — | `connectors/sdk/` (직접 연동, 클론 전제) | shared SDK — inject in `onMessage` |
 

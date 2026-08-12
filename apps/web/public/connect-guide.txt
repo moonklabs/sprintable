@@ -93,7 +93,7 @@ MCP는 «에이전트가 Sprintable을 부르는 길»입니다. 반대 방향 �
 | Hermes | 플랫폼 플러그인 | `hermes plugins install moonklabs/sprintable/connectors/hermes-sprintable` |
 | OpenClaw | 채널 플러그인 | `openclaw plugins install npm:openclaw-sprintable` |
 | OpenCode | 채널 플러그인 | `opencode plugin opencode-sprintable` |
-| Pi | — | 지원 준비 中 — 정식 설치 경로 아직 없음(#2574 진행 중) |
+| Pi | — | 지원 준비 中 — 정식 설치 경로 아직 없음 |
 | Cursor | — | 지원 준비 中 — 정식 설치 경로 아직 없음 |
 | 그 외 | 직접 연동 | `connectors/sdk/` |
 
@@ -104,8 +104,8 @@ MCP는 «에이전트가 Sprintable을 부르는 길»입니다. 반대 방향 �
 
 **Claude Code·Codex·Grok·Gemini·Hermes·OpenClaw·OpenCode는 정식 설치 경로가
 있습니다** — 아래 각 절을 그대로 따르면 이 단계를 끝낼 수 있습니다. **Pi와
-Cursor는 아직 없습니다** — Pi는 신규 in-process 확장이 #2574로 진행 중(머지·npm
-게시 前)이고, Cursor는 install-제로(키 등록만) 서버측 통합이 설계까지만 끝난
+Cursor는 아직 없습니다** — Pi는 신규 in-process 확장을 준비 중(머지·npm 게시
+前)이고, Cursor는 install-제로(키 등록만) 서버측 통합이 설계까지만 끝난
 상태라 지금 실행할 명령이 없습니다. 이 둘은 준비되는 대로 각 트랙에서 이 문서에
 절이 추가됩니다 — 지금은 시도하지 마십시오.
 
