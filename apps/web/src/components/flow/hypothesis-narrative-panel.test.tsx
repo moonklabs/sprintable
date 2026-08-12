@@ -10,6 +10,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { HypothesisNarrativePanel } from './hypothesis-narrative-panel';
+import { bumpOrgSyncVersion } from '@/lib/project-context-client';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -270,5 +271,28 @@ describe('HypothesisNarrativePanel — 닫기', () => {
       candidates[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+// story #2545(카디르 라이브 재QA 5단계) — hypothesisId는 URL `?hypothesis=`가 정본이라
+// org-switch 前後로 동일 id를 유지한 채(딥링크 cold entry) 이 패널이 떠 있을 수 있다. org
+// 불일치 자동교정(switch-org) 성공 直後 재요청되는지 고정한다.
+describe('HypothesisNarrativePanel — org-sync 성공 後 재요청 (story #2545)', () => {
+  it('bumpOrgSyncVersion() 호출 時 hypothesisId가 그대로여도 재요청된다', async () => {
+    let calls = 0;
+    const fetchImpl = vi.fn(() => {
+      calls += 1;
+      return Promise.resolve(new Response(JSON.stringify(makeLifecycle()), { status: 200 }));
+    });
+    await renderPanel(fetchImpl);
+    const callsAfterMount = calls;
+    expect(callsAfterMount).toBeGreaterThan(0);
+
+    await act(async () => {
+      bumpOrgSyncVersion();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(calls).toBeGreaterThan(callsAfterMount); // 재요청 — 이전엔 안 늘었다(RED)
   });
 });

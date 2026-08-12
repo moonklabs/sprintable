@@ -12,6 +12,7 @@ import {
 import { HypothesisStatusBadge } from '@/components/hypotheses/hypothesis-status-badge';
 import type { HypothesisStatus } from '@sprintable/core-storage';
 import { cn } from '@/lib/utils';
+import { useOrgSyncVersion } from '@/lib/project-context-client';
 
 /**
  * story #2533(E-FLOW-V4 S3) — 가설 생애 수직 서사. 지구층 가설 카드를 열면 그 가설의
@@ -111,6 +112,10 @@ export function HypothesisNarrativePanel({
   const t = useTranslations('flow');
   const locale = useLocale();
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
+  // story #2545(카디르 라이브 재QA 5단계) — hypothesisId는 URL의 `?hypothesis=`가 정본이라
+  // org-switch 前後로 동일 id를 유지한 채(딥링크 cold entry) 이 패널이 떠 있을 수 있다 —
+  // switch-org 성공 直後 재요청되게 orgSyncVersion을 얹는다.
+  const orgSyncVersion = useOrgSyncVersion();
 
   useEffect(() => {
     let cancelled = false;
@@ -126,7 +131,7 @@ export function HypothesisNarrativePanel({
       }
     })();
     return () => { cancelled = true; };
-  }, [hypothesisId]);
+  }, [hypothesisId, orgSyncVersion]);
 
   const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(locale);
 

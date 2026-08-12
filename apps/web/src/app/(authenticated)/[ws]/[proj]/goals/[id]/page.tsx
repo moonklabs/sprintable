@@ -20,6 +20,7 @@ import { ToastContainer, useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
 import { EpicStatusTransition } from '@/components/epics/epic-status-transition';
 import { HypothesesSection } from '@/components/hypotheses/hypotheses-section';
+import { useOrgSyncVersion } from '@/lib/project-context-client';
 
 type EpicStatus = 'draft' | 'active' | 'done' | 'archived';
 type EpicPriority = 'critical' | 'high' | 'medium' | 'low';
@@ -232,6 +233,11 @@ export default function EpicDetailPage() {
   const [epicAssigneeId, setEpicAssigneeId] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // story #2545(카디르 라이브 재QA 5단계) — org 불일치 자동교정(switch-org) 성공 直後 이 로드
+  // effect가 재요청되지 않으면, 옛 org 403이 catch에서 `router.replace(.../goals)`로 오인해
+  // "목표가 없다"며 목록으로 튕겨낸다(다른 opt-in 컴포넌트의 "빈 화면"보다 나쁜 결과 — 오판
+  // 네비게이션). orgSyncVersion을 의존성에 얹는다.
+  const orgSyncVersion = useOrgSyncVersion();
 
   const handleDelete = useCallback(async () => {
     if (!epic) return;
@@ -263,7 +269,7 @@ export default function EpicDetailPage() {
       })
       .catch(() => router.replace(`/${wsSlug}/${projSlug}/goals`))
       .finally(() => setLoading(false));
-  }, [id, router, wsSlug, projSlug]);
+  }, [id, router, wsSlug, projSlug, orgSyncVersion]);
 
   if (loading) {
     return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">{t('loading')}</div>;

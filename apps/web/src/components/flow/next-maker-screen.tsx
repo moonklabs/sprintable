@@ -16,6 +16,7 @@ import { NextActionsStrip } from './next-actions-strip';
 import { OrphanStoriesPanel } from './orphan-stories-panel';
 import { FlowMultiLaneCanvas } from './flow-multi-lane-canvas';
 import { parseCursorMeta } from '@/lib/pagination';
+import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 
 interface NextMakerScreenProps {
@@ -108,6 +109,9 @@ type LoadState =
 export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedNodeId = null, focusGoalId = null }: NextMakerScreenProps) {
   const t = useTranslations('flow');
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
+  // story #2545(카디르 라이브 재QA 5단계) — org 불일치 자동교정(switch-org) 성공 直後 이
+  // 로드 effect도 재요청되게 orgSyncVersion을 의존성에 얹는다(다른 opt-in 컴포넌트와 동일).
+  const orgSyncVersion = useOrgSyncVersion();
   // 스토리 하나가 승격(backlog→ready-for-dev)되거나 목표가 전이(done/archived)되면, 전체
   // 재fetch 없이 로컬 상태만 갱신한다(PO 왕복 완료 조건 — 승격이 «즉시» 화면에 반영돼야
   // "실제로 다음이 생겼다"가 눈으로 보인다).
@@ -153,7 +157,7 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
       }
     })();
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, orgSyncVersion]);
 
   // 까심 QA REQUEST_CHANGES(2026-07-31) 후속 — 「다음으로」는 backlog→ready-for-dev로 상태를
   // 바꾸는 동작이라 되돌릴 길이 없으면 누르기가 무서워진다. 되돌리기 자체도 진짜 서버 PATCH이지

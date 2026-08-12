@@ -528,3 +528,34 @@ describe('StoryDetailPanel — 영구삭제 트리거 authz(story #2104)', () =>
     expect(container.querySelector('[role="dialog"] button[aria-label="스토리 삭제"]')).toBeNull();
   });
 });
+
+// story #2545(카디르 라이브 재QA 5단계) — org 불일치 자동교정(switch-org)이 fetchData *後*
+// 성공하면 projectId는 안 바뀌므로 예전엔 재요청 트리거가 없었다(hypothesis-earth-layer 등
+// 다른 컴포넌트와 동형 결함 — 여기 5번째 자리로 확認됨). bumpOrgSyncVersion()이 보드
+// fetchData를 재요청시키는지 고정한다.
+describe('KanbanBoard — org-sync 성공 後 재요청 (story #2545)', () => {
+  it('bumpOrgSyncVersion() 호출 時 projectId가 그대로여도 fetchData가 재요청된다', async () => {
+    const { bumpOrgSyncVersion } = await import('@/lib/project-context-client');
+    let storiesCalls = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.startsWith('/api/stories?')) {
+        storiesCalls += 1;
+        return { ok: true, json: async () => ({ data: [], meta: { total: 0, nextCursor: null } }) };
+      }
+      if (typeof url === 'string' && url.startsWith('/api/members')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await mount();
+    const callsAfterMount = storiesCalls;
+    expect(callsAfterMount).toBeGreaterThan(0); // CB-S4: status별 5회 독립 호출
+
+    await act(async () => {
+      bumpOrgSyncVersion();
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+
+    expect(storiesCalls).toBeGreaterThan(callsAfterMount); // 재요청 — 이전엔 안 늘었다(RED)
+  });
+});

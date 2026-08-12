@@ -10,6 +10,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { FlowNodeStoryPanel } from './flow-node-story-panel';
+import { bumpOrgSyncVersion } from '@/lib/project-context-client';
 import koMessages from '../../../messages/ko.json';
 
 vi.mock('@/components/kanban/story-detail-panel', () => ({
@@ -288,5 +289,31 @@ describe('FlowNodeStoryPanel — 「확認하기」 훑기 진입점 (story #235
     });
 
     expect(container.textContent).not.toContain('훑기');
+  });
+});
+
+// story #2545(카디르 라이브 재QA 5단계) — storyId는 URL `?story=`가 정본이라 org-switch 前後로
+// 동일 storyId를 유지한 채(딥링크 cold entry) 이 패널이 떠 있을 수 있다. org 불일치 자동교정
+// (switch-org) 성공 直後 재요청되는지 고정한다.
+describe('FlowNodeStoryPanel — org-sync 성공 後 재요청 (story #2545)', () => {
+  it('bumpOrgSyncVersion() 호출 時 storyId가 그대로여도 재요청된다', async () => {
+    const calledUrls: string[] = [];
+    stubFetch(calledUrls);
+    placeAnchor('story-abc', { top: 100, bottom: 130 });
+
+    await act(async () => {
+      root.render(wrap(<FlowNodeStoryPanel storyId="story-abc" onClose={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const storyCallsAfterMount = calledUrls.filter((u) => u.startsWith('/api/stories/')).length;
+    expect(storyCallsAfterMount).toBeGreaterThan(0);
+
+    await act(async () => {
+      bumpOrgSyncVersion();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const storyCallsAfterBump = calledUrls.filter((u) => u.startsWith('/api/stories/')).length;
+    expect(storyCallsAfterBump).toBeGreaterThan(storyCallsAfterMount); // 재요청 — 이전엔 안 늘었다(RED)
   });
 });
