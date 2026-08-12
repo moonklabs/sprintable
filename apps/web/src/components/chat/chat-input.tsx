@@ -489,10 +489,12 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           // warning 톤(amber) — 보내기 전 미지원 안내 + 런타임 설정 링크(대상 에이전트별 1행).
           return (
             <div className="mb-2 space-y-1">
+              {/* story #2590(TIER1) — tint 위 계열색 글자는 text-foreground(#2420 규칙). Link는
+                  조상이 bg-warning-tint인 다른 리터럴(cross-element)이라 별도 표기. */}
               {unsupported.map((tg) => (
                 <div
                   key={tg.agentId}
-                  className="flex items-center gap-2 rounded-lg border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-warning"
+                  className="flex items-center gap-2 rounded-lg border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-foreground"
                 >
                   <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
                   <span className="min-w-0 flex-1 text-foreground">
@@ -503,7 +505,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   </span>
                   <Link
                     href={`/organization/workforce/${tg.agentId}`}
-                    className="shrink-0 rounded font-medium text-warning underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="shrink-0 rounded font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {t('commandViewSettings')}
                   </Link>
@@ -514,7 +516,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         }
         const chip = cmd ? `/${commandName(text)}` : (dequoteLiteral(text).trimStart().split(/\s+/)[0] ?? '');
         return (
-          <div className={`mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${cmd ? 'border-info/30 bg-info/8 text-info' : 'border-border bg-muted/50 text-muted-foreground'}`}>
+          // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+          <div className={`mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${cmd ? 'border-info/30 bg-info/8 text-foreground' : 'border-border bg-muted/50 text-muted-foreground'}`}>
             {cmd ? <Terminal className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <Type className="h-3.5 w-3.5 shrink-0" aria-hidden />}
             <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono text-foreground">{chip}</code>
             <span>{cmd ? t('commandPreviewSendAsCommand') : t('commandPreviewSendAsLiteral')}</span>

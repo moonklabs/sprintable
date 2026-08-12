@@ -280,7 +280,9 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
           {globalActive && (
             <div className="space-y-2 rounded-md border border-warning/35 bg-warning/12 p-2.5 text-xs text-foreground">
               <p className="flex items-start gap-1.5">
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" aria-hidden />
+                {/* story #2590(TIER1 아이콘) — text-warning은 tint 유무와 무관하게 3.0 미달(실측,
+                    #2420 doc) — text-foreground로 잠정 통일(진한 토큰 신설은 범위 밖). */}
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-foreground" aria-hidden />
                 <span>{t('misconfigGlobalActive')}</span>
               </p>
               <Button
@@ -327,7 +329,8 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
                           aria-label={`${t('webhookDeleteConfirm')} (${ariaScope})`}
                           className="flex items-center justify-between gap-3 bg-destructive/5 px-3 py-2.5"
                         >
-                          <span className="min-w-0 truncate text-sm text-destructive" title={c.url}>
+                          {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
+                          <span className="min-w-0 truncate text-sm text-foreground" title={c.url}>
                             {t('webhookDeleteConfirm')}
                           </span>
                           <div className="flex shrink-0 items-center gap-2">

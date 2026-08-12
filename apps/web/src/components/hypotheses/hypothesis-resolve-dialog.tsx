@@ -126,7 +126,8 @@ export function HypothesisResolveDialog({
           </div>
 
           {mismatch ? (
-            <div className="flex shrink-0 items-start gap-2 rounded-lg border border-warning-border bg-warning-tint px-3 py-2 text-xs text-warning">
+            // story #2590(TIER1) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+            <div className="flex shrink-0 items-start gap-2 rounded-lg border border-warning-border bg-warning-tint px-3 py-2 text-xs text-foreground">
               <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
               <div className="space-y-1">
                 <p>{isVerify ? t('mismatchVerifyWarning') : t('mismatchFalsifyWarning')}</p>

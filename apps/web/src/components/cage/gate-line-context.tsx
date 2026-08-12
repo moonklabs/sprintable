@@ -36,16 +36,21 @@ function ApproverRow({ status, blocking, name }: ApproverRowProps) {
         ? { Icon: XCircle, cls: 'text-destructive', label: t('lineApproverRejected') }
         : { Icon: Circle, cls: 'text-muted-foreground', label: t('lineApproverPending') };
   const { Icon } = view;
+  // story #2590(TIER3) — 조상(GateLineContext)의 bg-muted/45 위에서 텍스트로 쓰면(라벨,
+  // 아래) success/destructive 둘 다 대비 미달(경계·~4.4) — 라벨만 text-foreground, 아이콘은
+  // 크기가 3.0 문턱을 통과해 계열색 그대로 둔다(#2420 doc "확認·비-결함" 아이콘 규칙).
+  const labelCls = view.cls === 'text-muted-foreground' ? view.cls : 'text-foreground';
   return (
     <div className="flex items-center gap-1.5 text-[11px]">
       <Icon className={`size-3 shrink-0 ${view.cls}`} />
       <span className="truncate text-foreground/90">{name}</span>
       {blocking ? (
-        <span className="shrink-0 rounded-sm bg-warning-tint px-1 text-[9px] font-medium uppercase text-warning">
+        // story #2590(TIER1) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+        <span className="shrink-0 rounded-sm bg-warning-tint px-1 text-[9px] font-medium uppercase text-foreground">
           {t('lineApproverBlocking')}
         </span>
       ) : null}
-      <span className={`ml-auto shrink-0 ${view.cls}`}>{view.label}</span>
+      <span className={`ml-auto shrink-0 ${labelCls}`}>{view.label}</span>
     </div>
   );
 }
@@ -81,7 +86,7 @@ export function GateLineContext({ step, resolveName, className }: GateLineContex
         <div
           className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] ${
             sla.overdue
-              ? 'border border-warning-border bg-warning-tint text-warning'
+              ? 'border border-warning-border bg-warning-tint text-foreground'
               : 'text-muted-foreground'
           }`}
         >

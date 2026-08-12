@@ -220,7 +220,9 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
                 <Button size="sm" variant="ghost" className="gap-1 text-primary hover:bg-primary/10 hover:text-primary" disabled={busy} onClick={() => void saveDraft()}>
                   <Save className="size-3.5" />{t('lineEditorSave')}
                 </Button>
-                <Button size="sm" variant="ghost" className="gap-1 text-success hover:bg-success-tint hover:text-success" disabled={busy} onClick={() => void requestPublish()}>
+                {/* story #2590(TIER3) — rest는 투명 배경이라 text-success 그대로 통과, hover만
+                    bg-success-tint가 붙어 대비 미달 — hover 글자만 text-foreground로(#2420 규칙). */}
+                <Button size="sm" variant="ghost" className="gap-1 text-success hover:bg-success-tint hover:text-foreground" disabled={busy} onClick={() => void requestPublish()}>
                   <Send className="size-3.5" />{t('lineEditorRequestPublish')}
                 </Button>
               </>

@@ -36,9 +36,10 @@ const LEVELS: Level[] = ['auto', 'ask', 'block'];
 
 // GateEvidence DECISION_META 미러: auto→success Check / ask→warning Pause / block→destructive Ban (글리프→lucide).
 const LEVEL_META: Record<Level, { selected: string; badge: 'success' | 'warning' | 'destructive'; mark: LucideIcon; labelKey: string }> = {
-  auto: { selected: 'border-success-border bg-success-tint text-success', badge: 'success', mark: Check, labelKey: 'levelAuto' },
-  ask: { selected: 'border-warning-border bg-warning-tint text-warning', badge: 'warning', mark: Pause, labelKey: 'levelAsk' },
-  block: { selected: 'border-destructive-border bg-destructive-tint text-destructive', badge: 'destructive', mark: Ban, labelKey: 'levelBlock' },
+  // story #2590(TIER1 ask·TIER3 auto/block) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+  auto: { selected: 'border-success-border bg-success-tint text-foreground', badge: 'success', mark: Check, labelKey: 'levelAuto' },
+  ask: { selected: 'border-warning-border bg-warning-tint text-foreground', badge: 'warning', mark: Pause, labelKey: 'levelAsk' },
+  block: { selected: 'border-destructive-border bg-destructive-tint text-foreground', badge: 'destructive', mark: Ban, labelKey: 'levelBlock' },
 };
 
 // LEVEL_META.mark(lucide) 렌더 — 글리프 span 대체.

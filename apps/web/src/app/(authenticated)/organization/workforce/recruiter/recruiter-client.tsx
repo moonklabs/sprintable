@@ -1369,7 +1369,8 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 // recruiter STEP5는 채용할 때마다 반복되는 화면이라 접근성 누락의 대가가 connect-step
                 // (신규 가입 온보딩, 1회성)보다 크다는 것이 결함으로 판정된 근거. 레일이 이미 단계
                 // 전환을 aria-live로 말하므로 이 배너는 "완료" 한 마디만 — 중복 낭독하지 않는다.
-                <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-success/20 bg-success/10 px-3 py-2.5 text-sm text-success">
+                // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+                <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-success/20 bg-success/10 px-3 py-2.5 text-sm text-foreground">
                   {tOnboarding('verifiedBanner')}
                 </div>
               )}

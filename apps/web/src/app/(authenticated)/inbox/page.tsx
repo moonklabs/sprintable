@@ -462,7 +462,9 @@ export default function InboxPage() {
               {workflowExecs.slice(0, 5).map((exec) => (
                 <div key={exec.id} className="flex items-center gap-2 rounded-lg bg-muted/55 px-3 py-2 text-xs">
                   {exec.status === 'matched' ? (
-                    <Zap className="h-3.5 w-3.5 shrink-0 text-warning" />
+                    // story #2590(TIER1 아이콘) — text-warning은 tint 유무와 무관하게 3.0 미달
+                    // (실측, #2420 doc) — text-foreground로 잠정 통일.
+                    <Zap className="h-3.5 w-3.5 shrink-0 text-foreground" />
                   ) : (
                     <ZapOff className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   )}
@@ -537,7 +539,8 @@ export default function InboxPage() {
                                         {item.latest.title}
                                       </p>
                                       {/* story #2023 ⓑ: 카운트 칩=L5(시스템 상태), 브랜드 아님 */}
-                                      <span className="shrink-0 rounded-full border border-info/30 bg-info/10 px-1.5 py-0.5 text-[10px] font-medium text-info">
+                                      {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
+                                      <span className="shrink-0 rounded-full border border-info/30 bg-info/10 px-1.5 py-0.5 text-[10px] font-medium text-foreground">
                                         {t('statusChangeCount', { count: item.count })}
                                       </span>
                                     </div>

@@ -41,7 +41,9 @@ function PresenceRow({ item }: { item: TeamPresenceItem }) {
           // eslint-disable-next-line @next/next/no-img-element
           <img src={item.avatar_url} alt="" className="size-8 rounded-full object-cover" />
         ) : (
-          <span className="flex size-8 items-center justify-center rounded-full bg-warning-tint text-warning">
+          // story #2590(TIER1 아이콘) — text-warning은 tint 유무와 무관하게 3.0 미달(실측,
+          // #2420 doc) — text-foreground로 잠정 통일(진한 토큰 신설은 범위 밖).
+          <span className="flex size-8 items-center justify-center rounded-full bg-warning-tint text-foreground">
             <Bot className="size-4" />
           </span>
         )}

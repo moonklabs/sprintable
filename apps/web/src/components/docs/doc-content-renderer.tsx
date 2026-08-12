@@ -643,7 +643,8 @@ function MermaidReadonlyBlock({ code }: { code: string }) {
   }, [code]);
 
   if (error) {
-    return <div className="not-prose my-4 rounded-xl border border-destructive-border bg-destructive-tint p-3 text-xs text-destructive">{error}</div>;
+    // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+    return <div className="not-prose my-4 rounded-xl border border-destructive-border bg-destructive-tint p-3 text-xs text-foreground">{error}</div>;
   }
   if (!svg) {
     return <div className="not-prose my-4 rounded-xl border border-border bg-muted p-4 text-xs text-muted-foreground">렌더링 중...</div>;

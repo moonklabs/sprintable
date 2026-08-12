@@ -137,7 +137,8 @@ export function KanbanColumn({
       className={`flex h-full flex-col rounded-xl p-3 transition ${collapsed ? 'w-[52px] min-w-[52px]' : 'w-[280px] min-w-[240px]'} ${colClass}`}
     >
       {isDragging && isValidTarget && (
-        <div className="mb-3 rounded-md border border-success-border/30 bg-success-tint px-2 py-1 text-center text-[10px] font-medium text-success/70">
+        // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+        <div className="mb-3 rounded-md border border-success-border/30 bg-success-tint px-2 py-1 text-center text-[10px] font-medium text-foreground">
           {t('validDrop')}
         </div>
       )}

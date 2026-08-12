@@ -1443,8 +1443,10 @@ export default function SettingsPage() {
                 <ul className="space-y-0.5 text-foreground">
                   <li>• Project <span className="font-semibold">{orgImpact.project_count}개</span> 영구 삭제</li>
                   <li>• Member <span className="font-semibold">{orgImpact.member_count}명</span> 접근 불가</li>
+                  {/* story #2590(TIER1) — 조상(bg-muted/30)이 pale이라 text-warning도 대비 미달
+                      (교차-요소). tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
                   {orgImpact.has_active_subscription && (
-                    <li className="text-warning">• 활성 구독이 있습니다 — 삭제 전 구독을 취소해주세요.</li>
+                    <li className="text-foreground">• 활성 구독이 있습니다 — 삭제 전 구독을 취소해주세요.</li>
                   )}
                 </ul>
               </div>

@@ -107,7 +107,8 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
           )}
         >
           {t('tabUsage')}
-          <span className="rounded-full bg-info/10 px-[5px] text-[10px] font-bold text-info">{usageCount}</span>
+          {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
+          <span className="rounded-full bg-info/10 px-[5px] text-[10px] font-bold text-foreground">{usageCount}</span>
         </button>
       </div>
 

@@ -1685,7 +1685,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 });
                 if (incompletePreds.length === 0) return null;
                 return (
-                  <div className="mb-2 flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-warning">
+                  <div className="mb-2 flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-foreground">
                     <AlertTriangle className="size-3 shrink-0" />
                     <span>{t('dep.incompletePreds', { count: incompletePreds.length })}</span>
                   </div>
@@ -1712,7 +1712,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   {deps.filter((d) => d.dep_type === 'blocks' && d.to_id === story.id).map((d) => {
                     const blocker = storyMap[d.from_id];
                     return (
-                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-warning">
+                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-foreground">
                         <button type="button" onClick={() => onNavigate?.(d.from_id)} className="flex min-w-0 flex-1 items-center gap-2 text-left" disabled={!onNavigate}>
                           <AlertTriangle className="size-3 shrink-0" />
                           <span className="font-medium shrink-0">Blocked by</span>

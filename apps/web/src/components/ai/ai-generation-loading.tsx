@@ -63,7 +63,8 @@ export function AiGenerationLoading({
               <span
                 className={cn(
                   'relative z-[1] mt-0.5 flex size-[18px] shrink-0 items-center justify-center rounded-full text-[10px]',
-                  isDone && 'border border-info-border bg-info-tint text-info',
+                  // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+                  isDone && 'border border-info-border bg-info-tint text-foreground',
                   isActive && 'bg-info text-background',
                   isPending && 'border border-border bg-muted text-muted-foreground',
                 )}
