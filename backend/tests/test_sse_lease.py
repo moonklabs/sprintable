@@ -97,3 +97,32 @@ def test_fakeredis_and_lupa_available():
     """dep(fakeredis·lupa)가 빠지면 위 fakeredis 테스트가 조용히 skip되는 문을 닫는다 — plain import로 FAIL."""
     import fakeredis  # noqa: F401
     import lupa  # noqa: F401
+
+
+# ── story #2582: earliest_expiry — 정확한 Retry-After용 ────────────────────────
+async def test_earliest_expiry_none_when_empty(_flag_on_fakeredis):
+    assert await sse_lease.earliest_expiry("g") is None  # lease 하나도 없음
+
+
+async def test_earliest_expiry_none_when_flag_off(_flag_off):
+    assert await sse_lease.earliest_expiry("g") is None
+
+
+async def test_earliest_expiry_returns_soonest_score(_flag_on_fakeredis):
+    await sse_lease.acquire("g", 3, "c1")
+    await sse_lease.acquire("g", 3, "c2")
+    key = sse_lease._key("g")
+    # c1이 c2보다 먼저 만료하도록 score를 직접 당겨둔다(둘 다 acquire 직후 score는 거의 같음).
+    await _flag_on_fakeredis.zadd(key, {"c1": time.time() + 10, "c2": time.time() + 80})
+    earliest = await sse_lease.earliest_expiry("g")
+    assert earliest is not None
+    assert abs(earliest - (time.time() + 10)) < 2  # c1(가장 이른 것)의 score
+
+
+async def test_earliest_expiry_skips_already_expired(_flag_on_fakeredis):
+    """이미 만료(score<=now)된 건 evict된 뒤 계산 — 산 것 중 가장 이른 것만 본다."""
+    key = sse_lease._key("g")
+    await _flag_on_fakeredis.zadd(key, {"zombie": time.time() - 5, "alive": time.time() + 50})
+    earliest = await sse_lease.earliest_expiry("g")
+    assert earliest is not None
+    assert abs(earliest - (time.time() + 50)) < 2

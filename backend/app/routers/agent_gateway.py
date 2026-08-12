@@ -435,14 +435,24 @@ async def agent_stream(
     if _pk_lease is False or (
         _pk_lease is None and len(_agent_connections[agent_id_str]) >= _per_key_limit
     ):
+        # story #2582: flat _AGENT_STREAM_RETRY_AFTER(기본 5s)는 orphan lease(비정상 종료 —
+        # kill -9 등으로 finally/release가 안 돈 연결)의 실제 자가회수 시한(sse_lease._TTL_SEC,
+        # 기본 90s)과 무관하다 — 그 5s를 믿고 재시도하는 클라는 실제 해소보다 훨씬 일찍·
+        # 반복적으로(최대 18회) 429를 다시 맞는다("같은 키 재접속 lockout"으로 체감되는 근본
+        # 원인). Redis lease 경로에선 그 scope의 가장 이른 만료시각을 실측해 정확한 대기시간을
+        # 알려준다 — in-process 폴백(Redis 불가)엔 만료시각 개념이 없어 flat default 유지.
+        _retry_after = _AGENT_STREAM_RETRY_AFTER
+        _earliest = await sse_lease.earliest_expiry(f"perkey:{agent_id_str}")
+        if _earliest is not None:
+            _retry_after = max(1, round(_earliest - time.time()))
         raise HTTPException(
             status_code=429,
             detail={
                 "code": "AGENT_STREAM_LIMITED",
                 "message": f"Concurrent agent stream limit ({_per_key_limit}) reached for this key",
-                "retry_after": _AGENT_STREAM_RETRY_AFTER,
+                "retry_after": _retry_after,
             },
-            headers={"Retry-After": str(_AGENT_STREAM_RETRY_AFTER)},
+            headers={"Retry-After": str(_retry_after)},
         )
 
     # E-INFRA S4/#2121: 전역 agent stream 연결 cap — 503. Redis lease 주경로·Redis 불가 시 in-process 폴백.

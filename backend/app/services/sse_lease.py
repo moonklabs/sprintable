@@ -112,3 +112,28 @@ async def count(scope: str) -> "int | None":
     except Exception:
         logger.warning("sse_lease.count failed", exc_info=True)
         return None
+
+
+async def earliest_expiry(scope: str) -> "float | None":
+    """story #2582: 그 scope에서 가장 먼저 만료될 lease의 score(epoch 초) — acquire()가 False를
+    반환했을 때 호출부가 정확한 Retry-After를 계산하는 용도(현재 agent_gateway의 flat
+    `_AGENT_STREAM_RETRY_AFTER`(기본 5s)는 실제 자가회수까지 걸릴 수 있는 최대 시간(`_TTL_SEC`,
+    기본 90s)과 무관해 클라이언트가 실제 해소보다 훨씬 일찍·반복적으로 재시도하게 만든다 —
+    비정상 종료로 slot이 orphan인 채 최대 TTL만큼 남아있는 게 바로 이 상황).
+    None = Redis 불가 또는 그 scope에 살아있는(미만료) lease가 하나도 없음 — 두 경우 다
+    호출부는 flat default로 폴백한다."""
+    if not _enabled():
+        return None
+    client = redis_shared.get_client()
+    if client is None:
+        return None
+    try:
+        now = time.time()
+        await client.zremrangebyscore(_key(scope), "-inf", now)
+        res = await client.zrange(_key(scope), 0, 0, withscores=True)
+        if not res:
+            return None
+        return float(res[0][1])
+    except Exception:
+        logger.warning("sse_lease.earliest_expiry failed", exc_info=True)
+        return None
