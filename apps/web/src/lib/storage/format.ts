@@ -13,7 +13,9 @@ export const FILE_TINT_CLASS: Record<FileTint, string> = {
   img: 'bg-info/15 text-info',
   pdf: 'bg-destructive/10 text-destructive',
   doc: 'bg-success/15 text-success',
-  zip: 'bg-warning/15 text-warning',
+  // story #2590(TIER1 아이콘) — text-warning은 tint 유무와 무관하게 3.0 미달(실측, #2420 doc).
+  // 형제(img/pdf/doc)는 자기 계열색이 통과라 그대로 두고 zip만 foreground로 잠정 통일.
+  zip: 'bg-warning/15 text-foreground',
   code: 'bg-muted text-muted-foreground',
 };
 

@@ -57,9 +57,10 @@ function FolderNode({
             onSelectFolder(folder.id);
           }
         }}
+        // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙, 이 파일 3곳 동형).
         className={cn(
           'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-[13px] text-foreground outline-none focus-visible:bg-muted',
-          selected ? 'bg-info/10 font-semibold text-info' : 'hover:bg-muted',
+          selected ? 'bg-info/10 font-semibold text-foreground' : 'hover:bg-muted',
         )}
       >
         <span
@@ -259,7 +260,7 @@ export function StorageFolderTree({
           }}
           className={cn(
             'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-[13px] outline-none focus-visible:bg-muted',
-            selectedFolderId === null ? 'bg-info/10 font-semibold text-info' : 'text-foreground hover:bg-muted',
+            selectedFolderId === null ? 'bg-info/10 font-semibold text-foreground' : 'text-foreground hover:bg-muted',
           )}
         >
           <span className="w-[14px]" />
@@ -285,7 +286,7 @@ export function StorageFolderTree({
                 }}
                 className={cn(
                   'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-[13px] outline-none focus-visible:bg-muted',
-                  selectedFolderId === f.id ? 'bg-info/10 font-semibold text-info' : 'text-foreground hover:bg-muted',
+                  selectedFolderId === f.id ? 'bg-info/10 font-semibold text-foreground' : 'text-foreground hover:bg-muted',
                 )}
               >
                 <span className="w-[14px]" />

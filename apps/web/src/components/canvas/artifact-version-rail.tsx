@@ -55,11 +55,12 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
                 <div className="min-w-0 flex-1">
                   <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
                     v{v.version}
+                    {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
                     {isCurrent ? (
-                      <span className="rounded bg-info/10 px-1 py-0.5 text-[9px] font-bold text-info">{t('versionCurrentTag')}</span>
+                      <span className="rounded bg-info/10 px-1 py-0.5 text-[9px] font-bold text-foreground">{t('versionCurrentTag')}</span>
                     ) : null}
                     {isAnchor ? (
-                      <span className="rounded bg-success/10 px-1 py-0.5 text-[9px] font-bold text-success">{t('versionAnchorTag')}</span>
+                      <span className="rounded bg-success/10 px-1 py-0.5 text-[9px] font-bold text-foreground">{t('versionAnchorTag')}</span>
                     ) : null}
                   </p>
                   <p className="mt-0.5 truncate text-[11px] text-muted-foreground">

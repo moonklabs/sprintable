@@ -492,7 +492,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               {unsupported.map((tg) => (
                 <div
                   key={tg.agentId}
-                  className="flex items-center gap-2 rounded-lg border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-warning"
+                  // story #2590(TIER1) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+                  className="flex items-center gap-2 rounded-lg border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-foreground"
                 >
                   <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
                   <span className="min-w-0 flex-1 text-foreground">
@@ -503,7 +504,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   </span>
                   <Link
                     href={`/organization/workforce/${tg.agentId}`}
-                    className="shrink-0 rounded font-medium text-warning underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    // story #2590(TIER1) — 조상이 bg-warning-tint인 다른 리터럴(cross-element).
+                    className="shrink-0 rounded font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {t('commandViewSettings')}
                   </Link>
@@ -514,7 +516,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         }
         const chip = cmd ? `/${commandName(text)}` : (dequoteLiteral(text).trimStart().split(/\s+/)[0] ?? '');
         return (
-          <div className={`mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${cmd ? 'border-info/30 bg-info/8 text-info' : 'border-border bg-muted/50 text-muted-foreground'}`}>
+          // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+          <div className={`mb-2 flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs ${cmd ? 'border-info/30 bg-info/8 text-foreground' : 'border-border bg-muted/50 text-muted-foreground'}`}>
             {cmd ? <Terminal className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <Type className="h-3.5 w-3.5 shrink-0" aria-hidden />}
             <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono text-foreground">{chip}</code>
             <span>{cmd ? t('commandPreviewSendAsCommand') : t('commandPreviewSendAsLiteral')}</span>
