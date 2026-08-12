@@ -44,6 +44,7 @@ function FolderNode({
   const expanded = isExpanded(folder.id);
   const selected = selectedFolderId === folder.id;
 
+  // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙, 이 파일 3곳 동형).
   return (
     <div>
       <div
@@ -57,7 +58,6 @@ function FolderNode({
             onSelectFolder(folder.id);
           }
         }}
-        // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙, 이 파일 3곳 동형).
         className={cn(
           'flex cursor-pointer select-none items-center gap-[7px] rounded-sm px-2 py-[6px] text-[13px] text-foreground outline-none focus-visible:bg-muted',
           selected ? 'bg-info/10 font-semibold text-foreground' : 'hover:bg-muted',

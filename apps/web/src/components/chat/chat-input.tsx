@@ -489,10 +489,11 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           // warning 톤(amber) — 보내기 전 미지원 안내 + 런타임 설정 링크(대상 에이전트별 1행).
           return (
             <div className="mb-2 space-y-1">
+              {/* story #2590(TIER1) — tint 위 계열색 글자는 text-foreground(#2420 규칙). Link는
+                  조상이 bg-warning-tint인 다른 리터럴(cross-element)이라 별도 표기. */}
               {unsupported.map((tg) => (
                 <div
                   key={tg.agentId}
-                  // story #2590(TIER1) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
                   className="flex items-center gap-2 rounded-lg border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-foreground"
                 >
                   <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -504,7 +505,6 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   </span>
                   <Link
                     href={`/organization/workforce/${tg.agentId}`}
-                    // story #2590(TIER1) — 조상이 bg-warning-tint인 다른 리터럴(cross-element).
                     className="shrink-0 rounded font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {t('commandViewSettings')}

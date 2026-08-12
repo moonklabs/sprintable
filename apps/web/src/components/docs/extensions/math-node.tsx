@@ -62,9 +62,9 @@ function MathBlockView({ node, selected }: ReactNodeViewProps) {
         {/* KaTeX preview */}
         {!showEdit && (
           <div className="px-4 pb-4" contentEditable={false}>
+            {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
             {error ? (
               <div
-                // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
                 className="rounded-lg border border-destructive-border bg-destructive-tint p-3 text-xs text-foreground font-mono"
                 role="alert"
                 aria-live="assertive"

@@ -67,9 +67,9 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
             onClick={handlePreviewClick}
             style={{ cursor: isEditable ? 'pointer' : 'default' }}
           >
+            {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
             {error ? (
               <div
-                // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
                 className="rounded-xl border border-destructive-border bg-destructive-tint p-3 text-xs text-foreground"
                 role="alert"
                 aria-live="assertive"
