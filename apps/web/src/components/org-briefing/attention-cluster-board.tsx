@@ -33,7 +33,8 @@ function ClusterShell({
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-foreground">{title}</p>
-          <p className="truncate text-[11px] text-info">{subtitle}</p>
+          {/* story #2420 규칙 — tint 배경 위 글자는 계열색이 아니라 text-foreground. */}
+          <p className="truncate text-[11px] text-foreground">{subtitle}</p>
         </div>
         <span className="shrink-0 rounded-full border border-info/30 bg-card px-2.5 py-0.5 text-xs font-semibold text-info">
           {count}
@@ -59,7 +60,8 @@ function FalsifiedRow({ item }: { item: FalsifiedClusterItem }) {
         {item.hasOutcome ? t('clusterFalsifiedResult', { target: item.target ?? 0, actual: item.actual ?? 0 }) : t('clusterFalsifiedResultUnknown')}
       </p>
       <div className="mt-2 flex items-baseline gap-1.5 rounded-lg bg-info/10 px-2.5 py-1.5">
-        <span className="shrink-0 text-[11px] font-semibold text-info">{t('clusterBegetLabel')}</span>
+        {/* story #2420 규칙 — tint 배경 위 글자는 계열색이 아니라 text-foreground. */}
+        <span className="shrink-0 text-[11px] font-semibold text-foreground">{t('clusterBegetLabel')}</span>
         <span className="min-w-0 flex-1 truncate text-[11.5px] text-foreground">
           {item.supersededId ? t('clusterBegetLinked') : t('clusterBegetUnlinked')}
         </span>
