@@ -66,7 +66,7 @@ function needsAction(gate: GateItem): boolean {
 // 바로 승인/반려한다(gate-risk.ts usesSignatureFlow와 동일 경계 — high·unknown은 원탭 대상
 // 아님, 클릭하면 canonical 상세의 서명 플로우로 간다).
 function canInlineResolve(gate: GateItem): boolean {
-  return needsAction(gate) && gate.can_approve === true && !usesSignatureFlow(deriveRiskLevel(gate));
+  return needsAction(gate) && gate.can_approve === true && !usesSignatureFlow(deriveRiskLevel(gate)) && !isHeld(gate);
 }
 
 // AC §3.1 "노화 표시" — BE 신규 필드 불요, 기존 created_at으로 직접 계산(오르테가군 판정).
@@ -88,12 +88,16 @@ export function ApprovalsQueue() {
   const canResolveHitl = currentMemberType === 'human';
   const [items, setItems] = useState<GateInboxItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [resolving, setResolving] = useState<string | null>(null);
+  // PO 리뷰(PR#2948, 2026-08-12) — 단일 string|null이면 게이트 A in-flight 중 B를 클릭 후
+  // A가 먼저 끝나면 finally의 setResolving(null)이 "전역" 값을 지워 B도 아직 in-flight인데
+  // B 버튼이 재활성화된다(AC3 "중복 실행 0"이 다중 게이트 동시조작에서 깨지는 창). id별로
+  // 독립적으로 추적해야 한 게이트의 완료가 다른 게이트의 disabled 상태를 건드리지 않는다.
+  const [resolvingIds, setResolvingIds] = useState<Set<string>>(new Set());
   // story #1961(P2-S5) — 저위험 gate를 인라인으로 승인/반려한 결과. 목록에서 즉시 지우지
   // 않고(hitl과 다른 결정) "완료 상태 + 기록 링크"로 그 자리에서 바로 바꾼다 — AC "승인 후
-  // 완료 상태+서명 기록 링크 즉시"가 재조회나 페이지 전환 없이 서야 하기 때문. resolving===id
-  // 동안 버튼이 비활성화되고, 성공하면 이 맵에 값이 생겨 버튼 자체가 사라지므로(아래 렌더
-  // 분기) 중복 탭이 두 번째 요청을 만들 수 없다(요청 자체가 안 나감).
+  // 완료 상태+서명 기록 링크 즉시"가 재조회나 페이지 전환 없이 서야 하기 때문. resolvingIds에
+  // id가 있는 동안 버튼이 비활성화되고, 성공하면 이 맵에 값이 생겨 버튼 자체가 사라지므로(아래
+  // 렌더 분기) 중복 탭이 두 번째 요청을 만들 수 없다(요청 자체가 안 나감).
   const [resolvedGates, setResolvedGates] = useState<Record<string, 'approved' | 'rejected'>>({});
   const [gateErrors, setGateErrors] = useState<Record<string, string>>({});
 
@@ -111,7 +115,7 @@ export function ApprovalsQueue() {
   // story #2054 AC3: HitlRequest는 상세 페이지가 없어 이 큐 안에서 바로 승인/반려한다 —
   // 승인 후 원래 작업(report-done)이 통과하는지는 사용자 왕복(재시도)으로 확認된다.
   const resolveHitl = async (id: string, status: 'approved' | 'rejected') => {
-    setResolving(id);
+    setResolvingIds((prev) => new Set(prev).add(id));
     try {
       const res = await fetch(`/api/v1/hitl-requests/${id}`, {
         method: 'PATCH',
@@ -120,7 +124,7 @@ export function ApprovalsQueue() {
       });
       if (res.ok) setItems((prev) => prev.filter((it) => it.id !== id));
     } finally {
-      setResolving(null);
+      setResolvingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
     }
   };
 
@@ -128,7 +132,7 @@ export function ApprovalsQueue() {
   // 사유 없는 단순 transition)와 동일 엔드포인트·body — 서명 플로우(usesSignatureFlow)는
   // canInlineResolve가 이미 걸러 이 함수에 안 들어온다.
   const resolveGate = async (id: string, status: 'approved' | 'rejected') => {
-    setResolving(id);
+    setResolvingIds((prev) => new Set(prev).add(id));
     setGateErrors((prev) => { const next = { ...prev }; delete next[id]; return next; });
     try {
       const res = await fetch(`/api/gates/${id}/transition`, {
@@ -143,7 +147,7 @@ export function ApprovalsQueue() {
         setGateErrors((prev) => ({ ...prev, [id]: body?.error?.message ?? `HTTP ${res.status}` }));
       }
     } finally {
-      setResolving(null);
+      setResolvingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
     }
   };
 
@@ -175,7 +179,7 @@ export function ApprovalsQueue() {
                     size="sm"
                     variant="ghost"
                     className="h-7 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
-                    disabled={resolving === item.id}
+                    disabled={resolvingIds.has(item.id)}
                     onClick={() => void resolveHitl(item.id, 'rejected')}
                   >
                     <XCircle className="size-3.5" />
@@ -185,7 +189,7 @@ export function ApprovalsQueue() {
                     size="sm"
                     variant="ghost"
                     className="h-7 gap-1 text-success hover:bg-success-tint hover:text-success"
-                    disabled={resolving === item.id}
+                    disabled={resolvingIds.has(item.id)}
                     onClick={() => void resolveHitl(item.id, 'approved')}
                   >
                     <CheckCircle className="size-3.5" />
@@ -295,7 +299,7 @@ export function ApprovalsQueue() {
                 size="sm"
                 variant="ghost"
                 className="h-8 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
-                disabled={resolving === gate.id}
+                disabled={resolvingIds.has(gate.id)}
                 onClick={() => void resolveGate(gate.id, 'rejected')}
               >
                 <XCircle className="size-3.5" />
@@ -304,11 +308,11 @@ export function ApprovalsQueue() {
               <Button
                 size="sm"
                 className="h-8 gap-1"
-                disabled={resolving === gate.id}
+                disabled={resolvingIds.has(gate.id)}
                 onClick={() => void resolveGate(gate.id, 'approved')}
               >
                 <CheckCircle className="size-3.5" />
-                {resolving === gate.id ? '...' : t('gateApprove')}
+                {resolvingIds.has(gate.id) ? '...' : t('gateApprove')}
               </Button>
             </div>
           </div>

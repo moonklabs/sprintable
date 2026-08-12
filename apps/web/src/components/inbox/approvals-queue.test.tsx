@@ -401,4 +401,57 @@ describe('ApprovalsQueue', () => {
     const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
   });
+
+  // PO 리뷰(PR#2948, 2026-08-12) — status는 여전히 'pending'인데 held_until만 세팅된 조합.
+  // isHeld는 held_until만으로도 true라 보류 배지가 뜨는데, canInlineResolve가 그걸 안 보면
+  // "보류 뱃지 + 원탭 승인 버튼"이 같은 카드에 동시에 뜨는 자기모순이 난다.
+  it('pending 상태에 held_until만 세팅돼도 인라인 버튼이 안 뜬다(보류 배지·원탭 버튼 공존 봉쇄)', async () => {
+    mockFetches([lowRiskActionable({ id: 'g-pending-held-until', held_until: new Date().toISOString() })], []);
+    await mount();
+    expect(container.textContent).toContain(koMessages.cage.heldBadge);
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+  });
+
+  // PO 리뷰(PR#2948, 2026-08-12) — resolving이 단일 string|null이던 시절엔 게이트 A in-flight
+  // 중 A가 먼저 끝나면 finally의 setResolving(null)이 "전역" 값을 지워, 아직 in-flight인
+  // B의 버튼까지 재활성화됐다(중복 POST 창). id별 Set으로 독립 추적해야 한다는 걸 두 게이트를
+  // 동시에 굴려서 고정한다.
+  it('AC "중복 실행 0"(다중 게이트) — 게이트 A가 먼저 끝나도 아직 진행 중인 게이트 B 버튼은 계속 비활성 상태다', async () => {
+    const calls: { url: string; method?: string }[] = [];
+    let resolveA: (() => void) | null = null;
+    let resolveB: (() => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      calls.push({ url, method: init?.method });
+      if (init?.method === 'POST' && url.includes('g-a')) {
+        return new Promise((resolve) => { resolveA = () => resolve({ ok: true, json: async () => ({}) }); });
+      }
+      if (init?.method === 'POST' && url.includes('g-b')) {
+        return new Promise((resolve) => { resolveB = () => resolve({ ok: true, json: async () => ({}) }); });
+      }
+      if (url.includes('status=pending')) {
+        return { ok: true, json: async () => [lowRiskActionable({ id: 'g-a' }), lowRiskActionable({ id: 'g-b' })] };
+      }
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+
+    // React가 두 카드의 위치/구조를 그대로 유지하는 한(g-b는 이 테스트 내내 in-flight 2버튼
+    // 레이아웃을 벗어나지 않는다) DOM 참조는 재조회 없이도 재렌더를 관통해 유효하다 — B가
+    // "..."로 라벨만 바뀌는 것과 무관하게 같은 버튼 엘리먼트를 계속 가리킨다.
+    const [approveA, approveB] = Array.from(container.querySelectorAll('button')).filter((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement[];
+    await act(async () => { approveA.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { approveB.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2);
+
+    // A만 먼저 끝난다 — B는 여전히 in-flight.
+    await act(async () => { resolveA?.(); await Promise.resolve(); await Promise.resolve(); });
+    expect(approveB.disabled).toBe(true);
+    await act(async () => { approveB.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2); // B 재클릭이 세 번째 POST를 못 만든다.
+
+    await act(async () => { resolveB?.(); await Promise.resolve(); await Promise.resolve(); });
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2);
+    expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
+  });
 });
