@@ -246,7 +246,15 @@ class SprintableAdapter(BasePlatformAdapter):
 
     # -- lifecycle ----------------------------------------------------------
 
-    async def connect(self) -> bool:
+    async def connect(self, *, is_reconnect: bool = False) -> bool:
+        # story #2564(S9) — 격리 hermes-agent(v0.18.2) 실 왕복 中 실측: BasePlatformAdapter.
+        # connect()가 이제 keyword-only is_reconnect(cold-boot=False/outage 후 재연결=True)를
+        # 받는데(gateway/platforms/base.py) 이 오버라이드가 파라미터 없이 정의돼 있어 매
+        # 연결(최초든 재연결이든)이 TypeError로 죽었다 — hermes plugins install 정식 경로로
+        # 처음 실행해서야 드러난 결함(라이브 사본은 낡아 이 시그니처 변경 前 버전이라 아직
+        # 안 겪었을 뿐). 파라미터는 무시해도 안전 — 이 어댑터는 서버측 Last-Event-ID+backfill로
+        # 재연결을 이미 감당하고(_run_stream의 백오프 루프) 클라이언트 버퍼 큐가 없어 base
+        # docstring의 "no such queue may ignore the flag" 케이스에 정확히 해당한다.
         if not HTTPX_AVAILABLE:
             logger.warning("[%s] httpx not installed", self.name)
             return False
