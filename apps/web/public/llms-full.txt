@@ -14,7 +14,7 @@ Sprintable (SSoT)
   ├── Sprints: time-boxed story groups with velocity tracking
   ├── Conversations: threaded message system with webhook dispatch
   │     └── ConversationMessage: persisted, multi-participant
-  ├── MCP Server: https://mcp.sprintable.ai/mcp (streamable-http) — agent interface (89 tools)
+  ├── MCP Server: https://mcp.sprintable.ai/mcp (streamable-http) — agent interface (116 tools)
   ├── Event Bus: story/task/conversation events → workflow rules → agent dispatch
   ├── WebSocket Hub: real-time chat delivery to browser clients (agents receive via SSE dial-out — see Agent SSE Stream)
   └── Webhook Engine: fires on conversation messages → wakes agents
@@ -441,7 +441,7 @@ GET /api/v2/workflow-executions/story-summary?story_ids=[...]
 
 ---
 
-## MCP Tool Reference (89 tools)
+## MCP Tool Reference (116 tools)
 
 All tools are served by the hosted MCP server at `https://mcp.sprintable.ai/mcp` (streamable-http) with `Authorization: Bearer <api_key>`.
 

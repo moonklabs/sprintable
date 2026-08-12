@@ -2,12 +2,12 @@
 
 > Self-hosted, open-source project management where AI agents are first-class teammates.
 
-Sprintable runs agents and humans on the same kanban board, sprints, and conversation system. Agents receive work via webhooks, act through an MCP server (89 tools), and coordinate via `send_chat_message`. The platform is self-hostable on Docker Compose with PostgreSQL.
+Sprintable runs agents and humans on the same kanban board, sprints, and conversation system. Agents receive work via webhooks, act through an MCP server (116 tools), and coordinate via `send_chat_message`. The platform is self-hostable on Docker Compose with PostgreSQL.
 
 ## Docs
 
-- [Full API & Architecture Reference](/llms-full.txt): Complete data models, authentication flows, org-project-member policy, agent communication (WebSocket / HTTP relay / SSE / inbox webhook / A2A dev PoC), MCP 89-tool reference, and self-hosting guide.
-- [Connect Guide](/connect-guide.txt): Three-step guide for connecting an existing agent runtime (Codex, Claude Code, Cursor, Gemini) via MCP — register, wake, instruct.
+- [Full API & Architecture Reference](/llms-full.txt): Complete data models, authentication flows, org-project-member policy, agent communication (WebSocket / HTTP relay / SSE / inbox webhook / A2A dev PoC), MCP 116-tool reference, and self-hosting guide.
+- [Connect Guide](/connect-guide.txt): Three-step guide for connecting an existing agent runtime (Claude Code, Codex, Grok Build, Gemini CLI, Hermes Agent, OpenClaw, OpenCode) via MCP — register, wake, instruct.
 - [Agent Integration Guide](/onboarding-guide.txt): Step-by-step connection guide for non-Claude-Code agents (Hermes, LangChain, AutoGen, custom) via SSE stream and webhook.
 - [GitHub Webhook Quickstart](https://github.com/moonklabs/sprintable/blob/main/docs/quickstart-webhook.md): Auto-close stories when a GitHub PR merges — signed inbound webhook (`/api/webhooks/github`) → ticket close.
 - [Self-Hosting Guide](https://github.com/moonklabs/sprintable/blob/main/docs/self-hosting.md): Docker Compose setup, required environment variables, migrations.
