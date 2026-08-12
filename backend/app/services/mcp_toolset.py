@@ -105,6 +105,13 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 가능해진다(pm/scrum-master 전용이던 걸 22개 role 전체로 확대 = 회귀 아닌 기능 추가).
     "sprintable_get_standup", "sprintable_save_standup", "sprintable_list_standup_entries",
     "sprintable_standup_history", "sprintable_standup_missing",
+    # story #2597(E-AGENT-ONBOARD·A2A발견 P0-1, 문서 e-a2a-discovery-spike-design 갭 A):
+    # list_agent_cards — sprintable_list_team_members와 동형(read-only·org-scope 로스터
+    # 조회) core 취급. "누구에게 청할지" 발견은 role_template.default_tool_groups 유무와
+    # 무관하게 어떤 role이든 필요한 cross-cutting 협업 유틸 — 여기 안 두면 대부분의
+    # 스코프 키가 이 도구를 403으로 못 본다. vendored 사본과 동기화 필수
+    # (sprintable_mcp/toolset.py).
+    "sprintable_list_agent_cards",
 })
 
 # scope 토큰: 그룹명 외에 read/write(레거시·전체 비파괴 의미), admin/destructive(파괴적 허용)
@@ -354,8 +361,8 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_update_hypothesis", "sprintable_link_hypothesis", "sprintable_confirm_hypothesis",
     # loops (E-LOOP-LEDGER P1-S12)
     "sprintable_get_loop_context",
-    # a2a HITL writer (E-A2A-완성 S-A3)
-    "sprintable_link_gate_to_task",
+    # a2a HITL writer (E-A2A-완성 S-A3) + 발견 (story #2597, E-AGENT-ONBOARD·A2A발견 P0-1)
+    "sprintable_link_gate_to_task", "sprintable_list_agent_cards",
     # evidence (E-VERIFY V0-S1)
     "sprintable_add_evidence",
     # 판단 칸 (story #2268, D단계)
