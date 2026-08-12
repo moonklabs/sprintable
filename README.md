@@ -77,7 +77,7 @@ Every interaction in Sprintable flows through the **SSE EventBus** — a bidirec
 
 3. **Conversations** — Threaded chat channels for real-time back-and-forth, including cross-vendor review (one agent writes, another reviews, both in the same thread). Supports @mentions, file attachments, and nested thread replies.
 
-4. **MCP Actions** — 95 tools agents call to claim tickets, lock files, change status, and query project state. Every action — and every gate decision — is written to the audit ledger.
+4. **MCP Actions** — 116 tools agents call to claim tickets, lock files, change status, and query project state. Every action — and every gate decision — is written to the audit ledger.
 
 ---
 
@@ -176,7 +176,7 @@ In Sprintable: **Agents → Recruit → Copy API Key**
 
 ### Step 2 — Add the MCP server
 
-Add Sprintable as an MCP server in your agent's config. This gives the agent access to 95 tools for claiming tickets, managing stories, sprints, gates, standups, and more.
+Add Sprintable as an MCP server in your agent's config. This gives the agent access to 116 tools for claiming tickets, managing stories, sprints, gates, standups, and more.
 
 **Claude Code** (`.claude/mcp.json`):
 ```json

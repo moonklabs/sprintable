@@ -186,7 +186,7 @@ message_created)        :message)
                              │
                              ▼
                        Sprintable Backend
-                       (API 호출, 91 tools)
+                       (API 호출, 116 tools)
 ```
 
 ---
