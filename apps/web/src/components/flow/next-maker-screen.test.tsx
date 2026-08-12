@@ -11,6 +11,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { NextMakerScreen } from './next-maker-screen';
+import { bumpOrgSyncVersion } from '@/lib/project-context-client';
 import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -399,5 +400,30 @@ describe('NextMakerScreen — real fetch orchestration + lane grouping', () => {
     expect(patchBodies).toContainEqual({ status: 'backlog' });
     // 되돌리기 후 e-recent가 다시 "다음이 비어 있는" 목록으로 — headline이 3으로 복귀.
     expect(container.textContent).toContain('목표 3개 중 3개에');
+  });
+});
+
+// story #2545(카디르 라이브 재QA 5단계) — org 불일치 자동교정(switch-org)이 이 화면의 로드
+// effect *後* 성공하면 projectId는 안 바뀌므로 예전엔 재요청 트리거가 없었다. bumpOrgSyncVersion()
+// 호출 時 재요청되는지 고정한다.
+describe('NextMakerScreen — org-sync 성공 後 재요청 (story #2545)', () => {
+  it('bumpOrgSyncVersion() 호출 時 projectId가 그대로여도 재요청된다', async () => {
+    const calledUrls: string[] = [];
+    vi.stubGlobal('fetch', buildFetchMock(calledUrls));
+
+    await act(async () => {
+      root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const goalsCallsAfterMount = calledUrls.filter((u) => u.startsWith('/api/goals?')).length;
+    expect(goalsCallsAfterMount).toBeGreaterThan(0);
+
+    await act(async () => {
+      bumpOrgSyncVersion();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const goalsCallsAfterBump = calledUrls.filter((u) => u.startsWith('/api/goals?')).length;
+    expect(goalsCallsAfterBump).toBeGreaterThan(goalsCallsAfterMount); // 재요청 — 이전엔 안 늘었다(RED)
   });
 });

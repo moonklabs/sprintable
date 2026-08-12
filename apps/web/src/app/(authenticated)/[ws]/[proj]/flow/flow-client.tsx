@@ -9,6 +9,7 @@ import { KanbanBoard } from '@/components/kanban/kanban-board';
 import { ExceptionStream } from '@/components/glance/exception-stream';
 import { toExceptionQueueItems, type BeAttentionSignal, type ExceptionLabels } from '@/components/glance/derive-exception-signals';
 import { loadGlanceData, type GlanceData } from '@/components/glance/load-glance-data';
+import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { NextMakerScreen } from '@/components/flow/next-maker-screen';
 import { FlowNodeStoryPanel } from '@/components/flow/flow-node-story-panel';
@@ -116,12 +117,18 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
     })();
   }, [projectId]);
 
+  // story #2545(카디르 라이브 재QA 4단계) — org 불일치 자동교정(switch-org)이 이 fetch *後*
+  // 성공하면 projectId는 안 바뀌므로 재요청 트리거가 없었다. 다른 opt-in 컴포넌트들
+  // (hypothesis-earth-layer·goals-client·unattached-bucket·flow-multi-lane-canvas)과 동일
+  // 패턴 — orgSyncVersion을 트리거 effect 의존성에 얹는다.
+  const orgSyncVersion = useOrgSyncVersion();
+
   useEffect(() => {
     if (!projectId) return;
     const cancelledRef = { cancelled: false };
     fetchData(cancelledRef);
     return () => { cancelledRef.cancelled = true; };
-  }, [projectId, fetchData]);
+  }, [projectId, fetchData, orgSyncVersion]);
 
   const setView = useCallback((next: FlowView) => {
     const params = new URLSearchParams(searchParams.toString());

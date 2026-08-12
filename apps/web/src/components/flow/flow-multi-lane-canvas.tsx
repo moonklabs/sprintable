@@ -13,6 +13,7 @@ import { FlowCanvasResizePane } from './flow-canvas-resize-pane';
 import { declareResponseToEdge } from './flow-port-linking';
 import type { NextMakerGoal } from './derive-next-maker';
 import { parseCursorMeta } from '@/lib/pagination';
+import { useOrgSyncVersion } from '@/lib/project-context-client';
 
 interface FlowMultiLaneCanvasProps {
   projectId: string;
@@ -128,6 +129,11 @@ export function FlowMultiLaneCanvas({
   const [offscreenCardCount, setOffscreenCardCount] = useState(0);
 
   const expandGoalIds = useMemo(() => expandGoals.map((g) => g.id).join(','), [expandGoals]);
+  // story #2545(카디르 라이브 재QA 3단계) — org 불일치 자동교정(switch-org)이 이 fetch 直後
+  // 성공하면 project/expandGoals는 안 바뀌므로 재요청 트리거가 없었다(/flow의 실제 goals
+  // 요청원 — GoalsClient/goals-client.tsx가 아니라 이 컴포넌트의 fetchLaneIngredients였다,
+  // 카디르 grep으로 특定). project-context-client.ts 참고.
+  const orgSyncVersion = useOrgSyncVersion();
 
   useEffect(() => {
     let cancelled = false;
@@ -151,8 +157,8 @@ export function FlowMultiLaneCanvas({
       setState({ kind: 'ready', ingredientsByEpic });
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- expandGoals identity churns every parent render; expandGoalIds(문자열)가 실제 트리거다.
-  }, [projectId, expandGoalIds]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- expandGoals identity churns every parent render; expandGoalIds(문자열)가 실제 트리거다. orgSyncVersion도 콜백 안에서 안 읽는 의도적 invalidation 트리거(story #2545).
+  }, [projectId, expandGoalIds, orgSyncVersion]);
 
   // story #2224(멀티레인) — 어느 레인의 묶음인지 FlowMapCanvas가 epicId를 실어 보낸다.
   // 이미 펼쳐져 있으면(pastItemsByEpic에 항목 있음) 접고 끝 — 아니면 fetch해서 편다

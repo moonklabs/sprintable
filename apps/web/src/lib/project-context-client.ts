@@ -1,5 +1,7 @@
 'use client';
 
+import { useSyncExternalStore } from 'react';
+
 /**
  * 프로젝트 컨텍스트 SSOT (R2: d802da27 stale context / 85614dd9 멀티탭 독립).
  *
@@ -33,6 +35,44 @@ const effectiveOrgIdRef: { current: string | undefined } = { current: undefined 
 
 export function setEffectiveOrgId(id: string | undefined): void {
   effectiveOrgIdRef.current = id;
+}
+
+// story #2545(카디르 라이브 재QA, 2단계) — DashboardShell의 자동 switch-org(불일치 감지 →
+// 토큰 재발급, 위 참고)가 성공한 뒤 `router.refresh()`는 **서버 컴포넌트만** 재실행한다.
+// hypotheses/goals처럼 `useEffect(() => fetch(...), [projectId])`로 짜인 클라이언트 fetch는
+// projectId가 그대로면(이 결함에선 org만 바뀌고 project는 그대로다) effect가 다시 안 돌아
+// switch-org 이전에 이미 확定된 403/404 결과에 영구히 고정된다(카디르 실측: 8초 관측·
+// hypotheses fetch 총 1회뿐 — RSC 위젯은 refresh로 정상 회복하는 것과 대조).
+// 전체 fetch를 org-sync 완료까지 게이트하는 건 앱 전역 컴포넌트를 건드리는 큰 변경이라
+// (PO 판정) 이번 스코프 밖 — 대신 이 값을 구독하는 컴포넌트만 "org sync가 방금 완료됐다"는
+// 신호를 받아 자기 effect 의존성 배열에 얹어 재요청하게 한다(옵트인, 전수 마이그레이션 아님).
+let orgSyncVersion = 0;
+const orgSyncListeners = new Set<() => void>();
+
+/** DashboardShell이 switch-org 성공 直後 정확히 한 번 호출 — 구독 컴포넌트를 재요청시킨다. */
+export function bumpOrgSyncVersion(): void {
+  orgSyncVersion += 1;
+  for (const listener of orgSyncListeners) listener();
+}
+
+function subscribeOrgSyncVersion(callback: () => void): () => void {
+  orgSyncListeners.add(callback);
+  return () => { orgSyncListeners.delete(callback); };
+}
+
+function getOrgSyncVersionSnapshot(): number {
+  return orgSyncVersion;
+}
+
+function getOrgSyncVersionServerSnapshot(): number {
+  return 0; // SSR/최초 하이드레이션은 항상 0 — 서버·클라 첫 렌더 불일치 없음.
+}
+
+/** org 자동 동기화(switch-org)가 방금 성공적으로 끝났음을 신호받는 훅. 반환값이 바뀔 때마다
+ * 구독 컴포넌트를 재렌더시키므로, 이 값을 fetch effect의 의존성 배열에 얹으면 org-sync 성공
+ * 直後 그 fetch가 재요청된다(예: `useEffect(() => { ... }, [projectId, orgSyncVersion])`). */
+export function useOrgSyncVersion(): number {
+  return useSyncExternalStore(subscribeOrgSyncVersion, getOrgSyncVersionSnapshot, getOrgSyncVersionServerSnapshot);
 }
 
 let interceptorInstalled = false;

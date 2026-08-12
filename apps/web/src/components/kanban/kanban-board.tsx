@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
+import { useOrgSyncVersion } from '@/lib/project-context-client';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -111,6 +112,10 @@ function saveWipLimit(projectId: string | undefined, status: string, limit: numb
 export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  // story #2545(카디르 라이브 재QA 5단계) — org 불일치 자동교정(switch-org)이 이 fetchData
+  // *後* 성공하면 projectId는 안 바뀌므로 재요청 트리거가 없었다. 다른 opt-in 컴포넌트들과
+  // 동일 패턴 — orgSyncVersion을 트리거 effect 의존성에 얹는다.
+  const orgSyncVersion = useOrgSyncVersion();
   const t = useTranslations('board');
   const { toasts, addToast, dismissToast } = useToast();
   const [transitionError, setTransitionError] = useState<string | null>(null);
@@ -470,7 +475,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     }
   }, [columnCursors, fetchStoriesByStatus]);
 
-  useEffect(() => { void fetchData(); }, [fetchData]);
+  useEffect(() => { void fetchData(); }, [fetchData, orgSyncVersion]);
 
 
   const handleStoryClick = useCallback(async (story: KanbanStory, { replace = false } = {}) => {
