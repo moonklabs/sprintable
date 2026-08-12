@@ -306,7 +306,14 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     }
   }, [projectId, folderCreation, newFolderName, t, expandFolder]);
 
-  const handleNewFolder = useCallback(() => startCreateFolder(null), [startCreateFolder]);
+  // 유나 design:changes(2026-08-12, PR#2974 차단) — 인라인 폼은 sidebarContent 안에만 렌더되는데
+  // 데스크톱 aside는 모바일서 숨겨지고 드로어는 기본 닫힘이라, topbar "새 폴더"가 모바일에서
+  // no-op이었다(루트 폴더 생성 진입점이 이 버튼뿐이라 모바일서 원천 차단). isMobile이면 드로어도
+  // 같이 연다 — openDrawer와 동일 동작이나 아래에서 선언돼 훅 선언 순서상 setter를 직접 쓴다.
+  const handleNewFolder = useCallback(() => {
+    startCreateFolder(null);
+    if (isMobile) setTreeDrawerOpen(true);
+  }, [startCreateFolder, isMobile]);
   const handleAddChildFolder = useCallback((parentId: string) => startCreateFolder(parentId), [startCreateFolder]);
 
   const openDrawer = useCallback(() => setTreeDrawerOpen(true), []);
@@ -370,7 +377,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
           />
           {folderCreateError ? (
-            <p className="text-[11px] text-destructive" role="alert" aria-live="assertive">{folderCreateError}</p>
+            <p className="text-[11px] text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{folderCreateError}</p>
           ) : null}
           <div className="flex items-center justify-end gap-1.5">
             <Button size="sm" variant="ghost" onClick={cancelCreateFolder} disabled={folderSubmitting}>
