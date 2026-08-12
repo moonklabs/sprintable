@@ -43,15 +43,16 @@ async def link_gate_to_task(args: LinkGateToTaskInput) -> list[TextContent]:
 
 
 class ListAgentCardsInput(SprintableInput):
-    # story #2597 AC3: 서버측 `_skill_matches`(a2a.py) 로 그대로 전달 — id/tags/name/
-    # description 부분일치(대소문자 무시). 생략 시 org 내 활성 agent 전원 반환.
+    # story #2597 AC3: 서버측 `_skill_matches`(a2a.py) 로 그대로 전달 — id는 정확일치,
+    # tags/name/description은 부분일치(대소문자 무시·카디르 QA #2600 코스메틱 정정: id도
+    # 부분일치라고 잘못 적혀 있었음). 생략 시 org 내 활성 agent 전원 반환.
     skill: str | None = None
 
 
 async def list_agent_cards(args: ListAgentCardsInput) -> list[TextContent]:
     """지금 이 org에서 "누구에게 청할지" 발견한다 — org 내 활성 agent 전원의 A2A AgentCard
     (표준 규격: name/skills/security 등)를 열거한다. `skill`을 주면(예: "qa", "backend")
-    서버가 각 카드의 skill id/name/description/tags를 부분일치로 걸러 후보만 돌려준다 —
+    서버가 각 카드의 skill id(정확일치)·name/description/tags(부분일치)로 걸러 후보만 돌려준다 —
     "이 작업엔 누가 적임자인가"를 사람이 미리 알려주지 않아도 스스로 찾을 때 쓴다(예: PR을
     올린 뒤 QA 담당을 모를 때 `skill="qa"`로 조회해 반환된 member_id에게
     sprintable_send_chat_message 로 청한다). 자기 자신의 크리덴셜(org 스코프)로만 조회되며,
