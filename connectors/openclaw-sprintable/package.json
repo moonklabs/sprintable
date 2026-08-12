@@ -1,6 +1,6 @@
 {
   "name": "openclaw-sprintable",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Sprintable Gateway channel plugin for OpenClaw — real-time team chat via SSE dial-out (no inbound webhook required).",
   "keywords": [
     "openclaw-plugin",

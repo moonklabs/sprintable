@@ -175,8 +175,21 @@ export async function runSprintableSSE(opts: {
               process.stderr.write(
                 `[sprintable-sse] inbound seq=${ctx.seq} conv=${ctx.conversationId}: ${ctx.content.slice(0, 80)}\n`
               )
-              await onMessage(ctx)
-              if (ctx.seq) await ack(ctx.seq)
+              // story #2580 — isDup() claims ctx.eventId *before* onMessage runs (needed to
+              // survive a same-event redelivery arriving mid-processing). If onMessage throws
+              // (reply POST failed, LLM call failed, etc.), the event never gets acked, so the
+              // backend backfills the identical event_id on reconnect — but isDup() would keep
+              // rejecting it as already-seen forever (bounded only by the opportunistic TTL
+              // sweep at DEDUP_MAX overflow), silently losing the message. Same defect class as
+              // codex PR#7's claim-before-POST bug — release the claim on failure so redelivery
+              // can retry, same as codex's `_release_claim`.
+              try {
+                await onMessage(ctx)
+                if (ctx.seq) await ack(ctx.seq)
+              } catch (e) {
+                seen.delete(ctx.eventId)
+                throw e
+              }
             }
           }
           evType = 'message'; evId = ''; dataLines = []

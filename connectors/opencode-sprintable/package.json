@@ -1,6 +1,6 @@
 {
   "name": "opencode-sprintable",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Sprintable Gateway channel plugin for OpenCode — two-way chat between an OpenCode session and its Sprintable team, dial-out (no inbound domain/webhook/tunnel required).",
   "keywords": ["opencode-plugin", "sprintable"],
   "type": "module",
