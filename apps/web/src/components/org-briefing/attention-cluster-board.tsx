@@ -57,7 +57,15 @@ function FalsifiedRow({ item }: { item: FalsifiedClusterItem }) {
         <Badge variant="info" className="shrink-0">{t('clusterFalsifiedBadge')}</Badge>
       </div>
       <p className="mt-1.5 text-xs text-muted-foreground">
-        {item.hasOutcome ? t('clusterFalsifiedResult', { target: item.target ?? 0, actual: item.actual ?? 0 }) : t('clusterFalsifiedResultUnknown')}
+        {/* 유나 design:changes(2026-08-12, PR#2940 비차단 권장) — 목표→최종 값 위계가 목업
+            대비 flat했다. 최종값만 bold/text-foreground로 올려 결과가 눈에 먼저 들어오게 한다. */}
+        {item.hasOutcome
+          ? t.rich('clusterFalsifiedResult', {
+              target: item.target ?? 0,
+              actual: item.actual ?? 0,
+              b: (chunks) => <span className="font-semibold text-foreground">{chunks}</span>,
+            })
+          : t('clusterFalsifiedResultUnknown')}
       </p>
       <div className="mt-2 flex items-baseline gap-1.5 rounded-lg bg-info/10 px-2.5 py-1.5">
         {/* story #2420 규칙 — tint 배경 위 글자는 계열색이 아니라 text-foreground. */}

@@ -407,7 +407,7 @@
     "clusterStalledTitle": "Stalled stories",
     "clusterStalledSub": "Untouched 3+ days · oldest first",
     "clusterFalsifiedBadge": "✕ Refuted",
-    "clusterFalsifiedResult": "Target {target} → Final {actual}",
+    "clusterFalsifiedResult": "Target {target} → Final <b>{actual}</b>",
     "clusterFalsifiedResultUnknown": "Result pending",
     "clusterBegetLabel": "↳ Spawned",
     "clusterBegetLinked": "Linked to a follow-up hypothesis",
