@@ -23,9 +23,15 @@ const badgeVariants = cva(
         ghost:
           "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
         link: "text-primary underline-offset-4 hover:underline",
-        success: "border-success-border bg-success-tint text-success",
-        info: "border-info-border bg-info-tint text-info",
-        warning: "border-warning-border bg-warning-tint text-warning",
+        // story #2420 v3 규칙(계열별 토큰 대신 규칙 하나) — destructive와 동일: tint 배경 위
+        // 글자는 text-foreground다(계열색 아님). 계열은 border/bg로 전한다. 유나 라이브 실측
+        // (2026-08-10, dev): text-warning on bg-warning-tint = 2.06(라이트, AA 4.5 미달) →
+        // text-foreground로 이행 시 18.44(라이트·success 17.47·info 17.38·전 계열 AA,
+        // scripts/verify-tint-foreground-contrast.ts가 정의 시점에 검증). --foreground가
+        // 테마마다 값을 가지므로 dark: 짝이 따로 필요 없다.
+        success: "border-success-border bg-success-tint text-foreground",
+        info: "border-info-border bg-info-tint text-foreground",
+        warning: "border-warning-border bg-warning-tint text-foreground",
         chip: "border-border/80 bg-muted/70 text-muted-foreground",
         counter: "border-transparent bg-destructive text-destructive-foreground",
       },
