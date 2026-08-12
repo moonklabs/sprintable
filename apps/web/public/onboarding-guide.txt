@@ -160,23 +160,28 @@ and backoff are handled by the shared SDK; you only supply the runtime's injecti
 
 ### Runtime catalog
 
-| Runtime | Category | Adapter | Injection |
-|---------|----------|---------|-----------|
-| **Claude Code** | A (channel plugin) | `sprintable@moonklabs` (`moonklabs/sprintable-agent-plugins`) | Claude Code channel plugin — see `connect-guide.txt` |
-| **Hermes Agent** | A (platform plugin) | `connectors/hermes-sprintable/` | `handle_message()` |
-| **OpenClaw** | A (ChannelPlugin) | `connectors/openclaw-sprintable/` | `runtime.channel.inbound` |
-| **OpenCode** | A (plugin SDK) | `connectors/opencode-sprintable/` | `client.session.prompt()` |
-| **Codex** | A (channel plugin) | `sprintable-codex@moonklabs` (`moonklabs/sprintable-agent-plugins`) | Codex hooks (`SessionStart`/`Stop`/`UserPromptSubmit`) — see `connect-guide.txt` |
-| **Gemini** | B (ACP stdio JSON-RPC host) | `connectors/gemini-sprintable/` | spawns `gemini --acp` (Agent Client Protocol) |
-| **Grok** (xAI Grok Build) | B (Zed ACP stdio host) | `connectors/grok-sprintable/` | spawns `grok agent stdio` (same ACP as Gemini) |
-| **Pi** | B (JSONL/stdio host) | `connectors/pi-sprintable/` | spawns `pi --mode rpc` (line-delimited JSON, supports mid-stream `steer`) |
-| **Cursor** (Cloud Agents only) | C (HTTP sidecar) | `connectors/cursor-sprintable/` | Cursor Cloud Agents API — no child process, run-state managed over HTTP |
-| Custom (LangChain, etc.) | — | `connectors/sdk/` | shared SDK — inject in `onMessage` |
+| Runtime | Category | Formal install | Injection |
+|---------|----------|-----------------|-----------|
+| **Claude Code** | A (channel plugin) | `/plugin install sprintable@moonklabs` — see `connect-guide.txt` | Claude Code channel plugin |
+| **Codex** | A (channel plugin) | `codex plugin add sprintable-codex@moonklabs` — see `connect-guide.txt` | Codex hooks (`SessionStart`/`Stop`/`UserPromptSubmit`) |
+| **Grok Build** | A (channel plugin) | `grok plugin install sprintable-grok --trust` — see `connect-guide.txt` | Grok hooks (`SessionStart`/`Stop`, camelCase envelope) |
+| **Gemini CLI** | A (channel extension) | `gemini extensions install https://github.com/moonklabs/sprintable-gemini` | Gemini hooks (`SessionStart`/`AfterAgent`) |
+| **Hermes Agent** | A (platform plugin) | `hermes plugins install moonklabs/sprintable/connectors/hermes-sprintable --enable` | `handle_message()` |
+| **OpenClaw** | A (ChannelPlugin) | `openclaw plugins install npm:openclaw-sprintable` | `runtime.channel.inbound` |
+| **OpenCode** | A (plugin SDK) | `opencode plugin opencode-sprintable` | `client.session.prompt()` |
+| **Pi** | — | 아직 없음 — #2574(신규 in-process ExtensionAPI 확장) 진행 中, 머지·npm 게시 前 | `pi.sendMessage(deliverAs:"steer")` (설계만, 미출하) |
+| **Cursor** (Cloud Agents only) | — | 아직 없음 — install-제로(키 등록) 서버측 통합은 설계 스파이크만 완료, 구현 미착수 | Cursor Cloud Agents API (설계만, 미출하) |
+| Custom (LangChain, etc.) | — | `connectors/sdk/` (직접 연동, 클론 전제) | shared SDK — inject in `onMessage` |
 
-> Category B/C adapters are for **background/headless** runs (a spawned CLI or cloud
-> run), not a local interactive editor session — e.g. the Cursor adapter only reaches
-> Cursor's Cloud (Background) Agents API, not a local Cursor editor. Each adapter's own
-> README states exactly what it does and doesn't reach.
+> **`connectors/gemini-sprintable/`, `connectors/grok-sprintable/`, `connectors/pi-sprintable/`,
+> `connectors/cursor-sprintable/` in this monorepo are earlier "connector host" prototypes,
+> superseded (Gemini/Grok) or unrelated to (Pi/Cursor — see below) the shipped formal
+> installs above.** They are not what the table's "Formal install" column points at; don't
+> follow them for a fresh onboard. Gemini and Grok's real, current channel plugins live in
+> their own dedicated repos (`sprintable-gemini`, and `sprintable-agent-plugins/plugins/sprintable-grok`)
+> — a category-B/C spawned-CLI-host architecture is what the early feasibility research
+> considered before the hooks-based channel plugin pattern (proven first for Claude Code/
+> Codex, then ported) turned out to work for every runtime that has hooks.
 
 > **Codex also has a Category B option**, `connectors/codex-sprintable/` — spawns &
 > owns `codex app-server`, injects via stdio JSON-RPC. It predates the channel plugin
@@ -235,6 +240,91 @@ second plugin (enable `sprintable-prod-platform`). It uses `SPRINTABLE_PROD_*`
 env vars so prod credentials/home channel never cross with dev.
 
 Full detail, env-group reference and troubleshooting: `connectors/hermes-sprintable/README.md`.
+
+### Example: Grok Build
+
+Ported from the Codex channel plugin — same Stop-hook injection pattern, camelCase
+input envelope instead of snake_case.
+
+```bash
+grok plugin marketplace add moonklabs/sprintable-agent-plugins
+grok plugin install sprintable-grok --trust
+```
+
+`--trust` is required — Grok shows the plugin source and stops without it (it
+activates hooks, MCP, and skills). Then:
+
+```
+/sprintable-grok:configure sk_live_...
+```
+
+> Use the **qualified** `sprintable-grok:configure` name, not bare `configure` —
+> if the Claude Code `sprintable` plugin is also installed on the same machine,
+> Grok can resolve the ambiguous bare name to the *other* plugin's skill
+> (reproduced: it wrote to the Claude plugin's credential path instead).
+
+Run `grok` normally afterward — no extra flags. Grok caps a turn at 8
+`Stop`-hook continuations; this plugin batches the whole pending queue into one
+`block` per fire, so that cap rarely matters in practice.
+
+Full detail (marketplace layout, hooks-discovery workaround, troubleshooting):
+[`sprintable-agent-plugins/plugins/sprintable-grok/README.md`](https://github.com/moonklabs/sprintable-agent-plugins/blob/main/plugins/sprintable-grok/README.md).
+
+### Example: Gemini CLI
+
+```bash
+gemini extensions install https://github.com/moonklabs/sprintable-gemini
+```
+
+One command — pulls the extension, prompts for the Sprintable API key (stored in
+the OS keychain, not a plain-text file), and installs the bundled `sprintable-mcp`
+server. Reconfigure any time with `gemini extensions config sprintable`.
+
+> Gemini CLI has no per-agent home directory (`~/.gemini` is fixed — no
+> `CODEX_HOME`/`GROK_HOME` equivalent). Multiple Sprintable-connected Gemini
+> agents on one machine share the same keychain entry; use `SPRINTABLE_STATE_DIR`
+> to at least separate queue/log state.
+>
+> Uninstalling the extension does **not** stop the background listener process
+> (no uninstall-time hook exists) — kill it manually:
+> `pkill -f 'sprintable-gemini.*scripts/listener.py'`.
+
+Full detail: [`sprintable-gemini/README.md`](https://github.com/moonklabs/sprintable-gemini/blob/main/README.md).
+
+### Example: OpenClaw
+
+```bash
+openclaw plugins install npm:openclaw-sprintable
+openclaw daemon restart                          # install alone doesn't start serving
+openclaw plugins inspect sprintable --runtime     # confirm loaded + serving
+```
+
+Credentials in `~/.openclaw/openclaw.json` (`channels.sprintable.apiKey`/`apiUrl`)
+or env vars (`SPRINTABLE_API_KEY`/`AGENT_API_KEY`, `SPRINTABLE_API_URL`) — config
+takes precedence when both are set.
+
+Full detail: `connectors/openclaw-sprintable/README.md`.
+
+### Example: OpenCode
+
+```bash
+opencode plugin opencode-sprintable
+```
+
+One command — OpenCode fetches the npm package and updates your
+`opencode.json`/`opencode.jsonc` plugin config; no manual editing or symlinking.
+Set credentials before starting `opencode`:
+
+```bash
+export AGENT_API_KEY=sk_live_...
+export SPRINTABLE_API_URL=https://...    # optional, defaults to SaaS
+```
+
+Lifetime = the OpenCode process — the SSE connection dies when OpenCode closes
+(no separate daemon); messages that arrive while it's down are recovered via
+backfill on next start, not lost.
+
+Full detail: `connectors/opencode-sprintable/README.md`.
 
 ### Direct integration — shared SDK
 

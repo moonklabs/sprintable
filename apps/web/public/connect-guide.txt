@@ -88,25 +88,26 @@ MCP는 «에이전트가 Sprintable을 부르는 길»입니다. 반대 방향 �
 |---|---|---|
 | Claude Code | 채널 플러그인 | `sprintable@moonklabs` (`/plugin install` 정식 설치) |
 | Codex | 채널 플러그인 | `sprintable-codex@moonklabs` (`codex plugin add` 정식 설치) |
-| Hermes | 채널 플러그인 | `connectors/hermes-sprintable/` |
-| OpenClaw | 채널 플러그인 | `connectors/openclaw-sprintable/` |
-| OpenCode | 채널 플러그인 | `connectors/opencode-sprintable/` |
-| Gemini | 커넥터 호스트 | `connectors/gemini-sprintable/` |
-| Grok | 커넥터 호스트 | `connectors/grok-sprintable/` |
-| Pi | 커넥터 호스트 | `connectors/pi-sprintable/` |
-| Cursor | 사이드카 | `connectors/cursor-sprintable/` (클라우드 에이전트 전용) |
+| Grok | 채널 플러그인 | `sprintable-grok@moonklabs` (`grok plugin install --trust` 정식 설치) |
+| Gemini | 채널 확장 | `gemini extensions install https://github.com/moonklabs/sprintable-gemini` |
+| Hermes | 플랫폼 플러그인 | `hermes plugins install moonklabs/sprintable/connectors/hermes-sprintable` |
+| OpenClaw | 채널 플러그인 | `openclaw plugins install npm:openclaw-sprintable` |
+| OpenCode | 채널 플러그인 | `opencode plugin opencode-sprintable` |
+| Pi | — | 지원 준비 中 — 정식 설치 경로 아직 없음(#2574 진행 중) |
+| Cursor | — | 지원 준비 中 — 정식 설치 경로 아직 없음 |
 | 그 외 | 직접 연동 | `connectors/sdk/` |
 
-**채널 플러그인**은 MCP만으로 세션이 시작되지 않아 별도 페어링이 필요합니다.
-**커넥터 호스트**는 그 경로를 실행하면 세션을 직접 구동합니다.
+**채널 플러그인/확장**은 MCP만으로 세션이 시작되지 않아 별도 페어링(hooks/extension
+설치)이 필요합니다. 아래 각 절이 런타임별 정확한 순서입니다.
 
 채용 완료 화면의 ②「깨우기」 칸에도 같은 내용이 런타임별로 표시됩니다.
 
-**Claude Code와 Codex는 정식 플러그인이 있습니다** — 아래 각 절을 그대로 따르면
-(`/plugin install` 또는 `codex plugin add`) 이 단계를 끝낼 수 있습니다. 나머지
-런타임(Hermes·OpenClaw·OpenCode·Gemini·Grok·Pi·Cursor)은 아직 정식 설치 경로를
-제공하지 않습니다 — 위 표의 경로는 저장소 안의 위치일 뿐이라, 그 런타임들은 이
-단계를 지금 끝낼 수 없습니다.
+**Claude Code·Codex·Grok·Gemini·Hermes·OpenClaw·OpenCode는 정식 설치 경로가
+있습니다** — 아래 각 절을 그대로 따르면 이 단계를 끝낼 수 있습니다. **Pi와
+Cursor는 아직 없습니다** — Pi는 신규 in-process 확장이 #2574로 진행 중(머지·npm
+게시 前)이고, Cursor는 install-제로(키 등록만) 서버측 통합이 설계까지만 끝난
+상태라 지금 실행할 명령이 없습니다. 이 둘은 준비되는 대로 각 트랙에서 이 문서에
+절이 추가됩니다 — 지금은 시도하지 마십시오.
 
 ### Claude Code — 실시간 채널 연결 (정식 플러그인 설치)
 
@@ -214,6 +215,201 @@ self-host 백엔드에 붙으려면 그 URL을 함께 주십시오.
 응답을 `POST /api/v2/conversations/{id}/messages`로 돌려보내는 방식으로 동작합니다.
 키가 없으면 모든 hook이 조용히 아무 것도 하지 않습니다 — 기존 Codex 사용에 영향 없음.
 
+### Grok Build — 실시간 채널 연결 (정식 플러그인 설치)
+
+Codex 채널 플러그인을 그대로 이식한 구조입니다(같은 Stop-hook 주입 패턴). 로컬
+clone·스크립트 실행 없이 2명령으로 끝납니다.
+
+**1) 마켓플레이스 추가 + 플러그인 설치** (터미널에서)
+
+```bash
+grok plugin marketplace add moonklabs/sprintable-agent-plugins
+grok plugin install sprintable-grok --trust
+```
+
+`--trust`는 필수입니다 — 이게 없으면 Grok이 플러그인 소스를 보여주고 멈춥니다
+(hooks·MCP·skill을 활성화하는 설치라 먼저 확인을 요구합니다).
+
+**2) API 키 설정**
+
+```
+/sprintable-grok:configure <0단계에서 발급한 키>
+```
+
+> **바로 `/sprintable:configure`(이름 없이)를 쓰지 마십시오.** 같은 머신에 Claude
+> Code `sprintable` 플러그인도 있으면 이름이 같은 `configure` skill이 둘이라
+> Grok이 어느 쪽을 실행할지 모호해집니다 — 실제로 Claude 플러그인 쪽 자격증명
+> 파일에 잘못 쓰인 사례가 있습니다. `sprintable-grok:configure`처럼 항상
+> `<플러그인>:<skill>` 전체 이름을 쓰십시오.
+
+두 번째 인자를 생략하면 SaaS(`https://app.sprintable.ai`)에 붙습니다.
+
+**3) `grok` 정상 실행**
+
+추가 플래그가 필요 없습니다.
+
+> **8-continuation 상한.** Grok은 한 턴에서 `Stop` hook의 block/feedback을
+> 8회까지만 허용하고 그 이상이면 턴을 강제 종료합니다. 이 플러그인은 밀린
+> 메시지 전체를 한 번의 block으로 합쳐 보내므로(메시지당 1이 아니라) 실무에서
+> 이 상한에 걸리는 경우는 드뭅니다.
+>
+> **무료 티어 사용량 창이 하루보다 훨씬 좁습니다.** 라이브 실측(2026-08-12):
+> 한 번 응답이 성공한 직후 ~5-6분 만에 같은 사용량 제한에 다시 걸렸습니다 —
+> 채널 자체(SSE→큐→주입→회신)는 API 호출 경계까지 정상 동작했고, 막힌 지점은
+> Grok 모델 호출 자체입니다(플러그인 바깥). 무료 티어라면 Sprintable이 트리거한
+> 연속 실행이 본인 인터랙티브 사용량과 같은 얕은 예산을 다툰다고 예상하십시오.
+
+전체 상세(marketplace 구조·hooks 발견 우회책·트러블슈팅):
+[`moonklabs/sprintable-agent-plugins/plugins/sprintable-grok/README.md`](https://github.com/moonklabs/sprintable-agent-plugins/blob/main/plugins/sprintable-grok/README.md).
+
+### Gemini CLI — 실시간 채널 연결 (정식 확장 설치)
+
+**1) 확장 설치** (터미널에서)
+
+```bash
+gemini extensions install https://github.com/moonklabs/sprintable-gemini
+```
+
+한 명령으로 끝입니다 — 확장을 받고, Sprintable API 키를 물어서 **OS 키체인에**
+저장하고(평문 파일이 아닙니다), 번들 MCP 서버까지 같이 설치합니다. 두 번째 인자로
+API URL을 지정할 수 있습니다(생략 시 SaaS).
+
+**2) 다시 설정하려면**
+
+```bash
+gemini extensions config sprintable
+```
+
+**3) `gemini` 정상 실행**
+
+추가 플래그가 필요 없습니다.
+
+> **Gemini CLI는 에이전트별 홈 디렉터리 분리를 지원하지 않습니다** — `~/.gemini`가
+> 고정입니다(Codex의 `CODEX_HOME`, Grok의 `GROK_HOME` 같은 게 없습니다). 한
+> 머신에 Sprintable 연결 Gemini 에이전트를 여러 개 붙이면 OS 키체인 항목과
+> 확장 설정을 공유하게 됩니다 — `SPRINTABLE_STATE_DIR`로 큐/로그 상태만은
+> 분리할 수 있지만, 자격증명 자체를 에이전트별로 분리할 방법은 현재 없습니다.
+>
+> **확장을 제거해도 백그라운드 리스너 프로세스는 안 죽습니다** — Gemini CLI에
+> 제거 시점 hook이 없어서입니다(라이브 확인됨). 직접 종료하십시오:
+> ```bash
+> pkill -f 'sprintable-gemini.*scripts/listener.py'
+> ```
+
+전체 상세(설계 근거·소스 대조 기록): [`moonklabs/sprintable-gemini/README.md`](https://github.com/moonklabs/sprintable-gemini/blob/main/README.md).
+
+### Hermes Agent — 실시간 채널 연결 (정식 플러그인 설치)
+
+**Hermes ≥ v0.13.0**이 필요합니다(플러그인 레지스트리의 `env_enablement_fn`/
+`home_channel` 승격 훅). 이 저장소가 퍼블릭이라 clone 없이 바로 설치됩니다.
+
+**1) 플러그인 설치 + 활성화**
+
+```bash
+hermes plugins install moonklabs/sprintable/connectors/hermes-sprintable --enable
+```
+
+이름은 `plugin.yaml`의 `name:`(`sprintable-platform`)이지 폴더 이름(`sprintable`)이
+아닙니다 — `--enable`을 빼먹었거나 다른 이름으로 활성화하면 조용히 no-op입니다.
+
+**2) API 키 설정**
+
+```bash
+export AGENT_API_KEY=sk_live_...
+```
+
+dev/self-host 백엔드에 붙으려면 `SPRINTABLE_API_URL`도 같이 설정하십시오(SaaS가
+기본값). 여러 에이전트가 한 메시지를 받게 하려면 `SPRINTABLE_ALLOWED_USERS`를
+설정하지 말고 비워 두십시오 — 설정하면 그 목록 밖 발신자는 전부 무시됩니다.
+
+**3) 게이트웨이 재시작**
+
+```bash
+hermes gateway restart
+```
+
+**확인(진짜 「연결됨」 테스트)** — `~/.hermes/gateway.log`에서 순서대로:
+`dial-out …/api/v2/agent/stream` → `stream open` → (테스트 메시지 발송)
+`inbound seq=N` → 회신 1건 발송 → `ack seq=N`. 재시작 後 이미 ack된 메시지가
+다시 주입되면 안 됩니다.
+
+> **새 설치 profile에서 첫 메시지가 「Unauthorized user」로 막히면** — 기본
+> sender 정책이 pairing(승인 전 deny)이라 그렇습니다. `SPRINTABLE_ALLOW_ALL_USERS=1`
+> (이 플러그인만) 또는 `GATEWAY_ALLOW_ALL_USERS=true`(이 게이트웨이 전체)로
+> 우회하거나, sender를 pairing 승인하십시오. inbound·ack 로그가 정상인데 응답만
+> 없다면 이 문제일 확률이 높습니다.
+
+전체 상세(env 그룹·dev/prod 동시 운영·트러블슈팅):
+[`connectors/hermes-sprintable/README.md`](https://github.com/moonklabs/sprintable/blob/develop/connectors/hermes-sprintable/README.md).
+
+### OpenClaw — 실시간 채널 연결 (정식 플러그인 설치)
+
+**1) 플러그인 설치**
+
+```bash
+openclaw plugins install npm:openclaw-sprintable
+```
+
+**2) 게이트웨이 재시작** (설치만으로는 서빙 시작 안 됨)
+
+```bash
+openclaw daemon restart   # 또는: openclaw restart (구성에 따라)
+```
+
+**3) 로드·서빙 확인** (설치 성공 ≠ 서빙)
+
+```bash
+openclaw plugins inspect sprintable --runtime
+```
+
+**4) API 키 설정** — `~/.openclaw/openclaw.json`:
+
+```json
+{
+  "channels": {
+    "sprintable": {
+      "enabled": true,
+      "apiKey": "<0단계에서 발급한 키>",
+      "apiUrl": "https://app.sprintable.ai"
+    }
+  }
+}
+```
+
+환경변수(`SPRINTABLE_API_KEY`/`AGENT_API_KEY`, `SPRINTABLE_API_URL`)로도 설정
+가능합니다 — 둘 다 있으면 config 파일이 우선합니다.
+
+전체 상세: [`connectors/openclaw-sprintable/README.md`](https://github.com/moonklabs/sprintable/blob/develop/connectors/openclaw-sprintable/README.md).
+
+### OpenCode — 실시간 채널 연결 (정식 플러그인 설치)
+
+**1) 플러그인 설치**
+
+```bash
+opencode plugin opencode-sprintable
+```
+
+한 명령입니다 — OpenCode가 npm 패키지를 받아(다음 기동 시 Bun이 자동 설치)
+`opencode.json`/`opencode.jsonc`의 plugin 설정을 갱신합니다. `package.json`을
+손으로 고치거나 symlink 걸 필요가 없습니다.
+
+**2) API 키 설정** — `opencode` 실행 전에:
+
+```bash
+export AGENT_API_KEY=<0단계에서 발급한 키>
+export SPRINTABLE_API_URL=https://...     # 생략 시 SaaS
+```
+
+키가 없으면 플러그인은 로드만 되고 아무 것도 하지 않습니다(에러 없음) — 자격증명
+설정 전에 먼저 설치해도 안전합니다.
+
+> **수명 = OpenCode 프로세스.** SSE 연결은 플러그인이 로드된 OpenCode 프로세스가
+> 살아있는 동안만 유지됩니다 — 별도 데몬은 없습니다. 그 사이 도착한 메시지는
+> 다음 세션 시작 시 backfill로 회수됩니다(유실 아님, 다만 실시간성은 프로세스가
+> 떠 있는 동안만 보장).
+
+전체 상세: [`connectors/opencode-sprintable/README.md`](https://github.com/moonklabs/sprintable/blob/develop/connectors/opencode-sprintable/README.md).
+
 ---
 
 ## 3. 지침 — 에이전트에게 무엇을 하는지 알려 주기
@@ -247,6 +443,8 @@ codex mcp get sprintable-mcp   # → enabled: true   ← 1단계만 확인됨
 | 인증 오류 | `AGENT_API_KEY`가 그 에이전트의 것인지 · 키는 에이전트마다 다릅니다 |
 | 연결이 자꾸 끊김 | `SPRINTABLE_API_URL`이 앱 도메인이 아니라 백엔드 주소인지 |
 | Codex: 채널(메시지 왕복)은 되는데 Sprintable MCP 도구 호출이 `AuthRequired`로 실패 | `SPRINTABLE_API_KEY`를 Codex 프로세스 자체 환경변수로 export했는지 — `.env` 파일과는 별개 경로입니다 |
+| Grok: `/sprintable:configure`가 엉뚱한 곳(Claude 플러그인 자격증명 파일)에 씀 | 이름 없는 `configure` 대신 `/sprintable-grok:configure`로 명시했는지 |
+| Hermes: inbound·ack 로그는 정상인데 회신이 안 옴, `Unauthorized user` 경고 | 이 profile의 sender allowlist(기본 pairing/deny) — `GATEWAY_ALLOW_ALL_USERS=true` 또는 pairing 승인 필요 |
 
 ---
 
