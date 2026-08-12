@@ -913,3 +913,38 @@ describe('proxy — 폐기된 리소스 301(story #2378, 유나양 design:change
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/artifacts');
   });
 });
+
+describe('proxy — story #2595 connect-guide locale rewrite', () => {
+  it('rewrites /connect-guide.txt to the English default when no locale signal is present', async () => {
+    const response = await middleware(makeRequest('/connect-guide.txt'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-middleware-rewrite')).toContain('/connect-guide.en.txt');
+  });
+
+  it('rewrites /connect-guide.txt to Korean when the locale cookie says ko', async () => {
+    const response = await middleware(makeRequest('/connect-guide.txt', { locale: 'ko' }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-middleware-rewrite')).toContain('/connect-guide.ko.txt');
+  });
+
+  it('rewrites /connect-guide.txt to Korean via Accept-Language when no cookie is set', async () => {
+    const req = makeRequest('/connect-guide.txt');
+    req.headers.set('accept-language', 'ko-KR,ko;q=0.9');
+    const response = await middleware(req);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-middleware-rewrite')).toContain('/connect-guide.ko.txt');
+  });
+
+  it('a locale cookie value outside the supported set falls back to English, not a crash', async () => {
+    const response = await middleware(makeRequest('/connect-guide.txt', { locale: 'fr' }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-middleware-rewrite')).toContain('/connect-guide.en.txt');
+  });
+
+  it('direct requests to the per-locale files themselves are public (no login redirect)', async () => {
+    for (const path of ['/connect-guide.en.txt', '/connect-guide.ko.txt']) {
+      const response = await middleware(makeRequest(path));
+      expect(response.status).toBe(200);
+    }
+  });
+});

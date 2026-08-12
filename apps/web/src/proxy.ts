@@ -14,6 +14,31 @@ import {
   verifyResolveCache,
 } from '@/lib/route-resolve';
 
+// story #2595 — connect-guide.txt는 static public asset이라 서버 컴포넌트가 아니고,
+// apps/web/src/i18n/request.ts의 getLocale()(next-intl RSC config, `cookies()`/`headers()`
+// 비동기 API)을 그대로 재사용할 수 없다 — 이 파일(proxy)은 NextRequest 동기 API
+// (`request.cookies`/`request.headers`)로 도는 별개 실행 경로다. 그래서 알고리즘만
+// 그대로 이식한다: 쿠키 `locale` 우선 → Accept-Language 부분일치 → 기본값 'en'
+// (request.ts DEFAULT_LOCALE과 동일). 두 구현이 갈리면 SSR 페이지 언어와 이 정적
+// 문서의 언어가 서로 다른 locale로 어긋난다 — request.ts를 바꾸면 이 함수도 같이
+// 바꿔야 한다(proxy.test.ts가 이 함수를, i18n 쪽 테스트가 request.ts를 각각 고정).
+const CONNECT_GUIDE_SUPPORTED_LOCALES = ['en', 'ko'] as const;
+const CONNECT_GUIDE_DEFAULT_LOCALE = 'en';
+
+function resolveConnectGuideLocale(request: NextRequest): string {
+  const cookieLocale = request.cookies.get('locale')?.value;
+  if (cookieLocale && (CONNECT_GUIDE_SUPPORTED_LOCALES as readonly string[]).includes(cookieLocale)) {
+    return cookieLocale;
+  }
+
+  const acceptLang = request.headers.get('accept-language') ?? '';
+  for (const locale of CONNECT_GUIDE_SUPPORTED_LOCALES) {
+    if (acceptLang.includes(locale)) return locale;
+  }
+
+  return CONNECT_GUIDE_DEFAULT_LOCALE;
+}
+
 const PUBLIC_EXACT = [
   '/',
   '/llms.txt',
@@ -22,9 +47,20 @@ const PUBLIC_EXACT = [
   // 45a5a006: 공개 정적 문서(app 자체 온보딩 가이드, 랜딩과 내용 상이해 리다이렉트 대상 아님) —
   // 누락 시 인증 미들웨어가 보호 라우트로 오인해 /login 307(공개 문서가 로그인 뒤에 묶이는 버그).
   '/onboarding-guide.txt',
-  // story #2405 — 사용자용 연결 안내(채용 완료 화면 ②「깨우기」 카드가 이리로 링크한다).
-  // 위와 같은 이유로 공개여야 한다 — 링크를 공유받은 사람이 로그인 벽에 막히면 안 된다.
+  // story #2405/#2595 — 사용자용 연결 안내(채용 완료 화면 ②「깨우기」 카드가 이리로
+  // 링크한다). 위와 같은 이유로 공개여야 한다 — 링크를 공유받은 사람이 로그인 벽에
+  // 막히면 안 된다. 실제 공개 처리는 이 목록이 아니라 proxy() 맨 위의 locale-rewrite
+  // 분기가 한다(그 분기가 이 pathname에 대해 항상 먼저 return하므로 이 목록엔 절대
+  // 안 걸린다) — 그래도 "이 경로는 의도적으로 공개"라는 선언을 여기 남겨 두는 건,
+  // 그 분기를 나중에 지우거나 옮길 때 이 목록을 훑는 사람이 왜 없어도 되는지
+  // 헷갈리지 않게 하기 위함.
   '/connect-guide.txt',
+  // story #2595 — the rewrite target files. Someone can request these directly (bookmark,
+  // crawler, an old cached link) without going through the base /connect-guide.txt rewrite
+  // above — without this, they'd fall through to the auth-protected branch and 307 to
+  // /login (caught by the RED test in proxy.test.ts before this line was added).
+  '/connect-guide.en.txt',
+  '/connect-guide.ko.txt',
 ];
 
 // Fully public paths — no token check at all
@@ -505,6 +541,17 @@ async function resolveAndRespond(
 
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+
+  // story #2595 — /connect-guide.txt is locale-branched: rewrite (not redirect, so the URL
+  // in the browser/llms.txt link stays stable) to the matching per-locale file. Runs before
+  // the generic PUBLIC_EXACT passthrough below so both direct hits and the in-app link
+  // (recruiter-client.tsx, unchanged href="/connect-guide.txt") land on the right language.
+  if (pathname === '/connect-guide.txt') {
+    const locale = resolveConnectGuideLocale(request);
+    const url = request.nextUrl.clone();
+    url.pathname = `/connect-guide.${locale}.txt`;
+    return NextResponse.rewrite(url);
+  }
 
   const isPublicPath =
     PUBLIC_EXACT.includes(pathname) ||
