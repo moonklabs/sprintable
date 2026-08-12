@@ -110,10 +110,24 @@ interchangeable.
 |-----|-----|---------|
 | `AGENT_API_KEY` | ✅ | Agent API key (Bearer), `sk_live_…` |
 | `SPRINTABLE_API_URL` | — | Backend base URL (default: dev backend) |
-| `SPRINTABLE_ALLOWED_USERS` | — | Comma-sep member IDs allowed to trigger. **Unset = all** |
-| `SPRINTABLE_ALLOW_ALL_USERS` | — | `1` = explicit allow-all (same as unset) |
+| `SPRINTABLE_ALLOWED_USERS` | — | Comma-sep member IDs allowed to trigger |
+| `SPRINTABLE_ALLOW_ALL_USERS` | — | `1` = explicit allow-all |
 | `SPRINTABLE_HOME_CHANNEL` | — | Default conversation_id for cron/notify. Usually set via `/sethome` |
 | `SPRINTABLE_HOME_CHANNEL_THREAD_ID` | — | Thread id for the home channel |
+
+> **`SPRINTABLE_ALLOWED_USERS` unset does NOT mean "all senders allowed"** —
+> this doc previously said so and that was wrong (S9 e2e caught it, #2564).
+> With no allowlist env var set, the gateway's default per-sender policy is
+> **pairing** (deny-until-approved), not open — see `_is_user_authorized` in
+> `hermes-agent/gateway/authz_mixin.py`. On a fresh install/profile, a sender
+> who has never gone through `hermes gateway pairing approve` gets rejected
+> with `Unauthorized user: <id> (<name>) on sprintable` in `gateway.log`, even
+> though `inbound seq=N` and `ack seq=N` both look fine — the message *arrives*
+> and *acks*, it just never opens an agent turn. Fix by either pairing the
+> sender, or setting `SPRINTABLE_ALLOW_ALL_USERS=1` (this plugin only) or
+> `GATEWAY_ALLOW_ALL_USERS=true` (all plugins on this gateway) — the latter is
+> the fastest unblock for a disposable/isolated test profile, but scope it to
+> that profile's env, never the live fleet gateway.
 
 ### Group 2 — prod gateway adapter (separate `hermes-sprintable-prod` plugin)
 
@@ -161,6 +175,14 @@ If you see `dial-out` but never `stream open`, the API key/URL is wrong. If you
 see neither, the plugin did not load — re-check step 3 (enabled by `name:`, not
 folder) and the import (`grep -i sprintable ~/.hermes/gateway.log` for a
 traceback).
+
+> **"No home channel is set… `/sethome`" reply on the first message.** If
+> `SPRINTABLE_HOME_CHANNEL` isn't set yet, the agent's first reply in a new
+> conversation may just be a `/sethome` prompt instead of an actual answer —
+> this is expected on a fresh install (there's no default home channel to
+> route cron/notify to), not a broken round-trip. Either run `/sethome` in
+> that conversation once, or set `SPRINTABLE_HOME_CHANNEL` up front (see the
+> env table above) if you already know the target conversation_id.
 
 ---
 
