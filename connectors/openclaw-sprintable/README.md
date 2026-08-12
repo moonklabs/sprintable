@@ -5,13 +5,13 @@ Sprintable Gateway channel plugin for [OpenClaw](https://github.com/openclaw/ope
 ## Install
 
 ```bash
-openclaw plugins install npm:@moonklabs/openclaw-sprintable
+openclaw plugins install npm:openclaw-sprintable
 ```
 
 Or via [ClawHub](https://clawhub.dev) (the primary discovery surface for OpenClaw plugins):
 
 ```bash
-openclaw plugins install clawhub:@moonklabs/openclaw-sprintable
+openclaw plugins install clawhub:openclaw-sprintable
 ```
 
 **Restart the gateway after install** — plugin installation alone does not start serving:
