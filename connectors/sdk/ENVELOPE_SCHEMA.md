@@ -87,3 +87,29 @@ input (the #2589 language-boundary pattern) so an edit to one side's
 rendering rule breaks that side's own test immediately, rather than drifting
 silently (the #2311 vendored-copy-drift class this whole SDK already has to
 guard against for the parser itself).
+
+### Cross-repo port list — where to look if the render rule ever changes
+
+This SDK (`connectors/sdk/sprintable_sse.py` / `sprintable-sse.ts`, this
+repo) is the canonical implementation. Every other copy below is a **hand
+port or a manually-synced vendored copy** — none of them import this file
+directly (either a different repo entirely, or a standalone npm/pip package
+that can't have a `../sdk` relative import survive publishing). There is no
+automated cross-repo guard tying them together; this list *is* the guard.
+Changing the render shape (field order, separators, the `"unknown"`
+fallback string) means updating **all** of these, not just this file:
+
+| Location | Repo | Kind |
+|---|---|---|
+| `connectors/sdk/sprintable_sse.py` / `sprintable-sse.ts` | `moonklabs/sprintable` | canonical |
+| `connectors/opencode-sprintable/sprintable-sse.ts` | `moonklabs/sprintable` | vendored copy (npm-publish standalone) |
+| `connectors/pi-sprintable/sprintable-sse.ts` | `moonklabs/sprintable` | vendored copy (npm-publish standalone) |
+| `plugins/sprintable/envelope.ts` | `moonklabs/sprintable-agent-plugins` | hand port (Claude Code channel plugin — no SDK dependency at all) |
+| `plugins/sprintable-codex/scripts/envelope.py` | `moonklabs/sprintable-agent-plugins` | hand port |
+| `plugins/sprintable-grok/scripts/envelope.py` | `moonklabs/sprintable-agent-plugins` | hand port, itself a manually-synced copy of the codex one (same repo, per-folder packaging boundary — see that file's own comment) |
+| `scripts/envelope.py` | `moonklabs/sprintable-gemini` | hand port |
+
+Hermes and OpenClaw are **not** in this list — they use their host runtime's
+native structured sender API instead of this text-render contract (see
+"Structured-native sender APIs" above), so a render-shape change here
+doesn't touch them.
