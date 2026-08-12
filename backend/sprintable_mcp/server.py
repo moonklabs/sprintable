@@ -1,4 +1,4 @@
-"""Sprintable MCP 서버 — 106개 도구 등록 (flat schema)."""
+"""Sprintable MCP 서버 — 116개 도구 등록 (flat schema)."""
 from __future__ import annotations
 
 import asyncio

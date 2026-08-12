@@ -90,7 +90,7 @@ MCP는 «에이전트가 Sprintable을 부르는 길»입니다. 반대 방향 �
 | Codex | 채널 플러그인 | `sprintable-codex@moonklabs` (`codex plugin add` 정식 설치) |
 | Grok | 채널 플러그인 | `sprintable-grok@moonklabs` (`grok plugin install --trust` 정식 설치) |
 | Gemini | 채널 확장 | `gemini extensions install https://github.com/moonklabs/sprintable-gemini` |
-| Hermes | 플랫폼 플러그인 | `hermes plugins install moonklabs/sprintable/connectors/hermes-sprintable` |
+| Hermes | 플랫폼 플러그인 | `hermes plugins install moonklabs/sprintable/connectors/hermes-sprintable --enable` |
 | OpenClaw | 채널 플러그인 | `openclaw plugins install npm:openclaw-sprintable` |
 | OpenCode | 채널 플러그인 | `opencode plugin opencode-sprintable` |
 | Pi | — | 지원 준비 中 — 정식 설치 경로 아직 없음 |
