@@ -103,6 +103,9 @@ interface DocTreeProps {
   onRename?: (docId: string, newTitle: string) => Promise<void>;
   onDelete?: (docId: string) => Promise<void>;
   onAddChild?: (parentId: string) => Promise<void>;
+  // story #1950 — 폴더 트리 안에서 바로 하위 폴더를 만드는 진입점(부모 지정). 이름 입력은
+  // 트리 안 인라인 폼(docs-client-layout.tsx)이 맡는다 — 여기선 "어느 부모 아래 만들지"만 넘긴다.
+  onAddChildFolder?: (parentId: string) => void;
   emptyFolderLabel?: string;
   projectId?: string;
   // story #2167: 검색-중 트리 하이라이트/필터(visibleIds·matchedIds·searchQuery·isSearching)는
@@ -122,6 +125,7 @@ function TreeNode({
   onRename,
   onDelete,
   onAddChild,
+  onAddChildFolder,
   depth = 0,
   emptyFolderLabel = 'No child docs',
   projectId,
@@ -137,6 +141,7 @@ function TreeNode({
   onRename?: (docId: string, newTitle: string) => Promise<void>;
   onDelete?: (docId: string) => Promise<void>;
   onAddChild?: (parentId: string) => Promise<void>;
+  onAddChildFolder?: (parentId: string) => void;
   depth?: number;
   emptyFolderLabel?: string;
   projectId?: string;
@@ -240,6 +245,11 @@ function TreeNode({
     setContextMenuOpen(false);
   }, [doc.id, onAddChild]);
 
+  const handleAddChildFolder = useCallback(() => {
+    onAddChildFolder?.(doc.id);
+    setContextMenuOpen(false);
+  }, [doc.id, onAddChildFolder]);
+
   return (
     <div ref={setNodeRef} style={style}>
       <div className="group relative">
@@ -302,9 +312,10 @@ function TreeNode({
             contextMenuOpen ? 'block' : 'hidden',
           )}
         >
-          <button onClick={handleRename} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">Rename</button>
-          {isFolder && <button onClick={handleAddChild} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">Add child</button>}
-          <button onClick={handleDelete} className="w-full rounded-md px-3 py-2 text-left text-sm text-foreground hover:bg-destructive/10">Delete</button>
+          <button onClick={handleRename} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeRename')}</button>
+          {isFolder && <button onClick={handleAddChild} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeAddChild')}</button>}
+          {isFolder && <button onClick={handleAddChildFolder} className="w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted">{t('docTreeAddChildFolder')}</button>}
+          <button onClick={handleDelete} className="w-full rounded-md px-3 py-2 text-left text-sm text-foreground hover:bg-destructive/10">{t('docTreeDelete')}</button>
         </div>
       </div>
 
@@ -336,6 +347,7 @@ function TreeNode({
                   onRename={onRename}
                   onDelete={onDelete}
                   onAddChild={onAddChild}
+                  onAddChildFolder={onAddChildFolder}
                   depth={depth + 1}
                   emptyFolderLabel={emptyFolderLabel}
                   projectId={projectId}
@@ -359,7 +371,7 @@ function TreeNode({
   );
 }
 
-export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMoveDenied, onRename, onDelete, onAddChild, emptyFolderLabel, projectId, sortMode = 'manual' }: DocTreeProps) {
+export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMoveDenied, onRename, onDelete, onAddChild, onAddChildFolder, emptyFolderLabel, projectId, sortMode = 'manual' }: DocTreeProps) {
   const rootDocs = docs.filter((entry) => !entry.parent_id).sort((a, b) => compareDocsForSort(a, b, sortMode));
   // story #2167: 이름순/수정일순 보기에서는 드래그 재정렬을 막는다 — sort_order 기반 드롭
   // 위치 계산이 화면 순서와 안 맞아 엉뚱한 곳에 꽂히는 것을 막기 위함(수동 순서 자체는
@@ -436,7 +448,7 @@ export function DocTree({ docs, selectedSlug, onSelect, onReorder, onMove, onMov
       <SortableContext items={rootDocs.map((d) => d.id)} strategy={verticalListSortingStrategy}>
         <nav className="space-y-1">
           {rootDocs.map((doc) => (
-            <TreeNode key={doc.id} doc={doc} allDocs={docs} selectedSlug={selectedSlug} onSelect={onSelect} onReorder={onReorder} onRename={onRename} onDelete={onDelete} onAddChild={onAddChild} depth={0} emptyFolderLabel={emptyFolderLabel} projectId={projectId} isExpanded={isExpanded} onToggleExpanded={toggleExpanded} sortMode={sortMode} />
+            <TreeNode key={doc.id} doc={doc} allDocs={docs} selectedSlug={selectedSlug} onSelect={onSelect} onReorder={onReorder} onRename={onRename} onDelete={onDelete} onAddChild={onAddChild} onAddChildFolder={onAddChildFolder} depth={0} emptyFolderLabel={emptyFolderLabel} projectId={projectId} isExpanded={isExpanded} onToggleExpanded={toggleExpanded} sortMode={sortMode} />
           ))}
         </nav>
       </SortableContext>
