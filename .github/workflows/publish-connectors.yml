@@ -1,0 +1,37 @@
+# OIDC trusted publishing for the npm connector packages (opencode-sprintable,
+# openclaw-sprintable) — no token/OTP needed once this matches the npm-side trust
+# config exactly. Filename must stay `publish-connectors.yml` (npm's registered
+# trust is keyed on repo + this exact filename): trust IDs `b7ec4cef`
+# (opencode-sprintable) and `953c8d1e` (openclaw-sprintable), repo
+# moonklabs/sprintable, no environment configured on the npm side — so this
+# workflow intentionally has no `environment:` key (adding one would break the
+# OIDC subject match). `id-token: write` below is what lets npm verify this run's
+# identity in place of a token.
+name: publish-connectors
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 발행할 커넥터
+        required: true
+        type: choice
+        options: [opencode-sprintable, openclaw-sprintable]
+permissions:
+  contents: read
+  id-token: write        # OIDC — trusted publishing의 핵심
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@latest          # trusted publishing은 npm >= 11.5.1
+      - name: install deps
+        working-directory: connectors/${{ inputs.package }}
+        run: npm install --no-audit --no-fund
+      - name: publish ${{ inputs.package }}
+        working-directory: connectors/${{ inputs.package }}
+        run: npm publish --provenance --access public   # 토큰/OTP 없음·OIDC 신원증명
