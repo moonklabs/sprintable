@@ -26,8 +26,9 @@ from app.services import redis_shared
 logger = logging.getLogger(__name__)
 
 _DOMAIN = "ratelimit"
+_HEARTBEAT_SEC = int(os.getenv("SSE_HEARTBEAT_TIMEOUT", "30"))
 # 연결 살아있음 refresh 주기(SSE 30s 틱)의 3배 = 90s(2회 누락 허용·presence 와 동일 근거).
-_TTL_SEC = int(os.getenv("SSE_HEARTBEAT_TIMEOUT", "30")) * 3
+_TTL_SEC = _HEARTBEAT_SEC * 3
 _KEY_TTL_SEC = _TTL_SEC * 4  # ZSET 키 자체 leak backstop
 
 # KEYS[1]=zset · ARGV[1]=now(만료 evict 기준) · ARGV[2]=now+TTL(신규 score) · ARGV[3]=limit ·
@@ -111,4 +112,45 @@ async def count(scope: str) -> "int | None":
         return int(await client.zcard(_key(scope)))
     except Exception:
         logger.warning("sse_lease.count failed", exc_info=True)
+        return None
+
+
+async def earliest_expiry(scope: str) -> "float | None":
+    """story #2582: 그 scope에서 가장 먼저 만료될 lease의 score(epoch 초) — acquire()가 False를
+    반환했을 때 호출부가 정확한 Retry-After를 계산하는 용도(현재 agent_gateway의 flat
+    `_AGENT_STREAM_RETRY_AFTER`(기본 5s)는 실제 자가회수까지 걸릴 수 있는 최대 시간(`_TTL_SEC`,
+    기본 90s)과 무관해 클라이언트가 실제 해소보다 훨씬 일찍·반복적으로 재시도하게 만든다 —
+    비정상 종료로 slot이 orphan인 채 최대 TTL만큼 남아있는 게 바로 이 상황).
+
+    ⭐PO 리뷰(2026-08-12) — orphan(heartbeat 끊김 → score 고정 드레인)과 live-full(heartbeat
+    마다 score가 `now+TTL`로 계속 앞으로 밀리는, 한도를 채운 «살아있는» 세션들)을 score만으로
+    뭉개면 안 된다: live 세션의 잔여시간은 항상 `[TTL-heartbeat, TTL]` 구간(막 갱신됨)에
+    있고, 여기서 계산한 Retry-After로 돌아와도 그 세션이 계속 갱신 중이면 슬롯은 안 비어
+    또 429다(«새 값도 이행 안 되는 약속») — 게다가 그 사이 다른 세션이 정상 종료로 슬롯을
+    즉시 비워도 클라는 최대 그 값만큼(예: ~85s) 늦게 붙는다(구 flat 5s 폴링보다 오히려
+    느려지는 회귀). 반면 orphan은 beat를 한 번이라도 놓치면 잔여시간이 그 구간 아래로
+    드레인되므로, `remaining <= TTL-heartbeat`(beat 최소 1회 누락 확定)일 때만 이 값을
+    신뢰한다 — 그 위(막 갱신된 live)면 예측이 성립 안 하니 None(호출부 flat 폴백)을 준다.
+
+    None = Redis 불가·그 scope에 살아있는(미만료) lease가 하나도 없음·또는 가장 이른 lease가
+    아직 «막 갱신된 live-full」 구간에 있어 만료 기반 예측이 성립하지 않음. 세 경우 다
+    호출부는 flat default(폴링 간격으로서는 정직)로 폴백한다."""
+    if not _enabled():
+        return None
+    client = redis_shared.get_client()
+    if client is None:
+        return None
+    try:
+        now = time.time()
+        await client.zremrangebyscore(_key(scope), "-inf", now)
+        res = await client.zrange(_key(scope), 0, 0, withscores=True)
+        if not res:
+            return None
+        expiry = float(res[0][1])
+        remaining = expiry - now
+        if remaining > (_TTL_SEC - _HEARTBEAT_SEC):
+            return None  # 막 갱신된 live-full — 만료 기반 예측 성립 안 함, flat 폴백
+        return expiry
+    except Exception:
+        logger.warning("sse_lease.earliest_expiry failed", exc_info=True)
         return None

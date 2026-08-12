@@ -97,3 +97,53 @@ def test_fakeredis_and_lupa_available():
     """dep(fakeredis·lupa)가 빠지면 위 fakeredis 테스트가 조용히 skip되는 문을 닫는다 — plain import로 FAIL."""
     import fakeredis  # noqa: F401
     import lupa  # noqa: F401
+
+
+# ── story #2582: earliest_expiry — 정확한 Retry-After용 ────────────────────────
+async def test_earliest_expiry_none_when_empty(_flag_on_fakeredis):
+    assert await sse_lease.earliest_expiry("g") is None  # lease 하나도 없음
+
+
+async def test_earliest_expiry_none_when_flag_off(_flag_off):
+    assert await sse_lease.earliest_expiry("g") is None
+
+
+async def test_earliest_expiry_returns_soonest_score(_flag_on_fakeredis):
+    await sse_lease.acquire("g", 3, "c1")
+    await sse_lease.acquire("g", 3, "c2")
+    key = sse_lease._key("g")
+    # c1이 c2보다 먼저 만료하도록 score를 직접 당겨둔다(둘 다 acquire 직후 score는 거의 같음).
+    await _flag_on_fakeredis.zadd(key, {"c1": time.time() + 10, "c2": time.time() + 80})
+    earliest = await sse_lease.earliest_expiry("g")
+    assert earliest is not None
+    assert abs(earliest - (time.time() + 10)) < 2  # c1(가장 이른 것)의 score
+
+
+async def test_earliest_expiry_skips_already_expired(_flag_on_fakeredis):
+    """이미 만료(score<=now)된 건 evict된 뒤 계산 — 산 것 중 가장 이른 것만 본다."""
+    key = sse_lease._key("g")
+    await _flag_on_fakeredis.zadd(key, {"zombie": time.time() - 5, "alive": time.time() + 50})
+    earliest = await sse_lease.earliest_expiry("g")
+    assert earliest is not None
+    assert abs(earliest - (time.time() + 50)) < 2
+
+
+async def test_earliest_expiry_none_when_live_full(_flag_on_fakeredis):
+    """PO 리뷰(2026-08-12) — 가장 이른 lease조차 막 갱신돼(remaining이 [TTL-heartbeat, TTL]
+    구간) 아직 beat를 놓친 게 아니면(=live-full, 한도를 채운 살아있는 세션들), 만료 기반
+    예측이 성립하지 않는다 — None으로 호출부가 flat default로 폴백하게 한다."""
+    key = sse_lease._key("g")
+    # TTL=90, heartbeat=30 (테스트 기본 env) — 셋 다 막 갱신돼 [60,90] 구간 안.
+    await _flag_on_fakeredis.zadd(key, {
+        "live-0": time.time() + 85, "live-1": time.time() + 88, "live-2": time.time() + 90,
+    })
+    assert await sse_lease.earliest_expiry("g") is None
+
+
+async def test_earliest_expiry_computed_exactly_at_orphan_threshold(_flag_on_fakeredis):
+    """remaining == TTL-heartbeat(정확히 beat 1회분 경과) — orphan 쪽 경계, 여전히 computed."""
+    key = sse_lease._key("g")
+    threshold = sse_lease._TTL_SEC - sse_lease._HEARTBEAT_SEC
+    await _flag_on_fakeredis.zadd(key, {"edge": time.time() + threshold})
+    earliest = await sse_lease.earliest_expiry("g")
+    assert earliest is not None

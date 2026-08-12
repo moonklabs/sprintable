@@ -68,6 +68,14 @@ GET /api/v2/agent/stream (SSE)
   can't resolve a monorepo-relative `../sdk/...` import, so a copy ships in this package;
   keep it synced with the canonical SDK when it changes — see [`project_vendored_sdk_sync_debt`]
   for the tracked follow-up to end this vendoring pattern via an SDK-as-npm-package extraction).
+- **Concurrent-stream limit per key (tier-aware — free defaults to 3).** The same
+  `AGENT_API_KEY`/`SPRINTABLE_API_KEY` can only hold that many simultaneous `/agent/stream`
+  connections (abuse/fair-use). If a connection dies ungracefully (`kill -9`, OOM — anything
+  that skips `gateway.stopAccount`'s cleanup), its slot is reclaimed automatically after at
+  most 90s (`SSE_HEARTBEAT_TIMEOUT`×3, tolerating 2 missed heartbeat ticks) — a **bounded
+  self-heal, not a permanent lockout**. A 429 past the limit carries a `Retry-After` reflecting
+  the actual time until that scope's soonest slot frees up (story #2582), so retrying after
+  that value succeeds without guessing.
 
 ## Packaging notes
 
