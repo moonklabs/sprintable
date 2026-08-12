@@ -11,6 +11,7 @@ import { HypothesisGateBadge } from './hypothesis-gate-badge';
 import { HypothesisResolveDialog, type HypothesisResolveResult } from './hypothesis-resolve-dialog';
 import type { GateItem } from '@/components/kanban/types';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useOrgSyncVersion } from '@/lib/project-context-client';
 
 /**
  * Epic-detail Hypotheses section (E1-S8 §4.1). The first human-facing surface that
@@ -129,7 +130,10 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
     }
   }, [epicId, projectId]);
 
-  useEffect(() => { void load(); }, [load]);
+  // story #2545(카디르 라이브 재QA 5단계) — org 불일치 자동교정(switch-org) 성공 直後 재요청
+  // 되게 orgSyncVersion을 얹는다(다른 opt-in 컴포넌트와 동일 패턴).
+  const orgSyncVersion = useOrgSyncVersion();
+  useEffect(() => { void load(); }, [load, orgSyncVersion]);
 
   const handleCreate = useCallback(async (value: HypothesisFormValue) => {
     setSubmitting(true);

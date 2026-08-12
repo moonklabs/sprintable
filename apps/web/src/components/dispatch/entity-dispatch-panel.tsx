@@ -6,6 +6,7 @@ import { MoreHorizontal, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { normalizeAssigneePatch } from '@/components/kanban/types';
+import { useOrgSyncVersion } from '@/lib/project-context-client';
 
 interface TeamMember {
   id: string;
@@ -40,6 +41,9 @@ export function EntityDispatchPanel({
   const t = useTranslations('board');
   // f5ae74e4: Dispatch(이벤트 전달)를 Kickoff(킥오프·워크플로우 규칙)와 라벨·툴팁으로 명확히 구분.
   const dispatchTitle = !assigneeId ? t('dispatchNeedsAssignee') : t('dispatchTooltip');
+  // story #2545(카디르 라이브 재QA 5단계) — org 불일치 자동교정(switch-org) 성공 直後 아래
+  // members 로드 effect가 재요청되게 얹는다(다른 opt-in 컴포넌트와 동일 패턴).
+  const orgSyncVersion = useOrgSyncVersion();
 
   // 84f57f97 fix①: currentAssigneeId prop 변경(낙관 배정·재fetch) 시 local assigneeId 동기화.
   // 미동기화 시 stale 상태로 dispatch→BE가 직전 배정 못 봐 core flow 막힘(prod 버그 근본 1).
@@ -70,7 +74,7 @@ export function EntityDispatchPanel({
         setMembers(data.filter((m) => m.is_active));
       })
       .catch(() => {});
-  }, [projectId]);
+  }, [projectId, orgSyncVersion]);
 
   const handleDispatch = useCallback(async () => {
     if (!assigneeId || dispatching) return;

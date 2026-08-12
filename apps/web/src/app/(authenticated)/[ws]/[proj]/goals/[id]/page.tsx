@@ -259,16 +259,46 @@ export default function EpicDetailPage() {
     }
   }, [epic, router, addToast, wsSlug, projSlug, t]);
 
+  // PO 리뷰(2026-08-12, blocking) — 위 orgSyncVersion 의존성만으론 이 자리가 원천적으로 못
+  // 선다: ①레이스에서 지는 쪽이 기본(React가 자식 effect를 부모 DashboardShell의 switch-org
+  // 보다 먼저 돌려 이 GET의 403이 대개 먼저 돌아옴 → catch가 즉시 replace → 언마운트 →
+  // orgSyncVersion 재요청이 설 자리 자체가 없어짐), ②레이스에서 이겨도 짐(stale-guard 없이
+  // bump로 재실행된 2차 요청이 성공해도, 뒤늦게 resolve된 1차 in-flight 403의 catch가 그대로
+  // replace를 발화). 처방: (a) 403(org-scope 불일치 中일 수 있음)은 replace 금지 — 로딩
+  // 유지·orgSyncVersion 재요청에 맡긴다. 진짜 없음(404 등)만 목록으로. (b) cancelled 플래그로
+  // 재실행 시 이전 체인의 setState/replace를 무효화(flow-client.tsx의 cancelledRef와 동형).
   useEffect(() => {
-    fetch(`/api/goals/${id}`)
-      .then((r) => r.ok ? r.json() : Promise.reject())
-      .then((json) => {
+    let cancelled = false;
+    void (async () => {
+      let res: Response;
+      try {
+        res = await fetch(`/api/goals/${id}`);
+      } catch {
+        if (cancelled) return;
+        router.replace(`/${wsSlug}/${projSlug}/goals`);
+        setLoading(false);
+        return;
+      }
+      if (cancelled) return;
+      if (res.ok) {
+        const json = await res.json();
+        if (cancelled) return;
         const data = (json as { data: Epic }).data;
         setEpic(data);
         setEpicAssigneeId(data.assignee_id ?? null);
-      })
-      .catch(() => router.replace(`/${wsSlug}/${projSlug}/goals`))
-      .finally(() => setLoading(false));
+        setLoading(false);
+        return;
+      }
+      if (res.status === 403) {
+        // org-scope 불일치 中일 수 있다 — 목록으로 튕겨내지 않는다. orgSyncVersion이 bump되면
+        // 이 effect가 재실행돼 재요청한다(위 deps) — 그때까지는 로딩 유지.
+        return;
+      }
+      // 진짜 없음(404 등) — 목록으로.
+      router.replace(`/${wsSlug}/${projSlug}/goals`);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
   }, [id, router, wsSlug, projSlug, orgSyncVersion]);
 
   if (loading) {
