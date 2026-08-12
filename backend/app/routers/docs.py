@@ -238,7 +238,10 @@ async def create_doc(
         created_by=created_by,
         icon=body.icon,
         sort_order=body.sort_order,
-        doc_type=body.doc_type,
+        # story #2974 — is_folder는 doc_type=="folder"의 shorthand(Doc.is_folder derived
+        # property와 대칭). True면 doc_type을 강제 — explicit body.doc_type과 충돌해도
+        # is_folder가 우선(둘 다 명시된 경우는 없고, is_folder는 신설 편의 필드).
+        doc_type="folder" if body.is_folder else body.doc_type,
         content_format=body.content_format,
         tags=body.tags,
     )
