@@ -1454,7 +1454,7 @@ export default function SettingsPage() {
               // 아래), 재시도 또는 명시 인정(탈출구)만 남긴다. 서버(#2898)가 최종 방어선.
               <Alert variant="warning">
                 <AlertDescription className="space-y-3">
-                  <p>영향 범위를 확認할 수 없습니다. 지금은 삭제를 진행할 수 없습니다.</p>
+                  <p>영향 범위를 확인할 수 없습니다. 지금은 삭제를 진행할 수 없습니다.</p>
                   <Button
                     type="button"
                     variant="outline"
@@ -1472,8 +1472,8 @@ export default function SettingsPage() {
                       onChange={(e) => setConfirmWithoutImpact(e.target.checked)}
                     />
                     <span className="space-y-0.5">
-                      <span className="block">영향 범위를 확認하지 못한 상태로 삭제합니다.</span>
-                      <span className="block text-xs">확認 없이 삭제한 것으로 기록됩니다.</span>
+                      <span className="block">영향 범위를 확인하지 못한 상태로 삭제합니다.</span>
+                      <span className="block text-xs">확인 없이 삭제한 것으로 기록됩니다.</span>
                     </span>
                   </label>
                 </AlertDescription>

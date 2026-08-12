@@ -44,7 +44,7 @@ describe('canSubmitOrgDelete', () => {
     expect(canSubmitOrgDelete({ ...base, orgImpactFailed: true, confirmWithoutImpact: true })).toBe(true);
   });
 
-  it('탈출구도 이름 불일치면 여전히 막힌다(체크박스가 이름확認을 우회하지 않음)', () => {
+  it('탈출구도 이름 불일치면 여전히 막힌다(체크박스가 이름확인을 우회하지 않음)', () => {
     expect(canSubmitOrgDelete({
       ...base, confirmName: 'wrong', orgImpactFailed: true, confirmWithoutImpact: true,
     })).toBe(false);
