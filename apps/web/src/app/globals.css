@@ -145,6 +145,7 @@
   --color-destructive: var(--destructive);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  --color-warning-strong: var(--warning-strong);
   --color-info: var(--info);
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
@@ -301,6 +302,10 @@
   /* Semantic status tokens */
   --success: oklch(0.55 0.16 145);
   --warning: oklch(0.75 0.16 85);
+  /* story #2594: text-warning 전용 강조색 — 라이트 --warning(L0.75)은 흰 배경 2.25:1(AA 미달)이라
+     text에 못 쓴다. L0.52(5.54:1)로 낮춘 별 토큰. solid bg-warning은 밝은 앰버(L0.75) 정체성 유지,
+     text-warning → text-warning-strong 이관(선례: --brand-strong). --warning-tint/-bg/-border 무변경. */
+  --warning-strong: oklch(0.52 0.16 85);
   --info: oklch(0.55 0.18 250);
   /* story #2023(ⓐ): 신설 — L5(진행중·작업중·미읽음·측정·LLM 호출) 위반을 info로 교체하면서
      배경(bg-info) 위 텍스트가 올라가는 자리가 생긴다. 라이트/다크가 반대로 필요(핸드오프
@@ -441,6 +446,9 @@
   /* Semantic status tokens */
   --success: oklch(0.65 0.15 145);
   --warning: oklch(0.70 0.16 85);
+  /* story #2594: 다크는 현 --warning(L0.70)이 이미 흰 텍스트 배경 6.98:1로 AA 통과 → strong=동일값
+     (다크 무변경). 라이트와 값이 갈리는 건 의도(테마별 대비 헤드룸이 반대). */
+  --warning-strong: oklch(0.70 0.16 85);
   --info: oklch(0.65 0.18 250);
   /* story #2023(ⓐ): 라이트와 다른 값(어두운 남색) — 다크 bg-info는 밝은 파랑이라 밝은
      텍스트로는 AA 미달(실측 3.24:1). --primary-foreground 다크와 동일 보정 패턴. */

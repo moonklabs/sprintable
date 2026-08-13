@@ -106,7 +106,7 @@ export function PricingLimitsTable({ currentTier }: { currentTier: TierId }) {
                   key={tierId}
                   className={cn(
                     'px-3 py-2.5 text-right text-xs font-semibold',
-                    TIER_DEFINITIONS[tierId].limits.canPurchasePacks ? 'text-success' : 'text-warning',
+                    TIER_DEFINITIONS[tierId].limits.canPurchasePacks ? 'text-success' : 'text-warning-strong',
                     tierId === currentTier && 'bg-brand-tint',
                   )}
                 >

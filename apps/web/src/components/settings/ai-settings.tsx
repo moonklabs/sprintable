@@ -211,7 +211,7 @@ export function AiSettingsSection({ projectId }: { projectId: string }) {
             className="w-full rounded border px-3 py-2 text-sm"
           />
           {requiresNewApiKey && (
-            <p className="mt-1 text-xs text-warning">{t('aiApiKeyProviderChangeRequired')}</p>
+            <p className="mt-1 text-xs text-warning-strong">{t('aiApiKeyProviderChangeRequired')}</p>
           )}
         </div>
 

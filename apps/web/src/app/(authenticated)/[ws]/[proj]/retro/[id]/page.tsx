@@ -573,7 +573,7 @@ export default function RetroSessionPage() {
   const CATEGORY_COLORS: Record<RetroItemCategory, string> = {
     good: 'text-success',
     bad: 'text-destructive',
-    improve: 'text-warning',
+    improve: 'text-warning-strong',
   };
   const CATEGORY_DOT_COLORS: Record<RetroItemCategory, string> = {
     good: 'bg-success',

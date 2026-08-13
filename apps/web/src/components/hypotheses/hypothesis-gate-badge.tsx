@@ -58,7 +58,7 @@ export function HypothesisGateBadge({ hypothesis, gate, resolveName = (id) => id
     if (state === 'confirmed') return null;
     return (
       <span title={t(meta.labelKey)} aria-label={t(meta.labelKey)} className="inline-flex shrink-0 items-center">
-        <MetaIcon className={`size-3.5 ${state === 'rejected' ? 'text-destructive' : 'text-warning'}`} />
+        <MetaIcon className={`size-3.5 ${state === 'rejected' ? 'text-destructive' : 'text-warning-strong'}`} />
       </span>
     );
   }

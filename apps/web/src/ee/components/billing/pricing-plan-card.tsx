@@ -110,7 +110,7 @@ export function PricingPlanCard({
         </li>
       </ul>
 
-      <div className={cn('mt-3 border-t border-dashed border-border pt-3 text-[11px]', limits.canPurchasePacks ? 'text-success' : 'text-warning')}>
+      <div className={cn('mt-3 border-t border-dashed border-border pt-3 text-[11px]', limits.canPurchasePacks ? 'text-success' : 'text-warning-strong')}>
         {limits.canPurchasePacks ? t('reachGo') : t('reachStopFree')}
       </div>
     </div>

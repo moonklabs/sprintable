@@ -28,7 +28,7 @@ function RecentRow({ change, resolveName, t }: { change: RecentChange; resolveNa
   const ago = mins < 60 ? t('ccMinAgo', { n: mins }) : mins < 1440 ? t('ccHourAgo', { n: Math.floor(mins / 60) }) : t('ccDayAgo', { n: Math.floor(mins / 1440) });
   return (
     <li className="flex items-center gap-2 text-[11px]">
-      {tone === 'warn' ? <AlertTriangle className="size-3 shrink-0 text-warning" /> : <CheckCircle2 className="size-3 shrink-0 text-success" />}
+      {tone === 'warn' ? <AlertTriangle className="size-3 shrink-0 text-warning-strong" /> : <CheckCircle2 className="size-3 shrink-0 text-success" />}
       <span className="min-w-0 flex-1 truncate text-foreground">{label}{resolved ? <span className="text-muted-foreground"> · {resolved}</span> : null}</span>
       <span className="shrink-0 tabular-nums text-muted-foreground/70">{ago}</span>
     </li>
