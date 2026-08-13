@@ -359,6 +359,46 @@ async def test_chain_expired_blocks_agent_recipient_even_when_mentioned():
 
 
 @pytest.mark.anyio
+async def test_chain_expired_does_not_block_dm_agent_recipient():
+    """핫픽스(2026-08-13, 라이브 실측·Cloud Logging 대조 확定) — DM은 chain-expired 최종
+    게이트 밖이다. human 메시지가 없는 순수 1:1 agent DM은 연쇄 깊이가 구조적으로 늘 cap을
+    넘는데(장기 협업방 자체가 그런 모양), 이 게이트가 group과 동일하게 적용되면 정상 1:1
+    대화가 통째로 침묵당한다(실제로 페드루↔디디 DM에서 무멘션 메시지가 전부 막힌 채로 재현
+    됐다 — reason=chain-expired). group은 이 테스트 파일의 다른 케이스(위)처럼 그대로 막혀야
+    한다 — 이 테스트는 DM만 예외임을 고정."""
+    from app.services.channel_router import route_message
+
+    sender = uuid.uuid4()
+    recipient = uuid.uuid4()
+    conv = uuid.uuid4()
+    proj = uuid.uuid4()
+
+    msg = MagicMock()
+    msg.id = uuid.uuid4()
+    msg.sender_id = sender
+    msg.conversation_id = conv
+    msg.thread_id = None
+    msg.mentioned_ids = []  # 무멘션 — DM 기본계약(all)만으로 통과해야 한다.
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        _scalar(msg),
+        _scalar("agent"),
+        _scalars([sender, recipient]),
+        _scalars([]),
+        _all([(recipient, "agent")]),
+        _row(project_id=proj, type="dm", free_response=False),
+        _scalars([]),
+    ])
+
+    with patch("app.services.channel_router.compute_agent_chain_depth", AsyncMock(return_value=999)):
+        decisions = await route_message(msg.id, db)
+    assert len(decisions) == 1, "DM에서 연쇄 cap 초과가 무멘션 agent recipient를 막으면 안 된다"
+    assert decisions[0].member_id == recipient
+    assert decisions[0].level == "all"
+
+
+@pytest.mark.anyio
 async def test_chain_expired_does_not_block_human_recipient():
     """human recipient는 연쇄 게이트 대상이 아니다 — human이 바로 그 개입 대상."""
     from app.services.channel_router import route_message
