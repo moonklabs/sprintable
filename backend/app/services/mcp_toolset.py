@@ -42,6 +42,12 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("canvas", ("artifact", "canonical_version", "spec_pin")),
     ("admin", ("give_reward", "emit_event", "trigger_ai", "activate_sprint",
                "close_sprint", "create_sprint", "upsert_webhook", "delete_webhook")),
+    # story #2634: 이벤트 레지스트리 발행 표면(publish_event/list_event_definitions) — "admin"
+    # 뒤에 둔 이유는 순서 의존적이다: "emit_event"(admin 키워드)가 substring "event"를 포함하므로
+    # "events" 그룹을 admin보다 앞에 두면 sprintable_emit_event의 기존 분류(admin)가 깨진다.
+    # publish_event/list_event_definitions는 admin 키워드 어느 것과도 안 겹쳐 여기로 안전하게
+    # 떨어진다(발행/구독은 admin급 파괴 작업이 아닌 일반 도메인 기능이라 admin에 안 묶는다).
+    ("events", ("event",)),
 ]
 
 _CORE = "core"  # ping/notifications-check 등 기본 — 항상 허용
@@ -385,6 +391,8 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_delete_artifact",
     # projects (E-MCP-OPT story ff6cb90d)
     "sprintable_list_projects", "sprintable_set_default_project",
+    # events (story #2634) — POST /api/v2/events/publish(#2633) 발행 + GET /definitions 카탈로그.
+    "sprintable_publish_event", "sprintable_list_event_definitions",
 )
 
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.
@@ -397,6 +405,10 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
 _CATALOG_DISPLAY_ORDER: tuple[str, ...] = (
     "stories", "tasks", "sprints", "epics", "hypotheses", "chat", "docs", "analytics", "retro",
     "meetings", "notifications", "webhooks", "rewards", "audit", "agent_runs", "canvas",
+    # story #2634: publish_event/list_event_definitions — 새 그룹이라 role_template.
+    # default_tool_groups에 아직 이 토큰을 가진 role이 없다(선생님 승인 게이트 — 데이터
+    # 마이그 없이 여기 등록만으로는 아무 role도 자동으로 이 도구를 못 쓴다, fail-closed).
+    "events",
 )
 
 
