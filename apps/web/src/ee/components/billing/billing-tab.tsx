@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
@@ -304,6 +305,14 @@ export function UpgradeCheckoutDialog({
           </div>
         </dl>
         <p className="text-[11px] text-muted-foreground">{t('checkoutDialogTossNote')}</p>
+        {/* story #2606 AC4: 결제 화면에서 환불정책 확인 가능(Toss 심사 요건) — 확인 버튼 바로 위. */}
+        <p className="text-[11px] text-muted-foreground">
+          {t('checkoutDialogRefundPolicyPrefix')}{' '}
+          <Link href="/refund-policy" target="_blank" className="underline hover:text-foreground/80">
+            {t('checkoutDialogRefundPolicyLink')}
+          </Link>
+          {t('checkoutDialogRefundPolicySuffix')}
+        </p>
         {submitError && (
           <Alert variant="destructive">
             <AlertDescription>{t('checkoutWidgetOpenErrorInline')}</AlertDescription>

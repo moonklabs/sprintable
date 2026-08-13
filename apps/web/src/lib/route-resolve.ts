@@ -67,8 +67,8 @@ export const RESERVED_FIRST_SEGMENTS = new Set([
   'activity', 'api', 'apple-icon.png', 'auth', 'channel', 'chats', 'dashboard',
   'favicon.ico', 'forgot-password', 'gates', 'icon.svg', 'inbox', 'internal-dogfood',
   'invite', 'login', 'manifest.webmanifest', 'meetings', 'mfa', 'more', 'onboarding',
-  'org-briefing', 'organization', 'privacy', 'register', 'reset-password', 'rewards',
-  'settings', 'share', 'terms', 'verify-email',
+  'org-briefing', 'organization', 'privacy', 'refund-policy', 'register', 'reset-password',
+  'rewards', 'settings', 'share', 'terms', 'verify-email',
 ]);
 
 /**
