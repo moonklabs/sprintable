@@ -607,6 +607,122 @@ describe('ChatBubble — story #2572 HITL 승인 요청 버튼 카드', () => {
   });
 });
 
+describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', () => {
+  const GATE_ID = 'aaaaaaaa-0000-0000-0000-000000000001';
+  const approvalMessage: ChatMessage = {
+    ...baseMessage,
+    content: "'제안서.md' 문서 결재 요청",
+    sender_type: 'agent',
+    approval_target: { work_item_type: 'doc', work_item_id: DOC_ID, gate_id: GATE_ID, actions: ['approve', 'reject'] },
+  };
+
+  function stubGate(overrides: Partial<{ status: string; can_approve: boolean; risk_grade: 'low' | 'high' | null; title: string }>) {
+    // 상태를 가진 mock — POST .../transition 뒤에 컴포넌트가 다시 GET하는 fetchGate()
+    // refetch가 "바뀐 값"을 보게 하려면 gate 자체가 그 사이에 갱신돼야 한다(실 BE 동작 미러).
+    const gate = {
+      id: GATE_ID,
+      work_item_id: DOC_ID,
+      work_item_type: 'doc',
+      gate_type: 'doc_approval',
+      status: overrides.status ?? 'pending',
+      can_approve: overrides.can_approve ?? true,
+      risk_grade: overrides.risk_grade ?? 'low',
+      resolver_id: null,
+      resolved_at: null,
+      resolution_note: null,
+      neutral_facts: null,
+      work_item_summary: { title: overrides.title ?? '제안서.md', slug: null },
+      created_at: '2026-08-13T00:00:00.000Z',
+      updated_at: '2026-08-13T00:00:00.000Z',
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: string, opts?: { method?: string; body?: string }) => {
+      if (typeof url === 'string' && url.startsWith(`/api/gates/${GATE_ID}/transition`) && opts?.method === 'POST') {
+        const { status } = JSON.parse(opts.body as string) as { status: string };
+        gate.status = status;
+        return { ok: true, json: async () => ({ data: gate }) };
+      }
+      if (typeof url === 'string' && url === `/api/gates/${GATE_ID}`) {
+        return { ok: true, json: async () => ({ data: gate }) };
+      }
+      return { ok: false, json: async () => ({}) };
+    }));
+    return gate;
+  }
+
+  it('일반 메시지(approval_target 없음)는 카드 대신 기존 텍스트 렌더 그대로다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={baseMessage} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('결재 요청');
+  });
+
+  it('pending + can_approve=true — 제목·승인/반려 버튼이 렌더된다', async () => {
+    stubGate({});
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    expect(container.textContent).toContain('결재 요청');
+    expect(container.textContent).toContain('제안서.md');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(true);
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('반려'))).toBe(true);
+  });
+
+  it('승인 클릭 시 POST .../transition이 status:"approved"로 호출되고 결과가 처리됨 상태로 갱신된다', async () => {
+    stubGate({});
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    const approveBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('승인'))!;
+    await act(async () => { approveBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // onClick은 transition()을 await하지 않는 fire-and-forget이라(HitlApprovalCard와 동일
+    // 관례) 그 안의 await fetchGate() 재조회가 끝날 시점까지 한 번 더 flush가 필요하다.
+    await act(async () => {});
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const transitionCall = fetchMock.mock.calls.find((call: unknown[]) => (call[0] as string).includes('/transition'));
+    expect(transitionCall).toBeDefined();
+    expect(JSON.parse((transitionCall![1] as { body: string }).body)).toEqual({ status: 'approved', note: null });
+    expect(container.textContent).toContain('처리됨');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(false);
+  });
+
+  it('can_approve=false — 버튼 없이 무권한 사유 문구만 보인다(fail-closed, gates/[id]/page.tsx와 동일 규칙)', async () => {
+    stubGate({ can_approve: false });
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    expect(container.textContent).toContain('승인할 권한이 없습니다');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(false);
+  });
+
+  it('고위험(risk_grade=high) — 인라인 버튼 대신 결재함으로 열기 링크만 보인다(서명 플로우 재구현 안 함)', async () => {
+    stubGate({ risk_grade: 'high' });
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(false);
+    const link = container.querySelector(`a[href="/gates/${GATE_ID}"]`);
+    expect(link).not.toBeNull();
+  });
+
+  it('이미 처리된 게이트(status=approved)는 버튼 없이 처리됨 상태만 보인다', async () => {
+    stubGate({ status: 'approved' });
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    expect(container.textContent).toContain('처리됨');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(false);
+  });
+
+  it('게이트 404(삭제 등) — 조용히 죽지 않고 정직한 미발견 문구를 보인다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) })));
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    expect(container.textContent).toContain('찾을 수 없습니다');
+  });
+});
+
 // story #2037 — 이미지 첨부 클릭 → 라이트박스 진입점 배선. 비-이미지 첨부가 섞여 있어도
 // 이미지끼리의 상대 순번(imageIndex)이 정확한지가 이 통합의 핵심 회귀 지점(off-by-one 위험).
 describe('ChatBubble — story #2037 이미지 라이트박스 진입점', () => {

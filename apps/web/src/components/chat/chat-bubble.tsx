@@ -22,6 +22,7 @@ import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from './presence
 import { ReferenceSuggestionRow } from './reference-suggestion-row';
 import { parseHitlRequest } from '@/lib/hitl-classifier';
 import { HitlApprovalCard, type HitlAnswer } from './hitl-approval-card';
+import { ApprovalRequestCard } from './approval-request-card';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -285,6 +286,10 @@ export function ChatBubble({
   // + 플러그인 고정 포맷 정확 매칭(패턴이 안 맞으면 null → 일반 텍스트 폴백, PO 가드②)
   // + 응답 핸들러가 실제로 있을 때만(없는 화면=스레드 패널 등에서 깨진 카드 방지).
   const hitlRequest = !isDeleted && isAgent && onRespondHitl ? parseHitlRequest(message.content) : null;
+  // story #2604 P2 — BE가 실은 approval_target(additive)이 있으면 카드로 렌더. hitlRequest와
+  // 달리 sniffing(정규식 매칭) 없이 구조화 필드 존재만으로 판별 — BE가 이미 결정한 사실이라
+  // FE가 다시 추측할 이유가 없다.
+  const approvalTarget = !isDeleted ? message.approval_target ?? null : null;
   // S8: 슬래시 커맨드는 전용 버블(brand·mono·⌘). 리터럴(`//`)은 dequote된 일반 텍스트.
   const isCmd = isCommand(message.content);
   const isLiteral = !isCmd && message.content.startsWith('//');
@@ -471,6 +476,8 @@ export function ChatBubble({
                 {t('blockedSenderMessageReveal')}
               </button>
             </div>
+          ) : approvalTarget ? (
+            <ApprovalRequestCard target={approvalTarget} />
           ) : hitlRequest ? (
             <HitlApprovalCard
               request={hitlRequest}
@@ -515,7 +522,7 @@ export function ChatBubble({
           {/* story #2283 — 보낸 직후 그 메시지 바로 아래에서 한 번 제안(작성자 본인에게만,
               isMine 게이트는 컴포넌트 내부에서 건다). ⛔남의 메시지엔 안 뜬다. tombstone된
               메시지엔 제안할 실 내용이 없다(story #2319). */}
-          {!isCmd && !isDeleted && !hitlRequest && <ReferenceSuggestionRow messageId={message.id} content={message.content} isMine={isMine} projectId={projectId} />}
+          {!isCmd && !isDeleted && !hitlRequest && !approvalTarget && <ReferenceSuggestionRow messageId={message.id} content={message.content} isMine={isMine} projectId={projectId} />}
 
           {/* Attachments — a54ddc16: auth-gated 서명 라우트 경유(public 직링크 미사용).
               이미지=AttachmentImage(3상태 render)·오디오/비디오=AttachmentMedia(story #2051,
