@@ -309,10 +309,13 @@
   --info-foreground: oklch(0.985 0 0);
   --priority: oklch(0.65 0.18 50);
 
-  /* Scrollbar */
-  --scrollbar-thumb: oklch(0 0 0 / 10%);
-  --scrollbar-thumb-hover: oklch(0 0 0 / 18%);
-  --scrollbar-track: transparent;
+  /* Scrollbar — story #2601: 10%/18% 알파는 실측(Chromium canvas 2d fillRect+getImageData,
+     color-contrast.test.ts와 동일 규격) 대비 1.26:1(WCAG 비텍스트 UI 컴포넌트 3:1 문턱의
+     절반 이하)이라 사실상 안 보였다. 45%로 올려 3.36:1 확보(track도 6%로 미세하게 얹어
+     스크롤 가능한 «홈」 자체를 감지하게) — 회귀 가드는 globals-scrollbar.test.ts 참조. */
+  --scrollbar-thumb: oklch(0 0 0 / 45%);
+  --scrollbar-thumb-hover: oklch(0 0 0 / 65%);
+  --scrollbar-track: oklch(0 0 0 / 6%);
 
   --brand-soft: oklch(0.90 0.06 258);
   --brand-strong: oklch(0.45 0.20 258);
@@ -441,10 +444,12 @@
   --info-foreground: oklch(0.16 0.038 250);
   --priority: oklch(0.70 0.18 50);
 
-  /* Scrollbar */
-  --scrollbar-thumb: oklch(1 0 0 / 8%);
-  --scrollbar-thumb-hover: oklch(1 0 0 / 18%);
-  --scrollbar-track: transparent;
+  /* Scrollbar — story #2601, 라이트 쪽 주석 근거 그대로. 원래 8% 알파는 실측 대비 1.22:1 —
+     --background(다크)이 실측 rgb(17,17,20)로 거의 순흑에 가까워 흰 알파가 라이트보다도
+     헤드룸이 넉넉하다(65%에서 대비 8.31:1 — 직관과 달리 라이트보다 여유 있게 통과). */
+  --scrollbar-thumb: oklch(1 0 0 / 65%);
+  --scrollbar-thumb-hover: oklch(1 0 0 / 80%);
+  --scrollbar-track: oklch(1 0 0 / 12%);
 
   --brand-soft: oklch(0.80 0.10 258);
   --brand-strong: oklch(0.55 0.22 258);
