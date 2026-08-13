@@ -849,3 +849,188 @@ async def expire_stale_events(
     if not await _is_org_admin(db, org_id, uuid.UUID(auth.user_id)):
         raise HTTPException(status_code=403, detail="org admin/owner required")
     return await expire_stale_events_core(db, org_id)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# story #2633(이벤트 레지스트리 P1a) — POST /publish. doc event-registry-core-p1-plan §2-2.
+#
+# ⛔AC2(신규 전달 계통 금지, story #2620 재발 방지): route_message()/DeliveryDecision은
+# ConversationMessage가 이미 존재해야만 진입 가능한 구조라(하위 진입점 없음, 그라운딩 확認)
+# "발행"은 실제로 conversation에 메시지를 쓰는 것과 같다 — dispatch_notification()(#2630에서
+# 쓴 그것)은 별개 시스템(notification_settings·webhook_targeting 소비)이라 여기 쓰면 AC2
+# 미충족+3계통 재발. 그래서 이 엔드포인트는 자체 배달 로직을 만들지 않고 **`send_message()`를
+# 그대로 호출**한다 — mention/webhook parity·circuit breaker(#2630)·chain-depth(#2608) 전부
+# 공짜로 상속(중복 구현 0).
+# ─────────────────────────────────────────────────────────────────────────────
+
+class EventPublishRequest(BaseModel):
+    definition_key: str
+    payload: dict
+    # 정의의 routing.broadcast가 선언한 대상 외에 발행 시점에 추가로 공람시킬 대상(옵션 — P1
+    # 플랜 §2-2 "추가 전파 대상"). org 소속만 허용(cross-org 필터, send_message와 동형).
+    extra_broadcast_member_ids: list[uuid.UUID] = []
+
+
+async def _resolve_event_project_id(
+    db: AsyncSession, *, org_id: uuid.UUID, payload: dict,
+) -> uuid.UUID | None:
+    """이벤트가 속할 project_id — work_item_type/id가 있으면 그 작업의 project(gate_service.
+    resolve_work_item_project_id 재사용, 신규 쿼리 만들지 않음), goal_id만 있으면(preset.
+    goal.measured) Goal.project_id 직접. 둘 다 없으면 None(호출부가 400으로 거부)."""
+    if payload.get("work_item_type") and payload.get("work_item_id"):
+        from app.services.gate_service import resolve_work_item_project_id
+
+        return await resolve_work_item_project_id(
+            db, org_id, payload["work_item_type"], uuid.UUID(payload["work_item_id"]),
+        )
+    if payload.get("goal_id"):
+        from app.models.pm import Goal
+
+        return (await db.execute(
+            select(Goal.project_id).where(Goal.id == uuid.UUID(payload["goal_id"]), Goal.org_id == org_id)
+        )).scalar_one_or_none()
+    return None
+
+
+async def _get_or_create_event_conversation(
+    db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID,
+    participant_ids: set[uuid.UUID], created_by: uuid.UUID,
+) -> "Conversation":
+    """참가자 집합이 **정확히** 일치하는 기존 대화를 재사용, 없으면 생성 — approval_delivery.
+    _get_or_create_approval_dm(2인 전용)을 N인으로 일반화(같은 원리: 표식이 아니라 실물
+    참가자 집합이 정본, story #2628 교훈). 2인이면 dm, 3인 이상이면 group(1인 — escalation/
+    broadcast 둘 다 빈 집합으로 해석된 경우 — 도 group으로 허용: 이해관계자가 없어도 이벤트
+    자체는 감사 기록으로 durable해야 한다, P1 플랜 §1.5 goal-loop 입력 취지)."""
+    from app.models.conversation import Conversation, ConversationParticipant
+    from sqlalchemy import func as _func
+
+    n = len(participant_ids)
+    matched = (
+        select(ConversationParticipant.conversation_id)
+        .where(ConversationParticipant.member_id.in_(participant_ids))
+        .group_by(ConversationParticipant.conversation_id)
+        .having(_func.count(ConversationParticipant.member_id.distinct()) == n)
+    ).scalar_subquery()
+    exact = (
+        select(ConversationParticipant.conversation_id)
+        .where(ConversationParticipant.conversation_id.in_(matched))
+        .group_by(ConversationParticipant.conversation_id)
+        .having(_func.count() == n)
+    ).scalar_subquery()
+    existing = (await db.execute(
+        select(Conversation)
+        .where(Conversation.org_id == org_id, Conversation.id.in_(exact))
+        .order_by(Conversation.updated_at.desc())
+        .limit(1)
+    )).scalars().first()
+    if existing is not None:
+        return existing
+
+    from app.routers.conversations import _create_conversation_record
+
+    return await _create_conversation_record(
+        db, org_id=org_id, project_id=project_id, member_ids=participant_ids,
+        conv_type="dm" if n == 2 else "group", title=None, created_by=created_by,
+    )
+
+
+def _render_event_message_content(definition_key: str, payload: dict) -> str:
+    """P2(story #2637)의 block_template 렌더러가 상륙하기 전 제네릭 폴백 — model.py docstring의
+    "템플릿 없으면 제네릭 카드"와 동형 원칙을 메시지 본문 레벨에서 지금 구현. 필드 순서는
+    payload dict 삽입 순서(파이썬 3.7+ 보장) 그대로 — 임의 정렬로 무의미하게 흔들지 않는다."""
+    lines = [f"[이벤트] {definition_key}"]
+    lines += [f"- {k}: {v}" for k, v in payload.items()]
+    return "\n".join(lines)
+
+
+@router.post("/publish", status_code=201)
+async def publish_event(
+    body: EventPublishRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """POST /api/v2/events/publish — story #2633 AC1~AC3. definition_key+payload를 검증하고
+    routing(상신선·전파선)을 실 member_id로 풀어 기존 단일 판정 파이프(route_message/
+    DeliveryDecision, AC2)로 전달한다."""
+    from app.services.member_resolver import resolve_member
+
+    sender = await resolve_member(auth, org_id, db)
+
+    from app.models.event_definition import EventDefinition
+
+    definition = (await db.execute(
+        select(EventDefinition)
+        .where(
+            EventDefinition.key == body.definition_key,
+            EventDefinition.enabled.is_(True),
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        )
+        # org 커스텀이 있으면 프리셋보다 우선(같은 key 오버라이드 시나리오 대비 — 지금은
+        # #2632에 프리셋뿐이라 실질 영향 없음, #2636 커스텀 등록 대비 명시).
+        .order_by(EventDefinition.org_id.is_(None))
+        .limit(1)
+    )).scalars().first()
+    if definition is None:
+        raise HTTPException(
+            status_code=404, detail=f"event definition not found or disabled: {body.definition_key!r}",
+        )
+
+    from app.services.event_definition_registry import InvalidEventPayloadError, validate_event_payload
+
+    try:
+        validate_event_payload(definition.payload_schema, body.payload)
+    except InvalidEventPayloadError as e:
+        raise HTTPException(
+            status_code=400, detail={"error": "invalid_payload", "errors": e.errors},
+        ) from e
+
+    from app.services.event_routing_resolver import MissingRoutingPayloadFieldError, resolve_routing_leg
+
+    try:
+        escalation_ids = await resolve_routing_leg(
+            definition.routing["escalation"], payload=body.payload, org_id=org_id, db=db,
+        )
+        broadcast_ids = await resolve_routing_leg(
+            definition.routing["broadcast"], payload=body.payload, org_id=org_id, db=db,
+        )
+    except MissingRoutingPayloadFieldError as e:
+        raise HTTPException(
+            status_code=400, detail={"error": "invalid_payload", "errors": [str(e)]},
+        ) from e
+
+    if body.extra_broadcast_member_ids:
+        from app.services.member_resolver import filter_org_member_ids
+
+        broadcast_ids |= await filter_org_member_ids(set(body.extra_broadcast_member_ids), org_id, db)
+
+    project_id = await _resolve_event_project_id(db, org_id=org_id, payload=body.payload)
+    if project_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="payload에서 project를 해소할 수 없습니다(work_item_type+work_item_id 또는 goal_id 필요).",
+        )
+
+    participant_ids = {sender.id} | escalation_ids | broadcast_ids
+    conv = await _get_or_create_event_conversation(
+        db, org_id=org_id, project_id=project_id,
+        participant_ids=participant_ids, created_by=sender.id,
+    )
+
+    from app.routers.conversations import SendMessageRequest, send_message
+
+    send_body = SendMessageRequest(
+        content=_render_event_message_content(definition.key, body.payload),
+        mentioned_ids=list(escalation_ids),
+    )
+    msg_response = await send_message(
+        conv.id, send_body, background_tasks, db=db, auth=auth, org_id=org_id,
+    )
+
+    return {
+        "conversation_id": str(conv.id),
+        "message_id": msg_response["data"]["id"],
+        "escalation_member_ids": [str(i) for i in escalation_ids],
+        "broadcast_member_ids": [str(i) for i in broadcast_ids],
+    }
