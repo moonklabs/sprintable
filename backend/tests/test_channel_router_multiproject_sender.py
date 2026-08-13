@@ -36,9 +36,35 @@ def _all(rows):
     return r
 
 
+def _pref(member_id, *, scope_type="global", scope_id=None, channel="sse", level="mute"):
+    p = MagicMock()
+    p.member_id = member_id
+    p.scope_type = scope_type
+    p.scope_id = scope_id
+    p.channel = channel
+    p.level = level
+    return p
+
+
+def _row(**attrs):
+    """story #2603 P0: conv_row 조회가 scalar 하나가 아니라 (project_id, type, free_response)
+    Row가 됐다 — .one_or_none()이 이 객체를 반환하고 호출부가 속성으로 읽는다."""
+    r = MagicMock()
+    row = MagicMock()
+    for k, v in attrs.items():
+        setattr(row, k, v)
+    r.one_or_none.return_value = row
+    return r
+
+
 @pytest.mark.anyio
 async def test_multiproject_agent_sender_dispatches_without_crash():
-    """멀티프로젝트 agent 발신 → sender_type .limit(1)='agent' → agent↔agent SSE dispatch(크래시 0)."""
+    """멀티프로젝트 agent 발신 → sender_type .limit(1)='agent' → dispatch(크래시 0).
+
+    story #2603 P0: agent↔agent 강제 sse/all 바이패스는 제거됐다(channel_router.py docstring
+    참조) — 이 테스트의 원래 목적(멀티프로젝트 sender의 team_members 뷰 다중행이 route_message
+    를 MultipleResultsFound로 깨지 않는지)은 그대로 지키되, recipient가 명시 멘션된 경우의
+    새 기본계약(agent group default: mentions, 멘션 매치로 decision 생성)으로 갱신한다."""
     from app.services.channel_router import route_message
 
     sender = uuid.uuid4()       # 멀티프로젝트 agent(team_members 뷰 다중행)
@@ -51,6 +77,7 @@ async def test_multiproject_agent_sender_dispatches_without_crash():
     msg.sender_id = sender
     msg.conversation_id = conv
     msg.thread_id = None
+    msg.mentioned_ids = [recipient]  # 명시 멘션 — 새 기본계약(mentions) 하에서 decision 발생 조건.
 
     db = MagicMock()
     db.execute = AsyncMock(side_effect=[
@@ -59,13 +86,182 @@ async def test_multiproject_agent_sender_dispatches_without_crash():
         _scalars([sender, recipient]),      # 3 participants(발신자 포함)
         _scalars([]),                       # 3b story #2349: user_blocker_ids 조회(차단 0건)
         _all([(recipient, "agent")]),       # 4 수신자 type 배치
-        _scalar(proj),                      # 5 conv project_id
+        _row(project_id=proj, type="group", free_response=False),  # 5 conv project_id/type/free_response
         _scalars([]),                       # 6 preferences
     ])
 
     decisions = await route_message(msg.id, db)
-    # 발신자 제외·agent↔agent 강제 SSE → 1 decision(크래시/ChannelRouterError 없이)
+    # 발신자 제외·크래시/ChannelRouterError 없이 멘션된 recipient에게만 decision.
     assert len(decisions) == 1
     assert decisions[0].member_id == recipient
     assert decisions[0].channel == "sse"
-    assert decisions[0].reason == "agent-to-agent forced sse"
+    assert decisions[0].level == "mentions"
+    assert decisions[0].reason == "agent group default: mentions"
+
+
+@pytest.mark.anyio
+async def test_agent_group_default_excludes_unmentioned_agent_recipient():
+    """story #2603 P0 AC1 — 그룹챗에서 멘션 없는 에이전트 발화는 상대 에이전트에게 decision을
+    만들지 않는다(= turn 트리거 자체가 없다). 원 접수 루프 시나리오의 핵심 단언."""
+    from app.services.channel_router import route_message
+
+    sender = uuid.uuid4()
+    recipient = uuid.uuid4()
+    conv = uuid.uuid4()
+    proj = uuid.uuid4()
+
+    msg = MagicMock()
+    msg.id = uuid.uuid4()
+    msg.sender_id = sender
+    msg.conversation_id = conv
+    msg.thread_id = None
+    msg.mentioned_ids = []  # 멘션 없음 — 원 루프 재현 시나리오.
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        _scalar(msg),
+        _scalar("agent"),
+        _scalars([sender, recipient]),
+        _scalars([]),
+        _all([(recipient, "agent")]),
+        _row(project_id=proj, type="group", free_response=False),
+        _scalars([]),
+    ])
+
+    decisions = await route_message(msg.id, db)
+    assert decisions == [], "멘션 없는데 decision이 생기면 원 루프가 그대로 재현된다"
+
+
+@pytest.mark.anyio
+async def test_dm_agent_recipient_defaults_to_all_no_mention_needed():
+    """AC2 비회귀 — 1:1(DM) 대화의 에이전트 recipient는 멘션 없이도 기존처럼 all(무회귀)."""
+    from app.services.channel_router import route_message
+
+    sender = uuid.uuid4()
+    recipient = uuid.uuid4()
+    conv = uuid.uuid4()
+    proj = uuid.uuid4()
+
+    msg = MagicMock()
+    msg.id = uuid.uuid4()
+    msg.sender_id = sender
+    msg.conversation_id = conv
+    msg.thread_id = None
+    msg.mentioned_ids = []
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        _scalar(msg),
+        _scalar("human"),
+        _scalars([sender, recipient]),
+        _scalars([]),
+        _all([(recipient, "agent")]),
+        _row(project_id=proj, type="dm", free_response=False),
+        _scalars([]),
+    ])
+
+    decisions = await route_message(msg.id, db)
+    assert len(decisions) == 1
+    assert decisions[0].level == "all"
+    assert decisions[0].reason == "default: all"
+
+
+@pytest.mark.anyio
+async def test_free_response_conversation_relaxes_mentions_to_all():
+    """AC2 옵트아웃 — free_response=true인 그룹 대화는 멘션 없어도 에이전트 recipient에게 간다."""
+    from app.services.channel_router import route_message
+
+    sender = uuid.uuid4()
+    recipient = uuid.uuid4()
+    conv = uuid.uuid4()
+    proj = uuid.uuid4()
+
+    msg = MagicMock()
+    msg.id = uuid.uuid4()
+    msg.sender_id = sender
+    msg.conversation_id = conv
+    msg.thread_id = None
+    msg.mentioned_ids = []
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        _scalar(msg),
+        _scalar("agent"),
+        _scalars([sender, recipient]),
+        _scalars([]),
+        _all([(recipient, "agent")]),
+        _row(project_id=proj, type="group", free_response=True),
+        _scalars([]),
+    ])
+
+    decisions = await route_message(msg.id, db)
+    assert len(decisions) == 1
+    assert decisions[0].level == "all"
+    assert "free_response override" in decisions[0].reason
+
+
+@pytest.mark.anyio
+async def test_explicit_mute_wins_over_free_response_and_mention():
+    """mute는 회원 자신의 명시 선택 — free_response 대화든 명시 멘션이든 mute를 못 뒤집는다."""
+    from app.services.channel_router import route_message
+
+    sender = uuid.uuid4()
+    recipient = uuid.uuid4()
+    conv = uuid.uuid4()
+    proj = uuid.uuid4()
+
+    msg = MagicMock()
+    msg.id = uuid.uuid4()
+    msg.sender_id = sender
+    msg.conversation_id = conv
+    msg.thread_id = None
+    msg.mentioned_ids = [recipient]  # 명시 멘션조차도 mute를 못 이긴다.
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        _scalar(msg),
+        _scalar("agent"),
+        _scalars([sender, recipient]),
+        _scalars([]),
+        _all([(recipient, "agent")]),
+        _row(project_id=proj, type="group", free_response=True),
+        _scalars([_pref(recipient, scope_type="global", level="mute")]),
+    ])
+
+    decisions = await route_message(msg.id, db)
+    assert decisions == [], "명시 mute 선택인데 decision이 생기면 회원 자기결정권 위반"
+
+
+@pytest.mark.anyio
+async def test_explicit_all_preference_overrides_agent_group_default():
+    """명시 preference 행이 있으면 그게 기본계약(mentions)보다 우선 — 에이전트가 스스로
+    all을 선택했다면 그 선택이 존중된다."""
+    from app.services.channel_router import route_message
+
+    sender = uuid.uuid4()
+    recipient = uuid.uuid4()
+    conv = uuid.uuid4()
+    proj = uuid.uuid4()
+
+    msg = MagicMock()
+    msg.id = uuid.uuid4()
+    msg.sender_id = sender
+    msg.conversation_id = conv
+    msg.thread_id = None
+    msg.mentioned_ids = []
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        _scalar(msg),
+        _scalar("agent"),
+        _scalars([sender, recipient]),
+        _scalars([]),
+        _all([(recipient, "agent")]),
+        _row(project_id=proj, type="group", free_response=False),
+        _scalars([_pref(recipient, scope_type="global", level="all", channel="sse")]),
+    ])
+
+    decisions = await route_message(msg.id, db)
+    assert len(decisions) == 1
+    assert decisions[0].level == "all"
+    assert decisions[0].reason == "preference scope=global"
