@@ -706,6 +706,10 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     expect(container.textContent).toContain('위 근거를 확인했습니다');
     const signBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('승인하고 서명'))!;
     expect(signBtn).not.toBeUndefined();
+    // 카디르 QA(320/375px 실측) 재발방지 — compact=true가 실제로 전달돼 버튼이 세로 스택
+    // full-width로 렌더되는지(가로 2버튼이면 라벨이 좁은 챗 폭에서 잘린다, 재발가드).
+    expect(signBtn.className).toContain('w-full');
+    expect(signBtn.parentElement?.className).toContain('flex-col');
     // AC: 근거 확인+사유 전에는 서명 비활성(gate-signature-approval.tsx의 canSign 그대로 상속).
     expect(signBtn.hasAttribute('disabled')).toBe(true);
   });

@@ -156,6 +156,7 @@ function ApprovalRequestBody({
           error={transitionError}
           onApprove={onApprove}
           onReject={onReject}
+          compact
         />
       ) : (
         <>
