@@ -944,14 +944,25 @@ def _render_event_message_content(definition_key: str, payload: dict) -> str:
 
 
 @router.post("/publish", status_code=201)
-async def publish_event(
+async def publish_registry_event(
     body: EventPublishRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
-    """POST /api/v2/events/publish — story #2633 AC1~AC3. definition_key+payload를 검증하고
+    """POST /api/v2/events/publish — story #2633 AC1~AC3.
+
+    ⚠️`publish_event`(이름 겹침 아님)가 아니라 `publish_registry_event`인 이유: 이 모듈에
+    한때 `publish_event()`라는 완전히 다른 개념(SSE org-level fanout, 실 구독자 0으로
+    영구 죽은 경로)이 있었고 #2139/#2132가 그걸 삭제하며 부활 감지 회귀가드(test_2139_2132_
+    push_to_org_members.py::test_publish_event_and_subscribers_no_longer_exist)를 남겼다
+    (push_to_org_members() 위 docstring 참조). 이 함수는 그것과 무관한 새 개념(이벤트
+    레지스트리 발행 API)이라 이름을 아예 다르게 갈라 그 가드를 건드리지 않는다 — 같은
+    이름을 다른 뜻으로 되쓰면 그 가드가 "부활"로 오판하는 게 아니라(가드는 hasattr만 보므로
+    실제로 트립됐다), 미래 독자가 두 개념을 착각할 여지도 같이 없앤다.
+
+    definition_key+payload를 검증하고
     routing(상신선·전파선)을 실 member_id로 풀어 기존 단일 판정 파이프(route_message/
     DeliveryDecision, AC2)로 전달한다."""
     from app.services.member_resolver import resolve_member

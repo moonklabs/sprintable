@@ -3,7 +3,7 @@
 doc event-registry-core-p1-plan §2-2. 검증 축:
 - AC1: 프리셋 발행이 실왕복으로 도달 — escalation=액션 대상(mentioned_ids)·broadcast=공람
   (참가자)이 구분돼 실측된다.
-- AC2: 신규 전달 계통 금지 — publish_event가 send_message()를 그대로 호출한다는 사실 자체가
+- AC2: 신규 전달 계통 금지 — publish_registry_event가 send_message()를 그대로 호출한다는 사실 자체가
   구조적 보증(별도 배달 로직 부재)이므로, 여기서는 그 위임의 결과(mentioned_ids가 정확히
   escalation_ids로 실린 메시지가 생성됨)로 간접 검증한다. route_message/webhook parity 자체는
   #2620/test_conversations.py가 이미 회귀 고정한 축이라 여기서 재검증하지 않는다.
@@ -122,7 +122,7 @@ def _auth(agent_id: uuid.UUID, org_id: uuid.UUID) -> "AuthContext":
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_publish_work_assigned_escalation_is_assignee_mentioned():
-    from app.routers.events import EventPublishRequest, publish_event
+    from app.routers.events import EventPublishRequest, publish_registry_event
     from app.models.conversation import ConversationMessage
     from sqlalchemy import select
 
@@ -142,7 +142,7 @@ async def test_publish_work_assigned_escalation_is_assignee_mentioned():
                     "assignee_member_id": str(assignee_id),
                 },
             )
-            resp = await publish_event(
+            resp = await publish_registry_event(
                 body, BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
             )
             assert resp["escalation_member_ids"] == [str(assignee_id)]
@@ -159,7 +159,7 @@ async def test_publish_work_assigned_escalation_is_assignee_mentioned():
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_publish_gate_verdict_no_escalation_broadcasts_to_stakeholders():
-    from app.routers.events import EventPublishRequest, publish_event
+    from app.routers.events import EventPublishRequest, publish_registry_event
 
     engine, Session = await _realdb_session()
     try:
@@ -177,7 +177,7 @@ async def test_publish_gate_verdict_no_escalation_broadcasts_to_stakeholders():
                     "gate_type": "merge", "verdict": "approved",
                 },
             )
-            resp = await publish_event(
+            resp = await publish_registry_event(
                 body, BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
             )
             assert resp["escalation_member_ids"] == []  # verdict는 결과 통지, 개입 요청 없음
@@ -189,7 +189,7 @@ async def test_publish_gate_verdict_no_escalation_broadcasts_to_stakeholders():
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_publish_goal_measured_resolves_goal_owner():
-    from app.routers.events import EventPublishRequest, publish_event
+    from app.routers.events import EventPublishRequest, publish_registry_event
 
     engine, Session = await _realdb_session()
     try:
@@ -204,7 +204,7 @@ async def test_publish_goal_measured_resolves_goal_owner():
                 definition_key="preset.goal.measured",
                 payload={"goal_id": str(goal_id), "metric_value": 12.5},
             )
-            resp = await publish_event(
+            resp = await publish_registry_event(
                 body, BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
             )
             assert resp["broadcast_member_ids"] == [str(owner_id)]
@@ -217,7 +217,7 @@ async def test_publish_goal_measured_resolves_goal_owner():
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_publish_reuses_conversation_for_same_participant_set():
-    from app.routers.events import EventPublishRequest, publish_event
+    from app.routers.events import EventPublishRequest, publish_registry_event
 
     engine, Session = await _realdb_session()
     try:
@@ -238,10 +238,10 @@ async def test_publish_reuses_conversation_for_same_participant_set():
                     },
                 )
 
-            resp1 = await publish_event(
+            resp1 = await publish_registry_event(
                 _body(), BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
             )
-            resp2 = await publish_event(
+            resp2 = await publish_registry_event(
                 _body(), BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
             )
             assert resp1["conversation_id"] == resp2["conversation_id"]
@@ -255,7 +255,7 @@ async def test_publish_reuses_conversation_for_same_participant_set():
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_publish_unknown_definition_key_404():
-    from app.routers.events import EventPublishRequest, publish_event
+    from app.routers.events import EventPublishRequest, publish_registry_event
 
     engine, Session = await _realdb_session()
     try:
@@ -265,7 +265,7 @@ async def test_publish_unknown_definition_key_404():
 
             body = EventPublishRequest(definition_key="preset.does.not_exist", payload={})
             with pytest.raises(HTTPException) as ei:
-                await publish_event(
+                await publish_registry_event(
                     body, BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
                 )
             assert ei.value.status_code == 404
@@ -276,7 +276,7 @@ async def test_publish_unknown_definition_key_404():
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_publish_schema_violation_400():
-    from app.routers.events import EventPublishRequest, publish_event
+    from app.routers.events import EventPublishRequest, publish_registry_event
 
     engine, Session = await _realdb_session()
     try:
@@ -290,7 +290,7 @@ async def test_publish_schema_violation_400():
                 payload={"work_item_type": "story"},  # 필수 필드 대량 누락
             )
             with pytest.raises(HTTPException) as ei:
-                await publish_event(
+                await publish_registry_event(
                     body, BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
                 )
             assert ei.value.status_code == 400
@@ -319,7 +319,7 @@ async def test_resolve_routing_leg_missing_payload_field_raises():
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_publish_unresolvable_project_400():
-    from app.routers.events import EventPublishRequest, publish_event
+    from app.routers.events import EventPublishRequest, publish_registry_event
 
     engine, Session = await _realdb_session()
     try:
@@ -333,7 +333,7 @@ async def test_publish_unresolvable_project_400():
                 payload={"goal_id": str(uuid.uuid4()), "metric_value": 1},  # 존재하지 않는 goal
             )
             with pytest.raises(HTTPException) as ei:
-                await publish_event(
+                await publish_registry_event(
                     body, BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
                 )
             assert ei.value.status_code == 400
