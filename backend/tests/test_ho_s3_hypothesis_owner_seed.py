@@ -11,6 +11,13 @@ import uuid
 
 import pytest
 
+# story #2643(2026-08-14): raw SQL DDL(CREATE TABLE IF NOT EXISTS, sa.text 경유)을 실행하는
+# 파일이라 conftest.py의 확장된 정적 가드가 마커를 요구한다 — 이 파일이 애초에 그 사각(원본
+# 패턴 파일, #3031 사고의 근원)의 실물 예시였다. IF NOT EXISTS라 기존 공유 테이블을 DROP하진
+# 않지만(#3031 사고보다 파괴력 낮음), non-destructive 공유 DB에 대상 테이블이 아직 없을 때
+# 예기치 않은 스키마를 만들 수 있어 여전히 destructive_schema 격리 실행이 안전하다.
+pytestmark = pytest.mark.destructive_schema
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 _MIG = os.path.join(
     os.path.dirname(__file__), "..", "alembic", "versions", "0119_seed_hypothesis_owner_role.py"
