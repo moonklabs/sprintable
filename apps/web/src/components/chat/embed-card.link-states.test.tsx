@@ -9,8 +9,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { EmbedCard, getEntityHref } from './embed-card';
 import { translateEntityStatus } from './entity-status-labels';
+// story #2614 — artifact 몸통이 이제 ArtifactThumbnail(canvas 네임스페이스 useTranslations)을
+// 렌더하므로, 그 경로를 태우는 테스트만 NextIntlClientProvider로 감싼다(다른 기존 테스트는
+// i18n을 안 타 무변경).
+import koMessages from '../../../messages/ko.json';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -119,18 +124,83 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
   });
 });
 
-describe('AC4 — hypothesis는 고정 ③(fetch 자체를 안 함, 무한 스피너 자체발견 회귀가드)', () => {
-  it('hypothesis는 fetch를 시도하지 않고 즉시 "열 수 있는 화면이 없습니다"를 보인다(무한 스피너 아님)', async () => {
-    const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
+describe('story #2614 — hypothesis는 풋터(담긴 곳)는 여전히 없지만(다대다, ③ 고정 무변경) 몸통은 이제 fetch해 statement를 보인다', () => {
+  it('hypothesis는 fetch해 statement를 몸통에 보이면서도 풋터는 "열 수 있는 화면이 없습니다"를 유지한다(거짓 링크 금지는 그대로)', async () => {
+    stubFetch(async (url) => {
+      expect(url).toContain('/api/hypotheses/');
+      return { ok: true, json: async () => ({ data: { statement: '이 가설은 검증되면 전환율이 오른다', status: 'proposed' } }) };
+    });
     await act(async () => {
       root.render(<EmbedCard entity_type="hypothesis" entity_id="h1" title="가설 A" status={null} />);
     });
     await openCard();
     await flush();
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(document.body.textContent).not.toContain('불러오는 중');
+    expect(document.body.textContent).toContain('이 가설은 검증되면 전환율이 오른다');
+    expect(document.body.textContent).not.toContain('이 엔티티는 별도 미리보기가 없습니다');
+    // AC3/AC4 — 다대다라 단일 부모를 못 고르는 사실은 안 바뀌었다: 풋터는 여전히 "갈 곳 없음".
+    expect(document.querySelectorAll('a[href^="/goals/"], a[href^="/board?story="], a[href^="/docs?id="]').length).toBe(0);
     expect(document.body.textContent).toContain('열 수 있는 화면이 없습니다');
+  });
+
+  it('hypothesis 조회가 실패하면(대상 사라짐) 여전히 "대상이 없습니다"로 정직하게 갈린다(무한 스피너였던 자체발견 회귀 재확認)', async () => {
+    stubFetch(async () => ({ ok: false, json: async () => ({}) }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="hypothesis" entity_id="h-gone" title="사라진 가설" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.body.textContent).not.toContain('불러오는 중');
+    expect(document.body.textContent).toContain('대상을 찾을 수 없습니다');
+  });
+});
+
+describe('story #2614 AC1/AC3 — artifact(부모 없는 독립 목업)는 몸통에서 실물이 보인다(회귀: "미리보기가 없습니다"가 지원 타입에서 뜨면 안 됨)', () => {
+  it('부모(story/epic/doc) 전부 null인 artifact도 썸네일이 렌더돼 "이 엔티티는 별도 미리보기가 없습니다"가 안 뜬다', async () => {
+    // ArtifactThumbnail 자신도 exports/version-detail을 따로 fetch한다(둘 다 /api/visual-artifacts/
+    // 하위 경로) — URL별로 분기해, exports는 빈 배열(PNG 없음)·version-detail은 404(간단히
+    // placeholder 경로로 떨어뜨림, 이 테스트의 관심사는 "썸네일 요소 자체가 뜨는가"이지 실 렌더
+    // 내용물이 아니다)로 응답해 ArtifactThumbnail이 안전하게 placeholder로 정착하게 한다.
+    stubFetch(async (url) => {
+      expect(url).toContain('/api/visual-artifacts/');
+      if (url.includes('/exports')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/versions/')) return { ok: false, json: async () => ({}) };
+      return {
+        ok: true,
+        json: async () => ({
+          data: { story_id: null, epic_id: null, doc_id: null, latest_version_number: 1, anchor_version: null },
+        }),
+      };
+    });
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EmbedCard entity_type="artifact" entity_id="91eaf539" title="mockup" status={null} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await openCard();
+    await flush();
+    // AC3 회귀 가드 — 지원 타입(artifact)에서 "미리보기 없음" 문구가 뜨면 빨간불.
+    expect(document.body.textContent).not.toContain('이 엔티티는 별도 미리보기가 없습니다');
+    expect(document.querySelector('[data-artifact-thumbnail]')).not.toBeNull();
+    // 부모가 없다는 사실 자체는 안 바뀌었다 — 풋터는 여전히 "갈 곳 없음"(거짓 링크 금지 유지).
+    expect(document.body.textContent).toContain('열 수 있는 화면이 없습니다');
+  });
+});
+
+// story #2614 AC3 — "이 엔티티는 별도 미리보기가 없습니다" 문구는 지원 타입(RICH_PREVIEW_TYPES:
+// story/epic/doc/artifact/hypothesis)에서 뜨면 회귀다. sprint/task/evidence/asset은 의도적으로
+// 이 Set 밖(sprint=own-href로 이미 열림+몸통에 보여줄 게 없음, task/evidence=via-parent로 이미
+// 열림, asset=별도 스토리지 화면). 이 테스트는 그 경계 자체를 고정한다.
+describe('story #2614 AC3 — "미리보기 없음" 문구는 미지원 타입(sprint)에만 정직하게 남는다', () => {
+  it('sprint는 own-href로 풋터가 열리면서도 몸통엔 여전히 "미리보기 없음"이 뜬다(의도된 것 — 회귀 아님)', async () => {
+    await act(async () => {
+      root.render(<EmbedCard entity_type="sprint" entity_id="sp1" title="스프린트 3" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.body.textContent).toContain('이 엔티티는 별도 미리보기가 없습니다');
+    expect(document.querySelector('a[href="/sprints?id=sp1"]')).not.toBeNull();
   });
 });
 
