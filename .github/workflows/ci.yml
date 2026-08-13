@@ -933,6 +933,26 @@ jobs:
           done
           echo "backend failed to become healthy"; cat /tmp/backend.log; exit 1
 
+      # 시드된 owner는 org가 없어 (authenticated) layout이 /onboarding으로 리다이렉트한다
+      # (layout.tsx: me 404 또는 me.org_id 부재 → redirect). 그래서 global-setup의
+      # waitForURL(/inbox/)가 타임아웃한다. 테이블 직접 시드(스키마 추측) 대신 앱 자체
+      # 온보딩 로직을 그대로 태운다 — POST /api/v2/organizations가 org + org_member(owner) +
+      # human member 앵커를 만든다. 그러면 다음 로그인(global-setup)의 토큰 app_metadata에
+      # org_id가 실려 /me가 200+org_id를 주고 /inbox가 렌더된다(me.py는 프로젝트 없으면
+      # proj_id=org_id로 폴백하므로 프로젝트는 불요).
+      - name: Onboard e2e owner (create org via app API)
+        run: |
+          set -euo pipefail
+          TOKEN=$(curl -sf -X POST http://localhost:8000/api/v2/auth/token \
+            -H 'content-type: application/json' \
+            -d '{"email":"owner@sprintable.dev","password":"password123"}' | jq -r '.data.access_token')
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then echo "owner login failed"; exit 1; fi
+          CODE=$(curl -s -o /tmp/org.json -w '%{http_code}' -X POST http://localhost:8000/api/v2/organizations \
+            -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+            -d '{"name":"E2E CI","slug":"e2e-ci"}')
+          echo "create-org HTTP $CODE"; cat /tmp/org.json || true; echo
+          if [ "$CODE" != "201" ] && [ "$CODE" != "409" ]; then echo "org create failed"; exit 1; fi
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
