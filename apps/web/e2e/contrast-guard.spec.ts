@@ -12,16 +12,39 @@
  *
  * ⛔hover 상태는 v1서 뺐다(첫 CI 런 실측 — story #2590 iteration). 40개 인터랙티브를 훑어
  * hover마다 스캔하는 방식은 검출이 «비결정적»이었다(같은 표면이 run 2엔 위반·run 3엔 통과).
- * 게이트는 결정적이어야 하므로(flaky 게이트=무시당해 가드보다 못함) hover는 «특정 known 요소
- * 대상 결정적 스캔»으로 story #2607(v2)에 재도입한다(임의 루프 아님·결정성=연속 2런 동일이 1급
- * AC). rest 스캔은 결정적이라 v1의 뼈대다.
+ * 게이트는 결정적이어야 하므로(flaky 게이트=무시당해 가드보다 못함) — story #2607(v2)가
+ * «등록제 결정적 스캔»으로 재도입했다(아래 HOVER_TARGETS). rest 스캔은 결정적이라 v1의 뼈대다.
+ *
+ * story #2607(v2) — hover 재도입 근거·설계:
+ *   비결정성의 실제 메커니즘을 격리 repro(정적 HTML + `transition-colors` 저대비 버튼)로 재현—
+ *   real hover 직후 즉시 스캔은 트랜지션이 «진행 중»일 때 걸릴 수도 안 걸릴 수도 있다(로컬처럼
+ *   빠르고 일정한 환경에선 항상 한쪽으로 떨어지지만, CI처럼 렌더/네트워크 지연이 가변적이면
+ *   run마다 다른 프레임을 잡는다 — v1이 겪은 정확히 그 증상). 세 후보(트랜지션 disable·
+ *   transitionend 대기·고정 대기)를 8회씩 실측 비교해 전부 결정적이었으나, **트랜지션 disable**을
+ *   채택한다 — per-element 대기시간 튜닝이 필요 없고(미래에 더 긴 트랜지션이 추가돼도 안 깨짐),
+ *   가장 빠르며, 도착점(=:hover의 최종 계산 스타일)은 트랜지션 유무와 무관해 (B)의 «실 픽셀
+ *   authority» 원칙과 충돌하지 않는다(트랜지션은 «가는 길»만 바꾸지 도착점을 안 바꾼다).
+ *   ⛔단 이건 «정지 상태 hover»만 잰다 — 도착점이 없는 영구 반복 애니메이션(예: hover 중 계속
+ *   맥동하는 색)은 이 방식으로 못 잰다(v1의 «못 잡는 것» 목록과 같은 규율로 아래 갱신).
+ *
+ *   40개 스윕(v1이 뺀 원인) 대신 **등록제** — 페이지별 hover 대상을 role/aria-label 기반 안정
+ *   셀렉터로 명시 등록한다(class 기반 셀렉터는 v1이 겪은 클래스-순서 비결정성과 같은 계열의
+ *   취약점이라 피한다). 등록 목록에 없는 요소는 미커버 — 이것도 AC4 선언에 반영.
+ *
+ *   ⚠️seed 데이터 의존 — CI e2e owner는 빈 org만 갖는다(스토리/게이트/에픽 없음, ci.yml
+ *   「Onboard e2e owner」 참조). 그래서 데이터가 있어야만 렌더되는 hover 표면(예: 승인대기
+ *   카드·활성 에픽 링크)은 등록해도 이 seed로는 안 뜬다 — 항상 렌더되는 앱 셸(사이드바) 요소를
+ *   우선 등록하고, 데이터 의존 등록 항목은 요소가 없으면 «스킵»(실패 아님)으로 처리한다(다음
+ *   사람이 "왜 이 요소는 한 번도 안 걸리나" 헤매지 않게 스킵 사유를 test.info()에 남긴다).
  *
  * baseline(can only shrink): 지금 «있는» 대비 위반은 실패시키지 않고, «새로 생긴» 위반만
  * 빨간불(자매 정적 가드와 같은 계약). 첫 CI 런이 현 위반을 드러내면 그 키를 baseline에 시드한다.
+ * hover 키는 rest 키와 겹치지 않게 `page::theme::hover::색쌍`로 네임스페이스한다.
  *
  * ⚠️ 이 스펙이 «못 잡는 것»(AC4 선언·다음 사람이 «다 본다」로 오독 않게):
- *   ①이 페이지 목록 밖 화면 ②org 데이터가 있어야만 렌더되는 tint 표면(v1 미포함) ③hover 등
- *   상호작용 상태(v1 미포함·story #2607서 v2 재도입) ④색맹(axe color-contrast는 명도만) ⑤같은
+ *   ①이 페이지 목록 밖 화면 ②org 데이터가 있어야만 렌더되는 tint 표면(rest·hover 둘 다) ③hover
+ *   등록 목록 밖의 인터랙티브 요소(40개 스윕 아님 — 의도된 트레이드) ④정지점이 없는 영구 반복
+ *   애니메이션 hover(트랜지션 disable로는 못 잰다) ⑤색맹(axe color-contrast는 명도만) ⑥같은
  *   색쌍의 다른 인스턴스(키가 색쌍이라 접힘 — 새 «색쌍»은 잡지만 기존 색쌍의 새 자리는 안 잡음).
  */
 import { test, expect, type Page } from '@playwright/test';
@@ -61,15 +84,24 @@ const THEMES = ['light', 'dark'] as const;
  * 대비 미달»). 대가(AC4): 같은 색쌍의 «다른 인스턴스»는 하나로 접혀 새로는 안 잡힌다 — 그러나
  * 그건 이미 baseline에 있는 «같은 토큰 채무»이고, 진짜 새로운 것(새 색쌍=새 대비버그)은 그대로
  * 잡힌다. 게이트의 결정성을 위해 granularity를 내준 의도된 trade. */
-function violationKeys(page: string, theme: string, violations: AxeViolation[]): string[] {
-  const keys = new Set<string>();
+function extractColorPairs(violations: AxeViolation[]): string[] {
+  const pairs = new Set<string>();
   for (const v of violations) {
     for (const node of v.nodes) {
-      const colorPair = (node.failureSummary ?? '').match(/#[0-9a-f]{3,8}/gi)?.slice(0, 2).join('/') ?? '';
-      keys.add(`${page}::${theme}::${colorPair}`);
+      pairs.add((node.failureSummary ?? '').match(/#[0-9a-f]{3,8}/gi)?.slice(0, 2).join('/') ?? '');
     }
   }
-  return [...keys];
+  return [...pairs];
+}
+
+function violationKeys(page: string, theme: string, violations: AxeViolation[]): string[] {
+  return extractColorPairs(violations).map((colorPair) => `${page}::${theme}::${colorPair}`);
+}
+
+// story #2607(v2) — hover 키는 rest 키와 절대 안 겹치게 `hover` 세그먼트를 끼운다(같은 색쌍이
+// rest에선 안전하고 hover에서만 위반일 수 있어, 상태를 접으면 그 구분 자체가 사라진다).
+function hoverViolationKeys(page: string, theme: string, violations: AxeViolation[]): string[] {
+  return extractColorPairs(violations).map((colorPair) => `${page}::${theme}::hover::${colorPair}`);
 }
 
 async function setTheme(page: Page, theme: string): Promise<void> {
@@ -92,6 +124,66 @@ for (const { path: pagePath, label } of PAGES) {
       const violations = await scanContrast(page);
       const fresh = violationKeys(pagePath, theme, violations).filter((k) => !BASELINE.has(k));
       expect(fresh, `새 대비 위반 ${pagePath}[${theme}] — tint 위 계열색 글자는 text-foreground(#2420). 오탐이면 (A)에 tint-guard-ok, 여기선 baseline 시드.`).toEqual([]);
+    });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// story #2607(v2) — hover 상태 축, 등록제 결정적 스캔.
+// ─────────────────────────────────────────────────────────────────────────
+
+interface HoverTarget {
+  page: string;
+  label: string;
+  /** role/aria-label 기반 — class 셀렉터는 v1이 겪은 클래스-순서 비결정성과 같은 취약점이라 피함. */
+  locate: (page: Page) => ReturnType<Page['getByRole']>;
+}
+
+// 앱 셸(사이드바) 요소 — 4페이지 전부에서 항상 렌더된다(seed org에 데이터가 없어도 뜨는 유일한
+// 축이라 최우선 등록). 페이지별 고유 표면(승인대기 카드·활성 에픽 링크 등)은 seed가 빈 org라
+// 이 CI 환경에서 렌더 안 됨 — 등록해도 스킵될 걸 알면서 넣는 대신, 데이터가 실제로 쌓이는 순간
+// 자연히 커버되도록 다음 사람이 채워 넣을 자리로 AC4에 남긴다(추측으로 채우지 않음).
+function sidebarHelpTarget(page: string): HoverTarget {
+  return {
+    page,
+    label: 'sidebar help link (앱 셸 · 항상 렌더)',
+    // app-sidebar.tsx: <Link aria-label={t('help')} ...> — <a>라 role은 button이 아니라 link.
+    locate: (p) => p.getByRole('link', { name: /도움말|help/i }),
+  };
+}
+
+const HOVER_TARGETS: HoverTarget[] = PAGES.map(({ path: pagePath }) => sidebarHelpTarget(pagePath));
+
+/** 트랜지션을 죽여 hover 최종 계산 스타일을 즉시 적용시킨다(story #2607 결정 — 헤더 docblock
+ * 참조). 실 hover(page.locator(...).hover())는 그대로 쓴다 — 강제 클래스로 흉내내지 않는 이유는
+ * 실제 :hover 규칙이 바뀌어도 흉내 클래스가 안 따라가면 가드가 거짓 안전을 낼 위험이 있어서다. */
+async function disableTransitions(page: Page): Promise<void> {
+  await page.addStyleTag({
+    content: '*, *::before, *::after { transition: none !important; animation: none !important; }',
+  });
+}
+
+for (const target of HOVER_TARGETS) {
+  for (const theme of THEMES) {
+    test(`대비(hover) ${target.label} [${target.page}::${theme}]`, async ({ page }) => {
+      await page.goto(target.page, { waitUntil: 'domcontentloaded' });
+      await setTheme(page, theme);
+
+      const locator = target.locate(page);
+      const count = await locator.count();
+      if (count === 0) {
+        // seed 데이터 부재 등으로 이 페이지에 없는 요소 — 실패 아님(위 docblock 참조).
+        test.info().annotations.push({ type: 'skip-reason', description: `${target.label} not found on ${target.page} — likely data-dependent or not rendered in this env` });
+        test.skip();
+        return;
+      }
+
+      await disableTransitions(page);
+      await locator.first().hover();
+
+      const violations = await scanContrast(page);
+      const fresh = hoverViolationKeys(target.page, theme, violations).filter((k) => !BASELINE.has(k));
+      expect(fresh, `새 hover 대비 위반 ${target.page}[${theme}] hover:${target.label} — tint 위 계열색 글자는 text-foreground(#2420). 오탐이면 (A)에 tint-guard-ok, 여기선 baseline 시드.`).toEqual([]);
     });
   }
 }

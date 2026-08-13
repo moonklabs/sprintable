@@ -4,10 +4,18 @@
     "키 = page::theme::색쌍(fg/bg). 셀렉터는 axe가 클래스 순서를 런마다 바꿔 비결정적이라 뺐다",
     "(spec의 violationKeys 주석 참조). 색쌍은 위반의 결정적 정체다.",
     "아래는 첫 CI 런(rest 스캔)이 드러낸 현 위반 — 전부 text-muted-foreground 알파 변형의 저대비.",
-    "grandfather로 얼려 신규 «색쌍»만 빨간불. 이 채무 자체 수리는 별건 DS 스토리(muted-fg 대비 개선)."
+    "grandfather로 얼려 신규 «색쌍»만 빨간불. 이 채무 자체 수리는 별건 DS 스토리(muted-fg 대비 개선).",
+    "story #2607 (v2) — hover 키는 같은 규약으로 page::theme::hover::색쌍 형태로 이 같은 배열에",
+    "얹는다(rest와 네임스페이스로 구분). 첫 hover CI 런(PR#3002)이 /settings::dark::hover에서",
+    "#74747c/#111114를 드러냈다 — 위 rest 키(/settings::dark::#74747c/#111114)와 «같은 색쌍».",
+    "새 hover-only 결함이 아니라, axe가 페이지 전체를 스캔하는 이상(rest 스캔도 동일 방식) 이미",
+    "grandfather된 rest 채무가 hover 스캔 시점에도 화면에 그대로 남아있어(sidebar help 링크 하나만",
+    "hover해도 나머지 페이지의 기존 위반은 안 사라짐) hover 네임스페이스 아래서도 다시 걸린 것 —",
+    "rest 쪽과 동일하게 grandfather한다(수리는 별건 DS 스토리)."
   ],
   "keys": [
     "/settings::light::#95959c/#ffffff",
-    "/settings::dark::#74747c/#111114"
+    "/settings::dark::#74747c/#111114",
+    "/settings::dark::hover::#74747c/#111114"
   ]
 }

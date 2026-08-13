@@ -188,7 +188,11 @@ export function ApprovalsQueue() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-7 gap-1 text-success hover:bg-success-tint hover:text-success"
+                    // story #2607 — workflow-line-editor-section.tsx의 동일 패턴(#2590 TIER3)과
+                    // 같은 결함: rest는 투명 배경이라 text-success 그대로 통과하지만, hover만
+                    // bg-success-tint(계열색 10~12% 알파)가 붙어 대비 미달. hover 글자만
+                    // text-foreground로(#2420 규칙) — 그 fix를 놓친 자리였다.
+                    className="h-7 gap-1 text-success hover:bg-success-tint hover:text-foreground"
                     disabled={resolvingIds.has(item.id)}
                     onClick={() => void resolveHitl(item.id, 'approved')}
                   >
