@@ -2330,29 +2330,26 @@ async def send_message(
                             conversation_id, exc_info=True,
                         )
 
-            # story #2617 AC4: human 참가자가 아예 없는 대화는 위 블록이 대상 human 0명이라
-            # 구조적으로 항상 no-op이었다(_dispatch_human_intervention_event의 human_targets
-            # 빈 리스트) — mentioned_ids 유무와 무관하게(#3008 이후 default가 mentions 없이도
-            # "all"이라 대부분의 human-less group 트래픽은 애초에 멘션이 없다) 대화 밖(org
-            # owner/admin)으로 승격해 "무감독 연쇄가 계속되는 중"을 관측 가능하게 만든다
-            # (조용한 단락 금지). 24h/대화 dedup은 chain_escalation.py 내부(fleet 자체가
-            # customer-zero라 팀 DM 전부가 상시 human-less 연쇄 — dedup 없이는 org owner
-            # 스팸).
-            from app.services.channel_router import _conversation_has_human
-            if not await _conversation_has_human(db, conversation_id):
-                try:
-                    async with db.begin_nested():
-                        from app.services.chain_escalation import escalate_unsupervised_chain
-                        await escalate_unsupervised_chain(
-                            db, org_id=org_id, conversation_id=conversation_id,
-                            project_id=conv.project_id, depth=chain_depth,
-                            cap=_AGENT_CHAIN_DEPTH_CAP,
-                        )
-                except Exception:
-                    logger.warning(
-                        "unsupervised chain escalation dispatch failed conversation_id=%s",
-                        conversation_id, exc_info=True,
+        # story #2626(재설계, 2026-08-13 PO 승인): 무감독 연쇄 «알림»은 depth-cap(#2608,
+        # 위 블록·상시 상태)과 완전히 분리된 별도 트리거 — 속도 기반 이상 에피소드 감지로
+        # 교체했다(원 게이트 조건 depth > cap이 human-less 대화에서 영구 참이라 dedup만으론
+        # 소음을 못 없앴다, #3016 진단). 그래서 이 블록은 depth-cap 조건 밖으로 뺐다 — human-
+        # less 대화의 매 agent 메시지마다 속도를 평가한다(chain_escalation.py 내부에서 org
+        # 설정·임계·에피소드 마커·플래핑 쿨다운까지 전부 판단, 여기는 호출만).
+        from app.services.channel_router import _conversation_has_human
+        if not await _conversation_has_human(db, conversation_id):
+            try:
+                async with db.begin_nested():
+                    from app.services.chain_escalation import evaluate_unsupervised_chain_episode
+                    await evaluate_unsupervised_chain_episode(
+                        db, org_id=org_id, conversation_id=conversation_id,
+                        project_id=conv.project_id,
                     )
+            except Exception:
+                logger.warning(
+                    "unsupervised chain escalation dispatch failed conversation_id=%s",
+                    conversation_id, exc_info=True,
+                )
 
     # AC1: 멘션 대상에게 conversation:mention SSE 발송 (participant 여부 무관)
     #
