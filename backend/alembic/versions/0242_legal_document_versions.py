@@ -18,8 +18,13 @@ violation으로 즉시 실패, 침묵 데이터 오염 없음).
 이 마이그는 core 체인(main에도 존재) — pricing_versions와 달리 EE 전용이 아니다(약관은 모든
 배포에 필요, dev OSS 모드 포함).
 
-Revision ID: 0241
-Revises: 0240
+⚠️PO 지시(2026-08-13): #2603(PR #3000)이 동일 develop에서 분기해 먼저 revision="0241"을
+선점(delivery-contract-blueprint-v0-1 P0, 카디르 QA 진행 중 — 순서 선행 확定). 두 PR이 같은
+"0241"로 동시에 열려 있었던 충돌을 여기서 0242로 재번호해 해소한다 — #3000이 develop에
+머지된 후 이 마이그가 그 뒤를 잇는다.
+
+Revision ID: 0242
+Revises: 0241
 Create Date: 2026-08-13
 """
 from __future__ import annotations
@@ -28,8 +33,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "0241"
-down_revision = "0240"
+revision = "0242"
+down_revision = "0241"
 branch_labels = None
 depends_on = None
 
