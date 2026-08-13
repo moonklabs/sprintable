@@ -86,6 +86,10 @@ for (const { path: pagePath, label } of PAGES) {
 
   // hover 상태 — hover에서만 pale bg가 붙는 자리(doc-gate approve/reject·삭제 버튼 등)를 잡는다.
   test(`대비(hover) ${label} [light]`, async ({ page }) => {
+    // 최대 40개 인터랙티브 × (hover + 전체 axe 스캔) ≈ 50s+ 라 기본 30s 테스트 타임아웃을
+    // 넘긴다(첫 CI 런서 일부 T·열거 불완전 실측). 이 테스트는 원래 느린 게 정상이므로
+    // 명시적으로 넉넉히 준다(런타임 상한은 위 n 캡으로 이미 관리).
+    test.setTimeout(120_000);
     await page.goto(pagePath, { waitUntil: 'domcontentloaded' });
     await setTheme(page, 'light');
     const fresh: string[] = [];
