@@ -232,32 +232,37 @@ async def evaluate_unsupervised_chain_episode(
         if not approver_ids:
             return
 
+        # ⚠️deeplink_manifest_contract 스캐너(tests/deeplink_contract_lib.py)가 event_type=을
+        # 정적 분석으로 역추적한다 — 조건부로 만든 지역변수를 kwarg로 넘기면 못 잡는다(리터럴
+        # 아니면 "감싸는 함수의 파라미터"만 해석). 그래서 분기별로 event_type이 리터럴로 보이는
+        # 별도 호출 2개를 둔다(공유 로직 추출 대신 — 스캐너가 요구하는 형태, PR #3022 CI 적발).
         if breaker_id is not None:
-            event_type = "conversation.circuit_breaker_opened"
-            title = "무인간 대화 자동 차단(서킷브레이커)"
-            body = (
-                f"human 참가자가 없는 대화에서 최근 {window_seconds}초간 메시지 {velocity}건"
-                f"(임계 {threshold})이 발생해 agent 발신이 일시 차단되었습니다. "
-                "이 알림의 «차단 해제»로 즉시 풀 수 있습니다."
+            await dispatch_notification(
+                db, org_id=org_id, event_type="conversation.circuit_breaker_opened",
+                target_member_ids=list(approver_ids),
+                title="무인간 대화 자동 차단(서킷브레이커)",
+                body=(
+                    f"human 참가자가 없는 대화에서 최근 {window_seconds}초간 메시지 {velocity}건"
+                    f"(임계 {threshold})이 발생해 agent 발신이 일시 차단되었습니다. "
+                    "이 알림의 «차단 해제»로 즉시 풀 수 있습니다."
+                ),
+                reference_type="conversation", reference_id=breaker_id,
+                source_project_id=project_id,
+                via_outbox=True,
             )
-            reference_id = breaker_id
         else:
-            event_type = "conversation.unsupervised_chain_expired"
-            title = "무인간 대화 무감독 연쇄 감지"
-            body = (
-                f"human 참가자가 없는 대화에서 최근 {window_seconds}초간 메시지 {velocity}건"
-                f"(임계 {threshold})이 발생했습니다."
+            await dispatch_notification(
+                db, org_id=org_id, event_type="conversation.unsupervised_chain_expired",
+                target_member_ids=list(approver_ids),
+                title="무인간 대화 무감독 연쇄 감지",
+                body=(
+                    f"human 참가자가 없는 대화에서 최근 {window_seconds}초간 메시지 {velocity}건"
+                    f"(임계 {threshold})이 발생했습니다."
+                ),
+                reference_type="conversation", reference_id=conversation_id,
+                source_project_id=project_id,
+                via_outbox=True,
             )
-            reference_id = conversation_id
-
-        await dispatch_notification(
-            db, org_id=org_id, event_type=event_type,
-            target_member_ids=list(approver_ids),
-            title=title, body=body,
-            reference_type="conversation", reference_id=reference_id,
-            source_project_id=project_id,
-            via_outbox=True,
-        )
     except Exception:  # noqa: BLE001 — best-effort, 메시지 발신을 막지 않는다.
         logger.warning(
             "unsupervised chain escalation failed conversation_id=%s", conversation_id, exc_info=True,
