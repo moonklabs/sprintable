@@ -385,7 +385,7 @@ export function DocEditor({
             placeholder={titlePlaceholder ?? 'Untitled'}
             autoFocus={titleAutoFocus}
             rows={1}
-            className="min-w-[7rem] flex-1 resize-none overflow-hidden whitespace-nowrap bg-transparent text-lg font-bold leading-snug outline-none placeholder:text-muted-foreground/40"
+            className="min-w-[7rem] flex-1 resize-none overflow-hidden whitespace-nowrap bg-transparent text-lg font-bold leading-snug outline-none placeholder:text-muted-foreground"
           />
         ) : null}
         {metaSlot ? <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline-flex">{metaSlot}</span> : null}
@@ -566,7 +566,7 @@ export function DocEditor({
             {/* 빈 문서 힌트 — 첨부 진입 discoverability(+ · / · DnD). 콘텐츠를 따라가는 것이
                 맞다 — 안쪽 relative(스크롤 컨테이너) 기준 그대로 둔다. */}
             {editable && isEmpty ? (
-              <p className="pointer-events-none absolute left-9 top-3 select-none text-sm text-muted-foreground/50">
+              <p className="pointer-events-none absolute left-9 top-3 select-none text-sm text-muted-foreground">
                 {tEditor('attachEmptyHint')}
               </p>
             ) : null}

@@ -96,11 +96,11 @@ export function CommandCenter({ projectName }: { projectName?: string | null }) 
                   PendingData가 아니다). isPending에 걸면 이 실 객체와 영원히 안 맞아
                   아래 실측값이 렌더 코드에 도달하지 못했다(#2338이 잡은 사고). */}
               {!isPending(fleet.status_breakdown) ? (
-                <span className="text-muted-foreground/70">
+                <span className="text-muted-foreground">
                   · {t('ccFleetOnlineWorking', { online: fleet.status_breakdown.online, working: fleet.status_breakdown.working })}
                 </span>
               ) : (
-                <span className="text-muted-foreground/70">· {t('ccFleetBreakdownPending')}</span>
+                <span className="text-muted-foreground">· {t('ccFleetBreakdownPending')}</span>
               )}
             </div>
           ) : null}

@@ -203,7 +203,7 @@ export function ActionZone({ data, resolveName, epicTitles }: {
                 <AttentionRow key={`${a.entity_id}-${i}`} item={a} resolveName={resolveName} epicTitles={epicTitles} />
               ))}
               {/* pending 감지(CC-BE.2) — mock 0·미세 "준비중"만 */}
-              {hasPending ? <p className="text-[10px] text-muted-foreground/60">{t('ccAttentionMorePending')}</p> : null}
+              {hasPending ? <p className="text-[10px] text-muted-foreground">{t('ccAttentionMorePending')}</p> : null}
             </div>
           ) : null}
 

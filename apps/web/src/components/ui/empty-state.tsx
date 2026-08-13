@@ -16,7 +16,7 @@ export function EmptyState({
   return (
     <div className={cn('rounded-2xl bg-muted/50 px-6 py-10 text-center', className)}>
       <div className="mx-auto max-w-md space-y-3">
-        {icon ? <div className="mb-3 flex justify-center text-muted-foreground/60">{icon}</div> : null}
+        {icon ? <div className="mb-3 flex justify-center text-muted-foreground">{icon}</div> : null}
         <h3 className="text-base font-semibold tracking-tight text-foreground">{title}</h3>
         {description ? <p className="text-sm leading-6 text-muted-foreground">{description}</p> : null}
         {action ? <div className="pt-2.5">{action}</div> : null}

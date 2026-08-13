@@ -204,7 +204,7 @@ export function WorkflowTemplateGallerySection({
                   )}
                 </div>
               </div>
-              <p className="mt-2 text-[10px] text-muted-foreground/70">
+              <p className="mt-2 text-[10px] text-muted-foreground">
                 프리셋 {Object.keys(tmpl.presets ?? {}).length}종
               </p>
             </button>

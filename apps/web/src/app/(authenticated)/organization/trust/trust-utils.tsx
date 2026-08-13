@@ -129,7 +129,7 @@ export function sparklinePoints(values: number[], width = 120, height = 24, pad 
 export function Sparkline({ values }: { values: number[] }) {
   if (values.length < 2) return null;
   return (
-    <svg width={120} height={24} viewBox="0 0 120 24" className="text-muted-foreground/60" aria-hidden="true">
+    <svg width={120} height={24} viewBox="0 0 120 24" className="text-muted-foreground" aria-hidden="true">
       <polyline points={sparklinePoints(values)} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );

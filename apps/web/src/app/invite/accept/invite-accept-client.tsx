@@ -54,7 +54,7 @@ export function InviteAcceptClient({ token, orgName, role, email, projects }: In
           <p className="text-sm text-muted-foreground">
             {tInvite('invitedByOrg', { org: orgName })}
           </p>
-          {email && <p className="text-xs text-muted-foreground/60">{tInvite('signupEmail', { email })}</p>}
+          {email && <p className="text-xs text-muted-foreground">{tInvite('signupEmail', { email })}</p>}
         </div>
 
         <div className="rounded-lg border border-border bg-muted px-4 py-3">

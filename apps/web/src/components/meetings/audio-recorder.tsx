@@ -106,7 +106,7 @@ function DropZone({ onFile, t }: { onFile: (file: File) => void; t: (key: string
     >
       <span className="text-2xl">📁</span>
       <span className="mt-1 text-xs text-muted-foreground">{t('dropAudioFile')}</span>
-      <span className="text-[10px] text-muted-foreground/60">{t('supportedFormats')}</span>
+      <span className="text-[10px] text-muted-foreground">{t('supportedFormats')}</span>
       <input
         ref={inputRef}
         type="file"

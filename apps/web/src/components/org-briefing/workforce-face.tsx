@@ -66,7 +66,7 @@ function WorkforceRow({ item, memberNames, t }: { item: WorkforceFaceItem; membe
           <span className="text-[11px] text-muted-foreground">{t('workforceTogether')}</span>
         </div>
       ) : (
-        <span className="text-[11px] italic text-muted-foreground/70">{t('workforceUnassigned')}</span>
+        <span className="text-[11px] italic text-muted-foreground">{t('workforceUnassigned')}</span>
       )}
     </div>
   );
@@ -109,7 +109,7 @@ export function WorkforceFace({ projectId }: { projectId: string }) {
         </>
       ) : data.items.length === 0 ? (
         <div className="space-y-2 py-6 text-center">
-          <div className="flex items-center justify-center gap-1.5 text-muted-foreground/50" aria-hidden="true">
+          <div className="flex items-center justify-center gap-1.5 text-muted-foreground" aria-hidden="true">
             <Users className="size-4" />
             <Bot className="size-4" />
           </div>

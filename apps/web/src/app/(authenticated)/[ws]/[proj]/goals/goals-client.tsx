@@ -21,7 +21,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 // 금지 — 점+원뿐, 라벨 없음(그룹핑 자체가 메시지).
 function GoalGroupHint() {
   return (
-    <svg viewBox="0 0 48 24" className="size-6 w-12 text-muted-foreground/50" aria-hidden="true">
+    <svg viewBox="0 0 48 24" className="size-6 w-12 text-muted-foreground" aria-hidden="true">
       <circle cx="10" cy="8" r="2" fill="currentColor" opacity="0.5" />
       <circle cx="10" cy="16" r="2" fill="currentColor" opacity="0.5" />
       <circle cx="4" cy="12" r="2" fill="currentColor" opacity="0.5" />
@@ -549,7 +549,7 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
           type="button"
           aria-label={t('steerReorderAria', { title: epic.title })}
           onClick={(e) => e.stopPropagation()}
-          className="mt-0.5 flex shrink-0 cursor-grab items-center text-muted-foreground/50 transition-colors hover:text-muted-foreground active:cursor-grabbing"
+          className="mt-0.5 flex shrink-0 cursor-grab items-center text-muted-foreground transition-colors hover:text-muted-foreground active:cursor-grabbing"
           {...attributes}
           {...listeners}
         >
@@ -572,7 +572,7 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
                   {t('steerCurated')} {epic.position}
                 </span>
               ) : (
-                <span className="text-[10px] font-medium text-muted-foreground/70">{t('steerAuto')}</span>
+                <span className="text-[10px] font-medium text-muted-foreground">{t('steerAuto')}</span>
               )
             ) : null}
             {/* Loop 제안 hook — source_loop_id 배선(P3/v2) 전엔 미표시(no-fiction·sparkle 0·claimed amber 언어). */}
@@ -1095,7 +1095,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
                   />
                 ))}
                 {capped ? (
-                  <p className="pt-1 text-center text-[11px] text-muted-foreground/70">{t('steerCappedNote', { count: STEER_LIMIT })}</p>
+                  <p className="pt-1 text-center text-[11px] text-muted-foreground">{t('steerCappedNote', { count: STEER_LIMIT })}</p>
                 ) : null}
               </div>
             </SortableContext>

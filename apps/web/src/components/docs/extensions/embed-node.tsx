@@ -82,7 +82,7 @@ function EmbedView({ node, updateAttributes, selected }: ReactNodeViewProps) {
             onKeyDown={handleKeyDown}
             onBlur={applyUrl}
             placeholder="URL 입력 후 Enter"
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60"
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
         </div>
       )}

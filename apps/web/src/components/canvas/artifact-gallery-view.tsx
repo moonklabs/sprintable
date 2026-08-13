@@ -267,7 +267,7 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
           type="button"
           disabled
           title={t('galleryFeatureAxisUnsupported')}
-          className="cursor-not-allowed rounded-md px-2.5 py-1.5 text-xs font-semibold text-muted-foreground/40"
+          className="cursor-not-allowed rounded-md px-2.5 py-1.5 text-xs font-semibold text-muted-foreground"
         >
           {t('galleryAxisFeature')}
         </button>
@@ -321,7 +321,7 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
         </div>
       ) : artifacts.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-border bg-card px-6 py-12 text-center">
-          <Frame className="size-6 text-muted-foreground/60" aria-hidden="true" />
+          <Frame className="size-6 text-muted-foreground" aria-hidden="true" />
           <p className="text-sm font-medium text-foreground">{t('galleryEmptyTitle')}</p>
           <p className="max-w-sm text-xs text-muted-foreground">{t('emptyHint')}</p>
           {/* story 64010b05 §2 — 임포트=그리기와 co-located 2번째 입구. 갤러리는 스토리 귀속이

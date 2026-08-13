@@ -197,7 +197,7 @@ export default function LoginPage() {
           <div className="space-y-3">
             <div className="relative flex items-center">
               <div className="flex-grow border-t border-border/50" />
-              <span className="mx-3 flex-shrink text-xs text-muted-foreground/60">{t('orContinueWith')}</span>
+              <span className="mx-3 flex-shrink text-xs text-muted-foreground">{t('orContinueWith')}</span>
               <div className="flex-grow border-t border-border/50" />
             </div>
 
@@ -211,7 +211,7 @@ export default function LoginPage() {
               {t('google')}
             </a>
 
-            <p className="text-center text-xs text-muted-foreground/60">
+            <p className="text-center text-xs text-muted-foreground">
               {t('termsPrefix')}{' '}
               <a href="/terms" target="_blank" className="underline hover:text-foreground/60">{t('termsOfService')}</a>
               {' '}{t('and')}{' '}

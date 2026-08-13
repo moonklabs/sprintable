@@ -283,7 +283,7 @@ export function DocGateSection({
           >
             <History className="size-3 shrink-0" />
             {t('docGateAuditTitle')}
-            <span className="text-muted-foreground/70">({auditEvents.length})</span>
+            <span className="text-muted-foreground">({auditEvents.length})</span>
             <ChevronDown className={`size-3 shrink-0 transition-transform ${auditOpen ? 'rotate-180' : ''}`} />
           </button>
           {auditOpen ? (

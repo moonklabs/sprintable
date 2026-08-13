@@ -19,7 +19,7 @@ export function PropertyPanel({ node, onChangeText, onDelete, className }: Prope
   if (!node) {
     return (
       <div className={className}>
-        <p className="text-[11px] text-muted-foreground/70">{t('propertyPanelEmpty')}</p>
+        <p className="text-[11px] text-muted-foreground">{t('propertyPanelEmpty')}</p>
       </div>
     );
   }

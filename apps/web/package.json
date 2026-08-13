@@ -23,6 +23,7 @@
     "verify:no-new-tint-color-text": "tsx scripts/verify-no-new-tint-color-text.ts",
     "verify:cross-element-tint-text": "tsx scripts/verify-cross-element-tint-text.ts",
     "verify:muted-foreground-contrast": "tsx scripts/verify-muted-foreground-contrast.ts",
+    "verify:no-muted-foreground-alpha": "tsx scripts/verify-no-muted-foreground-alpha.ts",
     "verify:no-raw-error-message": "tsx scripts/verify-no-raw-error-message.ts",
     "e2e": "playwright test",
     "e2e:contrast": "playwright test contrast-guard.spec.ts",
