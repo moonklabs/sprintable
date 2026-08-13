@@ -443,6 +443,8 @@ def _msg_payload(
         payload["is_blocked_sender"] = bool(sender and sender.id in blocked_sender_ids)
     # E-ACTIVATION S1: typed activation 필드 top-level 노출(없으면 None). connector 헤더 주입용.
     payload.update(_activation_payload(msg))
+    # story #2604 P2: approval-request 카드 스키마 top-level 노출(없으면 None·additive).
+    payload.update(_approval_payload(msg))
     return payload
 
 
@@ -476,6 +478,15 @@ def _activation_payload(msg: "ConversationMessage") -> dict:
         "message_kind": act.get("kind"),
         "expects_response": act.get("expects_response"),
     }
+
+
+def _approval_payload(msg: "ConversationMessage") -> dict:
+    """story #2604 P2(delivery-contract-blueprint-v0-1): msg_metadata['approval_target'] →
+    payload top-level(없으면 None). _activation_payload와 동형(additive·__dict__ 전용 read —
+    동일 greenlet_spawn 회피 이유). 카드 *렌더*는 FE 몫 — 여기는 스키마만 실어 나른다."""
+    meta = (getattr(msg, "__dict__", None) or {}).get("msg_metadata")
+    target = meta.get("approval_target") if isinstance(meta, dict) else None
+    return {"approval_target": target if isinstance(target, dict) else None}
 
 
 async def _viewer_blocked_sender_ids(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession) -> set[uuid.UUID]:
@@ -848,6 +859,37 @@ async def _dispatch_discord_outbound(
                 )
 
 
+async def _create_conversation_record(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    member_ids: set[uuid.UUID],
+    conv_type: str,
+    title: str | None,
+    created_by: uuid.UUID,
+) -> Conversation:
+    """story #2604 P2(delivery-contract-blueprint-v0-1) 추출: create_conversation 엔드포인트의
+    INSERT 로직(원본 그대로, 추출만 — 동작 불변) — 인가(_enforce_agent_creator_policy)·dedup
+    정책(EF-S2 항상-신규)은 호출부 책임. approval-request DM(get-or-create 배달 경로,
+    app/services/approval_delivery.py)이 이 프리미티브를 재사용한다."""
+    all_members = sorted(member_ids)
+    dm_pair_key = "|".join(str(m) for m in all_members) if conv_type == "dm" else None
+    conv = Conversation(
+        project_id=project_id,
+        org_id=org_id,
+        type=conv_type,
+        title=title,
+        created_by=created_by,
+        dm_pair_key=dm_pair_key,
+    )
+    db.add(conv)
+    await db.flush()
+    for mid in all_members:
+        db.add(ConversationParticipant(conversation_id=conv.id, member_id=mid))
+    return conv
+
+
 # ─── Schemas ──────────────────────────────────────────────────────────────────
 
 class CreateConversationRequest(BaseModel):
@@ -1035,21 +1077,17 @@ async def create_conversation(
     # thread=스토리. dm_pair_key 컬럼은 2인 룸 태깅용으로 유지(non-unique·dedup 아님).
     all_members = sorted({sender.id, *valid_participant_ids})
     is_dm = len(all_members) == 2
-    dm_pair_key = "|".join(str(m) for m in all_members) if is_dm else None
 
-    conv = Conversation(
-        project_id=body.project_id,
-        org_id=org_id,
-        type=("dm" if is_dm else body.type),
-        title=body.title,
-        created_by=sender.id,
-        dm_pair_key=dm_pair_key,
-    )
-    db.add(conv)
     try:
-        await db.flush()
-        for mid in all_members:
-            db.add(ConversationParticipant(conversation_id=conv.id, member_id=mid))
+        conv = await _create_conversation_record(
+            db,
+            org_id=org_id,
+            project_id=body.project_id,
+            member_ids=set(all_members),
+            conv_type=("dm" if is_dm else body.type),
+            title=body.title,
+            created_by=sender.id,
+        )
         await db.commit()
     except IntegrityError:
         # dedup unique 제거 후엔 DM pair 레이스 충돌 없음 — 잔여 무결성 오류는 reuse 없이 전파.
