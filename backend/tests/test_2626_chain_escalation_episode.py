@@ -178,7 +178,11 @@ async def test_ac2_burst_fires_once_no_refire_while_continuing():
                 dn.assert_awaited_once()
                 kw = dn.await_args.kwargs
                 assert kw["target_member_ids"] == [owner_id]
-                assert kw["event_type"] == "conversation.unsupervised_chain_expired"
+                # story #2630: org config 미시딩 시 circuit_breaker_mode 기본값이 'block'이라
+                # (AC3 "기본 on이 원 목표") 이젠 서킷도 같이 열리고 이벤트 타입도 그걸 반영한다
+                # — 순수 관측-only 이벤트는 org가 'notify_only'로 명시 오버라이드한 경우만
+                # (test_2630_circuit_breaker.py의 notify_only 케이스가 그 옛 계약을 검증).
+                assert kw["event_type"] == "conversation.circuit_breaker_opened"
 
                 # 같은 에피소드 진행 중(여전히 폭주 상태) — 재평가해도 재발화 없음.
                 await evaluate_unsupervised_chain_episode(
@@ -375,7 +379,7 @@ async def test_redis_down_fails_closed_no_notification():
     dn = AsyncMock()
 
     async def _fake_get_org_config(db, org_id):  # noqa: ARG001
-        return True, 300, 15
+        return True, 300, 15, "block", "manual"  # story #2630: 5-tuple(+circuit breaker 축)
 
     async def _fake_velocity(db, conversation_id, window_seconds):  # noqa: ARG001
         return 999  # 명백한 폭주

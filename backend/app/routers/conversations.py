@@ -40,7 +40,7 @@ from app.services.member_resolver import (
     resolve_member,
     resolve_member_identity,
 )
-from app.services.project_auth import project_access_valid_correlated
+from app.services.project_auth import is_org_owner_or_admin, project_access_valid_correlated
 from app.services.storage import get_storage_provider
 
 logger = logging.getLogger(__name__)
@@ -1050,6 +1050,12 @@ class MarkReadRequest(BaseModel):
     up_to: datetime | None = None
 
 
+class CircuitBreakerReleaseRequest(BaseModel):
+    """story #2630: 서킷브레이커 수동 해제 — reason은 감사 표시용(선택)."""
+
+    reason: str | None = None
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("", status_code=201)
@@ -1893,6 +1899,47 @@ async def mark_conversation_read(
     }
 
 
+@router.post("/{conversation_id}/circuit-breaker/release")
+async def release_circuit_breaker_endpoint(
+    conversation_id: uuid.UUID,
+    body: CircuitBreakerReleaseRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """POST /api/v2/conversations/{id}/circuit-breaker/release — story #2630 수동 해제.
+
+    무감독 연쇄 알림(conversation.circuit_breaker_opened)의 «차단 해제» 액션이 이 엔드포인트를
+    친다. **human org owner/admin 전용**(gates.py transition_gate_endpoint의 93fc7aeb 선례와
+    동형 이유 — 서킷 open 대화는 정의상 human-less라 참가자 기반 authz가 성립 안 하고, 무엇보다
+    "agent가 자기 서킷을 스스로 풀 수 있으면 안전망 자체가 무의미"하다). `is_org_owner_or_admin`
+    은 human 전용을 명시 강제(agent auth는 애초에 매치 불가 — 함수 자체 불변식).
+
+    멱등: 이미 닫혀 있으면(중복 클릭·레이스) 200 + released=false로 응답, 에러 아님.
+    """
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    if not await is_org_owner_or_admin(db, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(
+            status_code=403,
+            detail="서킷브레이커 해제는 org owner/admin만 가능합니다.",
+        )
+
+    sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+
+    from app.services.chain_escalation import release_circuit_breaker
+
+    released = await release_circuit_breaker(
+        db, conversation_id=conversation_id, released_by=sender.id, reason=body.reason,
+    )
+    await db.commit()
+    return {"conversation_id": str(conversation_id), "released": released}
+
+
 @router.post("/{conversation_id}/participants", status_code=201)
 async def add_participant(
     conversation_id: uuid.UUID,
@@ -1998,6 +2045,30 @@ async def send_message(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+
+    # story #2630: 서킷브레이커 발신 차단 — human-less 대화에서 폭주 에피소드가 열려 있으면
+    # agent 발신을 여기서 막는다(참가자 auto-join 등 어떤 write도 하기 전, 최대한 이르게 —
+    # 막힌 시도가 부수 상태를 안 남기게). human 발신은 이 체크 대상이 아니다(페드루 필수수정
+    # 2026-08-13): 서킷이 연 방에 사람이 들어와 개입하려는 발화까지 막으면 안 된다 — 사람의
+    # 개입이 사태 수습의 정공 경로고, human 늦참여 자동해제를 v1 밖으로 미룬 것과도 정합
+    # (사람이 말은 할 수 있으니 해제 버튼 누를 판단도 대화 안에서 가능). breaker 행은
+    # human-less 대화에서만 열리므로(open 호출부 조건) 이 조회 결과가 있다는 것 자체가
+    # "이 대화는 human-less"를 함의 — 별도 human 유무 쿼리 불요.
+    if sender.type == "agent":
+        from app.services.chain_escalation import get_open_circuit_breaker_id
+
+        open_breaker_id = await get_open_circuit_breaker_id(db, conversation_id)
+        if open_breaker_id is not None:
+            raise HTTPException(
+                status_code=423,
+                detail={
+                    "error": "circuit_breaker_open",
+                    "message": "폭주 감지로 이 대화의 agent 발신이 일시 차단되었습니다 — "
+                                "org owner/admin의 해제 또는 자동 해소를 기다려주세요.",
+                    "conversation_id": str(conversation_id),
+                    "circuit_breaker_id": str(open_breaker_id),
+                },
+            )
 
     # 참여자 검증
     participant = (await db.execute(
