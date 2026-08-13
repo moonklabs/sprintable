@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -17,6 +17,14 @@ from fastapi import HTTPException
 _REAL_DB_URL = __import__("os").getenv("PARITY_TEST_DATABASE_URL") or __import__("os").getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = pytest.mark.destructive_schema
+
+
+def _fake_request() -> MagicMock:
+    """카디르 QA 블로커① 수정(@limiter.limit 추가)의 부작용 — 엔드포인트를 직접 함수 호출
+    하는 테스트(FastAPI DI를 안 타는 기존 관례)는 이제 slowapi 래퍼가 요구하는 `request`
+    포지셔널 인자도 같이 넘겨야 한다. `Limiter(enabled=not _TESTING)`이 pytest 하에서
+    False라 실제 rate-limit 판정 로직은 이 값을 안 건드린다(MagicMock로 충분)."""
+    return MagicMock()
 
 
 @pytest.fixture
@@ -51,7 +59,7 @@ async def test_unpublished_doc_type_returns_404_not_placeholder():
     try:
         async with Session() as db:
             with pytest.raises(HTTPException) as exc:
-                await get_current_legal_document(doc_type="terms", locale="ko", db=db)
+                await get_current_legal_document(request=_fake_request(), doc_type="terms", locale="ko", db=db)
             assert exc.value.status_code == 404
     finally:
         from app.core.database import Base
@@ -81,7 +89,7 @@ async def test_published_doc_returns_content_and_new_version_closes_old():
             await db.commit()
 
         async with Session() as db:
-            resp = await get_current_legal_document(doc_type="terms", locale="ko", db=db)
+            resp = await get_current_legal_document(request=_fake_request(), doc_type="terms", locale="ko", db=db)
             assert resp.content == "v1 content"
 
         # append-only: 새 버전 insert 시 직전 열린 행을 닫는다(admin 서비스 로직 미러 —
@@ -110,13 +118,13 @@ async def test_published_doc_returns_content_and_new_version_closes_old():
             await db.commit()
 
         async with Session() as db:
-            resp = await get_current_legal_document(doc_type="terms", locale="ko", db=db)
+            resp = await get_current_legal_document(request=_fake_request(), doc_type="terms", locale="ko", db=db)
             assert resp.content == "v2 content", "새 버전 발행 후에도 옛 값이 보이면 append-only 계약 위반"
 
         # locale 격리 — en에는 아무것도 없으므로 여전히 404(ko 버전이 새는 것 아님).
         async with Session() as db:
             with pytest.raises(HTTPException) as exc:
-                await get_current_legal_document(doc_type="terms", locale="en", db=db)
+                await get_current_legal_document(request=_fake_request(), doc_type="terms", locale="en", db=db)
             assert exc.value.status_code == 404
     finally:
         from app.core.database import Base
