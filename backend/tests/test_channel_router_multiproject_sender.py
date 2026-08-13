@@ -327,7 +327,8 @@ async def test_explicit_all_preference_overrides_agent_group_default():
 @pytest.mark.anyio
 async def test_chain_expired_blocks_agent_recipient_even_when_mentioned():
     """story #2608 P1 AC1 — A↔B 상호멘션(멘션은 항상 유효)류의 유일한 탈출구. mentions
-    체크는 통과해도(recipient가 명시 멘션됨) chain_expired=True면 최종 게이트에서 막힌다."""
+    체크는 통과해도(recipient가 명시 멘션됨) chain_expired=True + human 참가자 존재면
+    최종 게이트에서 막힌다(story #2617 — human 있는 대화는 원 #2608 AC 비회귀)."""
     from app.services.channel_router import route_message
 
     sender = uuid.uuid4()
@@ -348,6 +349,7 @@ async def test_chain_expired_blocks_agent_recipient_even_when_mentioned():
         _scalar("agent"),
         _scalars([sender, recipient]),
         _scalars([]),
+        _scalar(uuid.uuid4()),  # story #2617: _conversation_has_human → True(human 존재)
         _all([(recipient, "agent")]),
         _row(project_id=proj, type="group", free_response=False),
         _scalars([]),
@@ -355,17 +357,18 @@ async def test_chain_expired_blocks_agent_recipient_even_when_mentioned():
 
     with patch("app.services.channel_router.compute_agent_chain_depth", AsyncMock(return_value=5)):
         decisions = await route_message(msg.id, db)
-    assert decisions == [], "연쇄 cap 초과인데 멘션 성립만으로 decision이 생기면 P1이 안 먹는다"
+    assert decisions == [], "human 있는 대화에서 연쇄 cap 초과인데 멘션 성립만으로 decision이 생기면 P1이 안 먹는다"
 
 
 @pytest.mark.anyio
-async def test_chain_expired_does_not_block_dm_agent_recipient():
-    """핫픽스(2026-08-13, 라이브 실측·Cloud Logging 대조 확定) — DM은 chain-expired 최종
-    게이트 밖이다. human 메시지가 없는 순수 1:1 agent DM은 연쇄 깊이가 구조적으로 늘 cap을
-    넘는데(장기 협업방 자체가 그런 모양), 이 게이트가 group과 동일하게 적용되면 정상 1:1
-    대화가 통째로 침묵당한다(실제로 페드루↔디디 DM에서 무멘션 메시지가 전부 막힌 채로 재현
-    됐다 — reason=chain-expired). group은 이 테스트 파일의 다른 케이스(위)처럼 그대로 막혀야
-    한다 — 이 테스트는 DM만 예외임을 고정."""
+async def test_chain_expired_does_not_block_human_less_agent_recipient():
+    """story #2617(DM 전용 핫픽스 #3009를 human-presence로 일반화) — human 참가자가 전혀
+    없는 대화(DM이든 group이든)는 chain-expired 최종 게이트 밖이다. human 메시지가 없는
+    순수 agent 대화는 연쇄 깊이가 구조적으로 늘 cap을 넘는데(장기 협업방 자체가 그런 모양),
+    이 게이트가 그대로 적용되면 정상 협업이 통째로 침묵당한다(실제로 페드루↔디디 DM에서
+    무멘션 메시지가 전부 막힌 채로 재현됐고, 카디르 QA가 3-agent human-less group에서도
+    5번째 메시지부터 동형 재현). human 있는 대화는 위 케이스처럼 그대로 막혀야 한다 — 이
+    테스트는 human-less만 예외임을 고정(conv_type=group으로 DM 특칭이 아님을 명시)."""
     from app.services.channel_router import route_message
 
     sender = uuid.uuid4()
@@ -378,7 +381,7 @@ async def test_chain_expired_does_not_block_dm_agent_recipient():
     msg.sender_id = sender
     msg.conversation_id = conv
     msg.thread_id = None
-    msg.mentioned_ids = []  # 무멘션 — DM 기본계약(all)만으로 통과해야 한다.
+    msg.mentioned_ids = []  # 무멘션 — human-less 예외(all)만으로 통과해야 한다.
 
     db = MagicMock()
     db.execute = AsyncMock(side_effect=[
@@ -386,14 +389,15 @@ async def test_chain_expired_does_not_block_dm_agent_recipient():
         _scalar("agent"),
         _scalars([sender, recipient]),
         _scalars([]),
+        _scalar(None),  # story #2617: _conversation_has_human → False(human 없음)
         _all([(recipient, "agent")]),
-        _row(project_id=proj, type="dm", free_response=False),
+        _row(project_id=proj, type="group", free_response=False),  # DM 아닌 group도 예외 대상
         _scalars([]),
     ])
 
     with patch("app.services.channel_router.compute_agent_chain_depth", AsyncMock(return_value=999)):
         decisions = await route_message(msg.id, db)
-    assert len(decisions) == 1, "DM에서 연쇄 cap 초과가 무멘션 agent recipient를 막으면 안 된다"
+    assert len(decisions) == 1, "human-less 대화에서 연쇄 cap 초과가 무멘션 agent recipient를 막으면 안 된다"
     assert decisions[0].member_id == recipient
     assert decisions[0].level == "all"
 
@@ -421,6 +425,7 @@ async def test_chain_expired_does_not_block_human_recipient():
         _scalar("agent"),
         _scalars([sender, human_recipient]),
         _scalars([]),
+        _scalar(human_recipient),  # story #2617: _conversation_has_human → True
         _all([(human_recipient, "human")]),
         _row(project_id=proj, type="group", free_response=False),
         _scalars([]),

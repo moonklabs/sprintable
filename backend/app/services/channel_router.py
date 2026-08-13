@@ -27,6 +27,23 @@ logger = logging.getLogger(__name__)
 _AGENT_CHAIN_DEPTH_CAP: int = 4
 
 
+async def _conversation_has_human(db: AsyncSession, conversation_id: uuid.UUID) -> bool:
+    """story #2617: 대화 참가자 중 human이 1명이라도 있는가 — 실물 참가자 조회(캐시/파생
+    금지, PO 지시 2026-08-13). chain-expired 게이트가 사람-부재 대화를 무기한 침묵시키는지
+    판정하는 유일한 근거라 정확성이 중요하다 — recipient_type_map처럼 필터된 부분집합에서
+    유도하지 않고, 이 conversation_id의 ConversationParticipant 전체를 매번 새로 스캔한다."""
+    row = (await db.execute(
+        select(ConversationParticipant.member_id)
+        .join(TeamMember, TeamMember.id == ConversationParticipant.member_id)
+        .where(
+            ConversationParticipant.conversation_id == conversation_id,
+            TeamMember.type == "human",
+        )
+        .limit(1)
+    )).scalar_one_or_none()
+    return row is not None
+
+
 class ChannelRouterError(Exception):
     """ChannelRouter 장애 시 typed exception — caller가 SSE fallback 가능."""
 
@@ -82,10 +99,15 @@ async def route_message(
     이 게이트의 대상이 아니다(인간이 바로 그 "앵커"라 차단하면 안 됨 — 오히려 human-
     intervention 이벤트로 알려야 할 대상).
 
-    ⛔핫픽스(2026-08-13, 라이브 실측): 이 게이트도 DM은 대상 밖이다 — human 메시지가 애초에
-    없는 순수 1:1 agent DM(장기 협업방)은 연쇄 깊이가 구조적으로 늘 cap을 넘어, loop 방지
-    의도와 무관하게 정상 1:1 대화 자체가 침묵당했다(reason=chain-expired 반복 확인).
-    group(다자간 A↔B 핑퐁 리스크)만 게이트 유지.
+    ⛔story #2617(2026-08-13, DM전용 핫픽스 #3009를 일반화): 이 게이트는 **human 참가자가
+    1명이라도 있는 대화에만** 적용된다(conv_type 무관 — DM/group 둘 다). human 메시지가
+    애초에 없는 대화(순수 agent DM·순수 agent group)는 연쇄 깊이가 구조적으로 늘 cap을
+    넘어, loop 방지 의도와 무관하게 정상적인 장기 협업 자체가 침묵당한다(reason=
+    chain-expired 반복 확인 — DM 사례는 판별3·4, group 사례는 카디르 3-agent 5번째 무응답
+    실측). human이 있으면(누구에게 개입을 청할 수 있으면) 원 #2608 AC(A↔B 핑퐁 방지)
+    그대로 유지. human-less 대화의 관측(무한침묵 방지, AC4)은 이 함수 밖 —
+    conversations.py의 별도 escalation 경로가 담당(순수 판정 함수에 side-effect를 안
+    싣는다).
     """
     try:
         # 1. 메시지 + 발신자 조회
@@ -153,11 +175,16 @@ async def route_message(
         # story #2608 P1: sender가 agent일 때만 연쇄 깊이를 잰다(human 발신은 애초에 이
         # 게이트 대상 밖 — 정의상 그 메시지 자체가 앵커라 depth=0으로 리셋되는 것과 동치).
         chain_expired = False
+        conv_has_human = True  # chain_expired=False면 안 쓰임(아래 게이트가 and로 단락) — 기본은 안전측.
         if sender_type == "agent":
             depth = await compute_agent_chain_depth(
                 db, msg.conversation_id, max_scan=_AGENT_CHAIN_DEPTH_CAP,
             )
             chain_expired = depth > _AGENT_CHAIN_DEPTH_CAP
+            if chain_expired:
+                # story #2617: human 유무는 실물 참가자 조회로만 판정(캐시/파생 금지, PO 지시) —
+                # 게이트가 실제로 걸릴 때만 계산(흔한 경로에 쿼리 추가 안 함).
+                conv_has_human = await _conversation_has_human(db, msg.conversation_id)
 
         # 4. 수신자 type 배치 조회
         member_rows = (await db.execute(
@@ -253,14 +280,17 @@ async def route_message(
             # free_response 완화 전부 포함) agent recipient는 연쇄가 cap을 넘으면 여기서
             # 막힌다. human recipient는 대상 밖(위 docstring).
             #
-            # ⛔핫픽스(2026-08-13, 라이브 실측·Cloud Logging 대조 확定): DM은 이 게이트 밖이다.
-            # 순수 1:1 agent DM(human 메시지가 애초에 없는 지속 작업방, 예: PM↔BE 핸드오프)은
-            # 연쇄 깊이가 구조적으로 항상 cap을 넘어 — «A↔B 무한루프 방지»라는 원 의도와 무관하게
-            # «정상적인 장기 1:1 협업»을 통째로 침묵시켰다(reason=chain-expired 반복, 판별3·4
-            # 재현). group의 loop-risk와 DM의 legitimate 1:1은 다른 문제라 mentions-기본값
-            # DM예외(#2603)와 같은 논리로 여기도 DM을 뺀다 — group(다자간 A↔B 핑퐁 리스크)은
-            # 그대로 게이트 유지.
-            if chain_expired and recipient_type == "agent" and conv_type != "dm":
+            # ⛔story #2617(2026-08-13, 라이브 실측·Cloud Logging 대조 확定 + 카디르 QA 재현):
+            # DM만 뺐던 핫픽스(#3009)를 **human 참가자 유무**로 일반화한다 — 순수 1:1 agent DM
+            # (판별3·4 재현 사례)뿐 아니라 human 없는 group 대화도 동형으로 침묵당했다(카디르
+            # 3-agent group 5번째 메시지부터 무응답 실측). 앵커 개념 자체가 human 부재 대화엔
+            # 성립 안 하므로(누구에게도 개입을 청할 수 없다) 게이트를 건너뛴다. human이 1명이라도
+            # 있으면(DM이든 group이든) 원 #2608 AC(A↔B 핑퐁 방지) 그대로 유지 — 비회귀.
+            # ⚠️이 예외는 «전달을 막지 않을 뿐»이지 무한루프 자체를 차단하지 않는다 — 진짜 폭주
+            # (A↔B 동형 반복)는 토큰을 계속 태울 수 있다(#2617 스토리 «잔여 위험», 후속 축).
+            # human-less 대화의 chain-expired 관측(AC4)은 conversations.py의 별도 escalation
+            # 경로(chain_escalation.py)가 담당 — route_message는 순수 판정만, side-effect 없음.
+            if chain_expired and recipient_type == "agent" and conv_has_human:
                 logger.info(
                     "delivery_contract: excluded recipient=%s conversation_id=%s reason=%s",
                     rid, msg.conversation_id, "chain-expired",
