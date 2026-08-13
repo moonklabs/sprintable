@@ -12,6 +12,7 @@ from typing import Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.notification_preference import NotificationPreference
 from app.models.team import TeamMember
@@ -62,6 +63,12 @@ async def route_message(
     agent이고 대화가 group(dm 아님)이며 그 recipient의 명시 preference 행이 없으면
     default level="mentions"(과거는 이 경우도 "all"이었다 — PO 소급 확定: 원 고통이 기존
     그룹챗에 있어 소급 없이는 반쪽 해법). human이거나 DM이면 기존과 동일 default="all".
+
+    ⛔핫픽스(2026-08-13, 선생님 직접 지시): 위 mentions 기본계약은 `settings.
+    agent_group_default_mentions`(기본 False)로 게이트된다 — free_response 오버라이드가
+    실 사용에서 안 먹는 게 규명 전에 팀 전체 A2A 통신을 막아, 규명·수리 전까지 소급 off로
+    되돌렸다(#2603 원 의도는 유효·재상륙은 opt-in). 플래그 False면 이 분기는 완전히
+    스킵되고 agent group도 기존처럼 default="all"이 된다.
 
     **free_response 대화 오버라이드**(AC2 옵트아웃): `conversation.free_response=true`면
     이 대화 한정으로 level="mentions"인 recipient는 "all"로 완화된다 — 단 명시 "mute"는
@@ -202,8 +209,11 @@ async def route_message(
             if pref is not None:
                 level = pref.level
                 reason = f"preference scope={matched_scope}"
-            elif recipient_type == "agent" and conv_type != "dm":
+            elif recipient_type == "agent" and conv_type != "dm" and settings.agent_group_default_mentions:
                 # story #2603 P0: 에이전트 그룹챗 기본계약(소급 적용, PO 확定) — 위 docstring.
+                # 핫픽스(2026-08-13): free_response 오버라이드 규명 전까지 기본 off로 되돌림
+                # (settings.agent_group_default_mentions) — 팀 전체 통신 차단이 근본원인 규명보다
+                # 급했다(선생님 직접 지시). 규명·수리 후 opt-in 재활성 대상.
                 level = "mentions"
                 reason = "agent group default: mentions"
             else:

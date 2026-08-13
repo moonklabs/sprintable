@@ -20,6 +20,12 @@ _NOT_EXPIRED = patch(
     "app.services.channel_router.compute_agent_chain_depth", AsyncMock(return_value=1),
 )
 
+# 핫픽스(2026-08-13): agent 그룹챗 mentions 기본계약은 settings.agent_group_default_mentions
+# (기본 False)로 게이트됐다 — 그 분기 자체(메커니즘)를 계속 커버하는 테스트는 명시로 켠다.
+_MENTIONS_ON = patch(
+    "app.services.channel_router.settings.agent_group_default_mentions", True,
+)
+
 
 @pytest.fixture
 def anyio_backend():
@@ -98,7 +104,7 @@ async def test_multiproject_agent_sender_dispatches_without_crash():
         _scalars([]),                       # 6 preferences
     ])
 
-    with _NOT_EXPIRED:
+    with _NOT_EXPIRED, _MENTIONS_ON:
         decisions = await route_message(msg.id, db)
     # 발신자 제외·크래시/ChannelRouterError 없이 멘션된 recipient에게만 decision.
     assert len(decisions) == 1
@@ -137,9 +143,47 @@ async def test_agent_group_default_excludes_unmentioned_agent_recipient():
         _scalars([]),
     ])
 
-    with _NOT_EXPIRED:
+    with _NOT_EXPIRED, _MENTIONS_ON:
         decisions = await route_message(msg.id, db)
     assert decisions == [], "멘션 없는데 decision이 생기면 원 루프가 그대로 재현된다"
+
+
+@pytest.mark.anyio
+async def test_agent_group_default_is_all_when_mentions_flag_off():
+    """핫픽스(2026-08-13) — settings.agent_group_default_mentions 기본 False에서는 그룹챗
+    에이전트 recipient도 멘션 없이 all(사전 #2603 동작 복귀). 팀 전체 A2A 통신 차단 회피가
+    이 값의 존재 이유 — 회귀하면 다시 막힌다."""
+    from app.services.channel_router import route_message
+
+    sender = uuid.uuid4()
+    recipient = uuid.uuid4()
+    conv = uuid.uuid4()
+    proj = uuid.uuid4()
+
+    msg = MagicMock()
+    msg.id = uuid.uuid4()
+    msg.sender_id = sender
+    msg.conversation_id = conv
+    msg.thread_id = None
+    msg.mentioned_ids = []  # 멘션 없음 — 플래그 off면 그래도 통과해야 한다.
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        _scalar(msg),
+        _scalar("agent"),
+        _scalars([sender, recipient]),
+        _scalars([]),
+        _all([(recipient, "agent")]),
+        _row(project_id=proj, type="group", free_response=False),
+        _scalars([]),
+    ])
+
+    with _NOT_EXPIRED:  # _MENTIONS_ON 없음 — 기본값(False) 그대로.
+        decisions = await route_message(msg.id, db)
+    assert len(decisions) == 1
+    assert decisions[0].member_id == recipient
+    assert decisions[0].level == "all"
+    assert decisions[0].reason == "default: all"
 
 
 @pytest.mark.anyio
@@ -204,7 +248,7 @@ async def test_free_response_conversation_relaxes_mentions_to_all():
         _scalars([]),
     ])
 
-    with _NOT_EXPIRED:
+    with _NOT_EXPIRED, _MENTIONS_ON:
         decisions = await route_message(msg.id, db)
     assert len(decisions) == 1
     assert decisions[0].level == "all"
