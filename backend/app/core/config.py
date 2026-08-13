@@ -158,6 +158,14 @@ class Settings(BaseSettings):
     # 파생(충돌 시 redis 우선+ERROR)·"pg"|"redis"=명시 강제. "잘못된 상태를 표현 불가능하게"(불린 2개 대신 enum).
     realtime_backplane: str = ""
 
+    # 핫픽스(2026-08-13, 선생님 직접 지시 — 페드루 경유): story #2603 P0가 그룹(비-DM) 대화의
+    # agent recipient 기본 delivery level을 all→mentions로 바꿨는데, free_response 오버라이드
+    # 규명 전에 팀 전체 통신이 막혀(require_mention 켜고 일하는 관례가 없다) 즉시 되돌린다.
+    # 기본 off = 사전 #2603 동작(agent group도 all) — 소급 mentions는 규명·수리 후 opt-in
+    # 재활성 대상. False가 아니면(레거시 지원 없음) channel_router.py의 mentions 분기가
+    # 활성화된다(테스트에서만 True로 켜 그 분기 자체는 계속 커버).
+    agent_group_default_mentions: bool = False
+
     # E-ARCH S2 정리(2026-07-21, LISTEN 제거 완료 후 발견): redis_consume_loop task 생성이
     # event_broker_redis_dual_publish_enabled 하나로만 게이트돼 있었다 — dual_publish(발행,
     # 모든 인스턴스가 필요)와 consume(구독+dispatch, SSE를 실제로 서빙하는 서비스만 필요)
