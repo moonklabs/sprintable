@@ -15,6 +15,15 @@ import uuid
 
 import pytest
 
+# 페드루군 CI 실측 지적(2026-08-13, #3031): 이 파일은 role_templates 실 테이블을 DROP/CREATE
+# 한다 — Base.metadata.create_all/drop_all API를 안 쓰고 raw SQL DDL(sa.text)로 직접 하기 때문에
+# tests/conftest.py의 AST 정적 가드(_calls_destructive_schema_api, create_all/drop_all 속성
+# 호출만 스캔)가 이 파일을 못 잡는다 — 그래서 마커 누락이 collection 단계에서 자동 표면화되지
+# 않았다. 마커 없이 non-destructive CI 잡에 편입되면 공유 alembic-migrated DB의 진짜
+# role_templates 테이블을 떨어뜨려 무관한 뒤 테스트를 전멸시킨다(#3029 QA 때 카디르가 겪은
+# destructive/non-destructive 혼합 오염과 동일 클래스, 이번엔 CI 실측으로 재현).
+pytestmark = pytest.mark.destructive_schema
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 _MIG = os.path.join(
     os.path.dirname(__file__), "..", "alembic", "versions", "0246_role_templates_events_scope.py"
