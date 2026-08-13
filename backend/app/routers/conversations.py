@@ -2208,6 +2208,10 @@ async def send_message(
     # (지도 ②③). preference_excluded_ids = 참가자였지만 route_message가 mute/mentions로
     # 걸러 decisions에 없는 대상 — 이제 이들은 discord 판정과 같은 자리에서 SSE Event
     # 생성 자체가 제외된다(막는 쪽과 하는 쪽이 같은 판정을 본다).
+    # story #2620: decisions는 discord_exclude_ids·preference_excluded_ids뿐 아니라 아래
+    # webhook_authorized_ids(resolve_conversation_webhook_targets)까지 먹이는 단일 snapshot이라
+    # try 실패 시에도(디폴트 []) 참조 가능하게 try 밖에서 미리 초기화한다.
+    decisions: list = []
     discord_exclude_ids: set[uuid.UUID] = set()
     preference_excluded_ids: set[uuid.UUID] = set()
     try:
@@ -2249,24 +2253,26 @@ async def send_message(
     except Exception:
         logger.warning("user_blocker_ids lookup failed message_id=%s — fail-open(no exclusion)", msg.id, exc_info=True)
 
-    # E-EVENT-1CONFIG: webhook 전달 대상을 요청 트랜잭션서 1회 산출(SSOT) — SSE-skip 결정과 실제
-    # webhook delivery 가 **같은 snapshot/결정**을 쓰게 해 TOCTOU silent loss 를 차단한다(산티아고
-    # Finding 1). 산출된 target 을 그대로 delivery task 로 넘기고(post-commit requery 0), 그로부터
-    # 도출한 covered member 집합을 SSE-skip 에 쓴다.
+    # E-EVENT-1CONFIG + story #2620(P3, DeliveryDecision 단일화): webhook 전달 대상을 요청
+    # 트랜잭션서 1회 산출(SSOT) — SSE-skip 결정과 실제 webhook delivery 가 **같은 snapshot**을
+    # 쓰게 해 TOCTOU silent loss 를 차단한다(산티아고 Finding 1). 산출된 target 을 그대로
+    # delivery task 로 넘기고(post-commit requery 0), 그로부터 도출한 covered member 집합을
+    # SSE-skip 에 쓴다. #2620부터는 authorized_member_ids 자체가 route_message()의 decisions
+    # (위, discord_exclude_ids/preference_excluded_ids와 같은 호출)에서 유도돼, webhook이 더
+    # 이상 자체 mentioned_ids 판정을 하지 않는다 — SSE·discord·webhook 셋 다 같은 판정 원천.
     from app.services.conversation_webhook import resolve_conversation_webhook_targets
     webhook_targets: list = []
-    if conv.project_id:
+    webhook_authorized_ids = {d.member_id for d in decisions} - {sender.id}
+    if conv.project_id and webhook_authorized_ids:
         try:
             # P0 message-loss savepoint 격리 — 위 blocks와 동일 근거.
             async with db.begin_nested():
                 webhook_targets = await resolve_conversation_webhook_targets(
                     db,
-                    conversation_id=conversation_id,
                     org_id=org_id,
                     project_id=conv.project_id,
                     sender_id=sender.id,
-                    mentioned_ids=list(msg.mentioned_ids) if msg.mentioned_ids else None,
-                    blocker_member_ids=user_blocker_ids,
+                    authorized_member_ids=webhook_authorized_ids,
                 )
         except Exception:
             logger.warning(
