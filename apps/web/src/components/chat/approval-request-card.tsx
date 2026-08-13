@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Check, ExternalLink, FileText, X } from 'lucide-react';
+import { Check, FileText, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
 import type { GateItem } from '@/components/kanban/types';
 
@@ -29,15 +30,17 @@ type CardState =
 const WORK_ITEM_ICON: Record<string, typeof FileText> = { doc: FileText };
 
 /**
- * story #2604 P2 — chat approval-request 카드. BE(#3007)가 payload에 실은 `approval_target`
- * (work_item_type/work_item_id/gate_id/actions)을 렌더한다. 새 API는 만들지 않는다(AC③) —
- * 상태 조회는 기존 `GET /api/gates/{id}`, 액션은 기존 `POST /api/gates/{id}/transition`
- * 그대로(gates/[id]/page.tsx와 동일 계약·동일 envelope 언랩) — human-only SoD 인가는 그
- * 엔드포인트가 이미 지킨다(신규 인가 없음).
+ * story #2604 P2 → #2625(선생님 실사용 판정으로 확장) — chat approval-request 카드. BE(#3007)가
+ * payload에 실은 `approval_target`(work_item_type/work_item_id/gate_id/actions)을 렌더한다.
+ * 새 API는 만들지 않는다(AC③) — 상태 조회는 기존 `GET /api/gates/{id}`, 액션은 기존
+ * `POST /api/gates/{id}/transition` 그대로(gates/[id]/page.tsx와 동일 계약·동일 envelope
+ * 언랩) — human-only SoD 인가는 그 엔드포인트가 이미 지킨다(신규 인가 없음).
  *
- * 고위험(usesSignatureFlow)·무권한(can_approve=false)은 이 컴팩트 카드 안에서 서명플로우를
- * 재구현하지 않는다 — 결재함 상세(`/gates/{id}`)로 열기 링크만 준다(no-fiction: 챗 카드
- * 폭에 서명 플로우를 욱여넣는 대신 정직하게 위임).
+ * story #2625 — 고위험(usesSignatureFlow)도 이제 챗을 벗어나지 않고 완결된다. 원래는
+ * "결재함에서 열기" 링크로 위임했으나(#3011, no-fiction 원칙 하 재구현 회피), 선생님이
+ * 직접 실사용 중 그 네비게이션 자체를 UX 결함으로 판정(gate 34af76dc 반려 사유) — 서명
+ * 플로우(`GateSignatureApproval`)를 gates/[id]/page.tsx와 **그대로 공유 재사용**해 챗
+ * 카드 안에 얹는다(사본 분화 금지, AC③).
  */
 export function ApprovalRequestCard({ target }: ApprovalRequestCardProps) {
   const t = useTranslations('chats');
@@ -61,14 +64,14 @@ export function ApprovalRequestCard({ target }: ApprovalRequestCardProps) {
 
   useEffect(() => { void fetchGate(); }, [fetchGate]);
 
-  const transition = async (status: 'approved' | 'rejected') => {
+  const transition = async (status: 'approved' | 'rejected', note?: string) => {
     setResolving(true);
     setTransitionError(null);
     try {
       const res = await fetch(`/api/gates/${target.gate_id}/transition`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, note: null }),
+        body: JSON.stringify({ status, note: note?.trim() || null }),
       });
       if (res.ok) { await fetchGate(); return; }
       const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
@@ -98,11 +101,10 @@ export function ApprovalRequestCard({ target }: ApprovalRequestCardProps) {
       ) : (
         <ApprovalRequestBody
           gate={state.gate}
-          gateId={target.gate_id}
           resolving={resolving}
           transitionError={transitionError}
-          onApprove={() => void transition('approved')}
-          onReject={() => void transition('rejected')}
+          onApprove={(reason) => void transition('approved', reason)}
+          onReject={(reason) => void transition('rejected', reason)}
         />
       )}
     </div>
@@ -110,14 +112,13 @@ export function ApprovalRequestCard({ target }: ApprovalRequestCardProps) {
 }
 
 function ApprovalRequestBody({
-  gate, gateId, resolving, transitionError, onApprove, onReject,
+  gate, resolving, transitionError, onApprove, onReject,
 }: {
   gate: GateItem;
-  gateId: string;
   resolving: boolean;
   transitionError: string | null;
-  onApprove: () => void;
-  onReject: () => void;
+  onApprove: (reason?: string) => void;
+  onReject: (reason?: string) => void;
 }) {
   const t = useTranslations('chats');
   // gates/[id]/page.tsx와 같은 문구를 쓴다(동일 개념=동일 어휘, DS 원칙) — 그 키들은 'cage'
@@ -126,18 +127,37 @@ function ApprovalRequestBody({
   const title = gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`;
   const riskLevel = deriveRiskLevel(gate);
   const needsFullFlow = usesSignatureFlow(riskLevel);
-  const canActInline = gate.status === 'pending' && gate.can_approve === true && !needsFullFlow;
+  const canAct = gate.status === 'pending' && gate.can_approve === true;
 
   return (
     <div className="space-y-2">
       <p className="truncate text-sm font-medium text-foreground">{title}</p>
+
+      {gate.status === 'pending' && (riskLevel === 'high' || riskLevel === 'unknown') ? (
+        <Badge variant={riskLevel === 'high' ? 'warning' : 'outline'} className={riskLevel === 'unknown' ? 'text-muted-foreground' : undefined}>
+          {riskLevel === 'high' ? tCage('riskHigh') : tCage('riskUnknown')}
+        </Badge>
+      ) : null}
 
       {gate.status !== 'pending' ? (
         <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
           {gate.status === 'approved' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />}
           {t('approvalRequestResolvedStatus', { status: gate.status })}
         </div>
-      ) : canActInline ? (
+      ) : !canAct ? (
+        // story #2091(P0)과 동일 fail-closed 규율 — can_approve=false(무권한 뷰어)는 액션을
+        // 렌더하지 않는다. 고위험도 이제 챗 안에서 완결되므로(#2625) 여기 남는 유일한
+        // "액션 불가" 사유는 무권한뿐이다.
+        <p className="text-[11px] text-muted-foreground">{tCage('gateReadonlyNotAuthorized')}</p>
+      ) : needsFullFlow ? (
+        <GateSignatureApproval
+          gate={gate}
+          resolving={resolving}
+          error={transitionError}
+          onApprove={onApprove}
+          onReject={onReject}
+        />
+      ) : (
         <>
           {transitionError ? (
             <p role="alert" aria-live="assertive" className="text-[11px] text-foreground">
@@ -145,38 +165,17 @@ function ApprovalRequestBody({
             </p>
           ) : null}
           <div className="flex gap-1.5">
-            <Button type="button" size="sm" onClick={onApprove} disabled={resolving} className="flex-1">
+            <Button type="button" size="sm" onClick={() => onApprove()} disabled={resolving} className="flex-1">
               <Check className="h-3.5 w-3.5" aria-hidden />
               {tCage('gateApprove')}
             </Button>
-            <Button type="button" size="sm" variant="destructive" onClick={onReject} disabled={resolving} className="flex-1">
+            <Button type="button" size="sm" variant="destructive" onClick={() => onReject()} disabled={resolving} className="flex-1">
               <X className="h-3.5 w-3.5" aria-hidden />
               {tCage('gateReject')}
             </Button>
           </div>
         </>
-      ) : (
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] text-muted-foreground">
-            {gate.can_approve === false ? tCage('gateReadonlyNotAuthorized') : t('approvalRequestOpenForFullReview')}
-          </p>
-          {gate.can_approve !== false ? (
-            <a
-              href={`/gates/${gateId}`}
-              className="flex shrink-0 items-center gap-1 text-xs font-medium text-primary hover:underline"
-            >
-              {t('approvalRequestOpenInGates')}
-              <ExternalLink className="h-3 w-3" aria-hidden />
-            </a>
-          ) : null}
-        </div>
       )}
-
-      {gate.status === 'pending' && (riskLevel === 'high' || riskLevel === 'unknown') ? (
-        <Badge variant={riskLevel === 'high' ? 'warning' : 'outline'} className={riskLevel === 'unknown' ? 'text-muted-foreground' : undefined}>
-          {riskLevel === 'high' ? tCage('riskHigh') : tCage('riskUnknown')}
-        </Badge>
-      ) : null}
     </div>
   );
 }
