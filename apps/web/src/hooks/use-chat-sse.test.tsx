@@ -6,7 +6,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { useChatSse } from './use-chat-sse';
+import { useChatSse, normalizeToMessage } from './use-chat-sse';
+
+describe('normalizeToMessage — story #2604 P2 approval_target 노출', () => {
+  it('raw payload에 approval_target이 있으면 그대로 실린다', () => {
+    const raw = {
+      id: 'm1', content: "'x' 문서 결재 요청",
+      approval_target: { work_item_type: 'doc', work_item_id: 'd1', gate_id: 'g1', actions: ['approve', 'reject'] },
+    };
+    expect(normalizeToMessage(raw).approval_target).toEqual({
+      work_item_type: 'doc', work_item_id: 'd1', gate_id: 'g1', actions: ['approve', 'reject'],
+    });
+  });
+
+  it('키 자체가 없는(구 서버) payload는 null로 통일된다', () => {
+    expect(normalizeToMessage({ id: 'm2', content: 'hi' }).approval_target).toBeNull();
+  });
+
+  it('BE가 additive로 null을 명시해 보내도 null 그대로다', () => {
+    expect(normalizeToMessage({ id: 'm3', content: 'hi', approval_target: null }).approval_target).toBeNull();
+  });
+});
 
 class FakeEventSource {
   static readonly CONNECTING = 0;

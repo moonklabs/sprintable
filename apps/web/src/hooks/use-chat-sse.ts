@@ -49,6 +49,12 @@ export interface ChatMessage {
    * "판단 재료 없음"(이 필드를 안 주는 경로)이라 마스킹을 보류한다 — false로 기본값을 주면
    * "차단 여부 모름"이 "차단 안 함"으로 뭉개진다. */
   is_blocked_sender?: boolean;
+  /** story #2604 P2 — BE(#3007)가 msg_metadata['approval_target']를 payload top-level에
+   * additive로 노출(`_approval_payload`, `_activation_payload`와 동형). 있으면 결재 카드를
+   * 렌더한다 — 없으면(구 메시지·approval_target 없는 일반 메시지) 항상 `null`(옛 서버는 키
+   * 자체가 없을 수 있어 `?? null`로 통일, references류의 undefined/키부재 구분과 다른 축 —
+   * 이 필드는 "카드냐 아니냐"라는 이분법이라 undefined와 null을 굳이 나눌 이유가 없다). */
+  approval_target?: { work_item_type: string; work_item_id: string; gate_id: string; actions: string[] } | null;
 }
 
 // Normalize backend _to_chat_message format → ChatMessage
@@ -75,6 +81,8 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     references: Array.isArray(raw.references) ? raw.references as ChatMessage['references'] : undefined,
     // story #2349 — references와 동일 규율: 키 부재(undefined)와 false를 구분한다.
     is_blocked_sender: typeof raw.is_blocked_sender === 'boolean' ? raw.is_blocked_sender : undefined,
+    // story #2604 P2 — BE가 top-level에 항상 키를 싣진 않는 경로(구 메시지 등)도 있어 `?? null`.
+    approval_target: (raw.approval_target ?? null) as ChatMessage['approval_target'],
   };
 }
 
