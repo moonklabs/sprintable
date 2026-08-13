@@ -1,8 +1,14 @@
-"""E-EVENT-1CONFIG: resolve_conversation_webhook_targets SSOT 가드.
+"""E-EVENT-1CONFIG + story #2620(P3, DeliveryDecision 단일화): resolve_conversation_webhook_targets SSOT 가드.
 
 이 함수가 SSE-skip covered set 과 실제 webhook delivery 대상의 단일 출처다(TOCTOU 차단).
-가드: ①sender self-mention 제외(Finding 2) ②mentioned 우선·없으면 participants(sender 제외)
-③member-bound project-독립 union ④member_id=null 브로드캐스트 포함하되 covered 엔 미포함.
+story #2620부터 「누가 authorized 인가」(멘션/참가자/차단 판정)는 caller가 route_message()의
+DeliveryDecision에서 뽑아 `authorized_member_ids`로 넘긴다 — 이 함수 자신은 더 이상 mentioned_ids
+판정도 blocker 조회도 하지 않는다(SSE·discord·webhook 셋 다 같은 판정 원천, PO 확定 2026-08-13).
+
+가드: ①sender self-exclusion(방어심층, Finding 2 — route_message가 이미 recipient_ids에서
+sender를 빼므로 정상 경로에선 no-op) ②authorized_member_ids 그대로 필터링(caller 위임)
+③member-bound project-독립 union ④member_id=null 브로드캐스트 포함하되 covered 엔 미포함
+⑤authorized 0건이면 member-global union 쿼리 자체를 안 함.
 """
 from __future__ import annotations
 
@@ -41,8 +47,9 @@ def _scalars(rows: list) -> MagicMock:
 
 
 @pytest.mark.anyio
-async def test_sender_excluded_from_mentioned_finding2():
-    """멘션에 sender 가 포함돼도 sender webhook 은 전달 대상 아님(skip authorized set 과 통일)."""
+async def test_sender_excluded_even_if_present_in_authorized_defensive():
+    """방어심층(Finding 2) — authorized_member_ids에 sender가 섞여 들어와도(정상 경로에선
+    route_message가 이미 제외해 안 일어나지만) member-bound 대상에서 빠진다."""
     org, proj, sender, agent_a = (uuid.uuid4() for _ in range(4))
     wh_sender = _wh(sender)
     wh_a = _wh(agent_a)
@@ -54,11 +61,11 @@ async def test_sender_excluded_from_mentioned_finding2():
     ]))
 
     targets = await resolve_conversation_webhook_targets(
-        db, conversation_id=uuid.uuid4(), org_id=org, project_id=proj,
-        sender_id=sender, mentioned_ids=[sender, agent_a], blocker_member_ids=set(),
+        db, org_id=org, project_id=proj,
+        sender_id=sender, authorized_member_ids={sender, agent_a},
     )
     member_ids = {t.member_id for t in targets}
-    assert sender not in member_ids, "sender self-mention 제외(Finding 2)"
+    assert sender not in member_ids, "sender는 authorized에 섞여도 방어심층으로 제외(Finding 2)"
     assert agent_a in member_ids
     assert None in member_ids, "member_id=null 브로드캐스트 포함"
     covered = {t.member_id for t in targets if t.member_id is not None}
@@ -66,64 +73,66 @@ async def test_sender_excluded_from_mentioned_finding2():
 
 
 @pytest.mark.anyio
-async def test_mention_only_sender_yields_no_member_target():
-    """sender 가 자기만 멘션 → authorized 0 → member-bound 대상 없음(broadcast 만 가능)."""
+async def test_empty_authorized_yields_broadcast_only_no_member_union_query():
+    """authorized_member_ids가 비면(route_message가 아무도 못 통과시킨 경우) member-bound
+    대상은 없고(broadcast만) member-global union 쿼리 자체를 안 한다(불필요 쿼리 회피)."""
     org, proj, sender = (uuid.uuid4() for _ in range(3))
-    wh_sender = _wh(sender)
     wh_bcast = _wh(None)
 
     db = SimpleNamespace(execute=AsyncMock(side_effect=[
-        _scalars([wh_sender, wh_bcast]),  # project-scope: sender 는 authorized 아님→제외, bcast 유지
-        # member-global union 은 member_ids_for_webhook=[] 이라 호출 안 됨
+        _scalars([wh_bcast]),  # project-scope만 — member-global union은 호출 안 됨
     ]))
 
     targets = await resolve_conversation_webhook_targets(
-        db, conversation_id=uuid.uuid4(), org_id=org, project_id=proj,
-        sender_id=sender, mentioned_ids=[sender], blocker_member_ids=set(),
+        db, org_id=org, project_id=proj,
+        sender_id=sender, authorized_member_ids=set(),
     )
-    assert {t.member_id for t in targets} == {None}, "broadcast 만 — sender member webhook 제외"
+    assert {t.member_id for t in targets} == {None}, "broadcast만 — authorized 0건"
+    assert db.execute.await_count == 1, "member-global union 쿼리가 스킵돼야(authorized 0건)"
 
 
 @pytest.mark.anyio
-async def test_no_mention_uses_participants_minus_sender():
-    """멘션 없으면 참가자(sender 제외) authorized — participant 쿼리 1발 선행."""
-    org, proj, conv_id, sender, agent_a = (uuid.uuid4() for _ in range(5))
+async def test_authorized_member_ids_passthrough_to_project_scope_targets():
+    """authorized_member_ids를 그대로 project-scope 게이팅에 쓴다 — caller(route_message
+    decisions)가 넘긴 집합이 곧 이 함수의 판정 근거 전부(자체 mentioned_ids/participant
+    재조회 없음, story #2620)."""
+    org, proj, sender, agent_a = (uuid.uuid4() for _ in range(4))
     wh_a = _wh(agent_a)
 
     db = SimpleNamespace(execute=AsyncMock(side_effect=[
-        _scalars([agent_a]),   # participant query (.scalars().all())
         _scalars([wh_a]),      # project-scope
         _scalars([wh_a]),      # member-global union
     ]))
 
     targets = await resolve_conversation_webhook_targets(
-        db, conversation_id=conv_id, org_id=org, project_id=proj,
-        sender_id=sender, mentioned_ids=None, blocker_member_ids=set(),
+        db, org_id=org, project_id=proj,
+        sender_id=sender, authorized_member_ids={agent_a},
     )
     assert {t.member_id for t in targets} == {agent_a}
 
 
 @pytest.mark.anyio
-async def test_blocker_member_ids_excludes_recipient_who_blocked_sender():
-    """story #2349 — 라이브 검증(2026-08-03)서 발견한 갭: sender를 차단한 수신자는 webhook 대상에서
-    빠져야 한다. caller(conversations.py)가 이미 계산한 user_blocker_ids를 그대로 받아 거른다 —
-    이 함수 안에서 새 쿼리를 추가하지 않는다(파라미터 미전달 시 기본 동작은 기존과 동일)."""
-    org, proj, conv_id, sender, blocker, agent_a = (uuid.uuid4() for _ in range(6))
+async def test_recipient_not_in_authorized_set_is_excluded():
+    """story #2349 AC3 계승 — 이제는 「누가 authorized인가」 자체가 caller 책임(route_message가
+    이미 blocker/mute/mentions-gate 반영)이라, 이 함수는 authorized_member_ids에 없는 멤버의
+    webhook을 project-scope 게이팅에서 그냥 걸러낸다(caller가 안 넘긴 이유는 이 함수가 몰라도
+    된다 — 판정 단일화의 핵심)."""
+    org, proj, sender, excluded_member, agent_a = (uuid.uuid4() for _ in range(5))
+    wh_excluded = _wh(excluded_member)
     wh_a = _wh(agent_a)
 
     db = SimpleNamespace(execute=AsyncMock(side_effect=[
-        _scalars([blocker, agent_a]),  # participant query (sender 제외 — blocker·agent_a 참가)
-        _scalars([wh_a]),              # project-scope — blocker webhook은 애초에 대상 아님
-        _scalars([wh_a]),              # member-global union
+        _scalars([wh_excluded, wh_a]),  # project-scope — excluded_member는 authorized 밖
+        _scalars([wh_a]),               # member-global union
     ]))
 
     targets = await resolve_conversation_webhook_targets(
-        db, conversation_id=conv_id, org_id=org, project_id=proj,
-        sender_id=sender, mentioned_ids=None, blocker_member_ids={blocker},
+        db, org_id=org, project_id=proj,
+        sender_id=sender, authorized_member_ids={agent_a},
     )
     member_ids = {t.member_id for t in targets}
-    assert blocker not in member_ids, "sender를 차단한 수신자는 webhook 대상에서 제외"
-    assert agent_a in member_ids, "차단과 무관한 수신자는 그대로 대상"
+    assert excluded_member not in member_ids, "authorized 밖 멤버의 webhook은 제외"
+    assert agent_a in member_ids
 
 
 # ─── 실DB 전체 predicate (project 독립·sender 제외·broadcast) ──────────────────
@@ -143,16 +152,16 @@ _requires_db = pytest.mark.skipif(
     reason="story 18eefc31 — 원래 xfail 사유(asyncpg 'attached to a different loop')는 "
     "테스트 전용 엔진으로 전환해 해결됐으나(다른 모든 realdb 테스트와 동일 관례), 그 뒤에서 "
     "별개의 진짜 product 버그가 드러났다: 이 테스트가 만드는 member_id=None 행(§AC2 "
-    "'project-wide broadcast webhook' — conversation_webhook.py:149-150,192에 문서화된 "
-    "핵심 로직, member_id IS NULL이면 무조건 포함)이 실 스키마에서 NotNullViolationError로 "
-    "거부된다. baseline/schema.sql 실측 확인: `member_id uuid NOT NULL`(CREATE TABLE 원문) "
-    "— ORM 모델(webhook_config.py: `member_id: Mapped[uuid.UUID]`, Optional 아님)과 "
-    "생성 스키마(schemas/webhook_config.py: `member_id: uuid.UUID`, 필수)까지 전부 동일하게 "
-    "NOT NULL/필수라 실제 API로 broadcast(member_id=NULL) webhook을 만들 방법 자체가 없다 "
-    "— 이 AC2 브랜치는 100% 도달 불가 dead code. 테스트를 고쳐서(real member_id로 치환) "
-    "통과시키는 건 이 발견을 숨기는 것이라 하지 않음 — product 판단(§AC2 폐기 vs "
-    "member_id nullable 마이그+생성경로 복구) 필요 — follow-up story 34b3a8fb(E-EVENT-1CONFIG·"
-    "backlog)로 분리, 그 story 의 결정·구현 완료 후 이 xfail 해소 예정. story 18eefc31 트래킹.",
+    "'project-wide broadcast webhook' — conversation_webhook.py 핵심 로직, member_id IS "
+    "NULL이면 무조건 포함)이 실 스키마에서 NotNullViolationError로 거부된다. baseline/"
+    "schema.sql 실측 확인: `member_id uuid NOT NULL`(CREATE TABLE 원문) — ORM 모델"
+    "(webhook_config.py: `member_id: Mapped[uuid.UUID]`, Optional 아님)과 생성 스키마"
+    "(schemas/webhook_config.py: `member_id: uuid.UUID`, 필수)까지 전부 동일하게 NOT NULL/"
+    "필수라 실제 API로 broadcast(member_id=NULL) webhook을 만들 방법 자체가 없다 — 이 AC2 "
+    "브랜치는 100% 도달 불가 dead code. 테스트를 고쳐서(real member_id로 치환) 통과시키는 건 "
+    "이 발견을 숨기는 것이라 하지 않음 — product 판단(§AC2 폐기 vs member_id nullable 마이그+"
+    "생성경로 복구) 필요 — follow-up story 34b3a8fb(E-EVENT-1CONFIG·backlog)로 분리, 그 "
+    "story의 결정·구현 완료 후 이 xfail 해소 예정. story 18eefc31 트래킹.",
 )
 @pytest.mark.anyio
 async def test_resolve_predicate_realdb():
@@ -191,12 +200,12 @@ async def test_resolve_predicate_realdb():
             await db.commit()
             try:
                 targets = await resolve_conversation_webhook_targets(
-                    db, conversation_id=uuid.uuid4(), org_id=org, project_id=proj_x,
-                    sender_id=sender, mentioned_ids=[sender, agent_a], blocker_member_ids=set(),
+                    db, org_id=org, project_id=proj_x,
+                    sender_id=sender, authorized_member_ids={agent_a},
                 )
                 member_ids = {t.member_id for t in targets}
                 assert agent_a in member_ids, "타 프로젝트 member-bound 도 union 으로 covered(project 독립)"
-                assert sender not in member_ids, "sender 제외(Finding 2)"
+                assert sender not in member_ids, "sender는 authorized에 안 넣었으니 애초에 대상 아님"
                 assert None in member_ids, "broadcast 포함"
             finally:
                 for mid in (agent_a, sender):

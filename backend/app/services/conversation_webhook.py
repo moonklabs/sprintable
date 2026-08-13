@@ -175,12 +175,10 @@ class _WebhookTarget(NamedTuple):
 async def resolve_conversation_webhook_targets(
     db,
     *,
-    conversation_id: uuid.UUID,
     org_id: uuid.UUID,
     project_id: uuid.UUID,
     sender_id: uuid.UUID | None,
-    mentioned_ids: list[uuid.UUID] | None,
-    blocker_member_ids: set[uuid.UUID],
+    authorized_member_ids: set[uuid.UUID],
 ) -> list[_WebhookTarget]:
     """conversation.message_created 의 실 전달 대상 webhook 을 결정하는 SSOT.
 
@@ -189,46 +187,35 @@ async def resolve_conversation_webhook_targets(
     snapshot/결정을 쓰게 함으로써 TOCTOU(skip 됐는데 post-commit requery 시 target 0 →
     silent loss)를 차단한다(산티아고 Finding 1).
 
-    authorized = mentioned 우선(**sender 제외**)·없으면 참가자 전원(sender 제외). member-bound
-    webhook 은 그 멤버가 authorized 일 때만, member_id=null 브로드캐스트는 무조건 포함(참가자
-    게이팅 c2dfb823). sender 제외로 자기 self-mention webhook 비대칭도 제거(Finding 2).
+    ⛔story #2620(P3, delivery-contract-blueprint-v0-1 §5, 2026-08-13, PO 확定): `authorized_
+    member_ids`는 **caller가 route_message()의 DeliveryDecision에서 뽑아 넘긴다** — 이 함수는
+    더 이상 「멘션 있으면 멘션만·없으면 전원」이라는 자체 판정을 하지 않는다. 예전엔 SSE 코어
+    (②, #2603 P0로 route_message 소비 전환)와 webhook 배달(④, 이 함수)이 「누가 받나」를 각자
+    다른 규칙으로 판정하는 3계통 병존이었다 — 멘션은 route_message의 계약 의미론상 «강조»지
+    «배제»가 아닌데, webhook만 비멘션 수신자를 빼는 계약 밖 행동을 했다(PO 판정, 2026-08-13).
+    이제 route_message 판정 결과가 SSE-skip·discord-exclude·webhook-authorized 셋 다를 먹이는
+    **단일 snapshot**이라, mentions 기본값이 재상륙하면(#3008) 세 채널이 같이 좁혀진다 — 그게
+    이 통합의 이득이다.
 
-    story #2349 AC3 — 라이브 검증(2026-08-03, PO+디디, 스레드 7256d5cc)에서 실측으로 발견:
-    이 함수가 실제 agent 게이트웨이 webhook 배달(ConversationWebhookDelivery)의 SSOT인데,
-    「이 발신자를 차단한 수신자」exclusion(user_blocker_ids, #2814)이 conversations.py의
-    _dispatch_conversation_event(Event/SSE)·mention_targets에만 흘러가고 여기(실 webhook 배달
-    대상 산출)엔 한 번도 안 걸렸다 — #2817(channel_router.py::route_message, discord-channel
-    WebhookConfig 아웃바운드용)과는 완전히 별개 지점이라 그 수정도 이 갭을 안 덮었다. PO 재확認
-    (2026-08-03, origin/develop 실측): 값이 없던 게 아니라 caller(conversations.py:2049~2053)가
-    바로 옆에서 이미 계산해두고도 «전달을 안 했던» 것 — 그래서 여기서 재조회하지 않고
-    `blocker_member_ids` 파라미터로 caller의 값을 그대로 받는다(TOCTOU-safe한 단일 snapshot
-    원칙 유지, 이 함수 안에서 새 쿼리를 추가하지 않는다).
+    ⛔행동 변경(PR 본문에도 명시): 멘션이 있고 비멘션 webhook-구독 agent가 있는 메시지는,
+    **수신 집합 자체는 그대로**(#3008 mentions-기본값이 현재 off라 route_message decisions가
+    이미 "거의 항상 전원") — 종전엔 그 비멘션 agent가 webhook 대상에서 빠져 SSE로만
+    받았는데(=SSE 폴백), 이제는 webhook으로 직접 받는다(파이프만 이동, webhook 트래픽 소폭
+    증가). SSE 쪽 webhook_covered_ids도 같은 authorized_member_ids에서 파생되므로 이중수신은
+    그대로 0(아래 대조 테스트 참조).
 
-    카디르 QA 재발견(2026-08-03) — 필수 키워드 인자로 승격: 옵셔널(기본값 None)이면 다음 caller가
-    또 "값은 있는데 전달을 잊는" 실수를 반복할 수 있다 — 타입 체커가 누락을 잡게 강제한다.
+    member-bound webhook 은 그 멤버가 authorized 일 때만, member_id=null 브로드캐스트는
+    무조건 포함(참가자 게이팅 c2dfb823).
+
+    story #2349 AC3(2620이 흡수) — 「이 발신자를 차단한 수신자」exclusion(user_blocker_ids,
+    #2814)은 이제 이 함수 밖에서도 별도로 안 넘어온다 — route_message()가 UserBlock 제외를
+    이미 내부에서 반영해 decisions를 산출하므로(#2349 원 수정), authorized_member_ids 자체가
+    이미 차단자 제외 상태다. caller가 "계산해놓고 전달을 잊는" 클래스(카디르 QA 2026-08-03
+    재발견 원인)가 파라미터 자체의 소거로 구조적으로 봉쇄된다.
     """
     from sqlalchemy import select
 
-    from app.models.conversation import ConversationParticipant
-
-    if mentioned_ids:
-        # 멘션 있으면 멘션 대상만 — sender 제외(자기 메시지를 자기 webhook 으로 되받지 않도록·
-        # SSE mention 경로[conversations.py]와 authorized set 통일). 멘션이 sender 뿐이면 전달 0.
-        member_ids_for_webhook: list[uuid.UUID] = [
-            m for m in mentioned_ids if m != sender_id and m not in blocker_member_ids
-        ]
-    else:
-        participant_member_ids = (await db.execute(
-            select(ConversationParticipant.member_id).where(
-                ConversationParticipant.conversation_id == conversation_id,
-                *([ConversationParticipant.member_id != sender_id] if sender_id else []),
-            )
-        )).scalars().all()
-        member_ids_for_webhook = [m for m in participant_member_ids if m not in blocker_member_ids]
-
-    authorized_member_ids: set[uuid.UUID] = {
-        mid for mid in member_ids_for_webhook if mid is not None
-    }
+    member_ids_for_webhook = [mid for mid in authorized_member_ids if mid is not None and mid != sender_id]
 
     # 프로젝트-스코프 활성 webhook + 참가자 게이팅(c2dfb823).
     wh_rows = (await db.execute(
@@ -238,7 +225,7 @@ async def resolve_conversation_webhook_targets(
             WebhookConfig.is_active.is_(True),
         )
     )).scalars().all()
-    target_configs = _select_project_scope_targets(wh_rows, authorized_member_ids)
+    target_configs = _select_project_scope_targets(wh_rows, set(member_ids_for_webhook))
 
     # member-bound webhook 은 글로벌·타 프로젝트에도 존재 가능 → member_id union(중복 id/url 차단).
     if member_ids_for_webhook:
