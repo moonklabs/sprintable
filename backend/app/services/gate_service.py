@@ -561,6 +561,10 @@ async def transition_gate(
         await _advance_story_on_merge_approve(session, gate, new_status)
         # E-DG doc-gate(48f064e5): doc 결재 게이트 approve→confirmed·reject→denied.
         await _resolve_doc_gate(session, gate, new_status)
+        # story #2624: 해소 결과를 상신자에게 회신(approval_delivery.py 반대 방향) — 선생님
+        # 직접 지적(폴링해야만 반려를 알던 실사례). doc.status 변경 후 호출돼도 무방(회신
+        # 내용은 gate 필드에서만 유도).
+        await _notify_doc_gate_requester(session, gate, new_status)
         # E-CANVAS C4-S8(story a5118cb0): 정본화 게이트 approve→anchor_version set·reject→재논의 코멘트.
         await _resolve_artifact_canonicalize_gate(session, gate, new_status)
         # HITL crux(story 7726a003) — A2A task INPUT_REQUIRED 복귀. writer 미배선이라 오늘은 no-op.
@@ -792,6 +796,48 @@ async def _resolve_doc_gate(session: AsyncSession, gate: Gate, new_status: str) 
         return  # 멱등·pending 아니면 no-op(double-resolve/취소 방어).
     doc.status = "confirmed" if new_status == "approved" else "denied"
     await session.flush()
+
+
+async def _notify_doc_gate_requester(session: AsyncSession, gate: Gate, new_status: str) -> None:
+    """story #2624: doc 결재 게이트 해소 결과를 상신자에게 회신 —
+    dispatch_approval_request_cards(상신→승인자)의 반대 방향. P2(#3007)는 전방 경로만
+    만들었고 해소→상신자 회신 후방 경로가 없어, 상신자가 게이트를 폴링해야만 결과를
+    알 수 있었다(선생님 직접 지적, 실사례 2026-08-13 07:20 반려·상신자 무통지).
+
+    best-effort — 이 함수의 실패가 게이트 해소 자체를 막지 않는다(호출부 transition_gate
+    가 이 함수를 await만 하고 별도 격리는 하지 않으므로, 예외를 여기서 전부 삼킨다 —
+    approval_delivery.dispatch_approval_result_reply 자체도 내부에서 SAVEPOINT로 이미
+    격리하지만, requester_id 파싱 등 그 앞 단계도 안전해야 한다)."""
+    try:
+        from app.services.doc import DOC_GATE_TYPE, DOC_GATE_WORK_ITEM_TYPE
+        if gate.work_item_type != DOC_GATE_WORK_ITEM_TYPE or gate.gate_type != DOC_GATE_TYPE:
+            return
+        if new_status not in ("approved", "rejected") or gate.resolver_id is None:
+            return
+
+        facts = gate.neutral_facts or {}
+        requester_raw = facts.get("requested_by_member_id")
+        if not requester_raw:
+            return
+        requester_id = uuid.UUID(str(requester_raw))
+
+        from app.models.doc import Doc
+        doc = (await session.execute(
+            select(Doc).where(Doc.id == gate.work_item_id, Doc.org_id == gate.org_id)
+        )).scalar_one_or_none()
+        if doc is None:
+            return
+
+        from app.services.approval_delivery import dispatch_approval_result_reply
+        await dispatch_approval_result_reply(
+            session, org_id=gate.org_id, doc=doc, gate_id=gate.id,
+            requester_id=requester_id, resolver_id=gate.resolver_id,
+            decision=new_status, resolution_note=gate.resolution_note,
+        )
+    except Exception:  # noqa: BLE001 — best-effort, 회신 실패가 게이트 해소를 막지 않는다.
+        logger.warning(
+            "approval-result 상신자 회신 실패 gate=%s", gate.id, exc_info=True,
+        )
 
 
 async def _resolve_artifact_canonicalize_gate(session: AsyncSession, gate: Gate, new_status: str) -> None:
