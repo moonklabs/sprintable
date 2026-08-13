@@ -166,6 +166,14 @@ class Settings(BaseSettings):
     # 활성화된다(테스트에서만 True로 켜 그 분기 자체는 계속 커버).
     agent_group_default_mentions: bool = False
 
+    # 핫픽스(2026-08-13, 선생님 직접 지시 — 페드루 경유): story #2617의 human-less chain
+    # escalation 알림이 「무감독 연쇄 감지」 푸시 폭주를 냈다 — 근본 구조 결함(선생님 진단):
+    # 게이트 조건(depth > cap)이 무인간 대화에서 **영구 참인 상시 상태**라 에피소드 개념이
+    # 없고, 24h dedup은 스팸을 하루 단위로 미룰 뿐 모든 human-less 대화가 매일 재발화한다.
+    # agent_group_default_mentions와 동형 패턴 — 코드는 그대로 두고 발화만 차단(기본 False).
+    # 재설계(상시 상태가 아니라 «새 폭주 에피소드/이상 패턴» 기반)는 별도 스토리(페드루) 대상.
+    chain_escalation_notify_enabled: bool = False
+
     # E-ARCH S2 정리(2026-07-21, LISTEN 제거 완료 후 발견): redis_consume_loop task 생성이
     # event_broker_redis_dual_publish_enabled 하나로만 게이트돼 있었다 — dual_publish(발행,
     # 모든 인스턴스가 필요)와 consume(구독+dispatch, SSE를 실제로 서빙하는 서비스만 필요)

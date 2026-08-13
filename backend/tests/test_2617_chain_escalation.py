@@ -15,6 +15,12 @@ _REAL_DB_URL = __import__("os").getenv("PARITY_TEST_DATABASE_URL") or __import__
 
 pytestmark = pytest.mark.destructive_schema
 
+# 핫픽스(2026-08-13): escalate_unsupervised_chain은 settings.chain_escalation_notify_enabled
+# (기본 False)로 게이트됐다 — 알림 폭주 원인이 dedup 실패가 아니라 "human-less 대화는
+# depth>cap이 영구 참"이라는 게이트 조건 자체였음(에피소드 개념 부재). 메커니즘(dedup 등)을
+# 계속 커버하는 테스트는 명시로 켠다.
+_ESCALATION_ON = patch("app.core.config.settings.chain_escalation_notify_enabled", True)
+
 
 @pytest.fixture
 def anyio_backend():
@@ -166,7 +172,8 @@ async def test_escalate_notifies_org_owner_admin_once_then_dedups(monkeypatch):
 
             client = _fakeredis_client()
             dn = AsyncMock()
-            with patch("app.services.redis_shared.get_client", return_value=client), \
+            with _ESCALATION_ON, \
+                 patch("app.services.redis_shared.get_client", return_value=client), \
                  patch("app.services.notification_dispatch.dispatch_notification", dn):
                 await escalate_unsupervised_chain(
                     s, org_id=org_id, conversation_id=conv_id, project_id=project_id,
@@ -204,7 +211,8 @@ async def test_escalate_different_conversations_each_notify_once():
 
             client = _fakeredis_client()
             dn = AsyncMock()
-            with patch("app.services.redis_shared.get_client", return_value=client), \
+            with _ESCALATION_ON, \
+                 patch("app.services.redis_shared.get_client", return_value=client), \
                  patch("app.services.notification_dispatch.dispatch_notification", dn):
                 await escalate_unsupervised_chain(
                     s, org_id=org_id, conversation_id=conv_a, project_id=project_id, depth=5, cap=4,
@@ -225,7 +233,8 @@ async def test_escalate_redis_down_fails_closed_no_spam():
 
     session = AsyncMock()
     dn = AsyncMock()
-    with patch("app.services.redis_shared.get_client", return_value=None), \
+    with _ESCALATION_ON, \
+         patch("app.services.redis_shared.get_client", return_value=None), \
          patch("app.services.notification_dispatch.dispatch_notification", dn):
         await escalate_unsupervised_chain(
             session, org_id=uuid.uuid4(), conversation_id=uuid.uuid4(),
@@ -242,8 +251,27 @@ async def test_escalate_swallows_exceptions_best_effort():
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=RuntimeError("boom"))
     client = _fakeredis_client()
-    with patch("app.services.redis_shared.get_client", return_value=client):
+    with _ESCALATION_ON, patch("app.services.redis_shared.get_client", return_value=client):
         await escalate_unsupervised_chain(
             session, org_id=uuid.uuid4(), conversation_id=uuid.uuid4(),
             project_id=uuid.uuid4(), depth=5, cap=4,
         )  # 예외 전파 없이 조용히 반환
+
+
+@pytest.mark.anyio
+async def test_escalate_noop_when_flag_off_by_default():
+    """핫픽스(2026-08-13, 선생님 직접 지시) — settings.chain_escalation_notify_enabled 기본
+    False에서는 dedup 판정조차 안 가고(Redis 왕복 0) 즉시 반환한다. 알림 폭주 재발 방지의
+    핵심 회귀가드 — 이 값이 실수로 다시 True 기본이 되면 이 테스트가 알려준다."""
+    from app.services.chain_escalation import escalate_unsupervised_chain
+
+    session = AsyncMock()
+    dn = AsyncMock()
+    with patch("app.services.redis_shared.get_client") as get_client_mock, \
+         patch("app.services.notification_dispatch.dispatch_notification", dn):
+        await escalate_unsupervised_chain(
+            session, org_id=uuid.uuid4(), conversation_id=uuid.uuid4(),
+            project_id=uuid.uuid4(), depth=999, cap=4,
+        )
+    dn.assert_not_awaited()
+    get_client_mock.assert_not_called(), "플래그 off면 dedup 판정 자체를 시도하면 안 된다(Redis 왕복 0)"
