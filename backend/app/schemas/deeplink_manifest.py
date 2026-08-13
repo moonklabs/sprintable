@@ -668,6 +668,20 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
         ),
+        # story #2617: human-less 대화의 chain-depth 초과를 org owner/admin에게 대화 밖
+        # 승격(chain_escalation.py) — 「읽어두면 좋은」 관측 알림이지 즉시 조치가 필요한
+        # 게 아니라 conversation.message와 동형으로 grade B.
+        DeepLinkManifestEntry(
+            app=DeepLinkAppFields(
+                type="conversation.unsupervised_chain_expired", target="chat_thread",
+                parent_tab=ParentTab.chat,
+            ),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
+            channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
+        ),
 
         # --- goal(epic) ---
         DeepLinkManifestEntry(
