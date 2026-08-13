@@ -41,10 +41,15 @@ _SEED = [
             },
         },
         # 잠정 — 실 해석은 #2633(도달 3층 해석기)의 몫. verdict는 이미 일어난 결과 통지라
-        # escalation(개입 요청) 대상은 없고, 그 work_item의 이해관계자에게만 전파.
+        # escalation(개입 요청) 대상은 없고, 그 work_item의 이해관계자에게만 전파. 둘 다
+        # kind=server_derived(닫힌 어휘) — payload 필드에서 못 뽑는 파생 역할(레지스트리
+        # docstring의 두 부류 규약 참조, 페드루 판정 2026-08-13).
         {
-            "escalation": {"target": "none"},
-            "broadcast": {"target": "work_item_stakeholders", "inherit_conversation_scope": True},
+            "escalation": {"kind": "server_derived", "target": "none"},
+            "broadcast": {
+                "kind": "server_derived", "target": "work_item_stakeholders",
+                "inherit_conversation_scope": True,
+            },
         },
     ),
     (
@@ -63,8 +68,11 @@ _SEED = [
             },
         },
         {
-            "escalation": {"target": "none"},
-            "broadcast": {"target": "work_item_stakeholders", "inherit_conversation_scope": True},
+            "escalation": {"kind": "server_derived", "target": "none"},
+            "broadcast": {
+                "kind": "server_derived", "target": "work_item_stakeholders",
+                "inherit_conversation_scope": True,
+            },
         },
     ),
     (
@@ -80,10 +88,17 @@ _SEED = [
                 "assigned_by_member_id": {"type": ["string", "null"], "format": "uuid"},
             },
         },
-        # 배정 대상이 바로 개입(작업 착수)을 요청받는 사람 — escalation target=assignee.
+        # 배정 대상이 바로 개입(작업 착수)을 요청받는 사람 — escalation kind=payload_field(payload의
+        # assignee_member_id에서 직접 뽑는다, 페드루 판정 2026-08-13: org 커스텀(P1b)도 이 부류만
+        # 등록 가능하게 열어 확장이 성립하는 축).
         {
-            "escalation": {"target": "assignee"},
-            "broadcast": {"target": "work_item_stakeholders", "inherit_conversation_scope": True},
+            "escalation": {
+                "kind": "payload_field", "target": "assignee", "member_id_field": "assignee_member_id",
+            },
+            "broadcast": {
+                "kind": "server_derived", "target": "work_item_stakeholders",
+                "inherit_conversation_scope": True,
+            },
         },
     ),
     (
@@ -104,8 +119,10 @@ _SEED = [
             },
         },
         {
-            "escalation": {"target": "none"},
-            "broadcast": {"target": "goal_owner", "inherit_conversation_scope": False},
+            "escalation": {"kind": "server_derived", "target": "none"},
+            "broadcast": {
+                "kind": "server_derived", "target": "goal_owner", "inherit_conversation_scope": False,
+            },
         },
     ),
 ]

@@ -17,8 +17,21 @@ event_definition_registry.py의 validate_event_definition_key가 진짜 강제 �
 관대해 조용히 통과한다 — 시드 4종 전부 명시 선언, event_definition_registry.py 참조).
 
 `routing`(상신선·전파선 선언)은 **선언**일 뿐 해석기가 아니다 — 실제 도달 계산(누구에게
-무엇으로)은 story #2633(발행 API + 도달 3층 해석기)의 몫. 여기 저장된 값의 shape은 그
-해석기의 계약이 확정되기 전까지 잠정(seed 주석 참조).
+무엇으로)은 story #2633(발행 API + 도달 3층 해석기)의 몫. 단 각 target의 **부류**는 여기서
+확定(페드루 판정 2026-08-13, doc event-registry-core-p1-plan §2-1 갱신):
+
+- `kind="payload_field"`: 역할을 payload의 특정 필드에서 직접 뽑는다 — `member_id_field`
+  필수(예: `{"kind":"payload_field","target":"assignee","member_id_field":
+  "assignee_member_id"}`). **org 커스텀(P1b, story #2636)이 등록 가능한 유일한 부류** —
+  스키마가 매핑을 선언하니 해석기가 제네릭으로 돈다("정의=데이터" 철학의 연장).
+- `kind="server_derived"`: payload 필드로 못 뽑는 파생 역할(예: `work_item_stakeholders`
+  — work_item_type+id로 그 타입별 이해관계자를 서버가 조회, `goal_owner`) — `member_id_
+  field` 없음. 해석기(#2633)의 **닫힌 어휘**로만 존재한다 — 그 어휘 밖 target 레이블은
+  발행 시 명시 오류(조용한 무해석 금지, event_definition_registry.py의 SERVER_DERIVED_
+  TARGETS 참조). org 커스텀은 이 부류를 등록할 수 없다(서버가 모르는 파생 역할이라 해석
+  불가능한 정의를 만들게 되므로).
+
+시드 4종의 실 예시는 alembic/versions/0245_event_definitions.py의 _SEED 참조.
 """
 from __future__ import annotations
 

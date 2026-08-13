@@ -55,7 +55,7 @@ async def _seed_org(session, *, slug="acme"):
 async def test_seed_four_presets_exist_with_valid_schema_roundtrip():
     from sqlalchemy import select
     from app.models.event_definition import EventDefinition
-    from app.services.event_definition_registry import validate_event_payload
+    from app.services.event_definition_registry import validate_event_payload, validate_event_routing
 
     engine, Session = await _realdb_session()
     try:
@@ -86,6 +86,7 @@ async def test_seed_four_presets_exist_with_valid_schema_roundtrip():
             for key, payload_schema, routing in m0245._SEED:
                 assert payload_schema.get("additionalProperties") is False, key
                 assert isinstance(routing, dict) and "escalation" in routing and "broadcast" in routing, key
+                validate_event_routing(routing)  # 두 부류 계약(payload_field/server_derived) 준수
 
                 ed = EventDefinition(
                     id=uuid.uuid4(), key=key, org_id=None,
@@ -306,3 +307,72 @@ def test_seed_schemas_validate_realistic_payloads(key, payload, valid):
     else:
         with pytest.raises(InvalidEventPayloadError):
             validate_event_payload(schema_by_key[key], payload)
+
+
+# ─── routing 두 부류 계약(payload_field/server_derived, 페드루 판정 2026-08-13) ───────
+
+def test_routing_payload_field_requires_member_id_field():
+    from app.services.event_definition_registry import InvalidEventRoutingError, validate_event_routing
+
+    routing = {
+        "escalation": {"kind": "payload_field", "target": "assignee"},  # member_id_field 누락
+        "broadcast": {"kind": "server_derived", "target": "none"},
+    }
+    with pytest.raises(InvalidEventRoutingError):
+        validate_event_routing(routing)
+
+
+def test_routing_payload_field_with_member_id_field_valid():
+    from app.services.event_definition_registry import validate_event_routing
+
+    routing = {
+        "escalation": {
+            "kind": "payload_field", "target": "assignee", "member_id_field": "assignee_member_id",
+        },
+        "broadcast": {"kind": "server_derived", "target": "work_item_stakeholders"},
+    }
+    validate_event_routing(routing)
+
+
+def test_routing_server_derived_rejects_member_id_field():
+    from app.services.event_definition_registry import InvalidEventRoutingError, validate_event_routing
+
+    routing = {
+        "escalation": {"kind": "server_derived", "target": "none", "member_id_field": "oops"},
+        "broadcast": {"kind": "server_derived", "target": "none"},
+    }
+    with pytest.raises(InvalidEventRoutingError):
+        validate_event_routing(routing)
+
+
+def test_routing_server_derived_rejects_target_outside_closed_vocabulary():
+    from app.services.event_definition_registry import InvalidEventRoutingError, validate_event_routing
+
+    routing = {
+        "escalation": {"kind": "server_derived", "target": "none"},
+        "broadcast": {"kind": "server_derived", "target": "made_up_target"},
+    }
+    with pytest.raises(InvalidEventRoutingError):
+        validate_event_routing(routing)
+
+
+def test_routing_org_custom_rejects_server_derived_kind():
+    """story #2636(org 커스텀 등록)은 allow_server_derived=False로 호출해야 — 서버가 모르는
+    파생 역할을 등록하게 두면 안 된다."""
+    from app.services.event_definition_registry import InvalidEventRoutingError, validate_event_routing
+
+    routing = {
+        "escalation": {"kind": "server_derived", "target": "none"},
+        "broadcast": {
+            "kind": "payload_field", "target": "custom", "member_id_field": "owner_member_id",
+        },
+    }
+    with pytest.raises(InvalidEventRoutingError):
+        validate_event_routing(routing, allow_server_derived=False)
+
+
+def test_routing_missing_leg_rejected():
+    from app.services.event_definition_registry import InvalidEventRoutingError, validate_event_routing
+
+    with pytest.raises(InvalidEventRoutingError):
+        validate_event_routing({"escalation": {"kind": "server_derived", "target": "none"}})

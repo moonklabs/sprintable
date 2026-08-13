@@ -16,6 +16,13 @@ import jsonschema
 _PRESET_KEY_RE = re.compile(r"^preset\.[a-z0-9_]+(\.[a-z0-9_]+)+$")
 _ORG_KEY_RE = re.compile(r"^org\.([a-z0-9-]+)\.[a-z0-9_]+(\.[a-z0-9_]+)*$")
 
+# routing.{escalation,broadcast}.kind="server_derived"의 닫힌 어휘(model.py docstring 참조,
+# 페드루 판정 2026-08-13) — story #2633(해석기)이 실제로 이 target들을 member_id로 풀어야
+# 하므로, 여기 없는 target을 server_derived로 등록하면 해석기가 절대 못 푸는 정의가 만들어진다
+# — validate_event_routing이 등록 시점에 막는다(발행 시점에야 발견되는 것보다 이르게).
+SERVER_DERIVED_TARGETS = frozenset({"none", "work_item_stakeholders", "goal_owner"})
+_ROUTING_KINDS = frozenset({"payload_field", "server_derived"})
+
 
 class InvalidEventDefinitionKeyError(ValueError):
     """key 네임스페이스 규칙 위반 — AC2."""
@@ -27,6 +34,11 @@ class InvalidEventPayloadError(ValueError):
     def __init__(self, message: str, *, errors: list[str]) -> None:
         super().__init__(message)
         self.errors = errors
+
+
+class InvalidEventRoutingError(ValueError):
+    """routing 선언이 두 부류 계약(model.py docstring)을 위반 — 등록 시점에 막아 #2633
+    해석기가 절대 못 푸는 정의가 저장되는 것을 방지."""
 
 
 def validate_event_definition_key(
@@ -56,6 +68,49 @@ def validate_event_definition_key(
             f"key의 네임스페이스 slug({m.group(1)!r})가 호출자 org의 slug({org_slug!r})와 "
             "일치하지 않습니다 — 타 org 네임스페이스 도용 차단."
         )
+
+
+def _validate_routing_leg(leg: dict, *, leg_name: str, allow_server_derived: bool) -> None:
+    kind = leg.get("kind")
+    if kind not in _ROUTING_KINDS:
+        raise InvalidEventRoutingError(
+            f"routing.{leg_name}.kind는 {sorted(_ROUTING_KINDS)} 중 하나여야 합니다: {kind!r}"
+        )
+    if kind == "payload_field":
+        if not leg.get("member_id_field"):
+            raise InvalidEventRoutingError(
+                f"routing.{leg_name}.kind='payload_field'는 member_id_field가 필수입니다."
+            )
+        return
+
+    # kind == "server_derived"
+    if leg.get("member_id_field"):
+        raise InvalidEventRoutingError(
+            f"routing.{leg_name}.kind='server_derived'는 member_id_field를 가질 수 없습니다 "
+            "(payload 필드가 아니라 서버 파생 역할이므로)."
+        )
+    if not allow_server_derived:
+        raise InvalidEventRoutingError(
+            f"routing.{leg_name}.kind='server_derived'는 org 커스텀 정의에 등록할 수 없습니다 "
+            "— 서버가 모르는 파생 역할은 해석 불가능한 정의를 만듭니다(payload_field만 허용)."
+        )
+    target = leg.get("target")
+    if target not in SERVER_DERIVED_TARGETS:
+        raise InvalidEventRoutingError(
+            f"routing.{leg_name}.target={target!r}은 server_derived 닫힌 어휘"
+            f"({sorted(SERVER_DERIVED_TARGETS)}) 밖입니다 — #2633 해석기가 풀 수 없는 정의."
+        )
+
+
+def validate_event_routing(routing: dict, *, allow_server_derived: bool = True) -> None:
+    """routing.escalation·routing.broadcast 둘 다 두 부류 계약(model.py docstring)을 지키는지
+    확인 — 프리셋 시드는 allow_server_derived=True(기본), story #2636의 org 커스텀 등록
+    경로는 allow_server_derived=False로 호출해 payload_field만 허용해야 한다."""
+    for leg_name in ("escalation", "broadcast"):
+        leg = routing.get(leg_name)
+        if not isinstance(leg, dict):
+            raise InvalidEventRoutingError(f"routing.{leg_name}이 없거나 object가 아닙니다.")
+        _validate_routing_leg(leg, leg_name=leg_name, allow_server_derived=allow_server_derived)
 
 
 def validate_event_payload(payload_schema: dict, payload: dict) -> None:
