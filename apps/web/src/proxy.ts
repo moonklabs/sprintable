@@ -94,6 +94,11 @@ const PUBLIC_PREFIX = [
   '/internal-dogfood',
   '/terms',
   '/privacy',
+  // story #2606 — 결제 화면(Toss 체크아웃 다이얼로그)·푸터에서 링크되는 공개 법적 문서.
+  // /terms·/privacy처럼 로그인 없이 봐야 하는데, 새 라우트 추가 시 이 목록 등록을
+  // 놓치면(위 두 개와 별개 가드 — route-resolve.ts RESERVED_FIRST_SEGMENTS와는 다른 축)
+  // 방문자가 보호 라우트로 오인돼 /login 307로 튕긴다.
+  '/refund-policy',
 ];
 
 export const SP_AT_COOKIE = 'sp_at';

@@ -63,6 +63,13 @@ describe('proxy', () => {
     expect(response.status).toBe(200);
   });
 
+  it('treats /refund-policy as public — no 307-to-login (story #2606)', async () => {
+    // /terms·/privacy와 동형 — Toss 체크아웃/푸터에서 링크되는 공개 법적 문서. 이 목록 등록을
+    // 놓치면 로그인 없는 방문자가 보호 라우트로 오인돼 /login 307로 튕긴다.
+    const response = await middleware(makeRequest('/refund-policy'));
+    expect(response.status).toBe(200);
+  });
+
   it('treats /auth/native as public — no 307-to-login (story 26170479, 민군 축c 실측 발견)', async () => {
     // /auth/native는 세션을 만드는 공개 엔드포인트라 호출 시점엔 세션이 없는 게 정상 — PUBLIC
     // 목록 누락 시 보호 라우트로 오인돼 /login 307로 튕겨나간다(실 왕복 통합검증에서 잡힌
