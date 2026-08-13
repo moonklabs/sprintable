@@ -91,3 +91,26 @@ async def test_tier_aware_paid_allows_more(monkeypatch):
         assert isinstance(resp, StreamingResponse)
     finally:
         ag._agent_connections.pop(aid_str, None)
+
+
+@pytest.mark.anyio
+async def test_global_cap_rejection_does_not_leak_per_key_dict_entry(monkeypatch):
+    """story #2602 ⓑ: `_agent_connections`는 defaultdict(set) — per-key 한도 체크의
+    `_agent_connections[agent_id_str]` 서브스크립트는 **조회만으로도** 빈 set 항목을 만든다.
+    이 agent는 기존 연결이 0개라 per-key 체크는 통과하지만(0 < limit), 뒤이은 전역 cap(503)에서
+    거부된다 — 이 요청이 실제 연결을 하나도 등록 못 했는데도(`.add(queue)`엔 도달 못 함) dict에
+    영구 흔적을 남기면 안 된다("거부가 자원을 만드는" 결함, 실제 slot 카운트엔 무해하지만
+    agent_id마다 무한정 쌓이는 dict key 누수)."""
+    aid = uuid.uuid4()
+    req, auth, aid_str = _patch(monkeypatch, aid, org_plan="free")
+    assert aid_str not in ag._agent_connections  # 사전조건 — 이 agent는 한 번도 등록된 적 없음
+    monkeypatch.setattr(ag, "_agent_sse_connection_count", ag._MAX_AGENT_SSE_CONNECTIONS)  # 전역 cap 초과
+    try:
+        with pytest.raises(HTTPException) as exc:
+            await ag.agent_stream(req, auth=auth)
+        assert exc.value.status_code == 503
+        assert aid_str not in ag._agent_connections, (
+            "전역 cap에 거부된 요청이 per-key dict에 빈 항목을 남김(#2602 ⓑ 재발)"
+        )
+    finally:
+        ag._agent_connections.pop(aid_str, None)

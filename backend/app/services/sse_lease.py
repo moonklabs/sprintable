@@ -7,6 +7,16 @@ per-key `len(_agent_connections[...])`)를 Redis ZSET 으로 공유 → 멀티�
   scope 예: "events_global"(브라우저 /events/stream 전역)·"agent_global"(/agent/stream 전역)·"perkey:{agent_id}".
 ⭐**TTL 주경로**: 좀비 연결(refresh 끊김)은 score 지나면 count 에서 자동 evict → #2128(disconnect 미감지·
   finally 미실행) 을 부분 완화(현재는 리퍼가 전혀 없어 3600s 까지 점유). 명시 release(finally)는 최적화.
+⚠️story #2602(2026-08-13, dev 라이브 재현): 위 "TTL 주경로"는 **refresh 가 실제로 멈춘 경우에만** 성립한다
+  — refresh(`agent_gateway.py` 30초 틱)는 `request.is_disconnected()` 로 게이트되는 같은 루프 안에서
+  돌고, 그 판정 자체가 이 코드베이스에서 이미 여러 번(#2183·까심 AC6) 불신뢰로 확認됐다. **클라가 죽었는데
+  서버가 그걸 못 알아챈 orphan**은 refresh 도 안 멈춘다 — 매 30초 틱마다 자기 lease 를 스스로 갱신해
+  `_TTL_SEC`(90초) 만료가 영영 안 온다. 이 실패군에서 실제 상한선은 이 TTL 이 아니라
+  `agent_gateway._AGENT_SSE_LIFESPAN_SEC`(+jitter, 기본 ~300~330초) 능동 종료뿐이다(disconnect 감지와
+  무관하게 발동 — #2128 참조). Retry-After 계산(`earliest_expiry`)이 "방금 갱신된 live" 구간을 만나면
+  flat default 로 폴백하는 것(#2582 PO 리뷰, 2026-08-12)은 **의도된 그대로**다 — 그 순간엔 live 세션과
+  이 orphan 을 스코어만으로 구분할 수 없어서다(구분 시도가 오히려 다른 세션의 빠른 정상종료를 못 보게
+  만든다). 그러니 이 TTL 을 "90초 안에 자연 회수"로 신뢰하지 말 것 — 실제 정직한 상한은 lifespan cap.
 ⭐**원자성**: check(evict+ZCARD)+조건부 ZADD 를 **Lua 1스크립트**로 실행(TOCTOU 방지 — 동시 acquire 가
   둘 다 count<limit 을 보고 초과 획득하는 것 차단).
 
