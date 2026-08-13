@@ -51,7 +51,16 @@ async def escalate_unsupervised_chain(
 ) -> None:
     """human-less 대화가 chain cap을 넘었음을 org owner/admin에게 대화 밖 알림으로 승격.
     best-effort·24h/대화 dedup·실패해도 메시지 발신 트랜잭션을 막지 않는다(caller가
-    savepoint로 격리해 호출하는 것을 전제 — doc.py의 approval 알림과 동일 관례)."""
+    savepoint로 격리해 호출하는 것을 전제 — doc.py의 approval 알림과 동일 관례).
+
+    ⛔핫픽스(2026-08-13, 선생님 직접 지시): settings.chain_escalation_notify_enabled(기본
+    False)로 게이트 — 원 게이트 조건(depth > cap)이 human-less 대화에서 영구 참인 상시
+    상태라 에피소드 개념 없이 24h마다 전량 재발화해 알림 폭주를 냈다. 재설계(상시 상태가
+    아니라 새 폭주 에피소드/이상 패턴 기반) 전까지 발화만 차단(코드/dedup 로직은 유지 —
+    agent_group_default_mentions와 동형 패턴)."""
+    from app.core.config import settings
+    if not settings.chain_escalation_notify_enabled:
+        return
     try:
         if not await _claim_escalation_slot(conversation_id):
             return  # 쿨다운 중 — 이미 알렸음(스팸 방지, PO 조건(a))

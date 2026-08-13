@@ -165,6 +165,10 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # 핫픽스(2026-08-13, 선생님 직접 지시): agent_group_default_mentions 필드 신설로 93→94
     # (AGENT_GROUP_DEFAULT_MENTIONS 포함) — #2603 그룹챗 mentions 기본계약을 opt-in으로
     # 되돌리는 kill switch(기본 False). 가드가 신규 필드를 설계대로 잡은 것.
+    # 핫픽스(2026-08-13, 선생님 직접 지시②): chain_escalation_notify_enabled 필드 신설로
+    # 94→95(CHAIN_ESCALATION_NOTIFY_ENABLED 포함) — #2617 human-less chain escalation
+    # 알림이 에피소드 개념 없이 상시 재발화해 폭주를 냈다 — 재설계 전까지 발화만 차단하는
+    # kill switch(기본 False). 가드가 신규 필드를 설계대로 잡은 것.
     assert "PRESENCE_REDIS_ENABLED" in keys and "SSE_TRANSIENT_REPLAY_ENABLED" in keys
     assert "REQUIRE_VERIFIED_EMAIL_FOR_ORG_CREATE" in keys
     assert "DATABASE_URL_READ" in keys
@@ -174,4 +178,5 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     assert "ORG_BILLING_KEY_ENCRYPTION_KEY" in keys
     assert "TOSS_WEBHOOK_SECRET" in keys
     assert "AGENT_GROUP_DEFAULT_MENTIONS" in keys
-    assert len(keys) == 94
+    assert "CHAIN_ESCALATION_NOTIFY_ENABLED" in keys
+    assert len(keys) == 95
