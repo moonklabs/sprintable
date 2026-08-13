@@ -777,6 +777,14 @@ jobs:
       - name: "Verify no new tint-background × family-color-text usage (story #2420 AC7 regression guard)"
         run: pnpm --filter web verify:no-new-tint-color-text
 
+      # story #2590 (A) 정적 프리필터: 자매 가드 verify:no-new-tint-color-text는 «한 리터럴 안»의
+      # bg-X+text-X만 본다. 이 가드는 AST로 «조상 요소가 pale-tint 배경, 자식 요소가 계열색 글자»인
+      # 교차-요소 조합을 잡는다(#2960 hitl-card·#2940 cluster류). baseline(develop 기준 시드) 밖의
+      # 새 자리만 실패. 정적이라 못 재는 자리(조건부 조상·컴포넌트 경계·불투명 재설정)는 (B) axe가
+      # 실 픽셀로 최종 판정한다 — docs/contrast-guard.md AC4 참조.
+      - name: "Verify no new cross-element tint × family-color-text (story #2590 A regression guard)"
+        run: pnpm --filter web verify:cross-element-tint-text
+
 
       # story #2371 회귀가드: `scripts/check-i18n-keys.js`(code→messages missing-key 축)를
       # 처음으로 CI에 건다 — 이전엔 CI/husky/package.json 어디에도 안 걸려 있었고 손으로
@@ -827,3 +835,134 @@ jobs:
       # 재발을 clean-checkout 빌드 산출물(.next/standalone) 검사로 자동 차단.
       - name: Verify build schema integrity (story d3dd358b regression guard)
         run: pnpm --filter web verify:build-schema-integrity
+
+  contrast-guard-e2e:
+    name: "Contrast guard (axe runtime · story #2590 B)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    # story #2590 (B): (A) 정적 프리필터(ci 잡)가 원리적으로 못 재는 교차-요소·교차-계열·알파·
+    # 상태(hover) 대비를 실제 렌더된 픽셀에서 axe-core color-contrast로 전수한다(최종 authority).
+    # 인증 로그인(owner@sprintable.dev)이 필요해 backend-test처럼 pgvector postgres + alembic을
+    # 세우고, 그 위에 FastAPI(uvicorn)와 Next(dev)를 띄운 뒤 chromium을 돌린다. docs/contrast-guard.md 참조.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sprintable
+          POSTGRES_PASSWORD: sprintable
+          POSTGRES_DB: sprintable_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+      DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
+      # FastAPI(security._get_secret)와 Next proxy(getJwtSecretBytes)가 «같은» JWT_SECRET을 봐야
+      # 로그인 쿠키(sp_at) 검증이 통과한다 — 다르면 login 200 뒤 /inbox 이동에서 실패한다.
+      JWT_SECRET: ci-e2e-contrast-guard-secret-at-least-32-chars
+      # CI(비-Cloud-Run·비-pytest)에서 앱이 배포환경으로 오인돼 secret 부재로 fail-closed 되는 것을
+      # 막는다(backend/.env.example is_really_local 게이트).
+      SPRINTABLE_LOCAL_DEV: '1'
+      NEXT_PUBLIC_FASTAPI_URL: http://localhost:8000
+      NEXT_PUBLIC_APP_URL: http://localhost:3108
+      APP_BASE_URL: http://localhost:3108
+      PORT: '3108'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 'latest'
+
+      - name: alembic upgrade heads (baseline schema)
+        working-directory: backend
+        run: uv run alembic upgrade heads
+
+      # e2e 로그인 계정(owner@sprintable.dev/password123)은 리포 어디에서도 시드되지 않고,
+      # register API는 password 정책(대/소/숫자/특수 중 ≥3종)상 이 비밀번호를 거부한다. 그래서
+      # CI가 앱 자체 해셔(argon2)로 users 행을 직접 넣는다(login 핸들러는 정책을 안 걸고 해시만 검증).
+      - name: Seed e2e owner user
+        working-directory: backend
+        run: |
+          uv run python - <<'PY'
+          import asyncio
+          from sqlalchemy import select
+          from app.core.database import async_session_factory
+          from app.core.security import hash_password
+          from app.models.user import User
+
+          async def main() -> None:
+              async with async_session_factory() as session:
+                  existing = await session.scalar(
+                      select(User).where(User.email == "owner@sprintable.dev")
+                  )
+                  if existing:
+                      print("e2e owner already present")
+                      return
+                  session.add(User(
+                      email="owner@sprintable.dev",
+                      hashed_password=hash_password("password123"),
+                      is_active=True,
+                      email_verified=True,
+                  ))
+                  await session.commit()
+                  print("e2e owner created")
+
+          asyncio.run(main())
+          PY
+
+      - name: Start FastAPI backend
+        working-directory: backend
+        run: |
+          nohup uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/backend.log 2>&1 &
+          echo "waiting for backend health..."
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8000/api/v2/health > /dev/null; then
+              echo "backend healthy"; exit 0
+            fi
+            sleep 2
+          done
+          echo "backend failed to become healthy"; cat /tmp/backend.log; exit 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright chromium
+        run: pnpm --filter web exec playwright install --with-deps chromium
+
+      # playwright.config webServer가 `pnpm dev`로 Next(:3108)를 띄우고 e2e/global-setup이
+      # owner 로그인 → playwright/.auth/owner.json storageState를 만든 뒤 contrast-guard.spec을 돈다.
+      - name: Run contrast-guard e2e (axe color-contrast)
+        run: pnpm --filter web e2e:contrast
+
+      - name: Dump backend log on failure
+        if: failure()
+        run: cat /tmp/backend.log || true
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
