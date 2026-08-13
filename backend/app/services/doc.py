@@ -26,29 +26,51 @@ async def _notify_doc_approval_requested(
     session: AsyncSession, org_id: uuid.UUID, doc: Doc, gate_id: uuid.UUID, *, requester_id: uuid.UUID
 ) -> None:
     """doc-gate v2 갭2: doc 상신 → org owner/admin 휴먼 결재자에게 in-app 알림(상신자 본인 제외).
-    best-effort·비중단(알림 실패가 상신을 막지 않음). transition_gate 해소 알림과 대칭."""
+    best-effort·비중단(알림 실패가 상신을 막지 않음). transition_gate 해소 알림과 대칭.
+
+    story #2604 P2(delivery-contract-blueprint-v0-1): 벨 알림과 별개로, 같은 approver_ids에
+    대해 챗 승인요청 카드(승인자별 DM + message_kind="request")도 배달한다 — 둘은 독립 채널
+    (하나 실패해도 다른 하나는 그대로) [[project_...]] 카드 렌더 자체는 FE(미르코 #2614) 몫,
+    여기서는 이벤트 스키마·Gate 연결까지."""
+    approver_ids: list[uuid.UUID] = []
     try:
         from app.models.project import OrgMember
-        from app.services.notification_dispatch import dispatch_notification
-        approver_ids = (await session.execute(
+        approver_ids = list((await session.execute(
             select(OrgMember.id).where(
                 OrgMember.org_id == org_id,
                 OrgMember.role.in_(("owner", "admin")),
                 OrgMember.deleted_at.is_(None),  # 산티아고 RC: 삭제/탈퇴 owner/admin 제외(정보노출·실결재권자만)
                 OrgMember.id != requester_id,
             )
-        )).scalars().all()
-        if approver_ids:
-            await dispatch_notification(
-                session, org_id=org_id, event_type="doc_approval_requested",
-                target_member_ids=list(approver_ids),
-                title="문서 결재 요청",
-                body=f"'{doc.title}' 문서가 결재 대기 중입니다.",
-                reference_type="gate", reference_id=gate_id,
-                source_project_id=doc.project_id,
-            )
-    except Exception:  # noqa: BLE001 — 알림 실패는 상신 비중단.
-        logger.warning("doc 상신 결재자 알림 실패 doc=%s", doc.id, exc_info=True)
+        )).scalars().all())
+    except Exception:  # noqa: BLE001 — 조회 실패는 상신 비중단.
+        logger.warning("doc 상신 결재자 조회 실패 doc=%s", doc.id, exc_info=True)
+        return
+
+    if not approver_ids:
+        return
+
+    try:
+        from app.services.notification_dispatch import dispatch_notification
+        await dispatch_notification(
+            session, org_id=org_id, event_type="doc_approval_requested",
+            target_member_ids=approver_ids,
+            title="문서 결재 요청",
+            body=f"'{doc.title}' 문서가 결재 대기 중입니다.",
+            reference_type="gate", reference_id=gate_id,
+            source_project_id=doc.project_id,
+        )
+    except Exception:  # noqa: BLE001 — 벨 알림 실패는 상신 비중단.
+        logger.warning("doc 상신 결재자 벨 알림 실패 doc=%s", doc.id, exc_info=True)
+
+    try:
+        from app.services.approval_delivery import dispatch_approval_request_cards
+        await dispatch_approval_request_cards(
+            session, org_id=org_id, doc=doc, gate_id=gate_id,
+            requester_id=requester_id, approver_ids=approver_ids,
+        )
+    except Exception:  # noqa: BLE001 — 카드 배달 실패는 상신 비중단(Gate inbox 폴백 항상 존재).
+        logger.warning("doc 상신 결재자 카드(챗) 배달 실패 doc=%s", doc.id, exc_info=True)
 
 
 class DocTransitionError(Exception):
