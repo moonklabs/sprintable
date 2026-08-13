@@ -24,9 +24,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.member import Member
 
+# story #2608 후속(카디르 QA 발견, #2603 종결부): 64자 초과 handle + 그 65번째 문자가
+# 하이픈인 엣지에서, 정규식이 그 64번째 문자에서 word-boundary(\b)를 만족해(하이픈은 \w가
+# 아니라 alnum→hyphen 전환이 곧 경계) **긴 handle을 64자로 자른 접두사**를 캡처하고, 그
+# 접두사가 우연히 다른(짧은) 에이전트의 실 handle과 정확 일치하면 엉뚱한 상대에게 멘션이
+# 가는 오매칭이 난다(AC4 위반 — 부분 문자열 오매칭 금지). 정규식의 캡처 상한(_MAX_HANDLE_LEN)
+# 과 채번측 상한(generate_unique_handle)을 같은 상수로 묶어, "생성되는 handle은 절대 파서의
+# 캡처 한도를 넘지 않는다"를 구조적으로 보장한다(둘이 따로 드리프트할 수 없음).
+_MAX_HANDLE_LEN = 64
+
 # word-boundary: `@` 앞이 단어문자가 아니어야(이메일 `user@host`의 `@host`를 멘션으로 오인 안 함).
 # handle 문자셋은 슬러그 규칙(영숫자+하이픈)과 대칭 — generate_unique_handle이 만드는 형태만 매치.
-_HANDLE_TOKEN_RE = re.compile(r"(?<![\w@])@([a-zA-Z0-9][a-zA-Z0-9-]{0,63})\b")
+_HANDLE_TOKEN_RE = re.compile(
+    r"(?<![\w@])@([a-zA-Z0-9][a-zA-Z0-9-]{0," + str(_MAX_HANDLE_LEN - 1) + r"})\b"
+)
 
 
 def extract_handle_tokens(content: str) -> list[str]:
@@ -68,13 +79,25 @@ async def resolve_handle_mentions(
     return set(rows)
 
 
+# "-" + 최대 3자리 카운터(-999)까지 여유 — 그 이상 겹치는 org는 실사용에서 안 봤고, 설령
+# 그래도 아래 while이 -1000, -1001...로 계속 길이를 넘길 일은 없다(_SUFFIX_RESERVE가 그
+# 자릿수보다 넉넉해 조기 오버플로우 없음).
+_SUFFIX_RESERVE = 6
+
+
 def slugify_handle_base(name: str) -> str:
     """이름 → ASCII 슬러그 후보(고유성 보장 전 base). 결과가 빈 문자열이면(이름이 전부
     비ASCII, 예: 순한글 이름) 호출부가 "agent" 폴백을 쓴다 — @handle 파서가 word-boundary
     정규식으로 매칭하므로 handle 자체는 ASCII 토큰이어야 안전(0241 마이그의 백필 로직과 동형,
-    런타임 신규 생성용으로 별도 보관 — 마이그는 훗날 재실행 안 되므로 독립 사본이 맞다)."""
+    런타임 신규 생성용으로 별도 보관 — 마이그는 훗날 재실행 안 되므로 독립 사본이 맞다).
+
+    story #2608 후속(카디르 QA #2603 종결부 발견): `-N` 접미사가 붙을 여유(_SUFFIX_RESERVE)를
+    남기고 `_MAX_HANDLE_LEN`으로 자른다 — 생성되는 handle이 파서의 캡처 상한을 넘으면 그 자체가
+    "자기 자신을 완전히 멘션할 수 없는 handle"이 되는 모순이라(위 _HANDLE_TOKEN_RE 주석), 원천
+    차단이 근본 fix다(사후 파서 보정이 아니라)."""
     normalized = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
-    return re.sub(r"[^a-zA-Z0-9]+", "-", normalized).strip("-").lower()
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", normalized).strip("-").lower()
+    return slug[: _MAX_HANDLE_LEN - _SUFFIX_RESERVE].strip("-")
 
 
 async def generate_unique_handle(db: AsyncSession, *, org_id: uuid.UUID, name: str) -> str:
