@@ -14,10 +14,10 @@ from __future__ import annotations
 import logging
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.conversation import Conversation, ConversationMessage
+from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.doc import Doc
 
 logger = logging.getLogger(__name__)
@@ -31,25 +31,48 @@ async def _get_or_create_approval_dm(
     requester_id: uuid.UUID,
     approver_id: uuid.UUID,
 ) -> Conversation:
-    """requester↔approver 기존 dm 재사용(가장 최근 1개), 없으면 생성.
+    """requester↔approver 기존 dm 재사용(참가자 집합 기준, 가장 최근 활성 1개), 없으면 생성.
 
     일반 create_conversation 엔드포인트의 "매 호출 신규" 정책(EF-S2, db75ecd0)과 의도적으로
     다르다 — 승인자당 안정적 단일 스레드(카드 상태 갱신 대상)가 필요한 시스템 배달 경로라서,
     여기 한정으로 get-or-create를 쓴다(엔드포인트 자체는 무변경).
 
+    ⛔story #2628(2026-08-13, 선생님 실사용 지적): dm_pair_key **단독** 매치는 안 쓴다 — 그
+    컬럼이 없는(백필 갭·프로덕트 초기 생성 등) 기존 방을 "기존 페어 DM 없음"으로 오판해 새
+    DM을 만들어 대화가 쪼개지는 사고가 났다(선생님↔PO 실 사례: 방 97ee5509는 type=dm이나
+    dm_pair_key가 비어 카드가 새 방 59cda904로 흘러감). 표식(키)과 실물(참가자 집합)이
+    갈리면 실물이 정본이라, 조회를 "이 conversation의 참가자가 정확히 {requester_id,
+    approver_id} 2인"(ConversationParticipant 실물 조회 — 인원수 정확히 2·둘 다 매치)으로
+    바꾼다. dm_pair_key는 이제 조회에 전혀 안 쓴다(신설 시 태깅만 유지 — `_create_conversation_
+    record`가 이미 하는 일, 향후 최적화 여지로 남겨둠). 최근 활성 우선은 `updated_at DESC`
+    (메시지가 올 때마다 갱신되는 값 — `created_at`보다 "활성" 의미에 더 맞는다).
+
     _enforce_agent_creator_policy 미적용: 사용자가 여는 방이 아니라, 게이트가 이미 독립적으로
     인가한(요청자=문서 상신자, 대상=org owner/admin) 시스템 발신 알림 배달이다.
     """
-    pair_key = "|".join(str(m) for m in sorted((requester_id, approver_id)))
+    target_ids = (requester_id, approver_id)
+    matched_conv_ids = (
+        select(ConversationParticipant.conversation_id)
+        .where(ConversationParticipant.member_id.in_(target_ids))
+        .group_by(ConversationParticipant.conversation_id)
+        .having(func.count(ConversationParticipant.member_id.distinct()) == 2)
+    ).scalar_subquery()
+    exactly_two_participants = (
+        select(ConversationParticipant.conversation_id)
+        .where(ConversationParticipant.conversation_id.in_(matched_conv_ids))
+        .group_by(ConversationParticipant.conversation_id)
+        .having(func.count() == 2)
+    ).scalar_subquery()
+
     existing = (
         await db.execute(
             select(Conversation)
             .where(
                 Conversation.org_id == org_id,
                 Conversation.type == "dm",
-                Conversation.dm_pair_key == pair_key,
+                Conversation.id.in_(exactly_two_participants),
             )
-            .order_by(Conversation.created_at.desc())
+            .order_by(Conversation.updated_at.desc())
             .limit(1)
         )
     ).scalars().first()
