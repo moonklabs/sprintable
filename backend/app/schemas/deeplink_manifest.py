@@ -696,6 +696,24 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
         ),
+        # story #2630: 서킷브레이커 open — 위 unsupervised_chain_expired와 달리 «관측»이
+        # 아니라 agent 발신이 실제로 막힌 상태다. org owner/admin이 해제(release) 액션을
+        # 취할 수 있어야 풀리므로(manual release_mode가 기본) A2(조치 필요·비긴급) —
+        # SLA성 즉시대응은 아니라 A1은 과함. reference_id는 conversation_id가 아니라
+        # chain_circuit_breaker.id(release 엔드포인트가 그 id로 타겟팅, chain_escalation.py
+        # evaluate_unsupervised_chain_episode 참조) — target은 그래도 chat_thread(탭하면
+        # 그 대화로 이동, 해제 액션 자체는 알림 카드에서).
+        DeepLinkManifestEntry(
+            app=DeepLinkAppFields(
+                type="conversation.circuit_breaker_opened", target="chat_thread",
+                parent_tab=ParentTab.chat,
+            ),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
+            channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
+        ),
 
         # --- goal(epic) ---
         DeepLinkManifestEntry(

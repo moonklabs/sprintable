@@ -96,6 +96,7 @@ from app.models.visual_artifact import ArtifactNode, ArtifactVersion, VisualArti
 from app.models.hitl_config import MemberGateOverride, OrgGateOverride, OrgGatePolicy
 from app.models.participation import Participation, ParticipationRole
 from app.models.chain_escalation_org_config import ChainEscalationOrgConfig
+from app.models.chain_circuit_breaker import ChainCircuitBreaker
 
 __all__ = [
     "RoleTemplate",
