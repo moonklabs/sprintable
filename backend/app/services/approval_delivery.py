@@ -212,10 +212,14 @@ async def dispatch_approval_result_reply(
             "approval-result 회신 배달 실패 doc=%s requester=%s",
             doc.id, requester_id, exc_info=True,
         )
-        return
+        # ⛔카디르 QA(#3015): 여기 `return`이 있으면 DM 실패가 아래 벨 알림까지 같이
+        # 죽인다 — "별개 SAVEPOINT·독립"이라는 이 함수의 약속과 정반대(단방향 의존).
+        # 이 PR이 막으려던 "폴링 없인 결과 모름"이 정확히 이 실패모드에서 재발한다 —
+        # DM 실패해도 벨은 별도로 시도해야 하므로 return하지 않고 다음 블록으로 진행.
 
-    # human 상신자에겐 벨 알림도(AC1). 위 DM dispatch와 별개 SAVEPOINT — 하나 실패해도 다른
-    # 하나는 그대로(doc.py의 벨-알림/카드-배달 독립 채널 관례와 동형).
+    # human 상신자에겐 벨 알림도(AC1). 위 DM dispatch와 완전히 독립된 형제 try/except —
+    # 하나 실패해도 다른 하나는 그대로 시도된다(doc.py의 벨-알림/카드-배달 독립 채널 관례와
+    # 진짜 동형 — DM 블록의 실패가 여기로 전파되지 않는다).
     try:
         requester = (await lookup_members_by_ids({requester_id}, db)).get(requester_id)
         if requester is not None and requester.type == "human":

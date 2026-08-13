@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import uuid
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -245,5 +245,51 @@ async def test_second_resolution_reuses_existing_dm():
             assert len(convs) == 1
             msgs = (await s.execute(select(ConversationMessage))).scalars().all()
             assert len(msgs) == 2
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_dm_delivery_failure_does_not_block_bell_notification():
+    """카디르 QA(#3015): DM 배달 블록의 except가 조기 return을 하면 벨 알림까지 같이
+    죽어 「폴링 없인 결과 모름」이 그 실패모드에서 재발한다 — 이 PR이 막으려던 바로 그
+    문제. DM dispatch(_dispatch_conversation_event)가 SQL 레벨에서 실패해도 human
+    상신자의 벨 알림은 독립적으로 시도돼야 한다(형제 try/except, 단방향 의존 금지)."""
+    from app.services.approval_delivery import dispatch_approval_result_reply
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            requester_id = await _seed_member(s, org_id, project_id, member_type="human", name="requester")
+            resolver_id = await _seed_member(s, org_id, project_id, member_type="human", name="resolver")
+            doc = await _seed_doc(s, org_id, project_id)
+            gate_id = uuid.uuid4()
+
+            dn = AsyncMock()
+            import app.services.notification_dispatch as nd_mod
+            orig = nd_mod.dispatch_notification
+            nd_mod.dispatch_notification = dn
+            try:
+                with patch(
+                    "app.routers.conversations._dispatch_conversation_event",
+                    new=AsyncMock(side_effect=RuntimeError("DM dispatch boom")),
+                ):
+                    await dispatch_approval_result_reply(
+                        s, org_id=org_id, doc=doc, gate_id=gate_id,
+                        requester_id=requester_id, resolver_id=resolver_id,
+                        decision="rejected", resolution_note="사유",
+                    )
+                await s.commit()
+            finally:
+                nd_mod.dispatch_notification = orig
+
+            dn.assert_awaited_once(), (
+                "DM dispatch 실패가 벨 알림까지 막으면 안 된다 — 형제 try/except 위반"
+            )
+            kw = dn.await_args.kwargs
+            assert kw["target_member_ids"] == [requester_id]
+            assert kw["event_type"] == "doc_approval_resolved"
     finally:
         await engine.dispose()
