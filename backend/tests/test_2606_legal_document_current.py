@@ -137,8 +137,8 @@ async def test_public_endpoint_reachable_without_auth_header_real_http():
     from httpx import ASGITransport, AsyncClient
     from unittest.mock import AsyncMock, MagicMock
 
-    from app.dependencies.database import get_db
     from app.main import app
+    from tests.conftest import override_db_and_read
 
     result = MagicMock()
     result.scalar_one_or_none.return_value = None  # 미발행 → 404(placeholder 없음)
@@ -148,7 +148,10 @@ async def test_public_endpoint_reachable_without_auth_header_real_http():
     async def _override_db():
         yield session
 
-    app.dependency_overrides[get_db] = _override_db
+    # story #2451 guard: raw app.dependency_overrides[get_db] = ... 직접 대입 금지 —
+    # override_db_and_read 헬퍼로만 걸어야 get_read_db 동시 배선을 구조적으로 보장한다
+    # (이 엔드포인트는 get_read_db를 안 쓰지만, 헬퍼 자체가 그 축과 무관하게 강제되는 규율).
+    override_db_and_read(app, _override_db)
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # Authorization 헤더 완전히 없음 — 실사용(비로그인 방문자) 그대로.
@@ -159,7 +162,7 @@ async def test_public_endpoint_reachable_without_auth_header_real_http():
         )
         assert resp.status_code == 404, "미발행 doc_type은 여전히 404(placeholder 미생성)여야"
     finally:
-        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.clear()
 
 
 def test_unknown_doc_type_rejected_without_db_roundtrip():
