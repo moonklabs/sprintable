@@ -128,6 +128,38 @@ def test_msg_payload_includes_summary():
     assert payload["summary"].startswith(f"{sender.name}: ")
 
 
+def test_msg_payload_exposes_approval_target_when_present():
+    """story #2604 P2: msg_metadata['approval_target']가 있으면 payload top-level에 그대로
+    노출된다(_activation_payload와 동형 additive 패턴) — 카드 렌더(FE)가 이 필드로 붙는다."""
+    from app.routers.conversations import _msg_payload
+    msg = _make_msg()
+    gate_id = uuid.uuid4()
+    doc_id = uuid.uuid4()
+    msg.msg_metadata = {
+        "activation": {"kind": "request", "expects_response": True},
+        "approval_target": {
+            "work_item_type": "doc", "work_item_id": str(doc_id),
+            "gate_id": str(gate_id), "actions": ["approve", "reject"],
+        },
+    }
+    sender = _make_member()
+    payload = _msg_payload(msg, sender)
+    assert payload["message_kind"] == "request"
+    assert payload["approval_target"] == {
+        "work_item_type": "doc", "work_item_id": str(doc_id),
+        "gate_id": str(gate_id), "actions": ["approve", "reject"],
+    }
+
+
+def test_msg_payload_approval_target_none_when_absent():
+    """기존(activation 없는) 메시지 — approval_target 키는 있되 값은 None(additive·회귀 없음)."""
+    from app.routers.conversations import _msg_payload
+    msg = _make_msg()
+    sender = _make_member()
+    payload = _msg_payload(msg, sender)
+    assert payload["approval_target"] is None
+
+
 # ─── AC1: Alembic migration 파일 + 테이블 확인 ───────────────────────────────
 
 def test_migration_file_exists():
