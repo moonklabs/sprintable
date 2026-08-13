@@ -925,6 +925,9 @@ class UpdateStatusRequest(BaseModel):
 class UpdateConversationRequest(BaseModel):
     # EF-S2 (db75ecd0) AC3: 방 title 사용자 편집. title 제공 시만 갱신(기본 생성 title 보존).
     title: str | None = None
+    # story #2603 P0 AC2: free_response 대화 스코프 옵트아웃(channel_router.py 참조).
+    # 제공 시만 갱신 — 미제공은 기존값 보존(title과 동일 partial-update 규약).
+    free_response: bool | None = None
 
 
 class AddParticipantRequest(BaseModel):
@@ -1935,6 +1938,18 @@ async def send_message(
                 _seen.add(mid)
                 valid_mentioned_ids.append(mid)
 
+    # story #2603 P0(delivery-contract-blueprint-v0-1) ④: FE 구조화 mentioned_ids와 본문
+    # `@handle` 텍스트 파싱 결과를 합집합 — MCP/API 발신(SendChatInput엔 mentioned_ids 필드가
+    # 없다, #2602 지도 ⑦)도 여기서 같은 mentioned_ids 파이프에 실려 route_message/webhook
+    # targeting/notification 전부가 자동으로 handle 멘션을 본다(별도 소비처 변경 불요).
+    # org+type='agent' 스코프 정확 일치만(handle_mention_parser.py) — 부분 문자열 오매칭 없음.
+    from app.services.handle_mention_parser import resolve_handle_mentions
+    _handle_mentioned_ids = await resolve_handle_mentions(db, org_id=org_id, content=body.content or "")
+    if _handle_mentioned_ids:
+        for mid in _handle_mentioned_ids:
+            if mid != sender.id and mid not in valid_mentioned_ids:
+                valid_mentioned_ids.append(mid)
+
     # E-ACTIVATION S1(까디르 QA): audience 도 cross-org/삭제 id 차단 — mentioned_ids 와 동형 org 필터.
     # 안 하면 삭제·타조직 member_id 를 audience 에 넣어 «실 수신자 전원이 addressed=no» 메시지를 만들 수 있다.
     # 전량 필터돼 []가 되면 어댑터에서 `not audience`=True → all-addressed(현행)로 안전 degrade.
@@ -2086,12 +2101,28 @@ async def send_message(
     # ROLLBACK 처리되어(asyncpg 실측 확認) msg insert까지 통째로 사라졌다 — "성공 id 반환하는데
     # 저장 안 됨" 증상의 근본. `_dispatch_conversation_event` 호출부와 동형으로 begin_nested()
     # SAVEPOINT 격리 — 여기서 실패해도 이 nested만 롤백되고 바깥 트랜잭션(msg insert)은 안전.
+    # story #2603 P0(delivery-contract-blueprint-v0-1) ①: SSE 코어가 ChannelRouter의
+    # DeliveryDecision을 소비한다 — 예전엔 이 decisions가 discord 채널 판정에만 쓰이고
+    # `_dispatch_conversation_event`(실제 turn 트리거) 자체는 mute/mentions를 전혀 안 봤다
+    # (지도 ②③). preference_excluded_ids = 참가자였지만 route_message가 mute/mentions로
+    # 걸러 decisions에 없는 대상 — 이제 이들은 discord 판정과 같은 자리에서 SSE Event
+    # 생성 자체가 제외된다(막는 쪽과 하는 쪽이 같은 판정을 본다).
     discord_exclude_ids: set[uuid.UUID] = set()
+    preference_excluded_ids: set[uuid.UUID] = set()
     try:
         async with db.begin_nested():
             from app.services.channel_router import ChannelRouterError, route_message as _route
             decisions = await _route(msg.id, db)
             discord_exclude_ids = {d.member_id for d in decisions if d.channel == "discord"}
+            decided_ids = {d.member_id for d in decisions}
+            _participant_rows = (await db.execute(
+                select(ConversationParticipant.member_id).where(
+                    ConversationParticipant.conversation_id == conversation_id,
+                )
+            )).scalars().all()
+            preference_excluded_ids = {
+                pid for pid in _participant_rows if pid != sender.id and pid not in decided_ids
+            }
     except Exception:
         logger.warning("ChannelRouter pre-check failed message_id=%s — no SSE exclusion", msg.id)
 
@@ -2148,7 +2179,7 @@ async def send_message(
         async with db.begin_nested():
             pending_sse_pushes += await _dispatch_conversation_event(
                 db, conv, msg, org_id, sender,
-                exclude_ids=discord_exclude_ids | blocked_agent_ids | user_blocker_ids,
+                exclude_ids=discord_exclude_ids | blocked_agent_ids | user_blocker_ids | preference_excluded_ids,
                 webhook_covered_ids=webhook_covered_ids,
             )
     except Exception as _dispatch_err:
@@ -2534,9 +2565,10 @@ async def update_conversation(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
-    """PATCH /api/v2/conversations/{id} — 방 title 사용자 편집 (EF-S2 AC3·참여자 권한).
+    """PATCH /api/v2/conversations/{id} — 방 title·free_response 사용자 편집(EF-S2 AC3·
+    story #2603 P0 AC2·참여자 권한).
 
-    title 제공 시만 갱신(기본 생성 title 보존). status PATCH 와 동일 참여자 게이트.
+    각 필드는 제공 시만 갱신(기본값 보존). status PATCH 와 동일 참여자 게이트.
     """
     conv = (await db.execute(
         select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
@@ -2557,7 +2589,11 @@ async def update_conversation(
     if body.title is not None:
         conv.title = body.title
         conv.updated_at = datetime.now(timezone.utc)
+    if body.free_response is not None:
+        conv.free_response = body.free_response
+        conv.updated_at = datetime.now(timezone.utc)
+    if body.title is not None or body.free_response is not None:
         await db.commit()
         await db.refresh(conv)
 
-    return {"id": str(conv.id), "title": conv.title}
+    return {"id": str(conv.id), "title": conv.title, "free_response": conv.free_response}

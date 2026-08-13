@@ -60,6 +60,11 @@ async def sync_agent_anchor_on_create(
                 if not await ensure_human_member(session, owner_member_id):
                     owner_member_id = None
 
+    # story #2603 P0: 신규 에이전트는 생성 시점에 안정 @handle을 채번한다(NULL로 남기면
+    # mentions 기본계약 하에서 아무도 못 부르는 에이전트가 된다 — handle_mention_parser.py).
+    from app.services.handle_mention_parser import generate_unique_handle
+    handle = await generate_unique_handle(session, org_id=team_member.org_id, name=team_member.name)
+
     # 1. members (id=team_member.id, type='agent') — 0075 에이전트 백필 동형
     await session.execute(
         pg_insert(Member.__table__)
@@ -73,6 +78,7 @@ async def sync_agent_anchor_on_create(
             avatar_url=team_member.avatar_url,
             org_role=None,
             is_active=team_member.is_active,
+            handle=handle,
         )
         .on_conflict_do_nothing(index_elements=["id"])
     )
