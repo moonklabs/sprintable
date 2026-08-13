@@ -55,7 +55,7 @@ function TrustScoreEmpty({ compact }: { compact?: boolean }) {
   return (
     <div className="rounded-xl border border-dashed border-border bg-muted/20 px-4 py-5 text-center">
       <p className="text-sm font-medium text-muted-foreground">{t('trustScoreNoData')}</p>
-      <p className="mt-1 text-xs text-muted-foreground/60">{t('trustScoreNoDataHint')}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{t('trustScoreNoDataHint')}</p>
     </div>
   );
 }

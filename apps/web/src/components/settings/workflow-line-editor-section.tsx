@@ -265,7 +265,7 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
                 <span className="font-mono text-xs text-foreground">v{v.version}</span>
                 <Badge variant={STATUS_VARIANT[v.status] ?? 'chip'}>{v.status}</Badge>
                 <span className="text-[10px] text-muted-foreground">{t('lineEditorLintLabel')}: {v.lint_status}</span>
-                {v.updated_at ? <span className="text-[10px] text-muted-foreground/70">{new Date(v.updated_at).toLocaleString()}</span> : null}
+                {v.updated_at ? <span className="text-[10px] text-muted-foreground">{new Date(v.updated_at).toLocaleString()}</span> : null}
                 {v.status === 'draft' ? (
                   <Button size="sm" variant="ghost" className="ml-auto h-7 gap-1" onClick={() => void openVersion(v.id)}>
                     <Pencil className="size-3.5" />{t('lineEditorEditAction')}

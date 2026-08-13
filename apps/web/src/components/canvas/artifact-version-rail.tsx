@@ -82,7 +82,7 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
         {descOpen ? <ChevronUp className="h-3 w-3" aria-hidden /> : <ChevronDown className="h-3 w-3" aria-hidden />}
       </button>
       {descOpen ? (
-        descriptionSlot ?? <p className="mt-1.5 text-[11px] text-muted-foreground/80">{t('descriptionPaneComingSoon')}</p>
+        descriptionSlot ?? <p className="mt-1.5 text-[11px] text-muted-foreground">{t('descriptionPaneComingSoon')}</p>
       ) : null}
     </div>
   );

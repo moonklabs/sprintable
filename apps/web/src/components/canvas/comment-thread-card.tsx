@@ -76,7 +76,7 @@ export function CommentThreadCard({
         ) : null}
 
         {resolved && thread.resolved_by ? (
-          <p className="text-[10px] text-muted-foreground/80">{t('resolvedByNote', { name: memberMap[thread.resolved_by]?.name ?? '—' })}</p>
+          <p className="text-[10px] text-muted-foreground">{t('resolvedByNote', { name: memberMap[thread.resolved_by]?.name ?? '—' })}</p>
         ) : null}
 
         {!resolved ? (

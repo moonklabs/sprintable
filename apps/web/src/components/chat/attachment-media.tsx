@@ -155,7 +155,7 @@ export function AttachmentMedia({ storedUrl, conversationId, storyId, label, kin
           <Play className="h-3.5 w-3.5 fill-current" aria-hidden />
         </span>
       )}
-      {kind === 'video' ? <KindIcon className="h-4 w-4 text-muted-foreground/60" aria-hidden /> : null}
+      {kind === 'video' ? <KindIcon className="h-4 w-4 text-muted-foreground" aria-hidden /> : null}
       <span className="min-w-0 flex-1 truncate text-left text-xs text-muted-foreground">{label}</span>
     </button>
   );

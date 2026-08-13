@@ -147,7 +147,7 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
 
       {/* 검색 */}
       <div className="mx-[13px] mb-2 flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-[7px]">
-        <Search className="size-3.5 shrink-0 text-muted-foreground/60" aria-hidden />
+        <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <input
           ref={searchRef}
           type="text"

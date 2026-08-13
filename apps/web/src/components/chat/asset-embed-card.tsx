@@ -64,7 +64,7 @@ export function AssetEmbedCard({ entityId, label, ownMessage }: AssetEmbedCardPr
   const cardSurface = ownMessage ? 'border-white/20 bg-white/12 hover:bg-white/20' : 'border-border bg-card hover:bg-muted';
   const nameTone = ownMessage ? 'text-white' : 'text-foreground';
   const metaTone = ownMessage ? 'text-white/70' : 'text-muted-foreground';
-  const arrowTone = ownMessage ? 'text-white/80' : 'text-muted-foreground/50';
+  const arrowTone = ownMessage ? 'text-white/80' : 'text-muted-foreground';
 
   // ── 로딩: 스켈레톤 카드 ──
   if (loading) {

@@ -566,7 +566,7 @@ export function ChatBubble({
             </div>
           )}
 
-          <time className="text-[10px] text-muted-foreground/70">{time}</time>
+          <time className="text-[10px] text-muted-foreground">{time}</time>
 
           {/* AC5: 답글 수 표시 — reply_count > 0 */}
           {replyCount > 0 && (

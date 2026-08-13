@@ -105,7 +105,7 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
           >
             <p>{t('exportFailedNote')}</p>
             {errorDetail ? (
-              <p className="break-words font-mono text-[10px] leading-[13px] text-muted-foreground/70">{errorDetail}</p>
+              <p className="break-words font-mono text-[10px] leading-[13px] text-muted-foreground">{errorDetail}</p>
             ) : null}
           </div>
         ) : (
@@ -123,7 +123,7 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
                   </button>
                 ))}
               </div>
-              {!pngAllowed ? <p className="mt-1 text-[10px] text-muted-foreground/70">{t('exportPngUnavailableForHtml')}</p> : null}
+              {!pngAllowed ? <p className="mt-1 text-[10px] text-muted-foreground">{t('exportPngUnavailableForHtml')}</p> : null}
             </div>
             {format === 'png' ? (
               <div>

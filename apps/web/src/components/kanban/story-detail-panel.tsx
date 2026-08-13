@@ -1598,7 +1598,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                       ))}
                     </div>
                   ) : (
-                    <p className="mb-2 text-xs text-muted-foreground/60">라벨 없음</p>
+                    <p className="mb-2 text-xs text-muted-foreground">라벨 없음</p>
                   )}
 
                   {showLabelPicker && (

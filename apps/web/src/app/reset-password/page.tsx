@@ -124,10 +124,10 @@ export default function ResetPasswordPage() {
             />
             {touched && password.length > 0 && (
               <ul className="space-y-1 text-xs">
-                <li className={rules.length ? 'text-success' : 'text-muted-foreground/60'}>
+                <li className={rules.length ? 'text-success' : 'text-muted-foreground'}>
                   {rules.length ? '✓' : '○'} {t('lengthHint')}
                 </li>
-                <li className={categoriesMet >= 3 ? 'text-success' : 'text-muted-foreground/60'}>
+                <li className={categoriesMet >= 3 ? 'text-success' : 'text-muted-foreground'}>
                   {categoriesMet >= 3 ? '✓' : '○'} {t('strengthHint', { met: categoriesMet })}
                 </li>
               </ul>

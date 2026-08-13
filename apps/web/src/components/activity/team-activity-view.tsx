@@ -377,7 +377,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
           ) : items.length === 0 ? (
             <div className="flex h-64 items-center justify-center">
               <EmptyState
-                icon={<Inbox className="size-8 text-muted-foreground/60" />}
+                icon={<Inbox className="size-8 text-muted-foreground" />}
                 title={t('emptyTitle')}
                 description={t('emptyDesc')}
               />

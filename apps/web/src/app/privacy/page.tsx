@@ -15,7 +15,7 @@ export default function PrivacyPage() {
         </div>
 
         <div className="rounded-2xl bg-background p-8 shadow-sm space-y-6 text-sm text-muted-foreground leading-relaxed">
-          <p className="text-xs text-muted-foreground/60">Last updated: May 2026</p>
+          <p className="text-xs text-muted-foreground">Last updated: May 2026</p>
 
           <section className="space-y-2">
             <h2 className="font-semibold text-foreground">1. Information We Collect</h2>
@@ -52,7 +52,7 @@ export default function PrivacyPage() {
             <p>For privacy inquiries, contact us at <a href="mailto:privacy@moonklabs.com" className="text-brand hover:underline">privacy@moonklabs.com</a>.</p>
           </section>
 
-          <p className="text-xs text-muted-foreground/60 pt-4 border-t border-border/50">
+          <p className="text-xs text-muted-foreground pt-4 border-t border-border/50">
             This is a placeholder document. Full privacy policy will be provided before public launch.
           </p>
         </div>

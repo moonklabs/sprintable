@@ -23,17 +23,17 @@ function LoopCycleFlow({ t }: { t: (key: 'loopNodeHypothesis' | 'loopNodeExecute
     { Icon: Sparkles, label: t('loopNodeLearn') },
   ];
   return (
-    <div className="flex items-center gap-1.5 text-muted-foreground/70" aria-hidden="true">
+    <div className="flex items-center gap-1.5 text-muted-foreground" aria-hidden="true">
       {nodes.map(({ Icon, label }, i) => (
         <span key={label} className="flex items-center gap-1.5">
-          {i > 0 ? <ArrowRight className="size-3 shrink-0 text-muted-foreground/40" /> : null}
+          {i > 0 ? <ArrowRight className="size-3 shrink-0 text-muted-foreground" /> : null}
           <span className="flex flex-col items-center gap-1">
             <Icon className="size-4" />
             <span className="text-[10px] leading-none">{label}</span>
           </span>
         </span>
       ))}
-      <ArrowRight className="size-3 shrink-0 text-muted-foreground/40" />
+      <ArrowRight className="size-3 shrink-0 text-muted-foreground" />
       <span className="flex flex-col items-center gap-1">
         <RotateCcw className="size-4" />
         <span className="text-[10px] leading-none">{t('loopNodeNext')}</span>

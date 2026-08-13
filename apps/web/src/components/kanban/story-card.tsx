@@ -411,7 +411,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                       {lastExecution.status === 'matched' ? (
                         <Zap className="h-3 w-3 text-warning-strong" />
                       ) : (
-                        <ZapOff className="h-3 w-3 text-muted-foreground/40" />
+                        <ZapOff className="h-3 w-3 text-muted-foreground" />
                       )}
                     </span>
                   ) : null}
@@ -420,7 +420,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                       onClick={(e) => void handleKickoff(e)}
                       disabled={triggering}
                       title={t('kickoff')}
-                      className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 hover:text-primary hover:bg-primary/10 disabled:opacity-40 transition"
+                      className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 disabled:opacity-40 transition"
                     >
                       {triggering ? (
                         <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />

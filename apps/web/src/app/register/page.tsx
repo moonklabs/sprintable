@@ -125,7 +125,7 @@ export default function RegisterPage() {
           {showRules && (
             <ul className="space-y-1 text-xs">
               <RuleItem met={rules.length} label={t('ruleLength')} />
-              <li className={`flex items-center gap-1.5 ${categoriesMet >= 3 ? 'text-success' : 'text-muted-foreground/60'}`}>
+              <li className={`flex items-center gap-1.5 ${categoriesMet >= 3 ? 'text-success' : 'text-muted-foreground'}`}>
                 <span>{categoriesMet >= 3 ? '✓' : '○'}</span>
                 <span>{t('ruleCategories', { count: categoriesMet })}</span>
               </li>
@@ -170,7 +170,7 @@ export default function RegisterPage() {
           <div className="space-y-3">
             <div className="relative flex items-center">
               <div className="flex-grow border-t border-border/50" />
-              <span className="mx-3 flex-shrink text-xs text-muted-foreground/60">{t('orContinueWith')}</span>
+              <span className="mx-3 flex-shrink text-xs text-muted-foreground">{t('orContinueWith')}</span>
               <div className="flex-grow border-t border-border/50" />
             </div>
 
@@ -203,7 +203,7 @@ export default function RegisterPage() {
 
 function RuleItem({ met, label }: { met: boolean; label: string }) {
   return (
-    <li className={`flex items-center gap-1.5 ${met ? 'text-success' : 'text-muted-foreground/60'}`}>
+    <li className={`flex items-center gap-1.5 ${met ? 'text-success' : 'text-muted-foreground'}`}>
       <span>{met ? '✓' : '○'}</span>
       <span>{label}</span>
     </li>
