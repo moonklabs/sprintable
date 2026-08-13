@@ -28,7 +28,9 @@ export default async function PrivacyPage() {
               <DocContentRenderer content={doc.content} contentFormat={doc.contentFormat} publicMode />
             </>
           ) : (
-            <p className="text-sm text-muted-foreground">개인정보처리방침을 준비 중입니다.</p>
+            <p className="text-sm text-muted-foreground">
+              개인정보처리방침을 준비 중입니다. 문의: <a href="mailto:legal@moonklabs.com" className="text-brand hover:underline">legal@moonklabs.com</a>
+            </p>
           )}
         </div>
 
