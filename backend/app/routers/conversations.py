@@ -2288,15 +2288,10 @@ async def send_message(
         logger.error("conversation event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
         raise HTTPException(status_code=500, detail="event dispatch failed") from _dispatch_err
 
-    # story #2608 P1 AC1: A↔B 상호멘션류(멘션 자체는 항상 유효해 route_message의 mentions
-    # 체크로는 절대 안 끊김)를 잡는다 — 이 메시지가 agent가 보낸 것이고 agent를 명시
-    # 멘션했는데(=turn이 시도됐을 대상이 실재) 연쇄가 cap을 넘었으면, "침묵"이 아니라 human
-    # 참가자에게 human_intervention_requested 이벤트로 알린다(블루프린트 §3). depth 계산은
-    # route_message() 안의 게이트와 **같은 함수**(compute_agent_chain_depth) — 판정 로직
-    # 중복 없음, 호출 위치만 recipient-필터(route_message)·이벤트-발생(여기, 메시지당 1회)
-    # 으로 자연히 갈린다(chain_depth.py 모듈 docstring 참조). 「멘션됐는데 agent가 없다」
-    # (전부 human 멘션)면 turn 자체가 애초에 대상 없어 이 게이트는 no-op(조건에 이미 반영).
-    if sender.type == "agent" and msg.mentioned_ids:
+    # story #2608 P1 AC1 + #2617: agent가 보낸 메시지면 연쇄 깊이를 잰다(chain_depth.py 판정
+    # 로직 SSOT — route_message() 안의 게이트와 같은 함수 재사용, 중복 구현 없음). 호출
+    # 위치만 recipient-필터(route_message)·이벤트-발생(여기, 메시지당 1회)으로 갈린다.
+    if sender.type == "agent":
         from app.services.chain_depth import compute_agent_chain_depth
         from app.services.channel_router import _AGENT_CHAIN_DEPTH_CAP
 
@@ -2304,22 +2299,52 @@ async def send_message(
             db, conversation_id, max_scan=_AGENT_CHAIN_DEPTH_CAP,
         )
         if chain_depth > _AGENT_CHAIN_DEPTH_CAP:
-            _mentioned_agent_rows = (await db.execute(
-                select(TeamMember.id).where(
-                    TeamMember.id.in_(msg.mentioned_ids), TeamMember.type == "agent",
-                )
-            )).scalars().all()
-            chain_expired_agent_targets = set(_mentioned_agent_rows)
-            if chain_expired_agent_targets:
+            # story #2608 P1 AC1: A↔B 상호멘션류(멘션 자체는 항상 유효해 route_message의
+            # mentions 체크로는 절대 안 끊김)를 잡는다 — agent를 명시 멘션했는데(=turn이
+            # 시도됐을 대상이 실재) 연쇄가 cap을 넘었으면, "침묵"이 아니라 human 참가자에게
+            # human_intervention_requested 이벤트로 알린다(블루프린트 §3). 「멘션됐는데
+            # agent가 없다」(전부 human 멘션)면 turn 자체가 애초에 대상 없어 no-op.
+            if msg.mentioned_ids:
+                _mentioned_agent_rows = (await db.execute(
+                    select(TeamMember.id).where(
+                        TeamMember.id.in_(msg.mentioned_ids), TeamMember.type == "agent",
+                    )
+                )).scalars().all()
+                chain_expired_agent_targets = set(_mentioned_agent_rows)
+                if chain_expired_agent_targets:
+                    try:
+                        async with db.begin_nested():
+                            pending_sse_pushes += await _dispatch_human_intervention_event(
+                                db, conv, msg, org_id, sender,
+                                chain_expired_agent_targets, _AGENT_CHAIN_DEPTH_CAP,
+                            )
+                    except Exception:
+                        logger.warning(
+                            "human_intervention_requested dispatch failed conversation_id=%s",
+                            conversation_id, exc_info=True,
+                        )
+
+            # story #2617 AC4: human 참가자가 아예 없는 대화는 위 블록이 대상 human 0명이라
+            # 구조적으로 항상 no-op이었다(_dispatch_human_intervention_event의 human_targets
+            # 빈 리스트) — mentioned_ids 유무와 무관하게(#3008 이후 default가 mentions 없이도
+            # "all"이라 대부분의 human-less group 트래픽은 애초에 멘션이 없다) 대화 밖(org
+            # owner/admin)으로 승격해 "무감독 연쇄가 계속되는 중"을 관측 가능하게 만든다
+            # (조용한 단락 금지). 24h/대화 dedup은 chain_escalation.py 내부(fleet 자체가
+            # customer-zero라 팀 DM 전부가 상시 human-less 연쇄 — dedup 없이는 org owner
+            # 스팸).
+            from app.services.channel_router import _conversation_has_human
+            if not await _conversation_has_human(db, conversation_id):
                 try:
                     async with db.begin_nested():
-                        pending_sse_pushes += await _dispatch_human_intervention_event(
-                            db, conv, msg, org_id, sender,
-                            chain_expired_agent_targets, _AGENT_CHAIN_DEPTH_CAP,
+                        from app.services.chain_escalation import escalate_unsupervised_chain
+                        await escalate_unsupervised_chain(
+                            db, org_id=org_id, conversation_id=conversation_id,
+                            project_id=conv.project_id, depth=chain_depth,
+                            cap=_AGENT_CHAIN_DEPTH_CAP,
                         )
                 except Exception:
                     logger.warning(
-                        "human_intervention_requested dispatch failed conversation_id=%s",
+                        "unsupervised chain escalation dispatch failed conversation_id=%s",
                         conversation_id, exc_info=True,
                     )
 
