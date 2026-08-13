@@ -74,7 +74,7 @@ def test_all_role_templates_receive_events_grant_and_idempotent():
                 "is_builtin boolean NOT NULL DEFAULT false, is_published boolean NOT NULL DEFAULT true, "
                 "default_tool_groups text[] NOT NULL DEFAULT '{}')"
             ))
-            # 22개 실 slug + 인위 커스텀 role(is_builtin=False)·미공개 role(is_published=False)도
+            # 24개 실 slug + 인위 커스텀 role(is_builtin=False)·미공개 role(is_published=False)도
             # 섞어 「현존 전부」의 실제 다양성을 재현.
             for slug in slugs:
                 c.execute(sa.text(
@@ -103,7 +103,7 @@ def test_all_role_templates_receive_events_grant_and_idempotent():
             )).fetchall()
         by_slug = {r[0]: list(r[1]) for r in rows}
 
-        # AC1: 전량(22 실 slug + 커스텀 + 미공개) "events" 보유.
+        # AC1: 전량(24 실 slug + 커스텀 + 미공개) "events" 보유.
         for slug in slugs | {"custom-role", "unpublished-role"}:
             assert "events" in by_slug[slug], f"{slug} missing events grant"
 
