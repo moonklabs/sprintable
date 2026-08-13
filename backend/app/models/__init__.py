@@ -97,6 +97,7 @@ from app.models.hitl_config import MemberGateOverride, OrgGateOverride, OrgGateP
 from app.models.participation import Participation, ParticipationRole
 from app.models.chain_escalation_org_config import ChainEscalationOrgConfig
 from app.models.chain_circuit_breaker import ChainCircuitBreaker
+from app.models.event_definition import EventDefinition
 
 __all__ = [
     "RoleTemplate",
