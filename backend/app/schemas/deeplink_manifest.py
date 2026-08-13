@@ -433,6 +433,20 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
         ),
+        DeepLinkManifestEntry(
+            # story #2624: 결재 해소 결과가 상신자에게 회신되는 벨 알림 — doc_approval_
+            # requested와 동형(gate 경유, reference_id=gate_id)이나 이미 결정이 끝난
+            # 읽기 전용 FYI라 grade B(요청 쪽은 조치 필요라 A2인 것과 대비).
+            app=DeepLinkAppFields(
+                type="doc_approval_resolved", target="gate_detail", parent_tab=ParentTab.approvals,
+                target_promotion_pending=True,
+            ),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
+            channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
+        ),
 
         # --- dispatched(범용) — reference_type 5종 분기. entity_type 필수. ---
         # 정정(유나 3자 검토, 필수·조건부 GREEN의 조건): parentTab은 target의 순수 함수여야

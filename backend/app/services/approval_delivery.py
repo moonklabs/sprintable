@@ -135,3 +135,102 @@ async def dispatch_approval_request_cards(
                 "approval-request 카드 배달 실패 doc=%s approver=%s",
                 doc.id, approver_id, exc_info=True,
             )
+
+
+async def dispatch_approval_result_reply(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    doc: Doc,
+    gate_id: uuid.UUID,
+    requester_id: uuid.UUID,
+    resolver_id: uuid.UUID,
+    decision: str,
+    resolution_note: str | None,
+) -> None:
+    """story #2624: 게이트 해소(승인/반려) 결과를 상신자에게 회신 — dispatch_approval_
+    request_cards의 반대 방향(승인자→상신자). P2(#3007)는 상신→승인자 카드 전방 경로만
+    만들었고 해소→상신자 회신 후방 경로가 없어, 상신자가 게이트를 폴링해야만 결과를 알 수
+    있었다(선생님 직접 지적, 실사례 2026-08-13 07:20 반려·상신자 무통지).
+
+    상신자↔해소자 기존 DM(같은 dm_pair_key — get_or_create가 인자 순서 무관하게 같은 방을
+    찾는다)에 message_kind="result" 카드 게시 + 기존 _dispatch_conversation_event 재사용
+    으로 메인 dispatch — 상신자가 agent면 **이 경로로** 도달한다(오늘 PO가 못 받았던 그
+    자리, AC1). human 상신자는 추가로 벨 알림까지(dispatch_notification, agent는 기존
+    관례대로 대상에서 제외 — approval_delivery.py의 dispatch_approval_request_cards와
+    동일 비대칭).
+
+    해소자 본인이 상신자인 경우(SoD가 정상적으로 막지만 방어심층) 자기-알림 스킵(AC3).
+    """
+    if not doc.project_id or resolver_id == requester_id:
+        return
+
+    from app.routers.conversations import _dispatch_conversation_event
+    from app.services.member_resolver import lookup_members_by_ids
+
+    resolver = (await lookup_members_by_ids({resolver_id}, db)).get(resolver_id)
+    if resolver is None:
+        logger.warning("approval-result 회신 스킵 — resolver 미확인 doc=%s", doc.id)
+        return
+
+    decision_label = "승인" if decision == "approved" else "반려"
+    content = f"'{doc.title}' 문서 결재 결과: {decision_label}"
+    if resolution_note:
+        content += f"\n사유: {resolution_note}"
+
+    try:
+        async with db.begin_nested():
+            conv = await _get_or_create_approval_dm(
+                db, org_id=org_id, project_id=doc.project_id,
+                requester_id=requester_id, approver_id=resolver_id,
+            )
+            msg = ConversationMessage(
+                conversation_id=conv.id,
+                sender_id=resolver_id,
+                content=content,
+                mentioned_ids=[requester_id],
+                msg_metadata={
+                    "activation": {
+                        "audience": [str(requester_id)],
+                        "kind": "result",
+                        "expects_response": False,
+                    },
+                    "approval_target": {
+                        "work_item_type": "doc",
+                        "work_item_id": str(doc.id),
+                        "gate_id": str(gate_id),
+                        "decision": decision,
+                        "resolution_note": resolution_note,
+                    },
+                },
+            )
+            db.add(msg)
+            await db.flush()
+            await _dispatch_conversation_event(db, conv, msg, org_id, resolver)
+    except Exception:  # noqa: BLE001 — best-effort, 회신 실패가 해소를 막지 않음.
+        logger.warning(
+            "approval-result 회신 배달 실패 doc=%s requester=%s",
+            doc.id, requester_id, exc_info=True,
+        )
+        return
+
+    # human 상신자에겐 벨 알림도(AC1). 위 DM dispatch와 별개 SAVEPOINT — 하나 실패해도 다른
+    # 하나는 그대로(doc.py의 벨-알림/카드-배달 독립 채널 관례와 동형).
+    try:
+        requester = (await lookup_members_by_ids({requester_id}, db)).get(requester_id)
+        if requester is not None and requester.type == "human":
+            async with db.begin_nested():
+                from app.services.notification_dispatch import dispatch_notification
+                await dispatch_notification(
+                    db, org_id=org_id, event_type="doc_approval_resolved",
+                    target_member_ids=[requester_id],
+                    title=f"문서 결재 결과: {decision_label}",
+                    body=resolution_note or f"'{doc.title}' 문서가 {decision_label}됐습니다.",
+                    reference_type="gate", reference_id=gate_id,
+                    source_project_id=doc.project_id,
+                )
+    except Exception:  # noqa: BLE001 — 벨 알림 실패는 카드 배달과 독립.
+        logger.warning(
+            "approval-result 벨 알림 실패 doc=%s requester=%s",
+            doc.id, requester_id, exc_info=True,
+        )

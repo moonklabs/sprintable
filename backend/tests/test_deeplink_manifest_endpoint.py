@@ -46,7 +46,8 @@ async def test_deeplink_manifest_endpoint_returns_200_with_schema_version_and_lo
     assert body["schema_version"] == 1
     assert isinstance(body["version_policy"], str) and body["version_policy"]
     # story #2617: conversation.unsupervised_chain_expired 신설로 33→34.
-    assert isinstance(body["entries"], list) and len(body["entries"]) == 34
+    # story #2624: doc_approval_resolved 신설로 34→35.
+    assert isinstance(body["entries"], list) and len(body["entries"]) == 35
 
     # 미르코 point ②: lookup_key = f"{type}:{entity_type}" (구분자 ":") 서빙 시점 파생.
     story_entry = next(
