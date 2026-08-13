@@ -81,6 +81,11 @@ async def route_message(
     통과)를 막는 유일한 축이라 다른 판정보다 뒤에, 최종 게이트로 건다. human recipient는
     이 게이트의 대상이 아니다(인간이 바로 그 "앵커"라 차단하면 안 됨 — 오히려 human-
     intervention 이벤트로 알려야 할 대상).
+
+    ⛔핫픽스(2026-08-13, 라이브 실측): 이 게이트도 DM은 대상 밖이다 — human 메시지가 애초에
+    없는 순수 1:1 agent DM(장기 협업방)은 연쇄 깊이가 구조적으로 늘 cap을 넘어, loop 방지
+    의도와 무관하게 정상 1:1 대화 자체가 침묵당했다(reason=chain-expired 반복 확인).
+    group(다자간 A↔B 핑퐁 리스크)만 게이트 유지.
     """
     try:
         # 1. 메시지 + 발신자 조회
@@ -247,7 +252,15 @@ async def route_message(
             # story #2608 P1: 최종 게이트 — 그 외 모든 판정을 통과했어도(멘션 성립·all·
             # free_response 완화 전부 포함) agent recipient는 연쇄가 cap을 넘으면 여기서
             # 막힌다. human recipient는 대상 밖(위 docstring).
-            if chain_expired and recipient_type == "agent":
+            #
+            # ⛔핫픽스(2026-08-13, 라이브 실측·Cloud Logging 대조 확定): DM은 이 게이트 밖이다.
+            # 순수 1:1 agent DM(human 메시지가 애초에 없는 지속 작업방, 예: PM↔BE 핸드오프)은
+            # 연쇄 깊이가 구조적으로 항상 cap을 넘어 — «A↔B 무한루프 방지»라는 원 의도와 무관하게
+            # «정상적인 장기 1:1 협업»을 통째로 침묵시켰다(reason=chain-expired 반복, 판별3·4
+            # 재현). group의 loop-risk와 DM의 legitimate 1:1은 다른 문제라 mentions-기본값
+            # DM예외(#2603)와 같은 논리로 여기도 DM을 뺀다 — group(다자간 A↔B 핑퐁 리스크)은
+            # 그대로 게이트 유지.
+            if chain_expired and recipient_type == "agent" and conv_type != "dm":
                 logger.info(
                     "delivery_contract: excluded recipient=%s conversation_id=%s reason=%s",
                     rid, msg.conversation_id, "chain-expired",
