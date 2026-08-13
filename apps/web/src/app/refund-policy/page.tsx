@@ -22,7 +22,7 @@ export default async function RefundPolicyPage() {
         <div className="rounded-2xl bg-background p-8 shadow-sm">
           {doc ? (
             <>
-              <p className="mb-6 text-xs text-muted-foreground/60">
+              <p className="mb-6 text-xs text-muted-foreground">
                 시행일: {new Date(doc.effectiveFrom).toLocaleDateString('ko-KR')}
               </p>
               <DocContentRenderer content={doc.content} contentFormat={doc.contentFormat} publicMode />
