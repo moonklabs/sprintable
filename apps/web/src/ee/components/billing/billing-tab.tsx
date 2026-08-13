@@ -5,8 +5,10 @@
  * isEEEnabled()=true 환경에서만 렌더링됨. 유나 시안(artifact a1bd79ae) + 핸드오프 doc
  * (billing2-ui-handoff-v1) SSOT.
  *
- * isPricePublic — 대표 승인 게이트의 진실은 서버 필드(#2474 A관리1 BE)여야 하나, 그 API가
- * 아직 없어 지금은 하드코드 false 로 고정한다(승인 前 실가격 대외 노출 0 원칙).
+ * isPricePublic — 대표 승인 게이트의 진실은 서버 필드(#2474 A관리1 BE)가 최종형이나, 그 API
+ * 착지 前까지는 하드코드로 켠다(story #2605 그라운딩: 렌더 경로가 TIER_DEFINITIONS 로컬 상수만
+ * 읽고 #2474 API를 호출하는 자리가 코드 어디에도 없음을 확認 — 이 상수는 "API 부재로 대신 켜는
+ * 로컬 값"일 뿐, #2474가 기능적으로 선결조건은 아니다). 대표 승인 완료(2026-08-13) 반영.
  * #2474 착지 후 이 상수를 실 플래그 fetch 로 교체하는 것이 유일한 변경점이 되도록
  * 나머지 렌더 로직은 이미 isPricePublic 하나로 분기돼 있다.
  */
@@ -40,8 +42,8 @@ import {
   type TierId,
 } from './pricing-data';
 
-/** #2474 A관리1 BE 뜨기 前까지 하드코드 — 승인 前 실가격 대외 노출 0. */
-const IS_PRICE_PUBLIC = false;
+/** #2474 A관리1 BE 뜨기 前까지 하드코드 — 대표 승인 완료(2026-08-13, story #2605)로 켠다. */
+const IS_PRICE_PUBLIC = true;
 
 interface BillingStatus {
   org_id: string;
