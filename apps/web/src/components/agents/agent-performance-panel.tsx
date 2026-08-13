@@ -241,7 +241,7 @@ export function AgentPerformancePanel() {
                       key={agent.id}
                       className="flex items-center gap-3 px-3 py-2.5"
                     >
-                      <span className={`w-6 shrink-0 text-center text-sm font-bold ${idx === 0 ? 'text-warning-strong' : idx === 1 ? 'text-muted-foreground' : idx === 2 ? 'text-warning/70' : 'text-muted-foreground'}`}>
+                      <span className={`w-6 shrink-0 text-center text-sm font-bold ${idx === 0 ? 'text-warning-strong' : idx === 1 ? 'text-muted-foreground' : idx === 2 ? 'text-warning-strong' : 'text-muted-foreground'}`}>
                         {idx + 1}
                       </span>
                       <span className="flex-1 truncate text-sm font-medium text-foreground">{agent.name}</span>
