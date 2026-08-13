@@ -16,8 +16,14 @@ from app.models.conversation import Conversation, ConversationMessage, Conversat
 from app.models.notification_preference import NotificationPreference
 from app.models.team import TeamMember
 from app.models.user_block import UserBlock
+from app.services.chain_depth import compute_agent_chain_depth
 
 logger = logging.getLogger(__name__)
+
+# story #2608 P1: 인간 앵커 없는 에이전트 연쇄가 유효한 최대 hop 수. 실측 근거(정상 A2A
+# 협업 사슬 길이 분포)가 아직 없어 4로 시작한다(PM→BE→FE→QA류 짧은 핸드오프 사슬은
+# 통과·A↔B 무한 핑퐁류는 몇 초 안에 걸림) — 값 자체는 PO 판단 대상(PR 참조).
+_AGENT_CHAIN_DEPTH_CAP: int = 4
 
 
 class ChannelRouterError(Exception):
@@ -60,6 +66,14 @@ async def route_message(
     **free_response 대화 오버라이드**(AC2 옵트아웃): `conversation.free_response=true`면
     이 대화 한정으로 level="mentions"인 recipient는 "all"로 완화된다 — 단 명시 "mute"는
     안 뒤집는다(회원 자신의 «아예 알림 원치 않음» 선택이 방 설정보다 우선).
+
+    story #2608 P1: agent가 보낸 메시지이고, 이 대화의 최근 연쇄 깊이(compute_agent_chain_
+    depth, human 메시지 나올 때까지 역순 카운트)가 `_AGENT_CHAIN_DEPTH_CAP`을 넘으면, agent
+    recipient는 **mentions/all/free_response 판정과 무관하게** 제외된다(reason="chain-
+    expired") — A↔B가 서로를 계속 유효하게 멘션하는 최악 케이스(mentions 조건 자체는 항상
+    통과)를 막는 유일한 축이라 다른 판정보다 뒤에, 최종 게이트로 건다. human recipient는
+    이 게이트의 대상이 아니다(인간이 바로 그 "앵커"라 차단하면 안 됨 — 오히려 human-
+    intervention 이벤트로 알려야 할 대상).
     """
     try:
         # 1. 메시지 + 발신자 조회
@@ -123,6 +137,15 @@ async def route_message(
 
         if not recipient_ids:
             return []
+
+        # story #2608 P1: sender가 agent일 때만 연쇄 깊이를 잰다(human 발신은 애초에 이
+        # 게이트 대상 밖 — 정의상 그 메시지 자체가 앵커라 depth=0으로 리셋되는 것과 동치).
+        chain_expired = False
+        if sender_type == "agent":
+            depth = await compute_agent_chain_depth(
+                db, msg.conversation_id, max_scan=_AGENT_CHAIN_DEPTH_CAP,
+            )
+            chain_expired = depth > _AGENT_CHAIN_DEPTH_CAP
 
         # 4. 수신자 type 배치 조회
         member_rows = (await db.execute(
@@ -210,6 +233,16 @@ async def route_message(
                         rid, msg.conversation_id, "mentions level, not mentioned",
                     )
                     continue
+
+            # story #2608 P1: 최종 게이트 — 그 외 모든 판정을 통과했어도(멘션 성립·all·
+            # free_response 완화 전부 포함) agent recipient는 연쇄가 cap을 넘으면 여기서
+            # 막힌다. human recipient는 대상 밖(위 docstring).
+            if chain_expired and recipient_type == "agent":
+                logger.info(
+                    "delivery_contract: excluded recipient=%s conversation_id=%s reason=%s",
+                    rid, msg.conversation_id, "chain-expired",
+                )
+                continue
 
             decisions.append(DeliveryDecision(
                 member_id=rid,

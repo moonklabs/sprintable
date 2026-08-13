@@ -652,6 +652,69 @@ async def _dispatch_mention_events(
             for pid_str, event in events_to_push]
 
 
+async def _dispatch_human_intervention_event(
+    db: AsyncSession,
+    conversation: Conversation,
+    msg: ConversationMessage,
+    org_id: uuid.UUID,
+    sender: TeamMember,
+    blocked_agent_recipient_ids: set[uuid.UUID],
+    chain_depth_cap: int,
+) -> list[tuple[str, dict]]:
+    """story #2608 P1 AC1: 연쇄 cap 초과로 agent recipient가 막힌 메시지를, 그 대화의 human
+    참가자 전원에게 `conversation.human_intervention_requested` Event로 알린다 — "왜 조용한가"
+    가 항상 답 가능해야 한다(블루프린트 §3, 침묵이 아니라 이벤트로 전환).
+
+    `_dispatch_mention_events`와 동형 구조(Event INSERT + flush, commit 후 push) — 대상만
+    human 참가자로 다르다. human은 recipient_seq 개념이 없어(agent 전용 gap-free 커서)
+    assign_recipient_seq를 안 부른다(_dispatch_conversation_event의 기존 관례와 동일).
+    """
+    if not conversation.project_id:
+        return []
+
+    participant_rows = (await db.execute(
+        select(ConversationParticipant.member_id, TeamMember.type)
+        .join(TeamMember, TeamMember.id == ConversationParticipant.member_id)
+        .where(ConversationParticipant.conversation_id == conversation.id)
+    )).all()
+    human_targets = {pid for pid, m_type in participant_rows if m_type == "human"}
+    if not human_targets:
+        return []
+
+    payload = {
+        **_msg_payload(msg, sender),
+        "blocked_recipient_ids": [str(rid) for rid in sorted(blocked_agent_recipient_ids)],
+        "chain_depth_cap": chain_depth_cap,
+        "reason": "chain-expired",
+    }
+
+    events_to_push: list[tuple[str, Event]] = []
+    for pid in sorted(human_targets):  # deadlock 방지: 일관 락 순서
+        event = Event(
+            project_id=conversation.project_id,
+            org_id=org_id,
+            event_type="conversation.human_intervention_requested",
+            source_entity_type="conversation_message",
+            source_entity_id=msg.id,
+            sender_id=sender.id,
+            recipient_id=pid,
+            recipient_type="human",
+            payload=payload,
+            status="pending",
+        )
+        db.add(event)
+        events_to_push.append((str(pid), event))
+
+    await db.flush()
+    from app.services.activity_stream import extract_activities_best_effort
+    await extract_activities_best_effort(db, [event.id for _, event in events_to_push])
+    return [
+        (pid_str, {"event_id": str(event.id), "event_type": "conversation.human_intervention_requested",
+                   **payload, "recipient_id": pid_str})
+        for pid_str, event in events_to_push
+    ]
+
+
 async def _command_capability_gate(
     db: AsyncSession,
     conv: Conversation,
@@ -2186,6 +2249,41 @@ async def send_message(
         # dispatch 실패를 삼키지 않고 surface — 게이트웨이 이벤트 미생성 무음 방지
         logger.error("conversation event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
         raise HTTPException(status_code=500, detail="event dispatch failed") from _dispatch_err
+
+    # story #2608 P1 AC1: A↔B 상호멘션류(멘션 자체는 항상 유효해 route_message의 mentions
+    # 체크로는 절대 안 끊김)를 잡는다 — 이 메시지가 agent가 보낸 것이고 agent를 명시
+    # 멘션했는데(=turn이 시도됐을 대상이 실재) 연쇄가 cap을 넘었으면, "침묵"이 아니라 human
+    # 참가자에게 human_intervention_requested 이벤트로 알린다(블루프린트 §3). depth 계산은
+    # route_message() 안의 게이트와 **같은 함수**(compute_agent_chain_depth) — 판정 로직
+    # 중복 없음, 호출 위치만 recipient-필터(route_message)·이벤트-발생(여기, 메시지당 1회)
+    # 으로 자연히 갈린다(chain_depth.py 모듈 docstring 참조). 「멘션됐는데 agent가 없다」
+    # (전부 human 멘션)면 turn 자체가 애초에 대상 없어 이 게이트는 no-op(조건에 이미 반영).
+    if sender.type == "agent" and msg.mentioned_ids:
+        from app.services.chain_depth import compute_agent_chain_depth
+        from app.services.channel_router import _AGENT_CHAIN_DEPTH_CAP
+
+        chain_depth = await compute_agent_chain_depth(
+            db, conversation_id, max_scan=_AGENT_CHAIN_DEPTH_CAP,
+        )
+        if chain_depth > _AGENT_CHAIN_DEPTH_CAP:
+            _mentioned_agent_rows = (await db.execute(
+                select(TeamMember.id).where(
+                    TeamMember.id.in_(msg.mentioned_ids), TeamMember.type == "agent",
+                )
+            )).scalars().all()
+            chain_expired_agent_targets = set(_mentioned_agent_rows)
+            if chain_expired_agent_targets:
+                try:
+                    async with db.begin_nested():
+                        pending_sse_pushes += await _dispatch_human_intervention_event(
+                            db, conv, msg, org_id, sender,
+                            chain_expired_agent_targets, _AGENT_CHAIN_DEPTH_CAP,
+                        )
+                except Exception:
+                    logger.warning(
+                        "human_intervention_requested dispatch failed conversation_id=%s",
+                        conversation_id, exc_info=True,
+                    )
 
     # AC1: 멘션 대상에게 conversation:mention SSE 발송 (participant 여부 무관)
     #
