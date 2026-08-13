@@ -432,8 +432,13 @@ async def agent_stream(
     from app.services import sse_lease
     _lease_conn_id = str(uuid.uuid4())
     _pk_lease = await sse_lease.acquire(f"perkey:{agent_id_str}", _per_key_limit, _lease_conn_id)
+    # story #2602: `_agent_connections`는 defaultdict(set) — `[...]` 서브스크립트는 키가 없으면
+    # 빈 set을 **만들면서** 반환한다. 이 줄은 판정(길이 체크)일 뿐인데 거부(429)로 끝나는 요청도
+    # 매번 agent_id 하나를 이 dict에 영구 등록해버렸다("거부가 자원을 만드는" 결함 — len에는
+    # 무해(빈 set)지만 한 번이라도 한도초과 조회를 겪은 모든 agent_id가 dict key로 영구 잔류).
+    # `.get(..., ())` 로 조회를 read-only로 고정 — 존재하는 키만 세션 등록 시 만들어진다(L471).
     if _pk_lease is False or (
-        _pk_lease is None and len(_agent_connections[agent_id_str]) >= _per_key_limit
+        _pk_lease is None and len(_agent_connections.get(agent_id_str, ())) >= _per_key_limit
     ):
         # story #2582: flat _AGENT_STREAM_RETRY_AFTER(기본 5s)는 orphan lease(비정상 종료 —
         # kill -9 등으로 finally/release가 안 돈 연결)의 실제 자가회수 시한(sse_lease._TTL_SEC,
