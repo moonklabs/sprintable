@@ -33,6 +33,7 @@ from app.models.grandfather_policy import GrandfatherPolicy
 from app.models.billing_ledger_entry import BillingLedgerEntry
 from app.models.plan_tier_limit import PlanTierLimit
 from app.models.policy_document import PolicyDocument
+from app.models.legal_document import LegalDocumentVersion
 from app.models.audit import AuditLog
 from app.models.webhook_config import WebhookConfig
 from app.models.push_device import PushDevice
@@ -147,6 +148,7 @@ __all__ = [
     "BillingLedgerEntry",
     "PlanTierLimit",
     "PolicyDocument",
+    "LegalDocumentVersion",
     "AuditLog",
     "WebhookConfig",
     "PushDevice",
