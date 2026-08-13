@@ -86,19 +86,27 @@ describe('BillingTab — 결제②-D 4티어 재편', () => {
     expect(container.textContent).toContain('Business');
   });
 
-  it('isPricePublic=false — 실가격 대신 「준비 중」 플레이스홀더만 노출한다(대표 승인 前 노출 0)', async () => {
+  // story #2605 — 대표 승인 완료(2026-08-13)로 IS_PRICE_PUBLIC=true 전환. 이 파일의 나머지
+  // 테스트는 승인 前(false) 상태를 검증하던 것들을 뒤집어 승인 後(실가격 노출) 상태를 고정한다.
+  it('isPricePublic=true — v2.3 정본 실가격(원)이 노출된다(「준비 중」 플레이스홀더는 안 뜬다)', async () => {
     await mount(async () => statusResponse());
-    expect(container.textContent).toContain('준비 중');
-    // v2.3 seed 가격 원수(예: Starter 29,000원)가 화면에 절대 찍히면 안 된다.
-    expect(container.textContent).not.toContain('29,000원');
-    expect(container.textContent).not.toContain('59,000원');
-    expect(container.textContent).not.toContain('219,000원');
+    expect(container.textContent).not.toContain('준비 중');
+    expect(container.textContent).toContain('29,000원');
+    expect(container.textContent).toContain('59,000원');
+    expect(container.textContent).toContain('219,000원');
   });
 
-  it('현재 플랜 배지는 fetch된 tier에 붙고, 다른 카드는 잠금 CTA를 보인다', async () => {
+  // story #2605 AC4 — 토스 심사: 연간 구독은 서비스 제공기간이 12개월임을 명확히 표기해야
+  // 한다(1년 초과 시 결제 서비스 이용 불가 룰과 대칭). 연 결제 토글 라벨에 고정한다.
+  it('연 결제 토글에 「12개월」이 명시된다(토스 서비스제공기간 표기 요건)', async () => {
+    await mount(async () => statusResponse());
+    expect(container.textContent).toContain('12개월');
+  });
+
+  it('현재 플랜 배지는 fetch된 tier에 붙고, 다른 카드는 업그레이드 CTA를 보인다', async () => {
     await mount(async () => statusResponse({ tier: 'team' }));
     expect(container.textContent).toContain('현재 이용 중');
-    expect(container.textContent).toContain('공개 예정');
+    expect(container.textContent).toContain('업그레이드');
   });
 
   it('현재 tier가 팩 구매 불가(Free)면 팩 섹션을 숨긴다', async () => {
@@ -106,18 +114,17 @@ describe('BillingTab — 결제②-D 4티어 재편', () => {
     expect(container.textContent).not.toContain('추가 팩');
   });
 
-  // 카디르 QA(#2866) 발견 회귀: canPurchasePacks만 보고 렌더하면 승인 前에도
-  // team/business 티어에서 팩 실가격(원)이 샌다. isPricePublic=false인 동안은
-  // 어떤 tier든 팩 섹션 자체가 렌더되면 안 된다.
+  // 카디르 QA(#2866) 발견 회귀의 반대축 — canPurchasePacks=true인 team/business에서는
+  // 승인 後(isPricePublic=true) 팩 섹션·실가격이 실제로 노출돼야 한다(안 뜨면 회귀).
   it.each(['team', 'business'] as const)(
-    '승인 前(isPricePublic=false)이면 tier=%s 라도 팩 섹션·실가격을 노출하지 않는다',
+    '승인 後(isPricePublic=true)이면 tier=%s 는 팩 섹션·실가격을 노출한다',
     async (tier) => {
       await mount(async () => statusResponse({ tier }));
-      expect(container.textContent).not.toContain('추가 팩');
-      expect(container.textContent).not.toContain('자동화 팩');
-      expect(container.textContent).not.toContain('저장 팩');
-      expect(container.textContent).not.toContain('5,000원');
-      expect(container.textContent).not.toContain('3,000원');
+      expect(container.textContent).toContain('추가 팩');
+      expect(container.textContent).toContain('자동화 팩');
+      expect(container.textContent).toContain('저장 팩');
+      expect(container.textContent).toContain('5,000원');
+      expect(container.textContent).toContain('3,000원');
     },
   );
 
