@@ -608,7 +608,7 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     approval_target: { work_item_type: 'doc', work_item_id: DOC_ID, gate_id: GATE_ID, actions: ['approve', 'reject'] },
   };
 
-  function stubGate(overrides: Partial<{ status: string; can_approve: boolean; risk_grade: 'low' | 'high' | null; title: string }>) {
+  function stubGate(overrides: Partial<{ status: string; can_approve: boolean; risk_grade: 'low' | 'high' | null; title: string; resolution_note: string | null }>) {
     // 상태를 가진 mock — POST .../transition 뒤에 컴포넌트가 다시 GET하는 fetchGate()
     // refetch가 "바뀐 값"을 보게 하려면 gate 자체가 그 사이에 갱신돼야 한다(실 BE 동작 미러).
     const gate = {
@@ -621,7 +621,7 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
       risk_grade: overrides.risk_grade ?? 'low',
       resolver_id: null,
       resolved_at: null,
-      resolution_note: null,
+      resolution_note: overrides.resolution_note ?? null,
       neutral_facts: null,
       work_item_summary: { title: overrides.title ?? '제안서.md', slug: null },
       created_at: '2026-08-13T00:00:00.000Z',
@@ -736,6 +736,31 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     });
     expect(container.textContent).toContain('처리됨');
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(false);
+  });
+
+  it('story #2624 — 처리됨 상태에 raw 영문 토큰 대신 한글 라벨이 보인다(승인됨/반려됨)', async () => {
+    stubGate({ status: 'rejected' });
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    expect(container.textContent).toContain('반려됨');
+    expect(container.textContent).not.toContain('rejected');
+  });
+
+  it('story #2624 — resolution_note가 있으면 처리됨 상태 아래 사유가 렌더된다("사유는 남겨놨는데" 인시던트 대응)', async () => {
+    stubGate({ status: 'rejected', resolution_note: '근거가 불충분합니다' });
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    expect(container.textContent).toContain('근거가 불충분합니다');
+  });
+
+  it('story #2624 — resolution_note가 없으면(승인·사유 미기재) 사유 줄 자체를 안 그린다(지어내지 않음)', async () => {
+    stubGate({ status: 'approved', resolution_note: null });
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('사유:');
   });
 
   it('게이트 404(삭제 등) — 조용히 죽지 않고 정직한 미발견 문구를 보인다', async () => {
