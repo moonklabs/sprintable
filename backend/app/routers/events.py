@@ -993,8 +993,13 @@ async def publish_registry_event(
     try:
         validate_event_payload(definition.payload_schema, body.payload)
     except InvalidEventPayloadError as e:
+        # story #2634 후속(#2633 정합): api_client.py의 _extract_error_message가 인식하는
+        # {"detail":{"code","message"}} shape으로 맞춘다 — 신규 파싱 분기를 MCP 쪽에 안 만들고
+        # 기존 추출 경로를 그대로 타게 하는 것(원칙). errors 배열은 기계가 읽을 상세라 message로
+        # 뭉개지 않고 그대로 유지(extractor는 code/message 밖의 여분 키를 무해하게 무시한다).
         raise HTTPException(
-            status_code=400, detail={"error": "invalid_payload", "errors": e.errors},
+            status_code=400,
+            detail={"code": "invalid_payload", "message": str(e), "errors": e.errors},
         ) from e
 
     from app.services.event_routing_resolver import MissingRoutingPayloadFieldError, resolve_routing_leg
@@ -1008,7 +1013,8 @@ async def publish_registry_event(
         )
     except MissingRoutingPayloadFieldError as e:
         raise HTTPException(
-            status_code=400, detail={"error": "invalid_payload", "errors": [str(e)]},
+            status_code=400,
+            detail={"code": "invalid_payload", "message": str(e), "errors": [str(e)]},
         ) from e
 
     if body.extra_broadcast_member_ids:
