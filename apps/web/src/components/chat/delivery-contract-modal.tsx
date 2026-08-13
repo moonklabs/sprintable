@@ -130,6 +130,10 @@ export function DeliveryContractModal({
             <div className="space-y-4">
               <div>
                 <p className="mb-1 text-xs font-medium text-foreground">{t('deliveryContractLevelLabel')}</p>
+                {/* 유나 design 소견(#3012) — 헤더 Bell/BellOff(conversation.muted_at, 화면 표시만
+                    억제)와 이 레벨(notification_preferences, 전달 자체를 결정)은 서로 다른 축이다
+                    (channel_router.py가 muted_at을 참조하지 않음, 코드로 확認) — 혼동 방지 문구. */}
+                <p className="mb-1 text-[11px] text-muted-foreground">{t('deliveryContractLevelHint')}</p>
                 <p className="mb-2 text-[11px] text-muted-foreground">
                   {hasOverride ? t('deliveryContractLevelHasOverride') : t('deliveryContractLevelDefault')}
                 </p>

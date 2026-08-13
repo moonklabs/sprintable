@@ -3240,6 +3240,7 @@
     "deliveryContractTitle": "알림 설정",
     "deliveryContractLoading": "불러오는 중…",
     "deliveryContractLevelLabel": "이 대화에서 받을 알림",
+    "deliveryContractLevelHint": "헤더의 알림 벨과는 다릅니다 — 벨은 화면 표시만 끄고, 여기는 전달 자체를 결정합니다.",
     "deliveryContractLevelDefault": "설정한 값이 없어 기본값을 따릅니다.",
     "deliveryContractLevelHasOverride": "이 대화에 별도로 설정한 값입니다.",
     "deliveryContractLevel_all": "전체",
