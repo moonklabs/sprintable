@@ -18,6 +18,7 @@ export function GateSignatureApproval({
   error,
   onApprove,
   onReject,
+  compact = false,
 }: {
   gate: GateItem;
   resolving: boolean;
@@ -28,6 +29,12 @@ export function GateSignatureApproval({
   error?: string | null;
   onApprove: (reason: string) => void;
   onReject: (reason: string) => void;
+  /** story #2625(유나 design 확定, 카디르 QA 320px 실측 대응) — 챗 카드 좁은 폭(실효 ~166px)
+   * 컨텍스트. 원 컨텍스트(gates 페이지 672px)는 가로 2버튼이 여유롭지만, 좁은 폭에서
+   * whitespace-nowrap+shrink-0(button.tsx 기본) 그대로면 라벨이 잘린다. truncate나
+   * 아이콘-only는 금지(중대 액션 라벨 온전 필수, PO 확定) — 대신 세로 스택으로 각 버튼이
+   * full-width를 갖게 한다. 컴포넌트를 포크하지 않고 이 prop 하나로 컨텍스트만 분기한다. */
+  compact?: boolean;
 }) {
   const t = useTranslations('cage');
   const [evidenceViewed, setEvidenceViewed] = useState(false);
@@ -77,10 +84,10 @@ export function GateSignatureApproval({
 
       <div className="flex flex-col gap-2">
         <p className="text-center text-[11px] text-muted-foreground">{t('sigConsequenceNote')}</p>
-        <div className="flex gap-2">
+        <div className={compact ? 'flex flex-col gap-2' : 'flex gap-2'}>
           <Button
             variant="outline"
-            className="min-h-12 flex-1 gap-1.5"
+            className={compact ? 'min-h-12 w-full gap-1.5' : 'min-h-12 flex-1 gap-1.5'}
             disabled={resolving}
             onClick={() => onReject(reason)}
           >
@@ -88,7 +95,7 @@ export function GateSignatureApproval({
             {t('sigRequestChanges')}
           </Button>
           <Button
-            className="min-h-12 flex-[1.4] gap-1.5"
+            className={compact ? 'min-h-12 w-full gap-1.5' : 'min-h-12 flex-[1.4] gap-1.5'}
             disabled={!canSign}
             onClick={() => onApprove(reason)}
           >

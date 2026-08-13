@@ -695,14 +695,46 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(false);
   });
 
-  it('고위험(risk_grade=high) — 인라인 버튼 대신 결재함으로 열기 링크만 보인다(서명 플로우 재구현 안 함)', async () => {
+  it('story #2625 — 고위험(risk_grade=high)도 챗 안에서 서명 플로우로 완결된다(링크 위임 아님)', async () => {
     stubGate({ risk_grade: 'high' });
     await act(async () => {
       root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
     });
-    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(false);
-    const link = container.querySelector(`a[href="/gates/${GATE_ID}"]`);
-    expect(link).not.toBeNull();
+    // 링크 위임 UX는 선생님 실사용 판정으로 폐기됐다(gate 34af76dc) — 더 이상 없어야 한다.
+    expect(container.querySelector(`a[href="/gates/${GATE_ID}"]`)).toBeNull();
+    // GateSignatureApproval이 그대로(사본 아님) 얹힌다 — 근거 확인 체크박스+사유 textarea.
+    expect(container.textContent).toContain('위 근거를 확인했습니다');
+    const signBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('승인하고 서명'))!;
+    expect(signBtn).not.toBeUndefined();
+    // 카디르 QA(320/375px 실측) 재발방지 — compact=true가 실제로 전달돼 버튼이 세로 스택
+    // full-width로 렌더되는지(가로 2버튼이면 라벨이 좁은 챗 폭에서 잘린다, 재발가드).
+    expect(signBtn.className).toContain('w-full');
+    expect(signBtn.parentElement?.className).toContain('flex-col');
+    // AC: 근거 확인+사유 전에는 서명 비활성(gate-signature-approval.tsx의 canSign 그대로 상속).
+    expect(signBtn.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('story #2625 — 근거 확인+사유 입력 후 «승인하고 서명»이 transition POST에 사유를 note로 싣는다', async () => {
+    stubGate({ risk_grade: 'high' });
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      checkbox.click();
+      const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+      nativeSetter.call(textarea, '근거 확인함, 승인');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const signBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('승인하고 서명'))!;
+    expect(signBtn.hasAttribute('disabled')).toBe(false);
+    await act(async () => { signBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {});
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const transitionCall = fetchMock.mock.calls.find((call: unknown[]) => (call[0] as string).includes('/transition'));
+    expect(JSON.parse((transitionCall![1] as { body: string }).body)).toEqual({ status: 'approved', note: '근거 확인함, 승인' });
   });
 
   it('이미 처리된 게이트(status=approved)는 버튼 없이 처리됨 상태만 보인다', async () => {
