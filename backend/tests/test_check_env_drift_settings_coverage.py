@@ -162,6 +162,9 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # #2495(결제②-C4, PO 승인 2026-08-07): toss_webhook_secret 필드 신설로 92→93
     # (TOSS_WEBHOOK_SECRET 포함) — TossAdapter.verify_webhook의 HMAC 서명 검증 시크릿,
     # polar_webhook_secret 동형. 가드가 신규 필드를 설계대로 잡은 것.
+    # 핫픽스(2026-08-13, 선생님 직접 지시): agent_group_default_mentions 필드 신설로 93→94
+    # (AGENT_GROUP_DEFAULT_MENTIONS 포함) — #2603 그룹챗 mentions 기본계약을 opt-in으로
+    # 되돌리는 kill switch(기본 False). 가드가 신규 필드를 설계대로 잡은 것.
     assert "PRESENCE_REDIS_ENABLED" in keys and "SSE_TRANSIENT_REPLAY_ENABLED" in keys
     assert "REQUIRE_VERIFIED_EMAIL_FOR_ORG_CREATE" in keys
     assert "DATABASE_URL_READ" in keys
@@ -170,4 +173,5 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     assert "TOSS_PAYMENTS_CRYPTO_KEY" in keys and "TOSS_MERCHANT_ID" in keys
     assert "ORG_BILLING_KEY_ENCRYPTION_KEY" in keys
     assert "TOSS_WEBHOOK_SECRET" in keys
-    assert len(keys) == 93
+    assert "AGENT_GROUP_DEFAULT_MENTIONS" in keys
+    assert len(keys) == 94
