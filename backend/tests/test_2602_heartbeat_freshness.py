@@ -77,28 +77,43 @@ def test_evaluate_advance_never_seen_stays_unarmed_no_skip():
     assert r.newly_armed is False
 
 
-def test_evaluate_advance_frozen_value_after_arming_skips_refresh():
-    """connect-time 최초 write 하나만 있고 그 뒤로 다시는 안 바뀌는 값(같은 last_seen_at
-    반복 관측)은 최초 1회 무장 후 곧바로 skip 판정 — "heartbeat가 1번 오고 멈춘" 케이스의
-    핵심 회귀가드(신선함이 아니라 전진을 본다)."""
+def test_evaluate_advance_first_observation_only_records_never_arms():
+    """페드루 리뷰 지적(2026-08-13, #3028 head 497eafbd7) — 첫 관측(last_observed=None→값)은
+    기록만 하고 무장하지 않는다. connect-time write(agent_gateway.py 세션 등록 블록)가 AC2
+    무관 보편적이라, "첫 관측=전진"으로 치면 dial-out도 첫 tick에 무장되고 둘째 tick(값이
+    안 바뀌므로)부터 곧장 skip으로 떨어져 정상 dial-out 연결의 lease가 회수되는 그 역회귀가
+    재현된다 — 그래서 last_observed가 이미 값을 가진 뒤의 전진만 무장 사유로 인정한다."""
     from app.services.heartbeat_freshness import evaluate_advance
 
     frozen = datetime(2026, 8, 13, 12, 0, 0, tzinfo=timezone.utc)
     r1 = evaluate_advance(current=frozen, last_observed=None, armed=False)
-    assert r1.armed is True and r1.newly_armed is True
-    r2 = evaluate_advance(current=frozen, last_observed=r1.last_observed, armed=r1.armed)
-    assert r2.should_skip_refresh is True
+    assert r1.armed is False and r1.newly_armed is False and r1.should_skip_refresh is False
+    assert r1.last_observed == frozen  # 다음 tick 비교 기준으로는 기록됨
 
 
-def test_evaluate_advance_dial_out_realistic_never_arms():
-    """진짜 dial-out 재현 — get_agent_last_heartbeat가 애초에 None을 반환(heartbeat
-    엔드포인트를 한 번도 안 침, connect-time write는 last_seen_at이 아니라 별도 축이라고
-    가정 못 하는 최악 케이스도 커버: profile row 자체가 없거나 MAX가 None인 경우).
-    이 경로가 여러 tick 반복돼도 무장이 단 한 번도 안 걸려야 정상 refresh가 유지된다."""
+def test_evaluate_advance_dial_out_realistic_frozen_after_connect_never_arms():
+    """진짜 dial-out 재현 — connect-time write로 last_seen_at은 «있지만»(None이 아님)
+    그 이후 다시는 안 바뀐다(heartbeat 엔드포인트를 한 번도 안 침). 첫 tick은 기록만,
+    이후 여러 tick 반복돼도 값이 그대로라 무장이 단 한 번도 안 걸려야 정상 refresh가
+    유지된다 — Fix①의 핵심 회귀가드(구 버전은 여기서 실패했다, #3028 페드루 지적)."""
+    from app.services.heartbeat_freshness import evaluate_advance
+
+    frozen = datetime(2026, 8, 13, 12, 0, 0, tzinfo=timezone.utc)
+    armed, last_observed = False, None
+    for _ in range(5):  # 5 tick 시뮬레이션 — connect-write 값이 그대로 반복 관측됨
+        r = evaluate_advance(current=frozen, last_observed=last_observed, armed=armed)
+        armed, last_observed = r.armed, r.last_observed
+        assert r.should_skip_refresh is False
+    assert armed is False
+
+
+def test_evaluate_advance_no_profile_row_never_arms():
+    """profile row 자체가 없어 get_agent_last_heartbeat가 매번 None을 반환하는 최악
+    케이스도 무장 0(현행 refresh 유지)."""
     from app.services.heartbeat_freshness import evaluate_advance
 
     armed, last_observed = False, None
-    for _ in range(5):  # 5 tick 시뮬레이션 — 매번 current=None(heartbeat 신호 전무)
+    for _ in range(5):
         r = evaluate_advance(current=None, last_observed=last_observed, armed=armed)
         armed, last_observed = r.armed, r.last_observed
         assert r.should_skip_refresh is False
@@ -107,7 +122,8 @@ def test_evaluate_advance_dial_out_realistic_never_arms():
 
 def test_evaluate_advance_heartbeat_user_then_stops_arms_then_skips():
     """heartbeat가 반복 전진하다가(무장) 멈추면(전진 정지) 그 다음 tick부터 skip — Fix①의
-    핵심 시나리오(429 스톰의 원인이 된 실제 zombie 시그니처)."""
+    핵심 시나리오(429 스톰의 원인이 된 실제 zombie 시그니처). 무장은 «두 번째» 전진
+    관측부터(첫 관측은 기록만, 페드루 리뷰 반영)."""
     from app.services.heartbeat_freshness import evaluate_advance
 
     t0 = datetime(2026, 8, 13, 12, 0, 0, tzinfo=timezone.utc)
@@ -115,10 +131,10 @@ def test_evaluate_advance_heartbeat_user_then_stops_arms_then_skips():
     t2 = t0 + timedelta(seconds=60)
 
     r1 = evaluate_advance(current=t0, last_observed=None, armed=False)
-    assert r1.armed is True and r1.newly_armed is True and r1.should_skip_refresh is False
+    assert r1.armed is False and r1.newly_armed is False and r1.should_skip_refresh is False  # 첫 관측 — 기록만
 
-    r2 = evaluate_advance(current=t1, last_observed=r1.last_observed, armed=r1.armed)
-    assert r2.armed is True and r2.newly_armed is False and r2.should_skip_refresh is False  # 계속 전진 — 재무장 카운트 없음
+    r2 = evaluate_advance(current=t1, last_observed=r1.last_observed, armed=r1.armed)  # 진짜 전진(t0→t1)
+    assert r2.armed is True and r2.newly_armed is True and r2.should_skip_refresh is False
 
     r3 = evaluate_advance(current=t1, last_observed=r2.last_observed, armed=r2.armed)  # heartbeat 정지(같은 값)
     assert r3.should_skip_refresh is True

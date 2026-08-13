@@ -65,13 +65,22 @@ def evaluate_advance(
     전혀 없어 이 파일 상단 docstring의 "전진 vs 신선함" 규칙을 부수효과 없이 직접 단위
     테스트한다(agent_gateway.py의 SSE 제너레이터 내부는 직접 호출 불가라 여기로 추출).
 
-    - current가 last_observed보다 전진(> ) 또는 last_observed가 아직 None(첫 관측) →
-      무장(armed=True)·refresh 진행·last_observed 갱신.
-    - 전진이 없고(current <= last_observed, 또는 current가 None) 이미 armed →
-      refresh skip(좀비 시그니처).
+    ⚠️(페드루 리뷰 지적, 2026-08-13 — #3028 head 497eafbd7 시점) **첫 관측은 무장으로
+    치지 않는다.** connect-time write(agent_gateway.py 세션 등록 블록)가 AC2 무관 보편적
+    이라 — dial-out 연결도 last_seen_at이 「있다」(connect 시점 1회). last_observed=None을
+    "전진"으로 취급하면 dial-out의 그 최초 값이 첫 tick에 무장을 트리거하고, 둘째 tick부터
+    (다시는 안 바뀌므로) 곧장 skip 판정으로 떨어져 정상 dial-out 연결의 lease가 회수되는
+    바로 그 역회귀가 재현된다. 그래서 last_observed가 **None이 아닐 때만** 전진을 인정한다
+    — 첫 tick은 기록만 하고 무장 판단을 유보(비용: 무장까지 1 tick 지연, 안전측).
+
+    - `last_observed is not None`이고 `current > last_observed`(진짜 전진) → 무장·refresh
+      진행·last_observed 갱신.
+    - 전진이 없고(current가 last_observed 이하, None, 또는 last_observed 자체가 아직
+      None=첫 관측) 이미 armed → refresh skip(좀비 시그니처 — 전진하다 멈춘 경우만 해당,
+      첫 관측은 위에서 armed=False로 시작하니 여기 안 옴).
     - 전진이 없고 아직 armed 아님(dial-out류·첫 heartbeat 전) → 현행대로 refresh 진행,
-      무장하지 않음(회귀 없음)."""
-    if current is not None and (last_observed is None or current > last_observed):
+      무장하지 않음(회귀 없음) — last_observed는 기록해 다음 tick 비교 기준으로 삼는다."""
+    if current is not None and last_observed is not None and current > last_observed:
         return HeartbeatGateResult(
             armed=True, should_skip_refresh=False,
             last_observed=current, newly_armed=not armed,
@@ -81,7 +90,8 @@ def evaluate_advance(
             armed=True, should_skip_refresh=True, last_observed=last_observed, newly_armed=False,
         )
     return HeartbeatGateResult(
-        armed=False, should_skip_refresh=False, last_observed=last_observed, newly_armed=False,
+        armed=False, should_skip_refresh=False,
+        last_observed=current if current is not None else last_observed, newly_armed=False,
     )
 
 
