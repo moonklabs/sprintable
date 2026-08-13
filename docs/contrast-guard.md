@@ -37,12 +37,17 @@
   CI 에서는 authed DB 잡(postgres + alembic + owner 시드 → FastAPI + Next 서빙 → chromium)에서
   돈다. 인증은 `e2e/global-setup.ts` 가 `owner@sprintable.dev` 로그인 후 `playwright/.auth/owner.json`
   storageState 를 만든다(파일은 `.gitignore`, 생성 로직만 커밋).
-- v1 스코프: **데이터-경량 표면** × 두 테마 × rest+hover.
+- v1 스코프: **데이터-경량 표면** × 두 테마 × **rest 상태**.
   - 페이지: `/settings`, `/onboarding`, `/dashboard`, `/inbox`.
-  - 데이터-무거운 `flow`/`kanban` 은 CI 시드 대 nightly 비용을 관측한 뒤 조절(예방은 유지, 비용은 관측 후).
-- baseline: `apps/web/e2e/contrast-axe-baseline.json` — **빈 배열로 시작**. 첫 CI 런이 현 v1
-  표면의 대비 위반을 전부 "신규"로 드러내면, 그 키(`page::theme::selector::색쌍`)를 baseline 에
-  시드한다. 이후로는 baseline 밖 **새** 위반만 빨간불(자매 정적 가드와 같은 can-only-shrink 계약).
+  - **hover 상태는 v2로 미룸** — 40개 인터랙티브를 훑어 hover마다 스캔하는 방식이 비결정적이었다
+    (첫 CI 런 실측: 같은 표면이 run 2엔 위반·run 3엔 통과). 게이트는 결정적이어야 하므로(flaky
+    게이트는 무시당해 가드보다 못함) hover는 «특정 known 요소 대상 결정적 스캔»으로 v2 재도입.
+  - 데이터-무거운 `flow`/`kanban` 은 CI 시드 대 nightly 비용을 관측한 뒤 조절.
+- **키 = `page::theme::색쌍(fg/bg)`** — axe의 CSS 셀렉터(`node.target`)는 클래스 순서가 런마다
+  뒤바뀌어(`​.pt-4.pb-1` ↔ `.pb-1.pt-4`) 비결정적이라 키에서 뺐다. 색쌍은 위반의 결정적 정체다.
+- baseline: `apps/web/e2e/contrast-axe-baseline.json` — 첫 CI 런(rest)이 드러낸 현 위반(settings의
+  `text-muted-foreground` 알파 변형 저대비 2색쌍)을 grandfather로 시드. 이후 baseline 밖
+  **새 색쌍**만 빨간불(자매 정적 가드와 같은 can-only-shrink 계약).
 
 ## AC4 — 이 가드가 **못** 잡는 것 (명시 선언)
 
@@ -58,7 +63,9 @@
 2. **(B) 도 못 보는 것**:
    - v1 페이지 목록 밖 화면.
    - org 데이터가 있어야만 렌더되는 tint 표면(데이터-무거운 flow/kanban — v1 미포함).
-   - 모달·팝오버 등 상호작용으로만 열리는 상태 중 스펙이 명시적으로 열지 않은 것.
+   - **hover 등 상호작용 상태** — v1 미포함(검출 비결정성 때문·위 참조), v2 예정.
+   - **같은 색쌍의 다른 인스턴스** — 키가 색쌍이라 접힌다. 새 «색쌍»(진짜 새 대비 버그)은 잡지만,
+     이미 baseline에 있는 색쌍이 새 자리에 또 쓰이면 안 잡는다(그 색쌍은 이미 알려진 토큰 채무).
    - **색맹 대비** — axe `color-contrast` 는 명도(luminance)만 잰다. 색상 구분(빨/초 등)은 안 잰다.
 
 ## (A) ↔ (B) 요약
@@ -67,6 +74,6 @@
 |---|---|---|
 | 대상 | TSX 소스(AST) | 렌더된 실 픽셀 |
 | 비용 | 값쌈(모든 PR) | 무거움(authed DB 잡) |
-| 범위 | 교차-요소 tint×계열색 | 교차-요소·교차-계열·알파·상태·미래 |
+| 범위 | 교차-요소 tint×계열색 | 교차-요소·교차-계열·알파(rest·hover는 v2) |
 | 권위 | 프리필터 | **최종 authority**(충돌 시 (B) 승) |
-| baseline | 21건 시드(develop) | 빈 배열(첫 런 후 시드) |
+| baseline | 21건 시드(develop) | 2색쌍 시드(settings·첫 런) |
