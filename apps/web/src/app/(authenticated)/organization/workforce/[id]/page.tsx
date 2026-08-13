@@ -609,7 +609,7 @@ export default function AgentDetailPage() {
               </pre>
             </>
           ) : !hasActiveKey ? (
-            <p className="text-xs text-warning">{t('agentMcpKeyRequired')}</p>
+            <p className="text-xs text-warning-strong">{t('agentMcpKeyRequired')}</p>
           ) : (
             <p className="text-xs text-muted-foreground">{t('agentMcpSecurityNote')}</p>
           )}
@@ -655,7 +655,7 @@ export default function AgentDetailPage() {
               </code>
             </>
           ) : !hasActiveKey ? (
-            <p className="text-xs text-warning">{t('agentFakechatEnvKeyRequired')}</p>
+            <p className="text-xs text-warning-strong">{t('agentFakechatEnvKeyRequired')}</p>
           ) : (
             <p className="text-xs text-muted-foreground">{t('agentFakechatEnvKeySecurityNote')}</p>
           )}

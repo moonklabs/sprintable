@@ -42,7 +42,7 @@ export function QueueRow({ item }: { item: QueueItem }) {
         href="/inbox?tab=gates"
         className={`flex items-center gap-2 rounded-lg border border-l-2 border-border bg-card p-2.5 text-xs transition hover:border-muted-foreground/30 ${PRIORITY_BORDER[item.priority]}`}
       >
-        <ShieldCheck className="size-3.5 shrink-0 text-warning" />
+        <ShieldCheck className="size-3.5 shrink-0 text-warning-strong" />
         <span className="min-w-0 flex-1 truncate text-foreground">
           {t('ccQueueGateApproval')}{ctx.gate_type ? <span className="text-muted-foreground"> · {gateLabel(t, ctx.gate_type)}</span> : null}{ctx.kind ? <span className="text-muted-foreground"> · {ctx.kind}</span> : null}
         </span>
@@ -58,7 +58,7 @@ export function QueueRow({ item }: { item: QueueItem }) {
         href={ctx.blocked_story_id ? `/board?story=${ctx.blocked_story_id}` : '/board'}
         className={`flex items-center gap-2 rounded-lg border border-l-2 border-border bg-card p-2.5 text-xs transition hover:border-muted-foreground/30 ${PRIORITY_BORDER[item.priority]}`}
       >
-        <Ban className="size-3.5 shrink-0 text-warning" />
+        <Ban className="size-3.5 shrink-0 text-warning-strong" />
         <span className="min-w-0 flex-1 truncate text-foreground">
           <span className="text-muted-foreground">{t('ccQueueMyBlocker')} · </span>{item.title ?? ctx.story_id?.slice(0, 6)}
         </span>

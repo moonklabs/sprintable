@@ -230,7 +230,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
                   <span className="truncate">{l.repo_full_name} #{l.pr_number}</span>
                   <ExternalLink className="size-2.5 shrink-0" />
                 </a>
-                <span className="inline-flex shrink-0 items-center gap-1 text-warning">
+                <span className="inline-flex shrink-0 items-center gap-1 text-warning-strong">
                   <span aria-hidden className="size-1.5 rounded-full bg-warning" />
                   {t('estimated', { confidence: l.confidence })}
                 </span>
