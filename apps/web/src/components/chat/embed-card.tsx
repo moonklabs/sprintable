@@ -260,7 +260,10 @@ function EntityDetail({ entityType, entityId, detail }: { entityType: string; en
   return null;
 }
 
-function EntityPreviewModal({
+// story #2627 — 결재 카드(chat/approval-request-card.tsx)가 doc 본문 열람을 위해 그대로
+// 재사용한다(신규 뷰어 금지·사본 분화 금지, PO 확定). 이전엔 이 파일 내부(EntityChip)만
+// 소비하는 비-export 컴포넌트였다 — export만 추가, 내부 로직은 무변경.
+export function EntityPreviewModal({
   entityType,
   entityId,
   title,
