@@ -636,6 +636,14 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
       if (typeof url === 'string' && url === `/api/gates/${GATE_ID}`) {
         return { ok: true, json: async () => ({ data: gate }) };
       }
+      // story #2627 — 카드 제목 클릭 시 EntityPreviewModal(embed-card.tsx)이 doc 2단계
+      // fetch를 시도한다 — 그 경로도 여기서 같이 응답한다.
+      if (typeof url === 'string' && url.startsWith('/api/docs/preview')) {
+        return { ok: true, json: async () => ({ data: { slug: 'proposal', projectId: 'proj-1', orgSlug: 'org', projectSlug: 'proj' } }) };
+      }
+      if (typeof url === 'string' && url.startsWith('/api/docs?')) {
+        return { ok: true, json: async () => ({ data: { content: '# 제안서 본문\n\n승인 근거가 여기 있습니다.' } }) };
+      }
       return { ok: false, json: async () => ({}) };
     }));
     return gate;
@@ -769,6 +777,50 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
       root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
     });
     expect(container.textContent).toContain('찾을 수 없습니다');
+  });
+
+  it('story #2627 — 카드 제목 클릭 시 doc 본문이 챗 안 모달로 열린다(기존 EntityPreviewModal 재사용)', async () => {
+    stubGate({ risk_grade: 'high' });
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    const titleBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes('제안서.md'))!;
+    await act(async () => { titleBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {});
+    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.body.textContent).toContain('승인 근거가 여기 있습니다');
+  });
+
+  it('story #2627 AC③ — 모달 열람 후 닫아도 서명 플로우에 입력 중이던 근거확인·사유가 유실되지 않는다', async () => {
+    stubGate({ risk_grade: 'high' });
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    // 서명 플로우에 먼저 입력한다.
+    const checkbox = document.body.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const textarea = document.body.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      checkbox.click();
+      const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+      nativeSetter.call(textarea, '본문 확인, 승인');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    // 모달을 열었다 닫는다.
+    const titleBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes('제안서.md'))!;
+    await act(async () => { titleBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {});
+    const closeBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.querySelector('svg') && b.getAttribute('aria-label') === null && b.closest('[role="dialog"]'));
+    // Dialog의 닫기(X) 대신 Escape로 확실히 닫는다(base-ui Dialog가 내장 처리).
+    await act(async () => {
+      document.body.querySelector('[role="dialog"]')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    await act(async () => {});
+    void closeBtn;
+    // 체크박스·textarea 값이 그대로다 — 서명 플로우 컴포넌트가 언마운트되지 않았다.
+    expect((document.body.querySelector('input[type="checkbox"]') as HTMLInputElement).checked).toBe(true);
+    expect((document.body.querySelector('textarea') as HTMLTextAreaElement).value).toBe('본문 확인, 승인');
+    const signBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes('승인하고 서명'))!;
+    expect(signBtn.hasAttribute('disabled')).toBe(false);
   });
 });
 

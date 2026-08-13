@@ -1,12 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Check, FileText, X } from 'lucide-react';
+import { Check, Eye, FileText, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
+import { EntityPreviewModal, getEntityHref } from '@/components/chat/embed-card';
 import type { GateItem } from '@/components/kanban/types';
 
 export interface ApprovalTarget {
@@ -56,6 +57,13 @@ const RESOLVED_STATUS_LABEL_KEYS: Record<string, string> = {
  * 직접 실사용 중 그 네비게이션 자체를 UX 결함으로 판정(gate 34af76dc 반려 사유) — 서명
  * 플로우(`GateSignatureApproval`)를 gates/[id]/page.tsx와 **그대로 공유 재사용**해 챗
  * 카드 안에 얹는다(사본 분화 금지, AC③).
+ *
+ * story #2627 — 선생님 실사용 반려(gate 0db49ffc): "본문을 이 챗 UI 안에서 확인할 방법이
+ * 없다"는 지적. 액션(#2625)은 챗 안인데 판단 재료(doc 본문)가 밖이라 반쪽이었다 — 카드
+ * 제목을 `EntityPreviewModal`(embed-card.tsx, #2614에서 doc 본문 렌더를 이미 지원하도록
+ * 수리된 그 표면) 진입점으로 연결한다. 신규 뷰어 없음(export만 추가) · 서명 플로우
+ * (`GateSignatureApproval`)와 형제로 렌더돼 모달 열람/닫기가 그 로컬 state(근거확인·사유)를
+ * 건드리지 않는다(AC③, 언마운트 없음).
  */
 export function ApprovalRequestCard({ target }: ApprovalRequestCardProps) {
   const t = useTranslations('chats');
@@ -143,10 +151,26 @@ function ApprovalRequestBody({
   const riskLevel = deriveRiskLevel(gate);
   const needsFullFlow = usesSignatureFlow(riskLevel);
   const canAct = gate.status === 'pending' && gate.can_approve === true;
+  const [showPreview, setShowPreview] = useState(false);
+  // story #2627 AC④ — 미리보기 없는 타입(doc 외)은 기존 동작 그대로(제목=평문). EntityPreviewModal
+  // 자체가 doc 전용 fetch 전략을 가진 타입이라(embed-card.tsx `hasFetchStrategy`), 지금은 doc만
+  // 진짜 내용을 보여줄 수 있다 — 억지로 다른 타입에 진입점을 달아 빈 모달을 여는 거짓을 안 만든다.
+  const canPreview = gate.work_item_type === 'doc';
 
   return (
     <div className="space-y-2">
-      <p className="truncate text-sm font-medium text-foreground">{title}</p>
+      {canPreview ? (
+        <button
+          type="button"
+          onClick={() => setShowPreview(true)}
+          className="group/preview flex w-full min-w-0 items-center gap-1 text-left"
+        >
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground group-hover/preview:underline">{title}</span>
+          <Eye className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        </button>
+      ) : (
+        <p className="truncate text-sm font-medium text-foreground">{title}</p>
+      )}
 
       {gate.status === 'pending' && (riskLevel === 'high' || riskLevel === 'unknown') ? (
         <Badge variant={riskLevel === 'high' ? 'warning' : 'outline'} className={riskLevel === 'unknown' ? 'text-muted-foreground' : undefined}>
@@ -202,6 +226,17 @@ function ApprovalRequestBody({
             </Button>
           </div>
         </>
+      )}
+
+      {showPreview && (
+        <EntityPreviewModal
+          entityType={gate.work_item_type}
+          entityId={gate.work_item_id}
+          title={title}
+          status={null}
+          href={getEntityHref(gate.work_item_type, gate.work_item_id)}
+          onClose={() => setShowPreview(false)}
+        />
       )}
     </div>
   );
