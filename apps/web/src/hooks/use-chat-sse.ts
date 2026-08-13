@@ -53,8 +53,14 @@ export interface ChatMessage {
    * additive로 노출(`_approval_payload`, `_activation_payload`와 동형). 있으면 결재 카드를
    * 렌더한다 — 없으면(구 메시지·approval_target 없는 일반 메시지) 항상 `null`(옛 서버는 키
    * 자체가 없을 수 있어 `?? null`로 통일, references류의 undefined/키부재 구분과 다른 축 —
-   * 이 필드는 "카드냐 아니냐"라는 이분법이라 undefined와 null을 굳이 나눌 이유가 없다). */
-  approval_target?: { work_item_type: string; work_item_id: string; gate_id: string; actions: string[] } | null;
+   * 이 필드는 "카드냐 아니냐"라는 이분법이라 undefined와 null을 굳이 나눌 이유가 없다).
+   * story #2624 — 결재 "결과" 회신 메시지(BE #3015)도 같은 필드를 싣되 actions 없이
+   * decision/resolution_note를 대신 싣는다 — ApprovalRequestCard는 이 둘을 읽지 않고
+   * gate_id로 fetchGate()한 실물(gate.status/resolution_note)만 신뢰하므로 타입만 넓힌다. */
+  approval_target?: {
+    work_item_type: string; work_item_id: string; gate_id: string;
+    actions?: string[]; decision?: string; resolution_note?: string | null;
+  } | null;
 }
 
 // Normalize backend _to_chat_message format → ChatMessage
