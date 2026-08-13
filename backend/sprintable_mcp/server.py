@@ -1,4 +1,4 @@
-"""Sprintable MCP 서버 — 116개 도구 등록 (flat schema)."""
+"""Sprintable MCP 서버 — 118개 도구 등록 (flat schema)."""
 from __future__ import annotations
 
 import asyncio
@@ -45,6 +45,9 @@ from .tools.visual_artifacts import (
 from .tools.agent_runs import (
     EmitEventInput, PollEventsInput, UpdateRunStatusInput,
     emit_event, poll_events, update_run_status,
+)
+from .tools.events import (
+    ListEventDefinitionsInput, PublishEventInput, list_event_definitions, publish_event,
 )
 from .tools.analytics import (
     ActivityInput, AgentStatsInput, GoalProgressInput, OverdueMemberInput,
@@ -856,6 +859,15 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_delete_webhook_config",
      "[조직] Webhook config 삭제.",
      DeleteWebhookConfigInput, delete_webhook_config),
+    # Events registry (2) — story #2634
+    ("sprintable_publish_event",
+     "[조직] 이벤트 레지스트리(#2632) 기반 프리셋/커스텀 이벤트 발행. sprintable_emit_event(에이전트 "
+     "런 텔레메트리)와 다른 도구 — 이건 도메인 이벤트를 escalation/broadcast 대상에게 챗으로 전달한다.",
+     PublishEventInput, publish_event),
+    ("sprintable_list_event_definitions",
+     "[조직] 발행 가능한 이벤트 정의 카탈로그 조회(프리셋 ∪ 이 org 커스텀). publish_event 호출 전 "
+     "payload_schema 확인용.",
+     ListEventDefinitionsInput, list_event_definitions),
 ]
 
 for _name, _doc, _cls, _fn in _TOOL_DEFS:

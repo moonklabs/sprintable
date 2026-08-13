@@ -294,7 +294,11 @@ async def test_publish_schema_violation_400():
                     body, BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
                 )
             assert ei.value.status_code == 400
-            assert ei.value.detail["error"] == "invalid_payload"
+            # story #2634 후속(#2633 정합): api_client.py의 _extract_error_message가 인식하는
+            # {code,message} shape — errors 배열(기계가 읽을 상세)은 그대로 유지.
+            assert ei.value.detail["code"] == "invalid_payload"
+            assert ei.value.detail["message"]
+            assert ei.value.detail["errors"]
     finally:
         await engine.dispose()
 

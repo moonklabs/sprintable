@@ -993,8 +993,13 @@ async def publish_registry_event(
     try:
         validate_event_payload(definition.payload_schema, body.payload)
     except InvalidEventPayloadError as e:
+        # story #2634 후속(#2633 정합): api_client.py의 _extract_error_message가 인식하는
+        # {"detail":{"code","message"}} shape으로 맞춘다 — 신규 파싱 분기를 MCP 쪽에 안 만들고
+        # 기존 추출 경로를 그대로 타게 하는 것(원칙). errors 배열은 기계가 읽을 상세라 message로
+        # 뭉개지 않고 그대로 유지(extractor는 code/message 밖의 여분 키를 무해하게 무시한다).
         raise HTTPException(
-            status_code=400, detail={"error": "invalid_payload", "errors": e.errors},
+            status_code=400,
+            detail={"code": "invalid_payload", "message": str(e), "errors": e.errors},
         ) from e
 
     from app.services.event_routing_resolver import MissingRoutingPayloadFieldError, resolve_routing_leg
@@ -1008,7 +1013,8 @@ async def publish_registry_event(
         )
     except MissingRoutingPayloadFieldError as e:
         raise HTTPException(
-            status_code=400, detail={"error": "invalid_payload", "errors": [str(e)]},
+            status_code=400,
+            detail={"code": "invalid_payload", "message": str(e), "errors": [str(e)]},
         ) from e
 
     if body.extra_broadcast_member_ids:
@@ -1045,3 +1051,42 @@ async def publish_registry_event(
         "escalation_member_ids": [str(i) for i in escalation_ids],
         "broadcast_member_ids": [str(i) for i in broadcast_ids],
     }
+
+
+class EventDefinitionResponse(BaseModel):
+    key: str
+    org_id: str | None
+    payload_schema: dict
+    routing: dict
+    block_template: dict | None
+    enabled: bool
+    version: int
+
+
+@router.get("/definitions", response_model=list[EventDefinitionResponse])
+async def list_event_definitions(
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> list[EventDefinitionResponse]:
+    """GET /api/v2/events/definitions — story #2634: 발행 가능한 이벤트 정의 카탈로그 조회.
+
+    가시성 규칙은 publish_registry_event의 정의 조회 WHERE절과 동일(SSOT 재사용) —
+    플랫폼 프리셋(org_id NULL) ∪ 이 org 커스텀(org_id=자기 자신). enabled=false인 정의도
+    감추지 않고 그대로 노출한다(publish 시 그 상태로 거부될 것을 호출자가 미리 알 수 있게 —
+    조용히 숨기면 "왜 안 보이지"가 "왜 발행이 막히지"로 한 겹 더 미뤄질 뿐이다).
+    """
+    from app.models.event_definition import EventDefinition
+
+    rows = (await db.execute(
+        select(EventDefinition)
+        .where(or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)))
+        .order_by(EventDefinition.key)
+    )).scalars().all()
+    return [
+        EventDefinitionResponse(
+            key=r.key, org_id=str(r.org_id) if r.org_id else None,
+            payload_schema=r.payload_schema, routing=r.routing,
+            block_template=r.block_template, enabled=r.enabled, version=r.version,
+        )
+        for r in rows
+    ]
