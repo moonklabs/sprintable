@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Text, UniqueConstraint, func, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,6 +31,10 @@ class Conversation(Base, OrgScopedMixin, TimestampMixin):
     resolved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # story #2603 P0(delivery-contract-blueprint-v0-1) AC2: 대화 스코프 옵트아웃 — true면 이
+    # 대화의 에이전트 recipient는 mentions 기본계약이 all로 완화된다(단 회원 자신의 명시
+    # mute는 이걸로 안 뒤집힘 — channel_router.py 참조). 기본 false(무회귀).
+    free_response: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     participants: Mapped[list["ConversationParticipant"]] = relationship(
         "ConversationParticipant", back_populates="conversation", lazy="select"

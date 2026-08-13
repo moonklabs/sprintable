@@ -43,6 +43,9 @@ class Member(Base):
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #2603 P0(delivery-contract-blueprint-v0-1): 에이전트 안정 @멘션 핸들. org 내
+    # non-null 값만 unique(대소문자 무관, 0241 partial index). 휴먼은 NULL(무의미).
+    handle: Mapped[str | None] = mapped_column(Text, nullable=True)
     org_role: Mapped[str | None] = mapped_column(Text, nullable=True)
     # E-MSG-POLICY S1: agent DM 인가 모드(creator_only default|org_wide|list). 에이전트 단위 정책 —
     # canonical 위치(team_members 뷰가 m.message_policy_mode로 투영). 휴먼은 무의미(default 유지).

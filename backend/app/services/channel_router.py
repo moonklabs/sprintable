@@ -36,11 +36,30 @@ async def route_message(
     message_id: uuid.UUID,
     db: AsyncSession,
 ) -> list[DeliveryDecision]:
-    """메시지 수신자별 DeliveryDecision 목록 반환.
+    """메시지 수신자별 DeliveryDecision 목록 반환 — 「전달 계약」의 단일 판정 지점
+    (delivery-contract-blueprint-v0-1, story #2603 P0).
 
     mute인 경우 해당 수신자 제외 (decision 미생성).
     mentions level인 경우 message content에 @{member_id} 없으면 제외.
-    agent↔agent: preference 무관 sse 강제.
+
+    story #2603 이전엔 여기 "agent↔agent → sse 강제(AC5)" 바이패스가 있어 sender·recipient가
+    둘 다 agent면 preference 조회 자체를 건너뛰고 무조건 level="all"을 반환했다 — Hermes↔
+    OpenClaw 같은 외부 런타임 에이전트가 서로에게 응답하는 무한 루프가 정확히 이 바이패스
+    때문에 구조적으로 안 끊겼다(원 커밋 39b96444a "S-A4" 확인 — AC 라벨 하나뿐, 서술적
+    근거가 커밋 메시지에 없음. "agent-to-agent forced sse"가 A2A 협업이 notification
+    preference 마찰로 막히는 걸 피하려던 의도였다고 추정은 되나 기록으로 확定되지 않음 —
+    낡은 전제로 판단해 걷어낸다). 지금은 recipient가 agent든 human이든 **같은 판정 경로**를
+    탄다 — sender_type은 더 이상 이 함수의 분기 조건이 아니다(단, DM 판정에는 conv_type을
+    쓴다 — 아래).
+
+    **에이전트 그룹챗 기본계약 = mentions**(1:1/DM = all, 비회귀·AC2): recipient_type이
+    agent이고 대화가 group(dm 아님)이며 그 recipient의 명시 preference 행이 없으면
+    default level="mentions"(과거는 이 경우도 "all"이었다 — PO 소급 확定: 원 고통이 기존
+    그룹챗에 있어 소급 없이는 반쪽 해법). human이거나 DM이면 기존과 동일 default="all".
+
+    **free_response 대화 오버라이드**(AC2 옵트아웃): `conversation.free_response=true`면
+    이 대화 한정으로 level="mentions"인 recipient는 "all"로 완화된다 — 단 명시 "mute"는
+    안 뒤집는다(회원 자신의 «아예 알림 원치 않음» 선택이 방 설정보다 우선).
     """
     try:
         # 1. 메시지 + 발신자 조회
@@ -112,10 +131,15 @@ async def route_message(
         member_type_map: dict[uuid.UUID, str] = {r[0]: r[1] for r in member_rows}
 
         # 5. preference 배치 조회 — thread/conversation/project/global 4 scope
-        # conversation의 project_id 조회 (project scope fallback용)
-        conv_project_id: uuid.UUID | None = (await db.execute(
-            select(Conversation.project_id).where(Conversation.id == msg.conversation_id)
-        )).scalar_one_or_none()
+        # conversation의 project_id·type·free_response 조회(각각 project scope fallback·
+        # DM 비회귀·free_response 오버라이드 판정용 — story #2603 P0로 type/free_response 추가).
+        conv_row = (await db.execute(
+            select(Conversation.project_id, Conversation.type, Conversation.free_response)
+            .where(Conversation.id == msg.conversation_id)
+        )).one_or_none()
+        conv_project_id: uuid.UUID | None = conv_row.project_id if conv_row else None
+        conv_type: str = conv_row.type if conv_row else "group"
+        conv_free_response: bool = bool(conv_row.free_response) if conv_row else False
 
         scope_type_order: list[tuple[str, uuid.UUID | None]] = []
         if msg.thread_id:
@@ -136,20 +160,10 @@ async def route_message(
         for p in pref_rows:
             pref_map.setdefault(p.member_id, {})[(p.scope_type, p.scope_id)] = p
 
-        # 6. 수신자별 라우팅 결정
+        # 6. 수신자별 라우팅 결정 — sender_type 분기 없음(위 docstring, story #2603 P0).
         decisions: list[DeliveryDecision] = []
         for rid in recipient_ids:
             recipient_type = member_type_map.get(rid, "human")
-
-            # agent↔agent → sse 강제 (AC5)
-            if sender_type == "agent" and recipient_type == "agent":
-                decisions.append(DeliveryDecision(
-                    member_id=rid,
-                    channel="sse",
-                    level="all",
-                    reason="agent-to-agent forced sse",
-                ))
-                continue
 
             # preference fallback: thread → conversation → global
             pref: NotificationPreference | None = None
@@ -162,22 +176,46 @@ async def route_message(
                     break
 
             channel = pref.channel if pref else "sse"
-            level = pref.level if pref else "all"
+            if pref is not None:
+                level = pref.level
+                reason = f"preference scope={matched_scope}"
+            elif recipient_type == "agent" and conv_type != "dm":
+                # story #2603 P0: 에이전트 그룹챗 기본계약(소급 적용, PO 확定) — 위 docstring.
+                level = "mentions"
+                reason = "agent group default: mentions"
+            else:
+                level = "all"
+                reason = "default: all"
+
+            # AC2: free_response 대화는 mentions만 all로 완화 — 명시 mute는 안 뒤집는다.
+            if conv_free_response and level == "mentions":
+                level = "all"
+                reason = f"{reason} + free_response override"
 
             # mute → skip (AC3)
             if level == "mute":
+                logger.info(
+                    "delivery_contract: excluded recipient=%s conversation_id=%s reason=%s",
+                    rid, msg.conversation_id, "mute",
+                )
                 continue
 
-            # CB-S1 AC3: mentioned_ids 배열 기반 mentions 판단 (content regex 폐기)
+            # CB-S1 AC3: mentioned_ids 배열 기반 mentions 판단(content regex 폐기) — story #2603
+            # P0로 handle_mention_parser가 API/MCP 발신 본문의 @handle을 mentioned_ids에 이미
+            # 합집합해 저장하므로(conversations.py send_message), 이 체크는 그대로 재사용된다.
             if level == "mentions":
                 if not (msg.mentioned_ids and rid in msg.mentioned_ids):
+                    logger.info(
+                        "delivery_contract: excluded recipient=%s conversation_id=%s reason=%s",
+                        rid, msg.conversation_id, "mentions level, not mentioned",
+                    )
                     continue
 
             decisions.append(DeliveryDecision(
                 member_id=rid,
                 channel=channel,
                 level=level,
-                reason=f"preference scope={matched_scope}",
+                reason=reason,
             ))
 
         return decisions
