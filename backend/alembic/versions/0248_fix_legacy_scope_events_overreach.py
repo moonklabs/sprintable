@@ -73,11 +73,23 @@ def upgrade() -> None:
         "UPDATE agent_api_keys "
         "SET scope = array_remove(scope, 'events') "
         "WHERE revoked_at IS NULL "
+        "AND scope IS NOT NULL "
         "AND 'events' = ANY(scope) "
         f"AND NOT (scope && {vocab_array})"
     ))
 
 
 def downgrade() -> None:
-    """no-op — 0247.downgrade()가 이미 이 케이스를 포함해 더 넓게 되돌린다(위 docstring 참조)."""
-    pass
+    """0247.upgrade()와 동일 로직을 재적용 — 이 마이그가 벗겨낸 것과 정확히 같은 집합
+    (events가 없고 배열이 비어있지 않은 살아있는 키)에 다시 'events'를 append해 0248 적용
+    직전(=0247 직후) 상태로 복원한다. 단일 스텝(alembic downgrade -1)만으로도 정확히
+    되돌아가야 하므로 no-op이 아니라 이 재적용이 맞다(0247.downgrade까지 연쇄로 내려가는
+    경우에도 이 결과 위에 0247.downgrade가 그대로 적용돼 무해하다)."""
+    bind = op.get_bind()
+    bind.execute(sa.text(
+        "UPDATE agent_api_keys "
+        "SET scope = array_append(scope, 'events') "
+        "WHERE revoked_at IS NULL "
+        "AND scope IS NOT NULL AND array_length(scope, 1) > 0 "
+        "AND NOT ('events' = ANY(scope))"
+    ))

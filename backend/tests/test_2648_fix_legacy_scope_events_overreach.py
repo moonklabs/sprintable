@@ -156,6 +156,31 @@ def test_ac2_real_role_derived_scope_is_not_touched():
 
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
+def test_ac2_mixed_legacy_and_real_group_keeps_events():
+    """레거시 read/write + 실제 그룹 토큰이 섞인 키(['read','write','stories','events'])는
+    'stories'가 ALL_GROUPS 소속이라 0247 이전부터 이미 명시적으로 좁혀진 상태였다 — 순수
+    레거시 케이스(AC1)와 정확히 갈리는 경계를 확인."""
+    import sqlalchemy as sa
+
+    sync_url = _REAL_DB_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://").replace(
+        "postgresql://", "postgresql+psycopg2://"
+    )
+    eng = sa.create_engine(sync_url)
+    mig = _load_migration()
+    try:
+        _setup_table(eng)
+        key_id = _insert(eng, key_hash="mixed", scope=["read", "write", "stories", "events"])
+
+        _run_migration_fn(eng, mig, "upgrade")
+
+        assert set(_get_scope(eng, key_id)) == {"read", "write", "stories", "events"}
+    finally:
+        with eng.begin() as c:
+            c.execute(sa.text("DROP TABLE IF EXISTS agent_api_keys"))
+        eng.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
 def test_ac2_admin_only_scope_is_not_touched():
     """admin 토큰만 있는 scope도(is_tool_allowed 상 explicit_groups에 admin이 걸려 진짜
     restrictive) 대상 밖이어야 한다."""
@@ -227,7 +252,7 @@ def test_ac4_key_without_events_not_touched():
 
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
-def test_downgrade_is_noop_and_safe():
+def test_downgrade_leaves_already_events_key_untouched():
     import sqlalchemy as sa
 
     sync_url = _REAL_DB_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://").replace(
@@ -244,6 +269,43 @@ def test_downgrade_is_noop_and_safe():
         with eng.begin() as c:
             c.execute(sa.text("DROP TABLE IF EXISTS agent_api_keys"))
         eng.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
+def test_downgrade_restores_post_0247_state_for_fixed_key():
+    """단일 스텝 downgrade가 이 마이그가 벗겨낸 것과 정확히 같은 집합에 다시 events를
+    append해 0248 적용 직전(=0247 직후) 상태로 복원하는지 — no-op이 아니라 실제 재적용."""
+    import sqlalchemy as sa
+
+    sync_url = _REAL_DB_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://").replace(
+        "postgresql://", "postgresql+psycopg2://"
+    )
+    eng = sa.create_engine(sync_url)
+    mig = _load_migration()
+    try:
+        _setup_table(eng)
+        key_id = _insert(eng, key_hash="h-roundtrip", scope=["read", "write"])
+        _run_migration_fn(eng, mig, "downgrade")
+        assert set(_get_scope(eng, key_id)) == {"read", "write", "events"}
+    finally:
+        with eng.begin() as c:
+            c.execute(sa.text("DROP TABLE IF EXISTS agent_api_keys"))
+        eng.dispose()
+
+
+def test_migration_group_vocab_matches_live_all_groups():
+    """드리프트 가드 — 마이그의 하드코딩 리터럴(_RESTRICTIVE_VOCAB)이 실제 app/services/
+    mcp_toolset.ALL_GROUPS와 지금도 일치하는지 코드 레벨로 재확인. 그룹이 추가/삭제되면 이
+    테스트가 깨져 "0248의 리터럴도 갱신하라"는 신호를 준다(향후 그룹 신설 시 이 마이그를
+    복사해 쓸 사람을 위한 회귀 가드 — data-migration 스냅샷 특성상 이 마이그 자체는
+    과거 시점 기준으로 계속 옳지만, 패턴을 복제할 때 드리프트를 막는다)."""
+    from app.services.mcp_toolset import ALL_GROUPS
+
+    mig = _load_migration()
+    expected = (set(ALL_GROUPS) - {"events"}) | {"admin"}
+    assert set(mig._RESTRICTIVE_VOCAB) == expected, (
+        "0248의 _RESTRICTIVE_VOCAB이 app/services/mcp_toolset.py::ALL_GROUPS와 드리프트됐다"
+    )
 
 
 # ─── AC3: is_tool_allowed 왕복 — 수복 후 실제 무제한 동작이 돌아왔는지 ──────────────────
