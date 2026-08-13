@@ -117,7 +117,8 @@ async def _mark_agent_online(agent_id: uuid.UUID, session_id: uuid.UUID) -> None
 
 
 async def _mark_agent_disconnected(
-    agent_id: uuid.UUID, session_id: uuid.UUID, org_id: str | None = None
+    agent_id: uuid.UUID, session_id: uuid.UUID, org_id: str | None = None,
+    *, heartbeat_baseline: "datetime | None" = None,
 ) -> None:
     """49fed0a1 AC2/AC3: SSE 연결 종료 cleanup — 연결-도출 offline 강등.
 
@@ -125,7 +126,14 @@ async def _mark_agent_disconnected(
     offline로 강등. 같은 API Key의 멀티세션(멀티인스턴스 Cloud Run)은 한 presence 그룹이므로
     **마지막 연결이 끊길 때만** offline (AC2). last_seen_at=None → presence_status 즉시 offline
     (schema 단락). MCP heartbeat·재연결 시 online 복귀(self-heal). finally 호출이라 예외 비전파.
-    """
+
+    story #2602 Fix②(wipe-race 억제): `heartbeat_baseline`(호출부가 자기 connect 시점을 넘김,
+    미지정 시 기존 동작 그대로·회귀 없음)보다 **새 heartbeat 신호**가 있으면 강등을 skip한다 —
+    내 연결이 끊기는 그 순간, 내가 시작한 뒤에 이 agent에게 heartbeat(PATCH /heartbeat) 또는
+    다른 연결의 connect-time write(둘 다 agent_project_profiles.last_seen_at을 건드림, AC2
+    무관하게 connect 시점엔 항상 씀 — 아래 참조)가 있었다는 뜻이라, 내 cleanup이 그보다 늦게
+    도착한 stale order다(row-존재 체크만으론 못 잡는 TOCTOU — B의 세션 row insert가 아직 이
+    쿼리 시야에 안 들어온 좁은 창)."""
     now = datetime.now(timezone.utc)
     from app.core.config import settings as _settings
     _ac2 = bool(_settings.presence_online_redis_enabled) and bool(_settings.redis_url)
@@ -163,6 +171,19 @@ async def _mark_agent_disconnected(
                 from app.services import presence_online
                 if await presence_online.is_online(agent_id) is False:
                     remaining = None
+
+                # story #2602 Fix②: heartbeat_baseline보다 새 last_seen_at이 있으면(내가 시작한
+                # 뒤 heartbeat 또는 다른 세션의 connect write가 있었다는 뜻) 강등을 skip한다 —
+                # remaining을 "존재하는 것으로" 취급(위 accel과 반대 방향, 억제 전용 — 이미 None이
+                # 아니면 원래도 강등 안 하니 이 축은 "강등하려던 상황을 되돌리는" 경우만 의미 있다).
+                if remaining is None and heartbeat_baseline is not None:
+                    from app.services.heartbeat_freshness import (
+                        get_agent_last_heartbeat, incr_wipe_suppressed_counter,
+                    )
+                    _latest_hb = await get_agent_last_heartbeat(db, agent_id)
+                    if _latest_hb is not None and _latest_hb > heartbeat_baseline:
+                        remaining = session_id  # sentinel — "잔여 있음" 재사용(실제 row id 아님)
+                        await incr_wipe_suppressed_counter()
             else:
                 # 기존 freshness 경로(30s틱 유지·flag off·무회귀).
                 fresh_cutoff = now - timedelta(seconds=_SESSION_FRESH_TTL)
@@ -522,6 +543,12 @@ async def agent_stream(
                 )
                 await _pdb.commit()
             _presence_wired = True
+            # story #2602 Fix①/②의 기준점 — 이 시점 이후의 last_seen_at 전진만 "내 connect
+            # write 이후에 일어난 일"로 인정한다(내 connect write 자체는 위에서 이미 커밋됨).
+            # Fix①: 연결 단위 무장 상태(전진을 한 번이라도 봤는지) — arm 후 stale 전환 시만 skip.
+            _heartbeat_baseline = datetime.now(timezone.utc)
+            _heartbeat_last_observed: "datetime | None" = None
+            _heartbeat_armed = False
             # #2120 AC2: 연결 즉시 online 키 SET(타노드 GET서 즉시 online 가시). flag off면 no-op.
             # connect DB write(위 세션 INSERT + profile online)는 내구/폴백용으로 유지.
             from app.services import presence_online
@@ -562,15 +589,43 @@ async def agent_stream(
                 _now = datetime.now(timezone.utc)
                 if (_now - last_presence_tick).total_seconds() >= _PRESENCE_TICK_INTERVAL:
                     from app.core.config import settings as _settings
-                    if _settings.presence_online_redis_enabled and _settings.redis_url:
+                    _ac2_on = bool(_settings.presence_online_redis_enabled) and bool(_settings.redis_url)
+                    if _ac2_on:
                         # #2120 AC2: online liveness를 Redis 키로 — hot-path DB write 0.
                         from app.services import presence_online
                         await presence_online.mark_online(agent_id)
                     else:
                         await _mark_agent_online(agent_id, session_id)  # 기존 DB 틱(flag off·무회귀)
+
+                    # story #2602 Fix① — refresh를 무조건 걸지 않고 heartbeat 전진 여부로 게이트.
+                    # AC2 off일 땐 위 else 분기가 이 루프 자신의 tick으로 last_seen_at을 쓰므로
+                    # (heartbeat_freshness.py 모듈 docstring의 회로형 함정) 이 게이트를 적용하지
+                    # 않는다 — AC2 on일 때만(그 분기는 last_seen_at을 안 건드리니 heartbeat
+                    # 엔드포인트 전용 신호가 성립, 페드루 판정 2026-08-13).
+                    _skip_refresh = False
+                    if _ac2_on:
+                        from app.services.heartbeat_freshness import (
+                            evaluate_advance, get_agent_last_heartbeat,
+                            incr_armed_counter, incr_refresh_skip_counter,
+                        )
+                        async with async_session_factory() as _hb_db:
+                            _current_hb = await get_agent_last_heartbeat(_hb_db, agent_id)
+                        _gate = evaluate_advance(
+                            current=_current_hb, last_observed=_heartbeat_last_observed,
+                            armed=_heartbeat_armed,
+                        )
+                        _heartbeat_armed = _gate.armed
+                        _heartbeat_last_observed = _gate.last_observed
+                        _skip_refresh = _gate.should_skip_refresh
+                        if _gate.newly_armed:
+                            await incr_armed_counter()
+                        if _gate.should_skip_refresh:
+                            await incr_refresh_skip_counter()
+
                     # #2121: lease score 재갱신(live 연결이 슬롯 유지·TTL 만료 방지). off/다운 no-op.
-                    await sse_lease.refresh("agent_global", _lease_conn_id)
-                    await sse_lease.refresh(f"perkey:{agent_id_str}", _lease_conn_id)
+                    if not _skip_refresh:
+                        await sse_lease.refresh("agent_global", _lease_conn_id)
+                        await sse_lease.refresh(f"perkey:{agent_id_str}", _lease_conn_id)
                     last_presence_tick = _now
                 get_task = asyncio.create_task(queue.get())
                 shutdown_task = asyncio.create_task(_shutdown_module.shutdown_event.wait())
@@ -642,7 +697,9 @@ async def agent_stream(
             # 49fed0a1 AC2/AC3: 연결 종료 → 세션 행 삭제 + 마지막 세션이면 presence offline 강등.
             # (presence 배선 성공한 연결만 — 세션 미생성 시 타 세션 presence 오염 방지.)
             if _presence_wired:
-                await _mark_agent_disconnected(agent_id, session_id, org_id_str)
+                await _mark_agent_disconnected(
+                    agent_id, session_id, org_id_str, heartbeat_baseline=_heartbeat_baseline,
+                )
 
     return StreamingResponse(
         generate(),
