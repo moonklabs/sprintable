@@ -499,3 +499,327 @@ describe('ChatBubble — story #2349 사용자 차단 마스킹', () => {
     expect(document.body.textContent).toContain(baseMessage.sender_name);
   });
 });
+
+describe('ChatBubble — story #2572 HITL 승인 요청 버튼 카드', () => {
+  const HITL_CONTENT = '🔒 승인 요청: `Bash`\n입력: {"command":"rm -rf /tmp/x"}\n\n「allow」 또는 「deny <사유>」로 답해주세요 (600초 내 무응답 시 자동 거부).';
+  const hitlMessage: ChatMessage = {
+    ...baseMessage,
+    content: HITL_CONTENT,
+    sender_type: 'agent',
+    created_at: new Date().toISOString(),
+  };
+
+  it('에이전트 발신 + 고정 포맷 매칭이면 버튼 카드로 렌더된다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={hitlMessage} isMine={false} onRespondHitl={async () => {}} />));
+    });
+    expect(container.textContent).toContain('승인 요청');
+    expect(container.textContent).toContain('Bash');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '허용')).toBe(true);
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '거부')).toBe(true);
+  });
+
+  it('PO 가드① — 사람이 같은 텍스트를 쳐도(sender_type=human) 카드화되지 않는다', async () => {
+    const humanMsg = { ...hitlMessage, sender_type: 'human' };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={humanMsg} isMine={false} onRespondHitl={async () => {}} />));
+    });
+    // 카드였다면 있었을 「허용」/「거부」 버튼이 없다 — 원문 그대로 일반 텍스트로만 렌더된다.
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '허용')).toBe(false);
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '거부')).toBe(false);
+    expect(container.textContent).toContain('승인 요청');
+  });
+
+  it('PO 가드② — 문구가 살짝 어긋나면(플러그인 드리프트) 일반 텍스트로 폴백한다(깨진 카드 금지)', async () => {
+    const driftedMsg = { ...hitlMessage, content: HITL_CONTENT.replace('🔒 승인 요청', '🔒 승인요청') };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={driftedMsg} isMine={false} onRespondHitl={async () => {}} />));
+    });
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '허용')).toBe(false);
+    expect(container.textContent).toContain('승인요청');
+  });
+
+  it('onRespondHitl을 안 주면(호출부가 아직 안 넘긴 화면) 카드 대신 일반 텍스트로 폴백한다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={hitlMessage} isMine={false} />));
+    });
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '허용')).toBe(false);
+  });
+
+  it('AC2 — 「허용」 클릭 시 onRespondHitl이 규약 문자열 "allow"로 호출된다', async () => {
+    const onRespondHitl = vi.fn(async () => {});
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={hitlMessage} isMine={false} onRespondHitl={onRespondHitl} />));
+    });
+    const allowBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '허용')!;
+    await act(async () => { allowBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onRespondHitl).toHaveBeenCalledWith('allow');
+  });
+
+  it('AC2 — 「거부」 클릭 → 사유 입력 → 「거부 전송」 시 onRespondHitl이 "deny <사유>"로 호출된다', async () => {
+    const onRespondHitl = vi.fn(async () => {});
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={hitlMessage} isMine={false} onRespondHitl={onRespondHitl} />));
+    });
+    const denyBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '거부')!;
+    await act(async () => { denyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const input = container.querySelector('input') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      nativeSetter.call(input, '위험한 명령');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const submitBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '거부 전송')!;
+    await act(async () => { submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onRespondHitl).toHaveBeenCalledWith('deny 위험한 명령');
+  });
+
+  it('AC3 — hitlAnswer가 있으면(다른 기기 포함) 버튼 대신 상태만 보이고 재클릭이 불가하다', async () => {
+    const onRespondHitl = vi.fn(async () => {});
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble message={hitlMessage} isMine={false} onRespondHitl={onRespondHitl} hitlAnswer={{ decision: 'allow' }} />,
+      ));
+    });
+    expect(container.textContent).toContain('허용됨');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '허용')).toBe(false);
+    expect(onRespondHitl).not.toHaveBeenCalled();
+  });
+
+  it('AC3 — 타임아웃 경과 후엔 "만료됨"이 뜨고 버튼이 사라진다', async () => {
+    const expiredMsg = { ...hitlMessage, created_at: new Date(Date.now() - 700_000).toISOString() };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={expiredMsg} isMine={false} onRespondHitl={async () => {}} />));
+    });
+    expect(container.textContent).toContain('만료됨');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '허용')).toBe(false);
+  });
+});
+
+describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', () => {
+  const GATE_ID = 'aaaaaaaa-0000-0000-0000-000000000001';
+  const approvalMessage: ChatMessage = {
+    ...baseMessage,
+    content: "'제안서.md' 문서 결재 요청",
+    sender_type: 'agent',
+    approval_target: { work_item_type: 'doc', work_item_id: DOC_ID, gate_id: GATE_ID, actions: ['approve', 'reject'] },
+  };
+
+  function stubGate(overrides: Partial<{ status: string; can_approve: boolean; risk_grade: 'low' | 'high' | null; title: string; resolution_note: string | null }>) {
+    // 상태를 가진 mock — POST .../transition 뒤에 컴포넌트가 다시 GET하는 fetchGate()
+    // refetch가 "바뀐 값"을 보게 하려면 gate 자체가 그 사이에 갱신돼야 한다(실 BE 동작 미러).
+    const gate = {
+      id: GATE_ID,
+      work_item_id: DOC_ID,
+      work_item_type: 'doc',
+      gate_type: 'doc_approval',
+      status: overrides.status ?? 'pending',
+      can_approve: overrides.can_approve ?? true,
+      risk_grade: overrides.risk_grade ?? 'low',
+      resolver_id: null,
+      resolved_at: null,
+      resolution_note: overrides.resolution_note ?? null,
+      neutral_facts: null,
+      work_item_summary: { title: overrides.title ?? '제안서.md', slug: null },
+      created_at: '2026-08-13T00:00:00.000Z',
+      updated_at: '2026-08-13T00:00:00.000Z',
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: string, opts?: { method?: string; body?: string }) => {
+      if (typeof url === 'string' && url.startsWith(`/api/gates/${GATE_ID}/transition`) && opts?.method === 'POST') {
+        const { status } = JSON.parse(opts.body as string) as { status: string };
+        gate.status = status;
+        return { ok: true, json: async () => ({ data: gate }) };
+      }
+      if (typeof url === 'string' && url === `/api/gates/${GATE_ID}`) {
+        return { ok: true, json: async () => ({ data: gate }) };
+      }
+      // story #2627 — 카드 제목 클릭 시 EntityPreviewModal(embed-card.tsx)이 doc 2단계
+      // fetch를 시도한다 — 그 경로도 여기서 같이 응답한다.
+      if (typeof url === 'string' && url.startsWith('/api/docs/preview')) {
+        return { ok: true, json: async () => ({ data: { slug: 'proposal', projectId: 'proj-1', orgSlug: 'org', projectSlug: 'proj' } }) };
+      }
+      if (typeof url === 'string' && url.startsWith('/api/docs?')) {
+        return { ok: true, json: async () => ({ data: { content: '# 제안서 본문\n\n승인 근거가 여기 있습니다.' } }) };
+      }
+      return { ok: false, json: async () => ({}) };
+    }));
+    return gate;
+  }
+
+  it('일반 메시지(approval_target 없음)는 카드 대신 기존 텍스트 렌더 그대로다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={baseMessage} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('결재 요청');
+  });
+
+  it('pending + can_approve=true — 제목·승인/반려 버튼이 렌더된다', async () => {
+    stubGate({});
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    expect(container.textContent).toContain('결재 요청');
+    expect(container.textContent).toContain('제안서.md');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(true);
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('반려'))).toBe(true);
+  });
+
+  it('승인 클릭 시 POST .../transition이 status:"approved"로 호출되고 결과가 처리됨 상태로 갱신된다', async () => {
+    stubGate({});
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    const approveBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('승인'))!;
+    await act(async () => { approveBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // onClick은 transition()을 await하지 않는 fire-and-forget이라(HitlApprovalCard와 동일
+    // 관례) 그 안의 await fetchGate() 재조회가 끝날 시점까지 한 번 더 flush가 필요하다.
+    await act(async () => {});
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const transitionCall = fetchMock.mock.calls.find((call: unknown[]) => (call[0] as string).includes('/transition'));
+    expect(transitionCall).toBeDefined();
+    expect(JSON.parse((transitionCall![1] as { body: string }).body)).toEqual({ status: 'approved', note: null });
+    expect(container.textContent).toContain('처리됨');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(false);
+  });
+
+  it('can_approve=false — 버튼 없이 무권한 사유 문구만 보인다(fail-closed, gates/[id]/page.tsx와 동일 규칙)', async () => {
+    stubGate({ can_approve: false });
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    expect(container.textContent).toContain('승인할 권한이 없습니다');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(false);
+  });
+
+  it('story #2625 — 고위험(risk_grade=high)도 챗 안에서 서명 플로우로 완결된다(링크 위임 아님)', async () => {
+    stubGate({ risk_grade: 'high' });
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    // 링크 위임 UX는 선생님 실사용 판정으로 폐기됐다(gate 34af76dc) — 더 이상 없어야 한다.
+    expect(container.querySelector(`a[href="/gates/${GATE_ID}"]`)).toBeNull();
+    // GateSignatureApproval이 그대로(사본 아님) 얹힌다 — 근거 확인 체크박스+사유 textarea.
+    expect(container.textContent).toContain('위 근거를 확인했습니다');
+    const signBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('승인하고 서명'))!;
+    expect(signBtn).not.toBeUndefined();
+    // 카디르 QA(320/375px 실측) 재발방지 — compact=true가 실제로 전달돼 버튼이 세로 스택
+    // full-width로 렌더되는지(가로 2버튼이면 라벨이 좁은 챗 폭에서 잘린다, 재발가드).
+    expect(signBtn.className).toContain('w-full');
+    expect(signBtn.parentElement?.className).toContain('flex-col');
+    // AC: 근거 확인+사유 전에는 서명 비활성(gate-signature-approval.tsx의 canSign 그대로 상속).
+    expect(signBtn.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('story #2625 — 근거 확인+사유 입력 후 «승인하고 서명»이 transition POST에 사유를 note로 싣는다', async () => {
+    stubGate({ risk_grade: 'high' });
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      checkbox.click();
+      const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+      nativeSetter.call(textarea, '근거 확인함, 승인');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const signBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('승인하고 서명'))!;
+    expect(signBtn.hasAttribute('disabled')).toBe(false);
+    await act(async () => { signBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {});
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const transitionCall = fetchMock.mock.calls.find((call: unknown[]) => (call[0] as string).includes('/transition'));
+    expect(JSON.parse((transitionCall![1] as { body: string }).body)).toEqual({ status: 'approved', note: '근거 확인함, 승인' });
+  });
+
+  it('이미 처리된 게이트(status=approved)는 버튼 없이 처리됨 상태만 보인다', async () => {
+    stubGate({ status: 'approved' });
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    expect(container.textContent).toContain('처리됨');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(false);
+  });
+
+  it('story #2624 — 처리됨 상태에 raw 영문 토큰 대신 한글 라벨이 보인다(승인됨/반려됨)', async () => {
+    stubGate({ status: 'rejected' });
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    expect(container.textContent).toContain('반려됨');
+    expect(container.textContent).not.toContain('rejected');
+  });
+
+  it('story #2624 — resolution_note가 있으면 처리됨 상태 아래 사유가 렌더된다("사유는 남겨놨는데" 인시던트 대응)', async () => {
+    stubGate({ status: 'rejected', resolution_note: '근거가 불충분합니다' });
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    expect(container.textContent).toContain('근거가 불충분합니다');
+  });
+
+  it('story #2624 — resolution_note가 없으면(승인·사유 미기재) 사유 줄 자체를 안 그린다(지어내지 않음)', async () => {
+    stubGate({ status: 'approved', resolution_note: null });
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('사유:');
+  });
+
+  it('게이트 404(삭제 등) — 조용히 죽지 않고 정직한 미발견 문구를 보인다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) })));
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    expect(container.textContent).toContain('찾을 수 없습니다');
+  });
+
+  it('story #2627 — 카드 제목 클릭 시 doc 본문이 챗 안 모달로 열린다(기존 EntityPreviewModal 재사용)', async () => {
+    stubGate({ risk_grade: 'high' });
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    const titleBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes('제안서.md'))!;
+    await act(async () => { titleBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {});
+    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.body.textContent).toContain('승인 근거가 여기 있습니다');
+  });
+
+  it('story #2627 AC③ — 모달 열람 후 닫아도 서명 플로우에 입력 중이던 근거확인·사유가 유실되지 않는다', async () => {
+    stubGate({ risk_grade: 'high' });
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    // 서명 플로우에 먼저 입력한다.
+    const checkbox = document.body.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const textarea = document.body.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      checkbox.click();
+      const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+      nativeSetter.call(textarea, '본문 확인, 승인');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    // 모달을 열었다 닫는다.
+    const titleBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes('제안서.md'))!;
+    await act(async () => { titleBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {});
+    const closeBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.querySelector('svg') && b.getAttribute('aria-label') === null && b.closest('[role="dialog"]'));
+    // Dialog의 닫기(X) 대신 Escape로 확실히 닫는다(base-ui Dialog가 내장 처리).
+    await act(async () => {
+      document.body.querySelector('[role="dialog"]')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    await act(async () => {});
+    void closeBtn;
+    // 체크박스·textarea 값이 그대로다 — 서명 플로우 컴포넌트가 언마운트되지 않았다.
+    expect((document.body.querySelector('input[type="checkbox"]') as HTMLInputElement).checked).toBe(true);
+    expect((document.body.querySelector('textarea') as HTMLTextAreaElement).value).toBe('본문 확인, 승인');
+    const signBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes('승인하고 서명'))!;
+    expect(signBtn.hasAttribute('disabled')).toBe(false);
+  });
+});

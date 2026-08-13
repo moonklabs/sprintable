@@ -152,8 +152,25 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # #2461(§6 봉합③ part2, PO 승인 2026-08-05): worker_db_pool_size/worker_db_max_overflow
     # 필드 신설로 85→87(WORKER_DB_POOL_SIZE·WORKER_DB_MAX_OVERFLOW 포함) — L2/배치워커 전용
     # worker_engine 풀 크기 설정. 가드가 신규 필드를 설계대로 잡은 것.
+    # 핫픽스(2026-08-13, 선생님 직접 지시): agent_group_default_mentions 필드 신설로 87→88
+    # (AGENT_GROUP_DEFAULT_MENTIONS 포함) — #2603 그룹챗 mentions 기본계약을 opt-in으로
+    # 되돌리는 kill switch(기본 False). 가드가 신규 필드를 설계대로 잡은 것.
+    # ⛔prod 승격 브랜치(base=main) 전용 카운트 — develop은 결제②(TOSS_*·ORG_BILLING_KEY_
+    # ENCRYPTION_KEY) 4필드가 이 사이에 더 있어 94다. 이 브랜치는 결제 미승격이라 그 필드
+    # 자체가 없다(config.py에 없음) — 87→94가 아니라 87→88이 이 브랜치의 정답(페드루 판정
+    # 2026-08-13, "TOSS/빌링 assert가 승격 브랜치에 들어오면 즉시 중단" 조건 지킴).
+    # #3016(2026-08-13)이 chain_escalation_notify_enabled를 신설(88→89)했으나 story #2626
+    # (2026-08-13, PO 승인)이 곧바로 은퇴시켰다(89→88, CHAIN_ESCALATION_NOTIFY_ENABLED 제거)
+    # — 무감독 연쇄 알림이 속도 기반 에피소드 탐지+org별 설정(chain_escalation_org_config
+    # 테이블)으로 재설계되며 글로벌 killswitch가 org-level enabled로 완전히 대체됐다(반쪽
+    # 은퇴 금지, PO 조건① — 필드·이 가드·테스트 patch 전부 같이 걷었다). 순증감 0(88→89→88)
+    # 이라 이 브랜치의 최종 카운트는 #3016 이전과 동일한 88 — 가드가 필드 제거도 정확히
+    # 잡은 것(드리프트 양방향 커버, develop은 94→95→94와 동형).
     assert "PRESENCE_REDIS_ENABLED" in keys and "SSE_TRANSIENT_REPLAY_ENABLED" in keys
     assert "REQUIRE_VERIFIED_EMAIL_FOR_ORG_CREATE" in keys
     assert "DATABASE_URL_READ" in keys
     assert "WORKER_DB_POOL_SIZE" in keys and "WORKER_DB_MAX_OVERFLOW" in keys
-    assert len(keys) == 87
+    assert "AGENT_GROUP_DEFAULT_MENTIONS" in keys
+    assert "TOSS_PAYMENTS_SECRET_KEY" not in keys  # 결제 미승격 — 반입 시 즉시 실패해야 함
+    assert "CHAIN_ESCALATION_NOTIFY_ENABLED" not in keys
+    assert len(keys) == 88

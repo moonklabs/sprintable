@@ -40,7 +40,7 @@ from app.services.member_resolver import (
     resolve_member,
     resolve_member_identity,
 )
-from app.services.project_auth import project_access_valid_correlated
+from app.services.project_auth import is_org_owner_or_admin, project_access_valid_correlated
 from app.services.storage import get_storage_provider
 
 logger = logging.getLogger(__name__)
@@ -443,6 +443,8 @@ def _msg_payload(
         payload["is_blocked_sender"] = bool(sender and sender.id in blocked_sender_ids)
     # E-ACTIVATION S1: typed activation 필드 top-level 노출(없으면 None). connector 헤더 주입용.
     payload.update(_activation_payload(msg))
+    # story #2604 P2: approval-request 카드 스키마 top-level 노출(없으면 None·additive).
+    payload.update(_approval_payload(msg))
     return payload
 
 
@@ -476,6 +478,15 @@ def _activation_payload(msg: "ConversationMessage") -> dict:
         "message_kind": act.get("kind"),
         "expects_response": act.get("expects_response"),
     }
+
+
+def _approval_payload(msg: "ConversationMessage") -> dict:
+    """story #2604 P2(delivery-contract-blueprint-v0-1): msg_metadata['approval_target'] →
+    payload top-level(없으면 None). _activation_payload와 동형(additive·__dict__ 전용 read —
+    동일 greenlet_spawn 회피 이유). 카드 *렌더*는 FE 몫 — 여기는 스키마만 실어 나른다."""
+    meta = (getattr(msg, "__dict__", None) or {}).get("msg_metadata")
+    target = meta.get("approval_target") if isinstance(meta, dict) else None
+    return {"approval_target": target if isinstance(target, dict) else None}
 
 
 async def _viewer_blocked_sender_ids(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession) -> set[uuid.UUID]:
@@ -652,6 +663,69 @@ async def _dispatch_mention_events(
             for pid_str, event in events_to_push]
 
 
+async def _dispatch_human_intervention_event(
+    db: AsyncSession,
+    conversation: Conversation,
+    msg: ConversationMessage,
+    org_id: uuid.UUID,
+    sender: TeamMember,
+    blocked_agent_recipient_ids: set[uuid.UUID],
+    chain_depth_cap: int,
+) -> list[tuple[str, dict]]:
+    """story #2608 P1 AC1: 연쇄 cap 초과로 agent recipient가 막힌 메시지를, 그 대화의 human
+    참가자 전원에게 `conversation.human_intervention_requested` Event로 알린다 — "왜 조용한가"
+    가 항상 답 가능해야 한다(블루프린트 §3, 침묵이 아니라 이벤트로 전환).
+
+    `_dispatch_mention_events`와 동형 구조(Event INSERT + flush, commit 후 push) — 대상만
+    human 참가자로 다르다. human은 recipient_seq 개념이 없어(agent 전용 gap-free 커서)
+    assign_recipient_seq를 안 부른다(_dispatch_conversation_event의 기존 관례와 동일).
+    """
+    if not conversation.project_id:
+        return []
+
+    participant_rows = (await db.execute(
+        select(ConversationParticipant.member_id, TeamMember.type)
+        .join(TeamMember, TeamMember.id == ConversationParticipant.member_id)
+        .where(ConversationParticipant.conversation_id == conversation.id)
+    )).all()
+    human_targets = {pid for pid, m_type in participant_rows if m_type == "human"}
+    if not human_targets:
+        return []
+
+    payload = {
+        **_msg_payload(msg, sender),
+        "blocked_recipient_ids": [str(rid) for rid in sorted(blocked_agent_recipient_ids)],
+        "chain_depth_cap": chain_depth_cap,
+        "reason": "chain-expired",
+    }
+
+    events_to_push: list[tuple[str, Event]] = []
+    for pid in sorted(human_targets):  # deadlock 방지: 일관 락 순서
+        event = Event(
+            project_id=conversation.project_id,
+            org_id=org_id,
+            event_type="conversation.human_intervention_requested",
+            source_entity_type="conversation_message",
+            source_entity_id=msg.id,
+            sender_id=sender.id,
+            recipient_id=pid,
+            recipient_type="human",
+            payload=payload,
+            status="pending",
+        )
+        db.add(event)
+        events_to_push.append((str(pid), event))
+
+    await db.flush()
+    from app.services.activity_stream import extract_activities_best_effort
+    await extract_activities_best_effort(db, [event.id for _, event in events_to_push])
+    return [
+        (pid_str, {"event_id": str(event.id), "event_type": "conversation.human_intervention_requested",
+                   **payload, "recipient_id": pid_str})
+        for pid_str, event in events_to_push
+    ]
+
+
 async def _command_capability_gate(
     db: AsyncSession,
     conv: Conversation,
@@ -783,6 +857,37 @@ async def _dispatch_discord_outbound(
                 logger.warning(
                     "Discord outbound failed member_id=%s url=%s", decision.member_id, wh.url, exc_info=True
                 )
+
+
+async def _create_conversation_record(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    member_ids: set[uuid.UUID],
+    conv_type: str,
+    title: str | None,
+    created_by: uuid.UUID,
+) -> Conversation:
+    """story #2604 P2(delivery-contract-blueprint-v0-1) 추출: create_conversation 엔드포인트의
+    INSERT 로직(원본 그대로, 추출만 — 동작 불변) — 인가(_enforce_agent_creator_policy)·dedup
+    정책(EF-S2 항상-신규)은 호출부 책임. approval-request DM(get-or-create 배달 경로,
+    app/services/approval_delivery.py)이 이 프리미티브를 재사용한다."""
+    all_members = sorted(member_ids)
+    dm_pair_key = "|".join(str(m) for m in all_members) if conv_type == "dm" else None
+    conv = Conversation(
+        project_id=project_id,
+        org_id=org_id,
+        type=conv_type,
+        title=title,
+        created_by=created_by,
+        dm_pair_key=dm_pair_key,
+    )
+    db.add(conv)
+    await db.flush()
+    for mid in all_members:
+        db.add(ConversationParticipant(conversation_id=conv.id, member_id=mid))
+    return conv
 
 
 # ─── Schemas ──────────────────────────────────────────────────────────────────
@@ -925,6 +1030,9 @@ class UpdateStatusRequest(BaseModel):
 class UpdateConversationRequest(BaseModel):
     # EF-S2 (db75ecd0) AC3: 방 title 사용자 편집. title 제공 시만 갱신(기본 생성 title 보존).
     title: str | None = None
+    # story #2603 P0 AC2: free_response 대화 스코프 옵트아웃(channel_router.py 참조).
+    # 제공 시만 갱신 — 미제공은 기존값 보존(title과 동일 partial-update 규약).
+    free_response: bool | None = None
 
 
 class AddParticipantRequest(BaseModel):
@@ -940,6 +1048,12 @@ class MarkReadRequest(BaseModel):
     up_to 생략 시 서버 now() 사용 — 이는 "전체 읽음"(mark-all-read) 명시 액션 전용 의도(§3-2)."""
 
     up_to: datetime | None = None
+
+
+class CircuitBreakerReleaseRequest(BaseModel):
+    """story #2630: 서킷브레이커 수동 해제 — reason은 감사 표시용(선택)."""
+
+    reason: str | None = None
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
@@ -969,21 +1083,17 @@ async def create_conversation(
     # thread=스토리. dm_pair_key 컬럼은 2인 룸 태깅용으로 유지(non-unique·dedup 아님).
     all_members = sorted({sender.id, *valid_participant_ids})
     is_dm = len(all_members) == 2
-    dm_pair_key = "|".join(str(m) for m in all_members) if is_dm else None
 
-    conv = Conversation(
-        project_id=body.project_id,
-        org_id=org_id,
-        type=("dm" if is_dm else body.type),
-        title=body.title,
-        created_by=sender.id,
-        dm_pair_key=dm_pair_key,
-    )
-    db.add(conv)
     try:
-        await db.flush()
-        for mid in all_members:
-            db.add(ConversationParticipant(conversation_id=conv.id, member_id=mid))
+        conv = await _create_conversation_record(
+            db,
+            org_id=org_id,
+            project_id=body.project_id,
+            member_ids=set(all_members),
+            conv_type=("dm" if is_dm else body.type),
+            title=body.title,
+            created_by=sender.id,
+        )
         await db.commit()
     except IntegrityError:
         # dedup unique 제거 후엔 DM pair 레이스 충돌 없음 — 잔여 무결성 오류는 reuse 없이 전파.
@@ -1789,6 +1899,47 @@ async def mark_conversation_read(
     }
 
 
+@router.post("/{conversation_id}/circuit-breaker/release")
+async def release_circuit_breaker_endpoint(
+    conversation_id: uuid.UUID,
+    body: CircuitBreakerReleaseRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """POST /api/v2/conversations/{id}/circuit-breaker/release — story #2630 수동 해제.
+
+    무감독 연쇄 알림(conversation.circuit_breaker_opened)의 «차단 해제» 액션이 이 엔드포인트를
+    친다. **human org owner/admin 전용**(gates.py transition_gate_endpoint의 93fc7aeb 선례와
+    동형 이유 — 서킷 open 대화는 정의상 human-less라 참가자 기반 authz가 성립 안 하고, 무엇보다
+    "agent가 자기 서킷을 스스로 풀 수 있으면 안전망 자체가 무의미"하다). `is_org_owner_or_admin`
+    은 human 전용을 명시 강제(agent auth는 애초에 매치 불가 — 함수 자체 불변식).
+
+    멱등: 이미 닫혀 있으면(중복 클릭·레이스) 200 + released=false로 응답, 에러 아님.
+    """
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    if not await is_org_owner_or_admin(db, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(
+            status_code=403,
+            detail="서킷브레이커 해제는 org owner/admin만 가능합니다.",
+        )
+
+    sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+
+    from app.services.chain_escalation import release_circuit_breaker
+
+    released = await release_circuit_breaker(
+        db, conversation_id=conversation_id, released_by=sender.id, reason=body.reason,
+    )
+    await db.commit()
+    return {"conversation_id": str(conversation_id), "released": released}
+
+
 @router.post("/{conversation_id}/participants", status_code=201)
 async def add_participant(
     conversation_id: uuid.UUID,
@@ -1912,6 +2063,31 @@ async def send_message(
         else:
             raise HTTPException(status_code=403, detail="Not a participant")
 
+    # story #2630: 서킷브레이커 발신 차단 — human-less 대화에서 폭주 에피소드가 열려 있으면
+    # agent 발신을 여기서 막는다. 참가자 검증 다음(비참여자는 그 이유로 이미 403 — 참여자
+    # 여부와 무관한 사실인 서킷 상태를 그보다 먼저 노출할 이유가 없다), 그 뒤의 실 side-effect
+    # (working clear 등) 이전 — 막힌 시도가 부수 상태를 안 남기게. human 발신은 이 체크
+    # 대상이 아니다(페드루 필수수정 2026-08-13): 서킷이 연 방에 사람이 들어와 개입하려는
+    # 발화까지 막으면 안 된다 — 사람의 개입이 사태 수습의 정공 경로고, human 늦참여
+    # 자동해제를 v1 밖으로 미룬 것과도 정합(사람이 말은 할 수 있으니 해제 버튼 누를 판단도
+    # 대화 안에서 가능). breaker 행은 human-less 대화에서만 열리므로(open 호출부 조건) 이
+    # 조회 결과가 있다는 것 자체가 "이 대화는 human-less"를 함의 — 별도 human 유무 쿼리 불요.
+    if sender.type == "agent":
+        from app.services.chain_escalation import get_open_circuit_breaker_id
+
+        open_breaker_id = await get_open_circuit_breaker_id(db, conversation_id)
+        if open_breaker_id is not None:
+            raise HTTPException(
+                status_code=423,
+                detail={
+                    "error": "circuit_breaker_open",
+                    "message": "폭주 감지로 이 대화의 agent 발신이 일시 차단되었습니다 — "
+                                "org owner/admin의 해제 또는 자동 해소를 기다려주세요.",
+                    "conversation_id": str(conversation_id),
+                    "circuit_breaker_id": str(open_breaker_id),
+                },
+            )
+
     # 1aeecdde P2: sender 가 이 conversation 에 메시지를 보냄 = 답장 생성 종료 → working clear.
     # fork 분기(아래) 전 **원본 conversation_id** 기준 — working 은 그 conversation 에 set 됐다.
     # 휴먼 sender 면 set 된 적 없어 no-op(무해). agent reply 면 즉시 "...typing" 해제.
@@ -1933,6 +2109,18 @@ async def send_message(
         for mid in body.mentioned_ids:
             if mid in _org_member_ids and mid not in _seen:
                 _seen.add(mid)
+                valid_mentioned_ids.append(mid)
+
+    # story #2603 P0(delivery-contract-blueprint-v0-1) ④: FE 구조화 mentioned_ids와 본문
+    # `@handle` 텍스트 파싱 결과를 합집합 — MCP/API 발신(SendChatInput엔 mentioned_ids 필드가
+    # 없다, #2602 지도 ⑦)도 여기서 같은 mentioned_ids 파이프에 실려 route_message/webhook
+    # targeting/notification 전부가 자동으로 handle 멘션을 본다(별도 소비처 변경 불요).
+    # org+type='agent' 스코프 정확 일치만(handle_mention_parser.py) — 부분 문자열 오매칭 없음.
+    from app.services.handle_mention_parser import resolve_handle_mentions
+    _handle_mentioned_ids = await resolve_handle_mentions(db, org_id=org_id, content=body.content or "")
+    if _handle_mentioned_ids:
+        for mid in _handle_mentioned_ids:
+            if mid != sender.id and mid not in valid_mentioned_ids:
                 valid_mentioned_ids.append(mid)
 
     # E-ACTIVATION S1(까디르 QA): audience 도 cross-org/삭제 id 차단 — mentioned_ids 와 동형 org 필터.
@@ -2086,12 +2274,32 @@ async def send_message(
     # ROLLBACK 처리되어(asyncpg 실측 확認) msg insert까지 통째로 사라졌다 — "성공 id 반환하는데
     # 저장 안 됨" 증상의 근본. `_dispatch_conversation_event` 호출부와 동형으로 begin_nested()
     # SAVEPOINT 격리 — 여기서 실패해도 이 nested만 롤백되고 바깥 트랜잭션(msg insert)은 안전.
+    # story #2603 P0(delivery-contract-blueprint-v0-1) ①: SSE 코어가 ChannelRouter의
+    # DeliveryDecision을 소비한다 — 예전엔 이 decisions가 discord 채널 판정에만 쓰이고
+    # `_dispatch_conversation_event`(실제 turn 트리거) 자체는 mute/mentions를 전혀 안 봤다
+    # (지도 ②③). preference_excluded_ids = 참가자였지만 route_message가 mute/mentions로
+    # 걸러 decisions에 없는 대상 — 이제 이들은 discord 판정과 같은 자리에서 SSE Event
+    # 생성 자체가 제외된다(막는 쪽과 하는 쪽이 같은 판정을 본다).
+    # story #2620: decisions는 discord_exclude_ids·preference_excluded_ids뿐 아니라 아래
+    # webhook_authorized_ids(resolve_conversation_webhook_targets)까지 먹이는 단일 snapshot이라
+    # try 실패 시에도(디폴트 []) 참조 가능하게 try 밖에서 미리 초기화한다.
+    decisions: list = []
     discord_exclude_ids: set[uuid.UUID] = set()
+    preference_excluded_ids: set[uuid.UUID] = set()
     try:
         async with db.begin_nested():
             from app.services.channel_router import ChannelRouterError, route_message as _route
             decisions = await _route(msg.id, db)
             discord_exclude_ids = {d.member_id for d in decisions if d.channel == "discord"}
+            decided_ids = {d.member_id for d in decisions}
+            _participant_rows = (await db.execute(
+                select(ConversationParticipant.member_id).where(
+                    ConversationParticipant.conversation_id == conversation_id,
+                )
+            )).scalars().all()
+            preference_excluded_ids = {
+                pid for pid in _participant_rows if pid != sender.id and pid not in decided_ids
+            }
     except Exception:
         logger.warning("ChannelRouter pre-check failed message_id=%s — no SSE exclusion", msg.id)
 
@@ -2117,24 +2325,26 @@ async def send_message(
     except Exception:
         logger.warning("user_blocker_ids lookup failed message_id=%s — fail-open(no exclusion)", msg.id, exc_info=True)
 
-    # E-EVENT-1CONFIG: webhook 전달 대상을 요청 트랜잭션서 1회 산출(SSOT) — SSE-skip 결정과 실제
-    # webhook delivery 가 **같은 snapshot/결정**을 쓰게 해 TOCTOU silent loss 를 차단한다(산티아고
-    # Finding 1). 산출된 target 을 그대로 delivery task 로 넘기고(post-commit requery 0), 그로부터
-    # 도출한 covered member 집합을 SSE-skip 에 쓴다.
+    # E-EVENT-1CONFIG + story #2620(P3, DeliveryDecision 단일화): webhook 전달 대상을 요청
+    # 트랜잭션서 1회 산출(SSOT) — SSE-skip 결정과 실제 webhook delivery 가 **같은 snapshot**을
+    # 쓰게 해 TOCTOU silent loss 를 차단한다(산티아고 Finding 1). 산출된 target 을 그대로
+    # delivery task 로 넘기고(post-commit requery 0), 그로부터 도출한 covered member 집합을
+    # SSE-skip 에 쓴다. #2620부터는 authorized_member_ids 자체가 route_message()의 decisions
+    # (위, discord_exclude_ids/preference_excluded_ids와 같은 호출)에서 유도돼, webhook이 더
+    # 이상 자체 mentioned_ids 판정을 하지 않는다 — SSE·discord·webhook 셋 다 같은 판정 원천.
     from app.services.conversation_webhook import resolve_conversation_webhook_targets
     webhook_targets: list = []
-    if conv.project_id:
+    webhook_authorized_ids = {d.member_id for d in decisions} - {sender.id}
+    if conv.project_id and webhook_authorized_ids:
         try:
             # P0 message-loss savepoint 격리 — 위 blocks와 동일 근거.
             async with db.begin_nested():
                 webhook_targets = await resolve_conversation_webhook_targets(
                     db,
-                    conversation_id=conversation_id,
                     org_id=org_id,
                     project_id=conv.project_id,
                     sender_id=sender.id,
-                    mentioned_ids=list(msg.mentioned_ids) if msg.mentioned_ids else None,
-                    blocker_member_ids=user_blocker_ids,
+                    authorized_member_ids=webhook_authorized_ids,
                 )
         except Exception:
             logger.warning(
@@ -2148,13 +2358,70 @@ async def send_message(
         async with db.begin_nested():
             pending_sse_pushes += await _dispatch_conversation_event(
                 db, conv, msg, org_id, sender,
-                exclude_ids=discord_exclude_ids | blocked_agent_ids | user_blocker_ids,
+                exclude_ids=discord_exclude_ids | blocked_agent_ids | user_blocker_ids | preference_excluded_ids,
                 webhook_covered_ids=webhook_covered_ids,
             )
     except Exception as _dispatch_err:
         # dispatch 실패를 삼키지 않고 surface — 게이트웨이 이벤트 미생성 무음 방지
         logger.error("conversation event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
         raise HTTPException(status_code=500, detail="event dispatch failed") from _dispatch_err
+
+    # story #2608 P1 AC1 + #2617: agent가 보낸 메시지면 연쇄 깊이를 잰다(chain_depth.py 판정
+    # 로직 SSOT — route_message() 안의 게이트와 같은 함수 재사용, 중복 구현 없음). 호출
+    # 위치만 recipient-필터(route_message)·이벤트-발생(여기, 메시지당 1회)으로 갈린다.
+    if sender.type == "agent":
+        from app.services.chain_depth import compute_agent_chain_depth
+        from app.services.channel_router import _AGENT_CHAIN_DEPTH_CAP
+
+        chain_depth = await compute_agent_chain_depth(
+            db, conversation_id, max_scan=_AGENT_CHAIN_DEPTH_CAP,
+        )
+        if chain_depth > _AGENT_CHAIN_DEPTH_CAP:
+            # story #2608 P1 AC1: A↔B 상호멘션류(멘션 자체는 항상 유효해 route_message의
+            # mentions 체크로는 절대 안 끊김)를 잡는다 — agent를 명시 멘션했는데(=turn이
+            # 시도됐을 대상이 실재) 연쇄가 cap을 넘었으면, "침묵"이 아니라 human 참가자에게
+            # human_intervention_requested 이벤트로 알린다(블루프린트 §3). 「멘션됐는데
+            # agent가 없다」(전부 human 멘션)면 turn 자체가 애초에 대상 없어 no-op.
+            if msg.mentioned_ids:
+                _mentioned_agent_rows = (await db.execute(
+                    select(TeamMember.id).where(
+                        TeamMember.id.in_(msg.mentioned_ids), TeamMember.type == "agent",
+                    )
+                )).scalars().all()
+                chain_expired_agent_targets = set(_mentioned_agent_rows)
+                if chain_expired_agent_targets:
+                    try:
+                        async with db.begin_nested():
+                            pending_sse_pushes += await _dispatch_human_intervention_event(
+                                db, conv, msg, org_id, sender,
+                                chain_expired_agent_targets, _AGENT_CHAIN_DEPTH_CAP,
+                            )
+                    except Exception:
+                        logger.warning(
+                            "human_intervention_requested dispatch failed conversation_id=%s",
+                            conversation_id, exc_info=True,
+                        )
+
+        # story #2626(재설계, 2026-08-13 PO 승인): 무감독 연쇄 «알림»은 depth-cap(#2608,
+        # 위 블록·상시 상태)과 완전히 분리된 별도 트리거 — 속도 기반 이상 에피소드 감지로
+        # 교체했다(원 게이트 조건 depth > cap이 human-less 대화에서 영구 참이라 dedup만으론
+        # 소음을 못 없앴다, #3016 진단). 그래서 이 블록은 depth-cap 조건 밖으로 뺐다 — human-
+        # less 대화의 매 agent 메시지마다 속도를 평가한다(chain_escalation.py 내부에서 org
+        # 설정·임계·에피소드 마커·플래핑 쿨다운까지 전부 판단, 여기는 호출만).
+        from app.services.channel_router import _conversation_has_human
+        if not await _conversation_has_human(db, conversation_id):
+            try:
+                async with db.begin_nested():
+                    from app.services.chain_escalation import evaluate_unsupervised_chain_episode
+                    await evaluate_unsupervised_chain_episode(
+                        db, org_id=org_id, conversation_id=conversation_id,
+                        project_id=conv.project_id,
+                    )
+            except Exception:
+                logger.warning(
+                    "unsupervised chain escalation dispatch failed conversation_id=%s",
+                    conversation_id, exc_info=True,
+                )
 
     # AC1: 멘션 대상에게 conversation:mention SSE 발송 (participant 여부 무관)
     #
@@ -2534,9 +2801,10 @@ async def update_conversation(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
-    """PATCH /api/v2/conversations/{id} — 방 title 사용자 편집 (EF-S2 AC3·참여자 권한).
+    """PATCH /api/v2/conversations/{id} — 방 title·free_response 사용자 편집(EF-S2 AC3·
+    story #2603 P0 AC2·참여자 권한).
 
-    title 제공 시만 갱신(기본 생성 title 보존). status PATCH 와 동일 참여자 게이트.
+    각 필드는 제공 시만 갱신(기본값 보존). status PATCH 와 동일 참여자 게이트.
     """
     conv = (await db.execute(
         select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
@@ -2557,7 +2825,11 @@ async def update_conversation(
     if body.title is not None:
         conv.title = body.title
         conv.updated_at = datetime.now(timezone.utc)
+    if body.free_response is not None:
+        conv.free_response = body.free_response
+        conv.updated_at = datetime.now(timezone.utc)
+    if body.title is not None or body.free_response is not None:
         await db.commit()
         await db.refresh(conv)
 
-    return {"id": str(conv.id), "title": conv.title}
+    return {"id": str(conv.id), "title": conv.title, "free_response": conv.free_response}

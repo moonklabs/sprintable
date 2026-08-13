@@ -433,6 +433,20 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
         ),
+        DeepLinkManifestEntry(
+            # story #2624: 결재 해소 결과가 상신자에게 회신되는 벨 알림 — doc_approval_
+            # requested와 동형(gate 경유, reference_id=gate_id)이나 이미 결정이 끝난
+            # 읽기 전용 FYI라 grade B(요청 쪽은 조치 필요라 A2인 것과 대비).
+            app=DeepLinkAppFields(
+                type="doc_approval_resolved", target="gate_detail", parent_tab=ParentTab.approvals,
+                target_promotion_pending=True,
+            ),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
+            channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
+        ),
 
         # --- dispatched(범용) — reference_type 5종 분기. entity_type 필수. ---
         # 정정(유나 3자 검토, 필수·조건부 GREEN의 조건): parentTab은 target의 순수 함수여야
@@ -667,6 +681,38 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 required_payload=["reference_id"],
             ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
+        ),
+        # story #2617: human-less 대화의 chain-depth 초과를 org owner/admin에게 대화 밖
+        # 승격(chain_escalation.py) — 「읽어두면 좋은」 관측 알림이지 즉시 조치가 필요한
+        # 게 아니라 conversation.message와 동형으로 grade B.
+        DeepLinkManifestEntry(
+            app=DeepLinkAppFields(
+                type="conversation.unsupervised_chain_expired", target="chat_thread",
+                parent_tab=ParentTab.chat,
+            ),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
+            channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
+        ),
+        # story #2630: 서킷브레이커 open — 위 unsupervised_chain_expired와 달리 «관측»이
+        # 아니라 agent 발신이 실제로 막힌 상태다. org owner/admin이 해제(release) 액션을
+        # 취할 수 있어야 풀리므로(manual release_mode가 기본) A2(조치 필요·비긴급) —
+        # SLA성 즉시대응은 아니라 A1은 과함. reference_id는 conversation_id가 아니라
+        # chain_circuit_breaker.id(release 엔드포인트가 그 id로 타겟팅, chain_escalation.py
+        # evaluate_unsupervised_chain_episode 참조) — target은 그래도 chat_thread(탭하면
+        # 그 대화로 이동, 해제 액션 자체는 알림 카드에서).
+        DeepLinkManifestEntry(
+            app=DeepLinkAppFields(
+                type="conversation.circuit_breaker_opened", target="chat_thread",
+                parent_tab=ParentTab.chat,
+            ),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
+            channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
         ),
 
         # --- goal(epic) ---

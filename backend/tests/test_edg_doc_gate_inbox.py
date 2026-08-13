@@ -225,14 +225,20 @@ async def test_non_doc_gate_still_auto_passes():
 
 @pytest.mark.anyio
 async def test_submit_notifies_org_approvers():
-    """갭2: 상신 → org owner/admin 휴먼 결재자에게 dispatch_notification(상신자 제외·gate 참조)."""
+    """갭2: 상신 → org owner/admin 휴먼 결재자에게 dispatch_notification(상신자 제외·gate 참조).
+
+    story #2604 P2: 이 테스트는 벨 알림 경로만 스코프(카드 배달은 별도
+    test_2604_approval_request_cards.py) — dispatch_approval_request_cards를 patch해 동일
+    session.execute 목을 카드 배달의 lookup_members_by_ids 호출과 공유하지 않는다(공유 시
+    session.execute.await_args가 마지막 호출로 밀려 approver 쿼리 검증이 깨짐)."""
     from app.services.doc import _notify_doc_approval_requested
     org, requester, gate_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     doc = MagicMock(id=uuid.uuid4(), title="설계 문서", project_id=uuid.uuid4())
     owners = [uuid.uuid4(), uuid.uuid4()]
     res = MagicMock(); res.scalars.return_value.all.return_value = owners
     session = AsyncMock(); session.execute = AsyncMock(return_value=res)
-    with patch("app.services.notification_dispatch.dispatch_notification", new=AsyncMock()) as dn:
+    with patch("app.services.notification_dispatch.dispatch_notification", new=AsyncMock()) as dn, \
+         patch("app.services.approval_delivery.dispatch_approval_request_cards", new=AsyncMock()):
         await _notify_doc_approval_requested(session, org, doc, gate_id, requester_id=requester)
     dn.assert_awaited_once()
     kw = dn.await_args.kwargs

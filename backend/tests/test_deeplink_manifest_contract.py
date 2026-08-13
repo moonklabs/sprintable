@@ -88,10 +88,13 @@ def test_conversation_mention_lands_in_chat_tab():
     assert entry.app.parent_tab == ParentTab.chat
 
 
-def test_manifest_covers_all_24_dispatch_notification_event_types():
+def test_manifest_covers_all_27_dispatch_notification_event_types():
     """AC1 회귀 고정: story #1951 GATE1 전수 조사에서 확인한 dispatch_notification()
-    event_type 리터럴 24종이 전부 등재돼 있어야 한다. 새 알림 타입이 코드에 추가되고
-    이 집합이 갱신 안 되면 이 테스트가 알려준다(양방향 대조 — 매니페스트 초과분도 잡음)."""
+    event_type 리터럴이 전부 등재돼 있어야 한다. 새 알림 타입이 코드에 추가되고
+    이 집합이 갱신 안 되면 이 테스트가 알려준다(양방향 대조 — 매니페스트 초과분도 잡음).
+    story #2617: conversation.unsupervised_chain_expired 신설로 24→25.
+    story #2624: doc_approval_resolved 신설로 25→26.
+    story #2630: conversation.circuit_breaker_opened 신설로 26→27."""
     expected = {
         "sprint_closed", "task_completed", "story_assigned", "comment.created",
         "artifact.created", "artifact.exported", "artifact.updated", "artifact.canonicalized",
@@ -99,6 +102,8 @@ def test_manifest_covers_all_24_dispatch_notification_event_types():
         "dispatched", "epic_created", "epic_status_changed", "gate_escalated", "gate_reminder",
         "gate.pending_approval", "gate_overridden", "gate_approval_requested", "gate_reassigned",
         "doc_approval_requested", "handoff_fallback", "story_status_changed",
+        "conversation.unsupervised_chain_expired", "doc_approval_resolved",
+        "conversation.circuit_breaker_opened",
     }
     actual = {e.app.type for e in DEEPLINK_MANIFEST.entries}
     missing = expected - actual

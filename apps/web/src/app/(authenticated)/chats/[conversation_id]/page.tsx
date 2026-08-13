@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Bell, BellOff, ChevronLeft, UserPlus, Pencil } from 'lucide-react';
+import { Bell, BellOff, ChevronLeft, UserPlus, Pencil, Settings } from 'lucide-react';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ChatView } from '@/components/chat/chat-view';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { AddParticipantModal } from '@/components/chat/add-participant-modal';
+import { DeliveryContractModal } from '@/components/chat/delivery-contract-modal';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
@@ -31,6 +32,9 @@ interface ConversationMeta {
   // story #1977(트랙B): #1976 read state 계약 — caller last_read_at. ChatView의 "여기부터
   // 안읽음" 마커 경계로 소비(진입 시점 값만 필요, 마커는 이 화면 방문 내내 동결).
   lastReadAt: string | null;
+  // story #2621 v1 — 전달 계약 편집 모달의 free_response 초기값(conversation.free_response,
+  // EF-S2/#2603 P0). 부재 시 false로 graceful(하위호환 — 옛 응답엔 이 필드가 없을 수 있음).
+  freeResponse: boolean;
 }
 
 // story #2168 PR-②(오르테가 지적) — `?from=`은 사용자가 URL을 통해 조작 가능한 값이다.
@@ -65,6 +69,7 @@ export default function ConversationPage() {
   const { currentTeamMemberId, projectId } = useDashboardContext();
   const [meta, setMeta] = useState<ConversationMeta | null>(null);
   const [showAddParticipant, setShowAddParticipant] = useState(false);
+  const [showDeliveryContract, setShowDeliveryContract] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
 
@@ -90,6 +95,7 @@ export default function ConversationPage() {
       if (!res.ok) return;
       const conv = await res.json() as {
         title: string | null; type: 'dm' | 'group'; participants?: Participant[]; muted?: boolean; last_read_at?: string | null;
+        free_response?: boolean;
       };
       setMeta({
         title: conv.title,
@@ -97,6 +103,7 @@ export default function ConversationPage() {
         participants: conv.participants ?? [],
         muted: conv.muted ?? false,
         lastReadAt: conv.last_read_at ?? null,
+        freeResponse: conv.free_response ?? false,
       });
     } catch { /* non-critical */ }
   }, [conversation_id, projectId]);
@@ -262,6 +269,15 @@ export default function ConversationPage() {
                 <UserPlus className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">참여자 추가</span>
               </button>
+              {/* story #2621 v1 — 전달 계약 편집 진입점(대화 설정). */}
+              <button
+                type="button"
+                onClick={() => setShowDeliveryContract(true)}
+                className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                title={t('deliveryContractTitle')}
+              >
+                <Settings className="h-3.5 w-3.5" />
+              </button>
             </div>
           )
         }
@@ -302,6 +318,16 @@ export default function ConversationPage() {
           existingParticipantIds={meta.participants.map((p) => p.member_id)}
           onClose={() => setShowAddParticipant(false)}
           onAdded={handleParticipantAdded}
+        />
+      )}
+
+      {showDeliveryContract && meta && (
+        <DeliveryContractModal
+          conversationId={conversation_id}
+          conversationType={meta.type}
+          freeResponse={meta.freeResponse}
+          onClose={() => setShowDeliveryContract(false)}
+          onFreeResponseChange={(next) => setMeta((m) => (m ? { ...m, freeResponse: next } : m))}
         />
       )}
     </>
