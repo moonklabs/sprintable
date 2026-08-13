@@ -125,6 +125,43 @@ async def test_published_doc_returns_content_and_new_version_closes_old():
         await engine.dispose()
 
 
+@pytest.mark.anyio
+async def test_public_endpoint_reachable_without_auth_header_real_http():
+    """카디르 QA 블로커①(2026-08-13): `Depends(rate_limit)`(app.dependencies.rate_limit)이
+    내부적으로 `Depends(get_current_user)`를 물어, 이 엔드포인트 자체엔 인가 의존성이 없는데도
+    무인증 요청이 401로 튕겼다 — get_current_legal_document를 **직접 함수 호출**하는 위 테스트
+    들은 FastAPI 의존성 주입 자체를 안 타서 이 결함을 못 잡았다(정확히 이 결함의 은신처).
+    실 ASGI 라우팅(TestClient/AsyncClient+ASGITransport)으로 Authorization 헤더 없이 왕복해
+    401이 아님을 고정 — public_docs.py 패턴처럼 SlowAPI IP-키 limiter(app.core.rate_limit.
+    limiter)로 교체한 수정의 증거."""
+    from httpx import ASGITransport, AsyncClient
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.dependencies.database import get_db
+    from app.main import app
+
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None  # 미발행 → 404(placeholder 없음)
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=result)
+
+    async def _override_db():
+        yield session
+
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            # Authorization 헤더 완전히 없음 — 실사용(비로그인 방문자) 그대로.
+            resp = await client.get("/api/v2/legal/terms?locale=ko")
+        assert resp.status_code != 401, (
+            f"무인증 요청이 401 — rate_limit 의존성이 get_current_user를 끌고 있을 가능성 "
+            f"(body={resp.text})"
+        )
+        assert resp.status_code == 404, "미발행 doc_type은 여전히 404(placeholder 미생성)여야"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
 def test_unknown_doc_type_rejected_without_db_roundtrip():
     """400/404 판정이 DB 왕복 전에 걸러지는지 — invalid doc_type이 CHECK violation(500)으로
     새지 않고 깨끗한 404로 응답해야 한다(공개 엔드포인트라 에러 모양이 내부 스키마를 안 흘림)."""

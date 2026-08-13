@@ -7,12 +7,12 @@ get_current 하나로 고정한다(PO 지시, 2026-08-13) — 이력/미래 예�
 """
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.rate_limit import limiter
 from app.dependencies.database import get_db
-from app.dependencies.rate_limit import rate_limit
 from app.models.legal_document import LegalDocumentVersion
 from app.schemas.legal_document import LegalDocumentCurrentResponse
 
@@ -22,8 +22,10 @@ _DOC_TYPES = frozenset({"terms", "privacy", "refund_policy"})
 _LOCALES = frozenset({"ko", "en"})
 
 
-@router.get("/{doc_type}", response_model=LegalDocumentCurrentResponse, dependencies=[Depends(rate_limit)])
+@router.get("/{doc_type}", response_model=LegalDocumentCurrentResponse)
+@limiter.limit("60/minute")
 async def get_current_legal_document(
+    request: Request,
     doc_type: str,
     locale: str = Query("ko", description="ko | en"),
     db: AsyncSession = Depends(get_db),
