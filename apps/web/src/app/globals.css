@@ -311,11 +311,14 @@
 
   /* Scrollbar — story #2601: 10%/18% 알파는 실측(Chromium canvas 2d fillRect+getImageData,
      color-contrast.test.ts와 동일 규격) 대비 1.26:1(WCAG 비텍스트 UI 컴포넌트 3:1 문턱의
-     절반 이하)이라 사실상 안 보였다. 45%로 올려 3.36:1 확보(track도 6%로 미세하게 얹어
-     스크롤 가능한 «홈」 자체를 감지하게) — 회귀 가드는 globals-scrollbar.test.ts 참조. */
+     절반 이하)이라 사실상 안 보였다. 45%로 올려 3.36:1 확보 — 회귀 가드는
+     globals-scrollbar.test.ts 참조. track은 transparent 유지(유나 design verdict, 2026-08-13):
+     6%로 얹었던 시도는 라이트에서 썸-vs-track 인접면 대비가 2.95:1로 이 수정이 약속한
+     3:1을 자기 인접면에 못 지켰고, 접수 결함(썸 가시성)은 썸만으로 닫혀 공유 토큰 타는
+     모든 표면에 없던 시각요소를 얹는 건 범위초과 — transparent면 인접면=page라 안전. */
   --scrollbar-thumb: oklch(0 0 0 / 45%);
   --scrollbar-thumb-hover: oklch(0 0 0 / 65%);
-  --scrollbar-track: oklch(0 0 0 / 6%);
+  --scrollbar-track: transparent;
 
   --brand-soft: oklch(0.90 0.06 258);
   --brand-strong: oklch(0.45 0.20 258);
@@ -446,10 +449,11 @@
 
   /* Scrollbar — story #2601, 라이트 쪽 주석 근거 그대로. 원래 8% 알파는 실측 대비 1.22:1 —
      --background(다크)이 실측 rgb(17,17,20)로 거의 순흑에 가까워 흰 알파가 라이트보다도
-     헤드룸이 넉넉하다(65%에서 대비 8.31:1 — 직관과 달리 라이트보다 여유 있게 통과). */
+     헤드룸이 넉넉하다(65%에서 대비 8.31:1 — 직관과 달리 라이트보다 여유 있게 통과).
+     track은 transparent 유지 — 라이트 쪽 주석의 유나 design verdict 근거 그대로. */
   --scrollbar-thumb: oklch(1 0 0 / 65%);
   --scrollbar-thumb-hover: oklch(1 0 0 / 80%);
-  --scrollbar-track: oklch(1 0 0 / 12%);
+  --scrollbar-track: transparent;
 
   --brand-soft: oklch(0.80 0.10 258);
   --brand-strong: oklch(0.55 0.22 258);
