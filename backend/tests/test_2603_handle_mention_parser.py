@@ -174,3 +174,30 @@ async def test_generate_unique_handle_dedupes_within_org():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
         await engine.dispose()
+
+
+def test_handle_generation_never_exceeds_parser_capture_cap():
+    """story #2608 후속(카디르 QA 발견, #2603 종결부) — 64자 초과 handle + 65번째 문자가
+    하이픈인 엣지에서 파서가 긴 handle을 잘라 다른(짧은) 에이전트와 오매칭할 수 있었다.
+    생성 측(slugify_handle_base)이 파서의 캡처 상한(_MAX_HANDLE_LEN)보다 항상 짧게 만들면
+    이 클래스의 오매칭 자체가 구조적으로 불가능해진다."""
+    from app.services.handle_mention_parser import (
+        _MAX_HANDLE_LEN,
+        _HANDLE_TOKEN_RE,
+        slugify_handle_base,
+    )
+
+    very_long_name = "This Is An Extremely Long Agent Name That Goes Well Past Sixty Four Characters In Total Length"
+    base = slugify_handle_base(very_long_name)
+    assert len(base) < _MAX_HANDLE_LEN, "base 하나만으로도 이미 상한 밑이어야(접미사 여유 포함 전)"
+
+    # -N 접미사가 붙어도(현실적 충돌 자릿수 내) 여전히 상한 밑 — 그래서 그 handle 전체를
+    # "@" + handle로 써도 파서가 정확히 전체를 캡처할 수 있어야 한다(자기 자신을 완전히
+    # 멘션 못 하는 handle이 생기면 안 됨).
+    for suffix in ("", "-2", "-99"):
+        candidate = f"{base}{suffix}"
+        assert len(candidate) <= _MAX_HANDLE_LEN, f"{candidate!r} 길이 {len(candidate)}가 상한 초과"
+        m = _HANDLE_TOKEN_RE.match(f"@{candidate} hello")
+        assert m is not None and m.group(1) == candidate, (
+            f"자기 자신을 완전히 캡처 못함 — {candidate!r}"
+        )

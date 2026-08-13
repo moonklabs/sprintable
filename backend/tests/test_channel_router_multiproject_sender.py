@@ -8,9 +8,17 @@ route_message 가 MultipleResultsFound 로 안 깨지고 dispatch 되는지(send
 from __future__ import annotations
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+# story #2608 P1: route_message()은 sender_type=="agent"면 compute_agent_chain_depth를 추가로
+# 호출한다(그 함수 자체가 내부적으로 db.execute를 더 쓴다) — 기존 db.execute side_effect
+# 리스트를 안 건드리려고 그 함수 자체를 patch해 고정 depth를 준다. depth=1(<=cap)로 두면
+# 이 파일의 기존(P1 이전) 시나리오들은 전부 무회귀로 그대로 통과한다.
+_NOT_EXPIRED = patch(
+    "app.services.channel_router.compute_agent_chain_depth", AsyncMock(return_value=1),
+)
 
 
 @pytest.fixture
@@ -90,7 +98,8 @@ async def test_multiproject_agent_sender_dispatches_without_crash():
         _scalars([]),                       # 6 preferences
     ])
 
-    decisions = await route_message(msg.id, db)
+    with _NOT_EXPIRED:
+        decisions = await route_message(msg.id, db)
     # 발신자 제외·크래시/ChannelRouterError 없이 멘션된 recipient에게만 decision.
     assert len(decisions) == 1
     assert decisions[0].member_id == recipient
@@ -128,7 +137,8 @@ async def test_agent_group_default_excludes_unmentioned_agent_recipient():
         _scalars([]),
     ])
 
-    decisions = await route_message(msg.id, db)
+    with _NOT_EXPIRED:
+        decisions = await route_message(msg.id, db)
     assert decisions == [], "멘션 없는데 decision이 생기면 원 루프가 그대로 재현된다"
 
 
@@ -194,7 +204,8 @@ async def test_free_response_conversation_relaxes_mentions_to_all():
         _scalars([]),
     ])
 
-    decisions = await route_message(msg.id, db)
+    with _NOT_EXPIRED:
+        decisions = await route_message(msg.id, db)
     assert len(decisions) == 1
     assert decisions[0].level == "all"
     assert "free_response override" in decisions[0].reason
@@ -228,7 +239,8 @@ async def test_explicit_mute_wins_over_free_response_and_mention():
         _scalars([_pref(recipient, scope_type="global", level="mute")]),
     ])
 
-    decisions = await route_message(msg.id, db)
+    with _NOT_EXPIRED:
+        decisions = await route_message(msg.id, db)
     assert decisions == [], "명시 mute 선택인데 decision이 생기면 회원 자기결정권 위반"
 
 
@@ -261,7 +273,112 @@ async def test_explicit_all_preference_overrides_agent_group_default():
         _scalars([_pref(recipient, scope_type="global", level="all", channel="sse")]),
     ])
 
-    decisions = await route_message(msg.id, db)
+    with _NOT_EXPIRED:
+        decisions = await route_message(msg.id, db)
     assert len(decisions) == 1
     assert decisions[0].level == "all"
     assert decisions[0].reason == "preference scope=global"
+
+
+@pytest.mark.anyio
+async def test_chain_expired_blocks_agent_recipient_even_when_mentioned():
+    """story #2608 P1 AC1 — A↔B 상호멘션(멘션은 항상 유효)류의 유일한 탈출구. mentions
+    체크는 통과해도(recipient가 명시 멘션됨) chain_expired=True면 최종 게이트에서 막힌다."""
+    from app.services.channel_router import route_message
+
+    sender = uuid.uuid4()
+    recipient = uuid.uuid4()
+    conv = uuid.uuid4()
+    proj = uuid.uuid4()
+
+    msg = MagicMock()
+    msg.id = uuid.uuid4()
+    msg.sender_id = sender
+    msg.conversation_id = conv
+    msg.thread_id = None
+    msg.mentioned_ids = [recipient]  # 유효한 멘션 — 그런데도 막혀야 한다.
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        _scalar(msg),
+        _scalar("agent"),
+        _scalars([sender, recipient]),
+        _scalars([]),
+        _all([(recipient, "agent")]),
+        _row(project_id=proj, type="group", free_response=False),
+        _scalars([]),
+    ])
+
+    with patch("app.services.channel_router.compute_agent_chain_depth", AsyncMock(return_value=5)):
+        decisions = await route_message(msg.id, db)
+    assert decisions == [], "연쇄 cap 초과인데 멘션 성립만으로 decision이 생기면 P1이 안 먹는다"
+
+
+@pytest.mark.anyio
+async def test_chain_expired_does_not_block_human_recipient():
+    """human recipient는 연쇄 게이트 대상이 아니다 — human이 바로 그 개입 대상."""
+    from app.services.channel_router import route_message
+
+    sender = uuid.uuid4()
+    human_recipient = uuid.uuid4()
+    conv = uuid.uuid4()
+    proj = uuid.uuid4()
+
+    msg = MagicMock()
+    msg.id = uuid.uuid4()
+    msg.sender_id = sender
+    msg.conversation_id = conv
+    msg.thread_id = None
+    msg.mentioned_ids = [human_recipient]
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        _scalar(msg),
+        _scalar("agent"),
+        _scalars([sender, human_recipient]),
+        _scalars([]),
+        _all([(human_recipient, "human")]),
+        _row(project_id=proj, type="group", free_response=False),
+        _scalars([]),
+    ])
+
+    with patch("app.services.channel_router.compute_agent_chain_depth", AsyncMock(return_value=5)):
+        decisions = await route_message(msg.id, db)
+    assert len(decisions) == 1
+    assert decisions[0].member_id == human_recipient
+
+
+@pytest.mark.anyio
+async def test_chain_within_cap_delivers_normally():
+    """정상 A2A 협업(깊이 cap 이내)은 비회귀(AC4) — depth가 cap과 같아도(등호 없음) 통과."""
+    from app.services.channel_router import route_message, _AGENT_CHAIN_DEPTH_CAP
+
+    sender = uuid.uuid4()
+    recipient = uuid.uuid4()
+    conv = uuid.uuid4()
+    proj = uuid.uuid4()
+
+    msg = MagicMock()
+    msg.id = uuid.uuid4()
+    msg.sender_id = sender
+    msg.conversation_id = conv
+    msg.thread_id = None
+    msg.mentioned_ids = [recipient]
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[
+        _scalar(msg),
+        _scalar("agent"),
+        _scalars([sender, recipient]),
+        _scalars([]),
+        _all([(recipient, "agent")]),
+        _row(project_id=proj, type="group", free_response=False),
+        _scalars([]),
+    ])
+
+    with patch(
+        "app.services.channel_router.compute_agent_chain_depth",
+        AsyncMock(return_value=_AGENT_CHAIN_DEPTH_CAP),
+    ):
+        decisions = await route_message(msg.id, db)
+    assert len(decisions) == 1, "정확히 cap과 같은 깊이(등호)는 아직 유효해야 한다"
