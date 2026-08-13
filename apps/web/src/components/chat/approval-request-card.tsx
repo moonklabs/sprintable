@@ -13,7 +13,11 @@ export interface ApprovalTarget {
   work_item_type: string;
   work_item_id: string;
   gate_id: string;
-  actions: string[];
+  /** story #2624 — 결재 "결과" 메시지(message_kind=result, BE #3015)의 approval_target은
+   * actions가 없다(액션 카드가 아니라 회신 카드라 승인/반려 선택지 자체가 없음). 이 필드는
+   * 이 컴포넌트에서 실제로 읽히지 않는다(gate 상태는 항상 fetchGate()의 실물로 판단) —
+   * optional로 둬 두 메시지 종류(request/result) 모두 같은 타입으로 수용한다. */
+  actions?: string[];
 }
 
 interface ApprovalRequestCardProps {
@@ -28,6 +32,17 @@ type CardState =
   | { kind: 'ready'; gate: GateItem };
 
 const WORK_ITEM_ICON: Record<string, typeof FileText> = { doc: FileText };
+
+// story #2624 — 회신 카드가 gate.status 원문("approved"/"rejected" 등)을 그대로 보였다(선생님
+// 지적 — "사유는 남겨놨는데" 인시던트의 human 웹 표면 절반). i18n 키가 있는 상태만 번역하고,
+// 매핑 안 된 값(held/voided 등 흔치 않은 상태)은 원문을 그대로 보여 조용히 숨기거나 지어내지
+// 않는다.
+const RESOLVED_STATUS_LABEL_KEYS: Record<string, string> = {
+  approved: 'approvalRequestStatusApproved',
+  rejected: 'approvalRequestStatusRejected',
+  held: 'approvalRequestStatusHeld',
+  voided: 'approvalRequestStatusVoided',
+};
 
 /**
  * story #2604 P2 → #2625(선생님 실사용 판정으로 확장) — chat approval-request 카드. BE(#3007)가
@@ -140,9 +155,20 @@ function ApprovalRequestBody({
       ) : null}
 
       {gate.status !== 'pending' ? (
-        <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
-          {gate.status === 'approved' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />}
-          {t('approvalRequestResolvedStatus', { status: gate.status })}
+        <div className="space-y-1">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+            {gate.status === 'approved' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />}
+            {t('approvalRequestResolvedStatus', {
+              status: RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status,
+            })}
+          </div>
+          {/* story #2624 — 상신자가 결과를 회신 카드로 받아도 사유(resolution_note)가 안
+              보이면 "사유는 남겨놨는데" 인시던트가 human 웹 표면에서 재발한다. gate는 항상
+              fetchGate()로 실측한 최신 값이라 어느 메시지(request/result)를 눌러 들어왔든
+              같은 값을 보여준다. */}
+          {gate.resolution_note ? (
+            <p className="text-[11px] text-muted-foreground">{t('approvalRequestResolutionNote', { note: gate.resolution_note })}</p>
+          ) : null}
         </div>
       ) : !canAct ? (
         // story #2091(P0)과 동일 fail-closed 규율 — can_approve=false(무권한 뷰어)는 액션을
