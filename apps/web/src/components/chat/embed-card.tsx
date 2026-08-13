@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   ExternalLink, X, FileText, File, Layers, CheckSquare, Eye,
@@ -139,7 +139,21 @@ const MdBadge = ({ label }: { label: string }) => (
 // 새 함수 참조가 되어 react-markdown이 서브트리를 리마운트한다(chat-bubble 근본원인과 동형).
 // 이 객체는 props/상태에 의존하지 않는 순수 상수이고 자식도 전부 stateless라 useMemo조차
 // 불필요 — 모듈 스코프로 끌어올려 참조를 영구 고정한다.
+// story #2639 — 본문 엔티티 참조 토큰 `[제목](entity:타입:id)`의 href 매칭(id는 UUID만).
+// doc-content-renderer.tsx·chat-bubble.tsx의 파싱 규칙과 문자 그대로 동일(드리프트 방지).
+const MDBODY_ENTITY_REF_RE = /^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
 const mdBodyComponents = {
+  // story #2639(미르코 리뷰 ⑤) — 결재 카드 문서 미리보기(EntityPreviewModal→EntityDetail doc
+  // 분기)가 이 경량 렌더러를 쓴다. doc-content-renderer와 동일하게 entity: 참조를 EntityChip으로
+  // 잇는다(같은 파일의 EntityChip 재사용·사본 0). 비-UUID/asset은 평문 링크 폴백(무동작 0).
+  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
+    const m = href?.match(MDBODY_ENTITY_REF_RE);
+    if (m && m[1]!.toLowerCase() !== 'asset') {
+      return <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} />;
+    }
+    return <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">{children}</a>;
+  },
   p: ({ children }: { children?: React.ReactNode }) => <p className="mb-2 text-sm leading-6">{children}</p>,
   h1: ({ children }: { children?: React.ReactNode }) => <h1 className="mb-2 text-lg font-bold">{children}</h1>,
   h2: ({ children }: { children?: React.ReactNode }) => <h2 className="mb-2 text-base font-bold">{children}</h2>,
@@ -155,8 +169,14 @@ const mdBodyComponents = {
   em: ({ children }: { children?: React.ReactNode }) => <em className="italic">{children}</em>,
 };
 
-const MdBody = ({ content }: { content: string }) => (
-  <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdBodyComponents}>
+// story #2639 — entity: 스킴 보존(이 렌더러는 rehype-sanitize를 안 써서 이 한 겹이면 충분).
+// 그 외 스킴은 기본 sanitize 유지(javascript:/data: 차단). export: MdBody 격리 테스트용.
+export const MdBody = ({ content }: { content: string }) => (
+  <ReactMarkdown
+    remarkPlugins={[remarkGfm]}
+    urlTransform={(url) => (url.startsWith('entity:') ? url : defaultUrlTransform(url))}
+    components={mdBodyComponents}
+  >
     {content}
   </ReactMarkdown>
 );
