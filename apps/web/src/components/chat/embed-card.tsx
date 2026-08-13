@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { docViewUrl } from '@/components/docs/lib/doc-project-url';
 import { initials } from '@/lib/storage/format';
 import { renderEntityStatusLabel, translateEntityStatus, type EntityStatusFetchState } from './entity-status-labels';
+import { ArtifactThumbnail } from '@/components/canvas/artifact-thumbnail';
 
 // story #2302 — 이 8종은 BE reference_registry.py ENTITY_RESOLVERS 와 키 집합이 같아야 한다
 // (AC2·AC5, entity-icons.registry-parity.test.ts 가 코드스캔으로 대조). `asset`은 registry
@@ -120,14 +121,28 @@ const ENTITY_API: Record<string, (id: string) => string> = {
   epic: (id) => `/api/goals/${id}`,
   asset: (id) => `/api/assets/${id}`,
   // story #2302 — task.story_id(항상 유일 부모)·artifact.{story_id,epic_id,doc_id}(최대 1개,
-  // 전부 nullable)를 읽어 ②/③을 레코드 단위로 판정하는 재료. hypothesis는 의도적으로 여기
-  // 없다(위 getEntityHref 주석 참고 — 애초에 fetch할 필요가 없는 고정 ③).
+  // 전부 nullable)를 읽어 ②/③을 레코드 단위로 판정하는 재료.
   task: (id) => `/api/tasks/${id}`,
   artifact: (id) => `/api/visual-artifacts/${id}`,
   // story #2314(2026-07-29): GET /api/v2/evidence/{id}가 신설돼 evidence도 fetch-eligible로
   // 승격 — 응답의 resolved_story_id를 EntityPreviewModal이 읽는다(아래 evidence 분기).
   evidence: (id) => `/api/evidence/${id}`,
+  // story #2614 — hypothesis는 §2302에서 "링크(풋터) 판정용으로 fetch할 필요가 없다"(다대다라
+  // 부모 하나를 못 고름, 그건 여전히 사실 — 아래 getEntityHref는 무변경)는 이유로 ENTITY_API
+  // 자체에서 빠졌었는데, 그 근거가 "몸통 content도 fetch 불필요"로 잘못 일반화됐다 — statement
+  // (§2.2.4 유일한 수동 텍스트 입력)는 실재하고 GET /api/hypotheses/{id}도 이미 있다(E-LOOP-LEDGER
+  // S6). 풋터(갈 곳 없음)와 몸통(내용 있음)은 별개 축 — 몸통만 이제 채운다.
+  hypothesis: (id) => `/api/hypotheses/${id}`,
 };
+
+// story #2614 AC2 — 멘션 합성 가능 8타입(story/doc/epic/task/sprint/artifact/hypothesis/
+// evidence) 전수표. 이 Set에 없는 타입은 "이 엔티티는 별도 미리보기가 없습니다"로 떨어진다 —
+// 그게 이 스토리가 고친 결함(만들 수는 있는데 몸통에서 아무것도 못 얻는 반쪽)이었다. sprint는
+// own-href(getEntityHref)로 풋터가 이미 열리고 몸통에 보여줄 필드가 없어(제목·기간 외 없음)
+// 의도적으로 이 Set 밖 — "미리보기 없음" 문구가 정확한 그 드문 경우(AC3의 "진짜 없는 것"에
+// sprint도 포함). 새 합성 가능 타입을 추가하면 이 Set도 같이 넓히거나(몸통 있음), 의도적으로
+// 빼면서 그 이유를 여기 한 줄 남길 것 — «만들 수 있는데 못 여는» 사각을 다시 만들지 않도록.
+const RICH_PREVIEW_TYPES = new Set(['story', 'epic', 'doc', 'artifact', 'hypothesis']);
 
 const MdBadge = ({ label }: { label: string }) => (
   <span className="rounded border px-1.5 py-0.5 text-[11px] font-medium border-border bg-muted text-muted-foreground">
@@ -161,7 +176,7 @@ const MdBody = ({ content }: { content: string }) => (
   </ReactMarkdown>
 );
 
-function EntityDetail({ entityType, detail }: { entityType: string; detail: Record<string, unknown> }) {
+function EntityDetail({ entityType, entityId, detail }: { entityType: string; entityId: string; detail: Record<string, unknown> }) {
   if (entityType === 'story') {
     const d = detail as { status?: string; priority?: string; story_points?: number; description?: string; acceptance_criteria?: string };
     const statusLabel = d.status ? translateEntityStatus('story', d.status) : null;
@@ -203,6 +218,43 @@ function EntityDetail({ entityType, detail }: { entityType: string; detail: Reco
   if (entityType === 'doc') {
     const d = detail as { content?: string };
     return d.content ? <MdBody content={d.content} /> : null;
+  }
+
+  // story #2614 — 부모(story/epic/doc)가 없는 독립 artifact(챗에 바로 올린 mockup 등)는 풋터에
+  // "갈 곳"이 없다(getEntityHref 주석 그대로, 변경 없음) — 그래도 몸통에서 실물을 보여주면
+  // 그 자체로 소비처가 선다. 갤러리가 이미 쓰는 ArtifactThumbnail을 그대로 재사용(PNG export
+  // 우선·라이브 렌더·placeholder 폴백 — 이 컴포넌트 자신의 no-fiction 규율 그대로 상속, 여기서
+  // 새로 흉내내지 않는다).
+  if (entityType === 'artifact') {
+    const d = detail as { latest_version_number?: number; anchor_version?: number | null };
+    if (d.latest_version_number == null) return null;
+    return (
+      <ArtifactThumbnail
+        artifactId={entityId}
+        latestVersionNumber={d.latest_version_number}
+        anchorVersion={d.anchor_version ?? null}
+        className="aspect-video w-full"
+      />
+    );
+  }
+
+  // story #2614 — hypothesis는 풋터(담긴 곳)가 여전히 없다(다대다·getEntityHref 무변경). 하지만
+  // statement(§2.2.4 유일한 수동 텍스트 입력)는 story description과 동형으로 몸통에 보일 수
+  // 있다 — "풋터에 갈 곳이 없다"와 "몸통에 보여줄 게 없다"는 별개였다는 게 이 스토리의 발견.
+  if (entityType === 'hypothesis') {
+    const d = detail as { status?: string; statement?: string };
+    const statusLabel = d.status ? translateEntityStatus('hypothesis', d.status) : null;
+    if (!statusLabel && !d.statement) return null;
+    return (
+      <div className="space-y-3">
+        {statusLabel && (
+          <div className="flex flex-wrap gap-1.5">
+            <MdBadge label={statusLabel} />
+          </div>
+        )}
+        {d.statement && <MdBody content={d.statement} />}
+      </div>
+    );
   }
 
   return null;
@@ -388,8 +440,8 @@ function EntityPreviewModal({
             </div>
           ) : notFound ? (
             <p className="text-xs text-muted-foreground py-4">대상을 찾을 수 없습니다.</p>
-          ) : detail && (entityType === 'story' || entityType === 'epic' || entityType === 'doc') ? (
-            <EntityDetail entityType={entityType} detail={detail} />
+          ) : detail && RICH_PREVIEW_TYPES.has(entityType) ? (
+            <EntityDetail entityType={entityType} entityId={entityId} detail={detail} />
           ) : (
             <p className="text-xs text-muted-foreground py-4">이 엔티티는 별도 미리보기가 없습니다.</p>
           )}
