@@ -274,28 +274,29 @@ async def deliver_conversation_message_webhook(
     async with async_session_factory() as db:
         try:
             if targets is None:
-                # targets 미전달(구 호출자/방어) 경로 — 위 SSOT 호출부(conversations.py)처럼
-                # 미리 계산된 snapshot이 없으므로 여기서 직접 조회(fail-open, #2814/#2817과 동일 결).
-                blocker_member_ids: set[uuid.UUID] = set()
-                if sender_id:
-                    try:
-                        from app.models.user_block import UserBlock
-                        blocker_member_ids = set((await db.execute(
-                            select(UserBlock.blocker_member_id).where(UserBlock.blocked_member_id == sender_id)
-                        )).scalars().all())
-                    except Exception:
-                        logger.warning(
-                            "user_blocker_ids lookup failed conversation_id=%s — fail-open(no exclusion)",
-                            conversation_id, exc_info=True,
-                        )
+                # targets 미전달(구 호출자/방어) 경로 — a2a.py:716이 태우는 fallback(카디르 QA
+                # #2620, 실크래시 100% 재현). 위 SSOT 호출부(conversations.py)처럼 미리 계산된
+                # decisions snapshot이 없으므로, 여기서 **같은 판정 원천**(route_message)을
+                # 새로 1회 호출해 authorized_member_ids를 유도한다 — 이 함수/이 경로가 독자
+                # mentioned_ids·blocker 판정을 재도입하면 SSE·discord·webhook 3계통 병존으로
+                # 역행(#2620이 통합한 바로 그 문제). route_message가 mute/mentions-gate/
+                # chain-depth·UserBlock 제외를 이미 내부에서 반영하므로 여기선 그 결과만 소비.
+                authorized_member_ids: set[uuid.UUID] = set()
+                try:
+                    from app.services.channel_router import route_message as _route
+                    decisions = await _route(message_id, db)
+                    authorized_member_ids = {d.member_id for d in decisions if d.member_id != sender_id}
+                except Exception:
+                    logger.warning(
+                        "route_message fallback 재조회 실패 message_id=%s — fail-open(대상 0)",
+                        message_id, exc_info=True,
+                    )
                 targets = await resolve_conversation_webhook_targets(
                     db,
-                    conversation_id=conversation_id,
                     org_id=org_id,
                     project_id=project_id,
                     sender_id=sender_id,
-                    mentioned_ids=mentioned_ids,
-                    blocker_member_ids=blocker_member_ids,
+                    authorized_member_ids=authorized_member_ids,
                 )
 
             if not targets:
