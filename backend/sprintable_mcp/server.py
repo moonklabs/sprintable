@@ -28,7 +28,9 @@ from .schemas import SprintableInput
 # E-MCP S4: 독립 패키지 디탱글 — backend(app/*) import 제거. 규칙은 vendored .toolset 사용
 # (백엔드 app/services/mcp_toolset.py와 동일 규칙 유지·SSOT는 백엔드 매니페스트).
 from .toolset import is_tool_allowed
-from .tools.a2a import LinkGateToTaskInput, link_gate_to_task
+from .tools.a2a import (
+    LinkGateToTaskInput, ListAgentCardsInput, link_gate_to_task, list_agent_cards,
+)
 from .tools.evidence import AddEvidenceInput, add_evidence
 from .tools.judgments import AddJudgmentInput, ListJudgmentsInput, add_judgment, list_judgments
 from .tools.session_context import SessionContextInput, get_session_context
@@ -625,6 +627,13 @@ _TOOL_DEFS: list[tuple] = [
      "이 gate가 이 A2A task를 블록한다고 명시 선언 — 외부 GetTask가 INPUT_REQUIRED로 승격되고,"
      " 사람이 gate를 승인/거부하면 task가 자동으로 WORKING/REJECTED 복귀한다.",
      LinkGateToTaskInput, link_gate_to_task),
+    # A2A 발견 (1) — E-AGENT-ONBOARD·A2A발견 P0-1(story #2597)
+    ("sprintable_list_agent_cards",
+     "org 내 활성 agent 전원의 A2A AgentCard 열거 — «누구에게 청할지» 발견. optional"
+     " skill(예: \"qa\")로 필터해 적임자 후보만 조회. 지시받지 않은 담당자를 스스로 찾아"
+     " 위임할 때(예: PR 완료 후 QA 담당 조회) 이 도구로 먼저 발견한 뒤"
+     " sprintable_send_chat_message로 청한다.",
+     ListAgentCardsInput, list_agent_cards),
     # Evidence 자기증명 (1) — E-VERIFY V0-S1
     ("sprintable_add_evidence",
      "done을 스스로 증명하는 자기 서명 첨부(PR·배포·지표·발행물 링크 등) — story/task에 evidence"

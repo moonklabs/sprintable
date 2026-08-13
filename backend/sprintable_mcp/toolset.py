@@ -89,6 +89,12 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # app/services/mcp_toolset.py 참고 — role_template 특정 대신 범용 업무로 core 승격).
     "sprintable_get_standup", "sprintable_save_standup", "sprintable_list_standup_entries",
     "sprintable_standup_history", "sprintable_standup_missing",
+    # story #2597(E-AGENT-ONBOARD·A2A발견 P0-1): list_agent_cards — sprintable_list_team_members와
+    # 동형(read-only·org-scope 로스터 조회) core 취급. 특정 역할의 default_tool_groups 유무와
+    # 무관하게 "누구에게 청할지" 발견은 어떤 role이든 필요한 cross-cutting 협업 유틸이라 여기
+    # 안 두면 스코프 키(대부분의 role_template)에서 403으로 안 보인다. 백엔드 SSOT와 동기화
+    # (app/services/mcp_toolset.py).
+    "sprintable_list_agent_cards",
 })
 
 _LEGACY_SCOPES: frozenset[str] = frozenset({"read", "write"})

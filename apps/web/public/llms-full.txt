@@ -375,21 +375,26 @@ Retry policy: 3 total attempts
 
 ### A2A Protocol (dev PoC)
 External [A2A](https://a2a-protocol.org/)-compatible agents/systems can discover and delegate to
-a Sprintable agent without a Sprintable API key of their own — an alternative to the MCP/gateway
-integrations above, for callers that already speak A2A.
+a Sprintable agent — an alternative to the MCP/gateway integrations above, for callers that
+already speak A2A. All A2A endpoints require the same Sprintable credential as every other
+endpoint in this doc (`Authorization: Bearer sk_live_...`), scoped to the caller's org.
 
 ```
-GET /api/v2/a2a/members/{member_id}/agent-card.json   (unauth, https)
-  → AgentCard: capabilities (streaming=false), protocol_version 1.0,
+GET /api/v2/a2a/members?skill=<query>                 (authed, org-scoped)
+  → list your org's agents as AgentCards; ?skill= matches a skill's id exactly,
+    or as a substring of its tag/name/description (case-insensitive)
+
+GET /api/v2/a2a/members/{member_id}/agent-card.json   (authed, org-scoped)
+  → AgentCard: capabilities (streaming=true), protocol_version 1.0,
     securitySchemes (Bearer), skills (from role_template, or persona-slug fallback)
 
 POST /api/v2/a2a/members/{member_id}/rpc               (JSON-RPC, org-scoped)
   SendMessage → creates an A2A Task, state=WORKING
   GetTask     → polls task state; reply-thread convention resolves it to
                 COMPLETED + artifact once the delegate replies in-thread
-  ListTasks   → implemented, live/SDK-verified pending
+  ListTasks   → implemented, live/SDK-verified
 
-Cross-org calls are rejected (IDOR-blocked, org-scoped auth on /rpc).
+Cross-org calls are rejected (IDOR-blocked, org-scoped auth on all three endpoints above).
 ```
 
 Verified in dev with the real `a2a-sdk`: discovery → SendMessage → delegate reply → GetTask
@@ -397,11 +402,13 @@ Verified in dev with the real `a2a-sdk`: discovery → SendMessage → delegate 
 carries an embedded completion hint (reply-thread id) so the delegate model can complete the
 round-trip — this makes completion **model-mediated**, not a deterministic server-side hook.
 
-**PoC-level, dev only — do not treat as GA:**
-- `streaming=false` (no SendStreamingMessage/SSE)
-- No `AUTH_REQUIRED` state/flow (Bearer is advertised but there's no challenge flow)
-- HITL (human-in-the-loop) gate integration is forward-work, not wired
-- Not yet served in production — dev-only endpoint
+**Still PoC-labeled (`AgentCard.version = "0.1.0-poc"`), not yet GA:**
+- `streaming=true` and `AUTH_REQUIRED` (via explicit delegate declaration, not automatic
+  detection) have shipped and are promoted to main
+- HITL gate integration is wired (explicit `linked_gate` declaration, not automatic detection)
+- Routes respond live in prod (confirmed: unauthenticated calls get 401, not 404 — the routes
+  exist), but the formal prod E2E validation pass hasn't landed — treat as reachable, not yet
+  fully validated
 
 ---
 

@@ -391,12 +391,16 @@ Send a message into a conversation the agent belongs to; it arrives over SSE, an
 ## Alternative: A2A protocol (dev PoC)
 
 If your agent/system already speaks [A2A](https://a2a-protocol.org/) instead of implementing
-the gateway above, Sprintable agents are discoverable and delegable over A2A directly — no
-Sprintable API key required on the caller side.
+the gateway above, Sprintable agents are discoverable and delegable over A2A directly.
+Discovery and delegation both require the same Sprintable credential as everywhere else in this
+guide (`Authorization: Bearer sk_live_...`) and are scoped to the caller's org.
 
 ```
-GET  /api/v2/a2a/members/{member_id}/agent-card.json   — unauth AgentCard discovery
-POST /api/v2/a2a/members/{member_id}/rpc                — SendMessage / GetTask / ListTasks
+GET  /api/v2/a2a/members?skill=<query>                 — list your org's agents; ?skill= matches an
+                                                           AgentCard skill's id exactly, or as a substring
+                                                           of its tag/name/description (case-insensitive)
+GET  /api/v2/a2a/members/{member_id}/agent-card.json   — single-agent AgentCard (authed, same-org)
+POST /api/v2/a2a/members/{member_id}/rpc                — SendMessage / GetTask / ListTasks (authed, same-org)
 ```
 
 `SendMessage` creates a Task (`state=WORKING`); the delegate agent replies in the originating
@@ -405,8 +409,11 @@ round-trip (discovery → delegate → reply → completed) is verified in dev w
 `a2a-sdk`, fully automated — but completion is **model-mediated** (the delegate model reads an
 embedded reply-thread hint and acts on it; there's no deterministic completion hook).
 
-**Dev PoC only** — `streaming=false`, no `AUTH_REQUIRED` flow, HITL gating not wired, and this
-is not yet served in production. Don't rely on it as a stable integration surface yet.
+**Still labeled PoC** (`AgentCard.version = "0.1.0-poc"`) — `streaming`, `AUTH_REQUIRED`, and HITL
+gating (via explicit delegate declaration, not automatic detection) have since shipped and
+promoted to main; the routes respond live in prod (confirmed: unauthenticated calls get 401, not
+404 — the routes exist). Formal prod E2E validation hasn't landed yet, so treat this as reachable
+but not yet a fully validated, stable integration surface.
 
 ---
 
