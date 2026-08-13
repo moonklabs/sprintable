@@ -2046,30 +2046,6 @@ async def send_message(
 
     sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
 
-    # story #2630: 서킷브레이커 발신 차단 — human-less 대화에서 폭주 에피소드가 열려 있으면
-    # agent 발신을 여기서 막는다(참가자 auto-join 등 어떤 write도 하기 전, 최대한 이르게 —
-    # 막힌 시도가 부수 상태를 안 남기게). human 발신은 이 체크 대상이 아니다(페드루 필수수정
-    # 2026-08-13): 서킷이 연 방에 사람이 들어와 개입하려는 발화까지 막으면 안 된다 — 사람의
-    # 개입이 사태 수습의 정공 경로고, human 늦참여 자동해제를 v1 밖으로 미룬 것과도 정합
-    # (사람이 말은 할 수 있으니 해제 버튼 누를 판단도 대화 안에서 가능). breaker 행은
-    # human-less 대화에서만 열리므로(open 호출부 조건) 이 조회 결과가 있다는 것 자체가
-    # "이 대화는 human-less"를 함의 — 별도 human 유무 쿼리 불요.
-    if sender.type == "agent":
-        from app.services.chain_escalation import get_open_circuit_breaker_id
-
-        open_breaker_id = await get_open_circuit_breaker_id(db, conversation_id)
-        if open_breaker_id is not None:
-            raise HTTPException(
-                status_code=423,
-                detail={
-                    "error": "circuit_breaker_open",
-                    "message": "폭주 감지로 이 대화의 agent 발신이 일시 차단되었습니다 — "
-                                "org owner/admin의 해제 또는 자동 해소를 기다려주세요.",
-                    "conversation_id": str(conversation_id),
-                    "circuit_breaker_id": str(open_breaker_id),
-                },
-            )
-
     # 참여자 검증
     participant = (await db.execute(
         select(ConversationParticipant.id).where(
@@ -2086,6 +2062,31 @@ async def send_message(
             await db.flush()
         else:
             raise HTTPException(status_code=403, detail="Not a participant")
+
+    # story #2630: 서킷브레이커 발신 차단 — human-less 대화에서 폭주 에피소드가 열려 있으면
+    # agent 발신을 여기서 막는다. 참가자 검증 다음(비참여자는 그 이유로 이미 403 — 참여자
+    # 여부와 무관한 사실인 서킷 상태를 그보다 먼저 노출할 이유가 없다), 그 뒤의 실 side-effect
+    # (working clear 등) 이전 — 막힌 시도가 부수 상태를 안 남기게. human 발신은 이 체크
+    # 대상이 아니다(페드루 필수수정 2026-08-13): 서킷이 연 방에 사람이 들어와 개입하려는
+    # 발화까지 막으면 안 된다 — 사람의 개입이 사태 수습의 정공 경로고, human 늦참여
+    # 자동해제를 v1 밖으로 미룬 것과도 정합(사람이 말은 할 수 있으니 해제 버튼 누를 판단도
+    # 대화 안에서 가능). breaker 행은 human-less 대화에서만 열리므로(open 호출부 조건) 이
+    # 조회 결과가 있다는 것 자체가 "이 대화는 human-less"를 함의 — 별도 human 유무 쿼리 불요.
+    if sender.type == "agent":
+        from app.services.chain_escalation import get_open_circuit_breaker_id
+
+        open_breaker_id = await get_open_circuit_breaker_id(db, conversation_id)
+        if open_breaker_id is not None:
+            raise HTTPException(
+                status_code=423,
+                detail={
+                    "error": "circuit_breaker_open",
+                    "message": "폭주 감지로 이 대화의 agent 발신이 일시 차단되었습니다 — "
+                                "org owner/admin의 해제 또는 자동 해소를 기다려주세요.",
+                    "conversation_id": str(conversation_id),
+                    "circuit_breaker_id": str(open_breaker_id),
+                },
+            )
 
     # 1aeecdde P2: sender 가 이 conversation 에 메시지를 보냄 = 답장 생성 종료 → working clear.
     # fork 분기(아래) 전 **원본 conversation_id** 기준 — working 은 그 conversation 에 set 됐다.
