@@ -47,6 +47,12 @@ class InvalidBlockTemplateError(ValueError):
     위반 — 등록 시점 구조 게이트(치환 렌더링은 FE 몫, 여기는 구조만)."""
 
 
+class InvalidActionAuthError(ValueError):
+    """story #2637 §범위3(미르코 발견 후속, 2026-08-14): action_auth 어휘(human_only·role)
+    위반 — block_template.actions[].auth와 EventDefinition.action_auth 둘 다 이 함수 하나로
+    검증(shape 정합·중복 규칙 0)."""
+
+
 class InvalidEventRoutingError(ValueError):
     """routing 선언이 두 부류 계약(model.py docstring)을 위반 — 등록 시점에 막아 #2633
     해석기가 절대 못 푸는 정의가 저장되는 것을 방지."""
@@ -138,6 +144,25 @@ _ACTION_KINDS = frozenset({"publish"})
 _ACTION_AUTH_KEYS = frozenset({"human_only", "role"})
 
 
+def validate_action_auth(auth: dict) -> None:
+    """story #2637 §범위3 — action_auth v1 어휘(human_only·role) 화이트리스트. 두 소비처
+    양쪽에서 쓴다: ①block_template.actions[].auth(등록 시점 구조 게이트, validate_block_
+    template이 호출) ②EventDefinition.action_auth(발행 시점 실 집행 — publish_registry_
+    event가 이 shape을 그대로 신뢰하고 human_only/role을 검사, 미르코 발견 후속: "정의에
+    action_auth 있으면 서버가 거부"가 실제로 성립하려면 이 shape이 등록 시점에 이미 검증돼
+    있어야 한다)."""
+    if not isinstance(auth, dict) or not set(auth.keys()) <= _ACTION_AUTH_KEYS:
+        raise InvalidActionAuthError(
+            f"{sorted(_ACTION_AUTH_KEYS)} 키만 허용합니다(action_auth v1 어휘 — human_only·role)."
+        )
+    if "human_only" in auth and not isinstance(auth["human_only"], bool):
+        raise InvalidActionAuthError("human_only은 bool이어야 합니다.")
+    if "role" in auth and not (
+        isinstance(auth["role"], list) and all(isinstance(r, str) for r in auth["role"])
+    ):
+        raise InvalidActionAuthError("role은 문자열 목록이어야 합니다.")
+
+
 def validate_block_template(template: dict) -> None:
     """story #2637 §범위1: block_template v1 규격 — 제한 어휘 4종(header/text/fields/actions)
     밖의 type은 등록 거부. 렌더 시 {{payload.field}} 치환 자체는 렌더러(FE) 몫이라 여기서
@@ -191,21 +216,10 @@ def validate_block_template(template: dict) -> None:
                     )
                 auth = a.get("auth")
                 if auth is not None:
-                    if not isinstance(auth, dict) or not set(auth.keys()) <= _ACTION_AUTH_KEYS:
-                        raise InvalidBlockTemplateError(
-                            f"blocks[{i}].actions[{j}].auth는 {sorted(_ACTION_AUTH_KEYS)} 키만 "
-                            "허용합니다(action_auth v1 어휘 — human_only·role)."
-                        )
-                    if "human_only" in auth and not isinstance(auth["human_only"], bool):
-                        raise InvalidBlockTemplateError(
-                            f"blocks[{i}].actions[{j}].auth.human_only은 bool이어야 합니다."
-                        )
-                    if "role" in auth and not (
-                        isinstance(auth["role"], list) and all(isinstance(r, str) for r in auth["role"])
-                    ):
-                        raise InvalidBlockTemplateError(
-                            f"blocks[{i}].actions[{j}].auth.role은 문자열 목록이어야 합니다."
-                        )
+                    try:
+                        validate_action_auth(auth)
+                    except InvalidActionAuthError as e:
+                        raise InvalidBlockTemplateError(f"blocks[{i}].actions[{j}].auth: {e}") from e
 
 
 def validate_event_payload_schema_shape(payload_schema: dict) -> None:
