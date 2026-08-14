@@ -23,6 +23,15 @@ interface DeliveryContractModalProps {
   onClose: () => void;
   /** free_response가 바뀌면 부모(conversation meta)도 갱신 — 헤더 등 다른 표면과 어긋나지 않게. */
   onFreeResponseChange: (next: boolean) => void;
+  /** story #2623 pre-work(BE #3037 action_auth와 같은 org role 축 — admin/owner만) — 지정되면
+   * "나(호출자)"가 아니라 이 멤버의 계약을 대신 조회/편집한다(GET/PUT `?member_id=`). BE는
+   * story 933248fa(webhook admin override)와 동일 서버측 재해소+403 fail-closed 패턴을
+   * 적용할 예정(그라운딩 완료·PO 08-14 승인, 착지 대기) — 그때까지 이 prop은 준비만 해 둔다.
+   * 무권한 요청은 BE가 403으로 거부한다(FE는 재구성하지 않고 에러 그대로 보여준다, 기존
+   * handleSaveLevel catch가 이미 그 계약). undefined면 지금처럼 자기 자신(회귀 없음). */
+  targetMemberId?: string;
+  /** 대리 편집 중임을 헤더에 드러내는 라벨(예: 에이전트 이름) — targetMemberId와 짝. */
+  targetMemberLabel?: string;
 }
 
 // story #2621 v1 — 채널은 이 대화 UI 축 하나(sse, 실시간 인앱 알림)만 편집한다. discord/telegram/
@@ -36,15 +45,19 @@ const LEVELS: DeliveryLevel[] = ['all', 'mentions', 'mute'];
  * `GET/PUT /api/notification-preferences`(scope_type=conversation·channel=sse)와
  * `PATCH /api/conversations/{id}`(free_response)를 그대로 재사용한다.
  *
- * 편집 대상은 "나(호출자)의 이 대화 수신 레벨"뿐이다 — notification_preferences는
- * 애초에 caller 자신의 설정만 다루는 API(BE `_get_member`가 인증 주체로 고정)라 다른
- * 멤버의 레벨을 여기서 바꿀 수 없다(그건 멤버 관점 요약 뷰의 몫, 이 스토리의 다른 절반).
+ * story #2623 pre-work — `targetMemberId`가 있으면 "나(호출자)" 대신 그 멤버의 이 대화
+ * 수신 레벨을 대신 조회/편집한다(GET/PUT에 `member_id` 실어 보냄). BE는 아직 self-only
+ * 하드고정이라(그라운딩 확認·933248fa 동형 처방 승인·착지 대기) 이 경로는 BE 착지
+ * 前까지는 무권한 403(또는 무시)으로 떨어질 수 있다 — prop과 배선만 미리 갖춰 둔다.
+ * free_response 토글은 대리 편집 스코프 밖(이 스토리 AC가 대화 수신 레벨만 다룸) —
+ * targetMemberId가 있으면 그 축 자체를 숨긴다(편집 가능해 보이는데 실은 conversation
+ * 전역 설정이라 다른 참가자에게도 영향을 주는 축을 대리 편집 UI에 얹지 않는다).
  *
  * free_response는 group에서만 의미 있다(DM은 항상 default=all — channel_router.py
  * docstring) — dm이면 그 축 자체를 안 보여준다.
  */
 export function DeliveryContractModal({
-  conversationId, conversationType, freeResponse, onClose, onFreeResponseChange,
+  conversationId, conversationType, freeResponse, onClose, onFreeResponseChange, targetMemberId, targetMemberLabel,
 }: DeliveryContractModalProps) {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
@@ -57,7 +70,10 @@ export function DeliveryContractModal({
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/notification-preferences')
+    const url = targetMemberId
+      ? `/api/notification-preferences?member_id=${encodeURIComponent(targetMemberId)}`
+      : '/api/notification-preferences';
+    fetch(url)
       .then((r) => (r.ok ? r.json() : null))
       .then((json: { data?: { data?: PreferenceItem[] } | PreferenceItem[] } | null) => {
         if (cancelled || !json) return;
@@ -70,7 +86,7 @@ export function DeliveryContractModal({
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [conversationId]);
+  }, [conversationId, targetMemberId]);
 
   const handleSaveLevel = async (next: DeliveryLevel) => {
     const prev = level;
@@ -83,6 +99,7 @@ export function DeliveryContractModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           preferences: [{ scope_type: 'conversation', scope_id: conversationId, channel: EDITED_CHANNEL, level: next }],
+          ...(targetMemberId ? { member_id: targetMemberId } : {}),
         }),
       });
       if (!res.ok) throw new Error('save failed');
@@ -117,7 +134,16 @@ export function DeliveryContractModal({
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="max-w-md overflow-hidden rounded-xl p-0" showCloseButton={false}>
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <DialogTitle className="text-sm font-semibold text-foreground">{t('deliveryContractTitle')}</DialogTitle>
+          <div className="min-w-0">
+            <DialogTitle className="text-sm font-semibold text-foreground">{t('deliveryContractTitle')}</DialogTitle>
+            {/* story #2623 pre-work — 대리 편집 중임을 항상 눈에 띄게(누구 계약을 만지고 있는지
+                착각하면 사고 — «본인 계약인 줄 알고 바꿨는데 사실 남의 것»류 방지). */}
+            {targetMemberId && (
+              <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                {t('deliveryContractEditingOnBehalfOf', { name: targetMemberLabel ?? targetMemberId })}
+              </p>
+            )}
+          </div>
           <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground">
             <X className="h-4 w-4" />
           </button>
@@ -157,7 +183,7 @@ export function DeliveryContractModal({
                 </div>
               </div>
 
-              {conversationType === 'group' && (
+              {conversationType === 'group' && !targetMemberId && (
                 <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-foreground">{t('deliveryContractFreeResponseLabel')}</p>

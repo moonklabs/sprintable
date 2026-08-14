@@ -150,3 +150,88 @@ describe('DeliveryContractModal — story #2621 v1', () => {
     expect(onFreeResponseChange).toHaveBeenCalledWith(true);
   });
 });
+
+describe('DeliveryContractModal — story #2623 pre-work(targetMemberId 대리 편집 배선)', () => {
+  const AGENT_ID = 'agent-9';
+
+  it('targetMemberId가 있으면 GET에 ?member_id=가 실린다', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ data: { data: [] }, error: null, meta: null }) }));
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => {
+      root.render(wrap(
+        <DeliveryContractModal
+          conversationId={CONV_ID} conversationType="group" freeResponse={false}
+          onClose={() => {}} onFreeResponseChange={() => {}} targetMemberId={AGENT_ID}
+        />,
+      ));
+    });
+    await act(async () => {});
+    expect(fetchMock).toHaveBeenCalledWith(`/api/notification-preferences?member_id=${AGENT_ID}`);
+  });
+
+  it('targetMemberId가 없으면 GET이 기존과 동일한(쿼리 없는) 경로 그대로다(회귀 없음)', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ data: { data: [] }, error: null, meta: null }) }));
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => {
+      root.render(wrap(
+        <DeliveryContractModal
+          conversationId={CONV_ID} conversationType="group" freeResponse={false}
+          onClose={() => {}} onFreeResponseChange={() => {}}
+        />,
+      ));
+    });
+    await act(async () => {});
+    expect(fetchMock).toHaveBeenCalledWith('/api/notification-preferences');
+  });
+
+  it('targetMemberId가 있으면 PUT body에 member_id가 실린다(scope_type/scope_id/channel/level은 그대로)', async () => {
+    const fetchMock = vi.fn(async (url: string, opts?: { method?: string }) => ({ ok: true, json: async () => ({ data: { data: [] }, error: null, meta: null }) }));
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => {
+      root.render(wrap(
+        <DeliveryContractModal
+          conversationId={CONV_ID} conversationType="group" freeResponse={false}
+          onClose={() => {}} onFreeResponseChange={() => {}} targetMemberId={AGENT_ID}
+        />,
+      ));
+    });
+    await act(async () => {});
+    const muteBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '끄기')!;
+    await act(async () => { muteBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const putCall = fetchMock.mock.calls.find((c) => (c[1] as { method?: string } | undefined)?.method === 'PUT')!;
+    expect(JSON.parse((putCall[1] as { body: string }).body)).toEqual({
+      preferences: [{ scope_type: 'conversation', scope_id: CONV_ID, channel: 'sse', level: 'mute' }],
+      member_id: AGENT_ID,
+    });
+  });
+
+  it('targetMemberId가 있으면 헤더에 "대신 편집하는 중" 안내가 뜬다(본인 계약 착각 방지)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { data: [] }, error: null, meta: null }) })));
+    await act(async () => {
+      root.render(wrap(
+        <DeliveryContractModal
+          conversationId={CONV_ID} conversationType="group" freeResponse={false}
+          onClose={() => {}} onFreeResponseChange={() => {}}
+          targetMemberId={AGENT_ID} targetMemberLabel="레이서 에이전트"
+        />,
+      ));
+    });
+    await act(async () => {});
+    expect(document.body.textContent).toContain('레이서 에이전트의 계약을 대신 편집하는 중');
+  });
+
+  it('targetMemberId가 있으면 group 대화여도 free_response 토글이 안 보인다(대리 편집 스코프 밖 — 대화 전역 축)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { data: [] }, error: null, meta: null }) })));
+    await act(async () => {
+      root.render(wrap(
+        <DeliveryContractModal
+          conversationId={CONV_ID} conversationType="group" freeResponse={false}
+          onClose={() => {}} onFreeResponseChange={() => {}} targetMemberId={AGENT_ID}
+        />,
+      ));
+    });
+    await act(async () => {});
+    expect(document.body.textContent).not.toContain('멘션 없이도 자유롭게 응답');
+  });
+});
