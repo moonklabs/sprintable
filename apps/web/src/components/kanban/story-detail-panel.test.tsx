@@ -12,6 +12,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { StoryDetailPanel } from './story-detail-panel';
 import type { KanbanStory } from './types';
 import koMessages from '../../../messages/ko.json';
+import { bumpOrgSyncVersion } from '@/lib/project-context-client';
 
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
@@ -123,5 +124,48 @@ describe('StoryDetailPanel — #2528 본문 스크롤바 가시성', () => {
     });
     const body = Array.from(container.querySelectorAll('div')).find((d) => d.className.includes('overflow-y-auto'));
     expect(body?.className).toContain('scrollbar-visible');
+  });
+});
+
+// story #2593(#2545 후속) — kanban `?story=` 딥링크로 이 패널이 콜드 하드네비 직후 열리면
+// comments/activities/labels/references/dependencies/gates 6개 auto-mount fetch effect가
+// switch-org 완료 前에 구 org_id로 먼저 발사될 수 있다. #2946과 동형 stale-guard(orgSyncVersion
+// deps + cancelled 플래그)를 얹었는지를, "org-switch 신호 → 재요청 → 늦게 도착한 구 응답이
+// 새 응답을 덮지 않는다"는 실제 레이스로 검증한다(대표로 comments effect 사용).
+describe('StoryDetailPanel — org-switch 잔여 레이스 stale-guard (story #2593, #2545 후속)', () => {
+  it('org-switch 재요청 이후 늦게 도착한 구 org 응답이 새 org 응답을 덮지 않는다', async () => {
+    let resolveFirst: ((v: unknown) => void) | undefined;
+    let resolveSecond: ((v: unknown) => void) | undefined;
+    let commentsCallCount = 0;
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (typeof url === 'string' && url.includes('/comments?limit=20')) {
+        commentsCallCount += 1;
+        if (commentsCallCount === 1) return new Promise((resolve) => { resolveFirst = resolve; });
+        return new Promise((resolve) => { resolveSecond = resolve; });
+      }
+      return Promise.resolve({ ok: false, json: async () => null });
+    }));
+
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} />));
+    });
+    expect(commentsCallCount).toBe(1); // 최초 마운트 — 구 org 요청(1st) 발사
+
+    // DashboardShell의 switch-org 성공 신호 — orgSyncVersion 구독 effect가 재요청되어야 한다.
+    await act(async () => { bumpOrgSyncVersion(); });
+    expect(commentsCallCount).toBe(2); // 신 org 요청(2nd) 발사 확인 — 재요청 자체가 안 되면 여기서 실패(구코드 회귀)
+
+    // 신 org 응답(2nd)이 먼저 도착
+    await act(async () => {
+      resolveSecond?.({ ok: true, json: async () => ({ data: [{ id: 'fresh', content: 'FRESH_ORG_COMMENT', created_by: 'u', created_at: '2026-01-01' }] }) });
+    });
+    const trigger = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.startsWith('Comments'));
+    expect(trigger()?.textContent).toBe('Comments (1)');
+
+    // 구 org 응답(1st)이 뒤늦게 도착 — cancelled라 무시돼야 fresh 상태가 안 덮인다.
+    await act(async () => {
+      resolveFirst?.({ ok: true, json: async () => ({ data: [{ id: 'stale', content: 'STALE_ORG_COMMENT', created_by: 'u', created_at: '2026-01-01' }] }) });
+    });
+    expect(trigger()?.textContent).toBe('Comments (1)'); // 여전히 1 — stale 응답이 2번째로 덮어쓰지 않았다
   });
 });
