@@ -29,11 +29,19 @@ _ASYNC_URL = _RAW_URL.replace("postgresql+psycopg2://", "postgresql+asyncpg://")
     "postgresql://", "postgresql+asyncpg://"
 )
 
-pytestmark = pytest.mark.skip(
-    reason="post-cutover baseline과 구조적 불일치(team_members=읽기전용 VIEW, dual-write "
-    "픽스처 무효) — story 8236bbc3 스코프 밖, 재작성/폐기 follow-up 추적. design-ci-realdb-"
-    "gap-8236bbc3 §1 참고."
-)
+# story #2643(2026-08-14): 이 파일이 ALTER TABLE(agent_api_keys/project_access) raw SQL을
+# 실행해 conftest.py의 확장된 정적 가드가 destructive_schema도 요구한다 — 위 skip이 무조건
+# skip(skipif 아님)이라 실제로 실행될 일은 없지만, 마커 자체는 "실행됐을 때 안전한 격리가
+# 필요하다"는 선언이라 skip 여부와 별개로 정확하게 유지한다(나중에 누가 skip만 걷고
+# destructive_schema는 놓치는 재발을 막는 이중 방어).
+pytestmark = [
+    pytest.mark.skip(
+        reason="post-cutover baseline과 구조적 불일치(team_members=읽기전용 VIEW, dual-write "
+        "픽스처 무효) — story 8236bbc3 스코프 밖, 재작성/폐기 follow-up 추적. design-ci-realdb-"
+        "gap-8236bbc3 §1 참고."
+    ),
+    pytest.mark.destructive_schema,
+]
 
 
 @pytest.fixture
