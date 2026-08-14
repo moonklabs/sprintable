@@ -796,6 +796,7 @@ async def create_story(
     # has_hypothesis_or_goal의 배치쿼리는 목록/재조회 경로 전용, 여기선 불필요).
     if story.epic_id is not None:
         story.has_hypothesis_or_goal = True
+    await _attach_org_project_slugs(session, org_id, [story])
     return StoryResponse.model_validate(story)
 
 

@@ -113,7 +113,10 @@ async def test_create_sprint_201():
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
 
-        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
+             patch("app.routers.sprints._attach_org_project_slugs", new_callable=AsyncMock):
+            # story #2642(카디르 QA, 2026-08-14): test_create_task_201과 동형 — 이 테스트는
+            # slug 부착이 관심사가 아니고, session이 그 신규 쿼리용으로 configure된 적 없다.
             mock_create.return_value = sprint
 
             async with client as c:
@@ -298,7 +301,9 @@ async def test_create_sprint_with_intent_fields_201():
         sprint.metric_definition = _VALID_METRIC
         sprint.measure_after = None
 
-        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
+             patch("app.routers.sprints._attach_org_project_slugs", new_callable=AsyncMock):
+            # story #2642(카디르 QA, 2026-08-14): test_create_sprint_201과 동형.
             mock_create.return_value = sprint
 
             async with client as c:
@@ -669,7 +674,9 @@ async def test_create_sprint_with_goal_capacity_201():
 
     client, session, app = await _client()
     try:
-        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
+             patch("app.routers.sprints._attach_org_project_slugs", new_callable=AsyncMock):
+            # story #2642(카디르 QA, 2026-08-14): test_create_sprint_201과 동형.
             mock_create.return_value = sprint
             async with client as c:
                 resp = await c.post("/api/v2/sprints", json={
@@ -727,7 +734,9 @@ async def test_sprint_goal_independent_from_success_hypothesis():
 
     client, session, app = await _client()
     try:
-        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
+             patch("app.routers.sprints._attach_org_project_slugs", new_callable=AsyncMock):
+            # story #2642(카디르 QA, 2026-08-14): test_create_sprint_201과 동형.
             mock_create.return_value = sprint
             async with client as c:
                 resp = await c.post("/api/v2/sprints", json={

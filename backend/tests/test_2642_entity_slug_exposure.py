@@ -158,6 +158,31 @@ async def test_story_list_and_get_carry_org_project_slug():
         await engine.dispose()
 
 
+async def test_story_create_carries_org_project_slug():
+    """create_story는 8개 응답 사이트 중 처음에 빠뜨렸던 자리(카디르 QA 계기로 자체발견,
+    2026-08-14) — list/get만이 아니라 create도 같은 계약을 지키는지 직접 고정."""
+    from fastapi import BackgroundTasks
+    from app.routers.stories import create_story
+    from app.schemas.story import StoryCreate
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s, project_slug="acme-web")
+            agent_id = await _seed_agent(s, org.id, project.id)
+
+        async with Session() as s:
+            created = await create_story(
+                body=StoryCreate(project_id=project.id, org_id=org.id, title="New Story"),
+                background_tasks=BackgroundTasks(),
+                session=s, auth=_auth(agent_id, org.id), org_id=org.id,
+            )
+            assert created.org_slug == org.slug
+            assert created.project_slug == "acme-web"
+    finally:
+        await engine.dispose()
+
+
 async def test_story_list_slug_resolution_is_not_n_plus_1():
     """PO 자체발견 원칙 — story 5건(project 2개에 분산)이어도 org_slug/project_slug 쿼리는
     각각 고정 1회(행 수 비례 아님)."""

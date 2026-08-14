@@ -97,7 +97,11 @@ async def test_create_task_201():
     client, session, app = await _client()
     try:
         task = _mock_task()
-        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
+             patch("app.routers.tasks._attach_org_project_slugs", new_callable=AsyncMock):
+            # story #2642(카디르 QA, 2026-08-14): 이 테스트는 «201 + 기본 필드」만 재는 것이지
+            # slug 부착 자체는 관심사가 아니다(session이 이 새 쿼리를 위해 configure된 적
+            # 없는 bare AsyncMock이라 실행하면 TypeError) — 헬퍼를 no-op로 patch.
             mock_create.return_value = task
 
             async with client as c:
