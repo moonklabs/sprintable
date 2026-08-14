@@ -87,6 +87,35 @@ def test_extract_bare_ref_multiple_and_none():
     assert [c[2] for c in cands] == [1, 2]
 
 
+# ── story #2651 — 「PR #N」오승격 회귀 pin (실피해 재현: 9e19d9b2·45e9e868) ─────────
+def test_extract_bare_ref_pr_prefixed_excluded():
+    """AC1 — 직전 토큰이 「PR」이면 승격 후보에서 제외. 실피해 그대로 재현."""
+    from app.services.story_ref_promoter import extract_bare_story_ref_candidates
+    assert extract_bare_story_ref_candidates("PR #19 리뷰 완료") == []
+    assert extract_bare_story_ref_candidates("PR [E-02-S-02…] 열었음(fix/x) — PR #21 열었음") == []
+
+
+def test_extract_bare_ref_pr_prefixed_case_insensitive_and_no_space():
+    from app.services.story_ref_promoter import extract_bare_story_ref_candidates
+    assert extract_bare_story_ref_candidates("pr #21 머지") == []
+    assert extract_bare_story_ref_candidates("PR#21 머지") == []
+
+
+def test_extract_bare_ref_bare_hash_still_promotes_no_regression():
+    """AC2 — 맨 `#N`(PR 접두 없음) 승격은 무회귀."""
+    from app.services.story_ref_promoter import extract_bare_story_ref_candidates
+    cands = extract_bare_story_ref_candidates("확인은 #24 참고")
+    assert [c[2] for c in cands] == [24]
+
+
+def test_extract_bare_ref_pr_lookalike_word_not_excluded():
+    """`SUPR #21`처럼 「PR」 앞에 다른 알파벳/숫자가 곧장 붙으면 PR 토큰이 아니다 — 과도한
+    제외 방지(단어 경계 lookbehind 회귀 pin)."""
+    from app.services.story_ref_promoter import extract_bare_story_ref_candidates
+    cands = extract_bare_story_ref_candidates("SUPR #21 확인")
+    assert [c[2] for c in cands] == [21]
+
+
 # ── ② 보호 구간 ────────────────────────────────────────────────────────────────
 async def test_promote_skips_fenced_code_block():
     from app.services.story_ref_promoter import promote_bare_story_refs
@@ -337,6 +366,47 @@ async def test_send_message_promotes_bare_ref_for_human_sender():
             )
             expected_token = build_reference_token("story", story.id, "보드 리팩터")
             assert result["data"]["content"] == f"확인은 {expected_token} 참고"
+    finally:
+        await engine.dispose()
+
+
+async def test_send_message_pr_prefixed_number_not_promoted_no_false_reference():
+    """story #2651 AC1/AC3 — 「PR #N」은 승격되지 않고, 그 결과 거짓 참조도 references
+    적재 레벨에서 0건이다(실피해 재현: 무관 스토리에 backlink가 실제로 꽂혔던 사고)."""
+    from fastapi import BackgroundTasks
+    from app.models.reference import Reference
+    from app.routers.conversations import SendMessageRequest, send_message
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            agent_id = await _seed_agent(s, org.id, project.id)
+            story = await _seed_story(s, org.id, project.id, number=24, title="무관 구스토리")
+            conv_id = await _seed_conversation(s, org.id, project.id, [agent_id], created_by=agent_id)
+
+        async with Session() as s:
+            result = await send_message(
+                conversation_id=conv_id,
+                body=SendMessageRequest(content="PR #24 리뷰 완료"),
+                background_tasks=BackgroundTasks(),
+                db=s, auth=_agent_auth(agent_id, org.id), org_id=org.id,
+            )
+            # AC1: 본문이 원문 그대로 저장(entity 토큰으로 안 바뀜)
+            assert result["data"]["content"] == "PR #24 리뷰 완료"
+
+        async with Session() as s:
+            rows = (await s.execute(
+                select(Reference).where(
+                    Reference.org_id == org.id,
+                    Reference.source_id == uuid.UUID(result["data"]["id"]),
+                    Reference.target_type == "story",
+                    Reference.target_id == story.id,
+                )
+            )).scalars().all()
+            # AC3: 무관 스토리를 향한 거짓 참조가 적재되지 않았다
+            assert rows == []
     finally:
         await engine.dispose()
 
