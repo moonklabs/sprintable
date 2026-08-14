@@ -9,6 +9,8 @@ import { GateSignatureApproval } from '@/components/cage/gate-signature-approval
 import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
 import { EntityPreviewModal, getEntityHref } from '@/components/chat/embed-card';
 import type { GateItem } from '@/components/kanban/types';
+import { parseBlockTemplate, renderBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
+import { renderStaticEventBlock } from '@/components/chat/event-block-card';
 
 export interface ApprovalTarget {
   work_item_type: string;
@@ -23,6 +25,11 @@ export interface ApprovalTarget {
 
 interface ApprovalRequestCardProps {
   target: ApprovalTarget;
+  /** story #2637 AC4(PO 08-14 확定) — chat-view.tsx가 대화당 1회 배치조회한 event_definitions
+   * 카탈로그를 그대로 물려받는다(eventDefinitionsByKey와 동일 패턴, 별도 fetch 안 만든다).
+   * resolved(회신) 분기가 이 카탈로그의 preset.gate.verdict 항목을 찾아 정적 표현부(text·
+   * fields)만 소비한다 — pending(요청·서명·버튼) 분기는 그대로다. */
+  eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
 }
 
 type CardState =
@@ -65,7 +72,7 @@ const RESOLVED_STATUS_LABEL_KEYS: Record<string, string> = {
  * (`GateSignatureApproval`)와 형제로 렌더돼 모달 열람/닫기가 그 로컬 state(근거확인·사유)를
  * 건드리지 않는다(AC③, 언마운트 없음).
  */
-export function ApprovalRequestCard({ target }: ApprovalRequestCardProps) {
+export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalRequestCardProps) {
   const t = useTranslations('chats');
   const [state, setState] = useState<CardState>({ kind: 'loading' });
   const [resolving, setResolving] = useState(false);
@@ -128,6 +135,7 @@ export function ApprovalRequestCard({ target }: ApprovalRequestCardProps) {
           transitionError={transitionError}
           onApprove={(reason) => void transition('approved', reason)}
           onReject={(reason) => void transition('rejected', reason)}
+          eventDefinitionsByKey={eventDefinitionsByKey}
         />
       )}
     </div>
@@ -135,19 +143,42 @@ export function ApprovalRequestCard({ target }: ApprovalRequestCardProps) {
 }
 
 function ApprovalRequestBody({
-  gate, resolving, transitionError, onApprove, onReject,
+  gate, resolving, transitionError, onApprove, onReject, eventDefinitionsByKey,
 }: {
   gate: GateItem;
   resolving: boolean;
   transitionError: string | null;
   onApprove: (reason?: string) => void;
   onReject: (reason?: string) => void;
+  eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
 }) {
   const t = useTranslations('chats');
   // gates/[id]/page.tsx와 같은 문구를 쓴다(동일 개념=동일 어휘, DS 원칙) — 그 키들은 'cage'
   // 네임스페이스에 있다('chats'엔 없음, 그라운딩 중 확認).
   const tCage = useTranslations('cage');
   const title = gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`;
+
+  // story #2637 AC4(PO 08-14 확定, Q2/Q3 그라운딩) — resolved(회신) 분기만 preset.gate.verdict
+  // block_template을 부분 소비(text·fields만 — header/actions는 안 씀, 「결재 요청」 라벨은
+  // 그대로 카드 정체성으로 남는다). fetchGate()의 실물 데이터를 payload 동형 객체로 "합성"한다
+  // (Pedro 표현) — 원본 gate.status/work_item_id를 날것 그대로 흘려보내지 않고, title 폴백은
+  // 현행 로직 그대로 재사용(work_item_title 자리), verdict도 현행 RESOLVED_STATUS_LABEL_KEYS
+  // 번역을 그대로 재사용(raw "approved"/"rejected" 영문 노출은 시각 퇴보 — Q2가 work_item_id
+  // 건에서 확定한 "시각 동일 우선" 원칙을 verdict 필드에도 동형 적용). 템플릿 없음/파싱 실패는
+  // 조용히 죽지 않고 아래 기존 하드코딩 렌더로 폴백(AC2 폴백 원칙과 동형 방어).
+  const resolvedStaticBlocks = gate.status !== 'pending' ? (() => {
+    const definition = eventDefinitionsByKey?.['preset.gate.verdict'];
+    const parsed = definition?.block_template ? parseBlockTemplate(definition.block_template) : null;
+    if (!parsed) return null;
+    const verdictLabel = RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status;
+    const payload: Record<string, unknown> = {
+      gate_type: gate.gate_type,
+      verdict: verdictLabel,
+      work_item_title: title,
+      resolution_note: gate.resolution_note ?? null,
+    };
+    return renderBlockTemplate(parsed, payload).filter((b) => b.type === 'text' || b.type === 'fields');
+  })() : null;
   const riskLevel = deriveRiskLevel(gate);
   const needsFullFlow = usesSignatureFlow(riskLevel);
   const canAct = gate.status === 'pending' && gate.can_approve === true;
@@ -179,21 +210,36 @@ function ApprovalRequestBody({
       ) : null}
 
       {gate.status !== 'pending' ? (
-        <div className="space-y-1">
-          <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
-            {gate.status === 'approved' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />}
-            {t('approvalRequestResolvedStatus', {
-              status: RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status,
-            })}
+        resolvedStaticBlocks ? (
+          // story #2637 AC4 — 아이콘은 그대로 뱃지처럼 앞에 두고(어휘 4종 밖의 순수 UI 크롬,
+          // 템플릿이 대신할 수 없다), text·fields 블록은 EventBlockCard와 동일한 자기 고유
+          // 크기(text-sm/text-xs)로 그대로 둔다 — 억지로 기존 text-xs 한 줄에 욱여넣지 않는다
+          // (사이즈 클래스 충돌로 인한 시각 왜곡 방지).
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              {gate.status === 'approved' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />}
+              {resolvedStaticBlocks.filter((b) => b.type === 'text').map((b, i) => renderStaticEventBlock(b, i))}
+            </div>
+            {resolvedStaticBlocks.filter((b) => b.type === 'fields').map((b, i) => renderStaticEventBlock(b, i))}
           </div>
-          {/* story #2624 — 상신자가 결과를 회신 카드로 받아도 사유(resolution_note)가 안
-              보이면 "사유는 남겨놨는데" 인시던트가 human 웹 표면에서 재발한다. gate는 항상
-              fetchGate()로 실측한 최신 값이라 어느 메시지(request/result)를 눌러 들어왔든
-              같은 값을 보여준다. */}
-          {gate.resolution_note ? (
-            <p className="text-[11px] text-muted-foreground">{t('approvalRequestResolutionNote', { note: gate.resolution_note })}</p>
-          ) : null}
-        </div>
+        ) : (
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+              {gate.status === 'approved' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />}
+              {t('approvalRequestResolvedStatus', {
+                status: RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status,
+              })}
+            </div>
+            {/* story #2624 — 상신자가 결과를 회신 카드로 받아도 사유(resolution_note)가 안
+                보이면 "사유는 남겨놨는데" 인시던트가 human 웹 표면에서 재발한다. gate는 항상
+                fetchGate()로 실측한 최신 값이라 어느 메시지(request/result)를 눌러 들어왔든
+                같은 값을 보여준다.
+                story #2637 AC4 — 템플릿 없음/파싱실패 시 폴백(비회귀 안전망, AC2와 동형). */}
+            {gate.resolution_note ? (
+              <p className="text-[11px] text-muted-foreground">{t('approvalRequestResolutionNote', { note: gate.resolution_note })}</p>
+            ) : null}
+          </div>
+        )
       ) : !canAct ? (
         // story #2091(P0)과 동일 fail-closed 규율 — can_approve=false(무권한 뷰어)는 액션을
         // 렌더하지 않는다. 고위험도 이제 챗 안에서 완결되므로(#2625) 여기 남는 유일한

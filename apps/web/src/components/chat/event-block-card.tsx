@@ -112,27 +112,26 @@ function isActionAuthorized(
   return true;
 }
 
-function EventBlockRow({
-  block, payload, currentMemberType, currentRole, t,
-}: {
-  block: BlockTemplateBlock;
-  payload: Record<string, unknown>;
-  currentMemberType: 'human' | 'agent' | undefined;
-  currentRole: string | undefined;
-  t: ReturnType<typeof useTranslations>;
-}) {
+/**
+ * story #2637 AC4 — header/text/fields 3종(비-action)만 그린다. approval-request-card.tsx가
+ * preset.gate.verdict 템플릿을 「부분 소비」할 때 재사용한다(actions는 그쪽 카드가 자기 고유의
+ * 서명/버튼 분기를 유지하므로 여기서 다루지 않는다 — null 반환, 호출부가 filter로 걸러도 되고
+ * 안 걸러도 안전). EventBlockCard와 approval-request-card 둘 다 이 함수로 동일한 시각 어휘를
+ * 공유한다(DS 원칙 "동일 개념=동일 어휘" — 사본 분화 금지).
+ */
+export function renderStaticEventBlock(block: BlockTemplateBlock, key: number): React.ReactNode {
   // story #2637 — 유나 design 스티어: 4블록 시각 위계(header 최상위 > fields 구조데이터 >
   // text 본문 > actions 하단 액션열) — 렌더 «순서»는 템플릿 저자가 선언한 그대로 따르되
   // (임의 재배열 안 함), 각 블록 타입의 폰트 크기/굵기로 위계만 표현한다.
   if (block.type === 'header') {
-    return <p className="text-base font-semibold text-foreground">{renderTextWithMissingMarkers(block.text)}</p>;
+    return <p key={key} className="text-base font-semibold text-foreground">{renderTextWithMissingMarkers(block.text)}</p>;
   }
   if (block.type === 'text') {
-    return <p className="text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]">{renderTextWithMissingMarkers(block.text)}</p>;
+    return <p key={key} className="text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]">{renderTextWithMissingMarkers(block.text)}</p>;
   }
   if (block.type === 'fields') {
     return (
-      <dl className="space-y-1.5 rounded-lg bg-muted/40 px-2.5 py-2">
+      <dl key={key} className="space-y-1.5 rounded-lg bg-muted/40 px-2.5 py-2">
         {block.fields.map((f, i) => (
           <div key={i} className="flex gap-2 text-xs">
             <dt className="shrink-0 font-medium text-muted-foreground">{f.label}</dt>
@@ -142,7 +141,21 @@ function EventBlockRow({
       </dl>
     );
   }
-  // actions
+  return null;
+}
+
+function EventBlockRow({
+  block, payload, currentMemberType, currentRole, t,
+}: {
+  block: BlockTemplateBlock;
+  payload: Record<string, unknown>;
+  currentMemberType: 'human' | 'agent' | undefined;
+  currentRole: string | undefined;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  if (block.type !== 'actions') {
+    return renderStaticEventBlock(block, 0);
+  }
   return (
     <div className="flex flex-wrap items-center gap-2 pt-0.5">
       {block.actions.map((a, i) => {

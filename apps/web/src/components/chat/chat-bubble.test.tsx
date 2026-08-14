@@ -836,6 +836,58 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     const signBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes('승인하고 서명'))!;
     expect(signBtn.hasAttribute('disabled')).toBe(false);
   });
+
+  describe('story #2637 AC4(PO 08-14 확定) — resolved 분기 preset.gate.verdict block_template 부분 소비', () => {
+    // 0251 마이그(develop 상륙) 실물 그대로 — 대상 필드 value가 work_item_title로 정정된 것.
+    const GATE_VERDICT_TEMPLATE = {
+      blocks: [
+        { type: 'header', text: '게이트 판정' },
+        { type: 'text', text: '**{{payload.gate_type}}** 게이트 — **{{payload.verdict}}**' },
+        { type: 'fields', fields: [
+          { label: '대상', value: '{{payload.work_item_title}}' },
+          { label: '사유', value: '{{payload.resolution_note}}' },
+        ] },
+      ],
+    };
+    const withGateVerdictCatalog = { 'preset.gate.verdict': { key: 'preset.gate.verdict', org_id: null, payload_schema: {}, routing: {}, block_template: GATE_VERDICT_TEMPLATE, enabled: true, version: 2 } };
+
+    it('resolved + 카탈로그에 템플릿 있음 — 대상은 UUID가 아니라 fetched title, 사유는 fields로, 상태는 한글 verdict 라벨로 렌더된다(header는 부분소비 제외)', async () => {
+      stubGate({ status: 'approved', title: '제안서.md', resolution_note: '근거가 충분합니다' });
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} eventDefinitionsByKey={withGateVerdictCatalog} />));
+      });
+      expect(container.textContent).toContain('결재 요청'); // Q3 — 카드 라벨은 그대로.
+      expect(container.textContent).not.toContain('게이트 판정'); // header는 부분소비 제외.
+      expect(container.textContent).not.toContain(DOC_ID); // Q2 — UUID 노출 금지.
+      expect(container.textContent).toContain('doc_approval');
+      expect(container.textContent).toContain('승인됨'); // verdict 합성값 = 현행 한글 라벨.
+      expect(container.textContent).toContain('근거가 충분합니다');
+      // '제안서.md'는 카드 상단 제목(기존)과 fields 대상 값(신규) 둘 다에 나타난다 — 중복 등장 자체가
+      // 정상(같은 개념 두 자리 표시), 최소 1회 이상만 확認.
+      expect(container.textContent).toContain('제안서.md');
+    });
+
+    it('resolved + 카탈로그에 preset.gate.verdict 없음(구정의·미시딩) — 기존 하드코딩 렌더로 폴백(비회귀)', async () => {
+      stubGate({ status: 'rejected', resolution_note: '근거가 불충분합니다' });
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} eventDefinitionsByKey={{}} />));
+      });
+      expect(container.textContent).toContain('반려됨');
+      expect(container.textContent).toContain('근거가 불충분합니다');
+      expect(container.textContent).not.toContain('게이트 판정');
+    });
+
+    it('Q1 — pending 상태는 카탈로그에 템플릿이 있어도 영향받지 않는다(제목·뱃지·버튼 그대로)', async () => {
+      stubGate({});
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} eventDefinitionsByKey={withGateVerdictCatalog} />));
+      });
+      expect(container.textContent).toContain('제안서.md');
+      expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(true);
+      expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('반려'))).toBe(true);
+      expect(container.textContent).not.toContain('게이트 판정');
+    });
+  });
 });
 
 describe('ChatBubble — story #2637 event_definitions block_template 카드', () => {
