@@ -116,8 +116,12 @@ async def _session_factory():
 
 
 async def _setup_app_agent(app, Session, agent_member_id, org_id):
+    """story #2451(카디르 QA 구조 구멍①) — get_db만 걸고 get_read_db를 놓치는 whack-a-mole을
+    막는 conftest 공용 헬퍼(`override_db_and_read`)를 거친다. raw `dependency_overrides[get_db]
+    = ...` 직접 대입은 CI lint 가드(`scripts/lint_dependency_override_get_read_db.py`)가
+    baseline 초과분을 즉시 막는다 — 신규 자리는 반드시 이 헬퍼로."""
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     async def _db():
         async with Session() as s:
@@ -134,7 +138,7 @@ async def _setup_app_agent(app, Session, agent_member_id, org_id):
             claims={"app_metadata": {"org_id": str(org_id), "api_key_id": str(uuid.uuid4())}},
         )
 
-    app.dependency_overrides[get_db] = _db
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
 
 
