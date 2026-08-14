@@ -157,6 +157,15 @@ class SendChatInput(ConversationScopedInput):
     # `[title](entity:doc:id) ` 토큰을 content에 합성 — human 경로가 만드는 토큰을 agent 경로도
     # 만들 수 있게 해 doc backlink/link가 agent 발신 메시지에서도 동작하게 한다.
     mentions: list[MentionRef] | None = None
+    # story #2618: 위 `mentions`(entity-참조)와 별개 — 팀원 @멘션(구조화, UUID). REST
+    # `SendMessageRequest.mentioned_ids`(app/routers/conversations.py)에 그대로 전달한다.
+    # FE 피커(chat-input.tsx)가 이미 채워 보내는 필드인데 MCP 스키마에만 없었다(#3000 그라운딩
+    # ⑦ 발견) — channel_router.py mentions-레벨 알림게이팅·전용 conversation.mention 알림/푸시·
+    # DM 비참가자 멘션 시 group 자동 포크·체인뎁스 초과 시 human_intervention 타깃 한정, 4개
+    # 소비처가 실제로 갈리므로(#2636 (b)안류 죽은 파라미터 아님) 배선만으로 실효과가 난다.
+    # 이름→ID 해석은 기존 `sprintable_list_team_members`(id+name 노출)로 이미 가능 — 별도
+    # handle 노출은 이 스토리 스코프 밖(텍스트 @handle 파싱 경로의 별개 축, PO 판정 2026-08-14).
+    mentioned_ids: list[str] | None = None
 
 
 class CreateConversationInput(SprintableInput):
@@ -239,6 +248,8 @@ async def send_chat_message(args: SendChatInput) -> list[TextContent]:
         payload: dict = {"content": content}
         if args.reply_thread_id:
             payload["thread_id"] = args.reply_thread_id
+        if args.mentioned_ids:
+            payload["mentioned_ids"] = args.mentioned_ids
         meta: dict = {}
         if args.metadata:
             meta.update(args.metadata)
