@@ -40,12 +40,17 @@ afterEach(async () => {
 });
 
 describe('WakeMethodBody (story #2434) — path가 실제로 DOM에 렌더되는지', () => {
-  it('ko channel-plugin: path 문자열이 DOM 텍스트로 실제 존재한다(빈 괄호 회귀가드)', async () => {
+  // story #2648(PO 08-14 확定 (b)) — channel-plugin은 예외로 뒤집혔다: packages/fakechat
+  // 내부 경로가 «비-actionable»(같은 문장이 "받는 경로는 아직 제공하지 않습니다"라고
+  // 이미 말한다)인데도 사용자 표면에 그대로 샜던 것 — 이제 path를 안 보여준다(빈 괄호
+  // 대신 자연스러운 문장으로). 형제 3종(connector-host 등)은 무변경 — 아래 별도 테스트.
+  it('ko channel-plugin: packages/fakechat 내부 경로가 더는 안 보인다(story #2648)', async () => {
     await act(async () => {
       root.render(wrap('ko', <WakeMethodBody method="channel-plugin" path="packages/fakechat" />));
     });
-    expect(container.textContent).toContain('packages/fakechat');
-    expect(container.textContent).not.toContain('()'); // 빈 괄호로 퇴행하면 여기 걸린다
+    expect(container.textContent).not.toContain('fakechat');
+    expect(container.textContent).not.toContain('()');
+    expect(container.textContent).toContain('채널 플러그인');
   });
 
   it('ko connector-host: path 문자열이 DOM 텍스트로 실제 존재한다', async () => {
@@ -56,12 +61,13 @@ describe('WakeMethodBody (story #2434) — path가 실제로 DOM에 렌더되는
     expect(container.textContent).not.toContain('()');
   });
 
-  it('en channel-plugin: path 문자열이 DOM 텍스트로 실제 존재한다', async () => {
+  it('en channel-plugin: packages/fakechat 내부 경로가 더는 안 보인다(story #2648)', async () => {
     await act(async () => {
       root.render(wrap('en', <WakeMethodBody method="channel-plugin" path="packages/fakechat" />));
     });
-    expect(container.textContent).toContain('packages/fakechat');
+    expect(container.textContent).not.toContain('fakechat');
     expect(container.textContent).not.toContain('()');
+    expect(container.textContent).toContain('channel plugin');
   });
 
   it('en connector-host: path 문자열이 DOM 텍스트로 실제 존재한다', async () => {

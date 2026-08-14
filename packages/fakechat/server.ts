@@ -196,12 +196,12 @@ async function _sendAck(seq: number): Promise<void> {
     })
     if (resp.ok) {
       _lastAcked = seq
-      process.stderr.write(`[fakechat] ack seq=${seq}\n`)
+      process.stderr.write(`[sprintable] ack seq=${seq}\n`)
     } else {
-      process.stderr.write(`[fakechat] ack HTTP ${resp.status} seq=${seq}\n`)
+      process.stderr.write(`[sprintable] ack HTTP ${resp.status} seq=${seq}\n`)
     }
   } catch (e) {
-    process.stderr.write(`[fakechat] ack error seq=${seq}: ${e}\n`)
+    process.stderr.write(`[sprintable] ack error seq=${seq}: ${e}\n`)
   }
 }
 
@@ -278,7 +278,7 @@ async function _onEvent(evType: string, evId: string, dataStr: string): Promise<
       : undefined
 
   process.stderr.write(
-    `[fakechat] inbound seq=${seq} conv=${conversationId} from=${senderName}: ${content.slice(0, 80)}\n`,
+    `[sprintable] inbound seq=${seq} conv=${conversationId} from=${senderName}: ${content.slice(0, 80)}\n`,
   )
 
   deliver(eventId, content, undefined, meta)
@@ -312,12 +312,12 @@ async function _consumeStream(): Promise<void> {
       }
     } catch {}
     if (retryAfter > 0) _reconnectDelay = Math.max(_reconnectDelay, retryAfter * 1000)
-    process.stderr.write(`[fakechat] stream refused: ${code} (HTTP ${resp.status}) — backoff ${_reconnectDelay}ms\n`)
+    process.stderr.write(`[sprintable] stream refused: ${code} (HTTP ${resp.status}) — backoff ${_reconnectDelay}ms\n`)
     throw new Error(`stream refused: ${code} (HTTP ${resp.status})`)
   }
   if (!resp.body) throw new Error('no response body')
 
-  process.stderr.write('[fakechat] SSE stream open\n')
+  process.stderr.write('[sprintable] SSE stream open\n')
   _reconnectDelay = 2000 // 성공 시 backoff 리셋
 
   const reader = resp.body.getReader()
@@ -356,16 +356,16 @@ async function _consumeStream(): Promise<void> {
       }
     }
   }
-  process.stderr.write('[fakechat] SSE stream closed\n')
+  process.stderr.write('[sprintable] SSE stream closed\n')
 }
 
 async function _runStream(): Promise<void> {
   if (HAS_WEBHOOK) {
-    process.stderr.write('[fakechat] webhook configured — SSE off\n')
+    process.stderr.write('[sprintable] webhook configured — SSE off\n')
     return
   }
   if (!API_KEY) {
-    process.stderr.write('[fakechat] SPRINTABLE_API_KEY / AGENT_API_KEY not set — SSE disabled\n')
+    process.stderr.write('[sprintable] SPRINTABLE_API_KEY / AGENT_API_KEY not set — SSE disabled\n')
     return
   }
 
@@ -374,10 +374,10 @@ async function _runStream(): Promise<void> {
     try {
       await _consumeStream()
     } catch (e) {
-      process.stderr.write(`[fakechat] stream error: ${e}\n`)
+      process.stderr.write(`[sprintable] stream error: ${e}\n`)
     }
     if (Date.now() - start >= 60_000) _reconnectDelay = 2000
-    process.stderr.write(`[fakechat] reconnecting in ${_reconnectDelay}ms\n`)
+    process.stderr.write(`[sprintable] reconnecting in ${_reconnectDelay}ms\n`)
     await Bun.sleep(_reconnectDelay)
     _reconnectDelay = Math.min(_reconnectDelay * 2, 60_000)
   }
