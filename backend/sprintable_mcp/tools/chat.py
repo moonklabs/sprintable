@@ -175,8 +175,8 @@ class SendChatInput(ConversationScopedInput):
     # ⑦ 발견) — channel_router.py mentions-레벨 알림게이팅·전용 conversation.mention 알림/푸시·
     # DM 비참가자 멘션 시 group 자동 포크·체인뎁스 초과 시 human_intervention 타깃 한정, 4개
     # 소비처가 실제로 갈리므로(#2636 (b)안류 죽은 파라미터 아님) 배선만으로 실효과가 난다.
-    # 이름→ID 해석은 기존 `sprintable_list_team_members`(id+name 노출)로 이미 가능 — 별도
-    # handle 노출은 이 스토리 스코프 밖(텍스트 @handle 파싱 경로의 별개 축, PO 판정 2026-08-14).
+    # 이름→ID 해석은 기존 `sprintable_list_team_members`(id+name 노출)로 이미 가능. 텍스트
+    # `@handle` 파싱 경로는 story #2646(2026-08-14)로 은퇴 — 팀원 멘션은 이 필드가 유일 경로.
     mentioned_ids: list[str] | None = None
 
 

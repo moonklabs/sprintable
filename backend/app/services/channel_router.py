@@ -285,9 +285,10 @@ async def route_message(
                 )
                 continue
 
-            # CB-S1 AC3: mentioned_ids 배열 기반 mentions 판단(content regex 폐기) — story #2603
-            # P0로 handle_mention_parser가 API/MCP 발신 본문의 @handle을 mentioned_ids에 이미
-            # 합집합해 저장하므로(conversations.py send_message), 이 체크는 그대로 재사용된다.
+            # CB-S1 AC3: mentioned_ids 배열 기반 mentions 판단(content regex 폐기) — FE 피커·
+            # MCP 구조화 mentioned_ids(story #2618/#3043)가 conversations.py send_message에서
+            # 이미 채워 저장하므로(story #2646로 은퇴한 @handle 텍스트 파싱 union은 제외됨),
+            # 이 체크는 그대로 재사용된다.
             if level == "mentions":
                 if not (msg.mentioned_ids and rid in msg.mentioned_ids):
                     logger.info(
