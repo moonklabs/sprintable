@@ -1106,7 +1106,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
               {/* story #2105 2차 — 생성 성공도 결과다(#2096/#2105 1차와 동일 원칙). equipResult는 이
                   가드에서 최초 1회만 non-null이 되므로 polite 낭독으로 충분(흐름 차단 아님). */}
               <div role="status" aria-live="polite" aria-atomic="true" className="space-y-3 rounded-md border border-success-border bg-success-tint p-4">
-                <p className="text-sm font-semibold text-success">{t('equipCreatedTitle', { name: equipResult.name })}</p>
+                <p className="text-sm font-semibold text-foreground">{t('equipCreatedTitle', { name: equipResult.name })}</p>
                 {equipRuntimeSaveWarning && (
                   <p role="alert" className="flex items-start gap-1.5 rounded-md border border-warning-border bg-warning-tint p-2 text-xs text-foreground">
                     <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -1349,7 +1349,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   <div className="space-y-2 rounded-md border border-warning-border bg-warning-tint p-3">
                     <p className="text-xs font-semibold text-foreground">{t('rotateConfirmTitle')}</p>
                     <p className="text-xs leading-relaxed text-muted-foreground"><b className="text-foreground">{t('rotateConfirmBold')}</b> {t('rotateConfirmBody')}</p>
-                    {rotateError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{rotateError}</p>}
+                    {rotateError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-foreground">{rotateError}</p>}
                     <div className="flex justify-end gap-2">
                       <Button variant="ghost" size="sm" onClick={() => setShowRotateConfirm(false)} disabled={rotating}>{t('cancel')}</Button>
                       <Button size="sm" className="bg-warning text-foreground hover:bg-warning/90" disabled={rotating} onClick={() => void handleRotateConfirmed()}>
@@ -1387,7 +1387,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   복사 가능한 한 줄로 그 자리에 쥐여 준다. */}
               {rail.showVerifyExamplePrompt && (
                 <div className="flex items-center justify-between gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2 text-xs">
-                  <span className="min-w-0 truncate text-info">
+                  <span className="min-w-0 truncate text-foreground">
                     {t('verifyExampleLabel')} <span className="font-mono text-foreground">&ldquo;{t('verifyExamplePrompt')}&rdquo;</span>
                   </span>
                   <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0">

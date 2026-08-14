@@ -151,7 +151,7 @@ export function DecisionsWaiting({ onChange }: DecisionsWaitingProps = {}) {
       </header>
 
       {error ? (
-        <p className="mb-2 text-xs text-destructive" role="alert">
+        <p className="mb-2 text-xs text-foreground" role="alert">
           {t('decisionsErrorRetry')}
         </p>
       ) : null}

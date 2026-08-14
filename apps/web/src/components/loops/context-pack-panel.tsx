@@ -186,7 +186,7 @@ export function ContextPackPanel({ loopId }: { loopId: string }) {
           <>
             {/* L2 요약(위) → L3 제안(중간) → L1 근거 items(아래) — 유나 LOCK: 위계는 항상 결정 UI보다 낮게. */}
             {data.synthesis ? (
-              <div className="rounded-lg border border-info-border bg-info-tint p-2.5 text-xs text-info">
+              <div className="rounded-lg border border-info-border bg-info-tint p-2.5 text-xs text-foreground">
                 <div className="flex items-start gap-2">
                   <Sparkles className="mt-0.5 size-3.5 shrink-0" aria-hidden />
                   <div className="min-w-0 flex-1 space-y-1">
@@ -194,7 +194,7 @@ export function ContextPackPanel({ loopId }: { loopId: string }) {
                       <p className="font-semibold">{t('contextPackSynthesisTitle')}</p>
                       <AiAttributionRow confidence={data.synthesis_confidence} evidenceCount={data.evidence_count} />
                     </div>
-                    <p className="whitespace-pre-line text-info/90">{data.synthesis}</p>
+                    <p className="whitespace-pre-line text-foreground">{data.synthesis}</p>
                   </div>
                 </div>
                 <AiTransparencyLine className="border-info-border/60" />

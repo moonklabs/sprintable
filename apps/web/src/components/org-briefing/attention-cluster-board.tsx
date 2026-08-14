@@ -36,7 +36,7 @@ function ClusterShell({
           {/* story #2420 규칙 — tint 배경 위 글자는 계열색이 아니라 text-foreground. */}
           <p className="truncate text-[11px] text-foreground">{subtitle}</p>
         </div>
-        <span className="shrink-0 rounded-full border border-info/30 bg-card px-2.5 py-0.5 text-xs font-semibold text-info">
+        <span className="shrink-0 rounded-full border border-info/30 bg-card px-2.5 py-0.5 text-xs font-semibold text-foreground">
           {count}
         </span>
       </div>

@@ -1,26 +1,4 @@
 {
   "_comment": "story #2590 (A) 교차-요소 가드 grandfather baseline — can only shrink",
-  "keys": [
-    "app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx::destructive::font-medium text-destructive",
-    "app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx::destructive::text-sm font-semibold text-destructive",
-    "app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::destructive::text-xs text-destructive",
-    "app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::info::min-w-0 truncate text-info",
-    "app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::success::text-sm font-semibold text-success",
-    "app/(authenticated)/settings/page.tsx::destructive::mb-4 text-sm text-destructive/80",
-    "app/(authenticated)/settings/page.tsx::destructive::text-sm text-destructive/80",
-    "app/onboarding/connect-step.tsx::info::min-w-0 truncate text-info",
-    "components/cage/stuck-handoff-detail.tsx::destructive::text-destructive/70",
-    "components/cage/stuck-handoff-section.tsx::destructive::text-[11px] text-destructive",
-    "components/canvas/concurrency-prompt.tsx::info::rounded-md border border-info/40 px-2 py-0.5 font-semibold text-info hover:bg-info/10",
-    "components/canvas/concurrency-prompt.tsx::info::text-info",
-    "components/chat/chat-bubble.tsx::info::mb-1 flex items-center gap-1 text-[10px] font-medium text-info",
-    "components/chat/chat-bubble.tsx::info::text-info",
-    "components/docs/doc-gate-section.tsx::destructive::text-xs font-medium text-destructive",
-    "components/hypotheses/story-hypotheses-section.tsx::warning::inline-flex shrink-0 items-center gap-1 text-[11px] text-warning",
-    "components/inbox/decisions-waiting.tsx::destructive::mb-2 text-xs text-destructive",
-    "components/integrations/pr-link-section.tsx::warning::inline-flex shrink-0 items-center gap-1 text-warning",
-    "components/loops/context-pack-panel.tsx::info::whitespace-pre-line text-info/90",
-    "components/org-briefing/attention-cluster-board.tsx::info::shrink-0 rounded-full border border-info/30 bg-card px-2.5 py-0.5 text-xs font-semibold text-info",
-    "components/settings/workflow-execution-history-section.tsx::destructive::px-2 py-2 text-xs text-destructive"
-  ]
+  "keys": []
 }

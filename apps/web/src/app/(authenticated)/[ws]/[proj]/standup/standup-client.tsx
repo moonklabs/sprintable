@@ -592,12 +592,12 @@ export default function StandupPage({ projectId }: StandupClientProps) {
               {!loading && blockerEntries.length > 0 ? (
                 <div className="rounded-xl border border-destructive-border bg-destructive-bg p-4">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-sm font-semibold text-destructive">{t('blockersRollupTitle', { count: blockerEntries.length })}</h2>
+                    <h2 className="text-sm font-semibold text-foreground">{t('blockersRollupTitle', { count: blockerEntries.length })}</h2>
                   </div>
                   <div className="mt-2 space-y-1.5">
                     {blockerEntries.map((entry) => (
                       <p key={entry.authorId} className="text-xs text-foreground/90">
-                        <span className="font-medium text-destructive">{entry.name}</span>
+                        <span className="font-medium text-foreground">{entry.name}</span>
                         <span className="text-muted-foreground"> · {entry.blockers}</span>
                       </p>
                     ))}

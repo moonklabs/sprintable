@@ -17,12 +17,12 @@ export function ConcurrencyPrompt({ authorName, version, onView, onMergeOver, cl
   return (
     <div className={className}>
       <div className="flex items-center justify-between gap-3 rounded-lg border border-info/30 bg-info/5 px-3 py-2 text-[11px]">
-        <span className="text-info">{t('concurrencyArrived', { name: authorName, version })}</span>
+        <span className="text-foreground">{t('concurrencyArrived', { name: authorName, version })}</span>
         <span className="flex shrink-0 gap-1.5">
           <button type="button" onClick={onView} className="rounded-md border border-border px-2 py-0.5 text-muted-foreground hover:bg-muted">
             {t('concurrencyView')}
           </button>
-          <button type="button" onClick={onMergeOver} className="rounded-md border border-info/40 px-2 py-0.5 font-semibold text-info hover:bg-info/10">
+          <button type="button" onClick={onMergeOver} className="rounded-md border border-info/40 px-2 py-0.5 font-semibold text-foreground hover:bg-info/10">
             {t('concurrencyMerge')}
           </button>
         </span>
