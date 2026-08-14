@@ -2163,6 +2163,16 @@ async def send_message(
             if mid != sender.id and mid not in valid_mentioned_ids:
                 valid_mentioned_ids.append(mid)
 
+    # story #2629(P0의 @handle 파서와 동형 철학, 2026-08-14): 본문의 맨 스토리 번호(`#24`류)를
+    # entity 임베드 토큰으로 서버가 저장 시점에 승격 — 에이전트가 임베드 문법을 배우든 말든
+    # 흡수한다. @handle(`@word`)과 어휘상 안 겹쳐 위 블록과의 순서는 무관. body.content
+    # 재대입 지점은 이 함수 전체에서 여기 하나뿐이라(아래 ConversationMessage 생성이 유일한
+    # 소비처) 다른 호출부 변경 없이 자동 전파된다.
+    from app.services.story_ref_promoter import promote_bare_story_refs
+    body.content = await promote_bare_story_refs(
+        db, org_id=org_id, project_id=conv.project_id, content=body.content or "",
+    )
+
     # E-ACTIVATION S1(까디르 QA): audience 도 cross-org/삭제 id 차단 — mentioned_ids 와 동형 org 필터.
     # 안 하면 삭제·타조직 member_id 를 audience 에 넣어 «실 수신자 전원이 addressed=no» 메시지를 만들 수 있다.
     # 전량 필터돼 []가 되면 어댑터에서 `not audience`=True → all-addressed(현행)로 안전 degrade.
