@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import case, exists, func, select
+from sqlalchemy import and_, case, exists, func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.hypothesis import HypothesisStoryLink
@@ -18,6 +18,21 @@ _PRIORITY_ORDER = case(
     (Story.priority == "low", 3),
     else_=4,
 )
+
+
+def _title_search_filter(q: str):
+    """story #2619 fix(페드루 판정, 2026-08-14) — `list()`/`list_board()`/`list_backlog()`
+    3곳이 전부 `Story.title.ilike(f"%{q}%")`를 각자 심고 있었다(오늘의 3사본=내일의
+    드리프트 — 판정 로직을 한 곳으로 모은다는 것이 이 처방의 근본). 공백으로 토큰화 후
+    AND 결합(OR 아님 — "포함하는 단어 전부"가 사용자 기대에 더 가까움, PO 판정): 이전엔
+    `q` 전체를 하나의 리터럴 연속 substring으로만 봐서 제목 단어들이어도 **어순이 다르면
+    매치 실패**했다(실사례: "무인간 대화 체인 게이트"는 실제 제목 "체인 게이트의 «무인간
+    대화»"와 어순이 반대라 0건 — #2619 실측). 토큰이 하나도 없으면(공백뿐인 q) 무필터로
+    폴백(true) — 호출부의 `if q:` 가드가 걸러내지 못하는 이 경계를 여기서 안전하게 흡수."""
+    tokens = [t for t in q.split() if t]
+    if not tokens:
+        return true()
+    return and_(*(Story.title.ilike(f"%{t}%") for t in tokens))
 
 
 def _unattached_clause():
@@ -106,7 +121,7 @@ class StoryRepository(BaseRepository[Story]):
         for attr, val in filters.items():
             query = query.where(getattr(Story, attr) == val)
         if q:
-            query = query.where(Story.title.ilike(f"%{q}%"))
+            query = query.where(_title_search_filter(q))
         if cursor:
             query = query.where(Story.created_at < cursor)
         if unattached:
@@ -173,7 +188,7 @@ class StoryRepository(BaseRepository[Story]):
         if story_number is not None:
             q = q.where(Story.story_number == story_number)
         if q_text:
-            q = q.where(Story.title.ilike(f"%{q_text}%"))
+            q = q.where(_title_search_filter(q_text))
         if unattached:
             q = q.where(_unattached_clause())
 
@@ -237,7 +252,7 @@ class StoryRepository(BaseRepository[Story]):
         if story_number is not None:
             query = query.where(Story.story_number == story_number)
         if q:
-            query = query.where(Story.title.ilike(f"%{q}%"))
+            query = query.where(_title_search_filter(q))
         if unattached:
             query = query.where(_unattached_clause())
         result = await self.session.execute(query.limit(limit))
