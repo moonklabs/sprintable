@@ -9,9 +9,22 @@ import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
 import { RecruiterClient } from './recruiter-client';
 
+// story #2641 — 이 vi.mock('next-intl', ...)이 module registry를 공유하는 워커(isolate:false,
+// 이 코드베이스 기본값은 아니지만 잠재 위험) 안에서 t.rich를 기대하는 다른 파일(예: recruiter-
+// client.connect-cli-body.test.tsx의 NextIntlClientProvider 실 렌더)로 새면 `t.rich is not a
+// function`으로 깨진다 — 실측 재현(isolate:false 3회전)으로 확認된 구체 충돌 사례. t.rich/
+// t.markup/t.raw까지 실 next-intl의 t 함수 shape에 맞춰 채워 부분 mock을 완전화한다(격리가
+// 약해져도 이 mock을 "빌려 쓰는" 다른 파일이 최소한 이 함수들 부재로는 안 깨지게).
 vi.mock('next-intl', () => ({
-  useTranslations: (ns: string) => (key: string, vars?: Record<string, unknown>) =>
-    vars ? `${ns}.${key}(${JSON.stringify(vars)})` : `${ns}.${key}`,
+  useTranslations: (ns: string) => {
+    const t = (key: string, vars?: Record<string, unknown>) =>
+      vars ? `${ns}.${key}(${JSON.stringify(vars)})` : `${ns}.${key}`;
+    t.rich = (key: string) => `${ns}.${key}`;
+    t.markup = (key: string) => `${ns}.${key}`;
+    t.raw = (key: string) => `${ns}.${key}`;
+    t.has = () => true;
+    return t;
+  },
   useLocale: () => 'ko',
 }));
 
