@@ -3673,6 +3673,7 @@
     "connectConfigVerifiedBadge": "Config saved · tool delivery unconfirmed",
     "kitOrientingWakeLabel": "② Wake up",
     "kitOrientingWakeBody_channel-plugin": "A channel plugin wakes the session. We don't publish a way to obtain it yet.",
+    "kitOrientingWakeBody_channel-plugin-marketplace": "A channel plugin wakes the session. Install it with: <code>{path}</code> (installing alone doesn't confirm the connection — check the badge for actual connection status)",
     "kitOrientingWakeBody_connector-host": "A connector host spawns and drives the session. We don't publish a way to obtain it yet.",
     "kitOrientingWakeBody_connector-sidecar": "A sidecar manages the run for cloud agents. We don't publish a way to obtain it yet.",
     "kitOrientingWakeBody_connector-sdk": "You wire this runtime in yourself. We don't publish the reference SDK yet.",

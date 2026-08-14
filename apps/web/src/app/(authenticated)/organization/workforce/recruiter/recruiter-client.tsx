@@ -1171,8 +1171,12 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                           끝냈다가 실제로는 안 깨어나는" 오탐을 만든다. 사실형("…이 세션을
                           깨웁니다. 받는 경로는 아직 제공하지 않습니다")으로 정정 — path는 «명령
                           대상»이 아니라 «이름»으로 강등(t.rich path 태그: font-mono·작게·무채색,
-                          링크 색 금지 — 누를 수 있는 것처럼 보이면 안 된다). 디디군의 "한 줄
-                          설치"가 착지하면 이 문구 뒷문장을 그 설치 명령으로 되돌린다(만료조건). */}
+                          링크 색 금지 — 누를 수 있는 것처럼 보이면 안 된다).
+                          만료조건 착지(story #2653, 2026-08-14): claude-code는 마켓플레이스
+                          add→install 실왕복이 실측됐다 — 단 hermes/openclaw/opencode는 여전히
+                          "아직 제공하지 않습니다"가 사실이라 같은 'channel-plugin' 키를 못 씀.
+                          claude-code만 'channel-plugin-marketplace' method로 갈라 설치 명령을
+                          말한다(설치≠연결 확인 — 실 연결은 배지가 말한다, #2657과 역할 분리). */}
                       <p className="text-xs text-muted-foreground">
                         <WakeMethodBody method={wakeInfo.method} path={wakeInfo.path} />
                       </p>

@@ -104,6 +104,30 @@ describe('WakeMethodBody (story #2434) — path가 실제로 DOM에 렌더되는
     expect(container.querySelector('span.font-mono')).toBeNull();
   });
 
+  // story #2653(2026-08-14) — claude-code만은 #2648/#2652가 걷어낸 "비-actionable 내부
+  // 경로"가 아니라 실제로 사용자가 실행 가능한 설치 명령을 갖는다(마켓플레이스 add→install
+  // 실왕복 실측 완료). 그래서 형제들과 반대로 여기서는 path가 «보여야» 한다 — 별도 method
+  // ('channel-plugin-marketplace')로 가른 이유가 바로 이 비대칭.
+  it('ko channel-plugin-marketplace: 설치 명령이 DOM에 실재하고 "아직 제공하지 않습니다" 문구가 안 섞인다', async () => {
+    const installCmd = 'claude plugin marketplace add moonklabs/sprintable-agent-plugins && claude plugin install sprintable@moonklabs';
+    await act(async () => {
+      root.render(wrap('ko', <WakeMethodBody method="channel-plugin-marketplace" path={installCmd} />));
+    });
+    expect(container.textContent).toContain(installCmd);
+    expect(container.textContent).not.toContain('아직 제공하지 않습니다');
+    expect(container.textContent).not.toContain('()');
+  });
+
+  it('en channel-plugin-marketplace: 설치 명령이 DOM에 실재하고 "not yet" 문구가 안 섞인다', async () => {
+    const installCmd = 'claude plugin marketplace add moonklabs/sprintable-agent-plugins && claude plugin install sprintable@moonklabs';
+    await act(async () => {
+      root.render(wrap('en', <WakeMethodBody method="channel-plugin-marketplace" path={installCmd} />));
+    });
+    expect(container.textContent).toContain(installCmd);
+    expect(container.textContent).not.toContain("don't publish a way to obtain it yet");
+    expect(container.textContent).not.toContain('()');
+  });
+
   it('unknown은 t.rich를 안 쓰고 plain 문구를 보여준다(path 태그 없음)', async () => {
     await act(async () => {
       root.render(wrap('ko', <WakeMethodBody method="unknown" path="" />));

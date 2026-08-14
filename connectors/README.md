@@ -116,7 +116,7 @@ B=자식 프로세스 spawn 후 stdio, C=자식 프로세스 없이 원격 HTTP 
 
 | 카테고리 | 런타임 | 주입 방식 | 디렉토리 |
 |----------|--------|-----------|----------|
-| **A** | Claude Code | `notifications/claude/channel` emit (fakechat pairing 필요) | `packages/fakechat/server.ts` |
+| **A** | Claude Code | `notifications/claude/channel` emit | [`moonklabs/sprintable-agent-plugins`](https://github.com/moonklabs/sprintable-agent-plugins) `plugins/sprintable`(마켓플레이스 설치, story #2653) — `packages/fakechat/server.ts`는 같은 프로토콜의 로컬 테스트 하네스 |
 | **A** | Hermes Agent — dev (Python) | `handle_message()` → 세션 주입 | `connectors/hermes-sprintable/` |
 | **A** | Hermes Agent — prod (Python) | `handle_message()` → 세션 주입 (`SPRINTABLE_PROD_*`) | `connectors/hermes-sprintable-prod/` |
 | **A** | OpenClaw (TS, ChannelPlugin) | `runtime.channel.inbound` | `connectors/openclaw-sprintable/` |

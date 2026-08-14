@@ -3673,6 +3673,7 @@
     "connectConfigVerifiedBadge": "설정 저장됨 · 도구 전달 미확인",
     "kitOrientingWakeLabel": "② 깨우기",
     "kitOrientingWakeBody_channel-plugin": "채널 플러그인이 세션을 깨웁니다. 이 플러그인을 받는 경로는 아직 제공하지 않습니다.",
+    "kitOrientingWakeBody_channel-plugin-marketplace": "채널 플러그인이 세션을 깨웁니다. 아래 명령으로 설치합니다: <code>{path}</code> (설치 자체는 연결 확인이 아닙니다 — 실제 연결 여부는 배지로 확인합니다)",
     "kitOrientingWakeBody_connector-host": "커넥터 호스트가 세션을 구동합니다. 이 커넥터를 받는 경로는 아직 제공하지 않습니다.",
     "kitOrientingWakeBody_connector-sidecar": "사이드카가 클라우드 에이전트의 실행을 관리합니다. 이 사이드카를 받는 경로는 아직 제공하지 않습니다.",
     "kitOrientingWakeBody_connector-sdk": "직접 연동으로 세션을 구동합니다. 참조 SDK를 받는 경로는 아직 제공하지 않습니다.",
