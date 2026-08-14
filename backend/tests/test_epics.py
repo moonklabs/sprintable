@@ -185,8 +185,12 @@ async def test_list_epics_includes_story_aggregates():
         session.execute = _paginated_execute(
             1, [_mock_epic()], story_rows=[_story_agg_row(EPIC_ID, 11, 9)]
         )
-        async with client as c:
-            resp = await c.get("/api/v2/epics")
+        # story #2642(2026-08-14, 재발 방지 3차): _paginated_execute가 고정 순서 side_effect
+        # 큐라 신규 slug 쿼리가 끼면 뒤 소비자들이 한 칸씩 밀린다 — no-op patch로 격리(다른
+        # 11건과 동형, 이 테스트의 관심사는 story 집계이지 slug가 아니다).
+        with patch("app.routers.goals._attach_org_project_slugs", new_callable=AsyncMock):
+            async with client as c:
+                resp = await c.get("/api/v2/epics")
         assert resp.status_code == 200
         body = resp.json()
         assert body[0]["total_stories"] == 11
@@ -266,7 +270,9 @@ async def test_create_epic_201():
     client, session, app = await _client()
     try:
         epic = _mock_epic()
-        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+        with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
+             patch("app.routers.goals._attach_org_project_slugs", new_callable=AsyncMock):
+            # story #2642(2026-08-14, 재발 방지 3차): 다른 create/update epic 테스트들과 동형.
             mock_create.return_value = epic
 
             async with client as c:

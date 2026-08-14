@@ -155,7 +155,10 @@ async def test_create_epic_with_intent_sets_pending():
 
     pending_epic = _base_epic_mock(outcome_status="pending")
 
-    with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+    with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
+         patch("app.routers.goals._attach_org_project_slugs", new_callable=AsyncMock):
+        # story #2642(2026-08-14, 재발 방지 3차 — epics는 goals.py의 별칭 마운트라 URL-grep이
+        # /api/v2/goals만 찾고 이 파일을 또 놓쳤다): slug 부착은 이 테스트의 관심사가 아니다.
         mock_create.return_value = pending_epic
         try:
             async with client as c:
@@ -186,7 +189,9 @@ async def test_create_epic_without_intent_stays_na():
     na_epic.metric_definition = None
     na_epic.measure_after = None
 
-    with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create:
+    with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
+         patch("app.routers.goals._attach_org_project_slugs", new_callable=AsyncMock):
+        # story #2642(2026-08-14, 재발 방지 3차): test_create_epic_with_intent_sets_pending과 동형.
         mock_create.return_value = na_epic
         try:
             async with client as c:
@@ -217,7 +222,9 @@ async def test_update_epic_intent_triggers_pending_transition():
     updated = _base_epic_mock(outcome_status="pending")
 
     with patch("app.repositories.goal.GoalRepository.get", new_callable=AsyncMock) as mock_get, \
-         patch("app.repositories.base.BaseRepository.update", new_callable=AsyncMock) as mock_update:
+         patch("app.repositories.base.BaseRepository.update", new_callable=AsyncMock) as mock_update, \
+         patch("app.routers.goals._attach_org_project_slugs", new_callable=AsyncMock):
+        # story #2642(2026-08-14, 재발 방지 3차): 위 create_epic 테스트들과 동형.
         mock_get.return_value = current
         mock_update.return_value = updated
         try:
@@ -244,7 +251,9 @@ async def test_update_epic_does_not_downgrade_from_hit():
     updated = _base_epic_mock(outcome_status="hit")
 
     with patch("app.repositories.goal.GoalRepository.get", new_callable=AsyncMock) as mock_get, \
-         patch("app.repositories.base.BaseRepository.update", new_callable=AsyncMock) as mock_update:
+         patch("app.repositories.base.BaseRepository.update", new_callable=AsyncMock) as mock_update, \
+         patch("app.routers.goals._attach_org_project_slugs", new_callable=AsyncMock):
+        # story #2642(2026-08-14, 재발 방지 3차): 위 테스트들과 동형.
         mock_get.return_value = current
         mock_update.return_value = updated
         try:
