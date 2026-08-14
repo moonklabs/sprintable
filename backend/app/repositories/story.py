@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, case, exists, func, select, true
+from sqlalchemy import and_, case, exists, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.hypothesis import HypothesisStoryLink
@@ -20,6 +21,9 @@ _PRIORITY_ORDER = case(
 )
 
 
+_PURE_STORY_NUMBER_RE = re.compile(r"^#?(\d+)$")
+
+
 def _title_search_filter(q: str):
     """story #2619 fix(페드루 판정, 2026-08-14) — `list()`/`list_board()`/`list_backlog()`
     3곳이 전부 `Story.title.ilike(f"%{q}%")`를 각자 심고 있었다(오늘의 3사본=내일의
@@ -28,11 +32,32 @@ def _title_search_filter(q: str):
     `q` 전체를 하나의 리터럴 연속 substring으로만 봐서 제목 단어들이어도 **어순이 다르면
     매치 실패**했다(실사례: "무인간 대화 체인 게이트"는 실제 제목 "체인 게이트의 «무인간
     대화»"와 어순이 반대라 0건 — #2619 실측). 토큰이 하나도 없으면(공백뿐인 q) 무필터로
-    폴백(true) — 호출부의 `if q:` 가드가 걸러내지 못하는 이 경계를 여기서 안전하게 흡수."""
+    폴백(true) — 호출부의 `if q:` 가드가 걸러내지 못하는 이 경계를 여기서 안전하게 흡수.
+
+    story #2645(미르코 실사용 발견, 2026-08-14) — 스토리 «번호»는 제목에 리터럴로 없다
+    (별도 `story_number` 컬럼)라 title ILIKE만으로는 q="2642" 같은 번호 검색이 구조적으로
+    항상 0건이었다. q(공백 트림 후)가 단일 토큰이고 순수 숫자 또는 `#`+숫자면
+    (`_PURE_STORY_NUMBER_RE`), title 매치와 `story_number` 정확 일치를 **OR 결합**(PO
+    조건①) — «없다»로 오독해 중복 생성/기존 결정 미발견을 제조하는 #2619와 같은 해악
+    클래스(원인 축만 다름)를 막는다. OR이라 제목에도 그 숫자가 리터럴로 존재하는 케이스
+    (예: 제목에 "2024")는 두 채널이 겹쳐도 자연히 단일 행으로 매치될 뿐 중복이 생기지
+    않고, 서로 다른 두 스토리(제목에 "2024"가 든 것과 실제 #2024)가 둘 다 있으면 **둘 다
+    반환**된다(조건② 정의 — 한쪽이 다른 쪽을 가리지 않는다). 이 정확일치는 명시
+    `story_number` 파라미터(라우터 :147)와 동일하게 project_id 등 다른 필터와는 이 헬퍼가
+    아니라 **호출부의 둘러싼 AND**로 스코프된다(project 무지정 org-wide 검색 시 번호가
+    project간 재사용됐으면 여러 project의 동일 번호가 잡힐 수 있음 — 기존 명시
+    `story_number` 파라미터도 이미 같은 특성이라 새 리스크 아님). 다중 토큰(예: "스토리
+    2645")은 이 분기를 타지 않는다(PO 스펙이 "q가 순수 숫자"로 명시 — 섞인 쿼리까지
+    넓히는 것은 이 스토리 범위 밖, 추측 금지)."""
     tokens = [t for t in q.split() if t]
     if not tokens:
         return true()
-    return and_(*(Story.title.ilike(f"%{t}%") for t in tokens))
+    title_clause = and_(*(Story.title.ilike(f"%{t}%") for t in tokens))
+    if len(tokens) == 1:
+        m = _PURE_STORY_NUMBER_RE.match(tokens[0])
+        if m:
+            return or_(title_clause, Story.story_number == int(m.group(1)))
+    return title_clause
 
 
 def _unattached_clause():
