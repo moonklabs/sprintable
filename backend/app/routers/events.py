@@ -1045,12 +1045,25 @@ async def publish_registry_event(
         conv.id, send_body, background_tasks, db=db, auth=auth, org_id=org_id,
     )
 
-    return {
+    # story #2636(P1b) 갭 1호 처방 — 전환 실측(가동 1시간, 페드루군)에서 실제로 걸린
+    # 정황: work_item이 보드에 미배정이면 work_item_stakeholders 해석이 빈 집합이라 발행은
+    # 201로 "성공"하는데 escalation·broadcast 둘 다 아무도 못 받는다 — 응답만 보면 정상
+    # 발행처럼 보여 조용한 무도달이 된다. 여기서 명시 경고 필드를 싣는다(MCP 쪽은
+    # sprintable_publish_event가 이 필드를 사람 문장으로 강조 — tools/events.py).
+    zero_reach = not escalation_ids and not broadcast_ids
+    result = {
         "conversation_id": str(conv.id),
         "message_id": msg_response["data"]["id"],
         "escalation_member_ids": [str(i) for i in escalation_ids],
         "broadcast_member_ids": [str(i) for i in broadcast_ids],
+        "zero_reach_warning": zero_reach,
     }
+    if zero_reach:
+        result["warning"] = (
+            "발행은 성공했으나 escalation·broadcast 대상이 모두 0명입니다 — "
+            "work_item이 미배정이거나 routing이 아무도 가리키지 않습니다."
+        )
+    return result
 
 
 class EventDefinitionResponse(BaseModel):
@@ -1090,3 +1103,179 @@ async def list_event_definitions(
         )
         for r in rows
     ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# story #2636(P1b) — org 커스텀 이벤트 등록 API. doc event-registry-p1b-custom-registration-
+# detail. #2632가 확定해 둔 게이트 3종(validate_event_definition_key·validate_event_routing
+# (allow_server_derived=False)·validate_event_payload_schema_shape)을 그대로 소비한다 — 새
+# 검증 로직을 여기서 만들지 않는다(그 세 함수가 이미 실 계약이자 실 테스트 대상).
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CreateEventDefinitionRequest(BaseModel):
+    key: str
+    payload_schema: dict
+    routing: dict
+
+
+class UpdateEventDefinitionRequest(BaseModel):
+    payload_schema: dict | None = None
+    routing: dict | None = None
+    enabled: bool | None = None
+
+
+class EventDefinitionDetailResponse(BaseModel):
+    id: str
+    key: str
+    org_id: str | None
+    payload_schema: dict
+    routing: dict
+    block_template: dict | None
+    enabled: bool
+    version: int
+    created_by: str | None
+
+
+def _event_definition_detail(d: "EventDefinition") -> EventDefinitionDetailResponse:
+    return EventDefinitionDetailResponse(
+        id=str(d.id), key=d.key, org_id=str(d.org_id) if d.org_id else None,
+        payload_schema=d.payload_schema, routing=d.routing,
+        block_template=d.block_template, enabled=d.enabled, version=d.version,
+        created_by=str(d.created_by) if d.created_by else None,
+    )
+
+
+async def _get_org_slug(db: AsyncSession, org_id: uuid.UUID) -> str:
+    from app.models.organization import Organization
+
+    slug = (await db.execute(
+        select(Organization.slug).where(Organization.id == org_id)
+    )).scalar_one_or_none()
+    if slug is None:
+        raise HTTPException(status_code=404, detail="organization not found")
+    return slug
+
+
+@router.post("/definitions", status_code=201, response_model=EventDefinitionDetailResponse)
+async def create_event_definition(
+    body: CreateEventDefinitionRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> EventDefinitionDetailResponse:
+    """POST /api/v2/events/definitions — story #2636 AC1(스키마 gate)·AC2(escalation-none).
+
+    org admin/owner 전용(_is_org_admin, story #2391 S19와 동형 privilege 게이트). key
+    네임스페이스(org.{자기 slug}.*)·payload_schema shape(additionalProperties:false 필수)·
+    routing(server_derived 금지, target=none만 예외)을 #2632/#2636이 확定한 게이트 3종으로
+    검증 — 이 함수는 그 세 함수를 호출만 하고 새 규칙을 만들지 않는다.
+    """
+    from app.models.event_definition import EventDefinition
+    from app.services.event_definition_registry import (
+        InvalidEventDefinitionKeyError,
+        InvalidEventRoutingError,
+        InvalidPayloadSchemaError,
+        validate_event_definition_key,
+        validate_event_payload_schema_shape,
+        validate_event_routing,
+    )
+    from app.services.member_resolver import resolve_member
+
+    if not await _is_org_admin(db, org_id, uuid.UUID(auth.user_id)):
+        raise HTTPException(status_code=403, detail="org admin/owner required")
+
+    org_slug = await _get_org_slug(db, org_id)
+    try:
+        validate_event_definition_key(body.key, org_id=org_id, org_slug=org_slug)
+        validate_event_payload_schema_shape(body.payload_schema)
+        validate_event_routing(body.routing, allow_server_derived=False)
+    except (InvalidEventDefinitionKeyError, InvalidPayloadSchemaError, InvalidEventRoutingError) as e:
+        raise HTTPException(
+            status_code=400, detail={"code": "invalid_definition", "message": str(e)},
+        ) from e
+
+    existing = (await db.execute(
+        select(EventDefinition.id).where(
+            EventDefinition.org_id == org_id, EventDefinition.key == body.key,
+        )
+    )).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "definition_key_conflict", "message": f"key {body.key!r} already registered"},
+        )
+
+    sender = await resolve_member(auth, org_id, db)
+    definition = EventDefinition(
+        id=uuid.uuid4(), key=body.key, org_id=org_id,
+        payload_schema=body.payload_schema, routing=body.routing,
+        created_by=sender.id,
+    )
+    db.add(definition)
+    await db.commit()
+    await db.refresh(definition)
+    return _event_definition_detail(definition)
+
+
+@router.patch("/definitions/{definition_id}", response_model=EventDefinitionDetailResponse)
+async def update_event_definition(
+    definition_id: uuid.UUID,
+    body: UpdateEventDefinitionRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> EventDefinitionDetailResponse:
+    """PATCH /api/v2/events/definitions/{id} — story #2636: 수정(payload_schema/routing 변경
+    시 version 범프) + 삭제(enabled=false, soft — 발행 이력이 정의를 참조하므로 hard delete
+    금지). 플랫폼 프리셋(org_id IS NULL)은 이 org-scoped 경로로 절대 patch 불가 — org_id 일치
+    행만 대상(WHERE에 명시, 존재해도 org_id 안 맞으면 404로 정보 노출 0)."""
+    from app.models.event_definition import EventDefinition
+    from app.services.event_definition_registry import (
+        InvalidEventRoutingError,
+        InvalidPayloadSchemaError,
+        validate_event_payload_schema_shape,
+        validate_event_routing,
+    )
+
+    if not await _is_org_admin(db, org_id, uuid.UUID(auth.user_id)):
+        raise HTTPException(status_code=403, detail="org admin/owner required")
+
+    if body.payload_schema is None and body.routing is None and body.enabled is None:
+        raise HTTPException(status_code=400, detail="at least one field must be provided")
+
+    definition = (await db.execute(
+        select(EventDefinition).where(
+            EventDefinition.id == definition_id, EventDefinition.org_id == org_id,
+        )
+    )).scalar_one_or_none()
+    if definition is None:
+        raise HTTPException(status_code=404, detail="event definition not found")
+
+    content_changed = False
+    if body.payload_schema is not None:
+        try:
+            validate_event_payload_schema_shape(body.payload_schema)
+        except InvalidPayloadSchemaError as e:
+            raise HTTPException(
+                status_code=400, detail={"code": "invalid_definition", "message": str(e)},
+            ) from e
+        definition.payload_schema = body.payload_schema
+        content_changed = True
+    if body.routing is not None:
+        try:
+            validate_event_routing(body.routing, allow_server_derived=False)
+        except InvalidEventRoutingError as e:
+            raise HTTPException(
+                status_code=400, detail={"code": "invalid_definition", "message": str(e)},
+            ) from e
+        definition.routing = body.routing
+        content_changed = True
+    if body.enabled is not None:
+        definition.enabled = body.enabled
+
+    if content_changed:
+        definition.version += 1
+
+    await db.commit()
+    await db.refresh(definition)
+    return _event_definition_detail(definition)

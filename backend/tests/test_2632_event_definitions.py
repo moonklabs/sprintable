@@ -358,11 +358,17 @@ def test_routing_server_derived_rejects_target_outside_closed_vocabulary():
 
 def test_routing_org_custom_rejects_server_derived_kind():
     """story #2636(org 커스텀 등록)은 allow_server_derived=False로 호출해야 — 서버가 모르는
-    파생 역할을 등록하게 두면 안 된다."""
+    파생 역할을 등록하게 두면 안 된다.
+
+    ⚠️story #2636 AC2(PO 확定, 2026-08-14) 후속 정정: target="none"은 이제 이 금지의
+    명시적 예외다(아무것도 해석 안 하는 target이라 "서버가 모르는 파생 역할" 문제 자체가
+    없음 — event_definition_registry.py _validate_routing_leg 참조). 그래서 이 테스트는
+    여전히 금지돼야 하는 다른 target(work_item_stakeholders)으로 교체 — target=none 예외
+    자체의 회귀 가드는 tests/test_2636_custom_event_registration.py가 별도로 고정한다."""
     from app.services.event_definition_registry import InvalidEventRoutingError, validate_event_routing
 
     routing = {
-        "escalation": {"kind": "server_derived", "target": "none"},
+        "escalation": {"kind": "server_derived", "target": "work_item_stakeholders"},
         "broadcast": {
             "kind": "payload_field", "target": "custom", "member_id_field": "owner_member_id",
         },
