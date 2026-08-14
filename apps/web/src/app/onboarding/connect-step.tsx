@@ -401,7 +401,7 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
         )}
         {rail.showVerifyExamplePrompt && (
           <div className="flex items-center justify-between gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2 text-xs">
-            <span className="min-w-0 truncate text-info">
+            <span className="min-w-0 truncate text-foreground">
               {t('verifyExampleLabel')} <span className="font-mono text-foreground">&ldquo;{t('verifyExamplePrompt')}&rdquo;</span>
             </span>
             <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0">

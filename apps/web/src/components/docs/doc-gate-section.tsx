@@ -263,7 +263,7 @@ export function DocGateSection({
       {/* 반려 섹션: 사유 + 결재자 + 시각(현재 상태 prominent surface). */}
       {state === 'denied' ? (
         <div className="space-y-1.5 rounded-lg border border-destructive/30 bg-destructive/5 p-2.5">
-          <p className="text-xs font-medium text-destructive">{t('docGateDeniedReason')}</p>
+          <p className="text-xs font-medium text-foreground">{t('docGateDeniedReason')}</p>
           <p className="whitespace-pre-wrap text-xs text-foreground">{gate?.resolution_note?.trim() || t('docGateNoReason')}</p>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
             <span className="inline-flex items-center gap-1"><User className="size-3" />{resolveName(gate?.resolver_id)}</span>

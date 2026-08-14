@@ -1090,7 +1090,7 @@ export default function SettingsPage() {
                   <SectionCardHeader className="border-b border-destructive/20">
                     <div className="space-y-1">
                       <h2 className="text-base font-semibold text-destructive">위험 구역</h2>
-                      <p className="text-sm text-destructive/80">Organization을 삭제하면 모든 Project, Member, 데이터가 영구적으로 제거됩니다.</p>
+                      <p className="text-sm text-foreground">Organization을 삭제하면 모든 Project, Member, 데이터가 영구적으로 제거됩니다.</p>
                     </div>
                   </SectionCardHeader>
                   <SectionCardBody>
@@ -1406,11 +1406,11 @@ export default function SettingsPage() {
                 <SectionCardHeader className="border-b border-destructive/20">
                   <div className="space-y-1">
                     <h2 className="text-base font-semibold text-destructive">{t('dangerZone')}</h2>
-                    <p className="text-sm text-destructive/80">{t('dangerDescription')}</p>
+                    <p className="text-sm text-foreground">{t('dangerDescription')}</p>
                   </div>
                 </SectionCardHeader>
                 <SectionCardBody>
-                  <p className="mb-4 text-sm text-destructive/80">{t('deleteAccountDesc')}</p>
+                  <p className="mb-4 text-sm text-foreground">{t('deleteAccountDesc')}</p>
                   <Button variant="destructive" size="lg" onClick={() => setShowDeleteConfirm(true)}>
                     {t('deleteAccount')}
                   </Button>

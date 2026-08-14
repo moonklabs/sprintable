@@ -507,12 +507,12 @@ export function ChatBubble({
             />
           ) : isCmd ? (
             <div className={`min-w-0 max-w-full rounded-xl border border-info/30 bg-info/8 px-3.5 py-2 ${isMine ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
-              <div className="mb-1 flex items-center gap-1 text-[10px] font-medium text-info">
+              <div className="mb-1 flex items-center gap-1 text-[10px] font-medium text-foreground">
                 <Terminal className="h-3 w-3" aria-hidden />
                 {t('commandTag')}
               </div>
               <code className="block whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-sm">
-                <span className="text-info">/{cmdName}</span>
+                <span className="text-foreground">/{cmdName}</span>
                 <span className="text-muted-foreground">{message.content.slice(1 + (cmdName?.length ?? 0))}</span>
               </code>
             </div>
