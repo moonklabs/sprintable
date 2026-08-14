@@ -1037,9 +1037,13 @@ async def publish_registry_event(
 
     from app.routers.conversations import SendMessageRequest, send_message
 
+    # story #2637 AC 0-a: event_context → msg_metadata['event'](additive) — FE가 이 메시지를
+    # "이벤트 발행분"으로 인지하고 event_key로 event_definitions를 조회해 block_template
+    # 렌더러를 태울 근거. 렌더러 자체는 #2637 FE 레인(이 커밋은 스키마 배선만).
     send_body = SendMessageRequest(
         content=_render_event_message_content(definition.key, body.payload),
         mentioned_ids=list(escalation_ids),
+        event_context={"event_key": definition.key, "payload": body.payload},
     )
     msg_response = await send_message(
         conv.id, send_body, background_tasks, db=db, auth=auth, org_id=org_id,
@@ -1116,12 +1120,15 @@ class CreateEventDefinitionRequest(BaseModel):
     key: str
     payload_schema: dict
     routing: dict
+    # story #2637 §범위1/5: optional — 없으면 렌더러가 현행 제네릭 폴백을 쓴다(비회귀).
+    block_template: dict | None = None
 
 
 class UpdateEventDefinitionRequest(BaseModel):
     payload_schema: dict | None = None
     routing: dict | None = None
     enabled: bool | None = None
+    block_template: dict | None = None
 
 
 class EventDefinitionDetailResponse(BaseModel):
@@ -1172,9 +1179,11 @@ async def create_event_definition(
     """
     from app.models.event_definition import EventDefinition
     from app.services.event_definition_registry import (
+        InvalidBlockTemplateError,
         InvalidEventDefinitionKeyError,
         InvalidEventRoutingError,
         InvalidPayloadSchemaError,
+        validate_block_template,
         validate_event_definition_key,
         validate_event_payload_schema_shape,
         validate_event_routing,
@@ -1189,7 +1198,12 @@ async def create_event_definition(
         validate_event_definition_key(body.key, org_id=org_id, org_slug=org_slug)
         validate_event_payload_schema_shape(body.payload_schema)
         validate_event_routing(body.routing, allow_server_derived=False)
-    except (InvalidEventDefinitionKeyError, InvalidPayloadSchemaError, InvalidEventRoutingError) as e:
+        if body.block_template is not None:
+            validate_block_template(body.block_template)
+    except (
+        InvalidEventDefinitionKeyError, InvalidPayloadSchemaError,
+        InvalidEventRoutingError, InvalidBlockTemplateError,
+    ) as e:
         raise HTTPException(
             status_code=400, detail={"code": "invalid_definition", "message": str(e)},
         ) from e
@@ -1209,6 +1223,7 @@ async def create_event_definition(
     definition = EventDefinition(
         id=uuid.uuid4(), key=body.key, org_id=org_id,
         payload_schema=body.payload_schema, routing=body.routing,
+        block_template=body.block_template,
         created_by=sender.id,
     )
     db.add(definition)
@@ -1231,8 +1246,10 @@ async def update_event_definition(
     행만 대상(WHERE에 명시, 존재해도 org_id 안 맞으면 404로 정보 노출 0)."""
     from app.models.event_definition import EventDefinition
     from app.services.event_definition_registry import (
+        InvalidBlockTemplateError,
         InvalidEventRoutingError,
         InvalidPayloadSchemaError,
+        validate_block_template,
         validate_event_payload_schema_shape,
         validate_event_routing,
     )
@@ -1240,7 +1257,10 @@ async def update_event_definition(
     if not await _is_org_admin(db, org_id, uuid.UUID(auth.user_id)):
         raise HTTPException(status_code=403, detail="org admin/owner required")
 
-    if body.payload_schema is None and body.routing is None and body.enabled is None:
+    if (
+        body.payload_schema is None and body.routing is None
+        and body.enabled is None and body.block_template is None
+    ):
         raise HTTPException(status_code=400, detail="at least one field must be provided")
 
     definition = (await db.execute(
@@ -1269,6 +1289,15 @@ async def update_event_definition(
                 status_code=400, detail={"code": "invalid_definition", "message": str(e)},
             ) from e
         definition.routing = body.routing
+        content_changed = True
+    if body.block_template is not None:
+        try:
+            validate_block_template(body.block_template)
+        except InvalidBlockTemplateError as e:
+            raise HTTPException(
+                status_code=400, detail={"code": "invalid_definition", "message": str(e)},
+            ) from e
+        definition.block_template = body.block_template
         content_changed = True
     if body.enabled is not None:
         definition.enabled = body.enabled

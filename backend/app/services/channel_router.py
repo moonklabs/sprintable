@@ -203,12 +203,29 @@ async def route_message(
         conv_type: str = conv_row.type if conv_row else "group"
         conv_free_response: bool = bool(conv_row.free_response) if conv_row else False
 
-        scope_type_order: list[tuple[str, uuid.UUID | None]] = []
+        # story #2637 §0-c: msg_metadata['event']['event_key']가 있으면(이벤트 발행 메시지,
+        # #2637 AC 0-a가 태깅) "이 이벤트타입 전체 mute" 축을 conversation/project와 global
+        # 사이에 끼워 넣는다 — 사용자가 특정 대화를 명시로 커스텀했으면 그게 여전히 이기고
+        # (thread/conversation이 더 앞), 대화-구조 축이 전혀 없으면 event_key 축이 순수
+        # global보다 먼저 이긴다. __dict__ 전용 read는 _approval_payload와 동일 이유
+        # (getattr(msg, 'msg_metadata')의 미로드 컬럼 async lazy-load가 sync 컨텍스트에서
+        # greenlet_spawn 크래시를 낼 수 있어 회피).
+        event_key: str | None = None
+        _meta = (getattr(msg, "__dict__", None) or {}).get("msg_metadata")
+        if isinstance(_meta, dict):
+            _ev = _meta.get("event")
+            if isinstance(_ev, dict):
+                _ek = _ev.get("event_key")
+                event_key = _ek if isinstance(_ek, str) and _ek else None
+
+        scope_type_order: list[tuple[str, uuid.UUID | str | None]] = []
         if msg.thread_id:
             scope_type_order.append(("thread", msg.thread_id))
         scope_type_order.append(("conversation", msg.conversation_id))
         if conv_project_id:
             scope_type_order.append(("project", conv_project_id))
+        if event_key:
+            scope_type_order.append(("event_key", event_key))
         scope_type_order.append(("global", None))
 
         pref_rows = (await db.execute(
@@ -217,10 +234,13 @@ async def route_message(
             )
         )).scalars().all()
 
-        # member_id → {(scope_type, scope_id): NotificationPreference}
-        pref_map: dict[uuid.UUID, dict[tuple[str, uuid.UUID | None], NotificationPreference]] = {}
+        # member_id → {(scope_type, scope_id_or_event_key): NotificationPreference}. event_key-
+        # scope 행은 scope_id가 항상 NULL이라 그 자리에 event_key(str)를 대신 키로 쓴다 —
+        # scope_type_order도 동일 규약(("event_key", <str>))이라 조회가 그대로 맞아떨어진다.
+        pref_map: dict[uuid.UUID, dict[tuple[str, uuid.UUID | str | None], NotificationPreference]] = {}
         for p in pref_rows:
-            pref_map.setdefault(p.member_id, {})[(p.scope_type, p.scope_id)] = p
+            key_id = p.event_key if p.scope_type == "event_key" else p.scope_id
+            pref_map.setdefault(p.member_id, {})[(p.scope_type, key_id)] = p
 
         # 6. 수신자별 라우팅 결정 — sender_type 분기 없음(위 docstring, story #2603 P0).
         decisions: list[DeliveryDecision] = []
