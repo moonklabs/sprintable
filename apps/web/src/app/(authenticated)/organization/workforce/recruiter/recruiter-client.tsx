@@ -1208,7 +1208,10 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                     <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">3</span>
                     <div className="min-w-0">
                       <p className="text-xs font-bold text-foreground">{t('kitOrientingGuideLabel')}</p>
-                      <p className="text-xs text-muted-foreground">{t('kitOrientingGuideBody', { filename: guideFilename })}</p>
+                      {/* story #2648(boss 08-14 재현·PO 특定) — guideFilename(SPRINTABLE_ONBOARDING.md)이
+                          공백 없는 장토큰이라 word-break 부재 시 카드 라운드 경계를 뚫고 밖으로 샌다.
+                          alert.tsx/toast.tsx/chat-bubble.tsx가 쓰는 [overflow-wrap:anywhere] 관례를 그대로. */}
+                      <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">{t('kitOrientingGuideBody', { filename: guideFilename })}</p>
                     </div>
                   </div>
                 </div>
