@@ -114,7 +114,16 @@ is_worktree_clean() {
   [ -z "$(git -C "$path" status --porcelain 2>/dev/null)" ]
 }
 
-MAIN_WORKTREE="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
+# ⚠️실 스케일 함정(PO 첫 dry-run 실물 발견, 등록 worktree 264개 레포) — 여기 예전에
+# `awk '/^worktree /{print $2; exit}'`을 썼다. awk가 첫 매치에서 exit(0)하면 read
+# end가 즉시 닫히는데, git worktree list --porcelain 출력이 파이프 버퍼(보통 64KB)를
+# 넘는 실 스케일에서는 그 시점에 git이 아직 쓰는 중이라 SIGPIPE(141)를 맞고,
+# `set -euo pipefail`이 그걸 그대로 스크립트 전체 중단으로 전파했다 — exit=141,
+# 출력 0줄. 합성 테스트(worktree 몇 개=출력이 버퍼 안)에선 구조적으로 재현이
+# 안 된다(회귀가드는 reclaim-merged-worktrees.test.sh의 스트레스 시나리오 참고).
+# 고침: awk가 exit하지 않고 입력을 끝까지 그냥 다 읽게(첫 매치만 «출력»하고 계속
+# 읽기만 함) — git 쪽 write end가 스스로 EOF까지 안전하게 끝나게 둔다.
+MAIN_WORKTREE="$(git worktree list --porcelain | awk '/^worktree /{if(!f){print $2;f=1}}')"
 
 RECLAIMED=()
 KEPT=()

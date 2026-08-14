@@ -134,6 +134,48 @@ assert_exists "$(wt unpushed)" "unpushed"
 assert_exists "$(wt unmerged)" "unmerged"
 
 echo
+echo "== 실 스케일 SIGPIPE 회귀가드(PO 첫 dry-run 실물 발견, 등록 264개 레포에서 exit=141) =="
+# 파이프 버퍼(보통 64KB)를 넘는 `git worktree list --porcelain` 출력을 만들어야 재현된다 —
+# 합성 시나리오 5개(worktree 소수)로는 구조적으로 못 잡는다. detached worktree는 브랜치
+# 배타성이 없어(같은 커밋을 여러 worktree가 동시에 가리켜도 됨) 빠르게 대량 생성 가능.
+STRESS_COUNT=450
+for i in $(seq 1 "$STRESS_COUNT"); do
+  git -C "$MAIN" worktree add -q --detach "$WORK/stress-$i" develop >/dev/null 2>&1
+done
+
+STRESS_PORCELAIN_BYTES="$(git -C "$MAIN" worktree list --porcelain | wc -c | tr -d ' ')"
+echo "  porcelain 출력 크기: ${STRESS_PORCELAIN_BYTES} bytes(생성 ${STRESS_COUNT}개, 목표 >65536)"
+
+if STRESS_OUT="$(cd "$MAIN" && RECLAIM_BASE_BRANCH=develop "$SCRIPT" 2>&1)"; then
+  STRESS_EC=0
+else
+  STRESS_EC=$?
+fi
+
+if [ "$STRESS_EC" -eq 0 ]; then
+  echo "  ok   대량 worktree(${STRESS_COUNT}개, ${STRESS_PORCELAIN_BYTES}B) dry-run이 SIGPIPE 없이 완주(exit=0)"
+else
+  echo "  FAIL 대량 worktree dry-run이 exit=${STRESS_EC}로 죽었다(141=SIGPIPE 재발)"
+  echo "$STRESS_OUT" | head -5
+  FAIL=1
+fi
+
+if [[ "$STRESS_OUT" != *"KEEP     $MAIN"* ]] && [[ "$STRESS_OUT" != *"WOULD-RECLAIM $MAIN"* ]]; then
+  echo "  ok   MAIN_WORKTREE($MAIN) 자신은 KEEP/RECLAIM 목록에 안 나타난다(자기 자신 제외 로직 건재)"
+else
+  echo "  FAIL MAIN_WORKTREE가 회수 후보 목록에 나타났다 — 자기 자신 삭제 위험"
+  FAIL=1
+fi
+
+DETACHED_COUNT="$(printf '%s\n' "$STRESS_OUT" | grep -c "detached HEAD" || true)"
+if [ "$DETACHED_COUNT" -ge "$STRESS_COUNT" ]; then
+  echo "  ok   detached worktree ${DETACHED_COUNT}개 전부 KEEP(수동확인) 분류됨"
+else
+  echo "  FAIL detached worktree가 ${DETACHED_COUNT}개만 KEEP으로 잡혔다(기대 >= ${STRESS_COUNT} — 파싱 누락 의심)"
+  FAIL=1
+fi
+
+echo
 if [ "$FAIL" -eq 0 ]; then
   echo "ALL PASS"
   exit 0
