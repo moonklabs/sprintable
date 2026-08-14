@@ -662,7 +662,11 @@ export default function AgentDetailPage() {
           <div className="space-y-1.5 text-xs text-muted-foreground">
             <p>{t('agentFakechatEnvKeyInstruction')}</p>
             <p>{webhookActive ? t('agentFakechatWebhookActiveNote') : t('agentFakechatWebhookOffNote')}</p>
-            <p>{t('agentFakechatSuccessCheck')}</p>
+            <p>
+              {t.rich('agentFakechatSuccessCheck', {
+                code: (chunks) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">{chunks}</code>,
+              })}
+            </p>
           </div>
 
           {freshApiKey ? (

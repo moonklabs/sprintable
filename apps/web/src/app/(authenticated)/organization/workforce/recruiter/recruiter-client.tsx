@@ -1088,7 +1088,11 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                         {tSettings('agentFakechatEnvKeyInstruction')}
                       </p>
                       <p>{tSettings('agentFakechatWebhookOffNote')}</p>
-                      <p>{tSettings('agentFakechatSuccessCheck')}</p>
+                      <p>
+                        {tSettings.rich('agentFakechatSuccessCheck', {
+                          code: (chunks) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">{chunks}</code>,
+                        })}
+                      </p>
                     </div>
                   </div>
                 ) : null}

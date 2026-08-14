@@ -424,11 +424,19 @@ describe('recruiter-client STEP4 ②깨우기 — story #2434(정직한 "반쪽"
       // 같아지거나 플레인 {path}로 되돌아가면 t.rich가 값을 삼키거나 조용히 깨진다 —
       // 유나양 design:changes에서 실제로 걸린 자리, recruiter-client.wake-method-body.test.tsx가
       // 실 렌더로 다시 확認한다).
-      if (key.startsWith('kitOrientingWakeBody_')) {
+      // story #2648(PO 08-14 확定 (b)) — channel-plugin만 예외: packages/fakechat 내부
+      // 경로가 사용자 표면에 새던 것을 이 값에서만 제거했다(형제 3종은 각자의 path가
+      // fakechat이 아니라 무변경 — «비-actionable path 표시 자체의 존폐»는 별도 후속
+      // 판단거리로 PR에 명시, 유나 design 게이트에서 같이 소견).
+      if (key.startsWith('kitOrientingWakeBody_') && key !== 'kitOrientingWakeBody_channel-plugin') {
         expect(ko[key]).toContain('<code>');
         expect(en[key]).toContain('<code>');
         expect(ko[key]).not.toContain('<path>');
         expect(en[key]).not.toContain('<path>');
+      }
+      if (key === 'kitOrientingWakeBody_channel-plugin') {
+        expect(ko[key]).not.toContain('fakechat');
+        expect(en[key]).not.toContain('fakechat');
       }
     }
   });
