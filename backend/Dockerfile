@@ -1,4 +1,11 @@
-FROM python:3.12-slim
+# story #2640(P0 실사고, 2026-08-13 21:05): docker.io 익명 pull이 429로 Cloud Build를
+# 죽였다(build beb26450) — mirror.gcr.io로 전환해 그 rate-limit 표면 자체를 없앤다.
+# Docker daemon registry-mirror 설정이 아니라 FROM에 직접 참조하는 방식(Cloud Build 표준
+# `gcr.io/cloud-builders/docker` 스텝은 daemon.json을 못 건드림) — 실측(2026-08-14, 디디):
+# 흔치 않은 태그도 온디맨드 fetch-through 성공, 존재하지 않는 태그는 정상 404("not found") —
+# 캐시 미스가 조용히 깨지는 새 실패 모드가 아님을 확認. ghcr.io(uv 바이너리, 아래)는
+# docker.io가 아니라 이번 스코프 밖(story AC가 docker.io만 대상).
+FROM mirror.gcr.io/library/python:3.12-slim
 
 WORKDIR /app
 
