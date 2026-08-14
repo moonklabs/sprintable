@@ -15,7 +15,7 @@ from __future__ import annotations
 import io
 import logging
 import os
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.services.asset_registry import path_in_source_scope
 from app.services.storage import get_storage_provider
@@ -179,7 +179,14 @@ async def build_attachment_context(
                 continue
             if not _append(f"![{name}]({signed})"):
                 break
-            images.append({"url": signed, "name": name, "mime": ctype or f"image/{ext or 'png'}"})
+            # story #2650: 만료 시각 동반 — 소비자(플러그인 등)가 만료를 판별 못 하면 TTL(30분)
+            # 지난 뒤 조용한 403으로 fetch가 실패한다(PO 지적). 서명 URL 자체는 절대 로그에
+            # 안 찍는다(호출부도 동일 — count만 로깅).
+            expires_at = (datetime.now(timezone.utc) + _SIGNED_URL_TTL).isoformat()
+            images.append({
+                "url": signed, "name": name, "mime": ctype or f"image/{ext or 'png'}",
+                "expires_at": expires_at,
+            })
             continue
 
         # 미지원 형식 안내

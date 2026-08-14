@@ -61,9 +61,29 @@ async def test_image_emits_signed_url_markdown_and_struct(monkeypatch):
     # content: 마크다운 이미지 링크(멀티모달 에이전트 fetch+view)
     assert "![chart.png](https://signed/url?sig=abc)" in text
     assert "이미지 분석은 준비 중" not in text  # 옛 placeholder 제거
-    # 구조화 images 필드
-    assert images == [{"url": "https://signed/url?sig=abc", "name": "chart.png", "mime": "image/png"}]
+    # 구조화 images 필드 — story #2650: expires_at 동반(소비자가 만료 판별 가능하게, PO 지적)
+    assert len(images) == 1
+    assert images[0]["url"] == "https://signed/url?sig=abc"
+    assert images[0]["name"] == "chart.png"
+    assert images[0]["mime"] == "image/png"
+    assert images[0]["expires_at"]  # ISO8601 문자열, 비어있지 않음
     fetch.assert_not_awaited()  # 이미지는 백엔드 다운로드/vision 안 함
+
+
+@pytest.mark.anyio
+async def test_image_expires_at_matches_ttl_window(monkeypatch):
+    """story #2650: expires_at이 _SIGNED_URL_TTL(30분) 근처의 실제 미래 시각인지 pin."""
+    from datetime import datetime, timezone
+
+    from app.services import attachment_context as ac
+
+    monkeypatch.setattr(ac, "_signed_read_url", AsyncMock(return_value="https://signed/url"))
+    before = datetime.now(timezone.utc)
+    _text, images = await _build(ac, [_att("chart.png", "image/png")])
+    after = datetime.now(timezone.utc)
+
+    expires_at = datetime.fromisoformat(images[0]["expires_at"])
+    assert before + ac._SIGNED_URL_TTL <= expires_at <= after + ac._SIGNED_URL_TTL
 
 
 @pytest.mark.anyio
