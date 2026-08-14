@@ -420,19 +420,17 @@ describe('recruiter-client STEP4 ②깨우기 — story #2434(정직한 "반쪽"
     ]) {
       expect(ko[key], `ko.${key}`).toBeTruthy();
       expect(en[key], `en.${key}`).toBeTruthy();
-      // t.rich가 소비할 <code> 태그가 body 값들엔 살아있어야 한다(태그명이 인자명 path와
-      // 같아지거나 플레인 {path}로 되돌아가면 t.rich가 값을 삼키거나 조용히 깨진다 —
-      // 유나양 design:changes에서 실제로 걸린 자리, recruiter-client.wake-method-body.test.tsx가
-      // 실 렌더로 다시 확認한다).
-      // story #2648(PO 08-14 확定 (b)) — channel-plugin만 예외: packages/fakechat 내부
-      // 경로가 사용자 표면에 새던 것을 이 값에서만 제거했다(형제 3종은 각자의 path가
-      // fakechat이 아니라 무변경 — «비-actionable path 표시 자체의 존폐»는 별도 후속
-      // 판단거리로 PR에 명시, 유나 design 게이트에서 같이 소견).
-      if (key.startsWith('kitOrientingWakeBody_') && key !== 'kitOrientingWakeBody_channel-plugin') {
-        expect(ko[key]).toContain('<code>');
-        expect(en[key]).toContain('<code>');
-        expect(ko[key]).not.toContain('<path>');
-        expect(en[key]).not.toContain('<path>');
+      // story #2652(유나 design 게이트 소견, 2026-08-14) — #2648 Part1에서 channel-plugin만
+      // 비-actionable path 노출이 빠졌던 것을 형제 3종(connector-host/sidecar/sdk)까지
+      // 마저 통일: kitOrientingWakeBody_* 4종 전부 <code>(path 노출) 없이 같은 구조로
+      // "받는 경로는 아직 제공하지 않습니다"만 말한다. WakeMethodBody의 path/code t.rich
+      // 인자 자체는 남겨둔다(메시지가 <code>를 다시 쓰게 되면 즉시 값이 채워지도록) —
+      // recruiter-client.wake-method-body.test.tsx가 실 렌더로 무노출을 재확인한다.
+      if (key.startsWith('kitOrientingWakeBody_')) {
+        expect(ko[key], `ko.${key}`).not.toContain('<code>');
+        expect(en[key], `en.${key}`).not.toContain('<code>');
+        expect(ko[key], `ko.${key}`).not.toContain('{path}');
+        expect(en[key], `en.${key}`).not.toContain('{path}');
       }
       if (key === 'kitOrientingWakeBody_channel-plugin') {
         expect(ko[key]).not.toContain('fakechat');

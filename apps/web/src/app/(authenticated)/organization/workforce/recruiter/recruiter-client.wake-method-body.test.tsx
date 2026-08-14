@@ -53,12 +53,17 @@ describe('WakeMethodBody (story #2434) — path가 실제로 DOM에 렌더되는
     expect(container.textContent).toContain('채널 플러그인');
   });
 
-  it('ko connector-host: path 문자열이 DOM 텍스트로 실제 존재한다', async () => {
+  // story #2652(유나 design 게이트 소견, 2026-08-14) — #2648 Part1에서 channel-plugin만
+  // 빠졌던 통일을 형제 3종까지 마저 적용: connectors/codex-sprintable/ 같은 모노레포
+  // 내부 경로가 "받는 경로는 아직 제공하지 않습니다" 옆에 자기모순으로 노출되던 것을 제거.
+  it('ko connector-host: 내부 경로가 더는 안 보인다(story #2652)', async () => {
     await act(async () => {
       root.render(wrap('ko', <WakeMethodBody method="connector-host" path="connectors/codex-sprintable/" />));
     });
-    expect(container.textContent).toContain('connectors/codex-sprintable/');
+    expect(container.textContent).not.toContain('connectors/codex-sprintable/');
     expect(container.textContent).not.toContain('()');
+    expect(container.textContent).toContain('커넥터 호스트');
+    expect(container.querySelector('span.font-mono')).toBeNull();
   });
 
   it('en channel-plugin: packages/fakechat 내부 경로가 더는 안 보인다(story #2648)', async () => {
@@ -70,21 +75,33 @@ describe('WakeMethodBody (story #2434) — path가 실제로 DOM에 렌더되는
     expect(container.textContent).toContain('channel plugin');
   });
 
-  it('en connector-host: path 문자열이 DOM 텍스트로 실제 존재한다', async () => {
+  it('en connector-host: 내부 경로가 더는 안 보인다(story #2652)', async () => {
     await act(async () => {
       root.render(wrap('en', <WakeMethodBody method="connector-host" path="connectors/codex-sprintable/" />));
     });
-    expect(container.textContent).toContain('connectors/codex-sprintable/');
+    expect(container.textContent).not.toContain('connectors/codex-sprintable/');
     expect(container.textContent).not.toContain('()');
+    expect(container.querySelector('span.font-mono')).toBeNull();
   });
 
-  it('path는 명령 대상이 아니라 이름으로 강등된다 — 링크 색·밑줄 클래스가 없다', async () => {
+  it('ko connector-sidecar: 내부 경로가 더는 안 보인다(story #2652)', async () => {
     await act(async () => {
-      root.render(wrap('ko', <WakeMethodBody method="connector-host" path="connectors/codex-sprintable/" />));
+      root.render(wrap('ko', <WakeMethodBody method="connector-sidecar" path="connectors/cloud-agent-sidecar/" />));
     });
-    const code = container.querySelector('span.font-mono');
-    expect(code?.textContent).toBe('connectors/codex-sprintable/');
-    expect(code?.className).not.toMatch(/text-info|underline/);
+    expect(container.textContent).not.toContain('connectors/cloud-agent-sidecar/');
+    expect(container.textContent).not.toContain('()');
+    expect(container.textContent).toContain('사이드카');
+    expect(container.querySelector('span.font-mono')).toBeNull();
+  });
+
+  it('ko connector-sdk: 내부 경로가 더는 안 보인다(story #2652)', async () => {
+    await act(async () => {
+      root.render(wrap('ko', <WakeMethodBody method="connector-sdk" path="packages/reference-sdk/" />));
+    });
+    expect(container.textContent).not.toContain('packages/reference-sdk/');
+    expect(container.textContent).not.toContain('()');
+    expect(container.textContent).toContain('참조 SDK');
+    expect(container.querySelector('span.font-mono')).toBeNull();
   });
 
   it('unknown은 t.rich를 안 쓰고 plain 문구를 보여준다(path 태그 없음)', async () => {
