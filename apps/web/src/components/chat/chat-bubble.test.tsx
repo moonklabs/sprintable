@@ -910,6 +910,21 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
     expect(container.textContent).toContain('⟨missing: payload.note⟩');
   });
 
+  it('story #2637 유나 design 스티어 — ⟨missing⟩ 마커는 콘텐츠와 구분되는 에러 상태 스타일(solid text-warning-strong, 알파·빨강 금지)로 렌더된다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={EVENT_MESSAGE} isMine={false}
+          eventDefinitionsByKey={{ 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: VALID_TEMPLATE, enabled: true, version: 1 } }}
+        />,
+      ));
+    });
+    const markerEl = Array.from(container.querySelectorAll('em')).find((e) => e.textContent === '⟨missing: payload.note⟩');
+    expect(markerEl).not.toBeUndefined();
+    expect(markerEl!.className).toContain('text-warning-strong');
+    expect(markerEl!.className).not.toContain('text-destructive');
+  });
+
   it('human_only 액션 — human 뷰어면 발행 버튼이 보인다', async () => {
     mockDashboardContext = { ...mockDashboardContext, currentMemberType: 'human' };
     await act(async () => {
@@ -923,7 +938,7 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('확認'))).toBe(true);
   });
 
-  it('human_only 액션 — agent 뷰어면 버튼 대신 무권한 안내만(UX 안내, 실 보안경계는 BE)', async () => {
+  it('human_only 액션 — agent 뷰어면 버튼은 disabled로 보이고 보조문구로 이유를 노출한다(무음 회색 버튼 금지, UX 안내·실 보안경계는 BE)', async () => {
     mockDashboardContext = { ...mockDashboardContext, currentMemberType: 'agent' };
     await act(async () => {
       root.render(wrap(
@@ -933,7 +948,9 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
         />,
       ));
     });
-    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('확認'))).toBe(false);
+    const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('확認'));
+    expect(btn).not.toBeUndefined();
+    expect(btn!.hasAttribute('disabled')).toBe(true);
     expect(container.textContent).toContain('권한이 없습니다');
   });
 

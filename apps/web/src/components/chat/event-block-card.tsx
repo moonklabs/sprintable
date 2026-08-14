@@ -22,16 +22,38 @@ interface EventBlockCardProps {
   fallbackContent: string;
 }
 
+// story #2637 — 유나 design 사전 스티어(08-14, PR 前 반영). 치환 실패(⟨missing: payload.x⟩)를
+// 콘텐츠와 구분되는 「에러 상태」로 보이게 한다 — solid text-warning-strong(#2594 패턴, 알파
+// 금지) + 미세 이탤릭. 빨강(destructive) 금지 — 치환 실패는 저자(템플릿) 실수지 사용자 위험이
+// 아니다. renderBlockTemplate은 완성된 문자열을 주므로, 이 정규식으로 다시 갈라 부분 스타일만
+// 입힌다(파서 자체를 세그먼트 구조로 바꾸지 않는다 — block-template.ts는 순수 문자열 계약 유지).
+const MISSING_MARKER_RE = /(⟨missing: payload\.[a-zA-Z0-9_]+⟩)/g;
+
+function renderTextWithMissingMarkers(text: string): React.ReactNode {
+  const parts = text.split(MISSING_MARKER_RE);
+  if (parts.length === 1) return text;
+  return parts.map((part, i) =>
+    MISSING_MARKER_RE.test(part)
+      ? <em key={i} className="italic text-warning-strong">{part}</em>
+      : <span key={i}>{part}</span>,
+  );
+}
+
 /**
  * story #2637 — event_definitions.block_template v1 렌더러. msg_metadata.event가 있는 메시지의
  * 챗 카드. block_template 없음(정의 자체가 없거나 아직 미시딩)은 AC2 비회귀 — 현행 제네릭 텍스트
  * 그대로 보여준다(새 카드로 지어내지 않는다).
  *
  * ⚠️ action_auth(human_only/role) 집행 — **보안 경계는 BE(publish_registry_event, definition-
- * level 검사, PO 08-14 확定)에 있다.** 이 컴포넌트의 «권한 없어 보이면 숨김/문구» 표시는
- * UX 안내일 뿐이다 — REST를 직접 때리면 이 UI를 거치지 않고도 도달할 수 있어(2091과 동형
- * 클래스), 여기서 버튼을 숨겼다고 그게 실 차단이라고 오인하면 안 된다. FE 게이트가 BE
- * 게이트보다 먼저 서빙되지 않도록(디디 후속 PR이 이 PR 상륙 전 조건, PO 확定) 조율 상태.
+ * level 검사 — story #2637 §범위3/#3037, PO 08-14 확定)에 있다.** 이 컴포넌트의 «권한 없어
+ * 보이면 숨김/문구» 표시는 UX 안내일 뿐이다 — REST를 직접 때리면 이 UI를 거치지 않고도
+ * 도달할 수 있어(2091과 동형 클래스), 여기서 버튼을 숨겼다고 그게 실 차단이라고 오인하면
+ * 안 된다. 실 거부는 BE가 403 `{code:"action_auth_denied", message}`로 내려준다(아래
+ * EventPublishActionButton의 catch가 그 message를 그대로 보여준다 — FE가 재구성 안 함).
+ *
+ * role 축 의미(#3037 리뷰 기록, 2026-08-14): `action_auth.role`은 **조직 role**(member/
+ * admin/owner — team_members.role, `/api/me`가 내려주는 그 값)이다. 직무 템플릿 slug(예:
+ * "backend-engineer")가 아니다 — 이름이 비슷해 헷갈리기 쉬운 축이라 명시한다.
  */
 export function EventBlockCard({ eventKey, payload, definition, fallbackContent }: EventBlockCardProps) {
   const t = useTranslations('chats');
@@ -50,7 +72,7 @@ export function EventBlockCard({ eventKey, payload, definition, fallbackContent 
   const blocks = renderBlockTemplate(parsed, payload);
 
   return (
-    <div className="min-w-0 max-w-full space-y-2 rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
+    <div className="min-w-0 max-w-full space-y-3 rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
       {blocks.map((block, i) => (
         <EventBlockRow
           key={i}
@@ -85,19 +107,22 @@ function EventBlockRow({
   currentRole: string | undefined;
   t: ReturnType<typeof useTranslations>;
 }) {
+  // story #2637 — 유나 design 스티어: 4블록 시각 위계(header 최상위 > fields 구조데이터 >
+  // text 본문 > actions 하단 액션열) — 렌더 «순서»는 템플릿 저자가 선언한 그대로 따르되
+  // (임의 재배열 안 함), 각 블록 타입의 폰트 크기/굵기로 위계만 표현한다.
   if (block.type === 'header') {
-    return <p className="text-sm font-semibold text-foreground">{block.text}</p>;
+    return <p className="text-base font-semibold text-foreground">{renderTextWithMissingMarkers(block.text)}</p>;
   }
   if (block.type === 'text') {
-    return <p className="text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]">{block.text}</p>;
+    return <p className="text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]">{renderTextWithMissingMarkers(block.text)}</p>;
   }
   if (block.type === 'fields') {
     return (
-      <dl className="space-y-1">
+      <dl className="space-y-1.5 rounded-lg bg-muted/40 px-2.5 py-2">
         {block.fields.map((f, i) => (
-          <div key={i} className="flex gap-1.5 text-xs">
-            <dt className="shrink-0 text-muted-foreground">{f.label}</dt>
-            <dd className="min-w-0 text-foreground [overflow-wrap:anywhere]">{f.value}</dd>
+          <div key={i} className="flex gap-2 text-xs">
+            <dt className="shrink-0 font-medium text-muted-foreground">{f.label}</dt>
+            <dd className="min-w-0 text-foreground [overflow-wrap:anywhere]">{renderTextWithMissingMarkers(f.value)}</dd>
           </div>
         ))}
       </dl>
@@ -105,7 +130,7 @@ function EventBlockRow({
   }
   // actions
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="flex flex-wrap items-center gap-2 pt-0.5">
       {block.actions.map((a, i) => {
         const authorized = isActionAuthorized(a.auth, currentMemberType, currentRole);
         return (
@@ -137,8 +162,18 @@ function EventPublishActionButton({
   const [error, setError] = useState<string | null>(null);
 
   if (!authorized) {
-    // UX 안내(위 컴포넌트 docstring 참조) — 실 보안경계 아님.
-    return <p className="text-[11px] text-muted-foreground">{t('eventActionUnauthorized')}</p>;
+    // story #2637 유나 design 스티어 — "무음 회색 버튼만 두지 말 것": 비활성 상태를 실제
+    // disabled 버튼으로 보여주고(어떤 액션이 막혔는지 시각적으로 남김) 바로 옆에 왜 막혔는지
+    // 보조문구를 둔다(호버 전제인 툴팁 단독 대신 — 터치 기기에서도 항상 보임).
+    return (
+      <div className="flex items-center gap-2">
+        <Button type="button" size="sm" disabled title={t('eventActionUnauthorized')}>
+          <Send className="h-3.5 w-3.5" aria-hidden />
+          {label}
+        </Button>
+        <p className="text-[11px] text-muted-foreground">{t('eventActionUnauthorized')}</p>
+      </div>
+    );
   }
   if (published) {
     return (
@@ -159,6 +194,9 @@ function EventPublishActionButton({
         body: JSON.stringify({ definition_key: definitionKey, payload }),
       });
       if (!res.ok) {
+        // story #2637 §범위3/#3037 — 403 action_auth_denied는 BE가 이유를 완성 문장으로
+        // 주므로(예: "이 이벤트(...)는 human 발행자만 허용합니다") FE가 재구성하지 않고
+        // 그대로 보여준다(BE가 실 권위이자 유일한 메시지 출처).
         const body = await res.json().catch(() => null) as { error?: { message?: string }; detail?: { message?: string } | string } | null;
         const msg = body?.error?.message ?? (typeof body?.detail === 'string' ? body.detail : body?.detail?.message) ?? `HTTP ${res.status}`;
         throw new Error(msg);
