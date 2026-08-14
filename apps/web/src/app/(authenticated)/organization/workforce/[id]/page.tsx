@@ -595,7 +595,7 @@ export default function AgentDetailPage() {
           {!canEditWebhook ? (
             <p className="text-xs text-muted-foreground">{t('webhookAdminOnly')}</p>
           ) : (
-            <MemberNotificationPreferencesSummary memberId={id} />
+            <MemberNotificationPreferencesSummary memberId={id} memberLabel={agent.name} />
           )}
         </SectionCardBody>
       </SectionCard>

@@ -218,7 +218,8 @@ describe('DeliveryContractModal — story #2623 pre-work(targetMemberId 대리 �
       ));
     });
     await act(async () => {});
-    expect(document.body.textContent).toContain('레이서 에이전트의 계약을 대신 편집하는 중');
+    expect(document.body.textContent).toContain('"레이서 에이전트"님을 대신해 편집 중');
+    expect(document.body.textContent).toContain('저장 시 그 멤버의 수신 설정이 바뀝니다');
   });
 
   it('targetMemberId가 있으면 group 대화여도 free_response 토글이 안 보인다(대리 편집 스코프 밖 — 대화 전역 축)', async () => {

@@ -134,22 +134,22 @@ export function DeliveryContractModal({
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="max-w-md overflow-hidden rounded-xl p-0" showCloseButton={false}>
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <div className="min-w-0">
-            <DialogTitle className="text-sm font-semibold text-foreground">{t('deliveryContractTitle')}</DialogTitle>
-            {/* story #2623 pre-work — 대리 편집 중임을 항상 눈에 띄게(누구 계약을 만지고 있는지
-                착각하면 사고 — «본인 계약인 줄 알고 바꿨는데 사실 남의 것»류 방지). */}
-            {targetMemberId && (
-              <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                {t('deliveryContractEditingOnBehalfOf', { name: targetMemberLabel ?? targetMemberId })}
-              </p>
-            )}
-          </div>
+          <DialogTitle className="text-sm font-semibold text-foreground">{t('deliveryContractTitle')}</DialogTitle>
           <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground">
             <X className="h-4 w-4" />
           </button>
         </div>
 
         <div className="max-h-[60vh] overflow-y-auto px-4 py-3">
+          {/* story #2623 — 유나 design 확定(08-14, #2623 협의 스레드): 대리 편집 중임을 항상
+              눈에 띄게(누구 계약을 만지고 있는지 착각하면 사고 — «본인 계약인 줄 알고 바꿨는데
+              사실 남의 것»류 방지). info 톤(위험 아니라 «대상 명시» — warning/빨강 금지)+결과를
+              명시하는 문구(저장하면 그 멤버의 설정이 바뀐다는 것까지). self 편집이면 배너 없음. */}
+          {targetMemberId && (
+            <div className="mb-3 rounded-lg border border-info/30 bg-info/8 px-3 py-2 text-xs text-foreground">
+              {t('deliveryContractEditingOnBehalfOf', { name: targetMemberLabel ?? targetMemberId })}
+            </div>
+          )}
           {loading ? (
             <div className="py-6 text-center text-sm text-muted-foreground">{t('deliveryContractLoading')}</div>
           ) : (
