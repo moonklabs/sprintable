@@ -108,6 +108,54 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
     expect(document.querySelector('a[href="/goals/e-9"]')).not.toBeNull();
   });
 
+  // story #2642(PO 08-14, «FE 단독 가능» 조각) — doc_id가 있는 artifact도 이제 #2168(doc
+  // own-href)과 동형으로 그 doc 자신이 속한 project로 직행한다. 이전엔 project 무관 bare
+  // `/docs?id=`(그나마도 [ws]/[proj]/docs 라이브 라우트가 `?id=`를 안 읽어 죽은 링크였다 —
+  // 이 처방이 그 사각도 같이 없앤다).
+  it('doc_id가 있는 artifact — 그 doc이 속한 project로 직행한다(#2168 재사용, 새 BE 없음)', async () => {
+    stubFetch(async (url) => {
+      if (url.includes('/api/visual-artifacts/')) {
+        if (url.includes('/exports')) return { ok: true, json: async () => ({ data: [] }) };
+        if (url.includes('/versions/')) return { ok: false, json: async () => ({}) };
+        return { ok: true, json: async () => ({ data: { story_id: null, epic_id: null, doc_id: 'doc-9' } }) };
+      }
+      if (url.includes('/api/docs/preview')) {
+        expect(url).toContain('doc-9');
+        return { ok: true, json: async () => ({ data: { slug: 'other-doc', orgSlug: 'acme', projectSlug: 'content', projectId: 'p-9' } }) };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    await act(async () => {
+      root.render(<EmbedCard entity_type="artifact" entity_id="a4" title="목업 C" status={null} />);
+    });
+    await openCard();
+    await flush(8);
+    const link = document.querySelector('a[href="/acme/content/docs/other-doc/view"]');
+    expect(link).not.toBeNull();
+    expect(link!.textContent).toContain('담긴 곳으로 갑니다');
+    // 옛 project-무관 bare 링크가 더는 안 남아야 한다(진짜로 직행 링크로 교체됐는지 확認).
+    expect(document.querySelector('a[href="/docs?id=doc-9"]')).toBeNull();
+  });
+
+  it('doc_id가 있는 artifact — doc preview 조회 실패 시 기존 bare `/docs?id=`로 우아하게 폴백한다(회귀 아님, ④ 원칙)', async () => {
+    stubFetch(async (url) => {
+      if (url.includes('/api/visual-artifacts/')) {
+        if (url.includes('/exports')) return { ok: true, json: async () => ({ data: [] }) };
+        if (url.includes('/versions/')) return { ok: false, json: async () => ({}) };
+        return { ok: true, json: async () => ({ data: { story_id: null, epic_id: null, doc_id: 'doc-10' } }) };
+      }
+      return { ok: false, json: async () => ({}) }; // /api/docs/preview 도 이걸로 실패.
+    });
+    await act(async () => {
+      root.render(<EmbedCard entity_type="artifact" entity_id="a5" title="목업 D" status={null} />);
+    });
+    await openCard();
+    await flush(8);
+    const link = document.querySelector('a[href="/docs?id=doc-10"]');
+    expect(link).not.toBeNull();
+    expect(link!.textContent).toContain('담긴 곳으로 갑니다');
+  });
+
   it('전부 null(독립 artifact)이면 회색·행동0 "열 수 있는 화면이 없습니다"(거짓 링크 금지)', async () => {
     stubFetch(async () => ({
       ok: true,

@@ -369,6 +369,40 @@ export function EntityPreviewModal({
     return () => { cancelled = true; };
   }, [entityType, entityId, hasFetchStrategy]);
 
+  // story #2642(PO 08-14, «FE 단독 가능» 조각) — artifact의 부모가 doc이면(via-parent) 그
+  // doc이 실제로 속한 project로 직행한다 — #2168이 doc own-href에 이미 증명한 처방(/api/docs/
+  // preview 재사용, 새 BE 없음) 그대로 via-parent 경로에도 적용한다. 위 effect가 artifact
+  // 자신의 detail(story_id/epic_id/doc_id)을 먼저 채운 *뒤에* doc_id가 있으면 이 effect가
+  // 이어 붙는다(체이닝) — docPreview state를 재사용(모달이 열릴 때마다 언마운트→새 인스턴스라
+  // 이전 엔티티의 값이 새는 레이스 없음, 위 {showModal && <EntityPreviewModal .../>} 패턴).
+  useEffect(() => {
+    if (entityType !== 'artifact') return;
+    const docId = (detail as { doc_id?: string | null } | null)?.doc_id;
+    if (!docId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const previewRes = await fetch(`/api/docs/preview?q=${encodeURIComponent(docId)}`);
+        if (!previewRes.ok) throw new Error();
+        const previewJson = (await previewRes.json()) as {
+          data?: { slug?: string; projectId?: string; orgSlug?: string; projectSlug?: string | null };
+        };
+        const slug = previewJson.data?.slug;
+        const docProjectId = previewJson.data?.projectId;
+        if (!slug || !docProjectId || cancelled) return;
+        setDocPreview({
+          slug, projectId: docProjectId,
+          orgSlug: previewJson.data?.orgSlug ?? '',
+          projectSlug: previewJson.data?.projectSlug ?? null,
+        });
+      } catch {
+        // 조용히 실패 — 아래 artifact 분기가 bare `/docs?id=` 폴백으로 떨어진다(④ 원칙,
+        // 카드 전체를 안 죽인다 — AC4와 동형).
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [entityType, detail]);
+
   const colorClass = ENTITY_COLORS[entityType] ?? GRAY_STATE_COLOR;
   const label = title ?? entityId;
   // story #2262 AC2(2026-08-08, 쉬운 절반) — 호출부(EntityChip)는 status를 모르고 항상
@@ -411,10 +445,17 @@ export function EntityPreviewModal({
     // 위험이 없다). 우선순위는 story>epic>doc — 동시에 여럿 있을 수 없어(모델 제약은 아니지만
     // 실질적으로 최대 1개라는 그라운딩 전제) 순서 자체가 결과를 바꾸지 않는다.
     const d = detail as { story_id?: string | null; epic_id?: string | null; doc_id?: string | null } | null;
+    // story #2642 — doc 부모는 위 effect가 선조회한 docPreview가 있으면 #2168과 동형으로
+    // 직행(`/{ws}/{proj}/docs/{slug}/view`) — 없으면(preview 아직/실패) 기존 bare `/docs?id=`
+    // 폴백(④ 원칙, 회귀 아님). story/epic 부모는 아직 BE denormalize 대기 중(#2642 나머지
+    // 조각) — 그때까지 bare 그대로.
     const parentHref = d?.story_id ? `/board?story=${d.story_id}`
       : d?.epic_id ? `/goals/${d.epic_id}`
-      : d?.doc_id ? `/docs?id=${d.doc_id}`
-      : null;
+      : d?.doc_id
+        ? (docPreview && docPreview.orgSlug && docPreview.projectSlug
+            ? docViewUrl(docPreview.orgSlug, docPreview.projectSlug, docPreview.slug)
+            : `/docs?id=${d.doc_id}`)
+        : null;
     resolvedHref = parentHref;
     linkKind = parentHref ? 'via-parent' : null;
   } else if (entityType === 'evidence') {
