@@ -38,6 +38,20 @@ def _get_repo_read(
     return GoalRepository(session, org_id)
 
 
+async def _attach_org_project_slugs(session: AsyncSession, org_id: uuid.UUID, goals: list) -> None:
+    """story #2642: stories.py `_attach_org_project_slugs`와 동형 — org_slug(요청당 1쿼리)+
+    project_slug(distinct project_id 배치 1쿼리)를 transient attr로 부착(N+1 회피)."""
+    if not goals:
+        return
+    from app.services.entity_slug import resolve_org_slug, resolve_project_slugs
+
+    org_slug = await resolve_org_slug(session, org_id)
+    project_slug_map = await resolve_project_slugs(session, {g.project_id for g in goals})
+    for g in goals:
+        g.org_slug = org_slug
+        g.project_slug = project_slug_map.get(g.project_id)
+
+
 @router.get("", response_model=None)
 async def list_goals(
     response: Response,
@@ -89,6 +103,7 @@ async def list_goals(
         from app.services.project_auth import accessible_project_ids_in_org
         accessible = await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), org_id)
         goals = [g for g in goals if g.project_id in accessible]
+        await _attach_org_project_slugs(repo.session, org_id, goals)
         return [GoalResponse.model_validate(g) for g in goals]
 
     # ratchet round8(잔여 HIGH): project_id 필터(지정 시)에 caller 접근권 검증이 없어
@@ -125,12 +140,14 @@ async def list_goals(
         # 시도 안 하도록).
         if goals and order_by != "position":
             response.headers["X-Next-Cursor"] = goals[-1].created_at.isoformat()
+        await _attach_org_project_slugs(repo.session, org_id, goals)
         return [GoalResponse.model_validate(e) for e in goals]
 
     # ⛔직접 Response를 반환하면 위 `response: Response` 의존성에 건 헤더는 FastAPI가 안
     # 적용한다(반환한 Response 객체가 그대로 나간다) — 여기 JSONResponse에 같은 헤더를
     # 다시 건다.
     await repo.attach_glance_aggregates(goals)
+    await _attach_org_project_slugs(repo.session, org_id, goals)
     glance_response = JSONResponse(
         content=[
             GoalWithGlanceResponse.model_validate(e).model_dump(mode="json") for e in goals
@@ -191,6 +208,7 @@ async def create_goal(
     except Exception:  # noqa: BLE001
         _actor_id = None
     await emit_goal_created(session, org_id, goal, actor_id=_actor_id)
+    await _attach_org_project_slugs(session, org_id, [goal])
     return GoalResponse.model_validate(goal)
 
 
@@ -206,6 +224,7 @@ async def get_goal(
     # #2237: 형제(update_goal)와 동일한 project 접근권 가드 추가(기존엔 org-scope만 봤다).
     if not await has_project_access(repo.session, uuid.UUID(auth.user_id), goal.project_id, repo.org_id):
         raise HTTPException(status_code=404, detail="Goal not found")
+    await _attach_org_project_slugs(repo.session, repo.org_id, [goal])
     return GoalResponse.model_validate(goal)
 
 
@@ -276,6 +295,7 @@ async def bulk_update_goals(
     # STEER 커밋-모델(ff662876·선생님 재정의): 드래그 재정렬은 **이벤트 0**(순수 초안 저장)이다.
     # 인간이 로드맵을 A→B→다시A로 번복하는 사고과정은 사적 초안이라 실시간 이벤트로 새면 안 된다.
     # epic.reordered 발화는 명시적 조타 커밋(POST /goals/steer-dispatch)에서만 1회. 여기선 emit 없음.
+    await _attach_org_project_slugs(session, org_id, updated)
     return [GoalResponse.model_validate(e) for e in updated]
 
 
@@ -385,6 +405,7 @@ async def update_goal(
     goal = await repo.update(id, **data)
     if goal is None:
         raise HTTPException(status_code=404, detail="Goal not found")
+    await _attach_org_project_slugs(repo.session, repo.org_id, [goal])
     return GoalResponse.model_validate(goal)
 
 
@@ -536,6 +557,7 @@ async def transition_goal_endpoint(
         await emit_goal_status_changed(session, org_id, goal, _old_status, actor_id=caller.id)
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(goal)
+        await _attach_org_project_slugs(session, org_id, [goal])
         return GoalResponse.model_validate(goal)
     except GoalTransitionError as e:
         _codes = {

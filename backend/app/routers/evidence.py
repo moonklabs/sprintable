@@ -64,6 +64,13 @@ class EvidenceResponse(BaseModel):
     work_item_type='story'면 work_item_id 그 자체, 'task'면 그 task의 부모 story_id(2단
     조인) — FE가 evidence→task→story로 왕복 fetch하지 않도록 GET /{id} 응답에 얹는다."""
 
+    # story #2642(웹·칩 공통, 2026-08-14) — resolved_story_id와 동일 스코프(GET /{id}만,
+    # list는 미부착 — 기존 설계 그대로 유지). get_evidence가 이미 access 체크용으로
+    # _project_id_of_evidence를 계산해 두므로 그 값을 그대로 재사용해 slug만 얹는다(추가
+    # story join 불요, #2168 DocPreviewResponse와 동형 org_slug/project_slug 개념).
+    org_slug: str | None = None
+    project_slug: str | None = None
+
     model_config = {"from_attributes": True}
 
     # story #2314 AC5 — MCP mention 경로(_resolve_mention_content)가 title-미지정 mention을
@@ -187,8 +194,17 @@ async def get_evidence(
             select(Task.story_id).where(Task.id == evidence.work_item_id, Task.org_id == org_id)
         )).scalar_one_or_none()
 
+    from app.services.entity_slug import resolve_org_slug, resolve_project_slugs
+
+    org_slug = await resolve_org_slug(session, org_id)
+    project_slug_map = await resolve_project_slugs(session, {project_id})
+
     return EvidenceResponse.model_validate(evidence, from_attributes=True).model_copy(
-        update={"resolved_story_id": resolved_story_id}
+        update={
+            "resolved_story_id": resolved_story_id,
+            "org_slug": org_slug,
+            "project_slug": project_slug_map.get(project_id),
+        }
     )
 
 

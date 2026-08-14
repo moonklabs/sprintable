@@ -325,6 +325,19 @@ class StoryResponse(BaseModel):
     def _coerce_human_verified_at(cls, v):
         return v if isinstance(v, datetime) else None
 
+    # story #2642(웹·칩 공통, 2026-08-14) — 엔티티 «전체 보기» 착지가 뷰어의 현재 프로젝트로
+    # 새는 버그 fix: FE가 뷰어 컨텍스트 대신 이 스토리 자신의 org/project로 직행 URL을 짓게
+    # additive로 싣는다(#2168 DocPreviewResponse와 동일 패턴). org_slug는 항상 있음(Organization.
+    # slug NOT NULL)·project_slug는 nullable(Project.slug 미백필 행 존재, #2039). ORM 컬럼
+    # 아님 — 라우터가 model_validate 前 transient attr로 세팅(has_evidence 패턴 동형).
+    org_slug: str | None = None
+    project_slug: str | None = None
+
+    @field_validator("org_slug", "project_slug", mode="before")
+    @classmethod
+    def _coerce_slug_fields(cls, v):
+        return v if isinstance(v, str) else None
+
     # story #2282(E-CONNECT) AC1/AC2: 이 story를 가리키는 참조 토큰 — DocResponse와 동일
     # 단일 builder 재사용(app.services.reference_token.build_reference_token).
     @computed_field  # type: ignore[prop-decorator]

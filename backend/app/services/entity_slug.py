@@ -155,6 +155,49 @@ async def resolve_unique_project_slug(
         n += 1
 
 
+# story #2642 — 엔티티 칩 "전체 보기" 착지가 뷰어의 현재 프로젝트로 새는 버그(BE 절반):
+# 여러 엔티티 응답(story/goal/task/sprint/evidence/artifact/asset)에 org_slug/project_slug를
+# additive로 실어 FE가 뷰어 컨텍스트 대신 «엔티티 자신의» org/project로 직행 URL을 짓게 한다
+# (#2168 DocPreviewResponse가 이미 쓰던 패턴). 위 uniqueness 로직(write 축)과 달리 이건 순수
+# read 축이라 별도 섹션으로 — 같은 Organization.slug/Project.slug 컬럼을 다루는 같은 도메인이라
+# 파일은 공유한다.
+#
+# ⚠️N+1 주의(PO 판정, 2026-08-14): StoryResponse/TaskResponse 등은 list·단건 엔드포인트가
+# 같은 response_model을 공유한다(예: GET /stories, GET /stories/{id} 둘 다 StoryResponse) —
+# #2168 DocPreviewResponse의 "요청당 스칼라 쿼리 2개" 패턴을 list 직렬화 루프 안에서 행마다
+# 반복하면 실 N+1이 된다. org_slug는 요청 전체에서 org_id가 상수이므로 1쿼리, project_slug는
+# 그 응답에 등장하는 distinct project_id 집합 전체를 `IN (...)` 배치 1쿼리로 map해 dict 조회로
+# 바꾼다 — 호출부는 반드시 이 두 헬퍼를 "요청당 1회씩"만 불러야 한다(행마다 부르면 배치의
+# 의미가 없어진다).
+
+
+async def resolve_org_slug(session: AsyncSession, org_id: uuid.UUID) -> str:
+    """org_id → Organization.slug. org는 항상 slug를 가지므로(NOT NULL·unique) 존재가
+    보장된 호출부(이미 org_id로 인가 통과한 요청)에서만 쓴다."""
+    from app.models.organization import Organization
+
+    return (await session.execute(
+        select(Organization.slug).where(Organization.id == org_id)
+    )).scalar_one()
+
+
+async def resolve_project_slugs(
+    session: AsyncSession, project_ids: set[uuid.UUID] | list[uuid.UUID] | list[uuid.UUID | None],
+) -> dict[uuid.UUID, str | None]:
+    """project_id 집합 → slug 배치 조회(N+1 회피, story #2642). 결과에 없는 project_id는
+    호출부가 `.get(pid)`로 None 취급(project.slug nullable — #2039 이전 미백필 행 대응과
+    동일 규약, DocPreviewResponse의 scalar_one_or_none()과 동형 의미)."""
+    from app.models.project import Project
+
+    ids = {pid for pid in project_ids if pid is not None}
+    if not ids:
+        return {}
+    rows = (await session.execute(
+        select(Project.id, Project.slug).where(Project.id.in_(ids))
+    )).all()
+    return {pid: slug for pid, slug in rows}
+
+
 __all__ = [
     "slugify",
     "slugify_ascii",
@@ -166,4 +209,6 @@ __all__ = [
     "resolve_unique_workspace_slug",
     "is_project_slug_taken",
     "resolve_unique_project_slug",
+    "resolve_org_slug",
+    "resolve_project_slugs",
 ]

@@ -188,6 +188,7 @@ async def list_stories(
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
         await _attach_has_evidence(repo.session, stories)
         await _attach_has_hypothesis_or_goal(repo.session, stories)
+        await _attach_org_project_slugs(repo.session, repo.org_id, stories)
         return [StoryResponse.model_validate(s) for s in stories]
 
     # story #2188 ④-b(2026-07-25, 오르테가군 판정 — 의도된 제약, 코드 고칠 이유 없음):
@@ -210,6 +211,7 @@ async def list_stories(
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
         await _attach_has_evidence(repo.session, stories)
         await _attach_has_hypothesis_or_goal(repo.session, stories)
+        await _attach_org_project_slugs(repo.session, repo.org_id, stories)
         return [StoryResponse.model_validate(s) for s in stories]
 
     # CB-S4: status + project_id 조합 시 board 쿼리 (order_by + cursor + done 7일 제한)
@@ -236,6 +238,7 @@ async def list_stories(
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
         await _attach_has_evidence(repo.session, stories)
         await _attach_has_hypothesis_or_goal(repo.session, stories)
+        await _attach_org_project_slugs(repo.session, repo.org_id, stories)
         return [StoryResponse.model_validate(s) for s in stories]
 
     filters: dict = {}
@@ -274,6 +277,7 @@ async def list_stories(
             repo.session, repo.org_id, stories, boost_candidates_from,
         )
     await _attach_has_hypothesis_or_goal(repo.session, stories)
+    await _attach_org_project_slugs(repo.session, repo.org_id, stories)
     return [StoryResponse.model_validate(s) for s in stories]
 
 
@@ -384,6 +388,24 @@ async def _attach_has_hypothesis_or_goal(session: AsyncSession, stories: list[St
     for s in stories:
         if s.epic_id is not None or s.id in ids_with_hypothesis:
             s.has_hypothesis_or_goal = True
+
+
+async def _attach_org_project_slugs(
+    session: AsyncSession, org_id: uuid.UUID, stories: list[Story]
+) -> None:
+    """story #2642: 각 Story에 org_slug/project_slug(transient attr) — FE가 뷰어의 현재
+    프로젝트 대신 이 스토리 자신의 org/project로 직행 URL을 짓게 한다(#2168 DocPreviewResponse와
+    동형 패턴). N+1 회피 — org_slug는 요청당 1쿼리(org_id가 요청 전체에서 상수)·project_slug는
+    등장하는 distinct project_id 전체를 배치 조회(_attach_assignee_ids와 동형 배치 패턴)."""
+    if not stories:
+        return
+    from app.services.entity_slug import resolve_org_slug, resolve_project_slugs
+
+    org_slug = await resolve_org_slug(session, org_id)
+    project_slug_map = await resolve_project_slugs(session, {s.project_id for s in stories})
+    for s in stories:
+        s.org_slug = org_slug
+        s.project_slug = project_slug_map.get(s.project_id)
 
 
 async def _assert_story_project_access(
@@ -842,6 +864,7 @@ async def get_story(
     await _attach_assignee_ids(repo.session, repo.org_id, [story])
     await _attach_has_evidence(repo.session, [story])
     await _attach_has_hypothesis_or_goal(repo.session, [story])
+    await _attach_org_project_slugs(repo.session, repo.org_id, [story])
     return StoryResponse.model_validate(story)
 
 
@@ -1818,6 +1841,7 @@ async def bulk_update_stories(
     await _attach_assignee_ids(db, repo.org_id, updated)
     await _attach_has_evidence(db, updated)
     await _attach_has_hypothesis_or_goal(db, updated)
+    await _attach_org_project_slugs(db, repo.org_id, updated)
 
     # 응답(violation flag 포함) + violation 이벤트 페이로드를 commit 前에 빌드(commit 시 attr expire→
     # MissingGreenlet 방지·기존 results 빌드와 동일 시점). 이벤트 발화는 commit 後(/status 와 동일 순서).
@@ -2159,6 +2183,7 @@ async def update_story(
     await _attach_assignee_ids(db, repo.org_id, [story])
     await _attach_has_evidence(db, [story])
     await _attach_has_hypothesis_or_goal(db, [story])
+    await _attach_org_project_slugs(db, repo.org_id, [story])
     # story #2459 prod 회귀(2026-08-05): model_validate는 동기 호출이라 story의 어떤 컬럼이
     # unloaded 상태면(원인 미확定 — repo.update()가 flush+refresh 直後인데도 관측됨)
     # MissingGreenlet 500(await_only 호출 불가 — sync 컨텍스트에서 lazy load 시도)으로
@@ -2430,6 +2455,7 @@ async def update_story_status(
     await _attach_assignee_ids(db, repo.org_id, [story])
     await _attach_has_evidence(db, [story])
     await _attach_has_hypothesis_or_goal(db, [story])
+    await _attach_org_project_slugs(db, repo.org_id, [story])
     # story #2459 prod 회귀(2026-08-05): update_story와 동형 — model_validate 直前 명시
     # refresh로 unloaded 컬럼(예: updated_at) MissingGreenlet 500을 막는다.
     await db.refresh(story)

@@ -236,6 +236,13 @@ async def _load_detail(session: AsyncSession, artifact: VisualArtifact, version_
         select(ArtifactNode).where(ArtifactNode.version_id == version.id).order_by(ArtifactNode.sort_order)
     )).scalars().all()
     unresolved_counts = await _count_unresolved_comments(session, [artifact.id])
+    # story #2642: org_id/project_id는 artifact 자기 행에 이미 있어(부모 hop 불필요) 여기서
+    # 바로 slug 조회 — 이 함수는 항상 단건 artifact 1개로만 불려(3개 호출부 전부 루프 아님)
+    # N+1 걱정 없이 요청당 2쿼리(#2168 DocPreviewResponse와 동형 비용).
+    from app.services.entity_slug import resolve_org_slug, resolve_project_slugs
+
+    org_slug = await resolve_org_slug(session, artifact.org_id)
+    project_slug_map = await resolve_project_slugs(session, {artifact.project_id})
     return VisualArtifactDetail(
         id=artifact.id, org_id=artifact.org_id, project_id=artifact.project_id, title=artifact.title,
         story_id=artifact.story_id, epic_id=artifact.epic_id, doc_id=artifact.doc_id,
@@ -246,6 +253,7 @@ async def _load_detail(session: AsyncSession, artifact: VisualArtifact, version_
         version_source_comment_id=version.source_comment_id, canvas_bounds=version.canvas_bounds,
         nodes=[ArtifactNodeOut.model_validate(n) for n in node_rows],
         unresolved_comment_count=unresolved_counts.get(artifact.id, 0),
+        org_slug=org_slug, project_slug=project_slug_map.get(artifact.project_id),
     )
 
 
