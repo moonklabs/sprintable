@@ -940,6 +940,26 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
     expect(codeEls).toEqual(expect.arrayContaining(['in-progress', 'in-review']));
   });
 
+  it('PO 리뷰(head 57316d4e7) — 단일 토큰(백틱 전체일치) 조각이 같은 렌더 패스에 연속으로 와도 둘 다 <code>로 렌더된다(공유 /g 정규식 lastIndex 회귀)', async () => {
+    const consecutiveTemplate = {
+      blocks: [
+        { type: 'fields', fields: [{ label: 'A', value: '`onlyA`' }, { label: 'B', value: '`onlyB`' }] },
+      ],
+    };
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={EVENT_MESSAGE} isMine={false}
+          eventDefinitionsByKey={{ 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: consecutiveTemplate, enabled: true, version: 1 } }}
+        />,
+      ));
+    });
+    expect(container.textContent).not.toContain('`onlyA`');
+    expect(container.textContent).not.toContain('`onlyB`');
+    const codeEls = Array.from(container.querySelectorAll('code')).map((e) => e.textContent);
+    expect(codeEls).toEqual(expect.arrayContaining(['onlyA', 'onlyB']));
+  });
+
   it('story #2637 유나 design 스티어 — ⟨missing⟩ 마커는 콘텐츠와 구분되는 에러 상태 스타일(solid text-warning-strong, 알파·빨강 금지)로 렌더된다', async () => {
     await act(async () => {
       root.render(wrap(

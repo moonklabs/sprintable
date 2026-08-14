@@ -30,25 +30,34 @@ const MISSING_MARKER_RE = /(⟨missing: payload\.[a-zA-Z0-9_]+⟩)/g;
 // 마크다운 문법(링크·이탤릭 등)은 AC0-b 예시에 없어 v1 범위 밖으로 다루지 않는다.
 const INLINE_MD_RE = /(\*\*[^*]+\*\*|`[^`]+`)/g;
 
+// PO 리뷰(head 57316d4e7, node 재현 첨부) — 예전엔 여기 "전체가 단일 토큰"일 때 렌더를
+// 건너뛰는 fast-path가 있었는데, 그 판별에 모듈 전역 /g 정규식의 .test()를 썼다. /g는
+// lastIndex를 정규식 "객체"에 남기므로, 같은 렌더 패스 안에서 같은 정규식으로 연속 호출되면
+// (예: fields의 두 값이 둘 다 백틱 하나짜리 완전일치) 두 번째 호출이 앞 호출이 남긴
+// lastIndex부터 찾다 못 찾고 fast-path를 잘못 타 리터럴로 샜다. 고침: fast-path를 아예
+// 없앤다 — split 결과의 각 조각을 그대로 매핑하면(무매치든 매치든) startsWith/endsWith
+// 내용 검사만으로 충분히 정확하고, 공유 정규식 객체의 상태에 기대지 않는다.
 function renderInlineMarkdown(text: string): React.ReactNode {
   const parts = text.split(INLINE_MD_RE).filter((p) => p !== '');
-  if (parts.length === 1 && !INLINE_MD_RE.test(parts[0]!)) return text;
   return parts.map((part, i) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
       return <strong key={i} className="font-semibold text-foreground">{part.slice(2, -2)}</strong>;
     }
-    if (part.startsWith('`') && part.endsWith('`')) {
+    if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
       return <code key={i} className="rounded bg-muted px-1 py-0.5 font-mono text-[13px] text-foreground">{part.slice(1, -1)}</code>;
     }
     return <span key={i}>{part}</span>;
   });
 }
 
+// 마커 조각 판별도 같은 이유로 .test() 재검사 대신 split 결과의 인덱스 홀짝으로 가른다 —
+// 캡처 그룹 1개짜리 정규식의 split은 [평문, 매치, 평문, 매치, ...] 순서를 보장하므로
+// (홀수 인덱스=캡처된 매치) 공유 정규식 객체의 lastIndex 상태와 완전히 무관하다.
 function renderTextWithMissingMarkers(text: string): React.ReactNode {
   const parts = text.split(MISSING_MARKER_RE);
   if (parts.length === 1) return renderInlineMarkdown(text);
   return parts.map((part, i) =>
-    MISSING_MARKER_RE.test(part)
+    i % 2 === 1
       ? <em key={i} className="italic text-warning-strong">{part}</em>
       : <span key={i}>{renderInlineMarkdown(part)}</span>,
   );
