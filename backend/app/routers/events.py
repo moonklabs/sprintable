@@ -988,6 +988,30 @@ async def publish_registry_event(
             status_code=404, detail=f"event definition not found or disabled: {body.definition_key!r}",
         )
 
+    # story #2637 §범위3(미르코 발견 후속, 2026-08-14): action_auth 실 집행 — 정의에 걸려
+    # 있으면 발행 시점에 검사한다. 이전엔 block_template.actions[].auth가 등록 시점 구조
+    # 검증만 받고 발행 시점엔 아무도 안 봐서 "FE만 버튼을 숨기고 서버는 거부 안 함"이었다
+    # (#2091 클래스 — 금지 AC는 서버가 거부해야 성립). 이 엔드포인트가 버튼/REST/MCP 전부의
+    # 유일한 발행 경로(#2633 AC2 단일 파이프)라 여기 한 곳만 지키면 경로 무관하게 막힌다.
+    if definition.action_auth:
+        if definition.action_auth.get("human_only") and sender.type == "agent":
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "action_auth_denied",
+                    "message": f"이 이벤트({definition.key})는 human 발행자만 허용합니다.",
+                },
+            )
+        allowed_roles = definition.action_auth.get("role")
+        if allowed_roles and sender.role not in allowed_roles:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "action_auth_denied",
+                    "message": f"이 이벤트({definition.key})는 {allowed_roles} role만 허용합니다.",
+                },
+            )
+
     from app.services.event_definition_registry import InvalidEventPayloadError, validate_event_payload
 
     try:
@@ -1122,6 +1146,11 @@ class CreateEventDefinitionRequest(BaseModel):
     routing: dict
     # story #2637 §범위1/5: optional — 없으면 렌더러가 현행 제네릭 폴백을 쓴다(비회귀).
     block_template: dict | None = None
+    # story #2637 §범위3(미르코 발견 후속, 2026-08-14): 정의 레벨 발행 인가 — 있으면
+    # publish_registry_event가 발행 시점에 실제로 집행한다(human_only·role). 경로 무관
+    # (버튼/REST/MCP 전부 이 단일 엔드포인트를 탄다 — #2633 AC2 단일 파이프 덕에 별도
+    # 집행 지점이 필요 없다).
+    action_auth: dict | None = None
 
 
 class UpdateEventDefinitionRequest(BaseModel):
@@ -1129,6 +1158,7 @@ class UpdateEventDefinitionRequest(BaseModel):
     routing: dict | None = None
     enabled: bool | None = None
     block_template: dict | None = None
+    action_auth: dict | None = None
 
 
 class EventDefinitionDetailResponse(BaseModel):
@@ -1138,6 +1168,7 @@ class EventDefinitionDetailResponse(BaseModel):
     payload_schema: dict
     routing: dict
     block_template: dict | None
+    action_auth: dict | None
     enabled: bool
     version: int
     created_by: str | None
@@ -1147,7 +1178,8 @@ def _event_definition_detail(d: "EventDefinition") -> EventDefinitionDetailRespo
     return EventDefinitionDetailResponse(
         id=str(d.id), key=d.key, org_id=str(d.org_id) if d.org_id else None,
         payload_schema=d.payload_schema, routing=d.routing,
-        block_template=d.block_template, enabled=d.enabled, version=d.version,
+        block_template=d.block_template, action_auth=d.action_auth,
+        enabled=d.enabled, version=d.version,
         created_by=str(d.created_by) if d.created_by else None,
     )
 
@@ -1179,10 +1211,12 @@ async def create_event_definition(
     """
     from app.models.event_definition import EventDefinition
     from app.services.event_definition_registry import (
+        InvalidActionAuthError,
         InvalidBlockTemplateError,
         InvalidEventDefinitionKeyError,
         InvalidEventRoutingError,
         InvalidPayloadSchemaError,
+        validate_action_auth,
         validate_block_template,
         validate_event_definition_key,
         validate_event_payload_schema_shape,
@@ -1200,9 +1234,11 @@ async def create_event_definition(
         validate_event_routing(body.routing, allow_server_derived=False)
         if body.block_template is not None:
             validate_block_template(body.block_template)
+        if body.action_auth is not None:
+            validate_action_auth(body.action_auth)
     except (
         InvalidEventDefinitionKeyError, InvalidPayloadSchemaError,
-        InvalidEventRoutingError, InvalidBlockTemplateError,
+        InvalidEventRoutingError, InvalidBlockTemplateError, InvalidActionAuthError,
     ) as e:
         raise HTTPException(
             status_code=400, detail={"code": "invalid_definition", "message": str(e)},
@@ -1223,7 +1259,7 @@ async def create_event_definition(
     definition = EventDefinition(
         id=uuid.uuid4(), key=body.key, org_id=org_id,
         payload_schema=body.payload_schema, routing=body.routing,
-        block_template=body.block_template,
+        block_template=body.block_template, action_auth=body.action_auth,
         created_by=sender.id,
     )
     db.add(definition)
@@ -1246,9 +1282,11 @@ async def update_event_definition(
     행만 대상(WHERE에 명시, 존재해도 org_id 안 맞으면 404로 정보 노출 0)."""
     from app.models.event_definition import EventDefinition
     from app.services.event_definition_registry import (
+        InvalidActionAuthError,
         InvalidBlockTemplateError,
         InvalidEventRoutingError,
         InvalidPayloadSchemaError,
+        validate_action_auth,
         validate_block_template,
         validate_event_payload_schema_shape,
         validate_event_routing,
@@ -1258,8 +1296,8 @@ async def update_event_definition(
         raise HTTPException(status_code=403, detail="org admin/owner required")
 
     if (
-        body.payload_schema is None and body.routing is None
-        and body.enabled is None and body.block_template is None
+        body.payload_schema is None and body.routing is None and body.enabled is None
+        and body.block_template is None and body.action_auth is None
     ):
         raise HTTPException(status_code=400, detail="at least one field must be provided")
 
@@ -1298,6 +1336,15 @@ async def update_event_definition(
                 status_code=400, detail={"code": "invalid_definition", "message": str(e)},
             ) from e
         definition.block_template = body.block_template
+        content_changed = True
+    if body.action_auth is not None:
+        try:
+            validate_action_auth(body.action_auth)
+        except InvalidActionAuthError as e:
+            raise HTTPException(
+                status_code=400, detail={"code": "invalid_definition", "message": str(e)},
+            ) from e
+        definition.action_auth = body.action_auth
         content_changed = True
     if body.enabled is not None:
         definition.enabled = body.enabled
