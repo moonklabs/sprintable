@@ -2151,17 +2151,16 @@ async def send_message(
                 _seen.add(mid)
                 valid_mentioned_ids.append(mid)
 
-    # story #2603 P0(delivery-contract-blueprint-v0-1) ④: FE 구조화 mentioned_ids와 본문
-    # `@handle` 텍스트 파싱 결과를 합집합 — MCP/API 발신(SendChatInput엔 mentioned_ids 필드가
-    # 없다, #2602 지도 ⑦)도 여기서 같은 mentioned_ids 파이프에 실려 route_message/webhook
-    # targeting/notification 전부가 자동으로 handle 멘션을 본다(별도 소비처 변경 불요).
-    # org+type='agent' 스코프 정확 일치만(handle_mention_parser.py) — 부분 문자열 오매칭 없음.
-    from app.services.handle_mention_parser import resolve_handle_mentions
-    _handle_mentioned_ids = await resolve_handle_mentions(db, org_id=org_id, content=body.content or "")
-    if _handle_mentioned_ids:
-        for mid in _handle_mentioned_ids:
-            if mid != sender.id and mid not in valid_mentioned_ids:
-                valid_mentioned_ids.append(mid)
+    # story #2646(2026-08-14, 은퇴): 본문 `@handle` 텍스트 파싱(story #2603 P0,
+    # handle_mention_parser.py)을 여기서 mentioned_ids와 합집합하던 블록을 제거했다 —
+    # dev 실측 0/1139(최근 @포함 메시지 3000건 스캔, 실 handle 매치 0건) vs 구조화
+    # mentioned_ids 153건 실사용. 파서를 만든 원 사유(#2603: "MCP/API 발신엔 mentioned_ids
+    # 필드가 없다")는 story #2618/#3043(같은 날 선착 랜드)이 MCP SendChatInput에
+    # mentioned_ids를 배선하며 해소됐다 — 남는 존치 근거("handle을 노출하면 자유형식 LLM
+    # 런타임이 자연 발화할 것")는 실측 뒷받침 0인 가정뿐이었다(PO 판정). 멘션 경로는 이제
+    # 구조화 mentioned_ids 하나로 수렴한다. 재도입 필요 시 이 커밋을 되살리지 말고 독립
+    # 조각으로 새로 설계할 것(PO 지시) — handle_mention_parser.py 전체·members.handle 채번
+    # 호출부(agent_anchor_sync.py)도 같은 커밋에서 함께 제거됨.
 
     # story #2629(P0의 @handle 파서와 동형 철학, 2026-08-14): 본문의 맨 스토리 번호(`#24`류)를
     # entity 임베드 토큰으로 서버가 저장 시점에 승격 — 에이전트가 임베드 문법을 배우든 말든

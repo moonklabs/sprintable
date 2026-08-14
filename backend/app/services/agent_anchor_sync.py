@@ -60,10 +60,10 @@ async def sync_agent_anchor_on_create(
                 if not await ensure_human_member(session, owner_member_id):
                     owner_member_id = None
 
-    # story #2603 P0: 신규 에이전트는 생성 시점에 안정 @handle을 채번한다(NULL로 남기면
-    # mentions 기본계약 하에서 아무도 못 부르는 에이전트가 된다 — handle_mention_parser.py).
-    from app.services.handle_mention_parser import generate_unique_handle
-    handle = await generate_unique_handle(session, org_id=team_member.org_id, name=team_member.name)
+    # story #2646(2026-08-14, 은퇴): story #2603 P0가 여기서 채번하던 @handle(members.handle) —
+    # 그 값의 유일한 소비처였던 텍스트 @handle 파서(handle_mention_parser.py)를 dev 실측
+    # 0/1139(실 매치 0건, 구조화 mentioned_ids 153건과 대조)로 은퇴시키며 채번도 함께 제거.
+    # members.handle 컬럼 자체(과거 채번된 값)는 남아있으나 이제 아무 코드도 읽지 않는다.
 
     # 1. members (id=team_member.id, type='agent') — 0075 에이전트 백필 동형
     await session.execute(
@@ -78,7 +78,6 @@ async def sync_agent_anchor_on_create(
             avatar_url=team_member.avatar_url,
             org_role=None,
             is_active=team_member.is_active,
-            handle=handle,
         )
         .on_conflict_do_nothing(index_elements=["id"])
     )

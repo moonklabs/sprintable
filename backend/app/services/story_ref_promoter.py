@@ -1,11 +1,11 @@
 """story #2629(챗·전달계약) — 본문의 맨 스토리 번호(`#24`류)를 서버가 entity 임베드로
-자동 승격한다. P0의 본문 `@handle` 파서(`handle_mention_parser.py`)와 정확히 동형 철학
-— 에이전트가 임베드 문법을 배우든 말든, 서버가 발신 시점에 흡수한다(규율/문서화로
-가르치지 않는다, 선생님 08-13 판정).
+자동 승격한다. P0의 본문 `@handle` 파서(story #2646로 은퇴, 과거 `handle_mention_parser.py`)
+와 정확히 동형 철학이었다 — 에이전트가 임베드 문법을 배우든 말든, 서버가 발신 시점에
+흡수한다(규율/문서화로 가르치지 않는다, 선생님 08-13 판정).
 
-`handle_mention_parser.py`와의 차이: 그쪽은 **read-only 해석**(본문은 그대로 두고
-mentioned_ids만 파생) — 이 모듈은 **본문 자체를 저장 시점에 치환**하는 첫 사례다(PO
-지적, 2026-08-14). 그래서 편집(edit) 경로가 있으면 같은 승격이 거기도 걸려야 하는데,
+그 파서와의 차이(설계 비교, 파서 자체는 이제 없음): 그쪽은 **read-only 해석**(본문은
+그대로 두고 mentioned_ids만 파생) — 이 모듈은 **본문 자체를 저장 시점에 치환**하는 첫
+사례다(PO 지적, 2026-08-14). 그래서 편집(edit) 경로가 있으면 같은 승격이 거기도 걸려야 하는데,
 grep 전수 확認 결과 `ConversationMessage.content` 재대입 지점은 전체 백엔드에 2곳뿐
 (생성 시점=이 모듈이 거는 자리, DELETE tombstone=story #2319의 `content = ""` 스크럽 —
 새 사용자 텍스트가 없어 승격 대상 자체가 없다) — PATCH/PUT류 "메시지 수정" 엔드포인트는
@@ -39,8 +39,8 @@ _ENTITY_TOKEN_RE = re.compile(r"\[[^\]]*\]\(entity:[a-z_]+:[^)]+\)")
 
 
 def extract_bare_story_ref_candidates(content: str) -> list[tuple[int, int, int]]:
-    """본문에서 «#숫자» 후보 위치를 뽑는다(DB 조회 없는 순수 함수, resolve_handle_mentions의
-    `extract_handle_tokens`와 동형 — 모양만 본다, 존재 여부는 별도 async 함수의 몫).
+    """본문에서 «#숫자» 후보 위치를 뽑는다(DB 조회 없는 순수 함수 — 모양만 본다, 존재 여부는
+    별도 async 함수의 몫. 은퇴한 @handle 파서의 `extract_handle_tokens`와 같은 형태였다).
 
     반환: (start, end, story_number) 튜플 리스트. 매치 직후 문자가 라틴 알파벳이면
     헥스 컬러류(`#74747c`)로 보고 그 후보 자체를 버린다(dev 실측 근거 — 모듈 docstring
@@ -79,8 +79,8 @@ async def promote_bare_story_refs(
     치환한다.
 
     resolve 실패(그 번호의 story가 없음·타 project 소속)면 **그 매치만** 원문 그대로
-    남긴다(전체 all-or-nothing 아님 — resolve_handle_mentions의 "매치 0건=조회도 없이
-    조기 반환" 관대함과 동형 철학, 성실한 오독에서도 메시지 발신 자체는 막지 않는다)."""
+    남긴다(전체 all-or-nothing 아님 — 은퇴한 @handle 파서의 "매치 0건=조회도 없이 조기
+    반환" 관대함과 동형 철학, 성실한 오독에서도 메시지 발신 자체는 막지 않는다)."""
     if not content:
         return content
     candidates = extract_bare_story_ref_candidates(content)
