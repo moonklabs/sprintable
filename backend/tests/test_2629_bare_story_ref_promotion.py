@@ -116,6 +116,60 @@ def test_extract_bare_ref_pr_lookalike_word_not_excluded():
     assert [c[2] for c in cands] == [21]
 
 
+# ── story #2660(#2651 후속) — GitHub 「repo-name#N」 오승격 회귀 pin ────────────────
+def test_extract_bare_ref_repo_name_hash_excluded():
+    """실피해 문장 그대로(agent-plugins#25·gemini#3) — 레포명 직후 해시(공백 없음)는
+    GitHub 크로스레포 관례라 승격 제외."""
+    from app.services.story_ref_promoter import extract_bare_story_ref_candidates
+    assert extract_bare_story_ref_candidates("카디르 발신 「agent-plugins#25」") == []
+    assert extract_bare_story_ref_candidates("gemini#3 PR 확인 바라는") == []
+
+
+def test_extract_bare_ref_repo_shorthand_compound_prefix_excluded():
+    """`sprintable-`류 접두가 붙은 전체 레포명("sprintable-agent-plugins")도 접미사
+    매칭으로 같이 걸린다(하이픈 앞 토큰과 무관하게 "agent-plugins"로 끝나면 매치)."""
+    from app.services.story_ref_promoter import extract_bare_story_ref_candidates
+    assert extract_bare_story_ref_candidates("sprintable-agent-plugins#25 확인") == []
+    assert extract_bare_story_ref_candidates("sprintable-mobile#4 배포") == []
+    assert extract_bare_story_ref_candidates("sprintable-claude-plugin#1 확인") == []
+
+
+def test_extract_bare_ref_team_shorthand_hash_prefix_not_excluded():
+    """AC2 양성대조(GROUP BY 실측, story #2660) — 「story#N」/「BE#N」/「FE#N」류 팀 표기는
+    레포 짧은이름 허용목록에 없어 계속 승격된다(dev 60일 실측: story#N 11건·BE#N/FE#N
+    다수 확인 — 이 축을 깨는 설계는 #2629/#2651과 같은 "실측 없는 과잉 제외" 재발이었다,
+    최초 설계(임의 라틴 단어문자 전부 제외)에서 이 실측으로 걷어냄)."""
+    from app.services.story_ref_promoter import extract_bare_story_ref_candidates
+    assert [c[2] for c in extract_bare_story_ref_candidates("story#2588(As 이전")] == [2588]
+    assert [c[2] for c in extract_bare_story_ref_candidates("BE#1839 계약 확인")] == [1839]
+    assert [c[2] for c in extract_bare_story_ref_candidates("라이브 픽셀은 FE#1840+BE#1839 dep")] == [1840, 1839]
+
+
+def test_extract_bare_ref_unlisted_word_hash_prefix_not_excluded():
+    """허용목록에 없는 임의 라틴 단어("my_repo" 등)는 레포 짧은이름이 아니므로 승격
+    무회귀 — 허용목록 방식이 "라틴 단어문자 전부"가 아님을 명시적으로 고정."""
+    from app.services.story_ref_promoter import extract_bare_story_ref_candidates
+    assert [c[2] for c in extract_bare_story_ref_candidates("my_repo#7 이슈")] == [7]
+    assert [c[2] for c in extract_bare_story_ref_candidates("v1.2#3 릴리즈 노트")] == [3]
+
+
+def test_extract_bare_ref_korean_word_hash_prefix_not_excluded():
+    """양성대조 — 한글 단어가 «#N 앞»에 공백 없이 붙는 것은 GitHub repo-name 관례가
+    아니므로(그 관례는 라틴 식별자 문자셋뿐) 제외 대상이 아니다. 한글 조사는 원래
+    «#N 뒤»에 붙는 형태(모듈 docstring)이지만, 이 pin은 그 반대 방향(#N 앞)도 안전함을
+    명시적으로 고정한다."""
+    from app.services.story_ref_promoter import extract_bare_story_ref_candidates
+    cands = extract_bare_story_ref_candidates("확인#24 부탁")
+    assert [c[2] for c in cands] == [24]
+
+
+def test_extract_bare_ref_space_before_hash_still_promotes_no_regression():
+    """AC2 — 공백 하나만 있어도(레포명류가 아니라 진짜 단어 뒤 공백) 무회귀."""
+    from app.services.story_ref_promoter import extract_bare_story_ref_candidates
+    cands = extract_bare_story_ref_candidates("story #24 그리고 문서 #25")
+    assert [c[2] for c in cands] == [24, 25]
+
+
 # ── ② 보호 구간 ────────────────────────────────────────────────────────────────
 async def test_promote_skips_fenced_code_block():
     from app.services.story_ref_promoter import promote_bare_story_refs
@@ -406,6 +460,46 @@ async def test_send_message_pr_prefixed_number_not_promoted_no_false_reference()
                 )
             )).scalars().all()
             # AC3: 무관 스토리를 향한 거짓 참조가 적재되지 않았다
+            assert rows == []
+    finally:
+        await engine.dispose()
+
+
+async def test_send_message_repo_name_hash_not_promoted_no_false_reference():
+    """story #2660 AC1/AC3 — 「repo-name#N」(예: agent-plugins#25)은 승격되지 않고,
+    거짓 참조도 references 적재 레벨에서 0건이다(실피해 재현: 카디르 발신 메시지가
+    무관 스토리 3d740d8f/d99d4c20으로 오승격됐던 사고)."""
+    from fastapi import BackgroundTasks
+    from app.models.reference import Reference
+    from app.routers.conversations import SendMessageRequest, send_message
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, project = await _seed_org_project(s)
+            agent_id = await _seed_agent(s, org.id, project.id)
+            story = await _seed_story(s, org.id, project.id, number=25, title="무관 구스토리")
+            conv_id = await _seed_conversation(s, org.id, project.id, [agent_id], created_by=agent_id)
+
+        async with Session() as s:
+            result = await send_message(
+                conversation_id=conv_id,
+                body=SendMessageRequest(content="agent-plugins#25 QA 확인 바라는"),
+                background_tasks=BackgroundTasks(),
+                db=s, auth=_agent_auth(agent_id, org.id), org_id=org.id,
+            )
+            assert result["data"]["content"] == "agent-plugins#25 QA 확인 바라는"
+
+        async with Session() as s:
+            rows = (await s.execute(
+                select(Reference).where(
+                    Reference.org_id == org.id,
+                    Reference.source_id == uuid.UUID(result["data"]["id"]),
+                    Reference.target_type == "story",
+                    Reference.target_id == story.id,
+                )
+            )).scalars().all()
             assert rows == []
     finally:
         await engine.dispose()

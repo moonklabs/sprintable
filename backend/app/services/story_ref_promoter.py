@@ -41,6 +41,24 @@ _LATIN_RE = re.compile(r"[A-Za-z]")
 # 확인되지 않았다: 그 형태는 애초에 `_BARE_STORY_REF_RE`가 `#`을 요구해 매치 자체가 없다.
 _PR_PREFIX_RE = re.compile(r"(?<![A-Za-z0-9_])[Pp][Rr]\s*$")
 
+# story #2660(#2651 후속) — GitHub 크로스레포 관례 "repo-name#N"(예: agent-plugins#25·
+# gemini#3)이 실피해로 재발(실측: 실제 원문은 `agent-plugins#25`·`gemini#3` — 백틱 無,
+# 카디르 05f52181 메시지 170c7b98, dev DB 조회 확인). 직전 토큰이 "PR"/"pr"이 아니라
+# 레포명류라 _PR_PREFIX_RE로는 안 걸린다.
+#
+# ⛔AC2 GROUP BY 양성대조(2026-08-14, dev conversation_messages 60일치 실측 —
+# pgstat-probe-dev job) 결과 «라틴 단어문자가 #N 직전에 붙는» 축을 통째로 막으면 안 된다는
+# 것이 확定됐다: "story#2588"(11건)·"BE#1839"/"FE#1840"(다수)류 정상 팀 표기가 같은
+# 표면(레터+#N, 공백 없음)을 쓴다 — 최초 설계(임의 라틴 단어문자/하이픈/점/언더스코어
+# 전부 제외)는 이 정상 표기까지 깨뜨리는 과잉 제외였다(#2629/#2651 선례의 "실측 우선"
+# 그대로 이 설계를 걷어냄). 대신 **이 조직이 실제 쓰는 레포 짧은 이름만** 등재 —
+# `INJECTABLE_EVENT_TYPES`(sprintable_sse.py)와 같은 성격의 닫힌 허용목록. 새 레포가
+# 생기면 이 목록에 추가할 것(자동 발견 불가 — 그 자체가 이 클래스의 한계, 가드가 못
+# 잡는 것으로 명시).
+_REPO_SHORTHAND_SUFFIX_RE = re.compile(
+    r"(?i:agent-plugins|gemini|admin|claude-plugin|mobile)$"
+)
+
 # 보호 구간(스캔에서 제외) — fenced 코드블록·인라인 코드·이미 만들어진 entity 토큰.
 _FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
@@ -54,9 +72,12 @@ def extract_bare_story_ref_candidates(content: str) -> list[tuple[int, int, int]
     반환: (start, end, story_number) 튜플 리스트. 매치 직후 문자가 라틴 알파벳이면
     헥스 컬러류(`#74747c`)로 보고 그 후보 자체를 버린다(dev 실측 근거 — 모듈 docstring
     참조). 매치 직전 토큰이 「PR」/「pr」이면(story #2651) PR 번호로 보고 마찬가지로
-    버린다 — `_PR_PREFIX_RE` 참조. 코드블록/인라인코드/기존 entity 토큰 내부는 여기서
-    걸러지지 않는다 — 그건 `_protected_spans`가 별도로 처리(관심사 분리: 이 함수는
-    "무엇이 숫자 토큰처럼 생겼는가"만, 저건 "어디를 건드리면 안 되는가"만)."""
+    버린다 — `_PR_PREFIX_RE` 참조. 매치 직전이 알려진 레포 짧은이름 접미사로 끝나면
+    (story #2660) GitHub「repo-name#N」류로 보고 버린다 — `_REPO_SHORTHAND_SUFFIX_RE`
+    참조(⛔허용목록 방식 — "라틴 단어문자 전부"가 아니다. story#N/BE#N류 정상 팀 표기는
+    이 목록에 없어 계속 승격된다, #2660 GROUP BY 실측). 코드블록/인라인코드/기존 entity
+    토큰 내부는 여기서 걸러지지 않는다 — 그건 `_protected_spans`가 별도로 처리(관심사
+    분리: 이 함수는 "무엇이 숫자 토큰처럼 생겼는가"만, 저건 "어디를 건드리면 안 되는가"만)."""
     if not content:
         return []
     candidates: list[tuple[int, int, int]] = []
@@ -66,6 +87,8 @@ def extract_bare_story_ref_candidates(content: str) -> list[tuple[int, int, int]
         if end < len(content) and _LATIN_RE.match(content[end]):
             continue
         if _PR_PREFIX_RE.search(content, 0, start):
+            continue
+        if _REPO_SHORTHAND_SUFFIX_RE.search(content, 0, start):
             continue
         candidates.append((start, end, int(m.group(1))))
     return candidates
