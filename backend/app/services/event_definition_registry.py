@@ -42,6 +42,11 @@ class InvalidPayloadSchemaError(ValueError):
     다른 축)."""
 
 
+class InvalidBlockTemplateError(ValueError):
+    """story #2637 §범위1: block_template이 제한 어휘 4종(header/text/fields/actions) 계약을
+    위반 — 등록 시점 구조 게이트(치환 렌더링은 FE 몫, 여기는 구조만)."""
+
+
 class InvalidEventRoutingError(ValueError):
     """routing 선언이 두 부류 계약(model.py docstring)을 위반 — 등록 시점에 막아 #2633
     해석기가 절대 못 푸는 정의가 저장되는 것을 방지."""
@@ -124,6 +129,83 @@ def validate_event_routing(routing: dict, *, allow_server_derived: bool = True) 
         if not isinstance(leg, dict):
             raise InvalidEventRoutingError(f"routing.{leg_name}이 없거나 object가 아닙니다.")
         _validate_routing_leg(leg, leg_name=leg_name, allow_server_derived=allow_server_derived)
+
+
+_BLOCK_TYPES = frozenset({"header", "text", "fields", "actions"})
+# story #2637 범위3: 액션 v1 = 이벤트 발행 버튼만(다른 액션 종류는 후속 — 웹훅 액션은 명시
+# 제외 항목, doc event-registry-p2-block-template-detail §명시 제외).
+_ACTION_KINDS = frozenset({"publish"})
+_ACTION_AUTH_KEYS = frozenset({"human_only", "role"})
+
+
+def validate_block_template(template: dict) -> None:
+    """story #2637 §범위1: block_template v1 규격 — 제한 어휘 4종(header/text/fields/actions)
+    밖의 type은 등록 거부. 렌더 시 {{payload.field}} 치환 자체는 렌더러(FE) 몫이라 여기서
+    안 한다 — 이 함수는 등록 시점 **구조** 게이트만(어휘 4종·필수 필드·actions v1=publish만·
+    action_auth 키 화이트리스트). 소비자(렌더러) 없이 스키마+테스트만 먼저 굳히는 #2632
+    선례와 동형 — 실제 렌더링은 story #2637 FE 레인이 잇는다.
+
+    doc event-registry-p2-block-template-detail 0-b 예시가 이 함수의 실 계약 근거."""
+    if not isinstance(template, dict) or not isinstance(template.get("blocks"), list):
+        raise InvalidBlockTemplateError("block_template은 {'blocks': [...]} 형태의 object여야 합니다.")
+    blocks = template["blocks"]
+    if not blocks:
+        raise InvalidBlockTemplateError("block_template.blocks는 최소 1개 블록이 필요합니다.")
+    for i, block in enumerate(blocks):
+        if not isinstance(block, dict):
+            raise InvalidBlockTemplateError(f"blocks[{i}]은 object여야 합니다.")
+        block_type = block.get("type")
+        if block_type not in _BLOCK_TYPES:
+            raise InvalidBlockTemplateError(
+                f"blocks[{i}].type={block_type!r}은 제한 어휘 4종({sorted(_BLOCK_TYPES)}) 밖입니다."
+            )
+        if block_type in ("header", "text"):
+            if not isinstance(block.get("text"), str) or not block["text"]:
+                raise InvalidBlockTemplateError(f"blocks[{i}](type={block_type})는 비어있지 않은 text가 필요합니다.")
+        elif block_type == "fields":
+            fields = block.get("fields")
+            if not isinstance(fields, list) or not fields:
+                raise InvalidBlockTemplateError(f"blocks[{i}](type=fields)는 비어있지 않은 fields 목록이 필요합니다.")
+            for j, f in enumerate(fields):
+                if not isinstance(f, dict) or not isinstance(f.get("label"), str) or not isinstance(f.get("value"), str):
+                    raise InvalidBlockTemplateError(
+                        f"blocks[{i}].fields[{j}]는 {{'label': str, 'value': str}} 형태여야 합니다."
+                    )
+        elif block_type == "actions":
+            actions = block.get("actions")
+            if not isinstance(actions, list) or not actions:
+                raise InvalidBlockTemplateError(f"blocks[{i}](type=actions)는 비어있지 않은 actions 목록이 필요합니다.")
+            for j, a in enumerate(actions):
+                if not isinstance(a, dict):
+                    raise InvalidBlockTemplateError(f"blocks[{i}].actions[{j}]는 object여야 합니다.")
+                if a.get("action") not in _ACTION_KINDS:
+                    raise InvalidBlockTemplateError(
+                        f"blocks[{i}].actions[{j}].action={a.get('action')!r}은 v1 어휘"
+                        f"({sorted(_ACTION_KINDS)}) 밖입니다 — 웹훅 액션 등은 후속(명시 제외)."
+                    )
+                if not isinstance(a.get("label"), str) or not a["label"]:
+                    raise InvalidBlockTemplateError(f"blocks[{i}].actions[{j}]는 비어있지 않은 label이 필요합니다.")
+                if not isinstance(a.get("definition_key"), str) or not a["definition_key"]:
+                    raise InvalidBlockTemplateError(
+                        f"blocks[{i}].actions[{j}]는 발행할 definition_key(str)가 필요합니다."
+                    )
+                auth = a.get("auth")
+                if auth is not None:
+                    if not isinstance(auth, dict) or not set(auth.keys()) <= _ACTION_AUTH_KEYS:
+                        raise InvalidBlockTemplateError(
+                            f"blocks[{i}].actions[{j}].auth는 {sorted(_ACTION_AUTH_KEYS)} 키만 "
+                            "허용합니다(action_auth v1 어휘 — human_only·role)."
+                        )
+                    if "human_only" in auth and not isinstance(auth["human_only"], bool):
+                        raise InvalidBlockTemplateError(
+                            f"blocks[{i}].actions[{j}].auth.human_only은 bool이어야 합니다."
+                        )
+                    if "role" in auth and not (
+                        isinstance(auth["role"], list) and all(isinstance(r, str) for r in auth["role"])
+                    ):
+                        raise InvalidBlockTemplateError(
+                            f"blocks[{i}].actions[{j}].auth.role은 문자열 목록이어야 합니다."
+                        )
 
 
 def validate_event_payload_schema_shape(payload_schema: dict) -> None:

@@ -445,6 +445,8 @@ def _msg_payload(
     payload.update(_activation_payload(msg))
     # story #2604 P2: approval-request 카드 스키마 top-level 노출(없으면 None·additive).
     payload.update(_approval_payload(msg))
+    # story #2637 AC 0-a: 이벤트 발행 메시지 스키마 top-level 노출(없으면 None·additive).
+    payload.update(_event_payload(msg))
     return payload
 
 
@@ -463,6 +465,26 @@ def _activation_meta(req: "SendMessageRequest") -> dict | None:
     if req.expects_response is not None:
         act["expects_response"] = bool(req.expects_response)
     return {"activation": act} if act else None
+
+
+def _event_meta(req: "SendMessageRequest") -> dict | None:
+    """story #2637 AC 0-a: req.event_context({"event_key","payload"}) → msg_metadata['event'].
+    없으면 None(완전 additive) — publish_registry_event만 이 필드를 채운다."""
+    return {"event": req.event_context} if isinstance(req.event_context, dict) else None
+
+
+def _combined_msg_metadata(req: "SendMessageRequest") -> dict | None:
+    """_activation_meta/_event_meta 둘 다 독립 namespace라 병합 — 한쪽만 있어도, 둘 다
+    없어도(None), 이론상 둘 다 있어도 안전하게 합친다(현재 호출부는 상호배타적으로 쓰지만
+    강제하지 않음 — 필드 자체가 각자 optional이라 자연히 배타적이 된다)."""
+    merged: dict = {}
+    act = _activation_meta(req)
+    if act:
+        merged.update(act)
+    ev = _event_meta(req)
+    if ev:
+        merged.update(ev)
+    return merged or None
 
 
 def _activation_payload(msg: "ConversationMessage") -> dict:
@@ -487,6 +509,16 @@ def _approval_payload(msg: "ConversationMessage") -> dict:
     meta = (getattr(msg, "__dict__", None) or {}).get("msg_metadata")
     target = meta.get("approval_target") if isinstance(meta, dict) else None
     return {"approval_target": target if isinstance(target, dict) else None}
+
+
+def _event_payload(msg: "ConversationMessage") -> dict:
+    """story #2637 AC 0-a: msg_metadata['event'] → payload top-level(없으면 None).
+    _approval_payload와 동형(additive·__dict__ 전용 read — 동일 greenlet_spawn 회피 이유).
+    FE가 이 필드로 "이벤트 발행 메시지"임을 알고 event_key로 block_template을 찾는다
+    (#2637 렌더러 축, FE 레인) — 여기는 스키마만 실어 나른다."""
+    meta = (getattr(msg, "__dict__", None) or {}).get("msg_metadata")
+    event = meta.get("event") if isinstance(meta, dict) else None
+    return {"event": event if isinstance(event, dict) else None}
 
 
 async def _viewer_blocked_sender_ids(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession) -> set[uuid.UUID]:
@@ -991,6 +1023,14 @@ class SendMessageRequest(BaseModel):
     audience: list[uuid.UUID] | None = None
     message_kind: str | None = None  # request | handoff | result | ack
     expects_response: bool | None = None
+    # story #2637 AC 0-a: publish_registry_event(#2633) 전용 additive 필드 — {"event_key":
+    # str, "payload": dict}. approval_target(approval_delivery.py)과 동형 namespace 패턴이지만
+    # 그쪽은 send_message()를 우회해 ConversationMessage를 직접 구성하는 반면(#2604의 승인
+    # 카드 전용 별도 경로, 그 자체가 명시적 예외), 이건 send_message()의 기존 확장 메커니즘
+    # (E-ACTIVATION S1의 typed-field→msg_metadata 패턴)을 그대로 따른다 — #2633 AC2(신규
+    # 전달 계통 금지)를 지키면서 publish_registry_event가 이 필드로 "이 메시지가 이벤트
+    # 발행분임"을 msg_metadata에 실을 수 있게 한다. 공개 REST 문서에는 안 실을 내부 필드.
+    event_context: dict | None = None
 
     @field_validator("attachments")
     @classmethod
@@ -2218,7 +2258,8 @@ async def send_message(
         # S7: client 제공 asset_id 는 strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.
         attachments=[{**a.model_dump(), "asset_id": None} for a in body.attachments],
         # E-ACTIVATION S1: typed-activation(audience/kind/expects_response) → metadata(additive·마이그레이션 불요).
-        msg_metadata=_activation_meta(body),
+        # story #2637 AC 0-a: event_context → metadata['event'](additive, 둘 다 독립 namespace).
+        msg_metadata=_combined_msg_metadata(body),
     )
     db.add(msg)
 

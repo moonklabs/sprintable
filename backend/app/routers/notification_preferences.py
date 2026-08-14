@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +20,9 @@ router = APIRouter(prefix="/api/v2/notification-preferences", tags=["notificatio
 
 _VALID_CHANNELS = {"sse", "discord", "telegram", "in_app"}
 _VALID_LEVELS = {"all", "mentions", "mute"}
-_VALID_SCOPE_TYPES = {"global", "project", "conversation", "thread"}
+# story #2637 §0-c: "event_key" 신설 — 대화-구조 축(project/conversation/thread)과 다른
+# 별개 차원(이벤트 타입 축). scope_id는 안 쓰고 event_key 컬럼을 쓴다(migration 0250).
+_VALID_SCOPE_TYPES = {"global", "project", "conversation", "thread", "event_key"}
 
 
 # ─── Schemas ──────────────────────────────────────────────────────────────────
@@ -28,6 +30,8 @@ _VALID_SCOPE_TYPES = {"global", "project", "conversation", "thread"}
 class PreferenceItem(BaseModel):
     scope_type: str
     scope_id: uuid.UUID | None = None
+    # story #2637 §0-c: scope_type="event_key"일 때만 사용(그 외엔 반드시 None).
+    event_key: str | None = None
     channel: str
     level: str
 
@@ -67,6 +71,7 @@ def _pref_to_dict(p: NotificationPreference) -> dict:
         "member_id": str(p.member_id),
         "scope_type": p.scope_type,
         "scope_id": str(p.scope_id) if p.scope_id else None,
+        "event_key": p.event_key,
         "channel": p.channel,
         "level": p.level,
         "updated_at": p.updated_at.isoformat(),
@@ -108,6 +113,18 @@ async def upsert_preferences(
         if item.scope_type not in _VALID_SCOPE_TYPES:
             raise HTTPException(status_code=422, detail=f"Invalid scope_type '{item.scope_type}'.")
 
+        # story #2637 §0-c: event_key 축은 scope_id가 아니라 event_key 컬럼을 쓴다 — 둘의
+        # 상호배타를 여기서 강제(모호한 이중 스코프 조합을 저장하지 않는다).
+        if item.scope_type == "event_key":
+            if not item.event_key:
+                raise HTTPException(status_code=422, detail="scope_type='event_key'는 event_key가 필수입니다.")
+            if item.scope_id is not None:
+                raise HTTPException(status_code=422, detail="scope_type='event_key'는 scope_id를 가질 수 없습니다.")
+        elif item.event_key is not None:
+            raise HTTPException(
+                status_code=422, detail=f"scope_type='{item.scope_type}'는 event_key를 가질 수 없습니다.",
+            )
+
         # agent는 assigned conversation/thread에 mute 설정 불가
         if member.type == "agent" and item.level == "mute" and item.scope_type in ("conversation", "thread"):
             raise HTTPException(status_code=400, detail="Agent cannot mute assigned conversation or thread")
@@ -120,6 +137,7 @@ async def upsert_preferences(
                 member_id=member.id,
                 scope_type=item.scope_type,
                 scope_id=item.scope_id,
+                event_key=item.event_key,
                 channel=item.channel,
                 level=item.level,
                 created_at=now,
@@ -127,10 +145,18 @@ async def upsert_preferences(
             )
         )
         # partial unique index에 맞는 conflict target 선택
-        if item.scope_id is None:
+        if item.scope_type == "event_key":
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["member_id", "event_key", "channel"],
+                index_where=NotificationPreference.event_key.isnot(None),
+                set_={"level": item.level, "updated_at": now},
+            )
+        elif item.scope_id is None:
             stmt = stmt.on_conflict_do_update(
                 index_elements=["member_id", "scope_type", "channel"],
-                index_where=NotificationPreference.scope_id.is_(None),
+                index_where=and_(
+                    NotificationPreference.scope_id.is_(None), NotificationPreference.event_key.is_(None),
+                ),
                 set_={"level": item.level, "updated_at": now},
             )
         else:
