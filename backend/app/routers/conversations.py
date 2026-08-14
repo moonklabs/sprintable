@@ -558,6 +558,34 @@ async def _dispatch_conversation_event(
 
     payload = _msg_payload(msg, sender)
 
+    # story #2650: SSE/webhook 패리티 — conversation_webhook.py가 이미 하는 첨부 컨텍스트 주입
+    # (attachment_context.py, IDOR-safe·conversation 스코프 게이트 포함)을 SSE 수신자에게도
+    # 재사용한다. webhook-covered 수신자는 아래 참여자 루프에서 스킵돼(webhook이 대신 전달)
+    # 이 주입은 순수 SSE-only 수신자 payload에만 실린다 — 중복 주입 없음. 이 함수 로컬
+    # `payload` dict만 변경하므로 _msg_payload()의 다른 호출부(list_messages 등 읽기 경로)엔
+    # 무영향(호출마다 새 dict). 실패는 best-effort(전달 자체는 막지 않음, webhook 경로와 동형) —
+    # 로그는 개수만(서명 URL 문자열은 어떤 로그에도 안 찍는다, PO 지적).
+    if msg.attachments:
+        try:
+            from app.services.attachment_context import build_attachment_context
+            _ctx, attachment_images = await build_attachment_context(
+                msg.attachments, project_id=conversation.project_id,
+                conversation_id=conversation.id, org_id=org_id,
+            )
+            if _ctx:
+                _base = payload.get("content") or ""
+                payload["content"] = (_base + _ctx) if _base else _ctx.lstrip()
+            payload["images"] = attachment_images
+            if _ctx or attachment_images:
+                logger.info(
+                    "attachment_context SSE 주입 message_id=%s attachment_count=%d images=%d",
+                    msg.id, len(msg.attachments), len(attachment_images),
+                )
+        except Exception:
+            logger.warning(
+                "attachment_context SSE 주입 실패 message_id=%s", msg.id, exc_info=True,
+            )
+
     # 참여자 조회
     rows = (await db.execute(
         select(ConversationParticipant.member_id)
