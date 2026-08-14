@@ -118,7 +118,7 @@ export interface RuntimeCapabilityItem {
  * 오프를 감수하는 이유는 이 정보가 «서버 상태»가 아니라 «연동 방식에 대한 고정 사실»이기
  * 때문이다(BE가 매 요청마다 계산할 것이 없다).
  */
-export type RuntimeWakeMethod = 'channel-plugin' | 'connector-host' | 'connector-sidecar' | 'connector-sdk' | 'unknown';
+export type RuntimeWakeMethod = 'channel-plugin' | 'channel-plugin-marketplace' | 'connector-host' | 'connector-sidecar' | 'connector-sdk' | 'unknown';
 
 export interface RuntimeWakeInfo {
   method: RuntimeWakeMethod;
@@ -130,7 +130,17 @@ export interface RuntimeWakeInfo {
  * 말한다」(§2). 침묵 대신 "아직 깨우는 방법이 없다"를 명시적으로 말할 수 있어야 한다는 것이
  * 이 스토리의 핵심 처방(A-1)이다. */
 export const RUNTIME_WAKE_MECHANISM: Record<string, RuntimeWakeInfo> = {
-  'claude-code': { method: 'channel-plugin', path: 'packages/fakechat' },
+  // story #2653(디디 「한 줄 설치」 착지, 2026-08-14) — marketplace add→install 실왕복
+  // 실측 완료(claude plugin marketplace add moonklabs/sprintable-agent-plugins →
+  // claude plugin install sprintable@moonklabs, 완전 격리 CLAUDE_CONFIG_DIR로 확認).
+  // method를 별도 축으로 가른 이유: hermes/openclaw/opencode는 여전히 배포 경로가
+  // 없어 그 사실을 그대로 말해야 하는데, claude-code만 이제 실제 명령이 있다 — 같은
+  // 'channel-plugin' 키를 공유하면 "받는 경로는 아직 제공하지 않습니다" 문장이 실제
+  // 명령과 모순되게 붙는다. path는 「명령 대상」이 아니라 그대로 노출되는 설치 명령.
+  'claude-code': {
+    method: 'channel-plugin-marketplace',
+    path: 'claude plugin marketplace add moonklabs/sprintable-agent-plugins && claude plugin install sprintable@moonklabs',
+  },
   hermes: { method: 'channel-plugin', path: 'connectors/hermes-sprintable/' },
   openclaw: { method: 'channel-plugin', path: 'connectors/openclaw-sprintable/' },
   opencode: { method: 'channel-plugin', path: 'connectors/opencode-sprintable/' },

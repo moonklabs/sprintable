@@ -9,7 +9,10 @@ import koMessages from '../../messages/ko.json';
 
 describe('resolveRuntimeWakeInfo — story #2377 §2', () => {
   it('maps each of the 9 named runtimes + the generic connector slug to their real wake mechanism(onboarding-guide.txt Runtime catalog 표와 대조)', () => {
-    expect(resolveRuntimeWakeInfo('claude-code')).toEqual({ method: 'channel-plugin', path: 'packages/fakechat' });
+    expect(resolveRuntimeWakeInfo('claude-code')).toEqual({
+      method: 'channel-plugin-marketplace',
+      path: 'claude plugin marketplace add moonklabs/sprintable-agent-plugins && claude plugin install sprintable@moonklabs',
+    });
     expect(resolveRuntimeWakeInfo('codex')).toEqual({ method: 'connector-host', path: 'connectors/codex-sprintable/' });
     expect(resolveRuntimeWakeInfo('gemini')).toEqual({ method: 'connector-host', path: 'connectors/gemini-sprintable/' });
     expect(resolveRuntimeWakeInfo('grok')).toEqual({ method: 'connector-host', path: 'connectors/grok-sprintable/' });
@@ -54,6 +57,7 @@ describe('kitOrientingWakeBody_<method> i18n coverage — story #2377 (유나양
   // 타입이 실제로 하게 만든다.
   const NON_UNKNOWN_WAKE_METHOD_CHECK: Record<Exclude<RuntimeWakeMethod, 'unknown'>, true> = {
     'channel-plugin': true,
+    'channel-plugin-marketplace': true,
     'connector-host': true,
     'connector-sidecar': true,
     'connector-sdk': true,
