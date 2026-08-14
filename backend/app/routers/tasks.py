@@ -50,6 +50,30 @@ async def _attach_has_evidence(session: AsyncSession, tasks: list[Task]) -> None
             t.human_verified_at = verified.created_at
 
 
+async def _attach_org_project_slugs(session: AsyncSession, org_id: uuid.UUID, tasks: list[Task]) -> None:
+    """story #2642: Task엔 project_id 컬럼이 없어(_assert_task_project_access와 동일 이유)
+    story_id→project_id 1-hop 배치 조회부터 필요 — stories.py/goals.py의 `_attach_org_project_
+    slugs`와 동형 N+1 회피(요청당 org_slug 1쿼리+distinct project_id 배치 slug 1쿼리), 여기에
+    story_id→project_id 배치 조회 1개가 추가된다(총 3쿼리, 여전히 요청당 상수 — 행 수 무관)."""
+    if not tasks:
+        return
+    from app.services.entity_slug import resolve_org_slug, resolve_project_slugs
+
+    story_ids = {t.story_id for t in tasks}
+    rows = (await session.execute(
+        select(Story.id, Story.project_id).where(Story.id.in_(story_ids))
+    )).all()
+    project_by_story = {sid: pid for sid, pid in rows}
+
+    org_slug = await resolve_org_slug(session, org_id)
+    project_slug_map = await resolve_project_slugs(session, set(project_by_story.values()))
+    for t in tasks:
+        pid = project_by_story.get(t.story_id)
+        t.project_id = pid
+        t.org_slug = org_slug
+        t.project_slug = project_slug_map.get(pid) if pid else None
+
+
 async def _assert_task_project_access(
     session: AsyncSession, auth: AuthContext, org_id: uuid.UUID, story_id: uuid.UUID
 ) -> None:
@@ -112,6 +136,7 @@ async def list_tasks(
             project_by_story = {sid: pid for sid, pid in rows}
         tasks = [t for t in tasks if project_by_story.get(t.story_id) in accessible]
         await _attach_has_evidence(repo.session, tasks)
+        await _attach_org_project_slugs(repo.session, org_id, tasks)
         return [TaskResponse.model_validate(t) for t in tasks]
 
     # story_id 지정 시: round6(#2072)에서 _assert_task_project_access(기존 G-fix 재사용)로
@@ -139,6 +164,7 @@ async def list_tasks(
             accessible, assignee_id=assignee_id, status=status_filter
         )
     await _attach_has_evidence(repo.session, tasks)
+    await _attach_org_project_slugs(repo.session, org_id, tasks)
     return [TaskResponse.model_validate(t) for t in tasks]
 
 
@@ -169,6 +195,7 @@ async def create_task(
         status=body.status,
         story_points=body.story_points,
     )
+    await _attach_org_project_slugs(session, org_id, [task])
     return TaskResponse.model_validate(task)
 
 
@@ -184,6 +211,7 @@ async def get_task(
         raise HTTPException(status_code=404, detail="Task not found")
     await _assert_task_project_access(repo.session, auth, org_id, task.story_id)
     await _attach_has_evidence(repo.session, [task])
+    await _attach_org_project_slugs(repo.session, org_id, [task])
     return TaskResponse.model_validate(task)
 
 
@@ -228,6 +256,7 @@ async def update_task(
                 story_id=task.story_id,
             )
     await _attach_has_evidence(db, [task])
+    await _attach_org_project_slugs(db, org_id, [task])
     return TaskResponse.model_validate(task)
 
 

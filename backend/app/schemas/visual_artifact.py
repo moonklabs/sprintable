@@ -145,6 +145,13 @@ class VisualArtifactDetail(BaseModel):
     # ⛔story #2262(C-4, PO 판정 2026-07-29): VisualArtifactSummary와 동형 — 위 클래스의
     # next_action_code 제거 사유 그대로(unresolved_comment_count 원자 필드와 중복).
 
+    # story #2642(웹·칩 공통, 2026-08-14) — org_id/project_id가 이미 이 행 자체에 있어(부모
+    # story/epic/doc hop 불필요, artifact 생성 시점에 같은 org/project로 이미 보장됨,
+    # _assert_link_target_in_scope) additive slug 2개만(#2168 DocPreviewResponse와 동형).
+    # from_attributes 안 씀 — 호출부(_load_detail)가 항상 키워드 인자로 명시.
+    org_slug: str | None = None
+    project_slug: str | None = None
+
 
 class CreateArtifactCommentRequest(BaseModel):
     content: str

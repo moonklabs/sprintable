@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, computed_field
+from pydantic import BaseModel, ConfigDict, computed_field, field_validator
 
 # 계층 리네이밍 B1(story 1925): 구 epic.py — 클래스/필드명만 rename, DB 컬럼(stories.epic_id 등)은
 # B4 후속(스코프 밖). 구 이름(GoalXxx의 별칭)은 REST/MCP 레이어(routers/goals.py·sprintable_mcp)에서
@@ -94,6 +94,17 @@ class GoalResponse(BaseModel):
     source_loop_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
+
+    # story #2642(웹·칩 공통, 2026-08-14) — StoryResponse와 동형(#2168 DocPreviewResponse
+    # 패턴). project_id는 이미 있어 additive slug 2개만. ORM 컬럼 아님 — 라우터가
+    # model_validate 前 transient attr로 세팅.
+    org_slug: str | None = None
+    project_slug: str | None = None
+
+    @field_validator("org_slug", "project_slug", mode="before")
+    @classmethod
+    def _coerce_slug_fields(cls, v):
+        return v if isinstance(v, str) else None
 
     # story #2282(E-CONNECT) AC1/AC2: 이 goal(=epic, entity_type 문자열은 registry 기준
     # "epic" — reference_registry._resolve_epics가 Goal 모델을 쓴다)을 가리키는 참조 토큰.
