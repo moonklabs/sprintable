@@ -177,7 +177,17 @@ function ApprovalRequestBody({
       work_item_title: title,
       resolution_note: gate.resolution_note ?? null,
     };
-    return renderBlockTemplate(parsed, payload).filter((b) => b.type === 'text' || b.type === 'fields');
+    // PO 리뷰(head 81f7e4a7e) — resolution_note 없음은 템플릿 저자 실수(⟨missing⟩ 마커
+    // 대상)가 아니라 정상적인 「선택값 부재」다(기존 카드도 사유 없으면 그 줄 자체를 안
+    // 그렸다 — story #2624). fields 블록에서 payload.resolution_note를 참조하는 항목을
+    // 렌더 *전에* 통째로 걸러내 ⟨missing⟩ 마커가 아예 뜨지 않게 한다(사유가 있을 땐 그대로
+    // 통과 — filter는 no-op).
+    const blocksToRender = gate.resolution_note
+      ? parsed.blocks
+      : parsed.blocks.map((b) => (
+        b.type === 'fields' ? { ...b, fields: b.fields.filter((f) => f.value !== '{{payload.resolution_note}}') } : b
+      ));
+    return renderBlockTemplate({ blocks: blocksToRender }, payload).filter((b) => b.type === 'text' || b.type === 'fields');
   })() : null;
   const riskLevel = deriveRiskLevel(gate);
   const needsFullFlow = usesSignatureFlow(riskLevel);

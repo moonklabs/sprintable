@@ -867,6 +867,16 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
       expect(container.textContent).toContain('제안서.md');
     });
 
+    it('PO 리뷰(head 81f7e4a7e) — resolved + 템플릿 있음 + resolution_note 없음(승인·사유 미기재) — 사유 행 자체가 안 뜬다(⟨missing⟩ 마커 노출 금지, 기존 카드와 동형 비회귀)', async () => {
+      stubGate({ status: 'approved', title: '제안서.md', resolution_note: null });
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} eventDefinitionsByKey={withGateVerdictCatalog} />));
+      });
+      expect(container.textContent).toContain('승인됨');
+      expect(container.textContent).not.toContain('⟨missing');
+      expect(container.textContent).not.toContain('사유:');
+    });
+
     it('resolved + 카탈로그에 preset.gate.verdict 없음(구정의·미시딩) — 기존 하드코딩 렌더로 폴백(비회귀)', async () => {
       stubGate({ status: 'rejected', resolution_note: '근거가 불충분합니다' });
       await act(async () => {
