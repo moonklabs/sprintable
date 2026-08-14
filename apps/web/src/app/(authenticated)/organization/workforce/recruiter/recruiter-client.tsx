@@ -18,6 +18,7 @@ import { VerifyRail, useVerificationRail } from '@/app/onboarding/verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from '@/app/onboarding/onboarding-telemetry';
 import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle, RuntimeCapabilityItem } from '@/services/recruit';
 import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FILENAME, resolveRuntimeWakeInfo, RUNTIME_CONNECT_CLI, resolveConnectConfirm } from '@/services/recruit';
+import type { PresenceStatus } from '@/components/chat/presence-dot';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
 
@@ -233,6 +234,45 @@ export function ConnectCliBody({ command }: { command: string }) {
       })}
     </>
   );
+}
+
+// story #2657(디디 그라운딩, 2026-08-14·doc 625bab77 ⓐ) — RUNTIME_CONNECT_CONFIRM(위
+// connectConfirm 배지)은 런타임-클래스 정적 스냅샷이라 "지금 이 에이전트"의 실제 리스너
+// 부착 여부와 무관하다(#2656 codex 훅-미신뢰가 그 자리). 기존 presence 인프라(GET
+// /api/team-members/{id})를 재사용해 별개 축의 라이브 신호를 보여준다 — 병합/치환 금지,
+// 정적 배지 옆에 나란히(스펙 doc §ⓐ.4). WakeMethodBody와 같은 이유로 별도 컴포넌트로 뽑아
+// 실 렌더 테스트가 폴링·상태전환을 위저드 전체 마운트 없이 잡게 한다.
+export function LiveConnectionBadge({ agentId }: { agentId: string }) {
+  const t = useTranslations('recruiter');
+  const [status, setStatus] = useState<PresenceStatus | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    async function poll() {
+      try {
+        const res = await fetch(`/api/team-members/${agentId}`);
+        if (cancelled) return;
+        if (res.ok) {
+          const json = await res.json() as { data?: { presence_status?: PresenceStatus | null } };
+          const next = json.data?.presence_status ?? null;
+          if (cancelled) return;
+          setStatus(next);
+          // 스펙 doc §ⓐ.3(FE 재량) — 한 번 online 확인되면 폴링 중단.
+          if (next === 'online') return;
+        }
+      } catch { /* graceful — 다음 tick 재시도 */ }
+      if (!cancelled) timer = setTimeout(poll, 5000);
+    }
+    void poll();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [agentId]);
+
+  if (status === 'online') {
+    return <Badge variant="success" className="text-[9px]">{t('connectLiveBadgeOnline')}</Badge>;
+  }
+  return <Badge variant="chip" className="text-[9px]">{t('connectLiveBadgePending')}</Badge>;
 }
 
 // ─── 메인 컴포넌트 ───────────────────────────────────────────────────────────
@@ -1148,6 +1188,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                         {connectConfirm.tier === 'config-verified' && (
                           <Badge variant="chip" className="text-[9px]">{t('connectConfigVerifiedBadge')}</Badge>
                         )}
+                        {/* story #2657 — 위 connectConfirm 배지(런타임-클래스 과거 실측)와 별개
+                            축: "이 에이전트" 지금 상태(라이브 presence). 병합 금지, 나란히. */}
+                        <LiveConnectionBadge agentId={recruitResult.agent_id} />
                       </div>
                       <p className="text-xs text-muted-foreground">
                         {recruitResult.mcp_config
