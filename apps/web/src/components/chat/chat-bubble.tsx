@@ -23,6 +23,8 @@ import { ReferenceSuggestionRow } from './reference-suggestion-row';
 import { parseHitlRequest } from '@/lib/hitl-classifier';
 import { HitlApprovalCard, type HitlAnswer } from './hitl-approval-card';
 import { ApprovalRequestCard } from './approval-request-card';
+import { EventBlockCard } from './event-block-card';
+import { parseBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -59,6 +61,9 @@ interface ChatBubbleProps {
    * 자체가 안 뜬다(일반 텍스트로 폴백) — 호출부가 아직 안 넘기는 화면에서 깨진 카드가
    * 뜨지 않게 하는 안전장치. */
   onRespondHitl?: (content: string) => Promise<void>;
+  /** story #2637 — chat-view.tsx가 대화당 1회 배치조회한 event_definitions 카탈로그(entityStatusByKey와
+   * 동일 패턴). 생략하면(undefined) 이벤트 메시지도 BE 제네릭 폴백 텍스트로 안전하게 그려진다. */
+  eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
 }
 
 interface ContextMenuState {
@@ -276,7 +281,7 @@ const LONG_PRESS_MS = 500;
 export function ChatBubble({
   message, isMine, isGrouped = false, onOpenThread, onDelete, onBlockUser, presenceStatus, isWorking = false,
   highlight = false, projectId, isCiteAnchor = false, isCiteInRange = false, citeAction, entityStatusByKey,
-  hitlAnswer = null, onRespondHitl,
+  hitlAnswer = null, onRespondHitl, eventDefinitionsByKey,
 }: ChatBubbleProps) {
   const t = useTranslations('chats');
   const isAgent = message.sender_type === 'agent';
@@ -290,6 +295,16 @@ export function ChatBubble({
   // 달리 sniffing(정규식 매칭) 없이 구조화 필드 존재만으로 판별 — BE가 이미 결정한 사실이라
   // FE가 다시 추측할 이유가 없다.
   const approvalTarget = !isDeleted ? message.approval_target ?? null : null;
+  // story #2637 AC0-a — approval_target과 동일 규율(구조화 필드 존재만으로 판별).
+  const eventTarget = !isDeleted ? message.event ?? null : null;
+  // story #2637 AC2/PO 리뷰(head 80319636c ①) — block_template이 실제로 파싱 가능할 때만
+  // EventBlockCard로 간다. 파싱 실패/부재(정의 없음·구버전 캐시 등)는 이 상수 자체가 null이
+  // 되어 아래 렌더 분기가 자연히 일반 메시지(ChatMarkdown) 경로로 흘러간다 — EventBlockCard가
+  // 자체 폴백 div를 갖지 않는다(제네릭 content의 마크다운 렌더 경로까지 완전히 동일해야
+  // 비회귀 — 예: "- " 리스트가 불릿으로 남아야지 하이픈 리터럴로 후퇴하면 안 된다).
+  const eventBlockTemplate = eventTarget?.event_key
+    ? parseBlockTemplate(eventDefinitionsByKey?.[eventTarget.event_key]?.block_template)
+    : null;
   // S8: 슬래시 커맨드는 전용 버블(brand·mono·⌘). 리터럴(`//`)은 dequote된 일반 텍스트.
   const isCmd = isCommand(message.content);
   const isLiteral = !isCmd && message.content.startsWith('//');
@@ -478,6 +493,11 @@ export function ChatBubble({
             </div>
           ) : approvalTarget ? (
             <ApprovalRequestCard target={approvalTarget} />
+          ) : eventTarget && eventBlockTemplate ? (
+            <EventBlockCard
+              template={eventBlockTemplate}
+              payload={eventTarget.payload}
+            />
           ) : hitlRequest ? (
             <HitlApprovalCard
               request={hitlRequest}
@@ -522,7 +542,7 @@ export function ChatBubble({
           {/* story #2283 — 보낸 직후 그 메시지 바로 아래에서 한 번 제안(작성자 본인에게만,
               isMine 게이트는 컴포넌트 내부에서 건다). ⛔남의 메시지엔 안 뜬다. tombstone된
               메시지엔 제안할 실 내용이 없다(story #2319). */}
-          {!isCmd && !isDeleted && !hitlRequest && !approvalTarget && <ReferenceSuggestionRow messageId={message.id} content={message.content} isMine={isMine} projectId={projectId} />}
+          {!isCmd && !isDeleted && !hitlRequest && !approvalTarget && !(eventTarget && eventBlockTemplate) && <ReferenceSuggestionRow messageId={message.id} content={message.content} isMine={isMine} projectId={projectId} />}
 
           {/* Attachments — a54ddc16: auth-gated 서명 라우트 경유(public 직링크 미사용).
               이미지=AttachmentImage(3상태 render)·오디오/비디오=AttachmentMedia(story #2051,

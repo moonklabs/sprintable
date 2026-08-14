@@ -8,6 +8,7 @@ import { ChatBubble } from './chat-bubble';
 import { ChatInput } from './chat-input';
 import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
 import { useEntityStatusBatchFetch } from '@/hooks/use-entity-status-batch';
+import type { EventDefinitionSummary } from '@/lib/block-template';
 
 // story #2262 PR② — 배치조회가 꺼진(구 호출부) 경우 훅에 넘길 안정적인 빈 배열 참조(매
 // 렌더 새 배열을 만들면 useEntityStatusBatchFetch의 effect가 messages 변경으로 오인해
@@ -33,6 +34,9 @@ interface ThreadPanelProps {
   entityStatusByKey?: Record<string, EntityStatusFetchState>;
   requestedEntityStatusKeysRef?: RefObject<Set<string>>;
   setEntityStatusByKey?: (updater: (prev: Record<string, EntityStatusFetchState>) => Record<string, EntityStatusFetchState>) => void;
+  /** story #2637 — chat-view.tsx의 event_definitions 카탈로그 캐시를 그대로 물려받는다
+   * (entityStatusByKey와 동일 이유·별도로 안 만든다). */
+  eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
 }
 
 export function ThreadPanel({
@@ -46,6 +50,7 @@ export function ThreadPanel({
   entityStatusByKey,
   requestedEntityStatusKeysRef,
   setEntityStatusByKey,
+  eventDefinitionsByKey,
 }: ThreadPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -151,6 +156,7 @@ export function ThreadPanel({
           isGrouped={false}
           projectId={projectId}
           entityStatusByKey={entityStatusByKey}
+          eventDefinitionsByKey={eventDefinitionsByKey}
         />
       </div>
 
@@ -173,6 +179,7 @@ export function ThreadPanel({
                   isGrouped={isGrouped}
                   projectId={projectId}
                   entityStatusByKey={entityStatusByKey}
+                  eventDefinitionsByKey={eventDefinitionsByKey}
                 />
               );
             })}
