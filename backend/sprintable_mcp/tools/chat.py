@@ -6,7 +6,7 @@ import re
 from typing import Literal
 
 from mcp.types import TextContent
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from ..api_client import client
 from ..response import err, ok
@@ -146,7 +146,19 @@ class ConversationScopedInput(SprintableInput):
 
 
 class SendChatInput(ConversationScopedInput):
-    content: str
+    # story #2629(2026-08-14, 발견 표면 보조축): 「#24」류 맨 스토리 번호는 서버가 발신
+    # 시점에 자동으로 entity 임베드 카드로 승격한다(문법을 몰라도 됨) — 이 설명은 그
+    # 사실을 알리는 것이지, 아래 escape 규칙을 «가르치려는» 게 아니다(플랫폼이 흡수하는
+    # 축과 발견 표면 축은 별개 — 안 배워도 되지만, 알면 entity 토큰(`[제목](entity:type:id)`)
+    # 문법을 mentions 필드로 직접 구성할 수도 있다는 것도 알려 준다).
+    content: str = Field(
+        description=(
+            "메시지 본문. 「#24」처럼 맨 스토리 번호만 써도(코드블록/인라인코드 제외) "
+            "서버가 발신 시점에 자동으로 entity 임베드 카드로 승격한다 — 문법을 몰라도 됨. "
+            "doc/epic 등 다른 엔티티나 커스텀 표시 문구가 필요하면 `mentions` 필드로 "
+            "`[제목](entity:type:id)` 토큰을 직접 구성할 수도 있다."
+        ),
+    )
     reply_thread_id: str | None = None
     message_type: str | None = None
     review_type: str | None = None
