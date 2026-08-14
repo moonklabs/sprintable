@@ -17,8 +17,13 @@ import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// story #2637 — mutable로 둬 EventBlockCard의 human_only/role 게이팅 테스트가 값을 오버라이드
+// 할 수 있게 한다(기본값은 기존 50+ 테스트와 동일하게 human/무역할 — 비회귀).
+let mockDashboardContext: { projectId: string; currentTeamMemberId: string; currentMemberType?: 'human' | 'agent'; role?: string } = {
+  projectId: 'proj-1', currentTeamMemberId: 'member-1', currentMemberType: 'human', role: 'member',
+};
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
-  useDashboardContext: () => ({ projectId: 'proj-1', currentTeamMemberId: 'member-1' }),
+  useDashboardContext: () => mockDashboardContext,
 }));
 
 // story #2037 — 라이트박스 진입점 테스트용. 다른 describe들은 이미지 첨부를 렌더하지 않으므로
@@ -66,6 +71,7 @@ afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
   vi.unstubAllGlobals();
+  mockDashboardContext = { projectId: 'proj-1', currentTeamMemberId: 'member-1', currentMemberType: 'human', role: 'member' };
 });
 
 describe('ChatBubble — story #2263 AC6 유령 칩(stored 참조 대조)', () => {
@@ -829,6 +835,130 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     expect((document.body.querySelector('textarea') as HTMLTextAreaElement).value).toBe('본문 확인, 승인');
     const signBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes('승인하고 서명'))!;
     expect(signBtn.hasAttribute('disabled')).toBe(false);
+  });
+});
+
+describe('ChatBubble — story #2637 event_definitions block_template 카드', () => {
+  const EVENT_MESSAGE: ChatMessage = {
+    ...baseMessage,
+    content: '[이벤트] preset.work.status_changed\n- work_item_type: story\n- from_status: in-progress\n- to_status: in-review',
+    sender_type: 'agent',
+    event: {
+      event_key: 'preset.work.status_changed',
+      payload: { work_item_type: 'story', from_status: 'in-progress', to_status: 'in-review', work_item_id: 'S-42' },
+    },
+  };
+
+  const VALID_TEMPLATE = {
+    blocks: [
+      { type: 'header', text: '작업 상태 변경' },
+      { type: 'text', text: '**{{payload.work_item_type}}** `{{payload.from_status}}` → `{{payload.to_status}}`' },
+      { type: 'fields', fields: [{ label: '대상', value: '{{payload.work_item_id}}' }, { label: '메모', value: '{{payload.note}}' }] },
+      { type: 'actions', actions: [{ label: '확認', action: 'publish', definition_key: 'preset.work.escalate', auth: { human_only: true } }] },
+    ],
+  };
+
+  it('event 필드 없는 일반 메시지는 카드가 안 뜬다(비회귀)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={baseMessage} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('작업 상태 변경');
+  });
+
+  it('eventDefinitionsByKey 미제공(undefined) — 제네릭 폴백 content 그대로(AC2 비회귀)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={EVENT_MESSAGE} isMine={false} />));
+    });
+    expect(container.textContent).toContain('[이벤트] preset.work.status_changed');
+  });
+
+  it('event_key가 카탈로그에 없으면(구 정의 삭제 등) 제네릭 폴백', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={EVENT_MESSAGE} isMine={false} eventDefinitionsByKey={{}} />));
+    });
+    expect(container.textContent).toContain('[이벤트] preset.work.status_changed');
+  });
+
+  it('정의는 있으나 block_template이 null이면 제네릭 폴백', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={EVENT_MESSAGE} isMine={false}
+          eventDefinitionsByKey={{ 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: null, enabled: true, version: 1 } }}
+        />,
+      ));
+    });
+    expect(container.textContent).toContain('[이벤트] preset.work.status_changed');
+  });
+
+  it('block_template이 있으면 header/text/fields를 payload로 치환해 렌더한다(제네릭 텍스트 대신)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={EVENT_MESSAGE} isMine={false}
+          eventDefinitionsByKey={{ 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: VALID_TEMPLATE, enabled: true, version: 1 } }}
+        />,
+      ));
+    });
+    expect(container.textContent).not.toContain('[이벤트] preset.work.status_changed');
+    expect(container.textContent).toContain('작업 상태 변경');
+    expect(container.textContent).toContain('story');
+    expect(container.textContent).toContain('in-progress');
+    expect(container.textContent).toContain('in-review');
+    expect(container.textContent).toContain('S-42');
+    // note는 payload에 없다 — 명시 플레이스홀더(조용한 공백 금지, AC0-b).
+    expect(container.textContent).toContain('⟨missing: payload.note⟩');
+  });
+
+  it('human_only 액션 — human 뷰어면 발행 버튼이 보인다', async () => {
+    mockDashboardContext = { ...mockDashboardContext, currentMemberType: 'human' };
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={EVENT_MESSAGE} isMine={false}
+          eventDefinitionsByKey={{ 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: VALID_TEMPLATE, enabled: true, version: 1 } }}
+        />,
+      ));
+    });
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('확認'))).toBe(true);
+  });
+
+  it('human_only 액션 — agent 뷰어면 버튼 대신 무권한 안내만(UX 안내, 실 보안경계는 BE)', async () => {
+    mockDashboardContext = { ...mockDashboardContext, currentMemberType: 'agent' };
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={EVENT_MESSAGE} isMine={false}
+          eventDefinitionsByKey={{ 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: VALID_TEMPLATE, enabled: true, version: 1 } }}
+        />,
+      ));
+    });
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('확認'))).toBe(false);
+    expect(container.textContent).toContain('권한이 없습니다');
+  });
+
+  it('발행 버튼 클릭 시 POST /api/events/publish가 definition_key+payload로 호출되고 완료 표시로 바뀐다', async () => {
+    const fetchMock = vi.fn(async (_url: string, _opts?: { method?: string; body?: string }) => ({ ok: true, json: async () => ({}) }));
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={EVENT_MESSAGE} isMine={false}
+          eventDefinitionsByKey={{ 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: VALID_TEMPLATE, enabled: true, version: 1 } }}
+        />,
+      ));
+    });
+    const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('확認'))!;
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {});
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/events/publish', expect.objectContaining({ method: 'POST' }));
+    const call = fetchMock.mock.calls[0]!;
+    expect(JSON.parse((call[1] as { body: string }).body)).toEqual({
+      definition_key: 'preset.work.escalate',
+      payload: { work_item_type: 'story', from_status: 'in-progress', to_status: 'in-review', work_item_id: 'S-42' },
+    });
+    expect(container.textContent).toContain('완료했습니다');
   });
 });
 

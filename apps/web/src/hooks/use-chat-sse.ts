@@ -61,6 +61,12 @@ export interface ChatMessage {
     work_item_type: string; work_item_id: string; gate_id: string;
     actions?: string[]; decision?: string; resolution_note?: string | null;
   } | null;
+  /** story #2637 AC0-a — BE(#3036)가 msg_metadata['event']를 payload top-level에 additive로
+   * 노출(`_event_payload`, approval_target과 동형 패턴). 있으면 이 메시지는 이벤트 레지스트리
+   * 발행분이다 — event_key로 event_definitions를 조회해 block_template이 있으면 그걸로,
+   * 없으면 content(BE의 제네릭 폴백 텍스트, #2633 _render_event_message_content)를 그대로
+   * 렌더한다(비회귀). 구서버/일반 메시지는 `?? null`로 통일(approval_target과 같은 이유). */
+  event?: { event_key: string; payload: Record<string, unknown> } | null;
 }
 
 // Normalize backend _to_chat_message format → ChatMessage
@@ -89,6 +95,8 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     is_blocked_sender: typeof raw.is_blocked_sender === 'boolean' ? raw.is_blocked_sender : undefined,
     // story #2604 P2 — BE가 top-level에 항상 키를 싣진 않는 경로(구 메시지 등)도 있어 `?? null`.
     approval_target: (raw.approval_target ?? null) as ChatMessage['approval_target'],
+    // story #2637 AC0-a — approval_target과 동일 규율.
+    event: (raw.event ?? null) as ChatMessage['event'],
   };
 }
 

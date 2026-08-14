@@ -49,6 +49,18 @@ export interface BlockTemplate {
   blocks: BlockTemplateBlock[];
 }
 
+/** story #2637 — GET /api/v2/events/definitions(BE #2634/#3036) 응답 1건 미러. `block_template`은
+ * BE가 raw JSONB 그대로 주므로 여기선 unknown — 소비부가 parseBlockTemplate()을 거친다. */
+export interface EventDefinitionSummary {
+  key: string;
+  org_id: string | null;
+  payload_schema: Record<string, unknown>;
+  routing: Record<string, unknown>;
+  block_template: unknown;
+  enabled: boolean;
+  version: number;
+}
+
 // AC1 "어휘 4종 밖 type 거부" — 등록 게이트(BE)의 몫이지만, FE 렌더러도 같은 닫힌 어휘로
 // 판별해야 미지 타입을 조용히 지어내 그리지 않는다(no-fiction) — 단일 SSOT로 둔다.
 export const BLOCK_TEMPLATE_TYPES = ['header', 'text', 'fields', 'actions'] as const;
