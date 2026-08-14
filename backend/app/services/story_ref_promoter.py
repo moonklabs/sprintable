@@ -32,6 +32,15 @@ from app.services.reference_token import build_reference_token
 _BARE_STORY_REF_RE = re.compile(r"(?<!#)#(\d+)")
 _LATIN_RE = re.compile(r"[A-Za-z]")
 
+# story #2651 — PR 번호와 스토리 번호가 같은 `#N` 표기 공간을 공유(이 조직은 둘 다
+# 일상적으로 쓴다: PR 3033~3052 · 스토리 2637~2650). 직전 토큰이 「PR」/「pr」(대소문자
+# 무관, 단어 경계 — `SUPR #21`처럼 알파벳/숫자/밑줄 뒤에 곧장 붙은 것은 「PR」이 아니므로
+# 제외 대상이 아니다)이면 그 매치는 story 승격에서 제외한다. 실물 피해 2건(9e19d9b2 "PR
+# [E-01-S-07…]"·45e9e868 "PR [E-02-S-02…]") 전부 「PR #N」(공백+해시) 형태였다 — dev
+# 라이브 실측(2026-08-14, 착수 시 재검증)으로 「PR N」(해시 없는 형태)의 실사례는
+# 확인되지 않았다: 그 형태는 애초에 `_BARE_STORY_REF_RE`가 `#`을 요구해 매치 자체가 없다.
+_PR_PREFIX_RE = re.compile(r"(?<![A-Za-z0-9_])[Pp][Rr]\s*$")
+
 # 보호 구간(스캔에서 제외) — fenced 코드블록·인라인 코드·이미 만들어진 entity 토큰.
 _FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
@@ -44,17 +53,21 @@ def extract_bare_story_ref_candidates(content: str) -> list[tuple[int, int, int]
 
     반환: (start, end, story_number) 튜플 리스트. 매치 직후 문자가 라틴 알파벳이면
     헥스 컬러류(`#74747c`)로 보고 그 후보 자체를 버린다(dev 실측 근거 — 모듈 docstring
-    참조). 코드블록/인라인코드/기존 entity 토큰 내부는 여기서 걸러지지 않는다 — 그건
-    `_protected_spans`가 별도로 처리(관심사 분리: 이 함수는 "무엇이 숫자 토큰처럼
-    생겼는가"만, 저건 "어디를 건드리면 안 되는가"만)."""
+    참조). 매치 직전 토큰이 「PR」/「pr」이면(story #2651) PR 번호로 보고 마찬가지로
+    버린다 — `_PR_PREFIX_RE` 참조. 코드블록/인라인코드/기존 entity 토큰 내부는 여기서
+    걸러지지 않는다 — 그건 `_protected_spans`가 별도로 처리(관심사 분리: 이 함수는
+    "무엇이 숫자 토큰처럼 생겼는가"만, 저건 "어디를 건드리면 안 되는가"만)."""
     if not content:
         return []
     candidates: list[tuple[int, int, int]] = []
     for m in _BARE_STORY_REF_RE.finditer(content):
+        start = m.start()
         end = m.end()
         if end < len(content) and _LATIN_RE.match(content[end]):
             continue
-        candidates.append((m.start(), end, int(m.group(1))))
+        if _PR_PREFIX_RE.search(content, 0, start):
+            continue
+        candidates.append((start, end, int(m.group(1))))
     return candidates
 
 
