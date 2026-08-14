@@ -108,6 +108,8 @@ EXPECTED_TOOLS = {
     "sprintable_delete_spec_pin", "sprintable_delete_artifact",
     # events (2) — story #2634: 이벤트 레지스트리 발행/카탈로그 조회.
     "sprintable_publish_event", "sprintable_list_event_definitions",
+    # events registry 등록(2) — story #2636: org 커스텀 이벤트 정의 등록/수정(admin 그룹).
+    "sprintable_register_event_definition", "sprintable_update_event_definition",
     # smoke
     "ping",
 }
@@ -128,8 +130,10 @@ def test_total_tool_count():
     # story #2597(E-AGENT-ONBOARD·A2A발견 P0-1): sprintable_list_agent_cards 1종 신설
     # (A2A AgentCard 발견 — 「누구에게 청할지」를 스스로 찾는 MCP 도구) — 116→117.
     # story #2634: sprintable_publish_event/sprintable_list_event_definitions 2종 신설
-    # (이벤트 레지스트리 발행/카탈로그 조회) — 117→119.
-    assert len(_TOOLS) == 119
+    # (이벤트 레지스트리 발행/카탈로그 조회) — 117→119. story #2636: sprintable_register_
+    # event_definition/sprintable_update_event_definition 2종 신설(org 커스텀 등록/수정) —
+    # 119→121.
+    assert len(_TOOLS) == 121
 
 
 def test_all_expected_tools_registered():

@@ -36,6 +36,12 @@ class InvalidEventPayloadError(ValueError):
         self.errors = errors
 
 
+class InvalidPayloadSchemaError(ValueError):
+    """story #2636 AC1: payload_schema가 additionalProperties: false를 선언하지 않음 —
+    org 커스텀 등록 시점에 거부(스키마 저작 자체의 책임 소재 문제, 발행 시점 payload 위반과는
+    다른 축)."""
+
+
 class InvalidEventRoutingError(ValueError):
     """routing 선언이 두 부류 계약(model.py docstring)을 위반 — 등록 시점에 막아 #2633
     해석기가 절대 못 푸는 정의가 저장되는 것을 방지."""
@@ -89,12 +95,19 @@ def _validate_routing_leg(leg: dict, *, leg_name: str, allow_server_derived: boo
             f"routing.{leg_name}.kind='server_derived'는 member_id_field를 가질 수 없습니다 "
             "(payload 필드가 아니라 서버 파생 역할이므로)."
         )
-    if not allow_server_derived:
+    target = leg.get("target")
+    # story #2636 AC2(PO 확定 최소안, 2026-08-14): target="none"은 예외 — server_derived 금지
+    # 규약이 막으려는 것은 "서버가 해석 못 하는 파생 역할"인데, "none"은 애초에 아무 것도 해석
+    # 안 한다(event_routing_resolver._resolve_none — payload/DB 무관 즉시 빈 집합). org 커스텀이
+    # server_derived를 전혀 못 쓰면 «escalation 없음»조차 표현할 방법이 없어지는 쪽이 오히려
+    # 결함이었다(payload_field는 반드시 payload의 실 필드를 요구해 "의도적으로 없음"을 못 그림).
+    # allow_server_derived=False(org 커스텀 경로)에서도 target="none"만은 통과시킨다.
+    if not allow_server_derived and target != "none":
         raise InvalidEventRoutingError(
             f"routing.{leg_name}.kind='server_derived'는 org 커스텀 정의에 등록할 수 없습니다 "
-            "— 서버가 모르는 파생 역할은 해석 불가능한 정의를 만듭니다(payload_field만 허용)."
+            "— 서버가 모르는 파생 역할은 해석 불가능한 정의를 만듭니다(payload_field 또는 "
+            "target='none'만 허용)."
         )
-    target = leg.get("target")
     if target not in SERVER_DERIVED_TARGETS:
         raise InvalidEventRoutingError(
             f"routing.{leg_name}.target={target!r}은 server_derived 닫힌 어휘"
@@ -111,6 +124,25 @@ def validate_event_routing(routing: dict, *, allow_server_derived: bool = True) 
         if not isinstance(leg, dict):
             raise InvalidEventRoutingError(f"routing.{leg_name}이 없거나 object가 아닙니다.")
         _validate_routing_leg(leg, leg_name=leg_name, allow_server_derived=allow_server_derived)
+
+
+def validate_event_payload_schema_shape(payload_schema: dict) -> None:
+    """story #2636 AC1: org 커스텀 등록 시점에 payload_schema 자체가 유효한 JSON Schema이고
+    top-level `additionalProperties: false`를 명시했는지 강제. 미선언 스키마는 JSON Schema
+    기본값(관대 — 모르는 필드를 조용히 통과)이 그대로 새는데, 그 방임을 org 사용자의 저작
+    책임으로 돌릴 수 없으므로(플랫폼 프리셋 4종과 달리 리뷰가 없다) 등록 자체를 거부한다
+    (자동 주입은 안 한다 — 호출자가 실제로 무엇을 선언했는지와 서버에 저장된 내용이 갈리는
+    "조용한 대필"을 만들지 않기 위해, PO 확定: "게이트가 닫는다").
+
+    시드 4종(0245 마이그)과 동일 규약 — 그쪽은 플랫폼 저작이라 이 함수를 안 거치고, 이 함수는
+    #2636의 등록 엔드포인트(org 커스텀 경로)에서만 호출된다."""
+    validator_cls = jsonschema.validators.validator_for(payload_schema)
+    validator_cls.check_schema(payload_schema)
+    if payload_schema.get("additionalProperties") is not False:
+        raise InvalidPayloadSchemaError(
+            "payload_schema는 top-level 'additionalProperties: false'를 명시해야 합니다 — "
+            "미선언 스키마는 모르는 필드를 조용히 통과시켜 등록을 거부합니다."
+        )
 
 
 def validate_event_payload(payload_schema: dict, payload: dict) -> None:

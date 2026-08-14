@@ -41,12 +41,20 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # (propose_canonical_version은 "artifact" substring이 없음)·"spec_pin"(핀 4종)까지 포괄.
     ("canvas", ("artifact", "canonical_version", "spec_pin")),
     ("admin", ("give_reward", "emit_event", "trigger_ai", "activate_sprint",
-               "close_sprint", "create_sprint", "upsert_webhook", "delete_webhook")),
+               "close_sprint", "create_sprint", "upsert_webhook", "delete_webhook",
+               # story #2636: 이벤트 레지스트리 "등록"(admin 그룹 — 등록=org 관리 행위, PO
+               # 확定 §범위5). "events" 그룹 키워드("event")보다 이 admin 항목이 먼저 매치돼야
+               # 하므로 반드시 이 admin 튜플 안에 둔다(순서 의존 — 아래 events 항목 주석 참고).
+               "register_event_definition", "update_event_definition")),
     # story #2634: 이벤트 레지스트리 발행 표면(publish_event/list_event_definitions) — "admin"
     # 뒤에 둔 이유는 순서 의존적이다: "emit_event"(admin 키워드)가 substring "event"를 포함하므로
     # "events" 그룹을 admin보다 앞에 두면 sprintable_emit_event의 기존 분류(admin)가 깨진다.
     # publish_event/list_event_definitions는 admin 키워드 어느 것과도 안 겹쳐 여기로 안전하게
     # 떨어진다(발행/구독은 admin급 파괴 작업이 아닌 일반 도메인 기능이라 admin에 안 묶는다).
+    # story #2636: register_event_definition/update_event_definition도 "event" substring을
+    # 포함하지만, 위 admin 튜플에 더 구체적인 키워드("register_event_definition"/
+    # "update_event_definition")가 먼저 있어 이 항목까지 안 내려온다(admin이 이 events보다
+    # 리스트 앞쪽 — tool_group()은 첫 매치를 반환).
     ("events", ("event",)),
 ]
 
@@ -393,6 +401,8 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_list_projects", "sprintable_set_default_project",
     # events (story #2634) — POST /api/v2/events/publish(#2633) 발행 + GET /definitions 카탈로그.
     "sprintable_publish_event", "sprintable_list_event_definitions",
+    # events registry 등록(story #2636) — POST/PATCH /api/v2/events/definitions(org 커스텀).
+    "sprintable_register_event_definition", "sprintable_update_event_definition",
 )
 
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.

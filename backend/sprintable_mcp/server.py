@@ -47,7 +47,9 @@ from .tools.agent_runs import (
     emit_event, poll_events, update_run_status,
 )
 from .tools.events import (
-    ListEventDefinitionsInput, PublishEventInput, list_event_definitions, publish_event,
+    ListEventDefinitionsInput, PublishEventInput, RegisterEventDefinitionInput,
+    UpdateEventDefinitionInput, list_event_definitions, publish_event,
+    register_event_definition, update_event_definition,
 )
 from .tools.analytics import (
     ActivityInput, AgentStatsInput, GoalProgressInput, OverdueMemberInput,
@@ -868,6 +870,16 @@ _TOOL_DEFS: list[tuple] = [
      "[조직] 발행 가능한 이벤트 정의 카탈로그 조회(프리셋 ∪ 이 org 커스텀). publish_event 호출 전 "
      "payload_schema 확인용.",
      ListEventDefinitionsInput, list_event_definitions),
+    # Events registry — org 커스텀 등록(2) — story #2636. publish/list(events 그룹)와 분리된
+    # admin 그룹(등록=org 관리 행위, toolset.py 키워드 참조).
+    ("sprintable_register_event_definition",
+     "[조직] org 커스텀 이벤트 정의 등록(admin/owner 전용). key 네임스페이스·payload_schema "
+     "additionalProperties 게이트·routing(payload_field 또는 target=none만)을 강제한다.",
+     RegisterEventDefinitionInput, register_event_definition),
+    ("sprintable_update_event_definition",
+     "[조직] org 커스텀 이벤트 정의 수정/비활성화(admin/owner 전용). enabled=false가 삭제 "
+     "수단(soft). payload_schema/routing 변경 시 재검증+version 범프.",
+     UpdateEventDefinitionInput, update_event_definition),
 ]
 
 for _name, _doc, _cls, _fn in _TOOL_DEFS:
