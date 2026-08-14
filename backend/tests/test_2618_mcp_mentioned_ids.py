@@ -171,6 +171,12 @@ async def test_mcp_send_chat_message_mentioned_ids_creates_real_conversation_men
 
     engine, Session = await _session_factory()
     _RealAsyncClient = httpx.AsyncClient
+    # PO 지적(2026-08-14, #3043 리뷰) — chat_mod.client는 프로세스-전역 싱글톤이라 여기서
+    # 바꾼 _base_url/_api_key/_org_id를 원복 안 하면 뒤이어 도는 다른 테스트가(순서에 따라)
+    # 이 값을 그대로 물려받는 오염 축이 된다 — finally에서 반드시 원복.
+    _orig_base_url = chat_mod.client._base_url
+    _orig_api_key = chat_mod.client._api_key
+    _orig_org_id = chat_mod.client._org_id
     try:
         async with Session() as s:
             org = await _make_org(s)
@@ -207,4 +213,7 @@ async def test_mcp_send_chat_message_mentioned_ids_creates_real_conversation_men
             assert mention_count == 1, "MCP로 실은 mentioned_ids가 실제 conversation.mention 알림을 못 만들었다"
     finally:
         app.dependency_overrides.clear()
+        chat_mod.client._base_url = _orig_base_url
+        chat_mod.client._api_key = _orig_api_key
+        chat_mod.client._org_id = _orig_org_id
         await engine.dispose()
