@@ -24,7 +24,7 @@ import { parseHitlRequest } from '@/lib/hitl-classifier';
 import { HitlApprovalCard, type HitlAnswer } from './hitl-approval-card';
 import { ApprovalRequestCard } from './approval-request-card';
 import { EventBlockCard } from './event-block-card';
-import type { EventDefinitionSummary } from '@/lib/block-template';
+import { parseBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -297,6 +297,14 @@ export function ChatBubble({
   const approvalTarget = !isDeleted ? message.approval_target ?? null : null;
   // story #2637 AC0-a — approval_target과 동일 규율(구조화 필드 존재만으로 판별).
   const eventTarget = !isDeleted ? message.event ?? null : null;
+  // story #2637 AC2/PO 리뷰(head 80319636c ①) — block_template이 실제로 파싱 가능할 때만
+  // EventBlockCard로 간다. 파싱 실패/부재(정의 없음·구버전 캐시 등)는 이 상수 자체가 null이
+  // 되어 아래 렌더 분기가 자연히 일반 메시지(ChatMarkdown) 경로로 흘러간다 — EventBlockCard가
+  // 자체 폴백 div를 갖지 않는다(제네릭 content의 마크다운 렌더 경로까지 완전히 동일해야
+  // 비회귀 — 예: "- " 리스트가 불릿으로 남아야지 하이픈 리터럴로 후퇴하면 안 된다).
+  const eventBlockTemplate = eventTarget?.event_key
+    ? parseBlockTemplate(eventDefinitionsByKey?.[eventTarget.event_key]?.block_template)
+    : null;
   // S8: 슬래시 커맨드는 전용 버블(brand·mono·⌘). 리터럴(`//`)은 dequote된 일반 텍스트.
   const isCmd = isCommand(message.content);
   const isLiteral = !isCmd && message.content.startsWith('//');
@@ -485,12 +493,10 @@ export function ChatBubble({
             </div>
           ) : approvalTarget ? (
             <ApprovalRequestCard target={approvalTarget} />
-          ) : eventTarget ? (
+          ) : eventTarget && eventBlockTemplate ? (
             <EventBlockCard
-              eventKey={eventTarget.event_key}
+              template={eventBlockTemplate}
               payload={eventTarget.payload}
-              definition={eventDefinitionsByKey?.[eventTarget.event_key] ?? null}
-              fallbackContent={displayContent}
             />
           ) : hitlRequest ? (
             <HitlApprovalCard
@@ -536,7 +542,7 @@ export function ChatBubble({
           {/* story #2283 — 보낸 직후 그 메시지 바로 아래에서 한 번 제안(작성자 본인에게만,
               isMine 게이트는 컴포넌트 내부에서 건다). ⛔남의 메시지엔 안 뜬다. tombstone된
               메시지엔 제안할 실 내용이 없다(story #2319). */}
-          {!isCmd && !isDeleted && !hitlRequest && !approvalTarget && !eventTarget && <ReferenceSuggestionRow messageId={message.id} content={message.content} isMine={isMine} projectId={projectId} />}
+          {!isCmd && !isDeleted && !hitlRequest && !approvalTarget && !(eventTarget && eventBlockTemplate) && <ReferenceSuggestionRow messageId={message.id} content={message.content} isMine={isMine} projectId={projectId} />}
 
           {/* Attachments — a54ddc16: auth-gated 서명 라우트 경유(public 직링크 미사용).
               이미지=AttachmentImage(3상태 render)·오디오/비디오=AttachmentMedia(story #2051,

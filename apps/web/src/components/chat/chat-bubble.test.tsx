@@ -872,6 +872,18 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
     expect(container.textContent).toContain('[이벤트] preset.work.status_changed');
   });
 
+  it('PO 리뷰(head 80319636c ①) — 폴백은 EventBlockCard 자체 렌더가 아니라 기존 ChatMarkdown 경로를 그대로 탄다("- " 목록이 <li> 불릿으로 렌더, 하이픈 리터럴로 후퇴 안 함)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={EVENT_MESSAGE} isMine={false} />));
+    });
+    const items = Array.from(container.querySelectorAll('li')).map((li) => li.textContent);
+    expect(items).toEqual(expect.arrayContaining([
+      expect.stringContaining('work_item_type: story'),
+      expect.stringContaining('from_status: in-progress'),
+      expect.stringContaining('to_status: in-review'),
+    ]));
+  });
+
   it('event_key가 카탈로그에 없으면(구 정의 삭제 등) 제네릭 폴백', async () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={EVENT_MESSAGE} isMine={false} eventDefinitionsByKey={{}} />));
@@ -908,6 +920,24 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
     expect(container.textContent).toContain('S-42');
     // note는 payload에 없다 — 명시 플레이스홀더(조용한 공백 금지, AC0-b).
     expect(container.textContent).toContain('⟨missing: payload.note⟩');
+  });
+
+  it('유나 design 스티어 2차 — text 블록의 AC0-b 인라인 마크다운(**굵게**·`코드`)이 별표/백틱 리터럴이 아니라 실제 <strong>/<code>로 렌더된다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={EVENT_MESSAGE} isMine={false}
+          eventDefinitionsByKey={{ 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: VALID_TEMPLATE, enabled: true, version: 1 } }}
+        />,
+      ));
+    });
+    expect(container.textContent).not.toContain('**story**');
+    expect(container.textContent).not.toContain('`in-progress`');
+    const strongEl = Array.from(container.querySelectorAll('strong')).find((e) => e.textContent === 'story');
+    expect(strongEl).not.toBeUndefined();
+    expect(strongEl!.className).toContain('font-semibold');
+    const codeEls = Array.from(container.querySelectorAll('code')).map((e) => e.textContent);
+    expect(codeEls).toEqual(expect.arrayContaining(['in-progress', 'in-review']));
   });
 
   it('story #2637 유나 design 스티어 — ⟨missing⟩ 마커는 콘텐츠와 구분되는 에러 상태 스타일(solid text-warning-strong, 알파·빨강 금지)로 렌더된다', async () => {

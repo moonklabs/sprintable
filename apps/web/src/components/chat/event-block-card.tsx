@@ -5,44 +5,59 @@ import { useTranslations } from 'next-intl';
 import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import {
-  parseBlockTemplate, renderBlockTemplate,
-  type BlockTemplateBlock, type EventDefinitionSummary,
-} from '@/lib/block-template';
+import { renderBlockTemplate, type BlockTemplate, type BlockTemplateBlock } from '@/lib/block-template';
 
 interface EventBlockCardProps {
-  eventKey: string;
+  /** story #2637 AC2/PO 리뷰(head 80319636c ①) — 파싱은 chat-bubble.tsx가 미리 끝낸다. 이
+   * 컴포넌트는 "파싱된 템플릿이 있을 때만" 렌더되고, 파싱 실패/부재는 chat-bubble.tsx가 이
+   * 컴포넌트를 아예 안 부르고 기존 ChatMarkdown(제네릭 content) 경로로 보낸다 — 폴백
+   * 렌더 경로까지 일반 메시지와 완전히 동일해야 AC2 비회귀가 성립한다(자체 폴백 div를
+   * 갖지 않는 이유). */
+  template: BlockTemplate;
   payload: Record<string, unknown>;
-  /** story #2637 — chat-view.tsx가 대화당 1회 배치조회한 카탈로그 캐시(entityStatusByKey와
-   * 동일 패턴). `undefined`=아직 로딩 중(카탈로그 자체를 못 받음)·`null`=조회됐으나 이
-   * event_key가 카탈로그에 없음(구 정의 삭제 등) — 두 경우 다 제네릭 폴백으로 graceful. */
-  definition: EventDefinitionSummary | null | undefined;
-  /** BE의 현행 제네릭 렌더(#2633 _render_event_message_content) — block_template이 없거나
-   * 못 찾으면 이 content를 그대로 보여준다(AC2 비회귀 — 새로 지어내지 않는다). */
-  fallbackContent: string;
 }
 
-// story #2637 — 유나 design 사전 스티어(08-14, PR 前 반영). 치환 실패(⟨missing: payload.x⟩)를
-// 콘텐츠와 구분되는 「에러 상태」로 보이게 한다 — solid text-warning-strong(#2594 패턴, 알파
-// 금지) + 미세 이탤릭. 빨강(destructive) 금지 — 치환 실패는 저자(템플릿) 실수지 사용자 위험이
-// 아니다. renderBlockTemplate은 완성된 문자열을 주므로, 이 정규식으로 다시 갈라 부분 스타일만
-// 입힌다(파서 자체를 세그먼트 구조로 바꾸지 않는다 — block-template.ts는 순수 문자열 계약 유지).
+// story #2637 — 유나 design 스티어 2차(08-14, 재작업 방식까지 PR 前 확定).
+// ⟨missing: payload.x⟩는 콘텐츠와 구분되는 「에러 상태」로 보인다 — solid text-warning-strong
+// (#2594 패턴, 알파 금지) + 이탤릭. 빨강(destructive) 금지 — 치환 실패는 저자(템플릿) 실수지
+// 사용자 위험이 아니다. 마커를 **먼저** 이 정규식으로 갈라내고, 인라인 마크다운(굵게/코드)은
+// 마커가 아닌 조각에만 적용한다 — 순서를 바꾸면 마커 안 `payload.x`의 `_`가 이탤릭으로
+// 오파싱될 위험이 있다(마커는 항상 리터럴 텍스트로 유지). renderBlockTemplate은 완성된
+// 문자열을 주므로 여기서 정규식으로 다시 갈라 부분 스타일만 입힌다(block-template.ts 파서
+// 자체는 순수 문자열 계약 그대로 유지 — 세그먼트 구조로 바꾸지 않는다).
 const MISSING_MARKER_RE = /(⟨missing: payload\.[a-zA-Z0-9_]+⟩)/g;
+// AC0-b 스펙 의도(굵게 `**…**`·코드 `` `…` ``)만 지원하는 최소 인라인 마크다운 — 그 밖의
+// 마크다운 문법(링크·이탤릭 등)은 AC0-b 예시에 없어 v1 범위 밖으로 다루지 않는다.
+const INLINE_MD_RE = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+
+function renderInlineMarkdown(text: string): React.ReactNode {
+  const parts = text.split(INLINE_MD_RE).filter((p) => p !== '');
+  if (parts.length === 1 && !INLINE_MD_RE.test(parts[0]!)) return text;
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={i} className="font-semibold text-foreground">{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return <code key={i} className="rounded bg-muted px-1 py-0.5 font-mono text-[13px] text-foreground">{part.slice(1, -1)}</code>;
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
 
 function renderTextWithMissingMarkers(text: string): React.ReactNode {
   const parts = text.split(MISSING_MARKER_RE);
-  if (parts.length === 1) return text;
+  if (parts.length === 1) return renderInlineMarkdown(text);
   return parts.map((part, i) =>
     MISSING_MARKER_RE.test(part)
       ? <em key={i} className="italic text-warning-strong">{part}</em>
-      : <span key={i}>{part}</span>,
+      : <span key={i}>{renderInlineMarkdown(part)}</span>,
   );
 }
 
 /**
- * story #2637 — event_definitions.block_template v1 렌더러. msg_metadata.event가 있는 메시지의
- * 챗 카드. block_template 없음(정의 자체가 없거나 아직 미시딩)은 AC2 비회귀 — 현행 제네릭 텍스트
- * 그대로 보여준다(새 카드로 지어내지 않는다).
+ * story #2637 — event_definitions.block_template v1 렌더러. 호출부(chat-bubble.tsx)가 이미
+ * parseBlockTemplate로 파싱을 끝낸 template만 받는다 — 파싱 실패/정의 없음일 땐 이 컴포넌트가
+ * 아예 안 불린다(AC2 비회귀는 호출부의 분기 책임).
  *
  * ⚠️ action_auth(human_only/role) 집행 — **보안 경계는 BE(publish_registry_event, definition-
  * level 검사 — story #2637 §범위3/#3037, PO 08-14 확定)에 있다.** 이 컴포넌트의 «권한 없어
@@ -55,21 +70,11 @@ function renderTextWithMissingMarkers(text: string): React.ReactNode {
  * admin/owner — team_members.role, `/api/me`가 내려주는 그 값)이다. 직무 템플릿 slug(예:
  * "backend-engineer")가 아니다 — 이름이 비슷해 헷갈리기 쉬운 축이라 명시한다.
  */
-export function EventBlockCard({ eventKey, payload, definition, fallbackContent }: EventBlockCardProps) {
+export function EventBlockCard({ template, payload }: EventBlockCardProps) {
   const t = useTranslations('chats');
   const { currentMemberType, role } = useDashboardContext();
 
-  const parsed = definition?.block_template ? parseBlockTemplate(definition.block_template) : null;
-
-  if (!parsed) {
-    return (
-      <div className="min-w-0 max-w-full whitespace-pre-wrap rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3 text-sm text-foreground">
-        {fallbackContent}
-      </div>
-    );
-  }
-
-  const blocks = renderBlockTemplate(parsed, payload);
+  const blocks = renderBlockTemplate(template, payload);
 
   return (
     <div className="min-w-0 max-w-full space-y-3 rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
