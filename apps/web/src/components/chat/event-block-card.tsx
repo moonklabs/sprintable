@@ -6,6 +6,7 @@ import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { renderBlockTemplate, type BlockTemplate, type BlockTemplateBlock } from '@/lib/block-template';
+import { extractBackendErrorMessage } from '@/lib/api-error-message';
 
 interface EventBlockCardProps {
   /** story #2637 AC2/PO 리뷰(head 80319636c ①) — 파싱은 chat-bubble.tsx가 미리 끝낸다. 이
@@ -223,9 +224,10 @@ function EventPublishActionButton({
       if (!res.ok) {
         // story #2637 §범위3/#3037 — 403 action_auth_denied는 BE가 이유를 완성 문장으로
         // 주므로(예: "이 이벤트(...)는 human 발행자만 허용합니다") FE가 재구성하지 않고
-        // 그대로 보여준다(BE가 실 권위이자 유일한 메시지 출처).
-        const body = await res.json().catch(() => null) as { error?: { message?: string }; detail?: { message?: string } | string } | null;
-        const msg = body?.error?.message ?? (typeof body?.detail === 'string' ? body.detail : body?.detail?.message) ?? `HTTP ${res.status}`;
+        // 그대로 보여준다(BE가 실 권위이자 유일한 메시지 출처). story #2647에서
+        // extractBackendErrorMessage로 공통화(DeliveryContractModal과 동형 패턴 공유).
+        const body = await res.json().catch(() => null);
+        const msg = extractBackendErrorMessage(body) ?? `HTTP ${res.status}`;
         throw new Error(msg);
       }
       setPublished(true);

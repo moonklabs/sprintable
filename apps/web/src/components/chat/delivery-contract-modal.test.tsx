@@ -110,6 +110,79 @@ describe('DeliveryContractModal — story #2621 v1', () => {
     });
   });
 
+  it('story #2647 — PUT 400(정책 거부·agent mute 금지, #3048 조건④)은 BE 사유를 재구성 없이 그대로 보여준다("다시 시도" 안 붙임)', async () => {
+    const fetchMock = vi.fn(async (url: string, opts?: { method?: string }) => {
+      if (opts?.method === 'PUT') {
+        return { ok: false, status: 400, json: async () => ({ detail: 'Agent cannot mute assigned conversation or thread' }) };
+      }
+      return { ok: true, json: async () => ({ data: { data: [] }, error: null, meta: null }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => {
+      root.render(wrap(
+        <DeliveryContractModal
+          conversationId={CONV_ID} conversationType="group" freeResponse={false}
+          onClose={() => {}} onFreeResponseChange={() => {}}
+        />,
+      ));
+    });
+    await act(async () => {});
+    const muteBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '끄기')!;
+    await act(async () => { muteBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(document.body.textContent).toContain('Agent cannot mute assigned conversation or thread');
+    expect(document.body.textContent).not.toContain('저장에 실패했습니다');
+    expect(document.body.textContent).not.toContain('다시 시도');
+    // 실패했으니 낙관 갱신을 되돌린다 — 버튼 선택 상태가 원래 값(전체)으로 복귀.
+    const allBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '전체')!;
+    expect(allBtn.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('story #2647 AC2 — 5xx는 사유 유무와 무관하게 기존 일반 문구+재시도 안내를 유지한다(원인 모름 — 재시도가 유효할 수 있음)', async () => {
+    const fetchMock = vi.fn(async (url: string, opts?: { method?: string }) => {
+      if (opts?.method === 'PUT') {
+        return { ok: false, status: 500, json: async () => ({ detail: 'Internal Server Error' }) };
+      }
+      return { ok: true, json: async () => ({ data: { data: [] }, error: null, meta: null }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => {
+      root.render(wrap(
+        <DeliveryContractModal
+          conversationId={CONV_ID} conversationType="group" freeResponse={false}
+          onClose={() => {}} onFreeResponseChange={() => {}}
+        />,
+      ));
+    });
+    await act(async () => {});
+    const muteBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '끄기')!;
+    await act(async () => { muteBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(document.body.textContent).toContain('저장에 실패했습니다');
+    expect(document.body.textContent).not.toContain('Internal Server Error');
+  });
+
+  it('story #2647 — 네트워크 실패(fetch 자체가 throw)도 기존 일반 문구+재시도 안내를 유지한다', async () => {
+    const fetchMock = vi.fn(async (url: string, opts?: { method?: string }) => {
+      if (opts?.method === 'PUT') throw new Error('network down');
+      return { ok: true, json: async () => ({ data: { data: [] }, error: null, meta: null }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => {
+      root.render(wrap(
+        <DeliveryContractModal
+          conversationId={CONV_ID} conversationType="group" freeResponse={false}
+          onClose={() => {}} onFreeResponseChange={() => {}}
+        />,
+      ));
+    });
+    await act(async () => {});
+    const muteBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '끄기')!;
+    await act(async () => { muteBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(document.body.textContent).toContain('저장에 실패했습니다');
+  });
+
   it('dm 대화에서는 free_response 토글 자체가 안 보인다(항상 default=all이라 의미 없음)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { data: [] }, error: null, meta: null }) })));
     await act(async () => {

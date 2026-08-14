@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
+import { extractBackendErrorMessage } from '@/lib/api-error-message';
 
 export type DeliveryLevel = 'all' | 'mentions' | 'mute';
 
@@ -102,7 +103,22 @@ export function DeliveryContractModal({
           ...(targetMemberId ? { member_id: targetMemberId } : {}),
         }),
       });
-      if (!res.ok) throw new Error('save failed');
+      if (!res.ok) {
+        // story #2647 — 4xx(정책 거부·예: 대리 편집 대상이 agent인데 mute 시도 → BE 400
+        // "Agent cannot mute assigned conversation or thread", #3048 조건④)는 BE가 이미
+        // 완성 문장으로 준 사유를 재구성 없이 그대로 보여준다(#2637 §범위3 EventPublishAction
+        // Button과 동형 패턴, extractBackendErrorMessage로 공통화) — "다시 시도해 주세요"를
+        // 안 붙인다(재시도해도 같은 정책 거부라 오도). 5xx/사유 미상은 기존 일반 문구+재시도
+        // 안내를 유지한다(원인 모름 — 재시도가 유효할 수 있어 그 안내가 정직하다).
+        const body = await res.json().catch(() => null);
+        const backendMsg = extractBackendErrorMessage(body);
+        if (backendMsg && res.status >= 400 && res.status < 500) {
+          setLevel(prev);
+          setError(backendMsg);
+          return;
+        }
+        throw new Error('save failed');
+      }
       setHasOverride(true);
     } catch {
       setLevel(prev);
