@@ -10,6 +10,7 @@ import {
   Calendar, Image, FlaskConical, Paperclip, type LucideIcon,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { docViewUrl } from '@/components/docs/lib/doc-project-url';
 import { resolveScopedEntityHref, storyBoardUrl, goalUrl, sprintUrl, assetStorageUrl } from '@/lib/entity-project-url';
 import { initials } from '@/lib/storage/format';
@@ -734,7 +735,56 @@ export function EntityChip({
   const [showModal, setShowModal] = useState(false);
   const colorClass = ghost ? GRAY_STATE_COLOR : (ENTITY_COLORS[entityType] ?? GRAY_STATE_COLOR);
 
-  const statusLabel = ghost ? null : renderEntityStatusLabel(entityType, entityStatus ?? { kind: 'loading' });
+  // story #2669(B2) — doc이 chat-view.tsx 배치조회로 draft라고 확認되면, 상신 가능(project
+  // write access) 여부를 딱 그 경우에만 추가 조회한다(모든 doc 칩마다 매번 조회하면 N+1 —
+  // 대부분의 참조는 이미 confirmed라 draft만 걸러 조회 비용을 줄인다). 승인 직후엔 서버
+  // 재조회 없이 이 칩의 로컬 상태만 'pending'으로 넘겨 즉시 반영(배치조회 다음 폴백까지
+  // "결재로 올리기"가 다시 뜨는 깜빡임을 막는다).
+  const { projectMemberships } = useDashboardContext();
+  const [localDocStatus, setLocalDocStatus] = useState<string | null>(null);
+  const [canSubmit, setCanSubmit] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(false);
+  const rawDocStatus = entityStatus?.kind === 'resolved' ? entityStatus.raw : null;
+  const effectiveDocStatus = localDocStatus ?? rawDocStatus;
+
+  useEffect(() => {
+    if (entityType !== 'doc' || !entityId || effectiveDocStatus !== 'draft') { setCanSubmit(false); return; }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/docs/preview?q=${encodeURIComponent(entityId)}`);
+        if (!res.ok) throw new Error();
+        const json = (await res.json()) as { data?: { projectId?: string } };
+        const docProjectId = json.data?.projectId;
+        if (!cancelled) setCanSubmit(!!docProjectId && projectMemberships.some((p) => p.projectId === docProjectId));
+      } catch {
+        if (!cancelled) setCanSubmit(false); // ㉠ 조회 실패=fail-closed(버튼 안 보임), 조용한 무권한 노출 금지.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [entityType, entityId, effectiveDocStatus, projectMemberships]);
+
+  const submitForApproval = async () => {
+    if (!entityId || submitting) return;
+    setSubmitting(true);
+    setSubmitError(false);
+    try {
+      const res = await fetch(`/api/docs/${entityId}/transition`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'pending' }),
+      });
+      if (!res.ok) throw new Error();
+      setLocalDocStatus('pending');
+    } catch {
+      setSubmitError(true);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const statusLabel = ghost ? null : renderEntityStatusLabel(entityType, localDocStatus ? { kind: 'resolved', raw: localDocStatus } : (entityStatus ?? { kind: 'loading' }));
 
   const inner = (
     <span className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-xs font-medium ${colorClass}`}>
@@ -756,8 +806,31 @@ export function EntityChip({
   }
 
   if (entityId) {
+    // story #2669(B2) — "쓰던 자리에 이미 있어야 한다": 모달을 열지 않고도 칩 자체에 상태별
+    // CTA가 상시 붙는다. draft=상신 가능자에게만 「결재로 올리기」(fail-closed) · pending=
+    // 「결재함에서 보기」 딥링크. confirmed/denied는 위 statusLabel 배지로 이미 정직하게 표시.
+    const docCta = entityType === 'doc' && !ghost ? (
+      effectiveDocStatus === 'draft' && canSubmit ? (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); void submitForApproval(); }}
+          disabled={submitting}
+          className="inline-flex shrink-0 items-center rounded border border-primary/40 px-1.5 py-0.5 text-xs font-medium text-primary no-underline hover:bg-primary/10 disabled:opacity-60"
+        >
+          {submitting ? '...' : '결재로 올리기'}
+        </button>
+      ) : effectiveDocStatus === 'pending' ? (
+        <Link
+          href="/inbox?tab=gates"
+          onClick={(e) => e.stopPropagation()}
+          className="inline-flex shrink-0 items-center rounded border border-border px-1.5 py-0.5 text-xs font-medium text-muted-foreground no-underline hover:bg-muted"
+        >
+          결재함에서 보기
+        </Link>
+      ) : null
+    ) : null;
     return (
-      <>
+      <span className="inline-flex flex-wrap items-center gap-1">
         <button
           type="button"
           onClick={() => setShowModal(true)}
@@ -765,6 +838,8 @@ export function EntityChip({
         >
           {inner}
         </button>
+        {docCta}
+        {submitError ? <span className="text-xs text-destructive">상신 실패, 다시 시도해 주세요</span> : null}
         {showModal && (
           <EntityPreviewModal
             entityType={entityType}
@@ -775,7 +850,7 @@ export function EntityChip({
             onClose={() => setShowModal(false)}
           />
         )}
-      </>
+      </span>
     );
   }
 

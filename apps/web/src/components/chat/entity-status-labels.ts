@@ -36,7 +36,10 @@ const STATUS_LABELS: Record<StatusBearingEntityType, Record<string, string>> = {
     backlog: '대기', 'ready-for-dev': '착수 대기', 'in-progress': '진행 중', 'in-review': '검토 중', done: '완료',
   },
   task: { todo: '할 일', 'in-progress': '진행 중', done: '완료' },
-  doc: { draft: '초안', pending: '검토 중', confirmed: '확定' },
+  // story #2669 — denied가 이 맵에 없어(원 누락) 반려된 doc 칩엔 상태 문구가 아예 안 그려졌다
+  // (translateEntityStatus가 매핑 없으면 null을 내는 설계라 조용히 빈칸이 됐다 — 원시값 노출은
+  // 아니었지만 "정직한 표시"에서 벗어난 결함). docGateDenied와 같은 어휘로 통일.
+  doc: { draft: '초안', pending: '검토 중', confirmed: '확定', denied: '반려됨' },
   hypothesis: {
     proposed: '제안', active: '검증 중', measuring: '측정 중', verified: '입증', falsified: '반증', archived: '보관',
   },
