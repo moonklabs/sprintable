@@ -837,6 +837,81 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     expect(signBtn.hasAttribute('disabled')).toBe(false);
   });
 
+  // story #2631(FE 계약 doc bb733f26, AC4) — 챗 카드도 결재함/상세와 동일하게 undo·discuss를
+  // 노출한다. stubGate()를 그대로 재사용하되 /discuss·/undo 응답만 추가로 얹는다(다른 테스트의
+  // stubGate 시그니처는 안 건드림 — 이 describe 안에서만 로컬 확장).
+  function stubGateWithMutations(overrides: Parameters<typeof stubGate>[0]) {
+    const gate = stubGate(overrides) as Omit<ReturnType<typeof stubGate>, 'resolver_id' | 'resolved_at'> & { resolver_id: string | null; resolved_at: string | null };
+    vi.stubGlobal('fetch', vi.fn(async (url: string, opts?: { method?: string; body?: string }) => {
+      if (typeof url === 'string' && url.startsWith(`/api/gates/${GATE_ID}/transition`) && opts?.method === 'POST') {
+        const { status } = JSON.parse(opts.body as string) as { status: string };
+        gate.status = status;
+        // stubGate() 자체는 resolver_id/resolved_at을 안 채운다(그 describe의 기존 테스트가
+        // 필요로 하지 않았으므로) — undo 배선은 이 둘이 있어야 isUndoEligible이 true가 된다.
+        gate.resolver_id = mockDashboardContext.currentTeamMemberId;
+        gate.resolved_at = new Date().toISOString();
+        return { ok: true, json: async () => ({ data: gate }) };
+      }
+      if (typeof url === 'string' && url === `/api/gates/${GATE_ID}/discuss` && opts?.method === 'POST') {
+        return { ok: true, json: async () => ({ data: gate }) };
+      }
+      if (typeof url === 'string' && url === `/api/gates/${GATE_ID}/undo` && opts?.method === 'POST') {
+        gate.status = 'pending';
+        gate.resolver_id = null;
+        gate.resolved_at = null;
+        return { ok: true, json: async () => ({ data: gate }) };
+      }
+      if (typeof url === 'string' && url === `/api/gates/${GATE_ID}`) {
+        return { ok: true, json: async () => ({ data: gate }) };
+      }
+      return { ok: false, json: async () => ({}) };
+    }));
+    return gate;
+  }
+
+  it('story #2631 — pending 카드에 「보류(논의 필요)」 버튼이 뜨고, 사유 제출 시 POST /discuss를 호출한다', async () => {
+    stubGateWithMutations({});
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    const discussTrigger = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateDiscussSubmit))!;
+    expect(discussTrigger).not.toBeUndefined();
+    await act(async () => { discussTrigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const textarea = document.body.querySelector('[data-slot="dialog-content"] textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '더 확인하고 판단하겠습니다');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const submitBtn = Array.from(document.body.querySelectorAll('[data-slot="dialog-content"] button')).find((b) => b.textContent === koMessages.cage.gateDiscussSubmit) as HTMLButtonElement;
+    await act(async () => { submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const discussCall = fetchMock.mock.calls.find((call: unknown[]) => (call[0] as string).includes('/discuss'));
+    expect(discussCall).toBeDefined();
+    expect(JSON.parse((discussCall![1] as { body: string }).body)).toEqual({ reason: '더 확인하고 판단하겠습니다' });
+  });
+
+  it('story #2631 — 승인 직후(본인·5분 이내) 취소 버튼이 뜨고, 클릭 시 POST /undo 호출 후 승인/반려 버튼으로 되돌아간다', async () => {
+    stubGateWithMutations({});
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    const approveBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('승인'))!;
+    await act(async () => { approveBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {});
+    expect(container.textContent).toContain('처리됨');
+
+    const undoBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateUndo));
+    expect(undoBtn).not.toBeUndefined();
+    await act(async () => { undoBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {});
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(fetchMock.mock.calls.some((call: unknown[]) => (call[0] as string).includes('/undo') && (call[1] as { method?: string })?.method === 'POST')).toBe(true);
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(true);
+  });
+
   describe('story #2637 AC4(PO 08-14 확定) — resolved 분기 preset.gate.verdict block_template 부분 소비', () => {
     // 0251 마이그(develop 상륙) 실물 그대로 — 대상 필드 value가 work_item_title로 정정된 것.
     const GATE_VERDICT_TEMPLATE = {

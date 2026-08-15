@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { CheckCircle, XCircle } from 'lucide-react';
 import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
 import { gateNeedsAction } from '@/components/cage/gate-evidence';
+import { GateUndoButton, UNDO_WINDOW_MS } from '@/components/cage/gate-undo-button';
+import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateInboxItem, GateItem, HitlInboxItem } from '@/components/kanban/types';
 
@@ -100,6 +102,44 @@ export function ApprovalsQueue() {
   // 렌더 분기) 중복 탭이 두 번째 요청을 만들 수 없다(요청 자체가 안 나감).
   const [resolvedGates, setResolvedGates] = useState<Record<string, 'approved' | 'rejected'>>({});
   const [gateErrors, setGateErrors] = useState<Record<string, string>>({});
+  // story #2631 — 오클릭 정정 5분 창. items[]의 gate 객체는 resolveGate() 성공 후에도
+  // 갱신되지 않는 스냅샷(status=pending 그대로) — resolver_id/resolved_at을 못 믿으므로
+  // isUndoEligible(gate,...)을 못 쓴다. 대신 "이 세션에서 내가 방금 해소했다"는 사실 자체가
+  // 곧 "본인+지금"이므로, 해소 성공 시각만 로컬로 잰다(서버 재조회 0 — AC 비용 절감).
+  const [resolvedAtMs, setResolvedAtMs] = useState<Record<string, number>>({});
+  // story #2631 — 「보류(논의 필요)」 다이얼로그. 목록이라 한 번에 하나만 연다(대상 id 하나로 충분).
+  const [discussTargetId, setDiscussTargetId] = useState<string | null>(null);
+  const [discussSubmitting, setDiscussSubmitting] = useState(false);
+  const [discussError, setDiscussError] = useState<string | null>(null);
+
+  const discuss = async (id: string, reason: string) => {
+    setDiscussSubmitting(true);
+    setDiscussError(null);
+    try {
+      const res = await fetch(`/api/gates/${id}/discuss`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      });
+      if (res.ok) { setDiscussTargetId(null); return; }
+      const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+      setDiscussError(body?.error?.message ?? t('gateTransitionErrorGeneric'));
+    } catch {
+      // story #2631 — PO 리뷰(PR#3068) 지적: try/finally뿐이면 네트워크 실패 시 무표시+
+      // unhandled rejection. 챗 카드(approval-request-card.tsx)와 패리티.
+      setDiscussError(t('gateTransitionErrorGeneric'));
+    } finally {
+      setDiscussSubmitting(false);
+    }
+  };
+
+  // story #2631 — 오클릭 정정 성공 시 로컬 「해소됨」 상태를 지워 다시 액션 가능한(pending)
+  // 카드로 되돌린다 — 목록 자체는 애초에 resolveGate()가 items에서 안 지웠으므로(hitl과
+  // 다른 결정, 위 주석) 재조회 없이 그 자리서 되살릴 수 있다.
+  const undoGate = (id: string) => {
+    setResolvedGates((prev) => { const next = { ...prev }; delete next[id]; return next; });
+    setResolvedAtMs((prev) => { const next = { ...prev }; delete next[id]; return next; });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -142,6 +182,7 @@ export function ApprovalsQueue() {
       });
       if (res.ok) {
         setResolvedGates((prev) => ({ ...prev, [id]: status }));
+        setResolvedAtMs((prev) => ({ ...prev, [id]: Date.now() }));
       } else {
         const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
         setGateErrors((prev) => ({ ...prev, [id]: body?.error?.message ?? t('gateTransitionErrorGeneric') }));
@@ -265,6 +306,12 @@ export function ApprovalsQueue() {
                     {t('queueViewRecord')}
                   </Link>
                 </div>
+                {/* story #2631 — 오클릭 정정(방금 본인이 이 세션에서 해소한 게이트, 5분 창). */}
+                {resolvedAtMs[gate.id] && Date.now() - resolvedAtMs[gate.id]! < UNDO_WINDOW_MS ? (
+                  <div className="mt-2 flex justify-end">
+                    <GateUndoButton gateId={gate.id} onUndone={() => undoGate(gate.id)} />
+                  </div>
+                ) : null}
               </div>
             );
           }
@@ -318,10 +365,27 @@ export function ApprovalsQueue() {
                 <CheckCircle className="size-3.5" />
                 {resolvingIds.has(gate.id) ? '...' : t('gateApprove')}
               </Button>
+              {/* story #2631(PO 결정③) — 「보류(논의 필요)」는 결재함 전 게이트 타입 단일 표면. */}
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 text-muted-foreground"
+                disabled={resolvingIds.has(gate.id)}
+                onClick={() => setDiscussTargetId(gate.id)}
+              >
+                {t('gateDiscussSubmit')}
+              </Button>
             </div>
           </div>
         );
       })}
+      <GateDiscussDialog
+        open={discussTargetId !== null}
+        onOpenChange={(open) => { if (!open) setDiscussTargetId(null); }}
+        onSubmit={(reason) => { if (discussTargetId) void discuss(discussTargetId, reason); }}
+        submitting={discussSubmitting}
+        error={discussError}
+      />
     </div>
   );
 }

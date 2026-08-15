@@ -173,3 +173,83 @@ describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () 
     expect(container.textContent).toContain(koMessages.cage.gateTransitionErrorGeneric);
   });
 });
+
+// story #2631(FE 계약 doc bb733f26) — 「보류(논의 필요)」+ 오클릭 정정(취소). 저위험 경로
+// 버튼 노출·엔드포인트 배선만 고정한다(다이얼로그·GateUndoButton 자체의 상세 동작은
+// approvals-queue.test.tsx가 이미 실 렌더로 커버 — 공유 컴포넌트 중복 검증 금지, 여기선
+// "이 페이지가 올바른 props로 그것들을 배선했는가"만 본다).
+describe('GateDetailPage — 보류(논의 필요)·오클릭 정정 (story #2631)', () => {
+  async function mountWithMutations(gateFixture: GateItem, extra?: { discussOk?: boolean; undoOk?: boolean }) {
+    const calls: { url: string; method?: string; body?: string }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method, body: init?.body as string | undefined });
+      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1/discuss') {
+        return (extra?.discussOk ?? true)
+          ? { ok: true, json: async () => ({ data: gateFixture }) }
+          : { ok: false, status: 422, json: async () => ({ error: { message: '사유가 필요합니다' } }) };
+      }
+      if (url === '/api/gates/gate-1/undo') {
+        return (extra?.undoOk ?? true)
+          ? { ok: true, json: async () => ({ data: { ...gateFixture, status: 'pending', resolver_id: null, resolved_at: null } }) }
+          : { ok: false, status: 403, json: async () => ({ error: { message: '해소자 본인만 취소할 수 있습니다' } }) };
+      }
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    return calls;
+  }
+
+  it('저위험 pending 게이트엔 승인/반려 옆에 「보류(논의 필요)」 버튼이 뜬다', async () => {
+    await mountWithMutations(gate({ can_approve: true }));
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateDiscussSubmit))).toBe(true);
+  });
+
+  it('「보류(논의 필요)」 사유 제출 시 POST /api/gates/{id}/discuss를 {reason}으로 호출한다', async () => {
+    const calls = await mountWithMutations(gate({ can_approve: true }));
+    const discussTrigger = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateDiscussSubmit));
+    await act(async () => { discussTrigger?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const textarea = document.body.querySelector('[data-slot="dialog-content"] textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '근거 확인 후 재판단');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const submitButton = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find((b) => b.textContent === koMessages.cage.gateDiscussSubmit) as HTMLButtonElement;
+    await act(async () => { submitButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const discussCall = calls.find((c) => c.url === '/api/gates/gate-1/discuss');
+    expect(discussCall?.method).toBe('POST');
+    expect(JSON.parse(discussCall?.body ?? '{}')).toEqual({ reason: '근거 확인 후 재판단' });
+  });
+
+  it('본인이 방금 해소한 게이트(5분 이내)엔 취소 버튼이 뜨고, 클릭 시 POST /undo를 호출한다', async () => {
+    useDashboardContextMock.mockReturnValue({ orgMemberships: [], projectMemberships: [], currentTeamMemberId: 'me-1' });
+    const resolvedJustNow = gate({ status: 'approved', resolver_id: 'me-1', resolved_at: new Date().toISOString() });
+    const calls = await mountWithMutations(resolvedJustNow);
+    const undoButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateUndo));
+    expect(undoButton).toBeTruthy();
+    await act(async () => { undoButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(calls.some((c) => c.url === '/api/gates/gate-1/undo' && c.method === 'POST')).toBe(true);
+  });
+
+  it('타인이 해소한 게이트엔 취소 버튼이 안 뜬다(본인만, SoD류 오용 방지)', async () => {
+    useDashboardContextMock.mockReturnValue({ orgMemberships: [], projectMemberships: [], currentTeamMemberId: 'me-1' });
+    const resolvedByOther = gate({ status: 'approved', resolver_id: 'someone-else', resolved_at: new Date().toISOString() });
+    await mountWithMutations(resolvedByOther);
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateUndo))).toBe(false);
+  });
+
+  it('5분 창이 지난 게이트엔 취소 버튼이 안 뜬다', async () => {
+    useDashboardContextMock.mockReturnValue({ orgMemberships: [], projectMemberships: [], currentTeamMemberId: 'me-1' });
+    const staleResolved = gate({ status: 'approved', resolver_id: 'me-1', resolved_at: new Date(Date.now() - 6 * 60 * 1000).toISOString() });
+    await mountWithMutations(staleResolved);
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateUndo))).toBe(false);
+  });
+});
