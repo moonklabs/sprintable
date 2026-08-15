@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Badge } from '@/components/ui/badge';
@@ -290,6 +291,9 @@ function EventDefRow({
           <JsonPreview label={t('eventPayloadSchemaLabel')} value={def.payload_schema} />
           <JsonPreview label={t('eventRoutingLabel')} value={def.routing} />
           {def.block_template ? <JsonPreview label={t('eventBlockTemplateLabel')} value={def.block_template} /> : null}
+          {/* PR#3087 — 이 조회 자체가 BE org admin/owner 게이트라, 일반 멤버는 조회하면
+              항상 403이라 아예 안 그린다(모두가 여는 매 행마다 헛된 실패 fetch 방지). */}
+          {isAdmin ? <PublishHistorySection definitionKey={def.key} t={t} /> : null}
         </div>
       ) : null}
     </div>
@@ -301,6 +305,65 @@ function JsonPreview({ label, value }: { label: string; value: unknown }) {
     <div>
       <p className="mb-1 text-[11px] font-semibold text-muted-foreground">{label}</p>
       <pre className="overflow-x-auto rounded-md bg-muted p-2 text-xs text-foreground">{JSON.stringify(value, null, 2)}</pre>
+    </div>
+  );
+}
+
+// story #2665 — PR#3087(디디) 응답 계약 그대로 소비. 신규 로그 테이블 없이
+// conversation_messages SSOT 재조회라 정의 하나당 별도 fetch(펼칠 때만 — 목록 전체 N+1 방지).
+interface PublishHistoryItem {
+  id: string;
+  conversation_id: string;
+  sender_id: string | null;
+  sender_name: string | null;
+  created_at: string;
+}
+
+type PublishHistoryState = { kind: 'loading' } | { kind: 'resolved'; items: PublishHistoryItem[] } | { kind: 'error' };
+
+function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t: ReturnType<typeof useTranslations> }) {
+  const [state, setState] = useState<PublishHistoryState>({ kind: 'loading' });
+
+  useEffect(() => {
+    let cancelled = false;
+    setState({ kind: 'loading' });
+    void (async () => {
+      try {
+        const res = await fetch(`/api/events/definitions/publish-history?definition_key=${encodeURIComponent(definitionKey)}&limit=20`);
+        if (!res.ok) throw new Error();
+        const items = await res.json() as PublishHistoryItem[];
+        if (!cancelled) setState({ kind: 'resolved', items });
+      } catch {
+        if (!cancelled) setState({ kind: 'error' });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [definitionKey]);
+
+  return (
+    <div>
+      <p className="mb-1 text-[11px] font-semibold text-muted-foreground">{t('eventPublishHistoryLabel')}</p>
+      {state.kind === 'loading' ? (
+        <p className="text-xs text-muted-foreground">{t('eventPublishHistoryLoading')}</p>
+      ) : state.kind === 'error' ? (
+        <p className="text-xs text-destructive">{t('eventPublishHistoryError')}</p>
+      ) : state.items.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t('eventPublishHistoryEmpty')}</p>
+      ) : (
+        <ul className="space-y-1 rounded-md border border-border bg-muted/40 p-2">
+          {state.items.map((item) => (
+            <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span className="text-foreground">{item.sender_name ?? t('eventPublishHistoryUnknownSender')}</span>
+              <span className="flex items-center gap-2 text-muted-foreground">
+                {new Date(item.created_at).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}
+                <Link href={`/chats/${item.conversation_id}`} className="text-primary hover:underline">
+                  {t('eventPublishHistoryOpenChat')}
+                </Link>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
