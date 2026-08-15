@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 from sqlalchemy import and_, case, func, literal, or_, select
@@ -532,6 +532,29 @@ async def transition_gate(
     if note:
         gate.resolution_note = note
 
+    # story #2631(PO 판정 ①, 2026-08-15): 게이트 해소 계열 액션(approve/reject/undo/
+    # discuss-request)을 ActivityLog(immutable)에 처음으로 구조화 기록 — 지금까지 gate 행
+    # (resolver_id/resolved_at/resolution_note)이 "현재 상태"만 담아, 취소(undo_gate_resolution
+    # 참조) 시 원 액션의 흔적이 통째로 사라지는 감사 갭이 있었다(취소 기능이 없어도 이미
+    # 결함이었음). 범위 절제: 게이트 해소 계열만 — 결재 감사 프레임워크 일반화는 이 스토리
+    # 밖(PO 판정).
+    from app.services.activity_log import ActivityLogService
+
+    await ActivityLogService(session).record(
+        org_id=org_id,
+        action=f"gate_{new_status}",
+        actor_id=resolver_id,
+        actor_type="human",  # authz(router)가 human만 통과시킨다 — 93fc7aeb.
+        entity_type="gate",
+        entity_id=gate.id,
+        context={
+            "gate_type": gate.gate_type,
+            "work_item_type": gate.work_item_type,
+            "work_item_id": str(gate.work_item_id),
+            "note": note,
+        },
+    )
+
     # H1-S7: 사람 게이트 해소(approve/reject)를 verdict로 기록 — trust로 환류.
     await _record_gate_review_verdict(session, org_id, gate, new_status, resolver_id)
 
@@ -587,6 +610,204 @@ async def transition_gate(
         )
 
     return gate
+
+
+# story #2631(2026-08-15, 선생님 실사용 발견 08-13 19:49): 반려 의도로 승인을 오클릭 —
+# 해소를 되돌릴 경로도, 「승인도 반려도 아닌」 상태도 없었다. 두 축을 더한다:
+# ① undo_gate_resolution — 해소자 본인이 짧은 창 안에서 자기 해소를 취소.
+# ② request_gate_discussion — 승인/반려 옆 3안, 게이트는 pending 유지한 채 상신자에게 회신.
+GATE_UNDO_WINDOW = timedelta(minutes=5)
+
+
+class GateUndoNotSelfError(Exception):
+    """취소 시도자가 원 해소자 본인이 아님 — 라우터가 403으로 매핑."""
+
+
+class GateUndoWindowExpiredError(Exception):
+    """취소 창(GATE_UNDO_WINDOW) 경과 — 라우터가 403으로 매핑."""
+
+
+async def undo_gate_resolution(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    gate_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    *,
+    now: datetime | None = None,
+) -> Gate:
+    """AC1/AC3 — 해소(approved/rejected) 직후 짧은 창 안에서 **해소자 본인만** 취소해
+    pending으로 되돌린다. 오클릭 정정용이지 재심 경로가 아니다(SoD 불변 — 인가는 "본인
+    해소를 본인이 되돌린다"는 사실 하나로 성립, 새 권한을 안 연다).
+
+    ⛔범위 절제(PO 판정 ③, doc_approval이 1차 실증 대상): `_resolve_doc_gate`가 건 doc
+    status(confirmed/denied)는 여기서 되돌린다(안 되돌리면 gate=pending인데 doc=confirmed
+    인 화면 모순이 생긴다). **다른 부수효과**(workflow_line_resolution의 line 전진·
+    _advance_story_on_merge_approve의 story 진행·trust_pipeline stage 등)는 이 스토리
+    스코프 밖 — 되돌리지 않는다(가드가 못 잡는 것으로 명시. line-bound 게이트는 line이
+    이미 다음 스텝으로 넘어갔을 수 있어 "pending 복귀"가 그 자체로 안전을 보장 못 한다).
+    """
+    now = now or datetime.now(timezone.utc)
+    gate = (await session.execute(
+        select(Gate).where(Gate.id == gate_id, Gate.org_id == org_id)
+    )).scalar_one_or_none()
+    if gate is None:
+        raise ValueError(f"Gate {gate_id} not found")
+    if gate.status not in ("approved", "rejected"):
+        raise ValueError(
+            f"취소 불가: 게이트가 {gate.status} 상태입니다 (승인/반려된 게이트만 취소 가능)."
+        )
+    if gate.resolver_id != actor_id:
+        raise GateUndoNotSelfError("본인이 해소한 게이트만 취소할 수 있습니다.")
+    if gate.resolved_at is None or now - gate.resolved_at > GATE_UNDO_WINDOW:
+        raise GateUndoWindowExpiredError(
+            f"취소 창({int(GATE_UNDO_WINDOW.total_seconds() // 60)}분)이 지났습니다."
+        )
+
+    # 취소 전 원 액션 스냅샷 — status 를 pending 으로 되돌리면 gate 행 자체에선 사라지는 값이라
+    # ActivityLog context 에 남겨야 "원 액션이 무엇이었는지"가 취소 이력에서도 보인다.
+    _prev_status = gate.status
+    _prev_resolver_id = gate.resolver_id
+    _prev_resolved_at = gate.resolved_at
+    _prev_note = gate.resolution_note
+
+    from app.services.doc import DOC_GATE_TYPE, DOC_GATE_WORK_ITEM_TYPE
+    if gate.work_item_type == DOC_GATE_WORK_ITEM_TYPE and gate.gate_type == DOC_GATE_TYPE:
+        _expected_doc_status = "confirmed" if _prev_status == "approved" else "denied"
+        doc = (await session.execute(
+            select(Doc).where(
+                Doc.id == gate.work_item_id, Doc.org_id == org_id, Doc.deleted_at.is_(None),
+            )
+        )).scalar_one_or_none()
+        if doc is not None and doc.status == _expected_doc_status:
+            doc.status = "pending"  # 멱등 가드: 그 사이 다른 경로로 이미 바뀌었으면 안 건드림.
+
+    set_gate_status(gate, "pending", now=now)
+    gate.resolver_id = None
+    gate.resolved_at = None
+    gate.resolution_note = None
+
+    from app.services.activity_log import ActivityLogService
+
+    await ActivityLogService(session).record(
+        org_id=org_id,
+        action="gate_resolution_undone",
+        actor_id=actor_id,
+        actor_type="human",
+        entity_type="gate",
+        entity_id=gate.id,
+        context={
+            "gate_type": gate.gate_type,
+            "work_item_type": gate.work_item_type,
+            "work_item_id": str(gate.work_item_id),
+            "previous_status": _prev_status,
+            "previous_resolver_id": str(_prev_resolver_id) if _prev_resolver_id else None,
+            "previous_resolved_at": _prev_resolved_at.isoformat() if _prev_resolved_at else None,
+            "previous_note": _prev_note,
+        },
+    )
+
+    await session.flush()
+    await session.refresh(gate)
+    return gate
+
+
+async def request_gate_discussion(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    gate_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    reason: str,
+    *,
+    now: datetime | None = None,
+) -> Gate:
+    """AC2 — 승인/변경요청 옆 3안. 게이트는 **pending 그대로**(전이 없음) — 순수 회신+감사
+    기록 액션. 사유는 `gate.neutral_facts["discussion_requested"]`에 얹는다(신규 컬럼/
+    마이그 없이 기존 JSONB 확장 — requested_by_member_id와 같은 자리에 쌓는 관례 재사용).
+
+    ⛔PO 판정 ③ — 액션 자체는 게이트 타입 무관(결재함 단일 UX). 회신은 requester 개념이
+    있는 타입(doc_approval)만 실제 전달되고, 없는 타입은 회신 스킵을 ActivityLog context에
+    명시(`requester_notified=False` + 사유) — 조용한 no-op 금지."""
+    now = now or datetime.now(timezone.utc)
+    if not (reason or "").strip():
+        raise ValueError("논의 요청 사유(reason)는 필수입니다.")
+
+    gate = (await session.execute(
+        select(Gate).where(Gate.id == gate_id, Gate.org_id == org_id)
+    )).scalar_one_or_none()
+    if gate is None:
+        raise ValueError(f"Gate {gate_id} not found")
+    if gate.status != "pending":
+        raise ValueError(f"논의 요청 불가: 게이트가 {gate.status} 상태입니다 (pending만 가능).")
+
+    facts = dict(gate.neutral_facts or {})
+    facts["discussion_requested"] = {
+        "reason": reason,
+        "requested_by_member_id": str(actor_id),
+        "requested_at": now.isoformat(),
+    }
+    gate.neutral_facts = facts
+
+    requester_notified = await _notify_gate_discussion_requester(session, gate, actor_id, reason)
+
+    from app.services.activity_log import ActivityLogService
+
+    await ActivityLogService(session).record(
+        org_id=org_id,
+        action="gate_discussion_requested",
+        actor_id=actor_id,
+        actor_type="human",
+        entity_type="gate",
+        entity_id=gate.id,
+        context={
+            "gate_type": gate.gate_type,
+            "work_item_type": gate.work_item_type,
+            "work_item_id": str(gate.work_item_id),
+            "reason": reason,
+            "requester_notified": requester_notified,
+        },
+    )
+
+    await session.flush()
+    await session.refresh(gate)
+    return gate
+
+
+async def _notify_gate_discussion_requester(
+    session: AsyncSession, gate: Gate, actor_id: uuid.UUID, reason: str,
+) -> bool:
+    """`_notify_doc_gate_requester`의 「논의 요청」 자매 함수 — doc_approval만 실제 회신
+    (requester 개념이 있는 유일한 타입, PO 판정 ③ 1차 실증 대상). 다른 타입은 회신 대상이
+    없다는 사실 자체를 반환값으로 명시(호출부가 ActivityLog에 `requester_notified` 로
+    남겨 "조용한 no-op"이 되지 않게 한다). best-effort — 실패해도 논의 요청 자체는 막지 않는다."""
+    try:
+        from app.services.doc import DOC_GATE_TYPE, DOC_GATE_WORK_ITEM_TYPE
+        if gate.work_item_type != DOC_GATE_WORK_ITEM_TYPE or gate.gate_type != DOC_GATE_TYPE:
+            return False
+
+        facts = gate.neutral_facts or {}
+        requester_raw = facts.get("requested_by_member_id")
+        if not requester_raw:
+            return False
+        requester_id = uuid.UUID(str(requester_raw))
+
+        doc = (await session.execute(
+            select(Doc).where(Doc.id == gate.work_item_id, Doc.org_id == gate.org_id)
+        )).scalar_one_or_none()
+        if doc is None:
+            return False
+
+        from app.services.approval_delivery import dispatch_approval_discussion_reply
+
+        await dispatch_approval_discussion_reply(
+            session, org_id=gate.org_id, doc=doc, gate_id=gate.id,
+            requester_id=requester_id, resolver_id=actor_id, reason=reason,
+        )
+        return True
+    except Exception:  # noqa: BLE001 — best-effort, 회신 실패가 논의 요청 자체를 막지 않는다.
+        logger.warning(
+            "approval-discussion 상신자 회신 실패 gate=%s", gate.id, exc_info=True,
+        )
+        return False
 
 
 async def void_gate(

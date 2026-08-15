@@ -18,6 +18,8 @@ from app.models.pm import Story, Task
 from app.models.visual_artifact import VisualArtifact
 from app.routers.agent_gateway import wake_agent
 from app.services.gate_service import (
+    GateUndoNotSelfError,
+    GateUndoWindowExpiredError,
     RiskGrade,
     apply_gate_urgency_sort,
     create_gate,
@@ -25,8 +27,10 @@ from app.services.gate_service import (
     get_org_posture,
     hold_gate,
     is_known_project_agnostic_work_item_type,
+    request_gate_discussion,
     resolve_work_item_project_id,
     transition_gate,
+    undo_gate_resolution,
     unhold_gate,
     void_gate,
 )
@@ -294,6 +298,50 @@ async def _non_doc_can_approve(
     if gate_type == "artifact_canonicalize":
         return True
     return await _non_doc_gate_approvable(session, user_id, org_id, project_id)
+
+
+async def _authorize_gate_approve_equivalent(
+    session: AsyncSession, gate: Gate | None, resolved, auth, org_id: uuid.UUID,
+) -> None:
+    """story #2631 — transition_gate_endpoint 의 인가 블록(휴먼-only + doc/non-doc can_approve)을
+    그대로 추출한 것. request_gate_discussion_endpoint(«보류·논의»)는 승인/반려 옆 3번째 버튼이라
+    **같은 자격**을 요구한다(PO 판정 — "승인할 수 있는 사람만 논의도 요청할 수 있다", 승인 자격
+    없는 제3자가 게이트를 pending에 묶어두는 건 별개 취약이 된다). 로직 자체는 신규가 아니라
+    기존 transition 인가 규칙의 재사용 — 새 규칙을 만들지 않는다(DRY, 위 _non_doc_can_approve
+    표 주석과 같은 원칙)."""
+    if resolved.type != "human":
+        raise HTTPException(
+            status_code=403,
+            detail="게이트 승인/거부는 휴먼 멤버만 가능합니다 (에이전트 승인 불가).",
+        )
+    if gate is None:
+        return
+    if gate.gate_type == "doc_approval":  # doc.py DOC_GATE_TYPE
+        _reason = await can_approve_doc_gate_reason(
+            session, gate, resolved, uuid.UUID(auth.user_id), org_id
+        )
+        if _reason == "self_or_unverified":
+            raise HTTPException(
+                status_code=403,
+                detail="본인이 상신한 doc 결재는 본인이 승인/거부할 수 없습니다 (self-approval 금지·상신자 미검증 차단).",
+            )
+        if _reason is not None:
+            raise HTTPException(
+                status_code=403,
+                detail="doc 결재 권한이 없습니다 (대상 프로젝트 접근 필요).",
+            )
+    else:
+        _project_id = await resolve_work_item_project_id(
+            session, org_id, gate.work_item_type, gate.work_item_id,
+        )
+        if not await _non_doc_can_approve(session, gate.gate_type, uuid.UUID(auth.user_id), org_id, _project_id):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "이 게이트를 승인/거부할 권한이 없습니다 (해당 프로젝트의 owner/admin이어야 "
+                    "합니다). 프로젝트 관리자에게 권한을 요청하세요."
+                ),
+            )
 
 
 @router.get("", response_model=list[GateResponse])
@@ -803,74 +851,13 @@ async def transition_gate_endpoint(
     # 게이트를 승인하면 "agent-assisted·human-validated" 웨지 전제가 무너지므로 차단(403).
     # 시스템 auto-resolution(resolve_gate_from_verdict)은 transition_gate 서비스 직호출이라 무영향.
     # ⭐RC#1: status 는 validator 가 approved/rejected 로 제한 → 도달하는 전이는 전부 사람 결재.
+    # E-DG 48f064e5 / #2198(까심 QA·오르테가 PO): doc/non-doc 인가 규칙 —
+    # story #2631 로 _authorize_gate_approve_equivalent 로 추출(discuss 액션과 공유, 위 정의부 주석 참고).
     resolved = await resolve_member(auth, org_id, session)
-    if resolved.type != "human":
-        raise HTTPException(
-            status_code=403,
-            detail="게이트 승인/거부는 휴먼 멤버만 가능합니다 (에이전트 승인 불가).",
-        )
-    # E-DG 48f064e5: doc 결재 게이트 BE-level can_approve 강제(FE 게이팅은 가시성뿐·실 authz는 BE).
-    # 룰(A·PO 결정): human(위) + 대상 doc project has_project_access + not-author(resolver≠requester).
-    # 89484c8c: rule 을 can_approve_doc_gate_reason 단일 규칙으로 추출 — list_gates per-caller can_approve
-    # 가시성과 **공용**(거동 분기 0·DRY). 거부사유별 403 메시지는 여기서 보존(self vs 권한). 휴먼 체크는
-    # 위에서 선행되므로 여기 not_human 미도달(방어적으로 권한 403 매핑). 비-doc 게이트는 기존 경로 무변경.
     _gate = (await session.execute(
         select(Gate).where(Gate.id == id, Gate.org_id == org_id)
     )).scalar_one_or_none()
-    if _gate is not None and _gate.gate_type == "doc_approval":  # doc.py DOC_GATE_TYPE
-        _reason = await can_approve_doc_gate_reason(
-            session, _gate, resolved, uuid.UUID(auth.user_id), org_id
-        )
-        # ① self-approval(SoD)·상신자 미기록(forged/이상 게이트) fail-closed.
-        if _reason == "self_or_unverified":
-            raise HTTPException(
-                status_code=403,
-                detail="본인이 상신한 doc 결재는 본인이 승인/거부할 수 없습니다 (self-approval 금지·상신자 미검증 차단).",
-            )
-        # ② can_approve 자격(no_project_access·삭제 doc·방어적 not_human): project-scope·random org-member 차단.
-        if _reason is not None:
-            raise HTTPException(
-                status_code=403,
-                detail="doc 결재 권한이 없습니다 (대상 프로젝트 접근 필요).",
-            )
-    elif _gate is not None:
-        # story #2198(까심 QA 적출·오르테가 PO 판정): non-doc 게이트(merge/pr_review/qa/deploy/
-        # artifact_canonicalize 등)는 이 분기 자체가 없어 **휴먼 org 멤버이기만 하면 통과**했다
-        # (위 not-human 체크뿐). 처방은 새 단일 규칙이 아니라 _non_doc_can_approve(위 정의)
-        # **타입별 표**를 여기 물리는 것 — artifact_canonicalize 는 첫 판정(rule B 균일 적용)
-        # 시도가 CI 에서 실 회귀로 드러나 갈렸다: E-CANVAS C4-S8 설계상 그 타입은 project
-        # owner/admin 이 아니라 **휴먼이면 승인 가능**이 계약이었다(테스트 픽스처가 무권한 org
-        # 멤버를 승인자로 seed 해 그 설계를 증언하고 있었음). 그 외 타입은 rule B(project
-        # owner/admin, project-무관 work_item 은 org owner/admin) 그대로.
-        #
-        # ⛔SoD(self-approval) 는 의도적으로 안 넣는다(오르테가 PO 판정, 2026-07-27) — 이유:
-        # ① doc 결재의 SoD 는 "저자성"(자기가 쓴 문서를 자기가 승인)을 막는 것인데 non-doc
-        #    게이트엔 그 저자성 관계가 같은 형태로 없다. ② non-doc 게이트 상신자는 사실상
-        #    에이전트이고 에이전트는 이미 승인 불가(93fc7aeb, 위 not-human 체크) — 사람 대
-        #    사람 SoD 가 붙을 자리가 실제로 거의 없다. ③ 넣으면 1인 org·소규모 팀에서 아무도
-        #    못 여는 교착이 생긴다(가정 아님 — PR #1998 이 그 교착을 고치는 물건). ④ 추적은
-        #    이미 확보돼 있다(resolver_id 를 body 무시하고 인증 caller 로 강제 기록, S23 RC①).
-        #    다음 사람이 "doc 엔 있는데 여긴 왜 없지"로 되돌아와 넣지 않도록 여기 남긴다.
-        _project_id = await resolve_work_item_project_id(
-            session, org_id, _gate.work_item_type, _gate.work_item_id,
-        )
-        # ⚠️_non_doc_gate_approvable(rule B, non-artifact_canonicalize 타입에만 적용)은
-        # `uuid.UUID(auth.user_id)`를 기대한다(get_project_role 이 users.id/project_access.
-        # member_id 로 매칭 — list_gates 의 _uid 와 동일 축). resolved.id(member row id)는
-        # doc_approval SoD 비교 전용 축이라 여기 쓰면 다른 사람으로 조회돼 fail-closed 오탐
-        # (정당한 owner/admin 이 403)이 난다 — 실제로 이 갭을 realdb 테스트가 잡았다.
-        if not await _non_doc_can_approve(session, _gate.gate_type, uuid.UUID(auth.user_id), org_id, _project_id):
-            # #2198(오르테가 PO, 라이브 측정 후 지시): 없던 바를 새로 세우는 변경이라 막히는
-            # 사람이 "무엇을 해야 하는지" 다음 발을 못 받으면 그 자리서 막막해진다(오늘 아침
-            # #2166 과 같은 자리 — 막는 것과 "다음 발을 주는 것"은 다른 일). 자격 기준(project
-            # owner/admin)과 다음 행동(관리자에게 권한 요청)까지 메시지에 명시.
-            raise HTTPException(
-                status_code=403,
-                detail=(
-                    "이 게이트를 승인/거부할 권한이 없습니다 (해당 프로젝트의 owner/admin이어야 "
-                    "합니다). 프로젝트 관리자에게 권한을 요청하세요."
-                ),
-            )
+    await _authorize_gate_approve_equivalent(session, _gate, resolved, auth, org_id)
     # story #2027(까심 QA 적출): 고위험(risk_grade=high) 게이트의 approved 전이는 사유(note) 서버측
     # 강제 — void_gate/override_gate 기존 관례(reason 없으면 ValueError→422, void_gate 참고)에
     # 맞추는 작업이다(신규 규칙 아님). 이전엔 FE 버튼 disable(evidenceViewed && reason.trim())만
@@ -978,6 +965,64 @@ async def unhold_gate_endpoint(
     resolved = await _require_gate_admin(session, auth, org_id)
     try:
         gate = await unhold_gate(session, org_id, id, resolved.id)
+        await session.commit()
+        # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+        await session.refresh(gate)
+        return GateResponse.model_validate(gate)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/{id}/undo", response_model=GateResponse)
+async def undo_gate_resolution_endpoint(
+    id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> GateResponse:
+    """story #2631 AC1/AC3 — 오클릭 정정. 해소(approved/rejected) 직후 짧은 창 안에서
+    **해소자 본인만** 취소해 pending으로 되돌린다. 별도 role 게이팅 없음 — 본인 해소를
+    본인이 되돌린다는 사실 하나로 인가가 성립(void/hold 류 admin 액션과 다른 축, 서비스
+    docstring 참고). body 는 인증 caller 강제(S23 RC① 패턴 재사용) — actor_id 를 body 로
+    받지 않는다."""
+    resolved = await resolve_member(auth, org_id, session)
+    try:
+        gate = await undo_gate_resolution(session, org_id, id, resolved.id)
+        await session.commit()
+        # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+        await session.refresh(gate)
+        return GateResponse.model_validate(gate)
+    except GateUndoNotSelfError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except GateUndoWindowExpiredError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+class GateDiscussionRequest(BaseModel):
+    reason: str
+
+
+@router.post("/{id}/discuss", response_model=GateResponse)
+async def request_gate_discussion_endpoint(
+    id: uuid.UUID,
+    body: GateDiscussionRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> GateResponse:
+    """story #2631 AC2 — 승인/거부 옆 3번째 응답: 「보류(논의 필요)」. 게이트는 pending
+    그대로(전이 없음) — 순수 회신+감사 기록. 인가는 승인/거부와 **동일 자격**
+    (_authorize_gate_approve_equivalent — 승인 못 하는 제3자가 게이트를 논의-보류로
+    묶어두는 것도 막아야 하므로)."""
+    resolved = await resolve_member(auth, org_id, session)
+    _gate = (await session.execute(
+        select(Gate).where(Gate.id == id, Gate.org_id == org_id)
+    )).scalar_one_or_none()
+    await _authorize_gate_approve_equivalent(session, _gate, resolved, auth, org_id)
+    try:
+        gate = await request_gate_discussion(session, org_id, id, resolved.id, body.reason)
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(gate)

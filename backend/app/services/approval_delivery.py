@@ -261,3 +261,90 @@ async def dispatch_approval_result_reply(
             "approval-result 벨 알림 실패 doc=%s requester=%s",
             doc.id, requester_id, exc_info=True,
         )
+
+
+async def dispatch_approval_discussion_reply(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    doc: Doc,
+    gate_id: uuid.UUID,
+    requester_id: uuid.UUID,
+    resolver_id: uuid.UUID,
+    reason: str,
+) -> None:
+    """story #2631 — `dispatch_approval_result_reply`의 자매 함수. 승인/반려 둘 중 하나로
+    강제되지 않고 "보류(논의 필요)"를 표현하고 싶다는 게 원 실사용 요구(선생님 08-13
+    19:49) — 이 함수가 그 세 번째 회신 형태. 게이트는 pending 그대로라 gate.status를
+    참조하지 않는다(호출부 request_gate_discussion이 이미 pending 확인 완료).
+
+    구조는 dispatch_approval_result_reply와 동형(같은 DM·독립 SAVEPOINT 둘·human만 벨) —
+    `decision`/`message_kind`/알림 문구만 논의-요청 전용으로 갈린다."""
+    if not doc.project_id or resolver_id == requester_id:
+        return
+
+    from app.routers.conversations import _dispatch_conversation_event
+    from app.services.member_resolver import lookup_members_by_ids
+
+    resolver = (await lookup_members_by_ids({resolver_id}, db)).get(resolver_id)
+    if resolver is None:
+        logger.warning("approval-discussion 회신 스킵 — resolver 미확인 doc=%s", doc.id)
+        return
+
+    content = f"'{doc.title}' 문서 결재 — 논의 요청\n사유: {reason}"
+
+    try:
+        async with db.begin_nested():
+            conv = await _get_or_create_approval_dm(
+                db, org_id=org_id, project_id=doc.project_id,
+                requester_id=requester_id, approver_id=resolver_id,
+            )
+            msg = ConversationMessage(
+                conversation_id=conv.id,
+                sender_id=resolver_id,
+                content=content,
+                mentioned_ids=[requester_id],
+                msg_metadata={
+                    "activation": {
+                        "audience": [str(requester_id)],
+                        "kind": "discuss",
+                        "expects_response": True,
+                    },
+                    "approval_target": {
+                        "work_item_type": "doc",
+                        "work_item_id": str(doc.id),
+                        "gate_id": str(gate_id),
+                        "decision": "discuss",
+                        "resolution_note": reason,
+                    },
+                },
+            )
+            db.add(msg)
+            await db.flush()
+            await _dispatch_conversation_event(db, conv, msg, org_id, resolver)
+    except Exception:  # noqa: BLE001 — best-effort, 회신 실패가 논의 요청 자체를 막지 않음.
+        logger.warning(
+            "approval-discussion 회신 배달 실패 doc=%s requester=%s",
+            doc.id, requester_id, exc_info=True,
+        )
+        # dispatch_approval_result_reply와 동일 원칙 — DM 실패가 벨 알림까지 죽이지 않게
+        # return하지 않고 다음 블록으로 진행.
+
+    try:
+        requester = (await lookup_members_by_ids({requester_id}, db)).get(requester_id)
+        if requester is not None and requester.type == "human":
+            async with db.begin_nested():
+                from app.services.notification_dispatch import dispatch_notification
+                await dispatch_notification(
+                    db, org_id=org_id, event_type="doc_approval_discussion_requested",
+                    target_member_ids=[requester_id],
+                    title="문서 결재 — 논의 요청",
+                    body=reason or f"'{doc.title}' 문서 결재에 대해 논의를 요청받았습니다.",
+                    reference_type="gate", reference_id=gate_id,
+                    source_project_id=doc.project_id,
+                )
+    except Exception:  # noqa: BLE001 — 벨 알림 실패는 카드 배달과 독립.
+        logger.warning(
+            "approval-discussion 벨 알림 실패 doc=%s requester=%s",
+            doc.id, requester_id, exc_info=True,
+        )
