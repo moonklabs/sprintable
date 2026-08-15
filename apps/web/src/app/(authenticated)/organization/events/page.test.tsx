@@ -117,6 +117,12 @@ function mockFetches(defs: unknown[], opts?: { onPost?: (body: unknown) => { ok:
     if (url === '/api/events/publish' && init?.method === 'POST') {
       return { ok: true, json: async () => ({}) };
     }
+    // story #2665 — 정의 행을 펼치면 PublishHistorySection이 이 엔드포인트를 호출한다.
+    // 응답 계약(PR#3087)은 배열이라 기본값도 배열이어야 한다({}가 아님) — 이 스위트의
+    // 다른 대부분 테스트는 이력 자체를 안 재므로 빈 배열(정상 빈 상태)로 안전 폴백.
+    if (url.startsWith('/api/events/definitions/publish-history')) {
+      return { ok: true, json: async () => [] };
+    }
     return { ok: true, json: async () => ({}) };
   }));
   return calls;
@@ -491,5 +497,72 @@ describe('OrganizationEventsPage — 이벤트 정의기(story #2670 A층)', () 
     // 기본 탭 버튼은 비활성(disabled) — 표현 못 하는 정의를 폼으로 잘못 편집하게 두지 않는다.
     const basicTabBtn = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.definerTabBasic) as HTMLButtonElement;
     expect(basicTabBtn.disabled).toBe(true);
+  });
+});
+
+// story #2665 — PR#3087(디디) BE 계약 소비. 정의 상세(행 펼침)에 최근 발행 이력.
+describe('OrganizationEventsPage — 발행 이력(story #2665)', () => {
+  it('관리자가 행을 펼치면 definition_key+limit으로 조회하고 발행자·시각·대화 링크가 뜬다(AC1·AC2)', async () => {
+    const calls: { url: string }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push({ url });
+      if (url === '/api/events/definitions') return { ok: true, json: async () => [customWithId({ id: 'def-1', key: 'org.moonklabs.my_event' })] };
+      if (url.startsWith('/api/events/definitions/publish-history')) {
+        return {
+          ok: true,
+          json: async () => [
+            { id: 'pub-1', conversation_id: 'conv-9', sender_id: 'member-1', sender_name: '페드루 올리베이라', created_at: '2026-08-15T12:00:00Z' },
+          ],
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await mount();
+    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === 'org.moonklabs.my_event')!;
+    await act(async () => { keyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const historyCall = calls.find((c) => c.url.startsWith('/api/events/definitions/publish-history'));
+    expect(historyCall).toBeDefined();
+    const url = new URL(historyCall!.url, 'http://x');
+    expect(url.searchParams.get('definition_key')).toBe('org.moonklabs.my_event');
+    expect(url.searchParams.get('limit')).toBe('20');
+    expect(container.textContent).toContain('페드루 올리베이라');
+    const chatLink = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.organization.eventPublishHistoryOpenChat) as HTMLAnchorElement;
+    expect(chatLink.getAttribute('href')).toBe('/chats/conv-9');
+  });
+
+  it('이력이 빈 배열이면 빈 상태 문구를 보인다', async () => {
+    mockFetches([customWithId({ id: 'def-2', key: 'org.moonklabs.empty_event' })]);
+    await mount();
+    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === 'org.moonklabs.empty_event')!;
+    await act(async () => { keyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain(koMessages.organization.eventPublishHistoryEmpty);
+  });
+
+  it('조회 실패 시 에러 문구를 보이되 카드 자체는 안 죽는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/events/definitions') return { ok: true, json: async () => [customWithId({ id: 'def-3', key: 'org.moonklabs.err_event' })] };
+      if (url.startsWith('/api/events/definitions/publish-history')) return { ok: false, json: async () => ({}) };
+      return { ok: true, json: async () => ({}) };
+    }));
+    await mount();
+    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === 'org.moonklabs.err_event')!;
+    await act(async () => { keyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain(koMessages.organization.eventPublishHistoryError);
+    // 나머지 상세(payload_schema 등)는 여전히 렌더된다 — 이력 실패가 카드 전체를 안 죽인다.
+    expect(container.textContent).toContain(koMessages.organization.eventPayloadSchemaLabel);
+  });
+
+  it('일반 멤버는 행을 펼쳐도 이력 조회 자체를 안 한다(BE가 admin 전용이라 헛된 403 방지)', async () => {
+    asMember();
+    const calls = mockFetches([customWithId({ id: 'def-4', key: 'org.moonklabs.member_view' })]);
+    await mount();
+    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === 'org.moonklabs.member_view')!;
+    await act(async () => { keyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(calls.some((c) => c.url.startsWith('/api/events/definitions/publish-history'))).toBe(false);
   });
 });
