@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -322,6 +322,7 @@ interface PublishHistoryItem {
 type PublishHistoryState = { kind: 'loading' } | { kind: 'resolved'; items: PublishHistoryItem[] } | { kind: 'error' };
 
 function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t: ReturnType<typeof useTranslations> }) {
+  const locale = useLocale();
   const [state, setState] = useState<PublishHistoryState>({ kind: 'loading' });
 
   useEffect(() => {
@@ -355,7 +356,7 @@ function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t:
             <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
               <span className="text-foreground">{item.sender_name ?? t('eventPublishHistoryUnknownSender')}</span>
               <span className="flex items-center gap-2 text-muted-foreground">
-                {new Date(item.created_at).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}
+                {new Date(item.created_at).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' })}
                 <Link href={`/chats/${item.conversation_id}`} className="text-primary hover:underline">
                   {t('eventPublishHistoryOpenChat')}
                 </Link>
