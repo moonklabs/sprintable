@@ -184,11 +184,20 @@ describe('OrganizationEventsPage', () => {
     expect(container.textContent).toContain('"work_item_stakeholders"');
   });
 
+  // story #2670 — create는 이제 「기본」(3서식 폼) 탭이 기본으로 열린다(AC1). 이 스위트의
+  // 기존 JSON-경로 테스트들은 「고급」 탭으로 명시 전환해야 그 시절 동작을 그대로 잰다 —
+  // 기본 탭 자체의 새 동작은 이 파일 하단 새 describe에서 별도로 잰다.
+  function switchToAdvancedTab() {
+    const tabBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find((b) => b.textContent?.startsWith(koMessages.organization.definerTabAdvanced)) as HTMLButtonElement;
+    tabBtn.click();
+  }
+
   it('생성 폼 제출 시 org.{slug}. 접두사가 자동으로 붙고 파싱된 JSON을 POST한다', async () => {
     const calls = mockFetches([]);
     await mount();
     const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
     await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { switchToAdvancedTab(); });
 
     const keyInput = document.body.querySelector('#event-key') as HTMLInputElement;
     await act(async () => {
@@ -212,6 +221,7 @@ describe('OrganizationEventsPage', () => {
     await mount();
     const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
     await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { switchToAdvancedTab(); });
 
     const keyInput = document.body.querySelector('#event-key') as HTMLInputElement;
     const schemaTextarea = document.body.querySelector('#event-payload-schema') as HTMLTextAreaElement;
@@ -289,6 +299,7 @@ describe('OrganizationEventsPage', () => {
     await mount();
     const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
     await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { switchToAdvancedTab(); });
     const keyInput = document.body.querySelector('#event-key') as HTMLInputElement;
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
@@ -298,5 +309,145 @@ describe('OrganizationEventsPage', () => {
     const submitBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find((b) => b.textContent === koMessages.organization.eventCreateSubmit) as HTMLButtonElement;
     await act(async () => { submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(document.body.textContent).toContain('네임스페이스가 org.moonklabs.로 시작해야 합니다');
+  });
+});
+
+// story #2670(A층) — 휴먼용 이벤트 정의기(3서식 폼). 판별자: JSON 없이 사이클형 1건을
+// 정의→미리보기→저장까지. AC3(폼↔JSON 왕복)는 별도 describe.
+describe('OrganizationEventsPage — 이벤트 정의기(story #2670 A층)', () => {
+  function dialogContent() {
+    return document.body.querySelector('[data-slot="dialog-content"]') as HTMLElement;
+  }
+  function setInputValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
+    const proto = el instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!;
+    setter.call(el, value);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  it('생성 다이얼로그는 「기본」 탭으로 열리고 사이클형이 기본 선택돼 있다(AC1 진입점)', async () => {
+    mockFetches([]);
+    await mount();
+    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
+    await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(dialogContent().textContent).toContain(koMessages.organization.definerFormat_cycle);
+    // 고급 탭 전용 필드(JSON textarea)는 기본 탭에서 안 보인다.
+    expect(dialogContent().querySelector('#event-payload-schema')).toBeNull();
+    // 미리보기 패널(실 렌더러)이 이미 붙어 있다.
+    expect(dialogContent().textContent).toContain(koMessages.organization.definerPreviewLabel);
+  });
+
+  it('사이클형 정의 — 이름·키·단계 2개 입력 후 저장하면 파생 JSON을 그대로 POST한다(AC1)', async () => {
+    const calls = mockFetches([]);
+    await mount();
+    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
+    await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    await act(async () => {
+      setInputValue(dialogContent().querySelector('#definer-name') as HTMLInputElement, '릴리즈 흐름');
+      setInputValue(dialogContent().querySelector('#definer-key') as HTMLInputElement, 'release_flow');
+    });
+    const addStageBtn = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.organization.definerAddStage))!;
+    await act(async () => { addStageBtn.click(); });
+    await act(async () => { addStageBtn.click(); });
+    const stageNameInputs = dialogContent().querySelectorAll('input[placeholder="' + koMessages.organization.definerStageNamePlaceholder + '"]');
+    expect(stageNameInputs.length).toBe(2);
+    await act(async () => {
+      setInputValue(stageNameInputs[0] as HTMLInputElement, 'draft');
+      setInputValue(stageNameInputs[1] as HTMLInputElement, 'done');
+    });
+
+    const submitBtn = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateSubmit) as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+
+    const postCall = calls.find((c) => c.method === 'POST' && c.url === '/api/events/definitions');
+    expect(postCall).toBeDefined();
+    const body = JSON.parse(postCall!.body!);
+    expect(body.key).toBe('org.moonklabs.release_flow');
+    expect(body.payload_schema).toEqual({
+      type: 'object',
+      properties: { stage: { type: 'string', enum: ['draft', 'done'] } },
+      required: ['stage'],
+      additionalProperties: false,
+    });
+    expect(body.routing).toEqual({
+      escalation: { kind: 'server_derived', target: 'none' },
+      broadcast: { kind: 'payload_field', member_id_field: 'assignee_member_id' },
+    });
+    expect(body.action_auth).toBeNull();
+  });
+
+  it('저장 성공 후 다이얼로그가 닫히지 않고 「테스트 발행」이 열린다(§4 한 흐름)', async () => {
+    const calls = mockFetches([]);
+    await mount();
+    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
+    await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {
+      setInputValue(dialogContent().querySelector('#definer-key') as HTMLInputElement, 'x');
+    });
+    const addStageBtn = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.organization.definerAddStage))!;
+    await act(async () => { addStageBtn.click(); });
+    await act(async () => {
+      setInputValue(dialogContent().querySelector('input[placeholder="' + koMessages.organization.definerStageNamePlaceholder + '"]') as HTMLInputElement, 'a');
+    });
+    const submitBtn = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateSubmit) as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+
+    // 다이얼로그 여전히 열려 있음(닫혔으면 dialogContent()가 null) + 테스트 발행 버튼 활성.
+    expect(dialogContent()).not.toBeNull();
+    const testBtn = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.definerTestPublishCta) as HTMLButtonElement;
+    expect(testBtn.disabled).toBe(false);
+
+    await act(async () => { testBtn.click(); });
+    const publishCall = calls.find((c) => c.url === '/api/events/publish');
+    expect(publishCall).toBeDefined();
+    expect(JSON.parse(publishCall!.body!).definition_key).toBe('org.moonklabs.x');
+  });
+
+  it('키가 비었으면 저장 버튼이 비활성이다(fail-closed·서버 400 재생산 방지)', async () => {
+    mockFetches([]);
+    await mount();
+    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
+    await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const submitBtn = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateSubmit) as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
+  });
+
+  // AC3 — JSON→폼 왕복.
+  it('폼이 표현 가능한 모양(사이클형)의 기존 정의는 수정 시 「기본」 탭에 복원된 상태로 열린다', async () => {
+    mockFetches([customWithId({
+      id: 'def-cycle',
+      key: 'org.moonklabs.release_flow',
+      payload_schema: { type: 'object', properties: { stage: { type: 'string', enum: ['draft', 'done'] } }, required: ['stage'], additionalProperties: false },
+      routing: { escalation: { kind: 'server_derived', target: 'none' }, broadcast: { kind: 'payload_field', member_id_field: 'assignee_member_id' } },
+    })]);
+    await mount();
+    const editBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventEditCta)!;
+    await act(async () => { editBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    // 기본 탭이 활성(고급 전용 배지 없음) — #event-key(JSON탭 전용)는 안 보이고 폼 필드가 보인다.
+    expect(dialogContent().textContent).not.toContain(koMessages.organization.definerAdvancedOnlyBadge);
+    expect(dialogContent().querySelector('#definer-name')).not.toBeNull();
+    const stageNameInputs = dialogContent().querySelectorAll('input[placeholder="' + koMessages.organization.definerStageNamePlaceholder + '"]') as NodeListOf<HTMLInputElement>;
+    expect([...stageNameInputs].map((i) => i.value)).toEqual(['draft', 'done']);
+  });
+
+  it('폼이 표현 못 하는 모양(routing이 커스텀에서 불가능한 target)의 기존 정의는 「고급 전용」으로 떨어진다(AC3)', async () => {
+    mockFetches([customWithId({
+      id: 'def-weird',
+      key: 'org.moonklabs.weird',
+      payload_schema: { type: 'object', properties: { foo: { type: 'string' } }, required: [], additionalProperties: false },
+      routing: { escalation: { kind: 'server_derived', target: 'none' }, broadcast: { kind: 'server_derived', target: 'goal_owner' } },
+    })]);
+    await mount();
+    const editBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventEditCta)!;
+    await act(async () => { editBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(dialogContent().textContent).toContain(koMessages.organization.definerAdvancedOnlyBadge);
+    // 고급 탭이 강제로 열려 JSON textarea가 보인다(기존 #3070 편집기 기능 유지 — 손실 0).
+    expect(dialogContent().querySelector('#event-payload-schema')).not.toBeNull();
+    // 기본 탭 버튼은 비활성(disabled) — 표현 못 하는 정의를 폼으로 잘못 편집하게 두지 않는다.
+    const basicTabBtn = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.definerTabBasic) as HTMLButtonElement;
+    expect(basicTabBtn.disabled).toBe(true);
   });
 });
