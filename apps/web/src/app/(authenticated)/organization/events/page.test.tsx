@@ -32,11 +32,14 @@ function wrap(node: React.ReactNode) {
 
 const ORG_ID = 'org-1';
 
+const CURRENT_MEMBER_ID = 'member-me-1';
+
 function asAdmin() {
   useDashboardContextMock.mockReturnValue({
     orgId: ORG_ID,
     orgMemberships: [{ orgId: ORG_ID, orgName: '뭉클랩', orgSlug: 'moonklabs', role: 'admin' }],
     projectMemberships: [],
+    currentTeamMemberId: CURRENT_MEMBER_ID,
   });
 }
 
@@ -401,7 +404,37 @@ describe('OrganizationEventsPage — 이벤트 정의기(story #2670 A층)', () 
     await act(async () => { testBtn.click(); });
     const publishCall = calls.find((c) => c.url === '/api/events/publish');
     expect(publishCall).toBeDefined();
-    expect(JSON.parse(publishCall!.body!).definition_key).toBe('org.moonklabs.x');
+    const publishBody = JSON.parse(publishCall!.body!);
+    expect(publishBody.definition_key).toBe('org.moonklabs.x');
+    // PO 라이브 실측 회귀가드(review_changes) — 기본 routing(발행할 때 지정=payload_field,
+    // member_id_field=assignee_member_id)인데 테스트 발행 payload에 그 필드가 없으면 BE가
+    // 거부해 "나에게만 보내는 실 발행"(§4) 약속이 깨진다 — 로그인한 나로 자동 충전돼야 한다.
+    expect(publishBody.payload.assignee_member_id).toBe(CURRENT_MEMBER_ID);
+  });
+
+  it('routing이 「기록만」(server_derived)이면 테스트 발행 payload에 멤버 id를 안 넣는다(과다주입 금지)', async () => {
+    const calls = mockFetches([]);
+    await mount();
+    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
+    await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {
+      setInputValue(dialogContent().querySelector('#definer-key') as HTMLInputElement, 'y');
+    });
+    const recordOnlyRadio = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.organization.definerRoutingRecordTitle)) as HTMLButtonElement;
+    await act(async () => { recordOnlyRadio.click(); });
+    const addStageBtn = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.organization.definerAddStage))!;
+    await act(async () => { addStageBtn.click(); });
+    await act(async () => {
+      setInputValue(dialogContent().querySelector('input[placeholder="' + koMessages.organization.definerStageNamePlaceholder + '"]') as HTMLInputElement, 'a');
+    });
+    const submitBtn = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateSubmit) as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    const testBtn = [...dialogContent().querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.definerTestPublishCta) as HTMLButtonElement;
+    await act(async () => { testBtn.click(); });
+
+    const publishCall = calls.find((c) => c.url === '/api/events/publish');
+    const publishBody = JSON.parse(publishCall!.body!);
+    expect(publishBody.payload.assignee_member_id).toBeUndefined();
   });
 
   it('키가 비었으면 저장 버튼이 비활성이다(fail-closed·서버 400 재생산 방지)', async () => {
