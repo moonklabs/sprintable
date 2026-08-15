@@ -35,7 +35,7 @@ export function EventDefinerForm({
   const set = <K extends keyof DefinerFormState>(key: K, value: DefinerFormState[K]) => onChange({ ...state, [key]: value });
 
   return (
-    <div className="grid gap-5 md:grid-cols-[1fr_360px]">
+    <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
       <div className="space-y-5">
         {/* ① 서식 */}
         <Section title={t('definerFormatSectionTitle')} hint={t('definerFormatSectionHint')}>
@@ -142,7 +142,7 @@ export function EventDefinerForm({
       </div>
 
       {/* 실물 미리보기 */}
-      <div className="md:sticky md:top-4 md:self-start">
+      <div className="lg:sticky lg:top-4 lg:self-start">
         <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
           <span className="size-1.5 rounded-full bg-success shadow-[0_0_0_3px_var(--success-tint)]" />
           {t('definerPreviewLabel')}
@@ -159,8 +159,8 @@ export function EventDefinerForm({
           {testPublishing ? '...' : t('definerTestPublishCta')}
         </Button>
         {testPublishResult ? (
-          <p className={`mt-1.5 text-[11px] ${testPublishResult.ok ? 'text-success' : 'text-destructive'}`}>
-            {testPublishResult.ok ? t('definerTestPublishSuccess') : testPublishResult.message}
+          <p className={`mt-1.5 text-[11px] font-medium ${testPublishResult.ok ? 'text-success' : 'text-destructive'}`}>
+            {testPublishResult.ok ? `✓ ${t('definerTestPublishSuccess')}` : testPublishResult.message}
           </p>
         ) : null}
         <p className="mt-2.5 text-[11px] leading-relaxed text-muted-foreground">{t('definerPreviewNote')}</p>
