@@ -35,6 +35,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+
+# story #2662 AC2 양성대조(test_2662_missing_model_import_guard.py)가 `pytester` 픽스처로
+# 이 파일의 훅을 실 서브프로세스에서 검증한다 — pytest 내장 플러그인이지만 기본 비활성
+# (opt-in)이라 여기서 명시로 켠다. 세션당 1회 로드 비용만 있고(플러그인 자체) 매 테스트
+# 오버헤드는 0.
+pytest_plugins = ["pytester"]
 from sqlalchemy import create_engine, text
 
 # 테스트 환경 기본 환경변수
@@ -235,6 +241,121 @@ def pytest_collection_modifyitems(items: list) -> None:
             f"`pytestmark = pytest.mark.{_MARKER_NAME}` 를 추가하세요:\n"
             + "\n".join(sorted(violations))
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# story #2662 — create_all() 격리 테스트의 "model 미등재" 실패는 원인을 안 가리킨다
+# (`relation "X" does not exist`만 뜨고 "app.models.Y 임포트 누락"이라곤 안 나온다). PR
+# #3067(#2631) 실측: 이 클래스가 «한 PR 안에서» 세 라운드 재발했다 — ①카디르 QA 8파일
+# ②디디 grep 스윕 +4(HTTP/override 간접 경로) ③CI 재실패 +9(workflow_line_config·
+# workflow_sla_processor·workflow_parallel_approval 경유 — grep이 간접 호출을 구조적으로
+# 못 본다) = 총 21파일 수기 임포트. 처방은 "실행 시점 검출"이 정합(디디 방법 교훈 — 128파일
+# 전수 실행이 grep을 이겼다).
+#
+# ⛔ⓐ(conftest가 app.models 전체를 벌크 임포트) 기각 — story #2201(2026-07-28) 실측: 그
+# 시도가 기준선 16~17분짜리 job을 25분 타임아웃(25m15s CANCELLED)으로 밀어냈다(그때
+# 101개 destructive_schema 파일 × 파일당 create_all/drop_all 오버헤드가 모델 1개 추가당
+# 누적). 지금은 그 파일 수가 128개로 더 늘었다 — 같은 시도를 다시 하면 그 비용은 줄어들
+# 이유가 없고 오히려 더 클 것이다(파일당 오버헤드 × 더 많은 파일). 재측정 없이도 그 판정은
+# 그대로 유효하다.
+#
+# ⓑ(이 가드) 채택 — 실행 시점에 "relation X does not exist" 실패를 가로채, app/models/*.py
+# 정적 스캔(AST, import 없음 — 스캔 자체가 아무 모델도 안 불러온다)으로 만든 "테이블명→
+# 모듈 경로" 레지스트리에서 X를 찾아 "app.models.Y 임포트 누락"으로 진단을 리포트 section에
+# 붙인다. 정상 경로(테스트 통과)엔 오버헤드 0 — 실패했을 때만 사후에 도는 진단이라 CI 시간
+# 예산에 영향이 없다(ⓐ가 겪은 바로 그 트레이드오프를 구조적으로 피한다).
+# ─────────────────────────────────────────────────────────────────────────────
+_MISSING_RELATION_RE = re.compile(r'relation "([a-zA-Z_][a-zA-Z0-9_]*)" does not exist')
+_TABLENAME_REGISTRY_CACHE: dict[str, str] | None = None
+
+
+def _build_tablename_to_module_registry() -> dict[str, str]:
+    """app/models/*.py를 AST로 정적 스캔해 `__tablename__ = "..."` 리터럴을 전부 모아
+    테이블명→dotted 모듈 경로 맵을 만든다. import를 하나도 안 하므로(파일을 읽어 파싱만
+    한다) 이 스캔 자체는 Base.metadata에 아무것도 등록하지 않는다 — 등재 여부를 재는 잣대와
+    스캔 행위가 서로 안 섞인다.
+
+    ⚠️models_dir을 `Path(__file__).parent.parent`(이 conftest.py 자신의 파일 위치 기준
+    상대경로)로 잡으면 안 된다 — story #2662 AC2 pytester 양성대조가 이 conftest.py를
+    격리 실행 디렉터리로 «복사»해서 돌리는데, 그러면 `__file__`이 복사된 위치를 가리켜
+    `parent.parent`가 엉뚱한 디렉터리가 된다(실측: 레지스트리가 통째로 빈 채로 조용히
+    무동작했다 — 파일 위치에 의존하는 설계 자체가 함정이었다). `importlib.util.find_spec`
+    로 `app.models` 패키지의 실제 위치만 해소한다(import 실행 없음 — spec 탐색만, 그래서
+    "스캔이 아무것도 등록 안 한다"는 위 전제가 그대로 유지된다) — conftest.py가 어디
+    있든(원본이든 복사본이든) sys.path/PYTHONPATH가 가리키는 실제 `app` 패키지 위치로
+    정확히 해소된다."""
+    import importlib.util
+
+    spec = importlib.util.find_spec("app.models")
+    if spec is None or not spec.submodule_search_locations:
+        return {}
+    models_dir = Path(next(iter(spec.submodule_search_locations)))
+    registry: dict[str, str] = {}
+    for filepath in sorted(models_dir.glob("*.py")):
+        if filepath.name == "__init__.py":
+            continue
+        try:
+            tree = ast.parse(filepath.read_text(encoding="utf-8"))
+        except (SyntaxError, OSError, UnicodeDecodeError):
+            continue
+        module_name = f"app.models.{filepath.stem}"
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            if not any(isinstance(t, ast.Name) and t.id == "__tablename__" for t in node.targets):
+                continue
+            if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                registry[node.value.value] = module_name
+    return registry
+
+
+def _diagnose_missing_relation_error(exc: BaseException) -> str | None:
+    """실패 원인이 "미등재 모델의 테이블 참조"로 보이면 진단 문구를, 아니면(레지스트리에
+    없는 테이블명 — 오타·다른 원인 등) None을 반환한다. 예외 체인(__cause__/__context__)
+    전체를 훑는다 — asyncpg의 실제 UndefinedTableError는 SQLAlchemy 래퍼 예외의 __cause__로
+    들어 있는 경우가 흔하다."""
+    chain: list[str] = []
+    cur: BaseException | None = exc
+    seen: set[int] = set()
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        chain.append(str(cur))
+        cur = cur.__cause__ or cur.__context__
+    m = _MISSING_RELATION_RE.search("\n".join(chain))
+    if not m:
+        return None
+    table_name = m.group(1)
+    global _TABLENAME_REGISTRY_CACHE
+    if _TABLENAME_REGISTRY_CACHE is None:
+        _TABLENAME_REGISTRY_CACHE = _build_tablename_to_module_registry()
+    module_name = _TABLENAME_REGISTRY_CACHE.get(table_name)
+    if module_name is None:
+        return None
+    return (
+        f'[story #2662 진단] relation "{table_name}" does not exist — 원인 추정:\n'
+        f"  {module_name} 이 이 테스트의 create_all() 이전에 임포트되지 않았다\n"
+        f"  (모델 클래스는 실재하지만 Base.metadata에 등록 안 됨 — #2201 후속 미등재 모듈일\n"
+        f"   가능성이 높다. app.models 벌크 import에도 이 모듈이 없을 수 있다).\n"
+        f"  해소: 이 파일의 _session()/create_all 헬퍼에 다음 줄을 추가할 것:\n"
+        f"      import {module_name}  # noqa: F401"
+    )
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """story #2662 — destructive_schema 테스트가 "relation X does not exist"로 실패하면
+    report.sections에 진단을 덧붙인다(longrepr 자체는 안 건드림 — 원 트레이스백 그대로 보존,
+    섹션은 pytest 표준 확장점이라 `-rA`/터미널 요약에 자동으로 실린다). 이 마커가 없는
+    테스트나 이 패턴에 안 걸리는 실패는 완전히 무영향(early return)."""
+    outcome = yield
+    report = outcome.get_result()
+    if report.when != "call" or not report.failed or call.excinfo is None:
+        return
+    if item.get_closest_marker(_MARKER_NAME) is None:
+        return
+    diagnosis = _diagnose_missing_relation_error(call.excinfo.value)
+    if diagnosis:
+        report.sections.append(("story #2662: missing model import 진단", diagnosis))
 
 
 @pytest.fixture
