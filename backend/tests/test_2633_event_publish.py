@@ -117,6 +117,18 @@ def _auth(agent_id: uuid.UUID, org_id: uuid.UUID) -> "AuthContext":
     )
 
 
+def _fake_request(*, project_id_header: uuid.UUID | None = None) -> "StarletteRequest":
+    """story #2674 — publish_registry_event가 이제 request(X-Project-Id 헤더 폴백)를 받는다.
+    test_2274_cron_orphan_check_realdb.py의 기존 관례(최소 ASGI scope)와 동일 패턴 — 신규
+    발명 아님. headers는 ASGI 규약대로 (byte, byte) 튜플 목록."""
+    from starlette.requests import Request as StarletteRequest
+
+    headers = []
+    if project_id_header is not None:
+        headers.append((b"x-project-id", str(project_id_header).encode()))
+    return StarletteRequest(scope={"type": "http", "headers": headers})
+
+
 # ─── AC1: 프리셋 발행 실왕복 — escalation/broadcast 구분 ───────────────────────────
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
@@ -143,7 +155,7 @@ async def test_publish_work_assigned_escalation_is_assignee_mentioned():
                 },
             )
             resp = await publish_registry_event(
-                body, BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
+                body, BackgroundTasks(), _fake_request(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
             )
             assert resp["escalation_member_ids"] == [str(assignee_id)]
             assert str(assignee_id) in resp["broadcast_member_ids"]  # story_stakeholders에도 포함
@@ -178,7 +190,7 @@ async def test_publish_gate_verdict_no_escalation_broadcasts_to_stakeholders():
                 },
             )
             resp = await publish_registry_event(
-                body, BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
+                body, BackgroundTasks(), _fake_request(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
             )
             assert resp["escalation_member_ids"] == []  # verdict는 결과 통지, 개입 요청 없음
             assert str(stakeholder_id) in resp["broadcast_member_ids"]
@@ -205,7 +217,7 @@ async def test_publish_goal_measured_resolves_goal_owner():
                 payload={"goal_id": str(goal_id), "metric_value": 12.5},
             )
             resp = await publish_registry_event(
-                body, BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
+                body, BackgroundTasks(), _fake_request(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
             )
             assert resp["broadcast_member_ids"] == [str(owner_id)]
     finally:
@@ -239,13 +251,180 @@ async def test_publish_reuses_conversation_for_same_participant_set():
                 )
 
             resp1 = await publish_registry_event(
-                _body(), BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
+                _body(), BackgroundTasks(), _fake_request(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
             )
             resp2 = await publish_registry_event(
-                _body(), BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
+                _body(), BackgroundTasks(), _fake_request(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
             )
             assert resp1["conversation_id"] == resp2["conversation_id"]
             assert resp1["message_id"] != resp2["message_id"]
+    finally:
+        await engine.dispose()
+
+
+# ─── story #2674 — work_item/goal 참조 없는 커스텀 이벤트의 project 폴백 ──────────────
+# #2670 정의기 판별자 3차 실측(2026-08-16)이 특정한 실사고: 신호형·측정형류(work_item 참조
+# 필드 자체가 없음)를 테스트 발행하면 project 해소가 항상 400이었다. 폴백 사슬(호출 컨텍스트
+# — X-Project-Id 헤더/멤버 단일 접근가능 프로젝트)이 실제로 동작하는지, 그리고 기존
+# 참조기반 해소·dangling 참조 거부(AC2 무회귀)는 안 깨지는지 검증.
+
+async def _seed_custom_signal_definition(session, org_id, *, key="org.acme.acceptance_check_cycle"):
+    """work_item/goal 참조 필드가 아예 없는 정의기 신호형류 — #2670의 실 재현 모양
+    (payload_schema에 kind만 있고 work_item_type/id·goal_id 부재)."""
+    from app.models.event_definition import EventDefinition
+
+    session.add(EventDefinition(
+        id=uuid.uuid4(), key=key, org_id=org_id,
+        payload_schema={
+            "type": "object", "properties": {"kind": {"type": "string", "enum": ["ok"]}},
+            "required": ["kind"], "additionalProperties": False,
+        },
+        routing={
+            "escalation": {"kind": "server_derived", "target": "none"},
+            "broadcast": {"kind": "server_derived", "target": "none"},
+        },
+    ))
+    await session.commit()
+
+
+async def _seed_human_org_admin(session, org_id, project_id, *, name="admin"):
+    """#2670은 화면(FE 관리자 페이지, isAdmin 전용) 발행이라 실 재현 caller는 JWT 휴먼이다.
+    org owner/admin은 has_project_access/accessible_project_ids_in_org 양쪽의 admin_branch로
+    org 내 모든 project에 접근한다(project_access.py 참조) — 프로젝트별 grant를 따로 안 심어도
+    되는 가장 단순한 실증 caller. resolve_member의 human 분기가 반환하는 id는 org_member.id인데
+    conversations.created_by는 team_members FK라, om.id와 동일한 id의 team_member(human)도
+    같이 심는다(휴먼 신원의 org/project 두 표가 같은 id를 공유하는 이 코드베이스의 관례)."""
+    from app.models.user import User
+    from app.models.project import OrgMember
+    from app.models.team import TeamMember
+
+    user_id = uuid.uuid4()
+    session.add(User(id=user_id, email=f"{name}-{user_id.hex[:8]}@test.com", hashed_password="x"))
+    await session.commit()
+    om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user_id, role="admin")
+    session.add(om)
+    session.add(TeamMember(
+        id=om.id, org_id=org_id, project_id=project_id, type="human", user_id=user_id,
+        name=name, is_active=True,
+    ))
+    await session.commit()
+    return user_id
+
+
+def _human_auth(user_id: uuid.UUID, org_id: uuid.UUID) -> "AuthContext":
+    """JWT 휴먼 — _auth(에이전트 API키)와 대칭. api_key_id 없음이 resolve_member의 human 분기
+    판별자(member_resolver.py:_resolve_member_legacy)."""
+    from app.dependencies.auth import AuthContext
+    return AuthContext(user_id=str(user_id), email=None, claims={"app_metadata": {}}, org_id=str(org_id))
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_publish_no_reference_resolves_project_via_header():
+    """AC1 — work_item/goal 참조가 없어도 X-Project-Id 헤더가 있으면 그 프로젝트로 발행 성공
+    (#2670 화면 재현 caller=JWT 휴먼 admin)."""
+    from app.routers.events import EventPublishRequest, publish_registry_event
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            await _seed_custom_signal_definition(s, org_id)
+            user_id = await _seed_human_org_admin(s, org_id, project_id)
+
+            body = EventPublishRequest(definition_key="org.acme.acceptance_check_cycle", payload={"kind": "ok"})
+            resp = await publish_registry_event(
+                body, BackgroundTasks(), _fake_request(project_id_header=project_id),
+                db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
+            )
+            assert resp["message_id"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_publish_no_reference_resolves_project_via_single_accessible_project():
+    """AC1 변형 — 헤더도 없지만(#2670 FE가 실제로 안 보내는 케이스) 발행자가 이 org에서
+    접근 가능한 project가 단 하나면 그 프로젝트로 폴백 성공(멤버 기본/단일 접근가능
+    프로젝트 tier — resolve_required_project_id의 _resolve_project_default)."""
+    from app.routers.events import EventPublishRequest, publish_registry_event
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            await _seed_custom_signal_definition(s, org_id)
+            user_id = await _seed_human_org_admin(s, org_id, project_id)
+
+            body = EventPublishRequest(definition_key="org.acme.acceptance_check_cycle", payload={"kind": "ok"})
+            resp = await publish_registry_event(
+                body, BackgroundTasks(), _fake_request(), db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
+            )
+            assert resp["message_id"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_publish_no_reference_no_context_still_400():
+    """음성대조(AC) — 참조도 컨텍스트도(헤더 없음·발행자가 이 org의 org_member조차 아님)
+    없으면 여전히 현행 문구 그대로 명시 거부한다(폴백이 뭐든 조용히 골라주지 않는다)."""
+    from app.routers.events import EventPublishRequest, publish_registry_event
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, _project_id = await _seed_org_project(s)
+            await _seed_custom_signal_definition(s, org_id)
+            from app.models.user import User
+
+            # org_member 행이 아예 없는 유저 — accessible_project_ids_in_org가 0건, resolve_member도
+            # "Organization member not found"로 먼저 거부할 수 있어 그 경우까지 400 하나로 포용.
+            phantom_user_id = uuid.uuid4()
+            s.add(User(id=phantom_user_id, email=f"phantom-{phantom_user_id.hex[:8]}@test.com", hashed_password="x"))
+            await s.commit()
+
+            body = EventPublishRequest(definition_key="org.acme.acceptance_check_cycle", payload={"kind": "ok"})
+            with pytest.raises(HTTPException) as ei:
+                await publish_registry_event(
+                    body, BackgroundTasks(), _fake_request(),
+                    db=s, auth=_human_auth(phantom_user_id, org_id), org_id=org_id,
+                )
+            assert ei.value.status_code == 400
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_publish_dangling_goal_reference_still_400_no_context_fallback():
+    """AC2 무회귀 — goal_id를 «줬는데» 그 goal이 존재하지 않는 경우(참조 시도는 있었음)는
+    컨텍스트 폴백을 안 타고 그대로 즉시 거부한다(test_publish_unresolvable_project_400과
+    동일 계약 — 참조 필드 부재와 참조 실패를 다른 사건으로 가르는 #2674의 핵심 구분).
+    발행자는 X-Project-Id 헤더까지 보내는 org admin(폴백이 있었다면 100% 성공했을 가장
+    강한 조건) — attempted_reference 게이트가 실제로 그 성공 경로를 막는지까지 검증한다."""
+    from app.routers.events import EventPublishRequest, publish_registry_event
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            await _seed_preset_definitions(s)
+            user_id = await _seed_human_org_admin(s, org_id, project_id)
+
+            body = EventPublishRequest(
+                definition_key="preset.goal.measured",
+                payload={"goal_id": str(uuid.uuid4()), "metric_value": 1},  # 존재하지 않는 goal
+            )
+            with pytest.raises(HTTPException) as ei:
+                await publish_registry_event(
+                    body, BackgroundTasks(), _fake_request(project_id_header=project_id),
+                    db=s, auth=_human_auth(user_id, org_id), org_id=org_id,
+                )
+            assert ei.value.status_code == 400
+            assert "project를 해소할 수 없습니다" in str(ei.value.detail)
     finally:
         await engine.dispose()
 
@@ -266,7 +445,7 @@ async def test_publish_unknown_definition_key_404():
             body = EventPublishRequest(definition_key="preset.does.not_exist", payload={})
             with pytest.raises(HTTPException) as ei:
                 await publish_registry_event(
-                    body, BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
+                    body, BackgroundTasks(), _fake_request(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
                 )
             assert ei.value.status_code == 404
     finally:
@@ -291,7 +470,7 @@ async def test_publish_schema_violation_400():
             )
             with pytest.raises(HTTPException) as ei:
                 await publish_registry_event(
-                    body, BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
+                    body, BackgroundTasks(), _fake_request(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
                 )
             assert ei.value.status_code == 400
             # story #2634 후속(#2633 정합): api_client.py의 _extract_error_message가 인식하는
@@ -338,7 +517,7 @@ async def test_publish_unresolvable_project_400():
             )
             with pytest.raises(HTTPException) as ei:
                 await publish_registry_event(
-                    body, BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
+                    body, BackgroundTasks(), _fake_request(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
                 )
             assert ei.value.status_code == 400
     finally:
