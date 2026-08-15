@@ -87,6 +87,56 @@ def test_diagnose_returns_none_for_unregistered_table_name():
 #     최소 재현한다: model 미등재로 create_all()이 실패하는 destructive_schema 테스트. ──
 
 
+def _replace_dbname(url: str, new_name: str) -> str:
+    base, _, tail = url.rpartition("/")
+    query = ""
+    if "?" in tail:
+        _, _, query = tail.partition("?")
+        query = "?" + query
+    return f"{base}/{new_name}{query}"
+
+
+def _admin_url(base_url: str) -> str:
+    """CREATE/DROP DATABASE는 자기 자신에 붙은 채로는 못 하므로 관리용 DB(postgres)로 붙는다."""
+    from tests.conftest import _sync_url
+
+    return _replace_dbname(_sync_url(base_url), "postgres")
+
+
+def _create_disposable_pg_database(base_url: str) -> tuple[str, str]:
+    """PR#3088 QA CRITICAL(까디르, 2026-08-15) 재발방지 — pytester 서브프로세스에 복사된
+    conftest.py의 autouse `_reset_schema_for_destructive_tests`가, 서브프로세스가 «상속»한
+    PARITY_TEST_DATABASE_URL/ALEMBIC_DATABASE_URL을 그대로 읽어 CI의 공유 sprintable_test DB에
+    DROP SCHEMA public CASCADE를 실행 — alembic_version·기초테이블 전멸로 906건 연쇄실패를
+    냈다(로컬 재현으로 실증됨). 서브프로세스가 그 공유 DB를 아예 못 보게, 이 양성대조 전용
+    throwaway DB를 새로 만들어 그 URL로만 동작하게 강제한다."""
+    import uuid
+
+    from sqlalchemy import create_engine, text
+
+    db_name = f"sprintable_test_ac2_{uuid.uuid4().hex[:8]}"
+    engine = create_engine(_admin_url(base_url), isolation_level="AUTOCOMMIT")
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(f'CREATE DATABASE "{db_name}"'))
+    finally:
+        engine.dispose()
+    return _replace_dbname(base_url, db_name), db_name
+
+
+def _drop_disposable_pg_database(base_url: str, db_name: str) -> None:
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine(_admin_url(base_url), isolation_level="AUTOCOMMIT")
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)'))
+    except Exception:
+        pass  # cleanup 실패는 비치명적 — CI 잡 컨테이너 자체가 곧 폐기된다.
+    finally:
+        engine.dispose()
+
+
 @pytest.mark.skipif(
     __import__("os").getenv("PARITY_TEST_DATABASE_URL") is None
     and __import__("os").getenv("ALEMBIC_DATABASE_URL") is None,
@@ -105,7 +155,8 @@ def test_ac2_positive_control_missing_import_gets_diagnosed(pytester: pytest.Pyt
     # pytester 기본 sandbox는 빈 디렉터리라 훅 자체가 없으면 검증 대상이 없다.
     shutil.copy(Path(__file__).parent / "conftest.py", pytester.path / "conftest.py")
 
-    db_url = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
+    base_db_url = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
+    disposable_url, disposable_name = _create_disposable_pg_database(base_db_url)
     pytester.makepyfile(
         test_repro=f'''
 import os
@@ -126,7 +177,7 @@ async def test_write_without_activity_log_import():
     from app.core.database import Base
     import app.models  # noqa: F401 — 벌크 임포트(activity_log는 여기 없음, #2201 후속)
 
-    url = {db_url!r}
+    url = {disposable_url!r}
     for prefix in ("postgresql+psycopg2://", "postgresql://"):
         if url.startswith(prefix):
             url = "postgresql+asyncpg://" + url[len(prefix):]
@@ -148,10 +199,17 @@ async def test_write_without_activity_log_import():
     backend_dir = str((__import__("pathlib").Path(__file__).parent.parent).resolve())
     mp = pytest.MonkeyPatch()
     mp.setenv("PYTHONPATH", backend_dir + _os.pathsep + _os.environ.get("PYTHONPATH", ""))
+    # ⛔PR#3088 QA CRITICAL(까디르) — 복사된 conftest.py의 autouse 리셋 픽스처가 «상속받은»
+    # 실 DB URL을 그대로 읽는다. 서브프로세스가 그 두 변수를 무조건 위 disposable_url(이
+    # 양성대조 전용 throwaway DB)로만 보게 강제 — 진짜 CI 공유 DB는 이 서브프로세스 시야에
+    # 아예 없어야 한다(상속 금지).
+    mp.setenv("PARITY_TEST_DATABASE_URL", disposable_url)
+    mp.setenv("ALEMBIC_DATABASE_URL", disposable_url)
     try:
         result = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-m", "destructive_schema", "-v")
     finally:
         mp.undo()
+        _drop_disposable_pg_database(base_db_url, disposable_name)
     result.assert_outcomes(failed=1)  # 가드가 실패 자체를 숨기면 안 된다 — 여전히 RED.
     output = "\\n".join(result.outlines)
     assert "app.models.activity_log" in output, (
@@ -192,6 +250,14 @@ def test_uses_broken_fixture(broken_create_all_session):
     backend_dir = str(Path(__file__).parent.parent.resolve())
     mp = pytest.MonkeyPatch()
     mp.setenv("PYTHONPATH", backend_dir + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    # ⛔PR#3088 QA CRITICAL(까디르, 2026-08-15) — 이 테스트는 DB가 전혀 필요 없다(가짜
+    # 예외로 setup 실패를 재현). 그런데 복사된 conftest.py의 autouse 리셋 픽스처는
+    # destructive_schema 마커만 보고 발동하므로, 서브프로세스가 «상속받은» 실 DB URL이
+    # 있으면 CI의 공유 sprintable_test DB에 DROP SCHEMA를 실행해버린다(로컬 재현으로
+    # 실증 — alembic_version 전멸·906건 연쇄실패). 빈 문자열로 명시 오버라이드해 그
+    # 리셋을 완전히 무력화한다(url이 falsy → conftest.py의 `if url:` 가드가 no-op).
+    mp.setenv("PARITY_TEST_DATABASE_URL", "")
+    mp.setenv("ALEMBIC_DATABASE_URL", "")
     try:
         result = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-m", "destructive_schema", "-v")
     finally:
