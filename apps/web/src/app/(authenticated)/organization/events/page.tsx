@@ -318,6 +318,7 @@ function EventFormDialog({
   tc: ReturnType<typeof useTranslations>;
   addToast: ReturnType<typeof useToast>['addToast'];
 }) {
+  const { currentTeamMemberId } = useDashboardContext();
   const prefix = `org.${orgSlug || '{org}'}.`;
   const [keySuffix, setKeySuffix] = useState('');
   const [payloadSchema, setPayloadSchema] = useState(DEFAULT_PAYLOAD_SCHEMA);
@@ -447,10 +448,18 @@ function EventFormDialog({
     setTestPublishResult(null);
     try {
       const derived = deriveDefinition(definerState, orgSlug);
+      // PO 라이브 실측(review_changes) — 「발행할 때 지정」routing(payload_field)은 BE가
+      // payload[member_id_field]에 실 멤버 id를 요구한다. 순수 파생 샘플엔 그 필드가 없어
+      // 테스트 발행이 "나에게만 보내는 실 발행"(§4 약속)을 어기고 항상 실패했다 — 지금
+      // 로그인한 나(currentTeamMemberId)를 여기서 채워 보낸다(파생 로직 자체는 순수 유지).
+      const broadcast = derived.routing.broadcast as { kind?: string; member_id_field?: string } | undefined;
+      const publishPayload = broadcast?.kind === 'payload_field' && broadcast.member_id_field && currentTeamMemberId
+        ? { ...derived.samplePayload, [broadcast.member_id_field]: currentTeamMemberId }
+        : derived.samplePayload;
       const res = await fetch('/api/events/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ definition_key: savedKey, payload: derived.samplePayload }),
+        body: JSON.stringify({ definition_key: savedKey, payload: publishPayload }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
