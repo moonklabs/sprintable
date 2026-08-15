@@ -1441,17 +1441,25 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
   });
 
   it('asset 토큰은 단독 문단이어도 기존 AssetEmbedCard 그대로다(EmbedCard로 안 새어간다)', async () => {
+    // 카디르군 QA 지적(PR#3086) — references:[](유령)를 쓰면 유령가드가 먼저 막아버려서
+    // asset 제외 분기(`m[1] !== 'asset'`) 자체는 한 번도 안 거친 채로 그린이 뜬다(뮤테이션
+    // 해서 그 분기를 지워도 이 테스트는 안 빨개짐). 실제 asset 제외를 재는 재현은 asset이
+    // «유령이 아닌» 상태여야 한다 — stored 참조에 asset 엔트리를 실어 ghost가 false가 되게
+    // 하고, AssetEmbedCard 전용 렌더(자산 조회 실패 폴백 문구)로 「EmbedCard로 안 갔다」를
+    // 직접 확認한다(부재 아닌 양성 마커).
     await act(async () => {
       root.render(wrap(
         <ChatBubble
-          message={{ ...baseMessage, content: `[파일.png](entity:asset:${DOC_ID})`, references: [] }}
+          message={{ ...baseMessage, content: `[파일.png](entity:asset:${DOC_ID})`, references: [{ target_type: 'asset', target_id: DOC_ID }] }}
           isMine={false}
         />,
       ));
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     });
-    // AssetEmbedCard도 카드형이라 rounded-md를 쓸 수 있으므로, 대신 EmbedCard 전용 마커
-    // (미리보기 버튼)의 부재로 "EmbedCard로 안 갔다"만 정확히 잰다.
     expect(container.querySelector('button[aria-label="미리보기"]')).toBeNull();
+    expect(container.querySelector('.rounded-md')).not.toBeNull();
+    // AssetEmbedCard의 실 렌더 마커(자산 조회 실패 폴백 문구) — EmbedCard로 샜다면 절대 안 뜬다.
+    expect(container.textContent).toContain('자산을 찾을 수 없습니다');
   });
 
   it('같은 문단에 참조 외 텍스트가 섞여 있으면(단독 아님) 카드가 아니라 인라인 칩이다(회귀 0)', async () => {
