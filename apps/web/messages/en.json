@@ -3469,6 +3469,7 @@
     "gateInboxLoading": "Loading gates...",
     "gateInboxEmpty": "No pending gates",
     "gateInboxEmptyHint": "Gates awaiting your review will appear here",
+    "gateTransitionErrorGeneric": "Failed to process the gate. Please try again.",
     "gateRejectedHistory": "Recent rejection reasons",
     "voidAction": "Void",
     "voidConfirmTitle": "Void approval gate",

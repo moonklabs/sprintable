@@ -144,7 +144,7 @@ export function ApprovalsQueue() {
         setResolvedGates((prev) => ({ ...prev, [id]: status }));
       } else {
         const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        setGateErrors((prev) => ({ ...prev, [id]: body?.error?.message ?? `HTTP ${res.status}` }));
+        setGateErrors((prev) => ({ ...prev, [id]: body?.error?.message ?? t('gateTransitionErrorGeneric') }));
       }
     } finally {
       setResolvingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });

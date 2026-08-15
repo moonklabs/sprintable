@@ -149,4 +149,27 @@ describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () 
     expect(container.textContent).not.toContain('HTTP 422');
     expect(container.textContent).toContain('고위험(risk_grade=high) 게이트 승인은 사유(note) 입력이 필수입니다.');
   });
+
+  // story #2552 — BE가 사람이 읽을 message를 안 주는 예외(네트워크·예상외 500 등)엔 raw
+  // "HTTP {status}"가 아니라 사람말 공통 폴백(gateTransitionErrorGeneric)을 보여준다.
+  it('BE가 message를 안 주면(500 등) raw "HTTP 500" 대신 사람말 폴백을 보여준다 (story #2552)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => ({ data: gate({ can_approve: true, risk_grade: 'low' }) }) };
+      if (url === '/api/gates/gate-1/transition') {
+        return { ok: false, status: 500, json: async () => ({ data: null, error: null, meta: null }) };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const approveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    await act(async () => { approveBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).not.toContain('HTTP 500');
+    expect(container.textContent).toContain(koMessages.cage.gateTransitionErrorGeneric);
+  });
 });
