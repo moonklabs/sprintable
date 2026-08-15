@@ -148,6 +148,7 @@ async def create_org_agent(
         color=body.color,
         avatar_url=body.avatar_url,
         project_ids=project_ids,
+        defer_key_issuance=body.defer_key_issuance,
     )
 
     response = TeamMemberResponse.model_validate(member).model_dump()
