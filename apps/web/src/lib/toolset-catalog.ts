@@ -47,6 +47,13 @@ export const TEMP_TOOLSET_CATALOG: ToolsetCatalog = {
     { key: 'rewards', is_core: false, is_destructive: false, tools: ['sprintable_get_wallet'] },
     { key: 'audit', is_core: false, is_destructive: false, tools: ['sprintable_list_audit_logs'] },
     { key: 'agent_runs', is_core: false, is_destructive: false, tools: ['sprintable_update_run_status'] },
+    // story #2661 — mcp_toolset.py의 ALL_GROUPS(SSOT)에 canvas(story b4027b2e)·events(#2634)·
+    // hypotheses가 이미 있었는데 이 폴백 상수엔 반영이 안 돼 있었다. i18n 라벨 누락(canvas·events)
+    // 도 이 드리프트의 다른 증상이라 같이 잡는다 — BE 실측 없이도 group.key가 이 상수에서
+    // 나온다면 3종 다 최소 렌더는 되게.
+    { key: 'hypotheses', is_core: false, is_destructive: false, tools: ['sprintable_create_hypothesis', 'sprintable_confirm_hypothesis', 'sprintable_link_hypothesis'] },
+    { key: 'canvas', is_core: false, is_destructive: false, tools: ['sprintable_create_artifact', 'sprintable_edit_artifact', 'sprintable_create_spec_pin'] },
+    { key: 'events', is_core: false, is_destructive: false, tools: ['sprintable_publish_event', 'sprintable_list_event_definitions'] },
     { key: 'admin', is_core: false, is_destructive: true, tools: ['sprintable_delete_sprint', 'sprintable_close_sprint', 'sprintable_give_reward', 'sprintable_upsert_webhook_config', 'sprintable_activate_sprint'] },
   ],
 };

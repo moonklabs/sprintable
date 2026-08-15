@@ -2434,7 +2434,9 @@
         "audit": "감사",
         "agent_runs": "에이전트 런",
         "admin": "위험 작업 (Admin)",
-        "hypotheses": "가설"
+        "hypotheses": "가설",
+        "canvas": "아티팩트",
+        "events": "이벤트"
       }
     },
     "statusEyebrow": "STATUS DASHBOARD",
