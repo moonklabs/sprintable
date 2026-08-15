@@ -286,7 +286,15 @@ def _build_tablename_to_module_registry() -> dict[str, str]:
     정확히 해소된다."""
     import importlib.util
 
-    spec = importlib.util.find_spec("app.models")
+    try:
+        spec = importlib.util.find_spec("app.models")
+    except ModuleNotFoundError:
+        # find_spec("app.models")는 부모 패키지 "app" 자체가 sys.path 어디에도 없으면
+        # None이 아니라 ModuleNotFoundError를 던진다(문서화된 동작) — 이 함수는 실패 경로
+        # 진단용 보조 도구일 뿐이라, 여기서 죽으면 진단 하나 놓치는 정도가 아니라 pytest
+        # 실행 자체가 INTERNALERROR로 죽는다(실측: 이 case를 놓쳐 setup-phase 양성대조가
+        # 크래시). 진단을 못 붙이는 것과 테스트 러너를 죽이는 것은 전혀 다른 심각도다.
+        return {}
     if spec is None or not spec.submodule_search_locations:
         return {}
     models_dir = Path(next(iter(spec.submodule_search_locations)))
@@ -346,10 +354,16 @@ def pytest_runtest_makereport(item, call):
     """story #2662 — destructive_schema 테스트가 "relation X does not exist"로 실패하면
     report.sections에 진단을 덧붙인다(longrepr 자체는 안 건드림 — 원 트레이스백 그대로 보존,
     섹션은 pytest 표준 확장점이라 `-rA`/터미널 요약에 자동으로 실린다). 이 마커가 없는
-    테스트나 이 패턴에 안 걸리는 실패는 완전히 무영향(early return)."""
+    테스트나 이 패턴에 안 걸리는 실패는 완전히 무영향(early return).
+
+    PO AC 리뷰(2026-08-15) 실측: 21파일 사례의 지배 패턴은 `@pytest.fixture`가 아닌 평
+    async 헬퍼(`_wfc_session`류)를 테스트 본문에서 직접 await하는 것 — create_all 실패가
+    setup이 아니라 "call" 단계로 떨어진다(fixture 장식 케이스는 21건 중 1건뿐). 그래도
+    fixture-데코레이트된 create_all 헬퍼를 쓰는 미래 테스트를 위해 setup 단계도 커버한다
+    (call만으로는 놓치는 축이 실재 — 가드가 못 잡는 것을 방치하지 않는다)."""
     outcome = yield
     report = outcome.get_result()
-    if report.when != "call" or not report.failed or call.excinfo is None:
+    if report.when not in ("call", "setup") or not report.failed or call.excinfo is None:
         return
     if item.get_closest_marker(_MARKER_NAME) is None:
         return

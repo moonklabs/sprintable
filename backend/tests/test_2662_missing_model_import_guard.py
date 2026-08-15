@@ -158,3 +158,44 @@ async def test_write_without_activity_log_import():
         f"진단 섹션이 리포트에 안 실렸다 — 21파일 사례가 재현 안 됨.\\noutput={output!r}"
     )
     assert "story #2662" in output
+
+
+def test_setup_phase_failure_also_gets_diagnosed(pytester: pytest.Pytester):
+    """PO AC 리뷰(2026-08-15) 비블로커 권고 반영 — 21파일 사례의 지배 패턴은 call 단계
+    실패(평 async 헬퍼를 테스트 본문에서 await)지만, `@pytest.fixture`로 감싼 create_all
+    헬퍼를 쓰는 미래 테스트는 실패가 setup 단계로 떨어진다. DB 없이(가짜 예외로) 그 축도
+    실제로 커버되는지 확인 — call 단계 검증(pytester 서브프로세스, 실 PG 필요)과 별개로
+    빠르게 도는 회귀가드."""
+    import shutil
+    from pathlib import Path
+
+    shutil.copy(Path(__file__).parent / "conftest.py", pytester.path / "conftest.py")
+
+    pytester.makepyfile(
+        test_repro_setup='''
+import pytest
+
+pytestmark = pytest.mark.destructive_schema
+
+
+@pytest.fixture
+def broken_create_all_session():
+    raise Exception('relation "activity_logs" does not exist')
+
+
+def test_uses_broken_fixture(broken_create_all_session):
+    pass
+'''
+    )
+    import os
+
+    backend_dir = str(Path(__file__).parent.parent.resolve())
+    mp = pytest.MonkeyPatch()
+    mp.setenv("PYTHONPATH", backend_dir + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    try:
+        result = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-m", "destructive_schema", "-v")
+    finally:
+        mp.undo()
+    result.assert_outcomes(errors=1)  # setup 단계 실패는 pytest에서 "error"로 집계(fail 아님).
+    output = "\n".join(result.outlines)
+    assert "app.models.activity_log" in output, f"setup 단계 진단 미부착 — output={output!r}"
