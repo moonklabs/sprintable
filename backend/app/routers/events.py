@@ -947,6 +947,7 @@ def _render_event_message_content(definition_key: str, payload: dict) -> str:
 async def publish_registry_event(
     body: EventPublishRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -1048,10 +1049,38 @@ async def publish_registry_event(
 
     project_id = await _resolve_event_project_id(db, org_id=org_id, payload=body.payload)
     if project_id is None:
-        raise HTTPException(
-            status_code=400,
-            detail="payload에서 project를 해소할 수 없습니다(work_item_type+work_item_id 또는 goal_id 필요).",
+        # story #2674 — «참조 필드 자체가 없음»과 «참조는 있는데 못 풂(dangling)»은 다른
+        # 사건이다. 정의기(#2670)가 만드는 임의 payload 커스텀 이벤트(신호형·측정형류)는
+        # 전자(work_item/goal 키가 애초에 없음) — 이땐 호출 컨텍스트(X-Project-Id 헤더/API키
+        # 앵커/멤버 기본 프로젝트)로 폴백한다. 후자(goal_id는 줬는데 그 goal이 존재하지 않는
+        # 등)는 사용자가 뭔가를 참조하려다 실패한 것이라 컨텍스트로 조용히 다른 프로젝트를
+        # 골라주면 더 헷갈린다 — 그대로 명시 거부(test_publish_unresolvable_project_400의
+        # 기존 계약, AC2 무회귀).
+        attempted_reference = bool(
+            (body.payload.get("work_item_type") and body.payload.get("work_item_id"))
+            or body.payload.get("goal_id")
         )
+        if attempted_reference:
+            raise HTTPException(
+                status_code=400,
+                detail="payload에서 project를 해소할 수 없습니다(work_item_type+work_item_id 또는 goal_id 필요).",
+            )
+
+        # resolve_required_project_id(app/dependencies/project_scope.py)는 MCP api_client.py의
+        # require_project_id()와 동일 계약인 기존 SSOT 폴백 사슬이라 새로 발명하지 않는다.
+        # 라우팅 의미론(escalation/broadcast 해소)은 이 프로젝트 폴백과 무관 — payload_field/
+        # server_derived 어느 쪽도 project_id를 참조하지 않는다(model.py docstring 참조).
+        from app.dependencies.project_scope import resolve_required_project_id
+
+        try:
+            project_id = await resolve_required_project_id(db, request, auth, org_id)
+        except HTTPException:
+            # 컨텍스트도 없으면(예: 멀티프로젝트 키인데 헤더도 기본 프로젝트도 없음) 현행
+            # 문구 그대로 거부한다 — 음성대조(AC): 참조도 컨텍스트도 없으면 여전히 명시 거부.
+            raise HTTPException(
+                status_code=400,
+                detail="payload에서 project를 해소할 수 없습니다(work_item_type+work_item_id 또는 goal_id 필요).",
+            ) from None
 
     participant_ids = {sender.id} | escalation_ids | broadcast_ids
     conv = await _get_or_create_event_conversation(

@@ -103,6 +103,15 @@ def _auth(agent_id: uuid.UUID, org_id: uuid.UUID) -> "AuthContext":
     )
 
 
+def _fake_request() -> "StarletteRequest":
+    """story #2674 — publish_registry_event가 이제 request(X-Project-Id 헤더 폴백)를 받는다.
+    이 파일의 테스트들은 전부 work_item 참조가 있어 project 해소가 그 경로에서 끝나므로
+    헤더 없는 최소 요청으로 충분(신규 파라미터 자리만 채운다)."""
+    from starlette.requests import Request as StarletteRequest
+
+    return StarletteRequest(scope={"type": "http", "headers": []})
+
+
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_publish_unassigned_work_item_returns_zero_reach_warning():
@@ -125,7 +134,7 @@ async def test_publish_unassigned_work_item_returns_zero_reach_warning():
                 },
             )
             resp = await publish_registry_event(
-                body, BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
+                body, BackgroundTasks(), _fake_request(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
             )
             assert resp["zero_reach_warning"] is True
             assert "warning" in resp
@@ -157,7 +166,7 @@ async def test_publish_assigned_work_item_no_warning():
                 },
             )
             resp = await publish_registry_event(
-                body, BackgroundTasks(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
+                body, BackgroundTasks(), _fake_request(), db=s, auth=_auth(publisher_id, org_id), org_id=org_id,
             )
             assert resp["zero_reach_warning"] is False
             assert "warning" not in resp

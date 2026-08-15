@@ -19,8 +19,12 @@ import koMessages from '../../../messages/ko.json';
 
 // story #2637 — mutable로 둬 EventBlockCard의 human_only/role 게이팅 테스트가 값을 오버라이드
 // 할 수 있게 한다(기본값은 기존 50+ 테스트와 동일하게 human/무역할 — 비회귀).
-let mockDashboardContext: { projectId: string; currentTeamMemberId: string; currentMemberType?: 'human' | 'agent'; role?: string } = {
+let mockDashboardContext: {
+  projectId: string; currentTeamMemberId: string; currentMemberType?: 'human' | 'agent'; role?: string;
+  projectMemberships?: { projectId: string; projectName: string }[];
+} = {
   projectId: 'proj-1', currentTeamMemberId: 'member-1', currentMemberType: 'human', role: 'member',
+  projectMemberships: [],
 };
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => mockDashboardContext,
@@ -71,7 +75,7 @@ afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
   vi.unstubAllGlobals();
-  mockDashboardContext = { projectId: 'proj-1', currentTeamMemberId: 'member-1', currentMemberType: 'human', role: 'member' };
+  mockDashboardContext = { projectId: 'proj-1', currentTeamMemberId: 'member-1', currentMemberType: 'human', role: 'member', projectMemberships: [] };
 });
 
 describe('ChatBubble — story #2263 AC6 유령 칩(stored 참조 대조)', () => {
@@ -1221,5 +1225,156 @@ describe('ChatBubble — story #2037 이미지 라이트박스 진입점', () =>
     expect(document.body.textContent).toContain('2 / 2');
     const openedImg = document.querySelector('img[data-next-image="true"][alt="shot-2.png"]');
     expect(openedImg?.getAttribute('src')).toBe('https://signed/shot-2.png');
+  });
+});
+
+// story #2669(B2) — 문서 참조 칩(EntityChip)에 상태별 결재 CTA 상시 부착. PO 근거: 챗에
+// 문서를 임베드하고 "승인 주시면"이라 말로 때움 — 기제가 «찾아가야 있는 것»이면 안 쓰인다.
+describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
+  const DOC_STATUS_KEY = `doc:${DOC_ID.toLowerCase()}`;
+
+  it('draft + project 멤버 — "결재로 올리기" 버튼이 뜨고 클릭하면 transition POST 후 pending으로 즉시 반영된다', async () => {
+    mockDashboardContext.projectMemberships = [{ projectId: 'doc-proj-1', projectName: 'Doc Project' }];
+    const calls: { url: string; method?: string; body?: string }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+      calls.push({ url, method: init?.method, body: init?.body });
+      if (url.startsWith('/api/docs/preview')) return { ok: true, json: async () => ({ data: { projectId: 'doc-proj-1' } }) };
+      if (url === `/api/docs/${DOC_ID}/transition` && init?.method === 'POST') return { ok: true, json: async () => ({ data: {} }) };
+      return { ok: false, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, references: [{ target_type: 'doc', target_id: DOC_ID }] }}
+          isMine={false}
+          entityStatusByKey={{ [DOC_STATUS_KEY]: { kind: 'resolved', raw: 'draft' } }}
+        />,
+      ));
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+
+    const submitBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '결재로 올리기');
+    expect(submitBtn).toBeDefined();
+    await act(async () => {
+      submitBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+
+    const transitionCall = calls.find((c) => c.url === `/api/docs/${DOC_ID}/transition`);
+    expect(transitionCall?.method).toBe('POST');
+    expect(JSON.parse(transitionCall!.body!)).toEqual({ status: 'pending' });
+    // 재조회 없이 로컬 반영 — 배지가 "검토 중"으로, 버튼은 "결재로 올리기"에서 "결재함에서 보기"로.
+    expect(container.textContent).toContain('검토 중');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
+    expect(container.textContent).toContain('결재함에서 보기');
+  });
+
+  it('draft지만 doc의 project 멤버가 아니면 "결재로 올리기" 버튼이 안 뜬다(fail-closed)', async () => {
+    mockDashboardContext.projectMemberships = [{ projectId: 'other-proj', projectName: 'Other' }];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/docs/preview')) return { ok: true, json: async () => ({ data: { projectId: 'doc-proj-1' } }) };
+      return { ok: false, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, references: [{ target_type: 'doc', target_id: DOC_ID }] }}
+          isMine={false}
+          entityStatusByKey={{ [DOC_STATUS_KEY]: { kind: 'resolved', raw: 'draft' } }}
+        />,
+      ));
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
+  });
+
+  it('draft + 권한조회(preview) 실패 — 조용히 무권한 취급(버튼 노출 안 함, 카드 자체는 안 죽음)', async () => {
+    mockDashboardContext.projectMemberships = [{ projectId: 'doc-proj-1', projectName: 'Doc Project' }];
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({}) })));
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, references: [{ target_type: 'doc', target_id: DOC_ID }] }}
+          isMine={false}
+          entityStatusByKey={{ [DOC_STATUS_KEY]: { kind: 'resolved', raw: 'draft' } }}
+        />,
+      ));
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
+    expect(container.textContent).toContain('제안서.md');
+  });
+
+  it('pending — "결재함에서 보기" 딥링크가 /inbox?tab=gates로 간다(상신 버튼은 안 뜸)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, references: [{ target_type: 'doc', target_id: DOC_ID }] }}
+          isMine={false}
+          entityStatusByKey={{ [DOC_STATUS_KEY]: { kind: 'resolved', raw: 'pending' } }}
+        />,
+      ));
+      await Promise.resolve(); await Promise.resolve();
+    });
+    const link = Array.from(container.querySelectorAll('a')).find((a) => a.textContent === '결재함에서 보기');
+    expect(link?.getAttribute('href')).toBe('/inbox?tab=gates');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
+  });
+
+  it('denied — 배지가 "반려됨"으로 정직하게 뜨고 CTA는 없다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, references: [{ target_type: 'doc', target_id: DOC_ID }] }}
+          isMine={false}
+          entityStatusByKey={{ [DOC_STATUS_KEY]: { kind: 'resolved', raw: 'denied' } }}
+        />,
+      ));
+      await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.textContent).toContain('반려됨');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
+    expect(Array.from(container.querySelectorAll('a')).some((a) => a.textContent === '결재함에서 보기')).toBe(false);
+  });
+
+  it('confirmed — 배지가 "확定"으로 뜨고 CTA는 없다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, references: [{ target_type: 'doc', target_id: DOC_ID }] }}
+          isMine={false}
+          entityStatusByKey={{ [DOC_STATUS_KEY]: { kind: 'resolved', raw: 'confirmed' } }}
+        />,
+      ));
+      await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.textContent).toContain('확定');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
+  });
+
+  it('상신 실패(transition 500) — 재시도 가능한 에러 문구를 보이고 버튼은 draft 그대로 남는다', async () => {
+    mockDashboardContext.projectMemberships = [{ projectId: 'doc-proj-1', projectName: 'Doc Project' }];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (url.startsWith('/api/docs/preview')) return { ok: true, json: async () => ({ data: { projectId: 'doc-proj-1' } }) };
+      if (url === `/api/docs/${DOC_ID}/transition` && init?.method === 'POST') return { ok: false, json: async () => ({}) };
+      return { ok: false, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, references: [{ target_type: 'doc', target_id: DOC_ID }] }}
+          isMine={false}
+          entityStatusByKey={{ [DOC_STATUS_KEY]: { kind: 'resolved', raw: 'draft' } }}
+        />,
+      ));
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    const submitBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '결재로 올리기') as HTMLButtonElement;
+    await act(async () => {
+      submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.textContent).toContain('상신 실패');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(true);
   });
 });

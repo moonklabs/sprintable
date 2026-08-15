@@ -1,5 +1,6 @@
-"""문서 관련 MCP 도구 (5개) — E-SECURITY SEC-S1 확장: delete_doc 제거(에이전트 삭제 차단,
-delete_story와 동형 조치. 까심 적대적 QA 발견 갭)."""
+"""문서 관련 MCP 도구 (6개) — E-SECURITY SEC-S1 확장: delete_doc 제거(에이전트 삭제 차단,
+delete_story와 동형 조치. 까심 적대적 QA 발견 갭). story #2668(B3): submit_for_approval 추가
+— 결재 상신 REST(POST /{id}/transition)를 알아야만 상신 가능했던 걸 MCP 표면에 올린다."""
 from __future__ import annotations
 
 from typing import Literal
@@ -151,9 +152,26 @@ async def create_doc(args: CreateDocInput) -> list[TextContent]:
             body["is_folder"] = args.is_folder
         if args.tags is not None:
             body["tags"] = args.tags
-        return ok(await client.post("/api/v2/docs", json=body))
+        result = await client.post("/api/v2/docs", json=body)
+        _attach_submit_for_approval_next_action(result)
+        return ok(result)
     except Exception as exc:
         return err(str(exc))
+
+
+def _attach_submit_for_approval_next_action(doc: object) -> None:
+    """story #2668(B3) — next_action_code(`decision_pending`)는 사람이 읽는 문구고, 그걸 보고
+    "그래서 무슨 도구를 부르지"로 이어지는 경로가 없었다(REST `POST /{id}/transition`을
+    알아야만 상신 가능 — MCP 도구 목록엔 없어 발견 자체가 안 됐다, 오늘 PO 재발 2회의 구조
+    원인). draft 문서 응답에 `next_action`을 `{tool, args}` 실행 가능 명세로 동봉한다 —
+    BE의 next_action_code SSOT(app.services.next_action, 다중 소비자·PO 판정 이력 다수)는
+    건드리지 않는다(이 스토리 범위는 MCP 표면 하나). status가 draft가 아니면(이미 상신됐거나
+    다른 상태) 아무것도 안 붙인다 — 없는 행동을 지어내지 않는다."""
+    if isinstance(doc, dict) and doc.get("status") == "draft" and doc.get("id"):
+        doc["next_action"] = {
+            "tool": "sprintable_submit_for_approval",
+            "args": {"doc_id": doc["id"]},
+        }
 
 
 async def update_doc(args: UpdateDocInput) -> list[TextContent]:
@@ -182,6 +200,31 @@ async def update_doc(args: UpdateDocInput) -> list[TextContent]:
                     base_content = (current.get("content") or "") if isinstance(current, dict) else ""
                 snippets = "".join(a["embed_snippet"] for a in uploaded if isinstance(a, dict) and a.get("embed_snippet"))
                 updates["content"] = f"{base_content}\n{snippets}" if base_content else snippets
-        return ok(await client.patch(f"/api/v2/docs/{args.doc_id}", json=updates))
+        result = await client.patch(f"/api/v2/docs/{args.doc_id}", json=updates)
+        _attach_submit_for_approval_next_action(result)
+        return ok(result)
+    except Exception as exc:
+        return err(str(exc))
+
+
+class SubmitForApprovalInput(SprintableInput):
+    doc_id: str
+
+
+async def submit_for_approval(args: SubmitForApprovalInput) -> list[TextContent]:
+    """문서를 결재 상신(draft→pending) — `POST /{id}/transition`의 MCP 래퍼.
+
+    story #2668(B3): 응답에 doc(status=pending)뿐 아니라 그 상신이 실제로 만든 pending 게이트
+    (실물)를 동봉한다 — "호출은 200인데 게이트가 진짜 생겼는지"를 에이전트가 별도 조회 없이
+    이 한 번의 호출로 확認할 수 있게(AC1: MCP만으로 create_doc→submit_for_approval→pending
+    게이트 실물까지 왕복).
+    """
+    try:
+        doc = await client.post(f"/api/v2/docs/{args.doc_id}/transition", json={"status": "pending"})
+        gates = await client.get(
+            "/api/v2/gates", params={"work_item_id": args.doc_id, "work_item_type": "doc", "status": "pending"},
+        )
+        gate = gates[0] if isinstance(gates, list) and gates else None
+        return ok({"doc": doc, "gate": gate})
     except Exception as exc:
         return err(str(exc))

@@ -70,8 +70,8 @@ from .tools.projects import (
 )
 from .tools.docs import (
     CreateDocInput, GetDocInput, ListDocsInput,
-    SearchDocsInput, UpdateDocInput,
-    create_doc, get_doc, list_docs, search_docs, update_doc,
+    SearchDocsInput, SubmitForApprovalInput, UpdateDocInput,
+    create_doc, get_doc, list_docs, search_docs, submit_for_approval, update_doc,
 )
 from .tools.goals import (
     AddGoalInput, ListGoalsInput, TransitionGoalInput, UpdateGoalInput,
@@ -553,11 +553,19 @@ _TOOL_DEFS: list[tuple] = [
      SearchDocsInput, search_docs),
     ("sprintable_create_doc",
      "[지식] 문서 생성. 응답 reference_token 필드가 이 문서를 가리키는 참조 토큰"
-     "([제목](entity:doc:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
+     "([제목](entity:doc:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282). "
+     "결재가 필요한 문서(draft)면 응답 next_action에 sprintable_submit_for_approval 호출"
+     " 명세가 실린다 — 결재 상신은 REST가 아니라 그 도구로 한다.",
      CreateDocInput, create_doc),
     ("sprintable_update_doc",
-     "[지식] 문서 수정. 응답 reference_token은 sprintable_create_doc과 동일.",
+     "[지식] 문서 수정. 응답 reference_token은 sprintable_create_doc과 동일. next_action"
+     " 동봉 규칙도 동일.",
      UpdateDocInput, update_doc),
+    ("sprintable_submit_for_approval",
+     "[지식] 문서를 결재 상신한다(draft→pending, 승인 게이트 생성) — 문서 결재 상신은 이"
+     " 도구로 한다(REST POST /docs/{id}/transition을 직접 호출하지 않는다). 응답에 상신된"
+     " 문서와 그 상신이 실제로 만든 pending 게이트를 함께 반환.",
+     SubmitForApprovalInput, submit_for_approval),
     # Analytics (11)
     ("sprintable_get_project_overview",
      "[일감] 프로젝트 개요 통계 조회.",
