@@ -454,4 +454,72 @@ describe('ApprovalsQueue', () => {
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2);
     expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
   });
+
+  // story #2631 — 「보류(논의 필요)」. 저위험 인라인 행에 3번째 버튼으로 노출(PO 결정③,
+  // 결재함 전 게이트 타입 단일 표면).
+  // base-ui Dialog는 document.body에 포탈된다(#2354 교훈, flow-map-canvas-port-linking.test.tsx
+  // 동일 패턴) — container 안에서 찾으면 항상 null이라 document.body에서 [data-slot="dialog-content"]로 스코프한다.
+  it('보류(논의 필요) 클릭 시 다이얼로그가 열리고, 사유 없인 제출 버튼이 비활성이다', async () => {
+    mockFetches([lowRiskActionable({ id: 'g-discuss' })], []);
+    await mount();
+    const discussButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateDiscussSubmit));
+    await act(async () => { discussButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(document.body.querySelector('[data-slot="dialog-title"]')?.textContent).toBe(koMessages.cage.gateDiscussTitle);
+    const submitButton = Array.from(document.body.querySelectorAll('[data-slot="dialog-content"] button')).find((b) => b.textContent === koMessages.cage.gateDiscussSubmit) as HTMLButtonElement;
+    expect(submitButton.disabled).toBe(true);
+  });
+
+  it('보류(논의 필요) 사유 입력 후 제출하면 POST /api/gates/{id}/discuss를 {reason}으로 호출한다', async () => {
+    const calls = mockFetches([lowRiskActionable({ id: 'g-discuss2' })], []);
+    await mount();
+    const discussButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateDiscussSubmit));
+    await act(async () => { discussButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const textarea = document.body.querySelector('[data-slot="dialog-content"] textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '근거를 더 보고 싶습니다');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const submitButton = Array.from(document.body.querySelectorAll('[data-slot="dialog-content"] button')).find((b) => b.textContent === koMessages.cage.gateDiscussSubmit) as HTMLButtonElement;
+    await act(async () => { submitButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const postCall = calls.find((c) => c.method === 'POST' && c.url.includes('/discuss'));
+    expect(postCall?.url).toBe('/api/gates/g-discuss2/discuss');
+    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ reason: '근거를 더 보고 싶습니다' });
+  });
+
+  // story #2631 — 오클릭 정정. 인라인 승인 직후(이 세션) 취소 버튼이 뜨고, 클릭하면 다시
+  // 승인/반려 가능한 카드로 되돌아간다(재조회 없이 로컬 복원).
+  it('AC — 인라인 승인 직후 취소 버튼이 뜨고, 클릭하면 POST /undo 호출 후 승인/반려 버튼으로 되돌아간다', async () => {
+    const calls: { url: string; method?: string }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      calls.push({ url, method: init?.method });
+      if (init?.method === 'POST' && url.includes('/transition')) return { ok: true, json: async () => ({}) };
+      if (init?.method === 'POST' && url.includes('/undo')) return { ok: true, json: async () => ({ data: lowRiskActionable({ id: 'g-undo' }) }) };
+      if (url.includes('status=pending')) return { ok: true, json: async () => [lowRiskActionable({ id: 'g-undo' })] };
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    await act(async () => { approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
+
+    const undoButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateUndo));
+    expect(undoButton).toBeTruthy();
+    await act(async () => { undoButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const undoCall = calls.find((c) => c.method === 'POST' && c.url.includes('/undo'));
+    expect(undoCall?.url).toBe('/api/gates/g-undo/undo');
+    expect(container.textContent).not.toContain(koMessages.cage.queueResolvedApproved);
+    const buttonsAfter = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttonsAfter.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
+  });
+
+  it('AC 음성대조 — 반려 직후(아직 승인/취소 안 됨)엔 취소 버튼이 즉시 뜨지 않다가, 반려 완료 후엔 뜬다', async () => {
+    mockFetches([lowRiskActionable({ id: 'g-reject-undo' })], []);
+    await mount();
+    const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateReject));
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(false);
+    await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(true);
+  });
 });

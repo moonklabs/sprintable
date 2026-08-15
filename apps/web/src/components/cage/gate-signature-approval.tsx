@@ -18,6 +18,7 @@ export function GateSignatureApproval({
   error,
   onApprove,
   onReject,
+  onDiscuss,
   compact = false,
 }: {
   gate: GateItem;
@@ -29,6 +30,10 @@ export function GateSignatureApproval({
   error?: string | null;
   onApprove: (reason: string) => void;
   onReject: (reason: string) => void;
+  /** story #2631(FE 계약 doc bb733f26) — «보류(논의 필요)». 승인/반려와 같은 사유 입력을
+   * 공유한다(별도 모달 불필요 — 이미 이 화면에 사유 textarea가 있다). 미전달 시(#2043
+   * 기존 소비처가 아직 업데이트 안 된 경우 등) 버튼 자체를 안 그린다 — 회귀 없음. */
+  onDiscuss?: (reason: string) => void;
   /** story #2625(유나 design 확定, 카디르 QA 320px 실측 대응) — 챗 카드 좁은 폭(실효 ~166px)
    * 컨텍스트. 원 컨텍스트(gates 페이지 672px)는 가로 2버튼이 여유롭지만, 좁은 폭에서
    * whitespace-nowrap+shrink-0(button.tsx 기본) 그대로면 라벨이 잘린다. truncate나
@@ -40,6 +45,8 @@ export function GateSignatureApproval({
   const [evidenceViewed, setEvidenceViewed] = useState(false);
   const [reason, setReason] = useState('');
   const canSign = evidenceViewed && reason.trim().length > 0 && !resolving;
+  // discuss는 근거 열람 불필요(승인이 아니므로) — 사유만 있으면 된다.
+  const canDiscuss = reason.trim().length > 0 && !resolving;
 
   return (
     <div className="space-y-4">
@@ -103,6 +110,18 @@ export function GateSignatureApproval({
             {resolving ? '...' : t('sigApproveAndSign')}
           </Button>
         </div>
+        {onDiscuss ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="gap-1.5 text-muted-foreground"
+            disabled={!canDiscuss}
+            onClick={() => onDiscuss(reason)}
+          >
+            {t('gateDiscussSubmit')}
+          </Button>
+        ) : null}
       </div>
     </div>
   );

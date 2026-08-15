@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChevronLeft, CheckCircle, XCircle } from 'lucide-react';
@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { GateEvidence, gateNeedsAction, gateDecision } from '@/components/cage/gate-evidence';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
+import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
+import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -35,7 +37,7 @@ export default function GateDetailPage() {
   const t = useTranslations('cage');
   // 조직/프로젝트 식별(AC) — 현재 탭이 이미 로드해둔 멤버십 목록에서 이름 조회(신규 fetch 0).
   // 크로스 프로젝트 게이트(현재 탭 프로젝트가 아닌 경우)는 매칭 실패 → ID 스니펫 폴백(정직한 값).
-  const { orgMemberships, projectMemberships } = useDashboardContext();
+  const { orgMemberships, projectMemberships, currentTeamMemberId } = useDashboardContext();
   // story #1959(P2-S3): 딥링크 매니페스트(gate_detail→parentTab=approvals) — 콜드 진입 시 "결재함"
   // 탭 루트를 BACK 대상으로 선주입. 결재함 목록에서 클릭해 온 경우(history.length>1)는 no-op.
   useSyntheticParentTabHistory('/inbox');
@@ -67,18 +69,24 @@ export default function GateDetailPage() {
 
   useEffect(() => { void fetchGate(); }, [fetchGate]);
 
+  // story #2631 QA중 발견 — memberNames를 deps에 넣으면 setMemberNames가 매번 새 객체
+  // 레퍼런스를 만들어(resolver가 응답 목록에 없는 한) 이 effect가 무한 재실행됐다(fetch
+  // 폭주). resolver_id별로 한 번만 시도하도록 ref로 추적 — 기존 소비처(resolver_id 표시)와
+  // 무관한 사전 버그였고 이번 undo 테스트 픽스처(status!='pending')가 처음 건드렸다.
+  const fetchedResolverIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!gate?.resolver_id || memberNames[gate.resolver_id]) return;
+    if (!gate?.resolver_id || fetchedResolverIdRef.current === gate.resolver_id) return;
+    fetchedResolverIdRef.current = gate.resolver_id;
     void fetch('/api/team-members')
       .then((r) => (r.ok ? r.json() : null))
       .then((json: { data?: { id: string; name: string }[] } | null) => {
         if (!json?.data) return;
         const names: Record<string, string> = {};
         for (const m of json.data) names[m.id] = m.name;
-        setMemberNames(names);
+        setMemberNames((prev) => ({ ...prev, ...names }));
       })
       .catch(() => { /* non-critical — id 스니펫 폴백으로 graceful */ });
-  }, [gate?.resolver_id, memberNames]);
+  }, [gate?.resolver_id]);
 
   // gate-inbox.tsx와 동형 판정(중복 빌드 봉쇄 취지상 동일 규칙 재사용) — doc/canonicalize gate는
   // requires_human 메타가 없어(BE 구조상) gateNeedsAction()만으로는 액션 필요 여부를 못 잡는다.
@@ -132,6 +140,29 @@ export default function GateDetailPage() {
       setResolving(false);
     }
   }, [gate, router, t]);
+
+  // story #2631 — «보류(논의 필요)». transition()과 형제: 상태 전이가 없어(pending 유지)
+  // 페이지 이동 없이 그 자리서 fetchGate()로 discussion_requested만 갱신한다.
+  const [discussDialogOpen, setDiscussDialogOpen] = useState(false);
+  const [discussSubmitting, setDiscussSubmitting] = useState(false);
+  const [discussError, setDiscussError] = useState<string | null>(null);
+  const discuss = useCallback(async (reason: string) => {
+    if (!gate) return;
+    setDiscussSubmitting(true);
+    setDiscussError(null);
+    try {
+      const res = await fetch(`/api/gates/${gate.id}/discuss`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      });
+      if (res.ok) { await fetchGate(); setDiscussDialogOpen(false); return; }
+      const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+      setDiscussError(body?.error?.message ?? t('gateTransitionErrorGeneric'));
+    } finally {
+      setDiscussSubmitting(false);
+    }
+  }, [gate, fetchGate, t]);
 
   return (
     <>
@@ -197,6 +228,10 @@ export default function GateDetailPage() {
                     : gateDecision(gate) === 'auto_merge' ? t('gateReadonlyAuto')
                     : t('gateReadonlyNoVerdict')}
                 </p>
+                {/* story #2631 — 오클릭 정정(방금 본인이 해소한 게이트, 5분 창). */}
+                {isUndoEligible(gate, currentTeamMemberId) ? (
+                  <GateUndoButton gateId={gate.id} onUndone={() => void fetchGate()} />
+                ) : null}
               </div>
             ) : !canAct ? (
               // story #2091(P0) — needsAction=true(게이트 자체는 사람 판단이 필요)이지만
@@ -214,6 +249,7 @@ export default function GateDetailPage() {
                 error={transitionError}
                 onApprove={(reason) => void transition('approved', reason)}
                 onReject={(reason) => void transition('rejected', reason)}
+                onDiscuss={(reason) => void discuss(reason)}
               />
             ) : (
               <div className="space-y-3">
@@ -247,11 +283,30 @@ export default function GateDetailPage() {
                     {resolving ? '...' : t('gateApprove')}
                   </Button>
                 </div>
+                {/* story #2631 — 「보류(논의 필요)」. 저위험 경로엔 사유 입력창이 없어 다이얼로그로. */}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="w-full text-muted-foreground"
+                  disabled={resolving}
+                  onClick={() => setDiscussDialogOpen(true)}
+                >
+                  {t('gateDiscussSubmit')}
+                </Button>
               </div>
             )}
           </>
         )}
       </div>
+      {gate ? (
+        <GateDiscussDialog
+          open={discussDialogOpen}
+          onOpenChange={setDiscussDialogOpen}
+          onSubmit={(reason) => void discuss(reason)}
+          submitting={discussSubmitting}
+          error={discussError}
+        />
+      ) : null}
     </>
   );
 }

@@ -6,8 +6,11 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
+import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
+import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
 import { EntityPreviewModal, getEntityHref } from '@/components/chat/embed-card';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 import { parseBlockTemplate, renderBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
 import { renderStaticEventBlock } from '@/components/chat/event-block-card';
@@ -113,6 +116,31 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
     }
   };
 
+  // story #2631 — «보류(논의 필요)». transition()과 형제 함수: 같은 gate_id, 다른 엔드포인트,
+  // 성공해도 상태 전이가 없어(pending 유지) fetchGate()로 다시 물어 discussion_requested만
+  // 갱신한다.
+  const [discussDialogOpen, setDiscussDialogOpen] = useState(false);
+  const [discussSubmitting, setDiscussSubmitting] = useState(false);
+  const [discussError, setDiscussError] = useState<string | null>(null);
+  const discuss = async (reason: string) => {
+    setDiscussSubmitting(true);
+    setDiscussError(null);
+    try {
+      const res = await fetch(`/api/gates/${target.gate_id}/discuss`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      });
+      if (res.ok) { await fetchGate(); setDiscussDialogOpen(false); return; }
+      const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+      setDiscussError(body?.error?.message ?? `HTTP ${res.status}`);
+    } catch {
+      setDiscussError(t('hitlSendFailed'));
+    } finally {
+      setDiscussSubmitting(false);
+    }
+  };
+
   const Icon = WORK_ITEM_ICON[target.work_item_type] ?? FileText;
 
   return (
@@ -135,27 +163,45 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
           transitionError={transitionError}
           onApprove={(reason) => void transition('approved', reason)}
           onReject={(reason) => void transition('rejected', reason)}
+          onDiscuss={(reason) => void discuss(reason)}
+          onDiscussClick={() => setDiscussDialogOpen(true)}
+          onUndone={() => void fetchGate()}
           eventDefinitionsByKey={eventDefinitionsByKey}
         />
       )}
+      {state.kind === 'ready' ? (
+        <GateDiscussDialog
+          open={discussDialogOpen}
+          onOpenChange={setDiscussDialogOpen}
+          onSubmit={(reason) => void discuss(reason)}
+          submitting={discussSubmitting}
+          error={discussError}
+        />
+      ) : null}
     </div>
   );
 }
 
 function ApprovalRequestBody({
-  gate, resolving, transitionError, onApprove, onReject, eventDefinitionsByKey,
+  gate, resolving, transitionError, onApprove, onReject, onDiscuss, onDiscussClick, onUndone, eventDefinitionsByKey,
 }: {
   gate: GateItem;
   resolving: boolean;
   transitionError: string | null;
   onApprove: (reason?: string) => void;
   onReject: (reason?: string) => void;
+  /** story #2631 — 고위험(서명) 플로우가 이미 가진 사유 필드를 그대로 재사용해 직접 제출. */
+  onDiscuss: (reason: string) => void;
+  /** story #2631 — 저위험 플로우엔 사유 입력창이 없어 별도 다이얼로그를 연다. */
+  onDiscussClick: () => void;
+  onUndone: () => void;
   eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
 }) {
   const t = useTranslations('chats');
   // gates/[id]/page.tsx와 같은 문구를 쓴다(동일 개념=동일 어휘, DS 원칙) — 그 키들은 'cage'
   // 네임스페이스에 있다('chats'엔 없음, 그라운딩 중 확認).
   const tCage = useTranslations('cage');
+  const { currentTeamMemberId } = useDashboardContext();
   const title = gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`;
 
   // story #2637 AC4(PO 08-14 확定, Q2/Q3 그라운딩) — resolved(회신) 분기만 preset.gate.verdict
@@ -220,36 +266,43 @@ function ApprovalRequestBody({
       ) : null}
 
       {gate.status !== 'pending' ? (
-        resolvedStaticBlocks ? (
-          // story #2637 AC4 — 아이콘은 그대로 뱃지처럼 앞에 두고(어휘 4종 밖의 순수 UI 크롬,
-          // 템플릿이 대신할 수 없다), text·fields 블록은 EventBlockCard와 동일한 자기 고유
-          // 크기(text-sm/text-xs)로 그대로 둔다 — 억지로 기존 text-xs 한 줄에 욱여넣지 않는다
-          // (사이즈 클래스 충돌로 인한 시각 왜곡 방지).
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1.5">
-              {gate.status === 'approved' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />}
-              {resolvedStaticBlocks.filter((b) => b.type === 'text').map((b, i) => renderStaticEventBlock(b, i))}
+        <>
+          {resolvedStaticBlocks ? (
+            // story #2637 AC4 — 아이콘은 그대로 뱃지처럼 앞에 두고(어휘 4종 밖의 순수 UI 크롬,
+            // 템플릿이 대신할 수 없다), text·fields 블록은 EventBlockCard와 동일한 자기 고유
+            // 크기(text-sm/text-xs)로 그대로 둔다 — 억지로 기존 text-xs 한 줄에 욱여넣지 않는다
+            // (사이즈 클래스 충돌로 인한 시각 왜곡 방지).
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                {gate.status === 'approved' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />}
+                {resolvedStaticBlocks.filter((b) => b.type === 'text').map((b, i) => renderStaticEventBlock(b, i))}
+              </div>
+              {resolvedStaticBlocks.filter((b) => b.type === 'fields').map((b, i) => renderStaticEventBlock(b, i))}
             </div>
-            {resolvedStaticBlocks.filter((b) => b.type === 'fields').map((b, i) => renderStaticEventBlock(b, i))}
-          </div>
-        ) : (
-          <div className="space-y-1">
-            <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
-              {gate.status === 'approved' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />}
-              {t('approvalRequestResolvedStatus', {
-                status: RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status,
-              })}
+          ) : (
+            <div className="space-y-1">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                {gate.status === 'approved' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />}
+                {t('approvalRequestResolvedStatus', {
+                  status: RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status,
+                })}
+              </div>
+              {/* story #2624 — 상신자가 결과를 회신 카드로 받아도 사유(resolution_note)가 안
+                  보이면 "사유는 남겨놨는데" 인시던트가 human 웹 표면에서 재발한다. gate는 항상
+                  fetchGate()로 실측한 최신 값이라 어느 메시지(request/result)를 눌러 들어왔든
+                  같은 값을 보여준다.
+                  story #2637 AC4 — 템플릿 없음/파싱실패 시 폴백(비회귀 안전망, AC2와 동형). */}
+              {gate.resolution_note ? (
+                <p className="text-[11px] text-muted-foreground">{t('approvalRequestResolutionNote', { note: gate.resolution_note })}</p>
+              ) : null}
             </div>
-            {/* story #2624 — 상신자가 결과를 회신 카드로 받아도 사유(resolution_note)가 안
-                보이면 "사유는 남겨놨는데" 인시던트가 human 웹 표면에서 재발한다. gate는 항상
-                fetchGate()로 실측한 최신 값이라 어느 메시지(request/result)를 눌러 들어왔든
-                같은 값을 보여준다.
-                story #2637 AC4 — 템플릿 없음/파싱실패 시 폴백(비회귀 안전망, AC2와 동형). */}
-            {gate.resolution_note ? (
-              <p className="text-[11px] text-muted-foreground">{t('approvalRequestResolutionNote', { note: gate.resolution_note })}</p>
-            ) : null}
-          </div>
-        )
+          )}
+          {/* story #2631 — 오클릭 정정. 방금 본인이 해소한 게이트만(5분 창) — 두 렌더 분기
+              공통으로 하나만 둔다(중복 방지). */}
+          {isUndoEligible(gate, currentTeamMemberId) ? (
+            <GateUndoButton gateId={gate.id} onUndone={onUndone} compact />
+          ) : null}
+        </>
       ) : !canAct ? (
         // story #2091(P0)과 동일 fail-closed 규율 — can_approve=false(무권한 뷰어)는 액션을
         // 렌더하지 않는다. 고위험도 이제 챗 안에서 완결되므로(#2625) 여기 남는 유일한
@@ -262,6 +315,7 @@ function ApprovalRequestBody({
           error={transitionError}
           onApprove={onApprove}
           onReject={onReject}
+          onDiscuss={onDiscuss}
           compact
         />
       ) : (
@@ -281,6 +335,10 @@ function ApprovalRequestBody({
               {tCage('gateReject')}
             </Button>
           </div>
+          {/* story #2631 — 「보류(논의 필요)」. 저위험 경로엔 사유 입력창이 없어 다이얼로그로. */}
+          <Button type="button" size="sm" variant="ghost" onClick={onDiscussClick} disabled={resolving} className="w-full text-muted-foreground">
+            {tCage('gateDiscussSubmit')}
+          </Button>
         </>
       )}
 
