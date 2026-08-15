@@ -62,6 +62,11 @@ class DocSummaryResponse(BaseModel):
     icon: str | None = None
     sort_order: int
     doc_type: str
+    # story #2672(2026-08-15, 미르코 라이브 실측 발견) — 단건(DocResponse) 응답엔 있었는데 이
+    # 배치조회 응답엔 status가 아예 없었다. C-4 이래 챗 doc 참조 칩 상태 배지·#2669 CTA(draft
+    # 판별)가 전부 이 응답을 쓰는 경로라 필드 부재만으로 조용히 빈칸이었다 — FE 소비 로직은
+    # 이미 옳게 짜여 있었다(BE 필드 하나 누락이 근본원인). DocResponse와 동일 기본값(draft).
+    status: str = "draft"
     is_folder: bool
     tags: list[str]
     created_at: datetime
