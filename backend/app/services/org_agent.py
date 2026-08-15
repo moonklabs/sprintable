@@ -34,12 +34,18 @@ async def create_org_level_agent(
     color: str = "#3385f8",
     avatar_url: str | None = None,
     project_ids: list[uuid.UUID],
+    defer_key_issuance: bool = False,
 ) -> tuple[TeamMember, str | None]:
     """org-level 에이전트 1개 생성 후 project_ids 전체에 grant fan-out.
 
     project_ids 는 호출부에서 **org 소속·≥1·중복제거** 검증 완료를 가정(순서 보존). 반환:
-    (transient TeamMember, api_key 평문). 영속은 앵커 write-sync(members/profile/grant)·api_key
-    로만 — get_db 가 커밋한다(엔드포인트 명시 커밋 없음).
+    (transient TeamMember, api_key 평문 또는 None). 영속은 앵커 write-sync(members/profile/grant)·
+    api_key(발급 시)로만 — get_db 가 커밋한다(엔드포인트 명시 커밋 없음).
+
+    story #2667: defer_key_issuance=True면 API key를 발급하지 않는다(호출부가 곧바로
+    recruit_agent()를 부를 것을 안다는 신호 — 그쪽의 _rotate_or_create_key가 create 분기로
+    role-scope 키를 1회 발급한다. 여기서 먼저 발급하면 그 키가 곧장 rotate당해 무고지 무효화가
+    난다, 실사고 원인).
     """
     if not project_ids:
         raise ValueError("project_ids must be non-empty")
@@ -92,13 +98,16 @@ async def create_org_level_agent(
 
     await insert_default_preferences(session, member.id, "agent")
 
-    # API key 1개(전 비파괴 툴그룹 scope) — create_team_member 와 동일 모델
-    from app.repositories.api_key import ApiKeyRepository
-    from app.services.mcp_toolset import ALL_GROUPS
+    # API key 1개(전 비파괴 툴그룹 scope) — create_team_member 와 동일 모델. story #2667:
+    # defer_key_issuance=True면 발급 자체를 건너뛴다(호출부가 recruit_agent()에서 1회 발급).
+    api_key_plaintext: str | None = None
+    if not defer_key_issuance:
+        from app.repositories.api_key import ApiKeyRepository
+        from app.services.mcp_toolset import ALL_GROUPS
 
-    _key, api_key_plaintext = await ApiKeyRepository(session).create(
-        team_member_id=member.id, scope=list(ALL_GROUPS)
-    )
+        _key, api_key_plaintext = await ApiKeyRepository(session).create(
+            team_member_id=member.id, scope=list(ALL_GROUPS)
+        )
 
     # 생성자를 agent allow_list 에 자동 등록(멱등)
     from app.services.agent_message_policy import ensure_creator_allowlisted
