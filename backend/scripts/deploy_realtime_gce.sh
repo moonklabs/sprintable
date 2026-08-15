@@ -764,6 +764,41 @@ if ! gcloud compute backend-services describe "${GCLB_BACKEND_SERVICE}" --global
     exit 1
 fi
 
+# story #2673(2026-08-15, 실사고: dev 배포가 quota INSTANCE_TEMPLATES(한도 300)로 실패 —
+# 배포마다 이 스크립트가 새 템플릿을 만들고 옛것을 영구 방치했다. dev 게이트웨이만 463개
+# 누적, 실사용 1개. PO가 수동으로 460개 삭제 후 재실행해 복구) — 「상태 자가회수 부재」
+# 결함 클래스(worktree 디스크 사태와 동족) 재발 방지: 배포 본체가 성공적으로 끝난(트래픽
+# 부착까지 확認된) 지금, 같은 env 접두의 옛 템플릿을 최신 N개만 남기고 정리한다.
+#
+# ⛔AC2: 프루닝 실패가 배포 성공을 뒤집지 않는다 — 여기까지 오면 배포 자체는 이미 끝났다
+# (named-ports·backend-service 부착 확認 완료). 이 아래는 순수 정리 단계라 실패해도 경고만
+# 남기고 스크립트는 rc=0으로 마친다(set -e가 이 블록 전체를 죽이지 않도록 `|| true`로 감쌈).
+#
+# in-use 템플릿(현재 MIG가 참조 중)은 GCE가 삭제 요청 자체를 거부하므로 별도 방어 로직
+# 불요 — gcloud의 그 보장을 그대로 신뢰한다(재발명 안 함).
+PRUNE_KEEP="${GCE_TEMPLATE_PRUNE_KEEP:-5}"
+log "Pruning old instance templates (prefix=${TEMPLATE_PREFIX}-, keep latest ${PRUNE_KEEP})"
+_old_templates="$(gcloud compute instance-templates list \
+    --project="${GCP_PROJECT}" \
+    --filter="name~^${TEMPLATE_PREFIX}-" \
+    --sort-by=~creationTimestamp \
+    --format='value(name)' 2>/dev/null | tail -n +"$((PRUNE_KEEP + 1))")" || {
+    log "⚠️ Pruning skipped — could not list instance templates (gcloud error, non-fatal)"
+    _old_templates=""
+}
+if [ -n "${_old_templates}" ]; then
+    while IFS= read -r _tmpl; do
+        [ -z "${_tmpl}" ] && continue
+        if gcloud compute instance-templates delete "${_tmpl}" --project="${GCP_PROJECT}" --quiet 2>/dev/null; then
+            log "Pruned old instance template ${_tmpl}"
+        else
+            log "⚠️ Failed to prune instance template ${_tmpl} (likely still in-use — non-fatal, skipping)"
+        fi
+    done <<< "${_old_templates}"
+else
+    log "No old instance templates to prune (count within keep-${PRUNE_KEEP} window)"
+fi
+
 log "=== Deployment submitted ==="
 log "Instance template: ${TEMPLATE_NAME}"
 log "MIG: ${MIG_NAME} (region ${GCP_REGION})"
