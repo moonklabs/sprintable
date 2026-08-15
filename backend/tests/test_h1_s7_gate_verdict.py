@@ -147,6 +147,7 @@ async def test_human_review_verdict_reflected_in_trust_real_db():
 
     from app.core.database import Base
     import app.models  # noqa: F401
+    import app.models.activity_log  # noqa: F401 — #2631: transition_gate()가 ActivityLog를 씀(#2201 후속 미등재 갭).
     from app.models.gate import Gate
     from app.models.participation import Participation, ParticipationRole
     from app.models.pm import Story

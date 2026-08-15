@@ -49,6 +49,7 @@ async def _session_factory():
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     import app.models  # noqa: F401 — 전 모델 메타데이터 로드
+    import app.models.activity_log  # noqa: F401 — #2631: transition_gate()가 ActivityLog를 씀(#2201 후속 미등재 갭).
     from app.core.database import Base
 
     # ⚠️fix(발견 2026-07-20, #2043 AC3 작업 중): 이 함수가 create_all을 호출하지 않고 있었다 —

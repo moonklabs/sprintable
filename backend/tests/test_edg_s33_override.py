@@ -31,6 +31,7 @@ async def _session():
     import app.models  # noqa: F401
     import app.models.participation  # noqa: F401
     import app.models.workflow_line  # noqa: F401
+    import app.models.activity_log  # noqa: F401 — #2631: override_gate()→transition_gate()가 ActivityLog를 씀.
     url = _REAL_DB_URL
     for prefix in ("postgresql+psycopg2://", "postgresql://"):
         if url.startswith(prefix):
