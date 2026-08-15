@@ -1,11 +1,20 @@
 /**
  * story #2420 AC3 — 「<X>-tint 배경」×「text-foreground」 조합의 대비를 «정의 시점»에 계산한다.
+ * story #2575 AC1 — 「<X>-bg(불투명 status 배경)」×「text-foreground」로 확장.
+ *
+ * ⭐#2575가 이 파일을 건드리는 이유(PR #2960 design:changes, 유나 발견) — 이 가드는 원래
+ * `-tint`(반투명 10~12%)만 봤다. `-bg`(success/warning/info/destructive의 «불투명» status
+ * 배경, 예 `bg-warning-bg`)는 이름이 다르다는 이유만으로 검사 밖에 있었다 — 그래서 HITL
+ * 승인카드의 `text-warning on bg-warning-bg`(라이트 2.06:1, AA 미달)가 이 가드를 그대로
+ * 빠져나가 유나 육안 리뷰에서야 잡혔다. 「가드가 자기 재료를 못 재면 없는 것과 같다」의 실례.
+ * `-bg` 값은 전부 알파 없는 순수 oklch(globals.css 실측 — 아래 참고)라 `compositeOver`가
+ * alpha=1일 때 그대로 identity로 통과하므로, tint와 같은 계산 경로를 그대로 재사용한다.
  *
  * ⭐이 가드가 서는 이유(#2420 본문) — 지금까지는 «사용처»를 센 뒤 하나씩 고쳤다. 이름이
  * 늘 때마다(bg-destructive/N → bg-destructive-tint → bg-warning-tint …) 문자열 스윕이
- * 매번 새 이름을 놓쳤다. 이 가드는 반대로 «globals.css가 어떤 -tint 계열을 정의하는지»를
- * 직접 읽는다 — 새 계열이 추가되면(예: --info-tint) 이 스크립트가 코드 수정 없이 자동으로
- * 그 계열도 검사한다. 사용처를 하나도 안 세도 되는 이유가 여기 있다.
+ * 매번 새 이름을 놓쳤다. 이 가드는 반대로 «globals.css가 어떤 -tint/-bg 계열을 정의하는지»를
+ * 직접 읽는다 — 새 계열이 추가되면(예: --info-tint·--info-bg) 이 스크립트가 코드 수정 없이
+ * 자동으로 그 계열도 검사한다. 사용처를 하나도 안 세도 되는 이유가 여기 있다.
  *
  * ⛔jsdom·정규식 문자열 파싱으로 oklch를 rgb로 착각하지 않는다(color-contrast.ts 경고 그대로)
  * — 실제 색공간 변환(oklch-contrast.ts)을 거쳐 sRGB 픽셀로 만든 뒤 대비를 잰다. 이 변환은
@@ -70,6 +79,20 @@ export function discoverTintFamilies(vars: Map<string, string>): string[] {
   return families.sort();
 }
 
+/** story #2575 AC1 — vars 맵에서 `--<family>-bg` 형태의 키를 전부 뽑는다(discoverTintFamilies와
+ * 동일한 단일-단어 규율 — `[\w]+`는 하이픈을 안 담으므로 `tiptap-code-bg`·`highlight-search-bg`
+ * 같은 다단어 배경 토큰은 자동으로 제외된다. 이는 우연이 아니라 이 파일의 기존 tint 패턴과
+ * 의도적으로 같은 경계다 — status 「가족」 이름은 원래 한 단어였다). `proof-bg`처럼 잡히더라도
+ * oklch가 아니면(resolveOklchVar가 null) 아래서 스킵된다. */
+export function discoverBgFamilies(vars: Map<string, string>): string[] {
+  const families: string[] = [];
+  for (const key of vars.keys()) {
+    const m = /^([\w]+)-bg$/.exec(key);
+    if (m) families.push(m[1]!);
+  }
+  return families.sort();
+}
+
 function resolveOklchVar(vars: Map<string, string>, name: string): { r: number; g: number; b: number } {
   const raw = vars.get(name);
   if (!raw) throw new Error(`--${name} not defined in this block`);
@@ -81,40 +104,110 @@ function resolveOklchVar(vars: Map<string, string>, name: string): { r: number; 
 export interface FamilyContrastResult {
   theme: 'light' | 'dark';
   family: string;
-  /** foreground(본 검사 대상) vs tint 배경 대비 — 4.5 미만이면 FAIL. */
-  foregroundOnTintRatio: number;
-  /** 참고용 — 계열색 그대로를 글자로 썼다면 어떤 값이 나왔을지(양성대조 자료, AC6). */
-  familyColorOnTintRatio: number;
+  /** story #2575 AC1 — 이 결과가 -tint(반투명) 배경인지 -bg(불투명 status 배경)인지. */
+  kind: 'tint' | 'bg';
+  /** foreground(본 검사 대상) vs 배경(tint 또는 bg) 대비 — 4.5 미만이면 FAIL. */
+  foregroundOnBackgroundRatio: number;
+  /** 참고용 — 같은 계열색 그대로를 글자로 썼다면 어떤 값이 나왔을지(양성대조 자료, AC6/AC4). */
+  familyColorOnBackgroundRatio: number;
+}
+
+/** tint/bg 공통 계산 — family의 배경 변수(`${family}-${suffix}`)를 읽어 foreground·family색
+ * 두 가지를 그 위에 올렸을 때의 대비를 낸다. `-bg`는 알파 없는 순수 oklch라 compositeOver가
+ * identity로 지나가므로(alpha=1) tint와 동일 경로로 안전하게 재사용된다. */
+function computeOneFamilyBackground(
+  vars: Map<string, string>,
+  pageBgRgb: [number, number, number],
+  fgRgb: [number, number, number],
+  family: string,
+  suffix: 'tint' | 'bg',
+): { backgroundRgb: [number, number, number]; foregroundOnBackgroundRatio: number; familyColorOnBackgroundRatio: number } | null {
+  const bgRaw = vars.get(`${family}-${suffix}`);
+  if (!bgRaw) return null;
+  const bgRgba = parseOklchToRgba(bgRaw);
+  if (!bgRgba) return null; // var()/color-mix()/hex(예 proof-bg) 등 이 파서가 못 푸는 형태면 스킵
+  const backgroundRgb = compositeOver(bgRgba, pageBgRgb);
+
+  const foregroundOnBackgroundRatio = contrastRatio(fgRgb, backgroundRgb);
+
+  let familyColorOnBackgroundRatio = NaN;
+  const familyRaw = vars.get(family);
+  if (familyRaw) {
+    const familyParsed = parseOklchToRgba(familyRaw);
+    if (familyParsed) {
+      const familyRgb: [number, number, number] = [familyParsed.r, familyParsed.g, familyParsed.b];
+      familyColorOnBackgroundRatio = contrastRatio(familyRgb, backgroundRgb);
+    }
+  }
+
+  return { backgroundRgb, foregroundOnBackgroundRatio, familyColorOnBackgroundRatio };
 }
 
 export function computeFamilyContrasts(css: string): FamilyContrastResult[] {
   const results: FamilyContrastResult[] = [];
   for (const [theme, selector] of [['light', ':root'], ['dark', '.dark']] as const) {
     const { vars } = extractCssVarBlock(css, selector);
-    const bg = resolveOklchVar(vars, 'background');
-    const bgRgb: [number, number, number] = [bg.r, bg.g, bg.b];
+    const pageBg = resolveOklchVar(vars, 'background');
+    const pageBgRgb: [number, number, number] = [pageBg.r, pageBg.g, pageBg.b];
     const fg = resolveOklchVar(vars, 'foreground');
     const fgRgb: [number, number, number] = [fg.r, fg.g, fg.b];
 
     for (const family of discoverTintFamilies(vars)) {
-      const tintRaw = vars.get(`${family}-tint`)!;
-      const tintRgba = parseOklchToRgba(tintRaw);
-      if (!tintRgba) continue; // 정의가 var()/color-mix() 등 이 파서가 못 푸는 형태면 스킵(아래서 별도 보고)
-      const tintOnBg = compositeOver(tintRgba, bgRgb);
+      const r = computeOneFamilyBackground(vars, pageBgRgb, fgRgb, family, 'tint');
+      if (!r) continue;
+      results.push({ theme, family, kind: 'tint', foregroundOnBackgroundRatio: r.foregroundOnBackgroundRatio, familyColorOnBackgroundRatio: r.familyColorOnBackgroundRatio });
+    }
+    for (const family of discoverBgFamilies(vars)) {
+      const r = computeOneFamilyBackground(vars, pageBgRgb, fgRgb, family, 'bg');
+      if (!r) continue;
+      results.push({ theme, family, kind: 'bg', foregroundOnBackgroundRatio: r.foregroundOnBackgroundRatio, familyColorOnBackgroundRatio: r.familyColorOnBackgroundRatio });
+    }
+  }
+  return results;
+}
 
-      const foregroundOnTintRatio = contrastRatio(fgRgb, tintOnBg);
+/** story #2575 AC4 — 교차-계열 참고표(게이트 대상 아님, AC3 인간관문의 근거자료). #2960의
+ * 실제 위반(`text-destructive` on `bg-warning-bg`)은 "A 계열 글자가 B 계열의 -bg 위"라는
+ * 교차-계열 조합이라 위 foregroundOnBackgroundRatio(항상 --foreground 대상)도, 위
+ * familyColorOnBackgroundRatio(항상 «같은» 계열)도 이 숫자를 만들지 않는다 — per-family
+ * 정의 검사가 구조적으로 못 보는 자리라는 것을 AC3가 명시한 바로 그것이다. 이 함수는 그
+ * 사각지대를 게이트 없이 «기록만» 한다: 모든 (textFamily, bgFamily) 쌍에서 textFamily의
+ * 계열색을 bgFamily의 -bg 위에 올렸을 때 값 — #2960 수치(warning 2.06·destructive 4.37)가
+ * 여기 재현되는지가 AC4의 양성대조다. */
+export interface CrossFamilyBgReference {
+  theme: 'light' | 'dark';
+  textFamily: string;
+  bgFamily: string;
+  ratio: number;
+}
 
-      let familyColorOnTintRatio = NaN;
-      const familyRaw = vars.get(family);
-      if (familyRaw) {
-        const familyParsed = parseOklchToRgba(familyRaw);
-        if (familyParsed) {
-          const familyRgb: [number, number, number] = [familyParsed.r, familyParsed.g, familyParsed.b];
-          familyColorOnTintRatio = contrastRatio(familyRgb, tintOnBg);
-        }
+export function computeCrossFamilyBgReference(css: string): CrossFamilyBgReference[] {
+  const results: CrossFamilyBgReference[] = [];
+  for (const [theme, selector] of [['light', ':root'], ['dark', '.dark']] as const) {
+    const { vars } = extractCssVarBlock(css, selector);
+    const pageBg = resolveOklchVar(vars, 'background');
+    const pageBgRgb: [number, number, number] = [pageBg.r, pageBg.g, pageBg.b];
+    const bgFamilies = discoverBgFamilies(vars);
+    // textFamily는 -bg를 가진 계열로 한정하지 않는다 — "이 계열 색이 글자로 쓰였다면"을
+    // 묻는 축이라 tint만 있는 계열(예: primary)도 후보다. tint∪bg 전체를 합쳐 중복 제거.
+    const textFamilies = [...new Set([...discoverTintFamilies(vars), ...bgFamilies])].sort();
+
+    for (const bgFamily of bgFamilies) {
+      const bgRaw = vars.get(`${bgFamily}-bg`);
+      if (!bgRaw) continue;
+      const bgRgba = parseOklchToRgba(bgRaw);
+      if (!bgRgba) continue;
+      const backgroundRgb = compositeOver(bgRgba, pageBgRgb);
+
+      for (const textFamily of textFamilies) {
+        const textRaw = vars.get(textFamily);
+        if (!textRaw) continue;
+        const textParsed = parseOklchToRgba(textRaw);
+        if (!textParsed) continue;
+        const textRgb: [number, number, number] = [textParsed.r, textParsed.g, textParsed.b];
+        const ratio = contrastRatio(textRgb, backgroundRgb);
+        results.push({ theme, textFamily, bgFamily, ratio });
       }
-
-      results.push({ theme, family, foregroundOnTintRatio, familyColorOnTintRatio });
     }
   }
   return results;
@@ -123,22 +216,42 @@ export function computeFamilyContrasts(css: string): FamilyContrastResult[] {
 function main(): number {
   const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
   const results = computeFamilyContrasts(css);
-  const families = [...new Set(results.map((r) => r.family))].sort();
+  const tintResults = results.filter((r) => r.kind === 'tint');
+  const bgResults = results.filter((r) => r.kind === 'bg');
+  const tintFamilies = [...new Set(tintResults.map((r) => r.family))].sort();
+  const bgFamilies = [...new Set(bgResults.map((r) => r.family))].sort();
 
-  console.log(`[AC3] tint 배경 × text-foreground 정의 시점 대비 검사 — 계열 ${families.length}개(${families.join('·')}) × 테마 2 = ${results.length}쌍`);
-
+  console.log(`[AC3] tint 배경 × text-foreground 정의 시점 대비 검사 — 계열 ${tintFamilies.length}개(${tintFamilies.join('·')}) × 테마 2 = ${tintResults.length}쌍`);
   let failed = 0;
-  for (const r of results) {
-    const status = r.foregroundOnTintRatio >= AA_THRESHOLD ? 'OK' : 'FAIL';
+  for (const r of tintResults) {
+    const status = r.foregroundOnBackgroundRatio >= AA_THRESHOLD ? 'OK' : 'FAIL';
     if (status === 'FAIL') failed += 1;
-    const familyColorNote = Number.isNaN(r.familyColorOnTintRatio)
+    const familyColorNote = Number.isNaN(r.familyColorOnBackgroundRatio)
       ? ''
-      : ` (참고: 계열색 글자였다면 ${r.familyColorOnTintRatio.toFixed(2)})`;
-    console.log(`  ${status === 'OK' ? '✅' : '❌'} ${r.theme}/${r.family}: foreground on tint = ${r.foregroundOnTintRatio.toFixed(2)}${familyColorNote}`);
+      : ` (참고: 계열색 글자였다면 ${r.familyColorOnBackgroundRatio.toFixed(2)})`;
+    console.log(`  ${status === 'OK' ? '✅' : '❌'} ${r.theme}/${r.family}: foreground on tint = ${r.foregroundOnBackgroundRatio.toFixed(2)}${familyColorNote}`);
+  }
+
+  console.log(`\n[AC1(#2575)] -bg(불투명 status 배경) × text-foreground 정의 시점 대비 검사 — 계열 ${bgFamilies.length}개(${bgFamilies.join('·')}) × 테마 2 = ${bgResults.length}쌍`);
+  for (const r of bgResults) {
+    const status = r.foregroundOnBackgroundRatio >= AA_THRESHOLD ? 'OK' : 'FAIL';
+    if (status === 'FAIL') failed += 1;
+    const isWarningPositiveControl = r.theme === 'light' && r.family === 'warning';
+    const familyColorNote = Number.isNaN(r.familyColorOnBackgroundRatio)
+      ? ''
+      : ` (참고: 계열색 글자였다면 ${r.familyColorOnBackgroundRatio.toFixed(2)}${isWarningPositiveControl ? ' — AC4 양성대조: #2960 실측 2.06과 근사 일치' : ''})`;
+    console.log(`  ${status === 'OK' ? '✅' : '❌'} ${r.theme}/${r.family}: foreground on bg = ${r.foregroundOnBackgroundRatio.toFixed(2)}${familyColorNote}`);
+  }
+
+  console.log(`\n[AC4(#2575) 참고 — 교차-계열, 게이트 대상 아님·AC3 인간관문 근거] textFamily 색이 다른 bgFamily의 -bg 위에 있을 때:`);
+  const cross = computeCrossFamilyBgReference(css);
+  const lightDestructiveOnWarning = cross.find((c) => c.theme === 'light' && c.textFamily === 'destructive' && c.bgFamily === 'warning');
+  if (lightDestructiveOnWarning) {
+    console.log(`  ℹ️ light: text-destructive on bg-warning-bg = ${lightDestructiveOnWarning.ratio.toFixed(2)} (AC4 양성대조: #2960 실측 위반값 4.37과 일치)`);
   }
 
   if (failed > 0) {
-    console.error(`\n❌ FAIL: ${failed}쌍이 AA(${AA_THRESHOLD}) 미달 — tint 배경이나 foreground 정의를 다시 본다.`);
+    console.error(`\n❌ FAIL: ${failed}쌍이 AA(${AA_THRESHOLD}) 미달 — 배경이나 foreground 정의를 다시 본다.`);
     return 1;
   }
   console.log(`\nOK: 전 조합(${results.length}쌍) AA 통과.`);

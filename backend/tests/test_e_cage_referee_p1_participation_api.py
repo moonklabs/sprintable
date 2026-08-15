@@ -146,7 +146,11 @@ async def test_create_story_without_assignee_no_participation():
         # 부른다 — 이 테스트는 그 호출도 no-op patch(행동검증은 별도 실PG 테스트).
         with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create, \
              patch("app.routers.stories._upsert_assignee_participation", new_callable=AsyncMock) as mock_upsert, \
-             patch("app.routers.stories._reconcile_story_references_and_candidates", new_callable=AsyncMock):
+             patch("app.routers.stories._reconcile_story_references_and_candidates", new_callable=AsyncMock), \
+             patch("app.routers.stories._attach_org_project_slugs", new_callable=AsyncMock):
+            # story #2642(2026-08-14, 재발 방지 스윕 — 카디르 QA 패턴 재적용): test_stories.py
+            # 와 동형(slug 부착은 이 테스트의 관심사가 아니고 session이 그 신규 쿼리용으로
+            # configure된 적 없다).
             mock_create.return_value = story
             async with client as c:
                 resp = await c.post("/api/v2/stories", json={
@@ -268,7 +272,10 @@ async def test_create_story_without_assignee_still_201():
     client, app = await _make_client(mock_session)
     try:
         with patch("app.repositories.story.StoryRepository.create", new_callable=AsyncMock) as mock_create, \
-             patch("app.routers.stories._reconcile_story_references_and_candidates", new_callable=AsyncMock):
+             patch("app.routers.stories._reconcile_story_references_and_candidates", new_callable=AsyncMock), \
+             patch("app.routers.stories._attach_org_project_slugs", new_callable=AsyncMock):
+            # story #2642(2026-08-14, 재발 방지 스윕): test_create_story_without_assignee_no_
+            # participation과 동형.
             mock_create.return_value = story
             async with client as c:
                 resp = await c.post("/api/v2/stories", json={

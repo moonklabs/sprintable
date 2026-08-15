@@ -167,7 +167,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
     return (
       <div className={className}>
         {decisionBadge}
-        <p className="mt-1.5 text-[11.5px] italic text-muted-foreground/60">{t('evidenceNonePrompt')}</p>
+        <p className="mt-1.5 text-[11.5px] italic text-muted-foreground">{t('evidenceNonePrompt')}</p>
       </div>
     );
   }
@@ -182,7 +182,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
         <div className="mt-1.5 grid grid-cols-1 gap-2 text-[11.5px] sm:grid-cols-2 sm:gap-3">
           {/* 좌: 납품(delivery 신호 — 기계 검증). S5(GitHub앱) PR·AC·위험 슬롯 자리. */}
           <div className="space-y-0.5">
-            <p className="text-[10px] font-medium text-muted-foreground/70">{t('deliveryColLabel')}</p>
+            <p className="text-[10px] font-medium text-muted-foreground">{t('deliveryColLabel')}</p>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
               {ci !== null ? <CiSignal ci={ci} /> : null}
               {trust !== null ? <TrustValue trust={trust} selfReportOnly={selfReportOnly} /> : null}
@@ -192,12 +192,12 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
           </div>
           {/* 우: 판단("옳았다 판정"). gate엔 정밀 hit_rate 없음 → 임시 예측만(억지 % X). */}
           <div className="space-y-0.5">
-            <p className="text-[10px] font-medium text-muted-foreground/70">{t('outcomeColLabel')}</p>
+            <p className="text-[10px] font-medium text-muted-foreground">{t('outcomeColLabel')}</p>
             <div className="text-muted-foreground">
               {seedKey ? (
                 <Badge variant="chip" className="shrink-0">{t(seedKey)}</Badge>
               ) : (
-                <span className="italic text-muted-foreground/80">{t('coldStartProvisional')}</span>
+                <span className="italic text-muted-foreground">{t('coldStartProvisional')}</span>
               )}
             </div>
           </div>
@@ -222,7 +222,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11.5px] text-muted-foreground">
           {facts.map((node, i) => (
             <Fragment key={i}>
-              {i > 0 ? <span aria-hidden className="text-muted-foreground/50">·</span> : null}
+              {i > 0 ? <span aria-hidden className="text-muted-foreground">·</span> : null}
               {node}
             </Fragment>
           ))}

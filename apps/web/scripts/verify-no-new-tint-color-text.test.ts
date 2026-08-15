@@ -16,6 +16,17 @@ describe('findTintTextPairs (story #2420 AC7)', () => {
     expect(hits.map((h) => h.family)).toEqual(['warning']);
   });
 
+  // story #2575 AC2 — #2960(HITL 카드) 헤더 라벨이 정확히 이 모양이었다: bg-warning-bg +
+  // text-warning, 같은 className 리터럴. -tint 확장 전엔 이 자리를 안 잡았다(근본원인).
+  it('flags bg-<X>-bg + text-<X> in the same literal (story #2575 AC2 — #2960 근본원인 재현)', () => {
+    const hits = findTintTextPairs('mb-1.5 flex items-center gap-1.5 rounded-xl bg-warning-bg text-warning');
+    expect(hits.map((h) => h.family)).toEqual(['warning']);
+  });
+
+  it('does not flag solid bg-<X>-bg without matching text-<X> in the same literal', () => {
+    expect(findTintTextPairs('rounded-xl border border-warning-border bg-warning-bg px-3.5 py-3')).toEqual([]);
+  });
+
   it('does not flag a fixed site (text-foreground on tint bg)', () => {
     expect(findTintTextPairs('bg-destructive/10 text-foreground')).toEqual([]);
   });

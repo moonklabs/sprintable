@@ -19,8 +19,6 @@ from app.models.doc import Doc
 from app.models.event import Event, EventType
 from app.models.hypothesis import Hypothesis
 from app.models.pm import Goal, Sprint, Story
-from app.routers.agent_gateway import wake_agent
-from app.routers.events import _event_to_payload, _push_to_agent
 from app.services.activity_stream import extract_activities_best_effort
 from app.services.event_seq import assign_recipient_seq
 from app.services.member_resolver import resolve_member_identity
@@ -189,12 +187,15 @@ async def _finalize_dispatch(
         )
 
     if commit:
-        await db.commit()  # commit 후 seq 확정
-        if member_type == "agent":
-            if event.recipient_seq is not None:
-                wake_agent(str(recipient_id), event.recipient_seq)
-            else:
-                _push_to_agent(str(recipient_id), _event_to_payload(event))
+        await db.commit()  # commit 후 seq 확정 — agent recipient wake는 assign_recipient_seq()의
+        # after-commit 자동예약(event_seq.py)이 이미 발화한다(story #2381 AC5: 이 함수가 따로
+        # wake_agent()를 불렀던 예전 경로는 assign_recipient_seq() 자신의 계약이 아니라 각
+        # 호출부가 "commit 후에 불러야 한다"를 스스로 지켜야 하는 조건부 규칙이었다 — 그 규칙이
+        # dispatch_notification()의 ~20개 호출부에서는 통째로 빠져있던 것이 이 스토리의 근본
+        # 원인. 두 경로(이 함수 vs dispatch_notification())가 서로 다른 방식으로 wake하면 다음에
+        # 또 어긋난다 — assign_recipient_seq() 한 곳으로 판정을 모은다. `event.recipient_seq`는
+        # 위에서 이미 assign_recipient_seq()가 채웠으므로(agent 경로 무조건 호출) None-fallback은
+        # 항상 죽은 분기였다.
 
     response = DispatchResponse(
         dispatched=True,
@@ -232,8 +233,8 @@ async def dispatch_entity_to_assignee(
     """entity의 assignee에게 dispatched 이벤트 생성 + 알림 전달 + (agent) wake.
 
     순서(기존 라우터와 동일): assignee resolve → resolve_dispatch_anchor → Event(dispatched) →
-    flush → agent면 assign_recipient_seq → L1 활동 추출(best-effort) → human이면
-    dispatch_notification → commit → agent면 commit 후 wake_agent.
+    flush → agent면 assign_recipient_seq(commit 후 wake 자동예약까지 포함, story #2381) → L1
+    활동 추출(best-effort) → human이면 dispatch_notification → commit.
 
     반환: (DispatchResponse, delivery). delivery는 dispatched=True일 때 CC 릴레이 webhook
     파라미터(없으면 None) — 호출자(라우터는 background_tasks, L2 워커는 직접 await)가 스케줄한다.

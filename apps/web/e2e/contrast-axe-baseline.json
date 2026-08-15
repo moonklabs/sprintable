@@ -1,0 +1,12 @@
+{
+  "_comment": [
+    "story #2590 (B) — axe color-contrast 런타임 가드 baseline(can only shrink).",
+    "키 = page::theme::색쌍(fg/bg). 셀렉터는 axe가 클래스 순서를 런마다 바꿔 비결정적이라 뺐다",
+    "(spec의 violationKeys 주석 참조). 색쌍은 위반의 결정적 정체다.",
+    "story #2611(유나 확定) — 위 rest 2키(/settings light·dark) + #3002가 시드한 hover 1키",
+    "(/settings::dark::hover)는 전부 같은 물리적 색쌍(text-muted-foreground/70 저대비)이었다.",
+    "89곳 solid 이관(story #2611)으로 근본 수리돼 baseline 3키가 전부 비었다 — coupling대로",
+    "rest+hover 동반 소멸(can-only-shrink가 실제로 줄어드는 자리, CI axe 재실측이 최종 확認)."
+  ],
+  "keys": []
+}

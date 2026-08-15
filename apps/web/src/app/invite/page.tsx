@@ -260,7 +260,7 @@ export default function InvitePage() {
                   type="text"
                   placeholder={t('namePlaceholder')}
                   autoComplete="name"
-                  className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand"
+                  className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brand"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   disabled={submitting}
@@ -270,7 +270,7 @@ export default function InvitePage() {
                 type="email"
                 placeholder={t2('email')}
                 autoComplete="email"
-                className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brand"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={submitting}
@@ -279,7 +279,7 @@ export default function InvitePage() {
                 type="password"
                 placeholder={t2('password')}
                 autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
-                className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brand"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && void handleSubmit()}
@@ -323,7 +323,7 @@ export default function InvitePage() {
           <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-500 delay-400 fill-mode-backwards">
             <div className="relative flex items-center">
               <div className="flex-grow border-t border-border/50" />
-              <span className="mx-3 flex-shrink text-xs text-muted-foreground/60">{t2('orContinueWith')}</span>
+              <span className="mx-3 flex-shrink text-xs text-muted-foreground">{t2('orContinueWith')}</span>
               <div className="flex-grow border-t border-border/50" />
             </div>
             <a

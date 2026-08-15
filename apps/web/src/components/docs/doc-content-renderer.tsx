@@ -6,7 +6,7 @@ import { getShikiHighlighter, resolveLanguage } from './lib/shiki-highlighter';
 import { detectEmbedService } from './extensions/embed-node';
 import { renderKatex } from './extensions/math-node';
 import { renderMermaid } from './lib/mermaid-renderer';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import type { Components } from 'react-markdown';
 import DOMPurify from 'dompurify';
 import remarkGfm from 'remark-gfm';
@@ -16,6 +16,8 @@ import NextImage from 'next/image';
 import { ImageOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { extractDocHeadings, slugifyHeading } from './doc-heading-utils';
+// story #2639 — 본문 entity: 참조 링크를 앱 내 엔티티로 잇는다(chat/story-panel과 동일 자산 재사용).
+import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 
 interface DocContentRendererProps {
   content: string;
@@ -68,7 +70,20 @@ const docMarkdownSanitizeSchema = {
       'dataSlug',
     ],
   },
+  // story #2639 — entity: 참조 링크(`[제목](entity:타입:id)`)의 href가 두 겹 필터에 지워지지
+  // 않게 한다. rehype-sanitize의 protocols.href 허용목록에 'entity'만 추가로 열고
+  // javascript:/data: 등은 원래 막던 대로 둔다(story-detail-panel #2269와 동형 처방·둘째 겹).
+  // 첫째 겹은 아래 <ReactMarkdown urlTransform>.
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href ?? []), 'entity'],
+  },
 };
+
+// story #2639 — 본문 엔티티 참조 토큰 `[제목](entity:타입:id)`의 href 매칭(id는 UUID만 —
+// 비-UUID는 매칭 실패→평문 링크 폴백). chat-bubble.tsx·story-detail-panel.tsx의 파싱 규칙과
+// 문자 그대로 동일하게 둔다(정의가 세 곳에 흩어지면 그 자체가 드리프트 위험).
+const ENTITY_REF_RE = /^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 // asset-ref 식별 — react-markdown 은 hast node(properties.dataAssetId) + data-* prop 양쪽을 줄 수 있어
 // 둘 다 확인한다(스키마 통과분만 도달).
@@ -519,6 +534,27 @@ export function DocContentRenderer({
   // 매겨져야 하는데 메모이즈된 클로저에 넣으면 그 리셋이 깨진다 — 그래서 h1/h2/h3는 아래
   // components 병합 시 매 렌더 새로 만드는 채로 둔다(무해 remount).
   const stableMarkdownComponents = useMemo<Components>(() => ({
+    // story #2639 — 본문 entity: 참조를 EntityChip으로 잇는다(chat/story-panel과 동일 상호작용:
+    // 탭→엔티티 프리뷰 모달·그 안에 전체 열기 링크). getEntityHref가 story→/board?story=·
+    // epic→/goals/·doc→/docs?id= 동일오리진 라우트를 준다(웹뷰서 SPA 착지·셸 무변경).
+    // 매핑 없는 타입은 getEntityHref=null→모달만 뜨고(무동작 0), 비-UUID/asset은 평문 링크 폴백.
+    a: ({ href, children }: { href?: string; children?: ReactNode }) => {
+      const m = href?.match(ENTITY_REF_RE);
+      // asset은 story-detail-panel과 동일하게 칩 경로에서 제외한다(자산 임베드는 별 경로).
+      if (m && m[1]!.toLowerCase() !== 'asset') {
+        // public share 뷰어: 내부 참조는 비활성 평문(메타 유출 경계 — wikiLink publicMode와 동일).
+        if (publicMode) return <span className="text-sm text-muted-foreground">{children}</span>;
+        return (
+          <EntityChip
+            entityType={m[1]!}
+            entityId={m[2]!}
+            label={String(children)}
+            href={getEntityHref(m[1]!, m[2]!)}
+          />
+        );
+      }
+      return <a href={href}>{children}</a>;
+    },
     blockquote: ({ children }: { children?: ReactNode }) => <blockquote>{children}</blockquote>,
     img: (props) => {
       const { src, alt } = props as { src?: unknown; alt?: string };
@@ -605,6 +641,9 @@ export function DocContentRenderer({
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw, [rehypeSanitize, docMarkdownSanitizeSchema]]}
+        // story #2639 — entity: 스킴 보존(첫째 겹). 그 외는 기본 sanitize 유지 —
+        // javascript:/data: 는 여전히 빈 문자열로 지워진다(뮤테이션 테스트로 고정).
+        urlTransform={(url) => (url.startsWith('entity:') ? url : defaultUrlTransform(url))}
         components={{
           h1: ({ children }) => {
             const heading = headings[headingIndex++];
@@ -643,7 +682,8 @@ function MermaidReadonlyBlock({ code }: { code: string }) {
   }, [code]);
 
   if (error) {
-    return <div className="not-prose my-4 rounded-xl border border-destructive-border bg-destructive-tint p-3 text-xs text-destructive">{error}</div>;
+    // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+    return <div className="not-prose my-4 rounded-xl border border-destructive-border bg-destructive-tint p-3 text-xs text-foreground">{error}</div>;
   }
   if (!svg) {
     return <div className="not-prose my-4 rounded-xl border border-border bg-muted p-4 text-xs text-muted-foreground">렌더링 중...</div>;

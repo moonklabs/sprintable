@@ -43,7 +43,7 @@ from sprintable_sse import INJECTABLE_EVENT_TYPES  # noqa: E402
 
 
 async def _run_dispatch(member_type: str):
-    """POST /api/v2/dispatch for an agent/human assignee; return (resp, wake_mock, dispatch_mock, added)."""
+    """POST /api/v2/dispatch for an agent/human assignee; return (resp, assign_seq_mock, dispatch_mock, added)."""
     from httpx import ASGITransport, AsyncClient
 
     from app.dependencies.auth import get_current_user
@@ -88,9 +88,7 @@ async def _run_dispatch(member_type: str):
             return_value=assignee_member,
         ), patch(
             "app.services.agent_dispatch.assign_recipient_seq", side_effect=_seq
-        ), patch(
-            "app.services.agent_dispatch.wake_agent"
-        ) as mock_wake, patch(
+        ) as mock_assign_seq, patch(
             "app.services.agent_dispatch.dispatch_notification", new_callable=AsyncMock
         ) as mock_dispatch:
             transport = ASGITransport(app=app)
@@ -104,14 +102,23 @@ async def _run_dispatch(member_type: str):
                         "message": "please pick this up",
                     },
                 )
-            return resp, mock_wake, mock_dispatch, added
+            return resp, mock_assign_seq, mock_dispatch, added
     finally:
         app.dependency_overrides.clear()
 
 
 @pytest.mark.anyio
 async def test_dispatch_agent_emits_dispatched_event_with_content_seq_and_wakes():
-    resp, mock_wake, mock_dispatch, added = await _run_dispatch("agent")
+    """story #2381 AC5: `_finalize_dispatch()` no longer calls `wake_agent()` itself — wake is
+    scheduled solely by `assign_recipient_seq()`'s after-commit hook (event_seq.py), the single
+    choke point every agent-recipient Event already has to go through (#2375's own invariant).
+    That the wake actually fires post-commit is covered live (real Postgres, real SSE stream) by
+    test_2381_wake_after_commit_race_realdb.py and test_2381_ac4_live_wake_delivery_realdb.py —
+    this router-level test (mocked `db`, `assign_recipient_seq` replaced by a `_seq` stub) can't
+    observe that hook at all (it's guarded to no-op on non-real `Session` objects by design). What
+    it *can* still verify at this layer: `assign_recipient_seq` — the sole gate to wake-eligibility
+    — is invoked for the agent path and not the human path."""
+    resp, mock_assign_seq, mock_dispatch, added = await _run_dispatch("agent")
     assert resp.status_code == 200
     body = resp.json()
     assert body["dispatched"] is True
@@ -125,20 +132,20 @@ async def test_dispatch_agent_emits_dispatched_event_with_content_seq_and_wakes(
     assert ev.payload["content"].startswith("[story] Build login")
     assert ev.payload["content"].endswith("please pick this up")
     assert ev.recipient_seq == 42  # per-recipient dense seq assigned for agent
-    mock_wake.assert_called_once()
+    mock_assign_seq.assert_called_once()
     mock_dispatch.assert_not_called()  # agent path does not double-deliver via notification
 
 
 @pytest.mark.anyio
 async def test_dispatch_human_uses_notification_no_wake():
-    resp, mock_wake, mock_dispatch, added = await _run_dispatch("human")
+    resp, mock_assign_seq, mock_dispatch, added = await _run_dispatch("human")
     assert resp.status_code == 200
     events = [e for e in added if getattr(e, "event_type", None) == "dispatched"]
     assert len(events) == 1
     ev = events[0]
     assert ev.recipient_type == "human"
     assert ev.recipient_seq is None  # no gateway seq for human recipients
-    mock_wake.assert_not_called()
+    mock_assign_seq.assert_not_called()  # human recipients never go through the wake gate
     mock_dispatch.assert_called_once()
 
 

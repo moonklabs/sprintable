@@ -133,7 +133,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
           </div>
         ) : withdraw === 'confirming' ? (
           <div className="space-y-1.5 rounded-md border border-destructive/40 bg-destructive/5 p-2">
-            <p className="text-[11px] text-destructive">{t('withdrawIrreversibleWarning')}</p>
+            <p className="text-[11px] text-foreground">{t('withdrawIrreversibleWarning')}</p>
             <div className="flex gap-1.5">
               <Button variant="ghost" size="sm" className="flex-1 text-muted-foreground" onClick={() => setWithdraw('idle')}>
                 {t('withdrawCancel')}

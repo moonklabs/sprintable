@@ -48,6 +48,7 @@ import { ToastContainer, useToast } from '@/components/ui/toast';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
+import { useOrgSyncVersion } from '@/lib/project-context-client';
 
 export interface Task {
   id: string;
@@ -430,6 +431,13 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
   const titleInputRef = useRef<HTMLInputElement>(null);
 
+  // story #2593(#2545 후속) — kanban `?story=` 딥링크로 이 패널이 콜드 하드네비 직후 열리면,
+  // 아래 auto-mount fetch effect들(labels/references/dependencies/gates/comments/activities)이
+  // switch-org 완료 前에 구 org_id 토큰으로 먼저 발사될 수 있다. #2946과 동일한 opt-in 패턴
+  // (orgSyncVersion을 각 effect deps에 얹어 switch-org 완료 시 재요청 + cancelled 플래그로
+  // 늦게 도착한 구 요청이 새 요청을 덮지 않게).
+  const orgSyncVersion = useOrgSyncVersion();
+
   useEffect(() => {
     setTitleDraft(story.title);
     setDescriptionDraft(story.description ?? '');
@@ -444,12 +452,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   }, [editingTitle]);
 
   useEffect(() => {
+    let cancelled = false;
     setLoadingLabels(true);
     Promise.all([
       fetch(`/api/item-labels?item_type=story&item_id=${story.id}`).then((r) => r.ok ? r.json() : []),
       fetch('/api/labels').then((r) => r.ok ? r.json() : []),
     ])
       .then(([itemLabels, allLabels]) => {
+        if (cancelled) return;
         const all = allLabels as LabelData[];
         setOrgLabels(all);
         const labelMap = Object.fromEntries(all.map((l) => [l.id, l]));
@@ -460,8 +470,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
         setStoryLabels(attached);
       })
       .catch(() => {})
-      .finally(() => setLoadingLabels(false));
-  }, [story.id]);
+      .finally(() => { if (!cancelled) setLoadingLabels(false); });
+    return () => { cancelled = true; };
+  }, [story.id, orgSyncVersion]);
 
   // description/AC 본문의 entity: 링크 유령 판정용 outgoing 참조 목록. ChatProofSection과
   // 같은 엔드포인트(GET /{id}/references?direction=outgoing)를 재사용한다(전용 라우트
@@ -496,7 +507,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       })
       .catch(() => { /* undefined 유지 — 유령/치환 판정 보류 */ });
     return () => { cancelled = true; };
-  }, [story.id]);
+  }, [story.id, orgSyncVersion]);
 
   const handleAttachLabel = async (labelId: string) => {
     if (storyLabels.some((l) => l.id === labelId)) return;
@@ -674,16 +685,19 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   };
 
   useEffect(() => {
+    let cancelled = false;
     setLoadingDeps(true);
     fetch(`/api/dependencies?item_type=story&item_id=${story.id}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((json) => {
+        if (cancelled) return;
         const raw = Array.isArray(json) ? json : [];
         setDeps(raw as DependencyEdge[]);
       })
       .catch(() => {})
-      .finally(() => setLoadingDeps(false));
-  }, [story.id]);
+      .finally(() => { if (!cancelled) setLoadingDeps(false); });
+    return () => { cancelled = true; };
+  }, [story.id, orgSyncVersion]);
 
   // P0-04 in-flight 신뢰 칩 — StoryMergeGate와 동형 데이터소스(work_item_id 필터, BE 추가 0).
   useEffect(() => {
@@ -693,7 +707,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
       .then((gates) => { if (!cancelled) setChipGates(Array.isArray(gates) ? gates : []); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [story.id]);
+  }, [story.id, orgSyncVersion]);
 
   // Keep the locally-displayed status synced when a different story is selected or the
   // board pushes an external update. Optimistic in-panel changes set it directly (handler),
@@ -939,12 +953,15 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
   // Fetch comments
   useEffect(() => {
+    let cancelled = false;
     async function fetchComments() {
       setLoadingComments(true);
       try {
         const res = await fetch(`/api/stories/${story.id}/comments?limit=20`);
+        if (cancelled) return;
         if (res.ok) {
           const json = await res.json();
+          if (cancelled) return;
           setComments(json.data ?? []);
           // story #2230: BE meta 필드는 snake_case(next_cursor) — camelCase 로 읽어 항상
           // undefined였던 것이 커서가 죽어 보이던 세 번째 원인(BE 미반영·프록시 이중포장과 직렬).
@@ -952,22 +969,26 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
           setNextCommentsCursor(parseCursorMeta(json.meta, 'story-detail-panel:comments').nextCursor);
         }
       } catch {
-        setComments([]);
+        if (!cancelled) setComments([]);
       } finally {
-        setLoadingComments(false);
+        if (!cancelled) setLoadingComments(false);
       }
     }
     void fetchComments();
-  }, [story.id]);
+    return () => { cancelled = true; };
+  }, [story.id, orgSyncVersion]);
 
   // Fetch activities
   useEffect(() => {
+    let cancelled = false;
     async function fetchActivities() {
       setLoadingActivities(true);
       try {
         const res = await fetch(`/api/stories/${story.id}/activities?limit=20`);
+        if (cancelled) return;
         if (res.ok) {
           const json = await res.json();
+          if (cancelled) return;
           setActivities(json.data ?? []);
           // story #2231 AC4: BE list_activities는 아직 cursor를 안 낸다(CAPPED-NO-NEXT-PAGE) —
           // 지금은 meta가 없어 "더 없음"으로 낙하하는 게 맞지만, 조용히가 아니라 console.error로
@@ -975,13 +996,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
           setNextActivitiesCursor(parseCursorMeta(json.meta, 'story-detail-panel:activities').nextCursor);
         }
       } catch {
-        setActivities([]);
+        if (!cancelled) setActivities([]);
       } finally {
-        setLoadingActivities(false);
+        if (!cancelled) setLoadingActivities(false);
       }
     }
     void fetchActivities();
-  }, [story.id]);
+    return () => { cancelled = true; };
+  }, [story.id, orgSyncVersion]);
 
   // ESC 키로 닫기
   useEffect(() => {
@@ -1598,7 +1620,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                       ))}
                     </div>
                   ) : (
-                    <p className="mb-2 text-xs text-muted-foreground/60">라벨 없음</p>
+                    <p className="mb-2 text-xs text-muted-foreground">라벨 없음</p>
                   )}
 
                   {showLabelPicker && (
@@ -1685,7 +1707,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                 });
                 if (incompletePreds.length === 0) return null;
                 return (
-                  <div className="mb-2 flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-warning">
+                  <div className="mb-2 flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-foreground">
                     <AlertTriangle className="size-3 shrink-0" />
                     <span>{t('dep.incompletePreds', { count: incompletePreds.length })}</span>
                   </div>
@@ -1712,7 +1734,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   {deps.filter((d) => d.dep_type === 'blocks' && d.to_id === story.id).map((d) => {
                     const blocker = storyMap[d.from_id];
                     return (
-                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-warning">
+                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-foreground">
                         <button type="button" onClick={() => onNavigate?.(d.from_id)} className="flex min-w-0 flex-1 items-center gap-2 text-left" disabled={!onNavigate}>
                           <AlertTriangle className="size-3 shrink-0" />
                           <span className="font-medium shrink-0">Blocked by</span>

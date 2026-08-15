@@ -278,6 +278,19 @@ class StoryResponse(BaseModel):
         # (_coerce_attachments 와 동형). 실제 flag 는 라우터가 model_validate 後 dict 로 할당한다.
         return v if isinstance(v, dict) else None
 
+    # story #2532(E-FLOW-V4 S2): 「가설 OR 목표 매달림」 신호(positive 단방향 — has_evidence와
+    # 동형 규율). epic_id 존재 OR hypothesis_story_links 존재 시에만 True, 그 외엔 미설정
+    # (기본값 None 유지 — False 절대 안 씀). ORM 컬럼 아님·라우터가 model_validate 前 transient
+    # attr로 세팅(_attach_has_hypothesis_or_goal, has_evidence 패턴 동형). v4 조직원리(doc
+    # flow-board-v4-hypothesis-scale §4-1)의 「미매달림」 판정 SSOT — FE가 이 필드로 지도·추천·
+    # 서사에서 뺄지 판단한다(block 아님, 자연 유도).
+    has_hypothesis_or_goal: bool | None = None
+
+    @field_validator("has_hypothesis_or_goal", mode="before")
+    @classmethod
+    def _coerce_has_hypothesis_or_goal(cls, v):
+        return v if isinstance(v, bool) else None
+
     # E-VERIFY V0-S2(story 3fbd048d): evidence-backed 신호(positive 단방향) — True(있음) 또는
     # None(신호 부재, violation과 동형 — 부정값 False 절대 안 씀). ORM 컬럼 아님·라우터가
     # model_validate 前 transient attr로 세팅(assignee_ids 패턴 동형).
@@ -312,6 +325,19 @@ class StoryResponse(BaseModel):
     def _coerce_human_verified_at(cls, v):
         return v if isinstance(v, datetime) else None
 
+    # story #2642(웹·칩 공통, 2026-08-14) — 엔티티 «전체 보기» 착지가 뷰어의 현재 프로젝트로
+    # 새는 버그 fix: FE가 뷰어 컨텍스트 대신 이 스토리 자신의 org/project로 직행 URL을 짓게
+    # additive로 싣는다(#2168 DocPreviewResponse와 동일 패턴). org_slug는 항상 있음(Organization.
+    # slug NOT NULL)·project_slug는 nullable(Project.slug 미백필 행 존재, #2039). ORM 컬럼
+    # 아님 — 라우터가 model_validate 前 transient attr로 세팅(has_evidence 패턴 동형).
+    org_slug: str | None = None
+    project_slug: str | None = None
+
+    @field_validator("org_slug", "project_slug", mode="before")
+    @classmethod
+    def _coerce_slug_fields(cls, v):
+        return v if isinstance(v, str) else None
+
     # story #2282(E-CONNECT) AC1/AC2: 이 story를 가리키는 참조 토큰 — DocResponse와 동일
     # 단일 builder 재사용(app.services.reference_token.build_reference_token).
     @computed_field  # type: ignore[prop-decorator]
@@ -342,3 +368,20 @@ class StoryResponse(BaseModel):
     def next_action_category(self) -> str | None:
         from app.services.next_action import next_action_category
         return next_action_category(self.next_action_code)
+
+
+# story #2532(E-FLOW-V4 S2): GET /{id}/attachment-suggestions 응답 모형.
+
+
+class AttachmentCandidate(BaseModel):
+    id: uuid.UUID
+    # goal이면 title, hypothesis면 statement — 후보 카드에 바로 보여줄 텍스트.
+    text: str
+    score: int
+
+
+class AttachmentSuggestionResponse(BaseModel):
+    # fix/infra→goal · 실험/검증→hypothesis · 매치 없거나 둘 다 매치→ambiguous(양성대조: 둘 다 채움).
+    suggested_type: str
+    goal_candidates: list[AttachmentCandidate] = []
+    hypothesis_candidates: list[AttachmentCandidate] = []

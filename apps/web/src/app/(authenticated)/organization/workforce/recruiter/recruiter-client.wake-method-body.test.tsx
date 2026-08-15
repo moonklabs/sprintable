@@ -40,45 +40,92 @@ afterEach(async () => {
 });
 
 describe('WakeMethodBody (story #2434) — path가 실제로 DOM에 렌더되는지', () => {
-  it('ko channel-plugin: path 문자열이 DOM 텍스트로 실제 존재한다(빈 괄호 회귀가드)', async () => {
+  // story #2648(PO 08-14 확定 (b)) — channel-plugin은 예외로 뒤집혔다: packages/fakechat
+  // 내부 경로가 «비-actionable»(같은 문장이 "받는 경로는 아직 제공하지 않습니다"라고
+  // 이미 말한다)인데도 사용자 표면에 그대로 샜던 것 — 이제 path를 안 보여준다(빈 괄호
+  // 대신 자연스러운 문장으로). 형제 3종(connector-host 등)은 무변경 — 아래 별도 테스트.
+  it('ko channel-plugin: packages/fakechat 내부 경로가 더는 안 보인다(story #2648)', async () => {
     await act(async () => {
       root.render(wrap('ko', <WakeMethodBody method="channel-plugin" path="packages/fakechat" />));
     });
-    expect(container.textContent).toContain('packages/fakechat');
-    expect(container.textContent).not.toContain('()'); // 빈 괄호로 퇴행하면 여기 걸린다
+    expect(container.textContent).not.toContain('fakechat');
+    expect(container.textContent).not.toContain('()');
+    expect(container.textContent).toContain('채널 플러그인');
   });
 
-  it('ko connector-host: path 문자열이 DOM 텍스트로 실제 존재한다', async () => {
+  // story #2652(유나 design 게이트 소견, 2026-08-14) — #2648 Part1에서 channel-plugin만
+  // 빠졌던 통일을 형제 3종까지 마저 적용: connectors/codex-sprintable/ 같은 모노레포
+  // 내부 경로가 "받는 경로는 아직 제공하지 않습니다" 옆에 자기모순으로 노출되던 것을 제거.
+  it('ko connector-host: 내부 경로가 더는 안 보인다(story #2652)', async () => {
     await act(async () => {
       root.render(wrap('ko', <WakeMethodBody method="connector-host" path="connectors/codex-sprintable/" />));
     });
-    expect(container.textContent).toContain('connectors/codex-sprintable/');
+    expect(container.textContent).not.toContain('connectors/codex-sprintable/');
     expect(container.textContent).not.toContain('()');
+    expect(container.textContent).toContain('커넥터 호스트');
+    expect(container.querySelector('span.font-mono')).toBeNull();
   });
 
-  it('en channel-plugin: path 문자열이 DOM 텍스트로 실제 존재한다', async () => {
+  it('en channel-plugin: packages/fakechat 내부 경로가 더는 안 보인다(story #2648)', async () => {
     await act(async () => {
       root.render(wrap('en', <WakeMethodBody method="channel-plugin" path="packages/fakechat" />));
     });
-    expect(container.textContent).toContain('packages/fakechat');
+    expect(container.textContent).not.toContain('fakechat');
     expect(container.textContent).not.toContain('()');
+    expect(container.textContent).toContain('channel plugin');
   });
 
-  it('en connector-host: path 문자열이 DOM 텍스트로 실제 존재한다', async () => {
+  it('en connector-host: 내부 경로가 더는 안 보인다(story #2652)', async () => {
     await act(async () => {
       root.render(wrap('en', <WakeMethodBody method="connector-host" path="connectors/codex-sprintable/" />));
     });
-    expect(container.textContent).toContain('connectors/codex-sprintable/');
+    expect(container.textContent).not.toContain('connectors/codex-sprintable/');
+    expect(container.textContent).not.toContain('()');
+    expect(container.querySelector('span.font-mono')).toBeNull();
+  });
+
+  it('ko connector-sidecar: 내부 경로가 더는 안 보인다(story #2652)', async () => {
+    await act(async () => {
+      root.render(wrap('ko', <WakeMethodBody method="connector-sidecar" path="connectors/cloud-agent-sidecar/" />));
+    });
+    expect(container.textContent).not.toContain('connectors/cloud-agent-sidecar/');
+    expect(container.textContent).not.toContain('()');
+    expect(container.textContent).toContain('사이드카');
+    expect(container.querySelector('span.font-mono')).toBeNull();
+  });
+
+  it('ko connector-sdk: 내부 경로가 더는 안 보인다(story #2652)', async () => {
+    await act(async () => {
+      root.render(wrap('ko', <WakeMethodBody method="connector-sdk" path="packages/reference-sdk/" />));
+    });
+    expect(container.textContent).not.toContain('packages/reference-sdk/');
+    expect(container.textContent).not.toContain('()');
+    expect(container.textContent).toContain('참조 SDK');
+    expect(container.querySelector('span.font-mono')).toBeNull();
+  });
+
+  // story #2653(2026-08-14) — claude-code만은 #2648/#2652가 걷어낸 "비-actionable 내부
+  // 경로"가 아니라 실제로 사용자가 실행 가능한 설치 명령을 갖는다(마켓플레이스 add→install
+  // 실왕복 실측 완료). 그래서 형제들과 반대로 여기서는 path가 «보여야» 한다 — 별도 method
+  // ('channel-plugin-marketplace')로 가른 이유가 바로 이 비대칭.
+  it('ko channel-plugin-marketplace: 설치 명령이 DOM에 실재하고 "아직 제공하지 않습니다" 문구가 안 섞인다', async () => {
+    const installCmd = 'claude plugin marketplace add moonklabs/sprintable-agent-plugins && claude plugin install sprintable@moonklabs';
+    await act(async () => {
+      root.render(wrap('ko', <WakeMethodBody method="channel-plugin-marketplace" path={installCmd} />));
+    });
+    expect(container.textContent).toContain(installCmd);
+    expect(container.textContent).not.toContain('아직 제공하지 않습니다');
     expect(container.textContent).not.toContain('()');
   });
 
-  it('path는 명령 대상이 아니라 이름으로 강등된다 — 링크 색·밑줄 클래스가 없다', async () => {
+  it('en channel-plugin-marketplace: 설치 명령이 DOM에 실재하고 "not yet" 문구가 안 섞인다', async () => {
+    const installCmd = 'claude plugin marketplace add moonklabs/sprintable-agent-plugins && claude plugin install sprintable@moonklabs';
     await act(async () => {
-      root.render(wrap('ko', <WakeMethodBody method="connector-host" path="connectors/codex-sprintable/" />));
+      root.render(wrap('en', <WakeMethodBody method="channel-plugin-marketplace" path={installCmd} />));
     });
-    const code = container.querySelector('span.font-mono');
-    expect(code?.textContent).toBe('connectors/codex-sprintable/');
-    expect(code?.className).not.toMatch(/text-info|underline/);
+    expect(container.textContent).toContain(installCmd);
+    expect(container.textContent).not.toContain("don't publish a way to obtain it yet");
+    expect(container.textContent).not.toContain('()');
   });
 
   it('unknown은 t.rich를 안 쓰고 plain 문구를 보여준다(path 태그 없음)', async () => {

@@ -1,0 +1,503 @@
+# Sprintable Connect Guide — Attach your agent to the team
+
+Connect an agent runtime you already use (Claude Code, Codex, Cursor, Gemini, etc.)
+to your Sprintable team. There are three steps, and **the agent will not move until
+all three are done.**
+
+> This document is for the person doing the *connecting*.
+> If you're a developer *building* a new adapter, see `onboarding-guide.txt`
+> (BYOA Agent Onboarding) instead.
+
+---
+
+## 0. Prep — one API key
+
+Issue it from the screen.
+
+```
+Organization → Workforce → the agent → API Key
+(or Organization → Workforce → API Keys)
+```
+
+The issued key is **shown only once, at that moment.** Copy it now.
+
+---
+
+## 1. Connect — register as an MCP server
+
+This lets the agent use Sprintable's tools (read tasks, comment, change status, etc.).
+
+```bash
+# Codex — the command actually verified end-to-end (hosted MCP, no local process)
+codex mcp add sprintable-mcp --url https://mcp.sprintable.ai/mcp --bearer-token-env-var SPRINTABLE_API_KEY
+export SPRINTABLE_API_KEY=<the key issued in step 0>   # codex mcp reads this env var directly
+```
+
+> Why the registration name is `sprintable-mcp`: the Claude Code channel plugin uses a
+> separate MCP server (`sprintable-channel`) — if the names collided you couldn't tell
+> them apart in `/mcp` listings or logs (#2577). Every example in this document uses the
+> post-rename name.
+
+You can confirm the registration with `codex mcp get sprintable-mcp`
+(`transport: streamable_http`). No clone, no local process to run — only if you're
+self-hosting your own backend do you point `uvx sprintable` (below, same pattern as
+other runtimes) at it.
+
+**Other runtimes each register MCP servers differently.** Follow that runtime's own
+docs, but if you're on SaaS the values you register are the same three — the run
+command `uvx sprintable`, plus two environment variables.
+
+```json
+{
+  "mcpServers": {
+    "sprintable-mcp": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["sprintable"],
+      "env": {
+        "SPRINTABLE_API_URL": "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app",
+        "AGENT_GATEWAY_V2": "1",
+        "AGENT_API_KEY": "<the key issued in step 0>"
+      }
+    }
+  }
+}
+```
+
+**`SPRINTABLE_API_URL` is the backend address**, not the app domain — SSE connections
+get cut at the proxy layer, so you need to connect to the backend directly.
+
+**Don't skip `AGENT_GATEWAY_V2`.** Without it you connect to the old gateway — tools
+show up, but no messages arrive.
+
+> **The safest route is to use the `.mcp.json` the screen issues for you as-is.**
+> The example above just shows the shape — whatever the screen gives you is always
+> correct.
+>
+> `uvx sprintable` runs the MCP server as a **local process** — the backend it talks to
+> is set by `SPRINTABLE_API_URL`, and it can point at a local self-host or a remote
+> hosted backend either way. Either way, using the config the screen gives you is the
+> most reliable option.
+
+---
+
+## 2. ⭐Wake — actually start the session
+
+**Step 1 alone does not wake the agent.**
+
+MCP is "the road the agent takes to call Sprintable." The opposite direction — a
+message *from* Sprintable actually *starting a session* — is separate, and that's
+what this step does.
+
+The method differs per runtime.
+
+| Runtime | Mechanism | What to run |
+|---|---|---|
+| Claude Code | Channel plugin | `sprintable@moonklabs` (official `/plugin install`) |
+| Codex | Channel plugin | `sprintable-codex@moonklabs` (official `codex plugin add`) |
+| Grok | Channel plugin | `sprintable-grok@moonklabs` (official `grok plugin install --trust`) |
+| Gemini | Channel extension | `gemini extensions install https://github.com/moonklabs/sprintable-gemini` |
+| Hermes | Platform plugin | `hermes plugins install moonklabs/sprintable/connectors/hermes-sprintable --enable` |
+| OpenClaw | Channel plugin | `openclaw plugins install npm:openclaw-sprintable` |
+| OpenCode | Channel plugin | `opencode plugin opencode-sprintable` |
+| Pi | — | Support in progress — no official install path yet |
+| Cursor | — | Support in progress — no official install path yet |
+| Other | Direct integration | `connectors/sdk/` |
+
+**Channel plugins/extensions** need separate pairing (installing hooks/extensions) —
+MCP alone doesn't start a session. The sections below give the exact per-runtime steps.
+
+The ②"Wake" panel on the recruiting-complete screen shows the same content per runtime.
+
+**Claude Code, Codex, Grok, Gemini, Hermes, OpenClaw, and OpenCode have an official
+install path** — follow the section below for each and this step is done.
+**Pi and Cursor don't have one yet** — Pi is preparing a new in-process extension
+(pre-merge, pre-npm-publish), and Cursor's zero-install (key-registration-only)
+server-side integration has only reached the design-spike stage — there's no command
+to run for either right now. Sections will be added here for both once they're ready
+— don't attempt them yet.
+
+### Claude Code — real-time channel connection (official plugin install)
+
+Install Sprintable's Claude Code channel plugin **officially**. You no longer need to
+hand-edit another plugin's files the way you used to — one `/plugin install` is enough.
+
+**1) Add the marketplace + install the plugin** (inside Claude Code)
+
+```
+/plugin marketplace add moonklabs/sprintable-agent-plugins
+/plugin install sprintable@moonklabs
+```
+
+**2) Set the API key**
+
+```
+/sprintable:configure <the key issued in step 0>
+```
+
+The key is stored in `~/.claude/channels/sprintable/.env`. **If you omit the second
+argument you connect to SaaS** (`https://app.sprintable.ai`) — to connect to a dev or
+self-hosted backend, you must pass that URL too:
+
+```
+/sprintable:configure <the key issued in step 0> https://sprintable-backend-dev-57iommnikq-du.a.run.app
+```
+
+**3) Run with the channel enabled**
+
+```bash
+claude --dangerously-load-development-channels plugin:sprintable@moonklabs
+```
+
+> **Why `--dangerously-load-development-channels` is needed** — a channel plugin can
+> "inject" messages into a session, so Claude Code only auto-trusts channel plugins from
+> Anthropic's official marketplace (`claude-plugins-official`) with `--channels`. The
+> Sprintable plugin is a third-party channel installed from our marketplace
+> (`moonklabs`), so right now it needs to be loaded explicitly with this flag.
+>
+> ⚠️ **Note — this flag exists so Claude Code can warn you: "this is for local channel
+> development, don't use it for channels pulled from the internet."** The Sprintable
+> plugin *is* a channel "pulled from the internet," so only use this flag **once you
+> trust the Sprintable plugin**. Its code is public
+> (`github.com/moonklabs/sprintable-agent-plugins`) — you can review it before
+> installing. Using this flag brings up a confirmation dialog at session start; check
+> the repo above and approve it.
+
+**If you're on an individual/Pro or Max plan (no org admin console) — this flag is
+the normal path, not a rejection.** Despite the scary-sounding name, this is the
+actual procedure Claude Code requires for loading a non-`claude-plugins-official`
+channel plugin from a personal account — it's the officially documented flag for
+"testing a custom channel" (`code.claude.com/docs/en/channels-reference` —
+"Test during the research preview"). **Seeing this flag doesn't mean you were refused
+or that you're doing something dangerous** — one trust-confirmation dialog and you're
+through.
+
+**If you're on a managed org (Team/Enterprise) — you can connect without the flag.**
+If your org admin registers `allowedChannelPlugins` in managed settings
+(`managed-settings.json` or the admin console) like this, members of the org can
+connect with the flag-free `claude --channels plugin:sprintable@moonklabs` directly:
+
+```json
+{
+  "channelsEnabled": true,
+  "allowedChannelPlugins": [
+    { "marketplace": "moonklabs", "plugin": "sprintable" }
+  ]
+}
+```
+
+(The flag-free `--channels` path isn't gated solely on Anthropic's official
+marketplace listing — this org-admin registration opens it too, right now, without
+waiting for that listing. Registering it requires org admin permissions.)
+
+The adapter works as an SSE dial-out — it consumes the gateway's SSE
+(`GET /api/v2/agent/stream`) outbound, injects chat messages into the session as
+`<channel source="sprintable">` blocks, and sends replies via the `reply` tool →
+`POST /api/v2/conversations/{id}/messages`. With no key set, it doesn't open the SSE
+connection and quietly stays idle (`SSE disabled`).
+
+> Since this is an official install, updating the plugin with `/plugin update`
+> **never requires touching the files again.**
+
+### Codex — real-time channel connection (official plugin install)
+
+Install Sprintable's Codex channel plugin **officially**. No need to clone a repo
+locally or run a script yourself — two commands is all it takes.
+
+**1) Add the marketplace + install the plugin** (in your terminal)
+
+```bash
+codex plugin marketplace add moonklabs/sprintable-agent-plugins
+codex plugin add sprintable-codex@moonklabs
+```
+
+**2) Set the API key**
+
+```
+/sprintable:configure <the key issued in step 0>
+```
+
+**If you omit the second argument you connect to SaaS** (`https://app.sprintable.ai`)
+— to connect to a dev or self-hosted backend, pass that URL too.
+
+The key's storage location, in priority order: `$SPRINTABLE_STATE_DIR/.env` (if set,
+only that — no automatic fallback) → `<project path>/.sprintable/.env` (if present) →
+`$CODEX_HOME/sprintable/.env` (the default; `$CODEX_HOME` is usually `~/.codex`). If
+you already run multiple Codex agents on one machine with separate `CODEX_HOME`
+values, isolation happens automatically — nothing extra to do.
+
+**3) Run `codex` as normal**
+
+No extra flags needed — run `codex` the way you always do.
+
+> **The first time, a hook-trust approval prompt appears.** This plugin uses Codex's
+> hooks feature (`SessionStart`/`Stop`/`UserPromptSubmit`) to "inject" messages into
+> the session — Codex asks whether to trust a plugin's hooks before running them for
+> the first time. The plugin's code is public
+> (`github.com/moonklabs/sprintable-agent-plugins`) — you can review it before
+> approving. Once approved, it won't ask again.
+>
+> ⚠️ **Hooks are a relatively new feature on the Codex side too.** This channel has
+> been round-trip verified in real sessions (both headless and interactive TUI,
+> E-CODEX-CHANNEL S1/S2), but Codex CLI's own hooks support surface hasn't broadly
+> settled yet — behavior may vary by Codex version.
+
+> **MCP tools need separate authentication.** The key `/sprintable:configure` above
+> saves is only read by the *channel* (the hooks scripts). To also use Sprintable's
+> MCP tools (reading tasks, commenting, etc.), you need to expose the same key as an
+> environment variable on the Codex process itself:
+> ```bash
+> export SPRINTABLE_API_KEY=<the key issued in step 0>
+> ```
+> The channel (message round-trip) works fine without exposing it — these are two
+> separate paths.
+
+The channel works by having the `SessionStart` hook launch a background SSE listener
+(`GET /api/v2/agent/stream`), the `Stop` hook check the queue at the end of every turn
+and merge any pending messages into a single injection for the next turn, and send the
+reply back via `POST /api/v2/conversations/{id}/messages`. With no key set, every hook
+quietly does nothing — no effect on your existing Codex usage.
+
+### Grok Build — real-time channel connection (official plugin install)
+
+This is a direct port of the Codex channel plugin's structure (same Stop-hook
+injection pattern). No local clone or script to run — two commands and you're done.
+
+**1) Add the marketplace + install the plugin** (in your terminal)
+
+```bash
+grok plugin marketplace add moonklabs/sprintable-agent-plugins
+grok plugin install sprintable-grok --trust
+```
+
+`--trust` is required — without it, Grok shows you the plugin source and stops
+(installs that enable hooks/MCP/skills require confirmation first).
+
+**2) Set the API key**
+
+```
+/sprintable-grok:configure <the key issued in step 0>
+```
+
+> **Don't use bare `/sprintable:configure` (without the plugin name).** If the same
+> machine also has the Claude Code `sprintable` plugin installed, there are two
+> `configure` skills with the same name, and it becomes ambiguous which one Grok
+> runs — there's a real case of a key ending up written to the Claude plugin's
+> credential file by mistake. Always use the full `<plugin>:<skill>` name, like
+> `sprintable-grok:configure`.
+
+If you omit the second argument you connect to SaaS (`https://app.sprintable.ai`).
+
+**3) Run `grok` as normal**
+
+No extra flags needed.
+
+> **8-continuation cap.** Grok allows a `Stop` hook's block/feedback at most 8 times
+> per turn before force-ending the turn. This plugin merges every pending message into
+> a single block (not one per message), so hitting this cap in practice is rare.
+>
+> **The free tier's usage window is much narrower than a day.** Live measurement
+> (2026-08-12): right after one successful reply, the same usage limit was hit again
+> only ~5-6 minutes later — the channel itself (SSE→queue→inject→reply) worked
+> correctly up to the model API call boundary; the block was the Grok model call
+> itself (outside the plugin). On the free tier, expect Sprintable-triggered runs to
+> compete for the same shallow budget as your own interactive usage.
+
+Full details (marketplace structure, hook-discovery workaround, troubleshooting):
+[`moonklabs/sprintable-agent-plugins/plugins/sprintable-grok/README.md`](https://github.com/moonklabs/sprintable-agent-plugins/blob/main/plugins/sprintable-grok/README.md).
+
+### Gemini CLI — real-time channel connection (official extension install)
+
+**1) Install the extension** (in your terminal)
+
+```bash
+gemini extensions install https://github.com/moonklabs/sprintable-gemini
+```
+
+One command does it all — it fetches the extension, prompts for your Sprintable API
+key and stores it **in the OS keychain** (not a plaintext file), and installs the
+bundled MCP server alongside it. A second argument can set the API URL (SaaS if
+omitted).
+
+**2) To reconfigure**
+
+```bash
+gemini extensions config sprintable
+```
+
+**3) Run `gemini` as normal**
+
+No extra flags needed.
+
+> **Gemini CLI doesn't support per-agent home directory isolation** — `~/.gemini` is
+> fixed (there's no equivalent to Codex's `CODEX_HOME` or Grok's `GROK_HOME`). If you
+> connect multiple Sprintable-linked Gemini agents on one machine, they share the same
+> OS keychain entry and extension config — `SPRINTABLE_STATE_DIR` can isolate just the
+> queue/log state, but there's currently no way to isolate the credential itself
+> per-agent.
+>
+> **Removing the extension does not kill the background listener process** — Gemini
+> CLI has no on-uninstall hook (confirmed live). Kill it yourself:
+> ```bash
+> pkill -f 'sprintable-gemini.*scripts/listener.py'
+> ```
+
+Full details (design rationale, source cross-check record): [`moonklabs/sprintable-gemini/README.md`](https://github.com/moonklabs/sprintable-gemini/blob/main/README.md).
+
+### Hermes Agent — real-time channel connection (official plugin install)
+
+**Requires Hermes ≥ v0.13.0** (the plugin registry's `env_enablement_fn`/
+`home_channel` promotion hooks). This repo is public, so it installs directly with no
+clone needed.
+
+**1) Install + enable the plugin**
+
+```bash
+hermes plugins install moonklabs/sprintable/connectors/hermes-sprintable --enable
+```
+
+The name is `plugin.yaml`'s `name:` (`sprintable-platform`), not the folder name
+(`sprintable`) — forgetting `--enable`, or enabling under a different name, silently
+no-ops.
+
+**2) Set the API key**
+
+```bash
+export AGENT_API_KEY=sk_live_...
+```
+
+To connect to a dev/self-hosted backend, also set `SPRINTABLE_API_URL` (SaaS is the
+default). To let multiple agents receive the same message, leave
+`SPRINTABLE_ALLOWED_USERS` unset — setting it means every sender outside that list
+gets ignored.
+
+**3) Restart the gateway**
+
+```bash
+hermes gateway restart
+```
+
+**Confirming (a real "it's connected" test)** — in `~/.hermes/gateway.log`, in order:
+`dial-out …/api/v2/agent/stream` → `stream open` → (send a test message) →
+`inbound seq=N` → send one reply → `ack seq=N`. After a restart, a message that was
+already acked must not be re-injected.
+
+> **If the first message on a fresh install profile gets blocked as "Unauthorized
+> user"** — that's the default sender policy (pairing, deny-before-approval). Either
+> bypass it with `SPRINTABLE_ALLOW_ALL_USERS=1` (this plugin only) or
+> `GATEWAY_ALLOW_ALL_USERS=true` (the whole gateway), or approve the sender via
+> pairing. If inbound/ack logs look normal but no reply ever arrives, this is the most
+> likely cause.
+
+Full details (env groups, running dev/prod side by side, troubleshooting):
+[`connectors/hermes-sprintable/README.md`](https://github.com/moonklabs/sprintable/blob/develop/connectors/hermes-sprintable/README.md).
+
+### OpenClaw — real-time channel connection (official plugin install)
+
+**1) Install the plugin**
+
+```bash
+openclaw plugins install npm:openclaw-sprintable
+```
+
+**2) Restart the gateway** (install alone doesn't start serving)
+
+```bash
+openclaw daemon restart   # or: openclaw restart (depending on your setup)
+```
+
+**3) Confirm it's loaded and serving** (install succeeding ≠ serving)
+
+```bash
+openclaw plugins inspect sprintable --runtime
+```
+
+**4) Set the API key** — in `~/.openclaw/openclaw.json`:
+
+```json
+{
+  "channels": {
+    "sprintable": {
+      "enabled": true,
+      "apiKey": "<the key issued in step 0>",
+      "apiUrl": "https://app.sprintable.ai"
+    }
+  }
+}
+```
+
+Can also be set via environment variables (`SPRINTABLE_API_KEY`/`AGENT_API_KEY`,
+`SPRINTABLE_API_URL`) — if both are set, the config file wins.
+
+Full details: [`connectors/openclaw-sprintable/README.md`](https://github.com/moonklabs/sprintable/blob/develop/connectors/openclaw-sprintable/README.md).
+
+### OpenCode — real-time channel connection (official plugin install)
+
+**1) Install the plugin**
+
+```bash
+opencode plugin opencode-sprintable
+```
+
+One command — OpenCode fetches the npm package (Bun auto-installs it on next launch)
+and updates the plugin config in `opencode.json`/`opencode.jsonc`. No hand-editing
+`package.json` or symlinking required.
+
+**2) Set the API key** — before running `opencode`:
+
+```bash
+export AGENT_API_KEY=<the key issued in step 0>
+export SPRINTABLE_API_URL=https://...     # omit for SaaS
+```
+
+With no key, the plugin loads but does nothing (no error) — it's safe to install
+before setting up credentials.
+
+> **Lifetime = the OpenCode process.** The SSE connection stays open only while the
+> OpenCode process that loaded the plugin is alive — there's no separate daemon.
+> Messages that arrive in the meantime are recovered via backfill the next time a
+> session starts (nothing is lost, but real-time delivery is only guaranteed while
+> the process is running).
+
+Full details: [`connectors/opencode-sprintable/README.md`](https://github.com/moonklabs/sprintable/blob/develop/connectors/opencode-sprintable/README.md).
+
+---
+
+## 3. Instruct — tell the agent what it's doing
+
+Hand the agent the `SPRINTABLE_ONBOARDING.md` you got from the recruiting-complete
+screen. Depending on the runtime, put it in `CLAUDE.md` / `AGENTS.md` / `GEMINI.md`.
+
+---
+
+## ⚠️ How do you know it worked
+
+**"Added" or `enabled: true` means step 1 is done — not that the agent is awake.**
+
+```bash
+codex mcp get sprintable-mcp   # → enabled: true   ← only confirms step 1
+```
+
+How to actually check:
+
+1. Message that agent from Sprintable chat.
+2. If an agent session **starts on its own**, step 2 is done too.
+3. If nothing happens, **step 2 isn't done** — don't re-check the MCP config, check
+   ②"Wake" instead.
+
+## ⚠️ When it doesn't work
+
+| Symptom | Where to look |
+|---|---|
+| `uvx sprintable` doesn't run | Is `uv` installed? · the package name is `sprintable` |
+| Tools show up but the session never wakes | **Step 2** — MCP isn't the problem |
+| Auth error | Is `AGENT_API_KEY` the right agent's key? · keys are per-agent |
+| Connection keeps dropping | Is `SPRINTABLE_API_URL` the backend address, not the app domain? |
+| Codex: channel (message round-trip) works, but Sprintable MCP tool calls fail with `AuthRequired` | Did you export `SPRINTABLE_API_KEY` as an environment variable on the Codex process itself? — separate from the `.env` file path |
+| Grok: `/sprintable:configure` wrote to the wrong place (the Claude plugin's credential file) | Did you use the explicit `/sprintable-grok:configure` instead of the nameless `configure`? |
+| Hermes: inbound/ack logs look normal but no reply arrives, `Unauthorized user` warning | This profile's sender allowlist (default pairing/deny) — needs `GATEWAY_ALLOW_ALL_USERS=true` or pairing approval |
+
+---
+
+If something not covered here blocks you, paste it straight into the team channel.
+This document evolves by following wherever people get stuck.

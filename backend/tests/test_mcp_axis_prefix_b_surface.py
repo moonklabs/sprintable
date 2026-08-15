@@ -72,6 +72,9 @@ def test_tool_names_and_param_models_untouched():
     (D단계): sprintable_add_judgment/list_judgments 2종 신설(판단 칸 pull 진입점) — 112→114.
     story #2268(C-10): sprintable_get_session_context 1종 신설(세션 시작 컨텍스트 MCP 노출) —
     114→115. story #2597(E-AGENT-ONBOARD·A2A발견 P0-1): sprintable_list_agent_cards 1종
-    신설(A2A AgentCard 발견) — 115→116."""
-    assert len(_TOOL_DEFS) == 116
+    신설(A2A AgentCard 발견) — 115→116. story #2634: sprintable_publish_event/
+    sprintable_list_event_definitions 2종 신설(이벤트 레지스트리 발행/카탈로그) — 116→118.
+    story #2636: sprintable_register_event_definition/sprintable_update_event_definition
+    2종 신설(org 커스텀 이벤트 등록/수정) — 118→120."""
+    assert len(_TOOL_DEFS) == 120
     assert all(name.startswith("sprintable_") for name in _TOOLS)

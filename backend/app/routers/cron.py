@@ -645,6 +645,32 @@ async def embed_backfill_cron(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── POST /api/v2/internal/cron/unattached-snapshot ────────────────────────────
+
+@router.post("/unattached-snapshot")
+async def unattached_snapshot_cron(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """story #2536(E-FLOW-V4 S4): 프로젝트별 unattached_count 일별 스냅샷 append.
+
+    v4 강제(S2, #2532)가 신규 story의 가설/목표 부착을 요구하므로 기존 미매달림 총량이
+    시간에 걸쳐 줄어야 하고, 그 추세(스파크라인)를 그리려면 시계열이 필요 — 이 cron이
+    매일 실행되며 그 시계열을 쌓는다. append-only(재실행해도 새 행만 추가, upsert 없음).
+    """
+    verify_cron(request)
+
+    from app.services.unattached_snapshot import compute_and_record_unattached_snapshots
+
+    try:
+        results = await compute_and_record_unattached_snapshots(session)
+        await session.commit()
+        return _ok({"projects": len(results), "results": results})
+    except Exception as exc:
+        logger.exception("unattached-snapshot cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── S8: storage capacity lifecycle crons ─────────────────────────────────────
 
 _ASSET_GRACE_DAYS = 7
@@ -871,4 +897,44 @@ async def db_connection_stats(
         return _ok({"rows": rows, "total": sum(r["count"] for r in rows)})
     except Exception as exc:
         logger.exception("db-connection-stats cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── GET /api/v2/internal/cron/toss-billing-maintenance ───────────────────────
+# 결제②-C3(story #2494): dunning 재시도(pricing-policy-proposal-v1 §12.1) + pending
+# 대사(reconciliation). "신규 결제 주기 도래" 트리거는 스코프 밖(story #2502 대기) —
+# billing_scheduler.trigger_due_charges()가 그 자리를 NotImplementedError로 명시해둔다.
+@router.get("/toss-billing-maintenance")
+async def toss_billing_maintenance(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.billing_scheduler import sweep_dunning_retries, sweep_stale_pending_orders
+
+        dunning_result = await sweep_dunning_retries(session)
+        reconciliation_result = await sweep_stale_pending_orders(session)
+        return _ok({"dunning": dunning_result, "reconciliation": reconciliation_result})
+    except Exception as exc:
+        logger.exception("toss-billing-maintenance cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── GET /api/v2/internal/cron/toss-daily-reconciliation ──────────────────────
+# 결제②-C4(story #2495): confirmed billing_orders가 실제로 Toss와 금액이 맞는지 재확認
+# (§2 step8) — C3의 sweep_stale_pending_orders(pending 축)와 짝인 별개 축이라 별도 잡.
+@router.get("/toss-daily-reconciliation")
+async def toss_daily_reconciliation(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.billing_reconciliation import daily_reconcile_confirmed_orders
+
+        result = await daily_reconcile_confirmed_orders(session)
+        return _ok(result)
+    except Exception as exc:
+        logger.exception("toss-daily-reconciliation cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)

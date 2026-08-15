@@ -224,7 +224,8 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string;
 
           {/* Moat framing — decision UX = 이 화면의 심장(handoff §2) */}
           {totalSlots > 0 && loop.status === 'deciding' ? (
-            <div className="rounded-lg border border-info-border bg-info-tint p-2.5 text-xs text-info">
+            // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+            <div className="rounded-lg border border-info-border bg-info-tint p-2.5 text-xs text-foreground">
               🧠 <span className="font-semibold">{t('moatFraming')}</span> — {t('moatFramingDesc')}
             </div>
           ) : null}
@@ -234,7 +235,9 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string;
             <p className="text-xs text-muted-foreground">{t('notDecidingNotice')}</p>
           ) : null}
           {totalSlots > 0 && loop.status === 'deciding' && !isHuman ? (
-            <div className="flex items-center gap-1.5 rounded-lg border border-warning-border bg-warning-tint px-2.5 py-2 text-xs text-warning">
+            // story #2590(TIER1) — tint 배경 위 계열색 글자는 text-foreground(#2420 규칙). 계열
+            // 정체성은 border-warning-border로 전달.
+            <div className="flex items-center gap-1.5 rounded-lg border border-warning-border bg-warning-tint px-2.5 py-2 text-xs text-foreground">
               <ShieldAlert className="size-3.5 shrink-0" aria-hidden />
               {t('humanOnlyNotice')}
             </div>

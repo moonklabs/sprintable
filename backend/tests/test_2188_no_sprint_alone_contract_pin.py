@@ -65,7 +65,9 @@ async def test_actual_behavior_no_sprint_without_project_id_falls_through_to_gen
     repo.org_id = "org-1"
     repo.session = MagicMock()
     repo.list_backlog = AsyncMock(side_effect=AssertionError("backlog 분기가 호출되면 안 됨"))
-    repo.list = AsyncMock(return_value=[])
+    # story #2537: repo.list()가 (stories, total) 튜플을 반환하도록 계약 변경(X-Total-Count
+    # 미설정 결함 fix) — 이 mock도 새 계약을 반영해야 언패킹이 안 깨진다.
+    repo.list = AsyncMock(return_value=([], 0))
 
     async def _noop(*args, **kwargs):
         return None
@@ -81,6 +83,9 @@ async def test_actual_behavior_no_sprint_without_project_id_falls_through_to_gen
             project_id=None, epic_id=None, sprint_id=None, assignee_id=None,
             status_filter=None, no_sprint=True, ids=None, story_number=None, q=None,
             limit=1000, cursor=None, response=None, repo=repo, auth=auth,
+            # story #2532: 신규 Query 파라미터 — sentinel lint(scripts/lint_query_sentinel_
+            # direct_calls.py) baseline과 missing-set을 맞추기 위해 명시.
+            unattached=False,
         )
         assert result == []
         repo.list.assert_awaited_once()

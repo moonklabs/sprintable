@@ -8,6 +8,7 @@ import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors, cl
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { computeReorderPatch } from '@/lib/epic-steer';
+import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { useGoalsRoute } from './goals-context';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -20,7 +21,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 // 금지 — 점+원뿐, 라벨 없음(그룹핑 자체가 메시지).
 function GoalGroupHint() {
   return (
-    <svg viewBox="0 0 48 24" className="size-6 w-12 text-muted-foreground/50" aria-hidden="true">
+    <svg viewBox="0 0 48 24" className="size-6 w-12 text-muted-foreground" aria-hidden="true">
       <circle cx="10" cy="8" r="2" fill="currentColor" opacity="0.5" />
       <circle cx="10" cy="16" r="2" fill="currentColor" opacity="0.5" />
       <circle cx="4" cy="12" r="2" fill="currentColor" opacity="0.5" />
@@ -548,7 +549,7 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
           type="button"
           aria-label={t('steerReorderAria', { title: epic.title })}
           onClick={(e) => e.stopPropagation()}
-          className="mt-0.5 flex shrink-0 cursor-grab items-center text-muted-foreground/50 transition-colors hover:text-muted-foreground active:cursor-grabbing"
+          className="mt-0.5 flex shrink-0 cursor-grab items-center text-muted-foreground transition-colors hover:text-muted-foreground active:cursor-grabbing"
           {...attributes}
           {...listeners}
         >
@@ -571,7 +572,7 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
                   {t('steerCurated')} {epic.position}
                 </span>
               ) : (
-                <span className="text-[10px] font-medium text-muted-foreground/70">{t('steerAuto')}</span>
+                <span className="text-[10px] font-medium text-muted-foreground">{t('steerAuto')}</span>
               )
             ) : null}
             {/* Loop 제안 hook — source_loop_id 배선(P3/v2) 전엔 미표시(no-fiction·sparkle 0·claimed amber 언어). */}
@@ -871,6 +872,9 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   const [justDispatched, setJustDispatched] = useState(false);
   const [dispatchedTo, setDispatchedTo] = useState<string[]>([]); // 지정 수신자 이름(핸드오프 표시용)
   const sensors = useSensors(useSensor(MousePointerSensor, { activationConstraint: { distance: 8 } }));
+  // story #2545(카디르 라이브 재QA 2단계) — org 불일치 자동교정(switch-org)이 이 fetch 直後
+  // 성공하면 project는 안 바뀌므로 재요청 트리거가 없었다(project-context-client.ts 참고).
+  const orgSyncVersion = useOrgSyncVersion();
 
   // wedge #2: order_by=position 옵트인 — 큐레이션 prefix + 자동(NULL) tail. position 모드는 BE가
   // 커서를 발행하지 않으므로 이어달리기(cursor pagination) 없이 전량(상위 STEER_LIMIT) 로드한다(AC4).
@@ -888,7 +892,10 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+    // orgSyncVersion은 콜백 안에서 안 읽는다 — switch-org 성공 直後 이 콜백 새 참조를
+    // 강제해 재요청시키기 위한 의도적 invalidation 트리거다(story #2545, project-context-
+    // client.ts 참고).
+  }, [projectId, orgSyncVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     const { active, over } = event;
@@ -1088,7 +1095,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
                   />
                 ))}
                 {capped ? (
-                  <p className="pt-1 text-center text-[11px] text-muted-foreground/70">{t('steerCappedNote', { count: STEER_LIMIT })}</p>
+                  <p className="pt-1 text-center text-[11px] text-muted-foreground">{t('steerCappedNote', { count: STEER_LIMIT })}</p>
                 ) : null}
               </div>
             </SortableContext>

@@ -52,6 +52,7 @@ async def _session_factory():
 
     from app.core.database import Base
     import app.models  # noqa: F401 — 전 모델 메타데이터 로드
+    import app.models.activity_log  # noqa: F401 — #2631: transition_gate()가 ActivityLog를 씀(#2201 후속 미등재 갭).
 
     engine = create_async_engine(_async_url())
     async with engine.begin() as conn:

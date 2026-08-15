@@ -69,13 +69,14 @@ async def test_registered_standup_history_tool_still_accepts_known_args():
 
 
 def test_all_registered_tools_share_the_same_lockdown():
-    """AC2 카운트 — `_TOOL_DEFS` 116개 + ping 1개 = 117개(story #2597: list_agent_cards 추가로
-    115→116) 전부 arg_model이 extra=forbid로 잠겨 있어야 한다(상속 갈래 SprintableInput/
-    BaseModel 안 가리고 전부)."""
+    """AC2 카운트 — `_TOOL_DEFS` 120개 + ping 1개 = 121개(story #2634: sprintable_publish_event/
+    sprintable_list_event_definitions 추가로 117→119. story #2636: sprintable_register_
+    event_definition/sprintable_update_event_definition 추가로 119→121) 전부 arg_model이
+    extra=forbid로 잠겨 있어야 한다(상속 갈래 SprintableInput/BaseModel 안 가리고 전부)."""
     from sprintable_mcp import server as srv
 
     tools = srv.mcp._tool_manager.list_tools()
-    assert len(tools) == 117
+    assert len(tools) == 121
     unlocked = [
         t.name for t in tools
         if t.fn_metadata.arg_model.model_config.get("extra") != "forbid"

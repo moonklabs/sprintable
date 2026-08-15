@@ -14,6 +14,7 @@ import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { AgentProjectAccessSection } from '@/components/settings/agent-project-access-section';
+import { MemberNotificationPreferencesSummary } from '@/components/agents/member-notification-preferences-summary';
 import { useToast } from '@/components/ui/toast';
 import {
   RUNTIME_REGISTRY,
@@ -582,6 +583,23 @@ export default function AgentDetailPage() {
         );
       })()}
 
+      {/* story #2623 — 멤버 관점 요약(AC3, «이 에이전트는 어느 대화에서 무엇을 받나»). 웹훅
+          섹션과 동일 admin/owner 게이트(canEditWebhook — story 933248fa와 같은 org role 축,
+          새 인가 어휘 발명 없음) 재사용. BE #2623 착지 대기 — 착지 前엔 로드에러/자기자신
+          목록으로 보일 수 있다(컴포넌트 자체 docstring 참고, 조용히 감추지 않는다). */}
+      <SectionCard>
+        <SectionCardHeader>
+          <h2 className="text-base font-semibold text-foreground">{t('notificationPreferencesSummaryTitle')}</h2>
+        </SectionCardHeader>
+        <SectionCardBody>
+          {!canEditWebhook ? (
+            <p className="text-xs text-muted-foreground">{t('webhookAdminOnly')}</p>
+          ) : (
+            <MemberNotificationPreferencesSummary memberId={id} memberLabel={agent.name} />
+          )}
+        </SectionCardBody>
+      </SectionCard>
+
       {/* Messaging policy (E-MSG-POLICY S3) */}
       {canEdit && <MessagingPolicySection agentId={id} creatorUserId={agent.created_by} />}
 
@@ -609,7 +627,7 @@ export default function AgentDetailPage() {
               </pre>
             </>
           ) : !hasActiveKey ? (
-            <p className="text-xs text-warning">{t('agentMcpKeyRequired')}</p>
+            <p className="text-xs text-warning-strong">{t('agentMcpKeyRequired')}</p>
           ) : (
             <p className="text-xs text-muted-foreground">{t('agentMcpSecurityNote')}</p>
           )}
@@ -644,7 +662,11 @@ export default function AgentDetailPage() {
           <div className="space-y-1.5 text-xs text-muted-foreground">
             <p>{t('agentFakechatEnvKeyInstruction')}</p>
             <p>{webhookActive ? t('agentFakechatWebhookActiveNote') : t('agentFakechatWebhookOffNote')}</p>
-            <p>{t('agentFakechatSuccessCheck')}</p>
+            <p>
+              {t.rich('agentFakechatSuccessCheck', {
+                code: (chunks) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">{chunks}</code>,
+              })}
+            </p>
           </div>
 
           {freshApiKey ? (
@@ -655,7 +677,7 @@ export default function AgentDetailPage() {
               </code>
             </>
           ) : !hasActiveKey ? (
-            <p className="text-xs text-warning">{t('agentFakechatEnvKeyRequired')}</p>
+            <p className="text-xs text-warning-strong">{t('agentFakechatEnvKeyRequired')}</p>
           ) : (
             <p className="text-xs text-muted-foreground">{t('agentFakechatEnvKeySecurityNote')}</p>
           )}

@@ -17,6 +17,10 @@ export default defineConfig({
       '**/e2e/**',
       // QA worktrees are transient PR review directories, excluded from main test runs
       '.qa-worktrees/**',
+      // connectors/ is a no-package.json reference-SDK area (bun/pytest, unconfigured
+      // convention shared with the sibling Python tests) — its *.test.ts files use
+      // bun:test, not vitest, and vitest crashes trying to resolve that import (#2578 QA).
+      'connectors/**',
       // EE billing tests require EE-specific infrastructure (payment/factory, monthly-agent-usage-dashboard)
       // that is not available in the OSS vitest setup. These require a separate EE vitest config.
       'ee/apps/web/src/services/billing-limit-enforcer.test.ts',

@@ -71,9 +71,38 @@ def test_rejects_substring_fail_open_names(url):
     "postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test",
     "postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso",
 ])
-def test_allows_ci_db_names(url):
-    """CI가 쓰는 sprintable_test / sprintable_test_iso는 test 온전 토큰이라 허용(guard가 CI를 막지 않음)."""
-    assert_disposable_test_db(url)
+def test_allows_ci_db_names(url, monkeypatch):
+    """CI가 쓰는 sprintable_test / sprintable_test_iso는 CI 환경(CI=true, GitHub Actions가
+    항상 심어줌)에서는 job마다 완전 격리된 신선 postgres 컨테이너뿐이라 허용된다."""
+    monkeypatch.setenv("CI", "true")
+    assert_disposable_test_db(url)  # should not raise
+
+
+# story ebfd8252(2026-08-14) — sprintable_test는 이 조직의 로컬 realdb 관례 기본값이라
+# «테스트류 DB인가»(_TEST_DB_SIGNAL_RE)는 통과해도 CI 밖에서는 여러 세션이 동시에 같은
+# 서버의 같은 DB를 가리키고 있을 위험이 있다 — 그 자체로는 opt-in 없이 통과시키지 않는다.
+def test_rejects_shared_convention_db_outside_ci(monkeypatch):
+    """CI 밖(CI 미설정)에서 정확히 'sprintable_test'는 opt-in 없이 거부 — 실사고 3연발
+    (#2998·#3000·#3003 QA)의 근본원인 그대로 재현·봉인."""
+    monkeypatch.delenv("CI", raising=False)
+    with pytest.raises(RuntimeError, match="공유 로컬 DB 관례명"):
+        assert_disposable_test_db("postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test")
+
+
+def test_shared_convention_db_optin_allows_outside_ci(monkeypatch):
+    """ALLOW_DESTRUCTIVE_ON_SHARED=1이면 CI 밖에서도 정확히 'sprintable_test'를 갈아엎을 수
+    있다(사람이 «정말 그럴 의도」임을 명시했을 때만 — 실수 방지는 opt-in 부재 시에만 작동)."""
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setenv("ALLOW_DESTRUCTIVE_ON_SHARED", "1")
+    assert_disposable_test_db("postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test")  # ok with flag
+
+
+def test_shared_convention_check_scoped_to_exact_name_not_suffixed_variants(monkeypatch):
+    """'sprintable_test_iso'처럼 접미사가 붙은 변형은 공유 관례명 정확매치가 아니라 이 신규
+    체크 대상이 아니다(CI 밖에서도 opt-in 없이 허용 — 과잉거부 방지, 이미 스코프된 이름이라
+    우발적 동시-공유 위험이 낮다는 판단)."""
+    monkeypatch.delenv("CI", raising=False)
+    assert_disposable_test_db("postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test_iso")
 
 
 def test_optin_flag_allows_unrecognized(monkeypatch):

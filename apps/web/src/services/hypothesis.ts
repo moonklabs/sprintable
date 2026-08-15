@@ -6,6 +6,7 @@ import type {
   HypothesisTransitionInput,
   HypothesisLinkInput,
   HypothesisUnlinkInput,
+  HypothesisGuidedCreateInput,
   HypothesisDraftInput,
 } from '@sprintable/core-storage';
 import { ApiHypothesisRepository } from '@sprintable/storage-api';
@@ -33,6 +34,16 @@ export class HypothesisService {
     if (!input.project_id) throw new Error('project_id is required');
     if (!input.statement?.trim()) throw new Error('statement is required');
     return this.repo.create(input);
+  }
+
+  // story #2542(BE PR#2942) — guided 3부 폼. BE HypothesisGuidedCreate가 이미 direction
+  // enum(§_METRIC_DIRECTIONS)·필드 필수 검증을 하므로, 여기선 project_id/statement 필수
+  // 가드만(create()와 동일 규율) — direction 형식 검증까지 중복하지 않는다(BE가 422로
+  // 정직하게 거부, 이 레이어가 지어낸 검증 로직을 따로 안 둔다).
+  async createGuided(input: HypothesisGuidedCreateInput) {
+    if (!input.project_id) throw new Error('project_id is required');
+    if (!input.statement?.trim()) throw new Error('statement is required');
+    return this.repo.createGuided(input);
   }
 
   async getById(id: string) {

@@ -8,6 +8,7 @@ import { getAuthContext } from '@/lib/auth-helpers';
 import { checkResourceLimit } from '@/lib/check-feature';
 import { buildCursorPageMeta, parseCursorPageInput } from '@/lib/pagination';
 import { createStoryRepository } from '@/lib/storage/factory';
+import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 export async function POST(request: Request) {
   try {
@@ -48,6 +49,19 @@ export async function GET(request: Request) {
     const parsedIds = idsParam ? idsParam.split(',').map((id) => id.trim()).filter(Boolean).slice(0, IDS_BATCH_CAP) : [];
     const ids = parsedIds.length > 0 ? parsedIds : undefined;
 
+    // story #2534 카디르 QA HIGH(2026-08-09) — 미매달림 버킷 카운트가 stories.length
+    // (limit=100에 잘린 페이지 길이)였다. BE(stories.py:233)는 unattached 필터를 WHERE
+    // 레벨에서 걸러 X-Total-Count로 «정확한 전체 총계»를 이미 낸다(story #2190 backlog
+    // route와 동형 헤더) — StoryService 추상 대신 raw proxy로 그 헤더를 그대로 meta.total에
+    // 실어 보낸다(limit=100은 목록 표시용으로 그대로, 카운트만 헤더 기준으로 정직해진다).
+    if (searchParams.get('unattached') === 'true') {
+      const _r = await proxyToFastapi(request, '/api/v2/stories');
+      if (!_r.ok) return _r;
+      const data = await _r.json();
+      const totalHeader = _r.headers.get('x-total-count');
+      return apiSuccess(data, totalHeader !== null ? { total: Number(totalHeader) } : undefined);
+    }
+
     const repo = await createStoryRepository();
     const service = new StoryService(repo, dbClient);
 
@@ -74,6 +88,8 @@ export async function GET(request: Request) {
       project_id: searchParams.get('project_id') ?? undefined,
       q: searchParams.get('q') ?? undefined,
       unassigned: searchParams.get('unassigned') === 'true' ? true : undefined,
+      // story #2534(E-FLOW-V4 S4) — 가설/목표 둘 다 미매달림(unassigned와 다른 축).
+      unattached: searchParams.get('unattached') === 'true' ? true : undefined,
       story_number: storyNumberParam ? Number(storyNumberParam) : undefined,
       // story #2328(C-11 ㉡층) — 083176e8/story_number와 같은 클래스(있는 필드가 프록시에서
       // 빠지는 것) 재발 방지로 처음부터 포함.

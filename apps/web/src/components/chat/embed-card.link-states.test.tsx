@@ -9,8 +9,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { EmbedCard, getEntityHref } from './embed-card';
 import { translateEntityStatus } from './entity-status-labels';
+// story #2614 — artifact 몸통이 이제 ArtifactThumbnail(canvas 네임스페이스 useTranslations)을
+// 렌더하므로, 그 경로를 태우는 테스트만 NextIntlClientProvider로 감싼다(다른 기존 테스트는
+// i18n을 안 타 무변경).
+import koMessages from '../../../messages/ko.json';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -57,6 +62,66 @@ describe('AC1 — epic 링크가 은퇴한 /epics/ 대신 실재 라우트로 �
   });
 });
 
+// story #2642(BE #3044) — own-href 타입(story/epic/asset)도 이제 자기 detail 응답의
+// org_slug/project_slug로 직행한다(#2168 doc own-href와 동형, task/artifact/evidence
+// via-parent에 이어 마지막 조각). fetch 전/실패는 기존 bare href prop 그대로(④ 원칙).
+describe('story #2642 — own-href(story/epic/asset)도 크로스프로젝트 직행 URL로 착지한다', () => {
+  it('story — org_slug/project_slug가 실려 오면 뷰어 현재 프로젝트 대신 그 project로 직행한다', async () => {
+    stubFetch(async () => ({ ok: true, json: async () => ({ data: { org_slug: 'acme', project_slug: 'content' } }) }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="story" entity_id="s-cross" title="스토리 X" status={null} />);
+    });
+    await openCard();
+    await flush();
+    const link = document.querySelector('a[href="/acme/content/board?story=s-cross"]');
+    expect(link).not.toBeNull();
+    expect(link!.textContent).toContain('전체 보기');
+    expect(document.querySelector('a[href="/board?story=s-cross"]')).toBeNull();
+  });
+
+  it('story — fetch 실패/미도착 시 기존 bare href로 우아하게 폴백한다(회귀 아님)', async () => {
+    stubFetch(async () => ({ ok: false, json: async () => ({}) }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="story" entity_id="s-fail" title="스토리 Y" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.body.textContent).toContain('대상을 찾을 수 없습니다');
+  });
+
+  it('epic — org_slug/project_slug가 실려 오면 그 project의 /goals/{id}로 직행한다', async () => {
+    stubFetch(async () => ({ ok: true, json: async () => ({ data: { org_slug: 'acme', project_slug: 'content' } }) }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="epic" entity_id="e-cross" title="에픽 X" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.querySelector('a[href="/acme/content/goals/e-cross"]')).not.toBeNull();
+    expect(document.querySelector('a[href="/goals/e-cross"]')).toBeNull();
+  });
+
+  it('asset — org_slug/project_slug가 실려 오면 그 project의 storage로 직행한다', async () => {
+    stubFetch(async () => ({ ok: true, json: async () => ({ data: { org_slug: 'acme', project_slug: 'content' } }) }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="asset" entity_id="ast-cross" title="자산 X" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.querySelector('a[href="/acme/content/storage?asset=ast-cross"]')).not.toBeNull();
+    expect(document.querySelector('a[href="/storage?asset=ast-cross"]')).toBeNull();
+  });
+
+  it('asset — org-level asset(project_id null→project_slug null)은 bare href로 폴백한다(④ 원칙, org-level은 project 스코프가 없다)', async () => {
+    stubFetch(async () => ({ ok: true, json: async () => ({ data: { org_slug: 'acme', project_slug: null } }) }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="asset" entity_id="ast-org" title="자산 Y" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.querySelector('a[href="/storage?asset=ast-org"]')).not.toBeNull();
+  });
+});
+
 describe('AC3/AC4 — task는 부모 story로("담긴 곳으로 갑니다")', () => {
   it('task 상세 fetch가 story_id를 주면 풋터가 파랑 링크 "담긴 곳으로 갑니다"·/board?story=로 간다', async () => {
     stubFetch(async (url) => {
@@ -71,6 +136,24 @@ describe('AC3/AC4 — task는 부모 story로("담긴 곳으로 갑니다")', ()
     const link = document.querySelector('a[href="/board?story=s-parent-1"]');
     expect(link).not.toBeNull();
     expect(link!.textContent).toContain('담긴 곳으로 갑니다');
+  });
+
+  // story #2642(BE #3044) — TaskResponse가 story_id→Story.project_id 1-hop을 이미 해소해
+  // org_slug/project_slug를 직접 싣는다(FE가 추가 조회 없이 그대로 쓴다).
+  it('task — org_slug/project_slug가 실려 오면 크로스프로젝트 부모 story로 직행한다(뷰어 현재 프로젝트 추측 안 거침)', async () => {
+    stubFetch(async () => ({
+      ok: true,
+      json: async () => ({ data: { story_id: 's-parent-2', org_slug: 'acme', project_slug: 'content' } }),
+    }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="task" entity_id="t2" title="작업 B" status={null} />);
+    });
+    await openCard();
+    await flush();
+    const link = document.querySelector('a[href="/acme/content/board?story=s-parent-2"]');
+    expect(link).not.toBeNull();
+    expect(link!.textContent).toContain('담긴 곳으로 갑니다');
+    expect(document.querySelector('a[href="/board?story=s-parent-2"]')).toBeNull();
   });
 });
 
@@ -103,6 +186,84 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
     expect(document.querySelector('a[href="/goals/e-9"]')).not.toBeNull();
   });
 
+  // story #2642(BE #3044) — ArtifactResponse는 artifact 자기 행의 org_id/project_id를
+  // 직접 싣는다(부모 hop 불필요) — story_id/epic_id 분기 둘 다 이 값을 그대로 쓴다.
+  it('story_id + org_slug/project_slug가 있는 artifact는 크로스프로젝트 부모 story로 직행한다', async () => {
+    stubFetch(async () => ({
+      ok: true,
+      json: async () => ({ data: { story_id: 's-1', epic_id: null, doc_id: null, org_slug: 'acme', project_slug: 'content' } }),
+    }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="artifact" entity_id="a6" title="목업 E" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.querySelector('a[href="/acme/content/board?story=s-1"]')).not.toBeNull();
+    expect(document.querySelector('a[href="/board?story=s-1"]')).toBeNull();
+  });
+
+  it('epic_id + org_slug/project_slug가 있는 artifact는 크로스프로젝트 부모 epic으로 직행한다', async () => {
+    stubFetch(async () => ({
+      ok: true,
+      json: async () => ({ data: { story_id: null, epic_id: 'e-9', doc_id: null, org_slug: 'acme', project_slug: 'content' } }),
+    }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="artifact" entity_id="a7" title="목업 F" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.querySelector('a[href="/acme/content/goals/e-9"]')).not.toBeNull();
+    expect(document.querySelector('a[href="/goals/e-9"]')).toBeNull();
+  });
+
+  // story #2642(PO 08-14, «FE 단독 가능» 조각) — doc_id가 있는 artifact도 이제 #2168(doc
+  // own-href)과 동형으로 그 doc 자신이 속한 project로 직행한다. 이전엔 project 무관 bare
+  // `/docs?id=`(그나마도 [ws]/[proj]/docs 라이브 라우트가 `?id=`를 안 읽어 죽은 링크였다 —
+  // 이 처방이 그 사각도 같이 없앤다).
+  it('doc_id가 있는 artifact — 그 doc이 속한 project로 직행한다(#2168 재사용, 새 BE 없음)', async () => {
+    stubFetch(async (url) => {
+      if (url.includes('/api/visual-artifacts/')) {
+        if (url.includes('/exports')) return { ok: true, json: async () => ({ data: [] }) };
+        if (url.includes('/versions/')) return { ok: false, json: async () => ({}) };
+        return { ok: true, json: async () => ({ data: { story_id: null, epic_id: null, doc_id: 'doc-9' } }) };
+      }
+      if (url.includes('/api/docs/preview')) {
+        expect(url).toContain('doc-9');
+        return { ok: true, json: async () => ({ data: { slug: 'other-doc', orgSlug: 'acme', projectSlug: 'content', projectId: 'p-9' } }) };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    await act(async () => {
+      root.render(<EmbedCard entity_type="artifact" entity_id="a4" title="목업 C" status={null} />);
+    });
+    await openCard();
+    await flush(8);
+    const link = document.querySelector('a[href="/acme/content/docs/other-doc/view"]');
+    expect(link).not.toBeNull();
+    expect(link!.textContent).toContain('담긴 곳으로 갑니다');
+    // 옛 project-무관 bare 링크가 더는 안 남아야 한다(진짜로 직행 링크로 교체됐는지 확認).
+    expect(document.querySelector('a[href="/docs?id=doc-9"]')).toBeNull();
+  });
+
+  it('doc_id가 있는 artifact — doc preview 조회 실패 시 기존 bare `/docs?id=`로 우아하게 폴백한다(회귀 아님, ④ 원칙)', async () => {
+    stubFetch(async (url) => {
+      if (url.includes('/api/visual-artifacts/')) {
+        if (url.includes('/exports')) return { ok: true, json: async () => ({ data: [] }) };
+        if (url.includes('/versions/')) return { ok: false, json: async () => ({}) };
+        return { ok: true, json: async () => ({ data: { story_id: null, epic_id: null, doc_id: 'doc-10' } }) };
+      }
+      return { ok: false, json: async () => ({}) }; // /api/docs/preview 도 이걸로 실패.
+    });
+    await act(async () => {
+      root.render(<EmbedCard entity_type="artifact" entity_id="a5" title="목업 D" status={null} />);
+    });
+    await openCard();
+    await flush(8);
+    const link = document.querySelector('a[href="/docs?id=doc-10"]');
+    expect(link).not.toBeNull();
+    expect(link!.textContent).toContain('담긴 곳으로 갑니다');
+  });
+
   it('전부 null(독립 artifact)이면 회색·행동0 "열 수 있는 화면이 없습니다"(거짓 링크 금지)', async () => {
     stubFetch(async () => ({
       ok: true,
@@ -119,18 +280,110 @@ describe('AC3/AC4 — artifact는 레코드마다 갈린다(FK 있으면 ②, �
   });
 });
 
-describe('AC4 — hypothesis는 고정 ③(fetch 자체를 안 함, 무한 스피너 자체발견 회귀가드)', () => {
-  it('hypothesis는 fetch를 시도하지 않고 즉시 "열 수 있는 화면이 없습니다"를 보인다(무한 스피너 아님)', async () => {
-    const fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
+describe('story #2614 — hypothesis는 풋터(담긴 곳)는 여전히 없지만(다대다, ③ 고정 무변경) 몸통은 이제 fetch해 statement를 보인다', () => {
+  it('hypothesis는 fetch해 statement를 몸통에 보이면서도 풋터는 "열 수 있는 화면이 없습니다"를 유지한다(거짓 링크 금지는 그대로)', async () => {
+    stubFetch(async (url) => {
+      expect(url).toContain('/api/hypotheses/');
+      return { ok: true, json: async () => ({ data: { statement: '이 가설은 검증되면 전환율이 오른다', status: 'proposed' } }) };
+    });
     await act(async () => {
       root.render(<EmbedCard entity_type="hypothesis" entity_id="h1" title="가설 A" status={null} />);
     });
     await openCard();
     await flush();
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(document.body.textContent).not.toContain('불러오는 중');
+    expect(document.body.textContent).toContain('이 가설은 검증되면 전환율이 오른다');
+    expect(document.body.textContent).not.toContain('이 엔티티는 별도 미리보기가 없습니다');
+    // AC3/AC4 — 다대다라 단일 부모를 못 고르는 사실은 안 바뀌었다: 풋터는 여전히 "갈 곳 없음".
+    expect(document.querySelectorAll('a[href^="/goals/"], a[href^="/board?story="], a[href^="/docs?id="]').length).toBe(0);
     expect(document.body.textContent).toContain('열 수 있는 화면이 없습니다');
+  });
+
+  it('hypothesis 조회가 실패하면(대상 사라짐) 여전히 "대상이 없습니다"로 정직하게 갈린다(무한 스피너였던 자체발견 회귀 재확認)', async () => {
+    stubFetch(async () => ({ ok: false, json: async () => ({}) }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="hypothesis" entity_id="h-gone" title="사라진 가설" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.body.textContent).not.toContain('불러오는 중');
+    expect(document.body.textContent).toContain('대상을 찾을 수 없습니다');
+  });
+});
+
+describe('story #2614 AC1/AC3 — artifact(부모 없는 독립 목업)는 몸통에서 실물이 보인다(회귀: "미리보기가 없습니다"가 지원 타입에서 뜨면 안 됨)', () => {
+  it('부모(story/epic/doc) 전부 null인 artifact도 썸네일이 렌더돼 "이 엔티티는 별도 미리보기가 없습니다"가 안 뜬다', async () => {
+    // ArtifactThumbnail 자신도 exports/version-detail을 따로 fetch한다(둘 다 /api/visual-artifacts/
+    // 하위 경로) — URL별로 분기해, exports는 빈 배열(PNG 없음)·version-detail은 404(간단히
+    // placeholder 경로로 떨어뜨림, 이 테스트의 관심사는 "썸네일 요소 자체가 뜨는가"이지 실 렌더
+    // 내용물이 아니다)로 응답해 ArtifactThumbnail이 안전하게 placeholder로 정착하게 한다.
+    stubFetch(async (url) => {
+      expect(url).toContain('/api/visual-artifacts/');
+      if (url.includes('/exports')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/versions/')) return { ok: false, json: async () => ({}) };
+      return {
+        ok: true,
+        json: async () => ({
+          data: { story_id: null, epic_id: null, doc_id: null, latest_version_number: 1, anchor_version: null },
+        }),
+      };
+    });
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EmbedCard entity_type="artifact" entity_id="91eaf539" title="mockup" status={null} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await openCard();
+    await flush();
+    // AC3 회귀 가드 — 지원 타입(artifact)에서 "미리보기 없음" 문구가 뜨면 빨간불.
+    expect(document.body.textContent).not.toContain('이 엔티티는 별도 미리보기가 없습니다');
+    expect(document.querySelector('[data-artifact-thumbnail]')).not.toBeNull();
+    // 부모가 없다는 사실 자체는 안 바뀌었다 — 풋터는 여전히 "갈 곳 없음"(거짓 링크 금지 유지).
+    expect(document.body.textContent).toContain('열 수 있는 화면이 없습니다');
+  });
+});
+
+// story #2614 AC3 — "이 엔티티는 별도 미리보기가 없습니다" 문구는 지원 타입(RICH_PREVIEW_TYPES:
+// story/epic/doc/artifact/hypothesis)에서 뜨면 회귀다. sprint/task/evidence/asset은 의도적으로
+// 이 Set 밖(sprint=own-href로 이미 열림+몸통에 보여줄 게 없음, task/evidence=via-parent로 이미
+// 열림, asset=별도 스토리지 화면). 이 테스트는 그 경계 자체를 고정한다.
+describe('story #2614 AC3 — "미리보기 없음" 문구는 미지원 타입(sprint)에만 정직하게 남는다', () => {
+  // story #2642(BE #3044) — sprint도 이제 ENTITY_API에 항목이 생겨 자기 org_slug/project_slug를
+  // fetch한다(href 계산 재료로만 — RICH_PREVIEW_TYPES는 무변경, 몸통은 여전히 "미리보기 없음").
+  it('sprint — org_slug 없이 fetch 성공(옛 응답 모양·미백필 등)하면 여전히 "미리보기 없음"+bare href로 우아하게 폴백한다(회귀 아님)', async () => {
+    stubFetch(async () => ({ ok: true, json: async () => ({ data: {} }) }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="sprint" entity_id="sp1" title="스프린트 3" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.body.textContent).toContain('이 엔티티는 별도 미리보기가 없습니다');
+    expect(document.querySelector('a[href="/sprints?id=sp1"]')).not.toBeNull();
+  });
+
+  it('sprint — fetch 자체가 실패하면(대상 사라짐 등) "대상을 찾을 수 없습니다"로 정직하게 갈린다(#2642로 sprint도 fetch-eligible 승격 — 이전엔 이 갈래가 아예 없었다)', async () => {
+    stubFetch(async () => ({ ok: false, json: async () => ({}) }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="sprint" entity_id="sp-gone" title="사라진 스프린트" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.body.textContent).toContain('대상을 찾을 수 없습니다');
+  });
+
+  it('sprint — org_slug/project_slug가 도착하면 크로스프로젝트 직행 URL로 바뀐다(#2642)', async () => {
+    stubFetch(async (url) => {
+      expect(url).toContain('/api/sprints/');
+      return { ok: true, json: async () => ({ data: { org_slug: 'acme', project_slug: 'content' } }) };
+    });
+    await act(async () => {
+      root.render(<EmbedCard entity_type="sprint" entity_id="sp2" title="스프린트 4" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.querySelector('a[href="/acme/content/sprints?id=sp2"]')).not.toBeNull();
+    expect(document.querySelector('a[href="/sprints?id=sp2"]')).toBeNull();
   });
 });
 
@@ -159,6 +412,24 @@ describe('AC3/AC4 — evidence는 부모 story로("담긴 곳으로 갑니다", 
     await flush();
     expect(document.querySelectorAll('a[href^="/board?story="]').length).toBe(0);
     expect(document.body.textContent).toContain('열 수 있는 화면이 없습니다');
+  });
+
+  // story #2642(BE #3044) — EvidenceResponse가 resolve 과정에서 이미 계산해 둔 project_id로
+  // org_slug/project_slug도 같이 싣는다(추가 join 없음).
+  it('evidence — org_slug/project_slug가 실려 오면 크로스프로젝트 부모 story로 직행한다', async () => {
+    stubFetch(async () => ({
+      ok: true,
+      json: async () => ({ data: { resolved_story_id: 's-parent-3', org_slug: 'acme', project_slug: 'content' } }),
+    }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="evidence" entity_id="ev3" title="증거 C" status={null} />);
+    });
+    await openCard();
+    await flush();
+    const link = document.querySelector('a[href="/acme/content/board?story=s-parent-3"]');
+    expect(link).not.toBeNull();
+    expect(link!.textContent).toContain('담긴 곳으로 갑니다');
+    expect(document.querySelector('a[href="/board?story=s-parent-3"]')).toBeNull();
   });
 });
 

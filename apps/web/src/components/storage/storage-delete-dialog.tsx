@@ -68,7 +68,8 @@ export function StorageDeleteDialog({ asset, open, onOpenChange, onDeleted }: St
 
                 {usageCount > 0 ? (
                   <>
-                    <div className="mt-[10px] flex items-center gap-2 rounded-[0.5rem] bg-warning/15 px-3 py-[10px] text-[12px] font-semibold text-warning">
+                    {/* story #2590(TIER1) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
+                    <div className="mt-[10px] flex items-center gap-2 rounded-[0.5rem] bg-warning/15 px-3 py-[10px] text-[12px] font-semibold text-foreground">
                       <Link2 className="size-[15px] shrink-0" />
                       {t('deleteImpact', { count: usageCount })}
                     </div>

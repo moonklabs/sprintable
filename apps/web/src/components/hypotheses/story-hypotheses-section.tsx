@@ -157,7 +157,7 @@ export function StoryHypothesesSection({
               </span>
               {isCrossEpic(h) ? (
                 <span
-                  className="inline-flex shrink-0 items-center gap-1 text-[11px] text-warning"
+                  className="inline-flex shrink-0 items-center gap-1 text-[11px] text-warning-strong"
                   title={t('crossEpicHint')}
                 >
                   <AlertTriangle className="size-3" aria-hidden />
@@ -227,7 +227,7 @@ export function StoryHypothesesSection({
                     </span>
                     {isCrossEpic(h) ? (
                       <span
-                        className="inline-flex shrink-0 items-center gap-1 text-[11px] text-warning"
+                        className="inline-flex shrink-0 items-center gap-1 text-[11px] text-warning-strong"
                         title={t('crossEpicHint')}
                       >
                         <AlertTriangle className="size-3" aria-hidden />

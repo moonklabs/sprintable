@@ -125,6 +125,19 @@ class MessageImage:
 
 
 @dataclass
+class MessageAttachment:
+    """일반 첨부(이미지 포함 전체) — #2568: 서버는 payload.attachments에 이미 이걸 싣지만
+    이 SDK가 `images`(mime.startswith("image/") 필터)만 읽고 있어 .md 등 비-이미지
+    첨부가 여기서 조용히 사라졌다(백엔드 _msg_payload/_dispatch_conversation_event는
+    attachments를 정상 포함 — 실측 확認, 드롭 지점은 여기뿐)."""
+    url: str
+    name: str = ""
+    content_type: str = ""
+    size: int | None = None
+    asset_id: str = ""
+
+
+@dataclass
 class MessageContext:
     """어댑터 `on_message` 콜백에 전달되는 메시지 컨텍스트."""
     content: str
@@ -135,7 +148,16 @@ class MessageContext:
     seq: int
     is_backfill: bool
     images: list[MessageImage]
+    attachments: list[MessageAttachment]
     raw: dict[str, Any]
+
+    # story #2583 S1 — envelope 규격 필드. sender_type/event_kind/ts는 원 이벤트에 값이
+    # 없으면 빈 문자열("")로 둔다 — 지어내지 않는다(AC1 "값 없음의 정직 표기"). 빈 문자열은
+    # format_envelope_text()가 "unknown"으로 렌더하지만, 이 필드 자체는 어댑터가 원본 유무를
+    # 구분할 수 있게 빈 채로 남긴다.
+    sender_type: str = ""
+    event_kind: str = ""
+    ts: str = ""
 
     # E-ACTIVATION Phase 2 분류(기본값 = 현행 보존: 늘 호출로 취급).
     addressed: bool = True
@@ -183,6 +205,81 @@ def _normalize_images(value: Any) -> list[MessageImage]:
             mime=mime,
         ))
     return images
+
+
+def _normalize_attachments(value: Any) -> list[MessageAttachment]:
+    """`images`와 달리 mime 필터 없음 — 첨부는 전 타입(.md 등)이 대상(#2568)."""
+    if not isinstance(value, list):
+        return []
+    out: list[MessageAttachment] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        if not url:
+            continue
+        size = item.get("size")
+        try:
+            size = int(size) if size is not None else None
+        except (TypeError, ValueError):
+            size = None
+        out.append(MessageAttachment(
+            url=url,
+            name=str(item.get("name") or ""),
+            content_type=str(item.get("content_type") or ""),
+            size=size,
+            asset_id=str(item.get("asset_id") or ""),
+        ))
+    return out
+
+
+def render_attachment_notice(attachments: list[MessageAttachment]) -> str:
+    """#2568 AC3: 첨부 존재+회수 경로(asset text API)를 에이전트가 알 수 있게 텍스트로
+    안내. asset_id가 있으면(정상 케이스) 그 경로를, 없으면(레거시/미등록) url을 안내."""
+    lines = []
+    for a in attachments:
+        label = a.name or a.url
+        if a.asset_id:
+            lines.append(
+                f"- {label} ({a.content_type or 'unknown type'}) — "
+                f"본문 회수: GET /api/v2/assets/{a.asset_id}/text"
+            )
+        else:
+            lines.append(f"- {label} ({a.content_type or 'unknown type'}) — url: {a.url}")
+    return f"[첨부 {len(attachments)}건]\n" + "\n".join(lines) + "\n[/첨부]"
+
+
+# ── story #2583 S1: 주입 envelope 표준 렌더 ────────────────────────────────────
+#
+# 배경: #2583 정찰(doc 2583-injection-envelope-recon-20260812) — 8개 커넥터 中 6개가
+# sender_id/sender_name을 (이 SDK가 이미 정확히 파싱해 두는데도) 모델에 실제로 보이는
+# 텍스트 조립 단계에서 조용히 버렸다(댄 어윈 오호칭 사고와 동일 코드 경로). 이 함수는
+# 그 "조립" 단계를 SDK 안 단일 지점으로 끌어와, 텍스트-only 주입 런타임(Claude Code
+# hooks·codex/grok/gemini Stop-hook reason·opencode session.prompt parts 등 — 호스트
+# API가 "문자열 하나"만 받는 6곳)이 전부 이 함수를 부르면 사본마다 발신자를 흘리는
+# 사고를 구조적으로 막는다. Hermes/OpenClaw처럼 호스트가 이미 구조화 sender 파라미터를
+# 받는 런타임은 이 함수가 필요 없다 — 그쪽은 네이티브 API로 직접 채우는 게 맞다
+# (연구 doc의 두 그룹 구분 참조).
+#
+# ⚠️ 언어 경계(Python ↔ TS) — 이 함수는 `sprintable-sse.ts`의 `formatEnvelopeText()`와
+# **동일한 렌더 규칙**이어야 한다(값 배치 순서·구분자·"unknown" 폴백 문자열까지). 이쪽을
+# 고치면 그쪽 핀 테스트가 깨지도록 양쪽에 같은 샘플을 핀 고정해 뒀다 — #2589에서 쓴
+# 패턴 그대로. 정직 표기 원칙(AC1): 값이 없으면 "unknown"이라고 명시하지, 빈칸으로
+# 뭉개거나 그럴듯한 값을 지어내지 않는다.
+def format_envelope_text(ctx: "MessageContext") -> str:
+    # PO 리뷰(2026-08-12, PR #2984) — sender_name만 다른 필드와 폴백이 비대칭이었다(다른
+    # 필드는 전부 or "unknown"인데 이건 그대로 노출 → 명시적 빈 이름이면 헤더 이름칸이
+    # 빈 채 렌더돼 오호칭 봉쇄 취지에 어긋남). name → id → "unknown" 순으로 일관화.
+    sender_name = ctx.sender_name or ctx.sender_id or "unknown"
+    sender_type = ctx.sender_type or "unknown"
+    event_kind = ctx.event_kind or "unknown"
+    ts = ctx.ts or "unknown"
+    conv = ctx.conversation_id or "unknown"
+    header = (
+        f"[{event_kind}] {sender_name} ({sender_type}) "
+        f"· conv={conv} · ts={ts}"
+    )
+    return f"{header}\n{ctx.content}"
 
 
 # ── SDK client ────────────────────────────────────────────────────────────────
@@ -265,8 +362,14 @@ class SprintableSSEClient:
             return None
         content = (data.get("content") or payload.get("content") or "").strip()
         images = _normalize_images(data.get("images") or payload.get("images"))
-        if not content and not images:
+        attachments = _normalize_attachments(data.get("attachments") or payload.get("attachments"))
+        if not content and not images and not attachments:
             return None
+        # #2568 AC2/AC3: 첨부가 있으면 안내 블록을 content에 병합 — 어댑터마다 따로
+        # 렌더하게 하지 않고 SDK 단일 지점에서 처리(어댑터 코드 수정 0으로 전파).
+        if attachments:
+            notice = render_attachment_notice(attachments)
+            content = f"{content}\n\n{notice}" if content else notice
 
         event_id = str(data.get("event_id") or payload.get("id") or ev_id or uuid.uuid4())
         if self._is_dup(event_id):
@@ -294,7 +397,9 @@ class SprintableSSEClient:
             sender = {}
         sender_id = str(sender.get("id") or data.get("sender_id") or "sprintable")
         sender_name = str(sender.get("name") or sender_id)
+        sender_type = str(sender.get("type") or "")
         is_backfill = bool(data.get("is_backfill"))
+        ts = str(data.get("created_at") or payload.get("created_at") or "")
 
         reply_url = (
             f"{self._api_url}/api/v2/conversations/{conversation_id}/messages"
@@ -312,7 +417,11 @@ class SprintableSSEClient:
             seq=seq,
             is_backfill=is_backfill,
             images=images,
+            attachments=attachments,
             raw=data,
+            sender_type=sender_type,
+            event_kind=str(event_type or ""),
+            ts=ts,
             addressed=addressed,
             audience_targeted=audience_targeted,
             message_kind=message_kind,

@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, computed_field, field_validator, model_validator
 
-from app.schemas.story import _validate_metric_definition
+from app.schemas.story import _METRIC_DIRECTIONS, _validate_metric_definition
 
 # §2.5 상태 7종 (모델 HYPOTHESIS_STATUSES와 동기)
 HYPOTHESIS_STATUSES = (
@@ -42,6 +42,28 @@ class HypothesisCreate(BaseModel):
     def _check_metric(cls, v: dict[str, Any]) -> dict[str, Any]:
         # NOT NULL — None은 Pydantic 타입에서 이미 거부. 구조는 Story validator 재사용.
         return _validate_metric_definition(v)  # type: ignore[return-value]
+
+
+class HypothesisGuidedCreate(BaseModel):
+    """story #2542(v4 «가설 축척» ②첫 가설, 유나 SSOT ae75a8ff) — guided 3부 폼 전용 생성.
+
+    HypothesisCreate의 얇은 특수화: statement + {metric,target,direction} 3부만 받는다
+    (source·measure_after는 폼에 없음 — 서버가 source="manual"·measure_after=+14일로
+    보완). 생성 즉시 status=measuring까지 간다(빈 마찰 없는 «첫 성공») — _CREATE_STATUSES
+    를 넓히는 대신 기존 검증된 상태기계를 그대로 두 단계(active 생성 → measuring 전이)
+    재사용한다(app/services/hypothesis.py의 create_hypothesis_guided 참고)."""
+    project_id: uuid.UUID
+    statement: str
+    metric: str
+    target: float
+    direction: str
+
+    @field_validator("direction")
+    @classmethod
+    def _check_direction(cls, v: str) -> str:
+        if v not in _METRIC_DIRECTIONS:
+            raise ValueError(f"direction must be one of {sorted(_METRIC_DIRECTIONS)}")
+        return v
 
 
 class HypothesisUpdate(BaseModel):
@@ -111,6 +133,10 @@ class HypothesisResponse(BaseModel):
     story_ids: list[uuid.UUID] = []
     # N:1(PO 결) — sprint 링크는 최대 1개라 리스트가 아니라 nullable 단일 값.
     sprint_id: uuid.UUID | None = None
+    # story #2533(E-FLOW-V4 S3, migration 0237): 정반합 self-FK — 이 가설이 falsified된 뒤
+    # 대체된 새 가설. write path(자동 페어링·전이 UI)는 후속 스토리 — 지금은 확認된 단일
+    # 페어만 채워지고 나머지는 null("아직", 없는 데이터 지어내기 X).
+    superseded_by_hypothesis_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -173,3 +199,58 @@ class HypothesisDraftResponse(BaseModel):
     requires_confirmation: bool = True
     # persist=true일 때만 — 생성된 proposed row.
     hypothesis: HypothesisResponse | None = None
+
+
+# story #2533(E-FLOW-V4 S3): GET /{id}/lifecycle 조립 응답 — 5축 수직 서사.
+# 지어내지 않는다 원칙: 없는 축(증명 미도달·정반합 미확認·진짜 전이 이력)은 항상 None/빈
+# 값으로 정직하게 비운다(유·미르코 시안 f60d0502 "빈 칸=아직" 규격과 정합).
+
+
+class HypothesisLifecycleGoal(BaseModel):
+    """목표(에픽) — hypothesis_epic_links 확장(id만이 아니라 이름·상태까지)."""
+    id: uuid.UUID
+    title: str
+    status: str
+
+
+class HypothesisLifecycleStory(BaseModel):
+    """검증(스토리) — hypothesis_story_links 확장 + 증명(gate/evidence) 간접 조회.
+
+    gate_status/evidence_count: work_item_type='story'로 hypothesis_story_links를 거쳐
+    간접 조회한다(hypothesis에 직접 달리는 gate/evidence는 실사용 0 — 그라운딩 확認,
+    2026-08-09). 매칭 row가 없으면 gate_status=None("아직")·evidence_count=0으로 정직."""
+    id: uuid.UUID
+    title: str
+    status: str
+    metric_definition: dict[str, Any] | None = None
+    outcome_status: str
+    gate_status: str | None = None
+    evidence_count: int = 0
+
+
+class HypothesisLifecycleSuccessor(BaseModel):
+    """정반합 링크 한쪽(계승자 또는 전신) — superseded_by_hypothesis_id 확장."""
+    id: uuid.UUID
+    statement: str
+    status: str
+
+
+class HypothesisLifecycleTimeline(BaseModel):
+    """시간선 — ⛔진짜 전이 이력이 아니다(hypothesis_status_events류 감사 테이블 없음,
+    activity_log에도 hypothesis 참조 0건 — 그라운딩 확認). 딱 3점(created/measure_after/
+    updated)만 정직하게 반환한다. FE가 이걸 "전체 생애 타임라인"으로 과대포장하면 안 된다
+    (이 docstring이 그 경계선)."""
+    created_at: datetime
+    measure_after: datetime
+    updated_at: datetime
+
+
+class HypothesisLifecycleResponse(BaseModel):
+    hypothesis: HypothesisResponse
+    goals: list[HypothesisLifecycleGoal] = []
+    stories: list[HypothesisLifecycleStory] = []
+    # 정반합 양방향 — 이 가설을 대체한 것(계승자) + 이 가설이 대체한 것들(전신, 역방향 FK).
+    # 확認된 페어(migration 0237) 외엔 항상 None/빈 리스트("아직" — 자동 페어링 없음).
+    superseded_by: HypothesisLifecycleSuccessor | None = None
+    supersedes: list[HypothesisLifecycleSuccessor] = []
+    timeline: HypothesisLifecycleTimeline

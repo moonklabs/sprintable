@@ -120,7 +120,8 @@ function ConversationRow({
         </span>
         {/* story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
         {isAgentInConv && (
-          <span className="flex-shrink-0 rounded border border-info/30 bg-info/12 px-1.5 py-0.5 text-[10px] font-medium text-info">
+          // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+          <span className="flex-shrink-0 rounded border border-info/30 bg-info/12 px-1.5 py-0.5 text-[10px] font-medium text-foreground">
             {t('agent')}
           </span>
         )}
@@ -162,10 +163,13 @@ function ConversationRow({
       onClick={onClick}
       className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-muted/60 active:bg-muted"
     >
-      {/* Avatar */}
+      {/* Avatar — story #2590(TIER1 아이콘): 계열 글자는 tint 유무와 무관하게(카드/배경/muted
+          전부) 3.0 미달이라(--warning L=0.75 자체가 옅음) tint 제거+ring으로도 안 풀린다(직접
+          재실측: warning on card 2.25·warning-border on card 1.65 — 둘 다 실패). 진한 warning
+          토큰 신설은 이 스토리 범위 밖(#2420 doc "별건") — foreground로 잠정 통일. */}
       <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-sm font-medium ${
         isAgentConv
-          ? 'bg-warning-tint text-warning'
+          ? 'bg-warning-tint text-foreground'
           : conv.type === 'dm'
             ? 'bg-primary/15 text-primary'
             : 'bg-info/15 text-info'

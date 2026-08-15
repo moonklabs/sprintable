@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   ExternalLink, X, FileText, File, Layers, CheckSquare, Eye,
@@ -11,8 +11,10 @@ import {
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { docViewUrl } from '@/components/docs/lib/doc-project-url';
+import { resolveScopedEntityHref, storyBoardUrl, goalUrl, sprintUrl, assetStorageUrl } from '@/lib/entity-project-url';
 import { initials } from '@/lib/storage/format';
 import { renderEntityStatusLabel, translateEntityStatus, type EntityStatusFetchState } from './entity-status-labels';
+import { ArtifactThumbnail } from '@/components/canvas/artifact-thumbnail';
 
 // story #2302 — 이 8종은 BE reference_registry.py ENTITY_RESOLVERS 와 키 집합이 같아야 한다
 // (AC2·AC5, entity-icons.registry-parity.test.ts 가 코드스캔으로 대조). `asset`은 registry
@@ -119,15 +121,35 @@ const ENTITY_API: Record<string, (id: string) => string> = {
   story: (id) => `/api/stories/${id}`,
   epic: (id) => `/api/goals/${id}`,
   asset: (id) => `/api/assets/${id}`,
+  // story #2642 — sprint는 own-href(getEntityHref)라 이전엔 몸통 fetch 자체가 없었다(제목·기간
+  // 외 보여줄 게 없다는 판단, RICH_PREVIEW_TYPES 밖 그대로 유지). 그런데 크로스프로젝트 직행
+  // URL을 지으려면 sprint 자신의 org_slug/project_slug(BE #3044, SprintResponse 확장)를 알아야
+  // 해서 fetch 자체는 필요해졌다 — 몸통 렌더는 여전히 "미리보기 없음"(RICH_PREVIEW_TYPES 무변경,
+  // 아래 href 계산에서만 이 detail을 쓴다).
+  sprint: (id) => `/api/sprints/${id}`,
   // story #2302 — task.story_id(항상 유일 부모)·artifact.{story_id,epic_id,doc_id}(최대 1개,
-  // 전부 nullable)를 읽어 ②/③을 레코드 단위로 판정하는 재료. hypothesis는 의도적으로 여기
-  // 없다(위 getEntityHref 주석 참고 — 애초에 fetch할 필요가 없는 고정 ③).
+  // 전부 nullable)를 읽어 ②/③을 레코드 단위로 판정하는 재료.
   task: (id) => `/api/tasks/${id}`,
   artifact: (id) => `/api/visual-artifacts/${id}`,
   // story #2314(2026-07-29): GET /api/v2/evidence/{id}가 신설돼 evidence도 fetch-eligible로
   // 승격 — 응답의 resolved_story_id를 EntityPreviewModal이 읽는다(아래 evidence 분기).
   evidence: (id) => `/api/evidence/${id}`,
+  // story #2614 — hypothesis는 §2302에서 "링크(풋터) 판정용으로 fetch할 필요가 없다"(다대다라
+  // 부모 하나를 못 고름, 그건 여전히 사실 — 아래 getEntityHref는 무변경)는 이유로 ENTITY_API
+  // 자체에서 빠졌었는데, 그 근거가 "몸통 content도 fetch 불필요"로 잘못 일반화됐다 — statement
+  // (§2.2.4 유일한 수동 텍스트 입력)는 실재하고 GET /api/hypotheses/{id}도 이미 있다(E-LOOP-LEDGER
+  // S6). 풋터(갈 곳 없음)와 몸통(내용 있음)은 별개 축 — 몸통만 이제 채운다.
+  hypothesis: (id) => `/api/hypotheses/${id}`,
 };
+
+// story #2614 AC2 — 멘션 합성 가능 8타입(story/doc/epic/task/sprint/artifact/hypothesis/
+// evidence) 전수표. 이 Set에 없는 타입은 "이 엔티티는 별도 미리보기가 없습니다"로 떨어진다 —
+// 그게 이 스토리가 고친 결함(만들 수는 있는데 몸통에서 아무것도 못 얻는 반쪽)이었다. sprint는
+// own-href(getEntityHref)로 풋터가 이미 열리고 몸통에 보여줄 필드가 없어(제목·기간 외 없음)
+// 의도적으로 이 Set 밖 — "미리보기 없음" 문구가 정확한 그 드문 경우(AC3의 "진짜 없는 것"에
+// sprint도 포함). 새 합성 가능 타입을 추가하면 이 Set도 같이 넓히거나(몸통 있음), 의도적으로
+// 빼면서 그 이유를 여기 한 줄 남길 것 — «만들 수 있는데 못 여는» 사각을 다시 만들지 않도록.
+const RICH_PREVIEW_TYPES = new Set(['story', 'epic', 'doc', 'artifact', 'hypothesis']);
 
 const MdBadge = ({ label }: { label: string }) => (
   <span className="rounded border px-1.5 py-0.5 text-[11px] font-medium border-border bg-muted text-muted-foreground">
@@ -139,7 +161,21 @@ const MdBadge = ({ label }: { label: string }) => (
 // 새 함수 참조가 되어 react-markdown이 서브트리를 리마운트한다(chat-bubble 근본원인과 동형).
 // 이 객체는 props/상태에 의존하지 않는 순수 상수이고 자식도 전부 stateless라 useMemo조차
 // 불필요 — 모듈 스코프로 끌어올려 참조를 영구 고정한다.
+// story #2639 — 본문 엔티티 참조 토큰 `[제목](entity:타입:id)`의 href 매칭(id는 UUID만).
+// doc-content-renderer.tsx·chat-bubble.tsx의 파싱 규칙과 문자 그대로 동일(드리프트 방지).
+const MDBODY_ENTITY_REF_RE = /^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
 const mdBodyComponents = {
+  // story #2639(미르코 리뷰 ⑤) — 결재 카드 문서 미리보기(EntityPreviewModal→EntityDetail doc
+  // 분기)가 이 경량 렌더러를 쓴다. doc-content-renderer와 동일하게 entity: 참조를 EntityChip으로
+  // 잇는다(같은 파일의 EntityChip 재사용·사본 0). 비-UUID/asset은 평문 링크 폴백(무동작 0).
+  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
+    const m = href?.match(MDBODY_ENTITY_REF_RE);
+    if (m && m[1]!.toLowerCase() !== 'asset') {
+      return <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} />;
+    }
+    return <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">{children}</a>;
+  },
   p: ({ children }: { children?: React.ReactNode }) => <p className="mb-2 text-sm leading-6">{children}</p>,
   h1: ({ children }: { children?: React.ReactNode }) => <h1 className="mb-2 text-lg font-bold">{children}</h1>,
   h2: ({ children }: { children?: React.ReactNode }) => <h2 className="mb-2 text-base font-bold">{children}</h2>,
@@ -155,13 +191,19 @@ const mdBodyComponents = {
   em: ({ children }: { children?: React.ReactNode }) => <em className="italic">{children}</em>,
 };
 
-const MdBody = ({ content }: { content: string }) => (
-  <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdBodyComponents}>
+// story #2639 — entity: 스킴 보존(이 렌더러는 rehype-sanitize를 안 써서 이 한 겹이면 충분).
+// 그 외 스킴은 기본 sanitize 유지(javascript:/data: 차단). export: MdBody 격리 테스트용.
+export const MdBody = ({ content }: { content: string }) => (
+  <ReactMarkdown
+    remarkPlugins={[remarkGfm]}
+    urlTransform={(url) => (url.startsWith('entity:') ? url : defaultUrlTransform(url))}
+    components={mdBodyComponents}
+  >
     {content}
   </ReactMarkdown>
 );
 
-function EntityDetail({ entityType, detail }: { entityType: string; detail: Record<string, unknown> }) {
+function EntityDetail({ entityType, entityId, detail }: { entityType: string; entityId: string; detail: Record<string, unknown> }) {
   if (entityType === 'story') {
     const d = detail as { status?: string; priority?: string; story_points?: number; description?: string; acceptance_criteria?: string };
     const statusLabel = d.status ? translateEntityStatus('story', d.status) : null;
@@ -203,6 +245,43 @@ function EntityDetail({ entityType, detail }: { entityType: string; detail: Reco
   if (entityType === 'doc') {
     const d = detail as { content?: string };
     return d.content ? <MdBody content={d.content} /> : null;
+  }
+
+  // story #2614 — 부모(story/epic/doc)가 없는 독립 artifact(챗에 바로 올린 mockup 등)는 풋터에
+  // "갈 곳"이 없다(getEntityHref 주석 그대로, 변경 없음) — 그래도 몸통에서 실물을 보여주면
+  // 그 자체로 소비처가 선다. 갤러리가 이미 쓰는 ArtifactThumbnail을 그대로 재사용(PNG export
+  // 우선·라이브 렌더·placeholder 폴백 — 이 컴포넌트 자신의 no-fiction 규율 그대로 상속, 여기서
+  // 새로 흉내내지 않는다).
+  if (entityType === 'artifact') {
+    const d = detail as { latest_version_number?: number; anchor_version?: number | null };
+    if (d.latest_version_number == null) return null;
+    return (
+      <ArtifactThumbnail
+        artifactId={entityId}
+        latestVersionNumber={d.latest_version_number}
+        anchorVersion={d.anchor_version ?? null}
+        className="aspect-video w-full"
+      />
+    );
+  }
+
+  // story #2614 — hypothesis는 풋터(담긴 곳)가 여전히 없다(다대다·getEntityHref 무변경). 하지만
+  // statement(§2.2.4 유일한 수동 텍스트 입력)는 story description과 동형으로 몸통에 보일 수
+  // 있다 — "풋터에 갈 곳이 없다"와 "몸통에 보여줄 게 없다"는 별개였다는 게 이 스토리의 발견.
+  if (entityType === 'hypothesis') {
+    const d = detail as { status?: string; statement?: string };
+    const statusLabel = d.status ? translateEntityStatus('hypothesis', d.status) : null;
+    if (!statusLabel && !d.statement) return null;
+    return (
+      <div className="space-y-3">
+        {statusLabel && (
+          <div className="flex flex-wrap gap-1.5">
+            <MdBadge label={statusLabel} />
+          </div>
+        )}
+        {d.statement && <MdBody content={d.statement} />}
+      </div>
+    );
   }
 
   return null;
@@ -297,6 +376,40 @@ export function EntityPreviewModal({
     return () => { cancelled = true; };
   }, [entityType, entityId, hasFetchStrategy]);
 
+  // story #2642(PO 08-14, «FE 단독 가능» 조각) — artifact의 부모가 doc이면(via-parent) 그
+  // doc이 실제로 속한 project로 직행한다 — #2168이 doc own-href에 이미 증명한 처방(/api/docs/
+  // preview 재사용, 새 BE 없음) 그대로 via-parent 경로에도 적용한다. 위 effect가 artifact
+  // 자신의 detail(story_id/epic_id/doc_id)을 먼저 채운 *뒤에* doc_id가 있으면 이 effect가
+  // 이어 붙는다(체이닝) — docPreview state를 재사용(모달이 열릴 때마다 언마운트→새 인스턴스라
+  // 이전 엔티티의 값이 새는 레이스 없음, 위 {showModal && <EntityPreviewModal .../>} 패턴).
+  useEffect(() => {
+    if (entityType !== 'artifact') return;
+    const docId = (detail as { doc_id?: string | null } | null)?.doc_id;
+    if (!docId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const previewRes = await fetch(`/api/docs/preview?q=${encodeURIComponent(docId)}`);
+        if (!previewRes.ok) throw new Error();
+        const previewJson = (await previewRes.json()) as {
+          data?: { slug?: string; projectId?: string; orgSlug?: string; projectSlug?: string | null };
+        };
+        const slug = previewJson.data?.slug;
+        const docProjectId = previewJson.data?.projectId;
+        if (!slug || !docProjectId || cancelled) return;
+        setDocPreview({
+          slug, projectId: docProjectId,
+          orgSlug: previewJson.data?.orgSlug ?? '',
+          projectSlug: previewJson.data?.projectSlug ?? null,
+        });
+      } catch {
+        // 조용히 실패 — 아래 artifact 분기가 bare `/docs?id=` 폴백으로 떨어진다(④ 원칙,
+        // 카드 전체를 안 죽인다 — AC4와 동형).
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [entityType, detail]);
+
   const colorClass = ENTITY_COLORS[entityType] ?? GRAY_STATE_COLOR;
   const label = title ?? entityId;
   // story #2262 AC2(2026-08-08, 쉬운 절반) — 호출부(EntityChip)는 status를 모르고 항상
@@ -330,35 +443,72 @@ export function EntityPreviewModal({
     linkKind = resolvedHref ? 'own' : null;
   } else if (entityType === 'task') {
     // ② — Task.story_id는 NOT NULL(항상 유일 부모). fetch 전이면 아직 null(풋터는 loading이 가림).
-    const storyId = (detail as { story_id?: string } | null)?.story_id ?? null;
-    resolvedHref = storyId ? `/board?story=${storyId}` : null;
+    // story #2642(BE #3044) — TaskResponse가 이제 org_slug/project_slug를 직접 싣는다(story_id→
+    // Story.project_id 1-hop을 BE가 이미 해소해 응답에 얹어 준다 — FE가 또 한 번 조회할 필요 없음).
+    const t = detail as { story_id?: string | null; org_slug?: string | null; project_slug?: string | null } | null;
+    resolvedHref = resolveScopedEntityHref(
+      t?.org_slug ? { orgSlug: t.org_slug, projectSlug: t.project_slug ?? null } : null,
+      t?.story_id ? `/board?story=${t.story_id}` : null,
+      (ws, proj) => storyBoardUrl(ws, proj, t!.story_id!),
+    );
     linkKind = resolvedHref ? 'via-parent' : null;
   } else if (entityType === 'artifact') {
     // 레코드마다 갈린다(story #2302 그라운딩) — story_id/epic_id/doc_id 전부 nullable·최대 1개
     // (hypothesis의 다대다 링크테이블과 다른 모양이라 "하나 고르면 나머지를 숨기는 거짓"이 될
     // 위험이 없다). 우선순위는 story>epic>doc — 동시에 여럿 있을 수 없어(모델 제약은 아니지만
     // 실질적으로 최대 1개라는 그라운딩 전제) 순서 자체가 결과를 바꾸지 않는다.
-    const d = detail as { story_id?: string | null; epic_id?: string | null; doc_id?: string | null } | null;
-    const parentHref = d?.story_id ? `/board?story=${d.story_id}`
-      : d?.epic_id ? `/goals/${d.epic_id}`
-      : d?.doc_id ? `/docs?id=${d.doc_id}`
-      : null;
+    // story #2642(BE #3044) — ArtifactResponse는 org_id/project_id가 artifact 자기 행에 이미
+    // 있어(생성 시점 _assert_link_target_in_scope로 부모와 같은 org/project 보장) 부모 hop
+    // 없이 org_slug/project_slug를 직접 싣는다 — story_id/epic_id 분기 둘 다 이 값을 그대로 쓴다.
+    const d = detail as {
+      story_id?: string | null; epic_id?: string | null; doc_id?: string | null;
+      org_slug?: string | null; project_slug?: string | null;
+    } | null;
+    const ownerSlugs = d?.org_slug ? { orgSlug: d.org_slug, projectSlug: d.project_slug ?? null } : null;
+    // doc 부모만 예외 — docViewUrl은 doc 자신의 slug가 필요한데 artifact 응답엔 그게 없어(위
+    // effect가 /api/docs/preview로 별도 선조회한 docPreview를 쓴다, #2168 재사용 그대로).
+    const parentHref = d?.story_id
+      ? resolveScopedEntityHref(ownerSlugs, `/board?story=${d.story_id}`, (ws, proj) => storyBoardUrl(ws, proj, d.story_id!))
+      : d?.epic_id
+      ? resolveScopedEntityHref(ownerSlugs, `/goals/${d.epic_id}`, (ws, proj) => goalUrl(ws, proj, d.epic_id!))
+      : d?.doc_id
+        ? (docPreview && docPreview.orgSlug && docPreview.projectSlug
+            ? docViewUrl(docPreview.orgSlug, docPreview.projectSlug, docPreview.slug)
+            : `/docs?id=${d.doc_id}`)
+        : null;
     resolvedHref = parentHref;
     linkKind = parentHref ? 'via-parent' : null;
   } else if (entityType === 'evidence') {
     // ② — story #2314(2026-07-29): BE GET /{id}가 work_item_type이 story든 task든 이미
     // resolved_story_id 하나로 해소해 준다(task처럼 여기서 또 한 번 join할 필요가 없다).
-    const storyId = (detail as { resolved_story_id?: string | null } | null)?.resolved_story_id ?? null;
-    resolvedHref = storyId ? `/board?story=${storyId}` : null;
+    // story #2642(BE #3044) — EvidenceResponse가 그 resolve 과정에서 이미 계산해 둔
+    // project_id로 org_slug/project_slug도 같이 싣는다(추가 join 없음).
+    const ev = detail as { resolved_story_id?: string | null; org_slug?: string | null; project_slug?: string | null } | null;
+    resolvedHref = resolveScopedEntityHref(
+      ev?.org_slug ? { orgSlug: ev.org_slug, projectSlug: ev.project_slug ?? null } : null,
+      ev?.resolved_story_id ? `/board?story=${ev.resolved_story_id}` : null,
+      (ws, proj) => storyBoardUrl(ws, proj, ev!.resolved_story_id!),
+    );
     linkKind = resolvedHref ? 'via-parent' : null;
   } else if (entityType === 'hypothesis') {
     // ③ 고정 — 위 getEntityHref 주석 참고.
     resolvedHref = null;
     linkKind = null;
   } else {
-    // story·epic·sprint·asset — 전부 own-href를 동기로 아는 ①. href prop 그대로 신뢰.
-    resolvedHref = href;
-    linkKind = href ? 'own' : null;
+    // story·epic·sprint·asset — own-href ①. story #2642(BE #3044)부터 각 detail 응답이
+    // org_slug/project_slug를 직접 싣는다 — 엔티티 자신의 project로 직행(뷰어의 현재 프로젝트
+    // 추측을 proxy.ts::redirectLegacyResourcePath에 맡기지 않는다). fetch 전/실패(project_slug
+    // 없음 포함)는 기존 bare href prop 그대로(④ 원칙, 회귀 아님).
+    const own = detail as { org_slug?: string | null; project_slug?: string | null } | null;
+    const slugs = own?.org_slug ? { orgSlug: own.org_slug, projectSlug: own.project_slug ?? null } : null;
+    const buildScoped =
+      entityType === 'story' ? (ws: string, proj: string) => storyBoardUrl(ws, proj, entityId)
+      : entityType === 'epic' ? (ws: string, proj: string) => goalUrl(ws, proj, entityId)
+      : entityType === 'sprint' ? (ws: string, proj: string) => sprintUrl(ws, proj, entityId)
+      : entityType === 'asset' ? (ws: string, proj: string) => assetStorageUrl(ws, proj, entityId)
+      : null;
+    resolvedHref = buildScoped ? resolveScopedEntityHref(slugs, href, buildScoped) : href;
+    linkKind = resolvedHref ? 'own' : null;
   }
 
   return (
@@ -391,8 +541,8 @@ export function EntityPreviewModal({
             </div>
           ) : notFound ? (
             <p className="text-xs text-muted-foreground py-4">대상을 찾을 수 없습니다.</p>
-          ) : detail && (entityType === 'story' || entityType === 'epic' || entityType === 'doc') ? (
-            <EntityDetail entityType={entityType} detail={detail} />
+          ) : detail && RICH_PREVIEW_TYPES.has(entityType) ? (
+            <EntityDetail entityType={entityType} entityId={entityId} detail={detail} />
           ) : (
             <p className="text-xs text-muted-foreground py-4">이 엔티티는 별도 미리보기가 없습니다.</p>
           )}

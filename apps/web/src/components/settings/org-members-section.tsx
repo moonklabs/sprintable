@@ -391,13 +391,14 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                 actions={
                   canManage ? (
                     <div className="flex shrink-0 gap-1">
+                      {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
                       <Button
                         size="sm"
                         variant="glass"
                         disabled={!invite.invite_url}
                         onClick={() => void handleCopyInviteLink(invite.id, invite.invite_url)}
                         title={invite.invite_url ? '초대 링크 복사' : '링크 사용 불가'}
-                        className={copiedInviteId === invite.id ? 'text-success bg-success/12 border-success/30' : ''}
+                        className={copiedInviteId === invite.id ? 'text-foreground bg-success/12 border-success/30' : ''}
                       >
                         {copiedInviteId === invite.id ? (
                           <><Check className="h-3 w-3 mr-1" />복사됨</>

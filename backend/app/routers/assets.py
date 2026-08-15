@@ -68,6 +68,11 @@ class AssetResponse(BaseModel):
     updated_at: datetime
     created_by: CreatedBy | None = None
     source_links: list[SourceLink] = []
+    # story #2642(웹·칩 공통, 2026-08-14) — #2168 DocPreviewResponse와 동형. project_id가
+    # nullable(org-level asset 존재)이라 project_slug도 그 경우 None. _enrich()가 이미
+    # created_by/source_links를 페이지 단위 batch로 붙이는 자리라 같은 배치에 합류(N+1 회피).
+    org_slug: str | None = None
+    project_slug: str | None = None
 
 
 class AssetPage(BaseModel):
@@ -416,10 +421,19 @@ async def _enrich(
         if sl is not None:  # 스코프 밖 source → link 미생성(누수 0)
             links_by_asset.setdefault(aid, []).append(sl)
 
+    # story #2642: org_slug(요청당 1쿼리)+project_slug(distinct project_id 배치 1쿼리) —
+    # 이 파일의 기존 "페이지 단위 batch enrich(N+1 회피)" 원칙 그대로(파일 docstring 참조).
+    from app.services.entity_slug import resolve_org_slug, resolve_project_slugs
+
+    org_slug = await resolve_org_slug(db, org_id)
+    project_slug_map = await resolve_project_slugs(db, {a.project_id for a in assets if a.project_id})
+
     for a in assets:
         resp = base[a.id]
         resp.created_by = cb_map.get(a.created_by) if a.created_by else None
         resp.source_links = links_by_asset.get(a.id, [])
+        resp.org_slug = org_slug
+        resp.project_slug = project_slug_map.get(a.project_id) if a.project_id else None
     return base
 
 

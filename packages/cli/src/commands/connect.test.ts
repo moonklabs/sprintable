@@ -64,11 +64,17 @@ describe("writeMcpConfig — 구조 검증", () => {
       JSON.stringify({ mcpServers: { other: { command: "other" } } })
     );
     // #2577: 서버키 sprintable -> sprintable-mcp
+    // story #2579: uvx 패키지명은 서버키와 별개로 PyPI 실명("sprintable")이어야 한다 —
+    // 이 값을 서버키와 같게 적으면(구 "sprintable-mcp") 실제 구현(adapters/types.ts)이
+    // 그렇게 회귀했을 때도 이 자리는 계속 통과한다(공허-통과), 진짜 검증은
+    // adapters/types.test.ts가 real writer 함수를 호출해서 한다 — 여기는 그 값과
+    // 어긋나지 않게만 맞춰둔다.
     existing.mcpServers["sprintable-mcp"] = {
       command: "uvx",
-      args: ["sprintable-mcp"],
+      args: ["sprintable"],
       env: {
         SPRINTABLE_API_URL: "https://api.sprintable.ai",
+        AGENT_GATEWAY_V2: "1",
         AGENT_API_KEY: "sk_test",
       },
     };

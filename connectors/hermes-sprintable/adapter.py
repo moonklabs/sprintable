@@ -147,6 +147,43 @@ def _normalize_image_items(images: Any) -> list[dict[str, str]]:
     return normalized
 
 
+def _normalize_attachment_items(attachments: Any) -> list[dict[str, str]]:
+    """#2568: general (non-image-filtered) attachment metadata — unlike
+    ``_normalize_image_items`` this keeps every content_type (e.g. .md), since
+    the server's ``payload.attachments`` was already confirmed to include them
+    and this adapter (unlike ``connectors/sdk``, which it deliberately does not
+    import — see the module docstring) had its own independent copy of this gap."""
+    if not isinstance(attachments, list):
+        return []
+    normalized: list[dict[str, str]] = []
+    for idx, item in enumerate(attachments, start=1):
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        if not url:
+            continue
+        normalized.append({
+            "url": url,
+            "name": str(item.get("name") or f"sprintable-attachment-{idx}").strip(),
+            "content_type": str(item.get("content_type") or "").strip(),
+            "asset_id": str(item.get("asset_id") or "").strip(),
+        })
+    return normalized
+
+
+def _render_attachment_notice(attachments: list[dict[str, str]]) -> str:
+    """#2568 AC3: attachment 존재+회수 경로(asset text API)를 에이전트에 안내."""
+    lines = []
+    for a in attachments:
+        label = a["name"] or a["url"]
+        ctype = a["content_type"] or "unknown type"
+        if a["asset_id"]:
+            lines.append(f"- {label} ({ctype}) — 본문 회수: GET /api/v2/assets/{a['asset_id']}/text")
+        else:
+            lines.append(f"- {label} ({ctype}) — url: {a['url']}")
+    return f"[첨부 {len(attachments)}건]\n" + "\n".join(lines) + "\n[/첨부]"
+
+
 DEFAULT_API_URL = "https://sprintable-backend-dev-57iommnikq-du.a.run.app"
 RECONNECT_BACKOFF = [2, 5, 10, 30, 60]
 STREAM_READ_TIMEOUT = 90  # gateway heartbeats keep the stream alive
@@ -209,7 +246,15 @@ class SprintableAdapter(BasePlatformAdapter):
 
     # -- lifecycle ----------------------------------------------------------
 
-    async def connect(self) -> bool:
+    async def connect(self, *, is_reconnect: bool = False) -> bool:
+        # story #2564(S9) — 격리 hermes-agent(v0.18.2) 실 왕복 中 실측: BasePlatformAdapter.
+        # connect()가 이제 keyword-only is_reconnect(cold-boot=False/outage 후 재연결=True)를
+        # 받는데(gateway/platforms/base.py) 이 오버라이드가 파라미터 없이 정의돼 있어 매
+        # 연결(최초든 재연결이든)이 TypeError로 죽었다 — hermes plugins install 정식 경로로
+        # 처음 실행해서야 드러난 결함(라이브 사본은 낡아 이 시그니처 변경 前 버전이라 아직
+        # 안 겪었을 뿐). 파라미터는 무시해도 안전 — 이 어댑터는 서버측 Last-Event-ID+backfill로
+        # 재연결을 이미 감당하고(_run_stream의 백오프 루프) 클라이언트 버퍼 큐가 없어 base
+        # docstring의 "no such queue may ignore the flag" 케이스에 정확히 해당한다.
         if not HTTPX_AVAILABLE:
             logger.warning("[%s] httpx not installed", self.name)
             return False
@@ -357,6 +402,7 @@ class SprintableAdapter(BasePlatformAdapter):
             return  # not a recommended inject type (e.g. status_changed FYI)
         content = (data.get("content") or payload.get("content") or "").strip()
         images = _normalize_image_items(data.get("images") or payload.get("images"))
+        attachments = _normalize_attachment_items(data.get("attachments") or payload.get("attachments"))
 
         # seq for ack + reconnect cursor — check SSE id, then several data locations.
         # Computed before the content/images guard below so the empty-content branch
@@ -372,7 +418,7 @@ class SprintableAdapter(BasePlatformAdapter):
         if ev_id:
             self._last_event_id = ev_id
 
-        if not content and not images:
+        if not content and not images and not attachments:
             # #2375 AC5 — a content-less injectable event is "nothing to show", not a
             # delivery failure. Returning here without acking used to leave seq
             # unconfirmed forever, so every reconnect re-sent the same event via
@@ -428,6 +474,12 @@ class SprintableAdapter(BasePlatformAdapter):
         media_urls, media_types, attachment_notes = await self._fetch_image_attachments(images)
         if attachment_notes:
             content = "\n".join(attachment_notes + ([content] if content else []))
+        # #2568 AC2/AC3: 일반(비-이미지) 첨부 — 실제 바이트는 안 가져오고(이미지처럼 로컬
+        # 캐시할 필요 없음) 존재+회수 경로만 안내. 순수 첨부만 온 메시지(content="")도 이
+        # notice 자체가 content가 돼 위 드롭체크를 통과한다.
+        if attachments:
+            notice = _render_attachment_notice(attachments)
+            content = f"{content}\n\n{notice}" if content else notice
 
         # E-ACTIVATION Phase 2 (X): 이 대화에 쌓인 관찰을 활성화 턴 context 로 hydrate("다 봄" 보존).
         if noninvoke:

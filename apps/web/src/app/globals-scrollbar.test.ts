@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { contrastRatio } from '../lib/color-contrast';
 
 // story #2165(2026-07-25, 까심 QA): 제품 전역 스크롤바 숨김 + 코드블럭/표 예외. CSS는 jsdom으로
 // 렌더 검증이 안 돼(실제 스크롤바 렌더는 브라우저 전용) 소스 문자열 불변식으로 고정한다:
@@ -107,6 +108,39 @@ describe('실제 스크롤 요소(shiki가 만드는 <pre> 자신)에도 scrollb
   it('webkit 스크롤바 규칙(track·thumb·hover)도 같은 selector로 붙어 있다', () => {
     expect(css).toMatch(/\.ProseMirror \.scrollbar-visible pre::-webkit-scrollbar\s*\{[^}]*display:\s*block/);
     expect(css).toMatch(/\.ProseMirror \.scrollbar-visible pre::-webkit-scrollbar-thumb\s*\{/);
+  });
+});
+
+// story #2601 — 픽셀 fixture는 실 Chromium canvas 2d(fillRect+getImageData)로 캡처했다
+// (2026-08-13, Puppeteer, color-contrast.test.ts와 동일 규격). 원래 값(라이트 10%/다크 8%
+// 알파)은 대비 ~1.2:1로 사실상 안 보였다(story 원 결함) — 45%/65%(hover 65%/80%)로 올려
+// 3:1(WCAG 비텍스트 UI 컴포넌트 문턱) 이상을 확保. ⛔jsdom은 실 canvas 렌더를 안 하므로
+// oklch 알파합성을 여기서 재현하지 않는다 — 이미 sRGB로 환산된 실측 RGB를 고정값으로 쓴다.
+const LIGHT_BG = [255, 255, 255] as const; // --background(light) = oklch(1 0 0)
+const LIGHT_THUMB_OLD = [229, 229, 229] as const; // oklch(0 0 0 / 10%) — 원 결함
+const LIGHT_THUMB = [140, 140, 140] as const; // oklch(0 0 0 / 45%)
+const DARK_BG = [17, 17, 20] as const; // --background(dark) = oklch(0.18 0.005 285.823)
+const DARK_THUMB_OLD = [36, 36, 39] as const; // oklch(1 0 0 / 8%) — 원 결함
+const DARK_THUMB = [172, 172, 173] as const; // oklch(1 0 0 / 65%)
+
+describe('스크롤바 썸/배경 대비 (#2601 — «스크롤바 미표시» 실은 대비 실패)', () => {
+  it('양성대조 — 원래 값(10%/8% 알파)은 실측 대비 ~1.2:1로 3:1 미달이었다(원 결함 재현)', () => {
+    expect(contrastRatio(LIGHT_BG, LIGHT_THUMB_OLD)).toBeLessThan(1.5);
+    expect(contrastRatio(DARK_BG, DARK_THUMB_OLD)).toBeLessThan(1.5);
+  });
+
+  it('light: 새 썸(45% 알파)이 배경과 3:1 이상 — WCAG 비텍스트 UI 컴포넌트 문턱', () => {
+    expect(contrastRatio(LIGHT_BG, LIGHT_THUMB)).toBeGreaterThanOrEqual(3);
+  });
+
+  it('dark: 새 썸(65% 알파)이 배경과 3:1 이상', () => {
+    expect(contrastRatio(DARK_BG, DARK_THUMB)).toBeGreaterThanOrEqual(3);
+  });
+
+  it('회귀 가드 — --background 값이 이 값 그대로일 때만 위 판정이 유효하다(값이 바뀌면 재실측 필요)', () => {
+    const css = fs.readFileSync(path.resolve(__dirname, 'globals.css'), 'utf8');
+    expect(css).toContain('--background: oklch(1 0 0);');
+    expect(css).toContain('--background: oklch(0.18 0.005 285.823);');
   });
 });
 

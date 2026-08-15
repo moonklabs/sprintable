@@ -93,7 +93,7 @@ export function StorageSourceUsageList({ links, compact = false }: StorageSource
                 </span>
               ) : null}
             </span>
-            {isLinked ? <ArrowUpRight className="mt-[3px] size-4 shrink-0 text-muted-foreground/40" /> : null}
+            {isLinked ? <ArrowUpRight className="mt-[3px] size-4 shrink-0 text-muted-foreground" /> : null}
           </>
         );
 

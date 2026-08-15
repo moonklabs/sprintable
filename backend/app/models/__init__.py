@@ -28,8 +28,12 @@ from app.models.workflow_version import WorkflowVersion
 from app.models.api_key import ApiKey
 from app.models.org_subscription import OrgSubscription
 from app.models.pricing_version import PricingVersion
+from app.models.offering_version import OfferingVersion
+from app.models.grandfather_policy import GrandfatherPolicy
+from app.models.billing_ledger_entry import BillingLedgerEntry
 from app.models.plan_tier_limit import PlanTierLimit
 from app.models.policy_document import PolicyDocument
+from app.models.legal_document import LegalDocumentVersion
 from app.models.audit import AuditLog
 from app.models.webhook_config import WebhookConfig
 from app.models.push_device import PushDevice
@@ -81,6 +85,7 @@ from app.models.role_template import RoleTemplate
 # "등재를 미루는 것"이 아니라 "파일마다 전체 스키마를 create_all/drop_all하는 구조 자체를
 # 먼저 손보는 것"이 그 스토리의 실제 과제.
 from app.models.trust_snapshot import OrgMemberTrustSnapshot
+from app.models.unattached_snapshot import UnattachedStorySnapshot
 from app.models.visual_artifact import ArtifactNode, ArtifactVersion, VisualArtifact
 # fix(2026-07-20, #2058 후속 CI 적출): 이 두 모듈이 여기 없어 `import app.models`만으로는
 # Base.metadata에 등록 안 됐다 — participation_role을 참조하는 FK(hitl_config.OrgGateOverride/
@@ -92,6 +97,7 @@ from app.models.hitl_config import MemberGateOverride, OrgGateOverride, OrgGateP
 from app.models.participation import Participation, ParticipationRole
 from app.models.chain_escalation_org_config import ChainEscalationOrgConfig
 from app.models.chain_circuit_breaker import ChainCircuitBreaker
+from app.models.event_definition import EventDefinition
 
 __all__ = [
     "RoleTemplate",
@@ -140,8 +146,12 @@ __all__ = [
     "ApiKey",
     "OrgSubscription",
     "PricingVersion",
+    "OfferingVersion",
+    "GrandfatherPolicy",
+    "BillingLedgerEntry",
     "PlanTierLimit",
     "PolicyDocument",
+    "LegalDocumentVersion",
     "AuditLog",
     "WebhookConfig",
     "PushDevice",
@@ -180,6 +190,7 @@ __all__ = [
     "StoryAssignee",
     "Task",
     "TeamMember",
+    "UnattachedStorySnapshot",
     "LoginAuditLog",
     "RefreshToken",
     "User",

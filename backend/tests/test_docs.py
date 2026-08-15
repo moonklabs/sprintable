@@ -137,6 +137,72 @@ async def test_create_doc_201():
 
 
 @pytest.mark.anyio
+async def test_create_doc_is_folder_true_sets_doc_type_folder():
+    """story #2974(카디르 QA) — DocCreate에 is_folder 필드가 없어 Pydantic이 요청의
+    is_folder:true를 조용히 버리고 doc_type이 항상 기본값("page")으로 생성되던 결함.
+    is_folder:true를 보내면 repo.create()에 doc_type="folder"가 실제로 전달되는지 고정한다
+    (Doc.is_folder는 저장 컬럼이 아니라 doc_type=="folder" derived property — models/doc.py)."""
+    doc = _mock_doc()
+    doc.doc_type = "folder"
+    with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
+         patch("app.routers.docs._resolve_doc_member_id", new_callable=AsyncMock) as mock_resolve, \
+         patch("app.routers.docs.canonicalize_member_id", new_callable=AsyncMock) as mock_canon, \
+         patch("app.services.mention_parser.reconcile_doc_mentions", new_callable=AsyncMock) as mock_reconcile:
+        mock_create.return_value = doc
+        mock_resolve.return_value = doc.created_by
+        mock_canon.return_value = doc.created_by
+        mock_reconcile.return_value = None
+
+        client, session, app = await _client()
+        try:
+            async with client as c:
+                resp = await c.post("/api/v2/docs", json={
+                    "project_id": str(PROJECT_ID),
+                    "org_id": str(ORG_ID),
+                    "title": "My Folder",
+                    "slug": "my-folder",
+                    "is_folder": True,
+                })
+        finally:
+            app.dependency_overrides.clear()
+
+    assert resp.status_code == 201
+    # 핵심 회귀가드 — is_folder:true가 repo.create()의 doc_type="folder"로 실제 전달됐는지.
+    # is_folder 자체는 Doc 생성자 kwarg가 아니므로(derived property) 이 호출에 실려선 안 된다.
+    assert mock_create.call_args.kwargs["doc_type"] == "folder"
+    assert "is_folder" not in mock_create.call_args.kwargs
+
+
+@pytest.mark.anyio
+async def test_create_doc_is_folder_omitted_defaults_to_page():
+    """음성대조 — is_folder 미지정(기본 False)이면 기존 동작(doc_type="page") 그대로."""
+    doc = _mock_doc()
+    with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
+         patch("app.routers.docs._resolve_doc_member_id", new_callable=AsyncMock) as mock_resolve, \
+         patch("app.routers.docs.canonicalize_member_id", new_callable=AsyncMock) as mock_canon, \
+         patch("app.services.mention_parser.reconcile_doc_mentions", new_callable=AsyncMock) as mock_reconcile:
+        mock_create.return_value = doc
+        mock_resolve.return_value = doc.created_by
+        mock_canon.return_value = doc.created_by
+        mock_reconcile.return_value = None
+
+        client, session, app = await _client()
+        try:
+            async with client as c:
+                resp = await c.post("/api/v2/docs", json={
+                    "project_id": str(PROJECT_ID),
+                    "org_id": str(ORG_ID),
+                    "title": "Getting Started",
+                    "slug": "getting-started-2",
+                })
+        finally:
+            app.dependency_overrides.clear()
+
+    assert resp.status_code == 201
+    assert mock_create.call_args.kwargs["doc_type"] == "page"
+
+
+@pytest.mark.anyio
 async def test_get_doc_200():
     client, session, app = await _client()
     try:

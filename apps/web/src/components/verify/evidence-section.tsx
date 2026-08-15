@@ -157,7 +157,7 @@ export function EvidenceSection({
       <div className="rounded-lg border border-border p-2.5">
         <button type="button" onClick={handleToggle} className="flex w-full items-center gap-2 text-left">
           <Check
-            className={cn('h-3 w-3 shrink-0', trustStage === 'verified' ? 'text-success/85' : 'text-warning')}
+            className={cn('h-3 w-3 shrink-0', trustStage === 'verified' ? 'text-success/85' : 'text-warning-strong')}
             strokeWidth={2.6}
             aria-hidden
           />
@@ -205,12 +205,12 @@ export function EvidenceSection({
                               className="flex items-center gap-1 text-xs font-medium text-foreground hover:underline"
                             >
                               <span className="truncate">{primaryText}</span>
-                              <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground/70" aria-hidden />
+                              <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
                             </a>
                           ) : (
                             <span className="block truncate text-xs font-medium text-foreground">{primaryText}</span>
                           )}
-                          {item.source ? <p className="truncate text-[11px] text-muted-foreground/80">{item.source}</p> : null}
+                          {item.source ? <p className="truncate text-[11px] text-muted-foreground">{item.source}</p> : null}
                         </div>
                         <span className="mt-0.5 shrink-0 text-[10px] font-semibold text-muted-foreground">
                           {t(TYPE_LABEL_KEY[item.type] ?? 'evidenceTypeUrl')}

@@ -74,6 +74,7 @@ async def _session():
     import app.models  # noqa: F401
     import app.models.participation  # noqa: F401 — org_gate_override FK 타깃(metadata 완전성·import 순서 무관)
     import app.models.workflow_line  # noqa: F401
+    import app.models.activity_log  # noqa: F401 — #2631: transition_gate()가 ActivityLog를 씀(#2201 후속 미등재 갭).
     url = _REAL_DB_URL
     for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgresql://"):
         if url.startswith(prefix):

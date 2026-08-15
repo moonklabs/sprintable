@@ -106,7 +106,7 @@ function DropZone({ onFile, t }: { onFile: (file: File) => void; t: (key: string
     >
       <span className="text-2xl">📁</span>
       <span className="mt-1 text-xs text-muted-foreground">{t('dropAudioFile')}</span>
-      <span className="text-[10px] text-muted-foreground/60">{t('supportedFormats')}</span>
+      <span className="text-[10px] text-muted-foreground">{t('supportedFormats')}</span>
       <input
         ref={inputRef}
         type="file"
@@ -306,7 +306,7 @@ export function AudioRecorder({
           실패(예: micDenied 반복)에서는 null 경유 없이 같은 문자열이 재설정될 수 있다 — 별도 잠재
           결함으로 기록(훅 내부 상태머신은 이 스토리에서 재구성하지 않음). */}
       {errorCode && <p key={errorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="mb-2 text-xs text-destructive">{t(ERROR_I18N_MAP[errorCode])}</p>}
-      {sttError && <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-2 text-xs text-warning">{sttError}</p>}
+      {sttError && <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-2 text-xs text-warning-strong">{sttError}</p>}
       {fileError && <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-2 text-xs text-destructive">{fileError}</p>}
 
       {/* 녹음 상태 (AC2 + AC11 모바일 반응형) */}

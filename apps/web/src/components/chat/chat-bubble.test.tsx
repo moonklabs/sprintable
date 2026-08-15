@@ -17,8 +17,21 @@ import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// story #2637 — mutable로 둬 EventBlockCard의 human_only/role 게이팅 테스트가 값을 오버라이드
+// 할 수 있게 한다(기본값은 기존 50+ 테스트와 동일하게 human/무역할 — 비회귀).
+let mockDashboardContext: { projectId: string; currentTeamMemberId: string; currentMemberType?: 'human' | 'agent'; role?: string } = {
+  projectId: 'proj-1', currentTeamMemberId: 'member-1', currentMemberType: 'human', role: 'member',
+};
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
-  useDashboardContext: () => ({ projectId: 'proj-1', currentTeamMemberId: 'member-1' }),
+  useDashboardContext: () => mockDashboardContext,
+}));
+
+// story #2037 — 라이트박스 진입점 테스트용. 다른 describe들은 이미지 첨부를 렌더하지 않으므로
+// (문서 미리보기·PDF 등) 이 mock이 그쪽 동작에 영향을 안 준다.
+vi.mock('next/image', () => ({
+  default: ({ src, alt }: { src?: string; alt?: string }) =>
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={src} alt={alt} data-next-image="true" />,
 }));
 
 let container: HTMLDivElement;
@@ -58,6 +71,7 @@ afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
   vi.unstubAllGlobals();
+  mockDashboardContext = { projectId: 'proj-1', currentTeamMemberId: 'member-1', currentMemberType: 'human', role: 'member' };
 });
 
 describe('ChatBubble — story #2263 AC6 유령 칩(stored 참조 대조)', () => {
@@ -821,5 +835,391 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     expect((document.body.querySelector('textarea') as HTMLTextAreaElement).value).toBe('본문 확인, 승인');
     const signBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes('승인하고 서명'))!;
     expect(signBtn.hasAttribute('disabled')).toBe(false);
+  });
+
+  // story #2631(FE 계약 doc bb733f26, AC4) — 챗 카드도 결재함/상세와 동일하게 undo·discuss를
+  // 노출한다. stubGate()를 그대로 재사용하되 /discuss·/undo 응답만 추가로 얹는다(다른 테스트의
+  // stubGate 시그니처는 안 건드림 — 이 describe 안에서만 로컬 확장).
+  function stubGateWithMutations(overrides: Parameters<typeof stubGate>[0]) {
+    const gate = stubGate(overrides) as Omit<ReturnType<typeof stubGate>, 'resolver_id' | 'resolved_at'> & { resolver_id: string | null; resolved_at: string | null };
+    vi.stubGlobal('fetch', vi.fn(async (url: string, opts?: { method?: string; body?: string }) => {
+      if (typeof url === 'string' && url.startsWith(`/api/gates/${GATE_ID}/transition`) && opts?.method === 'POST') {
+        const { status } = JSON.parse(opts.body as string) as { status: string };
+        gate.status = status;
+        // stubGate() 자체는 resolver_id/resolved_at을 안 채운다(그 describe의 기존 테스트가
+        // 필요로 하지 않았으므로) — undo 배선은 이 둘이 있어야 isUndoEligible이 true가 된다.
+        gate.resolver_id = mockDashboardContext.currentTeamMemberId;
+        gate.resolved_at = new Date().toISOString();
+        return { ok: true, json: async () => ({ data: gate }) };
+      }
+      if (typeof url === 'string' && url === `/api/gates/${GATE_ID}/discuss` && opts?.method === 'POST') {
+        return { ok: true, json: async () => ({ data: gate }) };
+      }
+      if (typeof url === 'string' && url === `/api/gates/${GATE_ID}/undo` && opts?.method === 'POST') {
+        gate.status = 'pending';
+        gate.resolver_id = null;
+        gate.resolved_at = null;
+        return { ok: true, json: async () => ({ data: gate }) };
+      }
+      if (typeof url === 'string' && url === `/api/gates/${GATE_ID}`) {
+        return { ok: true, json: async () => ({ data: gate }) };
+      }
+      return { ok: false, json: async () => ({}) };
+    }));
+    return gate;
+  }
+
+  it('story #2631 — pending 카드에 「보류(논의 필요)」 버튼이 뜨고, 사유 제출 시 POST /discuss를 호출한다', async () => {
+    stubGateWithMutations({});
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    const discussTrigger = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateDiscussSubmit))!;
+    expect(discussTrigger).not.toBeUndefined();
+    await act(async () => { discussTrigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const textarea = document.body.querySelector('[data-slot="dialog-content"] textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '더 확인하고 판단하겠습니다');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const submitBtn = Array.from(document.body.querySelectorAll('[data-slot="dialog-content"] button')).find((b) => b.textContent === koMessages.cage.gateDiscussSubmit) as HTMLButtonElement;
+    await act(async () => { submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const discussCall = fetchMock.mock.calls.find((call: unknown[]) => (call[0] as string).includes('/discuss'));
+    expect(discussCall).toBeDefined();
+    expect(JSON.parse((discussCall![1] as { body: string }).body)).toEqual({ reason: '더 확인하고 판단하겠습니다' });
+  });
+
+  it('story #2631 — 승인 직후(본인·5분 이내) 취소 버튼이 뜨고, 클릭 시 POST /undo 호출 후 승인/반려 버튼으로 되돌아간다', async () => {
+    stubGateWithMutations({});
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
+    });
+    const approveBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('승인'))!;
+    await act(async () => { approveBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {});
+    expect(container.textContent).toContain('처리됨');
+
+    const undoBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateUndo));
+    expect(undoBtn).not.toBeUndefined();
+    await act(async () => { undoBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {});
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(fetchMock.mock.calls.some((call: unknown[]) => (call[0] as string).includes('/undo') && (call[1] as { method?: string })?.method === 'POST')).toBe(true);
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(true);
+  });
+
+  describe('story #2637 AC4(PO 08-14 확定) — resolved 분기 preset.gate.verdict block_template 부분 소비', () => {
+    // 0251 마이그(develop 상륙) 실물 그대로 — 대상 필드 value가 work_item_title로 정정된 것.
+    const GATE_VERDICT_TEMPLATE = {
+      blocks: [
+        { type: 'header', text: '게이트 판정' },
+        { type: 'text', text: '**{{payload.gate_type}}** 게이트 — **{{payload.verdict}}**' },
+        { type: 'fields', fields: [
+          { label: '대상', value: '{{payload.work_item_title}}' },
+          { label: '사유', value: '{{payload.resolution_note}}' },
+        ] },
+      ],
+    };
+    const withGateVerdictCatalog = { 'preset.gate.verdict': { key: 'preset.gate.verdict', org_id: null, payload_schema: {}, routing: {}, block_template: GATE_VERDICT_TEMPLATE, enabled: true, version: 2 } };
+
+    it('resolved + 카탈로그에 템플릿 있음 — 대상은 UUID가 아니라 fetched title, 사유는 fields로, 상태는 한글 verdict 라벨로 렌더된다(header는 부분소비 제외)', async () => {
+      stubGate({ status: 'approved', title: '제안서.md', resolution_note: '근거가 충분합니다' });
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} eventDefinitionsByKey={withGateVerdictCatalog} />));
+      });
+      expect(container.textContent).toContain('결재 요청'); // Q3 — 카드 라벨은 그대로.
+      expect(container.textContent).not.toContain('게이트 판정'); // header는 부분소비 제외.
+      expect(container.textContent).not.toContain(DOC_ID); // Q2 — UUID 노출 금지.
+      expect(container.textContent).toContain('doc_approval');
+      expect(container.textContent).toContain('승인됨'); // verdict 합성값 = 현행 한글 라벨.
+      expect(container.textContent).toContain('근거가 충분합니다');
+      // '제안서.md'는 카드 상단 제목(기존)과 fields 대상 값(신규) 둘 다에 나타난다 — 중복 등장 자체가
+      // 정상(같은 개념 두 자리 표시), 최소 1회 이상만 확認.
+      expect(container.textContent).toContain('제안서.md');
+    });
+
+    it('PO 리뷰(head 81f7e4a7e) — resolved + 템플릿 있음 + resolution_note 없음(승인·사유 미기재) — 사유 행 자체가 안 뜬다(⟨missing⟩ 마커 노출 금지, 기존 카드와 동형 비회귀)', async () => {
+      stubGate({ status: 'approved', title: '제안서.md', resolution_note: null });
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} eventDefinitionsByKey={withGateVerdictCatalog} />));
+      });
+      expect(container.textContent).toContain('승인됨');
+      expect(container.textContent).not.toContain('⟨missing');
+      expect(container.textContent).not.toContain('사유:');
+    });
+
+    it('resolved + 카탈로그에 preset.gate.verdict 없음(구정의·미시딩) — 기존 하드코딩 렌더로 폴백(비회귀)', async () => {
+      stubGate({ status: 'rejected', resolution_note: '근거가 불충분합니다' });
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} eventDefinitionsByKey={{}} />));
+      });
+      expect(container.textContent).toContain('반려됨');
+      expect(container.textContent).toContain('근거가 불충분합니다');
+      expect(container.textContent).not.toContain('게이트 판정');
+    });
+
+    it('Q1 — pending 상태는 카탈로그에 템플릿이 있어도 영향받지 않는다(제목·뱃지·버튼 그대로)', async () => {
+      stubGate({});
+      await act(async () => {
+        root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} eventDefinitionsByKey={withGateVerdictCatalog} />));
+      });
+      expect(container.textContent).toContain('제안서.md');
+      expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(true);
+      expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('반려'))).toBe(true);
+      expect(container.textContent).not.toContain('게이트 판정');
+    });
+  });
+});
+
+describe('ChatBubble — story #2637 event_definitions block_template 카드', () => {
+  const EVENT_MESSAGE: ChatMessage = {
+    ...baseMessage,
+    content: '[이벤트] preset.work.status_changed\n- work_item_type: story\n- from_status: in-progress\n- to_status: in-review',
+    sender_type: 'agent',
+    event: {
+      event_key: 'preset.work.status_changed',
+      payload: { work_item_type: 'story', from_status: 'in-progress', to_status: 'in-review', work_item_id: 'S-42' },
+    },
+  };
+
+  const VALID_TEMPLATE = {
+    blocks: [
+      { type: 'header', text: '작업 상태 변경' },
+      { type: 'text', text: '**{{payload.work_item_type}}** `{{payload.from_status}}` → `{{payload.to_status}}`' },
+      { type: 'fields', fields: [{ label: '대상', value: '{{payload.work_item_id}}' }, { label: '메모', value: '{{payload.note}}' }] },
+      { type: 'actions', actions: [{ label: '확認', action: 'publish', definition_key: 'preset.work.escalate', auth: { human_only: true } }] },
+    ],
+  };
+
+  it('event 필드 없는 일반 메시지는 카드가 안 뜬다(비회귀)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={baseMessage} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('작업 상태 변경');
+  });
+
+  it('eventDefinitionsByKey 미제공(undefined) — 제네릭 폴백 content 그대로(AC2 비회귀)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={EVENT_MESSAGE} isMine={false} />));
+    });
+    expect(container.textContent).toContain('[이벤트] preset.work.status_changed');
+  });
+
+  it('PO 리뷰(head 80319636c ①) — 폴백은 EventBlockCard 자체 렌더가 아니라 기존 ChatMarkdown 경로를 그대로 탄다("- " 목록이 <li> 불릿으로 렌더, 하이픈 리터럴로 후퇴 안 함)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={EVENT_MESSAGE} isMine={false} />));
+    });
+    const items = Array.from(container.querySelectorAll('li')).map((li) => li.textContent);
+    expect(items).toEqual(expect.arrayContaining([
+      expect.stringContaining('work_item_type: story'),
+      expect.stringContaining('from_status: in-progress'),
+      expect.stringContaining('to_status: in-review'),
+    ]));
+  });
+
+  it('event_key가 카탈로그에 없으면(구 정의 삭제 등) 제네릭 폴백', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={EVENT_MESSAGE} isMine={false} eventDefinitionsByKey={{}} />));
+    });
+    expect(container.textContent).toContain('[이벤트] preset.work.status_changed');
+  });
+
+  it('정의는 있으나 block_template이 null이면 제네릭 폴백', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={EVENT_MESSAGE} isMine={false}
+          eventDefinitionsByKey={{ 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: null, enabled: true, version: 1 } }}
+        />,
+      ));
+    });
+    expect(container.textContent).toContain('[이벤트] preset.work.status_changed');
+  });
+
+  it('block_template이 있으면 header/text/fields를 payload로 치환해 렌더한다(제네릭 텍스트 대신)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={EVENT_MESSAGE} isMine={false}
+          eventDefinitionsByKey={{ 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: VALID_TEMPLATE, enabled: true, version: 1 } }}
+        />,
+      ));
+    });
+    expect(container.textContent).not.toContain('[이벤트] preset.work.status_changed');
+    expect(container.textContent).toContain('작업 상태 변경');
+    expect(container.textContent).toContain('story');
+    expect(container.textContent).toContain('in-progress');
+    expect(container.textContent).toContain('in-review');
+    expect(container.textContent).toContain('S-42');
+    // note는 payload에 없다 — 명시 플레이스홀더(조용한 공백 금지, AC0-b).
+    expect(container.textContent).toContain('⟨missing: payload.note⟩');
+  });
+
+  it('유나 design 스티어 2차 — text 블록의 AC0-b 인라인 마크다운(**굵게**·`코드`)이 별표/백틱 리터럴이 아니라 실제 <strong>/<code>로 렌더된다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={EVENT_MESSAGE} isMine={false}
+          eventDefinitionsByKey={{ 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: VALID_TEMPLATE, enabled: true, version: 1 } }}
+        />,
+      ));
+    });
+    expect(container.textContent).not.toContain('**story**');
+    expect(container.textContent).not.toContain('`in-progress`');
+    const strongEl = Array.from(container.querySelectorAll('strong')).find((e) => e.textContent === 'story');
+    expect(strongEl).not.toBeUndefined();
+    expect(strongEl!.className).toContain('font-semibold');
+    const codeEls = Array.from(container.querySelectorAll('code')).map((e) => e.textContent);
+    expect(codeEls).toEqual(expect.arrayContaining(['in-progress', 'in-review']));
+  });
+
+  it('PO 리뷰(head 57316d4e7) — 단일 토큰(백틱 전체일치) 조각이 같은 렌더 패스에 연속으로 와도 둘 다 <code>로 렌더된다(공유 /g 정규식 lastIndex 회귀)', async () => {
+    const consecutiveTemplate = {
+      blocks: [
+        { type: 'fields', fields: [{ label: 'A', value: '`onlyA`' }, { label: 'B', value: '`onlyB`' }] },
+      ],
+    };
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={EVENT_MESSAGE} isMine={false}
+          eventDefinitionsByKey={{ 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: consecutiveTemplate, enabled: true, version: 1 } }}
+        />,
+      ));
+    });
+    expect(container.textContent).not.toContain('`onlyA`');
+    expect(container.textContent).not.toContain('`onlyB`');
+    const codeEls = Array.from(container.querySelectorAll('code')).map((e) => e.textContent);
+    expect(codeEls).toEqual(expect.arrayContaining(['onlyA', 'onlyB']));
+  });
+
+  it('story #2637 유나 design 스티어 — ⟨missing⟩ 마커는 콘텐츠와 구분되는 에러 상태 스타일(solid text-warning-strong, 알파·빨강 금지)로 렌더된다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={EVENT_MESSAGE} isMine={false}
+          eventDefinitionsByKey={{ 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: VALID_TEMPLATE, enabled: true, version: 1 } }}
+        />,
+      ));
+    });
+    const markerEl = Array.from(container.querySelectorAll('em')).find((e) => e.textContent === '⟨missing: payload.note⟩');
+    expect(markerEl).not.toBeUndefined();
+    expect(markerEl!.className).toContain('text-warning-strong');
+    expect(markerEl!.className).not.toContain('text-destructive');
+  });
+
+  it('human_only 액션 — human 뷰어면 발행 버튼이 보인다', async () => {
+    mockDashboardContext = { ...mockDashboardContext, currentMemberType: 'human' };
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={EVENT_MESSAGE} isMine={false}
+          eventDefinitionsByKey={{ 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: VALID_TEMPLATE, enabled: true, version: 1 } }}
+        />,
+      ));
+    });
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('확認'))).toBe(true);
+  });
+
+  it('human_only 액션 — agent 뷰어면 버튼은 disabled로 보이고 보조문구로 이유를 노출한다(무음 회색 버튼 금지, UX 안내·실 보안경계는 BE)', async () => {
+    mockDashboardContext = { ...mockDashboardContext, currentMemberType: 'agent' };
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={EVENT_MESSAGE} isMine={false}
+          eventDefinitionsByKey={{ 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: VALID_TEMPLATE, enabled: true, version: 1 } }}
+        />,
+      ));
+    });
+    const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('확認'));
+    expect(btn).not.toBeUndefined();
+    expect(btn!.hasAttribute('disabled')).toBe(true);
+    expect(container.textContent).toContain('권한이 없습니다');
+  });
+
+  it('발행 버튼 클릭 시 POST /api/events/publish가 definition_key+payload로 호출되고 완료 표시로 바뀐다', async () => {
+    const fetchMock = vi.fn(async (_url: string, _opts?: { method?: string; body?: string }) => ({ ok: true, json: async () => ({}) }));
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={EVENT_MESSAGE} isMine={false}
+          eventDefinitionsByKey={{ 'preset.work.status_changed': { key: 'preset.work.status_changed', org_id: null, payload_schema: {}, routing: {}, block_template: VALID_TEMPLATE, enabled: true, version: 1 } }}
+        />,
+      ));
+    });
+    const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('확認'))!;
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => {});
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/events/publish', expect.objectContaining({ method: 'POST' }));
+    const call = fetchMock.mock.calls[0]!;
+    expect(JSON.parse((call[1] as { body: string }).body)).toEqual({
+      definition_key: 'preset.work.escalate',
+      payload: { work_item_type: 'story', from_status: 'in-progress', to_status: 'in-review', work_item_id: 'S-42' },
+    });
+    expect(container.textContent).toContain('완료했습니다');
+  });
+});
+
+// story #2037 — 이미지 첨부 클릭 → 라이트박스 진입점 배선. 비-이미지 첨부가 섞여 있어도
+// 이미지끼리의 상대 순번(imageIndex)이 정확한지가 이 통합의 핵심 회귀 지점(off-by-one 위험).
+describe('ChatBubble — story #2037 이미지 라이트박스 진입점', () => {
+  let ioCallbacks: Array<(entries: Array<{ isIntersecting: boolean }>) => void>;
+
+  beforeEach(() => {
+    ioCallbacks = [];
+    class FakeIntersectionObserver {
+      constructor(cb: (entries: Array<{ isIntersecting: boolean }>) => void) {
+        ioCallbacks.push(cb);
+      }
+      observe = vi.fn();
+      disconnect = vi.fn();
+    }
+    (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = FakeIntersectionObserver;
+
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      const url = new URL(String(input), 'http://localhost');
+      const path = url.searchParams.get('path') ?? '';
+      return { ok: true, status: 200, json: async () => ({ data: { url: `https://signed/${path}` } }) };
+    }));
+  });
+
+  const twoImagesAndAFile: ChatMessage = {
+    ...baseMessage,
+    content: '스크린샷 두 장',
+    attachments: [
+      { url: 'report.pdf', name: 'report.pdf', content_type: 'application/pdf' },
+      { url: 'shot-1.png', name: 'shot-1.png', content_type: 'image/png' },
+      { url: 'shot-2.png', name: 'shot-2.png', content_type: 'image/png' },
+    ],
+  };
+
+  it('두 번째 이미지(비-이미지 첨부가 앞에 섞여 있음)를 클릭하면 라이트박스가 "2 / 2"로 그 이미지를 연다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={twoImagesAndAFile} isMine={false} />));
+    });
+    // 두 이미지 썸네일 모두 뷰포트 진입 → 서명 fetch 완료.
+    await act(async () => {
+      ioCallbacks.forEach((cb) => cb([{ isIntersecting: true }]));
+      await Promise.resolve(); await Promise.resolve();
+    });
+
+    const thumbButtons = container.querySelectorAll('button');
+    // shot-2.png 썸네일(두 번째 이미지)을 alt로 식별해 클릭.
+    const secondThumb = Array.from(thumbButtons).find((b) => b.getAttribute('aria-label') === 'shot-2.png');
+    expect(secondThumb).toBeDefined();
+    await act(async () => {
+      secondThumb!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve(); await Promise.resolve();
+    });
+
+    expect(document.body.textContent).toContain('2 / 2');
+    const openedImg = document.querySelector('img[data-next-image="true"][alt="shot-2.png"]');
+    expect(openedImg?.getAttribute('src')).toBe('https://signed/shot-2.png');
   });
 });

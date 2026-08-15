@@ -147,7 +147,7 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
 
       {/* 검색 */}
       <div className="mx-[13px] mb-2 flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-[7px]">
-        <Search className="size-3.5 shrink-0 text-muted-foreground/60" aria-hidden />
+        <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <input
           ref={searchRef}
           type="text"
@@ -167,6 +167,7 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
       <div className="flex flex-wrap items-center gap-1.5 px-[13px] pb-2">
         {scopes.map((s) => {
           const on = s.id === scope;
+          // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
           return (
             <button
               key={s.id}
@@ -174,7 +175,7 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
               onClick={() => setScope(s.id)}
               aria-pressed={on}
               className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-[3px] text-[11px] transition-colors ${
-                on ? 'border-transparent bg-info/10 font-semibold text-info' : 'border-border text-muted-foreground hover:bg-muted'
+                on ? 'border-transparent bg-info/10 font-semibold text-foreground' : 'border-border text-muted-foreground hover:bg-muted'
               }`}
             >
               {/* story #2023 ⓑ: 상태 점=L5, 브랜드 아님 */}

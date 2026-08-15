@@ -82,7 +82,15 @@ describe('LoopFace', () => {
     // (27e339bc 공허-통과 테스트 버그 클래스). 양성 어서션(현재 올바른 info 클래스가 실제로 있다)과
     // 진짜 존재하는 위험 클래스명(text-destructive)에 대한 음성 어서션으로 교체 — variant가
     // destructive로 바뀌면 이 테스트가 실제로 실패한다.
-    expect(container.innerHTML).toContain('text-info');
+    // story #2420 v3 — badge.tsx info variant가 text-info→text-foreground로 이행(tint 배경
+    // 위 글자는 계열색이 아니라 text-foreground라는 규칙, badge.tsx 참고). 단 text-foreground는
+    // 페이지 어디서나 흔한 클래스라 container.innerHTML 통짜 검사로는 다시 공허-통과가 된다
+    // (badge 아닌 다른 엘리먼트의 text-foreground가 어서션을 살릴 수 있음) — bg-info-tint를
+    // 가진 그 배지 엘리먼트 자체의 className을 골라 검사한다.
+    const infoBadge = container.querySelector('[class*="bg-info-tint"]');
+    expect(infoBadge).not.toBeNull();
+    expect(infoBadge?.className).toContain('text-foreground');
+    expect(infoBadge?.className).not.toContain('text-info');
     expect(container.innerHTML).not.toContain('text-destructive');
   });
 

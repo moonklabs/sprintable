@@ -54,7 +54,7 @@ export function InviteAcceptClient({ token, orgName, role, email, projects }: In
           <p className="text-sm text-muted-foreground">
             {tInvite('invitedByOrg', { org: orgName })}
           </p>
-          {email && <p className="text-xs text-muted-foreground/60">{tInvite('signupEmail', { email })}</p>}
+          {email && <p className="text-xs text-muted-foreground">{tInvite('signupEmail', { email })}</p>}
         </div>
 
         <div className="rounded-lg border border-border bg-muted px-4 py-3">
@@ -84,7 +84,10 @@ export function InviteAcceptClient({ token, orgName, role, email, projects }: In
         </div>
 
         {result ? (
-          <div className={`rounded-lg p-3 text-sm text-center ${result.type === 'success' ? 'bg-success-bg text-success border border-success-border' : 'bg-destructive-bg text-destructive border border-destructive-border'}`}>
+          // story #2576 — text-success/text-destructive on -bg는 라이트 AA 미달(4.204/4.304,
+          // #2575 가드가 grandfather로 잡아냄). status 정체성은 bg+border가 이미 싣는다
+          // (#2420 v3 DS 규칙 — tint/subtle 배경 위 글자는 계열색 아닌 --foreground).
+          <div className={`rounded-lg p-3 text-sm text-center ${result.type === 'success' ? 'bg-success-bg text-foreground border border-success-border' : 'bg-destructive-bg text-foreground border border-destructive-border'}`}>
             {result.text}
           </div>
         ) : (

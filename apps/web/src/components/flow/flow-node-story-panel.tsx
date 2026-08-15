@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import type { RawReferenceCandidate } from './derive-flow-map';
 import { selectUnconfirmedCandidates } from './flow-relation-review';
 import { FlowRelationReviewQueue } from './flow-relation-review-queue';
+import { useOrgSyncVersion } from '@/lib/project-context-client';
 
 const OVERLAY_GAP = 8; // 노드와 패널 사이 여백(px)
 const OVERLAY_EDGE_MARGIN = 16; // 뷰포트 가장자리 여백(px)
@@ -75,6 +76,10 @@ export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps
   // 17건이라 중복 GET 비용이 무시할 만하다).
   const [unconfirmedCount, setUnconfirmedCount] = useState(0);
   const [reviewQueueOpen, setReviewQueueOpen] = useState(false);
+  // story #2545(카디르 라이브 재QA 5단계) — storyId는 URL의 `?story=`가 정본이라 org-switch
+  // 前後로 동일 storyId를 유지한 채(딥링크 cold entry) 이 컴포넌트가 떠 있을 수 있다 —
+  // switch-org 성공 直後 아래 두 effect 다 재요청되게 orgSyncVersion을 얹는다.
+  const orgSyncVersion = useOrgSyncVersion();
 
   // 「story가 바뀔 때 loading으로 되돌리는」 것은 여기서 수동으로 안 한다 — 호출부
   // (flow-client.tsx)가 `key={storyId}`로 이 컴포넌트를 통째로 다시 마운트시킨다(초기값
@@ -98,7 +103,7 @@ export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps
       setState({ kind: 'ready', story, tasks });
     })();
     return () => { cancelled = true; };
-  }, [storyId]);
+  }, [storyId, orgSyncVersion]);
 
   const refetchUnconfirmedCount = () => {
     void fetch(`/api/stories/${storyId}/reference-candidates`)
@@ -109,8 +114,8 @@ export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps
 
   useEffect(() => {
     refetchUnconfirmedCount();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetchUnconfirmedCount identity churns every render; storyId is the real trigger.
-  }, [storyId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetchUnconfirmedCount identity churns every render; storyId/orgSyncVersion are the real triggers.
+  }, [storyId, orgSyncVersion]);
 
   // 앵커 위치는 클릭된 실 DOM(data-node-id)에서 한 번 잰다 — 패널이 열려 있는 동안 캔버스가
   // 스크롤돼도 다시 재지 않는다(AC6 "닫으면 그대로" 판정선이 스크롤 위치 자체를 건드리지

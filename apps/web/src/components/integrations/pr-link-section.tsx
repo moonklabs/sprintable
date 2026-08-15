@@ -216,7 +216,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
       {/* 추천 후보(suggestion·med/low) — 강하게 분리·기본 비활성·명시 confirm해야 승격 */}
       {suggestions.length > 0 ? (
         <div className="space-y-1.5">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">{t('suggestionLabel')}</p>
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('suggestionLabel')}</p>
           <ul className="space-y-1.5">
             {suggestions.map((l) => (
               <li key={l.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-border bg-muted/10 p-2 text-[11px]">
@@ -230,7 +230,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
                   <span className="truncate">{l.repo_full_name} #{l.pr_number}</span>
                   <ExternalLink className="size-2.5 shrink-0" />
                 </a>
-                <span className="inline-flex shrink-0 items-center gap-1 text-warning">
+                <span className="inline-flex shrink-0 items-center gap-1 text-warning-strong">
                   <span aria-hidden className="size-1.5 rounded-full bg-warning" />
                   {t('estimated', { confidence: l.confidence })}
                 </span>
@@ -247,7 +247,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
               </li>
             ))}
           </ul>
-          <p className="text-[10px] text-muted-foreground/70">{t('promoteHint')}</p>
+          <p className="text-[10px] text-muted-foreground">{t('promoteHint')}</p>
         </div>
       ) : null}
 
@@ -264,7 +264,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
             onChange={(e) => setRepoName(e.target.value)}
             placeholder={t('repoPlaceholder')}
             aria-label={t('repoAria')}
-            className="min-w-0 flex-1 bg-transparent font-mono text-foreground outline-none placeholder:text-muted-foreground/50"
+            className="min-w-0 flex-1 bg-transparent font-mono text-foreground outline-none placeholder:text-muted-foreground"
           />
         </div>
         <div className="flex shrink-0 items-center gap-1 rounded-lg border border-border bg-background px-2 py-1 text-[11px]">
@@ -275,7 +275,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
             inputMode="numeric"
             placeholder={t('prPlaceholder')}
             aria-label={t('prAria')}
-            className="w-16 bg-transparent text-foreground outline-none placeholder:text-muted-foreground/50"
+            className="w-16 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
           />
         </div>
         <Button
@@ -290,7 +290,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
         </Button>
       </div>
 
-      <p className="text-[10px] text-muted-foreground/70">{t('riskHint')}</p>
+      <p className="text-[10px] text-muted-foreground">{t('riskHint')}</p>
       {error ? (
         <p
           className="inline-flex items-center gap-1 text-[11px] text-destructive"

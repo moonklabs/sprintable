@@ -54,6 +54,10 @@ dependencies = [
     # lazy-import하고 있었는데 이 패키지가 선언돼 있지 않았다(rate_limit_backend가 항상 "memory"라
     # 한 번도 실행 경로를 안 타 드러나지 않은 잠재 ImportError) — 이 선언이 그 갭도 같이 닫는다.
     "redis>=5.0.0",
+    # story #2632(이벤트 레지스트리 P1a): event_definitions.payload_schema(JSON Schema) 런타임
+    # 검증. 기존에 uv.lock 전이 의존성(4.26.0)으로만 있었고 직접 import하는 곳이 없었다 — 첫
+    # 실사용처라 직접 선언.
+    "jsonschema>=4.26.0",
 ]
 
 [dependency-groups]

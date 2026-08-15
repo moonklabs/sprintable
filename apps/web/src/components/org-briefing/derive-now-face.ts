@@ -44,6 +44,14 @@ function str(v: unknown): string | null {
   return typeof v === 'string' && v.length > 0 ? v : null;
 }
 
+function num(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+function record(v: unknown): Record<string, unknown> | null {
+  return isRecord(v) ? v : null;
+}
+
 interface RawQueueItem {
   type: string;
   priority: string | null;
@@ -51,11 +59,35 @@ interface RawQueueItem {
   context: Record<string, unknown>;
 }
 
-interface RawAttentionItem {
+export interface RawAttentionItem {
   type: string;
   entity_type: string | null;
   entity_id: string | null;
   gate_type: string | null;
+  // ⛔PO 실측 결함(2026-08-09, 디디 그라운딩) — story_stalled/unanswered_blocker는
+  // entity_type/entity_id를 아예 안 낸다(backend/app/routers/command_center.py:379-406).
+  // story_stalled = {story_id, stalled_days} · unanswered_blocker = {blocked_story_id,
+  // blocker_id, age_days} — 별개 키명이라 위 entity_id 파싱은 이 둘에선 항상 null이었고,
+  // href가 매번 제네릭 /board로 떨어지고 id도 배열 index로 새 렌더마다 안 안정됐다.
+  story_id: string | null;
+  // story #2541 — 정체 클러스터 "일수순" 정렬·"N일째" 표시에 필요(BE가 이미 낸다,
+  // command_center.py:379-406). 옛 NowFace 플랫 행은 감시-프레이밍 금지(§1.5/§1.7)로
+  // 경과시간을 일부러 숨겼지만, 클러스터 보드는 유나 v4(PO (가) 결정, f01fa94a)가 "정체 N건"
+  // dedup·정렬축으로 명시 채택 — «개별 신호마다 경과를 드러내 감시처럼 읽힌다»는 옛 금지의
+  // 근거가, «묶어서 하나의 정체 지표로 보여준다»는 이 클러스터 형태에는 적용되지 않는다.
+  stalled_days: number | null;
+  blocked_story_id: string | null;
+  // title은 story_stalled/unanswered_blocker(#2938)가 이미 배선함 — 없으면 폴백 문구.
+  title: string | null;
+  // story #2539(BE PR#2939) — 4번째 attention type `hypothesis_falsified`. "진행 중 가설이
+  // 어긋나는 조짐"(in-flight)은 데이터 구조상 불가로 확認됐다(hypothesis_scorer.py가
+  // outcome_result를 종결 분기에서만 채움) — 그래서 스코프는 "방금 반증으로 종결된 가설"
+  // 결과 통보 하나뿐이다. severity=info(경고 아님), "이상감지" 뉘앙스 배제.
+  hypothesis_id: string | null;
+  statement: string | null;
+  outcome_result: Record<string, unknown> | null;
+  falsified_days: number | null;
+  superseded_by_hypothesis_id: string | null;
 }
 
 export interface RawMyActions {
@@ -97,6 +129,15 @@ export function parseMyActions(json: unknown): RawMyActions {
         entity_type: str(raw['entity_type']),
         entity_id: str(raw['entity_id']),
         gate_type: str(raw['gate_type']),
+        story_id: str(raw['story_id']),
+        stalled_days: num(raw['stalled_days']),
+        blocked_story_id: str(raw['blocked_story_id']),
+        title: str(raw['title']),
+        hypothesis_id: str(raw['hypothesis_id']),
+        statement: str(raw['statement']),
+        outcome_result: record(raw['outcome_result']),
+        falsified_days: num(raw['falsified_days']),
+        superseded_by_hypothesis_id: str(raw['superseded_by_hypothesis_id']),
       });
     }
   }
@@ -190,27 +231,20 @@ export function buildNowFace(raw: RawMyActions, notifications: RawCompletionNoti
         href: a.entity_type === 'story' && a.entity_id ? `/board?story=${a.entity_id}` : '/inbox?tab=gates',
         priority: 20,
       });
-    } else if (a.type === 'story_stalled') {
-      items.push({
-        id: `story_stalled-${a.entity_id ?? items.length}`,
-        kind: 'signal', kindLabel: t('kindSignal'),
-        title: t('signalStalledTitle'),
-        context: t('signalStalledContext'),
-        actionLabel: t('actionOpen'), actionTone: 'ghost',
-        href: a.entity_id ? `/board?story=${a.entity_id}` : '/board',
-        priority: 21,
-      });
     } else if (a.type === 'unanswered_blocker') {
       items.push({
-        id: `unanswered_blocker-${a.entity_id ?? items.length}`,
+        id: `unanswered_blocker-${a.blocked_story_id ?? items.length}`,
         kind: 'signal', kindLabel: t('kindSignal'),
         title: t('signalBlockerTitle'),
         context: t('signalBlockerContext'),
         actionLabel: t('actionOpen'), actionTone: 'ghost',
-        href: a.entity_id ? `/board?story=${a.entity_id}` : '/board',
+        href: a.blocked_story_id ? `/board?story=${a.blocked_story_id}` : '/board',
         priority: 22,
       });
     }
+    // story #2541 — story_stalled·hypothesis_falsified는 여기서 더는 flat 행으로 안 올린다.
+    // 20줄 flood(story_stalled) 원인이 바로 이 자리였다 — 이제 attention-cluster-board.tsx
+    // (deriveAttentionClusters)가 같은 raw.attention을 별도로 읽어 유형별 클러스터로 묶는다.
   }
 
   for (const n of notifications) {

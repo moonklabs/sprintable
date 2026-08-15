@@ -21,9 +21,12 @@
     "verify:reserved-first-segments-sync": "tsx scripts/verify-reserved-first-segments-sync.ts",
     "verify:tint-foreground-contrast": "tsx scripts/verify-tint-foreground-contrast.ts",
     "verify:no-new-tint-color-text": "tsx scripts/verify-no-new-tint-color-text.ts",
+    "verify:cross-element-tint-text": "tsx scripts/verify-cross-element-tint-text.ts",
     "verify:muted-foreground-contrast": "tsx scripts/verify-muted-foreground-contrast.ts",
+    "verify:no-muted-foreground-alpha": "tsx scripts/verify-no-muted-foreground-alpha.ts",
     "verify:no-raw-error-message": "tsx scripts/verify-no-raw-error-message.ts",
     "e2e": "playwright test",
+    "e2e:contrast": "playwright test contrast-guard.spec.ts",
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report"
   },
@@ -54,6 +57,7 @@
     "@tiptap/react": "^3.22.3",
     "@tiptap/starter-kit": "^3.22.3",
     "@tiptap/suggestion": "^3.22.3",
+    "@tosspayments/tosspayments-sdk": "^2.7.1",
     "@types/turndown": "^5.0.6",
     "@xyflow/react": "^12.10.2",
     "class-variance-authority": "^0.7.1",
@@ -85,6 +89,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4",
     "@types/dompurify": "^3.2.0",

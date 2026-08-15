@@ -176,7 +176,7 @@ export function AgentPerformancePanel() {
                         <div className="truncate text-sm font-semibold text-foreground">{agent.name}</div>
                         {agent.rank != null && (
                           <div className="mt-0.5 flex items-center gap-1">
-                            <Trophy className="size-3 text-warning" />
+                            <Trophy className="size-3 text-warning-strong" />
                             <span className="text-xs text-muted-foreground">#{agent.rank}</span>
                           </div>
                         )}
@@ -225,7 +225,7 @@ export function AgentPerformancePanel() {
           <SectionCard>
             <SectionCardHeader>
               <div className="flex items-center gap-2">
-                <Trophy className="size-4 text-warning" />
+                <Trophy className="size-4 text-warning-strong" />
                 <span className="text-sm font-semibold text-foreground">{t('leaderboardTitle')}</span>
               </div>
               <p className="mt-0.5 text-xs text-muted-foreground">{t('leaderboardDescription')}</p>
@@ -241,7 +241,7 @@ export function AgentPerformancePanel() {
                       key={agent.id}
                       className="flex items-center gap-3 px-3 py-2.5"
                     >
-                      <span className={`w-6 shrink-0 text-center text-sm font-bold ${idx === 0 ? 'text-warning' : idx === 1 ? 'text-muted-foreground' : idx === 2 ? 'text-warning/70' : 'text-muted-foreground'}`}>
+                      <span className={`w-6 shrink-0 text-center text-sm font-bold ${idx === 0 ? 'text-warning-strong' : idx === 1 ? 'text-muted-foreground' : idx === 2 ? 'text-warning-strong' : 'text-muted-foreground'}`}>
                         {idx + 1}
                       </span>
                       <span className="flex-1 truncate text-sm font-medium text-foreground">{agent.name}</span>

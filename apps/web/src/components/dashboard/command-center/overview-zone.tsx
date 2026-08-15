@@ -16,7 +16,7 @@ const VERB_META: Record<string, { key: string; tone: 'ok' | 'warn' }> = {
 };
 
 function PendingSlot({ label }: { label: string }) {
-  return <p className="text-[11px] text-muted-foreground/60">{label}</p>;
+  return <p className="text-[11px] text-muted-foreground">{label}</p>;
 }
 
 function RecentRow({ change, resolveName, t }: { change: RecentChange; resolveName: (id: string | null | undefined) => string | null; t: ReturnType<typeof useTranslations<'dashboard'>> }) {
@@ -28,9 +28,9 @@ function RecentRow({ change, resolveName, t }: { change: RecentChange; resolveNa
   const ago = mins < 60 ? t('ccMinAgo', { n: mins }) : mins < 1440 ? t('ccHourAgo', { n: Math.floor(mins / 60) }) : t('ccDayAgo', { n: Math.floor(mins / 1440) });
   return (
     <li className="flex items-center gap-2 text-[11px]">
-      {tone === 'warn' ? <AlertTriangle className="size-3 shrink-0 text-warning" /> : <CheckCircle2 className="size-3 shrink-0 text-success" />}
+      {tone === 'warn' ? <AlertTriangle className="size-3 shrink-0 text-warning-strong" /> : <CheckCircle2 className="size-3 shrink-0 text-success" />}
       <span className="min-w-0 flex-1 truncate text-foreground">{label}{resolved ? <span className="text-muted-foreground"> · {resolved}</span> : null}</span>
-      <span className="shrink-0 tabular-nums text-muted-foreground/70">{ago}</span>
+      <span className="shrink-0 tabular-nums text-muted-foreground">{ago}</span>
     </li>
   );
 }
@@ -128,7 +128,7 @@ export function OverviewZone({ data, resolveName }: {
       {/* story #2338 후속 — §11-5 문안 확定 그대로: "아직 표시하지 않는 것 — {항목}" 한 줄 +
           "준비되는 대로 표시됩니다." 시점 약속·사과 없음. 항목 0개면 칸 자체를 안 그린다. */}
       {notYetShown.length > 0 ? (
-        <p className="border-t border-border pt-3 text-[11px] text-muted-foreground/60">
+        <p className="border-t border-border pt-3 text-[11px] text-muted-foreground">
           {t('ccNotYetShownLabel', { items: notYetShown.join(' · ') })}
           <br />
           {t('ccNotYetShownFooter')}

@@ -319,7 +319,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
             {(blockedBy.length > 0 && story.status !== 'done') || labels.length > 0 || lineBadge ? (
               <div className="mb-2 flex flex-wrap items-center gap-1.5">
                 {blockedBy.length > 0 && story.status !== 'done' ? (
-                  <span className="inline-flex items-center gap-1 text-[10px] text-warning">
+                  <span className="inline-flex items-center gap-1 text-[10px] text-warning-strong">
                     <span className="size-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
                     {t('blockedBy', { count: blockedBy.length })}
                   </span>
@@ -409,9 +409,9 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                       className="flex h-5 w-5 items-center justify-center"
                     >
                       {lastExecution.status === 'matched' ? (
-                        <Zap className="h-3 w-3 text-warning" />
+                        <Zap className="h-3 w-3 text-warning-strong" />
                       ) : (
-                        <ZapOff className="h-3 w-3 text-muted-foreground/40" />
+                        <ZapOff className="h-3 w-3 text-muted-foreground" />
                       )}
                     </span>
                   ) : null}
@@ -420,7 +420,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                       onClick={(e) => void handleKickoff(e)}
                       disabled={triggering}
                       title={t('kickoff')}
-                      className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 hover:text-primary hover:bg-primary/10 disabled:opacity-40 transition"
+                      className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 disabled:opacity-40 transition"
                     >
                       {triggering ? (
                         <span className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />

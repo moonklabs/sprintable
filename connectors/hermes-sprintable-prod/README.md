@@ -31,10 +31,14 @@ tail -f ~/.hermes/gateway.log                        # watch [sprintable_prod] d
 |-----|-----|---------|
 | `SPRINTABLE_PROD_AGENT_API_KEY` | ✅ | Prod agent API key (Bearer) |
 | `SPRINTABLE_PROD_API_URL` | — | Prod backend base URL (default: prod backend) |
-| `SPRINTABLE_PROD_ALLOWED_USERS` | — | Comma-sep member IDs allowed. Unset = all |
+| `SPRINTABLE_PROD_ALLOWED_USERS` | — | Comma-sep member IDs allowed |
 | `SPRINTABLE_PROD_ALLOW_ALL_USERS` | — | `1` = explicit allow-all |
 | `SPRINTABLE_PROD_HOME_CHANNEL` | — | Default conversation_id for cron/notify (`/sethome`) |
 | `SPRINTABLE_PROD_HOME_CHANNEL_THREAD_ID` | — | Thread id for the prod home channel |
+
+> Unset `SPRINTABLE_PROD_ALLOWED_USERS` is **not** "all senders allowed" — see
+> the dev README's `SPRINTABLE_ALLOWED_USERS` note below (same default-deny
+> `pairing` policy applies here with `sprintable_prod` in the log lines).
 
 Platform name: `sprintable_prod`. Cron delivery target: `deliver=sprintable_prod`.
 

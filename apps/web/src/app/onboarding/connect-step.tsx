@@ -352,7 +352,8 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
           )}
         </div>
         {transport === 'http' && !isHostedUnavailable && (
-          <div className="flex items-start gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2.5 text-xs text-info">
+          // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+          <div className="flex items-start gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2.5 text-xs text-foreground">
             <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
             <span>{t('hostedBenefit')}</span>
           </div>
@@ -400,7 +401,7 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
         )}
         {rail.showVerifyExamplePrompt && (
           <div className="flex items-center justify-between gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2 text-xs">
-            <span className="min-w-0 truncate text-info">
+            <span className="min-w-0 truncate text-foreground">
               {t('verifyExampleLabel')} <span className="font-mono text-foreground">&ldquo;{t('verifyExamplePrompt')}&rdquo;</span>
             </span>
             <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0">
@@ -410,7 +411,8 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
         )}
         {verified && (
           // story #2105 2차 — 검증 성공 결과도 polite로 낭독(#2096/#2105 1차와 동일 원칙).
-          <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-success/20 bg-success/10 px-3 py-2.5 text-sm text-success">
+          // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+          <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-success/20 bg-success/10 px-3 py-2.5 text-sm text-foreground">
             {t('verifiedBanner')}
           </div>
         )}

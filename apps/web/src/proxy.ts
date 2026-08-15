@@ -14,6 +14,31 @@ import {
   verifyResolveCache,
 } from '@/lib/route-resolve';
 
+// story #2595 — connect-guide.txt는 static public asset이라 서버 컴포넌트가 아니고,
+// apps/web/src/i18n/request.ts의 getLocale()(next-intl RSC config, `cookies()`/`headers()`
+// 비동기 API)을 그대로 재사용할 수 없다 — 이 파일(proxy)은 NextRequest 동기 API
+// (`request.cookies`/`request.headers`)로 도는 별개 실행 경로다. 그래서 알고리즘만
+// 그대로 이식한다: 쿠키 `locale` 우선 → Accept-Language 부분일치 → 기본값 'en'
+// (request.ts DEFAULT_LOCALE과 동일). 두 구현이 갈리면 SSR 페이지 언어와 이 정적
+// 문서의 언어가 서로 다른 locale로 어긋난다 — request.ts를 바꾸면 이 함수도 같이
+// 바꿔야 한다(proxy.test.ts가 이 함수를, i18n 쪽 테스트가 request.ts를 각각 고정).
+const CONNECT_GUIDE_SUPPORTED_LOCALES = ['en', 'ko'] as const;
+const CONNECT_GUIDE_DEFAULT_LOCALE = 'en';
+
+function resolveConnectGuideLocale(request: NextRequest): string {
+  const cookieLocale = request.cookies.get('locale')?.value;
+  if (cookieLocale && (CONNECT_GUIDE_SUPPORTED_LOCALES as readonly string[]).includes(cookieLocale)) {
+    return cookieLocale;
+  }
+
+  const acceptLang = request.headers.get('accept-language') ?? '';
+  for (const locale of CONNECT_GUIDE_SUPPORTED_LOCALES) {
+    if (acceptLang.includes(locale)) return locale;
+  }
+
+  return CONNECT_GUIDE_DEFAULT_LOCALE;
+}
+
 const PUBLIC_EXACT = [
   '/',
   '/llms.txt',
@@ -22,9 +47,20 @@ const PUBLIC_EXACT = [
   // 45a5a006: 공개 정적 문서(app 자체 온보딩 가이드, 랜딩과 내용 상이해 리다이렉트 대상 아님) —
   // 누락 시 인증 미들웨어가 보호 라우트로 오인해 /login 307(공개 문서가 로그인 뒤에 묶이는 버그).
   '/onboarding-guide.txt',
-  // story #2405 — 사용자용 연결 안내(채용 완료 화면 ②「깨우기」 카드가 이리로 링크한다).
-  // 위와 같은 이유로 공개여야 한다 — 링크를 공유받은 사람이 로그인 벽에 막히면 안 된다.
+  // story #2405/#2595 — 사용자용 연결 안내(채용 완료 화면 ②「깨우기」 카드가 이리로
+  // 링크한다). 위와 같은 이유로 공개여야 한다 — 링크를 공유받은 사람이 로그인 벽에
+  // 막히면 안 된다. 실제 공개 처리는 이 목록이 아니라 proxy() 맨 위의 locale-rewrite
+  // 분기가 한다(그 분기가 이 pathname에 대해 항상 먼저 return하므로 이 목록엔 절대
+  // 안 걸린다) — 그래도 "이 경로는 의도적으로 공개"라는 선언을 여기 남겨 두는 건,
+  // 그 분기를 나중에 지우거나 옮길 때 이 목록을 훑는 사람이 왜 없어도 되는지
+  // 헷갈리지 않게 하기 위함.
   '/connect-guide.txt',
+  // story #2595 — the rewrite target files. Someone can request these directly (bookmark,
+  // crawler, an old cached link) without going through the base /connect-guide.txt rewrite
+  // above — without this, they'd fall through to the auth-protected branch and 307 to
+  // /login (caught by the RED test in proxy.test.ts before this line was added).
+  '/connect-guide.en.txt',
+  '/connect-guide.ko.txt',
 ];
 
 // Fully public paths — no token check at all
@@ -58,6 +94,11 @@ const PUBLIC_PREFIX = [
   '/internal-dogfood',
   '/terms',
   '/privacy',
+  // story #2606 — 결제 화면(Toss 체크아웃 다이얼로그)·푸터에서 링크되는 공개 법적 문서.
+  // /terms·/privacy처럼 로그인 없이 봐야 하는데, 새 라우트 추가 시 이 목록 등록을
+  // 놓치면(위 두 개와 별개 가드 — route-resolve.ts RESERVED_FIRST_SEGMENTS와는 다른 축)
+  // 방문자가 보호 라우트로 오인돼 /login 307로 튕긴다.
+  '/refund-policy',
 ];
 
 export const SP_AT_COOKIE = 'sp_at';
@@ -83,11 +124,18 @@ async function verifyAccessToken(token: string): Promise<{ exp?: number } | null
 // 복제(둘 다 이 문자열이 바뀔 일은 없음 — 서버-발급 세션 쿠키 이름).
 const CURRENT_PROJECT_COOKIE = 'sprintable_current_project_id';
 
-async function getOrgIdFromAccessToken(token: string): Promise<string | null> {
+// ⛔카디르 QA 2차 재진단(2026-08-09, 실측 8회 재현 — bare /flow·되돌이 전부 여전히 org-briefing
+// 튕김) — 옛 getOrgIdFromAccessToken()이 JWT app_metadata.org_id 클레임을 직접 디코드했는데,
+// 멀티org 계정은 이 클레임이 **로그인 시점 org로 고정**돼 세션이 실제로 일하는 org(=/api/v2/me
+// 검증값)와 달라질 수 있다(curl 대조: JWT org로 X-Org-Id 조회→404, me.org_id로 조회→200 —
+// layout.tsx는 이미 /api/v2/me를 써서 이 함정을 안 밟았다). 같은 SSOT(/api/v2/me)로 맞춘다 —
+// JWT 클레임 직접 디코드 대신 실 조회.
+async function getVerifiedOrgId(fastapiUrl: string, accessToken: string): Promise<string | null> {
   try {
-    const { payload } = await jwtVerify(token, getJwtSecretBytes());
-    const orgId = (payload['app_metadata'] as Record<string, unknown> | undefined)?.['org_id'];
-    return typeof orgId === 'string' ? orgId : null;
+    const res = await fetch(`${fastapiUrl}/api/v2/me`, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) return null;
+    const me = await res.json() as { org_id?: string };
+    return typeof me.org_id === 'string' ? me.org_id : null;
   } catch {
     return null;
   }
@@ -136,7 +184,8 @@ async function redirectLegacyResourcePath(
   const excluded = MIGRATED_RESOURCES[resourceName] ?? [];
   if (excluded.some((sub) => pathname.startsWith(`/${resourceName}/${sub}`))) return null;
 
-  const orgId = await getOrgIdFromAccessToken(accessToken);
+  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+  const orgId = await getVerifiedOrgId(fastapiUrl, accessToken);
   // story #1998: 쿠키 우선(명시 switch-project 결과) — 없으면 JWT app_metadata.project_id로 fallback.
   const projectId = request.cookies.get(CURRENT_PROJECT_COOKIE)?.value
     ?? await getProjectIdFromAccessToken(accessToken);
@@ -157,7 +206,6 @@ async function redirectLegacyResourcePath(
     return redirectToProjectPicker(request, pathname);
   }
 
-  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
   const slugs = await resolveLegacyResourcePath(fastapiUrl, orgId, projectId, accessToken);
   // org/project는 둘 다 확定됐는데 BE 해소만 실패한 경우(예: 그 project가 삭제/접근철회)도
   // 같은 안내로 보낸다(AC4: "404가 맞는 경우에도 다음 발이 붙는다") — 단, 이것도 되돌이 방지 적용.
@@ -498,6 +546,17 @@ async function resolveAndRespond(
 
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+
+  // story #2595 — /connect-guide.txt is locale-branched: rewrite (not redirect, so the URL
+  // in the browser/llms.txt link stays stable) to the matching per-locale file. Runs before
+  // the generic PUBLIC_EXACT passthrough below so both direct hits and the in-app link
+  // (recruiter-client.tsx, unchanged href="/connect-guide.txt") land on the right language.
+  if (pathname === '/connect-guide.txt') {
+    const locale = resolveConnectGuideLocale(request);
+    const url = request.nextUrl.clone();
+    url.pathname = `/connect-guide.${locale}.txt`;
+    return NextResponse.rewrite(url);
+  }
 
   const isPublicPath =
     PUBLIC_EXACT.includes(pathname) ||

@@ -1,17 +1,10 @@
 """story #2626: chain_escalation_org_config — 무감독 연쇄 알림 org 설정 표면.
 
 Revision ID: 0243
-Revises: 0241
+Revises: 0242
 Create Date: 2026-08-13
 
 org_gate_policy(0066)와 동형 패턴 — org당 1행, 없으면 코드 기본값(300s/15건) 폴백.
-
-⛔prod 승격 브랜치(base=main) 전용 재배선 — develop에서는 down_revision="0242"
-(legal_document_versions, story #2606/#3001)였으나, 이 브랜치는 결제·legal 미승격이라
-0242 자체가 존재하지 않는다. main 헤드(0240)→0241(그대로, 이미 down=0240)→0243(0242
-건너뛰고 여기로) 순으로 재배선(main의 0236→0227 재배선이 기존 관례, 페드루 확認).
-0244(chain_circuit_breaker, story #2630)는 down_revision="0243" 그대로 — 이 파일만
-고치면 체인 정합(0244가 재배선 불필요한 이유는 여기 0243이 그대로 존재하기 때문).
 """
 from __future__ import annotations
 
@@ -20,7 +13,7 @@ from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 revision = "0243"
-down_revision = "0241"
+down_revision = "0242"
 branch_labels = None
 depends_on = None
 

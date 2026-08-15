@@ -22,7 +22,7 @@ export function DescriptionPane({ description, elementLabel, className }: Descri
           {description}
         </p>
       ) : (
-        <p className="text-[11px] text-muted-foreground/70">{t('descriptionEmptyState')}</p>
+        <p className="text-[11px] text-muted-foreground">{t('descriptionEmptyState')}</p>
       )}
     </div>
   );

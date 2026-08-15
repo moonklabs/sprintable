@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import case, func, select
+from sqlalchemy import and_, case, exists, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.hypothesis import HypothesisStoryLink
 from app.models.pm import Story
 from app.repositories.base import BaseRepository
 from app.schemas.story import STATUS_TRANSITIONS
@@ -17,6 +19,58 @@ _PRIORITY_ORDER = case(
     (Story.priority == "low", 3),
     else_=4,
 )
+
+
+_PURE_STORY_NUMBER_RE = re.compile(r"^#?(\d+)$")
+
+
+def _title_search_filter(q: str):
+    """story #2619 fix(페드루 판정, 2026-08-14) — `list()`/`list_board()`/`list_backlog()`
+    3곳이 전부 `Story.title.ilike(f"%{q}%")`를 각자 심고 있었다(오늘의 3사본=내일의
+    드리프트 — 판정 로직을 한 곳으로 모은다는 것이 이 처방의 근본). 공백으로 토큰화 후
+    AND 결합(OR 아님 — "포함하는 단어 전부"가 사용자 기대에 더 가까움, PO 판정): 이전엔
+    `q` 전체를 하나의 리터럴 연속 substring으로만 봐서 제목 단어들이어도 **어순이 다르면
+    매치 실패**했다(실사례: "무인간 대화 체인 게이트"는 실제 제목 "체인 게이트의 «무인간
+    대화»"와 어순이 반대라 0건 — #2619 실측). 토큰이 하나도 없으면(공백뿐인 q) 무필터로
+    폴백(true) — 호출부의 `if q:` 가드가 걸러내지 못하는 이 경계를 여기서 안전하게 흡수.
+
+    story #2645(미르코 실사용 발견, 2026-08-14) — 스토리 «번호»는 제목에 리터럴로 없다
+    (별도 `story_number` 컬럼)라 title ILIKE만으로는 q="2642" 같은 번호 검색이 구조적으로
+    항상 0건이었다. q(공백 트림 후)가 단일 토큰이고 순수 숫자 또는 `#`+숫자면
+    (`_PURE_STORY_NUMBER_RE`), title 매치와 `story_number` 정확 일치를 **OR 결합**(PO
+    조건①) — «없다»로 오독해 중복 생성/기존 결정 미발견을 제조하는 #2619와 같은 해악
+    클래스(원인 축만 다름)를 막는다. OR이라 제목에도 그 숫자가 리터럴로 존재하는 케이스
+    (예: 제목에 "2024")는 두 채널이 겹쳐도 자연히 단일 행으로 매치될 뿐 중복이 생기지
+    않고, 서로 다른 두 스토리(제목에 "2024"가 든 것과 실제 #2024)가 둘 다 있으면 **둘 다
+    반환**된다(조건② 정의 — 한쪽이 다른 쪽을 가리지 않는다). 이 정확일치는 명시
+    `story_number` 파라미터(라우터 :147)와 동일하게 project_id 등 다른 필터와는 이 헬퍼가
+    아니라 **호출부의 둘러싼 AND**로 스코프된다(project 무지정 org-wide 검색 시 번호가
+    project간 재사용됐으면 여러 project의 동일 번호가 잡힐 수 있음 — 기존 명시
+    `story_number` 파라미터도 이미 같은 특성이라 새 리스크 아님). 다중 토큰(예: "스토리
+    2645")은 이 분기를 타지 않는다(PO 스펙이 "q가 순수 숫자"로 명시 — 섞인 쿼리까지
+    넓히는 것은 이 스토리 범위 밖, 추측 금지)."""
+    tokens = [t for t in q.split() if t]
+    if not tokens:
+        return true()
+    title_clause = and_(*(Story.title.ilike(f"%{t}%") for t in tokens))
+    if len(tokens) == 1:
+        m = _PURE_STORY_NUMBER_RE.match(tokens[0])
+        if m:
+            return or_(title_clause, Story.story_number == int(m.group(1)))
+    return title_clause
+
+
+def _unattached_clause():
+    """story #2532(카디르 QA REQUEST_CHANGES, 2026-08-09) — unattached 필터는 반드시 SQL
+    WHERE 레벨이어야 한다. 최초 구현(라우터의 Python 후필터 `_filter_unattached`)은 SQL
+    limit 後 필터라 ①페이지 경계 밖 유실(SQL이 20건만 뽑았는데 그중 3건만 unattached면 3건만
+    반환 — 다음 페이지에 더 있어도 판단 근거가 없다) ②X-Total-Count/X-Next-Cursor가 필터 前
+    값이라 거짓 신호(board 분기에서 재현)를 냈다. «미매달림=뷰 결부 재료» 자체가 정확해야
+    하는 값이라 이 결함은 못 넘긴다 — WHERE 절로 옮겨 페이지네이션·헤더가 전부 필터 後
+    진실을 말하게 한다."""
+    return Story.epic_id.is_(None) & ~exists(
+        select(HypothesisStoryLink.id).where(HypothesisStoryLink.story_id == Story.id)
+    )
 
 
 async def allocate_story_number(session: AsyncSession, project_id: uuid.UUID) -> int:
@@ -48,9 +102,19 @@ class StoryRepository(BaseRepository[Story]):
         return await super().create(story_number=story_number, **data)
 
     async def list(
-        self, limit: int = 1000, *, q: str | None = None, cursor: datetime | None = None, **filters,
-    ) -> list[Story]:
-        """story 083176e8(까심 #2148 QA 적출): 갤러리 피커 실검색 — `q`는 title ILIKE 부분일치로
+        self, limit: int = 1000, *, q: str | None = None, cursor: datetime | None = None,
+        unattached: bool = False, **filters,
+    ) -> tuple[list[Story], int]:
+        """story #2537(카디르 QA #2932 실측, 2026-08-09) — `list_board()`와 동형으로
+        `(stories, total)` 튜플을 반환한다. 이전엔 `list[Story]`만 반환해 이 분기(status
+        없이 project_id+unattached=true 등으로 오는 generic 필터 경로)로 빠지는 요청은
+        X-Total-Count를 아예 못 냈다 — unattached-bucket이 정확히 이 경로를 타는데
+        FE(meta.total)가 항상 undefined를 받아 HIGH로 보고됐다. count는 board 분기와
+        동형으로 필터 適用 後·limit 適用 前에 계산한다(cursor 필터까지 포함해야 "이 필터
+        조건에서 남은 전체 건수"가 정확하다). 실 콜러는 `app/routers/stories.py`(제네릭
+        분기) 단 1곳뿐이라(grep 확認, 직접-호출 테스트 0건) 시그니처 변경이 안전하다.
+
+        story 083176e8(까심 #2148 QA 적출): 갤러리 피커 실검색 — `q`는 title ILIKE 부분일치로
         기존 동등비교 필터(**filters, base.list() 상속)와 AND 결합. BaseRepository.list()는
         범용(모든 리포지토리 공유)이라 q ILIKE 개념을 거기 얹지 않고 story 전용으로 오버라이드
         (list_board/list_by_ids와 동일하게 자체 쿼리 구성 — 기존 관례).
@@ -82,14 +146,20 @@ class StoryRepository(BaseRepository[Story]):
         for attr, val in filters.items():
             query = query.where(getattr(Story, attr) == val)
         if q:
-            query = query.where(Story.title.ilike(f"%{q}%"))
+            query = query.where(_title_search_filter(q))
         if cursor:
             query = query.where(Story.created_at < cursor)
+        if unattached:
+            query = query.where(_unattached_clause())
+
+        count_q = select(func.count()).select_from(query.subquery())
+        total = (await self.session.execute(count_q)).scalar_one()
+
         query = query.order_by(Story.created_at.desc(), Story.id.desc()).limit(limit)
         result = await self.session.execute(query)
-        return list(result.scalars().all())
+        return list(result.scalars().all()), total
 
-    async def list_by_ids(self, ids: list[uuid.UUID]) -> list[Story]:
+    async def list_by_ids(self, ids: list[uuid.UUID], *, unattached: bool = False) -> list[Story]:
         """배치 앵커 조회(story ca37b2b0 ② — 갤러리 등 정확한 story 집합 필요 소비자용).
 
         org-scoped exact-id IN 조회. ORDER BY 없음 — 호출자가 id 집합 그대로를 필요로 하는
@@ -97,11 +167,12 @@ class StoryRepository(BaseRepository[Story]):
         """
         if not ids:
             return []
-        result = await self.session.execute(
-            select(Story).where(
-                self._org_filter(), Story.id.in_(ids), Story.deleted_at.is_(None),
-            )
+        query = select(Story).where(
+            self._org_filter(), Story.id.in_(ids), Story.deleted_at.is_(None),
         )
+        if unattached:
+            query = query.where(_unattached_clause())
+        result = await self.session.execute(query)
         return list(result.scalars().all())
 
     async def list_board(
@@ -115,6 +186,7 @@ class StoryRepository(BaseRepository[Story]):
         epic_id: uuid.UUID | None = None,
         story_number: int | None = None,
         q_text: str | None = None,
+        unattached: bool = False,
     ) -> tuple[list[Story], int]:
         """CB-S4: 보드 상태별 쿼리 — created_at DESC + priority 보조 정렬 + cursor 페이징.
 
@@ -141,7 +213,9 @@ class StoryRepository(BaseRepository[Story]):
         if story_number is not None:
             q = q.where(Story.story_number == story_number)
         if q_text:
-            q = q.where(Story.title.ilike(f"%{q_text}%"))
+            q = q.where(_title_search_filter(q_text))
+        if unattached:
+            q = q.where(_unattached_clause())
 
         # done: 최근 7일 제한
         if status == "done":
@@ -169,6 +243,7 @@ class StoryRepository(BaseRepository[Story]):
         status: str | None = None,
         story_number: int | None = None,
         q: str | None = None,
+        unattached: bool = False,
     ) -> list[Story]:
         """sprint 미배정 + 삭제되지 않은 스토리만 서버사이드 필터.
 
@@ -202,7 +277,9 @@ class StoryRepository(BaseRepository[Story]):
         if story_number is not None:
             query = query.where(Story.story_number == story_number)
         if q:
-            query = query.where(Story.title.ilike(f"%{q}%"))
+            query = query.where(_title_search_filter(q))
+        if unattached:
+            query = query.where(_unattached_clause())
         result = await self.session.execute(query.limit(limit))
         return list(result.scalars().all())
 

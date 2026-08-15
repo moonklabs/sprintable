@@ -101,18 +101,24 @@ def test_checkout_has_cancel_url():
 # ─── AC6: sandbox 모드 ───────────────────────────────────────────────────────
 
 def test_polar_api_url_uses_sandbox():
-    """polar_sandbox=True 시 sandbox API URL 사용."""
+    """polar_sandbox=True 시 sandbox API URL 사용.
+
+    #2478(B): _polar_api_url()은 PolarAdapter._api_url()로 무회귀 이관됐다(동일 로직) —
+    ee/routers/billing.py는 이제 PG URL을 직접 모른다(design doc §1)."""
     import inspect
-    from ee.routers import billing
-    source = inspect.getsource(billing._polar_api_url)
+    from app.services.payment.polar_adapter import PolarAdapter
+    source = inspect.getsource(PolarAdapter._api_url)
     assert "sandbox" in source
 
 
 def test_no_token_returns_mock_url():
-    """POLAR_ACCESS_TOKEN 없을 때 mock checkout URL 반환 로직 존재."""
+    """POLAR_ACCESS_TOKEN 없을 때 mock checkout URL 반환 로직 존재.
+
+    #2478(B): 이 로직은 PolarAdapter.create_checkout으로 이관됐다 — billing.py의
+    create_checkout_session은 이제 adapter.create_checkout()을 호출만 한다."""
     import inspect
-    from ee.routers import billing
-    source = inspect.getsource(billing.create_checkout_session)
+    from app.services.payment.polar_adapter import PolarAdapter
+    source = inspect.getsource(PolarAdapter.create_checkout)
     assert "polar_access_token" in source
     assert "mock" in source.lower() or "warning" in source.lower()
 
@@ -127,9 +133,14 @@ def test_checkout_request_schema():
 
 
 # ─── 프론트엔드 BillingTab checkout UI 검증 ─────────────────────────────────
+# story #2479(결제②-D 4티어 재편)에서 handleCheckout/selectedPlan/selectedCycle 이
+# UpgradeCheckoutDialog + onUpgrade + cycle 로 대체됨 — 신 구조 존재로 갱신.
+# (실 클릭→다이얼로그 오픈 인터랙션 검증은 isPricePublic=false 인 동안 잠긴 CTA라
+# 도달 불가 — apps/web/src/ee/components/billing/billing-tab.test.tsx 가 구조/상태
+# 분기 축을 vitest 로 커버한다.)
 
 def test_billing_tab_has_checkout_ui():
-    """billing-tab.tsx에 handleCheckout + 플랜/주기 선택 UI 존재."""
+    """billing-tab.tsx에 업그레이드 체크아웃 다이얼로그 + 월간/연간 주기 선택 UI 존재."""
     import os
     path = os.path.join(
         os.path.dirname(__file__), "..", "..", "apps", "web", "src",
@@ -137,8 +148,7 @@ def test_billing_tab_has_checkout_ui():
     )
     with open(path) as f:
         content = f.read()
-    assert "handleCheckout" in content
-    assert "selectedPlan" in content
-    assert "selectedCycle" in content
-    assert "monthly" in content
-    assert "yearly" in content
+    assert "UpgradeCheckoutDialog" in content
+    assert "onUpgrade" in content
+    assert "'monthly'" in content
+    assert "'yearly'" in content

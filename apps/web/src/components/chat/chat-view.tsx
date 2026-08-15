@@ -17,6 +17,7 @@ import { isHitlReply, parseHitlRequest } from '@/lib/hitl-classifier';
 import type { HitlAnswer } from './hitl-approval-card';
 import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
 import { useEntityStatusBatchFetch } from '@/hooks/use-entity-status-batch';
+import type { EventDefinitionSummary } from '@/lib/block-template';
 import { useMessageRangeSelection } from '@/hooks/use-message-range-selection';
 import { CitationComposeBar, type CitationSaveState } from './citation-compose-bar';
 import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
@@ -98,6 +99,24 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // 이 값을 읽어 effect의 재실행 여부를 판단하지 않기 때문(state로 하면 setState가 effect를
   // 재트리거해 순환 위험). messages만 dependency로 두고 "새로 보인 참조가 있는가"만 본다.
   const requestedEntityStatusKeysRef = useRef<Set<string>>(new Set());
+  // story #2637 — event_definitions 카탈로그(block_template 포함) 배치조회. entityStatusByKey와
+  // 같은 이유로 대화당 1회만 fetch(카탈로그는 event_key 조합에 무관하게 항상 전체를 돌려주는
+  // 응답이라, 메시지별로 다시 부를 이유가 없다 — 메시지가 100개여도 fetch는 1회).
+  const [eventDefinitionsByKey, setEventDefinitionsByKey] = useState<Record<string, EventDefinitionSummary> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/events/definitions')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: unknown) => {
+        if (cancelled || !json) return;
+        const list = Array.isArray(json) ? json as EventDefinitionSummary[] : [];
+        const byKey: Record<string, EventDefinitionSummary> = {};
+        for (const d of list) byKey[d.key] = d;
+        setEventDefinitionsByKey(byKey);
+      })
+      .catch(() => { /* non-critical — 렌더러가 못 찾으면 제네릭 폴백으로 graceful */ });
+    return () => { cancelled = true; };
+  }, []);
   // 1aeecdde P2: 답장 생성 중 에이전트 typing — #1353 GET /working 폴링(BE 45s TTL) 결과.
   const [typingAgents, setTypingAgents] = useState<{ id: string; name: string }[]>([]);
   // Deeplink (ade2d6d5): 진입 메시지를 일시적으로 하이라이트(ring). null이면 미표시.
@@ -776,7 +795,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                           {msg.id === unreadMarkerMessageId && (
                             <div className="my-1 flex items-center gap-2.5" role="separator" aria-label={t('unreadMarker')}>
                               <div className="h-px flex-1 bg-info/50" />
-                              <span className="rounded-full bg-info-tint px-3 py-0.5 text-[11px] font-bold text-info">
+                              {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
+                              <span className="rounded-full bg-info-tint px-3 py-0.5 text-[11px] font-bold text-foreground">
                                 {t('unreadMarker')}
                               </span>
                               <div className="h-px flex-1 bg-info/50" />
@@ -802,6 +822,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                             highlight={msg.id === highlightId}
                             projectId={projectId}
                             entityStatusByKey={entityStatusByKey}
+              eventDefinitionsByKey={eventDefinitionsByKey}
                             hitlAnswer={hitlAnswers.get(msg.id) ?? null}
                             onRespondHitl={(content) => handleSend(content)}
                             isCiteAnchor={citeSelection.isAnchor(msg.id)}
@@ -917,6 +938,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               incomingMessage={threadIncoming?.parent_id === activeThread.id ? threadIncoming : null}
               onReplyAdded={handleReplyAdded}
               entityStatusByKey={entityStatusByKey}
+              eventDefinitionsByKey={eventDefinitionsByKey}
               requestedEntityStatusKeysRef={requestedEntityStatusKeysRef}
               setEntityStatusByKey={setEntityStatusByKey}
             />

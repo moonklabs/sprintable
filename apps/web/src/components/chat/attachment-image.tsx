@@ -33,12 +33,16 @@ interface AttachmentImageProps {
   conversationId?: string;
   storyId?: string;
   alt: string;
+  /** story #2037 — 지정하면 클릭이 새 탭(원본) 대신 이 콜백을 연다(라이트박스 진입점).
+   * 생략하면(undefined) 기존 `<a target="_blank">` 그대로(story-detail-panel.tsx 등
+   * 다른 호출부는 이 prop을 안 넘겨 회귀 0). */
+  onOpen?: () => void;
 }
 
 // AC2: 모든 상태가 공유하는 고정 프레임 — 여기 크기를 바꾸면 반드시 모든 분기에서 동일하게 유지할 것.
 const FRAME_CLASS = 'relative flex h-32 w-60 max-w-full items-center justify-center overflow-hidden rounded bg-muted';
 
-export function AttachmentImage({ storedUrl, conversationId, storyId, alt }: AttachmentImageProps) {
+export function AttachmentImage({ storedUrl, conversationId, storyId, alt, onOpen }: AttachmentImageProps) {
   const t = useTranslations('chats');
   const [state, setState] = useState<State>('idle');
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
@@ -133,6 +137,13 @@ export function AttachmentImage({ storedUrl, conversationId, storyId, alt }: Att
           {t('attachmentReload')}
         </button>
       </div>
+    );
+  }
+  if (onOpen) {
+    return (
+      <button type="button" onClick={onOpen} className={`${FRAME_CLASS} cursor-zoom-in`} aria-label={alt}>
+        <Image src={signedUrl} alt={alt} fill sizes="240px" onError={handleImgError} className="object-contain" />
+      </button>
     );
   }
   return (

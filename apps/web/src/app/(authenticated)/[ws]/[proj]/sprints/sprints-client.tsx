@@ -16,7 +16,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 // 바(bounded bar) 형태. 과설명 금지 — 시작/종합 라벨 2개뿐.
 function SprintCycleBar({ startLabel, endLabel }: { startLabel: string; endLabel: string }) {
   return (
-    <div className="flex items-center gap-2 text-muted-foreground/70" aria-hidden="true">
+    <div className="flex items-center gap-2 text-muted-foreground" aria-hidden="true">
       <span className="text-[10px] leading-none">{startLabel}</span>
       <div className="h-2 w-24 rounded-full bg-gradient-to-r from-info/60 to-info/20" />
       <span className="text-[10px] leading-none">{endLabel}</span>

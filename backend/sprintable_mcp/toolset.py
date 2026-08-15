@@ -42,7 +42,13 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # 도구 자체가 이미 없다(원본 app/services/mcp_toolset.py에는 "제거했다"는 주석만 남아
     # 있었는데 vendored 사본에만 실제 키워드로 잔존해 있었다 — 원본과 동기화).
     ("admin", ("give_reward", "emit_event", "trigger_ai", "activate_sprint",
-               "close_sprint", "create_sprint", "upsert_webhook", "delete_webhook")),
+               "close_sprint", "create_sprint", "upsert_webhook", "delete_webhook",
+               # story #2636: 백엔드 SSOT와 동기화 — 이벤트 등록(admin 그룹, 등록=org 관리).
+               "register_event_definition", "update_event_definition")),
+    # story #2634: 백엔드 SSOT(app/services/mcp_toolset.py)와 동기화 — publish_event/
+    # list_event_definitions. admin 뒤에 두는 이유는 순서 의존(emit_event가 substring "event"를
+    # 포함 — admin보다 앞에 두면 기존 sprintable_emit_event 분류가 깨진다).
+    ("events", ("event",)),
 ]
 
 _CORE = "core"

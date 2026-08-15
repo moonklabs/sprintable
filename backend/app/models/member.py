@@ -43,8 +43,11 @@ class Member(Base):
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # story #2603 P0(delivery-contract-blueprint-v0-1): 에이전트 안정 @멘션 핸들. org 내
-    # non-null 값만 unique(대소문자 무관, 0241 partial index). 휴먼은 NULL(무의미).
+    # story #2603 P0(delivery-contract-blueprint-v0-1)이 채번하던 에이전트 @멘션 핸들 — 그
+    # 채번 호출부와 유일한 소비처(텍스트 @handle 파서)를 story #2646(2026-08-14)가 dev 실측
+    # 0/1139로 은퇴시켰다. 컬럼과 과거 채번된 값은 남아있으나 이제 아무 코드도 쓰지 않는다
+    # (재도입 시 독립 조각으로 새로 설계 — PO 지시). org 내 non-null 값만 unique했었다
+    # (대소문자 무관, 0241 partial index).
     handle: Mapped[str | None] = mapped_column(Text, nullable=True)
     org_role: Mapped[str | None] = mapped_column(Text, nullable=True)
     # E-MSG-POLICY S1: agent DM 인가 모드(creator_only default|org_wide|list). 에이전트 단위 정책 —

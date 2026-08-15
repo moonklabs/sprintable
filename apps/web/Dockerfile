@@ -1,6 +1,12 @@
 # D-S2: Next.js standalone 빌드용 Dockerfile
 # 빌드 컨텍스트: 레포 루트 (cloudbuild.yaml에서 실행)
-FROM node:20-alpine AS base
+# story #2640(P0 실사고, 2026-08-13 21:05): docker.io 익명 pull이 429로 Cloud Build를
+# 죽였다(build beb26450) — mirror.gcr.io로 전환해 그 rate-limit 표면 자체를 없앤다.
+# Docker daemon registry-mirror 설정이 아니라 FROM에 직접 참조하는 방식(Cloud Build 표준
+# `gcr.io/cloud-builders/docker` 스텝은 daemon.json을 못 건드림) — 실측(2026-08-14, 디디):
+# 흔치 않은 태그(node:20.11.1-alpine3.19)도 온디맨드 fetch-through 성공, 존재하지 않는
+# 태그는 정상 404("not found") — 캐시 미스가 조용히 깨지는 새 실패 모드가 아님을 확認.
+FROM mirror.gcr.io/library/node:20-alpine AS base
 RUN corepack enable pnpm
 
 # ─── 의존성 설치 ──────────────────────────────────────────────────────────────
@@ -41,7 +47,9 @@ ENV NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED=${NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED}
 RUN pnpm build
 
 # ─── 런타임 ──────────────────────────────────────────────────────────────────
-FROM node:20-alpine AS runner
+# story #2640: 위 base 스테이지와 동일 이유(mirror.gcr.io) — runner는 base에서 파생되지
+# 않는 별도 스테이지라 여기도 따로 전환 필요.
+FROM mirror.gcr.io/library/node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1

@@ -1,12 +1,50 @@
 'use client';
 
 /**
- * EE-only Billing tab — S5.2 상태 표시 + S5.3 Polar Checkout 연동.
- * isEEEnabled()=true 환경에서만 렌더링됨.
+ * EE-only Billing tab — 결제② D단계 재편 (v2.3 · 4티어 · KRW · Toss · 팩).
+ * isEEEnabled()=true 환경에서만 렌더링됨. 유나 시안(artifact a1bd79ae) + 핸드오프 doc
+ * (billing2-ui-handoff-v1) SSOT.
+ *
+ * isPricePublic — 대표 승인 게이트의 진실은 서버 필드(#2474 A관리1 BE)가 최종형이나, 그 API
+ * 착지 前까지는 하드코드로 켠다(story #2605 그라운딩: 렌더 경로가 TIER_DEFINITIONS 로컬 상수만
+ * 읽고 #2474 API를 호출하는 자리가 코드 어디에도 없음을 확認 — 이 상수는 "API 부재로 대신 켜는
+ * 로컬 값"일 뿐, #2474가 기능적으로 선결조건은 아니다). 대표 승인 완료(2026-08-13) 반영.
+ * #2474 착지 후 이 상수를 실 플래그 fetch 로 교체하는 것이 유일한 변경점이 되도록
+ * 나머지 렌더 로직은 이미 isPricePublic 하나로 분기돼 있다.
  */
 
 import { useEffect, useState } from 'react';
-import { CheckCircle, CreditCard, Loader2, Shield } from 'lucide-react';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
+import { Loader2 } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { PricingPlanCard } from './pricing-plan-card';
+import { PricingLimitsTable } from './pricing-limits-table';
+import { PricingPacks, type PackKind } from './pricing-packs';
+import { completeCheckout, startBillingAuth, type CheckoutOutcome } from './toss-checkout';
+import {
+  AUTOMATION_PACK,
+  STORAGE_PACK,
+  TIER_DEFINITIONS,
+  TIER_ORDER,
+  formatKrw,
+  withVatKrw,
+  yearlyMonthlyEquivalentKrw,
+  type TierId,
+} from './pricing-data';
+
+/** #2474 A관리1 BE 뜨기 前까지 하드코드 — 대표 승인 완료(2026-08-13, story #2605)로 켠다. */
+const IS_PRICE_PUBLIC = true;
 
 interface BillingStatus {
   org_id: string;
@@ -17,178 +55,338 @@ interface BillingStatus {
   can_manage: boolean;
 }
 
-interface Plan {
-  id: string;
-  name: string;
-  price: number;
-  billing_cycle: string | null;
-  features: string[];
-}
-
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
-const TIER_BADGE: Record<string, string> = {
-  free: 'bg-gray-100 text-gray-700',
-  team: 'bg-blue-100 text-blue-700',
-  pro: 'bg-purple-100 text-purple-700',
-};
-
-const STATUS_BADGE: Record<string, string> = {
-  active: 'bg-green-100 text-green-700',
-  past_due: 'bg-yellow-100 text-yellow-700',
-  cancelled: 'bg-destructive-tint text-destructive',
-};
-
-// E-ADMIN B1(doc e-admin-b1-polar-live-price-ids) — Polar live 확정가와 일치.
-// yearly = 연간 결제 시 월 환산가($490/12·$1490/12 반올림, ~17% 할인).
-const PLAN_PRICES: Record<string, { monthly: number; yearly: number }> = {
-  team: { monthly: 49, yearly: 41 },
-  pro: { monthly: 149, yearly: 124 },
-};
+function toTierId(raw: string | undefined): TierId {
+  return raw != null && (TIER_ORDER as readonly string[]).includes(raw) ? (raw as TierId) : 'free';
+}
 
 export function BillingTab({ orgId }: { orgId: string }) {
+  const t = useTranslations('pricingPlans');
+  const tc = useTranslations('common');
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [status, setStatus] = useState<BillingStatus | null>(null);
-  const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedPlan, setSelectedPlan] = useState<string>('team');
-  const [selectedCycle, setSelectedCycle] = useState<'monthly' | 'yearly'>('monthly');
-  const [checkingOut, setCheckingOut] = useState(false);
+  const [cycle, setCycle] = useState<'monthly' | 'yearly'>('monthly');
+  const [upgradeTarget, setUpgradeTarget] = useState<TierId | null>(null);
+  const [packTarget, setPackTarget] = useState<{ kind: PackKind; quantity: number } | null>(null);
+  const [checkoutProcessing, setCheckoutProcessing] = useState(false);
+  const [checkoutOutcome, setCheckoutOutcome] = useState<CheckoutOutcome | { kind: 'widgetFailed' } | null>(null);
 
-  useEffect(() => {
-    Promise.all([
-      fetch(`${FASTAPI_URL()}/api/v2/billing/status`, { credentials: 'include' }).then((r) => r.json() as Promise<BillingStatus>),
-      fetch(`${FASTAPI_URL()}/api/v2/billing/plans`, { credentials: 'include' }).then((r) => r.json() as Promise<Plan[]>),
-    ])
-      .then(([s, p]) => { setStatus(s); setPlans(p.filter((pl) => pl.id !== 'free')); })
-      .catch(() => setError('Billing 정보를 불러올 수 없는.'))
+  const refetchStatus = () => {
+    setLoading(true);
+    fetch(`${FASTAPI_URL()}/api/v2/billing/status`, { credentials: 'include' })
+      .then((r) => r.json() as Promise<BillingStatus>)
+      .then(setStatus)
+      .catch(() => setError(t('loadError')))
       .finally(() => setLoading(false));
-  }, [orgId]);
-
-  const handleCheckout = async () => {
-    if (!status?.can_manage) return;
-    setCheckingOut(true);
-    try {
-      const res = await fetch(`${FASTAPI_URL()}/api/v2/billing/checkout`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan_id: selectedPlan, billing_cycle: selectedCycle }),
-      });
-      const json = await res.json() as { checkout_url?: string; detail?: string };
-      if (!res.ok) throw new Error(json.detail ?? 'Checkout failed');
-      if (json.checkout_url) {
-        window.location.href = json.checkout_url;
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Checkout error');
-      setCheckingOut(false);
-    }
   };
 
-  if (loading) return <div className="p-6 text-sm text-muted-foreground flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Loading...</div>;
-  if (error) return <div className="p-6 text-sm text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</div>;
+  useEffect(() => {
+    refetchStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId]);
 
-  const currentPlan = [...plans, { id: 'free', name: 'Free', price: 0, billing_cycle: null, features: ['1 project', '5 members', 'Basic AI features'] }].find((p) => p.id === status?.tier);
+  // 결제②-D(#2510) — Toss 위젯 리다이렉트 왕복 복귀 처리. successUrl/failUrl 둘 다
+  // /settings?tab=billing 으로 돌아오므로 여기서 쿼리파라미터로 왕복 결과를 판별한다.
+  // 처리 後 즉시 쿼리를 지워 새로고침 시 같은 authKey로 이중 체크아웃되는 것을 막는다.
+  useEffect(() => {
+    const checkoutParam = searchParams.get('checkout');
+    if (checkoutParam == null) return;
+
+    const clearQuery = () => router.replace('/settings?tab=billing');
+
+    if (checkoutParam === 'fail') {
+      setCheckoutOutcome({ kind: 'widgetFailed' });
+      clearQuery();
+      return;
+    }
+    if (checkoutParam !== 'success') return;
+
+    const authKey = searchParams.get('authKey');
+    const tier = searchParams.get('tier');
+    const billingCycleParam = searchParams.get('cycle');
+    if (!authKey || !tier || (billingCycleParam !== 'monthly' && billingCycleParam !== 'annual')) {
+      setCheckoutOutcome({ kind: 'widgetFailed' });
+      clearQuery();
+      return;
+    }
+
+    setCheckoutProcessing(true);
+    completeCheckout({ authKey, tier: tier as Exclude<TierId, 'free'>, billingCycle: billingCycleParam })
+      .then((outcome) => {
+        setCheckoutOutcome(outcome);
+        if (outcome.kind === 'active') refetchStatus();
+      })
+      .catch(() => setCheckoutOutcome({ kind: 'error', status: 0 }))
+      .finally(() => {
+        setCheckoutProcessing(false);
+        clearQuery();
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        {tc('loading')}
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="p-6">
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  const currentTier = toTierId(status?.tier);
+  const canManage = status?.can_manage ?? false;
 
   return (
     <div className="space-y-6 p-6">
-      {/* 현재 구독 상태 */}
-      <section className="rounded-lg border p-4 space-y-3">
-        <div className="flex items-center gap-2">
-          <CreditCard className="h-5 w-5 text-muted-foreground" />
-          <h3 className="font-semibold text-base">현재 플랜</h3>
-        </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className={`px-2 py-0.5 rounded text-xs font-medium capitalize ${TIER_BADGE[status?.tier ?? 'free'] ?? 'bg-gray-100 text-gray-700'}`}>
-            {status?.tier ?? 'free'}
-          </span>
-          <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_BADGE[status?.status ?? 'active'] ?? 'bg-gray-100 text-gray-700'}`}>
-            {status?.status ?? 'active'}
-          </span>
-          {status?.billing_cycle && <span className="text-xs text-muted-foreground">{status.billing_cycle}</span>}
-          {status?.current_period_end && (
-            <span className="text-xs text-muted-foreground">
-              갱신일: {new Date(status.current_period_end).toLocaleDateString('ko-KR')}
-            </span>
-          )}
-        </div>
-        {currentPlan && (
-          <ul className="space-y-1 text-sm text-muted-foreground">
-            {currentPlan.features.map((f) => (
-              <li key={f} className="flex items-center gap-2"><CheckCircle className="h-4 w-4 text-green-500 shrink-0" />{f}</li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {/* Checkout — owner/admin 전용 */}
-      {status?.can_manage && (
-        <section className="rounded-lg border p-4 space-y-4">
-          <div className="flex items-center gap-2">
-            <Shield className="h-4 w-4 text-muted-foreground" />
-            <h3 className="font-semibold text-sm">플랜 업그레이드</h3>
-          </div>
-
-          {/* 결제 주기 토글 */}
-          <div className="flex gap-2">
-            {(['monthly', 'yearly'] as const).map((cycle) => (
-              <button
-                key={cycle}
-                onClick={() => setSelectedCycle(cycle)}
-                className={`px-3 py-1 rounded text-sm font-medium border transition-colors ${selectedCycle === cycle ? 'bg-primary text-primary-foreground border-primary' : 'border-border text-muted-foreground hover:border-primary/50'}`}
-              >
-                {cycle === 'monthly' ? '월간' : '연간'}
-                {cycle === 'yearly' && <span className="ml-1 text-xs text-green-600">(17% 할인)</span>}
-              </button>
-            ))}
-          </div>
-
-          {/* 플랜 선택 */}
-          <div className="grid gap-3 sm:grid-cols-2">
-            {plans.map((plan) => {
-              const prices = PLAN_PRICES[plan.id];
-              const price = prices ? prices[selectedCycle] : plan.price;
-              return (
-                <button
-                  key={plan.id}
-                  onClick={() => setSelectedPlan(plan.id)}
-                  className={`rounded-lg border p-4 text-left space-y-2 transition-colors ${selectedPlan === plan.id ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/30'}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium">{plan.name}</span>
-                    <span className="text-sm font-semibold">${price}/mo</span>
-                  </div>
-                  <ul className="space-y-1 text-xs text-muted-foreground">
-                    {plan.features.map((f) => (
-                      <li key={f} className="flex items-center gap-1.5"><CheckCircle className="h-3 w-3 text-green-500 shrink-0" />{f}</li>
-                    ))}
-                  </ul>
-                </button>
-              );
-            })}
-          </div>
-
-          <button
-            onClick={handleCheckout}
-            disabled={checkingOut}
-            className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
-          >
-            {checkingOut ? <><Loader2 className="h-4 w-4 animate-spin" />처리 중...</> : `${selectedPlan === 'team' ? 'Team' : 'Pro'} ${selectedCycle === 'monthly' ? '월간' : '연간'} 시작하기`}
-          </button>
-
-          <p className="text-xs text-muted-foreground text-center">
-            Polar 결제 포털로 이동합니다. 취소 시 이 화면으로 돌아옵니다.
-          </p>
-        </section>
+      {!IS_PRICE_PUBLIC && (
+        <Alert variant="info">
+          <AlertDescription>{t('statePendingBanner')}</AlertDescription>
+        </Alert>
       )}
 
-      {/* member 안내 */}
-      {status && !status.can_manage && (
-        <section className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-          결제 관리는 owner 또는 admin만 가능한. 플랜 변경이 필요하면 관리자에게 문의하면 됩니다.
-        </section>
+      {checkoutProcessing && (
+        <Alert variant="info">
+          <AlertDescription className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {t('checkoutProcessing')}
+          </AlertDescription>
+        </Alert>
       )}
+
+      {!checkoutProcessing && checkoutOutcome?.kind === 'active' && (
+        <Alert variant="success">
+          <AlertDescription>{t('checkoutSuccessBanner', { tier: t(`tierName_${checkoutOutcome.result.tier}`) })}</AlertDescription>
+        </Alert>
+      )}
+      {!checkoutProcessing && checkoutOutcome?.kind === 'declined' && (
+        // 유나 design 가디언(2026-08-07) — declined(카드거절)는 502 등 시스템오류와 색으로
+        // 구분돼야 한다(내 카드 문제 vs 서비스 문제). destructive(red)가 아니라 warning.
+        <Alert variant="warning">
+          <AlertDescription>
+            {t('checkoutDeclinedBanner', { reason: checkoutOutcome.result.declined_reason ?? '' })}
+            {' '}
+            {t('checkoutDeclinedReassurance')}
+          </AlertDescription>
+        </Alert>
+      )}
+      {!checkoutProcessing && checkoutOutcome?.kind === 'error' && (
+        <Alert variant="destructive">
+          <AlertDescription>{t('checkoutErrorBanner')}</AlertDescription>
+        </Alert>
+      )}
+      {!checkoutProcessing && checkoutOutcome?.kind === 'widgetFailed' && (
+        <Alert variant="destructive">
+          <AlertDescription>{t('checkoutWidgetFailedBanner')}</AlertDescription>
+        </Alert>
+      )}
+
+      {IS_PRICE_PUBLIC && (
+        <Tabs value={cycle} onValueChange={(v) => setCycle(v as 'monthly' | 'yearly')}>
+          <div className="flex items-center gap-3">
+            <TabsList>
+              <TabsTrigger value="monthly">{t('monthlyToggle')}</TabsTrigger>
+              <TabsTrigger value="yearly">{t('yearlyToggle')}</TabsTrigger>
+            </TabsList>
+            {cycle === 'yearly' && <span className="text-xs font-medium text-success">{t('yearlySaveNote')}</span>}
+          </div>
+        </Tabs>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {TIER_ORDER.map((tierId) => {
+          const tier = TIER_DEFINITIONS[tierId];
+          const displayPriceMonthlyKrw = cycle === 'yearly' ? yearlyMonthlyEquivalentKrw(tier.priceMonthlyKrw) : tier.priceMonthlyKrw;
+          return (
+            <PricingPlanCard
+              key={tierId}
+              tier={tier}
+              isPricePublic={IS_PRICE_PUBLIC}
+              isCurrent={tierId === currentTier}
+              displayPriceMonthlyKrw={displayPriceMonthlyKrw}
+              onUpgrade={(target) => canManage && setUpgradeTarget(target)}
+            />
+          );
+        })}
+      </div>
+
+      <PricingLimitsTable currentTier={currentTier} />
+
+      {/* 팩 실가격(원)도 대표 승인 게이트 대상 — canPurchasePacks만 보면 승인 前에도 team/business
+          티어에서 실 KRW 가격이 샌다(카디르 QA #2866 발견). isPricePublic 없이는 살 것 자체가 없다. */}
+      {IS_PRICE_PUBLIC && TIER_DEFINITIONS[currentTier].limits.canPurchasePacks && (
+        <PricingPacks onBuyPack={(kind, quantity) => canManage && setPackTarget({ kind, quantity })} />
+      )}
+
+      {!canManage && (
+        <Alert variant="default">
+          <AlertDescription>{t('memberNotice')}</AlertDescription>
+        </Alert>
+      )}
+
+      <UpgradeCheckoutDialog
+        tierId={upgradeTarget}
+        cycle={cycle}
+        currentSeats={TIER_DEFINITIONS[currentTier].limits.seats}
+        onClose={() => setUpgradeTarget(null)}
+      />
+      <PackPurchaseDialog target={packTarget} onClose={() => setPackTarget(null)} />
     </div>
+  );
+}
+
+export function UpgradeCheckoutDialog({
+  tierId,
+  cycle,
+  currentSeats,
+  onClose,
+}: {
+  tierId: TierId | null;
+  cycle: 'monthly' | 'yearly';
+  currentSeats: number;
+  onClose: () => void;
+}) {
+  const t = useTranslations('pricingPlans');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(false);
+  if (tierId == null || tierId === 'free') return null;
+  const tier = TIER_DEFINITIONS[tierId];
+  const monthlyKrw = cycle === 'yearly' ? yearlyMonthlyEquivalentKrw(tier.priceMonthlyKrw) : tier.priceMonthlyKrw;
+  const chargeKrw = withVatKrw(monthlyKrw);
+  const nextBillingDay = new Date().getDate();
+
+  // story #2510 — 위젯이 열리면 이 페이지를 이탈하므로 정상 흐름에서 setSubmitting(false)로
+  // 돌아오지 않는다(리다이렉트 복귀 後 새 마운트가 처리). 실패(예: 카드 인증창 자체가 안
+  // 열림)만 여기서 잡아 재시도 가능한 상태로 되돌린다 — 이중제출 방어(유나 시안 v2).
+  const handleConfirm = () => {
+    if (submitting) return;
+    setSubmitting(true);
+    setSubmitError(false);
+    startBillingAuth({ tier: tierId, cycle }).catch(() => {
+      setSubmitting(false);
+      setSubmitError(true);
+    });
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && !submitting && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('checkoutDialogTitle', { tier: t(`tierName_${tierId}`) })}</DialogTitle>
+        </DialogHeader>
+        <dl className="divide-y divide-border text-sm">
+          <div className="flex justify-between py-2">
+            <dt className="text-muted-foreground">{t('checkoutDialogPlanLabel')}</dt>
+            <dd className="font-semibold">{t('checkoutDialogPlanValue', { tier: t(`tierName_${tierId}`), cycle: t(cycle === 'monthly' ? 'monthlyToggle' : 'yearlyToggle') })}</dd>
+          </div>
+          <div className="flex justify-between py-2">
+            <dt className="text-muted-foreground">{t('checkoutDialogSeatsLabel')}</dt>
+            <dd className="font-semibold">{t('checkoutDialogSeatsCurrent', { count: currentSeats })}</dd>
+          </div>
+          <div className="flex justify-between py-2">
+            <dt className="text-muted-foreground">{t('checkoutDialogChargeLabel')}</dt>
+            <dd className="font-semibold">{t('checkoutDialogChargeValue', { amount: formatKrw(chargeKrw) })}</dd>
+          </div>
+          <div className="flex justify-between py-2">
+            <dt className="text-muted-foreground">{t('checkoutDialogNextBillingLabel')}</dt>
+            <dd className="font-semibold">{t('checkoutDialogNextBillingEveryMonth', { day: nextBillingDay })}</dd>
+          </div>
+        </dl>
+        <p className="text-[11px] text-muted-foreground">{t('checkoutDialogTossNote')}</p>
+        {/* story #2606 AC4: 결제 화면에서 환불정책 확인 가능(Toss 심사 요건) — 확인 버튼 바로 위. */}
+        <p className="text-[11px] text-muted-foreground">
+          {t('checkoutDialogRefundPolicyPrefix')}{' '}
+          <Link href="/refund-policy" target="_blank" className="underline hover:text-foreground/80">
+            {t('checkoutDialogRefundPolicyLink')}
+          </Link>
+          {t('checkoutDialogRefundPolicySuffix')}
+        </p>
+        {submitError && (
+          <Alert variant="destructive">
+            <AlertDescription>{t('checkoutWidgetOpenErrorInline')}</AlertDescription>
+          </Alert>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={submitting}>
+            {t('checkoutDialogCancel')}
+          </Button>
+          <Button
+            variant="default"
+            className="bg-brand text-brand-foreground hover:bg-brand/90"
+            onClick={handleConfirm}
+            disabled={submitting}
+          >
+            {submitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" data-icon="inline-start" />
+            ) : null}
+            {t('checkoutDialogConfirm')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PackPurchaseDialog({
+  target,
+  onClose,
+}: {
+  target: { kind: PackKind; quantity: number } | null;
+  onClose: () => void;
+}) {
+  const t = useTranslations('pricingPlans');
+  if (target == null) return null;
+  const pack = target.kind === 'automation' ? AUTOMATION_PACK : STORAGE_PACK;
+  const priceKrw = pack.priceKrwPerPack * target.quantity;
+  const packTitleKey = target.kind === 'automation' ? 'automationPackTitle' : 'storagePackTitle';
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('packDialogTitle', { count: target.quantity, pack: t(packTitleKey) })}</DialogTitle>
+        </DialogHeader>
+        <dl className="divide-y divide-border text-sm">
+          <div className="flex justify-between py-2">
+            <dt className="text-muted-foreground">{t('packDialogAmountLabel')}</dt>
+            <dd className="font-semibold">
+              {target.kind === 'automation'
+                ? t('packDialogAutomationAmount', { amount: (AUTOMATION_PACK.auPerPack * target.quantity).toLocaleString('ko-KR') })
+                : t('packDialogStorageAmount', { amount: STORAGE_PACK.gbPerPack * target.quantity })}
+            </dd>
+          </div>
+          <div className="flex justify-between py-2">
+            <dt className="text-muted-foreground">{t('packDialogChargeLabel')}</dt>
+            <dd className="font-semibold">{t('packDialogChargeValue', { price: formatKrw(priceKrw) })}</dd>
+          </div>
+          <div className="flex justify-between py-2">
+            <dt className="text-muted-foreground">{t('packDialogAppliesLabel')}</dt>
+            <dd className="font-semibold">{t('packDialogAppliesValue')}</dd>
+          </div>
+        </dl>
+        <p className="text-[11px] text-muted-foreground">{t('packDialogNote')}</p>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            {t('packDialogCancel')}
+          </Button>
+          {/* 실 결제/원장 기입은 결제②-C(TossAdapter)+A2(Ledger) 범위 — 셸 확인용으로 닫는다. */}
+          <Button variant="default" className="bg-brand text-brand-foreground hover:bg-brand/90" onClick={onClose}>
+            {t('packDialogConfirm')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

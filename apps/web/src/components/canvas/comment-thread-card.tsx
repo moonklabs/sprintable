@@ -36,7 +36,8 @@ export function CommentThreadCard({
   const t = useTranslations('canvas');
   const [replyDraft, setReplyDraft] = useState('');
   const resolved = thread.rollup === 'resolved';
-  const rollupTone = resolved ? 'text-success bg-success/10' : 'text-info bg-info/10';
+  // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+  const rollupTone = resolved ? 'text-foreground bg-success/10' : 'text-foreground bg-info/10';
 
   const handleReply = () => {
     const body = replyDraft.trim();
@@ -75,7 +76,7 @@ export function CommentThreadCard({
         ) : null}
 
         {resolved && thread.resolved_by ? (
-          <p className="text-[10px] text-muted-foreground/80">{t('resolvedByNote', { name: memberMap[thread.resolved_by]?.name ?? '—' })}</p>
+          <p className="text-[10px] text-muted-foreground">{t('resolvedByNote', { name: memberMap[thread.resolved_by]?.name ?? '—' })}</p>
         ) : null}
 
         {!resolved ? (

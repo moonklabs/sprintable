@@ -92,18 +92,37 @@ export default async function AuthenticatedLayout({
   // 단건 조회(name+slug 동시)로 보강한다 — 사이드바/⌘K "문서" 바로가기 slug(story a539c649 S2)
   // 와 표시 이름이 같은 project를 가리키므로 PO 리뷰(§확認②) 지적대로 fetch 하나로 합쳤다.
   // pathProjectId가 없으면(flat 라우트) 계정 상태 project 기준으로 조회한다(기존 동작 유지).
+  // ⛔카디르 QA 근본 재진단(2026-08-09, 실측 8회 재현) — 아래 project 조회(단건·리스트 둘 다)를
+  // X-Org-Id 없이 부르면 BE get_verified_org_id가 **JWT 기본 org**로 스코프한다. 세션의
+  // 현재/타겟 org(pathOrgId ?? me.org_id)가 JWT 기본 org와 다른 멀티org 계정에선 엉뚱한
+  // org로 스코프돼 빈 결과/404가 난다(curl로 X-Org-Id 붙이면 정상 확認됨) — 이게 사이드바
+  // bare-link 결함의 진짜 근본원인.
+  const projectAuthHeader = { ...authHeader, 'X-Org-Id': pathOrgId ?? me?.org_id ?? '' };
   const projectInfoTargetId = pathProjectId ?? me?.project_id;
   const projectInfo = projectInfoTargetId
-    ? await fetch(`${fastapiUrl}/api/v2/projects/${projectInfoTargetId}`, { headers: authHeader, cache: 'no-store' })
+    ? await fetch(`${fastapiUrl}/api/v2/projects/${projectInfoTargetId}`, { headers: projectAuthHeader, cache: 'no-store' })
         .then((r) => (r.ok ? r.json() : null))
         .then((json: { name?: string; slug?: string | null } | null) => json)
         .catch(() => null)
     : null;
-  const currentProjectSlug = projectInfo?.slug ?? undefined;
+  // ⛔실측 결함(2026-08-09, PO puppeteer 재현 — 흐름 메뉴→/flow bare→dead-end 404) — 위 단건조회
+  // (GET /projects/{id})가 정상 프로젝트(slug 有)인데도 이따금 slug 없이/실패 응답해 사이드바가
+  // slug 없는 bare 링크만 만들었다(근본원인=위 X-Org-Id 누락). 리스트 엔드포인트(GET /projects)는
+  // 같은 프로젝트를 직접 대조로 항상 정확히 낸다는 걸 확認했다 — 단건조회가 비면 그 자리에서
+  // 포기하지 않고 리스트에서 한 번 더 찾는다.
+  const projectInfoFallback = projectInfoTargetId && !projectInfo?.slug
+    ? await fetch(`${fastapiUrl}/api/v2/projects`, { headers: projectAuthHeader, cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((list: Array<{ id?: string; name?: string; slug?: string | null }> | null) =>
+          list?.find((p) => p.id === projectInfoTargetId) ?? null)
+        .catch(() => null)
+    : null;
+  const currentProjectSlug = projectInfo?.slug ?? projectInfoFallback?.slug ?? undefined;
+  const projectInfoName = projectInfo?.name ?? projectInfoFallback?.name;
 
   const pathProjectKnown = pathProjectId ? projectMemberships.some((m) => m.projectId === pathProjectId) : true;
-  if (pathProjectId && !pathProjectKnown && projectInfo?.name) {
-    projectMemberships = [...projectMemberships, { projectId: pathProjectId, projectName: projectInfo.name }];
+  if (pathProjectId && !pathProjectKnown && projectInfoName) {
+    projectMemberships = [...projectMemberships, { projectId: pathProjectId, projectName: projectInfoName }];
   }
   // PO 리뷰(§확認①) — 위 조회가 실패하면(네트워크·403 등) projectMemberships에 pathProjectId가
   // 안 들어간다. dashboard-shell.tsx가 이 경우 계정 상태의 옛 project_name으로 조용히
@@ -118,6 +137,19 @@ export default async function AuthenticatedLayout({
     <DashboardShell
       currentTeamMemberId={me?.id}
       orgId={me?.org_id}
+      // story #2545(카디르 라이브 재QA, 2026-08-10) — `me?.org_id`는 JWT `app_metadata.org_id`
+      // 클레임(#2544가 "top-level org_id"라 부른 바로 그 필드 — backend/app/dependencies/
+      // auth.py의 `jwt_org_id = auth.claims.get("app_metadata", {}).get("org_id")`와 동일
+      // 필드. "top-level"은 app_metadata *안에서* org_id가 최상위라는 뜻이지, JWT payload
+      // 자체의 최상위 필드라는 뜻이 아니다 — 오해 소지가 있어 명시한다)가 아니라, `/api/v2/me`가
+      // (주로) `app_metadata.project_id` 클레임으로 찾은 TeamMember 행의 org다
+      // (backend/app/routers/me.py). 두 클레임이 갈리면(예: org_id는 reset됐는데 project_id는
+      // 옛 org를 여전히 가리키는 부분-stale JWT) me.org_id가 «이미 pathOrgId와 같다»고
+      // 잘못 보고해 아래 자동 switch-org effect가 조기 return — 그 순간 실제 서명된
+      // app_metadata.org_id 클레임은 여전히 다르다(카디르 실측).
+      // getServerSession()이 이미 jwtVerify로 이 클레임을 직접 읽어둔 값을 그대로 흘려보낸다
+      // (신규 fetch/디코드 0) — DashboardShell의 불일치 판정은 이 값을 우선한다.
+      jwtOrgId={session.org_id ?? undefined}
       projectId={me?.project_id}
       projectName={projectNameForDisplay}
       currentProjectSlug={currentProjectSlug}

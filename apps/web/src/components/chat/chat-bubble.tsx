@@ -15,6 +15,7 @@ import { getFileIcon } from '@/lib/file-icon';
 import { AttachmentImage } from './attachment-image';
 import { AttachmentMedia } from './attachment-media';
 import { AttachmentFile } from './attachment-file';
+import { ImageLightbox, type LightboxItem } from './image-lightbox';
 import { MessageContextMenu, type CiteAction } from './message-context-menu';
 import { SenderProfilePopover } from './sender-profile-popover';
 import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from './presence-dot';
@@ -22,6 +23,8 @@ import { ReferenceSuggestionRow } from './reference-suggestion-row';
 import { parseHitlRequest } from '@/lib/hitl-classifier';
 import { HitlApprovalCard, type HitlAnswer } from './hitl-approval-card';
 import { ApprovalRequestCard } from './approval-request-card';
+import { EventBlockCard } from './event-block-card';
+import { parseBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -58,6 +61,9 @@ interface ChatBubbleProps {
    * 자체가 안 뜬다(일반 텍스트로 폴백) — 호출부가 아직 안 넘기는 화면에서 깨진 카드가
    * 뜨지 않게 하는 안전장치. */
   onRespondHitl?: (content: string) => Promise<void>;
+  /** story #2637 — chat-view.tsx가 대화당 1회 배치조회한 event_definitions 카탈로그(entityStatusByKey와
+   * 동일 패턴). 생략하면(undefined) 이벤트 메시지도 BE 제네릭 폴백 텍스트로 안전하게 그려진다. */
+  eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
 }
 
 interface ContextMenuState {
@@ -275,7 +281,7 @@ const LONG_PRESS_MS = 500;
 export function ChatBubble({
   message, isMine, isGrouped = false, onOpenThread, onDelete, onBlockUser, presenceStatus, isWorking = false,
   highlight = false, projectId, isCiteAnchor = false, isCiteInRange = false, citeAction, entityStatusByKey,
-  hitlAnswer = null, onRespondHitl,
+  hitlAnswer = null, onRespondHitl, eventDefinitionsByKey,
 }: ChatBubbleProps) {
   const t = useTranslations('chats');
   const isAgent = message.sender_type === 'agent';
@@ -289,6 +295,16 @@ export function ChatBubble({
   // 달리 sniffing(정규식 매칭) 없이 구조화 필드 존재만으로 판별 — BE가 이미 결정한 사실이라
   // FE가 다시 추측할 이유가 없다.
   const approvalTarget = !isDeleted ? message.approval_target ?? null : null;
+  // story #2637 AC0-a — approval_target과 동일 규율(구조화 필드 존재만으로 판별).
+  const eventTarget = !isDeleted ? message.event ?? null : null;
+  // story #2637 AC2/PO 리뷰(head 80319636c ①) — block_template이 실제로 파싱 가능할 때만
+  // EventBlockCard로 간다. 파싱 실패/부재(정의 없음·구버전 캐시 등)는 이 상수 자체가 null이
+  // 되어 아래 렌더 분기가 자연히 일반 메시지(ChatMarkdown) 경로로 흘러간다 — EventBlockCard가
+  // 자체 폴백 div를 갖지 않는다(제네릭 content의 마크다운 렌더 경로까지 완전히 동일해야
+  // 비회귀 — 예: "- " 리스트가 불릿으로 남아야지 하이픈 리터럴로 후퇴하면 안 된다).
+  const eventBlockTemplate = eventTarget?.event_key
+    ? parseBlockTemplate(eventDefinitionsByKey?.[eventTarget.event_key]?.block_template)
+    : null;
   // S8: 슬래시 커맨드는 전용 버블(brand·mono·⌘). 리터럴(`//`)은 dequote된 일반 텍스트.
   const isCmd = isCommand(message.content);
   const isLiteral = !isCmd && message.content.startsWith('//');
@@ -302,6 +318,26 @@ export function ChatBubble({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   // story #2349 — "상대 프로필" 진입점(자기 자신엔 없다, isMine 게이트).
   const [profilePopover, setProfilePopover] = useState<ContextMenuState | null>(null);
+  // story #2037 — 라이트박스. 이 메시지의 이미지 첨부에만 국한된 순번(AC3, 여러 장 넘기기는
+  // 메시지 단위 스코프)을 attachments 원 배열 순서 그대로 매겨 둔다(비-이미지 첨부가 섞여
+  // 있어도 이미지끼리의 상대 순서만 쓰면 되므로). react-hooks/immutability가 render 중
+  // 변수 재대입을 막아 카운터를 안 쓴다 — 대신 "이 위치 앞의 이미지 개수"를 순수하게 센다
+  // (한 메시지 첨부 수는 항상 소수라 O(n²)는 무관하다).
+  const imageAttachmentEntries = useMemo(() => {
+    const atts = message.attachments ?? [];
+    const isImageAtt = (a: (typeof atts)[number]) => Boolean(a.url) && a.content_type?.startsWith('image/');
+    return atts.map((att, pos) => ({
+      att,
+      imageIndex: isImageAtt(att) ? atts.slice(0, pos).filter(isImageAtt).length : undefined,
+    }));
+  }, [message.attachments]);
+  const lightboxItems: LightboxItem[] = useMemo(
+    () => imageAttachmentEntries
+      .filter((e) => e.imageIndex !== undefined)
+      .map((e) => ({ storedUrl: e.att.url!, alt: e.att.name ?? e.att.filename ?? '첨부파일' })),
+    [imageAttachmentEntries],
+  );
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const handleOpenProfilePopover = useCallback((e: { currentTarget: Element }) => {
     if (isMine) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -456,7 +492,12 @@ export function ChatBubble({
               </button>
             </div>
           ) : approvalTarget ? (
-            <ApprovalRequestCard target={approvalTarget} />
+            <ApprovalRequestCard target={approvalTarget} eventDefinitionsByKey={eventDefinitionsByKey} />
+          ) : eventTarget && eventBlockTemplate ? (
+            <EventBlockCard
+              template={eventBlockTemplate}
+              payload={eventTarget.payload}
+            />
           ) : hitlRequest ? (
             <HitlApprovalCard
               request={hitlRequest}
@@ -466,12 +507,12 @@ export function ChatBubble({
             />
           ) : isCmd ? (
             <div className={`min-w-0 max-w-full rounded-xl border border-info/30 bg-info/8 px-3.5 py-2 ${isMine ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
-              <div className="mb-1 flex items-center gap-1 text-[10px] font-medium text-info">
+              <div className="mb-1 flex items-center gap-1 text-[10px] font-medium text-foreground">
                 <Terminal className="h-3 w-3" aria-hidden />
                 {t('commandTag')}
               </div>
               <code className="block whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-sm">
-                <span className="text-info">/{cmdName}</span>
+                <span className="text-foreground">/{cmdName}</span>
                 <span className="text-muted-foreground">{message.content.slice(1 + (cmdName?.length ?? 0))}</span>
               </code>
             </div>
@@ -501,7 +542,7 @@ export function ChatBubble({
           {/* story #2283 — 보낸 직후 그 메시지 바로 아래에서 한 번 제안(작성자 본인에게만,
               isMine 게이트는 컴포넌트 내부에서 건다). ⛔남의 메시지엔 안 뜬다. tombstone된
               메시지엔 제안할 실 내용이 없다(story #2319). */}
-          {!isCmd && !isDeleted && !hitlRequest && !approvalTarget && <ReferenceSuggestionRow messageId={message.id} content={message.content} isMine={isMine} projectId={projectId} />}
+          {!isCmd && !isDeleted && !hitlRequest && !approvalTarget && !(eventTarget && eventBlockTemplate) && <ReferenceSuggestionRow messageId={message.id} content={message.content} isMine={isMine} projectId={projectId} />}
 
           {/* Attachments — a54ddc16: auth-gated 서명 라우트 경유(public 직링크 미사용).
               이미지=AttachmentImage(3상태 render)·오디오/비디오=AttachmentMedia(story #2051,
@@ -511,13 +552,20 @@ export function ChatBubble({
               서버 계약을 스스로 어기지 않는다는 것을 명시한다). */}
           {!isDeleted && message.attachments && message.attachments.length > 0 && (
             <div className="flex flex-col gap-1.5">
-              {message.attachments.map((att, i) => {
+              {imageAttachmentEntries.map(({ att, imageIndex }, i) => {
                 const href = att.url;
                 if (!href) return null;
                 const label = att.name ?? att.filename ?? '첨부파일';
-                const isImage = att.content_type?.startsWith('image/');
-                if (isImage) {
-                  return <AttachmentImage key={href ?? i} storedUrl={href} conversationId={message.memo_id} alt={label} />;
+                if (imageIndex !== undefined) {
+                  return (
+                    <AttachmentImage
+                      key={href ?? i}
+                      storedUrl={href}
+                      conversationId={message.memo_id}
+                      alt={label}
+                      onOpen={() => setLightboxIndex(imageIndex)}
+                    />
+                  );
                 }
                 const isAudio = att.content_type?.startsWith('audio/');
                 const isVideo = att.content_type?.startsWith('video/');
@@ -545,7 +593,7 @@ export function ChatBubble({
             </div>
           )}
 
-          <time className="text-[10px] text-muted-foreground/70">{time}</time>
+          <time className="text-[10px] text-muted-foreground">{time}</time>
 
           {/* AC5: 답글 수 표시 — reply_count > 0 */}
           {replyCount > 0 && (
@@ -589,6 +637,16 @@ export function ChatBubble({
           isAgent={isAgent}
           onClose={() => setProfilePopover(null)}
           onBlock={onBlockUser}
+        />
+      )}
+
+      {/* story #2037 — 이미지 첨부 확대 뷰 */}
+      {lightboxIndex !== null && (
+        <ImageLightbox
+          items={lightboxItems}
+          startIndex={lightboxIndex}
+          conversationId={message.memo_id}
+          onClose={() => setLightboxIndex(null)}
         />
       )}
     </>

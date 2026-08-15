@@ -6,7 +6,7 @@ import re
 from typing import Literal
 
 from mcp.types import TextContent
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from ..api_client import client
 from ..response import err, ok
@@ -146,7 +146,19 @@ class ConversationScopedInput(SprintableInput):
 
 
 class SendChatInput(ConversationScopedInput):
-    content: str
+    # story #2629(2026-08-14, 발견 표면 보조축): 「#24」류 맨 스토리 번호는 서버가 발신
+    # 시점에 자동으로 entity 임베드 카드로 승격한다(문법을 몰라도 됨) — 이 설명은 그
+    # 사실을 알리는 것이지, 아래 escape 규칙을 «가르치려는» 게 아니다(플랫폼이 흡수하는
+    # 축과 발견 표면 축은 별개 — 안 배워도 되지만, 알면 entity 토큰(`[제목](entity:type:id)`)
+    # 문법을 mentions 필드로 직접 구성할 수도 있다는 것도 알려 준다).
+    content: str = Field(
+        description=(
+            "메시지 본문. 「#24」처럼 맨 스토리 번호만 써도(코드블록/인라인코드 제외) "
+            "서버가 발신 시점에 자동으로 entity 임베드 카드로 승격한다 — 문법을 몰라도 됨. "
+            "doc/epic 등 다른 엔티티나 커스텀 표시 문구가 필요하면 `mentions` 필드로 "
+            "`[제목](entity:type:id)` 토큰을 직접 구성할 수도 있다."
+        ),
+    )
     reply_thread_id: str | None = None
     message_type: str | None = None
     review_type: str | None = None
@@ -157,6 +169,15 @@ class SendChatInput(ConversationScopedInput):
     # `[title](entity:doc:id) ` 토큰을 content에 합성 — human 경로가 만드는 토큰을 agent 경로도
     # 만들 수 있게 해 doc backlink/link가 agent 발신 메시지에서도 동작하게 한다.
     mentions: list[MentionRef] | None = None
+    # story #2618: 위 `mentions`(entity-참조)와 별개 — 팀원 @멘션(구조화, UUID). REST
+    # `SendMessageRequest.mentioned_ids`(app/routers/conversations.py)에 그대로 전달한다.
+    # FE 피커(chat-input.tsx)가 이미 채워 보내는 필드인데 MCP 스키마에만 없었다(#3000 그라운딩
+    # ⑦ 발견) — channel_router.py mentions-레벨 알림게이팅·전용 conversation.mention 알림/푸시·
+    # DM 비참가자 멘션 시 group 자동 포크·체인뎁스 초과 시 human_intervention 타깃 한정, 4개
+    # 소비처가 실제로 갈리므로(#2636 (b)안류 죽은 파라미터 아님) 배선만으로 실효과가 난다.
+    # 이름→ID 해석은 기존 `sprintable_list_team_members`(id+name 노출)로 이미 가능. 텍스트
+    # `@handle` 파싱 경로는 story #2646(2026-08-14)로 은퇴 — 팀원 멘션은 이 필드가 유일 경로.
+    mentioned_ids: list[str] | None = None
 
 
 class CreateConversationInput(SprintableInput):
@@ -239,6 +260,8 @@ async def send_chat_message(args: SendChatInput) -> list[TextContent]:
         payload: dict = {"content": content}
         if args.reply_thread_id:
             payload["thread_id"] = args.reply_thread_id
+        if args.mentioned_ids:
+            payload["mentioned_ids"] = args.mentioned_ids
         meta: dict = {}
         if args.metadata:
             meta.update(args.metadata)

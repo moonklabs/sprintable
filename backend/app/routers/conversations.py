@@ -445,6 +445,8 @@ def _msg_payload(
     payload.update(_activation_payload(msg))
     # story #2604 P2: approval-request 카드 스키마 top-level 노출(없으면 None·additive).
     payload.update(_approval_payload(msg))
+    # story #2637 AC 0-a: 이벤트 발행 메시지 스키마 top-level 노출(없으면 None·additive).
+    payload.update(_event_payload(msg))
     return payload
 
 
@@ -463,6 +465,26 @@ def _activation_meta(req: "SendMessageRequest") -> dict | None:
     if req.expects_response is not None:
         act["expects_response"] = bool(req.expects_response)
     return {"activation": act} if act else None
+
+
+def _event_meta(req: "SendMessageRequest") -> dict | None:
+    """story #2637 AC 0-a: req.event_context({"event_key","payload"}) → msg_metadata['event'].
+    없으면 None(완전 additive) — publish_registry_event만 이 필드를 채운다."""
+    return {"event": req.event_context} if isinstance(req.event_context, dict) else None
+
+
+def _combined_msg_metadata(req: "SendMessageRequest") -> dict | None:
+    """_activation_meta/_event_meta 둘 다 독립 namespace라 병합 — 한쪽만 있어도, 둘 다
+    없어도(None), 이론상 둘 다 있어도 안전하게 합친다(현재 호출부는 상호배타적으로 쓰지만
+    강제하지 않음 — 필드 자체가 각자 optional이라 자연히 배타적이 된다)."""
+    merged: dict = {}
+    act = _activation_meta(req)
+    if act:
+        merged.update(act)
+    ev = _event_meta(req)
+    if ev:
+        merged.update(ev)
+    return merged or None
 
 
 def _activation_payload(msg: "ConversationMessage") -> dict:
@@ -487,6 +509,16 @@ def _approval_payload(msg: "ConversationMessage") -> dict:
     meta = (getattr(msg, "__dict__", None) or {}).get("msg_metadata")
     target = meta.get("approval_target") if isinstance(meta, dict) else None
     return {"approval_target": target if isinstance(target, dict) else None}
+
+
+def _event_payload(msg: "ConversationMessage") -> dict:
+    """story #2637 AC 0-a: msg_metadata['event'] → payload top-level(없으면 None).
+    _approval_payload와 동형(additive·__dict__ 전용 read — 동일 greenlet_spawn 회피 이유).
+    FE가 이 필드로 "이벤트 발행 메시지"임을 알고 event_key로 block_template을 찾는다
+    (#2637 렌더러 축, FE 레인) — 여기는 스키마만 실어 나른다."""
+    meta = (getattr(msg, "__dict__", None) or {}).get("msg_metadata")
+    event = meta.get("event") if isinstance(meta, dict) else None
+    return {"event": event if isinstance(event, dict) else None}
 
 
 async def _viewer_blocked_sender_ids(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession) -> set[uuid.UUID]:
@@ -525,6 +557,34 @@ async def _dispatch_conversation_event(
         return []
 
     payload = _msg_payload(msg, sender)
+
+    # story #2650: SSE/webhook 패리티 — conversation_webhook.py가 이미 하는 첨부 컨텍스트 주입
+    # (attachment_context.py, IDOR-safe·conversation 스코프 게이트 포함)을 SSE 수신자에게도
+    # 재사용한다. webhook-covered 수신자는 아래 참여자 루프에서 스킵돼(webhook이 대신 전달)
+    # 이 주입은 순수 SSE-only 수신자 payload에만 실린다 — 중복 주입 없음. 이 함수 로컬
+    # `payload` dict만 변경하므로 _msg_payload()의 다른 호출부(list_messages 등 읽기 경로)엔
+    # 무영향(호출마다 새 dict). 실패는 best-effort(전달 자체는 막지 않음, webhook 경로와 동형) —
+    # 로그는 개수만(서명 URL 문자열은 어떤 로그에도 안 찍는다, PO 지적).
+    if msg.attachments:
+        try:
+            from app.services.attachment_context import build_attachment_context
+            _ctx, attachment_images = await build_attachment_context(
+                msg.attachments, project_id=conversation.project_id,
+                conversation_id=conversation.id, org_id=org_id,
+            )
+            if _ctx:
+                _base = payload.get("content") or ""
+                payload["content"] = (_base + _ctx) if _base else _ctx.lstrip()
+            payload["images"] = attachment_images
+            if _ctx or attachment_images:
+                logger.info(
+                    "attachment_context SSE 주입 message_id=%s attachment_count=%d images=%d",
+                    msg.id, len(msg.attachments), len(attachment_images),
+                )
+        except Exception:
+            logger.warning(
+                "attachment_context SSE 주입 실패 message_id=%s", msg.id, exc_info=True,
+            )
 
     # 참여자 조회
     rows = (await db.execute(
@@ -991,6 +1051,14 @@ class SendMessageRequest(BaseModel):
     audience: list[uuid.UUID] | None = None
     message_kind: str | None = None  # request | handoff | result | ack
     expects_response: bool | None = None
+    # story #2637 AC 0-a: publish_registry_event(#2633) 전용 additive 필드 — {"event_key":
+    # str, "payload": dict}. approval_target(approval_delivery.py)과 동형 namespace 패턴이지만
+    # 그쪽은 send_message()를 우회해 ConversationMessage를 직접 구성하는 반면(#2604의 승인
+    # 카드 전용 별도 경로, 그 자체가 명시적 예외), 이건 send_message()의 기존 확장 메커니즘
+    # (E-ACTIVATION S1의 typed-field→msg_metadata 패턴)을 그대로 따른다 — #2633 AC2(신규
+    # 전달 계통 금지)를 지키면서 publish_registry_event가 이 필드로 "이 메시지가 이벤트
+    # 발행분임"을 msg_metadata에 실을 수 있게 한다. 공개 REST 문서에는 안 실을 내부 필드.
+    event_context: dict | None = None
 
     @field_validator("attachments")
     @classmethod
@@ -2111,17 +2179,26 @@ async def send_message(
                 _seen.add(mid)
                 valid_mentioned_ids.append(mid)
 
-    # story #2603 P0(delivery-contract-blueprint-v0-1) ④: FE 구조화 mentioned_ids와 본문
-    # `@handle` 텍스트 파싱 결과를 합집합 — MCP/API 발신(SendChatInput엔 mentioned_ids 필드가
-    # 없다, #2602 지도 ⑦)도 여기서 같은 mentioned_ids 파이프에 실려 route_message/webhook
-    # targeting/notification 전부가 자동으로 handle 멘션을 본다(별도 소비처 변경 불요).
-    # org+type='agent' 스코프 정확 일치만(handle_mention_parser.py) — 부분 문자열 오매칭 없음.
-    from app.services.handle_mention_parser import resolve_handle_mentions
-    _handle_mentioned_ids = await resolve_handle_mentions(db, org_id=org_id, content=body.content or "")
-    if _handle_mentioned_ids:
-        for mid in _handle_mentioned_ids:
-            if mid != sender.id and mid not in valid_mentioned_ids:
-                valid_mentioned_ids.append(mid)
+    # story #2646(2026-08-14, 은퇴): 본문 `@handle` 텍스트 파싱(story #2603 P0,
+    # handle_mention_parser.py)을 여기서 mentioned_ids와 합집합하던 블록을 제거했다 —
+    # dev 실측 0/1139(최근 @포함 메시지 3000건 스캔, 실 handle 매치 0건) vs 구조화
+    # mentioned_ids 153건 실사용. 파서를 만든 원 사유(#2603: "MCP/API 발신엔 mentioned_ids
+    # 필드가 없다")는 story #2618/#3043(같은 날 선착 랜드)이 MCP SendChatInput에
+    # mentioned_ids를 배선하며 해소됐다 — 남는 존치 근거("handle을 노출하면 자유형식 LLM
+    # 런타임이 자연 발화할 것")는 실측 뒷받침 0인 가정뿐이었다(PO 판정). 멘션 경로는 이제
+    # 구조화 mentioned_ids 하나로 수렴한다. 재도입 필요 시 이 커밋을 되살리지 말고 독립
+    # 조각으로 새로 설계할 것(PO 지시) — handle_mention_parser.py 전체·members.handle 채번
+    # 호출부(agent_anchor_sync.py)도 같은 커밋에서 함께 제거됨.
+
+    # story #2629(P0의 @handle 파서와 동형 철학, 2026-08-14): 본문의 맨 스토리 번호(`#24`류)를
+    # entity 임베드 토큰으로 서버가 저장 시점에 승격 — 에이전트가 임베드 문법을 배우든 말든
+    # 흡수한다. @handle(`@word`)과 어휘상 안 겹쳐 위 블록과의 순서는 무관. body.content
+    # 재대입 지점은 이 함수 전체에서 여기 하나뿐이라(아래 ConversationMessage 생성이 유일한
+    # 소비처) 다른 호출부 변경 없이 자동 전파된다.
+    from app.services.story_ref_promoter import promote_bare_story_refs
+    body.content = await promote_bare_story_refs(
+        db, org_id=org_id, project_id=conv.project_id, content=body.content or "",
+    )
 
     # E-ACTIVATION S1(까디르 QA): audience 도 cross-org/삭제 id 차단 — mentioned_ids 와 동형 org 필터.
     # 안 하면 삭제·타조직 member_id 를 audience 에 넣어 «실 수신자 전원이 addressed=no» 메시지를 만들 수 있다.
@@ -2218,7 +2295,8 @@ async def send_message(
         # S7: client 제공 asset_id 는 strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.
         attachments=[{**a.model_dump(), "asset_id": None} for a in body.attachments],
         # E-ACTIVATION S1: typed-activation(audience/kind/expects_response) → metadata(additive·마이그레이션 불요).
-        msg_metadata=_activation_meta(body),
+        # story #2637 AC 0-a: event_context → metadata['event'](additive, 둘 다 독립 namespace).
+        msg_metadata=_combined_msg_metadata(body),
     )
     db.add(msg)
 

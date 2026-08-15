@@ -419,7 +419,8 @@ function ActionGroup({ label, items, start, activeIndex, onSelect, dangerPillLab
                 <Icon className="size-4 shrink-0 text-muted-foreground" />
                 <span className="flex-1 truncate">{item.label}</span>
                 {item.danger ? (
-                  <span className="ml-auto shrink-0 rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-[9px] font-semibold text-warning">
+                  // story #2590(TIER1) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+                  <span className="ml-auto shrink-0 rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-[9px] font-semibold text-foreground">
                     {dangerPillLabel}
                   </span>
                 ) : null}

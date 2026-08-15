@@ -84,7 +84,9 @@ async def test_create_task_correct_context_201():
         mock_task.updated_at = datetime(2026, 5, 18, tzinfo=timezone.utc)
 
         from unittest.mock import patch
-        with patch("app.repositories.task.TaskRepository.create", new_callable=AsyncMock) as mock_create:
+        with patch("app.repositories.task.TaskRepository.create", new_callable=AsyncMock) as mock_create, \
+             patch("app.routers.tasks._attach_org_project_slugs", new_callable=AsyncMock):
+            # story #2642(2026-08-14, 재발 방지 스윕): test_create_task_201과 동형.
             mock_create.return_value = mock_task
             async with client as c:
                 resp = await c.post("/api/v2/tasks", json={

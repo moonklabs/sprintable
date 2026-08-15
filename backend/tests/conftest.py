@@ -65,6 +65,17 @@ _TEST_DB_SIGNAL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# story ebfd8252(2026-08-14, 카디르 자수 3연발 — #2998/#3000/#3003 QA에서 각각) — 위
+# `_TEST_DB_SIGNAL_RE`는 "이게 실 dev/prod가 아니라 테스트류 DB인가"만 본다. `sprintable_test`는
+# 그 축은 통과하지만(토큰 경계 "test" 포함) **동시에 이 조직의 로컬 realdb 관례 기본값**이라 —
+# 사람/에이전트 여럿이 같은 로컬 postgres 서버의 같은 DB명을 동시에 가리키는 일이 흔하다. CI에서는
+# 안전하다(job마다 완전히 새로운 격리 postgres 서비스 컨테이너를 매번 띄우고 그 안에서만
+# `sprintable_test`라는 이름을 쓰므로 "공유"가 구조적으로 불가능 — GitHub Actions가 항상
+# `CI=true`를 심어주는 것을 신호로 구분한다, 이 conftest 밖에서도 이미 쓰는 관례:
+# test_s6_4_dod.py·test_s7_2_epic_dod.py 참조). CI 밖에서 이 이름을 향한 파괴적 리셋은 —
+# 격리를 사람이 «기억」해야 하는 바로 그 자리라 opt-in을 강제한다.
+_SHARED_CONVENTION_DB_NAMES = frozenset({"sprintable_test"})
+
 
 def _db_name(url: str) -> str:
     return url.rsplit("/", 1)[-1].split("?")[0] if "/" in url else url
@@ -84,6 +95,17 @@ def assert_disposable_test_db(url: str) -> None:
         raise RuntimeError(
             f"안전가드: DROP SCHEMA는 테스트 DB(이름에 test/parity/ci 등) 또는 "
             f"ALLOW_DESTRUCTIVE_SCHEMA_RESET=1 일 때만 허용 — 거부(DB='{name}')."
+        )
+    is_ci = bool(os.environ.get("CI"))
+    allow_shared_flag = os.environ.get("ALLOW_DESTRUCTIVE_ON_SHARED") == "1"
+    if name in _SHARED_CONVENTION_DB_NAMES and not is_ci and not allow_shared_flag:
+        raise RuntimeError(
+            f"안전가드: '{name}'은 이 조직의 공유 로컬 DB 관례명 — 여러 사람/에이전트가 같은 "
+            "postgres 서버의 이 DB를 동시에 realdb 테스트로 쓰고 있을 수 있어 DROP SCHEMA로 "
+            "리셋하면 다른 세션의 진행 중인 realdb 스위트가 연쇄로 깨집니다. 전용 throwaway "
+            "DB를 새로 만들어 가리키세요(예: `createdb sprintable_test_$(whoami)_$$` 후 그 URL로 "
+            f"ALEMBIC_DATABASE_URL/PARITY_TEST_DATABASE_URL을 설정) — 정말 이 공유 DB를 갈아엎어도 "
+            f"된다는 걸 알고 있다면 ALLOW_DESTRUCTIVE_ON_SHARED=1로 우회하세요(DB='{name}')."
         )
 
 
@@ -130,8 +152,56 @@ def _reset_schema_for_destructive_tests(request):
 # `conn.run_sync(Base.metadata.create_all)`처럼 콜백으로 전달되는 경우도 Attribute 노드로 잡힘)을
 # 정적 스캔해 마커 누락을 즉시·정확한 파일명으로 표면화한다(로컬 개발 시점에도 동일하게 발동 —
 # CI까지 갈 필요도 없음).
+#
+# story #2643(2026-08-14, #3031 CI 사고 규명 중 디디 발견): 위 스캔은 SQLAlchemy ORM API
+# 호출(`.create_all`/`.drop_all`)만 본다 — `sa.text("DROP TABLE ...")`처럼 raw SQL DDL을
+# 문자열로 직접 실행하는 테스트는 같은 파괴력(alembic-migrated 공유 DB의 실 테이블을 DROP)을
+# 가지면서도 이 정적 스캔을 완전히 피해간다. 그래서 아래 `_calls_raw_ddl_literal`을 추가해
+# **함수 호출의 인자로 쓰인 문자열 리터럴**만 정밀 스캔한다(모든 문자열 상수를 스캔하면
+# docstring/주석 프로즈가 "DROP TABLE"을 설명 목적으로 언급만 해도 오탐이 난다 — 실제로
+# **실행되는** 문자열인지가 판별축). 동적 조립 문자열(f-string·`+`·`.format()`)은 여전히
+# 못 본다 — AST 리터럴이 아니라서 값이 파싱 시점에 없다. 이 클래스는 의도적 잔여 사각으로
+# 남긴다(값을 실행 없이 정적으로 복원하려면 별도 데이터-흐름 분석이 필요해 이 가드의 비용
+# 대비 이득을 넘어선다) — 다음에 이 사각을 밟는 사람이 있다면 그게 그 판단이 틀렸다는
+# 신호이니 그때 확장한다.
 _DESTRUCTIVE_ATTRS = {"create_all", "drop_all"}
 _MARKER_NAME = "destructive_schema"
+_DDL_LITERAL_PATTERN = re.compile(r"\b(DROP|CREATE|TRUNCATE|ALTER)\s+TABLE\b", re.IGNORECASE)
+
+
+_SQL_EXEC_CALL_NAMES = {"text", "execute"}
+
+
+def _call_func_name(node: ast.Call) -> str | None:
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return None
+
+
+def _calls_raw_ddl_literal(tree: ast.AST) -> bool:
+    """`sa.text(...)`/`conn.execute(...)`(함수명이 정확히 "text" 또는 "execute"인 호출)의
+    인자로 전달된 **문자열 리터럴**에 DDL 키워드가 있으면 True.
+
+    ⚠️ 처음 버전은 "모든 함수 호출의 문자열 인자"를 봤다가 오탐을 냈다 — `@pytest.mark.xfail(
+    reason="...CREATE TABLE 원문 인용...")`처럼 SQL을 실행하지 않고 **설명하는** 프로즈도
+    어떤 호출의 키워드 인자이긴 하다(#2643 그라운딩 중 실측 발견, test_event1config_
+    webhook_targets.py). 실제로 DB에 위험한 것은 "이 문자열이 SQL 실행 함수로 전달됐는가"
+    뿐이므로 함수명을 text/execute로 좁혀 그 오탐을 없앤다 — docstring/주석은 애초에 호출의
+    인자가 아니라서 안 걸리고, 이제 "호출은 됐지만 SQL 실행이 아닌" 경우도 안 걸린다."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or _call_func_name(node) not in _SQL_EXEC_CALL_NAMES:
+            continue
+        for arg in list(node.args) + [kw.value for kw in node.keywords]:
+            if (
+                isinstance(arg, ast.Constant)
+                and isinstance(arg.value, str)
+                and _DDL_LITERAL_PATTERN.search(arg.value)
+            ):
+                return True
+    return False
 
 
 def _calls_destructive_schema_api(filepath: Path) -> bool:
@@ -139,10 +209,12 @@ def _calls_destructive_schema_api(filepath: Path) -> bool:
         tree = ast.parse(filepath.read_text(encoding="utf-8"))
     except (SyntaxError, OSError, UnicodeDecodeError):
         return False
-    return any(
+    if any(
         isinstance(node, ast.Attribute) and node.attr in _DESTRUCTIVE_ATTRS
         for node in ast.walk(tree)
-    )
+    ):
+        return True
+    return _calls_raw_ddl_literal(tree)
 
 
 def pytest_collection_modifyitems(items: list) -> None:
@@ -156,9 +228,10 @@ def pytest_collection_modifyitems(items: list) -> None:
             violations.add(str(filepath))
     if violations:
         raise pytest.UsageError(
-            "다음 테스트 파일이 Base.metadata.create_all/drop_all을 호출하지만 "
+            "다음 테스트 파일이 Base.metadata.create_all/drop_all 또는 raw SQL DDL 리터럴"
+            "(DROP/CREATE/TRUNCATE/ALTER TABLE, story #2643)을 호출하지만 "
             f"@pytest.mark.{_MARKER_NAME} 마커가 없습니다(alembic-migrated 공유 DB를 오염시켜 "
-            "무관한 테스트를 연쇄 실패시킬 수 있음 — story 8236bbc3). 파일 최상단에 "
+            "무관한 테스트를 연쇄 실패시킬 수 있음 — story 8236bbc3/#2643). 파일 최상단에 "
             f"`pytestmark = pytest.mark.{_MARKER_NAME}` 를 추가하세요:\n"
             + "\n".join(sorted(violations))
         )

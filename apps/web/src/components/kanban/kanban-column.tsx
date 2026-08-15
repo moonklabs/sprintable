@@ -137,7 +137,8 @@ export function KanbanColumn({
       className={`flex h-full flex-col rounded-xl p-3 transition ${collapsed ? 'w-[52px] min-w-[52px]' : 'w-[280px] min-w-[240px]'} ${colClass}`}
     >
       {isDragging && isValidTarget && (
-        <div className="mb-3 rounded-md border border-success-border/30 bg-success-tint px-2 py-1 text-center text-[10px] font-medium text-success/70">
+        // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+        <div className="mb-3 rounded-md border border-success-border/30 bg-success-tint px-2 py-1 text-center text-[10px] font-medium text-foreground">
           {t('validDrop')}
         </div>
       )}
@@ -151,7 +152,7 @@ export function KanbanColumn({
                 type="button"
                 aria-label="Expand done column"
                 onClick={onToggleCollapse}
-                className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 transition hover:text-foreground"
+                className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition hover:text-foreground"
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </button>
@@ -188,7 +189,7 @@ export function KanbanColumn({
                   aria-label={t('wipLimitSet')}
                   title={t('wipLimitSet')}
                   onClick={onWipLimitEdit}
-                  className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 transition hover:text-foreground"
+                  className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition hover:text-foreground"
                 >
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                     <path d="M11.013 1.427a1.75 1.75 0 012.474 2.474L4.92 12.47l-3.265.905.905-3.265 8.453-8.683z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -200,7 +201,7 @@ export function KanbanColumn({
                     type="button"
                     aria-label="Collapse done column"
                     onClick={onToggleCollapse}
-                    className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 transition hover:text-foreground"
+                    className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition hover:text-foreground"
                   >
                     <ChevronUp className="h-3.5 w-3.5" />
                   </button>
@@ -211,7 +212,7 @@ export function KanbanColumn({
                     aria-label={t('addStory')}
                     title={t('addStory')}
                     onClick={startCompose}
-                    className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 transition hover:bg-muted hover:text-foreground"
+                    className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition hover:bg-muted hover:text-foreground"
                   >
                     <Plus className="h-3.5 w-3.5" />
                   </button>
@@ -297,7 +298,7 @@ export function KanbanColumn({
             <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto p-1.5 [&>*]:shrink-0">
               {stories.length === 0 && !composing ? (
                 <div className="flex min-h-[100px] items-center justify-center px-4 text-center">
-                  <p className="text-xs text-muted-foreground/60">{t('noStories')}</p>
+                  <p className="text-xs text-muted-foreground">{t('noStories')}</p>
                 </div>
               ) : null}
               {stories.map((story) => (

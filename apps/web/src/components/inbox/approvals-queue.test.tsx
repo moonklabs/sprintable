@@ -277,4 +277,249 @@ describe('ApprovalsQueue', () => {
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateReject))).toBe(true);
   });
+
+  // story #1961(P2-S5) — 저위험 gate 인라인 승인/반려. gates/[id]/page.tsx의 canAct 판정
+  // (needsAction && can_approve===true)과 risk==='low'(usesSignatureFlow===false)를 모두
+  // 충족해야 승인/반려 버튼이 뜬다.
+  function lowRiskActionable(overrides: Partial<GateItem> = {}): GateItem {
+    return gate({
+      id: 'g-low', gate_type: 'merge_gate', status: 'pending', requires_human: true,
+      can_approve: true, risk_grade: 'low', work_item_summary: { title: '저위험 항목', slug: null },
+      ...overrides,
+    });
+  }
+
+  it('AC — 저위험(risk_grade=low)·승인권한 있는 gate는 인라인 승인/반려 버튼이 뜬다', async () => {
+    mockFetches([lowRiskActionable()], []);
+    await mount();
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateReject))).toBe(true);
+  });
+
+  it('AC "고위험 항목 인라인 승인 버튼 0" — risk_grade=high는 인라인 버튼이 아예 없고 행 전체가 상세 이동 버튼 하나뿐이다', async () => {
+    mockFetches([lowRiskActionable({ id: 'g-high', risk_grade: 'high' })], []);
+    await mount();
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateReject))).toBe(false);
+    expect(container.querySelectorAll('button').length).toBe(1);
+  });
+
+  it('risk_grade가 unknown(미배선)이어도 인라인 버튼이 안 뜬다(보수적 고위험 취급, gate-risk.ts 정책)', async () => {
+    mockFetches([lowRiskActionable({ id: 'g-unknown', risk_grade: null })], []);
+    await mount();
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+  });
+
+  it('can_approve=false면 저위험이어도 인라인 버튼이 안 뜬다(per-caller 권한 게이팅)', async () => {
+    mockFetches([lowRiskActionable({ id: 'g-noperm', can_approve: false })], []);
+    await mount();
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+  });
+
+  it('AC "승인 후 완료 상태+서명 기록 링크 즉시" — 승인 클릭 시 POST /api/gates/{id}/transition을 호출하고, 재조회 없이 완료 배지+기록 링크로 즉시 바뀐다', async () => {
+    const calls = mockFetches([lowRiskActionable()], []);
+    await mount();
+    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    await act(async () => { approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const postCall = calls.find((c) => c.method === 'POST');
+    expect(postCall?.url).toBe('/api/gates/g-low/transition');
+    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'approved', note: null });
+
+    expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
+    expect(container.textContent).toContain(koMessages.cage.queueViewRecord);
+    // 승인/반려 버튼 자체가 사라진다(재클릭 물리적으로 불가 — 중복 실행 방지의 두 번째 층).
+    const buttonsAfter = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttonsAfter.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+    // 재조회(fetchGates) 없이 이 렌더만으로 반영됐다 — GET 호출 수가 mount 시점(pending+held
+    // 각 1회=2)에서 늘지 않았다.
+    expect(calls.filter((c) => c.method === undefined || c.method === 'GET')).toHaveLength(2);
+  });
+
+  it('AC "중복 탭 중복 실행 0" — 승인 요청이 아직 안 끝난 상태에서 버튼이 비활성화돼 재클릭이 두 번째 요청을 만들지 않는다', async () => {
+    let resolveResponse: (() => void) | null = null;
+    const calls: { url: string; method?: string }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      calls.push({ url, method: init?.method });
+      if (init?.method === 'POST') {
+        return new Promise((resolve) => {
+          resolveResponse = () => resolve({ ok: true, json: async () => ({}) });
+        });
+      }
+      if (url.includes('status=pending')) return { ok: true, json: async () => [lowRiskActionable()] };
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+
+    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    await act(async () => { approveButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(approveButton.disabled).toBe(true);
+    // 응답 오기 전 재클릭 — disabled라 브라우저가 클릭을 무시하지만, 방어적으로 핸들러를
+    // 직접 다시 불러도 두 번째 POST가 안 나가야 한다는 것까지 확認하진 않는다(React가 disabled
+    // 버튼 클릭 이벤트 자체를 억제 — jsdom도 동일). 여기선 "그 시점까지 POST가 1건뿐"만 고정.
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
+
+    await act(async () => { resolveResponse?.(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
+  });
+
+  it('반려 클릭 시 status=rejected로 호출하고 반려됨 배지를 보인다', async () => {
+    const calls = mockFetches([lowRiskActionable({ id: 'g-rej' })], []);
+    await mount();
+    const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateReject));
+    await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const postCall = calls.find((c) => c.method === 'POST');
+    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'rejected', note: null });
+    expect(container.textContent).toContain(koMessages.cage.queueResolvedRejected);
+  });
+
+  it('서버가 거부하면(예: 이미 처리됨) 에러 문구를 보이고 완료 상태로 바뀌지 않는다(버튼 그대로 재시도 가능)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST') {
+        return { ok: false, status: 409, json: async () => ({ error: { message: '이미 처리된 게이트입니다' } }) };
+      }
+      if (url.includes('status=pending')) return { ok: true, json: async () => [lowRiskActionable()] };
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    await act(async () => { approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.textContent).toContain('이미 처리된 게이트입니다');
+    expect(container.textContent).not.toContain(koMessages.cage.queueResolvedApproved);
+    const buttonsAfter = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttonsAfter.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
+  });
+
+  it('held gate는 저위험이어도 인라인 버튼이 안 뜬다(보류 상태는 원탭 대상 아님)', async () => {
+    mockFetches([], [lowRiskActionable({ id: 'g-held-low', status: 'held' })]);
+    await mount();
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+  });
+
+  // PO 리뷰(PR#2948, 2026-08-12) — status는 여전히 'pending'인데 held_until만 세팅된 조합.
+  // isHeld는 held_until만으로도 true라 보류 배지가 뜨는데, canInlineResolve가 그걸 안 보면
+  // "보류 뱃지 + 원탭 승인 버튼"이 같은 카드에 동시에 뜨는 자기모순이 난다.
+  it('pending 상태에 held_until만 세팅돼도 인라인 버튼이 안 뜬다(보류 배지·원탭 버튼 공존 봉쇄)', async () => {
+    mockFetches([lowRiskActionable({ id: 'g-pending-held-until', held_until: new Date().toISOString() })], []);
+    await mount();
+    expect(container.textContent).toContain(koMessages.cage.heldBadge);
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+  });
+
+  // PO 리뷰(PR#2948, 2026-08-12) — resolving이 단일 string|null이던 시절엔 게이트 A in-flight
+  // 중 A가 먼저 끝나면 finally의 setResolving(null)이 "전역" 값을 지워, 아직 in-flight인
+  // B의 버튼까지 재활성화됐다(중복 POST 창). id별 Set으로 독립 추적해야 한다는 걸 두 게이트를
+  // 동시에 굴려서 고정한다.
+  it('AC "중복 실행 0"(다중 게이트) — 게이트 A가 먼저 끝나도 아직 진행 중인 게이트 B 버튼은 계속 비활성 상태다', async () => {
+    const calls: { url: string; method?: string }[] = [];
+    let resolveA: (() => void) | null = null;
+    let resolveB: (() => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      calls.push({ url, method: init?.method });
+      if (init?.method === 'POST' && url.includes('g-a')) {
+        return new Promise((resolve) => { resolveA = () => resolve({ ok: true, json: async () => ({}) }); });
+      }
+      if (init?.method === 'POST' && url.includes('g-b')) {
+        return new Promise((resolve) => { resolveB = () => resolve({ ok: true, json: async () => ({}) }); });
+      }
+      if (url.includes('status=pending')) {
+        return { ok: true, json: async () => [lowRiskActionable({ id: 'g-a' }), lowRiskActionable({ id: 'g-b' })] };
+      }
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+
+    // React가 두 카드의 위치/구조를 그대로 유지하는 한(g-b는 이 테스트 내내 in-flight 2버튼
+    // 레이아웃을 벗어나지 않는다) DOM 참조는 재조회 없이도 재렌더를 관통해 유효하다 — B가
+    // "..."로 라벨만 바뀌는 것과 무관하게 같은 버튼 엘리먼트를 계속 가리킨다.
+    const [approveA, approveB] = Array.from(container.querySelectorAll('button')).filter((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement[];
+    await act(async () => { approveA.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { approveB.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2);
+
+    // A만 먼저 끝난다 — B는 여전히 in-flight.
+    await act(async () => { resolveA?.(); await Promise.resolve(); await Promise.resolve(); });
+    expect(approveB.disabled).toBe(true);
+    await act(async () => { approveB.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2); // B 재클릭이 세 번째 POST를 못 만든다.
+
+    await act(async () => { resolveB?.(); await Promise.resolve(); await Promise.resolve(); });
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2);
+    expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
+  });
+
+  // story #2631 — 「보류(논의 필요)」. 저위험 인라인 행에 3번째 버튼으로 노출(PO 결정③,
+  // 결재함 전 게이트 타입 단일 표면).
+  // base-ui Dialog는 document.body에 포탈된다(#2354 교훈, flow-map-canvas-port-linking.test.tsx
+  // 동일 패턴) — container 안에서 찾으면 항상 null이라 document.body에서 [data-slot="dialog-content"]로 스코프한다.
+  it('보류(논의 필요) 클릭 시 다이얼로그가 열리고, 사유 없인 제출 버튼이 비활성이다', async () => {
+    mockFetches([lowRiskActionable({ id: 'g-discuss' })], []);
+    await mount();
+    const discussButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateDiscussSubmit));
+    await act(async () => { discussButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(document.body.querySelector('[data-slot="dialog-title"]')?.textContent).toBe(koMessages.cage.gateDiscussTitle);
+    const submitButton = Array.from(document.body.querySelectorAll('[data-slot="dialog-content"] button')).find((b) => b.textContent === koMessages.cage.gateDiscussSubmit) as HTMLButtonElement;
+    expect(submitButton.disabled).toBe(true);
+  });
+
+  it('보류(논의 필요) 사유 입력 후 제출하면 POST /api/gates/{id}/discuss를 {reason}으로 호출한다', async () => {
+    const calls = mockFetches([lowRiskActionable({ id: 'g-discuss2' })], []);
+    await mount();
+    const discussButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateDiscussSubmit));
+    await act(async () => { discussButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const textarea = document.body.querySelector('[data-slot="dialog-content"] textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '근거를 더 보고 싶습니다');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const submitButton = Array.from(document.body.querySelectorAll('[data-slot="dialog-content"] button')).find((b) => b.textContent === koMessages.cage.gateDiscussSubmit) as HTMLButtonElement;
+    await act(async () => { submitButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const postCall = calls.find((c) => c.method === 'POST' && c.url.includes('/discuss'));
+    expect(postCall?.url).toBe('/api/gates/g-discuss2/discuss');
+    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ reason: '근거를 더 보고 싶습니다' });
+  });
+
+  // story #2631 — 오클릭 정정. 인라인 승인 직후(이 세션) 취소 버튼이 뜨고, 클릭하면 다시
+  // 승인/반려 가능한 카드로 되돌아간다(재조회 없이 로컬 복원).
+  it('AC — 인라인 승인 직후 취소 버튼이 뜨고, 클릭하면 POST /undo 호출 후 승인/반려 버튼으로 되돌아간다', async () => {
+    const calls: { url: string; method?: string }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      calls.push({ url, method: init?.method });
+      if (init?.method === 'POST' && url.includes('/transition')) return { ok: true, json: async () => ({}) };
+      if (init?.method === 'POST' && url.includes('/undo')) return { ok: true, json: async () => ({ data: lowRiskActionable({ id: 'g-undo' }) }) };
+      if (url.includes('status=pending')) return { ok: true, json: async () => [lowRiskActionable({ id: 'g-undo' })] };
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    await act(async () => { approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
+
+    const undoButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateUndo));
+    expect(undoButton).toBeTruthy();
+    await act(async () => { undoButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const undoCall = calls.find((c) => c.method === 'POST' && c.url.includes('/undo'));
+    expect(undoCall?.url).toBe('/api/gates/g-undo/undo');
+    expect(container.textContent).not.toContain(koMessages.cage.queueResolvedApproved);
+    const buttonsAfter = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttonsAfter.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
+  });
+
+  it('AC 음성대조 — 반려 직후(아직 승인/취소 안 됨)엔 취소 버튼이 즉시 뜨지 않다가, 반려 완료 후엔 뜬다', async () => {
+    mockFetches([lowRiskActionable({ id: 'g-reject-undo' })], []);
+    await mount();
+    const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateReject));
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(false);
+    await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(true);
+  });
 });

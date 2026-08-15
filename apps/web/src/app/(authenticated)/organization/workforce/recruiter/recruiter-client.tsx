@@ -18,6 +18,7 @@ import { VerifyRail, useVerificationRail } from '@/app/onboarding/verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from '@/app/onboarding/onboarding-telemetry';
 import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle, RuntimeCapabilityItem } from '@/services/recruit';
 import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FILENAME, resolveRuntimeWakeInfo, RUNTIME_CONNECT_CLI, resolveConnectConfirm } from '@/services/recruit';
+import type { PresenceStatus } from '@/components/chat/presence-dot';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
 
@@ -233,6 +234,45 @@ export function ConnectCliBody({ command }: { command: string }) {
       })}
     </>
   );
+}
+
+// story #2657(디디 그라운딩, 2026-08-14·doc 625bab77 ⓐ) — RUNTIME_CONNECT_CONFIRM(위
+// connectConfirm 배지)은 런타임-클래스 정적 스냅샷이라 "지금 이 에이전트"의 실제 리스너
+// 부착 여부와 무관하다(#2656 codex 훅-미신뢰가 그 자리). 기존 presence 인프라(GET
+// /api/team-members/{id})를 재사용해 별개 축의 라이브 신호를 보여준다 — 병합/치환 금지,
+// 정적 배지 옆에 나란히(스펙 doc §ⓐ.4). WakeMethodBody와 같은 이유로 별도 컴포넌트로 뽑아
+// 실 렌더 테스트가 폴링·상태전환을 위저드 전체 마운트 없이 잡게 한다.
+export function LiveConnectionBadge({ agentId }: { agentId: string }) {
+  const t = useTranslations('recruiter');
+  const [status, setStatus] = useState<PresenceStatus | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    async function poll() {
+      try {
+        const res = await fetch(`/api/team-members/${agentId}`);
+        if (cancelled) return;
+        if (res.ok) {
+          const json = await res.json() as { data?: { presence_status?: PresenceStatus | null } };
+          const next = json.data?.presence_status ?? null;
+          if (cancelled) return;
+          setStatus(next);
+          // 스펙 doc §ⓐ.3(FE 재량) — 한 번 online 확인되면 폴링 중단.
+          if (next === 'online') return;
+        }
+      } catch { /* graceful — 다음 tick 재시도 */ }
+      if (!cancelled) timer = setTimeout(poll, 5000);
+    }
+    void poll();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [agentId]);
+
+  if (status === 'online') {
+    return <Badge variant="success" className="text-[9px]">{t('connectLiveBadgeOnline')}</Badge>;
+  }
+  return <Badge variant="chip" className="text-[9px]">{t('connectLiveBadgePending')}</Badge>;
 }
 
 // ─── 메인 컴포넌트 ───────────────────────────────────────────────────────────
@@ -1066,7 +1106,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
               {/* story #2105 2차 — 생성 성공도 결과다(#2096/#2105 1차와 동일 원칙). equipResult는 이
                   가드에서 최초 1회만 non-null이 되므로 polite 낭독으로 충분(흐름 차단 아님). */}
               <div role="status" aria-live="polite" aria-atomic="true" className="space-y-3 rounded-md border border-success-border bg-success-tint p-4">
-                <p className="text-sm font-semibold text-success">{t('equipCreatedTitle', { name: equipResult.name })}</p>
+                <p className="text-sm font-semibold text-foreground">{t('equipCreatedTitle', { name: equipResult.name })}</p>
                 {equipRuntimeSaveWarning && (
                   <p role="alert" className="flex items-start gap-1.5 rounded-md border border-warning-border bg-warning-tint p-2 text-xs text-foreground">
                     <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -1088,7 +1128,11 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                         {tSettings('agentFakechatEnvKeyInstruction')}
                       </p>
                       <p>{tSettings('agentFakechatWebhookOffNote')}</p>
-                      <p>{tSettings('agentFakechatSuccessCheck')}</p>
+                      <p>
+                        {tSettings.rich('agentFakechatSuccessCheck', {
+                          code: (chunks) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">{chunks}</code>,
+                        })}
+                      </p>
                     </div>
                   </div>
                 ) : null}
@@ -1144,6 +1188,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                         {connectConfirm.tier === 'config-verified' && (
                           <Badge variant="chip" className="text-[9px]">{t('connectConfigVerifiedBadge')}</Badge>
                         )}
+                        {/* story #2657 — 위 connectConfirm 배지(런타임-클래스 과거 실측)와 별개
+                            축: "이 에이전트" 지금 상태(라이브 presence). 병합 금지, 나란히. */}
+                        <LiveConnectionBadge agentId={recruitResult.agent_id} />
                       </div>
                       <p className="text-xs text-muted-foreground">
                         {recruitResult.mcp_config
@@ -1167,8 +1214,12 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                           끝냈다가 실제로는 안 깨어나는" 오탐을 만든다. 사실형("…이 세션을
                           깨웁니다. 받는 경로는 아직 제공하지 않습니다")으로 정정 — path는 «명령
                           대상»이 아니라 «이름»으로 강등(t.rich path 태그: font-mono·작게·무채색,
-                          링크 색 금지 — 누를 수 있는 것처럼 보이면 안 된다). 디디군의 "한 줄
-                          설치"가 착지하면 이 문구 뒷문장을 그 설치 명령으로 되돌린다(만료조건). */}
+                          링크 색 금지 — 누를 수 있는 것처럼 보이면 안 된다).
+                          만료조건 착지(story #2653, 2026-08-14): claude-code는 마켓플레이스
+                          add→install 실왕복이 실측됐다 — 단 hermes/openclaw/opencode는 여전히
+                          "아직 제공하지 않습니다"가 사실이라 같은 'channel-plugin' 키를 못 씀.
+                          claude-code만 'channel-plugin-marketplace' method로 갈라 설치 명령을
+                          말한다(설치≠연결 확인 — 실 연결은 배지가 말한다, #2657과 역할 분리). */}
                       <p className="text-xs text-muted-foreground">
                         <WakeMethodBody method={wakeInfo.method} path={wakeInfo.path} />
                       </p>
@@ -1204,7 +1255,10 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                     <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">3</span>
                     <div className="min-w-0">
                       <p className="text-xs font-bold text-foreground">{t('kitOrientingGuideLabel')}</p>
-                      <p className="text-xs text-muted-foreground">{t('kitOrientingGuideBody', { filename: guideFilename })}</p>
+                      {/* story #2648(boss 08-14 재현·PO 특定) — guideFilename(SPRINTABLE_ONBOARDING.md)이
+                          공백 없는 장토큰이라 word-break 부재 시 카드 라운드 경계를 뚫고 밖으로 샌다.
+                          alert.tsx/toast.tsx/chat-bubble.tsx가 쓰는 [overflow-wrap:anywhere] 관례를 그대로. */}
+                      <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">{t('kitOrientingGuideBody', { filename: guideFilename })}</p>
                     </div>
                   </div>
                 </div>
@@ -1299,7 +1353,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   <div className="space-y-2 rounded-md border border-warning-border bg-warning-tint p-3">
                     <p className="text-xs font-semibold text-foreground">{t('rotateConfirmTitle')}</p>
                     <p className="text-xs leading-relaxed text-muted-foreground"><b className="text-foreground">{t('rotateConfirmBold')}</b> {t('rotateConfirmBody')}</p>
-                    {rotateError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{rotateError}</p>}
+                    {rotateError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-foreground">{rotateError}</p>}
                     <div className="flex justify-end gap-2">
                       <Button variant="ghost" size="sm" onClick={() => setShowRotateConfirm(false)} disabled={rotating}>{t('cancel')}</Button>
                       <Button size="sm" className="bg-warning text-foreground hover:bg-warning/90" disabled={rotating} onClick={() => void handleRotateConfirmed()}>
@@ -1337,7 +1391,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   복사 가능한 한 줄로 그 자리에 쥐여 준다. */}
               {rail.showVerifyExamplePrompt && (
                 <div className="flex items-center justify-between gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2 text-xs">
-                  <span className="min-w-0 truncate text-info">
+                  <span className="min-w-0 truncate text-foreground">
                     {t('verifyExampleLabel')} <span className="font-mono text-foreground">&ldquo;{t('verifyExamplePrompt')}&rdquo;</span>
                   </span>
                   <Button variant="outline" size="sm" onClick={() => void handleCopyVerifyPrompt()} className="shrink-0">
@@ -1369,7 +1423,8 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 // recruiter STEP5는 채용할 때마다 반복되는 화면이라 접근성 누락의 대가가 connect-step
                 // (신규 가입 온보딩, 1회성)보다 크다는 것이 결함으로 판정된 근거. 레일이 이미 단계
                 // 전환을 aria-live로 말하므로 이 배너는 "완료" 한 마디만 — 중복 낭독하지 않는다.
-                <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-success/20 bg-success/10 px-3 py-2.5 text-sm text-success">
+                // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
+                <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-success/20 bg-success/10 px-3 py-2.5 text-sm text-foreground">
                   {tOnboarding('verifiedBanner')}
                 </div>
               )}

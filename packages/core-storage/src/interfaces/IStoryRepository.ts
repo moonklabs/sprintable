@@ -95,6 +95,9 @@ export interface StoryListFilters extends PaginationOptions {
   project_id?: string;
   q?: string;
   unassigned?: boolean;
+  /** story #2534(E-FLOW-V4 S4) — 가설/목표 둘 다 미매달림(BE #2532 stories.py:137
+   * `unattached` 쿼리와 동형). `unassigned`(담당자 미배정)와 다른 축이라 별도 필드. */
+  unattached?: boolean;
   /** story #2283 — 사람-읽는 #N(project 내에서만 유일)으로 정확 lookup(제목 ILIKE 아님). */
   story_number?: number;
   /** story ca37b2b0 — 고정 id 집합 배치 조회(BE 200개 cap). 주어지면 커서 페이지네이션과

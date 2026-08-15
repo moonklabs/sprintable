@@ -79,7 +79,7 @@ export function FlowLane({ rows, totalEpicCount }: FlowLaneProps) {
                 </span>
               </div>
               {!row.hasLaneData ? (
-                <p className="text-[10px] text-muted-foreground/70">{t('laneUnknown')}</p>
+                <p className="text-[10px] text-muted-foreground">{t('laneUnknown')}</p>
               ) : flags.length === 0 ? (
                 // PO 지적(2026-07-30) — 플래그 넷이 다 0인 것은 "완료"(done===total)와 "아직
                 // 아무도 안 잡음"(done<total, 백로그뿐)의 서로 다른 두 사실을 가릴 수 있다.
@@ -106,7 +106,7 @@ export function FlowLane({ rows, totalEpicCount }: FlowLaneProps) {
       </ul>
       {/* 유나 목업(eacf5b50) L2 footer 고지 — 퍼센트를 안 쓰는 이유를 이 자리에서 한 번만
           말한다(행마다 반복하지 않음). */}
-      <p className="px-1 text-[10px] text-muted-foreground/70">{t('laneWarnMsg')}</p>
+      <p className="px-1 text-[10px] text-muted-foreground">{t('laneWarnMsg')}</p>
     </div>
   );
 }

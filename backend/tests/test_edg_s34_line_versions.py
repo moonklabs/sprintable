@@ -27,6 +27,7 @@ async def _session():
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from app.core.database import Base
     import app.models  # noqa: F401
+    import app.models.activity_log  # noqa: F401 — #2631: transition_gate()가 ActivityLog를 씀(#2201 후속 미등재 갭).
     import app.models.participation  # noqa: F401
     import app.models.workflow_line  # noqa: F401
     url = _REAL_DB_URL

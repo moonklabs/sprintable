@@ -102,6 +102,19 @@ def _get_repo_read(
     return SprintRepository(session, org_id)
 
 
+async def _attach_org_project_slugs(session: AsyncSession, org_id: uuid.UUID, sprints: list) -> None:
+    """story #2642: stories.py/goals.py `_attach_org_project_slugs`와 동형(N+1 회피)."""
+    if not sprints:
+        return
+    from app.services.entity_slug import resolve_org_slug, resolve_project_slugs
+
+    org_slug = await resolve_org_slug(session, org_id)
+    project_slug_map = await resolve_project_slugs(session, {s.project_id for s in sprints})
+    for s in sprints:
+        s.org_slug = org_slug
+        s.project_slug = project_slug_map.get(s.project_id)
+
+
 @router.get("", response_model=list[SprintResponse])
 async def list_sprints(
     project_id: uuid.UUID | None = Query(default=None),
@@ -126,6 +139,7 @@ async def list_sprints(
     if not project_id:
         accessible = set(await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), repo.org_id))
         sprints = [s for s in sprints if s.project_id in accessible]
+    await _attach_org_project_slugs(repo.session, repo.org_id, sprints)
     return [SprintResponse.model_validate(s) for s in sprints]
 
 
@@ -166,6 +180,7 @@ async def create_sprint(
         entity_type="sprint", entity_id=sprint.id, project_id=sprint.project_id,
         title=sprint.title,
     )
+    await _attach_org_project_slugs(session, org_id, [sprint])
     return SprintResponse.model_validate(sprint)
 
 
@@ -183,6 +198,7 @@ async def get_sprint(
         raise HTTPException(status_code=404, detail="Sprint not found")
     if not await has_project_access(repo.session, uuid.UUID(auth.user_id), sprint.project_id, repo.org_id):
         raise HTTPException(status_code=404, detail="Sprint not found")
+    await _attach_org_project_slugs(repo.session, repo.org_id, [sprint])
     return SprintResponse.model_validate(sprint)
 
 
@@ -331,6 +347,7 @@ async def update_sprint(
     sprint = await repo.update(id, **data) if data else await repo.get(id)
     if sprint is None:
         raise HTTPException(status_code=404, detail="Sprint not found")
+    await _attach_org_project_slugs(repo.session, repo.org_id, [sprint])
     return SprintResponse.model_validate(sprint)
 
 
@@ -407,6 +424,7 @@ async def activate_sprint(
         raise HTTPException(status_code=400, detail=exc.message) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await _attach_org_project_slugs(session, org_id, [sprint])
     return SprintResponse.model_validate(sprint)
 
 
@@ -483,6 +501,7 @@ async def close_sprint(
                 # 신규 조회 없이 그대로 실음.
                 source_project_id=sprint.project_id,
             )
+    await _attach_org_project_slugs(db, org_id, [sprint])
     return SprintResponse.model_validate(sprint)
 
 
@@ -639,6 +658,7 @@ async def transition_sprint_endpoint(
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(sprint)
+        await _attach_org_project_slugs(session, org_id, [sprint])
         return SprintResponse.model_validate(sprint)
     except SprintTransitionError as e:
         _codes = {"SPRINT_NOT_FOUND": 404, "HUMAN_CONFIRM_REQUIRED": 403,

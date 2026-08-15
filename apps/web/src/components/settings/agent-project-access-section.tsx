@@ -205,8 +205,9 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
                       onClick={() => void handleToggle(project.id)}
                       className={cn(
                         'min-w-[72px] shrink-0 gap-1 transition-colors',
+                        // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
                         granted
-                          ? 'border-success/40 bg-success-tint text-success hover:bg-success/15'
+                          ? 'border-success/40 bg-success-tint text-foreground hover:bg-success/15'
                           : 'border-border text-muted-foreground hover:bg-muted/40',
                       )}
                     >

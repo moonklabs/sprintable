@@ -2,16 +2,12 @@
 role_templates.skills 최소 백필 — qa-automation + 원 builtin 3종(backend/frontend/pm).
 
 Revision ID: 0240
-Revises: 0236 (prod 승격 재접합 — develop 원본은 0239. main엔 0228~0239 파일 자체가 없어
-  (결제 등 제외 커밋), 0236 파일 자신의 선례(develop 0235 → main 0227 재접합)와 동일 패턴으로
-  main 실제 head(0236)에 재접합했다. 콘텐츠(UPDATE 대상 role_templates.skills)는 develop판과
-  byte-identical — down_revision 한 줄만 다름)
+Revises: 0239
 Create Date: 2026-08-12
 
 [[no-pr-for-data]] 게이트: 이 마이그는 role_templates.skills(app.schemas.a2a.AgentSkill 형태,
 0161이 "A2A 발견 키"로 도입)에 실 콘텐츠를 채운다 — 데이터 마이그레이션이라 병합 前 선생님
-명시 승인 필요(0166/0167 선례와 동일 규칙). develop판은 이미 승인 완료(PR#2993) — 이 prod
-승격은 그 승인된 콘텐츠를 그대로 옮기는 것뿐, 새 콘텐츠 승인 대상 아님.
+명시 승인 필요(0166/0167 선례와 동일 규칙).
 
 배경(#2584 스파이크 갭 D): skills 컬럼은 0161 도입 이래 전 24개 seed 카탈로그가 `[]`째
 방치돼 있었다 — `_build_agent_card`(app/routers/a2a.py:366)가 매번 persona.slug/name 파생
@@ -34,7 +30,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0240"
-down_revision = "0236"
+down_revision = "0239"
 branch_labels = None
 depends_on = None
 

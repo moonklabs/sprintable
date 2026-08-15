@@ -16,6 +16,7 @@ import { NextActionsStrip } from './next-actions-strip';
 import { OrphanStoriesPanel } from './orphan-stories-panel';
 import { FlowMultiLaneCanvas } from './flow-multi-lane-canvas';
 import { parseCursorMeta } from '@/lib/pagination';
+import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 
 interface NextMakerScreenProps {
@@ -24,6 +25,10 @@ interface NextMakerScreenProps {
   onSelectStory: (storyId: string) => void;
   /** story #2354 — 순수 통과 prop(FlowMapCanvas 참고, 노드 선택 고리 강조). */
   selectedNodeId?: string | null;
+  /** story #2535(E-FLOW-V4 S5) — 지구(가설)→대륙(목표)→도시(갈래) 드릴다운의 착지점.
+   * 이 목표가 30일 무변화로 접힘 대상이었어도 강제로 펼침(카드 폭발 회피를 «구조»로 —
+   * 다른 레인은 안 건드리고 이 레인 «하나»만 예외로 편다) + 그 레인으로 스크롤+하이라이트. */
+  focusGoalId?: string | null;
 }
 
 interface Envelope<T> { data: T; meta?: unknown }
@@ -101,9 +106,12 @@ type LoadState =
  *
  * ⛔done 스토리는 이 화면에서 fetch하지 않는다(goals.total_stories/done_stories로 충분).
  */
-export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedNodeId = null }: NextMakerScreenProps) {
+export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedNodeId = null, focusGoalId = null }: NextMakerScreenProps) {
   const t = useTranslations('flow');
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
+  // story #2545(카디르 라이브 재QA 5단계) — org 불일치 자동교정(switch-org) 성공 直後 이
+  // 로드 effect도 재요청되게 orgSyncVersion을 의존성에 얹는다(다른 opt-in 컴포넌트와 동일).
+  const orgSyncVersion = useOrgSyncVersion();
   // 스토리 하나가 승격(backlog→ready-for-dev)되거나 목표가 전이(done/archived)되면, 전체
   // 재fetch 없이 로컬 상태만 갱신한다(PO 왕복 완료 조건 — 승격이 «즉시» 화면에 반영돼야
   // "실제로 다음이 생겼다"가 눈으로 보인다).
@@ -149,7 +157,7 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
       }
     })();
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, orgSyncVersion]);
 
   // 까심 QA REQUEST_CHANGES(2026-07-31) 후속 — 「다음으로」는 backlog→ready-for-dev로 상태를
   // 바꾸는 동작이라 되돌릴 길이 없으면 누르기가 무서워진다. 되돌리기 자체도 진짜 서버 PATCH이지
@@ -246,11 +254,22 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
 
   // story #2224 AC1 — 스토리가 «정말 0건»인 목표는 레인 자체를 안 그린다(PO 정정: 접힘과
   // 0건은 다른 사정이라 섞으면 뜻이 흐려진다). 나머지만 30일-변화 성질로 펼침/접힘을 가른다.
+  //
+  // story #2535(E-FLOW-V4 S5) — focusGoalId가 30일 무변화로 fold 쪽에 떨어졌으면 그 목표
+  // «하나»만 강제로 expand로 옮긴다(다른 레인은 그대로 접힌 채 — 카드 폭발 회피를 구조로
+  // 지킨다). 지구→대륙→도시 드릴다운으로 왔는데 목표가 안 보이면 다리가 끊긴 것이다.
   const laneGrouping = useMemo(() => {
     if (state.kind !== 'ready') return { expand: [], fold: [] };
     const goalsWithStories = effectiveGoals.filter((g) => g.totalStories > 0);
-    return deriveActiveLaneGoals(goalsWithStories, effectiveActiveStories, nowMs);
-  }, [state, effectiveGoals, effectiveActiveStories, nowMs]);
+    const base = deriveActiveLaneGoals(goalsWithStories, effectiveActiveStories, nowMs);
+    if (!focusGoalId || base.expand.some((g) => g.id === focusGoalId)) return base;
+    const foldedTarget = base.fold.find((g) => g.id === focusGoalId);
+    if (!foldedTarget) return base;
+    return {
+      expand: [...base.expand, foldedTarget],
+      fold: base.fold.filter((g) => g.id !== focusGoalId),
+    };
+  }, [state, effectiveGoals, effectiveActiveStories, nowMs, focusGoalId]);
 
   if (state.kind === 'loading') {
     return (
@@ -279,6 +298,7 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
         onSelectStory={onSelectStory}
         selectedNodeId={selectedNodeId}
         memberMap={memberMap}
+        focusGoalId={focusGoalId}
       />
 
       <NextMakerHeader headline={headline} zeroStage={zeroStage} />

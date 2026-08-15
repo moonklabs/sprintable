@@ -215,3 +215,55 @@ describe('useUnifiedSwitcher — createProject 실패 표시 (story #2468 b)', (
     expect(result?.createProjectError).toBeNull();
   });
 });
+
+// story #2544 — switchOrg/switchOrgAndProject는 localOrgId를 optimistic으로 먼저 찍고(클릭
+// 즉시 "전환됨"으로 보임) try에 catch가 없었다: fetch 자체가 던지면(네트워크 실패 등) else의
+// revert를 절대 못 타 — 실제 전환은 실패했는데 드롭다운은 "전환됨"으로 영구 고정된다. 카디르
+// QA 라이브 재현("선택·체크까지 되고... 실제론 안 됨")과 정확히 같은 모양 — 이 테스트는
+// pre-fix에서 RED(localOrgId가 실패 후에도 nextOrgId로 고정), fix 後 GREEN을 고정한다.
+describe('useUnifiedSwitcher — switchOrg 네트워크 실패 시 optimistic 상태 복구 (story #2544)', () => {
+  it('switchOrg 中 fetch가 던지면(네트워크 실패) localOrgId를 되돌리고 switchOrgError를 채운다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+    await act(async () => { root.render(<TestComp />); });
+    expect(result?.currentOrg?.orgId).toBe('org-moonklabs');
+
+    await act(async () => { await result?.switchOrg('org-dogfood'); });
+
+    // ⛔fix 前엔 여기서 'org-dogfood'로 영구 고정됐다(되돌아오지 않음) — 이게 바로
+    // "선택·체크는 되는데 실제 org는 안 바뀐" 카디르 QA 재현의 근본.
+    expect(result?.currentOrg?.orgId).toBe('org-moonklabs');
+    expect(result?.switchOrgError).toBeTruthy();
+    expect(result?.pending).toBe(false); // finally는 원래도 돌아 stuck-pending은 아니었다
+  });
+
+  it('switchOrgAndProject 中 switch-org 자체가 던지면 switchOrgError를 채운다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+    await act(async () => { root.render(<TestComp />); });
+
+    await act(async () => { await result?.switchOrgAndProject('org-dogfood', 'proj-dogfood'); });
+
+    expect(result?.switchOrgError).toBeTruthy();
+    expect(routerPushMock).not.toHaveBeenCalled();
+  });
+
+  it('정상 전환 성공 時엔 switchOrgError가 null이다(회귀가드)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
+    await act(async () => { root.render(<TestComp />); });
+
+    await act(async () => { await result?.switchOrg('org-dogfood'); });
+
+    expect(result?.switchOrgError).toBeNull();
+    expect(result?.currentOrg?.orgId).toBe('org-dogfood');
+  });
+
+  it('재시도 시작 時 이전 switchOrgError가 지워진다(낡은 에러가 새 시도처럼 안 보임)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result?.switchOrg('org-dogfood'); });
+    expect(result?.switchOrgError).toBeTruthy();
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Promise(() => {}))); // 두 번째 시도는 아직 안 끝남
+    await act(async () => { void result?.switchOrg('org-dogfood'); });
+    expect(result?.switchOrgError).toBeNull();
+  });
+});

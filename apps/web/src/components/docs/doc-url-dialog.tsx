@@ -129,7 +129,7 @@ function DocUrlDialogForm({
         )}
 
         {suggestion ? (
-          <p className="text-xs text-warning">
+          <p className="text-xs text-warning-strong">
             {labels.slugTaken} →{' '}
             <button
               type="button"

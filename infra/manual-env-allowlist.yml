@@ -167,9 +167,28 @@ services:
           "값 자체가 무의미·재시작 트리거용 더미"로 추정(키 이름상) — 값 비교 자체가 무의미해
           skip. 존재 여부만 추적.
         owner: TBD
+      - key: ORG_BILLING_KEY_ENCRYPTION_KEY
+        reason: >-
+          결제②-C1(#2492) MultiFernet 암호화 키 — org_billing_keys.encrypted_billing_key
+          봉인용(billing_key_crypto.py). Secret Manager 등록·Cloud Run env 배선 PO 수동
+          프로비저닝(2026-08-06, C1 착수 GO 메시지) — 부트스트랩 스크립트 미편입.
+        owner: TBD
       - key: STORAGE_PROVIDER
         value_check: skip
         reason: 스토리지 프로바이더 선택 플래그 — 수동 토글.
+        owner: TBD
+      - key: TOSS_PAYMENTS_CLIENT_KEY
+        reason: >-
+          결제②-C0(#2491) Toss Payments 클라이언트 키 — state/shared/credentials/
+          toss-payments-keys.md(dev=test_ck)에 이미 발급돼 있던 값. app/core/config.py
+          Settings.toss_payments_client_key로 읽음. Secret Manager 등록 PO 수동
+          프로비저닝(2026-08-06) — 부트스트랩 스크립트 미편입.
+        owner: TBD
+      - key: TOSS_PAYMENTS_CRYPTO_KEY
+        reason: dev와 동일 사유(TOSS_PAYMENTS_CLIENT_KEY 참고) — test_crypto 값, Settings.toss_payments_crypto_key.
+        owner: TBD
+      - key: TOSS_PAYMENTS_SECRET_KEY
+        reason: dev와 동일 사유(TOSS_PAYMENTS_CLIENT_KEY 참고) — test_sk 값, Settings.toss_payments_secret_key.
         owner: TBD
 
   sprintable-backend-prod:
@@ -521,8 +540,9 @@ code_read_exempt:
 # 막으려는 바로 그 방향이다(새 구멍 추가는 이 파일을 고치는 게 아니라 실제로 값을
 # 채우는 걸로 막혀야 한다).
 # reason/declared_by/until 필수(최대 30일) — mcp-path-contract-allowlist.yml(#2280)과
-# 동일 계약. 2026-07-28 실측 기준 14건 — check_env_drift.py 실행 로그의
-# "⑤㉠ baseline" 카운트가 이 숫자와 일치해야 정상(달라지면 파일이 낡은 것).
+# 동일 계약. 2026-08-07 실측 기준 15건(#2510 NEXT_PUBLIC_TOSS_CLIENT_KEY 추가로 14→15) —
+# check_env_drift.py 실행 로그의 "⑤㉠ baseline" 카운트가 이 숫자와 일치해야 정상(달라지면
+# 파일이 낡은 것).
 code_read_high_baseline:
   - key: AGENT_INBOX_HMAC_SECRET
     reason: apps/web/src/services/inbox-item.service.ts — 기본값 없음, 미triage.
@@ -580,5 +600,13 @@ code_read_high_baseline:
     until: "2026-08-27"
   - key: NEXT_PUBLIC_FIREBASE_PROJECT_ID
     reason: apps/web/src/lib/auth/firebase-client.ts·lib/db/server.ts — 기본값 없음, 미triage(위와 동일 축).
+    declared_by: PO
+    until: "2026-08-27"
+  - key: NEXT_PUBLIC_TOSS_CLIENT_KEY
+    reason: >-
+      apps/web/src/ee/components/billing/toss-checkout.ts(story #2510) — 기본값 없음,
+      미triage. Toss 결제위젯 SDK 초기화용 clientKey — 실 배포 時 IaC/시크릿으로 채워질
+      알려진 필수값(secret 아님, publishable 성격 — #2878의 toss_payments_client_key와
+      한 쌍이나 그건 BE Settings 축, 이건 FE 빌드타임 축이라 별도 등재).
     declared_by: PO
     until: "2026-08-27"

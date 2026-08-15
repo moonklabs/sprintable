@@ -9,9 +9,13 @@ import { KanbanBoard } from '@/components/kanban/kanban-board';
 import { ExceptionStream } from '@/components/glance/exception-stream';
 import { toExceptionQueueItems, type BeAttentionSignal, type ExceptionLabels } from '@/components/glance/derive-exception-signals';
 import { loadGlanceData, type GlanceData } from '@/components/glance/load-glance-data';
+import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { NextMakerScreen } from '@/components/flow/next-maker-screen';
 import { FlowNodeStoryPanel } from '@/components/flow/flow-node-story-panel';
+import { HypothesisEarthLayer } from '@/components/flow/hypothesis-earth-layer';
+import { HypothesisNarrativePanel } from '@/components/flow/hypothesis-narrative-panel';
+import { ScaleLadder } from '@/components/flow/scale-ladder';
 
 interface FlowPageClientProps {
   projectId: string;
@@ -19,7 +23,7 @@ interface FlowPageClientProps {
   projSlug: string;
 }
 
-type FlowView = 'flow' | 'list';
+type FlowView = 'hypothesis' | 'flow' | 'list';
 
 // PO 판정(2026-07-30) — 선생님 원 지시("보드+현황판 통합, `/plan`은 말실수·`/flow`가 그
 // 자리")에 따라 07-23 시안(`e15905e8`)의 「갈래|목록」 세그를 되찾는다(IA 개정 때 조용히
@@ -33,9 +37,28 @@ type FlowView = 'flow' | 'list';
 // 하나로, 진행 궤적→시간축이 대체(따로 안 옮김). activity-logs만 목업 자체가 자리를
 // 정하지 않은 유일한 칸이라 판정 대기. 즉 현황판은 "갈래 캔버스가 더 잘 하는 것의 열등한
 // 판"이라 보기로도 남지 않는다.
-function parseView(raw: string | null): FlowView {
+// story #2531(E-FLOW-V4 S1, PO 2026-08-08) — v4 조직원리(flow-board-v4-hypothesis-scale
+// §2): 축척 최상위(지구 층)는 가설이다. 「본체가 지도로 서는가」 게이트를 «가설이 기본
+// 랜딩(?view= 없음)으로 최상위를 차지하는가»로 판정 — 그래서 default가 'flow'(갈래·
+// NextMakerScreen)에서 'hypothesis'로 이동한다. 갈래·목록은 폐기 아님 — 나란한 탭으로
+// 남아 v3.4 계승(§6)을 만족한다. 가설→갈래 드릴다운은 S5(축척 전환) 몫이라 이번엔 병렬.
+//
+// ⛔카디르 라이브 QA(2026-08-09, ①HIGH) — 모바일(390px)은 세그 자체를 안 그리므로(#2225
+// 탭이 대신함), 기본값을 데스크톱과 똑같이 가설로 바꾸면 모바일에서 갈래(NextMakerScreen
+// 상호작용 보드)·목록(칸반)으로 갈 UI 경로가 0이 되는 dead-end였다. 모바일 가설 축척은
+// #2225(모바일 3화면)/S5 몫이라 — 데스크톱만 가설 기본, 모바일은 기존(flow=NextMakerScreen)
+// 유지한다. `?view=`가 URL에 명시돼 있으면(모바일도 주소로는 들어올 수 있으므로) 그 값을
+// 그대로 존중 — 이 폴백은 «파라미터가 아예 없을 때»만 개입한다.
+// ⛔카디르 재QA 비차단②(2026-08-09, S3) — 모바일에서 `?hypothesis=<id>`만 있고 `?view=`가
+// 없으면(공유 링크·새로고침의 흔한 형태) 위 모바일 기본값(flow)이 이겨 서사 패널이
+// 렌더되지 않았다(패널은 view==='hypothesis'에서만 뜬다). hypothesis 파라미터가 있으면
+// «명시 view»와 동급으로 존중 — 모바일이어도 그 가설을 보러 온 것이 명백하므로.
+function parseView(raw: string | null, isMobile: boolean, hasHypothesisParam: boolean): FlowView {
   if (raw === 'list' || raw === 'kanban') return 'list';
-  return 'flow';
+  if (raw === 'flow') return 'flow';
+  if (raw === 'hypothesis') return 'hypothesis';
+  if (hasHypothesisParam) return 'hypothesis';
+  return isMobile ? 'flow' : 'hypothesis';
 }
 
 /**
@@ -60,12 +83,15 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
   const tGlance = useTranslations('glance');
   const router = useRouter();
   const searchParams = useSearchParams();
-  const view = parseView(searchParams.get('view'));
   // 유나 지적(2026-07-30) — 모바일은 갈래|칸반 세그를 그리지 않는다(#2225의 갈래·막힘·멈춤
   // 탭이 그 자리를 대신함). CSS로 숨기면 DOM에 둘 다 남아 스크린리더·탭 순서가 겹친다(#2225
   // AC3와 같은 규율) — useIsMobile로 렌더 자체를 가른다. `?view=`는 모바일에서도 URL 정본
   // 그대로라 세그가 없어도 주소로 칸반 진입은 가능하다.
   const isMobile = useIsMobile();
+  // story #2531 — 기본값(파라미터 없음) 판정이 데스크톱/모바일에 따라 갈리므로 isMobile이
+  // 정해진 뒤에 view를 센다(카디르 ①HIGH fix). hasHypothesisParam은 카디르 재QA 비차단②
+  // (S3) — 모바일에서 `?hypothesis=`만 있는 공유링크/새로고침이 패널을 못 열던 것 fix.
+  const view = parseView(searchParams.get('view'), isMobile, searchParams.get('hypothesis') !== null);
 
   const [data, setData] = useState<GlanceData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -91,16 +117,22 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
     })();
   }, [projectId]);
 
+  // story #2545(카디르 라이브 재QA 4단계) — org 불일치 자동교정(switch-org)이 이 fetch *後*
+  // 성공하면 projectId는 안 바뀌므로 재요청 트리거가 없었다. 다른 opt-in 컴포넌트들
+  // (hypothesis-earth-layer·goals-client·unattached-bucket·flow-multi-lane-canvas)과 동일
+  // 패턴 — orgSyncVersion을 트리거 effect 의존성에 얹는다.
+  const orgSyncVersion = useOrgSyncVersion();
+
   useEffect(() => {
     if (!projectId) return;
     const cancelledRef = { cancelled: false };
     fetchData(cancelledRef);
     return () => { cancelledRef.cancelled = true; };
-  }, [projectId, fetchData]);
+  }, [projectId, fetchData, orgSyncVersion]);
 
   const setView = useCallback((next: FlowView) => {
     const params = new URLSearchParams(searchParams.toString());
-    if (next === 'flow') params.delete('view');
+    if (next === 'hypothesis') params.delete('view');
     else params.set('view', next);
     const qs = params.toString();
     router.push(`/${wsSlug}/${projSlug}/flow${qs ? `?${qs}` : ''}`);
@@ -115,6 +147,35 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
     if (selectedStoryId) setPanelOpen(true);
   }, [selectedStoryId]);
   const handleClosePanel = useCallback(() => setPanelOpen(false), []);
+
+  // story #2533(E-FLOW-V4 S3) — 가설 생애 수직 서사 패널. story 패널(위)과 달리 「닫아도
+  // 선택 유지」 뉘앙스가 AC에 없어 훨씬 단순하게: URL의 `?hypothesis=`가 곧 열림 상태의
+  // 단일 소스다(별도 panelOpen 불필요) — 닫으면 파라미터 자체를 지운다.
+  const selectedHypothesisId = searchParams.get('hypothesis');
+  const handleSelectHypothesis = useCallback((id: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('hypothesis', id);
+    router.push(`/${wsSlug}/${projSlug}/flow?${params.toString()}`, { scroll: false });
+  }, [router, searchParams, wsSlug, projSlug]);
+  const handleCloseHypothesisPanel = useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('hypothesis');
+    const qs = params.toString();
+    router.push(`/${wsSlug}/${projSlug}/flow${qs ? `?${qs}` : ''}`, { scroll: false });
+  }, [router, searchParams, wsSlug, projSlug]);
+
+  // story #2535(E-FLOW-V4 S5) — 지구→대륙→도시 드릴다운. `?goal=<id>`가 착지점(NextMakerScreen
+  // focusGoalId로 흘러가 그 레인만 강제 펼침+스크롤+하이라이트, next-maker-screen.tsx 문서
+  // 참고). 가설 패널에서 넘어오는 경로라 `hypothesis` 파라미터는 지우고 view=flow로 간다
+  // (지구층에 남아있으면 도시층 레인이 안 보인다).
+  const focusGoalId = searchParams.get('goal');
+  const handleNavigateToGoal = useCallback((goalId: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('hypothesis');
+    params.set('view', 'flow');
+    params.set('goal', goalId);
+    router.push(`/${wsSlug}/${projSlug}/flow?${params.toString()}`, { scroll: false });
+  }, [router, searchParams, wsSlug, projSlug]);
 
   const exceptionItems = useMemo(() => {
     if (!data) return [];
@@ -151,14 +212,22 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
       <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
 
       <div className="space-y-4 p-4">
-        {/* ② 두 칸 세그(갈래|칸반) — 07-23 시안(`e15905e8`)에서 되찾음(IA 개정 때 조용히
-            지워졌던 것, 유나 지적 2026-07-30). ⛔"현황판" 세 번째 칸은 선생님 재정정으로
-            지웠다(짓지 않은 게 아니라 "안 짓기로" 확定해 없앤 것 — glance의 다섯 소스가 전부
-            다른 자리로 흡수되어 열등한 세 번째 판이 필요 없어졌다). 모바일은 #2225의
-            갈래·막힘·멈춤 탭이 이 자리를 대신하므로 세그를 그리지 않는다(isMobile===undefined인
-            최초 렌더에서도 안전하게 숨김 — 하이드레이션 후 실값으로 켜진다). */}
+        {/* ② 세 칸 세그(가설|갈래|칸반) — story #2531(E-FLOW-V4 S1)에서 「가설」 칸을
+            맨 앞에 신설(v4 조직원리 §2, 축척 최상위=가설). 갈래·칸반 두 칸은 07-23
+            시안(`e15905e8`)에서 되찾은 것(IA 개정 때 조용히 지워졌던 것, 유나 지적
+            2026-07-30) 그대로 — 폐기 아니라 나란한 탭으로 유지(v3.4 계승). ⛔"현황판" 세
+            번째 칸은 선생님 재정정으로 지웠었다(그 자리에 이제 "가설"이 대신 선다 — 다른
+            이유·다른 칸). 모바일은 #2225의 갈래·막힘·멈춤 탭이 이 자리를 대신하므로 세그를
+            그리지 않는다(isMobile===undefined인 최초 렌더에서도 안전하게 숨김). */}
         {isMobile ? null : (
           <div className="flex items-center gap-1 border-b border-border pb-2">
+            <button
+              type="button"
+              onClick={() => setView('hypothesis')}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${view === 'hypothesis' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              {t('viewHypothesis')}
+            </button>
             <button
               type="button"
               onClick={() => setView('flow')}
@@ -176,7 +245,16 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           </div>
         )}
 
-        {view === 'list' ? (
+        {/* story #2535(E-FLOW-V4 S5) — 축척 브레드크럼. 가설 뷰는 HypothesisEarthLayer가
+            자기 안에서 이미 사다리를 그리므로(지구=활성) 여기서 중복 안 그린다. 갈래=도시·
+            목록=건물 — 「지금 보는 층 = 묻는 질문 전환」을 탭 전환마다 같은 자리에서 보인다. */}
+        {view !== 'hypothesis' ? <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'building'} /> : null}
+
+        {view === 'hypothesis' ? (
+          // story #2531(E-FLOW-V4 S1) — 새 기본 랜딩. 가설(질문)을 최상위 조직 단위로 삼는
+          // 지구 층. 드릴다운(가설→갈래)은 S5 몫이라 지금은 독립 탭으로만 존재한다.
+          <HypothesisEarthLayer projectId={projectId} onSelectHypothesis={handleSelectHypothesis} />
+        ) : view === 'list' ? (
           // 2026-07-30 PO 확認 대기 — 07-23 시안의 「목록」이 칸반과 동일한지 디디군이 확認
           // 중(단순 표라면 드래그로 상태를 바꾸는 길이 사라지는지라 다르다). 답 오기 前엔
           // 되돌리기 쉬운 쪽(칸반 그대로 임베드)으로 가정한다 — kanban-board.tsx를 새로 그리지
@@ -200,17 +278,29 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
               memberMap={data?.memberMap ?? {}}
               onSelectStory={handleSelectStory}
               selectedNodeId={selectedStoryId}
+              focusGoalId={focusGoalId}
             />
           )
         )}
 
         {/* story #2354 — 지도 위에 겹치는 패널. list 보기일 땐 KanbanBoard가 이미 자기
             방식(전체화면 드로어)으로 같은 `?story=`를 읽어 여는 중이라(AC9 회귀 없음), 여기서
-            또 열면 두 벌이 뜬다 — view==='flow'일 때만 렌더한다. */}
-        {view !== 'list' && panelOpen && selectedStoryId ? (
+            또 열면 두 벌이 뜬다 — view==='flow'일 때만 렌더한다.
+            ⛔카디르 라이브 QA(2026-08-09, ②MEDIUM) — 조건이 `view !== 'list'`(구 2값
+            FlowView 시절 잔재)로 남아있어, story #2531로 view가 3값이 된 뒤 기본(가설) 뷰
+            에서도 `/flow?story=<id>`면 패널이 샜다. 주석이 원래 말하던 대로 정확히
+            `view === 'flow'`로 좁힌다 — 가설 뷰엔 story 선택 UI 자체가 없어 패널이 뜰
+            이유가 없다. */}
+        {view === 'flow' && panelOpen && selectedStoryId ? (
           // key={selectedStoryId} — 다른 노드를 연달아 누르면 통째로 다시 마운트시킨다(초기
           // loading 상태가 매번 자연히 맞다, flow-node-story-panel.tsx 문서 참고).
           <FlowNodeStoryPanel key={selectedStoryId} storyId={selectedStoryId} onClose={handleClosePanel} />
+        ) : null}
+
+        {/* story #2533(E-FLOW-V4 S3) — 가설 생애 수직 서사. 가설 뷰에서만(다른 탭엔 가설 카드
+            자체가 없어 selectedHypothesisId가 그 탭에서 생길 일이 없다) */}
+        {view === 'hypothesis' && selectedHypothesisId ? (
+          <HypothesisNarrativePanel key={selectedHypothesisId} hypothesisId={selectedHypothesisId} onClose={handleCloseHypothesisPanel} onNavigateToGoal={handleNavigateToGoal} />
         ) : null}
 
         {/* ③ 관제 서랍 — 보기 무관 고정, 접힘 기본(IA §2). ExceptionStream = #2100 예외 스트림

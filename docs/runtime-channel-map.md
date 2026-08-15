@@ -143,7 +143,7 @@ Claude Code 세션 (MCP stdio)
 
 | 에이전트 유형 | Outbound (보내기) | Inbound (받기) | 비고 |
 |--------------|------------------|----------------|------|
-| **Claude Code** | MCP (stdio) | fakechat — SSE dial-out→MCP notification 주입 | 이 harness 세션이 이 패턴 |
+| **Claude Code** | MCP (stdio) | `sprintable` 플러그인([`moonklabs/sprintable-agent-plugins`](https://github.com/moonklabs/sprintable-agent-plugins) `plugins/sprintable`) — SSE dial-out→MCP notification 주입 | 이 harness 세션이 이 패턴(story #2653 — `packages/fakechat`는 같은 프로토콜을 쓰는 로컬 테스트 하네스일 뿐, 배포 경로 아님) |
 | **Hermes** (장기 실행 서버) | MCP (stdio) | SSE (`GET /api/v2/events/stream`) | 상시 연결 유지, backfill 지원 |
 | **Webhook 에이전트** (서버리스·슬리핑) | MCP (stdio) | webhook (`webhook_configs.url` POST) | 이벤트 수신 시만 깨어남 |
 | **외부 통합** (Slack·Discord 봇 등) | MCP (stdio) | Inbox webhook (`/agent-inbox/{id}/webhook`) → EventBus → SSE relay | HMAC 검증 필수 |
@@ -186,7 +186,7 @@ message_created)        :message)
                              │
                              ▼
                        Sprintable Backend
-                       (API 호출, 91 tools)
+                       (API 호출, 116 tools)
 ```
 
 ---
@@ -197,7 +197,7 @@ message_created)        :message)
 
 - 내 에이전트가 **항상 켜져 있고 long-lived 프로세스**다 → SSE (`GET /api/v2/events/stream`)
 - 내 에이전트가 **이벤트가 올 때만 깨어나는** 서버리스/슬리핑 프로세스다 → webhook
-- 나는 **Claude Code harness** 안에서 실행 중이다 → fakechat (Bun shim 필요)
+- 나는 **Claude Code harness** 안에서 실행 중이다 → `sprintable` 플러그인(`moonklabs/sprintable-agent-plugins` 마켓플레이스로 설치, story #2653) — `packages/fakechat`는 로컬 SSE 브릿지 테스트 하네스일 뿐 배포 경로 아님
 - SSE를 열 수 없는 환경이다 → `poll_events` MCP tool
 
 **"어느 경로로 보내는가?"**
@@ -211,6 +211,7 @@ message_created)        :message)
 - [`docs/architecture-post-migration.md`](./architecture-post-migration.md) — GCP 인프라 전체 구조
 - [`docs/routing-rule-policy-enforcement.md`](./routing-rule-policy-enforcement.md) — 라우팅 규칙 정책
 - [`apps/web/public/llms-full.txt`](../apps/web/public/llms-full.txt) — LLM 에이전트용 전체 API 레퍼런스
-- [`packages/fakechat/server.ts`](../packages/fakechat/server.ts) — fakechat 구현체
+- [`moonklabs/sprintable-agent-plugins`](https://github.com/moonklabs/sprintable-agent-plugins) `plugins/sprintable` — Claude Code용 실 배포 채널 플러그인
+- [`packages/fakechat/server.ts`](../packages/fakechat/server.ts) — 같은 프로토콜의 로컬 SSE 브릿지 테스트 하네스(story #2653, 배포 경로 아님)
 - [`backend/sprintable_mcp/__main__.py`](../backend/sprintable_mcp/__main__.py) — MCP 서버 진입점
 - 구현 기반 스토리: S-COMM-01(SSE 인증), S-COMM-02(webhook 라우팅), S-COMM-04(send_chat_message 단일 경로), S-COMM-05(backfill+dedup), S-COMM-12(SSE/webhook 이벤트명 통일, backlog)

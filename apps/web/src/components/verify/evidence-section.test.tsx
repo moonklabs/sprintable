@@ -61,7 +61,7 @@ describe('EvidenceSection (SSR snapshot — §7 상태 매트릭스 + P0-04 Clai
       wrap(<EvidenceSection workItemId="s1" workItemType="story" selfReported={true} humanVerified={null} humanVerifiedBy={null} humanVerifiedAt={null} />),
     );
     expect(markup).toContain('에이전트 주장');
-    expect(markup).toContain('text-warning');
+    expect(markup).toContain('text-warning-strong');
     expect(markup).not.toContain('text-success');
     expect(markup).toContain('근거 보기');
     // 디디 BE 가이드: "근거 보기" 클릭 전엔 evidence 리스트를 부르지 않는다(카드마다 N+1 방지).

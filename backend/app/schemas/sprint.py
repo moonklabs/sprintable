@@ -124,6 +124,18 @@ class SprintResponse(SprintBase):
     created_at: datetime
     updated_at: datetime
 
+    # story #2642(웹·칩 공통, 2026-08-14) — #2168 DocPreviewResponse와 동형. project_id는
+    # 이미 있어 additive slug 2개만. 새 preview 라우트 대신 이 응답을 제자리 확장(PO 판정 —
+    # GET /{id}가 이미 project_id-스코프 단건조회라 preview와 비용/모양이 같다). ORM 컬럼
+    # 아님 — 라우터가 model_validate 前 transient attr로 세팅.
+    org_slug: str | None = None
+    project_slug: str | None = None
+
+    @field_validator("org_slug", "project_slug", mode="before")
+    @classmethod
+    def _coerce_slug_fields(cls, v):
+        return v if isinstance(v, str) else None
+
     @model_validator(mode="after")
     def _derive_duration_from_dates(self) -> "SprintResponse":
         """8a2bbda2: 날짜가 있으면 duration 을 날짜에서 파생(stored 14 오염 무시).

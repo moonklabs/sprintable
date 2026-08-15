@@ -139,7 +139,9 @@ export function DecisionsWaiting({ onChange }: DecisionsWaitingProps = {}) {
       className="mx-3 mt-3 rounded-lg border border-warning/30 bg-warning/8 px-3 py-2"
     >
       <header className="mb-2 flex items-center gap-2">
-        <AlertTriangle className="size-4 text-warning" />
+        {/* story #2590(TIER1 아이콘) — text-warning은 tint 유무와 무관하게 3.0 미달(실측,
+            #2420 doc) — text-foreground로 잠정 통일(진한 토큰 신설은 범위 밖). */}
+        <AlertTriangle className="size-4 text-foreground" />
         <h2 className="text-sm font-semibold text-foreground">
           {t('decisionsWaiting')}
         </h2>
@@ -149,7 +151,7 @@ export function DecisionsWaiting({ onChange }: DecisionsWaitingProps = {}) {
       </header>
 
       {error ? (
-        <p className="mb-2 text-xs text-destructive" role="alert">
+        <p className="mb-2 text-xs text-foreground" role="alert">
           {t('decisionsErrorRetry')}
         </p>
       ) : null}

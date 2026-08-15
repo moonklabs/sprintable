@@ -447,6 +447,22 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
         ),
+        DeepLinkManifestEntry(
+            # story #2631: 「보류(논의 필요)」 요청이 doc 결재 상신자에게 회신되는 벨 알림 —
+            # doc_approval_resolved와 동형(gate 경유·reference_id=gate_id)이나 게이트가 아직
+            # 결정 안 나고 pending인 채로 "3안 논의 요청"을 받은 것이라, 결재자가 그 카드로
+            # 착지해 응답(추가 승인/거부/재논의)할 수 있어야 한다 — 읽기전용 FYI가 아니라
+            # 조치 가능이므로 grade A2(요청 쪽 doc_approval_requested와 동일 등급).
+            app=DeepLinkAppFields(
+                type="doc_approval_discussion_requested", target="gate_detail",
+                parent_tab=ParentTab.approvals, target_promotion_pending=True,
+            ),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
+            channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
+        ),
 
         # --- dispatched(범용) — reference_type 5종 분기. entity_type 필수. ---
         # 정정(유나 3자 검토, 필수·조건부 GREEN의 조건): parentTab은 target의 순수 함수여야
