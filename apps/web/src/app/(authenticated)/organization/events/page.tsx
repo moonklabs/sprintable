@@ -353,7 +353,7 @@ function EventFormDialog({
       setHumanOnly(auth?.human_only ?? false);
       setRolesCsv((auth?.role ?? []).join(', '));
 
-      const parsed = orgSlug ? tryReverseParse(target.key, target.payload_schema, target.routing, target.action_auth ?? null, orgSlug) : null;
+      const parsed = orgSlug ? tryReverseParse(target.key, target.payload_schema, target.routing, target.action_auth ?? null, orgSlug, target.block_template) : null;
       if (parsed) { setDefinerState(parsed); setTab('basic'); setAdvancedOnly(false); }
       else { setDefinerState(emptyFormState()); setTab('advanced'); setAdvancedOnly(true); }
       setSavedKey(target.key);

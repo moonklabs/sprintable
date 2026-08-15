@@ -115,15 +115,37 @@ function fieldsToProperties(fields: DefinerField[]): { properties: Record<string
   return { properties, required };
 }
 
+// PO 라이브 실측(review_changes 2차) — member_id_field 이름은 routing 파생과 schema 삽입
+// 양쪽이 반드시 같은 상수를 써야 한다(둘이 벌어지면 BE가 "그 필드가 스키마에 없다"로 거부).
+const ASSIGNEE_MEMBER_ID_FIELD = 'assignee_member_id';
+
 // R4 — routing 2택 파생. escalation leg는 R3 정정대로 항상 명시(server_derived·target=none,
 // 누락 금지 — 서버가 두 leg 모두 object를 요구).
 function deriveRouting(routing: DefinerRouting): Record<string, unknown> {
   const broadcast = routing === 'assign_on_publish'
-    ? { kind: 'payload_field', member_id_field: 'assignee_member_id' }
+    ? { kind: 'payload_field', member_id_field: ASSIGNEE_MEMBER_ID_FIELD }
     : { kind: 'server_derived', target: 'none' };
   return {
     escalation: { kind: 'server_derived', target: 'none' },
     broadcast,
+  };
+}
+
+// 유나 v1.1 §④ — 「발행 시 지정」을 고르면 그 대상 필드가 payload_schema에도 선언돼야 한다
+// (additionalProperties:false라 스키마에 없는 필드는 실 발행이 전부 거부된다 — PO 2차 RED
+// 근인). samplePayload에도 자리표시자를 심어 둔다: 실값(로그인 멤버 id)은 테스트 발행
+// 호출부(page.tsx testPublish)가 그 자리를 덮어쓴다 — 파생 자체는 순수 유지.
+function withAssigneeMemberField(
+  properties: Record<string, unknown>,
+  required: string[],
+  samplePayload: Record<string, unknown>,
+  routing: DefinerRouting,
+): { properties: Record<string, unknown>; required: string[]; samplePayload: Record<string, unknown> } {
+  if (routing !== 'assign_on_publish') return { properties, required, samplePayload };
+  return {
+    properties: { ...properties, [ASSIGNEE_MEMBER_ID_FIELD]: { type: 'string' } },
+    required: [...required, ASSIGNEE_MEMBER_ID_FIELD],
+    samplePayload: { ...samplePayload, [ASSIGNEE_MEMBER_ID_FIELD]: '예시 멤버 id' },
   };
 }
 
@@ -166,14 +188,20 @@ export function deriveCycle(state: DefinerFormState, orgSlug: string): DerivedDe
   const validStages = state.stages.filter((s) => s.name.trim() && s.slug.trim());
   const stageSlugs = validStages.map((s) => s.slug);
   const { properties: fieldProps, required: fieldRequired } = fieldsToProperties(state.fields);
+  const sampleStage = stageSlugs[stageSlugs.length - 1] ?? 'stage_1';
+  const withMember = withAssigneeMemberField(
+    { stage: { type: 'string', enum: stageSlugs }, ...fieldProps },
+    ['stage', ...fieldRequired],
+    { stage: sampleStage, ...extraFieldsSample(state.fields) },
+    state.routing,
+  );
   const payload_schema = {
     type: 'object',
-    properties: { stage: { type: 'string', enum: stageSlugs }, ...fieldProps },
-    required: ['stage', ...fieldRequired],
+    properties: withMember.properties,
+    required: withMember.required,
     additionalProperties: false,
   };
-  const sampleStage = stageSlugs[stageSlugs.length - 1] ?? 'stage_1';
-  const samplePayload = { stage: sampleStage, ...extraFieldsSample(state.fields) };
+  const samplePayload = withMember.samplePayload;
   const fieldsBlock = buildFieldsBlock(state.fields);
   const block_template: BlockTemplate = {
     blocks: [
@@ -199,9 +227,11 @@ export function deriveSignal(state: DefinerFormState, orgSlug: string): DerivedD
   const properties: Record<string, unknown> = { kind: { type: 'string', enum: kinds.length > 0 ? kinds : ['default'] }, ...fieldProps };
   const required = ['kind', ...fieldRequired];
   if (state.includeSummary) { properties.summary = { type: 'string' }; }
-  const payload_schema = { type: 'object', properties, required, additionalProperties: false };
-  const samplePayload: Record<string, unknown> = { kind: kinds[0] ?? 'default', ...extraFieldsSample(state.fields) };
-  if (state.includeSummary) samplePayload.summary = '예시 요약';
+  const samplePayloadBase: Record<string, unknown> = { kind: kinds[0] ?? 'default', ...extraFieldsSample(state.fields) };
+  if (state.includeSummary) samplePayloadBase.summary = '예시 요약';
+  const withMember = withAssigneeMemberField(properties, required, samplePayloadBase, state.routing);
+  const payload_schema = { type: 'object', properties: withMember.properties, required: withMember.required, additionalProperties: false };
+  const samplePayload = withMember.samplePayload;
   const signalFieldsBlock = buildFieldsBlock(state.fields);
   const block_template: BlockTemplate = {
     blocks: [
@@ -227,10 +257,12 @@ export function deriveMeasure(state: DefinerFormState, orgSlug: string): Derived
   const required = ['metric_value', ...fieldRequired];
   if (state.includeMetricUnit) properties.metric_unit = { type: 'string' };
   if (state.includeSource) properties.source = { type: 'string' };
-  const payload_schema = { type: 'object', properties, required, additionalProperties: false };
-  const samplePayload: Record<string, unknown> = { metric_value: 42, ...extraFieldsSample(state.fields) };
-  if (state.includeMetricUnit) samplePayload.metric_unit = '%';
-  if (state.includeSource) samplePayload.source = '예시 출처';
+  const samplePayloadBase: Record<string, unknown> = { metric_value: 42, ...extraFieldsSample(state.fields) };
+  if (state.includeMetricUnit) samplePayloadBase.metric_unit = '%';
+  if (state.includeSource) samplePayloadBase.source = '예시 출처';
+  const withMember = withAssigneeMemberField(properties, required, samplePayloadBase, state.routing);
+  const payload_schema = { type: 'object', properties: withMember.properties, required: withMember.required, additionalProperties: false };
+  const samplePayload = withMember.samplePayload;
   const fieldsBlock: { label: string; value: string }[] = [{ label: '측정치', value: state.includeMetricUnit ? '{{payload.metric_value}} {{payload.metric_unit}}' : '{{payload.metric_value}}' }];
   if (state.includeSource) fieldsBlock.push({ label: '출처', value: '{{payload.source}}' });
   for (const f of state.fields) { if (f.name.trim() && validateFieldName(f.name)) fieldsBlock.push({ label: f.name, value: `{{payload.${f.name}}}` }); }
@@ -256,6 +288,17 @@ export function deriveDefinition(state: DefinerFormState, orgSlug: string): Deri
   return deriveMeasure(state, orgSlug);
 }
 
+// PO 라이브 실측(review_changes 2차) — 수정 진입 시 이벤트 이름이 매번 "이름 없음"으로
+// 비어 있던 유실. payload_schema엔 name이 없다(그건 오직 block_template 첫 블록의 header
+// text로만 산다, deriveCycle/Signal/Measure 참조) — 그러니 역파싱도 거기서 되돌려야 한다.
+function extractNameFromBlockTemplate(block_template: Record<string, unknown> | null | undefined): string {
+  const blocks = block_template?.blocks;
+  if (!Array.isArray(blocks) || blocks.length === 0) return '';
+  const first = blocks[0] as { type?: string; text?: string } | undefined;
+  if (first?.type !== 'header' || typeof first.text !== 'string') return '';
+  return first.text === '(이름 없음)' ? '' : first.text;
+}
+
 // AC3 — JSON→폼 왕복. 폼이 표현할 수 있는 정확한 모양(이 파일의 derive* 함수들이 만드는 것과
 // 구조적으로 동형)일 때만 성공한다 — 조금이라도 벗어나면(사람이 고급 탭에서 직접 편집했거나,
 // 이 기능 이전에 만들어진 정의 등) null을 반환해 호출부가 "고급 전용" 배지로 정직하게
@@ -266,6 +309,7 @@ export function tryReverseParse(
   routing: Record<string, unknown>,
   action_auth: Record<string, unknown> | null,
   orgSlug: string,
+  block_template?: Record<string, unknown> | null,
 ): DefinerFormState | null {
   try {
     const prefix = `org.${orgSlug}.`;
@@ -276,13 +320,17 @@ export function tryReverseParse(
     if (!properties || typeof properties !== 'object') return null;
     const required = new Set((payload_schema.required as string[] | undefined) ?? []);
 
-    // routing 2택 역해석(R4) — 이 두 모양 밖이면 표현 불가.
+    // routing 2택 역해석(R4) — 이 두 모양 밖이면 표현 불가. payload_field면 member_id_field가
+    // 폼이 항상 쓰는 그 이름(ASSIGNEE_MEMBER_ID_FIELD)과 정확히 같아야 한다 — 다른 이름이면
+    // 고급 탭에서 손으로 바꾼 것이라 폼이 못 되돌린다(스키마에서 그 필드를 잃는 걸 막는다).
     const esc = routing.escalation as { kind?: string; target?: string } | undefined;
     const bc = routing.broadcast as { kind?: string; target?: string; member_id_field?: string } | undefined;
     if (esc?.kind !== 'server_derived' || esc.target !== 'none') return null;
     let derivedRouting: DefinerRouting;
-    if (bc?.kind === 'payload_field') derivedRouting = 'assign_on_publish';
-    else if (bc?.kind === 'server_derived' && bc.target === 'none') derivedRouting = 'record_only';
+    if (bc?.kind === 'payload_field') {
+      if (bc.member_id_field !== ASSIGNEE_MEMBER_ID_FIELD) return null;
+      derivedRouting = 'assign_on_publish';
+    } else if (bc?.kind === 'server_derived' && bc.target === 'none') derivedRouting = 'record_only';
     else return null;
 
     const humanOnly = action_auth?.human_only === true;
@@ -296,13 +344,18 @@ export function tryReverseParse(
     base.routing = derivedRouting;
     base.humanOnly = humanOnly;
     base.rolesCsv = rolesCsv;
+    base.name = extractNameFromBlockTemplate(block_template);
+
+    // routing이 assign_on_publish일 때만 스키마에 실리는 필드라, 있으면 "사용자가 만든 추가
+    // 필드"가 아니라 파생이 자동으로 얹은 것 — 셋 다에서 일반 필드 취급 대상에서 뺀다.
+    const structuralExclude = derivedRouting === 'assign_on_publish' ? [ASSIGNEE_MEMBER_ID_FIELD] : [];
 
     if ('stage' in properties && properties.stage?.enum) {
       const { stage, ...rest } = properties;
       void stage;
       base.format = 'cycle';
       base.stages = (properties.stage!.enum ?? []).map((slug) => ({ id: makeId(), name: slug, slug }));
-      base.fields = objectToFields(rest, required, new Set(['stage']));
+      base.fields = objectToFields(rest, required, new Set(['stage', ...structuralExclude]));
       return base;
     }
     if ('kind' in properties) {
@@ -311,7 +364,7 @@ export function tryReverseParse(
       base.signalKinds = kind?.enum ?? [];
       base.includeSummary = 'summary' in properties;
       void summary;
-      base.fields = objectToFields(rest, required, new Set(['kind', 'summary']));
+      base.fields = objectToFields(rest, required, new Set(['kind', 'summary', ...structuralExclude]));
       return base;
     }
     if ('metric_value' in properties) {
@@ -321,7 +374,7 @@ export function tryReverseParse(
       base.includeMetricUnit = 'metric_unit' in properties;
       base.includeSource = 'source' in properties;
       void metric_unit; void source;
-      base.fields = objectToFields(rest, required, new Set(['metric_value', 'metric_unit', 'source']));
+      base.fields = objectToFields(rest, required, new Set(['metric_value', 'metric_unit', 'source', ...structuralExclude]));
       return base;
     }
     return null;
