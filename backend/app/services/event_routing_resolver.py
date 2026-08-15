@@ -24,6 +24,23 @@ class MissingRoutingPayloadFieldError(ValueError):
     빈 집합으로 넘기지 않고 발행 시점에 명시 오류(story #2633 AC4 "조용한 유실 금지")."""
 
 
+class InvalidWorkItemReferenceError(ValueError):
+    """work_item_id/goal_id/payload_field UUID 값이 문법적으로 유효한 UUID가 아님 — story
+    #2675: event_definition_registry.validate_event_payload가 format:uuid를 이제 집행하지만,
+    이 함수는 org 커스텀 정의(#2636)가 그 필드에 format:uuid 선언을 빠뜨린 경우까지 대비한
+    2차 방어선이다. uuid.UUID() 파싱 실패를 처리 안 된 ValueError로 흘려 500을 내지 않고
+    발행 시점에 명시 거부한다."""
+
+
+def _parse_uuid(value: str, *, field_name: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(value)
+    except (ValueError, AttributeError, TypeError) as e:
+        raise InvalidWorkItemReferenceError(
+            f"payload.{field_name}이 올바른 UUID 형식이 아닙니다: {value!r}"
+        ) from e
+
+
 async def _resolve_work_item_stakeholders(
     db: AsyncSession, *, org_id: uuid.UUID, payload: dict,
 ) -> set[uuid.UUID]:
@@ -34,7 +51,7 @@ async def _resolve_work_item_stakeholders(
     work_item_id_raw = payload.get("work_item_id")
     if not work_item_type or not work_item_id_raw:
         return set()
-    work_item_id = uuid.UUID(work_item_id_raw)
+    work_item_id = _parse_uuid(work_item_id_raw, field_name="work_item_id")
 
     if work_item_type == "story":
         from app.models.pm import Story
@@ -85,8 +102,9 @@ async def _resolve_goal_owner(db: AsyncSession, *, org_id: uuid.UUID, payload: d
     goal_id_raw = payload.get("goal_id")
     if not goal_id_raw:
         return set()
+    goal_id = _parse_uuid(goal_id_raw, field_name="goal_id")
     assignee = (await db.execute(
-        select(Goal.assignee_id).where(Goal.id == uuid.UUID(goal_id_raw), Goal.org_id == org_id)
+        select(Goal.assignee_id).where(Goal.id == goal_id, Goal.org_id == org_id)
     )).scalar_one_or_none()
     return {assignee} if assignee else set()
 
@@ -121,7 +139,7 @@ async def resolve_routing_leg(
             raise MissingRoutingPayloadFieldError(
                 f"routing이 요구하는 payload.{field}가 없거나 비었습니다."
             )
-        return {uuid.UUID(value)}
+        return {_parse_uuid(value, field_name=field)}
 
     resolver = _SERVER_DERIVED_RESOLVERS[leg["target"]]
     return await resolver(db, org_id=org_id, payload=payload)
