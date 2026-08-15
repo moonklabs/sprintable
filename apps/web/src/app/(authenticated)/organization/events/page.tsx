@@ -29,12 +29,21 @@ interface EventDefinition {
 const DEFAULT_PAYLOAD_SCHEMA = '{\n  "type": "object",\n  "properties": {},\n  "required": [],\n  "additionalProperties": false\n}';
 const DEFAULT_ROUTING = '{\n  "escalation": { "kind": "server_derived", "target": "none" },\n  "broadcast": { "kind": "server_derived", "target": "none" }\n}';
 
-function parseJsonField(raw: string, fallback: null): null;
-function parseJsonField(raw: string): Record<string, unknown>;
-function parseJsonField(raw: string, fallback?: null): Record<string, unknown> | null {
+// PO 리뷰(PR#3070) 기록사항① — raw SyntaxError 영문을 그대로 보여주지 않는다(#2552 사람말
+// 에러 카피 원칙). 어느 필드가 깨졌는지(field) 호출부가 t('eventJsonParseError', {field})로
+// 로컬라이즈해 보여줄 수 있게 field만 실어 던진다.
+class JsonFieldParseError extends Error {
+  constructor(public field: string) { super(`invalid_json:${field}`); }
+}
+
+function parseJsonField(raw: string, field: string): Record<string, unknown> {
   const trimmed = raw.trim();
-  if (!trimmed) return fallback ?? {};
-  return JSON.parse(trimmed) as Record<string, unknown>;
+  if (!trimmed) return {};
+  try {
+    return JSON.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    throw new JsonFieldParseError(field);
+  }
 }
 
 export default function OrganizationEventsPage() {
@@ -343,9 +352,9 @@ function EventFormDialog({
       const roles = rolesCsv.split(',').map((r) => r.trim()).filter(Boolean);
       const actionAuth = humanOnly || roles.length > 0 ? { human_only: humanOnly, role: roles } : null;
       const body: Record<string, unknown> = {
-        payload_schema: parseJsonField(payloadSchema),
-        routing: parseJsonField(routing),
-        block_template: blockTemplate.trim() ? parseJsonField(blockTemplate) : null,
+        payload_schema: parseJsonField(payloadSchema, t('eventPayloadSchemaLabel')),
+        routing: parseJsonField(routing, t('eventRoutingLabel')),
+        block_template: blockTemplate.trim() ? parseJsonField(blockTemplate, t('eventBlockTemplateLabel')) : null,
         action_auth: actionAuth,
       };
       let res: Response;
@@ -372,7 +381,7 @@ function EventFormDialog({
       onOpenChange(false);
       await onSaved();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof JsonFieldParseError ? t('eventJsonParseError', { field: e.field }) : e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
@@ -470,7 +479,7 @@ function TestPublishDialog({
     setSending(true);
     setError(null);
     try {
-      const parsedPayload = parseJsonField(payload);
+      const parsedPayload = parseJsonField(payload, t('eventTestPublishPayloadLabel'));
       const res = await fetch('/api/events/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -483,7 +492,7 @@ function TestPublishDialog({
       addToast({ type: 'success', title: t('eventTestPublishSuccessToast') });
       onOpenChange(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof JsonFieldParseError ? t('eventJsonParseError', { field: e.field }) : e instanceof Error ? e.message : String(e));
     } finally {
       setSending(false);
     }

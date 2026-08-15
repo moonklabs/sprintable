@@ -498,7 +498,8 @@
     "eventTestPublishPayloadLabel": "payload(JSON)",
     "eventTestPublishSubmit": "발행",
     "eventTestPublishSuccessToast": "발행했습니다.",
-    "eventErrorGeneric": "처리에 실패했습니다. 다시 시도해 주세요."
+    "eventErrorGeneric": "처리에 실패했습니다. 다시 시도해 주세요.",
+    "eventJsonParseError": "{field} 형식이 올바르지 않습니다(JSON 문법을 확인해 주세요)."
   },
   "flow": {
     "title": "흐름",

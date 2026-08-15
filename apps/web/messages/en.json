@@ -498,7 +498,8 @@
     "eventTestPublishPayloadLabel": "payload (JSON)",
     "eventTestPublishSubmit": "Publish",
     "eventTestPublishSuccessToast": "Published.",
-    "eventErrorGeneric": "Something went wrong. Please try again."
+    "eventErrorGeneric": "Something went wrong. Please try again.",
+    "eventJsonParseError": "{field} isn't valid JSON. Please check the syntax."
   },
   "flow": {
     "title": "Flow",
