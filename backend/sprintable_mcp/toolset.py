@@ -25,7 +25,10 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("meetings", ("meeting",)),
     ("retro", ("retro",)),
     ("standup", ("standup",)),
-    ("docs", ("doc", "search_docs")),
+    # story #2668: sprintable_submit_for_approval — "doc" substring 없음, 명시 추가 필요
+    # (원본 app/services/mcp_toolset.py와 동기화 — 이 vendored 사본이 갈리면 story #2311
+    # 회귀가드가 잡는다).
+    ("docs", ("doc", "search_docs", "submit_for_approval")),
     ("chat", ("chat", "message", "conversation")),
     ("sprints", ("sprint",)),
     ("hypotheses", ("hypothes",)),
