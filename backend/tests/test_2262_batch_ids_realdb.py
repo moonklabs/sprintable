@@ -110,11 +110,12 @@ async def _make_task(session, org_id, story_id, title="Task"):
     return task
 
 
-async def _make_doc(session, org_id, project_id, title="Doc", slug=None):
+async def _make_doc(session, org_id, project_id, title="Doc", slug=None, status=None):
     from app.models.doc import Doc
+    kwargs = {} if status is None else {"status": status}
     doc = Doc(
         id=uuid.uuid4(), org_id=org_id, project_id=project_id, title=title,
-        slug=slug or f"doc-{uuid.uuid4().hex[:8]}",
+        slug=slug or f"doc-{uuid.uuid4().hex[:8]}", **kwargs,
     )
     session.add(doc)
     await session.commit()
@@ -274,6 +275,36 @@ async def test_docs_ids_returns_set_and_excludes_inaccessible_project_realdb():
             ids = {row["id"] for row in body["data"]}
             assert ids == {str(doc_a.id)}, "접근권 없는 project B의 doc이 새면 안 된다"
             assert body["meta"] == {"has_more": False, "next_cursor": None}
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_docs_ids_includes_status_realdb():
+    """story #2672 — 배치조회(?ids=) 응답에 status가 있어야 챗 doc 참조 칩 상태 배지·#2669
+    CTA(draft 판별)가 산다(C-4 이래 필드 부재로 조용히 빈칸이었던 것). 양성대조: draft
+    기본값 하나만 찍으면 "필드는 있는데 항상 draft로 굳어있다" 회귀를 못 잡으므로 confirmed
+    doc도 같이 만들어 실제 컬럼값이 그대로 실린다는 것까지 확인한다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            f = await _two_project_fixture(s)
+            doc_draft = await _make_doc(s, f["org_id"], f["project_a"], "Draft Doc")
+            doc_confirmed = await _make_doc(s, f["org_id"], f["project_a"], "Confirmed Doc", status="confirmed")
+
+        await _setup_app_human(app, Session, f["caller_user_id"], f["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/docs?ids={doc_draft.id},{doc_confirmed.id}")
+            assert resp.status_code == 200, resp.text
+            by_id = {row["id"]: row for row in resp.json()["data"]}
+            assert by_id[str(doc_draft.id)]["status"] == "draft"
+            assert by_id[str(doc_confirmed.id)]["status"] == "confirmed"
         finally:
             await client.aclose()
     finally:
