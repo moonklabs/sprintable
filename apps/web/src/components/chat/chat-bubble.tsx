@@ -20,6 +20,7 @@ import { MessageContextMenu, type CiteAction } from './message-context-menu';
 import { SenderProfilePopover } from './sender-profile-popover';
 import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from './presence-dot';
 import { ReferenceSuggestionRow } from './reference-suggestion-row';
+import { IntentSuggestionCard } from './intent-suggestion-card';
 import { parseHitlRequest } from '@/lib/hitl-classifier';
 import { HitlApprovalCard, type HitlAnswer } from './hitl-approval-card';
 import { ApprovalRequestCard } from './approval-request-card';
@@ -543,6 +544,19 @@ export function ChatBubble({
               isMine 게이트는 컴포넌트 내부에서 건다). ⛔남의 메시지엔 안 뜬다. tombstone된
               메시지엔 제안할 실 내용이 없다(story #2319). */}
           {!isCmd && !isDeleted && !hitlRequest && !approvalTarget && !(eventTarget && eventBlockTemplate) && <ReferenceSuggestionRow messageId={message.id} content={message.content} isMine={isMine} projectId={projectId} />}
+
+          {/* story #2638(P3=B1) — «승인 주시면»류 의도 문구를 말로만 쓰고 실제 기제(상신·완료
+              전환·배정)를 안 거는 재발을 능동 제안으로 잡는다. ReferenceSuggestionRow와 동일
+              게이트(isMine·비명령·비삭제) — 두 제안이 동시에 뜨는 것 자체는 막지 않는다(서로
+              다른 축의 별개 제안이라 배타적일 이유가 없다). */}
+          {!isCmd && !isDeleted && !hitlRequest && !approvalTarget && !(eventTarget && eventBlockTemplate) && (
+            <IntentSuggestionCard
+              messageId={message.id}
+              content={message.content}
+              isMine={isMine}
+              entityStatusByKey={entityStatusByKey}
+            />
+          )}
 
           {/* Attachments — a54ddc16: auth-gated 서명 라우트 경유(public 직링크 미사용).
               이미지=AttachmentImage(3상태 render)·오디오/비디오=AttachmentMedia(story #2051,
