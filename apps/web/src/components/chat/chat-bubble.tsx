@@ -216,7 +216,10 @@ function ChatMarkdown({ content, isMine, references, entityStatusByKey }: {
       if (m && m[1]!.toLowerCase() !== 'asset' && !isGhostReference(references, m[1]!, m[2]!)) {
         const statusFetch = entityStatusByKey?.[`${m[1]!.toLowerCase()}:${m[2]!.toLowerCase()}`];
         const status = statusFetch?.kind === 'resolved' ? statusFetch.raw : null;
-        const label = hastNodeText(link!.children?.[0]) || m[2]!;
+        // PO 리뷰 지적 — 링크 라벨이 여러 자식(예: **강조** 섞인 텍스트)으로 쪼개질 수
+        // 있어 첫 자식만 읽으면 라벨이 잘린다. 전 자식을 이어붙인다(hastNodeText가
+        // 재귀로 하듯 여기도 동일 패턴).
+        const label = (link!.children ?? []).map(hastNodeText).join('') || m[2]!;
         return <EmbedCard entity_type={m[1]!} entity_id={m[2]!} title={label} status={status} />;
       }
       return <p className={`mb-1.5 [overflow-wrap:anywhere] text-sm leading-relaxed last:mb-0 ${text}`}>{children}</p>;
