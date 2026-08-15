@@ -38,7 +38,8 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 }));
 
 const DOC_ID = 'aabbccdd-1111-1111-1111-111111111111';
-const docToken = `[제목](entity:doc:${DOC_ID})`;
+// PO 라이브 판정 RED(2026-08-15) 회귀가드 — 실 정본 이스케이프 토큰 형태로.
+const docToken = `[\\[QA·폐기용\\] 제목](entity:doc:${DOC_ID})`;
 
 function jsonResponse(body: unknown, ok = true, status = ok ? 200 : 500) {
   return { ok, status, json: async () => body } as Response;
