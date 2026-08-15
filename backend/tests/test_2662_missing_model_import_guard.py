@@ -30,14 +30,21 @@ def test_registry_maps_known_tables_to_their_module():
 
 def test_registry_scan_is_side_effect_free_no_model_imported():
     """AST 정적 스캔이라 스캔 자체가 어떤 모델도 import하지 않는다 — "등재 여부를 재는
-    잣대"(sys.modules/Base.metadata)와 "스캔 행위"가 서로 안 섞인다는 설계 전제 확인."""
+    잣대"(sys.modules/Base.metadata)와 "스캔 행위"가 서로 안 섞인다는 설계 전제 확인.
+
+    PO 리뷰(2026-08-15) 지적 — "app.models.activity_log ∉ sys.modules" 전역 절대 단언은
+    풀스위트 실행 순서에 취약하다(다른 테스트가 그 모듈을 이미 정당하게 import해뒀으면 이
+    단언 자체가 깨진다 — 이 테스트가 검증하려는 것과 무관한 이유로). 스캔 «전/후 델타»로
+    바꿔 순서 무관하게 만든다 — 확인 대상은 "이미 import돼 있었나"가 아니라 "이 스캔 호출이
+    «새로» import를 만들었나"뿐이다."""
     import sys
     from tests.conftest import _build_tablename_to_module_registry
 
-    assert "app.models.activity_log" not in sys.modules
+    before = set(sys.modules)
     _build_tablename_to_module_registry()
-    assert "app.models.activity_log" not in sys.modules, (
-        "스캔이 실제로 모듈을 import했다 — 정적 스캔이어야 한다는 설계가 깨짐"
+    newly_imported = set(sys.modules) - before
+    assert not newly_imported, (
+        f"스캔이 실제로 모듈을 import했다 — 정적 스캔이어야 한다는 설계가 깨짐: {newly_imported}"
     )
 
 
