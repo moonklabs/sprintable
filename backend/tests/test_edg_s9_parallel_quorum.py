@@ -31,6 +31,7 @@ async def _session():
     import app.models.participation  # noqa: F401 — gate_resolver FK(participation_role) 등록
     import app.models.gate  # noqa: F401
     import app.models.hitl_config  # noqa: F401
+    import app.models.activity_log  # noqa: F401 — #2631: transition_gate()가 ActivityLog를 씀(#2201 후속 미등재 갭).
     url = _REAL_DB_URL
     for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgresql://"):
         if url.startswith(prefix):
