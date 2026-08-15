@@ -155,6 +155,7 @@ async def _make_engine_session():
 
     from app.core.database import Base
     import app.models  # noqa: F401 — 전 모델 등록(create_all)
+    import app.models.activity_log  # noqa: F401 — #2631: transition_gate()가 ActivityLog를 씀(#2201 후속 미등재 갭).
     import app.models.workflow_line  # noqa: F401
 
     url = _REAL_DB_URL
