@@ -159,6 +159,10 @@ export default function GateDetailPage() {
       if (res.ok) { await fetchGate(); setDiscussDialogOpen(false); return; }
       const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
       setDiscussError(body?.error?.message ?? t('gateTransitionErrorGeneric'));
+    } catch {
+      // story #2631 — PO 리뷰(PR#3068) 지적: try/finally뿐이면 네트워크 실패 시 무표시+
+      // unhandled rejection. 챗 카드(approval-request-card.tsx)와 패리티.
+      setDiscussError(t('gateTransitionErrorGeneric'));
     } finally {
       setDiscussSubmitting(false);
     }
