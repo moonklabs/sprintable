@@ -126,12 +126,12 @@ export default function GateDetailPage() {
       // 평문 문자열이지만 handler가 error.message로 재포장한다, gates.py:885). 올바른
       // 필드로 교정 — #2027의 "고위험 승인 사유 필수" 문구가 실제로 화면에 뜨게 된다.
       const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-      const reason = body?.error?.message ?? `HTTP ${res.status}`;
+      const reason = body?.error?.message ?? t('gateTransitionErrorGeneric');
       setTransitionError(reason);
     } finally {
       setResolving(false);
     }
-  }, [gate, router]);
+  }, [gate, router, t]);
 
   return (
     <>
