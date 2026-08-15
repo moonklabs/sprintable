@@ -2434,7 +2434,9 @@
         "audit": "Audit",
         "agent_runs": "Agent runs",
         "admin": "Danger zone (Admin)",
-        "hypotheses": "Hypotheses"
+        "hypotheses": "Hypotheses",
+        "canvas": "Artifacts",
+        "events": "Events"
       }
     },
     "statusEyebrow": "STATUS DASHBOARD",
