@@ -4,8 +4,11 @@ import type { EntityStatusFetchState } from '@/components/chat/entity-status-lab
 
 const DOC_ID = 'aabbccdd-1111-1111-1111-111111111111';
 const STORY_ID = '22222222-2222-2222-2222-222222222222';
-const docToken = (id: string) => `[제목](entity:doc:${id})`;
-const storyToken = (id: string) => `[제목](entity:story:${id})`;
+// PO 라이브 판정 RED(2026-08-15) — "심은 표본엔 아는 종류만" 교훈. 공용 헬퍼부터 실 정본
+// 이스케이프 토큰(제목에 대괄호 든 QA 폐기용 문서류·reference_token.py:_escape_title 산출물)
+// 으로 바꿔, 이 파일의 기존 시나리오 테스트 전부가 그 형태로 자동 재검증되게 한다.
+const docToken = (id: string) => `[\\[QA·폐기용\\] 제목](entity:doc:${id})`;
+const storyToken = (id: string) => `[\\[QA·폐기용\\] 제목](entity:story:${id})`;
 
 describe('computeSuggestion (story #2638) — AC1/AC3', () => {
   it('AC1 — PO 재발 메시지 재연: 승인 문구+draft doc 참조+게이트 부재 조합에서 제안이 뜬다', () => {

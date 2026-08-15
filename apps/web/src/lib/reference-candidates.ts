@@ -18,7 +18,13 @@ export interface ReferenceCandidate {
   value: string;
 }
 
-const ENTITY_TOKEN_RE = /\[[^\]]*\]\(entity:[a-z]+:[0-9a-fA-F-]+\)/g;
+// story #2638 QA(2026-08-15) 파생 발견 — 정본 토큰(reference_token.py:_escape_title)은
+// 제목의 \ [ ] ( ) 를 백슬래시로 이스케이프한다("[QA·폐기용] #2668 ..." 같은 실 제목이
+// 전형). `[^\]]*`는 이스케이프된 `\]`의 `]`에서 멈춰(백슬래시를 못 봄) 이 토큰을 아예 못
+// 지워, 제목 안의 "#2668" 같은 글자가 «이미 참조된 것»인데도 다시 「잇겠습니까?」 후보로
+// 새는 걸 이 파일 자신의 docstring(⛔이미 토큰인 것은 후보에서 뺀다)이 막으려던 바로 그
+// 케이스를 못 막았다. classifier.ts와 동형 수정(이스케이프 5종 전부 통과).
+const ENTITY_TOKEN_RE = /\[(?:[^\]\\]|\\.)*\]\(entity:[a-z]+:[0-9a-fA-F-]+\)/g;
 const NUMBER_RE = /#(\d{2,6})\b/g;
 // 슬러그: 최소 한 번의 하이픈을 요구해 일반 해시태그성 단어와 구분한다(이 코드베이스의
 // 실제 슬러그 관례 — 예: flow-map-blueprint-v1, provenance-attachment-point-inventory-...).

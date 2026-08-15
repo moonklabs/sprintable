@@ -42,6 +42,17 @@ describe('findReferenceCandidates', () => {
     expect(result).toEqual([]);
   });
 
+  // story #2638 QA(2026-08-15) 파생 발견 — 정본 토큰(reference_token.py:_escape_title)이
+  // 만드는 실 이스케이프 제목("[QA·폐기용] #2668 ..." 류, \[ \] 백슬래시 이스케이프)에서
+  // 옛 정규식이 토큰 자체를 못 지워, 제목 속 "#2668"이 "이미 참조됨"인데도 다시 후보로
+  // 새던 실 재현 버그. 위 40행 테스트(무괄호 제목)만으로는 이 케이스가 안 잡혔다.
+  it('제목에 대괄호가 든 정본 이스케이프 entity 토큰도 후보에서 뺀다(실 재현 사례)', () => {
+    const result = findReferenceCandidates(
+      '[\\[QA·폐기용\\] #2668 확認용 문서](entity:doc:11111111-1111-1111-1111-111111111111) 승인 주시면',
+    );
+    expect(result).toEqual([]);
+  });
+
   it('entity 토큰과 평문 후보가 섞여 있으면 평문 것만 잡는다', () => {
     const result = findReferenceCandidates(
       '[제목](entity:story:11111111-1111-1111-1111-111111111111) 관련해서 #2250 도 봐줘',

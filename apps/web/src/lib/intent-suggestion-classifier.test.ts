@@ -41,6 +41,23 @@ describe('intent-suggestion-classifier (story #2638)', () => {
     expect(extractEntityRefs(null)).toEqual([]);
   });
 
+  // PO 라이브 판정 RED(2026-08-15) 회귀가드 — 정본 토큰(reference_token.py:_escape_title)은
+  // 제목의 \ [ ] ( ) 를 전부 백슬래시 이스케이프한다. 처음 심은 표본이 전부 "제목"류 무괄호
+  // 였던 탓에 이 케이스를 못 잡았다("심은 표본엔 아는 종류만" — PO 교훈). QA 폐기용 문서류
+  // ("[QA·폐기용] ...")가 실제 재현 사례였다.
+  it('extractEntityRefs — 제목에 대괄호가 든 정본 이스케이프 토큰(실 재현 사례)도 매치한다', () => {
+    const id = 'aabbccdd-1111-1111-1111-111111111111';
+    const content = `[\\[QA·폐기용\\] #2668 확認용 문서](entity:doc:${id}) 승인 주시면`;
+    expect(extractEntityRefs(content)).toEqual([{ type: 'doc', id }]);
+  });
+
+  it('extractEntityRefs — 제목에 괄호·백슬래시가 섞여도(이스케이프 5종 전부) 매치한다', () => {
+    const id = 'aabbccdd-2222-2222-2222-222222222222';
+    // 원제목: `기획(안) [v2] 검토\완료` → _escape_title이 ( ) [ ] \ 를 전부 이스케이프.
+    const content = `[기획\\(안\\) \\[v2\\] 검토\\\\완료](entity:doc:${id})`;
+    expect(extractEntityRefs(content)).toEqual([{ type: 'doc', id }]);
+  });
+
   it('firstRefOfType — 지정 타입 중 첫 매치만', () => {
     const refs = [
       { type: 'story', id: 's1' },

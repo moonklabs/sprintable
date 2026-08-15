@@ -16,10 +16,18 @@ export interface EntityRef {
   id: string;
 }
 
-const ENTITY_TOKEN_RE = /\[[^\]]*\]\(entity:([a-z]+):([0-9a-fA-F-]{36})\)/g;
+// PO 라이브 판정 RED(2026-08-15) — 정본 토큰(reference_token.py:_escape_title)은 제목 안의
+// `\` [ ] ( ) 다섯 글자를 전부 백슬래시로 이스케이프한다("[QA·폐기용] 제목" → "\[QA·폐기용\]
+// 제목"). 첫 버전 `[^\]]*`는 이스케이프된 `\]`의 `]` 문자 자체에서 멈춰버려(백슬래시를 못 봄)
+// 실 토큰(제목에 대괄호가 든 것 — QA 폐기용 문서류가 전형)에서 전부 매치 실패했다. chat-bubble.
+// tsx의 렌더은 react-markdown 실 파서(CommonMark 이스케이프 규칙 완전 준수)라 칩은 멀쩡히
+// 떴다 — 이 정규식만 그 규칙을 흉내 못 낸 것. `(?:[^\]\\]|\\.)*` — `]`도 `\`도 아닌 문자
+// 또는 "백슬래시+아무 문자 1개" 반복으로 고쳐 이스케이프 5종을 전부 통과시킨다.
+const ENTITY_TOKEN_RE = /\[(?:[^\]\\]|\\.)*\]\(entity:([a-z]+):([0-9a-fA-F-]{36})\)/g;
 
-/** content에서 `[title](entity:type:id)` 토큰을 전부 뽑는다(chat-bubble.tsx의 렌더 파서와
- * 동일 정규식 — 새 계약 발명 아님). 순서 보존, 중복 제거 안 함(호출부가 type별로 filter). */
+/** content에서 `[title](entity:type:id)` 토큰을 전부 뽑는다 — 제목의 `_escape_title`
+ * 이스케이프(reference_token.py)를 그대로 통과시킨다. 순서 보존, 중복 제거 안 함(호출부가
+ * type별로 filter). */
 export function extractEntityRefs(content: string | null | undefined): EntityRef[] {
   if (!content) return [];
   const refs: EntityRef[] = [];
