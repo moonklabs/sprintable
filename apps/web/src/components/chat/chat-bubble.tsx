@@ -8,7 +8,7 @@ import { Bot, Check, Copy, MessageSquare, Terminal, User } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
-import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { EmbedCard, EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
 import { AssetEmbedCard } from '@/components/chat/asset-embed-card';
 import { getFileIcon } from '@/lib/file-icon';
@@ -105,6 +105,29 @@ function findReferenceMeta(
   return { form: match.form, referencedAt: match.referenced_at };
 }
 
+// story #2671 — EmbedCard(ME-S5 원조 카드 렌더)가 실 렌더 경로에 미배선이던 것을 여기서
+// 되살린다: 문단이 참조 링크 «하나뿐»(다른 텍스트 0)이면 인라인 EntityChip 대신 카드로
+// 그린다 — Slack/Discord/Notion의 "단독 링크→언퍼얼 카드" 관례와 같은 자리. react-markdown
+// v10은 hast-util-to-jsx-runtime에 `passNode:true`를 내부 고정해 커스텀 컴포넌트에 원본
+// hast 노드를 항상 건네준다(옵션 켤 필요 없음) — 그 `node.children`(렌더된 React가 아닌
+// 원본 AST)으로만 "링크 하나뿐"을 정확히 잰다(렌더된 children으로는 이미 자식 컴포넌트
+// 타입이 뭉개져 있어 못 잰다).
+type HastTextLike = { type?: string; value?: string; children?: HastTextLike[] };
+type HastElementLike = { type?: string; tagName?: string; properties?: { href?: unknown }; children?: HastTextLike[] };
+
+function soleLinkChild(node: HastElementLike | undefined): HastElementLike | null {
+  const kids = node?.children;
+  if (!kids || kids.length !== 1) return null;
+  const only = kids[0] as HastElementLike;
+  return only?.type === 'element' && only.tagName === 'a' ? only : null;
+}
+
+function hastNodeText(node: HastTextLike | undefined): string {
+  if (!node) return '';
+  if (node.type === 'text') return node.value ?? '';
+  return (node.children ?? []).map(hastNodeText).join('');
+}
+
 // Convert @name tokens to markdown links so react-markdown v10 can render them via the `a` component.
 // Uses negative lookbehind to skip already-linked mentions (e.g. inside [...]).
 function prepareMentions(content: string): string {
@@ -185,7 +208,19 @@ function ChatMarkdown({ content, isMine, references, entityStatusByKey }: {
   // 한 참조를 고정해 react-markdown이 같은 컴포넌트 인스턴스를 재사용하게 한다. hasMarkdown이
   // false인 이른 return보다 위에 둬 훅 호출 순서를 무조건화한다(rules-of-hooks).
   const components = useMemo(() => ({
-    p: ({ children }: { children?: React.ReactNode }) => <p className={`mb-1.5 [overflow-wrap:anywhere] text-sm leading-relaxed last:mb-0 ${text}`}>{children}</p>,
+    p: ({ children, node }: { children?: React.ReactNode; node?: HastElementLike }) => {
+      // story #2671 — 참조 링크 하나가 문단의 전부면(다른 텍스트 0) 카드 임베드로.
+      const link = soleLinkChild(node);
+      const href = link?.properties?.href;
+      const m = typeof href === 'string' ? href.match(/^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i) : null;
+      if (m && m[1]!.toLowerCase() !== 'asset' && !isGhostReference(references, m[1]!, m[2]!)) {
+        const statusFetch = entityStatusByKey?.[`${m[1]!.toLowerCase()}:${m[2]!.toLowerCase()}`];
+        const status = statusFetch?.kind === 'resolved' ? statusFetch.raw : null;
+        const label = hastNodeText(link!.children?.[0]) || m[2]!;
+        return <EmbedCard entity_type={m[1]!} entity_id={m[2]!} title={label} status={status} />;
+      }
+      return <p className={`mb-1.5 [overflow-wrap:anywhere] text-sm leading-relaxed last:mb-0 ${text}`}>{children}</p>;
+    },
     strong: ({ children }: { children?: React.ReactNode }) => <strong className={`font-semibold ${text}`}>{children}</strong>,
     em: ({ children }: { children?: React.ReactNode }) => <em className={`italic ${text}`}>{children}</em>,
     code: ({ className, children }: { className?: string; children?: React.ReactNode }) => {

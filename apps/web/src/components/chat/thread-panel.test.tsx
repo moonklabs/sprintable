@@ -23,6 +23,13 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => ({ projectId: 'proj-1', currentTeamMemberId: 'member-1' }),
 }));
 
+// story #2671 — 참조 링크 하나뿐인 문단은 EmbedCard(카드)로 렌더된다. EmbedCard doc 클릭
+// 핸들러가 useRouter()를 쓰므로 라우터 컨텍스트 없이 렌더하면 죽는다(같은 mock을
+// chat-bubble.test.tsx에서도 씀).
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: () => {} }),
+}));
+
 let container: HTMLDivElement;
 let root: Root;
 
