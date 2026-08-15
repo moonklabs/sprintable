@@ -42,6 +42,14 @@ class OrgAgentCreate(BaseModel):
     avatar_url: str | None = None
     scope_mode: str = "projects"  # 'org' | 'projects'
     project_ids: list[uuid.UUID] = []
+    # story #2667(2026-08-15, 선생님 실환 제보) — recruit 위저드가 create→recruit를 한 흐름으로
+    # 이어 부를 때(agentMode='new'), create가 즉시 발급한 키의 평문은 FE가 화면에 노출도 안 하고
+    # 바로 뒤이은 recruit()의 _rotate_or_create_key가 그 키를 무고지로 rotate했다 — 사용자가 이미
+    # 그 create 응답의 키를 복사해 배선했으면(예: create만 먼저 실행한 API 소비자) 무단 무효화.
+    # True면 이 호출은 키를 발급하지 않는다(호출부가 뒤이어 recruit을 부를 것을 안다는 신호) —
+    # recruit의 create 분기가 role-scope 바인딩된 키를 1회만 발급해 rotate 자체가 발생하지 않는다.
+    # equip-skip(역할 없이 키만) 흐름은 이 플래그를 안 보내 현행(즉시 발급) 그대로.
+    defer_key_issuance: bool = False
 
 
 class TeamMemberUpdate(BaseModel):

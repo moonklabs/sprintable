@@ -590,6 +590,11 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const [newAgentName, setNewAgentName] = useState('');
   const [existingAgents, setExistingAgents] = useState<{ id: string; name: string }[] | null>(null);
   const [selectedExistingAgentId, setSelectedExistingAgentId] = useState('');
+  // story #2667(2026-08-15, 선생님 실환 제보) — 기존 에이전트에 역할 장착(recruit)은 그 에이전트가
+  // 이미 가진 활성 키를 여전히 rotate한다(생성 시점 키 발급을 그대로 두는 게 맞는 경로 — equip-skip
+  // 으로 만들어졌을 수 있어 그 키를 사용자가 이미 배선했을 가능성이 있다). PO ⓒ: 이 경로는 없애지
+  // 않고 대신 명시 고지+확認으로 막는다. 같은 에이전트를 다시 고르면 재확認(경솔한 1회성 방지).
+  const [existingKeyRotateWarning, setExistingKeyRotateWarning] = useState<{ agentId: string; agentName: string } | null>(null);
   const [recruiting, setRecruiting] = useState(false);
   const [recruitError, setRecruitError] = useState<string | null>(null);
   const [activeAgentName, setActiveAgentName] = useState('');
@@ -630,7 +635,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const runtimePromptFileConvention = runtimeCapabilities?.find((r) => r.slug === runtime)?.prompt_file
     ?? RUNTIME_GUIDE_FILENAME_FALLBACK[runtime] ?? 'CLAUDE.md';
 
-  const handleRecruit = async () => {
+  const handleRecruit = async (confirmedExistingAgentId?: string) => {
     if (!selectedRoleSlug) return;
     setRecruiting(true);
     setRecruitError(null);
@@ -643,6 +648,10 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
         if (!name) { setRecruitError(t('agentNameRequired')); setRecruiting(false); return; }
         // story d82c1092: 하드코딩(scope_mode:'projects', project_ids:[projectId]) 제거 —
         // STEP2 스코프 값을 그대로 배선(org-scope 생성 능력 복원).
+        // story #2667: defer_key_issuance — 이 흐름은 create 직후 바로 recruit을 부르므로(아래),
+        // create가 키를 먼저 발급하면 recruit의 rotate가 그 키를 무고지로 죽인다(create 응답의
+        // 키는 여기서 애초에 읽지도 않는다 — 화면에 노출된 적 없는 키가 조용히 사라지는 게 실사고
+        // 원인). recruit이 유일한 발급처가 되게 한다.
         const createRes = await fetch('/api/agents', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -650,6 +659,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
             name,
             scope_mode: scopeMode,
             project_ids: scopeMode === 'projects' ? scopeProjectIds : [],
+            defer_key_issuance: true,
           }),
         });
         const createJson = (await createRes.json().catch(() => null)) as { data?: { id: string } } | null;
@@ -660,6 +670,25 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
         if (!selectedExistingAgentId) { setRecruitError(t('agentSelectRequired')); setRecruiting(false); return; }
         agentId = selectedExistingAgentId;
         agentName = existingAgents?.find((a) => a.id === agentId)?.name ?? '';
+
+        // story #2667 ⓒ — 기존 에이전트는 create 시점에 이미 키가 나갔을 수 있다(equip-skip류).
+        // recruit이 그 키를 rotate하기 直前에, 아직 이 에이전트에 대해 확認 안 받았으면 먼저
+        // 활성 키 존재 여부를 실측(handleRotateConfirmed와 같은 조회)하고 경고 다이얼로그로 막는다.
+        // confirmedExistingAgentId를 state가 아니라 파라미터로 받는 이유: 확認 버튼이
+        // setState 직후 같은 틱에서 handleRecruit()을 다시 부르면 React state는 아직 리렌더
+        // 전이라 옛 값을 읽는다(고전적 stale closure) — 그 값을 그대로 여기 넘겨 우회한다.
+        if (confirmedExistingAgentId !== agentId) {
+          try {
+            const listRes = await fetch(`/api/agents/${agentId}/api-keys`);
+            const listJson = (await listRes.json().catch(() => null)) as { data?: Array<{ revoked_at: string | null }> } | null;
+            const hasActiveKey = listRes.ok && (listJson?.data ?? []).some((k) => !k.revoked_at);
+            if (hasActiveKey) {
+              setExistingKeyRotateWarning({ agentId, agentName });
+              setRecruiting(false);
+              return;
+            }
+          } catch { /* 조회 실패 시 경고 없이 진행 — recruit 자체의 rotate 로직이 최종 권위 */ }
+        }
       }
 
       // S25(ae844d74): 활성 UI locale 전달 → BE(S24)가 role_behaviors_i18n에서 해당 locale kit 합성.
@@ -1075,7 +1104,13 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   ) : (
                     <select
                       value={selectedExistingAgentId}
-                      onChange={(e) => setSelectedExistingAgentId(e.target.value)}
+                      onChange={(e) => {
+                        setSelectedExistingAgentId(e.target.value);
+                        // story #2667 — 다른 에이전트로 바꾸면 이전 확認은 무효(handleRecruit이
+                        // confirmedExistingAgentId 파라미터로만 판단하므로 여기선 뜬 경고만 닫으면
+                        // 충분 — 다음 recruit 클릭이 새 agentId로 다시 실측한다).
+                        setExistingKeyRotateWarning(null);
+                      }}
                       className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     >
                       <option value="">{t('agentSelectPlaceholder')}</option>
@@ -1090,6 +1125,34 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
               </div>
 
               {recruitError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">{recruitError}</p>}
+
+              {/* story #2667 ⓒ — 기존 에이전트가 이미 가진 활성 키(equip-skip 등으로 발급됐을
+                  수 있는)를 recruit이 rotate하기 前에 명시 고지. handleRecruit()이 실측 후 이
+                  경고를 띄우고 실제 rotate는 여기서 사용자가 확認해야만 이어진다. */}
+              {existingKeyRotateWarning && (
+                <div className="space-y-2 rounded-md border border-warning-border bg-warning-tint p-3">
+                  <p className="text-xs font-semibold text-foreground">{t('recruitExistingKeyWarningTitle')}</p>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    <b className="text-foreground">{t('recruitExistingKeyWarningBold', { name: existingKeyRotateWarning.agentName })}</b>{' '}
+                    {t('recruitExistingKeyWarningBody')}
+                  </p>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="ghost" size="sm" onClick={() => setExistingKeyRotateWarning(null)} disabled={recruiting}>{t('cancel')}</Button>
+                    <Button
+                      size="sm"
+                      className="bg-warning text-foreground hover:bg-warning/90"
+                      disabled={recruiting}
+                      onClick={() => {
+                        const confirmedId = existingKeyRotateWarning.agentId;
+                        setExistingKeyRotateWarning(null);
+                        void handleRecruit(confirmedId);
+                      }}
+                    >
+                      {recruiting ? t('recruiting') : t('recruitExistingKeyWarningCta')}
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               <div className="flex justify-between gap-2 pt-2">
                 <Button variant="ghost" onClick={() => setStep(2)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
