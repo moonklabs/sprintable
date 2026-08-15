@@ -1388,3 +1388,63 @@ async def update_event_definition(
     await db.commit()
     await db.refresh(definition)
     return _event_definition_detail(definition)
+
+
+class EventPublishHistoryItem(BaseModel):
+    id: str
+    conversation_id: str
+    sender_id: str | None
+    sender_name: str | None
+    created_at: datetime
+
+
+@router.get("/definitions/publish-history", response_model=list[EventPublishHistoryItem])
+async def get_event_publish_history(
+    definition_key: str = Query(...),
+    limit: int = Query(default=20, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> list[EventPublishHistoryItem]:
+    """GET /api/v2/events/definitions/publish-history — story #2665(#2664 후속): definition_key
+    축 발행 이력 조회.
+
+    발행 기록 자체가 별도 로그 테이블이 아니라 대화 메시지 metadata에만 존재한다(#2637
+    AC 0-a — publish_registry_event가 msg_metadata['event']['event_key']로 태깅) — 그
+    SSOT를 그대로 조회한다(신규 로그 테이블 발명 안 함).
+
+    org admin/owner 전용(다른 정의 관리 엔드포인트와 동일 게이트 — 발행 이력도 관리 맥락의
+    관측 표면). conversation_messages 자체엔 org_id 컬럼이 없어(1:N via conversations)
+    conversations.org_id로 JOIN해서 스코프를 건다 — definition_key가 preset이든 org
+    커스텀이든 무관하게, "이 org의 대화에서 실제로 발행된 것"만 보인다.
+    """
+    if not await _is_org_admin(db, org_id, uuid.UUID(auth.user_id)):
+        raise HTTPException(status_code=403, detail="org admin/owner required")
+
+    from app.models.conversation import Conversation, ConversationMessage
+    from app.services.member_resolver import lookup_members_by_ids
+
+    rows = (await db.execute(
+        select(ConversationMessage)
+        .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+        .where(
+            Conversation.org_id == org_id,
+            ConversationMessage.msg_metadata["event"]["event_key"].astext == definition_key,
+        )
+        .order_by(ConversationMessage.created_at.desc())
+        .limit(limit)
+    )).scalars().all()
+
+    sender_ids = {r.sender_id for r in rows if r.sender_id is not None}
+    members = await lookup_members_by_ids(sender_ids, db)
+
+    return [
+        EventPublishHistoryItem(
+            id=str(r.id),
+            conversation_id=str(r.conversation_id),
+            sender_id=str(r.sender_id) if r.sender_id else None,
+            sender_name=members[r.sender_id].name if r.sender_id in members else None,
+            created_at=r.created_at,
+        )
+        for r in rows
+    ]
