@@ -10,6 +10,10 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { ToastContainer, useToast } from '@/components/ui/toast';
+import { EventDefinerForm } from '@/components/organization/event-definer-form';
+import {
+  type DefinerFormState, deriveDefinition, emptyFormState, tryReverseParse, validateKeySuffix,
+} from '@/components/organization/event-definer-logic';
 
 // story #2664 — 목록(GET) 응답 모델(events.py EventDefinitionResponse)엔 아직 id가 없다
 // (BE #2663, PR#3069 재QA 중). id가 없는 항목은 수정/비활성 버튼을 아예 안 그린다 — #2663가
@@ -324,6 +328,19 @@ function EventFormDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // story #2670(A층) — 「기본」(3서식 폼) / 「고급」(JSON, #3070 원안) 탭. create=항상 기본
+  // 시작. edit=기존 JSON을 tryReverseParse로 되돌려 성공하면 기본, 실패(폼이 못 만드는
+  // 모양)하면 고급 전용(배지+기본 탭 비활성) — AC3 그대로.
+  const [tab, setTab] = useState<'basic' | 'advanced'>('basic');
+  const [definerState, setDefinerState] = useState<DefinerFormState>(emptyFormState());
+  const [advancedOnly, setAdvancedOnly] = useState(false);
+  // 새로 저장한 정의의 실 key(발행 테스트가 필요로 하는 서버측 실체) — create 저장 성공
+  // 직후에도 다이얼로그를 닫지 않고 이 값을 채워 그 자리에서 바로 테스트 발행까지 잇는다
+  // (스펙 §4 "정의→미리보기→테스트 발행"이 한 세션 안에서 끊기지 않아야 함).
+  const [savedKey, setSavedKey] = useState<string | null>(null);
+  const [testPublishing, setTestPublishing] = useState(false);
+  const [testPublishResult, setTestPublishResult] = useState<{ ok: boolean; message?: string } | null>(null);
+
   useEffect(() => {
     if (!open) return;
     if (mode === 'edit' && target) {
@@ -334,6 +351,11 @@ function EventFormDialog({
       const auth = target.action_auth as { human_only?: boolean; role?: string[] } | null | undefined;
       setHumanOnly(auth?.human_only ?? false);
       setRolesCsv((auth?.role ?? []).join(', '));
+
+      const parsed = orgSlug ? tryReverseParse(target.key, target.payload_schema, target.routing, target.action_auth ?? null, orgSlug) : null;
+      if (parsed) { setDefinerState(parsed); setTab('basic'); setAdvancedOnly(false); }
+      else { setDefinerState(emptyFormState()); setTab('advanced'); setAdvancedOnly(true); }
+      setSavedKey(target.key);
     } else {
       setKeySuffix('');
       setPayloadSchema(DEFAULT_PAYLOAD_SCHEMA);
@@ -341,25 +363,45 @@ function EventFormDialog({
       setBlockTemplate('');
       setHumanOnly(false);
       setRolesCsv('');
+      setDefinerState(emptyFormState());
+      setTab('basic');
+      setAdvancedOnly(false);
+      setSavedKey(null);
     }
+    setTestPublishResult(null);
     setError(null);
   }, [open, mode, target, orgSlug]);
+
+  const definerKeyError = tab === 'basic' && mode === 'create' ? validateKeySuffix(definerState.keySuffix) : null;
 
   const submit = async () => {
     setSaving(true);
     setError(null);
     try {
-      const roles = rolesCsv.split(',').map((r) => r.trim()).filter(Boolean);
-      const actionAuth = humanOnly || roles.length > 0 ? { human_only: humanOnly, role: roles } : null;
-      const body: Record<string, unknown> = {
-        payload_schema: parseJsonField(payloadSchema, t('eventPayloadSchemaLabel')),
-        routing: parseJsonField(routing, t('eventRoutingLabel')),
-        block_template: blockTemplate.trim() ? parseJsonField(blockTemplate, t('eventBlockTemplateLabel')) : null,
-        action_auth: actionAuth,
-      };
+      let body: Record<string, unknown>;
+      if (tab === 'basic') {
+        if (definerKeyError) throw new Error(definerKeyError === 'empty' ? t('definerKeyErrorEmpty') : t('definerKeyErrorCharset'));
+        const derived = deriveDefinition(definerState, orgSlug);
+        body = {
+          payload_schema: derived.payload_schema,
+          routing: derived.routing,
+          block_template: derived.block_template,
+          action_auth: derived.action_auth,
+        };
+        if (mode === 'create') body.key = derived.key;
+      } else {
+        const roles = rolesCsv.split(',').map((r) => r.trim()).filter(Boolean);
+        const actionAuth = humanOnly || roles.length > 0 ? { human_only: humanOnly, role: roles } : null;
+        body = {
+          payload_schema: parseJsonField(payloadSchema, t('eventPayloadSchemaLabel')),
+          routing: parseJsonField(routing, t('eventRoutingLabel')),
+          block_template: blockTemplate.trim() ? parseJsonField(blockTemplate, t('eventBlockTemplateLabel')) : null,
+          action_auth: actionAuth,
+        };
+        if (mode === 'create') body.key = `${prefix}${keySuffix.trim()}`;
+      }
       let res: Response;
       if (mode === 'create') {
-        body.key = `${prefix}${keySuffix.trim()}`;
         res = await fetch('/api/events/definitions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -377,9 +419,21 @@ function EventFormDialog({
         const resBody = await res.json().catch(() => null) as { error?: { message?: string }; detail?: { message?: string } } | null;
         throw new Error(resBody?.error?.message ?? resBody?.detail?.message ?? `HTTP ${res.status}`);
       }
+      // POST /api/events/definitions는 raw passthrough(proxyToFastapi, apiSuccess로 안 감쌈)라
+      // BE(EventDefinitionDetailResponse)를 그대로 준다 — {data:...}가 아니다. 다만 이 계층
+      // (fastapi-proxy)이 훗날 wrapped로 바뀌어도 조용히 깨지지 않게 두 형태 다 받는다
+      // (오늘 세션 gate undo/discuss와 같은 방어 패턴).
+      const savedRaw = await res.json().catch(() => null) as { data?: { key?: string }; key?: string } | null;
+      const savedKeyValue = savedRaw?.data?.key ?? savedRaw?.key;
       addToast({ type: 'success', title: mode === 'create' ? t('eventCreateSuccessToast') : t('eventEditSuccessToast') });
-      onOpenChange(false);
       await onSaved();
+      if (mode === 'create' && savedKeyValue) {
+        // 다이얼로그를 안 닫는다 — 저장 즉시 테스트 발행이 가능해야 §4의 "정의→미리보기→
+        // 테스트 발행" 한 흐름이 끊기지 않는다(재오픈 왕복 없음).
+        setSavedKey(savedKeyValue);
+      } else {
+        onOpenChange(false);
+      }
     } catch (e) {
       setError(e instanceof JsonFieldParseError ? t('eventJsonParseError', { field: e.field }) : e instanceof Error ? e.message : String(e));
     } finally {
@@ -387,53 +441,117 @@ function EventFormDialog({
     }
   };
 
+  const testPublish = async () => {
+    if (!savedKey) return;
+    setTestPublishing(true);
+    setTestPublishResult(null);
+    try {
+      const derived = deriveDefinition(definerState, orgSlug);
+      const res = await fetch('/api/events/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ definition_key: savedKey, payload: derived.samplePayload }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+        setTestPublishResult({ ok: false, message: body?.error?.message ?? `HTTP ${res.status}` });
+        return;
+      }
+      setTestPublishResult({ ok: true });
+    } catch {
+      setTestPublishResult({ ok: false, message: t('eventErrorGeneric') });
+    } finally {
+      setTestPublishing(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!saving) onOpenChange(next); }}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>{mode === 'create' ? t('eventCreateDialogTitle') : t('eventEditDialogTitle')}</DialogTitle>
-          <DialogDescription>{t('eventKeyPrefixHint')}</DialogDescription>
+          <div className="flex items-center justify-between gap-3">
+            <DialogTitle>{mode === 'create' ? t('eventCreateDialogTitle') : t('eventEditDialogTitle')}</DialogTitle>
+            <div className="inline-flex shrink-0 rounded-lg bg-muted p-0.5">
+              <button
+                type="button"
+                disabled={advancedOnly}
+                onClick={() => setTab('basic')}
+                className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${tab === 'basic' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}
+              >
+                {t('definerTabBasic')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab('advanced')}
+                className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${tab === 'advanced' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}
+              >
+                {t('definerTabAdvanced')}
+                {advancedOnly ? <Badge variant="warning" className="ml-1 text-[9px]">{t('definerAdvancedOnlyBadge')}</Badge> : null}
+              </button>
+            </div>
+          </div>
+          {tab === 'advanced' ? <DialogDescription>{t('eventKeyPrefixHint')}</DialogDescription> : null}
         </DialogHeader>
-        <div className="space-y-3">
-          <div>
-            <label className="mb-1 block text-[11px] font-semibold text-muted-foreground" htmlFor="event-key">
-              {t('eventKeyLabel')}
-            </label>
-            {mode === 'create' ? (
-              <div className="flex items-center gap-1">
-                <span className="shrink-0 font-mono text-xs text-muted-foreground">{prefix}</span>
-                <Input id="event-key" value={keySuffix} onChange={(e) => setKeySuffix(e.target.value)} className="font-mono text-sm" />
-              </div>
-            ) : (
-              <Input id="event-key" value={target?.key ?? ''} readOnly disabled className="font-mono text-sm" />
-            )}
-          </div>
-          <JsonField id="event-payload-schema" label={t('eventPayloadSchemaLabel')} value={payloadSchema} onChange={setPayloadSchema} />
-          <JsonField id="event-routing" label={t('eventRoutingLabel')} value={routing} onChange={setRouting} />
-          <JsonField id="event-block-template" label={`${t('eventBlockTemplateLabel')} (${tc('optional')})`} value={blockTemplate} onChange={setBlockTemplate} />
-          <div className="space-y-1.5">
-            <label className="flex items-center gap-2 text-sm text-foreground">
-              <input type="checkbox" checked={humanOnly} onChange={(e) => setHumanOnly(e.target.checked)} className="size-4" />
-              {t('eventActionAuthHumanOnlyLabel')}
-            </label>
-            <Input
-              value={rolesCsv}
-              onChange={(e) => setRolesCsv(e.target.value)}
-              placeholder={t('eventActionAuthRolePlaceholder')}
-              className="text-sm"
+        <div className="min-h-0 flex-1 overflow-y-auto px-1">
+          {tab === 'basic' ? (
+            <EventDefinerForm
+              state={definerState}
+              onChange={setDefinerState}
+              orgSlug={orgSlug}
+              testPublish={() => void testPublish()}
+              testPublishing={testPublishing}
+              testPublishResult={savedKey ? testPublishResult : { ok: false, message: t('definerTestPublishSaveFirst') }}
             />
-          </div>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold text-muted-foreground" htmlFor="event-key">
+                  {t('eventKeyLabel')}
+                </label>
+                {mode === 'create' ? (
+                  <div className="flex items-center gap-1">
+                    <span className="shrink-0 font-mono text-xs text-muted-foreground">{prefix}</span>
+                    <Input id="event-key" value={keySuffix} onChange={(e) => setKeySuffix(e.target.value)} className="font-mono text-sm" />
+                  </div>
+                ) : (
+                  <Input id="event-key" value={target?.key ?? ''} readOnly disabled className="font-mono text-sm" />
+                )}
+              </div>
+              <JsonField id="event-payload-schema" label={t('eventPayloadSchemaLabel')} value={payloadSchema} onChange={setPayloadSchema} />
+              <JsonField id="event-routing" label={t('eventRoutingLabel')} value={routing} onChange={setRouting} />
+              <JsonField id="event-block-template" label={`${t('eventBlockTemplateLabel')} (${tc('optional')})`} value={blockTemplate} onChange={setBlockTemplate} />
+              <div className="space-y-1.5">
+                <label className="flex items-center gap-2 text-sm text-foreground">
+                  <input type="checkbox" checked={humanOnly} onChange={(e) => setHumanOnly(e.target.checked)} className="size-4" />
+                  {t('eventActionAuthHumanOnlyLabel')}
+                </label>
+                <Input
+                  value={rolesCsv}
+                  onChange={(e) => setRolesCsv(e.target.value)}
+                  placeholder={t('eventActionAuthRolePlaceholder')}
+                  className="text-sm"
+                />
+              </div>
+            </div>
+          )}
           {error ? (
-            <p role="alert" aria-live="assertive" className="rounded-md border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-foreground">
+            <p role="alert" aria-live="assertive" className="mt-3 rounded-md border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-foreground">
               {error}
             </p>
           ) : null}
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>{tc('cancel')}</Button>
-          <Button onClick={() => void submit()} disabled={saving || (mode === 'create' && !keySuffix.trim())}>
-            {saving ? '...' : mode === 'create' ? t('eventCreateSubmit') : t('eventEditSubmit')}
+        <DialogFooter className="shrink-0">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            {mode === 'create' && savedKey ? tc('close') /* 저장 후엔 닫기만 남는다(재저장=중복 POST·409 방지) */ : tc('cancel')}
           </Button>
+          {mode === 'create' && savedKey ? null : (
+            <Button
+              onClick={() => void submit()}
+              disabled={saving || (tab === 'advanced' ? mode === 'create' && !keySuffix.trim() : !!definerKeyError)}
+            >
+              {saving ? '...' : mode === 'create' ? t('eventCreateSubmit') : t('eventEditSubmit')}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
