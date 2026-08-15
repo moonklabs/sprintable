@@ -214,4 +214,38 @@ describe('RecruiterClient — recruit 키 무고지 rotate 방지 (story #2667)'
     expect(container.textContent).not.toContain('recruiter.recruitExistingKeyWarningTitle');
     expect(fetchMock.mock.calls.some((c) => c[0] === '/api/agents/existing-agent-2/recruit')).toBe(true);
   });
+
+  it('활성 키 조회가 실패하면(5xx) fail-closed로 경고를 띄운다(PO R1 — 조회 실패를 "키 없음"으로 오인해 조용히 진행하면 안 됨)', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      const method = init?.method ?? 'GET';
+      if (url.startsWith('/api/role-templates')) return jsonResponse({ data: [ROLE] });
+      if (url === '/api/projects') return jsonResponse({ data: [{ id: 'proj-1', name: 'Proj 1' }] });
+      if (url === '/api/runtime-capabilities') return jsonResponse({ data: [] });
+      if (url.startsWith('/api/team-members?')) return jsonResponse({ data: [{ id: 'existing-agent-3', name: 'Flaky Agent', type: 'agent' }] });
+      if (url === '/api/agents/existing-agent-3/api-keys') return jsonResponse({ error: 'boom' }, false, 500);
+      if (url === '/api/agents/existing-agent-3/recruit' && method === 'POST') {
+        return jsonResponse({ data: { agent_id: 'existing-agent-3', api_key: 'sk_live_x', mcp_config: { mcpServers: {} }, tool_allowlist: ['stories'], default_transport: 'stdio' } });
+      }
+      throw new Error(`unmocked fetch: ${method} ${url}`);
+    });
+
+    root = await mountAndSelectRole(container);
+
+    const existingTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'recruiter.agentModeExisting');
+    await act(async () => { existingTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const select = container.querySelector('select') as HTMLSelectElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
+      setter.call(select, 'existing-agent-3');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    const recruitCta = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'recruiter.recruitCta');
+    await act(async () => { recruitCta!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('recruiter.recruitExistingKeyWarningTitle');
+    expect(fetchMock.mock.calls.some((c) => c[0] === '/api/agents/existing-agent-3/recruit')).toBe(false);
+  });
 });

@@ -677,17 +677,28 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
         // confirmedExistingAgentId를 state가 아니라 파라미터로 받는 이유: 확認 버튼이
         // setState 직후 같은 틱에서 handleRecruit()을 다시 부르면 React state는 아직 리렌더
         // 전이라 옛 값을 읽는다(고전적 stale closure) — 그 값을 그대로 여기 넘겨 우회한다.
+        //
+        // PO R1(2026-08-15) — fail-closed로 정정: 조회 자체가 실패하면(네트워크·5xx) 활성 키
+        // 유무를 모르는 것이지 "없다"가 아니다. 모르면 있다고 가정하고 경고를 띄운다(무고지
+        // 무효화를 막는 게 이 게이트의 존재 이유 — 조회 실패로 조용히 원안대로 새는 건 이 스토리가
+        // 고치려던 바로 그 증상의 재발).
         if (confirmedExistingAgentId !== agentId) {
+          let hasActiveKeyOrUnknown = true;
           try {
             const listRes = await fetch(`/api/agents/${agentId}/api-keys`);
             const listJson = (await listRes.json().catch(() => null)) as { data?: Array<{ revoked_at: string | null }> } | null;
-            const hasActiveKey = listRes.ok && (listJson?.data ?? []).some((k) => !k.revoked_at);
-            if (hasActiveKey) {
-              setExistingKeyRotateWarning({ agentId, agentName });
-              setRecruiting(false);
-              return;
+            if (listRes.ok && listJson?.data) {
+              hasActiveKeyOrUnknown = listJson.data.some((k) => !k.revoked_at);
             }
-          } catch { /* 조회 실패 시 경고 없이 진행 — recruit 자체의 rotate 로직이 최종 권위 */ }
+            // listRes.ok=false 또는 data 없음 → hasActiveKeyOrUnknown은 true(fail-closed)로 유지.
+          } catch {
+            // 네트워크 예외도 동일하게 fail-closed(true) 유지.
+          }
+          if (hasActiveKeyOrUnknown) {
+            setExistingKeyRotateWarning({ agentId, agentName });
+            setRecruiting(false);
+            return;
+          }
         }
       }
 
