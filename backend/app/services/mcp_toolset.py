@@ -26,7 +26,11 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("meetings", ("meeting",)),
     ("retro", ("retro",)),
     ("standup", ("standup",)),
-    ("docs", ("doc", "search_docs")),
+    # story #2668: sprintable_submit_for_approval은 "doc" substring이 없다(propose_canonical_
+    # version/give_reward 등과 동형 함정) — "submit_for_approval" 명시 추가 없으면 core로 오분류
+    # 돼, role-scope 키(예 scope=["docs"])로 recruit된 에이전트가 이 도구를 호출 못 하는(403)
+    # 채로 조용히 회귀한다 — 이 스토리가 고치려던 "발견 못 함"과 결이 같은 새 차단이라 미리 막는다.
+    ("docs", ("doc", "search_docs", "submit_for_approval")),
     ("chat", ("chat", "message", "conversation")),
     ("sprints", ("sprint",)),
     ("hypotheses", ("hypothes",)),
@@ -357,6 +361,7 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_save_standup", "sprintable_search_docs", "sprintable_search_stories",
     "sprintable_send_chat_message", "sprintable_sprint_summary", "sprintable_standup_history",
     "sprintable_standup_missing",
+    "sprintable_submit_for_approval",
     # story #2010: sprintable_transition_goal — 목표 lifecycle 전이 전용 신설(구 _epic 별칭
     # 없음). tool_group()은 "goal" substring 매칭으로 "epics" 그룹에 귀속(add_goal/update_goal/
     # list_goals와 동일 그룹) — role_template.default_tool_groups의 "epics" literal이 그대로
