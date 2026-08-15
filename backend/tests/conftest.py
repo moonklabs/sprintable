@@ -65,6 +65,17 @@ _TEST_DB_SIGNAL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# story ebfd8252(2026-08-14, 카디르 자수 3연발 — #2998/#3000/#3003 QA에서 각각) — 위
+# `_TEST_DB_SIGNAL_RE`는 "이게 실 dev/prod가 아니라 테스트류 DB인가"만 본다. `sprintable_test`는
+# 그 축은 통과하지만(토큰 경계 "test" 포함) **동시에 이 조직의 로컬 realdb 관례 기본값**이라 —
+# 사람/에이전트 여럿이 같은 로컬 postgres 서버의 같은 DB명을 동시에 가리키는 일이 흔하다. CI에서는
+# 안전하다(job마다 완전히 새로운 격리 postgres 서비스 컨테이너를 매번 띄우고 그 안에서만
+# `sprintable_test`라는 이름을 쓰므로 "공유"가 구조적으로 불가능 — GitHub Actions가 항상
+# `CI=true`를 심어주는 것을 신호로 구분한다, 이 conftest 밖에서도 이미 쓰는 관례:
+# test_s6_4_dod.py·test_s7_2_epic_dod.py 참조). CI 밖에서 이 이름을 향한 파괴적 리셋은 —
+# 격리를 사람이 «기억」해야 하는 바로 그 자리라 opt-in을 강제한다.
+_SHARED_CONVENTION_DB_NAMES = frozenset({"sprintable_test"})
+
 
 def _db_name(url: str) -> str:
     return url.rsplit("/", 1)[-1].split("?")[0] if "/" in url else url
@@ -84,6 +95,17 @@ def assert_disposable_test_db(url: str) -> None:
         raise RuntimeError(
             f"안전가드: DROP SCHEMA는 테스트 DB(이름에 test/parity/ci 등) 또는 "
             f"ALLOW_DESTRUCTIVE_SCHEMA_RESET=1 일 때만 허용 — 거부(DB='{name}')."
+        )
+    is_ci = bool(os.environ.get("CI"))
+    allow_shared_flag = os.environ.get("ALLOW_DESTRUCTIVE_ON_SHARED") == "1"
+    if name in _SHARED_CONVENTION_DB_NAMES and not is_ci and not allow_shared_flag:
+        raise RuntimeError(
+            f"안전가드: '{name}'은 이 조직의 공유 로컬 DB 관례명 — 여러 사람/에이전트가 같은 "
+            "postgres 서버의 이 DB를 동시에 realdb 테스트로 쓰고 있을 수 있어 DROP SCHEMA로 "
+            "리셋하면 다른 세션의 진행 중인 realdb 스위트가 연쇄로 깨집니다. 전용 throwaway "
+            "DB를 새로 만들어 가리키세요(예: `createdb sprintable_test_$(whoami)_$$` 후 그 URL로 "
+            f"ALEMBIC_DATABASE_URL/PARITY_TEST_DATABASE_URL을 설정) — 정말 이 공유 DB를 갈아엎어도 "
+            f"된다는 걸 알고 있다면 ALLOW_DESTRUCTIVE_ON_SHARED=1로 우회하세요(DB='{name}')."
         )
 
 
