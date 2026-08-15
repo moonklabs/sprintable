@@ -42,9 +42,10 @@ EXPECTED_TOOLS = {
     "sprintable_list_sprints", "sprintable_sprint_summary", "sprintable_activate_sprint",
     "sprintable_close_sprint", "sprintable_get_velocity", "sprintable_create_sprint",
     "sprintable_update_sprint",
-    # docs (5) — E-SECURITY SEC-S1(확장): delete_doc 의도적 제거(에이전트 삭제 차단)
+    # docs (6) — E-SECURITY SEC-S1(확장): delete_doc 의도적 제거(에이전트 삭제 차단). story #2668:
+    # submit_for_approval 추가(결재 상신 발견 축).
     "sprintable_list_docs", "sprintable_get_doc", "sprintable_search_docs",
-    "sprintable_create_doc", "sprintable_update_doc",
+    "sprintable_create_doc", "sprintable_update_doc", "sprintable_submit_for_approval",
     # analytics (11)
     "sprintable_get_project_overview", "sprintable_get_member_workload",
     "sprintable_get_sprint_velocity_history", "sprintable_search_stories",
@@ -132,8 +133,9 @@ def test_total_tool_count():
     # story #2634: sprintable_publish_event/sprintable_list_event_definitions 2종 신설
     # (이벤트 레지스트리 발행/카탈로그 조회) — 117→119. story #2636: sprintable_register_
     # event_definition/sprintable_update_event_definition 2종 신설(org 커스텀 등록/수정) —
-    # 119→121.
-    assert len(_TOOLS) == 121
+    # 119→121. story #2668(B3): sprintable_submit_for_approval 1종 신설(문서 결재 상신
+    # REST를 MCP로 노출 — 도구 목록에 없어 에이전트가 발견 못 하던 것) — 121→122.
+    assert len(_TOOLS) == 122
 
 
 def test_all_expected_tools_registered():

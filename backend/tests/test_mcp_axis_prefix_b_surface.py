@@ -75,6 +75,7 @@ def test_tool_names_and_param_models_untouched():
     신설(A2A AgentCard 발견) — 115→116. story #2634: sprintable_publish_event/
     sprintable_list_event_definitions 2종 신설(이벤트 레지스트리 발행/카탈로그) — 116→118.
     story #2636: sprintable_register_event_definition/sprintable_update_event_definition
-    2종 신설(org 커스텀 이벤트 등록/수정) — 118→120."""
-    assert len(_TOOL_DEFS) == 120
+    2종 신설(org 커스텀 이벤트 등록/수정) — 118→120. story #2668(B3): sprintable_submit_
+    for_approval 1종 신설(문서 결재 상신 MCP 발견 경로) — 120→121."""
+    assert len(_TOOL_DEFS) == 121
     assert all(name.startswith("sprintable_") for name in _TOOLS)
