@@ -1095,6 +1095,10 @@ async def publish_registry_event(
 
 
 class EventDefinitionResponse(BaseModel):
+    # story #2663 — id가 없어 GET 목록에서 얻은 정의를 PATCH(uuid 필수)로 못 이어갔다(org
+    # admin도 DB를 직접 파야 하는 갭이었다 — 2026-08-15 P2 어휘 집행 중 실측). 값은
+    # EventDefinitionDetailResponse/_event_definition_detail과 동일하게 str(uuid).
+    id: str
     key: str
     org_id: str | None
     payload_schema: dict
@@ -1125,7 +1129,7 @@ async def list_event_definitions(
     )).scalars().all()
     return [
         EventDefinitionResponse(
-            key=r.key, org_id=str(r.org_id) if r.org_id else None,
+            id=str(r.id), key=r.key, org_id=str(r.org_id) if r.org_id else None,
             payload_schema=r.payload_schema, routing=r.routing,
             block_template=r.block_template, enabled=r.enabled, version=r.version,
         )

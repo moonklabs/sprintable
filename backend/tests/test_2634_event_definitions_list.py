@@ -69,6 +69,23 @@ async def _seed_org(session, *, slug):
     return org.id
 
 
+async def _seed_org_member(session, org_id, *, role="admin"):
+    from app.models.project import OrgMember
+
+    user_id = uuid.uuid4()
+    session.add(OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user_id, role=role))
+    await session.commit()
+    return user_id
+
+
+def _human_auth(user_id: uuid.UUID, org_id: uuid.UUID):
+    from app.dependencies.auth import AuthContext
+    return AuthContext(
+        user_id=str(user_id), email="admin@example.com",
+        claims={"app_metadata": {"org_id": str(org_id)}}, org_id=str(org_id),
+    )
+
+
 async def _seed_custom_definition(session, org_id, *, slug, key_suffix, enabled=True):
     from app.models.event_definition import EventDefinition
 
@@ -125,5 +142,55 @@ async def test_list_exposes_disabled_definitions_not_hidden():
             result = await list_event_definitions(db=s, org_id=org_id)
             match = next(r for r in result if r.key == "org.acme2.thing.done")
             assert match.enabled is False
+    finally:
+        await engine.dispose()
+
+
+# story #2663 — GET 목록에서 id가 빠져 있어 PATCH(uuid 필수)로 이어갈 수 없었다(org admin도
+# DB를 직접 파야 했던 갭). 아래 두 테스트: ①목록 각 항목에 id 존재 ②그 id로 실제 PATCH 200
+# 왕복(양성대조).
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_list_items_include_id():
+    from app.routers.events import list_event_definitions
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id = await _seed_org(s, slug="acme3")
+            definition_id = await _seed_custom_definition(s, org_id, slug="acme3", key_suffix="widget.made")
+
+            result = await list_event_definitions(db=s, org_id=org_id)
+            match = next(r for r in result if r.key == "org.acme3.widget.made")
+            assert match.id == str(definition_id)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_list_id_round_trips_through_patch():
+    """AC2 양성대조: GET 목록에서 얻은 id 그대로 PATCH가 200으로 닿는다(존재하지 않는/변형된
+    id가 아니라, 실제 목록 응답의 그 값)."""
+    import uuid as _uuid
+
+    from app.routers.events import UpdateEventDefinitionRequest, list_event_definitions, update_event_definition
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id = await _seed_org(s, slug="acme4")
+            admin_id = await _seed_org_member(s, org_id, role="admin")
+            await _seed_custom_definition(s, org_id, slug="acme4", key_suffix="widget.patched")
+
+            listed = await list_event_definitions(db=s, org_id=org_id)
+            match = next(r for r in listed if r.key == "org.acme4.widget.patched")
+
+            patched = await update_event_definition(
+                _uuid.UUID(match.id), UpdateEventDefinitionRequest(enabled=False),
+                db=s, auth=_human_auth(admin_id, org_id), org_id=org_id,
+            )
+            assert patched.id == match.id
+            assert patched.enabled is False
     finally:
         await engine.dispose()
