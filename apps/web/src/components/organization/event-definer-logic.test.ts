@@ -74,8 +74,11 @@ describe('deriveCycle — 서식① (핸드오프 스펙 §2 사이클형 예시
         stage: { type: 'string', enum: ['draft', 'review_requested', 'approved', 'deployed'] },
         release_note: { type: 'string' },
         pr_number: { type: 'number' },
+        // 유나 v1.1 §④ — 기본(발행할 때 지정)이면 대상 필드가 스키마에도 선언돼야
+        // additionalProperties:false에 안 걸린다(PO review_changes 2차 근인).
+        assignee_member_id: { type: 'string' },
       },
-      required: ['stage', 'release_note'],
+      required: ['stage', 'release_note', 'assignee_member_id'],
       additionalProperties: false,
     });
     // R4 — 기본(발행할 때 지정) = payload_field. R3 — escalation은 항상 명시(server_derived·none).
@@ -127,7 +130,8 @@ describe('deriveSignal — 서식②', () => {
       kind: { type: 'string', enum: ['verdict', 'scope'] },
       summary: { type: 'string' },
     });
-    expect(d.payload_schema.required).toEqual(['kind']);
+    // routing 기본값(assign_on_publish)이라 assignee_member_id도 필수로 실린다.
+    expect(d.payload_schema.required).toEqual(['kind', 'assignee_member_id']);
   });
 
   it('summary 미포함 시 properties에도 없다(지어내지 않음)', () => {
@@ -149,7 +153,65 @@ describe('deriveMeasure — 서식③', () => {
     const d = deriveMeasure(state, 'moonklabs');
     expect(d.payload_schema.properties).toMatchObject({ metric_value: { type: 'number' }, metric_unit: { type: 'string' } });
     expect(d.payload_schema.properties).not.toHaveProperty('source');
-    expect(d.payload_schema.required).toEqual(['metric_value']);
+    expect(d.payload_schema.required).toEqual(['metric_value', 'assignee_member_id']);
+  });
+});
+
+// PO 라이브 실측(review_changes 2차)이 제안한 판별 핀 — "파생 정의의 샘플 payload(주입
+// 포함)가 파생 schema를 자기 검증 통과". 이 핀이 있었으면 assignee_member_id 스키마 누락도
+// 오프라인에서 바로 잡혔을 것. 스키마 모양이 항상 평평한(nested 없는) object라 별도
+// 라이브러리 없이 최소 구조검사로 충분하다.
+function selfValidate(schema: Record<string, unknown>, payload: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  const properties = (schema.properties ?? {}) as Record<string, { type?: string; enum?: string[] }>;
+  const required = (schema.required as string[] | undefined) ?? [];
+  for (const key of required) {
+    if (!(key in payload)) errors.push(`missing required: ${key}`);
+  }
+  if (schema.additionalProperties === false) {
+    for (const key of Object.keys(payload)) {
+      if (!(key in properties)) errors.push(`unexpected key (additionalProperties:false): ${key}`);
+    }
+  }
+  for (const [key, def] of Object.entries(properties)) {
+    if (!(key in payload)) continue;
+    const value = payload[key];
+    const actualType = typeof value;
+    if (def.type && def.type !== actualType) errors.push(`${key}: expected ${def.type}, got ${actualType}`);
+    if (def.enum && !def.enum.includes(value as string)) errors.push(`${key}: "${String(value)}" not in enum ${JSON.stringify(def.enum)}`);
+  }
+  return errors;
+}
+
+describe('판별 핀 — 파생 샘플 payload가 파생 schema를 자기 검증 통과(assign_on_publish 주입 포함)', () => {
+  it('사이클형', () => {
+    const state = emptyFormState('cycle');
+    state.keySuffix = 'x';
+    state.stages = [{ id: makeId(), name: 'a', slug: 'a' }];
+    const d = deriveCycle(state, 'moonklabs');
+    expect(selfValidate(d.payload_schema, d.samplePayload)).toEqual([]);
+  });
+  it('신호형', () => {
+    const state = emptyFormState('signal');
+    state.keySuffix = 'x';
+    state.signalKinds = ['verdict'];
+    const d = deriveSignal(state, 'moonklabs');
+    expect(selfValidate(d.payload_schema, d.samplePayload)).toEqual([]);
+  });
+  it('측정형', () => {
+    const state = emptyFormState('measure');
+    state.keySuffix = 'x';
+    const d = deriveMeasure(state, 'moonklabs');
+    expect(selfValidate(d.payload_schema, d.samplePayload)).toEqual([]);
+  });
+  it('routing이 기록만(record_only)이면 assignee_member_id 없이도 자기검증 통과(과다 요구 금지)', () => {
+    const state = emptyFormState('cycle');
+    state.keySuffix = 'x';
+    state.stages = [{ id: makeId(), name: 'a', slug: 'a' }];
+    state.routing = 'record_only';
+    const d = deriveCycle(state, 'moonklabs');
+    expect(d.payload_schema.properties).not.toHaveProperty('assignee_member_id');
+    expect(selfValidate(d.payload_schema, d.samplePayload)).toEqual([]);
   });
 });
 
@@ -164,15 +226,18 @@ describe('tryReverseParse — AC3 JSON→폼 왕복(표현 가능 범위만, 못
     state.rolesCsv = 'owner';
     const d = deriveCycle(state, 'moonklabs');
 
-    const parsed = tryReverseParse(d.key, d.payload_schema, d.routing, d.action_auth, 'moonklabs');
+    const parsed = tryReverseParse(d.key, d.payload_schema, d.routing, d.action_auth, 'moonklabs', d.block_template as unknown as Record<string, unknown>);
     expect(parsed).not.toBeNull();
     expect(parsed!.format).toBe('cycle');
     expect(parsed!.keySuffix).toBe('release_flow');
     expect(parsed!.stages.map((s) => s.slug)).toEqual(['draft', 'done']);
+    // assignee_member_id(routing 파생 필드)는 사용자 필드로 안 새어 나온다(구조적 제외).
     expect(parsed!.fields).toEqual([{ id: expect.any(String), name: 'note', type: 'string', required: true }]);
     expect(parsed!.humanOnly).toBe(true);
     expect(parsed!.rolesCsv).toBe('owner');
     expect(parsed!.routing).toBe('assign_on_publish');
+    // PO review_changes 2차 — 수정 진입 시 이름이 "이름 없음"으로 비던 유실 회귀가드.
+    expect(parsed!.name).toBe('릴리즈');
   });
 
   it('deriveSignal/deriveMeasure도 자기 왕복된다', () => {
@@ -190,6 +255,28 @@ describe('tryReverseParse — AC3 JSON→폼 왕복(표현 가능 범위만, 못
     expect(parsedMeas?.format).toBe('measure');
     expect(parsedMeas?.includeMetricUnit).toBe(true);
     expect(parsedMeas?.includeSource).toBe(true);
+  });
+
+  it('block_template 없이 호출하면(옵션 인자 생략) 이름은 빈 문자열로 안전하게 떨어진다', () => {
+    const parsed = tryReverseParse(
+      'org.moonklabs.x',
+      { properties: { kind: { type: 'string', enum: ['a'] } }, required: ['kind'] },
+      { escalation: { kind: 'server_derived', target: 'none' }, broadcast: { kind: 'server_derived', target: 'none' } },
+      null,
+      'moonklabs',
+    );
+    expect(parsed?.name).toBe('');
+  });
+
+  it('routing이 payload_field여도 member_id_field가 폼이 안 쓰는 이름이면 null(고급 전용 — 손실 방지)', () => {
+    const parsed = tryReverseParse(
+      'org.moonklabs.x',
+      { properties: { stage: { type: 'string', enum: ['a'] }, custom_owner: { type: 'string' } }, required: ['stage', 'custom_owner'] },
+      { escalation: { kind: 'server_derived', target: 'none' }, broadcast: { kind: 'payload_field', member_id_field: 'custom_owner' } },
+      null,
+      'moonklabs',
+    );
+    expect(parsed).toBeNull();
   });
 
   it('routing이 폼이 못 만드는 모양(server_derived target=work_item_stakeholders)이면 null(고급 전용)', () => {

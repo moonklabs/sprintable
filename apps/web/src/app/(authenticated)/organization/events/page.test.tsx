@@ -369,8 +369,10 @@ describe('OrganizationEventsPage — 이벤트 정의기(story #2670 A층)', () 
     expect(body.key).toBe('org.moonklabs.release_flow');
     expect(body.payload_schema).toEqual({
       type: 'object',
-      properties: { stage: { type: 'string', enum: ['draft', 'done'] } },
-      required: ['stage'],
+      // routing 기본값(발행할 때 지정)이라 대상 필드가 스키마에도 실린다(PO review_changes
+      // 2차 근인 — additionalProperties:false에서 스키마에 없는 필드는 실 발행이 거부됨).
+      properties: { stage: { type: 'string', enum: ['draft', 'done'] }, assignee_member_id: { type: 'string' } },
+      required: ['stage', 'assignee_member_id'],
       additionalProperties: false,
     });
     expect(body.routing).toEqual({
@@ -451,8 +453,9 @@ describe('OrganizationEventsPage — 이벤트 정의기(story #2670 A층)', () 
     mockFetches([customWithId({
       id: 'def-cycle',
       key: 'org.moonklabs.release_flow',
-      payload_schema: { type: 'object', properties: { stage: { type: 'string', enum: ['draft', 'done'] } }, required: ['stage'], additionalProperties: false },
+      payload_schema: { type: 'object', properties: { stage: { type: 'string', enum: ['draft', 'done'] }, assignee_member_id: { type: 'string' } }, required: ['stage', 'assignee_member_id'], additionalProperties: false },
       routing: { escalation: { kind: 'server_derived', target: 'none' }, broadcast: { kind: 'payload_field', member_id_field: 'assignee_member_id' } },
+      block_template: { blocks: [{ type: 'header', text: '릴리즈 흐름' }] },
     })]);
     await mount();
     const editBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventEditCta)!;
@@ -460,9 +463,15 @@ describe('OrganizationEventsPage — 이벤트 정의기(story #2670 A층)', () 
 
     // 기본 탭이 활성(고급 전용 배지 없음) — #event-key(JSON탭 전용)는 안 보이고 폼 필드가 보인다.
     expect(dialogContent().textContent).not.toContain(koMessages.organization.definerAdvancedOnlyBadge);
-    expect(dialogContent().querySelector('#definer-name')).not.toBeNull();
+    // PO review_changes 2차 — 수정 진입 시 이름이 "이름 없음"으로 비던 유실 회귀가드.
+    expect((dialogContent().querySelector('#definer-name') as HTMLInputElement).value).toBe('릴리즈 흐름');
     const stageNameInputs = dialogContent().querySelectorAll('input[placeholder="' + koMessages.organization.definerStageNamePlaceholder + '"]') as NodeListOf<HTMLInputElement>;
     expect([...stageNameInputs].map((i) => i.value)).toEqual(['draft', 'done']);
+    // assignee_member_id(routing 파생 필드)는 ⑥ 추가 필드 편집 행으로 새어 나오면 안 된다
+    // (「이 폼이 파생하는 것」 요약 패널엔 정상적으로 스키마 키로 보이므로 dialog 전체가 아닌
+    // 입력 필드 값만 좁혀서 확認).
+    const inputValues = [...dialogContent().querySelectorAll('input')].map((i) => (i as HTMLInputElement).value);
+    expect(inputValues).not.toContain('assignee_member_id');
   });
 
   it('폼이 표현 못 하는 모양(routing이 커스텀에서 불가능한 target)의 기존 정의는 「고급 전용」으로 떨어진다(AC3)', async () => {
