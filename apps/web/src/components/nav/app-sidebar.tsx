@@ -27,6 +27,7 @@ import {
   Users,
   Users2,
   Workflow,
+  Zap,
 } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
@@ -255,6 +256,16 @@ export function AppSidebar({
                 >
                   <Brain />
                   <span>{t('orgMemory')}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href="/organization/events" />}
+                  isActive={isActive('/organization/events')}
+                  tooltip={t('orgEvents')}
+                >
+                  <Zap />
+                  <span>{t('orgEvents')}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
