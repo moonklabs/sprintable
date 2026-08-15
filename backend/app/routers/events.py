@@ -877,17 +877,21 @@ async def _resolve_event_project_id(
     """이벤트가 속할 project_id — work_item_type/id가 있으면 그 작업의 project(gate_service.
     resolve_work_item_project_id 재사용, 신규 쿼리 만들지 않음), goal_id만 있으면(preset.
     goal.measured) Goal.project_id 직접. 둘 다 없으면 None(호출부가 400으로 거부)."""
+    from app.services.event_routing_resolver import _parse_uuid
+
     if payload.get("work_item_type") and payload.get("work_item_id"):
         from app.services.gate_service import resolve_work_item_project_id
 
         return await resolve_work_item_project_id(
-            db, org_id, payload["work_item_type"], uuid.UUID(payload["work_item_id"]),
+            db, org_id, payload["work_item_type"],
+            _parse_uuid(payload["work_item_id"], field_name="work_item_id"),
         )
     if payload.get("goal_id"):
         from app.models.pm import Goal
 
+        goal_id = _parse_uuid(payload["goal_id"], field_name="goal_id")
         return (await db.execute(
-            select(Goal.project_id).where(Goal.id == uuid.UUID(payload["goal_id"]), Goal.org_id == org_id)
+            select(Goal.project_id).where(Goal.id == goal_id, Goal.org_id == org_id)
         )).scalar_one_or_none()
     return None
 
@@ -1027,7 +1031,11 @@ async def publish_registry_event(
             detail={"code": "invalid_payload", "message": str(e), "errors": e.errors},
         ) from e
 
-    from app.services.event_routing_resolver import MissingRoutingPayloadFieldError, resolve_routing_leg
+    from app.services.event_routing_resolver import (
+        InvalidWorkItemReferenceError,
+        MissingRoutingPayloadFieldError,
+        resolve_routing_leg,
+    )
 
     try:
         escalation_ids = await resolve_routing_leg(
@@ -1036,7 +1044,7 @@ async def publish_registry_event(
         broadcast_ids = await resolve_routing_leg(
             definition.routing["broadcast"], payload=body.payload, org_id=org_id, db=db,
         )
-    except MissingRoutingPayloadFieldError as e:
+    except (MissingRoutingPayloadFieldError, InvalidWorkItemReferenceError) as e:
         raise HTTPException(
             status_code=400,
             detail={"code": "invalid_payload", "message": str(e), "errors": [str(e)]},
@@ -1047,7 +1055,13 @@ async def publish_registry_event(
 
         broadcast_ids |= await filter_org_member_ids(set(body.extra_broadcast_member_ids), org_id, db)
 
-    project_id = await _resolve_event_project_id(db, org_id=org_id, payload=body.payload)
+    try:
+        project_id = await _resolve_event_project_id(db, org_id=org_id, payload=body.payload)
+    except InvalidWorkItemReferenceError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_payload", "message": str(e), "errors": [str(e)]},
+        ) from e
     if project_id is None:
         # story #2674 — «참조 필드 자체가 없음»과 «참조는 있는데 못 풂(dangling)»은 다른
         # 사건이다. 정의기(#2670)가 만드는 임의 payload 커스텀 이벤트(신호형·측정형류)는

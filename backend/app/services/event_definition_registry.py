@@ -244,10 +244,19 @@ def validate_event_payload_schema_shape(payload_schema: dict) -> None:
 def validate_event_payload(payload_schema: dict, payload: dict) -> None:
     """AC3: payload_schema(JSON Schema) 대조 검증 — 스키마가 additionalProperties: false를
     선언한 한도 내에서 모르는 필드도 거부된다(선언 안 한 스키마는 이 함수가 대신 강제하지
-    않는다 — 스키마 저작 시점의 책임, 시드 4종은 전부 선언함)."""
+    않는다 — 스키마 저작 시점의 책임, 시드 4종은 전부 선언함).
+
+    story #2675: format_checker 없이 jsonschema Validator를 만들면 `"format": "uuid"` 선언이
+    있어도 «검증되지 않고 조용히 통과»한다(jsonschema의 기본 동작 — format은 검증기를 명시로
+    줘야 집행된다, 실측 확認). 이 코드베이스 event_definitions는 work_item_id/goal_id/
+    notify_member_id 등 거의 모든 payload UUID 필드에 format:uuid를 선언하는데, 그게 안 먹혀서
+    "pr-3084" 같은 비-UUID 문자열이 여기를 무사통과해 다운스트림 uuid.UUID() 파싱에서 처리
+    안 된 ValueError로 500을 냈다(카디르 2026-08-15 실측, 승격 PR류 gate_cycle 발행). FormatChecker()를
+    명시로 넘겨 이 스키마가 이미 선언한 계약을 실제로 집행 — 새 검증을 발명하는 게 아니라
+    기존 선언을 마침내 작동시키는 것."""
     validator_cls = jsonschema.validators.validator_for(payload_schema)
     validator_cls.check_schema(payload_schema)
-    validator = validator_cls(payload_schema)
+    validator = validator_cls(payload_schema, format_checker=jsonschema.FormatChecker())
     errors = [e.message for e in validator.iter_errors(payload)]
     if errors:
         raise InvalidEventPayloadError(
