@@ -9,6 +9,8 @@ import remarkGfm from 'remark-gfm';
 import { ArrowLeft, Pencil, Trash2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import {
   Dialog, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle,
@@ -238,6 +240,12 @@ export default function EpicDetailPage() {
   // "목표가 없다"며 목록으로 튕겨낸다(다른 opt-in 컴포넌트의 "빈 화면"보다 나쁜 결과 — 오판
   // 네비게이션). orgSyncVersion을 의존성에 얹는다.
   const orgSyncVersion = useOrgSyncVersion();
+  // story #2587 AC3 — 위 처방 "403은 replace 금지·로딩 유지"가 org-sync가 아예 성립할 여지가
+  // 없는 «진짜 권한없음» 딥링크(남의 org epic 등)까지 영구 스피너로 만들던 잔여. orgSyncPending이
+  // false면(pathOrgId 없거나 이미 토큰과 일치 — DashboardShell의 switch-org effect 자체가
+  // 안 돎) 그 403은 stale일 리 없다 — 정직하게 「권한 없음」으로 끝낸다.
+  const { orgSyncPending } = useDashboardContext();
+  const [forbidden, setForbidden] = useState(false);
 
   const handleDelete = useCallback(async () => {
     if (!epic) return;
@@ -269,6 +277,7 @@ export default function EpicDetailPage() {
   // 재실행 시 이전 체인의 setState/replace를 무효화(flow-client.tsx의 cancelledRef와 동형).
   useEffect(() => {
     let cancelled = false;
+    setForbidden(false);
     void (async () => {
       let res: Response;
       try {
@@ -290,8 +299,16 @@ export default function EpicDetailPage() {
         return;
       }
       if (res.status === 403) {
-        // org-scope 불일치 中일 수 있다 — 목록으로 튕겨내지 않는다. orgSyncVersion이 bump되면
-        // 이 effect가 재실행돼 재요청한다(위 deps) — 그때까지는 로딩 유지.
+        if (orgSyncPending) {
+          // org-scope 불일치 中일 수 있다 — 목록으로 튕겨내지 않는다. orgSyncVersion이
+          // bump되면 이 effect가 재실행돼 재요청한다(위 deps) — 그때까지는 로딩 유지.
+          return;
+        }
+        // story #2587 AC3 — org-sync가 이 경로에 대해 아무 것도 할 게 없다(pathOrgId가
+        // 없거나 이미 토큰과 일치) — 이 403은 stale일 수 없다, 진짜 권한없음. 영구
+        // 스피너 대신 정직하게 끝낸다(목록 이동 경로 제시, 자동 튕김 금지).
+        setForbidden(true);
+        setLoading(false);
         return;
       }
       // 진짜 없음(404 등) — 목록으로.
@@ -299,10 +316,25 @@ export default function EpicDetailPage() {
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [id, router, wsSlug, projSlug, orgSyncVersion]);
+  }, [id, router, wsSlug, projSlug, orgSyncVersion, orgSyncPending]);
 
   if (loading) {
     return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">{t('loading')}</div>;
+  }
+  if (forbidden) {
+    return (
+      <div className="flex h-64 items-center justify-center px-4">
+        <EmptyState
+          title={t('forbiddenTitle')}
+          description={t('forbiddenDescription')}
+          action={
+            <Link href={`/${wsSlug}/${projSlug}/goals`}>
+              <Button size="sm" variant="outline">{t('backToList')}</Button>
+            </Link>
+          }
+        />
+      </div>
+    );
   }
   if (!epic) return null;
 

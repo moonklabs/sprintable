@@ -47,6 +47,15 @@ vi.mock('@/components/hypotheses/hypotheses-section', () => ({
   HypothesesSection: () => <div data-testid="hypotheses-section-stub" />,
 }));
 
+// story #2587 AC3 — orgSyncPending을 테스트별로 바꿔 잰다. 기본(false)은 "org-sync가 이
+// 경로에 대해 할 일이 없다" — DashboardShell 실 컨텍스트의 디폴트 값(orgSyncPending: false)과
+// 동형(Provider 없이 렌더될 때의 실제 상태). 명시적으로 true로 바꾼 테스트만 org-mismatch
+// pending 시나리오를 잰다.
+let mockOrgSyncPending = false;
+vi.mock('@/app/dashboard/dashboard-shell', () => ({
+  useDashboardContext: () => ({ orgSyncPending: mockOrgSyncPending }),
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -86,6 +95,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   vi.resetModules();
   replaceMock.mockReset();
+  mockOrgSyncPending = false;
 });
 
 async function mount(fetchImpl: (...args: unknown[]) => Promise<unknown>) {
@@ -98,7 +108,10 @@ async function mount(fetchImpl: (...args: unknown[]) => Promise<unknown>) {
 }
 
 describe('EpicDetailPage — 403 vs 404 분리 (story #2545)', () => {
-  it('403이면 replace를 호출하지 않고 로딩 상태를 유지한다', async () => {
+  it('org-sync 성립 여지가 있는(mismatch pending) 403이면 replace 없이 로딩 상태를 유지한다(#2545 원 시나리오)', async () => {
+    // story #2587 AC3 — 이 테스트의 진짜 의도는 "org-sync가 아직 이 403을 되돌릴 수 있을
+    // 때"였다(#2545 PO 블로킹 리뷰). 그 조건을 명시(orgSyncPending=true)해야 원 의도 그대로다.
+    mockOrgSyncPending = true;
     await mount(vi.fn(async () => ({ ok: false, status: 403, json: async () => null })));
     expect(replaceMock).not.toHaveBeenCalled();
     expect(container.textContent).toContain(koMessages.goals.loading);
@@ -113,6 +126,50 @@ describe('EpicDetailPage — 403 vs 404 분리 (story #2545)', () => {
     await mount(vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: epicFixture() }) })));
     expect(replaceMock).not.toHaveBeenCalled();
     expect(container.textContent).toContain('목표 제목');
+  });
+});
+
+// story #2587 AC3·AC4 — org-sync가 이 경로에 대해 아무 것도 할 게 없는(orgSyncPending=false,
+// 이 스위트의 기본값) 403은 이제 영구 스피너가 아니라 정직한 「권한 없음」으로 끝난다.
+describe('EpicDetailPage — 진짜 권한없음 403 정직 종결 (story #2587 AC3)', () => {
+  it('orgSyncPending=false(org-sync가 이 경로에 대해 할 일이 없음)이면 403은 진짜 — 로딩이 안 걸리고 「권한 없음」+목록 링크를 정직하게 보인다', async () => {
+    mockOrgSyncPending = false;
+    await mount(vi.fn(async () => ({ ok: false, status: 403, json: async () => null })));
+    // 영구 로딩이 아니다 — loading 문구가 안 뜬다(빠져나왔다).
+    expect(container.textContent).not.toContain(koMessages.goals.loading);
+    // 자동으로 목록에 튕겨내지도 않는다(오판 네비게이션 금지, #2545와 같은 원칙).
+    expect(replaceMock).not.toHaveBeenCalled();
+    expect(container.textContent).toContain(koMessages.goals.forbiddenTitle);
+    expect(container.textContent).toContain(koMessages.goals.forbiddenDescription);
+    const backLink = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.goals.backToList) as HTMLAnchorElement;
+    expect(backLink).toBeDefined();
+    expect(backLink.getAttribute('href')).toBe('/ws/proj/goals');
+  });
+
+  it('orgSyncPending=true였다가 재요청도 여전히 403이면(진짜 org 불일치 아닌 순수 무권한) 재요청 후 정직 종결로 전이한다', async () => {
+    // 시나리오: 처음엔 org-sync가 아직 안 끝나 orgSyncPending=true로 mount(로딩 유지) →
+    // sync가 끝나며 orgSyncPending이 false로 바뀌고 bump가 재요청을 트리거 → 그 재요청도
+    // 403이면(다른 org 소유 epic처럼 진짜 무권한) 이번엔 정직 종결이어야 한다.
+    mockOrgSyncPending = true;
+    const fetchImpl = vi.fn(async () => ({ ok: false, status: 403, json: async () => null }));
+    vi.stubGlobal('fetch', fetchImpl);
+    const { default: EpicDetailPage } = await import('./page');
+    const { GoalsRouteProvider } = await import('../goals-context');
+    await act(async () => {
+      root.render(wrap(GoalsRouteProvider, <EpicDetailPage />));
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.textContent).toContain(koMessages.goals.loading);
+
+    mockOrgSyncPending = false;
+    const { bumpOrgSyncVersion } = await import('@/lib/project-context-client');
+    await act(async () => {
+      bumpOrgSyncVersion();
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.textContent).not.toContain(koMessages.goals.loading);
+    expect(replaceMock).not.toHaveBeenCalled();
+    expect(container.textContent).toContain(koMessages.goals.forbiddenTitle);
   });
 });
 
