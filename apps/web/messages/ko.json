@@ -52,8 +52,7 @@
     "now": "지금",
     "approvals": "결재",
     "chat": "채팅",
-    "more": "전체",
-    "moreTempNotice": "임시 목록입니다 — 정식 화면으로 곧 교체됩니다."
+    "more": "전체"
   },
   "nav": {
     "dashboard": "대시보드",
