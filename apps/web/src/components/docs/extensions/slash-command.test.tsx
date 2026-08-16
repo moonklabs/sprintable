@@ -134,10 +134,101 @@ describe('defaultSlashItems', () => {
 
 // Re-export the component from the module for testing. If it becomes exported
 // in the future, this pattern can be replaced with a direct import.
-import { SlashCommandExtension } from './slash-command';
+import { SlashCommandExtension, buildSlashMenuCategories, createSlashCommandExtension, slashMenuCategories, type SlashMenuStrings } from './slash-command';
 
 describe('SlashCommandExtension', () => {
   it('is created with name "slashCommand"', () => {
     expect(SlashCommandExtension.name).toBe('slashCommand');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createSlashCommandExtension / buildSlashMenuCategories — story ab2fd813(#2028)
+// ---------------------------------------------------------------------------
+
+import enMessages from '../../../../messages/en.json';
+import koMessages from '../../../../messages/ko.json';
+
+// raw messages/{ko,en}.json nest each item description one level deeper
+// (`items.<key>.description`) than the flat `SlashMenuStrings` interface —
+// doc-editor.tsx's `tSlash('items.<key>.description')` calls flatten that away.
+// This helper mirrors the exact same flattening so the test exercises the real shape.
+interface RawSlashMenuMessages {
+  categories: SlashMenuStrings['categories'];
+  items: Record<keyof SlashMenuStrings['items'], { description: string }>;
+  embedPrompt: string;
+  mermaidDefault: { start: string; end: string };
+  toggleDefaultTitle: string;
+}
+
+function stringsFromMessages(messages: { docs: { slashMenu: RawSlashMenuMessages } }): SlashMenuStrings {
+  const raw = messages.docs.slashMenu;
+  const items = Object.fromEntries(
+    Object.entries(raw.items).map(([key, value]) => [key, value.description]),
+  ) as SlashMenuStrings['items'];
+  return {
+    categories: raw.categories,
+    items,
+    embedPrompt: raw.embedPrompt,
+    mermaidDefault: raw.mermaidDefault,
+    toggleDefaultTitle: raw.toggleDefaultTitle,
+  };
+}
+
+const KOREAN_RE = /[가-힣]/;
+
+describe('buildSlashMenuCategories — EN strings carry no Korean leakage', () => {
+  const enStrings = stringsFromMessages(enMessages as unknown as { docs: { slashMenu: RawSlashMenuMessages } });
+  const enCategories = buildSlashMenuCategories(enStrings);
+
+  it('every category label is Korean-free', () => {
+    for (const cat of enCategories) {
+      expect(KOREAN_RE.test(cat.label)).toBe(false);
+    }
+  });
+
+  it('every item description is Korean-free', () => {
+    for (const cat of enCategories) {
+      for (const item of cat.items) {
+        expect(KOREAN_RE.test(item.description)).toBe(false);
+      }
+    }
+  });
+
+  it('item titles stay identical to the static (search-key) fallback regardless of locale', () => {
+    const staticTitles = slashMenuCategories.flatMap((c) => c.items.map((i) => i.title));
+    const localizedTitles = enCategories.flatMap((c) => c.items.map((i) => i.title));
+    expect(localizedTitles).toEqual(staticTitles);
+  });
+
+  it('produces the same category/item counts as the static fallback', () => {
+    expect(enCategories.length).toBe(slashMenuCategories.length);
+    expect(enCategories.flatMap((c) => c.items).length).toBe(slashMenuCategories.flatMap((c) => c.items).length);
+  });
+});
+
+describe('buildSlashMenuCategories — KO strings still carry the original Korean copy', () => {
+  it('description text matches the pre-i18n static fallback 1:1 (no meaning drift)', () => {
+    const koStrings = stringsFromMessages(koMessages as unknown as { docs: { slashMenu: RawSlashMenuMessages } });
+    const koCategories = buildSlashMenuCategories(koStrings);
+    const koDescriptions = koCategories.flatMap((c) => c.items.map((i) => i.description));
+    const staticDescriptions = slashMenuCategories.flatMap((c) => c.items.map((i) => i.description));
+    expect(koDescriptions).toEqual(staticDescriptions);
+  });
+});
+
+describe('createSlashCommandExtension(strings)', () => {
+  it('builds an Extension named "slashCommand" regardless of injected strings', () => {
+    const enStrings = stringsFromMessages(enMessages as unknown as { docs: { slashMenu: RawSlashMenuMessages } });
+    const ext = createSlashCommandExtension(enStrings);
+    expect(ext.name).toBe('slashCommand');
+  });
+
+  it('filters suggestion items by title (English search key), not by localized description', () => {
+    const enStrings = stringsFromMessages(enMessages as unknown as { docs: { slashMenu: RawSlashMenuMessages } });
+    const ext = createSlashCommandExtension(enStrings);
+    const options = ext.options as { suggestion: { items: (arg: { query: string }) => { title: string }[] } };
+    const matches = options.suggestion.items({ query: 'heading' });
+    expect(matches.map((m) => m.title)).toEqual(['Heading 1', 'Heading 2', 'Heading 3']);
   });
 });
