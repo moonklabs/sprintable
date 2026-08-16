@@ -39,3 +39,16 @@ Notes:
   the full UUID. Resolve it from the story in Sprintable.
 - A non-blocking advisory check (`.github/workflows/sid-link-check.yml`) emits a warning
   when a PR has neither carrier. It never blocks merge.
+
+## Checking whether a PR's CI is actually green (story #2285)
+
+When confirming PR status programmatically, count anything whose `bucket` isn't `pass`
+as blocking: `gh pr checks <PR> --json name,bucket,link | jq -r '.[] | select(.bucket!="pass" and .bucket!="skipping")'`.
+Filtering on `conclusion == "FAILURE"` alone misses `CANCELLED`/`TIMED_OUT`/`ACTION_REQUIRED` —
+those read as an empty "failures" list even though the check is not passing (PR #2570,
+2026-07-28: a `Backend pytest` run hit its 25-minute ceiling and was cancelled, and a
+`FAILURE`-only filter reported zero failures). GitHub's branch-protection merge gate
+already treats non-`SUCCESS` conclusions as blocking regardless of this tooling gap — the
+risk here is a human/agent being told "clear to merge" by a script when the actual gate
+is still red. `skipping` is excluded — it's a conditionally-skipped job (e.g. "Main
+Alembic preflight" when its precondition doesn't apply), not a blocked one.
