@@ -1125,6 +1125,10 @@ async def _resolve_artifact_canonicalize_gate(session: AsyncSession, gate: Gate,
                 body=f"v{version_number}이(가) 정본으로 확定됐습니다." if version_number else None,
                 reference_type="visual_artifact", reference_id=artifact.id,
                 source_project_id=artifact.project_id,
+                # story #2694: #2688(create_gate 2콜)과 동일 결함 클래스 — 이 호출부(transition_gate
+                # → _resolve_artifact_canonicalize_gate)도 요청의 열린 트랜잭션 커넥션 안에서
+                # 동기 개인 webhook 재시도(최대 3회·1s/2s backoff)를 그대로 문다. outbox 이관.
+                via_outbox=True,
             )
     else:  # rejected — info 재논의(§5: destructive 색 절대 금지). 사유=코멘트로 제안자에게 전파.
         if gate.resolution_note and requested_by:
@@ -1399,6 +1403,9 @@ async def override_gate(
                         session, org_id, gate.work_item_type, gate.work_item_id,
                     )
                 ),
+                # story #2694: #2688과 동일 결함 클래스 — override_gate() 호출부도 요청의 열린
+                # 트랜잭션 커넥션 안에서 동기 개인 webhook 재시도를 문다. outbox 이관.
+                via_outbox=True,
             )
         except Exception:  # noqa: BLE001 — notification 실패는 비중단(override 자체는 성공).
             pass
