@@ -72,7 +72,8 @@ async def _notify_doc_approval_requested(
     try:
         from app.services.approval_delivery import dispatch_approval_request_cards
         await dispatch_approval_request_cards(
-            session, org_id=org_id, doc=doc, gate_id=gate_id,
+            session, org_id=org_id, work_item_type=DOC_GATE_WORK_ITEM_TYPE, work_item_id=doc.id,
+            project_id=doc.project_id, title=doc.title, gate_id=gate_id,
             requester_id=requester_id, approver_ids=approver_ids,
         )
     except Exception:  # noqa: BLE001 — 카드 배달 실패는 상신 비중단(Gate inbox 폴백 항상 존재).

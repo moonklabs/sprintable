@@ -96,21 +96,34 @@ async def dispatch_approval_request_cards(
     db: AsyncSession,
     *,
     org_id: uuid.UUID,
-    doc: Doc,
+    work_item_type: str,
+    work_item_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+    title: str,
     gate_id: uuid.UUID,
     requester_id: uuid.UUID,
     approver_ids: list[uuid.UUID],
 ) -> None:
     """승인자별 DM에 message_kind="request" 카드 메시지 게시 + SSE 이벤트(AC1/AC2).
 
-    승인자별 SAVEPOINT 격리 — 한 승인자 배달 실패(예: DM insert 레이스)가 나머지 승인자
-    배달이나, 이 함수를 부르는 doc 상신 트랜잭션(gate 생성·doc.status='pending') 자체를
-    poison 하지 않는다([[feedback_savepoint_failopen_session_poison]] — bare flush 실패
-    후 세션 오염이 후속 write를 통째로 삼키는 클래스).
+    story #2118(E-DG-REAL ②, 2026-08-16) 이전엔 ``doc: Doc``을 직접 받는 doc 전용 함수였다 —
+    호출부(merge_verdict_gate.py 등 다른 gate_type)가 doc 객체를 갖고 있지 않아 그대로 확장할
+    수 없었다. work_item_type/work_item_id/project_id/title로 일반화(함수 로직 자체는 무변경 —
+    doc 전용 필드 참조 4곳을 파라미터로 치환한 것뿐). FE(approval-request-card.tsx, #3149)는
+    이미 work_item_type 제네릭으로 렌더하고, 카드 title 자체는 GET /api/gates/{id}의
+    work_item_summary(gates.py _resolve_work_item_summary — doc/story/task 지원)에서 오므로
+    이 함수의 ``title``은 메시지 본문(chat bubble text)에만 쓰인다(카드 렌더 값 아님).
 
-    project_id 없는 doc(비정상 상태)은 배달 스킵(무대상, 조용히 반환).
+    승인자별 SAVEPOINT 격리 — 한 승인자 배달 실패(예: DM insert 레이스)가 나머지 승인자
+    배달이나, 이 함수를 부르는 caller의 게이트 생성 트랜잭션 자체를 poison 하지 않는다
+    ([[feedback_savepoint_failopen_session_poison]] — bare flush 실패 후 세션 오염이 후속
+    write를 통째로 삼키는 클래스).
+
+    project_id 없는 work_item(비정상 상태 또는 project-무관 work_item_type)은 배달 스킵
+    (무대상, 조용히 반환) — project 없이는 `_get_or_create_approval_dm`의 DM project_id를
+    채울 수 없다.
     """
-    if not doc.project_id or not approver_ids:
+    if not project_id or not approver_ids:
         return
 
     from app.routers.conversations import _dispatch_conversation_event
@@ -118,7 +131,9 @@ async def dispatch_approval_request_cards(
 
     requester = (await lookup_members_by_ids({requester_id}, db)).get(requester_id)
     if requester is None:
-        logger.warning("approval-request 카드 배달 스킵 — requester 미확인 doc=%s", doc.id)
+        logger.warning(
+            "approval-request 카드 배달 스킵 — requester 미확인 %s=%s", work_item_type, work_item_id,
+        )
         return
 
     for approver_id in approver_ids:
@@ -127,14 +142,14 @@ async def dispatch_approval_request_cards(
                 conv = await _get_or_create_approval_dm(
                     db,
                     org_id=org_id,
-                    project_id=doc.project_id,
+                    project_id=project_id,
                     requester_id=requester_id,
                     approver_id=approver_id,
                 )
                 msg = ConversationMessage(
                     conversation_id=conv.id,
                     sender_id=requester_id,
-                    content=f"'{doc.title}' 문서 결재 요청",
+                    content=f"'{title}' 결재 요청",
                     mentioned_ids=[approver_id],
                     msg_metadata={
                         "activation": {
@@ -143,8 +158,8 @@ async def dispatch_approval_request_cards(
                             "expects_response": True,
                         },
                         "approval_target": {
-                            "work_item_type": "doc",
-                            "work_item_id": str(doc.id),
+                            "work_item_type": work_item_type,
+                            "work_item_id": str(work_item_id),
                             "gate_id": str(gate_id),
                             "actions": ["approve", "reject"],
                         },
@@ -155,8 +170,8 @@ async def dispatch_approval_request_cards(
                 await _dispatch_conversation_event(db, conv, msg, org_id, requester)
         except Exception:  # noqa: BLE001 — best-effort, 개별 승인자 실패가 상신을 막지 않음.
             logger.warning(
-                "approval-request 카드 배달 실패 doc=%s approver=%s",
-                doc.id, approver_id, exc_info=True,
+                "approval-request 카드 배달 실패 %s=%s approver=%s",
+                work_item_type, work_item_id, approver_id, exc_info=True,
             )
 
 

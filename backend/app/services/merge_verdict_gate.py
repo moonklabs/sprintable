@@ -376,6 +376,18 @@ async def evaluate_merge_gate(
     # story #1968: 이 함수는 story_id(uuid)만 갖고 Story 객체를 로드하지 않으므로(participation/
     # verdict/trust 경로 전부 story_id만 소비) resolve_work_item_project_id()로 신규 조회.
     project_id = await resolve_work_item_project_id(session, org_id, "story", story_id)
+    # story #2118(E-DG-REAL ②): create_gate()가 이미 pending인 기존 gate를 멱등 반환할 때(예:
+    # report-done/board-preflight가 이 함수를 반복 호출)마다 승인요청 카드를 중복 배달하지 않으려면
+    # "이 호출에서 방금 pending이 됐는지"(신규 생성 또는 rejected/voided→재오픈)를 알아야 한다 —
+    # create_gate()는 그 신호를 반환하지 않으므로(반환형 변경은 8개 호출부 전체에 영향, 스코프 밖)
+    # 호출 *전* 상태를 가볍게 먼저 조회해 비교한다(create_gate 내부의 멱등 조회와 동형 SELECT,
+    # 신규 인덱스 불필요 — uq(work_item_id, work_item_type, gate_type) 이미 있음).
+    _prior_status = (await session.execute(
+        select(Gate.status).where(
+            Gate.org_id == org_id, Gate.work_item_id == story_id,
+            Gate.work_item_type == "story", Gate.gate_type == MERGE_GATE_TYPE,
+        )
+    )).scalar_one_or_none()
     gate = await create_gate(
         session,
         org_id,
@@ -416,6 +428,34 @@ async def evaluate_merge_gate(
             "merge gate re-opened on resubmit story=%s gate=%s prior=%s",
             story_id, gate.id, prior["status"],
         )
+
+    # story #2118(E-DG-REAL ②) — doc.py의 dispatch_approval_request_cards(#2604) 패턴을 merge
+    # gate까지 확장: 이 호출에서 gate가 «방금» pending이 된 경우만(_prior_status와 비교, 위 주석
+    # 참조) 승인자별 1:1 DM에 카드를 배달한다. 승인 자격자 = project owner/admin(project_id
+    # 해소 실패 시 org owner/admin — project_auth.list_gate_approver_ids, gates.py
+    # _non_doc_gate_approvable과 동일 규칙). 카드 배달 자체는 best-effort(project_auth 조회
+    # 실패가 게이트 생성/decision을 막지 않음) — doc.py와 동일 관례.
+    if gate.status == "pending" and _prior_status != "pending":
+        try:
+            from app.models.pm import Story
+            from app.services.approval_delivery import dispatch_approval_request_cards
+            from app.services.project_auth import list_gate_approver_ids
+
+            story_title = (await session.execute(
+                select(Story.title).where(Story.id == story_id, Story.org_id == org_id)
+            )).scalar_one_or_none() or f"#{str(story_id)[:8]}"
+            approver_ids = await list_gate_approver_ids(
+                session, org_id, project_id, exclude_id=member_id,
+            )
+            await dispatch_approval_request_cards(
+                session, org_id=org_id, work_item_type="story", work_item_id=story_id,
+                project_id=project_id, title=story_title, gate_id=gate.id,
+                requester_id=member_id, approver_ids=approver_ids,
+            )
+        except Exception:  # noqa: BLE001 — 카드 배달 실패는 게이트 생성/decision을 막지 않음.
+            logger.warning(
+                "merge gate 승인요청 카드 배달 실패 story=%s gate=%s", story_id, gate.id, exc_info=True,
+            )
 
     # 4. 정책 + 증거(CI/PR) + outcome trust 합성 decision.
     decision, reason = _decide(
