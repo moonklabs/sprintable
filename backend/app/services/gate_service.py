@@ -377,6 +377,9 @@ async def _reopen_rejected_gate(
                     body=f"{gate_type} 게이트가 재제출되어 다시 승인/거부를 기다리고 있습니다.",
                     reference_type="gate", reference_id=gate.id,
                     source_project_id=project_id,
+                    # story #2688: create_gate()의 신규-gate 경로(:475 부근)와 동일 결함 —
+                    # 재상신(rejected→pending re-open) 경로도 동기 웹훅이 트랜잭션을 물었다.
+                    via_outbox=True,
                 )
         except Exception:
             logger.warning(
@@ -479,6 +482,11 @@ async def create_gate(
                     body=f"{gate_type} 게이트가 승인/거부를 기다리고 있습니다.",
                     reference_type="gate", reference_id=gate.id,
                     source_project_id=project_id,
+                    # story #2688: 동기 개인 webhook 실POST가 create_gate() 호출부(예:
+                    # docs/{id}/transition draft→pending)의 열린 트랜잭션 커넥션을 붙잡아
+                    # 요청을 초 단위로 지연시켰다(실측 2.7s→220ms). story #2460 §6 봉합②
+                    # outbox 경로 재사용.
+                    via_outbox=True,
                 )
         except Exception:
             logger.warning(
