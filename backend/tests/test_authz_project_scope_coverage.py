@@ -323,6 +323,15 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     "app.routers.event_notifications:mark_read": "recipient-scoped(event.recipient_id==caller member)",
     "app.routers.notifications:mark_read": "owner user_id 스코프(caller 소유 알림만)",
     "app.routers.evidence:delete_evidence": "creator-only(created_by!=caller → 403)",
+    "app.routers.me:revoke_my_api_key": (
+        "story #1940 — path의 key_id는 human_api_keys 행을 가리키고, 대상 리소스가 "
+        "project-소속이 아니라 caller 자신 소유(member_id) — user_blocks:delete_user_block과 "
+        "동일 결의 SELF_DERIVED(project 접근권 검증 자체가 무의미한 축). 라우터가 "
+        "key.member_id != caller.member_id면 404(존재 여부 누설 없이)로 스코프. 받치는 것은 "
+        "test_router_cannot_revoke_other_humans_key(test_1940_human_api_keys.py) — 타인의 "
+        "키를 key_id로 지정해도 404인지 실증한다. 그 테스트를 지우거나 약화시키면 이 면제의 "
+        "근거도 함께 사라진다."
+    ),
     # org/user-level 리소스 — project 축 없음 — ORG_ONLY
     "app.routers.labels:delete_label": "org taxonomy(project_id 컬럼 없음)·org-scope",
     "app.routers.labels:detach_label": "org taxonomy·org-scope",

@@ -242,6 +242,80 @@ async def _resolve_api_key(
     )
 
 
+async def _touch_human_api_key_last_used(key_id: uuid.UUID) -> None:
+    """_touch_api_key_last_used(agent)와 동형 — 전용 세션·단독 짧은 트랜잭션·fail-silent."""
+    from app.models.human_api_key import HumanApiKey
+    try:
+        async with async_session_factory() as s:
+            await s.execute(
+                update(HumanApiKey).where(HumanApiKey.id == key_id)
+                .values(last_used_at=datetime.now(timezone.utc))
+            )
+            await s.commit()
+    except Exception:
+        logger.warning("_touch_human_api_key_last_used failed key_id=%s", key_id, exc_info=True)
+
+
+async def _resolve_human_api_key(raw_key: str, db: AsyncSession) -> AuthContext:
+    """story #1940 — hu_live_* 휴먼 개인 API key(MCP 셀프서브)를 DB에서 조회하여 AuthContext 반환.
+
+    ⚠️ ``resolve_member()``류(member_resolver.py:64/133)의
+    ``is_api_key = bool(app_metadata.get("api_key_id"))`` 휴리스틱(에이전트 판별용 —
+    ``app/dependencies/auth.py``의 "api_key 경로 = 에이전트 인증" 불변식, PO A안 판정의
+    핵심 근거)을 절대 안 건드린다 — 그래서 이 경로는 ``api_key_id`` claim을 «싣지 않는다».
+    대신 JWT 휴먼 인증과 **똑같은 모양**의 AuthContext를 만든다(``user_id=users.id``,
+    ``OrgMember``로 조직 신원 해소되는 것과 동치 입력) — resolve_member()가 이 요청을
+    무수정으로 "JWT 휴먼" 분기 그대로 태운다. 감사·last_used_at 추적용 식별자는 별도 키
+    (``human_api_key_id``)로만 싣는다(이름이 달라 어떤 기존 소비처의 ``api_key_id`` 판정도
+    안 건드림)."""
+    from app.models.human_api_key import HumanApiKey
+    from app.models.member import Member
+
+    key_hash = hash_token(raw_key)
+    now = datetime.now(timezone.utc)
+
+    result = await db.execute(
+        select(HumanApiKey)
+        .where(HumanApiKey.key_hash == key_hash)
+        .where(HumanApiKey.revoked_at.is_(None))
+        .where((HumanApiKey.expires_at.is_(None)) | (HumanApiKey.expires_at > now))
+    )
+    api_key = result.scalar_one_or_none()
+    if not api_key:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+
+    # fail-closed: 발급 시점엔 human이었어도 재조회 시점엔 반드시 다시 확인한다(예: 역할
+    # 전환·비활성화·삭제) — type=="human" 명시(agent로 오판정될 조합을 원천 차단).
+    member = (await db.execute(
+        select(Member).where(
+            Member.id == api_key.member_id,
+            Member.type == "human",
+            Member.is_active.is_(True),
+            Member.deleted_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if member is None or member.user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key member not found")
+
+    needs_touch = api_key.last_used_at is None or (now - api_key.last_used_at) > _LAST_USED_AT_THROTTLE
+    if needs_touch:
+        await _touch_human_api_key_last_used(api_key.id)
+
+    return AuthContext(
+        user_id=str(member.user_id),
+        email=None,
+        claims={
+            "sub": str(member.user_id),
+            "app_metadata": {
+                "org_id": str(member.org_id),
+                "human_api_key_id": str(api_key.id),
+                "actor_type": "human",
+            },
+        },
+        org_id=str(member.org_id),
+    )
+
+
 async def _reject_if_before_cutover(user_id: str | uuid.UUID, unix_timestamp: int | None, db: AsyncSession) -> None:
     """story bea25062(§17d-1 cutover epoch authority): legacy iat/Firebase auth_time이
     이 사용자의 auth_valid_after 이전(또는 동일)이거나, migration.state가 강제 재설정
@@ -371,6 +445,14 @@ async def get_current_user(
     if token.startswith("sk_live_"):
         async with async_session_factory() as db:
             return await _resolve_api_key(token, db, transport=x_mcp_transport)
+
+    # story #1940 — hu_live_* 휴먼 개인 API key. ⛔의도적으로 x-agent-api-key 헤더 경로(위)에는
+    # 이 분기를 안 붙인다 — 그 헤더는 이 코드베이스에서 "에이전트 SSE 브릿지 전용"으로 이미
+    # 굳어진 표면(PO AC2: 휴먼 키가 agent 전용 표면을 못 열게 서버가 거부)이라, hu_live_ 토큰을
+    # 거기로 보내면 이 분기가 아예 없어 그대로 미인증(자연 차단 — 별도 판별 코드 불요).
+    if token.startswith("hu_live_"):
+        async with async_session_factory() as db:
+            return await _resolve_human_api_key(token, db)
 
     # story 455e528d(E-AUTH-REBUILD Phase1-S2·doc §4.2): Firebase 세션(RS256)은 alg 헤더로
     # 정확 분기 — 순차 fallback 아님. FIREBASE_AUTH_ACCEPT_SESSION=false(기본)면 이 분기는
@@ -827,6 +909,11 @@ async def get_current_user_streaming(
     if token.startswith("sk_live_"):
         async with async_session_factory() as db:
             return await _resolve_api_key(token, db)
+
+    # story #1940 — get_current_user와 동형(x-agent-api-key 헤더 경로엔 의도적으로 안 붙임).
+    if token.startswith("hu_live_"):
+        async with async_session_factory() as db:
+            return await _resolve_human_api_key(token, db)
 
     # story 455e528d(doc §4.3 "mirror the dual verifier in get_current_user_streaming"):
     # get_current_user와 동일하게 alg 헤더로 정확 분기(순차 fallback 아님). 단명 세션으로
