@@ -15,6 +15,7 @@ import { EventDefinerForm } from '@/components/organization/event-definer-form';
 import {
   type DefinerFormState, deriveDefinition, emptyFormState, tryReverseParse, validateKeySuffix,
 } from '@/components/organization/event-definer-logic';
+import { EventDefinitionSummary } from '@/components/organization/event-definition-summary';
 
 // story #2664 — 목록(GET) 응답 모델(events.py EventDefinitionResponse)엔 아직 id가 없다
 // (BE #2663, PR#3069 재QA 중). id가 없는 항목은 수정/비활성 버튼을 아예 안 그린다 — #2663가
@@ -147,6 +148,7 @@ export default function OrganizationEventsPage() {
                       onToggleExpand={() => setExpandedKey((k) => (k === def.key ? null : def.key))}
                       readonly={false}
                       isAdmin={isAdmin}
+                      orgSlug={orgSlug}
                       onEdit={() => setEditTarget(def)}
                       onDeactivate={() => setDeactivateTarget(def)}
                       onTestPublish={() => setPublishTarget(def)}
@@ -178,6 +180,7 @@ export default function OrganizationEventsPage() {
                       onToggleExpand={() => setExpandedKey((k) => (k === def.key ? null : def.key))}
                       readonly
                       isAdmin={isAdmin}
+                      orgSlug={orgSlug}
                       t={t}
                     />
                   ))}
@@ -237,13 +240,14 @@ export default function OrganizationEventsPage() {
 }
 
 function EventDefRow({
-  def, expanded, onToggleExpand, readonly, isAdmin, onEdit, onDeactivate, onTestPublish, t,
+  def, expanded, onToggleExpand, readonly, isAdmin, orgSlug, onEdit, onDeactivate, onTestPublish, t,
 }: {
   def: EventDefinition;
   expanded: boolean;
   onToggleExpand: () => void;
   readonly: boolean;
   isAdmin: boolean;
+  orgSlug: string;
   onEdit?: () => void;
   onDeactivate?: () => void;
   onTestPublish?: () => void;
@@ -287,24 +291,23 @@ function EventDefRow({
         </div>
       </div>
       {expanded ? (
-        <div className="mt-3 space-y-2">
-          <JsonPreview label={t('eventPayloadSchemaLabel')} value={def.payload_schema} />
-          <JsonPreview label={t('eventRoutingLabel')} value={def.routing} />
-          {def.block_template ? <JsonPreview label={t('eventBlockTemplateLabel')} value={def.block_template} /> : null}
+        <div className="mt-3 space-y-3">
+          {/* story #2677 — 기본 뷰=사람 언어(서식 요약·필드 표·실물 카드), JSON은 「고급」
+              접기로 존치(EventDefinitionSummary 내부). 역파생 불가(프리셋 전부 포함) 시엔
+              정의기 edit 다이얼로그와 같은 규칙으로 정직하게 JSON 기본+고급 전용 배지. */}
+          <EventDefinitionSummary
+            eventKey={def.key}
+            payloadSchema={def.payload_schema}
+            routing={def.routing}
+            actionAuth={def.action_auth}
+            blockTemplate={def.block_template}
+            orgSlug={orgSlug}
+          />
           {/* PR#3087 — 이 조회 자체가 BE org admin/owner 게이트라, 일반 멤버는 조회하면
               항상 403이라 아예 안 그린다(모두가 여는 매 행마다 헛된 실패 fetch 방지). */}
           {isAdmin ? <PublishHistorySection definitionKey={def.key} t={t} /> : null}
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function JsonPreview({ label, value }: { label: string; value: unknown }) {
-  return (
-    <div>
-      <p className="mb-1 text-[11px] font-semibold text-muted-foreground">{label}</p>
-      <pre className="overflow-x-auto rounded-md bg-muted p-2 text-xs text-foreground">{JSON.stringify(value, null, 2)}</pre>
     </div>
   );
 }

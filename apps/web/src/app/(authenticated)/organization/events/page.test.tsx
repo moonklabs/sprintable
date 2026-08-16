@@ -635,3 +635,88 @@ describe('OrganizationEventsPage — 고급 탭 key 문자셋 클라 선검증(s
     expect(document.body.textContent).not.toContain(koMessages.organization.definerKeyHint);
   });
 });
+
+// story #2677 — 정의 행 펼침 기본 뷰=사람 언어(서식 요약·필드 표·실물 카드), JSON은
+// 「고급」 접기. 정의기 역파생(tryReverseParse)이 성공하는 정의(폼이 만들 수 있는 모양)와
+// 실패하는 정의(프리셋 전부·손편집 커스텀) 양쪽을 각각 잰다 — AC2의 "침묵 오렌더 금지"는
+// 실패 시 조용히 반쪽짜리 사람 언어를 흉내내지 않고 «고급 전용» 배지+JSON 그대로임을 뜻한다.
+describe('OrganizationEventsPage — 정의 상세보기 사람 언어 기본(story #2677)', () => {
+  // 측정형(record_only) — tryReverseParse가 성공하는 최소 모양. metric_value가 payload_schema에
+  // 있어야 measure 분기를 탄다(event-definer-logic.ts tryReverseParse 참조).
+  function humanReadableCustom(overrides: Record<string, unknown> = {}) {
+    return customWithId({
+      id: 'def-human-1',
+      key: 'org.moonklabs.deploy.completed',
+      payload_schema: {
+        type: 'object',
+        properties: { metric_value: { type: 'number' } },
+        required: ['metric_value'],
+        additionalProperties: false,
+      },
+      routing: { escalation: { kind: 'server_derived', target: 'none' }, broadcast: { kind: 'server_derived', target: 'none' } },
+      action_auth: null,
+      block_template: { blocks: [{ type: 'header', text: '배포 완료' }, { type: 'fields', fields: [{ label: '측정치', value: '{{payload.metric_value}}' }] }] },
+      ...overrides,
+    });
+  }
+
+  function expandRow(key: string) {
+    const btn = [...container.querySelectorAll('button')].find((b) => b.textContent === key)!;
+    return act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+  }
+
+  it('역파생 성공하는 정의는 서식/받는 사람/필드 표/실물 카드가 JSON 없이 먼저 보인다', async () => {
+    mockFetches([humanReadableCustom()]);
+    await mount();
+    await expandRow('org.moonklabs.deploy.completed');
+
+    expect(container.textContent).toContain(koMessages.organization.definerFormat_measure);
+    expect(container.textContent).toContain(koMessages.organization.definerRoutingRecordTitle);
+    expect(container.textContent).toContain('metric_value');
+    expect(container.textContent).toContain('배포 완료');
+    // «고급 전용» 배지는 안 뜬다 — 역파생이 성공했다는 뜻.
+    expect(container.textContent).not.toContain(koMessages.organization.definerAdvancedOnlyBadge);
+  });
+
+  it('JSON 원문은 「고급」 접기 안에 그대로 남아있다(제거 아님, textContent로 확인)', async () => {
+    mockFetches([humanReadableCustom()]);
+    await mount();
+    await expandRow('org.moonklabs.deploy.completed');
+
+    expect(container.textContent).toContain(koMessages.organization.definerTabAdvanced);
+    // <details> 닫힌 상태에서도 DOM엔 존재한다(jsdom textContent는 open 여부와 무관) — 제거
+    // 여부만 검증하면 충분하다(펼침 UI 자체의 접근성/애니메이션은 이 스토리 범위 밖).
+    expect(container.textContent).toContain('"metric_value"');
+  });
+
+  it('역파생 실패(프리셋)는 «고급 전용» 배지+JSON이 기본으로 뜬다(침묵 오렌더 금지, AC2)', async () => {
+    mockFetches([preset()]);
+    await mount();
+    await expandRow('preset.gate.verdict');
+
+    expect(container.textContent).toContain(koMessages.organization.definerAdvancedOnlyBadge);
+    expect(container.textContent).toContain('"work_item_stakeholders"');
+    // 사람 언어 서식 라벨은 안 뜬다 — 반쪽짜리 사람 언어를 흉내내지 않는다.
+    expect(container.textContent).not.toContain(koMessages.organization.eventSummaryFormatLabel);
+  });
+
+  it('역파생 실패(손편집 커스텀 — member_id_field 이름이 폼 상수와 다름)도 같은 정직 폴백', async () => {
+    mockFetches([customWithId({
+      id: 'def-manual-1',
+      key: 'org.moonklabs.manual.thing',
+      payload_schema: { type: 'object', properties: { stage: { type: 'string', enum: ['a', 'b'] } }, required: ['stage'], additionalProperties: false },
+      routing: { escalation: { kind: 'server_derived', target: 'none' }, broadcast: { kind: 'payload_field', member_id_field: 'weird_field_name' } },
+    })]);
+    await mount();
+    await expandRow('org.moonklabs.manual.thing');
+
+    expect(container.textContent).toContain(koMessages.organization.definerAdvancedOnlyBadge);
+  });
+
+  it('비활성 정의도 펼침 시 사람 언어 요약이 뜬다(AC3)', async () => {
+    mockFetches([humanReadableCustom({ enabled: false })]);
+    await mount();
+    await expandRow('org.moonklabs.deploy.completed');
+    expect(container.textContent).toContain(koMessages.organization.definerFormat_measure);
+  });
+});
