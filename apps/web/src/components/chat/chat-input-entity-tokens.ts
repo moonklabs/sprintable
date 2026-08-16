@@ -18,6 +18,17 @@ export function getEntityQuery(value: string, cursorPos: number): string | null 
   return m ? m[1]! : null;
 }
 
+// story d6f8e025 — Enter는 채팅에서 전송 키를 겸한다. "#3086"까지 타이핑하고 아직 스페이스를
+// 안 친 채로(=피커가 열린 채로) 전송하려고 Enter를 누르면, 화살표로 후보를 능동 선택한 적이
+// 없어도(entityIndex는 새 결과 도착 시 자동으로 0번을 가리킨다) 그 최상위 후보가 조용히
+// 토큰으로 삽입돼버렸다(실사례: backlink 오염). hasNavigated(moveUp/moveDown을 최소 1회
+// 거쳤는지)가 true일 때만 Enter가 수락한다 — Tab은 전송 키가 아니라 위험이 없어 늘 수락.
+export function shouldAcceptEntityPickerSelection(key: string, hasNavigated: boolean): boolean {
+  if (key === 'Tab') return true;
+  if (key === 'Enter') return hasNavigated;
+  return false;
+}
+
 // story #2292(보안·critical) — 링크 텍스트(markdown `[text](url)`의 text 부분) escape.
 // `[ ] ( ) \` 와 개행이 markdown-link 토큰 구조를 변조(예 `x](https://phish)[y` → 외부
 // phishing 링크 렌더)하는 걸 차단한다. ⛔형제 함수(applyEntity·applyAsset)가 이 상수 하나를

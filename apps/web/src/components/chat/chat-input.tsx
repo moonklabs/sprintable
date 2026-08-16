@@ -22,7 +22,8 @@ import { ENTITY_ICONS } from './embed-card';
 import { translateEntityStatus } from './entity-status-labels';
 import { AssetPickerPopover } from './asset-picker-popover';
 import {
-  applyEntity, entityTypeLabel, escapeMarkdownLinkText, getEntityQuery, groupEntitiesByType, type EntityResult,
+  applyEntity, entityTypeLabel, escapeMarkdownLinkText, getEntityQuery, groupEntitiesByType,
+  shouldAcceptEntityPickerSelection, type EntityResult,
 } from './chat-input-entity-tokens';
 import { useEntityPicker } from '@/hooks/use-entity-picker';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -360,8 +361,19 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
     if (entityPicker.entityResults.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); entityPicker.moveDown(); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); entityPicker.moveUp(); return; }
-      // §5.2 select 가드: async 윈도우서 index가 범위 밖이면 undefined select 방지(클램프+존재 체크).
-      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); const ent = entityPicker.entityResults[entityPicker.entityIndex] ?? entityPicker.entityResults[0]; if (ent) selectEntity(ent); return; }
+      // story d6f8e025 — shouldAcceptEntityPickerSelection: 화살표로 능동 탐색한 적 없이
+      // Enter를 누르면(전송 키를 겸함) 수락하지 않는다 — preventDefault 없이 통과시켜
+      // 아래 일반 Enter=전송 분기가 받게 한다. Tab은 늘 수락(전송 키가 아니라 위험 없음).
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        if (shouldAcceptEntityPickerSelection(e.key, entityPicker.hasNavigated)) {
+          // §5.2 select 가드: async 윈도우서 index가 범위 밖이면 undefined select 방지(클램프+존재 체크).
+          e.preventDefault();
+          const ent = entityPicker.entityResults[entityPicker.entityIndex] ?? entityPicker.entityResults[0];
+          if (ent) selectEntity(ent);
+          return;
+        }
+        entityPicker.close();
+      }
       if (e.key === 'Escape') { entityPicker.close(); return; }
     }
     if (mentionMembers.length > 0) {
