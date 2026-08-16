@@ -910,6 +910,13 @@ jobs:
       - name: "Verify RESERVED_FIRST_SEGMENTS sync (story #2393 regression guard)"
         run: pnpm --filter web verify:reserved-first-segments-sync
 
+      # story #1971 회귀가드: RENAMED_RESOURCES(옛 이름→신 이름)의 값이 MIGRATED_RESOURCES
+      # (bare 딥링크를 [ws]/[proj]로 채워 넣는 표)의 키에도 있는지 대조한다 — proxy.ts의
+      # redirectLegacyResourcePath는 정확히 그 판정(resourceName in MIGRATED_RESOURCES)으로
+      # bare 콜드 딥링크의 ws/proj를 채운다. #2016(epics→goals) 실사고와 동형 재발 방지.
+      - name: "Verify MIGRATED_RESOURCES sync (story #1971 regression guard)"
+        run: pnpm --filter web verify:migrated-resources-sync
+
       - name: Test
         # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead
         # of being masked by tail's 0 — without it the unit-test gate was a no-op

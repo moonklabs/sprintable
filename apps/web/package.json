@@ -19,6 +19,7 @@
     "verify:no-i18n-phrase-collision": "tsx scripts/verify-no-i18n-phrase-collision.ts",
     "verify:no-orphan-resource-routes": "tsx scripts/verify-no-orphan-resource-routes.ts",
     "verify:reserved-first-segments-sync": "tsx scripts/verify-reserved-first-segments-sync.ts",
+    "verify:migrated-resources-sync": "tsx scripts/verify-migrated-resources-sync.ts",
     "verify:tint-foreground-contrast": "tsx scripts/verify-tint-foreground-contrast.ts",
     "verify:no-new-tint-color-text": "tsx scripts/verify-no-new-tint-color-text.ts",
     "verify:cross-element-tint-text": "tsx scripts/verify-cross-element-tint-text.ts",
