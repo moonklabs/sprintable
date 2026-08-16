@@ -40,6 +40,7 @@ from app.services.project_auth import (
     has_project_access,
     is_org_owner,
     is_org_owner_or_admin,
+    require_project_access,
 )
 
 
@@ -226,8 +227,9 @@ async def create_gate_endpoint(
     # fail-closed(②): 통과는 KNOWN_PROJECT_AGNOSTIC_WORK_ITEM_TYPES(명시 allowlist)에 있을 때만 —
     # PROJECT_SCOPED_WORK_ITEM_TYPES에도 그 목록에도 없는 미분류 타입은 기본값이 거부다.
     if project_id is not None:
-        if not await has_project_access(session, uuid.UUID(_auth.user_id), project_id, org_id):
-            raise HTTPException(status_code=404, detail="Project not found")
+        # story #2697: require_project_access(전 리소스 공용 판정 함수)로 위임(재구현 0).
+        await require_project_access(session, uuid.UUID(_auth.user_id), project_id, org_id,
+                                      not_found_detail="Project not found")
     elif not is_known_project_agnostic_work_item_type(body.work_item_type):
         raise HTTPException(status_code=404, detail="Project not found")
     gate = await create_gate(
@@ -798,8 +800,10 @@ async def get_gate_endpoint(
     # 안에서 해소 안 되는 것은 이 gate 자체가 가리키는 대상이 이 org에 없다는 뜻이라 거부.
     # fail-closed(②): 통과는 KNOWN_PROJECT_AGNOSTIC_WORK_ITEM_TYPES 명시 allowlist에 있을 때만.
     if project_id is not None:
-        if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
-            raise HTTPException(status_code=404, detail="Gate not found")
+        # story #2697: require_project_access(전 리소스 공용 판정 함수)로 위임 — 이 파일이
+        # goals/stories/sprints/retros가 수렴한 원본 레퍼런스 패턴이었다(재구현 0).
+        await require_project_access(session, uuid.UUID(auth.user_id), project_id, org_id,
+                                      not_found_detail="Gate not found")
     elif not is_known_project_agnostic_work_item_type(gate.work_item_type):
         raise HTTPException(status_code=404, detail="Gate not found")
 

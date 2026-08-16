@@ -81,12 +81,15 @@ def _mock_vote() -> MagicMock:
 
 
 def _allow_project_access():
-    """has_project_access를 True로 patch(router-local import 경로) — session-scope pre-check용."""
-    return patch("app.routers.retros.has_project_access", new=AsyncMock(return_value=True))
+    """has_project_access를 True로 patch — story #2697: 라우터가 이제 전부
+    require_project_access(project_auth.py SSOT)를 경유하고, 그 함수는 같은 모듈 안에서
+    has_project_access를 bare name으로 부른다 — router-local import가 아니라 진짜 소스
+    (app.services.project_auth.has_project_access)를 patch해야 라우터 무관하게 먹힌다."""
+    return patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=True))
 
 
 def _deny_project_access():
-    return patch("app.routers.retros.has_project_access", new=AsyncMock(return_value=False))
+    return patch("app.services.project_auth.has_project_access", new=AsyncMock(return_value=False))
 
 
 def _mock_resolve_member(member_id: uuid.UUID | None = None, member_type: str = "human"):
