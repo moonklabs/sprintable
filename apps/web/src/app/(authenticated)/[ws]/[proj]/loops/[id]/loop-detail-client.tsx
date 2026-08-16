@@ -52,7 +52,7 @@ interface DocSummary {
  * brief state가 잔존하는 버그 클래스(A3 AuditClient·S8 TenantsClient에 이은 3번째 재발
  * ·까심 QA 적출) — route param으로 fetch하는 상세 page는 항상 key-remount.
  */
-export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string; wsSlug: string; projSlug: string }) {
+export function LoopDetailClient({ loopId, wsSlug, projSlug, projectId }: { loopId: string; wsSlug: string; projSlug: string; projectId: string }) {
   const t = useTranslations('loops');
   const th = useTranslations('hypotheses');
   const router = useRouter();
@@ -70,6 +70,11 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string;
       const loopRes = await fetchWithAuth(`/api/loops/${loopId}`);
       if (!loopRes.ok) { setNotFound(true); return; }
       const loopData = (await loopRes.json()) as Loop;
+      // story f401139e — GET /api/loops/{id}가 X-Project-Id와 무관하게 200을 줄 수 있어
+      // (goals/stories/conversations/sprints와 동일 계열 BE 갭, 그라운딩 확認) res.ok만으론
+      // 부족 — 응답의 project_id를 현재 프로젝트와 직접 대조해야 옛 프로젝트 loop이 새
+      // 프로젝트 URL 아래 노출되지 않는다.
+      if (loopData.project_id && loopData.project_id !== projectId) { setNotFound(true); return; }
       setLoop(loopData);
       setNotFound(false);
 
@@ -107,7 +112,7 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string;
     } finally {
       setLoading(false);
     }
-  }, [loopId]);
+  }, [loopId, projectId]);
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 

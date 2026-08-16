@@ -346,6 +346,13 @@ export default function RetroSessionPage() {
           hypotheses?: RetroHypothesisResult[];
         };
       };
+      // story f401139e — 이 엔드포인트는 이미 `project_id` 쿼리로 BE가 실제로 400을 주는
+      // 자리(그라운딩 확認, goals/loops와 달리 여기는 원래도 안전)라 아래는 belt-and-suspenders:
+      // BE가 언젠가 완화돼 다른 프로젝트 세션에 200을 주게 되더라도 옛 화면이 새 프로젝트 URL
+      // 아래 그대로 남지 않도록, 응답의 project_id를 한 번 더 대조한다.
+      if (json.data.project_id && json.data.project_id !== projectId) {
+        throw new Error('project mismatch');
+      }
       const loadedItems = json.data.items ?? [];
       setSession(json.data);
       setItems(loadedItems);
