@@ -641,6 +641,11 @@ jobs:
     # (backend-test의 필수 판정 근거) cascade로 스킵된다.
     if: always()
     runs-on: ubuntu-latest
+    # story #2285 AC4(2026-08-17 실측, develop 최근 10런): 각 샤드 4~6분 → 천장 25분 대비
+    # 여유 19~21분. 이 값은 story #2293(destructive-schema를 이 job으로 4-way 샤딩)이 옮겨온
+    # 뒤의 실측이라, 그 전(같은 job이 94개를 순차로 다 돌던 시절, 15m58s~18m32s·여유 6.5분)과
+    # 는 다른 상태다. 재검 기준: 이 샤드의 p95가 15분을 넘으면 값을 다시 본다(⛔"자주 터지니
+    # 올린다"가 아니라 근거 먼저 — story #2285 AC4).
     timeout-minutes: 25
     strategy:
       fail-fast: false  # 한 샤드 실패가 다른 샤드를 취소하면 "어디까지 진짜 돌았는지"가 흐려진다
@@ -744,6 +749,10 @@ jobs:
     # exit 1로, 94개 중 하나라도 실패/샤드가 안 돌면 이 필수 체크 자체가 빨개지게 만든다
     # (GitHub의 기본 `needs`-실패-시-skip에만 기대면 "필수 체크가 skipped로 조용히 안
     # 걸리는" 위험이 있다 — 파울로군 지적).
+    #
+    # story #2285 AC4(2026-08-17 실측, develop 최근 10런): 이 job 본체(non-destructive
+    # pytest, story #2293 이관 후) 7~8분 → 천장 25분 대비 여유 17~18분. 재검 기준: p95가
+    # 15분을 넘으면 값을 다시 본다.
     timeout-minutes: 25
 
     services:
@@ -794,7 +803,25 @@ jobs:
 
       - name: Run pytest (non-destructive, real-PG auto-discovered via marker)
         working-directory: backend
-        run: uv run pytest -q -m "not destructive_schema"
+        run: |
+          set -o pipefail
+          uv run pytest -q -m "not destructive_schema" --durations=20 2>&1 | tee /tmp/pytest_output.log
+
+      # story #2285 AC5: 넘쳤을 때(취소) 무엇이 시간을 먹었는지 최소한이라도 보이게 —
+      # --durations=20이 정상 완주 시엔 정확한 breakdown을 준다. ⛔한계를 그대로 적는다: job이
+      # 25분 천장에 «중간에» 취소되면 이 스텝(과 --durations 출력 자체)도 같이 죽는다 — GitHub
+      # Actions는 타임아웃-취소 시 이후 스텝을 실행할 방법을 안 준다(`if: always()`도 못 막음).
+      # 그래서 이건 "정상 완주했지만 느려지는 중"을 조기에 보이게 하는 것까지가 이 스텝의
+      # 몫 — 그 이상(취소 순간의 실시간 heartbeat 등)은 짓지 않는다(AC6).
+      - name: Slowest tests summary (story #2285 AC5)
+        if: always()
+        run: |
+          {
+            echo "## Backend pytest — slowest 20 (여유: 천장 25분, 08-17 실측 본체 7~8분)"
+            echo '```'
+            awk '/slowest 20 durations/,0' /tmp/pytest_output.log 2>/dev/null || echo "(durations 출력 없음 — 타임아웃-취소로 이 스텝 자체가 못 돌았을 가능성)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   ci:
     name: Lint, Type Check, Test, Build
