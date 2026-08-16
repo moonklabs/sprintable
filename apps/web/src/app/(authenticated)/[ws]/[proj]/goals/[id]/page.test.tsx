@@ -107,6 +107,30 @@ async function mount(fetchImpl: (...args: unknown[]) => Promise<unknown>) {
   return { EpicDetailPage, GoalsRouteProvider };
 }
 
+// story f401139e — BE GET /api/goals/{id}는 X-Project-Id와 무관하게 200을 줄 수 있다(그라운딩
+// 확認). 프로젝트 전환 직후 이 페이지가 옛 프로젝트 goal을 편집/삭제 버튼까지 활성 상태로 그대로
+// 보여주던 결함을 잡는다 — res.ok=200이어도 응답의 project_id가 현재 프로젝트(wrap()의
+// projectId="proj-1")와 다르면 목록으로 replace하고 절대 렌더하지 않는다.
+describe('EpicDetailPage — cross-project stale 응답 폴백 (story f401139e)', () => {
+  it('200이어도 응답 project_id가 현재 프로젝트와 다르면 렌더하지 않고 목록으로 replace한다', async () => {
+    await mount(vi.fn(async () => ({
+      ok: true, status: 200,
+      json: async () => ({ data: epicFixture({ project_id: 'other-project', title: '남의 프로젝트 목표' }) }),
+    })));
+    expect(replaceMock).toHaveBeenCalledWith('/ws/proj/goals');
+    expect(container.textContent).not.toContain('남의 프로젝트 목표');
+  });
+
+  it('200이고 project_id가 현재 프로젝트와 같으면 정상 렌더한다(회귀 없음)', async () => {
+    await mount(vi.fn(async () => ({
+      ok: true, status: 200,
+      json: async () => ({ data: epicFixture({ project_id: 'proj-1', title: '내 프로젝트 목표' }) }),
+    })));
+    expect(replaceMock).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('내 프로젝트 목표');
+  });
+});
+
 describe('EpicDetailPage — 403 vs 404 분리 (story #2545)', () => {
   it('org-sync 성립 여지가 있는(mismatch pending) 403이면 replace 없이 로딩 상태를 유지한다(#2545 원 시나리오)', async () => {
     // story #2587 AC3 — 이 테스트의 진짜 의도는 "org-sync가 아직 이 403을 되돌릴 수 있을

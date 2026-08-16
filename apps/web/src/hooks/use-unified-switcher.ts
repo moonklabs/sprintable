@@ -42,6 +42,31 @@ function isSafeInternalNext(value: string | null): value is string {
   return !!value && value.startsWith('/') && !value.startsWith('//') && !value.includes('\\');
 }
 
+// story f401139e — switchProject/switchOrgAndProject 예전엔 현재 searchParams를 통째로
+// 이월하고 `p`만 갈아끼웠다. `withSwitchedSlugs`는 pathname 세그먼트[0]/[1](org/project slug)만
+// 바꿀 뿐 세그먼트[2:]나 쿼리파라미터 안의 리소스 id는 그대로 두므로, `?story=`/`?id=` 같은
+// 리소스-scoped 파라미터가 새 프로젝트로 그대로 넘어가면 존재하지도 않는(또는 다른 프로젝트
+// 소속) 리소스를 새 URL 아래서 열려고 시도하게 된다(`flow?story=`는 로컬 필터링 목록에서
+// 찾는 구현이라 우연히 안전했을 뿐 — 그라운딩 확認, 설계가 아니었다). 화이트리스트 방식으로
+// 뒤집는다: 프로젝트-무관 UI 상태만 명시로 이월하고, 나머지는 기본적으로 버린다 — 이후
+// 새 쿼리파라미터가 추가돼도 여기 명시로 추가하지 않는 한 자동으로 안전하다.
+//
+// 드랍(리소스/필터-scoped, 재검토 시 이 목록 갱신):
+//   story·hypothesis·goal·id·slug — 리소스 id/슬러그 직참조(flow·sprints·docs 등)
+//   task_id·epic_id·sprint_id·assignee_id — kanban 보드 필터(값이 특정 프로젝트에 종속)
+//   from·pn·messageId — chats/[conversation_id]의 프로젝트-교차 진입 컨텍스트
+//   agent_id — channel 페이지의 프로젝트 종속 에이전트 참조
+const PROJECT_AGNOSTIC_QUERY_PARAMS = ['view', 'tab'] as const;
+
+function withProjectAgnosticParams(searchParams: URLSearchParams): URLSearchParams {
+  const sp = new URLSearchParams();
+  for (const key of PROJECT_AGNOSTIC_QUERY_PARAMS) {
+    const value = searchParams.get(key);
+    if (value !== null) sp.set(key, value);
+  }
+  return sp;
+}
+
 // story #2039 AC4 — 라이브 재현 확認(2026-07-20): switchProject/switchOrgAndProject가 URL 경로는
 // 그대로 두고 `?p=`만 갈아끼워서 ①목록이 안 바뀐 것처럼 보이고 ②사이드바를 누르는 순간에야 새
 // 프로젝트 slug로 이동해 그 slug가 미정규화(한글 등)면 404가 터진다(#2039 본체와 결합해 증폭).
@@ -215,7 +240,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
         router.push(nextTarget);
         return;
       }
-      const sp = new URLSearchParams(Array.from(searchParams.entries()));
+      const sp = withProjectAgnosticParams(searchParams);
       sp.set('p', projectId);
       const newOrgSlug = orgs.find((o) => o.orgId === nextOrgId)?.orgSlug;
       const newSlug = newOrgSlug ? await fetchProjectSlug(projectId) : null;
@@ -252,7 +277,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
         router.push(nextTarget);
         return;
       }
-      const sp = new URLSearchParams(Array.from(searchParams.entries()));
+      const sp = withProjectAgnosticParams(searchParams);
       sp.set('p', nextProjectId);
       const orgSlug = currentOrg?.orgSlug;
       const newSlug = orgSlug ? await fetchProjectSlug(nextProjectId) : null;
