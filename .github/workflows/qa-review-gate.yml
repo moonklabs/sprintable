@@ -201,6 +201,14 @@ jobs:
       # 끝나면 명시로 비차단(관찰 확認, PR#3090 체크 목록 실측)이니 그것만 빼고 나머지 전부를
       # "이 게이트가 신경 쓰는 대상"으로 본다 — 보수적(advisory 아닌 느린 잡 때문에도 막힐 수
       # 있음)이지만 "몰라서 초록"보다 안전.
+      #
+      # ⛔PO 리뷰 블로커(2026-08-16, PR#3092 첫 판) — 자기 이름("QA review gate")만 빼면
+      # "Design review gate"는 여전히 비-advisory로 잡혀, 두 라벨이 다 걸린 PR에서 두 게이트가
+      # 동시에 재실행되면(오늘 3086/3088류 실물 — 한 PR에 qa:pass+design:pass 둘 다 필요하면
+      # 흔한 정상 상황) 서로가 서로를 "아직 안 끝남"으로 보고 상호 RED로 고착된다(둘 다 완료된
+      # 뒤에도 자동 재트리거가 없어 새 pull_request 이벤트 전까지 안 풀림). 상대 게이트 이름도
+      # 같이 뺀다 — 순환 대기를 구조적으로 없앤다(광범위 제외라 "advisory 아닌 다른 게이트류"가
+      # 미래에 더 생기면 그때 또 추가해야 하는 갭은 남는다, 지금은 이 리포에 게이트가 이 둘뿐).
       - name: Enforce no incomplete non-advisory checks when qa:pass is claimed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -208,7 +216,7 @@ jobs:
         run: |
           set -euo pipefail
           INCOMPLETE="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/check-runs" --paginate \
-            --jq '.check_runs[] | select(.name != "QA review gate") | select(.name | endswith("— advisory") | not) | select(.status != "completed") | .name' \
+            --jq '.check_runs[] | select(.name != "QA review gate" and .name != "Design review gate") | select(.name | endswith("— advisory") | not) | select(.status != "completed") | .name' \
             | sort -u)"
           if [ -n "${INCOMPLETE}" ]; then
             echo "::error title=required-ish checks still incomplete::qa:pass가 붙어 있지만 아직 안 끝난(비-advisory) 체크가 있다 — 「CI green」은 이것들이 전부 completed일 때만 참이다:"

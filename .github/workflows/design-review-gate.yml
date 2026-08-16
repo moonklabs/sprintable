@@ -226,6 +226,11 @@ jobs:
       # story #2676 AC2 — qa-review-gate.yml과 동형(로직 복제). 잡 이름이 "— advisory"로
       # 끝나면 비차단 관례(실측 확認)라 그것만 빼고, design:pass 붙인 시점에 나머지 체크런
       # 중 미완이 있으면 막는다.
+      #
+      # ⛔PO 리뷰 블로커(2026-08-16, PR#3092 첫 판·qa-review-gate.yml과 동일 대칭 결함) — 자기
+      # 이름만 빼면 "QA review gate"는 여전히 비-advisory로 잡혀, 두 라벨이 다 걸린 PR에서
+      # 두 게이트가 동시에 재실행되면 서로가 서로를 "아직 안 끝남"으로 보고 상호 RED로 고착된다
+      # (자동 재트리거 없어 새 pull_request 이벤트 전까지 안 풀림). 상대 게이트 이름도 같이 뺀다.
       - name: Enforce no incomplete non-advisory checks when design:pass is claimed
         if: steps.scope.outputs.in_scope == 'true'
         env:
@@ -234,7 +239,7 @@ jobs:
         run: |
           set -euo pipefail
           INCOMPLETE="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/check-runs" --paginate \
-            --jq '.check_runs[] | select(.name != "Design review gate") | select(.name | endswith("— advisory") | not) | select(.status != "completed") | .name' \
+            --jq '.check_runs[] | select(.name != "Design review gate" and .name != "QA review gate") | select(.name | endswith("— advisory") | not) | select(.status != "completed") | .name' \
             | sort -u)"
           if [ -n "${INCOMPLETE}" ]; then
             echo "::error title=required-ish checks still incomplete::design:pass가 붙어 있지만 아직 안 끝난(비-advisory) 체크가 있다:"
