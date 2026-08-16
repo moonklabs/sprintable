@@ -81,24 +81,35 @@ async function mount(gateData: GateItem) {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
 
-describe('ApprovalRequestCard — 제목 미리보기 진입점 전 타입 확장(story #2118)', () => {
-  it('work_item_type=story(비-doc)에도 미리보기 진입점(제목 버튼)이 뜬다 — 예전엔 doc만', async () => {
-    await mount(gate({ work_item_type: 'story', work_item_id: 'story-1' }));
-    const titleButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('스토리 제목'));
+// story #2118(페드루 리뷰) — "폴백이 정직하다"(크래시 안 남)는 "클릭에 값이 있다"는 뜻이
+// 아니다. RICH_PREVIEW/ENTITY_API fetch 전략/own-href 셋 다 없는 타입(loop·wf_line_version)은
+// 진입점 자체가 없어야 한다(story #2118 P2.2 AC④ 판정과 동형) — 값 있는 타입(story/task/
+// visual_artifact)은 버튼, 값 없는 타입은 기존 평문 <p>로 짝을 이뤄 검증한다.
+describe('ApprovalRequestCard — 제목 미리보기 진입점, canPreviewEntity로 값 있는 타입만(story #2118)', () => {
+  it.each([
+    ['story', '스토리 제목'],
+    ['task', '태스크 제목'],
+    ['visual_artifact', '비주얼 아티팩트'],
+  ])('work_item_type=%s — 미리보기 진입점(제목 버튼)이 뜬다', async (workItemType, title) => {
+    await mount(gate({ work_item_type: workItemType, work_item_id: 'w-1', work_item_summary: { title, slug: null } }));
+    const titleButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(title));
     expect(titleButton).toBeTruthy();
   });
 
-  it('work_item_type=visual_artifact도 미리보기 진입점이 뜨고 클릭 시 크래시 없이 모달이 연다', async () => {
+  it('visual_artifact 클릭 시 크래시 없이 모달이 연다(toEntityType 변환 실사용 경로)', async () => {
     await mount(gate({ work_item_type: 'visual_artifact', work_item_id: 'artifact-1', work_item_summary: { title: '비주얼 아티팩트', slug: null } }));
     const titleButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('비주얼 아티팩트'));
-    expect(titleButton).toBeTruthy();
     await act(async () => { titleButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(document.body.querySelector('[data-slot="dialog-content"]')).toBeTruthy();
   });
 
-  it('work_item_type=loop(entity 계열 미등록)도 크래시 없이 진입점이 뜬다', async () => {
-    await mount(gate({ work_item_type: 'loop', work_item_id: 'loop-1', work_item_summary: { title: '루프 제목', slug: null } }));
-    const titleButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('루프 제목'));
-    expect(titleButton).toBeTruthy();
+  it.each([
+    ['loop', '루프 제목'],
+    ['wf_line_version', '워크플로 버전'],
+  ])('work_item_type=%s — RICH_PREVIEW/fetch전략/own-href 셋 다 없어 진입점(버튼) 없이 평문으로만 뜬다', async (workItemType, title) => {
+    await mount(gate({ work_item_type: workItemType, work_item_id: 'w-1', work_item_summary: { title, slug: null } }));
+    const titleButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(title));
+    expect(titleButton).toBeFalsy();
+    expect(container.textContent).toContain(title);
   });
 });

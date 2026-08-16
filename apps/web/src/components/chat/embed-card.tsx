@@ -153,6 +153,19 @@ const ENTITY_API: Record<string, (id: string) => string> = {
 // 빼면서 그 이유를 여기 한 줄 남길 것 — «만들 수 있는데 못 여는» 사각을 다시 만들지 않도록.
 const RICH_PREVIEW_TYPES = new Set(['story', 'epic', 'doc', 'artifact', 'hypothesis']);
 
+// story #2118(E-DG-REAL, 페드루 리뷰) — "폴백이 정직하다"(크래시 안 남)는 "클릭에 값이
+// 있다"는 뜻이 아니다. RICH_PREVIEW도 ENTITY_API fetch 전략도 own-href(getEntityHref)도
+// 셋 다 없는 타입(예: gate work_item_type의 loop·wf_line_version — entity 계열 자체에 등록
+// 안 됨)은 제목을 눌러도 "미리보기 없음"+갈 곳 없는 빈 모달만 뜬다 — story #2118(P2.2)
+// AC④가 이미 내린 판정("미리보기 없는 타입에 억지로 진입점 달아 빈 모달 여는 거짓 안
+// 만든다")과 정면충돌. 이 판정을 한 곳에 두어 새 타입이 늘 때마다 흩어진 조건을 다시
+// 맞추지 않게 한다 — 진입점을 달지 여부를 결정하는 소비부(approval-request-card.tsx 등)는
+// 이 함수 하나만 부른다. getEntityHref는 entityId 값과 무관하게 entityType만으로 null 여부가
+// 갈리므로(switch가 타입 단위 분기) 더미 id로도 정확하다.
+export function canPreviewEntity(entityType: string): boolean {
+  return RICH_PREVIEW_TYPES.has(entityType) || Boolean(ENTITY_API[entityType]) || getEntityHref(entityType, '') !== null;
+}
+
 const MdBadge = ({ label }: { label: string }) => (
   <span className="rounded border px-1.5 py-0.5 text-[11px] font-medium border-border bg-muted text-muted-foreground">
     {label}

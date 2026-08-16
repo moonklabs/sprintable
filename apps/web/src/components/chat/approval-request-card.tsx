@@ -9,7 +9,7 @@ import { GateSignatureApproval } from '@/components/cage/gate-signature-approval
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
-import { EntityPreviewModal, getEntityHref, resolveEntityIcon } from '@/components/chat/embed-card';
+import { EntityPreviewModal, canPreviewEntity, getEntityHref, resolveEntityIcon } from '@/components/chat/embed-card';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 import { parseBlockTemplate, renderBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
@@ -250,23 +250,28 @@ function ApprovalRequestBody({
   const needsFullFlow = usesSignatureFlow(riskLevel);
   const canAct = gate.status === 'pending' && gate.can_approve === true;
   const [showPreview, setShowPreview] = useState(false);
-  // story #2118(E-DG-REAL) — doc 전용이던 제목 진입점을 전 work_item_type으로 확장한다.
-  // EntityPreviewModal은 이미 fetch 전략이 없는(또는 rich preview가 없는) 타입도 크래시 없이
-  // "이 엔티티는 별도 미리보기가 없습니다"로 정직하게 떨어진다(embed-card.tsx 실측 확認) —
-  // 그래서 진입점 자체를 막을 필요가 없다. 억지로 빈 모달을 "숨기는" 게 아니라, 모달이 이미
-  // 그 빈 상태를 정직하게 보여줄 수 있으므로 항상 연다.
+  // story #2118(E-DG-REAL) — doc 전용이던 제목 진입점을 전 work_item_type으로 확장하되,
+  // «클릭에 값이 있는 타입»만(페드루 리뷰). canPreviewEntity가 RICH_PREVIEW/ENTITY_API fetch
+  // 전략/own-href 셋 다 없는 타입(loop·wf_line_version 등)을 걸러 빈 모달 진입점을 안 만든다
+  // — story #2118(P2.2) AC④("미리보기 없는 타입에 억지로 진입점 달아 빈 모달 여는 거짓 안
+  // 만든다")와 동형 판정을 embed-card.tsx 공유 함수로 그대로 재사용.
   const previewEntityType = toEntityType(gate.work_item_type);
+  const canPreview = canPreviewEntity(previewEntityType);
 
   return (
     <div className="space-y-2">
-      <button
-        type="button"
-        onClick={() => setShowPreview(true)}
-        className="group/preview flex w-full min-w-0 items-center gap-1 text-left"
-      >
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground group-hover/preview:underline">{title}</span>
-        <Eye className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-      </button>
+      {canPreview ? (
+        <button
+          type="button"
+          onClick={() => setShowPreview(true)}
+          className="group/preview flex w-full min-w-0 items-center gap-1 text-left"
+        >
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground group-hover/preview:underline">{title}</span>
+          <Eye className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        </button>
+      ) : (
+        <p className="truncate text-sm font-medium text-foreground">{title}</p>
+      )}
 
       {gate.status === 'pending' && (riskLevel === 'high' || riskLevel === 'unknown') ? (
         <Badge variant={riskLevel === 'high' ? 'warning' : 'outline'} className={riskLevel === 'unknown' ? 'text-muted-foreground' : undefined}>
