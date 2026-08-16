@@ -2873,10 +2873,8 @@
   "goals": {
     "title": "Goals",
     "subtitle": "Manage the big outcomes your workspace is working toward as goals.",
-    "loading": "Loading...",
     "forbiddenTitle": "Access denied",
     "forbiddenDescription": "You don't have permission to view this goal.",
-    "backToList": "Back to list",
     "newGoal": "Add Goal",
     "noProject": "No project selected.",
     "noGoals": "No goals yet",
