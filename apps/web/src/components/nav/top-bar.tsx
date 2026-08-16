@@ -1,11 +1,14 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { NotificationBell } from './notification-bell';
 import { WhatsNewButton } from '@/components/release-notes/whats-new-button';
 import { PresenceToggleButton } from '@/components/presence/team-presence-toggle';
 import { useTopBar } from './top-bar-context';
 import { ContextSwitcherChip } from './context-switcher-chip';
+import { SidebarTrigger } from '@/components/ui/sidebar';
+import { useIsTablet } from '@/hooks/use-mobile';
 import type { OrgSwitcherItem } from './unified-switcher';
 
 interface TopBarProps {
@@ -21,6 +24,8 @@ interface TopBarProps {
 
 export function TopBar({ className, orgId, orgMemberships = [], projectId, projectMemberships = [] }: TopBarProps) {
   const { title, actions, hidden, showContextChip } = useTopBar();
+  const t = useTranslations('nav');
+  const isTablet = useIsTablet();
   return (
     <div
       className={cn(
@@ -40,6 +45,14 @@ export function TopBar({ className, orgId, orgMemberships = [], projectId, proje
           근본 재구현(2076 회귀 후속, 유나양 규격): 기본 숨김·표시할 루트 화면만 showContextChip
           으로 명시 — "숨길 것 명시" 방식이 새 상세 화면마다 빠뜨리는 fail-open이었던 것을
           "표시할 것만 명시·기본 숨김"으로 뒤집었다(상세 화면은 이미 뒤로가기로 맥락이 있다). */}
+      {/* story #2683(모바일 IA S3) — settings/page.tsx 안에만 있던 전역 GNB 유일문
+          (SidebarTrigger)을 폐기하며(AC1), 태블릿(768~1023, doc §2.6① PO 승인 권고로 Sheet
+          GNB 존치)만 새 문을 여기 둔다. 폰(<768)은 문이 없다 — /more 허브(S2)가 이미 전
+          목적지를 2탭으로 커버해 Sheet GNB 자체가 불필요(doc 판별자). useIsTablet()은 JS
+          판정이라 `md:` Tailwind 브레이크포인트 신규 사용 금지 규율을 건드리지 않는다. */}
+      {isTablet && (
+        <SidebarTrigger aria-label={t('openGlobalNav')} />
+      )}
       {showContextChip && (
         <ContextSwitcherChip
           orgs={orgMemberships}
