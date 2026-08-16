@@ -16,6 +16,16 @@ import jsonschema
 _PRESET_KEY_RE = re.compile(r"^preset\.[a-z0-9_]+(\.[a-z0-9_]+)+$")
 _ORG_KEY_RE = re.compile(r"^org\.([a-z0-9-]+)\.[a-z0-9_]+(\.[a-z0-9_]+)*$")
 
+# story #2666 — _ORG_KEY_RE가 통째로 안 맞으면(m is None) "접두가 틀렸다"는 메시지 하나로
+# 뭉뚱그렸는데, 실제로는 두 가지 다른 사고다: ①진짜 접두 모양 자체가 틀림(org.으로 안
+# 시작하거나 세그먼트가 아예 없음) ②접두(org.{slug}.)는 맞는데 slug 이후 세그먼트에
+# _ORG_KEY_RE가 허용 안 하는 문자(대표적으로 하이픈)가 섞임 — 이 둘을 가르지 않으면 ②
+# 사용자에게 "접두를 고치라"는 «틀린 복구 행동»을 유도한다(#2664 라이브 실측, 세그먼트에
+# 하이픈을 쓴 사용자가 실제로 그랬다). 아래 느슨한 구조 패턴(세그먼트 charset은 안 가리고
+# 개수·마침표 구조만 봄)으로 "접두 자체는 맞았는가"만 먼저 가른다.
+_ORG_KEY_STRUCTURE_RE = re.compile(r"^org\.([^.]+)\.([^.]+(?:\.[^.]+)*)$")
+_SEGMENT_CHARSET_RE = re.compile(r"^[a-z0-9_]+$")
+
 # routing.{escalation,broadcast}.kind="server_derived"의 닫힌 어휘(model.py docstring 참조,
 # 페드루 판정 2026-08-13) — story #2633(해석기)이 실제로 이 target들을 member_id로 풀어야
 # 하므로, 여기 없는 target을 server_derived로 등록하면 해석기가 절대 못 푸는 정의가 만들어진다
@@ -77,6 +87,19 @@ def validate_event_definition_key(
         )
     m = _ORG_KEY_RE.match(key)
     if m is None:
+        loose = _ORG_KEY_STRUCTURE_RE.match(key)
+        if loose is not None and loose.group(1) == org_slug:
+            # 접두(org.{org_slug}.)는 정확히 맞다 — org_slug 자신은 이미 유효한 charset으로
+            # 검증돼 있는 값이므로, 여기까지 왔는데 strict 정규식이 실패했다는 것은 slug
+            # «이후» 세그먼트 중 하나가 허용 문자셋을 벗어났다는 뜻뿐이다(구조는 맞음).
+            bad_segments = [
+                seg for seg in loose.group(2).split(".") if not _SEGMENT_CHARSET_RE.match(seg)
+            ]
+            bad_segments_str = ", ".join(repr(s) for s in bad_segments)
+            raise InvalidEventDefinitionKeyError(
+                f"key의 세그먼트({bad_segments_str})가 허용 문자셋(소문자·숫자·밑줄 "
+                f"[a-z0-9_]만, 하이픈·대문자 불가)을 벗어났습니다: {key!r}"
+            )
         raise InvalidEventDefinitionKeyError(
             f"org 커스텀 정의의 key는 'org.{{slug}}.'로 시작해야 합니다: {key!r}"
         )
