@@ -166,13 +166,25 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1)', () =>
     expect(membersBtn?.hasAttribute('data-active')).toBe(false);
   });
 
-  it('unread 배지(inbox)가 카운트>0일 때만 렌더된다', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: { inboxUnreadCount: 3 } }), {
+  // story #1981 — 배지 소스가 "안 읽은 알림 수"에서 "내 결재 대기 수"(/api/gates?status=
+  // pending&assigned_to_me=true, mobile-tab-bar.tsx와 동일 계약)로 바뀌었다. 응답이 원시
+  // 배열이라 .length가 그대로 배지 숫자다.
+  it('결재 대기 배지(inbox)가 카운트>0일 때만 렌더된다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([{ id: 'g1' }, { id: 'g2' }, { id: 'g3' }]), {
       status: 200, headers: { 'content-type': 'application/json' },
     })));
     await mount();
     const inboxBtn = [...container.querySelectorAll('[data-slot="sidebar-menu-button"]')].find((b) => b.textContent?.includes('알림'));
     expect(inboxBtn?.textContent).toContain('3');
+  });
+
+  it('결재 대기 0건이면 배지가 안 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([]), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    })));
+    await mount();
+    const inboxBtn = [...container.querySelectorAll('[data-slot="sidebar-menu-button"]')].find((b) => b.textContent?.includes('알림'));
+    expect(inboxBtn?.querySelector('[data-slot="sidebar-menu-badge"]')).toBeNull();
   });
 
   it('설정 그룹은 라벨 없는 유틸 그룹으로 유지된다(ia-4zone 확定)', async () => {
