@@ -7,8 +7,8 @@ Create Date: 2026-08-16
 """
 from __future__ import annotations
 
-revision = "0997"
-down_revision = "0252"
+revision = "0996"
+down_revision = "0248"
 branch_labels = None
 depends_on = None
 
