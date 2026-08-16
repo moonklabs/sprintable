@@ -396,6 +396,24 @@ async def has_project_access(
     return bool(result.scalar_one_or_none())
 
 
+async def require_project_access(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    project_id: uuid.UUID,
+    org_id: uuid.UUID,
+    *,
+    not_found_detail: object = "Resource not found",
+) -> None:
+    """story #2697([BE·인가·프로젝트 스코프]) — GET/PATCH/DELETE-by-id 판정 함수 한 곳.
+
+    goals.py/stories.py/sprints.py/retros.py가 각자 ``if not await has_project_access(...):
+    raise HTTPException(404, "X not found")`` 3줄을 리소스마다 복제하고 있었다(리소스 타입별
+    404/403 들쭉날쭉의 근원 — 「막는 쪽과 하는 쪽이 다른 걸 본다」 클래스). 이 헬퍼로 수렴:
+    실패 시 항상 404(존재-비노출 — 다수 관례, gates.py의 기존 설계 원칙과 동일)."""
+    if not await has_project_access(session, user_id, project_id, org_id):
+        raise HTTPException(status_code=404, detail=not_found_detail)
+
+
 async def is_org_owner_or_admin(
     session: AsyncSession,
     user_id: uuid.UUID,

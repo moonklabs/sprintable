@@ -420,11 +420,15 @@ async def _assert_story_project_access(
     이 파일 전체에서 통일한다(participation.py의 동명 헬퍼·gates.py get_gate_endpoint가 이미
     이 규율이었다 — 「같은 엔티티가 경로마다 다른 답」을 내던 것이 진짜 결함이었다). 조직
     경계(다른 org)는 이 함수 호출 前에 이미 404로 막혀 있다(repo.get()의 org 필터) — 이 함수가
-    새로 여는 것은 「조직 안·프로젝트 밖」 하나뿐이고, 그 답도 이제 404다."""
-    from app.services.project_auth import has_project_access
+    새로 여는 것은 「조직 안·프로젝트 밖」 하나뿐이고, 그 답도 이제 404다.
 
-    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
-        raise HTTPException(status_code=404, detail="Story not found")
+    story #2697: 구현을 project_auth.require_project_access(전 리소스 공용 판정 함수)로
+    위임 — #2322가 이 파일 안에서 먼저 정한 404 규율을 이제 goals.py/sprints.py/retros.py도
+    같은 함수로 공유한다(재구현 0)."""
+    from app.services.project_auth import require_project_access
+
+    await require_project_access(session, uuid.UUID(auth.user_id), project_id, org_id,
+                                  not_found_detail="Story not found")
 
 
 async def _upsert_assignee_participation(

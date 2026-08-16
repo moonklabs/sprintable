@@ -184,7 +184,7 @@ async def test_get_gate_endpoint_populates_risk_grade():
 
     with patch.object(gates_mod, "resolve_work_item_project_id",
                        AsyncMock(return_value=project_id)), \
-         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)), \
+         patch("app.services.project_auth.has_project_access", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "_resolve_work_item_summary", AsyncMock(return_value=None)), \
          patch.object(gates_mod, "get_org_posture", AsyncMock(return_value="balanced")) as posture_spy:
         result = await get_gate_endpoint(id=gate_id, session=session, org_id=org_id, auth=auth)
@@ -207,7 +207,7 @@ async def test_get_gate_endpoint_risk_grade_low_permissive():
 
     with patch.object(gates_mod, "resolve_work_item_project_id",
                        AsyncMock(return_value=project_id)), \
-         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)), \
+         patch("app.services.project_auth.has_project_access", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "_resolve_work_item_summary", AsyncMock(return_value=None)), \
          patch.object(gates_mod, "get_org_posture", AsyncMock(return_value="permissive")):
         result = await get_gate_endpoint(id=gate_id, session=session, org_id=org_id, auth=auth)

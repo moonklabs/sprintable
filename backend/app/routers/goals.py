@@ -17,7 +17,7 @@ from app.dependencies.auth import AuthContext, enforce_body_context, get_current
 from app.dependencies.database import get_db, get_read_db
 from app.repositories.goal import GoalRepository
 from app.schemas.goal import GoalCreate, GoalProgressResponse, GoalResponse, GoalUpdate, GoalWithGlanceResponse
-from app.services.project_auth import has_project_access
+from app.services.project_auth import has_project_access, require_project_access
 
 router = APIRouter(tags=["goals", "Work"])
 
@@ -221,9 +221,9 @@ async def get_goal(
     goal = await repo.get(id)
     if goal is None:
         raise HTTPException(status_code=404, detail="Goal not found")
-    # #2237: 형제(update_goal)와 동일한 project 접근권 가드 추가(기존엔 org-scope만 봤다).
-    if not await has_project_access(repo.session, uuid.UUID(auth.user_id), goal.project_id, repo.org_id):
-        raise HTTPException(status_code=404, detail="Goal not found")
+    # #2237/#2697: 형제(update_goal)와 동일한 project 접근권 가드(판정 함수 한 곳).
+    await require_project_access(repo.session, uuid.UUID(auth.user_id), goal.project_id, repo.org_id,
+                                  not_found_detail="Goal not found")
     await _attach_org_project_slugs(repo.session, repo.org_id, [goal])
     return GoalResponse.model_validate(goal)
 
@@ -381,8 +381,8 @@ async def update_goal(
     # title/goal/전략까지 무가드로 덮어쓸 수 있었다(PATH_ID 뮤테이션 project-scope IDOR). resolved
     # -resource(현 goal의 실 project_id)에 has_project_access 사전검증(404·존재 비노출·body-claimed
     # 금지). GoalUpdate엔 project_id 필드 없어 cross-project 이동 경로는 원천 부재.
-    if not await has_project_access(repo.session, uuid.UUID(auth.user_id), current.project_id, repo.org_id):
-        raise HTTPException(status_code=404, detail="Goal not found")
+    await require_project_access(repo.session, uuid.UUID(auth.user_id), current.project_id, repo.org_id,
+                                  not_found_detail="Goal not found")
     data = body.model_dump(exclude_unset=True)
     # ⭐RC#2(D1' 봉인): goal status(lifecycle) **변경**은 generic PATCH 금지 — 전용 transition 엔드포인트
     # (POST /goals/{id}/transition)가 FSM(_GOAL_VALID_TRANSITIONS)+SoD+overlay-gate 보유. generic 으로
@@ -478,9 +478,9 @@ async def get_goal_progress(
     goal = await repo.get(id)
     if goal is None:
         raise HTTPException(status_code=404, detail="Goal not found")
-    # #2237: 형제(update_goal)와 동일한 project 접근권 가드 추가(기존엔 org-scope만 봤다).
-    if not await has_project_access(repo.session, uuid.UUID(auth.user_id), goal.project_id, repo.org_id):
-        raise HTTPException(status_code=404, detail="Goal not found")
+    # #2237/#2697: 형제(update_goal)와 동일한 project 접근권 가드(판정 함수 한 곳).
+    await require_project_access(repo.session, uuid.UUID(auth.user_id), goal.project_id, repo.org_id,
+                                  not_found_detail="Goal not found")
     return await repo.get_progress(id)
 
 
@@ -499,8 +499,8 @@ async def get_goal_reference_candidates(
     goal = await repo.get(id)
     if goal is None:
         raise HTTPException(status_code=404, detail="Goal not found")
-    if not await has_project_access(repo.session, uuid.UUID(auth.user_id), goal.project_id, repo.org_id):
-        raise HTTPException(status_code=404, detail="Goal not found")
+    await require_project_access(repo.session, uuid.UUID(auth.user_id), goal.project_id, repo.org_id,
+                                  not_found_detail="Goal not found")
 
     from app.services.reference_semantic_candidates import list_candidates_for_epic_stories
 
