@@ -77,6 +77,31 @@ async def test_creator_only_creator_absent_403():
     with pytest.raises(HTTPException) as exc:
         await _enforce_agent_creator_policy(sender, [agent_id], session)
     assert exc.value.status_code == 403
+    # story #2613 — FE가 원인을 actionable하게 보이려면 detail이 구조화돼 있어야 한다.
+    assert exc.value.detail == {
+        "code": "AGENT_MESSAGE_POLICY_DENIED",
+        "message": "Agent's creator must be a participant in this conversation",
+        "details": {"agent_id": str(agent_id), "reason": "creator_not_participant"},
+    }
+
+
+@pytest.mark.anyio
+async def test_creator_only_missing_creator_returns_structured_403():
+    """created_by_none 분기(에이전트에 creator 자체가 없음) — creator_not_participant와
+    다른 reason이라 별도 케이스로 고정."""
+    sender = _human_sender(uuid.uuid4(), uuid.uuid4())
+    agent_id = uuid.uuid4()
+    agent = _agent(agent_id, "creator_only", None)
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=_result([agent]))
+    with pytest.raises(HTTPException) as exc:
+        await _enforce_agent_creator_policy(sender, [agent_id], session)
+    assert exc.value.status_code == 403
+    assert exc.value.detail == {
+        "code": "AGENT_MESSAGE_POLICY_DENIED",
+        "message": "Agent has no creator — conversation not allowed",
+        "details": {"agent_id": str(agent_id), "reason": "created_by_none"},
+    }
 
 
 # ── org_wide — org 내 휴먼 전부 허용 ──────────────────────────────────────────
@@ -107,7 +132,8 @@ async def test_list_mode_allowlisted_ok():
 
 @pytest.mark.anyio
 async def test_list_mode_not_allowlisted_403():
-    sender = _human_sender(uuid.uuid4(), uuid.uuid4())  # allowlist 밖 + creator 아님
+    sender_mid = uuid.uuid4()
+    sender = _human_sender(sender_mid, uuid.uuid4())  # allowlist 밖 + creator 아님
     agent_id = uuid.uuid4()
     agent = _agent(agent_id, "list", uuid.uuid4())
     session = AsyncMock()
@@ -115,6 +141,15 @@ async def test_list_mode_not_allowlisted_403():
     with pytest.raises(HTTPException) as exc:
         await _enforce_agent_creator_policy(sender, [agent_id], session)
     assert exc.value.status_code == 403
+    assert exc.value.detail == {
+        "code": "AGENT_MESSAGE_POLICY_DENIED",
+        "message": "Member is not in this agent's message allowlist",
+        "details": {
+            "agent_id": str(agent_id),
+            "member_id": str(sender_mid),
+            "reason": "allowlist_miss",
+        },
+    }
 
 
 @pytest.mark.anyio
