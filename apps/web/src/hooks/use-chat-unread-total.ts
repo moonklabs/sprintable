@@ -54,6 +54,12 @@ export function useChatUnreadTotal(currentTeamMemberId?: string): number {
     currentTeamMemberId,
     onConversationMessage: () => setTotal((prev) => prev + 1),
     onConversationRead: () => fetchTotalRef.current?.(),
+    // story #1978(트랙C) — SSE 드롭 중 놓친 conversation.message_created는 낙관 +1이 못 따라오니
+    // 재연결 시 서버 truth로 스냅해 drift를 없앤다. visibility/focus(위)는 이미 있었지만 그건
+    // "탭이 백그라운드였다 포그라운드로" 축이고, 이건 "SSE 커넥션 자체가 끊겼다 재연결됐다"
+    // 축이라 서로 다른 트리거다(탭은 계속 보이는데 네트워크만 끊겼다 복구된 경우 visibility는
+    // 안 fire하지만 onReconnect는 fire한다).
+    onReconnect: () => fetchTotalRef.current?.(),
   });
 
   return total;
