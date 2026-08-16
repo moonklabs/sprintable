@@ -1,16 +1,22 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { X, Check } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { buildPolicyDeniedMessage, parseAgentMessagePolicyDenied } from '@/lib/agent-message-policy-error';
 
 interface Member {
   id: string;
   name: string;
   type: string;
 }
+
+// story #2613 — 정책 거부(AGENT_MESSAGE_POLICY_DENIED)는 대상 에이전트로의 워크포스 설정
+// 딥링크가 필요해 단순 문자열보다 구조가 더 필요하다(그 외 실패는 기존처럼 문자열 그대로).
+type ModalError = { kind: 'generic'; message: string } | { kind: 'policy'; message: string; agentId: string };
 
 interface NewConversationModalProps {
   projectId: string;
@@ -25,7 +31,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
   const [groupTitle, setGroupTitle] = useState('');
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ModalError | null>(null);
 
   useEffect(() => {
     fetch(`/api/members?is_active=true&project_id=${projectId}`)
@@ -57,11 +63,22 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
           project_id: projectId,
         }),
       });
-      if (!res.ok) throw new Error('Failed to create conversation');
+      if (!res.ok) {
+        // story #2613(PR #2824 승계) — creator/allowlist 정책 거부는 generic 403이 아니라
+        // 구조화 코드로 온다(BE PR#3096). 서버 message는 로케일 무관 영문 고정문이라 그대로
+        // 노출하지 않고(계약 원칙), reason을 보고 FE가 actionable 안내를 직접 구성한다.
+        const body = await res.json().catch(() => null);
+        const policy = parseAgentMessagePolicyDenied(body);
+        if (policy) {
+          setError({ kind: 'policy', message: buildPolicyDeniedMessage(policy, members, t), agentId: policy.agent_id });
+          return;
+        }
+        throw new Error('Failed to create conversation');
+      }
       const data = await res.json() as { id: string };
       onCreated(data.id);
     } catch {
-      setError('대화 생성에 실패했습니다. 다시 시도해보세요.');
+      setError({ kind: 'generic', message: '대화 생성에 실패했습니다. 다시 시도해보세요.' });
     } finally {
       setCreating(false);
     }
@@ -126,7 +143,19 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
 
           {/* story #2105 2차 — handleCreate가 재시도 전 setError(null)을 먼저 호출해(위 정의) 매
               시도마다 언마운트→리마운트된다. */}
-          {error && <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-2 text-xs text-destructive">{error}</p>}
+          {error && (
+            <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-2 text-xs text-destructive">
+              {error.message}
+              {error.kind === 'policy' ? (
+                <>
+                  {' · '}
+                  <Link href={`/organization/workforce/${error.agentId}`} className="text-primary underline">
+                    {t('policyDeniedManageLink')}
+                  </Link>
+                </>
+              ) : null}
+            </p>
+          )}
         </div>
 
         {/* Footer */}
