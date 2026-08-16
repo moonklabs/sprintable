@@ -38,6 +38,13 @@ vi.mock('next/image', () => ({
     <img src={src} alt={alt} data-next-image="true" />,
 }));
 
+// story #2671 — EmbedCard(단독 참조 문단 카드 렌더)가 doc 클릭 시 useRouter()를 쓴다.
+// 이 스위트의 baseMessage.content 자체가 단독 doc 참조라 라우터 컨텍스트 없이 렌더하면
+// "invariant expected app router to be mounted"로 죽는다.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: () => {} }),
+}));
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -57,7 +64,11 @@ const baseMessage: ChatMessage = {
   created_by: 'agent-1',
   sender_name: '오르테가',
   sender_type: 'agent',
-  content: `[제안서.md](entity:doc:${DOC_ID})`,
+  // story #2671 — 링크 하나뿐인 문단은 이제 EmbedCard(카드)로 렌더된다(신규 기능, 아래
+  // 전용 describe에서 검증). 이 파일의 나머지 스위트는 전부 EntityChip 특화 동작(사실성
+  // 표기·상태 배지·결재 CTA·모달 재렌더 생존 등)을 재는 게 목적이라 앞에 문맥어를 붙여
+  // "단독 문단"이 아니게 만든다 — 카드 스왑에 영향받지 않고 원래 의도 그대로 유지.
+  content: `문서 첨부: [제안서.md](entity:doc:${DOC_ID})`,
   attachments: [],
   created_at: '2026-07-20T00:00:00.000Z',
 };
@@ -177,7 +188,7 @@ describe('ChatBubble — story #2262 AC2 PR② 1단계(2026-08-07 유나양 카�
     await act(async () => {
       root.render(wrap(
         <ChatBubble
-          message={{ ...baseMessage, content: `[가설 A](entity:hypothesis:${hypothesisId})`, references: undefined }}
+          message={{ ...baseMessage, content: `가설 첨부: [가설 A](entity:hypothesis:${hypothesisId})`, references: undefined }}
           isMine={false}
         />,
       ));
@@ -1376,5 +1387,93 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
     });
     expect(container.textContent).toContain('상신 실패');
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(true);
+  });
+});
+
+// story #2671 — EmbedCard(ME-S5 원조 카드, "메모 기능 퇴역" PR#924 이후 실 렌더 경로 0건이던
+// built-but-nowhere-to-run)를 되살린 지점. 참조 링크 하나뿐인 문단만 카드로 바뀐다 — 본문에
+// 섞인 인라인 참조는 위 스위트 전부가 그대로 증명하듯 EntityChip 그대로다(회귀 0).
+describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌더', () => {
+  it('참조 링크 하나뿐인 문단(doc)은 EmbedCard로 렌더된다(카드 전용 미리보기 아이콘 버튼 존재)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, content: `[제안서.md](entity:doc:${DOC_ID})`, references: [{ target_type: 'doc', target_id: DOC_ID }] }}
+          isMine={false}
+        />,
+      ));
+    });
+    // EmbedCard doc 분기 전용 마커 — EntityChip엔 이 아이콘 버튼이 없다.
+    expect(container.querySelector('button[aria-label="미리보기"]')).not.toBeNull();
+    // 카드(block, rounded-md) — 칩(inline, rounded)과 다른 시각 클래스.
+    expect(container.querySelector('.rounded-md')).not.toBeNull();
+    expect(container.textContent).toContain('제안서.md');
+  });
+
+  it('참조 링크 하나뿐인 문단(story·non-doc)도 EmbedCard로 렌더된다', async () => {
+    const storyId = '33333333-3333-3333-3333-333333333333';
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, content: `[스토리 제목](entity:story:${storyId})`, references: [{ target_type: 'story', target_id: storyId }] }}
+          isMine={false}
+        />,
+      ));
+    });
+    expect(container.querySelector('.rounded-md')).not.toBeNull();
+    // non-doc 분기엔 미리보기 아이콘이 없다(doc 전용) — 카드 자체를 눌러 모달을 연다.
+    expect(container.querySelector('button[aria-label="미리보기"]')).toBeNull();
+    expect(container.textContent).toContain('스토리 제목');
+  });
+
+  it('참조가 유령(stored 참조에 없음)이면 단독 문단이어도 카드가 아니라 유령 칩(행동 0)이다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, content: `[제안서.md](entity:doc:${DOC_ID})`, references: [] }}
+          isMine={false}
+        />,
+      ));
+    });
+    expect(container.querySelector('.rounded-md')).toBeNull();
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.textContent).toContain('대상이 없습니다');
+  });
+
+  it('asset 토큰은 단독 문단이어도 기존 AssetEmbedCard 그대로다(EmbedCard로 안 새어간다)', async () => {
+    // 카디르군 QA 지적(PR#3086) — references:[](유령)를 쓰면 유령가드가 먼저 막아버려서
+    // asset 제외 분기(`m[1] !== 'asset'`) 자체는 한 번도 안 거친 채로 그린이 뜬다(뮤테이션
+    // 해서 그 분기를 지워도 이 테스트는 안 빨개짐). 실제 asset 제외를 재는 재현은 asset이
+    // «유령이 아닌» 상태여야 한다 — stored 참조에 asset 엔트리를 실어 ghost가 false가 되게
+    // 하고, AssetEmbedCard 전용 렌더(자산 조회 실패 폴백 문구)로 「EmbedCard로 안 갔다」를
+    // 직접 확認한다(부재 아닌 양성 마커).
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, content: `[파일.png](entity:asset:${DOC_ID})`, references: [{ target_type: 'asset', target_id: DOC_ID }] }}
+          isMine={false}
+        />,
+      ));
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.querySelector('button[aria-label="미리보기"]')).toBeNull();
+    expect(container.querySelector('.rounded-md')).not.toBeNull();
+    // AssetEmbedCard의 실 렌더 마커(자산 조회 실패 폴백 문구) — EmbedCard로 샜다면 절대 안 뜬다.
+    expect(container.textContent).toContain('자산을 찾을 수 없습니다');
+  });
+
+  it('같은 문단에 참조 외 텍스트가 섞여 있으면(단독 아님) 카드가 아니라 인라인 칩이다(회귀 0)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, content: `참고: [제안서.md](entity:doc:${DOC_ID})`, references: [{ target_type: 'doc', target_id: DOC_ID }] }}
+          isMine={false}
+        />,
+      ));
+    });
+    expect(container.querySelector('.rounded-md')).toBeNull();
+    expect(container.querySelector('button[aria-label="미리보기"]')).toBeNull();
+    expect(container.textContent).toContain('참고:');
+    expect(container.textContent).toContain('제안서.md');
   });
 });

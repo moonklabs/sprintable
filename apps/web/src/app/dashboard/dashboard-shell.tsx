@@ -49,9 +49,18 @@ interface DashboardContext {
   currentMemberType?: 'human' | 'agent';
   projectMemberships: DashboardProjectOption[];
   orgMemberships: OrgSwitcherItem[];
+  // story #2587 AC3 — 「진짜 권한없음 403」을 정직하게 끝내려면 소비 화면이 "org-sync가
+  // 아직 이 경로에 대해 성립할 여지가 있는가"를 알아야 한다(있으면 403이 stale일 수 있어
+  // 로딩 유지가 맞고, 없으면 403은 진짜다). pathOrgId가 없거나(flat 라우트) 이미
+  // actualTokenOrgId와 같으면(재발급이 발화조차 안 함, 아래 switch-org effect의 조기
+  // return 조건과 정확히 대칭) org-sync는 이 경로에 대해 아무 것도 안 한다 — false.
+  // ⛔optional — DashboardShellProps가 이 interface를 extends해 필수면 서버 레이아웃이
+  // 이걸 prop으로 넘겨야 하는 것처럼 보인다. 실제로는 DashboardShell 내부에서만 계산해
+  // Provider value에 싣는 값이라 외부 prop 계약에선 없어도 된다.
+  orgSyncPending?: boolean;
 }
 
-const DashboardCtx = createContext<DashboardContext>({ projectMemberships: [], orgMemberships: [] });
+const DashboardCtx = createContext<DashboardContext>({ projectMemberships: [], orgMemberships: [], orgSyncPending: false });
 
 export function useDashboardContext() {
   return useContext(DashboardCtx);
@@ -309,6 +318,11 @@ export function DashboardShell({
   // 그 클레임이 없는 인증경로(Firebase 세션 —
   // db/server.ts 참고)에서만 orgId로 폴백한다.
   const actualTokenOrgId = jwtOrgId ?? orgId;
+  // story #2587 AC3 — 아래 switch-org effect의 조기 return 조건(`!pathOrgId ||
+  // pathOrgId === actualTokenOrgId`)과 정확히 대칭인 부정형. true인 동안은 재발급이
+  // 시도됐거나 시도될 예정이라 이 순간의 403은 stale일 수 있다(로딩 유지가 맞음) — false면
+  // org-sync가 이 경로에 대해 아무 것도 할 게 없다는 뜻이라 그 순간의 403은 진짜다.
+  const orgSyncPending = !!pathOrgId && pathOrgId !== actualTokenOrgId;
   const orgSyncAttemptedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!pathOrgId || pathOrgId === actualTokenOrgId) return;
@@ -349,7 +363,7 @@ export function DashboardShell({
   // 참고) — 이 훅 호출은 <RealtimeProvider> 자식 위치(ShellBody 안)로 옮겨졌다.
 
   return (
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, currentMemberType, projectMemberships, orgMemberships }}>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>

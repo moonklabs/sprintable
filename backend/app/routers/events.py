@@ -877,17 +877,21 @@ async def _resolve_event_project_id(
     """이벤트가 속할 project_id — work_item_type/id가 있으면 그 작업의 project(gate_service.
     resolve_work_item_project_id 재사용, 신규 쿼리 만들지 않음), goal_id만 있으면(preset.
     goal.measured) Goal.project_id 직접. 둘 다 없으면 None(호출부가 400으로 거부)."""
+    from app.services.event_routing_resolver import _parse_uuid
+
     if payload.get("work_item_type") and payload.get("work_item_id"):
         from app.services.gate_service import resolve_work_item_project_id
 
         return await resolve_work_item_project_id(
-            db, org_id, payload["work_item_type"], uuid.UUID(payload["work_item_id"]),
+            db, org_id, payload["work_item_type"],
+            _parse_uuid(payload["work_item_id"], field_name="work_item_id"),
         )
     if payload.get("goal_id"):
         from app.models.pm import Goal
 
+        goal_id = _parse_uuid(payload["goal_id"], field_name="goal_id")
         return (await db.execute(
-            select(Goal.project_id).where(Goal.id == uuid.UUID(payload["goal_id"]), Goal.org_id == org_id)
+            select(Goal.project_id).where(Goal.id == goal_id, Goal.org_id == org_id)
         )).scalar_one_or_none()
     return None
 
@@ -1027,7 +1031,11 @@ async def publish_registry_event(
             detail={"code": "invalid_payload", "message": str(e), "errors": e.errors},
         ) from e
 
-    from app.services.event_routing_resolver import MissingRoutingPayloadFieldError, resolve_routing_leg
+    from app.services.event_routing_resolver import (
+        InvalidWorkItemReferenceError,
+        MissingRoutingPayloadFieldError,
+        resolve_routing_leg,
+    )
 
     try:
         escalation_ids = await resolve_routing_leg(
@@ -1036,7 +1044,7 @@ async def publish_registry_event(
         broadcast_ids = await resolve_routing_leg(
             definition.routing["broadcast"], payload=body.payload, org_id=org_id, db=db,
         )
-    except MissingRoutingPayloadFieldError as e:
+    except (MissingRoutingPayloadFieldError, InvalidWorkItemReferenceError) as e:
         raise HTTPException(
             status_code=400,
             detail={"code": "invalid_payload", "message": str(e), "errors": [str(e)]},
@@ -1047,7 +1055,13 @@ async def publish_registry_event(
 
         broadcast_ids |= await filter_org_member_ids(set(body.extra_broadcast_member_ids), org_id, db)
 
-    project_id = await _resolve_event_project_id(db, org_id=org_id, payload=body.payload)
+    try:
+        project_id = await _resolve_event_project_id(db, org_id=org_id, payload=body.payload)
+    except InvalidWorkItemReferenceError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_payload", "message": str(e), "errors": [str(e)]},
+        ) from e
     if project_id is None:
         # story #2674 — «참조 필드 자체가 없음»과 «참조는 있는데 못 풂(dangling)»은 다른
         # 사건이다. 정의기(#2670)가 만드는 임의 payload 커스텀 이벤트(신호형·측정형류)는
@@ -1388,3 +1402,63 @@ async def update_event_definition(
     await db.commit()
     await db.refresh(definition)
     return _event_definition_detail(definition)
+
+
+class EventPublishHistoryItem(BaseModel):
+    id: str
+    conversation_id: str
+    sender_id: str | None
+    sender_name: str | None
+    created_at: datetime
+
+
+@router.get("/definitions/publish-history", response_model=list[EventPublishHistoryItem])
+async def get_event_publish_history(
+    definition_key: str = Query(...),
+    limit: int = Query(default=20, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> list[EventPublishHistoryItem]:
+    """GET /api/v2/events/definitions/publish-history — story #2665(#2664 후속): definition_key
+    축 발행 이력 조회.
+
+    발행 기록 자체가 별도 로그 테이블이 아니라 대화 메시지 metadata에만 존재한다(#2637
+    AC 0-a — publish_registry_event가 msg_metadata['event']['event_key']로 태깅) — 그
+    SSOT를 그대로 조회한다(신규 로그 테이블 발명 안 함).
+
+    org admin/owner 전용(다른 정의 관리 엔드포인트와 동일 게이트 — 발행 이력도 관리 맥락의
+    관측 표면). conversation_messages 자체엔 org_id 컬럼이 없어(1:N via conversations)
+    conversations.org_id로 JOIN해서 스코프를 건다 — definition_key가 preset이든 org
+    커스텀이든 무관하게, "이 org의 대화에서 실제로 발행된 것"만 보인다.
+    """
+    if not await _is_org_admin(db, org_id, uuid.UUID(auth.user_id)):
+        raise HTTPException(status_code=403, detail="org admin/owner required")
+
+    from app.models.conversation import Conversation, ConversationMessage
+    from app.services.member_resolver import lookup_members_by_ids
+
+    rows = (await db.execute(
+        select(ConversationMessage)
+        .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+        .where(
+            Conversation.org_id == org_id,
+            ConversationMessage.msg_metadata["event"]["event_key"].astext == definition_key,
+        )
+        .order_by(ConversationMessage.created_at.desc())
+        .limit(limit)
+    )).scalars().all()
+
+    sender_ids = {r.sender_id for r in rows if r.sender_id is not None}
+    members = await lookup_members_by_ids(sender_ids, db)
+
+    return [
+        EventPublishHistoryItem(
+            id=str(r.id),
+            conversation_id=str(r.conversation_id),
+            sender_id=str(r.sender_id) if r.sender_id else None,
+            sender_name=members[r.sender_id].name if r.sender_id in members else None,
+            created_at=r.created_at,
+        )
+        for r in rows
+    ]

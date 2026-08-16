@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import Link from 'next/link';
+import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,6 +15,7 @@ import { EventDefinerForm } from '@/components/organization/event-definer-form';
 import {
   type DefinerFormState, deriveDefinition, emptyFormState, tryReverseParse, validateKeySuffix,
 } from '@/components/organization/event-definer-logic';
+import { EventDefinitionSummary } from '@/components/organization/event-definition-summary';
 
 // story #2664 — 목록(GET) 응답 모델(events.py EventDefinitionResponse)엔 아직 id가 없다
 // (BE #2663, PR#3069 재QA 중). id가 없는 항목은 수정/비활성 버튼을 아예 안 그린다 — #2663가
@@ -286,21 +288,81 @@ function EventDefRow({
         </div>
       </div>
       {expanded ? (
-        <div className="mt-3 space-y-2">
-          <JsonPreview label={t('eventPayloadSchemaLabel')} value={def.payload_schema} />
-          <JsonPreview label={t('eventRoutingLabel')} value={def.routing} />
-          {def.block_template ? <JsonPreview label={t('eventBlockTemplateLabel')} value={def.block_template} /> : null}
+        <div className="mt-3 space-y-3">
+          {/* story #2677 — 기본 뷰=사람 언어(서식 요약·필드 표·실물 카드), JSON은 「고급」
+              접기로 존치(EventDefinitionSummary 내부). 역파생 불가(프리셋 전부 포함) 시엔
+              정의기 edit 다이얼로그와 같은 규칙으로 정직하게 JSON 기본+고급 전용 배지. */}
+          <EventDefinitionSummary
+            payloadSchema={def.payload_schema}
+            routing={def.routing}
+            actionAuth={def.action_auth}
+            blockTemplate={def.block_template}
+          />
+          {/* PR#3087 — 이 조회 자체가 BE org admin/owner 게이트라, 일반 멤버는 조회하면
+              항상 403이라 아예 안 그린다(모두가 여는 매 행마다 헛된 실패 fetch 방지). */}
+          {isAdmin ? <PublishHistorySection definitionKey={def.key} t={t} /> : null}
         </div>
       ) : null}
     </div>
   );
 }
 
-function JsonPreview({ label, value }: { label: string; value: unknown }) {
+// story #2665 — PR#3087(디디) 응답 계약 그대로 소비. 신규 로그 테이블 없이
+// conversation_messages SSOT 재조회라 정의 하나당 별도 fetch(펼칠 때만 — 목록 전체 N+1 방지).
+interface PublishHistoryItem {
+  id: string;
+  conversation_id: string;
+  sender_id: string | null;
+  sender_name: string | null;
+  created_at: string;
+}
+
+type PublishHistoryState = { kind: 'loading' } | { kind: 'resolved'; items: PublishHistoryItem[] } | { kind: 'error' };
+
+function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t: ReturnType<typeof useTranslations> }) {
+  const locale = useLocale();
+  const [state, setState] = useState<PublishHistoryState>({ kind: 'loading' });
+
+  useEffect(() => {
+    let cancelled = false;
+    setState({ kind: 'loading' });
+    void (async () => {
+      try {
+        const res = await fetch(`/api/events/definitions/publish-history?definition_key=${encodeURIComponent(definitionKey)}&limit=20`);
+        if (!res.ok) throw new Error();
+        const items = await res.json() as PublishHistoryItem[];
+        if (!cancelled) setState({ kind: 'resolved', items });
+      } catch {
+        if (!cancelled) setState({ kind: 'error' });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [definitionKey]);
+
   return (
     <div>
-      <p className="mb-1 text-[11px] font-semibold text-muted-foreground">{label}</p>
-      <pre className="overflow-x-auto rounded-md bg-muted p-2 text-xs text-foreground">{JSON.stringify(value, null, 2)}</pre>
+      <p className="mb-1 text-[11px] font-semibold text-muted-foreground">{t('eventPublishHistoryLabel')}</p>
+      {state.kind === 'loading' ? (
+        <p className="text-xs text-muted-foreground">{t('eventPublishHistoryLoading')}</p>
+      ) : state.kind === 'error' ? (
+        <p className="text-xs text-destructive">{t('eventPublishHistoryError')}</p>
+      ) : state.items.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t('eventPublishHistoryEmpty')}</p>
+      ) : (
+        <ul className="space-y-1 rounded-md border border-border bg-muted/40 p-2">
+          {state.items.map((item) => (
+            <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span className="text-foreground">{item.sender_name ?? t('eventPublishHistoryUnknownSender')}</span>
+              <span className="flex items-center gap-2 text-muted-foreground">
+                {new Date(item.created_at).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' })}
+                <Link href={`/chats/${item.conversation_id}`} className="text-primary hover:underline">
+                  {t('eventPublishHistoryOpenChat')}
+                </Link>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -374,6 +436,11 @@ function EventFormDialog({
   }, [open, mode, target, orgSlug]);
 
   const definerKeyError = tab === 'basic' && mode === 'create' ? validateKeySuffix(definerState.keySuffix) : null;
+  // story #2666 — 「고급」탭도 「기본」탭과 같은 key 규격(_ORG_KEY_RE 접미 [a-z0-9_]+)이라
+  // 같은 클라 선검증을 재사용한다. 서버 메시지("...로 시작해야 합니다")가 문자셋 위반을
+  // 접두 문제로 오진시키던 것 — 클라에서 먼저 정확한 원인(문자셋)을 지목해 그 오진 문구에
+  // 도달할 일 자체를 줄인다(서버 검증은 그대로 유지 — 이건 안내일 뿐, 우회 아님).
+  const advancedKeyError = tab === 'advanced' && mode === 'create' ? validateKeySuffix(keySuffix) : null;
 
   const submit = async () => {
     setSaving(true);
@@ -391,6 +458,7 @@ function EventFormDialog({
         };
         if (mode === 'create') body.key = derived.key;
       } else {
+        if (advancedKeyError) throw new Error(advancedKeyError === 'empty' ? t('definerKeyErrorEmpty') : t('definerKeyErrorCharset'));
         const roles = rolesCsv.split(',').map((r) => r.trim()).filter(Boolean);
         const actionAuth = humanOnly || roles.length > 0 ? { human_only: humanOnly, role: roles } : null;
         body = {
@@ -499,7 +567,11 @@ function EventFormDialog({
               </button>
             </div>
           </div>
-          {tab === 'advanced' ? <DialogDescription>{t('eventKeyPrefixHint')}</DialogDescription> : null}
+          {/* story #2666(발견) — 원래 문구가 "org.{조직 slug}."처럼 한글 자리표시자를 ICU
+              변수 자리에 그대로 박아 놔 next-intl이 MALFORMED_ARGUMENT로 파싱 실패하던
+              것(콘솔 에러+깨진 렌더 — 이 다이얼로그를 열 때마다 항상 재현). ICU 유효 이름
+              (slug)으로 고치고 실제 org slug를 인자로 넘긴다. */}
+          {tab === 'advanced' ? <DialogDescription>{t('eventKeyPrefixHint', { slug: orgSlug || '{org}' })}</DialogDescription> : null}
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-1">
           {tab === 'basic' ? (
@@ -518,10 +590,19 @@ function EventFormDialog({
                   {t('eventKeyLabel')}
                 </label>
                 {mode === 'create' ? (
-                  <div className="flex items-center gap-1">
-                    <span className="shrink-0 font-mono text-xs text-muted-foreground">{prefix}</span>
-                    <Input id="event-key" value={keySuffix} onChange={(e) => setKeySuffix(e.target.value)} className="font-mono text-sm" />
-                  </div>
+                  <>
+                    <div className="flex items-center gap-1">
+                      <span className="shrink-0 font-mono text-xs text-muted-foreground">{prefix}</span>
+                      <Input id="event-key" value={keySuffix} onChange={(e) => setKeySuffix(e.target.value)} className="font-mono text-sm" />
+                    </div>
+                    {advancedKeyError ? (
+                      <p className="mt-1 text-[11px] text-destructive">
+                        {advancedKeyError === 'empty' ? t('definerKeyErrorEmpty') : t('definerKeyErrorCharset')}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-[11px] text-muted-foreground">{t('definerKeyHint')}</p>
+                    )}
+                  </>
                 ) : (
                   <Input id="event-key" value={target?.key ?? ''} readOnly disabled className="font-mono text-sm" />
                 )}
@@ -556,7 +637,7 @@ function EventFormDialog({
           {mode === 'create' && savedKey ? null : (
             <Button
               onClick={() => void submit()}
-              disabled={saving || (tab === 'advanced' ? mode === 'create' && !keySuffix.trim() : !!definerKeyError)}
+              disabled={saving || (tab === 'advanced' ? mode === 'create' && !!advancedKeyError : !!definerKeyError)}
             >
               {saving ? '...' : mode === 'create' ? t('eventCreateSubmit') : t('eventEditSubmit')}
             </Button>

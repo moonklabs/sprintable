@@ -58,6 +58,11 @@ async def _enforce_agent_creator_policy(
     """⭐ 불변식: 휴먼↔에이전트 대화 — 각 에이전트의 creator가 참가자(sender ∪ participant_ids)에 있어야.
 
     전제: 에이전트 없거나 휴먼 없으면(에이전트↔에이전트) skip.
+
+    story #2613(PR #2824 승계 — 원 스토리 소실, fix 자체는 유효) — 403 detail을 구조화
+    ({code, message, details})해 FE가 generic 실패 대신 원인(allowlist_miss·created_by_none·
+    creator_not_participant)을 actionable하게 보여줄 수 있게 한다. 보안 정책 자체는 불변
+    (우회·완화 없음) — 거부 사유를 «누구에게» 보이는지만 바뀐다.
     """
     if not participant_ids:
         return
@@ -127,7 +132,15 @@ async def _enforce_agent_creator_policy(
                     )
                     raise HTTPException(
                         status_code=403,
-                        detail="Member is not in this agent's message allowlist",
+                        detail={
+                            "code": "AGENT_MESSAGE_POLICY_DENIED",
+                            "message": "Member is not in this agent's message allowlist",
+                            "details": {
+                                "agent_id": str(agent_tm.id),
+                                "member_id": str(member_id),
+                                "reason": "allowlist_miss",
+                            },
+                        },
                     )
             continue
 
@@ -137,13 +150,33 @@ async def _enforce_agent_creator_policy(
                 "agent creator policy 403: agent_id=%s sender_id=%s reason=created_by_none",
                 agent_tm.id, sender.id,
             )
-            raise HTTPException(status_code=403, detail="Agent has no creator — conversation not allowed")
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "AGENT_MESSAGE_POLICY_DENIED",
+                    "message": "Agent has no creator — conversation not allowed",
+                    "details": {
+                        "agent_id": str(agent_tm.id),
+                        "reason": "created_by_none",
+                    },
+                },
+            )
         if agent_tm.created_by not in human_user_ids:
             logger.warning(
                 "agent creator policy 403: agent_id=%s sender_id=%s reason=creator_not_participant created_by=%s",
                 agent_tm.id, sender.id, agent_tm.created_by,
             )
-            raise HTTPException(status_code=403, detail="Agent's creator must be a participant in this conversation")
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "AGENT_MESSAGE_POLICY_DENIED",
+                    "message": "Agent's creator must be a participant in this conversation",
+                    "details": {
+                        "agent_id": str(agent_tm.id),
+                        "reason": "creator_not_participant",
+                    },
+                },
+            )
 
 
 async def _resolve_member(
