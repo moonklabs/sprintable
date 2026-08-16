@@ -180,8 +180,11 @@ async def test_promote_skips_fenced_code_block():
             org, project = await _seed_org_project(s)
             story = await _seed_story(s, org.id, project.id, number=24, title="보드 리팩터")
             content = "설명\n```\n# 24 이건 셸 주석\n```\n끝"
-            result = await promote_bare_story_refs(s, org_id=org.id, project_id=project.id, content=content)
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
             assert result == content  # 코드블록 안이라 무변환
+            assert promoted_ids == set()
     finally:
         await engine.dispose()
 
@@ -195,8 +198,11 @@ async def test_promote_skips_inline_code():
             org, project = await _seed_org_project(s)
             await _seed_story(s, org.id, project.id, number=24, title="보드 리팩터")
             content = "명령어 `git checkout #24` 참고"
-            result = await promote_bare_story_refs(s, org_id=org.id, project_id=project.id, content=content)
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
             assert result == content
+            assert promoted_ids == set()
     finally:
         await engine.dispose()
 
@@ -210,8 +216,11 @@ async def test_promote_skips_existing_entity_token():
             org, project = await _seed_org_project(s)
             await _seed_story(s, org.id, project.id, number=24, title="보드 리팩터")
             content = "[이슈 #24 수정](entity:story:11111111-1111-1111-1111-111111111111) 참고"
-            result = await promote_bare_story_refs(s, org_id=org.id, project_id=project.id, content=content)
+            result, promoted_ids = await promote_bare_story_refs(
+                s, org_id=org.id, project_id=project.id, content=content,
+            )
             assert result == content  # 이미 토큰 안 — 이중 변환 금지
+            assert promoted_ids == set()
     finally:
         await engine.dispose()
 
@@ -226,11 +235,13 @@ async def test_promote_resolves_existing_story_to_entity_token():
         async with Session() as s:
             org, project = await _seed_org_project(s)
             story = await _seed_story(s, org.id, project.id, number=24, title="보드 리팩터")
-            result = await promote_bare_story_refs(
+            result, promoted_ids = await promote_bare_story_refs(
                 s, org_id=org.id, project_id=project.id, content="확인은 #24 참고",
             )
             expected_token = build_reference_token("story", story.id, "보드 리팩터")
             assert result == f"확인은 {expected_token} 참고"
+            # story #2679: 실제 치환된 story_id 집합도 반환 — caller가 origin='auto' 판정에 씀.
+            assert promoted_ids == {story.id}
     finally:
         await engine.dispose()
 
@@ -245,11 +256,13 @@ async def test_promote_unresolved_number_kept_verbatim():
         async with Session() as s:
             org, project = await _seed_org_project(s)
             story = await _seed_story(s, org.id, project.id, number=24, title="보드 리팩터")
-            result = await promote_bare_story_refs(
+            result, promoted_ids = await promote_bare_story_refs(
                 s, org_id=org.id, project_id=project.id, content="#24 그리고 #9999",
             )
             expected_token = build_reference_token("story", story.id, "보드 리팩터")
             assert result == f"{expected_token} 그리고 #9999"
+            # #9999는 resolve 실패라 promoted_ids엔 안 들어간다(원문 그대로 남은 것과 대칭).
+            assert promoted_ids == {story.id}
     finally:
         await engine.dispose()
 
@@ -268,10 +281,11 @@ async def test_promote_scoped_to_project_cross_project_not_resolved():
             await s.commit()
             await _seed_story(s, org.id, other_project.id, number=24, title="다른 프로젝트 스토리")
 
-            result = await promote_bare_story_refs(
+            result, promoted_ids = await promote_bare_story_refs(
                 s, org_id=org.id, project_id=project.id, content="#24 참고",
             )
             assert result == "#24 참고"  # 다른 project 소속이라 미승격
+            assert promoted_ids == set()
     finally:
         await engine.dispose()
 

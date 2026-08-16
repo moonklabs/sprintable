@@ -599,7 +599,10 @@ async def _reconcile_story_references_and_candidates(
         _desc_result = await reconcile_entity_references(
             db, org_id=org_id, source_type="story", source_field="description",
             source_id=story.id,
-            extracted_refs=[(t, i, "mention") for t, i in _desc_pairs] + _desc_bare_refs,
+            # story #2679: _desc_pairs(브라켓 멘션)는 caller가 명시로 타이핑한 것 = explicit.
+            # _desc_bare_refs(맨 #번호, resolve_bare_number_story_refs)는 이미 4-tuple로
+            # origin='auto'를 스스로 갖고 있다(그 함수 참조).
+            extracted_refs=[(t, i, "mention", "explicit") for t, i in _desc_pairs] + _desc_bare_refs,
             created_by=mention_actor_id,
         )
         _ref_stored += _desc_result.stored
@@ -617,7 +620,8 @@ async def _reconcile_story_references_and_candidates(
         _ac_result = await reconcile_entity_references(
             db, org_id=org_id, source_type="story", source_field="acceptance_criteria",
             source_id=story.id,
-            extracted_refs=[(t, i, "mention") for t, i in _ac_pairs] + _ac_bare_refs,
+            # story #2679: 위 description 블록과 동일 근거(_ac_bare_refs가 origin='auto' 자체 보유).
+            extracted_refs=[(t, i, "mention", "explicit") for t, i in _ac_pairs] + _ac_bare_refs,
             created_by=mention_actor_id,
         )
         _ref_stored += _ac_result.stored
