@@ -5,6 +5,7 @@ import { ImageOff, Loader2, Lock } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Asset, AssetDeeplink } from '@/lib/storage/types';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /**
  * 39724bef — Storage 상세 패널 미리보기 썸네일.
@@ -115,7 +116,7 @@ export function StorageThumbnail({ asset }: StorageThumbnailProps) {
           params.set('path', asset.object_path);
           params.set(plan.param, plan.id);
         }
-        const res = await fetch(`/api/attachments/sign?${params.toString()}`);
+        const res = await fetchWithAuth(`/api/attachments/sign?${params.toString()}`);
         if (cancelled) return;
         // 403 = 권한 거부 → no-access. 다른 sign 인자로 fallback 절대 금지(단일 시도).
         if (res.status === 403) {

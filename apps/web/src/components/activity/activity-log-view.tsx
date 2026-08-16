@@ -9,6 +9,7 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { deriveAuditProofState } from './derive-audit-proof-state';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -91,7 +92,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
   // fetch team members for actor dropdown
   useEffect(() => {
-    fetch(`/api/members?project_id=${projectId}`)
+    fetchWithAuth(`/api/members?project_id=${projectId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data: { data?: TeamMember[] } | null) => {
         if (data?.data) setMembers(data.data);

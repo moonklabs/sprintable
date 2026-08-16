@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface TemplateStep {
   pattern: string;
@@ -105,7 +106,7 @@ export function WorkflowTemplateGallerySection({
     setOverwriteConfirm(false);
     setLoadingDetail(true);
     try {
-      const res = await fetch(`/api/workflow-templates/${tmpl.slug}`);
+      const res = await fetchWithAuth(`/api/workflow-templates/${tmpl.slug}`);
       if (res.ok) {
         const full = await res.json() as WorkflowTemplate;
         setSelected(full);

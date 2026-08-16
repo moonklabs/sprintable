@@ -11,6 +11,7 @@ import {
   type HypothesisDeclarationValue,
 } from '@/services/hypothesis-declaration';
 import { HypothesisDeclarationCard } from './hypothesis-declaration-card';
+import { fetchWithAuth } from '@/lib/db/client';
 
 const LINKABLE_STATUSES = new Set<Hypothesis['status']>(['proposed', 'active']);
 
@@ -39,7 +40,7 @@ export function HypothesisDeclarationSection({
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(`/api/hypotheses?project_id=${projectId}`);
+        const res = await fetchWithAuth(`/api/hypotheses?project_id=${projectId}`);
         if (!res.ok || cancelled) { if (!cancelled) setLinkableHypotheses([]); return; }
         const json = await res.json() as { data?: Hypothesis[] };
         if (!cancelled) setLinkableHypotheses((json.data ?? []).filter((h) => LINKABLE_STATUSES.has(h.status)));

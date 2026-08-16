@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { applyEntity, entityTypeLabel, groupEntitiesByType, type EntityResult } from '@/components/chat/chat-input-entity-tokens';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /**
  * story #2263 BE 계약②(PR#2615) — FastAPI `/api/v2/entities/search`가 flat list에서
@@ -43,7 +44,7 @@ export function useEntityPicker(projectId: string | undefined) {
     const timer = window.setTimeout(() => {
       const params = new URLSearchParams({ project_id: projectId });
       if (entityQuery) params.set('q', entityQuery);
-      fetch(`/api/entities/search?${params}`)
+      fetchWithAuth(`/api/entities/search?${params}`)
         .then((r) => r.json())
         .then((json: unknown) => {
           if (cancelled) return;

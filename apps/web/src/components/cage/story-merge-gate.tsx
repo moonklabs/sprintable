@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { GateEvidence } from '@/components/cage/gate-evidence';
 import type { GateItem } from '@/components/kanban/types';
+import { fetchWithAuth } from '@/lib/db/client';
 
 const MERGE_GATE_TYPE = 'merge';
 
@@ -21,7 +22,7 @@ export function StoryMergeGate({ storyId }: { storyId: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/gates?work_item_id=${storyId}&work_item_type=story`, { cache: 'no-store' })
+    fetchWithAuth(`/api/gates?work_item_id=${storyId}&work_item_type=story`, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : []))
       .then((gates: GateItem[]) => {
         if (cancelled) return;

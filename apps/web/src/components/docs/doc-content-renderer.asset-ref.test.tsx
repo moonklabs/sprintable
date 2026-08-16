@@ -85,7 +85,10 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
       fileBlock?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve(); await Promise.resolve();
     });
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=file-1&disposition=attachment'));
+    // story #2691 — 이 클릭 경로는 fetchWithAuth로 전환됨(마운트시 img 경로는 미전환·1인자
+    // 유지). fetchWithAuth(url)이 내부에서 fetch(input, init)을 호출해 init 생략 시 undefined를
+    // 명시로 넘긴다.
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=file-1&disposition=attachment'), undefined);
     expect(openMock).toHaveBeenCalledWith(SIGNED_URL, '_blank', 'noopener,noreferrer');
   });
 
@@ -162,7 +165,8 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
       fileBlock?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve(); await Promise.resolve();
     });
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=mdfile-1&disposition=attachment'));
+    // story #2691 — fetchWithAuth 전환(위와 동일 사유).
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=mdfile-1&disposition=attachment'), undefined);
     expect(openMock).toHaveBeenCalledWith(SIGNED_URL, '_blank', 'noopener,noreferrer');
   });
 

@@ -10,6 +10,7 @@ import type { RawReferenceCandidate } from './derive-flow-map';
 import { selectUnconfirmedCandidates } from './flow-relation-review';
 import { FlowRelationReviewQueue } from './flow-relation-review-queue';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
+import { fetchWithAuth } from '@/lib/db/client';
 
 const OVERLAY_GAP = 8; // 노드와 패널 사이 여백(px)
 const OVERLAY_EDGE_MARGIN = 16; // 뷰포트 가장자리 여백(px)
@@ -90,8 +91,8 @@ export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps
     let cancelled = false;
     void (async () => {
       const [storyJson, tasksJson] = await Promise.all([
-        fetch(`/api/stories/${storyId}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-        fetch(`/api/tasks?story_id=${storyId}&limit=20`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetchWithAuth(`/api/stories/${storyId}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetchWithAuth(`/api/tasks?story_id=${storyId}&limit=20`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       ]);
       if (cancelled) return;
       const story = storyJson?.data as KanbanStory | undefined;

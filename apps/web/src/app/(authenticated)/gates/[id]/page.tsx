@@ -15,6 +15,7 @@ import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk'
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // story #1954(P1a-S4) — Gate 3종(게이트·문서결재·머지게이트) canonical 상세. P1a·P2 공용 유일
 // per-gate 라우트(중복 빌드 봉쇄) — decision(inbox_items)은 별도 표면(오르테가군 PO 판단+
@@ -77,7 +78,7 @@ export default function GateDetailPage() {
   useEffect(() => {
     if (!gate?.resolver_id || fetchedResolverIdRef.current === gate.resolver_id) return;
     fetchedResolverIdRef.current = gate.resolver_id;
-    void fetch('/api/team-members')
+    void fetchWithAuth('/api/team-members')
       .then((r) => (r.ok ? r.json() : null))
       .then((json: { data?: { id: string; name: string }[] } | null) => {
         if (!json?.data) return;

@@ -15,6 +15,7 @@ import { ToastContainer, useToast } from '@/components/ui/toast';
 import { ChevronDown, ChevronRight, Plus, X, Menu, Search, FileText } from 'lucide-react';
 import { DocsShell } from '@/components/docs/docs-shell';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface Doc {
   id: string;
@@ -151,7 +152,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
 
     setSearchLoading(true);
     searchTimerRef.current = setTimeout(() => {
-      void fetch(`/api/docs?project_id=${projectId}&q=${encodeURIComponent(searchQuery.trim())}&limit=20`)
+      void fetchWithAuth(`/api/docs?project_id=${projectId}&q=${encodeURIComponent(searchQuery.trim())}&limit=20`)
         .then((r) => r.ok ? r.json() : null)
         .then((data: { data?: Array<{ id: string; title: string; slug: string; snippet?: string }> } | null) => {
           setSearchResults(data?.data ?? []);

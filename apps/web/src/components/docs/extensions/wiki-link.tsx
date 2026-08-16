@@ -7,6 +7,7 @@ import { PluginKey } from '@tiptap/pm/state';
 import { ReactNodeViewRenderer, NodeViewWrapper, type ReactNodeViewProps } from '@tiptap/react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FileText, AlertCircle } from 'lucide-react';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // ─── WikiLink Node View ───────────────────────────────────────────────────────
 
@@ -30,7 +31,7 @@ function WikiLinkView({ node, editor }: ReactNodeViewProps) {
     void (async () => {
       if (!slug || !projectId) { setExists(true); return; }
       try {
-        const res = await fetch(`/api/docs?project_id=${projectId}&slug=${encodeURIComponent(slug)}&limit=1`);
+        const res = await fetchWithAuth(`/api/docs?project_id=${projectId}&slug=${encodeURIComponent(slug)}&limit=1`);
         const data = res.ok ? (await res.json() as { data?: unknown[] }) : null;
         if (!cancelled) setExists(Array.isArray(data?.data) && data.data.length > 0);
       } catch {

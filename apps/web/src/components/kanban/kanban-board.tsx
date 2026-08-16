@@ -30,6 +30,7 @@ import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
 import { COLUMNS, normalizeAssigneePatch, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
 import type { LabelData } from '@/components/ui/label-chip';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /**
  * 터치는 드래그를 절대 시작하지 않게 — pointerType !== 'touch'만 드래그 활성(0d142311 prod 재발 근본 fix).
@@ -492,7 +493,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     }
 
     try {
-      const res = await fetch(`/api/tasks?story_id=${story.id}&limit=20`);
+      const res = await fetchWithAuth(`/api/tasks?story_id=${story.id}&limit=20`);
       if (res.ok) {
         const json = await res.json();
         setStoryTasks(json.data ?? []);
@@ -535,7 +536,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       void handleStoryClick(story, { replace: true });
     } else if (stories.length > 0) {
       // 현재 보드에 없는 스토리 — 직접 fetch 후 패널 오픈
-      fetch(`/api/stories/${storyId}`)
+      fetchWithAuth(`/api/stories/${storyId}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((json) => {
           const fetched = json?.data as KanbanStory | undefined;
@@ -552,7 +553,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     const taskId = searchParams.get('task_id');
     if (!taskId || stories.length === 0) return;
 
-    fetch(`/api/tasks/${taskId}`)
+    fetchWithAuth(`/api/tasks/${taskId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((json) => {
         const storyId = json?.data?.story_id as string | undefined;
@@ -561,7 +562,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         if (story) {
           void handleStoryClick(story, { replace: true });
         } else {
-          fetch(`/api/stories/${storyId}`)
+          fetchWithAuth(`/api/stories/${storyId}`)
             .then((r) => (r.ok ? r.json() : null))
             .then((json2) => {
               const fetched = json2?.data as KanbanStory | undefined;

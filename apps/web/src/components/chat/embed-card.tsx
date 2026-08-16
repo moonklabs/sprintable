@@ -16,6 +16,7 @@ import { resolveScopedEntityHref, storyBoardUrl, goalUrl, sprintUrl, assetStorag
 import { initials } from '@/lib/storage/format';
 import { renderEntityStatusLabel, translateEntityStatus, type EntityStatusFetchState } from './entity-status-labels';
 import { ArtifactThumbnail } from '@/components/canvas/artifact-thumbnail';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // story #2302 — 이 8종은 BE reference_registry.py ENTITY_RESOLVERS 와 키 집합이 같아야 한다
 // (AC2·AC5, entity-icons.registry-parity.test.ts 가 코드스캔으로 대조). `asset`은 registry
@@ -339,7 +340,7 @@ export function EntityPreviewModal({
       // /api/docs/{id}(lightweight timestamp-only)를 "풀 doc 조회"로 오인했던 게 원 결함(#1996).
       void (async () => {
         try {
-          const previewRes = await fetch(`/api/docs/preview?q=${encodeURIComponent(entityId)}`);
+          const previewRes = await fetchWithAuth(`/api/docs/preview?q=${encodeURIComponent(entityId)}`);
           if (!previewRes.ok) throw new Error();
           const previewJson = (await previewRes.json()) as {
             data?: { slug?: string; projectId?: string; orgSlug?: string; projectSlug?: string | null };
@@ -354,7 +355,7 @@ export function EntityPreviewModal({
               projectSlug: previewJson.data?.projectSlug ?? null,
             });
           }
-          const docRes = await fetch(`/api/docs?project_id=${docProjectId}&slug=${encodeURIComponent(slug)}`);
+          const docRes = await fetchWithAuth(`/api/docs?project_id=${docProjectId}&slug=${encodeURIComponent(slug)}`);
           if (!docRes.ok) throw new Error();
           const docJson = (await docRes.json()) as { data?: Record<string, unknown> };
           if (!cancelled) setDetail(docJson.data ?? null);
@@ -390,7 +391,7 @@ export function EntityPreviewModal({
     let cancelled = false;
     void (async () => {
       try {
-        const previewRes = await fetch(`/api/docs/preview?q=${encodeURIComponent(docId)}`);
+        const previewRes = await fetchWithAuth(`/api/docs/preview?q=${encodeURIComponent(docId)}`);
         if (!previewRes.ok) throw new Error();
         const previewJson = (await previewRes.json()) as {
           data?: { slug?: string; projectId?: string; orgSlug?: string; projectSlug?: string | null };
@@ -753,7 +754,7 @@ export function EntityChip({
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(`/api/docs/preview?q=${encodeURIComponent(entityId)}`);
+        const res = await fetchWithAuth(`/api/docs/preview?q=${encodeURIComponent(entityId)}`);
         if (!res.ok) throw new Error();
         const json = (await res.json()) as { data?: { projectId?: string } };
         const docProjectId = json.data?.projectId;

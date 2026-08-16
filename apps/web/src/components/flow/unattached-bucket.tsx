@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { cn } from '@/lib/utils';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /**
  * story #2534(E-FLOW-V4 S4) — 이행기. 미매달림(가설·목표 둘 다 없는) 작업을 지구 지도에서
@@ -50,7 +51,7 @@ function SuggestionChips({
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(`/api/stories/${storyId}/attachment-suggestions`, { cache: 'no-store' });
+        const res = await fetchWithAuth(`/api/stories/${storyId}/attachment-suggestions`, { cache: 'no-store' });
         if (!res.ok) throw new Error('failed');
         const json = await res.json() as AttachmentSuggestionResponse;
         if (!cancelled) setSuggestions(json);

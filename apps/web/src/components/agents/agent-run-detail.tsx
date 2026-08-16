@@ -10,6 +10,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { useToast, ToastContainer } from '@/components/ui/toast';
 import { canManuallyRetryRun, getRunErrorDisplay, getRunFailureDisposition, getToolAuditOutcome } from '@/services/agent-run-history';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface ToolCallEntry {
   type?: string;
@@ -203,7 +204,7 @@ export function AgentRunDetail({
       setLoading(true);
       setLoadError(false);
       try {
-        const res = await fetch(`/api/v1/agent-runs/${runId}`);
+        const res = await fetchWithAuth(`/api/v1/agent-runs/${runId}`);
         const json = res.ok ? await res.json() : null;
         if (cancelled) return;
         setRun(json?.data ?? null);

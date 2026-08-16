@@ -10,6 +10,7 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface WebhookConfig {
   id: string;
@@ -83,8 +84,8 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
     async function load() {
       try {
         const [meRes, projRes] = await Promise.all([
-          fetch('/api/me'),
-          fetch('/api/projects').catch(() => null),
+          fetchWithAuth('/api/me'),
+          fetchWithAuth('/api/projects').catch(() => null),
         ]);
         if (projRes?.ok) {
           const pj = await projRes.json() as { data?: Array<{ id: string; name: string }> };

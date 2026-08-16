@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { fetchWithAuth } from '@/lib/db/client';
 
 export type SaveStatus = 'idle' | 'unsaved' | 'saving' | 'saved' | 'conflict' | 'remote-changed' | 'error';
 
@@ -246,7 +247,7 @@ export function useDocSync<TDoc = { updated_at: string }>({
     const poll = async () => {
       if (savingRef.current || remoteChangedRef.current || conflictRef.current) return;
       try {
-        const res = await fetch(`/api/docs/${docId}/updated-at`);
+        const res = await fetchWithAuth(`/api/docs/${docId}/updated-at`);
         if (!res.ok) return;
         const json = await res.json() as { data?: { updated_at?: string } };
         const remoteUpdatedAt = json.data?.updated_at;

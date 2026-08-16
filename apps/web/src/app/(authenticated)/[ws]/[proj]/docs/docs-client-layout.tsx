@@ -23,6 +23,7 @@ import { DocsLayoutContext, type Doc, type DocSortMode, type DocUpdate } from '.
 import { useSwipeDrawer } from '@/lib/use-swipe-drawer';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { newDocUrl, docUrl } from '@/components/docs/lib/doc-project-url';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // story #2167: BE search_full_text 의 limit(doc.py:83)과 동일 값 — 화면에 "상위 N건" 문구를
 // 낼 때 실제 서버 cap과 어긋나지 않게 한 곳에서만 선언한다.
@@ -87,7 +88,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     setSearchLoading(true);
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      void fetch(`/api/docs?project_id=${encodeURIComponent(projectId)}&q=${encodeURIComponent(q)}&limit=${DOC_SEARCH_LIMIT}`, { signal: controller.signal })
+      void fetchWithAuth(`/api/docs?project_id=${encodeURIComponent(projectId)}&q=${encodeURIComponent(q)}&limit=${DOC_SEARCH_LIMIT}`, { signal: controller.signal })
         .then((res) => (res.ok ? res.json() : { data: [] }))
         .then((json: { data?: DocSearchResult[] }) => {
           setSearchResults(json.data ?? []);

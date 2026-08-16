@@ -24,6 +24,7 @@ import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface ChatViewProps {
   threadId: string;
@@ -105,7 +106,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const [eventDefinitionsByKey, setEventDefinitionsByKey] = useState<Record<string, EventDefinitionSummary> | null>(null);
   useEffect(() => {
     let cancelled = false;
-    void fetch('/api/events/definitions')
+    void fetchWithAuth('/api/events/definitions')
       .then((r) => (r.ok ? r.json() : null))
       .then((json: unknown) => {
         if (cancelled || !json) return;

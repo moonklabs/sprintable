@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { OperatorSelect } from '@/components/ui/operator-control';
+import { fetchWithAuth } from '@/lib/db/client';
 
 export interface BoardBridgeStory {
   id: string;
@@ -54,7 +55,7 @@ export function BoardBridgeModal({ open, onOpenChange, boards, alreadySelectedId
       setLoading(true);
       setLoadError(null);
       try {
-        const res = await fetch(`/api/stories?project_id=${selectedBoardId}&limit=40`);
+        const res = await fetchWithAuth(`/api/stories?project_id=${selectedBoardId}&limit=40`);
         if (!res.ok) throw new Error('failed to load stories');
         const json = await res.json().catch(() => null) as { data?: BoardBridgeStory[] } | null;
         if (!cancelled) setStories(json?.data ?? []);

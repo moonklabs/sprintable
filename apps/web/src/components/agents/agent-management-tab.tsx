@@ -16,6 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface OrgAgent {
   id: string;
@@ -106,8 +107,8 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
       setLoadError(false);
       try {
         const [meRes, projectsRes] = await Promise.all([
-          fetch('/api/me'),
-          fetch('/api/projects'),
+          fetchWithAuth('/api/me'),
+          fetchWithAuth('/api/projects'),
         ]);
         if (meRes.ok) {
           const meJson = await meRes.json() as { data?: { role?: string } };

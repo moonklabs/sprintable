@@ -14,6 +14,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useRetroRoute } from './retro-context';
 import { RETRO_PHASE_TO_STAGE, RETRO_STAGE_VARIANTS, type RetroSessionPhase } from '@/services/retro-session';
 import { isRetroStale, daysStale } from './retro-staleness';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface RetroSession {
   id: string;
@@ -55,7 +56,7 @@ export default function RetroPage() {
     if (!projectId) { setSprints([]); return; }
     let cancelled = false;
     void (async () => {
-      const res = await fetch(`/api/sprints?project_id=${projectId}&status=active`);
+      const res = await fetchWithAuth(`/api/sprints?project_id=${projectId}&status=active`);
       if (!res.ok || cancelled) return;
       const json = await res.json().catch(() => null) as { data?: RetroSprintOption[] } | null;
       if (json?.data && !cancelled) setSprints(json.data);
@@ -76,7 +77,7 @@ export default function RetroPage() {
       setLoading(true);
       setLoadError(null);
       try {
-        const res = await fetch(`/api/retro-sessions?project_id=${projectId}`);
+        const res = await fetchWithAuth(`/api/retro-sessions?project_id=${projectId}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         if (!cancelled) setSessions(json.data ?? []);

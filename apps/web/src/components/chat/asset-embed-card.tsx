@@ -9,6 +9,7 @@ import { formatFileSize } from '@/components/docs/extensions/file-node';
 import { FILE_TINT_CLASS, fileExtLabel, fileTypeTint } from '@/lib/storage/format';
 import type { Asset } from '@/lib/storage/types';
 import { Skeleton } from '@/components/ui/skeleton';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /** 파일 타입 글리프 — getFileIcon 결과를 createElement 로 직접 렌더(render 중 컴포넌트 생성 lint 회피). */
 function fileGlyph(contentType: string | null, className: string) {
@@ -41,7 +42,7 @@ export function AssetEmbedCard({ entityId, label, ownMessage }: AssetEmbedCardPr
       setLoading(true);
       setMissing(false);
       try {
-        const r = await fetch(`/api/assets/${entityId}`);
+        const r = await fetchWithAuth(`/api/assets/${entityId}`);
         if (!r.ok) throw new Error('not-found');
         const json: { data?: Asset } | Asset = await r.json();
         if (cancelled) return;

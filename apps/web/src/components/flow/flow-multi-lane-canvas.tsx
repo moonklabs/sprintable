@@ -14,6 +14,7 @@ import { declareResponseToEdge } from './flow-port-linking';
 import type { NextMakerGoal } from './derive-next-maker';
 import { parseCursorMeta } from '@/lib/pagination';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface FlowMultiLaneCanvasProps {
   projectId: string;
@@ -139,7 +140,7 @@ export function FlowMultiLaneCanvas({
     let cancelled = false;
     setState({ kind: 'loading' });
     void (async () => {
-      const graphJson = await fetch('/api/dependencies/graph?item_type=story')
+      const graphJson = await fetchWithAuth('/api/dependencies/graph?item_type=story')
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null);
       const graph = unwrap<{ edges: RawDependencyEdge[] }>(graphJson);

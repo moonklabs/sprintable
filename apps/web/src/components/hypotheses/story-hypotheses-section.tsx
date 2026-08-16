@@ -7,6 +7,7 @@ import type { Hypothesis } from '@sprintable/core-storage';
 import { HypothesisStatusBadge } from './hypothesis-status-badge';
 import { HypothesisGateBadge } from './hypothesis-gate-badge';
 import type { GateItem } from '@/components/kanban/types';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /**
  * Story-detail panel "linked hypotheses" surface (E1-S8c / S9 fold · blueprint §6.5).
@@ -71,7 +72,7 @@ export function StoryHypothesesSection({
   const loadCandidates = useCallback(async () => {
     setCandidates(null);
     try {
-      const res = await fetch(`/api/hypotheses?project_id=${projectId}`, { cache: 'no-store' });
+      const res = await fetchWithAuth(`/api/hypotheses?project_id=${projectId}`, { cache: 'no-store' });
       if (!res.ok) { setCandidates([]); return; }
       const json = await res.json();
       const all = (json?.data ?? []) as Hypothesis[];

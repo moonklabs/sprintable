@@ -36,6 +36,7 @@ import { HypothesisDeclarationSection } from '@/components/sprints/hypothesis-de
 import { OpenLoopCockpit } from '@/components/sprints/open-loop-cockpit';
 import type { RetroHypothesisResult } from '@/services/retro-session';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // 8a2bbda2: 기간 표시는 start_date~end_date(진실)에서 계산한다. BE `duration` 필드(예 14)가
 // 날짜 범위와 불일치하는 케이스가 있어 신뢰하지 않고, inclusive 일수(end−start+1)를 직접 산출한다.
@@ -434,9 +435,9 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
 
     try {
       const [burndownRes, storiesRes, backlogRes] = await Promise.all([
-        fetch(`/api/sprints/${sprint.id}/burndown`),
-        fetch(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=20`),
-        fetch(`/api/stories/backlog?project_id=${projectId}&limit=20`),
+        fetchWithAuth(`/api/sprints/${sprint.id}/burndown`),
+        fetchWithAuth(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=20`),
+        fetchWithAuth(`/api/stories/backlog?project_id=${projectId}&limit=20`),
       ]);
       if (burndownRes.ok) {
         const json = await burndownRes.json();

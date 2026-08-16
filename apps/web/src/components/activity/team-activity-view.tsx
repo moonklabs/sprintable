@@ -11,6 +11,7 @@ import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/opera
 import { getEventTypeCopy, KNOWN_EVENT_TYPE_VERBS } from '@/services/notification-display';
 import { getEntityHref } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // ─── Types (BE ActivityStreamItem flat 실측 — doc §10 정정 정합) ──────────────
 interface ActivityStreamItem {
@@ -191,7 +192,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   const [members, setMembers] = useState<TeamMember[]>([]);
 
   useEffect(() => {
-    fetch(`/api/members?project_id=${projectId}`)
+    fetchWithAuth(`/api/members?project_id=${projectId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { data?: TeamMember[] } | null) => {
         if (d?.data) setMembers(d.data);

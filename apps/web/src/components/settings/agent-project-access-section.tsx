@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { cn } from '@/lib/utils';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /**
  * org-agent 멀티프로젝트 접근 관리 (story 088987d8).
@@ -105,7 +106,7 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
           let recId = (await res.json().catch(() => null) as { data?: AccessRecord } | null)?.data?.id;
           if (!recId) {
             // 응답에 record id 없으면 해당 프로젝트만 재조회(1콜)로 확보.
-            const g = await fetch(`/api/projects/${projectId}/access`).catch(() => null);
+            const g = await fetchWithAuth(`/api/projects/${projectId}/access`).catch(() => null);
             if (g?.ok) {
               const j = await g.json() as { data?: AccessRecord[] };
               recId = (j.data ?? []).find((r) => r.member_id === agentMemberId)?.id;

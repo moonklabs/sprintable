@@ -8,6 +8,7 @@ import { CircleDot, Inbox, MessageSquare, Grid2x2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { GateItem } from '@/components/kanban/types';
 import { MOBILE_BREAKPOINT } from '@/hooks/use-mobile';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // story #1958(P2-S2, mobile-p2-p1a-story-breakdown SSOT) — 모바일 4탭 셸. <1024(lg 미만)에서만
 // 렌더되고 데스크톱 GNB(AppSidebar)를 대체한다(P2-S1의 lg:1024 SSOT와 동일 경계 — route 내
@@ -107,7 +108,7 @@ export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
     // 충분, 완전한 실시간 갱신은 #1960 결재함 큐 스코프).
     async function loadPendingCount() {
       try {
-        const res = await fetch('/api/gates?status=pending&assigned_to_me=true');
+        const res = await fetchWithAuth('/api/gates?status=pending&assigned_to_me=true');
         if (!res.ok) return;
         const gates = (await res.json()) as GateItem[];
         if (!cancelled) setPendingCount(Array.isArray(gates) ? gates.length : 0);

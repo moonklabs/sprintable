@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface Props {
   projectId?: string;
@@ -18,7 +19,7 @@ export function StandupDeadlineSection({ projectId }: Props) {
 
   useEffect(() => {
     if (!projectId) return;
-    void fetch(`/api/project-settings?project_id=${projectId}`)
+    void fetchWithAuth(`/api/project-settings?project_id=${projectId}`)
       .then((r) => r.ok ? r.json() : null)
       .then((json) => { if (json?.data?.standup_deadline) setDeadline(json.data.standup_deadline as string); });
   }, [projectId]);

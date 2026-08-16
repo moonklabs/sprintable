@@ -34,6 +34,7 @@ import type { OutcomeStatus } from '@/components/outcome/outcome-status-badge';
 import { SprintCloseCockpit } from '@/components/retro/sprint-close-cockpit';
 import { EvidenceStrip } from '@/components/retro/evidence-strip';
 import { Skeleton } from '@/components/ui/skeleton';
+import { fetchWithAuth } from '@/lib/db/client';
 
 type RetroItemCategory = 'good' | 'bad' | 'improve';
 type VisibleStage = RetroVisibleStage;
@@ -215,7 +216,7 @@ export default function RetroSessionPage() {
     setOutcomeLoading(true);
     void (async () => {
       try {
-        const res = await fetch(`/api/sprints/${sprintId}`);
+        const res = await fetchWithAuth(`/api/sprints/${sprintId}`);
         if (!res.ok || cancelled) return;
         const { data } = await res.json() as { data?: { outcome_status?: string; success_hypothesis?: string | null; outcome_result?: OutcomeResult | null; metric_definition?: { metric?: string } | null } };
         if (data?.outcome_status && data.outcome_status !== 'n_a') {
@@ -251,7 +252,7 @@ export default function RetroSessionPage() {
     setHypothesesLoading(true);
     void (async () => {
       try {
-        const res = await fetch(`/api/sprints/${sprintId}/hypotheses`);
+        const res = await fetchWithAuth(`/api/sprints/${sprintId}/hypotheses`);
         if (!res.ok || cancelled) { if (!cancelled) setHypotheses([]); return; }
         const json = await res.json() as { data?: RetroHypothesisResult[] };
         if (!cancelled) setHypotheses(json.data ?? []);
@@ -322,7 +323,7 @@ export default function RetroSessionPage() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const res = await fetch('/api/team-members');
+      const res = await fetchWithAuth('/api/team-members');
       if (!res.ok || cancelled) return;
       const json = await res.json().catch(() => null) as { data?: RetroMemberOption[] } | null;
       if (json?.data && !cancelled) setMembers(json.data);

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { PORT_LINK_KINDS, type PortLinkKind } from './flow-port-linking';
 import type { RawReferenceCandidate } from './derive-flow-map';
 import { selectUnconfirmedCandidates, buildReviewQueue } from './flow-relation-review';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface TargetStoryInfo {
   storyNumber: number | null;
@@ -59,7 +60,7 @@ export function FlowRelationReviewQueue({
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const res = await fetch(`/api/stories/${storyId}/reference-candidates`).catch(() => null);
+      const res = await fetchWithAuth(`/api/stories/${storyId}/reference-candidates`).catch(() => null);
       if (cancelled) return;
       if (!res || !res.ok) { setState({ kind: 'error' }); return; }
       const raw = (await res.json().catch(() => null)) as RawReferenceCandidate[] | null;
@@ -69,7 +70,7 @@ export function FlowRelationReviewQueue({
       if (unconfirmed.length === 0) { setState({ kind: 'empty' }); return; }
 
       const targetIds = Array.from(new Set(unconfirmed.map((c) => c.target_id)));
-      const storiesRes = await fetch(`/api/stories?ids=${targetIds.join(',')}`).catch(() => null);
+      const storiesRes = await fetchWithAuth(`/api/stories?ids=${targetIds.join(',')}`).catch(() => null);
       if (cancelled) return;
       const storiesJson = storiesRes && storiesRes.ok ? await storiesRes.json().catch(() => null) : null;
       const list = (storiesJson?.data ?? []) as Array<{ id: string; story_number: number | null; title: string; epic_id: string | null }>;

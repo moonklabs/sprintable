@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface RoleScore {
   role_key: string;
@@ -66,7 +67,7 @@ export function TrustScoreCard({ memberId, compact = false }: TrustScoreCardProp
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`/api/trust-scores?member_id=${memberId}`)
+    fetchWithAuth(`/api/trust-scores?member_id=${memberId}`)
       .then((r) => r.ok ? r.json() : null)
       .then((json) => setData((json as TrustScoreData | null)))
       .catch(() => {})

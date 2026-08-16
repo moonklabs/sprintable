@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ChatProofEmbed } from './chat-proof-embed';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface ProofSnapshotMessage {
   message_id: string;
@@ -115,7 +116,7 @@ export function ChatProofSection({ storyId }: ChatProofSectionProps) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/stories/${storyId}/references?direction=outgoing`, { cache: 'no-store' })
+    fetchWithAuth(`/api/stories/${storyId}/references?direction=outgoing`, { cache: 'no-store' })
       .then((r) => {
         if (r.ok) return r.json();
         if (r.status === 404) return null; // C-3 존재 비노출 — 확認된 "없음".

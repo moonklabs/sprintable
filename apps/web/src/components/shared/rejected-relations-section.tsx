@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { fetchWithAuth } from '@/lib/db/client';
 
 export interface RejectedRelationItem {
   id: string;
@@ -56,7 +57,7 @@ export function RejectedRelationsSection({ storyId }: { storyId: string }) {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const res = await fetch(`/api/stories/${storyId}/rejected-relations`, { cache: 'no-store' }).catch(() => null);
+      const res = await fetchWithAuth(`/api/stories/${storyId}/rejected-relations`, { cache: 'no-store' }).catch(() => null);
       if (cancelled) return;
       if (!res || !res.ok) { setState({ kind: 'failed' }); return; }
       const items = (await res.json().catch(() => null)) as RejectedRelationItem[] | null;
@@ -65,7 +66,7 @@ export function RejectedRelationsSection({ storyId }: { storyId: string }) {
       // target_type은 지금 항상 "story"다(BE DELETE 라우트가 target_type="story"로 고정
       // 조회하는 것과 같은 사정) — 제목은 story 상세 엔드포인트로 조회한다.
       const titles = await Promise.all(items.map((it) =>
-        fetch(`/api/stories/${it.target_id}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetchWithAuth(`/api/stories/${it.target_id}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       ));
       if (cancelled) return;
       setState({

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface LedgerEntry { id: string; member_id: string; amount: number; reason: string; created_at: string }
 interface LeaderboardEntry { member_id: string; balance: number }
@@ -44,9 +45,9 @@ export default function RewardsPage() {
       setLoading(true);
       try {
         const [lbRes, ledgerRes, membersRes] = await Promise.all([
-          fetch(`/api/rewards/leaderboard?project_id=${projectId}&period=${period}`),
-          fetch(`/api/rewards?project_id=${projectId}`),
-          fetch(`/api/team-members?project_id=${projectId}`),
+          fetchWithAuth(`/api/rewards/leaderboard?project_id=${projectId}&period=${period}`),
+          fetchWithAuth(`/api/rewards?project_id=${projectId}`),
+          fetchWithAuth(`/api/team-members?project_id=${projectId}`),
         ]);
         if (lbRes.ok && !cancelled) { const j = await lbRes.json(); setLeaderboard(j.data ?? []); }
         if (ledgerRes.ok && !cancelled) { const j = await ledgerRes.json(); setLedger(j.data ?? []); }
