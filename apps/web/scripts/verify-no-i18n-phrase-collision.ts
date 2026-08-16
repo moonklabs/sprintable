@@ -275,6 +275,15 @@ export const EXEMPT_PAIRS = new Set<string>([
 // standup.feedback<->standup.feedbackDialogTitle
 // ⇒ 이 18건을 GRANDFATHER_BASELINE에서 걷어낼지(진짜 결함이 아니었다고 결론)는 이 PR이 정하지 않는다
 // (AC6과 같은 판단 — 이 스토리는 정밀화만, triage는 별도).
+//
+// story #2519(2026-08-16, 고아 컴포넌트 정리) — 위 18건과는 다른 성질의 제거 2건.
+// `settings.slackIntegration.saveLabel <-> settings.slackIntegration.savePending`·
+// `settings.slackIntegration.savePending <-> settings.slackIntegration.saveRow`는 #2410
+// 이후에도 실제로 계속 걸리고 있었는데(스캔 정밀화 문제가 아니라 진짜 충돌), 그 값 자체(고아
+// 컴포넌트 `SlackIntegrationSettingsSection` 전용 i18n 네임스페이스)가 이 스토리에서 완전히
+// 삭제됐다 — "판정 보류"가 아니라 "그 문자열이 이제 존재하지 않는다"라 Set에서도 뺀다(#2410의
+// 판단 유보 대상과 다름, 소스가 사라진 건 재검토할 것도 없다). Set 크기 40→38, 실 걸림 수
+// GRANDFATHER_LIVE_COUNT_TEST 22→20.
 export const GRANDFATHER_BASELINE = new Set<string>([
   'board.backlinksEmptyFallback <-> board.backlinksEmptyScoped',
   'cage.pendingSummary <-> cage.trustScorePending',
@@ -308,8 +317,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'settings.projectCreated <-> settings.tabProjects',
   'settings.slackIntegration.mappedElsewhereHint <-> settings.slackIntegration.saveLabel',
   'settings.slackIntegration.pendingHint <-> settings.slackIntegration.saveLabel',
-  'settings.slackIntegration.saveLabel <-> settings.slackIntegration.savePending',
-  'settings.slackIntegration.savePending <-> settings.slackIntegration.saveRow',
   'settings.slackIntegration.workspaceConnectedSummary <-> settings.slackIntegration.workspaceLabel',
   'standup.blockersRollupTitle <-> standup.today',
   'standup.feedback <-> standup.feedbackDialogTitle',
