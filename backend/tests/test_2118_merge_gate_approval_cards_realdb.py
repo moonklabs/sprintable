@@ -145,6 +145,75 @@ async def test_list_gate_approver_ids_project_none_falls_back_to_org_owner_admin
         await engine.dispose()
 
 
+async def _seed_org_member_with_uid(session, org_id, *, role="member"):
+    """parity 테스트 전용 — user_id를 함께 반환한다(_non_doc_gate_approvable은 org_members.id가
+    아니라 .user_id를 받는 단건 판정 함수라 listing 결과(.id)와 다른 id 공간)."""
+    from app.models.project import OrgMember
+
+    user_id = uuid.uuid4()
+    om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user_id, role=role)
+    session.add(om)
+    await session.commit()
+    return om.id, user_id
+
+
+@pytest.mark.anyio
+async def test_list_gate_approver_ids_parity_with_single_item_judge():
+    """페드루 PO AC 리뷰(2026-08-16) — list_gate_approver_ids(listing)가 gates.py
+    _non_doc_gate_approvable(단건 판정)과 «같은 규칙»이라는 주장은 docstring뿐이었다(규칙이
+    한쪽만 바뀌면 조용히 어긋나는 자리 — 「막는 쪽과 하는 쪽이 다른 걸 본다」 클래스, #2198과
+    동형). 시드된 멤버 전원에 대해 두 방향(listing 포함 여부 == 단건 판정 결과)을 단언해
+    어느 쪽이 바뀌어도 이 테스트가 빨개지게 고정한다."""
+    from app.routers.gates import _non_doc_gate_approvable
+    from app.services.project_auth import list_gate_approver_ids
+
+    engine, Session = await _engine_and_session()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            _other_org_id, other_project_id = None, None
+            from app.models.project import Project
+            other_project = Project(id=uuid.uuid4(), org_id=org_id, name="P2")
+            s.add(other_project)
+            await s.commit()
+            other_project_id = other_project.id
+
+            members = {}
+            members["project_owner"], uid_project_owner = await _seed_org_member_with_uid(s, org_id, role="member")
+            await _seed_project_access(s, project_id, members["project_owner"], role="owner")
+
+            members["project_admin"], uid_project_admin = await _seed_org_member_with_uid(s, org_id, role="member")
+            await _seed_project_access(s, project_id, members["project_admin"], role="admin")
+
+            members["project_plain_member"], uid_project_plain = await _seed_org_member_with_uid(s, org_id, role="member")
+            await _seed_project_access(s, project_id, members["project_plain_member"], role="member")
+
+            members["org_owner_floor"], uid_org_owner = await _seed_org_member_with_uid(s, org_id, role="owner")
+            members["org_admin_floor"], uid_org_admin = await _seed_org_member_with_uid(s, org_id, role="admin")
+            members["no_access"], uid_no_access = await _seed_org_member_with_uid(s, org_id, role="member")
+
+            members["other_project_owner"], uid_other_project_owner = await _seed_org_member_with_uid(s, org_id, role="member")
+            await _seed_project_access(s, other_project_id, members["other_project_owner"], role="owner")
+
+            uids = {
+                "project_owner": uid_project_owner, "project_admin": uid_project_admin,
+                "project_plain_member": uid_project_plain, "org_owner_floor": uid_org_owner,
+                "org_admin_floor": uid_org_admin, "no_access": uid_no_access,
+                "other_project_owner": uid_other_project_owner,
+            }
+
+        async with Session() as s:
+            listing = set(await list_gate_approver_ids(s, org_id, project_id))
+            for label, member_id in members.items():
+                judged = await _non_doc_gate_approvable(s, uids[label], org_id, project_id)
+                in_listing = member_id in listing
+                assert judged == in_listing, (
+                    f"{label}: 단건 판정={judged} vs listing 포함={in_listing} — 두 함수가 갈렸다"
+                )
+    finally:
+        await engine.dispose()
+
+
 async def _seed_story_with_participation(session, *, org, project, story_id, member, role_id):
     from app.models.participation import Participation, ParticipationRole
     from app.models.pm import Story
