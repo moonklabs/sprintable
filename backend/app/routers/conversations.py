@@ -2250,8 +2250,12 @@ async def send_message(
     # 흡수한다. @handle(`@word`)과 어휘상 안 겹쳐 위 블록과의 순서는 무관. body.content
     # 재대입 지점은 이 함수 전체에서 여기 하나뿐이라(아래 ConversationMessage 생성이 유일한
     # 소비처) 다른 호출부 변경 없이 자동 전파된다.
+    # story #2679: 반환이 (content, auto_story_ids)로 바뀌었다 — 아래 insert_chat_mentions
+    # 호출에 auto_story_ids를 그대로 넘겨 entity_references.origin(explicit vs auto)을
+    # 가른다(promoter가 여기서 심은 토큰과 caller가 직접 타이핑한 브라켓 토큰은 파싱만으론
+    # 구분이 안 되므로 별도 채널로 전달).
     from app.services.story_ref_promoter import promote_bare_story_refs
-    body.content = await promote_bare_story_refs(
+    body.content, _auto_story_ids = await promote_bare_story_refs(
         db, org_id=org_id, project_id=conv.project_id, content=body.content or "",
     )
 
@@ -2376,6 +2380,7 @@ async def send_message(
     from app.services.mention_parser import insert_chat_mentions
     mention_result = await insert_chat_mentions(
         db, org_id=org_id, message_id=msg.id, content=msg.content, created_by=sender.id,
+        auto_story_ids=frozenset(_auto_story_ids),
     )
 
     # E-STORAGE-SSOT S2: 첨부를 asset registry로 동기화(SAVE-time·같은 트랜잭션·orphan 0).
