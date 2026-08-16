@@ -148,7 +148,6 @@ export default function OrganizationEventsPage() {
                       onToggleExpand={() => setExpandedKey((k) => (k === def.key ? null : def.key))}
                       readonly={false}
                       isAdmin={isAdmin}
-                      orgSlug={orgSlug}
                       onEdit={() => setEditTarget(def)}
                       onDeactivate={() => setDeactivateTarget(def)}
                       onTestPublish={() => setPublishTarget(def)}
@@ -180,7 +179,6 @@ export default function OrganizationEventsPage() {
                       onToggleExpand={() => setExpandedKey((k) => (k === def.key ? null : def.key))}
                       readonly
                       isAdmin={isAdmin}
-                      orgSlug={orgSlug}
                       t={t}
                     />
                   ))}
@@ -240,14 +238,13 @@ export default function OrganizationEventsPage() {
 }
 
 function EventDefRow({
-  def, expanded, onToggleExpand, readonly, isAdmin, orgSlug, onEdit, onDeactivate, onTestPublish, t,
+  def, expanded, onToggleExpand, readonly, isAdmin, onEdit, onDeactivate, onTestPublish, t,
 }: {
   def: EventDefinition;
   expanded: boolean;
   onToggleExpand: () => void;
   readonly: boolean;
   isAdmin: boolean;
-  orgSlug: string;
   onEdit?: () => void;
   onDeactivate?: () => void;
   onTestPublish?: () => void;
@@ -296,12 +293,10 @@ function EventDefRow({
               접기로 존치(EventDefinitionSummary 내부). 역파생 불가(프리셋 전부 포함) 시엔
               정의기 edit 다이얼로그와 같은 규칙으로 정직하게 JSON 기본+고급 전용 배지. */}
           <EventDefinitionSummary
-            eventKey={def.key}
             payloadSchema={def.payload_schema}
             routing={def.routing}
             actionAuth={def.action_auth}
             blockTemplate={def.block_template}
-            orgSlug={orgSlug}
           />
           {/* PR#3087 — 이 조회 자체가 BE org admin/owner 게이트라, 일반 멤버는 조회하면
               항상 403이라 아예 안 그린다(모두가 여는 매 행마다 헛된 실패 fetch 방지). */}

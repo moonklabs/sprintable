@@ -636,14 +636,13 @@ describe('OrganizationEventsPage — 고급 탭 key 문자셋 클라 선검증(s
   });
 });
 
-// story #2677 — 정의 행 펼침 기본 뷰=사람 언어(서식 요약·필드 표·실물 카드), JSON은
-// 「고급」 접기. 정의기 역파생(tryReverseParse)이 성공하는 정의(폼이 만들 수 있는 모양)와
-// 실패하는 정의(프리셋 전부·손편집 커스텀) 양쪽을 각각 잰다 — AC2의 "침묵 오렌더 금지"는
-// 실패 시 조용히 반쪽짜리 사람 언어를 흉내내지 않고 «고급 전용» 배지+JSON 그대로임을 뜻한다.
+// story #2677 — 정의 행 펼침 기본 뷰=사람 언어(서식 요약·받는 사람·필드 표·실물 카드),
+// JSON은 「고급」 접기. PO review_changes(head cbb0ff0c) — 최초안은 이 전부를
+// tryReverseParse(정의기 폼이 만들 수 있는 정확한 모양) 하나에 묶어 프리셋 4종이 전부 JSON
+// 그대로였다. fix 후: 필드 표·받는 사람·실물 카드는 raw JSON에서 직접 읽어 역파생 없이
+// 항상 뜬다 — 폴백은 «서식(사이클/신호/측정) 분류» 한 줄로만 좁혀진다(AC2).
 describe('OrganizationEventsPage — 정의 상세보기 사람 언어 기본(story #2677)', () => {
-  // 측정형(record_only) — tryReverseParse가 성공하는 최소 모양. metric_value가 payload_schema에
-  // 있어야 measure 분기를 탄다(event-definer-logic.ts tryReverseParse 참조).
-  function humanReadableCustom(overrides: Record<string, unknown> = {}) {
+  function measureCustom(overrides: Record<string, unknown> = {}) {
     return customWithId({
       id: 'def-human-1',
       key: 'org.moonklabs.deploy.completed',
@@ -665,21 +664,20 @@ describe('OrganizationEventsPage — 정의 상세보기 사람 언어 기본(st
     return act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
   }
 
-  it('역파생 성공하는 정의는 서식/받는 사람/필드 표/실물 카드가 JSON 없이 먼저 보인다', async () => {
-    mockFetches([humanReadableCustom()]);
+  it('서식이 분류되는 정의는 서식/받는 사람/필드 표/실물 카드가 JSON 없이 먼저 보인다', async () => {
+    mockFetches([measureCustom()]);
     await mount();
     await expandRow('org.moonklabs.deploy.completed');
 
     expect(container.textContent).toContain(koMessages.organization.definerFormat_measure);
+    // broadcast=server_derived/none은 정의기가 부르는 이름(«기록만») 그대로.
     expect(container.textContent).toContain(koMessages.organization.definerRoutingRecordTitle);
     expect(container.textContent).toContain('metric_value');
     expect(container.textContent).toContain('배포 완료');
-    // «고급 전용» 배지는 안 뜬다 — 역파생이 성공했다는 뜻.
-    expect(container.textContent).not.toContain(koMessages.organization.definerAdvancedOnlyBadge);
   });
 
   it('JSON 원문은 「고급」 접기 안에 그대로 남아있다(제거 아님, textContent로 확인)', async () => {
-    mockFetches([humanReadableCustom()]);
+    mockFetches([measureCustom()]);
     await mount();
     await expandRow('org.moonklabs.deploy.completed');
 
@@ -689,32 +687,54 @@ describe('OrganizationEventsPage — 정의 상세보기 사람 언어 기본(st
     expect(container.textContent).toContain('"metric_value"');
   });
 
-  it('역파생 실패(프리셋)는 «고급 전용» 배지+JSON이 기본으로 뜬다(침묵 오렌더 금지, AC2)', async () => {
+  it('프리셋(gate.verdict)도 받는 사람·필드 표·JSON 접기가 전부 뜬다(폴백은 서식 한 줄뿐, AC2)', async () => {
     mockFetches([preset()]);
     await mount();
     await expandRow('preset.gate.verdict');
 
-    expect(container.textContent).toContain(koMessages.organization.definerAdvancedOnlyBadge);
+    // properties={}라 3서식(cycle/signal/measure) 어디에도 안 맞아 서식 줄만 미분류 표시.
+    expect(container.textContent).toContain(koMessages.organization.eventSummaryFormatUnclassified);
+    // 받는 사람(broadcast=work_item_stakeholders)은 역파생과 무관하게 직접 읽혀 사람 언어로 뜬다.
+    expect(container.textContent).toContain(koMessages.organization.definerRoutingStakeholdersTitle);
+    // JSON은 제거되지 않았다 — 「고급」 접기 안에 여전히 존재.
     expect(container.textContent).toContain('"work_item_stakeholders"');
-    // 사람 언어 서식 라벨은 안 뜬다 — 반쪽짜리 사람 언어를 흉내내지 않는다.
-    expect(container.textContent).not.toContain(koMessages.organization.eventSummaryFormatLabel);
   });
 
-  it('역파생 실패(손편집 커스텀 — member_id_field 이름이 폼 상수와 다름)도 같은 정직 폴백', async () => {
+  it('프리셋(goal.measured)은 metric_value가 있어 서식도 실제로 분류된다(폴백이 필요조차 없는 사례)', async () => {
+    mockFetches([preset({
+      key: 'preset.goal.measured',
+      payload_schema: {
+        type: 'object',
+        properties: { goal_id: { type: 'string' }, metric_value: { type: 'number' }, metric_unit: { type: 'string' } },
+        required: ['goal_id', 'metric_value'],
+      },
+      routing: { escalation: { kind: 'server_derived', target: 'none' }, broadcast: { kind: 'server_derived', target: 'goal_owner' } },
+    })]);
+    await mount();
+    await expandRow('preset.goal.measured');
+
+    expect(container.textContent).toContain(koMessages.organization.definerFormat_measure);
+    expect(container.textContent).toContain(koMessages.organization.eventRoutingTargetGoalOwner);
+    expect(container.textContent).not.toContain(koMessages.organization.eventSummaryFormatUnclassified);
+  });
+
+  it('손편집 커스텀(3서식 키와 안 겹치는 스키마)도 받는 사람·필드 표는 직접 렌더된다', async () => {
     mockFetches([customWithId({
       id: 'def-manual-1',
       key: 'org.moonklabs.manual.thing',
-      payload_schema: { type: 'object', properties: { stage: { type: 'string', enum: ['a', 'b'] } }, required: ['stage'], additionalProperties: false },
+      payload_schema: { type: 'object', properties: { foo: { type: 'string' } }, required: [], additionalProperties: false },
       routing: { escalation: { kind: 'server_derived', target: 'none' }, broadcast: { kind: 'payload_field', member_id_field: 'weird_field_name' } },
     })]);
     await mount();
     await expandRow('org.moonklabs.manual.thing');
 
-    expect(container.textContent).toContain(koMessages.organization.definerAdvancedOnlyBadge);
+    expect(container.textContent).toContain(koMessages.organization.eventSummaryFormatUnclassified);
+    expect(container.textContent).toContain(koMessages.organization.definerRoutingAssignTitle);
+    expect(container.textContent).toContain('foo');
   });
 
   it('비활성 정의도 펼침 시 사람 언어 요약이 뜬다(AC3)', async () => {
-    mockFetches([humanReadableCustom({ enabled: false })]);
+    mockFetches([measureCustom({ enabled: false })]);
     await mount();
     await expandRow('org.moonklabs.deploy.completed');
     expect(container.textContent).toContain(koMessages.organization.definerFormat_measure);
