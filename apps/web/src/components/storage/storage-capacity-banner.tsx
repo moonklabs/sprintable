@@ -7,6 +7,7 @@ import { AlertOctagon, AlertTriangle, X } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { fetchWithAuth } from '@/lib/db/client';
 import { isEEEnabled } from '@/lib/ee';
 import { formatStorageSize } from '@/lib/storage/format';
 import { cn } from '@/lib/utils';
@@ -51,7 +52,9 @@ export function StorageCapacityBanner() {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch('/api/assets/storage-usage');
+        // story #2689 — 콜드 재진입 시 raw fetch는 401을 재시도 없이 삼킨다(폴링 없음, 마운트
+        // 1회뿐이라 다시 안 뜬다). fetchWithAuth로 401→refresh→재시도 경로에 태운다.
+        const res = await fetchWithAuth('/api/assets/storage-usage');
         if (!res.ok) return;
         const json = (await res.json()) as {
           data?: { used_bytes?: number; limit_bytes?: number; percentage?: number };

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { CheckCircle2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { fetchWithAuth } from '@/lib/db/client';
 import { cn } from '@/lib/utils';
 import {
   buildNowFace, parseCompletionNotifications, parseMyActions,
@@ -24,9 +25,11 @@ interface NowFaceLoad {
 }
 
 async function loadNowFace(t: NowFaceTranslator): Promise<NowFaceLoad> {
+  // story #2689 — 콜드 재진입 시 raw fetch는 401을 재시도 없이 삼켜(!r.ok=>null) "지금" 면이
+  // 빈 채로 60초 REFRESH_MS까지 안 채워졌다. fetchWithAuth로 401→refresh→재시도 경로에 태운다.
   const [ma, notifs] = await Promise.all([
-    fetch('/api/dashboard/my-actions').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    fetch('/api/notifications?type=task_completed&unread=true').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    fetchWithAuth('/api/dashboard/my-actions').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    fetchWithAuth('/api/notifications?type=task_completed&unread=true').then((r) => (r.ok ? r.json() : null)).catch(() => null),
   ]);
   const raw = parseMyActions(ma);
   return {

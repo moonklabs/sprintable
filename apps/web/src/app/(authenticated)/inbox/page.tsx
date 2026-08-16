@@ -12,6 +12,7 @@ import { ApprovalsQueue } from '@/components/inbox/approvals-queue';
 import { AttentionQueueView } from '@/components/attention-queue/attention-queue-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { useToast, ToastContainer } from '@/components/ui/toast';
+import { fetchWithAuth } from '@/lib/db/client';
 import {
   getInboxNotificationLabel,
   getNotificationReasonKey,
@@ -164,7 +165,9 @@ async function fetchInboxNotifications(typeFilter: string, cursor?: string | nul
   if (typeFilter) params.set('type', typeFilter);
   if (cursor) params.set('cursor', cursor);
 
-  const res = await fetch(`/api/notifications?${params}`);
+  // story #2689 — 콜드 재진입 시 raw fetch는 401을 재시도 없이 삼켜(!res.ok=>null) 알림
+  // 목록이 빈 채로 남았다. fetchWithAuth로 401→refresh→재시도 경로에 태운다.
+  const res = await fetchWithAuth(`/api/notifications?${params}`);
   if (!res.ok) return null;
 
   const json = await res.json();
@@ -258,7 +261,9 @@ export default function InboxPage() {
   useEffect(() => {
     if (!currentTeamMemberId || !projectId) return;
     const params = new URLSearchParams({ project_id: projectId, member_id: currentTeamMemberId, limit: '10' });
-    fetch(`/api/workflow-executions?${params.toString()}`)
+    // story #2689 — 콜드 재진입 시 raw fetch는 401을 재시도 없이 삼켜(r.ok?...:null) 워크플로우
+    // 실행 목록이 빈 채로 남았다. fetchWithAuth로 401→refresh→재시도 경로에 태운다.
+    fetchWithAuth(`/api/workflow-executions?${params.toString()}`)
       .then((r) => r.ok ? r.json() : null)
       .then((json) => {
         if (json?.items) setWorkflowExecs(json.items as WorkflowExecItem[]);
