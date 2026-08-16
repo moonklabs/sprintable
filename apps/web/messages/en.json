@@ -52,8 +52,7 @@
     "now": "Now",
     "approvals": "Approvals",
     "chat": "Chat",
-    "more": "More",
-    "moreTempNotice": "Temporary list — will be replaced by the full screen soon."
+    "more": "More"
   },
   "nav": {
     "dashboard": "Dashboard",
