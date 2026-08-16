@@ -5,6 +5,8 @@
 - AC2(음성대조): 다른 대화 알림·비채팅 이벤트(story_assigned 등)는 불변.
 - 과잉살상 방지(미르코 보강): up_to(GREATEST 래칫 후 값) 이후 생성된 메시지의 알림은 안 건드림.
 - AC3: 멱등 — 이미 read_at 세팅된 알림 재갱신 0.
+- SAVEPOINT 격리: 동기 실패(카디르 QA #3119 — 실 SQL 레벨 에러 주입)가 read-state 갱신
+  자체를 조용히 삼키지 않는다(begin_nested 없으면 last_read_at이 세션 poison으로 유실됨).
 """
 from __future__ import annotations
 
@@ -131,7 +133,7 @@ def _client_for(app):
 
 async def _setup_app_human(app, Session, user_id, org_id):
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     async def _db():
         async with Session() as s:
@@ -148,7 +150,7 @@ async def _setup_app_human(app, Session, user_id, org_id):
             claims={"app_metadata": {"org_id": str(org_id)}},
         )
 
-    app.dependency_overrides[get_db] = _db
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
 
 
@@ -360,6 +362,60 @@ async def test_mark_read_twice_is_idempotent_no_error():
                 )).scalar_one()
 
             assert first_read_at == second_read_at  # read_at IS NULL 필터로 재갱신 0.
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_notif_sync_failure_does_not_poison_read_state_update(monkeypatch):
+    """SAVEPOINT 격리 실증(카디르 QA #3119) — 동기 실패가 read-state 갱신을 못 막아야 한다.
+
+    bare Python raise는 SQLAlchemy 세션을 poison 안 시킨다(begin_nested 유무와 무관하게
+    항상 통과해 이 테스트가 무의미해짐) — 실 DBAPI 에러(SELECT 1/0)를 주입해야 진짜
+    poison이 재현된다. begin_nested 없이 이 에러가 나면 이후 UPDATE(ConversationParticipant.
+    last_read_at)까지 poisoned 트랜잭션에 실려 조용히 사라진다(200 응답인데 저장 안 됨 —
+    [[feedback_aborted_txn_silent_commit_class]] 동형)."""
+    from app.main import app
+    from sqlalchemy import text
+
+    async def _boom(db, org_id, conversation_id, member_id, up_to):
+        await db.execute(text("SELECT 1/0"))
+        return 0
+
+    monkeypatch.setattr(
+        "app.routers.event_notifications.sync_notification_read_on_chat_read", _boom,
+    )
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_conversation(s, n_members=2)
+            me, other = seeded["member_ids"]
+            await _add_message(s, seeded["conv_id"], other, "hi", _t(1))
+
+        await _setup_app_human(app, Session, seeded["user_ids"][0], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                f"/api/v2/conversations/{seeded['conv_id']}/read",
+                json={"up_to": _t(1).isoformat()},
+            )
+            assert resp.status_code == 200, resp.text
+
+            async with Session() as s2:
+                from app.models.conversation import ConversationParticipant
+                from sqlalchemy import select
+                participant = (await s2.execute(
+                    select(ConversationParticipant).where(
+                        ConversationParticipant.conversation_id == seeded["conv_id"],
+                        ConversationParticipant.member_id == me,
+                    )
+                )).scalar_one()
+                # SAVEPOINT가 격리하므로 동기 실패와 무관하게 read-state는 실제로 저장돼야 한다.
+                assert participant.last_read_at is not None
         finally:
             await client.aclose()
     finally:
