@@ -400,6 +400,8 @@ async def create_team_member(
                 # story #1953: 신규 에이전트(member) 자신의 project_id — TeamMember.project_id
                 # NOT NULL, 신규 조회 없이 그대로 실음.
                 source_project_id=member.project_id,
+                # story #2696: outbox 이관(동일 결함 클래스 예방).
+                via_outbox=True,
             )
 
     # AC3: agent 생성 시 API key 자동 생성 + response에 포함
