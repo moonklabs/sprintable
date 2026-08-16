@@ -35,7 +35,6 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { SidebarTrigger } from '@/components/ui/sidebar';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { NOTIFICATION_TYPES } from '@/lib/notification-types';
 import { isEEEnabled } from '@/lib/ee';
@@ -796,9 +795,10 @@ export default function SettingsPage() {
 
         {/* Right content */}
         <div className="focus-inset flex-1 min-w-0 overflow-y-auto">
-          {/* Mobile toggle button */}
+          {/* Mobile toggle button — story #2683(모바일 IA S3): 전역 GNB 유일문(SidebarTrigger)
+              폐기(AC1). 그 문은 top-bar.tsx로 옮겨(태블릿 전용) 두 토글 혼동을 없앴다 — 이
+              헤더에 남는 건 설정 내부 LNB 토글 하나뿐이다. */}
           <div className="lg:hidden flex items-center gap-2 border-b px-4 py-2">
-            <SidebarTrigger className="mr-1" />
             <button
               type="button"
               onClick={() => setLnbOpen((v) => !v)}
