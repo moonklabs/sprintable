@@ -226,6 +226,81 @@ def test_validate_key_fails_closed_when_org_id_present_but_slug_missing():
         )
 
 
+# ─── story #2666: 세그먼트 문자셋 위반이 "접두 불일치"로 오진되던 결함 ──────────────
+# 2026-08-15 #2664 라이브 실측: 세그먼트에 하이픈을 쓰면(예: "work-item") 접두는 맞는데도
+# "org.{slug}.로 시작해야 합니다"가 떠 사용자가 «접두»를 고치려 든다 — 실제 원인(허용
+# 문자셋 위반)과 안내가 어긋나는 클래스.
+
+def test_validate_key_hyphen_segment_reports_charset_not_prefix():
+    """⭐#2664 실사고의 정확한 재현 — 접두(org.{slug}.)는 맞는데 이후 세그먼트에 하이픈이
+    섞인 경우, 에러 메시지가 «세그먼트 문자셋»을 지목해야 한다(«접두» 문구가 아니라)."""
+    from app.services.event_definition_registry import (
+        InvalidEventDefinitionKeyError, validate_event_definition_key,
+    )
+
+    with pytest.raises(InvalidEventDefinitionKeyError) as ei:
+        validate_event_definition_key(
+            "org.acme.work-item", org_id=uuid.uuid4(), org_slug="acme",
+        )
+    msg = str(ei.value)
+    assert "문자셋" in msg
+    assert "work-item" in msg
+    assert "'org.{slug}.'" not in msg  # 접두 문구로 오진하지 않는다(이 스토리의 존재 이유).
+
+
+def test_validate_key_uppercase_segment_reports_charset():
+    from app.services.event_definition_registry import (
+        InvalidEventDefinitionKeyError, validate_event_definition_key,
+    )
+
+    with pytest.raises(InvalidEventDefinitionKeyError) as ei:
+        validate_event_definition_key(
+            "org.acme.WorkItem", org_id=uuid.uuid4(), org_slug="acme",
+        )
+    assert "문자셋" in str(ei.value)
+
+
+def test_validate_key_genuinely_wrong_prefix_still_reports_prefix():
+    """음성대조 — 진짜 접두 문제(org.으로 시작조차 안 함)는 여전히 접두 메시지 그대로다.
+    charset 분기가 진짜 접두 오류까지 삼키면 안 된다."""
+    from app.services.event_definition_registry import (
+        InvalidEventDefinitionKeyError, validate_event_definition_key,
+    )
+
+    with pytest.raises(InvalidEventDefinitionKeyError) as ei:
+        validate_event_definition_key(
+            "not_org_prefixed.acme.work_item", org_id=uuid.uuid4(), org_slug="acme",
+        )
+    msg = str(ei.value)
+    assert "org.{slug}." in msg
+    assert "문자셋" not in msg
+
+
+def test_validate_key_mismatched_slug_with_valid_charset_still_reports_slug_mismatch():
+    """음성대조 — slug 자체가 틀린 경우(세그먼트 charset은 멀쩡함)는 기존 slug-불일치
+    메시지 그대로 유지된다(charset 분기는 strict regex가 실패한 경우에만 타므로, slug만
+    틀리고 나머지가 유효하면 strict regex 자체가 통과해 이 분기를 안 거친다)."""
+    from app.services.event_definition_registry import (
+        InvalidEventDefinitionKeyError, validate_event_definition_key,
+    )
+
+    with pytest.raises(InvalidEventDefinitionKeyError) as ei:
+        validate_event_definition_key(
+            "org.globex.work_item", org_id=uuid.uuid4(), org_slug="acme",
+        )
+    msg = str(ei.value)
+    assert "일치하지 않" in msg
+    assert "문자셋" not in msg
+
+
+def test_validate_key_valid_underscore_segments_still_pass_no_regression():
+    from app.services.event_definition_registry import validate_event_definition_key
+
+    validate_event_definition_key(
+        "org.acme.work_item.status_changed", org_id=uuid.uuid4(), org_slug="acme",
+    )  # raise 없으면 통과 — 기존 정상 흐름 무회귀.
+
+
 # ─── AC3: payload_schema 검증 — 모르는 필드 거부(양성·음성) ────────────────────────
 
 def test_validate_payload_accepts_conforming_payload():
