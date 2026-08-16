@@ -12,7 +12,7 @@ main.py 핸들러가 {data:null,error:{code,message,...},meta:null}로 감싼다
 """
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import (
@@ -111,7 +111,6 @@ async def draft(
 
 @router.get("", response_model=list[HypothesisResponse])
 async def list_hypotheses(
-    response: Response,
     auth: AuthContext = Depends(get_current_user),
     project_id: uuid.UUID | None = Query(default=None),
     epic_id: uuid.UUID | None = Query(default=None),
@@ -140,7 +139,13 @@ async def list_hypotheses(
             if await has_project_access(session, user_id, item.project_id, org_id)
         ]
         items = accessible
-    response.headers["X-Total-Count"] = str(len(items))
+    # story #2233(PO 판정 ㉢, 2026-08-16): X-Total-Count가 `len(items)`(이 페이지에 온
+    # 개수)를 "전체"라 거짓 주장했었다 — svc.list_hypotheses는 COUNT를 안 내고, org-wide
+    # 분기는 위에서 in-memory 후필터까지 걸려 DB COUNT 하나로도 못 맞힌다. 아무도 이
+    # 헤더를 안 읽는다(FE `/api/hypotheses` 프록시는 raw passthrough가 아니라 서비스
+    # 재구성이라 헤더 자체가 브라우저까지 안 감, MCP는 headers 참조 0 — 그라운딩 judgment
+    # efdeeb8c 실측). 실사용자가 생기면 그때 has_more/next_cursor(#2231 정본 A)를 그
+    # 화면과 같이 설계 — 지금은 헤더를 그냥 뺀다(틀린 총량보다 없는 총량).
     return items
 
 
