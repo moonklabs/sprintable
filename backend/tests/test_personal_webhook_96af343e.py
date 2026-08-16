@@ -2,7 +2,11 @@
 
 dispatch_notification 이 in-app 만 보내고 개인 WebhookConfig 로 POST 안 하던 것(2겹 근본)을
 옵션 C(flush 타이밍·best-effort)로 보강. agent SSE 경로(route_dispatch_event)는 미변경.
-"""
+
+story #2696: via_outbox 기본값이 True로 바뀌어(outbox 이관) 이 파일이 검증하는 동기 즉시-POST
+경로(_post_with_retry 직접 호출)에 도달하려면 via_outbox=False를 명시해야 한다 — 이 파일의
+관심사가 outbox 자체가 아니라 sync 배달 메커니즘(SSRF·HMAC·Discord 포맷·mute 필터)이라 그대로
+False로 고정한다."""
 from __future__ import annotations
 
 import uuid
@@ -42,7 +46,7 @@ async def test_personal_webhook_posts_for_active_config():
     with patch("app.services.dispatch_router._post_with_retry", new_callable=AsyncMock) as mpost, \
          patch("app.core.ssrf.validate_webhook_url_async", new_callable=AsyncMock):
         mpost.return_value = True
-        await _deliver_personal_webhooks(db, org, [cfg.member_id], title="T", body="B", event_type="story_assigned")
+        await _deliver_personal_webhooks(db, org, [cfg.member_id], title="T", body="B", event_type="story_assigned", via_outbox=False)
     mpost.assert_awaited_once()
     args = mpost.await_args.args
     assert args[0] == cfg.url and args[2] == "sek"  # url, secret
@@ -57,7 +61,7 @@ async def test_personal_webhook_skips_muted():
     db.execute = AsyncMock(side_effect=[_scalars([cfg]), _scalars([cfg.member_id])])  # muted
     with patch("app.services.dispatch_router._post_with_retry", new_callable=AsyncMock) as mpost, \
          patch("app.core.ssrf.validate_webhook_url_async", new_callable=AsyncMock):
-        await _deliver_personal_webhooks(db, org, [cfg.member_id], title="T", body=None, event_type="e")
+        await _deliver_personal_webhooks(db, org, [cfg.member_id], title="T", body=None, event_type="e", via_outbox=False)
     mpost.assert_not_awaited()
 
 
@@ -70,7 +74,7 @@ async def test_personal_webhook_discord_format_no_secret():
     db.execute = AsyncMock(side_effect=[_scalars([cfg]), _scalars([])])
     with patch("app.services.dispatch_router._post_with_retry", new_callable=AsyncMock) as mpost, \
          patch("app.core.ssrf.validate_webhook_url_async", new_callable=AsyncMock):
-        await _deliver_personal_webhooks(db, org, [cfg.member_id], title="Hi", body="x", event_type="e")
+        await _deliver_personal_webhooks(db, org, [cfg.member_id], title="Hi", body="x", event_type="e", via_outbox=False)
     payload, secret = mpost.await_args.args[1], mpost.await_args.args[2]
     assert "content" in payload and secret is None
 
@@ -84,7 +88,7 @@ async def test_personal_webhook_ssrf_reject_skips():
     db.execute = AsyncMock(side_effect=[_scalars([cfg]), _scalars([])])
     with patch("app.services.dispatch_router._post_with_retry", new_callable=AsyncMock) as mpost, \
          patch("app.core.ssrf.validate_webhook_url_async", new_callable=AsyncMock, side_effect=ValueError("blocked")):
-        await _deliver_personal_webhooks(db, org, [cfg.member_id], title="T", body=None, event_type="e")
+        await _deliver_personal_webhooks(db, org, [cfg.member_id], title="T", body=None, event_type="e", via_outbox=False)
     mpost.assert_not_awaited()
 
 
@@ -95,7 +99,7 @@ async def test_personal_webhook_no_config_noop():
     db = AsyncMock()
     db.execute = AsyncMock(side_effect=[_scalars([])])  # no configs
     with patch("app.services.dispatch_router._post_with_retry", new_callable=AsyncMock) as mpost:
-        await _deliver_personal_webhooks(db, org, [uuid.uuid4()], title="T", body=None, event_type="e")
+        await _deliver_personal_webhooks(db, org, [uuid.uuid4()], title="T", body=None, event_type="e", via_outbox=False)
     mpost.assert_not_awaited()
     assert db.execute.await_count == 1  # configs 조회만
 
@@ -110,12 +114,12 @@ async def test_personal_webhook_post_failure_swallowed():
     with patch("app.services.dispatch_router._post_with_retry", new_callable=AsyncMock, side_effect=RuntimeError("boom")), \
          patch("app.core.ssrf.validate_webhook_url_async", new_callable=AsyncMock):
         # 예외 전파 없이 정상 반환해야 함
-        await _deliver_personal_webhooks(db, org, [cfg.member_id], title="T", body=None, event_type="e")
+        await _deliver_personal_webhooks(db, org, [cfg.member_id], title="T", body=None, event_type="e", via_outbox=False)
 
 
 @pytest.mark.anyio
 async def test_empty_member_ids_noop():
     db = AsyncMock()
     db.execute = AsyncMock()
-    await _deliver_personal_webhooks(db, uuid.uuid4(), [], title="T", body=None, event_type="e")
+    await _deliver_personal_webhooks(db, uuid.uuid4(), [], title="T", body=None, event_type="e", via_outbox=False)
     db.execute.assert_not_awaited()
