@@ -2,7 +2,10 @@
 
 AC1(dispatch_notification 경로 발송·비-EE 무동작) + AC2(DeviceNotRegistered→is_active=false 왕복).
 실 PG + 실 파이프라인(dispatch_notification) 구동, Expo HTTP 만 mock(토큰별 ticket 반환). DB env 없으면 skip.
-"""
+
+story #2696: via_outbox 기본값이 True로 바뀌어 이 테스트가 노리는 "한 요청 안에서 발송+만료
+왕복까지 끝남" 전제가 깨지므로(outbox는 job만 쌓고 실 발송은 delivery_dispatcher 워커가
+별도 폴링으로 함) via_outbox=False를 명시해 즉시-발송 경로를 그대로 검증한다."""
 from __future__ import annotations
 
 import json
@@ -119,6 +122,7 @@ async def test_dispatch_notification_sends_expo_and_expires_dead_token_realdb():
                 await dispatch_notification(
                     s, org_id=ORG, event_type="gate_pending",
                     target_member_ids=[MEMBER_X], title="게이트 대기", body="승인 필요",
+                    via_outbox=False,
                 )
             await s.commit()
 
