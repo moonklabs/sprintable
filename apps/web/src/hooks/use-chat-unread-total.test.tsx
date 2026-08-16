@@ -110,3 +110,33 @@ describe('useChatUnreadTotal — story #2078 결함수정(Provider 자식 위치
     expect(instances).toHaveLength(1);
   });
 });
+
+// story #1978(트랙C) — onReconnect가 없어서 SSE 재연결(포그라운드 복귀 등) 시 total이 서버
+// truth로 재동기화되지 않던 drift 구멍. sse-multiplexer.test.tsx와 동일 관례(실제 백오프
+// 타이머 재현은 다른 테스트의 몫 — 여기선 useChatSse를 목해 onReconnect 배선만 직접 고정한다).
+describe('useChatUnreadTotal — onReconnect 배선(story #1978)', () => {
+  it('useChatSse에 onReconnect가 넘어가고, 그걸 부르면 unread-count를 다시 fetch한다', async () => {
+    vi.resetModules();
+    const useChatSseMock = vi.fn();
+    vi.doMock('./use-chat-sse', () => ({ useChatSse: (opts: unknown) => { useChatSseMock(opts); return { connected: true }; } }));
+    const fetchMock = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ count: 0 }) }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const { useChatUnreadTotal } = await import('./use-chat-unread-total');
+    function Consumer() {
+      useChatUnreadTotal('member-1');
+      return null;
+    }
+    await act(async () => { root.render(<Consumer />); });
+    await act(async () => { await Promise.resolve(); });
+
+    const beforeCount = fetchMock.mock.calls.length;
+    const opts = useChatSseMock.mock.calls.at(-1)?.[0] as { onReconnect?: () => void } | undefined;
+    expect(typeof opts?.onReconnect).toBe('function');
+    await act(async () => { opts!.onReconnect!(); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(fetchMock.mock.calls.length).toBe(beforeCount + 1);
+    vi.doUnmock('./use-chat-sse');
+  });
+});

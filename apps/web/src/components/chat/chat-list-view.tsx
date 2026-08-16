@@ -398,11 +398,33 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     if (agentLoadedRef.current) setAllConversations(applyRead);
   }, []);
 
+  // story #1978(트랙C) — SSE 드롭 후 놓친 conversation.message_created는 이 목록에 영영
+  // 반영 안 됐다(handleConversationMessage는 살아있는 이벤트에만 반응). chat-view.tsx의
+  // handleReconnect(fetchMessages 재호출)와 동형 — "재연결됐다"는 신호를 받으면 목록을
+  // 통째로 다시 가져와 서버 truth로 백필한다. agent 탭은 이미 연 적 있을 때만(lazy 유지 원칙,
+  // loadAgentConversationsOnce와 동일 가드).
+  const handleReconnect = useCallback(() => {
+    void fetchConversations(0, false);
+    if (agentLoadedRef.current) void fetchAllConversations(0, false);
+  }, [fetchConversations, fetchAllConversations]);
+
   useChatSse({
     currentTeamMemberId,
     onConversationMessage: handleConversationMessage,
     onConversationRead: handleConversationRead,
+    onReconnect: handleReconnect,
   });
+
+  // story #1978(트랙C) — onReconnect(SSE 커넥션 자체의 재연결)와는 다른 축: 탭이 백그라운드에
+  // 있는 동안엔 SSE가 안 끊겨도(브라우저가 살려둘 수 있음) 목록이 갱신 안 됐을 수 있다.
+  // use-chat-unread-total.ts와 동일 패턴(document.visibilitychange, !document.hidden에서만).
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (!document.hidden) handleReconnect();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [handleReconnect]);
 
   const handleCreated = (conversationId: string) => {
     setShowModal(false);
