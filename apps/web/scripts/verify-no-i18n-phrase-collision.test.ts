@@ -262,8 +262,13 @@ describe('story #2410 — isNumberAdjacent: 이름 보간은 numberAdjacent가 �
 // 지키는지(모듈 코멘트 "CI 안전장치" 참조). 이게 없으면 이 스토리가 잡은 40건이 이 PR과
 // 다른 모든 PR을 영원히 막는다.
 describe('GRANDFATHER_BASELINE — 기존 채무는 통과, 새 충돌만 막는다', () => {
-  it('실제 첫 검거(ccWaitingGateReason/ccAgentStuck)는 baseline에 있다', () => {
-    expect(GRANDFATHER_BASELINE.has(pairKey('dashboard.ccAgentStuck', 'dashboard.ccWaitingGateReason'))).toBe(
+  // story #2410 후속(2026-08-17) — 예전엔 dashboard.ccAgentStuck/ccWaitingGateReason({gate})를
+  // 썼으나, 그 쌍은 isNumberAdjacent 정밀화로 더 이상 numberAdjacent가 아니라는 게 밝혀져
+  // GRANDFATHER_BASELINE에서 걷어냈다(위 '18건 제거' 참조) — 이 테스트가 원래 그 쌍으로
+  // 하려던 것과 같은 검증(AC7이 이미 옮겨간 자리, notification-bell.tsx의 진짜 카운터 쌍)을
+  // 그대로 재사용해 파일 안 두 테스트가 다른 예시를 들지 않게 맞춘다.
+  it('실제 첫 검거(panelTitle/bellAriaLabelCount, AC7과 동일 쌍)는 baseline에 있다', () => {
+    expect(GRANDFATHER_BASELINE.has(pairKey('inbox.panelTitle', 'inbox.bellAriaLabelCount'))).toBe(
       true,
     );
   });
@@ -284,22 +289,25 @@ describe('GRANDFATHER_BASELINE — 기존 채무는 통과, 새 충돌만 막는
 // 2026-07-31: 41번째 항목부터는 PO 승인 없이 조용히 못 들어온다. 크기를 고정해
 // 두면 누가 리뷰 없이 항목을 추가/삭제해도 이 테스트가 실패해 diff가 눈에 띈다(그 자체가
 // design:pass/qa:pass 리뷰를 거치게 만드는 자리). story #2519 — 40→38(고아 컴포넌트
-// SlackIntegrationSettingsSection 삭제로 그 전용 i18n 키 자체가 사라진 2건 제거, GRANDFATHER_
-// BASELINE 상단 주석 참조 — #2410의 판단-유보 18건과는 다른 사유).
+// SlackIntegrationSettingsSection 삭제로 그 전용 i18n 키 자체가 사라진 2건 제거).
+// story #2410 후속(2026-08-17, PO 승인) — 38→20. isNumberAdjacent 정밀화 이후 더 이상 안
+// 걸리던 18건(판단 유보 상태였던 것)을 이번에 GRANDFATHER_BASELINE에서 걷어냈다 — 유령
+// 채무를 "아직 판단 안 됨"으로 남겨 두는 것보다, 이미 내려진 결론(numberAdjacent 아님)을
+// Set에도 반영하는 쪽이 다음 사람에게 정확하다.
 describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 PO 승인, 조용한 증감을 막는다', () => {
-  it('#2367 최초 스캔 스냅샷(#2519 소스 삭제 2건 제외) 크기는 정확히 38건이다', () => {
-    expect(GRANDFATHER_BASELINE.size).toBe(38);
+  it('정리 후(#2410 후속) 크기는 정확히 20건이다', () => {
+    expect(GRANDFATHER_BASELINE.size).toBe(20);
   });
 });
 
 // story #2410(PO 지적, 2026-08-02): «선언된» 건수와 «실제로 지금 걸리는» 건수는 다른 축이다
-// (isNumberAdjacent 정밀화로 18건이 더 안 걸리게 됐다 — GRANDFATHER_BASELINE 상단 주석 참조).
-// console.log의 "안 걸림" 경고만으로는 다음 사람이 노이즈로 읽고 넘길 수 있어, 실제 저장소
-// 전체를 스캔해 «지금 몇 건이 실제로 걸리는지»를 이 테스트가 고정한다 — GRANDFATHER_BASELINE_
-// COUNT_TEST(선언 수)와 이 테스트(실 걸림 수)가 서로 다른 값을 지키는 것 자체가 그
-// 간극이 조용히 사라지지 않게 하는 자리다. story #2519 — 22→20(위와 같은 사유).
+// — 당시엔 isNumberAdjacent 정밀화로 18건이 안 걸리게 됐는데도 Set엔 그대로 남아 간극이
+// 있었다. story #2410 후속(2026-08-17)에서 그 18건을 Set에서 제거해 이제 두 수(선언 20·실
+// 걸림 20)가 같아졌다 — 그렇다고 이 테스트가 불필요해지는 건 아니다: GRANDFATHER_BASELINE_
+// COUNT_TEST(선언 수, 조용한 항목 증감 방지)와 이 테스트(실 저장소 스캔 결과, 선언과 실제가
+// 다시 벌어지면 그 자체가 신호)는 서로 다른 것을 지키는 별개의 안전장치라 계속 둔다.
 describe('GRANDFATHER_LIVE_COUNT_TEST — 「선언된 수」와 「지금 실제로 걸리는 수」는 다른 축이다', () => {
-  it('실제 저장소 스캔에서 지금 걸리는 grandfather는 20건이다(18건은 #2410으로, 2건은 #2519 소스삭제로 안 걸리게 됨)', () => {
+  it('실제 저장소 스캔에서 지금 걸리는 grandfather는 20건이다(정리 후 선언 수와 일치)', () => {
     const { grandfatherHit } = scanRepository();
     expect(grandfatherHit.size).toBe(20);
   });
