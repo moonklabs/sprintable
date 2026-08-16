@@ -296,7 +296,11 @@ export function ApprovalsQueue() {
               ) : null}
               <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{formatAge(gate.created_at, t)}</span>
             </div>
-            <p className="truncate text-sm text-foreground">
+            {/* PO 실측(390px, 2026-08-16) — items-start 부모(flex-col)에서 truncate는 자기
+                content 폭까지 shrink-to-fit돼 ellipsis가 걸릴 폭 기준 자체가 없다(카드
+                우변에서 그냥 잘림). w-full로 폭을 부모 카드 전체로 고정해야 truncate가 실제로
+                동작한다. */}
+            <p className="w-full truncate text-sm text-foreground">
               {gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
             </p>
             {orgName ? <p className="text-[11px] text-muted-foreground">{orgName}</p> : null}
