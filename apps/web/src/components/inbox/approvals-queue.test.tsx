@@ -645,4 +645,42 @@ describe('ApprovalsQueue', () => {
     await act(async () => { approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(container.textContent).toContain(koMessages.cage.gateUndoRemaining.replace('{minutes}', '5'));
   });
+
+  // story 22affaf2 — PO 스크린샷(390px)과 유나 실측이 "행1이 뭔가"를 놓고 서로 다른 사실을
+  // 보고했다(뷰포트/하이드레이션 타이밍 차이 가능성, PO). jsdom엔 실 레이아웃 엔진이 없어
+  // getBoundingClientRect로는 못 가른다 — 코드가 정본이므로, 모바일(no-prefix, `sm:` 아닌)
+  // order 유틸 클래스 값 자체를 DOM에서 읽어 "primary가 order 수치상 더 앞인가"를 고정한다.
+  // Tailwind에서 order 숫자가 작을수록 flex-col(모바일)에서 위에 온다 — 유나 규격="primary 위".
+  function mobileOrderOf(el: Element): number {
+    const cls = (el.getAttribute('class') ?? '').split(/\s+/);
+    const token = cls.find((c) => /^order-\d+$/.test(c)); // "sm:order-3" 등 prefixed는 제외
+    if (!token) throw new Error(`no bare order-N class on: ${cls.join(' ')}`);
+    return Number(token.replace('order-', ''));
+  }
+
+  it('AC(신규, 22affaf2) — 모바일(no-prefix order) 기준 primary가 변경요청/보류보다 order 수치가 작아 위(행1)에 온다', async () => {
+    const highRiskGate = gate({
+      id: 'g-order-high', work_item_id: 'w-order-high', gate_type: 'merge_gate', status: 'pending',
+      requires_human: true, can_approve: true, risk_grade: 'high',
+      work_item_summary: { title: '고위험 항목', slug: null },
+    });
+    mockFetches([lowRiskActionable({ id: 'g-order-low' }), highRiskGate], []);
+    await mount();
+    // exact textContent 일치로 검색(gateApprove="승인"이 sigApproveAndSign="승인하고 서명"의
+    // 부분문자열이라 includes()면 잘못된 버튼이 잡힐 수 있다).
+    for (const label of [koMessages.cage.gateApprove, koMessages.cage.sigApproveAndSign]) {
+      const primary = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === label);
+      expect(primary).toBeTruthy();
+      const actionRow = primary!.parentElement!;
+      const rejectBtn = Array.from(actionRow.querySelectorAll('button')).find((b) => b.textContent === koMessages.cage.sigRequestChanges);
+      const holdBtn = Array.from(actionRow.querySelectorAll('button')).find((b) => b.textContent === koMessages.cage.gateDiscussSubmit);
+      expect(rejectBtn && holdBtn).toBeTruthy();
+      // reject/hold 자신의 order-N은 그 둘을 감싼 wrapper div(order-2, sm:contents) 안에서
+      // «서로»의 순서일 뿐 — primary와 견줄 기준은 그 wrapper 자체의(actionRow 기준) order다.
+      const wrapper = rejectBtn!.parentElement!;
+      expect(wrapper).toBe(holdBtn!.parentElement);
+      expect(wrapper.parentElement).toBe(actionRow);
+      expect(mobileOrderOf(primary!)).toBeLessThan(mobileOrderOf(wrapper));
+    }
+  });
 });
