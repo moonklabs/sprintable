@@ -61,15 +61,29 @@ ALEMBIC_REL_DIR = Path("alembic/versions")
 FILENAME_REV_RE = re.compile(r"^(\d{4})_.*\.py$")
 
 
+def _run_git(args: list[str]) -> str:
+    """story #2401 hotfix(2026-08-17) — `subprocess.run(check=True)`가 실패하면 Python은
+    `CalledProcessError`를 던지는데, `capture_output=True`로 잡힌 stderr는 그 예외의 기본
+    `str()`에 안 실린다 — CI 로그엔 "returncode 128"만 남고 «왜»(예: "fatal: no merge base")는
+    사라진다. PR #3140 실 CI에서 정확히 이 모양으로 죽었다(shallow-fetch가 심은 경계 때문에
+    `git diff origin/develop...HEAD`가 no-merge-base로 실패 — 원인은 워크플로 fetch 스텝에서
+    같이 고쳤다). 모든 git 하위명령 호출을 이 헬퍼로 통일해 실패 시 stderr를 명시적으로
+    stdout/stderr에 찍은 뒤 fail-closed(exit 2)한다 — `_run_gh_json`이 gh 호출에 이미 쓰는
+    것과 같은 관례."""
+    result = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        print(f"❌ git 호출 실패({' '.join(args)}, exit {result.returncode}):\n{result.stderr}", file=sys.stderr)
+        raise SystemExit(2)
+    return result.stdout
+
+
 def _git_root_prefix() -> str:
     """이 스크립트는 backend/를 cwd로 실행되는 계약이지만(위 docstring), git의 몇몇
     하위명령(`show <ref>:<path>`)은 **repo root 기준** 경로를 요구하고 다른 것들
     (`diff --relative`, `ls-tree`는 cwd 기준 pathspec을 주면 cwd 기준으로 출력)은 cwd 기준을
     쓴다 — 이 프리픽스로 둘을 오간다. GitHub API(`pulls/{n}/files`)의 `filename`도 항상
     root 기준이라 마찬가지로 이 프리픽스가 필요하다."""
-    return subprocess.run(
-        ["git", "rev-parse", "--show-prefix"], capture_output=True, text=True, check=True,
-    ).stdout.strip()
+    return _run_git(["rev-parse", "--show-prefix"]).strip()
 
 
 _ROOT_PREFIX = _git_root_prefix()
@@ -149,11 +163,10 @@ def _run_gh_json(args: list[str]) -> object:
 def _this_pr_new_files() -> list[Path]:
     """이 PR이 base 대비 새로 추가한 alembic 리비전 파일 목록(git 기준, 정본)."""
     base_ref = os.environ["PR_BASE_REF"]
-    out = subprocess.run(
-        ["git", "diff", "--relative", "--name-only", "--diff-filter=A",
+    out = _run_git(
+        ["diff", "--relative", "--name-only", "--diff-filter=A",
          f"origin/{base_ref}...HEAD", "--", str(ALEMBIC_REL_DIR)],
-        capture_output=True, text=True, check=True,
-    ).stdout
+    )
     return [Path(p) for p in out.splitlines() if p.strip()]
 
 
@@ -162,19 +175,17 @@ def _base_current_revisions() -> list[RevisionInfo]:
     이 job이 매번 fresh하게 fetch한 base 최신을 본다(축 A/B의 "PR이 못 보는 새 형제" 케이스
     중 「형제가 이미 머지돼 base 자체가 된」 경우를 여기서 잡는다)."""
     base_ref = os.environ["PR_BASE_REF"]
-    tree_out = subprocess.run(
-        ["git", "ls-tree", "-r", "--name-only", f"origin/{base_ref}", "--", str(ALEMBIC_REL_DIR)],
-        capture_output=True, text=True, check=True,
-    ).stdout
+    tree_out = _run_git(
+        ["ls-tree", "-r", "--name-only", f"origin/{base_ref}", "--", str(ALEMBIC_REL_DIR)],
+    )
     infos: list[RevisionInfo] = []
     for rel_path in tree_out.splitlines():
         rel_path = rel_path.strip()
         if not rel_path or not rel_path.endswith(".py"):
             continue
-        content = subprocess.run(
-            ["git", "show", f"origin/{base_ref}:{_ROOT_PREFIX}{rel_path}"],
-            capture_output=True, text=True, check=True,
-        ).stdout
+        content = _run_git(
+            ["show", f"origin/{base_ref}:{_ROOT_PREFIX}{rel_path}"],
+        )
         revision, down_revision = _extract_revision_vars(content)
         if revision is None:
             continue
