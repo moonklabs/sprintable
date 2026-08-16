@@ -3625,6 +3625,7 @@
     "overrideConfirm": "강제 실행",
     "overriddenTag": "Owner 강제 · SoD 우회",
     "gateUndo": "취소(오클릭 정정)",
+    "gateUndoRemaining": "{minutes}분 내 취소 가능",
     "gateDiscussTitle": "보류(논의 필요)",
     "gateDiscussDescription": "승인도 반려도 아닌 상태로 남깁니다. 상신자에게 사유가 전달됩니다.",
     "gateDiscussReasonLabel": "논의 사유",
