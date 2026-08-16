@@ -27,6 +27,11 @@ export type RailState = (typeof RAIL_ORDER)[number];
 /** E-MCP-OPT S3: 호스팅(http) transport 축소 레일 — event_delivered/ack 없음(구조적으로 불가·BE agent_verify.py). */
 export const HTTP_RAIL_ORDER = ['config_copied', 'waiting', 'mcp_reachable', 'verified'] as const;
 
+/** story #4cdad425(prod 에스컬레이트) — 검증이 이 시간(ms) 안에 verified로 안 넘어가면 «진단 힌트»를
+ * 띄운다. 근본: 설정만 붙이고 Claude Code를 재시작 안 하면 폴링이 영원히 pending에 머물러
+ * 실유저가 5회 재시도했다(무한 폴링 가림). 폴링 자체는 계속 돈다(성공하면 힌트는 자동으로 사라짐). */
+export const VERIFY_TIMEOUT_MS = 60_000;
+
 export interface DisplayStep {
   state: RailState;
   status: RailStatus;
@@ -212,6 +217,12 @@ export interface UseVerificationRailResult {
    * 분기 확認) — connect-step의 기존 `transport === 'http' && !verified` 게이팅이 기술적으로
    * 옳은 쪽이라 그걸로 통일한다(예전 recruiter는 transport 무관 항상 노출했다). */
   showVerifyExamplePrompt: boolean;
+  /** story #4cdad425 — 검증 폴링 진행 중이나 아직 verified 아님(«연결 확인 중» 대기 표시용).
+   * enabled·agentId·transport 준비되고 verified 전이면 true. */
+  awaitingVerification: boolean;
+  /** story #4cdad425 — VERIFY_TIMEOUT_MS 지나도 verified 안 됨(진단 힌트 표시용). verified되면 false로
+   * 자동 복귀·수동 재시도(handleVerify)나 transport 전환 시 타이머 재무장. */
+  timedOut: boolean;
 }
 
 /** story #2407 ②-3 — 두 콜러가 각자 계산하되 recruiter만 stdio에서 빈 문자열이었다(무근거
@@ -254,6 +265,9 @@ export function useVerificationRail({
   const [beSteps, setBeSteps] = useState<RawStep[] | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [copiedVerifyPrompt, setCopiedVerifyPrompt] = useState(false);
+  // story #4cdad425 — 진단 힌트 타이머. verifyNonce는 수동 재시도 시 타이머를 재무장하는 트리거.
+  const [timedOut, setTimedOut] = useState(false);
+  const [verifyNonce, setVerifyNonce] = useState(0);
 
   const pollStatus = useCallback(async (forAgentId: string, forTransport: Transport) => {
     try {
@@ -274,6 +288,19 @@ export function useVerificationRail({
     return () => clearInterval(iv);
   }, [enabled, agentId, transport, pollIntervalMs, pollStatus]);
 
+  // story #4cdad425 — 진단 힌트 타이머. 폴링이 시작되면(또는 transport 전환·수동 재시도로 verifyNonce가
+  // 오르면) 재무장하고, VERIFY_TIMEOUT_MS 지나도 verified가 안 되면 timedOut을 켠다. 폴링은 멈추지
+  // 않는다 — 늦게라도 성공하면 아래 verified 파생이 true가 되어 소비처가 힌트를 자동으로 감춘다.
+  useEffect(() => {
+    if (!enabled || !agentId || !transport) {
+      setTimedOut(false);
+      return;
+    }
+    setTimedOut(false);
+    const timer = setTimeout(() => setTimedOut(true), VERIFY_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [enabled, agentId, transport, verifyNonce]);
+
   const railOrder = transport === 'http' ? HTTP_RAIL_ORDER : RAIL_ORDER;
   const displaySteps: DisplayStep[] = railOrder.map((state) => {
     const be = beSteps?.find((s) => s.state === state);
@@ -285,6 +312,9 @@ export function useVerificationRail({
 
   const handleVerify = useCallback(async () => {
     if (!agentId || !transport) return;
+    // story #4cdad425 — 수동 재시도는 진단 타이머를 재무장(힌트 감춤 + 60s 다시 셈).
+    setTimedOut(false);
+    setVerifyNonce((n) => n + 1);
     setVerifying(true);
     try {
       await fetch(`/api/agents/${agentId}/verify-connection?transport=${transport}`, {
@@ -317,5 +347,8 @@ export function useVerificationRail({
     copiedVerifyPrompt,
     handleCopyVerifyPrompt,
     showVerifyExamplePrompt: computeShowVerifyExamplePrompt(transport, verified),
+    // verified되면 대기·타임아웃 표시는 자동으로 꺼진다(늦게 성공해도 힌트가 안 남는다).
+    awaitingVerification: enabled && Boolean(agentId) && Boolean(transport) && !verified,
+    timedOut: timedOut && !verified,
   };
 }
