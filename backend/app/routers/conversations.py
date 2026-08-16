@@ -1973,6 +1973,23 @@ async def mark_conversation_read(
     new_last_read_at = result.scalar_one_or_none()
     if new_last_read_at is None:
         raise HTTPException(status_code=403, detail="Not a participant")
+
+    # story #2686(축D): 채팅 read → 그 대화 소속 event-notification(벨/인박스) read_at 동기.
+    # SAVEPOINT 격리(feedback_savepoint_failopen_session_poison 동형) — 이 동기 실패가
+    # read-state 갱신(위 UPDATE) 자체를 막으면 안 된다. up_to=new_last_read_at(GREATEST
+    # 래칫 후 값)로 넘겨 미래 메시지 알림까지 앞당겨 읽는 과잉살상을 막는다.
+    try:
+        async with db.begin_nested():
+            from app.routers.event_notifications import sync_notification_read_on_chat_read
+            await sync_notification_read_on_chat_read(
+                db, org_id, conversation_id, sender.id, new_last_read_at,
+            )
+    except Exception:
+        logger.warning(
+            "채팅 read → notification read_at 동기 실패 conversation=%s member=%s",
+            conversation_id, sender.id, exc_info=True,
+        )
+
     await db.commit()
 
     # 재계산(가정 아님 — up_to가 최신 메시지보다 과거인 엣지케이스에서 0이 아닐 수 있음, §3-3).

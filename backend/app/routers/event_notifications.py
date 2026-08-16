@@ -66,6 +66,47 @@ def _is_hidden_notification(member_id: uuid.UUID):
     )
 
 
+async def sync_notification_read_on_chat_read(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    member_id: uuid.UUID,
+    up_to: datetime,
+) -> int:
+    """story #2686(축D): 채팅 read → 그 대화 소속 event-notification(벨/인박스) read_at 동기.
+
+    «노티 받고 들어왔는데 잔상» 근본수정 — 채팅 read는 원래 ConversationParticipant.
+    last_read_at만 갱신하고 Event.read_at은 안 건드려 벨/인박스에 그대로 남아있었다.
+
+    매칭 축: recipient_id(내 알림만) + event_type(대화 이벤트만, _is_hidden_notification과
+    동일 상수) + source_entity_id가 «이 대화 소속이면서 up_to 이전에 생성된» 메시지. 다른
+    대화·비채팅 알림은 이 WHERE에 안 걸려 불변(AC2 음성대조).
+
+    up_to는 호출부가 GREATEST 래칫(_mark_read_update_stmt) 통과 후 받은 값을 넘겨야 한다
+    (미르코 보강) — 「일부만 읽음」 호출이 up_to보다 미래에 온 메시지의 알림까지 앞당겨
+    읽음 처리하는 과잉살상을 막는다. read_at IS NULL 필터로 멱등(AC3 — 이미 읽은 알림 재갱신 0).
+    """
+    evt_msg = aliased(ConversationMessage)
+    stmt = (
+        update(Event)
+        .where(
+            Event.org_id == org_id,
+            Event.recipient_id == member_id,
+            Event.event_type.in_(_CONVERSATION_EVENT_TYPES),
+            Event.read_at.is_(None),
+            Event.source_entity_id.in_(
+                select(evt_msg.id).where(
+                    evt_msg.conversation_id == conversation_id,
+                    evt_msg.created_at <= up_to,
+                )
+            ),
+        )
+        .values(read_at=datetime.now(timezone.utc))
+    )
+    result = await db.execute(stmt)
+    return result.rowcount
+
+
 # ─── Helper ───────────────────────────────────────────────────────────────────
 
 async def _resolve_member_id(
