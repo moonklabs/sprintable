@@ -149,7 +149,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
               {error.kind === 'policy' ? (
                 <>
                   {' · '}
-                  <Link href={`/organization/workforce/${error.agentId}`} className="underline">
+                  <Link href={`/organization/workforce/${error.agentId}`} className="text-primary underline">
                     {t('policyDeniedManageLink')}
                   </Link>
                 </>

@@ -139,7 +139,7 @@ export function AddParticipantModal({
               {error.kind === 'policy' ? (
                 <>
                   {' · '}
-                  <Link href={`/organization/workforce/${error.agentId}`} className="underline">
+                  <Link href={`/organization/workforce/${error.agentId}`} className="text-primary underline">
                     {t('policyDeniedManageLink')}
                   </Link>
                 </>
