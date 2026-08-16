@@ -134,6 +134,14 @@ async function mount() {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
+// story #2670 — create는 「기본」(3서식 폼) 탭이 기본으로 열린다. 「고급」 탭 경로를 재는
+// 스위트들이 공유하는 헬퍼라 모듈 스코프로 둔다(describe 하나에 갇혀 있으면 다른
+// describe에서 못 쓴다 — story #2666 작업 중 실제로 겪은 스코프 버그).
+function switchToAdvancedTab() {
+  const tabBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find((b) => b.textContent?.startsWith(koMessages.organization.definerTabAdvanced)) as HTMLButtonElement;
+  tabBtn.click();
+}
+
 describe('OrganizationEventsPage', () => {
   it('프리셋·커스텀 그룹을 나눠 렌더하고 관리자에겐 새 정의 버튼이 뜬다', async () => {
     mockFetches([preset(), customWithId()]);
@@ -192,14 +200,6 @@ describe('OrganizationEventsPage', () => {
     await act(async () => { keyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(container.textContent).toContain('"work_item_stakeholders"');
   });
-
-  // story #2670 — create는 이제 「기본」(3서식 폼) 탭이 기본으로 열린다(AC1). 이 스위트의
-  // 기존 JSON-경로 테스트들은 「고급」 탭으로 명시 전환해야 그 시절 동작을 그대로 잰다 —
-  // 기본 탭 자체의 새 동작은 이 파일 하단 새 describe에서 별도로 잰다.
-  function switchToAdvancedTab() {
-    const tabBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find((b) => b.textContent?.startsWith(koMessages.organization.definerTabAdvanced)) as HTMLButtonElement;
-    tabBtn.click();
-  }
 
   it('생성 폼 제출 시 org.{slug}. 접두사가 자동으로 붙고 파싱된 JSON을 POST한다', async () => {
     const calls = mockFetches([]);
@@ -564,5 +564,74 @@ describe('OrganizationEventsPage — 발행 이력(story #2665)', () => {
     await act(async () => { keyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(calls.some((c) => c.url.startsWith('/api/events/definitions/publish-history'))).toBe(false);
+  });
+});
+
+// story #2666 — 「고급」탭 key 입력이 「기본」탭과 같은 클라 선검증(validateKeySuffix)을
+// 받는다. 서버 메시지("...로 시작해야 합니다")가 문자셋 위반을 접두 문제로 오진시키던 것을
+// 클라에서 먼저 정확한 원인(문자셋)으로 막는다 — 서버 검증은 그대로 유지(우회 아님).
+describe('OrganizationEventsPage — 고급 탭 key 문자셋 클라 선검증(story #2666)', () => {
+  it('하이픈 포함 key는 정확한 문자셋 에러를 보이고 클라에서 막혀 서버 오진 메시지에 도달하지 않는다(AC1·AC2·AC3 양성대조)', async () => {
+    const calls = mockFetches([]);
+    await mount();
+    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
+    await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { switchToAdvancedTab(); });
+
+    const keyInput = document.body.querySelector('#event-key') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      // story #2666의 원 재현 — screen-check처럼 하이픈이 들어간 key.
+      setter.call(keyInput, 'screen-check');
+      keyInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    // 정확한 원인(문자셋)을 지목한다. 상단 정적 안내("org.{slug}. 로 시작해야 합니다")는
+    // 늘 떠 있는 별개 문구라 그 substring으로는 못 가른다 — 대신 실제로 서버까지 요청이
+    // 가서 서버의 오진 메시지("org 커스텀 정의의 key는...")를 받는 일 자체가 없는지
+    // (클라에서 막혀 POST가 0건인지)로 정확히 잰다.
+    expect(document.body.textContent).toContain(koMessages.organization.definerKeyErrorCharset);
+
+    const submitBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find((b) => b.textContent === koMessages.organization.eventCreateSubmit) as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
+
+    // 클라에서 막혔으니 방어적으로 클릭해도(disabled 우회 시도) POST가 안 나간다.
+    await act(async () => { submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/events/definitions')).toBe(false);
+  });
+
+  it('유효한 key(스네이크)로 바꾸면 힌트 문구로 되돌아가고 저장이 다시 가능해진다', async () => {
+    mockFetches([]);
+    await mount();
+    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventCreateCta)!;
+    await act(async () => { createBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { switchToAdvancedTab(); });
+
+    const keyInput = document.body.querySelector('#event-key') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(keyInput, 'bad-key');
+      keyInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(document.body.textContent).toContain(koMessages.organization.definerKeyErrorCharset);
+
+    await act(async () => {
+      setter.call(keyInput, 'good_key');
+      keyInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(document.body.textContent).not.toContain(koMessages.organization.definerKeyErrorCharset);
+    expect(document.body.textContent).toContain(koMessages.organization.definerKeyHint);
+    const submitBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find((b) => b.textContent === koMessages.organization.eventCreateSubmit) as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(false);
+  });
+
+  it('수정 모드(key 읽기전용)에서는 클라 선검증이 안 뜬다(회귀 0 — 기존 값은 항상 유효)', async () => {
+    mockFetches([customWithId({ id: 'def-9', key: 'org.moonklabs.existing-ish' })]);
+    await mount();
+    const editBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventEditCta)!;
+    await act(async () => { editBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { switchToAdvancedTab(); });
+    expect(document.body.textContent).not.toContain(koMessages.organization.definerKeyErrorCharset);
+    expect(document.body.textContent).not.toContain(koMessages.organization.definerKeyHint);
   });
 });

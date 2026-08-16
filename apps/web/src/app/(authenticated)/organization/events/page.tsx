@@ -438,6 +438,11 @@ function EventFormDialog({
   }, [open, mode, target, orgSlug]);
 
   const definerKeyError = tab === 'basic' && mode === 'create' ? validateKeySuffix(definerState.keySuffix) : null;
+  // story #2666 — 「고급」탭도 「기본」탭과 같은 key 규격(_ORG_KEY_RE 접미 [a-z0-9_]+)이라
+  // 같은 클라 선검증을 재사용한다. 서버 메시지("...로 시작해야 합니다")가 문자셋 위반을
+  // 접두 문제로 오진시키던 것 — 클라에서 먼저 정확한 원인(문자셋)을 지목해 그 오진 문구에
+  // 도달할 일 자체를 줄인다(서버 검증은 그대로 유지 — 이건 안내일 뿐, 우회 아님).
+  const advancedKeyError = tab === 'advanced' && mode === 'create' ? validateKeySuffix(keySuffix) : null;
 
   const submit = async () => {
     setSaving(true);
@@ -455,6 +460,7 @@ function EventFormDialog({
         };
         if (mode === 'create') body.key = derived.key;
       } else {
+        if (advancedKeyError) throw new Error(advancedKeyError === 'empty' ? t('definerKeyErrorEmpty') : t('definerKeyErrorCharset'));
         const roles = rolesCsv.split(',').map((r) => r.trim()).filter(Boolean);
         const actionAuth = humanOnly || roles.length > 0 ? { human_only: humanOnly, role: roles } : null;
         body = {
@@ -563,7 +569,11 @@ function EventFormDialog({
               </button>
             </div>
           </div>
-          {tab === 'advanced' ? <DialogDescription>{t('eventKeyPrefixHint')}</DialogDescription> : null}
+          {/* story #2666(발견) — 원래 문구가 "org.{조직 slug}."처럼 한글 자리표시자를 ICU
+              변수 자리에 그대로 박아 놔 next-intl이 MALFORMED_ARGUMENT로 파싱 실패하던
+              것(콘솔 에러+깨진 렌더 — 이 다이얼로그를 열 때마다 항상 재현). ICU 유효 이름
+              (slug)으로 고치고 실제 org slug를 인자로 넘긴다. */}
+          {tab === 'advanced' ? <DialogDescription>{t('eventKeyPrefixHint', { slug: orgSlug || '{org}' })}</DialogDescription> : null}
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-1">
           {tab === 'basic' ? (
@@ -582,10 +592,19 @@ function EventFormDialog({
                   {t('eventKeyLabel')}
                 </label>
                 {mode === 'create' ? (
-                  <div className="flex items-center gap-1">
-                    <span className="shrink-0 font-mono text-xs text-muted-foreground">{prefix}</span>
-                    <Input id="event-key" value={keySuffix} onChange={(e) => setKeySuffix(e.target.value)} className="font-mono text-sm" />
-                  </div>
+                  <>
+                    <div className="flex items-center gap-1">
+                      <span className="shrink-0 font-mono text-xs text-muted-foreground">{prefix}</span>
+                      <Input id="event-key" value={keySuffix} onChange={(e) => setKeySuffix(e.target.value)} className="font-mono text-sm" />
+                    </div>
+                    {advancedKeyError ? (
+                      <p className="mt-1 text-[11px] text-destructive">
+                        {advancedKeyError === 'empty' ? t('definerKeyErrorEmpty') : t('definerKeyErrorCharset')}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-[11px] text-muted-foreground">{t('definerKeyHint')}</p>
+                    )}
+                  </>
                 ) : (
                   <Input id="event-key" value={target?.key ?? ''} readOnly disabled className="font-mono text-sm" />
                 )}
@@ -620,7 +639,7 @@ function EventFormDialog({
           {mode === 'create' && savedKey ? null : (
             <Button
               onClick={() => void submit()}
-              disabled={saving || (tab === 'advanced' ? mode === 'create' && !keySuffix.trim() : !!definerKeyError)}
+              disabled={saving || (tab === 'advanced' ? mode === 'create' && !!advancedKeyError : !!definerKeyError)}
             >
               {saving ? '...' : mode === 'create' ? t('eventCreateSubmit') : t('eventEditSubmit')}
             </Button>
