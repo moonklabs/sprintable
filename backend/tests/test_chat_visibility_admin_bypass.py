@@ -4,13 +4,25 @@ admin-bypass(owner/admin org-level 조회)를 **agent-only 대화로 한정**한
 근본: org owner/admin이 participant 우회로 남의 휴먼↔에이전트 사적 DM을 열람.
 정책(PO APPROVE): 참가자에 휴먼이 있으면 private → participant만 조회(owner/admin도 우회 금지).
 휴먼 없음(agent-only·팀운영)이면 admin 조회 허용. 본인 참여 대화는 항상 정상.
-보수적 human 판별: TeamMember.type='agent'로 확정된 id만 agent, 나머지 전부 human
-(grant-only OrgMember·미앵커 휴먼·봉희신류 포함).
+
+story #2697: get_conversation()이 자체 `_effective_org_role`+`_conversation_has_human_
+participant`(bespoke, pre-resolve TOCTOU류)를 쓰던 것을 `_can_read_conversation`
+(conversation_readable_predicate SSOT — backlinks.py·list_conversations가 이미 쓰던 것)로
+통일했다. `_conversation_has_human_participant` **함수 자체는 존치**(conversations.py에
+그대로 남음) — attachments.py의 authorize 엔드포인트가 여전히 이 함수를 직접 import해
+자기 admin-bypass 판정에 쓰는 별도 소비자였다(test_attachment_authorize_a54ddc16.py로
+발견 — 처음엔 삭제했다가 그 파일의 3개 테스트가 ImportError로 잡아줬다). get_conversation()
+만 predicate SSOT로 이관·이 함수를 더 이상 호출 안 함. get_conversation() 엔드포인트 레벨
+회귀(admin-bypass 유지·403→404 통일·cross-project 음성대조)는
+test_2697_conversation_project_scope_realdb.py로 이관했다 — 이 파일은 그 마이그레이션과
+무관한 `_conversations_with_human_participant`(list_conversations의 배치 헬퍼, 미변경)와
+`list_messages`(별도 함수, 미변경) 테스트만 남긴다. `_conversation_has_human_participant`
+자체의 단위테스트(CP1-3)는 test_conv_human_participant_realdb.py(실 VIEW 락)가 이미
+있으므로 여기서 재작성하지 않는다.
 
 테스트 전략:
-- 헬퍼(_conversation_has_human_participant / _conversations_with_human_participant)는
-  라우팅 mock으로 직접 검증(CP1/CP2/CP3 핵심 로직).
-- 3엔드포인트(detail/messages/list) 일관성은 헬퍼 게이트 호출 경로로 검증(CP4/CP5).
+- CP5: `_conversations_with_human_participant`(배치 헬퍼)는 라우팅 mock으로 직접 검증.
+- CP5(messages): list_messages의 admin-bypass/private 일관성(이 스토리에서 안 건드림).
 """
 from __future__ import annotations
 
@@ -19,22 +31,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from datetime import datetime, timezone
-
 
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
-
-
-def _make_conv(*, conv_id, org_id, project_id, conv_type="dm"):
-    """ConversationResponse.model_validate가 통과하도록 유효 필드를 가진 conv 객체."""
-    from types import SimpleNamespace
-    now = datetime(2026, 6, 8, tzinfo=timezone.utc)
-    return SimpleNamespace(
-        id=conv_id, project_id=project_id, org_id=org_id, type=conv_type,
-        title="대화", status="open", created_by=conv_id, created_at=now, updated_at=now,
-    )
 
 
 # ─── 라우팅 mock: 컴파일 statement의 from-entity로 결과 분기 ────────────────────
@@ -78,66 +78,6 @@ def _routing_db(*, participant_rows, agent_ids):
     return db
 
 
-# ─── CP1: team_member 휴먼 참가 → private(휴먼 있음) ──────────────────────────
-
-@pytest.mark.anyio
-async def test_cp1_team_member_human_is_private():
-    """admin 비참가 + team_member 휴먼 참가 대화 → has_human=True(=private·403 폴백)."""
-    from app.routers.conversations import _conversation_has_human_participant
-
-    conv = uuid.uuid4()
-    human = uuid.uuid4()
-    agent = uuid.uuid4()
-    db = _routing_db(
-        participant_rows=[(conv, human), (conv, agent)],
-        agent_ids={agent},  # human은 agent 확정 아님 → human
-    )
-    assert await _conversation_has_human_participant(conv, db) is True
-
-
-# ─── CP2: grant-only OrgMember 휴먼(team_member agent 아님) → 보수적 human ──────
-
-@pytest.mark.anyio
-async def test_cp2_grant_only_human_conservative_private():
-    """grant-only OrgMember 휴먼(봉희신류·team_member agent 아님) 참가 → 보수적으로 human → private."""
-    from app.routers.conversations import _conversation_has_human_participant
-
-    conv = uuid.uuid4()
-    grant_only_human = uuid.uuid4()  # team_members에 agent로 없음
-    agent = uuid.uuid4()
-    db = _routing_db(
-        participant_rows=[(conv, grant_only_human), (conv, agent)],
-        agent_ids={agent},  # grant_only_human은 agent 확정 외 → human
-    )
-    assert await _conversation_has_human_participant(conv, db) is True
-
-
-# ─── CP3: agent-only 대화 → admin 조회 허용 ──────────────────────────────────
-
-@pytest.mark.anyio
-async def test_cp3_agent_only_allows_admin():
-    """참가자 전부 type='agent' → has_human=False(=admin 200 허용)."""
-    from app.routers.conversations import _conversation_has_human_participant
-
-    conv = uuid.uuid4()
-    a1, a2 = uuid.uuid4(), uuid.uuid4()
-    db = _routing_db(
-        participant_rows=[(conv, a1), (conv, a2)],
-        agent_ids={a1, a2},
-    )
-    assert await _conversation_has_human_participant(conv, db) is False
-
-
-@pytest.mark.anyio
-async def test_empty_participants_not_private():
-    """참가자 없음(엣지) → has_human=False(헬퍼는 admin 폴백 안 함·404/참가체크는 호출부 책임)."""
-    from app.routers.conversations import _conversation_has_human_participant
-
-    conv = uuid.uuid4()
-    db = _routing_db(participant_rows=[], agent_ids=set())
-    assert await _conversation_has_human_participant(conv, db) is False
-
-
 # ─── CP5: batch 헬퍼(list_conversations) — agent-only만 통과 ──────────────────
 
 @pytest.mark.anyio
@@ -169,179 +109,6 @@ async def test_cp5_batch_empty_input():
     db.execute = AsyncMock(side_effect=AssertionError("should not query on empty input"))
     assert await _conversations_with_human_participant([], db) == set()
 
-
-# ─── CP4 + 3엔드포인트 일관성: detail/messages가 휴먼 참가 시 participant 폴백 ──
-
-def _admin_routing_db(*, conv, project_id, participant_member_ids, agent_ids, admin_role="admin",
-                      requester_is_participant):
-    """detail/messages 엔드포인트 통합 mock.
-
-    - Conversation 조회 → conv (project_id 포함)
-    - _resolve_member(TeamMember) → admin sender
-    - _effective_org_role(OrgMember.role) → admin_role
-    - 헬퍼 participant/agent 조회 → human 판별
-    - participant 체크 → requester_is_participant
-    - story #2009: get_conversation이 `_fetch_conversation_participants`(participants 배치
-      + lookup_members_by_ids + runtime_type 배치)를 추가로 호출 — 컬럼명 기반으로 정밀 분기.
-    """
-    from collections import namedtuple
-
-    sender = MagicMock()
-    sender.id = uuid.uuid4()
-    sender.role = "member"  # raw project role 낮음 — org에서 admin 상속
-    sender.type = "human"
-    sender.name = "admin user"
-
-    ParticipantRow = namedtuple("ParticipantRow", ["conversation_id", "member_id"])
-    RuntimeTypeRow = namedtuple("RuntimeTypeRow", ["id", "runtime_type"])
-
-    def _resolved_member_mock(mid):
-        m = MagicMock()
-        m.id = mid
-        m.user_id = uuid.uuid4()
-        m.name = f"member-{str(mid)[:8]}"
-        m.type = "agent" if mid in agent_ids else "human"
-        m.role = "member"
-        m.org_id = conv.org_id
-        m.project_id = project_id
-        m.avatar_url = None
-        return m
-
-    async def _execute(stmt, *a, **k):
-        sql = str(stmt).lower()
-        cols = list(stmt.selected_columns) if hasattr(stmt, "selected_columns") else []
-        col_names = {c.name for c in cols} if cols else set()
-
-        # Conversation 단건 조회(participant 테이블 미포함 + conversations FROM)
-        if "from conversations" in sql and "conversation_participants" not in sql:
-            res = MagicMock()
-            res.scalar_one_or_none.return_value = conv
-            return res
-        if "org_members" in sql:
-            res = MagicMock()
-            res.scalar_one_or_none.return_value = admin_role
-            return res
-        if "conversation_participants" in sql:
-            if col_names == {"conversation_id", "member_id"}:
-                # story #2009: `_fetch_conversation_participants`(및 `_conversations_with_human_
-                # participant`)의 배치 조회 — attribute+tuple 겸용 namedtuple로 실 Row 흉내.
-                return _rows_all([
-                    ParticipantRow(conversation_id=conv.id, member_id=mid)
-                    for mid in participant_member_ids
-                ])
-            if col_names == {"muted_at", "last_read_at"}:
-                # 270c87e6/#1976: caller mute/read-state 조회 — one_or_none() 사용.
-                res = MagicMock()
-                row = MagicMock()
-                row.muted_at = None
-                row.last_read_at = None
-                res.one_or_none.return_value = row if requester_is_participant else None
-                return res
-            # 단건: member_id 헬퍼(1-col) 또는 participant 체크(scalar_one_or_none)
-            res = MagicMock()
-            res.scalars.return_value.all.return_value = list(participant_member_ids)
-            res.scalar_one_or_none.return_value = (uuid.uuid4() if requester_is_participant else None)
-            return res
-        if "team_members" in sql:
-            # 4용도: _resolve_member(sender) / 헬퍼 agent 확정(1-col) /
-            # story #2009 lookup_members_by_ids(full-row) / runtime_type 배치(2-col).
-            if col_names == {"id", "runtime_type"}:
-                return _rows_all([
-                    RuntimeTypeRow(id=mid, runtime_type=("claude_code" if mid in agent_ids else None))
-                    for mid in participant_member_ids
-                ])
-            if col_names == {"id"} and "type" in sql and ("in (" in sql or "in(" in sql):
-                return _scalars_all(list(agent_ids))
-            if "team_members.id in" in sql or "team_members.id in(" in sql:
-                # story #2009: lookup_members_by_ids(전체 컬럼 select, id IN 필터).
-                return _scalars_all([_resolved_member_mock(mid) for mid in participant_member_ids])
-            # _resolve_member: user_id/org_id(/project_id) 등치 필터, id IN 아님.
-            res = MagicMock()
-            res.scalars.return_value.first.return_value = sender
-            return res
-        res = MagicMock()
-        res.scalars.return_value.all.return_value = []
-        res.scalar_one_or_none.return_value = None
-        return res
-
-    db = AsyncMock()
-    db.execute = AsyncMock(side_effect=_execute)
-    return db, sender
-
-
-@pytest.mark.anyio
-async def test_cp4_admin_own_participation_passes_detail():
-    """CP4: admin이 휴먼 참가 대화에 본인도 참가 → 정상 통과(403 아님)."""
-    from app.routers.conversations import get_conversation
-    from app.dependencies.auth import AuthContext  # noqa: F401
-
-    org_id = uuid.uuid4()
-    project_id = uuid.uuid4()
-    conv = _make_conv(conv_id=uuid.uuid4(), org_id=org_id, project_id=project_id, conv_type="dm")
-
-    human = uuid.uuid4()
-    agent = uuid.uuid4()
-    db, sender = _admin_routing_db(
-        conv=conv, project_id=project_id,
-        participant_member_ids=[human, agent], agent_ids={agent},
-        requester_is_participant=True,  # admin 본인 참가
-    )
-    auth = MagicMock()
-    auth.user_id = str(uuid.uuid4())
-    auth.claims = {"app_metadata": {}}
-
-    # participant이므로 403 안 남
-    resp = await get_conversation(conv.id, db=db, auth=auth, org_id=org_id)  # type: ignore[arg-type]
-    assert resp is not None
-
-
-@pytest.mark.anyio
-async def test_cp4_admin_nonparticipant_human_conv_403_detail():
-    """CP1/CP5(detail): admin 비참가 + 휴먼 참가 대화 → 403(private participant only)."""
-    from fastapi import HTTPException
-    from app.routers.conversations import get_conversation
-
-    org_id = uuid.uuid4()
-    project_id = uuid.uuid4()
-    conv = _make_conv(conv_id=uuid.uuid4(), org_id=org_id, project_id=project_id, conv_type="dm")
-
-    human = uuid.uuid4()
-    agent = uuid.uuid4()
-    db, sender = _admin_routing_db(
-        conv=conv, project_id=project_id,
-        participant_member_ids=[human, agent], agent_ids={agent},
-        requester_is_participant=False,  # admin 비참가
-    )
-    auth = MagicMock()
-    auth.user_id = str(uuid.uuid4())
-    auth.claims = {"app_metadata": {}}
-
-    with pytest.raises(HTTPException) as ei:
-        await get_conversation(conv.id, db=db, auth=auth, org_id=org_id)  # type: ignore[arg-type]
-    assert ei.value.status_code == 403
-
-
-@pytest.mark.anyio
-async def test_cp3_admin_nonparticipant_agent_only_conv_200_detail():
-    """CP3(detail): admin 비참가 + agent-only 대화 → 통과(admin-bypass 허용)."""
-    from app.routers.conversations import get_conversation
-
-    org_id = uuid.uuid4()
-    project_id = uuid.uuid4()
-    conv = _make_conv(conv_id=uuid.uuid4(), org_id=org_id, project_id=project_id, conv_type="group")
-
-    a1, a2 = uuid.uuid4(), uuid.uuid4()
-    db, sender = _admin_routing_db(
-        conv=conv, project_id=project_id,
-        participant_member_ids=[a1, a2], agent_ids={a1, a2},  # agent-only
-        requester_is_participant=False,  # admin 비참가지만 agent-only → 허용
-    )
-    auth = MagicMock()
-    auth.user_id = str(uuid.uuid4())
-    auth.claims = {"app_metadata": {}}
-
-    resp = await get_conversation(conv.id, db=db, auth=auth, org_id=org_id)  # type: ignore[arg-type]
-    assert resp is not None
 
 
 def _messages_routing_db(*, conv_id, project_id, participant_member_ids, agent_ids,

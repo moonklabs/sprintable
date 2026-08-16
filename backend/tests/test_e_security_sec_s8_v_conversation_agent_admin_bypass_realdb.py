@@ -136,8 +136,11 @@ async def _setup_app_agent(app, Session, agent_id, org_id):
 
 @pytest.mark.anyio
 async def test_mixed_role_agent_cannot_get_conversation_without_project_grant():
-    """V 재현: project_x=admin·project_y=grant 0인 에이전트가 project_y 대화 GET → 403
-    (기존엔 admin-bypass가 임의 row role로 통과해 200이었음)."""
+    """V 재현: project_x=admin·project_y=grant 0인 에이전트가 project_y 대화 GET → 404
+    (기존엔 admin-bypass가 임의 row role로 통과해 200이었음). story #2697: get_conversation()이
+    conversation_readable_predicate SSOT로 이관되며 이 엔드포인트의 거부 상태코드가 403("Not a
+    participant")→404(존재-비노출 — 다른 리소스 다수 관례와 통일)로 바뀌었다. list_messages
+    (아래 두 번째 테스트)는 #2697이 안 건드린 별도 경로라 403 그대로."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -149,7 +152,7 @@ async def test_mixed_role_agent_cannot_get_conversation_without_project_grant():
         client = _client_for(app)
         try:
             resp = await client.get(f"/api/v2/conversations/{seeded['conv_y_id']}")
-            assert resp.status_code == 403, resp.text
+            assert resp.status_code == 404, resp.text
         finally:
             await client.aclose()
     finally:

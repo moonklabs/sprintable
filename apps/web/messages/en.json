@@ -3625,6 +3625,7 @@
     "overrideConfirm": "Override",
     "overriddenTag": "Owner override · SoD bypassed",
     "gateUndo": "Undo",
+    "gateUndoRemaining": "Undo available for {minutes} more min",
     "gateDiscussTitle": "Hold for discussion",
     "gateDiscussDescription": "Leaves the gate neither approved nor rejected. The requester will be notified with your reason.",
     "gateDiscussReasonLabel": "Reason for discussion",

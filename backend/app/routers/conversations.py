@@ -240,7 +240,13 @@ async def _effective_org_role(
 
 async def _conversation_has_human_participant(conversation_id: uuid.UUID, db: AsyncSession) -> bool:
     """대화에 휴먼 참가자가 있으면 True(=private·admin 우회 금지).
-    보수적: agent team_member로 확정 안 된 참가자는 human 간주(grant-only/미앵커 휴먼 포함)."""
+    보수적: agent team_member로 확정 안 된 참가자는 human 간주(grant-only/미앵커 휴먼 포함).
+
+    story #2697: get_conversation()은 더 이상 이 함수를 안 쓴다(conversation_readable_
+    predicate SSOT로 이관) — 하지만 attachments.py의 authorize 엔드포인트가 여전히 이
+    정확한 함수를 직접 import해 자신의 admin-bypass 판정에 쓴다(별도 콜사이트, 삭제 시
+    ImportError). 그래서 이 함수는 존치 — 삭제가 아니라 "소비자 하나만 이관"이 맞는
+    변경이었다(#2697 첫 시도에서 삭제했다가 test_attachment_authorize_a54ddc16.py로 잡힘)."""
     pids = (await db.execute(
         select(ConversationParticipant.member_id).where(ConversationParticipant.conversation_id == conversation_id)
     )).scalars().all()
@@ -1455,21 +1461,20 @@ async def get_conversation(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    sender = await _resolve_member(auth, org_id, db, project_id=None)
-    is_admin = await _effective_org_role(
-        auth, org_id, db, sender, project_id=conv.project_id,
-    ) in ("owner", "admin")
-    # admin이어도 휴먼 참가(private) 대화면 participant 체크 폴백
-    if (not is_admin) or await _conversation_has_human_participant(conversation_id, db):
-        sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
-        participant = (await db.execute(
-            select(ConversationParticipant.id).where(
-                ConversationParticipant.conversation_id == conversation_id,
-                ConversationParticipant.member_id == sender.id,
-            )
-        )).scalar_one_or_none()
-        if participant is None:
-            raise HTTPException(status_code=403, detail="Not a participant")
+    # story #2697: get_conversation이 conversation_readable_predicate SSOT(§6회차 — backlinks.py·
+    # list_conversations·_can_read_conversation이 이미 쓰는 canonical judge)로 안 옮겨간 마지막
+    # 소비자였다(reviewer round-5 verdict가 이 자리를 스코프 밖으로 남겼던 것 — 여기서 마저
+    # 닫는다). _effective_org_role의 사전 해소(TOCTOU류·project_scope.py 문서와 동일 클래스) +
+    # 별도 participant SELECT 대신 이미 검증된 SSOT를 그대로 재사용한다(재구현 0) — 판정 자체
+    # (participant∧project-access-valid ∨ ¬human-participant∧admin-bypass)는 불변, 소싱만
+    # 통일. 404로 존재-비노출(구 403 "Not a participant"는 참가여부를 노출했다 — 다른 리소스
+    # (goals·stories·sprints·retros·gates) 다수 관례에 맞춰 통일, story #2697 AC②).
+    if not await _can_read_conversation(
+        conversation_id, db, auth, org_id, _conv_project_id=conv.project_id,
+    ):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
 
     # 270c87e6: caller의 mute 상태 노출(FE 토글 초기 상태·#1426). 비참여자(admin-bypass agent-only)는 False.
     # story #1976: 같은 단건 조회에 last_read_at도 편승(신규 쿼리 아님) — unread_count는 참여자일 때만 계산.

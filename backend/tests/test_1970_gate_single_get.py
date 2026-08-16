@@ -179,7 +179,8 @@ async def test_get_gate_endpoint_404_no_project_access():
 
     with patch.object(gates_mod, "resolve_work_item_project_id",
                        AsyncMock(return_value=project_id)) as resolve_spy, \
-         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=False)) as access_spy:
+         patch("app.services.project_auth.has_project_access",
+               AsyncMock(return_value=False)) as access_spy:
         with pytest.raises(HTTPException) as exc_info:
             await get_gate_endpoint(id=gate_id, session=session, org_id=org_id, auth=auth)
 
@@ -201,7 +202,7 @@ async def test_get_gate_endpoint_200_populates_project_id_and_summary():
 
     with patch.object(gates_mod, "resolve_work_item_project_id",
                        AsyncMock(return_value=project_id)), \
-         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)), \
+         patch("app.services.project_auth.has_project_access", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "_resolve_work_item_summary",
                        AsyncMock(return_value=WorkItemSummary(title="설계 문서", slug="design-doc"))):
         result = await get_gate_endpoint(id=gate_id, session=session, org_id=org_id, auth=auth)

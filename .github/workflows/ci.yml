@@ -297,8 +297,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # story #2401 hotfix(2026-08-17, 미르코 재현·확定): checkout(fetch-depth: 0)이 이미
+      # develop 전체 히스토리를 받은 뒤, 여기서 `--depth=1`로 다시 fetch하면(그 사이 develop
+      # tip이 움직였을 때) 그 얕은 fetch가 새 shallow 경계를 심어버린다 — 이후
+      # `git diff origin/develop...HEAD`가 merge base를 못 찾고 exit 128로 죽는다(PR #3140
+      # 실 CI에서 재현, 바쁜 밤처럼 develop이 자주 움직일 때만 터지는 타이밍 의존 버그).
+      # checkout이 이미 전체 히스토리를 갖고 있으므로 이 fetch는 "최신 tip 반영"만이
+      # 목적 — depth 제한 없이 다시 받는다(얕은 경계를 새로 심지 않음).
       - name: Fetch base branch (current tip, not PR-open-time)
-        run: git fetch origin "${{ github.event.pull_request.base.ref }}" --depth=1
+        run: git fetch origin "${{ github.event.pull_request.base.ref }}"
       - name: Check alembic revision collisions against base + sibling open PRs
         working-directory: backend
         env:
