@@ -289,28 +289,44 @@ describe('ApprovalsQueue', () => {
     });
   }
 
-  it('AC — 저위험(risk_grade=low)·승인권한 있는 gate는 인라인 승인/반려 버튼이 뜬다', async () => {
+  it('AC — 저위험(risk_grade=low)·승인권한 있는 gate는 인라인 승인/변경요청 버튼이 뜬다', async () => {
     mockFetches([lowRiskActionable()], []);
     await mount();
     const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
-    expect(buttons.some((t) => t?.includes(koMessages.cage.gateReject))).toBe(true);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.sigRequestChanges))).toBe(true);
   });
 
-  it('AC "고위험 항목 인라인 승인 버튼 0" — risk_grade=high는 인라인 버튼이 아예 없고 행 전체가 상세 이동 버튼 하나뿐이다', async () => {
+  // story 22affaf2(PO 결정, 2026-08-16) — 구 #1961 AC "고위험 항목 인라인 승인 버튼 0"을
+  // 뒤집는다: 결재함 목록이 「전부 고위험」인 실사용에서 인라인이 아예 안 뜨는 게 이 P0의
+  // 실체였다(미르코 dev 실측). 이제 고위험도 인라인 카드를 받되, primary는 원탭이 아니라
+  // 서명 모달을 여는 진입점이다(승인 자체는 여전히 근거열람+사유 게이팅, 아래 별도 테스트).
+  it('AC(신규, 22affaf2) — risk_grade=high도 인라인 카드를 받는다·primary 라벨은 "승인하고 서명"(원탭 아님)', async () => {
     mockFetches([lowRiskActionable({ id: 'g-high', risk_grade: 'high' })], []);
     await mount();
     const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
-    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
-    expect(buttons.some((t) => t?.includes(koMessages.cage.gateReject))).toBe(false);
-    expect(container.querySelectorAll('button').length).toBe(1);
+    // "승인하고 서명"은 "승인"을 부분문자열로 포함하므로 정확히 일치하는 버튼이 없는지로 판정한다
+    // (원탭 전용 "승인" 단독 버튼이 안 남아있어야 함 — 서명 게이팅 우회 경로가 없다는 뜻).
+    expect(buttons.some((t) => t === koMessages.cage.sigApproveAndSign)).toBe(true);
+    expect(buttons.some((t) => t === koMessages.cage.gateApprove)).toBe(false);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.sigRequestChanges))).toBe(true);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateDiscussSubmit))).toBe(true);
   });
 
-  it('risk_grade가 unknown(미배선)이어도 인라인 버튼이 안 뜬다(보수적 고위험 취급, gate-risk.ts 정책)', async () => {
+  it('AC(신규, 22affaf2) — risk_grade=high에서 primary("승인하고 서명") 클릭은 즉시 transition을 안 부르고 서명 모달을 연다', async () => {
+    const calls = mockFetches([lowRiskActionable({ id: 'g-high2', risk_grade: 'high' })], []);
+    await mount();
+    const signBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigApproveAndSign));
+    await act(async () => { signBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+    expect(document.body.querySelector('[data-slot="dialog-content"]')).toBeTruthy();
+  });
+
+  it('unknown(risk_grade 미배선)도 이제 인라인 카드를 받되 고위험과 동형(서명 모달, 원탭 아님) — 보수적 취급 유지', async () => {
     mockFetches([lowRiskActionable({ id: 'g-unknown', risk_grade: null })], []);
     await mount();
     const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
-    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.sigApproveAndSign))).toBe(true);
   });
 
   it('can_approve=false면 저위험이어도 인라인 버튼이 안 뜬다(per-caller 권한 게이팅)', async () => {
@@ -368,10 +384,10 @@ describe('ApprovalsQueue', () => {
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
   });
 
-  it('반려 클릭 시 status=rejected로 호출하고 반려됨 배지를 보인다', async () => {
+  it('변경 요청 클릭 시(저위험) status=rejected로 호출하고 반려됨 배지를 보인다', async () => {
     const calls = mockFetches([lowRiskActionable({ id: 'g-rej' })], []);
     await mount();
-    const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateReject));
+    const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges));
     await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const postCall = calls.find((c) => c.method === 'POST');
     expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'rejected', note: null });
@@ -517,9 +533,116 @@ describe('ApprovalsQueue', () => {
   it('AC 음성대조 — 반려 직후(아직 승인/취소 안 됨)엔 취소 버튼이 즉시 뜨지 않다가, 반려 완료 후엔 뜬다', async () => {
     mockFetches([lowRiskActionable({ id: 'g-reject-undo' })], []);
     await mount();
-    const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateReject));
+    const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges));
     expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(false);
     await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(true);
+  });
+
+  // story 22affaf2(유나 design③) — 고위험 인라인 서명 모달. canonical 상세와 동일 컴포넌트
+  // (GateSignatureApproval)를 nav 없이 Dialog로 연다. base-ui Dialog는 document.body에
+  // 포탈되므로(#2354 교훈) [data-slot="dialog-content"]로 스코프한다(위 보류 다이얼로그
+  // 테스트와 동일 관례).
+  describe('고위험 인라인 서명 모달(22affaf2)', () => {
+    function highRiskActionable(overrides: Partial<GateItem> = {}): GateItem {
+      return gate({
+        id: 'g-sig', gate_type: 'merge_gate', status: 'pending', requires_human: true,
+        can_approve: true, risk_grade: 'high', work_item_summary: { title: '고위험 항목', slug: null },
+        ...overrides,
+      });
+    }
+
+    async function openSignatureDialog() {
+      const signBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === koMessages.cage.sigApproveAndSign);
+      await act(async () => { signBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      const dialog = document.body.querySelector('[data-slot="dialog-content"]');
+      expect(dialog).toBeTruthy();
+      return dialog!;
+    }
+
+    it('근거 열람 체크+사유 둘 다 없으면 [승인하고 서명] 비활성(canonical 상세와 동형 서명 게이팅 — 서명 생략 우회 경로 없음)', async () => {
+      mockFetches([highRiskActionable()], []);
+      await mount();
+      const dialog = await openSignatureDialog();
+      const signButton = Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent === koMessages.cage.sigApproveAndSign) as HTMLButtonElement;
+      expect(signButton.disabled).toBe(true);
+    });
+
+    it('근거 열람 체크박스만으론 부족·사유까지 채워야 [승인하고 서명]이 풀린다', async () => {
+      mockFetches([highRiskActionable({ id: 'g-sig-evidence' })], []);
+      await mount();
+      const dialog = await openSignatureDialog();
+      const checkbox = dialog.querySelector('input[type="checkbox"]') as HTMLInputElement;
+      await act(async () => {
+        checkbox.click();
+      });
+      const signButton = Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent === koMessages.cage.sigApproveAndSign) as HTMLButtonElement;
+      expect(signButton.disabled).toBe(true); // 사유 아직 없음
+      const textarea = dialog.querySelector('textarea') as HTMLTextAreaElement;
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+        setter.call(textarea, '근거 확認 완료');
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(signButton.disabled).toBe(false);
+    });
+
+    it('서명 완료 시 note=사유로 transition POST·모달이 닫히고 큐 카드가 완료 상태로 즉시 바뀐다(재조회 없이)', async () => {
+      const calls = mockFetches([highRiskActionable({ id: 'g-sig-approve' })], []);
+      await mount();
+      const dialog = await openSignatureDialog();
+      const checkbox = dialog.querySelector('input[type="checkbox"]') as HTMLInputElement;
+      await act(async () => { checkbox.click(); });
+      const textarea = dialog.querySelector('textarea') as HTMLTextAreaElement;
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+        setter.call(textarea, '근거 확認·서명 사유');
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      const signButton = Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent === koMessages.cage.sigApproveAndSign) as HTMLButtonElement;
+      await act(async () => { signButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+      const postCall = calls.find((c) => c.method === 'POST' && c.url.includes('/transition'));
+      expect(postCall?.url).toBe('/api/gates/g-sig-approve/transition');
+      expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'approved', note: '근거 확認·서명 사유' });
+      expect(document.body.querySelector('[data-slot="dialog-content"]')).toBeFalsy();
+      expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
+    });
+
+    it('모달 안 [변경 요청]은 근거 열람 없이도(사유만 있으면) status=rejected로 note와 함께 제출한다', async () => {
+      const calls = mockFetches([highRiskActionable({ id: 'g-sig-reject' })], []);
+      await mount();
+      const dialog = await openSignatureDialog();
+      const textarea = dialog.querySelector('textarea') as HTMLTextAreaElement;
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+        setter.call(textarea, '재작업 필요');
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      const rejectButtons = Array.from(dialog.querySelectorAll('button')).filter((b) => b.textContent === koMessages.cage.sigRequestChanges);
+      await act(async () => { rejectButtons[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+      const postCall = calls.find((c) => c.method === 'POST' && c.url.includes('/transition'));
+      expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'rejected', note: '재작업 필요' });
+      expect(container.textContent).toContain(koMessages.cage.queueResolvedRejected);
+    });
+
+    it('큐 카드의 행2 [변경 요청] 버튼을 직접 눌러도(모달을 열지 않고) 고위험은 여전히 모달을 연다(서명 우회 경로 없음)', async () => {
+      const calls = mockFetches([highRiskActionable({ id: 'g-sig-reject-entry' })], []);
+      await mount();
+      const rejectEntry = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges));
+      await act(async () => { rejectEntry?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+      expect(document.body.querySelector('[data-slot="dialog-content"]')).toBeTruthy();
+    });
+  });
+
+  // story 22affaf2(유나 design⑤) — undo 어포던스에 "N분 내 취소 가능" 힌트가 버튼과 함께 뜬다.
+  it('AC(신규, 22affaf2) — 인라인 승인 직후 "N분 내 취소 가능" 힌트가 취소 버튼과 함께 뜬다', async () => {
+    mockFetches([lowRiskActionable({ id: 'g-hint' })], []);
+    await mount();
+    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    await act(async () => { approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.textContent).toContain(koMessages.cage.gateUndoRemaining.replace('{minutes}', '5'));
   });
 });
