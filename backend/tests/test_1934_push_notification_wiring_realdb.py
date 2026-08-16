@@ -202,3 +202,65 @@ async def test_reopen_rejected_gate_notification_via_outbox():
             assert dn.await_args.kwargs["via_outbox"] is True
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_create_gate_notify_false_suppresses_generic_notification():
+    """story #373cfaa1: notify=False 호출부(예: doc.py — 자체 리치 알림을 따로 쏘는 콜사이트)는
+    create_gate()의 generic "gate.pending_approval" 벨을 받지 않는다(중복 제거 opt-out).
+    mutation-kill: doc.py의 notify=False 인자를 빼면 이 자리의 dn이 호출돼 RED가 된다."""
+    from unittest.mock import AsyncMock, patch
+    from app.services.gate_service import create_gate
+
+    org_id = uuid.uuid4()
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            await _seed_org_admin(s, org_id)
+
+            dn = AsyncMock()
+            with patch("app.services.notification_dispatch.dispatch_notification", dn):
+                gate = await create_gate(
+                    s, org_id, uuid.uuid4(), "doc", "doc_approval",
+                    uuid.uuid4(), uuid.uuid4(), notify=False,
+                )
+            assert gate.status == "pending"
+            dn.assert_not_awaited()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_reopen_rejected_gate_notify_false_suppresses_generic_notification():
+    """story #373cfaa1: 재상신(rejected→pending reopen) 경로도 notify=False면 generic 벨이
+    안 나간다(doc 재상신 시 doc.py 자체 알림과의 중복 제거가 이 경로에도 동일 적용)."""
+    from unittest.mock import AsyncMock, patch
+    from app.services.gate_service import create_gate
+
+    org_id = uuid.uuid4()
+    work_item_id = uuid.uuid4()
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            await _seed_org_admin(s, org_id)
+
+            gate = await create_gate(
+                s, org_id, work_item_id, "doc", "doc_approval",
+                uuid.uuid4(), uuid.uuid4(), notify=False,
+            )
+            await s.commit()
+            from app.models.gate import set_gate_status
+            from datetime import datetime, timezone
+            set_gate_status(gate, "rejected", now=datetime.now(timezone.utc))
+            await s.commit()
+
+            dn = AsyncMock()
+            with patch("app.services.notification_dispatch.dispatch_notification", dn):
+                reopened = await create_gate(
+                    s, org_id, work_item_id, "doc", "doc_approval",
+                    uuid.uuid4(), uuid.uuid4(), notify=False,
+                )
+            assert reopened.status == "pending"
+            dn.assert_not_awaited()
+    finally:
+        await engine.dispose()

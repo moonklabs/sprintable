@@ -302,6 +302,7 @@ async def _reopen_rejected_gate(
     gate_type: str,
     neutral_facts: dict[str, Any] | None,
     project_id: uuid.UUID | None,
+    notify: bool = True,
 ) -> Gate:
     """story #2150(P1) 근본수정 — create_gate()의 멱등 조회에 status 필터가 없어 rejected
     게이트를 그대로 반환했다(merge_verdict_gate.py의 ``gate_status=="rejected"`` 체크와
@@ -365,7 +366,7 @@ async def _reopen_rejected_gate(
     await session.flush()
     await session.refresh(gate)
 
-    if new_status == "pending":
+    if new_status == "pending" and notify:
         try:
             target_ids = await _resolve_gate_notification_targets(session, org_id)
             if target_ids:
@@ -399,6 +400,7 @@ async def create_gate(
     role_id: uuid.UUID,
     neutral_facts: dict[str, Any] | None = None,
     project_id: uuid.UUID | None = None,
+    notify: bool = True,
 ) -> Gate:
     """config 기반 게이트 생성 (멱등: 이미 있으면 기존 반환).
 
@@ -411,6 +413,11 @@ async def create_gate(
     workflow_line_config(wf_line_version)처럼 진짜 org-level(project 무관)일 수 있는 work_item은
     ``version.project_id``(nullable)를 그대로 넘겨 None이 나올 수 있다 — 이건 미해결이 아니라
     구조적으로 project-scoped가 아니라는 정직한 값이다.
+
+    notify: story #373cfaa1 — 호출부가 이미 자기 전용의 리치 알림(제목/본문+카드 등)을 별도로
+    보낼 때, 이 generic "gate.pending_approval" 벨과의 중복을 끄는 opt-out(기본값 True=기존
+    全 호출부 무회귀). gate_type/work_item_type별 하드코딩 대신 호출부 판단으로 남겨 이 함수의
+    공용 chokepoint 성격을 유지한다.
     """
     # 멱등: 이미 존재하면 기존 반환
     existing_r = await session.execute(
@@ -430,6 +437,7 @@ async def create_gate(
         return await _reopen_rejected_gate(
             session, existing, org_id=org_id, member_id=member_id, role_id=role_id,
             gate_type=gate_type, neutral_facts=neutral_facts, project_id=project_id,
+            notify=notify,
         )
 
     # SID 301ee45d/#2047: 반환값이 (disposition, source) — 이 범용 생성기는 disposition→status
@@ -470,7 +478,7 @@ async def create_gate(
     # pending 상태(진짜 결재 대기)일 때만 알림 — auto_passed/rejected는 즉시 확정이라 결재
     # 액션이 없다. best-effort(알림 실패가 게이트 생성 자체를 롤백하면 안 됨 — deliver_expo_
     # push/override 알림과 동일 관례).
-    if status == "pending":
+    if status == "pending" and notify:
         try:
             target_ids = await _resolve_gate_notification_targets(session, org_id)
             if target_ids:
