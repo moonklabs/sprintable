@@ -107,7 +107,7 @@ export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps
   }, [storyId, orgSyncVersion]);
 
   const refetchUnconfirmedCount = () => {
-    void fetch(`/api/stories/${storyId}/reference-candidates`)
+    void fetchWithAuth(`/api/stories/${storyId}/reference-candidates`)
       .then((r) => (r.ok ? r.json() : null))
       .then((raw: RawReferenceCandidate[] | null) => setUnconfirmedCount(raw ? selectUnconfirmedCandidates(raw).length : 0))
       .catch(() => setUnconfirmedCount(0));

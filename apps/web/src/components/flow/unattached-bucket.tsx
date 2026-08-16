@@ -200,7 +200,7 @@ export function UnattachedBucket({ projectId }: { projectId: string }) {
     setLoadError(false);
     void (async () => {
       try {
-        const res = await fetch(`/api/stories?project_id=${projectId}&unattached=true&limit=100`, { cache: 'no-store' });
+        const res = await fetchWithAuth(`/api/stories?project_id=${projectId}&unattached=true&limit=100`, { cache: 'no-store' });
         if (!res.ok) throw new Error('failed');
         const json = await res.json() as { data?: BucketStory[]; meta?: { total?: number } };
         if (!cancelled) {

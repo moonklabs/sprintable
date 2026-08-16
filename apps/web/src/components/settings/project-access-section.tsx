@@ -9,6 +9,8 @@ import { MemberRow } from '@/components/ui/member-row';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { cn } from '@/lib/utils';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 interface OrgMember {
   id: string;            // org_member.id
   user_id: string;
@@ -40,8 +42,8 @@ export function ProjectAccessSection({ projectId, currentRole }: ProjectAccessSe
   const refreshData = async () => {
     setLoading(true);
     const [membersRes, grantsRes] = await Promise.all([
-      fetch('/api/org-members').catch(() => null),
-      fetch(`/api/projects/${projectId}/access`).catch(() => null),
+      fetchWithAuth('/api/org-members').catch(() => null),
+      fetchWithAuth(`/api/projects/${projectId}/access`).catch(() => null),
     ]);
     if (membersRes?.ok) {
       const json = await membersRes.json() as { data?: OrgMember[] };
@@ -71,7 +73,7 @@ export function ProjectAccessSection({ projectId, currentRole }: ProjectAccessSe
     try {
       if (existing) {
         // 차단 — DELETE grant
-        const res = await fetch(`/api/projects/${projectId}/access/${existing.id}`, { method: 'DELETE' });
+        const res = await fetchWithAuth(`/api/projects/${projectId}/access/${existing.id}`, { method: 'DELETE' });
         if (res.ok) {
           setMessage({ type: 'success', text: `${member.name} 접근 권한 해제됨` });
           await refreshData();
@@ -80,7 +82,7 @@ export function ProjectAccessSection({ projectId, currentRole }: ProjectAccessSe
         }
       } else {
         // 허용 — POST grant
-        const res = await fetch(`/api/projects/${projectId}/access`, {
+        const res = await fetchWithAuth(`/api/projects/${projectId}/access`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ org_member_id: member.id, role: member.role }),

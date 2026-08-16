@@ -74,7 +74,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
   // 중복+유해(BE가 member_id를 user_id로 저장/반환하는데 /api/me.id는 org-member-id라 0 매치→전 config 숨김 회귀).
   // → 필터 제거하고 BE 스코프 그대로 신뢰. (member_id 시맨틱은 디디 BE #1726 확인 항목)
   const fetchWebhookConfigs = useCallback(async () => {
-    const res = await fetch('/api/webhooks/config');
+    const res = await fetchWithAuth('/api/webhooks/config');
     if (!res.ok) return;
     const json = await res.json() as { data: WebhookConfig[] };
     setWebhookConfigs(json.data ?? []);
@@ -126,7 +126,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
     if (!memberId) return;
     setBusyId(c.id);
     try {
-      const res = await fetch('/api/webhooks/config', {
+      const res = await fetchWithAuth('/api/webhooks/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ member_id: memberId, url: c.url, project_id: c.project_id, is_active: next }),
@@ -197,7 +197,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
     }
     setSavingNew(true);
     try {
-      const res = await fetch('/api/webhooks/config', {
+      const res = await fetchWithAuth('/api/webhooks/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

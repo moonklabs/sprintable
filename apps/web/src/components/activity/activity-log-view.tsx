@@ -115,7 +115,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
   const fetchLogs = useCallback(
     async (nextOffset = 0) => {
-      const res = await fetch(`/api/activity-logs?${buildParams(nextOffset)}`);
+      const res = await fetchWithAuth(`/api/activity-logs?${buildParams(nextOffset)}`);
       if (res.status === 403) { setForbidden(true); return null; }
       if (!res.ok) return null;
       const json = await res.json() as { data?: ActivityLogResponse };

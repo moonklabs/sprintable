@@ -223,7 +223,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
       if (verbFilter !== ALL) p.set('verb', verbFilter);
       if (objectTypeFilter !== ALL) p.set('object_type', objectTypeFilter);
 
-      const res = await fetch(`/api/activity-stream?${p.toString()}`, { cache: 'no-store' });
+      const res = await fetchWithAuth(`/api/activity-stream?${p.toString()}`, { cache: 'no-store' });
       if (res.status === 403) {
         setForbidden(true);
         return null;

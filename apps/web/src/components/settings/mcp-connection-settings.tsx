@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { OperatorInput, OperatorTextarea } from '@/components/ui/operator-control';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 interface McpConnectionSummary {
   serverKey: string;
   displayName: string;
@@ -62,7 +64,7 @@ export function McpConnectionSettings({ projectId }: { projectId: string }) {
   const loadConnections = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/projects/${projectId}/mcp-connections`, { cache: 'no-store' });
+      const response = await fetchWithAuth(`/api/projects/${projectId}/mcp-connections`, { cache: 'no-store' });
       const json = await response.json().catch(() => null);
       // story #2485 — 이 Next.js 라우트는 OSS에서 빈 배열 하드리턴 stub이라 실제로는
       // 거의 항상 200이다(그라운딩 확認) — 방어적으로 raw 서버 message 노출만 제거.
@@ -109,7 +111,7 @@ export function McpConnectionSettings({ projectId }: { projectId: string }) {
     setSavingKey(serverKey);
     setMessage(null);
     try {
-      const response = await fetch(`/api/projects/${projectId}/mcp-connections/${serverKey}`, {
+      const response = await fetchWithAuth(`/api/projects/${projectId}/mcp-connections/${serverKey}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -138,7 +140,7 @@ export function McpConnectionSettings({ projectId }: { projectId: string }) {
     setDeletingKey(serverKey);
     setMessage(null);
     try {
-      const response = await fetch(`/api/projects/${projectId}/mcp-connections/${serverKey}`, { method: 'DELETE' });
+      const response = await fetchWithAuth(`/api/projects/${projectId}/mcp-connections/${serverKey}`, { method: 'DELETE' });
       // story #2485 — 그라운딩(2026-08-06): 이 라우트는 backend에 존재하지 않아 항상
       // 404다(BE 미구현 — 별도 이슈로 보고, FE에서 code로 갈라도 해결 안 됨). raw 서버
       // message 노출만 우선 제거.
@@ -160,7 +162,7 @@ export function McpConnectionSettings({ projectId }: { projectId: string }) {
     setRequesting(true);
     setMessage(null);
     try {
-      const response = await fetch(`/api/projects/${projectId}/mcp-connections`, {
+      const response = await fetchWithAuth(`/api/projects/${projectId}/mcp-connections`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

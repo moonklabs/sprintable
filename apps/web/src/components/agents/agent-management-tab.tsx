@@ -76,7 +76,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   // 깊이 추적하지 않는다(AgentPerformancePanel·AgentProjectAccessSection은 위임 없이 자체
   // setState라 통과, 여기선 refreshAgents/refreshGrantCounts로 위임하므로 plain fn 유지).
   const refreshAgents = async () => {
-    const res = await fetch('/api/team-members?type=agent&include_inactive=true');
+    const res = await fetchWithAuth('/api/team-members?type=agent&include_inactive=true');
     if (!res.ok) return;
     const json = await res.json() as { data?: OrgAgent[] };
     setAgents(json.data ?? []);
@@ -86,7 +86,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
     if (projectList.length === 0) { setGrantCounts({}); return; }
     const results = await Promise.all(
       projectList.map((p) =>
-        fetch(`/api/projects/${p.id}/access`)
+        fetchWithAuth(`/api/projects/${p.id}/access`)
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null) as Promise<{ data?: AccessRecord[] } | null>,
       ),

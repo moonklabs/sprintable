@@ -5,6 +5,8 @@ import { ReactNodeViewRenderer, NodeViewWrapper, type ReactNodeViewProps } from 
 import { useState, useEffect, useCallback } from 'react';
 import { FileText, AlertCircle, RefreshCw } from 'lucide-react';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 // ---------------------------------------------------------------------------
 // Pure helpers — exported for unit tests
 // ---------------------------------------------------------------------------
@@ -83,7 +85,7 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
       try {
         const params = new URLSearchParams({ q: slugOrId });
         if (currentDocId) params.set('currentDocId', currentDocId);
-        const res = await fetch(`/api/docs/preview?${params.toString()}`);
+        const res = await fetchWithAuth(`/api/docs/preview?${params.toString()}`);
         if (!res.ok) {
           setError(res.status === 404 ? 'Document not found' : 'Document unavailable');
           setLoading(false);

@@ -111,7 +111,7 @@ function DocAssetImage({ assetId, alt, errorLabel }: { assetId: string; alt: str
 
   const fetchSigned = useCallback(async () => {
     try {
-      const res = await fetch(`/api/attachments/sign?asset_id=${encodeURIComponent(assetId)}`);
+      const res = await fetchWithAuth(`/api/attachments/sign?asset_id=${encodeURIComponent(assetId)}`);
       if (!res.ok) { setState('error'); return; }
       const json = (await res.json().catch(() => null)) as { data?: { url?: string } } | null;
       const signed = json?.data?.url;
@@ -470,7 +470,7 @@ export function DocContentRenderer({
 
         void (async () => {
           try {
-            const res = await fetch(`/api/attachments/sign?asset_id=${encodeURIComponent(assetId)}`);
+            const res = await fetchWithAuth(`/api/attachments/sign?asset_id=${encodeURIComponent(assetId)}`);
             if (cancelled) return;
             if (!res.ok) { showError(); return; }
             const json = (await res.json().catch(() => null)) as { data?: { url?: string } } | null;

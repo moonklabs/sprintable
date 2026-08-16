@@ -7,6 +7,8 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { Badge } from '@/components/ui/badge';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 interface AgentMember {
   id: string;
   name: string;
@@ -92,9 +94,9 @@ export function AgentPerformancePanel() {
     setLoading(true);
     try {
       const [membersRes, velocityRes, lbRes] = await Promise.all([
-        fetch(`/api/team-members?project_id=${projectId}&type=agent`),
-        fetch(`/api/analytics/velocity-history?project_id=${projectId}`),
-        fetch(`/api/rewards/leaderboard?project_id=${projectId}&period=all`),
+        fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`),
+        fetchWithAuth(`/api/analytics/velocity-history?project_id=${projectId}`),
+        fetchWithAuth(`/api/rewards/leaderboard?project_id=${projectId}&period=all`),
       ]);
 
       const membersJson = membersRes.ok ? (await membersRes.json() as { data: AgentMember[] | null }) : null;
@@ -112,7 +114,7 @@ export function AgentPerformancePanel() {
 
       const statsResults = await Promise.allSettled(
         agentMembers.map((m) =>
-          fetch(`/api/analytics/agent-stats?project_id=${projectId}&agent_id=${m.id}`)
+          fetchWithAuth(`/api/analytics/agent-stats?project_id=${projectId}&agent_id=${m.id}`)
             .then(async (r) => {
               if (!r.ok) return null;
               const j = await r.json() as { data: AgentStats | null };

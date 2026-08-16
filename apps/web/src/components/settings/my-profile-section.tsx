@@ -7,6 +7,8 @@ import { OperatorInput } from '@/components/ui/operator-control';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { TrustScoreCard } from '@/components/cage/trust-score-card';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 interface MyProfile {
   id: string;
   name: string;
@@ -25,7 +27,7 @@ export function MyProfileSection() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchProfile = useCallback(async () => {
-    const res = await fetch('/api/me');
+    const res = await fetchWithAuth('/api/me');
     if (!res.ok) return;
     const json = await res.json() as { data: MyProfile };
     setProfile(json.data);
@@ -39,7 +41,7 @@ export function MyProfileSection() {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch('/api/me', {
+      const res = await fetchWithAuth('/api/me', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: editName.trim() }),

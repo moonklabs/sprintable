@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 interface WorkflowTriggerType {
   id: string;
   slug: string;
@@ -41,7 +43,7 @@ export function WorkflowTriggerTypesSection() {
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const refresh = async () => {
-    const res = await fetch('/api/workflow-trigger-types');
+    const res = await fetchWithAuth('/api/workflow-trigger-types');
     if (res.ok) {
       const json = await res.json() as WorkflowTriggerType[];
       setTriggerTypes(Array.isArray(json) ? json : []);
@@ -115,7 +117,7 @@ export function WorkflowTriggerTypesSection() {
     setCreating(true);
     setCreateError(null);
     try {
-      const res = await fetch('/api/workflow-trigger-types', {
+      const res = await fetchWithAuth('/api/workflow-trigger-types', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

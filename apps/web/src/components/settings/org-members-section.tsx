@@ -13,6 +13,8 @@ import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 interface OrgMember {
   id: string;
   user_id: string | null;
@@ -73,9 +75,9 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
 
   const refreshData = async () => {
     const [membersRes, invitesRes, projectsRes] = await Promise.all([
-      fetch('/api/org-members').catch(() => null),
-      fetch(`/api/organizations/${orgId}/invites`).catch(() => null),
-      fetch('/api/projects').catch(() => null),
+      fetchWithAuth('/api/org-members').catch(() => null),
+      fetchWithAuth(`/api/organizations/${orgId}/invites`).catch(() => null),
+      fetchWithAuth('/api/projects').catch(() => null),
     ]);
     if (projectsRes?.ok) {
       const json = await projectsRes.json() as { data?: Array<{ id: string; name: string }> };
@@ -108,7 +110,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
     if (!inviteEmail.trim() || inviting) return;
     setInviting(true);
     setInviteResult(null);
-    const res = await fetch(`/api/organizations/${orgId}/invites`, {
+    const res = await fetchWithAuth(`/api/organizations/${orgId}/invites`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole, project_ids: inviteProjectIds }),
@@ -170,14 +172,14 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
 
   const handleResendInvite = async (inviteId: string) => {
     setResendingId(inviteId);
-    await fetch(`/api/organizations/${orgId}/invites/${inviteId}/resend`, { method: 'POST' }).catch(() => null);
+    await fetchWithAuth(`/api/organizations/${orgId}/invites/${inviteId}/resend`, { method: 'POST' }).catch(() => null);
     setResendingId(null);
     await refreshData();
   };
 
   const handleRevokeInvite = async (inviteId: string) => {
     setRevokingId(inviteId);
-    await fetch(`/api/organizations/${orgId}/invites/${inviteId}`, { method: 'DELETE' }).catch(() => null);
+    await fetchWithAuth(`/api/organizations/${orgId}/invites/${inviteId}`, { method: 'DELETE' }).catch(() => null);
     setRevokingId(null);
     await refreshData();
   };

@@ -69,9 +69,9 @@ export function AccessMatrixTab() {
     setLoadError(false);
     try {
       const [agentsRes, projectsRes, matrixRes] = await Promise.all([
-        fetch('/api/team-members?type=agent&include_inactive=true'),
-        fetch('/api/projects'),
-        fetch('/api/agents/access-matrix'),
+        fetchWithAuth('/api/team-members?type=agent&include_inactive=true'),
+        fetchWithAuth('/api/projects'),
+        fetchWithAuth('/api/agents/access-matrix'),
       ]);
       if (!agentsRes.ok || !projectsRes.ok || !matrixRes.ok) { setLoadError(true); return; }
       const agentsJson = await agentsRes.json() as { data?: OrgAgent[] };

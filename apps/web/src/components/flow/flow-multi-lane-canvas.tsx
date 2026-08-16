@@ -84,10 +84,10 @@ async function fetchLaneIngredients(
   projectId: string, epicId: string, epicTitle: string, sharedDependencyEdges: FlowMapEdge[],
 ): Promise<LaneIngredients | null> {
   const [nodesJson, candidatesJson] = await Promise.all([
-    fetch(`/api/analytics/epic-flow-nodes?project_id=${projectId}&epic_id=${epicId}&upcoming_limit=${UPCOMING_LIMIT}`)
+    fetchWithAuth(`/api/analytics/epic-flow-nodes?project_id=${projectId}&epic_id=${epicId}&upcoming_limit=${UPCOMING_LIMIT}`)
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null),
-    fetch(`/api/goals/${epicId}/reference-candidates`)
+    fetchWithAuth(`/api/goals/${epicId}/reference-candidates`)
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null),
   ]);

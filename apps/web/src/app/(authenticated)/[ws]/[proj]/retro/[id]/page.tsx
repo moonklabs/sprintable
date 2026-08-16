@@ -274,7 +274,7 @@ export default function RetroSessionPage() {
   const handleGenerateSynthesis = useCallback(async (): Promise<boolean> => {
     if (!projectId) return false;
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}/synthesis?project_id=${projectId}`, { method: 'POST' });
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/synthesis?project_id=${projectId}`, { method: 'POST' });
       if (!res.ok) return false;
       const json = await res.json() as { data?: { synthesis?: RetroSynthesis; next_hypotheses?: RetroNextHypothesis[] } };
       if (!json.data?.synthesis) return false;
@@ -289,7 +289,7 @@ export default function RetroSessionPage() {
   const handleAdoptRecommendation = useCallback(async (rec: RetroNextHypothesis, statement: string): Promise<boolean> => {
     if (!projectId) return false;
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}/next-hypotheses/adopt?project_id=${projectId}`, {
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/next-hypotheses/adopt?project_id=${projectId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...rec, statement }),
@@ -335,7 +335,7 @@ export default function RetroSessionPage() {
     if (!projectId || !sessionId) return;
     setLoadError(null);
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}?project_id=${projectId}`);
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}?project_id=${projectId}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json() as {
         data: RetroSessionRecord & {
@@ -384,7 +384,7 @@ export default function RetroSessionPage() {
     setAdvancing(true);
     setAdvanceError(null);
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}?project_id=${projectId}`, {
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}?project_id=${projectId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phase: targetPhase }),
@@ -405,7 +405,7 @@ export default function RetroSessionPage() {
     setAddingItem(category);
     setAddItemError(null);
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}/items?project_id=${projectId}`, {
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/items?project_id=${projectId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category, text, author_id: currentTeamMemberId }),
@@ -425,7 +425,7 @@ export default function RetroSessionPage() {
     if (!projectId || votedItemIds.has(itemId)) return;
     setVotedItemIds((prev) => new Set([...prev, itemId]));
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}/items/${itemId}/vote?project_id=${projectId}`, {
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/items/${itemId}/vote?project_id=${projectId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
@@ -448,7 +448,7 @@ export default function RetroSessionPage() {
     if (!projectId) return;
     setGroupError(null);
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}/items/${itemId}/group?project_id=${projectId}`, {
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/items/${itemId}/group?project_id=${projectId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ parent_item_id: parentItemId }),
@@ -464,7 +464,7 @@ export default function RetroSessionPage() {
     if (!projectId) return;
     setGroupError(null);
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}/items/${itemId}/ungroup?project_id=${projectId}`, {
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/items/${itemId}/ungroup?project_id=${projectId}`, {
         method: 'POST',
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -492,7 +492,7 @@ export default function RetroSessionPage() {
     setAddingAction(true);
     setAddActionError(null);
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}/actions?project_id=${projectId}`, {
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/actions?project_id=${projectId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: text, assignee_id: newActionAssigneeId || null }),
@@ -516,7 +516,7 @@ export default function RetroSessionPage() {
     setTogglingActionId(action.id);
     setAddActionError(null);
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}/actions/${action.id}?project_id=${projectId}`, {
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/actions/${action.id}?project_id=${projectId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: nextStatus }),
@@ -534,7 +534,7 @@ export default function RetroSessionPage() {
   async function exportSession() {
     if (!projectId) return;
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}/export?project_id=${projectId}`);
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/export?project_id=${projectId}`);
       if (!res.ok) return;
       const json = await res.json() as { data: { markdown: string } };
       await navigator.clipboard.writeText(json.data.markdown);

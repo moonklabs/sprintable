@@ -58,7 +58,7 @@ export default function GateDetailPage() {
     setLoading(true);
     setNotFound(false);
     try {
-      const res = await fetch(`/api/gates/${id}`);
+      const res = await fetchWithAuth(`/api/gates/${id}`);
       if (res.status === 404) { setNotFound(true); return; }
       if (!res.ok) return;
       const json = await res.json();
@@ -113,7 +113,7 @@ export default function GateDetailPage() {
     setResolving(true);
     setTransitionError(null);
     try {
-      const res = await fetch(`/api/gates/${gate.id}/transition`, {
+      const res = await fetchWithAuth(`/api/gates/${gate.id}/transition`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, note: note?.trim() || null }),
@@ -152,7 +152,7 @@ export default function GateDetailPage() {
     setDiscussSubmitting(true);
     setDiscussError(null);
     try {
-      const res = await fetch(`/api/gates/${gate.id}/discuss`, {
+      const res = await fetchWithAuth(`/api/gates/${gate.id}/discuss`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),

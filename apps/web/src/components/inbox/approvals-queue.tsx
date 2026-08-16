@@ -14,6 +14,8 @@ import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateInboxItem, GateItem, HitlInboxItem } from '@/components/kanban/types';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 // story #1960(P2-S4) — 결재함 통합 큐. Gate 3종(게이트·문서결재·머지게이트, gate_type/
 // work_item_type discriminator로 단일 Gate 테이블에 자연 수렴 — #1954에서 확定된 스코프
 // 그대로 재사용) 단일 목록. decision(inbox_items)은 별도 표면(/inbox 기본 탭 DecisionsWaiting
@@ -38,8 +40,8 @@ import type { GateInboxItem, GateItem, HitlInboxItem } from '@/components/kanban
 // `/gates/{id}` 상세로 이동.
 async function fetchGates(): Promise<GateInboxItem[]> {
   const [pending, held] = await Promise.all([
-    fetch('/api/gates/inbox?status=pending&sort=urgency&assigned_to_me=true').then((r) => (r.ok ? r.json() : [])),
-    fetch('/api/gates/inbox?status=held&sort=urgency&assigned_to_me=true').then((r) => (r.ok ? r.json() : [])),
+    fetchWithAuth('/api/gates/inbox?status=pending&sort=urgency&assigned_to_me=true').then((r) => (r.ok ? r.json() : [])),
+    fetchWithAuth('/api/gates/inbox?status=held&sort=urgency&assigned_to_me=true').then((r) => (r.ok ? r.json() : [])),
   ]);
   return [...(pending as GateInboxItem[]), ...(held as GateInboxItem[])];
 }

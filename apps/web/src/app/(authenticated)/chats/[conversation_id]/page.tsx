@@ -13,6 +13,8 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 interface Participant {
   member_id: string;
   name: string | null;
@@ -90,7 +92,7 @@ export default function ConversationPage() {
   const fetchMeta = useCallback(async () => {
     if (!projectId) return;
     try {
-      const res = await fetch(`/api/conversations/${conversation_id}`);
+      const res = await fetchWithAuth(`/api/conversations/${conversation_id}`);
       if (res.status === 403) { setBlocked(true); return; }
       if (!res.ok) return;
       const conv = await res.json() as {
@@ -115,7 +117,7 @@ export default function ConversationPage() {
     const next = !meta.muted;
     setMeta((m) => (m ? { ...m, muted: next } : m));
     try {
-      const res = await fetch(`/api/conversations/${conversation_id}/mute`, {
+      const res = await fetchWithAuth(`/api/conversations/${conversation_id}/mute`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ muted: next }),
@@ -133,7 +135,7 @@ export default function ConversationPage() {
     if (!next || next === (meta?.title ?? '')) return;
     setMeta((m) => (m ? { ...m, title: next } : m));
     try {
-      await fetch(`/api/conversations/${conversation_id}`, {
+      await fetchWithAuth(`/api/conversations/${conversation_id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: next }),
@@ -145,7 +147,7 @@ export default function ConversationPage() {
   const [presenceById, setPresenceById] = useState<Record<string, PresenceStatus>>({});
   const fetchPresence = useCallback(async () => {
     try {
-      const res = await fetch('/api/team-members?type=agent');
+      const res = await fetchWithAuth('/api/team-members?type=agent');
       if (!res.ok) return;
       const json = await res.json() as { data?: Array<{ id: string; presence_status?: string | null }> };
       const map: Record<string, PresenceStatus> = {};

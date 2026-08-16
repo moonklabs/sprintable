@@ -73,9 +73,9 @@ export function WorkflowTemplateGallerySection({
     setLoading(true);
     try {
       const [tmplRes, memberRes, rulesRes] = await Promise.all([
-        fetch('/api/workflow-templates'),
-        fetch(`/api/team-members?project_id=${projectId}&type=agent`),
-        fetch(`/api/v1/agent-routing-rules?project_id=${projectId}`),
+        fetchWithAuth('/api/workflow-templates'),
+        fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`),
+        fetchWithAuth(`/api/v1/agent-routing-rules?project_id=${projectId}`),
       ]);
       if (tmplRes.ok) {
         const data: unknown = await tmplRes.json();

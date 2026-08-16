@@ -167,7 +167,7 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
         const body = toDeclarationPayload(d);
         if (!body) continue;
         try {
-          await fetch(`/api/sprints/${data.id}/hypotheses`, {
+          await fetchWithAuth(`/api/sprints/${data.id}/hypotheses`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
@@ -178,7 +178,7 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
       }
 
       if (activateAfterCreate) {
-        await fetch(`/api/sprints/${data.id}/activate`, { method: 'POST' }).catch(() => {});
+        await fetchWithAuth(`/api/sprints/${data.id}/activate`, { method: 'POST' }).catch(() => {});
       }
       onCreated(data);
     } catch {
@@ -397,7 +397,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
 
   const loadHypotheses = useCallback(async (sprintId: string) => {
     try {
-      const res = await fetch(`/api/sprints/${sprintId}/hypotheses`);
+      const res = await fetchWithAuth(`/api/sprints/${sprintId}/hypotheses`);
       if (!res.ok) { setHypotheses([]); return; }
       const json = await res.json() as { data?: RetroHypothesisResult[] };
       setHypotheses(json.data ?? []);
@@ -409,7 +409,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
   const loadSprints = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/sprints?project_id=${projectId}`);
+      const res = await fetchWithAuth(`/api/sprints?project_id=${projectId}`);
       if (res.ok) {
         const json = await res.json();
         setSprints(json.data ?? []);
@@ -529,7 +529,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     setActionError(null);
     setActivateGateBlocked(false);
     try {
-      const res = await fetch(`/api/sprints/${selected.id}/activate`, { method: 'POST' });
+      const res = await fetchWithAuth(`/api/sprints/${selected.id}/activate`, { method: 'POST' });
       if (!res.ok) {
         const json = await res.json().catch(() => ({})) as { error?: { code?: string; message?: string } };
         // E-SPRINT-LOOP FE(278314e9) §5 — 422 HYPOTHESIS_REQUIRED_FOR_ACTIVATION은 마찰(에러 토스트)이
@@ -564,7 +564,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       for (const d of completed) {
         const body = toDeclarationPayload(d);
         if (!body) continue;
-        await fetch(`/api/sprints/${selected.id}/hypotheses`, {
+        await fetchWithAuth(`/api/sprints/${selected.id}/hypotheses`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
@@ -587,7 +587,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     setClosing(true);
     setActionError(null);
     try {
-      const res = await fetch(`/api/sprints/${selected.id}/close`, { method: 'POST' });
+      const res = await fetchWithAuth(`/api/sprints/${selected.id}/close`, { method: 'POST' });
       if (!res.ok) {
         // story #2485 — backend close_sprint()는 code 자체를 안 낸다(그라운딩 확認,
         // 의도적으로 discard) — raw 서버 message 노출 대신 고정 문구.
@@ -606,7 +606,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     setDeleting(true);
     setDeleteError(null);
     try {
-      const res = await fetch(`/api/sprints/${selected.id}`, { method: 'DELETE' });
+      const res = await fetchWithAuth(`/api/sprints/${selected.id}`, { method: 'DELETE' });
       if (!res.ok) {
         // story #2485 — backend delete_sprint()는 generic HTTP상태 코드만 낸다
         // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.

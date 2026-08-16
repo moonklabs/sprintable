@@ -70,7 +70,7 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
     await mount(<DocContentRenderer content={ASSET_REF_HTML} contentFormat="html" />);
 
     // image: signed route hit → img.src set to the signed URL (was blank before the fix).
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=img-1'));
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=img-1'), undefined);
     const img = container.querySelector<HTMLImageElement>('img[data-asset-id="img-1"]');
     expect(img).not.toBeNull();
     expect(img?.getAttribute('src')).toBe(SIGNED_URL);
@@ -144,7 +144,7 @@ describe('DocContentRenderer · asset-ref (S4 docs-attach regression)', () => {
     const md = 'Intro\n\n<img data-asset-id="md-1" data-filename="m.png" data-size="5" data-mime-type="image/png" alt="md shot">\n\nOutro';
     await mount(<DocContentRenderer content={md} contentFormat="markdown" />);
 
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=md-1'));
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/attachments/sign?asset_id=md-1'), undefined);
     const img = container.querySelector<HTMLImageElement>('img');
     expect(img?.getAttribute('src')).toBe(SIGNED_URL);
     // it is the resolver-rendered <img>, NOT a blank NextImage (mock tags those data-next-image).

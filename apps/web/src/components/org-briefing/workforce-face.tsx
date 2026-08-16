@@ -9,6 +9,8 @@ import {
   type WorkforceFaceItem, type WorkforceFaceTranslator,
 } from './derive-workforce-face';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 // story 09fa254e — 조직 브리핑 "워크포스" 면. S1 셸의 스켈레톤 자리에 배치 이동 없이 증분 장착.
 // 아바타 클러스터는 collaboration-map.tsx(E-GLANCE §5)와 동일 스타일(숫자 배지 0, presence만).
 // story 64b9a879: 빈상태를 "사람과 AI가 함께 맡은 일이 여기 모입니다"로 전환·Users+Bot 아이콘
@@ -21,14 +23,14 @@ interface WorkforceData {
 }
 
 async function loadWorkforceFace(projectId: string, t: WorkforceFaceTranslator): Promise<WorkforceData> {
-  const overview = await fetch('/api/dashboard/overview').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  const overview = await fetchWithAuth('/api/dashboard/overview').then((r) => (r.ok ? r.json() : null)).catch(() => null);
   const epics = parseActiveEpics(overview);
   const [storiesResults, membersJson] = await Promise.all([
     Promise.all(epics.map((e) =>
-      fetch(`/api/stories?epic_id=${e.epicId}&project_id=${projectId}&limit=100`)
+      fetchWithAuth(`/api/stories?epic_id=${e.epicId}&project_id=${projectId}&limit=100`)
         .then((r) => (r.ok ? r.json() : null)).catch(() => null),
     )),
-    fetch('/api/team-members').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    fetchWithAuth('/api/team-members').then((r) => (r.ok ? r.json() : null)).catch(() => null),
   ]);
   const storiesByEpic: Record<string, ReturnType<typeof parseEpicStories>> = {};
   epics.forEach((e, i) => { storiesByEpic[e.epicId] = parseEpicStories(storiesResults[i]); });

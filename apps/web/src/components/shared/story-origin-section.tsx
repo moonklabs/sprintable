@@ -9,6 +9,8 @@ import { parseCursorMeta } from '@/lib/pagination';
 import type { BacklinkItem } from './entity-backlinks-section';
 import { deriveStoryOrigin } from './derive-story-origin';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 // story #2267(C-9) AC4 — 이 컴포넌트는 EntityBacklinksSection과 같은 엔드포인트
 // (GET /api/stories/{id}/backlinks)를 별도로 부른다. 두 섹션이 응답을 나눠 쓰도록
 // EntityBacklinksSection의 내부-fetch 구조를 리팩터해 상태를 끌어올릴 수도 있었으나,
@@ -75,7 +77,7 @@ async function findOriginAcrossPages(storyId: string, signal: { cancelled: boole
   for (let page = 0; page < MAX_PAGES; page++) {
     const params = new URLSearchParams({ limit: String(PAGE_LIMIT) });
     if (cursor) params.set('before', cursor);
-    const res = await fetch(`/api/stories/${storyId}/backlinks?${params}`, { cache: 'no-store' });
+    const res = await fetchWithAuth(`/api/stories/${storyId}/backlinks?${params}`, { cache: 'no-store' });
     if (signal.cancelled) return collected;
     if (!res.ok) return 'failed';
     const json = await res.json() as BacklinksPage;

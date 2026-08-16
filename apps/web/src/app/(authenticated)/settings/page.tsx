@@ -203,7 +203,7 @@ export default function SettingsPage() {
     setOrgImpactFailed(false);
     setConfirmWithoutImpact(false);
     try {
-      const res = await fetch(`/api/organizations/${orgInfo.id}/impact`).catch(() => null);
+      const res = await fetchWithAuth(`/api/organizations/${orgInfo.id}/impact`).catch(() => null);
       if (!res?.ok) {
         setOrgImpact(null);
         setOrgImpactFailed(true);
@@ -244,7 +244,7 @@ export default function SettingsPage() {
     })) return;
     setDeletingOrg(true);
     try {
-      const res = await fetch(`/api/organizations/${orgInfo.id}`, {
+      const res = await fetchWithAuth(`/api/organizations/${orgInfo.id}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         // story #2092 AC3 — 영향도 조회가 실패한 채로 사용자가 명시 인정했을 때만 true.
@@ -274,7 +274,7 @@ export default function SettingsPage() {
     setSavingOrgName(true);
     setOrgNameError('');
     try {
-      const res = await fetch(`/api/organizations/${orgInfo.id}`, {
+      const res = await fetchWithAuth(`/api/organizations/${orgInfo.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: editOrgName.trim() }),
@@ -310,9 +310,9 @@ export default function SettingsPage() {
   // 이 엔드포인트 성공 시에만 구독 grace-period 배너를 갱신하는 기존 게이팅은 그대로 보존.
   const refreshInvitations = async () => {
     if (!orgId) return;
-    const res = await fetch(`/api/organizations/${orgId}/invites`);
+    const res = await fetchWithAuth(`/api/organizations/${orgId}/invites`);
     if (res.ok) {
-      const statusRes = await fetch('/api/subscription/status');
+      const statusRes = await fetchWithAuth('/api/subscription/status');
       if (statusRes.ok) {
         const statusJson = await statusRes.json() as { data?: { grace_until?: string | null } };
         setGraceUntil(statusJson.data?.grace_until ?? null);
@@ -324,7 +324,7 @@ export default function SettingsPage() {
   const refreshMemberData = async (projectId: string) => {
     if (!projectId) return;
 
-    const projectMemberRes = await fetch(`/api/team-members?project_id=${projectId}`);
+    const projectMemberRes = await fetchWithAuth(`/api/team-members?project_id=${projectId}`);
 
     if (projectMemberRes.ok) {
       const json = await projectMemberRes.json();

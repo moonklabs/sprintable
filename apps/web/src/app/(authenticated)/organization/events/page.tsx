@@ -74,7 +74,7 @@ export default function OrganizationEventsPage() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/events/definitions');
+      const res = await fetchWithAuth('/api/events/definitions');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json() as EventDefinition[] | { data?: EventDefinition[] };
       setDefs(Array.isArray(json) ? json : (json.data ?? []));
@@ -472,7 +472,7 @@ function EventFormDialog({
       }
       let res: Response;
       if (mode === 'create') {
-        res = await fetch('/api/events/definitions', {
+        res = await fetchWithAuth('/api/events/definitions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),

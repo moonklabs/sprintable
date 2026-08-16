@@ -9,6 +9,8 @@ import { ActionZone } from './action-zone';
 import { OverviewZone } from './overview-zone';
 import { derivePhrase } from '@/services/glance';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 /**
  * E-MODERN [Track C/command-center] 커맨드 센터 — 현 대시보드 위젯 교체. 2구역+헤더.
  * "괜찮다 / 내가 OO 해야" 한눈에. canonical 부품·색=신호·pending_data graceful(mock-0 금지).
@@ -39,9 +41,9 @@ export function CommandCenter({ projectName }: { projectName?: string | null }) 
     setLoading(true);
     try {
       const [ma, ov, members] = await Promise.all([
-        fetch('/api/dashboard/my-actions').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-        fetch('/api/dashboard/overview').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-        fetch('/api/team-members').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetchWithAuth('/api/dashboard/my-actions').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetchWithAuth('/api/dashboard/overview').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetchWithAuth('/api/team-members').then((r) => (r.ok ? r.json() : null)).catch(() => null),
       ]);
       setMyActions(unwrap<MyActions>(ma));
       setOverview(unwrap<Overview>(ov));

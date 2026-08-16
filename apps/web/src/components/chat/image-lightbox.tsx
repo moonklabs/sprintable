@@ -7,6 +7,8 @@ import { ChevronLeft, ChevronRight, ExternalLink, Loader2, X } from 'lucide-reac
 import { useTranslations } from 'next-intl';
 import { Dialog, DialogPortal } from '@/components/ui/dialog';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 /**
  * story #2037 — 채팅 이미지 첨부 확대 뷰(라이트박스).
  *
@@ -78,7 +80,7 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
       const params = new URLSearchParams({ path: storedUrl });
       if (conversationId) params.set('conversation_id', conversationId);
       else if (storyId) params.set('story_id', storyId);
-      const res = await fetch(`/api/attachments/sign?${params.toString()}`);
+      const res = await fetchWithAuth(`/api/attachments/sign?${params.toString()}`);
       if (res.status === 403) {
         setSignState('denied');
         return;

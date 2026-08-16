@@ -163,7 +163,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
       const fetchParams = new URLSearchParams({ project_id: projectId, limit: '20' });
       if (tags?.length) fetchParams.set('tags', tags.join(','));
       if (cursor) fetchParams.set('cursor', cursor);
-      const res = await fetch(`/api/docs?${fetchParams.toString()}`);
+      const res = await fetchWithAuth(`/api/docs?${fetchParams.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch tree');
       const { data, meta } = await res.json() as { data: Doc[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
       if (cursor) {

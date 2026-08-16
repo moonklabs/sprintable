@@ -47,8 +47,8 @@ describe('extractRawFetchApiCalls — 순수 판정 함수(AC4)', () => {
 // story #2691 — 선언된 baseline 크기를 고정해 조용한 증감(리뷰 없는 추가/삭제)을 막는다
 // (verify-no-i18n-phrase-collision.ts의 GRANDFATHER_BASELINE_COUNT_TEST와 동일 관례).
 describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 review 없이 조용히 못 늘어난다(관례 재사용)', () => {
-  it('story #2691 착수 시점 스냅샷은 정확히 282건이다', () => {
-    expect(GRANDFATHER_BASELINE.size).toBe(282);
+  it('QA reject 후속 재triage(2026-08-17) 스냅샷은 정확히 164건이다(282건 중 118건 콜드마운트 GET 전환)', () => {
+    expect(GRANDFATHER_BASELINE.size).toBe(164);
   });
 
   it('EXEMPT_FILES는 8개 파일(pre-auth·공개 라우트·primitive 구현) 그대로다', () => {

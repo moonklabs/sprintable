@@ -8,6 +8,8 @@ import { Loader2, ImageOff, Lock } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { formatFileSize } from './file-node';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 // 첨부 src 분류 — regression 0 의 핵심.
 // legacy(data:/http(s)/blob) → 직접 렌더(현 비주얼) · ref(assetId attr) → signed fetch.
 function isLegacySrc(src: unknown): src is string {
@@ -108,7 +110,7 @@ function ImageView({ node, updateAttributes, selected }: ReactNodeViewProps) {
   const fetchSigned = useCallback(async () => {
     if (!assetId) return;
     try {
-      const res = await fetch(`/api/attachments/sign?asset_id=${encodeURIComponent(assetId)}`);
+      const res = await fetchWithAuth(`/api/attachments/sign?asset_id=${encodeURIComponent(assetId)}`);
       if (res.status === 403) {
         setSignState('public');
         return;

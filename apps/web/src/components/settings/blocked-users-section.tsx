@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { useToast } from '@/components/ui/toast';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 interface UserBlockRow {
   blocked_member_id: string;
   created_at: string;
@@ -24,7 +26,7 @@ export function BlockedUsersSection() {
 
   const fetchBlocks = useCallback(async () => {
     try {
-      const res = await fetch('/api/user-blocks', { cache: 'no-store' });
+      const res = await fetchWithAuth('/api/user-blocks', { cache: 'no-store' });
       if (!res.ok) return;
       const json = await res.json() as { data?: UserBlockRow[] };
       const list = json.data ?? [];
@@ -33,7 +35,7 @@ export function BlockedUsersSection() {
       if (missing.length > 0) {
         const entries = await Promise.all(missing.map(async (id) => {
           try {
-            const r = await fetch(`/api/team-members/${id}`);
+            const r = await fetchWithAuth(`/api/team-members/${id}`);
             if (!r.ok) return [id, id] as const;
             const j = await r.json() as { data?: { name?: string } };
             return [id, j.data?.name ?? id] as const;

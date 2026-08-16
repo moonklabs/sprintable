@@ -317,7 +317,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     setRoleError(false);
     try {
       // S25(ae844d74): 활성 UI locale 전달 → BE(S24)가 카드 name/description을 locale별로 반환.
-      const res = await fetch(`/api/role-templates?locale=${locale}`);
+      const res = await fetchWithAuth(`/api/role-templates?locale=${locale}`);
       if (!res.ok) { setRoleError(true); return; }
       const json = (await res.json()) as { data?: RoleTemplateSummary[] };
       setRoleTemplates(json.data ?? []);
@@ -451,7 +451,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const fetchRuntimeCapabilities = useCallback(async () => {
     setRuntimeCapabilitiesError(false);
     try {
-      const res = await fetch('/api/runtime-capabilities');
+      const res = await fetchWithAuth('/api/runtime-capabilities');
       if (!res.ok) {
         setRuntimeCapabilities(RUNTIME_CAPABILITIES_FALLBACK);
         if (res.status !== 404) setRuntimeCapabilitiesError(true);

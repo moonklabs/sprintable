@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { useToast } from '@/components/ui/toast';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 type MessagingMode = 'creator_only' | 'org_wide' | 'list';
 const MODES: MessagingMode[] = ['creator_only', 'list', 'org_wide'];
 
@@ -42,8 +44,8 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
 
   const load = useCallback(async () => {
     const [policyRes, membersRes] = await Promise.all([
-      fetch(`/api/agents/${agentId}/message-policy`).catch(() => null),
-      fetch('/api/org-members').catch(() => null),
+      fetchWithAuth(`/api/agents/${agentId}/message-policy`).catch(() => null),
+      fetchWithAuth('/api/org-members').catch(() => null),
     ]);
     if (policyRes?.ok) {
       const json = await policyRes.json() as { data?: { mode?: MessagingMode; allowlist?: string[] } };
@@ -81,7 +83,7 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
     if (stagedMode === mode || savingMode) return;
     setSavingMode(true);
     try {
-      const res = await fetch(`/api/agents/${agentId}/message-policy`, {
+      const res = await fetchWithAuth(`/api/agents/${agentId}/message-policy`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode: stagedMode }),
@@ -102,7 +104,7 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
   const handleAddMember = async (memberId: string) => {
     setPendingId(memberId);
     try {
-      const res = await fetch(`/api/agents/${agentId}/message-policy/allowlist`, {
+      const res = await fetchWithAuth(`/api/agents/${agentId}/message-policy/allowlist`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ member_id: memberId }),
@@ -124,7 +126,7 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
   const handleRemoveMember = async (memberId: string) => {
     setPendingId(memberId);
     try {
-      const res = await fetch(`/api/agents/${agentId}/message-policy/allowlist/${memberId}`, { method: 'DELETE' });
+      const res = await fetchWithAuth(`/api/agents/${agentId}/message-policy/allowlist/${memberId}`, { method: 'DELETE' });
       if (!res.ok) {
         // story #2485 — backend remove_allowlist_member()는 generic HTTP상태 코드만
         // 낸다(진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.

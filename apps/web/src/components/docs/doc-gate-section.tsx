@@ -12,6 +12,8 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 /**
  * E-DG S28 + 24f5ae18/34360c54 — doc decision gate UI(doc 상세 상단). S24 hypothesis-gate-badge 어휘 미러·신규 토큰 0.
  * 어휘 2축(혼동 금지):
@@ -82,9 +84,9 @@ export function DocGateSection({
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const [gates, revsJson, membersJson] = await Promise.all([
-      fetch(`/api/gates?work_item_id=${docId}&work_item_type=doc`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
-      fetch(`/api/docs/${docId}/revisions`).then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
-      fetch('/api/team-members').then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
+      fetchWithAuth(`/api/gates?work_item_id=${docId}&work_item_type=doc`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+      fetchWithAuth(`/api/docs/${docId}/revisions`).then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
+      fetchWithAuth('/api/team-members').then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
     ]);
     if (signal?.aborted) return;
     const gs = (Array.isArray(gates) ? gates : []) as GateItem[];
@@ -120,7 +122,7 @@ export function DocGateSection({
     if (busy) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/docs/${docId}/transition`, {
+      const res = await fetchWithAuth(`/api/docs/${docId}/transition`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: next }),

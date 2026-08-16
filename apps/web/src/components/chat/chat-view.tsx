@@ -310,7 +310,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // 이름=commandTargets(없으면 미표시 graceful). poll이 BE working 셋 그대로 반영(클라 TTL 불요).
   const fetchWorking = useCallback(async () => {
     try {
-      const res = await fetch(`/api/conversations/${threadId}/working`);
+      const res = await fetchWithAuth(`/api/conversations/${threadId}/working`);
       if (!res.ok) return;
       const json = await res.json() as { data?: Array<{ member_id: string }> };
       const next = (json.data ?? [])

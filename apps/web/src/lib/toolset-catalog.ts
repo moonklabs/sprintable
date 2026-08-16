@@ -9,6 +9,9 @@
  * 도구명은 예시다 — 실제 멤버 툴/도구 수는 카탈로그 응답이 권위를 가진다.
  */
 
+import { fetchWithAuth } from '@/lib/db/client';
+
+
 export interface ToolsetGroup {
   /** enforcement에 들어가는 그룹키 (불변·`api-key.scope`에 저장). */
   key: string;
@@ -64,7 +67,7 @@ export const TEMP_TOOLSET_CATALOG: ToolsetCatalog = {
  */
 export async function fetchToolsetCatalog(): Promise<{ catalog: ToolsetCatalog; isFallback: boolean }> {
   try {
-    const res = await fetch('/api/mcp/toolset-catalog');
+    const res = await fetchWithAuth('/api/mcp/toolset-catalog');
     if (!res.ok) return { catalog: TEMP_TOOLSET_CATALOG, isFallback: true };
     const json = (await res.json()) as { data?: ToolsetCatalog } | ToolsetCatalog;
     const catalog = (('data' in json ? json.data : json) ?? TEMP_TOOLSET_CATALOG) as ToolsetCatalog;
