@@ -17,6 +17,7 @@ import {
   type OpenAIModel,
   type PersistedLLMConfig,
 } from '@/lib/llm/types';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface AiSettings {
   provider: LLMProvider;
@@ -69,7 +70,7 @@ export function AiSettingsSection({ projectId }: { projectId: string }) {
   const requiresNewApiKey = providerSwitchRequiresNewApiKey(settings?.provider, provider);
 
   useEffect(() => {
-    fetch(`/api/projects/${projectId}/ai-settings`)
+    fetchWithAuth(`/api/projects/${projectId}/ai-settings`)
       .then((r) => (r.ok ? r.json() : null))
       .then((json) => {
         if (json?.data) {

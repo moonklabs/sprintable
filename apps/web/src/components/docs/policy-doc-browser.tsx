@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { ContextualPanelLayout, useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { cn } from '@/lib/utils';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface Sprint {
   id: string;
@@ -56,7 +57,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
       if (!projectId) return;
       setLoading(true);
       try {
-        const sprintsRes = await fetch(`/api/sprints?project_id=${projectId}`);
+        const sprintsRes = await fetchWithAuth(`/api/sprints?project_id=${projectId}`);
         if (!sprintsRes.ok) return;
         const sprintsJson = await sprintsRes.json();
         if (cancelled) return;
@@ -83,7 +84,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
       try {
         const params = new URLSearchParams({ project_id: projectId, sprint_id: selectedSprintId });
         if (query.trim()) params.set('q', query.trim());
-        const res = await fetch(`/api/policy-documents?${params.toString()}`);
+        const res = await fetchWithAuth(`/api/policy-documents?${params.toString()}`);
         if (!res.ok) return;
         const json = await res.json();
         if (cancelled) return;

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
+import { fetchWithAuth } from '@/lib/db/client';
 
 export interface OrgSwitcherItem {
   orgId: string;
@@ -127,7 +128,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     for (const org of orgsToFetch) {
       if (otherOrgProjects[org.orgId] !== undefined || loadingOrgIds.has(org.orgId)) continue;
       setLoadingOrgIds((prev) => new Set([...prev, org.orgId]));
-      fetch(`/api/projects`, { headers: { 'X-Org-Id': org.orgId } })
+      fetchWithAuth(`/api/projects`, { headers: { 'X-Org-Id': org.orgId } })
         .then((r) => (r.ok ? r.json() : null))
         .then((data: { data?: Array<{ id?: string; projectId?: string; name?: string; projectName?: string }> } | null) => {
           const mapped = (data?.data ?? []).map((p) => ({

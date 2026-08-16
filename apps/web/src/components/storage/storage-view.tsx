@@ -23,6 +23,7 @@ import type {
   SortOrder,
   StorageViewMode,
 } from '@/lib/storage/types';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // story #2302 AC1 — `?asset=` 딥링크가 무엇을 해야 하는지의 판정만 순수 함수로 뽑아 둔다
 // (StorageView 전체를 렌더하지 않고도 이 결정 로직 자체를 단위테스트하기 위함 — 이 컴포넌트는
@@ -107,7 +108,7 @@ export function StorageView({ projectId }: { projectId: string }) {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(`/api/folders?project_id=${encodeURIComponent(projectId)}`);
+        const res = await fetchWithAuth(`/api/folders?project_id=${encodeURIComponent(projectId)}`);
         if (!res.ok) return;
         const json = (await res.json()) as { data?: Folder[] };
         if (!cancelled) setFolders(json.data ?? []);
@@ -204,7 +205,7 @@ export function StorageView({ projectId }: { projectId: string }) {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(`/api/assets/${action.assetId}`);
+        const res = await fetchWithAuth(`/api/assets/${action.assetId}`);
         if (!res.ok) return; // 조용히 무시 — 대상이 없으면 그냥 선택되지 않는다(별도 에러 UI는 이 스코프 밖).
         const json = (await res.json()) as { data?: Asset };
         if (cancelled || !json.data) return;

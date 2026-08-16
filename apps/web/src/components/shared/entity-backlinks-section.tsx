@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { FileText, MessageSquare, Calendar, BookOpen } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { formatRelativeTime } from '@/lib/storage/format';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface BacklinkMember { id: string; name: string; type: string }
 
@@ -120,7 +121,7 @@ export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinks
   useEffect(() => {
     let cancelled = false;
     const segment = ENTITY_ROUTE_SEGMENT[entityType];
-    fetch(`/api/${segment}/${entityId}/backlinks`, { cache: 'no-store' })
+    fetchWithAuth(`/api/${segment}/${entityId}/backlinks`, { cache: 'no-store' })
       .then((r) => (r.ok ? (r.json() as Promise<{ data?: BacklinkItem[]; meta?: BacklinksMeta }>) : null))
       .then((json) => {
         if (cancelled) return;

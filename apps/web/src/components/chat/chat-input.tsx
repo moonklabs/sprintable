@@ -25,6 +25,7 @@ import {
   applyEntity, entityTypeLabel, escapeMarkdownLinkText, getEntityQuery, groupEntitiesByType, type EntityResult,
 } from './chat-input-entity-tokens';
 import { useEntityPicker } from '@/hooks/use-entity-picker';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // story #2264(C-6): 토큰조립/그룹핑/라벨은 이제 참조 코어(chat-input-entity-tokens.ts)에
 // 산다 — 여기선 재-export만 해서 기존 소비부(테스트 등)의 import 경로를 그대로 둔다.
@@ -180,7 +181,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   useEffect(() => {
     if (mentionQuery === null) { setMentionMembers([]); return; }
     let cancelled = false;
-    fetch(`/api/members?is_active=true${projectId ? `&project_id=${projectId}` : ''}`)
+    fetchWithAuth(`/api/members?is_active=true${projectId ? `&project_id=${projectId}` : ''}`)
       .then((r) => r.json())
       .then((json) => {
         if (cancelled) return;

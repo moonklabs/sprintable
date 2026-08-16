@@ -13,6 +13,8 @@ import {
 } from './verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from './onboarding-telemetry';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 // story #2407 — Transport는 이제 verify-rail.tsx가 소유(useVerificationRail이 그 값을 직접
 // 다룸). 이 re-export는 기존 소비자(onboarding-form.tsx 등)의 import 경로를 안 건드리려는
 // 하위호환 자리 — 새 소비자는 verify-rail에서 바로 import한다.
@@ -121,7 +123,7 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
     if (!reqTransport) setInitialError(false);
     try {
       const qs = reqTransport ? `?transport=${reqTransport}` : '';
-      const res = await fetch(`/api/agents/${agentId}/connection-artifact${qs}`);
+      const res = await fetchWithAuth(`/api/agents/${agentId}/connection-artifact${qs}`);
       if (!res.ok) {
         if (reqTransport === 'http' && res.status === 400) {
           // MCP_PUBLIC_URL 미설정 환경(OSS/로컬) — "탭 자체가 없음"(BE 계약), 에러 아님.

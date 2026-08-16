@@ -18,6 +18,8 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { ToolPermissionPicker } from '@/components/agents/tool-permission-picker';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 interface ApiKey {
   id: string;
   key_prefix: string;
@@ -64,7 +66,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
     if (!agentId) return;
     setLoading(true);
     try {
-      const response = await fetch(`/api/agents/${agentId}/api-key`);
+      const response = await fetchWithAuth(`/api/agents/${agentId}/api-key`);
       if (!response.ok) throw new Error('Failed to load API keys');
       const result = await response.json() as { data?: ApiKey[] };
       setApiKeys(result.data ?? []);
@@ -88,7 +90,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
     if (!agentId) return;
     setLoading(true);
     try {
-      const response = await fetch(`/api/agents/${agentId}/api-key`, {
+      const response = await fetchWithAuth(`/api/agents/${agentId}/api-key`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scope: selectedScopes }),
@@ -120,7 +122,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
     try {
       await Promise.all(
         activeKeys.map((key) =>
-          fetch(`/api/agents/${agentId}/api-key/${key.id}`, { method: 'DELETE' })
+          fetchWithAuth(`/api/agents/${agentId}/api-key/${key.id}`, { method: 'DELETE' })
         )
       );
     } catch {
@@ -137,7 +139,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
 
     setLoading(true);
     try {
-      const response = await fetch(`/api/agents/${agentId}/api-key/${keyId}`, {
+      const response = await fetchWithAuth(`/api/agents/${agentId}/api-key/${keyId}`, {
         method: 'DELETE',
       });
       if (!response.ok) throw new Error('Failed to revoke API key');

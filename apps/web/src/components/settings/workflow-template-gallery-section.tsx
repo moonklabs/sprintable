@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface TemplateStep {
   pattern: string;
@@ -72,9 +73,9 @@ export function WorkflowTemplateGallerySection({
     setLoading(true);
     try {
       const [tmplRes, memberRes, rulesRes] = await Promise.all([
-        fetch('/api/workflow-templates'),
-        fetch(`/api/team-members?project_id=${projectId}&type=agent`),
-        fetch(`/api/v1/agent-routing-rules?project_id=${projectId}`),
+        fetchWithAuth('/api/workflow-templates'),
+        fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`),
+        fetchWithAuth(`/api/v1/agent-routing-rules?project_id=${projectId}`),
       ]);
       if (tmplRes.ok) {
         const data: unknown = await tmplRes.json();
@@ -105,7 +106,7 @@ export function WorkflowTemplateGallerySection({
     setOverwriteConfirm(false);
     setLoadingDetail(true);
     try {
-      const res = await fetch(`/api/workflow-templates/${tmpl.slug}`);
+      const res = await fetchWithAuth(`/api/workflow-templates/${tmpl.slug}`);
       if (res.ok) {
         const full = await res.json() as WorkflowTemplate;
         setSelected(full);

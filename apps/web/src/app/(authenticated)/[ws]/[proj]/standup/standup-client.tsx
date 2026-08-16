@@ -23,6 +23,7 @@ import {
   type StandupReviewType,
   type StandupStorySummary,
 } from '@/components/standup/standup-types';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface BridgedStory {
   id: string;
@@ -227,8 +228,8 @@ export default function StandupPage({ projectId }: StandupClientProps) {
         // d9847ef0: org-level(항상) — standup entries(project_id 생략→org_id scoped 전체)·members(org-level).
         // standalone org write 진입(프로젝트 미선택)에서도 작성/조회 가능.
         const [entriesRes, membersRes] = await Promise.all([
-          fetch(`/api/standup?date=${date}`),
-          fetch(`/api/team-members`),
+          fetchWithAuth(`/api/standup?date=${date}`),
+          fetchWithAuth(`/api/team-members`),
         ]);
 
         const [entriesData, membersData] = await Promise.all([
@@ -246,9 +247,9 @@ export default function StandupPage({ projectId }: StandupClientProps) {
 
         if (projectId) {
           const [sprintsRes, feedbackRes, missingRes] = await Promise.all([
-            fetch(`/api/sprints?project_id=${projectId}&status=active`),
-            fetch(`/api/standup/feedback?project_id=${projectId}&date=${date}`),
-            fetch(`/api/standup/missing?project_id=${projectId}&date=${date}`),
+            fetchWithAuth(`/api/sprints?project_id=${projectId}&status=active`),
+            fetchWithAuth(`/api/standup/feedback?project_id=${projectId}&date=${date}`),
+            fetchWithAuth(`/api/standup/missing?project_id=${projectId}&date=${date}`),
           ]);
 
           const [sprintsData, fbData] = await Promise.all([
@@ -264,7 +265,7 @@ export default function StandupPage({ projectId }: StandupClientProps) {
           sprint = sprintsData.find((item) => item.status === 'active') ?? sprintsData[0] ?? null;
 
           if (sprint) {
-          const storiesRes = await fetch(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=40`);
+          const storiesRes = await fetchWithAuth(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=40`);
           if (!storiesRes.ok) throw new Error('Failed to load sprint stories');
           const storiesJson = await storiesRes.json().catch(() => null);
           if (!storiesJson || !('data' in storiesJson)) throw new Error('Failed to load sprint stories');
@@ -272,7 +273,7 @@ export default function StandupPage({ projectId }: StandupClientProps) {
           nextStoriesCursor = storiesJson.meta?.nextCursor ?? null;
           const taskEntries = await Promise.all(
             storyRows.map(async (story) => {
-              const taskRes = await fetch(`/api/tasks?story_id=${story.id}&limit=1`);
+              const taskRes = await fetchWithAuth(`/api/tasks?story_id=${story.id}&limit=1`);
               const taskJson = await taskRes.json().catch(() => null) as { data?: StandupTaskRow[]; meta?: { totalCount?: number; doneCount?: number } } | null;
               if (!taskRes.ok || !taskJson || !Array.isArray(taskJson.data)) {
                 throw new Error(`Failed to load task summary for story ${story.id}`);

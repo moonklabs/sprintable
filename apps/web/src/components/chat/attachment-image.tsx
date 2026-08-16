@@ -5,6 +5,8 @@ import Image from 'next/image';
 import { Lock, RefreshCw } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 /**
  * a54ddc16 — 첨부 이미지 auth-gated 렌더. public 직링크 대신 서명 라우트
  * (`/api/attachments/sign`)로 단기 서명 URL을 받아 표시한다. 비동기 fetch라 상태 UX가 필요:
@@ -55,7 +57,7 @@ export function AttachmentImage({ storedUrl, conversationId, storyId, alt, onOpe
       const params = new URLSearchParams({ path: storedUrl });
       if (conversationId) params.set('conversation_id', conversationId);
       else if (storyId) params.set('story_id', storyId);
-      const res = await fetch(`/api/attachments/sign?${params.toString()}`);
+      const res = await fetchWithAuth(`/api/attachments/sign?${params.toString()}`);
       if (res.status === 403) {
         setState('denied');
         return;

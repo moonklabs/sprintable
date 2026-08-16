@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { GitBranch, ArrowRight, ShieldOff } from 'lucide-react';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 /**
  * E-DG S29 좌-pane — 현 active published 라인 정의 보기(read-only). 데이터 = GET
  * /api/workflow-line-config/active?entity_type=&project_id=(디디 #1637). 우 pane(dry-run)와
@@ -30,7 +32,7 @@ export function WorkflowActiveLineView({ projectId }: { projectId?: string | nul
     try {
       const q = new URLSearchParams({ entity_type: entityType });
       if (projectId) q.set('project_id', projectId);
-      const res = await fetch(`/api/workflow-line-config/active?${q.toString()}`);
+      const res = await fetchWithAuth(`/api/workflow-line-config/active?${q.toString()}`);
       setData(res.ok ? ((await res.json()) as ActiveLine) : null);
     } catch {
       setData(null);

@@ -11,6 +11,8 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { Badge } from '@/components/ui/badge';
 import type { LLMProvider } from '@/lib/llm';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 interface SavedKeyInfo {
   provider: LLMProvider;
   maskedKey: string;
@@ -55,7 +57,7 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
 
   const fetchSavedKey = useCallback(async () => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/ai-settings`);
+      const res = await fetchWithAuth(`/api/projects/${projectId}/ai-settings`);
       if (!res.ok) return;
       const json = await res.json();
       if (json?.data) {
@@ -91,7 +93,7 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
     setValidationResult(null);
 
     try {
-      const res = await fetch(`/api/projects/${projectId}/ai-settings/validate`, {
+      const res = await fetchWithAuth(`/api/projects/${projectId}/ai-settings/validate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -116,7 +118,7 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
     setSaveError(null);
 
     try {
-      const res = await fetch(`/api/projects/${projectId}/ai-settings`, {
+      const res = await fetchWithAuth(`/api/projects/${projectId}/ai-settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -158,7 +160,7 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/ai-settings`, {
+      const res = await fetchWithAuth(`/api/projects/${projectId}/ai-settings`, {
         method: 'DELETE',
       });
       if (res.ok) {

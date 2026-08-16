@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { buildPolicyDeniedMessage, parseAgentMessagePolicyDenied } from '@/lib/agent-message-policy-error';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface Member {
   id: string;
@@ -43,7 +44,7 @@ export function AddParticipantModal({
   const [error, setError] = useState<ModalError | null>(null);
 
   useEffect(() => {
-    fetch(`/api/members?is_active=true&project_id=${projectId}`)
+    fetchWithAuth(`/api/members?is_active=true&project_id=${projectId}`)
       .then((r) => r.json())
       .then((json) => setMembers((json.data ?? []) as Member[]))
       .catch(() => {})

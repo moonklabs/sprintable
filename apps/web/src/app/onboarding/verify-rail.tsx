@@ -5,6 +5,8 @@ import { Check, X, Loader2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 export type RailStatus = 'pending' | 'active' | 'done' | 'failed';
 
 /** E-MCP-OPT S3: SaaS 기본=호스팅(http)·OSS 기본=로컬(stdio) — BE `default_transport_for_edition()`
@@ -271,7 +273,7 @@ export function useVerificationRail({
 
   const pollStatus = useCallback(async (forAgentId: string, forTransport: Transport) => {
     try {
-      const res = await fetch(`/api/agents/${forAgentId}/verification-status?transport=${forTransport}`);
+      const res = await fetchWithAuth(`/api/agents/${forAgentId}/verification-status?transport=${forTransport}`);
       if (!res.ok) return; // 미머지/404 → pending 유지(가짜 에러 안 띄움)
       const raw = parseVerificationRail(await res.json());
       if (raw) setBeSteps(raw);
@@ -317,7 +319,7 @@ export function useVerificationRail({
     setVerifyNonce((n) => n + 1);
     setVerifying(true);
     try {
-      await fetch(`/api/agents/${agentId}/verify-connection?transport=${transport}`, {
+      await fetchWithAuth(`/api/agents/${agentId}/verify-connection?transport=${transport}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{}',

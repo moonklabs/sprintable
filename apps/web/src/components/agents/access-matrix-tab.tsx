@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Check, Loader2 } from 'lucide-react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { cn } from '@/lib/utils';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface OrgAgent {
   id: string;
@@ -68,9 +69,9 @@ export function AccessMatrixTab() {
     setLoadError(false);
     try {
       const [agentsRes, projectsRes, matrixRes] = await Promise.all([
-        fetch('/api/team-members?type=agent&include_inactive=true'),
-        fetch('/api/projects'),
-        fetch('/api/agents/access-matrix'),
+        fetchWithAuth('/api/team-members?type=agent&include_inactive=true'),
+        fetchWithAuth('/api/projects'),
+        fetchWithAuth('/api/agents/access-matrix'),
       ]);
       if (!agentsRes.ok || !projectsRes.ok || !matrixRes.ok) { setLoadError(true); return; }
       const agentsJson = await agentsRes.json() as { data?: OrgAgent[] };
@@ -117,7 +118,7 @@ export function AccessMatrixTab() {
         if (res.ok) {
           let recId = (await res.json().catch(() => null) as { data?: { id?: string } } | null)?.data?.id;
           if (!recId) {
-            const g = await fetch(`/api/agents/access-matrix`).catch(() => null);
+            const g = await fetchWithAuth(`/api/agents/access-matrix`).catch(() => null);
             if (g?.ok) {
               const j = await g.json() as { data?: AccessMatrixRow[] };
               recId = (j.data ?? []).find((r) => r.agent_member_id === agentId && r.project_id === project.id)?.record_id;

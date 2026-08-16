@@ -40,6 +40,7 @@ import { NOTIFICATION_TYPES } from '@/lib/notification-types';
 import { isEEEnabled } from '@/lib/ee';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import dynamic from 'next/dynamic';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // TypeScript 정적 해석을 위해 unconditional import — 조건부 렌더링은 JSX isEEEnabled() 체크로 처리
 const BillingTab = dynamic(
@@ -202,7 +203,7 @@ export default function SettingsPage() {
     setOrgImpactFailed(false);
     setConfirmWithoutImpact(false);
     try {
-      const res = await fetch(`/api/organizations/${orgInfo.id}/impact`).catch(() => null);
+      const res = await fetchWithAuth(`/api/organizations/${orgInfo.id}/impact`).catch(() => null);
       if (!res?.ok) {
         setOrgImpact(null);
         setOrgImpactFailed(true);
@@ -243,7 +244,7 @@ export default function SettingsPage() {
     })) return;
     setDeletingOrg(true);
     try {
-      const res = await fetch(`/api/organizations/${orgInfo.id}`, {
+      const res = await fetchWithAuth(`/api/organizations/${orgInfo.id}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         // story #2092 AC3 — 영향도 조회가 실패한 채로 사용자가 명시 인정했을 때만 true.
@@ -273,7 +274,7 @@ export default function SettingsPage() {
     setSavingOrgName(true);
     setOrgNameError('');
     try {
-      const res = await fetch(`/api/organizations/${orgInfo.id}`, {
+      const res = await fetchWithAuth(`/api/organizations/${orgInfo.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: editOrgName.trim() }),
@@ -309,9 +310,9 @@ export default function SettingsPage() {
   // 이 엔드포인트 성공 시에만 구독 grace-period 배너를 갱신하는 기존 게이팅은 그대로 보존.
   const refreshInvitations = async () => {
     if (!orgId) return;
-    const res = await fetch(`/api/organizations/${orgId}/invites`);
+    const res = await fetchWithAuth(`/api/organizations/${orgId}/invites`);
     if (res.ok) {
-      const statusRes = await fetch('/api/subscription/status');
+      const statusRes = await fetchWithAuth('/api/subscription/status');
       if (statusRes.ok) {
         const statusJson = await statusRes.json() as { data?: { grace_until?: string | null } };
         setGraceUntil(statusJson.data?.grace_until ?? null);
@@ -323,7 +324,7 @@ export default function SettingsPage() {
   const refreshMemberData = async (projectId: string) => {
     if (!projectId) return;
 
-    const projectMemberRes = await fetch(`/api/team-members?project_id=${projectId}`);
+    const projectMemberRes = await fetchWithAuth(`/api/team-members?project_id=${projectId}`);
 
     if (projectMemberRes.ok) {
       const json = await projectMemberRes.json();
@@ -336,7 +337,7 @@ export default function SettingsPage() {
     async function loadContext() {
       // admin 감지: /api/me role 기반 (invitations 응답 결과에 의존하지 않음)
       try {
-        const meRes = await fetch('/api/me');
+        const meRes = await fetchWithAuth('/api/me');
         const meJson = meRes.ok ? await meRes.json() : null;
         const role = (meJson?.data?.role ?? 'member') as string;
         setIsAdmin(role === 'admin' || role === 'owner');
@@ -350,7 +351,7 @@ export default function SettingsPage() {
       // Get current project — current-project 실패/예외와 무관하게 loading은 finally에서 해소(무한 스켈레톤 방지).
       // (fresh signup 직후 org_id 없는 JWT → /current-project 실패 시 setLoading(false) 미호출되던 결함)
       try {
-        const projectRes = await fetch('/api/current-project');
+        const projectRes = await fetchWithAuth('/api/current-project');
         if (projectRes.ok) {
           const projectJson = await projectRes.json();
           const projectId = projectJson?.data?.project_id ?? null;
@@ -360,7 +361,7 @@ export default function SettingsPage() {
 
           // org 상세 정보 로드 — list API에서 orgId로 필터 (단건 API 미구현)
           if (orgId) {
-            const orgListRes = await fetch('/api/organizations').catch(() => null);
+            const orgListRes = await fetchWithAuth('/api/organizations').catch(() => null);
             if (orgListRes?.ok) {
               const orgListJson = await orgListRes.json() as { data?: Array<{ id: string; name: string; slug: string; plan?: string; role?: string }> };
               const found = (orgListJson.data ?? []).find((o) => o.id === orgId);
@@ -372,14 +373,14 @@ export default function SettingsPage() {
           }
 
           // Get notification settings
-          const settingsRes = await fetch('/api/notification-settings');
+          const settingsRes = await fetchWithAuth('/api/notification-settings');
           if (settingsRes.ok) {
             const settingsJson = await settingsRes.json();
             setSettings(settingsJson.data ?? []);
           }
 
           // story #2272 — 형제(notification-preferences)의 global·in_app level 조회.
-          const preferencesRes = await fetch('/api/notification-preferences');
+          const preferencesRes = await fetchWithAuth('/api/notification-preferences');
           if (preferencesRes.ok) {
             const preferencesJson = await preferencesRes.json() as { data?: Array<{ scope_type: string; channel: string; level: 'all' | 'mentions' | 'mute' }> };
             const global = (preferencesJson.data ?? []).find((p) => p.scope_type === 'global' && p.channel === 'in_app');
@@ -387,7 +388,7 @@ export default function SettingsPage() {
           }
 
           // Get webhook configs
-          const webhookRes = await fetch('/api/webhooks/config');
+          const webhookRes = await fetchWithAuth('/api/webhooks/config');
           if (webhookRes.ok) {
             const webhookJson = await webhookRes.json();
             setWebhooks(webhookJson.data ?? []);
@@ -413,7 +414,7 @@ export default function SettingsPage() {
     if (!currentProjectId || !currentUserId) { setCurrentProjectRole('member'); return; }
     let cancelled = false;
     void (async () => {
-      const res = await fetch(`/api/team-members?project_id=${currentProjectId}&type=human`).catch(() => null);
+      const res = await fetchWithAuth(`/api/team-members?project_id=${currentProjectId}&type=human`).catch(() => null);
       if (cancelled || !res?.ok) return;
       const json = await res.json() as { data?: Array<{ user_id?: string | null; role?: string }> };
       const mine = (json.data ?? []).find((m) => m.user_id === currentUserId);

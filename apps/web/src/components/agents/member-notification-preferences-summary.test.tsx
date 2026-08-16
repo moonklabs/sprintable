@@ -42,7 +42,9 @@ describe('MemberNotificationPreferencesSummary — story #2623', () => {
     vi.stubGlobal('fetch', fetchMock);
     await act(async () => { root.render(wrap(<MemberNotificationPreferencesSummary memberId="agent-1" memberLabel="Agent One" />)); });
     await act(async () => {});
-    expect(fetchMock).toHaveBeenCalledWith('/api/notification-preferences?member_id=agent-1');
+    // story #2691 — fetchWithAuth(url)가 내부에서 fetch(input, init)을 호출하며 init 생략 시
+    // undefined를 명시로 넘긴다(래퍼 도입 전엔 raw fetch(url) 단일 인자였다).
+    expect(fetchMock).toHaveBeenCalledWith('/api/notification-preferences?member_id=agent-1', undefined);
   });
 
   it('conversation·sse 항목만 골라 대화id×레벨로 보여준다(다른 scope_type/channel은 걸러짐)', async () => {

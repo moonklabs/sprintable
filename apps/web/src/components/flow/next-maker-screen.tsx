@@ -18,6 +18,7 @@ import { FlowMultiLaneCanvas } from './flow-multi-lane-canvas';
 import { parseCursorMeta } from '@/lib/pagination';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { ToastContainer, useToast } from '@/components/ui/toast';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface NextMakerScreenProps {
   projectId: string;
@@ -130,10 +131,10 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
         const [rawGoals, storiesByStatus, nextUpRes, laneRes] = await Promise.all([
           fetchAllGoals(projectId),
           Promise.all(ACTIVE_STATUSES.map((status) => fetchAllStoriesByStatus(projectId, status))),
-          fetch(`/api/reference-candidates/next-up?project_id=${projectId}&recent_days=14`)
+          fetchWithAuth(`/api/reference-candidates/next-up?project_id=${projectId}&recent_days=14`)
             .then((r) => (r.ok ? r.json() : []))
             .catch(() => []),
-          fetch(`/api/analytics/epics-progress-lane?project_id=${projectId}`)
+          fetchWithAuth(`/api/analytics/epics-progress-lane?project_id=${projectId}`)
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null),
         ]);

@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface AffectedProject {
   project_id: string;
@@ -42,7 +43,7 @@ export function RemoveOrgMemberDialog({
     if (!open) return;
     setLoading(true);
     setError(null);
-    fetch(`/api/org-members/${member.id}/affected-projects`)
+    fetchWithAuth(`/api/org-members/${member.id}/affected-projects`)
       .then(async (res) => {
         if (!res.ok) throw new Error('failed');
         const json = await res.json() as { data?: AffectedProject[] };

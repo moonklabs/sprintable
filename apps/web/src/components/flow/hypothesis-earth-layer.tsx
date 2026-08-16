@@ -11,6 +11,8 @@ import { GuidedHypothesisEntry } from '@/components/flow/guided-hypothesis-entry
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { cn } from '@/lib/utils';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 /**
  * story #2531(E-FLOW-V4 S1) — 축척 지도의 최상위 «지구 층». 조직 단위를 작업이 아니라
  * 가설(질문)로 올린다(doc flow-board-v4-hypothesis-scale §2). 유나 시안 f60d0502 v2 규격.
@@ -146,7 +148,7 @@ export function HypothesisEarthLayer({
     if (!projectId) return;
     setLoadError(false);
     try {
-      const res = await fetch(`/api/hypotheses?project_id=${projectId}`, { cache: 'no-store' });
+      const res = await fetchWithAuth(`/api/hypotheses?project_id=${projectId}`, { cache: 'no-store' });
       if (!res.ok) throw new Error('failed');
       const json = await res.json() as { data?: Hypothesis[] };
       setHypotheses(json.data ?? []);

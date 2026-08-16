@@ -917,6 +917,13 @@ jobs:
       - name: "Verify MIGRATED_RESOURCES sync (story #1971 regression guard)"
         run: pnpm --filter web verify:migrated-resources-sync
 
+      # story #2691 회귀가드: raw fetch('/api/*')가 401을 재시도 없이 삼키는 결함 클래스
+      # (#2689 근본 원인)의 재발을 막는다 — #2689(8곳)+#2691(카디르 QA 전수감사 기반 130곳)이
+      # fetchWithAuth로 전환한 뒤, 그 전환이 유지되도록 신규 raw fetch만 막는다(기존 잔존
+      # 282건은 GRANDFATHER_BASELINE로 얼림, mutation/handler/pre-auth류 — 개별 triage는 별도).
+      - name: "Verify no new raw fetch('/api/*') (story #2691 regression guard)"
+        run: pnpm --filter web verify:no-new-raw-fetch-api
+
       - name: Test
         # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead
         # of being masked by tail's 0 — without it the unit-test gate was a no-op

@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /** BE _GA4_SUPPORTED_METRICS(backend/app/schemas/story.py)와 동기 — 모르는 지표는 BE가 422. */
 const GA4_METRICS = ['activeUsers', 'newUsers', 'sessions', 'conversions', 'eventCount', 'screenPageViews'] as const;
@@ -155,7 +156,7 @@ export function LoopCreateDialog({
     if (mode !== 'link' || hypotheses !== null) return;
     void (async () => {
       try {
-        const res = await fetch(`/api/hypotheses?project_id=${projectId}`);
+        const res = await fetchWithAuth(`/api/hypotheses?project_id=${projectId}`);
         if (!res.ok) { setHypotheses([]); return; }
         const json = (await res.json()) as { data?: Hypothesis[] };
         setHypotheses((json.data ?? []).filter((h) => LINKABLE_STATUSES.has(h.status)));
@@ -172,7 +173,7 @@ export function LoopCreateDialog({
     if (!open || recipes !== null || recipesFailed) return;
     void (async () => {
       try {
-        const res = await fetch('/api/workflow-recipes');
+        const res = await fetchWithAuth('/api/workflow-recipes');
         if (!res.ok) { setRecipesFailed(true); return; }
         setRecipes((await res.json()) as WorkflowRecipe[]);
       } catch {

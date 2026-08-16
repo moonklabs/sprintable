@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { OutcomeBadge } from '@/components/loops/outcome-badge';
 import { AiAttributionRow, AiTransparencyLine, type AiConfidence } from '@/components/loops/ai-attribution';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /** E-LOOP-LEDGER S13 — GET /loops/{id}/context-pack 응답 shape(handoff §3, PO-locked). */
 interface ContextPackDecision {
@@ -143,7 +144,7 @@ export function ContextPackPanel({ loopId }: { loopId: string }) {
     setUnavailable(false);
     void (async () => {
       try {
-        const res = await fetch(`/api/loops/${loopId}/context-pack`);
+        const res = await fetchWithAuth(`/api/loops/${loopId}/context-pack`);
         if (cancelled) return;
         if (!res.ok) { setUnavailable(true); return; }
         const json = (await res.json()) as ContextPackResponse;

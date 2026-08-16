@@ -13,6 +13,7 @@ import { HypothesisStatusBadge } from '@/components/hypotheses/hypothesis-status
 import type { HypothesisStatus } from '@sprintable/core-storage';
 import { cn } from '@/lib/utils';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /**
  * story #2533(E-FLOW-V4 S3) — 가설 생애 수직 서사. 지구층 가설 카드를 열면 그 가설의
@@ -121,7 +122,7 @@ export function HypothesisNarrativePanel({
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(`/api/hypotheses/${hypothesisId}/lifecycle`, { cache: 'no-store' });
+        const res = await fetchWithAuth(`/api/hypotheses/${hypothesisId}/lifecycle`, { cache: 'no-store' });
         if (!res.ok) throw new Error('lifecycle fetch failed');
         const data = await res.json() as LifecycleResponse;
         if (cancelled) return;

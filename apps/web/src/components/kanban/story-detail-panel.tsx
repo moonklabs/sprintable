@@ -49,6 +49,7 @@ import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-h
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
+import { fetchWithAuth } from '@/lib/db/client';
 
 export interface Task {
   id: string;
@@ -455,8 +456,8 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     let cancelled = false;
     setLoadingLabels(true);
     Promise.all([
-      fetch(`/api/item-labels?item_type=story&item_id=${story.id}`).then((r) => r.ok ? r.json() : []),
-      fetch('/api/labels').then((r) => r.ok ? r.json() : []),
+      fetchWithAuth(`/api/item-labels?item_type=story&item_id=${story.id}`).then((r) => r.ok ? r.json() : []),
+      fetchWithAuth('/api/labels').then((r) => r.ok ? r.json() : []),
     ])
       .then(([itemLabels, allLabels]) => {
         if (cancelled) return;
@@ -489,7 +490,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     let cancelled = false;
     setOutgoingRefs(undefined);
     setBareNumberTargets(undefined);
-    fetch(`/api/stories/${story.id}/references?direction=outgoing`, { cache: 'no-store' })
+    fetchWithAuth(`/api/stories/${story.id}/references?direction=outgoing`, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
       .then((json: { data?: unknown; bare_number_targets?: unknown } | null) => {
         if (cancelled || !json) return;
@@ -553,7 +554,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     const tid = setTimeout(() => {
       const params = new URLSearchParams({ q: depQuery });
       if (projectId) params.set('project_id', projectId);
-      fetch(`/api/stories?${params}`)
+      fetchWithAuth(`/api/stories?${params}`)
         .then((r) => r.ok ? r.json() : null)
         .then((json) => {
           const results = (json?.data ?? []) as { id: string; title: string }[];
@@ -584,7 +585,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     depCandidatesFetchedRef.current = true;
     const params = new URLSearchParams({ boost_candidates_from: story.id });
     if (projectId) params.set('project_id', projectId);
-    fetch(`/api/stories?${params}`)
+    fetchWithAuth(`/api/stories?${params}`)
       .then((r) => r.ok ? r.json() : null)
       .then((json) => {
         const results = (json?.data ?? []) as RawStoryRow[];
@@ -687,7 +688,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   useEffect(() => {
     let cancelled = false;
     setLoadingDeps(true);
-    fetch(`/api/dependencies?item_type=story&item_id=${story.id}`)
+    fetchWithAuth(`/api/dependencies?item_type=story&item_id=${story.id}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((json) => {
         if (cancelled) return;
@@ -702,7 +703,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   // P0-04 in-flight 신뢰 칩 — StoryMergeGate와 동형 데이터소스(work_item_id 필터, BE 추가 0).
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/gates?work_item_id=${story.id}&work_item_type=story`, { cache: 'no-store' })
+    fetchWithAuth(`/api/gates?work_item_id=${story.id}&work_item_type=story`, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : []))
       .then((gates) => { if (!cancelled) setChipGates(Array.isArray(gates) ? gates : []); })
       .catch(() => {});
@@ -957,7 +958,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     async function fetchComments() {
       setLoadingComments(true);
       try {
-        const res = await fetch(`/api/stories/${story.id}/comments?limit=20`);
+        const res = await fetchWithAuth(`/api/stories/${story.id}/comments?limit=20`);
         if (cancelled) return;
         if (res.ok) {
           const json = await res.json();
@@ -984,7 +985,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     async function fetchActivities() {
       setLoadingActivities(true);
       try {
-        const res = await fetch(`/api/stories/${story.id}/activities?limit=20`);
+        const res = await fetchWithAuth(`/api/stories/${story.id}/activities?limit=20`);
         if (cancelled) return;
         if (res.ok) {
           const json = await res.json();

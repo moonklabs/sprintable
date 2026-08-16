@@ -28,6 +28,8 @@ import { DocBreadcrumb } from '@/components/docs/doc-breadcrumb';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 interface DocDetail {
   id: string;
   title: string;
@@ -187,7 +189,7 @@ export default function DocSlugPage() {
     try {
       // AC3 (fc4d4264): never serve the doc body from HTTP/bf cache — a stale load
       // re-seeds the editor with an outdated baseline and can re-trigger an overwrite.
-      const res = await fetch(`/api/docs?project_id=${projectId}&slug=${slug}`, { cache: 'no-store' });
+      const res = await fetchWithAuth(`/api/docs?project_id=${projectId}&slug=${slug}`, { cache: 'no-store' });
       if (!res.ok) {
         // prod P0(2026-07-14) — 이전엔 setSelectedDoc(null)만 하고 끝나 이 슬러그가 현재
         // project_id에 없는(삭제됐든, project 전환 레이스로 어긋났든) 모든 경우가 회복 경로

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Info, Copy, Check } from 'lucide-react';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface ShareLabels {
   share: string;
@@ -50,7 +51,7 @@ function DocShareForm({ docId, labels }: { docId: string; labels: ShareLabels })
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/docs/${docId}/share`)
+    fetchWithAuth(`/api/docs/${docId}/share`)
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (cancelled) return;

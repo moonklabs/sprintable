@@ -42,6 +42,8 @@ import { toEpicHypothesisCreatePayload, toEpicHypothesisLink } from '@/services/
 import { SteerDispatchModal } from './steer-dispatch-modal';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 // ─── Drag sensor ──────────────────────────────────────────────────────────────
 
 /**
@@ -881,7 +883,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   const fetchGoals = useCallback(async () => {
     try {
       const params = new URLSearchParams({ project_id: projectId, limit: String(STEER_LIMIT), order_by: 'position' });
-      const res = await fetch(`/api/goals?${params.toString()}`);
+      const res = await fetchWithAuth(`/api/goals?${params.toString()}`);
       if (!res.ok) throw new Error(`Failed to fetch epics: ${res.status}`);
       const { data } = await res.json() as { data: Goal[] };
       setGoals(data ?? []);

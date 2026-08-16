@@ -23,6 +23,7 @@ import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
 import { EpicStatusTransition } from '@/components/epics/epic-status-transition';
 import { HypothesesSection } from '@/components/hypotheses/hypotheses-section';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
+import { fetchWithAuth } from '@/lib/db/client';
 
 type EpicStatus = 'draft' | 'active' | 'done' | 'archived';
 type EpicPriority = 'critical' | 'high' | 'medium' | 'low';
@@ -281,7 +282,7 @@ export default function EpicDetailPage() {
     void (async () => {
       let res: Response;
       try {
-        res = await fetch(`/api/goals/${id}`);
+        res = await fetchWithAuth(`/api/goals/${id}`);
       } catch {
         if (cancelled) return;
         router.replace(`/${wsSlug}/${projSlug}/goals`);

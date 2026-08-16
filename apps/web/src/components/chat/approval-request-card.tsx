@@ -15,6 +15,8 @@ import type { GateItem } from '@/components/kanban/types';
 import { parseBlockTemplate, renderBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
 import { renderStaticEventBlock } from '@/components/chat/event-block-card';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 export interface ApprovalTarget {
   work_item_type: string;
   work_item_id: string;
@@ -83,7 +85,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
 
   const fetchGate = useCallback(async () => {
     try {
-      const res = await fetch(`/api/gates/${target.gate_id}`);
+      const res = await fetchWithAuth(`/api/gates/${target.gate_id}`);
       if (res.status === 404) { setState({ kind: 'not-found' }); return; }
       if (!res.ok) { setState({ kind: 'error' }); return; }
       const json = await res.json().catch(() => null) as { data?: GateItem } | GateItem | null;
@@ -101,7 +103,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
     setResolving(true);
     setTransitionError(null);
     try {
-      const res = await fetch(`/api/gates/${target.gate_id}/transition`, {
+      const res = await fetchWithAuth(`/api/gates/${target.gate_id}/transition`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, note: note?.trim() || null }),
@@ -126,7 +128,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
     setDiscussSubmitting(true);
     setDiscussError(null);
     try {
-      const res = await fetch(`/api/gates/${target.gate_id}/discuss`, {
+      const res = await fetchWithAuth(`/api/gates/${target.gate_id}/discuss`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),

@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { useTouchSafePointerSensor } from '@/hooks/use-touch-safe-pointer-sensor';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useTreeExpanded } from './use-tree-expanded';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // ─── Preview Card ─────────────────────────────────────────────────────────────
 
@@ -169,7 +170,7 @@ function TreeNode({
     const { clientX, clientY } = e;
     hoverTimerRef.current = setTimeout(() => {
       if (!projectId) return;
-      void fetch(`/api/docs?project_id=${projectId}&slug=${encodeURIComponent(doc.slug)}&limit=1`)
+      void fetchWithAuth(`/api/docs?project_id=${projectId}&slug=${encodeURIComponent(doc.slug)}&limit=1`)
         .then((r) => r.ok ? r.json() : null)
         .then((data: { data?: Array<{ title: string; content?: string }> } | null) => {
           const d = data?.data?.[0];

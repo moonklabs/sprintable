@@ -12,6 +12,8 @@ import { OutcomeBadge } from '@/components/loops/outcome-badge';
 import { VariantGallery, type VariantGroup } from '@/components/loops/variant-gallery';
 import { ContextPackPanel } from '@/components/loops/context-pack-panel';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 /** E-LOOP-LEDGER S7 loop_outcome_attribution.py::attribute_loop_outcome 산출 shape 그대로. */
 interface OutcomeSnapshot {
   hypothesis_id: string;
@@ -65,15 +67,15 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string;
 
   const fetchAll = useCallback(async () => {
     try {
-      const loopRes = await fetch(`/api/loops/${loopId}`);
+      const loopRes = await fetchWithAuth(`/api/loops/${loopId}`);
       if (!loopRes.ok) { setNotFound(true); return; }
       const loopData = (await loopRes.json()) as Loop;
       setLoop(loopData);
       setNotFound(false);
 
       const [artifactsRes, meRes] = await Promise.all([
-        fetch(`/api/loops/${loopId}/artifacts`),
-        fetch('/api/me'),
+        fetchWithAuth(`/api/loops/${loopId}/artifacts`),
+        fetchWithAuth('/api/me'),
       ]);
       if (artifactsRes.ok) setGroups((await artifactsRes.json()) as VariantGroup[]);
       if (meRes.ok) {
@@ -82,7 +84,7 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string;
       }
 
       if (loopData.hypothesis_id) {
-        const hRes = await fetch(`/api/hypotheses/${loopData.hypothesis_id}`);
+        const hRes = await fetchWithAuth(`/api/hypotheses/${loopData.hypothesis_id}`);
         if (hRes.ok) {
           const { data } = (await hRes.json()) as { data: Hypothesis };
           setHypothesis(data);
@@ -92,7 +94,7 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string;
       }
 
       if (loopData.brief_doc_id) {
-        const dRes = await fetch(`/api/docs/${loopData.brief_doc_id}/summary`);
+        const dRes = await fetchWithAuth(`/api/docs/${loopData.brief_doc_id}/summary`);
         if (dRes.ok) {
           const { data } = (await dRes.json()) as { data: DocSummary };
           setBrief(data);

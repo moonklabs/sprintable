@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Check, Circle } from 'lucide-react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { fetchWithAuth } from '@/lib/db/client';
 
 function checkPasswordRules(pw: string) {
   return {
@@ -29,7 +30,7 @@ export function SetPasswordSection() {
 
   useEffect(() => {
     (async () => {
-      const res = await fetch('/api/me');
+      const res = await fetchWithAuth('/api/me');
       if (!res.ok) return;
       const json = await res.json() as { data?: { has_password?: boolean } };
       setHasPassword(json.data?.has_password ?? null);

@@ -24,6 +24,7 @@ import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface ChatViewProps {
   threadId: string;
@@ -105,7 +106,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const [eventDefinitionsByKey, setEventDefinitionsByKey] = useState<Record<string, EventDefinitionSummary> | null>(null);
   useEffect(() => {
     let cancelled = false;
-    void fetch('/api/events/definitions')
+    void fetchWithAuth('/api/events/definitions')
       .then((r) => (r.ok ? r.json() : null))
       .then((json: unknown) => {
         if (cancelled || !json) return;
@@ -309,7 +310,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // 이름=commandTargets(없으면 미표시 graceful). poll이 BE working 셋 그대로 반영(클라 TTL 불요).
   const fetchWorking = useCallback(async () => {
     try {
-      const res = await fetch(`/api/conversations/${threadId}/working`);
+      const res = await fetchWithAuth(`/api/conversations/${threadId}/working`);
       if (!res.ok) return;
       const json = await res.json() as { data?: Array<{ member_id: string }> };
       const next = (json.data ?? [])

@@ -12,6 +12,7 @@ import { Edit2 } from 'lucide-react';
 import { useDocsLayout } from '../../docs-context';
 import { docUrl } from '@/components/docs/lib/doc-project-url';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface DocDetail {
   id: string;
@@ -40,7 +41,7 @@ export default function DocViewPage() {
   useEffect(() => {
     if (!projectId || !slug) return;
     let cancelled = false;
-    fetch(`/api/docs?project_id=${projectId}&slug=${slug}`)
+    fetchWithAuth(`/api/docs?project_id=${projectId}&slug=${slug}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((json) => { if (!cancelled) setDoc((json?.data as DocDetail) ?? false); })
       .catch(() => { if (!cancelled) setDoc(false); });

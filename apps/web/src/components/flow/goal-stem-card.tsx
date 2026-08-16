@@ -7,6 +7,7 @@ import type { GoalStem, NextMakerStory } from './derive-next-maker';
 import { deriveNextPickCandidates, NEXT_PICK_TOP_COUNT, type NextPickCandidate, type NextPickReasonKey } from './derive-next-pick';
 import type { RawReferenceCandidate } from './derive-flow-map';
 import { FlowEpicNodes } from './flow-epic-nodes';
+import { fetchWithAuth } from '@/lib/db/client';
 
 export interface MemberLite {
   name: string;
@@ -72,7 +73,7 @@ export function GoalStemCard({
   useEffect(() => {
     let cancelled = false;
     setPickState({ kind: 'loading' });
-    fetch(`/api/goals/${stem.epicId}/reference-candidates`)
+    fetchWithAuth(`/api/goals/${stem.epicId}/reference-candidates`)
       .then((r) => (r.ok ? r.json() : []))
       .catch(() => [])
       .then((raw: unknown) => {
