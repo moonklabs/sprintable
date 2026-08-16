@@ -9,7 +9,7 @@ import { GateSignatureApproval } from '@/components/cage/gate-signature-approval
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
-import { EntityPreviewModal, getEntityHref } from '@/components/chat/embed-card';
+import { EntityPreviewModal, getEntityHref, resolveEntityIcon } from '@/components/chat/embed-card';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 import { parseBlockTemplate, renderBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
@@ -44,7 +44,16 @@ type CardState =
   | { kind: 'error' }
   | { kind: 'ready'; gate: GateItem };
 
-const WORK_ITEM_ICON: Record<string, typeof FileText> = { doc: FileText };
+// story #2118(E-DG-REAL) — Gate.work_item_type과 embed-card.tsx의 entity_type 어휘는 대부분
+// 같은 문자열이지만 둘이 갈리는 자리가 있다(gate_service.py:194 vs embed-card.tsx ENTITY_ICONS
+// 키 대조로 확認): Gate는 "visual_artifact"를 쓰는데 entity 계열은 "artifact"다. 이 변환 없이
+// 그대로 룩업하면 visual_artifact 게이트만 조용히 제네릭 아이콘/미리보기 없음으로 떨어진다
+// (버그가 아니라 보이는 실패였을 뿐 — 그래도 있는 지원을 안 쓰는 건 낭비). "loop"처럼 entity
+// 계열에 아예 없는 타입은 그대로 흘려보낸다 — resolveEntityIcon/EntityPreviewModal 둘 다
+// 미등록 타입을 크래시 없이 정직하게 폴백한다(초성 아이콘·"별도 미리보기가 없습니다").
+export function toEntityType(workItemType: string): string {
+  return workItemType === 'visual_artifact' ? 'artifact' : workItemType;
+}
 
 // story #2624 — 회신 카드가 gate.status 원문("approved"/"rejected" 등)을 그대로 보였다(선생님
 // 지적 — "사유는 남겨놨는데" 인시던트의 human 웹 표면 절반). i18n 키가 있는 상태만 번역하고,
@@ -143,7 +152,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
     }
   };
 
-  const Icon = WORK_ITEM_ICON[target.work_item_type] ?? FileText;
+  const Icon = resolveEntityIcon(toEntityType(target.work_item_type)) ?? FileText;
 
   return (
     <div className="min-w-0 max-w-full rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
@@ -241,25 +250,23 @@ function ApprovalRequestBody({
   const needsFullFlow = usesSignatureFlow(riskLevel);
   const canAct = gate.status === 'pending' && gate.can_approve === true;
   const [showPreview, setShowPreview] = useState(false);
-  // story #2627 AC④ — 미리보기 없는 타입(doc 외)은 기존 동작 그대로(제목=평문). EntityPreviewModal
-  // 자체가 doc 전용 fetch 전략을 가진 타입이라(embed-card.tsx `hasFetchStrategy`), 지금은 doc만
-  // 진짜 내용을 보여줄 수 있다 — 억지로 다른 타입에 진입점을 달아 빈 모달을 여는 거짓을 안 만든다.
-  const canPreview = gate.work_item_type === 'doc';
+  // story #2118(E-DG-REAL) — doc 전용이던 제목 진입점을 전 work_item_type으로 확장한다.
+  // EntityPreviewModal은 이미 fetch 전략이 없는(또는 rich preview가 없는) 타입도 크래시 없이
+  // "이 엔티티는 별도 미리보기가 없습니다"로 정직하게 떨어진다(embed-card.tsx 실측 확認) —
+  // 그래서 진입점 자체를 막을 필요가 없다. 억지로 빈 모달을 "숨기는" 게 아니라, 모달이 이미
+  // 그 빈 상태를 정직하게 보여줄 수 있으므로 항상 연다.
+  const previewEntityType = toEntityType(gate.work_item_type);
 
   return (
     <div className="space-y-2">
-      {canPreview ? (
-        <button
-          type="button"
-          onClick={() => setShowPreview(true)}
-          className="group/preview flex w-full min-w-0 items-center gap-1 text-left"
-        >
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground group-hover/preview:underline">{title}</span>
-          <Eye className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-        </button>
-      ) : (
-        <p className="truncate text-sm font-medium text-foreground">{title}</p>
-      )}
+      <button
+        type="button"
+        onClick={() => setShowPreview(true)}
+        className="group/preview flex w-full min-w-0 items-center gap-1 text-left"
+      >
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground group-hover/preview:underline">{title}</span>
+        <Eye className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+      </button>
 
       {gate.status === 'pending' && (riskLevel === 'high' || riskLevel === 'unknown') ? (
         <Badge variant={riskLevel === 'high' ? 'warning' : 'outline'} className={riskLevel === 'unknown' ? 'text-muted-foreground' : undefined}>
@@ -346,11 +353,11 @@ function ApprovalRequestBody({
 
       {showPreview && (
         <EntityPreviewModal
-          entityType={gate.work_item_type}
+          entityType={previewEntityType}
           entityId={gate.work_item_id}
           title={title}
           status={null}
-          href={getEntityHref(gate.work_item_type, gate.work_item_id)}
+          href={getEntityHref(previewEntityType, gate.work_item_id)}
           onClose={() => setShowPreview(false)}
         />
       )}
