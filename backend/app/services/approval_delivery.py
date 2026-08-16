@@ -255,6 +255,8 @@ async def dispatch_approval_result_reply(
                     body=resolution_note or f"'{doc.title}' 문서가 {decision_label}됐습니다.",
                     reference_type="gate", reference_id=gate_id,
                     source_project_id=doc.project_id,
+                    # story #2696: outbox 이관(동일 결함 클래스 예방).
+                    via_outbox=True,
                 )
     except Exception:  # noqa: BLE001 — 벨 알림 실패는 카드 배달과 독립.
         logger.warning(
@@ -342,6 +344,8 @@ async def dispatch_approval_discussion_reply(
                     body=reason or f"'{doc.title}' 문서 결재에 대해 논의를 요청받았습니다.",
                     reference_type="gate", reference_id=gate_id,
                     source_project_id=doc.project_id,
+                    # story #2696: outbox 이관(동일 결함 클래스 예방).
+                    via_outbox=True,
                 )
     except Exception:  # noqa: BLE001 — 벨 알림 실패는 카드 배달과 독립.
         logger.warning(

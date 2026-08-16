@@ -2627,6 +2627,8 @@ async def add_comment(
                 "content": content,
                 "author_member_id": str(created_by),
             },
+            # story #2696: outbox 이관(동일 결함 클래스 예방).
+            via_outbox=True,
         )
 
     return CommentResponse.model_validate(comment)

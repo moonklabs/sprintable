@@ -57,16 +57,21 @@ async def _deliver_personal_webhooks(
     reference_id: uuid.UUID | None = None,
     context: dict | None = None,
     muted_member_ids: set[uuid.UUID] | None = None,
-    via_outbox: bool = False,
+    via_outbox: bool = True,
 ) -> None:
-    """story #2460(§6 봉합②, PO 스코프 확定 2026-08-05): outbox 경유는 **opt-in**이다
-    (``via_outbox=True``) — dispatch_notification 호출부 중 story_status_events.py·
-    conversations.py send_message(멘션·메시지 알림) 둘만 켠다. 나머지 dispatch_notification
-    호출부는 기본값 False로 기존과 동일하게 즉시 POST한다(behavior 무변경).
-    ``via_outbox=True``면 즉시 POST 대신 `delivery_jobs`에 job row만 insert(caller
-    세션·트랜잭션에 실림, commit은 caller 책임 — at-least-once) — 실 배달은
-    `delivery_dispatcher.py` 워커가 자기 세션으로 `_deliver_personal_webhooks_now()`를
-    수행한다(요청 트랜잭션 밖에서 외부 I/O)."""
+    """story #2696([클래스 마감]) — 기본값을 outbox(``via_outbox=True``)로 뒤집었다.
+    #2687→#2688→#373cfaa1→#2694로 「호출부 트랜잭션 안에서 동기 개인 webhook POST(최대 3회
+    재시도·1s/2s backoff)를 문다」 결함이 4번 반복됐다 — 원인은 인스턴스가 아니라 「기본값이
+    동기」인 것 자체였다(#2696 AC1 그라운딩: 동기 완료를 전제하는 호출부·테스트 0건 확認 후
+    flip). 이제 새 호출부는 아무것도 안 넘겨도 자동으로 안전하다 — 동기가 필요하면
+    ``via_outbox=False``를 **명시**(사유 주석 필수 — 현재 그런 자리 0곳, count-lock 가드로
+    고정: test_2696_via_outbox_default_flip_guard.py 참고).
+
+    ``via_outbox=True``(기본값)면 개인 webhook·Expo push 실배달을 이 호출 안에서 하지 않고
+    outbox(`delivery_jobs`)에 적재만 한다 — in-app Notification/Event INSERT(아래 본문)는
+    원래도 순수 DB write라 이 플래그와 무관하게 그대로 caller의 트랜잭션에 실린다(바꿀 이유
+    없음). 실 배달은 `delivery_dispatcher.py` 워커가 자기 세션으로 별도 수행한다(요청
+    트랜잭션 밖에서 외부 I/O)."""
     if not member_ids:
         return
     if via_outbox:
@@ -228,16 +233,16 @@ async def dispatch_notification(
     context: dict | None = None,
     story_id: uuid.UUID | None = None,
     sprint_id: uuid.UUID | None = None,
-    via_outbox: bool = False,
+    via_outbox: bool = True,
 ) -> None:
     """notification_settings 필터 후 enabled member에게 알림 발송.
 
-    ``via_outbox``(story #2460, §6 봉합②): True면 개인 webhook·Expo push 실배달을 이 호출
-    안에서 하지 않고 outbox(`delivery_jobs`)에 적재만 한다 — in-app Notification/Event
-    INSERT(아래 본문)는 원래도 순수 DB write라 이 플래그와 무관하게 그대로 caller의
-    트랜잭션에 실린다(바꿀 이유 없음). opt-in 스코프는 story_status_events.py·
-    conversations.py send_message 두 콜사이트뿐(PO 확定) — 기본 False로 다른 12+ 콜사이트는
-    behavior 무변경.
+    ``via_outbox``: 기본값 True(story #2696 — 자세한 배경은 `_deliver_personal_webhooks`
+    docstring 참고). True면 개인 webhook·Expo push 실배달을 이 호출 안에서 하지 않고
+    outbox(`delivery_jobs`)에 적재만 한다 — in-app Notification/Event INSERT(아래 본문)는
+    원래도 순수 DB write라 이 플래그와 무관하게 그대로 caller의 트랜잭션에 실린다(바꿀 이유
+    없음). 동기 즉시-POST가 필요한 자리만 ``via_outbox=False``를 명시(사유 주석 필수 — 현재
+    그런 자리 0곳).
 
     human 멤버: Notification 테이블 INSERT (in-app 알림)
     agent 멤버: events 테이블 INSERT (event_type=dispatched, status=pending)

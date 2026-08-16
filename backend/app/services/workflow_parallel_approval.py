@@ -137,6 +137,8 @@ async def _notify_parallel_gate_approvers(
             body=f"{step_run.entity_type} 항목의 {gate.gate_type} 결재가 대기 중입니다.",
             reference_type="gate", reference_id=gate.id,
             source_project_id=step_run.project_id,
+            # story #2696: outbox 이관(동일 결함 클래스 예방).
+            via_outbox=True,
         )
     except Exception:  # noqa: BLE001 — 알림 실패는 게이트 생성 비중단.
         logger.warning("parallel gate 승인자 알림 실패 gate=%s", gate.id, exc_info=True)
@@ -345,6 +347,8 @@ async def reassign_approver(
             # story #1953: target(WorkflowLineStepApproval).project_id NOT NULL — 신규 조회
             # 없이 그대로 실음.
             source_project_id=target.project_id,
+            # story #2696: outbox 이관(동일 결함 클래스 예방).
+            via_outbox=True,
         )
     except Exception:  # noqa: BLE001 — notification 실패는 비중단(재지정 자체는 성공).
         pass

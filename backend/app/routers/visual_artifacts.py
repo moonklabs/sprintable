@@ -112,6 +112,8 @@ async def _notify_artifact_created(
         body="새 시각 산출물이 생성됐습니다.",
         reference_type="visual_artifact", reference_id=artifact.id,
         source_project_id=project_id,
+        # story #2696: outbox 이관(동일 결함 클래스 예방).
+        via_outbox=True,
     )
 
 
@@ -471,6 +473,8 @@ async def add_artifact_comment(
             reference_type="visual_artifact",
             reference_id=artifact.id,
             source_project_id=project_id,
+            # story #2696: outbox 이관(동일 결함 클래스 예방).
+            via_outbox=True,
         )
 
     return _ok(ArtifactCommentResponse.model_validate(comment).model_dump(mode="json"), status=201)
@@ -804,6 +808,8 @@ async def complete_png_export(
             body="PNG export가 완료됐습니다.",
             reference_type="visual_artifact", reference_id=artifact.id,
             source_project_id=project_id,
+            # story #2696: outbox 이관(동일 결함 클래스 예방).
+            via_outbox=True,
         )
 
     resp = await _export_response(session, export, version_number, container=container)
@@ -869,6 +875,8 @@ async def create_html_export(
             body="HTML export가 완료됐습니다.",
             reference_type="visual_artifact", reference_id=artifact.id,
             source_project_id=project_id,
+            # story #2696: outbox 이관(동일 결함 클래스 예방).
+            via_outbox=True,
         )
 
     resp = await _export_response(session, export, version_number, container=container)
@@ -1057,6 +1065,8 @@ async def _notify_artifact_updated(
             body="artifact가 새 버전으로 갱신됐습니다.",
             reference_type="visual_artifact", reference_id=artifact.id,
             source_project_id=project_id,
+            # story #2696: outbox 이관(동일 결함 클래스 예방).
+            via_outbox=True,
         )
 
 

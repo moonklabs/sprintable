@@ -79,6 +79,8 @@ async def _emit(
                 reference_type="epic",
                 reference_id=uuid.UUID(event_data["epic_id"]),
                 source_project_id=uuid.UUID(event_data["project_id"]),
+                # story #2696: outbox 이관(동일 결함 클래스 예방).
+                via_outbox=True,
             )
         except Exception:
             pass
