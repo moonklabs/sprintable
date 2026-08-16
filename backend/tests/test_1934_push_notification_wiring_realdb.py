@@ -131,3 +131,74 @@ async def test_create_gate_auto_passed_does_not_notify():
                 assert notif is None
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_create_gate_pending_notification_via_outbox():
+    """story #2688: create_gate()의 dispatch_notification 콜이 via_outbox=True를 넘기는지 pin.
+
+    동기 개인 webhook POST가 create_gate() 호출부(예: docs/{id}/transition draft→pending)의
+    열린 트랜잭션 커넥션을 붙잡아 2.7s대 지연을 유발했다(실측·story #2687과 동일 결함 클래스).
+    Notification INSERT 자체(위 test_create_gate_pending_notifies_org_admin)는 via_outbox와
+    무관하게 그대로 발생 — 이 테스트는 그 위에 얹힌 배달 채널 계약만 별도로 고정한다."""
+    from unittest.mock import AsyncMock, patch
+    from app.services.gate_service import create_gate
+
+    org_id = uuid.uuid4()
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            await _seed_org_admin(s, org_id)
+
+            dn = AsyncMock()
+            with patch("app.services.notification_dispatch.dispatch_notification", dn):
+                gate = await create_gate(
+                    s, org_id, uuid.uuid4(), "story", "pr_review",
+                    uuid.uuid4(), uuid.uuid4(),
+                )
+            assert gate.status == "pending"
+            dn.assert_awaited_once()
+            assert dn.await_args.kwargs["via_outbox"] is True
+            assert dn.await_args.kwargs["event_type"] == "gate.pending_approval"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_reopen_rejected_gate_notification_via_outbox():
+    """story #2688: 재상신(rejected→pending re-open) 경로도 동일 결함·동일 fix.
+
+    _reopen_rejected_gate()는 create_gate()가 기존 rejected(terminal) gate를 발견했을 때
+    타는 별도 콜사이트 — 새 gate 생성과 나란한 두 번째 dispatch_notification 호출."""
+    from unittest.mock import AsyncMock, patch
+    from app.services.gate_service import create_gate
+
+    org_id = uuid.uuid4()
+    work_item_id = uuid.uuid4()
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            await _seed_org_admin(s, org_id)
+
+            # 1차: rejected 상태 gate를 만든다(알림 무시 — 이 테스트의 관심사는 재상신 쪽).
+            gate = await create_gate(
+                s, org_id, work_item_id, "story", "pr_review",
+                uuid.uuid4(), uuid.uuid4(),
+            )
+            await s.commit()
+            from app.models.gate import set_gate_status
+            from datetime import datetime, timezone
+            set_gate_status(gate, "rejected", now=datetime.now(timezone.utc))
+            await s.commit()
+
+            dn = AsyncMock()
+            with patch("app.services.notification_dispatch.dispatch_notification", dn):
+                reopened = await create_gate(
+                    s, org_id, work_item_id, "story", "pr_review",
+                    uuid.uuid4(), uuid.uuid4(),
+                )
+            assert reopened.status == "pending"
+            dn.assert_awaited_once()
+            assert dn.await_args.kwargs["via_outbox"] is True
+    finally:
+        await engine.dispose()
