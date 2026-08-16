@@ -148,8 +148,10 @@ def _client_for(app):
 
 
 async def _setup_app_human(app, Session, user_id, org_id):
+    """story #2451: get_db 오버라이드는 반드시 conftest.override_db_and_read 경유(get_read_db
+    동반 필수 — 구조적 lint가 raw dependency_overrides[get_db] 신규 대입을 막는다)."""
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     async def _db():
         async with Session() as s:
@@ -163,7 +165,7 @@ async def _setup_app_human(app, Session, user_id, org_id):
     async def _user():
         return AuthContext(user_id=str(user_id), email="h@test.com", claims={"app_metadata": {"org_id": str(org_id)}})
 
-    app.dependency_overrides[get_db] = _db
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _user
 
 
