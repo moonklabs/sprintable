@@ -93,6 +93,34 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
   { labelKey: null, labels: ['설정'] },
 ];
 
+// 카디르 QA(PR#3100) 지적 — 라벨은 맞는데 href가 다른 항목과 뒤바뀐 뮤테이션은 그룹별 라벨
+// 순서 대조(위 EXPECTED_GROUPS)만으론 못 잡는다(라벨 목록 자체는 안 바뀌므로). 21항목 전부의
+// 라벨→href 쌍을 개별 대조해 그 구멍을 닫는다 — org/project slug 없는 테스트 환경이라
+// resource 항목은 bare `/${resource}`로 폴백한 값(리팩터 전 resourceLink()와 동일 규칙).
+const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
+  '구성원': '/organization/members',
+  '워크포스': '/organization/workforce',
+  '권한': '/organization/roles',
+  '신뢰': '/organization/trust',
+  '기억': '/organization/memory',
+  '이벤트': '/organization/events',
+  '조직 브리핑': '/org-briefing',
+  '알림': '/inbox',
+  '대시보드': '/dashboard',
+  '채팅': '/chats',
+  '흐름': '/flow',
+  '스프린트': '/sprints',
+  '목표': '/goals',
+  '실험실': '/loops',
+  '스탠드업': '/standup',
+  '회고': '/retro',
+  '활동 로그': '/activity',
+  '문서': '/docs',
+  '산출물': '/artifacts',
+  '스토리지': '/storage',
+  '설정': '/settings',
+};
+
 describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1)', () => {
   it('그룹 순서·라벨·항목 순서·라벨이 리팩터 전과 동일하다', async () => {
     await mount();
@@ -151,5 +179,18 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1)', () =>
     await mount();
     const settingsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('설정') && a.getAttribute('href') === '/settings');
     expect(settingsLink).toBeDefined();
+  });
+
+  // 카디르 QA(PR#3100) 지적 — 라벨은 그대로인 채 href만 다른 항목과 뒤바뀌는 뮤테이션은 앞
+  // 테스트들(그룹별 라벨 순서 대조 + 4항목만 개별 href 대조)로는 못 잡는다. 21항목 전부를
+  // 라벨→href 쌍으로 개별 대조해 "라벨은 맞는데 목적지가 틀림"을 확실히 막는다.
+  it('전 21항목의 라벨→href 쌍이 정확하다(뒤바뀐 목적지 방지, 카디르 QA 지적 반영)', async () => {
+    await mount();
+    const links = [...container.querySelectorAll('a')];
+    for (const [label, expectedHref] of Object.entries(EXPECTED_HREF_BY_LABEL)) {
+      const link = links.find((a) => a.textContent?.includes(label));
+      expect(link, `링크 "${label}"를 찾지 못함`).toBeDefined();
+      expect(link!.getAttribute('href'), `"${label}"의 href`).toBe(expectedHref);
+    }
   });
 });
