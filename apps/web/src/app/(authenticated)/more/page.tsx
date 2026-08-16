@@ -3,44 +3,22 @@
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import {
-  CalendarRange,
-  Layers,
-  Compass,
-  FlaskConical,
-  Users,
-  RotateCcw,
-  Activity,
-  FileText,
-  Image,
-  HardDrive,
-  Settings,
-} from 'lucide-react';
+import { MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS } from '@/lib/nav-config';
 
-// story #1958(P2-S2) "전체" 탭의 임시 스텁 — blueprint §3.2가 모바일 사이드바(Sheet·햄버거)
-// 폐기 방향이라 기존 GNB Sheet를 탭에 매달지 않고, 최소 목록 라우트로 대신한다. 정식 목록화는
-// P2-S9(story #1965)가 담당 — 이 페이지는 그때 교체된다(오르테가군 확定, 2026-07-17).
-// bare 경로만 씀 — 미들웨어의 bare→쿠키 default 해소 301 안전망이 ws/proj slug를 채운다
-// (app-sidebar.tsx의 resourceLink()와 동형 전제).
-// board 항목은 없다(유나 2026-08-01) — /board는 /flow로 리다이렉트되니(#2227 AC8·proxy.ts
-// RENAMED_RESOURCES) flow 링크가 따로 생기면 같은 화면으로 가는 항목이 두 개가 된다.
-const ITEMS = [
-  { href: '/sprints', icon: CalendarRange, labelKey: 'sprints' as const },
-  { href: '/goals', icon: Layers, labelKey: 'goals' as const },
-  { href: '/loops', icon: FlaskConical, labelKey: 'loops' as const },
-  { href: '/standup', icon: Users, labelKey: 'standup' as const },
-  { href: '/retro', icon: RotateCcw, labelKey: 'retro' as const },
-  { href: '/activity', icon: Activity, labelKey: 'activity' as const },
-  { href: '/docs', icon: FileText, labelKey: 'docs' as const },
-  { href: '/artifacts', icon: Image, labelKey: 'artifacts' as const },
-  { href: '/storage', icon: HardDrive, labelKey: 'storage' as const },
-  { href: '/dashboard', icon: Compass, labelKey: 'dashboard' as const },
-  { href: '/settings', icon: Settings, labelKey: 'settings' as const },
-] as const;
-
+// story #2682(모바일 IA S2, doc mobile-ia-full-completion-2678 §2.3) — 임시 평면 stub(#1958·
+// #1965)을 데스크톱 GNB(app-sidebar.tsx) 5 zones를 그대로 미러하는 그룹형 허브로 재건한다.
+// 목적지 목록 자체는 새로 만들지 않는다 — S1이 추출한 NAV_GROUPS(nav-config.ts)를 그대로
+// 소비해 데스크톱과 drift 없이 항상 정합한다(SSOT). 그룹 순서·제외 목록도 story #2684(S4)에서
+// nav-config.ts로 옮겨 depth 가드가 이 페이지 내부를 몰라도 SSOT 하나만 보고 판정할 수 있다.
 export default function MorePage() {
   const t = useTranslations('nav');
   const tMore = useTranslations('mobileTabBar');
+
+  const hubGroups = MOBILE_HUB_GROUP_ORDER
+    .map((groupId) => NAV_GROUPS.find((g) => g.id === groupId))
+    .filter((g): g is NonNullable<typeof g> => !!g)
+    .map((g) => ({ ...g, items: g.items.filter((item) => !MOBILE_HUB_EXCLUDE_IDS.has(item.id)) }))
+    .filter((g) => g.items.length > 0);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
@@ -48,20 +26,34 @@ export default function MorePage() {
           allowlist(showContextChip)로 켤 자리가 없었다. "슬롯 없으면 자동 켬"은 fail-open이라
           금지(유나양) — 슬롯을 명시적으로 쓰게 해서 켠다. */}
       <TopBarSlot title={<h1 className="text-sm font-medium">{tMore('more')}</h1>} showContextChip />
-      <p className="mb-4 text-xs text-muted-foreground">{tMore('moreTempNotice')}</p>
-      <ul className="divide-y divide-border rounded-xl border border-border">
-        {ITEMS.map(({ href, icon: Icon, labelKey }) => (
-          <li key={href}>
-            <Link
-              href={href}
-              className="flex min-h-12 items-center gap-3 px-4 py-3 text-sm text-foreground hover:bg-muted"
-            >
-              <Icon className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.8} />
-              {t(labelKey)}
-            </Link>
-          </li>
+      {/* story #2682 AC3 — 임시 stub 배너(#1965) 제거. 섹션 헤더 있는 단일 스크롤 목록(아코디언
+          아님 — 아코디언은 목적지를 탭 뒤에 숨겨 depth+1이 된다, doc §2.3). */}
+      <div className="space-y-5">
+        {hubGroups.map((group) => (
+          <section key={group.id}>
+            <h2 className="mb-1.5 px-1 text-xs font-semibold text-muted-foreground">
+              {group.id === 'settings' ? t('settings') : t(group.labelKey!)}
+            </h2>
+            <ul className="divide-y divide-border rounded-xl border border-border">
+              {group.items.map((item) => {
+                const href = item.kind === 'static' ? item.path : `/${item.path}`;
+                const Icon = item.icon;
+                return (
+                  <li key={item.id}>
+                    <Link
+                      href={href}
+                      className="flex min-h-12 items-center gap-3 px-4 py-3 text-sm text-foreground hover:bg-muted"
+                    >
+                      <Icon className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.8} />
+                      {t(item.labelKey)}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
         ))}
-      </ul>
+      </div>
     </div>
   );
 }

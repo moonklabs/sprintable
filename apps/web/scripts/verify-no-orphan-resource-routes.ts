@@ -133,6 +133,19 @@ export function extractComposedTargets(content: string): string[] {
   return [...content.matchAll(COMPOSED_CALL_RE)].map((m) => m[2]!);
 }
 
+// story #2681/#2682(모바일 IA S1·S2) 후속 — app-sidebar.tsx·more/page.tsx가 각 리소스마다
+// `resourceLink('x')`를 개별 리터럴로 부르던 걸 nav-config.ts(NAV_GROUPS) 순회로 리팩터하며
+// `resourceLink(item.path)`(변수 인자)가 됐다. AC7㉠이 이미 문서화한 한계(정규식은 리터럴만
+// 본다)가 실제로 걸린 사례 — nav-config.ts 자체가 이제 조합 진입점의 실제 소스이므로, 그
+// 파일의 `kind: 'resource'` 옆 `path: '...'` 리터럴을 세 번째 축으로 인정한다(손 EXEMPT
+// 추가가 아니라, 이 가드가 원래 하려던 일 — "정적으로 찾을 수 있는 진입점 전수"를 새 SSOT
+// 모양에 맞춰 넓힌 것).
+const NAV_CONFIG_RESOURCE_RE = /kind:\s*'resource',\s*path:\s*'([a-zA-Z][a-zA-Z0-9_-]*)'/g;
+
+export function extractNavConfigResourceTargets(content: string): string[] {
+  return [...content.matchAll(NAV_CONFIG_RESOURCE_RE)].map((m) => m[1]!);
+}
+
 // ── ㉡리터럴 진입점 — href="/x" / href: '/x' (단일 세그먼트, 선택적 쿼리) ───────
 
 const LITERAL_HREF_RE = /\bhref\s*[:=]\s*(['"`])\/([a-zA-Z][a-zA-Z0-9_-]*)(?:\?[^'"`]*)?\1/g;
@@ -247,6 +260,10 @@ function main(): void {
     const content = readFileSync(abs, 'utf8');
     const rel = path.relative(SRC_ROOT, abs).split(path.sep).join('/');
     for (const target of extractComposedTargets(content)) {
+      hits.push({ target, file: rel, kind: 'composed' });
+      composedCount += 1;
+    }
+    for (const target of extractNavConfigResourceTargets(content)) {
       hits.push({ target, file: rel, kind: 'composed' });
       composedCount += 1;
     }

@@ -166,11 +166,34 @@ def _attach_submit_for_approval_next_action(doc: object) -> None:
     원인). draft 문서 응답에 `next_action`을 `{tool, args}` 실행 가능 명세로 동봉한다 —
     BE의 next_action_code SSOT(app.services.next_action, 다중 소비자·PO 판정 이력 다수)는
     건드리지 않는다(이 스토리 범위는 MCP 표면 하나). status가 draft가 아니면(이미 상신됐거나
-    다른 상태) 아무것도 안 붙인다 — 없는 행동을 지어내지 않는다."""
+    다른 상태) 아무것도 안 붙인다 — 없는 행동을 지어내지 않는다.
+
+    story #2680 — `tool` 필드만으론 이 광고가 무효할 수 있다: sprintable_submit_for_approval
+    자체가 이 문서를 만든 그 `create_doc`/`update_doc`보다 «나중에» 추가된 도구라(B3),
+    이 서버가 tools/list_changed를 못 보내는 구조(SprintableFastMCP는
+    stateless_http=True — mcp SDK streamable_http_manager가 stateless 모드에서 요청마다
+    완전히 새 transport를 만들고 세션 트래킹 자체를 안 한다, 실측 확認: 서버가 밀어줄
+    «연결된 세션» 개념이 원리적으로 없다) 오래 연결된 세션은 이 tool을 영원히 못 본다 —
+    광고는 보여도 이행이 막힌다. `fallback_rest`를 같이 동봉해, 그 도구가 없는 세션도
+    (curl/HTTP 실행 능력만 있으면) REST를 직접 쳐 완주할 수 있게 한다 — 이 필드는 신규
+    도구 등록에 의존하지 않는다(create_doc/update_doc 자체는 이미 모든 세션에 있는
+    기존 도구이므로 이 응답 보강은 세션 나이와 무관하게 항상 도달)."""
     if isinstance(doc, dict) and doc.get("status") == "draft" and doc.get("id"):
+        doc_id = doc["id"]
         doc["next_action"] = {
             "tool": "sprintable_submit_for_approval",
-            "args": {"doc_id": doc["id"]},
+            "args": {"doc_id": doc_id},
+            "fallback_rest": {
+                "method": "POST",
+                "url": f"{client._base_url}/api/v2/docs/{doc_id}/transition",
+                "headers": {"Authorization": "Bearer <YOUR_SPRINTABLE_API_KEY>"},
+                "body": {"status": "pending"},
+                "note": (
+                    "sprintable_submit_for_approval 도구가 이 세션에 안 보이면(구 세션 —"
+                    " 이 도구가 등록된 뒤 재연결 안 한 경우) 이 REST 호출을 직접 실행해도"
+                    " 동일하게 상신된다."
+                ),
+            },
         }
 
 

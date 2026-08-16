@@ -52,8 +52,7 @@
     "now": "지금",
     "approvals": "결재",
     "chat": "채팅",
-    "more": "전체",
-    "moreTempNotice": "임시 목록입니다 — 정식 화면으로 곧 교체됩니다."
+    "more": "전체"
   },
   "nav": {
     "dashboard": "대시보드",
@@ -75,6 +74,7 @@
     "sprints": "스프린트",
     "search": "검색…",
     "help": "도움말",
+    "openGlobalNav": "전체 메뉴 열기",
     "chats": "채팅",
     "activity": "활동 로그",
     "goals": "목표",
@@ -3388,6 +3388,12 @@
     "participantsOthers": "외 {count}명",
     "forkInfo": "DM에 참여자를 추가하면 새 그룹 채팅이 생성됩니다. 기존 DM은 유지됩니다.",
     "adding": "추가 중…",
+    "policyDeniedAllowlistMiss": "{member}님은 {agent}의 발신 허용 목록에 없습니다.",
+    "policyDeniedCreatedByNone": "{agent}에게 생성자가 설정돼 있지 않아 대화를 시작할 수 없습니다.",
+    "policyDeniedCreatorNotParticipant": "{agent}의 생성자가 이 대화에 참여하고 있지 않아 메시지를 보낼 수 없습니다.",
+    "policyDeniedManageLink": "에이전트 설정에서 확인",
+    "policyDeniedUnknownAgent": "이 에이전트",
+    "policyDeniedUnknownMember": "이 멤버",
     "deliveryContractTitle": "알림 설정",
     "deliveryContractEditingOnBehalfOf": "\"{name}\"님을 대신해 편집 중 — 저장 시 그 멤버의 수신 설정이 바뀝니다.",
     "deliveryContractLoading": "불러오는 중…",

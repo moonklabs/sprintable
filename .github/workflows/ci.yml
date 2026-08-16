@@ -11,8 +11,76 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # story #2555 — 선생님 플래그(2026-08-10): docs/FE-only PR도 백엔드 무거운 잡(alembic·
+  # destructive-schema 4샤드·pytest)이 전량 돌아 ~30분. 실측(승격 PR #2952: README·docs·
+  # apps/web·packages/cli·packages/fakechat만 변경, backend/ 미접촉)이 이 잡의 근거 픽스처다.
+  #
+  # ⛔job 레벨 `if:`로 백엔드 잡 자체를 스킵하지 «않는다» — qa-review-gate.yml/
+  # design-review-gate.yml이 이미 정립한 이유와 동형: required 체크가 "미실행=스킵"으로
+  # 잡히면 그 판정이 통과인지 미확인인지 GitHub 쪽에서 모호해질 수 있다("스킵=통과"로 세어질
+  # 위험, 이 리포의 기존 결론). 대신 이 잡은 항상 돌고 «출력만» 준다 — 소비하는 3개 잡
+  # (alembic-fresh-db·backend-test-destructive·backend-test, 전부 develop 필수 체크)이
+  # «잡 안의 스텝»을 이 출력으로 조건부 스킵한다 — 잡 자체는 항상 실행→항상 success/failure를
+  # 정상 보고(그냥 빠르게 끝날 뿐), required 체크 의미론이 전혀 안 흔들린다.
+  detect-changed-scope:
+    name: Detect changed-file scope (backend relevance)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      backend_relevant: ${{ steps.scope.outputs.backend_relevant }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine backend relevance from changed paths
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # push 이벤트(브랜치 직접 push — develop/main에 머지될 때 등)는 PR base/head가
+          # 없다 — 비교 대상을 모르면 fail-closed(백엔드 전량 실행). 스코프 판별은 PR
+          # 컨텍스트에서만 돈다(design-review-gate.yml의 AC8과 같은 fail-closed 원칙).
+          if [ -z "${BASE_SHA}" ] || [ -z "${HEAD_SHA}" ]; then
+            echo "backend_relevant=true" >> "$GITHUB_OUTPUT"
+            echo "PR 컨텍스트 아님(push 이벤트 등) — fail-closed로 백엔드 전량 실행."
+            exit 0
+          fi
+          CHANGED="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")"
+          echo "changed files:"
+          echo "${CHANGED}"
+          # 이 allowlist에 «전부» 속하는 diff만 백엔드-무관으로 본다 — 모르는 경로가 하나라도
+          # 있으면 fail-closed(백엔드 전량 실행). packages/{db,shared,core-storage,storage-api}
+          # 포함 packages/* 전부 TS-only(package.json+tsconfig뿐, .py 파일 0개 확認,
+          # 2026-08-16) — backend Python 런타임과 언어 경계로 격리돼 있다. backend/·ee/·
+          # infra/·supabase/·connectors/·scripts/(루트)·.github/는 이 allowlist 밖(모르면
+          # 포함 안 함 — 특히 .github/는 이 워크플로 자신의 안전을 위해 항상 백엔드-관련으로 본다).
+          NON_SAFE="$(printf '%s\n' "${CHANGED}" \
+            | grep -Ev '^docs/|\.md$|^apps/web/|^packages/' || true)"
+          if [ -z "${NON_SAFE}" ] && [ -n "${CHANGED}" ]; then
+            echo "backend_relevant=false" >> "$GITHUB_OUTPUT"
+            echo "전 변경 파일이 백엔드-무관 allowlist(docs/·*.md·apps/web/·packages/) 안 — 백엔드 무거운 잡 skip 대상."
+          else
+            echo "backend_relevant=true" >> "$GITHUB_OUTPUT"
+            echo "allowlist 밖 변경 있음(또는 변경 0건) — fail-closed로 백엔드 전량 실행."
+            if [ -n "${NON_SAFE}" ]; then
+              echo "allowlist 밖 파일:"
+              echo "${NON_SAFE}"
+            fi
+          fi
+
   alembic-fresh-db:
     name: Alembic upgrade head (fresh DB)
+    needs: [detect-changed-scope]
+    # ⛔`if: always()` 필수 — 없으면 detect-changed-scope가 실패했을 때 GitHub 기본 동작으로
+    # 이 잡 자체가(required 체크!) «스킵»된다(의존 잡 실패 시 자동 스킵 cascade). 그러면 잡
+    # 안 스텝의 fail-closed(`!= 'false'`, 아래)가 전혀 무의미해진다 — 잡 자체가 안 돈다.
+    # always()로 무조건 돌게 하고, 안에서 출력이 비어 있으면(=위 job 실패) 스텝 조건이
+    # fail-closed로 정상 실행된다.
+    if: always()
     runs-on: ubuntu-latest
     # story 8236bbc3(2026-07-03): 217초 실측(전체 스위트 3391개 대다수, 비파괴 real-DB 84개
     # 파일 포함) + 파괴적 54개 파일 격리 순회 오버헤드 버퍼. 규모상 샤딩 불요(설계 §1-D).
@@ -79,16 +147,19 @@ jobs:
       # story bda4beac: 0148(core) 재부모 후 이 checkout(develop, ee_pricing 포함)은 dual-head
       # (core 0155+ · ee_pricing 0147) — `head`(단수)는 이제 모호해 `heads`(복수)로 전환.
       - name: alembic upgrade heads (fresh DB → baseline)
+        if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
         working-directory: backend
         run: uv run alembic upgrade heads
 
       - name: Verify tables created
+        if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
         run: |
           PGPASSWORD=sprintable psql -h localhost -U sprintable -d sprintable_test -c \
             "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE';" \
             | grep -E "^\s+[0-9]+"
 
       - name: Verify baseline parity (view + nullable + seed)
+        if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
         run: |
           set -e
           P() { PGPASSWORD=sprintable psql -h localhost -U sprintable -d sprintable_test -tA -c "$1"; }
@@ -111,6 +182,7 @@ jobs:
       # 일치하는지(comm -3, 차집합 0행) 비교로 교체. 단일-head 컨텍스트(main)에서도 그대로
       # 성립(양쪽 다 1행이면 차집합도 0행).
       - name: Verify fresh DB reached heads (baseline + incremental)
+        if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
         working-directory: backend
         run: |
           set -e
@@ -124,6 +196,7 @@ jobs:
       # existing-DB path: a DB already at heads must be a pure no-op — no migration re-runs.
       # (The fresh-DB run above already advanced this DB to heads via baseline + incremental.)
       - name: Existing-DB no-op (re-run upgrade heads)
+        if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
         working-directory: backend
         run: |
           set -e
@@ -132,6 +205,11 @@ jobs:
             echo "FAIL: migrations re-ran on a DB already at heads (existing-DB path not a no-op)"; exit 1
           fi
           echo "OK: existing-DB upgrade heads is a no-op"
+
+      - name: Skip reason (backend-irrelevant PR)
+        if: needs.detect-changed-scope.outputs.backend_relevant == 'false'
+        run: |
+          echo "story #2555 — 변경 파일 전부가 백엔드-무관 allowlist(docs/·*.md·apps/web/·packages/) 안이라 이 잡의 마이그레이션 검증 스텝을 건너뛰었다."
 
   # story #2330(CI·승격안전, 2026-07-30) — alembic-fresh-db(위)는 "빈 DB에서 baseline-stamp
   # 후 나머지 리비전 전부를 «한 번의» command.upgrade() 호출(=한 트랜잭션 블록)"으로 올린다.
@@ -530,6 +608,10 @@ jobs:
   # 지적에 대한 답).
   backend-test-destructive:
     name: Backend destructive-schema (shard)
+    needs: [detect-changed-scope]
+    # alembic-fresh-db와 동일 이유 — always() 없으면 detect-changed-scope 실패 시 이 잡이
+    # (backend-test의 필수 판정 근거) cascade로 스킵된다.
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -569,6 +651,7 @@ jobs:
           version: 'latest'
 
       - name: Determine this shard's file list
+        if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
         working-directory: backend
         run: |
           uv run python scripts/shard_destructive_tests.py \
@@ -582,6 +665,7 @@ jobs:
       # 파일마다 독립 throwaway DB(sprintable_test_iso)로 완전 격리한다(샤딩 전과 동일 원칙 —
       # 바뀐 것은 «몇 개를 도는가»이지 «어떻게 격리하는가»가 아니다).
       - name: Run pytest (destructive schema — isolated fresh DB per file, this shard)
+        if: needs.detect-changed-scope.outputs.backend_relevant != 'false'
         working-directory: backend
         run: |
           set -uo pipefail
@@ -608,10 +692,15 @@ jobs:
           fi
           echo "OK: all ${#files[@]} isolated destructive-schema files passed (shard ${{ matrix.shard }})"
 
+      - name: Skip reason (backend-irrelevant PR)
+        if: needs.detect-changed-scope.outputs.backend_relevant == 'false'
+        run: |
+          echo "story #2555 — 변경 파일 전부가 백엔드-무관 allowlist 안이라 이 샤드의 destructive-schema 실행을 건너뛰었다."
+
   backend-test:
     name: Backend pytest
     runs-on: ubuntu-latest
-    needs: [backend-test-destructive]
+    needs: [backend-test-destructive, detect-changed-scope]
     if: always()
     # story #1982(2026-07-17): postgres service + real-PG env 배선. 이 갭은 story #1472
     # (2026-06-21)에서 이미 발견됐고, story 8236bbc3(#1619, 2026-07-03)이 "backend-test job
@@ -820,6 +909,13 @@ jobs:
       # more·apple-icon.png·manifest.webmanifest·flow·goals) 어긋나 있던 것을 이 스토리가 고쳤다.
       - name: "Verify RESERVED_FIRST_SEGMENTS sync (story #2393 regression guard)"
         run: pnpm --filter web verify:reserved-first-segments-sync
+
+      # story #1971 회귀가드: RENAMED_RESOURCES(옛 이름→신 이름)의 값이 MIGRATED_RESOURCES
+      # (bare 딥링크를 [ws]/[proj]로 채워 넣는 표)의 키에도 있는지 대조한다 — proxy.ts의
+      # redirectLegacyResourcePath는 정확히 그 판정(resourceName in MIGRATED_RESOURCES)으로
+      # bare 콜드 딥링크의 ws/proj를 채운다. #2016(epics→goals) 실사고와 동형 재발 방지.
+      - name: "Verify MIGRATED_RESOURCES sync (story #1971 regression guard)"
+        run: pnpm --filter web verify:migrated-resources-sync
 
       - name: Test
         # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead

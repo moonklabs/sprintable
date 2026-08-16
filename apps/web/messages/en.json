@@ -52,8 +52,7 @@
     "now": "Now",
     "approvals": "Approvals",
     "chat": "Chat",
-    "more": "More",
-    "moreTempNotice": "Temporary list — will be replaced by the full screen soon."
+    "more": "More"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -75,6 +74,7 @@
     "sprints": "Sprints",
     "search": "Search…",
     "help": "Help",
+    "openGlobalNav": "Open menu",
     "chats": "Chats",
     "activity": "Activity Log",
     "goals": "Goals",
@@ -3388,6 +3388,12 @@
     "participantsOthers": "{count} more",
     "forkInfo": "Adding someone to a DM creates a new group chat. The existing DM is preserved.",
     "adding": "Adding…",
+    "policyDeniedAllowlistMiss": "{member} is not on {agent}'s allowed senders list.",
+    "policyDeniedCreatedByNone": "{agent} has no creator configured, so it can't start a conversation.",
+    "policyDeniedCreatorNotParticipant": "{agent}'s creator isn't a participant in this conversation, so it can't message.",
+    "policyDeniedManageLink": "Check agent settings",
+    "policyDeniedUnknownAgent": "This agent",
+    "policyDeniedUnknownMember": "This member",
     "deliveryContractTitle": "Notification settings",
     "deliveryContractEditingOnBehalfOf": "Editing on behalf of \"{name}\" — saving changes their delivery settings.",
     "deliveryContractLoading": "Loading…",

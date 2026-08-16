@@ -4,6 +4,7 @@ import {
   EXEMPT_TARGETS,
   extractComposedTargets,
   extractLiteralTargets,
+  extractNavConfigResourceTargets,
   findEntryWithoutRoute,
   findRouteWithoutEntry,
   GRANDFATHER_BASELINE,
@@ -23,6 +24,25 @@ describe('extractComposedTargets — AC2㉠', () => {
 
   it('변수 인자(런타임 조립)는 못 뽑는다(AC7㉠ — 리터럴만 본다)', () => {
     expect(extractComposedTargets(`resourceLink(someVar)`)).toEqual([]);
+  });
+});
+
+// story #2681/#2682 후속 — app-sidebar.tsx·more/page.tsx가 resourceLink('x') 리터럴 반복을
+// nav-config.ts(NAV_GROUPS) 순회로 리팩터하며 resourceLink(item.path)(변수 인자)가 됐다.
+// 이 가드가 원래 리터럴만 보므로(AC7㉠), nav-config.ts의 `kind: 'resource', path: 'x'` 짝을
+// 새 진입점 축으로 인정해야 리팩터가 "조용한 도달불가"(routeWithoutEntry)로 오판되지 않는다.
+describe('extractNavConfigResourceTargets — nav-config.ts SSOT 축(story #2681/#2682 후속)', () => {
+  it('kind: \'resource\', path: \'x\' 짝을 뽑는다', () => {
+    const src = `
+      { id: 'flow', labelKey: 'flow', icon: Workflow, kind: 'resource', path: 'flow', kbdHint: 'B' },
+      { id: 'docs', labelKey: 'docs', icon: BookOpen, kind: 'resource', path: 'docs' },
+    `;
+    expect(extractNavConfigResourceTargets(src)).toEqual(['flow', 'docs']);
+  });
+
+  it('kind: \'static\'인 항목은 안 뽑는다(resource 축만)', () => {
+    const src = `{ id: 'org-events', labelKey: 'orgEvents', icon: Zap, kind: 'static', path: '/organization/events' },`;
+    expect(extractNavConfigResourceTargets(src)).toEqual([]);
   });
 });
 
