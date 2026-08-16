@@ -1034,6 +1034,7 @@ async def publish_registry_event(
     from app.services.event_routing_resolver import (
         InvalidWorkItemReferenceError,
         MissingRoutingPayloadFieldError,
+        UnknownRoutingMemberError,
         resolve_routing_leg,
     )
 
@@ -1044,16 +1045,34 @@ async def publish_registry_event(
         broadcast_ids = await resolve_routing_leg(
             definition.routing["broadcast"], payload=body.payload, org_id=org_id, db=db,
         )
-    except (MissingRoutingPayloadFieldError, InvalidWorkItemReferenceError) as e:
+    except (MissingRoutingPayloadFieldError, InvalidWorkItemReferenceError, UnknownRoutingMemberError) as e:
         raise HTTPException(
             status_code=400,
             detail={"code": "invalid_payload", "message": str(e), "errors": [str(e)]},
         ) from e
 
     if body.extra_broadcast_member_ids:
+        # story #2693(AC2): payload_field routing과 동일 검증 — 예전엔 filter_org_member_ids로
+        # 비회원 id를 조용히 걸러내고(silent drop) 발행을 그대로 진행했다. AC1의 원자성
+        # 요구(비회원이면 conv/msg 어느 것도 만들지 않는다)와 일관되게, 여기도 걸러내는 대신
+        # 하나라도 비회원이면 명시 거부한다(조용한 유실 금지 — MissingRoutingPayloadFieldError와
+        # 동일 철학).
         from app.services.member_resolver import filter_org_member_ids
 
-        broadcast_ids |= await filter_org_member_ids(set(body.extra_broadcast_member_ids), org_id, db)
+        requested_extra = set(body.extra_broadcast_member_ids)
+        valid_extra = await filter_org_member_ids(requested_extra, org_id, db)
+        unknown_extra = requested_extra - valid_extra
+        if unknown_extra:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "invalid_payload",
+                    "message": f"extra_broadcast_member_ids에 이 org의 실존 회원이 아닌 id가 있습니다: "
+                               f"{sorted(str(i) for i in unknown_extra)}",
+                    "errors": [str(i) for i in unknown_extra],
+                },
+            )
+        broadcast_ids |= valid_extra
 
     try:
         project_id = await _resolve_event_project_id(db, org_id=org_id, payload=body.payload)
