@@ -217,3 +217,4 @@ message_created)        :message)
 - 구현 기반 스토리: S-COMM-01(SSE 인증), S-COMM-02(webhook 라우팅), S-COMM-04(send_chat_message 단일 경로), S-COMM-05(backfill+dedup), S-COMM-12(SSE/webhook 이벤트명 통일, backlog)
 
 <!-- story #2555 검증용 임시 주석 — docs-only 변경이 backend 무거운 잡을 실제로 스킵하는지 실증. PR 머지 안 함, 검증 후 이 PR은 close. -->
+<!-- force new commit for fresh CI trigger against correct base -->
