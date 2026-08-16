@@ -280,6 +280,34 @@ jobs:
           test -n "$cur"
           diff <(echo "$cur") <(echo "$heads")
 
+  # story #2401(결함·CI) — #2397(PR #2777·#2781)이 develop 기준 같은 `0221`을 각자 새
+  # 리비전으로 만들었는데도 위 #2330 게이트를 둘 다 통과했다: 그 게이트는 자기 브랜치의
+  # alembic.ini만 보고, 형제 PR을 전혀 참조하지 않기 때문이다(dual-head는 머지 «후»에야
+  # 드러났다). 이 잡은 그 시야를 메운다 — 자세한 검사 축·시간 축 한계 선언은
+  # `ci_alembic_sibling_pr_collision_check.py` docstring 참고.
+  alembic-sibling-pr-collision-check:
+    name: Alembic sibling-PR revision collision (guard, story #2401)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch base branch (current tip, not PR-open-time)
+        run: git fetch origin "${{ github.event.pull_request.base.ref }}" --depth=1
+      - name: Check alembic revision collisions against base + sibling open PRs
+        working-directory: backend
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python3 scripts/ci_alembic_sibling_pr_collision_check.py
+
   # story #2330 AC6 — env.py(PR#2661)의 "autocommit_block()은 이 프로젝트에서 원리적으로
   # 못 쓴다" 주석은 «읽어야» 서는 것이었다(주석만으로는 다음 사람이 또 쓸 수 있다). grep
   # 가드로 승격한다 — 마이그레이션 파일에 그 호출이 들어오면 CI가 빨개진다.

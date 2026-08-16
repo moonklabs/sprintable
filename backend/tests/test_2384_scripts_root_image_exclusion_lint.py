@@ -28,6 +28,7 @@ _SCRIPTS_ROOT = Path(__file__).resolve().parent.parent / "scripts"
 # 않는다(model_db_drift_audit.py는 읽기 전용 감사 — ALEMBIC_DATABASE_URL로 로컬에서 돌리는
 # 것을 전제로 문서화돼 있다, story #2181).
 _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
+    "ci_alembic_sibling_pr_collision_check.py",   # story #2401 — CI 전용, git+gh api만 사용(운영 DB 무접속)
     "ci_alembic_single_step_promotion_check.py",  # story #2330 — CI 전용 fresh-DB 재현
     "lint_candidate_source_ownership.py",         # story #2363 AC6 — CI lint 게이트
     "lint_commit_before_validate.py",             # story #2459 — CI lint 게이트(AST 정적분석, 운영 DB 무접속)
