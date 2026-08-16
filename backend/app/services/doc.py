@@ -59,6 +59,12 @@ async def _notify_doc_approval_requested(
             body=f"'{doc.title}' 문서가 결재 대기 중입니다.",
             reference_type="gate", reference_id=gate_id,
             source_project_id=doc.project_id,
+            # story #2687: 동기 개인 webhook 재시도(최대 3회·1s/2s backoff)가 이 함수를 호출한
+            # transition_doc()의 열린 트랜잭션 커넥션을 그대로 붙잡아(pool_size=3+overflow=1인
+            # 소형 풀) 상신 요청 자체를 8~9초 지연시키고, 그 창 동안 다른 동시 요청들의 커넥션
+            # 획득도 지연시켰다(실측: PATCH /docs/{id}/transition 8.7-9.3s). story #2460 §6
+            # 봉합②의 outbox 경로로 옮겨 트랜잭션 밖에서 배달한다.
+            via_outbox=True,
         )
     except Exception:  # noqa: BLE001 — 벨 알림 실패는 상신 비중단.
         logger.warning("doc 상신 결재자 벨 알림 실패 doc=%s", doc.id, exc_info=True)

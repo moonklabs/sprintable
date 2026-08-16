@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import {
   Check, CheckCircle2, Copy, Download, RefreshCw, ChevronLeft, Info, Sparkles,
-  Palette, Cog, Search, ClipboardList, Briefcase, IdCard,
+  Palette, Cog, Search, ClipboardList, Briefcase, IdCard, RotateCw, Loader2,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -772,7 +772,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     enabled: step === 5 && Boolean(recruitResult),
     configCopiedDone: true,
   });
-  const { displaySteps, verified, verifying } = rail;
+  const { displaySteps, verified, verifying, awaitingVerification, timedOut } = rail;
   const handleCopyVerifyPrompt = rail.handleCopyVerifyPrompt;
 
   // story(2026-08-02, 채용 흐름 텔레메트리 부재) — connect-step.tsx는 config_copied·
@@ -1460,6 +1460,14 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 )}
               </p>
 
+              {/* story #4cdad425(prod 에스컬레이트) — 실유저가 탄 표면(채용 위저드·recruit)이 이곳이다.
+                  connect-step(#3114)에만 넣었던 「Claude Code 재시작」 명시 안내를 여기에도 둔다 —
+                  설정만 붙이고 재시작 안 하면 검증이 영원히 pending(무한 폴링). info 톤(미확認≠에러). */}
+              <div className="flex items-start gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2.5 text-xs text-foreground">
+                <RotateCw className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span>{tOnboarding('restartAfterConfig')}</span>
+              </div>
+
               {/* story #2404(AC5, PO 확定) — "설정만 넣으면 자동으로 된다"는 오해가 무한 대기의
                   실원인이었다(검증은 실제 tool 호출로만 완료됨). 대기 문구를 지우고 "지금 할 일"을
                   복사 가능한 한 줄로 그 자리에 쥐여 준다. */}
@@ -1486,6 +1494,22 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 </Button>
               </div>
               <VerifyRail steps={displaySteps} />
+              {/* story #4cdad425 ② — 폴링 중 화면이 침묵하면(무한 폴링 가림) 실유저는 멈췄다고 느껴
+                  재시도한다(prod 5회). 확인 중임을 명시. verified/timeout이면 자동으로 사라진다. */}
+              {awaitingVerification && !timedOut && (
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+                  {tOnboarding('verifyWaiting')}
+                </p>
+              )}
+              {/* story #4cdad425 ③ — 타임아웃(~60s) 시 침묵 대신 진단 힌트. info 톤(연결이 아직 «확인
+                  안 됨»이지 «실패»가 아님·빨강 안 씀). text-foreground on info-tint(#2420). */}
+              {timedOut && (
+                <div role="status" aria-live="polite" className="rounded-md border border-info-border bg-info-tint px-3 py-2.5 text-xs text-foreground">
+                  <p className="font-medium">{tOnboarding('verifyTimeoutTitle')}</p>
+                  <p className="mt-1">{tOnboarding('verifyTimeoutHint')}</p>
+                </div>
+              )}
               {/* story #2404(AC5, PO 확定) — "이미 가능한데 사용자가 모르는" 상태를 없앤다. 처음부터
                   보인다(폴링 실패 N회 뒤가 아님) — 검증은 관문이 아니라 확인일 뿐이라는 것 자체가
                   즉시 알려져야 하는 사실이다. 주 동선(위 예시 프롬프트)보다 약하게(muted). */}

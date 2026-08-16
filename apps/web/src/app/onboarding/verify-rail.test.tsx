@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment jsdom
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { act } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { createRoot } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import {
   parseVerificationRail, VerifyRail, computeRailStageLabel, computeShowVerifyExamplePrompt,
+  useVerificationRail, VERIFY_TIMEOUT_MS,
   type DisplayStep,
 } from './verify-rail';
 import ko from '../../../messages/ko.json';
@@ -156,5 +160,78 @@ describe('computeShowVerifyExamplePrompt — story #2407 ②-4 (http에서만 �
 
   it('transport 미해소(null) → 비노출', () => {
     expect(computeShowVerifyExamplePrompt(null, false)).toBe(false);
+  });
+});
+
+// story #4cdad425(prod 에스컬레이트) — 설정만 붙이고 Claude Code 재시작 안 하면 검증이 영원히
+// pending에 머물러 실유저가 5회 재시도했다(무한 폴링 가림). 폴링 중엔 «확인 중»을, 타임아웃 뒤엔
+// «진단 힌트»를 띄우는 상태 신호(awaitingVerification·timedOut)를 고정한다.
+describe('useVerificationRail — story #4cdad425 (검증 타임아웃 진단 상태)', () => {
+  const opts = { agentId: 'a1', transport: 'http' as const, enabled: true, configCopiedDone: false };
+
+  // 코드베이스 마운트 패턴(createRoot + React.act·@testing-library 미설치). 훅 결과를 DOM에 렌더해
+  // 관측한다(아웃터 변수 변경 없이 — react-hooks/immutability 준수).
+  function Harness({ o }: { o: Parameters<typeof useVerificationRail>[0] }) {
+    const rail = useVerificationRail(o);
+    return (
+      <div>
+        <span data-testid="awaiting">{String(rail.awaitingVerification)}</span>
+        <span data-testid="timedout">{String(rail.timedOut)}</span>
+        <button type="button" data-testid="retry" onClick={() => { void rail.handleVerify(); }}>retry</button>
+      </div>
+    );
+  }
+  function mount(o: Parameters<typeof useVerificationRail>[0]) {
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    act(() => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={ko} timeZone="Asia/Seoul"><Harness o={o} /></NextIntlClientProvider>,
+      );
+    });
+    const read = (id: string) => container.querySelector(`[data-testid="${id}"]`)?.textContent;
+    return { container, read, unmount: () => act(() => root.unmount()) };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    // 절대 verified로 안 넘어가는 폴 응답(pending 유지) — 재시작 안 한 실유저 상황.
+    global.fetch = vi.fn(async () => ({ ok: false, json: async () => ({}) })) as unknown as typeof fetch;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('폴링 중(verified 전)엔 awaitingVerification=true·timedOut=false', () => {
+    const { read, unmount } = mount(opts);
+    expect(read('awaiting')).toBe('true');
+    expect(read('timedout')).toBe('false');
+    unmount();
+  });
+
+  it('VERIFY_TIMEOUT_MS 지나도 verified 안 되면 timedOut=true(진단 힌트 트리거)', () => {
+    const { read, unmount } = mount(opts);
+    act(() => { vi.advanceTimersByTime(VERIFY_TIMEOUT_MS + 100); });
+    expect(read('timedout')).toBe('true');
+    unmount();
+  });
+
+  it('handleVerify(수동 재시도)는 timedOut을 리셋한다(타이머 재무장)', async () => {
+    const { container, read, unmount } = mount(opts);
+    act(() => { vi.advanceTimersByTime(VERIFY_TIMEOUT_MS + 100); });
+    expect(read('timedout')).toBe('true');
+    const btn = container.querySelector('[data-testid="retry"]') as HTMLButtonElement;
+    await act(async () => { btn.click(); });
+    expect(read('timedout')).toBe('false');
+    unmount();
+  });
+
+  it('enabled=false면 폴링·타임아웃 없음(awaitingVerification=false·timedOut=false)', () => {
+    const { read, unmount } = mount({ ...opts, enabled: false });
+    act(() => { vi.advanceTimersByTime(VERIFY_TIMEOUT_MS + 100); });
+    expect(read('awaiting')).toBe('false');
+    expect(read('timedout')).toBe('false');
+    unmount();
   });
 });

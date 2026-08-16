@@ -311,6 +311,32 @@ describe('recruiter-client STEP5 — story #2410 ③-1(verifiedBanner)', () => {
   });
 });
 
+// story #4cdad425(prod 에스컬레이트) — 실유저가 탄 표면이 여기(채용 위저드 STEP5)였다(Backend Engineer
+// 채용 1호). connect-step(#3114)에만 넣었던 검증 안내 3종(재시작·대기·타임아웃)을 이 표면에도 넣는다.
+// 이 컴포넌트는 STEP5까지의 마운트가 불가한 거대 위저드라 소스 텍스트 수준으로 pin(이 파일의 기존 관례).
+// 실제 렌더 로직(조건 ↔ 훅 출력 대응)은 connect-step.test.tsx가 DOM 마운트로 덮는다 — 같은 useVerificationRail·
+// 같은 tOnboarding 키를 쓰므로 로직은 동일하고, 여기서는 «이 표면에 그 JSX가 실제로 있는가»를 지킨다.
+describe('recruiter-client STEP5 — story #4cdad425 (검증 안내 3종: 재시작·대기·타임아웃)', () => {
+  const source = readFileSync(fileURLToPath(new URL('./recruiter-client.tsx', import.meta.url)), 'utf-8');
+
+  it('① 재시작 안내를 connect-step과 같은 onboarding 키로 렌더한다(설정 저장 후 Claude Code 재시작)', () => {
+    expect(source).toContain("tOnboarding('restartAfterConfig')");
+  });
+
+  it('② 대기 표시는 awaitingVerification && !timedOut로 게이팅된다(폴링 중에만·verified/timeout이면 사라짐)', () => {
+    expect(source).toMatch(/\{awaitingVerification && !timedOut && \([\s\S]{0,300}tOnboarding\('verifyWaiting'\)/);
+  });
+
+  it('③ 타임아웃 힌트는 timedOut으로 게이팅되고 제목+본문 두 키를 쓴다(진단 힌트)', () => {
+    expect(source).toMatch(/\{timedOut && \([\s\S]{0,400}tOnboarding\('verifyTimeoutTitle'\)[\s\S]{0,250}tOnboarding\('verifyTimeoutHint'\)/);
+  });
+
+  it('대기와 타임아웃은 timedOut 한 축으로 상호배타된다(동시에 안 뜸)', () => {
+    expect(source).toContain('awaitingVerification && !timedOut');
+    expect(source).toMatch(/\{timedOut && \(/);
+  });
+});
+
 // story #2433(A/B) — 미르코 실측(codex 표본, 2026-08-03): 위저드에서 런타임을 골라 채용해도
 // 관리화면엔 "런타임 타입: 미설정"으로 떴다(A) + "역할 없이(키만)"는 실행환경(런타임) 단계
 // 자체가 스킵됐다(B). 소스 텍스트 수준으로 pin(이 파일의 기존 관례 — 컴포넌트 전체 마운트

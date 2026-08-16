@@ -12,9 +12,88 @@ from app.models.member import Member
 from app.models.project import OrgMember
 from app.models.team import TeamMember
 from app.models.user import User
+from app.repositories.human_api_key import HumanApiKeyRepository
+from app.schemas.human_api_key import (
+    CreateHumanApiKeyRequest,
+    HumanApiKeyCreatedResponse,
+    HumanApiKeyResponse,
+)
 from app.schemas.me import MeResponse, UpdateMe
 
 router = APIRouter(prefix="/api/v2/me", tags=["me", "Organization"])
+
+
+async def _resolve_current_human_member(
+    auth: AuthContext, session: AsyncSession,
+) -> Member:
+    """story #1940 — 「나 자신」의 canonical Member 행 해소. resolve_member()의 ``.id``는
+    레거시 경로에서 OrgMember.id를 반환해(shadow 플래그 꺼짐이 기본) member_ssot 캐노니컬
+    ``members.id``와 항상 같은 값이라는 보장에 기대지 않는다 — 여기서 직접
+    ``Member.user_id == auth.user_id``로 해소(agent API key 경로는 애초에 사용 불가:
+    is_api_key=True면 이 함수를 부르는 라우트 자체가 human_api_key_id 발급 대상이 아님)."""
+    org_id_str = auth.claims.get("app_metadata", {}).get("org_id")
+    if not org_id_str:
+        raise HTTPException(status_code=400, detail="org_id not resolvable from auth context")
+    member = (await session.execute(
+        select(Member).where(
+            Member.user_id == uuid.UUID(auth.user_id),
+            Member.org_id == uuid.UUID(org_id_str),
+            Member.type == "human",
+            Member.deleted_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if member is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+    return member
+
+
+@router.get("/api-keys", response_model=list[HumanApiKeyResponse])
+async def list_my_api_keys(
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> list[HumanApiKeyResponse]:
+    """story #1940 — 셀프서브: 내 개인 API 키 목록. 다른 사람 키는 애초에 조회 대상에 없다
+    (member_id=본인으로 고정 — path에 임의 id를 안 받으므로 IDOR 표면 자체가 없음)."""
+    member = await _resolve_current_human_member(auth, session)
+    repo = HumanApiKeyRepository(session)
+    keys = await repo.list_by_member(member.id)
+    return [HumanApiKeyResponse.model_validate(k) for k in keys]
+
+
+@router.post("/api-keys", response_model=HumanApiKeyCreatedResponse, status_code=201)
+async def create_my_api_key(
+    body: CreateHumanApiKeyRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> HumanApiKeyCreatedResponse:
+    member = await _resolve_current_human_member(auth, session)
+    repo = HumanApiKeyRepository(session)
+    key, plaintext = await repo.create(
+        member_id=member.id, name=body.name, expires_at=body.expires_at,
+    )
+    await session.commit()
+    await session.refresh(key)
+    data = HumanApiKeyResponse.model_validate(key)
+    return HumanApiKeyCreatedResponse(**data.model_dump(), api_key=plaintext)
+
+
+@router.delete("/api-keys/{key_id}", status_code=200)
+async def revoke_my_api_key(
+    key_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    member = await _resolve_current_human_member(auth, session)
+    repo = HumanApiKeyRepository(session)
+    key = await repo.get(key_id)
+    if key is None or key.member_id != member.id:
+        # 존재 여부 누설 없이 404 — 본인 소유가 아니면 "없음"과 구분 안 함(다른 라우터 관례 정합).
+        raise HTTPException(status_code=404, detail="API key not found")
+    result = await repo.revoke(key_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="API key not found")
+    await session.commit()
+    return {"ok": True}
 
 
 @router.get("", response_model=MeResponse)

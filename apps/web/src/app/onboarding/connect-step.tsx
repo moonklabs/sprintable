@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { FileText, Copy, Check, RefreshCw, ChevronRight, Info, Cloud, Terminal, Sparkles } from 'lucide-react';
+import { FileText, Copy, Check, RefreshCw, ChevronRight, Info, Cloud, Terminal, Sparkles, RotateCw, Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useTranslations } from 'next-intl';
@@ -198,7 +198,7 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
     enabled: Boolean(apiKey),
     configCopiedDone: hasCopied,
   });
-  const { displaySteps, verified, verifying } = rail;
+  const { displaySteps, verified, verifying, awaitingVerification, timedOut } = rail;
 
   // unload(탭닫기/이탈) best-effort — 미검증 시 abandoned_explicit 보조 신호(SoT는 BE 파생).
   useEffect(() => {
@@ -369,6 +369,13 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
           {t('artifactGuide')}
         </p>
         <p className="text-xs text-muted-foreground">{t('keyOneTimeNote')}</p>
+        {/* story #4cdad425(prod 에스컬레이트) — 「설정만 붙이면 자동」 오해가 무한 대기의 근본이었다
+            (실유저 5회 재시도). 설정 저장 뒤 «Claude Code 재시작»이 연결 적용의 필수 단계라 그
+            자리에 명시한다. info 톤(안내·연결 미확認≠에러). */}
+        <div className="flex items-start gap-2 rounded-md border border-info-border bg-info-tint px-3 py-2.5 text-xs text-foreground">
+          <RotateCw className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span>{t('restartAfterConfig')}</span>
+        </div>
       </section>
 
       {/* [2] verify 상태레일 */}
@@ -393,6 +400,22 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
           </Button>
         </div>
         <VerifyRail steps={displaySteps} />
+        {/* story #4cdad425 ② — 폴링이 도는데 화면이 침묵하면(무한 폴링 가림) 실유저는 «멈췄다»고
+            느껴 재시도한다. 확인 중임을 명시한다. verified/timeout이면 자동으로 사라진다. */}
+        {awaitingVerification && !timedOut && (
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+            {t('verifyWaiting')}
+          </p>
+        )}
+        {/* story #4cdad425 ③ — 타임아웃(~60s) 시 침묵 대신 진단 힌트. 색은 info 톤(연결이 아직
+            «확인 안 됨»이지 «실패»가 아니다 — 빨강 안 씀·내 색 규율). text-foreground on info-tint(#2420). */}
+        {timedOut && (
+          <div role="status" aria-live="polite" className="rounded-md border border-info-border bg-info-tint px-3 py-2.5 text-xs text-foreground">
+            <p className="font-medium">{t('verifyTimeoutTitle')}</p>
+            <p className="mt-1">{t('verifyTimeoutHint')}</p>
+          </div>
+        )}
         {transport === 'http' && (
           <p className="flex items-start gap-1.5 text-xs text-info">
             <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />

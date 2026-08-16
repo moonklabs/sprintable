@@ -24,9 +24,13 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock, replace: vi.fn() }),
 }));
 
-// use-chat-sse는 EventSource(jsdom 미구현)를 쓰므로 no-op으로 목.
+// use-chat-sse는 EventSource(jsdom 미구현)를 쓰므로 no-op으로 목 — 단, story #1978은 정확히
+// onReconnect 배선을 검증해야 하니 마지막 호출의 옵션을 캡처해 테스트에서 직접 불러낸다
+// (SSE 백오프/타이머 전체를 재현하지 않는다 — sse-multiplexer.test.tsx가 이미 그 축은
+// "실제 재연결 타이밍은 별도"로 선언하고 옵션 배선만 고정하는 동일 관례).
+const { useChatSseMock } = vi.hoisted(() => ({ useChatSseMock: vi.fn() }));
 vi.mock('@/hooks/use-chat-sse', () => ({
-  useChatSse: () => {},
+  useChatSse: (opts: unknown) => { useChatSseMock(opts); },
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -47,6 +51,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   pushMock.mockClear();
+  useChatSseMock.mockClear();
   useDashboardContextMock.mockReturnValue({ role: 'member' });
 });
 
@@ -66,6 +71,12 @@ function stubFetch(outsideProject: unknown[]) {
     }
     return { ok: false, status: 404, json: async () => null };
   }));
+}
+
+// story #1978 — /api/conversations? 호출 횟수만 센다(목록 백필 재fetch가 실제로 일어났는지).
+// /api/conversations/recent-outside-project는 별개 축(마운트 1회 전용, 이 스토리 스코프 밖)이라 안 센다.
+function countMyConversationsFetchCalls(fetchMock: ReturnType<typeof vi.fn>): number {
+  return fetchMock.mock.calls.filter(([url]) => (url as string).includes('/api/conversations?') && !(url as string).includes('recent-outside-project')).length;
 }
 
 async function mount() {
@@ -125,5 +136,51 @@ describe('ChatListView — 다른 프로젝트 섹션 (story #2168 PR-②)', () 
     await act(async () => { row!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     expect(sessionStorage.getItem('sprintable_pending_toast')).toBe('sprintable-content 프로젝트로 이동');
+  });
+});
+
+// story #1978(트랙C) — SSE 드롭 후 놓친 conversation.message_created가 목록에 미백필되던
+// 두 구멍(재연결·백그라운드 복귀)을 고정한다. useChatSse는 위에서 옵션 캡처용으로만 목했으므로
+// 실제 SSE 백오프/타이머는 재현하지 않는다 — onReconnect 콜백이 넘어왔는지, 그리고 그 콜백을
+// 직접 불렀을 때 실제로 재fetch가 도는지만 검증한다(배선 고정).
+describe('ChatListView — SSE 재연결·백그라운드 복귀 재fetch (story #1978)', () => {
+  it('useChatSse에 onReconnect가 넘어가고, 그걸 부르면 목록이 재fetch된다(AC①)', async () => {
+    stubFetch([]);
+    await mount();
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const beforeCount = countMyConversationsFetchCalls(fetchMock);
+
+    const opts = useChatSseMock.mock.calls.at(-1)?.[0] as { onReconnect?: () => void } | undefined;
+    expect(typeof opts?.onReconnect).toBe('function');
+    await act(async () => { opts!.onReconnect!(); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(countMyConversationsFetchCalls(fetchMock)).toBe(beforeCount + 1);
+  });
+
+  it('탭이 백그라운드에서 복귀(visibilitychange, hidden=false)하면 목록이 재fetch된다(AC①)', async () => {
+    stubFetch([]);
+    await mount();
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const beforeCount = countMyConversationsFetchCalls(fetchMock);
+
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(countMyConversationsFetchCalls(fetchMock)).toBe(beforeCount + 1);
+  });
+
+  it('탭이 백그라운드로 갈 때(hidden=true)는 재fetch하지 않는다(불필요 호출 억제, AC③)', async () => {
+    stubFetch([]);
+    await mount();
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const beforeCount = countMyConversationsFetchCalls(fetchMock);
+
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    await act(async () => { await Promise.resolve(); });
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+
+    expect(countMyConversationsFetchCalls(fetchMock)).toBe(beforeCount);
   });
 });
