@@ -29,6 +29,14 @@ export function shouldAcceptEntityPickerSelection(key: string, hasNavigated: boo
   return false;
 }
 
+// story d6f8e025(유나 design 지적, PO 판정) — 위 shouldAcceptEntityPickerSelection이 Enter를
+// hasNavigated 전엔 안 받아주는데, 화면이 0번 후보를 늘 하이라이트/aria-selected로 보여주면
+// 어포던스가 실제 동작과 어긋난다("선택된 것처럼 보이는데 Enter는 다르게 동작"). 화살표로
+// 능동 탐색하기 전엔 어떤 후보도 시각적으로 "선택됨"이 아니어야 한다.
+export function shouldHighlightEntityCandidate(idx: number, entityIndex: number, hasNavigated: boolean): boolean {
+  return hasNavigated && idx === entityIndex;
+}
+
 // story #2292(보안·critical) — 링크 텍스트(markdown `[text](url)`의 text 부분) escape.
 // `[ ] ( ) \` 와 개행이 markdown-link 토큰 구조를 변조(예 `x](https://phish)[y` → 외부
 // phishing 링크 렌더)하는 걸 차단한다. ⛔형제 함수(applyEntity·applyAsset)가 이 상수 하나를

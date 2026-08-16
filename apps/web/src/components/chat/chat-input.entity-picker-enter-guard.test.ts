@@ -5,7 +5,7 @@
  * 재발 안 되게 고정한다.
  */
 import { describe, expect, it } from 'vitest';
-import { shouldAcceptEntityPickerSelection } from './chat-input-entity-tokens';
+import { shouldAcceptEntityPickerSelection, shouldHighlightEntityCandidate } from './chat-input-entity-tokens';
 
 describe('shouldAcceptEntityPickerSelection', () => {
   it('능동 탐색(화살표) 없이 Enter — 수락하지 않는다(전송 의도로 취급)', () => {
@@ -24,5 +24,18 @@ describe('shouldAcceptEntityPickerSelection', () => {
   it('그 외 키는 수락하지 않는다', () => {
     expect(shouldAcceptEntityPickerSelection('Escape', true)).toBe(false);
     expect(shouldAcceptEntityPickerSelection('a', true)).toBe(false);
+  });
+});
+
+// story d6f8e025(유나 design 지적, PO 판정) — 어포던스(화면 하이라이트/aria-selected)가
+// shouldAcceptEntityPickerSelection의 실제 동작(Enter 미탐색 시 미수락)과 어긋나면 안 된다.
+describe('shouldHighlightEntityCandidate', () => {
+  it('능동 탐색 전엔 0번 후보도 하이라이트/aria-selected 되지 않는다', () => {
+    expect(shouldHighlightEntityCandidate(0, 0, false)).toBe(false);
+  });
+
+  it('화살표로 탐색한 뒤엔 현재 entityIndex 위치만 하이라이트된다', () => {
+    expect(shouldHighlightEntityCandidate(0, 0, true)).toBe(true);
+    expect(shouldHighlightEntityCandidate(1, 0, true)).toBe(false);
   });
 });

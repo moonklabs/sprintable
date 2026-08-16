@@ -23,7 +23,7 @@ import { translateEntityStatus } from './entity-status-labels';
 import { AssetPickerPopover } from './asset-picker-popover';
 import {
   applyEntity, entityTypeLabel, escapeMarkdownLinkText, getEntityQuery, groupEntitiesByType,
-  shouldAcceptEntityPickerSelection, type EntityResult,
+  shouldAcceptEntityPickerSelection, shouldHighlightEntityCandidate, type EntityResult,
 } from './chat-input-entity-tokens';
 import { useEntityPicker } from '@/hooks/use-entity-picker';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -603,9 +603,13 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   type="button"
                   id={`entity-opt-${idx}`}
                   role="option"
-                  aria-selected={idx === entityPicker.entityIndex}
+                  /* story d6f8e025(유나 design 지적) — 하이라이트/aria-selected를 hasNavigated에
+                     게이트한다: 어포던스(화면에 "선택됨"으로 보임)가 실제 동작(Enter가 이걸
+                     수락하는지)과 어긋나면 안 된다. 화살표로 능동 탐색 전엔 0번이 시각적으로도
+                     "선택 안 됨" 상태라야 Enter=전송이 놀라움 없다. */
+                  aria-selected={shouldHighlightEntityCandidate(idx, entityPicker.entityIndex, entityPicker.hasNavigated)}
                   onMouseDown={(e) => { e.preventDefault(); selectEntity(entity); }}
-                  className={`flex w-full items-center px-3 py-2 text-left text-sm transition ${idx === entityPicker.entityIndex ? 'bg-accent text-foreground font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+                  className={`flex w-full items-center px-3 py-2 text-left text-sm transition ${shouldHighlightEntityCandidate(idx, entityPicker.entityIndex, entityPicker.hasNavigated) ? 'bg-accent text-foreground font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
                 >
                   {/* ㉠: 종류는 위 머리글의 «글자»가 1차 신호 — 이 아이콘은 어디까지나 보조. */}
                   <EntityIcon className="mr-1.5 size-3.5 shrink-0" aria-hidden />
