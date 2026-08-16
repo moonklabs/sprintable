@@ -481,7 +481,7 @@
     "eventRoutingLabel": "routing",
     "eventBlockTemplateLabel": "block_template",
     "eventKeyLabel": "키",
-    "eventKeyPrefixHint": "커스텀 정의 키는 org.{조직 slug}. 로 시작해야 합니다.",
+    "eventKeyPrefixHint": "커스텀 정의 키는 org.{slug}. 로 시작해야 합니다.",
     "eventActionAuthHumanOnlyLabel": "사람만 발행 가능(human_only)",
     "eventActionAuthRolePlaceholder": "발행 허용 역할(쉼표 구분, 선택) — 예: admin, owner",
     "eventCreateDialogTitle": "새 이벤트 정의",

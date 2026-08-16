@@ -145,6 +145,10 @@ export function flattenMessages(obj: Record<string, unknown>, prefix = ''): Map<
 //   teamId     — Slack 워크스페이스 ID(문자열 식별자, 카운트 아님)
 //   dir        — 방향 기호(↑/↓), 수치 아님
 //   sources·excludes — 수집 범위를 나타내는 라벨 목록
+//   slug       — 조직 slug(예: "moonklabs" — teamId와 같은 축, 문자열 식별자·카운트 아님).
+//                story #2666 — eventKeyPrefixHint의 원래 값이 "org.{조직 slug}."처럼 ICU
+//                무효 자리표시자였던 걸 "org.{slug}."로 고치며 처음 이 가드에 노출됐다
+//                (전엔 파싱 실패로 스캔 자체가 이 문구를 못 봤다).
 // ⛔새 이름을 여기 더하기 前에(PO 지적, 2026-08-02): 그 이름이 실제로 채우는 ko.json 값을
 // 먼저 읽는다. 정말 이름·경로류(수가 아님)면 더한다. 그런데 만약 «숫자인» 값인데 여기 걸려
 // EXEMPT_PAIRS에 다시 나타난다면, 그건 denylist 후보가 아니라 «진짜 충돌»이다 — 그 경우
@@ -154,7 +158,7 @@ export function flattenMessages(obj: Record<string, unknown>, prefix = ''): Map<
 // 재는지 모르게 되는 것)이 재발한다.
 const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   'name', 'runtime', 'filename', 'promptFile', 'gate', 'role', 'project', 'teamId', 'dir',
-  'sources', 'excludes',
+  'sources', 'excludes', 'slug',
 ]);
 const PLACEHOLDER_NAME_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
 

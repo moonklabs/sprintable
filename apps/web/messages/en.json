@@ -481,7 +481,7 @@
     "eventRoutingLabel": "routing",
     "eventBlockTemplateLabel": "block_template",
     "eventKeyLabel": "Key",
-    "eventKeyPrefixHint": "Custom definition keys must start with org.{org slug}.",
+    "eventKeyPrefixHint": "Custom definition keys must start with org.{slug}.",
     "eventActionAuthHumanOnlyLabel": "Human-only publish (human_only)",
     "eventActionAuthRolePlaceholder": "Roles allowed to publish (comma-separated, optional) — e.g. admin, owner",
     "eventCreateDialogTitle": "New event definition",
