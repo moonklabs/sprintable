@@ -2026,7 +2026,44 @@
     "copyMarkdown": "마크다운 복사",
     "deleteDoc": "삭제",
     "createFailed": "문서 생성에 실패했습니다",
-    "notFound": "문서를 찾을 수 없습니다"
+    "notFound": "문서를 찾을 수 없습니다",
+    "slashMenu": {
+      "categories": {
+        "text": "텍스트",
+        "list": "리스트",
+        "block": "블록",
+        "media": "미디어",
+        "advanced": "고급"
+      },
+      "items": {
+        "heading1": { "description": "큰 제목" },
+        "heading2": { "description": "중간 제목" },
+        "heading3": { "description": "작은 제목" },
+        "bulletList": { "description": "순서 없는 목록" },
+        "orderedList": { "description": "순서 있는 목록" },
+        "checklist": { "description": "체크리스트" },
+        "codeBlock": { "description": "코드 블록" },
+        "blockquote": { "description": "인용구" },
+        "callout": { "description": "강조 박스" },
+        "table": { "description": "표 삽입" },
+        "image": { "description": "이미지 삽입" },
+        "file": { "description": "파일 첨부" },
+        "embed": { "description": "외부 URL 임베드" },
+        "mermaidDiagram": { "description": "다이어그램 삽입" },
+        "columns": { "description": "2단/3단 컬럼 레이아웃" },
+        "mathBlock": { "description": "LaTeX 블록 수식" },
+        "mathInline": { "description": "LaTeX 인라인 수식" },
+        "toggle": { "description": "접기/펼치기 블록" },
+        "pageEmbed": { "description": "다른 문서 임베드" },
+        "horizontalRule": { "description": "구분선" }
+      },
+      "embedPrompt": "임베드할 URL을 입력하세요 (YouTube, Figma 등):",
+      "mermaidDefault": {
+        "start": "시작",
+        "end": "끝"
+      },
+      "toggleDefaultTitle": "토글 제목"
+    }
   },
   "rewards": {
     "title": "리워드",
@@ -2836,10 +2873,8 @@
   "goals": {
     "title": "목표",
     "subtitle": "워크스페이스의 주요 목표와 작업 범위를 관리합니다.",
-    "loading": "로딩 중...",
     "forbiddenTitle": "접근 권한 없음",
     "forbiddenDescription": "이 목표를 조회할 권한이 없습니다.",
-    "backToList": "목록으로 돌아가기",
     "newGoal": "목표 추가",
     "noProject": "프로젝트가 선택되지 않았습니다.",
     "noGoals": "아직 목표가 없어요",

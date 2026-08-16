@@ -254,6 +254,8 @@ async def update_task(
                 # story #1953(P1a-S3): task는 항상 story 소속(story_id NOT NULL) — 신규 조회
                 # 없이 FK 그대로 payload에 실음(향후 story_detail 폴백 승격 발판).
                 story_id=task.story_id,
+                # story #2696: outbox 이관(동일 결함 클래스 예방).
+                via_outbox=True,
             )
     await _attach_has_evidence(db, [task])
     await _attach_org_project_slugs(db, org_id, [task])

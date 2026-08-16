@@ -2,7 +2,12 @@
 
 발송기 로직: ticket 파싱·배치(≤100)·DeviceNotRegistered→is_active=false·mute 필터·best-effort.
 dispatch_notification 경로 실구동은 test_expo_push_realdb 가 커버.
-"""
+
+story #2696: via_outbox 기본값이 True로 바뀌어(outbox 이관) 이 파일이 검증하는 즉시-발송
+경로(_expo_send_chunk 직접 호출·dead-token 즉시 반영)에 도달하려면 via_outbox=False를
+명시해야 한다 — 이 파일의 관심사는 발송기 자체 메커니즘이지 outbox 라우팅이 아니다. outbox
+경로에서도 동일한 dead-token 처리(_finalize_expo_push_dead_tokens)가 delivery_dispatcher.py
+워커를 통해 수행됨을 확認(코드 read) — 기능 갭 없음, 순수 배달 타이밍만 이관."""
 from __future__ import annotations
 
 import uuid
@@ -150,6 +155,7 @@ async def test_batches_over_100():
     with patch("ee.services.expo_push._expo_send_chunk", new=_fake_chunk):
         await expo.deliver_expo_push(
             db, uuid.uuid4(), [devices[0].member_id], title="T", body="B", event_type="e",
+            via_outbox=False,
         )
     assert sizes == [100, 100, 50]  # 250 → 100/100/50 청크
 
@@ -173,6 +179,7 @@ async def test_deactivates_device_not_registered():
     with patch("ee.services.expo_push._expo_send_chunk", new=_fake_chunk):
         await expo.deliver_expo_push(
             db, uuid.uuid4(), [good.member_id, bad.member_id], title="T", body=None, event_type="e",
+            via_outbox=False,
         )
     # select 1 + update 1 = execute 2회, flush 1회(만료 반영)
     assert db.execute.await_count == 2
@@ -184,7 +191,7 @@ async def test_no_deactivation_when_all_ok():
     dev = _dev("ExponentPushToken[GOOD]")
     db = _mock_db([dev])
     with patch("ee.services.expo_push._expo_send_chunk", new=AsyncMock(return_value=[{"status": "ok"}])):
-        await expo.deliver_expo_push(db, uuid.uuid4(), [dev.member_id], title="T", body="B", event_type="e")
+        await expo.deliver_expo_push(db, uuid.uuid4(), [dev.member_id], title="T", body="B", event_type="e", via_outbox=False)
     # dead 없음 → update/flush 미실행(select 1회만)
     assert db.execute.await_count == 1
     db.flush.assert_not_awaited()
@@ -198,6 +205,7 @@ async def test_skips_when_all_muted():
     with patch("ee.services.expo_push._expo_send_chunk", new=sent):
         await expo.deliver_expo_push(
             db, uuid.uuid4(), [m], title="T", body="B", event_type="e", muted_member_ids={m},
+            via_outbox=False,
         )
     # 전원 mute → 조기 return: device 조회도 발송도 없음
     db.execute.assert_not_awaited()
@@ -209,7 +217,7 @@ async def test_no_send_when_no_devices():
     db = _mock_db([])  # select → 0 devices
     sent = AsyncMock()
     with patch("ee.services.expo_push._expo_send_chunk", new=sent):
-        await expo.deliver_expo_push(db, uuid.uuid4(), [uuid.uuid4()], title="T", body="B", event_type="e")
+        await expo.deliver_expo_push(db, uuid.uuid4(), [uuid.uuid4()], title="T", body="B", event_type="e", via_outbox=False)
     sent.assert_not_awaited()  # 디바이스 0 → 발송 없음
 
 
@@ -233,6 +241,7 @@ async def test_deliver_expo_push_includes_org_project_story_sprint_in_data_paylo
             db, org_id, [dev.member_id], title="T", body="B", event_type="task_completed",
             reference_type="task", reference_id=uuid.uuid4(),
             project_id=project_id, story_id=story_id,
+            via_outbox=False,
         )
     assert len(captured) == 1
     data = captured[0]["data"]
@@ -246,4 +255,4 @@ async def test_best_effort_swallows_exceptions():
     db = AsyncMock()
     db.execute = AsyncMock(side_effect=RuntimeError("db down"))
     # 예외가 전파되면 알림 파이프라인이 되돌려짐 — best-effort 로 삼켜야 함(예외 안 남).
-    await expo.deliver_expo_push(db, uuid.uuid4(), [uuid.uuid4()], title="T", body="B", event_type="e")
+    await expo.deliver_expo_push(db, uuid.uuid4(), [uuid.uuid4()], title="T", body="B", event_type="e", via_outbox=False)

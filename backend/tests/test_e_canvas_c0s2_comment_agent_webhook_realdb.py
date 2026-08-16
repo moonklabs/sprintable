@@ -5,6 +5,11 @@
 전달" 전제)하나 그 webhook 발송은 휴먼 전용(_deliver_personal_webhooks·m.type!='agent')이라
 comment.created가 webhook-agent에 **미도달**(죽은 경로). fix: agent(활성 webhook)도 webhook 발송
 (Event-skip 유지·이중배달 0)로 부활.
+
+story #2696: via_outbox 기본값이 True로 바뀌어(outbox 이관) 이 파일이 검증하는 "한 호출 안에서
+webhook까지 도달" 전제(_post_with_retry 직접 캡처)가 깨지므로 via_outbox=False를 명시해
+즉시-배달 경로를 그대로 검증한다 — 이 파일의 관심사는 라우팅 결정(agent도 대상에 포함되는가·
+payload 형식)이지 outbox 자체가 아니다.
 """
 from __future__ import annotations
 
@@ -117,6 +122,7 @@ async def test_comment_created_reaches_agent_webhook():
                     reference_type="story",
                     reference_id=uuid.uuid4(),
                     source_project_id=seeded["project_id"],
+                    via_outbox=False,
                 )
                 await s.commit()
 
@@ -180,6 +186,7 @@ async def test_agent_webhook_payload_carries_reaction_context():
                     reference_type="story", reference_id=story_id, source_project_id=project_id,
                     context={"story_id": str(story_id), "comment_id": str(comment_id),
                              "content": "확인 바람", "author_member_id": str(author_id)},
+                             via_outbox=False,
                 )
                 await s.commit()
 

@@ -33,6 +33,12 @@ export function useEntityPicker(projectId: string | undefined) {
   const [entityQuery, setEntityQuery] = useState<string | null>(null);
   const [entityResults, setEntityResults] = useState<EntityResult[]>([]);
   const [entityIndex, setEntityIndex] = useState(0);
+  // story d6f8e025 — Enter는 메시지 전송 키를 겸한다. 피커가 열려 있다는 이유만으로(사용자가
+  // 화살표로 후보를 능동 선택한 적 없이) Enter를 "수락"으로 해석하면, "#3086"까지 타이핑하고
+  // 전송하려던 Enter가 조용히 최상위 후보를 토큰으로 삽입해버린다(실사례: backlink 오염).
+  // hasNavigated가 true일 때만(moveUp/moveDown을 최소 1회 거친 뒤에만) Enter/Tab이 수락한다 —
+  // 새 후보 집합이 도착할 때마다(entityIndex가 0으로 리셋되는 바로 그 지점) 같이 리셋한다.
+  const [hasNavigated, setHasNavigated] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,6 +56,7 @@ export function useEntityPicker(projectId: string | undefined) {
           if (cancelled) return;
           setEntityResults(groupEntitiesByType(parseEntitySearchResults(json)));
           setEntityIndex(0);
+          setHasNavigated(false);
         })
         .catch(() => {});
     }, 200);
@@ -60,11 +67,12 @@ export function useEntityPicker(projectId: string | undefined) {
     entityQuery,
     entityResults,
     entityIndex,
+    hasNavigated,
     /** 입력 텍스트가 `#쿼리`로 바뀔 때마다 호출 — null이면 피커를 닫는다. */
     setEntityQuery,
-    close: () => { setEntityQuery(null); setEntityResults([]); },
-    moveDown: () => setEntityIndex((i) => (entityResults.length ? (i + 1) % entityResults.length : 0)),
-    moveUp: () => setEntityIndex((i) => (entityResults.length ? (i - 1 + entityResults.length) % entityResults.length : 0)),
+    close: () => { setEntityQuery(null); setEntityResults([]); setHasNavigated(false); },
+    moveDown: () => { setHasNavigated(true); setEntityIndex((i) => (entityResults.length ? (i + 1) % entityResults.length : 0)); },
+    moveUp: () => { setHasNavigated(true); setEntityIndex((i) => (entityResults.length ? (i - 1 + entityResults.length) % entityResults.length : 0)); },
     /** 선택 결과 텍스트/caret을 돌려주고 피커를 닫는다 — text state 반영·refocus는 호출부 책임
      * (호출부마다 textarea ref가 다르므로 hook이 DOM을 직접 만지지 않는다). */
     selectAndApply(entity: EntityResult, value: string, cursorPos: number): { text: string; caretPos: number } {

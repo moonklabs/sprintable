@@ -498,6 +498,9 @@ async def close_sprint(
                 # story #1953: 이미 `if sprint.project_id and ...`로 non-null 확인된 후라
                 # 신규 조회 없이 그대로 실음.
                 source_project_id=sprint.project_id,
+                # story #2696([클래스 마감]): 요청 트랜잭션 안 동기 webhook POST 결함 클래스
+                # (#2687/#2688/#373cfaa1/#2694) 예방 — outbox 이관.
+                via_outbox=True,
             )
     await _attach_org_project_slugs(db, org_id, [sprint])
     return SprintResponse.model_validate(sprint)
