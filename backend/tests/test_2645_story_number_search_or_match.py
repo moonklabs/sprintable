@@ -295,7 +295,7 @@ async def test_list_backlog_number_search_matches():
         async with Session() as s:
             repo = StoryRepository(s, seeded["org_id"])
             n = seeded["story_by_number_only_number"]
-            stories = await repo.list_backlog(project_id=seeded["project_id"], q=str(n))
+            stories, _total = await repo.list_backlog(project_id=seeded["project_id"], q=str(n))
             assert {st.id for st in stories} == {seeded["story_by_number_only"]}
     finally:
         await engine.dispose()

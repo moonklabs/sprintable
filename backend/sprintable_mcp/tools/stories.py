@@ -6,9 +6,26 @@ from __future__ import annotations
 from mcp.types import CallToolResult, TextContent
 
 from ..api_client import client
-from ..response import err, ok
+from ..response import err, ok, ok_paginated
 from ..schemas import SprintableInput, StoryPoints, StoryPriority, StoryStatus
 from .attachments import upload_attachments
+
+
+def _has_more_from_headers(headers, items: list) -> tuple[bool, str | None]:
+    """story #2428 — stories.py 계열은 X-Total-Count/X-Next-Cursor **헤더**로 페이지네이션을
+    신호한다(docs.py/notifications.py의 body meta{has_more} 규약과 wire shape가 다름). BE가
+    X-Next-Cursor를 «항상»(결과가 있으면) 싣기 때문에(app/routers/goals.py·stories.py — 실제
+    다음 페이지 유무와 무관하게 `if items:`만 조건) 그 헤더의 존재 자체는 has_more 신호가
+    아니다 — X-Total-Count와 이번 응답 건수를 비교해야 진짜 «더 있음»을 안다."""
+    total_raw = headers.get("x-total-count")
+    next_cursor = headers.get("x-next-cursor")
+    if total_raw is None:
+        return False, next_cursor
+    try:
+        total = int(total_raw)
+    except (TypeError, ValueError):
+        return False, next_cursor
+    return total > len(items), next_cursor
 
 
 class ListStoriesInput(SprintableInput):
@@ -17,6 +34,15 @@ class ListStoriesInput(SprintableInput):
     status: StoryStatus | None = None
     priority: StoryPriority | None = None
     assignee_id: str | None = None
+    limit: int | None = None
+    cursor: str | None = None  # 이전 호출의 X-Next-Cursor 헤더 값을 그대로 넘기면 다음 페이지.
+
+
+class ListBacklogInput(SprintableInput):
+    limit: int | None = None
+    # story #2428: cursor 없음 — 이 분기(list_backlog)는 cursor pagination 자체를 지원 안 한다
+    # (app/repositories/story.py list_backlog() docstring — #2489/board 분기와 갈라진 지점).
+    # 더 필요하면 limit을 올려 재호출하는 것이 유일한 다음 페이지 수단.
 
 
 class AddStoryInput(SprintableInput):
@@ -123,20 +149,41 @@ async def list_stories(args: ListStoriesInput) -> list[TextContent]:
             params["priority"] = args.priority.value
         if args.assignee_id:
             params["assignee_id"] = args.assignee_id
-        return ok(await client.get("/api/v2/stories", params=params))
+        if args.limit:
+            params["limit"] = args.limit
+        if args.cursor:
+            params["cursor"] = args.cursor
+        items, headers = await client.get_with_headers("/api/v2/stories", params=params)
+        has_more, next_cursor = _has_more_from_headers(headers, items)
+        return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_list_stories")
     except Exception as exc:
         return err(str(exc))
 
 
-async def list_backlog(args: SprintableInput) -> list[TextContent]:
+async def list_backlog(args: ListBacklogInput) -> list[TextContent]:
     """백로그 스토리 목록 (스프린트 미배정)."""
     # b5870c4c: 전용 `/stories/backlog` 라우트 부재 → `/{id}` 로 shadow 돼 422(id="backlog" 非-UUID).
     # 기존 list 엔드포인트 + `no_sprint` 필터(server-side repo.list_backlog·sprint 미배정·docstring 정합) 재사용.
     # ⚠️ no_sprint 는 project_id 와 함께여야 backlog 분기 동작(stories.py list_stories).
     try:
-        return ok(await client.get(
-            "/api/v2/stories", params={"project_id": client.require_project_id(), "no_sprint": "true"}
-        ))
+        params: dict = {"project_id": client.require_project_id(), "no_sprint": "true"}
+        if args.limit:
+            params["limit"] = args.limit
+        items, headers = await client.get_with_headers("/api/v2/stories", params=params)
+        # story #2428: 이 분기는 X-Next-Cursor를 안 싣는다(cursor 미지원 — ListBacklogInput 주석
+        # 참조) — ok_paginated의 cursor 문구는 여기서 오해를 부르므로 쓰지 않고 limit 재호출을
+        # 직접 안내한다.
+        has_more, _ = _has_more_from_headers(headers, items)
+        blocks = ok(items)
+        if has_more:
+            blocks.append(TextContent(
+                type="text",
+                text=(
+                    f"※ 더 있음 — 이 응답은 {len(items)}건까지만 포함(전량 아님). "
+                    f"이 도구는 cursor를 지원 안 함 — limit을 올려 sprintable_list_backlog를 다시 호출."
+                ),
+            ))
+        return blocks
     except Exception as exc:
         return err(str(exc))
 

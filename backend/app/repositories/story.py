@@ -244,8 +244,14 @@ class StoryRepository(BaseRepository[Story]):
         story_number: int | None = None,
         q: str | None = None,
         unattached: bool = False,
-    ) -> list[Story]:
+    ) -> tuple[list[Story], int]:
         """sprint 미배정 + 삭제되지 않은 스토리만 서버사이드 필터.
+
+        story #2428: `(stories, total)` 튜플을 반환한다(list()/list_board()와 동형 — 필터
+        適用 後·limit 適用 前 실 COUNT). 예전엔 total 자체를 안 내(X-Total-Count 헤더 부재)
+        MCP `sprintable_list_backlog`가 「더 있는지」를 알 방법이 없었다 — 카디르가 200건
+        요청 大비 이 분기가 1000건(자연 상한)까지 조용히 다 실어 320만자 응답을 낸 것도 이
+        갭의 다른 얼굴(list_backlog 호출부는 이 사실 자체를 몰랐다).
 
         story #2188 형제(2026-07-25, 오르테가군 판정) — board 분기(#2489)와 같은 결함 클래스:
         이 분기도 epic_id/assignee_id/status/story_number/q를 받기만 하고 무시했다. 필터
@@ -280,8 +286,12 @@ class StoryRepository(BaseRepository[Story]):
             query = query.where(_title_search_filter(q))
         if unattached:
             query = query.where(_unattached_clause())
+
+        count_q = select(func.count()).select_from(query.subquery())
+        total = (await self.session.execute(count_q)).scalar_one()
+
         result = await self.session.execute(query.limit(limit))
-        return list(result.scalars().all())
+        return list(result.scalars().all()), total
 
     async def transition_status(self, id: uuid.UUID) -> Story:
         story = await self.get(id)

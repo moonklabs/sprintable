@@ -204,10 +204,15 @@ async def list_stories(
         # ⚠️ cursor는 안 넘긴다 — #2190은 이 분기와 무관함이 밝혀졌다(list_backlog
         # docstring 참조: /api/stories/backlog 프록시가 status를 강제 부착해 실제로는
         # board 분기로 감).
-        stories = await repo.list_backlog(
+        # story #2428: list_backlog가 이제 (stories, total) — X-Total-Count로 호출부가
+        # "더 있는지"를 알 수 있게 한다(이 분기는 cursor 미지원, 위 docstring 참조 — 더
+        # 필요하면 limit을 올려 재호출하는 것이 유일한 다음 페이지 수단).
+        stories, total = await repo.list_backlog(
             project_id, limit=limit, epic_id=epic_id, assignee_id=assignee_id,
             status=status_filter, story_number=story_number, q=q, unattached=unattached,
         )
+        if response is not None:
+            response.headers["X-Total-Count"] = str(total)
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
         await _attach_has_evidence(repo.session, stories)
         await _attach_has_hypothesis_or_goal(repo.session, stories)

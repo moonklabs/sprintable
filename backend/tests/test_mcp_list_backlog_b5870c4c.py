@@ -20,13 +20,13 @@ async def test_list_backlog_targets_existing_endpoint_with_no_sprint(monkeypatch
         def require_project_id(self):  # E-MCP-OPT ff6cb90d: 툴이 이제 이 메서드를 씀.
             return self.project_id
 
-        async def get(self, path, params=None):
+        async def get_with_headers(self, path, params=None):
             captured["path"] = path
             captured["params"] = params or {}
-            return []
+            return [], {"x-total-count": "0"}
 
     monkeypatch.setattr(st, "client", _FakeClient())
-    await st.list_backlog(None)
+    await st.list_backlog(st.ListBacklogInput())
 
     # 부재 라우트(/stories/backlog) 호출 금지 — /{id} shadow→422 의 근본.
     assert captured["path"] == "/api/v2/stories", captured
