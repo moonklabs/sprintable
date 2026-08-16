@@ -237,3 +237,61 @@ describe('NotificationBell — sync_status 배너(story #2201)', () => {
     expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았습니다');
   });
 });
+
+// story #2686(축D) — 채팅 mark-read가 그 대화의 event-notification read_at을 BE에서
+// 동기(디디 계약)하는데, 벨이 그걸 "즉시" 반영하려면 conversation.read SSE 수신 시 unread-count를
+// 재fetch해야 한다(기존 30초 폴링만으론 AC①의 "즉시" 성립이 늦다). 30초를 기다리지 않고도
+// 반영되는지를 정확히 그 축으로 고정한다 — 폴링이 언젠가 따라잡는 것과는 다른 결함 클래스.
+describe('NotificationBell — conversation.read SSE 즉시 unread-count 재fetch(story #2686)', () => {
+  it('conversation.read를 받으면 폴링(30초)을 기다리지 않고 unread-count를 다시 fetch해 배지를 갱신한다', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    let unreadCountCallCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/event-notifications/unread-count')) {
+        unreadCountCallCount += 1;
+        // 두 번째 호출(=conversation.read 이후 재fetch)부터 감소된 값을 준다 — 재fetch가
+        // "실제로" 일어났는지(단순 로컬 감산이 아니라 서버 truth 재조회인지)까지 구분한다.
+        return new Response(JSON.stringify({ count: unreadCountCallCount === 1 ? 3 : 1 }), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.includes('/api/event-notifications?')) {
+        return new Response(JSON.stringify({ data: [], meta: { hasMore: false } }), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ count: 0 }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+
+    await openBell();
+    await act(async () => { await Promise.resolve(); });
+    const bellButton = container.querySelector('button[aria-expanded]') as HTMLButtonElement;
+    expect(bellButton.getAttribute('aria-label')).toContain('3');
+
+    const beforeCount = unreadCountCallCount;
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => {
+      es.emit('conversation.read', { conversation_id: 'conv-1', member_id: 'me-1', last_read_at: '2026-08-16T00:00:00Z', unread_count: 0 });
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(unreadCountCallCount).toBe(beforeCount + 1);
+    expect(bellButton.getAttribute('aria-label')).toContain('1');
+  });
+
+  it('sync_status 등 다른 extra 이벤트는 unread-count를 재fetch하지 않는다(과잉살상 금지 음성대조)', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
+    await openBell();
+
+    const es = FakeEventSource.instances[0]!;
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const beforeCalls = fetchMock.mock.calls.length;
+    await act(async () => { es.emit('sync_status', { complete: true, reason: null, returned: 0 }); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(fetchMock.mock.calls.length).toBe(beforeCalls);
+  });
+});

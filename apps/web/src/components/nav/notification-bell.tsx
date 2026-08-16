@@ -136,7 +136,12 @@ function isSyncDegraded(data: SseSyncStatus): boolean {
   return !data.complete && data.reason !== null && data.reason !== 'no_cursor';
 }
 
-const SYNC_STATUS_EVENT_NAMES = ['sync_status'];
+// story #2686(축D) — 채팅 mark-read가 그 대화의 event-notification read_at을 서버에서
+// 동기하도록 BE가 확장됐다(디디 계약). 벨은 기존 30초 폴링+visibility로도 결국 반영되지만
+// (안전망, 아래 useEffect 그대로 유지), conversation.read SSE(conversations.py
+// mark_conversation_read가 이미 본인 커넥션에 쏘는 기존 payload — 새 필드 불요)를 받는 즉시
+// unread-count를 재fetch하면 "채팅 읽자마자 벨이 준다"가 30초 대기 없이 성립한다.
+const BELL_EXTRA_EVENT_NAMES = ['sync_status', 'conversation.read'];
 
 async function fetchUnreadCount(projectId?: string): Promise<number> {
   const params = projectId ? `?project_id=${projectId}` : '';
@@ -401,19 +406,28 @@ export function NotificationBell() {
   }, [t]);
 
   // story #2201 — sync_status는 SseEventNotification 계약과 무관한 별도 이벤트라
-  // extraEventNames/onExtraEvent로 구독한다(핸들러 파이프라인을 안 건드림).
-  const handleSyncStatus = useCallback((eventName: string, data: unknown) => {
-    if (eventName !== 'sync_status') return;
-    const parsed = data as Partial<SseSyncStatus>;
-    if (typeof parsed.complete !== 'boolean') return;
-    setSyncDegraded(isSyncDegraded(parsed as SseSyncStatus));
-  }, []);
+  // extraEventNames/onExtraEvent로 구독한다(핸들러 파이프라인을 안 건드림). story #2686(축D) —
+  // conversation.read도 같은 축(별도 계약, 같은 커넥션)으로 추가 — 채팅을 읽으면 BE가 그
+  // 대화의 event-notification read_at도 동기하므로, 이 신호를 받는 즉시 unread-count를
+  // 서버 truth로 재fetch한다(payload 자체는 안 읽는다 — 벨 카운트를 그 payload에서 역산하지
+  // 않고 항상 재조회, 30초 폴링·mark_read PATCH 후 재조회와 동일 관례).
+  const handleExtraEvent = useCallback((eventName: string, data: unknown) => {
+    if (eventName === 'sync_status') {
+      const parsed = data as Partial<SseSyncStatus>;
+      if (typeof parsed.complete !== 'boolean') return;
+      setSyncDegraded(isSyncDegraded(parsed as SseSyncStatus));
+      return;
+    }
+    if (eventName === 'conversation.read') {
+      void fetchUnreadCount(projectId ?? undefined).then(setUnreadCount);
+    }
+  }, [projectId]);
 
   useSseNotifications({
     onNotification: handleSseNotification,
     memberId: currentTeamMemberId,
-    extraEventNames: SYNC_STATUS_EVENT_NAMES,
-    onExtraEvent: handleSyncStatus,
+    extraEventNames: BELL_EXTRA_EVENT_NAMES,
+    onExtraEvent: handleExtraEvent,
   });
 
   // unread count 폴링 (30초 — SSE 실패 보완)
