@@ -1,13 +1,13 @@
 """QA test fixture B for story #2401 sibling-collision guard (Mirko cross-QA, throwaway).
-Same revision value as fixture A on purpose — axis A (revision duplicate) positive control.
+Different revision value from A but SAME down_revision — axis B (dual-head) positive control.
 
-Revision ID: 0999
+Revision ID: 0997
 Revises: 0252
 Create Date: 2026-08-16
 """
 from __future__ import annotations
 
-revision = "0999"
+revision = "0997"
 down_revision = "0252"
 branch_labels = None
 depends_on = None
