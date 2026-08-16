@@ -92,7 +92,12 @@ export function AppSidebar({
     if (isMobile) setOpenMobile(false);
   }, [pathname, isMobile, setOpenMobile]);
 
-  const [inboxUnreadCount, setInboxUnreadCount] = useState(0);
+  // story #1981 — GNB 결재함 배지 semantic 교체: "안 읽은 알림 수"(/api/notifications/count)
+  // 대신 "내가 승인 가능한 pending 게이트 수"(/api/gates?status=pending&assigned_to_me=true)로.
+  // mobile-tab-bar.tsx가 이미 같은 계약으로 쓰던 것(story #1974 개인화·#1960 held fix 반영,
+  // origin/main과 diff 0으로 prod에도 이미 있음, #1981 그라운딩 확認)을 그대로 재사용 — 새
+  // 집계 발명 없음.
+  const [inboxPendingCount, setInboxPendingCount] = useState(0);
   // story #1977(트랙B) GNB ③ 채팅 unread 총합 — story #2007로 dashboard-shell.tsx의 단일
   // useChatUnreadTotal() 호출 결과를 prop으로 받는다(MobileTabBar와 SSE 연결 중복 제거).
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -116,23 +121,24 @@ export function AppSidebar({
 
   useEffect(() => {
     let cancelled = false;
-    const fetchUnread = async () => {
+    const fetchPending = async () => {
       try {
-        // story #2160 — 30초 폴링이 401을 조용히 삼키던 자리(fetchWithAuth로 전환).
-        const res = await fetchWithAuth('/api/notifications/count');
+        // story #2160 — 30초 폴링이 401을 조용히 삼키던 자리(fetchWithAuth로 전환) — 그
+        // 규율은 story #1981의 새 엔드포인트에도 그대로 적용한다.
+        const res = await fetchWithAuth('/api/gates?status=pending&assigned_to_me=true');
         if (!res.ok || cancelled) return;
-        const json = await res.json() as { data?: { memoUnreadCount?: number; inboxUnreadCount?: number } };
+        const gates = await res.json() as unknown[];
         if (!cancelled) {
-          setInboxUnreadCount(json.data?.inboxUnreadCount ?? 0);
+          setInboxPendingCount(Array.isArray(gates) ? gates.length : 0);
         }
       } catch { /* noop */ }
     };
 
-    void fetchUnread();
-    intervalRef.current = setInterval(() => { void fetchUnread(); }, 30000);
+    void fetchPending();
+    intervalRef.current = setInterval(() => { void fetchPending(); }, 30000);
 
     const handleVisibility = () => {
-      if (!document.hidden) void fetchUnread();
+      if (!document.hidden) void fetchPending();
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
@@ -186,7 +192,7 @@ export function AppSidebar({
                     ? { href: item.path, isActive: isActive(item.path) }
                     : resourceLink(item.path);
                   const Icon = item.icon;
-                  const badgeCount = item.badgeKey === 'inbox' ? inboxUnreadCount
+                  const badgeCount = item.badgeKey === 'inbox' ? inboxPendingCount
                     : item.badgeKey === 'chats' ? chatUnreadTotal
                     : 0;
                   const badgeCap = item.badgeKey === 'inbox' ? 9 : 99;
