@@ -19,7 +19,7 @@ import Placeholder from '@tiptap/extension-placeholder';
 import { Bold, Italic, Strikethrough, Code, Link2, Highlighter, Undo2, Redo2, PanelLeft, Plus, ImageIcon, Paperclip } from 'lucide-react';
 import { pickAndUpload } from './extensions/slash-command';
 import { CalloutNode } from './extensions/callout-node';
-import { SlashCommandExtension } from './extensions/slash-command';
+import { createSlashCommandExtension, type SlashMenuStrings } from './extensions/slash-command';
 import { PageEmbedExtension } from './extensions/page-embed-node';
 import { CodeBlockWithCopy } from './extensions/code-block-copy';
 import { ToggleBlock, ToggleSummary, ToggleContent } from './extensions/toggle-block';
@@ -113,6 +113,46 @@ export function DocEditor({
   };
 }) {
   const tEditor = useTranslations('docs');
+  // story ab2fd813(#2028) — 슬래시 팝업은 React 트리 밖(body append via createRoot)에
+  // 렌더돼 slash-command.tsx 안에서 useTranslations를 직접 못 쓴다. 여기서 문자열을 미리
+  // resolve해 createSlashCommandExtension에 주입한다. i18n-key-coverage.test.ts는
+  // useTranslations 할당과 t('key') 호출이 "같은 파일"일 때만 키를 검증하므로, 이 tSlash 호출은
+  // 반드시 이 파일(doc-editor.tsx) 안에서 각 키를 개별 리터럴로 호출해야 한다(동적 키 조합 금지).
+  const tSlash = useTranslations('docs.slashMenu');
+  const slashMenuStrings: SlashMenuStrings = {
+    categories: {
+      text: tSlash('categories.text'),
+      list: tSlash('categories.list'),
+      block: tSlash('categories.block'),
+      media: tSlash('categories.media'),
+      advanced: tSlash('categories.advanced'),
+    },
+    items: {
+      heading1: tSlash('items.heading1.description'),
+      heading2: tSlash('items.heading2.description'),
+      heading3: tSlash('items.heading3.description'),
+      bulletList: tSlash('items.bulletList.description'),
+      orderedList: tSlash('items.orderedList.description'),
+      checklist: tSlash('items.checklist.description'),
+      codeBlock: tSlash('items.codeBlock.description'),
+      blockquote: tSlash('items.blockquote.description'),
+      callout: tSlash('items.callout.description'),
+      table: tSlash('items.table.description'),
+      image: tSlash('items.image.description'),
+      file: tSlash('items.file.description'),
+      embed: tSlash('items.embed.description'),
+      mermaidDiagram: tSlash('items.mermaidDiagram.description'),
+      columns: tSlash('items.columns.description'),
+      mathBlock: tSlash('items.mathBlock.description'),
+      mathInline: tSlash('items.mathInline.description'),
+      toggle: tSlash('items.toggle.description'),
+      pageEmbed: tSlash('items.pageEmbed.description'),
+      horizontalRule: tSlash('items.horizontalRule.description'),
+    },
+    embedPrompt: tSlash('embedPrompt'),
+    mermaidDefault: { start: tSlash('mermaidDefault.start'), end: tSlash('mermaidDefault.end') },
+    toggleDefaultTitle: tSlash('toggleDefaultTitle'),
+  };
   const suppressUpdateRef = useRef(false);
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
   const [tocHeadings, setTocHeadings] = useState<DocHeading[]>([]);
@@ -170,7 +210,7 @@ export function DocEditor({
         onNavigate,
         suggestion: createWikiLinkSuggestion(projectId),
       }),
-      SlashCommandExtension,
+      createSlashCommandExtension(slashMenuStrings),
       PageEmbedExtension.configure({ currentDocId, onNavigate }),
     ],
     editable,
@@ -237,26 +277,26 @@ export function DocEditor({
   const openImagePicker = useCallback(() => {
     if (editor) pickAndUpload(editor, 'image/*');
     setInsertMenuOpen(false);
-  }, [editor]);
+  }, [editor, setInsertMenuOpen]);
   const openFilePicker = useCallback(() => {
     if (editor) pickAndUpload(editor);
     setInsertMenuOpen(false);
-  }, [editor]);
+  }, [editor, setInsertMenuOpen]);
 
   // DnD active-zone — 파일 드래그 동안 점선 오버레이(실 drop 은 ProseMirror handleDrop 처리).
   const onDragEnter = useCallback((e: React.DragEvent) => {
     if (!Array.from(e.dataTransfer?.types ?? []).includes('Files')) return;
     dragDepthRef.current += 1;
     setIsDragging(true);
-  }, []);
+  }, [setIsDragging]);
   const onDragLeave = useCallback(() => {
     dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
     if (dragDepthRef.current === 0) setIsDragging(false);
-  }, []);
+  }, [setIsDragging]);
   const onDrop = useCallback(() => {
     dragDepthRef.current = 0;
     setIsDragging(false);
-  }, []);
+  }, [setIsDragging]);
 
   // Extract TOC headings from editor + assign IDs to heading DOM elements
   useEffect(() => {

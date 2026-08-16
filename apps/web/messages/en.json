@@ -2026,7 +2026,44 @@
     "copyMarkdown": "Copy Markdown",
     "deleteDoc": "Delete",
     "createFailed": "Failed to create document",
-    "notFound": "Document not found"
+    "notFound": "Document not found",
+    "slashMenu": {
+      "categories": {
+        "text": "Text",
+        "list": "List",
+        "block": "Block",
+        "media": "Media",
+        "advanced": "Advanced"
+      },
+      "items": {
+        "heading1": { "description": "Big heading" },
+        "heading2": { "description": "Medium heading" },
+        "heading3": { "description": "Small heading" },
+        "bulletList": { "description": "Unordered list" },
+        "orderedList": { "description": "Ordered list" },
+        "checklist": { "description": "Checklist" },
+        "codeBlock": { "description": "Code block" },
+        "blockquote": { "description": "Quote block" },
+        "callout": { "description": "Highlighted box" },
+        "table": { "description": "Insert table" },
+        "image": { "description": "Insert image" },
+        "file": { "description": "Attach file" },
+        "embed": { "description": "Embed external URL" },
+        "mermaidDiagram": { "description": "Insert diagram" },
+        "columns": { "description": "2/3-column layout" },
+        "mathBlock": { "description": "LaTeX block formula" },
+        "mathInline": { "description": "LaTeX inline formula" },
+        "toggle": { "description": "Collapsible block" },
+        "pageEmbed": { "description": "Embed another doc" },
+        "horizontalRule": { "description": "Divider" }
+      },
+      "embedPrompt": "Enter the URL to embed (YouTube, Figma, etc.):",
+      "mermaidDefault": {
+        "start": "Start",
+        "end": "End"
+      },
+      "toggleDefaultTitle": "Toggle title"
+    }
   },
   "rewards": {
     "title": "Rewards",
