@@ -110,3 +110,16 @@ export const NAV_GROUPS: NavGroupConfig[] = [
     ],
   },
 ];
+
+// story #2682(S2)에서 more/page.tsx 로컬 상수였던 것을 story #2684(S4)에서 이리 옮긴다 —
+// 모바일 허브 그룹 순서·제외 목록도 nav-config.ts의 SSOT 일부다(그래야 depth 가드가 더보기
+// 렌더러 내부를 몰라도 이 파일 하나만 보고 「도달 depth ≤2」를 판정할 수 있다).
+//
+// 그룹 순서는 데스크톱과 다르다(doc mobile-ia-full-completion-2678 §2.3 명시) — 데스크톱은
+// "조직이 4구역 위 프레임"이라 맨 위지만, 모바일 허브는 §2.2 분류(자주→가끔→관리) 순서를
+// 따라 조직·설정(관리)이 뒤로 간다: 홈·지금 / 작업 / 신뢰 / 지식 / 조직(이벤트 포함) / 설정.
+export const MOBILE_HUB_GROUP_ORDER = ['now', 'work', 'trust', 'knowledge', 'organization', 'settings'];
+
+// flow·inbox·chats는 바텀 탭(지금/결재/채팅)이 이미 depth 1로 커버한다(doc §2.2 "자주" 축) —
+// 허브에 또 실으면 같은 목적지로 가는 진입점이 두 개가 되고 "몇 탭"의 의미가 흐려진다.
+export const MOBILE_HUB_EXCLUDE_IDS = new Set(['flow', 'inbox', 'chats']);
