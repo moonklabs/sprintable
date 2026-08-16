@@ -258,12 +258,17 @@ export const EXEMPT_PAIRS = new Set<string>([
 // 고치는 일이 아니다"(AC6)를 지키는
 // 방법이다 — 여기 있는 40건 «중 실제로 몇 건이 진짜 결함인지»는 이 스토리가 판정하지 않는다.
 // 그래도 매 실행 로그에 grandfather 카운트로 찍혀 "원래 그런 것"으로 조용히 묻히지 않는다.
-// story #2410(PO 지적, 2026-08-02): 이 40건 중 18건은 이제 이 스캔에 «안 걸린다» — isNumberAdjacent
-// 정밀화(이름·런타임류 배제) 여파로, 그동안 「진짜 결함인지 몰랐던」게 아니라 「애초에 numberAdjacent가
-// 아니었던」 것으로 밝혀졌다. Set 크기(40)는 #2367 최초 스캔 스냅샷이라 그대로 두지만("아래 40건" 문단
-// 그대로), 매 실행 로그의 "안 걸림" 경고만으로는 다음 사람이 노이즈로 읽고 넘길 수 있어 여기 명시로
-// 남긴다 — 실 걸림 수(22)는 GRANDFATHER_LIVE_COUNT_TEST가 고정한다(아래).
-// 안 걸리는 18건: board.backlinksEmptyFallback<->board.backlinksEmptyScoped · canvas.resolveAction<->
+// story #2410(PO 지적, 2026-08-02): 이 40건 중 18건은 isNumberAdjacent 정밀화(이름·런타임류
+// 배제) 여파로 이 스캔에 «안 걸리게» 됐었다 — 그동안 「진짜 결함인지 몰랐던」게 아니라
+// 「애초에 numberAdjacent가 아니었던」 것으로 밝혀진 것. 당시(#2410 원 PR)엔 이 18건을 Set에서
+// 걷어낼지를 "이 PR이 정하지 않는다"로 명시 유보했었다.
+//
+// story #2410 후속(카디르, 2026-08-17, PO 승인) — 그 유보를 마저 정리한다. isNumberAdjacent
+// 정밀화 자체가 이미 "이 18건은 numberAdjacent가 아니다"라고 결론 낸 상태라, "판단 안 됨"으로
+// Set에 남겨 두는 건 실체 없는 유령 채무를 "아직 모름"으로 오독시키는 쪽이 더 나쁘다 —
+// GRANDFATHER_BASELINE(선언 40건)과 GRANDFATHER_LIVE_COUNT_TEST(실 걸림 22건)의 간극 자체가
+// 이 18건이었으므로, 걷어내면 둘이 같아진다(선언=실걸림=20, #2519의 소스삭제 2건 반영 후).
+// 제거된 18건: board.backlinksEmptyFallback<->board.backlinksEmptyScoped · canvas.resolveAction<->
 // canvas.resolvedByNote · dashboard.ccAgentStuck<->dashboard.ccWaitingGateReason ·
 // recruiter.back<->recruiter.{guideFileDeliveryNoteConnector,guideFileDeliveryNoteMcp,kitOrientingGuideBody} ·
 // recruiter.equipCreatedTitle<->recruiter.{equipDone,stepComplete} ·
@@ -273,27 +278,25 @@ export const EXEMPT_PAIRS = new Set<string>([
 // settings.slackIntegration.{mappedElsewhereHint,pendingHint}<->settings.slackIntegration.saveLabel ·
 // settings.slackIntegration.workspaceConnectedSummary<->settings.slackIntegration.workspaceLabel ·
 // standup.feedback<->standup.feedbackDialogTitle
-// ⇒ 이 18건을 GRANDFATHER_BASELINE에서 걷어낼지(진짜 결함이 아니었다고 결론)는 이 PR이 정하지 않는다
-// (AC6과 같은 판단 — 이 스토리는 정밀화만, triage는 별도).
+// 재확認(2026-08-17): 제거 후 전체 재스캔 — grandfatherHit=20(Set 크기와 일치)·newFindings=0
+// (이 18건이 「새 충돌」로 재부상하지 않았다). Set 크기 40→38(#2519)→20(이번), 실 걸림 수
+// GRANDFATHER_LIVE_COUNT_TEST 22→20(#2519)→20(이번, 변화 없음 — 애초에 이 18건은 살아있던
+// 채무가 아니었으므로).
 //
-// story #2519(2026-08-16, 고아 컴포넌트 정리) — 위 18건과는 다른 성질의 제거 2건.
-// `settings.slackIntegration.saveLabel <-> settings.slackIntegration.savePending`·
-// `settings.slackIntegration.savePending <-> settings.slackIntegration.saveRow`는 #2410
-// 이후에도 실제로 계속 걸리고 있었는데(스캔 정밀화 문제가 아니라 진짜 충돌), 그 값 자체(고아
-// 컴포넌트 `SlackIntegrationSettingsSection` 전용 i18n 네임스페이스)가 이 스토리에서 완전히
-// 삭제됐다 — "판정 보류"가 아니라 "그 문자열이 이제 존재하지 않는다"라 Set에서도 뺀다(#2410의
-// 판단 유보 대상과 다름, 소스가 사라진 건 재검토할 것도 없다). Set 크기 40→38, 실 걸림 수
-// GRANDFATHER_LIVE_COUNT_TEST 22→20.
+// story #2519(2026-08-16, 고아 컴포넌트 정리) — 위 18건과는 다른 성질의 제거 2건(이미 반영,
+// 아래 Set에는 포함 안 됨). `settings.slackIntegration.saveLabel <-> settings.slackIntegration.
+// savePending`·`settings.slackIntegration.savePending <-> settings.slackIntegration.saveRow`는
+// #2410 이후에도 실제로 계속 걸리고 있었는데(스캔 정밀화 문제가 아니라 진짜 충돌), 그 값
+// 자체(고아 컴포넌트 `SlackIntegrationSettingsSection` 전용 i18n 네임스페이스)가 그 스토리에서
+// 완전히 삭제됐다 — "판정 보류"가 아니라 "그 문자열이 이제 존재하지 않는다"라 Set에서도 뺀다
+// (#2410의 판단 유보 대상과 다름, 소스가 사라진 건 재검토할 것도 없다).
 export const GRANDFATHER_BASELINE = new Set<string>([
-  'board.backlinksEmptyFallback <-> board.backlinksEmptyScoped',
   'cage.pendingSummary <-> cage.trustScorePending',
-  'canvas.resolveAction <-> canvas.resolvedByNote',
   'chats.agent <-> chats.agentCount',
   'chats.agentCount <-> chats.agentSection',
   'chats.agentCount <-> chats.personCount',
   'chats.agentCount <-> chats.you',
   'chats.participantsOthers <-> chats.personCount',
-  'dashboard.ccAgentStuck <-> dashboard.ccWaitingGateReason',
   'dashboard.ccQueueTruncated <-> dashboard.ccWaitingTitle',
   'docs.searchResultCount <-> docs.title',
   'goals.fieldPriority <-> goals.steerCappedNote',
@@ -303,23 +306,8 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'hypotheses.target <-> retro.hTargetLine',
   'inbox.bellAriaLabelCount <-> inbox.panelTitle',
   'presence.fabLabelWorking <-> presence.panelTitle',
-  'recruiter.back <-> recruiter.guideFileDeliveryNoteConnector',
-  'recruiter.back <-> recruiter.guideFileDeliveryNoteMcp',
-  'recruiter.back <-> recruiter.kitOrientingGuideBody',
-  'recruiter.equipCreatedTitle <-> recruiter.equipDone',
-  'recruiter.equipCreatedTitle <-> recruiter.stepComplete',
-  'recruiter.equipDone <-> recruiter.guideFileDeliveryNoteConnector',
-  'recruiter.equipDone <-> recruiter.kitOrientingTitle',
-  'recruiter.guideFileDeliveryNoteConnector <-> recruiter.kitOrientingGuideBody',
-  'recruiter.guideFileDeliveryNoteConnector <-> recruiter.stepComplete',
-  'recruiter.kitOrientingTitle <-> recruiter.stepComplete',
   'retro.recConfMid <-> retro.tallyMeasuring',
-  'settings.projectCreated <-> settings.tabProjects',
-  'settings.slackIntegration.mappedElsewhereHint <-> settings.slackIntegration.saveLabel',
-  'settings.slackIntegration.pendingHint <-> settings.slackIntegration.saveLabel',
-  'settings.slackIntegration.workspaceConnectedSummary <-> settings.slackIntegration.workspaceLabel',
   'standup.blockersRollupTitle <-> standup.today',
-  'standup.feedback <-> standup.feedbackDialogTitle',
   'storage.capacityUpgrade <-> storage.capacityWarnDesc',
   'storage.delete <-> storage.deleteImpact',
   'verify.chatProofCount <-> verify.chatProofSectionTitle',
