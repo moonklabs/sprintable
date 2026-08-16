@@ -281,25 +281,27 @@ describe('GRANDFATHER_BASELINE — 기존 채무는 통과, 새 충돌만 막는
 });
 
 // GRANDFATHER_BASELINE_COUNT_TEST(모듈 코멘트가 가리키는 그 테스트) — 오르테가군 지적,
-// 2026-07-31: 41번째 항목부터는 PO 승인 없이 조용히 못 들어온다. 크기를 40으로 고정해
+// 2026-07-31: 41번째 항목부터는 PO 승인 없이 조용히 못 들어온다. 크기를 고정해
 // 두면 누가 리뷰 없이 항목을 추가/삭제해도 이 테스트가 실패해 diff가 눈에 띈다(그 자체가
-// design:pass/qa:pass 리뷰를 거치게 만드는 자리).
+// design:pass/qa:pass 리뷰를 거치게 만드는 자리). story #2519 — 40→38(고아 컴포넌트
+// SlackIntegrationSettingsSection 삭제로 그 전용 i18n 키 자체가 사라진 2건 제거, GRANDFATHER_
+// BASELINE 상단 주석 참조 — #2410의 판단-유보 18건과는 다른 사유).
 describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 PO 승인, 조용한 증감을 막는다', () => {
-  it('#2367 최초 스캔 스냅샷은 정확히 40건이다', () => {
-    expect(GRANDFATHER_BASELINE.size).toBe(40);
+  it('#2367 최초 스캔 스냅샷(#2519 소스 삭제 2건 제외) 크기는 정확히 38건이다', () => {
+    expect(GRANDFATHER_BASELINE.size).toBe(38);
   });
 });
 
-// story #2410(PO 지적, 2026-08-02): «선언된» 40건과 «실제로 지금 걸리는» 건수는 다른 축이다
+// story #2410(PO 지적, 2026-08-02): «선언된» 건수와 «실제로 지금 걸리는» 건수는 다른 축이다
 // (isNumberAdjacent 정밀화로 18건이 더 안 걸리게 됐다 — GRANDFATHER_BASELINE 상단 주석 참조).
 // console.log의 "안 걸림" 경고만으로는 다음 사람이 노이즈로 읽고 넘길 수 있어, 실제 저장소
 // 전체를 스캔해 «지금 몇 건이 실제로 걸리는지»를 이 테스트가 고정한다 — GRANDFATHER_BASELINE_
-// COUNT_TEST(선언 수 40)와 이 테스트(실 걸림 수 22)가 서로 다른 값을 지키는 것 자체가 그
-// 간극(18)이 조용히 사라지지 않게 하는 자리다.
-describe('GRANDFATHER_LIVE_COUNT_TEST — 「선언된 40」과 「지금 실제로 걸리는 수」는 다른 축이다', () => {
-  it('실제 저장소 스캔에서 지금 걸리는 grandfather는 22건이다(18건은 #2410으로 안 걸리게 됨)', () => {
+// COUNT_TEST(선언 수)와 이 테스트(실 걸림 수)가 서로 다른 값을 지키는 것 자체가 그
+// 간극이 조용히 사라지지 않게 하는 자리다. story #2519 — 22→20(위와 같은 사유).
+describe('GRANDFATHER_LIVE_COUNT_TEST — 「선언된 수」와 「지금 실제로 걸리는 수」는 다른 축이다', () => {
+  it('실제 저장소 스캔에서 지금 걸리는 grandfather는 20건이다(18건은 #2410으로, 2건은 #2519 소스삭제로 안 걸리게 됨)', () => {
     const { grandfatherHit } = scanRepository();
-    expect(grandfatherHit.size).toBe(22);
+    expect(grandfatherHit.size).toBe(20);
   });
 
   it('새 FAIL은 없다(#2410 자체가 신규 회귀를 안 냈다는 증거)', () => {

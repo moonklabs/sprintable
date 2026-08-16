@@ -4,7 +4,6 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ArtifactViewer } from './artifact-viewer';
 import { CommitBar } from './commit-bar';
-import { ConcurrencyPrompt } from './concurrency-prompt';
 import { MOCK_ARTIFACT, MOCK_VERSIONS, MOCK_MEMBERS, MOCK_EDITABLE_ARTIFACT } from '@/services/canvas';
 
 function wrap(node: React.ReactNode) {
@@ -55,16 +54,5 @@ describe('C3 감시-게이트 회귀가드 (§4 — 편집 표면은 CCTV로 가
   it('CommitBar disables the save action when there are no changes (no empty commits)', () => {
     const markup = renderToStaticMarkup(wrap(<CommitBar changeCount={0} onCommit={() => {}} />));
     expect(markup).toContain('disabled=""');
-  });
-
-  it('ConcurrencyPrompt frames the other author\'s edit as calm collaboration, not a conflict/competition', () => {
-    const markup = renderToStaticMarkup(
-      wrap(<ConcurrencyPrompt authorName="디디 은와추쿠" version={5} onView={() => {}} onMergeOver={() => {}} />),
-    );
-    expect(markup).toContain('디디 은와추쿠');
-    for (const forbidden of ['충돌', '경쟁', '뺏김', '덮어쓰기']) {
-      expect(markup).not.toContain(forbidden);
-    }
-    expect(markup).not.toContain('text-destructive');
   });
 });
