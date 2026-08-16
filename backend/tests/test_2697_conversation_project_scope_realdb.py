@@ -54,36 +54,61 @@ async def _session_factory():
 
 
 async def _seed_human(session, *, org_id, project_id, role="member"):
-    """휴먼 1명: users+org_members+team_members를 같은 id로(E-MEMBER-SSOT AC2-1 불변식 —
-    members.id == org_members.id를 로컬 create_all에서 수동으로 재현)."""
+    """휴먼 1명 — team_members는 실 배포 스키마에서 members ⋈ project_access VIEW라
+    직접 INSERT가 불가능하다("cannot insert into view") — anchor 경로(members/org_members/
+    project_access)로만 영속한다(test_1994_backlink_api_realdb.py `_make_human_member`/
+    `_make_org_owner`와 동형 패턴, 가드 test_no_team_members_view_dml_in_tests가 요구).
+
+    org owner/admin은 project_access 없이도 has_project_access의 org-wide 분기로 항상
+    통과하므로(project_auth.py SSOT) ProjectAccess를 skip — 비-admin만 명시 grant."""
     from app.core.security import hash_password
+    from app.models.member import Member
     from app.models.project import OrgMember
-    from app.models.team import TeamMember
+    from app.models.project_access import ProjectAccess
     from app.models.user import User
 
     user_id = uuid.uuid4()
-    member_id = uuid.uuid4()
     session.add(User(
         id=user_id, email=f"u-{user_id.hex[:8]}@test.com",
         hashed_password=hash_password("x"), is_active=True, email_verified=True,
     ))
     await session.commit()
-    session.add(OrgMember(id=member_id, org_id=org_id, user_id=user_id, role=role))
-    session.add(TeamMember(
-        id=member_id, org_id=org_id, project_id=project_id, user_id=user_id,
-        type="human", name=f"h-{member_id.hex[:6]}", role=("owner" if role == "owner" else "member"),
-    ))
+
+    om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=user_id, role=role)
+    session.add(om)
     await session.commit()
-    return user_id, member_id
+
+    m = Member(id=om.id, org_id=org_id, type="human", user_id=user_id, name=f"h-{om.id.hex[:6]}")
+    session.add(m)
+    await session.commit()
+
+    if role not in ("owner", "admin"):
+        session.add(ProjectAccess(
+            id=uuid.uuid4(), project_id=project_id, org_member_id=om.id, member_id=m.id,
+            permission="granted", role=role,
+        ))
+        await session.commit()
+    return user_id, m.id
 
 
 async def _seed_agent(session, *, org_id, project_id):
-    from app.models.team import TeamMember
+    """에이전트 1명 — members + agent_project_profiles(뷰 런타임 조인) + project_access(grant,
+    has_project_access의 에이전트 branch가 요구) 3-write(`_make_agent_member`와 동형)."""
+    from app.models.member import AgentProjectProfile, Member
+    from app.models.project_access import ProjectAccess
 
     member_id = uuid.uuid4()
-    session.add(TeamMember(
-        id=member_id, org_id=org_id, project_id=project_id, user_id=None,
-        type="agent", name=f"a-{member_id.hex[:6]}", role="member",
+    session.add(Member(
+        id=member_id, org_id=org_id, type="agent", user_id=None, name=f"a-{member_id.hex[:6]}",
+    ))
+    await session.commit()
+
+    session.add(AgentProjectProfile(id=uuid.uuid4(), member_id=member_id, project_id=project_id))
+    await session.commit()
+
+    session.add(ProjectAccess(
+        id=uuid.uuid4(), project_id=project_id, org_member_id=None, member_id=member_id,
+        permission="granted", role="member",
     ))
     await session.commit()
     return member_id

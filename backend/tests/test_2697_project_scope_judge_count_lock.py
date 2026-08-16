@@ -24,8 +24,12 @@ from pathlib import Path
 
 _APP = Path(__file__).resolve().parent.parent / "app"
 
-# 2026-08-16 실측(develop HEAD 5dcdd75e 기준) — 정확한 자리를 고정해 "어디가 늘었는지"를
-# count 불일치가 아니라 diff로 바로 보여준다. 늘어나면 왜 늘었는지 검토 후 의식적으로만 올릴 것.
+# 2026-08-16 실측(develop HEAD 2a5a1cbfb 기준, #2696 merge 후 재측 — team_members.py:592→594·
+# workflow_parallel_approval.py:308→310는 #2696의 via_outbox=True 라인 삽입에 의한 순수
+# 줄번호 드리프트였다(카디르 최초 리포트는 "신규 잔존"으로 읽었으나 git diff로 대조한 결과
+# 헬퍼 미전환 신규 발생이 아니라 그 두 자리였음 그대로임을 확인 — count=59 불변, 그 2건만
+# 좌표 이동) — 정확한 자리를 고정해 "어디가 늘었는지"를 count 불일치가 아니라 diff로 바로
+# 보여준다. 진짜로 늘어나면 왜 늘었는지 검토 후 의식적으로만 올릴 것.
 _KNOWN_HITS = {
     "app/dependencies/auth.py:823",
     "app/dependencies/project_scope.py:61",
@@ -74,7 +78,7 @@ _KNOWN_HITS = {
     "app/routers/stories.py:1600",
     "app/routers/stories.py:2234",
     "app/routers/team_members.py:180",
-    "app/routers/team_members.py:592",
+    "app/routers/team_members.py:594",
     "app/routers/workflow_executions.py:70",
     "app/routers/workflow_report.py:158",
     "app/routers/workflow_templates.py:104",
@@ -85,7 +89,7 @@ _KNOWN_HITS = {
     "app/services/member_resolver.py:157",
     "app/services/member_resolver.py:173",
     "app/services/project_auth.py:413",
-    "app/services/workflow_parallel_approval.py:308",
+    "app/services/workflow_parallel_approval.py:310",
 }
 _RAW_INLINE_RAISE_BASELINE = len(_KNOWN_HITS)
 
