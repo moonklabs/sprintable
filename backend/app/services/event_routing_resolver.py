@@ -24,6 +24,16 @@ class MissingRoutingPayloadFieldError(ValueError):
     빈 집합으로 넘기지 않고 발행 시점에 명시 오류(story #2633 AC4 "조용한 유실 금지")."""
 
 
+class UnknownRoutingMemberError(ValueError):
+    """story #2693(PO 자체 사고, customer-zero) — kind=payload_field로 받은 member_id가
+    문법적으로는 유효한 UUID지만 이 org의 실존 회원이 아님. 예전엔 그대로 통과시켜
+    `_get_or_create_event_conversation`이 그 UUID를 참가자로 앉힌 «유령 conversation»을
+    만들고 메시지까지 저장했다(reach=1 거짓 성공 — ConversationParticipant.member_id에
+    FK가 없어 존재하지 않는 member_id도 조용히 insert된다, story #2697 그라운딩에서
+    확인된 사실과 동형 갭). 여기서 막으면(caller가 conv/msg 어느 것도 만들기 전) 원자성이
+    자연히 보장된다 — publish_event()의 routing 해석 지점이 그 어떤 DB write보다 먼저다."""
+
+
 class InvalidWorkItemReferenceError(ValueError):
     """work_item_id/goal_id/payload_field UUID 값이 문법적으로 유효한 UUID가 아님 — story
     #2675: event_definition_registry.validate_event_payload가 format:uuid를 이제 집행하지만,
@@ -139,7 +149,15 @@ async def resolve_routing_leg(
             raise MissingRoutingPayloadFieldError(
                 f"routing이 요구하는 payload.{field}가 없거나 비었습니다."
             )
-        return {_parse_uuid(value, field_name=field)}
+        member_id = _parse_uuid(value, field_name=field)
+        from app.services.member_resolver import filter_org_member_ids
+
+        valid = await filter_org_member_ids({member_id}, org_id, db)
+        if not valid:
+            raise UnknownRoutingMemberError(
+                f"routing이 요구하는 payload.{field}({member_id})가 이 org의 실존 회원이 아닙니다."
+            )
+        return valid
 
     resolver = _SERVER_DERIVED_RESOLVERS[leg["target"]]
     return await resolver(db, org_id=org_id, payload=payload)
