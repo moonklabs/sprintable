@@ -874,6 +874,8 @@
     "filterAll": "전체",
     "filterMembers": "멤버",
     "filterAgents": "에이전트",
+    "excludedCountBadge": "{count}건 숨김",
+    "excludedCountTitle": "라이브 QA 임시 카드 등 — 지표·화면에서 숨김 처리됨(삭제 아님)",
     "sprints": "스프린트",
     "epics": "목표",
     "manageSprints": "스프린트 관리 →",

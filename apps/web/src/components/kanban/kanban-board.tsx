@@ -576,7 +576,12 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       .catch(() => {});
   }, [searchParams, stories, handleStoryClick]);
 
+  // story #2187 — is_excluded=true(라이브 QA 임시 카드 등)는 무조건 숨긴다. 다른 필터와 달리
+  // 토글이 없다 — 삭제 권한이 없어 화면에서라도 항상 빠져야 「«남은 일»을 과장」하지 않는다.
+  const excludedCount = stories.filter((s) => s.is_excluded).length;
+
   const filteredStories = stories.filter((s) => {
+    if (s.is_excluded) return false;
     if (selectedEpicId && s.epic_id !== selectedEpicId) return false;
     // 9f25e74a AC1: assignee 필터는 서버사이드(fetchStoriesByStatus ?assignee_id=)로 이관 — 클라 이중필터 제거(done 페이지네이션 경계 AC2 동시 해소).
     if (assigneeTypeFilter) {
@@ -1218,6 +1223,18 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 </div>
               </DropdownMenuContent>
             </DropdownMenu>
+          )}
+
+          {/* story #2187 — is_excluded 카드가 조용히 사라지면 "삭제 대상" 카드의 존재 자체를
+              아무도 모르게 된다(만든 쪽도 못 치우는데 아무도 안 보면 영영 안 놓인다) — 그래서
+              숨긴 수를 항상 보이는 어포던스로 남긴다. */}
+          {excludedCount > 0 && (
+            <span
+              title={t('excludedCountTitle')}
+              className="ml-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground"
+            >
+              {t('excludedCountBadge', { count: excludedCount })}
+            </span>
           )}
         </div>
 

@@ -874,6 +874,8 @@
     "filterAll": "All",
     "filterMembers": "Members",
     "filterAgents": "Agents",
+    "excludedCountBadge": "{count} hidden",
+    "excludedCountTitle": "Live-QA throwaway cards etc. — hidden from views/metrics (not deleted)",
     "sprints": "Sprints",
     "epics": "Goals",
     "manageSprints": "Manage sprints →",
