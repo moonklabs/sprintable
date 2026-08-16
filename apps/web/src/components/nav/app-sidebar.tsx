@@ -4,37 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import {
-  Award,
-  BookOpen,
-  Bot,
-  Brain,
-  CalendarRange,
-  CircleHelp,
-  ClipboardList,
-  FlaskConical,
-  GalleryVerticalEnd,
-  Gauge,
-  HardDrive,
-  Inbox,
-  Layers,
-  LayoutDashboard,
-  MessageSquare,
-  Newspaper,
-  Search,
-  Settings,
-  Shield,
-  Users,
-  Users2,
-  Workflow,
-  Zap,
-} from 'lucide-react';
+import { CircleHelp, Search } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
 import { ProfileMenu } from '@/components/nav/profile-menu';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import { fetchWithAuth } from '@/lib/db/client';
+import { NAV_GROUPS } from '@/lib/nav-config';
 import {
   Sidebar,
   SidebarContent,
@@ -93,14 +70,9 @@ export function AppSidebar({
       || Boolean(orgSlug && currentProjectSlug && pathname.startsWith(`/${orgSlug}/${currentProjectSlug}/${resource}`));
     return { href, isActive };
   }
+  // story #2681 — docsLink는 footer 도움말 링크가 루프 밖에서 따로 참조해 개별 바인딩을
+  // 유지한다(그 외 리소스 항목은 전부 NAV_GROUPS 순회 중 resourceLink()를 그 자리에서 호출).
   const docsLink = resourceLink('docs');
-  const standupLink = resourceLink('standup');
-  const retroLink = resourceLink('retro');
-  const loopsLink = resourceLink('loops');
-  const artifactsLink = resourceLink('artifacts');
-  const sprintsLink = resourceLink('sprints');
-  const storageLink = resourceLink('storage');
-  const goalsLink = resourceLink('goals');
   // story #2224(IA v2.2 §7-3, AC12) — 기본 진입은 /flow, 사이드바가 통합뷰를 가리킨다.
   // 칸반은 /flow?view=list로 흡수됐다(PR#2698, `/board` 라우트 자체는 삭제) — 사이드바에
   // board를 flow와 나란히 1Depth로 세우지 않는다("나란히 두면 「내렸다」가 무효가 된다" —
@@ -200,289 +172,48 @@ export function AppSidebar({
       </SidebarHeader>
 
       <SidebarContent>
-        {/* 조직 / Organization — 주체·구조 프레임(4구역=주의 모드와 별개 축). story c4980e70·
-            doc org-1st-class-surface-ia-design-b §1(다이어그램=조직이 4구역 위 프레임 — 유나
-            가디언 fix로 최상단 배치). 에이전트=1급 멤버·조직/워크포스 1차 홈(🔒확定).
-            신뢰·기억은 C 트랙 전 자리(slot)만 — no-fiction. */}
-        <SidebarGroup>
-          <SidebarGroupLabel>{t('zoneOrganization')}</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/organization/members" />}
-                  isActive={isActive('/organization/members')}
-                  tooltip={t('orgMembers')}
-                >
-                  <Users2 />
-                  <span>{t('orgMembers')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/organization/workforce" />}
-                  isActive={isActive('/organization/workforce')}
-                  tooltip={t('workforce')}
-                >
-                  <Bot />
-                  <span>{t('workforce')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/organization/roles" />}
-                  isActive={isActive('/organization/roles')}
-                  tooltip={t('orgRoles')}
-                >
-                  <Shield />
-                  <span>{t('orgRoles')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/organization/trust" />}
-                  isActive={isActive('/organization/trust')}
-                  tooltip={t('orgTrust')}
-                >
-                  <Award />
-                  <span>{t('orgTrust')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/organization/memory" />}
-                  isActive={isActive('/organization/memory')}
-                  tooltip={t('orgMemory')}
-                >
-                  <Brain />
-                  <span>{t('orgMemory')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/organization/events" />}
-                  isActive={isActive('/organization/events')}
-                  tooltip={t('orgEvents')}
-                >
-                  <Zap />
-                  <span>{t('orgEvents')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        {/* ① 지금 / Now — 개입할 것(인박스·대시보드·채팅). ia-4zone SSOT 확定. */}
-        <SidebarGroup>
-          <SidebarGroupLabel>{t('zoneNow')}</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/org-briefing" />}
-                  isActive={isActive('/org-briefing')}
-                  tooltip={t('orgBriefing')}
-                >
-                  <Newspaper />
-                  <span>{t('orgBriefing')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/inbox" />}
-                  isActive={isActive('/inbox')}
-                  tooltip={t('inbox')}
-                >
-                  <Inbox />
-                  <span>{t('inbox')}</span>
-                  {inboxUnreadCount > 0 ? (
-                    <SidebarMenuBadge>
-                      {inboxUnreadCount > 9 ? '9+' : inboxUnreadCount}
-                    </SidebarMenuBadge>
-                  ) : null}
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/dashboard" />}
-                  isActive={isActive('/dashboard')}
-                  tooltip={t('dashboard')}
-                >
-                  <LayoutDashboard />
-                  <span>{t('dashboard')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/chats" />}
-                  isActive={isActive('/chats')}
-                  tooltip={t('chats')}
-                >
-                  <MessageSquare />
-                  <span>{t('chats')}</span>
-                  {/* story #1977(트랙B): 유나 시안 768e89b5 v2 ③ — 결재함 배지와 동일 brand,
-                      구분은 색이 아니라 아이콘+탭 순서(디자인 노트). */}
-                  {chatUnreadTotal > 0 ? (
-                    <SidebarMenuBadge>
-                      {chatUnreadTotal > 99 ? '99+' : chatUnreadTotal}
-                    </SidebarMenuBadge>
-                  ) : null}
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        {/* ② 작업 / Work — 흐르는 일(흐름·스프린트·목표·Loop·스탠드업·회고). ia-4zone SSOT 확定.
-            board·glance는 /flow로 흡수되며 별도 1Depth 항목이 아니게 됐다(#2224, PR#2698). */}
-        <SidebarGroup>
-          <SidebarGroupLabel>{t('zoneWork')}</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href={flowLink.href} />}
-                  isActive={flowLink.isActive}
-                  tooltip={t('flow')}
-                >
-                  <Workflow />
-                  <span>{t('flow')}</span>
-                  <KbdHint>B</KbdHint>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href={sprintsLink.href} />}
-                  isActive={sprintsLink.isActive}
-                  tooltip={t('sprints')}
-                >
-                  <CalendarRange />
-                  <span>{t('sprints')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href={goalsLink.href} />}
-                  isActive={goalsLink.isActive}
-                  tooltip={t('goals')}
-                >
-                  <Layers />
-                  <span>{t('goals')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href={loopsLink.href} />}
-                  isActive={loopsLink.isActive}
-                  tooltip={t('loops')}
-                >
-                  <FlaskConical />
-                  <span>{t('loops')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href={standupLink.href} />}
-                  isActive={standupLink.isActive}
-                  tooltip={t('standup')}
-                >
-                  <Users />
-                  <span>{t('standup')}</span>
-                  <KbdHint>S</KbdHint>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href={retroLink.href} />}
-                  isActive={retroLink.isActive}
-                  tooltip={t('retro')}
-                >
-                  <Gauge />
-                  <span>{t('retro')}</span>
-                  <KbdHint>R</KbdHint>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        {/* ③ 신뢰 / Trust — 증명된 일(활동 로그·감사). 검증 표면 확장 자리(ia-4zone SSOT 확定). */}
-        <SidebarGroup>
-          <SidebarGroupLabel>{t('zoneTrust')}</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/activity" />}
-                  isActive={isActive('/activity')}
-                  tooltip={t('activity')}
-                >
-                  <ClipboardList />
-                  <span>{t('activity')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        {/* ④ 지식 / Knowledge — 팀 기억(문서·산출물·스토리지·에이전트). ia-4zone SSOT 확定.
-            산출물(story a15cea4f) — 스토리 귀속 ArtifactSection과 별개인 모아보기 발견 표면. */}
-        <SidebarGroup>
-          <SidebarGroupLabel>{t('zoneKnowledge')}</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href={docsLink.href} />}
-                  isActive={docsLink.isActive}
-                  tooltip={t('docs')}
-                >
-                  <BookOpen />
-                  <span>{t('docs')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href={artifactsLink.href} />}
-                  isActive={artifactsLink.isActive}
-                  tooltip={t('artifacts')}
-                >
-                  <GalleryVerticalEnd />
-                  <span>{t('artifacts')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href={storageLink.href} />}
-                  isActive={storageLink.isActive}
-                  tooltip={t('storage')}
-                >
-                  <HardDrive />
-                  <span>{t('storage')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              {/* E-SETTINGS S5: Meetings 메뉴 숨김 — /meetings 진입 차단(route thin guard 404). */}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        {/* 설정 — zone 밖·하단(ia-4zone 확定: 유틸 푸터·zone 라벨 없음). */}
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href="/settings" />}
-                  isActive={isActive('/settings')}
-                  tooltip={t('settings')}
-                >
-                  <Settings />
-                  <span>{t('settings')}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {/* story #2681 — 데스크톱 GNB와 모바일 /more 허브(S2)가 한 정의(NAV_GROUPS)에서
+            파생된다(doc mobile-ia-full-completion-2678 §2.5-3). 그룹·항목 목록 자체는
+            nav-config.ts가 유일한 출처이고, 여기선 오직 순회+렌더만 한다 — 순서·라벨·아이콘·
+            그룹핑은 이 리팩터 전과 동일(시각 회귀 0, AC1). */}
+        {NAV_GROUPS.map((group) => (
+          <SidebarGroup key={group.id}>
+            {group.labelKey ? <SidebarGroupLabel>{t(group.labelKey)}</SidebarGroupLabel> : null}
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {group.items.map((item) => {
+                  const link = item.kind === 'static'
+                    ? { href: item.path, isActive: isActive(item.path) }
+                    : resourceLink(item.path);
+                  const Icon = item.icon;
+                  const badgeCount = item.badgeKey === 'inbox' ? inboxUnreadCount
+                    : item.badgeKey === 'chats' ? chatUnreadTotal
+                    : 0;
+                  const badgeCap = item.badgeKey === 'inbox' ? 9 : 99;
+                  const label = t(item.labelKey);
+                  return (
+                    <SidebarMenuItem key={item.id}>
+                      <SidebarMenuButton
+                        render={<Link href={link.href} />}
+                        isActive={link.isActive}
+                        tooltip={label}
+                      >
+                        <Icon />
+                        <span>{label}</span>
+                        {item.kbdHint ? <KbdHint>{item.kbdHint}</KbdHint> : null}
+                        {item.badgeKey && badgeCount > 0 ? (
+                          <SidebarMenuBadge>
+                            {badgeCount > badgeCap ? `${badgeCap}+` : badgeCount}
+                          </SidebarMenuBadge>
+                        ) : null}
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
 
       <SidebarFooter className="space-y-2 p-2">
