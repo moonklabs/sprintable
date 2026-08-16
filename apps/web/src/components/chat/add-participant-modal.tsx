@@ -1,16 +1,21 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { X, Check } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { buildPolicyDeniedMessage, parseAgentMessagePolicyDenied } from '@/lib/agent-message-policy-error';
 
 interface Member {
   id: string;
   name: string;
   type: string;
 }
+
+// story #2613 — new-conversation-modal.tsx와 동일 축(정책 거부는 딥링크가 필요한 구조).
+type ModalError = { kind: 'generic'; message: string } | { kind: 'policy'; message: string; agentId: string };
 
 interface AddParticipantModalProps {
   conversationId: string;
@@ -35,7 +40,7 @@ export function AddParticipantModal({
   const [selected, setSelected] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ModalError | null>(null);
 
   useEffect(() => {
     fetch(`/api/members?is_active=true&project_id=${projectId}`)
@@ -57,11 +62,20 @@ export function AddParticipantModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ member_id: selected }),
       });
-      if (!res.ok) throw new Error('Failed to add participant');
+      if (!res.ok) {
+        // story #2613(PR #2824 승계) — new-conversation-modal.tsx와 동일 계약/원칙.
+        const body = await res.json().catch(() => null);
+        const policy = parseAgentMessagePolicyDenied(body);
+        if (policy) {
+          setError({ kind: 'policy', message: buildPolicyDeniedMessage(policy, members, t), agentId: policy.agent_id });
+          return;
+        }
+        throw new Error('Failed to add participant');
+      }
       const data = await res.json() as { conversation_id?: string; forked?: boolean };
       onAdded(data.conversation_id);
     } catch {
-      setError('참여자 추가에 실패했습니다. 다시 시도해보세요.');
+      setError({ kind: 'generic', message: '참여자 추가에 실패했습니다. 다시 시도해보세요.' });
     } finally {
       setAdding(false);
     }
@@ -119,7 +133,19 @@ export function AddParticipantModal({
 
           {/* story #2105 2차 — handleAdd이 재시도 전 setError(null)을 먼저 호출해(위 정의) 매
               시도마다 언마운트→리마운트된다. */}
-          {error && <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-2 text-xs text-destructive">{error}</p>}
+          {error && (
+            <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-2 text-xs text-destructive">
+              {error.message}
+              {error.kind === 'policy' ? (
+                <>
+                  {' · '}
+                  <Link href={`/organization/workforce/${error.agentId}`} className="underline">
+                    {t('policyDeniedManageLink')}
+                  </Link>
+                </>
+              ) : null}
+            </p>
+          )}
         </div>
 
         {/* Footer */}
