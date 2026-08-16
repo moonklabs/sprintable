@@ -13,10 +13,17 @@ conversations.py 실결함 + 상태코드 통일 + 음성대조 테스트)는 �
 baseline=0으로 두면 "다 고쳤다"는 거짓 신호가 된다 — 실측 59를 그대로 고정한다(#2694
 AC②가 #2696을 낳은 것과 동형 — 이번엔 마감 없이 스토리 본문에 후속 후보 목록만 남긴다).
 이 59 안에는 goals.py:113(list 엔드포인트 쿼리필터, by-id 아님)·goals.py:331(steer_dispatch
-커밋 뮤테이션, 이미 404로 존재 확인된 後의 의도된 403)·stories.py 1600/2234(delete_story의
+커밋 뮤테이션, 이미 404로 존재 확인된 後의 의도된 403)·stories.py 1604/2238(delete_story의
 SEC-S3 의도된 403 — 이 스토리 스코프 밖 기존 결정)처럼 «raise하지만 이 스토리가 다루는
 GET-by-id 존재-비노출 클래스가 아닌» 정당한 잔존도 섞여 있다 — baseline은 그 구분 없이
-전체 카운트를 고정해, 늘면(신규든 회귀든) 사람이 다시 살펴보게 한다."""
+전체 카운트를 고정해, 늘면(신규든 회귀든) 사람이 다시 살펴보게 한다.
+
+⛔story #2679(2026-08-16, PO 실측): stories.py 두 좌표가 1600/2234→1604/2238로 다시 흔들림
+— #2679의 stories.py diff(_reconcile_story_references_and_candidates 주석 추가)가 그 두
+자리보다 앞에서 줄을 밀었을 뿐, 신규 occurrence 아님(count 59 불변, 좌표만 이동 — #2696
+merge가 team_members.py/workflow_parallel_approval.py를 흔든 것과 동형, 2회째 실증). 줄번호
+키의 구조적 약점 — 다음 스토리(파일::심볼 키 전환, PO 예고)까지는 형제 PR merge마다 이런
+drift가 또 날 수 있음을 알고 있을 것."""
 from __future__ import annotations
 
 import ast
@@ -75,8 +82,8 @@ _KNOWN_HITS = {
     "app/routers/standups.py:340",
     "app/routers/standups.py:355",
     "app/routers/standups.py:423",
-    "app/routers/stories.py:1600",
-    "app/routers/stories.py:2234",
+    "app/routers/stories.py:1604",
+    "app/routers/stories.py:2238",
     "app/routers/team_members.py:180",
     "app/routers/team_members.py:594",
     "app/routers/workflow_executions.py:70",
