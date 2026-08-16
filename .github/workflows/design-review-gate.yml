@@ -92,9 +92,21 @@ jobs:
           MATCHED="$(printf '%s\n' "${CHANGED}" \
             | grep -E '^apps/web/src/components/|^apps/web/messages/|^apps/web/src/app/' \
             | grep -Ev '^apps/web/src/app/api/' || true)"
-          if [ -n "${MATCHED}" ]; then
+          # story #2685 — 실사례(PR#3101): app-sidebar.test.tsx 41줄 «테스트 전용» PR도
+          # components/** 경로라 위 grep에 잡혀 design:pass를 요구했다(시각 표면 0인데).
+          # 경로만 보고 «내용 유형»은 안 가른 게 원인 — MATCHED 중 *.test.{ts,tsx}·*.stories.*
+          # 를 뺀 나머지(=실제 시각/문구 파일)가 하나라도 남아야 스코프 안이다. MATCHED 전부가
+          # 테스트/스토리북이면(하나라도 비테스트 시각 경로가 섞이면 그 즉시 여기 걸려 스코프
+          # 안 — 음성대조 AC2) out-of-scope로 내린다.
+          NON_TEST_MATCHED="$(printf '%s\n' "${MATCHED}" \
+            | grep -Ev '\.test\.(ts|tsx)$|\.stories\.' || true)"
+          if [ -n "${NON_TEST_MATCHED}" ]; then
             echo "in_scope=true" >> "$GITHUB_OUTPUT"
-            echo "This PR touches design-review paths:"
+            echo "This PR touches design-review paths (non-test):"
+            echo "${NON_TEST_MATCHED}"
+          elif [ -n "${MATCHED}" ]; then
+            echo "in_scope=false" >> "$GITHUB_OUTPUT"
+            echo "design-review 경로에 걸린 파일이 있지만 전부 테스트/스토리북(*.test.ts(x)·*.stories.*)이다 — 시각 표면 변경 0, 스코프 밖(story #2685):"
             echo "${MATCHED}"
           else
             echo "in_scope=false" >> "$GITHUB_OUTPUT"
