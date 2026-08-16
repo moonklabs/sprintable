@@ -3957,5 +3957,29 @@
     "learnMore": "자세히 보기",
     "previousNotes": "이전 노트",
     "previousNotesListDesc": "이전 릴리즈 노트 목록"
+  },
+  "workcell": {
+    "briefQuestion": "무엇을 · 왜 (약속)",
+    "briefGoal": "목표",
+    "briefDod": "완료정의",
+    "briefRoles": "권한",
+    "briefOwner": "책임",
+    "briefAgent": "실행",
+    "runQuestion": "어디까지 · 무엇이 필요 (현재 행위, 진행률바 아님)",
+    "runNow": "지금",
+    "runStage": "단계",
+    "runTools": "도구",
+    "runScopes": "권한",
+    "runBlocked": "막힘",
+    "none": "없음",
+    "runNextNeed": "다음 요구",
+    "evidenceQuestion": "증명 (Proof Capsule 재사용 · done=라벨 아니라 증거)",
+    "evidenceEmpty": "아직 증거 없음",
+    "conversationQuestion": "작업-귀속 스레드 (전역 chat 아님)",
+    "viewRun": "실행",
+    "viewEvidence": "증거",
+    "viewDecision": "결정",
+    "conversationEmpty": "아직 메시지가 없습니다",
+    "conversationFooter": "이 작업에 귀속된 지시·판단·증거·수정요청만. 뷰 전환(실행/증거/결정)=같은 스레드 다른 렌즈."
   }
 }

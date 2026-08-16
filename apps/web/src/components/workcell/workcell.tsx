@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { ProofAvatar, ProofCapsule, type ProofCapsuleProps, type ProofState } from '@/components/proof-capsule/proof-capsule';
 
@@ -59,9 +60,6 @@ export interface WorkcellProps {
   className?: string;
 }
 
-const VIEW_LABEL: Record<WorkcellConversationView, string> = {
-  run: '실행', evidence: '증거', decision: '결정',
-};
 
 const STATE_TONE: Record<ProofState, string> = {
   blue: 'text-proof-blue', amber: 'text-proof-amber', green: 'text-proof-green', red: 'text-proof-red',
@@ -113,22 +111,23 @@ function LayerLabel({ title, question, className }: { title: string; question: s
 }
 
 function BriefLayer({ brief }: { brief: WorkcellBrief }) {
+  const t = useTranslations('workcell');
   return (
     <div className="border-b border-proof-line-soft px-4.5 py-3.5">
-      <LayerLabel title="Brief" question="무엇을 · 왜 (약속)" className="mb-2.5" />
+      <LayerLabel title="Brief" question={t('briefQuestion')} className="mb-2.5" />
       <div className="flex gap-2 text-[13px] leading-[1.5] text-proof-ink-2">
-        <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">목표</span>
+        <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">{t('briefGoal')}</span>
         <span className="text-proof-ink">{brief.goal}</span>
       </div>
       <div className="mt-1.5 flex gap-2 text-[13px] leading-[1.5] text-proof-ink-2">
-        <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">완료정의</span>
+        <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">{t('briefDod')}</span>
         <span className="text-proof-ink">{brief.dod}</span>
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-2 gap-y-1.5 text-[13px] leading-[1.5] text-proof-ink-2">
-        <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">권한</span>
-        <span className="inline-flex items-center gap-1.5"><ProofAvatar label={brief.owner.name.slice(0, 1)} size={18} />책임 {brief.owner.name}</span>
+        <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">{t('briefRoles')}</span>
+        <span className="inline-flex items-center gap-1.5"><ProofAvatar label={brief.owner.name.slice(0, 1)} size={18} />{t('briefOwner')} {brief.owner.name}</span>
         {brief.agent ? (
-          <span className="inline-flex items-center gap-1.5"><ProofAvatar label={brief.agent.initial} isAgent size={18} />실행 {brief.agent.name}</span>
+          <span className="inline-flex items-center gap-1.5"><ProofAvatar label={brief.agent.initial} isAgent size={18} />{t('briefAgent')} {brief.agent.name}</span>
         ) : null}
         {brief.scopes && brief.scopes.length > 0 ? (
           <span className="font-mono text-[10.5px] text-proof-ink-3">{brief.scopes.join(' · ')}</span>
@@ -139,34 +138,36 @@ function BriefLayer({ brief }: { brief: WorkcellBrief }) {
 }
 
 function RunLayer({ run }: { run: WorkcellRun }) {
+  const t = useTranslations('workcell');
   return (
     <div className="border-b border-proof-line-soft px-4.5 py-3.5">
-      <LayerLabel title="Run" question="어디까지 · 무엇이 필요 (현재 행위, 진행률바 아님)" className="mb-2.5" />
-      <div className="mb-2 text-[13.5px] font-semibold text-proof-ink">지금: {run.now}</div>
+      <LayerLabel title="Run" question={t('runQuestion')} className="mb-2.5" />
+      <div className="mb-2 text-[13.5px] font-semibold text-proof-ink">{t('runNow')}: {run.now}</div>
       <div className="mb-2.5 flex flex-wrap gap-3.5 text-[11px] text-proof-ink-3">
-        <span>단계 <b className="font-semibold text-proof-ink-2">{run.stage}</b></span>
-        {run.tools.length > 0 ? <span className="font-mono text-[10.5px]">도구 {run.tools.join(', ')}</span> : null}
-        {run.scopes.length > 0 ? <span className="font-mono text-[10.5px]">권한 {run.scopes.join(', ')}</span> : null}
+        <span>{t('runStage')} <b className="font-semibold text-proof-ink-2">{run.stage}</b></span>
+        {run.tools.length > 0 ? <span className="font-mono text-[10.5px]">{t('runTools')} {run.tools.join(', ')}</span> : null}
+        {run.scopes.length > 0 ? <span className="font-mono text-[10.5px]">{t('runScopes')} {run.scopes.join(', ')}</span> : null}
       </div>
       <div className="mb-2 text-[11.5px] text-proof-ink-3">
-        막힘: <b className={cn('font-semibold', run.blocked ? 'text-proof-amber' : 'text-proof-ink-2')}>{run.blocked ?? '없음'}</b>
+        {t('runBlocked')}: <b className={cn('font-semibold', run.blocked ? 'text-proof-amber' : 'text-proof-ink-2')}>{run.blocked ?? t('none')}</b>
       </div>
       <div className="flex items-center gap-1.5 rounded-[6px] border border-proof-blue/25 bg-proof-blue-soft px-2.5 py-1.5 text-[12.5px] text-proof-blue">
-        → 다음 요구: <b className="font-bold">{run.nextNeed}</b>
+        → {t('runNextNeed')}: <b className="font-bold">{run.nextNeed}</b>
       </div>
     </div>
   );
 }
 
 function EvidenceLayer({ evidence }: { evidence: ProofCapsuleProps | null }) {
+  const t = useTranslations('workcell');
   return (
     <div className="border-b border-proof-line-soft px-4.5 py-3.5">
-      <LayerLabel title="Evidence" question="증명 (Proof Capsule 재사용 · done=라벨 아니라 증거)" className="mb-2.5" />
+      <LayerLabel title="Evidence" question={t('evidenceQuestion')} className="mb-2.5" />
       {evidence ? (
         <ProofCapsule {...evidence} />
       ) : (
         <p className="rounded-[6px] border border-dashed border-proof-line bg-proof-sunk px-3 py-2.5 text-[11.5px] text-proof-faint">
-          아직 증거 없음
+          {t('evidenceEmpty')}
         </p>
       )}
     </div>
@@ -174,11 +175,15 @@ function EvidenceLayer({ evidence }: { evidence: ProofCapsuleProps | null }) {
 }
 
 function ConversationLayer({ conversation }: { conversation: WorkcellConversation }) {
+  const t = useTranslations('workcell');
   const [view, setView] = useState<WorkcellConversationView>(conversation.view);
+  const viewLabel: Record<WorkcellConversationView, string> = {
+    run: t('viewRun'), evidence: t('viewEvidence'), decision: t('viewDecision'),
+  };
   return (
     <div className="px-4.5 py-3.5">
       <div className="mb-2.5 flex items-center gap-2">
-        <LayerLabel title="Conversation" question="작업-귀속 스레드 (전역 chat 아님)" />
+        <LayerLabel title="Conversation" question={t('conversationQuestion')} />
         <div className="ml-auto inline-flex overflow-hidden rounded-[6px] border border-proof-line">
           {(['run', 'evidence', 'decision'] as const).map((v) => (
             <button
@@ -190,13 +195,13 @@ function ConversationLayer({ conversation }: { conversation: WorkcellConversatio
                 v === view ? 'bg-proof-sunk font-semibold text-proof-ink' : 'text-proof-ink-3',
               )}
             >
-              {VIEW_LABEL[v]}
+              {viewLabel[v]}
             </button>
           ))}
         </div>
       </div>
       {conversation.messages.length === 0 ? (
-        <p className="text-[11.5px] text-proof-faint">아직 메시지가 없습니다</p>
+        <p className="text-[11.5px] text-proof-faint">{t('conversationEmpty')}</p>
       ) : (
         <div className="space-y-1">
           {conversation.messages.map((m, i) => (
@@ -211,7 +216,7 @@ function ConversationLayer({ conversation }: { conversation: WorkcellConversatio
         </div>
       )}
       <p className="mt-2 text-[10px] text-proof-faint">
-        이 작업에 귀속된 지시·판단·증거·수정요청만. 뷰 전환(실행/증거/결정)=같은 스레드 다른 렌즈.
+        {t('conversationFooter')}
       </p>
     </div>
   );

@@ -2,7 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import type { ReactElement } from 'react';
 import { Workcell, type WorkcellProps } from './workcell';
+
+// Workcell이 useTranslations('workcell')을 쓰므로 렌더에 NextIntlClientProvider 필수.
+// ko 로케일로 감싸 기존 한글 스냅샷 단언을 그대로 유지한다(KO 회귀 대조 = AC3).
+function renderKo(ui: ReactElement): string {
+  return renderToStaticMarkup(
+    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      {ui}
+    </NextIntlClientProvider>,
+  );
+}
 
 const BASE: WorkcellProps = {
   title: '결제 복구 플로우 — 재시도 로직',
@@ -28,7 +39,7 @@ const BASE: WorkcellProps = {
 
 describe('Workcell (4층 — Brief/Run/Evidence/Conversation)', () => {
   it('renders all four layer labels', () => {
-    const markup = renderToStaticMarkup(<Workcell {...BASE} />);
+    const markup = renderKo(<Workcell {...BASE} />);
     expect(markup).toContain('Brief');
     expect(markup).toContain('Run');
     expect(markup).toContain('Evidence');
@@ -36,13 +47,13 @@ describe('Workcell (4층 — Brief/Run/Evidence/Conversation)', () => {
   });
 
   it('renders the header title and state label together (색만으로 의미 전달 금지)', () => {
-    const markup = renderToStaticMarkup(<Workcell {...BASE} />);
+    const markup = renderKo(<Workcell {...BASE} />);
     expect(markup).toContain(BASE.title);
     expect(markup).toContain('실행 중');
   });
 
   it('renders Brief goal/dod/owner/agent', () => {
-    const markup = renderToStaticMarkup(<Workcell {...BASE} />);
+    const markup = renderKo(<Workcell {...BASE} />);
     expect(markup).toContain('실패한 결제를 재시도로 복구');
     expect(markup).toContain('AC 4 충족');
     expect(markup).toContain('책임 윤재');
@@ -52,7 +63,7 @@ describe('Workcell (4층 — Brief/Run/Evidence/Conversation)', () => {
 
 describe('Workcell Run layer (진행률바 0 — 현재행위+다음요구만)', () => {
   it('renders "지금:" current action and "다음 요구" next-need, never a percentage progress bar', () => {
-    const markup = renderToStaticMarkup(<Workcell {...BASE} />);
+    const markup = renderKo(<Workcell {...BASE} />);
     expect(markup).toContain('지금: 재시도 로직 검증 테스트 작성 중');
     expect(markup).toContain('다음 요구');
     expect(markup).toContain('까심군 QA 리뷰 대기');
@@ -65,17 +76,17 @@ describe('Workcell Run layer (진행률바 0 — 현재행위+다음요구만)',
   });
 
   it('shows "없음" for blocked when null, and the blocked value when present (never hidden — 도크트린 ③)', () => {
-    const clean = renderToStaticMarkup(<Workcell {...BASE} run={{ ...BASE.run, blocked: null }} />);
+    const clean = renderKo(<Workcell {...BASE} run={{ ...BASE.run, blocked: null }} />);
     expect(clean).toContain('없음');
 
-    const blocked = renderToStaticMarkup(<Workcell {...BASE} run={{ ...BASE.run, blocked: '의존 대기 중' }} />);
+    const blocked = renderKo(<Workcell {...BASE} run={{ ...BASE.run, blocked: '의존 대기 중' }} />);
     expect(blocked).toContain('의존 대기 중');
   });
 });
 
 describe('Workcell Evidence layer (Proof Capsule 재사용 · null=정직한 빈 상태)', () => {
   it('shows an honest empty state when evidence is null (no fabricated claim)', () => {
-    const markup = renderToStaticMarkup(<Workcell {...BASE} evidence={null} />);
+    const markup = renderKo(<Workcell {...BASE} evidence={null} />);
     expect(markup).toContain('아직 증거 없음');
   });
 
@@ -103,12 +114,12 @@ describe('Workcell Evidence layer (Proof Capsule 재사용 · null=정직한 빈
 
 describe('Workcell Conversation layer (작업-귀속 · 전역 chat과 분리 · 뷰 가소성)', () => {
   it('shows an honest empty state when there are no messages', () => {
-    const markup = renderToStaticMarkup(<Workcell {...BASE} conversation={{ view: 'run', messages: [] }} />);
+    const markup = renderKo(<Workcell {...BASE} conversation={{ view: 'run', messages: [] }} />);
     expect(markup).toContain('아직 메시지가 없습니다');
   });
 
   it('renders all three view-toggle labels (실행/증거/결정) and the real messages with author+body', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderKo(
       <Workcell
         {...BASE}
         conversation={{
