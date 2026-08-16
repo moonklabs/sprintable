@@ -3957,5 +3957,29 @@
     "learnMore": "Learn more",
     "previousNotes": "Previous notes",
     "previousNotesListDesc": "Previous release notes"
+  },
+  "workcell": {
+    "briefQuestion": "What · Why (the promise)",
+    "briefGoal": "Goal",
+    "briefDod": "DoD",
+    "briefRoles": "Roles",
+    "briefOwner": "Owner",
+    "briefAgent": "Agent",
+    "runQuestion": "How far · What's needed (current activity, not a progress bar)",
+    "runNow": "Now",
+    "runStage": "Stage",
+    "runTools": "Tools",
+    "runScopes": "Scopes",
+    "runBlocked": "Blocked",
+    "none": "None",
+    "runNextNeed": "Next need",
+    "evidenceQuestion": "Proof (reuses Proof Capsule · done = evidence, not a label)",
+    "evidenceEmpty": "No evidence yet",
+    "conversationQuestion": "Work-scoped thread (not global chat)",
+    "viewRun": "Run",
+    "viewEvidence": "Evidence",
+    "viewDecision": "Decision",
+    "conversationEmpty": "No messages yet",
+    "conversationFooter": "Only directives, decisions, evidence, and change requests scoped to this work. Switching views (Run/Evidence/Decision) = same thread, different lens."
   }
 }
