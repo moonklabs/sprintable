@@ -177,3 +177,68 @@ jobs:
             exit 1
           fi
           echo "design:pass attached at ${LABEL_TS} — at or after the latest commit (${LAST_COMMIT_TS}). Fresh."
+
+      # story #2676 AC1 — qa-review-gate.yml과 동형 로직(로직만 복제, 이 파일의 기존 관례
+      # 그대로). PR#3089 실사고: design:pass 라벨이 커밋보다 시각상 "늦게" 붙었어도, 그 라벨을
+      # 낳은 리뷰 코멘트 자체가 «이전» head를 명시하고 있었을 수 있다 — 시각 순서와 리뷰 내용은
+      # 별개다. 디자인 리뷰 코멘트는 head를 명시하는 문구가 QA만큼 고정 포맷이 아니다(실측:
+      # "리뷰 head: `9c8867e9`" · "PASS (head `dd37eecb`)" 둘 다 관찰됨, 짧은 sha 8자) — 그래서
+      # 코멘트 헤더가 "## "로 시작하고 "PASS"를 포함하는 것(디자인 통과 판정 공통축)을 후보로
+      # 삼고, 그 본문 어딘가의 "head" 근처 백틱-hex 토큰을 head로 파싱한다(대소문자 무관, 8~40자
+      # 모두 허용 — 짧은 sha 프리픽스 매치).
+      #
+      # ⛔이 스텝이 못 잡는 것 — 코멘트 포맷이 "PASS"라는 단어 자체를 안 쓰거나 head를 전혀 안
+      # 적으면 fail-closed(모르면 실패)로 막지만, 위 두 관찰 포맷과 «다른» 새 포맷이 등장하면
+      # 오탐(엉뚱한 코멘트를 판정 근거로 오인)이 생길 여지가 QA gate보다 크다 — 포맷이
+      # 고정적이지 않다는 것 자체가 이 스텝의 한계다(디자인 게이트는 QA gate보다 약한 보증).
+      - name: Enforce design:pass verdict comment's stated head matches current PR head
+        if: steps.scope.outputs.in_scope == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          LATEST_VERDICT_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate \
+            --jq 'select(.body | test("^## .*PASS")) | [.created_at, .body] | @tsv' \
+            | sort | tail -1 | cut -f2-)"
+          if [ -z "${LATEST_VERDICT_BODY}" ]; then
+            echo "::error title=design:pass verdict comment not found::design:pass 라벨은 있는데 그 근거로 보이는 'PASS' 판정 코멘트를 못 찾았다 — head 대조 불가. fail-closed."
+            exit 1
+          fi
+          VERDICT_HEAD="$(printf '%s' "${LATEST_VERDICT_BODY}" | grep -ioE 'head[^0-9a-f]*[0-9a-f]{7,40}' | head -1 | grep -oE '[0-9a-f]{7,40}$')"
+          if [ -z "${VERDICT_HEAD}" ]; then
+            echo "::error title=design:pass verdict head unparsable::가장 최근 design 판정 코멘트에서 head sha를 못 찾았다 — head 대조 불가. fail-closed."
+            exit 1
+          fi
+          echo "latest design verdict comment states head: ${VERDICT_HEAD}"
+          echo "current PR head: ${HEAD_SHA}"
+          case "${HEAD_SHA}" in
+            "${VERDICT_HEAD}"*)
+              echo "일치 — 가장 최근 design:pass verdict가 현재 head를 보고 판정했다."
+              ;;
+            *)
+              echo "::error title=design:pass verdict is for a stale head::가장 최근 design 판정 코멘트가 명시한 head(${VERDICT_HEAD})가 현재 PR head(${HEAD_SHA})와 다르다 — 그 사이 새 커밋이 끼어들었다(story #2676). 재리뷰 후 design:pass를 다시 붙일 것."
+              exit 1
+              ;;
+          esac
+
+      # story #2676 AC2 — qa-review-gate.yml과 동형(로직 복제). 잡 이름이 "— advisory"로
+      # 끝나면 비차단 관례(실측 확認)라 그것만 빼고, design:pass 붙인 시점에 나머지 체크런
+      # 중 미완이 있으면 막는다.
+      - name: Enforce no incomplete non-advisory checks when design:pass is claimed
+        if: steps.scope.outputs.in_scope == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          INCOMPLETE="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/check-runs" --paginate \
+            --jq '.check_runs[] | select(.name != "Design review gate") | select(.name | endswith("— advisory") | not) | select(.status != "completed") | .name' \
+            | sort -u)"
+          if [ -n "${INCOMPLETE}" ]; then
+            echo "::error title=required-ish checks still incomplete::design:pass가 붙어 있지만 아직 안 끝난(비-advisory) 체크가 있다:"
+            echo "${INCOMPLETE}"
+            exit 1
+          fi
+          echo "no incomplete non-advisory checks for ${HEAD_SHA}."

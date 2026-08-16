@@ -147,3 +147,72 @@ jobs:
           fi
           echo "qa:pass attached at ${LABEL_TS} — at or after the latest commit (${LAST_COMMIT_TS}). Fresh."
           echo "(AC9: design:pass + qa:pass both green is not 'everything is done' — live-pixel rendering, performance, and accessibility are covered by neither gate.)"
+
+      # story #2676 AC1 — 위 freshness 스텝(라벨 "시각")은 PR#3088 실사고를 못 잡았다: 실측
+      # 결과 qa:pass 라벨이 2026-08-15T21:54:13Z에 붙었는데, 그 «전»인 21:53:02Z에 이미 새
+      # 커밋(773aeeb4)이 푸시돼 있었다 — 시각 순서만 보면 "라벨이 커밋보다 늦다=fresh"로
+      # 읽히지만, 그 라벨을 붙이게 한 리뷰 코멘트 자체는 "**Head:** `5491687c8...`"(그 «이전»
+      # 커밋)를 명시하고 있었다. 시각은 순서가 맞아도 리뷰 «내용»은 옛 커밋을 본 것 — 레이스
+      # (리뷰 완료 시각과 라벨 API 호출 시각 사이의 지연)가 시각 비교로는 원리적으로 못 잡힌다.
+      #
+      # QA 리뷰어는 매 판정마다 "**Head:** `<sha>`"를 코멘트에 명시하는 규율이 이미 있다(실측:
+      # PR#3088·#3089 전 코멘트 확認 — 예외 없음). 그 명시된 head를 파싱해 현재 PR head와
+      # «직접» 대조한다 — 시각이 아니라 "무엇을 봤다고 썼는가"를 잰다. 레이스 자체가 안 생긴다.
+      #
+      # ⛔이 스텝이 못 잡는 것 — QA verdict 코멘트가 "**Head:** \`sha\`" 포맷을 안 지키면(예:
+      # 코멘트 형식을 사람이 바꾸면) fail-closed(모르면 통과가 아니라 실패)로 막긴 하지만,
+      # «다른 포맷을 다른 포맷으로 오인식»해 틀린 head를 뽑을 가능성까지는 없앨 수 없다.
+      - name: Enforce qa:pass verdict comment's stated head matches current PR head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          LATEST_VERDICT_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate \
+            --jq 'select(.body | test("^## QA verdict: approved \\(qa:pass\\)")) | [.created_at, .body] | @tsv' \
+            | sort | tail -1 | cut -f2-)"
+          if [ -z "${LATEST_VERDICT_BODY}" ]; then
+            echo "::error title=qa:pass verdict comment not found::qa:pass 라벨은 있는데 그 근거인 '## QA verdict: approved (qa:pass)' 코멘트를 못 찾았다 — head 대조 불가. fail-closed."
+            exit 1
+          fi
+          VERDICT_HEAD="$(printf '%s' "${LATEST_VERDICT_BODY}" | grep -oE '\*\*Head:\*\*[^0-9a-f]*[0-9a-f]{7,40}' | head -1 | grep -oE '[0-9a-f]{7,40}$')"
+          if [ -z "${VERDICT_HEAD}" ]; then
+            echo "::error title=qa:pass verdict head unparsable::가장 최근 QA verdict 코멘트에서 '**Head:** \`<sha>\`' 패턴을 못 찾았다 — head 대조 불가. fail-closed."
+            exit 1
+          fi
+          echo "latest QA verdict comment states head: ${VERDICT_HEAD}"
+          echo "current PR head: ${HEAD_SHA}"
+          case "${HEAD_SHA}" in
+            "${VERDICT_HEAD}"*)
+              echo "일치 — 가장 최근 qa:pass verdict가 현재 head를 보고 판정했다."
+              ;;
+            *)
+              echo "::error title=qa:pass verdict is for a stale head::가장 최근 QA verdict 코멘트가 명시한 head(${VERDICT_HEAD})가 현재 PR head(${HEAD_SHA})와 다르다 — 그 사이 새 커밋이 끼어들었다(story #2676, PR#3088 실사고와 동형). 재리뷰 후 qa:pass를 다시 붙일 것."
+              exit 1
+              ;;
+          esac
+
+      # story #2676 AC2 — PR#3088 실사고 ③: 최초 qa:pass 승인이 Backend pytest가 아직
+      # in_progress이던 도중(job 95074664724, 21:49~21:59) 21:54에 나갔다 — 리뷰 코멘트가
+      # "CI green"이라 썼지만 그 시점 실제로는 «아직 안 나온 결과»였다(까디르 자기 정정).
+      # branch protection의 "어느 체크가 required인가"를 읽으려면 더 넓은 권한이 필요해
+      # 신뢰성이 낮다 — 대신 이 리포 CI의 실제 명명 관례를 그대로 쓴다: 잡 이름이 "— advisory"로
+      # 끝나면 명시로 비차단(관찰 확認, PR#3090 체크 목록 실측)이니 그것만 빼고 나머지 전부를
+      # "이 게이트가 신경 쓰는 대상"으로 본다 — 보수적(advisory 아닌 느린 잡 때문에도 막힐 수
+      # 있음)이지만 "몰라서 초록"보다 안전.
+      - name: Enforce no incomplete non-advisory checks when qa:pass is claimed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          INCOMPLETE="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/check-runs" --paginate \
+            --jq '.check_runs[] | select(.name != "QA review gate") | select(.name | endswith("— advisory") | not) | select(.status != "completed") | .name' \
+            | sort -u)"
+          if [ -n "${INCOMPLETE}" ]; then
+            echo "::error title=required-ish checks still incomplete::qa:pass가 붙어 있지만 아직 안 끝난(비-advisory) 체크가 있다 — 「CI green」은 이것들이 전부 completed일 때만 참이다:"
+            echo "${INCOMPLETE}"
+            exit 1
+          fi
+          echo "no incomplete non-advisory checks for ${HEAD_SHA}."
