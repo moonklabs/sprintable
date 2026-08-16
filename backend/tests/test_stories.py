@@ -268,17 +268,24 @@ async def test_status_nonsequential_jump_allowed_with_violation():
             return result
         session.execute = mock_execute
 
-        async with client as c:
-            resp = await c.patch(
-                f"/api/v2/stories/{STORY_ID}/status",
-                json={"status": "in-review"},
-            )
+        # story #2687: 동기 webhook 재시도(최대 3회·1s/2s backoff)가 이 요청의 db 세션
+        # 커넥션을 물고 있는 채로 돌아 PATCH 응답을 5초대까지 지연시켰다(pool_size=3+
+        # overflow=1인 소형 풀) — via_outbox=True로 outbox 경유하게 고쳤으니 그 계약을 고정.
+        fire_mock = AsyncMock()
+        with patch("app.routers.stories.fire_webhooks", fire_mock):
+            async with client as c:
+                resp = await c.patch(
+                    f"/api/v2/stories/{STORY_ID}/status",
+                    json={"status": "in-review"},
+                )
 
         assert resp.status_code == 200
         v = resp.json()["violation"]
         assert v is not None
         assert v["level"] == "warn" and v["from"] == "backlog" and v["to"] == "in-review"
         assert v["skipped"] == 2  # ready-for-dev, in-progress 건너뜀
+        fire_mock.assert_awaited_once()
+        assert fire_mock.await_args.kwargs["via_outbox"] is True
     finally:
         app.dependency_overrides.clear()
 
