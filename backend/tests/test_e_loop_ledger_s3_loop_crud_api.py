@@ -299,9 +299,9 @@ async def test_list_loops_filters_by_status_and_project():
             await s.commit()
 
         async with Session() as s:
-            from unittest.mock import MagicMock
+            # story #2233(PO 판정 ㉢): list_loops가 X-Total-Count(위조값)를 안 내면서
+            # response 파라미터 자체가 필요 없어져 시그니처에서 빠졌다.
             items = await r.list_loops(
-                response=MagicMock(headers={}),
                 project_id=PROJ_A, status_filter="draft", parent_loop_id=None, goal_tag=None,
                 limit=100, session=s, org_id=ORG,
             )
