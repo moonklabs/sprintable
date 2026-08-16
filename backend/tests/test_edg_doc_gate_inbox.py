@@ -258,3 +258,41 @@ async def test_submit_notify_fail_silent():
     session = AsyncMock(); session.execute = AsyncMock(side_effect=RuntimeError("boom"))
     await _notify_doc_approval_requested(session, uuid.uuid4(), MagicMock(id=uuid.uuid4()),
                                          uuid.uuid4(), requester_id=uuid.uuid4())
+
+
+# ─── story #373cfaa1: doc 상신 시 create_gate() generic 벨 중복 제거(notify=False) ──────
+
+@pytest.mark.anyio
+async def test_submit_calls_create_gate_with_notify_false():
+    """최초 상신(draft→pending): transition_doc이 create_gate()를 notify=False로 호출해
+    _notify_doc_approval_requested()의 doc 전용 알림과 중복되지 않게 한다.
+    mutation-kill: doc.py에서 notify=False 인자를 빼면 이 assert가 RED가 된다."""
+    org = uuid.uuid4()
+    doc = MagicMock(status="draft", id=uuid.uuid4(), title="설계 문서", project_id=uuid.uuid4())
+    session = _doc_session(doc)
+    role_id = uuid.uuid4()
+    with patch("app.services.gate_service.create_gate",
+               new=AsyncMock(return_value=MagicMock(status="pending"))) as mock_cg, \
+         patch("app.services.workflow_line_config._default_role_id",
+               new=AsyncMock(return_value=role_id)), \
+         patch("app.services.doc._notify_doc_approval_requested", new=AsyncMock()):
+        await transition_doc(session, org, _human(org), doc.id, "pending")
+    assert mock_cg.await_args.kwargs["notify"] is False
+
+
+@pytest.mark.anyio
+async def test_resubmit_calls_create_gate_with_notify_false():
+    """반려 후 재상신(rejected→pending reopen)도 동일 콜사이트라 notify=False 동일 적용."""
+    org = uuid.uuid4()
+    doc = MagicMock(status="draft", id=uuid.uuid4(), title="t", project_id=uuid.uuid4())
+    session = _doc_session(doc)
+    rejected = MagicMock(status="rejected", resolver_id=uuid.uuid4(),
+                         resolved_at=datetime(2026, 6, 26, tzinfo=timezone.utc),
+                         resolution_note="반려사유", neutral_facts=None)
+    with patch("app.services.gate_service.create_gate",
+               new=AsyncMock(return_value=rejected)) as mock_cg, \
+         patch("app.services.workflow_line_config._default_role_id",
+               new=AsyncMock(return_value=uuid.uuid4())), \
+         patch("app.services.doc._notify_doc_approval_requested", new=AsyncMock()):
+        await transition_doc(session, org, _human(org), doc.id, "pending")
+    assert mock_cg.await_args.kwargs["notify"] is False

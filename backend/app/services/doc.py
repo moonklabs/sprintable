@@ -123,6 +123,10 @@ async def transition_doc(
             caller.id, role_id,
             neutral_facts={"requested_by_member_id": str(caller.id), "doc_title": doc.title},
             project_id=doc.project_id,
+            # story #373cfaa1: 이 함수가 아래서 _notify_doc_approval_requested()로 doc 전용
+            # 리치 알림(벨+카드)을 별도로 쏘므로, create_gate() generic "gate.pending_approval"
+            # 벨은 끈다(중복 제거 — 신규생성·rejected재오픈 두 경로 모두 해당).
+            notify=False,
         )
         # ⚠️재상신 RC(산티아고): uq(work_item_id,gate_type)=1 gate·terminal(approved/rejected)=immutable →
         # create_gate 멱등이 기존 **terminal gate 를 반환**해(상태필터 없음) 재상신 시 새 pending gate 0 →
