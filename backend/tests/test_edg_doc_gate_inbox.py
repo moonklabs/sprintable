@@ -247,6 +247,8 @@ async def test_submit_notifies_org_approvers():
     assert kw["reference_type"] == "gate" and kw["reference_id"] == gate_id
     # 산티아고 RC: approver 쿼리에 deleted_at 필터(삭제 owner/admin 제외).
     assert "deleted_at" in str(session.execute.await_args.args[0])
+    # story #2687: 동기 웹훅 재시도가 상신 트랜잭션 커넥션을 붙잡아 8~9초 지연 — outbox로 이관.
+    assert kw["via_outbox"] is True
 
 
 @pytest.mark.anyio

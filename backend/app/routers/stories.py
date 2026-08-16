@@ -1872,8 +1872,12 @@ async def bulk_update_stories(
     # webhook(fire_webhooks, 아래)은 별개 채널이라 무관·그대로 유지.
     for _ev, _notify in violation_dispatch:
         try:
+            # story #2687: 단건 PATCH(:2421 부근) 와 같은 결함 — 동기 웹훅 재시도가 request-scoped
+            # db 세션의 커넥션을 붙잡아 pool(size=3+overflow=1)을 압박한다. bulk는 item마다
+            # 순차 발화라 영향이 더 큼 — outbox로 옮긴다.
             await fire_webhooks(
                 db, repo.org_id, "workflow_violation", _ev, recipient_member_ids=_notify,
+                via_outbox=True,
             )
         except Exception:  # noqa: BLE001
             pass
@@ -2414,9 +2418,14 @@ async def update_story_status(
                 m for m in (actor_id, story.assignee_id) if m is not None
             }
             try:
+                # story #2687: 동기 개인 webhook 재시도(최대 3회·1s/2s backoff)가 update_story_status
+                # 의 열린 트랜잭션 커넥션을 붙잡아(pool_size=3+overflow=1인 소형 풀) PATCH
+                # /stories/{id}/status 응답을 5초대까지 지연시키고 동시 요청의 커넥션 획득까지
+                # 지연시켰다(실측 5.0-5.4s). story #2460 §6 봉합②의 outbox 경로로 옮긴다.
                 await fire_webhooks(
                     db, org_id, "workflow_violation", _v_event,
                     recipient_member_ids=_violation_notify_ids,
+                    via_outbox=True,
                 )
             except Exception:
                 pass

@@ -108,6 +108,9 @@ async def test_bulk_nonsequential_jump_flags_violation_but_allows(monkeypatch):
     # 호출은 삭제됐다(FE 소비처 0) — webhook만 남은 실 배달 경로.
     _fire.assert_awaited_once()
     assert _fire.call_args[0][2] == "workflow_violation"
+    # story #2687: 동기 웹훅 재시도가 status 전이 요청의 db 세션 커넥션을 붙잡아 pool을
+    # 압박(pool_size=3+overflow=1) — outbox로 이관.
+    assert _fire.call_args.kwargs["via_outbox"] is True
 
 
 @pytest.mark.anyio
