@@ -31,79 +31,110 @@ from pathlib import Path
 
 _APP = Path(__file__).resolve().parent.parent / "app"
 
-# 2026-08-16 실측(develop HEAD 2a5a1cbfb 기준, #2696 merge 후 재측 — team_members.py:592→594·
-# workflow_parallel_approval.py:308→310는 #2696의 via_outbox=True 라인 삽입에 의한 순수
-# 줄번호 드리프트였다(카디르 최초 리포트는 "신규 잔존"으로 읽었으나 git diff로 대조한 결과
-# 헬퍼 미전환 신규 발생이 아니라 그 두 자리였음 그대로임을 확인 — count=59 불변, 그 2건만
-# 좌표 이동) — 정확한 자리를 고정해 "어디가 늘었는지"를 count 불일치가 아니라 diff로 바로
-# 보여준다. 진짜로 늘어나면 왜 늘었는지 검토 후 의식적으로만 올릴 것.
+# story #2699(2026-08-16, «파일::심볼» 키 전환 — 줄번호 키가 형제 PR merge(#2696)·자기 diff
+# (#2679) 두 번 다 "신규 잔존"으로 오탐시킨 뒤 PO 지시로 교체) — 재측(develop HEAD 기준,
+# require_project_access 도입 SSOT 통일 이후). 키에 줄번호가 없어 같은 함수 안에서 줄이
+# 밀려도(주석 추가·형제 PR merge) 흔들리지 않는다.
+#
+# ⛔59건 raw 인라인 발견 중 5개 함수(_resolve_member_legacy·_resolve_member_anchor·
+# resolve_required_project_id·docs.py의 get_doc·get_doc_preview)는 각각 그 안에 이 패턴이
+# «두 번» 있어(휴먼 분기·에이전트 분기 등 서로 다른 조건절에서 같은 모양을 반복) 키가
+# 겹친다 — 그래서 고유 키는 54개뿐이지만 raw 총량은 59건(아래 _RAW_INLINE_RAISE_BASELINE이
+# len(_KNOWN_HITS)에서 분리된 이유). 진짜로 늘어나면(고유 키 증가든 raw 총량 증가든) 왜
+# 늘었는지 검토 후 의식적으로만 올릴 것.
 _KNOWN_HITS = {
-    "app/dependencies/auth.py:823",
-    "app/dependencies/project_scope.py:61",
-    "app/dependencies/project_scope.py:71",
-    "app/routers/activity_logs.py:97",
-    "app/routers/activity_stream.py:41",
-    "app/routers/agent_runs.py:65",
-    "app/routers/agent_runs.py:106",
-    "app/routers/agent_runs.py:159",
-    "app/routers/analytics.py:47",
-    "app/routers/assets.py:146",
-    "app/routers/assets.py:252",
-    "app/routers/assets.py:300",
-    "app/routers/attachments.py:198",
-    "app/routers/auth.py:1557",
-    "app/routers/context_pack.py:50",
-    "app/routers/current_project.py:79",
-    "app/routers/docs.py:339",
-    "app/routers/docs.py:373",
-    "app/routers/docs.py:412",
-    "app/routers/docs.py:434",
-    "app/routers/docs.py:697",
-    "app/routers/docs.py:970",
-    "app/routers/docs.py:1095",
-    "app/routers/entities.py:316",
-    "app/routers/evidence.py:112",
-    "app/routers/file_locks.py:295",
-    "app/routers/gate_config.py:75",
-    "app/routers/glance.py:120",
-    "app/routers/goals.py:113",
-    "app/routers/goals.py:331",
-    "app/routers/meetings.py:37",
-    "app/routers/meetings.py:65",
-    "app/routers/members.py:54",
-    "app/routers/oss.py:34",
-    "app/routers/policy_documents.py:29",
-    "app/routers/project_settings.py:27",
-    "app/routers/reference_candidates.py:40",
-    "app/routers/references.py:153",
-    "app/routers/rewards.py:47",
-    "app/routers/standups.py:176",
-    "app/routers/standups.py:294",
-    "app/routers/standups.py:340",
-    "app/routers/standups.py:355",
-    "app/routers/standups.py:423",
-    "app/routers/stories.py:1604",
-    "app/routers/stories.py:2238",
-    "app/routers/team_members.py:180",
-    "app/routers/team_members.py:594",
-    "app/routers/workflow_executions.py:70",
-    "app/routers/workflow_report.py:158",
-    "app/routers/workflow_templates.py:104",
-    "app/routers/workflow_trigger.py:45",
-    "app/services/loop.py:92",
-    "app/services/member_resolver.py:77",
-    "app/services/member_resolver.py:93",
-    "app/services/member_resolver.py:157",
-    "app/services/member_resolver.py:173",
-    "app/services/project_auth.py:413",
-    "app/services/workflow_parallel_approval.py:310",
+    "app/dependencies/auth.py::enforce_body_context",
+    "app/dependencies/project_scope.py::resolve_required_project_id",
+    "app/routers/activity_logs.py::list_activity_logs",
+    "app/routers/activity_stream.py::get_activity_stream",
+    "app/routers/agent_runs.py::create_agent_run",
+    "app/routers/agent_runs.py::list_agent_runs",
+    "app/routers/agent_runs.py::update_agent_run",
+    "app/routers/analytics.py::_assert_project_access",
+    "app/routers/assets.py::_scope_filter",
+    "app/routers/assets.py::create_folder",
+    "app/routers/assets.py::list_folders",
+    "app/routers/attachments.py::authorize_attachment",
+    "app/routers/auth.py::set_default_project",
+    "app/routers/context_pack.py::search_context_pack",
+    "app/routers/current_project.py::set_current_project",
+    "app/routers/docs.py::_require_doc_project_access",
+    "app/routers/docs.py::get_doc",
+    "app/routers/docs.py::get_doc_preview",
+    "app/routers/docs.py::register_doc_asset",
+    "app/routers/docs.py::upload_doc_attachment",
+    "app/routers/entities.py::search_entities",
+    "app/routers/evidence.py::_assert_work_item_access",
+    "app/routers/file_locks.py::list_file_locks",
+    "app/routers/gate_config.py::get_gate_config",
+    "app/routers/glance.py::glance_attention",
+    "app/routers/goals.py::list_goals",
+    "app/routers/goals.py::steer_dispatch",
+    "app/routers/meetings.py::_get_repo",
+    "app/routers/meetings.py::_get_repo_read",
+    "app/routers/members.py::list_members",
+    "app/routers/oss.py::oss_seed",
+    "app/routers/policy_documents.py::list_policy_documents",
+    "app/routers/project_settings.py::get_project_settings",
+    "app/routers/reference_candidates.py::get_next_up_reference_candidates",
+    "app/routers/references.py::create_reference",
+    "app/routers/rewards.py::list_rewards",
+    "app/routers/standups.py::add_feedback",
+    "app/routers/standups.py::get_missing_standups",
+    "app/routers/standups.py::list_feedback",
+    "app/routers/standups.py::list_standup_history",
+    "app/routers/standups.py::list_standups",
+    "app/routers/stories.py::delete_story",
+    "app/routers/stories.py::upload_story_attachment",
+    "app/routers/team_members.py::claim_story",
+    "app/routers/team_members.py::list_team_members",
+    "app/routers/workflow_executions.py::story_execution_summary",
+    "app/routers/workflow_report.py::report_done",
+    "app/routers/workflow_templates.py::apply_template",
+    "app/routers/workflow_trigger.py::trigger_workflow",
+    "app/services/loop.py::require_loop_project_access",
+    "app/services/member_resolver.py::_resolve_member_anchor",
+    "app/services/member_resolver.py::_resolve_member_legacy",
+    "app/services/project_auth.py::require_project_access",
+    "app/services/workflow_parallel_approval.py::reassign_approver",
 }
-_RAW_INLINE_RAISE_BASELINE = len(_KNOWN_HITS)
+# raw 총량(고유 키 54개 + 위 5개 함수의 내부 중복 5건 = 59) — len(_KNOWN_HITS)와 분리해 명시.
+_RAW_INLINE_RAISE_BASELINE = 59
+
+
+def _qualname_of(node: ast.AST, parents: dict[int, ast.AST]) -> str:
+    """node를 감싸는 (Async)FunctionDef/ClassDef 체인을 안쪽→바깥쪽으로 걸어 dotted qualname을
+    만든다(예: `MyClass.handler` 또는 모듈 최상위면 그냥 `handler`). id(node) 기반 parents 맵은
+    `_attach_parents`가 미리 만들어 둔다 — ast 표준 walk는 parent pointer를 안 주므로."""
+    parts: list[str] = []
+    cur = parents.get(id(node))
+    while cur is not None:
+        if isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            parts.append(cur.name)
+        cur = parents.get(id(cur))
+    return ".".join(reversed(parts)) if parts else "<module>"
+
+
+def _attach_parents(tree: ast.AST) -> dict[int, ast.AST]:
+    parents: dict[int, ast.AST] = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[id(child)] = parent
+    return parents
 
 
 def _find_raw_inline_raise_patterns() -> list[str]:
     """`if not await has_project_access(...):` 바로 다음 줄(들)이 `raise HTTPException(...)`인
-    자리를 찾는다 — require_project_access로 수렴 안 한 잔존 인라인 판정."""
+    자리를 찾는다 — require_project_access로 수렴 안 한 잔존 인라인 판정.
+
+    story #2699(2026-08-16 실증 2회 — #2696 형제 merge의 순수 line-shift·#2679 자기 diff의
+    줄 밀림, 둘 다 baseline을 «신규 잔존»으로 오탐시킴): 키를 `{경로}:{줄번호}`에서
+    `{경로}::{함수/메서드 qualname}`으로 바꾼다 — 같은 함수 안에서 앞뒤로 줄이 밀려도(주석
+    추가·형제 PR merge 등) 키가 안 흔들린다. ⛔못 잡는 것(의식적 트레이드오프, AC4): 같은
+    함수 안에 «두 번째» 동일 인라인 raise 패턴이 새로 생기면 기존 키와 충돌해
+    `set(hits) - _KNOWN_HITS`(신규 키 diff)에는 안 잡힌다 — 다만 `len(hits) == baseline`
+    (원시 리스트 길이, dedup 안 함) 비교는 여전히 걸린다(카운트 불일치로 사람이 다시 봄,
+    "어느 함수인지"만 자동으로 못 짚어 줄 뿐)."""
     hits: list[str] = []
     for path in sorted(_APP.rglob("*.py")):
         try:
@@ -111,6 +142,7 @@ def _find_raw_inline_raise_patterns() -> list[str]:
             tree = ast.parse(src, filename=str(path))
         except (SyntaxError, UnicodeDecodeError):
             continue
+        parents = _attach_parents(tree)
         for node in ast.walk(tree):
             if not isinstance(node, ast.If):
                 continue
@@ -132,7 +164,8 @@ def _find_raw_inline_raise_patterns() -> list[str]:
                 and isinstance(node.body[0], ast.Raise)
             )
             if body_is_raise:
-                hits.append(f"{path.relative_to(_APP.parent)}:{node.lineno}")
+                qualname = _qualname_of(node, parents)
+                hits.append(f"{path.relative_to(_APP.parent)}::{qualname}")
     return hits
 
 
