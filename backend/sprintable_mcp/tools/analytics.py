@@ -20,6 +20,8 @@ class WorkloadInput(SprintableInput):
 
 class SprintFilterInput(SprintableInput):
     sprint_id: str | None = None
+    limit: int | None = None
+    cursor: str | None = None  # 이전 호출의 X-Next-Cursor 헤더 값을 그대로 넘기면 다음 페이지.
 
 
 class OverdueMemberInput(SprintableInput):
@@ -96,7 +98,13 @@ async def get_blocked_stories(args: SprintFilterInput) -> list[TextContent]:
         params: dict = {"project_id": client.require_project_id(), "status": "in-review"}
         if args.sprint_id:
             params["sprint_id"] = args.sprint_id
-        return ok(await client.get("/api/v2/stories", params=params))
+        if args.limit:
+            params["limit"] = args.limit
+        if args.cursor:
+            params["cursor"] = args.cursor
+        items, headers = await client.get_with_headers("/api/v2/stories", params=params)
+        has_more, next_cursor = _has_more_from_headers(headers, items)
+        return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_get_blocked_stories")
     except Exception as exc:
         return err(str(exc))
 
@@ -107,7 +115,13 @@ async def get_unassigned_stories(args: SprintFilterInput) -> list[TextContent]:
         params: dict = {"project_id": client.require_project_id(), "unassigned": "true"}
         if args.sprint_id:
             params["sprint_id"] = args.sprint_id
-        return ok(await client.get("/api/v2/stories", params=params))
+        if args.limit:
+            params["limit"] = args.limit
+        if args.cursor:
+            params["cursor"] = args.cursor
+        items, headers = await client.get_with_headers("/api/v2/stories", params=params)
+        has_more, next_cursor = _has_more_from_headers(headers, items)
+        return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_get_unassigned_stories")
     except Exception as exc:
         return err(str(exc))
 
