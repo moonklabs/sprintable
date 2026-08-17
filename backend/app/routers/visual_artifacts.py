@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.asset import Asset
+from app.services.artifact_image_url import _canonicalize_props, sign_image_srcs_in_nodes
 from app.models.visual_artifact import (
     ArtifactComment, ArtifactExport, ArtifactNode, ArtifactSpecPin, ArtifactVersion, VisualArtifact,
 )
@@ -155,14 +156,17 @@ async def create_artifact(
     for n in body.nodes:
         node = ArtifactNode(
             id=n.id or uuid.uuid4(), artifact_id=artifact.id, version_id=version.id,
-            type=n.type, props=n.props, parent_id=n.parent_id, sort_order=n.sort_order,
-            description=n.description,
+            type=n.type, props=_canonicalize_props(n.props), parent_id=n.parent_id,
+            sort_order=n.sort_order, description=n.description,
         )
         session.add(node)
         nodes.append(node)
     await session.flush()
 
     await _notify_artifact_created(session, artifact, org_id=org_id, project_id=project_id, creator_id=created_by)
+
+    node_outs = [ArtifactNodeOut.model_validate(n) for n in nodes]
+    await sign_image_srcs_in_nodes(node_outs)  # story #2711 AC1 — 응답 직전 신선 서명(url 미저장)
 
     detail = VisualArtifactDetail(
         id=artifact.id, org_id=artifact.org_id, project_id=artifact.project_id, title=artifact.title,
@@ -172,7 +176,7 @@ async def create_artifact(
         created_by=artifact.created_by, created_at=artifact.created_at, updated_at=artifact.updated_at,
         version_number=version.version_number, version_summary=version.summary,
         version_source_comment_id=version.source_comment_id, canvas_bounds=version.canvas_bounds,
-        nodes=[ArtifactNodeOut.model_validate(n) for n in nodes],
+        nodes=node_outs,
     )
     return _ok(detail.model_dump(mode="json"), status=201)
 
@@ -246,6 +250,8 @@ async def _load_detail(session: AsyncSession, artifact: VisualArtifact, version_
 
     org_slug = await resolve_org_slug(session, artifact.org_id)
     project_slug_map = await resolve_project_slugs(session, {artifact.project_id})
+    node_outs = [ArtifactNodeOut.model_validate(n) for n in node_rows]
+    await sign_image_srcs_in_nodes(node_outs)  # story #2711 AC1 — 응답 직전 신선 서명(url 미저장)
     return VisualArtifactDetail(
         id=artifact.id, org_id=artifact.org_id, project_id=artifact.project_id, title=artifact.title,
         story_id=artifact.story_id, epic_id=artifact.epic_id, doc_id=artifact.doc_id,
@@ -254,7 +260,7 @@ async def _load_detail(session: AsyncSession, artifact: VisualArtifact, version_
         created_by=artifact.created_by, created_at=artifact.created_at, updated_at=artifact.updated_at,
         version_number=version.version_number, version_summary=version.summary,
         version_source_comment_id=version.source_comment_id, canvas_bounds=version.canvas_bounds,
-        nodes=[ArtifactNodeOut.model_validate(n) for n in node_rows],
+        nodes=node_outs,
         unresolved_comment_count=unresolved_counts.get(artifact.id, 0),
         org_slug=org_slug, project_slug=project_slug_map.get(artifact.project_id),
     )
@@ -1031,8 +1037,9 @@ async def _apply_artifact_edit(
         if op.op == "add":
             new_id = op.id or uuid.uuid4()
             working[new_id] = {
-                "type": op.type or "text", "props": op.props or {}, "parent_id": op.parent_id,
-                "sort_order": op.sort_order or 0, "description": op.description,
+                "type": op.type or "text", "props": _canonicalize_props(op.props or {}),
+                "parent_id": op.parent_id, "sort_order": op.sort_order or 0,
+                "description": op.description,
             }
         elif op.op == "update":
             if op.id is None or op.id not in working:
@@ -1041,7 +1048,10 @@ async def _apply_artifact_edit(
             if op.type is not None:
                 node["type"] = op.type
             if op.props is not None:
-                node["props"] = op.props
+                # story #2711 ⓑ — 클라가 get으로 받은 서명 url을 그대로 되보내는 왕복이
+                # 가장 흔한 경로(에이전트가 노드를 읽고 다른 필드만 고쳐 되보낼 때 props는
+                # 건드리지 않았어도 그대로 전달되는 경우 포함) — 여기서 반드시 raw로 되돌린다.
+                node["props"] = _canonicalize_props(op.props)
             if op.parent_id is not None:
                 node["parent_id"] = op.parent_id
             if op.sort_order is not None:
