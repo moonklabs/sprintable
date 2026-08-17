@@ -279,7 +279,8 @@ async def test_fix_applies_bidirectionally_request_and_result_reply():
             gate_id = uuid.uuid4()
 
             await dispatch_approval_request_cards(
-                s, org_id=org_id, doc=doc, gate_id=gate_id,
+                s, org_id=org_id, work_item_type="doc", work_item_id=doc.id,
+                project_id=doc.project_id, title=doc.title, gate_id=gate_id,
                 requester_id=requester_id, approver_ids=[approver_id],
             )
             await s.commit()
