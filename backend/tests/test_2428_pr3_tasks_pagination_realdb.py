@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -97,14 +98,27 @@ async def _seed(session, *, n_todo: int = 3, n_done: int = 2):
     session.add(story)
     await session.commit()
 
+    # 단일 트랜잭션 내 여러 row는 Postgres now()가 전부 동일값이라(server_default=func.now())
+    # created_at 커서 비교(<)가 동일-timestamp 행을 스킵한다 — 명시 override로 결정적 스태거.
+    base = datetime.now(timezone.utc)
+    total = n_todo + n_done
     task_ids = []
+    seq = 0
     for i in range(n_todo):
-        t = Task(id=uuid.uuid4(), org_id=org.id, story_id=story.id, title=f"todo-{i}", status="todo")
+        t = Task(
+            id=uuid.uuid4(), org_id=org.id, story_id=story.id, title=f"todo-{i}", status="todo",
+            created_at=base - timedelta(seconds=total - seq),
+        )
         session.add(t)
         task_ids.append(t.id)
+        seq += 1
     for i in range(n_done):
-        t = Task(id=uuid.uuid4(), org_id=org.id, story_id=story.id, title=f"done-{i}", status="done")
+        t = Task(
+            id=uuid.uuid4(), org_id=org.id, story_id=story.id, title=f"done-{i}", status="done",
+            created_at=base - timedelta(seconds=total - seq),
+        )
         session.add(t)
+        seq += 1
     await session.commit()
 
     caller_id = uuid.uuid4()
@@ -210,6 +224,59 @@ async def test_no_limit_returns_all_and_total_matches_page():
             assert resp.status_code == 200, resp.text
             assert len(resp.json()) == 5
             assert resp.headers["x-total-count"] == "5"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_org_wide_last_page_x_total_count_matches_remaining_not_grand_total():
+    """페드루 AC 리뷰(2026-08-17) 지적 — count_q가 cursor를 안 보면 마지막 페이지에서도
+    X-Total-Count가 grand total(5)로 고정돼 has_more(=total>len(items))가 영구 참이 된다.
+    5건을 limit=2로 3페이지 끝까지 실제로 걸어(org-wide 분기), 마지막 페이지에서
+    X-Total-Count == len(items)(=has_more False로 정확히 떨어짐)까지 확認한다."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s, n_todo=3, n_done=2)
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            # sprintable_mcp/tools/stories.py::_has_more_from_headers 규약 그대로 —
+            # X-Next-Cursor는 결과가 있으면 "항상" 실리므로(진짜 다음 페이지 유무와 무관)
+            # 헤더 존재가 아니라 has_more=(X-Total-Count > 이번 페이지 건수)로 멈춘다.
+            seen_ids: set[str] = set()
+            cursor = None
+            pages = 0
+            last_total = None
+            last_len = None
+            while True:
+                params = {"limit": 2}
+                if cursor:
+                    params["cursor"] = cursor
+                resp = await client.get("/api/v2/tasks", params=params)
+                assert resp.status_code == 200, resp.text
+                body = resp.json()
+                pages += 1
+                seen_ids.update(t["id"] for t in body)
+                last_total = int(resp.headers["x-total-count"])
+                last_len = len(body)
+                has_more = last_total > last_len
+                cursor = resp.headers.get("x-next-cursor")
+                if not has_more or not body:
+                    break
+                assert pages < 10, "무한 루프 방지"
+
+            assert len(seen_ids) == 5, f"5건이 페이지 전체에 걸쳐 정확히 다 나와야(중복/누락 0): {seen_ids}"
+            assert pages == 3, f"5건/limit=2 → 3페이지(2+2+1)여야: {pages}"
+            assert last_total == last_len, (
+                f"마지막 페이지 X-Total-Count({last_total})가 그 페이지 건수({last_len})와 "
+                f"같아야 has_more=False로 정확히 떨어진다 — grand total(5) 고정이면 여기서 어긋남"
+            )
         finally:
             await client.aclose()
     finally:
