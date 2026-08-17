@@ -52,6 +52,10 @@ function stubFetch(detailOk: boolean) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.includes('/pins')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    // story #2721(별건, 이번 판 사이 develop에 머지) — ArtifactViewer가 이제 EntityBacklinksSection도
+    // 그려 `/backlinks`를 fetch한다. `/comments`보다 먼저 걸러야 한다(문자열 포함 검사라 순서 무관하지만
+    // 명시적으로 분리 — items 배열 형상 계약이 detail 폴백과 달라 섞이면 items.filter 크래시).
+    if (url.includes('/backlinks')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
     if (url.includes('/comments')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
     if (url.includes('/versions')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
     if (url.includes('/api/gates')) return { ok: true, status: 200, json: async () => [] };
