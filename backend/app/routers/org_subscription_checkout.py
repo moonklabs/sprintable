@@ -21,6 +21,7 @@ from app.services.org_subscription_checkout import (
     CheckoutInProgress,
     checkout_subscription,
 )
+from app.services.platform_settings import get_platform_settings
 
 router = APIRouter(prefix="/api/v2/org-subscriptions", tags=["billing", "Organization"])
 
@@ -62,7 +63,16 @@ async def checkout(
     """카드 인증 완료(authKey) → 빌링키 발급 + 구독 pending 생성 + 즉시 1차 청구 →
     청구 성공 時에만 active. 청구가 카드 거절 등으로 실패하면 200으로 status='pending'
     바디를 반환한다(시스템 오류가 아니라 재시도 가능한 비즈니스 결과 — 502는 Toss API
-    자체에 도달 못 한 진짜 시스템 오류에만 쓴다)."""
+    자체에 도달 못 한 진짜 시스템 오류에만 쓴다).
+
+    story #2728(선생님 결정②) — Toss 심사 완료 前엔 이 엔드포인트가 서버측에서 무조건
+    거부한다(FE 버튼 숨김만으로는 반쪽 — 「금지 AC=서버가 거부」). 어드민에서 스위치를
+    켜야만(sprintable-admin/internal-api 경유) 도달 가능해진다. auth 체크보다 먼저 —
+    기능 자체가 꺼진 상태에선 호출자의 org 권한과 무관하게 전원 차단이 정답."""
+    settings = await get_platform_settings(session)
+    if not settings.billing_checkout_enabled:
+        raise HTTPException(status_code=403, detail="billing checkout is not yet enabled")
+
     from app.services.project_auth import is_org_owner_or_admin
 
     if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
