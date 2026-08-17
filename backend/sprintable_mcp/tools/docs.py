@@ -25,6 +25,7 @@ class GetDocInput(SprintableInput):
 class SearchDocsInput(SprintableInput):
     query: str
     tags: list[str] | None = None
+    limit: int | None = None  # BE search_full_text 분기는 결과 자체가 min(limit, 50)로 상한 — cursor는 없음(관련도순 정렬이라 페이지 이어달리기 불가, 아래 함수 docstring 참조).
 
 
 class CreateDocInput(SprintableInput):
@@ -133,9 +134,23 @@ async def search_docs(args: SearchDocsInput) -> list[TextContent]:
         params: dict = {"project_id": client.require_project_id(), "q": args.query}
         if args.tags:
             params["tags"] = ",".join(args.tags)
+        if args.limit:
+            params["limit"] = args.limit
         result = await client.get("/api/v2/docs", params=params)
         items, _meta = _unwrap_docs_page(result)
-        return ok(items)
+        # has_more는 이 분기에서 BE가 항상 False로 고정해 보낸다(위 docstring) — 그래도 결과가
+        # BE 상한(min(limit,50))에 딱 걸쳤을 수 있어 그 사실만 안내(다음 페이지 제안 아님,
+        # cursor 자체가 없어 "더 좁혀 재검색"만 유효한 다음 수).
+        blocks = ok(items)
+        if args.limit and len(items) >= min(args.limit, 50):
+            blocks.append(TextContent(
+                type="text",
+                text=(
+                    f"※ 결과가 상한({min(args.limit, 50)}건)에 걸쳤을 수 있음 — 이 도구는 cursor를 "
+                    f"지원 안 함(관련도순 정렬이라 페이지 이어달리기 불가). query를 좁혀 재검색할 것."
+                ),
+            ))
+        return blocks
     except Exception as exc:
         return err(str(exc))
 
