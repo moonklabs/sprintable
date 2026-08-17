@@ -298,7 +298,9 @@ def test_ac4_real_repo_scan_counts_are_recorded():
     # 2026-08-02 story #2422 후속으로 high 20→15·exempt 18→23 갱신,
     # 2026-08-07 story #2510 NEXT_PUBLIC_TOSS_CLIENT_KEY 신설로 high 15→16,
     # 2026-08-17 story #2728 후속으로 NEXT_PUBLIC_EE_ENABLED를 cloudbuild.yaml/GHA에 배선
-    # (dev FE billing 표면 렌더 안 되던 근본원인)해 IaC-covered로 전환·high 16→15) — 스위트가
+    # (dev FE billing 표면 렌더 안 되던 근본원인)해 IaC-covered로 전환·high 16→15,
+    # 2026-08-18 story #e6500272 후속으로 LICENSE_CONSENT도 동형 배선(backend deploy 스텝
+    # ENV_VARS)해 IaC-covered로 전환·high 15→14) — 스위트가
     # 실패하면 숫자가 바뀐 것, 원인을 봐야 한다. 이번 -5/+5는 SPRINTABLE_RUNTIME_ROLE·
     # SPRINTABLE_{BACKGROUND,MEMO_DISPATCHER,DISCORD_OUTBOUND,TEAMS_OUTBOUND}_POLL_INTERVAL_MS
     # 다섯이 high(미triage)에서 code_read_exempt(영구 정상)로 승격된 것 — env 드리프트
@@ -308,7 +310,7 @@ def test_ac4_real_repo_scan_counts_are_recorded():
     # 은퇴 상태). 값을 채워야 도는 게 아니라 안 채워야 지금 의도대로 도는 스위치라
     # code_read_exempt가 정확한 분류다(baseline의 "아직 triage 안 됨"과 다르다).
     assert len(highest) == 1, highest
-    assert len(high) == 15, high
+    assert len(high) == 14, high
     assert len(low) == 9, low
     assert len(exempt) == 23
 
@@ -401,12 +403,13 @@ def test_baseline_entry_without_reason_is_escalated():
 
 
 def test_repo_code_read_high_baseline_is_wellformed():
-    """저장소에 실제로 커밋된 baseline(14건, 2026-08-07 — #2510 NEXT_PUBLIC_TOSS_CLIENT_KEY
+    """저장소에 실제로 커밋된 baseline(13건, 2026-08-07 — #2510 NEXT_PUBLIC_TOSS_CLIENT_KEY
     추가로 14→15, 2026-08-17 — #2728 NEXT_PUBLIC_EE_ENABLED를 cloudbuild.yaml/GHA 배선으로
-    해소해 15→14)이 형식을 지키는지."""
+    해소해 15→14, 2026-08-18 — #e6500272 LICENSE_CONSENT를 backend deploy 스텝 배선으로
+    해소해 14→13)이 형식을 지키는지."""
     mod = _load_check_env_drift()
     baseline = mod._load_code_read_high_baseline()
-    assert len(baseline) == 14
+    assert len(baseline) == 13
     for key, entry in baseline.items():
         problem = mod._baseline_entry_expired(entry, mod._today())
         assert problem is None, f"{key}: {problem}"

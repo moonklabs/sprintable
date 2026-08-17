@@ -165,6 +165,12 @@ jobs:
             # 명시 false로 durable화만 — Toss 심사 前 결제 표면은 여전히 이 값과 무관하게
             # platform_settings.billing_checkout_enabled 서버측 게이트가 막는다, #2728 별건 PR).
             echo "ee_enabled=false" >> "$GITHUB_OUTPUT"
+            # story #e6500272 후속(2026-08-18, 페드루 PO 지시 — #3188과 동형 발견) — backend
+            # `settings.is_ee_enabled`가 읽는 LICENSE_CONSENT도 배포 SSOT 어디에도 배선된 적이
+            # 없었다(cloudbuild.yaml·GHA·Dockerfile 전부 무배선). dev·prod 둘 다 현재 수동 env로만
+            # 'agreed' — ⛔prod도 여기서 명시하되 값 변경 0(현행값 그대로 durable화만, 별도 배포
+            # 조작 없음 — "손 값을 다음 배포가 덮는다" 교훈, _BACKEND_MIN_INSTANCES류와 동일 클래스).
+            echo "license_consent=agreed" >> "$GITHUB_OUTPUT"
             # story #2139/#2143 후속(2026-07-23, 오르테가군 판정 — dev 게이트 GREEN 확認 後
             # 같은 날 prod 승격, "절반만 고치는 것" 방지 교정): backend 쪽을 GCE 실시간 3노드와
             # 같은 흐름에서 켠다(한쪽만 켜고 멈추면 오늘의 #2448 인시던트와 동형 반쪽 상태가
@@ -320,6 +326,11 @@ jobs:
             # billing 표면(settings/page.tsx의 isEEEnabled() 게이트)이 아예 렌더 안 됐다 — dev만
             # 켠다(prod는 위 main 분기에서 명시 false, 무접촉).
             echo "ee_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #e6500272 후속(2026-08-18, 페드루 PO 지시) — LICENSE_CONSENT(backend
+            # `settings.is_ee_enabled` 게이트)도 EE_ENABLED와 동형 미배선이었다. dev 현재값도
+            # 'agreed'(수동 env) — 여기서도 값 변경 0, 현행값만 durable화(prod 위 main 분기와
+            # 같은 값 — dev/prod가 실제로 다른 다른 플래그들과 달리 이건 원래 같아야 하는 값).
+            echo "license_consent=agreed" >> "$GITHUB_OUTPUT"
             # story #2139/#2143 후속(2026-07-23, 오르테가군 판정) — "백플레인 켜기" dev 1단계.
             # PRESENCE_ONLINE_REDIS_ENABLED: DB 폴백 있음(안 깨져 있음 — 켜면 신선도 개선).
             # PRESENCE_REDIS_ENABLED(chat_presence "working"): 프로세스-로컬 dict라 GCE
@@ -379,6 +390,7 @@ jobs:
           V_BACKEND_FANOUT_WAKE_REDIS_ENABLED: ${{ steps.env.outputs.backend_fanout_wake_redis_enabled }}
           V_SSE_MULTIPLEX_ENABLED: ${{ steps.env.outputs.sse_multiplex_enabled }}
           V_EE_ENABLED: ${{ steps.env.outputs.ee_enabled }}
+          V_LICENSE_CONSENT: ${{ steps.env.outputs.license_consent }}
           V_BACKEND_PRESENCE_REDIS_ENABLED: ${{ steps.env.outputs.backend_presence_redis_enabled }}
           V_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED: ${{ steps.env.outputs.backend_presence_online_redis_enabled }}
           V_BACKEND_SSE_LEASE_REDIS_ENABLED: ${{ steps.env.outputs.backend_sse_lease_redis_enabled }}
@@ -387,7 +399,7 @@ jobs:
           V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED: ${{ steps.env.outputs.backend_sse_transient_replay_enabled }}
           V_MCP_ALLOWED_HOSTS: ${{ steps.env.outputs.mcp_allowed_hosts }}
         run: |
-          SUBST="_DEPLOY_ENV=\"${V_DEPLOY_ENV}\",_FASTAPI_URL=\"${V_FASTAPI_URL}\",_BACKEND_MIN_INSTANCES=\"${V_BACKEND_MIN_INSTANCES}\",_BACKEND_MAX_INSTANCES=\"${V_BACKEND_MAX_INSTANCES}\",_DB_POOL_SIZE=\"${V_DB_POOL_SIZE}\",_DB_MAX_OVERFLOW=\"${V_DB_MAX_OVERFLOW}\",_BACKEND_DB_PGBOUNCER=\"${V_BACKEND_DB_PGBOUNCER}\",_BACKEND_TIMEOUT=\"${V_BACKEND_TIMEOUT}\",_GA4_MEASUREMENT_ID=\"${V_GA4_MEASUREMENT_ID}\",_REALTIME_MIN_INSTANCES=\"${V_REALTIME_MIN_INSTANCES}\",_REALTIME_MAX_INSTANCES=\"${V_REALTIME_MAX_INSTANCES}\",_REALTIME_TIMEOUT=\"${V_REALTIME_TIMEOUT}\",_REALTIME_URL=\"${V_REALTIME_URL}\",_BACKEND_PG_LISTEN_ENABLED=\"${V_BACKEND_PG_LISTEN_ENABLED}\",_BACKEND_REDIS_CONSUME_ENABLED=\"${V_BACKEND_REDIS_CONSUME_ENABLED}\",_BACKEND_REDIS_DISPATCH_ENABLED=\"${V_BACKEND_REDIS_DISPATCH_ENABLED}\",_REDIS_URL=\"${V_REDIS_URL}\",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED=\"${V_BACKEND_REDIS_DUAL_PUBLISH_ENABLED}\",_BACKEND_FANOUT_WAKE_REDIS_ENABLED=\"${V_BACKEND_FANOUT_WAKE_REDIS_ENABLED}\",_SSE_MULTIPLEX_ENABLED=\"${V_SSE_MULTIPLEX_ENABLED}\",_BACKEND_PRESENCE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_REDIS_ENABLED}\",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED}\",_BACKEND_SSE_LEASE_REDIS_ENABLED=\"${V_BACKEND_SSE_LEASE_REDIS_ENABLED}\",_FRONTEND_MIN_INSTANCES=\"${V_FRONTEND_MIN_INSTANCES}\",_FRONTEND_MAX_INSTANCES=\"${V_FRONTEND_MAX_INSTANCES}\",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED=\"${V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}\",_MCP_ALLOWED_HOSTS=\"${V_MCP_ALLOWED_HOSTS}\",_EE_ENABLED=\"${V_EE_ENABLED}\""
+          SUBST="_DEPLOY_ENV=\"${V_DEPLOY_ENV}\",_FASTAPI_URL=\"${V_FASTAPI_URL}\",_BACKEND_MIN_INSTANCES=\"${V_BACKEND_MIN_INSTANCES}\",_BACKEND_MAX_INSTANCES=\"${V_BACKEND_MAX_INSTANCES}\",_DB_POOL_SIZE=\"${V_DB_POOL_SIZE}\",_DB_MAX_OVERFLOW=\"${V_DB_MAX_OVERFLOW}\",_BACKEND_DB_PGBOUNCER=\"${V_BACKEND_DB_PGBOUNCER}\",_BACKEND_TIMEOUT=\"${V_BACKEND_TIMEOUT}\",_GA4_MEASUREMENT_ID=\"${V_GA4_MEASUREMENT_ID}\",_REALTIME_MIN_INSTANCES=\"${V_REALTIME_MIN_INSTANCES}\",_REALTIME_MAX_INSTANCES=\"${V_REALTIME_MAX_INSTANCES}\",_REALTIME_TIMEOUT=\"${V_REALTIME_TIMEOUT}\",_REALTIME_URL=\"${V_REALTIME_URL}\",_BACKEND_PG_LISTEN_ENABLED=\"${V_BACKEND_PG_LISTEN_ENABLED}\",_BACKEND_REDIS_CONSUME_ENABLED=\"${V_BACKEND_REDIS_CONSUME_ENABLED}\",_BACKEND_REDIS_DISPATCH_ENABLED=\"${V_BACKEND_REDIS_DISPATCH_ENABLED}\",_REDIS_URL=\"${V_REDIS_URL}\",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED=\"${V_BACKEND_REDIS_DUAL_PUBLISH_ENABLED}\",_BACKEND_FANOUT_WAKE_REDIS_ENABLED=\"${V_BACKEND_FANOUT_WAKE_REDIS_ENABLED}\",_SSE_MULTIPLEX_ENABLED=\"${V_SSE_MULTIPLEX_ENABLED}\",_BACKEND_PRESENCE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_REDIS_ENABLED}\",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED}\",_BACKEND_SSE_LEASE_REDIS_ENABLED=\"${V_BACKEND_SSE_LEASE_REDIS_ENABLED}\",_FRONTEND_MIN_INSTANCES=\"${V_FRONTEND_MIN_INSTANCES}\",_FRONTEND_MAX_INSTANCES=\"${V_FRONTEND_MAX_INSTANCES}\",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED=\"${V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}\",_MCP_ALLOWED_HOSTS=\"${V_MCP_ALLOWED_HOSTS}\",_EE_ENABLED=\"${V_EE_ENABLED}\",_LICENSE_CONSENT=\"${V_LICENSE_CONSENT}\""
           echo "substitutions=${SUBST}" >> "$GITHUB_OUTPUT"
 
       - name: Submit Cloud Build
