@@ -163,6 +163,77 @@ async def test_verified_and_ack_received_inherit_session_id_and_flow_from_verify
 
 
 @pytest.mark.anyio
+async def test_verified_inherits_latest_verify_started_row_on_retry_not_the_first():
+    """미르코 QA(2026-08-17) — PO가 명시한 «재시도 시 최신 행 승리»(ORDER BY server_ts DESC) 축은
+    단일 verify_started 행 시딩으로는 실제로 갈라지지 않는다(오름차순으로 잘못 바뀌어도 통과
+    했을 것). 같은 agent_id에 verify_started 행을 **두 번**(오래된 것 flow='onboarding', 최신
+    것 flow='recruit') 시딩해 최신 쪽이 이긴다는 것을 직접 재현한다 — 별도 session/commit으로
+    서버 트랜잭션 시작 시각을 벌려(같은 트랜잭션 내 func.now()는 고정값이라 순서 보장 안 됨,
+    이 세션 다른 realdb 테스트들과 동일 원칙) server_ts 순서를 실측 보장한다."""
+    from sqlalchemy import select
+
+    from app.main import app
+    from app.models.onboarding_event import OnboardingEvent
+    from app.services.agent_verify import start_verification
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            agent_id = await _seed_agent(s, org_id, project_id)
+
+        # 오래된 시도(첫 verify_started) — 자기 트랜잭션에서 커밋해 server_ts를 확정시킨다.
+        stale_session_id = uuid.uuid4()
+        async with Session() as s:
+            s.add(OnboardingEvent(
+                id=uuid.uuid4(), event="verify_started", agent_id=agent_id,
+                session_id=stale_session_id, meta={"flow": "onboarding"},
+            ))
+            await s.commit()
+
+        # 최신 시도(재시도) — 별도 트랜잭션이라 server_ts가 위 행보다 반드시 뒤(같은 트랜잭션
+        # 안이었다면 func.now()가 고정값이라 이 테스트 자체가 성립하지 않았을 것).
+        latest_session_id = uuid.uuid4()
+        async with Session() as s:
+            s.add(OnboardingEvent(
+                id=uuid.uuid4(), event="verify_started", agent_id=agent_id,
+                session_id=latest_session_id, meta={"flow": "recruit"},
+            ))
+            await s.commit()
+
+        async with Session() as s:
+            seq = await start_verification(s, agent_id=agent_id, org_id=org_id, project_id=project_id)
+            await s.commit()
+
+        await _setup_app(app, Session, agent_id)
+        client = _client_for(app)
+        try:
+            resp = await client.post("/api/v2/agent/events/ack", json={"seq": seq})
+            assert resp.status_code == 200, resp.text
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+
+        async with Session() as s:
+            rows = (await s.execute(
+                select(OnboardingEvent).where(
+                    OnboardingEvent.agent_id == agent_id,
+                    OnboardingEvent.event.in_(("ack_received", "verified")),
+                )
+            )).scalars().all()
+            by_event = {r.event: r for r in rows}
+            assert set(by_event) == {"ack_received", "verified"}
+            for ev in ("ack_received", "verified"):
+                assert by_event[ev].session_id == latest_session_id, (
+                    f"{ev}가 오래된 시도(stale_session_id)를 물려받음 — ORDER BY DESC가 안 지켜짐"
+                )
+                assert by_event[ev].session_id != stale_session_id
+                assert by_event[ev].meta == {"flow": "recruit"}, f"{ev} meta.flow가 최신 시도 값이 아님"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_verified_gracefully_degrades_when_no_verify_started_row_exists():
     """음성대조 — verify_started 행이 아예 없으면(API 전용 발급 등) session_id/meta 조회가
     None으로 조용히 degrade한다(크래시·422 없음, fail-silent 철학 유지)."""
