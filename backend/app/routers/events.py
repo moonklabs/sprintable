@@ -726,6 +726,12 @@ async def _route_dispatch_bg(event_id: uuid.UUID) -> None:
             )
 
 
+# story #2428 PR⑤ QA(카디르, 2026-08-17): limit 상수를 라우터 함수 밖으로 빼 테스트가 실제로
+# 「cap 걸림 + has_more」 경계를 작은 값으로 주입해 검증할 수 있게 한다(1000건 넘게 실제로
+# 시딩하지 않고도) — PO 처방 ⓒ.
+_PENDING_EVENTS_DEFAULT_LIMIT = 1000
+
+
 @router.get("/pending", response_model=list[EventResponse])
 async def get_pending_events(
     recipient_id: uuid.UUID = Query(...),
@@ -756,6 +762,15 @@ async def get_pending_events(
     엔드포인트는 «읽으면 준다」가 아니라 「pending으로 남는다」— cursor 없이 다시 부르면 같은
     상위 N건이 그대로 다시 온다(browse형과 다른 이 도구 특유의 함정, poll_events MCP 도구
     안내 문구에서 명시).
+
+    ⚠️의도적 행동 변경(카디르 QA 2026-08-17, PO 처방): `limit` 미지정 시 이전엔 진짜 무제한
+    이었으나 지금은 `_PENDING_EVENTS_DEFAULT_LIMIT`(1000)으로 잘린다 — 이건 «무회귀»가
+    아니라 이 스토리(#2428) 본체가 명시적으로 요구하는 처방 그 자체다("조용히 자르는 기본값만
+    넣으면... #2412의 병을 그대로 재현" — AC2/AC3). 무제한을 그대로 두는 게 아니라 **잘렸으면
+    호출자가 알 수 있게**(`X-Total-Count`가 진짜 남은 건수, `total > len(items)`면 has_more)
+    하는 것이 처방이었다. 계약: **limit 미지정 = 기본 1000 cap + X-Total-Count/has_more로
+    잘림 신호**(이전 「무제한」 계약은 폐기 — 이 엔드포인트의 유일한 소비자인 MCP `poll_events`
+    가 has_more를 이미 소비하므로 이 변경으로 조용히 깨지는 소비자 없음, 전수 grep 확認).
     """
     await assert_caller_is_member(
         recipient_id, auth, db, org_id, detail="Cannot read another member's events",
@@ -786,7 +801,10 @@ async def get_pending_events(
     count_result = await db.execute(select(func.count()).select_from(Event).where(*conds))
     total = int(count_result.scalar_one() or 0)
 
-    q = select(Event).where(*conds).order_by(Event.created_at.asc()).limit(limit if limit is not None else 1000)
+    q = (
+        select(Event).where(*conds).order_by(Event.created_at.asc())
+        .limit(limit if limit is not None else _PENDING_EVENTS_DEFAULT_LIMIT)
+    )
     result = await db.execute(q)
     events = result.scalars().all()
 

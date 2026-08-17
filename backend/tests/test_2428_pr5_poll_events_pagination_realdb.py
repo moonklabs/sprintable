@@ -108,8 +108,10 @@ async def test_get_pending_events_last_page_x_total_count_matches_remaining():
 
 
 @pytest.mark.anyio
-async def test_get_pending_events_no_limit_returns_all_and_total_matches():
-    """limit 미지정(기존 동작 무회귀) — 다 오고 X-Total-Count도 같은 값."""
+async def test_get_pending_events_no_limit_under_default_cap_returns_all():
+    """limit 미지정 + 건수가 기본 cap 밑이면(3 < 1000) 다 오고 X-Total-Count도 같은 값 —
+    카디르 QA(2026-08-17) PO 처방: 이 케이스는 "무회귀" 주장이 아니라 cap 밑에서는 cap이
+    안 보인다는 것만 확認한다(cap 자체의 존재는 아래 boundary 테스트가 별도로 잰다)."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -128,6 +130,45 @@ async def test_get_pending_events_no_limit_returns_all_and_total_matches():
             assert resp.status_code == 200, resp.text
             assert len(resp.json()) == 3
             assert resp.headers["x-total-count"] == "3"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_get_pending_events_no_limit_hits_default_cap_signals_has_more(monkeypatch):
+    """카디르 QA(2026-08-17) 지적 — «무회귀» 주장이 실제로는 회귀(암묵적 1000 cap)였다. 이제
+    이 엔드포인트 계약은 "limit 미지정 = 기본 cap + X-Total-Count/has_more로 잘림 신호"다
+    (무제한 유지가 아니라 잘림을 호출자가 알 수 있게 하는 것이 story #2428의 처방 그 자체).
+    1000+건을 실제로 시딩하지 않고 `_PENDING_EVENTS_DEFAULT_LIMIT`를 테스트로 낮춰 그 경계를
+    실제로 물린다(PO 처방 ⓒ) — cap이 걸려도 X-Total-Count는 진짜 전체 건수(5)를 유지하고
+    바디는 cap(2)만큼만 옴을 확認."""
+    from app.main import app
+    from app.routers import events as events_module
+
+    monkeypatch.setattr(events_module, "_PENDING_EVENTS_DEFAULT_LIMIT", 2)
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            recipient_id, user_id = await _make_human_member(s, org.id, project.id)
+            base = datetime.now(timezone.utc)
+            for i in range(5):
+                await _make_pending_event(s, org.id, project.id, recipient_id, _stagger(base, 5, i))
+        await _setup_app_human(app, Session, user_id, org.id)
+        client = _client_for(app)
+        try:
+            # limit 파라미터 자체를 안 준다 — «기본값이 무제한이 아니라 cap이다»가 검증 대상.
+            resp = await client.get("/api/v2/events/pending", params={"recipient_id": str(recipient_id)})
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert len(body) == 2, "기본 cap(테스트 주입값 2)만큼만 와야"
+            assert resp.headers["x-total-count"] == "5", "cap이 걸려도 X-Total-Count는 진짜 전체를 유지"
+            assert int(resp.headers["x-total-count"]) > len(body), "has_more 판정식(total>len)이 True여야"
         finally:
             await client.aclose()
     finally:
