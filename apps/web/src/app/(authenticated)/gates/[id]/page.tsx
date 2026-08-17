@@ -108,7 +108,7 @@ export default function GateDetailPage() {
   // 뷰어) 아래에서 읽기전용 사유 문구로 분기한다(무권한 상태에서 액션 버튼 자체를 렌더하지 않음).
   const canAct = needsAction && gate?.can_approve === true;
 
-  const transition = useCallback(async (status: 'approved' | 'rejected', note?: string) => {
+  const transition = useCallback(async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean) => {
     if (!gate) return;
     setResolving(true);
     setTransitionError(null);
@@ -116,7 +116,11 @@ export default function GateDetailPage() {
       const res = await fetchWithAuth(`/api/gates/${gate.id}/transition`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, note: note?.trim() || null }),
+        // story #2027 AC2: evidence_viewed는 GateSignatureApproval의 onApprove가 호출될 때만
+        // 실려온다(그 컴포넌트 자체가 canSign=evidenceViewed&&reason로 버튼을 막아 이 콜백에
+        // 도달했다는 사실 자체가 열람 확인 — 아래 저위험 경로는 안 보내 undefined→백엔드가
+        // risk_grade=='high'가 아니면 아예 안 봄).
+        body: JSON.stringify({ status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false }),
       });
       // story #1990: push()는 콜드-진입 합성 스택([parentTab, target])에 세번째 엔트리를
       // 쌓아 브라우저 BACK 1회가 이 상세를 재진입시키는 트랩을 만든다(§3.2 재진입 트랩).
@@ -252,7 +256,7 @@ export default function GateDetailPage() {
                 gate={gate}
                 resolving={resolving}
                 error={transitionError}
-                onApprove={(reason) => void transition('approved', reason)}
+                onApprove={(reason) => void transition('approved', reason, true)}
                 onReject={(reason) => void transition('rejected', reason)}
                 onDiscuss={(reason) => void discuss(reason)}
               />

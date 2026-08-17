@@ -88,6 +88,13 @@ class GateTransitionRequest(BaseModel):
     status: str
     resolver_id: uuid.UUID | None = None  # ⚠️RC#1: 무시됨(서버가 인증 caller 로 강제)·하위호환 잔류.
     note: str | None = None
+    # story #2027 AC2(까심 QA 적출·2026-07-20, 페드루 PO 처방 2026-08-16): 고위험 게이트의
+    # "근거 열람" 요건도 note와 동형으로 서버가 강제한다 — 클라이언트가 「봤다」고 선언한
+    # 값을 그대로 신뢰하는 것뿐이라 완전한 증명은 아니지만(서버는 실제 열람 여부를 관측할
+    # 수 없다), 최소한 「보냈다」는 사실 자체가 UI 경유를 강제한다(직접 API 호출은 이 필드를
+    # 몰라 기본값 False로 막힌다 — AC1의 note 강제와 같은 방어선). 기본값 False = 안 보내면
+    # 고위험에서 막힘(저위험은 아래 강제 블록이 risk_grade=="high"일 때만 돌아 무관).
+    evidence_viewed: bool = False
 
     @field_validator("status")
     @classmethod
@@ -870,11 +877,18 @@ async def transition_gate_endpoint(
     # (derive_risk_grade+get_org_posture) 재사용(DRY·N+1 0 — org당 posture 1쿼리).
     if body.status == "approved" and _gate is not None:
         _posture = await get_org_posture(session, org_id)
-        if derive_risk_grade(_posture, _gate.gate_type) == "high" and not (body.note or "").strip():
-            raise HTTPException(
-                status_code=422,
-                detail="고위험(risk_grade=high) 게이트 승인은 사유(note) 입력이 필수입니다.",
-            )
+        if derive_risk_grade(_posture, _gate.gate_type) == "high":
+            if not (body.note or "").strip():
+                raise HTTPException(
+                    status_code=422,
+                    detail="고위험(risk_grade=high) 게이트 승인은 사유(note) 입력이 필수입니다.",
+                )
+            # story #2027 AC2: note와 같은 자리 — 근거 열람(evidence_viewed) 확인도 서버가 강제.
+            if body.evidence_viewed is not True:
+                raise HTTPException(
+                    status_code=422,
+                    detail="고위험(risk_grade=high) 게이트 승인은 근거 열람 확인(evidence_viewed=true)이 필수입니다.",
+                )
     # ⭐S23 RC① + RC#1(방어심층): resolver_id 를 **전 status 무조건 인증 caller 로 강제**(body 무시).
     # body 조작(타인 UUID)으로 SoD(approver≠owner) 우회·confirmed_by_member_id 위조 차단.
     _resolver_id = resolved.id

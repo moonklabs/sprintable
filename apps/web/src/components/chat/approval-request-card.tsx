@@ -108,14 +108,16 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
 
   useEffect(() => { void fetchGate(); }, [fetchGate]);
 
-  const transition = async (status: 'approved' | 'rejected', note?: string) => {
+  const transition = async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean) => {
     setResolving(true);
     setTransitionError(null);
     try {
       const res = await fetchWithAuth(`/api/gates/${target.gate_id}/transition`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, note: note?.trim() || null }),
+        // story #2027 AC2 — gates/[id]/page.tsx와 동일 계약(evidence_viewed는 고위험 서명
+        // 플로우 onApprove에서만 true로 실린다, 아래 ApprovalRequestBody 배선 참조).
+        body: JSON.stringify({ status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false }),
       });
       if (res.ok) { await fetchGate(); return; }
       const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
@@ -172,7 +174,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
           gate={state.gate}
           resolving={resolving}
           transitionError={transitionError}
-          onApprove={(reason) => void transition('approved', reason)}
+          onApprove={(reason, evidenceViewed) => void transition('approved', reason, evidenceViewed)}
           onReject={(reason) => void transition('rejected', reason)}
           onDiscuss={(reason) => void discuss(reason)}
           onDiscussClick={() => setDiscussDialogOpen(true)}
@@ -199,7 +201,7 @@ function ApprovalRequestBody({
   gate: GateItem;
   resolving: boolean;
   transitionError: string | null;
-  onApprove: (reason?: string) => void;
+  onApprove: (reason?: string, evidenceViewed?: boolean) => void;
   onReject: (reason?: string) => void;
   /** story #2631 — 고위험(서명) 플로우가 이미 가진 사유 필드를 그대로 재사용해 직접 제출. */
   onDiscuss: (reason: string) => void;
@@ -327,7 +329,9 @@ function ApprovalRequestBody({
           gate={gate}
           resolving={resolving}
           error={transitionError}
-          onApprove={onApprove}
+          // story #2027 AC2: GateSignatureApproval의 canSign이 evidenceViewed&&reason로 버튼을
+          // 막아서 이 콜백에 닿았다는 사실 자체가 열람 확인 — gates/[id]/page.tsx와 동일 계약.
+          onApprove={(reason) => onApprove(reason, true)}
           onReject={onReject}
           onDiscuss={onDiscuss}
           compact
