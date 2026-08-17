@@ -33,7 +33,7 @@ human-only 게이트만 통과 가능 — 진행은 agent·결정은 human의 �
 """
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_project_scoped_org_id, get_verified_org_id
@@ -87,7 +87,6 @@ def _raise(err: svc.LoopServiceError) -> None:
 
 @router.get("", response_model=list[LoopResponse])
 async def list_loops(
-    response: Response,
     project_id: uuid.UUID = Query(...),
     status_filter: str | None = Query(default=None, alias="status"),
     parent_loop_id: uuid.UUID | None = Query(default=None),
@@ -96,12 +95,15 @@ async def list_loops(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_project_scoped_org_id),
 ) -> list[LoopResponse]:
-    items = await svc.list_loops(
+    # story #2233(PO 판정 ㉢, 2026-08-16): X-Total-Count가 `len(items)`(이 페이지에 온 개수)를
+    # "전체"라 거짓 주장했었다 — svc.list_loops는 COUNT도 cursor/has_more도 안 낸다. 아무도
+    # 이 헤더를 안 읽는다(FE loops-client.tsx는 res.json()만, MCP는 headers 참조 0 — 그라운딩
+    # judgment efdeeb8c 실측). 실사용자가 생기면 그때 has_more/next_cursor(#2231 정본 A)를
+    # 그 화면과 같이 설계 — 지금은 헤더를 그냥 뺀다(틀린 총량보다 없는 총량).
+    return await svc.list_loops(
         session, org_id, project_id,
         status=status_filter, parent_loop_id=parent_loop_id, goal_tag=goal_tag, limit=limit,
     )
-    response.headers["X-Total-Count"] = str(len(items))
-    return items
 
 
 @router.post("", response_model=LoopResponse, status_code=201)

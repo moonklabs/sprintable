@@ -190,6 +190,8 @@ async def emit_story_assignee_changed(
                 reference_type="story",
                 reference_id=story.id,
                 source_project_id=story.project_id,
+                # story #2696: outbox 이관(동일 결함 클래스 예방).
+                via_outbox=True,
             )
     if actor_id:
         try:

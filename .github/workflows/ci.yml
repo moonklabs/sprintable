@@ -280,6 +280,41 @@ jobs:
           test -n "$cur"
           diff <(echo "$cur") <(echo "$heads")
 
+  # story #2401(결함·CI) — #2397(PR #2777·#2781)이 develop 기준 같은 `0221`을 각자 새
+  # 리비전으로 만들었는데도 위 #2330 게이트를 둘 다 통과했다: 그 게이트는 자기 브랜치의
+  # alembic.ini만 보고, 형제 PR을 전혀 참조하지 않기 때문이다(dual-head는 머지 «후»에야
+  # 드러났다). 이 잡은 그 시야를 메운다 — 자세한 검사 축·시간 축 한계 선언은
+  # `ci_alembic_sibling_pr_collision_check.py` docstring 참고.
+  alembic-sibling-pr-collision-check:
+    name: Alembic sibling-PR revision collision (guard, story #2401)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # story #2401 hotfix(2026-08-17, 미르코 재현·확定): checkout(fetch-depth: 0)이 이미
+      # develop 전체 히스토리를 받은 뒤, 여기서 `--depth=1`로 다시 fetch하면(그 사이 develop
+      # tip이 움직였을 때) 그 얕은 fetch가 새 shallow 경계를 심어버린다 — 이후
+      # `git diff origin/develop...HEAD`가 merge base를 못 찾고 exit 128로 죽는다(PR #3140
+      # 실 CI에서 재현, 바쁜 밤처럼 develop이 자주 움직일 때만 터지는 타이밍 의존 버그).
+      # checkout이 이미 전체 히스토리를 갖고 있으므로 이 fetch는 "최신 tip 반영"만이
+      # 목적 — depth 제한 없이 다시 받는다(얕은 경계를 새로 심지 않음).
+      - name: Fetch base branch (current tip, not PR-open-time)
+        run: git fetch origin "${{ github.event.pull_request.base.ref }}"
+      - name: Check alembic revision collisions against base + sibling open PRs
+        working-directory: backend
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python3 scripts/ci_alembic_sibling_pr_collision_check.py
+
   # story #2330 AC6 — env.py(PR#2661)의 "autocommit_block()은 이 프로젝트에서 원리적으로
   # 못 쓴다" 주석은 «읽어야» 서는 것이었다(주석만으로는 다음 사람이 또 쓸 수 있다). grep
   # 가드로 승격한다 — 마이그레이션 파일에 그 호출이 들어오면 CI가 빨개진다.
@@ -613,6 +648,11 @@ jobs:
     # (backend-test의 필수 판정 근거) cascade로 스킵된다.
     if: always()
     runs-on: ubuntu-latest
+    # story #2285 AC4(2026-08-17 실측, develop 최근 10런): 각 샤드 4~6분 → 천장 25분 대비
+    # 여유 19~21분. 이 값은 story #2293(destructive-schema를 이 job으로 4-way 샤딩)이 옮겨온
+    # 뒤의 실측이라, 그 전(같은 job이 94개를 순차로 다 돌던 시절, 15m58s~18m32s·여유 6.5분)과
+    # 는 다른 상태다. 재검 기준: 이 샤드의 p95가 15분을 넘으면 값을 다시 본다(⛔"자주 터지니
+    # 올린다"가 아니라 근거 먼저 — story #2285 AC4).
     timeout-minutes: 25
     strategy:
       fail-fast: false  # 한 샤드 실패가 다른 샤드를 취소하면 "어디까지 진짜 돌았는지"가 흐려진다
@@ -716,6 +756,10 @@ jobs:
     # exit 1로, 94개 중 하나라도 실패/샤드가 안 돌면 이 필수 체크 자체가 빨개지게 만든다
     # (GitHub의 기본 `needs`-실패-시-skip에만 기대면 "필수 체크가 skipped로 조용히 안
     # 걸리는" 위험이 있다 — 파울로군 지적).
+    #
+    # story #2285 AC4(2026-08-17 실측, develop 최근 10런): 이 job 본체(non-destructive
+    # pytest, story #2293 이관 후) 7~8분 → 천장 25분 대비 여유 17~18분. 재검 기준: p95가
+    # 15분을 넘으면 값을 다시 본다.
     timeout-minutes: 25
 
     services:
@@ -766,7 +810,25 @@ jobs:
 
       - name: Run pytest (non-destructive, real-PG auto-discovered via marker)
         working-directory: backend
-        run: uv run pytest -q -m "not destructive_schema"
+        run: |
+          set -o pipefail
+          uv run pytest -q -m "not destructive_schema" --durations=20 2>&1 | tee /tmp/pytest_output.log
+
+      # story #2285 AC5: 넘쳤을 때(취소) 무엇이 시간을 먹었는지 최소한이라도 보이게 —
+      # --durations=20이 정상 완주 시엔 정확한 breakdown을 준다. ⛔한계를 그대로 적는다: job이
+      # 25분 천장에 «중간에» 취소되면 이 스텝(과 --durations 출력 자체)도 같이 죽는다 — GitHub
+      # Actions는 타임아웃-취소 시 이후 스텝을 실행할 방법을 안 준다(`if: always()`도 못 막음).
+      # 그래서 이건 "정상 완주했지만 느려지는 중"을 조기에 보이게 하는 것까지가 이 스텝의
+      # 몫 — 그 이상(취소 순간의 실시간 heartbeat 등)은 짓지 않는다(AC6).
+      - name: Slowest tests summary (story #2285 AC5)
+        if: always()
+        run: |
+          {
+            echo "## Backend pytest — slowest 20 (여유: 천장 25분, 08-17 실측 본체 7~8분)"
+            echo '```'
+            awk '/slowest 20 durations/,0' /tmp/pytest_output.log 2>/dev/null || echo "(durations 출력 없음 — 타임아웃-취소로 이 스텝 자체가 못 돌았을 가능성)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   ci:
     name: Lint, Type Check, Test, Build
@@ -837,6 +899,12 @@ jobs:
       # 경우(#2352·#2365 원 사고 자체)는 이 v1 스코프 밖 — 스크립트 헤더 주석 참조.
       - name: "Verify no i18n phrase substring collision (story #2367 regression guard)"
         run: pnpm --filter web verify:no-i18n-phrase-collision
+
+      # story #2395 회귀가드: en.json/ko.json 안 같은 부모 객체에 키가 두 번 나오면(JSON
+      # 표준상 마지막 값이 조용히 이기고 에러도 경고도 없음) CI가 잡는다. AC1 실측 4건(전부
+      # `goals` 네임스페이스)을 이 PR에서 이미 제거해 baseline은 0 — 새로 생기는 것만 막는다.
+      - name: "Verify no duplicate sibling i18n keys (story #2395 regression guard)"
+        run: pnpm --filter web verify:no-duplicate-i18n-keys
 
       # story #2420 AC3 회귀가드: globals.css의 `--<family>-tint` 배경 위에서 --foreground가
       # AA(4.5)를 넘는지 «정의 시점»에 계산한다(oklch→sRGB 변환은 Yuna의 실 Chromium canvas
@@ -916,6 +984,13 @@ jobs:
       # bare 콜드 딥링크의 ws/proj를 채운다. #2016(epics→goals) 실사고와 동형 재발 방지.
       - name: "Verify MIGRATED_RESOURCES sync (story #1971 regression guard)"
         run: pnpm --filter web verify:migrated-resources-sync
+
+      # story #2691 회귀가드: raw fetch('/api/*')가 401을 재시도 없이 삼키는 결함 클래스
+      # (#2689 근본 원인)의 재발을 막는다 — #2689(8곳)+#2691(카디르 QA 전수감사 기반 130곳)이
+      # fetchWithAuth로 전환한 뒤, 그 전환이 유지되도록 신규 raw fetch만 막는다(기존 잔존
+      # 282건은 GRANDFATHER_BASELINE로 얼림, mutation/handler/pre-auth류 — 개별 triage는 별도).
+      - name: "Verify no new raw fetch('/api/*') (story #2691 regression guard)"
+        run: pnpm --filter web verify:no-new-raw-fetch-api
 
       - name: Test
         # set -o pipefail so vitest's non-zero exit propagates through `| tail` instead

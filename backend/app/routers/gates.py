@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import get_current_user, get_verified_org_id
+from app.dependencies.auth import get_current_user, get_scope_context, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition
@@ -40,6 +40,7 @@ from app.services.project_auth import (
     has_project_access,
     is_org_owner,
     is_org_owner_or_admin,
+    require_project_access,
 )
 
 
@@ -87,6 +88,13 @@ class GateTransitionRequest(BaseModel):
     status: str
     resolver_id: uuid.UUID | None = None  # ⚠️RC#1: 무시됨(서버가 인증 caller 로 강제)·하위호환 잔류.
     note: str | None = None
+    # story #2027 AC2(까심 QA 적출·2026-07-20, 페드루 PO 처방 2026-08-16): 고위험 게이트의
+    # "근거 열람" 요건도 note와 동형으로 서버가 강제한다 — 클라이언트가 「봤다」고 선언한
+    # 값을 그대로 신뢰하는 것뿐이라 완전한 증명은 아니지만(서버는 실제 열람 여부를 관측할
+    # 수 없다), 최소한 「보냈다」는 사실 자체가 UI 경유를 강제한다(직접 API 호출은 이 필드를
+    # 몰라 기본값 False로 막힌다 — AC1의 note 강제와 같은 방어선). 기본값 False = 안 보내면
+    # 고위험에서 막힘(저위험은 아래 강제 블록이 risk_grade=="high"일 때만 돌아 무관).
+    evidence_viewed: bool = False
 
     @field_validator("status")
     @classmethod
@@ -226,8 +234,9 @@ async def create_gate_endpoint(
     # fail-closed(②): 통과는 KNOWN_PROJECT_AGNOSTIC_WORK_ITEM_TYPES(명시 allowlist)에 있을 때만 —
     # PROJECT_SCOPED_WORK_ITEM_TYPES에도 그 목록에도 없는 미분류 타입은 기본값이 거부다.
     if project_id is not None:
-        if not await has_project_access(session, uuid.UUID(_auth.user_id), project_id, org_id):
-            raise HTTPException(status_code=404, detail="Project not found")
+        # story #2697: require_project_access(전 리소스 공용 판정 함수)로 위임(재구현 0).
+        await require_project_access(session, uuid.UUID(_auth.user_id), project_id, org_id,
+                                      not_found_detail="Project not found")
     elif not is_known_project_agnostic_work_item_type(body.work_item_type):
         raise HTTPException(status_code=404, detail="Project not found")
     gate = await create_gate(
@@ -246,6 +255,78 @@ async def create_gate_endpoint(
     # 트리거 미확定인 MissingGreenlet 클래스(unloaded attr sync 직렬화) 전체를 이 자리서 차단.
     await session.refresh(gate)
     return GateResponse.model_validate(gate)
+
+
+class DecisionRequestCreate(BaseModel):
+    question: str
+    options: list[str] | None = None
+    assumption: str
+    related_work_item_type: str | None = None
+    related_work_item_id: uuid.UUID | None = None
+
+
+@router.post("/decisions", response_model=GateResponse, status_code=201)
+async def create_decision_request(
+    body: DecisionRequestCreate,
+    session: AsyncSession = Depends(get_db),
+    scope: dict = Depends(get_scope_context),
+    auth=Depends(get_current_user),
+) -> GateResponse:
+    """story #2709(2026-08-17) — 에이전트의 블로킹 질문을 비동기 결정 요청으로 승격.
+    AskUserQuestion류 훅 봉인(story #2701 후속)의 dogfood 교체 대상 — 새 게이트 메커니즘
+    발명 0(create_gate/gate_type 등재/알림배관 전부 기존 재사용), 이 엔드포인트 자체만
+    신규(캐스팅 글루 — 호출자 신원+standalone self-referencing anchor를 서버가 원자적으로
+    한 번에 만들어 준다, MCP 클라이언트가 role_id 같은 내부 개념을 몰라도 되게).
+
+    self-referencing anchor(PO 판정, 2026-08-17): work_item_id==gate.id로 클라 uuid4 선생성
+    없이 서버가 1 INSERT로 원자 생성(생성 後 UPDATE 2단계 금지). work_item_type=
+    "agent_decision"(KNOWN_PROJECT_AGNOSTIC_WORK_ITEM_TYPES 등재 필수 —
+    안 하면 GET /gates/{id}가 전수 fail-closed 404, 전수 grep으로 발견)."""
+    org_id, project_id = scope["org_id"], scope["project_id"]
+    if not org_id or not project_id:
+        raise HTTPException(status_code=403, detail="org_id/project_id required")
+
+    gate_id = uuid.uuid4()
+    caller_id = uuid.UUID(auth.user_id)
+
+    from app.services.workflow_line_config import _default_role_id
+    # doc.py의 동일 관례 재사용(role_id는 _ALWAYS_MANUAL_GATE_TYPES라 disposition 결과에
+    # 실제 영향 없음 — 기본 role 없으면 self-referencing anchor 자체를 placeholder로).
+    role_id = await _default_role_id(session, org_id) or gate_id
+
+    neutral_facts: dict[str, Any] = {
+        "question": body.question,
+        "options": body.options,
+        "assumption": body.assumption,
+        "requested_by_member_id": str(caller_id),
+        "project_id": str(project_id),
+    }
+    if body.related_work_item_type and body.related_work_item_id:
+        neutral_facts["related_work_item_type"] = body.related_work_item_type
+        neutral_facts["related_work_item_id"] = str(body.related_work_item_id)
+
+    gate = await create_gate(
+        session=session,
+        org_id=org_id,
+        work_item_id=gate_id,
+        work_item_type="agent_decision",
+        gate_type="agent_decision_request",
+        member_id=caller_id,
+        role_id=role_id,
+        neutral_facts=neutral_facts,
+        project_id=project_id,
+        gate_id=gate_id,
+    )
+    await session.commit()
+    await session.refresh(gate)
+    resp = GateResponse.model_validate(gate)
+    resp.project_id = project_id
+    # story #1972 SSOT 재사용(제네릭 create_gate_endpoint가 이 필드를 아예 안 채우는 기존
+    # 갭을 여기서까지 상속하면 FE deriveRiskLevel이 null→'unknown'으로 읽어 low 등재의
+    # 목적(원탭 승인)이 생성 응답 자체에서는 무효화된다 — 자체 신규 테스트로 발견·직접 수정).
+    _posture = await get_org_posture(session, org_id)
+    resp.risk_grade = derive_risk_grade(_posture, gate.gate_type)
+    return resp
 
 
 async def _non_doc_gate_approvable(
@@ -798,8 +879,10 @@ async def get_gate_endpoint(
     # 안에서 해소 안 되는 것은 이 gate 자체가 가리키는 대상이 이 org에 없다는 뜻이라 거부.
     # fail-closed(②): 통과는 KNOWN_PROJECT_AGNOSTIC_WORK_ITEM_TYPES 명시 allowlist에 있을 때만.
     if project_id is not None:
-        if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
-            raise HTTPException(status_code=404, detail="Gate not found")
+        # story #2697: require_project_access(전 리소스 공용 판정 함수)로 위임 — 이 파일이
+        # goals/stories/sprints/retros가 수렴한 원본 레퍼런스 패턴이었다(재구현 0).
+        await require_project_access(session, uuid.UUID(auth.user_id), project_id, org_id,
+                                      not_found_detail="Gate not found")
     elif not is_known_project_agnostic_work_item_type(gate.work_item_type):
         raise HTTPException(status_code=404, detail="Gate not found")
 
@@ -866,11 +949,18 @@ async def transition_gate_endpoint(
     # (derive_risk_grade+get_org_posture) 재사용(DRY·N+1 0 — org당 posture 1쿼리).
     if body.status == "approved" and _gate is not None:
         _posture = await get_org_posture(session, org_id)
-        if derive_risk_grade(_posture, _gate.gate_type) == "high" and not (body.note or "").strip():
-            raise HTTPException(
-                status_code=422,
-                detail="고위험(risk_grade=high) 게이트 승인은 사유(note) 입력이 필수입니다.",
-            )
+        if derive_risk_grade(_posture, _gate.gate_type) == "high":
+            if not (body.note or "").strip():
+                raise HTTPException(
+                    status_code=422,
+                    detail="고위험(risk_grade=high) 게이트 승인은 사유(note) 입력이 필수입니다.",
+                )
+            # story #2027 AC2: note와 같은 자리 — 근거 열람(evidence_viewed) 확인도 서버가 강제.
+            if body.evidence_viewed is not True:
+                raise HTTPException(
+                    status_code=422,
+                    detail="고위험(risk_grade=high) 게이트 승인은 근거 열람 확인(evidence_viewed=true)이 필수입니다.",
+                )
     # ⭐S23 RC① + RC#1(방어심층): resolver_id 를 **전 status 무조건 인증 caller 로 강제**(body 무시).
     # body 조작(타인 UUID)으로 SoD(approver≠owner) 우회·confirmed_by_member_id 위조 차단.
     _resolver_id = resolved.id

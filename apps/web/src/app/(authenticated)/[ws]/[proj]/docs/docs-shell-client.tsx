@@ -15,6 +15,7 @@ import { ToastContainer, useToast } from '@/components/ui/toast';
 import { ChevronDown, ChevronRight, Plus, X, Menu, Search, FileText } from 'lucide-react';
 import { DocsShell } from '@/components/docs/docs-shell';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface Doc {
   id: string;
@@ -125,7 +126,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
       if (tags?.length) params.set('tags', tags.join(','));
       else params.set('view', 'tree');
       if (cursor) params.set('cursor', cursor);
-      const res = await fetch(`/api/docs?${params.toString()}`);
+      const res = await fetchWithAuth(`/api/docs?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch tree');
 
       const { data, meta } = await res.json() as { data: Doc[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
@@ -151,7 +152,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
 
     setSearchLoading(true);
     searchTimerRef.current = setTimeout(() => {
-      void fetch(`/api/docs?project_id=${projectId}&q=${encodeURIComponent(searchQuery.trim())}&limit=20`)
+      void fetchWithAuth(`/api/docs?project_id=${projectId}&q=${encodeURIComponent(searchQuery.trim())}&limit=20`)
         .then((r) => r.ok ? r.json() : null)
         .then((data: { data?: Array<{ id: string; title: string; slug: string; snippet?: string }> } | null) => {
           setSearchResults(data?.data ?? []);
@@ -167,7 +168,7 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
     if (!projectId) return;
 
     try {
-      const res = await fetch(`/api/docs?project_id=${projectId}&slug=${slug}`);
+      const res = await fetchWithAuth(`/api/docs?project_id=${projectId}&slug=${slug}`);
       if (!res.ok) throw new Error('Failed to fetch doc');
 
       const { data } = await res.json();

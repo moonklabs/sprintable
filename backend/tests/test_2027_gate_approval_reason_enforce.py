@@ -187,7 +187,11 @@ async def test_realdb_high_risk_approve_without_note_422_and_no_mutation():
 @pytest.mark.anyio
 async def test_realdb_high_risk_approve_with_note_persists_resolution_note():
     """같은 고위험 조합에 note 를 실어 보내면 200·resolution_note 가 실제로 저장된다(재조회로 확인
-    — story #2027 이전엔 approved 전이가 resolution_note 를 rejected 전용 분기라 저장하지 않았다)."""
+    — story #2027 이전엔 approved 전이가 resolution_note 를 rejected 전용 분기라 저장하지 않았다).
+
+    AC2(2026-08-16) 후속 — evidence_viewed:true도 함께 실어야 한다(note만으론 이제 부족,
+    아래 test_realdb_high_risk_approve_with_note_but_no_evidence_viewed_422_and_no_mutation
+    이 그 축을 별도로 고정)."""
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -203,7 +207,7 @@ async def test_realdb_high_risk_approve_with_note_persists_resolution_note():
             note = "PR diff 전체 + CI green 확인, 마이그레이션 없음 확인 후 승인"
             resp = await client.post(
                 f"/api/v2/gates/{gate_id}/transition",
-                json={"status": "approved", "note": note},
+                json={"status": "approved", "note": note, "evidence_viewed": True},
             )
             assert resp.status_code == 200, resp.text
             assert resp.json()["resolution_note"] == note, resp.json()
@@ -244,6 +248,111 @@ async def test_realdb_low_risk_approve_without_note_still_succeeds():
             assert resp.status_code == 200, resp.text
             assert resp.json()["status"] == "approved", resp.json()
             assert resp.json()["resolution_note"] is None, resp.json()
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# ── AC2(페드루 PO 처방, 2026-08-16) — 근거 열람(evidence_viewed)도 note와 같은 자리에서
+# 서버 강제. FE는 GateSignatureApproval의 canSign(evidenceViewed&&reason)이 버튼을 막아
+# "화면상"으로만 강제하고 있었다 — AC1의 note와 동일한 API 직접호출 우회가 가능했다.
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_realdb_high_risk_approve_with_note_but_no_evidence_viewed_422_and_no_mutation():
+    """note는 실어도 evidence_viewed를 안 보내면(기본값 False) 422 — AC1(note)만으론 우회
+    막이가 반쪽이었다는 것을 그대로 보인다. 뮤테이션 0 확인(재조회)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded, gate_id = await _seed_gate(
+                s, posture="conservative", gate_type="pr_review", story_title="근거미확인 승인 시도",
+            )
+
+        await _setup_app(app, Session, seeded["org_id"], seeded["caller_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                f"/api/v2/gates/{gate_id}/transition",
+                json={"status": "approved", "note": "사유는 적었지만 근거는 안 봤다"},
+            )
+            assert resp.status_code == 422, resp.text
+            assert "근거 열람" in resp.json()["error"]["message"], resp.json()
+
+            recheck = await client.get(f"/api/v2/gates/{gate_id}")
+            assert recheck.status_code == 200, recheck.text
+            body = recheck.json()
+            assert body["status"] == "pending", body
+            assert body["resolution_note"] is None, body
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_realdb_high_risk_approve_with_note_and_evidence_viewed_true_persists():
+    """note + evidence_viewed:true 둘 다 실으면(FE 서명 플로우가 실제로 보내는 형태) 200·저장."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded, gate_id = await _seed_gate(
+                s, posture="conservative", gate_type="pr_review", story_title="근거확인 승인",
+            )
+
+        await _setup_app(app, Session, seeded["org_id"], seeded["caller_id"])
+        client = _client_for(app)
+        try:
+            note = "PR diff + CI green + 근거 패널 확인 후 승인"
+            resp = await client.post(
+                f"/api/v2/gates/{gate_id}/transition",
+                json={"status": "approved", "note": note, "evidence_viewed": True},
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["status"] == "approved", resp.json()
+            assert resp.json()["resolution_note"] == note, resp.json()
+
+            recheck = await client.get(f"/api/v2/gates/{gate_id}")
+            assert recheck.status_code == 200, recheck.text
+            assert recheck.json()["status"] == "approved", recheck.json()
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_realdb_low_risk_approve_without_evidence_viewed_still_succeeds():
+    """저위험은 evidence_viewed 없이도(기본값 False) 기존대로 200 — AC4 과도 강제 금지가
+    note뿐 아니라 evidence_viewed에도 동일하게 적용됨을 고정."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded, gate_id = await _seed_gate(
+                s, posture="permissive", gate_type="merge", story_title="저위험 승인(근거미확인)",
+            )
+
+        await _setup_app(app, Session, seeded["org_id"], seeded["caller_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                f"/api/v2/gates/{gate_id}/transition", json={"status": "approved"},
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["status"] == "approved", resp.json()
         finally:
             await client.aclose()
     finally:

@@ -110,19 +110,38 @@ async def _touch_api_key_last_used(api_key_id: uuid.UUID) -> None:
 async def _resolve_api_key(
     raw_key: str, db: AsyncSession, transport: str | None = None,
 ) -> AuthContext:
-    """sk_live_* API key를 DB에서 조회하여 AuthContext 반환."""
+    """sk_live_* API key를 DB에서 조회하여 AuthContext 반환.
+
+    story #2295 갭 후속(2026-08-17, 페드루 PO 판정) — realtime-gateway가 backplane=redis일 때
+    (현재 dev/prod 실값) pg_pubsub.listen_loop()가 아예 안 떠서 그 신호에 기댄 readiness가
+    영구 fail-open이었다(원 인시던트 2026-07-28을 실제로 재현 못 함이 드러난 갭). 그라운딩
+    결과 — cloud-sql-proxy가 죽으면 실제로 망가지는 건 이 함수(신규 SSE 연결마다 agent API키
+    인증이 DB 왕복)다: 원 인시던트의 실증상("신규 연결만 거부·기존 스트림 유지")과 정합.
+
+    아래 db.execute()만 감싼다(그 밑 `if not api_key: raise 401`은 DB가 멀쩡히 응답했는데
+    키가 틀린 정상 인증실패라 readiness 신호와 무관 — 틀린 키가 UNHEALTHY를 만들면 안 된다,
+    PO 명시 조건). auth.py는 backend/realtime 공유 파일이라 이 계측은 backend에도 걸리지만
+    무해(어떤 LB도 backend `/ready`를 안 본다 — story #2295가 그 표면 자체는 이미 노출해 둠)."""
     from app.models.api_key import ApiKey
     from app.models.team import TeamMember
 
     key_hash = hash_token(raw_key)
     now = datetime.now(timezone.utc)
 
-    result = await db.execute(
-        select(ApiKey)
-        .where(ApiKey.key_hash == key_hash)
-        .where(ApiKey.revoked_at.is_(None))
-        .where((ApiKey.expires_at.is_(None)) | (ApiKey.expires_at > now))
-    )
+    try:
+        result = await db.execute(
+            select(ApiKey)
+            .where(ApiKey.key_hash == key_hash)
+            .where(ApiKey.revoked_at.is_(None))
+            .where((ApiKey.expires_at.is_(None)) | (ApiKey.expires_at > now))
+        )
+    except Exception as exc:
+        from app.services import realtime_readiness
+        realtime_readiness.mark_disconnected(f"{type(exc).__name__}: {exc}")
+        raise
+    from app.services import realtime_readiness
+    realtime_readiness.mark_connected()
+
     api_key = result.scalar_one_or_none()
     if not api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
@@ -585,12 +604,22 @@ async def _resolve_verified_org_id(
     auth: AuthContext,
     x_org_id: str | None,
     request: Request | None,
+    *,
+    skip_key_scope_check: bool = False,
 ) -> uuid.UUID:
     """``get_verified_org_id``/``get_verified_org_id_no_project_gate`` 공유 atom — X-Org-Id 헤더
     fallback 시 DB membership 검증까지의 org_id 해소. X-Project-Id 프로젝트-멤버십 체크는
-    여기 없다(호출부가 필요할 때만 추가로 얹는다 — 아래 두 함수 참고)."""
+    여기 없다(호출부가 필요할 때만 추가로 얹는다 — 아래 두 함수 참고).
+
+    story #2708(2026-08-17, 페드루 PO 판정) — ``skip_key_scope_check``는 story b4027b2e가 세운
+    별개 보안축(API키 **toolgroup** scope, 예 canvas/docs)을 건너뛴다 — org/project **멤버십**
+    검증(has_project_access)과는 무관, 그건 아래서 항상 선다. 이 파라미터는 내부 전용(plain
+    함수 인자, FastAPI Depends() 그래프에 직접 노출 안 됨) — Header/Query로 새는 걸 막기 위해
+    공개 dependency 쪽(get_scope_context 계열)에서 얇은 wrapper 둘로 분기하고, 이 함수
+    자체에는 bare bool 파라미터를 절대 노출하지 않는다(그러면 `?skip_key_scope_check=true`
+    쿼리로 호출자가 자기 자신의 toolgroup 게이트를 끌 수 있는 구멍이 열린다)."""
     # API Key scope 체크 (request 있을 때만 — 직접 단위 테스트 호출 시 스킵)
-    if request is not None:
+    if request is not None and not skip_key_scope_check:
         _check_api_key_scope(auth, request.method, request.url.path)
 
     jwt_org_id = auth.claims.get("app_metadata", {}).get("org_id")
@@ -635,18 +664,25 @@ async def get_verified_org_id_no_project_gate(
     return await _resolve_verified_org_id(auth, x_org_id, request)
 
 
-async def get_verified_org_id(
-    auth: AuthContext = Depends(get_current_user),
-    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
-    x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
-    request: Request = None,
+async def _resolve_verified_org_id_with_project(
+    auth: AuthContext,
+    x_org_id: str | None,
+    x_project_id: str | None,
+    request: Request | None,
+    *,
+    skip_key_scope_check: bool = False,
 ) -> uuid.UUID:
-    """org_id 추출 — X-Org-Id 헤더 fallback 시 DB membership 검증, X-Project-Id 헤더 시 project 소속 검증.
-    API Key 경로는 HTTP method 기반 scope 자동 체크.
+    """``get_verified_org_id``/``get_verified_org_id_no_key_scope_check`` 공유 core.
+
+    org_id 추출 — X-Org-Id 헤더 fallback 시 DB membership 검증, X-Project-Id 헤더 시 project 소속 검증.
+    ``skip_key_scope_check=False``(기본)면 API Key 경로는 HTTP method/path 기반 toolgroup scope
+    자동 체크(story b4027b2e) — 이 축은 project 멤버십 검증과 독립이라 always-on.
 
     story #2459(§6 봉합①): 요청-수명 ``Depends(get_db)`` 대신 검증마다 전용 단명 세션 —
     get_current_user와 동일 근거(호출 대상이 전부 읽기 전용, #2457로 이미 성립)."""
-    org_id = await _resolve_verified_org_id(auth, x_org_id, request)
+    org_id = await _resolve_verified_org_id(
+        auth, x_org_id, request, skip_key_scope_check=skip_key_scope_check
+    )
 
     # X-Project-Id 헤더 = per-request 프로젝트 스코프 **override**(d802da27/85614dd9).
     # JWT project_id 는 탭 공유라, 같은 유저가 여러 프로젝트 탭을 열어도 mutation 이 JWT 의 단일
@@ -657,7 +693,8 @@ async def get_verified_org_id(
     # ⚠️ 보안 critical: 헤더 프로젝트는 **반드시 has_project_access 멤버십 검증**(team_member ∪
     # grant ∪ owner/admin). 미검증 시 헤더로 org 내 임의 프로젝트를 mutation 하는 권한상승 취약점.
     # (기존 코드는 JWT project_id 부재 시에만·_verify_project_in_org=project∈org 만 봐서 멤버 아닌
-    # 프로젝트도 통과하던 갭.) 멤버십 미달이면 403.
+    # 프로젝트도 통과하던 갭.) 멤버십 미달이면 403. ⚠️ skip_key_scope_check와 무관하게 항상 선다
+    # (toolgroup scope 면제와 project 멤버십 검증은 독립된 두 축 — story #2708 PO 판정).
     if x_project_id:
         try:
             header_project_id = uuid.UUID(x_project_id)
@@ -674,6 +711,39 @@ async def get_verified_org_id(
         auth.claims.setdefault("app_metadata", {})["project_id"] = str(header_project_id)
 
     return org_id
+
+
+async def get_verified_org_id(
+    auth: AuthContext = Depends(get_current_user),
+    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+    x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
+    request: Request = None,
+) -> uuid.UUID:
+    """org_id 추출 — X-Org-Id 헤더 fallback 시 DB membership 검증, X-Project-Id 헤더 시 project 소속 검증.
+    API Key 경로는 HTTP method 기반 scope 자동 체크.
+
+    story #2459(§6 봉합①): 요청-수명 ``Depends(get_db)`` 대신 검증마다 전용 단명 세션 —
+    get_current_user와 동일 근거(호출 대상이 전부 읽기 전용, #2457로 이미 성립)."""
+    return await _resolve_verified_org_id_with_project(auth, x_org_id, x_project_id, request)
+
+
+async def get_verified_org_id_no_key_scope_check(
+    auth: AuthContext = Depends(get_current_user),
+    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+    x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
+    request: Request = None,
+) -> uuid.UUID:
+    """``get_verified_org_id``와 동일하나 API키 **toolgroup** scope 체크(story b4027b2e)만
+    건너뛴다 — org/project **멤버십** 검증(has_project_access)은 그대로 항상 선다.
+
+    story #2708(2026-08-17, 페드루 PO 판정) — visual_artifacts.py의 read 7라우트가
+    project_id 헤더 인식(이 스토리의 목적)을 얻으면서도, b4027b2e가 테스트로 pin까지 한
+    「read는 toolgroup scope 면제」 의도적 동작을 안 깨야 한다. 두 축(project 접근 판정 vs
+    toolgroup 판정)은 원래 독립이라 판정 함수는 각각 한 곳(_check_api_key_scope·
+    has_project_access)씩 그대로 — 이 함수는 그 둘을 조합만 다르게 하는 얇은 wrapper."""
+    return await _resolve_verified_org_id_with_project(
+        auth, x_org_id, x_project_id, request, skip_key_scope_check=True
+    )
 
 
 async def get_project_scoped_org_id(
@@ -863,22 +933,51 @@ async def _verify_project_in_org(
         )
 
 
+async def _resolve_scope_context(
+    auth: AuthContext,
+    x_org_id: str | None,
+    x_project_id: str | None,
+    request: Request | None,
+    *,
+    skip_key_scope_check: bool = False,
+) -> dict:
+    """``get_scope_context``/``get_scope_context_no_key_scope_check`` 공유 core."""
+    org_id = await _resolve_verified_org_id_with_project(
+        auth, x_org_id, x_project_id, request, skip_key_scope_check=skip_key_scope_check
+    )
+    jwt_project_id = auth.claims.get("app_metadata", {}).get("project_id")
+    project_id_raw = jwt_project_id or x_project_id
+    project_id = uuid.UUID(str(project_id_raw)) if project_id_raw else None
+    return {"org_id": org_id, "project_id": project_id, "user_id": auth.user_id}
+
+
 async def get_scope_context(
     auth: AuthContext = Depends(get_current_user),
     x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
     x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
     request: Request = None,
 ) -> dict:
-    """org_id + project_id 컨텍스트를 한번에 추출 — 헤더 fallback 시 membership/소속 검증.
+    """org_id + project_id 컨텍스트를 한번에 추출 — 헤더 fallback 시 membership/소속 검증
+    (org·project 멤버십 + API키 toolgroup scope 전부 always-on).
 
     story #2459(§6 봉합①): get_verified_org_id가 이제 자체 단명 세션을 쓰므로 이 함수는
     db 의존 자체가 불요."""
-    # x_project_id를 get_verified_org_id에 전달해서 project 소속 검증도 위임
-    org_id = await get_verified_org_id(auth=auth, x_org_id=x_org_id, x_project_id=x_project_id, request=request)
-    jwt_project_id = auth.claims.get("app_metadata", {}).get("project_id")
-    project_id_raw = jwt_project_id or x_project_id
-    project_id = uuid.UUID(str(project_id_raw)) if project_id_raw else None
-    return {"org_id": org_id, "project_id": project_id, "user_id": auth.user_id}
+    return await _resolve_scope_context(auth, x_org_id, x_project_id, request)
+
+
+async def get_scope_context_no_key_scope_check(
+    auth: AuthContext = Depends(get_current_user),
+    x_org_id: str | None = Header(default=None, alias="X-Org-Id"),
+    x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
+    request: Request = None,
+) -> dict:
+    """``get_scope_context``와 동일(org/project 멤버십 검증 always-on)하나 API키 toolgroup
+    scope 체크(story b4027b2e)만 건너뛴다 — read 전용 라우트에서 쓴다(story #2708, PO 판정).
+
+    org/project 접근 판정(has_project_access)과 toolgroup 판정(_check_api_key_scope)은
+    독립된 두 축이고, 각 축의 판정 함수는 여전히 한 곳씩이다 — 이 함수는 조합만 다르게
+    하는 얇은 wrapper(사본 최소화)."""
+    return await _resolve_scope_context(auth, x_org_id, x_project_id, request, skip_key_scope_check=True)
 
 
 # ─── SSE/스트림 전용 auth (커넥션 비점유) ──────────────────────────────────────

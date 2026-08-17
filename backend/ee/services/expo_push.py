@@ -106,16 +106,14 @@ async def deliver_expo_push(
     project_id: uuid.UUID | None = None,
     story_id: uuid.UUID | None = None,
     sprint_id: uuid.UUID | None = None,
-    via_outbox: bool = False,
+    via_outbox: bool = True,
 ) -> None:
-    """story #2460(§6 봉합②, PO 스코프 확定 2026-08-05): outbox 경유는 **opt-in**이다
-    (``via_outbox=True``) — dispatch_notification 호출부 중 story_status_events.py·
-    conversations.py send_message 둘만 켠다. 나머지 dispatch_notification 호출부는 기본값
-    False로 기존과 동일하게 이 함수 안에서 즉시 발송한다(behavior 무변경).
-    ``via_outbox=True``면 즉시 발송 대신 `delivery_jobs`에 job row만 insert(caller
-    세션·트랜잭션에 실림, commit은 caller 책임 — at-least-once) — 실 발송은
-    `delivery_dispatcher.py` 워커가 자기 세션으로 `_deliver_expo_push_now()`를 수행한다
-    (요청 트랜잭션 밖에서 외부 I/O)."""
+    """story #2696: 기본값 True(자세한 배경은 notification_dispatch._deliver_personal_webhooks
+    docstring 참고) — dispatch_notification의 유일한 호출부가 항상 explicit via_outbox를
+    전달하므로 이 자리는 defense-in-depth. ``via_outbox=True``(기본값)면 즉시 발송 대신
+    `delivery_jobs`에 job row만 insert(caller 세션·트랜잭션에 실림, commit은 caller 책임 —
+    at-least-once) — 실 발송은 `delivery_dispatcher.py` 워커가 자기 세션으로
+    `_deliver_expo_push_now()`를 수행한다(요청 트랜잭션 밖에서 외부 I/O)."""
     if not member_ids:
         return
     if via_outbox:

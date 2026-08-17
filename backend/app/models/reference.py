@@ -76,6 +76,13 @@ FORMS = frozenset({"mention", "embed", "proof"})
 # 멘션) sentinel이다(source_field가 "body"를 쓰는 것과 동형 — NULL로 "없음"을 표현하지 않는다).
 RELATIONS = frozenset({"none", "created_from"})
 NO_RELATION = "none"
+# story #2679(BE) — 「어떻게 감지됐나」 축. 'explicit'=caller가 의도해서 만든 참조(브라켓
+# 토큰·human `#` 피커·agent mentions 필드). 'auto'=서버가 본문의 맨 `#숫자`를 존재만 보고
+# caller 의도 확인 없이 승격한 것(story_ref_promoter.py·resolve_bare_number_story_refs).
+# form/relation과 다른 축 — 유일성 인덱스엔 넣지 않는다(정체성이 아니라 부수 속성, 아래
+# __table_args__ 주석 참조).
+ORIGINS = frozenset({"explicit", "auto"})
+EXPLICIT_ORIGIN = "explicit"
 
 
 class Reference(Base, OrgScopedMixin):
@@ -88,6 +95,9 @@ class Reference(Base, OrgScopedMixin):
         # 뿐인 별도 축 — form/source_field와 안 섞는다(위 모듈 docstring 참조). NOT NULL +
         # sentinel(source_field와 동형) — NULL-distinct 함정을 원천 차단한다.
         CheckConstraint("relation IN ('none', 'created_from')", name="ck_entity_references_relation"),
+        # story #2679(BE): origin — 「감지 방식」 축(explicit/auto). form/relation과 마찬가지로
+        # 별도 CHECK로 닫는다. 유일성 인덱스(아래)엔 의도적으로 안 넣는다(정체성 축이 아님).
+        CheckConstraint("origin IN ('explicit', 'auto')", name="ck_entity_references_origin"),
         # mentions 테이블의 uq_mentions_source_target 과 동일 SSOT 원칙(insert-only write-path의
         # ON CONFLICT DO NOTHING 방어 + 백필 재실행 시 idempotent 보장).
         # ⛔PO 판정(2026-07-28): proof 는 이 제약에서 뺀다 — proof 는 "대화의 다른 범위"를
@@ -123,6 +133,11 @@ class Reference(Base, OrgScopedMixin):
     # source에서 만들어졌다("출처"). NOT NULL + sentinel(source_field와 동형, NULL-distinct
     # 함정 회피) — form/source_field와 다른 축이다(위 모듈 docstring 참조).
     relation: Mapped[str] = mapped_column(Text, nullable=False, server_default=NO_RELATION, default=NO_RELATION)
+    # story #2679(BE): 'explicit'(기본, 기존 행 전부 포함) · 'auto'=서버가 caller 의도 확인
+    # 없이 승격. NOT NULL + sentinel(source_field/relation과 동형) — 유일성 인덱스엔 미포함.
+    origin: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=EXPLICIT_ORIGIN, default=EXPLICIT_ORIGIN,
+    )
     # #2265(유나 lane) 몫 — 이 스토리에서 모양을 굳히지 않는다. proof 가 아니면 항상 None.
     proof_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

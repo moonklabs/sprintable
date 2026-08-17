@@ -23,6 +23,7 @@ import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
 import { EpicStatusTransition } from '@/components/epics/epic-status-transition';
 import { HypothesesSection } from '@/components/hypotheses/hypotheses-section';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
+import { fetchWithAuth } from '@/lib/db/client';
 
 type EpicStatus = 'draft' | 'active' | 'done' | 'archived';
 type EpicPriority = 'critical' | 'high' | 'medium' | 'low';
@@ -227,7 +228,7 @@ export default function EpicDetailPage() {
   const locale = useLocale();
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { wsSlug, projSlug } = useGoalsRoute();
+  const { wsSlug, projSlug, projectId } = useGoalsRoute();
   const { toasts, addToast, dismissToast } = useToast();
   const [epic, setEpic] = useState<Epic | null>(null);
   const [loading, setLoading] = useState(true);
@@ -281,7 +282,7 @@ export default function EpicDetailPage() {
     void (async () => {
       let res: Response;
       try {
-        res = await fetch(`/api/goals/${id}`);
+        res = await fetchWithAuth(`/api/goals/${id}`);
       } catch {
         if (cancelled) return;
         router.replace(`/${wsSlug}/${projSlug}/goals`);
@@ -293,6 +294,14 @@ export default function EpicDetailPage() {
         const json = await res.json();
         if (cancelled) return;
         const data = (json as { data: Epic }).data;
+        // story f401139e — BE GET /api/goals/{id}는 X-Project-Id와 무관하게 200을 준다(project
+        // 경계 미시행, 그라운딩 확認). 전환 직후 옛 프로젝트 goal이 편집/삭제 버튼까지 활성 상태로
+        // 노출되는 걸 막으려면 res.ok만으론 부족 — 응답이 실은 현재 프로젝트 것인지 직접 대조한다.
+        if (data.project_id && data.project_id !== projectId) {
+          router.replace(`/${wsSlug}/${projSlug}/goals`);
+          setLoading(false);
+          return;
+        }
         setEpic(data);
         setEpicAssigneeId(data.assignee_id ?? null);
         setLoading(false);
@@ -316,7 +325,7 @@ export default function EpicDetailPage() {
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [id, router, wsSlug, projSlug, orgSyncVersion, orgSyncPending]);
+  }, [id, router, wsSlug, projSlug, projectId, orgSyncVersion, orgSyncPending]);
 
   if (loading) {
     return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">{t('loading')}</div>;

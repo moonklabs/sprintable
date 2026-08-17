@@ -187,6 +187,20 @@ jobs:
             # ⚠️승격 병합(promo/backplane-20260723): 위 백플레인 3플래그(develop)와 이 REALTIME_URL
             # 전환(main #2439)은 서로 무관한 prod env 출력이라 둘 다 보존한다.
             echo "realtime_url=https://realtime.sprintable.ai" >> "$GITHUB_OUTPUT"
+            # story #2701(2026-08-17) — sprintable-mcp-prod의 라이브 실측(gcloud describe)
+            # 그대로 durable화. dev엔 이 값이 없다(아래 dev 분기 참조, 조용히 맞추지 않음 —
+            # dev는 CORS/host allowlist 자체가 아직 필요하지 않다는 뜻으로 실측된 그대로 둔다).
+            # ⛔fix(디디 교차QA, 2026-08-17): 실값이 호스트 둘을 콤마로 이었는데, 이 문자열이
+            # `gcloud builds submit --substitutions=` 조립(SUBST=, 아래)에 그대로 들어가면 그
+            # 조립 자체가 "key=value,key=value,..." 콤마 목록이라 값 안의 콤마가 다음
+            # substitution의 시작으로 오인돼(gcloud ArgDict 파서는 순수 split(',')·따옴표
+            # 이스케이프 무시) prod 배포가 CLI 파싱 단계에서 죽는다. dev는 이 값이 빈
+            # 문자열이라 이 함정이 안 드러났었다(검증은 "그 값들에 대해서만" 유효했다는
+            # 정확한 사례). 파이프라인 구간(GHA output→SUBST→cloudbuild substitution)은
+            # `|`로 나르고, cloudbuild.yaml deploy-mcp 스텝 안에서 실제 env var로 쓸 때만
+            # `tr '|' ','`로 콤마 복원한다(앱이 받는 최종 env var 값 자체는 무변경 — MCP_ALLOWED_HOSTS
+            # 는 여전히 콤마구분).
+            echo "mcp_allowed_hosts=sprintable-mcp-prod-787818285179.asia-northeast3.run.app|mcp.sprintable.ai" >> "$GITHUB_OUTPUT"
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
@@ -274,7 +288,15 @@ jobs:
             # realtime 쪽 값(EVENT_BROKER_REDIS_DISPATCH_ENABLED 포함)은 cloudbuild.yaml의
             # deploy-realtime 스텝이 이미 dev 전용 가드 안에서 직접 명시(변수 아님).
             echo "redis_url=redis://10.164.120.243:6379" >> "$GITHUB_OUTPUT"
-            echo "backend_redis_dual_publish_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #2157 해제 판(2026-08-17, 미르코 그라운딩·페드루 확定) — dual_publish는
+            # #2123 cutover(2026-07-25 15:43 KST)의 롤백 안전망이었다. 해제 조건 3개(①72h
+            # 무사고=Redis 배달 오류 신규 클래스 0 ②PG_LISTEN 재활성 0회 ③SSOT 경유) 전부
+            # 실측 PASS(Cloud Logging 21일간 redis 오류 0건·git log 이후 PG_LISTEN 롤백 커밋
+            # 0건) — 3주째 방치돼 있던 조건부 해제를 여기서 dev부터 집행한다. PG_LISTEN이 이미
+            # 꺼져 있어 이 스위치가 켜져 있어도 롤백 경로 자체가 무의미했다(pg_notify는 무조건
+            # 나가지만 듣는 프로세스가 0개 — 원 스토리 ④). prod(위 main 분기)는 별도 판단 —
+            # 여기서 안 건드림.
+            echo "backend_redis_dual_publish_enabled=false" >> "$GITHUB_OUTPUT"
             # story #2123 S0-b(2026-07-23, 오르테가군 판정): wake_agent()의 크로스인스턴스
             # 배달이 #2122 머지 이후에도 무효였던 이유 — 이 발행측 스위치(agent_gateway.py:224
             # 게이팅)가 꺼져 있어 event_broker를 계속 우회했다(직접 pg_notify만, Redis 미발행).
@@ -307,6 +329,11 @@ jobs:
             # 없어 까심군이 사용자 경로 재측정을 못 하고 있었다. dev만 켠다(#2158 취지 자체가
             # "손 gcloud로 안 켠다"라 SSOT 경유 필수).
             echo "backend_sse_transient_replay_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #2701(2026-08-17) — dev sprintable-mcp의 라이브 실측(gcloud describe)엔
+            # MCP_ALLOWED_HOSTS 자체가 없다(prod 분기 참조) — 명시로 빈 값을 두지 않는다.
+            # cloudbuild.yaml deploy-mcp가 이 값이 비어 있으면 그 env var 자체를 안 실어(조건
+            # 분기), dev 서비스에 새로 빈 문자열 env가 안 생긴다(오늘 실측 그대로 무변경).
+            echo "mcp_allowed_hosts=" >> "$GITHUB_OUTPUT"
           fi
 
       # story #2827 P0 핫픽스 2차(2026-08-03, 페드루 dispatch-test 실측) — 1차 핫픽스가 조립
@@ -345,8 +372,9 @@ jobs:
           V_FRONTEND_MIN_INSTANCES: ${{ steps.env.outputs.frontend_min_instances }}
           V_FRONTEND_MAX_INSTANCES: ${{ steps.env.outputs.frontend_max_instances }}
           V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED: ${{ steps.env.outputs.backend_sse_transient_replay_enabled }}
+          V_MCP_ALLOWED_HOSTS: ${{ steps.env.outputs.mcp_allowed_hosts }}
         run: |
-          SUBST="_DEPLOY_ENV=\"${V_DEPLOY_ENV}\",_FASTAPI_URL=\"${V_FASTAPI_URL}\",_BACKEND_MIN_INSTANCES=\"${V_BACKEND_MIN_INSTANCES}\",_BACKEND_MAX_INSTANCES=\"${V_BACKEND_MAX_INSTANCES}\",_DB_POOL_SIZE=\"${V_DB_POOL_SIZE}\",_DB_MAX_OVERFLOW=\"${V_DB_MAX_OVERFLOW}\",_BACKEND_DB_PGBOUNCER=\"${V_BACKEND_DB_PGBOUNCER}\",_BACKEND_TIMEOUT=\"${V_BACKEND_TIMEOUT}\",_GA4_MEASUREMENT_ID=\"${V_GA4_MEASUREMENT_ID}\",_REALTIME_MIN_INSTANCES=\"${V_REALTIME_MIN_INSTANCES}\",_REALTIME_MAX_INSTANCES=\"${V_REALTIME_MAX_INSTANCES}\",_REALTIME_TIMEOUT=\"${V_REALTIME_TIMEOUT}\",_REALTIME_URL=\"${V_REALTIME_URL}\",_BACKEND_PG_LISTEN_ENABLED=\"${V_BACKEND_PG_LISTEN_ENABLED}\",_BACKEND_REDIS_CONSUME_ENABLED=\"${V_BACKEND_REDIS_CONSUME_ENABLED}\",_BACKEND_REDIS_DISPATCH_ENABLED=\"${V_BACKEND_REDIS_DISPATCH_ENABLED}\",_REDIS_URL=\"${V_REDIS_URL}\",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED=\"${V_BACKEND_REDIS_DUAL_PUBLISH_ENABLED}\",_BACKEND_FANOUT_WAKE_REDIS_ENABLED=\"${V_BACKEND_FANOUT_WAKE_REDIS_ENABLED}\",_SSE_MULTIPLEX_ENABLED=\"${V_SSE_MULTIPLEX_ENABLED}\",_BACKEND_PRESENCE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_REDIS_ENABLED}\",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED}\",_BACKEND_SSE_LEASE_REDIS_ENABLED=\"${V_BACKEND_SSE_LEASE_REDIS_ENABLED}\",_FRONTEND_MIN_INSTANCES=\"${V_FRONTEND_MIN_INSTANCES}\",_FRONTEND_MAX_INSTANCES=\"${V_FRONTEND_MAX_INSTANCES}\",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED=\"${V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}\""
+          SUBST="_DEPLOY_ENV=\"${V_DEPLOY_ENV}\",_FASTAPI_URL=\"${V_FASTAPI_URL}\",_BACKEND_MIN_INSTANCES=\"${V_BACKEND_MIN_INSTANCES}\",_BACKEND_MAX_INSTANCES=\"${V_BACKEND_MAX_INSTANCES}\",_DB_POOL_SIZE=\"${V_DB_POOL_SIZE}\",_DB_MAX_OVERFLOW=\"${V_DB_MAX_OVERFLOW}\",_BACKEND_DB_PGBOUNCER=\"${V_BACKEND_DB_PGBOUNCER}\",_BACKEND_TIMEOUT=\"${V_BACKEND_TIMEOUT}\",_GA4_MEASUREMENT_ID=\"${V_GA4_MEASUREMENT_ID}\",_REALTIME_MIN_INSTANCES=\"${V_REALTIME_MIN_INSTANCES}\",_REALTIME_MAX_INSTANCES=\"${V_REALTIME_MAX_INSTANCES}\",_REALTIME_TIMEOUT=\"${V_REALTIME_TIMEOUT}\",_REALTIME_URL=\"${V_REALTIME_URL}\",_BACKEND_PG_LISTEN_ENABLED=\"${V_BACKEND_PG_LISTEN_ENABLED}\",_BACKEND_REDIS_CONSUME_ENABLED=\"${V_BACKEND_REDIS_CONSUME_ENABLED}\",_BACKEND_REDIS_DISPATCH_ENABLED=\"${V_BACKEND_REDIS_DISPATCH_ENABLED}\",_REDIS_URL=\"${V_REDIS_URL}\",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED=\"${V_BACKEND_REDIS_DUAL_PUBLISH_ENABLED}\",_BACKEND_FANOUT_WAKE_REDIS_ENABLED=\"${V_BACKEND_FANOUT_WAKE_REDIS_ENABLED}\",_SSE_MULTIPLEX_ENABLED=\"${V_SSE_MULTIPLEX_ENABLED}\",_BACKEND_PRESENCE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_REDIS_ENABLED}\",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED}\",_BACKEND_SSE_LEASE_REDIS_ENABLED=\"${V_BACKEND_SSE_LEASE_REDIS_ENABLED}\",_FRONTEND_MIN_INSTANCES=\"${V_FRONTEND_MIN_INSTANCES}\",_FRONTEND_MAX_INSTANCES=\"${V_FRONTEND_MAX_INSTANCES}\",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED=\"${V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}\",_MCP_ALLOWED_HOSTS=\"${V_MCP_ALLOWED_HOSTS}\""
           echo "substitutions=${SUBST}" >> "$GITHUB_OUTPUT"
 
       - name: Submit Cloud Build

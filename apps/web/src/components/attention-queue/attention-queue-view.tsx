@@ -13,6 +13,8 @@ import {
   type AttentionQueueItem, type AttentionQueueTranslator,
 } from './derive-attention-queue';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 const CAP = 7;
 // 9ef0f914: story.trust_stage_changed 버스트(같은 story 연속 전이 등)를 단발 재조회로 병합.
 const REFETCH_DEBOUNCE_MS = 500;
@@ -20,7 +22,7 @@ const REFETCH_DEBOUNCE_MS = 500;
 const HIGHLIGHT_MS = 900;
 
 async function fetchAttentionQueue(projectId: string, t: AttentionQueueTranslator): Promise<AttentionQueueItem[]> {
-  const json = await fetch(`/api/glance/attention?project_id=${projectId}`)
+  const json = await fetchWithAuth(`/api/glance/attention?project_id=${projectId}`)
     .then((r) => (r.ok ? r.json() : null))
     .catch(() => null);
   const signals = parseAttentionQueueSignals(json);

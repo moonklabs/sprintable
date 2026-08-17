@@ -11,6 +11,8 @@ import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-ss
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { queuePendingToast } from './cross-project-toast-provider';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 interface Participant {
   member_id: string;
   name: string | null;
@@ -296,7 +298,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
 
   const fetchConversations = useCallback(async (nextOffset = 0, append = false) => {
     try {
-      const res = await fetch(
+      const res = await fetchWithAuth(
         `/api/conversations?project_id=${projectId}&limit=${PAGE_LIMIT}&offset=${nextOffset}`
       );
       if (!res.ok) return;
@@ -313,7 +315,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   }, [projectId]);
 
   const fetchAllConversations = useCallback(async (nextOffset = 0, append = false) => {
-    const res = await fetch(
+    const res = await fetchWithAuth(
       `/api/conversations?project_id=${projectId}&include_agent_conversations=true&limit=${PAGE_LIMIT}&offset=${nextOffset}`
     );
     if (!res.ok) return;
@@ -329,7 +331,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // 불요. 전환 in-flight 가드는 위 fetchConversations와 동형(stale 응답 drop).
   const fetchOutsideProjectConversations = useCallback(async () => {
     try {
-      const res = await fetch(`/api/conversations/recent-outside-project?project_id=${projectId}&limit=5`);
+      const res = await fetchWithAuth(`/api/conversations/recent-outside-project?project_id=${projectId}&limit=5`);
       if (!res.ok) return;
       const json = await res.json() as { data?: OutsideProjectConversation[] };
       if (projectId !== projectIdRef.current) return;

@@ -61,7 +61,13 @@ export function TopBar({ className, orgId, orgMemberships = [], projectId, proje
           currentProjectId={projectId}
         />
       )}
-      <div className="flex min-w-0 flex-1 items-center gap-2">
+      {/* story 6df91dce — 390px에서 title(현재 탭 이름, 예 "결재함")이 contextChip+actions와
+          폭 경합에 밀려 글자 단위로 세로 꺾이던 결함(선생님 폰 첫 화면 "결/재/함"). title 슬롯은
+          <h1 className="text-sm font-medium">{...}</h1> 패턴이 인박스·rewards·chats·more·goals·
+          standup·sprints·docs 등 10+ 화면 공통이라 각 caller가 아니라 이 렌더러(슬롯 소비처)에서
+          단일 정의로 막는다 — 직계 자식(title)에 min-w-0+truncate를 걸어 flex 안에서 줄바꿈 대신
+          한 줄 말줄임으로 degrade. sidebar.tsx의 [&>span:last-child]:truncate와 동일 관례. */}
+      <div className="flex min-w-0 flex-1 items-center gap-2 [&>*]:min-w-0 [&>*]:truncate">
         {title}
       </div>
       <div className="flex shrink-0 items-center gap-1">

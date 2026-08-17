@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { ToastContainer, useToast } from '@/components/ui/toast';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /** 세션 1회 가드 — 같은 세션 새로고침 시 토스트 재노출 방지. */
 const TOAST_SHOWN_KEY = 'storage-capacity-toast-shown';
@@ -36,7 +37,10 @@ export function StorageCapacityToastProvider({ children }: { children: React.Rea
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch('/api/assets/storage-usage');
+        // story #2689 — 콜드 재진입(만료 access token) 시 raw fetch는 401을 재시도 없이
+        // 삼켜(!res.ok=>return) ranRef가 이미 true라 이 세션 안엔 다시는 안 뜬다(폴링도 없음,
+        // §S8 "세션 1회"). fetchWithAuth로 바꿔 401→refresh→재시도 경로에 태운다.
+        const res = await fetchWithAuth('/api/assets/storage-usage');
         if (!res.ok) return;
         const json = (await res.json()) as { data?: { percentage?: number } };
         const pct = json.data?.percentage;

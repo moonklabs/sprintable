@@ -184,6 +184,9 @@ async def _finalize_dispatch(
             # story #1953: project_id는 이미 함수 파라미터로 갖고 있음(신규 조회 0).
             source_project_id=project_id,
             sprint_id=_sprint_id,
+            # story #2696: outbox 이관(동일 결함 클래스 예방) — in-app Event INSERT/
+            # assign_recipient_seq()는 via_outbox와 무관하게 그대로 동기(webhook 배달만 지연).
+            via_outbox=True,
         )
 
     if commit:

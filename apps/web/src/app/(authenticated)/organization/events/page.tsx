@@ -16,6 +16,7 @@ import {
   type DefinerFormState, deriveDefinition, emptyFormState, tryReverseParse, validateKeySuffix,
 } from '@/components/organization/event-definer-logic';
 import { EventDefinitionSummary } from '@/components/organization/event-definition-summary';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // story #2664 — 목록(GET) 응답 모델(events.py EventDefinitionResponse)엔 아직 id가 없다
 // (BE #2663, PR#3069 재QA 중). id가 없는 항목은 수정/비활성 버튼을 아예 안 그린다 — #2663가
@@ -73,7 +74,7 @@ export default function OrganizationEventsPage() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/events/definitions');
+      const res = await fetchWithAuth('/api/events/definitions');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json() as EventDefinition[] | { data?: EventDefinition[] };
       setDefs(Array.isArray(json) ? json : (json.data ?? []));
@@ -328,7 +329,7 @@ function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t:
     setState({ kind: 'loading' });
     void (async () => {
       try {
-        const res = await fetch(`/api/events/definitions/publish-history?definition_key=${encodeURIComponent(definitionKey)}&limit=20`);
+        const res = await fetchWithAuth(`/api/events/definitions/publish-history?definition_key=${encodeURIComponent(definitionKey)}&limit=20`);
         if (!res.ok) throw new Error();
         const items = await res.json() as PublishHistoryItem[];
         if (!cancelled) setState({ kind: 'resolved', items });
@@ -471,7 +472,7 @@ function EventFormDialog({
       }
       let res: Response;
       if (mode === 'create') {
-        res = await fetch('/api/events/definitions', {
+        res = await fetchWithAuth('/api/events/definitions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),

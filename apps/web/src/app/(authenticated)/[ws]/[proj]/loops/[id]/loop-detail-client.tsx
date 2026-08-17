@@ -12,6 +12,8 @@ import { OutcomeBadge } from '@/components/loops/outcome-badge';
 import { VariantGallery, type VariantGroup } from '@/components/loops/variant-gallery';
 import { ContextPackPanel } from '@/components/loops/context-pack-panel';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 /** E-LOOP-LEDGER S7 loop_outcome_attribution.py::attribute_loop_outcome 산출 shape 그대로. */
 interface OutcomeSnapshot {
   hypothesis_id: string;
@@ -50,7 +52,7 @@ interface DocSummary {
  * brief state가 잔존하는 버그 클래스(A3 AuditClient·S8 TenantsClient에 이은 3번째 재발
  * ·까심 QA 적출) — route param으로 fetch하는 상세 page는 항상 key-remount.
  */
-export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string; wsSlug: string; projSlug: string }) {
+export function LoopDetailClient({ loopId, wsSlug, projSlug, projectId }: { loopId: string; wsSlug: string; projSlug: string; projectId: string }) {
   const t = useTranslations('loops');
   const th = useTranslations('hypotheses');
   const router = useRouter();
@@ -65,15 +67,20 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string;
 
   const fetchAll = useCallback(async () => {
     try {
-      const loopRes = await fetch(`/api/loops/${loopId}`);
+      const loopRes = await fetchWithAuth(`/api/loops/${loopId}`);
       if (!loopRes.ok) { setNotFound(true); return; }
       const loopData = (await loopRes.json()) as Loop;
+      // story f401139e — GET /api/loops/{id}가 X-Project-Id와 무관하게 200을 줄 수 있어
+      // (goals/stories/conversations/sprints와 동일 계열 BE 갭, 그라운딩 확認) res.ok만으론
+      // 부족 — 응답의 project_id를 현재 프로젝트와 직접 대조해야 옛 프로젝트 loop이 새
+      // 프로젝트 URL 아래 노출되지 않는다.
+      if (loopData.project_id && loopData.project_id !== projectId) { setNotFound(true); return; }
       setLoop(loopData);
       setNotFound(false);
 
       const [artifactsRes, meRes] = await Promise.all([
-        fetch(`/api/loops/${loopId}/artifacts`),
-        fetch('/api/me'),
+        fetchWithAuth(`/api/loops/${loopId}/artifacts`),
+        fetchWithAuth('/api/me'),
       ]);
       if (artifactsRes.ok) setGroups((await artifactsRes.json()) as VariantGroup[]);
       if (meRes.ok) {
@@ -82,7 +89,7 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string;
       }
 
       if (loopData.hypothesis_id) {
-        const hRes = await fetch(`/api/hypotheses/${loopData.hypothesis_id}`);
+        const hRes = await fetchWithAuth(`/api/hypotheses/${loopData.hypothesis_id}`);
         if (hRes.ok) {
           const { data } = (await hRes.json()) as { data: Hypothesis };
           setHypothesis(data);
@@ -92,7 +99,7 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string;
       }
 
       if (loopData.brief_doc_id) {
-        const dRes = await fetch(`/api/docs/${loopData.brief_doc_id}/summary`);
+        const dRes = await fetchWithAuth(`/api/docs/${loopData.brief_doc_id}/summary`);
         if (dRes.ok) {
           const { data } = (await dRes.json()) as { data: DocSummary };
           setBrief(data);
@@ -105,7 +112,7 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug }: { loopId: string;
     } finally {
       setLoading(false);
     }
-  }, [loopId]);
+  }, [loopId, projectId]);
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 

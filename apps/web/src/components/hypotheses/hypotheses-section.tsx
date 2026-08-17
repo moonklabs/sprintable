@@ -13,6 +13,8 @@ import type { GateItem } from '@/components/kanban/types';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 /**
  * Epic-detail Hypotheses section (E1-S8 §4.1). The first human-facing surface that
  * pulls hypotheses out of the hidden epic/story outcome columns into a 1st-class entity.
@@ -105,16 +107,16 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`/api/hypotheses?project_id=${projectId}&epic_id=${epicId}`, { cache: 'no-store' });
+      const res = await fetchWithAuth(`/api/hypotheses?project_id=${projectId}&epic_id=${epicId}`, { cache: 'no-store' });
       if (!res.ok) { setItems([]); return; }
       const json = await res.json();
       const arr = (json?.data ?? []) as Hypothesis[];
       setItems(arr);
       // S24 QA LOW② fix: per-hyp N fetch → status-batch(GateInbox식·pending+rejected status-only 2 fetch→클라 work_item_type='hypothesis' 필터·map). confirmed는 hyp payload(confirmed_by) 파생이라 gate 조회 불요.
       const [pendingGates, rejectedGates, membersJson] = await Promise.all([
-        fetch('/api/gates?status=pending').then((r) => (r.ok ? (r.json() as Promise<GateItem[]>) : [])).catch(() => []),
-        fetch('/api/gates?status=rejected').then((r) => (r.ok ? (r.json() as Promise<GateItem[]>) : [])).catch(() => []),
-        fetch('/api/team-members').then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
+        fetchWithAuth('/api/gates?status=pending').then((r) => (r.ok ? (r.json() as Promise<GateItem[]>) : [])).catch(() => []),
+        fetchWithAuth('/api/gates?status=rejected').then((r) => (r.ok ? (r.json() as Promise<GateItem[]>) : [])).catch(() => []),
+        fetchWithAuth('/api/team-members').then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
       ]);
       const gmap: Record<string, GateItem> = {};
       // pending 우선·rejected는 pending 없을 때만(한 hyp에 둘 다면 진행중 pending이 우세).

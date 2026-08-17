@@ -19,6 +19,7 @@ import { emitOnboardingEvent, beaconOnboardingEvent } from '@/app/onboarding/onb
 import type { RoleTemplateSummary, RecruitResponse, McpConfigBundle, RuntimeCapabilityItem } from '@/services/recruit';
 import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FILENAME, resolveRuntimeWakeInfo, RUNTIME_CONNECT_CLI, resolveConnectConfirm } from '@/services/recruit';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
 
@@ -252,7 +253,7 @@ export function LiveConnectionBadge({ agentId }: { agentId: string }) {
 
     async function poll() {
       try {
-        const res = await fetch(`/api/team-members/${agentId}`);
+        const res = await fetchWithAuth(`/api/team-members/${agentId}`);
         if (cancelled) return;
         if (res.ok) {
           const json = await res.json() as { data?: { presence_status?: PresenceStatus | null } };
@@ -316,7 +317,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     setRoleError(false);
     try {
       // S25(ae844d74): 활성 UI locale 전달 → BE(S24)가 카드 name/description을 locale별로 반환.
-      const res = await fetch(`/api/role-templates?locale=${locale}`);
+      const res = await fetchWithAuth(`/api/role-templates?locale=${locale}`);
       if (!res.ok) { setRoleError(true); return; }
       const json = (await res.json()) as { data?: RoleTemplateSummary[] };
       setRoleTemplates(json.data ?? []);
@@ -344,7 +345,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
 
   useEffect(() => {
     void (async () => {
-      const res = await fetch('/api/projects');
+      const res = await fetchWithAuth('/api/projects');
       if (!res.ok) return;
       const json = (await res.json()) as { data?: { id: string; name: string }[] };
       setOrgProjects((json.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)));
@@ -450,7 +451,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const fetchRuntimeCapabilities = useCallback(async () => {
     setRuntimeCapabilitiesError(false);
     try {
-      const res = await fetch('/api/runtime-capabilities');
+      const res = await fetchWithAuth('/api/runtime-capabilities');
       if (!res.ok) {
         setRuntimeCapabilities(RUNTIME_CAPABILITIES_FALLBACK);
         if (res.status !== 404) setRuntimeCapabilitiesError(true);
@@ -605,7 +606,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
       try {
         // 까심 QA RC HIGH③: project_id 없이 부르면 org 전체(타 프로젝트 포함) 에이전트가 새 — 이 채용
         // 흐름은 현재 프로젝트 스코프라 새로 만들기(scope_mode=projects)와 동일하게 project_id 로 스코프.
-        const res = await fetch(`/api/team-members?project_id=${projectId}&type=agent`);
+        const res = await fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`);
         if (!res.ok) return;
         const json = (await res.json()) as { data?: Array<{ id: string; name: string; type: string }> };
         setExistingAgents((json.data ?? []).filter((m) => m.type === 'agent').map((m) => ({ id: m.id, name: m.name })));

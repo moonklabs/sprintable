@@ -6,6 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 interface ExecutionLogItem {
   id: string;
   rule_id: string | null;
@@ -48,7 +50,7 @@ export function WorkflowExecutionHistorySection({ projectId }: { projectId: stri
     if (!projectId) return;
     setLoading(true);
     try {
-      const res = await window.fetch(
+      const res = await fetchWithAuth(
         `/api/workflow-executions?project_id=${projectId}&offset=${off}&limit=${LIMIT}`
       );
       if (res.ok) {

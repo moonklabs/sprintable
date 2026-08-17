@@ -26,6 +26,8 @@ import uuid
 from collections.abc import Coroutine
 from typing import Any
 
+from app.services import realtime_readiness
+
 logger = logging.getLogger(__name__)
 
 INSTANCE_ID: str = str(uuid.uuid4())
@@ -201,6 +203,7 @@ async def listen_loop() -> None:
             await conn.add_listener(_CHANNEL, _on_notification)
             delay = 1.0  # 연결 성공 시 backoff 리셋
             logger.info("pg_listen connected")
+            realtime_readiness.mark_connected()  # story #2295 — readiness 캐시 갱신(DB 왕복 0)
             # 커넥션 유지 — CancelledError까지 대기
             while True:
                 await asyncio.sleep(30)
@@ -209,6 +212,7 @@ async def listen_loop() -> None:
             break
         except Exception as exc:
             logger.warning("pg_listen error: %s — reconnecting in %.1fs", exc, delay)
+            realtime_readiness.mark_disconnected(f"{type(exc).__name__}: {exc}")
         finally:
             if conn is not None:
                 try:

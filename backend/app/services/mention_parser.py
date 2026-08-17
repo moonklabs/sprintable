@@ -259,26 +259,30 @@ async def resolve_bare_number_story_refs(
     org_id: uuid.UUID,
     project_id: uuid.UUID,
     content: str,
-) -> list[tuple[str, uuid.UUID, str]]:
+) -> list[tuple[str, uuid.UUID, str, str]]:
     """story #2269(C-11) AC0-2 축A — `resolve_bare_number_story_targets`가 준 number→id
-    매핑을 `reconcile_entity_references`가 바로 받는 (target_type, target_id, form) 3튜플로
-    변환한다(caller가 대괄호 파서 결과와 합쳐 한 번에 reconcile — 저장 시 원문 rewrite는
-    하지 않는다, doc `c11-2269-ac0-findings` AC0-2 축A/축B 구분 참조)."""
+    매핑을 `reconcile_entity_references`가 바로 받는 (target_type, target_id, form, origin)
+    4튜플로 변환한다(caller가 대괄호 파서 결과와 합쳐 한 번에 reconcile — 저장 시 원문
+    rewrite는 하지 않는다, doc `c11-2269-ac0-findings` AC0-2 축A/축B 구분 참조).
+
+    ⛔story #2679(BE) — 아래 옛 주석이 지목한 "다시 볼 조건" ②(㉠대괄호·㉡맨번호 출처 참조를
+    실제로 다르게 다뤄야 할 일)가 지금 발동했다(유나 사례, 2026-08-16). 그때 예고한 두
+    대안(form 분기 vs 별도 discriminator 컬럼) 중 **후자**를 골랐다 — `form`은 여전히
+    "mention" 그대로(렌더 방식 축은 안 바뀜), 대신 origin='auto'로 「이 참조가 caller
+    의도 확인 없이 감지됐다」만 별도로 표시한다. 옛 주석이 전수 확인하라 지목했던 4곳:
+    ①이 함수의 existing-refs diff(reconcile_entity_references) — origin을 diff 키에 포함해
+    대응(위 함수 docstring 참조) ②`verify_backfill_complete`(reference_backfill.py) — 확인
+    결과 이 write-path(#2269 축A)를 소급 백필하지 않음(같은 이유로 origin도 소급 대상 아님,
+    기존 행 전부 서버 기본값 'explicit'로 시작 — 부정확하지만 「소급 안 함」은 #2269 자체의
+    기존 PO 판정 그대로 승계) ③POST /api/v2/references(`insert_reference`, reference_core.py)
+    — 사람이 명시로 만드는 경로라 origin='explicit' 그대로(코드 변경 불요, 기본값이 이미
+    'explicit') ④story 출처기록(#2267 relation='created_from') — 별개 축, origin과 안 섞임
+    (관계 없음). FORMS CHECK는 안 건드림(위 설명대로 form 자체는 그대로).
+    """
     targets = await resolve_bare_number_story_targets(
         db, org_id=org_id, project_id=project_id, content=content,
     )
-    # ⛔story #2269 AC0-1 후속(오르테가군 판정, 2026-07-30): 대괄호 `entity:story:<uuid>`
-    # 멘션과 이 맨번호 결과가 여기서 같은 form="mention"으로 합쳐진다 — 서로 다른 문법(추출기
-    # 다름·존재검사 방식 다름)인데 저장되면 구분이 사라진다(#2284와 같은 병 재발). 실측
-    # 결과 지금은 "안 가른다"(대괄호 story-멘션 원문 2건뿐 — 둘 다 단일 검증용 story #2321
-    # 한 건에서 같은 순간 난 것, 조직 실사용 아님). ⭐다시 볼 조건(사건 기반, 날짜 아님):
-    # ①대괄호 story-멘션이 세 자리(100+)에 들어서거나, ②㉠(대괄호)·㉡(맨번호) 출처 참조를
-    # 실제로 다르게 다뤄야 할 일이 생기면 — 그때 form을 가른다(예: "mention_bracket"/
-    # "mention_bare" 또는 별도 discriminator 컬럼). 가르기 전 반드시 전수 확인할 자리:
-    # 이 함수의 existing-refs diff(reconcile_entity_references)·verify_backfill_complete
-    # (reference_backfill.py)·POST /api/v2/references·story 출처기록(#2267) 4곳 + FORMS
-    # CHECK 제약(app/models/reference.py) — story #2269 description 2026-07-30 섹션에 전수 기록됨.
-    return [("story", story_id, "mention") for story_id in targets.values()]
+    return [("story", story_id, "mention", "auto") for story_id in targets.values()]
 
 
 def extract_chat_doc_mention_ids(content: str) -> list[uuid.UUID]:
@@ -381,8 +385,9 @@ class ReconcileResult:
 
     ⛔파서(어떤 문법에서 어떤 토큰을 뽑는가)는 이 코어 밖이다 — caller가 source-format에
     맞는 추출 함수(마크다운은 `extract_chat_entity_mentions`, doc HTML은
-    `extract_doc_mention_targets`)를 미리 돌려 `(target_type, target_id, form)` 3튜플
-    집합으로 넘긴다. 한 함수 안에 마크다운·HTML 파서 둘을 분기로 박지 않는다(PO 지시,
+    `extract_doc_mention_targets`)를 미리 돌려 `(target_type, target_id, form, origin)` 4튜플
+    집합으로 넘긴다(origin은 story #2679 추가 — 대부분의 caller는 "explicit" 고정).
+    한 함수 안에 마크다운·HTML 파서 둘을 분기로 박지 않는다(PO 지시,
     AC1: "story 전용 write 헬퍼가 0" — 이 병합 자체가 그 요건).
 
     diff-against-empty(신규 source, 기존 참조 0건)는 순수 insert와 결과가 같다 — 그래서
@@ -402,7 +407,7 @@ async def reconcile_entity_references(
     source_type: str,
     source_field: str,
     source_id: uuid.UUID,
-    extracted_refs: list[tuple[str, uuid.UUID, str]],
+    extracted_refs: list[tuple[str, uuid.UUID, str, str]],
     created_by: uuid.UUID | None,
     target_types: frozenset[str] = frozenset(ENTITY_RESOLVERS),
     known_new: bool = False,
@@ -412,8 +417,11 @@ async def reconcile_entity_references(
     (`stored`). 자기참조(target==source, 예: doc이 자기 자신을 wikiLink)는 드롭(doc의
     기존 self-ref 가드를 일반화한 것 — `tt == source_type and tid == source_id`).
 
-    `extracted_refs`는 caller가 이미 파싱해 온 (target_type, target_id, form) 3튜플이다 —
-    이 함수는 파싱을 하지 않는다(`ReconcileResult` docstring 참조). `target_types` 밖의
+    `extracted_refs`는 caller가 이미 파싱해 온 (target_type, target_id, form, origin) 4튜플이다
+    — 이 함수는 파싱을 하지 않는다(`ReconcileResult` docstring 참조). story #2679: origin
+    (`app.models.reference.ORIGINS` — 'explicit'|'auto')이 4번째 원소로 추가됐다(diff/insert
+    키에 포함 — 같은 대상이 auto→explicit로 바뀌면 stale 삭제 후 새로 insert되는 게 맞는
+    동작: 서로 다른 감지방식은 서로 다른 참조로 다룬다). `target_types` 밖의
     target_type은 registry 미등록으로 걸러 `dropped`에 담는다(#2294 관례 그대로 — 침묵 거부
     금지). 이 필터·dropped·경고 로직은 **여기 한 곳에만** 있다 — caller(래퍼)가 같은 로직을
     다시 하면 코어가 나중에 바뀔 때 래퍼만 옛 모양으로 남는 twin-system 갭이 된다(오르테가
@@ -432,10 +440,10 @@ async def reconcile_entity_references(
     같은 트랜잭션(caller 세션 그대로 사용, 별도 커밋 없음) — 실패 시 예외가 그대로
     propagate되어 caller(story/doc/chat 저장 트랜잭션) 전체가 롤백된다(chat/doc 기존
     AC4 원자성 계약과 동일)."""
-    valid = [(tt, tid, form) for tt, tid, form in extracted_refs if tt in target_types]
+    valid = [(tt, tid, form, origin) for tt, tid, form, origin in extracted_refs if tt in target_types]
     dropped = [
         {"target_type": tt, "target_id": str(tid), "reason": "unregistered_target_type"}
-        for tt, tid, _form in extracted_refs if tt not in target_types
+        for tt, tid, _form, _origin in extracted_refs if tt not in target_types
     ]
     if dropped:
         logger.warning(
@@ -445,7 +453,7 @@ async def reconcile_entity_references(
         )
 
     target_refs = {
-        (tt, tid, form) for tt, tid, form in valid
+        (tt, tid, form, origin) for tt, tid, form, origin in valid
         if not (tt == source_type and tid == source_id)
     }
 
@@ -464,23 +472,23 @@ async def reconcile_entity_references(
     # "DB 왕복 0" 불변식을 이 게이트가 깨지 않는다.
     if target_refs:
         ids_by_type: dict[str, set[uuid.UUID]] = {}
-        for tt, tid, _form in target_refs:
+        for tt, tid, _form, _origin in target_refs:
             ids_by_type.setdefault(tt, set()).add(tid)
         existing_by_type = await _batch_resolve_existence(db, org_id, ids_by_type)
         not_found = [
-            (tt, tid, form) for tt, tid, form in target_refs
+            (tt, tid, form, origin) for tt, tid, form, origin in target_refs
             if tid not in existing_by_type.get(tt, set())
         ]
         if not_found:
             dropped.extend(
                 {"target_type": tt, "target_id": str(tid), "reason": "target_not_found"}
-                for tt, tid, _form in not_found
+                for tt, tid, _form, _origin in not_found
             )
             logger.warning(
                 "reconcile_entity_references: dropped %d ref(s) whose target does not exist "
                 "(source_type=%s, source_field=%s, source_id=%s) dropped=%s",
                 len(not_found), source_type, source_field, source_id,
-                [{"target_type": tt, "target_id": str(tid)} for tt, tid, _form in not_found],
+                [{"target_type": tt, "target_id": str(tid)} for tt, tid, _form, _origin in not_found],
             )
             target_refs -= set(not_found)
 
@@ -488,11 +496,13 @@ async def reconcile_entity_references(
         # insert-only 고속 경로 — existing-refs SELECT/stale-delete 자체를 건너뛴다(DB 왕복
         # 0~1회: target_refs가 비면 그마저도 0). `test_dropped_logging_red_green_mutation_
         # self_check`가 db=None으로 이 경로를 직접 실증한다.
-        existing_refs: set[tuple[str, uuid.UUID, str]] = set()
-        stale_refs: set[tuple[str, uuid.UUID, str]] = set()
+        existing_refs: set[tuple[str, uuid.UUID, str, str]] = set()
+        stale_refs: set[tuple[str, uuid.UUID, str, str]] = set()
     else:
         existing_rows = await db.execute(
-            select(Reference.target_type, Reference.target_id, Reference.form).where(
+            select(
+                Reference.target_type, Reference.target_id, Reference.form, Reference.origin,
+            ).where(
                 Reference.org_id == org_id,
                 Reference.source_type == source_type,
                 Reference.source_field == source_field,
@@ -500,19 +510,28 @@ async def reconcile_entity_references(
                 Reference.form.in_(("mention", "embed")),
             )
         )
-        existing_refs = {(row.target_type, row.target_id, row.form) for row in existing_rows.all()}
+        existing_refs = {
+            (row.target_type, row.target_id, row.form, row.origin) for row in existing_rows.all()
+        }
 
         stale_refs = existing_refs - target_refs
         if stale_refs:
             from sqlalchemy import delete as sa_delete, tuple_
 
+            # story #2679: DELETE 매치는 (target_type, target_id, form) 3열만 본다 — origin은
+            # 정체성 축이 아니므로(위 모듈/함수 docstring) 유일성 인덱스에도 없다. 다만 이
+            # stale_refs 자체는 4-tuple(diff 키에 origin 포함)이라 같은 대상이 auto→explicit로
+            # 바뀌면 옛 origin 값의 행이 여기서 stale로 잡혀 삭제되고, 아래 new_refs에서 새
+            # origin 값으로 다시 insert된다(의도된 동작 — 위 docstring 참조).
             await db.execute(
                 sa_delete(Reference).where(
                     Reference.org_id == org_id,
                     Reference.source_type == source_type,
                     Reference.source_field == source_field,
                     Reference.source_id == source_id,
-                    tuple_(Reference.target_type, Reference.target_id, Reference.form).in_(stale_refs),
+                    tuple_(Reference.target_type, Reference.target_id, Reference.form).in_(
+                        {(tt, tid, form) for tt, tid, form, _origin in stale_refs}
+                    ),
                 )
             )
 
@@ -529,9 +548,10 @@ async def reconcile_entity_references(
                 "target_type": target_type,
                 "target_id": target_id,
                 "form": form,
+                "origin": origin,
                 "created_by": canonical_created_by,
             }
-            for target_type, target_id, form in new_refs
+            for target_type, target_id, form, origin in new_refs
         ])
         stmt = stmt.on_conflict_do_nothing(
             # story #2267(C-9): relation이 유니크 인덱스에 추가돼 이 목록도 같이 늘어야
@@ -556,6 +576,7 @@ async def insert_chat_mentions(
     content: str,
     created_by: uuid.UUID,
     target_types: frozenset[str] = frozenset(ENTITY_RESOLVERS),
+    auto_story_ids: frozenset[uuid.UUID] = frozenset(),
 ) -> ChatMentionResult:
     """채팅 write-path: insert-only(메시지 불변 전제 — 재조정 불필요). 같은 트랜잭션(caller 의
     세션 그대로 사용·별도 커밋 없음) — 실패 시 예외가 그대로 propagate 되어 caller(메시지 전송
@@ -603,7 +624,14 @@ async def insert_chat_mentions(
     "비면 skip" 분기를 이 래퍼에 따로 두지 않는다(`test_dropped_logging_red_green_mutation_
     self_check`가 `db=None`으로 이 경로를 직접 실증한다)."""
     all_pairs = extract_chat_entity_mentions(content)
-    extracted_refs = [(etype, eid, "mention") for etype, eid in all_pairs]
+    # story #2679: caller(conversations.py)가 story_ref_promoter.promote_bare_story_refs로
+    # 저장 시점에 본문 안에 브라켓 토큰을 미리 심어 둔 story_id 집합을 넘긴다 — 그 토큰은
+    # 여기 all_pairs에도 똑같이 잡히므로(치환된 본문을 그대로 파싱), origin은 "그 토큰을
+    # caller가 명시로 타이핑했나 vs 서버가 승격했나"로만 가른다(파싱 결과 자체는 구분 불가).
+    extracted_refs = [
+        (etype, eid, "mention", "auto" if (etype == "story" and eid in auto_story_ids) else "explicit")
+        for etype, eid in all_pairs
+    ]
     result = await reconcile_entity_references(
         db, org_id=org_id, source_type="chat_message", source_field="body",
         source_id=message_id, extracted_refs=extracted_refs, created_by=created_by,
@@ -712,8 +740,10 @@ async def reconcile_doc_mentions(
     entity_type을 뽑게 되는 날(선생님 지시 원문 "어떤 엔티티든 임베드") 파서는 뽑았는데
     필터가 조용히 막는 벽이 된다. no-op인 지금 없애 두면 파서가 늘 때 이 함수를 안 고쳐도
     자동으로 따라온다."""
+    # story #2679: doc은 wikiLink/pageEmbed 브라켓 문법뿐(맨 #숫자 자동감지 없음) — 항상 explicit.
     extracted_refs = [
-        ("doc", target_id, form) for target_id, form in extract_doc_mention_targets(html_content)
+        ("doc", target_id, form, "explicit")
+        for target_id, form in extract_doc_mention_targets(html_content)
     ]
     await reconcile_entity_references(
         db, org_id=org_id, source_type="doc", source_field="body", source_id=doc_id,

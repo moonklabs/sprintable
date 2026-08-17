@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Pencil } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { DeliveryContractModal } from '@/components/chat/delivery-contract-modal';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface PreferenceItem {
   scope_type: string;
@@ -54,7 +55,7 @@ export function MemberNotificationPreferencesSummary({ memberId, memberLabel }: 
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/notification-preferences?member_id=${encodeURIComponent(memberId)}`)
+    fetchWithAuth(`/api/notification-preferences?member_id=${encodeURIComponent(memberId)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((json: { data?: { data?: PreferenceItem[] } | PreferenceItem[] }) => {
         if (cancelled) return;
@@ -77,7 +78,7 @@ export function MemberNotificationPreferencesSummary({ memberId, memberLabel }: 
     let cancelled = false;
     void Promise.all(missing.map(async (id) => {
       try {
-        const res = await fetch(`/api/conversations/${id}`);
+        const res = await fetchWithAuth(`/api/conversations/${id}`);
         if (!res.ok) return [id, null] as const;
         const conv = await res.json() as { title?: string | null; type?: 'dm' | 'group' };
         return [id, { title: conv.title ?? null, type: conv.type ?? 'group' }] as const;

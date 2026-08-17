@@ -8,9 +8,13 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
+import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
+import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
+
+import { fetchWithAuth } from '@/lib/db/client';
 
 /**
  * E-DG S28 + 24f5ae18/34360c54 — doc decision gate UI(doc 상세 상단). S24 hypothesis-gate-badge 어휘 미러·신규 토큰 0.
@@ -79,12 +83,17 @@ export function DocGateSection({
   const [auditOpen, setAuditOpen] = useState(false); // 기본 접힘(본문 우선·이력 secondary)
   const [rejectOpen, setRejectOpen] = useState(false);
   const [note, setNote] = useState('');
+  // story #6c89e40d(페드루 PO 판정 2026-08-17, ⓑ) — doc_approval이 ⓐ항목(하위 처방)으로 high 세트에 명시
+  // 등재되며 usesSignatureFlow가 항상 true가 되므로, 결재함 카드(approvals-queue.tsx)와
+  // 동일 패턴(canonical GateSignatureApproval을 Dialog로) 그대로 배선한다 — 새 UI 발명 0.
+  const [sigOpen, setSigOpen] = useState(false);
+  const [sigError, setSigError] = useState<string | null>(null);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const [gates, revsJson, membersJson] = await Promise.all([
-      fetch(`/api/gates?work_item_id=${docId}&work_item_type=doc`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
-      fetch(`/api/docs/${docId}/revisions`).then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
-      fetch('/api/team-members').then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
+      fetchWithAuth(`/api/gates?work_item_id=${docId}&work_item_type=doc`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+      fetchWithAuth(`/api/docs/${docId}/revisions`).then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
+      fetchWithAuth('/api/team-members').then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
     ]);
     if (signal?.aborted) return;
     const gs = (Array.isArray(gates) ? gates : []) as GateItem[];
@@ -120,7 +129,7 @@ export function DocGateSection({
     if (busy) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/docs/${docId}/transition`, {
+      const res = await fetchWithAuth(`/api/docs/${docId}/transition`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: next }),
@@ -130,8 +139,10 @@ export function DocGateSection({
   };
 
   // gate-row resolution transition(approved/rejected). 성공 시 BE가 doc.status를 confirmed/denied로 flip.
-  const gateTransition = async (body: Record<string, unknown>): Promise<boolean> => {
-    if (!gate || busy) return false;
+  // story #6c89e40d — 실 envelope({data,error,meta}, story #2500 교정)에서 에러 문구를 뽑아
+  // 반환한다(gates/[id]/page.tsx transition()과 동일 파싱 — body.detail은 항상 죽어있던 필드).
+  const gateTransition = async (body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> => {
+    if (!gate || busy) return { ok: false };
     setBusy(true);
     try {
       const res = await fetch(`/api/gates/${gate.id}/transition`, {
@@ -139,10 +150,13 @@ export function DocGateSection({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (res.ok) { onTransitioned(); await load(); return true; }
-      return false;
+      if (res.ok) { onTransitioned(); await load(); return { ok: true }; }
+      const resBody = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+      return { ok: false, error: resBody?.error?.message ?? t('docGateTransitionErrorGeneric') };
     } finally { setBusy(false); }
   };
+
+  const isSigFlow = gate ? usesSignatureFlow(deriveRiskLevel(gate)) : false;
 
   const approve = () => {
     if (!currentTeamMemberId) return;
@@ -151,8 +165,28 @@ export function DocGateSection({
 
   const submitReject = async () => {
     if (!currentTeamMemberId) return;
-    const ok = await gateTransition({ status: 'rejected', resolver_id: currentTeamMemberId, note: note.trim() || null });
+    const { ok } = await gateTransition({ status: 'rejected', resolver_id: currentTeamMemberId, note: note.trim() || null });
     if (ok) { setRejectOpen(false); setNote(''); } // 실패 시 모달 유지·재시도 허용
+  };
+
+  // story #6c89e40d(ⓑ) — GateSignatureApproval 하나가 승인/반려 둘 다 담당(canonical과 동형).
+  // approve만 evidence_viewed=true(canSign 게이팅 자체가 열람 확인 — gates/[id]/page.tsx와 동일 근거).
+  const sigApprove = async (reason: string) => {
+    if (!currentTeamMemberId) return;
+    setSigError(null);
+    const { ok, error } = await gateTransition({
+      status: 'approved', resolver_id: currentTeamMemberId, note: reason.trim() || null, evidence_viewed: true,
+    });
+    if (ok) setSigOpen(false); else setSigError(error ?? null);
+  };
+
+  const sigReject = async (reason: string) => {
+    if (!currentTeamMemberId) return;
+    setSigError(null);
+    const { ok, error } = await gateTransition({
+      status: 'rejected', resolver_id: currentTeamMemberId, note: reason.trim() || null,
+    });
+    if (ok) setSigOpen(false); else setSigError(error ?? null);
   };
 
   // audit 타임라인 이벤트(display 병합): revision = 검토요청/재검토요청, gate resolution = 승인/반려(+사유).
@@ -217,7 +251,7 @@ export function DocGateSection({
                 variant="ghost"
                 className="h-7 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
                 disabled={busy}
-                onClick={() => setRejectOpen(true)}
+                onClick={() => { if (isSigFlow) { setSigError(null); setSigOpen(true); } else setRejectOpen(true); }}
               >
                 <XCircle className="size-3.5" />
                 {t('docGateReject')}
@@ -225,9 +259,13 @@ export function DocGateSection({
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-7 gap-1 text-success hover:bg-success-tint hover:text-success"
+                // story #9853aa2f(§AC7 가드, 페드루 지적 2026-08-17) — tint 배경 위 계열색
+                // 글자는 hover 순간 대비 최저점(#2420 규칙). approvals-queue.tsx:268/
+                // workflow-line-editor-section.tsx:227과 동일 처방(rest=text-success 유지,
+                // hover만 text-foreground)으로 통일 — 새 패턴 발명 0.
+                className="h-7 gap-1 text-success hover:bg-success-tint hover:text-foreground"
                 disabled={busy}
-                onClick={approve}
+                onClick={() => { if (isSigFlow) { setSigError(null); setSigOpen(true); } else approve(); }}
               >
                 <CheckCircle className="size-3.5" />
                 {t('docGateApprove')}
@@ -345,6 +383,26 @@ export function DocGateSection({
                 {busy ? '...' : t('docGateRejectConfirm')}
               </Button>
             </div>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+
+      {/* story #6c89e40d(ⓑ) — 고위험 서명 모달. approvals-queue.tsx와 동일 컴포넌트를 동일
+          Dialog 패턴으로(canonical 상세와 1:1, 새 UI 발명 0). */}
+      {sigOpen && gate ? (
+        <Dialog open={sigOpen} onOpenChange={(open) => { if (!open && !busy) setSigOpen(false); }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t('docGateLabel')}</DialogTitle>
+            </DialogHeader>
+            <GateSignatureApproval
+              gate={gate}
+              resolving={busy}
+              error={sigError}
+              onApprove={(reason) => void sigApprove(reason)}
+              onReject={(reason) => void sigReject(reason)}
+              compact
+            />
           </DialogContent>
         </Dialog>
       ) : null}

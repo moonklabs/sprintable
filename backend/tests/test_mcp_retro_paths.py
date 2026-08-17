@@ -28,10 +28,13 @@ def _client(**methods):
 
 
 async def test_list_retro_sessions_calls_real_path():
-    client = _client(get=[])
+    """story #2428 PR④: X-Total-Count/X-Next-Cursor 헤더 기반 페이지네이션으로 전환 —
+    client.get 대신 client.get_with_headers를 호출한다."""
+    client = _client()
+    client.get_with_headers = AsyncMock(return_value=([], {"x-total-count": "0"}))
     with patch.object(r, "client", client):
         await r.list_retro_sessions(r.ListRetroSessionsInput())
-    assert client.get.call_args.args[0] == "/api/v2/retros"
+    assert client.get_with_headers.call_args.args[0] == "/api/v2/retros"
 
 
 async def test_create_retro_session_calls_real_path():

@@ -31,6 +31,7 @@ from .toolset import is_tool_allowed
 from .tools.a2a import (
     LinkGateToTaskInput, ListAgentCardsInput, link_gate_to_task, list_agent_cards,
 )
+from .tools.decisions import RequestDecisionInput, request_decision
 from .tools.evidence import AddEvidenceInput, add_evidence
 from .tools.judgments import AddJudgmentInput, ListJudgmentsInput, add_judgment, list_judgments
 from .tools.session_context import SessionContextInput, get_session_context
@@ -647,6 +648,13 @@ _TOOL_DEFS: list[tuple] = [
      " 위임할 때(예: PR 완료 후 QA 담당 조회) 이 도구로 먼저 발견한 뒤"
      " sprintable_send_chat_message로 청한다.",
      ListAgentCardsInput, list_agent_cards),
+    # 비동기 결정 요청 (1) — story #2709(AskUserQuestion 블로킹 대체)
+    ("sprintable_request_decision",
+     "⛔AskUserQuestion 대신 이걸 쓸 것 — 사람 판단이 필요할 때 블로킹으로 기다리지 말고 이"
+     " 도구로 결정을 발행한 뒤 assumption대로 즉시 계속 일한다. 결재함+해당 채팅에 카드로"
+     " 뜨고(원탭 승인 — 서명/근거열람 불요), 사람이 답하면 poll_events로 회신이 온다(approve="
+     " 가정 확인, reject=note에 실제 답 — 자유텍스트로 옴). options는 힌트일 뿐 강제 아님.",
+     RequestDecisionInput, request_decision),
     # Evidence 자기증명 (1) — E-VERIFY V0-S1
     ("sprintable_add_evidence",
      "done을 스스로 증명하는 자기 서명 첨부(PR·배포·지표·발행물 링크 등) — story/task에 evidence"
@@ -678,7 +686,16 @@ _TOOL_DEFS: list[tuple] = [
      " type=\"html_blob\" 노드 하나로 감싸도 됨. canvas_bounds{w,h}(선택): 렌더 자기 프레임 크기"
      "(CSS px, 양수·≤20000) — sandbox iframe이라 서버가 측정 불가해 선언 필요·미지정=FE 기본 아트보드."
      " ⭐UI·화면·디자인·시각 산출물을 만들 때는 텍스트 설명 대신 이 툴로 구조화해 그린다(사람이"
-     " 캔버스에서 보고 코멘트/핀으로 피드백).",
+     " 캔버스에서 보고 코멘트/핀으로 피드백)."
+     " ⭐스크린샷/이미지 증거(story #2707) — base64를 이 도구 호출에 직접 싣지 말 것(토큰 폭증)."
+     " 2단계로: ①먼저 `POST $SPRINTABLE_API_URL/api/visual-artifacts/import-image`를 curl 등으로"
+     " 직접 호출(multipart/form-data, 필드명 `file`, 헤더 `Authorization: Bearer $AGENT_API_KEY`)해"
+     " GCS url을 받는다(예: `curl -F file=@screenshot.png -H \"Authorization: Bearer $AGENT_API_KEY\""
+     " $SPRINTABLE_API_URL/api/visual-artifacts/import-image`) ②그 url을 이 도구의"
+     " `nodes=[{\"type\": \"html_blob\", \"props\": {\"src\": \"<①의 url>\"}}]`로 넣어 호출하면"
+     " FE가 자동으로 image 포맷으로 렌더한다. (Bash/HTTP 클라이언트 접근이 없는 에이전트는 ①을"
+     " 스스로 못 탄다 — 그 경우는 이 경로 대상이 아님.)"
+     " source는 \"created\"(기본) 또는 \"imported\"만 허용(다른 값은 422).",
      CreateArtifactInput, create_artifact),
     ("sprintable_get_artifact",
      "[일감] 시각 산출물 단건 조회(latest 버전 + nodes). ⭐편집/코멘트/핀 작업 전 먼저 현재 상태(노드"

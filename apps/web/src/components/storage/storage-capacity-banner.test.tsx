@@ -61,3 +61,39 @@ describe('StorageCapacityBanner — 아이콘 색 유지 (story #2513 회귀가�
     expect(icon?.getAttribute('class')).toContain('text-destructive');
   });
 });
+
+// story #2689(콜드 재진입 슬로우) — raw fetch였을 때는 마운트 시 401을 맞으면 재시도 없이
+// `if (!res.ok) return`으로 조용히 삼켜(폴링도 없는 마운트 1회뿐) 배너가 영원히 안 떴다.
+// fetchWithAuth로 바꾼 뒤엔 401→refresh→재시도 경로를 타 결국 뜬다 — 이 축을 고정한다.
+describe('StorageCapacityBanner — 콜드 재진입(401→refresh→재시도) 후 배너가 뜬다(story #2689)', () => {
+  it('첫 요청이 401이어도 fetchWithAuth의 refresh 재시도로 결국 배너가 렌더된다', async () => {
+    let callCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : String(input);
+      if (url.includes('/api/auth/refresh')) {
+        return new Response(JSON.stringify({ data: { access_token: 'new-at', refresh_token: 'new-rt', token_type: 'bearer' } }), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        });
+      }
+      callCount += 1;
+      if (callCount === 1) return new Response(null, { status: 401 });
+      return new Response(JSON.stringify({ data: { used_bytes: 100, limit_bytes: 100, percentage: 100 } }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <StorageCapacityBanner />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const alertEl = container.querySelector('[role="alert"]');
+    expect(alertEl).not.toBeNull();
+  });
+});

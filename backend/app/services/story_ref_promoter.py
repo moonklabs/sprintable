@@ -109,23 +109,31 @@ def _in_protected_span(pos: int, spans: list[tuple[int, int]]) -> bool:
 
 async def promote_bare_story_refs(
     db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, content: str,
-) -> str:
+) -> tuple[str, set[uuid.UUID]]:
     """본문의 «#N» 후보를 org+project 스코프 story_number로 resolve해 entity 참조 토큰
     (`build_reference_token`, #2282 SSOT 그대로 재사용 — 새 escape 규칙 발명 안 함)으로
     치환한다.
 
     resolve 실패(그 번호의 story가 없음·타 project 소속)면 **그 매치만** 원문 그대로
     남긴다(전체 all-or-nothing 아님 — 은퇴한 @handle 파서의 "매치 0건=조회도 없이 조기
-    반환" 관대함과 동형 철학, 성실한 오독에서도 메시지 발신 자체는 막지 않는다)."""
+    반환" 관대함과 동형 철학, 성실한 오독에서도 메시지 발신 자체는 막지 않는다).
+
+    story #2679(BE): 반환이 `str`에서 `(content, auto_story_ids)`로 바뀌었다 — 이번 호출에서
+    **실제로 성공 치환한** story_id 집합을 같이 돌려준다(resolve 실패로 원문 그대로 남은
+    번호는 안 들어간다). caller(conversations.py)가 이 집합을 `insert_chat_mentions`에
+    그대로 전달해 «caller가 명시로 타이핑한 브라켓 토큰»과 «서버가 여기서 승격한 것»을
+    entity_references.origin에서 가른다(explicit vs auto) — 본문 자체(치환된 브라켓 토큰)는
+    이 함수가 이미 심어 둔 그대로, 파싱만으로는 두 출처를 구분할 수 없기 때문에 별도 채널로
+    넘긴다."""
     if not content:
-        return content
+        return content, set()
     candidates = extract_bare_story_ref_candidates(content)
     if not candidates:
-        return content
+        return content, set()
     protected = _protected_spans(content)
     candidates = [c for c in candidates if not _in_protected_span(c[0], protected)]
     if not candidates:
-        return content
+        return content, set()
 
     numbers = {c[2] for c in candidates}
     from app.models.pm import Story
@@ -140,10 +148,11 @@ async def promote_bare_story_refs(
     )).all()
     story_by_number = {number: (story_id, title) for number, story_id, title in rows}
     if not story_by_number:
-        return content
+        return content, set()
 
     # 뒤에서부터 치환 — 앞쪽 매치의 인덱스가 뒤 치환으로 밀리지 않게.
     result = content
+    promoted_ids: set[uuid.UUID] = set()
     for start, end, number in sorted(candidates, key=lambda c: c[0], reverse=True):
         found = story_by_number.get(number)
         if found is None:
@@ -153,4 +162,5 @@ async def promote_bare_story_refs(
         if token is None:
             continue
         result = result[:start] + token + result[end:]
-    return result
+        promoted_ids.add(story_id)
+    return result, promoted_ids

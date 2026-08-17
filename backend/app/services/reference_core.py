@@ -135,15 +135,17 @@ async def list_references(
     """direction="outgoing" — entity_id 가 가리키는 것(내가 가리키는 것).
     direction="incoming" — entity_id 를 가리키는 것(나를 가리키는 것).
     같은 표에서 축만 바꿔 조회한다(backlinks.py 기존 패턴 재사용)."""
+    # story #2679(BE): origin='auto'(서버가 caller 의도 확인 없이 승격한 참조)는 참조
+    # 카운트/목록에서 제외 — backlinks.py list_entity_backlinks와 동일 근거·동일 패턴.
     if direction == "outgoing":
         stmt = select(Reference).where(
             Reference.org_id == org_id, Reference.source_type == entity_type,
-            Reference.source_id == entity_id,
+            Reference.source_id == entity_id, Reference.origin == "explicit",
         )
     else:
         stmt = select(Reference).where(
             Reference.org_id == org_id, Reference.target_type == entity_type,
-            Reference.target_id == entity_id,
+            Reference.target_id == entity_id, Reference.origin == "explicit",
         )
     rows = (await session.execute(stmt)).scalars().all()
 

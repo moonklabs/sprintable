@@ -2,7 +2,7 @@ import uuid
 from datetime import date as date_type, datetime
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -119,27 +119,52 @@ async def _attach_org_project_slugs(session: AsyncSession, org_id: uuid.UUID, sp
 async def list_sprints(
     project_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    limit: int | None = Query(default=None, ge=1, le=2000),
+    cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
+    response: Response = None,  # type: ignore[assignment]
     repo: SprintRepository = Depends(_get_repo_read),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[SprintResponse]:
+    """story #2428 PR④(ⓐ): goals.py/tasks.py와 동일 규약(필터 適用 後·limit 適用 前 COUNT,
+    cursor=created_at) — true cursor 페이지네이션 + 전체 카운트(X-Total-Count 헤더). limit
+    미지정 시 기존 동작(최대 1000)과 호환."""
     # E-SECURITY SEC-S8(story 83ea3d6a) CC(선생님 "sprint org-level=갭" 확定): 라우터 13개
     # 전부 org-scope만이고 project-scope 0이던 것 중 하나 — project_id 미지정 시 caller의
     # project 접근권과 무관하게 org 전체 sprint가 노출됐다. project_id 지정 시엔 접근권 검증,
-    # 미지정 시엔 accessible_project_ids_in_org로 필터(완전봉인, Z-standup 패턴 동형).
-    from app.services.project_auth import accessible_project_ids_in_org, has_project_access
+    # 미지정 시엔 accessible_project_ids_in_org로 필터.
+    from app.services.project_auth import accessible_project_ids_in_org, require_project_access
 
-    filters: dict = {}
+    cursor_dt: datetime | None = None
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=400, detail="invalid cursor: expected ISO 8601 datetime"
+            ) from exc
+
     if project_id:
-        if not await has_project_access(repo.session, uuid.UUID(auth.user_id), project_id, repo.org_id):
-            raise HTTPException(status_code=404, detail="Project not found")
-        filters["project_id"] = project_id
-    if status_filter:
-        filters["status"] = status_filter
-    sprints = await repo.list(**filters)
-    if not project_id:
-        accessible = set(await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), repo.org_id))
-        sprints = [s for s in sprints if s.project_id in accessible]
+        await require_project_access(repo.session, uuid.UUID(auth.user_id), project_id, repo.org_id,
+            not_found_detail="Project not found")
+        filters: dict = {"project_id": project_id}
+        if status_filter:
+            filters["status"] = status_filter
+        sprints, total = await repo.list_paginated(limit=limit, cursor=cursor_dt, **filters)
+    else:
+        # accessible_project_ids_in_org로 SQL-level IN 스코프(list_in_projects) — 예전 Python
+        # post-filter 방식(SEC-S8 최초 fix)은 DB-level limit/cursor와 결합하면 페이지 건수가
+        # post-filter로 다시 줄어 X-Total-Count/has_more가 어긋난다(TaskRepository.
+        # list_in_projects와 동형 함정 회피).
+        accessible = list(await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), repo.org_id))
+        sprints, total = await repo.list_in_projects(
+            accessible, status=status_filter, limit=limit, cursor=cursor_dt
+        )
+
     await _attach_org_project_slugs(repo.session, repo.org_id, sprints)
+    if response is not None:
+        response.headers["X-Total-Count"] = str(total)
+        if sprints:
+            response.headers["X-Next-Cursor"] = sprints[-1].created_at.isoformat()
     return [SprintResponse.model_validate(s) for s in sprints]
 
 
@@ -153,9 +178,9 @@ async def create_sprint(
 ) -> SprintResponse:
     # E-SECURITY SEC-S8(story 83ea3d6a) CC: body.project_id에 접근권 검증 없이 caller가
     # 임의 org-내 project에 sprint를 생성할 수 있었다.
-    from app.services.project_auth import has_project_access
-    if not await has_project_access(session, uuid.UUID(auth.user_id), body.project_id, org_id):
-        raise HTTPException(status_code=404, detail="Project not found")
+    from app.services.project_auth import require_project_access
+    await require_project_access(session, uuid.UUID(auth.user_id), body.project_id, org_id,
+        not_found_detail="Project not found")
 
     repo = SprintRepository(session, org_id)
     # 8a2bbda2: 날짜에서 duration 산출 저장(dates 단일진실·신규 정합). 날짜 없으면 model default(14).
@@ -192,12 +217,12 @@ async def get_sprint(
 ) -> SprintResponse:
     # E-SECURITY SEC-S8(story 83ea3d6a) CC: sprint id-scoped 조회에 project 접근권 검증 없이
     # org 내 어느 project의 sprint든 조회 가능했다.
-    from app.services.project_auth import has_project_access
+    from app.services.project_auth import require_project_access
     sprint = await repo.get(id)
     if sprint is None:
         raise HTTPException(status_code=404, detail="Sprint not found")
-    if not await has_project_access(repo.session, uuid.UUID(auth.user_id), sprint.project_id, repo.org_id):
-        raise HTTPException(status_code=404, detail="Sprint not found")
+    await require_project_access(repo.session, uuid.UUID(auth.user_id), sprint.project_id, repo.org_id,
+        not_found_detail="Sprint not found")
     await _attach_org_project_slugs(repo.session, repo.org_id, [sprint])
     return SprintResponse.model_validate(sprint)
 
@@ -217,16 +242,14 @@ async def list_sprint_hypotheses(
 ) -> list[SprintHypothesisItem]:
     # E-SECURITY SEC-S8(story 83ea3d6a) CC: read-쌍둥이(POST declare_sprint_hypothesis는 이미
     # resolve_member(project_id=)로 검증하는데 이 GET은 검증 없이 미러링 안 됐던 갭 — 발견즉시수정.
-    from app.services.project_auth import has_project_access
+    from app.services.project_auth import require_project_access
     sprint = await repo.get(id)
     if sprint is None:
         raise HTTPException(
             status_code=404, detail={"code": "SPRINT_NOT_FOUND", "message": "스프린트를 찾을 수 없습니다."}
         )
-    if not await has_project_access(session, uuid.UUID(auth.user_id), sprint.project_id, org_id):
-        raise HTTPException(
-            status_code=404, detail={"code": "SPRINT_NOT_FOUND", "message": "스프린트를 찾을 수 없습니다."}
-        )
+    await require_project_access(session, uuid.UUID(auth.user_id), sprint.project_id, org_id,
+        not_found_detail={"code": "SPRINT_NOT_FOUND", "message": "스프린트를 찾을 수 없습니다."})
     items = await hypothesis_svc.list_hypotheses(
         session, org_id, sprint.project_id, sprint_id=id, limit=200
     )
@@ -288,12 +311,12 @@ async def update_sprint(
 ) -> SprintResponse:
     # E-SECURITY SEC-S8(story 83ea3d6a) CC: PATCH가 project 접근권 검증 없이 org 내 어느
     # project의 sprint든 갱신 가능했다(report_doc_id Z-fix는 별개 갭 — 이건 sprint 자체 접근권).
-    from app.services.project_auth import has_project_access
+    from app.services.project_auth import require_project_access
     _scope_sprint = await repo.get(id)
     if _scope_sprint is None:
         raise HTTPException(status_code=404, detail="Sprint not found")
-    if not await has_project_access(session, uuid.UUID(auth.user_id), _scope_sprint.project_id, org_id):
-        raise HTTPException(status_code=404, detail="Sprint not found")
+    await require_project_access(session, uuid.UUID(auth.user_id), _scope_sprint.project_id, org_id,
+        not_found_detail="Sprint not found")
 
     data = body.model_dump(exclude_unset=True)
     # E-SECURITY SEC-S8(story 83ea3d6a) Z(까심 전수스윕): report_doc_id가 sprint의 project 소속인지
@@ -500,6 +523,9 @@ async def close_sprint(
                 # story #1953: 이미 `if sprint.project_id and ...`로 non-null 확인된 후라
                 # 신규 조회 없이 그대로 실음.
                 source_project_id=sprint.project_id,
+                # story #2696([클래스 마감]): 요청 트랜잭션 안 동기 webhook POST 결함 클래스
+                # (#2687/#2688/#373cfaa1/#2694) 예방 — outbox 이관.
+                via_outbox=True,
             )
     await _attach_org_project_slugs(db, org_id, [sprint])
     return SprintResponse.model_validate(sprint)
@@ -514,12 +540,12 @@ async def kickoff_sprint(
 ) -> dict:
     # E-SECURITY SEC-S8(story 83ea3d6a) CC: project 접근권 검증 없이 org 내 어느 project의
     # sprint든 kickoff 발동 가능했다.
-    from app.services.project_auth import has_project_access
+    from app.services.project_auth import require_project_access
     sprint = await repo.get(id)
     if sprint is None:
         raise HTTPException(status_code=404, detail="Sprint not found")
-    if not await has_project_access(repo.session, uuid.UUID(auth.user_id), sprint.project_id, repo.org_id):
-        raise HTTPException(status_code=404, detail="Sprint not found")
+    await require_project_access(repo.session, uuid.UUID(auth.user_id), sprint.project_id, repo.org_id,
+        not_found_detail="Sprint not found")
     # Notification dispatch is Phase D — return stub for Phase B
     return {"notified": 0, "sprint_id": str(id), "message": body.message}
 
@@ -534,12 +560,12 @@ async def sprint_summary(
     """GET /api/v2/sprints/{id}/summary — 스프린트 스토리 상태별 집계 (AC3 S-STANDUP-FIX)."""
     # E-SECURITY SEC-S8(story 83ea3d6a) CC: project 접근권 검증 없이 남의 project sprint의
     # 스토리 상태별 집계가 노출됐다.
-    from app.services.project_auth import has_project_access
+    from app.services.project_auth import require_project_access
     sprint = await repo.get(id)
     if sprint is None:
         raise HTTPException(status_code=404, detail="Sprint not found")
-    if not await has_project_access(db, uuid.UUID(auth.user_id), sprint.project_id, repo.org_id):
-        raise HTTPException(status_code=404, detail="Sprint not found")
+    await require_project_access(db, uuid.UUID(auth.user_id), sprint.project_id, repo.org_id,
+        not_found_detail="Sprint not found")
 
     stories_result = await db.execute(
         select(Story.status, Story.story_points).where(Story.sprint_id == id)
@@ -581,12 +607,12 @@ async def checkin_sprint(
 ) -> dict:
     # E-SECURITY SEC-S8(story 83ea3d6a) CC: project 접근권 검증 없이 남의 project sprint의
     # standup 미제출자 명단(이름 포함)이 노출됐다.
-    from app.services.project_auth import has_project_access
+    from app.services.project_auth import require_project_access
     sprint = await repo.get(id)
     if sprint is None:
         raise HTTPException(status_code=404, detail="Sprint not found")
-    if not await has_project_access(db, uuid.UUID(auth.user_id), sprint.project_id, repo.org_id):
-        raise HTTPException(status_code=404, detail="Sprint not found")
+    await require_project_access(db, uuid.UUID(auth.user_id), sprint.project_id, repo.org_id,
+        not_found_detail="Sprint not found")
 
     try:
         checkin_date = date_type.fromisoformat(date)

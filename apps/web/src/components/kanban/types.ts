@@ -34,6 +34,11 @@ export interface KanbanStory {
   human_verified?: boolean | null;
   human_verified_by?: string | null;
   human_verified_at?: string | null;
+  // story #2187 — 라이브 QA가 만든 임시 카드([TEMP-QA] 등)는 삭제가 휴먼 전용(에이전트 API키
+  // 403)이라 만든 쪽이 못 치운다. PO가 우선 is_excluded=true로 마킹해 analytics/command_center
+  // 지표에서는 뺐으나(#2187 관측) 보드/백로그 화면은 그 플래그를 안 봐 그대로 남아 있었다 —
+  // 이 필드로 화면도 존중해 숨긴다(삭제 아닌 숨김, DB엔 남음).
+  is_excluded?: boolean;
 }
 
 export interface GateItem {

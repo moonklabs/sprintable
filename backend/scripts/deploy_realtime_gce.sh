@@ -662,13 +662,19 @@ if gcloud compute instance-groups managed describe "${MIG_NAME}" \
             --quiet
 
         # ③ create — 신규 MIG(재생성 경로).
+        # story #2182(2026-08-17, 미르코 실측) — regional MIG의 silent default는
+        # instance-redistribution-type=proactive다. SSE는 long-lived라 이 자발적 zone
+        # 재분배(관측 주기 ~1~2h)가 시작될 때마다 1~3분 내 502 버스트가 뜬다는 것을 분단위
+        # 상관대조+음성대조(재분배 없는 구간 502=0건)로 확定했다 — --instance-redistribution-type
+        # 을 명시 안 하면 이 create 경로(강제재생성)를 탈 때마다 proactive로 도로 돌아간다.
         log "Creating MIG ${MIG_NAME} (size ${TARGET_SIZE}, zones ${ZONES}, no autoscaling)"
         gcloud compute instance-groups managed create "${MIG_NAME}" \
             --project="${GCP_PROJECT}" \
             --region="${GCP_REGION}" \
             --template="${TEMPLATE_NAME}" \
             --size="${TARGET_SIZE}" \
-            --zones="${ZONES}"
+            --zones="${ZONES}" \
+            --instance-redistribution-type=none
     else
         # 기본 경로 — MIG 객체를 그대로 두고 인스턴스 템플릿만 교체(rolling-update).
         # backend-service 부착·named-ports는 MIG 객체 자체의 속성이라 이 경로에서 전혀 안
@@ -717,13 +723,15 @@ if gcloud compute instance-groups managed describe "${MIG_NAME}" \
         fi
     fi
 else
+    # story #2182 — 위 create 경로와 동일 이유(silent default=proactive → SSE 502).
     log "Creating MIG ${MIG_NAME} (size ${TARGET_SIZE}, zones ${ZONES}, no autoscaling)"
     gcloud compute instance-groups managed create "${MIG_NAME}" \
         --project="${GCP_PROJECT}" \
         --region="${GCP_REGION}" \
         --template="${TEMPLATE_NAME}" \
         --size="${TARGET_SIZE}" \
-        --zones="${ZONES}"
+        --zones="${ZONES}" \
+        --instance-redistribution-type=none
 fi
 
 # story #2142(2026-07-23, 오르테가 적발) 근본수정 — named-ports는 MIG 객체 자체의 속성(인스턴스
@@ -802,4 +810,4 @@ fi
 log "=== Deployment submitted ==="
 log "Instance template: ${TEMPLATE_NAME}"
 log "MIG: ${MIG_NAME} (region ${GCP_REGION})"
-log "Health check target: /api/v2/ping (DB 미조회, GCLB 나머지 스택은 provision_realtime_gclb.sh 참조)"
+log "Health check target: /api/v2/ready (DB 미조회·캐시된 연결상태, story #2295 — GCLB 나머지 스택은 provision_realtime_gclb.sh 참조)"

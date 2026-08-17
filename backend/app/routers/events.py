@@ -22,10 +22,10 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import and_, delete, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import (
@@ -726,11 +726,20 @@ async def _route_dispatch_bg(event_id: uuid.UUID) -> None:
             )
 
 
+# story #2428 PR⑤ QA(카디르, 2026-08-17): limit 상수를 라우터 함수 밖으로 빼 테스트가 실제로
+# 「cap 걸림 + has_more」 경계를 작은 값으로 주입해 검증할 수 있게 한다(1000건 넘게 실제로
+# 시딩하지 않고도) — PO 처방 ⓒ.
+_PENDING_EVENTS_DEFAULT_LIMIT = 1000
+
+
 @router.get("/pending", response_model=list[EventResponse])
 async def get_pending_events(
     recipient_id: uuid.UUID = Query(...),
     event_type: str | None = Query(default=None),
     include_recent_delivered_minutes: int = Query(default=30, le=120),
+    limit: int | None = Query(default=None, ge=1, le=2000),
+    cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch after this time(오래된순 정렬 forward-cursor)"),
+    response: Response = None,  # type: ignore[assignment]
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
@@ -744,6 +753,24 @@ async def get_pending_events(
     auth·recipient 검증 없이 읽을 수 있었다 — mark_delivered(write)는 recipient==caller로
     닫혔는데 같은 recipient 축의 이 read fallback이 열려있었다. 동일 패턴(순수 self, admin
     대리열람 흐름 없음)으로 닫는다.
+
+    story #2428 ⓐ: `.limit()`이 아예 없어 pending 무한 누적 위험(만료/reaper는 status=
+    delivered에만 있고 pending 자체는 cap이 없음 — 페드루/디디 그라운딩 2026-08-17). goals.py
+    규약 그대로(필터 適用 後·limit 適用 前 COUNT에 cursor 포함) limit/cursor/X-Total-Count
+    추가. 정렬이 오래된순(asc)이라 cursor는 forward(`created_at > cursor`, artifact_comments와
+    동형). ⚠️MCP 계층엔 mark_delivered를 부르는 도구가 없어(poll_events는 순수 read) 이
+    엔드포인트는 «읽으면 준다」가 아니라 「pending으로 남는다」— cursor 없이 다시 부르면 같은
+    상위 N건이 그대로 다시 온다(browse형과 다른 이 도구 특유의 함정, poll_events MCP 도구
+    안내 문구에서 명시).
+
+    ⚠️의도적 행동 변경(카디르 QA 2026-08-17, PO 처방): `limit` 미지정 시 이전엔 진짜 무제한
+    이었으나 지금은 `_PENDING_EVENTS_DEFAULT_LIMIT`(1000)으로 잘린다 — 이건 «무회귀»가
+    아니라 이 스토리(#2428) 본체가 명시적으로 요구하는 처방 그 자체다("조용히 자르는 기본값만
+    넣으면... #2412의 병을 그대로 재현" — AC2/AC3). 무제한을 그대로 두는 게 아니라 **잘렸으면
+    호출자가 알 수 있게**(`X-Total-Count`가 진짜 남은 건수, `total > len(items)`면 has_more)
+    하는 것이 처방이었다. 계약: **limit 미지정 = 기본 1000 cap + X-Total-Count/has_more로
+    잘림 신호**(이전 「무제한」 계약은 폐기 — 이 엔드포인트의 유일한 소비자인 MCP `poll_events`
+    가 has_more를 이미 소비하므로 이 변경으로 조용히 깨지는 소비자 없음, 전수 grep 확認).
     """
     await assert_caller_is_member(
         recipient_id, auth, db, org_id, detail="Cannot read another member's events",
@@ -753,17 +780,38 @@ async def get_pending_events(
         Event.status == "pending",
         and_(Event.status == "delivered", Event.delivered_at >= cutoff),
     )
-    filters = [
+    conds = [
         Event.org_id == org_id,
         Event.recipient_id == recipient_id,
         status_filter,
     ]
     if event_type:
-        filters.append(Event.event_type == event_type)
-    result = await db.execute(
-        select(Event).where(*filters).order_by(Event.created_at.asc())
+        conds.append(Event.event_type == event_type)
+
+    cursor_dt: datetime | None = None
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=400, detail="invalid cursor: expected ISO 8601 datetime"
+            ) from exc
+        conds.append(Event.created_at > cursor_dt)
+
+    count_result = await db.execute(select(func.count()).select_from(Event).where(*conds))
+    total = int(count_result.scalar_one() or 0)
+
+    q = (
+        select(Event).where(*conds).order_by(Event.created_at.asc())
+        .limit(limit if limit is not None else _PENDING_EVENTS_DEFAULT_LIMIT)
     )
+    result = await db.execute(q)
     events = result.scalars().all()
+
+    if response is not None:
+        response.headers["X-Total-Count"] = str(total)
+        if events:
+            response.headers["X-Next-Cursor"] = events[-1].created_at.isoformat()
     return [EventResponse.model_validate(e) for e in events]
 
 
@@ -1034,6 +1082,7 @@ async def publish_registry_event(
     from app.services.event_routing_resolver import (
         InvalidWorkItemReferenceError,
         MissingRoutingPayloadFieldError,
+        UnknownRoutingMemberError,
         resolve_routing_leg,
     )
 
@@ -1044,16 +1093,34 @@ async def publish_registry_event(
         broadcast_ids = await resolve_routing_leg(
             definition.routing["broadcast"], payload=body.payload, org_id=org_id, db=db,
         )
-    except (MissingRoutingPayloadFieldError, InvalidWorkItemReferenceError) as e:
+    except (MissingRoutingPayloadFieldError, InvalidWorkItemReferenceError, UnknownRoutingMemberError) as e:
         raise HTTPException(
             status_code=400,
             detail={"code": "invalid_payload", "message": str(e), "errors": [str(e)]},
         ) from e
 
     if body.extra_broadcast_member_ids:
+        # story #2693(AC2): payload_field routing과 동일 검증 — 예전엔 filter_org_member_ids로
+        # 비회원 id를 조용히 걸러내고(silent drop) 발행을 그대로 진행했다. AC1의 원자성
+        # 요구(비회원이면 conv/msg 어느 것도 만들지 않는다)와 일관되게, 여기도 걸러내는 대신
+        # 하나라도 비회원이면 명시 거부한다(조용한 유실 금지 — MissingRoutingPayloadFieldError와
+        # 동일 철학).
         from app.services.member_resolver import filter_org_member_ids
 
-        broadcast_ids |= await filter_org_member_ids(set(body.extra_broadcast_member_ids), org_id, db)
+        requested_extra = set(body.extra_broadcast_member_ids)
+        valid_extra = await filter_org_member_ids(requested_extra, org_id, db)
+        unknown_extra = requested_extra - valid_extra
+        if unknown_extra:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "invalid_payload",
+                    "message": f"extra_broadcast_member_ids에 이 org의 실존 회원이 아닌 id가 있습니다: "
+                               f"{sorted(str(i) for i in unknown_extra)}",
+                    "errors": [str(i) for i in unknown_extra],
+                },
+            )
+        broadcast_ids |= valid_extra
 
     try:
         project_id = await _resolve_event_project_id(db, org_id=org_id, payload=body.payload)

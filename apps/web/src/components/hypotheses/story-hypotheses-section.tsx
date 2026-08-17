@@ -7,6 +7,7 @@ import type { Hypothesis } from '@sprintable/core-storage';
 import { HypothesisStatusBadge } from './hypothesis-status-badge';
 import { HypothesisGateBadge } from './hypothesis-gate-badge';
 import type { GateItem } from '@/components/kanban/types';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /**
  * Story-detail panel "linked hypotheses" surface (E1-S8c / S9 fold · blueprint §6.5).
@@ -46,7 +47,7 @@ export function StoryHypothesesSection({
 
   const loadLinked = useCallback(async () => {
     try {
-      const res = await fetch(
+      const res = await fetchWithAuth(
         `/api/hypotheses?project_id=${projectId}&story_id=${storyId}`,
         { cache: 'no-store' },
       );
@@ -55,8 +56,8 @@ export function StoryHypothesesSection({
       setLinked((json?.data ?? []) as Hypothesis[]);
       // S24 follow-up: gate status-batch(pending+rejected→hypothesis 필터→map)·confirmed는 칩서 생략이라 불요.
       const [pg, rg] = await Promise.all([
-        fetch('/api/gates?status=pending').then((r) => (r.ok ? (r.json() as Promise<GateItem[]>) : [])).catch(() => []),
-        fetch('/api/gates?status=rejected').then((r) => (r.ok ? (r.json() as Promise<GateItem[]>) : [])).catch(() => []),
+        fetchWithAuth('/api/gates?status=pending').then((r) => (r.ok ? (r.json() as Promise<GateItem[]>) : [])).catch(() => []),
+        fetchWithAuth('/api/gates?status=rejected').then((r) => (r.ok ? (r.json() as Promise<GateItem[]>) : [])).catch(() => []),
       ]);
       const gmap: Record<string, GateItem> = {};
       for (const g of [...rg, ...pg]) if (g.work_item_type === 'hypothesis') gmap[g.work_item_id] = g;
@@ -71,7 +72,7 @@ export function StoryHypothesesSection({
   const loadCandidates = useCallback(async () => {
     setCandidates(null);
     try {
-      const res = await fetch(`/api/hypotheses?project_id=${projectId}`, { cache: 'no-store' });
+      const res = await fetchWithAuth(`/api/hypotheses?project_id=${projectId}`, { cache: 'no-store' });
       if (!res.ok) { setCandidates([]); return; }
       const json = await res.json();
       const all = (json?.data ?? []) as Hypothesis[];

@@ -30,6 +30,7 @@ import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
 import { COLUMNS, normalizeAssigneePatch, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
 import type { LabelData } from '@/components/ui/label-chip';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /**
  * 터치는 드래그를 절대 시작하지 않게 — pointerType !== 'touch'만 드래그 활성(0d142311 prod 재발 근본 fix).
@@ -236,7 +237,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     params.set('status', status);
     params.set('limit', status === 'done' ? '10' : '20');
     if (cursor) params.set('cursor', cursor);
-    const res = await fetch(`/api/stories?${params}`);
+    const res = await fetchWithAuth(`/api/stories?${params}`);
     if (!res.ok) return { stories: [], total: 0, nextCursor: null };
     // RC: 헤더 대신 JSON body meta에서 cursor/total 읽기 (proxy 헤더 strip 방지)
     const json = await res.json() as { data?: KanbanStory[]; meta?: { nextCursor?: string | null; hasMore?: boolean; total?: number } };
@@ -347,9 +348,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       const statuses = COLUMNS.map((c) => c.id);
       const [storyResults, sprintsRes, epicsRes, membersRes] = await Promise.all([
         Promise.all(statuses.map((s) => fetchStoriesByStatus(s))),
-        fetch(`/api/sprints${sprintParams}`),
-        fetch(`/api/goals?${epicParams.toString()}`),
-        fetch(`/api/members${memberParams}`),
+        fetchWithAuth(`/api/sprints${sprintParams}`),
+        fetchWithAuth(`/api/goals?${epicParams.toString()}`),
+        fetchWithAuth(`/api/members${memberParams}`),
       ]);
 
       const allStories: KanbanStory[] = [];
@@ -373,7 +374,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         try {
           const summaryParams = new URLSearchParams({ project_id: projectId });
           for (const sid of storyIds) summaryParams.append('story_ids', sid);
-          const summaryRes = await fetch(`/api/workflow-executions/story-summary?${summaryParams.toString()}`);
+          const summaryRes = await fetchWithAuth(`/api/workflow-executions/story-summary?${summaryParams.toString()}`);
           if (summaryRes.ok) {
             const summaryJson = await summaryRes.json() as Record<string, { status: string; rule_name?: string | null; completed_at?: string | null }>;
             setExecutionMap(summaryJson);
@@ -389,7 +390,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           const chunks: string[][] = [];
           for (let i = 0; i < storyIds.length; i += 200) chunks.push(storyIds.slice(i, i + 200));
           const results = await Promise.all(chunks.map((chunk) =>
-            fetch(`/api/stories/workflow-line/status?ids=${chunk.join(',')}`)
+            fetchWithAuth(`/api/stories/workflow-line/status?ids=${chunk.join(',')}`)
               .then((r) => (r.ok ? (r.json() as Promise<LineStatusSummary[]>) : []))
               .catch(() => []),
           ));
@@ -402,7 +403,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       }
 
       try {
-        const graphRes = await fetch('/api/dependencies/graph?item_type=story');
+        const graphRes = await fetchWithAuth('/api/dependencies/graph?item_type=story');
         if (graphRes.ok) {
           const graphJson = await graphRes.json() as { edges?: DependencyEdge[] };
           const map: Record<string, string[]> = {};
@@ -419,12 +420,12 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       }
 
       try {
-        const labelsRes = await fetch('/api/labels');
+        const labelsRes = await fetchWithAuth('/api/labels');
         if (labelsRes.ok) {
           const labelsJson = await labelsRes.json() as LabelData[];
           setOrgLabels(labelsJson);
           try {
-            const ilRes = await fetch('/api/item-labels?item_type=story');
+            const ilRes = await fetchWithAuth('/api/item-labels?item_type=story');
             if (ilRes.ok) {
               const itemLabels = await ilRes.json() as { item_id: string; label_id: string }[];
               const map: Record<string, LabelData[]> = {};
@@ -443,7 +444,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       }
 
       try {
-        const gatesRes = await fetch('/api/gates?status=pending&work_item_type=story');
+        const gatesRes = await fetchWithAuth('/api/gates?status=pending&work_item_type=story');
         if (gatesRes.ok) {
           const gatesJson = await gatesRes.json() as GateItem[];
           const gmap: Record<string, { id: string; gate_type: string; status: string }[]> = {};
@@ -492,7 +493,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     }
 
     try {
-      const res = await fetch(`/api/tasks?story_id=${story.id}&limit=20`);
+      const res = await fetchWithAuth(`/api/tasks?story_id=${story.id}&limit=20`);
       if (res.ok) {
         const json = await res.json();
         setStoryTasks(json.data ?? []);
@@ -535,7 +536,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       void handleStoryClick(story, { replace: true });
     } else if (stories.length > 0) {
       // 현재 보드에 없는 스토리 — 직접 fetch 후 패널 오픈
-      fetch(`/api/stories/${storyId}`)
+      fetchWithAuth(`/api/stories/${storyId}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((json) => {
           const fetched = json?.data as KanbanStory | undefined;
@@ -552,7 +553,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     const taskId = searchParams.get('task_id');
     if (!taskId || stories.length === 0) return;
 
-    fetch(`/api/tasks/${taskId}`)
+    fetchWithAuth(`/api/tasks/${taskId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((json) => {
         const storyId = json?.data?.story_id as string | undefined;
@@ -561,7 +562,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         if (story) {
           void handleStoryClick(story, { replace: true });
         } else {
-          fetch(`/api/stories/${storyId}`)
+          fetchWithAuth(`/api/stories/${storyId}`)
             .then((r) => (r.ok ? r.json() : null))
             .then((json2) => {
               const fetched = json2?.data as KanbanStory | undefined;
@@ -575,7 +576,12 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       .catch(() => {});
   }, [searchParams, stories, handleStoryClick]);
 
+  // story #2187 — is_excluded=true(라이브 QA 임시 카드 등)는 무조건 숨긴다. 다른 필터와 달리
+  // 토글이 없다 — 삭제 권한이 없어 화면에서라도 항상 빠져야 「«남은 일»을 과장」하지 않는다.
+  const excludedCount = stories.filter((s) => s.is_excluded).length;
+
   const filteredStories = stories.filter((s) => {
+    if (s.is_excluded) return false;
     if (selectedEpicId && s.epic_id !== selectedEpicId) return false;
     // 9f25e74a AC1: assignee 필터는 서버사이드(fetchStoriesByStatus ?assignee_id=)로 이관 — 클라 이중필터 제거(done 페이지네이션 경계 AC2 동시 해소).
     if (assigneeTypeFilter) {
@@ -1218,6 +1224,18 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               </DropdownMenuContent>
             </DropdownMenu>
           )}
+
+          {/* story #2187 — is_excluded 카드가 조용히 사라지면 "삭제 대상" 카드의 존재 자체를
+              아무도 모르게 된다(만든 쪽도 못 치우는데 아무도 안 보면 영영 안 놓인다) — 그래서
+              숨긴 수를 항상 보이는 어포던스로 남긴다. */}
+          {excludedCount > 0 && (
+            <span
+              title={t('excludedCountTitle')}
+              className="ml-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground"
+            >
+              {t('excludedCountBadge', { count: excludedCount })}
+            </span>
+          )}
         </div>
 
         {/* Right: search + view toggle */}
@@ -1402,7 +1420,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 if (projectId) params.set('project_id', projectId);
                 params.set('limit', '50');
                 params.set('cursor', nextCursor);
-                const res = await fetch(`/api/stories?${params}`);
+                const res = await fetchWithAuth(`/api/stories?${params}`);
                 if (res.ok) {
                   const json = await res.json();
                   setStories((prev) => {
@@ -1429,7 +1447,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 if (projectId) params.set('project_id', projectId);
                 params.set('limit', '50');
                 params.set('cursor', epicsNextCursor);
-                const res = await fetch(`/api/goals?${params.toString()}`);
+                const res = await fetchWithAuth(`/api/goals?${params.toString()}`);
                 if (res.ok) {
                   const json = await res.json();
                   setEpics((prev) => [...prev, ...(json.data ?? [])]);

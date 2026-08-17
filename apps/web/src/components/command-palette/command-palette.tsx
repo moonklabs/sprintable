@@ -21,6 +21,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { buildActionCommands, type ActionCommand } from './command-palette-actions';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface CommandItem {
   id: string;
@@ -111,7 +112,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(`/api/stories/${contextStoryId}`);
+        const res = await fetchWithAuth(`/api/stories/${contextStoryId}`);
         if (!res.ok) return;
         const json = (await res.json()) as { data?: { id: string; title: string; story_number?: number | null } };
         if (!cancelled && json.data) setContextStory({ id: json.data.id, title: json.data.title, story_number: json.data.story_number });
@@ -149,7 +150,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
 
     debounceRef.current = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/docs?project_id=${encodeURIComponent(projectId)}&q=${encodeURIComponent(q)}&limit=5`);
+        const res = await fetchWithAuth(`/api/docs?project_id=${encodeURIComponent(projectId)}&q=${encodeURIComponent(q)}&limit=5`);
         if (!res.ok) return;
         const json = await res.json() as { data?: DocResult[] };
         setDocResults(json.data ?? []);

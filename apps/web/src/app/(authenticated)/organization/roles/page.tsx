@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { MemberRow } from '@/components/ui/member-row';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 interface OrgMember {
   id: string;
   name: string;
@@ -32,7 +34,7 @@ export default function OrganizationRolesPage() {
   const [changingId, setChangingId] = useState<string | null>(null);
 
   const refresh = async () => {
-    const res = await fetch('/api/org-members').catch(() => null);
+    const res = await fetchWithAuth('/api/org-members').catch(() => null);
     if (res?.ok) {
       const json = await res.json() as { data?: Array<{ id: string; name?: string | null; email?: string | null; role: 'owner' | 'admin' | 'member'; user_id?: string }> };
       setMembers((json.data ?? []).map((m) => ({

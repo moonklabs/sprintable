@@ -34,6 +34,7 @@ import type { OutcomeStatus } from '@/components/outcome/outcome-status-badge';
 import { SprintCloseCockpit } from '@/components/retro/sprint-close-cockpit';
 import { EvidenceStrip } from '@/components/retro/evidence-strip';
 import { Skeleton } from '@/components/ui/skeleton';
+import { fetchWithAuth } from '@/lib/db/client';
 
 type RetroItemCategory = 'good' | 'bad' | 'improve';
 type VisibleStage = RetroVisibleStage;
@@ -215,7 +216,7 @@ export default function RetroSessionPage() {
     setOutcomeLoading(true);
     void (async () => {
       try {
-        const res = await fetch(`/api/sprints/${sprintId}`);
+        const res = await fetchWithAuth(`/api/sprints/${sprintId}`);
         if (!res.ok || cancelled) return;
         const { data } = await res.json() as { data?: { outcome_status?: string; success_hypothesis?: string | null; outcome_result?: OutcomeResult | null; metric_definition?: { metric?: string } | null } };
         if (data?.outcome_status && data.outcome_status !== 'n_a') {
@@ -251,7 +252,7 @@ export default function RetroSessionPage() {
     setHypothesesLoading(true);
     void (async () => {
       try {
-        const res = await fetch(`/api/sprints/${sprintId}/hypotheses`);
+        const res = await fetchWithAuth(`/api/sprints/${sprintId}/hypotheses`);
         if (!res.ok || cancelled) { if (!cancelled) setHypotheses([]); return; }
         const json = await res.json() as { data?: RetroHypothesisResult[] };
         if (!cancelled) setHypotheses(json.data ?? []);
@@ -273,7 +274,7 @@ export default function RetroSessionPage() {
   const handleGenerateSynthesis = useCallback(async (): Promise<boolean> => {
     if (!projectId) return false;
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}/synthesis?project_id=${projectId}`, { method: 'POST' });
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/synthesis?project_id=${projectId}`, { method: 'POST' });
       if (!res.ok) return false;
       const json = await res.json() as { data?: { synthesis?: RetroSynthesis; next_hypotheses?: RetroNextHypothesis[] } };
       if (!json.data?.synthesis) return false;
@@ -288,7 +289,7 @@ export default function RetroSessionPage() {
   const handleAdoptRecommendation = useCallback(async (rec: RetroNextHypothesis, statement: string): Promise<boolean> => {
     if (!projectId) return false;
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}/next-hypotheses/adopt?project_id=${projectId}`, {
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/next-hypotheses/adopt?project_id=${projectId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...rec, statement }),
@@ -322,7 +323,7 @@ export default function RetroSessionPage() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const res = await fetch('/api/team-members');
+      const res = await fetchWithAuth('/api/team-members');
       if (!res.ok || cancelled) return;
       const json = await res.json().catch(() => null) as { data?: RetroMemberOption[] } | null;
       if (json?.data && !cancelled) setMembers(json.data);
@@ -334,7 +335,7 @@ export default function RetroSessionPage() {
     if (!projectId || !sessionId) return;
     setLoadError(null);
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}?project_id=${projectId}`);
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}?project_id=${projectId}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json() as {
         data: RetroSessionRecord & {
@@ -345,6 +346,13 @@ export default function RetroSessionPage() {
           hypotheses?: RetroHypothesisResult[];
         };
       };
+      // story f401139e — 이 엔드포인트는 이미 `project_id` 쿼리로 BE가 실제로 400을 주는
+      // 자리(그라운딩 확認, goals/loops와 달리 여기는 원래도 안전)라 아래는 belt-and-suspenders:
+      // BE가 언젠가 완화돼 다른 프로젝트 세션에 200을 주게 되더라도 옛 화면이 새 프로젝트 URL
+      // 아래 그대로 남지 않도록, 응답의 project_id를 한 번 더 대조한다.
+      if (json.data.project_id && json.data.project_id !== projectId) {
+        throw new Error('project mismatch');
+      }
       const loadedItems = json.data.items ?? [];
       setSession(json.data);
       setItems(loadedItems);
@@ -383,7 +391,7 @@ export default function RetroSessionPage() {
     setAdvancing(true);
     setAdvanceError(null);
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}?project_id=${projectId}`, {
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}?project_id=${projectId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phase: targetPhase }),
@@ -404,7 +412,7 @@ export default function RetroSessionPage() {
     setAddingItem(category);
     setAddItemError(null);
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}/items?project_id=${projectId}`, {
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/items?project_id=${projectId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category, text, author_id: currentTeamMemberId }),
@@ -424,7 +432,7 @@ export default function RetroSessionPage() {
     if (!projectId || votedItemIds.has(itemId)) return;
     setVotedItemIds((prev) => new Set([...prev, itemId]));
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}/items/${itemId}/vote?project_id=${projectId}`, {
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/items/${itemId}/vote?project_id=${projectId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
@@ -447,7 +455,7 @@ export default function RetroSessionPage() {
     if (!projectId) return;
     setGroupError(null);
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}/items/${itemId}/group?project_id=${projectId}`, {
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/items/${itemId}/group?project_id=${projectId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ parent_item_id: parentItemId }),
@@ -463,7 +471,7 @@ export default function RetroSessionPage() {
     if (!projectId) return;
     setGroupError(null);
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}/items/${itemId}/ungroup?project_id=${projectId}`, {
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/items/${itemId}/ungroup?project_id=${projectId}`, {
         method: 'POST',
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -491,7 +499,7 @@ export default function RetroSessionPage() {
     setAddingAction(true);
     setAddActionError(null);
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}/actions?project_id=${projectId}`, {
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/actions?project_id=${projectId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: text, assignee_id: newActionAssigneeId || null }),
@@ -515,7 +523,7 @@ export default function RetroSessionPage() {
     setTogglingActionId(action.id);
     setAddActionError(null);
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}/actions/${action.id}?project_id=${projectId}`, {
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/actions/${action.id}?project_id=${projectId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: nextStatus }),
@@ -533,7 +541,7 @@ export default function RetroSessionPage() {
   async function exportSession() {
     if (!projectId) return;
     try {
-      const res = await fetch(`/api/retro-sessions/${sessionId}/export?project_id=${projectId}`);
+      const res = await fetchWithAuth(`/api/retro-sessions/${sessionId}/export?project_id=${projectId}`);
       if (!res.ok) return;
       const json = await res.json() as { data: { markdown: string } };
       await navigator.clipboard.writeText(json.data.markdown);

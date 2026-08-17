@@ -78,6 +78,10 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 유틸이라 단일 도메인 그룹에 못 묶음. link_gate_to_task와 동일 논리로 core 취급(백엔드
     # SSOT와 동기화, app/services/mcp_toolset.py 참고).
     "sprintable_add_evidence",
+    # story #2709(AskUserQuestion 블로킹 대체): request_decision — 어떤 역할의 에이전트든
+    # 판단이 필요한 순간 도메인 무관하게 써야 하는 협업 도구(link_gate_to_task/add_evidence와
+    # 동일 논리). 백엔드 SSOT와 동기화 필수(app/services/mcp_toolset.py).
+    "sprintable_request_decision",
     # story #2268(D단계, E-CONNECT — "판단 칸"): add_judgment/list_judgments — 판단/철회는
     # work_item_ids(다건 또는 0건 general)에 걸치는 cross-cutting 기록이라 add_evidence와
     # 동일 논리로 core 취급(백엔드 SSOT와 동기화, app/services/mcp_toolset.py 참고).

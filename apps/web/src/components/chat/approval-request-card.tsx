@@ -9,11 +9,13 @@ import { GateSignatureApproval } from '@/components/cage/gate-signature-approval
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
-import { EntityPreviewModal, getEntityHref } from '@/components/chat/embed-card';
+import { EntityPreviewModal, canPreviewEntity, getEntityHref, resolveEntityIcon } from '@/components/chat/embed-card';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 import { parseBlockTemplate, renderBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
 import { renderStaticEventBlock } from '@/components/chat/event-block-card';
+
+import { fetchWithAuth } from '@/lib/db/client';
 
 export interface ApprovalTarget {
   work_item_type: string;
@@ -42,7 +44,16 @@ type CardState =
   | { kind: 'error' }
   | { kind: 'ready'; gate: GateItem };
 
-const WORK_ITEM_ICON: Record<string, typeof FileText> = { doc: FileText };
+// story #2118(E-DG-REAL) — Gate.work_item_type과 embed-card.tsx의 entity_type 어휘는 대부분
+// 같은 문자열이지만 둘이 갈리는 자리가 있다(gate_service.py:194 vs embed-card.tsx ENTITY_ICONS
+// 키 대조로 확認): Gate는 "visual_artifact"를 쓰는데 entity 계열은 "artifact"다. 이 변환 없이
+// 그대로 룩업하면 visual_artifact 게이트만 조용히 제네릭 아이콘/미리보기 없음으로 떨어진다
+// (버그가 아니라 보이는 실패였을 뿐 — 그래도 있는 지원을 안 쓰는 건 낭비). "loop"처럼 entity
+// 계열에 아예 없는 타입은 그대로 흘려보낸다 — resolveEntityIcon/EntityPreviewModal 둘 다
+// 미등록 타입을 크래시 없이 정직하게 폴백한다(초성 아이콘·"별도 미리보기가 없습니다").
+export function toEntityType(workItemType: string): string {
+  return workItemType === 'visual_artifact' ? 'artifact' : workItemType;
+}
 
 // story #2624 — 회신 카드가 gate.status 원문("approved"/"rejected" 등)을 그대로 보였다(선생님
 // 지적 — "사유는 남겨놨는데" 인시던트의 human 웹 표면 절반). i18n 키가 있는 상태만 번역하고,
@@ -83,7 +94,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
 
   const fetchGate = useCallback(async () => {
     try {
-      const res = await fetch(`/api/gates/${target.gate_id}`);
+      const res = await fetchWithAuth(`/api/gates/${target.gate_id}`);
       if (res.status === 404) { setState({ kind: 'not-found' }); return; }
       if (!res.ok) { setState({ kind: 'error' }); return; }
       const json = await res.json().catch(() => null) as { data?: GateItem } | GateItem | null;
@@ -97,14 +108,16 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
 
   useEffect(() => { void fetchGate(); }, [fetchGate]);
 
-  const transition = async (status: 'approved' | 'rejected', note?: string) => {
+  const transition = async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean) => {
     setResolving(true);
     setTransitionError(null);
     try {
-      const res = await fetch(`/api/gates/${target.gate_id}/transition`, {
+      const res = await fetchWithAuth(`/api/gates/${target.gate_id}/transition`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, note: note?.trim() || null }),
+        // story #2027 AC2 — gates/[id]/page.tsx와 동일 계약(evidence_viewed는 고위험 서명
+        // 플로우 onApprove에서만 true로 실린다, 아래 ApprovalRequestBody 배선 참조).
+        body: JSON.stringify({ status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false }),
       });
       if (res.ok) { await fetchGate(); return; }
       const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
@@ -126,7 +139,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
     setDiscussSubmitting(true);
     setDiscussError(null);
     try {
-      const res = await fetch(`/api/gates/${target.gate_id}/discuss`, {
+      const res = await fetchWithAuth(`/api/gates/${target.gate_id}/discuss`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
@@ -141,7 +154,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
     }
   };
 
-  const Icon = WORK_ITEM_ICON[target.work_item_type] ?? FileText;
+  const Icon = resolveEntityIcon(toEntityType(target.work_item_type)) ?? FileText;
 
   return (
     <div className="min-w-0 max-w-full rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
@@ -161,7 +174,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
           gate={state.gate}
           resolving={resolving}
           transitionError={transitionError}
-          onApprove={(reason) => void transition('approved', reason)}
+          onApprove={(reason, evidenceViewed) => void transition('approved', reason, evidenceViewed)}
           onReject={(reason) => void transition('rejected', reason)}
           onDiscuss={(reason) => void discuss(reason)}
           onDiscussClick={() => setDiscussDialogOpen(true)}
@@ -188,7 +201,7 @@ function ApprovalRequestBody({
   gate: GateItem;
   resolving: boolean;
   transitionError: string | null;
-  onApprove: (reason?: string) => void;
+  onApprove: (reason?: string, evidenceViewed?: boolean) => void;
   onReject: (reason?: string) => void;
   /** story #2631 — 고위험(서명) 플로우가 이미 가진 사유 필드를 그대로 재사용해 직접 제출. */
   onDiscuss: (reason: string) => void;
@@ -239,10 +252,13 @@ function ApprovalRequestBody({
   const needsFullFlow = usesSignatureFlow(riskLevel);
   const canAct = gate.status === 'pending' && gate.can_approve === true;
   const [showPreview, setShowPreview] = useState(false);
-  // story #2627 AC④ — 미리보기 없는 타입(doc 외)은 기존 동작 그대로(제목=평문). EntityPreviewModal
-  // 자체가 doc 전용 fetch 전략을 가진 타입이라(embed-card.tsx `hasFetchStrategy`), 지금은 doc만
-  // 진짜 내용을 보여줄 수 있다 — 억지로 다른 타입에 진입점을 달아 빈 모달을 여는 거짓을 안 만든다.
-  const canPreview = gate.work_item_type === 'doc';
+  // story #2118(E-DG-REAL) — doc 전용이던 제목 진입점을 전 work_item_type으로 확장하되,
+  // «클릭에 값이 있는 타입»만(페드루 리뷰). canPreviewEntity가 RICH_PREVIEW/ENTITY_API fetch
+  // 전략/own-href 셋 다 없는 타입(loop·wf_line_version 등)을 걸러 빈 모달 진입점을 안 만든다
+  // — story #2118(P2.2) AC④("미리보기 없는 타입에 억지로 진입점 달아 빈 모달 여는 거짓 안
+  // 만든다")와 동형 판정을 embed-card.tsx 공유 함수로 그대로 재사용.
+  const previewEntityType = toEntityType(gate.work_item_type);
+  const canPreview = canPreviewEntity(previewEntityType);
 
   return (
     <div className="space-y-2">
@@ -313,7 +329,9 @@ function ApprovalRequestBody({
           gate={gate}
           resolving={resolving}
           error={transitionError}
-          onApprove={onApprove}
+          // story #2027 AC2: GateSignatureApproval의 canSign이 evidenceViewed&&reason로 버튼을
+          // 막아서 이 콜백에 닿았다는 사실 자체가 열람 확인 — gates/[id]/page.tsx와 동일 계약.
+          onApprove={(reason) => onApprove(reason, true)}
           onReject={onReject}
           onDiscuss={onDiscuss}
           compact
@@ -344,11 +362,11 @@ function ApprovalRequestBody({
 
       {showPreview && (
         <EntityPreviewModal
-          entityType={gate.work_item_type}
+          entityType={previewEntityType}
           entityId={gate.work_item_id}
           title={title}
           status={null}
-          href={getEntityHref(gate.work_item_type, gate.work_item_id)}
+          href={getEntityHref(previewEntityType, gate.work_item_id)}
           onClose={() => setShowPreview(false)}
         />
       )}

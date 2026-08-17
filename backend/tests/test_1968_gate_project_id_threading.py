@@ -130,7 +130,7 @@ async def test_generic_gate_endpoint_threads_resolved_project_id():
 
     with patch.object(gates_mod, "resolve_work_item_project_id",
                        AsyncMock(return_value=project_id)) as resolve_spy, \
-         patch.object(gates_mod, "has_project_access", AsyncMock(return_value=True)), \
+         patch("app.services.project_auth.has_project_access", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "create_gate", AsyncMock(return_value=gate)) as create_spy, \
          patch.object(gates_mod.GateResponse, "model_validate", lambda g: "OK"):
         await create_gate_endpoint(body=body, session=session, org_id=org_id, _auth=auth)

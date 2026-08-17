@@ -531,6 +531,12 @@ async def list_entity_backlinks(
         )
         .where(
             Reference.org_id == org_id,
+            # story #2679(BE): origin='auto'(caller 의도 확인 없이 서버가 승격한 참조 —
+            # story_ref_promoter.py·resolve_bare_number_story_refs)는 backlink 그래프에서
+            # 제외한다 — 「명시적으로 링크를 걸었다」는 신호가 아닌데 그래프/카운트를 오염시켰던
+            # 것이 이 스토리(#2679)의 원 결함이다. 렌더(채팅 버블 본문 표시)는 이 쿼리를 안
+            # 거치므로(promote_bare_story_refs가 이미 content에 토큰을 심어 둠) 영향 없다.
+            Reference.origin == "explicit",
             or_(Reference.relation == "created_from", Reference.source_field == "body"),
             Reference.target_type == target_type,
             Reference.target_id == target_id,

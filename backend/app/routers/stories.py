@@ -204,10 +204,15 @@ async def list_stories(
         # ⚠️ cursor는 안 넘긴다 — #2190은 이 분기와 무관함이 밝혀졌다(list_backlog
         # docstring 참조: /api/stories/backlog 프록시가 status를 강제 부착해 실제로는
         # board 분기로 감).
-        stories = await repo.list_backlog(
+        # story #2428: list_backlog가 이제 (stories, total) — X-Total-Count로 호출부가
+        # "더 있는지"를 알 수 있게 한다(이 분기는 cursor 미지원, 위 docstring 참조 — 더
+        # 필요하면 limit을 올려 재호출하는 것이 유일한 다음 페이지 수단).
+        stories, total = await repo.list_backlog(
             project_id, limit=limit, epic_id=epic_id, assignee_id=assignee_id,
             status=status_filter, story_number=story_number, q=q, unattached=unattached,
         )
+        if response is not None:
+            response.headers["X-Total-Count"] = str(total)
         await _attach_assignee_ids(repo.session, repo.org_id, stories)
         await _attach_has_evidence(repo.session, stories)
         await _attach_has_hypothesis_or_goal(repo.session, stories)
@@ -420,11 +425,15 @@ async def _assert_story_project_access(
     이 파일 전체에서 통일한다(participation.py의 동명 헬퍼·gates.py get_gate_endpoint가 이미
     이 규율이었다 — 「같은 엔티티가 경로마다 다른 답」을 내던 것이 진짜 결함이었다). 조직
     경계(다른 org)는 이 함수 호출 前에 이미 404로 막혀 있다(repo.get()의 org 필터) — 이 함수가
-    새로 여는 것은 「조직 안·프로젝트 밖」 하나뿐이고, 그 답도 이제 404다."""
-    from app.services.project_auth import has_project_access
+    새로 여는 것은 「조직 안·프로젝트 밖」 하나뿐이고, 그 답도 이제 404다.
 
-    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
-        raise HTTPException(status_code=404, detail="Story not found")
+    story #2697: 구현을 project_auth.require_project_access(전 리소스 공용 판정 함수)로
+    위임 — #2322가 이 파일 안에서 먼저 정한 404 규율을 이제 goals.py/sprints.py/retros.py도
+    같은 함수로 공유한다(재구현 0)."""
+    from app.services.project_auth import require_project_access
+
+    await require_project_access(session, uuid.UUID(auth.user_id), project_id, org_id,
+                                  not_found_detail="Story not found")
 
 
 async def _upsert_assignee_participation(
@@ -595,7 +604,10 @@ async def _reconcile_story_references_and_candidates(
         _desc_result = await reconcile_entity_references(
             db, org_id=org_id, source_type="story", source_field="description",
             source_id=story.id,
-            extracted_refs=[(t, i, "mention") for t, i in _desc_pairs] + _desc_bare_refs,
+            # story #2679: _desc_pairs(브라켓 멘션)는 caller가 명시로 타이핑한 것 = explicit.
+            # _desc_bare_refs(맨 #번호, resolve_bare_number_story_refs)는 이미 4-tuple로
+            # origin='auto'를 스스로 갖고 있다(그 함수 참조).
+            extracted_refs=[(t, i, "mention", "explicit") for t, i in _desc_pairs] + _desc_bare_refs,
             created_by=mention_actor_id,
         )
         _ref_stored += _desc_result.stored
@@ -613,7 +625,8 @@ async def _reconcile_story_references_and_candidates(
         _ac_result = await reconcile_entity_references(
             db, org_id=org_id, source_type="story", source_field="acceptance_criteria",
             source_id=story.id,
-            extracted_refs=[(t, i, "mention") for t, i in _ac_pairs] + _ac_bare_refs,
+            # story #2679: 위 description 블록과 동일 근거(_ac_bare_refs가 origin='auto' 자체 보유).
+            extracted_refs=[(t, i, "mention", "explicit") for t, i in _ac_pairs] + _ac_bare_refs,
             created_by=mention_actor_id,
         )
         _ref_stored += _ac_result.stored
@@ -2627,6 +2640,8 @@ async def add_comment(
                 "content": content,
                 "author_member_id": str(created_by),
             },
+            # story #2696: outbox 이관(동일 결함 클래스 예방).
+            via_outbox=True,
         )
 
     return CommentResponse.model_validate(comment)

@@ -94,7 +94,7 @@ async def test_tool_call_succeeds_when_unambiguous():
     from sprintable_mcp.tools.stories import ListStoriesInput, list_stories
 
     client._project_id = "proj-a"
-    with patch.object(client, "get", new=AsyncMock(return_value=[{"id": "s1"}])):
+    with patch.object(client, "get_with_headers", new=AsyncMock(return_value=([{"id": "s1"}], {"x-total-count": "1"}))):
         try:
             result = await list_stories(ListStoriesInput())
         finally:

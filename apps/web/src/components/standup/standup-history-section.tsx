@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { parseCursorMeta } from '@/lib/pagination';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface HistoryEntry {
   id: string;
@@ -33,7 +34,7 @@ export function StandupHistorySection({ projectId, memberNameById = {} }: Props)
   useEffect(() => {
     if (!projectId) return;
     startTransition(() => setLoading(true));
-    fetch(`/api/standup/history?project_id=${projectId}&limit=20`)
+    fetchWithAuth(`/api/standup/history?project_id=${projectId}&limit=20`)
       .then((r) => r.json())
       .then((json) => {
         if (json?.data && Array.isArray(json.data)) setEntries(json.data);

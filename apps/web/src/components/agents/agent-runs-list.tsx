@@ -20,6 +20,8 @@ import {
 } from '@/services/agent-run-history';
 import { AgentRunDetail } from './agent-run-detail';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 interface AgentRun {
   id: string;
   agent_id: string;
@@ -125,7 +127,7 @@ export function AgentRunsList() {
     if (toDate) params.set('to', getLocalDayEndIso(toDate));
     if (cursor) params.set('cursor', cursor);
 
-    const res = await fetch(`/api/v1/agent-runs?${params}`);
+    const res = await fetchWithAuth(`/api/v1/agent-runs?${params}`);
     if (!res.ok) return { items: [], nextCursor: null };
     const json = await res.json();
     // story #2231 AC4: 이 프록시는 apiSuccess(await _r.json())로 BE의 {data,meta} 전체를

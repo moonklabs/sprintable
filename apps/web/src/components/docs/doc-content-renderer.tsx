@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { extractDocHeadings, slugifyHeading } from './doc-heading-utils';
 // story #2639 — 본문 entity: 참조 링크를 앱 내 엔티티로 잇는다(chat/story-panel과 동일 자산 재사용).
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface DocContentRendererProps {
   content: string;
@@ -110,7 +111,7 @@ function DocAssetImage({ assetId, alt, errorLabel }: { assetId: string; alt: str
 
   const fetchSigned = useCallback(async () => {
     try {
-      const res = await fetch(`/api/attachments/sign?asset_id=${encodeURIComponent(assetId)}`);
+      const res = await fetchWithAuth(`/api/attachments/sign?asset_id=${encodeURIComponent(assetId)}`);
       if (!res.ok) { setState('error'); return; }
       const json = (await res.json().catch(() => null)) as { data?: { url?: string } } | null;
       const signed = json?.data?.url;
@@ -420,7 +421,7 @@ export function DocContentRenderer({
         if (!refAssetId) return;
         void (async () => {
           try {
-            const res = await fetch(`/api/attachments/sign?asset_id=${encodeURIComponent(refAssetId)}&disposition=attachment`);
+            const res = await fetchWithAuth(`/api/attachments/sign?asset_id=${encodeURIComponent(refAssetId)}&disposition=attachment`);
             if (!res.ok) return;
             const json = (await res.json().catch(() => null)) as { data?: { url?: string } } | null;
             const url = json?.data?.url;
@@ -469,7 +470,7 @@ export function DocContentRenderer({
 
         void (async () => {
           try {
-            const res = await fetch(`/api/attachments/sign?asset_id=${encodeURIComponent(assetId)}`);
+            const res = await fetchWithAuth(`/api/attachments/sign?asset_id=${encodeURIComponent(assetId)}`);
             if (cancelled) return;
             if (!res.ok) { showError(); return; }
             const json = (await res.json().catch(() => null)) as { data?: { url?: string } } | null;

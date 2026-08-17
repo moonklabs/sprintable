@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -98,14 +99,32 @@ async def _assert_task_project_access(
 
 @router.get("", response_model=list[TaskResponse])
 async def list_tasks(
+    project_id: uuid.UUID | None = Query(default=None),
     story_id: uuid.UUID | None = Query(default=None),
     assignee_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    status_ne: str | None = Query(default=None, description="이 status가 아닌 것만(예: done 제외 — 미완료 목록, get_overdue_tasks가 사용)"),
     ids: str | None = Query(default=None, description="comma-separated task ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관, story #2262 PR② 칩 상태 배치조회)"),
+    limit: int | None = Query(default=None, ge=1, le=2000),
+    cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
+    response: Response = None,  # type: ignore[assignment]
     repo: TaskRepository = Depends(_get_repo_read),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[TaskResponse]:
+    """story #2428 PR③(⓪tasks ⓐ — 라이브 실측 667건, list_tasks/list_my_tasks/get_overdue_tasks
+    3-way 공유 엔드포인트): true cursor 페이지네이션 + 전체 카운트(X-Total-Count 헤더) —
+    goals.py list_goals와 동일 규약(필터 適用 後·limit 適用 前 COUNT, cursor=created_at, 새
+    규약 발명 0). limit 미지정 시 기존 동작(최대 1000)과 호환.
+
+    story #2706(디디 3157 작업 중 부수발견): 이 엔드포인트엔 `project_id` 필터 자체가 없어
+    accessible한 «전» 프로젝트의 task가 한 응답에 섞여 나가고 있었다(#2697 「GET-by-id가
+    X-Project-Id 무시」와 같은 클래스의 목록판) — MCP `list_tasks`/`list_my_tasks`/
+    `get_overdue_tasks` 셋 다 이미 `project_id=client.require_project_id()`를 보내고
+    있었지만(sprintable_mcp/tools/tasks.py·analytics.py 실측 확認) 라우터가 그 파라미터를
+    안 받아 FastAPI가 조용히 버렸다(AC4 — 배선만으로 해소, MCP측 코드 변경 불요). 지정 시
+    `require_project_access`(#2697 판정 함수 SSOT, 새 판정 발명 0)로 접근권 검증 後 그
+    프로젝트로 좁힌다 — 미지정 시 기존 org-wide 동작 그대로(AC2, 회귀 0)."""
     # story #2262 PR②(칩 상태 배치조회) — stories.py list_stories의 ids= 패턴 미러링. Task엔
     # project_id 컬럼이 없어(story_id NN) list_in_projects와 동형으로 Story JOIN을 거쳐야
     # 접근권 스코프를 낼 수 있다 — repo.list_by_ids(org-scope만)로 앵커 조회 後, 결과의
@@ -139,6 +158,15 @@ async def list_tasks(
         await _attach_org_project_slugs(repo.session, org_id, tasks)
         return [TaskResponse.model_validate(t) for t in tasks]
 
+    cursor_dt: datetime | None = None
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=400, detail="invalid cursor: expected ISO 8601 datetime"
+            ) from exc
+
     # story_id 지정 시: round6(#2072)에서 _assert_task_project_access(기존 G-fix 재사용)로
     # caller의 story project 접근권을 직접 검증(단일 story 스코프).
     if story_id is not None:
@@ -148,23 +176,38 @@ async def list_tasks(
             filters["assignee_id"] = assignee_id
         if status_filter:
             filters["status"] = status_filter
-        tasks = await repo.list(**filters)
+        tasks, total = await repo.list_paginated(limit=limit, cursor=cursor_dt, **filters)
     else:
         # d3e5ca89(SEC fast-follow): story_id 미지정(org-wide) 분기는 예전엔 org 전체 task를
         # result-level로 흘렸다 — 같은 org 다른 project의 task title/assignee_id/status를 접근권
         # 없이 열거. round6은 story_id 벡터만 닫고 이 result-level 누출은 분리 트래킹됐다(d3e5ca89).
         # caller가 실제 접근권을 가진 project의 task로만 스코프(Task엔 project_id가 없어 Story
         # JOIN으로 환원). 접근권 0이면 빈 리스트. assignee_id/status는 그 위 추가 narrowing 필터.
-        from app.services.project_auth import accessible_project_ids_in_org
+        from app.services.project_auth import accessible_project_ids_in_org, require_project_access
 
-        accessible = await accessible_project_ids_in_org(
-            repo.session, uuid.UUID(auth.user_id), org_id
-        )
-        tasks = await repo.list_in_projects(
-            accessible, assignee_id=assignee_id, status=status_filter
+        if project_id is not None:
+            # story #2706 AC1/AC3: project_id 지정 시 그 프로젝트로 좁힌다 — 접근권 없으면
+            # require_project_access(#2697 SSOT)가 404(존재 비노출).
+            await require_project_access(
+                repo.session, uuid.UUID(auth.user_id), project_id, org_id,
+                not_found_detail="Project not found",
+            )
+            accessible = [project_id]
+        else:
+            # AC2: 미지정 시 기존 org-wide 동작 그대로(회귀 0).
+            accessible = await accessible_project_ids_in_org(
+                repo.session, uuid.UUID(auth.user_id), org_id
+            )
+        tasks, total = await repo.list_in_projects(
+            accessible, assignee_id=assignee_id, status=status_filter, status_ne=status_ne,
+            limit=limit, cursor=cursor_dt,
         )
     await _attach_has_evidence(repo.session, tasks)
     await _attach_org_project_slugs(repo.session, org_id, tasks)
+    if response is not None:
+        response.headers["X-Total-Count"] = str(total)
+        if tasks:
+            response.headers["X-Next-Cursor"] = tasks[-1].created_at.isoformat()
     return [TaskResponse.model_validate(t) for t in tasks]
 
 
@@ -254,6 +297,8 @@ async def update_task(
                 # story #1953(P1a-S3): task는 항상 story 소속(story_id NOT NULL) — 신규 조회
                 # 없이 FK 그대로 payload에 실음(향후 story_detail 폴백 승격 발판).
                 story_id=task.story_id,
+                # story #2696: outbox 이관(동일 결함 클래스 예방).
+                via_outbox=True,
             )
     await _attach_has_evidence(db, [task])
     await _attach_org_project_slugs(db, org_id, [task])

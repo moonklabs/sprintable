@@ -23,6 +23,8 @@ import {
   type RuntimeStatus,
 } from '@/lib/runtime-capabilities';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 /** 런타임 상태(6종 중 ①~⑤) → 배지·헬퍼 표현. ⑥(드롭다운 dot)은 AC 범위 외(§11). */
 const RUNTIME_STATUS_UI: Record<
   RuntimeStatus,
@@ -123,7 +125,7 @@ export default function AgentDetailPage() {
   const [projects, setProjects] = useState<ProjectOption[]>([]);
 
   const fetchAgent = useCallback(async () => {
-    const res = await fetch(`/api/team-members/${id}`);
+    const res = await fetchWithAuth(`/api/team-members/${id}`);
     // story #1990: replace — 뒤로가기 재진입 트랩 방지(§3.2 원칙, gate/chat/goal/loop과 동일).
     if (!res.ok) { router.replace('/organization/workforce?tab=manage'); return; }
     const json = await res.json() as { data: AgentMember };
@@ -132,8 +134,8 @@ export default function AgentDetailPage() {
 
   const fetchOrgContext = useCallback(async () => {
     const [projectRes, meRes] = await Promise.all([
-      fetch('/api/projects'),
-      fetch('/api/me'),
+      fetchWithAuth('/api/projects'),
+      fetchWithAuth('/api/me'),
     ]);
     if (projectRes.ok) {
       const json = await projectRes.json() as { data: ProjectOption[] };
@@ -150,7 +152,7 @@ export default function AgentDetailPage() {
     // story 933248fa 재오픈: GET은 기본 caller-scope라 project_id만으로는 "내(caller) 웹훅"만
     // 돌아온다 — admin이 타 멤버(id) 상세를 보는 중이면 ?member_id=로 그 타깃을 명시 조회해야
     // BE의 admin override(list_webhook_configs)가 실제로 작동한다(write_ok≠read_success).
-    const res = await fetch(
+    const res = await fetchWithAuth(
       `/api/webhooks/config?project_id=${encodeURIComponent(projectId)}&member_id=${encodeURIComponent(id)}`,
     );
     if (!res.ok) return;
@@ -161,7 +163,7 @@ export default function AgentDetailPage() {
   }, [id]);
 
   const fetchActiveApiKey = useCallback(async () => {
-    const res = await fetch(`/api/agents/${id}/api-key`);
+    const res = await fetchWithAuth(`/api/agents/${id}/api-key`);
     if (!res.ok) return;
     const json = await res.json() as { data: ApiKey[] };
     const active = (json.data ?? []).find((k) => !k.revoked_at);
@@ -191,7 +193,7 @@ export default function AgentDetailPage() {
   const handleSaveEdit = async () => {
     if (!editName.trim()) return;
     setSavingEdit(true);
-    const res = await fetch(`/api/team-members/${id}`, {
+    const res = await fetchWithAuth(`/api/team-members/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: editName.trim(), role: editRole.trim() || 'member' }),
@@ -325,7 +327,7 @@ export default function AgentDetailPage() {
   const handleSaveRuntime = async () => {
     setSavingRuntime(true);
     try {
-      const res = await fetch(`/api/team-members/${id}`, {
+      const res = await fetchWithAuth(`/api/team-members/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ runtime_type: selectedRuntime || null }),
@@ -351,7 +353,7 @@ export default function AgentDetailPage() {
 
   const handleToggleActive = async () => {
     const next = !agent.is_active;
-    const res = await fetch(`/api/team-members/${id}`, {
+    const res = await fetchWithAuth(`/api/team-members/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ is_active: next }),

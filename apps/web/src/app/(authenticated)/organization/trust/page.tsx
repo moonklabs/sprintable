@@ -17,6 +17,7 @@ import {
   type RosterMember,
   type SelfScore,
 } from './trust-utils';
+import { fetchWithAuth } from '@/lib/db/client';
 
 export default function OrganizationTrustPage() {
   const { orgId, orgMemberships, currentTeamMemberId, projectId } = useDashboardContext();
@@ -33,9 +34,9 @@ export default function OrganizationTrustPage() {
     let cancelled = false;
     async function loadAdmin() {
       const [summaryRes, orgMembersRes, teamMembersRes] = await Promise.all([
-        fetch('/api/trust-scores/org-summary').catch(() => null),
-        fetch('/api/org-members').catch(() => null),
-        projectId ? fetch(`/api/team-members?project_id=${projectId}`).catch(() => null) : Promise.resolve(null),
+        fetchWithAuth('/api/trust-scores/org-summary').catch(() => null),
+        fetchWithAuth('/api/org-members').catch(() => null),
+        projectId ? fetchWithAuth(`/api/team-members?project_id=${projectId}`).catch(() => null) : Promise.resolve(null),
       ]);
       if (cancelled) return;
       const summaryJson = summaryRes?.ok ? await summaryRes.json() as { members?: OrgSummaryRow[] } : { members: [] };
@@ -48,7 +49,7 @@ export default function OrganizationTrustPage() {
     }
     async function loadSelf() {
       if (!currentTeamMemberId) { setLoading(false); return; }
-      const res = await fetch(`/api/trust-scores?member_id=${currentTeamMemberId}`).catch(() => null);
+      const res = await fetchWithAuth(`/api/trust-scores?member_id=${currentTeamMemberId}`).catch(() => null);
       if (cancelled) return;
       if (res?.ok) {
         const json = await res.json() as { scores?: SelfScore[] };

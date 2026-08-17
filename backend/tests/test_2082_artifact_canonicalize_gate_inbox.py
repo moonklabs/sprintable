@@ -234,10 +234,10 @@ async def test_realdb_artifact_canonicalize_gate_approve_processes_server_side()
             ):
                 resp = await client.post(
                     f"/api/v2/gates/{gate_id}/transition",
-                    # note는 risk_grade=high 게이트 타입의 approve 서버측 강제 사유(story #2027)를
-                    # 무해하게 만족시키기 위함 — 이 테스트의 검증 대상(project_id 배치 해소 회귀)과
-                    # 무관한 별개 정책이라 우회하지 않고 그냥 채운다.
-                    json={"status": "approved", "note": "test approve"},
+                    # note+evidence_viewed는 risk_grade=high 게이트 타입의 approve 서버측 강제
+                    # (story #2027 AC1/AC2)를 무해하게 만족시키기 위함 — 이 테스트의 검증 대상
+                    # (project_id 배치 해소 회귀)과 무관한 별개 정책이라 우회하지 않고 그냥 채운다.
+                    json={"status": "approved", "note": "test approve", "evidence_viewed": True},
                 )
             assert resp.status_code == 200, resp.text
             assert resp.json()["status"] == "approved"

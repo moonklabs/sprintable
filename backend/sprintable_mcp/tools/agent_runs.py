@@ -42,6 +42,8 @@ class UpdateRunStatusInput(SprintableInput):
 class PollEventsInput(SprintableInput):
     recipient_id: str | None = None
     event_type: str | None = None
+    limit: int | None = None
+    cursor: str | None = None  # 이전 호출의 X-Next-Cursor 헤더 값을 그대로 넘기면 다음 페이지.
 
 
 async def emit_event(args: EmitEventInput) -> list[TextContent]:
@@ -76,13 +78,35 @@ async def update_run_status(args: UpdateRunStatusInput) -> list[TextContent]:
 
 
 async def poll_events(args: PollEventsInput) -> list[TextContent]:
-    """에이전트 수신 대기 이벤트 폴링."""
+    """에이전트 수신 대기 이벤트 폴링. 더 있으면(has_more) 다음 페이지 안내가 별도 텍스트
+    블록으로 붙는다 — 단 이 도구는 순수 read(이 MCP 계층엔 mark_delivered를 부르는 도구가
+    없음)라 다른 list_* 도구와 달리 cursor 없이 그냥 다시 부르면 같은 상위 N건이 그대로
+    다시 온다(«비워지지» 않음). 안내 문구가 그 함정을 명시한다."""
+    from .stories import _has_more_from_headers
+
     recipient = args.recipient_id or client.member_id
     params: dict = {"recipient_id": recipient}
     if args.event_type:
         params["event_type"] = args.event_type
+    if args.limit:
+        params["limit"] = args.limit
+    if args.cursor:
+        params["cursor"] = args.cursor
     try:
-        data = await client.get("/api/v2/events/pending", params=params)
-        return ok(data or [])
+        items, headers = await client.get_with_headers("/api/v2/events/pending", params=params)
+        has_more, next_cursor = _has_more_from_headers(headers, items)
+        blocks = ok(items)
+        if has_more:
+            cursor_hint = f'cursor="{next_cursor}"' if next_cursor else "cursor(서버가 next_cursor를 안 줌 — 호출부 확인 필요)"
+            blocks.append(TextContent(
+                type="text",
+                text=(
+                    f"※ 더 있음 — 이 응답은 {len(items)}건까지만 포함(전량 아님). "
+                    f"이 도구는 mark_delivered를 부르지 않는 순수 read라 cursor 없이 다시 불러도 같은 상위 "
+                    f"{len(items)}건이 그대로 다시 온다(pending이 비워지지 않음) — 나머지를 보려면 "
+                    f"poll_events를 {cursor_hint}로 다시 호출."
+                ),
+            ))
+        return blocks
     except Exception as exc:
         return err(str(exc))

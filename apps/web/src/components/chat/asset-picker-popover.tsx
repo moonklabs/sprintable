@@ -9,6 +9,7 @@ import { FILE_TINT_CLASS, fileExtLabel, fileTypeTint } from '@/lib/storage/forma
 import type { Asset } from '@/lib/storage/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface AssetPickerPopoverProps {
   projectId: string;
@@ -75,7 +76,7 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
       if (q) params.set('q', q);
       if (scope === 'folder' && currentFolderId) params.set('folder_id', currentFolderId);
       try {
-        const r = await fetch(`/api/assets?${params.toString()}`);
+        const r = await fetchWithAuth(`/api/assets?${params.toString()}`);
         if (!r.ok) throw new Error('fetch-failed');
         const json: { data?: { items?: Asset[] } } = await r.json();
         if (cancelled) return;

@@ -10,6 +10,7 @@ import {
   DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { resolveRecipientPrefill } from '@/lib/epic-steer';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface AgentMember {
   id: string;
@@ -64,7 +65,7 @@ export function SteerDispatchModal({ projectId, items, onClose, onDispatched }: 
     let alive = true;
     void (async () => {
       try {
-        const res = await fetch('/api/team-members');
+        const res = await fetchWithAuth('/api/team-members');
         if (!res.ok) throw new Error(`team-members ${res.status}`);
         const { data } = await res.json() as {
           data: Array<{ id: string; name: string; type: string; is_active: boolean }>;

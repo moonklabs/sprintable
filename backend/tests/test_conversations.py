@@ -448,13 +448,15 @@ async def test_get_conversation_200_returns_project_id():
         member_result = MagicMock()
         member_result.scalars.return_value.first.return_value = mock_member
 
-        # #1262: admin-bypass=agent-only 한정 — 휴먼 판별 헬퍼가 참가자/agent 조회.
-        # 본 테스트는 agent-only 대화로 두어 owner org-level 접근(우회 허용)을 검증.
-        agent_id = uuid.uuid4()
-        pids_result = MagicMock()
-        pids_result.scalars.return_value.all.return_value = [agent_id]
-        agents_result = MagicMock()
-        agents_result.scalars.return_value.all.return_value = [agent_id]  # 전원 agent 확정
+        # story #2697: get_conversation이 _can_read_conversation(conversation_readable_predicate
+        # SSOT)로 통일된 후의 실 쿼리 순서 — ①_resolve_member(project_id=None, SSOT 내부)
+        # ②has_project_access(project_access_valid atom) ③predicate 자체(admin_bypass_eligible이
+        # agent-only 대화라 True로 correlate) ④_resolve_member 재해소(gate 통과 後, project_id=
+        # conv.project_id) ⑤muted/read-state ⑥participants 배치.
+        access_valid_result = MagicMock()
+        access_valid_result.scalar_one_or_none.return_value = True  # has_project_access(owner 4-branch)
+        predicate_result = MagicMock()
+        predicate_result.scalar_one.return_value = True  # agent-only 대화 + owner → predicate True
 
         # 270c87e6: detail이 caller (muted_at, last_read_at) 조회 1건 추가(story #1976: last_read_at
         # 편승) — 비참여(agent-only)면 row 자체가 None(=미mute·unread_count 계산 스킵).
@@ -469,7 +471,8 @@ async def test_get_conversation_200_returns_project_id():
         participants_result.all.return_value = []
 
         session.execute = AsyncMock(side_effect=[
-            conv_result, member_result, pids_result, agents_result, muted_result, participants_result,
+            conv_result, member_result, access_valid_result, predicate_result,
+            member_result, muted_result, participants_result,
         ])
 
         async with client as c:

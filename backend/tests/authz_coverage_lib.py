@@ -52,6 +52,13 @@ PROJECT_PARAM_RE = re.compile(
 
 PROJECT_GUARD_FUNCTIONS: frozenset[str] = frozenset({
     "has_project_access",
+    # story #2697([BE·인가·프로젝트 스코프]) — goals/stories/sprints/retros/gates가 각자
+    # 복제하던 `if not await has_project_access(...): raise HTTPException(404, ...)` 3줄을
+    # `project_auth.require_project_access`(SSOT, has_project_access를 내부에서 호출)로
+    # 수렴했다. 스캐너가 이 이름을 모르면 그 라우트들이 (has_project_access를 더 이상 직접
+    # 안 부르므로) «미가드»로 오탐 — 이 목록에 새 헬퍼가 편입 안 되면 그게 사각이 된다(까심
+    # i18n 가드·이 파일 86행 주석과 동일 규율: 헬퍼 리네임/도입 시 이 목록 동반 갱신 필수).
+    "require_project_access",
     # story #2340 실측(2026-08-02, 디디) — 이름·실동작 둘 다 project-scope 가드(project_id를
     # 받아 그 project의 role을 검사)인데 이 목록에서만 누락돼 있었다(GUARD_FUNCTIONS(identity
     # 축)엔 있었다 — 두 목록이 서로 다른 걸 보는 것 자체는 설계지만, 이 함수는 어느 쪽에도

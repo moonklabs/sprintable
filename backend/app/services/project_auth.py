@@ -396,6 +396,24 @@ async def has_project_access(
     return bool(result.scalar_one_or_none())
 
 
+async def require_project_access(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    project_id: uuid.UUID,
+    org_id: uuid.UUID,
+    *,
+    not_found_detail: object = "Resource not found",
+) -> None:
+    """story #2697([BE·인가·프로젝트 스코프]) — GET/PATCH/DELETE-by-id 판정 함수 한 곳.
+
+    goals.py/stories.py/sprints.py/retros.py가 각자 ``if not await has_project_access(...):
+    raise HTTPException(404, "X not found")`` 3줄을 리소스마다 복제하고 있었다(리소스 타입별
+    404/403 들쭉날쭉의 근원 — 「막는 쪽과 하는 쪽이 다른 걸 본다」 클래스). 이 헬퍼로 수렴:
+    실패 시 항상 404(존재-비노출 — 다수 관례, gates.py의 기존 설계 원칙과 동일)."""
+    if not await has_project_access(session, user_id, project_id, org_id):
+        raise HTTPException(status_code=404, detail=not_found_detail)
+
+
 async def is_org_owner_or_admin(
     session: AsyncSession,
     user_id: uuid.UUID,
@@ -434,6 +452,72 @@ async def is_org_owner_or_admin(
         {"user_id": user_id, "org_id": org_id},
     )
     return row.scalar_one_or_none() is not None
+
+
+async def list_gate_approver_ids(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+    *,
+    exclude_id: uuid.UUID | None = None,
+) -> list[uuid.UUID]:
+    """story #2118(E-DG-REAL ②) — 비-doc gate_type(merge/pr_review/qa/deploy 등)의 승인 자격자
+    전원 나열. gates.py `_non_doc_gate_approvable`(단건 판정: project owner/admin effective role
+    ∪ org owner/admin floor, project_id 없으면 org owner/admin만)와 **같은 규칙**을 listing
+    방향으로 뒤집은 것 — 새 규칙 발명 아님(재구현 금지 원칙, SSOT는 여전히 `get_project_role`/
+    `_non_doc_gate_approvable`이고 이 함수는 그 판정을 만족하는 human 전원을 나열할 뿐).
+
+    반환값은 `org_members.id`(doc.py `_notify_doc_approval_requested`의 approver_ids와 동일
+    id 공간 — `dispatch_notification`/`_get_or_create_approval_dm`/approval_delivery.py가 이미
+    그 공간을 소비하므로 재사용, 새 타입 발명 없음). human 전용(`is_org_owner_or_admin`과 동일
+    NOT EXISTS agent-배제 가드).
+
+    artifact_canonicalize(role 제약 없음 — gates.py `_non_doc_can_approve` 주석 참조)는 이
+    헬퍼 대상이 아니다 — 그 gate_type은 «누구나 승인 가능」이라 카드 배달 대상이 「project
+    구성원 전체」가 되어버려 이 헬퍼의 owner/admin 좁히기와 의미가 다르다(스코프 밖, 별도 판단 필요)."""
+    if project_id is not None:
+        rows = await session.execute(
+            text(
+                """
+                SELECT DISTINCT om.id
+                FROM org_members om
+                JOIN projects p ON p.org_id = om.org_id
+                WHERE p.id = :pid AND om.deleted_at IS NULL
+                  AND NOT EXISTS (
+                    SELECT 1 FROM members m
+                    WHERE m.user_id = om.user_id AND m.org_id = om.org_id AND m.type = 'agent'
+                  )
+                  AND (
+                    om.role IN ('owner', 'admin')
+                    OR EXISTS (
+                      SELECT 1 FROM project_access pa
+                      WHERE pa.project_id = :pid AND pa.permission = 'granted'
+                        AND pa.org_member_id = om.id AND pa.role IN ('owner', 'admin')
+                    )
+                  )
+                """
+            ),
+            {"pid": project_id},
+        )
+    else:
+        rows = await session.execute(
+            text(
+                """
+                SELECT om.id FROM org_members om
+                WHERE om.org_id = :org_id AND om.deleted_at IS NULL
+                  AND om.role IN ('owner', 'admin')
+                  AND NOT EXISTS (
+                    SELECT 1 FROM members m
+                    WHERE m.user_id = om.user_id AND m.org_id = om.org_id AND m.type = 'agent'
+                  )
+                """
+            ),
+            {"org_id": org_id},
+        )
+    ids = [r[0] for r in rows.all()]
+    if exclude_id is not None:
+        ids = [i for i in ids if i != exclude_id]
+    return ids
 
 
 async def is_org_owner(

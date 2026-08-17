@@ -7,6 +7,7 @@ import { Paperclip, Send, X } from 'lucide-react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Button } from '@/components/ui/button';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface ChannelMsg {
   id: string;
@@ -54,7 +55,7 @@ export default function ChannelPage() {
 
   // JWT 가져오기
   useEffect(() => {
-    fetch('/api/channel/token')
+    fetchWithAuth('/api/channel/token')
       .then((r) => r.json())
       .then((d: { token: string }) => setToken(d.token))
       .catch(() => {});

@@ -28,6 +28,7 @@ from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition, set_gate_status
 from app.models.hitl_config import OrgGatePolicy
 from app.models.hypothesis import Hypothesis
+from app.services.doc import DOC_GATE_TYPE
 from app.models.loop import LoopRun
 from app.models.pm import Goal, Sprint, Story, Task
 from app.models.visual_artifact import VisualArtifact
@@ -57,8 +58,23 @@ logger = logging.getLogger(__name__)
 RiskGrade = Literal["low", "high"]
 
 # 2차 축(doc §2.2): posture가 미확定(balanced/미설정)일 때만 참조.
-_HIGH_RISK_GATE_TYPES: frozenset[str] = frozenset({"merge", "deploy", "workflow_config_publish"})
-_LOW_RISK_GATE_TYPES: frozenset[str] = frozenset({"pr_review", "qa"})
+#
+# story #6c89e40d(페드루 PO 판정 2026-08-17, ⓐ'): doc_approval은 지금까지 이 세트 어디에도
+# 없어 폴백(§2.3 안전판)에 «의존»해서만 high였다 — 실사용 타입이 우연히 폴백과 값이 같다는
+# 사실에 기대는 것과 명시 등재는 다르다(폴백은 "미분류 신규 타입"을 위한 것이지 이미 아는
+# 타입을 위한 것이 아니다). doc-gate-section.tsx의 note-422 실사고(dev 08-15, gate
+# 5a34ef7f)가 정확히 이 간극에서 났다 — FE가 note/evidence_viewed를 안 보내는 채로 배선돼
+# 있었는데 그 사실을 아무 코드도 "doc_approval=high"라고 선언하지 않고 있었다. low로
+# 등재하지 않는다(신중 결재 취지 훼손, PO 명시 판단) — high로 명시.
+_HIGH_RISK_GATE_TYPES: frozenset[str] = frozenset({"merge", "deploy", "workflow_config_publish", DOC_GATE_TYPE})
+#
+# story #2709(2026-08-17, PO 판정) — agent_decision_request를 명시 low 등재. 미등재=폴백(§2.3
+# 보수적 high)에 기대는 게 안전한 기본값이 아니라는 것을 story #6c89e40d(doc_approval 미등재
+# 실사고)가 오늘 이미 증명했다. 이 게이트는 되돌릴 수 없는 액션을 그 자신이 트리거하지
+# 않는다(에이전트가 이미 자기 가정대로 진행 중인 결정의 사후/병행 확인일 뿐 — 진짜 위험한
+# 액션은 merge/deploy/doc_approval 같은 그 자신의 게이트가 따로 막는다) — 신중 결재(서명
+# 의식)를 강제하면 "빠른 비동기 확인"이라는 이 기능의 존재 이유와 정면 충돌한다.
+_LOW_RISK_GATE_TYPES: frozenset[str] = frozenset({"pr_review", "qa", "agent_decision_request"})
 
 
 def derive_risk_grade(posture: str | None, gate_type: str) -> RiskGrade:
@@ -193,7 +209,14 @@ _DISPOSITION_TO_STATUS: dict[str, str] = {
 PROJECT_SCOPED_WORK_ITEM_TYPES: frozenset[str] = frozenset(
     {"story", "task", "doc", "visual_artifact", "loop", "hypothesis", "epic", "sprint"}
 )
-KNOWN_PROJECT_AGNOSTIC_WORK_ITEM_TYPES: frozenset[str] = frozenset({"wf_line_version"})
+KNOWN_PROJECT_AGNOSTIC_WORK_ITEM_TYPES: frozenset[str] = frozenset({
+    "wf_line_version",
+    # story #2709(2026-08-17) — self-referencing standalone anchor(work_item_id==gate.id, work
+    # item 없는 순수 질문). resolve_work_item_project_id()가 이 타입에 대응하는 실 테이블이
+    # 없어 항상 None을 준다 — 여기 미등재였다면 gates.py의 fail-closed 분기(#2237)가 모든
+    # GET /gates/{id}를 404로 거부했을 것(전수 grep으로 발견, 실제 배선 전 확認).
+    "agent_decision",
+})
 
 
 def is_project_scoped_work_item_type(work_item_type: str) -> bool:
@@ -288,8 +311,11 @@ async def resolve_work_item_project_id(
 # 미등록(doc_approval과 동일 선례. org gate override 설정 대상에서 제외=애초에 자동화 불가 명시).
 # 'artifact_canonicalize'(E-CANVAS C4-S8): 정본화=계약(§1) — org auto posture 무관 항상 HITL.
 _ALWAYS_MANUAL_GATE_TYPES: frozenset[str] = frozenset(
-    {"doc_approval", "loop_decision", "artifact_canonicalize"}
+    {"doc_approval", "loop_decision", "artifact_canonicalize", "agent_decision_request"}
 )
+# ⚠️story #2709 — agent_decision_request가 항상 manual(=posture 무관 항상 pending)인 이유:
+# 이 게이트는 "사람의 판단"이 존재 이유인데, org posture가 permissive라고 자동 allow_auto가
+# 걸리면 질문 자체가 응답 없이 자동 승인돼 버린다 — 애초에 물을 이유가 없어진다.
 
 
 async def _reopen_rejected_gate(
@@ -302,6 +328,7 @@ async def _reopen_rejected_gate(
     gate_type: str,
     neutral_facts: dict[str, Any] | None,
     project_id: uuid.UUID | None,
+    notify: bool = True,
 ) -> Gate:
     """story #2150(P1) 근본수정 — create_gate()의 멱등 조회에 status 필터가 없어 rejected
     게이트를 그대로 반환했다(merge_verdict_gate.py의 ``gate_status=="rejected"`` 체크와
@@ -365,7 +392,7 @@ async def _reopen_rejected_gate(
     await session.flush()
     await session.refresh(gate)
 
-    if new_status == "pending":
+    if new_status == "pending" and notify:
         try:
             target_ids = await _resolve_gate_notification_targets(session, org_id)
             if target_ids:
@@ -377,6 +404,9 @@ async def _reopen_rejected_gate(
                     body=f"{gate_type} 게이트가 재제출되어 다시 승인/거부를 기다리고 있습니다.",
                     reference_type="gate", reference_id=gate.id,
                     source_project_id=project_id,
+                    # story #2688: create_gate()의 신규-gate 경로(:475 부근)와 동일 결함 —
+                    # 재상신(rejected→pending re-open) 경로도 동기 웹훅이 트랜잭션을 물었다.
+                    via_outbox=True,
                 )
         except Exception:
             logger.warning(
@@ -396,8 +426,16 @@ async def create_gate(
     role_id: uuid.UUID,
     neutral_facts: dict[str, Any] | None = None,
     project_id: uuid.UUID | None = None,
+    notify: bool = True,
+    gate_id: uuid.UUID | None = None,
 ) -> Gate:
     """config 기반 게이트 생성 (멱등: 이미 있으면 기존 반환).
+
+    gate_id: story #2709(2026-08-17, PO 판정) — self-referencing standalone anchor(work_item이
+    없는 순수 질문류 gate_type)를 위한 파라미터. 호출측(MCP 도구)이 uuid4를 미리 만들어
+    이 인자와 work_item_id 둘에 **같은 값**을 넣으면, 별도 UPDATE 없이 1 INSERT로 gate.id==
+    gate.work_item_id가 성립(생성 後 2단계 갱신 금지, 원자성). 미지정 시(기존 18곳 전부)
+    기존 그대로 내부에서 uuid.uuid4() 생성 — 무회귀.
 
     project_id: story #1953(P1a-S3)이 처음 배선·story #1968(P1a-S3 잔여)이 완성 — gate.pending_
     approval 알림 payload의 project_id 보강용(선택적). create_gate()는 gate_type/work_item_type을
@@ -408,6 +446,11 @@ async def create_gate(
     workflow_line_config(wf_line_version)처럼 진짜 org-level(project 무관)일 수 있는 work_item은
     ``version.project_id``(nullable)를 그대로 넘겨 None이 나올 수 있다 — 이건 미해결이 아니라
     구조적으로 project-scoped가 아니라는 정직한 값이다.
+
+    notify: story #373cfaa1 — 호출부가 이미 자기 전용의 리치 알림(제목/본문+카드 등)을 별도로
+    보낼 때, 이 generic "gate.pending_approval" 벨과의 중복을 끄는 opt-out(기본값 True=기존
+    全 호출부 무회귀). gate_type/work_item_type별 하드코딩 대신 호출부 판단으로 남겨 이 함수의
+    공용 chokepoint 성격을 유지한다.
     """
     # 멱등: 이미 존재하면 기존 반환
     existing_r = await session.execute(
@@ -427,6 +470,7 @@ async def create_gate(
         return await _reopen_rejected_gate(
             session, existing, org_id=org_id, member_id=member_id, role_id=role_id,
             gate_type=gate_type, neutral_facts=neutral_facts, project_id=project_id,
+            notify=notify,
         )
 
     # SID 301ee45d/#2047: 반환값이 (disposition, source) — 이 범용 생성기는 disposition→status
@@ -440,7 +484,7 @@ async def create_gate(
         status = "pending"
 
     gate = Gate(
-        id=uuid.uuid4(),
+        id=gate_id or uuid.uuid4(),
         org_id=org_id,
         work_item_id=work_item_id,
         work_item_type=work_item_type,
@@ -467,7 +511,7 @@ async def create_gate(
     # pending 상태(진짜 결재 대기)일 때만 알림 — auto_passed/rejected는 즉시 확정이라 결재
     # 액션이 없다. best-effort(알림 실패가 게이트 생성 자체를 롤백하면 안 됨 — deliver_expo_
     # push/override 알림과 동일 관례).
-    if status == "pending":
+    if status == "pending" and notify:
         try:
             target_ids = await _resolve_gate_notification_targets(session, org_id)
             if target_ids:
@@ -479,6 +523,11 @@ async def create_gate(
                     body=f"{gate_type} 게이트가 승인/거부를 기다리고 있습니다.",
                     reference_type="gate", reference_id=gate.id,
                     source_project_id=project_id,
+                    # story #2688: 동기 개인 webhook 실POST가 create_gate() 호출부(예:
+                    # docs/{id}/transition draft→pending)의 열린 트랜잭션 커넥션을 붙잡아
+                    # 요청을 초 단위로 지연시켰다(실측 2.7s→220ms). story #2460 §6 봉합②
+                    # outbox 경로 재사용.
+                    via_outbox=True,
                 )
         except Exception:
             logger.warning(
@@ -1025,14 +1074,18 @@ async def _notify_doc_gate_requester(session: AsyncSession, gate: Gate, new_stat
     만들었고 해소→상신자 회신 후방 경로가 없어, 상신자가 게이트를 폴링해야만 결과를
     알 수 있었다(선생님 직접 지적, 실사례 2026-08-13 07:20 반려·상신자 무통지).
 
+    story #2709(2026-08-17) — agent_decision_request도 이 함수를 탄다(함수명은 이력 보존을
+    위해 유지·내부만 gate_type 분기, 새 함수 발명 0). doc은 Doc row에서 title/project_id를
+    읽지만, agent_decision_request는 work_item이 곧 gate 자기참조(standalone anchor)라 Doc
+    row가 없다 — title=neutral_facts["question"], project_id=neutral_facts["project_id"](발행
+    시점에 넣어 둠, Gate 모델 자체엔 project_id 컬럼이 없어 이 필드에만 존재).
+
     best-effort — 이 함수의 실패가 게이트 해소 자체를 막지 않는다(호출부 transition_gate
     가 이 함수를 await만 하고 별도 격리는 하지 않으므로, 예외를 여기서 전부 삼킨다 —
     approval_delivery.dispatch_approval_result_reply 자체도 내부에서 SAVEPOINT로 이미
     격리하지만, requester_id 파싱 등 그 앞 단계도 안전해야 한다)."""
     try:
         from app.services.doc import DOC_GATE_TYPE, DOC_GATE_WORK_ITEM_TYPE
-        if gate.work_item_type != DOC_GATE_WORK_ITEM_TYPE or gate.gate_type != DOC_GATE_TYPE:
-            return
         if new_status not in ("approved", "rejected") or gate.resolver_id is None:
             return
 
@@ -1042,19 +1095,38 @@ async def _notify_doc_gate_requester(session: AsyncSession, gate: Gate, new_stat
             return
         requester_id = uuid.UUID(str(requester_raw))
 
-        from app.models.doc import Doc
-        doc = (await session.execute(
-            select(Doc).where(Doc.id == gate.work_item_id, Doc.org_id == gate.org_id)
-        )).scalar_one_or_none()
-        if doc is None:
-            return
-
         from app.services.approval_delivery import dispatch_approval_result_reply
-        await dispatch_approval_result_reply(
-            session, org_id=gate.org_id, doc=doc, gate_id=gate.id,
-            requester_id=requester_id, resolver_id=gate.resolver_id,
-            decision=new_status, resolution_note=gate.resolution_note,
-        )
+
+        if gate.work_item_type == DOC_GATE_WORK_ITEM_TYPE and gate.gate_type == DOC_GATE_TYPE:
+            from app.models.doc import Doc
+            doc = (await session.execute(
+                select(Doc).where(Doc.id == gate.work_item_id, Doc.org_id == gate.org_id)
+            )).scalar_one_or_none()
+            if doc is None or not doc.project_id:
+                return
+            await dispatch_approval_result_reply(
+                session, org_id=gate.org_id, work_item_type="doc", work_item_id=doc.id,
+                project_id=doc.project_id, title=doc.title, gate_id=gate.id,
+                requester_id=requester_id, resolver_id=gate.resolver_id,
+                decision=new_status, resolution_note=gate.resolution_note,
+                # story #2709 — 딥링크 계약 정적 스캐너(deeplink_contract_lib)가 event_type을
+                # 파라미터 default가 아니라 매 호출부 명시 리터럴로만 정적 해석한다 — default
+                # 값에 기대면 UnresolvedDispatchCallError. 값 자체는 원래 default와 동일(무회귀).
+                event_type="doc_approval_resolved",
+            )
+        elif gate.gate_type == "agent_decision_request":
+            project_id_raw = facts.get("project_id")
+            question = facts.get("question")
+            if not project_id_raw or not question:
+                return
+            await dispatch_approval_result_reply(
+                session, org_id=gate.org_id, work_item_type=gate.work_item_type,
+                work_item_id=gate.work_item_id, project_id=uuid.UUID(str(project_id_raw)),
+                title=str(question), gate_id=gate.id,
+                requester_id=requester_id, resolver_id=gate.resolver_id,
+                decision=new_status, resolution_note=gate.resolution_note,
+                event_type="agent_decision_resolved",
+            )
     except Exception:  # noqa: BLE001 — best-effort, 회신 실패가 게이트 해소를 막지 않는다.
         logger.warning(
             "approval-result 상신자 회신 실패 gate=%s", gate.id, exc_info=True,
@@ -1109,6 +1181,10 @@ async def _resolve_artifact_canonicalize_gate(session: AsyncSession, gate: Gate,
                 body=f"v{version_number}이(가) 정본으로 확定됐습니다." if version_number else None,
                 reference_type="visual_artifact", reference_id=artifact.id,
                 source_project_id=artifact.project_id,
+                # story #2694: #2688(create_gate 2콜)과 동일 결함 클래스 — 이 호출부(transition_gate
+                # → _resolve_artifact_canonicalize_gate)도 요청의 열린 트랜잭션 커넥션 안에서
+                # 동기 개인 webhook 재시도(최대 3회·1s/2s backoff)를 그대로 문다. outbox 이관.
+                via_outbox=True,
             )
     else:  # rejected — info 재논의(§5: destructive 색 절대 금지). 사유=코멘트로 제안자에게 전파.
         if gate.resolution_note and requested_by:
@@ -1383,6 +1459,9 @@ async def override_gate(
                         session, org_id, gate.work_item_type, gate.work_item_id,
                     )
                 ),
+                # story #2694: #2688과 동일 결함 클래스 — override_gate() 호출부도 요청의 열린
+                # 트랜잭션 커넥션 안에서 동기 개인 webhook 재시도를 문다. outbox 이관.
+                via_outbox=True,
             )
         except Exception:  # noqa: BLE001 — notification 실패는 비중단(override 자체는 성공).
             pass

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface Agent {
   id: string;
@@ -17,7 +18,7 @@ export default function ApiKeysPage() {
   useEffect(() => {
     async function loadAgents() {
       try {
-        const res = await fetch('/api/team-members?type=agent');
+        const res = await fetchWithAuth('/api/team-members?type=agent');
         if (!res.ok) return;
         const json = await res.json() as { data?: Agent[] };
         setAgents((json.data ?? []).filter((m) => m.type === 'agent' && m.is_active));

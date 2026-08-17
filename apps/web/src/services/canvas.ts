@@ -11,6 +11,8 @@
 import type { ArtifactNode, NodeOperation } from './canvas-nodes';
 import { resolveNodeTree } from './canvas-nodes';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 export type ArtifactFormat = 'html' | 'tree' | 'image';
 
 /** blueprint §2: `artifact_version`(내용 blob/tree·변경자·요약). */
@@ -221,7 +223,7 @@ export async function getArtifactVersionDetail(
   artifactId: string, versionNumber: number,
 ): Promise<BeVisualArtifactDetail | null> {
   try {
-    const res = await fetch(`/api/visual-artifacts/${artifactId}/versions/${versionNumber}`);
+    const res = await fetchWithAuth(`/api/visual-artifacts/${artifactId}/versions/${versionNumber}`);
     if (!res.ok) return null;
     const json = (await res.json()) as { data?: BeVisualArtifactDetail };
     return json.data ?? null;
@@ -269,7 +271,7 @@ export async function editArtifact(
 ): Promise<BeVisualArtifactDetail | null> {
   if (operations.length === 0) return null;
   try {
-    const res = await fetch(`/api/visual-artifacts/${artifactId}/edit`, {
+    const res = await fetchWithAuth(`/api/visual-artifacts/${artifactId}/edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ operations, summary: summary ?? null }),

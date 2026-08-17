@@ -6,6 +6,8 @@ import { useTranslations, useLocale } from 'next-intl';
 import { Activity, ChevronRight } from 'lucide-react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 interface ActivityLogItem {
   id: string;
   actor_id: string | null;
@@ -87,7 +89,7 @@ export function DashboardActivityTimeline({ projectId }: DashboardActivityTimeli
   const fetchItems = useCallback(async () => {
     if (!projectId) return;
     try {
-      const res = await fetch(`/api/activity-logs?project_id=${projectId}&limit=${LIMIT}`);
+      const res = await fetchWithAuth(`/api/activity-logs?project_id=${projectId}&limit=${LIMIT}`);
       if (!res.ok) return;
       const json = await res.json() as { data: { items: ActivityLogItem[] } | null };
       if (json.data?.items) setItems(json.data.items.slice(0, LIMIT));

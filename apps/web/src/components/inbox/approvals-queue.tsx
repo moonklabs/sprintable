@@ -6,13 +6,17 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CheckCircle, XCircle } from 'lucide-react';
 import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
 import { gateNeedsAction } from '@/components/cage/gate-evidence';
 import { GateUndoButton, UNDO_WINDOW_MS } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
+import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateInboxItem, GateItem, HitlInboxItem } from '@/components/kanban/types';
+
+import { fetchWithAuth } from '@/lib/db/client';
 
 // story #1960(P2-S4) — 결재함 통합 큐. Gate 3종(게이트·문서결재·머지게이트, gate_type/
 // work_item_type discriminator로 단일 Gate 테이블에 자연 수렴 — #1954에서 확定된 스코프
@@ -38,8 +42,8 @@ import type { GateInboxItem, GateItem, HitlInboxItem } from '@/components/kanban
 // `/gates/{id}` 상세로 이동.
 async function fetchGates(): Promise<GateInboxItem[]> {
   const [pending, held] = await Promise.all([
-    fetch('/api/gates/inbox?status=pending&sort=urgency&assigned_to_me=true').then((r) => (r.ok ? r.json() : [])),
-    fetch('/api/gates/inbox?status=held&sort=urgency&assigned_to_me=true').then((r) => (r.ok ? r.json() : [])),
+    fetchWithAuth('/api/gates/inbox?status=pending&sort=urgency&assigned_to_me=true').then((r) => (r.ok ? r.json() : [])),
+    fetchWithAuth('/api/gates/inbox?status=held&sort=urgency&assigned_to_me=true').then((r) => (r.ok ? r.json() : [])),
   ]);
   return [...(pending as GateInboxItem[]), ...(held as GateInboxItem[])];
 }
@@ -64,11 +68,14 @@ function isCanonicalizeGate(gate: GateItem): boolean {
 function needsAction(gate: GateItem): boolean {
   return gate.status === 'pending' && (gateNeedsAction(gate) || isDocGate(gate) || isCanonicalizeGate(gate));
 }
-// story #1961 AC — "고위험 항목 인라인 승인 버튼 0". risk==='low' 확정일 때만 이 큐 안에서
-// 바로 승인/반려한다(gate-risk.ts usesSignatureFlow와 동일 경계 — high·unknown은 원탭 대상
-// 아님, 클릭하면 canonical 상세의 서명 플로우로 간다).
+// story 22affaf2(PO 결정, 2026-08-16) — 구 #1961 AC "고위험 항목 인라인 승인 버튼 0"을
+// 뒤집는다: 「함에서 승인/거절 못 함」의 실체가 고위험 인라인 부재였다(저위험은 이미
+// #1961/#2631로 인라인 완비). 이제 위험도와 무관하게 인라인 처리 가능 — 고위험은
+// GateSignatureApproval을 큐 안에서 Dialog로 열어 서명 플로우(근거열람+사유 없인 승인
+// 비활성)를 그대로 거친다(서명 생략이 아니다, 아래 렌더 분기 참조). usesSignatureFlow는
+// 이제 "인라인 가능 여부"가 아니라 "그 인라인이 원탭인지 서명모달인지"만 가른다.
 function canInlineResolve(gate: GateItem): boolean {
-  return needsAction(gate) && gate.can_approve === true && !usesSignatureFlow(deriveRiskLevel(gate)) && !isHeld(gate);
+  return needsAction(gate) && gate.can_approve === true && !isHeld(gate);
 }
 
 // AC §3.1 "노화 표시" — BE 신규 필드 불요, 기존 created_at으로 직접 계산(오르테가군 판정).
@@ -76,6 +83,17 @@ function formatAge(createdAt: string, t: ReturnType<typeof useTranslations>): st
   const days = Math.floor((Date.now() - new Date(createdAt).getTime()) / 86_400_000);
   if (days <= 0) return t('queueAgeToday');
   return t('queueAgeDays', { days });
+}
+
+// story 22affaf2(유나 design⑤) — undo 어포던스에 "N분 내 취소 가능" 미세 힌트를 곁들인다
+// (안전망 인지 자체가 오발 방지의 일부 — 버튼만 덜렁 있는 것보다 "아직 취소 가능한 창"임을
+// 명시). 5분 경과분은 null(호출부가 이미 UNDO_WINDOW_MS로 버튼 자체를 안 그린다 — 힌트도
+// 버튼과 같은 조건으로 사라진다).
+function formatUndoRemaining(resolvedAtMs: number, t: ReturnType<typeof useTranslations>): string | null {
+  const remainingMs = UNDO_WINDOW_MS - (Date.now() - resolvedAtMs);
+  if (remainingMs <= 0) return null;
+  const minutes = Math.max(1, Math.ceil(remainingMs / 60_000));
+  return t('gateUndoRemaining', { minutes });
 }
 
 export function ApprovalsQueue() {
@@ -111,6 +129,14 @@ export function ApprovalsQueue() {
   const [discussTargetId, setDiscussTargetId] = useState<string | null>(null);
   const [discussSubmitting, setDiscussSubmitting] = useState(false);
   const [discussError, setDiscussError] = useState<string | null>(null);
+  // story 22affaf2 — 고위험 인라인 서명 모달. 목록이라 한 번에 하나만 연다(대상 id 하나로
+  // 충분, discussTargetId와 동형). resolving/error는 resolvingIds/gateErrors를 그대로
+  // 공유한다(별도 병렬 state를 새로 만들지 않는다 — 이 컴포넌트 전체가 이미 id 키로
+  // 추적하는 관례를 그대로 따른다).
+  const [signatureTargetId, setSignatureTargetId] = useState<string | null>(null);
+  const signatureGate = signatureTargetId
+    ? (items.find((it) => !isHitl(it) && it.id === signatureTargetId) as GateItem | undefined)
+    : undefined;
 
   const discuss = async (id: string, reason: string) => {
     setDiscussSubmitting(true);
@@ -168,21 +194,27 @@ export function ApprovalsQueue() {
     }
   };
 
-  // story #1961(P2-S5) — 저위험 gate 원탭 승인/반려. gates/[id]/page.tsx의 저위험 분기(근거·
-  // 사유 없는 단순 transition)와 동일 엔드포인트·body — 서명 플로우(usesSignatureFlow)는
-  // canInlineResolve가 이미 걸러 이 함수에 안 들어온다.
-  const resolveGate = async (id: string, status: 'approved' | 'rejected') => {
+  // story #1961(P2-S5) — 저위험 gate 원탭 승인/반려, gates/[id]/page.tsx의 transition()과
+  // 동일 엔드포인트·body. story 22affaf2 — 고위험 서명 플로우(GateSignatureApproval)도
+  // 이제 이 함수를 그대로 쓴다(note=서명 사유) — 별도 함수를 새로 짓지 않는다(canonical
+  // 상세의 transition()과 body shape을 1:1로 맞춘 이유이기도 함).
+  const resolveGate = async (id: string, status: 'approved' | 'rejected', note: string | null = null, evidenceViewed?: boolean) => {
     setResolvingIds((prev) => new Set(prev).add(id));
     setGateErrors((prev) => { const next = { ...prev }; delete next[id]; return next; });
     try {
       const res = await fetch(`/api/gates/${id}/transition`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, note: null }),
+        // story #2027 AC2 — gates/[id]/page.tsx와 동일 계약(evidence_viewed는 고위험 서명
+        // 플로우 onApprove에서만 true로 실린다, 아래 GateSignatureApproval 배선 참조).
+        body: JSON.stringify({ status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false }),
       });
       if (res.ok) {
         setResolvedGates((prev) => ({ ...prev, [id]: status }));
         setResolvedAtMs((prev) => ({ ...prev, [id]: Date.now() }));
+        // story 22affaf2 — 서명 모달을 거친 성공이면 그 자리서 닫는다(다른 gate의 모달을
+        // 잘못 닫지 않도록 대상 id 일치 확認).
+        setSignatureTargetId((cur) => (cur === id ? null : cur));
       } else {
         const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
         setGateErrors((prev) => ({ ...prev, [id]: body?.error?.message ?? t('gateTransitionErrorGeneric') }));
@@ -266,17 +298,22 @@ export function ApprovalsQueue() {
               ) : null}
               <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{formatAge(gate.created_at, t)}</span>
             </div>
-            <p className="truncate text-sm text-foreground">
+            {/* PO 실측(390px, 2026-08-16) — items-start 부모(flex-col)에서 truncate는 자기
+                content 폭까지 shrink-to-fit돼 ellipsis가 걸릴 폭 기준 자체가 없다(카드
+                우변에서 그냥 잘림). w-full로 폭을 부모 카드 전체로 고정해야 truncate가 실제로
+                동작한다. */}
+            <p className="w-full truncate text-sm text-foreground">
               {gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
             </p>
             {orgName ? <p className="text-[11px] text-muted-foreground">{orgName}</p> : null}
           </>
         );
 
-        // story #1961(P2-S5) — 저위험이면서 아직 인라인으로 안 끝난 항목만 이 2단 구조(제목=
-        // 상세 이동 버튼 + 그 아래 승인/반려 행)로 렌더한다. 그 외(고위험·unknown·held·이미
-        // 인라인 처리됨)는 기존 그대로 «행 전체가 상세로 가는 단일 버튼»— 고위험 항목엔
-        // 인라인 승인 버튼이 «아예 안 생긴다»(AC, 새 분기 자체를 안 탐).
+        // story 22affaf2 — canInlineResolve(can_approve && needsAction && !held)를 만족하는
+        // 항목만 이 2단 구조(제목=상세 이동 버튼 + 그 아래 승인/거절/보류 행)로 렌더한다 —
+        // 이제 위험도와 무관(구 #1961 AC "고위험 인라인 0"은 이 스토리로 뒤집혔다, 위
+        // canInlineResolve 주석 참조). 그 외(unknown 미배선·held·권한없음·이미 인라인
+        // 처리됨)만 기존 그대로 «행 전체가 상세로 가는 단일 버튼».
         if (!inlineResolvable) {
           if (resolved) {
             return (
@@ -306,9 +343,12 @@ export function ApprovalsQueue() {
                     {t('queueViewRecord')}
                   </Link>
                 </div>
-                {/* story #2631 — 오클릭 정정(방금 본인이 이 세션에서 해소한 게이트, 5분 창). */}
+                {/* story #2631 — 오클릭 정정(방금 본인이 이 세션에서 해소한 게이트, 5분 창).
+                    story 22affaf2(유나 design⑤) — 남은 시간 힌트를 버튼 옆에 subtle하게
+                    곁들인다(안전망 인지 자체가 오발 방지의 일부). */}
                 {resolvedAtMs[gate.id] && Date.now() - resolvedAtMs[gate.id]! < UNDO_WINDOW_MS ? (
-                  <div className="mt-2 flex justify-end">
+                  <div className="mt-2 flex items-center justify-end gap-2">
+                    <span className="text-[11px] text-muted-foreground">{formatUndoRemaining(resolvedAtMs[gate.id]!, t)}</span>
                     <GateUndoButton gateId={gate.id} onUndone={() => undoGate(gate.id)} />
                   </div>
                 ) : null}
@@ -326,6 +366,23 @@ export function ApprovalsQueue() {
             </button>
           );
         }
+
+        // story 22affaf2(유나 design①③) — 저위험 원탭·고위험 서명모달 둘 다 이 하나의 카드
+        // chrome을 쓴다(분기는 primary 라벨+onClick만 — 새 카드 컴포넌트를 만들지 않는다).
+        // isSigFlow===true면 [승인하고 서명]/[변경 요청] 둘 다 서명 모달을 여는 것으로
+        // 통일한다(canonical 상세와 동형 — GateSignatureApproval 화면 하나가 승인/거절
+        // 둘 다 담당, canSign이 서명 생략을 막는다). 저위험은 기존처럼 즉시 transition.
+        const isSigFlow = usesSignatureFlow(deriveRiskLevel(gate));
+        const disabled = resolvingIds.has(gate.id);
+        const primaryLabel = isSigFlow ? t('sigApproveAndSign') : t('gateApprove');
+        const primaryOnClick = () => {
+          if (isSigFlow) setSignatureTargetId(gate.id);
+          else void resolveGate(gate.id, 'approved');
+        };
+        const rejectOnClick = () => {
+          if (isSigFlow) setSignatureTargetId(gate.id);
+          else void resolveGate(gate.id, 'rejected');
+        };
 
         return (
           <div key={gate.id} className="rounded-xl border border-border bg-card px-4 py-3">
@@ -345,35 +402,41 @@ export function ApprovalsQueue() {
                 {t('gateTransitionError', { reason: gateErrors[gate.id] })}
               </p>
             ) : null}
-            <div className="mt-2 flex justify-end gap-1.5 border-t border-border pt-2">
+            {/* story 22affaf2(유나 design①) — 모바일(≤390px) 2단 스택: 행1=primary 전폭,
+                행2=변경요청+보류 각 flex-1. 데스크톱(≥sm)=단일 우측정렬 행, primary 최우측.
+                order 유틸+wrapper의 sm:contents로 DOM은 한 세트만 유지한다(버튼 중복 렌더
+                금지 — 테스트·접근성 트리 둘 다 단일 소스여야 함). */}
+            <div className="mt-2 flex flex-col gap-1.5 border-t border-border pt-2 sm:flex-row sm:items-center sm:justify-end">
+              <div className="order-2 flex gap-1.5 sm:contents">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="order-1 h-8 flex-1 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 sm:order-1 sm:flex-none"
+                  disabled={disabled}
+                  onClick={rejectOnClick}
+                >
+                  <XCircle className="size-3.5" />
+                  {t('sigRequestChanges')}
+                </Button>
+                {/* story #2631(PO 결정③) — 「보류(논의 필요)」는 결재함 전 게이트 타입 단일 표면. */}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="order-2 h-8 flex-1 text-muted-foreground sm:order-2 sm:flex-none"
+                  disabled={disabled}
+                  onClick={() => setDiscussTargetId(gate.id)}
+                >
+                  {t('gateDiscussSubmit')}
+                </Button>
+              </div>
               <Button
                 size="sm"
-                variant="ghost"
-                className="h-8 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
-                disabled={resolvingIds.has(gate.id)}
-                onClick={() => void resolveGate(gate.id, 'rejected')}
-              >
-                <XCircle className="size-3.5" />
-                {t('gateReject')}
-              </Button>
-              <Button
-                size="sm"
-                className="h-8 gap-1"
-                disabled={resolvingIds.has(gate.id)}
-                onClick={() => void resolveGate(gate.id, 'approved')}
+                className="order-1 h-9 w-full gap-1.5 sm:order-3 sm:h-8 sm:w-auto"
+                disabled={disabled}
+                onClick={primaryOnClick}
               >
                 <CheckCircle className="size-3.5" />
-                {resolvingIds.has(gate.id) ? '...' : t('gateApprove')}
-              </Button>
-              {/* story #2631(PO 결정③) — 「보류(논의 필요)」는 결재함 전 게이트 타입 단일 표면. */}
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-8 text-muted-foreground"
-                disabled={resolvingIds.has(gate.id)}
-                onClick={() => setDiscussTargetId(gate.id)}
-              >
-                {t('gateDiscussSubmit')}
+                {disabled && !isSigFlow ? '...' : primaryLabel}
               </Button>
             </div>
           </div>
@@ -386,6 +449,32 @@ export function ApprovalsQueue() {
         submitting={discussSubmitting}
         error={discussError}
       />
+      {/* story 22affaf2(유나 design③) — 고위험 인라인 서명 모달. canonical 상세와 동일
+          컴포넌트(GateSignatureApproval)를 nav 없이 Dialog로 연다 — 어휘·게이팅(canSign)
+          둘 다 상세와 1:1이라 화면마다 다른 규칙을 새로 만들지 않는다. */}
+      <Dialog
+        open={signatureGate !== undefined}
+        onOpenChange={(open) => {
+          if (!open && !(signatureTargetId && resolvingIds.has(signatureTargetId))) setSignatureTargetId(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {signatureGate ? (signatureGate.work_item_summary?.title ?? `#${signatureGate.work_item_id.slice(0, 8)}`) : ''}
+            </DialogTitle>
+          </DialogHeader>
+          {signatureGate ? (
+            <GateSignatureApproval
+              gate={signatureGate}
+              resolving={resolvingIds.has(signatureGate.id)}
+              error={gateErrors[signatureGate.id]}
+              onApprove={(reason) => void resolveGate(signatureGate.id, 'approved', reason, true)}
+              onReject={(reason) => void resolveGate(signatureGate.id, 'rejected', reason)}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

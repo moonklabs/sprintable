@@ -15,6 +15,7 @@ import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk'
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // story #1954(P1a-S4) — Gate 3종(게이트·문서결재·머지게이트) canonical 상세. P1a·P2 공용 유일
 // per-gate 라우트(중복 빌드 봉쇄) — decision(inbox_items)은 별도 표면(오르테가군 PO 판단+
@@ -57,7 +58,7 @@ export default function GateDetailPage() {
     setLoading(true);
     setNotFound(false);
     try {
-      const res = await fetch(`/api/gates/${id}`);
+      const res = await fetchWithAuth(`/api/gates/${id}`);
       if (res.status === 404) { setNotFound(true); return; }
       if (!res.ok) return;
       const json = await res.json();
@@ -77,7 +78,7 @@ export default function GateDetailPage() {
   useEffect(() => {
     if (!gate?.resolver_id || fetchedResolverIdRef.current === gate.resolver_id) return;
     fetchedResolverIdRef.current = gate.resolver_id;
-    void fetch('/api/team-members')
+    void fetchWithAuth('/api/team-members')
       .then((r) => (r.ok ? r.json() : null))
       .then((json: { data?: { id: string; name: string }[] } | null) => {
         if (!json?.data) return;
@@ -107,15 +108,19 @@ export default function GateDetailPage() {
   // 뷰어) 아래에서 읽기전용 사유 문구로 분기한다(무권한 상태에서 액션 버튼 자체를 렌더하지 않음).
   const canAct = needsAction && gate?.can_approve === true;
 
-  const transition = useCallback(async (status: 'approved' | 'rejected', note?: string) => {
+  const transition = useCallback(async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean) => {
     if (!gate) return;
     setResolving(true);
     setTransitionError(null);
     try {
-      const res = await fetch(`/api/gates/${gate.id}/transition`, {
+      const res = await fetchWithAuth(`/api/gates/${gate.id}/transition`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, note: note?.trim() || null }),
+        // story #2027 AC2: evidence_viewed는 GateSignatureApproval의 onApprove가 호출될 때만
+        // 실려온다(그 컴포넌트 자체가 canSign=evidenceViewed&&reason로 버튼을 막아 이 콜백에
+        // 도달했다는 사실 자체가 열람 확인 — 아래 저위험 경로는 안 보내 undefined→백엔드가
+        // risk_grade=='high'가 아니면 아예 안 봄).
+        body: JSON.stringify({ status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false }),
       });
       // story #1990: push()는 콜드-진입 합성 스택([parentTab, target])에 세번째 엔트리를
       // 쌓아 브라우저 BACK 1회가 이 상세를 재진입시키는 트랩을 만든다(§3.2 재진입 트랩).
@@ -151,7 +156,7 @@ export default function GateDetailPage() {
     setDiscussSubmitting(true);
     setDiscussError(null);
     try {
-      const res = await fetch(`/api/gates/${gate.id}/discuss`, {
+      const res = await fetchWithAuth(`/api/gates/${gate.id}/discuss`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason }),
@@ -251,7 +256,7 @@ export default function GateDetailPage() {
                 gate={gate}
                 resolving={resolving}
                 error={transitionError}
-                onApprove={(reason) => void transition('approved', reason)}
+                onApprove={(reason) => void transition('approved', reason, true)}
                 onReject={(reason) => void transition('rejected', reason)}
                 onDiscuss={(reason) => void discuss(reason)}
               />

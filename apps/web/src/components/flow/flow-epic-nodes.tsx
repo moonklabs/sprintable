@@ -10,6 +10,7 @@ import {
 import { FlowMapCanvas, type CreateLinkResult, type DeleteLinkResult, type RejectLinkResult } from './flow-map-canvas';
 import { declareResponseToEdge } from './flow-port-linking';
 import { parseCursorMeta } from '@/lib/pagination';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface FlowEpicNodesProps {
   projectId: string;
@@ -121,13 +122,13 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory, sel
     // (done) 스토리에 닿은 간선은 deriveFlowMapLane에 «도달하기도 전에» 사라진다. 분류(양끝
     // 살아있음/한쪽만/양끝 과거)는 deriveFlowMapLane 내부의 몫이라 여기서 미리 안 거른다.
     Promise.all([
-      fetch(`/api/analytics/epic-flow-nodes?project_id=${projectId}&epic_id=${epicId}&upcoming_limit=${UPCOMING_LIMIT}`)
+      fetchWithAuth(`/api/analytics/epic-flow-nodes?project_id=${projectId}&epic_id=${epicId}&upcoming_limit=${UPCOMING_LIMIT}`)
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null),
-      fetch('/api/dependencies/graph?item_type=story')
+      fetchWithAuth('/api/dependencies/graph?item_type=story')
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null),
-      fetch(`/api/goals/${epicId}/reference-candidates`)
+      fetchWithAuth(`/api/goals/${epicId}/reference-candidates`)
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null),
     ]).then(([nodesJson, graphJson, candidatesJson]) => {

@@ -36,6 +36,7 @@ import { HypothesisDeclarationSection } from '@/components/sprints/hypothesis-de
 import { OpenLoopCockpit } from '@/components/sprints/open-loop-cockpit';
 import type { RetroHypothesisResult } from '@/services/retro-session';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // 8a2bbda2: 기간 표시는 start_date~end_date(진실)에서 계산한다. BE `duration` 필드(예 14)가
 // 날짜 범위와 불일치하는 케이스가 있어 신뢰하지 않고, inclusive 일수(end−start+1)를 직접 산출한다.
@@ -73,6 +74,15 @@ interface Story {
   status: string;
   story_points: number | null;
   sprint_id: string | null;
+  is_excluded?: boolean;
+}
+
+// story #2187 후속(카디르 QA changes-requested, PR#3153) — 이 화면은 KanbanBoard를 거치지
+// 않고 /api/stories(/backlog)를 직접 fetch하므로 is_excluded 무조건 필터가 안 걸렸다. 필터만
+// 거는 kanban-board.tsx와 달리 여기는 "배정" 버튼까지 있어 삭제 대상 카드가 실 스프린트에
+// 편입될 수 있는 위험이 더 크다 — 같은 규약을 그대로 이식.
+function excludeHidden(stories: Story[]): Story[] {
+  return stories.filter((s) => !s.is_excluded);
 }
 
 interface BurndownData {
@@ -166,7 +176,7 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
         const body = toDeclarationPayload(d);
         if (!body) continue;
         try {
-          await fetch(`/api/sprints/${data.id}/hypotheses`, {
+          await fetchWithAuth(`/api/sprints/${data.id}/hypotheses`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
@@ -177,7 +187,7 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
       }
 
       if (activateAfterCreate) {
-        await fetch(`/api/sprints/${data.id}/activate`, { method: 'POST' }).catch(() => {});
+        await fetchWithAuth(`/api/sprints/${data.id}/activate`, { method: 'POST' }).catch(() => {});
       }
       onCreated(data);
     } catch {
@@ -396,7 +406,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
 
   const loadHypotheses = useCallback(async (sprintId: string) => {
     try {
-      const res = await fetch(`/api/sprints/${sprintId}/hypotheses`);
+      const res = await fetchWithAuth(`/api/sprints/${sprintId}/hypotheses`);
       if (!res.ok) { setHypotheses([]); return; }
       const json = await res.json() as { data?: RetroHypothesisResult[] };
       setHypotheses(json.data ?? []);
@@ -408,7 +418,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
   const loadSprints = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/sprints?project_id=${projectId}`);
+      const res = await fetchWithAuth(`/api/sprints?project_id=${projectId}`);
       if (res.ok) {
         const json = await res.json();
         setSprints(json.data ?? []);
@@ -434,9 +444,9 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
 
     try {
       const [burndownRes, storiesRes, backlogRes] = await Promise.all([
-        fetch(`/api/sprints/${sprint.id}/burndown`),
-        fetch(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=20`),
-        fetch(`/api/stories/backlog?project_id=${projectId}&limit=20`),
+        fetchWithAuth(`/api/sprints/${sprint.id}/burndown`),
+        fetchWithAuth(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=20`),
+        fetchWithAuth(`/api/stories/backlog?project_id=${projectId}&limit=20`),
       ]);
       if (burndownRes.ok) {
         const json = await burndownRes.json();
@@ -444,13 +454,13 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       }
       if (storiesRes.ok) {
         const json = await storiesRes.json() as { data?: Story[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
-        setSprintStories(json.data ?? []);
+        setSprintStories(excludeHidden(json.data ?? []));
         setSprintStoriesHasMore(json.meta?.hasMore ?? false);
         setSprintStoriesNextCursor(json.meta?.nextCursor ?? null);
       }
       if (backlogRes.ok) {
         const json = await backlogRes.json() as { data?: Story[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
-        setBacklogStories(json.data ?? []);
+        setBacklogStories(excludeHidden(json.data ?? []));
         setBacklogHasMore(json.meta?.hasMore ?? false);
         setBacklogNextCursor(json.meta?.nextCursor ?? null);
       }
@@ -470,7 +480,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       const res = await fetch(`/api/stories?project_id=${projectId}&sprint_id=${selected.id}&limit=20&cursor=${encodeURIComponent(sprintStoriesNextCursor)}`);
       if (res.ok) {
         const json = await res.json() as { data?: Story[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
-        setSprintStories((prev) => [...prev, ...(json.data ?? [])]);
+        setSprintStories((prev) => [...prev, ...excludeHidden(json.data ?? [])]);
         setSprintStoriesHasMore(json.meta?.hasMore ?? false);
         setSprintStoriesNextCursor(json.meta?.nextCursor ?? null);
       } else {
@@ -493,7 +503,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       const res = await fetch(`/api/stories/backlog?project_id=${projectId}&limit=20&cursor=${encodeURIComponent(backlogNextCursor)}`);
       if (res.ok) {
         const json = await res.json() as { data?: Story[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
-        setBacklogStories((prev) => [...prev, ...(json.data ?? [])]);
+        setBacklogStories((prev) => [...prev, ...excludeHidden(json.data ?? [])]);
         setBacklogHasMore(json.meta?.hasMore ?? false);
         setBacklogNextCursor(json.meta?.nextCursor ?? null);
       } else {
@@ -528,7 +538,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     setActionError(null);
     setActivateGateBlocked(false);
     try {
-      const res = await fetch(`/api/sprints/${selected.id}/activate`, { method: 'POST' });
+      const res = await fetchWithAuth(`/api/sprints/${selected.id}/activate`, { method: 'POST' });
       if (!res.ok) {
         const json = await res.json().catch(() => ({})) as { error?: { code?: string; message?: string } };
         // E-SPRINT-LOOP FE(278314e9) §5 — 422 HYPOTHESIS_REQUIRED_FOR_ACTIVATION은 마찰(에러 토스트)이
@@ -563,7 +573,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       for (const d of completed) {
         const body = toDeclarationPayload(d);
         if (!body) continue;
-        await fetch(`/api/sprints/${selected.id}/hypotheses`, {
+        await fetchWithAuth(`/api/sprints/${selected.id}/hypotheses`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
@@ -586,7 +596,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     setClosing(true);
     setActionError(null);
     try {
-      const res = await fetch(`/api/sprints/${selected.id}/close`, { method: 'POST' });
+      const res = await fetchWithAuth(`/api/sprints/${selected.id}/close`, { method: 'POST' });
       if (!res.ok) {
         // story #2485 — backend close_sprint()는 code 자체를 안 낸다(그라운딩 확認,
         // 의도적으로 discard) — raw 서버 message 노출 대신 고정 문구.
@@ -605,7 +615,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     setDeleting(true);
     setDeleteError(null);
     try {
-      const res = await fetch(`/api/sprints/${selected.id}`, { method: 'DELETE' });
+      const res = await fetchWithAuth(`/api/sprints/${selected.id}`, { method: 'DELETE' });
       if (!res.ok) {
         // story #2485 — backend delete_sprint()는 generic HTTP상태 코드만 낸다
         // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.

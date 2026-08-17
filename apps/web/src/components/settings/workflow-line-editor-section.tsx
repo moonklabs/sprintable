@@ -9,6 +9,8 @@ import { WorkflowActiveLineView } from './workflow-active-line-view';
 import { WorkflowPolicySimulatorSection } from './workflow-policy-simulator-section';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 /**
  * E-DG S34 — workflow line admin editor(workflow-policies 탭 4모드 확장). org admin이 라인 config를
  * 편집/diff/버전 publish. View(S29 active+simulator)·Edit(config 편집+lint+저장+새 draft)·History(버전 리스트)·
@@ -89,14 +91,14 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
   const loadVersions = useCallback(async () => {
     const q = new URLSearchParams({ entity_type: entityType });
     if (projectId) q.set('project_id', projectId);
-    const r = await fetch(`/api/workflow-line-config/versions?${q.toString()}`).catch(() => null);
+    const r = await fetchWithAuth(`/api/workflow-line-config/versions?${q.toString()}`).catch(() => null);
     setVersions(r && r.ok ? (((await r.json()) as VersionItem[]) ?? []) : []);
   }, [entityType, projectId]);
 
   const loadActive = useCallback(async () => {
     const q = new URLSearchParams({ entity_type: entityType });
     if (projectId) q.set('project_id', projectId);
-    const r = await fetch(`/api/workflow-line-config/active?${q.toString()}`).catch(() => null);
+    const r = await fetchWithAuth(`/api/workflow-line-config/active?${q.toString()}`).catch(() => null);
     const j = r && r.ok ? await r.json() : null;
     setActiveSteps((j?.config?.steps as Step[]) ?? []);
   }, [entityType, projectId]);

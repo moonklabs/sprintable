@@ -559,3 +559,35 @@ describe('KanbanBoard — org-sync 성공 後 재요청 (story #2545)', () => {
     expect(storiesCalls).toBeGreaterThan(callsAfterMount); // 재요청 — 이전엔 안 늘었다(RED)
   });
 });
+
+// story #2187 — 라이브 QA 임시 카드([TEMP-QA] 등)는 삭제가 휴먼 전용이라 만든 쪽이 못 치운다.
+// PO가 is_excluded=true로 마킹해도 보드가 그 필드를 안 보면 화면엔 그대로 남아 "«남은 일»을
+// 과장"한다(#2187 관측 그대로) — 화면이 실제로 이 플래그를 존중해 숨기는지 회귀가드한다.
+describe('KanbanBoard — is_excluded 카드 숨김(story #2187)', () => {
+  it('is_excluded=true인 카드는 컬럼에 렌더되지 않는다 — 형제 카드(제외 아님)는 그대로 보인다', async () => {
+    stubFetch([
+      { id: 's-hidden', title: '[TEMP-QA] 검증용 임시 카드', status: 'backlog', priority: 'medium', is_excluded: true },
+      { id: 's-visible', title: '진짜 백로그 항목', status: 'backlog', priority: 'medium', is_excluded: false },
+    ]);
+    await mount();
+    const html = container.innerHTML;
+    expect(html).not.toContain('[TEMP-QA] 검증용 임시 카드');
+    expect(html).toContain('진짜 백로그 항목');
+  });
+
+  it('is_excluded 카드가 있으면 "N건 숨김" 배지가 정확한 수로 뜬다 — 없으면 배지 자체가 없다', async () => {
+    stubFetch([
+      { id: 's-hidden-1', title: '[TEMP-QA] 1', status: 'backlog', priority: 'medium', is_excluded: true },
+      { id: 's-hidden-2', title: '[TEMP-QA] 2', status: 'ready-for-dev', priority: 'medium', is_excluded: true },
+      { id: 's-visible', title: '진짜 항목', status: 'backlog', priority: 'medium', is_excluded: false },
+    ]);
+    await mount();
+    expect(container.textContent).toContain('2건 숨김');
+  });
+
+  it('is_excluded 카드가 하나도 없으면 "숨김" 배지가 렌더되지 않는다(과잉 배지 금지)', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', is_excluded: false }]);
+    await mount();
+    expect(container.textContent).not.toContain('숨김');
+  });
+});

@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { normalizeAssigneePatch } from '@/components/kanban/types';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface TeamMember {
   id: string;
@@ -67,7 +68,7 @@ export function EntityDispatchPanel({
   }, [moreOpen]);
 
   useEffect(() => {
-    fetch(`/api/members?project_id=${projectId}`)
+    fetchWithAuth(`/api/members?project_id=${projectId}`)
       .then((r) => r.ok ? r.json() : Promise.reject())
       .then((json) => {
         const data = (json?.data ?? json) as TeamMember[];

@@ -5,11 +5,24 @@ C2-S6(story 0edca31e, 코멘트 왕복)+C3-S7(story 940266db, 편집 왕복)+C4-
 다른 리스크 클래스. deleted_at 타임스탬프 플립일 뿐 자식 row 물리삭제 없음)."""
 from __future__ import annotations
 
+from typing import Literal
+
 from mcp.types import TextContent
 
 from ..api_client import client
-from ..response import err, ok
+from ..response import err, ok, ok_paginated
 from ..schemas import SprintableInput
+
+
+def _unwrap_data_meta(result: object) -> tuple[list, dict]:
+    """story #2428 PR④ — GET /api/v2/visual-artifacts·/comments는 stories.py 계열의
+    X-Total-Count 헤더가 아니라 docs.py `_unwrap_docs_page`와 동형인 body
+    `{data, meta:{has_more,next_cursor}}` 봉투를 쓴다 — 그 헬퍼와 동일 컨벤션을 그대로
+    미러링(get 메서드 그대로 사용, 새 규약 발명 0). 구 bare-array 응답(롤백/미갱신 BE)도
+    하위호환으로 통과시킨다."""
+    if isinstance(result, dict) and "data" in result:
+        return result["data"], (result.get("meta") or {})
+    return (result if isinstance(result, list) else []), {}
 
 
 class ArtifactNodeInput(SprintableInput):
@@ -33,7 +46,9 @@ class CreateArtifactInput(SprintableInput):
     story_id: str | None = None
     epic_id: str | None = None
     doc_id: str | None = None
-    source: str | None = None  # "created" | "imported" — 기본 created
+    # story #2707 부수④ — 커스텀 문자열이 오면 BE가 422를 냄(대응 실패 前엔 알기 어려움).
+    # Literal로 스키마 자체에 유효값을 명시(호출 前에 드러남 — 트리비얼 fix).
+    source: Literal["created", "imported"] | None = None  # 기본 created
     nodes: list[ArtifactNodeInput] | None = None
     summary: str | None = None  # 최초 버전 변경 이유(선택)
     # 뷰어 통합 재설계(story 1948d19d): 생성 시점 프레임 크기(선택 — 미선언 시 FE가 기본
@@ -47,6 +62,8 @@ class GetArtifactInput(SprintableInput):
 
 class ListArtifactCommentsInput(SprintableInput):
     artifact_id: str
+    limit: int | None = None
+    cursor: str | None = None  # 이전 호출의 meta.next_cursor 값을 그대로 넘기면 다음 페이지.
 
 
 class AddArtifactCommentInput(SprintableInput):
@@ -122,6 +139,8 @@ class ListArtifactsInput(SprintableInput):
     story_id: str | None = None
     epic_id: str | None = None
     doc_id: str | None = None
+    limit: int | None = None
+    cursor: str | None = None  # 이전 호출의 meta.next_cursor 값을 그대로 넘기면 다음 페이지.
 
 
 async def create_artifact(args: CreateArtifactInput) -> list[TextContent]:
@@ -163,7 +182,8 @@ async def get_artifact(args: GetArtifactInput) -> list[TextContent]:
 async def list_artifacts(args: ListArtifactsInput) -> list[TextContent]:
     """현재 프로젝트의 시각 산출물 목록 조회 — story_id/epic_id/doc_id로 필터 가능(미지정 시
     프로젝트 전체). 각 항목은 artifact 메타(title·story/epic/doc 연결·latest 버전 번호)만 반환하며
-    노드 트리는 미포함 — 특정 artifact의 nodes/상세는 get_artifact로 조회."""
+    노드 트리는 미포함 — 특정 artifact의 nodes/상세는 get_artifact로 조회. 더 있으면(has_more)
+    다음 페이지 안내가 별도 텍스트 블록으로 붙는다."""
     try:
         params: dict = {}
         if args.story_id:
@@ -172,18 +192,36 @@ async def list_artifacts(args: ListArtifactsInput) -> list[TextContent]:
             params["epic_id"] = args.epic_id
         if args.doc_id:
             params["doc_id"] = args.doc_id
+        if args.limit:
+            params["limit"] = args.limit
+        if args.cursor:
+            params["cursor"] = args.cursor
         result = await client.get("/api/v2/visual-artifacts", params=params)
-        return ok(result)
+        items, meta = _unwrap_data_meta(result)
+        return ok_paginated(
+            items, has_more=bool(meta.get("has_more")), next_cursor=meta.get("next_cursor"),
+            tool_name="sprintable_list_artifacts",
+        )
     except Exception as exc:
         return err(str(exc))
 
 
 async def list_artifact_comments(args: ListArtifactCommentsInput) -> list[TextContent]:
     """artifact 코멘트 스레드 조회(요소/좌표 앵커·resolve 상태 포함) — 휴먼 딸깍 피드백을
-    에이전트가 읽고 반응하는 왕복 입구."""
+    에이전트가 읽고 반응하는 왕복 입구. 더 있으면(has_more) 다음 페이지 안내가 별도 텍스트
+    블록으로 붙는다(오래된순 정렬 — cursor는 "이 시각 이후"로 이어달림)."""
     try:
-        result = await client.get(f"/api/v2/visual-artifacts/{args.artifact_id}/comments")
-        return ok(result)
+        params: dict = {}
+        if args.limit:
+            params["limit"] = args.limit
+        if args.cursor:
+            params["cursor"] = args.cursor
+        result = await client.get(f"/api/v2/visual-artifacts/{args.artifact_id}/comments", params=params)
+        items, meta = _unwrap_data_meta(result)
+        return ok_paginated(
+            items, has_more=bool(meta.get("has_more")), next_cursor=meta.get("next_cursor"),
+            tool_name="sprintable_list_artifact_comments",
+        )
     except Exception as exc:
         return err(str(exc))
 
@@ -239,7 +277,8 @@ async def edit_artifact(args: EditArtifactInput) -> list[TextContent]:
 
 async def list_spec_pins(args: ListSpecPinsInput) -> list[TextContent]:
     """artifact 최신 버전의 스펙 핀 목록 조회(description pane 저작 대상) — 코멘트와 달리
-    작성자/시간 속성 없음(감시금지)."""
+    작성자/시간 속성 없음(감시금지). story #2428 ⓑ: limit 없음(의도) — 「최신 버전」 단건
+    스코프라 그 버전 스펙 분량으로 자연 상한(standup_missing과 동형 축, 페드루 확定 2026-08-17)."""
     try:
         result = await client.get(f"/api/v2/visual-artifacts/{args.artifact_id}/pins")
         return ok(result)

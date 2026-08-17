@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { ExternalLink, Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /**
  * E-GHAPP 연동 카드 — GitHub App(canonical·slack 옛 loud 스타일 미러 금지). 재사용(slack/mcp follow-up).
@@ -35,7 +36,7 @@ export function IntegrationCard() {
 
   useEffect(() => {
     let alive = true;
-    void fetch('/api/integrations/github/status')
+    void fetchWithAuth('/api/integrations/github/status')
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null)
       .then((json) => {

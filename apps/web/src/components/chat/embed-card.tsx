@@ -16,6 +16,7 @@ import { resolveScopedEntityHref, storyBoardUrl, goalUrl, sprintUrl, assetStorag
 import { initials } from '@/lib/storage/format';
 import { renderEntityStatusLabel, translateEntityStatus, type EntityStatusFetchState } from './entity-status-labels';
 import { ArtifactThumbnail } from '@/components/canvas/artifact-thumbnail';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // story #2302 — 이 8종은 BE reference_registry.py ENTITY_RESOLVERS 와 키 집합이 같아야 한다
 // (AC2·AC5, entity-icons.registry-parity.test.ts 가 코드스캔으로 대조). `asset`은 registry
@@ -151,6 +152,19 @@ const ENTITY_API: Record<string, (id: string) => string> = {
 // sprint도 포함). 새 합성 가능 타입을 추가하면 이 Set도 같이 넓히거나(몸통 있음), 의도적으로
 // 빼면서 그 이유를 여기 한 줄 남길 것 — «만들 수 있는데 못 여는» 사각을 다시 만들지 않도록.
 const RICH_PREVIEW_TYPES = new Set(['story', 'epic', 'doc', 'artifact', 'hypothesis']);
+
+// story #2118(E-DG-REAL, 페드루 리뷰) — "폴백이 정직하다"(크래시 안 남)는 "클릭에 값이
+// 있다"는 뜻이 아니다. RICH_PREVIEW도 ENTITY_API fetch 전략도 own-href(getEntityHref)도
+// 셋 다 없는 타입(예: gate work_item_type의 loop·wf_line_version — entity 계열 자체에 등록
+// 안 됨)은 제목을 눌러도 "미리보기 없음"+갈 곳 없는 빈 모달만 뜬다 — story #2118(P2.2)
+// AC④가 이미 내린 판정("미리보기 없는 타입에 억지로 진입점 달아 빈 모달 여는 거짓 안
+// 만든다")과 정면충돌. 이 판정을 한 곳에 두어 새 타입이 늘 때마다 흩어진 조건을 다시
+// 맞추지 않게 한다 — 진입점을 달지 여부를 결정하는 소비부(approval-request-card.tsx 등)는
+// 이 함수 하나만 부른다. getEntityHref는 entityId 값과 무관하게 entityType만으로 null 여부가
+// 갈리므로(switch가 타입 단위 분기) 더미 id로도 정확하다.
+export function canPreviewEntity(entityType: string): boolean {
+  return RICH_PREVIEW_TYPES.has(entityType) || Boolean(ENTITY_API[entityType]) || getEntityHref(entityType, '') !== null;
+}
 
 const MdBadge = ({ label }: { label: string }) => (
   <span className="rounded border px-1.5 py-0.5 text-[11px] font-medium border-border bg-muted text-muted-foreground">
@@ -339,7 +353,7 @@ export function EntityPreviewModal({
       // /api/docs/{id}(lightweight timestamp-only)를 "풀 doc 조회"로 오인했던 게 원 결함(#1996).
       void (async () => {
         try {
-          const previewRes = await fetch(`/api/docs/preview?q=${encodeURIComponent(entityId)}`);
+          const previewRes = await fetchWithAuth(`/api/docs/preview?q=${encodeURIComponent(entityId)}`);
           if (!previewRes.ok) throw new Error();
           const previewJson = (await previewRes.json()) as {
             data?: { slug?: string; projectId?: string; orgSlug?: string; projectSlug?: string | null };
@@ -354,7 +368,7 @@ export function EntityPreviewModal({
               projectSlug: previewJson.data?.projectSlug ?? null,
             });
           }
-          const docRes = await fetch(`/api/docs?project_id=${docProjectId}&slug=${encodeURIComponent(slug)}`);
+          const docRes = await fetchWithAuth(`/api/docs?project_id=${docProjectId}&slug=${encodeURIComponent(slug)}`);
           if (!docRes.ok) throw new Error();
           const docJson = (await docRes.json()) as { data?: Record<string, unknown> };
           if (!cancelled) setDetail(docJson.data ?? null);
@@ -390,7 +404,7 @@ export function EntityPreviewModal({
     let cancelled = false;
     void (async () => {
       try {
-        const previewRes = await fetch(`/api/docs/preview?q=${encodeURIComponent(docId)}`);
+        const previewRes = await fetchWithAuth(`/api/docs/preview?q=${encodeURIComponent(docId)}`);
         if (!previewRes.ok) throw new Error();
         const previewJson = (await previewRes.json()) as {
           data?: { slug?: string; projectId?: string; orgSlug?: string; projectSlug?: string | null };
@@ -753,7 +767,7 @@ export function EntityChip({
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(`/api/docs/preview?q=${encodeURIComponent(entityId)}`);
+        const res = await fetchWithAuth(`/api/docs/preview?q=${encodeURIComponent(entityId)}`);
         if (!res.ok) throw new Error();
         const json = (await res.json()) as { data?: { projectId?: string } };
         const docProjectId = json.data?.projectId;

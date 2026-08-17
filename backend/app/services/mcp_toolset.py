@@ -92,6 +92,11 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 동형(자기 작업에 self-proof 첨부 = 데이터 파괴 아닌 협업/증명 유틸) — 어떤 역할의 working
     # agent든 default_tool_groups 무관하게 done 첨부해야 하므로 always-allow.
     "sprintable_add_evidence",
+    # story #2709(AskUserQuestion 블로킹 대체): request_decision — 어떤 역할의 에이전트든
+    # 판단이 필요한 순간 도메인 무관하게 써야 하는 협업 도구(link_gate_to_task/add_evidence와
+    # 동일 논리 — 특정 work_item 도메인에 묶이지 않는 self-scope 발행 유틸). vendored 사본과
+    # 동기화 필수(sprintable_mcp/toolset.py).
+    "sprintable_request_decision",
     # story #2268(D단계, E-CONNECT — "판단 칸"): add_judgment/list_judgments — 판단/철회는
     # work_item_ids(다건 또는 0건 general)에 걸치는 cross-cutting 기록이라 add_evidence와
     # 동일 논리로 core 취급. vendored 사본과 동기화 필수(sprintable_mcp/toolset.py).
@@ -384,6 +389,8 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_link_gate_to_task", "sprintable_list_agent_cards",
     # evidence (E-VERIFY V0-S1)
     "sprintable_add_evidence",
+    # 비동기 결정 요청 (story #2709, AskUserQuestion 블로킹 대체)
+    "sprintable_request_decision",
     # 판단 칸 (story #2268, D단계)
     "sprintable_add_judgment", "sprintable_list_judgments",
     # 세션 시작 컨텍스트 (story #2268, C-10)

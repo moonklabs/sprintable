@@ -5,6 +5,7 @@ import { ImageOff, Loader2, Lock } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { fetchWithAuth } from '@/lib/db/client';
 
 type ImageState = 'loading' | 'ok' | 'no-access' | 'phantom';
 
@@ -25,7 +26,7 @@ function ImagePreview({ assetId, fallbackLabel }: { assetId: string; fallbackLab
     let cancelled = false;
     void (async () => {
       try {
-        const signRes = await fetch(`/api/attachments/sign?asset_id=${assetId}`);
+        const signRes = await fetchWithAuth(`/api/attachments/sign?asset_id=${assetId}`);
         if (cancelled) return;
         if (signRes.status === 403) { setState('no-access'); return; }
         if (!signRes.ok) { setState('no-access'); return; }
@@ -198,7 +199,7 @@ function LegacyContentTypeFallback({ assetId, fallbackLabel }: { assetId: string
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(`/api/assets/${assetId}`);
+        const res = await fetchWithAuth(`/api/assets/${assetId}`);
         if (cancelled) return;
         if (!res.ok) { setFailed(true); return; }
         const { data } = (await res.json()) as { data?: { content_type?: string } };

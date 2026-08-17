@@ -72,7 +72,8 @@ async def _notify_doc_approval_requested(
     try:
         from app.services.approval_delivery import dispatch_approval_request_cards
         await dispatch_approval_request_cards(
-            session, org_id=org_id, doc=doc, gate_id=gate_id,
+            session, org_id=org_id, work_item_type=DOC_GATE_WORK_ITEM_TYPE, work_item_id=doc.id,
+            project_id=doc.project_id, title=doc.title, gate_id=gate_id,
             requester_id=requester_id, approver_ids=approver_ids,
         )
     except Exception:  # noqa: BLE001 — 카드 배달 실패는 상신 비중단(Gate inbox 폴백 항상 존재).
@@ -123,6 +124,10 @@ async def transition_doc(
             caller.id, role_id,
             neutral_facts={"requested_by_member_id": str(caller.id), "doc_title": doc.title},
             project_id=doc.project_id,
+            # story #373cfaa1: 이 함수가 아래서 _notify_doc_approval_requested()로 doc 전용
+            # 리치 알림(벨+카드)을 별도로 쏘므로, create_gate() generic "gate.pending_approval"
+            # 벨은 끈다(중복 제거 — 신규생성·rejected재오픈 두 경로 모두 해당).
+            notify=False,
         )
         # ⚠️재상신 RC(산티아고): uq(work_item_id,gate_type)=1 gate·terminal(approved/rejected)=immutable →
         # create_gate 멱등이 기존 **terminal gate 를 반환**해(상태필터 없음) 재상신 시 새 pending gate 0 →

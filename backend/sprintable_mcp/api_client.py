@@ -279,6 +279,7 @@ class SprintableClient:
         json: dict | None = None,
         params: dict | None = None,
         unwrap: bool = True,
+        return_headers: bool = False,
     ) -> Any:
         url = f"{self._base_url}{path}"
         # E-MCP-HTTP S1: effective 키 = per-request override(http 멀티테넌트) ∨ env 단일키(stdio·무회귀).
@@ -335,14 +336,23 @@ class SprintableClient:
         # 같은 이유로 이 함수를 공유하는 **command_gate도 처음부터 MCP 경로에서 안 보였다**
         # (이번에 같이 드러난 기존 버그 — 별도로 새로 만든 게 아니다). unwrap=False를 넘기면
         # 언래핑하지 않고 전체를 그대로 반환한다(소수 호출부 — sibling 키가 필요한 곳만 씀).
-        if not unwrap:
-            return data
-        if isinstance(data, dict) and "data" in data:
-            return data["data"]
+        if unwrap and isinstance(data, dict) and "data" in data:
+            data = data["data"]
+        # story #2428: X-Total-Count/X-Next-Cursor(stories.py 계열 — 헤더 기반 페이지네이션,
+        # docs.py/notifications.py의 body meta{has_more,next_cursor} 규약과 wire shape가 다름)를
+        # 읽으려는 호출부용. httpx.Headers는 대소문자 무관 dict-like — 그대로 넘긴다.
+        if return_headers:
+            return data, resp.headers
         return data
 
     async def get(self, path: str, *, params: dict | None = None) -> Any:
         return await self.request("GET", path, params=params)
+
+    async def get_with_headers(self, path: str, *, params: dict | None = None) -> tuple[Any, Any]:
+        """story #2428 — X-Total-Count/X-Next-Cursor 헤더로 페이지네이션을 신호하는
+        엔드포인트(stories.py 계열)용. `(body, headers)` 튜플 반환 — headers는 httpx.Headers
+        (대소문자 무관 접근)."""
+        return await self.request("GET", path, params=params, return_headers=True)
 
     async def post(self, path: str, *, json: dict | None = None) -> Any:
         return await self.request("POST", path, json=json or {})

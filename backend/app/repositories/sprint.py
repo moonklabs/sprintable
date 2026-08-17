@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pm import Sprint, Story
@@ -10,6 +11,40 @@ from app.repositories.base import BaseRepository
 class SprintRepository(BaseRepository[Sprint]):
     def __init__(self, session: AsyncSession, org_id: uuid.UUID) -> None:
         super().__init__(Sprint, session, org_id)
+
+    async def list_in_projects(
+        self,
+        project_ids: list[uuid.UUID],
+        *,
+        status: str | None = None,
+        limit: int | None = None,
+        cursor: datetime | None = None,
+    ) -> tuple[list[Sprint], int]:
+        """story #2428 PR④(ⓐ) — list_sprints의 project_id 미지정(org-wide) 분기 전용.
+        기존 코드는 `repo.list()`로 org 전체를 끌어온 뒤 Python에서 accessible project_id로
+        post-filter했다(SEC-S8) — DB-level limit/cursor를 곧이곧대로 얹으면 그 post-filter가
+        페이지 건수를 다시 줄여 X-Total-Count/has_more가 어긋난다(TaskRepository.
+        list_in_projects()가 이미 겪은 것과 동형 함정, 거긴 Story JOIN이 필요했지만 Sprint는
+        project_id 컬럼이 있어 직접 IN). cursor는 conds에 포함(count_q/q 공유) — story.py
+        규약 그대로(#2537), 3157/base.py list_paginated() fix와 동일 모양."""
+        if not project_ids:
+            return [], 0
+        conds = [self._org_filter(), Sprint.project_id.in_(project_ids)]
+        if status is not None:
+            conds.append(Sprint.status == status)
+        if cursor is not None:
+            conds.append(Sprint.created_at < cursor)
+
+        count_q = select(func.count()).select_from(Sprint).where(*conds)
+        total = int((await self.session.execute(count_q)).scalar_one() or 0)
+
+        q = (
+            select(Sprint).where(*conds)
+            .order_by(Sprint.created_at.desc(), Sprint.id.desc())
+            .limit(limit if limit is not None else 1000)
+        )
+        result = await self.session.execute(q)
+        return list(result.scalars().all()), total
 
     async def activate(self, id: uuid.UUID) -> Sprint:
         sprint = await self.get(id)

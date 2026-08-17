@@ -1,4 +1,11 @@
-"""E-EVENTBUS P3 S8: 이벤트→알림 설정 필터 엔진 테스트."""
+"""E-EVENTBUS P3 S8: 이벤트→알림 설정 필터 엔진 테스트.
+
+story #2696: 이 파일의 관심사는 설정 필터 엔진(누가 Notification을 받는가)이지 outbox
+배달 메커니즘이 아니다 — 기본값이 via_outbox=True로 바뀌면서 human 대상마다 DeliveryJob
+add()가 하나씩 더 붙어(webhook config 존재 여부와 무관하게, 실제 필터는 워커가 배달
+시점에 함) mock_session.add 카운트 assert가 깨지므로, 모든 호출에 via_outbox=False를
+명시해 이 파일의 검증 범위를 원래대로 좁힌다(outbox 자체는 test_2460_delivery_outbox.py·
+test_2696_via_outbox_default_flip_guard.py가 별도로 고정)."""
 from __future__ import annotations
 
 import uuid
@@ -82,6 +89,7 @@ async def test_disabled_setting_skips_notification(mock_session, org_id):
         event_type="memo_received",
         target_member_ids=[member_id],
         title="테스트 메모",
+        via_outbox=False,
     )
 
     mock_session.add.assert_not_called()
@@ -109,6 +117,7 @@ async def test_no_setting_defaults_to_enabled(mock_session, org_id):
         event_type="memo_received",
         target_member_ids=[member_id],
         title="테스트 메모",
+        via_outbox=False,
     )
 
     mock_session.add.assert_called_once()
@@ -144,6 +153,7 @@ async def test_enabled_setting_creates_notification(mock_session, org_id):
         body="알림 내용",
         reference_type="memo",
         reference_id=uuid.uuid4(),
+        via_outbox=False,
     )
 
     mock_session.add.assert_called_once()
@@ -184,6 +194,7 @@ async def test_grant_only_human_gets_notification(mock_session, org_id):
         body="내용",
         reference_type="epic",
         reference_id=uuid.uuid4(),
+        via_outbox=False,
     )
 
     # org_member.user_id 기반 Notification 생성 (silent drop 아님)
@@ -223,6 +234,7 @@ async def test_human_dispatched_event_gets_delivered_at_stamped(mock_session, or
         body="pending → in-progress",
         reference_type="story",
         reference_id=uuid.uuid4(),
+        via_outbox=False,
     )
     after = datetime.now(timezone.utc)
 
@@ -252,6 +264,7 @@ async def test_empty_target_skips_all(mock_session, org_id):
         event_type="memo_received",
         target_member_ids=[],
         title="빈 대상",
+        via_outbox=False,
     )
 
     mock_session.execute.assert_not_called()
@@ -281,6 +294,7 @@ async def test_mixed_settings_only_enabled_gets_notification(mock_session, org_i
         event_type="memo_received",
         target_member_ids=[member_on, member_off],
         title="복수 대상 테스트",
+        via_outbox=False,
     )
 
     assert mock_session.add.call_count == 1
@@ -310,6 +324,7 @@ async def test_dispatch_dedups_multiproject_view_rows(mock_session, org_id):
         event_type="story_assigned",
         target_member_ids=[member_id],
         title="스토리 담당자로 지정됨",
+        via_outbox=False,
     )
 
     notifs = [c.args[0] for c in mock_session.add.call_args_list if isinstance(c.args[0], Notification)]
@@ -362,6 +377,7 @@ async def test_dispatch_agent_routed_to_source_project(mock_session, org_id, mon
         reference_type="story",
         reference_id=uuid.uuid4(),
         source_project_id=p2,  # 트리거 프로젝트
+        via_outbox=False,
     )
 
     events = [c.args[0] for c in mock_session.add.call_args_list if isinstance(c.args[0], Event)]
@@ -397,6 +413,7 @@ async def test_dispatch_agent_no_source_falls_back_first_row(mock_session, org_i
         title="작업 전달",
         reference_type="story",
         reference_id=uuid.uuid4(),
+        via_outbox=False,
     )
 
     events = [c.args[0] for c in mock_session.add.call_args_list if isinstance(c.args[0], Event)]
@@ -439,6 +456,7 @@ async def test_dispatch_passes_source_project_id_to_expo_push(mock_session, org_
             target_member_ids=[member_id], title="담당자 지정",
             reference_type="story", reference_id=uuid.uuid4(),
             source_project_id=project_id,
+            via_outbox=False,
         )
 
     assert mock_push.await_args.kwargs["project_id"] == project_id
@@ -471,6 +489,7 @@ async def test_dispatch_infers_project_id_when_members_share_single_project(
             mock_session, org_id=org_id, event_type="agent_joined",
             target_member_ids=[member_id], title="새 에이전트",
             reference_type="team_member", reference_id=uuid.uuid4(),
+            via_outbox=False,
         )
 
     assert mock_push.await_args.kwargs["project_id"] == project_id
@@ -509,6 +528,7 @@ async def test_dispatch_project_id_none_when_members_span_multiple_projects(
             mock_session, org_id=org_id, event_type="agent_joined",
             target_member_ids=[m1, m2], title="새 에이전트",
             reference_type="team_member", reference_id=uuid.uuid4(),
+            via_outbox=False,
         )
 
     assert mock_push.await_args.kwargs["project_id"] is None
@@ -536,6 +556,7 @@ async def test_dispatch_passes_story_id_and_sprint_id_through_to_expo_push(mock_
             target_member_ids=[member_id], title="작업 완료",
             reference_type="task", reference_id=uuid.uuid4(),
             story_id=story_id, sprint_id=sprint_id,
+            via_outbox=False,
         )
 
     assert mock_push.await_args.kwargs["story_id"] == story_id

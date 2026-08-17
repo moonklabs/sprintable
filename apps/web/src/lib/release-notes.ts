@@ -1,3 +1,5 @@
+import { fetchWithAuth } from '@/lib/db/client';
+
 export interface ReleaseNoteItem {
   text: string;
   href?: string;
@@ -21,7 +23,10 @@ export interface ReleaseNote {
  */
 export async function fetchReleaseNotes(): Promise<ReleaseNote[]> {
   try {
-    const res = await fetch('/api/release-notes', { credentials: 'same-origin' });
+    // story #2689 — 콜드 재진입 시 raw fetch는 401을 재시도 없이 삼켜(!res.ok=>[]) 릴리즈
+    // 노트 게이트가 조용히 안 뜨는(빈 배열이라 gate auto-open 대상 자체가 없어짐) 결과였다.
+    // fetchWithAuth로 401→refresh→재시도 경로에 태운다.
+    const res = await fetchWithAuth('/api/release-notes', { credentials: 'same-origin' });
     if (!res.ok) return [];
     const body = (await res.json()) as { data?: ReleaseNote[] };
     return Array.isArray(body?.data) ? body.data : [];

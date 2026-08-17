@@ -712,7 +712,7 @@ async def agent_stream(
     )
 
 
-# âââ POST /api/v2/agent/events/ack ââââââââââââââââââââââââââââââââââââââââââââ
+# ─── POST /api/v2/agent/events/ack ────────────────────────────────────────────
 
 class AckRequest(BaseModel):
     seq: int
@@ -724,7 +724,7 @@ async def ack_event(
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> dict:
-    """ìì´ì í¸ê° ì²ë¦¬ ìë£í gateway_seq ACK â agent_event_cursors ê°±ì ."""
+    """에이전트가 처리 완료한 gateway_seq ACK — agent_event_cursors 갱신."""
     is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
     if not is_api_key:
         raise HTTPException(status_code=403, detail="API key required")
@@ -764,6 +764,7 @@ async def ack_event(
     # OB-4 seam: 새로 ack된 범위(prior_acked < seq <= body.seq)에 verify connection_test 가 있으면
     # ack_received + verified 발화(verify 라운드트립 완료·funnel·non-blocking·verify-ack에만 한정).
     if body.seq > prior_acked:
+        from app.models.onboarding_event import OnboardingEvent
         from app.services.agent_verify import VERIFY_EVENT_TYPE
         from app.services.onboarding_funnel import emit_onboarding_event
         _verify_done = (await db.execute(
@@ -776,8 +777,27 @@ async def ack_event(
             ).limit(1)
         )).first()
         if _verify_done:
-            await emit_onboarding_event(db, "ack_received", agent_id=agent_id)
-            await emit_onboarding_event(db, "verified", agent_id=agent_id)
+            # story #2430 — 이 ack 요청은 에이전트 런타임이 보내 브라우저의 session_id를 모른다.
+            # FE `verify_started`가 이미 같은 agent_id 행에 session_id(sessionStorage 조인 키)와
+            # meta.flow(onboarding|recruit)를 함께 실어 둔다(onboarding-telemetry.ts) — 그 「가장
+            # 최근」행을 조회해 그대로 이식한다(새 요청 필드·FE 변경 0, 순수 BE 조회 1회 추가).
+            # 여러 번 재시도(타임아웃 뒤 재검증)해도 ORDER BY server_ts DESC로 최신 시도가 이긴다.
+            _seam_source = (await db.execute(
+                select(OnboardingEvent.session_id, OnboardingEvent.meta).where(
+                    OnboardingEvent.agent_id == agent_id,
+                    OnboardingEvent.event == "verify_started",
+                ).order_by(OnboardingEvent.server_ts.desc()).limit(1)
+            )).first()
+            _seam_session_id = _seam_source.session_id if _seam_source else None
+            _seam_meta = _seam_source.meta if _seam_source else None
+            await emit_onboarding_event(
+                db, "ack_received", agent_id=agent_id,
+                session_id=_seam_session_id, meta=_seam_meta,
+            )
+            await emit_onboarding_event(
+                db, "verified", agent_id=agent_id,
+                session_id=_seam_session_id, meta=_seam_meta,
+            )
 
     await db.commit()
     return {"acked_seq": body.seq}

@@ -9,6 +9,7 @@ import { ToastContainer, useToast } from '@/components/ui/toast';
 import { GateLineContext } from '@/components/cage/gate-line-context';
 import { StuckHandoffDetail } from '@/components/cage/stuck-handoff-detail';
 import type { KanbanMember, WorkflowLineStatus, WorkflowLineStepRun } from '@/components/kanban/types';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /**
  * E-DG S12 ① — detail drawer "워크플로우 라인 상태" 섹션(story-detail-panel DISPATCH 직후 마운트).
@@ -35,7 +36,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/stories/${storyId}/workflow-line/status`, { cache: 'no-store' })
+    fetchWithAuth(`/api/stories/${storyId}/workflow-line/status`, { cache: 'no-store' })
       .then((r) => (r.ok ? (r.json() as Promise<WorkflowLineStatus>) : null))
       .then((ls) => { if (!cancelled) setStep(ls?.active ?? null); })
       .catch(() => { if (!cancelled) setStep(null); });

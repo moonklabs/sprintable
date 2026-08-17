@@ -18,6 +18,7 @@ import { FlowMultiLaneCanvas } from './flow-multi-lane-canvas';
 import { parseCursorMeta } from '@/lib/pagination';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { ToastContainer, useToast } from '@/components/ui/toast';
+import { fetchWithAuth } from '@/lib/db/client';
 
 interface NextMakerScreenProps {
   projectId: string;
@@ -46,12 +47,21 @@ const ACTIVE_STATUSES = ['backlog', 'ready-for-dev', 'in-progress', 'in-review']
 const PAGE_LIMIT = 100; // /api/goals, /api/stories FE 프록시 상한(parseCursorPageInput maxLimit).
 const SAFETY_MAX_PAGES = 50; // 무한루프 방어 — 100*50=5000건, 오늘 이 project 규모를 넉넉히 상회.
 
+// story #2224 후속(2026-08-16, 미르코 그라운딩) — dev 실측: 활성 목표 39건이 존재하는데
+// 화면은 "목표 0개"로 떴다(정직한 빈 화면 아님 — 실데이터 미배선). 원인: 이 루프가 이
+// 파일의 다른 fetch(next-up·epics-progress-lane)와 달리 맨 fetch()를 썼다 — 토큰이 막
+// 만료된 타이밍이면 401이 오는데 `if (!res.ok) break`가 그걸 "페이지네이션 끝"으로 조용히
+// 삼켜 items=[]를 정상 결과처럼 반환했다(에러 0·콘솔 0). 오늘 이미 한 번 고친 그 클래스
+// (PR#3123, raw fetch 401 swallow)와 동일 결함 — fetchWithAuth로 바꿔 401을 자동
+// refresh+재시도하게 하고, 재시도 후에도 non-ok면(진짜 실패) 조용히 끝내지 않고 던져서
+// 위 useEffect의 catch가 kind:'error'로 잡게 한다 — "0건"과 "못 가져왔다"를 더는 같은
+// 화면으로 안 보여준다.
 async function fetchAllPages<T>(urlBuilder: (cursor: string | null) => string, source: string): Promise<T[]> {
   const items: T[] = [];
   let cursor: string | null = null;
   for (let page = 0; page < SAFETY_MAX_PAGES; page += 1) {
-    const res = await fetch(urlBuilder(cursor));
-    if (!res.ok) break;
+    const res = await fetchWithAuth(urlBuilder(cursor));
+    if (!res.ok) throw new Error(`${source}: HTTP ${res.status}`);
     const json: Envelope<T[]> = await res.json();
     const rows = Array.isArray(json.data) ? json.data : [];
     items.push(...rows);
@@ -130,10 +140,10 @@ export function NextMakerScreen({ projectId, memberMap, onSelectStory, selectedN
         const [rawGoals, storiesByStatus, nextUpRes, laneRes] = await Promise.all([
           fetchAllGoals(projectId),
           Promise.all(ACTIVE_STATUSES.map((status) => fetchAllStoriesByStatus(projectId, status))),
-          fetch(`/api/reference-candidates/next-up?project_id=${projectId}&recent_days=14`)
+          fetchWithAuth(`/api/reference-candidates/next-up?project_id=${projectId}&recent_days=14`)
             .then((r) => (r.ok ? r.json() : []))
             .catch(() => []),
-          fetch(`/api/analytics/epics-progress-lane?project_id=${projectId}`)
+          fetchWithAuth(`/api/analytics/epics-progress-lane?project_id=${projectId}`)
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null),
         ]);

@@ -7,6 +7,7 @@ import { Loader2 } from 'lucide-react';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { cn } from '@/lib/utils';
 import { InviteError, inviteErrorMessage } from '@/lib/invite-error-message';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // d3619e80: invite_accept canonical InvitePreviewResponse 정합(org_name·role·status·expires_at·email).
 // inviter_name/email은 canonical 미제공(optional·미제공 시 generic 안내로 graceful degrade).
@@ -49,7 +50,7 @@ export default function InvitePage() {
       return;
     }
     // d3619e80: invite_accept canonical(GET /api/v2/invites/{token}·InvitePreviewResponse).
-    fetch(`/api/invites/${encodeURIComponent(token)}`)
+    fetchWithAuth(`/api/invites/${encodeURIComponent(token)}`)
       .then(async (res) => {
         if (!res.ok) {
           const json = await res.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
@@ -60,7 +61,7 @@ export default function InvitePage() {
         const json = await res.json() as { data: InvitePreview };
         setPreview(json.data);
         if (json.data.email) setEmail(json.data.email);
-        const meRes = await fetch('/api/me');
+        const meRes = await fetchWithAuth('/api/me');
         if (meRes.ok) {
           void acceptInvite(token);
         } else {

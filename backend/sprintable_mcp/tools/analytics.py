@@ -5,8 +5,9 @@ from mcp.types import TextContent
 from pydantic import AliasChoices, ConfigDict, Field
 
 from ..api_client import client
-from ..response import err, ok
+from ..response import err, ok, ok_paginated
 from ..schemas import SprintableInput
+from .stories import _has_more_from_headers
 
 
 class MemberIdInput(SprintableInput):
@@ -19,10 +20,14 @@ class WorkloadInput(SprintableInput):
 
 class SprintFilterInput(SprintableInput):
     sprint_id: str | None = None
+    limit: int | None = None
+    cursor: str | None = None  # 이전 호출의 X-Next-Cursor 헤더 값을 그대로 넘기면 다음 페이지.
 
 
 class OverdueMemberInput(SprintableInput):
     member_id: str | None = None
+    limit: int | None = None
+    cursor: str | None = None  # 이전 호출의 X-Next-Cursor 헤더 값을 그대로 넘기면 다음 페이지.
 
 
 class ActivityInput(SprintableInput):
@@ -46,6 +51,8 @@ class AgentStatsInput(SprintableInput):
 
 class SearchStoriesInput(SprintableInput):
     query: str
+    limit: int | None = None
+    cursor: str | None = None  # 이전 호출의 X-Next-Cursor 헤더 값을 그대로 넘기면 다음 페이지.
 
 
 async def get_project_overview(args: SprintableInput) -> list[TextContent]:
@@ -75,7 +82,14 @@ async def get_sprint_velocity_history(args: SprintableInput) -> list[TextContent
 async def search_stories(args: SearchStoriesInput) -> list[TextContent]:
     """스토리 제목 검색."""
     try:
-        return ok(await client.get("/api/v2/stories", params={"project_id": client.require_project_id(), "q": args.query}))
+        params: dict = {"project_id": client.require_project_id(), "q": args.query}
+        if args.limit:
+            params["limit"] = args.limit
+        if args.cursor:
+            params["cursor"] = args.cursor
+        items, headers = await client.get_with_headers("/api/v2/stories", params=params)
+        has_more, next_cursor = _has_more_from_headers(headers, items)
+        return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_search_stories")
     except Exception as exc:
         return err(str(exc))
 
@@ -86,7 +100,13 @@ async def get_blocked_stories(args: SprintFilterInput) -> list[TextContent]:
         params: dict = {"project_id": client.require_project_id(), "status": "in-review"}
         if args.sprint_id:
             params["sprint_id"] = args.sprint_id
-        return ok(await client.get("/api/v2/stories", params=params))
+        if args.limit:
+            params["limit"] = args.limit
+        if args.cursor:
+            params["cursor"] = args.cursor
+        items, headers = await client.get_with_headers("/api/v2/stories", params=params)
+        has_more, next_cursor = _has_more_from_headers(headers, items)
+        return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_get_blocked_stories")
     except Exception as exc:
         return err(str(exc))
 
@@ -97,18 +117,35 @@ async def get_unassigned_stories(args: SprintFilterInput) -> list[TextContent]:
         params: dict = {"project_id": client.require_project_id(), "unassigned": "true"}
         if args.sprint_id:
             params["sprint_id"] = args.sprint_id
-        return ok(await client.get("/api/v2/stories", params=params))
+        if args.limit:
+            params["limit"] = args.limit
+        if args.cursor:
+            params["cursor"] = args.cursor
+        items, headers = await client.get_with_headers("/api/v2/stories", params=params)
+        has_more, next_cursor = _has_more_from_headers(headers, items)
+        return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_get_unassigned_stories")
     except Exception as exc:
         return err(str(exc))
 
 
 async def get_overdue_tasks(args: OverdueMemberInput) -> list[TextContent]:
-    """미완료 태스크 목록."""
+    """미완료 태스크 목록.
+
+    story #2428 PR③ 부수발견: `status_ne=done`은 이 도구가 늘 보내고 있었으나 BE
+    `GET /api/v2/tasks`가 그 파라미터를 아예 안 받아(FastAPI가 조용히 버림) 완료
+    포함 전체가 나가던 결함이었다 — 이번 PR에서 라우터에 status_ne를 실제로 배선해
+    바로잡음(app/routers/tasks.py)."""
     try:
         params: dict = {"project_id": client.require_project_id(), "status_ne": "done"}
         if args.member_id:
             params["assignee_id"] = args.member_id
-        return ok(await client.get("/api/v2/tasks", params=params))
+        if args.limit:
+            params["limit"] = args.limit
+        if args.cursor:
+            params["cursor"] = args.cursor
+        items, headers = await client.get_with_headers("/api/v2/tasks", params=params)
+        has_more, next_cursor = _has_more_from_headers(headers, items)
+        return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_get_overdue_tasks")
     except Exception as exc:
         return err(str(exc))
 

@@ -1,8 +1,12 @@
 """story #2460(§6 봉합②): 웹훅/푸시 배달 트랜잭셔널 아웃박스 테스트.
 
-PO 확定 스코프(2026-08-05): ①story_status_events ②conversations send_message 두 콜사이트만
-outbox 경유(via_outbox=True) — 나머지 12+ dispatch_notification/fire_webhooks 콜사이트는
-기본값 False로 즉시 배달(behavior 무변경). 이 파일은 그 opt-in 라우팅 자체와, 워커
+원 PO 확定 스코프(2026-08-05): story_status_events·conversations send_message 두 콜사이트만
+opt-in outbox, 나머지는 기본값 False(즉시 배달). story #2696([클래스 마감], 2026-08-16)에서
+이 스코프가 뒤집혔다 — #2687→#2688→#373cfaa1→#2694로 "호출부 트랜잭션 안 동기 webhook POST"
+결함이 4번 반복되며 원인이 "기본값이 동기"인 것 자체로 판명, AC1 그라운딩(동기 완료 전제
+호출부 0건 확認) 후 dispatch_notification의 via_outbox 기본값을 **True**로 뒤집었다 — 이제
+동기가 필요한 자리만 via_outbox=False를 명시한다. fire_webhooks(org_webhook, 이 파일의
+별개 축)는 이 스토리 스코프 밖이라 기본값 False 그대로. 이 파일은 그 라우팅 자체와, 워커
 (delivery_dispatcher.py)의 claim/배달/재시도 FSM을 correctness 축(중복·유실·순서·재시도)으로
 검증한다. ⛔공유 dev 백엔드에 대한 부하테스트는 이 파일 스코프 밖(PO 명시 금지) — 전부
 mock 세션 또는 로컬 PG로만 검증한다.
@@ -119,8 +123,12 @@ async def test_dispatch_notification_via_outbox_propagates_to_both_channels(mock
 
 
 @pytest.mark.anyio
-async def test_dispatch_notification_default_via_outbox_false(mock_session, org_id):
-    """기본값(via_outbox 미지정)이 기존 12+ 콜사이트 계약대로 False로 전파돼야 한다."""
+async def test_dispatch_notification_default_via_outbox_true(mock_session, org_id):
+    """story #2696: 이 테스트는 원래 "기본값=False"를 고정하던 자리였다 — 그 목적 자체가
+    #2696의 flip으로 뒤집혔으므로 은퇴하지 않고 새 계약(기본값=True)으로 개정한다(이름도
+    함께 바꿔 과거 이름이 현재 코드와 모순되는 채로 남지 않게 — Pedro 리뷰 지적,
+    2026-08-16). via_outbox 미지정(기본값)이 _deliver_personal_webhooks에 True로
+    전파되는지가 지금부터의 계약이다."""
     from app.services.notification_dispatch import dispatch_notification
 
     member_id = uuid.uuid4()
@@ -142,7 +150,7 @@ async def test_dispatch_notification_default_via_outbox_false(mock_session, org_
             target_member_ids=[member_id], title="t",
         )
 
-    assert mock_wh.call_args.kwargs["via_outbox"] is False
+    assert mock_wh.call_args.kwargs["via_outbox"] is True
 
 
 # ─── delivery_dispatcher: kind별 라우팅 + 성공/실패 FSM ──────────────────────

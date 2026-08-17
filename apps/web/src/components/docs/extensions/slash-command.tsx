@@ -281,6 +281,273 @@ export const slashMenuCategories: SlashMenuCategory[] = [
 export const defaultSlashItems: SlashMenuItem[] =
   slashMenuCategories.flatMap((c) => c.items);
 
+// story ab2fd813(#2028) — 이 파일의 슬래시 팝업은 `createRoot(popup)`로 React 트리 밖(body
+// append)에 렌더돼 `useTranslations`를 여기서 직접 못 쓴다. 그래서 로케일 문자열은 소비처
+// (doc-editor.tsx, 이미 useTranslations 보유)가 빌드해 이 팩토리에 주입하는 형태로 뒤집는다.
+// `slashMenuCategories`/`defaultSlashItems`(위, 한글 고정)는 그대로 둔다 — 기존
+// `slash-command.test.tsx`의 `defaultSlashItems` 단언(영문 title)이 안 깨지게 하기 위한
+// fallback 겸 하위호환 export다.
+export interface SlashMenuStrings {
+  categories: {
+    text: string;
+    list: string;
+    block: string;
+    media: string;
+    advanced: string;
+  };
+  items: {
+    heading1: string;
+    heading2: string;
+    heading3: string;
+    bulletList: string;
+    orderedList: string;
+    checklist: string;
+    codeBlock: string;
+    blockquote: string;
+    callout: string;
+    table: string;
+    image: string;
+    file: string;
+    embed: string;
+    mermaidDiagram: string;
+    columns: string;
+    mathBlock: string;
+    mathInline: string;
+    toggle: string;
+    pageEmbed: string;
+    horizontalRule: string;
+  };
+  embedPrompt: string;
+  /** 선택 — 없으면 한글 기본값(시작/끝) 유지. 삽입되는 문서 콘텐츠라 UI chrome이 아님. */
+  mermaidDefault?: { start: string; end: string };
+  /** 선택 — 없으면 한글 기본값('토글 제목') 유지. */
+  toggleDefaultTitle?: string;
+}
+
+/** `slashMenuCategories`와 구조는 동일, label/description/embed prompt/삽입 기본값만
+ * `strings`에서 resolve한다 — icon·command 로직은 그대로 재사용. */
+export function buildSlashMenuCategories(strings: SlashMenuStrings): SlashMenuCategory[] {
+  const mermaidStart = strings.mermaidDefault?.start ?? '시작';
+  const mermaidEnd = strings.mermaidDefault?.end ?? '끝';
+  const toggleTitle = strings.toggleDefaultTitle ?? '토글 제목';
+
+  return [
+    {
+      label: strings.categories.text,
+      items: [
+        {
+          title: 'Heading 1',
+          description: strings.items.heading1,
+          icon: Heading1,
+          command: (editor, range) =>
+            editor.chain().focus().deleteRange(range).toggleHeading({ level: 1 }).run(),
+        },
+        {
+          title: 'Heading 2',
+          description: strings.items.heading2,
+          icon: Heading2,
+          command: (editor, range) =>
+            editor.chain().focus().deleteRange(range).toggleHeading({ level: 2 }).run(),
+        },
+        {
+          title: 'Heading 3',
+          description: strings.items.heading3,
+          icon: Heading3,
+          command: (editor, range) =>
+            editor.chain().focus().deleteRange(range).toggleHeading({ level: 3 }).run(),
+        },
+      ],
+    },
+    {
+      label: strings.categories.list,
+      items: [
+        {
+          title: 'Bullet List',
+          description: strings.items.bulletList,
+          icon: List,
+          command: (editor, range) =>
+            editor.chain().focus().deleteRange(range).toggleBulletList().run(),
+        },
+        {
+          title: 'Ordered List',
+          description: strings.items.orderedList,
+          icon: ListOrdered,
+          command: (editor, range) =>
+            editor.chain().focus().deleteRange(range).toggleOrderedList().run(),
+        },
+        {
+          title: 'Checklist',
+          description: strings.items.checklist,
+          icon: ListTodo,
+          command: (editor, range) =>
+            editor.chain().focus().deleteRange(range).toggleTaskList().run(),
+        },
+      ],
+    },
+    {
+      label: strings.categories.block,
+      items: [
+        {
+          title: 'Code Block',
+          description: strings.items.codeBlock,
+          icon: Code,
+          command: (editor, range) =>
+            editor.chain().focus().deleteRange(range).toggleCodeBlock().run(),
+        },
+        {
+          title: 'Blockquote',
+          description: strings.items.blockquote,
+          icon: Quote,
+          command: (editor, range) =>
+            editor.chain().focus().deleteRange(range).toggleBlockquote().run(),
+        },
+        {
+          title: 'Callout',
+          description: strings.items.callout,
+          icon: Lightbulb,
+          command: (editor, range) =>
+            editor
+              .chain()
+              .focus()
+              .deleteRange(range)
+              .insertContent({ type: 'callout', content: [{ type: 'paragraph' }] })
+              .run(),
+        },
+        {
+          title: 'Table',
+          description: strings.items.table,
+          icon: Table,
+          command: (editor, range) =>
+            editor
+              .chain()
+              .focus()
+              .deleteRange(range)
+              .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+              .run(),
+        },
+      ],
+    },
+    {
+      label: strings.categories.media,
+      items: [
+        {
+          title: 'Image',
+          description: strings.items.image,
+          icon: ImageIcon,
+          command: (editor, range) => {
+            editor.chain().focus().deleteRange(range).run();
+            pickAndUpload(editor, 'image/*');
+          },
+        },
+        {
+          title: 'File',
+          description: strings.items.file,
+          icon: Paperclip,
+          command: (editor, range) => {
+            editor.chain().focus().deleteRange(range).run();
+            pickAndUpload(editor);
+          },
+        },
+        {
+          title: 'Embed',
+          description: strings.items.embed,
+          icon: Globe,
+          command: (editor, range) => {
+            const url = window.prompt(strings.embedPrompt);
+            editor.chain().focus().deleteRange(range).run();
+            if (url?.trim()) {
+              editor.commands.insertContent({ type: 'embedBlock', attrs: { url: url.trim() } });
+            }
+          },
+        },
+        {
+          title: 'Mermaid Diagram',
+          description: strings.items.mermaidDiagram,
+          icon: GitBranch,
+          command: (editor, range) =>
+            editor
+              .chain()
+              .focus()
+              .deleteRange(range)
+              .insertContent({
+                type: 'codeBlock',
+                attrs: { language: 'mermaid' },
+                content: [{ type: 'text', text: `flowchart TD\n    A[${mermaidStart}] --> B[${mermaidEnd}]` }],
+              })
+              .run(),
+        },
+      ],
+    },
+    {
+      label: strings.categories.advanced,
+      items: [
+        {
+          title: 'Columns',
+          description: strings.items.columns,
+          icon: Columns2,
+          command: (editor, range) =>
+            editor.chain().focus().deleteRange(range).insertContent({
+              type: 'columnsBlock',
+              attrs: { columns: 2 },
+              content: [
+                { type: 'columnBlock', content: [{ type: 'paragraph' }] },
+                { type: 'columnBlock', content: [{ type: 'paragraph' }] },
+              ],
+            }).run(),
+        },
+        {
+          title: 'Math Block',
+          description: strings.items.mathBlock,
+          icon: Sigma,
+          command: (editor, range) =>
+            editor.chain().focus().deleteRange(range).insertContent({
+              type: 'mathBlock',
+              content: [{ type: 'text', text: 'E = mc^2' }],
+            }).run(),
+        },
+        {
+          title: 'Math Inline',
+          description: strings.items.mathInline,
+          icon: Sigma,
+          command: (editor, range) =>
+            editor.chain().focus().deleteRange(range).insertContent({
+              type: 'mathInline',
+              content: [{ type: 'text', text: 'x^2' }],
+            }).run(),
+        },
+        {
+          title: 'Toggle',
+          description: strings.items.toggle,
+          icon: ChevronRight,
+          command: (editor, range) =>
+            editor.chain().focus().deleteRange(range).insertContent({
+              type: 'toggleBlock',
+              attrs: { open: false },
+              content: [
+                { type: 'toggleSummary', content: [{ type: 'text', text: toggleTitle }] },
+                { type: 'toggleContent', content: [{ type: 'paragraph' }] },
+              ],
+            }).run(),
+        },
+        {
+          title: 'Page Embed',
+          description: strings.items.pageEmbed,
+          icon: FileText,
+          command: (editor, range) =>
+            editor.chain().focus().deleteRange(range).insertPageEmbed().run(),
+        },
+        {
+          title: 'Horizontal Rule',
+          description: strings.items.horizontalRule,
+          icon: Minus,
+          command: (editor, range) =>
+            editor.chain().focus().deleteRange(range).setHorizontalRule().run(),
+        },
+      ],
+    },
+  ];
+}
+
 interface SlashMenuRef {
   onKeyDown: (event: KeyboardEvent) => boolean;
 }
@@ -449,7 +716,7 @@ function applyPosition(
   });
 }
 
-function createSuggestionRenderer() {
+function createSuggestionRenderer(categories: SlashMenuCategory[]) {
   let popup: HTMLElement | null = null;
   let root: Root | null = null;
   let menuRef: SlashMenuRef | null = null;
@@ -475,7 +742,7 @@ function createSuggestionRenderer() {
         <SlashMenu
           ref={(r) => { menuRef = r; }}
           items={props.items}
-          categories={slashMenuCategories}
+          categories={categories}
           query={props.query}
           command={(item) => { item.command(props.editor, props.range); }}
         />,
@@ -495,7 +762,7 @@ function createSuggestionRenderer() {
         <SlashMenu
           ref={(r) => { menuRef = r; }}
           items={props.items}
-          categories={slashMenuCategories}
+          categories={categories}
           query={props.query}
           command={(item) => { item.command(props.editor, props.range); }}
         />,
@@ -521,6 +788,7 @@ function createSuggestionRenderer() {
   };
 }
 
+/** 하위호환 fallback(한글 고정) — 로케일 인지 소비처는 `createSlashCommandExtension`을 쓴다. */
 export const SlashCommandExtension = Extension.create({
   name: 'slashCommand',
 
@@ -532,7 +800,7 @@ export const SlashCommandExtension = Extension.create({
           defaultSlashItems.filter((item) =>
             item.title.toLowerCase().includes(query.toLowerCase()),
           ),
-        render: createSuggestionRenderer,
+        render: () => createSuggestionRenderer(slashMenuCategories),
       } satisfies Partial<SuggestionOptions<SlashMenuItem>>,
     };
   },
@@ -546,3 +814,36 @@ export const SlashCommandExtension = Extension.create({
     ];
   },
 });
+
+// story ab2fd813(#2028) — 로케일 문자열을 주입받는 팩토리. doc-editor.tsx가
+// useTranslations('docs.slashMenu')로 빌드한 SlashMenuStrings를 여기 넘긴다.
+export function createSlashCommandExtension(strings: SlashMenuStrings) {
+  const categories = buildSlashMenuCategories(strings);
+  const items = categories.flatMap((c) => c.items);
+
+  return Extension.create({
+    name: 'slashCommand',
+
+    addOptions() {
+      return {
+        suggestion: {
+          char: '/',
+          items: ({ query }: { query: string }) =>
+            items.filter((item) =>
+              item.title.toLowerCase().includes(query.toLowerCase()),
+            ),
+          render: () => createSuggestionRenderer(categories),
+        } satisfies Partial<SuggestionOptions<SlashMenuItem>>,
+      };
+    },
+
+    addProseMirrorPlugins() {
+      return [
+        Suggestion({
+          editor: this.editor,
+          ...this.options.suggestion,
+        }),
+      ];
+    },
+  });
+}

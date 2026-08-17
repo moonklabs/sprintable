@@ -196,7 +196,7 @@ async def test_list_backlog_uses_same_tokenized_and_match():
             seeded = await _seed(s)
         async with Session() as s:
             repo = StoryRepository(s, seeded["org_id"])
-            stories = await repo.list_backlog(
+            stories, _total = await repo.list_backlog(
                 project_id=seeded["project_id"], q="무인간 대화 체인 게이트",
             )
             assert {st.id for st in stories} == {seeded["story_chain_gate"]}

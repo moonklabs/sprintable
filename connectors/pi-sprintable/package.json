@@ -1,0 +1,29 @@
+{
+  "name": "sprintable-pi",
+  "version": "0.1.0",
+  "description": "Sprintable Gateway extension for Pi — real-time team chat via SSE dial-out, in-process ExtensionAPI (no inbound webhook required).",
+  "keywords": ["pi-coding-agent", "pi-package", "sprintable"],
+  "type": "module",
+  "files": ["index.ts", "sprintable-sse.ts", "README.md"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moonklabs/sprintable.git",
+    "directory": "connectors/pi-sprintable"
+  },
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": ">=0.84.0",
+    "@earendil-works/pi-ai": ">=0.84.0",
+    "@earendil-works/pi-coding-agent": ">=0.84.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-agent-core": ">=0.84.0",
+    "@earendil-works/pi-ai": ">=0.84.0",
+    "@earendil-works/pi-coding-agent": ">=0.84.0",
+    "@types/node": "*",
+    "typescript": "^5.9.0"
+  }
+}

@@ -114,6 +114,64 @@ describe('useUnifiedSwitcher — currentOrgProjects (story #2093 후속)', () =>
   });
 });
 
+// story f401139e — switchProject/switchOrgAndProject가 예전엔 현재 searchParams를 통째로
+// 이월하고 `p`만 갈아끼웠다. 리소스-scoped 쿼리(`story`/`hypothesis`/`id` 등)가 새 프로젝트로
+// 그대로 넘어가면 존재하지도 않는(또는 다른 프로젝트 소속) 리소스를 새 URL 아래서 열려고
+// 시도하게 되는 결함(그라운딩 확認)이라 화이트리스트로 뒤집었다 — project-agnostic 값(`view`·
+// `tab`)만 명시 이월하고 나머지는 기본적으로 버린다.
+function destQueryParams(dest: string): URLSearchParams {
+  const qIndex = dest.indexOf('?');
+  return new URLSearchParams(qIndex === -1 ? '' : dest.slice(qIndex + 1));
+}
+
+describe('useUnifiedSwitcher — 전환 시 쿼리파라미터 화이트리스트 (story f401139e)', () => {
+  it('switchProject: view/tab(project-agnostic)만 이월하고 story/hypothesis/id(리소스-scoped)는 버린다', async () => {
+    searchParamsValueRef.current = 'story=story-1&view=canvas&hypothesis=hyp-1&tab=board&id=sprint-1';
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
+    await act(async () => { root.render(<TestComp />); });
+
+    await act(async () => { await result?.switchProject('proj-sprintable'); });
+
+    expect(routerPushMock).toHaveBeenCalledTimes(1);
+    const dest = String(routerPushMock.mock.calls[0]![0]);
+    const q = destQueryParams(dest);
+    expect(q.get('view')).toBe('canvas');
+    expect(q.get('tab')).toBe('board');
+    expect(q.get('p')).toBe('proj-sprintable');
+    expect(q.has('story')).toBe(false);
+    expect(q.has('hypothesis')).toBe(false);
+    expect(q.has('id')).toBe(false);
+  });
+
+  it('switchOrgAndProject: 동일 화이트리스트 정책이 org+project 동시전환에도 적용된다', async () => {
+    searchParamsValueRef.current = 'story=story-1&view=list&assignee_id=member-9';
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
+    await act(async () => { root.render(<TestComp />); });
+
+    await act(async () => { await result?.switchOrgAndProject('org-dogfood', 'proj-dogfood'); });
+
+    expect(routerPushMock).toHaveBeenCalledTimes(1);
+    const dest = String(routerPushMock.mock.calls[0]![0]);
+    const q = destQueryParams(dest);
+    expect(q.get('view')).toBe('list');
+    expect(q.get('p')).toBe('proj-dogfood');
+    expect(q.has('story')).toBe(false);
+    expect(q.has('assignee_id')).toBe(false);
+  });
+
+  it('project-agnostic 파라미터가 아예 없으면 p만 실린다(빈 값 오염 없음)', async () => {
+    searchParamsValueRef.current = 'story=story-1&epic_id=epic-1';
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));
+    await act(async () => { root.render(<TestComp />); });
+
+    await act(async () => { await result?.switchProject('proj-sprintable'); });
+
+    const dest = String(routerPushMock.mock.calls[0]![0]);
+    const q = destQueryParams(dest);
+    expect([...q.keys()]).toEqual(['p']);
+  });
+});
+
 describe('useUnifiedSwitcher — switchProject의 ?next= 복귀 (story #2212)', () => {
   it('?next=이 안전한 내부경로면 프로젝트 선택 직후 그리로 router.push한다(원 목적지로 복귀)', async () => {
     searchParamsValueRef.current = 'next=%2Fboard';

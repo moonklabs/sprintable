@@ -11,6 +11,8 @@ import {
   type LoopFaceItem, type LoopFaceTranslator,
 } from './derive-loop-face';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 // story 6b707960 — 조직 브리핑 "루프" 면. S1 셸의 스켈레톤 자리에 배치 이동 없이 증분 장착
 // (org-briefing-shell.tsx의 duo grid 첫 칸, 목업 Frame A 배치 1:1).
 // story 64b9a879: 빈상태를 "가설을 세우면 검증까지 이어지는 과정이 여기 모입니다"로 전환하고
@@ -21,8 +23,8 @@ const REFRESH_MS = 60_000;
 
 async function loadLoopFace(projectId: string, t: LoopFaceTranslator): Promise<LoopFaceItem[]> {
   const [hyp, overview] = await Promise.all([
-    fetch(`/api/hypotheses?project_id=${projectId}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    fetch('/api/dashboard/overview').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    fetchWithAuth(`/api/hypotheses?project_id=${projectId}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    fetchWithAuth('/api/dashboard/overview').then((r) => (r.ok ? r.json() : null)).catch(() => null),
   ]);
   return buildLoopFace(parseHypotheses(hyp), parseEpicProgress(overview), t);
 }

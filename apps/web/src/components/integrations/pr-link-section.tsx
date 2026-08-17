@@ -6,6 +6,8 @@ import { GitPullRequest, ExternalLink, X, Plus, AlertTriangle, Check, Loader2 } 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 /**
  * E-GHAPP Bot-L.2 — in-app PR↔story 명시연결 관리 UI(story 상세 = 관리 홈). 2-tier 강한 분리:
  *   · 연결됨(canonical·confidence=high·explicit/sid-exact): close-on-merge 대상·solid 행.
@@ -46,7 +48,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
   const [prNum, setPrNum] = useState('');
 
   const loadLinks = useCallback(async () => {
-    const res = await fetch(`/api/integrations/github/links?story_id=${storyId}`)
+    const res = await fetchWithAuth(`/api/integrations/github/links?story_id=${storyId}`)
       .then((r) => (r.ok ? r.json() : { data: [] }))
       .catch(() => ({ data: [] }));
     // 방어적 언랩(가디언 ②·[[envelope-boundary]]): 프록시가 apiSuccess로 1회 감싸므로 res.data.
@@ -63,7 +65,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const st = await fetch('/api/integrations/github/status')
+      const st = await fetchWithAuth('/api/integrations/github/status')
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null);
       const s = (st?.data ?? st) as GithubStatus | null;

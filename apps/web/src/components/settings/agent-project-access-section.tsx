@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { cn } from '@/lib/utils';
+import { fetchWithAuth } from '@/lib/db/client';
 
 /**
  * org-agent 멀티프로젝트 접근 관리 (story 088987d8).
@@ -54,7 +55,7 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
     // 403(read 권한 없음)·일시 오류(500/네트워크)는 각각 별도 추적 — "grant 없음(차단)"으로
     // 오해석해 잘못된 토글/POST 를 유발하지 않는다(RC③·일시오류 fall-through RC).
     const results = await Promise.all(projects.map(async (p) => {
-      const res = await fetch(`/api/projects/${p.id}/access`).catch(() => null);
+      const res = await fetchWithAuth(`/api/projects/${p.id}/access`).catch(() => null);
       if (res?.status === 403) return { projectId: p.id, readDenied: true } as const;
       if (!res?.ok) return { projectId: p.id, error: true } as const; // transient — granted/denied 단정 안 함
       const json = await res.json() as { data?: AccessRecord[] };
@@ -87,7 +88,7 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
     try {
       if (recordId) {
         // 차단 — DELETE grant (키 불변).
-        const res = await fetch(`/api/projects/${projectId}/access/${recordId}`, { method: 'DELETE' });
+        const res = await fetchWithAuth(`/api/projects/${projectId}/access/${recordId}`, { method: 'DELETE' });
         if (res.ok) {
           setGrantMap((m) => { const n = { ...m }; delete n[projectId]; return n; });
           setMessage({ type: 'success', text: `${projectName} 접근을 차단했습니다.` });
@@ -96,7 +97,7 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
         }
       } else {
         // 허용 — POST grant (새 API 키 발급 없음).
-        const res = await fetch(`/api/projects/${projectId}/access`, {
+        const res = await fetchWithAuth(`/api/projects/${projectId}/access`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ member_id: agentMemberId, org_member_id: null, permission: 'granted' }),
@@ -105,7 +106,7 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
           let recId = (await res.json().catch(() => null) as { data?: AccessRecord } | null)?.data?.id;
           if (!recId) {
             // 응답에 record id 없으면 해당 프로젝트만 재조회(1콜)로 확보.
-            const g = await fetch(`/api/projects/${projectId}/access`).catch(() => null);
+            const g = await fetchWithAuth(`/api/projects/${projectId}/access`).catch(() => null);
             if (g?.ok) {
               const j = await g.json() as { data?: AccessRecord[] };
               recId = (j.data ?? []).find((r) => r.member_id === agentMemberId)?.id;

@@ -15,6 +15,8 @@ import { derivePendingCanonicalizeVersion, type CanonicalizeGateLookup } from '@
 import { deriveNodeOperations, type ArtifactNode } from '@/services/canvas-nodes';
 import { listSpecPins, type SpecPin } from '@/services/canvas-spec-pins';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 interface ArtifactSectionProps {
   storyId: string;
   memberMap?: Record<string, MemberRef>;
@@ -56,7 +58,7 @@ async function loadArtifactThreads(artifactId: string, nodes: ArtifactNode[]): P
  * 없다(_ok() 미경유). fetchJson과 별개 helper로 raw 배열을 직접 받는다(gate-inbox.tsx와 동일 관례). */
 async function loadPendingCanonicalizeVersion(artifactId: string): Promise<number | null> {
   try {
-    const res = await fetch(`/api/gates?work_item_id=${artifactId}&status=pending`);
+    const res = await fetchWithAuth(`/api/gates?work_item_id=${artifactId}&status=pending`);
     const gates = res.ok ? (await res.json()) as CanonicalizeGateLookup[] : [];
     return derivePendingCanonicalizeVersion(gates);
   } catch {

@@ -10,6 +10,8 @@ import type { EntityStatusFetchState } from '@/components/chat/entity-status-lab
 import { useEntityStatusBatchFetch } from '@/hooks/use-entity-status-batch';
 import type { EventDefinitionSummary } from '@/lib/block-template';
 
+import { fetchWithAuth } from '@/lib/db/client';
+
 // story #2262 PR② — 배치조회가 꺼진(구 호출부) 경우 훅에 넘길 안정적인 빈 배열 참조(매
 // 렌더 새 배열을 만들면 useEntityStatusBatchFetch의 effect가 messages 변경으로 오인해
 // 매번 재실행된다 — 어차피 빈 배열이라 fetch는 안 나가지만 불필요한 재실행 자체를 막는다).
@@ -71,7 +73,7 @@ export function ThreadPanel({
 
   const fetchThreadMessages = useCallback(async () => {
     try {
-      const res = await fetch(
+      const res = await fetchWithAuth(
         `/api/conversations/${conversationId}/messages?thread_id=${parentMessage.id}`,
       );
       if (!res.ok) return;
@@ -113,7 +115,7 @@ export function ThreadPanel({
   const handleSend = useCallback(async (content: string, mentionedIds?: string[]) => {
     const body: Record<string, unknown> = { content, thread_id: parentMessage.id };
     if (mentionedIds && mentionedIds.length > 0) body.mentioned_ids = mentionedIds;
-    const res = await fetch(`/api/conversations/${conversationId}/messages`, {
+    const res = await fetchWithAuth(`/api/conversations/${conversationId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

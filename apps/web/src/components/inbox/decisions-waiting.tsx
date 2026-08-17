@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { CheckCircle2, X, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { fetchWithAuth } from '@/lib/db/client';
 
 // Operator Cockpit Phase A2-MIN — pending decisions panel.
 // Reads from /api/inbox (inbox_items) and lets the operator resolve or dismiss
@@ -65,7 +66,11 @@ export function DecisionsWaiting({ onChange }: DecisionsWaitingProps = {}) {
   const fetchItems = useCallback(async () => {
     setError(null);
     try {
-      const res = await fetch('/api/inbox?state=pending');
+      // story #2689 — 콜드 재진입 시 raw fetch는 401을 재시도 없이 삼켜(아래 return) 이
+      // 패널이 영구히 비어 보였다. fetchWithAuth로 401→refresh→재시도 경로에 태운다 — 그래도
+      // 401이면(refresh 자체 실패) signalSessionExpired가 이미 전역 다이얼로그를 띄우므로
+      // 여기선 그대로 조용히 return.
+      const res = await fetchWithAuth('/api/inbox?state=pending');
       if (!res.ok) {
         if (res.status === 401) return;
         setError('fetch_failed');
