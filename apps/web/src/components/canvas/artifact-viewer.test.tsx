@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -249,5 +249,139 @@ describe('ArtifactViewer — provenance 중립 라벨(story 64010b05, §5 감시
       wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
     );
     expect(markup).not.toContain('임포트됨');
+  });
+});
+
+describe('ArtifactViewer — 새 좌표 코멘트 생성(story #2725, commentsComingSoon 자리표시자 대체)', () => {
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    // artifact-stage.test.tsx와 동일 기법 — bounds(DEFAULT_BOUNDS 1280x800) 1:1 매핑되는 rect.
+    rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 1280, bottom: 800, width: 1280, height: 800, toJSON() { return {}; },
+    } as DOMRect);
+  });
+  afterEach(async () => {
+    await act(async () => { root.unmount(); });
+    container.remove();
+    rectSpy.mockRestore();
+  });
+
+  function pickAt(clientX: number, clientY: number) {
+    const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+    return act(async () => {
+      viewport.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, clientX, clientY, button: 0 }));
+      viewport.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX, clientY }));
+    });
+  }
+
+  it('renders no toggle button without onCreateThread (읽기전용 폴백, onResolveThread/onReplyThread와 동일 옵션 규약)', async () => {
+    await act(async () => {
+      root.render(wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={[]} />));
+    });
+    expect(container.querySelector('button[aria-pressed]')).toBeNull();
+    const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+    expect(viewport.style.cursor).not.toBe('crosshair');
+  });
+
+  it('clicking the header comment badge toggles pin-add mode (crosshair cursor)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={[]} onCreateThread={() => {}} />,
+      ));
+    });
+    const toggle = container.querySelector('button[aria-pressed]') as HTMLButtonElement;
+    expect(toggle).not.toBeNull();
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+
+    await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(viewport.style.cursor).toBe('crosshair');
+  });
+
+  it('picking a coordinate in add-mode shows a draft pin + compose popover, and turns add-mode back off', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={[]} onCreateThread={() => {}} />,
+      ));
+    });
+    const toggle = container.querySelector('button[aria-pressed]') as HTMLButtonElement;
+    await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    await pickAt(640, 400); // 50%, 50%
+    expect(toggle.getAttribute('aria-pressed')).toBe('false'); // 픽 즉시 모드 종료
+    const textarea = container.querySelector('textarea');
+    expect(textarea).not.toBeNull();
+    expect(textarea!.placeholder).toBe('이 지점에 코멘트를 남기세요');
+  });
+
+  it('submitting the compose popover calls onCreateThread with the picked % and typed body, then clears the draft', async () => {
+    const onCreateThread = vi.fn();
+    await act(async () => {
+      root.render(wrap(
+        <ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={[]} onCreateThread={onCreateThread} />,
+      ));
+    });
+    const toggle = container.querySelector('button[aria-pressed]') as HTMLButtonElement;
+    await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await pickAt(320, 200); // 25%, 25%
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '여기가 어색해요');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === '코멘트')!;
+    await act(async () => { submitButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(onCreateThread).toHaveBeenCalledTimes(1);
+    const [x, y, body] = onCreateThread.mock.calls[0]!;
+    expect(x).toBeCloseTo(25, 5);
+    expect(y).toBeCloseTo(25, 5);
+    expect(body).toBe('여기가 어색해요');
+    expect(container.querySelector('textarea')).toBeNull(); // draft 소거
+  });
+
+  it('the cancel button discards the draft without calling onCreateThread', async () => {
+    const onCreateThread = vi.fn();
+    await act(async () => {
+      root.render(wrap(
+        <ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={[]} onCreateThread={onCreateThread} />,
+      ));
+    });
+    const toggle = container.querySelector('button[aria-pressed]') as HTMLButtonElement;
+    await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await pickAt(640, 400);
+
+    const cancelButton = [...container.querySelectorAll('button')].find((b) => b.textContent === '취소')!;
+    await act(async () => { cancelButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(onCreateThread).not.toHaveBeenCalled();
+    expect(container.querySelector('textarea')).toBeNull();
+  });
+
+  it('Escape discards the draft without calling onCreateThread', async () => {
+    const onCreateThread = vi.fn();
+    await act(async () => {
+      root.render(wrap(
+        <ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} threads={[]} onCreateThread={onCreateThread} />,
+      ));
+    });
+    const toggle = container.querySelector('button[aria-pressed]') as HTMLButtonElement;
+    await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await pickAt(640, 400);
+
+    const popover = container.querySelector('textarea')!.closest('div')!;
+    await act(async () => { popover.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })); });
+
+    expect(onCreateThread).not.toHaveBeenCalled();
+    expect(container.querySelector('textarea')).toBeNull();
   });
 });

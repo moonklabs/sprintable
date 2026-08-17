@@ -132,6 +132,13 @@ interface ArtifactStageProps {
    * 저작 시점 canvasBounds 자체는 건드리지 않는다(핀 좌표·썸네일 등 다른 소비처와 무관).
    */
   previewWidth?: number;
+  /** story #2725 — 좌표 픽 모드. true면 커서가 crosshair로 바뀌고, pan-드래그가 아닌 순수
+   * 클릭(탭)이 pan 대신 `onPickCoordinate`를 발화한다(기존 movedPast 임계값 판별 재사용 —
+   * 신규 click-vs-drag 로직 0). */
+  pinAddMode?: boolean;
+  /** 콘텐츠 좌표계 % (0~100, `AnchorPin` 오버레이가 이미 쓰는 것과 같은 단위 — CommentThread.anchor.x/y
+   * 컨벤션 그대로, canvas.ts:artifact-viewer.tsx의 `${x}%` 소비와 정합). */
+  onPickCoordinate?: (xPercent: number, yPercent: number) => void;
 }
 
 /**
@@ -140,11 +147,16 @@ interface ArtifactStageProps {
  * 안쪽만 다름). sandbox 무완화 유지(iframe은 여전히 `sandbox=""`) — pointer-events:none이라
  * 상호작용 레이어와 물리적으로 분리되므로 완화할 필요 자체가 없다.
  */
-function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 'view', contentRef, previewWidth }: {
+function CanvasViewport({
+  format, content, title, canvasBounds, overlay, mode = 'view', contentRef, previewWidth,
+  pinAddMode, onPickCoordinate,
+}: {
   format: ArtifactFormat; content: string; title: string;
   canvasBounds?: { w: number; h: number } | null; overlay?: React.ReactNode; mode?: 'view' | 'edit';
   contentRef?: React.RefObject<HTMLDivElement | null>;
   previewWidth?: number;
+  pinAddMode?: boolean;
+  onPickCoordinate?: (xPercent: number, yPercent: number) => void;
 }) {
   const t = useTranslations('canvas');
   // story 70a06b22 — 어제(74d6047e) 만든 터치 핀치/더블탭이 힌트 카피에 반영 안 된 발견성 갭
@@ -231,6 +243,23 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 
       return { ...next, scale: nextScale };
     });
   }, [viewportSize, bounds.w, bounds.h, clampPan]);
+
+  // story #2725 — screen 좌표(clientX/Y) → 콘텐츠 % 좌표. toggleZoomAtPoint와 동일한 rect-상대
+  // 변환(localX/Y → content 좌표)을 재사용하되, scale/bounds로 나눠 %(0~100)까지 낸다 —
+  // AnchorPin 오버레이가 이미 소비하는 단위(`${x}%`, artifact-viewer.tsx) 그대로. 콘텐츠 밖(팬
+  // 여백)을 클릭했을 수 있어 0~100으로 clamp(핀이 화면 밖으로 나가는 것 방지).
+  const pickCoordinateAt = useCallback((clientX: number, clientY: number) => {
+    const rect = viewportRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const localX = clientX - rect.left;
+    const localY = clientY - rect.top;
+    const contentX = (localX - transform.tx) / transform.scale;
+    const contentY = (localY - transform.ty) / transform.scale;
+    return {
+      xPercent: clamp((contentX / bounds.w) * 100, 0, 100),
+      yPercent: clamp((contentY / bounds.h) * 100, 0, 100),
+    };
+  }, [transform, bounds.w, bounds.h]);
 
   // 최초 진입 = fit(콘텐츠 전체가 즉시 보이는 것이 재설계의 근본 목적 — "잘림 상태 부존재").
   useEffect(() => {
@@ -332,7 +361,12 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 
         // 더블탭 판정 — 핀치의 일부였던 리프트(wasPinching)는 탭이 아니다. 순수 탭(이동<임계값)만.
         const d = dragRef.current;
         const wasTap = !wasPinching && d.pointerId === e.pointerId && !d.movedPast;
-        if (wasTap && liftedPos) {
+        if (wasTap && liftedPos && pinAddMode && onPickCoordinate) {
+          // story #2725 — 핀 추가 모드에서는 탭=픽(더블탭-줌 판별보다 우선 — 모드 중엔 줌
+          // 제스처를 기대하지 않는다, 유나 스케치 "클릭=픽").
+          const picked = pickCoordinateAt(liftedPos.x, liftedPos.y);
+          if (picked) onPickCoordinate(picked.xPercent, picked.yPercent);
+        } else if (wasTap && liftedPos) {
           const now = performance.now();
           const last = lastTapRef.current;
           const isDoubleTap = !!last && now - last.time < DOUBLE_TAP_MS
@@ -351,6 +385,12 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 
     }
     const d = dragRef.current;
     if (d.pointerId !== e.pointerId) return;
+    // story #2725 — 데스크톱 클릭=픽(임계값 미달 이동만, 기존 movedPast 판별 그대로 재사용 —
+    // 신규 click-vs-drag 로직 0). 릴리즈 전에 판정해야 e.clientX/Y가 아직 유효.
+    if (!d.movedPast && pinAddMode && onPickCoordinate) {
+      const picked = pickCoordinateAt(e.clientX, e.clientY);
+      if (picked) onPickCoordinate(picked.xPercent, picked.yPercent);
+    }
     const el = e.currentTarget as HTMLElement;
     if (typeof el.releasePointerCapture === 'function') el.releasePointerCapture(e.pointerId);
     dragRef.current.pointerId = -1;
@@ -412,7 +452,7 @@ function CanvasViewport({ format, content, title, canvasBounds, overlay, mode = 
         ref={viewportRef}
         data-artifact-canvas-viewport
         className="relative min-h-0 w-full flex-1 touch-none overflow-hidden rounded-lg border border-border bg-muted/20"
-        style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+        style={{ cursor: pinAddMode ? 'crosshair' : (isDragging ? 'grabbing' : 'grab') }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -504,6 +544,13 @@ function TreeStageContent(
  * allow-same-origin 둘 다 없음, 핸드오프 §3-1 + 유나 디자인 가디언 보안 지적 반영) 유지 —
  * pointer-events:none이 상호작용 레이어와 물리적으로 분리해 완화가 애초에 불필요.
  */
-export function ArtifactStage({ format, content, title, canvasBounds, overlay, mode, contentRef, previewWidth }: ArtifactStageProps) {
-  return <CanvasViewport format={format} content={content} title={title} canvasBounds={canvasBounds} overlay={overlay} mode={mode} contentRef={contentRef} previewWidth={previewWidth} />;
+export function ArtifactStage({
+  format, content, title, canvasBounds, overlay, mode, contentRef, previewWidth, pinAddMode, onPickCoordinate,
+}: ArtifactStageProps) {
+  return (
+    <CanvasViewport
+      format={format} content={content} title={title} canvasBounds={canvasBounds} overlay={overlay} mode={mode}
+      contentRef={contentRef} previewWidth={previewWidth} pinAddMode={pinAddMode} onPickCoordinate={onPickCoordinate}
+    />
+  );
 }

@@ -139,6 +139,20 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
     await refreshThreads(artifactId, nodes);
   }
 
+  /** story #2725 — 새 좌표 스레드 생성. handleReply와 동일 CREATE 엔드포인트, parent_id 대신
+   * anchor_x/anchor_y(% — CommentThread.anchor.x/y와 같은 컨벤션)를 실어 신규 스레드로 만든다.
+   * BE 신규 0(그라운딩 확認 — 기존 POST /{id}/comments가 이미 anchor_x/anchor_y를 받음). */
+  async function handleCreateThread(
+    artifactId: string, nodes: ArtifactNode[], anchorXPercent: number, anchorYPercent: number, body: string,
+  ) {
+    await fetchJson(`/api/visual-artifacts/${artifactId}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: body, anchor_x: anchorXPercent, anchor_y: anchorYPercent }),
+    });
+    await refreshThreads(artifactId, nodes);
+  }
+
   async function handleProposeCanonical(artifactId: string, versionNumber: number) {
     await fetchJson(`/api/visual-artifacts/${artifactId}/versions/${versionNumber}/canonicalize`, { method: 'POST' });
     const pendingCanonicalizeVersion = await loadPendingCanonicalizeVersion(artifactId);
@@ -288,6 +302,7 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
             onEnterEdit={() => setEditingArtifactId(artifact.id)}
             onResolveThread={(threadId) => void handleResolve(artifact.id, nodes, threadId)}
             onReplyThread={(threadId, body) => void handleReply(artifact.id, nodes, threadId, body)}
+            onCreateThread={(x, y, body) => void handleCreateThread(artifact.id, nodes, x, y, body)}
             pendingCanonicalizeVersion={pendingCanonicalizeVersion}
             onProposeCanonical={(versionNumber) => void handleProposeCanonical(artifact.id, versionNumber)}
           />
