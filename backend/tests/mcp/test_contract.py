@@ -107,6 +107,7 @@ EXPECTED_TOOLS = {
     "sprintable_create_artifact", "sprintable_get_artifact", "sprintable_list_artifacts",
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
     "sprintable_edit_artifact", "sprintable_propose_canonical_version",
+    "sprintable_import_image_artifact",
     "sprintable_list_spec_pins", "sprintable_create_spec_pin", "sprintable_update_spec_pin",
     "sprintable_delete_spec_pin", "sprintable_delete_artifact",
     # events (2) — story #2634: 이벤트 레지스트리 발행/카탈로그 조회.
@@ -138,7 +139,7 @@ def test_total_tool_count():
     # 119→121. story #2668(B3): sprintable_submit_for_approval 1종 신설(문서 결재 상신
     # REST를 MCP로 노출 — 도구 목록에 없어 에이전트가 발견 못 하던 것) — 121→122.
     # story #2709: sprintable_request_decision 1종 신설(AskUserQuestion 블로킹 대체) — 122→123.
-    assert len(_TOOLS) == 123
+    assert len(_TOOLS) == 124  # story b6b9c52d(#2707 부수): sprintable_import_image_artifact 신설 123→124
 
 
 def test_all_expected_tools_registered():

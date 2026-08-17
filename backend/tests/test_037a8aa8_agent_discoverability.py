@@ -17,7 +17,7 @@ _CANVAS_TOOL_NAMES = (
     "sprintable_list_artifact_comments", "sprintable_add_artifact_comment",
     "sprintable_edit_artifact", "sprintable_propose_canonical_version",
     "sprintable_list_spec_pins", "sprintable_create_spec_pin", "sprintable_update_spec_pin",
-    "sprintable_delete_spec_pin",
+    "sprintable_delete_spec_pin", "sprintable_import_image_artifact",
 )
 
 

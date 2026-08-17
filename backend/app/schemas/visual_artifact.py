@@ -72,6 +72,18 @@ class CreateArtifactRequest(BaseModel):
         return v
 
 
+class ImportImageArtifactRequest(BaseModel):
+    """story b6b9c52d(#2707 부수) — MCP `import_image_artifact` 입구. FE
+    `apps/web/src/app/api/visual-artifacts/import-image/route.ts`(story 64010b05)의 base64 포팅판
+    — Bash/HTTP 클라이언트가 없는 에이전트는 그 라우트를 스스로 못 타므로(2단계 curl 수동 플로우
+    불가), base64 인라인 한 번으로 업로드+artifact 생성까지 묶는다."""
+    title: str
+    image_base64: str
+    content_type: str
+    story_id: uuid.UUID | None = None
+    doc_id: uuid.UUID | None = None
+
+
 class ArtifactVersionSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
