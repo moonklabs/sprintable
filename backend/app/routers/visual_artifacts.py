@@ -291,6 +291,40 @@ async def get_artifact(
     return _ok(detail.model_dump(mode="json"))
 
 
+@router.get("/{id}/backlinks")
+async def get_artifact_backlinks(
+    id: uuid.UUID,
+    limit: int = Query(default=30, ge=1, le=200),
+    before: str | None = Query(default=None),
+    auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context_no_key_scope_check),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """GET /api/v2/visual-artifacts/{id}/backlinks — story #2721(아티팩트 원장 1급화 1단).
+    이 artifact를 가리키는 chat_message/doc/story 목록(역방향) — stories.py의
+    get_story_backlinks와 동형(`list_entity_backlinks` 코어 그대로 재사용, 새 쿼리 발명 0).
+    TARGET 접근 게이트는 이 파일 기존 관례인 `_get_artifact_or_404`(org_id+project_id 404,
+    story #2266 §8①이 요구하는 "호출부가 TARGET 접근을 이미 검증" 계약 충족).
+
+    WRITE(entity_references에 target_type=artifact 저장)는 이미 배선돼 있었다(reference_
+    registry.ENTITY_RESOLVERS에 artifact가 이미 등재 — 그라운딩 실PG 실증) — 이 엔드포인트가
+    이 스토리의 유일한 신규 로직이다. 이 파일 다른 GET들과 동형으로 `get_scope_context_no_key_
+    scope_check`(read 전용 — story #2708 판정) 사용."""
+    org_id, project_id = scope["org_id"], scope["project_id"]
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+
+    from app.services.backlinks import list_entity_backlinks
+    result = await list_entity_backlinks(
+        session, org_id=org_id, target_type="artifact", target_id=id,
+        auth=auth, limit=limit, cursor=before,
+    )
+    return _ok(result["data"], meta=result["meta"])
+
+
 @router.get("/{id}/versions")
 async def list_artifact_versions(
     id: uuid.UUID,

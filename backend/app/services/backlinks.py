@@ -185,6 +185,7 @@ from app.models.doc import Doc
 from app.models.meeting import Meeting
 from app.models.pm import Story
 from app.models.reference import Reference
+from app.models.visual_artifact import VisualArtifact
 from app.services.conversation_auth import conversation_readable_predicate
 from app.services.member_resolver import ResolvedMember, lookup_members_by_ids
 from app.services.project_auth import (
@@ -266,11 +267,16 @@ async def _chat_predicate_inputs(
 # 구멍»이 생긴다 — 이 함수는 TARGET 접근 검증을 스스로 하지 않고(§8①) 호출부(라우터)가
 # 이미 검증했다는 전제로 짜여 있기 때문(위 docstring 참조). 그래서 "이 타입은 호출부가 실제로
 # 게이트를 세웠다"를 이 allowlist가 보증한다 — 코드 레벨 계약이지 편의 목록이 아니다.
-BACKLINKS_ALLOWED_TARGET_TYPES = frozenset({"doc", "story"})
+BACKLINKS_ALLOWED_TARGET_TYPES = frozenset({"doc", "story", "artifact"})
 # ⛔registry(reference_registry.ENTITY_RESOLVERS)의 나머지 타입(epic 등)이 여기 없는 이유는
 # "의도적 제외"가 아니라 **게이트 미비**다 — 그 타입들의 라우터에 아직 이 함수와 동형인
 # TARGET project-access 선-게이트(docs.py._require_doc_project_access ·
 # stories.py._assert_story_project_access)가 없다. 게이트가 서는 순서대로 여기 추가한다.
+# story #2721(2026-08-17): artifact 추가 — visual_artifacts.py의 `_get_artifact_or_404`가
+# 이미 동형 TARGET project-access 게이트(org_id+project_id 조합 404)라 그대로 재사용,
+# 새 게이트 발명 0. WRITE(entity_references에 target_type=artifact 저장)는 reference_registry.
+# ENTITY_RESOLVERS에 이미 등재돼 실측 확認됨(그라운딩) — 이 스토리는 READ(backlinks 조회)
+# 축만 연다.
 
 
 class UnsupportedBacklinkTargetTypeError(ValueError):
@@ -291,7 +297,7 @@ class UnsupportedBacklinkTargetTypeError(ValueError):
 # 목록과 같은 목록을 쓴다, 별도 목록을 만들지 않는다") — 이 dict의 키를 늘릴 땐 반드시
 # BACKLINKS_ALLOWED_TARGET_TYPES도 같이 늘어 있어야 한다(파생이 아니라 하드코딩인 이유: model
 # 클래스 자체는 registry가 담을 수 없는 타입정보라 여기 한 곳에만 둔다).
-_ZERO_REF_MODELS: dict[str, type] = {"doc": Doc, "story": Story}
+_ZERO_REF_MODELS: dict[str, type] = {"doc": Doc, "story": Story, "artifact": VisualArtifact}
 
 
 async def count_zero_referenced_entities(
