@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.auth import AuthContext, get_current_user, get_scope_context, get_scope_context_no_key_scope_check
 from app.dependencies.database import get_db
 from app.models.asset import Asset
 from app.services.artifact_image_url import _canonicalize_props, sign_image_srcs_in_nodes
@@ -49,13 +49,19 @@ def _err(code: str, message: str, status: int) -> JSONResponse:
     return JSONResponse({"data": None, "error": {"code": code, "message": message}, "meta": None}, status_code=status)
 
 
-def _get_org_project(auth: AuthContext) -> tuple[uuid.UUID | None, uuid.UUID | None]:
-    meta = auth.claims.get("app_metadata", {})
-    o = meta.get("org_id")
-    p = meta.get("project_id")
-    if not o or not p:
-        return None, None
-    return uuid.UUID(str(o)), uuid.UUID(str(p))
+# story #2708(2026-08-17, 페드루 PO 판정) — _get_org_project(auth) 헬퍼를 걷어냈다. 그 헬퍼는
+# auth.claims의 JWT app_metadata.project_id만 읽어 X-Project-Id 헤더를 아예 몰랐다(파라미터로도
+# 안 받음) — 브라우저가 현재 보고 있는 프로젝트와 무관하게 JWT에 구워진(다른/기본) project_id로
+# 조용히 스코프해, 아티팩트 갤러리가 실재 60+건을 두고 「No artifacts collected yet」로 빈
+# 화면을 보였다(원 인시던트, 유나 라이브 판별). 이 파일 19곳 전부가 같은 헬퍼를 썼다 — 판정을
+# 한 곳(get_scope_context, auth.py)으로 통일한다(들쭉날쭉 금지 원칙, story 22caa39b와 동형).
+#
+# get_scope_context()는 내부에서 get_verified_org_id(x_project_id=...)를 거치므로 헤더로 지정한
+# 프로젝트가 has_project_access(team_member ∪ grant ∪ owner/admin)로 **이미 멤버십 검증**된다
+# (auth.py get_verified_org_id 참조) — 헤더를 열어주는 대신 IDOR을 새로 여는 일은 없다. 19곳
+# 전부 `scope: dict = Depends(get_scope_context)`를 받아 `scope["org_id"]`/`scope["project_id"]`로
+# 읽는다(MCP/API키 경로는 x_project_id 헤더가 없으므로 기존처럼 키에 구운 JWT project_id가
+# 그대로 이김 — get_scope_context 내부 `jwt_project_id or x_project_id` 순서 그대로).
 
 
 _LINK_TABLES = {"story_id": "stories", "epic_id": "goals", "doc_id": "docs"}
@@ -123,10 +129,10 @@ async def _notify_artifact_created(
 async def create_artifact(
     body: CreateArtifactRequest,
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context),
     session: AsyncSession = Depends(get_db),
-    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id:
         return _err("FORBIDDEN", "org_id required", 403)
 
@@ -270,9 +276,10 @@ async def _load_detail(session: AsyncSession, artifact: VisualArtifact, version_
 async def get_artifact(
     id: uuid.UUID,
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context_no_key_scope_check),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
@@ -288,9 +295,10 @@ async def get_artifact(
 async def list_artifact_versions(
     id: uuid.UUID,
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context_no_key_scope_check),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
@@ -310,10 +318,11 @@ async def get_artifact_version(
     id: uuid.UUID,
     version_number: int,
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context_no_key_scope_check),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """무-mutate 버전 조회 — 미르코 §6-1 갭 지적 대응(mockup은 restore=즉시 라이브 덮어씀)."""
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
@@ -334,6 +343,7 @@ async def list_artifacts(
     limit: int = Query(default=500, ge=1, le=1000),
     cursor: str | None = Query(default=None, description="ISO 8601 created_at, fetch before this time — 이전 페이지 meta.next_cursor 값 그대로"),
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context_no_key_scope_check),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """story #2428 PR④(ⓐ) — 예전엔 limit이 아예 없어 project 전체 artifact가 조용히 다
@@ -347,7 +357,7 @@ async def list_artifacts(
     # doc_id 미지정 호출(파라미터 없는 목록 조회)이 org 전체 artifact를 반환했다(cross-project
     # 노출·미르코 라이브 실측). create_artifact/get_artifact와 동형으로 JWT/API키 컨텍스트의
     # project_id(비-caller-suppliable)로 항상 스코프.
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
 
@@ -415,11 +425,11 @@ async def list_artifacts(
 async def delete_artifact(
     id: uuid.UUID,
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context),
     session: AsyncSession = Depends(get_db),
-    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     """생성자만 삭제 가능(Evidence 패턴 계승 — "누가 주어인가"). soft delete."""
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
@@ -445,13 +455,14 @@ async def list_artifact_comments(
     limit: int = Query(default=50, le=200),
     cursor: str | None = Query(default=None, description="ISO 8601 created_at, fetch after this time — 이전 페이지 meta.next_cursor 값 그대로(오래된순 정렬이라 forward-cursor)"),
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context_no_key_scope_check),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """story #2428 PR④(ⓐ) — limit은 있었으나 total/has_more가 없어 잘렸는지 호출자가 알 수
     없었다(활발한 토론 스레드는 챗 스레드와 동형 무한성장 위험). list_artifacts와 동일하게
     limit+1 오버페치 + has_more/next_cursor body meta(docs.py 정본 규약 A) — 정렬이 오래된순
     (asc)이라 next_cursor는 "이 시각 이후"로 이어가는 forward cursor."""
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
@@ -486,10 +497,10 @@ async def add_artifact_comment(
     id: uuid.UUID,
     body: CreateArtifactCommentRequest,
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context),
     session: AsyncSession = Depends(get_db),
-    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
@@ -549,10 +560,10 @@ async def resolve_artifact_comment(
     id: uuid.UUID,
     comment_id: uuid.UUID,
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context),
     session: AsyncSession = Depends(get_db),
-    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
@@ -586,9 +597,10 @@ async def resolve_artifact_comment(
 async def list_spec_pins(
     id: uuid.UUID,
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context_no_key_scope_check),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
@@ -609,10 +621,10 @@ async def create_spec_pin(
     id: uuid.UUID,
     body: CreateSpecPinRequest,
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context),
     session: AsyncSession = Depends(get_db),
-    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
@@ -664,10 +676,10 @@ async def update_spec_pin(
     pin_id: uuid.UUID,
     body: UpdateSpecPinRequest,
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context),
     session: AsyncSession = Depends(get_db),
-    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
@@ -686,10 +698,10 @@ async def delete_spec_pin(
     id: uuid.UUID,
     pin_id: uuid.UUID,
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context),
     session: AsyncSession = Depends(get_db),
-    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
@@ -790,14 +802,14 @@ async def create_export_upload_url(
     version_number: int,
     body: ExportUploadUrlRequest,
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context),
     session: AsyncSession = Depends(get_db),
-    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     from datetime import datetime, timedelta, timezone
 
     from app.services.storage import get_storage_provider
 
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
@@ -826,12 +838,12 @@ async def complete_png_export(
     version_number: int,
     body: CompleteExportRequest,
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context),
     session: AsyncSession = Depends(get_db),
-    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     from app.services.storage import get_storage_provider
 
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
@@ -885,14 +897,14 @@ async def create_html_export(
     id: uuid.UUID,
     version_number: int,
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context),
     session: AsyncSession = Depends(get_db),
-    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     """self-contained HTML export — 렌더 불요(nodes 트리를 BE가 직렬화), client-trust 이슈 없어
     즉시 put_object(유나 UX②: as-authored — 별도 재테마 없이 저장된 props 그대로 직렬화)."""
     from app.services.storage import get_storage_provider
 
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
@@ -976,9 +988,10 @@ async def list_artifact_exports(
     id: uuid.UUID,
     version_number: int | None = Query(default=None),
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context_no_key_scope_check),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
@@ -1143,12 +1156,12 @@ async def edit_artifact(
     id: uuid.UUID,
     body: EditArtifactRequest,
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context),
     session: AsyncSession = Depends(get_db),
-    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     """딸깍 편집(FE) + MCP 편집(에이전트) 공용 엔드포인트 — 요소 add/update/delete를 적용해
     새 버전을 만든다(무-mutate 버전 원칙 계승)."""
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
@@ -1198,14 +1211,14 @@ async def propose_canonical_version(
     id: uuid.UUID,
     version_number: int,
     auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context),
     session: AsyncSession = Depends(get_db),
-    _write_scope_check: uuid.UUID = Depends(get_verified_org_id),
 ) -> JSONResponse:
     """정본으로 제안 — AI는 제안만(MCP도 동일 엔드포인트), 승인은 always-HITL(gate_service).
     이미 pending 제안이 있으면 멱등(create_gate 자체 멱등 재사용)."""
     from app.services.gate_service import create_gate
 
-    org_id, project_id = _get_org_project(auth)
+    org_id, project_id = scope["org_id"], scope["project_id"]
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
