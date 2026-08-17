@@ -518,6 +518,83 @@ describe('ArtifactStage — 캔버스 뷰포트(story 1948d19d)', () => {
       expect(container.textContent).not.toContain('트리 렌더는 준비 중');
     });
   });
+
+  describe('story #2725 — 좌표 픽 모드(핀 추가, 기존 click-vs-drag 판별 재사용)', () => {
+    let rectSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      // bounds(DEFAULT_BOUNDS 1280x800) 1:1 매핑되는 rect — scale=1(auto-fit 미발동, clientWidth/
+      // Height 기본 0)이라 clientX/Y가 곧 content px, /bounds.w,h*100이 그대로 기대 %.
+      rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+        x: 0, y: 0, left: 0, top: 0, right: 1280, bottom: 800, width: 1280, height: 800, toJSON() { return {}; },
+      } as DOMRect);
+    });
+    afterEach(() => { rectSpy.mockRestore(); });
+
+    it('a click (no movement) in pinAddMode picks the content-space % coordinate, not a pan', async () => {
+      const onPickCoordinate = vi.fn();
+      await mount({ pinAddMode: true, onPickCoordinate });
+      const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+      const content = container.querySelector('[data-artifact-canvas-content]') as HTMLDivElement;
+      const before = readTransform(content);
+
+      await act(async () => { press(viewport, 'pointerdown', { pointerId: 1, clientX: 640, clientY: 400, button: 0 }); });
+      await act(async () => { press(viewport, 'pointerup', { pointerId: 1, clientX: 640, clientY: 400 }); });
+
+      expect(onPickCoordinate).toHaveBeenCalledTimes(1);
+      const [x, y] = onPickCoordinate.mock.calls[0]!;
+      expect(x).toBeCloseTo(50, 5); // 640/1280*100
+      expect(y).toBeCloseTo(50, 5); // 400/800*100
+      expect(readTransform(content)).toEqual(before); // pan 미발생(순수 pick)
+    });
+
+    it('a drag past the threshold in pinAddMode pans instead of picking (움직인 클릭=여전히 pan)', async () => {
+      const onPickCoordinate = vi.fn();
+      await mount({ pinAddMode: true, onPickCoordinate });
+      const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+
+      await act(async () => { press(viewport, 'pointerdown', { pointerId: 1, clientX: 100, clientY: 100, button: 0 }); });
+      await act(async () => { press(viewport, 'pointermove', { pointerId: 1, clientX: 160, clientY: 130 }); }); // 임계 초과
+      await act(async () => { press(viewport, 'pointerup', { pointerId: 1, clientX: 160, clientY: 130 }); });
+
+      expect(onPickCoordinate).not.toHaveBeenCalled();
+    });
+
+    it('pinAddMode=false — a plain click never picks even with onPickCoordinate provided (옵트인 가드)', async () => {
+      const onPickCoordinate = vi.fn();
+      await mount({ pinAddMode: false, onPickCoordinate });
+      const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+
+      await act(async () => { press(viewport, 'pointerdown', { pointerId: 1, clientX: 640, clientY: 400, button: 0 }); });
+      await act(async () => { press(viewport, 'pointerup', { pointerId: 1, clientX: 640, clientY: 400 }); });
+
+      expect(onPickCoordinate).not.toHaveBeenCalled();
+    });
+
+    it('a touch tap in pinAddMode also picks a coordinate (모바일 경로 — 데스크톱과 동일 계약)', async () => {
+      const onPickCoordinate = vi.fn();
+      await mount({ pinAddMode: true, onPickCoordinate });
+      const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+
+      await act(async () => {
+        press(viewport, 'pointerdown', { pointerId: 1, pointerType: 'touch', clientX: 320, clientY: 200, button: 0 });
+      });
+      await act(async () => {
+        press(viewport, 'pointerup', { pointerId: 1, pointerType: 'touch', clientX: 320, clientY: 200 });
+      });
+
+      expect(onPickCoordinate).toHaveBeenCalledTimes(1);
+      const [x, y] = onPickCoordinate.mock.calls[0]!;
+      expect(x).toBeCloseTo(25, 5); // 320/1280*100
+      expect(y).toBeCloseTo(25, 5); // 200/800*100
+    });
+
+    it('sets cursor:crosshair while in pinAddMode (fit 버튼류의 grab/grabbing 대체)', async () => {
+      await mount({ pinAddMode: true });
+      const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+      expect(viewport.style.cursor).toBe('crosshair');
+    });
+  });
 });
 
 describe('isResponsiveHtml(story 3d0d60a3) — @media 소스 파싱(유나 1순위 판정, 신규 BE 0)', () => {

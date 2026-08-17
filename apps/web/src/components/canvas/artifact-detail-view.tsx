@@ -32,12 +32,10 @@ type DetailState = DetailItem | null | 'not_found';
  * 재사용해 `ArtifactViewer`를 직접 그린다(신규 코멘트/핀 저장 로직 0 — 기존 reply/resolve
  * 엔드포인트 그대로).
  *
- * ⚠️ "새 좌표 코멘트를 처음부터 남기기"(핀 없이 캔버스를 클릭해 새 스레드를 여는 것)는
- * `ArtifactSection`에도 없다 — `onReplyThread`는 항상 기존 threadId(parent_id)에 대한
- * 답글만 만든다(handleReply 구현 확認). 즉 `ArtifactViewer` 헤더의 `commentsComingSoon`은
- * 이 스토리가 되돌릴 수 있는 "남겨진 단순 플래그"가 아니라, 아직 어디에도 안 지어진 별도
- * 트랙(코멘트 최초 작성 UI)의 자리표시자다 — 이번 판은 그 트랙을 새로 짓지 않고 기존 도달성
- * (있는 코멘트 열람 + 기존 스레드에 답글)만 standalone까지 넓힌다.
+ * story #2725(후속 착지) — 당시엔 "새 좌표 코멘트를 처음부터 남기는" UI가 FE 어디에도 없었다
+ * (`ArtifactViewer`의 `commentsComingSoon`은 미착지 트랙의 자리표시자였음). 이제
+ * `onCreateThread`(핀 추가 모드→캔버스 픽→작성)로 착지 — standalone 표면에서도 동형(아래
+ * `handleCreateThread`).
  */
 export function ArtifactDetailView({ artifactId }: { artifactId: string }) {
   const t = useTranslations('canvas');
@@ -81,6 +79,17 @@ export function ArtifactDetailView({ artifactId }: { artifactId: string }) {
     await refreshThreads(nodes);
   }
 
+  /** story #2725 — 새 좌표 스레드 생성. artifact-section.tsx의 handleCreateThread와 동형(같은
+   * CREATE 엔드포인트 재사용, BE 신규 0). */
+  async function handleCreateThread(nodes: ArtifactNode[], anchorXPercent: number, anchorYPercent: number, body: string) {
+    await fetchJson(`/api/visual-artifacts/${artifactId}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: body, anchor_x: anchorXPercent, anchor_y: anchorYPercent }),
+    });
+    await refreshThreads(nodes);
+  }
+
   async function handleProposeCanonical(versionNumber: number) {
     await fetchJson(`/api/visual-artifacts/${artifactId}/versions/${versionNumber}/canonicalize`, { method: 'POST' });
     const pendingCanonicalizeVersion = await loadPendingCanonicalizeVersion(artifactId);
@@ -118,6 +127,7 @@ export function ArtifactDetailView({ artifactId }: { artifactId: string }) {
         specPins={specPins}
         onResolveThread={(threadId) => void handleResolve(nodes, threadId)}
         onReplyThread={(threadId, body) => void handleReply(nodes, threadId, body)}
+        onCreateThread={(x, y, body) => void handleCreateThread(nodes, x, y, body)}
         pendingCanonicalizeVersion={pendingCanonicalizeVersion}
         onProposeCanonical={(versionNumber) => void handleProposeCanonical(versionNumber)}
       />
