@@ -172,8 +172,14 @@ class VisualArtifactDetail(BaseModel):
 class CreateArtifactCommentRequest(BaseModel):
     content: str
     node_id: uuid.UUID | None = None
-    anchor_x: float | None = None
-    anchor_y: float | None = None
+    # story #154a26be — 좌표 앵커 규약은 %(0~100), ratio(0~1)나 픽셀이 아니다(FE
+    # artifact-viewer.tsx가 `style={{ left: "${x}%" }}`로 직접 CSS % 소비). 기존엔 이
+    # 규약이 소비처 관행으로만 서 있고 서버가 안 막아 다른 단위 클라이언트가 통과·핀이
+    # 조용히 딴 자리에 렌더될 수 있었다("금지 AC=서버가 거부" 원칙 위반) — 실측으로
+    # artifact_spec_pins에 이미 픽셀 단위(638.4, 398.4)로 오염된 행 1건 확認(2026-07-13,
+    # 이 fix 前 생성분이라 소급 안 함, PO 판단).
+    anchor_x: float | None = Field(default=None, ge=0, le=100, description="캔버스 폭 대비 %(0~100) — ratio(0~1)·픽셀 아님")
+    anchor_y: float | None = Field(default=None, ge=0, le=100, description="캔버스 높이 대비 %(0~100) — ratio(0~1)·픽셀 아님")
     parent_id: uuid.UUID | None = None
     mentioned_ids: list[uuid.UUID] = []
 
@@ -209,6 +215,10 @@ class CreateSpecPinRequest(BaseModel):
     """편집 캔버스 핀 저작(story 7fe16274) — anchor_type이 좌표/노드 중 무엇이든 description은
     non-null 강제(doc §3 — 빈 스펙 커밋 차단)."""
     anchor_type: str
+    # story #154a26be — %(0~100) 규약, 하한만 있고 상한이 없던 갭. 실측: 이 클래스로 생성된
+    # 기존 유일한 좌표 핀 1건이 이미 픽셀 단위(638.4, 398.4)로 저장돼 있었다(2026-07-13,
+    # 이 fix 前 — 소급 안 함, PO 판단) — «다른 단위 클라이언트가 통과» 리스크의 실제 사례.
+    # 상한은 아래 _validate_anchor_consistency에서(anchor_type 분기와 같은 자리) 확認.
     anchor_x: float | None = None
     anchor_y: float | None = None
     node_id: uuid.UUID | None = None
@@ -237,8 +247,8 @@ class CreateSpecPinRequest(BaseModel):
                 raise ValueError("coord anchor requires both anchor_x and anchor_y")
             if self.node_id is not None:
                 raise ValueError("coord anchor must not set node_id")
-            if self.anchor_x < 0 or self.anchor_y < 0:
-                raise ValueError("anchor_x/anchor_y must be non-negative")
+            if self.anchor_x < 0 or self.anchor_x > 100 or self.anchor_y < 0 or self.anchor_y > 100:
+                raise ValueError("anchor_x/anchor_y must be within 0..100 (%, not ratio/pixel)")
         else:  # node
             if self.node_id is None:
                 raise ValueError("node anchor requires node_id")
