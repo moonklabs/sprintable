@@ -44,6 +44,11 @@ ENV NEXT_PUBLIC_GA4_MEASUREMENT_ID=${NEXT_PUBLIC_GA4_MEASUREMENT_ID}
 # 안 돼 별도 판단으로 미룬다. 기본값 false(미설정 시 dev-safe fallback).
 ARG NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED=false
 ENV NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED=${NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED}
+# story #2728 후속(2026-08-17) — apps/web/src/lib/ee.ts의 isEEEnabled()가 읽는 빌드타임
+# 인라인 값. 여태 ARG/ENV 어디에도 배선된 적이 없어 dev/prod 둘 다 항상 undefined(=false)
+# 였다 — 기본값 false(미설정 시 dev-safe fallback, SSE_MULTIPLEX_ENABLED와 동일 컨벤션).
+ARG NEXT_PUBLIC_EE_ENABLED=false
+ENV NEXT_PUBLIC_EE_ENABLED=${NEXT_PUBLIC_EE_ENABLED}
 RUN pnpm build
 
 # ─── 런타임 ──────────────────────────────────────────────────────────────────
