@@ -23,6 +23,7 @@ from app.dependencies.database import get_db
 from app.models.asset import Asset, AssetLink
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.pm import Story
+from app.services.asset_registry import canonical_object_path as _canonical_object_path
 from app.services.asset_registry import path_in_source_scope
 from app.services.member_resolver import resolve_member
 from app.services.project_auth import has_project_access
@@ -32,20 +33,9 @@ router = APIRouter(prefix="/api/v2/attachments", tags=["attachments", "Knowledge
 _BUCKET = os.environ.get("GCS_MEMO_ATTACHMENTS_BUCKET", "sprintable-memo-attachments")
 _PUBLIC_PREFIX = f"https://storage.googleapis.com/{_BUCKET}/"
 
-
-def _canonical_object_path(stored_url: str) -> str | None:
-    """stored attachment url → canonical GCS object path. 우리 버킷 외/비정상이면 None.
-
-    신규 = bare object path 그대로. legacy = `https://storage.googleapis.com/{bucket}/{path}`.
-    다른 도메인/스킴 URL 은 None(유효 객체 아님) → 임의-URL 삽입 차단.
-    """
-    if not stored_url:
-        return None
-    if stored_url.startswith(_PUBLIC_PREFIX):
-        return stored_url[len(_PUBLIC_PREFIX):]
-    if "://" in stored_url:
-        return None  # 외부 도메인 등 → 우리 객체 아님
-    return stored_url  # 이미 bare object path
+# story #2720(2026-08-17) — 이 파일 자체 재구현을 없애고 asset_registry.canonical_object_path
+# (BE canonicalization SSOT)를 alias로 소비한다. 호출부(아래) 시그니처는 무변경(container
+# 인자 없이 이 버킷 default로 호출) — 리팩터 diff를 호출부가 아니라 정의부로 국한한다.
 
 
 @router.get("/authorize")

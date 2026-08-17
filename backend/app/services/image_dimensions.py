@@ -15,12 +15,12 @@ from __future__ import annotations
 import logging
 import os
 
+from app.services.asset_registry import canonical_object_path as _canonical_object_path
 from app.services.storage import get_storage_provider
 
 logger = logging.getLogger(__name__)
 
 _BUCKET = os.environ.get("GCS_MEMO_ATTACHMENTS_BUCKET", "sprintable-memo-attachments")
-_PUBLIC_PREFIX = f"https://storage.googleapis.com/{_BUCKET}/"
 
 # attachment_context.py/attachments.py와 동일 지원 포맷 집합(#2055 AC4: 비이미지는 대상 아님).
 _IMAGE_CONTENT_TYPE_PREFIX = "image/"
@@ -32,17 +32,8 @@ _IMAGE_CONTENT_TYPE_PREFIX = "image/"
 # 해상도는 비현실적) 안전판으로 상한을 둔다 — 넘으면 파싱 실패와 동일하게 취급(None).
 _MAX_PLAUSIBLE_DIMENSION = 20_000
 
-
-def _canonical_object_path(stored_url: str) -> str | None:
-    """stored attachment url → canonical object path. attachments.py/attachment_context.py와
-    동일 규칙(신규=bare path·legacy=GCS public prefix·외부 도메인=None)."""
-    if not stored_url:
-        return None
-    if stored_url.startswith(_PUBLIC_PREFIX):
-        return stored_url[len(_PUBLIC_PREFIX):]
-    if "://" in stored_url:
-        return None
-    return stored_url
+# story #2720(2026-08-17) — 자체 canonicalization 재구현을 없애고 asset_registry.
+# canonical_object_path(BE SSOT)를 alias로 소비한다(import 위, 호출부 무변경).
 
 
 def measure_image_dimensions_from_bytes(content_type: str, data: bytes) -> tuple[int, int] | None:
