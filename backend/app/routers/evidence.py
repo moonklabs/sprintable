@@ -11,6 +11,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.models.evidence import _CLIENT_CREATABLE_TYPES, Evidence
 from app.models.pm import Story, Task
+from app.models.visual_artifact import ArtifactVersion, VisualArtifact
 from app.services.member_resolver import resolve_member
 from app.services.project_auth import has_project_access
 from app.services.reference_registry import _project_id_of_evidence
@@ -27,6 +28,12 @@ class EvidenceCreateRequest(BaseModel):
     ref: str
     source: str | None = None
     note: str | None = None
+    # story #2722(아티팩트·evidence 버전 pin) — 이 evidence가 아티팩트를 근거로 삼을 때
+    # 명시 필드로 준다(ref 문자열을 서버가 파싱해 추측하지 않는다 — 파싱 실패 시 조용한
+    # 미기입 위험을 피하려는 의도적 선택, story 상신 스케치 참고). 버전은 여기서 선택하지
+    # 않는다 — "그 시각의 latest"를 서버가 항상 resolve해 고정한다(③pin 시점 규칙, 클라
+    # 위임 시 취지가 샌다).
+    artifact_id: uuid.UUID | None = None
 
     @field_validator("work_item_type")
     @classmethod
@@ -53,6 +60,15 @@ class EvidenceResponse(BaseModel):
     org_id: uuid.UUID
     work_item_id: uuid.UUID
     work_item_type: str
+    artifact_version_id: uuid.UUID | None = None
+    """story #2722 — NULL="버전 미상"(구 데이터 또는 아티팩트 근거 아님), 값 있으면 evidence
+    생성 시각에 서버가 고정한 그 버전."""
+    artifact_id: uuid.UUID | None = None
+    artifact_version_number: int | None = None
+    """story #2722 — artifact_version_id 하나로는 FE가 기존 ArtifactExpandDialog 왕복
+    (artifactId+versionNumber 필요, artifact-gallery-view.tsx의 handleOpenArtifact와 동일
+    계약)을 못 채운다 — evidence.artifact_version_id → artifact_versions 1-hop 조인 결과를
+    denorm으로 얹는다(둘 다 artifact_version_id가 있을 때만 채워짐, 새 컬럼 아님)."""
     type: str
     ref: str
     source: str | None
@@ -86,9 +102,14 @@ class EvidenceResponse(BaseModel):
 async def _assert_work_item_access(
     session: AsyncSession, work_item_id: uuid.UUID, work_item_type: str,
     caller_id: uuid.UUID, org_id: uuid.UUID,
-) -> None:
+) -> uuid.UUID:
     """work_item 존재 + caller의 project 접근권 검증(mutation 대상 project-scope 강제
-    — [[feedback_mutation_target_resource_project_scope]] 동형)."""
+    — [[feedback_mutation_target_resource_project_scope]] 동형).
+
+    story #2722 — project_id를 반환하도록 확장(기존 호출부는 반환값 무시라 무회귀).
+    create_evidence가 artifact_id를 받을 때 그 아티팩트가 이 work_item과 같은
+    project 소속인지 검증하는 데 재사용(cross-project artifact 근거 금지 —
+    _get_artifact_or_404의 project_id 필터와 동일 근거, visual_artifacts.py:190-200 참고)."""
     if work_item_type == "story":
         story = (await session.execute(
             select(Story).where(Story.id == work_item_id, Story.org_id == org_id)
@@ -112,6 +133,60 @@ async def _assert_work_item_access(
     if not await has_project_access(session, caller_id, project_id, org_id):
         raise HTTPException(status_code=403, detail="No access to this project")
 
+    return project_id
+
+
+async def _resolve_latest_artifact_version_id(
+    session: AsyncSession, artifact_id: uuid.UUID, org_id: uuid.UUID, project_id: uuid.UUID,
+) -> uuid.UUID:
+    """story #2722 — evidence 생성 시각의 latest ArtifactVersion을 서버가 조회해 고정한다
+    (③pin 시점 규칙: 클라이언트에 버전 선택을 맡기면 "그 순간 최신을 근거로 봤다"는 취지가
+    샌다). org_id+project_id로 스코프(cross-org/cross-project artifact 근거 금지 —
+    visual_artifacts.py:_get_artifact_or_404와 동일 근거)."""
+    artifact = (await session.execute(
+        select(VisualArtifact).where(
+            VisualArtifact.id == artifact_id, VisualArtifact.org_id == org_id,
+            VisualArtifact.project_id == project_id, VisualArtifact.deleted_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    latest = (await session.execute(
+        select(ArtifactVersion).where(ArtifactVersion.artifact_id == artifact_id)
+        .order_by(ArtifactVersion.version_number.desc()).limit(1)
+    )).scalar_one_or_none()
+    if latest is None:
+        raise HTTPException(status_code=404, detail="Artifact has no versions")
+    return latest.id
+
+
+async def _attach_artifact_denorm(
+    session: AsyncSession, items: list[Evidence],
+) -> list[EvidenceResponse]:
+    """story #2722 — artifact_version_id가 있는 evidence들의 artifact_id/version_number를
+    한 번의 IN 쿼리로 조회해 붙인다(리스트 크기만큼 N+1 안 함)."""
+    version_ids = {e.artifact_version_id for e in items if e.artifact_version_id is not None}
+    version_map: dict[uuid.UUID, ArtifactVersion] = {}
+    if version_ids:
+        rows = (await session.execute(
+            select(ArtifactVersion).where(ArtifactVersion.id.in_(version_ids))
+        )).scalars().all()
+        version_map = {v.id: v for v in rows}
+
+    out = []
+    for e in items:
+        version = version_map.get(e.artifact_version_id) if e.artifact_version_id else None
+        out.append(
+            EvidenceResponse.model_validate(e, from_attributes=True).model_copy(
+                update={
+                    "artifact_id": version.artifact_id if version else None,
+                    "artifact_version_number": version.version_number if version else None,
+                }
+            )
+        )
+    return out
+
 
 @router.post("", response_model=EvidenceResponse, status_code=201)
 async def create_evidence(
@@ -119,15 +194,24 @@ async def create_evidence(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
-) -> Evidence:
+) -> EvidenceResponse:
     caller = await resolve_member(auth, org_id, session)
-    await _assert_work_item_access(session, body.work_item_id, body.work_item_type, caller.id, org_id)
+    project_id = await _assert_work_item_access(
+        session, body.work_item_id, body.work_item_type, caller.id, org_id
+    )
+
+    artifact_version_id = None
+    if body.artifact_id is not None:
+        artifact_version_id = await _resolve_latest_artifact_version_id(
+            session, body.artifact_id, org_id, project_id
+        )
 
     evidence = Evidence(
         id=uuid.uuid4(),
         org_id=org_id,
         work_item_id=body.work_item_id,
         work_item_type=body.work_item_type,
+        artifact_version_id=artifact_version_id,
         type=body.type,
         ref=body.ref,
         source=body.source,
@@ -137,7 +221,8 @@ async def create_evidence(
     session.add(evidence)
     await session.commit()
     await session.refresh(evidence)
-    return evidence
+    [denorm] = await _attach_artifact_denorm(session, [evidence])
+    return denorm
 
 
 @router.get("", response_model=list[EvidenceResponse])
@@ -147,7 +232,7 @@ async def list_evidence(
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
-) -> list[Evidence]:
+) -> list[EvidenceResponse]:
     if work_item_type not in _WORK_ITEM_TYPES:
         raise HTTPException(status_code=400, detail=f"work_item_type must be one of {sorted(_WORK_ITEM_TYPES)}")
 
@@ -161,7 +246,8 @@ async def list_evidence(
             Evidence.work_item_type == work_item_type,
         ).order_by(Evidence.created_at.asc())
     )
-    return list(result.scalars().all())
+    items = list(result.scalars().all())
+    return await _attach_artifact_denorm(session, items)
 
 
 @router.get("/{id}", response_model=EvidenceResponse)
@@ -199,7 +285,8 @@ async def get_evidence(
     org_slug = await resolve_org_slug(session, org_id)
     project_slug_map = await resolve_project_slugs(session, {project_id})
 
-    return EvidenceResponse.model_validate(evidence, from_attributes=True).model_copy(
+    [denorm] = await _attach_artifact_denorm(session, [evidence])
+    return denorm.model_copy(
         update={
             "resolved_story_id": resolved_story_id,
             "org_slug": org_slug,

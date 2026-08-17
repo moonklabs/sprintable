@@ -7,7 +7,7 @@ done의 검사지가 아니라 에이전트가 자기 완결을 표현하는 서
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,4 +34,11 @@ class Evidence(Base):
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    # story #2722(아티팩트·evidence 버전 pin) — 이 evidence가 아티팩트를 근거로 삼을 때
+    # "그 시각의 그 버전"을 고정한다. artifact_versions.artifact_id가 이미 visual_artifacts를
+    # 함의하므로 별도 visual_artifact_id 컬럼은 안 둔다(비정규화 회피). NULL=버전 미상
+    # (구 데이터이거나 아티팩트를 근거로 안 삼은 evidence) — 소급 백필 없음.
+    artifact_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("artifact_versions.id", ondelete="SET NULL"), nullable=True
     )
