@@ -5,11 +5,12 @@ from datetime import datetime, timedelta, timezone
 
 from dataclasses import dataclass, field
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.org_invite import OrgInvite
 from app.models.organization import Organization
 from app.models.project import OrgMember, Project
@@ -227,6 +228,21 @@ class OrgInviteRepository:
             return {"ok": False, "reason": "expired"}
         if invite.email.lower() != user_email.lower():
             return {"ok": False, "reason": "email_mismatch"}
+
+        # story #2477 AC②③ — Free cap 재검증(accept 시점) + 동시 수락 레이스 방어.
+        # org_id 해시 기반 advisory xact lock으로 같은 org를 겨눈 동시 accept 트랜잭션을
+        # 직렬화(커밋/롤백 시 자동 해제, 명시적 unlock 불요) — 락을 먼저 잡아야 그 뒤에
+        # 재는 멤버 카운트를 신뢰할 수 있다(락 없이 재면 두 트랜잭션이 서로 상대의 INSERT를
+        # 못 본 채 동시에 "아직 cap 안 참"을 보고 둘 다 통과해버린다). org_id는 accept 호출
+        # 시점엔 알 수 없어(토큰만 받음) invite 조회 후인 이 지점이 최초 가능 지점이라
+        # 라우터가 아닌 여기서 처리한다. EE 미탑재(OSS) 빌드에선 import 자체가 없으므로 게이트.
+        if settings.is_ee_enabled:
+            await self.session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:oid))"),
+                {"oid": str(invite.organization_id)},
+            )
+            from ee.plan_limits import check_member_accept_limit  # type: ignore[import]
+            await check_member_accept_limit(self.session, invite.organization_id)
 
         # org_member 생성 (중복 시 무시)
         await self.session.execute(
