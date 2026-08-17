@@ -810,4 +810,4 @@ fi
 log "=== Deployment submitted ==="
 log "Instance template: ${TEMPLATE_NAME}"
 log "MIG: ${MIG_NAME} (region ${GCP_REGION})"
-log "Health check target: /api/v2/ping (DB 미조회, GCLB 나머지 스택은 provision_realtime_gclb.sh 참조)"
+log "Health check target: /api/v2/ready (DB 미조회·캐시된 연결상태, story #2295 — GCLB 나머지 스택은 provision_realtime_gclb.sh 참조)"
