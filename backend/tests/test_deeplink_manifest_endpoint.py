@@ -49,7 +49,8 @@ async def test_deeplink_manifest_endpoint_returns_200_with_schema_version_and_lo
     # story #2624: doc_approval_resolved 신설로 34→35.
     # story #2630: conversation.circuit_breaker_opened 신설로 35→36.
     # story #2631: doc_approval_discussion_requested 신설로 36→37.
-    assert isinstance(body["entries"], list) and len(body["entries"]) == 37
+    # story #2709: agent_decision_resolved 신설로 37→38.
+    assert isinstance(body["entries"], list) and len(body["entries"]) == 38
 
     # 미르코 point ②: lookup_key = f"{type}:{entity_type}" (구분자 ":") 서빙 시점 파생.
     story_entry = next(

@@ -22,6 +22,8 @@ import pytest
 #   app/services/merge_verdict_gate.py         "story"
 #   app/services/loop.py                       "loop"
 #   app/services/workflow_line_config.py       "wf_line_version"  (WORKFLOW_LINE_VERSION_WORK_ITEM_TYPE)
+#   app/routers/gates.py create_decision_request "agent_decision"  (story #2709, self-referencing
+#                                               standalone anchor — work_item_id==gate.id)
 #   app/services/workflow_parallel_approval.py step_run.entity_type — 정의역(app/models/workflow_line.py
 #                                               ENTITY_TYPES) = {story, doc, hypothesis, epic, sprint}
 #   app/routers/gates.py 제네릭 create_gate_endpoint — task 포함(resolve_work_item_project_id가
@@ -32,7 +34,7 @@ import pytest
 _KNOWN_PROJECT_SCOPED = frozenset(
     {"story", "task", "doc", "visual_artifact", "loop", "hypothesis", "epic", "sprint"}
 )
-_KNOWN_PROJECT_AGNOSTIC = frozenset({"wf_line_version"})
+_KNOWN_PROJECT_AGNOSTIC = frozenset({"wf_line_version", "agent_decision"})
 
 
 def test_project_scoped_set_matches_hand_audited_inventory():

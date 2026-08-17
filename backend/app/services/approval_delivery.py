@@ -179,17 +179,25 @@ async def dispatch_approval_result_reply(
     db: AsyncSession,
     *,
     org_id: uuid.UUID,
-    doc: Doc,
+    work_item_type: str,
+    work_item_id: uuid.UUID,
+    project_id: uuid.UUID,
+    title: str,
     gate_id: uuid.UUID,
     requester_id: uuid.UUID,
     resolver_id: uuid.UUID,
     decision: str,
     resolution_note: str | None,
+    event_type: str = "doc_approval_resolved",
 ) -> None:
     """story #2624: 게이트 해소(승인/반려) 결과를 상신자에게 회신 — dispatch_approval_
     request_cards의 반대 방향(승인자→상신자). P2(#3007)는 상신→승인자 카드 전방 경로만
     만들었고 해소→상신자 회신 후방 경로가 없어, 상신자가 게이트를 폴링해야만 결과를 알 수
     있었다(선생님 직접 지적, 실사례 2026-08-13 07:20 반려·상신자 무통지).
+
+    story #2709(2026-08-17) — doc 전용(`doc: Doc` 객체)이던 시그니처를 일반화했다(새 함수
+    발명 0, 파라미터화). `agent_decision_request`처럼 work_item이 Doc이 아니거나(또는
+    work_item이 gate 자기참조뿐인 standalone) 호출부는 자기가 가진 값을 그대로 넘긴다.
 
     상신자↔해소자 기존 DM(같은 dm_pair_key — get_or_create가 인자 순서 무관하게 같은 방을
     찾는다)에 message_kind="result" 카드 게시 + 기존 _dispatch_conversation_event 재사용
@@ -200,7 +208,7 @@ async def dispatch_approval_result_reply(
 
     해소자 본인이 상신자인 경우(SoD가 정상적으로 막지만 방어심층) 자기-알림 스킵(AC3).
     """
-    if not doc.project_id or resolver_id == requester_id:
+    if not project_id or resolver_id == requester_id:
         return
 
     from app.routers.conversations import _dispatch_conversation_event
@@ -208,18 +216,18 @@ async def dispatch_approval_result_reply(
 
     resolver = (await lookup_members_by_ids({resolver_id}, db)).get(resolver_id)
     if resolver is None:
-        logger.warning("approval-result 회신 스킵 — resolver 미확인 doc=%s", doc.id)
+        logger.warning("approval-result 회신 스킵 — resolver 미확인 work_item=%s", work_item_id)
         return
 
     decision_label = "승인" if decision == "approved" else "반려"
-    content = f"'{doc.title}' 문서 결재 결과: {decision_label}"
+    content = f"'{title}' 결재 결과: {decision_label}"
     if resolution_note:
         content += f"\n사유: {resolution_note}"
 
     try:
         async with db.begin_nested():
             conv = await _get_or_create_approval_dm(
-                db, org_id=org_id, project_id=doc.project_id,
+                db, org_id=org_id, project_id=project_id,
                 requester_id=requester_id, approver_id=resolver_id,
             )
             msg = ConversationMessage(
@@ -234,8 +242,8 @@ async def dispatch_approval_result_reply(
                         "expects_response": False,
                     },
                     "approval_target": {
-                        "work_item_type": "doc",
-                        "work_item_id": str(doc.id),
+                        "work_item_type": work_item_type,
+                        "work_item_id": str(work_item_id),
                         "gate_id": str(gate_id),
                         "decision": decision,
                         "resolution_note": resolution_note,
@@ -247,8 +255,8 @@ async def dispatch_approval_result_reply(
             await _dispatch_conversation_event(db, conv, msg, org_id, resolver)
     except Exception:  # noqa: BLE001 — best-effort, 회신 실패가 해소를 막지 않음.
         logger.warning(
-            "approval-result 회신 배달 실패 doc=%s requester=%s",
-            doc.id, requester_id, exc_info=True,
+            "approval-result 회신 배달 실패 work_item=%s requester=%s",
+            work_item_id, requester_id, exc_info=True,
         )
         # ⛔카디르 QA(#3015): 여기 `return`이 있으면 DM 실패가 아래 벨 알림까지 같이
         # 죽인다 — "별개 SAVEPOINT·독립"이라는 이 함수의 약속과 정반대(단방향 의존).
@@ -264,19 +272,19 @@ async def dispatch_approval_result_reply(
             async with db.begin_nested():
                 from app.services.notification_dispatch import dispatch_notification
                 await dispatch_notification(
-                    db, org_id=org_id, event_type="doc_approval_resolved",
+                    db, org_id=org_id, event_type=event_type,
                     target_member_ids=[requester_id],
-                    title=f"문서 결재 결과: {decision_label}",
-                    body=resolution_note or f"'{doc.title}' 문서가 {decision_label}됐습니다.",
+                    title=f"결재 결과: {decision_label}",
+                    body=resolution_note or f"'{title}'가 {decision_label}됐습니다.",
                     reference_type="gate", reference_id=gate_id,
-                    source_project_id=doc.project_id,
+                    source_project_id=project_id,
                     # story #2696: outbox 이관(동일 결함 클래스 예방).
                     via_outbox=True,
                 )
     except Exception:  # noqa: BLE001 — 벨 알림 실패는 카드 배달과 독립.
         logger.warning(
-            "approval-result 벨 알림 실패 doc=%s requester=%s",
-            doc.id, requester_id, exc_info=True,
+            "approval-result 벨 알림 실패 work_item=%s requester=%s",
+            work_item_id, requester_id, exc_info=True,
         )
 
 

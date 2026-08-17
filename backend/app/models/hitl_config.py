@@ -18,7 +18,13 @@ from app.core.database import Base
 
 POSTURES = frozenset({"conservative", "balanced", "permissive"})
 DISPOSITIONS = frozenset({"allow_auto", "ask", "deny"})
-GATE_TYPES = frozenset({"pr_review", "qa", "merge", "deploy", "workflow_config_publish"})
+# story #2709(2026-08-17) — agent_decision_request 포함: gates.py의 GateCreateRequest 필드
+# validator가 이 세트만 통과시켜 등재 필요. _ALWAYS_MANUAL_GATE_TYPES(gate_service.py)가
+# posture 무관 항상 pending으로 덮으므로 여기 등재가 disposition 자동판정에 실제로 영향은
+# 안 준다 — 순수히 「generic POST /api/v2/gates로 생성 허용」 관문 통과 목적.
+GATE_TYPES = frozenset({
+    "pr_review", "qa", "merge", "deploy", "workflow_config_publish", "agent_decision_request",
+})
 
 _POSTURE_DEFAULT: dict[str, str] = {
     "conservative": "ask",
