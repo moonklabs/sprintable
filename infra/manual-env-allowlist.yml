@@ -576,10 +576,6 @@ code_read_high_baseline:
     reason: apps/web/src/lib/auth/cookies.ts 등 — 기본값 없음, 미triage.
     declared_by: PO
     until: "2026-08-27"
-  - key: NEXT_PUBLIC_EE_ENABLED
-    reason: apps/web/src/lib/ee.ts — 기본값 없음, 미triage(기능 플래그 추정).
-    declared_by: PO
-    until: "2026-08-27"
   - key: NEXT_PUBLIC_FIREBASE_API_KEY
     reason: >-
       apps/web/src/lib/auth/firebase-client.ts — 기본값 없음, 미triage. NEXT_PUBLIC_*

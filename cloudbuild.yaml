@@ -49,6 +49,14 @@ substitutions:
   # 미비활성으로 PgBouncer 아래서 prepared statement reuse 깨짐, #1314류 재발).
   _BACKEND_DB_PGBOUNCER: 'false'
   _GA4_MEASUREMENT_ID: ""  # dev 기본값 빈 문자열 — prod 트리거에서 G-RYHFE7XM3X 주입
+  # story #2728 후속(2026-08-17, 페드루 PO 지시) — 유나 실측: dev FE 빌드가 NEXT_PUBLIC_
+  # EE_ENABLED 자체를 build-arg/Dockerfile ARG 어디에도 배선한 적이 없어(grep 확認 — 이
+  # substitution·GHA·Dockerfile 전부 무배선) billing 표면이 dev서 아예 렌더 안 됐다. 배포
+  # SSOT/과거 스토리 grep으로 "의도된 결정"이 아님을 확認(manual-env-allowlist.yml에
+  # declared_by:PO·미triage로만 남아있던 값 — 코드로 differentiate된 적이 없다). dev-safe
+  # 기본값 'false'(SSE_MULTIPLEX_ENABLED와 동일 컨벤션) — GHA가 dev 브랜치에서만 'true' 주입,
+  # prod는 이 커밋으로 무접촉(기존 동작 그대로 유지, 명시 false로 durable화만).
+  _EE_ENABLED: "false"
   # story #2078(E-ARCH 0단계) — SSE 멀티플렉서 롤백 플래그. dev-safe 기본값 'false'(수동
   # `gcloud builds submit` override 없을 때 안전). GHA가 dev 브랜치에서만 'true' 주입 —
   # prod는 develop→main 일괄승격에 검증 안 된 플래그를 얹지 않는다(오르테가군 판정,
@@ -240,6 +248,8 @@ steps:
       - NEXT_PUBLIC_GA4_MEASUREMENT_ID=${_GA4_MEASUREMENT_ID}
       - --build-arg
       - NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED=${_SSE_MULTIPLEX_ENABLED}
+      - --build-arg
+      - NEXT_PUBLIC_EE_ENABLED=${_EE_ENABLED}
       - .
     env:
       - DOCKER_BUILDKIT=1
