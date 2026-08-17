@@ -254,10 +254,9 @@ async def test_2_members_plus_5_invites_all_accept_concurrently_only_1_passes_ca
         async with SessionLocal() as sess:
             repo = OrgInviteRepository(sess)
             try:
-                with _ee_on():
-                    result = await repo.accept(
-                        token=token, user_id=user_id, user_email=f"{user_id}@race2477.test"
-                    )
+                result = await repo.accept(
+                    token=token, user_id=user_id, user_email=f"{user_id}@race2477.test"
+                )
                 await sess.commit()
                 return ("ok", result)
             except Exception as exc:  # noqa: BLE001 — 성공/실패 신호를 한 채널로 모으기 위함
@@ -265,9 +264,15 @@ async def test_2_members_plus_5_invites_all_accept_concurrently_only_1_passes_ca
                 return ("err", exc)
 
     import asyncio
-    outcomes = await asyncio.gather(*[
-        _accept_one(uid, tok) for uid, tok in zip(invitee_ids, tokens)
-    ])
+    # ⚠️_ee_on()은 unittest.mock.patch로 settings.is_ee_enabled 클래스 프로퍼티를 패치한다 —
+    # asyncio.gather로 도는 태스크 각각의 안에서 열고 닫으면(겹치는 enter/exit) 한 태스크가
+    # 먼저 exit하며 원복시켜 나머지가 아직 True를 기대하는 동안 False로 새는 레이스가 생긴다
+    # (실측: 이 상태로 이 테스트 뒤에 test_push_devices_realdb가 돌면 EE off 네거티브 게이트가
+    # 새어 실패). 패치는 gather 전체를 한 번만 감싸 단일 enter/exit로 고정한다.
+    with _ee_on():
+        outcomes = await asyncio.gather(*[
+            _accept_one(uid, tok) for uid, tok in zip(invitee_ids, tokens)
+        ])
 
     successes = [o for o in outcomes if o[0] == "ok"]
     failures = [o for o in outcomes if o[0] == "err"]
