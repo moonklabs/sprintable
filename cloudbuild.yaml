@@ -10,6 +10,9 @@ substitutions:
   _AR_REPO: sprintable
   _DEPLOY_ENV: dev
   _FASTAPI_URL: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app
+  # story #2701 — dev-safe 기본값(빈 문자열 = 이 env var 자체를 안 싣는다, 아래 deploy-mcp
+  # 참조). GHA cloud-build.yml이 prod에서만 실값으로 override.
+  _MCP_ALLOWED_HOSTS: ''
   _BACKEND_MIN_INSTANCES: '1'
   # ⚠️ default '1'(아래) = _DEPLOY_ENV:dev default 와 정합한 **dev-safe fallback**(수동 `gcloud builds submit`
   #    override 없을 때 무리한 maxScale 재현 차단). GHA cloud-build.yml 이 per-env override(prod=5·dev=8, #2074 응급).
@@ -527,14 +530,21 @@ steps:
   #  두 가지를 가리켜, 처음엔 그쪽을 원인으로 짚었다가 이미지 태그를 열어 보고 갈렸다.)
   # ⇒ 그래서 오늘 고친 MCP 인자 검증(#2412)이 **정작 그 도구를 쓰는 서버에는 안 닿아 있었다.**
   #
-  # ⚠️이 스텝이 **하지 않는 것**(선언): `services update --image` 만 쓰므로 **환경변수는 안 건드린다.**
-  # mcp 서비스의 env 는 지금도 파이프라인 밖(손 설정)이다 — 그 SSOT 화는 별건이다.
-  # `run deploy` 를 안 쓰는 이유가 이것이다: 지정 안 한 설정이 기본값으로 되돌아가면
-  # 「배포가 손 고침을 지우는」 쪽 사고가 난다(deploy-realtime 주석의 #2078 사례와 같은 병).
+  # ⚠️story #2701(2026-08-17) 후속 — 위 #2426이 「env는 파이프라인 밖(손 설정)」이라 선언했던
+  # 그 잔여를 여기서 닫는다. SSOT 위치 = 이 스텝(플레인 값)+아래 AGENT_API_KEY 시크릿
+  # (MCP_AGENT_API_KEY_DEV/MCP_AGENT_API_KEY_PROD, Secret Manager) — backend/realtime 스텝과
+  # 동일 관례(--update-env-vars additive·--update-secrets, --set-env-vars/--env-vars-file
+  # 전체교체 금지 그대로 승계). `services update`→`run deploy`로 바꾸지 않는다(이미지 갱신
+  # 방식 자체는 위 #2426 판단 그대로 유효 — env만 추가 배선).
+  #
+  # AC1 census(2026-08-17, gcloud describe 실측, 값은 기록 안 함— 이름만):
+  #   dev  = MCP_TRANSPORT · SPRINTABLE_API_URL · AGENT_API_KEY(시크릿화 대상)
+  #   prod = 위 셋 + MCP_ALLOWED_HOSTS(dev엔 없음 — CORS/host allowlist가 아직 dev엔
+  #          불필요하다는 뜻으로 실측된 그대로 두고 조용히 안 맞춘다, 위 GHA 주석 참조)
   #
   # ⚠️realtime 과 달리 **prod 게이트를 두지 않는다** — `sprintable-mcp-prod` 는 이미 존재하고
   # 실제로 요청을 받고 있다(2026-08-02 실측). backend-prod 가 이 파이프라인으로 갱신되는데
-  # mcp-prod 만 안 따라가는 것이 바로 이 스토리가 없애려는 «불일치»다.
+  # mcp-prod 만 안 따라가는 것이 바로 #2426이 없애려던 «불일치»다.
   - id: deploy-mcp
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
@@ -542,9 +552,30 @@ steps:
       - -c
       - |
         set -euo pipefail
+        # story #2701: MCP_TRANSPORT·SPRINTABLE_API_URL은 dev/prod 공통 배선(SPRINTABLE_API_URL은
+        # 이 파일 다른 스텝의 _FASTAPI_URL과 값 동일 — 새 substitution 안 만들고 재사용).
+        # MCP_ALLOWED_HOSTS는 dev에서 빈 문자열(_MCP_ALLOWED_HOSTS 기본값)이면 그 키 자체를
+        # 안 싣는다 — 명시로 빈 값을 실으면 "값 없음"과 "빈 문자열"이 앱 입장에서 다른 뜻일 수
+        # 있어(예: allowlist 빈 배열=전부 거부 vs 미설정=검증 스킵) 오늘 실측 그대로(dev엔 이
+        # 키가 없다)를 보존한다.
+        ENV_VARS="MCP_TRANSPORT=http,SPRINTABLE_API_URL=${_FASTAPI_URL}"
+        if [ -n "${_MCP_ALLOWED_HOSTS}" ]; then
+          ENV_VARS="$${ENV_VARS},MCP_ALLOWED_HOSTS=${_MCP_ALLOWED_HOSTS}"
+        fi
+        # AGENT_API_KEY — story #2701(PO 판정, 2026-08-17): plain substitution 금지(cloudbuild.yaml은
+        # git 파일 — API 키 평문 커밋 사고 방지). dev/prod 각자 라이브 값을 그대로 Secret Manager로
+        # 1회 이관(MCP_AGENT_API_KEY_DEV/_PROD, 키 회전 아님·사본 이동)해 backend deploy-backend
+        # 스텝의 DATABASE_URL_* secretKeyRef 관례를 그대로 재사용한다.
+        if [ "${_DEPLOY_ENV}" == "prod" ]; then
+          AGENT_KEY_SECRET="MCP_AGENT_API_KEY_PROD"
+        else
+          AGENT_KEY_SECRET="MCP_AGENT_API_KEY_DEV"
+        fi
         gcloud run services update sprintable-mcp-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
           --region=${_AR_REGION} \
+          --update-env-vars="$${ENV_VARS}" \
+          --update-secrets="AGENT_API_KEY=$${AGENT_KEY_SECRET}:latest" \
           --quiet
         # 검산: 「배포 success」가 아니라 «서빙 이미지가 backend 와 같은 태그인가»로 잰다.
         served=$(gcloud run services describe sprintable-mcp-${_DEPLOY_ENV} \
@@ -556,7 +587,11 @@ steps:
           echo "  기대: $expected"
           exit 1
         fi
+        # story #2701 AC3 양성대조 일부: env 이름 목록이 배포 전후 동일한지(값은 안 찍음).
+        names=$(gcloud run services describe sprintable-mcp-${_DEPLOY_ENV} \
+          --region=${_AR_REGION} --format='value(spec.template.spec.containers[0].env[].name)')
         echo "OK: sprintable-mcp-${_DEPLOY_ENV} = backend:${COMMIT_SHA}"
+        echo "OK: sprintable-mcp-${_DEPLOY_ENV} env names = $names"
     waitFor: [run-migrate-job]
 
   # story #2185(2026-07-27) — GCE MIG(realtime-gateway) 자동배포. deploy-realtime(위, Cloud
