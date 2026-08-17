@@ -11,6 +11,7 @@ import { SpecPinMarker } from './spec-pin-marker';
 import { CommentThreadCard } from './comment-thread-card';
 import { DescriptionPane } from './description-pane';
 import { ExportDialog } from './export-dialog';
+import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
 import type { ArtifactVersion, MemberRef, VisualArtifact } from '@/services/canvas';
 import type { ArtifactNode } from '@/services/canvas-nodes';
 import type { CommentThread } from '@/services/canvas-comments';
@@ -257,6 +258,10 @@ export function ArtifactViewer({
             ))}
           </div>
         ) : null}
+        {/* story #2721(아티팩트·원장 1급화 1단) — 「이것을 가리키는 것들」. 신규 뷰어 0(기존
+         * EntityBacklinksSection 재사용, doc/story와 동형) — 뷰어가 곧 상세 표면이라 여기 마운트
+         * (ArtifactExpandDialog는 순수 캔버스 프리뷰라 대상 아님). */}
+        <EntityBacklinksSection entityType="artifact" entityId={artifact.id} />
       </div>
       <ExportDialog
         open={exportOpen}
