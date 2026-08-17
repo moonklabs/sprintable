@@ -647,13 +647,15 @@ steps:
         # 바뀌었는지 본다. 얕은 클론이면 옛 SHA가 히스토리에 없을 수 있어 unshallow를
         # 먼저 시도(실패해도 계속 — 아래 diff 성패로 최종 fail-safe 판단).
         #
-        # ⛔hotfix(2026-08-17, 페드루 P0) — 로컬 bash 변수를 언더스코어 접두(`_CURRENT_TEMPLATE`
-        # `_LAST_SHA`)로 지었다가 develop 배포가 2연속 실패했다: GCB의 substitution 파서가
-        # `${_XXX}` 패턴 전부를 자기 치환 키로 오인해("key ... is not matched in the
-        # substitution data") 빌드 자체가 안 뜬 것 — GHA 주석 파싱 함정의 GCB 사촌. 이 파일의
-        # 다른 로컬변수(`served`·`expected`·`names`, 604~617행)는 전부 언더스코어 없이 지어져
-        # 아무 문제 없이 plain `$var`로 참조되고 있다 — 그 검증된 패턴으로 맞춘다(언더스코어
-        # 제거, `$$` 이스케이프 대안보다 이 파일 관행과 일치해 위험 낮음).
+        # ⛔hotfix(2026-08-17, 페드루 P0) — 로컬 bash 변수를 언더스코어 접두(CURRENT_TEMPLATE·
+        # LAST_SHA 앞에 밑줄을 붙인 이름)로 지었다가 develop 배포가 2연속 실패했다: GCB의
+        # substitution 파서가 밑줄로 시작하는 중괄호 치환 패턴 전부를 자기 치환 키로 오인해
+        # ("key ... is not matched in the substitution data") 빌드 자체가 안 뜬 것 — GHA
+        # 주석 파싱 함정의 GCB 사촌(⚠️이 주석 자신도 그 패턴의 리터럴 표기를 피한다 — 문자
+        # 그대로 적으면 이 주석 자체가 또 같은 함정에 걸린다, 페드루 리뷰 지적). 이 파일의
+        # 다른 로컬변수(served·expected·names, 604~617행)는 전부 언더스코어 없이 지어져
+        # 아무 문제 없이 참조되고 있다 — 그 검증된 패턴으로 맞춘다(치환 이스케이프 대안보다
+        # 이 파일 관행과 일치해 위험 낮음).
         CURRENT_TEMPLATE="$(gcloud compute instance-groups managed describe sprintable-realtime-gateway-dev \
           --region="${_AR_REGION}" --project="${PROJECT_ID}" \
           --format='value(versions[0].instanceTemplate)' 2>/dev/null | sed 's#.*/##' || echo '')"
