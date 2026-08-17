@@ -109,6 +109,23 @@ describe('BillingTab — 결제②-D 4티어 재편', () => {
     expect(container.textContent).toContain('업그레이드');
   });
 
+  // story #2403 후속(2026-08-17) — prod org_subscriptions 실측(tier='pro' 3건 실존) 기반
+  // 회귀가드. toTierId()가 'pro'를 몰라 TIER_ORDER.includes 실패 → 'free'로 조용히 폴백하면
+  // 유료 결제 중인 조직이 화면엔 무료로 보인다(실해악). DOM 셀렉터는 팩 섹션도 카드와 같은
+  // className을 재사용해 불안정(6개 매치, 카드 4개 아님) — 대신 textContent의 문서 순서로
+  // "현재 이용 중" 배지가 Free~Starter 구간엔 없고 Business 헤딩 이후(마지막 티어라 다음
+  // 헤딩 없음)에만 있는지를 인덱스로 가른다.
+  it('tier="pro"(레거시 Polar)는 Free가 아니라 Business로 매핑된다', async () => {
+    await mount(async () => statusResponse({ tier: 'pro' }));
+    const text = container.textContent ?? '';
+    const starterIdx = text.indexOf('Starter');
+    const businessIdx = text.indexOf('Business');
+    const badgeIdx = text.indexOf('현재 이용 중');
+    expect(businessIdx).toBeGreaterThan(starterIdx); // TIER_ORDER상 Business가 마지막
+    expect(badgeIdx).toBeGreaterThan(businessIdx); // 배지가 Business 헤딩 뒤(=그 카드 안)에만 있음
+    expect(text.indexOf('현재 이용 중', badgeIdx + 1)).toBe(-1); // 딱 1번만(Free에 안 붙음)
+  });
+
   it('현재 tier가 팩 구매 불가(Free)면 팩 섹션을 숨긴다', async () => {
     await mount(async () => statusResponse({ tier: 'free' }));
     expect(container.textContent).not.toContain('추가 팩');
