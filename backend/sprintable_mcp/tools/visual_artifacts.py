@@ -16,7 +16,7 @@ def _unwrap_data_meta(result: object) -> tuple[list, dict]:
     """story #2428 PR④ — GET /api/v2/visual-artifacts·/comments는 stories.py 계열의
     X-Total-Count 헤더가 아니라 docs.py `_unwrap_docs_page`와 동형인 body
     `{data, meta:{has_more,next_cursor}}` 봉투를 쓴다 — 그 헬퍼와 동일 컨벤션을 그대로
-    미러링(client.get() 사용, 새 규약 발명 0). 구 bare-array 응답(롤백/미갱신 BE)도
+    미러링(get 메서드 그대로 사용, 새 규약 발명 0). 구 bare-array 응답(롤백/미갱신 BE)도
     하위호환으로 통과시킨다."""
     if isinstance(result, dict) and "data" in result:
         return result["data"], (result.get("meta") or {})
