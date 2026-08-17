@@ -2,7 +2,7 @@ import uuid
 from datetime import date as date_type, datetime
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -119,27 +119,52 @@ async def _attach_org_project_slugs(session: AsyncSession, org_id: uuid.UUID, sp
 async def list_sprints(
     project_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    limit: int | None = Query(default=None, ge=1, le=2000),
+    cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
+    response: Response = None,  # type: ignore[assignment]
     repo: SprintRepository = Depends(_get_repo_read),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[SprintResponse]:
+    """story #2428 PR④(ⓐ): goals.py/tasks.py와 동일 규약(필터 適用 後·limit 適用 前 COUNT,
+    cursor=created_at) — true cursor 페이지네이션 + 전체 카운트(X-Total-Count 헤더). limit
+    미지정 시 기존 동작(최대 1000)과 호환."""
     # E-SECURITY SEC-S8(story 83ea3d6a) CC(선생님 "sprint org-level=갭" 확定): 라우터 13개
     # 전부 org-scope만이고 project-scope 0이던 것 중 하나 — project_id 미지정 시 caller의
     # project 접근권과 무관하게 org 전체 sprint가 노출됐다. project_id 지정 시엔 접근권 검증,
-    # 미지정 시엔 accessible_project_ids_in_org로 필터(완전봉인, Z-standup 패턴 동형).
+    # 미지정 시엔 accessible_project_ids_in_org로 필터.
     from app.services.project_auth import accessible_project_ids_in_org, require_project_access
 
-    filters: dict = {}
+    cursor_dt: datetime | None = None
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=400, detail="invalid cursor: expected ISO 8601 datetime"
+            ) from exc
+
     if project_id:
         await require_project_access(repo.session, uuid.UUID(auth.user_id), project_id, repo.org_id,
             not_found_detail="Project not found")
-        filters["project_id"] = project_id
-    if status_filter:
-        filters["status"] = status_filter
-    sprints = await repo.list(**filters)
-    if not project_id:
-        accessible = set(await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), repo.org_id))
-        sprints = [s for s in sprints if s.project_id in accessible]
+        filters: dict = {"project_id": project_id}
+        if status_filter:
+            filters["status"] = status_filter
+        sprints, total = await repo.list_paginated(limit=limit, cursor=cursor_dt, **filters)
+    else:
+        # accessible_project_ids_in_org로 SQL-level IN 스코프(list_in_projects) — 예전 Python
+        # post-filter 방식(SEC-S8 최초 fix)은 DB-level limit/cursor와 결합하면 페이지 건수가
+        # post-filter로 다시 줄어 X-Total-Count/has_more가 어긋난다(TaskRepository.
+        # list_in_projects와 동형 함정 회피).
+        accessible = list(await accessible_project_ids_in_org(repo.session, uuid.UUID(auth.user_id), repo.org_id))
+        sprints, total = await repo.list_in_projects(
+            accessible, status=status_filter, limit=limit, cursor=cursor_dt
+        )
+
     await _attach_org_project_slugs(repo.session, repo.org_id, sprints)
+    if response is not None:
+        response.headers["X-Total-Count"] = str(total)
+        if sprints:
+            response.headers["X-Next-Cursor"] = sprints[-1].created_at.isoformat()
     return [SprintResponse.model_validate(s) for s in sprints]
 
 

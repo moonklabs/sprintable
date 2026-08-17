@@ -70,7 +70,13 @@ class BaseRepository(Generic[T]):
 
         - order_by: 단조 컬럼 화이트리스트(created_at/updated_at). 그 외는 created_at로 폴백.
         - cursor: 직전 페이지 마지막 row의 order_by 값(datetime). desc 페이지네이션(< cursor).
-        - total: 페이지와 무관한 필터링 전체 개수(silent-truncation을 호출자가 인지하도록).
+        - total: 필터+cursor 適用 後·limit 適用 前 전체 개수("이 필터+커서 조건에서 남은 전체
+          건수" — story.py::list()가 세운 규약, #2537). ⚠️페드루 AC 리뷰(story #2428 PR③,
+          2026-08-17, TaskRepository.list_in_projects()에서 먼저 잡힘)로 발견 — 이 공용
+          메서드가 최초엔 cursor를 count 쿼리에서 빠뜨려(q에만 붙임) 마지막 페이지에서도
+          total이 cursor-무관 grand total로 고정, has_more(=total>len(items))가 영구 참이
+          되는 결함이었다. cursor를 conds에 넣어 count_q/q 둘 다 같은 조건을 보게 고쳤다 —
+          이 메서드를 쓰는 모든 소비자(GoalRepository.list_goals 등)에 소급 적용된다.
         - limit: None이면 기존 list()와 동일하게 1000 cap. 지정 시 그만큼만 반환(over-fetch는 호출자 책임).
         반환: (rows, total).
         """
@@ -80,23 +86,22 @@ class BaseRepository(Generic[T]):
         for attr, val in filters.items():
             conds.append(getattr(self.model, attr) == val)
 
-        # 전체 카운트(페이지네이션 무관) — 1000+ 잘림을 호출자가 알 수 있게 한다.
+        if order_by not in self._orderable_fields():
+            order_by = "created_at"
+        order_col = getattr(self.model, order_by)
+
+        if cursor is not None:
+            conds.append(order_col < cursor)
+
+        # 전체 카운트(필터+cursor 適用 後) — 1000+ 잘림 및 "마지막 페이지"를 호출자가 인지하도록.
         count_result = await self.session.execute(
             select(func.count()).select_from(self.model).where(*conds)
         )
         total = int(count_result.scalar_one() or 0)
 
-        if order_by not in self._orderable_fields():
-            order_by = "created_at"
-        order_col = getattr(self.model, order_by)
-
         q = select(self.model).where(*conds).order_by(
             order_col.desc(), self.model.id.desc()  # type: ignore[attr-defined]
         )
-
-        if cursor is not None:
-            q = q.where(order_col < cursor)
-
         q = q.limit(limit if limit is not None else 1000)
         result = await self.session.execute(q)
         return list(result.scalars().all()), total

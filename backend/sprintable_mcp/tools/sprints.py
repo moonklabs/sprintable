@@ -5,12 +5,15 @@ from __future__ import annotations
 from mcp.types import TextContent
 
 from ..api_client import client
-from ..response import err, ok
+from ..response import err, ok, ok_paginated
 from ..schemas import SprintStatus, SprintableInput
+from .stories import _has_more_from_headers
 
 
 class ListSprintsInput(SprintableInput):
     status: SprintStatus | None = None
+    limit: int | None = None
+    cursor: str | None = None  # 이전 호출의 X-Next-Cursor 헤더 값을 그대로 넘기면 다음 페이지.
 
 
 class SprintIdInput(SprintableInput):
@@ -38,7 +41,13 @@ async def list_sprints(args: ListSprintsInput) -> list[TextContent]:
         params: dict = {"project_id": client.require_project_id()}
         if args.status:
             params["status"] = args.status.value
-        return ok(await client.get("/api/v2/sprints", params=params))
+        if args.limit:
+            params["limit"] = args.limit
+        if args.cursor:
+            params["cursor"] = args.cursor
+        items, headers = await client.get_with_headers("/api/v2/sprints", params=params)
+        has_more, next_cursor = _has_more_from_headers(headers, items)
+        return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_list_sprints")
     except Exception as exc:
         return err(str(exc))
 

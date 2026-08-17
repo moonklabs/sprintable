@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func, select, text, update
@@ -19,6 +20,38 @@ from app.repositories.base import BaseRepository
 class RetroSessionRepository(BaseRepository[RetroSession]):
     def __init__(self, session: AsyncSession, org_id: uuid.UUID) -> None:
         super().__init__(RetroSession, session, org_id)
+
+    async def list_in_projects(
+        self,
+        project_ids: list[uuid.UUID],
+        *,
+        sprint_id: uuid.UUID | None = None,
+        limit: int | None = None,
+        cursor: datetime | None = None,
+    ) -> tuple[list[RetroSession], int]:
+        """story #2428 PR④(ⓐ) — list_sessions의 project_id 미지정(org-wide) 분기 전용.
+        SprintRepository.list_in_projects()와 동형(project_id 컬럼 직접 IN, cursor는 conds에
+        포함해 count_q/q 공유 — story.py 규약·base.py list_paginated() fix와 동일 모양).
+        기존 코드는 org-wide일 때 세션마다 has_project_access를 개별 호출하는 post-filter라
+        DB-level limit/cursor와 결합하면 페이지 건수가 다시 줄어드는 함정이 있었다."""
+        if not project_ids:
+            return [], 0
+        conds = [self._org_filter(), RetroSession.project_id.in_(project_ids)]
+        if sprint_id is not None:
+            conds.append(RetroSession.sprint_id == sprint_id)
+        if cursor is not None:
+            conds.append(RetroSession.created_at < cursor)
+
+        count_q = select(func.count()).select_from(RetroSession).where(*conds)
+        total = int((await self.session.execute(count_q)).scalar_one() or 0)
+
+        q = (
+            select(RetroSession).where(*conds)
+            .order_by(RetroSession.created_at.desc(), RetroSession.id.desc())
+            .limit(limit if limit is not None else 1000)
+        )
+        result = await self.session.execute(q)
+        return list(result.scalars().all()), total
 
     async def set_phase(self, id: uuid.UUID, new_phase: str) -> RetroSession:
         """B1: 인접 양방향(collect↔vote↔action) + action→closed 편도만 허용. closed는
