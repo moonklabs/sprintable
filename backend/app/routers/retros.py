@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select
@@ -12,7 +13,7 @@ from app.services import hypothesis as hyp_svc
 from app.services import retro_hypothesis_seed as seed_svc
 from app.services import retro_synthesis as synth_svc
 from app.services.member_resolver import canonicalize_member_id, lookup_members_by_ids, resolve_member
-from app.services.project_auth import has_project_access, require_project_access
+from app.services.project_auth import require_project_access
 from app.repositories.retro import (
     RetroActionRepository,
     RetroItemRepository,
@@ -105,27 +106,51 @@ async def _require_item_in_session(
 async def list_sessions(
     project_id: uuid.UUID | None = Query(default=None),
     sprint_id: uuid.UUID | None = Query(default=None),
+    limit: int | None = Query(default=None, ge=1, le=2000),
+    cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
+    response: Response = None,  # type: ignore[assignment]
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     repo: RetroSessionRepository = Depends(_get_session_repo),
 ) -> list[SessionListResponse]:
+    """story #2428 PR④(ⓐ): goals.py/tasks.py/list_sprints와 동일 규약 — true cursor
+    페이지네이션 + 전체 카운트(X-Total-Count 헤더). limit 미지정 시 기존 동작(최대 1000)과
+    호환."""
     user_id = uuid.UUID(auth.user_id)
     if project_id is not None:
         # 명시 필터 시 그 프로젝트 접근권 선검증(무권한 project_id로 org 존재 여부 탐색 차단).
         # ⛔story #2342(2026-07-30): 무권한을 403이 아닌 404로 통일.
         await require_project_access(db, user_id, project_id, repo.org_id,
             not_found_detail="Project not found")
-    filters: dict = {}
+
+    cursor_dt: datetime | None = None
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=400, detail="invalid cursor: expected ISO 8601 datetime"
+            ) from exc
+
     if project_id:
-        filters["project_id"] = project_id
-    if sprint_id:
-        filters["sprint_id"] = sprint_id
-    sessions = await repo.list(**filters)
-    if project_id is None:
-        # project_id 생략 시 org 전체 세션이 나오던 갭 — 각 세션의 실제 project 접근권으로 필터.
-        sessions = [
-            s for s in sessions if await has_project_access(db, user_id, s.project_id, repo.org_id)
-        ]
+        filters: dict = {"project_id": project_id}
+        if sprint_id:
+            filters["sprint_id"] = sprint_id
+        sessions, total = await repo.list_paginated(limit=limit, cursor=cursor_dt, **filters)
+    else:
+        # project_id 생략 시 org 전체 세션이 나오던 갭(기존 has_project_access post-filter) —
+        # accessible_project_ids_in_org로 SQL-level IN 스코프(list_in_projects, list_sprints와
+        # 동형) — DB-level limit/cursor와 post-filter가 충돌하는 함정 회피.
+        from app.services.project_auth import accessible_project_ids_in_org
+        accessible = list(await accessible_project_ids_in_org(db, user_id, repo.org_id))
+        sessions, total = await repo.list_in_projects(
+            accessible, sprint_id=sprint_id, limit=limit, cursor=cursor_dt
+        )
+
+    if response is not None:
+        response.headers["X-Total-Count"] = str(total)
+        if sessions:
+            response.headers["X-Next-Cursor"] = sessions[-1].created_at.isoformat()
     return [SessionListResponse.model_validate(s) for s in sessions]
 
 

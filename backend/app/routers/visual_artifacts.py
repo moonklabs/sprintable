@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -39,8 +40,8 @@ from app.services.project_auth import assert_target_in_caller_org
 router = APIRouter(prefix="/api/v2/visual-artifacts", tags=["visual-artifacts", "Work"])
 
 
-def _ok(data: object, status: int = 200) -> JSONResponse:
-    return JSONResponse({"data": data, "error": None, "meta": None}, status_code=status)
+def _ok(data: object, status: int = 200, meta: dict | None = None) -> JSONResponse:
+    return JSONResponse({"data": data, "error": None, "meta": meta}, status_code=status)
 
 
 def _err(code: str, message: str, status: int) -> JSONResponse:
@@ -324,9 +325,18 @@ async def list_artifacts(
     epic_id: uuid.UUID | None = Query(default=None),
     doc_id: uuid.UUID | None = Query(default=None),
     ids: str | None = Query(default=None, description="comma-separated artifact ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관, story #2262 PR② 칩 상태 배치조회)"),
+    limit: int = Query(default=500, ge=1, le=1000),
+    cursor: str | None = Query(default=None, description="ISO 8601 created_at, fetch before this time — 이전 페이지 meta.next_cursor 값 그대로"),
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    """story #2428 PR④(ⓐ) — 예전엔 limit이 아예 없어 project 전체 artifact가 조용히 다
+    나왔다(무제한 위험). docs.py list_docs와 동일 규약(정본 규약 A — limit+1 오버페치 +
+    has_more/next_cursor body meta, `_doc_page_envelope` 참조) — 이 라우터는 stories.py/
+    goals.py 계열의 X-Total-Count 헤더 봉투가 아니라 이미 `{data,error,meta}` 자체 봉투를
+    쓰고 있어(위 `_ok`) 그 家族(docs.py)을 그대로 따른다(새 규약 발명 0). COUNT 쿼리 없이
+    limit+1개만 더 읽어 판정하므로 base.py list_paginated()류의 «count에 cursor 누락»
+    결함 클래스 자체가 구조적으로 없다."""
     # E-SECURITY SEC-S8(story 83ea3d6a) G(N): project_id 필터가 아예 없어 story_id/epic_id/
     # doc_id 미지정 호출(파라미터 없는 목록 조회)이 org 전체 artifact를 반환했다(cross-project
     # 노출·미르코 라이브 실측). create_artifact/get_artifact와 동형으로 JWT/API키 컨텍스트의
@@ -334,6 +344,16 @@ async def list_artifacts(
     org_id, project_id = _get_org_project(auth)
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
+
+    cursor_dt: datetime | None = None
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=400, detail="invalid cursor: expected ISO 8601 datetime"
+            ) from exc
+
     q = select(VisualArtifact).where(
         VisualArtifact.org_id == org_id, VisualArtifact.project_id == project_id,
         VisualArtifact.deleted_at.is_(None),
@@ -349,24 +369,40 @@ async def list_artifacts(
         except ValueError:
             raise HTTPException(status_code=422, detail="invalid artifact id in ids")
         if not artifact_ids:
-            return _ok([])
+            return _ok([], meta={"has_more": False, "next_cursor": None})
         if len(artifact_ids) > 200:
             raise HTTPException(status_code=422, detail="too many ids (max 200)")
         q = q.where(VisualArtifact.id.in_(artifact_ids))
+        rows = (await session.execute(q)).scalars().all()
+        unresolved_counts = await _count_unresolved_comments(session, [r.id for r in rows])
+        for r in rows:
+            r.unresolved_comment_count = unresolved_counts.get(r.id, 0)
+        return _ok(
+            [VisualArtifactSummary.model_validate(r).model_dump(mode="json") for r in rows],
+            meta={"has_more": False, "next_cursor": None},
+        )
     if story_id is not None:
         q = q.where(VisualArtifact.story_id == story_id)
     if epic_id is not None:
         q = q.where(VisualArtifact.epic_id == epic_id)
     if doc_id is not None:
         q = q.where(VisualArtifact.doc_id == doc_id)
-    q = q.order_by(VisualArtifact.created_at.desc())
-    rows = (await session.execute(q)).scalars().all()
+    if cursor_dt is not None:
+        q = q.where(VisualArtifact.created_at < cursor_dt)
+    q = q.order_by(VisualArtifact.created_at.desc()).limit(limit + 1)
+    fetched = (await session.execute(q)).scalars().all()
+    has_more = len(fetched) > limit
+    rows = fetched[:limit]
+    next_cursor = rows[-1].created_at.isoformat() if has_more and rows else None
     # story #2262 AC9②: 페이지 전체를 쿼리 1회로 해소(N+1 방지, #2619와 동형) — artifact마다
     # 따로 COUNT 왕복하지 않는다.
     unresolved_counts = await _count_unresolved_comments(session, [r.id for r in rows])
     for r in rows:
         r.unresolved_comment_count = unresolved_counts.get(r.id, 0)
-    return _ok([VisualArtifactSummary.model_validate(r).model_dump(mode="json") for r in rows])
+    return _ok(
+        [VisualArtifactSummary.model_validate(r).model_dump(mode="json") for r in rows],
+        meta={"has_more": has_more, "next_cursor": next_cursor},
+    )
 
 
 @router.delete("/{id}")
@@ -401,20 +437,42 @@ async def delete_artifact(
 async def list_artifact_comments(
     id: uuid.UUID,
     limit: int = Query(default=50, le=200),
+    cursor: str | None = Query(default=None, description="ISO 8601 created_at, fetch after this time — 이전 페이지 meta.next_cursor 값 그대로(오래된순 정렬이라 forward-cursor)"),
     auth: AuthContext = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    """story #2428 PR④(ⓐ) — limit은 있었으나 total/has_more가 없어 잘렸는지 호출자가 알 수
+    없었다(활발한 토론 스레드는 챗 스레드와 동형 무한성장 위험). list_artifacts와 동일하게
+    limit+1 오버페치 + has_more/next_cursor body meta(docs.py 정본 규약 A) — 정렬이 오래된순
+    (asc)이라 next_cursor는 "이 시각 이후"로 이어가는 forward cursor."""
     org_id, project_id = _get_org_project(auth)
     if not org_id or not project_id:
         return _err("FORBIDDEN", "org_id/project_id required", 403)
     artifact = await _get_artifact_or_404(session, org_id, project_id, id)
     if artifact is None:
         return _err("NOT_FOUND", "Artifact not found", 404)
-    rows = (await session.execute(
-        select(ArtifactComment).where(ArtifactComment.artifact_id == id)
-        .order_by(ArtifactComment.created_at.asc()).limit(limit)
-    )).scalars().all()
-    return _ok([ArtifactCommentResponse.model_validate(r).model_dump(mode="json") for r in rows])
+
+    cursor_dt: datetime | None = None
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=400, detail="invalid cursor: expected ISO 8601 datetime"
+            ) from exc
+
+    q = select(ArtifactComment).where(ArtifactComment.artifact_id == id)
+    if cursor_dt is not None:
+        q = q.where(ArtifactComment.created_at > cursor_dt)
+    q = q.order_by(ArtifactComment.created_at.asc()).limit(limit + 1)
+    fetched = (await session.execute(q)).scalars().all()
+    has_more = len(fetched) > limit
+    rows = fetched[:limit]
+    next_cursor = rows[-1].created_at.isoformat() if has_more and rows else None
+    return _ok(
+        [ArtifactCommentResponse.model_validate(r).model_dump(mode="json") for r in rows],
+        meta={"has_more": has_more, "next_cursor": next_cursor},
+    )
 
 
 @router.post("/{id}/comments", status_code=201)

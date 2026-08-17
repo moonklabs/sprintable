@@ -6,15 +6,17 @@ from typing import Literal
 from mcp.types import TextContent
 
 from ..api_client import client
-from ..response import err, ok
+from ..response import err, ok, ok_paginated
 from ..schemas import SprintableInput
+from .stories import _has_more_from_headers
 
 RetroPhase = Literal["collect", "group", "vote", "discuss", "action", "closed"]
 RetroCategory = Literal["good", "bad", "improve"]
 
 
 class ListRetroSessionsInput(SprintableInput):
-    pass
+    limit: int | None = None
+    cursor: str | None = None  # 이전 호출의 X-Next-Cursor 헤더 값을 그대로 넘기면 다음 페이지.
 
 
 class CreateRetroSessionInput(SprintableInput):
@@ -54,7 +56,14 @@ class ExportRetroInput(SprintableInput):
 async def list_retro_sessions(args: ListRetroSessionsInput) -> list[TextContent]:
     """레트로 세션 목록 조회."""
     try:
-        return ok(await client.get("/api/v2/retros", params={"project_id": client.require_project_id()}))
+        params: dict = {"project_id": client.require_project_id()}
+        if args.limit:
+            params["limit"] = args.limit
+        if args.cursor:
+            params["cursor"] = args.cursor
+        items, headers = await client.get_with_headers("/api/v2/retros", params=params)
+        has_more, next_cursor = _has_more_from_headers(headers, items)
+        return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_list_retro_sessions")
     except Exception as exc:
         return err(str(exc))
 

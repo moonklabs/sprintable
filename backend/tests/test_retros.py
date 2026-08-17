@@ -153,19 +153,26 @@ async def test_list_retro_sessions_200():
 
 @pytest.mark.anyio
 async def test_list_retro_sessions_no_project_id_filters_by_access():
-    """project_id 생략 시 org 전체가 아니라 has_project_access 통과분만 반환(#1801 스윕)."""
+    """project_id 생략 시 org 전체가 아니라 accessible project 스코프만 반환(#1801 스윕).
+
+    story #2428 PR④(2026-08-17): org-wide 분기가 세션마다 has_project_access를 개별
+    호출하는 Python post-filter에서 accessible_project_ids_in_org 기반 SQL-level IN
+    스코프(RetroSessionRepository.list_in_projects)로 바뀌었다 — 같은 최종 계약(무권한
+    project의 세션은 안 보임)을 새 seam(accessible_project_ids_in_org)으로 고정."""
     client, session, app = await _client()
     try:
         accessible = _mock_session(project_id=PROJECT_ID)
-        inaccessible = _mock_session(project_id=OTHER_PROJECT_ID)
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [accessible, inaccessible]
-        session.execute = AsyncMock(return_value=mock_result)
 
-        async def fake_access(_db, _user_id, project_id, _org_id):
-            return project_id == PROJECT_ID
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = 1
+        item_result = MagicMock()
+        item_result.scalars.return_value.all.return_value = [accessible]
+        session.execute = AsyncMock(side_effect=[count_result, item_result])
 
-        with patch("app.routers.retros.has_project_access", new=AsyncMock(side_effect=fake_access)):
+        with patch(
+            "app.services.project_auth.accessible_project_ids_in_org",
+            new=AsyncMock(return_value=[PROJECT_ID]),
+        ):
             async with client as c:
                 resp = await c.get("/api/v2/retros")
 
