@@ -2254,10 +2254,21 @@ async def send_message(
     # 호출에 auto_story_ids를 그대로 넘겨 entity_references.origin(explicit vs auto)을
     # 가른다(promoter가 여기서 심은 토큰과 caller가 직접 타이핑한 브라켓 토큰은 파싱만으론
     # 구분이 안 되므로 별도 채널로 전달).
+    from app.services.mention_parser import extract_chat_entity_mentions
     from app.services.story_ref_promoter import promote_bare_story_refs
+
+    # story #2702 — 같은 메시지에 같은 story의 bare #N 과 명시 브라켓 멘션이 둘 다 있으면,
+    # 승격(promote) 후엔 파싱만으로 "그 story_id가 애초에 명시로도 타이핑돼 있었다"는 걸 더는
+    # 못 가른다(브라켓 토큰 모양이 같아져서). 그래서 승격 *전* 원문에서 명시 멘션을 먼저 뽑아
+    # 두고, 그 id들을 auto_story_ids에서 빼 둔다 — insert_chat_mentions의 origin 판정
+    # (`"auto" if eid in auto_story_ids else "explicit"`)이 자연히 explicit을 고르게 된다.
+    _explicit_story_ids_before_promotion = {
+        eid for etype, eid in extract_chat_entity_mentions(body.content or "") if etype == "story"
+    }
     body.content, _auto_story_ids = await promote_bare_story_refs(
         db, org_id=org_id, project_id=conv.project_id, content=body.content or "",
     )
+    _auto_story_ids -= _explicit_story_ids_before_promotion
 
     # E-ACTIVATION S1(까디르 QA): audience 도 cross-org/삭제 id 차단 — mentioned_ids 와 동형 org 필터.
     # 안 하면 삭제·타조직 member_id 를 audience 에 넣어 «실 수신자 전원이 addressed=no» 메시지를 만들 수 있다.
