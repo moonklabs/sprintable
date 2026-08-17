@@ -14,7 +14,7 @@
 # 스텝④의 add-backend는 실재하는 instance-group을 요구하므로 **deploy_realtime_gce.sh
 # (MIG 생성)가 먼저, 이 스크립트(GCLB 프로비저닝)가 그 다음**이 맞다.
 #
-# 실행 순서: ① 방화벽(GCLB 헬스체크 프로브 대역 허용) → ② 헬스체크(/api/v2/ping)
+# 실행 순서: ① 방화벽(GCLB 헬스체크 프로브 대역 허용) → ② 헬스체크(/api/v2/ready, story #2295)
 #           → ③ 백엔드서비스(timeout=3600!) → ④ MIG를 백엔드로 부착
 #           → ⑤ URL맵 → ⑥ 타겟프록시 → ⑦ 전역 고정IP → ⑧ 포워딩규칙
 #
@@ -77,7 +77,7 @@ if [ "${DRY_RUN}" = "1" ]; then
     cat <<EOF
 ENV=${ENV}
 FW_RULE_NAME=${FW_RULE_NAME}
-HEALTH_CHECK_NAME=${HEALTH_CHECK_NAME} (target: /api/v2/ping, DB 미조회 — PR-A 확認됨)
+HEALTH_CHECK_NAME=${HEALTH_CHECK_NAME} (target: /api/v2/ready, DB 미조회·캐시된 연결상태 — story #2295)
 BACKEND_SERVICE_NAME=${BACKEND_SERVICE_NAME} (timeout=${BACKEND_TIMEOUT_SEC}s, draining=${DRAINING_TIMEOUT_SEC}s)
 MIG_NAME=${MIG_NAME}
 URL_MAP_NAME=${URL_MAP_NAME}
@@ -102,20 +102,40 @@ else
     log "Firewall rule ${FW_RULE_NAME} already exists — skip"
 fi
 
-# ── ② 헬스체크 — /api/v2/ping (DB 안 타는 엔드포인트, PR-A에서 이미 구현·배포됨).
-#    /api/v2/health 아님 — 그건 DB 조회가 걸려 있어 콜드/DB부하 시 오탐 우려(설계 doc 명시). ──
+# ── ② 헬스체크 — story #2295(2026-08-17) target 전환: /api/v2/ping → /api/v2/ready.
+#
+# 이력 — 왜 /ping이었나(PR-A~C, 2026-07): /api/v2/health(DB SELECT 1 조회)는 콜드/DB부하 시
+# 오탐 우려(설계 doc 명시)라 DB 미조회 /ping을 골랐다. 그런데 그 선택의 부작용이 2026-07-28
+# 인시던트로 드러났다 — /ping은 "앱 프로세스가 응답하는가"만 재서, cloud-sql-proxy가 스테일
+# 소켓으로 크래시루프 중이어도(=이 인스턴스는 일을 못 한다) LB가 계속 HEALTHY로 봤다(story
+# #2295 원문 실측). ⛔"DB 부하 우려"라는 /ping의 원래 근거는 여전히 옳다 — 그래서 /health로
+# 되돌리지 않는다. 대신 신설된 /api/v2/ready(story #2295)가 DB를 조회하지 않으면서도(체크당
+# 쿼리 0 — pg_pubsub.listen_loop()가 이미 자기 재연결 목적으로 추적하던 연결상태를 캐시된
+# 사실로 읽기만 한다) "일할 수 있는가"를 답한다 — /ping의 DB 부하 우려와 /health의 오탐 우려
+# 둘 다 재도입하지 않는 제3의 선택.
+#
+# 멱등 — 이미 있으면(구 /ping 타깃 포함) request-path를 조회해 다르면 update, 같으면 skip.
 if ! gcloud compute health-checks describe "${HEALTH_CHECK_NAME}" --project="${GCP_PROJECT}" >/dev/null 2>&1; then
-    log "Creating health check ${HEALTH_CHECK_NAME} → /api/v2/ping"
+    log "Creating health check ${HEALTH_CHECK_NAME} → /api/v2/ready"
     gcloud compute health-checks create http "${HEALTH_CHECK_NAME}" \
         --project="${GCP_PROJECT}" \
         --port=8000 \
-        --request-path=/api/v2/ping \
+        --request-path=/api/v2/ready \
         --check-interval=10s \
         --timeout=5s \
         --healthy-threshold=2 \
         --unhealthy-threshold=3
 else
-    log "Health check ${HEALTH_CHECK_NAME} already exists — skip"
+    _current_path=$(gcloud compute health-checks describe "${HEALTH_CHECK_NAME}" \
+        --project="${GCP_PROJECT}" --format='value(httpHealthCheck.requestPath)')
+    if [ "${_current_path}" != "/api/v2/ready" ]; then
+        log "Health check ${HEALTH_CHECK_NAME} exists with stale target (${_current_path}) — updating to /api/v2/ready"
+        gcloud compute health-checks update http "${HEALTH_CHECK_NAME}" \
+            --project="${GCP_PROJECT}" \
+            --request-path=/api/v2/ready
+    else
+        log "Health check ${HEALTH_CHECK_NAME} already targets /api/v2/ready — skip"
+    fi
 fi
 
 # ── ③ 백엔드서비스 — ⚠️timeout=3600 명시(기본 30 그대로 두면 Cloud Run보다 퇴보). ──
