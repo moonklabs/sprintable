@@ -112,7 +112,7 @@ async def _setup_app_jwt_with_stale_project(app, Session, org_id, caller_id, sta
     브라우저 세션 발급 시점의 기본/구 프로젝트) — X-Project-Id 헤더로 override되는지가
     이 스토리의 핵심 검증축."""
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     async def _db():
         async with Session() as s:
@@ -129,7 +129,7 @@ async def _setup_app_jwt_with_stale_project(app, Session, org_id, caller_id, sta
             claims={"app_metadata": {"org_id": str(org_id), "project_id": str(stale_project_id)}},
         )
 
-    app.dependency_overrides[get_db] = _db
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
 
 
@@ -220,7 +220,7 @@ async def test_read_route_toolgroup_scope_still_exempt_for_api_key():
     """read 라우트는 project 멤버십 검증은 서지만, API키 toolgroup scope 체크(story b4027b2e)는
     여전히 면제된다(PO 조건① — scope 미보유 API키라도 read는 통과) — 회귀 확認."""
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
     from app.main import app
 
     engine, Session = await _session_factory()
@@ -246,7 +246,7 @@ async def test_read_route_toolgroup_scope_still_exempt_for_api_key():
                 }},
             )
 
-        app.dependency_overrides[get_db] = _db
+        override_db_and_read(app, _db)
         app.dependency_overrides[get_current_user] = _auth
         client = _client_for(app)
         try:
