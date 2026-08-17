@@ -15,6 +15,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.models.billing_order import BillingOrder
 from app.services.billing_pack import PackPurchaseDeclined, PackPurchaseError, purchase_packs
+from app.services.platform_settings import get_platform_settings
 
 router = APIRouter(prefix="/api/v2/org-subscriptions", tags=["billing", "Organization"])
 
@@ -52,7 +53,14 @@ async def purchase_pack(
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> PackPurchaseResponse:
     """명시 구매 확認 → 즉시 청구(#2506 checkout과 동형) → confirmed 時 원장 확定.
-    카드 거절은 200+status='failed'(비즈니스 결과) — 502는 Toss API 자체 미도달에만."""
+    카드 거절은 200+status='failed'(비즈니스 결과) — 502는 Toss API 자체 미도달에만.
+
+    story #2728(선생님 결정②) — 팩 구매도 실제 결제 처리라 checkout과 동일 스위치로
+    서버측 전면 차단."""
+    platform_settings = await get_platform_settings(session)
+    if not platform_settings.billing_checkout_enabled:
+        raise HTTPException(status_code=403, detail="billing checkout is not yet enabled")
+
     from app.services.project_auth import is_org_owner_or_admin
 
     if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):

@@ -22,6 +22,7 @@ from app.models.org_subscription import OrgSubscription
 from app.models.pricing_version import PricingVersion
 from app.models.project import OrgMember
 from app.services.payment.factory import get_payment_adapter
+from app.services.platform_settings import get_platform_settings
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +128,14 @@ async def create_checkout_session(
     session: AsyncSession = Depends(get_db),
     _ee: None = Depends(_require_ee),
 ) -> dict:
-    """Polar checkout 세션 생성 — owner/admin 전용."""
+    """Polar checkout 세션 생성 — owner/admin 전용.
+
+    story #2728(선생님 결정②) — 구세계(Polar) checkout도 신세계와 동일하게 서버측 전면
+    차단(org_subscription_checkout.py의 checkout과 동일 근거·동일 스위치)."""
+    platform_settings = await get_platform_settings(session)
+    if not platform_settings.billing_checkout_enabled:
+        raise HTTPException(status_code=403, detail="billing checkout is not yet enabled")
+
     # owner/admin 권한 확인
     role_result = await session.execute(
         select(OrgMember.role).where(
