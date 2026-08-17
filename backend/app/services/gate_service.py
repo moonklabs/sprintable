@@ -28,6 +28,7 @@ from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition, set_gate_status
 from app.models.hitl_config import OrgGatePolicy
 from app.models.hypothesis import Hypothesis
+from app.services.doc import DOC_GATE_TYPE
 from app.models.loop import LoopRun
 from app.models.pm import Goal, Sprint, Story, Task
 from app.models.visual_artifact import VisualArtifact
@@ -57,7 +58,15 @@ logger = logging.getLogger(__name__)
 RiskGrade = Literal["low", "high"]
 
 # 2차 축(doc §2.2): posture가 미확定(balanced/미설정)일 때만 참조.
-_HIGH_RISK_GATE_TYPES: frozenset[str] = frozenset({"merge", "deploy", "workflow_config_publish"})
+#
+# story #6c89e40d(페드루 PO 판정 2026-08-17, ⓐ'): doc_approval은 지금까지 이 세트 어디에도
+# 없어 폴백(§2.3 안전판)에 «의존»해서만 high였다 — 실사용 타입이 우연히 폴백과 값이 같다는
+# 사실에 기대는 것과 명시 등재는 다르다(폴백은 "미분류 신규 타입"을 위한 것이지 이미 아는
+# 타입을 위한 것이 아니다). doc-gate-section.tsx의 note-422 실사고(dev 08-15, gate
+# 5a34ef7f)가 정확히 이 간극에서 났다 — FE가 note/evidence_viewed를 안 보내는 채로 배선돼
+# 있었는데 그 사실을 아무 코드도 "doc_approval=high"라고 선언하지 않고 있었다. low로
+# 등재하지 않는다(신중 결재 취지 훼손, PO 명시 판단) — high로 명시.
+_HIGH_RISK_GATE_TYPES: frozenset[str] = frozenset({"merge", "deploy", "workflow_config_publish", DOC_GATE_TYPE})
 _LOW_RISK_GATE_TYPES: frozenset[str] = frozenset({"pr_review", "qa"})
 
 

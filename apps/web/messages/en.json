@@ -1855,6 +1855,7 @@
     "docGateRequestReview": "Request review",
     "docGateRequestReviewHint": "Request a review and the assigned reviewer will approve or reject this document.",
     "docGateApprove": "Approve",
+    "docGateTransitionErrorGeneric": "Failed to process the gate. Please try again.",
     "docGateReject": "Reject",
     "docGateRejectModalTitle": "Reject review",
     "docGateRejectReasonLabel": "Rejection reason (shared with the author)",
