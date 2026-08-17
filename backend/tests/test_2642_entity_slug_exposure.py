@@ -345,10 +345,11 @@ async def test_evidence_get_carries_org_project_slug():
 
 # ── Artifact axis ────────────────────────────────────────────────────────────
 async def test_artifact_get_carries_own_org_project_slug_no_parent_hop():
-    """create_artifact/get_artifact를 직접 호출(다른 축과 동형) — create_artifact의
-    `_write_scope_check: Depends(get_verified_org_id)`는 실 DI 그래프 밖에서 org.id를 그대로
-    넘겨 우회(HTTP 라운드트립의 bearer-key 해소 복잡도 불필요 — 이 스토리 스코프는 slug
-    부착 로직 검증이지 인증 배선 자체가 아니다)."""
+    """create_artifact/get_artifact를 직접 호출(다른 축과 동형) — story #2708(2026-08-17)로
+    `_write_scope_check: Depends(get_verified_org_id)`가 `scope: dict = Depends(get_scope_context)`
+    로 교체됨에 따라, 실 DI 그래프 밖에서 그 dict를 그대로 넘겨 우회(HTTP 라운드트립의
+    bearer-key 해소 복잡도 불필요 — 이 스토리 스코프는 slug 부착 로직 검증이지 인증 배선
+    자체가 아니다)."""
     from app.models.visual_artifact import VisualArtifact
     from app.routers.visual_artifacts import CreateArtifactRequest, create_artifact, get_artifact
     from app.schemas.visual_artifact import ArtifactNodeIn
@@ -361,18 +362,19 @@ async def test_artifact_get_carries_own_org_project_slug_no_parent_hop():
 
             auth = _auth(agent_id, org.id)
             auth.claims["app_metadata"]["project_id"] = str(project.id)
+            scope = {"org_id": org.id, "project_id": project.id, "user_id": auth.user_id}
 
             create_resp = await create_artifact(
                 body=CreateArtifactRequest(
                     title="Diagram", source="created",
                     nodes=[ArtifactNodeIn(type="text", props={"content": "hi"})],
                 ),
-                auth=auth, session=s, _write_scope_check=org.id,
+                auth=auth, session=s, scope=scope,
             )
             import json
             artifact_id = uuid.UUID(json.loads(create_resp.body)["data"]["id"])
 
-            get_resp = await get_artifact(id=artifact_id, auth=auth, session=s)
+            get_resp = await get_artifact(id=artifact_id, auth=auth, scope=scope, session=s)
             body = json.loads(get_resp.body)["data"]
             assert body["org_slug"] == org.slug
             assert body["project_slug"] == "art-proj"
