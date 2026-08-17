@@ -15,6 +15,7 @@ import {
 } from '@/services/canvas';
 import { ArtifactExpandDialog } from '@/components/canvas/artifact-expand-dialog';
 import { type GalleryTimelineVersion } from '@/components/canvas/artifact-gallery-timeline';
+import { fetchWithAuth } from '@/lib/db/client';
 
 const VISIBLE_LIMIT = 4;
 
@@ -112,7 +113,7 @@ export function EvidenceSection({
   const handleOpenArtifact = useCallback(async (artifactId: string, versionNumber: number, title: string) => {
     const [detail, versionListRes] = await Promise.all([
       getArtifactVersionDetail(artifactId, versionNumber),
-      fetch(`/api/visual-artifacts/${artifactId}/versions`),
+      fetchWithAuth(`/api/visual-artifacts/${artifactId}/versions`),
     ]);
     if (!detail) return;
     const { artifact, versions } = adaptArtifactDetail(detail);
