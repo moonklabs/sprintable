@@ -22,6 +22,8 @@ _CORE_NO_PREFIX = {
     "sprintable_lock_files", "sprintable_unlock_files", "sprintable_link_gate_to_task",
     "sprintable_add_evidence", "sprintable_list_projects", "sprintable_set_default_project",
     "sprintable_add_judgment", "sprintable_list_judgments",
+    # story #2709: request_decision — link_gate_to_task/add_evidence와 동일 근거로 core.
+    "sprintable_request_decision",
     "sprintable_get_session_context",
     # story #2597: list_agent_cards — mcp_toolset.py _ALWAYS_ALLOWED와 동기화(core 취급 사유는
     # 거기 주석 참조 — 어떤 role이든 필요한 cross-cutting 발견 유틸, 단일 축 아님).
@@ -76,6 +78,7 @@ def test_tool_names_and_param_models_untouched():
     sprintable_list_event_definitions 2종 신설(이벤트 레지스트리 발행/카탈로그) — 116→118.
     story #2636: sprintable_register_event_definition/sprintable_update_event_definition
     2종 신설(org 커스텀 이벤트 등록/수정) — 118→120. story #2668(B3): sprintable_submit_
-    for_approval 1종 신설(문서 결재 상신 MCP 발견 경로) — 120→121."""
-    assert len(_TOOL_DEFS) == 121
+    for_approval 1종 신설(문서 결재 상신 MCP 발견 경로) — 120→121. story #2709: sprintable_
+    request_decision 1종 신설(AskUserQuestion 블로킹 대체) — 121→122."""
+    assert len(_TOOL_DEFS) == 122
     assert all(name.startswith("sprintable_") for name in _TOOLS)

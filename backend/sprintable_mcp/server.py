@@ -650,7 +650,7 @@ _TOOL_DEFS: list[tuple] = [
      ListAgentCardsInput, list_agent_cards),
     # 비동기 결정 요청 (1) — story #2709(AskUserQuestion 블로킹 대체)
     ("sprintable_request_decision",
-     "[⛔AskUserQuestion 대신 이걸 쓸 것] 사람 판단이 필요할 때 블로킹으로 기다리지 말고 이"
+     "⛔AskUserQuestion 대신 이걸 쓸 것 — 사람 판단이 필요할 때 블로킹으로 기다리지 말고 이"
      " 도구로 결정을 발행한 뒤 assumption대로 즉시 계속 일한다. 결재함+해당 채팅에 카드로"
      " 뜨고(원탭 승인 — 서명/근거열람 불요), 사람이 답하면 poll_events로 회신이 온다(approve="
      " 가정 확인, reject=note에 실제 답 — 자유텍스트로 옴). options는 힌트일 뿐 강제 아님.",
