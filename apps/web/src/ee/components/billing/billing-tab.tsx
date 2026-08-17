@@ -58,6 +58,13 @@ interface BillingStatus {
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
 function toTierId(raw: string | undefined): TierId {
+  // story #2403 후속(2026-08-17) — prod org_subscriptions 실측: tier='pro'(레거시 Polar,
+  // v2.2 D5가 은퇴시킨 이름) 조직이 3건 실존. TIER_ORDER에 'pro'가 없어 이 매핑 없이는
+  // 유료 결제 중인 조직이 조용히 "Free"로 렌더됐다(실해악 — 화면만 틀리고 청구는 계속됨).
+  // 'business'로 매핑하는 근거: migration 0228이 이미 pricing_versions에 동일 판단을
+  // 적용했다(`UPDATE pricing_versions SET tier = 'business' WHERE tier = 'pro'`) — 이름
+  // 재사용 금지(D12)는 신규 의미 부여 금지이지, 레거시 데이터 표시 매핑까지 막지 않는다.
+  if (raw === 'pro') return 'business';
   return raw != null && (TIER_ORDER as readonly string[]).includes(raw) ? (raw as TierId) : 'free';
 }
 
