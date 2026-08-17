@@ -448,6 +448,20 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
         ),
         DeepLinkManifestEntry(
+            # story #2709: 비동기 결정 요청(agent_decision_request) 해소 결과가 human 상신자에게
+            # 회신되는 벨 알림 — doc_approval_resolved와 완전 동형(dispatch_approval_result_reply
+            # 파라미터화 재사용, gate 경유·reference_id=gate_id·읽기전용 FYI).
+            app=DeepLinkAppFields(
+                type="agent_decision_resolved", target="gate_detail", parent_tab=ParentTab.approvals,
+                target_promotion_pending=True,
+            ),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
+            channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
+        ),
+        DeepLinkManifestEntry(
             # story #2631: 「보류(논의 필요)」 요청이 doc 결재 상신자에게 회신되는 벨 알림 —
             # doc_approval_resolved와 동형(gate 경유·reference_id=gate_id)이나 게이트가 아직
             # 결정 안 나고 pending인 채로 "3안 논의 요청"을 받은 것이라, 결재자가 그 카드로

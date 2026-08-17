@@ -1109,6 +1109,10 @@ async def _notify_doc_gate_requester(session: AsyncSession, gate: Gate, new_stat
                 project_id=doc.project_id, title=doc.title, gate_id=gate.id,
                 requester_id=requester_id, resolver_id=gate.resolver_id,
                 decision=new_status, resolution_note=gate.resolution_note,
+                # story #2709 — 딥링크 계약 정적 스캐너(deeplink_contract_lib)가 event_type을
+                # 파라미터 default가 아니라 매 호출부 명시 리터럴로만 정적 해석한다 — default
+                # 값에 기대면 UnresolvedDispatchCallError. 값 자체는 원래 default와 동일(무회귀).
+                event_type="doc_approval_resolved",
             )
         elif gate.gate_type == "agent_decision_request":
             project_id_raw = facts.get("project_id")
