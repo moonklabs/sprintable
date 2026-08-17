@@ -1,78 +1,79 @@
-# Sprintable Adapter for Pi
+# sprintable-pi
 
-Pi용 Sprintable Gateway dial-out 어댑터 (카테고리 B — JSONL/stdio 호스트).
+Sprintable Gateway extension for [Pi](https://github.com/earendil-works/pi) — real-time team chat via SSE dial-out (no inbound webhook required). In-process `ExtensionAPI`, Category A — the same shape as every other Sprintable connector's real npm package (opencode-sprintable, openclaw-sprintable), not the standalone-host pattern `host.py` in this same directory uses (see [Legacy: `host.py`](#legacy-hostpy) below).
 
-**codex/gemini 호스트와 동형 골격** (자식 프로세스 spawn/own + lifetime 관리).
-차이 = 메시지 레이어: pi는 **`pi --mode rpc`** (JSONL/stdio — JSON-RPC 아닌 **줄단위 JSON**).
-`steer`로 mid-stream 주입이 pi 강점.
-
-## 요구사항
-
-- **pi 설치 필수** (`pi --mode rpc` 사용).
-  ```bash
-  npm install -g @earendil-works/pi-coding-agent   # bin: pi
-  pi --version
-  ```
-- Python 3.10+ (asyncio subprocess)
-- `httpx` (공통 SDK 의존)
-
-## 설치 및 실행
+## Install
 
 ```bash
-# 1. git pull
-git pull origin develop
-
-# 2. 환경 변수 설정
-export AGENT_API_KEY=sk_live_...            # Sprintable agent API key (필수)
-export SPRINTABLE_API_URL=https://...       # Backend URL (미설정 시 dev 기본값)
-# export PI_BIN=/path/to/pi                  # pi 바이너리 경로 (기본: PATH의 pi)
-
-# 3. 호스트 실행
-python connectors/pi-sprintable/host.py
+pi install npm:sprintable-pi
 ```
 
-## 동작 원리
+Or from a local checkout during development:
 
-```
-host.py 시작
-  → PiRpcServer.start(): pi --mode rpc spawn (JSONL은 별도 initialize 핸드셰이크 없음)
-  → SprintableSSEClient.run(inject) (공통 SDK)
-  → 이벤트마다 inject(ctx):
-    → pi.run_turn(ctx.content):
-      → stdin JSONL: {"type":"prompt", "message": text}
-      → stdout JSONL: AgentSessionEvent 스트림 (session.subscribe)
-      → agent_end {messages:[AgentMessage]} 에서 assistant 텍스트 수집
-    → ctx.reply(response) → POST /api/v2/conversations/{id}/messages
-    → ack: SDK 처리
+```bash
+pi install ./connectors/pi-sprintable -l   # -l installs project-locally into .pi/settings.json
 ```
 
-## 메시지 레이어 (JSONL — JSON-RPC와 차이)
+Then set your Sprintable agent credentials before starting `pi`:
 
-codex/gemini는 JSON-RPC(id/method/params/result)지만, pi는 **줄단위 JSON 명령/이벤트**:
-- 명령(stdin): `{"type":"prompt", "message", "streamingBehavior"?:"steer"|"followUp"}`
-- mid-stream 주입(stdin): `{"type":"steer", "message"}` — pi 강점
-- 응답(stdout): `{"type":"response", "command":"prompt", "success":true}` = ack
-- 이벤트(stdout): `AgentSessionEvent` — `agent_end {messages}`, `turn_end {message}`, `message_update {...}` 등
+```bash
+export SPRINTABLE_API_KEY=sk_live_...       # Sprintable agent API key (required)
+export SPRINTABLE_API_URL=https://...       # Backend URL (defaults to https://app.sprintable.ai)
+```
 
-## 프로세스 관리 (카테고리 B 핵심 — codex/gemini 동형)
+Without a key set, the extension registers no handlers at all and does nothing observable — safe to install ahead of configuring credentials.
 
-- `PiRpcServer`가 자식 프로세스를 spawn/own
-- `stop()`: SIGTERM(`terminate`) → 5s timeout → `kill` — 좀비 방지
-- `host.py` 종료 시 `finally: pi.stop()` 보장 + reader_task cancel
+## How it works
 
-## 실측 스키마
+```
+pi session starts
+  → session_start event
+    → runSprintableSSE (vendored SDK) opens GET /api/v2/agent/stream
+  → inbound Sprintable message arrives
+    → pi.sendUserMessage(content, {deliverAs: "steer"})   — injects as a new turn,
+      correctly whether the agent is idle or already mid-turn (Pi's own doc comment:
+      "When the agent is streaming, use deliverAs to specify how to queue the message")
+  → agent_end event (the turn settles)
+    → last assistant message's text extracted → POST /api/v2/conversations/{id}/messages
+  → session_shutdown event
+    → AbortController.abort() closes the SSE connection
+```
 
-`@earendil-works/pi-coding-agent@0.78.0` `dist/modes/rpc/rpc-types.d.ts`:
-- `RpcCommand: {type:"prompt"|"steer"|"follow_up", message, streamingBehavior?}`
-- `RpcResponse: {type:"response", command, success}`
+- **No idle-wake problem.** Every other Sprintable connector (codex, grok, gemini) spawns
+  a *fresh CLI process* to wake an idle session (`<cli> -r <session_id> -p "<msg>"`), which is
+  why each of those has had to solve its own idle-wake mechanism (and, in gemini's case, get
+  it wrong the first time — see #2561's `--resume` fix). Pi's extension runs **in-process**,
+  inside the same running session the whole time, so `sendUserMessage(..., {deliverAs:
+  "steer"})` just works uniformly — there's no separate process to wake up.
+- Single active conversation tracked per process (mirrors every sibling connector's own
+  single-active-conversation pattern) — this extension replies to whichever Sprintable
+  conversation most recently sent it a message.
+- SSE consumption, dedup, ack, backoff, and attachment handling live in the vendored
+  `sprintable-sse.ts` (SDK original: `connectors/sdk/sprintable-sse.ts` — published packages
+  can't resolve a monorepo-relative `../sdk/...` import, so a copy ships in this package; see
+  [`project_vendored_sdk_sync_debt`] for the tracked follow-up to end this vendoring pattern).
 
-`@earendil-works/pi-agent-core@0.78.0` `dist/types.d.ts`:
-- `AgentEvent: agent_end {messages:[AgentMessage]}`, `turn_end {message}`, ...
+## Verification status
 
-`@earendil-works/pi-ai@0.78.0`:
-- `AssistantMessage.content: (TextContent{type:"text",text} | ...)[]`
+- **Live-verified**: real `pi` CLI, real extension load (isolated project-local install,
+  `.pi/settings.json`, zero contact with any global `pi` config), real SSE connection to the
+  Sprintable dev backend (`[sprintable-sse] stream open` observed).
+- **Boundary-tested, not live end-to-end**: this session's free-tier Google API quota was
+  fully exhausted (shared across every tool touching that key today) before a real LLM turn
+  could complete through `pi` — same boundary already established for the OpenCode (#2562)
+  and OpenClaw (#2563) connectors: this extension's responsibility ends at correctly
+  receiving a message and injecting it via `sendUserMessage`; whether the underlying model
+  provider is authenticated and actually responds is out of scope. `index.test.ts` proves the
+  full logic (SSE receive → `sendUserMessage(steer)` injection → `agent_end` → reply POST)
+  against a fake `ExtensionAPI` and a real mock SSE server — no real `pi` binary or LLM call
+  needed, and the mocked assistant response round-trips through the exact same `ctx.reply()`
+  code path a real turn would use.
 
-## 단일 세션 주의
+## Legacy: `host.py`
 
-현재 모든 conversation을 단일 pi 세션에 주입 (codex/gemini와 동일).
-멀티 conversation 컨텍스트 분리는 후속(ef2603d8)에서 B 어댑터 일괄 보강.
+`host.py` (Category B — spawns and owns `pi --mode rpc` as a child process) predates the
+discovery that Pi's real extension system is in-process (Category A) — this in-process
+extension is the correct, publishable shape and the one documented above. `host.py` is kept
+as a preserved alternative rather than deleted (same call made for the codex plugin's own
+`host.py`-equivalent precedent) — see its own docstring for the JSONL/stdio protocol details
+if that standalone-host pattern is ever needed again.
