@@ -52,3 +52,30 @@ already treats non-`SUCCESS` conclusions as blocking regardless of this tooling 
 risk here is a human/agent being told "clear to merge" by a script when the actual gate
 is still red. `skipping` is excluded — it's a conditionally-skipped job (e.g. "Main
 Alembic preflight" when its precondition doesn't apply), not a blocked one.
+
+## Live-QA temporary story cards (story #2187)
+
+Live verification sometimes needs a real story to click through/observe SSE against,
+without touching an actual product story. `DELETE /api/v2/stories/{id}` is human-only
+(agent API keys get 403) by design — an agent that creates a throwaway card **cannot
+clean it up itself**. Without a convention, these accumulate on the board forever and
+inflate "how much is left" counts (exactly the class of defect this story reports).
+
+**When creating one:**
+- Prefix the title with `[TEMP-QA]` (or an equally unambiguous marker — existing
+  examples use `[TEST-PROBE·삭제예정]` / `[삭제 대상 — ...]`, `[TEMP-QA]` is preferred
+  going forward for grep-ability).
+- Immediately mark it `is_excluded: true` (`sprintable_update_story` or the equivalent
+  API field) — do this in the same turn you create the card, not as a follow-up. The
+  board/backlog UI (`kanban-board.tsx`, story #2187) filters `is_excluded` cards out of
+  every column unconditionally, so this is what actually keeps the card from inflating
+  visible counts; `command_center`/analytics already excluded it before this story.
+
+**When cleaning up:**
+- You cannot delete it yourself. Don't leave the request implicit in a chat message that
+  will scroll away — batch pending `[TEMP-QA]` deletions and ask the PO for a bulk
+  delete once per branch of work (not per-card), e.g. at the end of a live-verification
+  session. `gh`/Sprintable search for the `[TEMP-QA]` prefix to compile the list.
+- Do not request agent delete-permission as a workaround (rejected direction — see story
+  #2187 AC4: the human-only block is an intentional safeguard against an agent deleting
+  someone else's work, and throwaway-card convenience isn't worth trading that away).

@@ -153,3 +153,91 @@ describe('SprintsClient — 백로그/스프린트 스토리 「더 보기」(st
     expect(cursorCall).not.toContain(`cursor=${CURSOR_WITH_PLUS}`);
   });
 });
+
+describe('SprintsClient — is_excluded 스토리 무조건 숨김(story #2187 후속, 카디르 QA changes-requested·PR#3153)', () => {
+  it('백로그 초기 로드에서 is_excluded=true 카드는 목록에도 "배정" 대상에도 안 뜬다', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/api/sprints?project_id=')) return { ok: true, json: async () => ({ data: [SPRINT] }) };
+      if (url.includes('/burndown')) return { ok: true, json: async () => ({ data: null }) };
+      if (url.includes('/api/stories?project_id=')) return { ok: true, json: async () => ({ data: [], meta: { hasMore: false, nextCursor: null } }) };
+      if (url.includes('/api/stories/backlog')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 'b1', title: 'Backlog 정상', is_excluded: false },
+              { id: 'b2', title: 'Backlog 삭제대상', is_excluded: true },
+            ],
+            meta: { hasMore: false, nextCursor: null },
+          }),
+        };
+      }
+      return { ok: false, json: async () => null };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await mountAndSelect();
+
+    expect(container.textContent).toContain('Backlog 정상');
+    expect(container.textContent).not.toContain('Backlog 삭제대상');
+  });
+
+  it('스프린트 편입 스토리 초기 로드에서도 is_excluded=true 카드는 숨는다', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/api/sprints?project_id=')) return { ok: true, json: async () => ({ data: [SPRINT] }) };
+      if (url.includes('/burndown')) return { ok: true, json: async () => ({ data: null }) };
+      if (url.includes('/api/stories/backlog')) return { ok: true, json: async () => ({ data: [], meta: { hasMore: false, nextCursor: null } }) };
+      if (url.includes('/api/stories?project_id=')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 's1', title: 'Sprint 정상', is_excluded: false },
+              { id: 's2', title: 'Sprint 삭제대상', is_excluded: true },
+            ],
+            meta: { hasMore: false, nextCursor: null },
+          }),
+        };
+      }
+      return { ok: false, json: async () => null };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await mountAndSelect();
+
+    expect(container.textContent).toContain('Sprint 정상');
+    expect(container.textContent).not.toContain('Sprint 삭제대상');
+  });
+
+  it('loadMore로 추가 페이지를 append할 때도 is_excluded=true 카드는 걸러진다(backlog)', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/api/sprints?project_id=')) return { ok: true, json: async () => ({ data: [SPRINT] }) };
+      if (url.includes('/burndown')) return { ok: true, json: async () => ({ data: null }) };
+      if (url.includes('/api/stories?project_id=')) return { ok: true, json: async () => ({ data: [], meta: { hasMore: false, nextCursor: null } }) };
+      if (url.includes('/api/stories/backlog') && !url.includes('cursor=')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'b1', title: 'Backlog 1페이지', is_excluded: false }], meta: { hasMore: true, nextCursor: CURSOR_WITH_PLUS } }) };
+      }
+      if (url.includes('/api/stories/backlog') && url.includes('cursor=')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 'b2', title: 'Backlog 2페이지 정상', is_excluded: false },
+              { id: 'b3', title: 'Backlog 2페이지 삭제대상', is_excluded: true },
+            ],
+            meta: { hasMore: false, nextCursor: null },
+          }),
+        };
+      }
+      return { ok: false, json: async () => null };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await mountAndSelect();
+    const loadMoreBtn = findLoadMoreButtons().find((b) => !b.disabled)!;
+    await act(async () => { loadMoreBtn.click(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('Backlog 2페이지 정상');
+    expect(container.textContent).not.toContain('Backlog 2페이지 삭제대상');
+  });
+});
