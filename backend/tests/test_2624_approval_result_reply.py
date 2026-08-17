@@ -98,7 +98,7 @@ async def test_human_requester_gets_dm_and_bell():
             nd_mod.dispatch_notification = dn
             try:
                 await dispatch_approval_result_reply(
-                    s, org_id=org_id, doc=doc, gate_id=gate_id,
+                    s, org_id=org_id, work_item_type="doc", work_item_id=doc.id, project_id=project_id, title=doc.title, gate_id=gate_id,
                     requester_id=requester_id, resolver_id=resolver_id,
                     decision="rejected", resolution_note="사유: 재작성 필요",
                 )
@@ -157,7 +157,7 @@ async def test_agent_requester_gets_dm_but_no_bell():
             nd_mod.dispatch_notification = dn
             try:
                 await dispatch_approval_result_reply(
-                    s, org_id=org_id, doc=doc, gate_id=gate_id,
+                    s, org_id=org_id, work_item_type="doc", work_item_id=doc.id, project_id=project_id, title=doc.title, gate_id=gate_id,
                     requester_id=requester_id, resolver_id=resolver_id,
                     decision="approved", resolution_note=None,
                 )
@@ -195,7 +195,7 @@ async def test_self_resolve_skips_notification():
             doc = await _seed_doc(s, org_id, project_id)
 
             await dispatch_approval_result_reply(
-                s, org_id=org_id, doc=doc, gate_id=uuid.uuid4(),
+                s, org_id=org_id, work_item_type="doc", work_item_id=doc.id, project_id=project_id, title=doc.title, gate_id=uuid.uuid4(),
                 requester_id=same_id, resolver_id=same_id,
                 decision="approved", resolution_note=None,
             )
@@ -227,13 +227,13 @@ async def test_second_resolution_reuses_existing_dm():
             doc2 = await _seed_doc(s, org_id, project_id, title="문서2")
 
             await dispatch_approval_result_reply(
-                s, org_id=org_id, doc=doc1, gate_id=uuid.uuid4(),
+                s, org_id=org_id, work_item_type="doc", work_item_id=doc1.id, project_id=project_id, title=doc1.title, gate_id=uuid.uuid4(),
                 requester_id=requester_id, resolver_id=resolver_id,
                 decision="approved", resolution_note=None,
             )
             await s.commit()
             await dispatch_approval_result_reply(
-                s, org_id=org_id, doc=doc2, gate_id=uuid.uuid4(),
+                s, org_id=org_id, work_item_type="doc", work_item_id=doc2.id, project_id=project_id, title=doc2.title, gate_id=uuid.uuid4(),
                 requester_id=requester_id, resolver_id=resolver_id,
                 decision="rejected", resolution_note="두번째",
             )
@@ -277,7 +277,7 @@ async def test_dm_delivery_failure_does_not_block_bell_notification():
                     new=AsyncMock(side_effect=RuntimeError("DM dispatch boom")),
                 ):
                     await dispatch_approval_result_reply(
-                        s, org_id=org_id, doc=doc, gate_id=gate_id,
+                        s, org_id=org_id, work_item_type="doc", work_item_id=doc.id, project_id=project_id, title=doc.title, gate_id=gate_id,
                         requester_id=requester_id, resolver_id=resolver_id,
                         decision="rejected", resolution_note="사유",
                     )

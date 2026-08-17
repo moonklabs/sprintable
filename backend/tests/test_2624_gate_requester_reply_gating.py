@@ -89,7 +89,7 @@ async def test_doc_not_found_is_noop_no_delivery_call():
 @pytest.mark.anyio
 async def test_valid_gate_calls_delivery_with_correct_args():
     session = AsyncMock()
-    fake_doc = SimpleNamespace(id=uuid.uuid4(), title="T")
+    fake_doc = SimpleNamespace(id=uuid.uuid4(), title="T", project_id=uuid.uuid4())
     result = AsyncMock()
     result.scalar_one_or_none = lambda: fake_doc
     session.execute = AsyncMock(return_value=result)
@@ -103,7 +103,10 @@ async def test_valid_gate_calls_delivery_with_correct_args():
     mock_dispatch.assert_awaited_once()
     kw = mock_dispatch.await_args.kwargs
     assert kw["org_id"] == gate.org_id
-    assert kw["doc"] is fake_doc
+    assert kw["work_item_type"] == "doc"
+    assert kw["work_item_id"] == fake_doc.id
+    assert kw["project_id"] == fake_doc.project_id
+    assert kw["title"] == fake_doc.title
     assert kw["gate_id"] == gate.id
     assert kw["requester_id"] == requester_id
     assert kw["resolver_id"] == gate.resolver_id
@@ -115,7 +118,7 @@ async def test_valid_gate_calls_delivery_with_correct_args():
 async def test_delivery_exception_swallowed_best_effort():
     """dispatch_approval_result_reply가 터져도 게이트 해소 자체(호출부)로 예외가 새지 않는다."""
     session = AsyncMock()
-    fake_doc = SimpleNamespace(id=uuid.uuid4(), title="T")
+    fake_doc = SimpleNamespace(id=uuid.uuid4(), title="T", project_id=uuid.uuid4())
     result = AsyncMock()
     result.scalar_one_or_none = lambda: fake_doc
     session.execute = AsyncMock(return_value=result)

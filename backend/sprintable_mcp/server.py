@@ -31,6 +31,7 @@ from .toolset import is_tool_allowed
 from .tools.a2a import (
     LinkGateToTaskInput, ListAgentCardsInput, link_gate_to_task, list_agent_cards,
 )
+from .tools.decisions import RequestDecisionInput, request_decision
 from .tools.evidence import AddEvidenceInput, add_evidence
 from .tools.judgments import AddJudgmentInput, ListJudgmentsInput, add_judgment, list_judgments
 from .tools.session_context import SessionContextInput, get_session_context
@@ -647,6 +648,13 @@ _TOOL_DEFS: list[tuple] = [
      " 위임할 때(예: PR 완료 후 QA 담당 조회) 이 도구로 먼저 발견한 뒤"
      " sprintable_send_chat_message로 청한다.",
      ListAgentCardsInput, list_agent_cards),
+    # 비동기 결정 요청 (1) — story #2709(AskUserQuestion 블로킹 대체)
+    ("sprintable_request_decision",
+     "[⛔AskUserQuestion 대신 이걸 쓸 것] 사람 판단이 필요할 때 블로킹으로 기다리지 말고 이"
+     " 도구로 결정을 발행한 뒤 assumption대로 즉시 계속 일한다. 결재함+해당 채팅에 카드로"
+     " 뜨고(원탭 승인 — 서명/근거열람 불요), 사람이 답하면 poll_events로 회신이 온다(approve="
+     " 가정 확인, reject=note에 실제 답 — 자유텍스트로 옴). options는 힌트일 뿐 강제 아님.",
+     RequestDecisionInput, request_decision),
     # Evidence 자기증명 (1) — E-VERIFY V0-S1
     ("sprintable_add_evidence",
      "done을 스스로 증명하는 자기 서명 첨부(PR·배포·지표·발행물 링크 등) — story/task에 evidence"

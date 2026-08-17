@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import get_current_user, get_verified_org_id
+from app.dependencies.auth import get_current_user, get_scope_context, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition
@@ -255,6 +255,78 @@ async def create_gate_endpoint(
     # 트리거 미확定인 MissingGreenlet 클래스(unloaded attr sync 직렬화) 전체를 이 자리서 차단.
     await session.refresh(gate)
     return GateResponse.model_validate(gate)
+
+
+class DecisionRequestCreate(BaseModel):
+    question: str
+    options: list[str] | None = None
+    assumption: str
+    related_work_item_type: str | None = None
+    related_work_item_id: uuid.UUID | None = None
+
+
+@router.post("/decisions", response_model=GateResponse, status_code=201)
+async def create_decision_request(
+    body: DecisionRequestCreate,
+    session: AsyncSession = Depends(get_db),
+    scope: dict = Depends(get_scope_context),
+    auth=Depends(get_current_user),
+) -> GateResponse:
+    """story #2709(2026-08-17) — 에이전트의 블로킹 질문을 비동기 결정 요청으로 승격.
+    AskUserQuestion류 훅 봉인(story #2701 후속)의 dogfood 교체 대상 — 새 게이트 메커니즘
+    발명 0(create_gate/gate_type 등재/알림배관 전부 기존 재사용), 이 엔드포인트 자체만
+    신규(캐스팅 글루 — 호출자 신원+standalone self-referencing anchor를 서버가 원자적으로
+    한 번에 만들어 준다, MCP 클라이언트가 role_id 같은 내부 개념을 몰라도 되게).
+
+    self-referencing anchor(PO 판정, 2026-08-17): work_item_id==gate.id로 클라 uuid4 선생성
+    없이 서버가 1 INSERT로 원자 생성(생성 後 UPDATE 2단계 금지). work_item_type=
+    "agent_decision"(KNOWN_PROJECT_AGNOSTIC_WORK_ITEM_TYPES 등재 필수 —
+    안 하면 GET /gates/{id}가 전수 fail-closed 404, 전수 grep으로 발견)."""
+    org_id, project_id = scope["org_id"], scope["project_id"]
+    if not org_id or not project_id:
+        raise HTTPException(status_code=403, detail="org_id/project_id required")
+
+    gate_id = uuid.uuid4()
+    caller_id = uuid.UUID(auth.user_id)
+
+    from app.services.workflow_line_config import _default_role_id
+    # doc.py의 동일 관례 재사용(role_id는 _ALWAYS_MANUAL_GATE_TYPES라 disposition 결과에
+    # 실제 영향 없음 — 기본 role 없으면 self-referencing anchor 자체를 placeholder로).
+    role_id = await _default_role_id(session, org_id) or gate_id
+
+    neutral_facts: dict[str, Any] = {
+        "question": body.question,
+        "options": body.options,
+        "assumption": body.assumption,
+        "requested_by_member_id": str(caller_id),
+        "project_id": str(project_id),
+    }
+    if body.related_work_item_type and body.related_work_item_id:
+        neutral_facts["related_work_item_type"] = body.related_work_item_type
+        neutral_facts["related_work_item_id"] = str(body.related_work_item_id)
+
+    gate = await create_gate(
+        session=session,
+        org_id=org_id,
+        work_item_id=gate_id,
+        work_item_type="agent_decision",
+        gate_type="agent_decision_request",
+        member_id=caller_id,
+        role_id=role_id,
+        neutral_facts=neutral_facts,
+        project_id=project_id,
+        gate_id=gate_id,
+    )
+    await session.commit()
+    await session.refresh(gate)
+    resp = GateResponse.model_validate(gate)
+    resp.project_id = project_id
+    # story #1972 SSOT 재사용(제네릭 create_gate_endpoint가 이 필드를 아예 안 채우는 기존
+    # 갭을 여기서까지 상속하면 FE deriveRiskLevel이 null→'unknown'으로 읽어 low 등재의
+    # 목적(원탭 승인)이 생성 응답 자체에서는 무효화된다 — 자체 신규 테스트로 발견·직접 수정).
+    _posture = await get_org_posture(session, org_id)
+    resp.risk_grade = derive_risk_grade(_posture, gate.gate_type)
+    return resp
 
 
 async def _non_doc_gate_approvable(
