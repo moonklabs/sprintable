@@ -24,6 +24,8 @@ class SprintFilterInput(SprintableInput):
 
 class OverdueMemberInput(SprintableInput):
     member_id: str | None = None
+    limit: int | None = None
+    cursor: str | None = None  # 이전 호출의 X-Next-Cursor 헤더 값을 그대로 넘기면 다음 페이지.
 
 
 class ActivityInput(SprintableInput):
@@ -113,12 +115,23 @@ async def get_unassigned_stories(args: SprintFilterInput) -> list[TextContent]:
 
 
 async def get_overdue_tasks(args: OverdueMemberInput) -> list[TextContent]:
-    """미완료 태스크 목록."""
+    """미완료 태스크 목록.
+
+    story #2428 PR③ 부수발견: `status_ne=done`은 이 도구가 늘 보내고 있었으나 BE
+    `GET /api/v2/tasks`가 그 파라미터를 아예 안 받아(FastAPI가 조용히 버림) 완료
+    포함 전체가 나가던 결함이었다 — 이번 PR에서 라우터에 status_ne를 실제로 배선해
+    바로잡음(app/routers/tasks.py)."""
     try:
         params: dict = {"project_id": client.require_project_id(), "status_ne": "done"}
         if args.member_id:
             params["assignee_id"] = args.member_id
-        return ok(await client.get("/api/v2/tasks", params=params))
+        if args.limit:
+            params["limit"] = args.limit
+        if args.cursor:
+            params["cursor"] = args.cursor
+        items, headers = await client.get_with_headers("/api/v2/tasks", params=params)
+        has_more, next_cursor = _has_more_from_headers(headers, items)
+        return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_get_overdue_tasks")
     except Exception as exc:
         return err(str(exc))
 

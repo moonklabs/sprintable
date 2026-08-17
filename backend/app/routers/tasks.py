@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -101,11 +102,19 @@ async def list_tasks(
     story_id: uuid.UUID | None = Query(default=None),
     assignee_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    status_ne: str | None = Query(default=None, description="이 status가 아닌 것만(예: done 제외 — 미완료 목록, get_overdue_tasks가 사용)"),
     ids: str | None = Query(default=None, description="comma-separated task ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관, story #2262 PR② 칩 상태 배치조회)"),
+    limit: int | None = Query(default=None, ge=1, le=2000),
+    cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch before this time"),
+    response: Response = None,  # type: ignore[assignment]
     repo: TaskRepository = Depends(_get_repo_read),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
 ) -> list[TaskResponse]:
+    """story #2428 PR③(⓪tasks ⓐ — 라이브 실측 667건, list_tasks/list_my_tasks/get_overdue_tasks
+    3-way 공유 엔드포인트): true cursor 페이지네이션 + 전체 카운트(X-Total-Count 헤더) —
+    goals.py list_goals와 동일 규약(필터 適用 後·limit 適用 前 COUNT, cursor=created_at, 새
+    규약 발명 0). limit 미지정 시 기존 동작(최대 1000)과 호환."""
     # story #2262 PR②(칩 상태 배치조회) — stories.py list_stories의 ids= 패턴 미러링. Task엔
     # project_id 컬럼이 없어(story_id NN) list_in_projects와 동형으로 Story JOIN을 거쳐야
     # 접근권 스코프를 낼 수 있다 — repo.list_by_ids(org-scope만)로 앵커 조회 後, 결과의
@@ -139,6 +148,15 @@ async def list_tasks(
         await _attach_org_project_slugs(repo.session, org_id, tasks)
         return [TaskResponse.model_validate(t) for t in tasks]
 
+    cursor_dt: datetime | None = None
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=400, detail="invalid cursor: expected ISO 8601 datetime"
+            ) from exc
+
     # story_id 지정 시: round6(#2072)에서 _assert_task_project_access(기존 G-fix 재사용)로
     # caller의 story project 접근권을 직접 검증(단일 story 스코프).
     if story_id is not None:
@@ -148,7 +166,7 @@ async def list_tasks(
             filters["assignee_id"] = assignee_id
         if status_filter:
             filters["status"] = status_filter
-        tasks = await repo.list(**filters)
+        tasks, total = await repo.list_paginated(limit=limit, cursor=cursor_dt, **filters)
     else:
         # d3e5ca89(SEC fast-follow): story_id 미지정(org-wide) 분기는 예전엔 org 전체 task를
         # result-level로 흘렸다 — 같은 org 다른 project의 task title/assignee_id/status를 접근권
@@ -160,11 +178,16 @@ async def list_tasks(
         accessible = await accessible_project_ids_in_org(
             repo.session, uuid.UUID(auth.user_id), org_id
         )
-        tasks = await repo.list_in_projects(
-            accessible, assignee_id=assignee_id, status=status_filter
+        tasks, total = await repo.list_in_projects(
+            accessible, assignee_id=assignee_id, status=status_filter, status_ne=status_ne,
+            limit=limit, cursor=cursor_dt,
         )
     await _attach_has_evidence(repo.session, tasks)
     await _attach_org_project_slugs(repo.session, org_id, tasks)
+    if response is not None:
+        response.headers["X-Total-Count"] = str(total)
+        if tasks:
+            response.headers["X-Next-Cursor"] = tasks[-1].created_at.isoformat()
     return [TaskResponse.model_validate(t) for t in tasks]
 
 

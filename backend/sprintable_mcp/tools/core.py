@@ -26,7 +26,8 @@ class UnlockFilesInput(SprintableInput):
 
 
 async def list_team_members(args: SprintableInput) -> list[TextContent]:
-    """프로젝트 팀 멤버 목록 조회."""
+    """프로젝트 팀 멤버 목록 조회. story #2428 ⓑ: limit 없음(의도) — 팀 로스터 크기가
+    자연 상한(standup_missing과 동형 축, 페드루 확定 2026-08-17)."""
     try:
         params: dict = {"project_id": client.require_project_id()}
         return ok(await client.get("/api/v2/members", params=params))

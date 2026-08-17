@@ -5,18 +5,23 @@ from __future__ import annotations
 from mcp.types import TextContent
 
 from ..api_client import client
-from ..response import err, ok
+from ..response import err, ok, ok_paginated
 from ..schemas import SprintableInput, TaskStatus
+from .stories import _has_more_from_headers
 
 
 class ListTasksInput(SprintableInput):
     story_id: str | None = None
     assignee_id: str | None = None
     status: TaskStatus | None = None
+    limit: int | None = None
+    cursor: str | None = None  # 이전 호출의 X-Next-Cursor 헤더 값을 그대로 넘기면 다음 페이지.
 
 
 class ListMyTasksInput(SprintableInput):
     assignee_id: str | None = None
+    limit: int | None = None
+    cursor: str | None = None
 
 
 class GetTaskInput(SprintableInput):
@@ -53,7 +58,13 @@ async def list_tasks(args: ListTasksInput) -> list[TextContent]:
             params["assignee_id"] = args.assignee_id
         if args.status:
             params["status"] = args.status.value
-        return ok(await client.get("/api/v2/tasks", params=params))
+        if args.limit:
+            params["limit"] = args.limit
+        if args.cursor:
+            params["cursor"] = args.cursor
+        items, headers = await client.get_with_headers("/api/v2/tasks", params=params)
+        has_more, next_cursor = _has_more_from_headers(headers, items)
+        return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_list_tasks")
     except Exception as exc:
         return err(str(exc))
 
@@ -63,7 +74,13 @@ async def list_my_tasks(args: ListMyTasksInput) -> list[TextContent]:
     try:
         assignee = args.assignee_id or client.member_id
         params: dict = {"assignee_id": assignee, "project_id": client.require_project_id()}
-        return ok(await client.get("/api/v2/tasks", params=params))
+        if args.limit:
+            params["limit"] = args.limit
+        if args.cursor:
+            params["cursor"] = args.cursor
+        items, headers = await client.get_with_headers("/api/v2/tasks", params=params)
+        has_more, next_cursor = _has_more_from_headers(headers, items)
+        return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_list_my_tasks")
     except Exception as exc:
         return err(str(exc))
 

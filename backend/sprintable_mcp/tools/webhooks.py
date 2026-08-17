@@ -27,7 +27,8 @@ class DeleteWebhookConfigInput(SprintableInput):
 
 
 async def list_webhook_configs(args: ListWebhookConfigsInput) -> list[TextContent]:
-    """Webhook config 목록 조회."""
+    """Webhook config 목록 조회. story #2428 ⓑ: limit 없음(의도) — caller-scope(멤버당
+    사실상 1개, upsert 시맨틱)라 자연 상한(standup_missing과 동형 축, 페드루 확定 2026-08-17)."""
     params: dict = {}
     if args.project_id:
         params["project_id"] = args.project_id
