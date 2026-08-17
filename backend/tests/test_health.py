@@ -9,12 +9,14 @@ def anyio_backend():
 
 
 def _override_db(app, mock_session):
-    from app.dependencies.database import get_db
+    # story #2451 §6 Phase3(디디 QA 지적, 2026-08-17) — get_db만 걸고 get_read_db를 빠뜨리는
+    # 클래스의 회귀를 override_db_and_read 헬퍼 하나로 구조적으로 막는다(conftest.py 참조).
+    from tests.conftest import override_db_and_read
 
     async def _override():
         yield mock_session
 
-    app.dependency_overrides[get_db] = _override
+    override_db_and_read(app, _override)
     return app
 
 

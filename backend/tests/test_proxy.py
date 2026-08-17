@@ -73,9 +73,10 @@ async def test_health_via_proxy_path():
     실제 의존성 해석엔 반영되지 않는 사문(死文) 패턴이었다(늘 진짜 전역 테스트 DB를 탔을
     뿐 — 예전엔 `/health`가 DB 성패 무관 항상 200을 반환해 이 갭이 안 드러났었다. 이제
     `/health`가 DB 실패 시 정직하게 503을 반환하면서 이 사문 mock의 무효함이 표면화됐다).
-    `app.dependency_overrides`(FastAPI 정본 오버라이드 경로)로 교체."""
-    from app.dependencies.database import get_db
+    `override_db_and_read`(FastAPI 정본 오버라이드 경로 + get_read_db 동시 배선, 디디 QA
+    지적 2026-08-17 — story #2451 §6 Phase3 재발 클래스)로 교체."""
     from app.main import app
+    from tests.conftest import override_db_and_read
 
     mock_session = AsyncMock()
     mock_session.execute = AsyncMock(return_value=None)
@@ -83,7 +84,7 @@ async def test_health_via_proxy_path():
     async def _override():
         yield mock_session
 
-    app.dependency_overrides[get_db] = _override
+    override_db_and_read(app, _override)
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get(
