@@ -155,15 +155,43 @@ async def check_storage_capacity(session: AsyncSession, org_id, attachments: lis
 
 
 async def check_member_invite_limit(session: AsyncSession, org_id) -> None:
-    """Free: org당 member 5명 제한 (human + agent). Team/Pro는 스킵."""
+    """Free: org당 member 3명 제한 (human + agent, 현재 멤버 + pending 미만료 초대 합). Team/Pro는 스킵.
+
+    story #2477 AC① — pending invite를 안 세면 cap을 우회할 수 있었다(2명이 초대 5개를
+    만들어 전부 수락하면 3명 캡을 넘길 수 있음). 생성 단계에서 «멤버+대기중 초대» 합으로
+    선차단해 애초에 캡을 넘길 만큼의 초대가 쌓이지 못하게 한다.
+    """
     tier = await _get_org_tier(session, org_id)
     if tier != "free":
         return
     result = await session.execute(
         text(
-            "SELECT COUNT(*) FROM org_members"
-            " WHERE org_id = :oid AND deleted_at IS NULL"
+            "SELECT "
+            "(SELECT COUNT(*) FROM org_members WHERE org_id = :oid AND deleted_at IS NULL)"
+            " + (SELECT COUNT(*) FROM org_invites"
+            "     WHERE organization_id = :oid AND status = 'pending' AND expires_at > now())"
         ),
+        {"oid": str(org_id)},
+    )
+    count = result.scalar() or 0
+    if count >= FREE_LIMITS["max_members"]:
+        raise _plan_limit_error("member", FREE_LIMITS["max_members"])
+
+
+async def check_member_accept_limit(session: AsyncSession, org_id) -> None:
+    """Free: 초대 «수락» 시점 재검증(story #2477 AC②) — 현재 멤버수만 비교(대기중 초대는
+    무관, 이 호출이 성공하면 그 초대 하나가 바로 멤버로 전환되므로). Team/Pro는 스킵.
+
+    ⚠️호출부(OrgInviteRepository.accept)가 org_id 스코프 advisory xact lock을 먼저 잡은
+    뒤에 불러야 한다 — 락 없이 재면 동시에 수락하는 두 트랜잭션이 서로 상대의 INSERT를
+    못 본 채 똑같이 "아직 cap 안 참"으로 읽어 둘 다 통과해버린다(AC③ 레이스 방어는 이
+    함수가 아니라 호출부의 락이 담당).
+    """
+    tier = await _get_org_tier(session, org_id)
+    if tier != "free":
+        return
+    result = await session.execute(
+        text("SELECT COUNT(*) FROM org_members WHERE org_id = :oid AND deleted_at IS NULL"),
         {"oid": str(org_id)},
     )
     count = result.scalar() or 0
