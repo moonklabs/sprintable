@@ -114,20 +114,41 @@ function literalTextOf(node: ts.Node): string | null {
   return null;
 }
 
-export function scanContent(content: string, file: string): Violation[] {
-  const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  // AC4 — 가드가 자기 재료(이 파일)를 못 읽으면(문법 오류로 파싱 실패) 조용히 건너뛰지 않고
-  // 죽는다. parseDiagnostics는 공개 타입엔 없지만 컴파일러가 실제로 채우는 필드 — #2590
-  // verify-cross-element-tint-text.ts와 이 가드가 함께 의존하는 ts.createSourceFile의 오래된
-  // 안정 동작이다(빈 배열=클린 파싱, 실측 확認).
-  const parseDiagnostics = (sf as unknown as { parseDiagnostics?: ts.Diagnostic[] }).parseDiagnostics;
-  if (parseDiagnostics && parseDiagnostics.length > 0) {
+/** AC4 self-check — 가드가 자기 재료(이 파일)를 못 읽으면(문법 오류로 파싱 실패) 조용히
+ * 건너뛰지 않고 죽는다. parseDiagnostics는 공개 타입엔 없지만 컴파일러가 실제로 채우는
+ * 필드 — #2590 verify-cross-element-tint-text.ts와 이 가드가 함께 의존하는
+ * ts.createSourceFile의 오래된 안정 동작이다(빈 배열=클린 파싱, 실측 확認).
+ *
+ * 카디르 QA(2026-08-17) 지적 — 이 필드가 undefined면(TS 내부 API가 향후 이름/구조를 바꾸는
+ * 경우) length 체크만으로는 falsy라 조용히 통과해버린다. 그건 이 AC4 자체가 막으려는 "재료
+ * 소실의 조용한 통과" 패턴이 자기 fallback에 남는 것 — undefined는 length>0과 별개로,
+ * 그 자체로 「이 가드가 자기가 못 읽는 상태인지조차 더는 못 잰다」는 뜻이므로 명시적으로
+ * 죽는다. `scanContent`에서 분리한 순수 함수 — `ts.createSourceFile`을 모킹하지 않고도
+ * undefined 분기를 직접 테스트할 수 있게(export된 이유).
+ */
+export function assertParseDiagnosticsReadable(
+  file: string,
+  parseDiagnostics: readonly ts.Diagnostic[] | undefined,
+): void {
+  if (parseDiagnostics === undefined) {
+    throw new Error(
+      `FAIL: ${file} — ts.createSourceFile의 parseDiagnostics 필드가 사라짐(TS 내부 API 변경 의심) — ` +
+        `이 가드의 AC4 전제(파싱 실패를 스스로 감지할 수 있다는 전제)가 깨졌다, 확認 필요(story #2710).`,
+    );
+  }
+  if (parseDiagnostics.length > 0) {
     throw new Error(
       `FAIL: ${file} 파싱 실패(${parseDiagnostics.length}건) — 이 가드가 이 파일의 문자열 리터럴을 ` +
         `못 읽는다(재료 소실을 조용한 통과로 두지 않는다, story #2710 AC4): ` +
         parseDiagnostics.map((d) => ts.flattenDiagnosticMessageText(d.messageText, ' ')).join('; '),
     );
   }
+}
+
+export function scanContent(content: string, file: string): Violation[] {
+  const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const parseDiagnostics = (sf as unknown as { parseDiagnostics?: ts.Diagnostic[] }).parseDiagnostics;
+  assertParseDiagnosticsReadable(file, parseDiagnostics);
 
   const violations: Violation[] = [];
   function walk(node: ts.Node): void {

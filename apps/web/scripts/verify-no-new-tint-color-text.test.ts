@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { findTintTextPairs, scanContent, violationKey, loadBaseline } from './verify-no-new-tint-color-text';
+import {
+  findTintTextPairs,
+  scanContent,
+  violationKey,
+  loadBaseline,
+  assertParseDiagnosticsReadable,
+} from './verify-no-new-tint-color-text';
 import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -131,6 +137,20 @@ describe('AC4 — self-check: unparseable file goes RED, not a silent skip (stor
   it('throws when the file fails to parse instead of silently returning no violations', () => {
     const unterminated = "const x = 'bg-warning-tint text-warning";
     expect(() => scanContent(unterminated, 'broken.tsx')).toThrow(/파싱 실패/);
+  });
+
+  // 미르코 QA(2026-08-17) — parseDiagnostics가 undefined면(TS 내부 API가 향후 이 필드
+  // 자체를 없애는 경우) length 체크만으로는 falsy라 조용히 통과해버리는 fallback 취약점.
+  // scanContent에서 분리한 순수 함수를 직접 호출해 undefined 분기를 테스트한다(ts.createSourceFile
+  // 자체는 모킹 불가 — export가 configurable하지 않다, 그래서 로직을 분리해 이 축을 검증한다).
+  it('throws when parseDiagnostics itself is undefined (TS internal API drift), not a silent pass', () => {
+    expect(() => assertParseDiagnosticsReadable('drifted.tsx', undefined)).toThrow(
+      /parseDiagnostics 필드가 사라짐/,
+    );
+  });
+
+  it('does not throw for a clean parse (empty diagnostics array)', () => {
+    expect(() => assertParseDiagnosticsReadable('clean.tsx', [])).not.toThrow();
   });
 });
 
