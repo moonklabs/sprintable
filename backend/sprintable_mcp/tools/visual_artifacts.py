@@ -5,6 +5,8 @@ C2-S6(story 0edca31e, 코멘트 왕복)+C3-S7(story 940266db, 편집 왕복)+C4-
 다른 리스크 클래스. deleted_at 타임스탬프 플립일 뿐 자식 row 물리삭제 없음)."""
 from __future__ import annotations
 
+from typing import Literal
+
 from mcp.types import TextContent
 
 from ..api_client import client
@@ -44,7 +46,9 @@ class CreateArtifactInput(SprintableInput):
     story_id: str | None = None
     epic_id: str | None = None
     doc_id: str | None = None
-    source: str | None = None  # "created" | "imported" — 기본 created
+    # story #2707 부수④ — 커스텀 문자열이 오면 BE가 422를 냄(대응 실패 前엔 알기 어려움).
+    # Literal로 스키마 자체에 유효값을 명시(호출 前에 드러남 — 트리비얼 fix).
+    source: Literal["created", "imported"] | None = None  # 기본 created
     nodes: list[ArtifactNodeInput] | None = None
     summary: str | None = None  # 최초 버전 변경 이유(선택)
     # 뷰어 통합 재설계(story 1948d19d): 생성 시점 프레임 크기(선택 — 미선언 시 FE가 기본

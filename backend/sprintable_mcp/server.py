@@ -678,7 +678,16 @@ _TOOL_DEFS: list[tuple] = [
      " type=\"html_blob\" 노드 하나로 감싸도 됨. canvas_bounds{w,h}(선택): 렌더 자기 프레임 크기"
      "(CSS px, 양수·≤20000) — sandbox iframe이라 서버가 측정 불가해 선언 필요·미지정=FE 기본 아트보드."
      " ⭐UI·화면·디자인·시각 산출물을 만들 때는 텍스트 설명 대신 이 툴로 구조화해 그린다(사람이"
-     " 캔버스에서 보고 코멘트/핀으로 피드백).",
+     " 캔버스에서 보고 코멘트/핀으로 피드백)."
+     " ⭐스크린샷/이미지 증거(story #2707) — base64를 이 도구 호출에 직접 싣지 말 것(토큰 폭증)."
+     " 2단계로: ①먼저 `POST $SPRINTABLE_API_URL/api/visual-artifacts/import-image`를 curl 등으로"
+     " 직접 호출(multipart/form-data, 필드명 `file`, 헤더 `Authorization: Bearer $AGENT_API_KEY`)해"
+     " GCS url을 받는다(예: `curl -F file=@screenshot.png -H \"Authorization: Bearer $AGENT_API_KEY\""
+     " $SPRINTABLE_API_URL/api/visual-artifacts/import-image`) ②그 url을 이 도구의"
+     " `nodes=[{\"type\": \"html_blob\", \"props\": {\"src\": \"<①의 url>\"}}]`로 넣어 호출하면"
+     " FE가 자동으로 image 포맷으로 렌더한다. (Bash/HTTP 클라이언트 접근이 없는 에이전트는 ①을"
+     " 스스로 못 탄다 — 그 경우는 이 경로 대상이 아님.)"
+     " source는 \"created\"(기본) 또는 \"imported\"만 허용(다른 값은 422).",
      CreateArtifactInput, create_artifact),
     ("sprintable_get_artifact",
      "[일감] 시각 산출물 단건 조회(latest 버전 + nodes). ⭐편집/코멘트/핀 작업 전 먼저 현재 상태(노드"

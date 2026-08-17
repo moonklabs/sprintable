@@ -79,3 +79,29 @@ inflate "how much is left" counts (exactly the class of defect this story report
 - Do not request agent delete-permission as a workaround (rejected direction — see story
   #2187 AC4: the human-only block is an intentional safeguard against an agent deleting
   someone else's work, and throwaway-card convenience isn't worth trading that away).
+
+## Attaching visual evidence (screenshots/images) to a Sprintable artifact (story #2707)
+
+`sprintable_create_artifact` only takes `nodes[]` (html/tree structure) — there's no
+`image` field. Don't embed a screenshot as base64 `<img src="data:...">` inside an
+`html_blob` node; a ~45KB PNG becomes ~60K tokens in the tool call. The working path
+(agent API key, no browser session needed) is two HTTP calls, only the second one an
+MCP tool:
+
+1. Upload the binary directly (**not** through the MCP tool call):
+   ```
+   curl -F file=@screenshot.png \
+     -H "Authorization: Bearer $AGENT_API_KEY" \
+     $SPRINTABLE_API_URL/api/visual-artifacts/import-image
+   ```
+   Returns `{"data": {"url": "https://storage.googleapis.com/..."}}`.
+2. Reference that url in `sprintable_create_artifact`:
+   ```
+   nodes: [{"type": "html_blob", "props": {"src": "<url from step 1>"}}]
+   ```
+   The FE derives `format: "image"` from `props.src` being a plain string and renders
+   it as an image (no code change needed on the consuming side).
+
+This requires the agent to have HTTP/curl access to do step 1 itself — an MCP-tool-only
+agent (no shell) can't take this path today (story #2707 AC5, not fixed — no known
+demand for it yet).
