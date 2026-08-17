@@ -336,22 +336,28 @@ async def test_recipient_type_resolved_from_db(client, mock_session):
 
 @pytest.mark.anyio
 async def test_get_pending_filters_by_org(client, mock_session, org_id):
-    """GET /pending 은 verified org_id 내 이벤트만 반환해야 함."""
+    """GET /pending 은 verified org_id 내 이벤트만 반환해야 함.
+
+    story #2428 ⓐ 페이지네이션 추가(2026-08-17) — count_q 1건이 늘어 execute가 2번(count+item)
+    불린다(goals.py/tasks.py와 동일 규약). count_result/item_result를 side_effect로 갈라서
+    두 호출 모양을 각각 맞춘다."""
     recipient_id = uuid.uuid4()
     event_same_org = _make_event(recipient_id=recipient_id, org_id=org_id, status="pending")
 
+    count_result = MagicMock()
+    count_result.scalar_one.return_value = 1
     scalars_mock = MagicMock()
     scalars_mock.all.return_value = [event_same_org]
-    result_mock = MagicMock()
-    result_mock.scalars.return_value = scalars_mock
-    mock_session.execute.return_value = result_mock
+    item_result = MagicMock()
+    item_result.scalars.return_value = scalars_mock
+    mock_session.execute.side_effect = [count_result, item_result]
 
     with patch("app.routers.events.assert_caller_is_member", new_callable=AsyncMock,
                return_value=None):
         resp = await client.get(f"/api/v2/events/pending?recipient_id={recipient_id}")
     assert resp.status_code == 200
     # execute 호출 시 org_id 필터가 쿼리에 포함됐는지 — 실제 SQL은 mock이므로 호출 여부로 확인
-    mock_session.execute.assert_called_once()
+    assert mock_session.execute.call_count == 2
 
 
 @pytest.mark.anyio

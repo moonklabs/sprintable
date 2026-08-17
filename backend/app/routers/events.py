@@ -22,10 +22,10 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import and_, delete, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import (
@@ -731,6 +731,9 @@ async def get_pending_events(
     recipient_id: uuid.UUID = Query(...),
     event_type: str | None = Query(default=None),
     include_recent_delivered_minutes: int = Query(default=30, le=120),
+    limit: int | None = Query(default=None, ge=1, le=2000),
+    cursor: str | None = Query(default=None, description="Cursor: ISO 8601 created_at, fetch after this time(오래된순 정렬 forward-cursor)"),
+    response: Response = None,  # type: ignore[assignment]
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
@@ -744,6 +747,15 @@ async def get_pending_events(
     auth·recipient 검증 없이 읽을 수 있었다 — mark_delivered(write)는 recipient==caller로
     닫혔는데 같은 recipient 축의 이 read fallback이 열려있었다. 동일 패턴(순수 self, admin
     대리열람 흐름 없음)으로 닫는다.
+
+    story #2428 ⓐ: `.limit()`이 아예 없어 pending 무한 누적 위험(만료/reaper는 status=
+    delivered에만 있고 pending 자체는 cap이 없음 — 페드루/디디 그라운딩 2026-08-17). goals.py
+    규약 그대로(필터 適用 後·limit 適用 前 COUNT에 cursor 포함) limit/cursor/X-Total-Count
+    추가. 정렬이 오래된순(asc)이라 cursor는 forward(`created_at > cursor`, artifact_comments와
+    동형). ⚠️MCP 계층엔 mark_delivered를 부르는 도구가 없어(poll_events는 순수 read) 이
+    엔드포인트는 «읽으면 준다」가 아니라 「pending으로 남는다」— cursor 없이 다시 부르면 같은
+    상위 N건이 그대로 다시 온다(browse형과 다른 이 도구 특유의 함정, poll_events MCP 도구
+    안내 문구에서 명시).
     """
     await assert_caller_is_member(
         recipient_id, auth, db, org_id, detail="Cannot read another member's events",
@@ -753,17 +765,35 @@ async def get_pending_events(
         Event.status == "pending",
         and_(Event.status == "delivered", Event.delivered_at >= cutoff),
     )
-    filters = [
+    conds = [
         Event.org_id == org_id,
         Event.recipient_id == recipient_id,
         status_filter,
     ]
     if event_type:
-        filters.append(Event.event_type == event_type)
-    result = await db.execute(
-        select(Event).where(*filters).order_by(Event.created_at.asc())
-    )
+        conds.append(Event.event_type == event_type)
+
+    cursor_dt: datetime | None = None
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=400, detail="invalid cursor: expected ISO 8601 datetime"
+            ) from exc
+        conds.append(Event.created_at > cursor_dt)
+
+    count_result = await db.execute(select(func.count()).select_from(Event).where(*conds))
+    total = int(count_result.scalar_one() or 0)
+
+    q = select(Event).where(*conds).order_by(Event.created_at.asc()).limit(limit if limit is not None else 1000)
+    result = await db.execute(q)
     events = result.scalars().all()
+
+    if response is not None:
+        response.headers["X-Total-Count"] = str(total)
+        if events:
+            response.headers["X-Next-Cursor"] = events[-1].created_at.isoformat()
     return [EventResponse.model_validate(e) for e in events]
 
 
