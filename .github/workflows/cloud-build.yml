@@ -288,7 +288,15 @@ jobs:
             # realtime 쪽 값(EVENT_BROKER_REDIS_DISPATCH_ENABLED 포함)은 cloudbuild.yaml의
             # deploy-realtime 스텝이 이미 dev 전용 가드 안에서 직접 명시(변수 아님).
             echo "redis_url=redis://10.164.120.243:6379" >> "$GITHUB_OUTPUT"
-            echo "backend_redis_dual_publish_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #2157 해제 판(2026-08-17, 미르코 그라운딩·페드루 확定) — dual_publish는
+            # #2123 cutover(2026-07-25 15:43 KST)의 롤백 안전망이었다. 해제 조건 3개(①72h
+            # 무사고=Redis 배달 오류 신규 클래스 0 ②PG_LISTEN 재활성 0회 ③SSOT 경유) 전부
+            # 실측 PASS(Cloud Logging 21일간 redis 오류 0건·git log 이후 PG_LISTEN 롤백 커밋
+            # 0건) — 3주째 방치돼 있던 조건부 해제를 여기서 dev부터 집행한다. PG_LISTEN이 이미
+            # 꺼져 있어 이 스위치가 켜져 있어도 롤백 경로 자체가 무의미했다(pg_notify는 무조건
+            # 나가지만 듣는 프로세스가 0개 — 원 스토리 ④). prod(위 main 분기)는 별도 판단 —
+            # 여기서 안 건드림.
+            echo "backend_redis_dual_publish_enabled=false" >> "$GITHUB_OUTPUT"
             # story #2123 S0-b(2026-07-23, 오르테가군 판정): wake_agent()의 크로스인스턴스
             # 배달이 #2122 머지 이후에도 무효였던 이유 — 이 발행측 스위치(agent_gateway.py:224
             # 게이팅)가 꺼져 있어 event_broker를 계속 우회했다(직접 pg_notify만, Redis 미발행).
