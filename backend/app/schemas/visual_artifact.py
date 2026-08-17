@@ -172,8 +172,16 @@ class VisualArtifactDetail(BaseModel):
 class CreateArtifactCommentRequest(BaseModel):
     content: str
     node_id: uuid.UUID | None = None
-    anchor_x: float | None = None
-    anchor_y: float | None = None
+    # story #154a26be — 이 클래스(아티팩트 좌표 코멘트)의 좌표 앵커 규약은 %(0~100),
+    # ratio(0~1)나 픽셀이 아니다(FE artifact-viewer.tsx가 `style={{ left: "${x}%" }}`로
+    # 직접 CSS % 소비). 기존엔 이 규약이 소비처 관행으로만 서 있고 서버가 안 막아 다른
+    # 단위 클라이언트가 통과·핀이 조용히 딴 자리에 렌더될 수 있었다("금지 AC=서버가 거부"
+    # 원칙 위반). ⛔`artifact_spec_pins`(CreateSpecPinRequest, 이 파일의 별개 클래스)는
+    # **다른 단위 계약**(px, canvas_bounds 좌표계)이라 이 %(0~100) 제약을 그쪽엔 걸지
+    # 않는다 — 처음엔 두 클래스를 같은 규약으로 오판해 걸었다가 미르코 QA 음성대조로
+    # 롤백함(페드루 PO, 2026-08-17). 이 클래스(코멘트)만 %.
+    anchor_x: float | None = Field(default=None, ge=0, le=100, description="캔버스 폭 대비 %(0~100) — ratio(0~1)·픽셀 아님")
+    anchor_y: float | None = Field(default=None, ge=0, le=100, description="캔버스 높이 대비 %(0~100) — ratio(0~1)·픽셀 아님")
     parent_id: uuid.UUID | None = None
     mentioned_ids: list[uuid.UUID] = []
 
@@ -209,6 +217,12 @@ class CreateSpecPinRequest(BaseModel):
     """편집 캔버스 핀 저작(story 7fe16274) — anchor_type이 좌표/노드 중 무엇이든 description은
     non-null 강제(doc §3 — 빈 스펙 커밋 차단)."""
     anchor_type: str
+    # ⛔story #154a26be 정정(페드루 PO, 2026-08-17) — 이 클래스는 %(0~100)가 아니라
+    # **px(canvas_bounds 좌표계)**다. FE `edit-canvas.tsx`가 `style={{ left: pin.anchorX,
+    # top: pin.anchorY }}`로 단위 없는 숫자를 직접 꽂아 쓴다(React CSSProperties 관례상
+    # unitless left/top = px). 실측값(638.4, 398.4)은 오염이 아니라 **정상 데이터**였음
+    # (원래 le=100을 걸었다가 라이브 스펙핀 배치를 과잉살상할 뻔한 것을 미르코 QA 음성대조가
+    # 잡음). 상한은 걸지 않는다 — 하한(>=0, 아래 _validate_anchor_consistency)만 유지.
     anchor_x: float | None = None
     anchor_y: float | None = None
     node_id: uuid.UUID | None = None
