@@ -28,16 +28,21 @@ vi.mock('./toss-checkout', () => ({
 let container: HTMLDivElement;
 let root: Root;
 
+// story #40659941(#2728 픽셀 검증 블로커) — FASTAPI_URL 직접 fetch를 same-origin 프록시로
+// 수렴한 뒤부터 응답이 proxyToFastapiWrapped의 {data:...} 봉투를 쓴다(customer-key/checkout
+// 프록시와 동일 계약) — mock도 그 봉투 그대로 재현.
 function statusResponse(overrides: Partial<{ tier: string; can_manage: boolean }> = {}) {
   return {
     ok: true,
     json: async () => ({
-      org_id: 'org-1',
-      tier: overrides.tier ?? 'free',
-      billing_cycle: null,
-      status: 'active',
-      current_period_end: null,
-      can_manage: overrides.can_manage ?? true,
+      data: {
+        org_id: 'org-1',
+        tier: overrides.tier ?? 'free',
+        billing_cycle: null,
+        status: 'active',
+        current_period_end: null,
+        can_manage: overrides.can_manage ?? true,
+      },
     }),
   };
 }
@@ -50,8 +55,10 @@ function platformSettingsResponse(overrides: Partial<{ billing_price_public: boo
   return {
     ok: true,
     json: async () => ({
-      billing_price_public: overrides.billing_price_public ?? true,
-      billing_checkout_enabled: overrides.billing_checkout_enabled ?? true,
+      data: {
+        billing_price_public: overrides.billing_price_public ?? true,
+        billing_checkout_enabled: overrides.billing_checkout_enabled ?? true,
+      },
     }),
   };
 }
