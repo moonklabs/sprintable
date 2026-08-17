@@ -82,7 +82,7 @@ async def _setup_app_org_project(app, Session, user_id, org_id, project_id):
     claims.app_metadata.project_id를 직접 읽음, DB 조회 없음 — test_2262_artifact_
     unresolved_comment_count_realdb.py의 `_setup_app_human`과 동형)."""
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     async def _db():
         async with Session() as s:
@@ -99,7 +99,7 @@ async def _setup_app_org_project(app, Session, user_id, org_id, project_id):
             claims={"app_metadata": {"org_id": str(org_id), "project_id": str(project_id)}},
         )
 
-    app.dependency_overrides[get_db] = _db
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
 
 
