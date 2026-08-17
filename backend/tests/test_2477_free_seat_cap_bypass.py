@@ -224,8 +224,8 @@ async def test_2_members_plus_5_invites_all_accept_concurrently_only_1_passes_ca
         for uid in existing_member_ids + invitee_ids:
             await s.execute(
                 text(
-                    "INSERT INTO users (id,email,hashed_password,is_active)"
-                    " VALUES (:id,:email,'x',true)"
+                    "INSERT INTO users (id,email,hashed_password,is_active,email_verified)"
+                    " VALUES (:id,:email,'x',true,true)"
                 ),
                 {"id": str(uid), "email": f"{uid}@race2477.test"},
             )
