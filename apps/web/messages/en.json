@@ -3968,6 +3968,7 @@
     "galleryAxisFeature": "Feature",
     "galleryFeatureAxisUnsupported": "Grouping by feature isn't supported yet.",
     "galleryUnassignedGroup": "Unassigned",
+    "galleryUnlinkedBadge": "Unlinked",
     "galleryEmptyTitle": "No artifacts have been collected yet.",
     "storyPickerTitle": "Choose a story",
     "storyPickerSearchPlaceholder": "Search stories",

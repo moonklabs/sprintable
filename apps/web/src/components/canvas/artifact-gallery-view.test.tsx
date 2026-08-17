@@ -132,6 +132,24 @@ describe('ArtifactGalleryView (story a15cea4f)', () => {
     expect(container.textContent).toContain('정본 v3');
   });
 
+  // story #2724(2026-08-17) — 카드 레벨 미연결 배지. 기본 픽스처(ARTIFACTS)는 둘 다
+  // story_id/doc_id 없음(양성) — 별도 story_id 세팅 픽스처로 음성도 같이 확認.
+  it('story #2724 — shows the unlinked badge on cards without story_id/doc_id', async () => {
+    await mount();
+    expect(container.textContent).toContain('미연결');
+  });
+
+  it('story #2724 — hides the unlinked badge once the artifact has a story_id', async () => {
+    vi.stubGlobal('fetch', stubFetch({
+      artifacts: [
+        { id: 'a1', title: '웰컴 이메일 시안', story_id: 's1', epic_id: 'e1', doc_id: null, source: 'created', latest_version_number: 3, anchor_version: 3, created_by: 'm1', created_at: '2026-07-01T00:00:00Z' },
+      ],
+      stories: [{ id: 's1', title: '웰컴 이메일', sprint_id: null, epic_id: 'e1' }],
+    }));
+    await mount();
+    expect(container.textContent).not.toContain('미연결');
+  });
+
   it('story 6d0a0e3a — GROUP BY(axis segment + group list) is integrated into the same left rail container, not split into a header-top tab row (목업 0d852d24 배치 SSOT)', async () => {
     await mount();
     // 둘 다 같은 좌 레일 컨테이너 안에 있다(desktop lg:block 사본 기준) — 서로 다른 컨테이너로

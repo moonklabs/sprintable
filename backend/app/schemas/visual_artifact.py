@@ -114,6 +114,16 @@ class VisualArtifactSummary(BaseModel):
     # 아무도 안 읽지만(next_action_code 소비 0%) 읽을 재료는 이미 서 있다. 빼도 없어지는
     # 동작이 0인 이유가 바로 이것(FE 소비 0%였다는 사실 그대로).
 
+    # story #2724(2026-08-17, 페드루 PO 판정) — 추가 필드(기존 소비자 무회귀, additive-only).
+    # story_id·doc_id가 둘 다 비어있다는 **사실만** 싣는다(처방 문장·권고 아님 — "이걸 붙이세요"
+    # 류는 여기 안 넣는다, MCP 도구 description 쪽 유도문과 역할 분리). story_id/doc_id는 이미
+    # 응답에 있어 소비자가 스스로 계산할 수 있지만, 그 계산을 반복 재구현하는 대신 이 한 필드로
+    # 명시(계산 로직 1곳 SSOT — epic_id는 이 판정에 안 들어간다, PO 문구 "story/doc 미연결" 그대로).
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def unlinked(self) -> bool:
+        return self.story_id is None and self.doc_id is None
+
 
 class VisualArtifactDetail(BaseModel):
     id: uuid.UUID
@@ -151,6 +161,12 @@ class VisualArtifactDetail(BaseModel):
     # from_attributes 안 씀 — 호출부(_load_detail)가 항상 키워드 인자로 명시.
     org_slug: str | None = None
     project_slug: str | None = None
+
+    # story #2724 — VisualArtifactSummary와 동형(위 주석 참조), 이 클래스에도 동일 사실 필드.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def unlinked(self) -> bool:
+        return self.story_id is None and self.doc_id is None
 
 
 class CreateArtifactCommentRequest(BaseModel):
