@@ -83,7 +83,7 @@ export function DocGateSection({
   const [auditOpen, setAuditOpen] = useState(false); // 기본 접힘(본문 우선·이력 secondary)
   const [rejectOpen, setRejectOpen] = useState(false);
   const [note, setNote] = useState('');
-  // story #6c89e40d(페드루 PO 판정 2026-08-17, ⓑ) — doc_approval이 ⓐ'로 high 세트에 명시
+  // story #6c89e40d(페드루 PO 판정 2026-08-17, ⓑ) — doc_approval이 ⓐ항목(하위 처방)으로 high 세트에 명시
   // 등재되며 usesSignatureFlow가 항상 true가 되므로, 결재함 카드(approvals-queue.tsx)와
   // 동일 패턴(canonical GateSignatureApproval을 Dialog로) 그대로 배선한다 — 새 UI 발명 0.
   const [sigOpen, setSigOpen] = useState(false);
@@ -259,7 +259,11 @@ export function DocGateSection({
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-7 gap-1 text-success hover:bg-success-tint hover:text-success"
+                // story #9853aa2f(§AC7 가드, 페드루 지적 2026-08-17) — tint 배경 위 계열색
+                // 글자는 hover 순간 대비 최저점(#2420 규칙). approvals-queue.tsx:268/
+                // workflow-line-editor-section.tsx:227과 동일 처방(rest=text-success 유지,
+                // hover만 text-foreground)으로 통일 — 새 패턴 발명 0.
+                className="h-7 gap-1 text-success hover:bg-success-tint hover:text-foreground"
                 disabled={busy}
                 onClick={() => { if (isSigFlow) { setSigError(null); setSigOpen(true); } else approve(); }}
               >
