@@ -646,17 +646,25 @@ steps:
         # check_realtime_relevant_diff.sh의 목록, 보수적 채택 — 공유 파일 포함 24.7%셋)가
         # 바뀌었는지 본다. 얕은 클론이면 옛 SHA가 히스토리에 없을 수 있어 unshallow를
         # 먼저 시도(실패해도 계속 — 아래 diff 성패로 최종 fail-safe 판단).
-        _CURRENT_TEMPLATE="$(gcloud compute instance-groups managed describe sprintable-realtime-gateway-dev \
+        #
+        # ⛔hotfix(2026-08-17, 페드루 P0) — 로컬 bash 변수를 언더스코어 접두(`_CURRENT_TEMPLATE`
+        # `_LAST_SHA`)로 지었다가 develop 배포가 2연속 실패했다: GCB의 substitution 파서가
+        # `${_XXX}` 패턴 전부를 자기 치환 키로 오인해("key ... is not matched in the
+        # substitution data") 빌드 자체가 안 뜬 것 — GHA 주석 파싱 함정의 GCB 사촌. 이 파일의
+        # 다른 로컬변수(`served`·`expected`·`names`, 604~617행)는 전부 언더스코어 없이 지어져
+        # 아무 문제 없이 plain `$var`로 참조되고 있다 — 그 검증된 패턴으로 맞춘다(언더스코어
+        # 제거, `$$` 이스케이프 대안보다 이 파일 관행과 일치해 위험 낮음).
+        CURRENT_TEMPLATE="$(gcloud compute instance-groups managed describe sprintable-realtime-gateway-dev \
           --region="${_AR_REGION}" --project="${PROJECT_ID}" \
           --format='value(versions[0].instanceTemplate)' 2>/dev/null | sed 's#.*/##' || echo '')"
-        _LAST_SHA="$(echo "${_CURRENT_TEMPLATE}" | grep -oE '[0-9a-f]{8}' | head -1 || echo '')"
+        LAST_SHA="$(echo "$CURRENT_TEMPLATE" | grep -oE '[0-9a-f]{8}' | head -1 || echo '')"
 
-        if [ -z "${_LAST_SHA}" ]; then
+        if [ -z "$LAST_SHA" ]; then
           echo "deploy-realtime-gce: 기존 MIG 템플릿에서 직전 SHA를 못 읽음(최초 배포이거나 이름 패턴 변경) — path-filter 건너뛰고 배포 진행"
         else
           git fetch --unshallow >/dev/null 2>&1 || true
-          if ! bash backend/scripts/check_realtime_relevant_diff.sh "${_LAST_SHA}" "${COMMIT_SHA}"; then
-            echo "skip deploy-realtime-gce: ${_LAST_SHA}..${COMMIT_SHA} 사이 realtime-관련 경로 변경 없음(story #2089 path-filter, 스킵 사유는 위 로그 참고)"
+          if ! bash backend/scripts/check_realtime_relevant_diff.sh "$LAST_SHA" "${COMMIT_SHA}"; then
+            echo "skip deploy-realtime-gce: $LAST_SHA..${COMMIT_SHA} 사이 realtime-관련 경로 변경 없음(story #2089 path-filter, 스킵 사유는 위 로그 참고)"
             exit 0
           fi
         fi
