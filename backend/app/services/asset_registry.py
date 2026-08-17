@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from urllib.parse import urlsplit
 
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -16,19 +17,32 @@ from app.models.asset import ASSET_LINK_SOURCE_TYPES, Asset, AssetLink
 
 # S1 GCS_MEMO_ATTACHMENTS_BUCKET 기본과 정합. 현재 단일 컨테이너(첨부 버킷).
 DEFAULT_CONTAINER = os.environ.get("GCS_MEMO_ATTACHMENTS_BUCKET", "sprintable-memo-attachments")
-_PUBLIC_PREFIX = f"https://storage.googleapis.com/{DEFAULT_CONTAINER}/"
+_GCS_HOST = "storage.googleapis.com"
 
 
 def canonical_object_path(stored_url: str, container: str = DEFAULT_CONTAINER) -> str | None:
     """저장 url → canonical object_path. 우리 객체가 아니면 None.
 
-    S1 `_canonical_object_path` 규칙과 정합: GCS public prefix 제거 / bare 그대로 / 외부 스킴 None.
+    story #2720(2026-08-17, 미르코) — 이 함수가 BE 전역 canonicalization SSOT다.
+    `attachments.py`·`attachment_context.py`·`image_dimensions.py`·`artifact_image_url.py`가
+    각자 손으로 재구현했던 동일 규칙(신규=bare path·legacy=GCS public prefix·외부 도메인=None)을
+    이 함수 하나로 흡수한다 — 다른 곳에서 새로 만들지 않는다.
+
+    `urlsplit` 기반(문자열 `startswith` 아님) — story #2711(artifact_image_url.py)의 왕복
+    오염 가드 요구사항 때문: 서명 쿼리스트링(`?X-Goog-...`)이 붙은 url도 안전하게 처리해야
+    한다(쿼리는 `urlsplit`이 `.path`와 분리해주므로 prefix 매칭에 전혀 안 섞인다 — 문자열
+    `startswith`로는 쿼리스트링을 인식 못 해 canonical 결과에 쿼리가 그대로 남는다).
     """
     if not stored_url:
         return None
-    prefix = f"https://storage.googleapis.com/{container}/"
-    if stored_url.startswith(prefix):
-        return stored_url[len(prefix):] or None
+    parts = urlsplit(stored_url)
+    if parts.scheme and parts.netloc:
+        if parts.netloc != _GCS_HOST:
+            return None
+        prefix = f"/{container}/"
+        if not parts.path.startswith(prefix):
+            return None
+        return parts.path[len(prefix):] or None
     if "://" in stored_url:
         return None
     return stored_url

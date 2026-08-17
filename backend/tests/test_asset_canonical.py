@@ -27,6 +27,11 @@ def test_bare_path_passthrough():
         "gs://other-bucket/a.png",
         "file:///etc/passwd",
         "https://storage.googleapis.com/other-bucket/a.png",  # 타 버킷
+        # story #2720(2026-08-17, 미르코 뮤테이션킬로 발견한 커버리지 갭) — host가 우리
+        # GCS 호스트와 다른데 **path만** 우리 버킷 prefix와 우연히 일치하는 경우. netloc
+        # 체크가 없으면(prefix-only string 매칭이면) 이게 우리 객체로 오판정된다 — 외부
+        # 서버가 우리 버킷 이름을 흉내낸 경로를 심어도 통과하는 결함 클래스.
+        "http://evil.com/sprintable-memo-attachments/a.png",
     ],
 )
 def test_external_or_other_bucket_is_none(external):

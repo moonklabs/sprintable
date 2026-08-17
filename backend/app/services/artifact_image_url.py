@@ -12,29 +12,31 @@
 그대로 edit으로 되보내면, 서명 쿼리스트링(`X-Goog-...`)이 그대로 저장돼 만료 後 깨진 url이
 영속화된다. `_canonicalize_props()`가 저장 직전에 항상 raw(무쿼리) 형태로 되돌린다 — 이
 모듈이 read/write 양쪽 진입점 전부에서 호출돼야 이 가드가 성립한다(호출 누락 = 결함 재발).
+
+story #2720(2026-08-17) — `_our_bucket_object_path()`의 자체 host/prefix 매칭 로직을 없애고
+`asset_registry.canonical_object_path`(BE canonicalization SSOT)를 이 버킷으로 호출하는
+얇은 wrapper로 대체했다. ⓐ(판정 단일함수)·ⓑ(왕복 오염 가드) 의미는 그대로 — "그 단일함수가
+어디 정의돼 있는가"만 바뀌었다(SSOT 위치가 이 파일에서 asset_registry로 이동, 판정 자체는
+여전히 이 파일의 read/write 양쪽 진입점이 이 wrapper 하나만 거친다).
 """
 from __future__ import annotations
 
 import os
 from datetime import timedelta
-from urllib.parse import urlsplit
+
+from app.services.asset_registry import canonical_object_path as _canonical_object_path
 
 _BUCKET = os.environ.get("GCS_MEMO_ATTACHMENTS_BUCKET", "sprintable-memo-attachments")
 _HOST = "storage.googleapis.com"
-_PREFIX = f"/{_BUCKET}/"
 _SIGNED_READ_TTL = timedelta(minutes=15)
 
 
 def _our_bucket_object_path(url: str) -> str | None:
     """url이 우리 버킷을 가리키면(raw든 서명 쿼리가 붙었든) canonical object_path를
-    반환(쿼리스트링은 urlsplit이 이미 분리해 자동 배제) — 아니면(외부 url·빈 값 등) None.
-    read(서명)·write(canonicalize) 양쪽이 이 함수 하나만 거친다(ⓐ)."""
-    if not url:
-        return None
-    parts = urlsplit(url)
-    if parts.netloc != _HOST or not parts.path.startswith(_PREFIX):
-        return None
-    return parts.path[len(_PREFIX):]
+    반환(asset_registry.canonical_object_path가 urlsplit 기반이라 쿼리스트링은 이미
+    분리돼 자동 배제) — 아니면(외부 url·빈 값 등) None. read(서명)·write(canonicalize)
+    양쪽이 이 함수 하나만 거친다(ⓐ)."""
+    return _canonical_object_path(url, _BUCKET)
 
 
 def _canonicalize_props(props: dict | None) -> dict | None:
