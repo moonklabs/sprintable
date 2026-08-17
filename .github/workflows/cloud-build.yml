@@ -190,7 +190,17 @@ jobs:
             # story #2701(2026-08-17) — sprintable-mcp-prod의 라이브 실측(gcloud describe)
             # 그대로 durable화. dev엔 이 값이 없다(아래 dev 분기 참조, 조용히 맞추지 않음 —
             # dev는 CORS/host allowlist 자체가 아직 필요하지 않다는 뜻으로 실측된 그대로 둔다).
-            echo "mcp_allowed_hosts=sprintable-mcp-prod-787818285179.asia-northeast3.run.app,mcp.sprintable.ai" >> "$GITHUB_OUTPUT"
+            # ⛔fix(디디 교차QA, 2026-08-17): 실값이 호스트 둘을 콤마로 이었는데, 이 문자열이
+            # `gcloud builds submit --substitutions=` 조립(SUBST=, 아래)에 그대로 들어가면 그
+            # 조립 자체가 "key=value,key=value,..." 콤마 목록이라 값 안의 콤마가 다음
+            # substitution의 시작으로 오인돼(gcloud ArgDict 파서는 순수 split(',')·따옴표
+            # 이스케이프 무시) prod 배포가 CLI 파싱 단계에서 죽는다. dev는 이 값이 빈
+            # 문자열이라 이 함정이 안 드러났었다(검증은 "그 값들에 대해서만" 유효했다는
+            # 정확한 사례). 파이프라인 구간(GHA output→SUBST→cloudbuild substitution)은
+            # `|`로 나르고, cloudbuild.yaml deploy-mcp 스텝 안에서 실제 env var로 쓸 때만
+            # `tr '|' ','`로 콤마 복원한다(앱이 받는 최종 env var 값 자체는 무변경 — MCP_ALLOWED_HOSTS
+            # 는 여전히 콤마구분).
+            echo "mcp_allowed_hosts=sprintable-mcp-prod-787818285179.asia-northeast3.run.app|mcp.sprintable.ai" >> "$GITHUB_OUTPUT"
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
