@@ -15,6 +15,12 @@ export interface GalleryArtifactSummary {
   title: string;
   latestVersionNumber: number;
   anchorVersion: number | null;
+  // story #2724(2026-08-17) — story_id·doc_id 둘 다 없다는 사실만(BE unlinked와 동일 판정,
+  // epic_id는 안 봄). ⚠️axis 그룹핑의 "무소속"(story #buildGalleryGroups, epic/sprint는
+  // 스토리 경유 1홉이라 story_id가 있어도 그 스토리에 epic/sprint가 없으면 그 축에서만
+  // 무소속으로 떨어질 수 있음)과 **다른 개념** — 카드 배지는 축과 무관하게 story_id/doc_id
+  // 원자값만 본다(그룹 라벨과 뜻이 갈릴 수 있다는 걸 의도한 설계, 섞으면 안 됨).
+  unlinked: boolean;
 }
 
 export interface GalleryGroup {
@@ -45,7 +51,10 @@ export interface GalleryLookups {
 }
 
 function toSummary(a: BeVisualArtifactSummary): GalleryArtifactSummary {
-  return { id: a.id, title: a.title, latestVersionNumber: a.latest_version_number, anchorVersion: a.anchor_version };
+  return {
+    id: a.id, title: a.title, latestVersionNumber: a.latest_version_number, anchorVersion: a.anchor_version,
+    unlinked: a.story_id == null && a.doc_id == null,
+  };
 }
 
 function groupBy(

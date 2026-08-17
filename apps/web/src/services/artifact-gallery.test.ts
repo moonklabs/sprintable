@@ -107,7 +107,32 @@ describe('buildGalleryGroups — summary fields (no extra fetch needed)', () => 
     const groups = buildGalleryGroups('epic', [
       artifact({ id: 'a1', epic_id: 'e1', latest_version_number: 3, anchor_version: 2 }),
     ], lookups, UNASSIGNED);
-    expect(groups[0]!.artifacts[0]).toEqual({ id: 'a1', title: '웰컴 이메일 시안', latestVersionNumber: 3, anchorVersion: 2 });
+    expect(groups[0]!.artifacts[0]).toEqual({
+      id: 'a1', title: '웰컴 이메일 시안', latestVersionNumber: 3, anchorVersion: 2, unlinked: true,
+    });
+  });
+
+  // story #2724(2026-08-17) — 카드 배지용 unlinked. epic_id는 이 판정에 안 들어간다(BE와
+  // 동일 규칙, "story/doc 미연결"만 본다).
+  it('unlinked is true when story_id and doc_id are both null (even with epic_id set)', () => {
+    const groups = buildGalleryGroups('epic', [
+      artifact({ id: 'a1', epic_id: 'e1', story_id: null, doc_id: null }),
+    ], lookups, UNASSIGNED);
+    expect(groups[0]!.artifacts[0]!.unlinked).toBe(true);
+  });
+
+  it('unlinked is false when story_id is set', () => {
+    const groups = buildGalleryGroups('epic', [
+      artifact({ id: 'a1', epic_id: 'e1', story_id: 's1' }),
+    ], lookups, UNASSIGNED);
+    expect(groups[0]!.artifacts[0]!.unlinked).toBe(false);
+  });
+
+  it('unlinked is false when doc_id is set', () => {
+    const groups = buildGalleryGroups('doc', [
+      artifact({ id: 'a1', doc_id: 'd1' }),
+    ], lookups, UNASSIGNED);
+    expect(groups[0]!.artifacts[0]!.unlinked).toBe(false);
   });
 
   it('anchorVersion is null when nothing has been anchored yet (no fabricated anchor)', () => {
