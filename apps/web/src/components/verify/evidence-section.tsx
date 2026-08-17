@@ -3,12 +3,18 @@
 import { useCallback, useState } from 'react';
 import {
   Check, ChevronDown, ChevronUp, ExternalLink, Link2, Paperclip, Plus,
-  GitPullRequest, Rocket, TrendingUp, FileText, CheckCircle2,
+  GitPullRequest, Rocket, TrendingUp, FileText, CheckCircle2, Frame,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { deriveTrustStage, type EvidenceItem, type EvidenceType } from '@/services/verify';
+import {
+  adaptArtifactDetail, getArtifactVersionDetail,
+  type ArtifactFormat, type BeArtifactVersionSummary,
+} from '@/services/canvas';
+import { ArtifactExpandDialog } from '@/components/canvas/artifact-expand-dialog';
+import { type GalleryTimelineVersion } from '@/components/canvas/artifact-gallery-timeline';
 
 const VISIBLE_LIMIT = 4;
 
@@ -93,6 +99,37 @@ export function EvidenceSection({
     if (!expanded && items === null) { void fetchEvidence(); }
     setExpanded((v) => !v);
   };
+
+  // story #2722(아티팩트·evidence 버전 pin, AC2) — evidence가 아티팩트를 근거로 삼았으면
+  // "그 시각 고정된 버전"으로 열린다(현행 최신이 아니라). artifact-gallery-view.tsx의
+  // handleOpenArtifact/ArtifactExpandDialog 왕복을 그대로 재사용(새 발명 0).
+  const [expandTarget, setExpandTarget] = useState<{
+    artifactId: string; format: ArtifactFormat; content: string; title: string;
+    canvasBounds?: { w: number; h: number } | null;
+    versionNumber: number; versions: GalleryTimelineVersion[];
+  } | null>(null);
+
+  const handleOpenArtifact = useCallback(async (artifactId: string, versionNumber: number, title: string) => {
+    const [detail, versionListRes] = await Promise.all([
+      getArtifactVersionDetail(artifactId, versionNumber),
+      fetch(`/api/visual-artifacts/${artifactId}/versions`),
+    ]);
+    if (!detail) return;
+    const { artifact, versions } = adaptArtifactDetail(detail);
+    const content = versions[0]?.content;
+    if (!content) return;
+    const versionList: BeArtifactVersionSummary[] = versionListRes.ok
+      ? ((await versionListRes.json()) as { data?: BeArtifactVersionSummary[] }).data ?? []
+      : [];
+    const mappedVersions: GalleryTimelineVersion[] = versionList
+      .slice()
+      .sort((a, b) => a.version_number - b.version_number)
+      .map((v) => ({ versionNumber: v.version_number, summary: v.summary, isAnchor: v.version_number === artifact.anchor_version }));
+    setExpandTarget({
+      artifactId, format: artifact.format, content, title,
+      canvasBounds: versions[0]?.canvasBounds, versionNumber, versions: mappedVersions,
+    });
+  }, []);
 
   // story #2258 — 증거연결: BE(create_evidence)는 이미 있었는데 화면이 부르지 않던 경로.
   const [showAddForm, setShowAddForm] = useState(false);
@@ -193,11 +230,26 @@ export function EvidenceSection({
                     const Icon = TYPE_ICON[item.type] ?? Link2;
                     const linkable = isLinkableRef(item.ref);
                     const primaryText = item.note || item.ref;
+                    // story #2722(AC2) — 아티팩트 근거는 그 시각 고정된 버전으로 열린다(현행
+                    // 최신 아님). artifact_version_id가 null이면 "버전 미상"인 구 데이터라
+                    // 이 분기를 못 타고 기존 링크/텍스트 렌더로 폴백한다(정직 표기).
+                    const pinnedArtifact = item.artifact_id != null && item.artifact_version_number != null
+                      ? { id: item.artifact_id, versionNumber: item.artifact_version_number }
+                      : null;
                     return (
                       <li key={item.id} className="flex items-start gap-2 rounded-md px-1.5 py-1 hover:bg-muted/40">
                         <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
                         <div className="min-w-0 flex-1">
-                          {linkable ? (
+                          {pinnedArtifact ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleOpenArtifact(pinnedArtifact.id, pinnedArtifact.versionNumber, primaryText)}
+                              className="flex items-center gap-1 text-xs font-medium text-foreground hover:underline"
+                            >
+                              <span className="truncate">{primaryText}</span>
+                              <Frame className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+                            </button>
+                          ) : linkable ? (
                             <a
                               href={item.ref}
                               target="_blank"
@@ -290,6 +342,19 @@ export function EvidenceSection({
           </div>
         ) : null}
       </div>
+      {expandTarget ? (
+        <ArtifactExpandDialog
+          open={expandTarget !== null}
+          onOpenChange={(next) => { if (!next) setExpandTarget(null); }}
+          title={expandTarget.title}
+          format={expandTarget.format}
+          content={expandTarget.content}
+          canvasBounds={expandTarget.canvasBounds}
+          versions={expandTarget.versions}
+          selectedVersion={expandTarget.versionNumber}
+          onSelectVersion={(versionNumber) => void handleOpenArtifact(expandTarget.artifactId, versionNumber, expandTarget.title)}
+        />
+      ) : null}
     </div>
   );
 }

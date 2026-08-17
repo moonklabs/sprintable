@@ -658,7 +658,9 @@ _TOOL_DEFS: list[tuple] = [
     # Evidence 자기증명 (1) — E-VERIFY V0-S1
     ("sprintable_add_evidence",
      "done을 스스로 증명하는 자기 서명 첨부(PR·배포·지표·발행물 링크 등) — story/task에 evidence"
-     " 남김. 선택제(첨부 안 해도 무불이익).",
+     " 남김. 선택제(첨부 안 해도 무불이익). 아티팩트를 근거로 삼을 땐 artifact_id를 같이 주면"
+     " 그 시각의 버전이 자동 고정된다(그 뒤 아티팩트가 새 버전으로 바뀌어도 이 evidence의"
+     " 근거는 안 흔들림).",
      AddEvidenceInput, add_evidence),
     # 판단 칸 (2) — story #2268(D단계, E-CONNECT)
     ("sprintable_add_judgment",
