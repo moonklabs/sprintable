@@ -1,4 +1,20 @@
-"""가격 버전 이력(E-ADMIN B1, story 553fc58d) — team/pro 유료 tier의 가격 변경 이력.
+"""⛔DEPRECATED(story #2731/82593fb0, 2026-08-18 그라운딩) — v2.3 이행 후 `offering_versions`
+(migration 0228, `app/models/offering_version.py`)가 실 가격/과금 결정 축을 전부 대체했다.
+그라운딩 실측: 이 클래스(`PricingVersion`)를 import하는 곳은 이 파일과 `models/__init__.py`
+(등록용) 뿐 — 어떤 router·service·repository도 쿼리하지 않는다(전수 grep, 0건). FE도 무접촉.
+잔존 참조는 딱 둘: ①`org_subscriptions.pricing_version_id`(FK, nullable) — 컬럼은 있으나
+아무 코드도 채우거나 읽지 않는 순수 vestige(grep 0건) ②sprintable-admin(internal-api)의
+CRUD write 경로 — prod는 `PRICING_VERSIONS_ENABLED=false`로 완전 게이트오프(2026-07-09
+부팅실패 발견 이후)돼 있으나 **dev는 env override가 없어 기본값 True로 여전히 라이브**
+(admin-web `/pricing` 다이얼로그로 새 행 생성 가능) — 단 그렇게 만든 행을 읽는 코드가
+없어 실제 가격에 영향 0.
+
+**DROP 안 함** — story #70bc4bc3("P0급 잠재·prod DB: alembic_version(0253)과 pricing_versions
+실 스키마 불일치 — prod pre-0228 형상·polar_price_id 잔존 판별")이 이 테이블 자체를 대상으로
+진행 중이라 스키마 변경은 그쪽 판별에 종속. 이 docstring 갱신은 순수 문서화(코드 동작 무변경).
+
+---
+가격 버전 이력(E-ADMIN B1, story 553fc58d) — team/pro 유료 tier의 가격 변경 이력.
 
 **append-only**: 가격 값이 담긴 행은 절대 UPDATE되지 않는다. 가격이 바뀌면 새 행을
 INSERT하고, 직전 "열린"(effective_to IS NULL) 행의 effective_to를 새 행의 effective_from

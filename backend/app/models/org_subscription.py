@@ -38,6 +38,10 @@ class OrgSubscription(Base):
     checkout_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # E-ADMIN B1: grandfather — 가입(플랜변경)시점 pricing_version 참조. free tier·백필 전
     # 기존 구독은 NULL(0146은 구조만, 값 백필은 가격 확정 후 별도 마이그).
+    # ⛔VESTIGE(story #2731/82593fb0, 2026-08-18) — offering_version_id(아래)가 이 컬럼을
+    # 완전히 대체했다. 이 컬럼을 채우거나 읽는 코드는 전수 grep 0건(app/models/
+    # pricing_version.py의 DEPRECATED 표기 참고) — DROP은 story #70bc4bc3(prod 스키마
+    # 불일치 판별)에 종속돼 미루되, 신규 코드는 이 컬럼을 쓰지 말 것.
     pricing_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("pricing_versions.id"), nullable=True
     )
