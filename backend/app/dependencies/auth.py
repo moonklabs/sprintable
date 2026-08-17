@@ -110,19 +110,38 @@ async def _touch_api_key_last_used(api_key_id: uuid.UUID) -> None:
 async def _resolve_api_key(
     raw_key: str, db: AsyncSession, transport: str | None = None,
 ) -> AuthContext:
-    """sk_live_* API key를 DB에서 조회하여 AuthContext 반환."""
+    """sk_live_* API key를 DB에서 조회하여 AuthContext 반환.
+
+    story #2295 갭 후속(2026-08-17, 페드루 PO 판정) — realtime-gateway가 backplane=redis일 때
+    (현재 dev/prod 실값) pg_pubsub.listen_loop()가 아예 안 떠서 그 신호에 기댄 readiness가
+    영구 fail-open이었다(원 인시던트 2026-07-28을 실제로 재현 못 함이 드러난 갭). 그라운딩
+    결과 — cloud-sql-proxy가 죽으면 실제로 망가지는 건 이 함수(신규 SSE 연결마다 agent API키
+    인증이 DB 왕복)다: 원 인시던트의 실증상("신규 연결만 거부·기존 스트림 유지")과 정합.
+
+    아래 db.execute()만 감싼다(그 밑 `if not api_key: raise 401`은 DB가 멀쩡히 응답했는데
+    키가 틀린 정상 인증실패라 readiness 신호와 무관 — 틀린 키가 UNHEALTHY를 만들면 안 된다,
+    PO 명시 조건). auth.py는 backend/realtime 공유 파일이라 이 계측은 backend에도 걸리지만
+    무해(어떤 LB도 backend `/ready`를 안 본다 — story #2295가 그 표면 자체는 이미 노출해 둠)."""
     from app.models.api_key import ApiKey
     from app.models.team import TeamMember
 
     key_hash = hash_token(raw_key)
     now = datetime.now(timezone.utc)
 
-    result = await db.execute(
-        select(ApiKey)
-        .where(ApiKey.key_hash == key_hash)
-        .where(ApiKey.revoked_at.is_(None))
-        .where((ApiKey.expires_at.is_(None)) | (ApiKey.expires_at > now))
-    )
+    try:
+        result = await db.execute(
+            select(ApiKey)
+            .where(ApiKey.key_hash == key_hash)
+            .where(ApiKey.revoked_at.is_(None))
+            .where((ApiKey.expires_at.is_(None)) | (ApiKey.expires_at > now))
+        )
+    except Exception as exc:
+        from app.services import realtime_readiness
+        realtime_readiness.mark_disconnected(f"{type(exc).__name__}: {exc}")
+        raise
+    from app.services import realtime_readiness
+    realtime_readiness.mark_connected()
+
     api_key = result.scalar_one_or_none()
     if not api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
