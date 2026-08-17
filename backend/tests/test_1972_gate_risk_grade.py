@@ -8,7 +8,7 @@ SSOT: doc `gate-risk-ux-classification-criteria` §2 판정표(1차 축=posture,
 단일 쿼리만 수행한다(doc §4 "경계 명확화").
 
 테스트 구성:
-- derive_risk_grade 순수 함수 매트릭스(posture 4종 × gate_type 6종 = 24 조합, doc §2 표 그대로
+- derive_risk_grade 순수 함수 매트릭스(posture 4종 × gate_type 7종 = 28 조합, doc §2 표 그대로
   literal 명시 — 구현 로직을 그대로 미러링하지 않고 스펙을 직접 기술).
 - get_org_posture 쿼리 형태(단일 쿼리·OrgGatePolicy만 대상) + resolve_disposition 비호출 구조 확인.
 - list_gates/get_gate_endpoint 라우트(mocked session) risk_grade enrich 배선.
@@ -47,9 +47,9 @@ def _scalar_result(value):
 # ── derive_risk_grade 순수 함수 매트릭스(doc §2 표 그대로) ──────────────────────
 
 # doc §2.1(1차 축=posture)·§2.2(2차 축=gate_type, posture 미확定일 때만)·§2.3(폴백=보수적 고위험)을
-# 표 그대로 옮긴 literal 매트릭스. gate_type 6종(pr_review/qa/merge/deploy/workflow_config_publish/
+# 표 그대로 옮긴 literal 매트릭스. gate_type 7종(pr_review/qa/merge/deploy/workflow_config_publish/
 # doc_approval) + 진짜 미분류 gate_type 대리값("_未來_unclassified_gate_type")으로 폴백 케이스까지
-# 커버 = posture 4종(conservative/permissive/balanced/None) × gate_type 7종 = 28 조합.
+# 커버 = posture 4종(conservative/permissive/balanced/None) × gate_type 8종 = 32 조합.
 #
 # ⛔story #6c89e40d(페드루 PO 판정 2026-08-17, ⓐ'): doc_approval은 원래 이 매트릭스에서 "폴백
 # 대리값" 역할이었다(과거 어느 세트에도 없어 미분류 폴백과 값이 우연히 같았을 뿐) — 이제
@@ -69,6 +69,7 @@ _RISK_GRADE_MATRIX: list[tuple[str | None, str, str]] = [
     ("conservative", "deploy", "high"),
     ("conservative", "workflow_config_publish", "high"),
     ("conservative", "doc_approval", "high"),
+    ("conservative", "agent_decision_request", "high"),  # story #2709
     ("conservative", _UNCLASSIFIED_GATE_TYPE, "high"),
     # posture=permissive → 항상 low(gate_type 무관, §2.1)
     ("permissive", "pr_review", "low"),
@@ -77,6 +78,7 @@ _RISK_GRADE_MATRIX: list[tuple[str | None, str, str]] = [
     ("permissive", "deploy", "low"),
     ("permissive", "workflow_config_publish", "low"),
     ("permissive", "doc_approval", "low"),
+    ("permissive", "agent_decision_request", "low"),  # story #2709
     ("permissive", _UNCLASSIFIED_GATE_TYPE, "low"),
     # posture=balanced → 2차 축(gate_type, §2.2) + 폴백(§2.3)
     ("balanced", "pr_review", "low"),
@@ -85,6 +87,11 @@ _RISK_GRADE_MATRIX: list[tuple[str | None, str, str]] = [
     ("balanced", "deploy", "high"),
     ("balanced", "workflow_config_publish", "high"),
     ("balanced", "doc_approval", "high"),  # 2차 축 명시 등재(더 이상 폴백 아님, ⓐ')
+    # story #2709 — agent_decision_request는 _LOW_RISK_GATE_TYPES에 명시 등재(gate_service.py) —
+    # doc_approval과 반대로 low(2차 축에서 직접, 폴백 아님). 근거: 이 gate는 되돌릴 수 없는
+    # 액션을 그 자신이 트리거하지 않는다(에이전트가 이미 자기 가정대로 진행 중인 결정의
+    # 사후확인일 뿐) — 서명 마찰이 "빠른 비동기 확인"이라는 존재 이유와 충돌한다.
+    ("balanced", "agent_decision_request", "low"),
     ("balanced", _UNCLASSIFIED_GATE_TYPE, "high"),  # 폴백: 진짜 미분류 gate_type → 보수적 고위험
     # posture=None(미설정 row 없음) → 2차 축(gate_type, §2.2) + 폴백(§2.3)
     (None, "pr_review", "low"),
@@ -93,6 +100,7 @@ _RISK_GRADE_MATRIX: list[tuple[str | None, str, str]] = [
     (None, "deploy", "high"),
     (None, "workflow_config_publish", "high"),
     (None, "doc_approval", "high"),  # 2차 축 명시 등재(더 이상 폴백 아님, ⓐ')
+    (None, "agent_decision_request", "low"),  # story #2709 — balanced와 동일(§2.2 2차 축)
     (None, _UNCLASSIFIED_GATE_TYPE, "high"),  # 폴백: 진짜 미분류 gate_type → 보수적 고위험
 ]
 
@@ -115,12 +123,12 @@ def test_doc_approval_is_explicitly_high_risk_not_fallback():
 
 
 def test_derive_risk_grade_matrix_covers_all_gate_types():
-    """GATE_TYPES(5종) 전부가 매트릭스에 등장하는지 자기표면화(신규 gate_type 확장 시 매트릭스
+    """GATE_TYPES(6종) 전부가 매트릭스에 등장하는지 자기표면화(신규 gate_type 확장 시 매트릭스
     drift 방지 — feedback_one_directional_check_vacuous_pass 교훈: EXPECTED-actual 방향도 확인)."""
     from app.models.hitl_config import GATE_TYPES
 
     covered = {gt for _, gt, _ in _RISK_GRADE_MATRIX}
-    assert GATE_TYPES <= covered  # 5종 전부 매트릭스에 있어야 함
+    assert GATE_TYPES <= covered  # 6종 전부 매트릭스에 있어야 함
     assert "doc_approval" in covered  # 이제 명시 등재 케이스로 커버
     assert _UNCLASSIFIED_GATE_TYPE in covered  # 폴백(진짜 미분류) 경로도 별도로 커버
 
