@@ -427,3 +427,34 @@ describe('NextMakerScreen — org-sync 성공 後 재요청 (story #2545)', () =
     expect(goalsCallsAfterBump).toBeGreaterThan(goalsCallsAfterMount); // 재요청 — 이전엔 안 늘었다(RED)
   });
 });
+
+// story #2224 후속(2026-08-16, 미르코) — dev 실측(활성 목표 39건인데 화면은 "목표 0개")의
+// 근본원인 회귀가드. fetchAllPages가 `if (!res.ok) break`로 실패를 «페이지네이션 끝»과
+// 구분 없이 삼켜, 어떤 실패든(이번엔 401·일반화하면 5xx도 동형) items=[]가 "정상 0건"인
+// 화면(목표 0개 중 0개)으로 조용히 렌더됐다 — 에러 표시도 콘솔도 없이. 이 가드는 goals 응답이
+// 실패할 때 그 조용한 "0개"가 아니라 정직한 에러 화면(nextMakerError)이 뜨는지를 고정한다
+// (RED였다면 이 테스트는 "목표 0개 중 0개"가 뜨는 것을 보고 통과해 버렸을 것 — 그래서 이
+// 가드는 "에러 문구가 있다"뿐 아니라 "0개 문구가 없다"도 함께 확認한다).
+describe('NextMakerScreen — 실패를 "0건"으로 삼키지 않는다(story #2224 후속)', () => {
+  it('goals 응답이 실패(5xx)면 "목표 0개"가 아니라 에러 화면이 뜬다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('/api/goals?')) return { ok: false, status: 500, json: async () => null } as Response;
+      // 다른 병렬 호출은 정상 응답 — goals 실패 «단독»이 원인임을 못박는다.
+      if (url.startsWith('/api/stories?')) return jsonResponse({ data: [], meta: { hasMore: false, nextCursor: null, limit: 100 } });
+      if (url.startsWith('/api/reference-candidates/next-up')) return jsonResponse([]);
+      if (url.startsWith('/api/analytics/epics-progress-lane')) {
+        return jsonResponse({ data: { epics: {}, zones: {}, stall_threshold_hours: 168, stories_without_epic: 0 } });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }));
+
+    await act(async () => {
+      root.render(wrap(<NextMakerScreen projectId="p1" memberMap={{}} onSelectStory={() => {}} />));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(container.textContent).toContain('다음을 불러오지 못했습니다');
+    expect(container.textContent).not.toContain('목표 0개');
+  });
+});
