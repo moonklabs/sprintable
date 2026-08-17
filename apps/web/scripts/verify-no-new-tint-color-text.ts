@@ -21,6 +21,21 @@
  * 참조)를 grandfather로 얼리고, 그 밖의 새 자리만 FAIL한다. 이 건수를 지금 고치는 것은
  * 이 스토리의 AC4가 아니라 다음 판이다 — 여기서는 "더 늘지 않는다"만 보장한다.
  *
+ * story #2710(2026-08-17) — quote-pairing 정규식(LITERAL_RE) 폐기, TS 컴파일러 API
+ * (ts.createSourceFile)로 교체. 근본원인(PR #3165 CI 빨강 추적 중 실측): 정규식은 파일
+ * 전체를 「따옴표 짝맞추기」로만 훑어 comment/문자열을 구분 못 한다 — 주석 속 apostrophe
+ * 하나(`ⓐ'로`처럼 짝 없는 `'`)가 나오면 그 지점부터 다음 `'`까지(다른 파일이면 파일 끝까지)를
+ * 통째로 하나의 "리터럴"로 삼킨다. 이게 오탐(#3165, 무관 코드 뭉치가 우연히 family 쌍을 담아
+ * 걸림)으로도, **미탐**(진짜 위반이 «삼킨 리터럴의 여는/닫는 따옴표 그 자체»로 소비돼 리터럴
+ * 추출 대상에서 아예 빠짐 — 재현·회귀테스트로 실측 확認)으로도 터진다. 실 파서는 주석을
+ * 애초에 토큰화하지 않고(swallow 구조적으로 불가) 각 문자열/템플릿 리터럴의 경계를 escape까지
+ * 반영해 정확히 긋는다 — 「막는 쪽(가드)과 하는 쪽(코드)이 같은 걸 본다」의 이 가드판.
+ * AC4(가드가 자기 재료를 못 읽으면 빨강) — `ts.createSourceFile`의 내부 `parseDiagnostics`가
+ * 비어있지 않으면(문법 오류로 파싱 실패) FAIL로 죽는다(조용한 스킵 금지, #2093 lint 가드와
+ * 같은 원칙). 이 가드는 「같은 문자열 리터럴 안의 페어링」만 본다는 스코프 자체는 안 바뀐다 —
+ * split-literal(예 `cn('bg-x', cond && 'text-x')`)은 여전히 못 본다(교차-요소는 자매 가드
+ * verify-cross-element-tint-text.ts 담당, 위 한계 ①과 동일).
+ *
  * 이 가드가 못 잡는 것(반드시 읽어야 하는 한계) —
  *   1) 같은 논리적 className이 cn('bg-x/10', cond && 'text-x')처럼 여러 리터럴로
  *      쪼개져 있으면 이 스크립트는 그 둘을 "같은 자리"로 못 본다(각 리터럴을 독립으로
@@ -43,13 +58,10 @@
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
+import ts from 'typescript';
 
 export const FAMILIES = ['destructive', 'info', 'success', 'warning'] as const;
 export type Family = (typeof FAMILIES)[number];
-
-// 문자열/템플릿 리터럴 하나를 통째로 뽑는다 — Tailwind 클래스 문자열은 따옴표 문자 자체를
-// 담지 않으므로 이스케이프 처리는 최소로 둔다(다른 verify-*.ts 스크립트들과 같은 정밀도).
-const LITERAL_RE = /'([^'\\]*(?:\\.[^'\\]*)*)'|"([^"\\]*(?:\\.[^"\\]*)*)"|`([^`\\]*(?:\\.[^`\\]*)*)`/g;
 
 function familyBgRe(family: Family): RegExp {
   // story #2575 AC2 — `-bg`(불투명 status 배경) 추가. `-bg`가 `-tint`보다 먼저 와도/나중에
@@ -91,18 +103,47 @@ export function violationKey(v: Pick<Violation, 'file' | 'family' | 'literal'>):
   return `${v.file}::${v.family}::${v.literal}`;
 }
 
-export function scanContent(content: string, file: string): Violation[] {
-  const violations: Violation[] = [];
-  for (const m of content.matchAll(LITERAL_RE)) {
-    const literal = m[1] ?? m[2] ?? m[3] ?? '';
-    if (!literal) continue;
-    const hits = findTintTextPairs(literal);
-    if (hits.length === 0) continue;
-    const line = content.slice(0, m.index).split('\n').length;
-    for (const hit of hits) {
-      violations.push({ file, line, family: hit.family, literal: hit.literal });
-    }
+/** node가 문자열/템플릿 리터럴이면 그 "리터럴 텍스트"를 하나로 뽑는다(정적 부분만 —
+ * 보간식 `${expr}` 내부의 개별 문자열은 이 함수가 아니라 AST 재귀 자체가 따로 방문한다,
+ * 그래서 `` `${cond ? "text-x" : "text-y"}` `` 안의 "text-x"도 독립 리터럴로 잡힌다). */
+function literalTextOf(node: ts.Node): string | null {
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (ts.isTemplateExpression(node)) {
+    return [node.head.text, ...node.templateSpans.map((sp) => sp.literal.text)].join(' ');
   }
+  return null;
+}
+
+export function scanContent(content: string, file: string): Violation[] {
+  const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  // AC4 — 가드가 자기 재료(이 파일)를 못 읽으면(문법 오류로 파싱 실패) 조용히 건너뛰지 않고
+  // 죽는다. parseDiagnostics는 공개 타입엔 없지만 컴파일러가 실제로 채우는 필드 — #2590
+  // verify-cross-element-tint-text.ts와 이 가드가 함께 의존하는 ts.createSourceFile의 오래된
+  // 안정 동작이다(빈 배열=클린 파싱, 실측 확認).
+  const parseDiagnostics = (sf as unknown as { parseDiagnostics?: ts.Diagnostic[] }).parseDiagnostics;
+  if (parseDiagnostics && parseDiagnostics.length > 0) {
+    throw new Error(
+      `FAIL: ${file} 파싱 실패(${parseDiagnostics.length}건) — 이 가드가 이 파일의 문자열 리터럴을 ` +
+        `못 읽는다(재료 소실을 조용한 통과로 두지 않는다, story #2710 AC4): ` +
+        parseDiagnostics.map((d) => ts.flattenDiagnosticMessageText(d.messageText, ' ')).join('; '),
+    );
+  }
+
+  const violations: Violation[] = [];
+  function walk(node: ts.Node): void {
+    const literal = literalTextOf(node);
+    if (literal !== null) {
+      const hits = findTintTextPairs(literal);
+      if (hits.length > 0) {
+        const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+        for (const hit of hits) {
+          violations.push({ file, line, family: hit.family, literal: hit.literal });
+        }
+      }
+    }
+    node.forEachChild(walk);
+  }
+  walk(sf);
   return violations;
 }
 
@@ -189,5 +230,13 @@ function main(): number {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  process.exit(main());
+  if (process.argv.includes('--write-baseline')) {
+    // story #2710 — verify-cross-element-tint-text.ts와 같은 재생성 방식(can-only-shrink
+    // 메타가드 없음, 위 baseline 파일 _comment의 재키잉 전례들과 동일 계약).
+    const violations = scanRepo(path.resolve(process.cwd(), 'src'));
+    const keys = [...new Set(violations.map(violationKey))].sort();
+    process.stdout.write(JSON.stringify({ _comment: [], keys }, null, 2) + '\n');
+  } else {
+    process.exit(main());
+  }
 }

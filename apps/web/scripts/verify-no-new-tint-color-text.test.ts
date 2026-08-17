@@ -82,6 +82,58 @@ describe('known documented limitation — split-literal cn() calls are NOT paire
   });
 });
 
+describe('quote-pairing swallow bug — story #2710 AC1/AC2 (root cause: PR #3165 CI 빨강 추적)', () => {
+  // AC1 — 옛 정규식(LITERAL_RE quote-pairing)은 주석 속 짝 없는 apostrophe 하나 뒤로 실제
+  // 위반의 여는/닫는 따옴표 자체를 소비해버려, 그 위반이 "리터럴"로 추출조차 안 됐다(미탐).
+  it('detects a real violation whose literal comes after an unpaired apostrophe in an earlier comment', () => {
+    const content = ["// don't do this", "const x = 'bg-warning-tint text-warning';"].join('\n');
+    const violations = scanContent(content, 'fake.tsx');
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({ family: 'warning', literal: 'bg-warning-tint text-warning' });
+  });
+
+  // AC2 — PR #3165의 정확한 재현(주석 `ⓐ'로`류 apostrophe) 회귀 케이스: 위반이 실제로
+  // 잡히되(미탐 0), 스왈로우로 인한 무관 코드 뭉치 오탐도 0이어야 한다.
+  it("reproduces PR #3165 exactly (the ⓐ' apostrophe) — catches the real pair, zero false positives on unrelated surrounding code", () => {
+    const content = [
+      "// ⓐ'로 처리한다 — 하위 처방",
+      'export function unrelated() {',
+      "  const other = 'this literal has nothing tint-related in it';",
+      '  return other;',
+      '}',
+      '',
+      "const cls = 'bg-info-tint text-info';",
+    ].join('\n');
+    const violations = scanContent(content, 'fake.tsx');
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({ family: 'info', literal: 'bg-info-tint text-info' });
+  });
+
+  // AC3 — 뮤테이션: 파서를 옛 quote-pairing 정규식으로 되돌리면(가짜 재현) 위 AC1 케이스가
+  // 다시 미탐으로 떨어짐을 직접 확認 — 이 fix가 실제로 그 버그를 없앴다는 증거.
+  it('mutation-kill: the old quote-pairing regex misses the exact AC1 case (proves the parser swap is load-bearing)', () => {
+    const OLD_LITERAL_RE = /'([^'\\]*(?:\\.[^'\\]*)*)'|"([^"\\]*(?:\\.[^"\\]*)*)"|`([^`\\]*(?:\\.[^`\\]*)*)`/g;
+    function oldScan(content: string): string[] {
+      const literals: string[] = [];
+      for (const m of content.matchAll(OLD_LITERAL_RE)) {
+        const literal = m[1] ?? m[2] ?? m[3] ?? '';
+        if (literal) literals.push(literal);
+      }
+      return literals;
+    }
+    const content = ["// don't do this", "const x = 'bg-warning-tint text-warning';"].join('\n');
+    const literals = oldScan(content);
+    expect(literals.some((l) => l.includes('bg-warning-tint') && l.includes('text-warning'))).toBe(false);
+  });
+});
+
+describe('AC4 — self-check: unparseable file goes RED, not a silent skip (story #2710)', () => {
+  it('throws when the file fails to parse instead of silently returning no violations', () => {
+    const unterminated = "const x = 'bg-warning-tint text-warning";
+    expect(() => scanContent(unterminated, 'broken.tsx')).toThrow(/파싱 실패/);
+  });
+});
+
 describe('loadBaseline — JSON storage (regression: newline-in-literal corruption)', () => {
   it('round-trips a key whose literal contains a real newline without splitting it', () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'tint-baseline-test-'));
