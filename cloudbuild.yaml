@@ -634,6 +634,33 @@ steps:
           echo "skip deploy-realtime-gce: dev 전용 하드게이트(story #2185) — prod GCE는 사람이 직접 배포한다"
           exit 0
         fi
+
+        # story #2089 (a) — realtime path-filter(페드루 PO 판정, 2026-08-17). #2182
+        # 그라운딩에서 오늘까지의 502 rolling 중 75.3%가 "realtime 코드가 실제로 안 바뀐
+        # 커밋"에서 유발됐음을 실측(2주 162커밋 대조) — 매 develop 머지가 무조건 이
+        # 스텝을 재실행시키던 걸 여기서 끊는다. 별도 GCB 트리거로 안 쪼갠다(SSOT 유지,
+        # 페드루 지시) — 기존 파이프라인 안 조건부 스텝 그대로.
+        #
+        # 판별 기준: 현재 MIG가 물고 있는 인스턴스 템플릿 이름에서 직전 배포 SHA를 뽑아,
+        # 그 SHA부터 이번 COMMIT_SHA까지 realtime-관련 경로(backend/scripts/
+        # check_realtime_relevant_diff.sh의 목록, 보수적 채택 — 공유 파일 포함 24.7%셋)가
+        # 바뀌었는지 본다. 얕은 클론이면 옛 SHA가 히스토리에 없을 수 있어 unshallow를
+        # 먼저 시도(실패해도 계속 — 아래 diff 성패로 최종 fail-safe 판단).
+        _CURRENT_TEMPLATE="$(gcloud compute instance-groups managed describe sprintable-realtime-gateway-dev \
+          --region="${_AR_REGION}" --project="${PROJECT_ID}" \
+          --format='value(versions[0].instanceTemplate)' 2>/dev/null | sed 's#.*/##' || echo '')"
+        _LAST_SHA="$(echo "${_CURRENT_TEMPLATE}" | grep -oE '[0-9a-f]{8}' | head -1 || echo '')"
+
+        if [ -z "${_LAST_SHA}" ]; then
+          echo "deploy-realtime-gce: 기존 MIG 템플릿에서 직전 SHA를 못 읽음(최초 배포이거나 이름 패턴 변경) — path-filter 건너뛰고 배포 진행"
+        else
+          git fetch --unshallow >/dev/null 2>&1 || true
+          if ! bash backend/scripts/check_realtime_relevant_diff.sh "${_LAST_SHA}" "${COMMIT_SHA}"; then
+            echo "skip deploy-realtime-gce: ${_LAST_SHA}..${COMMIT_SHA} 사이 realtime-관련 경로 변경 없음(story #2089 path-filter, 스킵 사유는 위 로그 참고)"
+            exit 0
+          fi
+        fi
+
         GCP_PROJECT="${PROJECT_ID}" GCP_REGION="${_AR_REGION}" COMMIT_SHA="${COMMIT_SHA}" \
           bash backend/scripts/deploy_realtime_gce.sh dev
     waitFor: [run-migrate-job]
