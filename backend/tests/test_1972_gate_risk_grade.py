@@ -47,9 +47,20 @@ def _scalar_result(value):
 # ── derive_risk_grade 순수 함수 매트릭스(doc §2 표 그대로) ──────────────────────
 
 # doc §2.1(1차 축=posture)·§2.2(2차 축=gate_type, posture 미확定일 때만)·§2.3(폴백=보수적 고위험)을
-# 표 그대로 옮긴 literal 매트릭스. gate_type 5종(pr_review/qa/merge/deploy/workflow_config_publish) +
-# 신규/미분류 gate_type 대리값("doc_approval")으로 폴백 케이스까지 커버 = posture 4종(conservative/
-# permissive/balanced/None) × gate_type 6종 = 24 조합.
+# 표 그대로 옮긴 literal 매트릭스. gate_type 6종(pr_review/qa/merge/deploy/workflow_config_publish/
+# doc_approval) + 진짜 미분류 gate_type 대리값("_未來_unclassified_gate_type")으로 폴백 케이스까지
+# 커버 = posture 4종(conservative/permissive/balanced/None) × gate_type 7종 = 28 조합.
+#
+# ⛔story #6c89e40d(페드루 PO 판정 2026-08-17, ⓐ'): doc_approval은 원래 이 매트릭스에서 "폴백
+# 대리값" 역할이었다(과거 어느 세트에도 없어 미분류 폴백과 값이 우연히 같았을 뿐) — 이제
+# `_HIGH_RISK_GATE_TYPES`에 명시 등재됐으므로 더 이상 폴백 케이스가 아니다(2차 축에서 직접
+# high로 걸림, doc §2.2). 폴백(§2.3) 자체는 여전히 살아있는 안전판이라 그 경로는 진짜
+# 미분류 값(`_UNCLASSIFIED_GATE_TYPE`)으로 별도 커버한다 — doc_approval을 폴백 대리값에서
+# 빼는 것으로 "이제 폴백 안 탄다"는 사실이 매트릭스에서도 드러나야 한다(회귀가 생기면
+# 매트릭스가 그 자리에서 doc_approval을 다시 «폴백에 의존»하는 값으로 잘못 해석하게 두지 않기
+# 위함).
+_UNCLASSIFIED_GATE_TYPE = "_미래_unclassified_gate_type"
+
 _RISK_GRADE_MATRIX: list[tuple[str | None, str, str]] = [
     # posture=conservative → 항상 high(gate_type 무관, §2.1)
     ("conservative", "pr_review", "high"),
@@ -58,6 +69,7 @@ _RISK_GRADE_MATRIX: list[tuple[str | None, str, str]] = [
     ("conservative", "deploy", "high"),
     ("conservative", "workflow_config_publish", "high"),
     ("conservative", "doc_approval", "high"),
+    ("conservative", _UNCLASSIFIED_GATE_TYPE, "high"),
     # posture=permissive → 항상 low(gate_type 무관, §2.1)
     ("permissive", "pr_review", "low"),
     ("permissive", "qa", "low"),
@@ -65,20 +77,23 @@ _RISK_GRADE_MATRIX: list[tuple[str | None, str, str]] = [
     ("permissive", "deploy", "low"),
     ("permissive", "workflow_config_publish", "low"),
     ("permissive", "doc_approval", "low"),
+    ("permissive", _UNCLASSIFIED_GATE_TYPE, "low"),
     # posture=balanced → 2차 축(gate_type, §2.2) + 폴백(§2.3)
     ("balanced", "pr_review", "low"),
     ("balanced", "qa", "low"),
     ("balanced", "merge", "high"),
     ("balanced", "deploy", "high"),
     ("balanced", "workflow_config_publish", "high"),
-    ("balanced", "doc_approval", "high"),  # 폴백: 미분류 gate_type → 보수적 고위험
+    ("balanced", "doc_approval", "high"),  # 2차 축 명시 등재(더 이상 폴백 아님, ⓐ')
+    ("balanced", _UNCLASSIFIED_GATE_TYPE, "high"),  # 폴백: 진짜 미분류 gate_type → 보수적 고위험
     # posture=None(미설정 row 없음) → 2차 축(gate_type, §2.2) + 폴백(§2.3)
     (None, "pr_review", "low"),
     (None, "qa", "low"),
     (None, "merge", "high"),
     (None, "deploy", "high"),
     (None, "workflow_config_publish", "high"),
-    (None, "doc_approval", "high"),  # 폴백: 미분류 gate_type → 보수적 고위험
+    (None, "doc_approval", "high"),  # 2차 축 명시 등재(더 이상 폴백 아님, ⓐ')
+    (None, _UNCLASSIFIED_GATE_TYPE, "high"),  # 폴백: 진짜 미분류 gate_type → 보수적 고위험
 ]
 
 
@@ -89,6 +104,16 @@ def test_derive_risk_grade_matrix(posture, gate_type, expected):
     assert derive_risk_grade(posture, gate_type) == expected
 
 
+def test_doc_approval_is_explicitly_high_risk_not_fallback():
+    """story #6c89e40d(ⓐ') — doc_approval이 `_HIGH_RISK_GATE_TYPES`에 실제로 들어있는지 직접
+    확認(단순 값 매트릭스 통과만으로는 "폴백이 우연히 같은 값"과 "명시 등재" 둘을 구분 못 함 —
+    바로 이 간극에서 dev 08-15 실사고(gate 5a34ef7f)가 났다)."""
+    from app.services.gate_service import _HIGH_RISK_GATE_TYPES, _LOW_RISK_GATE_TYPES
+
+    assert "doc_approval" in _HIGH_RISK_GATE_TYPES
+    assert "doc_approval" not in _LOW_RISK_GATE_TYPES  # PO 명시 판단: low로 옮기지 않는다
+
+
 def test_derive_risk_grade_matrix_covers_all_gate_types():
     """GATE_TYPES(5종) 전부가 매트릭스에 등장하는지 자기표면화(신규 gate_type 확장 시 매트릭스
     drift 방지 — feedback_one_directional_check_vacuous_pass 교훈: EXPECTED-actual 방향도 확인)."""
@@ -96,7 +121,8 @@ def test_derive_risk_grade_matrix_covers_all_gate_types():
 
     covered = {gt for _, gt, _ in _RISK_GRADE_MATRIX}
     assert GATE_TYPES <= covered  # 5종 전부 매트릭스에 있어야 함
-    assert "doc_approval" in covered  # 폴백(미분류) 대리값도 있어야 함
+    assert "doc_approval" in covered  # 이제 명시 등재 케이스로 커버
+    assert _UNCLASSIFIED_GATE_TYPE in covered  # 폴백(진짜 미분류) 경로도 별도로 커버
 
 
 # ── get_org_posture 쿼리 형태 + resolve_disposition 비호출 구조 확인 ─────────────

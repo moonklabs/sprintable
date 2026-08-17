@@ -1855,6 +1855,7 @@
     "docGateRequestReview": "검토 요청",
     "docGateRequestReviewHint": "이 문서를 검토 요청하면 지정 검토자가 승인/반려합니다.",
     "docGateApprove": "승인",
+    "docGateTransitionErrorGeneric": "게이트 처리에 실패했습니다. 다시 시도해 주세요.",
     "docGateReject": "반려",
     "docGateRejectModalTitle": "검토 반려",
     "docGateRejectReasonLabel": "반려 사유 (작성자에게 전달됩니다)",

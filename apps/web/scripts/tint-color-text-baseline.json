@@ -48,7 +48,13 @@
     "미르코가 approvals-queue.tsx의 승인 버튼을 hover:text-success→hover:text-foreground로",
     "고쳤다(#2590 TIER3와 동일 패턴을 놓친 자리 — rest는 ghost버튼=투명 배경이라 실위반 아니고,",
     "tint는 hover-only인데 same-literal 스캐너가 rest/hover를 못 가려 flag). 리터럴이 바뀌어",
-    "re-key만 필요(PO 판정, 이 PR의 실 e2e(B) 가드가 fix 전/후를 실 픽셀로 이미 교차검증함)."
+    "re-key만 필요(PO 판정, 이 PR의 실 e2e(B) 가드가 fix 전/후를 실 픽셀로 이미 교차검증함).",
+    "",
+    "story #6c89e40d(2026-08-17) 재키잉 — 위 두 사례(workflow-line-editor-section.tsx·",
+    "approvals-queue.tsx)와 완전히 같은 이유·같은 오탐: doc-gate-section.tsx의 doc 결재",
+    "approve 버튼을 hover:text-success→hover:text-foreground로 고쳤다(rest는 ghost버튼=",
+    "투명 배경이라 실위반 아니고, tint는 hover-only인데 same-literal 스캐너가 rest/hover를",
+    "못 가려 flag). 리터럴이 바뀌어 re-key만 필요(페드루 PO 판정)."
   ],
   "keys": [
     "app/(authenticated)/[ws]/[proj]/retro/[id]/page.tsx::success::border-success bg-success-tint text-success",
@@ -65,7 +71,7 @@
     "components/docs/doc-gate-section.tsx::destructive::bg-destructive/10 text-destructive",
     "components/docs/doc-gate-section.tsx::info::bg-info-tint text-info",
     "components/docs/doc-gate-section.tsx::success::bg-success-tint text-success",
-    "components/docs/doc-gate-section.tsx::success::h-7 gap-1 text-success hover:bg-success-tint hover:text-success",
+    "components/docs/doc-gate-section.tsx::success::h-7 gap-1 text-success hover:bg-success-tint hover:text-foreground",
     "components/docs/extensions/file-node.tsx::destructive::flex h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-md bg-destructive/10 text-destructive",
     "components/hypotheses/hypothesis-gate-badge.tsx::success::h-7 gap-1 text-success hover:bg-success-tint hover:text-success",
     "components/inbox/approvals-queue.tsx::success::h-7 gap-1 text-success hover:bg-success-tint hover:text-foreground",
