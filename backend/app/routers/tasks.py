@@ -99,6 +99,7 @@ async def _assert_task_project_access(
 
 @router.get("", response_model=list[TaskResponse])
 async def list_tasks(
+    project_id: uuid.UUID | None = Query(default=None),
     story_id: uuid.UUID | None = Query(default=None),
     assignee_id: uuid.UUID | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
@@ -114,7 +115,16 @@ async def list_tasks(
     """story #2428 PR③(⓪tasks ⓐ — 라이브 실측 667건, list_tasks/list_my_tasks/get_overdue_tasks
     3-way 공유 엔드포인트): true cursor 페이지네이션 + 전체 카운트(X-Total-Count 헤더) —
     goals.py list_goals와 동일 규약(필터 適用 後·limit 適用 前 COUNT, cursor=created_at, 새
-    규약 발명 0). limit 미지정 시 기존 동작(최대 1000)과 호환."""
+    규약 발명 0). limit 미지정 시 기존 동작(최대 1000)과 호환.
+
+    story #2706(디디 3157 작업 중 부수발견): 이 엔드포인트엔 `project_id` 필터 자체가 없어
+    accessible한 «전» 프로젝트의 task가 한 응답에 섞여 나가고 있었다(#2697 「GET-by-id가
+    X-Project-Id 무시」와 같은 클래스의 목록판) — MCP `list_tasks`/`list_my_tasks`/
+    `get_overdue_tasks` 셋 다 이미 `project_id=client.require_project_id()`를 보내고
+    있었지만(sprintable_mcp/tools/tasks.py·analytics.py 실측 확認) 라우터가 그 파라미터를
+    안 받아 FastAPI가 조용히 버렸다(AC4 — 배선만으로 해소, MCP측 코드 변경 불요). 지정 시
+    `require_project_access`(#2697 판정 함수 SSOT, 새 판정 발명 0)로 접근권 검증 後 그
+    프로젝트로 좁힌다 — 미지정 시 기존 org-wide 동작 그대로(AC2, 회귀 0)."""
     # story #2262 PR②(칩 상태 배치조회) — stories.py list_stories의 ids= 패턴 미러링. Task엔
     # project_id 컬럼이 없어(story_id NN) list_in_projects와 동형으로 Story JOIN을 거쳐야
     # 접근권 스코프를 낼 수 있다 — repo.list_by_ids(org-scope만)로 앵커 조회 後, 결과의
@@ -173,11 +183,21 @@ async def list_tasks(
         # 없이 열거. round6은 story_id 벡터만 닫고 이 result-level 누출은 분리 트래킹됐다(d3e5ca89).
         # caller가 실제 접근권을 가진 project의 task로만 스코프(Task엔 project_id가 없어 Story
         # JOIN으로 환원). 접근권 0이면 빈 리스트. assignee_id/status는 그 위 추가 narrowing 필터.
-        from app.services.project_auth import accessible_project_ids_in_org
+        from app.services.project_auth import accessible_project_ids_in_org, require_project_access
 
-        accessible = await accessible_project_ids_in_org(
-            repo.session, uuid.UUID(auth.user_id), org_id
-        )
+        if project_id is not None:
+            # story #2706 AC1/AC3: project_id 지정 시 그 프로젝트로 좁힌다 — 접근권 없으면
+            # require_project_access(#2697 SSOT)가 404(존재 비노출).
+            await require_project_access(
+                repo.session, uuid.UUID(auth.user_id), project_id, org_id,
+                not_found_detail="Project not found",
+            )
+            accessible = [project_id]
+        else:
+            # AC2: 미지정 시 기존 org-wide 동작 그대로(회귀 0).
+            accessible = await accessible_project_ids_in_org(
+                repo.session, uuid.UUID(auth.user_id), org_id
+            )
         tasks, total = await repo.list_in_projects(
             accessible, assignee_id=assignee_id, status=status_filter, status_ne=status_ne,
             limit=limit, cursor=cursor_dt,
