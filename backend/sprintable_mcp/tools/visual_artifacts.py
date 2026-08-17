@@ -239,7 +239,8 @@ async def edit_artifact(args: EditArtifactInput) -> list[TextContent]:
 
 async def list_spec_pins(args: ListSpecPinsInput) -> list[TextContent]:
     """artifact 최신 버전의 스펙 핀 목록 조회(description pane 저작 대상) — 코멘트와 달리
-    작성자/시간 속성 없음(감시금지)."""
+    작성자/시간 속성 없음(감시금지). story #2428 ⓑ: limit 없음(의도) — 「최신 버전」 단건
+    스코프라 그 버전 스펙 분량으로 자연 상한(standup_missing과 동형 축, 페드루 확定 2026-08-17)."""
     try:
         result = await client.get(f"/api/v2/visual-artifacts/{args.artifact_id}/pins")
         return ok(result)

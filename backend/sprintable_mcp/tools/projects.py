@@ -19,7 +19,9 @@ class ListProjectsInput(BaseModel):
 
 async def list_projects(_args: ListProjectsInput) -> list:
     """caller 키(member)가 접근 가능한 프로젝트 열거(id·이름·org) — 무권한/타조직 프로젝트는
-    미노출(존재 유출 오라클 0). 신규 BE 로직 0 — 기존 GET /api/v2/projects(정책B) 얇은 래핑."""
+    미노출(존재 유출 오라클 0). 신규 BE 로직 0 — 기존 GET /api/v2/projects(정책B) 얇은 래핑.
+    story #2428 ⓑ: limit 없음(의도) — org당 프로젝트 개수가 자연 상한(standup_missing과
+    동형 축, 페드루 확定 2026-08-17)."""
     try:
         result = await client.get("/api/v2/projects")
         return ok(result)

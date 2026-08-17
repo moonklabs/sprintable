@@ -109,7 +109,8 @@ async def save_standup(args: SaveStandupInput) -> list[TextContent]:
 
 
 async def list_standup_entries(args: ListStandupEntriesInput) -> list[TextContent]:
-    """날짜 기준 스탠드업 목록 조회."""
+    """날짜 기준 스탠드업 목록 조회. story #2428 ⓑ: limit 없음(의도) — (project×특정 날짜)
+    조합이라 standup_missing과 완전 동형 축으로 자연 상한(페드루 확定 2026-08-17)."""
     try:
         return ok(await client.get("/api/v2/standups", params={"project_id": client.require_project_id(), "date": args.date}))
     except Exception as exc:
