@@ -94,6 +94,8 @@ EXPECTED_TOOLS = {
     "sprintable_link_gate_to_task",
     # a2a 발견 (1) — E-AGENT-ONBOARD·A2A발견 P0-1(story #2597)
     "sprintable_list_agent_cards",
+    # 비동기 결정 요청 (1) — story #2709(AskUserQuestion 블로킹 대체)
+    "sprintable_request_decision",
     # evidence (1) — E-VERIFY V0-S1
     "sprintable_add_evidence",
     # 판단 칸 (2) — story #2268(D단계, E-CONNECT)
@@ -135,7 +137,8 @@ def test_total_tool_count():
     # event_definition/sprintable_update_event_definition 2종 신설(org 커스텀 등록/수정) —
     # 119→121. story #2668(B3): sprintable_submit_for_approval 1종 신설(문서 결재 상신
     # REST를 MCP로 노출 — 도구 목록에 없어 에이전트가 발견 못 하던 것) — 121→122.
-    assert len(_TOOLS) == 122
+    # story #2709: sprintable_request_decision 1종 신설(AskUserQuestion 블로킹 대체) — 122→123.
+    assert len(_TOOLS) == 123
 
 
 def test_all_expected_tools_registered():
