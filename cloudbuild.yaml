@@ -578,6 +578,16 @@ steps:
         # git 파일 — API 키 평문 커밋 사고 방지). dev/prod 각자 라이브 값을 그대로 Secret Manager로
         # 1회 이관(MCP_AGENT_API_KEY_DEV/_PROD, 키 회전 아님·사본 이동)해 backend deploy-backend
         # 스텝의 DATABASE_URL_* secretKeyRef 관례를 그대로 재사용한다.
+        #
+        # ⛔hotfix(P0, 2026-08-17) — 첫 실배포(d9f852e7)가 이 스텝에서 죽었다:
+        # `ERROR: Cannot update environment variable [AGENT_API_KEY] to the given type because
+        # it has already been set with a different type` — AGENT_API_KEY가 이미 **plain env**로
+        # 서빙 중인 상태에서 같은 이름을 `--update-secrets`로 시크릿 타입 전환하려 하면 gcloud가
+        # 거부한다(타입 충돌, additive 확장이 아니라 같은 키의 종류를 바꾸는 것이라 별개 취급).
+        # `--remove-env-vars`로 plain 쪽을 먼저 걷어내고 `--update-secrets`로 시크릿을 얹는 걸
+        # **같은 gcloud 호출**에 조합 — 이러면 새 revision 하나로 원자 전환되고(순단 없음), plain
+        # 값이 잔존하는 창도 없다. 이후 배포부터는 AGENT_API_KEY가 이미 시크릿이라 remove가
+        # no-op(이미 없는 env var 제거 시도 — gcloud는 이를 에러로 안 침, idempotent).
         if [ "${_DEPLOY_ENV}" == "prod" ]; then
           AGENT_KEY_SECRET="MCP_AGENT_API_KEY_PROD"
         else
@@ -587,6 +597,7 @@ steps:
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
           --region=${_AR_REGION} \
           --update-env-vars="^;^$${ENV_VARS}" \
+          --remove-env-vars=AGENT_API_KEY \
           --update-secrets="AGENT_API_KEY=$${AGENT_KEY_SECRET}:latest" \
           --quiet
         # 검산: 「배포 success」가 아니라 «서빙 이미지가 backend 와 같은 태그인가»로 잰다.
