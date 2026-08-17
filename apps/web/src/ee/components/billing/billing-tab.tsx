@@ -26,6 +26,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { fetchWithAuth } from '@/lib/db/client';
 import { PricingPlanCard } from './pricing-plan-card';
 import { PricingLimitsTable } from './pricing-limits-table';
 import { PricingPacks, type PackKind } from './pricing-packs';
@@ -55,8 +56,6 @@ interface BillingStatus {
   can_manage: boolean;
 }
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
-
 function toTierId(raw: string | undefined): TierId {
   // story #2403 후속(2026-08-17) — prod org_subscriptions 실측: tier='pro'(레거시 Polar,
   // v2.2 D5가 은퇴시킨 이름) 조직이 3건 실존. TIER_ORDER에 'pro'가 없어 이 매핑 없이는
@@ -85,9 +84,12 @@ export function BillingTab({ orgId }: { orgId: string }) {
 
   const refetchStatus = () => {
     setLoading(true);
-    fetch(`${FASTAPI_URL()}/api/v2/billing/status`, { credentials: 'include' })
-      .then((r) => r.json() as Promise<BillingStatus>)
-      .then(setStatus)
+    // story #40659941(#2728 픽셀 검증 블로커) — FASTAPI_URL 직접 fetch는 CSP connect-src에
+    // 막힌다(브라우저→백엔드 origin 직행 금지). same-origin /api 프록시 경유로 수렴 +
+    // fetchWithAuth(콜드마운트 자동발화 GET이라 raw fetch 금지, #2689/#2691 가드).
+    fetchWithAuth('/api/billing/status', { credentials: 'include' })
+      .then((r) => r.json() as Promise<{ data: BillingStatus }>)
+      .then((json) => setStatus(json.data))
       .catch(() => setError(t('loadError')))
       .finally(() => setLoading(false));
   };
@@ -101,9 +103,9 @@ export function BillingTab({ orgId }: { orgId: string }) {
     // story #2728 — 미기입/fetch 실패 시 안전측 기본값(둘 다 false, 노출 안 함)으로
     // 폴백한다. "못 읽으면 일단 켜서 보여준다"는 이 스위치의 존재 이유(prod 결제표면
     // 전면 차단)를 정반대로 무력화한다.
-    fetch(`${FASTAPI_URL()}/api/v2/platform-settings`, { credentials: 'include' })
-      .then((r) => r.ok ? (r.json() as Promise<PlatformSettings>) : null)
-      .then((v) => setPlatformSettings(v ?? { billing_price_public: false, billing_checkout_enabled: false }))
+    fetchWithAuth('/api/platform-settings', { credentials: 'include' })
+      .then((r) => r.ok ? (r.json() as Promise<{ data: PlatformSettings }>) : null)
+      .then((json) => setPlatformSettings(json?.data ?? { billing_price_public: false, billing_checkout_enabled: false }))
       .catch(() => setPlatformSettings({ billing_price_public: false, billing_checkout_enabled: false }));
   }, []);
 
