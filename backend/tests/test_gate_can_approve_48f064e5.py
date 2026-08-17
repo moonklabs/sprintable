@@ -68,9 +68,9 @@ async def _call(resolved, *, execute_results, has_access=None, status="approved"
         for p in patches:
             stack.enter_context(p)
         result = await transition_gate_endpoint(
-            # note 동봉: risk_grade 폴백(미분류 gate_type→고위험)이 이 authz 테스트의 관심사가
-            # 아닌 사유-강제 가드에 걸리지 않도록.
-            id=uuid.uuid4(), body=GateTransitionRequest(status=status, note="테스트 사유"),
+            # note+evidence_viewed 동봉: risk_grade 폴백(미분류 gate_type→고위험)이 이 authz
+            # 테스트의 관심사가 아닌 사유-강제 가드(story #2027 AC1/AC2)에 걸리지 않도록.
+            id=uuid.uuid4(), body=GateTransitionRequest(status=status, note="테스트 사유", evidence_viewed=True),
             background_tasks=BackgroundTasks(),
             session=session, org_id=uuid.uuid4(), auth=auth,
         )

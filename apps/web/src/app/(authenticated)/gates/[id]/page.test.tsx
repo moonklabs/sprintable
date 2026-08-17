@@ -253,3 +253,57 @@ describe('GateDetailPage — 보류(논의 필요)·오클릭 정정 (story #263
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateUndo))).toBe(false);
   });
 });
+
+// story #2027 AC2(페드루 PO 처방 2026-08-16) — BE가 고위험(risk_grade=high) 게이트 승인에
+// evidence_viewed=true를 강제하기 시작했다. FE가 이 값을 안 보내면 서명 플로우를 거쳐도
+// 서버가 422로 막는다 — 이 스위트는 "서명 플로우를 거치면 실제로 true가 실리는지"와
+// "저위험 플레인 버튼은 안 실려도(false) 무관한지" 둘 다 고정한다.
+describe('GateDetailPage — evidence_viewed 서버 계약 (story #2027 AC2)', () => {
+  async function mountCapturingTransition(gateFixture: GateItem) {
+    const calls: { url: string; method?: string; body?: string }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method, body: init?.body as string | undefined });
+      if (url === '/api/gates/gate-1' && !init) return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1/transition') return { ok: true, json: async () => ({ data: gateFixture }) };
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gateFixture }) };
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    return calls;
+  }
+
+  it('고위험(서명 플로우) 승인 — 근거 열람 체크 + 사유 입력 후 클릭하면 evidence_viewed:true가 실린다', async () => {
+    const calls = await mountCapturingTransition(gate({ can_approve: true, risk_grade: 'high' }));
+
+    const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const textarea = container.querySelector('#gate-sig-reason') as HTMLTextAreaElement;
+    expect(checkbox).toBeTruthy();
+    expect(textarea).toBeTruthy();
+
+    await act(async () => { checkbox.click(); });
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '근거 확인함');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const approveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.sigApproveAndSign));
+    expect(approveBtn?.hasAttribute('disabled')).toBe(false);
+    await act(async () => { approveBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const transitionCall = calls.find((c) => c.url === '/api/gates/gate-1/transition');
+    expect(JSON.parse(transitionCall?.body ?? '{}')).toMatchObject({ status: 'approved', evidence_viewed: true });
+  });
+
+  it('저위험(플레인 버튼) 승인 — evidence_viewed:false로 실려도(안 봤어도) 그대로 통과 경로(회귀 없음)', async () => {
+    const calls = await mountCapturingTransition(gate({ can_approve: true, risk_grade: 'low' }));
+    const approveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    await act(async () => { approveBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const transitionCall = calls.find((c) => c.url === '/api/gates/gate-1/transition');
+    expect(JSON.parse(transitionCall?.body ?? '{}')).toMatchObject({ status: 'approved', evidence_viewed: false });
+  });
+});
