@@ -344,7 +344,7 @@ describe('ApprovalsQueue', () => {
 
     const postCall = calls.find((c) => c.method === 'POST');
     expect(postCall?.url).toBe('/api/gates/g-low/transition');
-    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'approved', note: null });
+    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'approved', note: null, evidence_viewed: false });
 
     expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
     expect(container.textContent).toContain(koMessages.cage.queueViewRecord);
@@ -390,7 +390,7 @@ describe('ApprovalsQueue', () => {
     const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges));
     await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const postCall = calls.find((c) => c.method === 'POST');
-    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'rejected', note: null });
+    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'rejected', note: null, evidence_viewed: false });
     expect(container.textContent).toContain(koMessages.cage.queueResolvedRejected);
   });
 
@@ -604,7 +604,7 @@ describe('ApprovalsQueue', () => {
 
       const postCall = calls.find((c) => c.method === 'POST' && c.url.includes('/transition'));
       expect(postCall?.url).toBe('/api/gates/g-sig-approve/transition');
-      expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'approved', note: '근거 확認·서명 사유' });
+      expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'approved', note: '근거 확認·서명 사유', evidence_viewed: true });
       expect(document.body.querySelector('[data-slot="dialog-content"]')).toBeFalsy();
       expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
     });
@@ -623,7 +623,7 @@ describe('ApprovalsQueue', () => {
       await act(async () => { rejectButtons[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
       const postCall = calls.find((c) => c.method === 'POST' && c.url.includes('/transition'));
-      expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'rejected', note: '재작업 필요' });
+      expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'rejected', note: '재작업 필요', evidence_viewed: false });
       expect(container.textContent).toContain(koMessages.cage.queueResolvedRejected);
     });
 

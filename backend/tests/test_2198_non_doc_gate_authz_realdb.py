@@ -166,7 +166,9 @@ async def test_transition_non_doc_gate_forbidden_for_member_allowed_for_owner():
         # 자격자(project owner) → 승인 성공.
         async with Session() as s:
             resp = await transition_gate_endpoint(
-                id=gate_id, body=GateTransitionRequest(status="approved", note="승인 사유"),
+                # story #2027 AC2: note+evidence_viewed 동봉 — 이 파일의 관심사(#2198 인가)와
+                # 무관한 고위험 사유-강제 가드를 우회.
+                id=gate_id, body=GateTransitionRequest(status="approved", note="승인 사유", evidence_viewed=True),
                 background_tasks=BackgroundTasks(), session=s, org_id=ORG, auth=_auth(OWNER_USER),
             )
         assert resp.status == "approved"
@@ -215,7 +217,9 @@ async def test_transition_doc_approval_gate_still_unaffected():
             gate_id = gate.id
         async with Session() as s:
             resp = await transition_gate_endpoint(
-                id=gate_id, body=GateTransitionRequest(status="approved", note="doc 승인"),
+                # story #2027 AC2: note+evidence_viewed 동봉 — 이 파일의 관심사(#2198 인가)와
+                # 무관한 고위험 사유-강제 가드를 우회.
+                id=gate_id, body=GateTransitionRequest(status="approved", note="doc 승인", evidence_viewed=True),
                 background_tasks=BackgroundTasks(), session=s, org_id=ORG, auth=_auth(OWNER_USER),
             )
         assert resp.status == "approved"  # doc_approval 경로는 #2198 변경으로 인한 영향 0.
@@ -272,7 +276,9 @@ async def test_transition_artifact_canonicalize_gate_human_only_not_project_owne
             gate_id_holder["id"] = gate.id
         async with Session() as s:
             resp = await transition_gate_endpoint(
-                id=gate_id_holder["id"], body=GateTransitionRequest(status="approved", note="정본화 승인"),
+                # story #2027 AC2: note+evidence_viewed 동봉 — 이 파일의 관심사(#2198 인가)와
+                # 무관한 고위험 사유-강제 가드를 우회.
+                id=gate_id_holder["id"], body=GateTransitionRequest(status="approved", note="정본화 승인", evidence_viewed=True),
                 background_tasks=BackgroundTasks(), session=s, org_id=ORG, auth=_auth(MEMBER_USER),
             )
         assert resp.status == "approved"

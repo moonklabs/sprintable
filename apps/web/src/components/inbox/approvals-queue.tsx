@@ -198,14 +198,16 @@ export function ApprovalsQueue() {
   // 동일 엔드포인트·body. story 22affaf2 — 고위험 서명 플로우(GateSignatureApproval)도
   // 이제 이 함수를 그대로 쓴다(note=서명 사유) — 별도 함수를 새로 짓지 않는다(canonical
   // 상세의 transition()과 body shape을 1:1로 맞춘 이유이기도 함).
-  const resolveGate = async (id: string, status: 'approved' | 'rejected', note: string | null = null) => {
+  const resolveGate = async (id: string, status: 'approved' | 'rejected', note: string | null = null, evidenceViewed?: boolean) => {
     setResolvingIds((prev) => new Set(prev).add(id));
     setGateErrors((prev) => { const next = { ...prev }; delete next[id]; return next; });
     try {
       const res = await fetch(`/api/gates/${id}/transition`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, note: note?.trim() || null }),
+        // story #2027 AC2 — gates/[id]/page.tsx와 동일 계약(evidence_viewed는 고위험 서명
+        // 플로우 onApprove에서만 true로 실린다, 아래 GateSignatureApproval 배선 참조).
+        body: JSON.stringify({ status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false }),
       });
       if (res.ok) {
         setResolvedGates((prev) => ({ ...prev, [id]: status }));
@@ -467,7 +469,7 @@ export function ApprovalsQueue() {
               gate={signatureGate}
               resolving={resolvingIds.has(signatureGate.id)}
               error={gateErrors[signatureGate.id]}
-              onApprove={(reason) => void resolveGate(signatureGate.id, 'approved', reason)}
+              onApprove={(reason) => void resolveGate(signatureGate.id, 'approved', reason, true)}
               onReject={(reason) => void resolveGate(signatureGate.id, 'rejected', reason)}
             />
           ) : null}
