@@ -6,7 +6,12 @@ import { Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { Hypothesis, HypothesisDraft, MetricDefinition } from '@sprintable/core-storage';
-import type { ContextPackSearchResult, HypothesisDeclarationValue } from '@/services/hypothesis-declaration';
+import {
+  getMissingDeclarationFields,
+  type ContextPackSearchResult,
+  type HypothesisDeclarationValue,
+  type MissingDeclarationField,
+} from '@/services/hypothesis-declaration';
 import { AiGenerationLoading } from '@/components/ai/ai-generation-loading';
 
 const GA4_METRICS = ['activeUsers', 'newUsers', 'sessions', 'conversions', 'eventCount', 'screenPageViews'] as const;
@@ -46,6 +51,16 @@ export function HypothesisDeclarationCard({
   const setMetricPatch = (patch: Partial<NonNullable<HypothesisDeclarationValue['metricDefinition']>>) => {
     const base = metric ?? { metric: '', source: 'internal_ops' as const, target: 0, direction: 'up' as const };
     onChange({ ...value, metricDefinition: { ...base, ...patch } });
+  };
+
+  // story #2760 — statement·지표·target을 다 채워도 measureAfter 하나가 비어 있으면 카드가
+  // 조용히 "0 선언됨"으로 남던 것(#2755 침묵 제거의 형제 마찰). 어느 필드가 부족한지 명시.
+  const missingFields = value.mode === 'new' ? getMissingDeclarationFields(value) : [];
+  const MISSING_LABEL: Record<MissingDeclarationField, string> = {
+    statement: t('declareStatementLabel'),
+    metricName: t('declareMetricNameLabel'),
+    measureAfter: t('declareMeasureAfterLabel'),
+    ga4Config: t('declareGa4ConfigLabel'),
   };
 
   async function handleDraft() {
@@ -240,6 +255,12 @@ export function HypothesisDeclarationCard({
               className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
+
+          {missingFields.length > 0 ? (
+            <p className="rounded-lg border border-dashed border-info-border bg-info-tint/20 px-2 py-1.5 text-[10px] text-muted-foreground">
+              {t('declareIncompleteCaption', { items: missingFields.map((f) => MISSING_LABEL[f]).join(', ') })}
+            </p>
+          ) : null}
 
           {precedentsLoading ? (
             <p className="text-[10px] text-muted-foreground">{t('declareL1Loading')}</p>
