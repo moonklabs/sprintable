@@ -15,10 +15,46 @@ export function notifyContentPainted() {
   window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'content-painted' }));
 }
 
-// story #2766(레인 A) §A5 — 다운로드 버튼 환경 분기의 판별 신호. 레인 B(#2765)가 실제 브릿지
-// 훅(다운로드/외부 열기 postMessage 왕복)을 구현하기 전까지는, 이 판별만으로 "RN 안이면 아직
-// 다운로드 미지원(레인 B 대기)"을 정직 표시하는 데 쓴다 — 서버사이드(SSR)에서 호출하면 항상
-// false(window 없음).
+// story #2766(레인 A) §A5 — 다운로드 버튼 환경 분기의 판별 신호. 서버사이드(SSR)에서
+// 호출하면 항상 false(window 없음).
 export function isNativeShell(): boolean {
   return typeof window !== 'undefined' && Boolean(window.ReactNativeWebView);
+}
+
+// story #2765(레인 B) §2 — 웹↔셸 postMessage 계약. content-painted와 동일한 명시 스키마
+// 관례(sprintable-mobile App.js:746 onMessage의 type 스위치가 소비). url은 항상
+// disposition=attachment(다운로드) 또는 inline(외부 열기) 서명 URL — 단명이라 호출 직전에
+// 새로 발급한 것만 넘긴다(캐시된 URL 재사용 금지).
+function downloadViaShell(url: string, filename: string) {
+  window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'download', url, filename }));
+}
+
+function openExternalViaShell(url: string) {
+  window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'open-external', url }));
+}
+
+/**
+ * 환경 분기 훅(레인 A가 호출) — RN 셸 안이면 postMessage로 위임(레인 B가 실제 저장/공유를
+ * 수행), 일반 브라우저면 기존 `<a download>` 경로 그대로(회귀 0).
+ */
+export function downloadAsset(url: string, filename: string) {
+  if (isNativeShell()) {
+    downloadViaShell(url, filename);
+    return;
+  }
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.rel = 'noopener noreferrer';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+export function openExternal(url: string) {
+  if (isNativeShell()) {
+    openExternalViaShell(url);
+    return;
+  }
+  window.open(url, '_blank', 'noopener,noreferrer');
 }
