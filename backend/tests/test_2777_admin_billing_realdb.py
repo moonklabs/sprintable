@@ -31,20 +31,6 @@ async def _dispose_global_engine_after_test():
     await _global_engine.dispose()
 
 
-@pytest.fixture(autouse=True)
-async def _clear_offering_versions_before_test():
-    """offering_versions는 org-scope가 아니라(글로벌 카탈로그) create_all 공유 DB에서
-    테스트 간 (tier,currency) 행이 누적돼 `_derive_grant_amount_minor`의 단건 조회가
-    MultipleResultsFound로 깨진다 — 매 테스트 시작 전 비운다."""
-    from sqlalchemy import text
-    engine, maker = await _session_factory()
-    async with maker() as s:
-        await s.execute(text("DELETE FROM offering_versions"))
-        await s.commit()
-    await engine.dispose()
-    yield
-
-
 def _async_url() -> str:
     url = _REAL_DB_URL
     for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgresql://"):
@@ -73,10 +59,24 @@ async def _seed_org(session, *, tier: str | None = None):
     return org.id
 
 
-async def _seed_offering(session, *, tier: str, currency: str = "krw", monthly_price_minor: int = 59000):
+async def _seed_offering(session, *, tier: str, currency: str = "krw", monthly_price_minor: int = 59000) -> int:
+    """⚠️ CI는 이 테이블을 migration 0228이 이미 실데이터로 seed해 둔 **공유** 카탈로그다
+    (free/starter/team/business × krw 4행 — 다른 실PG 테스트 파일들이 그 행을 전제로 돈다).
+    여기서 무조건 INSERT하면 uq_offering_versions_active_tier_currency 위반이거나(로컬처럼
+    비어있지 않은 한) 과거엔 "매 테스트 전 DELETE"로 피했는데 그게 그 공유 seed 자체를
+    지워 다른 테스트 파일을 연쇄로 깨뜨렸다(실사고, 2026-08-18 CI RED).
+
+    select-then-insert(TOCTOU)로 짰던 1차 수정도 실 CI 병렬/재실행 조건에서 재발했다
+    (같은 tier를 여러 테스트가 거의 동시에 seed 시도) — [[feedback_check_then_insert_toctou]]
+    교훈 그대로, DB의 실 UNIQUE 부분 인덱스(uq_offering_versions_active_tier_currency)에
+    `ON CONFLICT DO NOTHING`으로 위임해 원자적으로 만든다(billing_ledger.py::
+    record_ledger_entry와 동형 패턴). 존재하면(migration seed든 충돌한 내 삽입이든)
+    그 값을 그대로 읽어 반환 — 호출부가 이 반환값 기준으로 assert."""
+    from sqlalchemy import select
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
     from app.models.offering_version import OfferingVersion
 
-    session.add(OfferingVersion(
+    stmt = pg_insert(OfferingVersion).values(
         id=uuid.uuid4(), tier=tier, currency=currency, version_label="krw_v1_test",
         monthly_price_minor=monthly_price_minor, annual_price_minor=monthly_price_minor * 10,
         included_seats=5, extra_seat_price_minor=None, max_agents=None,
@@ -85,8 +85,16 @@ async def _seed_offering(session, *, tier: str, currency: str = "krw", monthly_p
         event_replay_days=7, overage_allowed=True, pack_catalog=None,
         effective_from=datetime(2026, 1, 1, tzinfo=timezone.utc), effective_to=None,
         created_by="test-seed",
-    ))
+    ).on_conflict_do_nothing(index_elements=["tier", "currency"], index_where=OfferingVersion.effective_to.is_(None))
+    await session.execute(stmt)
     await session.commit()
+
+    return (await session.execute(
+        select(OfferingVersion.monthly_price_minor).where(
+            OfferingVersion.tier == tier, OfferingVersion.currency == currency,
+            OfferingVersion.effective_to.is_(None),
+        )
+    )).scalar_one()
 
 
 async def _seed_failed_order(session, *, org_id, amount_minor=10000, currency="krw"):
@@ -113,7 +121,7 @@ async def test_grant_credit_bumps_org_subscription_tier_not_just_ledger():
     try:
         async with maker() as s:
             org_id = await _seed_org(s, tier="free")
-            await _seed_offering(s, tier="team", monthly_price_minor=59000)
+            monthly_price = await _seed_offering(s, tier="team", monthly_price_minor=59000)
 
         async with maker() as s:
             entry = await grant_credit(
@@ -128,7 +136,7 @@ async def test_grant_credit_bumps_org_subscription_tier_not_just_ledger():
             assert sub.status == "active"
             assert sub.current_period_end is not None
             assert entry.entry_type == "credit_grant"
-            assert entry.amount_minor == 59000  # 서버 파생(offering_versions.monthly_price_minor × 1개월)
+            assert entry.amount_minor == monthly_price  # 서버 파생(offering_versions.monthly_price_minor × 1개월)
             assert entry.entry_metadata["prev_tier"] == "free"
             assert entry.entry_metadata["target_tier"] == "team"
     finally:
@@ -143,7 +151,7 @@ async def test_grant_credit_amount_derived_from_offering_scales_with_months():
     try:
         async with maker() as s:
             org_id = await _seed_org(s, tier="free")
-            await _seed_offering(s, tier="business", monthly_price_minor=219000)
+            monthly_price = await _seed_offering(s, tier="business", monthly_price_minor=219000)
 
         async with maker() as s:
             entry = await grant_credit(
@@ -151,7 +159,7 @@ async def test_grant_credit_amount_derived_from_offering_scales_with_months():
                 currency="krw", idempotency_key=f"idem-{uuid.uuid4()}",
                 actor_email="operator@moonklabs.com",
             )
-        assert entry.amount_minor == 219000 * 3
+        assert entry.amount_minor == monthly_price * 3
     finally:
         await engine.dispose()
 
@@ -159,20 +167,24 @@ async def test_grant_credit_amount_derived_from_offering_scales_with_months():
 @pytest.mark.asyncio
 async def test_grant_credit_fails_loud_when_no_pricing_source():
     """PO 지적③ — 원천(offering_versions) 없는 tier/currency 조합은 지어낸 수를 남기지
-    않고 422로 명시 거부한다."""
+    않고 422로 명시 거부한다. ⚠️CI는 krw_v1 4종(free/starter/team/business × krw)이
+    migration 0228로 이미 seed돼 있으므로(공유 카탈로그, 지우면 안 됨 — 위 _seed_offering
+    docstring 참고) "존재하는 실 tier"로는 이 음성경로를 재현 못 한다. 그라운딩 확認:
+    A1 스코프가 krw_v1만 시드했고 USD 카탈로그는 별도(미시드) — currency='usd'는 어느
+    tier든 실제로 원천이 없다."""
     from app.services.admin_billing import AdminBillingError, grant_credit
 
     engine, maker = await _session_factory()
     try:
         async with maker() as s:
             org_id = await _seed_org(s, tier="free")
-            # offering_versions 시드 없음(의도적)
+            # offering_versions(currency='usd') 시드 없음(의도적 — krw_v1만 존재하는 실 갭)
 
         async with maker() as s:
             with pytest.raises(AdminBillingError) as exc_info:
                 await grant_credit(
                     s, org_id=org_id, target_tier="starter", months=1, reason="원천 없음 케이스",
-                    currency="krw", idempotency_key=f"idem-{uuid.uuid4()}",
+                    currency="usd", idempotency_key=f"idem-{uuid.uuid4()}",
                     actor_email="operator@moonklabs.com",
                 )
             assert exc_info.value.status_code == 422
