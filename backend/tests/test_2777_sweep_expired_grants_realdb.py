@@ -327,3 +327,56 @@ async def test_only_most_recent_grant_per_org_considered():
             assert sub.tier == "business"  # 오래된 grant 기준으로 되돌려지지 않음(핵심 판정)
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_stacked_grants_superseded_grant_never_becomes_candidate_after_latest_reverted():
+    """카디르군 QA 3차(2026-08-18, PR2 head 03a42af35 재현) — companion 필터가 DISTINCT ON
+    보다 먼저 걸리면(1차 시도), 순차 grant(A: free→team 만료·B: team→business 만료, B가
+    A보다 최신)에서 스윕1이 B를 정확히 회수한 뒤 스윕2가 B를 후보에서 빼자 **DISTINCT ON이
+    남은 A를 "org의 최신 grant"로 오판**해 tier가 free로 붕괴했다(A.target_tier==team이
+    스윕1 이후 현재 tier와 우연히 일치해 tier 가드도 못 막음).
+
+    이 테스트는 그 정확한 스택 시나리오를 재현한다 — 음성대조: 스윕1=B만 회수, 스윕2=완전
+    no-op(A는 「최신이 아니므로 회수 여부와 무관하게 영원히 후보가 아니다」라는 불변식이
+    실제로 지켜지는지 pin)."""
+    from app.services.billing_scheduler import sweep_expired_grants
+    from app.models.org_subscription import OrgSubscription
+    from sqlalchemy import select
+
+    engine, maker = await _session_factory()
+    try:
+        async with maker() as s:
+            org_id = await _seed_org(s, tier="business")
+            # A(구) — 먼저 생성·먼저 만료. superseded 대상.
+            await _seed_grant_entry(
+                s, org_id=org_id, target_tier="team", prev_tier="free",
+                expires_at=NOW - timedelta(days=20), created_at=NOW - timedelta(days=60),
+            )
+            # B(신) — A보다 나중에 생성·A보다 나중에(하지만 NOW 기준으론 이미) 만료.
+            # 「절대 최신」은 항상 B — companion 유무와 무관하게 ts만으로 결정돼야 한다.
+            await _seed_grant_entry(
+                s, org_id=org_id, target_tier="business", prev_tier="team",
+                expires_at=NOW - timedelta(days=1), created_at=NOW - timedelta(days=30),
+            )
+
+        # 스윕1 — 절대 최신인 B가 되돌려져야 한다(business→team).
+        async with maker() as s:
+            result1 = await sweep_expired_grants(s, now=NOW)
+            assert result1["reverted"] >= 1
+        async with maker() as s:
+            sub = (await s.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))).scalar_one()
+            assert sub.tier == "team"  # B가 되돌려짐(business→team) — A는 아직 손 안 됨
+
+        # 스윕2 — B에 companion이 붙어 후보에서 빠져도, A가 "새 최신"으로 승격돼선 안
+        # 된다(핵심 판정 — 버그 재현시 tier가 free로 붕괴).
+        async with maker() as s:
+            await sweep_expired_grants(s, now=NOW + timedelta(days=1))
+        async with maker() as s:
+            sub = (await s.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))).scalar_one()
+            assert sub.tier == "team", (
+                f"A(superseded)가 스윕2에서 되돌려져 tier가 {sub.tier!r}로 붕괴 — "
+                f"«최신 아닌 grant는 영원히 후보 아님» 불변식 위반(카디르군 3차 QA 재현)"
+            )
+    finally:
+        await engine.dispose()

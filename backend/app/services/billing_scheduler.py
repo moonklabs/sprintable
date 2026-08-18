@@ -276,13 +276,29 @@ async def sweep_expired_grants(session: AsyncSession, *, now: datetime | None = 
 
     fix(PO 판정 2026-08-18) — 값-비교 휴리스틱을 폐기하고 **내구 마커**로 바꾼다. revert
     시 원장에 companion 행(entry_type='adjustment'·metadata.kind='tier_grant_revert'·
-    metadata.reverted_entry_id=원 grant id)을 append하고, 후보 조회 자체가 그 companion이
-    이미 있는 grant를 SQL NOT EXISTS로 원천 제외한다. 그러면 ⓐ동일 tier 재부여도 정확히
-    한 번만 되돌려짐(반복 재현 불가) ⓑ이미 되돌려진 grant는 재조회 후보에도 안 잡히므로
-    `skipped_already_reverted`는 자연히 0으로 수렴(그 휴리스틱 분기 자체가 이제 불요 —
-    반환 키는 하위호환으로 유지) ⓒcompanion 자체가 감사 기록이라 audit 이중화 불요.
-    동일 tier 재부여 자체(정상 유스케이스)는 계속 허용 — 이 fix가 막는 건 "재부여"가 아니라
-    "같은 grant를 여러 번 되돌리는" 회귀뿐이다."""
+    metadata.reverted_entry_id=원 grant id)을 append한다. 동일 tier 재부여 자체(정상
+    유스케이스)는 계속 허용 — 이 fix가 막는 건 "재부여"가 아니라 "같은 grant를 여러 번
+    되돌리는" 회귀뿐이다.
+
+    카디르군 QA 3차(2026-08-18, PR2 head 03a42af35) — companion 마커를 **DISTINCT ON보다
+    먼저** WHERE에 걸면(1차 시도), 순차 grant(A: free→team 만료·B: team→business 만료,
+    ts는 B가 A보다 최신)가 있는 org에서 1차 스윕이 B를 정확히 회수한 뒤, 2차 스윕은 B가
+    companion 때문에 후보 집합에서 아예 빠져버려 **DISTINCT ON이 남은 행 중 최신인 A를
+    "org의 최신 grant"로 오판**한다 — A는 진작에 B에 의해 superseded된 낡은 grant인데
+    tier 우연 일치(A.target_tier == 되돌아간 현재 tier)까지 겹치면 A가 그대로 되돌려져
+    tier가 free로 붕괴한다(fresh PG 재현 확定).
+
+    **불변식(이 함수가 지켜야 하는 것, 쿼리는 이 문장을 그대로 구현해야 한다)**:
+    스윕 후보 = org별 **절대 최신** grant(ts DESC 1건, companion 유무와 무관하게 결정)
+    정확히 1건이며, 그 1건이 ⓐ미회수(companion 없음) ⓑ만료 ⓒtier 정합일 때만 회수한다.
+    최신이 아닌 grant는 회수 여부와 무관하게 영원히 후보가 아니다(신 grant가 구 grant를
+    대체 — superseded된 grant는 되돌릴 대상에서 항구적으로 제외).
+
+    구현 — CTE로 "org별 절대 최신 grant"를 companion 유무와 **무관하게** 먼저 확정한
+    뒤, 그 특정 행 하나에 대해서만 companion 존재 여부를 바깥 WHERE로 검사한다(순서가
+    거꾸로면 위 재현처럼 최신이 회수돼 사라진 순간 구 grant가 "새 최신"으로 승격돼버린다
+    — DISTINCT ON과 NOT EXISTS는 같은 WHERE 절에서 함께 못 걸리고, 반드시 DISTINCT ON이
+    "필터 없는 전체 grant 집합" 위에서 먼저 절대 최신을 뽑아야 한다)."""
     from app.services.admin_billing import _audit  # 순환 임포트 회피(admin_billing이 이 모듈을 안 씀)
     from app.services.billing_ledger import record_ledger_entry
 
@@ -290,23 +306,30 @@ async def sweep_expired_grants(session: AsyncSession, *, now: datetime | None = 
 
     # entry_metadata는 BillingLedgerEntry의 Python 속성명일 뿐, DB 컬럼명은 "metadata"다
     # (모델 주석 — AC 원문대로·Base.metadata 예약명 충돌 회피). raw SQL은 실 컬럼명을 쓴다.
-    # NOT EXISTS — 이미 revert companion(adjustment/tier_grant_revert)이 붙은 grant는
-    # 후보 자체에서 제외(값-비교 대신 마커 존재로 "이미 처리됨" 판정, 위 docstring).
     latest_grants = (
         await session.execute(
             text(
                 """
-                SELECT DISTINCT ON (g.org_id) g.id, g.org_id, g.amount_minor, g.currency,
-                       g.metadata AS entry_metadata
-                FROM billing_ledger_entries g
-                WHERE g.entry_type = 'credit_grant' AND g.metadata->>'kind' = 'tier_grant'
-                  AND NOT EXISTS (
+                WITH absolute_latest_grants AS (
+                    -- companion 유무와 무관하게, org별 «절대 최신» grant 정확히 1건을
+                    -- 먼저 확定(위 불변식 ⓐ 이전 단계 — superseded 판정의 유일한 축).
+                    SELECT DISTINCT ON (org_id) id, org_id, amount_minor, currency,
+                           metadata AS entry_metadata
+                    FROM billing_ledger_entries
+                    WHERE entry_type = 'credit_grant' AND metadata->>'kind' = 'tier_grant'
+                    ORDER BY org_id, ts DESC
+                )
+                SELECT lg.id, lg.org_id, lg.amount_minor, lg.currency, lg.entry_metadata
+                FROM absolute_latest_grants lg
+                WHERE NOT EXISTS (
+                    -- «그 특정 절대-최신 행 하나»에만 companion 유무를 검사(불변식 ⓐ).
+                    -- companion이 있으면 이 org는 이번 스윕에서 후보가 아예 없음(구
+                    -- grant로 되돌아가지 않는다 — superseded는 영구 제외).
                     SELECT 1 FROM billing_ledger_entries r
                     WHERE r.entry_type = 'adjustment'
                       AND r.metadata->>'kind' = 'tier_grant_revert'
-                      AND r.metadata->>'reverted_entry_id' = g.id::text
-                  )
-                ORDER BY g.org_id, g.ts DESC
+                      AND r.metadata->>'reverted_entry_id' = lg.id::text
+                )
                 """
             )
         )
