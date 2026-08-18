@@ -205,6 +205,39 @@ async def test_grant_credit_rejects_downgrade_with_422():
 
 
 @pytest.mark.asyncio
+async def test_grant_credit_same_idempotency_key_across_orgs_returns_409_not_others_entry():
+    """PO 지적(2026-08-18, PR2 비블로커) — provider_ref는 전역 UNIQUE라 org 스코프가
+    없다. 타 org가 같은 Idempotency-Key를 재사용하면 남의 grant entry를 그대로 반환하는
+    IDOR류 대신 409로 닫혀야 한다."""
+    from app.services.admin_billing import AdminBillingError, grant_credit
+
+    engine, maker = await _session_factory()
+    try:
+        async with maker() as s:
+            org_a = await _seed_org(s, tier="free")
+            org_b = await _seed_org(s, tier="free")
+            await _seed_offering(s, tier="team", monthly_price_minor=59000)
+        key = f"idem-{uuid.uuid4()}"
+
+        async with maker() as s:
+            await grant_credit(
+                s, org_id=org_a, target_tier="team", months=1, reason="org A 보상",
+                currency="krw", idempotency_key=key, actor_email="operator@moonklabs.com",
+            )
+
+        async with maker() as s:
+            with pytest.raises(AdminBillingError) as exc_info:
+                await grant_credit(
+                    s, org_id=org_b, target_tier="team", months=1, reason="org B가 같은 키 재사용",
+                    currency="krw", idempotency_key=key, actor_email="operator@moonklabs.com",
+                )
+            assert exc_info.value.status_code == 409
+            assert exc_info.value.code == "IDEMPOTENCY_KEY_ORG_MISMATCH"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_grant_credit_same_idempotency_key_does_not_duplicate_ledger_entry():
     from app.services.admin_billing import grant_credit
     from app.models.billing_ledger_entry import BillingLedgerEntry

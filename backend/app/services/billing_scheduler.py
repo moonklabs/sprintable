@@ -22,7 +22,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -249,6 +249,79 @@ async def sweep_stale_pending_orders(session: AsyncSession, *, now: datetime | N
     return {
         "stale_pending_seen": len(stale_orders), "confirmed": confirmed,
         "failed": failed, "skipped_lookup_error": skipped,
+    }
+
+
+async def sweep_expired_grants(session: AsyncSession, *, now: datetime | None = None) -> dict:
+    """story #2777 PR2 — 어드민 credit_grant(app/services/admin_billing.py::grant_credit)로
+    부여된 임시 유료 tier의 자가회수. PR1이 grant 시 billing_ledger_entries.entry_metadata에
+    심어둔 재료(kind='tier_grant'·target_tier·prev_tier·grant_expires_at)를 읽어 만료된
+    grant를 되돌린다 — grant_expires_at 자체는 org_subscriptions.current_period_end에도
+    반영돼 있지만(테넌트 상세 "언제까지" 읽기 경로), **자동으로 되돌리는 코드는 이 함수가
+    유일**(그 갭이 원래 헤드라인②였다).
+
+    가드(PO 판정 2026-08-18, 과잉살상 방지) — org의 **가장 최근** credit_grant만 후보로
+    삼고, 그 grant 이후 org_subscriptions.tier가 **한 번도 안 바뀌었을 때만**(=지금 tier가
+    여전히 grant의 target_tier와 같을 때만) prev_tier로 되돌린다. 그 사이 실결제 업그레이드/
+    다운그레이드 등으로 tier가 달라졌으면 no-op(그 변경이 이미 grant를 무의미하게 만들었으므로
+    되돌릴 게 없다) — skipped_reason 기록."""
+    from app.services.admin_billing import _audit  # 순환 임포트 회피(admin_billing이 이 모듈을 안 씀)
+
+    now = now or datetime.now(timezone.utc)
+
+    # entry_metadata는 BillingLedgerEntry의 Python 속성명일 뿐, DB 컬럼명은 "metadata"다
+    # (모델 주석 — AC 원문대로·Base.metadata 예약명 충돌 회피). raw SQL은 실 컬럼명을 쓴다.
+    latest_grants = (
+        await session.execute(
+            text(
+                """
+                SELECT DISTINCT ON (org_id) id, org_id, metadata AS entry_metadata
+                FROM billing_ledger_entries
+                WHERE entry_type = 'credit_grant' AND metadata->>'kind' = 'tier_grant'
+                ORDER BY org_id, ts DESC
+                """
+            )
+        )
+    ).mappings().all()
+
+    reverted = skipped_tier_changed = skipped_not_expired = 0
+    for row in latest_grants:
+        meta = row["entry_metadata"]
+        expires_at = datetime.fromisoformat(meta["grant_expires_at"])
+        if expires_at >= now:
+            skipped_not_expired += 1
+            continue
+
+        org_id = row["org_id"]
+        sub = (
+            await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
+        ).scalar_one_or_none()
+        current_tier = sub.tier if sub is not None else None
+        if current_tier != meta["target_tier"]:
+            # 그 사이 실결제/다른 조작으로 tier가 바뀜 — 이 grant는 이미 무의미, 손대지 않는다.
+            _audit(
+                actor_email="system:sweep_expired_grants", org_id=org_id, action="grant_sweep_skipped",
+                before={"expected_tier": meta["target_tier"], "actual_tier": current_tier},
+                after={"skipped_reason": "tier_changed_since_grant"},
+            )
+            skipped_tier_changed += 1
+            continue
+
+        prev_tier = meta["prev_tier"]
+        sub.tier = prev_tier
+        sub.status = "active"
+        sub.current_period_start = None
+        sub.current_period_end = None
+        await session.commit()
+        _audit(
+            actor_email="system:sweep_expired_grants", org_id=org_id, action="grant_sweep_reverted",
+            before={"tier": meta["target_tier"]}, after={"tier": prev_tier},
+        )
+        reverted += 1
+
+    return {
+        "grants_seen": len(latest_grants), "reverted": reverted,
+        "skipped_tier_changed": skipped_tier_changed, "skipped_not_expired": skipped_not_expired,
     }
 
 

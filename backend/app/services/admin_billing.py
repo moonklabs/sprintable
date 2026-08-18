@@ -148,10 +148,19 @@ async def grant_credit(
     # 이전 버전은 구독 UPDATE를 항상 먼저 flush해, 같은 idempotency_key 재전송(타임아웃
     # 재시도 등)마다 current_period_end가 매번 now+months로 다시 밀렸다(응답의 entry
     # 메타 grant_expires_at과 실제 subscription 상태가 어긋나는 결함).
+    #
+    # PO 지적(2026-08-18, PR2 비블로커) — provider_ref는 전역 UNIQUE라 org 스코프가 없다.
+    # 조회에 org_id 조건이 없으면 타 org가 우연히/의도적으로 같은 idempotency_key를 재사용할
+    # 때 남의 org의 grant entry를 그대로 반환해버린다(IDOR류) — org_id 불일치는 409로 닫는다.
     existing = (
         await session.execute(select(BillingLedgerEntry).where(BillingLedgerEntry.provider_ref == idempotency_key))
     ).scalar_one_or_none()
     if existing is not None:
+        if existing.org_id != org_id:
+            raise AdminBillingError(
+                409, "IDEMPOTENCY_KEY_ORG_MISMATCH",
+                "이 Idempotency-Key는 다른 조직의 요청에 이미 쓰였음 — 새 키로 재시도할 것",
+            )
         _audit(
             actor_email=actor_email, org_id=org_id, action="credit_grant_replay",
             before=None, after={"entry_id": str(existing.id), "idempotency_key": idempotency_key},
