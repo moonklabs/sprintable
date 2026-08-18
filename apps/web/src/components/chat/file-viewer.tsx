@@ -158,7 +158,7 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="focus-inset min-h-0 flex-1 overflow-auto">
         {state.kind === 'fetching' && (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-6">
             <div className="h-24 w-full max-w-md animate-pulse rounded-lg bg-muted" />
