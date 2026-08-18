@@ -28,7 +28,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_gateway import AgentEventCursor, AgentGatewaySession
@@ -219,3 +219,48 @@ async def get_verification_state(
         verify_seq is not None and acked_seq is not None and acked_seq >= verify_seq
     )
     return {"verify_seq": verify_seq, "acked_seq": acked_seq, "verified": verified, "rail": rail}
+
+
+async def get_verified_map(db: AsyncSession, agent_ids: list[uuid.UUID]) -> dict[uuid.UUID, bool]:
+    """story #2751(설계②, PO 판정 2026-08-18) — 워크포스 목록 "연결 안 됨" CTA용 배치 조회.
+
+    `get_verification_state()`와 **같은 정의**(``acked_seq >= verify_seq``, stdio 레일) —
+    두 번째 판정 기준을 새로 만들지 않는다. 다만 목록은 에이전트 수에 비례해 N번 호출하면
+    안 되므로(fan-out 금지, PO 확定 — `_inject_active_stories()`의 `Story.id.in_()` 배치와
+    동형 패턴) GROUP BY로 agent_ids 전체를 한 번에 집계한다(상수 쿼리 2회 — agent 수 무관).
+    요청한 agent_ids 전원에 대해 키가 채워진다(verify 자체를 한 번도 안 한 이탈자도
+    False — 그게 이 CTA가 잡으려는 정확히 그 집단이다).
+
+    ⚠️scope: stdio 전용(`acked_seq >= verify_seq`는 durable — 한 번 참이면 영구 유지). http
+    transport는 heartbeat freshness(`_has_fresh_heartbeat`)가 유일한 신호인데 그건 "현재
+    도달 가능"이지 "한 번이라도 연결 완료"의 durable 기록이 아니다 — http 에이전트의 durable
+    verified 신호는 신규 컬럼 없이는 못 만들어 이번 스코프 밖. 지금은 실제로 정상 연결된
+    http 에이전트가 이 map에서 False로 나올 수 있다(false positive 방향 — "이미 괜찮은데
+    CTA가 뜬다"는 눈에 띄지만 안전한 실패 모드, 반대(진짜 이탈자를 숨김)보다 낫다)."""
+    if not agent_ids:
+        return {}
+
+    verify_seq_rows = (await db.execute(
+        select(Event.recipient_id, func.max(Event.recipient_seq)).where(
+            Event.recipient_id.in_(agent_ids),
+            Event.event_type == VERIFY_EVENT_TYPE,
+            Event.recipient_seq.isnot(None),
+        ).group_by(Event.recipient_id)
+    )).all()
+    verify_seq_map = {row[0]: row[1] for row in verify_seq_rows}
+
+    acked_seq_rows = (await db.execute(
+        select(AgentEventCursor.agent_id, AgentEventCursor.acked_seq).where(
+            AgentEventCursor.agent_id.in_(agent_ids)
+        )
+    )).all()
+    acked_seq_map = {row[0]: row[1] for row in acked_seq_rows}
+
+    return {
+        agent_id: (
+            agent_id in verify_seq_map
+            and agent_id in acked_seq_map
+            and acked_seq_map[agent_id] >= verify_seq_map[agent_id]
+        )
+        for agent_id in agent_ids
+    }

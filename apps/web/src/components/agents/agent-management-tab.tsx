@@ -23,6 +23,12 @@ interface OrgAgent {
   name: string;
   role: string;
   is_active: boolean;
+  // story #2751(설계②) — BE `_inject_active_stories()`가 배치 주입(fan-out 없음, PO
+  // 확定 — get_verified_map()). false=stdio verify 미완주(이탈 후보) — "연결 안 됨" CTA
+  // 대상. undefined/null이면 판별 불가(예: 이 필드를 아직 안 실어보내는 옛 응답 형태
+  // 방어) — 그 경우 CTA를 안 띄운다(거짓 "연결 안 됨" 낙인 방지, 침묵 실패보다 과소표시가
+  // 안전한 방향).
+  verified?: boolean | null;
 }
 
 interface ProjectOption {
@@ -218,9 +224,20 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                       <Badge variant="secondary">{t('agentMember')}</Badge>
                       <Badge variant="outline">{agent.role}</Badge>
                       <Badge variant="info">{ta('manageProjectsGranted', { count: grantCounts[agent.id] ?? 0 })}</Badge>
+                      {agent.verified === false ? (
+                        <Badge variant="warning">{ta('agentNotConnected')}</Badge>
+                      ) : null}
                     </div>
                   </Link>
                   <div className="flex shrink-0 items-center gap-2">
+                    {agent.verified === false ? (
+                      <Link
+                        href={`/organization/workforce/${agent.id}`}
+                        className="whitespace-nowrap text-xs font-medium text-primary hover:underline"
+                      >
+                        {ta('viewConnectionSettings')}
+                      </Link>
+                    ) : null}
                     {isAdmin ? (
                       <Button
                         variant="glass"

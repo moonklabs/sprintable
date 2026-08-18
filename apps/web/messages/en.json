@@ -2693,6 +2693,8 @@
     "backToList": "Back to list",
     "manageAddAgent": "Add agent",
     "manageProjectsGranted": "{count} projects granted",
+    "agentNotConnected": "Not connected",
+    "viewConnectionSettings": "View connection settings",
     "accessTab": "Access",
     "matrixTitle": "Access matrix",
     "matrixDescription": "Click a cell to toggle grant/block instantly.",

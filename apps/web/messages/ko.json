@@ -2693,6 +2693,8 @@
     "backToList": "목록으로",
     "manageAddAgent": "에이전트 추가",
     "manageProjectsGranted": "{count}개 프로젝트 허용",
+    "agentNotConnected": "연결 안 됨",
+    "viewConnectionSettings": "연결 설정 보기",
     "accessTab": "접근권한",
     "matrixTitle": "접근권한 매트릭스",
     "matrixDescription": "셀을 눌러 허용/차단을 즉시 토글합니다.",
