@@ -376,3 +376,54 @@ async def test_retry_billing_order_404_when_order_belongs_to_different_org():
             assert exc_info.value.status_code == 404
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_grant_credit_replay_lookup_ignores_cross_type_provider_ref_collision():
+    """PO 지적(2026-08-18, PR2 비블로커②) — provider_ref UNIQUE는 entry_type 무관 테이블
+    전체 스코프(0229 마이그)라, replay 조회에 entry_type 필터가 없으면 어드민이 고른
+    Idempotency-Key가 우연히 다른 종류의 entry(웹훅 provider_ref 등)와 겹칠 때 그 이종
+    entry를 "이 grant의 replay"로 오인한다 — entry_metadata에 target_tier/prev_tier 같은
+    키가 없어 이후 KeyError로 터진다. entry_type='credit_grant' 필터가 그 오인을 원천
+    배제하는지 직접 확認: 같은 org·같은 provider_ref를 가진 非credit_grant entry가 이미
+    있어도, grant_credit이 그걸 replay로 잘못 판정해 tier bump를 건너뛰지 않는다(=필터가
+    실제로 걸러 정상 경로로 진행했다는 관찰 가능한 증거)."""
+    from app.services.admin_billing import grant_credit
+    from app.services.billing_ledger import record_ledger_entry
+    from app.models.org_subscription import OrgSubscription
+    from sqlalchemy import select
+
+    engine, maker = await _session_factory()
+    try:
+        async with maker() as s:
+            org_id = await _seed_org(s, tier="free")
+            await _seed_offering(s, tier="team", monthly_price_minor=59000)
+        colliding_key = f"idem-{uuid.uuid4()}"
+
+        # 같은 org·같은 provider_ref를 가진 非credit_grant entry(웹훅 등 다른 출처를
+        # 흉내) — 필터 없이 조회하면 grant_credit이 이걸 "이미 처리된 replay"로 오인한다.
+        async with maker() as s:
+            await record_ledger_entry(
+                s, org_id=org_id, entry_type="charge", amount_minor=1000, currency="krw",
+                direction="debit", provider="toss", provider_ref=colliding_key,
+                metadata={"note": "unrelated charge, not a tier_grant"},
+            )
+
+        async with maker() as s:
+            await grant_credit(
+                s, org_id=org_id, target_tier="team", months=1, reason="CS 보상",
+                currency="krw", idempotency_key=colliding_key,
+                actor_email="operator@moonklabs.com",
+            )
+
+        async with maker() as s:
+            sub = (await s.execute(
+                select(OrgSubscription).where(OrgSubscription.org_id == org_id)
+            )).scalar_one()
+            # entry_type 필터가 없었다면 위 charge entry를 replay로 오인해 여기 도달하기
+            # 전에 조기반환했을 것 — tier가 그대로 "free"였을 것. 실제로 team이 됐다는 건
+            # 필터가 charge entry를 무시하고 grant_credit이 정상 신규 경로로 진행했다는
+            # 뜻(핵심 판정).
+            assert sub.tier == "team"
+    finally:
+        await engine.dispose()

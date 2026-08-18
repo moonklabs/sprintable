@@ -152,8 +152,21 @@ async def grant_credit(
     # PO 지적(2026-08-18, PR2 비블로커) — provider_ref는 전역 UNIQUE라 org 스코프가 없다.
     # 조회에 org_id 조건이 없으면 타 org가 우연히/의도적으로 같은 idempotency_key를 재사용할
     # 때 남의 org의 grant entry를 그대로 반환해버린다(IDOR류) — org_id 불일치는 409로 닫는다.
+    #
+    # PO 지적(2026-08-18, PR2 비블로커②) — provider_ref UNIQUE는 entry_type 무관 테이블
+    # 전체 스코프(0229 마이그)다. entry_type 필터 없이 조회하면, 어드민이 고른 Idempotency-
+    # Key가 우연히 다른 종류의 entry(웹훅 provider_ref·본 서비스의 revert companion
+    # "grant-revert:<id>" 등)와 문자열이 겹칠 때 그 이종 entry를 "이 grant의 replay"로
+    # 오인해 반환한다 — 그 entry의 entry_metadata엔 target_tier/prev_tier/grant_expires_at
+    # 같은 키가 없어(또는 다른 뜻으로 존재해) 이후 이 값을 읽는 어디선가 KeyError로 터진다.
+    # entry_type='credit_grant'로 좁혀 애초에 다른 종류를 candidate에서 배제한다.
     existing = (
-        await session.execute(select(BillingLedgerEntry).where(BillingLedgerEntry.provider_ref == idempotency_key))
+        await session.execute(
+            select(BillingLedgerEntry).where(
+                BillingLedgerEntry.provider_ref == idempotency_key,
+                BillingLedgerEntry.entry_type == "credit_grant",
+            )
+        )
     ).scalar_one_or_none()
     if existing is not None:
         if existing.org_id != org_id:
