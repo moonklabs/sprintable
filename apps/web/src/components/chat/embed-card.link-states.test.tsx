@@ -344,14 +344,13 @@ describe('story #2614 AC1/AC3 — artifact(부모 없는 독립 목업)는 몸�
   });
 });
 
-// story #2614 AC3 — "이 엔티티는 별도 미리보기가 없습니다" 문구는 지원 타입(RICH_PREVIEW_TYPES:
-// story/epic/doc/artifact/hypothesis)에서 뜨면 회귀다. sprint/task/evidence/asset은 의도적으로
-// 이 Set 밖(sprint=own-href로 이미 열림+몸통에 보여줄 게 없음, task/evidence=via-parent로 이미
-// 열림, asset=별도 스토리지 화면). 이 테스트는 그 경계 자체를 고정한다.
-describe('story #2614 AC3 — "미리보기 없음" 문구는 미지원 타입(sprint)에만 정직하게 남는다', () => {
-  // story #2642(BE #3044) — sprint도 이제 ENTITY_API에 항목이 생겨 자기 org_slug/project_slug를
-  // fetch한다(href 계산 재료로만 — RICH_PREVIEW_TYPES는 무변경, 몸통은 여전히 "미리보기 없음").
-  it('sprint — org_slug 없이 fetch 성공(옛 응답 모양·미백필 등)하면 여전히 "미리보기 없음"+bare href로 우아하게 폴백한다(회귀 아님)', async () => {
+// story #2780 — sprint/task가 RICH_PREVIEW_TYPES에 편입됐다(§3/페드루 판정: "있으면 열고
+// 없으면 안 연다" — TaskResponse/SprintResponse 실측상 title·status가 있어 편입). 이 가드의
+// 취지("미리보기 없음" 문구는 실제로 보여줄 내용이 없을 때만 뜬다, #2614 AC3)는 안 바뀌었다 —
+// 새 전제: RICH 타입이어도 detail에 필요한 필드(title)가 없으면 여전히 이 문구가 뜬다(카디르
+// QA 발견 — 편입 직후엔 이 문구 대신 완전 공백이 떴었다, embed-card.tsx richContent 가드로 수정).
+describe('story #2780 — "미리보기 없음" 문구는 "실제로 보여줄 내용이 없을 때" 정직하게 뜬다(미지원 타입이든, RICH 타입인데 필드가 없든)', () => {
+  it('sprint(#2780로 RICH 편입) — title 없는 옛 응답 모양(미백필 등)이면 몸통이 공백 아닌 "미리보기 없음"+bare href로 우아하게 폴백한다', async () => {
     stubFetch(async () => ({ ok: true, json: async () => ({ data: {} }) }));
     await act(async () => {
       root.render(<EmbedCard entity_type="sprint" entity_id="sp1" title="스프린트 3" status={null} />);
@@ -360,6 +359,20 @@ describe('story #2614 AC3 — "미리보기 없음" 문구는 미지원 타입(s
     await flush();
     expect(document.body.textContent).toContain('이 엔티티는 별도 미리보기가 없습니다');
     expect(document.querySelector('a[href="/sprints?id=sp1"]')).not.toBeNull();
+  });
+
+  it('sprint(#2780) — title·status·기간이 실려 오면 RICH 몸통(뱃지)이 렌더되고 "미리보기 없음"은 안 뜬다', async () => {
+    stubFetch(async () => ({
+      ok: true,
+      json: async () => ({ data: { title: '스프린트 5', status: 'active', start_date: '2026-08-01', end_date: '2026-08-14' } }),
+    }));
+    await act(async () => {
+      root.render(<EmbedCard entity_type="sprint" entity_id="sp3" title="스프린트 5" status={null} />);
+    });
+    await openCard();
+    await flush();
+    expect(document.body.textContent).not.toContain('이 엔티티는 별도 미리보기가 없습니다');
+    expect(document.body.textContent).toContain('2026-08-01 ~ 2026-08-14');
   });
 
   it('sprint — fetch 자체가 실패하면(대상 사라짐 등) "대상을 찾을 수 없습니다"로 정직하게 갈린다(#2642로 sprint도 fetch-eligible 승격 — 이전엔 이 갈래가 아예 없었다)', async () => {

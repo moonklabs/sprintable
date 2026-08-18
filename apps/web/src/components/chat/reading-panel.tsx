@@ -4,11 +4,12 @@ import { EntityPreviewModal } from '@/components/chat/embed-card';
 import { FileViewer } from '@/components/chat/file-viewer';
 
 /**
- * story #2766(레인 A) — 채팅을 벗어나지 않는 우측 리딩 패널의 대상 2종.
- * ①doc 임베드 미리보기(EntityPreviewModal embedded 재사용) ②채팅 첨부(FileViewer 신설).
+ * story #2766(레인 A)·#2780(엔티티 확장) — 채팅을 벗어나지 않는 우측 리딩 패널의 대상 2형태.
+ * ①엔티티 읽기 뷰(story/epic/doc/hypothesis/artifact/task/sprint — EntityPreviewModal embedded
+ * 재사용, 타입별 분기는 그 내부(EntityDetail)에만 있다) ②채팅 첨부(FileViewer).
  */
 export type ReadingPanelTarget =
-  | { kind: 'doc'; entityType: string; entityId: string; title: string | null; status: string | null; href: string | null }
+  | { kind: 'entity'; entityType: string; entityId: string; title: string | null; status: string | null; href: string | null }
   | {
       kind: 'attachment';
       storedUrl: string;
@@ -26,7 +27,7 @@ export type ReadingPanelTarget =
  * 레이아웃(모달 아님·오버레이 아님)에 개입하지 않는다.
  */
 export function ReadingPanel({ target, onClose }: { target: ReadingPanelTarget; onClose: () => void }) {
-  if (target.kind === 'doc') {
+  if (target.kind === 'entity') {
     return (
       <div className="flex h-full flex-col overflow-hidden border-l border-border bg-background">
         <EntityPreviewModal
