@@ -1001,6 +1001,7 @@
     "orgNamePlaceholder": "e.g. Moonklabs",
     "slug": "URL Slug",
     "slugPlaceholder": "e.g. moonklabs",
+    "slugManualRequired": "We couldn't auto-generate a slug from that name. Enter one above using lowercase letters, numbers, and hyphens.",
     "createProject": "Create First Project",
     "projectSubtitle": "Create the first project for {orgName}.",
     "projectName": "Project Name",
