@@ -1,6 +1,14 @@
 """story #2777 PR2 — sweep_expired_grants(어드민 credit_grant 자가회수) realdb 검증.
 핵심 축: ①정상 되돌림 ②음성대조(그 사이 tier가 바뀐 케이스는 손 안 댐, PO 판정 필수 요구)
-③미만료는 무시 ④org별 가장 최근 grant만 후보(오래된 grant 무시). 로컬 PG 미설정 시 skip."""
+③미만료는 무시 ④org별 가장 최근 grant만 후보(오래된 grant 무시). 로컬 PG 미설정 시 skip.
+
+⚠️ 이 파일은 (test_2777_admin_billing_realdb.py를 실사고로 낸 뒤 교훈) 더 이상 어떤
+공유 테이블도 DELETE하지 않는다 — `sweep_expired_grants`는 org 스코프 없이 전체
+`billing_ledger_entries`를 스캔하므로(프로덕션에서 옳은 설계), 같은 세션에서 먼저 도는
+다른 테스트가 남긴 credit_grant 행이 `grants_seen`/`reverted` 등 **집계** 카운트에 함께
+잡힐 수 있다. 그래서 집계값 단정은 `>=`로만 하고, 실제 판정은 **이 테스트가 만든 그
+org의 subscription 상태를 직접 재조회**하는 것으로 한다(다른 org의 존재/부재와 무관하게
+항상 옳다)."""
 from __future__ import annotations
 
 import os
@@ -27,22 +35,6 @@ async def _dispose_global_engine_after_test():
     yield
     from app.core.database import engine as _global_engine
     await _global_engine.dispose()
-
-
-@pytest.fixture(autouse=True)
-async def _clear_billing_ledger_entries_before_test():
-    """sweep_expired_grants는 전 org의 billing_ledger_entries를 스캔한다(org 스코프 없는
-    쿼리) — 같은 공유 create_all DB에서 다른 테스트 파일(test_2777_admin_billing_realdb.py
-    등)이 남긴 credit_grant 행이 섞이면 grants_seen/reverted 등 정확 개수 assert가 깨진다.
-    매 테스트 시작 전 비운다(org_subscriptions는 그대로 — 이 파일 각 테스트가 자기
-    org만 새로 만들어 씀)."""
-    from sqlalchemy import text
-    engine, maker = await _session_factory()
-    async with maker() as s:
-        await s.execute(text("DELETE FROM billing_ledger_entries"))
-        await s.commit()
-    await engine.dispose()
-    yield
 
 
 def _async_url() -> str:
@@ -108,8 +100,7 @@ async def test_reverts_tier_when_grant_expired_and_tier_unchanged():
 
         async with maker() as s:
             result = await sweep_expired_grants(s, now=NOW)
-            assert result["reverted"] == 1
-            assert result["skipped_tier_changed"] == 0
+            assert result["reverted"] >= 1  # 다른 세션-공존 org가 있을 수 있어 하한만(§파일 docstring)
 
         async with maker() as s:
             sub = (await s.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))).scalar_one()
@@ -126,6 +117,8 @@ async def test_rerun_after_revert_reports_already_reverted_not_tier_changed():
     "tier_changed_since_grant"로 오집계(신호 죽음)되던 것을 skipped_already_reverted로
     분리했는지 재실행으로 직접 확認."""
     from app.services.billing_scheduler import sweep_expired_grants
+    from app.models.org_subscription import OrgSubscription
+    from sqlalchemy import select
 
     engine, maker = await _session_factory()
     try:
@@ -138,14 +131,19 @@ async def test_rerun_after_revert_reports_already_reverted_not_tier_changed():
 
         async with maker() as s:
             first = await sweep_expired_grants(s, now=NOW)
-            assert first["reverted"] == 1
+            assert first["reverted"] >= 1
 
-        # 다음 주기(같은 grant, 아직 새 grant 없음) — 되돌림도 재실측도 아니어야 함.
+        async with maker() as s:
+            sub = (await s.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))).scalar_one()
+            assert sub.tier == "free"  # 첫 스윕에서 되돌려짐
+
+        # 다음 주기(같은 grant, 아직 새 grant 없음) — 이 org는 재실측 안 되고 tier도 그대로.
         async with maker() as s:
             second = await sweep_expired_grants(s, now=NOW + timedelta(days=1))
-            assert second["reverted"] == 0
-            assert second["skipped_tier_changed"] == 0  # 「변경 감지」로 오분류되면 안 됨
-            assert second["skipped_already_reverted"] == 1
+            assert second["skipped_already_reverted"] >= 1  # 분류 자체가 동작함(하한 — 다른 org와 공존 가능)
+        async with maker() as s:
+            sub = (await s.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))).scalar_one()
+            assert sub.tier == "free"  # 재반복 실행에도 불변(이중 되돌림/오염 없음)
     finally:
         await engine.dispose()
 
@@ -171,12 +169,11 @@ async def test_negative_control_skips_when_tier_changed_since_grant():
 
         async with maker() as s:
             result = await sweep_expired_grants(s, now=NOW)
-            assert result["reverted"] == 0
-            assert result["skipped_tier_changed"] == 1
+            assert result["skipped_tier_changed"] >= 1  # 분류 동작 확認(하한)
 
         async with maker() as s:
             sub = (await s.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))).scalar_one()
-            assert sub.tier == "business"  # 손 안 댐 — 그대로 유지
+            assert sub.tier == "business"  # 손 안 댐 — 그대로 유지(핵심 판정)
     finally:
         await engine.dispose()
 
@@ -184,6 +181,8 @@ async def test_negative_control_skips_when_tier_changed_since_grant():
 @pytest.mark.asyncio
 async def test_not_yet_expired_grant_is_ignored():
     from app.services.billing_scheduler import sweep_expired_grants
+    from app.models.org_subscription import OrgSubscription
+    from sqlalchemy import select
 
     engine, maker = await _session_factory()
     try:
@@ -196,8 +195,11 @@ async def test_not_yet_expired_grant_is_ignored():
 
         async with maker() as s:
             result = await sweep_expired_grants(s, now=NOW)
-            assert result["reverted"] == 0
-            assert result["skipped_not_expired"] == 1
+            assert result["skipped_not_expired"] >= 1  # 분류 동작 확認(하한)
+
+        async with maker() as s:
+            sub = (await s.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))).scalar_one()
+            assert sub.tier == "team"  # 손 안 댐 — 핵심 판정
     finally:
         await engine.dispose()
 
@@ -205,9 +207,14 @@ async def test_not_yet_expired_grant_is_ignored():
 @pytest.mark.asyncio
 async def test_only_most_recent_grant_per_org_considered():
     """오래된(이미 만료+되돌려졌어야 할) grant가 org에 여러 건 있어도 가장 최근 것만
-    본다 — 오래된 grant의 target_tier가 현재 tier와 달라도(당연히 다름) 그건 무시 대상이지
-    스킵 카운트에 안 잡혀야 한다(최근 것 하나만 후보이므로)."""
+    본다 — 오래된 grant(target_tier='starter')는 지금 tier(business)와 안 맞아 매칭됐다면
+    그 자체가 skipped_tier_changed감이지만, DISTINCT ON org_id가 최신 것(target_tier=
+    'business', 아직 안 만료)만 후보로 잡으므로 실제로는 skipped_not_expired여야 하고,
+    무엇보다 **tier가 그대로 business로 유지**돼야 한다(오래된 grant 기준으로 잘못
+    되돌려지면 안 됨 — 이게 이 테스트의 핵심 판정)."""
     from app.services.billing_scheduler import sweep_expired_grants
+    from app.models.org_subscription import OrgSubscription
+    from sqlalchemy import select
 
     engine, maker = await _session_factory()
     try:
@@ -225,9 +232,10 @@ async def test_only_most_recent_grant_per_org_considered():
             )
 
         async with maker() as s:
-            result = await sweep_expired_grants(s, now=NOW)
-            assert result["grants_seen"] == 1  # org당 1건만(DISTINCT ON org_id) 후보로 잡힘
-            assert result["reverted"] == 0
-            assert result["skipped_not_expired"] == 1
+            await sweep_expired_grants(s, now=NOW)
+
+        async with maker() as s:
+            sub = (await s.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))).scalar_one()
+            assert sub.tier == "business"  # 오래된 grant 기준으로 되돌려지지 않음(핵심 판정)
     finally:
         await engine.dispose()
