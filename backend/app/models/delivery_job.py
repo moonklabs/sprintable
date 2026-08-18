@@ -31,13 +31,23 @@ class DeliveryJob(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #2761 — claim 시각(reaper 기준값). 'claimed' 상태로 전이할 때만 채워진다(그 밖엔 NULL).
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
             "kind IN ('org_webhook', 'personal_webhook', 'expo_push')", name="ck_delivery_jobs_kind"
         ),
-        CheckConstraint("status IN ('pending', 'delivered', 'failed')", name="ck_delivery_jobs_status"),
-        # 워커 폴링 축 — pending 부분 인덱스(event_outbox.ix_event_outbox_pending과 동형: 대부분의
-        # row가 곧 delivered/failed로 빠지므로 미해결 row는 항상 소수, 부분 인덱스로 스캔 최소화).
-        Index("ix_delivery_jobs_pending", "id", postgresql_where=text("status = 'pending'")),
+        # story #2761 — 'claimed' 추가: claim(attempts+1)과 status 전이가 같은 원자적 UPDATE
+        # 안에서 일어나야 재집기 창이 닫힌다(0256 마이그 참조 — 근본원인·prod 3중복 실사고).
+        CheckConstraint(
+            "status IN ('pending', 'claimed', 'delivered', 'failed')", name="ck_delivery_jobs_status"
+        ),
+        # 워커 폴링 축 — pending/claimed 부분 인덱스(event_outbox.ix_event_outbox_pending과 동형:
+        # 대부분의 row가 곧 delivered/failed로 빠지므로 미해결 row는 항상 소수, 부분 인덱스로
+        # 스캔 최소화). claimed도 포함하는 이유 — reaper가 만료된 claimed를 이 인덱스로 찾는다.
+        Index(
+            "ix_delivery_jobs_pending", "id",
+            postgresql_where=text("status IN ('pending', 'claimed')"),
+        ),
     )
