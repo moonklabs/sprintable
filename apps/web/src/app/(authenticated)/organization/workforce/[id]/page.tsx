@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { AlertTriangle, ArrowLeft, Check, Copy, MinusCircle, Pencil, X, XCircle } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
+import { AgentConnectionSettingsSection } from '@/components/agents/agent-connection-settings-section';
 import { MessagingPolicySection } from '@/components/agents/messaging-policy-section';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -117,9 +118,7 @@ export default function AgentDetailPage() {
   const [savingWebhook, setSavingWebhook] = useState(false);
 
   const [freshApiKey, setFreshApiKey] = useState<string | null>(null);
-  const [freshMcpConfig, setFreshMcpConfig] = useState<string | null>(null);
   const [hasActiveKey, setHasActiveKey] = useState(false);
-  const [mcpCopied, setMcpCopied] = useState(false);
   const [fakechatEnvKeyCopied, setFakechatEnvKeyCopied] = useState(false);
 
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -279,16 +278,6 @@ export default function AgentDetailPage() {
       addToast({ type: 'error', title: tc('error') });
     } finally {
       setSavingWebhook(false);
-    }
-  };
-
-  const handleCopyMcp = async () => {
-    try {
-      await navigator.clipboard.writeText(freshMcpConfig ?? '');
-      setMcpCopied(true);
-      setTimeout(() => setMcpCopied(false), 2000);
-    } catch {
-      addToast({ type: 'error', title: tc('error') });
     }
   };
 
@@ -518,7 +507,7 @@ export default function AgentDetailPage() {
         <AgentApiKeyManager
           agentId={id}
           agentName={agent.name}
-          onNewKey={(key, mcpConfig) => { setFreshApiKey(key); setFreshMcpConfig(mcpConfig ?? null); setHasActiveKey(true); }}
+          onNewKey={(key) => { setFreshApiKey(key); setHasActiveKey(true); }}
         />
       )}
 
@@ -605,36 +594,9 @@ export default function AgentDetailPage() {
       {/* Messaging policy (E-MSG-POLICY S3) */}
       {canEdit && <MessagingPolicySection agentId={id} creatorUserId={agent.created_by} />}
 
-      {/* MCP Config */}
-      <SectionCard>
-        <SectionCardHeader>
-          <div className="flex items-center justify-between w-full">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold text-foreground">{t('agentMcpTitle')}</h2>
-              <p className="text-sm text-muted-foreground">{t('agentMcpDescription')}</p>
-            </div>
-            {freshApiKey && freshMcpConfig && (
-              <Button variant="glass" size="sm" onClick={() => void handleCopyMcp()} disabled={!freshMcpConfig}>
-                {mcpCopied ? <Check className="h-3.5 w-3.5" /> : 'Copy'}
-              </Button>
-            )}
-          </div>
-        </SectionCardHeader>
-        <SectionCardBody>
-          {freshApiKey && freshMcpConfig ? (
-            <>
-              <p className="text-xs text-success mb-2">{t('agentMcpFreshKeyNote')}</p>
-              <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
-                {freshMcpConfig}
-              </pre>
-            </>
-          ) : !hasActiveKey ? (
-            <p className="text-xs text-warning-strong">{t('agentMcpKeyRequired')}</p>
-          ) : (
-            <p className="text-xs text-muted-foreground">{t('agentMcpSecurityNote')}</p>
-          )}
-        </SectionCardBody>
-      </SectionCard>
+      {/* story #2751(설계①) — 연결 설정 상시 섹션. connection-artifact를 항상 재조회해
+          .mcp.json 등 연결 구조를 언제든 다시 볼 수 있게 한다(freshApiKey 유무와 무관). */}
+      <AgentConnectionSettingsSection agentId={id} freshApiKey={freshApiKey} />
 
       {/* Fakechat 채널 (SSE) — story #2362(2026-07-31): 예전엔 여기가 "이 포트로 접속하라"고
           안내했는데, fakechat은 다이얼아웃 방식이라 그 주소를 아무도 안 연다(포트를 안 쓴다).

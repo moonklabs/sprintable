@@ -38,8 +38,10 @@ interface ConnectStepProps {
   onFinish: () => void;
 }
 
-/** `sk_live_••••<last4>` — prefix + 마지막 4자만 노출. */
-function maskApiKey(key: string): string {
+/** `sk_live_••••<last4>` — prefix + 마지막 4자만 노출.
+ * story #2751: 워크포스 › 에이전트 상세의 "연결 설정" 상시 섹션도 이 마스킹을 재사용한다
+ * (재발급 직후에만 실키를 다루는 로컬 규약은 그대로 — 여기선 export만 추가, 동작 변경 0). */
+export function maskApiKey(key: string): string {
   if (!key) return '';
   const last4 = key.slice(-4);
   const m = key.match(/^(sk_(?:live|test)_)/);
@@ -52,7 +54,7 @@ function maskApiKey(key: string): string {
  * 클라는 config를 재조립하지 않는다(buildConfig 제거). 키 placeholder(`<YOUR_AGENT_API_KEY>`)만
  * first-run 실 키로 치환(display=마스킹·copy=실키). OB-1 content 부재 시 null → 카드는 pending.
  */
-function renderArtifact(baseContent: string | null, apiKey: string, mask: boolean): string | null {
+export function renderArtifact(baseContent: string | null, apiKey: string, mask: boolean): string | null {
   if (!baseContent) return null;
   const key = mask ? maskApiKey(apiKey) : apiKey;
   try {
@@ -71,7 +73,7 @@ function renderArtifact(baseContent: string | null, apiKey: string, mask: boolea
   }
 }
 
-function HighlightedJson({ text }: { text: string }) {
+export function HighlightedJson({ text }: { text: string }) {
   const segments: { t: string; c?: string }[] = [];
   const regex = /("(?:\\.|[^"\\])*"\s*:)|("(?:\\.|[^"\\])*")|([{}[\],])/g;
   let last = 0;
