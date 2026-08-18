@@ -190,6 +190,13 @@ services:
       - key: TOSS_PAYMENTS_SECRET_KEY
         reason: dev와 동일 사유(TOSS_PAYMENTS_CLIENT_KEY 참고) — test_sk 값, Settings.toss_payments_secret_key.
         owner: TBD
+      - key: TOSS_WEBHOOK_SECRET
+        reason: >-
+          #2728 Toss 웹훅 서명 검증용 시크릿 — Secret Manager(TOSS_WEBHOOK_SECRET_DEV)에
+          이미 발급돼 있던 값. app/core/config.py Settings.toss_webhook_secret로 읽음.
+          Secret Manager 등록·Cloud Run env 수동 배선 PO(#2728 착수 時) — TOSS_PAYMENTS_*
+          3건과 동형, 등재만 누락돼 있었음(story #2739/054edff4).
+        owner: TBD
 
   sprintable-backend-prod:
     keys:
