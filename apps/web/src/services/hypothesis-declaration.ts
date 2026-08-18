@@ -28,15 +28,29 @@ export const EMPTY_DECLARATION: HypothesisDeclarationValue = {
   linkedPreview: null,
 };
 
+export type MissingDeclarationField = 'statement' | 'metricName' | 'measureAfter' | 'ga4Config';
+
+/**
+ * story #2760 — mode='new' 카드가 왜 "선언됨"으로 안 잡히는지 필드 단위로 쪼갠다(무설명
+ * disabled 금지). isDeclarationComplete가 이걸로 재정의돼 있어 두 함수의 조건이 갈라질 수
+ * 없다(단일 SSOT — 조건을 늘릴 땐 여기 한 곳만 고치면 카드 캡션도 자동으로 따라온다).
+ */
+export function getMissingDeclarationFields(v: HypothesisDeclarationValue): MissingDeclarationField[] {
+  if (v.mode === 'link') return [];
+  const md = v.metricDefinition;
+  const missing: MissingDeclarationField[] = [];
+  if (v.statement.trim().length === 0) missing.push('statement');
+  if (!md || md.metric.trim().length === 0) missing.push('metricName');
+  if (v.measureAfter.length === 0) missing.push('measureAfter');
+  if (md?.source === 'ga4' && !(md.property_id?.trim() && md.ga4_metric && md.date_range_days)) {
+    missing.push('ga4Config');
+  }
+  return missing;
+}
+
 export function isDeclarationComplete(v: HypothesisDeclarationValue): boolean {
   if (v.mode === 'link') return v.linkedHypothesisId != null;
-  const md = v.metricDefinition;
-  return (
-    v.statement.trim().length > 0 &&
-    !!md && md.metric.trim().length > 0 &&
-    v.measureAfter.length > 0 &&
-    (md.source !== 'ga4' || (!!md.property_id?.trim() && !!md.ga4_metric && !!md.date_range_days))
-  );
+  return getMissingDeclarationFields(v).length === 0;
 }
 
 /** POST /api/sprints/:id/hypotheses 페이로드(BE 계약 crux 중 — 신규=create+link, 기존=link만). */
