@@ -50,6 +50,11 @@ def downgrade() -> None:
         "ix_delivery_jobs_pending", "delivery_jobs", ["id"],
         postgresql_where=sa.text("status = 'pending'"),
     )
+    # PO 리뷰(2026-08-18) — 'claimed' row가 존재하는 채로 OLD_CK를 재생성하면 그 즉시 CHECK
+    # 위반으로 실패한다(로컬 검증은 빈 테이블이라 놓쳤다). OLD_CK가 'claimed'를 모르므로
+    # 먼저 pending으로 정규화 — at-least-once 계약상 claimed는 언젠가 재시도될 값이라
+    # pending 복귀가 안전한 유일한 다운그레이드 경로.
+    op.execute("UPDATE delivery_jobs SET status = 'pending', claimed_at = NULL WHERE status = 'claimed'")
     op.drop_constraint("ck_delivery_jobs_status", "delivery_jobs", type_="check")
     op.create_check_constraint("ck_delivery_jobs_status", "delivery_jobs", _OLD_CK)
     op.drop_column("delivery_jobs", "claimed_at")
