@@ -117,9 +117,10 @@ describe('proxy', () => {
     }
   });
 
-  it('redirects to login when no sp_at cookie and refresh fails', async () => {
+  it('redirects to login with reason=session_expired when sp_rt exists but refresh is rejected — real expiry (story #2745 AC2)', async () => {
+    // sp_rt가 실재했다가 백엔드가 401로 명시 거부한 경우만 "만료"라 부를 근거가 있다.
     mockFetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
-    const response = await middleware(makeRequest('/dashboard'));
+    const response = await middleware(makeRequest('/dashboard', { sp_rt: 'dead-rt' }));
     expect(response.status).toBe(307);
     // AC3(551bbbee): hard /login 대신 next 보존 + reason 배너 계약. graceful 세션 만료 UX.
     const loc = response.headers.get('location') ?? '';
@@ -128,14 +129,17 @@ describe('proxy', () => {
     expect(loc).toContain('reason=session_expired');
   });
 
-  it('redirects to login when no sp_at and no sp_rt cookie', async () => {
+  it('redirects to login WITHOUT reason=session_expired when no sp_at and no sp_rt cookie — anonymous first visit (story #2745 AC1, 선생님 지적)', async () => {
+    // 근본 버그: sp_at/sp_rt/활성계정 금고 중 아무 신호도 없는 익명 첫 방문자가 보호 라우트에
+    // 진입해도 예전엔 loginRedirect가 무조건 reason=session_expired를 붙였다 — "만료"는 살아있던
+    // 세션이 죽었다는 주장인데, 애초에 세션이 없었으면 성립하지 않는다. 재현: /legal/refund 같은
+    // 보호 라우트에 쿠키 0개 브라우저로 진입(선생님 실측 2026-08-18).
     const response = await middleware(makeRequest('/dashboard'));
     expect(response.status).toBe(307);
-    // AC3(551bbbee): hard /login 대신 next 보존 + reason 배너 계약. graceful 세션 만료 UX.
     const loc = response.headers.get('location') ?? '';
     expect(loc).toContain('https://app.example.com/login?');
     expect(loc).toContain(`next=${encodeURIComponent('/dashboard')}`);
-    expect(loc).toContain('reason=session_expired');
+    expect(loc).not.toContain('reason=session_expired');
   });
 
   it('clears sp_at/sp_rt cookies on definitive refresh failure — UI path (story e5225c0a P0)', async () => {
