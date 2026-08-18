@@ -49,6 +49,13 @@ ENV NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED=${NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED}
 # 였다 — 기본값 false(미설정 시 dev-safe fallback, SSE_MULTIPLEX_ENABLED와 동일 컨벤션).
 ARG NEXT_PUBLIC_EE_ENABLED=false
 ENV NEXT_PUBLIC_EE_ENABLED=${NEXT_PUBLIC_EE_ENABLED}
+# story #2758(2026-08-18) — apps/web/src/ee/components/billing/toss-checkout.ts(story #2510)가
+# 읽는 Toss 결제위젯 clientKey. manual-env-allowlist.yml에 declared_by:PO로 「등재」만 되고
+# ARG/ENV 어디에도 배선된 적이 없어(EE_ENABLED·LICENSE_CONSENT와 동형 「등재≠배선」 3번째)
+# dev FE에 값이 아예 없었다. publishable 값(secret 아님, 브라우저 노출 전제) — 기본값 빈
+# 문자열(미설정 시 dev-safe fallback, 위 컨벤션과 동일).
+ARG NEXT_PUBLIC_TOSS_CLIENT_KEY=""
+ENV NEXT_PUBLIC_TOSS_CLIENT_KEY=${NEXT_PUBLIC_TOSS_CLIENT_KEY}
 RUN pnpm build
 
 # ─── 런타임 ──────────────────────────────────────────────────────────────────

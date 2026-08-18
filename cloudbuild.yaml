@@ -57,6 +57,14 @@ substitutions:
   # 기본값 'false'(SSE_MULTIPLEX_ENABLED와 동일 컨벤션) — GHA가 dev 브랜치에서만 'true' 주입,
   # prod는 이 커밋으로 무접촉(기존 동작 그대로 유지, 명시 false로 durable화만).
   _EE_ENABLED: "false"
+  # story #2758(2026-08-18, 페드루 PO 지시 — EE_ENABLED·LICENSE_CONSENT와 동형 「등재≠배선」
+  # 3번째, 미르코 2754 라이브 실증이 이 마디에서 잡음) — apps/web/src/ee/components/billing/
+  # toss-checkout.ts(story #2510)가 읽는 Toss 결제위젯 clientKey가 manual-env-allowlist.yml에
+  # declared_by:PO로 등재만 되고 build-arg 배선이 0건이었다 — dev FE 런타임에 값이 아예 없어
+  # SDK 초기화 직전에서 막혔다. publishable 값(secret 아님, 브라우저 노출 전제) — dev-safe
+  # 기본값 빈 문자열 — GHA가 dev 브랜치에서만 Secret Manager TOSS_PAYMENTS_CLIENT_KEY_DEV를
+  # 읽어 주입. prod는 이 커밋으로 무접촉(값 반입은 심사 후 선생님 허가 축).
+  _TOSS_CLIENT_KEY: ""
   # story #e6500272 후속(2026-08-18, 페드루 PO 지시 — #3188과 동형 발견) — backend
   # `settings.is_ee_enabled`가 읽는 `LICENSE_CONSENT`도 EE_ENABLED와 동일하게 배포 SSOT
   # 어디에도 배선된 적이 없다(cloudbuild.yaml·GHA·Dockerfile 전부 무배선). dev·prod 둘 다
@@ -257,6 +265,8 @@ steps:
       - NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED=${_SSE_MULTIPLEX_ENABLED}
       - --build-arg
       - NEXT_PUBLIC_EE_ENABLED=${_EE_ENABLED}
+      - --build-arg
+      - NEXT_PUBLIC_TOSS_CLIENT_KEY=${_TOSS_CLIENT_KEY}
       - .
     env:
       - DOCKER_BUILDKIT=1

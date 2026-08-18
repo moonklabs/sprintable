@@ -601,11 +601,3 @@ code_read_high_baseline:
     reason: apps/web/src/lib/auth/firebase-client.ts·lib/db/server.ts — 기본값 없음, 미triage(위와 동일 축).
     declared_by: PO
     until: "2026-08-27"
-  - key: NEXT_PUBLIC_TOSS_CLIENT_KEY
-    reason: >-
-      apps/web/src/ee/components/billing/toss-checkout.ts(story #2510) — 기본값 없음,
-      미triage. Toss 결제위젯 SDK 초기화용 clientKey — 실 배포 時 IaC/시크릿으로 채워질
-      알려진 필수값(secret 아님, publishable 성격 — #2878의 toss_payments_client_key와
-      한 쌍이나 그건 BE Settings 축, 이건 FE 빌드타임 축이라 별도 등재).
-    declared_by: PO
-    until: "2026-08-27"
