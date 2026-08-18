@@ -41,12 +41,17 @@ def test_check_member_invite_limit_docstring_says_3_not_5():
 # ─── AC①: 생성 시점 cap = 현재 멤버 + pending invite 합 ─────────────────────
 
 def test_check_member_invite_limit_counts_pending_invites_in_sql():
-    """count SQL에 org_invites·pending·org_members 3요소가 합산 형태로 실재."""
-    from ee.plan_limits import check_member_invite_limit
-    source = inspect.getsource(check_member_invite_limit)
-    assert "org_invites" in source
-    assert "pending" in source
-    assert "org_members" in source
+    """count SQL에 org_invites·pending·org_members 3요소가 합산 형태로 실재 — #2776 리팩터로
+    이 SQL은 공용 헬퍼 `_seat_usage`(check_member_invite_limit/accept_limit 공유)로 옮겨졌다."""
+    from ee.plan_limits import _seat_usage, check_member_invite_limit
+    invite_source = inspect.getsource(check_member_invite_limit)
+    assert "_seat_usage" in invite_source
+    assert "include_pending_invites=True" in invite_source
+
+    seat_usage_source = inspect.getsource(_seat_usage)
+    assert "org_invites" in seat_usage_source
+    assert "pending" in seat_usage_source
+    assert "org_members" in seat_usage_source
 
 
 @pytest.mark.anyio
@@ -58,9 +63,11 @@ async def test_check_member_invite_limit_rejects_when_members_plus_pending_at_ca
     mock_session = AsyncMock()
     tier_result = MagicMock()
     tier_result.first.return_value = ("free",)
+    offering_result = MagicMock()
+    offering_result.first.return_value = (3, 3)  # (included_seats, max_agents) — #2776 카탈로그 조회
     count_result = MagicMock()
     count_result.scalar.return_value = 3  # 2 members + 1 pending = 3 = cap
-    mock_session.execute = AsyncMock(side_effect=[tier_result, count_result])
+    mock_session.execute = AsyncMock(side_effect=[tier_result, offering_result, count_result])
 
     with pytest.raises(HTTPException) as exc_info:
         await check_member_invite_limit(mock_session, uuid.uuid4())
@@ -76,9 +83,11 @@ async def test_check_member_invite_limit_passes_when_under_cap():
     mock_session = AsyncMock()
     tier_result = MagicMock()
     tier_result.first.return_value = ("free",)
+    offering_result = MagicMock()
+    offering_result.first.return_value = (3, 3)  # (included_seats, max_agents) — #2776 카탈로그 조회
     count_result = MagicMock()
     count_result.scalar.return_value = 2  # 1 member + 1 pending = 2 < 3
-    mock_session.execute = AsyncMock(side_effect=[tier_result, count_result])
+    mock_session.execute = AsyncMock(side_effect=[tier_result, offering_result, count_result])
 
     await check_member_invite_limit(mock_session, uuid.uuid4())  # 예외 없어야 함
 
@@ -86,9 +95,11 @@ async def test_check_member_invite_limit_passes_when_under_cap():
 # ─── AC②: accept-time 재검증 함수 존재 + 402 거부 (mock, 락 존재만 확인) ────
 
 def test_check_member_accept_limit_exists():
+    """#2776: 하드코딩 max_members 대신 offering_versions 카탈로그(_get_offering_limits)에서
+    seats 캡을 조회 — 全 tier 집행."""
     from ee.plan_limits import check_member_accept_limit
     source = inspect.getsource(check_member_accept_limit)
-    assert "max_members" in source
+    assert "_get_offering_limits" in source
     assert "_plan_limit_error" in source or "raise" in source
 
 
@@ -122,11 +133,13 @@ async def test_accept_rejects_when_at_cap_ee_on():
     invite_result.scalar_one_or_none.return_value = invite
     tier_result = MagicMock()
     tier_result.first.return_value = ("free",)
+    offering_result = MagicMock()
+    offering_result.first.return_value = (3, 3)  # (included_seats, max_agents) — #2776 카탈로그 조회
     count_result = MagicMock()
     count_result.scalar.return_value = 3  # 이미 cap
 
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[invite_result, MagicMock(), tier_result, count_result])
+    session.execute = AsyncMock(side_effect=[invite_result, MagicMock(), tier_result, offering_result, count_result])
 
     repo = OrgInviteRepository(session)
     with patch("app.repositories.org_invite.settings") as mock_settings:
