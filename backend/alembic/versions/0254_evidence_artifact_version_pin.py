@@ -15,7 +15,11 @@ nullable, ON DELETE SET NULL: 이 스토리는 신규 evidence부터 pin을 시�
 아니라 SET NULL(근거였다는 사실 자체는 evidence.ref에 여전히 남을 수 있으니 파괴 안 함).
 
 Revision ID: 0254
-Revises: 0253
+Revises: 0253a
+
+⚠️2026-08-18 재부모화(story #70bc4bc3 P0 hotfix) — 원래 down_revision=0253이었으나,
+그 자리에 0253a(prod 미실행 마이그 12개 정정 replay)가 결제 승격을 기다리지 않고
+main 직행해야 해서 끼어들었다. 이 리비전 자체의 DDL 내용은 무변경.
 Create Date: 2026-08-17
 """
 from alembic import op
@@ -23,7 +27,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = "0254"
-down_revision = "0253"
+down_revision = "0253a"
 branch_labels = None
 depends_on = None
 
