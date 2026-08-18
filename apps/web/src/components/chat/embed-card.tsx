@@ -309,11 +309,14 @@ function EntityDetail({ entityType, entityId, detail }: { entityType: string; en
     if (!d.title) return null;
     const statusLabel = d.status ? translateEntityStatus('task', d.status) : null;
     const parentHref = d.story_id ? getEntityHref('story', d.story_id) : null;
+    if (!statusLabel && !parentHref) return null;
     return (
       <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-1.5">
-          {statusLabel && <MdBadge label={statusLabel} />}
-        </div>
+        {statusLabel && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <MdBadge label={statusLabel} />
+          </div>
+        )}
         {parentHref && (
           <a href={parentHref} className="text-xs text-primary hover:underline">
             부모 스토리 보기 →
