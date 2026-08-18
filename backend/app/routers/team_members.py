@@ -58,6 +58,10 @@ async def _inject_active_stories(
     """AC6: active_story_id → stories batch 조회 후 inject.
 
     #2120 AC2: online 키 배치조회(MGET 1회) → 있으면 last_seen_at override → computed_field online.
+
+    story #2751(설계②) — 이 함수는 오직 에이전트 리스트에만 호출된다(call site 확認, 아래
+    `list_team_members` 참고) — `verified` 배치 주입을 여기 같이 얹어도 human 응답에 새
+    분기를 안 만든다.
     """
     ids = {m.active_story_id for m in members if m.active_story_id}
     stories: dict[uuid.UUID, Story] = {}
@@ -69,6 +73,9 @@ async def _inject_active_stories(
     from app.services import presence_online
     online_map = await presence_online.get_online_map([m.id for m in members])
 
+    from app.services.agent_verify import get_verified_map
+    verified_map = await get_verified_map(session, [m.id for m in members])
+
     out = []
     for m in members:
         resp = TeamMemberResponse.model_validate(m)
@@ -78,6 +85,7 @@ async def _inject_active_stories(
             resp = resp.model_copy(update={
                 "active_story": ActiveStorySummary(id=s.id, title=s.title, status=s.status)
             })
+        resp = resp.model_copy(update={"verified": verified_map.get(m.id)})
         out.append(resp)
     return out
 

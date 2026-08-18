@@ -90,6 +90,11 @@ class TeamMemberResponse(BaseModel):
     agent_status: str | None = None
     # S2-4: active_story 요약 — router에서 inject
     active_story: ActiveStorySummary | None = None
+    # story #2751(설계②) — 워크포스 목록 "연결 안 됨" CTA용. type='agent'에서만 의미 있다
+    # (router `_inject_active_stories()`가 배치 주입 — human 행에도 False가 실릴 수 있으나
+    # FE는 type='agent'에서만 이 필드를 읽는다, 소비 규약). agent_ids 목록에 없거나(빈
+    # 목록 등) 함수가 아직 안 도는 단건 경로에서만 None.
+    verified: bool | None = None
 
     # S2-3: computed presence_status — 조회 시점 실시간 계산
     @computed_field
