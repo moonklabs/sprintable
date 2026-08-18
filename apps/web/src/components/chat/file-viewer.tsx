@@ -176,7 +176,7 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
         {state.kind === 'error' && (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
             <p className="text-sm text-foreground">불러오지 못했습니다.</p>
-            <p className="w-fit rounded-md bg-destructive-tint px-2 py-1.5 font-mono text-[10.5px] text-destructive">
+            <p className="w-fit rounded-md bg-destructive-tint px-2 py-1.5 font-mono text-[10.5px] text-foreground">
               {state.status} {state.message}
             </p>
             <button
