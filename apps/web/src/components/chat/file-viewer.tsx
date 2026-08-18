@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Download, Expand, File, FileCode, FileText, Film, Image as ImageIcon, Music, X, type LucideIcon } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/db/client';
-import { isNativeShell } from '@/lib/native-shell-bridge';
+import { downloadAsset, openExternal } from '@/lib/native-shell-bridge';
 import { MdBody } from '@/components/chat/embed-card';
 import type { ReadingPanelTarget } from '@/components/chat/reading-panel';
 
@@ -82,7 +82,6 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
   const format = resolveFormat(target.contentType, target.label);
   const [state, setState] = useState<SignState>({ kind: 'fetching' });
   const [downloading, setDownloading] = useState(false);
-  const nativeShell = isNativeShell();
 
   useEffect(() => {
     let cancelled = false;
@@ -96,28 +95,22 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
     void signAttachment(target, 'inline').then(setState);
   }, [target]);
 
+  // story #2765(레인 B) — downloadAsset이 환경을 스스로 판별한다(RN 셸=postMessage 브리지
+  // /브라우저=<a download>). 레인 A 시점의 "RN이면 비활성" 특례는 브리지가 실제로 붙었으니
+  // 더 이상 없다 — 항상 실행 가능.
   const handleDownload = useCallback(async () => {
-    if (nativeShell) return; // §A5 — RN 브리지(레인 B/#2765) 도착 전까지 웹 경로만 실행
     if (downloading) return;
     setDownloading(true);
     try {
       const s = await signAttachment(target, 'attachment');
-      if (s.kind === 'ready') {
-        const a = document.createElement('a');
-        a.href = s.url;
-        a.download = target.label;
-        a.rel = 'noopener noreferrer';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      }
+      if (s.kind === 'ready') downloadAsset(s.url, target.label);
     } finally {
       setDownloading(false);
     }
-  }, [target, downloading, nativeShell]);
+  }, [target, downloading]);
 
   const handleOpenFull = useCallback(() => {
-    if (state.kind === 'ready') window.open(state.url, '_blank', 'noopener,noreferrer');
+    if (state.kind === 'ready') openExternal(state.url);
   }, [state]);
 
   const Icon = iconFor(format);
@@ -141,10 +134,10 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
         <button
           type="button"
           onClick={() => void handleDownload()}
-          disabled={downloading || nativeShell}
+          disabled={downloading}
           className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
           aria-label="다운로드"
-          title={nativeShell ? '앱 다운로드는 준비 중입니다' : '다운로드'}
+          title="다운로드"
         >
           <Download className="h-4 w-4" />
         </button>
