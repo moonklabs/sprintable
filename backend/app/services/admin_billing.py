@@ -153,17 +153,24 @@ async def grant_credit(
     # 조회에 org_id 조건이 없으면 타 org가 우연히/의도적으로 같은 idempotency_key를 재사용할
     # 때 남의 org의 grant entry를 그대로 반환해버린다(IDOR류) — org_id 불일치는 409로 닫는다.
     #
-    # PO 지적(2026-08-18, PR2 비블로커②) — provider_ref UNIQUE는 entry_type 무관 테이블
-    # 전체 스코프(0229 마이그)다. entry_type 필터 없이 조회하면, 어드민이 고른 Idempotency-
-    # Key가 우연히 다른 종류의 entry(웹훅 provider_ref·본 서비스의 revert companion
-    # "grant-revert:<id>" 등)와 문자열이 겹칠 때 그 이종 entry를 "이 grant의 replay"로
-    # 오인해 반환한다 — 그 entry의 entry_metadata엔 target_tier/prev_tier/grant_expires_at
-    # 같은 키가 없어(또는 다른 뜻으로 존재해) 이후 이 값을 읽는 어디선가 KeyError로 터진다.
-    # entry_type='credit_grant'로 좁혀 애초에 다른 종류를 candidate에서 배제한다.
+    # PO 지적(2026-08-18, PR2 비블로커② — 1차 fix가 반쪽이었던 지점) — provider_ref
+    # UNIQUE는 entry_type 무관 테이블 전체 스코프(0229 마이그)다. **조회**에 entry_type
+    # 필터만 걸고 저장은 그대로 두면, 충돌 키가 들어왔을 때 조회는 이종 entry를 걸러
+    # "replay 아님"으로 정상 경로에 진입시키지만 그다음 tier가 이미 commit된 뒤 **저장
+    # INSERT**가 여전히 같은 UNIQUE를 위반해 ON CONFLICT DO NOTHING으로 조용히 무삽입되고,
+    # `record_ledger_entry`의 충돌 폴백이 그 이종 entry를 재조회해 반환한다 — 장부 없는
+    # tier 변경(entry 자체가 생성 안 됨) + 반환값이 credit_grant가 아니라 이후 이 값을
+    # 읽는 어디선가 KeyError. 조회만 좁히는 건 반쪽 fix(필터 前보다 정합이 오히려 나쁨).
+    #
+    # 정공법 — provider_ref 자체를 이 grant 전용 네임스페이스로 저장한다(revert companion의
+    # `grant-revert:<id>` 규율과 동일 패턴). 이러면 admin_grant_provider_ref가 다른 종류의
+    # entry(웹훅 provider_ref 등 임의 문자열)와 우연히 겹칠 확률이 사실상 0으로 떨어져
+    # 저장 INSERT 층의 충돌 자체가 원천 소멸한다 — entry_type 필터는 방어 depth로 유지.
+    admin_grant_provider_ref = f"admin-grant:{idempotency_key}"
     existing = (
         await session.execute(
             select(BillingLedgerEntry).where(
-                BillingLedgerEntry.provider_ref == idempotency_key,
+                BillingLedgerEntry.provider_ref == admin_grant_provider_ref,
                 BillingLedgerEntry.entry_type == "credit_grant",
             )
         )
@@ -220,7 +227,7 @@ async def grant_credit(
     entry = await record_ledger_entry(
         session, org_id=org_id, entry_type="credit_grant",
         amount_minor=amount_minor, currency=currency, direction="credit",
-        provider_ref=idempotency_key, metadata=metadata,
+        provider_ref=admin_grant_provider_ref, metadata=metadata,
     )
     _audit(
         actor_email=actor_email, org_id=org_id, action="credit_grant",
