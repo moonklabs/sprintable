@@ -14,3 +14,11 @@ declare global {
 export function notifyContentPainted() {
   window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'content-painted' }));
 }
+
+// story #2766(레인 A) §A5 — 다운로드 버튼 환경 분기의 판별 신호. 레인 B(#2765)가 실제 브릿지
+// 훅(다운로드/외부 열기 postMessage 왕복)을 구현하기 전까지는, 이 판별만으로 "RN 안이면 아직
+// 다운로드 미지원(레인 B 대기)"을 정직 표시하는 데 쓴다 — 서버사이드(SSR)에서 호출하면 항상
+// false(window 없음).
+export function isNativeShell(): boolean {
+  return typeof window !== 'undefined' && Boolean(window.ReactNativeWebView);
+}

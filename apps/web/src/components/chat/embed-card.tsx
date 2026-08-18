@@ -312,6 +312,7 @@ export function EntityPreviewModal({
   status,
   href,
   onClose,
+  embedded = false,
 }: {
   entityType: string;
   entityId: string;
@@ -319,6 +320,11 @@ export function EntityPreviewModal({
   status: string | null;
   href: string | null;
   onClose: () => void;
+  /** story #2766(레인 A) — Dialog(중앙 모달, base DialogContent의 sm:max-w-sm 상속)가 아니라
+   * ReadingPanel(우측 패널) 안에 그대로 얹힐 때 true. fetch·헤더·본문·풋터 로직은 완전히
+   * 동일 재사용(모달 vs 패널 전환 시 별도 재구현 0) — 바뀌는 건 바깥 래퍼(Dialog vs 패널
+   * 자체 크기의 plain div)뿐이다. */
+  embedded?: boolean;
 }) {
   // story #2302 — hypothesis·evidence는 fetch 자체를 안 한다(항상 고정 ③, ENTITY_API에 항목
   // 없음) — 예전 코드는 'task'만 예외 취급해 loading을 false로 시작했는데, ENTITY_API에 없는
@@ -526,68 +532,100 @@ export function EntityPreviewModal({
     linkKind = resolvedHref ? 'own' : null;
   }
 
+  // story #2766(레인 A) — Dialog(모달)와 embedded(패널) 두 래퍼가 헤더/본문/풋터는 100%
+  // 동일 재사용한다. embedded일 땐 DialogTitle(base-ui Dialog.Title — Dialog.Root 컨텍스트
+  // 밖에서 쓰면 안전하지 않다)을 평범한 span으로 바꾸는 것만 다르다.
+  const header = (TitleTag: 'dialog-title' | 'span') => (
+    <div className="flex flex-shrink-0 items-start gap-3 border-b border-border px-6 pt-5 pb-3">
+      <div className={`flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-1.5 text-sm ${colorClass}`}>
+        <EntityGlyph Icon={resolveEntityIcon(entityType)} label={label} />
+        {TitleTag === 'dialog-title' ? (
+          <DialogTitle className="truncate text-sm font-semibold">{label}</DialogTitle>
+        ) : (
+          <span className="truncate text-sm font-semibold">{label}</span>
+        )}
+        {resolvedStatusLabel ? (
+          <span className="ml-auto shrink-0 rounded bg-black/10 px-1.5 py-0.5 text-xs dark:bg-white/10">{resolvedStatusLabel}</span>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        onClick={onClose}
+        className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
+        aria-label="닫기"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  );
+
+  const body = (
+    <div className="flex-1 overflow-y-auto px-6 py-4">
+      {loading ? (
+        <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground">
+          <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          불러오는 중…
+        </div>
+      ) : notFound ? (
+        <p className="py-4 text-xs text-muted-foreground">대상을 찾을 수 없습니다.</p>
+      ) : detail && RICH_PREVIEW_TYPES.has(entityType) ? (
+        <EntityDetail entityType={entityType} entityId={entityId} detail={detail} />
+      ) : (
+        <p className="py-4 text-xs text-muted-foreground">이 엔티티는 별도 미리보기가 없습니다.</p>
+      )}
+    </div>
+  );
+
+  // Footer — story #2302 AC4: ㉠/㉡-b는 회색·기본커서로 "죽는 건 링크뿐"(카드 전체 안 죽음).
+  // 색은 회색 하나(노랑 금지 — 위 GRAY_STATE_COLOR 주석 참고), 구별은 문구로.
+  const footer = !loading && (
+    <div className="flex-shrink-0 border-t border-border px-6 py-3">
+      {notFound ? (
+        <span className="flex cursor-default items-center gap-1.5 text-sm text-muted-foreground">대상이 없습니다</span>
+      ) : resolvedHref ? (
+        <Link
+          href={resolvedHref}
+          onClick={onClose}
+          className="flex items-center gap-1.5 text-sm text-primary hover:underline"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          {linkKind === 'via-parent' ? '담긴 곳으로 갑니다' : '전체 보기'}
+        </Link>
+      ) : (
+        <span className="flex cursor-default items-center gap-1.5 text-sm text-muted-foreground">열 수 있는 화면이 없습니다</span>
+      )}
+    </div>
+  );
+
+  if (embedded) {
+    return (
+      <div className="flex h-full flex-col overflow-hidden bg-background">
+        {header('span')}
+        {body}
+        {footer}
+      </div>
+    );
+  }
+
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="flex max-h-[80vh] max-w-3xl flex-col overflow-hidden rounded-xl p-0" showCloseButton={false}>
-        {/* Header */}
-        <div className="flex-shrink-0 flex items-start gap-3 px-6 pt-5 pb-3 border-b border-border">
-          <div className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm ${colorClass} flex-1 min-w-0`}>
-            <EntityGlyph Icon={resolveEntityIcon(entityType)} label={label} />
-            <DialogTitle className="font-semibold truncate text-sm">{label}</DialogTitle>
-            {resolvedStatusLabel ? (
-              <span className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs bg-black/10 dark:bg-white/10">{resolvedStatusLabel}</span>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="shrink-0 text-muted-foreground hover:text-foreground mt-0.5"
-            aria-label="닫기"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        {/* Scrollable body */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
-          {loading ? (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground py-8 justify-center">
-              <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              불러오는 중…
-            </div>
-          ) : notFound ? (
-            <p className="text-xs text-muted-foreground py-4">대상을 찾을 수 없습니다.</p>
-          ) : detail && RICH_PREVIEW_TYPES.has(entityType) ? (
-            <EntityDetail entityType={entityType} entityId={entityId} detail={detail} />
-          ) : (
-            <p className="text-xs text-muted-foreground py-4">이 엔티티는 별도 미리보기가 없습니다.</p>
-          )}
-        </div>
-        {/* Footer — story #2302 AC4: ㉠/㉡-b는 회색·기본커서로 "죽는 건 링크뿐"(카드 전체 안
-            죽음). 색은 회색 하나(노랑 금지 — 위 GRAY_STATE_COLOR 주석 참고), 구별은 문구로. */}
-        {!loading && (
-          <div className="flex-shrink-0 px-6 py-3 border-t border-border">
-            {notFound ? (
-              <span className="flex cursor-default items-center gap-1.5 text-sm text-muted-foreground">대상이 없습니다</span>
-            ) : resolvedHref ? (
-              <Link
-                href={resolvedHref}
-                onClick={onClose}
-                className="flex items-center gap-1.5 text-sm text-primary hover:underline"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-                {linkKind === 'via-parent' ? '담긴 곳으로 갑니다' : '전체 보기'}
-              </Link>
-            ) : (
-              <span className="flex cursor-default items-center gap-1.5 text-sm text-muted-foreground">열 수 있는 화면이 없습니다</span>
-            )}
-          </div>
-        )}
+        {header('dialog-title')}
+        {body}
+        {footer}
       </DialogContent>
     </Dialog>
   );
 }
 
-export function EmbedCard({ entity_type, entity_id, title, status }: EmbedCardData) {
+export function EmbedCard({
+  entity_type, entity_id, title, status, onOpenReadingPanel,
+}: EmbedCardData & {
+  /** story #2766(레인 A) — 채팅(ChatView)이 물려주면 doc 미리보기 아이콘 클릭이 중앙 모달
+   * 대신 우측 ReadingPanel을 연다. 생략하면(undefined, 채팅 밖의 기존 호출부들) 기존
+   * Dialog 모달 그대로 — 회귀 없음. */
+  onOpenReadingPanel?: (entityType: string, entityId: string, title: string | null, status: string | null, href: string | null) => void;
+}) {
   const [showModal, setShowModal] = useState(false);
   const [navigating, setNavigating] = useState(false);
   const router = useRouter();
@@ -657,7 +695,11 @@ export function EmbedCard({ entity_type, entity_id, title, status }: EmbedCardDa
           </button>
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); setShowModal(true); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onOpenReadingPanel) onOpenReadingPanel(entity_type, entity_id, title, status, href);
+              else setShowModal(true);
+            }}
             className="shrink-0 rounded p-1 opacity-70 transition-opacity hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10"
             aria-label="미리보기"
             title="미리보기"
@@ -665,7 +707,7 @@ export function EmbedCard({ entity_type, entity_id, title, status }: EmbedCardDa
             <Eye className="size-3.5" />
           </button>
         </div>
-        {showModal && (
+        {!onOpenReadingPanel && showModal && (
           <EntityPreviewModal
             entityType={entity_type}
             entityId={entity_id}
