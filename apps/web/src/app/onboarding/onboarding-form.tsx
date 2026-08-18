@@ -364,6 +364,12 @@ export function OnboardingForm({ initialStep, initialOrgId }: OnboardingFormProp
                 // ⚠️Phase2 i18n·#2485 — 클라 측 정규식 검증 문구가 하드코딩 한국어다(t() 아님,
                 // 서버 응답과 무관 — raw 서버 누수는 아님). #2484 스코프 밖, 유나 design 확認.
                 <p className="text-xs text-destructive">영소문자, 숫자, 하이픈만 사용 가능합니다</p>
+              ) : !orgSlug && orgName.trim() ? (
+                // story #2750 — 조직명이 한글 등 비-ASCII로만 이뤄지면 handleOrgNameChange의
+                // 자동 파생(로마자/숫자만 남기는 정규식)이 전부 걸러내 orgSlug가 빈 문자열로
+                // 남는다. 그 상태에서 아래 버튼이 무설명 disabled로 남던 것이 이 스토리의 근본
+                // 결함 — 이미 존재하는 수동 slug 입력 칸(바로 위)으로 안내해 막힘을 뚫는다.
+                <p className="text-xs text-destructive">{t('slugManualRequired')}</p>
               ) : (
                 <p className="text-xs text-muted-foreground">sprintable.app/{orgSlug || '...'}</p>
               )}
