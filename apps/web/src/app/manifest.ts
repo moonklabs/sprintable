@@ -6,9 +6,10 @@ import type { MetadataRoute } from 'next';
 // 색(인디고, 핸드오프 §6-2) #42549B로. 아이콘 파일은 경로 그대로 in-place 교체(§5).
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Sprintable — The PM tool where agents are teammates',
+    // story #2745 — layout.tsx SITE_TITLE/SITE_DESCRIPTION과 동일 정본(같은 이유로 동시 갱신).
+    name: 'Sprintable — Ship with AI agents',
     short_name: 'Sprintable',
-    description: 'AI-powered sprint management. Kanban, memos, standups, retros, MCP server — with AI agents as first-class team members.',
+    description: 'The organization OS that closes open loops. Kanban, memos, standups, retros, MCP server — with AI agents as first-class team members.',
     start_url: '/',
     display: 'standalone',
     background_color: '#FFFFFF',
