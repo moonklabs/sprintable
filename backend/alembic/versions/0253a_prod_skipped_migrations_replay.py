@@ -39,8 +39,16 @@ prod는 셋 다 동시에 어긋나 있지만 설계는 구간별로 분리).
 
 dev 등 정상 환경에서는 3개 게이트 전부 "이미 존재"로 판별돼 완전 no-op.
 
-Revision ID: 0256
-Revises: 0255
+Revision ID: 0253a
+Revises: 0253
+
+⚠️2026-08-18 페드루 PO 재배선 지시: 결제 인프라(0254 platform_settings·0255 이하)와
+무관하게 hypotheses 500(0237 산출물 부재)이 실사용자에게 실제로 발생 중이라, 이
+정정을 **결제 승격을 기다리지 않고 즉시 main 직행**시켜야 했다. 원래 down_revision
+=0255(head)였던 걸 0253 바로 뒤로 재배선(0254를 이 리비전 뒤로 재부모화) — 그래야
+main(head=0253, platform_settings 미승격 상태)에 결제 스키마 없이도 이 리비전만
+독립적으로 얹을 수 있다. develop과 main 양쪽에 **바이트 동일** 파일로 존재해야
+한다(다르면 그 어긋남 자체가 다음 승격의 새 지뢰).
 Create Date: 2026-08-18
 """
 from __future__ import annotations
@@ -51,8 +59,8 @@ import os
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0256"
-down_revision = "0255"
+revision = "0253a"
+down_revision = "0253"
 branch_labels = None
 depends_on = None
 
