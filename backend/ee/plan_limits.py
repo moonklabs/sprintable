@@ -1,23 +1,40 @@
-"""EE Plan Limit 정책 (E-ORG-MULTI S5.5).
+"""EE Plan Limit 정책 (E-ORG-MULTI S5.5, story #2776 후속 — seats/max_agents 축 통일).
 
-Free 플랜 제한:
-  - Org: 사용자당 1개 (owner 기준)
-  - Project: org당 1개
-  - Member: org당 3명 (#2471 A1 — v2.3 정책·선생님 確定 2026-08-06 04:00Z. 강제 마이그
-    아님: 기존 3명 초과 Free org는 멤버를 그대로 두고 신규 초대만 막는다 — 이 파일의 다른
-    모든 초과-자원 처리(storage: 신규 업로드만 차단·기존 파일 유지)와 동일한 패턴.)
+Org/Project 제한(#2776 스코프 밖 — `offering_versions`에 대응 필드가 없다, PO 確定
+2026-08-18: "gating 통일 완료"가 전 축으로 오독되지 않게 이름 박아둠):
+  - Org: 사용자당 owner org 1개(하드코딩 유지).
+  - Project: org당 1개, free만(하드코딩 유지).
 
-Team/Pro: 제한 없음.
+Member/Agent 제한(story #2776, 2026-08-18 — 가격표 정본 `offering_versions`로 통일):
+  - seats(휴먼+대기중 초대) — **全 tier**에서 `offering_versions.included_seats`로
+    집행(이전엔 free만 하드코딩 3, 나머지 tier는 완전 무제한이었다 — 카탈로그 실측:
+    free=3·starter=3·team=5·business=15로 실제 집행 확장됨, PO 判定 안B).
+  - `max_agents`(신규 축, 이전엔 코드 어디서도 read 0) — `offering_versions.max_agents`
+    (None=무제한, free만 유한 3).
+  - **미지 tier 방어**(PO 판정) — org_subscriptions.tier가 알려진 tier(free/starter/
+    team/business) 밖의 값이면(예: 0228 마이그가 놓친 'pro' 잔존값) 조용히 free로
+    취급하지 않는다(유료 org를 잘못 막을 위험) — fail loud 로그 + 그 요청은 무제한
+    통과(안전측 — «막는 사고»보다 «캡 미검사 통과»가 안전).
 """
+from __future__ import annotations
+
+import logging
+
 from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+logger = logging.getLogger(__name__)
+
 FREE_LIMITS: dict[str, int] = {
     "max_orgs_owned": 1,
     "max_projects": 1,
-    "max_members": 3,
 }
+
+# org_subscriptions.tier로 실제 나타날 수 있는, offering_versions가 정의하는 tier 집합.
+# 'overage'는 구독 tier가 아니라 사용량과금 축이라 여기 포함 안 됨(구독 tier로 저장되는
+# 값이 아님 — 그라운딩 확認).
+_KNOWN_TIERS = frozenset({"free", "starter", "team", "business"})
 
 # API 초과 과금 정책 (per call, USD)
 API_OVERAGE_RATES: dict[str, float] = {
@@ -26,18 +43,24 @@ API_OVERAGE_RATES: dict[str, float] = {
 }
 
 
-def _plan_limit_error(resource: str, limit: int) -> HTTPException:
-    return HTTPException(
-        status_code=402,
-        detail={
-            "code": "PLAN_LIMIT_EXCEEDED",
-            "resource": resource,
-            "limit": limit,
-            "tier": "free",
-            "upgrade_required": True,
-            "message": f"Free plan {resource} limit ({limit}) reached. Upgrade to Team or Pro.",
-        },
+def _plan_limit_error(resource: str, limit: int, current: int | None = None, tier: str = "free") -> HTTPException:
+    upgrade = tier != "business"
+    limit_repr = f"{current}/{limit}" if current is not None else str(limit)
+    msg = (
+        f"{tier} plan {resource} limit ({limit_repr}) reached. Upgrade for more capacity."
+        if upgrade else f"{resource} limit ({limit_repr}) reached."
     )
+    detail = {
+        "code": "PLAN_LIMIT_EXCEEDED",
+        "resource": resource,
+        "limit": limit,
+        "tier": tier,
+        "upgrade_required": upgrade,
+        "message": msg,
+    }
+    if current is not None:
+        detail["current"] = current
+    return HTTPException(status_code=402, detail=detail)
 
 
 async def _get_org_tier(session: AsyncSession, org_id) -> str:
@@ -48,6 +71,24 @@ async def _get_org_tier(session: AsyncSession, org_id) -> str:
     )
     row = result.first()
     return (row[0] if row else None) or "free"
+
+
+async def _get_offering_limits(session: AsyncSession, tier: str) -> tuple[int, int | None] | None:
+    """(included_seats, max_agents) — 가격표 정본. `currency` 무관 조회(그라운딩:
+    A1 스코프가 krw_v1만 시드했고 USD 카탈로그는 아직 별도 — seats/max_agents는 좌석 수
+    개념이라 통화별로 값이 다를 이유가 없다·둘 다 세팅된 currency 행이면 충분, 결정적
+    선택을 위해 currency ASC 1건). 매칭 행이 없으면 None(호출부가 §미지tier방어와 동일
+    원칙 — 무제한 통과 + 로그)."""
+    row = (await session.execute(
+        text(
+            "SELECT included_seats, max_agents FROM offering_versions "
+            "WHERE tier = :t AND effective_to IS NULL ORDER BY currency ASC LIMIT 1"
+        ),
+        {"t": tier},
+    )).first()
+    if row is None:
+        return None
+    return int(row[0]), (int(row[1]) if row[1] is not None else None)
 
 
 async def check_org_create_limit(session: AsyncSession, user_id) -> None:
@@ -65,7 +106,7 @@ async def check_org_create_limit(session: AsyncSession, user_id) -> None:
 
 
 async def check_project_create_limit(session: AsyncSession, org_id) -> None:
-    """Free: org당 project 1개 제한. Team/Pro는 스킵."""
+    """Free: org당 project 1개 제한. Team/Pro는 스킵. (#2776 스코프 밖 — 하드코딩 유지)"""
     tier = await _get_org_tier(session, org_id)
     if tier != "free":
         return
@@ -154,33 +195,54 @@ async def check_storage_capacity(session: AsyncSession, org_id, attachments: lis
         raise _storage_limit_error("storage", max_storage_mb, tier)
 
 
+async def _seat_usage(session: AsyncSession, org_id, *, include_pending_invites: bool) -> int:
+    """휴먼 org_members(+옵션: 대기중 미만료 초대) 카운트 — seats 축의 "현재값"(에이전트
+    미포함, PO 판정 안B: seats=휴먼 전용)."""
+    if include_pending_invites:
+        result = await session.execute(
+            text(
+                "SELECT "
+                "(SELECT COUNT(*) FROM org_members WHERE org_id = :oid AND deleted_at IS NULL)"
+                " + (SELECT COUNT(*) FROM org_invites"
+                "     WHERE organization_id = :oid AND status = 'pending' AND expires_at > now())"
+            ),
+            {"oid": str(org_id)},
+        )
+    else:
+        result = await session.execute(
+            text("SELECT COUNT(*) FROM org_members WHERE org_id = :oid AND deleted_at IS NULL"),
+            {"oid": str(org_id)},
+        )
+    return result.scalar() or 0
+
+
 async def check_member_invite_limit(session: AsyncSession, org_id) -> None:
-    """Free: org당 member 3명 제한 (human + agent, 현재 멤버 + pending 미만료 초대 합). Team/Pro는 스킵.
+    """story #2776 — seats 축을 全 tier에서 카탈로그(`offering_versions.included_seats`)로
+    집행(이전엔 free만 하드코딩 3, 나머지 tier 무제한이었음). 여전히 휴먼(org_members)+
+    대기중 미만료 초대 합만 센다(에이전트 미포함 — PO 판정 안B, seats 의미 불변).
 
     story #2477 AC① — pending invite를 안 세면 cap을 우회할 수 있었다(2명이 초대 5개를
     만들어 전부 수락하면 3명 캡을 넘길 수 있음). 생성 단계에서 «멤버+대기중 초대» 합으로
     선차단해 애초에 캡을 넘길 만큼의 초대가 쌓이지 못하게 한다.
     """
     tier = await _get_org_tier(session, org_id)
-    if tier != "free":
+    if tier not in _KNOWN_TIERS:
+        logger.error("check_member_invite_limit: unknown tier %r for org_id=%s — skipping cap(fail-open)", tier, org_id)
         return
-    result = await session.execute(
-        text(
-            "SELECT "
-            "(SELECT COUNT(*) FROM org_members WHERE org_id = :oid AND deleted_at IS NULL)"
-            " + (SELECT COUNT(*) FROM org_invites"
-            "     WHERE organization_id = :oid AND status = 'pending' AND expires_at > now())"
-        ),
-        {"oid": str(org_id)},
-    )
-    count = result.scalar() or 0
-    if count >= FREE_LIMITS["max_members"]:
-        raise _plan_limit_error("member", FREE_LIMITS["max_members"])
+    offering = await _get_offering_limits(session, tier)
+    if offering is None:
+        logger.error("check_member_invite_limit: no offering_version for tier=%r org_id=%s — skipping cap(fail-open)", tier, org_id)
+        return
+    seats_limit, _max_agents = offering
+    count = await _seat_usage(session, org_id, include_pending_invites=True)
+    if count >= seats_limit:
+        raise _plan_limit_error("member", seats_limit, current=count, tier=tier)
 
 
 async def check_member_accept_limit(session: AsyncSession, org_id) -> None:
-    """Free: 초대 «수락» 시점 재검증(story #2477 AC②) — 현재 멤버수만 비교(대기중 초대는
-    무관, 이 호출이 성공하면 그 초대 하나가 바로 멤버로 전환되므로). Team/Pro는 스킵.
+    """story #2776 — §check_member_invite_limit과 동일 카탈로그 소스, 全 tier 집행.
+    초대 «수락» 시점 재검증(story #2477 AC②) — 현재 멤버수만 비교(대기중 초대는 무관,
+    이 호출이 성공하면 그 초대 하나가 바로 멤버로 전환되므로).
 
     ⚠️호출부(OrgInviteRepository.accept)가 org_id 스코프 advisory xact lock을 먼저 잡은
     뒤에 불러야 한다 — 락 없이 재면 동시에 수락하는 두 트랜잭션이 서로 상대의 INSERT를
@@ -188,12 +250,40 @@ async def check_member_accept_limit(session: AsyncSession, org_id) -> None:
     함수가 아니라 호출부의 락이 담당).
     """
     tier = await _get_org_tier(session, org_id)
-    if tier != "free":
+    if tier not in _KNOWN_TIERS:
+        logger.error("check_member_accept_limit: unknown tier %r for org_id=%s — skipping cap(fail-open)", tier, org_id)
         return
-    result = await session.execute(
-        text("SELECT COUNT(*) FROM org_members WHERE org_id = :oid AND deleted_at IS NULL"),
+    offering = await _get_offering_limits(session, tier)
+    if offering is None:
+        logger.error("check_member_accept_limit: no offering_version for tier=%r org_id=%s — skipping cap(fail-open)", tier, org_id)
+        return
+    seats_limit, _max_agents = offering
+    count = await _seat_usage(session, org_id, include_pending_invites=False)
+    if count >= seats_limit:
+        raise _plan_limit_error("member", seats_limit, current=count, tier=tier)
+
+
+async def check_agent_add_limit(session: AsyncSession, org_id) -> None:
+    """story #2776 신규 — `offering_versions.max_agents` 축 집행(이전엔 코드 어디서도
+    read 0이던 그 값). None=무제한(free만 유한 3). 미지 tier/미시드 offering은 §미지tier
+    방어와 동일 원칙(fail-open+로그) — 유료 org를 잘못 막지 않는다."""
+    tier = await _get_org_tier(session, org_id)
+    if tier not in _KNOWN_TIERS:
+        logger.error("check_agent_add_limit: unknown tier %r for org_id=%s — skipping cap(fail-open)", tier, org_id)
+        return
+    offering = await _get_offering_limits(session, tier)
+    if offering is None:
+        logger.error("check_agent_add_limit: no offering_version for tier=%r org_id=%s — skipping cap(fail-open)", tier, org_id)
+        return
+    _seats, max_agents = offering
+    if max_agents is None:
+        return  # 무제한 tier
+    count = (await session.execute(
+        text(
+            "SELECT COUNT(*) FROM members "
+            "WHERE org_id = :oid AND type = 'agent' AND is_active = true AND deleted_at IS NULL"
+        ),
         {"oid": str(org_id)},
-    )
-    count = result.scalar() or 0
-    if count >= FREE_LIMITS["max_members"]:
-        raise _plan_limit_error("member", FREE_LIMITS["max_members"])
+    )).scalar() or 0
+    if count >= max_agents:
+        raise _plan_limit_error("agent", max_agents, current=count, tier=tier)

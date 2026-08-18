@@ -65,11 +65,13 @@ def test_oss_no_plan_limit_imported_unconditionally():
 # ─── AC3: Free 제한값 검증 ───────────────────────────────────────────────────
 
 def test_free_limits_defined():
-    """FREE_LIMITS에 max_orgs_owned, max_projects, max_members 정의."""
+    """FREE_LIMITS에 max_orgs_owned, max_projects 정의(#2776: org/project는 스코프 밖
+    하드코딩 유지). max_members는 #2776로 offering_versions.included_seats 카탈로그
+    집행으로 이관돼 이 dict에서 빠짐(전 tier 공통 조회이지 tier별 상수가 아니므로)."""
     from ee.plan_limits import FREE_LIMITS
     assert FREE_LIMITS["max_orgs_owned"] == 1
     assert FREE_LIMITS["max_projects"] == 1
-    assert FREE_LIMITS["max_members"] == 3  # #2471(A1): v2.3 정책, 5→3(선생님 確定 04:00Z)
+    assert "max_members" not in FREE_LIMITS
 
 
 def test_free_limits_org_check_exists():
@@ -89,22 +91,28 @@ def test_free_limits_project_check_exists():
 
 
 def test_free_limits_member_check_exists():
-    """check_member_invite_limit 함수 존재."""
+    """check_member_invite_limit 함수 존재 — #2776: 하드코딩 max_members 대신
+    offering_versions(카탈로그 정본)에서 seats 캡을 조회."""
     from ee.plan_limits import check_member_invite_limit
     source = inspect.getsource(check_member_invite_limit)
-    assert "max_members" in source
+    assert "_get_offering_limits" in source
     assert "_plan_limit_error" in source or "raise" in source
 
 
-# ─── AC4: Team/Pro 제한 없음 ─────────────────────────────────────────────────
+# ─── AC4: Team/Pro 제한 없음(project/org 축만, #2776 스코프 밖 유지) ─────────
 
-def test_team_pro_skips_limit():
-    """project/member limit 체크 소스에 tier != 'free' 시 return 존재."""
+def test_team_pro_skips_project_limit_but_not_member_limit():
+    """#2776 판정 안B: project/org 축은 여전히 free 전용 하드코딩(스코프 밖, tier!='free'
+    시 skip 유지)이지만, member(seats) 축은 이제 全 tier가 offering_versions 카탈로그로
+    집행돼 더 이상 "team/pro는 무제한"이 아니다 — 이 비대칭을 소스로 직접 pin."""
     from ee.plan_limits import check_project_create_limit, check_member_invite_limit
-    for fn in (check_project_create_limit, check_member_invite_limit):
-        source = inspect.getsource(fn)
-        assert "return" in source
-        assert "free" in source
+    project_source = inspect.getsource(check_project_create_limit)
+    assert "return" in project_source
+    assert "free" in project_source
+
+    member_source = inspect.getsource(check_member_invite_limit)
+    assert "_KNOWN_TIERS" in member_source  # free 단독분기가 아니라 known-tier 집합 방어
+    assert '!= "free"' not in member_source and "!= 'free'" not in member_source
 
 
 # ─── AC5: 402 + upgrade_required ─────────────────────────────────────────────

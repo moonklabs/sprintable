@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db, get_read_db
 from app.dependencies.ownership import _is_org_admin, assert_agent_owner
@@ -342,6 +343,12 @@ async def create_team_member(
     # project_access placement) = 유일 영속 경로. ⚠️ api_key 자동생성(아래)보다 선행 — agent_api_keys.
     # member_id→members FK(0080) 충족 + cut-on 무중단.
     if body.type == "agent":
+        # EE: story #2776 — max_agents 축 집행(offering_versions 정본). OSS에서는 로드되지 않음.
+        # anchor sync(실제 영속)보다 선행 — 캡 초과 요청이 members 앵커에 새겨지기 전에 막는다.
+        if settings.is_ee_enabled:
+            from ee.plan_limits import check_agent_add_limit  # type: ignore[import]
+            await check_agent_add_limit(session, org_id)
+
         from app.services.agent_anchor_sync import sync_agent_anchor_on_create
         await sync_agent_anchor_on_create(session, member, created_by)
 

@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.dependencies.ownership import assert_agent_owner
@@ -135,6 +136,11 @@ async def create_org_agent(
         from app.services.project_auth import is_org_owner_or_admin
         if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
             raise HTTPException(status_code=403, detail="org admin/owner role required to manage members")
+
+    # EE: story #2776 — max_agents 축 집행(offering_versions 정본). OSS에서는 로드되지 않음.
+    if settings.is_ee_enabled:
+        from ee.plan_limits import check_agent_add_limit  # type: ignore[import]
+        await check_agent_add_limit(session, org_id)
 
     created_by = uuid.UUID(auth.user_id)  # 휴먼=user_id / 에이전트=member.id (anchor sync 가 휴먼만 owner 매칭)
     member, api_key_plaintext = await create_org_level_agent(
