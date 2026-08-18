@@ -31,7 +31,9 @@ class CreditGrantRequest(BaseModel):
     target_tier: GrantTier
     months: int = Field(..., ge=1, le=12)
     reason: str = Field(..., min_length=1)
-    amount_minor: int = Field(..., gt=0)
+    # PO 지적③(판정 변경) — amount_minor는 어드민 자유입력이 아니라 서버가
+    # offering_versions(checkout과 동일 가격 원천)에서 파생한다. 이 필드는 애초에
+    # request body에 없다(유나 UI 인계 doc도 이 필드 없이 짜여 있었음 — 결과적으로 정합).
     currency: str = "krw"
 
 
@@ -44,7 +46,7 @@ async def retry_billing(
 ) -> dict:
     _reject_prod()
     try:
-        order = await retry_billing_order(session, org_id=org_id, order_id=body.order_id)
+        order = await retry_billing_order(session, org_id=org_id, order_id=body.order_id, actor_email=operator.email)
     except AdminBillingError as e:
         raise HTTPException(status_code=e.status_code, detail={"code": e.code, "message": e.message}) from e
     return {"order_id": order.order_id, "status": order.status}
@@ -62,7 +64,7 @@ async def credit_grant(
     try:
         entry = await grant_credit(
             session, org_id=org_id, target_tier=body.target_tier, months=body.months,
-            reason=body.reason, amount_minor=body.amount_minor, currency=body.currency,
+            reason=body.reason, currency=body.currency,
             idempotency_key=idempotency_key, actor_email=operator.email,
         )
     except AdminBillingError as e:
