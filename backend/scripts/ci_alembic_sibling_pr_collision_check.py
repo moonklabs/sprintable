@@ -160,36 +160,57 @@ def _run_gh_json(args: list[str]) -> object:
     return json.loads(result.stdout)
 
 
-def _this_pr_new_files() -> list[Path]:
-    """이 PR이 base 대비 새로 추가한 alembic 리비전 파일 목록(git 기준, 정본)."""
+def _this_pr_head_paths() -> set[str]:
+    """이 PR(작업 트리, HEAD)이 지금 실제로 갖고 있는 alembic 리비전 파일 경로 집합 —
+    git 트리 기준 정본(로컬 미커밋 변경은 안 봄, CI 계약과 동일)."""
+    out = _run_git(["ls-tree", "-r", "--name-only", "HEAD", "--", str(ALEMBIC_REL_DIR)])
+    return {p.strip() for p in out.splitlines() if p.strip().endswith(".py")}
+
+
+def _base_paths() -> set[str]:
     base_ref = os.environ["PR_BASE_REF"]
-    out = _run_git(
-        ["diff", "--relative", "--name-only", "--diff-filter=A",
-         f"origin/{base_ref}...HEAD", "--", str(ALEMBIC_REL_DIR)],
-    )
-    return [Path(p) for p in out.splitlines() if p.strip()]
+    out = _run_git(["ls-tree", "-r", "--name-only", f"origin/{base_ref}", "--", str(ALEMBIC_REL_DIR)])
+    return {p.strip() for p in out.splitlines() if p.strip().endswith(".py")}
+
+
+def _this_pr_new_files() -> list[Path]:
+    """이 PR이 base 대비 «새로 갖게 된» alembic 리비전 파일 목록 — **집합 차집합**(PR
+    HEAD 경로 − base 경로)으로 판별한다.
+
+    story #f6d1bbaa 후속 fix②(2026-08-18, 페드루 진단) — 기존엔 `git diff --diff-
+    filter=A`(git의 rename-heuristic에 좌우됨)를 썼다. git이 리네임으로 감지하면 새
+    경로가 **R**로 분류돼 A로 안 잡히고, 삭제(D)도 별도 처리가 없어 base 쪽에서
+    stale 유령 리비전으로 계속 비교돼 위양성/위음성을 동시에 만들 수 있었다(#f6d1bbaa
+    PR #3199 리뷰 — diff-filter=M만 고친 1차 fix가 남긴 D/R 사각). 집합 차집합은 git의
+    rename-heuristic·필터 문자와 완전히 무관하다 — "지금 PR HEAD에 있는데 base엔 없는
+    경로"라는 사실 자체만 본다(add든 rename-후-경로든 결과는 같다: PR 관점에서 새
+    존재)."""
+    return [Path(p) for p in sorted(_this_pr_head_paths() - _base_paths())]
 
 
 def _base_current_revisions() -> list[RevisionInfo]:
-    """base 브랜치의 «현재(이 job 실행 시점)» 전체 리비전 — PR이 열린 뒤 base가 진행됐어도
+    """base 브랜치의 «현재(이 job 실행 시점)» 리비전 — PR이 열린 뒤 base가 진행됐어도
     이 job이 매번 fresh하게 fetch한 base 최신을 본다(축 A/B의 "PR이 못 보는 새 형제" 케이스
-    중 「형제가 이미 머지돼 base 자체가 된」 경우를 여기서 잡는다)."""
-    base_ref = os.environ["PR_BASE_REF"]
-    tree_out = _run_git(
-        ["ls-tree", "-r", "--name-only", f"origin/{base_ref}", "--", str(ALEMBIC_REL_DIR)],
-    )
+    중 「형제가 이미 머지돼 base 자체가 된」 경우를 여기서 잡는다).
+
+    **base에는 있지만 이 PR HEAD엔 없는 경로**(이 PR이 삭제했거나 리네임으로 옛 이름을
+    버린 경우)는 아예 결과에서 제외한다 — 그 리비전은 이 PR 관점에서 더는 존재하지
+    않으므로 stale 유령으로 비교하면 안 된다(#f6d1bbaa fix② — D/R 사각 해소).
+
+    **base에도 있고 이 PR HEAD에도 있는 경로**는 base의 git-show 내용이 아니라 **이
+    PR(작업 트리, HEAD)의 현재 로컬 파일 내용**을 읽는다 — 그래야 이 PR이 그 기존
+    파일을 수정(예: down_revision 재부모화)했어도 자기 자신의 최신 상태와 비교된다
+    (#f6d1bbaa fix① — M 사각 해소, PR #3196 hotfix에서 실측)."""
+    pr_head_paths = _this_pr_head_paths()
     infos: list[RevisionInfo] = []
-    for rel_path in tree_out.splitlines():
-        rel_path = rel_path.strip()
-        if not rel_path or not rel_path.endswith(".py"):
-            continue
-        content = _run_git(
-            ["show", f"origin/{base_ref}:{_ROOT_PREFIX}{rel_path}"],
-        )
+    for rel_path in sorted(_base_paths()):
+        if rel_path not in pr_head_paths:
+            continue  # 이 PR이 삭제/리네임-이탈시킨 경로 — stale 유령 비교 방지.
+        content = Path(rel_path).read_text(encoding="utf-8")
         revision, down_revision = _extract_revision_vars(content)
         if revision is None:
             continue
-        infos.append(RevisionInfo(rel_path, revision, _down_revision_set(down_revision), f"base:{base_ref}"))
+        infos.append(RevisionInfo(rel_path, revision, _down_revision_set(down_revision), "this PR(existing, current content)"))
     return infos
 
 
