@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import re
 import uuid
 from datetime import datetime
 
@@ -12,12 +15,15 @@ from app.dependencies.auth import AuthContext, get_current_user, get_scope_conte
 from app.dependencies.database import get_db
 from app.models.asset import Asset
 from app.services.artifact_image_url import _canonicalize_props, sign_image_srcs_in_nodes
+from app.services.asset_registry import DEFAULT_CONTAINER
+from app.services.storage import get_storage_provider
 from app.models.visual_artifact import (
     ArtifactComment, ArtifactExport, ArtifactNode, ArtifactSpecPin, ArtifactVersion, VisualArtifact,
 )
 from app.schemas.visual_artifact import (
     ArtifactCommentResponse,
     ArtifactExportResponse,
+    ArtifactNodeIn,
     ArtifactNodeOperation,
     ArtifactNodeOut,
     ArtifactVersionSummary,
@@ -29,6 +35,7 @@ from app.schemas.visual_artifact import (
     EditArtifactRequest,
     ExportUploadUrlRequest,
     ExportUploadUrlResponse,
+    ImportImageArtifactRequest,
     SpecPinResponse,
     UpdateSpecPinRequest,
     VisualArtifactDetail,
@@ -37,6 +44,13 @@ from app.schemas.visual_artifact import (
 from app.services.member_resolver import filter_org_member_ids
 from app.services.notification_dispatch import dispatch_notification
 from app.services.project_auth import assert_target_in_caller_org
+
+# story 64010b05 FE 라우트(apps/web import-image/route.ts)와 동일 상수(포팅판 — 20MB, 첨부
+# 100MB보다 보수적). 이 파일 안에서만 쓰는 로컬 상수라 GCS host 문자열도 artifact_image_url.py/
+# asset_registry.py와 같은 값을 여기 한 번 더 든다(이 두 파일의 기존 중복 관례 그대로 — 새 SSOT
+# 발명 0).
+_MAX_IMPORT_IMAGE_BYTES = 20 * 1024 * 1024
+_GCS_HOST = "storage.googleapis.com"
 
 router = APIRouter(prefix="/api/v2/visual-artifacts", tags=["visual-artifacts", "Work"])
 
@@ -185,6 +199,48 @@ async def create_artifact(
         nodes=node_outs,
     )
     return _ok(detail.model_dump(mode="json"), status=201)
+
+
+@router.post("/import-image", status_code=201)
+async def import_image_artifact(
+    body: ImportImageArtifactRequest,
+    auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """story b6b9c52d(#2707 부수) — MCP `sprintable_import_image_artifact` 전용 원콜 입구
+    (base64 in → artifact out). FE import-image 라우트(story 64010b05, apps/web
+    api/visual-artifacts/import-image/route.ts)의 서버사이드 GCS 업로드 로직을 포팅하고, 그 뒤를
+    이어 `create_artifact()`를 내부 함수 호출로 그대로 재사용(DB write 로직 사본 발명 0 — 두
+    갈래가 다시 어긋나면 create_artifact 한쪽만 고치고 여기를 잊는 사고가 난다는 뜻이니, 이
+    엔드포인트를 건드릴 땐 그 함수도 같이 봐야 한다)."""
+    if not body.content_type.startswith("image/"):
+        return _err("VALIDATION_ERROR", "content_type must be an image/* type", 400)
+    try:
+        image_bytes = base64.b64decode(body.image_base64, validate=True)
+    except (binascii.Error, ValueError):
+        return _err("VALIDATION_ERROR", "image_base64 is not valid base64", 400)
+    if len(image_bytes) > _MAX_IMPORT_IMAGE_BYTES:
+        return _err("VALIDATION_ERROR", "image too large (max 20MB)", 413)
+
+    org_id, project_id = scope["org_id"], scope["project_id"]
+    if not org_id:
+        return _err("FORBIDDEN", "org_id required", 403)
+
+    safe_title = re.sub(r"[^\w.-]+", "_", body.title).strip("_")[:128] or "image"
+    object_path = f"org/{org_id}/project/{project_id}/canvas-import/{uuid.uuid4()}-{safe_title}"
+    uploaded = await get_storage_provider().put_object(
+        DEFAULT_CONTAINER, object_path, image_bytes, content_type=body.content_type,
+    )
+    if not uploaded:
+        return _err("UPSTREAM_ERROR", "image upload failed", 502)
+
+    canonical_url = f"https://{_GCS_HOST}/{DEFAULT_CONTAINER}/{object_path}"
+    create_body = CreateArtifactRequest(
+        title=body.title, story_id=body.story_id, doc_id=body.doc_id, source="imported",
+        nodes=[ArtifactNodeIn(type="html_blob", props={"src": canonical_url})],
+    )
+    return await create_artifact(create_body, auth=auth, scope=scope, session=session)
 
 
 async def _get_artifact_or_404(

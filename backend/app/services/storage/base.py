@@ -2,6 +2,12 @@
 
 D3 결정: BE 범위 = attachment_context 실사용인 **read + sign 만**. put/delete 는 FE 업로드
 경로 전담(BE 미사용) → dead surface 회피(YAGNI). 후속에서 필요 시 확장.
+
+story b6b9c52d(2026-08-17, #2707 후속) — 그 "후속"이 처음 실현됐다. MCP 서버는 FastAPI
+백엔드와 HTTP로만 통신하는 별도 프로세스라 Next.js FE의 put 경로를 호출할 방법이 없어,
+`POST /api/v2/visual-artifacts/import-image`(sprintable_import_image_artifact MCP 도구
+전용, `routers/visual_artifacts.py`)가 BE 런타임에서 처음 `put_object`를 호출한다 — D3의
+"put=FE 전담" 원칙에 대한 의도적 예외(구조적으로 불가피, dead surface 아님).
 """
 from __future__ import annotations
 
