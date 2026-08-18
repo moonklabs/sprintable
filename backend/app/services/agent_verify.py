@@ -43,6 +43,20 @@ RAIL_STATES = ("config_copied", "waiting", "mcp_reachable", "event_delivered", "
 HTTP_RAIL_STATES = ("config_copied", "waiting", "mcp_reachable", "verified")
 
 
+async def push_verification_signal(
+    *, org_id: uuid.UUID, agent_id: uuid.UUID, state: str, transport: str = "stdio",
+) -> None:
+    """story #2467 respec — polling 대체 SSE push. verify-rail 상태 전이(mcp_reachable·verified)를
+    org 멤버 전원에게 브로드캐스트(presence push_to_org_members 와 동형 패턴 — 발명 0). FE 는
+    `onboarding.rail_signal` named 이벤트를 구독해 GET 재조회 없이 직접 렌더한다."""
+    from app.routers.events import push_to_org_members
+
+    await push_to_org_members(
+        str(org_id), "onboarding.rail_signal",
+        {"agent_id": str(agent_id), "state": state, "transport": transport},
+    )
+
+
 def build_verification_rail(
     *,
     verify_seq: int | None,

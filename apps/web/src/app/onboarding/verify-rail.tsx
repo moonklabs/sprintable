@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { useSseNotifications } from '@/hooks/use-sse-notifications';
 
 export type RailStatus = 'pending' | 'active' | 'done' | 'failed';
 
@@ -29,10 +30,12 @@ export type RailState = (typeof RAIL_ORDER)[number];
 /** E-MCP-OPT S3: 호스팅(http) transport 축소 레일 — event_delivered/ack 없음(구조적으로 불가·BE agent_verify.py). */
 export const HTTP_RAIL_ORDER = ['config_copied', 'waiting', 'mcp_reachable', 'verified'] as const;
 
-/** story #4cdad425(prod 에스컬레이트) — 검증이 이 시간(ms) 안에 verified로 안 넘어가면 «진단 힌트»를
- * 띄운다. 근본: 설정만 붙이고 Claude Code를 재시작 안 하면 폴링이 영원히 pending에 머물러
- * 실유저가 5회 재시도했다(무한 폴링 가림). 폴링 자체는 계속 돈다(성공하면 힌트는 자동으로 사라짐). */
-export const VERIFY_TIMEOUT_MS = 60_000;
+/** story #2467 respec(2026-08-18, 「10초 내 살아있음 신호」 의무) — 원래 60s(story #4cdad425
+ * polling 진단힌트)였으나, 신호 의무 프로토콜로는 연결 직후 10초가 "살아있다는 첫 신호"의
+ * 상한이다(재실측 #2748: 순수 왕복 6.5초 — 10초는 그 위 여유). 10초 안에 mcp_reachable/verified
+ * SSE push가 안 오면 «미도달 + 진단 힌트»를 정직히 띄운다(#2404 클래스 재발 방지 — 침묵을
+ * "대기 중"으로 영원히 두지 않음). SSE push는 늦게라도 도착하면 이 힌트를 자동으로 감춘다. */
+export const VERIFY_TIMEOUT_MS = 10_000;
 
 export interface DisplayStep {
   state: RailState;
@@ -200,7 +203,6 @@ export interface UseVerificationRailOptions {
    * 동적)·recruiter: 항상 true(STEP4 번들 다운로드 완주 시점이라 이미 완료로 간주, 기존
    * recruiter-client.tsx 주석 "번들 다운로드=STEP3 완주로 이미 완료" 그대로 보존). */
   configCopiedDone: boolean;
-  pollIntervalMs?: number;
 }
 
 export interface UseVerificationRailResult {
@@ -253,15 +255,20 @@ export function computeShowVerifyExamplePrompt(transport: Transport | null, veri
  * (hasCopied && !beSteps일 때 pending을 active로 덮어쓰던 것). #2407 조사 中 미르코 라이브
  * 실측(http 축, story #2422/#2423 인접 조사)이 확認: `heartbeat_fresh` 하나가 http 레일
  * 전체를 한 번에 뒤집는 구조라 애초에 "부분 상태"가 정의돼 있지 않다 — 그 보정은 첫 폴
- * 응답 前(~pollIntervalMs) 잠깐의 화면 표시일 뿐 실제 관측 가능한 차이를 만들지 않았다.
+ * 응답 前 잠깐의 화면 표시일 뿐 실제 관측 가능한 차이를 만들지 않았다.
  * PO 판정(2026-08-02): 결함이 아니라 설계 그대로 — 제거해도 관측 가능한 손실이 없다.
+ *
+ * story #2467 respec(2026-08-18) — 2.5초 setInterval polling 철거. 「살아있음 신호」는 이제
+ * BE가 push하는 named SSE 이벤트(`onboarding.rail_signal` — agent_gateway.py 두 지점:
+ * ①/stream 연결 직후 자동 verify 기동→mcp_reachable ②/events/ack에서 verify round-trip
+ * 완료→verified)로만 받는다. 재조회(GET verification-status)는 ⓐ마운트 시 1회(재로드/재진입
+ * 복원용) ⓑSSE push 도착 시 1회, 둘 다 반복 타이머가 아니라 이벤트 트리거 단발 호출이다.
  */
 export function useVerificationRail({
   agentId,
   transport,
   enabled,
   configCopiedDone,
-  pollIntervalMs = 2500,
 }: UseVerificationRailOptions): UseVerificationRailResult {
   const t = useTranslations('onboarding');
   const [beSteps, setBeSteps] = useState<RawStep[] | null>(null);
@@ -282,13 +289,27 @@ export function useVerificationRail({
     }
   }, []);
 
+  // 마운트/transport전환 1회 스냅샷 — 반복 타이머 아님(재로드 시 이미 진행된 상태 복원용).
   useEffect(() => {
     if (!enabled || !agentId || !transport) return;
     setBeSteps(null); // transport 전환 시 이전 transport의 레일 상태가 새 레일에 새는 것 방지
     void pollStatus(agentId, transport);
-    const iv = setInterval(() => void pollStatus(agentId, transport), pollIntervalMs);
-    return () => clearInterval(iv);
-  }, [enabled, agentId, transport, pollIntervalMs, pollStatus]);
+  }, [enabled, agentId, transport, pollStatus]);
+
+  // story #2467 respec — 살아있음 신호 수신(SSE push) → 그 즉시 단발 재조회. 반복 타이머 없음
+  // (grep 검산 대상: 이 파일에 setInterval 0).
+  const handleRailSignal = useCallback((_eventName: string, data: unknown) => {
+    const payload = data as { agent_id?: string } | null;
+    if (!enabled || !agentId || !transport) return;
+    if (!payload || payload.agent_id !== agentId) return; // 다른 에이전트의 신호는 무시
+    void pollStatus(agentId, transport);
+  }, [enabled, agentId, transport, pollStatus]);
+
+  useSseNotifications({
+    enabled: enabled && Boolean(agentId) && Boolean(transport),
+    extraEventNames: ['onboarding.rail_signal'],
+    onExtraEvent: handleRailSignal,
+  });
 
   // story #4cdad425 — 진단 힌트 타이머. 폴링이 시작되면(또는 transport 전환·수동 재시도로 verifyNonce가
   // 오르면) 재무장하고, VERIFY_TIMEOUT_MS 지나도 verified가 안 되면 timedOut을 켠다. 폴링은 멈추지

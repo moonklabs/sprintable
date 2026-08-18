@@ -235,3 +235,61 @@ describe('useVerificationRail — story #4cdad425 (검증 타임아웃 진단 �
     unmount();
   });
 });
+
+// story #2467 respec — SSE push가 재조회를 "트리거"하는 것이지 타이머가 반복 도는 게 아님을
+// 직접 증명한다. useSseNotifications를 모킹해 onExtraEvent 콜백을 손으로 쥐고 실행 —
+// 그 호출 하나가 fetch 1회를 유발하는지, 그리고 시간 경과만으로는(콜백 없이) fetch가 안
+// 늘어나는지(=반복 타이머 부재) 둘 다 확인한다.
+vi.mock('@/hooks/use-sse-notifications', () => ({
+  useSseNotifications: vi.fn(),
+}));
+
+describe('useVerificationRail — story #2467 respec (SSE push가 재조회를 트리거·polling 아님)', () => {
+  const opts = { agentId: 'a1', transport: 'stdio' as const, enabled: true, configCopiedDone: false };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    global.fetch = vi.fn(async () => ({ ok: false, json: async () => ({}) })) as unknown as typeof fetch;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('시간만 흘러선 재조회가 안 늘어난다(반복 타이머 없음) — SSE push가 와야 늘어난다', async () => {
+    const { useSseNotifications } = await import('@/hooks/use-sse-notifications');
+    let capturedOnExtraEvent: ((eventName: string, data: unknown) => void) | undefined;
+    (useSseNotifications as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      (o: { onExtraEvent?: typeof capturedOnExtraEvent }) => { capturedOnExtraEvent = o.onExtraEvent; },
+    );
+
+    function Harness2({ o }: { o: Parameters<typeof useVerificationRail>[0] }) {
+      useVerificationRail(o);
+      return null;
+    }
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    act(() => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={ko} timeZone="Asia/Seoul"><Harness2 o={opts} /></NextIntlClientProvider>,
+      );
+    });
+
+    const callsAfterMount = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.length;
+    expect(callsAfterMount).toBeGreaterThan(0); // 마운트 1회 스냅샷
+
+    // 시간만 30초 흘려도(과거 2.5s 폴링이면 12번 더 늘었을 시간) 추가 fetch 없음.
+    act(() => { vi.advanceTimersByTime(30_000); });
+    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callsAfterMount);
+
+    // SSE push 도착(mock onExtraEvent 직접 호출) → 그 즉시 단발 재조회 1회.
+    act(() => { capturedOnExtraEvent?.('onboarding.rail_signal', { agent_id: 'a1', state: 'mcp_reachable' }); });
+    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callsAfterMount + 1);
+
+    // 다른 agent_id의 신호는 무시(내 재조회 트리거 아님).
+    act(() => { capturedOnExtraEvent?.('onboarding.rail_signal', { agent_id: 'someone-else', state: 'verified' }); });
+    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callsAfterMount + 1);
+
+    act(() => root.unmount());
+  });
+});
