@@ -302,7 +302,11 @@ def test_ac4_real_repo_scan_counts_are_recorded():
     # 2026-08-18 story #e6500272 후속으로 LICENSE_CONSENT도 동형 배선(backend deploy 스텝
     # ENV_VARS)해 IaC-covered로 전환·high 15→14,
     # 2026-08-18 story #2758 후속으로 NEXT_PUBLIC_TOSS_CLIENT_KEY도 동형 배선(cloudbuild.yaml
-    # build-arg+GHA dev 분기 Secret Manager 주입)해 IaC-covered로 전환·high 14→13) — 스위트가
+    # build-arg+GHA dev 분기 Secret Manager 주입)해 IaC-covered로 전환·high 14→13,
+    # 2026-08-18 story #2749 후속으로 NEXT_PUBLIC_APP_URL도 동형 배선(cloudbuild.yaml
+    # deploy-backend ENV_VARS+GHA dev/prod 분기 — dev 가입 인증메일 verify 링크가 prod
+    # 도메인으로 발급되던 근본원인, apps/web 소비처는 무접촉이나 cloudbuild.yaml/cloud-build.yml
+    # 은 서비스 공유 스캔이라 frontend-prod의 이 축에도 covered로 반영)해 high 13→12) — 스위트가
     # 실패하면 숫자가 바뀐 것, 원인을 봐야 한다. 이번 -5/+5는 SPRINTABLE_RUNTIME_ROLE·
     # SPRINTABLE_{BACKGROUND,MEMO_DISPATCHER,DISCORD_OUTBOUND,TEAMS_OUTBOUND}_POLL_INTERVAL_MS
     # 다섯이 high(미triage)에서 code_read_exempt(영구 정상)로 승격된 것 — env 드리프트
@@ -312,7 +316,7 @@ def test_ac4_real_repo_scan_counts_are_recorded():
     # 은퇴 상태). 값을 채워야 도는 게 아니라 안 채워야 지금 의도대로 도는 스위치라
     # code_read_exempt가 정확한 분류다(baseline의 "아직 triage 안 됨"과 다르다).
     assert len(highest) == 1, highest
-    assert len(high) == 13, high
+    assert len(high) == 12, high
     assert len(low) == 9, low
     assert len(exempt) == 23
 
