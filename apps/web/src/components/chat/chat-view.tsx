@@ -10,6 +10,7 @@ import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
 import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from './reference-drop-notice';
 import { ChatInput, type CommandTarget } from './chat-input';
 import { ThreadPanel } from './thread-panel';
+import { ReadingPanel, type ReadingPanelTarget } from './reading-panel';
 import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { normalizeToMessage, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
@@ -128,8 +129,17 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // activeThread 열림 여부를 ref로 추적 — popstate 핸들러 stale closure 방지
   const activeThreadRef = useRef(false);
 
+  // story #2766(레인 A) — ReadingPanel도 우측 패널이라 스레드와 동일 슬롯을 공유한다(동시
+  // 2패널 레이아웃은 인계 doc에 없는 새 영역이라 짓지 않음 — 열면 서로 배타적으로 닫는다).
+  const [activeReadingPanel, setActiveReadingPanel] = useState<ReadingPanelTarget | null>(null);
+  // activeThreadRef와 동일 이유(popstate stale closure 방지) — 모바일 뒤로가기 제스처가
+  // ThreadPanel과 똑같이 이 패널도 먼저 닫아야 한다(페이지 이탈 아님).
+  const activeReadingPanelRef = useRef(false);
+
   // 스레드 열기: 현재 URL 유지한 채 history entry 추가
   const openThread = useCallback((message: ChatMessage) => {
+    activeReadingPanelRef.current = false;
+    setActiveReadingPanel(null);
     setActiveThread(message);
     activeThreadRef.current = true;
     const url = window.location.pathname + window.location.search;
@@ -140,6 +150,20 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const closeThread = useCallback(() => {
     activeThreadRef.current = false;
     setActiveThread(null);
+  }, []);
+
+  const openReadingPanel = useCallback((target: ReadingPanelTarget) => {
+    activeThreadRef.current = false;
+    setActiveThread(null);
+    activeReadingPanelRef.current = true;
+    setActiveReadingPanel(target);
+    const url = window.location.pathname + window.location.search;
+    window.history.pushState({ _sprintableReadingPanel: true }, '', url);
+  }, []);
+
+  const closeReadingPanel = useCallback(() => {
+    activeReadingPanelRef.current = false;
+    setActiveReadingPanel(null);
   }, []);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -339,13 +363,17 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     onReconnect: handleReconnect,
   });
 
-  // fix: popstate — 스레드 열린 상태에서만 가로채기 (Next.js 네비게이션 비간섭)
+  // fix: popstate — 스레드/리딩패널 열린 상태에서만 가로채기 (Next.js 네비게이션 비간섭)
   useEffect(() => {
     const handlePopState = (e: PopStateEvent) => {
-      if (!activeThreadRef.current) return; // 스레드 없으면 Next.js가 처리
-      // 스레드 닫기 + 현재 URL 재push → 실제 뒤로가기 취소, 채팅 화면 유지
+      // story #2766(레인 A) — 모바일 뒤로가기 제스처가 ReadingPanel도 ThreadPanel과 동일하게
+      // "페이지 이탈"이 아니라 "패널만 닫기"로 소비돼야 한다(전체화면 드로어 규약).
+      if (!activeThreadRef.current && !activeReadingPanelRef.current) return; // 둘 다 없으면 Next.js가 처리
+      // 패널 닫기 + 현재 URL 재push → 실제 뒤로가기 취소, 채팅 화면 유지
       activeThreadRef.current = false;
       setActiveThread(null);
+      activeReadingPanelRef.current = false;
+      setActiveReadingPanel(null);
       window.history.pushState(e.state ?? null, '', window.location.pathname + window.location.search);
     };
     window.addEventListener('popstate', handlePopState);
@@ -709,6 +737,11 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
   // CB-S9: 모바일에서 스레드 뷰로 전환 중인지 (< lg)
   const isMobileThreadView = activeThread !== null;
+  // story #2766(레인 A) — ReadingPanel도 같은 "메인 채팅 숨김" 규칙을 탄다(모바일 전체화면
+  // 드로어). ReadingPanel 자신이 이미 자체 닫기(X) 버튼을 갖고 있어(FileViewer/EntityPreviewModal
+  // 헤더) ThreadPanel처럼 별도 상단 "뒤로" 바를 새로 만들지 않는다.
+  const isMobileReadingView = activeReadingPanel !== null;
+  const isMobileRightPanelView = isMobileThreadView || isMobileReadingView;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -731,8 +764,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       {/* Body: main chat + optional thread panel (side-by-side on desktop) */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
 
-        {/* Main chat — AC8: 모바일에서 스레드 뷰 활성 시 hidden */}
-        <div className={`flex min-w-0 flex-1 flex-col overflow-hidden ${isMobileThreadView ? 'hidden lg:flex' : 'flex'}`}>
+        {/* Main chat — AC8: 모바일에서 스레드/리딩패널 뷰 활성 시 hidden */}
+        <div className={`flex min-w-0 flex-1 flex-col overflow-hidden ${isMobileRightPanelView ? 'hidden lg:flex' : 'flex'}`}>
           {/* Messages */}
           <div
             ref={scrollRef}
@@ -812,6 +845,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                             isMine={msg.created_by === currentTeamMemberId}
                             isGrouped={isGrouped}
                             onOpenThread={openThread}
+                            onOpenReadingPanel={openReadingPanel}
                             onDelete={handleDeleteMessage}
                             onBlockUser={
                               msg.created_by !== currentTeamMemberId
@@ -943,6 +977,18 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               requestedEntityStatusKeysRef={requestedEntityStatusKeysRef}
               setEntityStatusByKey={setEntityStatusByKey}
             />
+          </div>
+        )}
+
+        {/* story #2766(레인 A) §A1 — ReadingPanel: 데스크톱 clamp(480px,40vw,720px) 사이드 /
+            모바일 전체 뷰. ThreadPanel과 같은 슬롯이지만 폭 규격이 다르다(320px 고정이 아님
+            — 문서 가독 기준 폭). */}
+        {activeReadingPanel && (
+          <div
+            className={`flex flex-col overflow-hidden ${isMobileReadingView ? 'flex-1' : 'hidden lg:flex'}`}
+            style={isMobileReadingView ? undefined : { width: 'clamp(480px, 40vw, 720px)', flexShrink: 0 }}
+          >
+            <ReadingPanel target={activeReadingPanel} onClose={closeReadingPanel} />
           </div>
         )}
       </div>

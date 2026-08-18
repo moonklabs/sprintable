@@ -17,14 +17,23 @@ interface AttachmentFileProps {
   storyId?: string;
   label: string;
   Icon: LucideIcon;
+  /** story #2766(레인 A) — 채팅 호출부가 물려주면 클릭 시 새 탭 대신 ReadingPanel을 연다
+   * (서명 URL 자체는 패널이 직접 뜬다 — 여기선 target 정보만 전달). 생략하면(undefined,
+   * docs/kanban 등 채팅 밖 기존 호출부) 기존 window.open 다운로드 그대로 — 회귀 없음. */
+  onOpenPanel?: (target: { storedUrl: string; conversationId?: string; storyId?: string; label: string; contentType?: string | null }) => void;
+  contentType?: string | null;
 }
 
-export function AttachmentFile({ storedUrl, conversationId, storyId, label, Icon }: AttachmentFileProps) {
+export function AttachmentFile({ storedUrl, conversationId, storyId, label, Icon, onOpenPanel, contentType }: AttachmentFileProps) {
   const t = useTranslations('chats');
   const { addToast } = useToast();
   const [loading, setLoading] = useState(false);
 
   const open = useCallback(async () => {
+    if (onOpenPanel) {
+      onOpenPanel({ storedUrl, conversationId, storyId, label, contentType });
+      return;
+    }
     if (loading) return;
     setLoading(true);
     try {
@@ -48,7 +57,7 @@ export function AttachmentFile({ storedUrl, conversationId, storyId, label, Icon
     } finally {
       setLoading(false);
     }
-  }, [storedUrl, conversationId, storyId, loading, addToast, t]);
+  }, [storedUrl, conversationId, storyId, label, contentType, loading, addToast, t, onOpenPanel]);
 
   return (
     <button
