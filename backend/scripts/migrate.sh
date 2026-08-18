@@ -148,5 +148,18 @@ else
   echo "[migrate] prod-fork precheck: no action needed."
 fi
 
+# story #70bc4bc3 후속(2026-08-18) — **재봉합 stamp 정합 가드**: 마이그 개발 中 일부
+# 리비전을 임시 제외하려 뒤쪽 리비전의 down_revision을 재봉합했다가 나중에 정본 체인을
+# 복원하면, 그 임시 재봉합 이미지로 이미 실행된 prod의 alembic_version은 "복원된 정본
+# 체인 기준 이미 지난 리비전들"을 실제로는 실행한 적이 없는 채로 영구히 오판된다
+# (#70bc4bc3 실사고 — 0228~0235·0237~0239·0242 총 12개 리비전이 이 방식으로 5주+
+# 조용히 미실행 상태였음, hypotheses 500이 실사용자에게 실제로 발생 중이었다).
+#
+# EE-stamp·0183a fork precheck와 달리 **self-heal 안 함** — 이 정합 위반은 원인이
+# 다양할 수 있어 자동 stamp 재조정이 오히려 새 드리프트를 만들 위험이 있다. FAIL 시
+# migrate job 자체를 죽여 배포를 막는다 — 사람이 봐야 하는 실패로 남긴다.
+echo "[migrate] stamp-chain-integrity precheck: verifying ancestry DDL artifacts..."
+python3 scripts/jobs/check_stamp_chain_integrity.py
+
 echo "Running: alembic upgrade heads"
 exec alembic upgrade heads
