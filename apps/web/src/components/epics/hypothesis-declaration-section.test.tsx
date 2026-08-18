@@ -15,7 +15,7 @@ function wrap(node: React.ReactNode) {
 
 // story #2760 — sprints/hypothesis-declaration-section.test.tsx와 동형(사본 관계 컴포넌트,
 // goals 네임스페이스만 다름). measureAfter 부족 캡션이 이 사본에도 실렌더되는지 확認.
-describe('EpicHypothesisDeclarationSection (story 671ea3b8 S4)', () => {
+describe('EpicHypothesisDeclarationSection — 부족 필드 캡션 (story #2760)', () => {
   beforeEach(() => {
     vi.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200 }));
   });
