@@ -1,0 +1,208 @@
+"""story #2777(E-ADMIN-REDESIGN·결제 운영) — 어드민 처리 액션(빌링 재시도·사용권 부여).
+
+두 "부품은 있는데 조립 안 됨" 재료를 조립한다(그라운딩 2026-08-18):
+- 재시도: `charge_org`(#2493, sweep_dunning_retries가 이미 쓰는 그 함수) 그대로 재사용
+  — cron 케이던스(day+1/3/5) 게이트는 걸지 않는다(자동 스윕만의 비즈니스 리듬이지, 수동
+  트리거의 안전조건이 아니다 — charge_org 자체가 idempotent/claim을 이미 지킨다). 유일한
+  게이트는 "지금 이 order가 정말 failed인가"뿐.
+- 사용권: `billing_ledger.record_ledger_entry(entry_type='credit_grant')`만으로는 아무것도
+  안 풀린다(org_ledger_balances 소비처 0, 그라운딩 확認) — 실제 gating이 읽는 유일한 값은
+  `org_subscriptions.tier`뿐이라, 원장기록 + tier 세팅 두 쓰기를 **같은 세션·같은 트랜잭션**
+  으로 묶는다(`record_ledger_entry`가 내부에서 commit하므로, tier 갱신을 그보다 먼저
+  flush만 해두면 그 commit이 둘 다 함께 확정한다 — 별도 트랜잭션 관리 불요).
+
+PR2(sweep_expired_grants, 후속 별도 PR)가 되돌릴 재료를 여기서 심는다 — ledger entry의
+entry_metadata에 kind/target_tier/prev_tier/grant_expires_at을 남긴다(신규 컬럼 0).
+
+PO AC 리뷰 CHANGES(2026-08-18, head d488d2f) 반영:
+① Idempotency-Key replay 시 provider_ref 기존 행을 **먼저** 조회 — 있으면 구독(tier/
+   period) 무접촉으로 기존 entry 그대로 반환한다(이전 버전은 tier bump를 항상 먼저
+   flush해 재전송마다 current_period_end가 뒤로 밀리는 결함이 있었다).
+② audit 로그(pricing_version.py `_audit()`와 동형 JSON) 추가 — retry/grant 양쪽.
+③ amount_minor는 어드민 자유입력이 아니라 `offering_versions`(checkout과 동일 가격
+   원천)에서 서버가 파생 — monthly_price_minor × months. 원천 없는 tier/currency
+   조합은 fail loud(422, 지어낸 수를 장부에 남기지 않는다)."""
+from __future__ import annotations
+
+import json
+import logging
+import uuid
+from datetime import datetime, timezone
+from typing import Literal
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.billing_ledger_entry import BillingLedgerEntry
+from app.models.billing_order import BillingOrder
+from app.models.offering_version import OfferingVersion
+from app.models.org_subscription import OrgSubscription
+from app.services.billing_charge import charge_org
+from app.services.billing_ledger import record_ledger_entry
+from app.services.billing_period import _add_months
+
+audit_logger = logging.getLogger("sprintable.audit.admin_billing")
+
+GrantTier = Literal["starter", "team", "business"]
+# grant는 오직 유료 tier로만 — free/overage는 "부여" 대상이 아니다(overage=사용량과금,
+# 구독 tier 서열 밖 — PO 판정 2026-08-18).
+_TIER_RANK: dict[str, int] = {"free": 0, "starter": 1, "team": 2, "business": 3}
+
+
+def _audit(*, actor_email: str, org_id: uuid.UUID, action: str, before: dict | None, after: dict) -> None:
+    audit_logger.info(
+        json.dumps(
+            {
+                "audit": "admin_billing",
+                "actor_email": actor_email,
+                "org_id": str(org_id),
+                "action": action,
+                "before": before,
+                "after": after,
+            },
+            default=str, ensure_ascii=False,
+        )
+    )
+
+
+class AdminBillingError(Exception):
+    """라우터가 status_code로 매핑. code는 FE가 분기하는 안정 식별자(HTTP status만으론
+    "왜"가 안 잡히므로 — retry의 409 ALREADY_HANDLED가 그 예)."""
+
+    def __init__(self, status_code: int, code: str, message: str) -> None:
+        self.status_code = status_code
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
+async def retry_billing_order(
+    session: AsyncSession, *, org_id: uuid.UUID, order_id: str, actor_email: str,
+) -> BillingOrder:
+    order = (
+        await session.execute(
+            select(BillingOrder).where(BillingOrder.order_id == order_id, BillingOrder.org_id == org_id)
+        )
+    ).scalar_one_or_none()
+    if order is None:
+        raise AdminBillingError(404, "ORDER_NOT_FOUND", f"order {order_id} not found for this org")
+    if order.status != "failed":
+        # PO 지적(부수 1건) — FE가 "실패"로 오인해 잘못된 복구 행동(예: 재재시도 반복)을
+        # 유도하지 않도록 사람이 읽을 사유를 명시한다.
+        raise AdminBillingError(
+            409, "ALREADY_HANDLED",
+            f"이미 처리됨 — 현재 상태: {order.status}(재시도 불필요)",
+        )
+
+    status_before = order.status
+    await charge_org(
+        session, org_id=org_id, order_id=order.order_id,
+        amount_minor=order.amount_minor, currency=order.currency,
+    )
+    refreshed = (
+        await session.execute(select(BillingOrder).where(BillingOrder.order_id == order_id))
+    ).scalar_one()
+    _audit(
+        actor_email=actor_email, org_id=org_id, action="billing_retry",
+        before={"order_id": order_id, "status": status_before},
+        after={"order_id": order_id, "status": refreshed.status},
+    )
+    return refreshed
+
+
+async def _derive_grant_amount_minor(session: AsyncSession, *, target_tier: GrantTier, currency: str, months: int) -> int:
+    """checkout과 동일 가격 원천(offering_versions)에서 파생 — 어드민 손입력 금지(PO
+    지적③: 지어낸 수를 장부에 남기지 않는다). 원천 없으면 조용한 0/추정 대신 fail loud."""
+    offering = (
+        await session.execute(
+            select(OfferingVersion).where(
+                OfferingVersion.tier == target_tier,
+                OfferingVersion.currency == currency,
+                OfferingVersion.effective_to.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if offering is None:
+        raise AdminBillingError(
+            422, "PRICING_SOURCE_UNAVAILABLE",
+            f"tier={target_tier}/currency={currency}의 유효 offering_version이 없어 금액을 파생할 수 없음",
+        )
+    return offering.monthly_price_minor * months
+
+
+async def grant_credit(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    target_tier: GrantTier,
+    months: int,
+    reason: str,
+    currency: str,
+    idempotency_key: str,
+    actor_email: str,
+    now: datetime | None = None,
+) -> BillingLedgerEntry:
+    now = now or datetime.now(timezone.utc)
+
+    # PO 지적①(블로커) — replay 여부를 tier/period에 손대기 **전에** 먼저 판정한다.
+    # 이전 버전은 구독 UPDATE를 항상 먼저 flush해, 같은 idempotency_key 재전송(타임아웃
+    # 재시도 등)마다 current_period_end가 매번 now+months로 다시 밀렸다(응답의 entry
+    # 메타 grant_expires_at과 실제 subscription 상태가 어긋나는 결함).
+    existing = (
+        await session.execute(select(BillingLedgerEntry).where(BillingLedgerEntry.provider_ref == idempotency_key))
+    ).scalar_one_or_none()
+    if existing is not None:
+        _audit(
+            actor_email=actor_email, org_id=org_id, action="credit_grant_replay",
+            before=None, after={"entry_id": str(existing.id), "idempotency_key": idempotency_key},
+        )
+        return existing
+
+    sub = (
+        await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
+    ).scalar_one_or_none()
+    current_tier = sub.tier if sub is not None else "free"
+    if _TIER_RANK[target_tier] < _TIER_RANK.get(current_tier, 0):
+        raise AdminBillingError(
+            422, "GRANT_WOULD_DOWNGRADE",
+            f"target_tier({target_tier})가 현재 tier({current_tier})보다 낮음 — grant는 강등을 하지 않는다",
+        )
+
+    amount_minor = await _derive_grant_amount_minor(session, target_tier=target_tier, currency=currency, months=months)
+
+    period_end = _add_months(now, months)
+    metadata = {
+        "kind": "tier_grant",
+        "target_tier": target_tier,
+        "prev_tier": current_tier,
+        "grant_expires_at": period_end.isoformat(),
+        "months": months,
+        "granted_by": actor_email,
+        "reason": reason,
+    }
+
+    # tier bump — flush만(commit은 record_ledger_entry가 아래서 함께 확정, 모듈 docstring 참고).
+    if sub is None:
+        sub = OrgSubscription(
+            id=uuid.uuid4(), org_id=org_id, tier=target_tier, status="active",
+            currency=currency, current_period_start=now, current_period_end=period_end,
+        )
+        session.add(sub)
+    else:
+        sub.tier = target_tier
+        sub.status = "active"
+        sub.current_period_start = now
+        sub.current_period_end = period_end
+    await session.flush()
+
+    entry = await record_ledger_entry(
+        session, org_id=org_id, entry_type="credit_grant",
+        amount_minor=amount_minor, currency=currency, direction="credit",
+        provider_ref=idempotency_key, metadata=metadata,
+    )
+    _audit(
+        actor_email=actor_email, org_id=org_id, action="credit_grant",
+        before={"tier": current_tier},
+        after={"entry_id": str(entry.id), "tier": target_tier, "grant_expires_at": period_end.isoformat(), "amount_minor": amount_minor},
+    )
+    return entry

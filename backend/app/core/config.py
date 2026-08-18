@@ -102,6 +102,20 @@ class Settings(BaseSettings):
     # EE / SaaS gating
     license_consent: str = ""
 
+    # story #2777(E-ADMIN-REDESIGN·결제 운영) — 어드민 처리 액션(빌링 재시도·사용권 부여)의
+    # SA ID-token 인가 레인. backend-dev/prod는 IAP 뒤가 아니라 공개 run.app 직결 서빙(PO
+    # 실측 2026-08-18) — internal-api의 agent-lane(SA ID token+allowlist)과 동형 패턴만
+    # 이식, IAP 검증은 없음. audience 미설정=fail-closed(503, dependencies/admin_auth.py).
+    admin_operator_audience: str = ""
+    # 콤마 구분 SA 이메일 allowlist. 미설정=fail-closed(빈 allowlist는 아무도 통과 못 함).
+    admin_operator_allowlist: str = ""
+
+    # story #2777 — 어드민 mutation(빌링 재시도·사용권 부여)의 PROD 완전차단 하드가드가
+    # 읽는 배포 환경 신호. 기존에 이 앱이 읽는 "지금 dev/prod 어디" 신호가 전무했다(그라운딩
+    # 확認 — K_SERVICE는 "Cloud Run 위"만 판별, dev/prod 구분 불가). cloudbuild.yaml의
+    # 기존 `_DEPLOY_ENV` 치환을 이 env var로 처음 배선한다(dev-safe 기본값 "dev").
+    deploy_env: str = "dev"
+
     # E-EVENTBUS: dev=true, prod=false (기존 웹훅 병행 운영)
     eventbus_enabled: bool = False
 
@@ -374,6 +388,20 @@ class Settings(BaseSettings):
     @property
     def is_ee_enabled(self) -> bool:
         return self.license_consent.lower() == "agreed"
+
+    @property
+    def admin_operator_allowlist_set(self) -> frozenset[str]:
+        return frozenset(
+            e.strip().lower() for e in self.admin_operator_allowlist.split(",") if e.strip()
+        )
+
+    @property
+    def admin_operator_auth_configured(self) -> bool:
+        return bool(self.admin_operator_audience) and bool(self.admin_operator_allowlist_set)
+
+    @property
+    def is_prod_deploy(self) -> bool:
+        return self.deploy_env.lower() == "prod"
 
     @property
     def is_really_local(self) -> bool:
