@@ -112,12 +112,16 @@ async def test_reverts_tier_when_grant_expired_and_tier_unchanged():
 
 
 @pytest.mark.asyncio
-async def test_rerun_after_revert_reports_already_reverted_not_tier_changed():
-    """PO AC 리뷰 CHANGES(head 62f44bdd) — 되돌린 grant가 다음 스윕 실행마다 매번
-    "tier_changed_since_grant"로 오집계(신호 죽음)되던 것을 skipped_already_reverted로
-    분리했는지 재실행으로 직접 확認."""
+async def test_rerun_after_revert_excludes_grant_via_companion_marker():
+    """카디르군 QA fix(2026-08-18, PR2 head c47db6dd5) — 값-비교 휴리스틱(current_tier==
+    prev_tier)을 폐기하고 companion 원장 마커(entry_type='adjustment'·metadata.kind=
+    'tier_grant_revert'·reverted_entry_id)로 바꾼 뒤: 되돌린 grant는 재조회 SQL의 NOT
+    EXISTS가 후보에서 원천 제외한다는 것을 직접 확認 — companion이 정확히 1건만 존재하고
+    (재실행해도 중복 생성 안 됨, provider_ref 결정적 유도로 멱등), 재실행이 tier를 다시
+    건드리지 않는다."""
     from app.services.billing_scheduler import sweep_expired_grants
     from app.models.org_subscription import OrgSubscription
+    from app.models.billing_ledger_entry import BillingLedgerEntry
     from sqlalchemy import select
 
     engine, maker = await _session_factory()
@@ -137,13 +141,97 @@ async def test_rerun_after_revert_reports_already_reverted_not_tier_changed():
             sub = (await s.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))).scalar_one()
             assert sub.tier == "free"  # 첫 스윕에서 되돌려짐
 
-        # 다음 주기(같은 grant, 아직 새 grant 없음) — 이 org는 재실측 안 되고 tier도 그대로.
+        # 다음 주기(같은 grant, 아직 새 grant 없음) — companion 마커로 후보에서 원천 제외되니
+        # reverted/skipped_* 어느 쪽으로도 재집계되지 않아야 한다(이제 이 org는 latest_grants
+        # 쿼리 결과에 아예 안 잡힌다 — 값 비교가 아니라 마커 존재로 판정하므로).
         async with maker() as s:
-            second = await sweep_expired_grants(s, now=NOW + timedelta(days=1))
-            assert second["skipped_already_reverted"] >= 1  # 분류 자체가 동작함(하한 — 다른 org와 공존 가능)
+            await sweep_expired_grants(s, now=NOW + timedelta(days=1))
         async with maker() as s:
             sub = (await s.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))).scalar_one()
             assert sub.tier == "free"  # 재반복 실행에도 불변(이중 되돌림/오염 없음)
+
+        async with maker() as s:
+            companions = (await s.execute(
+                select(BillingLedgerEntry).where(
+                    BillingLedgerEntry.org_id == org_id,
+                    BillingLedgerEntry.entry_type == "adjustment",
+                )
+            )).scalars().all()
+            assert len(companions) == 1, "companion이 재실행마다 중복 생성되면 원장 오염 — 정확히 1건"
+            assert companions[0].entry_metadata["kind"] == "tier_grant_revert"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_same_tier_regrant_reverted_exactly_once_not_every_sweep():
+    """카디르군 QA 실PG 재현(2026-08-18) — 이미 team인 org에 team 사용권을 재부여(정상 CS
+    유스케이스)하면 target_tier == prev_tier == 'team'이 된다. 구 버전은 되돌리기 전부터
+    이미 current_tier==prev_tier가 참이라 "이미 되돌려짐" 휴리스틱이 원천 무력화돼, 스윕을
+    3연속 돌리면 매번 reverted+1·current_period_*를 계속 None으로 재설정했다(카디르군
+    fresh PG 재현). 이 테스트는 그 정확한 시나리오를 3연속 스윕으로 재현해 정확히 1회만
+    되돌려지는지 pin한다."""
+    from app.services.billing_scheduler import sweep_expired_grants
+    from app.models.org_subscription import OrgSubscription
+    from app.models.billing_ledger_entry import BillingLedgerEntry
+    from sqlalchemy import select, update
+
+    engine, maker = await _session_factory()
+    try:
+        async with maker() as s:
+            org_id = await _seed_org(s, tier="team")
+            # 동일 tier 재부여 — target_tier == prev_tier == "team"(핵심 시나리오).
+            await _seed_grant_entry(
+                s, org_id=org_id, target_tier="team", prev_tier="team",
+                expires_at=NOW - timedelta(days=1), created_at=NOW - timedelta(days=31),
+            )
+
+        # 1회차 — 실제로 되돌려져야 한다(period가 None화).
+        async with maker() as s:
+            await sweep_expired_grants(s, now=NOW)
+        async with maker() as s:
+            sub = (await s.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))).scalar_one()
+            assert sub.tier == "team"  # 동일 tier라 값 자체는 관찰 불가 축(의도된 시나리오)
+            assert sub.current_period_end is None  # 1회차 되돌림으로 null화
+
+        # None은 "재발동 없음"과 "재발동으로 다시 null화"를 구분 못 하는 위장 신호라, 매
+        # 라운드 사이 **감시용 sentinel 값**을 직접 심어 둔다 — fix가 옳다면(companion
+        # 마커로 후보 제외) 2·3회차 스윕이 이 org를 아예 안 건드려 sentinel이 그대로 남고,
+        # 구 휴리스틱 버그가 재현되면 스윕이 다시 None으로 덮어써 sentinel이 사라진다.
+        sentinel = NOW.replace(year=2030)
+        for i in range(1, 3):
+            async with maker() as s:
+                await s.execute(
+                    update(OrgSubscription)
+                    .where(OrgSubscription.org_id == org_id)
+                    .values(current_period_end=sentinel)
+                )
+                await s.commit()
+
+            async with maker() as s:
+                await sweep_expired_grants(s, now=NOW + timedelta(days=i))
+
+            async with maker() as s:
+                sub = (await s.execute(
+                    select(OrgSubscription).where(OrgSubscription.org_id == org_id)
+                )).scalar_one()
+                assert sub.current_period_end == sentinel, (
+                    f"라운드 {i+1}: 이미 되돌려진 grant가 재발동돼 sentinel을 덮어씀 — "
+                    f"동일 tier 재부여 무한 재되돌림 버그 재현(companion 마커 필터 실패)"
+                )
+
+        async with maker() as s:
+            companions = (await s.execute(
+                select(BillingLedgerEntry).where(
+                    BillingLedgerEntry.org_id == org_id,
+                    BillingLedgerEntry.entry_type == "adjustment",
+                    BillingLedgerEntry.entry_metadata["kind"].astext == "tier_grant_revert",
+                )
+            )).scalars().all()
+            assert len(companions) == 1, (
+                f"동일 tier 재부여가 매 스윕마다 재되돌려지면 companion이 반복 생성된다 — "
+                f"3연속 스윕 후 companion={len(companions)}건(1건이어야 fix 성공)"
+            )
     finally:
         await engine.dispose()
 

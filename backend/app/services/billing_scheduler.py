@@ -266,26 +266,47 @@ async def sweep_expired_grants(session: AsyncSession, *, now: datetime | None = 
     다운그레이드 등으로 tier가 달라졌으면 no-op(그 변경이 이미 grant를 무의미하게 만들었으므로
     되돌릴 게 없다) — skipped_reason 기록.
 
-    PO AC 리뷰 CHANGES(2026-08-18, head 62f44bdd) 반영 — «tier != target_tier»를 단일
-    사유로 뭉치면, **정상적으로 되돌려진 grant**(current_tier == prev_tier가 된 상태)가
-    다음 스윕 실행마다 매번 "tier_changed_since_grant"로 오집계된다(신규 상태 컬럼 없이
-    이미 되돌린 것과 실제 외부 변경을 구분 못 함 — audit 로그가 매 주기 같은 grant를
-    "변경 감지"로 반복 기록해 진짜 신호를 죽인다). current_tier == prev_tier면
-    "이미 되돌려짐"(skipped_already_reverted)으로 갈라 별도 집계·감사 스팸 방지."""
+    카디르군 QA 실PG 재현(2026-08-18, PR2 head c47db6dd5) — 동일 tier 재부여(이미 team인
+    org에 team 사용권 재부여, 정상 CS 유스케이스)는 target_tier == prev_tier가 된다. 구
+    버전은 "이미 되돌려짐"을 `current_tier == prev_tier` 값-비교 휴리스틱으로만 판정했는데,
+    이 케이스에선 되돌리기 **전에도** current_tier(team) == prev_tier(team)가 이미 참이라
+    휴리스틱이 원천 무력화 — fresh PG에서 스윕을 3연속 돌리면 매번 "아직 안 되돌림"으로
+    오판해 매번 reverted+1, current_period_*를 계속 None으로 재설정한다(테넌트 상세가
+    읽는 그 필드의 무결성이 매 주기 깨짐).
+
+    fix(PO 판정 2026-08-18) — 값-비교 휴리스틱을 폐기하고 **내구 마커**로 바꾼다. revert
+    시 원장에 companion 행(entry_type='adjustment'·metadata.kind='tier_grant_revert'·
+    metadata.reverted_entry_id=원 grant id)을 append하고, 후보 조회 자체가 그 companion이
+    이미 있는 grant를 SQL NOT EXISTS로 원천 제외한다. 그러면 ⓐ동일 tier 재부여도 정확히
+    한 번만 되돌려짐(반복 재현 불가) ⓑ이미 되돌려진 grant는 재조회 후보에도 안 잡히므로
+    `skipped_already_reverted`는 자연히 0으로 수렴(그 휴리스틱 분기 자체가 이제 불요 —
+    반환 키는 하위호환으로 유지) ⓒcompanion 자체가 감사 기록이라 audit 이중화 불요.
+    동일 tier 재부여 자체(정상 유스케이스)는 계속 허용 — 이 fix가 막는 건 "재부여"가 아니라
+    "같은 grant를 여러 번 되돌리는" 회귀뿐이다."""
     from app.services.admin_billing import _audit  # 순환 임포트 회피(admin_billing이 이 모듈을 안 씀)
+    from app.services.billing_ledger import record_ledger_entry
 
     now = now or datetime.now(timezone.utc)
 
     # entry_metadata는 BillingLedgerEntry의 Python 속성명일 뿐, DB 컬럼명은 "metadata"다
     # (모델 주석 — AC 원문대로·Base.metadata 예약명 충돌 회피). raw SQL은 실 컬럼명을 쓴다.
+    # NOT EXISTS — 이미 revert companion(adjustment/tier_grant_revert)이 붙은 grant는
+    # 후보 자체에서 제외(값-비교 대신 마커 존재로 "이미 처리됨" 판정, 위 docstring).
     latest_grants = (
         await session.execute(
             text(
                 """
-                SELECT DISTINCT ON (org_id) id, org_id, metadata AS entry_metadata
-                FROM billing_ledger_entries
-                WHERE entry_type = 'credit_grant' AND metadata->>'kind' = 'tier_grant'
-                ORDER BY org_id, ts DESC
+                SELECT DISTINCT ON (g.org_id) g.id, g.org_id, g.amount_minor, g.currency,
+                       g.metadata AS entry_metadata
+                FROM billing_ledger_entries g
+                WHERE g.entry_type = 'credit_grant' AND g.metadata->>'kind' = 'tier_grant'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM billing_ledger_entries r
+                    WHERE r.entry_type = 'adjustment'
+                      AND r.metadata->>'kind' = 'tier_grant_revert'
+                      AND r.metadata->>'reverted_entry_id' = g.id::text
+                  )
+                ORDER BY g.org_id, g.ts DESC
                 """
             )
         )
@@ -305,14 +326,10 @@ async def sweep_expired_grants(session: AsyncSession, *, now: datetime | None = 
         ).scalar_one_or_none()
         current_tier = sub.tier if sub is not None else None
         if current_tier != meta["target_tier"]:
-            if current_tier == meta["prev_tier"]:
-                # 이 스윕이 과거 실행에서 이미 되돌려 놓은 상태 — 매 주기 재발견되는 게
-                # 정상(신규 상태 컬럼 없이 히스토리로 재구성)이라 "변경 감지"와 분리 집계·
-                # 감사 스팸 방지(조용히 스킵만, _audit 호출 안 함 — 매 주기 반복 기록할
-                # 새 사실이 없다).
-                skipped_already_reverted += 1
-                continue
             # 그 사이 실결제/다른 조작으로 tier가 바뀜 — 이 grant는 이미 무의미, 손대지 않는다.
+            # (companion 마커 설계상 "이미 되돌려짐"은 위 NOT EXISTS가 후보에서 이미 제외하므로
+            # 여기 도달하는 경우는 항상 진짜 외부 tier 변경뿐 — skipped_already_reverted는 더
+            # 이상 이 분기에서 발생하지 않는다.)
             _audit(
                 actor_email="system:sweep_expired_grants", org_id=org_id, action="grant_sweep_skipped",
                 before={"expected_tier": meta["target_tier"], "actual_tier": current_tier},
@@ -326,7 +343,22 @@ async def sweep_expired_grants(session: AsyncSession, *, now: datetime | None = 
         sub.status = "active"
         sub.current_period_start = None
         sub.current_period_end = None
-        await session.commit()
+        await session.flush()
+        # record_ledger_entry가 내부에서 commit — 위 구독 되돌리기(flush만)와 이 companion
+        # 원장 기입이 같은 트랜잭션으로 함께 확정된다(admin_billing.grant_credit과 동일
+        # flush-then-record_ledger_entry-commit 패턴). provider_ref는 원 grant id로 결정적
+        # 유도 — 동시/재실행 스윕이 같은 grant를 두 번 되돌려도 companion 자체는 멱등.
+        await record_ledger_entry(
+            session, org_id=org_id, entry_type="adjustment",
+            amount_minor=row["amount_minor"], currency=row["currency"], direction="debit",
+            provider_ref=f"grant-revert:{row['id']}",
+            metadata={
+                "kind": "tier_grant_revert",
+                "reverted_entry_id": str(row["id"]),
+                "reverted_target_tier": meta["target_tier"],
+                "reverted_to_tier": prev_tier,
+            },
+        )
         _audit(
             actor_email="system:sweep_expired_grants", org_id=org_id, action="grant_sweep_reverted",
             before={"tier": meta["target_tier"]}, after={"tier": prev_tier},
