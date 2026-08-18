@@ -541,8 +541,25 @@ async def agent_stream(
                     org_id=uuid.UUID(org_id_str), session_id=session_id,
                     runtime=tm.runtime_type or DEFAULT_RUNTIME, transport="stdio",
                 )
+                # story #2467 respec — 연결 즉시 자동 verify 라운드트립 기동(사람의 "Run test"
+                # 클릭 불요 — 커넥터의 "10초 내 살아있음 신호" 의무는 이 라운드트립의 ack로
+                # 충족된다, sse_bridge.py 의 자동 ack 재사용·발명 0). 이미 verified 인 재연결은
+                # 재트리거 안 함(매 재접속마다 이벤트 스팸 방지).
+                from app.services.agent_verify import get_verification_state, start_verification
+                _prior_verify = await get_verification_state(_pdb, agent_id, transport="stdio")
+                _newly_started = not _prior_verify["verified"]
+                if _newly_started:
+                    await start_verification(
+                        _pdb, agent_id=agent_id, org_id=tm.org_id, project_id=tm.project_id,
+                    )
                 await _pdb.commit()
             _presence_wired = True
+            if _newly_started:
+                # AC2: mcp_reachable 신호 — commit 성공 후에만(쓰기 실패 시 헛신호 방지).
+                from app.services.agent_verify import push_verification_signal
+                await push_verification_signal(
+                    org_id=tm.org_id, agent_id=agent_id, state="mcp_reachable", transport="stdio",
+                )
             # story #2602 Fix①/②의 기준점 — 이 시점 이후의 last_seen_at 전진만 "내 connect
             # write 이후에 일어난 일"로 인정한다(내 connect write 자체는 위에서 이미 커밋됨).
             # Fix①: 연결 단위 무장 상태(전진을 한 번이라도 봤는지) — arm 후 stale 전환 시만 skip.
@@ -730,6 +747,7 @@ async def ack_event(
         raise HTTPException(status_code=403, detail="API key required")
 
     agent_id = uuid.UUID(auth.user_id)
+    _newly_verified_org_id: uuid.UUID | None = None
 
     # UPSERT acked_seq (ë ëì ê°ë§ ê°±ì )
     existing = (await db.execute(
@@ -768,7 +786,7 @@ async def ack_event(
         from app.services.agent_verify import VERIFY_EVENT_TYPE
         from app.services.onboarding_funnel import emit_onboarding_event
         _verify_done = (await db.execute(
-            select(Event.id).where(
+            select(Event.id, Event.org_id).where(
                 Event.recipient_id == agent_id,
                 Event.event_type == VERIFY_EVENT_TYPE,
                 Event.recipient_seq.isnot(None),
@@ -798,6 +816,15 @@ async def ack_event(
                 db, "verified", agent_id=agent_id,
                 session_id=_seam_session_id, meta=_seam_meta,
             )
+            _newly_verified_org_id = _verify_done.org_id
 
     await db.commit()
+
+    if _newly_verified_org_id is not None:
+        # story #2467 respec — verified 신호(commit 성공 후에만 push, 헛신호 방지).
+        from app.services.agent_verify import push_verification_signal
+        await push_verification_signal(
+            org_id=_newly_verified_org_id, agent_id=agent_id, state="verified", transport="stdio",
+        )
+
     return {"acked_seq": body.seq}

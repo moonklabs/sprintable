@@ -88,6 +88,10 @@ async def test_ack_creates_cursor():
 
     session = AsyncMock()
     existing_result = MagicMock(); existing_result.scalar_one_or_none.return_value = None
+    # story #2467: ack 핸들러가 새로 추가한 verify-seam 조회(`.first()`)도 이 mock을 공유한다 —
+    # 이 테스트엔 connection_test 이벤트가 없으므로 명시 None(그래야 push_verification_signal이
+    # real DB(async_session_factory)를 타지 않는다 — MagicMock 기본 auto-truthy가 아니라).
+    existing_result.first.return_value = None
     session.execute = AsyncMock(return_value=existing_result)
     session.add = MagicMock()
     session.commit = AsyncMock()
@@ -126,6 +130,8 @@ async def test_ack_updates_cursor_if_higher():
 
     session = AsyncMock()
     result = MagicMock(); result.scalar_one_or_none.return_value = existing_cursor
+    # story #2467: verify-seam 조회 공유 mock — 이 테스트엔 connection_test 이벤트가 없다.
+    result.first.return_value = None
     session.execute = AsyncMock(return_value=result)
     session.commit = AsyncMock()
 

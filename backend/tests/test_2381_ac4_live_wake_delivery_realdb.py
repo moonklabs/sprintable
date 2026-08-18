@@ -87,6 +87,16 @@ def _patch_side_effects(monkeypatch):
     monkeypatch.setattr(
         "app.services.onboarding_funnel.emit_onboarding_event", AsyncMock()
     )
+    # story #2467: /stream 연결 시 자동 verify 기동(신규 배선) — 이 스토리는 wake 배달 순수성만
+    # 관측 대상이다. 패치 없이 두면 매번 새로 seed하는 미검증 agent가 connection_test 이벤트를
+    # 자동으로 하나 더 만들어(backfill로 주워짐) "wake 없이도 도착"이라는 거짓 양성을 만든다
+    # (test_2143 선례와 동일 원칙 — 이미 verified로 보아 재트리거 안 함).
+    monkeypatch.setattr(
+        "app.services.agent_verify.get_verification_state",
+        AsyncMock(return_value={"verify_seq": None, "acked_seq": None, "verified": True, "rail": []}),
+    )
+    monkeypatch.setattr("app.services.agent_verify.start_verification", AsyncMock())
+    monkeypatch.setattr("app.services.agent_verify.push_verification_signal", AsyncMock())
     monkeypatch.setattr("app.services.presence_online.mark_online", AsyncMock())
     monkeypatch.setattr("app.services.presence_events.emit_presence", AsyncMock())
     monkeypatch.setattr("app.services.sse_lease.acquire", AsyncMock(return_value=None))
