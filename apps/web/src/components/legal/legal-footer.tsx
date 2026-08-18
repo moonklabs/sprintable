@@ -9,6 +9,10 @@
  * (story #2741).
  *
  * 값은 SSOT(lib/legal/business-info.ts)에서만 가져온다. 링크 목적지는 기존 legal 라우트.
+ *
+ * 구분자 점(·)은 aria-hidden 순수 장식이나, #2611 가드상 text-muted-foreground 알파 변형은
+ * 금지라(모든 알파 레벨 AA 미달) 부모의 solid muted-foreground를 상속한다 — muted-alpha-ok
+ * 밸브는 큰 워터마크류(인접 텍스트 없음) 전용이라 작은 인접 구분자엔 쓰지 않는다.
  */
 
 import Link from 'next/link';
@@ -27,11 +31,11 @@ export function LegalLinks({ className = '' }: { className?: string }) {
       <Link href={LEGAL_DOC_ROUTES.terms} className="hover:text-foreground hover:underline">
         {t('termsOfService')}
       </Link>
-      <span aria-hidden className="text-muted-foreground/40">·</span>
+      <span aria-hidden>·</span>
       <Link href={LEGAL_DOC_ROUTES.privacy} className="hover:text-foreground hover:underline">
         {t('privacyPolicy')}
       </Link>
-      <span aria-hidden className="text-muted-foreground/40">·</span>
+      <span aria-hidden>·</span>
       <Link href={LEGAL_DOC_ROUTES.refundPolicy} className="hover:text-foreground hover:underline">
         {t('refundPolicy')}
       </Link>
@@ -54,11 +58,7 @@ export function BusinessInfoBlock({ className = '' }: { className?: string }) {
     <div className={`flex flex-wrap items-center gap-x-2 gap-y-0.5 leading-relaxed ${className}`}>
       {parts.map((part, i) => (
         <Fragment key={i}>
-          {i > 0 && (
-            <span aria-hidden className="text-muted-foreground/40">
-              ·
-            </span>
-          )}
+          {i > 0 && <span aria-hidden>·</span>}
           <span>{part}</span>
         </Fragment>
       ))}

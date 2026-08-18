@@ -47,11 +47,32 @@ async function mount(node: React.ReactNode) {
 }
 
 describe('LegalFooter (story #2741)', () => {
-  it('사업자정보 6종 값이 모두 화면에 렌더된다', async () => {
+  // 카디르군 QA(#3203) — 기대값을 SSOT에서 뽑으면 «값이 틀려도 GREEN»인 동어반복이라(ceo
+  // 변조 뮤테이션으로 실증), 기대값을 story #2740 정본의 «하드코딩 리터럴»로 박는다 — SSOT가
+  // 정본과 어긋나면 실제로 빨개지는 «틀릴 수 있는 표본».
+  const EXPECTED_BUSINESS_INFO = [
+    '주식회사 뭉클랩',
+    '윤도선',
+    '488-88-02579',
+    '경기도 고양시 일산동구 무궁화로 20-38, 5층 502호',
+    '070-8098-5775',
+    '제2023-고양일산동-1337호',
+  ] as const;
+
+  it('SSOT 값이 #2740 정본과 글자 단위로 일치한다 (변조 검출 · 하드코딩 대조)', () => {
+    expect(BUSINESS_INFO.companyName).toBe('주식회사 뭉클랩');
+    expect(BUSINESS_INFO.ceo).toBe('윤도선');
+    expect(BUSINESS_INFO.registrationNumber).toBe('488-88-02579');
+    expect(BUSINESS_INFO.address).toBe('경기도 고양시 일산동구 무궁화로 20-38, 5층 502호');
+    expect(BUSINESS_INFO.phone).toBe('070-8098-5775');
+    expect(BUSINESS_INFO.mailOrderNumber).toBe('제2023-고양일산동-1337호');
+  });
+
+  it('사업자정보 6종 값이 모두 화면에 렌더된다 (정본 리터럴 대조)', async () => {
     const { LegalFooter } = await import('./legal-footer');
     await mount(<LegalFooter />);
     const text = container.textContent ?? '';
-    for (const value of Object.values(BUSINESS_INFO)) {
+    for (const value of EXPECTED_BUSINESS_INFO) {
       expect(text).toContain(value);
     }
   });
