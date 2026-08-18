@@ -228,7 +228,7 @@ function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenRe
         const label = (link!.children ?? []).map(hastNodeText).join('') || m[2]!;
         const openReadingPanel = onOpenReadingPanel
           ? (entityType: string, entityId: string, t: string | null, s: string | null, h: string | null) =>
-              onOpenReadingPanel({ kind: 'doc', entityType, entityId, title: t, status: s, href: h })
+              onOpenReadingPanel({ kind: 'entity', entityType, entityId, title: t, status: s, href: h })
           : undefined;
         return <EmbedCard entity_type={m[1]!} entity_id={m[2]!} title={label} status={status} onOpenReadingPanel={openReadingPanel} />;
       }
