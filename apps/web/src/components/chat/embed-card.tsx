@@ -123,11 +123,10 @@ const ENTITY_API: Record<string, (id: string) => string> = {
   story: (id) => `/api/stories/${id}`,
   epic: (id) => `/api/goals/${id}`,
   asset: (id) => `/api/assets/${id}`,
-  // story #2642 — sprint는 own-href(getEntityHref)라 이전엔 몸통 fetch 자체가 없었다(제목·기간
-  // 외 보여줄 게 없다는 판단, RICH_PREVIEW_TYPES 밖 그대로 유지). 그런데 크로스프로젝트 직행
-  // URL을 지으려면 sprint 자신의 org_slug/project_slug(BE #3044, SprintResponse 확장)를 알아야
-  // 해서 fetch 자체는 필요해졌다 — 몸통 렌더는 여전히 "미리보기 없음"(RICH_PREVIEW_TYPES 무변경,
-  // 아래 href 계산에서만 이 detail을 쓴다).
+  // story #2642 — sprint는 own-href(getEntityHref)라 당시엔 몸통 fetch 자체가 없었다. 크로스
+  // 프로젝트 직행 URL을 지으려면 sprint 자신의 org_slug/project_slug(BE #3044, SprintResponse
+  // 확장)를 알아야 해서 fetch가 필요해졌고, #2780에서 title·status·기간이 실제로 응답에
+  // 있음을 확認해 RICH_PREVIEW_TYPES에 편입(EntityDetail sprint 분기).
   sprint: (id) => `/api/sprints/${id}`,
   // story #2302 — task.story_id(항상 유일 부모)·artifact.{story_id,epic_id,doc_id}(최대 1개,
   // 전부 nullable)를 읽어 ②/③을 레코드 단위로 판정하는 재료.
@@ -151,7 +150,8 @@ const ENTITY_API: Record<string, (id: string) => string> = {
 // 의도적으로 이 Set 밖 — "미리보기 없음" 문구가 정확한 그 드문 경우(AC3의 "진짜 없는 것"에
 // sprint도 포함). 새 합성 가능 타입을 추가하면 이 Set도 같이 넓히거나(몸통 있음), 의도적으로
 // 빼면서 그 이유를 여기 한 줄 남길 것 — «만들 수 있는데 못 여는» 사각을 다시 만들지 않도록.
-const RICH_PREVIEW_TYPES = new Set(['story', 'epic', 'doc', 'artifact', 'hypothesis']);
+// story #2780 — task·sprint 편입(§3/페드루 판정, EntityDetail 주석 그대로 근거).
+const RICH_PREVIEW_TYPES = new Set(['story', 'epic', 'doc', 'artifact', 'hypothesis', 'task', 'sprint']);
 
 // story #2118(E-DG-REAL, 페드루 리뷰) — "폴백이 정직하다"(크래시 안 남)는 "클릭에 값이
 // 있다"는 뜻이 아니다. RICH_PREVIEW도 ENTITY_API fetch 전략도 own-href(getEntityHref)도
@@ -218,7 +218,10 @@ export const MdBody = ({ content }: { content: string }) => (
   </ReactMarkdown>
 );
 
-function EntityDetail({ entityType, entityId, detail }: { entityType: string; entityId: string; detail: Record<string, unknown> }) {
+// story #2780 — 컴포넌트가 아니라 순수 함수로 둔다: 호출부(embed-card 모달 body)가 반환값이
+// null인지(=보여줄 내용 없음) 직접 검사해야 하는데, JSX `<EntityDetail/>` 호출은 그 반환값을
+// 렌더 트리 밖에서 들여다볼 수 없다(엘리먼트 서술자는 항상 non-null이다 — 안이 null이어도).
+function renderEntityDetail(entityType: string, entityId: string, detail: Record<string, unknown>): React.ReactNode | null {
   if (entityType === 'story') {
     const d = detail as { status?: string; priority?: string; story_points?: number; description?: string; acceptance_criteria?: string };
     const statusLabel = d.status ? translateEntityStatus('story', d.status) : null;
@@ -295,6 +298,47 @@ function EntityDetail({ entityType, entityId, detail }: { entityType: string; en
           </div>
         )}
         {d.statement && <MdBody content={d.statement} />}
+      </div>
+    );
+  }
+
+  // story #2780 — 인계 §3/페드루 판정(d8347c43 원칙="빈 모달 여는 거짓 금지"는 유지, 전제만
+  // 변화): task/sprint는 여태 RICH_PREVIEW_TYPES 밖이었으나(그때는 보여줄 내용이 없었다)
+  // TaskResponse/SprintResponse 실측(backend/app/schemas/task.py·sprint.py) 결과 title·status
+  // (+task는 story_id 부모링크·sprint는 start/end_date)가 실제로 있다 — 「있으면 열고 없으면
+  // 안 연다」로 이번엔 포함. 필드가 없으면(과거처럼) 여전히 null 반환 — 진입점을 억지로 안 만든다.
+  if (entityType === 'task') {
+    const d = detail as { title?: string; status?: string; story_id?: string };
+    if (!d.title) return null;
+    const statusLabel = d.status ? translateEntityStatus('task', d.status) : null;
+    const parentHref = d.story_id ? getEntityHref('story', d.story_id) : null;
+    if (!statusLabel && !parentHref) return null;
+    return (
+      <div className="space-y-2">
+        {statusLabel && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <MdBadge label={statusLabel} />
+          </div>
+        )}
+        {parentHref && (
+          <a href={parentHref} className="text-xs text-primary hover:underline">
+            부모 스토리 보기 →
+          </a>
+        )}
+      </div>
+    );
+  }
+
+  if (entityType === 'sprint') {
+    const d = detail as { title?: string; status?: string; start_date?: string; end_date?: string };
+    if (!d.title) return null;
+    const statusLabel = d.status ? translateEntityStatus('sprint', d.status) : null;
+    const period = d.start_date && d.end_date ? `${d.start_date} ~ ${d.end_date}` : null;
+    if (!statusLabel && !period) return null;
+    return (
+      <div className="flex flex-wrap items-center gap-1.5">
+        {statusLabel && <MdBadge label={statusLabel} />}
+        {period && <MdBadge label={period} />}
       </div>
     );
   }
@@ -559,6 +603,12 @@ export function EntityPreviewModal({
     </div>
   );
 
+  // story #2780 QA(카디르) 발견 — RICH 타입인데 detail에 필요한 필드가 없으면(예: title 없는
+  // sprint) EntityDetail이 null을 반환해 몸통이 완전 공백이었다(옛 "미리보기 없음" 문구보다
+  // 덜 정직한 새 위반형). "RICH 타입인가"가 아니라 "실제로 보여줄 내용이 있는가"로 이
+  // 문구를 하나로 통일한다 — 한 번만 계산해 조건과 렌더 양쪽에 쓴다(이중 호출 금지).
+  const richContent = detail && RICH_PREVIEW_TYPES.has(entityType) ? renderEntityDetail(entityType, entityId, detail) : null;
+
   const body = (
     <div className="flex-1 overflow-y-auto px-6 py-4">
       {loading ? (
@@ -568,8 +618,8 @@ export function EntityPreviewModal({
         </div>
       ) : notFound ? (
         <p className="py-4 text-xs text-muted-foreground">대상을 찾을 수 없습니다.</p>
-      ) : detail && RICH_PREVIEW_TYPES.has(entityType) ? (
-        <EntityDetail entityType={entityType} entityId={entityId} detail={detail} />
+      ) : richContent !== null ? (
+        richContent
       ) : (
         <p className="py-4 text-xs text-muted-foreground">이 엔티티는 별도 미리보기가 없습니다.</p>
       )}
@@ -673,6 +723,24 @@ export function EmbedCard({
     </div>
   );
 
+  // story #2780 — 인계 handoff-entity-embed-reading-panel-2780 §2/§7: 채팅 컨텍스트
+  // (onOpenReadingPanel 제공)에서는 «여는 동선»이 타입 무관 하나다 — doc의 기존 이중 버튼
+  // (주클릭=이동·eye=미리보기)도 포함해 전부 이 단일 클릭 하나로 합친다(전체 보기는 패널
+  // 자신의 명시 액션으로 이동, EntityPreviewModal 풋터 링크가 이미 그 역할). 채팅 밖 호출부
+  // (onOpenReadingPanel 미제공 — chat-input.tsx 작성 중 미리보기 등)는 아래 타입별 기존
+  // 분기를 그대로 유지(회귀 0).
+  if (onOpenReadingPanel) {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenReadingPanel(entity_type, entity_id, title, status, href)}
+        className="block w-full text-left transition-opacity hover:opacity-80"
+      >
+        {inner}
+      </button>
+    );
+  }
+
   if (entity_type === 'doc') {
     // story #1996(no-sloppy): 전체 카드가 항상 이동만 해 EntityPreviewModal(doc content 렌더
     // 이미 지원, EntityDetail의 doc 분기)에 도달할 방법이 없었다 — 주 클릭=이동(기존 UX 유지)·
@@ -697,8 +765,7 @@ export function EmbedCard({
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              if (onOpenReadingPanel) onOpenReadingPanel(entity_type, entity_id, title, status, href);
-              else setShowModal(true);
+              setShowModal(true);
             }}
             className="shrink-0 rounded p-1 opacity-70 transition-opacity hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10"
             aria-label="미리보기"
@@ -707,7 +774,7 @@ export function EmbedCard({
             <Eye className="size-3.5" />
           </button>
         </div>
-        {!onOpenReadingPanel && showModal && (
+        {showModal && (
           <EntityPreviewModal
             entityType={entity_type}
             entityId={entity_id}
