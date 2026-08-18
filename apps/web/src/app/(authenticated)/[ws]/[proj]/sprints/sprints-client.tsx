@@ -134,11 +134,26 @@ interface CreateDialogProps {
   onClose: () => void;
 }
 
-function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
+// story #2755 — fresh 조직의 첫 스프린트 시작이 «무설명 무반응»이던 근본: startDate/endDate가 빈
+// 값 기본이라(type=date·pre-fill 없음) 이름+목표만 채운 fresh 유저가 disabled 벽에 막혔다. 오늘
+// ~+13일(2주 inclusive) 기본값을 주어 침묵 blocker를 없앤다(둘 다 편집 가능). ⚠️UTC(toISOString)
+// 대신 로컬 시계로 YYYY-MM-DD를 조립해 자정 부근 하루 밀림을 피한다.
+const SPRINT_DEFAULT_SPAN_DAYS = 13;
+function localDateISO(offsetDays = 0): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// story #2755 테스트 접근용 export(내부 사용 불변) — «침묵 금지» 렌더 검증(loud validation) 대상.
+export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
   const t = useTranslations('sprints');
   const [title, setTitle] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [startDate, setStartDate] = useState(() => localDateISO(0));
+  const [endDate, setEndDate] = useState(() => localDateISO(SPRINT_DEFAULT_SPAN_DAYS));
   const [goal, setGoal] = useState('');
   const [capacity, setCapacity] = useState('');
   const [teamSize, setTeamSize] = useState('');
@@ -151,8 +166,10 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
   const declaredCount = declarations.filter(isDeclarationComplete).length;
 
   const handleSubmit = async (activateAfterCreate: boolean) => {
-    if (!title.trim() || !startDate || !endDate) return;
-    if (activateAfterCreate && declaredCount === 0) return;
+    // story #2755 — 침묵 금지: 미충족 조건을 조용히 return하지 않고 사유를 화면에 올린다(아래
+    // role=alert 배너). 게이트(가설 ≥1) 자체는 유지하되, «왜 안 되는지»를 클릭이 항상 말하게 한다.
+    if (!title.trim() || !startDate || !endDate) { setError(t('missingRequired')); return; }
+    if (activateAfterCreate && declaredCount === 0) { setError(t('activateBlocked')); return; }
     setSubmitting(true);
     setError(null);
     try {
@@ -310,10 +327,13 @@ function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProps) {
             </span>
             <div className="flex gap-2">
               <Button type="button" variant="ghost" size="sm" onClick={onClose}>{t('cancel')}</Button>
-              <Button type="button" variant="outline" size="sm" disabled={submitting || !title.trim() || !startDate || !endDate} onClick={() => void handleSubmit(false)}>
+              {/* story #2755 — disabled를 submitting만으로 좁혀 «클릭이 항상 handleSubmit을 실행»
+                  하게 한다(무설명 disabled 제거). 미충족 필드는 handleSubmit이 setError로 사유를
+                  띄운다. 연타/중복 제출은 submitting 가드로 커버. */}
+              <Button type="button" variant="outline" size="sm" disabled={submitting} onClick={() => void handleSubmit(false)}>
                 {t('saveDraft')}
               </Button>
-              <Button type="button" size="sm" disabled={submitting || !title.trim() || !startDate || !endDate || declaredCount === 0} onClick={() => void handleSubmit(true)}>
+              <Button type="button" size="sm" disabled={submitting} onClick={() => void handleSubmit(true)}>
                 {submitting ? '...' : t('activate')}
               </Button>
             </div>
