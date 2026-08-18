@@ -218,7 +218,10 @@ export const MdBody = ({ content }: { content: string }) => (
   </ReactMarkdown>
 );
 
-function EntityDetail({ entityType, entityId, detail }: { entityType: string; entityId: string; detail: Record<string, unknown> }) {
+// story #2780 — 컴포넌트가 아니라 순수 함수로 둔다: 호출부(embed-card 모달 body)가 반환값이
+// null인지(=보여줄 내용 없음) 직접 검사해야 하는데, JSX `<EntityDetail/>` 호출은 그 반환값을
+// 렌더 트리 밖에서 들여다볼 수 없다(엘리먼트 서술자는 항상 non-null이다 — 안이 null이어도).
+function renderEntityDetail(entityType: string, entityId: string, detail: Record<string, unknown>): React.ReactNode | null {
   if (entityType === 'story') {
     const d = detail as { status?: string; priority?: string; story_points?: number; description?: string; acceptance_criteria?: string };
     const statusLabel = d.status ? translateEntityStatus('story', d.status) : null;
@@ -600,6 +603,12 @@ export function EntityPreviewModal({
     </div>
   );
 
+  // story #2780 QA(카디르) 발견 — RICH 타입인데 detail에 필요한 필드가 없으면(예: title 없는
+  // sprint) EntityDetail이 null을 반환해 몸통이 완전 공백이었다(옛 "미리보기 없음" 문구보다
+  // 덜 정직한 새 위반형). "RICH 타입인가"가 아니라 "실제로 보여줄 내용이 있는가"로 이
+  // 문구를 하나로 통일한다 — 한 번만 계산해 조건과 렌더 양쪽에 쓴다(이중 호출 금지).
+  const richContent = detail && RICH_PREVIEW_TYPES.has(entityType) ? renderEntityDetail(entityType, entityId, detail) : null;
+
   const body = (
     <div className="flex-1 overflow-y-auto px-6 py-4">
       {loading ? (
@@ -609,8 +618,8 @@ export function EntityPreviewModal({
         </div>
       ) : notFound ? (
         <p className="py-4 text-xs text-muted-foreground">대상을 찾을 수 없습니다.</p>
-      ) : detail && RICH_PREVIEW_TYPES.has(entityType) ? (
-        <EntityDetail entityType={entityType} entityId={entityId} detail={detail} />
+      ) : richContent !== null ? (
+        richContent
       ) : (
         <p className="py-4 text-xs text-muted-foreground">이 엔티티는 별도 미리보기가 없습니다.</p>
       )}
