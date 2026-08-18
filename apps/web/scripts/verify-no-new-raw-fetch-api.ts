@@ -132,7 +132,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'app/(authenticated)/settings/page.tsx::/api/notification-settings',
   'app/(authenticated)/settings/page.tsx::/api/projects',
   'app/(authenticated)/settings/page.tsx::/api/projects/',
-  'app/(authenticated)/settings/page.tsx::/api/subscription/portal',
   'app/(authenticated)/settings/page.tsx::/api/webhooks/config',
   'app/(authenticated)/settings/page.tsx::/api/webhooks/config?id=',
   'app/dashboard/dashboard-shell.tsx::/api/switch-org',
