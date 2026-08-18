@@ -427,14 +427,27 @@ function buildRefreshedHeaders(
   return headers;
 }
 
-/** AC3: 인증 실패 → /login?next=<현재경로>&reason=session_expired (login 배너 + 작업 보존 복귀). */
-function loginRedirect(request: NextRequest): NextResponse {
+// story #2745(선생님 지적 2026-08-18) — sp_at/sp_rt/활성계정 금고 중 아무 신호도 없는 «익명 첫
+// 진입»까지 loginRedirect가 무조건 reason=session_expired를 실어 보내던 것이 근본원인이었다
+// (재현: /legal/refund 같은 보호 라우트에 쿠키 0개 브라우저로 진입 → /login 리다이렉트에 «세션이
+// 만료되어…» 토스트). "만료"는 살아있던 세션이 죽었다는 주장인데, 애초에 세션 신호가 하나도
+// 없었으면 그 주장이 성립하지 않는다 — sp_at·sp_rt·활성계정 금고(sp_acct_rt_<id>) 중 하나라도
+// 있었을 때만 "만료"라 부를 근거가 있다.
+function hadAnySessionSignal(request: NextRequest): boolean {
+  if (request.cookies.get(SP_AT_COOKIE)?.value) return true;
+  if (request.cookies.get(SP_RT_COOKIE)?.value) return true;
+  const activeAccountId = request.cookies.get(ACTIVE_ACCOUNT_COOKIE)?.value;
+  return Boolean(activeAccountId && request.cookies.get(`${VAULT_PREFIX}${activeAccountId}`)?.value);
+}
+
+/** AC3: 인증 실패 → /login?next=<현재경로>(&reason=session_expired — 실제로 세션이 있었을 때만). */
+function loginRedirect(request: NextRequest, sessionExpired: boolean): NextResponse {
   const url = request.nextUrl.clone();
   const nextTarget = request.nextUrl.pathname + request.nextUrl.search;
   url.pathname = '/login';
   url.search = '';
   url.searchParams.set('next', nextTarget); // searchParams.set 이 encode
-  url.searchParams.set('reason', SESSION_EXPIRED_REASON);
+  if (sessionExpired) url.searchParams.set('reason', SESSION_EXPIRED_REASON);
   return NextResponse.redirect(url);
 }
 
@@ -444,8 +457,10 @@ function loginRedirect(request: NextRequest): NextResponse {
 // 시도할 여지를 남긴다(㉢ 수정 — 일시 장애로 멀쩡한 세션이 영구 삭제되던 것). refreshMatchesActive
 // =false(RC2, superseded 계정의 늦은 refresh)는 refresh 자체는 성공이므로 쿠키를 그대로 둔다 —
 // 이 세 실패 사유를 여기서 한 번만 구분해 양쪽 호출부의 분기를 통일한다.
-function handleUnauthenticated(request: NextRequest, isApiPath: boolean, clearCookies: boolean): NextResponse {
-  const response = isApiPath ? NextResponse.next({ request }) : loginRedirect(request);
+// sessionExpired(story #2745): 호출부가 hadAnySessionSignal() 등으로 판정해 넘긴다 — 세션 신호가
+// 애초에 없었던 익명 첫 진입은 false로 넘어와 loginRedirect가 reason을 안 붙인다.
+function handleUnauthenticated(request: NextRequest, isApiPath: boolean, clearCookies: boolean, sessionExpired: boolean): NextResponse {
+  const response = isApiPath ? NextResponse.next({ request }) : loginRedirect(request, sessionExpired);
   if (clearCookies) clearAuthCookies(response);
   return response;
 }
@@ -581,11 +596,14 @@ export async function proxy(request: NextRequest) {
   const accessToken = request.cookies.get(SP_AT_COOKIE)?.value;
 
   if (!accessToken) {
+    // story #2745: accessToken이 원래 없는 이 분기는 "익명 첫 진입"과 "쿠키 다 지워진 죽은 세션"이
+    // 섞여 있다 — sp_rt/활성계정 금고 신호로 실제 판정(둘 다 없으면 애초에 세션이 없었던 것).
+    const sessionExpired = hadAnySessionSignal(request);
     const outcome = await tryRefreshViaFastapi(request);
-    if (outcome.kind !== 'ok') return handleUnauthenticated(request, isApiPath, outcome.kind === 'invalid');
+    if (outcome.kind !== 'ok') return handleUnauthenticated(request, isApiPath, outcome.kind === 'invalid', sessionExpired);
     // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지(쿠키는 유지).
     if (!(await refreshMatchesActive(request, outcome.accessToken))) {
-      return handleUnauthenticated(request, isApiPath, false);
+      return handleUnauthenticated(request, isApiPath, false, sessionExpired);
     }
     return respondWithRefreshedToken(request, pathname, outcome, isApiPath);
   }
@@ -593,12 +611,13 @@ export async function proxy(request: NextRequest) {
   const claims = await verifyAccessToken(accessToken);
 
   if (!claims) {
-    // access token invalid/expired — try refresh
+    // access token invalid/expired — try refresh. accessToken 쿠키가 실재했으므로(이 분기 진입
+    // 조건) 이건 항상 진짜 "만료"다 — sessionExpired=true 고정.
     const outcome = await tryRefreshViaFastapi(request);
-    if (outcome.kind !== 'ok') return handleUnauthenticated(request, isApiPath, outcome.kind === 'invalid');
+    if (outcome.kind !== 'ok') return handleUnauthenticated(request, isApiPath, outcome.kind === 'invalid', true);
     // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지(쿠키는 유지).
     if (!(await refreshMatchesActive(request, outcome.accessToken))) {
-      return handleUnauthenticated(request, isApiPath, false);
+      return handleUnauthenticated(request, isApiPath, false, true);
     }
     return respondWithRefreshedToken(request, pathname, outcome, isApiPath);
   }
