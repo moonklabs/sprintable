@@ -3199,6 +3199,7 @@
     "loadMoreError": "더 불러오지 못했습니다. 다시 시도해 주세요.",
     "saveDraft": "임시저장",
     "activateBlocked": "활성화하려면 검증할 가설이 최소 1개 필요합니다.",
+    "missingRequired": "이름·시작일·종료일을 입력하세요.",
     "declareSectionTitle": "검증할 가설",
     "declareRequiredBadge": "≥ 1 필수",
     "declareCount": "{count} 선언됨",

@@ -3199,6 +3199,7 @@
     "loadMoreError": "Couldn't load more. Please try again.",
     "saveDraft": "Save draft",
     "activateBlocked": "Activating requires at least 1 hypothesis to test.",
+    "missingRequired": "Enter a name, start date, and end date.",
     "declareSectionTitle": "Hypotheses to test",
     "declareRequiredBadge": "≥ 1 required",
     "declareCount": "{count} declared",
