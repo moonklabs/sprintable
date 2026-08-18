@@ -256,7 +256,7 @@ export function HypothesisDeclarationCard({
           </div>
 
           {missingFields.length > 0 ? (
-            <p className="rounded-lg border border-dashed border-info-border bg-info-tint/20 px-2 py-1.5 text-[10px] text-muted-foreground">
+            <p className="rounded-lg border border-dashed border-info-border bg-info-tint/20 px-2 py-1.5 text-xs text-foreground">
               {t('declareIncompleteCaption', { items: missingFields.map((f) => MISSING_LABEL[f]).join(', ') })}
             </p>
           ) : null}
