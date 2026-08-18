@@ -264,7 +264,14 @@ async def sweep_expired_grants(session: AsyncSession, *, now: datetime | None = 
     삼고, 그 grant 이후 org_subscriptions.tier가 **한 번도 안 바뀌었을 때만**(=지금 tier가
     여전히 grant의 target_tier와 같을 때만) prev_tier로 되돌린다. 그 사이 실결제 업그레이드/
     다운그레이드 등으로 tier가 달라졌으면 no-op(그 변경이 이미 grant를 무의미하게 만들었으므로
-    되돌릴 게 없다) — skipped_reason 기록."""
+    되돌릴 게 없다) — skipped_reason 기록.
+
+    PO AC 리뷰 CHANGES(2026-08-18, head 62f44bdd) 반영 — «tier != target_tier»를 단일
+    사유로 뭉치면, **정상적으로 되돌려진 grant**(current_tier == prev_tier가 된 상태)가
+    다음 스윕 실행마다 매번 "tier_changed_since_grant"로 오집계된다(신규 상태 컬럼 없이
+    이미 되돌린 것과 실제 외부 변경을 구분 못 함 — audit 로그가 매 주기 같은 grant를
+    "변경 감지"로 반복 기록해 진짜 신호를 죽인다). current_tier == prev_tier면
+    "이미 되돌려짐"(skipped_already_reverted)으로 갈라 별도 집계·감사 스팸 방지."""
     from app.services.admin_billing import _audit  # 순환 임포트 회피(admin_billing이 이 모듈을 안 씀)
 
     now = now or datetime.now(timezone.utc)
@@ -284,7 +291,7 @@ async def sweep_expired_grants(session: AsyncSession, *, now: datetime | None = 
         )
     ).mappings().all()
 
-    reverted = skipped_tier_changed = skipped_not_expired = 0
+    reverted = skipped_tier_changed = skipped_not_expired = skipped_already_reverted = 0
     for row in latest_grants:
         meta = row["entry_metadata"]
         expires_at = datetime.fromisoformat(meta["grant_expires_at"])
@@ -298,6 +305,13 @@ async def sweep_expired_grants(session: AsyncSession, *, now: datetime | None = 
         ).scalar_one_or_none()
         current_tier = sub.tier if sub is not None else None
         if current_tier != meta["target_tier"]:
+            if current_tier == meta["prev_tier"]:
+                # 이 스윕이 과거 실행에서 이미 되돌려 놓은 상태 — 매 주기 재발견되는 게
+                # 정상(신규 상태 컬럼 없이 히스토리로 재구성)이라 "변경 감지"와 분리 집계·
+                # 감사 스팸 방지(조용히 스킵만, _audit 호출 안 함 — 매 주기 반복 기록할
+                # 새 사실이 없다).
+                skipped_already_reverted += 1
+                continue
             # 그 사이 실결제/다른 조작으로 tier가 바뀜 — 이 grant는 이미 무의미, 손대지 않는다.
             _audit(
                 actor_email="system:sweep_expired_grants", org_id=org_id, action="grant_sweep_skipped",
@@ -322,6 +336,7 @@ async def sweep_expired_grants(session: AsyncSession, *, now: datetime | None = 
     return {
         "grants_seen": len(latest_grants), "reverted": reverted,
         "skipped_tier_changed": skipped_tier_changed, "skipped_not_expired": skipped_not_expired,
+        "skipped_already_reverted": skipped_already_reverted,
     }
 
 

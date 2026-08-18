@@ -121,6 +121,36 @@ async def test_reverts_tier_when_grant_expired_and_tier_unchanged():
 
 
 @pytest.mark.asyncio
+async def test_rerun_after_revert_reports_already_reverted_not_tier_changed():
+    """PO AC 리뷰 CHANGES(head 62f44bdd) — 되돌린 grant가 다음 스윕 실행마다 매번
+    "tier_changed_since_grant"로 오집계(신호 죽음)되던 것을 skipped_already_reverted로
+    분리했는지 재실행으로 직접 확認."""
+    from app.services.billing_scheduler import sweep_expired_grants
+
+    engine, maker = await _session_factory()
+    try:
+        async with maker() as s:
+            org_id = await _seed_org(s, tier="team")
+            await _seed_grant_entry(
+                s, org_id=org_id, target_tier="team", prev_tier="free",
+                expires_at=NOW - timedelta(days=1), created_at=NOW - timedelta(days=31),
+            )
+
+        async with maker() as s:
+            first = await sweep_expired_grants(s, now=NOW)
+            assert first["reverted"] == 1
+
+        # 다음 주기(같은 grant, 아직 새 grant 없음) — 되돌림도 재실측도 아니어야 함.
+        async with maker() as s:
+            second = await sweep_expired_grants(s, now=NOW + timedelta(days=1))
+            assert second["reverted"] == 0
+            assert second["skipped_tier_changed"] == 0  # 「변경 감지」로 오분류되면 안 됨
+            assert second["skipped_already_reverted"] == 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_negative_control_skips_when_tier_changed_since_grant():
     """PO 판정 필수 요구 — 그 사이 실결제 등으로 tier가 바뀐 케이스는 스윕이 손 안 댐을
     직접 assert(과잉살상 방지 가드의 존재 증명)."""
