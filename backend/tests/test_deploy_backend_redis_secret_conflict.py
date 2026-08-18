@@ -48,7 +48,7 @@ _DECLARED_SUBSTITUTIONS = {
     "_BACKEND_PRESENCE_REDIS_ENABLED", "_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED",
     "_BACKEND_SSE_LEASE_REDIS_ENABLED", "_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED",
     "_FRONTEND_MIN_INSTANCES", "_FRONTEND_MAX_INSTANCES", "_LICENSE_CONSENT",
-    "_NEXT_PUBLIC_APP_URL",
+    "_NEXT_PUBLIC_APP_URL", "_ADMIN_OPERATOR_AUDIENCE", "_ADMIN_OPERATOR_ALLOWLIST",
     "PROJECT_ID", "PROJECT_NUMBER", "BUILD_ID", "COMMIT_SHA", "SHORT_SHA",
     "REPO_NAME", "BRANCH_NAME", "TAG_NAME", "REVISION_ID", "LOCATION",
 }
@@ -114,6 +114,8 @@ def _run_env_vars_assembly(deploy_env: str, redis_url: str) -> str:
         "_REDIS_URL": redis_url,
         "_LICENSE_CONSENT": "agreed",
         "_NEXT_PUBLIC_APP_URL": "https://example.run.app",
+        "_ADMIN_OPERATOR_AUDIENCE": "https://example-audience.run.app",
+        "_ADMIN_OPERATOR_ALLOWLIST": "operator@example.iam.gserviceaccount.com",
     }
     proc = subprocess.run(
         ["bash", "-c", assembly_only],
@@ -180,6 +182,22 @@ def test_deploy_backend_prod_excludes_plain_redis_url():
     assert "REDIS_URL" not in result
 
 
+def test_deploy_backend_dev_includes_admin_operator_env_vars():
+    """story #2777 — dev는 ADMIN_OPERATOR_AUDIENCE/ALLOWLIST를 plain env로 넘긴다."""
+    result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
+    assert "ADMIN_OPERATOR_AUDIENCE=https://example-audience.run.app" in result
+    assert "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com" in result
+
+
+def test_deploy_backend_prod_excludes_admin_operator_env_vars():
+    """⭐story #2777 핵심 AC — prod는 ADMIN_OPERATOR_AUDIENCE/ALLOWLIST를 절대 안 싣는다(⛔대표
+    승인 前 prod 결제 개입 전면금지 태세 — require_admin_operator가 미설정을 fail-closed 503으로
+    처리해, 이 두 키가 없으면 그 엔드포인트 자체가 prod에서 항상 503)."""
+    result = _run_env_vars_assembly("prod", "")
+    assert "ADMIN_OPERATOR_AUDIENCE" not in result
+    assert "ADMIN_OPERATOR_ALLOWLIST" not in result
+
+
 def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
     """dev 경로 무회귀 — prod 분기 추가가 dev의 다른 필드에 영향을 주지 않는다."""
     result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
@@ -192,5 +210,7 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         "PRESENCE_ONLINE_REDIS_ENABLED=false,SSE_LEASE_REDIS_ENABLED=false,"
         "SSE_TRANSIENT_REPLAY_ENABLED=false,LICENSE_CONSENT=agreed,"
         "NEXT_PUBLIC_APP_URL=https://example.run.app,DEPLOY_ENV=dev,"
-        "REDIS_URL=redis://10.164.120.243:6379"
+        "REDIS_URL=redis://10.164.120.243:6379,"
+        "ADMIN_OPERATOR_AUDIENCE=https://example-audience.run.app,"
+        "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com"
     )

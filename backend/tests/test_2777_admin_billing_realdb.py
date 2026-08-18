@@ -217,6 +217,39 @@ async def test_grant_credit_rejects_downgrade_with_422():
 
 
 @pytest.mark.asyncio
+async def test_grant_credit_same_idempotency_key_across_orgs_returns_409_not_others_entry():
+    """PO 지적(2026-08-18, PR2 비블로커) — provider_ref는 전역 UNIQUE라 org 스코프가
+    없다. 타 org가 같은 Idempotency-Key를 재사용하면 남의 grant entry를 그대로 반환하는
+    IDOR류 대신 409로 닫혀야 한다."""
+    from app.services.admin_billing import AdminBillingError, grant_credit
+
+    engine, maker = await _session_factory()
+    try:
+        async with maker() as s:
+            org_a = await _seed_org(s, tier="free")
+            org_b = await _seed_org(s, tier="free")
+            await _seed_offering(s, tier="team", monthly_price_minor=59000)
+        key = f"idem-{uuid.uuid4()}"
+
+        async with maker() as s:
+            await grant_credit(
+                s, org_id=org_a, target_tier="team", months=1, reason="org A 보상",
+                currency="krw", idempotency_key=key, actor_email="operator@moonklabs.com",
+            )
+
+        async with maker() as s:
+            with pytest.raises(AdminBillingError) as exc_info:
+                await grant_credit(
+                    s, org_id=org_b, target_tier="team", months=1, reason="org B가 같은 키 재사용",
+                    currency="krw", idempotency_key=key, actor_email="operator@moonklabs.com",
+                )
+            assert exc_info.value.status_code == 409
+            assert exc_info.value.code == "IDEMPOTENCY_KEY_ORG_MISMATCH"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_grant_credit_same_idempotency_key_does_not_duplicate_ledger_entry():
     from app.services.admin_billing import grant_credit
     from app.models.billing_ledger_entry import BillingLedgerEntry
@@ -341,5 +374,81 @@ async def test_retry_billing_order_404_when_order_belongs_to_different_org():
             with pytest.raises(AdminBillingError) as exc_info:
                 await retry_billing_order(s, org_id=org_b, order_id=order_id, actor_email="operator@moonklabs.com")
             assert exc_info.value.status_code == 404
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_grant_credit_replay_lookup_ignores_cross_type_provider_ref_collision():
+    """PO 지적(2026-08-18, PR2 비블로커② — 1차 fix가 반쪽이었던 지점) — provider_ref
+    UNIQUE는 entry_type 무관 테이블 전체 스코프(0229 마이그)다. 조회만 entry_type으로
+    좁히고 저장 provider_ref는 그대로 두면, 충돌 키가 들어왔을 때 조회는 통과시켜 정상
+    경로에 진입시키지만 tier가 이미 commit된 뒤 **저장 INSERT**가 여전히 같은 값으로
+    UNIQUE를 위반해 ON CONFLICT DO NOTHING → 충돌 폴백이 이종(charge) entry를 재조회해
+    반환한다 — 장부 없는 tier 변경(신규 entry 자체가 안 생김) + 반환 entry_type이 charge.
+
+    정공법(provider_ref를 `admin-grant:{key}` 네임스페이스로 저장·조회 양쪽 통일 —
+    revert companion의 `grant-revert:` 규율과 동일 패턴) 적용 후 3축 직접 확認:
+    ①grant 행 실재(namespace된 provider_ref로 직접 재조회 가능) ②반환 entry의 타입이
+    정확히 credit_grant(charge 아님) ③충돌 시나리오로 세팅한 원래 charge entry가
+    무손상(amount/type 그대로) — namespace 덕에 저장 INSERT조차 그 charge entry의
+    provider_ref(비-네임스페이스 원문)와 겹치지 않아 애초에 그 행을 건드릴 방법이 없다."""
+    from app.services.admin_billing import grant_credit
+    from app.services.billing_ledger import record_ledger_entry
+    from app.models.org_subscription import OrgSubscription
+    from app.models.billing_ledger_entry import BillingLedgerEntry
+    from sqlalchemy import select
+
+    engine, maker = await _session_factory()
+    try:
+        async with maker() as s:
+            org_id = await _seed_org(s, tier="free")
+            await _seed_offering(s, tier="team", monthly_price_minor=59000)
+        colliding_key = f"idem-{uuid.uuid4()}"
+
+        # 같은 org·grant_credit이 받을 idempotency_key 원문과 동일한 provider_ref를 가진
+        # 非credit_grant entry(웹훅 등 다른 출처를 흉내) — namespace 없이 저장했다면
+        # grant_credit의 조회/저장 양쪽이 이 값과 부딪혔을 시나리오.
+        async with maker() as s:
+            await record_ledger_entry(
+                s, org_id=org_id, entry_type="charge", amount_minor=1000, currency="krw",
+                direction="debit", provider="toss", provider_ref=colliding_key,
+                metadata={"note": "unrelated charge, not a tier_grant"},
+            )
+
+        async with maker() as s:
+            result_entry = await grant_credit(
+                s, org_id=org_id, target_tier="team", months=1, reason="CS 보상",
+                currency="krw", idempotency_key=colliding_key,
+                actor_email="operator@moonklabs.com",
+            )
+
+        # ②반환 entry가 정확히 신규 credit_grant인지(charge를 잘못 재반환하지 않았는지).
+        assert result_entry.entry_type == "credit_grant"
+        assert result_entry.entry_metadata["kind"] == "tier_grant"
+
+        async with maker() as s:
+            sub = (await s.execute(
+                select(OrgSubscription).where(OrgSubscription.org_id == org_id)
+            )).scalar_one()
+            assert sub.tier == "team"  # 정상 경로로 진행해 tier bump가 실제로 일어남
+
+            # ①grant 행 실재 — namespace된 provider_ref로 직접 재조회 가능해야 한다.
+            grant_row = (await s.execute(
+                select(BillingLedgerEntry).where(
+                    BillingLedgerEntry.provider_ref == f"admin-grant:{colliding_key}",
+                )
+            )).scalar_one()
+            assert grant_row.entry_type == "credit_grant"
+            assert grant_row.id == result_entry.id
+
+            # ③충돌 시나리오로 세팅한 원래 charge entry가 무손상 — namespace 덕에 저장
+            # INSERT조차 그 원문 provider_ref(colliding_key, 접두어 없음)와 안 겹쳐 애초에
+            # 건드릴 방법이 없다(ON CONFLICT DO NOTHING 폴백 자체가 발동하지 않음).
+            charge_row = (await s.execute(
+                select(BillingLedgerEntry).where(BillingLedgerEntry.provider_ref == colliding_key)
+            )).scalar_one()
+            assert charge_row.entry_type == "charge"
+            assert charge_row.amount_minor == 1000
     finally:
         await engine.dispose()

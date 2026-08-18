@@ -22,7 +22,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -249,6 +249,149 @@ async def sweep_stale_pending_orders(session: AsyncSession, *, now: datetime | N
     return {
         "stale_pending_seen": len(stale_orders), "confirmed": confirmed,
         "failed": failed, "skipped_lookup_error": skipped,
+    }
+
+
+async def sweep_expired_grants(session: AsyncSession, *, now: datetime | None = None) -> dict:
+    """story #2777 PR2 — 어드민 credit_grant(app/services/admin_billing.py::grant_credit)로
+    부여된 임시 유료 tier의 자가회수. PR1이 grant 시 billing_ledger_entries.entry_metadata에
+    심어둔 재료(kind='tier_grant'·target_tier·prev_tier·grant_expires_at)를 읽어 만료된
+    grant를 되돌린다 — grant_expires_at 자체는 org_subscriptions.current_period_end에도
+    반영돼 있지만(테넌트 상세 "언제까지" 읽기 경로), **자동으로 되돌리는 코드는 이 함수가
+    유일**(그 갭이 원래 헤드라인②였다).
+
+    가드(PO 판정 2026-08-18, 과잉살상 방지) — org의 **가장 최근** credit_grant만 후보로
+    삼고, 그 grant 이후 org_subscriptions.tier가 **한 번도 안 바뀌었을 때만**(=지금 tier가
+    여전히 grant의 target_tier와 같을 때만) prev_tier로 되돌린다. 그 사이 실결제 업그레이드/
+    다운그레이드 등으로 tier가 달라졌으면 no-op(그 변경이 이미 grant를 무의미하게 만들었으므로
+    되돌릴 게 없다) — skipped_reason 기록.
+
+    카디르군 QA 실PG 재현(2026-08-18, PR2 head c47db6dd5) — 동일 tier 재부여(이미 team인
+    org에 team 사용권 재부여, 정상 CS 유스케이스)는 target_tier == prev_tier가 된다. 구
+    버전은 "이미 되돌려짐"을 `current_tier == prev_tier` 값-비교 휴리스틱으로만 판정했는데,
+    이 케이스에선 되돌리기 **전에도** current_tier(team) == prev_tier(team)가 이미 참이라
+    휴리스틱이 원천 무력화 — fresh PG에서 스윕을 3연속 돌리면 매번 "아직 안 되돌림"으로
+    오판해 매번 reverted+1, current_period_*를 계속 None으로 재설정한다(테넌트 상세가
+    읽는 그 필드의 무결성이 매 주기 깨짐).
+
+    fix(PO 판정 2026-08-18) — 값-비교 휴리스틱을 폐기하고 **내구 마커**로 바꾼다. revert
+    시 원장에 companion 행(entry_type='adjustment'·metadata.kind='tier_grant_revert'·
+    metadata.reverted_entry_id=원 grant id)을 append한다. 동일 tier 재부여 자체(정상
+    유스케이스)는 계속 허용 — 이 fix가 막는 건 "재부여"가 아니라 "같은 grant를 여러 번
+    되돌리는" 회귀뿐이다.
+
+    카디르군 QA 3차(2026-08-18, PR2 head 03a42af35) — companion 마커를 **DISTINCT ON보다
+    먼저** WHERE에 걸면(1차 시도), 순차 grant(A: free→team 만료·B: team→business 만료,
+    ts는 B가 A보다 최신)가 있는 org에서 1차 스윕이 B를 정확히 회수한 뒤, 2차 스윕은 B가
+    companion 때문에 후보 집합에서 아예 빠져버려 **DISTINCT ON이 남은 행 중 최신인 A를
+    "org의 최신 grant"로 오판**한다 — A는 진작에 B에 의해 superseded된 낡은 grant인데
+    tier 우연 일치(A.target_tier == 되돌아간 현재 tier)까지 겹치면 A가 그대로 되돌려져
+    tier가 free로 붕괴한다(fresh PG 재현 확定).
+
+    **불변식(이 함수가 지켜야 하는 것, 쿼리는 이 문장을 그대로 구현해야 한다)**:
+    스윕 후보 = org별 **절대 최신** grant(ts DESC 1건, companion 유무와 무관하게 결정)
+    정확히 1건이며, 그 1건이 ⓐ미회수(companion 없음) ⓑ만료 ⓒtier 정합일 때만 회수한다.
+    최신이 아닌 grant는 회수 여부와 무관하게 영원히 후보가 아니다(신 grant가 구 grant를
+    대체 — superseded된 grant는 되돌릴 대상에서 항구적으로 제외).
+
+    구현 — CTE로 "org별 절대 최신 grant"를 companion 유무와 **무관하게** 먼저 확정한
+    뒤, 그 특정 행 하나에 대해서만 companion 존재 여부를 바깥 WHERE로 검사한다(순서가
+    거꾸로면 위 재현처럼 최신이 회수돼 사라진 순간 구 grant가 "새 최신"으로 승격돼버린다
+    — DISTINCT ON과 NOT EXISTS는 같은 WHERE 절에서 함께 못 걸리고, 반드시 DISTINCT ON이
+    "필터 없는 전체 grant 집합" 위에서 먼저 절대 최신을 뽑아야 한다)."""
+    from app.services.admin_billing import _audit  # 순환 임포트 회피(admin_billing이 이 모듈을 안 씀)
+    from app.services.billing_ledger import record_ledger_entry
+
+    now = now or datetime.now(timezone.utc)
+
+    # entry_metadata는 BillingLedgerEntry의 Python 속성명일 뿐, DB 컬럼명은 "metadata"다
+    # (모델 주석 — AC 원문대로·Base.metadata 예약명 충돌 회피). raw SQL은 실 컬럼명을 쓴다.
+    latest_grants = (
+        await session.execute(
+            text(
+                """
+                WITH absolute_latest_grants AS (
+                    -- companion 유무와 무관하게, org별 «절대 최신» grant 정확히 1건을
+                    -- 먼저 확定(위 불변식 ⓐ 이전 단계 — superseded 판정의 유일한 축).
+                    SELECT DISTINCT ON (org_id) id, org_id, amount_minor, currency,
+                           metadata AS entry_metadata
+                    FROM billing_ledger_entries
+                    WHERE entry_type = 'credit_grant' AND metadata->>'kind' = 'tier_grant'
+                    ORDER BY org_id, ts DESC
+                )
+                SELECT lg.id, lg.org_id, lg.amount_minor, lg.currency, lg.entry_metadata
+                FROM absolute_latest_grants lg
+                WHERE NOT EXISTS (
+                    -- «그 특정 절대-최신 행 하나»에만 companion 유무를 검사(불변식 ⓐ).
+                    -- companion이 있으면 이 org는 이번 스윕에서 후보가 아예 없음(구
+                    -- grant로 되돌아가지 않는다 — superseded는 영구 제외).
+                    SELECT 1 FROM billing_ledger_entries r
+                    WHERE r.entry_type = 'adjustment'
+                      AND r.metadata->>'kind' = 'tier_grant_revert'
+                      AND r.metadata->>'reverted_entry_id' = lg.id::text
+                )
+                """
+            )
+        )
+    ).mappings().all()
+
+    reverted = skipped_tier_changed = skipped_not_expired = skipped_already_reverted = 0
+    for row in latest_grants:
+        meta = row["entry_metadata"]
+        expires_at = datetime.fromisoformat(meta["grant_expires_at"])
+        if expires_at >= now:
+            skipped_not_expired += 1
+            continue
+
+        org_id = row["org_id"]
+        sub = (
+            await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
+        ).scalar_one_or_none()
+        current_tier = sub.tier if sub is not None else None
+        if current_tier != meta["target_tier"]:
+            # 그 사이 실결제/다른 조작으로 tier가 바뀜 — 이 grant는 이미 무의미, 손대지 않는다.
+            # (companion 마커 설계상 "이미 되돌려짐"은 위 NOT EXISTS가 후보에서 이미 제외하므로
+            # 여기 도달하는 경우는 항상 진짜 외부 tier 변경뿐 — skipped_already_reverted는 더
+            # 이상 이 분기에서 발생하지 않는다.)
+            _audit(
+                actor_email="system:sweep_expired_grants", org_id=org_id, action="grant_sweep_skipped",
+                before={"expected_tier": meta["target_tier"], "actual_tier": current_tier},
+                after={"skipped_reason": "tier_changed_since_grant"},
+            )
+            skipped_tier_changed += 1
+            continue
+
+        prev_tier = meta["prev_tier"]
+        sub.tier = prev_tier
+        sub.status = "active"
+        sub.current_period_start = None
+        sub.current_period_end = None
+        await session.flush()
+        # record_ledger_entry가 내부에서 commit — 위 구독 되돌리기(flush만)와 이 companion
+        # 원장 기입이 같은 트랜잭션으로 함께 확정된다(admin_billing.grant_credit과 동일
+        # flush-then-record_ledger_entry-commit 패턴). provider_ref는 원 grant id로 결정적
+        # 유도 — 동시/재실행 스윕이 같은 grant를 두 번 되돌려도 companion 자체는 멱등.
+        await record_ledger_entry(
+            session, org_id=org_id, entry_type="adjustment",
+            amount_minor=row["amount_minor"], currency=row["currency"], direction="debit",
+            provider_ref=f"grant-revert:{row['id']}",
+            metadata={
+                "kind": "tier_grant_revert",
+                "reverted_entry_id": str(row["id"]),
+                "reverted_target_tier": meta["target_tier"],
+                "reverted_to_tier": prev_tier,
+            },
+        )
+        _audit(
+            actor_email="system:sweep_expired_grants", org_id=org_id, action="grant_sweep_reverted",
+            before={"tier": meta["target_tier"]}, after={"tier": prev_tier},
+        )
+        reverted += 1
+
+    return {
+        "grants_seen": len(latest_grants), "reverted": reverted,
+        "skipped_tier_changed": skipped_tier_changed, "skipped_not_expired": skipped_not_expired,
+        "skipped_already_reverted": skipped_already_reverted,
     }
 
 
