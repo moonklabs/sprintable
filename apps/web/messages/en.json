@@ -1,4 +1,14 @@
 {
+  "legal": {
+    "policiesHeading": "Policies",
+    "businessInfoHeading": "Business Information",
+    "termsOfService": "Terms of Service",
+    "privacyPolicy": "Privacy Policy",
+    "refundPolicy": "Refund Policy",
+    "ceoLabel": "CEO",
+    "registrationLabel": "Business Reg. No.",
+    "mailOrderLabel": "Mail-order Reg. No."
+  },
   "notFound": {
     "title": "Page not found",
     "description": "The page you're looking for doesn't exist or has moved",

@@ -34,6 +34,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { LegalLinks, BusinessInfoBlock } from '@/components/legal/legal-footer';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { NOTIFICATION_TYPES } from '@/lib/notification-types';
@@ -115,6 +116,7 @@ function resolveSettingsTab(tab: string | null): string {
 export default function SettingsPage() {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
+  const tLegal = useTranslations('legal');
   // story #2485 — projectLimitExceededError는 onboarding-form.tsx(#2484)와 동일 개념
   // (resource:"project" PLAN_LIMIT_EXCEEDED)이라 새 키를 만들지 않고 재사용한다.
   const tOnboarding = useTranslations('onboarding');
@@ -824,6 +826,21 @@ export default function SettingsPage() {
                   />
                 )}
                 <BlockedUsersSection />
+
+                <SectionCard>
+                  <SectionCardHeader>
+                    <div className="space-y-1">
+                      <h2 className="text-base font-semibold text-foreground">{tLegal('policiesHeading')}</h2>
+                    </div>
+                  </SectionCardHeader>
+                  <SectionCardBody className="space-y-4">
+                    <LegalLinks className="justify-start text-sm text-muted-foreground" />
+                    <div className="border-t border-border pt-4">
+                      <p className="mb-1.5 text-xs font-medium text-muted-foreground">{tLegal('businessInfoHeading')}</p>
+                      <BusinessInfoBlock className="justify-start text-xs text-muted-foreground" />
+                    </div>
+                  </SectionCardBody>
+                </SectionCard>
               </div>
             </TabsContent>
 
