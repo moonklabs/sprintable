@@ -9,8 +9,13 @@ head_sha가 없고, verdict_capture.py가 웹훅에서 뽑는 head_sha가 게이
 - `gates.github_check_run_id`(BigInteger, nullable) — 이 게이트가 추적 중인 현재 GitHub
   check-run id. 같은 SHA에 대한 pending→success/failure 갱신은 이 id로 PATCH, 새 SHA(재-pending)
   는 새 check-run을 만들고 이 값을 교체한다.
-- `gates.approved_head_sha`(Text, nullable) — "이 승인이 귀속된 SHA"(AC②). synchronize 웹훅
-  수신 시 이 값과 새 head_sha가 다르면 게이트를 pending으로 되돌린다(재-pending).
+- `gates.github_check_run_sha`(Text, nullable) — 카디르 QA(PR#3243)③-c: check-run은 **SHA당
+  1개**가 정본이라, github_check_run_id가 "어느 SHA"에 대한 것인지 알아야 발행 대상 SHA가
+  다를 때 PATCH 대신 새 run을 만들 수 있다(안 그러면 새 head로는 영원히 check가 안 생겨
+  required가 영구 미충족되는 데드엔드가 생긴다).
+- `gates.approved_head_sha`(Text, nullable) — "이 승인이 귀속된 SHA"(AC②). PR 라이프사이클
+  웹훅(synchronize뿐 아니라 opened/reopened/ready_for_review도, 카디르 QA③-b) 수신 시 이 값과
+  새 head_sha가 다르면 게이트를 pending으로 되돌린다(재-pending).
 - 신규 테이블 `gate_github_check_event` — check 발행/재-pending/해소 원장(AC④). 기존 audit
   테이블 3종(permission_audit_logs/login_audit_log/deletion_audit)은 전부 목적이 달라(권한변경·
   로그인·삭제 전용 스키마) 재사용 부적합 판정(그라운딩 §1) — 신규가 정본.
@@ -33,6 +38,7 @@ depends_on = None
 
 def upgrade() -> None:
     op.add_column("gate", sa.Column("github_check_run_id", sa.BigInteger(), nullable=True))
+    op.add_column("gate", sa.Column("github_check_run_sha", sa.Text(), nullable=True))
     op.add_column("gate", sa.Column("approved_head_sha", sa.Text(), nullable=True))
 
     op.create_table(
@@ -66,4 +72,5 @@ def downgrade() -> None:
     op.drop_index("ix_gate_github_check_event_gate_created", table_name="gate_github_check_event")
     op.drop_table("gate_github_check_event")
     op.drop_column("gate", "approved_head_sha")
+    op.drop_column("gate", "github_check_run_sha")
     op.drop_column("gate", "github_check_run_id")

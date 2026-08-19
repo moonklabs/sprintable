@@ -86,11 +86,15 @@ class Gate(Base):
     status_entered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     evidence_status_entered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # story #2813(Gate→GitHub required check, 0262) — 이 게이트가 추적 중인 현재 GitHub
-    # check-run id. 같은 SHA의 pending→success/failure는 이 id로 PATCH, 새 SHA(재-pending)는
-    # 새 check-run 생성 후 이 값 교체.
+    # check-run id. **check-run은 SHA당 1개가 정본**(카디르 QA③-c, 2026-08-19) — 발행 대상
+    # SHA가 github_check_run_sha와 다르면 PATCH가 아니라 새 run을 만든다(안 그러면 새 head로는
+    # 영원히 check가 안 생겨 required가 영구 미충족되는 데드엔드).
     github_check_run_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    # story #2813 — "이 승인이 귀속된 SHA"(AC②). synchronize 웹훅의 새 head_sha와 다르면
-    # 재-pending(approved→pending) 트리거.
+    # story #2813 — 위 github_check_run_id가 "어느 SHA에 대해" 만들어졌는지(카디르 QA③-c).
+    github_check_run_sha: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #2813 — "이 승인이 귀속된 SHA"(AC②). synchronize/opened/reopened/ready_for_review
+    # 웹훅의 새 head_sha와 다르면 재-pending(approved→pending) 트리거(카디르 QA③-b: reopen 가드를
+    # synchronize만이 아니라 네 액션 전부에서 돌림 — 다른 head로 돌아온 재오픈 PR도 잡는다).
     approved_head_sha: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

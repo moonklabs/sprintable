@@ -45,7 +45,10 @@ async def _session_factory():
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
-async def _seed(session, *, gate_status="pending", approved_head_sha=None, github_check_run_id=None):
+async def _seed(
+    session, *, gate_status="pending", approved_head_sha=None,
+    github_check_run_id=None, github_check_run_sha=None,
+):
     from app.models.gate import Gate
     from app.models.github_installation import GithubInstallation
     from app.models.organization import Organization
@@ -68,6 +71,7 @@ async def _seed(session, *, gate_status="pending", approved_head_sha=None, githu
         id=uuid.uuid4(), org_id=org.id, work_item_id=story.id, work_item_type="story",
         gate_type=MERGE_GATE_TYPE, status=gate_status,
         approved_head_sha=approved_head_sha, github_check_run_id=github_check_run_id,
+        github_check_run_sha=github_check_run_sha,
     )
     session.add(gate)
 
@@ -142,7 +146,12 @@ async def test_publish_gate_check_approved_sets_conclusion_success_and_sha_attri
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            seeded = await _seed(s, gate_status="approved", github_check_run_id=9001)
+            # github_check_run_sha를 발행 대상 head_sha와 동일하게 시드해야(카디르 QA③-c 이후)
+            # PATCH(update_check_run) 경로를 탄다 — 다르면 새 run 생성 경로로 바뀐다(정상 동작,
+            # test_publish_gate_check_creates_new_run_for_different_sha_realdb가 그 축을 커버).
+            seeded = await _seed(
+                s, gate_status="approved", github_check_run_id=9001, github_check_run_sha="sha-approved-1",
+            )
 
         with patch(
             "app.services.gate_github_check.update_check_run",
@@ -223,6 +232,126 @@ async def test_publish_gate_check_never_raises_on_unexpected_exception_realdb():
 
 
 @pytest.mark.anyio
+async def test_publish_gate_check_skips_success_when_approved_but_anchor_missing_realdb():
+    """카디르 QA③-a — approved인데 anchor(approved_head_sha)가 없으면 link.evidence로
+    폴백해서 success를 발행하면 안 된다(anchor bypass). create_check_run이 아예 안 불려야 함."""
+    from sqlalchemy import select
+
+    from app.models.gate import Gate
+    from app.models.gate_github_check_event import GateGithubCheckEvent
+    from app.services.gate_github_check import publish_gate_check
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s, gate_status="approved", approved_head_sha=None)
+            # link.evidence에 다른 SHA가 있어도(레이스로 오염된 상황 재현) 이걸 못 쓰게 막는 것이 핵심.
+            from app.models.pull_request_story_link import PullRequestStoryLink
+
+            link = (
+                await s.execute(
+                    select(PullRequestStoryLink).where(PullRequestStoryLink.story_id == seeded["story_id"])
+                )
+            ).scalar_one()
+            link.evidence = {"head_sha": "sha-from-link-should-not-be-used"}
+            await s.commit()
+
+        with patch(
+            "app.services.gate_github_check.create_check_run", AsyncMock(return_value={"id": 1}),
+        ) as create_mock, patch("app.core.database.async_session_factory", Session):
+            await publish_gate_check(seeded["org_id"], seeded["gate_id"])  # head_sha 인자 없음.
+
+        create_mock.assert_not_awaited()
+
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == seeded["gate_id"]))).scalar_one()
+            assert gate.github_check_run_id is None
+            events = (
+                await s.execute(select(GateGithubCheckEvent).where(GateGithubCheckEvent.gate_id == gate.id))
+            ).scalars().all()
+            assert events == []
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publish_gate_check_creates_new_run_for_different_sha_realdb():
+    """카디르 QA③-c — 기존 check-run이 다른 SHA(github_check_run_sha)에 대한 것이면 PATCH가
+    아니라 새 run을 만든다(같은 run을 다른 SHA로 옮기면 required check가 그 SHA에서 영영 안 생김)."""
+    from sqlalchemy import select
+
+    from app.models.gate import Gate
+    from app.services.gate_github_check import publish_gate_check
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(
+                s, gate_status="pending",
+                github_check_run_id=9001, github_check_run_sha="sha-old",
+            )
+
+        with patch(
+            "app.services.gate_github_check.create_check_run",
+            AsyncMock(return_value={"id": 9002}),
+        ) as create_mock, patch(
+            "app.services.gate_github_check.update_check_run", AsyncMock(),
+        ) as update_mock, patch("app.core.database.async_session_factory", Session):
+            await publish_gate_check(
+                seeded["org_id"], seeded["gate_id"],
+                head_sha="sha-new", repo_full_name="acme/repo", pr_number=7,
+            )
+
+        create_mock.assert_awaited_once()  # 새 run 생성 — PATCH 아님.
+        update_mock.assert_not_awaited()
+
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == seeded["gate_id"]))).scalar_one()
+            assert gate.github_check_run_id == 9002
+            assert gate.github_check_run_sha == "sha-new"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publish_gate_check_updates_existing_run_for_same_sha_realdb():
+    """양성대조 — 같은 SHA면 여전히 PATCH(새 run 남발 안 함)."""
+    from sqlalchemy import select
+
+    from app.models.gate import Gate
+    from app.services.gate_github_check import publish_gate_check
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(
+                s, gate_status="pending",
+                github_check_run_id=9001, github_check_run_sha="sha-same",
+            )
+
+        with patch(
+            "app.services.gate_github_check.create_check_run", AsyncMock(),
+        ) as create_mock, patch(
+            "app.services.gate_github_check.update_check_run",
+            AsyncMock(return_value={"id": 9001}),
+        ) as update_mock, patch("app.core.database.async_session_factory", Session):
+            await publish_gate_check(
+                seeded["org_id"], seeded["gate_id"],
+                head_sha="sha-same", repo_full_name="acme/repo", pr_number=7,
+            )
+
+        update_mock.assert_awaited_once()
+        create_mock.assert_not_awaited()
+
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == seeded["gate_id"]))).scalar_one()
+            assert gate.github_check_run_id == 9001
+            assert gate.github_check_run_sha == "sha-same"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_reopen_gate_if_new_sha_flips_approved_to_pending_realdb():
     from app.models.gate import Gate
     from app.services.gate_github_check import reopen_gate_if_new_sha
@@ -236,7 +365,7 @@ async def test_reopen_gate_if_new_sha_flips_approved_to_pending_realdb():
 
         async with Session() as s:
             gate = await s.get(Gate, seeded["gate_id"])
-            flipped = await reopen_gate_if_new_sha(s, seeded["org_id"], gate, "new-sha")
+            flipped = await reopen_gate_if_new_sha(s, seeded["org_id"], gate, "new-sha", repo_full_name="acme/repo", pr_number=7)
             await s.commit()
 
         assert flipped is True
@@ -246,6 +375,24 @@ async def test_reopen_gate_if_new_sha_flips_approved_to_pending_realdb():
             assert gate.status == "pending"
             assert gate.approved_head_sha is None
             assert gate.github_check_run_id is None  # 새 SHA는 새 check-run(§2-2).
+            assert gate.github_check_run_sha is None
+
+        # 미르코군 그라운딩(doc gate-github-check-fe-grounding-2814 §3) 적출 — re_pending 원장
+        # 행이 실제로 남는지(구 코드는 상태만 리셋하고 원장은 전혀 안 씀).
+        async with Session() as s:
+            from sqlalchemy import select
+
+            from app.models.gate_github_check_event import GateGithubCheckEvent
+
+            events = (
+                await s.execute(
+                    select(GateGithubCheckEvent).where(GateGithubCheckEvent.gate_id == seeded["gate_id"])
+                )
+            ).scalars().all()
+            assert len(events) == 1
+            assert events[0].event_type == "re_pending"
+            assert events[0].head_sha == "new-sha"
+            assert events[0].check_conclusion is None
     finally:
         await engine.dispose()
 
@@ -263,7 +410,7 @@ async def test_reopen_gate_if_new_sha_noop_when_sha_matches_realdb():
 
         async with Session() as s:
             gate = await s.get(Gate, seeded["gate_id"])
-            flipped = await reopen_gate_if_new_sha(s, seeded["org_id"], gate, "same-sha")
+            flipped = await reopen_gate_if_new_sha(s, seeded["org_id"], gate, "same-sha", repo_full_name="acme/repo", pr_number=7)
 
         assert flipped is False
 
@@ -286,7 +433,7 @@ async def test_reopen_gate_if_new_sha_noop_when_not_approved_realdb():
 
         async with Session() as s:
             gate = await s.get(Gate, seeded["gate_id"])
-            flipped = await reopen_gate_if_new_sha(s, seeded["org_id"], gate, "any-sha")
+            flipped = await reopen_gate_if_new_sha(s, seeded["org_id"], gate, "any-sha", repo_full_name="acme/repo", pr_number=7)
 
         assert flipped is False
     finally:
@@ -363,7 +510,7 @@ async def test_race_reopen_fail_closed_when_anchor_missing_despite_approved_real
 
         async with Session() as s:
             gate = await s.get(Gate, seeded["gate_id"])
-            flipped = await reopen_gate_if_new_sha(s, seeded["org_id"], gate, "sha-new")
+            flipped = await reopen_gate_if_new_sha(s, seeded["org_id"], gate, "sha-new", repo_full_name="acme/repo", pr_number=7)
             await s.commit()
 
         assert flipped is True  # 구 코드라면 False(침묵 스킵)였을 것.

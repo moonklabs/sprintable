@@ -114,8 +114,19 @@ async def publish_gate_check(
             # 축복"하는 사고가 난다. approved/auto_passed는 **anchor(gate.approved_head_sha,
             # 승인 트랜잭션에서 이미 확정 기록됨 — gates.py 참고)를 그대로 쓴다** — link.evidence는
             # pending 상태(아직 anchor 없음)에서만 참고한다.
+            #
+            # ⛔카디르 QA③-a — approved/auto_passed인데 anchor가 없으면(정상 경로라면 gates.py
+            # 승인 트랜잭션이 항상 채우므로 legacy/이상 상태뿐) link.evidence로 **폴백하지 않고
+            # success 발행 자체를 skip**한다. 폴백을 허용하면 "확인 안 된 SHA에 success"라는
+            # anchor bypass 구멍이 그대로 남는다(레이스 fix의 취지와 정면 충돌).
             if head_sha is None:
-                if gate.status in ("approved", "auto_passed") and gate.approved_head_sha:
+                if gate.status in ("approved", "auto_passed"):
+                    if not gate.approved_head_sha:
+                        logger.warning(
+                            "gate=%s: %s인데 anchor(approved_head_sha) 없음 — success 발행 skip"
+                            "(fail-closed, anchor bypass 방지)", gate_id, gate.status,
+                        )
+                        return
                     head_sha = gate.approved_head_sha
                 else:
                     head_sha = (link.evidence or {}).get("head_sha")
@@ -132,7 +143,10 @@ async def publish_gate_check(
 
             gh_status, gh_conclusion = _github_state_for_gate_status(gate.status)
 
-            if gate.github_check_run_id is None:
+            # 카디르 QA③-c — check-run은 **SHA당 1개**가 정본. 기존 run이 다른 SHA에 대한
+            # 것이면(github_check_run_sha 불일치) PATCH가 아니라 새 run을 만든다 — 안 그러면 새
+            # head로는 영원히 check가 안 생겨 required가 영구 미충족되는 데드엔드가 생긴다.
+            if gate.github_check_run_id is None or gate.github_check_run_sha != head_sha:
                 result = await create_check_run(
                     installation_id, repo_full_name, head_sha,
                     name=CHECK_NAME, status=gh_status, conclusion=gh_conclusion,
@@ -143,6 +157,7 @@ async def publish_gate_check(
                     logger.warning("gate=%s: check-run 생성 실패(fail-closed, GitHub 쪽 무영향)", gate_id)
                     return
                 gate.github_check_run_id = result.get("id")
+                gate.github_check_run_sha = head_sha
             else:
                 result = await update_check_run(
                     installation_id, repo_full_name, gate.github_check_run_id,
@@ -169,7 +184,13 @@ async def publish_gate_check(
 
 
 async def reopen_gate_if_new_sha(
-    session: AsyncSession, org_id: uuid.UUID, gate: Gate, new_head_sha: str,
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    gate: Gate,
+    new_head_sha: str,
+    *,
+    repo_full_name: str,
+    pr_number: int,
 ) -> bool:
     """SHA 귀속(AC②) — 승인된 게이트가 더 이상 최신 커밋과 안 맞으면 pending으로 되돌린다.
     **호출자의 기존 트랜잭션 안에서 동작**(commit 안 함 — verdict_capture.py가 커밋).
@@ -178,7 +199,13 @@ async def reopen_gate_if_new_sha(
 
     ⛔카디르 QA(PR#3243) fail-closed 보강 — approved인데 `approved_head_sha`가 비어있는 경우
     (정상 경로라면 gates.py 승인 트랜잭션이 항상 채워두므로 legacy/이상 상태뿐)도 **재-pending
-    쪽으로** 판정한다. "SHA를 모르는 승인"을 그대로 success로 방치하는 것이 fail-open이다."""
+    쪽으로** 판정한다. "SHA를 모르는 승인"을 그대로 success로 방치하는 것이 fail-open이다.
+
+    ⛔미르코군 그라운딩(doc gate-github-check-fe-grounding-2814) 적출 — 이 함수가 상태만 리셋
+    하고 `GateGithubCheckEvent` 원장에 `re_pending` 행을 전혀 안 남기고 있었다(AC④의 가운데
+    조각이 비어 FE가 "재-pending 사유"를 원장만으로 못 만듦). `repo_full_name`/`pr_number`를
+    받아 이 트랜잭션 안에서 원장 행도 함께 기록한다(`publish_gate_check`의 별도 background
+    발행과 무관 — 재-pending "발생 사실"은 그 즉시, 같은 트랜잭션에 남아야 한다)."""
     if gate.gate_type != MERGE_GATE_TYPE:
         return False
     if gate.status != "approved":
@@ -188,8 +215,16 @@ async def reopen_gate_if_new_sha(
     logger.info(
         "gate=%s: SHA 불일치(approved=%s new=%s) — 재-pending", gate.id, gate.approved_head_sha, new_head_sha
     )
+    prior_sha = gate.approved_head_sha
     set_gate_status(gate, "pending", now=datetime.now(timezone.utc))
     gate.approved_head_sha = None
     gate.github_check_run_id = None  # 새 SHA는 새 check-run(같은 SHA의 pending→success 갱신 축과 분리).
+    gate.github_check_run_sha = None
+    session.add(GateGithubCheckEvent(
+        org_id=org_id, gate_id=gate.id, story_id=gate.work_item_id,
+        repo_full_name=repo_full_name, pr_number=pr_number, head_sha=new_head_sha,
+        event_type="re_pending", check_conclusion=None,
+    ))
+    logger.info("gate=%s: re_pending 원장 기록(prior_sha=%s)", gate.id, prior_sha)
     await session.flush()
     return True

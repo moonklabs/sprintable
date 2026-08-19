@@ -393,6 +393,10 @@ async def _process_webhook_event(
     # 증거와 무관하게 merge 게이트를 GitHub check-run으로 반영한다. 설계 doc §2-1(PO 승인): 카드
     # 원안 "push 이벤트" 대신 `pull_request.synchronize`를 쓴다 — PR번호+head_sha가 payload에
     # 이미 있어 브랜치→PR 매칭 추가조회가 불요. synchronize는 SHA 재-pending(§2-2)도 겸한다.
+    #
+    # ⛔카디르 QA(PR#3243)③-b — 재-pending 가드를 synchronize 하나에만 걸면, PR이 **다른
+    # head로 재오픈**(close→reopen 사이 강제 push 등)되거나 draft→ready_for_review로 전환되며
+    # 그새 커밋이 바뀐 경우를 못 잡는다. 네 액션 전부에서 동일 가드를 돌린다(비교 비용은 동일).
     if (
         event == "pull_request"
         and pr_action in ("opened", "reopened", "ready_for_review", "synchronize")
@@ -412,8 +416,10 @@ async def _process_webhook_event(
             )
         ).scalar_one_or_none()
         if merge_gate is not None:
-            if pr_action == "synchronize":
-                await reopen_gate_if_new_sha(session, org_id, merge_gate, head_sha)
+            await reopen_gate_if_new_sha(
+                session, org_id, merge_gate, head_sha,
+                repo_full_name=repo, pr_number=pr_number,
+            )
             gate_check_publish.append({
                 "org_id": org_id, "gate_id": merge_gate.id,
                 "head_sha": head_sha, "repo_full_name": repo, "pr_number": pr_number,

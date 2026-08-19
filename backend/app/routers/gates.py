@@ -164,6 +164,11 @@ class GateResponse(BaseModel):
     evidence_status: str | None = None
     decision_basis: str | None = None
     auto_decision_reason: str | None = None
+    # story #2813/#2814 계약 ①(미르코군 그라운딩 doc gate-github-check-fe-grounding-2814 §5) —
+    # GitHub check-run 상태를 FE가 읽을 수 있게 raw passthrough(신규 엔드포인트 불요). Gate ORM에
+    # 이미 있는 컬럼 그대로 — additive·nullable(merge 게이트 아니거나 아직 미발행이면 None).
+    github_check_run_id: int | None = None
+    approved_head_sha: str | None = None
     created_at: datetime
     updated_at: datetime
 
