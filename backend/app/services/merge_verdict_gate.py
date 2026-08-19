@@ -268,12 +268,20 @@ async def evaluate_merge_gate(
     ci_result: str | None,
     pr_result: str | None = "pass",
     trust_threshold: float = DEFAULT_TRUST_THRESHOLD,
+    head_sha: str | None = None,
 ) -> MergeGateDecision:
     """story 머지 게이트를 평가해 decision(auto_merge|ask_human|block)을 산출한다.
 
     Cage 재사용: capture_pr_ci_verdict(독립 verdict 기록) + compute_member_trust_scores(trust) +
     create_gate(정책 disposition 아티팩트·AC⑥). 모든 평가는 gate row를 남긴다.
-    """
+
+    ``head_sha``(story #2813, 카디르 R2 CRITICAL) — 이 평가로 gate.status가 "auto_passed"가
+    되면(정책이 allow_auto) `gate.approved_head_sha`를 이 값으로 즉시 확定한다. 사람 승인
+    (gates.py transition_gate_endpoint)이 승인 트랜잭션에서 anchor를 즉시 박는 것과 동일한
+    불변식 — "success를 받을 수 있는 SHA는 anchor 단 하나"가 approved/auto_passed 둘 다에서
+    성립해야 publish_gate_check의 anchor 검증이 의미가 있다. 호출자가 head_sha를 모르면(board
+    preflight/report-done처럼 웹훅 컨텍스트가 없는 경로) None — anchor 없음(fail-closed, publish
+    가 success 발행을 skip)."""
     ci = _normalize_result(ci_result)
     pr = _normalize_result(pr_result)
 
@@ -400,6 +408,12 @@ async def evaluate_merge_gate(
         neutral_facts=facts,
     )
 
+    # story #2813(카디르 R2 CRITICAL) — auto_passed는 정책이 내리는 "그 순간의" 승인이다.
+    # 사람 승인(gates.py)과 동일하게 **결정 트랜잭션에서 즉시** anchor를 박는다 — 재평가로 다시
+    # auto_passed가 되면(새 증거·같은 정책) anchor도 그 시점 head_sha로 갱신(idempotent).
+    if gate.status == "auto_passed" and head_sha:
+        gate.approved_head_sha = head_sha
+
     # 재제출 re-open(doc-gate 48f064e5 선례 이식): uq(work_item,gate_type)=1행 + terminal=immutable
     # → create_gate 멱등이 rejected/voided gate 를 그대로 반환하면 아래 _decide 가 deny BLOCK 을
     # 영구 반환한다(void/override 는 pending 전용이라 API 복구 경로 0 — reject→수정→재제출 불가).
@@ -507,6 +521,7 @@ async def reconcile_merge_gate_with_real_evidence(
     repo: str,
     ci_result: str | None,
     merged: bool,
+    head_sha: str | None = None,
 ) -> MergeGateDecision | None:
     """story #2156 AC2(2026-08-07) — GitHub 웹훅이 잡은 실 CI/PR verdict를 merge-type
     게이트에 반영한다.
@@ -552,4 +567,5 @@ async def reconcile_merge_gate_with_real_evidence(
         session, org_id, story_id,
         pr_number=pr_number, repo=repo, ci_result=ci_result,
         pr_result=("pass" if merged else None),
+        head_sha=head_sha,
     )

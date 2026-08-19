@@ -149,8 +149,11 @@ async def test_publish_gate_check_approved_sets_conclusion_success_and_sha_attri
             # github_check_run_sha를 발행 대상 head_sha와 동일하게 시드해야(카디르 QA③-c 이후)
             # PATCH(update_check_run) 경로를 탄다 — 다르면 새 run 생성 경로로 바뀐다(정상 동작,
             # test_publish_gate_check_creates_new_run_for_different_sha_realdb가 그 축을 커버).
+            # approved_head_sha도 같은 값으로 시드해야(카디르 R2 CRITICAL 이후) anchor 검증을
+            # 통과한다 — 인자 head_sha만으론 더 이상 안 통과.
             seeded = await _seed(
-                s, gate_status="approved", github_check_run_id=9001, github_check_run_sha="sha-approved-1",
+                s, gate_status="approved", approved_head_sha="sha-approved-1",
+                github_check_run_id=9001, github_check_run_sha="sha-approved-1",
             )
 
         with patch(
@@ -170,6 +173,21 @@ async def test_publish_gate_check_approved_sets_conclusion_success_and_sha_attri
         async with Session() as s:
             gate = (await s.execute(select(Gate).where(Gate.id == seeded["gate_id"]))).scalar_one()
             assert gate.approved_head_sha == "sha-approved-1"  # SHA 귀속(AC②) 실제 저장 확認.
+
+            # PO 지시(2026-08-19) — 원장 3축(published/re_pending/resolved) 완충족의 마지막
+            # 조각. resolved는 gh_status=="completed"일 때만 찍힌다(_process_webhook_event와
+            # 무관 — publish_gate_check 자체 로직).
+            from app.models.gate_github_check_event import GateGithubCheckEvent
+
+            events = (
+                await s.execute(
+                    select(GateGithubCheckEvent).where(GateGithubCheckEvent.gate_id == gate.id)
+                )
+            ).scalars().all()
+            assert len(events) == 1
+            assert events[0].event_type == "resolved"
+            assert events[0].check_conclusion == "success"
+            assert events[0].head_sha == "sha-approved-1"
     finally:
         await engine.dispose()
 
@@ -187,7 +205,9 @@ async def test_publish_gate_check_fail_closed_on_github_error_does_not_set_succe
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            seeded = await _seed(s, gate_status="approved")
+            # anchor를 head_sha와 동일하게 시드(카디르 R2 이후) — anchor-missing-skip이 아니라
+            # "GitHub 호출 자체가 실패"하는 이 테스트 본연의 시나리오를 타야 한다.
+            seeded = await _seed(s, gate_status="approved", approved_head_sha="sha-fail-1")
 
         with patch(
             "app.services.gate_github_check.create_check_run", AsyncMock(return_value=None),
@@ -199,7 +219,7 @@ async def test_publish_gate_check_fail_closed_on_github_error_does_not_set_succe
 
         async with Session() as s:
             gate = (await s.execute(select(Gate).where(Gate.id == seeded["gate_id"]))).scalar_one()
-            assert gate.approved_head_sha is None
+            assert gate.approved_head_sha == "sha-fail-1"  # 시드값 그대로 — 새로 오염 안 됨.
             assert gate.github_check_run_id is None
             events = (
                 await s.execute(select(GateGithubCheckEvent).where(GateGithubCheckEvent.gate_id == gate.id))
@@ -217,7 +237,9 @@ async def test_publish_gate_check_never_raises_on_unexpected_exception_realdb():
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
-            seeded = await _seed(s, gate_status="approved")
+            # anchor를 head_sha와 동일하게 시드(카디르 R2 이후) — 예외를 실제로 일으키는
+            # create_check_run 호출까지 도달해야 이 테스트가 뭘 검증하는지 의미가 있다.
+            seeded = await _seed(s, gate_status="approved", approved_head_sha="sha-x")
 
         with patch(
             "app.services.gate_github_check.create_check_run",
@@ -518,5 +540,186 @@ async def test_race_reopen_fail_closed_when_anchor_missing_despite_approved_real
         async with Session() as s:
             gate = await s.get(Gate, seeded["gate_id"])
             assert gate.status == "pending"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_r2_critical_webhook_explicit_head_sha_mismatch_never_bypasses_anchor_realdb():
+    """카디르 R2 CRITICAL(2026-08-19, 코드 추적 재확認) — 이전 fix는 anchor 우선을
+    "head_sha 인자가 None일 때만" 적용해서, **항상 head_sha를 명시 전달하는 웹훅 경로**
+    (verdict_capture.py의 gate_check_publish outparam)가 그 검증을 통째로 우회했다. 이 테스트가
+    바로 그 경로를 재현한다 — 웹훅이 anchor(A)와 다른 head_sha(B)를 명시로 넘겨도 success가
+    발행되면 안 된다(그 상황은 재-pending 영역)."""
+    from sqlalchemy import select
+
+    from app.models.gate import Gate
+    from app.models.gate_github_check_event import GateGithubCheckEvent
+    from app.services.gate_github_check import publish_gate_check
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s, gate_status="approved", approved_head_sha="sha-A")
+
+        with patch(
+            "app.services.gate_github_check.create_check_run", AsyncMock(return_value={"id": 1}),
+        ) as create_mock, patch(
+            "app.services.gate_github_check.update_check_run", AsyncMock(),
+        ) as update_mock, patch("app.core.database.async_session_factory", Session):
+            # 웹훅 경로와 동일한 호출 형태 — head_sha를 **명시로** 넘긴다(다른 SHA).
+            await publish_gate_check(
+                seeded["org_id"], seeded["gate_id"],
+                head_sha="sha-B", repo_full_name="acme/repo", pr_number=7,
+            )
+
+        # ⭐핵심 단언 — 구 코드였다면 head_sha="sha-B"가 인자로 왔으므로 anchor 검증 자체가
+        # 안 돌아 create_check_run(status=completed, conclusion=success)이 그대로 호출됐을 것.
+        create_mock.assert_not_awaited()
+        update_mock.assert_not_awaited()
+
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == seeded["gate_id"]))).scalar_one()
+            assert gate.approved_head_sha == "sha-A"  # B로 오염 안 됨.
+            events = (
+                await s.execute(select(GateGithubCheckEvent).where(GateGithubCheckEvent.gate_id == gate.id))
+            ).scalars().all()
+            assert events == []  # 발행 자체가 안 일어났으므로 원장도 0건.
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_reopen_gate_if_new_sha_treats_auto_passed_same_as_approved_realdb():
+    """카디르 R2 fix② — auto_passed도 approved와 동일하게 재-pending 대상이어야 한다(구 코드는
+    `gate.status != "approved"`로 auto_passed를 완전히 건너뛰었다)."""
+    from app.models.gate import Gate
+    from app.services.gate_github_check import reopen_gate_if_new_sha
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s, gate_status="auto_passed", approved_head_sha="sha-old")
+
+        async with Session() as s:
+            gate = await s.get(Gate, seeded["gate_id"])
+            flipped = await reopen_gate_if_new_sha(
+                s, seeded["org_id"], gate, "sha-new", repo_full_name="acme/repo", pr_number=7,
+            )
+            await s.commit()
+
+        assert flipped is True  # 구 코드라면 gate_type만 보고 status 체크에서 False였을 것.
+
+        async with Session() as s:
+            gate = await s.get(Gate, seeded["gate_id"])
+            assert gate.status == "pending"
+            assert gate.approved_head_sha is None
+    finally:
+        await engine.dispose()
+
+
+# ── 카디르 R2 fix②-a — auto_passed 판정 시점 anchor 즉시 확定(merge_verdict_gate.evaluate_
+# merge_gate) — test_2156_merge_gate_evidence_realdb.py의 _seed_story_with_participation/
+# _gate_row 패턴을 그대로 재사용(발명 0, 이 파일 self-contained 유지 위해 로컬 복제). ──────────
+
+
+async def _seed_story_with_participation(session):
+    from app.models.organization import Organization
+    from app.models.participation import Participation, ParticipationRole
+    from app.models.pm import Story
+    from app.models.project import Project
+
+    org = Organization(id=uuid.uuid4(), name="Org", slug=f"org-{uuid.uuid4().hex[:8]}")
+    session.add(org)
+    await session.commit()
+
+    project = Project(id=uuid.uuid4(), org_id=org.id, name="P")
+    session.add(project)
+    await session.commit()
+
+    story = Story(id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="anchor stamp target")
+    session.add(story)
+    await session.commit()
+
+    role = ParticipationRole(id=uuid.uuid4(), org_id=org.id, key="dev", label="Dev", is_default=True)
+    session.add(role)
+    await session.commit()
+
+    member_id = uuid.uuid4()
+    participation = Participation(
+        id=uuid.uuid4(), org_id=org.id, story_id=story.id, role_id=role.id, member_id=member_id,
+    )
+    session.add(participation)
+    await session.commit()
+
+    return {"org_id": org.id, "story_id": story.id, "member_id": member_id}
+
+
+async def _gate_row_by_story(session, story_id):
+    from sqlalchemy import select
+
+    from app.models.gate import Gate
+    from app.services.merge_verdict_gate import MERGE_GATE_TYPE
+
+    result = await session.execute(
+        select(Gate).where(Gate.work_item_id == story_id, Gate.gate_type == MERGE_GATE_TYPE)
+    )
+    return result.scalar_one_or_none()
+
+
+@pytest.mark.anyio
+async def test_evaluate_merge_gate_stamps_anchor_when_auto_passed_realdb():
+    """카디르 R2 fix②-a — 정책이 allow_auto로 판정하면(status=auto_passed) 그 결정 트랜잭션
+    에서 즉시 `approved_head_sha`가 head_sha로 확定돼야 한다(사람 승인과 동일 불변식)."""
+    from app.services.merge_verdict_gate import evaluate_merge_gate
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_story_with_participation(s)
+
+            with patch(
+                "app.services.gate_service.resolve_disposition",
+                AsyncMock(return_value=("allow_auto", "org_policy")),
+            ):
+                await evaluate_merge_gate(
+                    s, seeded["org_id"], seeded["story_id"],
+                    pr_number=99, repo="acme/repo", ci_result="pass", pr_result="pass",
+                    head_sha="sha-auto-1",
+                )
+                await s.commit()
+
+            gate = await _gate_row_by_story(s, seeded["story_id"])
+            assert gate.status == "auto_passed"
+            assert gate.approved_head_sha == "sha-auto-1"  # ⭐핵심 단언.
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_evaluate_merge_gate_no_anchor_when_head_sha_unknown_realdb():
+    """양성대조 — head_sha를 모르는 호출자(board preflight류)는 anchor를 못 남긴다(발명 금지,
+    None 그대로) — publish_gate_check가 그 경우 success 발행을 skip하는 것과 짝을 이룬다."""
+    from app.services.merge_verdict_gate import evaluate_merge_gate
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_story_with_participation(s)
+
+            with patch(
+                "app.services.gate_service.resolve_disposition",
+                AsyncMock(return_value=("allow_auto", "org_policy")),
+            ):
+                await evaluate_merge_gate(
+                    s, seeded["org_id"], seeded["story_id"],
+                    pr_number=99, repo="acme/repo", ci_result="pass", pr_result="pass",
+                    # head_sha 인자 생략 — None 기본값.
+                )
+                await s.commit()
+
+            gate = await _gate_row_by_story(s, seeded["story_id"])
+            assert gate.status == "auto_passed"
+            assert gate.approved_head_sha is None
     finally:
         await engine.dispose()

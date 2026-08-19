@@ -108,28 +108,34 @@ async def publish_gate_check(
             repo_full_name = repo_full_name or link.repo_full_name
             pr_number = pr_number if pr_number is not None else link.pr_number
 
-            # ⛔카디르 QA(PR#3243, 2026-08-19) 레이스 fix — 여기서 link.evidence.head_sha를
-            # "지금 추적 중인 SHA"로 재해소하면, 승인(SHA A) 커밋 後·이 배경 태스크 실행 前에
-            # 새 커밋(B)의 synchronize가 먼저 link.evidence를 B로 갱신해버렸을 때 "A 승인이 B를
-            # 축복"하는 사고가 난다. approved/auto_passed는 **anchor(gate.approved_head_sha,
-            # 승인 트랜잭션에서 이미 확정 기록됨 — gates.py 참고)를 그대로 쓴다** — link.evidence는
-            # pending 상태(아직 anchor 없음)에서만 참고한다.
+            # ⛔카디르 R2 CRITICAL(2026-08-19, 코드 추적 재확認) — 이전 fix는 anchor 우선을
+            # "head_sha 인자가 None일 때만" 적용했다. 그런데 verdict_capture.py 웹훅 경로는
+            # **항상 head_sha를 명시 전달**하므로(gate_check_publish outparam) 그 경로에서
+            # anchor 검증이 통째로 우회됐다 — 웹훅이 다른 SHA를 넘기면 그대로 그 SHA에
+            # success가 발행될 수 있었다(레이스 fix가 막으려던 것과 같은 계열의 구멍).
             #
-            # ⛔카디르 QA③-a — approved/auto_passed인데 anchor가 없으면(정상 경로라면 gates.py
-            # 승인 트랜잭션이 항상 채우므로 legacy/이상 상태뿐) link.evidence로 **폴백하지 않고
-            # success 발행 자체를 skip**한다. 폴백을 허용하면 "확인 안 된 SHA에 success"라는
-            # anchor bypass 구멍이 그대로 남는다(레이스 fix의 취지와 정면 충돌).
-            if head_sha is None:
-                if gate.status in ("approved", "auto_passed"):
-                    if not gate.approved_head_sha:
-                        logger.warning(
-                            "gate=%s: %s인데 anchor(approved_head_sha) 없음 — success 발행 skip"
-                            "(fail-closed, anchor bypass 방지)", gate_id, gate.status,
-                        )
-                        return
-                    head_sha = gate.approved_head_sha
-                else:
-                    head_sha = (link.evidence or {}).get("head_sha")
+            # 불변식으로 재정의: **approved/auto_passed 게이트에서 success를 받을 수 있는
+            # SHA는 anchor(gate.approved_head_sha) 단 하나** — 인자로 뭐가 왔든 무관하다.
+            # ①anchor가 없으면(legacy/이상 상태) skip(QA③-a 그대로) ②인자 head_sha가 anchor와
+            # 다르면(=최신 SHA가 승인된 것과 다름) 그 상황은 **재-pending 영역이지 발행 영역이
+            # 아니다** — reopen_gate_if_new_sha가 처리할 몫이므로 여기서도 skip. 통과하면
+            # head_sha를 anchor로 **강제 고정**(인자 무시).
+            if gate.status in ("approved", "auto_passed"):
+                if not gate.approved_head_sha:
+                    logger.warning(
+                        "gate=%s: %s인데 anchor(approved_head_sha) 없음 — success 발행 skip"
+                        "(fail-closed, anchor bypass 방지)", gate_id, gate.status,
+                    )
+                    return
+                if head_sha is not None and head_sha != gate.approved_head_sha:
+                    logger.warning(
+                        "gate=%s: 요청 head_sha(%s)가 anchor(%s)와 불일치 — success 발행 skip"
+                        "(재-pending 영역, 발행 영역 아님)", gate_id, head_sha, gate.approved_head_sha,
+                    )
+                    return
+                head_sha = gate.approved_head_sha  # anchor가 절대 기준 — 인자 유무 무관.
+            elif head_sha is None:
+                head_sha = (link.evidence or {}).get("head_sha")
             if not head_sha:
                 logger.info("gate=%s: head_sha 미상 — check 발행 skip", gate_id)
                 return
@@ -205,10 +211,15 @@ async def reopen_gate_if_new_sha(
     하고 `GateGithubCheckEvent` 원장에 `re_pending` 행을 전혀 안 남기고 있었다(AC④의 가운데
     조각이 비어 FE가 "재-pending 사유"를 원장만으로 못 만듦). `repo_full_name`/`pr_number`를
     받아 이 트랜잭션 안에서 원장 행도 함께 기록한다(`publish_gate_check`의 별도 background
-    발행과 무관 — 재-pending "발생 사실"은 그 즉시, 같은 트랜잭션에 남아야 한다)."""
+    발행과 무관 — 재-pending "발생 사실"은 그 즉시, 같은 트랜잭션에 남아야 한다).
+
+    ⛔카디르 R2 CRITICAL(2026-08-19) — `auto_passed`도 `approved`와 동일하게 다룬다. 정책이
+    allow_auto로 내린 통과도 "그 SHA에 대한" 승인이라 새 커밋엔 무효 — 자동통과 정책이 새
+    증거로 다시 통과시키는 것은 `evaluate_merge_gate`(재평가 시 anchor 재확定)의 몫이지,
+    구 anchor를 새 SHA에 그대로 붙여두는 것의 몫이 아니다."""
     if gate.gate_type != MERGE_GATE_TYPE:
         return False
-    if gate.status != "approved":
+    if gate.status not in ("approved", "auto_passed"):
         return False
     if gate.approved_head_sha == new_head_sha:
         return False

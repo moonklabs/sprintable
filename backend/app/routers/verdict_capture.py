@@ -512,9 +512,12 @@ async def _process_webhook_event(
     # 배달은 영구 no-op(processed로 커밋)"이 돼 GitHub 재시도를 못 받는다(delivery 모델
     # 자체 계약 — "실패=rollback→retry 보존"). 이 함수 밖(github_webhook)이 이미 예외를
     # 전체 rollback+500으로 처리해 GitHub가 재시도하므로, 여기서 삼키지 않고 그대로 올린다.
+    # story #2813(카디르 R2) — head_sha를 넘겨 auto_passed 판정 시 anchor(gate.approved_head_sha)
+    # 즉시 확定(merge_verdict_gate.evaluate_merge_gate 참고).
     await reconcile_merge_gate_with_real_evidence(
         session, org_id, story_id,
         pr_number=pr_number, repo=repo, ci_result=ci_conclusion, merged=merged,
+        head_sha=head_sha,
     )
 
     # ⭐story #2327 후속(PO 판정, 2026-07-30, PR#2685 실 웹훅 시험대가 드러낸 갭) — merge 시
