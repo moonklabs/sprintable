@@ -1378,9 +1378,17 @@ class EventDefinitionResponse(BaseModel):
     id: str
     key: str
     org_id: str | None
+    # story #2792(2790 P1) — name/description 신설(PO 확定 2026-08-19 ①). key는 여전히
+    # 기계용 식별자, name이 사람용 표시(드롭다운 등) — role_templates류 i18n 오버레이는
+    # 여기 없음(신규 서브시스템 얹지 않는다, 이번 스코프 밖).
+    name: str
+    description: str | None
     payload_schema: dict
     routing: dict
     block_template: dict | None
+    # 사이클형 정의의 stage별 role/action 카탈로그 메타 — {slug: {role, action}}. 신호형/
+    # 측정형 정의는 빈 dict.
+    stage_metadata: dict
     enabled: bool
     version: int
 
@@ -1407,8 +1415,10 @@ async def list_event_definitions(
     return [
         EventDefinitionResponse(
             id=str(r.id), key=r.key, org_id=str(r.org_id) if r.org_id else None,
+            name=r.name, description=r.description,
             payload_schema=r.payload_schema, routing=r.routing,
-            block_template=r.block_template, enabled=r.enabled, version=r.version,
+            block_template=r.block_template, stage_metadata=r.stage_metadata,
+            enabled=r.enabled, version=r.version,
         )
         for r in rows
     ]
@@ -1423,6 +1433,11 @@ async def list_event_definitions(
 
 class CreateEventDefinitionRequest(BaseModel):
     key: str
+    # story #2792(2790 P1, PO 확定 2026-08-19 ①) — 사람용 표시 이름(드롭다운 등). key는
+    # 기계용 식별자로 그대로 둔다. 기본값 ""은 DB server_default와 동일 안전망 컨벤션(#2636
+    # 기존 호출부가 name 없이도 여전히 동작 — 신규 필드가 기존 계약을 안 깬다).
+    name: str = ""
+    description: str | None = None
     payload_schema: dict
     routing: dict
     # story #2637 §범위1/5: optional — 없으면 렌더러가 현행 제네릭 폴백을 쓴다(비회귀).
@@ -1432,24 +1447,34 @@ class CreateEventDefinitionRequest(BaseModel):
     # (버튼/REST/MCP 전부 이 단일 엔드포인트를 탄다 — #2633 AC2 단일 파이프 덕에 별도
     # 집행 지점이 필요 없다).
     action_auth: dict | None = None
+    # story #2792(2790 P1) — 사이클형 정의의 stage별 role/action 카탈로그 메타. 키는
+    # payload_schema.properties.stage.enum의 부분집합이어야 한다(validate_stage_metadata,
+    # 가드①) — 비어 있으면(신호형/측정형) 검증 스킵.
+    stage_metadata: dict = {}
 
 
 class UpdateEventDefinitionRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
     payload_schema: dict | None = None
     routing: dict | None = None
     enabled: bool | None = None
     block_template: dict | None = None
     action_auth: dict | None = None
+    stage_metadata: dict | None = None
 
 
 class EventDefinitionDetailResponse(BaseModel):
     id: str
     key: str
     org_id: str | None
+    name: str
+    description: str | None
     payload_schema: dict
     routing: dict
     block_template: dict | None
     action_auth: dict | None
+    stage_metadata: dict
     enabled: bool
     version: int
     created_by: str | None
@@ -1458,8 +1483,10 @@ class EventDefinitionDetailResponse(BaseModel):
 def _event_definition_detail(d: "EventDefinition") -> EventDefinitionDetailResponse:
     return EventDefinitionDetailResponse(
         id=str(d.id), key=d.key, org_id=str(d.org_id) if d.org_id else None,
+        name=d.name, description=d.description,
         payload_schema=d.payload_schema, routing=d.routing,
         block_template=d.block_template, action_auth=d.action_auth,
+        stage_metadata=d.stage_metadata,
         enabled=d.enabled, version=d.version,
         created_by=str(d.created_by) if d.created_by else None,
     )
@@ -1497,11 +1524,13 @@ async def create_event_definition(
         InvalidEventDefinitionKeyError,
         InvalidEventRoutingError,
         InvalidPayloadSchemaError,
+        InvalidStageMetadataError,
         validate_action_auth,
         validate_block_template,
         validate_event_definition_key,
         validate_event_payload_schema_shape,
         validate_event_routing,
+        validate_stage_metadata,
     )
     from app.services.member_resolver import resolve_member
 
@@ -1517,9 +1546,11 @@ async def create_event_definition(
             validate_block_template(body.block_template)
         if body.action_auth is not None:
             validate_action_auth(body.action_auth)
+        validate_stage_metadata(body.payload_schema, body.stage_metadata)
     except (
         InvalidEventDefinitionKeyError, InvalidPayloadSchemaError,
         InvalidEventRoutingError, InvalidBlockTemplateError, InvalidActionAuthError,
+        InvalidStageMetadataError,
     ) as e:
         raise HTTPException(
             status_code=400, detail={"code": "invalid_definition", "message": str(e)},
@@ -1539,8 +1570,10 @@ async def create_event_definition(
     sender = await resolve_member(auth, org_id, db)
     definition = EventDefinition(
         id=uuid.uuid4(), key=body.key, org_id=org_id,
+        name=body.name, description=body.description,
         payload_schema=body.payload_schema, routing=body.routing,
         block_template=body.block_template, action_auth=body.action_auth,
+        stage_metadata=body.stage_metadata,
         created_by=sender.id,
     )
     db.add(definition)
@@ -1567,18 +1600,21 @@ async def update_event_definition(
         InvalidBlockTemplateError,
         InvalidEventRoutingError,
         InvalidPayloadSchemaError,
+        InvalidStageMetadataError,
         validate_action_auth,
         validate_block_template,
         validate_event_payload_schema_shape,
         validate_event_routing,
+        validate_stage_metadata,
     )
 
     if not await _is_org_admin(db, org_id, uuid.UUID(auth.user_id)):
         raise HTTPException(status_code=403, detail="org admin/owner required")
 
     if (
-        body.payload_schema is None and body.routing is None and body.enabled is None
-        and body.block_template is None and body.action_auth is None
+        body.name is None and body.description is None
+        and body.payload_schema is None and body.routing is None and body.enabled is None
+        and body.block_template is None and body.action_auth is None and body.stage_metadata is None
     ):
         raise HTTPException(status_code=400, detail="at least one field must be provided")
 
@@ -1590,7 +1626,32 @@ async def update_event_definition(
     if definition is None:
         raise HTTPException(status_code=404, detail="event definition not found")
 
+    # story #2792 가드① — stage_metadata는 payload_schema와 짝인 검증이라, 둘 중 하나만
+    # 바뀌어도 **유효 조합**(새 값 있으면 새 값·없으면 기존 값)으로 재검증한다. payload_schema만
+    # 줄어들고 stage_metadata를 안 건드리면 기존 메타가 고아가 될 수 있어(예: enum에서 stage
+    # 하나를 뺐는데 그 slug를 가리키던 메타는 그대로) — 이 경우도 여기서 걸린다.
+    if body.payload_schema is not None or body.stage_metadata is not None:
+        effective_schema = body.payload_schema if body.payload_schema is not None else definition.payload_schema
+        effective_stage_metadata = (
+            body.stage_metadata if body.stage_metadata is not None else definition.stage_metadata
+        )
+        try:
+            validate_stage_metadata(effective_schema, effective_stage_metadata)
+        except InvalidStageMetadataError as e:
+            raise HTTPException(
+                status_code=400, detail={"code": "invalid_definition", "message": str(e)},
+            ) from e
+
     content_changed = False
+    if body.name is not None:
+        definition.name = body.name
+        content_changed = True
+    if body.description is not None:
+        definition.description = body.description
+        content_changed = True
+    if body.stage_metadata is not None:
+        definition.stage_metadata = body.stage_metadata
+        content_changed = True
     if body.payload_schema is not None:
         try:
             validate_event_payload_schema_shape(body.payload_schema)
