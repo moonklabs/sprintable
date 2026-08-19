@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import random
 import time
 import uuid
@@ -42,6 +43,7 @@ from app.models.event import Event
 from app.services.member_resolver import assert_caller_is_member, resolve_member_identity
 
 router = APIRouter(prefix="/api/v2/events", tags=["events", "Organization"])
+logger = logging.getLogger(__name__)
 
 # ─── Agent connection registry (S2/S3: 에이전트별 SSE) ───────────────────────
 # member_id (str) → set[Queue] — 다중 연결 지원, 해제 시 해당 queue만 제거
@@ -1015,9 +1017,31 @@ async def publish_registry_event(
     이름을 다른 뜻으로 되쓰면 그 가드가 "부활"로 오판하는 게 아니라(가드는 hasattr만 보므로
     실제로 트립됐다), 미래 독자가 두 개념을 착각할 여지도 같이 없앤다.
 
-    definition_key+payload를 검증하고
-    routing(상신선·전파선)을 실 member_id로 풀어 기존 단일 판정 파이프(route_message/
-    DeliveryDecision, AC2)로 전달한다."""
+    실 로직은 `_publish_registry_event_core`(story #2791 P0 추출) — 서버 자동발행
+    (`publish_preset_event`)도 HTTP 요청 컨텍스트 없이 같은 core를 호출해 단일 파이프
+    원칙(#2633 AC2)을 유지한다. 이 엔드포인트는 auth 의존성 해석만 하고 넘긴다."""
+    return await _publish_registry_event_core(
+        db, org_id, auth, body.definition_key, body.payload, background_tasks,
+        request=request, extra_broadcast_member_ids=body.extra_broadcast_member_ids,
+    )
+
+
+async def _publish_registry_event_core(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    auth: AuthContext,
+    definition_key: str,
+    payload: dict,
+    background_tasks: BackgroundTasks,
+    *,
+    request: Request | None = None,
+    extra_broadcast_member_ids: "list[uuid.UUID] | None" = None,
+) -> dict:
+    """`publish_registry_event`(HTTP)·`publish_preset_event`(서버 자동발행, story #2791 P0)의
+    공유 core — definition_key+payload를 검증하고 routing(상신선·전파선)을 실 member_id로
+    풀어 기존 단일 판정 파이프(route_message/DeliveryDecision, AC2)로 전달한다. HTTP 전용
+    폴백(`request`가 있을 때만 쓰는 `resolve_required_project_id`)만 옵션 처리 — 자동발행
+    호출부는 항상 payload에 work_item/goal 참조를 실어 이 폴백에 안 걸린다."""
     from app.services.member_resolver import resolve_member
 
     sender = await resolve_member(auth, org_id, db)
@@ -1027,7 +1051,7 @@ async def publish_registry_event(
     definition = (await db.execute(
         select(EventDefinition)
         .where(
-            EventDefinition.key == body.definition_key,
+            EventDefinition.key == definition_key,
             EventDefinition.enabled.is_(True),
             or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
         )
@@ -1038,7 +1062,7 @@ async def publish_registry_event(
     )).scalars().first()
     if definition is None:
         raise HTTPException(
-            status_code=404, detail=f"event definition not found or disabled: {body.definition_key!r}",
+            status_code=404, detail=f"event definition not found or disabled: {definition_key!r}",
         )
 
     # story #2637 §범위3(미르코 발견 후속, 2026-08-14): action_auth 실 집행 — 정의에 걸려
@@ -1068,7 +1092,7 @@ async def publish_registry_event(
     from app.services.event_definition_registry import InvalidEventPayloadError, validate_event_payload
 
     try:
-        validate_event_payload(definition.payload_schema, body.payload)
+        validate_event_payload(definition.payload_schema, payload)
     except InvalidEventPayloadError as e:
         # story #2634 후속(#2633 정합): api_client.py의 _extract_error_message가 인식하는
         # {"detail":{"code","message"}} shape으로 맞춘다 — 신규 파싱 분기를 MCP 쪽에 안 만들고
@@ -1088,10 +1112,10 @@ async def publish_registry_event(
 
     try:
         escalation_ids = await resolve_routing_leg(
-            definition.routing["escalation"], payload=body.payload, org_id=org_id, db=db,
+            definition.routing["escalation"], payload=payload, org_id=org_id, db=db,
         )
         broadcast_ids = await resolve_routing_leg(
-            definition.routing["broadcast"], payload=body.payload, org_id=org_id, db=db,
+            definition.routing["broadcast"], payload=payload, org_id=org_id, db=db,
         )
     except (MissingRoutingPayloadFieldError, InvalidWorkItemReferenceError, UnknownRoutingMemberError) as e:
         raise HTTPException(
@@ -1099,7 +1123,7 @@ async def publish_registry_event(
             detail={"code": "invalid_payload", "message": str(e), "errors": [str(e)]},
         ) from e
 
-    if body.extra_broadcast_member_ids:
+    if extra_broadcast_member_ids:
         # story #2693(AC2): payload_field routing과 동일 검증 — 예전엔 filter_org_member_ids로
         # 비회원 id를 조용히 걸러내고(silent drop) 발행을 그대로 진행했다. AC1의 원자성
         # 요구(비회원이면 conv/msg 어느 것도 만들지 않는다)와 일관되게, 여기도 걸러내는 대신
@@ -1107,7 +1131,7 @@ async def publish_registry_event(
         # 동일 철학).
         from app.services.member_resolver import filter_org_member_ids
 
-        requested_extra = set(body.extra_broadcast_member_ids)
+        requested_extra = set(extra_broadcast_member_ids)
         valid_extra = await filter_org_member_ids(requested_extra, org_id, db)
         unknown_extra = requested_extra - valid_extra
         if unknown_extra:
@@ -1123,7 +1147,7 @@ async def publish_registry_event(
         broadcast_ids |= valid_extra
 
     try:
-        project_id = await _resolve_event_project_id(db, org_id=org_id, payload=body.payload)
+        project_id = await _resolve_event_project_id(db, org_id=org_id, payload=payload)
     except InvalidWorkItemReferenceError as e:
         raise HTTPException(
             status_code=400,
@@ -1138,8 +1162,8 @@ async def publish_registry_event(
         # 골라주면 더 헷갈린다 — 그대로 명시 거부(test_publish_unresolvable_project_400의
         # 기존 계약, AC2 무회귀).
         attempted_reference = bool(
-            (body.payload.get("work_item_type") and body.payload.get("work_item_id"))
-            or body.payload.get("goal_id")
+            (payload.get("work_item_type") and payload.get("work_item_id"))
+            or payload.get("goal_id")
         )
         if attempted_reference:
             raise HTTPException(
@@ -1175,9 +1199,9 @@ async def publish_registry_event(
     # "이벤트 발행분"으로 인지하고 event_key로 event_definitions를 조회해 block_template
     # 렌더러를 태울 근거. 렌더러 자체는 #2637 FE 레인(이 커밋은 스키마 배선만).
     send_body = SendMessageRequest(
-        content=_render_event_message_content(definition.key, body.payload),
+        content=_render_event_message_content(definition.key, payload),
         mentioned_ids=list(escalation_ids),
-        event_context={"event_key": definition.key, "payload": body.payload},
+        event_context={"event_key": definition.key, "payload": payload},
     )
     msg_response = await send_message(
         conv.id, send_body, background_tasks, db=db, auth=auth, org_id=org_id,
@@ -1200,6 +1224,122 @@ async def publish_registry_event(
         result["warning"] = (
             "발행은 성공했으나 escalation·broadcast 대상이 모두 0명입니다 — "
             "work_item이 미배정이거나 routing이 아무도 가리키지 않습니다."
+        )
+    return result
+
+
+async def _get_or_create_system_publisher(db: AsyncSession, org_id: uuid.UUID) -> "TeamMember":
+    """story #2791(P0) — 서버 도메인 전이 자동발행 전용 시스템 발신자. org당 정확히 1행
+    (0258 부분 유니크 인덱스로 DB 레벨 동시성 가드), get-or-create 멱등.
+
+    소유·수명: 이 org가 존재하는 한 영구 — 별도 TTL·수동 정리 없음(자동발행 자체가 이 org
+    수명과 결합돼 있어 "고아 리소스" 클래스가 아니다).
+
+    `project_id`는 team_members 스키마상 NOT NULL이지만, 이 member로 발행할 때 쓰는
+    `send_message`의 sender 해석(conversations.py::`_resolve_member`, api_key 분기)은
+    `TeamMember.id` 존재만 확인하고 project_id는 안 읽는다(2026-08-19 실측, story #2791 PR
+    참조) — 그래서 org 내 아무 project 하나에 anchor해도 org 전역 전이 이벤트 발행에
+    문제없다. `type='agent'`로 만들어 기존 서킷브레이커(agent 발신자 전용, story #2630)가
+    자동발행 폭주(전이 루프)도 그대로 방어하게 한다 — 의도적으로 끄지 않는다(P0 가드②).
+    이름 "시스템 발행"은 채팅 카드의 sender 표시가 사람 눈에 시스템 발행임을 신규 FE 없이
+    이름만으로 읽히게 하기 위함(P0 가드④) — 팀멤버 목록·리더보드·워크포스 표면에는 이 이름
+    그대로의 agent 1명으로 노출된다(관측 기록, P0 스코프 밖 — 페드루 2026-08-19 확認).
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.models.project import Project
+    from app.models.team import TeamMember
+
+    existing = (await db.execute(
+        select(TeamMember).where(
+            TeamMember.org_id == org_id, TeamMember.runtime_type == "system-publisher",
+        ).limit(1)
+    )).scalars().first()
+    if existing is not None:
+        return existing
+
+    anchor_project_id = (await db.execute(
+        select(Project.id)
+        .where(Project.org_id == org_id, Project.deleted_at.is_(None))
+        .order_by(Project.created_at.asc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if anchor_project_id is None:
+        raise ValueError(f"org {org_id}에 anchor할 project가 없음 — 시스템 발신자 프로비저닝 불가")
+
+    ins = pg_insert(TeamMember).values(
+        id=uuid.uuid4(), org_id=org_id, project_id=anchor_project_id,
+        type="agent", name="시스템 발행", role="member",
+        runtime_type="system-publisher", is_active=True,
+    ).on_conflict_do_nothing(
+        index_elements=["org_id"],
+        index_where=(TeamMember.runtime_type == "system-publisher"),
+    ).returning(TeamMember.id)
+    member_id = (await db.execute(ins)).scalar_one_or_none()
+    if member_id is None:
+        # 동시요청 레이스로 다른 트랜잭션이 먼저 생성 — 재조회(asset_registry.py와 동일 TOCTOU 대응).
+        return (await db.execute(
+            select(TeamMember).where(
+                TeamMember.org_id == org_id, TeamMember.runtime_type == "system-publisher",
+            )
+        )).scalars().one()
+    await db.flush()
+    return (await db.execute(select(TeamMember).where(TeamMember.id == member_id))).scalars().one()
+
+
+async def publish_preset_event(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    definition_key: str,
+    payload: dict,
+    background_tasks: BackgroundTasks,
+) -> dict | None:
+    """story #2791(P0, event-workflow-unification-design-2790) — 서버 도메인 전이 지점
+    (상태변경·배정·게이트판정·목표측정)에서 호출하는 자동발행 진입점. HTTP 요청 컨텍스트
+    없이 `_publish_registry_event_core`를 그대로 호출해 #2633 AC2 단일 발행 파이프 원칙을
+    지킨다 — 신규 발행 갈래를 만들지 않는다.
+
+    **구계통(story_status_events.py 등 SSE·웹훅·알림)과의 관계는 병행이다, 대체가 아니다**
+    — 이 함수는 기존 5-effect 옆에 프리셋 발행을 하나 더 추가할 뿐, 기존 effect를 하나도
+    안 건드린다(이중발송처럼 보이지만 서로 다른 채널: 구계통=SSE/webhook/notification,
+    신계통=이벤트 레지스트리 발행 대화 메시지 — 수신자가 같아도 매체가 다르다).
+
+    ⚠️호출자 계약(story_status_events.py::emit_story_status_changed와 동형) — 이 함수는
+    예외를 삼키지 않는다. best-effort 격리(실패가 도메인 전이 자체를 깨면 안 됨)는
+    **호출자**가 개별 try/except로 감싸는 몫이다 — 이 함수 안에서 조용히 삼키면 실패
+    자체를 관측할 수 없다(기존 5-effect와 동일 조직 원칙).
+
+    반환값 `None` = definition이 비활성/미등록이라 정상 no-op(아직 이 org가 프리셋을 안
+    켰거나 #2636 커스텀 오버라이드로 비활성화한 경우 — 발행 실패가 아니다). zero-reach는
+    HTTP 응답 필드 대신 서버 로그(`logger.warning`)로 남긴다 — 이 호출엔 응답을 읽는 사람이
+    없어(핵심 제약②, 침묵 실패 금지) 응답 필드에만 실으면 완전히 유실된다.
+    """
+    from app.models.event_definition import EventDefinition
+
+    definition = (await db.execute(
+        select(EventDefinition)
+        .where(
+            EventDefinition.key == definition_key,
+            EventDefinition.enabled.is_(True),
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        )
+        .limit(1)
+    )).scalars().first()
+    if definition is None:
+        return None
+
+    system_member = await _get_or_create_system_publisher(db, org_id)
+    auth = AuthContext(
+        user_id=str(system_member.id), email=None,
+        claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(org_id),
+    )
+    result = await _publish_registry_event_core(
+        db, org_id, auth, definition_key, payload, background_tasks,
+    )
+    if result.get("zero_reach_warning"):
+        logger.warning(
+            "preset event zero_reach — 도달 0명(org=%s definition=%s payload_keys=%s)",
+            org_id, definition_key, sorted(payload.keys()),
         )
     return result
 
