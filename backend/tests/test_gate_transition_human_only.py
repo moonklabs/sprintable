@@ -48,7 +48,12 @@ async def _call(status: str, member_type: str):
         gate_type="merge_approval", work_item_type="story", work_item_id=uuid.uuid4(),
     )
     session.execute = AsyncMock(return_value=_gr)
-    transition = AsyncMock(return_value=SimpleNamespace())
+    # story #2813: 엔드포인트가 commit 前 gate.gate_type 을 읽어 merge 게이트인지 판정하고(anchor
+    # 기록 여부), commit 後 publish_gate_check 배경 태스크 예약에 gate.id 를 읽는다(태스크 자체는
+    # 이 테스트에서 실행 안 됨 — BackgroundTasks().add_task 는 큐잉만). gate_type을 "merge"가 아닌
+    # 값으로 둬 anchor 기록 분기(resolve_pr_link 추가 조회)를 건너뛴다 — 이 파일의 관심사(human-vs-
+    # agent authz)와 무관.
+    transition = AsyncMock(return_value=SimpleNamespace(id=uuid.uuid4(), gate_type="merge_approval"))
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_resolved(member_type))), \
          patch.object(gates_mod, "transition_gate", transition), \
          patch.object(gates_mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)), \

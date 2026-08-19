@@ -268,12 +268,23 @@ async def evaluate_merge_gate(
     ci_result: str | None,
     pr_result: str | None = "pass",
     trust_threshold: float = DEFAULT_TRUST_THRESHOLD,
+    head_sha: str | None = None,
 ) -> MergeGateDecision:
     """story 머지 게이트를 평가해 decision(auto_merge|ask_human|block)을 산출한다.
 
     Cage 재사용: capture_pr_ci_verdict(독립 verdict 기록) + compute_member_trust_scores(trust) +
     create_gate(정책 disposition 아티팩트·AC⑥). 모든 평가는 gate row를 남긴다.
-    """
+
+    ``head_sha``(story #2813, 카디르 R2 CRITICAL·R3 HIGH) — 이 평가의 **실 판정이
+    `_decide()`==AUTO_MERGE**일 때만(아래 §4) `gate.approved_head_sha`를 이 값으로 즉시
+    확定한다. ⛔`gate.status=="auto_passed"`(정책 disposition 축) 시점에 찍으면 안 된다 —
+    status="auto_passed"이면서 CI 미완/trust 표본 부족으로 실판정은 ASK_HUMAN인 게이트가
+    실재한다(카디르 QA PR#2902②·#2156이 이미 고정한 두 축 구분). 사람 승인(gates.py
+    transition_gate_endpoint)이 승인 트랜잭션에서 anchor를 즉시 박는 것과 동일한 불변식 —
+    "success를 받을 수 있는 SHA는 anchor 단 하나"가 approved/AUTO_MERGE 둘 다에서 성립해야
+    publish_gate_check의 anchor 검증이 의미가 있다. 호출자가 head_sha를 모르면(board
+    preflight/report-done처럼 웹훅 컨텍스트가 없는 경로) None — anchor 없음(fail-closed, publish
+    가 success 발행을 skip)."""
     ci = _normalize_result(ci_result)
     pr = _normalize_result(pr_result)
 
@@ -474,6 +485,31 @@ async def evaluate_merge_gate(
     set_gate_evidence_status(gate, _evidence_status(decision), now=datetime.now(timezone.utc))
     gate.decision_basis = reason
     gate.auto_decision_reason = decision
+
+    # story #2813(카디르 R3 HIGH) — anchor는 **실 판정이 AUTO_MERGE일 때만** 확定한다.
+    # ⛔최초 fix는 `gate.status == "auto_passed"`(정책 disposition 축) 시점에 찍었는데, 그건
+    # `_decide()`의 실 증거 기반 verdict(이 axis)와 다른 필드다(카디르 QA PR#2902②·#2156이
+    # 이미 고정한 구분 — status="auto_passed"이면서 CI 미완/trust 표본 부족으로 실판정은
+    # ASK_HUMAN인 게이트가 실재한다). 그 상태에서 anchor를 찍으면 "사람이 봐야 하는" SHA에도
+    # success가 나갈 수 있었다 — AUTO_MERGE로 옮기면 그런 상태는 anchor가 안 생겨
+    # publish_gate_check의 불변식이 자연히 success를 막는다(fail-closed 정합).
+    # story #2813(카디르 R4①) — 같은 SHA 재평가로 decision이 AUTO_MERGE에서 이탈하면(CI
+    # 재실패·trust 하락 등) 이전 auto-pass anchor는 더 이상 유효하지 않다 — 지운다.
+    # ⚠️스코프: `gate.status=="auto_passed"`(정책이 여전히 allow_auto인 "자동 축")일 때만 —
+    # 사람이 승인한 anchor(`gate.status=="approved"`, gates.py `transition_gate_endpoint`가
+    # 세팅)는 이 시스템 재평가가 **절대 못 건드린다**(건드리면 사람 결재를 시스템이 역전시키는
+    # 사고). head_sha를 모르는 호출자의 AUTO_MERGE 재확認은 기존 anchor를 그대로 둔다(새로
+    # 세우지도 지우지도 않음 — "모른다"는 "무효"가 아니다).
+    if decision == AUTO_MERGE:
+        if head_sha:
+            gate.approved_head_sha = head_sha
+    elif gate.status == "auto_passed" and gate.approved_head_sha:
+        logger.info(
+            "gate=%s: 재평가로 decision이 AUTO_MERGE 이탈(%s) — auto-axis anchor(%s) 무효화",
+            gate.id, decision, gate.approved_head_sha,
+        )
+        gate.approved_head_sha = None
+
     await session.flush()
 
     logger.info(
@@ -507,6 +543,7 @@ async def reconcile_merge_gate_with_real_evidence(
     repo: str,
     ci_result: str | None,
     merged: bool,
+    head_sha: str | None = None,
 ) -> MergeGateDecision | None:
     """story #2156 AC2(2026-08-07) — GitHub 웹훅이 잡은 실 CI/PR verdict를 merge-type
     게이트에 반영한다.
@@ -552,4 +589,5 @@ async def reconcile_merge_gate_with_real_evidence(
         session, org_id, story_id,
         pr_number=pr_number, repo=repo, ci_result=ci_result,
         pr_result=("pass" if merged else None),
+        head_sha=head_sha,
     )

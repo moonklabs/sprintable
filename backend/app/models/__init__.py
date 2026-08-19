@@ -19,6 +19,7 @@ from app.models.event import Event
 from app.models.event_outbox import EventOutbox
 from app.models.delivery_job import DeliveryJob
 from app.models.gate import Gate
+from app.models.gate_github_check_event import GateGithubCheckEvent
 from app.models.github_installation import GithubInstallation, GithubInstallNonce, GithubWebhookDelivery
 from app.models.hitl import HitlPolicy, HitlRequest
 from app.models.judgment import Judgment
@@ -133,6 +134,7 @@ __all__ = [
     "EventOutbox",
     "DeliveryJob",
     "Gate",
+    "GateGithubCheckEvent",
     "GithubInstallation",
     "GithubInstallNonce",
     "GithubWebhookDelivery",
