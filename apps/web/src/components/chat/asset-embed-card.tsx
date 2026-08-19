@@ -128,7 +128,7 @@ export function AssetEmbedCard({ entityId, label, ownMessage, onOpenReadingPanel
         onClick={() =>
           onOpenReadingPanel({ kind: 'attachment', assetId: asset.id, label: asset.name, contentType: asset.content_type })
         }
-        className={`mt-2 flex w-full max-w-[300px] items-center gap-2.5 rounded-md border px-2.5 py-2 text-left transition-colors ${cardSurface}`}
+        className={`mt-2 flex max-w-[300px] items-center gap-2.5 rounded-md border px-2.5 py-2 text-left transition-colors ${cardSurface}`}
       >
         {inner}
       </button>
