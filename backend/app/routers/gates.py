@@ -13,11 +13,12 @@ from app.dependencies.auth import get_current_user, get_scope_context, get_verif
 from app.dependencies.database import get_db
 from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition
+from app.models.gate_github_check_event import GateGithubCheckEvent
 from app.models.hitl import HitlRequest
 from app.models.pm import Story, Task
 from app.models.visual_artifact import VisualArtifact
 from app.routers.agent_gateway import wake_agent
-from app.services.gate_github_check import publish_gate_check, resolve_pr_link
+from app.services.gate_github_check import is_repo_check_enforced, publish_gate_check, resolve_pr_link
 from app.services.merge_verdict_gate import MERGE_GATE_TYPE
 from app.services.gate_service import (
     GateUndoNotSelfError,
@@ -169,6 +170,12 @@ class GateResponse(BaseModel):
     # 이미 있는 컬럼 그대로 — additive·nullable(merge 게이트 아니거나 아직 미발행이면 None).
     github_check_run_id: int | None = None
     approved_head_sha: str | None = None
+    # story #2815(§5-④, 관측모드 판별) — `github_check_run_id`가 계속 null인 이유를 FE가
+    # 구분하게: True면 "이 repo는 required check 등록됨(발행 대기/진행 중)", False/None이면
+    # "이 repo는 애초에 관측모드"로 해석. additive·기본 None(get_gate_endpoint만 채움 — list_gates
+    # 등 타 엔드포인트는 PR 링크 N+1 조회 비용 때문에 스코프 밖, risk_grade/can_approve와 동일
+    # 선례 — Gate ORM에 이 속성이 없어 from_attributes 기본값으로 조용히 통과).
+    github_check_enforced: bool | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -902,6 +909,12 @@ async def get_gate_endpoint(
     # 미경유) + 이 gate의 gate_type을 derive_risk_grade()로 파생(doc §2 SSOT).
     _posture = await get_org_posture(session, org_id)
     resp.risk_grade = derive_risk_grade(_posture, gate.gate_type)
+    # story #2815(§5-④): merge 게이트만 의미 있음(다른 gate_type은 PR/repo 개념 자체가 없음).
+    if gate.gate_type == MERGE_GATE_TYPE:
+        _link = await resolve_pr_link(session, org_id, gate.work_item_id)
+        resp.github_check_enforced = await is_repo_check_enforced(
+            session, org_id, _link.repo_full_name if _link else None,
+        )
     # story #2198(까심 QA 적출·오르테가 확定): can_approve 가 이 엔드포인트에선 **전혀 계산되지
     # 않고** 있었다(docstring 이 enrich 목록에 project_id/work_item_summary/risk_grade 만 적어
     # 뒀던 것 자체가 증거) — doc_approval·non-doc 가릴 것 없이 Pydantic 기본값 False 가 그대로
@@ -926,6 +939,58 @@ async def get_gate_endpoint(
             _approvable = await _non_doc_can_approve(session, gate.gate_type, _uid, org_id, project_id)
             resp.can_approve = _approvable and is_valid_transition(gate.status, "approved")
     return resp
+
+
+class GateGithubCheckEventResponse(BaseModel):
+    """story #2815(§5-②, 미르코군 계약 제안) — `gate_github_check_event`(0262) raw 원장 뷰.
+    org_id/gate_id/story_id는 생략(이미 URL의 `{id}`가 gate 컨텍스트를 특정 — 중복 노출 불요)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    repo_full_name: str
+    pr_number: int
+    head_sha: str
+    event_type: str  # published | re_pending | resolved
+    check_conclusion: str | None
+    created_at: datetime
+
+
+@router.get("/{id}/github-check-events", response_model=list[GateGithubCheckEventResponse])
+async def list_gate_github_check_events_endpoint(
+    id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> list[GateGithubCheckEventResponse]:
+    """story #2815(§5-②) — GitHub check 발행/재-pending/해소 원장(AC④, story #2813) 조회.
+    `GateEvidence`(FE)가 "check 상태·전이 이력" 섹션에서 지연 로드하는 용도 — 소량(gate당
+    보통 수 건)이라 페이지네이션 없이 최신순 전체 반환.
+
+    authz는 `get_gate_endpoint`와 **동일 패턴**(존재 비노출 — project 무권한도 404, 403 아님)을
+    그대로 재사용한다: 이 원장은 gate의 세부 정보이지 별도 리소스가 아니므로 gate 조회와 같은
+    접근권이어야 한다(gate는 보이는데 원장은 막히는 비대칭 방지)."""
+    gate = (await session.execute(
+        select(Gate).where(Gate.id == id, Gate.org_id == org_id)
+    )).scalar_one_or_none()
+    if gate is None:
+        raise HTTPException(status_code=404, detail="Gate not found")
+
+    project_id = await resolve_work_item_project_id(
+        session, org_id, gate.work_item_type, gate.work_item_id,
+    )
+    if project_id is not None:
+        await require_project_access(session, uuid.UUID(auth.user_id), project_id, org_id,
+                                      not_found_detail="Gate not found")
+    elif not is_known_project_agnostic_work_item_type(gate.work_item_type):
+        raise HTTPException(status_code=404, detail="Gate not found")
+
+    rows = (await session.execute(
+        select(GateGithubCheckEvent)
+        .where(GateGithubCheckEvent.gate_id == id, GateGithubCheckEvent.org_id == org_id)
+        .order_by(GateGithubCheckEvent.created_at.desc())
+    )).scalars().all()
+    return [GateGithubCheckEventResponse.model_validate(r) for r in rows]
 
 
 @router.post("/{id}/transition", response_model=GateResponse)

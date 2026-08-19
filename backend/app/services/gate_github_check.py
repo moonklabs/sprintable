@@ -77,6 +77,26 @@ async def _resolve_installation_id(session: AsyncSession, org_id: uuid.UUID) -> 
     return row
 
 
+async def is_repo_check_enforced(
+    session: AsyncSession, org_id: uuid.UUID, repo_full_name: str | None,
+) -> bool:
+    """story #2815(§5-④, 관측모드 판별) — 이 repo가 `sprintable/gate`를 branch protection에
+    required로 등록했는지. `github_installation.enforced_check_repos`(수동 플래그, PO 운영
+    — 설계 근거는 0263 마이그·모델 주석) 조회. installation 없음/미설정/repo 없음이면 전부
+    False(관측모드 아님을 확언하는 게 아니라 "모른다≈아직 강제 아님"의 안전한 기본값)."""
+    if not repo_full_name:
+        return False
+    row = (
+        await session.execute(
+            select(GithubInstallation.enforced_check_repos).where(
+                GithubInstallation.org_id == org_id,
+                GithubInstallation.suspended_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    return bool(row) and repo_full_name in row
+
+
 async def publish_gate_check(
     org_id: uuid.UUID,
     gate_id: uuid.UUID,

@@ -204,7 +204,12 @@ async def test_get_gate_endpoint_200_populates_project_id_and_summary():
                        AsyncMock(return_value=project_id)), \
          patch("app.services.project_auth.has_project_access", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "_resolve_work_item_summary",
-                       AsyncMock(return_value=WorkItemSummary(title="설계 문서", slug="design-doc"))):
+                       AsyncMock(return_value=WorkItemSummary(title="설계 문서", slug="design-doc"))), \
+         patch.object(gates_mod, "resolve_pr_link", AsyncMock(return_value=None)):
+        # story #2815: get_gate_endpoint가 gate_type=="merge"(이 파일 _gate() 헬퍼 고정값)면
+        # github_check_enforced enrich를 위해 resolve_pr_link를 추가 호출한다 — 이 파일 관심사
+        # (project_id/work_item_summary enrich)와 무관하므로 patch로 우회(session.execute 단일
+        # 고정 mock 재사용 충돌 방지, gates.py:916 그 지점).
         result = await get_gate_endpoint(id=gate_id, session=session, org_id=org_id, auth=auth)
 
     assert result.id == gate_id
@@ -231,7 +236,10 @@ async def test_get_gate_endpoint_project_id_none_skips_access_check():
                        AsyncMock(return_value=None)), \
          patch.object(gates_mod, "has_project_access",
                        AsyncMock(side_effect=AssertionError("호출되면 안 됨"))) as access_spy, \
-         patch.object(gates_mod, "_resolve_work_item_summary", AsyncMock(return_value=None)):
+         patch.object(gates_mod, "_resolve_work_item_summary", AsyncMock(return_value=None)), \
+         patch.object(gates_mod, "resolve_pr_link", AsyncMock(return_value=None)):
+        # story #2815: gate_type=="merge"(이 파일 _gate() 헬퍼 고정값)라 github_check_enforced
+        # enrich 경로가 도는 것 — 이 테스트 관심사(project_id=None access-skip)와 무관, 우회.
         result = await get_gate_endpoint(id=gate_id, session=session, org_id=org_id, auth=auth)
 
     assert result.project_id is None
