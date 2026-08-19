@@ -551,6 +551,22 @@ jobs:
         working-directory: backend
         run: python3 scripts/lint_commit_before_validate.py
 
+  # story #2786(2026-08-19, PR#3088 DROP SCHEMA 906건 연쇄·PR#3217 DELETE FROM 26건 연쇄
+  # — 같은 클래스 3일 내 2회) — 공유 실PG를 부수는 테스트 SQL 리터럴(WHERE 없는 DELETE FROM·
+  # DROP SCHEMA·DROP TABLE·TRUNCATE)을 커밋 시점에 잡는다. 스크립트 docstring(scripts/
+  # lint_destructive_test_sql.py) 참조 — baseline 없음(도입 시점 위반 0건, destructive_schema
+  # 마커 파일은 story #2293 격리 shard에서 돌아 스캔 대상에서 제외).
+  destructive-test-sql-lint:
+    name: destructive test SQL lint (guard, story #2786)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan tests/ for shared-DB-destroying SQL literals (bare DELETE/DROP/TRUNCATE)
+        working-directory: backend
+        run: python3 scripts/lint_destructive_test_sql.py
+
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
   # main이 develop과 다른 파일셋(ee_pricing 0146/0147 부재)일 때의 그래프 단절을 원천적으로
   # 못 잡는다(실제로 못 잡아서 prod 승격이 롤백된 그 사고). PR base가 main일 때만 도는 이
