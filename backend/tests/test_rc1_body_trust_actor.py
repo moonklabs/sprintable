@@ -24,6 +24,13 @@ def _non_doc_gate_session():
     gr = MagicMock()
     gr.scalar_one_or_none.return_value = SimpleNamespace(
         gate_type="merge", work_item_type="story", work_item_id=uuid.uuid4(),
+        # story #2813 — session.execute가 단일 고정 return_value라, gates.py의 신규
+        # resolve_pr_link(SELECT PullRequestStoryLink) 호출도 이 같은 목을 되돌려 받는다
+        # (이 파일의 관심사는 resolver_id 강제이지 PR 링크 조회가 아님). `.evidence`가 없으면
+        # gates.py의 anchor 기록 분기(status=="approved" and gate_type=="merge"에서 항상 발동
+        # — 이 목의 gate_type이 정확히 "merge")가 AttributeError로 죽는다 — None으로 명시해
+        # "링크 없음/head_sha 미상"과 동형 무해 경로를 타게 한다.
+        evidence=None,
     )
     s.execute = AsyncMock(return_value=gr)
     return s
