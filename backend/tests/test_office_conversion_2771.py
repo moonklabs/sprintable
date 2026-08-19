@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from app.services import office_conversion
 
@@ -46,3 +49,40 @@ async def test_call_gotenberg_unavailable_when_url_unset(monkeypatch):
         pass
     else:
         raise AssertionError("expected ConversionUnavailable")
+
+
+def _mock_gotenberg_response(status_code: int, content: bytes):
+    mock_resp = MagicMock()
+    mock_resp.status_code = status_code
+    mock_resp.content = content
+    mock_client = AsyncMock()
+    mock_client.__aenter__.return_value.post = AsyncMock(return_value=mock_resp)
+    return mock_client
+
+
+async def test_call_gotenberg_accepts_valid_pdf_magic(monkeypatch):
+    """정상 케이스 — %PDF- 매직으로 시작하는 200 응답은 그대로 통과."""
+    monkeypatch.setattr(office_conversion, "_GOTENBERG_URL", "https://example.internal")
+    monkeypatch.setattr(office_conversion, "_id_token_header", lambda: {})
+    mock_client = _mock_gotenberg_response(200, b"%PDF-1.4 real pdf bytes")
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await office_conversion._call_gotenberg("x.pptx", b"data")
+    assert result == b"%PDF-1.4 real pdf bytes"
+
+
+async def test_call_gotenberg_rejects_non_pdf_body_even_on_200(monkeypatch):
+    """⭐QA catch(카디르군, 2026-08-19) 회귀 방지 — 200이어도 %PDF- 매직이 없으면(에러 페이지류
+    오탐) ConversionFailed로 거부해 캐시 오염을 막는다."""
+    monkeypatch.setattr(office_conversion, "_GOTENBERG_URL", "https://example.internal")
+    monkeypatch.setattr(office_conversion, "_id_token_header", lambda: {})
+
+    mock_client = _mock_gotenberg_response(200, b"<html>error page</html>")
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        with pytest.raises(office_conversion.ConversionFailed):
+            await office_conversion._call_gotenberg("x.pptx", b"data")
+
+    # 빈 body도 마찬가지로 거부.
+    mock_client_empty = _mock_gotenberg_response(200, b"")
+    with patch("httpx.AsyncClient", return_value=mock_client_empty):
+        with pytest.raises(office_conversion.ConversionFailed):
+            await office_conversion._call_gotenberg("x.pptx", b"data")

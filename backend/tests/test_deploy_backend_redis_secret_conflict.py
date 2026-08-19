@@ -218,6 +218,18 @@ def test_deploy_backend_excludes_gotenberg_service_url_when_unset():
     assert "GOTENBERG_SERVICE_URL" not in result
 
 
+def test_deploy_backend_prod_excludes_gotenberg_service_url_even_when_set():
+    """⭐QA catch(카디르군, 2026-08-19) 회귀 방지 — office-converter는 dev 전용 하드게이트
+    (deploy-office-converter 스텝)인데 이 배선에 REDIS_URL/ADMIN_OPERATOR_*와 같은 prod
+    게이트가 없었다. **값이 채워져 있어도** prod에서는 이 키 자체가 없어야 한다(#2141 원칙과
+    동일 — 값 유무가 아니라 키 존재 자체가 신호). substitution에 실수로 값이 남아 있는
+    상태를 흉내내 검증(빈 값 fallback에 기대지 않음)."""
+    result = _run_env_vars_assembly(
+        "prod", "", gotenberg_url="https://office-converter-dev.example.run.app"
+    )
+    assert "GOTENBERG_SERVICE_URL" not in result
+
+
 def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
     """dev 경로 무회귀 — prod 분기 추가가 dev의 다른 필드에 영향을 주지 않는다."""
     result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")

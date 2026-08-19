@@ -497,10 +497,14 @@ steps:
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},ADMIN_OPERATOR_AUDIENCE=${_ADMIN_OPERATOR_AUDIENCE},ADMIN_OPERATOR_ALLOWLIST=${_ADMIN_OPERATOR_ALLOWLIST}"
         fi
-        # story #2771 — _MCP_ALLOWED_HOSTS와 동일 컨벤션: 빈 문자열이면 키 자체를 안 싣는다
-        # (office_conversion.py는 os.environ.get 기본값 ""로 "미설정"과 "빈 문자열"을 이미
-        # 같은 뜻으로 다뤄 이 조건이 없어도 안전하지만, 다른 substitution들과 표기를 통일한다).
-        if [ -n "${_GOTENBERG_SERVICE_URL}" ]; then
+        # ⛔QA catch(카디르군, 2026-08-19) — office-converter 자체가 dev 전용 하드게이트인데
+        # (deploy-office-converter 스텝) 이 배선엔 REDIS_URL/ADMIN_OPERATOR_*와 같은
+        # `_DEPLOY_ENV != prod` 게이트가 빠져 있었다. 지금은 `_GOTENBERG_SERVICE_URL` 기본값이
+        # 빈 문자열이라 무해하지만, prod substitution에 값이 실수로 채워지는 단 한 번의 수동
+        # bootstrap 오조작만으로 prod backend가 dev office-converter로 테넌트 pptx를 흘리는
+        # 구조가 된다 — 값의 유무가 아니라 **prod에서는 이 키 자체가 없어야** 안전(story #2141
+        # REDIS_URL과 동일 원칙). dev만 싣는다.
+        if [ "${_DEPLOY_ENV}" != "prod" ] && [ -n "${_GOTENBERG_SERVICE_URL}" ]; then
           ENV_VARS="$${ENV_VARS},GOTENBERG_SERVICE_URL=${_GOTENBERG_SERVICE_URL}"
         fi
         # story #2445 Phase1(2026-08-03) — dev만 DATABASE_URL/DATABASE_URL_DIRECT를 PgBouncer

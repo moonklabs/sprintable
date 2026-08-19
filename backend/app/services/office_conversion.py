@@ -84,6 +84,12 @@ async def _call_gotenberg(filename: str, data: bytes) -> bytes:
             raise ConversionFailed(f"gotenberg request error: {exc}") from exc
     if resp.status_code != 200:
         raise ConversionFailed(f"gotenberg returned {resp.status_code}")
+    # ⛔QA catch(카디르군, 2026-08-19) — 200이어도 body가 PDF가 아닌 응답(에러 페이지류 등
+    # 프록시/게이트웨이 오탐)이 오면 검증 없이 캐시하는 순간 영구 오염된다(§7-2 캐시는
+    # 결정적 path라 재변환 트리거 자체가 없어 다음 열람마다 그 오염을 계속 서빙). 저장 前
+    # 최소 가드: 비어있지 않음 + `%PDF-` 매직 프리픽스.
+    if not resp.content.startswith(b"%PDF-"):
+        raise ConversionFailed("gotenberg response is not a valid PDF (missing %PDF- magic)")
     return resp.content
 
 
