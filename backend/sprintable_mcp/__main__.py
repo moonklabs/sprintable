@@ -6,7 +6,7 @@ import sys
 
 from .api_client import SprintableApiError, client
 from .config import settings
-from .server import filter_tools_by_scope, mcp
+from .server import MAX_MCP_REQUEST_BODY_SIZE, filter_tools_by_scope, mcp, transport_security
 from .sse_bridge import start_sse_bridge
 
 
@@ -99,7 +99,7 @@ def _run_http() -> None:
 
     # env fallback 키. ⭐http 모드 실제 인증은 per-request bearer override(미들웨어)라 이 fallback 은
     # never-hit(미들웨어가 bearer 없으면 401). agent_api_key 미설정 시 placeholder(configure 계약 유지·
-    # 백엔드는 override 키로 호출되며 placeholder 가 새면 401 로 거름·fail-safe). stateless_http=True 는 mcp 구성.
+    # 백엔드는 override 키로 호출되며 placeholder 가 새면 401 로 거름·fail-safe).
     client.configure(
         settings.sprintable_api_url,
         settings.agent_api_key or "_http_per_request_bearer_only_",
@@ -108,7 +108,19 @@ def _run_http() -> None:
     import os
 
     port = int(os.environ.get("PORT") or settings.mcp_http_port)
-    app = bearer_auth_asgi(mcp.streamable_http_app())
+    # story #2772(mcp 2.0 이관) — stateless_http(요청간 세션 미보존)·transport_security(DNS-rebinding
+    # 보호)가 1.x에서는 MCPServer 생성자 인자였으나 2.0.0에서 streamable_http_app()로 이동(스파이크
+    # 2026-08-19 실측, server.py:1218-1228 시그니처). stdio 모드는 이 호출 자체를 안 타서 무관(무회귀).
+    # PO AC 리뷰 CHANGES(2026-08-19) — 2.0.0 신규 기본 max_request_body_size=4MiB가 우리 첨부
+    # 계약(base64 인코딩 후 최대 ~8MiB)을 413으로 깨는 회귀였다 — MAX_MCP_REQUEST_BODY_SIZE
+    # 명시로 override(산식·근거는 server.py 주석).
+    app = bearer_auth_asgi(
+        mcp.streamable_http_app(
+            stateless_http=True,
+            transport_security=transport_security,
+            max_request_body_size=MAX_MCP_REQUEST_BODY_SIZE,
+        )
+    )
     print(
         f"Sprintable MCP — Streamable HTTP on {settings.mcp_http_host}:{port}/mcp "
         "(per-request bearer auth·tools-only)",

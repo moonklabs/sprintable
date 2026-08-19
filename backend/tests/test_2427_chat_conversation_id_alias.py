@@ -123,6 +123,9 @@ class TestResponseRoundTrip:
 class TestRegisteredToolEndToEnd:
     @pytest.mark.anyio
     async def test_send_chat_message_tool_accepts_conversation_id(self):
+        # story #2772(mcp 2.0 이관): Tool.run()이 context 위치인자를 요구(실측) — Context()는
+        # 전 필드 기본값 None이라 단위테스트용으로 충분.
+        from mcp.server.mcpserver import Context
         from sprintable_mcp import server as srv
 
         tool = srv.mcp._tool_manager.get_tool("sprintable_send_chat_message")
@@ -130,23 +133,25 @@ class TestRegisteredToolEndToEnd:
             mock_client.post_full = AsyncMock(return_value={
                 "data": {"id": "m1", "conversation_id": CONV, "thread_id": None, "content": "hi"},
             })
-            result = await tool.run({"conversation_id": CONV, "content": "hi"})
+            result = await tool.run({"conversation_id": CONV, "content": "hi"}, Context())
         assert isinstance(result, list)
 
     @pytest.mark.anyio
     async def test_send_chat_message_tool_rejects_the_old_bug_shape(self):
         """실물 재현 — story #2427의 발단 그대로: conversation_id를 넘긴 옛 습관이 아니라
         thread_id/conversation_id를 «둘 다·다른 값으로» 넘기는 자리를 통한 도구 경로 회귀 확認."""
+        from mcp.server.mcpserver import Context
+        from mcp.server.mcpserver.exceptions import ToolError
         from sprintable_mcp import server as srv
-        from mcp.server.fastmcp.exceptions import ToolError
 
         tool = srv.mcp._tool_manager.get_tool("sprintable_send_chat_message")
         with pytest.raises(ToolError):
-            await tool.run({"conversation_id": CONV, "thread_id": OTHER, "content": "hi"})
+            await tool.run({"conversation_id": CONV, "thread_id": OTHER, "content": "hi"}, Context())
 
     @pytest.mark.anyio
     async def test_send_chat_message_tool_still_accepts_legacy_thread_id_only(self):
         """회귀 방지 — 기존 호출부가 thread_id=만 쓰던 습관이 안 깨져야 한다."""
+        from mcp.server.mcpserver import Context
         from sprintable_mcp import server as srv
 
         tool = srv.mcp._tool_manager.get_tool("sprintable_send_chat_message")
@@ -154,5 +159,5 @@ class TestRegisteredToolEndToEnd:
             mock_client.post_full = AsyncMock(return_value={
                 "data": {"id": "m1", "conversation_id": CONV, "thread_id": None, "content": "hi"},
             })
-            result = await tool.run({"thread_id": CONV, "content": "hi"})
+            result = await tool.run({"thread_id": CONV, "content": "hi"}, Context())
         assert isinstance(result, list)
