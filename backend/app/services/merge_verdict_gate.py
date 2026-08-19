@@ -275,11 +275,14 @@ async def evaluate_merge_gate(
     Cage 재사용: capture_pr_ci_verdict(독립 verdict 기록) + compute_member_trust_scores(trust) +
     create_gate(정책 disposition 아티팩트·AC⑥). 모든 평가는 gate row를 남긴다.
 
-    ``head_sha``(story #2813, 카디르 R2 CRITICAL) — 이 평가로 gate.status가 "auto_passed"가
-    되면(정책이 allow_auto) `gate.approved_head_sha`를 이 값으로 즉시 확定한다. 사람 승인
-    (gates.py transition_gate_endpoint)이 승인 트랜잭션에서 anchor를 즉시 박는 것과 동일한
-    불변식 — "success를 받을 수 있는 SHA는 anchor 단 하나"가 approved/auto_passed 둘 다에서
-    성립해야 publish_gate_check의 anchor 검증이 의미가 있다. 호출자가 head_sha를 모르면(board
+    ``head_sha``(story #2813, 카디르 R2 CRITICAL·R3 HIGH) — 이 평가의 **실 판정이
+    `_decide()`==AUTO_MERGE**일 때만(아래 §4) `gate.approved_head_sha`를 이 값으로 즉시
+    확定한다. ⛔`gate.status=="auto_passed"`(정책 disposition 축) 시점에 찍으면 안 된다 —
+    status="auto_passed"이면서 CI 미완/trust 표본 부족으로 실판정은 ASK_HUMAN인 게이트가
+    실재한다(카디르 QA PR#2902②·#2156이 이미 고정한 두 축 구분). 사람 승인(gates.py
+    transition_gate_endpoint)이 승인 트랜잭션에서 anchor를 즉시 박는 것과 동일한 불변식 —
+    "success를 받을 수 있는 SHA는 anchor 단 하나"가 approved/AUTO_MERGE 둘 다에서 성립해야
+    publish_gate_check의 anchor 검증이 의미가 있다. 호출자가 head_sha를 모르면(board
     preflight/report-done처럼 웹훅 컨텍스트가 없는 경로) None — anchor 없음(fail-closed, publish
     가 success 발행을 skip)."""
     ci = _normalize_result(ci_result)
@@ -408,12 +411,6 @@ async def evaluate_merge_gate(
         neutral_facts=facts,
     )
 
-    # story #2813(카디르 R2 CRITICAL) — auto_passed는 정책이 내리는 "그 순간의" 승인이다.
-    # 사람 승인(gates.py)과 동일하게 **결정 트랜잭션에서 즉시** anchor를 박는다 — 재평가로 다시
-    # auto_passed가 되면(새 증거·같은 정책) anchor도 그 시점 head_sha로 갱신(idempotent).
-    if gate.status == "auto_passed" and head_sha:
-        gate.approved_head_sha = head_sha
-
     # 재제출 re-open(doc-gate 48f064e5 선례 이식): uq(work_item,gate_type)=1행 + terminal=immutable
     # → create_gate 멱등이 rejected/voided gate 를 그대로 반환하면 아래 _decide 가 deny BLOCK 을
     # 영구 반환한다(void/override 는 pending 전용이라 API 복구 경로 0 — reject→수정→재제출 불가).
@@ -488,6 +485,17 @@ async def evaluate_merge_gate(
     set_gate_evidence_status(gate, _evidence_status(decision), now=datetime.now(timezone.utc))
     gate.decision_basis = reason
     gate.auto_decision_reason = decision
+
+    # story #2813(카디르 R3 HIGH) — anchor는 **실 판정이 AUTO_MERGE일 때만** 확定한다.
+    # ⛔최초 fix는 `gate.status == "auto_passed"`(정책 disposition 축) 시점에 찍었는데, 그건
+    # `_decide()`의 실 증거 기반 verdict(이 axis)와 다른 필드다(카디르 QA PR#2902②·#2156이
+    # 이미 고정한 구분 — status="auto_passed"이면서 CI 미완/trust 표본 부족으로 실판정은
+    # ASK_HUMAN인 게이트가 실재한다). 그 상태에서 anchor를 찍으면 "사람이 봐야 하는" SHA에도
+    # success가 나갈 수 있었다 — AUTO_MERGE로 옮기면 그런 상태는 anchor가 안 생겨
+    # publish_gate_check의 불변식이 자연히 success를 막는다(fail-closed 정합).
+    if decision == AUTO_MERGE and head_sha:
+        gate.approved_head_sha = head_sha
+
     await session.flush()
 
     logger.info(

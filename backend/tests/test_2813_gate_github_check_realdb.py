@@ -667,11 +667,20 @@ async def _gate_row_by_story(session, story_id):
     return result.scalar_one_or_none()
 
 
+_STRONG_TRUST = {
+    # Wilson 하한(n=25,전부 hit)≈0.867 > DEFAULT_TRUST_THRESHOLD(0.8) — 실측 확認(_wilson_lower_bound).
+    "scores": [{"role_key": "dev", "hit": 25, "resolved": 25, "pending": 0, "hit_rate": 1.0}],
+}
+
+
 @pytest.mark.anyio
-async def test_evaluate_merge_gate_stamps_anchor_when_auto_passed_realdb():
-    """카디르 R2 fix②-a — 정책이 allow_auto로 판정하면(status=auto_passed) 그 결정 트랜잭션
-    에서 즉시 `approved_head_sha`가 head_sha로 확定돼야 한다(사람 승인과 동일 불변식)."""
-    from app.services.merge_verdict_gate import evaluate_merge_gate
+async def test_evaluate_merge_gate_stamps_anchor_only_when_decision_is_auto_merge_realdb():
+    """카디르 R3 HIGH — anchor는 `gate.status=="auto_passed"`(정책 disposition 축)가 아니라
+    **`_decide()`의 실 판정이 AUTO_MERGE일 때만** 확定돼야 한다(#2156이 이미 고정한 두 축
+    구분과 동일 원칙). trust_score를 mock해(25건 실seed 대신 — 이 테스트의 관심사는 trust
+    계산 자체가 아니라 anchor 배선 지점) 표본 충분+Wilson 하한 높음을 강제, decision=AUTO_MERGE
+    를 실제로 만든 뒤 anchor가 그 시점에 찍히는지 확認한다."""
+    from app.services.merge_verdict_gate import AUTO_MERGE, evaluate_merge_gate
 
     engine, Session = await _session_factory()
     try:
@@ -681,14 +690,18 @@ async def test_evaluate_merge_gate_stamps_anchor_when_auto_passed_realdb():
             with patch(
                 "app.services.gate_service.resolve_disposition",
                 AsyncMock(return_value=("allow_auto", "org_policy")),
+            ), patch(
+                "app.services.merge_verdict_gate.compute_member_trust_scores",
+                AsyncMock(return_value=_STRONG_TRUST),
             ):
-                await evaluate_merge_gate(
+                decision = await evaluate_merge_gate(
                     s, seeded["org_id"], seeded["story_id"],
                     pr_number=99, repo="acme/repo", ci_result="pass", pr_result="pass",
                     head_sha="sha-auto-1",
                 )
                 await s.commit()
 
+            assert decision.decision == AUTO_MERGE, f"테스트 전제 실패 — 실판정이 AUTO_MERGE가 아님: {decision.reason}"
             gate = await _gate_row_by_story(s, seeded["story_id"])
             assert gate.status == "auto_passed"
             assert gate.approved_head_sha == "sha-auto-1"  # ⭐핵심 단언.
@@ -697,10 +710,47 @@ async def test_evaluate_merge_gate_stamps_anchor_when_auto_passed_realdb():
 
 
 @pytest.mark.anyio
-async def test_evaluate_merge_gate_no_anchor_when_head_sha_unknown_realdb():
-    """양성대조 — head_sha를 모르는 호출자(board preflight류)는 anchor를 못 남긴다(발명 금지,
-    None 그대로) — publish_gate_check가 그 경우 success 발행을 skip하는 것과 짝을 이룬다."""
-    from app.services.merge_verdict_gate import evaluate_merge_gate
+async def test_evaluate_merge_gate_no_anchor_when_decision_is_auto_merge_but_head_sha_unknown_realdb():
+    """양성대조 — decision=AUTO_MERGE가 나더라도 head_sha를 모르는 호출자(board preflight류)는
+    anchor를 못 남긴다(발명 금지, None 그대로) — publish_gate_check가 그 경우 success 발행을
+    skip하는 것과 짝을 이룬다."""
+    from app.services.merge_verdict_gate import AUTO_MERGE, evaluate_merge_gate
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_story_with_participation(s)
+
+            with patch(
+                "app.services.gate_service.resolve_disposition",
+                AsyncMock(return_value=("allow_auto", "org_policy")),
+            ), patch(
+                "app.services.merge_verdict_gate.compute_member_trust_scores",
+                AsyncMock(return_value=_STRONG_TRUST),
+            ):
+                decision = await evaluate_merge_gate(
+                    s, seeded["org_id"], seeded["story_id"],
+                    pr_number=99, repo="acme/repo", ci_result="pass", pr_result="pass",
+                    # head_sha 인자 생략 — None 기본값.
+                )
+                await s.commit()
+
+            assert decision.decision == AUTO_MERGE, f"테스트 전제 실패: {decision.reason}"
+            gate = await _gate_row_by_story(s, seeded["story_id"])
+            assert gate.status == "auto_passed"
+            assert gate.approved_head_sha is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_evaluate_merge_gate_no_anchor_when_status_auto_passed_but_decision_ask_human_realdb():
+    """⭐카디르 R3 HIGH 핵심 재현 — `gate.status=="auto_passed"`(정책은 allow_auto)인데
+    outcome 표본 부족(cold-start, #2156 동형)으로 **실판정은 ASK_HUMAN**인 상태. 구 fix(R2
+    시점)는 `gate.status`만 보고 여기서 anchor를 찍어 "사람이 봐야 하는 SHA"에도 success가
+    나갈 수 있었다 — R3 fix 後엔 anchor가 안 남아야 한다(publish_gate_check가 자연히 success
+    발행을 skip)."""
+    from app.services.merge_verdict_gate import ASK_HUMAN, evaluate_merge_gate
 
     engine, Session = await _session_factory()
     try:
@@ -711,15 +761,18 @@ async def test_evaluate_merge_gate_no_anchor_when_head_sha_unknown_realdb():
                 "app.services.gate_service.resolve_disposition",
                 AsyncMock(return_value=("allow_auto", "org_policy")),
             ):
-                await evaluate_merge_gate(
+                # trust_score mock 없음 — 신규 participation은 outcome.resolved=0 <
+                # MIN_OUTCOME_SAMPLE(3) → cold-start ASK_HUMAN(_decide() AC④).
+                decision = await evaluate_merge_gate(
                     s, seeded["org_id"], seeded["story_id"],
                     pr_number=99, repo="acme/repo", ci_result="pass", pr_result="pass",
-                    # head_sha 인자 생략 — None 기본값.
+                    head_sha="sha-should-not-be-anchored",
                 )
                 await s.commit()
 
+            assert decision.decision == ASK_HUMAN, f"테스트 전제 실패: {decision.reason}"
             gate = await _gate_row_by_story(s, seeded["story_id"])
-            assert gate.status == "auto_passed"
-            assert gate.approved_head_sha is None
+            assert gate.status == "auto_passed"  # 정책 축 — allow_auto 그대로.
+            assert gate.approved_head_sha is None  # ⭐핵심 단언 — 구 fix라면 여기 SHA가 찍혔을 것.
     finally:
         await engine.dispose()
