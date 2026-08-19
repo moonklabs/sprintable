@@ -34,10 +34,24 @@ echo "== cloudbuild.yaml 이 배포하는 서비스 =="
 # 찾는다. 주석 줄과 인라인 주석은 걷어낸다(설명문에도 같은 이름이 나온다).
 # ⚠️mapfile 은 bash 4+ 라 macOS 기본 bash(3.2)에서 안 돈다 — 「CI 에서만 돌아가는 가드」가
 # 되지 않게 이식 가능한 형태로 읽는다.
+#
+# ⛔story #2812(미르코군 발견, 2026-08-19) — 이 regex가 «sprintable-» 접두어를 하드코딩해서
+#   그 접두어를 안 쓰는 서비스(office-converter, story #2771/PR #3230)가 늘 때마다 위양성이
+#   재발하는 클래스였다. 접두어 무관 패턴으로 넓힌다.
+#
+# ⚠️이 넓힌 패턴이 «못 보는 것/과다포획하는 것»(선언, 실측 확認 — cloudbuild.yaml a7648b65d):
+#   - `cloudrun-runtime-${_DEPLOY_ENV}` (IAM 서비스어카운트 이름 조각) · `latest-${_DEPLOY_ENV}`
+#     (이미지 태그) · `mcp-${_DEPLOY_ENV}`(echo 메시지 문자열 안의 축약 표기, sprintable-mcp
+#     와 별개 매치)도 declared 목록에 잡힌다 — 전부 실제 Cloud Run 서비스 이름과 우연히도
+#     안 겹쳐(어떤 actual 서비스의 `-(dev|prod)$` 제거 base도 이 문자열이 아님) 「틀린 커버로
+#     세는」 오탐(=실제로 안 배포되는 서비스를 배포된다고 오판)은 안 일으킨다 — 다만 declared
+#     목록 출력이 지저분해지는 건 알려진 잔여 비용이다. 더 좁히려면 `gcloud run deploy`/
+#     `services update` 커맨드 컨텍스트에 앵커링해야 하는데, 그러면 위 ⚠️(YAML args 배열 형태인
+#     deploy-frontend/run-migrate-job)를 다시 놓친다 — 그래서 이 트레이드오프를 그대로 유지한다.
 declared=()
 while IFS= read -r line; do declared+=("$line"); done < <(
   sed -E 's/#.*//' "$CB" \
-    | grep -oE 'sprintable-[a-z-]+-\$\{_DEPLOY_ENV\}' \
+    | grep -oE '[a-z][a-z-]*-\$\{_DEPLOY_ENV\}' \
     | sed -E 's/\$\{_DEPLOY_ENV\}//' | sort -u
 )
 printf '  %s{dev,prod}\n' "${declared[@]}"
@@ -45,6 +59,20 @@ printf '  %s{dev,prod}\n' "${declared[@]}"
 if [ "${#declared[@]}" -eq 0 ]; then
   echo "FAIL: cloudbuild.yaml 에서 배포 대상을 하나도 못 찾았다 — 이 스크립트의 패턴이 낡았을 수 있다."
   echo "      (자기 재료를 못 찾으면 초록이 아니라 빨강이어야 한다)"
+  exit 1
+fi
+
+# 양성대조(story #2812 AC2) — office-converter 는 「sprintable- 접두어 없는」 첫 실사례다.
+# 이 접두어 무관 regex가 실제로 그걸 잡는지 스스로 증명한다 — 못 잡으면(예: 누가 다시
+# `sprintable-` 접두어를 규칙에 하드코딩하면) 조용히 넘어가지 않고 여기서 즉시 빨간불이어야
+# 한다.
+_office_converter_covered=0
+for d in "${declared[@]}"; do
+  [ "$d" = "office-converter-" ] && _office_converter_covered=1 && break
+done
+if [ "$_office_converter_covered" -ne 1 ]; then
+  echo "FAIL: 양성대조 실패 — office-converter-\${_DEPLOY_ENV} 가 declared 목록에 안 잡혔다."
+  echo "      (접두어 무관 패턴이 story #2812 이전으로 퇴행했을 수 있다)"
   exit 1
 fi
 
