@@ -231,7 +231,8 @@ function FileViewerBody({ format, url, label, assetId }: { format: Format; url: 
         </div>
       );
     case 'pdf':
-      return <iframe src={url} title={label} className="h-full w-full border-0" />;
+      // key={url} — 다른 첨부로 전환 시 컴포넌트를 통째로 새로 마운트(DocxBody와 동형).
+      return <PdfBody key={url} url={url} label={label} />;
     case 'html':
       // 미신뢰 업로드 컨텐츠 미리보기 — allow-scripts 없음(격리, CSP 준하는 최소 권한).
       return <iframe src={url} title={label} sandbox="allow-popups" className="h-full w-full border-0 bg-white" />;
@@ -415,6 +416,83 @@ function DocxBody({ url, label }: { url: string; label: string }) {
 }
 
 /**
+ * story #2807 — 예전엔 서명 GCS URL을 곧장 iframe src에 넣었는데, CSP frame-src 'none'
+ * (SEC-08)에 원천 차단됐다(선생님 실측 ERR_BLOCKED_BY_CSP — 백지의 진짜 원인). frame-src에
+ * blob:만 열려 있으므로(next.config.ts, storage.googleapis.com 같은 외부 호스트 전체
+ * 개방은 피싱 표면이라 금지 — toss-checkout 선례) fetch로 직접 받아 Blob→객체 URL로 바꿔
+ * 그것만 iframe에 건다. DocxBody와 동형 패턴(단일 try/catch+독립 타이머).
+ */
+function PdfBody({ url, label }: { url: string; label: string }) {
+  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let settled = false;
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+
+    const markFailed = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      console.error('pdf 인앱 렌더 실패', err);
+      controller.abort();
+      setStatus('failed');
+    };
+    const markReady = (u: string) => {
+      if (settled) return;
+      settled = true;
+      setBlobUrl(u);
+      setStatus('ready');
+    };
+
+    // AC(무한 로딩 금지) — fetch가 멈추든 어느 단계가 멈추든 20초 뒤 강제로 정직 실패로
+    // 떨어뜨린다. run과 독립적으로 도는 타이머라 run 쪽 로직과 무관하게 항상 발화한다.
+    const timeoutId = setTimeout(() => markFailed(new Error('pdf fetch timeout')), 20000);
+
+    (async () => {
+      try {
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) throw new Error(String(res.status));
+        const blob = await res.blob();
+        objectUrl = URL.createObjectURL(blob);
+        clearTimeout(timeoutId);
+        markReady(objectUrl);
+      } catch (err) {
+        clearTimeout(timeoutId);
+        markFailed(err);
+      }
+    })();
+
+    return () => {
+      settled = true;
+      controller.abort();
+      clearTimeout(timeoutId);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [url]);
+
+  if (status === 'failed') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+        <FileText className="size-8 text-muted-foreground" aria-hidden />
+        <p className="text-sm text-foreground">미리보기를 표시하지 못했습니다.</p>
+        <p className="text-xs text-muted-foreground">이 문서는 인앱 렌더에 실패했습니다. 다운로드해 확인하세요.</p>
+      </div>
+    );
+  }
+
+  if (status === 'loading') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" aria-hidden />
+      </div>
+    );
+  }
+
+  return <iframe src={blobUrl ?? undefined} title={label} className="h-full w-full border-0" />;
+}
+
+/**
  * story #2803 — pptx는 BE 변환 파이프(POST /api/attachments/convert → office_conversion.py,
  * 84ef0cb7 §7-3)로 PDF로 바꾼 뒤 기존 PDF iframe 렌더를 그대로 재사용한다. 콜드스타트가
  * 수십 초 걸릴 수 있어(LibreOffice 헤드리스, §7-4 timeout=120s) "변환 중" + 경과시간 정직
@@ -444,6 +522,7 @@ function PptxBody({ assetId, label }: { assetId: string; label: string }) {
     // 동형) status/failMessage는 이미 useState 초기값으로 깨끗하다 — 여기서 재설정 불요.
     let settled = false;
     const controller = new AbortController();
+    let objectUrl: string | null = null;
 
     const markFailed = (msg: string | null) => {
       if (settled) return;
@@ -486,12 +565,19 @@ function PptxBody({ assetId, label }: { assetId: string; label: string }) {
           { signal: controller.signal },
         );
         const signJson = (await signRes.json().catch(() => null)) as { data?: { url?: string }; error?: { message?: string } } | null;
-        const url = signJson?.data?.url;
-        if (!signRes.ok || !url) {
+        const signedUrl = signJson?.data?.url;
+        if (!signRes.ok || !signedUrl) {
           throw new Error(signJson?.error?.message ?? String(signRes.status));
         }
+        // story #2807 — 서명 URL을 곧장 iframe src에 넣으면 CSP frame-src 'none'에
+        // 원천 차단된다(선생님 실측 ERR_BLOCKED_BY_CSP — 백지의 진짜 원인). frame-src에
+        // blob:만 열려 있으므로(PdfBody와 동형) fetch로 직접 받아 Blob→객체 URL로 바꾼다.
+        const pdfRes = await fetch(signedUrl, { signal: controller.signal });
+        if (!pdfRes.ok) throw new Error(String(pdfRes.status));
+        const blob = await pdfRes.blob();
+        objectUrl = URL.createObjectURL(blob);
         clearTimeout(timeoutId);
-        markReady(url);
+        markReady(objectUrl);
       } catch (e) {
         clearTimeout(timeoutId);
         // 에러를 삼키지 않는다 — 폴백 UI로 사용자에겐 정직 실패를 보여주되, 원인은 콘솔에 남긴다.
@@ -500,7 +586,12 @@ function PptxBody({ assetId, label }: { assetId: string; label: string }) {
       }
     })();
 
-    return () => { settled = true; controller.abort(); clearTimeout(timeoutId); };
+    return () => {
+      settled = true;
+      controller.abort();
+      clearTimeout(timeoutId);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
   }, [assetId]);
 
   if (status === 'failed') {
