@@ -22,7 +22,12 @@ const _CSP = [
   // 이미 같은 호스트가 허용돼 있다(story #2050, 서명 URL·노출 축 동일) — 새 origin을
   // 여는 것이 아니라 media-src를 img-src와 같은 경계로 맞추는 것이다.
   "media-src 'self' blob: https://storage.googleapis.com",
-  "frame-src 'none'",
+  // story #2807 — PDF/pptx 인앱 미리보기가 GCS 서명 URL을 곧바로 iframe src에 넣어
+  // frame-src 'none'에 원천 차단됐다(선생님 실측 ERR_BLOCKED_BY_CSP). storage.googleapis.com
+  // 같은 외부 호스트를 통째로 열면 임의 GCS 콘텐츠를 끼우는 피싱 표면이 생긴다(toss-checkout
+  // 선례와 동일 판단) — 대신 FE가 fetch→Blob→객체 URL로 직접 받아 그 blob: URL만 iframe에
+  // 넣는다. blob:은 그 탭이 방금 만든 콘텐츠만 가리키므로 외부 호스트 개방보다 훨씬 좁다.
+  "frame-src blob:",
   "object-src 'none'",
   "base-uri 'self'",
   // OAuth 리다이렉트 대상

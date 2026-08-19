@@ -53,12 +53,20 @@ function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status });
 }
 
+// story #2807 — 변환된 PDF는 이제 서명 URL을 곧장 iframe src에 넣지 않고(CSP frame-src
+// 'none'에 막힘) fetch→Blob→객체 URL로 바꿔서 건다. jsdom엔 URL.createObjectURL이 없어
+// 스텁하고, plain fetch(fetchWithAuth 아님)도 별도로 모킹해야 이 단계를 테스트로 통과시킬 수 있다.
+let objectUrlCounter = 0;
+const fetchMock = vi.fn();
+
 afterEach(() => {
   act(() => { root.unmount(); });
   container.remove();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   fetchWithAuthMock.mockReset();
+  fetchMock.mockReset();
+  objectUrlCounter = 0;
 });
 
 describe('FileViewer pptx (story #2803)', () => {
@@ -76,13 +84,22 @@ describe('FileViewer pptx (story #2803)', () => {
       }
       throw new Error(`unexpected fetchWithAuth call: ${url}`);
     });
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === 'https://signed.example/deck.pdf') return new Response(new Blob(['%PDF-fake']), { status: 200 });
+      throw new Error(`unexpected plain fetch call: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('URL', Object.assign(URL, {
+      createObjectURL: vi.fn(() => `blob:mock-${objectUrlCounter++}`),
+      revokeObjectURL: vi.fn(),
+    }));
 
     mount(<FileViewer target={target} onClose={() => {}} />);
     await waitFor(() => container.querySelector('iframe') !== null || container.textContent!.includes('변환에 실패했습니다'));
 
     const iframe = container.querySelector('iframe');
     expect(iframe, `iframe 없음. text=${container.textContent}`).not.toBeNull();
-    expect(iframe!.getAttribute('src')).toBe('https://signed.example/deck.pdf');
+    expect(iframe!.getAttribute('src')).toBe('blob:mock-0');
     // "변환 중" 스피너는 사라져야 한다.
     expect(container.textContent).not.toContain('변환 중입니다');
   });
@@ -106,6 +123,15 @@ describe('FileViewer pptx (story #2803)', () => {
       }
       throw new Error(`unexpected fetchWithAuth call: ${url}`);
     });
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === 'https://signed.example/deck.pdf') return new Response(new Blob(['%PDF-fake']), { status: 200 });
+      throw new Error(`unexpected plain fetch call: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('URL', Object.assign(URL, {
+      createObjectURL: vi.fn(() => `blob:mock-${objectUrlCounter++}`),
+      revokeObjectURL: vi.fn(),
+    }));
 
     mount(<FileViewer target={mismatchedTarget} onClose={() => {}} />);
     // pptx로 갔다면 "변환 중" 표시를 거쳐 iframe이 뜬다. docx로 잘못 갔다면 window.fetch(미모킹)
@@ -114,7 +140,7 @@ describe('FileViewer pptx (story #2803)', () => {
 
     const iframe = container.querySelector('iframe');
     expect(iframe, `iframe 없음(=docx로 오라우팅됐을 가능성). text=${container.textContent}`).not.toBeNull();
-    expect(iframe!.getAttribute('src')).toBe('https://signed.example/deck.pdf');
+    expect(iframe!.getAttribute('src')).toBe('blob:mock-0');
   });
 
   it('변환 서비스 미배선(503)이면 정직 폴백으로 빠진다 — 빈 화면/무한 로딩 금지', async () => {
