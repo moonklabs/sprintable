@@ -84,8 +84,11 @@ describe('FileViewer pptx (story #2803)', () => {
       }
       throw new Error(`unexpected fetchWithAuth call: ${url}`);
     });
+    // story #2807 CI 재발견 — new Response(new Blob([...]))는 Node 22(CI)에서 "object.stream
+    // is not a function"으로 깨진다(undici Response 생성자가 cross-realm Blob의 .stream()을
+    // 못 찾는 버전차, 로컬 Node 26에선 안 재현됨). 문자열 body로 우회.
     fetchMock.mockImplementation(async (url: string) => {
-      if (url === 'https://signed.example/deck.pdf') return new Response(new Blob(['%PDF-fake']), { status: 200 });
+      if (url === 'https://signed.example/deck.pdf') return new Response('%PDF-fake', { status: 200 });
       throw new Error(`unexpected plain fetch call: ${url}`);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -124,7 +127,7 @@ describe('FileViewer pptx (story #2803)', () => {
       throw new Error(`unexpected fetchWithAuth call: ${url}`);
     });
     fetchMock.mockImplementation(async (url: string) => {
-      if (url === 'https://signed.example/deck.pdf') return new Response(new Blob(['%PDF-fake']), { status: 200 });
+      if (url === 'https://signed.example/deck.pdf') return new Response('%PDF-fake', { status: 200 });
       throw new Error(`unexpected plain fetch call: ${url}`);
     });
     vi.stubGlobal('fetch', fetchMock);
