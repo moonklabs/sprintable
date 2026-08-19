@@ -10,10 +10,20 @@ import re
 from pathlib import Path
 
 _MIGRATION = Path(__file__).parent.parent / "alembic" / "versions" / "0160_role_templates_marketing_roster.py"
+_WORKFLOW_COMPILE_MIGRATION = (
+    Path(__file__).parent.parent / "alembic" / "versions" / "0260_compile_workflow_recipes_to_cycle_events.py"
+)
 
 
 def _load_migration():
     spec = importlib.util.spec_from_file_location("rev_0160", _MIGRATION)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _load_workflow_compile_migration():
+    spec = importlib.util.spec_from_file_location("rev_0260", _WORKFLOW_COMPILE_MIGRATION)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -81,12 +91,18 @@ def test_both_roles_compose_without_error_and_validate_against_default_tool_grou
 
 
 def test_recipe_slugs_reference_known_builtin_recipes():
-    from app.routers.workflow_recipes import _BUILTIN_BY_ID
+    """story #2790 라우터 은퇴 §4 (b) — SSOT를 event_definitions(0260)로 이관.
+    test_e_recruit_s14_catalog_buildout.py의 동형 테스트와 동일 근거."""
+    workflow_mod = _load_workflow_compile_migration()
+    compiled_keys = {f"preset.workflow.{slug}" for slug, *_ in workflow_mod._rows()}
 
     mod = _load_migration()
     for slug, _name, _category, _description, _tool_groups, recipe_slug in mod._SEED:
         if recipe_slug is not None:
-            assert recipe_slug in _BUILTIN_BY_ID, f"{slug}: unknown recipe slug {recipe_slug!r}"
+            expected_key = f"preset.workflow.{recipe_slug.replace('-', '_')}"
+            assert expected_key in compiled_keys, (
+                f"{slug}: unknown recipe slug {recipe_slug!r} (기대 키 {expected_key!r})"
+            )
 
 
 def test_categories_are_distinct_from_engineering_to_avoid_eng_mismapping():
