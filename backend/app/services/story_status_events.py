@@ -316,16 +316,20 @@ async def emit_story_status_changed(
     try:
         from app.routers.events import publish_preset_event
 
-        await publish_preset_event(
-            db, org_id, "preset.work.status_changed",
-            {
-                "work_item_type": "story",
-                "work_item_id": str(story.id),
-                "from_status": old_status,
-                "to_status": story.status,
-                "changed_by_member_id": str(actor_id) if actor_id else None,
-            },
-        )
+        # ⛔실버그(디디군 교차QA, 2026-08-19) — payload_schema(0245)의 changed_by_member_id는
+        # `{"type":"string","format":"uuid"}`로 non-nullable(assigned_by_member_id와 달리
+        # null 허용 union이 아님). actor_id 없는 전이(시스템/자동 전이 — 바로 이 P0 자동발행
+        # 자체가 그 사례)에서 값을 None으로 실으면 스키마 위반 400 → 발행이 영구 불발됐었다.
+        # 키가 required는 아니므로 값이 없으면 아예 안 싣는다(스키마상 정직한 표현).
+        payload = {
+            "work_item_type": "story",
+            "work_item_id": str(story.id),
+            "from_status": old_status,
+            "to_status": story.status,
+        }
+        if actor_id:
+            payload["changed_by_member_id"] = str(actor_id)
+        await publish_preset_event(db, org_id, "preset.work.status_changed", payload)
     except Exception:
         logger.warning(
             "preset.work.status_changed 자동발행 실패(story=%s org=%s)",
