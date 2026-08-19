@@ -911,21 +911,11 @@ async def toss_billing_maintenance(
 ) -> JSONResponse:
     verify_cron(request)
     try:
-        from app.services.billing_scheduler import (
-            sweep_dunning_retries,
-            sweep_expired_grants,
-            sweep_stale_pending_orders,
-        )
+        from app.services.billing_scheduler import sweep_dunning_retries, sweep_stale_pending_orders
 
         dunning_result = await sweep_dunning_retries(session)
         reconciliation_result = await sweep_stale_pending_orders(session)
-        # story #2777 PR2 — 어드민 credit_grant의 자가회수. 신규 cron 잡 발명 대신 이
-        # 기존 billing-maintenance 표면에 동거(PO 지시 2026-08-18).
-        grant_sweep_result = await sweep_expired_grants(session)
-        return _ok({
-            "dunning": dunning_result, "reconciliation": reconciliation_result,
-            "grant_sweep": grant_sweep_result,
-        })
+        return _ok({"dunning": dunning_result, "reconciliation": reconciliation_result})
     except Exception as exc:
         logger.exception("toss-billing-maintenance cron error: %s", exc)
         return _err("INTERNAL_ERROR", "Internal server error", 500)

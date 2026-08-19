@@ -13,15 +13,6 @@ substitutions:
   # story #2701 — dev-safe 기본값(빈 문자열 = 이 env var 자체를 안 싣는다, 아래 deploy-mcp
   # 참조). GHA cloud-build.yml이 prod에서만 실값으로 override.
   _MCP_ALLOWED_HOSTS: ''
-  # story #2777(어드민 개입 액션) — admin_auth.require_admin_operator()의 ID-token 검증
-  # 축(발급자=admin-web-dev 서비스 SA·수신측 audience=이 backend 서비스 자신). 페드루군
-  # gcloud describe 실측(2026-08-18) — ⚠️audience는 format-exact(services list의 project
-  # 번호 표기와 describe의 canonical hash 표기가 다르면 401, 위 _FASTAPI_URL 재사용 금지 —
-  # 이 값은 반드시 describe 출력 그대로). prod는 아래 배포 스텝의 _DEPLOY_ENV 가드로 절대
-  # ENV_VARS에 안 실린다(REDIS_URL과 동일 이중가드 — 여기 값이 남아 있어도 안전) + 라우터
-  # 자체의 _reject_prod() 가드까지 삼중.
-  _ADMIN_OPERATOR_AUDIENCE: https://sprintable-backend-dev-57iommnikq-du.a.run.app
-  _ADMIN_OPERATOR_ALLOWLIST: sprintable-admin-web@sprintable-494803.iam.gserviceaccount.com
   _BACKEND_MIN_INSTANCES: '1'
   # ⚠️ default '1'(아래) = _DEPLOY_ENV:dev default 와 정합한 **dev-safe fallback**(수동 `gcloud builds submit`
   #    override 없을 때 무리한 maxScale 재현 차단). GHA cloud-build.yml 이 per-env override(prod=5·dev=8, #2074 응급).
@@ -429,12 +420,6 @@ steps:
         # 달러 한 개 표기 그대로 유지 — 그건 Cloud Build가 실제로 채워야 하는 값이라 안전하다).
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},REDIS_URL=${_REDIS_URL}"
-        fi
-        # story #2777 — ADMIN_OPERATOR_AUDIENCE/ALLOWLIST도 REDIS_URL과 동일 원칙: dev만
-        # 싣는다. prod는 이 두 env var 자체가 없어(require_admin_operator가 auth_configured
-        # 부재를 fail-closed 503으로 처리) ⛔대표 승인 前 prod 결제 개입 전면금지 태세와 정합.
-        if [ "${_DEPLOY_ENV}" != "prod" ]; then
-          ENV_VARS="$${ENV_VARS},ADMIN_OPERATOR_AUDIENCE=${_ADMIN_OPERATOR_AUDIENCE},ADMIN_OPERATOR_ALLOWLIST=${_ADMIN_OPERATOR_ALLOWLIST}"
         fi
         # story #2445 Phase1(2026-08-03) — dev만 DATABASE_URL/DATABASE_URL_DIRECT를 PgBouncer
         # 경유 시크릿으로 재바인딩(--update-secrets=additive, 기존 다른 시크릿 preserve — REDIS_URL_

@@ -148,39 +148,10 @@ async def grant_credit(
     # 이전 버전은 구독 UPDATE를 항상 먼저 flush해, 같은 idempotency_key 재전송(타임아웃
     # 재시도 등)마다 current_period_end가 매번 now+months로 다시 밀렸다(응답의 entry
     # 메타 grant_expires_at과 실제 subscription 상태가 어긋나는 결함).
-    #
-    # PO 지적(2026-08-18, PR2 비블로커) — provider_ref는 전역 UNIQUE라 org 스코프가 없다.
-    # 조회에 org_id 조건이 없으면 타 org가 우연히/의도적으로 같은 idempotency_key를 재사용할
-    # 때 남의 org의 grant entry를 그대로 반환해버린다(IDOR류) — org_id 불일치는 409로 닫는다.
-    #
-    # PO 지적(2026-08-18, PR2 비블로커② — 1차 fix가 반쪽이었던 지점) — provider_ref
-    # UNIQUE는 entry_type 무관 테이블 전체 스코프(0229 마이그)다. **조회**에 entry_type
-    # 필터만 걸고 저장은 그대로 두면, 충돌 키가 들어왔을 때 조회는 이종 entry를 걸러
-    # "replay 아님"으로 정상 경로에 진입시키지만 그다음 tier가 이미 commit된 뒤 **저장
-    # INSERT**가 여전히 같은 UNIQUE를 위반해 ON CONFLICT DO NOTHING으로 조용히 무삽입되고,
-    # `record_ledger_entry`의 충돌 폴백이 그 이종 entry를 재조회해 반환한다 — 장부 없는
-    # tier 변경(entry 자체가 생성 안 됨) + 반환값이 credit_grant가 아니라 이후 이 값을
-    # 읽는 어디선가 KeyError. 조회만 좁히는 건 반쪽 fix(필터 前보다 정합이 오히려 나쁨).
-    #
-    # 정공법 — provider_ref 자체를 이 grant 전용 네임스페이스로 저장한다(revert companion의
-    # `grant-revert:<id>` 규율과 동일 패턴). 이러면 admin_grant_provider_ref가 다른 종류의
-    # entry(웹훅 provider_ref 등 임의 문자열)와 우연히 겹칠 확률이 사실상 0으로 떨어져
-    # 저장 INSERT 층의 충돌 자체가 원천 소멸한다 — entry_type 필터는 방어 depth로 유지.
-    admin_grant_provider_ref = f"admin-grant:{idempotency_key}"
     existing = (
-        await session.execute(
-            select(BillingLedgerEntry).where(
-                BillingLedgerEntry.provider_ref == admin_grant_provider_ref,
-                BillingLedgerEntry.entry_type == "credit_grant",
-            )
-        )
+        await session.execute(select(BillingLedgerEntry).where(BillingLedgerEntry.provider_ref == idempotency_key))
     ).scalar_one_or_none()
     if existing is not None:
-        if existing.org_id != org_id:
-            raise AdminBillingError(
-                409, "IDEMPOTENCY_KEY_ORG_MISMATCH",
-                "이 Idempotency-Key는 다른 조직의 요청에 이미 쓰였음 — 새 키로 재시도할 것",
-            )
         _audit(
             actor_email=actor_email, org_id=org_id, action="credit_grant_replay",
             before=None, after={"entry_id": str(existing.id), "idempotency_key": idempotency_key},
@@ -227,7 +198,7 @@ async def grant_credit(
     entry = await record_ledger_entry(
         session, org_id=org_id, entry_type="credit_grant",
         amount_minor=amount_minor, currency=currency, direction="credit",
-        provider_ref=admin_grant_provider_ref, metadata=metadata,
+        provider_ref=idempotency_key, metadata=metadata,
     )
     _audit(
         actor_email=actor_email, org_id=org_id, action="credit_grant",
