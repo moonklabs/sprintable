@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-from lint_destructive_test_sql import find_violations  # noqa: E402
+from lint_destructive_test_sql import find_violations, scan_dir  # noqa: E402
 
 
 def _write(tmp_path: Path, name: str, source: str) -> Path:
@@ -45,6 +45,26 @@ def reset(conn):
     violations = find_violations(path)
     assert len(violations) == 1
     assert "무조건 위반" in violations[0][2]
+
+
+def test_positive_control_subdirectory_violation_is_scanned(tmp_path):
+    """story #2786 재QA(PO 격상, 디디 3221 fix) — pytest는 tests/ 하위 서브디렉토리(예:
+    tests/mcp/)까지 재귀 실행하는데, top-level glob만 쓰면 그 파일들이 스캔 밖인데 pytest는
+    도는 «거짓 안전 신호»가 된다. 이 테스트는 정확히 그 시나리오를 재현 — 하위 폴더의 위반이
+    scan_dir()에 실제로 잡히는지 고정한다."""
+    sub = tmp_path / "mcp"
+    sub.mkdir()
+    (sub / "__init__.py").write_text("")
+    src = '''
+async def cleanup(session):
+    await session.execute(text("DELETE FROM webhook_events"))
+'''
+    _write(sub, "test_nested_bad.py", src)
+    violations, scanned = scan_dir(tmp_path)
+    assert scanned == 2  # __init__.py + test_nested_bad.py
+    assert len(violations) == 1
+    assert "WHERE절 없음" in violations[0][2]
+    assert "mcp" in violations[0][0]  # 서브디렉토리 경로가 보고에 실제로 찍히는지
 
 
 # ── 음성대조: 정상 관례는 통과 ──────────────────────────────────────────────

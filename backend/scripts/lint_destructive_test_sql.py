@@ -50,6 +50,14 @@
 ⛔baseline 없음 — 이 가드 도입 시점(2026-08-19) 스윕으로 기존 위반 전부 정리(WHERE 없는
    DELETE/무마커 DROP·TRUNCATE 0건 확認 후 켰다). #2459 commit-before-validate와 같은 계약
    ("baseline 없음" = 지금 위반이 있으면 그것도 즉시 FAIL, 봐주는 게 없다).
+
+⛔재QA 1라운드(2026-08-19, PR#3221 — 디디 독립검증→PO 격상): 초판이 `TESTS_DIR.glob("*.py")`
+   (top-level만)를 써서 `tests/mcp/`(8파일) 등 서브디렉토리가 스캔 밖이었는데, pytest 자신은
+   `tests/` 하위를 재귀 실행한다 — 그 하위 파일이 위반을 갖고 있어도 이 가드는 「OK: 0건」이라는
+   **거짓 안전 신호**를 냈다("가드가 자기 재료를 못 찾으면 빨강" 원칙의 변형 — 안 본 걸 본 것처럼
+   찍는 게 이 가드가 잡으려는 바로 그 클래스). fix: `glob`→`rglob`(재귀)+출력에 "스캔 파일 N개"
+   명시(카디르 mobile#61 QA가 요구한 "비교/스킵 계수" 규율과 동형 — 스캔 모수가 줄면 눈에
+   보이게)+서브디렉토리 위반 양성대조 테스트 추가.
 """
 from __future__ import annotations
 
@@ -156,15 +164,26 @@ def find_violations(path: Path) -> list[tuple[str, int, str]]:
     return violations
 
 
-def scan_repo() -> list[tuple[str, int, str]]:
+def scan_dir(root: Path) -> tuple[list[tuple[str, int, str]], int]:
+    """(violations, scanned_file_count). rglob — pytest는 tests/ 하위 서브디렉토리(예: tests/mcp/)
+    까지 재귀 실행하는데(story #2786 재QA, PO 격상 — 디디 3221 fix), 이전 버전이 top-level
+    glob만 써서 그 하위 파일들이 스캔 밖인데 pytest는 도는 «거짓 안전 신호»였다. «가드가 자기
+    재료를 못 찾으면 빨강» 원칙의 변형 — 안 본 걸 본 것처럼 찍는 게 이 가드가 잡으려는 바로
+    그 클래스다."""
     violations = []
-    for path in sorted(TESTS_DIR.glob("*.py")):
+    files = sorted(root.rglob("*.py"))
+    for path in files:
         violations.extend(find_violations(path))
-    return violations
+    return violations, len(files)
+
+
+def scan_repo() -> tuple[list[tuple[str, int, str]], int]:
+    return scan_dir(TESTS_DIR)
 
 
 def main() -> int:
-    violations = scan_repo()
+    violations, scanned = scan_repo()
+    print(f"스캔 파일 {scanned}개(tests/ 재귀)")
     if violations:
         print(f"FAIL: 공유 실PG를 부술 수 있는 테스트 SQL 리터럴 {len(violations)}건 발견")
         print("story #2786 판정: WHERE 없는 DELETE FROM / DROP SCHEMA·DROP TABLE·TRUNCATE는")
