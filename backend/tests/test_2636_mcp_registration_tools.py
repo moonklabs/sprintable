@@ -107,23 +107,27 @@ def test_update_input_rejects_unknown_field_direct_construction():
 
 @pytest.mark.anyio
 async def test_registered_register_tool_rejects_unknown_arg():
-    from mcp.server.fastmcp.exceptions import ToolError
+    # story #2772(mcp 2.0 이관): Tool.run()이 context 위치인자를 요구(실측) — Context()는
+    # 전 필드 기본값 None이라 단위테스트용으로 충분.
+    from mcp.server.mcpserver import Context
+    from mcp.server.mcpserver.exceptions import ToolError
     from sprintable_mcp import server as srv
 
     tool = srv.mcp._tool_manager.get_tool("sprintable_register_event_definition")
     with pytest.raises(ToolError) as ei:
-        await tool.run({"key": "k", "payload_schema": {}, "routing": {}, "totally_bogus_arg": 1})
+        await tool.run({"key": "k", "payload_schema": {}, "routing": {}, "totally_bogus_arg": 1}, Context())
     assert "totally_bogus_arg" in str(ei.value)
 
 
 @pytest.mark.anyio
 async def test_registered_update_tool_rejects_unknown_arg():
-    from mcp.server.fastmcp.exceptions import ToolError
+    from mcp.server.mcpserver import Context
+    from mcp.server.mcpserver.exceptions import ToolError
     from sprintable_mcp import server as srv
 
     tool = srv.mcp._tool_manager.get_tool("sprintable_update_event_definition")
     with pytest.raises(ToolError) as ei:
-        await tool.run({"definition_id": "d1", "totally_bogus_arg": 1})
+        await tool.run({"definition_id": "d1", "totally_bogus_arg": 1}, Context())
     assert "totally_bogus_arg" in str(ei.value)
 
 

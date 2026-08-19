@@ -75,8 +75,10 @@ async def test_read_only_tools_succeed():
             for tool_name, args in READ_ONLY_TOOLS:
                 try:
                     result = await session.call_tool(tool_name, args)
-                    if result.isError:
-                        failed.append(f"{tool_name}: isError=True — {result.content[0].text[:200] if result.content else ''}")
+                    # story #2772(mcp 2.0 이관) — CallToolResult.isError → is_error(camelCase→
+                    # snake_case 전수 개명, 실측: mcp.types.CallToolResult.model_fields).
+                    if result.is_error:
+                        failed.append(f"{tool_name}: is_error=True — {result.content[0].text[:200] if result.content else ''}")
                 except Exception as exc:
                     failed.append(f"{tool_name}: exception — {exc}")
             assert not failed, f"실호출 실패 도구:\n" + "\n".join(failed)

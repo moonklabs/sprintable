@@ -13,8 +13,12 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 logger = logging.getLogger(__name__)
 
-from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.tools.base import Tool as _FastMCPTool
+# story #2772(mcp 2.0 이관) — FastMCP→MCPServer 개명(mcp.server.fastmcp→mcp.server.mcpserver).
+# 스파이크(2026-08-19) 실 2.0.0 소스 대조 확認: private 내부(fn_metadata.arg_model·_tool_manager·
+# add_tool 반환값 None·구성시점 핸들러 바인딩) 전부 등가 재현 가능 — 이 파일의 로직 자체는 무변경,
+# import 경로만 이동.
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.tools.base import Tool as _FastMCPTool
 from mcp.types import TextContent
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -277,17 +281,24 @@ _allowed_hosts = [h.strip() for h in (settings.mcp_allowed_hosts or "").split(",
 # 넣으면 브라우저 Origin 요청이 403(prod·whitelist 시). → origins 는 `https://{host}` 로 파생(Cloud Run/
 # 커스텀도메인 TLS=https). Poke 등 server-to-server 는 Origin 부재라 항상 통과(SDK: origin 없으면 True).
 _allowed_origins = [f"https://{h}" for h in _allowed_hosts]
-_transport_security = TransportSecuritySettings(
+# story #2772(mcp 2.0 이관) — 2.0.0에서 transport_security(+stateless_http)가 MCPServer 생성자에서
+# streamable_http_app() 호출부로 이동(스파이크 확認, server.py:1218-1228 시그니처). 이 값 자체는
+# stdio/http 공용 구성이 아니라 http 전용이라 __main__.py의 _run_http()에서 소비 — non-private로
+# export(구 leading underscore는 "이 파일 안에서만 쓴다"는 뜻이었는데 더 이상 그렇지 않다).
+transport_security = TransportSecuritySettings(
     enable_dns_rebinding_protection=bool(_allowed_hosts),
     allowed_hosts=_allowed_hosts,
     allowed_origins=_allowed_origins,
 )
 
-# E-MCP-OPT S1: hosted(http) tools/list 요청별 scope 필터. FastMCP.__init__ → _setup_handlers()가
-# `self._mcp_server.list_tools()(self.list_tools)`로 **구성 시점 bound method**를 저수준 핸들러에
-# 등록한다 — 구성 後 인스턴스 몽키패치(mcp.list_tools = fn)는 이미 캡처된 참조에 안 먹는다(실측 확인:
-# 코덱스 + 별도 독립 재현 스크립트 둘 다). 서브클래스 오버라이드는 __init__ 이전에 존재해 self.list_tools
-# 속성조회(MRO)가 오버라이드로 해소되므로 저수준 핸들러가 정확히 이걸 호출한다 — 유일하게 먹는 방식.
+# E-MCP-OPT S1: hosted(http) tools/list 요청별 scope 필터. (1.x 시절 근거였던) FastMCP.__init__ →
+# _setup_handlers()의 "구성 시점 bound method 캡처" 메커니즘은 2.0.0에서 이중 간접화로 바뀌었다
+# (story #2772 스파이크 2026-08-19 실측): MCPServer가 저수준 Server를 `on_list_tools=self.
+# _handle_list_tools`(MCPServer 소유 안정 메서드)로 구성하고, `_handle_list_tools`는 **호출될
+# 때마다** `await self.list_tools()`를 부른다 — 그래서 서브클래스 오버라이드가 구성 시점이 아니라
+# 매 호출마다 MRO로 재해석돼 이전의 "구성 後 몽키패치는 안 먹는다"는 함정 자체가 사라졌다(더
+# 견고해진 것 — 1.x의 위험을 신경 안 써도 서브클래스 오버라이드는 그냥 항상 먹는다). 그래도
+# 서브클래스 오버라이드(정적으로 __init__ 이전에 존재)라는 이 파일의 접근 자체는 두 버전 다 동작.
 #
 # stdio는 부팅 시 filter_tools_by_scope(레지스트리 destructive mutation)로 이미 걸러진 목록만 남아
 # 있어 이 필터가 다시 돌아도 무해한 no-op(전 도구 이미 허용된 것들)이지만, mcp_transport 가드로 아예
@@ -346,7 +357,7 @@ def _lock_down_extra_args(tool: _FastMCPTool) -> None:
     tool.fn_metadata.arg_model = strict_arg_model
 
 
-class SprintableFastMCP(FastMCP):
+class SprintableMCPServer(MCPServer):
     def add_tool(
         self,
         fn,
@@ -383,16 +394,17 @@ class SprintableFastMCP(FastMCP):
         return [tool for tool in tools if is_tool_allowed(tool.name, _scope)]
 
 
-mcp = SprintableFastMCP(
+# story #2772(mcp 2.0 이관) — stateless_http/transport_security는 더 이상 생성자 인자가 아니다
+# (2.0.0에서 streamable_http_app()로 이동, 위 transport_security 변수 주석 참고). http 모드
+# 실제 적용은 __main__.py::_run_http()의 mcp.streamable_http_app(stateless_http=True,
+# transport_security=transport_security) 호출부에서 이뤄진다 — stdio 모드는 그 호출 자체를
+# 안 타므로(무회귀).
+mcp = SprintableMCPServer(
     name="sprintable-mcp-python",
     instructions=(
         "Sprintable Python MCP server. "
         f"Backend: {settings.sprintable_api_url}"
     ),
-    # E-MCP-HTTP S1: stateless HTTP(요청간 세션 미보존)=무상태 툴서버(서버리스/멀티인스턴스 안전·Cloud
-    # Run S2). stdio 모드는 이 설정 무시(영향 0).
-    stateless_http=True,
-    transport_security=_transport_security,
 )
 
 

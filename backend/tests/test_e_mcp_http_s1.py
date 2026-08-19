@@ -65,9 +65,15 @@ def test_allowed_hosts_env_read_and_protection_toggle(monkeypatch):
 
 
 def test_module_mcp_protection_off_by_default():
-    """현 모듈 mcp(빈 hosts 임포트)는 DNS-rebinding 보호 OFF — Cloud Run 호스팅 421 회피."""
-    from sprintable_mcp.server import mcp
-    assert mcp.settings.transport_security.enable_dns_rebinding_protection is False
+    """현 모듈(빈 hosts 임포트)은 DNS-rebinding 보호 OFF — Cloud Run 호스팅 421 회피.
+
+    story #2772(mcp 2.0 이관) — transport_security는 2.0.0에서 MCPServer 생성자/`.settings`
+    에서 빠지고 streamable_http_app() 호출부 인자로만 존재(실측: mcp.settings에 그 필드 자체가
+    없음, AttributeError). 그래서 이제 mcp 인스턴스가 아니라 server.py가 export하는
+    `transport_security` 모듈 변수(=__main__.py가 streamable_http_app()에 실제로 넘기는 그
+    객체)를 직접 검증한다 — 검증 대상이 "실제로 쓰이는 값"이라는 계약은 그대로."""
+    from sprintable_mcp.server import transport_security
+    assert transport_security.enable_dns_rebinding_protection is False
 
 
 def test_allowed_origins_derive_scheme():

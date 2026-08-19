@@ -3,25 +3,25 @@
 문제: http 모드는 멀티테넌트(多키 동시서비스)인데 tools/list 가 항상 전체 ~95개 도구를 반환
 (call-time enforcement는 이미 키별로 정확하지만 list 는 그대로) — 컨텍스트 낭비.
 
-해법: `SprintableFastMCP(FastMCP)` 서브클래스가 `list_tools()`를 오버라이드해 call-time과 동일
-primitive(`_api_key_override`·`_load_scope_for`·`is_tool_allowed`)로 http 모드에서만 응답을
-필터링한다. **왜 서브클래스인가**: FastMCP.__init__ → _setup_handlers() 가
-`self._mcp_server.list_tools()(self.list_tools)`로 **구성 시점 bound method**를 저수준
-프로토콜 핸들러에 등록 — 구성 後 인스턴스 몽키패치는 이미 캡처된 참조라 안 먹지만, 서브클래스
-오버라이드는 __init__ 이전에 존재해 `self.list_tools` 속성조회(MRO)가 오버라이드로 해소되므로
-정확히 먹는다(PO crux 확認: mcp/server/fastmcp/server.py:304 소스 직접 대조).
+해법: `SprintableMCPServer(MCPServer)`(story #2772 이관 전 이름 `SprintableFastMCP(FastMCP)`)
+서브클래스가 `list_tools()`를 오버라이드해 call-time과 동일 primitive(`_api_key_override`·
+`_load_scope_for`·`is_tool_allowed`)로 http 모드에서만 응답을 필터링한다. **왜 서브클래스인가**:
+mcp 2.0.0(스파이크 2026-08-19 실측, mcp/server/mcpserver/server.py:190-215,410-413) —
+MCPServer가 저수준 Server를 `on_list_tools=self._handle_list_tools`로 구성하고,
+`_handle_list_tools`가 **호출될 때마다** `await self.list_tools()`를 부른다 — 서브클래스
+오버라이드가 MRO로 매번 재해석돼 항상 먹는다(1.x의 "구성 시점 캡처라 인스턴스 몽키패치는
+안 먹는다"는 제약보다 오히려 관대해진 것).
 
 3개 검증축(PO crux 명시):
 ①unit — 핸들러 자체(전체 필터 로직) 직접 호출, 키별 scope 상이 시 결과 상이
 ②ASGI 2-bearer 통합(실경로 핵심) — 실제 streamable_http_app()+bearer_auth_asgi() 스택을
-  진짜 MCP client(streamablehttp_client+ClientSession)로 initialize+tools/list 왕복
+  진짜 MCP client(streamable_http_client+ClientSession)로 initialize+tools/list 왕복
 ③stdio 회귀 — 부팅 필터(filter_tools_by_scope)·도구 수·manifest 미조회 무영향
 """
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-import httpx
 import pytest
 
 
@@ -127,8 +127,14 @@ async def test_http_transport_tools_list_real_path_differs_per_bearer(monkeypatc
     """실제 streamable_http_app()+bearer_auth_asgi() 스택을 진짜 MCP client(initialize+
     tools/list JSON-RPC 왕복)로 구동 — PO 지정 '실경로 핵심' 검증. 서로 다른 bearer 토큰이
     서로 다른 tools/list 응답을 받는지 세션-레벨에서 확인(핸들러 직접호출이 아닌 전체 스택)."""
+    import httpx2
     from mcp.client.session import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+    # story #2772(mcp 2.0 이관) — streamablehttp_client → streamable_http_client 개명(실측) +
+    # 시그니처 자체가 바뀜: headers=/httpx_client_factory= 콜백 대신 http_client=(httpx2.
+    # AsyncClient 인스턴스, mcp SDK가 내부적으로 httpx→httpx2로 완전 대체됨 — 우리 자신의
+    # httpx 사용과는 무관, mcp 클라이언트 전용) 하나만 받는다(실측: url, *, http_client=None,
+    # terminate_on_close=True). 키마다 헤더가 달라야 하니 클라이언트를 키별로 새로 구성.
+    from mcp.client.streamable_http import streamable_http_client
 
     from sprintable_mcp import server as srv
     from sprintable_mcp.http_auth import bearer_auth_asgi
@@ -140,29 +146,39 @@ async def test_http_transport_tools_list_real_path_differs_per_bearer(monkeypatc
         key = _api_key_override.get()
         return {"scope": ["stories"]} if key == "keyA" else {"scope": ["chat"]}
 
-    app = bearer_auth_asgi(srv.mcp.streamable_http_app())
-
-    def _factory(headers=None, timeout=None, auth=None):
-        return httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://testserver",
-            headers=headers,
-            timeout=timeout or 30,
+    # story #2772(mcp 2.0 이관) — transport_security 미지정(None)이면 host 기반 자동 보호가
+    # 켜져(server.py 원 주석과 동형 원칙) 이 테스트의 합성 호스트("testserver")를 거부한다
+    # (실측: "Invalid Host header: testserver"). 이 테스트가 검증하는 건 scope 필터이지
+    # DNS-rebinding 보호가 아니므로 명시로 끈다(그 보호 자체는 test_e_mcp_http_s1.py가
+    # 별도로 검증).
+    from mcp.server.transport_security import TransportSecuritySettings
+    app = bearer_auth_asgi(
+        srv.mcp.streamable_http_app(
+            transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False)
         )
+    )
 
     results: dict[str, set[str]] = {}
     async with srv.mcp.session_manager.run():
         with patch.object(srv.client, "get", new=AsyncMock(side_effect=_fake_get)):
             for key in ("keyA", "keyB"):
-                async with streamablehttp_client(
-                    url="http://testserver/mcp",
+                async with httpx2.AsyncClient(
+                    transport=httpx2.ASGITransport(app=app),
+                    base_url="http://testserver",
                     headers={"Authorization": f"Bearer {key}"},
-                    httpx_client_factory=_factory,
-                ) as (read, write, _get_session_id):
-                    async with ClientSession(read, write) as session:
-                        await session.initialize()
-                        result = await session.list_tools()
-                        results[key] = {t.name for t in result.tools}
+                    timeout=30,
+                ) as http_client:
+                    # story #2772(mcp 2.0 이관) — yield 값이 3-tuple(read,write,get_session_id)
+                    # 에서 2-tuple(read,write)로 축소(실측 — session_id 콜백 자체가 사라짐,
+                    # §1 핸드셰이크 폐지와 같은 축의 변화). 안 쓰던 값이라 무영향.
+                    async with streamable_http_client(
+                        url="http://testserver/mcp",
+                        http_client=http_client,
+                    ) as (read, write):
+                        async with ClientSession(read, write) as session:
+                            await session.initialize()
+                            result = await session.list_tools()
+                            results[key] = {t.name for t in result.tools}
 
     assert "sprintable_add_story" in results["keyA"]
     assert "sprintable_send_chat_message" not in results["keyA"]
