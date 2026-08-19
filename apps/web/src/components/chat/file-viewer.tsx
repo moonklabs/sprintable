@@ -323,48 +323,65 @@ function DocxBody({ url, label }: { url: string; label: string }) {
   const [status, setStatus] = useState<'rendering' | 'ready' | 'failed'>('rendering');
 
   useEffect(() => {
-    let cancelled = false;
+    // 인시던트(2026-08-19, 선생님 실클릭 재현) — Promise.race([run, timeout])+catch/finally
+    // 조합이 실 배포 환경에서 «타임아웃이 만료됐는데도 상태 전이가 안 되는» 경로로 관측됐다
+    // (라이브 디버깅: 130초를 몇 배 넘겨도 pptx가 converting에 고정, 원인은 이 패턴의 미묘한
+    // 실패 모드로 추정 — Promise.race 자체를 걷어내고 단일 try/catch+독립 타이머로 재작성해
+    // 재발 표면을 줄인다). settled 플래그로 "먼저 끝낸 쪽이 이긴다"만 보장 — 더 단순하고
+    // 예측 가능하다.
+    let settled = false;
     const controller = new AbortController();
-    let timeoutId: ReturnType<typeof setTimeout>;
     setStatus('rendering');
-    // story #2788 QA(까디르군) 지적 — res.blob()은 undici Blob을 만드는데 JSZip이 내부에서
-    // FileReader(jsdom 전용 API)로 읽으려 하면 cross-realm 불일치로 조용히 못 읽는다(CI
-    // headless 환경 재현). renderAsync는 ArrayBuffer도 그대로 받으므로 Blob 경유를 아예 없앤다.
-    const run = (async () => {
-      const res = await fetch(url, { signal: controller.signal });
-      if (!res.ok) throw new Error(String(res.status));
-      const buf = await res.arrayBuffer();
-      const { renderAsync } = await import('docx-preview');
-      if (cancelled) return;
-      if (!containerRef.current) throw new Error('docx render target unmounted');
-      containerRef.current.innerHTML = '';
-      await renderAsync(buf, containerRef.current, undefined, {
-        inWrapper: true,
-        ignoreWidth: false,
-        ignoreHeight: true,
-        breakPages: true,
-      });
-      if (!cancelled) setStatus('ready');
+
+    const markFailed = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      console.error('docx 인앱 렌더 실패', err);
+      controller.abort();
+      setStatus('failed');
+    };
+    const markReady = () => {
+      if (settled) return;
+      settled = true;
+      setStatus('ready');
+    };
+
+    // AC2(무한 로딩 금지) — fetch든 renderAsync든 어느 단계가 멈추든 20초 뒤 강제로 정직
+    // 실패로 떨어뜨린다. run과 독립적으로 도는 타이머라 run 쪽 로직과 무관하게 항상 발화한다.
+    const timeoutId = setTimeout(() => markFailed(new Error('docx render timeout')), 20000);
+
+    (async () => {
+      try {
+        // story #2788 QA(까디르군) 지적 — res.blob()은 undici Blob을 만드는데 JSZip이
+        // 내부에서 FileReader(jsdom 전용 API)로 읽으려 하면 cross-realm 불일치로 조용히
+        // 못 읽는다(CI headless 환경 재현). renderAsync는 ArrayBuffer도 그대로 받으므로
+        // Blob 경유를 아예 없앤다.
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) throw new Error(String(res.status));
+        const buf = await res.arrayBuffer();
+        const { renderAsync } = await import('docx-preview');
+        if (settled) return;
+        if (!containerRef.current) throw new Error('docx render target unmounted');
+        containerRef.current.innerHTML = '';
+        await renderAsync(buf, containerRef.current, undefined, {
+          inWrapper: true,
+          // 인시던트(2026-08-19) — A4 고정폭 페이지가 좁은 패널에서 가로 스크롤로만
+          // 도달 가능해 실사용 판정이 "잘림"이었다(선생님 실클릭 스크린샷). ignoreWidth:true로
+          // docx-preview가 페이지/표 폭을 강제하지 않게 해 컨테이너 폭에 자연히 맞춘다
+          // (fit-width) — WYSIWYG 정확도보다 미리보기 가독성 우선.
+          ignoreWidth: true,
+          ignoreHeight: true,
+          breakPages: true,
+        });
+        clearTimeout(timeoutId);
+        markReady();
+      } catch (err) {
+        clearTimeout(timeoutId);
+        markFailed(err);
+      }
     })();
-    // AC2(무한 로딩 금지)는 개별 실패 분기만으론 구조적으로 못 지킨다 — fetch든 renderAsync든
-    // 어느 단계에서 진짜로 멈추면 20초 뒤 강제로 정직 실패로 떨어뜨린다.
-    const timeout = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error('docx render timeout')), 20000);
-    });
-    Promise.race([run, timeout])
-      .catch((e) => {
-        // 에러를 삼키지 않는다 — 폴백 UI로 사용자에겐 정직 실패를 보여주되, 원인은 콘솔에 남긴다.
-        console.error('docx 인앱 렌더 실패', e);
-        controller.abort();
-        if (cancelled) return;
-        // story #2788 QA(까디르군) 재발견 — timeout으로 failed를 확정한 뒤에도 abort를
-        // 못 받는 renderAsync가 뒤늦게 resolve하면 run 꼬리의 setStatus('ready')가 failed를
-        // 되돌린다. cancelled를 여기서도 세워 늦게 온 resolve를 무력화해 최종 상태를 고정한다.
-        cancelled = true;
-        setStatus('failed');
-      })
-      .finally(() => clearTimeout(timeoutId));
-    return () => { cancelled = true; controller.abort(); clearTimeout(timeoutId); };
+
+    return () => { settled = true; controller.abort(); clearTimeout(timeoutId); };
   }, [url]);
 
   if (status === 'failed') {
@@ -377,8 +394,8 @@ function DocxBody({ url, label }: { url: string; label: string }) {
     );
   }
 
-  // 바깥 패널(FileViewer)이 이미 overflow-auto — 여기선 중첩 스크롤 없이 폭만 내어준다
-  // (docx-preview는 A4 고정폭 페이지를 그리므로 모바일에선 바깥 컨테이너가 가로 스크롤).
+  // ignoreWidth:true라 docx-preview가 페이지/표 폭을 강제하지 않는다 — 컨테이너 폭(w-full)에
+  // 자연히 맞춰지므로(fit-width, 인시던트#2788 재발수정) 가로 스크롤에 기대지 않는다.
   return (
     <div className="min-h-full bg-muted/30">
       {status === 'rendering' && (
@@ -391,7 +408,7 @@ function DocxBody({ url, label }: { url: string; label: string }) {
       <div
         ref={containerRef}
         aria-label={label}
-        className={status === 'ready' ? 'docx-preview-container w-fit min-w-full p-4' : 'hidden'}
+        className={status === 'ready' ? 'docx-preview-container w-full p-4' : 'hidden'}
       />
     </div>
   );
@@ -401,9 +418,14 @@ function DocxBody({ url, label }: { url: string; label: string }) {
  * story #2803 — pptx는 BE 변환 파이프(POST /api/attachments/convert → office_conversion.py,
  * 84ef0cb7 §7-3)로 PDF로 바꾼 뒤 기존 PDF iframe 렌더를 그대로 재사용한다. 콜드스타트가
  * 수십 초 걸릴 수 있어(LibreOffice 헤드리스, §7-4 timeout=120s) "변환 중" + 경과시간 정직
- * 표시 — 무한 스피너 금지. 실패 처리는 DocxBody와 동형(AbortController+상한타이머+cancelled
- * 레이스 가드, story #2788 QA 교훈 그대로 적용 — timeout 확정 뒤 늦은 resolve가 상태를
- * 되돌리지 못하게 catch에서도 cancelled를 세운다).
+ * 표시 — 무한 스피너 금지.
+ *
+ * 인시던트(2026-08-19, 선생님 실클릭 재현·2788/2803 done→in-progress 되돌림) — 배포된
+ * dev에서 직접 puppeteer로 실 pptx를 첨부·클릭해 재현: convert가 502로 실패한 뒤에도
+ * "변환 중" 스피너가 400초+ 고정되는 것을 라이브로 확인(까디르군 QA가 잡았던 "timeout
+ * 확定 뒤 늦은 resolve가 되돌리는" 레이스와는 다른 결— Promise.race([run, timeout])
+ * +catch+finally 조합 자체가 실 배포 환경에서 상태 전이 없이 settle되는 경로를 탐).
+ * Promise.race를 걷어내고 단일 try/catch+독립 타이머로 재작성 — DocxBody와 동일 패턴.
  */
 function PptxBody({ assetId, label }: { assetId: string; label: string }) {
   const [status, setStatus] = useState<'converting' | 'ready' | 'failed'>('converting');
@@ -418,54 +440,67 @@ function PptxBody({ assetId, label }: { assetId: string; label: string }) {
   }, [status]);
 
   useEffect(() => {
-    let cancelled = false;
-    const controller = new AbortController();
-    let timeoutId: ReturnType<typeof setTimeout>;
     // key={assetId}가 다른 첨부 전환 시 이 컴포넌트를 통째로 새로 마운트하므로(DocxBody와
     // 동형) status/failMessage는 이미 useState 초기값으로 깨끗하다 — 여기서 재설정 불요.
-    const run = (async () => {
-      const convertRes = await fetchWithAuth(`/api/attachments/convert?asset_id=${encodeURIComponent(assetId)}`, {
-        method: 'POST',
-        signal: controller.signal,
-      });
-      const convertJson = (await convertRes.json().catch(() => null)) as
-        | { data?: { asset_id?: string }; error?: { message?: string } }
-        | null;
-      const convertedAssetId = convertJson?.data?.asset_id;
-      if (!convertRes.ok || !convertedAssetId) {
-        throw new Error(convertJson?.error?.message ?? String(convertRes.status));
-      }
-      if (cancelled) return;
-      const signRes = await fetchWithAuth(
-        `/api/attachments/sign?asset_id=${encodeURIComponent(convertedAssetId)}&disposition=inline`,
-        { signal: controller.signal },
-      );
-      const signJson = (await signRes.json().catch(() => null)) as { data?: { url?: string }; error?: { message?: string } } | null;
-      const url = signJson?.data?.url;
-      if (!signRes.ok || !url) {
-        throw new Error(signJson?.error?.message ?? String(signRes.status));
-      }
-      if (!cancelled) {
-        setPdfUrl(url);
-        setStatus('ready');
+    let settled = false;
+    const controller = new AbortController();
+
+    const markFailed = (msg: string | null) => {
+      if (settled) return;
+      settled = true;
+      controller.abort();
+      setFailMessage(msg);
+      setStatus('failed');
+    };
+    const markReady = (url: string) => {
+      if (settled) return;
+      settled = true;
+      setPdfUrl(url);
+      setStatus('ready');
+    };
+
+    // 백엔드 하드 타임아웃(Gotenberg 왕복 120s, 84ef0cb7 §7-4)보다 여유를 둔 클라이언트
+    // 상한 — run과 독립적으로 도는 타이머라 run 쪽에서 무슨 일이 있어도 항상 발화한다
+    // (AC2·AC3, 무한 로딩 금지를 구조로 보장).
+    const timeoutId = setTimeout(() => {
+      console.error('pptx 변환 시간 초과(130s)');
+      markFailed('변환 시간 초과');
+    }, 130000);
+
+    (async () => {
+      try {
+        const convertRes = await fetchWithAuth(`/api/attachments/convert?asset_id=${encodeURIComponent(assetId)}`, {
+          method: 'POST',
+          signal: controller.signal,
+        });
+        const convertJson = (await convertRes.json().catch(() => null)) as
+          | { data?: { asset_id?: string }; error?: { message?: string } }
+          | null;
+        const convertedAssetId = convertJson?.data?.asset_id;
+        if (!convertRes.ok || !convertedAssetId) {
+          throw new Error(convertJson?.error?.message ?? String(convertRes.status));
+        }
+        if (settled) return;
+        const signRes = await fetchWithAuth(
+          `/api/attachments/sign?asset_id=${encodeURIComponent(convertedAssetId)}&disposition=inline`,
+          { signal: controller.signal },
+        );
+        const signJson = (await signRes.json().catch(() => null)) as { data?: { url?: string }; error?: { message?: string } } | null;
+        const url = signJson?.data?.url;
+        if (!signRes.ok || !url) {
+          throw new Error(signJson?.error?.message ?? String(signRes.status));
+        }
+        clearTimeout(timeoutId);
+        markReady(url);
+      } catch (e) {
+        clearTimeout(timeoutId);
+        // 에러를 삼키지 않는다 — 폴백 UI로 사용자에겐 정직 실패를 보여주되, 원인은 콘솔에 남긴다.
+        console.error('pptx 변환 실패', e);
+        markFailed(e instanceof Error ? e.message : null);
       }
     })();
-    // 백엔드 하드 타임아웃(Gotenberg 왕복 120s, 84ef0cb7 §7-4)보다 여유를 둔 클라이언트 상한 —
-    // fetch든 변환이든 어느 단계가 멈추든 무한 로딩 금지(AC2·AC3).
-    const timeout = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error('변환 시간 초과')), 130000);
-    });
-    Promise.race([run, timeout])
-      .catch((e) => {
-        console.error('pptx 변환 실패', e);
-        controller.abort();
-        if (cancelled) return;
-        cancelled = true;
-        setFailMessage(e instanceof Error ? e.message : null);
-        setStatus('failed');
-      })
-      .finally(() => clearTimeout(timeoutId));
-    return () => { cancelled = true; controller.abort(); clearTimeout(timeoutId); };
+
+    return () => { settled = true; controller.abort(); clearTimeout(timeoutId); };
   }, [assetId]);
 
   if (status === 'failed') {
