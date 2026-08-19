@@ -1310,12 +1310,13 @@ async def publish_preset_event(
     org_id: uuid.UUID,
     definition_key: str,
     payload: dict,
-    background_tasks: BackgroundTasks,
 ) -> dict | None:
     """story #2791(P0, event-workflow-unification-design-2790) — 서버 도메인 전이 지점
     (상태변경·배정·게이트판정·목표측정)에서 호출하는 자동발행 진입점. HTTP 요청 컨텍스트
-    없이 `_publish_registry_event_core`를 그대로 호출해 #2633 AC2 단일 발행 파이프 원칙을
-    지킨다 — 신규 발행 갈래를 만들지 않는다.
+    없이(4개 호출부 전부 `BackgroundTasks` 미보유 — 시그니처 확장 대신 이 함수가 자체
+    `BackgroundTasks()`를 만들어 `_publish_registry_event_core` 완료 직후 즉시 실행한다,
+    HTTP 응답 이후로 미룰 대상이 없으므로 안전) `_publish_registry_event_core`를 그대로
+    호출해 #2633 AC2 단일 발행 파이프 원칙을 지킨다 — 신규 발행 갈래를 만들지 않는다.
 
     **구계통(story_status_events.py 등 SSE·웹훅·알림)과의 관계는 병행이다, 대체가 아니다**
     — 이 함수는 기존 5-effect 옆에 프리셋 발행을 하나 더 추가할 뿐, 기존 effect를 하나도
@@ -1351,9 +1352,11 @@ async def publish_preset_event(
         user_id=str(system_member.id), email=None,
         claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(org_id),
     )
+    background_tasks = BackgroundTasks()
     result = await _publish_registry_event_core(
         db, org_id, auth, definition_key, payload, background_tasks,
     )
+    await background_tasks()
     if result.get("zero_reach_warning"):
         logger.warning(
             "preset event zero_reach — 도달 0명(org=%s definition=%s payload_keys=%s)",

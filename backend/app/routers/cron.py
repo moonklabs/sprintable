@@ -550,6 +550,31 @@ async def score_ga4_outcomes(
                 epic.outcome_status = scoring["outcome_status"]
                 epic.outcome_result = scoring["outcome_result"]
                 scored.append({"type": "epic", "id": str(epic.id), "outcome_status": scoring["outcome_status"]})
+
+                # story #2791(P0, event-workflow-unification-design-2790) — preset.goal.measured
+                # 서버 자동발행. "pending"(아직 실측 안 됨)은 발행 대상 아님 — hit/miss처럼
+                # 실제 값이 확정됐을 때만("목표 측정"이라는 사건 자체가 성립한 시점).
+                # best-effort 격리는 호출자(여기) 몫 — cron 잡 자체를 안 깬다.
+                if scoring["outcome_status"] in ("hit", "miss") and scoring.get("outcome_result"):
+                    try:
+                        from app.routers.events import publish_preset_event
+
+                        outcome_result = scoring["outcome_result"]
+                        await publish_preset_event(
+                            session, epic.org_id, "preset.goal.measured",
+                            {
+                                "goal_id": str(epic.id),
+                                "metric_value": outcome_result.get("actual"),
+                                "metric_unit": outcome_result.get("metric"),
+                                "source": source,
+                                "measured_at": outcome_result.get("scored_at"),
+                            },
+                        )
+                    except Exception:
+                        logger.warning(
+                            "preset.goal.measured 자동발행 실패(goal=%s org=%s)",
+                            epic.id, epic.org_id, exc_info=True,
+                        )
             except Exception as exc:
                 logger.warning("epic scoring failed id=%s: %s", epic.id, exc)
                 failed.append({"type": "epic", "id": str(epic.id), "error": str(exc)})
