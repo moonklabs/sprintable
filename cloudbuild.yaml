@@ -287,8 +287,13 @@ steps:
         gcloud storage buckets update gs://sprintable-memo-attachments \
           --cors-file=infra/gcs-attachments-cors.json \
           --quiet
-        applied=$(gcloud storage buckets describe gs://sprintable-memo-attachments --format='value(cors)')
-        echo "OK: sprintable-memo-attachments CORS applied = $${applied}"
+        applied=$(gcloud storage buckets describe gs://sprintable-memo-attachments --format='value(cors_config)')
+        echo "sprintable-memo-attachments CORS applied = $${applied}"
+        case "$${applied}" in
+          *https://sprintable-frontend-dev-787818285179.asia-northeast3.run.app*) ;;
+          *) echo "FAIL: dev Cloud Run regional origin missing from applied CORS — 배포 검증 실패" >&2; exit 1 ;;
+        esac
+        echo "OK: dev Cloud Run regional origin confirmed in applied CORS"
     waitFor: ['-']
 
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
