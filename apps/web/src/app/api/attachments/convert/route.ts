@@ -8,6 +8,9 @@ import { handleApiError } from '@/lib/api-error';
 //
 // POST /api/attachments/convert?asset_id=<uuid> → BE POST /api/v2/attachments/{asset_id}/convert
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+// 까디르군 QA(#2803) — asset_id를 검증 없이 BE 경로 세그먼트에 직접 보간하고 있었다(경로조작
+// 이론 위험). apps/web/src/app/api/assets/[id]/route.ts와 동일 패턴으로 UUID 형식만 통과.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(request: Request) {
   try {
@@ -17,6 +20,7 @@ export async function POST(request: Request) {
     const { searchParams } = new URL(request.url);
     const assetId = searchParams.get('asset_id');
     if (!assetId) return ApiErrors.badRequest('asset_id is required');
+    if (!UUID_RE.test(assetId)) return ApiErrors.badRequest('invalid asset id');
 
     const beUrl = new URL(`/api/v2/attachments/${assetId}/convert`, FASTAPI_URL());
     const beRes = await fetch(beUrl.toString(), {

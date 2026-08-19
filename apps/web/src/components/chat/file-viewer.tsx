@@ -24,10 +24,14 @@ function resolveFormat(contentType: string | null | undefined, label: string): F
   if (ct === 'application/pdf' || ext === 'pdf') return 'pdf';
   if (ct === 'text/html' || ext === 'html' || ext === 'htm') return 'html';
   if (ct.startsWith('text/') || ct === 'text/markdown' || ['txt', 'md', 'markdown'].includes(ext)) return 'text';
-  if (ext === 'docx' || ct.includes('wordprocessingml')) return 'docx';
-  // BE office_conversion.is_convertible은 확장자 .pptx만 인정(content-type 무시) — FE도 그
-  // 기준에 맞춰 분기해야 convert 호출이 헛되이 422로 떨어지지 않는다(84ef0cb7 §7-3 실측).
-  if (ext === 'pptx' || ct.includes('presentationml')) return 'pptx';
+  // 까디르군 QA(#2803) — 확장자를 content-type보다 먼저 판정해야 한다. ext/ct 불일치
+  // 입력(예: .pptx인데 ct가 wordprocessingml)이 ct 우선 순서에서는 docx로 잘못 라우팅됐다.
+  // BE office_conversion.is_convertible도 확장자 .pptx만 인정(content-type 무시)하므로 —
+  // 확장자가 결정적일 땐 그걸로 확정, ct는 확장자가 없거나 못 알아볼 때만 폴백으로 쓴다.
+  if (ext === 'docx') return 'docx';
+  if (ext === 'pptx') return 'pptx';
+  if (ct.includes('wordprocessingml')) return 'docx';
+  if (ct.includes('presentationml')) return 'pptx';
   if (
     ['ppt', 'doc', 'xlsx', 'xls'].includes(ext) ||
     ct.includes('officedocument') ||

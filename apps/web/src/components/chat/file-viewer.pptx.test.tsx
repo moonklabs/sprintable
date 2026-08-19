@@ -87,6 +87,36 @@ describe('FileViewer pptx (story #2803)', () => {
     expect(container.textContent).not.toContain('변환 중입니다');
   });
 
+  it('확장자 .pptx인데 content-type이 wordprocessingml(불일치)이어도 확장자 우선으로 pptx 분기를 탄다(까디르군 QA #2803)', async () => {
+    const mismatchedTarget: Extract<ReadingPanelTarget, { kind: 'attachment' }> = {
+      kind: 'attachment',
+      label: 'mismatched.pptx',
+      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      assetId: ORIGINAL_ASSET_ID,
+    };
+    fetchWithAuthMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes('/api/attachments/sign') && url.includes(`asset_id=${ORIGINAL_ASSET_ID}`)) {
+        return jsonResponse({ data: { url: 'https://signed.example/mismatched.pptx' } });
+      }
+      if (url.includes('/api/attachments/convert') && init?.method === 'POST') {
+        return jsonResponse({ data: { asset_id: CONVERTED_ASSET_ID, name: 'deck.pdf', content_type: 'application/pdf' } });
+      }
+      if (url.includes('/api/attachments/sign') && url.includes(`asset_id=${CONVERTED_ASSET_ID}`)) {
+        return jsonResponse({ data: { url: 'https://signed.example/deck.pdf' } });
+      }
+      throw new Error(`unexpected fetchWithAuth call: ${url}`);
+    });
+
+    mount(<FileViewer target={mismatchedTarget} onClose={() => {}} />);
+    // pptx로 갔다면 "변환 중" 표시를 거쳐 iframe이 뜬다. docx로 잘못 갔다면 window.fetch(미모킹)
+    // 호출이 던져 실패로 빠진다 — 둘 중 하나로 갈릴 때까지 기다려 실제로 pptx 경로임을 증명.
+    await waitFor(() => container.querySelector('iframe') !== null || container.textContent!.includes('실패'));
+
+    const iframe = container.querySelector('iframe');
+    expect(iframe, `iframe 없음(=docx로 오라우팅됐을 가능성). text=${container.textContent}`).not.toBeNull();
+    expect(iframe!.getAttribute('src')).toBe('https://signed.example/deck.pdf');
+  });
+
   it('변환 서비스 미배선(503)이면 정직 폴백으로 빠진다 — 빈 화면/무한 로딩 금지', async () => {
     fetchWithAuthMock.mockImplementation(async (url: string, init?: RequestInit) => {
       if (url.includes('/api/attachments/sign') && url.includes(`asset_id=${ORIGINAL_ASSET_ID}`)) {
