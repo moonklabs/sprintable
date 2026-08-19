@@ -10,7 +10,6 @@ export interface RoleTemplateSummary {
   category: string;
   description: string | null;
   default_tool_groups: string[];
-  default_workflow_recipe_slug: string | null;
   is_builtin: boolean;
   tier: string;
   version: number;

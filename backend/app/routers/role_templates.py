@@ -68,7 +68,6 @@ class RoleTemplateSummary(BaseModel):
     category: str
     description: str | None
     default_tool_groups: list[str]
-    default_workflow_recipe_slug: str | None
     is_builtin: bool
     tier: str
     version: int
@@ -97,7 +96,7 @@ def _to_summary_response(rt: RoleTemplate, locale: str) -> RoleTemplateSummary:
     return RoleTemplateSummary(
         id=rt.id, slug=rt.slug, name=rt.name, category=rt.category, description=description,
         default_tool_groups=rt.default_tool_groups,
-        default_workflow_recipe_slug=rt.default_workflow_recipe_slug, is_builtin=rt.is_builtin,
+        is_builtin=rt.is_builtin,
         tier=rt.tier, version=rt.version, division=_localize_division(rt.division, locale),
         emoji=rt.emoji, skills=[AgentSkill.model_validate(s) for s in rt.skills],
     )
@@ -109,7 +108,7 @@ def _to_detail_response(rt: RoleTemplate, locale: str) -> RoleTemplateDetail:
     return RoleTemplateDetail(
         id=rt.id, slug=rt.slug, name=rt.name, category=rt.category, description=description,
         default_tool_groups=rt.default_tool_groups,
-        default_workflow_recipe_slug=rt.default_workflow_recipe_slug, is_builtin=rt.is_builtin,
+        is_builtin=rt.is_builtin,
         tier=rt.tier, version=rt.version, division=_localize_division(rt.division, locale),
         emoji=rt.emoji, skills=[AgentSkill.model_validate(s) for s in rt.skills],
         role_behaviors=role_behaviors, runtime_overrides=rt.runtime_overrides,
