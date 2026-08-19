@@ -27,7 +27,13 @@ const _CSP = [
   // 같은 외부 호스트를 통째로 열면 임의 GCS 콘텐츠를 끼우는 피싱 표면이 생긴다(toss-checkout
   // 선례와 동일 판단) — 대신 FE가 fetch→Blob→객체 URL로 직접 받아 그 blob: URL만 iframe에
   // 넣는다. blob:은 그 탭이 방금 만든 콘텐츠만 가리키므로 외부 호스트 개방보다 훨씬 좁다.
-  "frame-src blob:",
+  //
+  // story #2809 — 2807 QA(카디르)가 같은 근본원인(frame-src)에 걸리는 잔존 경로 2곳을
+  // 더 찾았다: docs YouTube/Figma embed(embed-node.tsx, 항상 www.youtube.com/embed·
+  // www.figma.com/embed로 고정 재작성되는 known-service origin — GCS처럼 임의 콘텐츠를
+  // 끼울 여지가 없어 exact-origin allowlist가 정당)와 채팅 html 첨부 미리보기(GCS 서명
+  // URL을 그대로 썼던 것 — pptx/PDF와 동일하게 blob: 전환, 새 origin 개방 불요).
+  "frame-src blob: https://www.youtube.com https://www.figma.com",
   "object-src 'none'",
   "base-uri 'self'",
   // OAuth 리다이렉트 대상

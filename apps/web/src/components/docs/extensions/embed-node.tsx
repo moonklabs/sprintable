@@ -14,28 +14,36 @@ interface EmbedInfo {
   embedUrl: string;
 }
 
+// story #2809(페드루군 AC 지적) — hostname.includes('youtube.com')류 부분일치는 hostname이
+// 정확히 그 도메인이거나 그 서브도메인일 때만 참이어야 한다(느슨한 substring 매치는
+// "notyoutube.com" 같은 오탐도 통과시킨다 — CSP가 뒷단에서 막아 보안 구멍은 아니지만
+// 판정 자체가 틀리다).
+function isDomainOrSubdomain(hostname: string, domain: string): boolean {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}
+
 export function detectEmbedService(url: string): EmbedInfo {
   try {
     const parsed = new URL(url);
     if (!['https:', 'http:'].includes(parsed.protocol)) return { type: 'fallback', embedUrl: url };
 
-    // YouTube
-    const ytVideoId =
-      parsed.hostname.includes('youtube.com')
-        ? (parsed.searchParams.get('v') ?? null)
-        : parsed.hostname === 'youtu.be'
-          ? parsed.pathname.slice(1)
-          : null;
+    // YouTube — CSP frame-src가 정확히 `https://www.youtube.com`만 허용하므로(story #2809),
+    // 입력이 어떤 형태든(youtube.com·music.youtube.com·이미 /embed/ 경로 등) 항상 그
+    // canonical origin으로 재작성해야 한다 — 원본 URL을 그대로 통과시키면(구 코드, 페드루군
+    // AC 지적) www 없는 호스트나 서브도메인 /embed/ URL이 CSP에 막혀 조용히 백지가 된다.
+    const isYoutubeHost = isDomainOrSubdomain(parsed.hostname, 'youtube.com');
+    const ytVideoId = isYoutubeHost
+      ? (parsed.searchParams.get('v') ?? (parsed.pathname.startsWith('/embed/') ? parsed.pathname.slice('/embed/'.length) : null))
+      : parsed.hostname === 'youtu.be'
+        ? parsed.pathname.slice(1)
+        : null;
     if (ytVideoId) {
       return { type: 'youtube', embedUrl: `https://www.youtube.com/embed/${ytVideoId}` };
-    }
-    if (parsed.hostname.includes('youtube.com') && parsed.pathname.startsWith('/embed/')) {
-      return { type: 'youtube', embedUrl: url };
     }
 
     // Figma
     if (
-      parsed.hostname.includes('figma.com') &&
+      isDomainOrSubdomain(parsed.hostname, 'figma.com') &&
       /^\/(file|design|proto)\//.test(parsed.pathname)
     ) {
       return {

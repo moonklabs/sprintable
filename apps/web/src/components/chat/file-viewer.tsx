@@ -234,8 +234,8 @@ function FileViewerBody({ format, url, label, assetId }: { format: Format; url: 
       // key={url} — 다른 첨부로 전환 시 컴포넌트를 통째로 새로 마운트(DocxBody와 동형).
       return <PdfBody key={url} url={url} label={label} />;
     case 'html':
-      // 미신뢰 업로드 컨텐츠 미리보기 — allow-scripts 없음(격리, CSP 준하는 최소 권한).
-      return <iframe src={url} title={label} sandbox="allow-popups" className="h-full w-full border-0 bg-white" />;
+      // key={url} — 다른 첨부로 전환 시 컴포넌트를 통째로 새로 마운트(PdfBody와 동형).
+      return <HtmlPreviewBody key={url} url={url} label={label} />;
     case 'text':
       // key={url} — url이 바뀌면(다른 첨부로 전환) 컴포넌트를 통째로 새로 마운트해 이전
       // 내용을 자연히 초기화한다(effect 안에서 수동 setState 리셋 없이 — react-hooks/
@@ -490,6 +490,82 @@ function PdfBody({ url, label }: { url: string; label: string }) {
   }
 
   return <iframe src={blobUrl ?? undefined} title={label} className="h-full w-full border-0" />;
+}
+
+/**
+ * story #2809 — case 'html'도 PdfBody와 같은 근본원인(CSP frame-src)에 걸려 있었다(2807
+ * QA·카디르 발견) — 서명 GCS URL을 곧장 iframe src에 넣었으므로 blob: 전환이 똑같이
+ * 필요하다. 미신뢰 업로드 컨텐츠 미리보기라는 성격은 그대로라 `sandbox="allow-popups"`
+ * (allow-scripts·allow-same-origin 없음)도 그대로 유지 — blob: URL을 이 sandbox에 넣으면
+ * opaque origin이 되어 부모/동일출처 리소스 접근이 여전히 막힌다(격리 약화 없음, 유나군
+ * #2808 검토 재료).
+ */
+function HtmlPreviewBody({ url, label }: { url: string; label: string }) {
+  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let settled = false;
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+
+    const markFailed = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      console.error('html 인앱 렌더 실패', err);
+      controller.abort();
+      setStatus('failed');
+    };
+    const markReady = (u: string) => {
+      if (settled) return;
+      settled = true;
+      setBlobUrl(u);
+      setStatus('ready');
+    };
+
+    const timeoutId = setTimeout(() => markFailed(new Error('html fetch timeout')), 20000);
+
+    (async () => {
+      try {
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) throw new Error(String(res.status));
+        const blob = await res.blob();
+        objectUrl = URL.createObjectURL(blob);
+        clearTimeout(timeoutId);
+        markReady(objectUrl);
+      } catch (err) {
+        clearTimeout(timeoutId);
+        markFailed(err);
+      }
+    })();
+
+    return () => {
+      settled = true;
+      controller.abort();
+      clearTimeout(timeoutId);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [url]);
+
+  if (status === 'failed') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+        <FileText className="size-8 text-muted-foreground" aria-hidden />
+        <p className="text-sm text-foreground">미리보기를 표시하지 못했습니다.</p>
+        <p className="text-xs text-muted-foreground">이 문서는 인앱 렌더에 실패했습니다. 다운로드해 확인하세요.</p>
+      </div>
+    );
+  }
+
+  if (status === 'loading') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" aria-hidden />
+      </div>
+    );
+  }
+
+  return <iframe src={blobUrl ?? undefined} title={label} sandbox="allow-popups" className="h-full w-full border-0 bg-white" />;
 }
 
 /**
