@@ -1228,31 +1228,42 @@ async def _publish_registry_event_core(
     return result
 
 
-async def _get_or_create_system_publisher(db: AsyncSession, org_id: uuid.UUID) -> "TeamMember":
+async def _get_or_create_system_publisher(db: AsyncSession, org_id: uuid.UUID) -> "Member":
     """story #2791(P0) — 서버 도메인 전이 자동발행 전용 시스템 발신자. org당 정확히 1행
     (0258 부분 유니크 인덱스로 DB 레벨 동시성 가드), get-or-create 멱등.
+
+    ⚠️`team_members`가 아니라 **`members`**(anchor 테이블)에 직접 쓴다 — `team_members`는
+    0088+에서 `members`/`project_access`/`agent_project_profiles` 위 3-way UNION ALL VIEW로
+    전환됐다(초판 실수 CI가 실측으로 잡아냄, 0258 참조). `send_message`의 sender 해석
+    (conversations.py::`_resolve_member`, api_key 분기)은 `team_members` 뷰를 `TeamMember.id
+    == auth.user_id`로 SELECT하므로, 이 member가 뷰에 최소 1행 투영되려면 `project_access`
+    grant가 최소 1건 있어야 한다(뷰의 3번째 UNION 브랜치 — profile 없는 agent-grant-only).
 
     소유·수명: 이 org가 존재하는 한 영구 — 별도 TTL·수동 정리 없음(자동발행 자체가 이 org
     수명과 결합돼 있어 "고아 리소스" 클래스가 아니다).
 
-    `project_id`는 team_members 스키마상 NOT NULL이지만, 이 member로 발행할 때 쓰는
-    `send_message`의 sender 해석(conversations.py::`_resolve_member`, api_key 분기)은
-    `TeamMember.id` 존재만 확인하고 project_id는 안 읽는다(2026-08-19 실측, story #2791 PR
-    참조) — 그래서 org 내 아무 project 하나에 anchor해도 org 전역 전이 이벤트 발행에
-    문제없다. `type='agent'`로 만들어 기존 서킷브레이커(agent 발신자 전용, story #2630)가
-    자동발행 폭주(전이 루프)도 그대로 방어하게 한다 — 의도적으로 끄지 않는다(P0 가드②).
+    project_access의 `project_id`는 org 내 아무 project 하나에 anchor해도 무방(2026-08-19
+    실측, story #2791 PR 참조) — sender 해석 자체는 project 무관, 그 project를 특정
+    대화방에 결부시키는 것도 아니다(발행 대상 conversation의 project_id는 매 호출마다
+    `_resolve_event_project_id`가 payload의 work_item/goal에서 별도로 뽑는다).
+
+    `type='agent'`로 만들어 기존 서킷브레이커(agent 발신자 전용, story #2630)가 자동발행
+    폭주(전이 루프)도 그대로 방어하게 한다 — 의도적으로 끄지 않는다(P0 가드②). 마커는
+    `members.handle`(구 에이전트 @멘션 핸들, story #2646이 완전히 은퇴시킨 죽은 필드) 재사용
+    — `runtime_type`(9종 enum, agent_runtime capability registry 실 조회 키)과 충돌 회피.
     이름 "시스템 발행"은 채팅 카드의 sender 표시가 사람 눈에 시스템 발행임을 신규 FE 없이
     이름만으로 읽히게 하기 위함(P0 가드④) — 팀멤버 목록·리더보드·워크포스 표면에는 이 이름
     그대로의 agent 1명으로 노출된다(관측 기록, P0 스코프 밖 — 페드루 2026-08-19 확認).
     """
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+    from app.models.member import Member
     from app.models.project import Project
-    from app.models.team import TeamMember
+    from app.models.project_access import ProjectAccess
 
     existing = (await db.execute(
-        select(TeamMember).where(
-            TeamMember.org_id == org_id, TeamMember.runtime_type == "system-publisher",
+        select(Member).where(
+            Member.org_id == org_id, Member.handle == "system-publisher", Member.type == "agent",
         ).limit(1)
     )).scalars().first()
     if existing is not None:
@@ -1267,24 +1278,31 @@ async def _get_or_create_system_publisher(db: AsyncSession, org_id: uuid.UUID) -
     if anchor_project_id is None:
         raise ValueError(f"org {org_id}에 anchor할 project가 없음 — 시스템 발신자 프로비저닝 불가")
 
-    ins = pg_insert(TeamMember).values(
-        id=uuid.uuid4(), org_id=org_id, project_id=anchor_project_id,
-        type="agent", name="시스템 발행", role="member",
-        runtime_type="system-publisher", is_active=True,
+    ins = pg_insert(Member).values(
+        id=uuid.uuid4(), org_id=org_id, type="agent", name="시스템 발행",
+        handle="system-publisher", is_active=True,
     ).on_conflict_do_nothing(
         index_elements=["org_id"],
-        index_where=(TeamMember.runtime_type == "system-publisher"),
-    ).returning(TeamMember.id)
+        index_where=(and_(Member.handle == "system-publisher", Member.type == "agent")),
+    ).returning(Member.id)
     member_id = (await db.execute(ins)).scalar_one_or_none()
     if member_id is None:
         # 동시요청 레이스로 다른 트랜잭션이 먼저 생성 — 재조회(asset_registry.py와 동일 TOCTOU 대응).
         return (await db.execute(
-            select(TeamMember).where(
-                TeamMember.org_id == org_id, TeamMember.runtime_type == "system-publisher",
+            select(Member).where(
+                Member.org_id == org_id, Member.handle == "system-publisher", Member.type == "agent",
             )
         )).scalars().one()
+
+    # team_members 뷰(3번째 UNION 브랜치)에 투영되려면 project_access grant가 최소 1건 필요.
+    # 별도 on_conflict 불요 — 위 members insert가 org당 1행을 이미 원자적으로 게이팅해서,
+    # 이 라인엔 그 레이스를 이긴 트랜잭션 단 하나만 도달한다(재조회 분기는 여기 안 옴).
+    db.add(ProjectAccess(
+        id=uuid.uuid4(), project_id=anchor_project_id, org_member_id=None,
+        member_id=member_id, permission="granted", role="member",
+    ))
     await db.flush()
-    return (await db.execute(select(TeamMember).where(TeamMember.id == member_id))).scalars().one()
+    return (await db.execute(select(Member).where(Member.id == member_id))).scalars().one()
 
 
 async def publish_preset_event(
