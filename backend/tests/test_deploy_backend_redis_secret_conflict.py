@@ -62,7 +62,9 @@ _DECLARED_SUBSTITUTIONS = {
 # 아니라 이 스텝들로 좁힌다 — 넓히면 순수 YAML 주석(예: 다른 스텝을 설명하는 프로즈 안의
 # `${ENV}` 언급)에 오탐이 나서 안전한 주석을 억지로 고치게 만든다. bash entrypoint 스텝이
 # 새로 생기면 이 목록에 추가할 것(오르테가 지시 — deploy-realtime도 같은 함정 자리라 포함).
-_BASH_ENTRYPOINT_STEP_IDS = ("deploy-backend", "deploy-realtime")
+# story #2771 후속(2026-08-19) — deploy-office-converter도 실 substitution(${_DEPLOY_ENV} 등)을
+# 쓰는 bash entrypoint라 포함.
+_BASH_ENTRYPOINT_STEP_IDS = ("deploy-backend", "deploy-realtime", "deploy-office-converter")
 
 
 def _extract_step_script(step_id: str) -> str:
