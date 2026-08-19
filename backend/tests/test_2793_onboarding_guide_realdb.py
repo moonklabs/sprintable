@@ -93,3 +93,50 @@ async def test_onboarding_guide_excludes_disabled_definitions():
             ))
             await s.commit()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_onboarding_guide_isolates_malformed_stage_metadata_instead_of_500ing():
+    """⭐카디르군 QA 실재현(2026-08-19) — 정의 1건의 stage_metadata가 malformed(값이 dict가
+    아님)여도 그 org 온보딩 가이드 전체가 안 죽는다. 쓰기 시점 가드(validate_stage_metadata)
+    를 우회해 DB에 직접 malformed 값을 심어(레거시/경합 시뮬레이션) 렌더러의 방어 격리
+    자체를 검증 — 다른 정의(프리셋 등)는 정상 렌더되고, 오염된 정의만 조용히 빠진다."""
+    from app.routers.events import get_onboarding_guide
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        org_id = uuid.uuid4()
+        async with Session() as s:
+            await s.execute(text(
+                "INSERT INTO organizations (id,name,slug,plan) VALUES (:id,'MalformedOrg',:slug,'free')"
+            ), {"id": str(org_id), "slug": f"malorg-{org_id.hex[:8]}"})
+            await s.commit()
+
+            # validate_stage_metadata를 거치지 않고(raw UPDATE) preset.workflow.solo의
+            # stage_metadata를 malformed하게 오염 — "쓰기 시점 가드를 어떻게든 우회한
+            # 레거시 데이터"를 시뮬레이션(렌더러는 이런 데이터가 와도 안전해야 함).
+            await s.execute(text(
+                "UPDATE event_definitions SET stage_metadata = "
+                "'{\"assign_step_1\": \"이건 dict가 아니라 string\"}'::jsonb "
+                "WHERE key = 'preset.workflow.solo'"
+            ))
+            await s.commit()
+
+            # 500(예외)이 아니라 정상 응답이어야 한다 — 이게 이 테스트의 핵심 단언.
+            result = await get_onboarding_guide(db=s, org_id=org_id)
+
+        assert "Solo" not in result.guide or "assign_step_1" not in result.guide  # 오염된 정의는 빠짐
+        # 나머지(프리셋·다른 컴파일 정의)는 정상 생존 — 폭발 반경이 1건으로 격리됐는지 확인.
+        assert "게이트 판정" in result.guide
+        assert "3단계 스크럼" in result.guide
+        assert "PO" in result.guide
+    finally:
+        async with Session() as s:
+            await s.execute(text(
+                "UPDATE event_definitions SET stage_metadata = "
+                "'{\"assign_step_1\": {\"role\": \"Worker\", \"action\": \"담당자 배정\"}}'::jsonb "
+                "WHERE key = 'preset.workflow.solo'"
+            ))
+            await s.commit()
+        await engine.dispose()

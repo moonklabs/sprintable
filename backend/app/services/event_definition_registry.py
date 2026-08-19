@@ -296,6 +296,21 @@ def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
             f"stage_metadata에 payload_schema.properties.stage.enum에 없는 키가 있습니다: {unknown} "
             f"(허용된 stage: {sorted(valid)})"
         )
+    # ⛔실버그(카디르군 QA, 2026-08-19 — story #2793 재현) — 키⊆enum만 보고 **값의 모양**은
+    # 안 봤다. malformed 값(dict가 아니거나 role/action이 없거나 문자열이 아님)이 등록을
+    # 통과하면 소비처(온보딩 가이드 렌더러)가 `meta.get('role')`에서 죽는데, 그 렌더러가
+    # org 전 정의를 한 루프로 돌아 **커스텀 1건 오염이 그 org 가이드 전체를 죽이는** 폭발
+    # 반경이었다 — 쓰기 시점(여기)에서 값 모양 자체를 강제해 근본 차단.
+    for slug, meta in stage_metadata.items():
+        if not isinstance(meta, dict):
+            raise InvalidStageMetadataError(
+                f"stage_metadata[{slug!r}]는 object({{role, action}})여야 합니다 — {type(meta).__name__} 아님."
+            )
+        for field in ("role", "action"):
+            if not isinstance(meta.get(field), str) or not meta[field]:
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].{field}는 비어있지 않은 문자열이어야 합니다."
+                )
 
 
 def validate_event_payload(payload_schema: dict, payload: dict) -> None:

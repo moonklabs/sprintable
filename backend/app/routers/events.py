@@ -1451,32 +1451,58 @@ def _classify_event_kind(payload_schema: dict) -> str:
     return "signal"
 
 
+def _render_one_definition(r: "EventDefinition") -> list[str]:
+    """정의 1건을 마크다운 라인 목록으로 — 실패하면(malformed 데이터) 그대로 raise한다.
+    격리는 호출자(`_render_onboarding_guide`)의 몫(다른 부류의 격리와 동일 조직 원칙,
+    story_status_events.py류 — 함수 자체는 삼키지 않고 호출자가 포위한다)."""
+    lines = [f"## {r.name} (`{r.key}`)"]
+    if r.description:
+        lines.append(r.description)
+    kind = _classify_event_kind(r.payload_schema)
+    if kind == "cycle" and r.stage_metadata:
+        lines.append("")
+        lines.append("이 이벤트는 다음 상황에서 발행하세요:")
+        stage_order = ((r.payload_schema.get("properties") or {}).get("stage") or {}).get("enum") or []
+        for slug in stage_order:
+            meta = r.stage_metadata.get(slug)
+            if not meta:
+                continue
+            # ⛔실버그(카디르군 QA, 2026-08-19) — validate_stage_metadata(쓰기 시점)가 값
+            # 모양을 강제하지만, 이 렌더러는 그 가드를 못 거친(레거시·경합 등) 데이터가
+            # 와도 안전해야 한다 — dict가 아니거나 role/action이 없으면 명시 raise해
+            # 아래 per-row try/except가 "이 정의 1건만" 건너뛰게 한다.
+            if not isinstance(meta, dict) or not isinstance(meta.get("role"), str) or not isinstance(meta.get("action"), str):
+                raise ValueError(f"{r.key}: stage_metadata[{slug!r}] malformed({meta!r})")
+            lines.append(f"- 단계 `{slug}`: **{meta['role']}** 담당 — {meta['action']}")
+    else:
+        required = (r.payload_schema or {}).get("required") or []
+        if required:
+            lines.append("")
+            lines.append(f"발행 시 필수 항목: {', '.join(f'`{f}`' for f in required)}")
+    return lines
+
+
 def _render_onboarding_guide(rows: list["EventDefinition"]) -> str:
     """enabled 정의만으로 마크다운 가이드 조립 — disabled를 넣으면 "발행 가능"이라는
     잘못된 다음-행동 지시가 된다(list_event_definitions의 admin 감사 목적과 다른 축이라
-    disabled 포함 여부도 다르다, 의도적 비대칭)."""
+    disabled 포함 여부도 다르다, 의도적 비대칭).
+
+    ⛔실버그 fix(카디르군 QA, 2026-08-19) — 이전엔 이 루프 자체에서 렌더링해 정의 1건의
+    malformed stage_metadata가 org 전체 가이드를 500으로 죽였다(폭발 반경 = 그 org가
+    보는 모든 정의, preset 포함). 정의 1건 렌더를 `_render_one_definition`으로 분리해
+    per-row try/except로 격리 — 문제 있는 정의는 **그 항목만** 조용히 건너뛰고 나머지
+    가이드는 그대로 산다(로그로 관측 가능, exc_info 포함 — 완전 침묵 아님)."""
     lines = [_ONBOARDING_PHILOSOPHY, ""]
     for r in rows:
         if not r.enabled:
             continue
-        lines.append(f"## {r.name} (`{r.key}`)")
-        if r.description:
-            lines.append(r.description)
-        kind = _classify_event_kind(r.payload_schema)
-        if kind == "cycle" and r.stage_metadata:
-            lines.append("")
-            lines.append("이 이벤트는 다음 상황에서 발행하세요:")
-            stage_order = ((r.payload_schema.get("properties") or {}).get("stage") or {}).get("enum") or []
-            for slug in stage_order:
-                meta = r.stage_metadata.get(slug)
-                if not meta:
-                    continue
-                lines.append(f"- 단계 `{slug}`: **{meta.get('role', '')}** 담당 — {meta.get('action', '')}")
-        else:
-            required = (r.payload_schema or {}).get("required") or []
-            if required:
-                lines.append("")
-                lines.append(f"발행 시 필수 항목: {', '.join(f'`{f}`' for f in required)}")
+        try:
+            lines.extend(_render_one_definition(r))
+        except Exception:
+            logger.warning(
+                "onboarding-guide: 정의 렌더 실패, 이 항목만 건너뜀(key=%s)", r.key, exc_info=True,
+            )
+            continue
         lines.append("")
     return "\n".join(lines).strip() + "\n"
 
