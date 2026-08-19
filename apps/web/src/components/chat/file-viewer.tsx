@@ -15,21 +15,24 @@ type AttachmentTarget = Extract<ReadingPanelTarget, { kind: 'attachment' }>;
 // 나머지 office는 여전히 렌더러가 없다(가짜 렌더 금지).
 type Format = 'image' | 'video' | 'audio' | 'text' | 'html' | 'pdf' | 'docx' | 'pptx' | 'office' | 'unknown';
 
-function resolveFormat(contentType: string | null | undefined, label: string): Format {
+// story #2803 QA(까디르군) — 클래스 전체를 table-driven 테스트로 못박기 위해 export.
+export function resolveFormat(contentType: string | null | undefined, label: string): Format {
   const ct = (contentType ?? '').toLowerCase();
   const ext = label.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
+  // 까디르군 QA(#2803) 2라운드 — docx/pptx는 함수 «최상단»에서 확장자 단독으로 확정해야
+  // 한다. wordprocessingml/presentationml보다만 앞서면 여전히 그 위의 image/pdf/html 등
+  // content-type 판정에 먼저 걸려 .pptx+content-type=application/pdf류가 깨진 pdf iframe으로
+  // 오라우팅된다(정직 폴백보다 나쁜 경로). BE office_conversion.is_convertible도 확장자만
+  // 보고 판정하므로 이 두 확장자에선 ext가 최종 진실 — 오명명 파일은 convert 실패→정직
+  // 폴백으로 귀결되니 안전하다.
+  if (ext === 'docx') return 'docx';
+  if (ext === 'pptx') return 'pptx';
   if (ct.startsWith('image/')) return 'image';
   if (ct.startsWith('video/')) return 'video';
   if (ct.startsWith('audio/')) return 'audio';
   if (ct === 'application/pdf' || ext === 'pdf') return 'pdf';
   if (ct === 'text/html' || ext === 'html' || ext === 'htm') return 'html';
   if (ct.startsWith('text/') || ct === 'text/markdown' || ['txt', 'md', 'markdown'].includes(ext)) return 'text';
-  // 까디르군 QA(#2803) — 확장자를 content-type보다 먼저 판정해야 한다. ext/ct 불일치
-  // 입력(예: .pptx인데 ct가 wordprocessingml)이 ct 우선 순서에서는 docx로 잘못 라우팅됐다.
-  // BE office_conversion.is_convertible도 확장자 .pptx만 인정(content-type 무시)하므로 —
-  // 확장자가 결정적일 땐 그걸로 확정, ct는 확장자가 없거나 못 알아볼 때만 폴백으로 쓴다.
-  if (ext === 'docx') return 'docx';
-  if (ext === 'pptx') return 'pptx';
   if (ct.includes('wordprocessingml')) return 'docx';
   if (ct.includes('presentationml')) return 'pptx';
   if (
