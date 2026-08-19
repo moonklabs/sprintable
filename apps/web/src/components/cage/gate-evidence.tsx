@@ -1,9 +1,10 @@
 'use client';
 
-import { Fragment } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { CheckCircle, XCircle, GitPullRequest, Check, Pause, Ban, Loader2, type LucideIcon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
+import { fetchWithAuth } from '@/lib/db/client';
 import type { GateItem } from '@/components/kanban/types';
 
 /**
@@ -94,26 +95,33 @@ export function gateHasEvidence(gate: GateItem): boolean {
   return hasCi || hasTrust || hasSeed || hasReason || hasGithubCheck;
 }
 
-type GithubCheckState = 'in_progress' | 'success' | 'failure';
+type GithubCheckState = 'not_published' | 'in_progress' | 'success' | 'failure';
 
 /**
  * story #2814(2813 BE 조각 착지분) — BE `_github_state_for_gate_status`와 정합(gate_github_check.py):
  * approved/auto_passed→success, rejected/voided→failure, pending/held→in_progress. 그 외 gate
  * status(discussed 등)는 GitHub check 관점에선 미정의라 null.
  *
- * `github_check_run_id`가 null이면 이 게이트가 "아직 발행 안 됨"인지 "이 저장소가 관측 모드"인지
- * 구분할 필드가 아직 없다(관측모드 판별 필드는 story #2814 BE 조각으로 분리, 미착지). 두 경우
- * 모두 null을 리턴해 표시 자체를 접는다 — "강제 중"이라는 잘못된 인상을 주는 쪽보다 안전(AC③ 정신).
- *
  * ⚠️페드루군 AC 노트(PR#3244, 비차단) — 이 값은 gate.status에서 파생한 "게이트가 의도한" check
  * 상태이지, GitHub의 실제 check 상태를 조회한 값이 아니다. publish_gate_check()가 GitHub API
  * 호출에 실패하면 실제 check는 오래된 pending에 머무는데 이 화면은 approved→success로 보일 수
  * 있다 — GitHub 쪽은 fail-closed라 required check 미충족 시 머지가 막히므로 안전 사고는 아니고
- * 표시 정직성 문제만 있다. 실제 원장(gate_github_check_event) 조회로 이 어긋남을 좁히는 건 2단
- * (story #2814 BE 조각) 이후.
+ * 표시 정직성 문제만 있다. 실제 원장(gate_github_check_event) 조회로 좁히는 건 재-pending 사유
+ * 표시(GithubRependingReason)가 맡는다.
+ *
+ * story #2814 2단(§5-④ 그라운딩·BE story #2815/PR#3245) — 관측모드 판별을 1단의 "run_id null이면
+ * 무조건 숨김" 휴리스틱에서 `github_check_enforced`(단건 조회에서만 enrich) 기반으로 승격:
+ *   - enforced===false(관측모드 확定) → run_id 유무·값과 무관하게 항상 숨김(가장 신뢰도 높은 신호).
+ *   - enforced===true인데 run_id가 아직 null → "관측모드"가 아니라 "아직 발행 전"임을 이제는 안다
+ *     — 1단엔 없던 not_published 상태로 승격 표시(숨기지 않음).
+ *   - enforced===undefined/null(list_gates·inbox 등 미enrich 표면) → 1단 휴리스틱 그대로 폴백
+ *     (run_id null=숨김) — 이 필드가 없는 표면에서 오판하지 않기 위한 안전망.
  */
 export function githubCheckState(gate: GateItem): GithubCheckState | null {
-  if (gate.github_check_run_id == null) return null;
+  if (gate.github_check_enforced === false) return null;
+  if (gate.github_check_run_id == null) {
+    return gate.github_check_enforced === true ? 'not_published' : null;
+  }
   switch (gate.status) {
     case 'approved':
     case 'auto_passed':
@@ -166,6 +174,8 @@ function TrustValue({ trust, selfReportOnly }: { trust: number; selfReportOnly: 
 function GithubCheckSignal({ state, sha }: { state: GithubCheckState; sha: string | null }) {
   const t = useTranslations('cage');
   const META: Record<GithubCheckState, { className: string; icon: LucideIcon; labelKey: string; spin?: boolean }> = {
+    // story #2814 2단 — enforced===true인데 아직 발행 전(1단엔 없던 상태, githubCheckState 참조).
+    not_published: { className: 'text-muted-foreground', icon: Pause, labelKey: 'githubCheckNotPublished' },
     in_progress: { className: 'text-muted-foreground', icon: Loader2, labelKey: 'githubCheckPending', spin: true },
     success: { className: 'text-success', icon: CheckCircle, labelKey: 'githubCheckSuccess' },
     failure: { className: 'text-destructive', icon: XCircle, labelKey: 'githubCheckFailure' },
@@ -177,6 +187,62 @@ function GithubCheckSignal({ state, sha }: { state: GithubCheckState; sha: strin
       {t('githubCheckLabel')} {t(labelKey)}
       {sha ? <span className="font-mono text-muted-foreground">{t('githubCheckShaLabel', { sha: sha.slice(0, 7) })}</span> : null}
     </span>
+  );
+}
+
+// story #2814 2단(§5-② 그라운딩) — backend/app/routers/gates.py GateGithubCheckEventResponse와 정합.
+interface GithubCheckLedgerEvent {
+  id: string;
+  repo_full_name: string;
+  pr_number: number;
+  head_sha: string;
+  event_type: 'published' | 're_pending' | 'resolved';
+  check_conclusion: string | null;
+  created_at: string;
+}
+
+/**
+ * 재-pending 사유 상세(story #2814 2단 AC②) — `GET /api/gates/{id}/github-check-events` 지연
+ * 로드(최신순). 최신 이벤트가 `re_pending`이면 "새 커밋이 이전 승인을 무효화했다"는 문장을
+ * 그 이벤트의 head_sha(무효화를 유발한 새 SHA)로 조립한다.
+ *
+ * ⚠️알려진 축소 범위 — "이전에 승인됐던 SHA"까지는 못 보여준다. BE
+ * `reopen_gate_if_new_sha`(gate_github_check.py:256)가 `prior_sha`를 지역변수로만 로깅하고
+ * `GateGithubCheckEvent` 행엔 `head_sha`(새 SHA)만 남긴다 — 원장에 prior_sha 컬럼이 없다.
+ * `gate.approved_head_sha`로 메꾸려 해도 같은 함수가 그 필드를 재-pending 즉시 null로 리셋해
+ * 버려(§2-2) FE 시점엔 이미 사라지고 없다. 이번 이터레이션은 "새 SHA"만으로 표시하고, prior_sha
+ * 컬럼 추가는 후속 BE 조각으로 페드루/디디군에 별도 보고.
+ *
+ * 트리거는 호출부(GateEvidence)가 결정 — ghState==='in_progress'일 때만 마운트한다(success/
+ * failure/not_published/null인 게이트는 재-pending 여지 자체가 없어 호출 불요).
+ *
+ * 실패/빈 응답은 침묵(옵션 정보라 카드 붕괴 X) — 이 신호가 evidence 판정(gateHasEvidence)에
+ * 관여하지 않는 이유이기도 하다(로드 전/실패 시에도 카드가 이미 유효한 GithubCheckSignal로
+ * State B/C에 들어가 있어야 함).
+ */
+function GithubRependingReason({ gateId }: { gateId: string }) {
+  const t = useTranslations('cage');
+  const [latest, setLatest] = useState<GithubCheckLedgerEvent | null | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchWithAuth(`/api/gates/${gateId}/github-check-events`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`status ${res.status}`))))
+      .then((events: GithubCheckLedgerEvent[]) => {
+        if (!cancelled) setLatest(events[0] ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setLatest(null);
+      });
+    return () => { cancelled = true; };
+  }, [gateId]);
+
+  if (!latest || latest.event_type !== 're_pending') return null;
+
+  return (
+    <p className="mt-1 text-[11px] text-muted-foreground">
+      {t('githubCheckRependingReason', { newSha: latest.head_sha.slice(0, 7) })}
+    </p>
   );
 }
 
@@ -204,6 +270,8 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
   const trust = trustScore(gate);
   const ghState = githubCheckState(gate);
   const ghSha = gate.github_check_run_sha ?? null;
+  // story #2814 2단 AC② — 재-pending 이력이 있을 수 있는 상태(in_progress)에서만 원장을 지연 조회.
+  const showRepending = ghState === 'in_progress';
   const selfReportOnly = gate.neutral_facts?.['self_report_only'] === true;
   const reason = gate.decision_basis ?? null; // 실 human reason만(auto_decision_reason echo 폴백 제거 — 배지가 이미 표시)
   // HO-S8 cold-start: 미확정 outcome은 "임시 예측"(keep/kill)으로만 — 판정/% 환원 절대 X.
@@ -264,6 +332,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
             </div>
           </div>
         </div>
+        {showRepending ? <GithubRependingReason gateId={gate.id} /> : null}
         {reason ? (
           <p className="mt-1.5 text-[11.5px] text-muted-foreground">{t('reasonLabel')} · {reason}</p>
         ) : null}
@@ -291,6 +360,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
           ))}
         </div>
       ) : null}
+      {showRepending ? <GithubRependingReason gateId={gate.id} /> : null}
       {reason ? (
         <p className="mt-1.5 text-[11.5px] text-muted-foreground">{t('reasonLabel')} · {reason}</p>
       ) : null}
