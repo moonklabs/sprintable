@@ -28,6 +28,7 @@ from .api_client import _api_key_override, client, reset_project_override, set_p
 from .config import settings
 from .response import ok
 from .schemas import SprintableInput
+from .tools.attachments import MAX_TOTAL_ATTACHMENT_BYTES
 
 # E-MCP S4: 독립 패키지 디탱글 — backend(app/*) import 제거. 규칙은 vendored .toolset 사용
 # (백엔드 app/services/mcp_toolset.py와 동일 규칙 유지·SSOT는 백엔드 매니페스트).
@@ -290,6 +291,16 @@ transport_security = TransportSecuritySettings(
     allowed_hosts=_allowed_hosts,
     allowed_origins=_allowed_origins,
 )
+
+# story #2772(mcp 2.0 이관, PO AC 리뷰 CHANGES) — 2.0.0의 streamable_http_app() 신규 기본
+# max_request_body_size=4MiB가 우리 첨부 계약을 깬다: MAX_TOTAL_ATTACHMENT_BYTES(6MiB
+# decoded)를 base64로 실으면 4/3 팽창 → 정확히 8MiB(6 * 4 // 3), 거기에 JSON 봉투(MCP
+# _meta·tool call 래퍼·다른 필드들) 여유까지 얹어야 1.x 시절과 동일하게 통한다. 16MiB로
+# 명시(계산값의 2배 여유) — __main__.py::_run_http()가 streamable_http_app() 호출 시 이
+# 상수를 그대로 쓴다. 두 상수의 관계는 별도 구조적 assert 테스트(MAX_MCP_REQUEST_BODY_SIZE
+# >= base64 팽창값)로 고정 — 첨부 상한을 나중에 올리면서 이 캡을 안 같이 올리면 그
+# 테스트가 빨강이 되게 한다(PO 지시: "한쪽만 움직이는 걸 구조로 차단").
+MAX_MCP_REQUEST_BODY_SIZE = 16 * 1024 * 1024  # 16MiB
 
 # E-MCP-OPT S1: hosted(http) tools/list 요청별 scope 필터. (1.x 시절 근거였던) FastMCP.__init__ →
 # _setup_handlers()의 "구성 시점 bound method 캡처" 메커니즘은 2.0.0에서 이중 간접화로 바뀌었다
