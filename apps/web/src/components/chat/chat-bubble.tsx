@@ -650,6 +650,7 @@ export function ChatBubble({
                     label={label}
                     Icon={getFileIcon(att.content_type)}
                     contentType={att.content_type}
+                    assetId={att.asset_id}
                     onOpenPanel={
                       onOpenReadingPanel
                         ? (t) => onOpenReadingPanel({ kind: 'attachment', ...t })
