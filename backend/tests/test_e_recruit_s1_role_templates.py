@@ -66,7 +66,7 @@ def test_model_field_shape():
     cols = {c.name for c in RoleTemplate.__table__.columns}
     assert cols == {
         "id", "slug", "name", "category", "description", "role_behaviors",
-        "default_tool_groups", "default_workflow_recipe_slug", "runtime_overrides",
+        "default_tool_groups", "runtime_overrides",
         "is_builtin", "is_published", "tier", "version", "created_at", "updated_at",
         # 카탈로그 트랙 S1(0161, 문서 role-template-crud-api-crux §4).
         "division", "emoji", "skills",
@@ -365,7 +365,6 @@ def _mock_role_template(**overrides):
     rt.description = "English description"
     rt.description_i18n = {"ko": "한글 설명"}
     rt.default_tool_groups = ["stories"]
-    rt.default_workflow_recipe_slug = None
     rt.is_builtin = False
     rt.tier = "free"
     rt.version = 1
