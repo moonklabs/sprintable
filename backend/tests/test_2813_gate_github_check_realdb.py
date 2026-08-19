@@ -776,3 +776,89 @@ async def test_evaluate_merge_gate_no_anchor_when_status_auto_passed_but_decisio
             assert gate.approved_head_sha is None  # ⭐핵심 단언 — 구 fix라면 여기 SHA가 찍혔을 것.
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_evaluate_merge_gate_clears_auto_axis_anchor_when_decision_leaves_auto_merge_realdb():
+    """카디르 R4① — 같은 SHA를 두 번 평가: ①CI pass+강한 trust → AUTO_MERGE, anchor 확定
+    ②(같은 SHA) CI가 나중에 fail로 뒤집힘 → `_decide()`가 하드 BLOCK(trust 무관) → 이전
+    auto-pass anchor는 더 이상 유효하지 않으므로 지워져야 한다."""
+    from app.services.merge_verdict_gate import AUTO_MERGE, BLOCK, evaluate_merge_gate
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_story_with_participation(s)
+
+            with patch(
+                "app.services.gate_service.resolve_disposition",
+                AsyncMock(return_value=("allow_auto", "org_policy")),
+            ), patch(
+                "app.services.merge_verdict_gate.compute_member_trust_scores",
+                AsyncMock(return_value=_STRONG_TRUST),
+            ):
+                d1 = await evaluate_merge_gate(
+                    s, seeded["org_id"], seeded["story_id"],
+                    pr_number=99, repo="acme/repo", ci_result="pass", pr_result="pass",
+                    head_sha="sha-same",
+                )
+                await s.commit()
+                assert d1.decision == AUTO_MERGE, f"1차 전제 실패: {d1.reason}"
+                gate = await _gate_row_by_story(s, seeded["story_id"])
+                assert gate.approved_head_sha == "sha-same"  # anchor 확定 확認.
+
+                # 같은 SHA — CI가 나중에 fail로 뒤집힘(재평가).
+                d2 = await evaluate_merge_gate(
+                    s, seeded["org_id"], seeded["story_id"],
+                    pr_number=99, repo="acme/repo", ci_result="fail", pr_result="pass",
+                    head_sha="sha-same",
+                )
+                await s.commit()
+
+            assert d2.decision == BLOCK, f"2차 전제 실패: {d2.reason}"
+            gate = await _gate_row_by_story(s, seeded["story_id"])
+            assert gate.approved_head_sha is None  # ⭐핵심 단언 — 무효화된 anchor.
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_evaluate_merge_gate_never_clears_human_approved_anchor_realdb():
+    """카디르 R4① 안전경계 — `gate.status=="approved"`(사람 승인, gates.py 축)는
+    evaluate_merge_gate 재평가가 **절대** 못 건드린다. 시스템 재평가가 사람 결재를 역전시키면
+    사고이므로, 클리어 조건은 반드시 `gate.status=="auto_passed"`로만 스코프돼야 한다."""
+    from app.services.gate_service import create_gate
+    from app.services.merge_verdict_gate import BLOCK, MERGE_GATE_TYPE, evaluate_merge_gate
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_story_with_participation(s)
+
+            # 사람이 이미 승인한 상태를 직접 시뮬레이션(gates.py 축과 동형 — status=approved+anchor).
+            gate = await create_gate(
+                s, seeded["org_id"], seeded["story_id"], "story", MERGE_GATE_TYPE,
+                seeded["member_id"], None, project_id=None, neutral_facts={},
+            )
+            gate.status = "approved"
+            gate.approved_head_sha = "sha-human-approved"
+            await s.commit()
+
+            with patch(
+                "app.services.gate_service.resolve_disposition",
+                AsyncMock(return_value=("allow_auto", "org_policy")),
+            ):
+                # CI fail 재평가가 들어와도(시스템 축 관점) — 사람 승인 anchor는 안 건드려야 함.
+                decision = await evaluate_merge_gate(
+                    s, seeded["org_id"], seeded["story_id"],
+                    pr_number=99, repo="acme/repo", ci_result="fail", pr_result="pass",
+                    head_sha="sha-human-approved",
+                )
+                await s.commit()
+
+            gate = await _gate_row_by_story(s, seeded["story_id"])
+            # create_gate가 approved 게이트를 멱등 반환하므로 status는 그대로 approved 유지.
+            assert gate.status == "approved"
+            assert gate.approved_head_sha == "sha-human-approved"  # ⭐핵심 단언 — 안 지워짐.
+    finally:
+        await engine.dispose()

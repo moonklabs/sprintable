@@ -493,8 +493,22 @@ async def evaluate_merge_gate(
     # ASK_HUMAN인 게이트가 실재한다). 그 상태에서 anchor를 찍으면 "사람이 봐야 하는" SHA에도
     # success가 나갈 수 있었다 — AUTO_MERGE로 옮기면 그런 상태는 anchor가 안 생겨
     # publish_gate_check의 불변식이 자연히 success를 막는다(fail-closed 정합).
-    if decision == AUTO_MERGE and head_sha:
-        gate.approved_head_sha = head_sha
+    # story #2813(카디르 R4①) — 같은 SHA 재평가로 decision이 AUTO_MERGE에서 이탈하면(CI
+    # 재실패·trust 하락 등) 이전 auto-pass anchor는 더 이상 유효하지 않다 — 지운다.
+    # ⚠️스코프: `gate.status=="auto_passed"`(정책이 여전히 allow_auto인 "자동 축")일 때만 —
+    # 사람이 승인한 anchor(`gate.status=="approved"`, gates.py `transition_gate_endpoint`가
+    # 세팅)는 이 시스템 재평가가 **절대 못 건드린다**(건드리면 사람 결재를 시스템이 역전시키는
+    # 사고). head_sha를 모르는 호출자의 AUTO_MERGE 재확認은 기존 anchor를 그대로 둔다(새로
+    # 세우지도 지우지도 않음 — "모른다"는 "무효"가 아니다).
+    if decision == AUTO_MERGE:
+        if head_sha:
+            gate.approved_head_sha = head_sha
+    elif gate.status == "auto_passed" and gate.approved_head_sha:
+        logger.info(
+            "gate=%s: 재평가로 decision이 AUTO_MERGE 이탈(%s) — auto-axis anchor(%s) 무효화",
+            gate.id, decision, gate.approved_head_sha,
+        )
+        gate.approved_head_sha = None
 
     await session.flush()
 
