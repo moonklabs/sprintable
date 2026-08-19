@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { CheckCircle, XCircle, GitPullRequest, Check, Pause, Ban, Loader2, type LucideIcon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
+import { fetchWithAuth } from '@/lib/db/client';
 import type { GateItem } from '@/components/kanban/types';
 
 /**
@@ -225,7 +226,7 @@ function GithubRependingReason({ gateId }: { gateId: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/gates/${gateId}/github-check-events`)
+    fetchWithAuth(`/api/gates/${gateId}/github-check-events`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`status ${res.status}`))))
       .then((events: GithubCheckLedgerEvent[]) => {
         if (!cancelled) setLatest(events[0] ?? null);
