@@ -180,11 +180,4 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     assert "TOSS_WEBHOOK_SECRET" in keys
     assert "AGENT_GROUP_DEFAULT_MENTIONS" in keys
     assert "CHAIN_ESCALATION_NOTIFY_ENABLED" not in keys
-    # story #2777(E-ADMIN-REDESIGN·결제 운영, 2026-08-18): admin_operator_audience/
-    # admin_operator_allowlist(어드민 mutation SA ID-token 인가 레인) + deploy_env(prod
-    # 하드가드가 읽는, 이 앱이 여태 전무했던 dev/prod 런타임 신호) 필드 신설로 94→97
-    # (ADMIN_OPERATOR_AUDIENCE·ADMIN_OPERATOR_ALLOWLIST·DEPLOY_ENV 포함). 가드가 신규
-    # 필드를 설계대로 잡은 것.
-    assert "ADMIN_OPERATOR_AUDIENCE" in keys and "ADMIN_OPERATOR_ALLOWLIST" in keys
-    assert "DEPLOY_ENV" in keys
-    assert len(keys) == 97
+    assert len(keys) == 94

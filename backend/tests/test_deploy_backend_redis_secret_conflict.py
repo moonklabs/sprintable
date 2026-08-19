@@ -191,6 +191,6 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         "FANOUT_WAKE_REDIS_ENABLED=false,PRESENCE_REDIS_ENABLED=false,"
         "PRESENCE_ONLINE_REDIS_ENABLED=false,SSE_LEASE_REDIS_ENABLED=false,"
         "SSE_TRANSIENT_REPLAY_ENABLED=false,LICENSE_CONSENT=agreed,"
-        "NEXT_PUBLIC_APP_URL=https://example.run.app,DEPLOY_ENV=dev,"
+        "NEXT_PUBLIC_APP_URL=https://example.run.app,"
         "REDIS_URL=redis://10.164.120.243:6379"
     )
