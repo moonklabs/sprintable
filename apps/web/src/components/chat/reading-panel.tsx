@@ -4,19 +4,23 @@ import { EntityPreviewModal } from '@/components/chat/embed-card';
 import { FileViewer } from '@/components/chat/file-viewer';
 
 /**
- * story #2766(레인 A)·#2780(엔티티 확장) — 채팅을 벗어나지 않는 우측 리딩 패널의 대상 2형태.
- * ①엔티티 읽기 뷰(story/epic/doc/hypothesis/artifact/task/sprint — EntityPreviewModal embedded
- * 재사용, 타입별 분기는 그 내부(EntityDetail)에만 있다) ②채팅 첨부(FileViewer).
+ * story #2766(레인 A)·#2780(엔티티 확장)·#2781(asset 편입) — 채팅을 벗어나지 않는 우측 리딩
+ * 패널의 대상 2형태. ①엔티티 읽기 뷰(story/epic/doc/hypothesis/artifact/task/sprint —
+ * EntityPreviewModal embedded 재사용, 타입별 분기는 그 내부(EntityDetail)에만 있다) ②파일류
+ * (FileViewer) — 채팅 첨부(storedUrl+conversationId/storyId)와 스토리지 asset(assetId) 둘 다
+ * 이 kind 하나로 들어온다. sign 방식만 다르다(파일 signer가 정확히 하나만 요구·file-viewer.tsx
+ * signAttachment 참고) — 소비부(FileViewer 본체)는 동일.
  */
 export type ReadingPanelTarget =
   | { kind: 'entity'; entityType: string; entityId: string; title: string | null; status: string | null; href: string | null }
   | {
       kind: 'attachment';
-      storedUrl: string;
-      conversationId?: string;
-      storyId?: string;
       label: string;
       contentType?: string | null;
+      storedUrl?: string;
+      conversationId?: string;
+      storyId?: string;
+      assetId?: string;
     };
 
 /**

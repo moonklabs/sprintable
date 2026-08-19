@@ -282,7 +282,7 @@ function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenRe
         // 주석 참조) mention_parser가 애초에 entity_references에 안 쓴다 — stored 참조와
         // 대조하면 asset 임베드가 전부 유령으로 오판된다. 유령 판정 자체를 안 태운다.
         if (m[1]!.toLowerCase() === 'asset') {
-          return <AssetEmbedCard entityId={m[2]!} label={String(children)} ownMessage={isMine} />;
+          return <AssetEmbedCard entityId={m[2]!} label={String(children)} ownMessage={isMine} onOpenReadingPanel={onOpenReadingPanel} />;
         }
         const ghost = isGhostReference(references, m[1]!, m[2]!);
         const referenceMeta = ghost ? null : findReferenceMeta(references, m[1]!, m[2]!);

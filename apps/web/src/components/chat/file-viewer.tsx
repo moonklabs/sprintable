@@ -56,11 +56,20 @@ type SignState =
   | { kind: 'error'; status: number; message: string }
   | { kind: 'ready'; url: string };
 
+// story #2781 — /api/attachments/sign은 BE 계약상 정확히 하나의 리소스 식별자(conversation_id|
+// story_id|asset_id)만 받는다(route.ts 실측). 채팅 첨부는 storedUrl+conversationId/storyId,
+// 스토리지 asset은 assetId 하나로 충분(path 불요 — BE가 asset registry에서 {container,
+// object_path}를 권위 derive한다).
 async function signAttachment(target: AttachmentTarget, disposition: 'inline' | 'attachment'): Promise<SignState> {
   try {
-    const params = new URLSearchParams({ path: target.storedUrl, disposition });
-    if (target.conversationId) params.set('conversation_id', target.conversationId);
-    else if (target.storyId) params.set('story_id', target.storyId);
+    const params = new URLSearchParams({ disposition });
+    if (target.assetId) {
+      params.set('asset_id', target.assetId);
+    } else if (target.storedUrl) {
+      params.set('path', target.storedUrl);
+      if (target.conversationId) params.set('conversation_id', target.conversationId);
+      else if (target.storyId) params.set('story_id', target.storyId);
+    }
     const res = await fetchWithAuth(`/api/attachments/sign?${params.toString()}`);
     if (res.status === 403) return { kind: 'denied' };
     const json = (await res.json().catch(() => null)) as { data?: { url?: string }; error?: { message?: string } } | null;
