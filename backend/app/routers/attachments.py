@@ -227,7 +227,10 @@ async def convert_attachment(
     if asset.project_id is not None and not await has_project_access(
         db, uuid.UUID(auth.user_id), asset.project_id, org_id
     ):
-        raise HTTPException(status_code=403, detail="No access to this project")
+        # story #2342(존재 비노출) — has_project_access 거부는 항상 404(CI lint_project_access_403.py
+        # 가 403을 신규 위반으로 잡는다). authorize_attachment의 asset_id 분기(위)는 이 파일이
+        # 통째로 grandfather 베이스라인에 있어 403이지만, 이건 신규 코드라 정공법(404)으로 낸다.
+        raise HTTPException(status_code=404, detail="Asset not found")
 
     if not office_conversion.is_convertible(asset.name, asset.content_type):
         raise HTTPException(status_code=422, detail="Asset is not a convertible office document")
