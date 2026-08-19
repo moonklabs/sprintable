@@ -103,7 +103,7 @@ describe('FileViewer docx (story #2788)', () => {
   });
 
   it('fetch가 응답하지 않고 멈춰도(hang) 상한 타이머로 정직 폴백에 도달한다 — 무한 로딩 금지(story #2788 QA 지적)', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));
 
@@ -124,26 +124,33 @@ describe('FileViewer docx (story #2788)', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     let resolveRender: () => void = () => {};
     const pendingRender = new Promise<void>((resolve) => { resolveRender = resolve; });
+    let markStarted: () => void = () => {};
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
     const renderAsyncSpy = vi.fn(async (_data: unknown, el: HTMLElement) => {
       // renderAsync가 실제로 시작돼 containerRef를 이미 붙잡았음을 표시 — Kadir 지적의
       // 전제(fetch 대기 중이 아니라 렌더 진행 중에 timeout이 발화)를 재현하는 지점.
       el.setAttribute('data-render-started', 'true');
+      markStarted();
       await pendingRender;
       el.textContent = 'PHANTOM_LATE_RENDER';
     });
     vi.resetModules();
     vi.doMock('docx-preview', () => ({ renderAsync: renderAsyncSpy }));
+    // 모듈 로딩 자체(vite 변환·동적 import 해석)는 실 타이머에 얹힌 내부 스케줄링을 쓸 수
+    // 있어 fake timer 아래서 멈춘다 — 컴포넌트 안의 동일 import('docx-preview') 호출이
+    // 캐시에서 즉시 resolve하도록, fake timer를 켜기 전에 실 타이머로 한 번 "예열"해 둔다.
+    await import('docx-preview');
     vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array(REAL_DOCX_BYTES), { status: 200 })));
 
-    // 이 시나리오는 20초 상한 타이머 자체가 fake여야 하므로(마운트 시점에 컴포넌트가
-    // setTimeout(20000)을 예약한다) mount 전에 fake timer를 켠다. fetch~dynamic
-    // import~renderAsync 진입은 순수 microtask 체인이라 실제 시간 없이도 진행되므로,
-    // 0ms 어드밴스를 반복해 마이크로태스크 큐를 배출하며 renderAsync 호출을 기다린다.
-    vi.useFakeTimers();
+    // 20초 상한 타이머 자체가 fake여야 하므로(마운트 시점에 컴포넌트가 setTimeout(20000)을
+    // 예약한다) mount 전에 fake timer를 켠다. 예열 덕에 fetch~dynamic import~renderAsync
+    // 진입까지는 순수 microtask만 남으므로 `started` 신호를 그냥 기다리면 된다. 단 React의
+    // 첫 effect flush 자체가 최소 한 틱 필요해(다른 테스트들과 동형) 곧바로 started를
+    // 기다리면 그 첫 틱이 안 돌아 영영 대기한다 — 한 틱 먼저 흘려보낸다.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     mount(<FileViewer target={target} onClose={() => {}} />);
-    for (let i = 0; i < 50 && renderAsyncSpy.mock.calls.length === 0; i++) {
-      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-    }
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await started; });
     expect(renderAsyncSpy).toHaveBeenCalled();
 
     // renderAsync가 pendingRender를 기다리며 멈춰 있는 도중 20초 상한 타이머가 발화 —
