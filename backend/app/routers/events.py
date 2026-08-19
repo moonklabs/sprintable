@@ -1249,8 +1249,14 @@ async def _get_or_create_system_publisher(db: AsyncSession, org_id: uuid.UUID) -
 
     `type='agent'`로 만들어 기존 서킷브레이커(agent 발신자 전용, story #2630)가 자동발행
     폭주(전이 루프)도 그대로 방어하게 한다 — 의도적으로 끄지 않는다(P0 가드②). 마커는
-    `members.handle`(구 에이전트 @멘션 핸들, story #2646이 완전히 은퇴시킨 죽은 필드) 재사용
-    — `runtime_type`(9종 enum, agent_runtime capability registry 실 조회 키)과 충돌 회피.
+    `members.runtime_type`(9종 enum이지만 `get_runtime_capability`가 미등록 문자열을
+    UNSUPPORTED_CAPABILITY로 안전 처리 — app/services/agent_runtime.py 확인) 재사용 —
+    `team_members` 뷰가 이 컬럼을 그대로 투영해 `send_message()` 등 뷰 기반 호출부가 값을
+    직접 읽을 수 있다(초판은 `handle`을 썼으나 뷰가 그 컬럼을 투영 안 해 재QA 중 정정,
+    0258 참조). 이 마커가 실제로 쓰이는 자리 — `send_message()`가 발신자 `runtime_type`이
+    이 값이면 presence/working 방출을 스킵한다(아래 가드③ 참조: system 발신자는 애초에
+    "지금 활동 중"이라는 presence 개념이 성립하지 않는 존재라 org 전체에 그 신호를 쏘는
+    것 자체가 의미론적으로 틀렸다는 판단, 페드루 2026-08-19).
     이름 "시스템 발행"은 채팅 카드의 sender 표시가 사람 눈에 시스템 발행임을 신규 FE 없이
     이름만으로 읽히게 하기 위함(P0 가드④) — 팀멤버 목록·리더보드·워크포스 표면에는 이 이름
     그대로의 agent 1명으로 노출된다(관측 기록, P0 스코프 밖 — 페드루 2026-08-19 확認).
@@ -1263,7 +1269,7 @@ async def _get_or_create_system_publisher(db: AsyncSession, org_id: uuid.UUID) -
 
     existing = (await db.execute(
         select(Member).where(
-            Member.org_id == org_id, Member.handle == "system-publisher", Member.type == "agent",
+            Member.org_id == org_id, Member.runtime_type == "system-publisher", Member.type == "agent",
         ).limit(1)
     )).scalars().first()
     if existing is not None:
@@ -1280,17 +1286,17 @@ async def _get_or_create_system_publisher(db: AsyncSession, org_id: uuid.UUID) -
 
     ins = pg_insert(Member).values(
         id=uuid.uuid4(), org_id=org_id, type="agent", name="시스템 발행",
-        handle="system-publisher", is_active=True,
+        runtime_type="system-publisher", is_active=True,
     ).on_conflict_do_nothing(
         index_elements=["org_id"],
-        index_where=(and_(Member.handle == "system-publisher", Member.type == "agent")),
+        index_where=(and_(Member.runtime_type == "system-publisher", Member.type == "agent")),
     ).returning(Member.id)
     member_id = (await db.execute(ins)).scalar_one_or_none()
     if member_id is None:
         # 동시요청 레이스로 다른 트랜잭션이 먼저 생성 — 재조회(asset_registry.py와 동일 TOCTOU 대응).
         return (await db.execute(
             select(Member).where(
-                Member.org_id == org_id, Member.handle == "system-publisher", Member.type == "agent",
+                Member.org_id == org_id, Member.runtime_type == "system-publisher", Member.type == "agent",
             )
         )).scalars().one()
 

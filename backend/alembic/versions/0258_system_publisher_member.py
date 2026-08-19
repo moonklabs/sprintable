@@ -11,9 +11,17 @@ views" — CI Alembic 잡이 실측으로 잡아냄). 실제 anchor 테이블 `m
 전량을 못 덮는다) — `app/routers/events.py::_get_or_create_system_publisher`가 최초 자동발행
 시점에 lazy get-or-create로 프로비저닝한다(`members` 행 + `project_access` grant 1건).
 
-마커는 `members.handle`(구 에이전트 @멘션 핸들 — story #2646이 완전히 은퇴시킨 죽은 필드,
-"이제 아무 코드도 안 쓴다") 재사용 — `runtime_type`(9종 enum, agent_runtime capability
-registry의 실 조회 키)을 마커로 쓰면 그 조회 로직과 충돌할 위험이 있어 피한다.
+마커는 `members.runtime_type`(에이전트 런타임 종류, 9종 enum이지만 `get_runtime_capability`가
+None/빈문자열/미등록 문자열 전부 UNSUPPORTED_CAPABILITY로 안전 처리 — app/services/
+agent_runtime.py 확인) 재사용 — `"system-publisher"`는 그 9종 어디에도 안 걸려 항상
+UNSUPPORTED로 떨어질 뿐 예외를 안 낸다. `team_members` 뷰가 이 컬럼을 그대로 투영해
+`send_message()`(conversations.py) 등 뷰 기반 호출부가 이 값을 직접 읽을 수 있다는 것이
+핵심 — 2026-08-19 재QA(카디르)에서 이 마커가 실제로 필요해짐(system 발신자에게 org-wide
+presence 방출을 스킵시키는 조건 분기의 판별 키).
+
+⚠️초판(2026-08-19 최초 커밋)은 `members.handle`(구 에이전트 @멘션 핸들, 죽은 필드)을 마커로
+썼으나 — `team_members` 뷰가 `handle`을 투영하지 않아 `send_message()` 등 뷰 기반 호출부에서
+읽을 수 없다는 것이 재QA 중 드러나 `runtime_type`으로 정정.
 
 Revision ID: 0258
 Revises: 0257
@@ -36,7 +44,7 @@ def upgrade() -> None:
         "members",
         ["org_id"],
         unique=True,
-        postgresql_where=sa.text("handle = 'system-publisher' AND type = 'agent'"),
+        postgresql_where=sa.text("runtime_type = 'system-publisher' AND type = 'agent'"),
     )
 
 

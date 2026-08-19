@@ -2214,11 +2214,21 @@ async def send_message(
     # 1aeecdde P2: sender 가 이 conversation 에 메시지를 보냄 = 답장 생성 종료 → working clear.
     # fork 분기(아래) 전 **원본 conversation_id** 기준 — working 은 그 conversation 에 set 됐다.
     # 휴먼 sender 면 set 된 적 없어 no-op(무해). agent reply 면 즉시 "...typing" 해제.
-    await chat_presence.clear_working(str(conversation_id), str(sender.id))
-    # R2(da9d1781): working clear → conversation.working + presence SSE 발행(폴링 대체·best-effort).
-    from app.services.presence_events import emit_conversation_working, emit_presence
-    await emit_conversation_working(org_id, conversation_id)
-    await emit_presence(org_id)
+    #
+    # story #2791(P0) 정정(2026-08-19, 페드루 판정) — system publisher(서버 자동발행 전용
+    # 합성 발신자, runtime_type='system-publisher')는 이 블록을 건너뛴다. 우회가 아니라
+    # 의미 정정: presence·working은 "이 구성원이 지금 활동 중"이라는 신호인데, system
+    # 발신자는 애초에 presence 개념이 성립하지 않는 존재라 그걸 org 전체에 쏘는 것 자체가
+    # 원래 틀렸다. 사람이 실제로 타이핑할 때만 타던 이 경로의 암묵 전제가, 도메인 전이마다
+    # 대량으로 트리거되는 자동발행에서 처음 드러났다(재QA 중 story #2791의
+    # test_e_ui_daegbyeon_9ef0f914_sse_bridge_realdb.py cross-project 하드게이트가 이
+    # org-wide presence 방출과 우연히 충돌해 발각).
+    if getattr(sender, "runtime_type", None) != "system-publisher":
+        await chat_presence.clear_working(str(conversation_id), str(sender.id))
+        # R2(da9d1781): working clear → conversation.working + presence SSE 발행(폴링 대체·best-effort).
+        from app.services.presence_events import emit_conversation_working, emit_presence
+        await emit_conversation_working(org_id, conversation_id)
+        await emit_presence(org_id)
 
     # cross-org 차단: mentioned_ids를 현재 org 소속 member로 일괄 필터링 (QA B1).
     # E-MEMBER-SSOT Phase 0: 저장·DM포크·group 멘션 발송 모든 경로에 org 필터를 한 번 적용.
