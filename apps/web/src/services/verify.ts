@@ -16,6 +16,11 @@ export interface EvidenceItem {
   org_id: string;
   work_item_id: string;
   work_item_type: 'story' | 'task';
+  /** story #2722 — 아티팩트를 근거로 삼은 evidence만 채워짐. artifact_version_id가 null이면
+   * 나머지 둘도 null(버전 미상 — 구 데이터 또는 아티팩트 근거 아님). */
+  artifact_version_id: string | null;
+  artifact_id: string | null;
+  artifact_version_number: number | null;
 }
 
 /**

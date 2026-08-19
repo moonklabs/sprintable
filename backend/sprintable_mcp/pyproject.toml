@@ -9,8 +9,13 @@ name = "sprintable"
 # 0.1.2 (2026-08-01, story #2382 · P0 RED): mcp 2.0.0이 07-28 PyPI에 올라오며 FastMCP→MCPServer
 # 개명·mcp.server.fastmcp→mcp.server.mcpserver 모듈 경로 변경 — 상한 없던 "mcp>=1.8.0"이 그 순간부터
 # `uvx sprintable`을 100% 깨뜨렸다(신규 설치자 전원, 나흘간 미발견). PO 판정(RED 상황 — 빠른 복구가
-# 지배): 2.0 이관은 별건으로 미루고 지금은 상한만 넣어 즉시 복구한다.
-version = "0.1.2"
+# 지배): 2.0 이관은 별건으로 미루고 그때는 상한만 넣어 즉시 복구했다.
+# 0.2.0 (2026-08-19, story #2772): 그 별건 — mcp 2.0.0 전면 이관 본편. 프로토콜 스펙 2026-07-28
+# 리비전(핸드셰이크 폐지·요청별 버전선언) 구현체로 SDK 갈아탐 — 1.x는 2025-11-25에 구조적으로
+# 영구 고정이라 이 캡을 벗는 유일한 길. private 내부 결합 3곳(fn_metadata.arg_model 조작·
+# _tool_manager 재조회·list_tools 구성시점 바인딩) 전부 2.0.0 실 소스 대조로 등가 확認(스파이크,
+# 순수 rename+import경로 포팅 — 재설계 아님).
+version = "0.2.0"
 description = "Sprintable MCP server — BYO agent toolset over the Sprintable API (stdio). No repo clone required."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,11 +23,10 @@ license = { text = "Proprietary" }
 authors = [{ name = "Sprintable" }]
 keywords = ["mcp", "sprintable", "agent", "model-context-protocol"]
 dependencies = [
-    # E-MCP-HTTP S1: streamable-http floor(mcp 1.8+·run_streamable_http_async/transport='streamable-http')
-    # — fresh 빌드가 구버전 받아 http 미지원되는 footgun 방지(S2 Cloud Run 빌드 보증). 설치본 1.27.1 검증완.
-    # story #2382: 상한 <2.0.0 — mcp 2.0.0이 FastMCP→MCPServer로 개명해 server.py의
-    # `from mcp.server.fastmcp import FastMCP`를 ModuleNotFoundError로 깨뜨린다. 2.0 이관은 별건.
-    "mcp>=1.8.0,<2.0.0",
+    # story #2772(2026-08-19): mcp 2.0.0 이관 완료 — 하한을 그 자체로 인상(1.x는 이제 보안 fix만 받는
+    # 유지보수 라인). 상한 <3.0.0은 #2382 재발 방지(다음 메이저가 또 우리도 모르게 uvx를 깨지 않도록
+    # 항상 명시 상한 유지 — "상한 없음"이 #2382의 근본원인이었다).
+    "mcp>=2.0.0,<3.0.0",
     "httpx>=0.27",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",

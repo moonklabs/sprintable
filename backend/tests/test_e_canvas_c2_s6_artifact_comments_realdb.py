@@ -194,13 +194,16 @@ async def test_add_comment_coordinate_anchor():
         try:
             resp = await client.post(
                 f"/api/v2/visual-artifacts/{seeded['artifact_id']}/comments",
-                json={"content": "여기 여백 좁아요", "anchor_x": 120.5, "anchor_y": 340.2},
+                # story #154a26be — 좌표 앵커는 %(0~100) 규약(ratio·픽셀 아님). 이 값들이
+                # 원래 120.5/340.2(범위 밖)였던 것 자체가 그 스토리가 지적한 문제의 실물
+                # 증거였다 — 서버가 안 막아 이 테스트조차 잘못된 스케일로 통과하고 있었음.
+                json={"content": "여기 여백 좁아요", "anchor_x": 62.5, "anchor_y": 84.2},
             )
             assert resp.status_code == 201, resp.text
             body = resp.json()["data"]
             assert body["node_id"] is None
-            assert body["anchor_x"] == 120.5
-            assert body["anchor_y"] == 340.2
+            assert body["anchor_x"] == 62.5
+            assert body["anchor_y"] == 84.2
         finally:
             await client.aclose()
     finally:

@@ -191,9 +191,22 @@ async def test_list_entity_backlinks_rejects_unsupported_target_type():
 
 @pytest.mark.anyio
 async def test_backlinks_allowlist_contains_exactly_doc_and_story():
-    """이번 판 허용목록은 정확히 {doc, story}뿐 — 다음 판(epic 등)이 늘리기 전까지 고정."""
+    """story #2721(2026-08-17)이 artifact를 추가 — 허용목록은 정확히 {doc, story, artifact}뿐
+    (다음 판이 늘리기 전까지 고정, 함수명은 이력 보존을 위해 유지)."""
     from app.services.backlinks import BACKLINKS_ALLOWED_TARGET_TYPES
-    assert BACKLINKS_ALLOWED_TARGET_TYPES == frozenset({"doc", "story"})
+    assert BACKLINKS_ALLOWED_TARGET_TYPES == frozenset({"doc", "story", "artifact"})
+
+
+def test_zero_ref_models_key_set_matches_allowlist():
+    """story #2721 — backlinks.py 자기 주석("_ZERO_REF_MODELS의 키를 늘릴 땐 반드시
+    BACKLINKS_ALLOWED_TARGET_TYPES도 같이 늘어야 한다")이 지금까지 코드로 강제된 적이 없었다
+    (grep 확認 — 이 테스트가 최초). count_zero_referenced_entities()가 `_ZERO_REF_MODELS
+    [target_type]`을 BACKLINKS_ALLOWED_TARGET_TYPES 전체에 대해 순회하므로, 두 집합이 어긋나면
+    한쪽만 늘어도 조용히 넘어가는 게 아니라 **KeyError로 즉시 죽는다**(런타임 크래시 —
+    다음 사람이 한쪽만 고치면 이 함수가 다음 cron 실행에서 바로 터진다) — 그 자리를 이 테스트가
+    push 前에 잡는다."""
+    from app.services.backlinks import _ZERO_REF_MODELS, BACKLINKS_ALLOWED_TARGET_TYPES
+    assert set(_ZERO_REF_MODELS) == BACKLINKS_ALLOWED_TARGET_TYPES
 
 
 # ─── ②story TARGET 게이트 — AC2 money test(권한 대조: 있음 vs 없음) ────────────

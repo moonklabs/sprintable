@@ -40,6 +40,10 @@ async def test_ack_issues_delivered_update_on_events():
     cursor = SimpleNamespace(acked_seq=0, updated_at=None, agent_id=agent_id)
     sel_result = MagicMock()
     sel_result.scalar_one_or_none.return_value = cursor
+    # story #2467: ack 핸들러의 verify-seam 조회(`.first()`)도 이 mock을 공유한다 — 이
+    # 테스트엔 connection_test 이벤트가 없으므로 명시 None(그래야 push_verification_signal이
+    # real DB(async_session_factory)를 안 탄다).
+    sel_result.first.return_value = None
 
     executed: list = []
 

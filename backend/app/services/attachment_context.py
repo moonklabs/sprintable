@@ -17,13 +17,13 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 
+from app.services.asset_registry import canonical_object_path as _canonical_object_path
 from app.services.asset_registry import path_in_source_scope
 from app.services.storage import get_storage_provider
 
 logger = logging.getLogger(__name__)
 
 _BUCKET = os.environ.get("GCS_MEMO_ATTACHMENTS_BUCKET", "sprintable-memo-attachments")
-_PUBLIC_PREFIX = f"https://storage.googleapis.com/{_BUCKET}/"
 
 _PER_ATTACHMENT_CAP = 8000   # §7-3 첨부당 자수 cap
 _TOTAL_CAP = 24000           # §7-3 총합 cap
@@ -37,19 +37,8 @@ _DOC_EXTS = frozenset({"pdf", "docx", "txt", "csv", "md"})
 _IMAGE_EXTS = frozenset({"jpg", "jpeg", "png", "gif", "webp"})
 _HEADER = "\n\n--- 첨부 내용 ---\n"
 
-
-def _canonical_object_path(stored_url: str) -> str | None:
-    """stored attachment url → canonical GCS object path. 우리 버킷 외/비정상이면 None.
-
-    attachments.py 의 동일 규칙(신규=bare path·legacy=public prefix·외부 도메인=None).
-    """
-    if not stored_url:
-        return None
-    if stored_url.startswith(_PUBLIC_PREFIX):
-        return stored_url[len(_PUBLIC_PREFIX):]
-    if "://" in stored_url:
-        return None
-    return stored_url
+# story #2720(2026-08-17) — 자체 canonicalization 재구현을 없애고 asset_registry.
+# canonical_object_path(BE SSOT)를 alias로 소비한다(import 위, 호출부 무변경).
 
 
 def _ext(name: str) -> str:

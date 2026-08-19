@@ -13,8 +13,12 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 logger = logging.getLogger(__name__)
 
-from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.tools.base import Tool as _FastMCPTool
+# story #2772(mcp 2.0 이관) — FastMCP→MCPServer 개명(mcp.server.fastmcp→mcp.server.mcpserver).
+# 스파이크(2026-08-19) 실 2.0.0 소스 대조 확認: private 내부(fn_metadata.arg_model·_tool_manager·
+# add_tool 반환값 None·구성시점 핸들러 바인딩) 전부 등가 재현 가능 — 이 파일의 로직 자체는 무변경,
+# import 경로만 이동.
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.tools.base import Tool as _FastMCPTool
 from mcp.types import TextContent
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -24,6 +28,7 @@ from .api_client import _api_key_override, client, reset_project_override, set_p
 from .config import settings
 from .response import ok
 from .schemas import SprintableInput
+from .tools.attachments import MAX_TOTAL_ATTACHMENT_BYTES
 
 # E-MCP S4: 독립 패키지 디탱글 — backend(app/*) import 제거. 규칙은 vendored .toolset 사용
 # (백엔드 app/services/mcp_toolset.py와 동일 규칙 유지·SSOT는 백엔드 매니페스트).
@@ -37,11 +42,12 @@ from .tools.judgments import AddJudgmentInput, ListJudgmentsInput, add_judgment,
 from .tools.session_context import SessionContextInput, get_session_context
 from .tools.visual_artifacts import (
     AddArtifactCommentInput, CreateArtifactInput, CreateSpecPinInput, DeleteArtifactInput,
-    DeleteSpecPinInput, EditArtifactInput, GetArtifactInput, ListArtifactCommentsInput,
-    ListArtifactsInput, ListSpecPinsInput, ProposeCanonicalInput, UpdateSpecPinInput,
+    DeleteSpecPinInput, EditArtifactInput, GetArtifactInput, ImportImageArtifactInput,
+    ListArtifactCommentsInput, ListArtifactsInput, ListSpecPinsInput, ProposeCanonicalInput,
+    UpdateSpecPinInput,
     add_artifact_comment, create_artifact, create_spec_pin, delete_artifact, delete_spec_pin,
-    edit_artifact, get_artifact, list_artifact_comments, list_artifacts, list_spec_pins,
-    propose_canonical_version, update_spec_pin,
+    edit_artifact, get_artifact, import_image_artifact, list_artifact_comments, list_artifacts,
+    list_spec_pins, propose_canonical_version, update_spec_pin,
 )
 from .tools.agent_runs import (
     EmitEventInput, PollEventsInput, UpdateRunStatusInput,
@@ -276,17 +282,34 @@ _allowed_hosts = [h.strip() for h in (settings.mcp_allowed_hosts or "").split(",
 # 넣으면 브라우저 Origin 요청이 403(prod·whitelist 시). → origins 는 `https://{host}` 로 파생(Cloud Run/
 # 커스텀도메인 TLS=https). Poke 등 server-to-server 는 Origin 부재라 항상 통과(SDK: origin 없으면 True).
 _allowed_origins = [f"https://{h}" for h in _allowed_hosts]
-_transport_security = TransportSecuritySettings(
+# story #2772(mcp 2.0 이관) — 2.0.0에서 transport_security(+stateless_http)가 MCPServer 생성자에서
+# streamable_http_app() 호출부로 이동(스파이크 확認, server.py:1218-1228 시그니처). 이 값 자체는
+# stdio/http 공용 구성이 아니라 http 전용이라 __main__.py의 _run_http()에서 소비 — non-private로
+# export(구 leading underscore는 "이 파일 안에서만 쓴다"는 뜻이었는데 더 이상 그렇지 않다).
+transport_security = TransportSecuritySettings(
     enable_dns_rebinding_protection=bool(_allowed_hosts),
     allowed_hosts=_allowed_hosts,
     allowed_origins=_allowed_origins,
 )
 
-# E-MCP-OPT S1: hosted(http) tools/list 요청별 scope 필터. FastMCP.__init__ → _setup_handlers()가
-# `self._mcp_server.list_tools()(self.list_tools)`로 **구성 시점 bound method**를 저수준 핸들러에
-# 등록한다 — 구성 後 인스턴스 몽키패치(mcp.list_tools = fn)는 이미 캡처된 참조에 안 먹는다(실측 확인:
-# 코덱스 + 별도 독립 재현 스크립트 둘 다). 서브클래스 오버라이드는 __init__ 이전에 존재해 self.list_tools
-# 속성조회(MRO)가 오버라이드로 해소되므로 저수준 핸들러가 정확히 이걸 호출한다 — 유일하게 먹는 방식.
+# story #2772(mcp 2.0 이관, PO AC 리뷰 CHANGES) — 2.0.0의 streamable_http_app() 신규 기본
+# max_request_body_size=4MiB가 우리 첨부 계약을 깬다: MAX_TOTAL_ATTACHMENT_BYTES(6MiB
+# decoded)를 base64로 실으면 4/3 팽창 → 정확히 8MiB(6 * 4 // 3), 거기에 JSON 봉투(MCP
+# _meta·tool call 래퍼·다른 필드들) 여유까지 얹어야 1.x 시절과 동일하게 통한다. 16MiB로
+# 명시(계산값의 2배 여유) — __main__.py::_run_http()가 streamable_http_app() 호출 시 이
+# 상수를 그대로 쓴다. 두 상수의 관계는 별도 구조적 assert 테스트(MAX_MCP_REQUEST_BODY_SIZE
+# >= base64 팽창값)로 고정 — 첨부 상한을 나중에 올리면서 이 캡을 안 같이 올리면 그
+# 테스트가 빨강이 되게 한다(PO 지시: "한쪽만 움직이는 걸 구조로 차단").
+MAX_MCP_REQUEST_BODY_SIZE = 16 * 1024 * 1024  # 16MiB
+
+# E-MCP-OPT S1: hosted(http) tools/list 요청별 scope 필터. (1.x 시절 근거였던) FastMCP.__init__ →
+# _setup_handlers()의 "구성 시점 bound method 캡처" 메커니즘은 2.0.0에서 이중 간접화로 바뀌었다
+# (story #2772 스파이크 2026-08-19 실측): MCPServer가 저수준 Server를 `on_list_tools=self.
+# _handle_list_tools`(MCPServer 소유 안정 메서드)로 구성하고, `_handle_list_tools`는 **호출될
+# 때마다** `await self.list_tools()`를 부른다 — 그래서 서브클래스 오버라이드가 구성 시점이 아니라
+# 매 호출마다 MRO로 재해석돼 이전의 "구성 後 몽키패치는 안 먹는다"는 함정 자체가 사라졌다(더
+# 견고해진 것 — 1.x의 위험을 신경 안 써도 서브클래스 오버라이드는 그냥 항상 먹는다). 그래도
+# 서브클래스 오버라이드(정적으로 __init__ 이전에 존재)라는 이 파일의 접근 자체는 두 버전 다 동작.
 #
 # stdio는 부팅 시 filter_tools_by_scope(레지스트리 destructive mutation)로 이미 걸러진 목록만 남아
 # 있어 이 필터가 다시 돌아도 무해한 no-op(전 도구 이미 허용된 것들)이지만, mcp_transport 가드로 아예
@@ -345,7 +368,7 @@ def _lock_down_extra_args(tool: _FastMCPTool) -> None:
     tool.fn_metadata.arg_model = strict_arg_model
 
 
-class SprintableFastMCP(FastMCP):
+class SprintableMCPServer(MCPServer):
     def add_tool(
         self,
         fn,
@@ -382,16 +405,17 @@ class SprintableFastMCP(FastMCP):
         return [tool for tool in tools if is_tool_allowed(tool.name, _scope)]
 
 
-mcp = SprintableFastMCP(
+# story #2772(mcp 2.0 이관) — stateless_http/transport_security는 더 이상 생성자 인자가 아니다
+# (2.0.0에서 streamable_http_app()로 이동, 위 transport_security 변수 주석 참고). http 모드
+# 실제 적용은 __main__.py::_run_http()의 mcp.streamable_http_app(stateless_http=True,
+# transport_security=transport_security) 호출부에서 이뤄진다 — stdio 모드는 그 호출 자체를
+# 안 타므로(무회귀).
+mcp = SprintableMCPServer(
     name="sprintable-mcp-python",
     instructions=(
         "Sprintable Python MCP server. "
         f"Backend: {settings.sprintable_api_url}"
     ),
-    # E-MCP-HTTP S1: stateless HTTP(요청간 세션 미보존)=무상태 툴서버(서버리스/멀티인스턴스 안전·Cloud
-    # Run S2). stdio 모드는 이 설정 무시(영향 0).
-    stateless_http=True,
-    transport_security=_transport_security,
 )
 
 
@@ -658,7 +682,9 @@ _TOOL_DEFS: list[tuple] = [
     # Evidence 자기증명 (1) — E-VERIFY V0-S1
     ("sprintable_add_evidence",
      "done을 스스로 증명하는 자기 서명 첨부(PR·배포·지표·발행물 링크 등) — story/task에 evidence"
-     " 남김. 선택제(첨부 안 해도 무불이익).",
+     " 남김. 선택제(첨부 안 해도 무불이익). 아티팩트를 근거로 삼을 땐 artifact_id를 같이 주면"
+     " 그 시각의 버전이 자동 고정된다(그 뒤 아티팩트가 새 버전으로 바뀌어도 이 evidence의"
+     " 근거는 안 흔들림).",
      AddEvidenceInput, add_evidence),
     # 판단 칸 (2) — story #2268(D단계, E-CONNECT)
     ("sprintable_add_judgment",
@@ -687,16 +713,32 @@ _TOOL_DEFS: list[tuple] = [
      "(CSS px, 양수·≤20000) — sandbox iframe이라 서버가 측정 불가해 선언 필요·미지정=FE 기본 아트보드."
      " ⭐UI·화면·디자인·시각 산출물을 만들 때는 텍스트 설명 대신 이 툴로 구조화해 그린다(사람이"
      " 캔버스에서 보고 코멘트/핀으로 피드백)."
+     " ⭐story_id 또는 doc_id(선택) — 작업 맥락이 있으면 잇는 것을 권장(어느 스토리/문서의"
+     " 산출물인지 붙어야 검색·backlink·evidence로 나중에 다시 찾긴다). standalone(둘 다 생략)도"
+     " 정당한 사용이다 — 강제 아님, 지금 맥락에 붙일 story/doc이 실제로 없으면 그냥 생략."
      " ⭐스크린샷/이미지 증거(story #2707) — base64를 이 도구 호출에 직접 싣지 말 것(토큰 폭증)."
-     " 2단계로: ①먼저 `POST $SPRINTABLE_API_URL/api/visual-artifacts/import-image`를 curl 등으로"
+     " Bash/HTTP 클라이언트 접근이 있는 에이전트는 2단계로: ①먼저"
+     " `POST $SPRINTABLE_API_URL/api/visual-artifacts/import-image`를 curl 등으로"
      " 직접 호출(multipart/form-data, 필드명 `file`, 헤더 `Authorization: Bearer $AGENT_API_KEY`)해"
      " GCS url을 받는다(예: `curl -F file=@screenshot.png -H \"Authorization: Bearer $AGENT_API_KEY\""
      " $SPRINTABLE_API_URL/api/visual-artifacts/import-image`) ②그 url을 이 도구의"
      " `nodes=[{\"type\": \"html_blob\", \"props\": {\"src\": \"<①의 url>\"}}]`로 넣어 호출하면"
-     " FE가 자동으로 image 포맷으로 렌더한다. (Bash/HTTP 클라이언트 접근이 없는 에이전트는 ①을"
-     " 스스로 못 탄다 — 그 경우는 이 경로 대상이 아님.)"
+     " FE가 자동으로 image 포맷으로 렌더한다. Bash/HTTP 클라이언트 접근이 없는 에이전트는 그 ①을"
+     " 스스로 못 타므로 대신 sprintable_import_image_artifact(작은 이미지 전용, 원콜)를 쓴다."
      " source는 \"created\"(기본) 또는 \"imported\"만 허용(다른 값은 422).",
      CreateArtifactInput, create_artifact),
+    ("sprintable_import_image_artifact",
+     "[일감] base64 이미지 한 번으로 업로드+artifact 생성을 원콜로 처리(story b6b9c52d) —"
+     " Bash/HTTP 클라이언트 접근이 없어 sprintable_create_artifact의 2단계 curl 플로우를 스스로"
+     " 못 타는 에이전트 전용 대안. ⭐스크린샷/시안/아이콘 등 **작은** 이미지 증거를 산출물로 남길"
+     " 때 이 도구로 — 단, image_base64는 도구 호출 인자 텍스트로 그대로 실리므로 호출하는 에이전트"
+     " 자신의 최대 출력 토큰 한도가 실질 상한이다(대략 수백 KB 이하 이미지 권장). BE 자체는"
+     " 최대 20MB까지 받지만, 그보다 큰 이미지는 이 도구로 못 보내니 Bash/HTTP 클라이언트가 있는"
+     " 에이전트라면 sprintable_create_artifact의 2단계 curl 플로우를 대신 쓴다."
+     " content_type은 image/*여야 함(아니면 422). story_id/doc_id(선택, sprintable_create_artifact와"
+     " 동형) — 맥락이 있으면 잇는 것을 권장, standalone도 정당. 반환은 get_artifact와 동형"
+     " artifact 상세(FE-import와 동일하게 렌더).",
+     ImportImageArtifactInput, import_image_artifact),
     ("sprintable_get_artifact",
      "[일감] 시각 산출물 단건 조회(latest 버전 + nodes). ⭐편집/코멘트/핀 작업 전 먼저 현재 상태(노드"
      " 구조·프레임)를 확인할 때.",

@@ -401,6 +401,10 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_edit_artifact", "sprintable_propose_canonical_version",
     "sprintable_list_spec_pins", "sprintable_create_spec_pin", "sprintable_update_spec_pin",
     "sprintable_delete_spec_pin",
+    # story b6b9c52d(#2707 부수): sprintable_import_image_artifact — base64 원콜 이미지 임포트
+    # 신설(Bash/HTTP 클라이언트 없는 에이전트용 create_artifact 대안). tool_group()은 "artifact"
+    # substring 매칭으로 이미 "canvas" 그룹 귀속(신규 매핑 불요).
+    "sprintable_import_image_artifact",
     # story #1922: sprintable_delete_artifact — artifact soft delete(생성자 전용) 전용 신설.
     # #2010(sprintable_transition_goal)이 이 SSOT 목록 등록을 처음 커밋에서 빠뜨려 role-template
     # picker 카탈로그/신규 에이전트 채용 치트시트에서 누락됐던 갭(follow-up 커밋 8126465e로 정정)을

@@ -26,6 +26,18 @@ def _sub(*, org_id, status="active"):
     return s
 
 
+def _checkout_enabled():
+    """story #2728 — 이 파일의 테스트들은 org-admin/checkout_subscription 분기 자체를
+    검증 대상으로 삼는다(platform_settings 게이트는 별도 test_2728 파일에서 전담 검증) —
+    여기서는 게이트를 통과시켜 원래 테스트 취지를 그대로 살린다."""
+    settings = MagicMock()
+    settings.billing_checkout_enabled = True
+    return patch(
+        "app.routers.org_subscription_checkout.get_platform_settings",
+        new=AsyncMock(return_value=settings),
+    )
+
+
 @pytest.fixture
 def _app_client():
     from app.main import app
@@ -50,7 +62,8 @@ def _app_client():
 
 def test_checkout_returns_403_when_not_org_admin(_app_client):
     client, org_id = _app_client
-    with patch("app.services.project_auth.is_org_owner_or_admin", new=AsyncMock(return_value=False)):
+    with _checkout_enabled(), \
+         patch("app.services.project_auth.is_org_owner_or_admin", new=AsyncMock(return_value=False)):
         resp = client.post(
             "/api/v2/org-subscriptions/checkout",
             json={"auth_key": "ak", "tier": "team", "billing_cycle": "monthly"},
@@ -61,7 +74,8 @@ def test_checkout_returns_403_when_not_org_admin(_app_client):
 def test_checkout_returns_200_active_on_success(_app_client):
     client, org_id = _app_client
     active_sub = _sub(org_id=org_id, status="active")
-    with patch("app.services.project_auth.is_org_owner_or_admin", new=AsyncMock(return_value=True)), \
+    with _checkout_enabled(), \
+         patch("app.services.project_auth.is_org_owner_or_admin", new=AsyncMock(return_value=True)), \
          patch("app.routers.org_subscription_checkout.checkout_subscription", new=AsyncMock(return_value=active_sub)):
         resp = client.post(
             "/api/v2/org-subscriptions/checkout",
@@ -78,7 +92,8 @@ def test_checkout_returns_200_pending_with_declined_reason_on_card_decline(_app_
 
     client, org_id = _app_client
     pending_sub = _sub(org_id=org_id, status="pending")
-    with patch("app.services.project_auth.is_org_owner_or_admin", new=AsyncMock(return_value=True)), \
+    with _checkout_enabled(), \
+         patch("app.services.project_auth.is_org_owner_or_admin", new=AsyncMock(return_value=True)), \
          patch(
              "app.routers.org_subscription_checkout.checkout_subscription",
              new=AsyncMock(side_effect=CheckoutDeclined("카드 거절", subscription=pending_sub)),
@@ -95,7 +110,8 @@ def test_checkout_returns_200_pending_with_declined_reason_on_card_decline(_app_
 
 def test_checkout_returns_502_on_toss_unreachable(_app_client):
     client, org_id = _app_client
-    with patch("app.services.project_auth.is_org_owner_or_admin", new=AsyncMock(return_value=True)), \
+    with _checkout_enabled(), \
+         patch("app.services.project_auth.is_org_owner_or_admin", new=AsyncMock(return_value=True)), \
          patch(
              "app.routers.org_subscription_checkout.checkout_subscription",
              new=AsyncMock(side_effect=RuntimeError("Cannot reach Toss API")),
@@ -111,7 +127,8 @@ def test_checkout_returns_500_on_internal_catalog_gap(_app_client):
     from app.services.org_subscription_checkout import CheckoutError
 
     client, org_id = _app_client
-    with patch("app.services.project_auth.is_org_owner_or_admin", new=AsyncMock(return_value=True)), \
+    with _checkout_enabled(), \
+         patch("app.services.project_auth.is_org_owner_or_admin", new=AsyncMock(return_value=True)), \
          patch(
              "app.routers.org_subscription_checkout.checkout_subscription",
              new=AsyncMock(side_effect=CheckoutError("offering_version not found")),
@@ -131,6 +148,24 @@ def test_checkout_rejects_invalid_tier_with_422(_app_client):
         json={"auth_key": "ak", "tier": "free", "billing_cycle": "monthly"},
     )
     assert resp.status_code == 422
+
+
+def test_checkout_returns_403_when_billing_checkout_disabled(_app_client):
+    """story #2728(선생님 결정②) — platform_settings.billing_checkout_enabled=false면
+    org-admin 권한과 무관하게 무조건 403(서버측 전면 차단, gate가 org-admin 체크보다
+    먼저 — is_org_owner_or_admin이 아예 호출 안 됨을 mock 미설정으로 확認)."""
+    client, org_id = _app_client
+    settings = MagicMock()
+    settings.billing_checkout_enabled = False
+    with patch(
+        "app.routers.org_subscription_checkout.get_platform_settings",
+        new=AsyncMock(return_value=settings),
+    ):
+        resp = client.post(
+            "/api/v2/org-subscriptions/checkout",
+            json={"auth_key": "ak", "tier": "team", "billing_cycle": "monthly"},
+        )
+    assert resp.status_code == 403
 
 
 def test_checkout_requires_auth():

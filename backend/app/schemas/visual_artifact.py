@@ -72,6 +72,18 @@ class CreateArtifactRequest(BaseModel):
         return v
 
 
+class ImportImageArtifactRequest(BaseModel):
+    """story b6b9c52d(#2707 부수) — MCP `import_image_artifact` 입구. FE
+    `apps/web/src/app/api/visual-artifacts/import-image/route.ts`(story 64010b05)의 base64 포팅판
+    — Bash/HTTP 클라이언트가 없는 에이전트는 그 라우트를 스스로 못 타므로(2단계 curl 수동 플로우
+    불가), base64 인라인 한 번으로 업로드+artifact 생성까지 묶는다."""
+    title: str
+    image_base64: str
+    content_type: str
+    story_id: uuid.UUID | None = None
+    doc_id: uuid.UUID | None = None
+
+
 class ArtifactVersionSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -114,6 +126,16 @@ class VisualArtifactSummary(BaseModel):
     # 아무도 안 읽지만(next_action_code 소비 0%) 읽을 재료는 이미 서 있다. 빼도 없어지는
     # 동작이 0인 이유가 바로 이것(FE 소비 0%였다는 사실 그대로).
 
+    # story #2724(2026-08-17, 페드루 PO 판정) — 추가 필드(기존 소비자 무회귀, additive-only).
+    # story_id·doc_id가 둘 다 비어있다는 **사실만** 싣는다(처방 문장·권고 아님 — "이걸 붙이세요"
+    # 류는 여기 안 넣는다, MCP 도구 description 쪽 유도문과 역할 분리). story_id/doc_id는 이미
+    # 응답에 있어 소비자가 스스로 계산할 수 있지만, 그 계산을 반복 재구현하는 대신 이 한 필드로
+    # 명시(계산 로직 1곳 SSOT — epic_id는 이 판정에 안 들어간다, PO 문구 "story/doc 미연결" 그대로).
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def unlinked(self) -> bool:
+        return self.story_id is None and self.doc_id is None
+
 
 class VisualArtifactDetail(BaseModel):
     id: uuid.UUID
@@ -152,12 +174,26 @@ class VisualArtifactDetail(BaseModel):
     org_slug: str | None = None
     project_slug: str | None = None
 
+    # story #2724 — VisualArtifactSummary와 동형(위 주석 참조), 이 클래스에도 동일 사실 필드.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def unlinked(self) -> bool:
+        return self.story_id is None and self.doc_id is None
+
 
 class CreateArtifactCommentRequest(BaseModel):
     content: str
     node_id: uuid.UUID | None = None
-    anchor_x: float | None = None
-    anchor_y: float | None = None
+    # story #154a26be — 이 클래스(아티팩트 좌표 코멘트)의 좌표 앵커 규약은 %(0~100),
+    # ratio(0~1)나 픽셀이 아니다(FE artifact-viewer.tsx가 `style={{ left: "${x}%" }}`로
+    # 직접 CSS % 소비). 기존엔 이 규약이 소비처 관행으로만 서 있고 서버가 안 막아 다른
+    # 단위 클라이언트가 통과·핀이 조용히 딴 자리에 렌더될 수 있었다("금지 AC=서버가 거부"
+    # 원칙 위반). ⛔`artifact_spec_pins`(CreateSpecPinRequest, 이 파일의 별개 클래스)는
+    # **다른 단위 계약**(px, canvas_bounds 좌표계)이라 이 %(0~100) 제약을 그쪽엔 걸지
+    # 않는다 — 처음엔 두 클래스를 같은 규약으로 오판해 걸었다가 미르코 QA 음성대조로
+    # 롤백함(페드루 PO, 2026-08-17). 이 클래스(코멘트)만 %.
+    anchor_x: float | None = Field(default=None, ge=0, le=100, description="캔버스 폭 대비 %(0~100) — ratio(0~1)·픽셀 아님")
+    anchor_y: float | None = Field(default=None, ge=0, le=100, description="캔버스 높이 대비 %(0~100) — ratio(0~1)·픽셀 아님")
     parent_id: uuid.UUID | None = None
     mentioned_ids: list[uuid.UUID] = []
 
@@ -193,6 +229,12 @@ class CreateSpecPinRequest(BaseModel):
     """편집 캔버스 핀 저작(story 7fe16274) — anchor_type이 좌표/노드 중 무엇이든 description은
     non-null 강제(doc §3 — 빈 스펙 커밋 차단)."""
     anchor_type: str
+    # ⛔story #154a26be 정정(페드루 PO, 2026-08-17) — 이 클래스는 %(0~100)가 아니라
+    # **px(canvas_bounds 좌표계)**다. FE `edit-canvas.tsx`가 `style={{ left: pin.anchorX,
+    # top: pin.anchorY }}`로 단위 없는 숫자를 직접 꽂아 쓴다(React CSSProperties 관례상
+    # unitless left/top = px). 실측값(638.4, 398.4)은 오염이 아니라 **정상 데이터**였음
+    # (원래 le=100을 걸었다가 라이브 스펙핀 배치를 과잉살상할 뻔한 것을 미르코 QA 음성대조가
+    # 잡음). 상한은 걸지 않는다 — 하한(>=0, 아래 _validate_anchor_consistency)만 유지.
     anchor_x: float | None = None
     anchor_y: float | None = None
     node_id: uuid.UUID | None = None

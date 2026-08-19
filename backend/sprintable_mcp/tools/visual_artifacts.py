@@ -134,6 +134,21 @@ class ProposeCanonicalInput(SprintableInput):
     version_number: int
 
 
+class ImportImageArtifactInput(SprintableInput):
+    """story b6b9c52d(#2707 부수) — Bash/HTTP 클라이언트 접근이 없는 에이전트도 base64 한
+    번으로 이미지 artifact를 만들 수 있게 하는 입구(create_artifact 자체 docstring의 2단계
+    curl 수동 플로우를 못 타는 에이전트 대상). 실전 주의: image_base64는 도구 호출 인자
+    텍스트로 그대로 실려 나가므로, 호출하는 에이전트 자신의 최대 출력 토큰 한도가 실질
+    상한이다 — 작은 스케치/아이콘(대략 수백 KB 이하) 용도로 한정. 그보다 큰 이미지(최대
+    20MB까지 BE는 받음)는 create_artifact 자체 설명에 있는 2단계 curl 플로우(Bash/HTTP
+    클라이언트가 있는 에이전트 전용)를 계속 쓴다."""
+    title: str
+    image_base64: str
+    content_type: str
+    story_id: str | None = None
+    doc_id: str | None = None
+
+
 class ListArtifactsInput(SprintableInput):
     # 프로젝트 스코프는 서버-파생(키 컨텍스트·비-caller-suppliable) — 아래 필터만 선택 지정.
     story_id: str | None = None
@@ -165,6 +180,24 @@ async def create_artifact(args: CreateArtifactInput) -> list[TextContent]:
         if args.canvas_bounds:
             body["canvas_bounds"] = args.canvas_bounds.model_dump(exclude_none=True)
         result = await client.post("/api/v2/visual-artifacts", json=body)
+        return ok(result)
+    except Exception as exc:
+        return err(str(exc))
+
+
+async def import_image_artifact(args: ImportImageArtifactInput) -> list[TextContent]:
+    """base64 이미지 한 번으로 업로드+artifact 생성을 원콜로 묶는다(story b6b9c52d) — BE
+    `/import-image`가 GCS 업로드부터 create_artifact 위임까지 내부에서 전부 처리, 반환은
+    get_artifact/list_artifacts와 동형 artifact 상세(FE-import(source="imported")와 동일 렌더)."""
+    try:
+        body: dict = {
+            "title": args.title, "image_base64": args.image_base64, "content_type": args.content_type,
+        }
+        if args.story_id:
+            body["story_id"] = args.story_id
+        if args.doc_id:
+            body["doc_id"] = args.doc_id
+        result = await client.post("/api/v2/visual-artifacts/import-image", json=body)
         return ok(result)
     except Exception as exc:
         return err(str(exc))

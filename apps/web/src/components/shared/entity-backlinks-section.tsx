@@ -65,12 +65,13 @@ const EXCLUDE_LABEL_KEYS: Record<string, string> = {
 /** BacklinksEntityType → BE 라우트 세그먼트. 불규칙복수(story→stories)라 순수 접미사 파생이
  * 아닌 조회 테이블로 연다 — PROJECT_ID_RESOLVERS와 같은 성격(종류-분기가 아니라 표기 파생).
  *
- * ⛔이 맵의 키 집합은 BE `backlinks.py::BACKLINKS_ALLOWED_TARGET_TYPES`(현재
- * `frozenset({"doc", "story"})`)와 **글자 그대로 같은 집합**이어야 한다 — 미리 늘리지 않는다.
- * epic 등 나머지 registry 타입이 거기 없는 이유는 "라우트가 없어서"가 아니라 그 라우터들에
- * `_require_doc_project_access`/`_assert_story_project_access`와 동형인 TARGET
+ * ⛔이 맵의 키 집합은 BE `backlinks.py::BACKLINKS_ALLOWED_TARGET_TYPES`(story #2721부터
+ * `frozenset({"doc", "story", "artifact"})`)와 **글자 그대로 같은 집합**이어야 한다 — 미리
+ * 늘리지 않는다. epic 등 나머지 registry 타입이 거기 없는 이유는 "라우트가 없어서"가 아니라
+ * 그 라우터들에 `_require_doc_project_access`/`_assert_story_project_access`와 동형인 TARGET
  * project-access 선-게이트가 아직 없어서다(PO 확認, 2026-07-28) — 게이트 없이 여기 먼저
- * 추가하면 화면이 "게이트 없는 라우트"를 부르게 된다.
+ * 추가하면 화면이 "게이트 없는 라우트"를 부르게 된다. artifact는 story #2721이 그 동형 게이트
+ * (`_get_artifact_or_404`, 기존 project-access 계약 재사용)를 세운 뒤 여기 추가한 것.
  *
  * ⛔이 맵은 **임시**다 — BE가 언젠가 client 입력을 받는 단일 generic
  * `/entities/{type}/{id}/backlinks` 라우트로 접으면(PO가 `UnsupportedBacklinkTargetTypeError`
@@ -83,6 +84,7 @@ const EXCLUDE_LABEL_KEYS: Record<string, string> = {
 const ENTITY_ROUTE_SEGMENT = {
   story: 'stories',
   doc: 'docs',
+  artifact: 'visual-artifacts',
 } as const satisfies Record<string, string>;
 
 export type BacklinksEntityType = keyof typeof ENTITY_ROUTE_SEGMENT;

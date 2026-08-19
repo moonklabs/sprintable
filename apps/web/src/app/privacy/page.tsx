@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { DocContentRenderer } from '@/components/docs/doc-content-renderer';
 import { getCurrentLegalDocument } from '@/lib/legal-docs';
+import { BusinessInfoBlock } from '@/components/legal/legal-footer';
 
 export const metadata = { title: 'Privacy Policy — Sprintable' };
 export const revalidate = 300;
@@ -41,6 +42,10 @@ export default async function PrivacyPage() {
           {' · '}
           <Link href="/register" className="text-brand hover:text-brand/80">회원가입으로 돌아가기</Link>
         </p>
+
+        <div className="mt-4 text-center text-xs text-muted-foreground">
+          <BusinessInfoBlock className="justify-center" />
+        </div>
       </div>
     </div>
   );

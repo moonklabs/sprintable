@@ -59,6 +59,10 @@ jobs:
           if [[ "$REF_NAME" == "main" ]]; then
             echo "target=prod" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-prod-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
+            # story #2749(2026-08-18, 페드루 PO 지시 — auth.py verify-email/reset-password가
+            # 읽는 NEXT_PUBLIC_APP_URL 무배선 정정) — prod는 코드 하드코딩 기본값과 동일값이라
+            # 동작 변경 0, SSOT durable화만.
+            echo "next_public_app_url=https://app.sprintable.ai" >> "$GITHUB_OUTPUT"
             # ⚠️ minScale 1→3 (prod 콜드스타트 durable 봉합, 오르테가군 PO 2026-07-22): dev #2074 응급대응
             # (a0738e81)이 dev 만 3으로 올리고 prod 는 1로 남았다 — 오늘 아침 prod 콜드스타트가 재발(선생님
             # 격노)해 PO 가 `gcloud run services update` 로 prod minScale=3 을 라이브 적용(승인된 조치).
@@ -159,6 +163,23 @@ jobs:
             # prod에 얹지 않는다 — develop→main 48커밋 일괄승격에 검증 안 된 롤백 플래그를
             # 섞으면 문제 발생 시 원인 격리가 안 된다. dev 실측 후 별도 판단.
             echo "sse_multiplex_enabled=false" >> "$GITHUB_OUTPUT"
+            # story #2728 후속(2026-08-17, 페드루 PO 지시) — NEXT_PUBLIC_EE_ENABLED가 이 파이프라인
+            # 어디에도 배선된 적이 없어(cloudbuild.yaml·Dockerfile 전부 무배선) dev FE billing 표면이
+            # 아예 안 떴다. prod는 이 커밋으로 무접촉(값을 새로 켜는 게 아니라 기존 동작 그대로
+            # 명시 false로 durable화만 — Toss 심사 前 결제 표면은 여전히 이 값과 무관하게
+            # platform_settings.billing_checkout_enabled 서버측 게이트가 막는다, #2728 별건 PR).
+            echo "ee_enabled=false" >> "$GITHUB_OUTPUT"
+            # story #e6500272 후속(2026-08-18, 페드루 PO 지시 — #3188과 동형 발견) — backend
+            # `settings.is_ee_enabled`가 읽는 LICENSE_CONSENT도 배포 SSOT 어디에도 배선된 적이
+            # 없었다(cloudbuild.yaml·GHA·Dockerfile 전부 무배선). dev·prod 둘 다 현재 수동 env로만
+            # 'agreed' — ⛔prod도 여기서 명시하되 값 변경 0(현행값 그대로 durable화만, 별도 배포
+            # 조작 없음 — "손 값을 다음 배포가 덮는다" 교훈, _BACKEND_MIN_INSTANCES류와 동일 클래스).
+            echo "license_consent=agreed" >> "$GITHUB_OUTPUT"
+            # story #2758(2026-08-18, 페드루 PO 지시 — EE_ENABLED·LICENSE_CONSENT와 동형
+            # 「등재≠배선」 3번째) — Toss 결제위젯 clientKey도 배포 SSOT 어디에도 배선된 적이
+            # 없었다. ⛔prod 무접촉 — 값 반입은 심사 후 선생님 허가 축, 빈 문자열 명시만
+            # (Dockerfile ARG 기본값과 동일 — 새로 켜는 게 아니라 기존 무배선 상태 그대로).
+            echo "toss_client_key=" >> "$GITHUB_OUTPUT"
             # story #2139/#2143 후속(2026-07-23, 오르테가군 판정 — dev 게이트 GREEN 확認 後
             # 같은 날 prod 승격, "절반만 고치는 것" 방지 교정): backend 쪽을 GCE 실시간 3노드와
             # 같은 흐름에서 켠다(한쪽만 켜고 멈추면 오늘의 #2448 인시던트와 동형 반쪽 상태가
@@ -204,6 +225,10 @@ jobs:
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
+            # story #2749(2026-08-18, 페드루 PO 실측 — dev 가입 인증메일 verify 링크가 prod
+            # 도메인으로 발급됨) — NEXT_PUBLIC_APP_URL이 dev에 한 번도 배선된 적이 없어
+            # auth.py의 코드 하드코딩 fallback(prod URL)이 dev에도 새고 있었다. dev 도메인 명시.
+            echo "next_public_app_url=https://dev-app.sprintable.ai" >> "$GITHUB_OUTPUT"
             # ⚠️ minScale 1→3 (#2074 응급대응, 오르테가군 PO 2026-07-21): gcloud 로그 실측 —
             # "The request was aborted because there was no available instance"(04:38 다수)가
             # 채팅 5초 지연·목표화면 Loading·촬영 막힘의 원인이었다. minScale 1은 콜드스타트
@@ -308,6 +333,28 @@ jobs:
             # 전제. 3개 소비 훅(use-sse-notifications·use-chat-sse·use-team-presence)이 이
             # 값 하나로 공유 커넥션 vs 독립 커넥션을 가른다(realtime-provider.tsx).
             echo "sse_multiplex_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #2728 후속(2026-08-17, 페드루 PO 지시) — 선생님 기결정 "결제는 dev에서 구현·
+            # 검증" 집행 전제조건. NEXT_PUBLIC_EE_ENABLED가 여태 이 파이프라인 어디에도 배선된
+            # 적이 없어(cloudbuild.yaml build-arg·Dockerfile ARG 전부 무배선, grep 확認) dev FE
+            # billing 표면(settings/page.tsx의 isEEEnabled() 게이트)이 아예 렌더 안 됐다 — dev만
+            # 켠다(prod는 위 main 분기에서 명시 false, 무접촉).
+            echo "ee_enabled=true" >> "$GITHUB_OUTPUT"
+            # story #e6500272 후속(2026-08-18, 페드루 PO 지시) — LICENSE_CONSENT(backend
+            # `settings.is_ee_enabled` 게이트)도 EE_ENABLED와 동형 미배선이었다. dev 현재값도
+            # 'agreed'(수동 env) — 여기서도 값 변경 0, 현행값만 durable화(prod 위 main 분기와
+            # 같은 값 — dev/prod가 실제로 다른 다른 플래그들과 달리 이건 원래 같아야 하는 값).
+            echo "license_consent=agreed" >> "$GITHUB_OUTPUT"
+            # story #2758(2026-08-18, 페드루 PO 지시 — EE_ENABLED·LICENSE_CONSENT와 동형
+            # 「등재≠배선」 3번째, 미르코 2754 라이브 실증이 이 마디에서 잡음) — Toss 결제위젯
+            # clientKey(publishable 값, secret 아님 — 브라우저 노출 전제)를 Secret Manager
+            # TOSS_PAYMENTS_CLIENT_KEY_DEV에서 읽어 dev만 주입(prod는 위 main 분기에서 빈
+            # 문자열 명시·무접촉). Secret Manager 접근 권한은 이 워크플로우의 GHA SA(github-
+            # actions@sprintable-494803)가 project-level roles/secretmanager.secretAccessor로
+            # 이미 보유(신규 IAM 변경 0). Setup Cloud SDK 스텝이 이미 프로젝트를 기본값으로
+            # 잡아 둬 --project 불요.
+            TOSS_CLIENT_KEY_DEV_VALUE=$(gcloud secrets versions access latest --secret="TOSS_PAYMENTS_CLIENT_KEY_DEV")
+            echo "::add-mask::${TOSS_CLIENT_KEY_DEV_VALUE}"
+            echo "toss_client_key=${TOSS_CLIENT_KEY_DEV_VALUE}" >> "$GITHUB_OUTPUT"
             # story #2139/#2143 후속(2026-07-23, 오르테가군 판정) — "백플레인 켜기" dev 1단계.
             # PRESENCE_ONLINE_REDIS_ENABLED: DB 폴백 있음(안 깨져 있음 — 켜면 신선도 개선).
             # PRESENCE_REDIS_ENABLED(chat_presence "working"): 프로세스-로컬 dict라 GCE
@@ -366,6 +413,10 @@ jobs:
           V_BACKEND_REDIS_DUAL_PUBLISH_ENABLED: ${{ steps.env.outputs.backend_redis_dual_publish_enabled }}
           V_BACKEND_FANOUT_WAKE_REDIS_ENABLED: ${{ steps.env.outputs.backend_fanout_wake_redis_enabled }}
           V_SSE_MULTIPLEX_ENABLED: ${{ steps.env.outputs.sse_multiplex_enabled }}
+          V_EE_ENABLED: ${{ steps.env.outputs.ee_enabled }}
+          V_LICENSE_CONSENT: ${{ steps.env.outputs.license_consent }}
+          V_TOSS_CLIENT_KEY: ${{ steps.env.outputs.toss_client_key }}
+          V_NEXT_PUBLIC_APP_URL: ${{ steps.env.outputs.next_public_app_url }}
           V_BACKEND_PRESENCE_REDIS_ENABLED: ${{ steps.env.outputs.backend_presence_redis_enabled }}
           V_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED: ${{ steps.env.outputs.backend_presence_online_redis_enabled }}
           V_BACKEND_SSE_LEASE_REDIS_ENABLED: ${{ steps.env.outputs.backend_sse_lease_redis_enabled }}
@@ -374,7 +425,7 @@ jobs:
           V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED: ${{ steps.env.outputs.backend_sse_transient_replay_enabled }}
           V_MCP_ALLOWED_HOSTS: ${{ steps.env.outputs.mcp_allowed_hosts }}
         run: |
-          SUBST="_DEPLOY_ENV=\"${V_DEPLOY_ENV}\",_FASTAPI_URL=\"${V_FASTAPI_URL}\",_BACKEND_MIN_INSTANCES=\"${V_BACKEND_MIN_INSTANCES}\",_BACKEND_MAX_INSTANCES=\"${V_BACKEND_MAX_INSTANCES}\",_DB_POOL_SIZE=\"${V_DB_POOL_SIZE}\",_DB_MAX_OVERFLOW=\"${V_DB_MAX_OVERFLOW}\",_BACKEND_DB_PGBOUNCER=\"${V_BACKEND_DB_PGBOUNCER}\",_BACKEND_TIMEOUT=\"${V_BACKEND_TIMEOUT}\",_GA4_MEASUREMENT_ID=\"${V_GA4_MEASUREMENT_ID}\",_REALTIME_MIN_INSTANCES=\"${V_REALTIME_MIN_INSTANCES}\",_REALTIME_MAX_INSTANCES=\"${V_REALTIME_MAX_INSTANCES}\",_REALTIME_TIMEOUT=\"${V_REALTIME_TIMEOUT}\",_REALTIME_URL=\"${V_REALTIME_URL}\",_BACKEND_PG_LISTEN_ENABLED=\"${V_BACKEND_PG_LISTEN_ENABLED}\",_BACKEND_REDIS_CONSUME_ENABLED=\"${V_BACKEND_REDIS_CONSUME_ENABLED}\",_BACKEND_REDIS_DISPATCH_ENABLED=\"${V_BACKEND_REDIS_DISPATCH_ENABLED}\",_REDIS_URL=\"${V_REDIS_URL}\",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED=\"${V_BACKEND_REDIS_DUAL_PUBLISH_ENABLED}\",_BACKEND_FANOUT_WAKE_REDIS_ENABLED=\"${V_BACKEND_FANOUT_WAKE_REDIS_ENABLED}\",_SSE_MULTIPLEX_ENABLED=\"${V_SSE_MULTIPLEX_ENABLED}\",_BACKEND_PRESENCE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_REDIS_ENABLED}\",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED}\",_BACKEND_SSE_LEASE_REDIS_ENABLED=\"${V_BACKEND_SSE_LEASE_REDIS_ENABLED}\",_FRONTEND_MIN_INSTANCES=\"${V_FRONTEND_MIN_INSTANCES}\",_FRONTEND_MAX_INSTANCES=\"${V_FRONTEND_MAX_INSTANCES}\",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED=\"${V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}\",_MCP_ALLOWED_HOSTS=\"${V_MCP_ALLOWED_HOSTS}\""
+          SUBST="_DEPLOY_ENV=\"${V_DEPLOY_ENV}\",_FASTAPI_URL=\"${V_FASTAPI_URL}\",_BACKEND_MIN_INSTANCES=\"${V_BACKEND_MIN_INSTANCES}\",_BACKEND_MAX_INSTANCES=\"${V_BACKEND_MAX_INSTANCES}\",_DB_POOL_SIZE=\"${V_DB_POOL_SIZE}\",_DB_MAX_OVERFLOW=\"${V_DB_MAX_OVERFLOW}\",_BACKEND_DB_PGBOUNCER=\"${V_BACKEND_DB_PGBOUNCER}\",_BACKEND_TIMEOUT=\"${V_BACKEND_TIMEOUT}\",_GA4_MEASUREMENT_ID=\"${V_GA4_MEASUREMENT_ID}\",_REALTIME_MIN_INSTANCES=\"${V_REALTIME_MIN_INSTANCES}\",_REALTIME_MAX_INSTANCES=\"${V_REALTIME_MAX_INSTANCES}\",_REALTIME_TIMEOUT=\"${V_REALTIME_TIMEOUT}\",_REALTIME_URL=\"${V_REALTIME_URL}\",_BACKEND_PG_LISTEN_ENABLED=\"${V_BACKEND_PG_LISTEN_ENABLED}\",_BACKEND_REDIS_CONSUME_ENABLED=\"${V_BACKEND_REDIS_CONSUME_ENABLED}\",_BACKEND_REDIS_DISPATCH_ENABLED=\"${V_BACKEND_REDIS_DISPATCH_ENABLED}\",_REDIS_URL=\"${V_REDIS_URL}\",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED=\"${V_BACKEND_REDIS_DUAL_PUBLISH_ENABLED}\",_BACKEND_FANOUT_WAKE_REDIS_ENABLED=\"${V_BACKEND_FANOUT_WAKE_REDIS_ENABLED}\",_SSE_MULTIPLEX_ENABLED=\"${V_SSE_MULTIPLEX_ENABLED}\",_BACKEND_PRESENCE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_REDIS_ENABLED}\",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED}\",_BACKEND_SSE_LEASE_REDIS_ENABLED=\"${V_BACKEND_SSE_LEASE_REDIS_ENABLED}\",_FRONTEND_MIN_INSTANCES=\"${V_FRONTEND_MIN_INSTANCES}\",_FRONTEND_MAX_INSTANCES=\"${V_FRONTEND_MAX_INSTANCES}\",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED=\"${V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}\",_MCP_ALLOWED_HOSTS=\"${V_MCP_ALLOWED_HOSTS}\",_EE_ENABLED=\"${V_EE_ENABLED}\",_LICENSE_CONSENT=\"${V_LICENSE_CONSENT}\",_TOSS_CLIENT_KEY=\"${V_TOSS_CLIENT_KEY}\",_NEXT_PUBLIC_APP_URL=\"${V_NEXT_PUBLIC_APP_URL}\""
           echo "substitutions=${SUBST}" >> "$GITHUB_OUTPUT"
 
       - name: Submit Cloud Build

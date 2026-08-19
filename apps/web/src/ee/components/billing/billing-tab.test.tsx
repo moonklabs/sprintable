@@ -28,22 +28,49 @@ vi.mock('./toss-checkout', () => ({
 let container: HTMLDivElement;
 let root: Root;
 
+// story #40659941(#2728 픽셀 검증 블로커) — FASTAPI_URL 직접 fetch를 same-origin 프록시로
+// 수렴한 뒤부터 응답이 proxyToFastapiWrapped의 {data:...} 봉투를 쓴다(customer-key/checkout
+// 프록시와 동일 계약) — mock도 그 봉투 그대로 재현.
 function statusResponse(overrides: Partial<{ tier: string; can_manage: boolean }> = {}) {
   return {
     ok: true,
     json: async () => ({
-      org_id: 'org-1',
-      tier: overrides.tier ?? 'free',
-      billing_cycle: null,
-      status: 'active',
-      current_period_end: null,
-      can_manage: overrides.can_manage ?? true,
+      data: {
+        org_id: 'org-1',
+        tier: overrides.tier ?? 'free',
+        billing_cycle: null,
+        status: 'active',
+        current_period_end: null,
+        can_manage: overrides.can_manage ?? true,
+      },
     }),
   };
 }
 
-async function mount(fetchImpl: () => Promise<unknown>) {
-  vi.stubGlobal('fetch', vi.fn(fetchImpl));
+// story #2728 — mount()이 두 fetch(status·platform-settings)를 URL로 라우팅한다. 기존
+// 16개 호출부는 status만 신경 쓰면 되도록 platformSettings 기본값을 이 파일이 원래
+// 가정하던 상태(IS_PRICE_PUBLIC=true 시절과 동형 — 가격 공개+체크아웃 가능)로 맞춰
+// 무회귀시킨다. off 상태 자체를 검증하는 테스트만 명시로 override.
+function platformSettingsResponse(overrides: Partial<{ billing_price_public: boolean; billing_checkout_enabled: boolean }> = {}) {
+  return {
+    ok: true,
+    json: async () => ({
+      data: {
+        billing_price_public: overrides.billing_price_public ?? true,
+        billing_checkout_enabled: overrides.billing_checkout_enabled ?? true,
+      },
+    }),
+  };
+}
+
+async function mount(
+  statusFetchImpl: () => Promise<unknown>,
+  platformSettingsFetchImpl: () => Promise<unknown> = async () => platformSettingsResponse(),
+) {
+  vi.stubGlobal('fetch', vi.fn((url: string) => {
+    if (typeof url === 'string' && url.includes('/platform-settings')) return platformSettingsFetchImpl();
+    return statusFetchImpl();
+  }));
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
@@ -51,7 +78,7 @@ async function mount(fetchImpl: () => Promise<unknown>) {
       </NextIntlClientProvider>,
     );
   });
-  // status fetch effect flush
+  // status + platform-settings fetch effect flush
   await act(async () => {
     await Promise.resolve();
     await Promise.resolve();
@@ -162,6 +189,47 @@ describe('BillingTab — 결제②-D 4티어 재편', () => {
     const alertEl = container.querySelector('[role="alert"]');
     expect(alertEl).not.toBeNull();
     expect(alertEl?.textContent).toContain('요금제 정보를 불러올 수 없습니다');
+  });
+});
+
+describe('BillingTab — platform-settings 소비(story #2728, 선생님 결정②③ 집행)', () => {
+  it('billing_price_public=false면 가격이 안 뜬다(하드코딩 IS_PRICE_PUBLIC 철거 확認)', async () => {
+    await mount(
+      async () => statusResponse(),
+      async () => platformSettingsResponse({ billing_price_public: false }),
+    );
+    expect(container.textContent).toContain('준비 중');
+    expect(container.textContent).not.toContain('29,000원');
+  });
+
+  it('/api/v2/platform-settings fetch 실패 시 안전측 기본값(false)으로 폴백 — 가격이 조용히 새지 않는다', async () => {
+    let callCount = 0;
+    await mount(
+      async () => statusResponse(),
+      async () => {
+        callCount += 1;
+        throw new Error('platform-settings network down');
+      },
+    );
+    expect(callCount).toBeGreaterThan(0);
+    expect(container.textContent).toContain('준비 중');
+    expect(container.textContent).not.toContain('29,000원');
+  });
+
+  it('billing_checkout_enabled=false면(가격은 공개돼도) 업그레이드 클릭이 결제 다이얼로그를 안 연다', async () => {
+    await mount(
+      async () => statusResponse({ tier: 'free', can_manage: true }),
+      async () => platformSettingsResponse({ billing_price_public: true, billing_checkout_enabled: false }),
+    );
+    const upgradeBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('업그레이드'));
+    expect(upgradeBtn).toBeTruthy();
+    await act(async () => { upgradeBtn!.click(); await Promise.resolve(); await Promise.resolve(); });
+    // UpgradeCheckoutDialog(Radix Dialog)는 document.body로 portal되므로 container 안이
+    // 아니라 document.body를 봐야 한다(container만 보면 항상 빈 채로 통과하는 거짓양성
+    // — 직접 겪은 함정, 주석으로 남김). tierId===null이면 렌더 자체를 안 하므로(billing-
+    // tab.tsx의 `if (tierId == null...) return null`) 다이얼로그 타이틀("로 업그레이드")
+    // 부재로 "setUpgradeTarget이 실질적으로 다이얼로그를 못 열었다"를 확認.
+    expect(document.body.textContent).not.toContain('로 업그레이드');
   });
 });
 

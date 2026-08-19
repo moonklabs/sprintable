@@ -34,6 +34,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { LegalLinks, BusinessInfoBlock } from '@/components/legal/legal-footer';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { NOTIFICATION_TYPES } from '@/lib/notification-types';
@@ -115,6 +116,7 @@ function resolveSettingsTab(tab: string | null): string {
 export default function SettingsPage() {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
+  const tLegal = useTranslations('legal');
   // story #2485 — projectLimitExceededError는 onboarding-form.tsx(#2484)와 동일 개념
   // (resource:"project" PLAN_LIMIT_EXCEEDED)이라 새 키를 만들지 않고 재사용한다.
   const tOnboarding = useTranslations('onboarding');
@@ -184,7 +186,6 @@ export default function SettingsPage() {
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [deleteProjectConfirmId, setDeleteProjectConfirmId] = useState<string | null>(null);
 
-  const [graceUntil, setGraceUntil] = useState<string | null>(null);
   const [addMemberOpen, setAddMemberOpen] = useState(false); // 7363ec8a: 통합 "+멤버 추가" 모달
   const [webhookEditing, setWebhookEditing] = useState<Record<string, string>>({});
   const [webhookSaving, setWebhookSaving] = useState<string | null>(null);
@@ -306,21 +307,6 @@ export default function SettingsPage() {
     setMemberProjectId((current) => current || currentProjectId || nextProjects[0]?.id || '');
   };
 
-  // d3619e80: org_invites canonical(레거시 /api/invitations 폐기) — 초대 목록 UI는 폐기됐지만
-  // 이 엔드포인트 성공 시에만 구독 grace-period 배너를 갱신하는 기존 게이팅은 그대로 보존.
-  const refreshInvitations = async () => {
-    if (!orgId) return;
-    const res = await fetchWithAuth(`/api/organizations/${orgId}/invites`);
-    if (res.ok) {
-      const statusRes = await fetchWithAuth('/api/subscription/status');
-      if (statusRes.ok) {
-        const statusJson = await statusRes.json() as { data?: { grace_until?: string | null } };
-        setGraceUntil(statusJson.data?.grace_until ?? null);
-      }
-    }
-  };
-
-
   const refreshMemberData = async (projectId: string) => {
     if (!projectId) return;
 
@@ -402,8 +388,6 @@ export default function SettingsPage() {
     void loadContext().catch((err) => { console.error('설정 컨텍스트 로드 실패', err); });
 
     void refreshProjects().catch((err) => { console.error('프로젝트 목록 로드 실패', err); });
-
-    void refreshInvitations().catch((err) => { console.error('초대 목록 로드 실패', err); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProjectId, orgId]);
 
@@ -755,12 +739,6 @@ export default function SettingsPage() {
               <>
                 <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('billing')}</span>
                 {isEEEnabled() && (
-                  <TabsTrigger value="subscription">
-                    <CreditCard className="h-4 w-4" />
-                    {t('tabSubscription')}
-                  </TabsTrigger>
-                )}
-                {isEEEnabled() && (
                   <TabsTrigger value="billing">
                     <CreditCard className="h-4 w-4" />
                     {t('tabBilling')}
@@ -824,6 +802,21 @@ export default function SettingsPage() {
                   />
                 )}
                 <BlockedUsersSection />
+
+                <SectionCard>
+                  <SectionCardHeader>
+                    <div className="space-y-1">
+                      <h2 className="text-base font-semibold text-foreground">{tLegal('policiesHeading')}</h2>
+                    </div>
+                  </SectionCardHeader>
+                  <SectionCardBody className="space-y-4">
+                    <LegalLinks className="justify-start text-sm text-muted-foreground" />
+                    <div className="border-t border-border pt-4">
+                      <p className="mb-1.5 text-xs font-medium text-muted-foreground">{tLegal('businessInfoHeading')}</p>
+                      <BusinessInfoBlock className="justify-start text-xs text-muted-foreground" />
+                    </div>
+                  </SectionCardBody>
+                </SectionCard>
               </div>
             </TabsContent>
 
@@ -1339,47 +1332,6 @@ export default function SettingsPage() {
                 <SectionCardBody>
                   {/* S34: 4모드(View[S29 active+simulator]/Edit/History/Diff) 라인 에디터 — View 내부에 기존 2-pane 포함 */}
                   <WorkflowLineEditorSection projectId={currentProjectId} />
-                </SectionCardBody>
-              </SectionCard>
-            </TabsContent>
-            ) : null}
-
-            {isEEEnabled() && adminChecked && isAdmin ? (
-            <TabsContent value="subscription">
-              <SectionCard>
-                <SectionCardHeader>
-                  <div className="space-y-1">
-                    <h2 className="text-base font-semibold text-foreground">{t('manageSubscription')}</h2>
-                    <p className="text-sm text-muted-foreground">{t('subscriptionDescription')}</p>
-                  </div>
-                </SectionCardHeader>
-                <SectionCardBody className="space-y-3">
-                  {graceUntil && new Date(graceUntil) > new Date() ? (
-                    <Alert variant="warning">
-                      <AlertDescription>{t('gracePeriodNotice', { date: new Date(graceUntil).toLocaleDateString('ko-KR') })}</AlertDescription>
-                    </Alert>
-                  ) : null}
-                  <Button
-                    variant="glass"
-                    size="lg"
-                    onClick={async () => {
-                      try {
-                        const res = await fetch('/api/subscription/portal', { method: 'POST' });
-                        if (res.ok) {
-                          const json = await res.json() as { data: { portalUrl: string } };
-                          window.open(json.data.portalUrl, '_blank');
-                        } else {
-                          addToast({ type: 'error', title: t('billingPortalError') });
-                        }
-                      } catch (err) {
-                        // 사용자 액션(결제 포털)인데 조용히 실패하면 버튼이 무반응처럼 보인다 — 안내.
-                        console.error('결제 포털 열기 실패', err);
-                        addToast({ type: 'error', title: t('billingPortalError') });
-                      }
-                    }}
-                  >
-                    {t('manageSubscriptionBtn')}
-                  </Button>
                 </SectionCardBody>
               </SectionCard>
             </TabsContent>

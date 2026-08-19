@@ -10,6 +10,7 @@ import { FILE_TINT_CLASS, fileExtLabel, fileTypeTint } from '@/lib/storage/forma
 import type { Asset } from '@/lib/storage/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fetchWithAuth } from '@/lib/db/client';
+import type { ReadingPanelTarget } from '@/components/chat/reading-panel';
 
 /** 파일 타입 글리프 — getFileIcon 결과를 createElement 로 직접 렌더(render 중 컴포넌트 생성 lint 회피). */
 function fileGlyph(contentType: string | null, className: string) {
@@ -22,6 +23,12 @@ interface AssetEmbedCardProps {
   label: string;
   /** 내 메시지(brand 버블) 위면 카드 배경을 반투명 화이트로(목업 ②). */
   ownMessage: boolean;
+  /**
+   * story #2781 — 채팅 컨텍스트(제공됨)에서는 클릭이 `/storage` 이탈 대신 우측 ReadingPanel의
+   * FileViewer를 연다(#2766·#2780과 같은 패턴 — «채팅을 벗어나지 않는다»의 마지막 사각).
+   * 미제공(채팅 밖 호출부)이면 기존 `<Link>` 이동 그대로(회귀 0).
+   */
+  onOpenReadingPanel?: (target: ReadingPanelTarget) => void;
 }
 
 /**
@@ -30,7 +37,7 @@ interface AssetEmbedCardProps {
  * 썸네일(타입 틴트 글리프) + 이름 + 메타 + 외부링크 화살표. 링크 `/storage?asset={id}`.
  * 로딩=스켈레톤·미존재(fetch 실패/404)=graceful(평문 라벨, 링크/화살표 제거).
  */
-export function AssetEmbedCard({ entityId, label, ownMessage }: AssetEmbedCardProps) {
+export function AssetEmbedCard({ entityId, label, ownMessage, onOpenReadingPanel }: AssetEmbedCardProps) {
   const t = useTranslations('chats');
   const [asset, setAsset] = useState<Asset | null>(null);
   const [loading, setLoading] = useState(true);
@@ -100,11 +107,8 @@ export function AssetEmbedCard({ entityId, label, ownMessage }: AssetEmbedCardPr
   const ext = fileExtLabel(asset.content_type, asset.name);
   const meta = `${ext} · ${formatFileSize(asset.size_bytes)}`;
 
-  return (
-    <Link
-      href={`/storage?asset=${asset.id}`}
-      className={`mt-2 flex max-w-[300px] items-center gap-2.5 rounded-md border px-2.5 py-2 no-underline transition-colors ${cardSurface}`}
-    >
+  const inner = (
+    <>
       {/* 썸네일 38×38 — 타입 틴트 글리프(서명 썸네일 필드 부재 → 글리프, 추후 affordance). */}
       <span className={`grid size-[38px] shrink-0 place-items-center overflow-hidden rounded-sm ${ownMessage ? 'bg-white/15 text-white' : tint}`}>
         {fileGlyph(asset.content_type, 'size-[17px]')}
@@ -114,6 +118,29 @@ export function AssetEmbedCard({ entityId, label, ownMessage }: AssetEmbedCardPr
         <p className={`mt-px text-[11px] ${metaTone}`}>{meta}</p>
       </div>
       <ExternalLink className={`size-[15px] shrink-0 ${arrowTone}`} aria-hidden />
+    </>
+  );
+
+  if (onOpenReadingPanel) {
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          onOpenReadingPanel({ kind: 'attachment', assetId: asset.id, label: asset.name, contentType: asset.content_type })
+        }
+        className={`mt-2 flex max-w-[300px] items-center gap-2.5 rounded-md border px-2.5 py-2 text-left transition-colors ${cardSurface}`}
+      >
+        {inner}
+      </button>
+    );
+  }
+
+  return (
+    <Link
+      href={`/storage?asset=${asset.id}`}
+      className={`mt-2 flex max-w-[300px] items-center gap-2.5 rounded-md border px-2.5 py-2 no-underline transition-colors ${cardSurface}`}
+    >
+      {inner}
     </Link>
   );
 }

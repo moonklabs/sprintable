@@ -121,6 +121,11 @@ async def test_list_team_members_include_inactive_true_omits_is_active_filter_or
         mock_repo = MagicMock()
         mock_repo.list = AsyncMock(return_value=[_mock_member(type_="agent"), _mock_member(type_="agent", is_active=False)])
         app.dependency_overrides[_get_repo_read] = lambda: mock_repo
+        # story #2751 — _inject_active_stories()가 이제 get_verified_map() 배치 조회도
+        # 하므로(session.execute 재사용) 빈 결과로 명시(검증 대상 밖 — 무관 회귀 방지).
+        _verify_result = MagicMock()
+        _verify_result.all.return_value = []
+        session.execute = AsyncMock(return_value=_verify_result)
 
         async with client as c:
             resp = await c.get("/api/v2/team-members?type=agent&include_inactive=true")
@@ -145,6 +150,9 @@ async def test_list_team_members_include_inactive_omitted_preserves_default_acti
         mock_repo = MagicMock()
         mock_repo.list = AsyncMock(return_value=[_mock_member(type_="agent")])
         app.dependency_overrides[_get_repo_read] = lambda: mock_repo
+        _verify_result = MagicMock()
+        _verify_result.all.return_value = []
+        session.execute = AsyncMock(return_value=_verify_result)
 
         async with client as c:
             resp = await c.get("/api/v2/team-members?type=agent")
@@ -170,6 +178,9 @@ async def test_list_team_members_typo_param_silently_ignored_confirms_root_cause
         mock_repo = MagicMock()
         mock_repo.list = AsyncMock(return_value=[_mock_member(type_="agent")])
         app.dependency_overrides[_get_repo_read] = lambda: mock_repo
+        _verify_result = MagicMock()
+        _verify_result.all.return_value = []
+        session.execute = AsyncMock(return_value=_verify_result)
 
         async with client as c:
             resp = await c.get("/api/v2/team-members?type=agent&include_inactivee=true")  # 오타
@@ -191,6 +202,9 @@ async def test_list_team_members_include_inactive_true_omits_is_active_filter_pr
         mock_repo = MagicMock()
         mock_repo.list = AsyncMock(return_value=[_mock_member(), _mock_member(is_active=False)])
         app.dependency_overrides[_get_repo_read] = lambda: mock_repo
+        _verify_result = MagicMock()
+        _verify_result.all.return_value = []
+        session.execute = AsyncMock(return_value=_verify_result)
 
         with patch("app.routers.team_members.has_project_access", new=AsyncMock(return_value=True)):
             async with client as c:

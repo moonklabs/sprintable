@@ -23,8 +23,13 @@ sys.path.insert(0, ".")
 @pytest.mark.anyio
 async def test_baseline_unpatched_arg_model_silently_drops_unknown_kwarg():
     """positive control — 패치 전 FastMCP 기본 동작 자체가 조용히 삼킨다는 것을 직접 재현.
-    이게 실측 없이 「SprintableInput만 고치면 된다」고 믿기 쉬웠던 지점이다."""
-    from mcp.server.fastmcp.tools.base import Tool
+    이게 실측 없이 「SprintableInput만 고치면 된다」고 믿기 쉬웠던 지점이다.
+
+    story #2772(mcp 2.0 이관) — Tool.run()이 이제 context 위치인자를 요구한다(2.0.0 실측:
+    `run(self, arguments, context: Context[...], convert_result=False)`). Context()는 전
+    필드 기본값 None이라 단위테스트용 최소 인스턴스로 충분(실측 확認)."""
+    from mcp.server.mcpserver import Context
+    from mcp.server.mcpserver.tools.base import Tool
 
     captured = {}
 
@@ -35,7 +40,7 @@ async def test_baseline_unpatched_arg_model_silently_drops_unknown_kwarg():
     tool = Tool.from_function(wrapper, name="unpatched_probe")
     # wrapper 시그니처엔 애초에 존재하지 않는 인자 — MCP 클라가 미지 필드(days같은)를 보내는
     # 상황을 재현. 패치 전 baseline은 이걸 조용히 버리고 정상 200류 응답을 낸다(에러 0).
-    result = await tool.run({"limit": 5, "some_field_wrapper_never_declared": 14})
+    result = await tool.run({"limit": 5, "some_field_wrapper_never_declared": 14}, Context())
     assert result == []
     assert captured["received"] == {"limit": 5, "project_id": None}, (
         "패치 전 baseline은 wrapper 시그니처에 없는 인자를 조용히 버린다(에러 없음) — "
@@ -46,12 +51,13 @@ async def test_baseline_unpatched_arg_model_silently_drops_unknown_kwarg():
 @pytest.mark.anyio
 async def test_registered_standup_history_tool_rejects_unknown_days_arg():
     """AC2 본체 — 실제 등록된(server.py, lockdown 패치 적용됨) 도구로 스토리 repro를 재현."""
+    from mcp.server.mcpserver import Context
+    from mcp.server.mcpserver.exceptions import ToolError
     from sprintable_mcp import server as srv
-    from mcp.server.fastmcp.exceptions import ToolError
 
     tool = srv.mcp._tool_manager.get_tool("sprintable_standup_history")
     with pytest.raises(ToolError) as ei:
-        await tool.run({"limit": 5, "totally_bogus_arg": 1})
+        await tool.run({"limit": 5, "totally_bogus_arg": 1}, Context())
     msg = str(ei.value)
     assert "totally_bogus_arg" in msg
     assert "accepted arguments" in msg, "거부 메시지가 accepted 인자 목록을 말해야 한다(올리베이라군 요청 — «다음 발»을 줘야 함)"
@@ -61,24 +67,26 @@ async def test_registered_standup_history_tool_rejects_unknown_days_arg():
 @pytest.mark.anyio
 async def test_registered_standup_history_tool_still_accepts_known_args():
     """회귀 방지 — lockdown이 정상 콜까지 깨면 안 된다."""
+    from mcp.server.mcpserver import Context
     from sprintable_mcp import server as srv
 
     tool = srv.mcp._tool_manager.get_tool("sprintable_standup_history")
-    result = await tool.run({"limit": 5, "days": 7})
+    result = await tool.run({"limit": 5, "days": 7}, Context())
     assert isinstance(result, list)
 
 
 def test_all_registered_tools_share_the_same_lockdown():
-    """AC2 카운트 — `_TOOL_DEFS` 122개 + ping 1개 = 123개(story #2634: sprintable_publish_event/
+    """AC2 카운트 — `_TOOL_DEFS` 123개 + ping 1개 = 124개(story #2634: sprintable_publish_event/
     sprintable_list_event_definitions 추가로 117→119. story #2636: sprintable_register_
     event_definition/sprintable_update_event_definition 추가로 119→121. story #2668:
     sprintable_submit_for_approval 추가로 121→122. story #2709: sprintable_request_decision
-    추가로 122→123) 전부 arg_model이
+    추가로 122→123. story b6b9c52d(#2707 부수): sprintable_import_image_artifact 추가로
+    123→124) 전부 arg_model이
     extra=forbid로 잠겨 있어야 한다(상속 갈래 SprintableInput/BaseModel 안 가리고 전부)."""
     from sprintable_mcp import server as srv
 
     tools = srv.mcp._tool_manager.list_tools()
-    assert len(tools) == 123
+    assert len(tools) == 124
     unlocked = [
         t.name for t in tools
         if t.fn_metadata.arg_model.model_config.get("extra") != "forbid"

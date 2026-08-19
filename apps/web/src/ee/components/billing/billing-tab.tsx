@@ -5,12 +5,10 @@
  * isEEEnabled()=true 환경에서만 렌더링됨. 유나 시안(artifact a1bd79ae) + 핸드오프 doc
  * (billing2-ui-handoff-v1) SSOT.
  *
- * isPricePublic — 대표 승인 게이트의 진실은 서버 필드(#2474 A관리1 BE)가 최종형이나, 그 API
- * 착지 前까지는 하드코드로 켠다(story #2605 그라운딩: 렌더 경로가 TIER_DEFINITIONS 로컬 상수만
- * 읽고 #2474 API를 호출하는 자리가 코드 어디에도 없음을 확認 — 이 상수는 "API 부재로 대신 켜는
- * 로컬 값"일 뿐, #2474가 기능적으로 선결조건은 아니다). 대표 승인 완료(2026-08-13) 반영.
- * #2474 착지 후 이 상수를 실 플래그 fetch 로 교체하는 것이 유일한 변경점이 되도록
- * 나머지 렌더 로직은 이미 isPricePublic 하나로 분기돼 있다.
+ * isPricePublic/checkoutEnabled — story #2728(선생님 결정③, 2026-08-18): 가변값은 어드민
+ * 관리(하드코딩 금지). `GET /api/v2/platform-settings`에서 fetch — 둘 다 기본 false(Toss
+ * 심사 완료 前 prod 결제표면 전면 차단, 결정②). 이전 하드코드 `IS_PRICE_PUBLIC = true`는
+ * 이 스토리가 지우는 그 위반 자체다(⛔실제로 prod에 가격이 노출되고 있었음).
  */
 
 import { useEffect, useState } from 'react';
@@ -28,6 +26,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { fetchWithAuth } from '@/lib/db/client';
 import { PricingPlanCard } from './pricing-plan-card';
 import { PricingLimitsTable } from './pricing-limits-table';
 import { PricingPacks, type PackKind } from './pricing-packs';
@@ -43,8 +42,10 @@ import {
   type TierId,
 } from './pricing-data';
 
-/** #2474 A관리1 BE 뜨기 前까지 하드코드 — 대표 승인 완료(2026-08-13, story #2605)로 켠다. */
-const IS_PRICE_PUBLIC = true;
+interface PlatformSettings {
+  billing_price_public: boolean;
+  billing_checkout_enabled: boolean;
+}
 
 interface BillingStatus {
   org_id: string;
@@ -54,8 +55,6 @@ interface BillingStatus {
   current_period_end: string | null;
   can_manage: boolean;
 }
-
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
 function toTierId(raw: string | undefined): TierId {
   // story #2403 후속(2026-08-17) — prod org_subscriptions 실측: tier='pro'(레거시 Polar,
@@ -74,6 +73,7 @@ export function BillingTab({ orgId }: { orgId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<BillingStatus | null>(null);
+  const [platformSettings, setPlatformSettings] = useState<PlatformSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cycle, setCycle] = useState<'monthly' | 'yearly'>('monthly');
@@ -84,9 +84,12 @@ export function BillingTab({ orgId }: { orgId: string }) {
 
   const refetchStatus = () => {
     setLoading(true);
-    fetch(`${FASTAPI_URL()}/api/v2/billing/status`, { credentials: 'include' })
-      .then((r) => r.json() as Promise<BillingStatus>)
-      .then(setStatus)
+    // story #40659941(#2728 픽셀 검증 블로커) — FASTAPI_URL 직접 fetch는 CSP connect-src에
+    // 막힌다(브라우저→백엔드 origin 직행 금지). same-origin /api 프록시 경유로 수렴 +
+    // fetchWithAuth(콜드마운트 자동발화 GET이라 raw fetch 금지, #2689/#2691 가드).
+    fetchWithAuth('/api/billing/status', { credentials: 'include' })
+      .then((r) => r.json() as Promise<{ data: BillingStatus }>)
+      .then((json) => setStatus(json.data))
       .catch(() => setError(t('loadError')))
       .finally(() => setLoading(false));
   };
@@ -95,6 +98,16 @@ export function BillingTab({ orgId }: { orgId: string }) {
     refetchStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId]);
+
+  useEffect(() => {
+    // story #2728 — 미기입/fetch 실패 시 안전측 기본값(둘 다 false, 노출 안 함)으로
+    // 폴백한다. "못 읽으면 일단 켜서 보여준다"는 이 스위치의 존재 이유(prod 결제표면
+    // 전면 차단)를 정반대로 무력화한다.
+    fetchWithAuth('/api/platform-settings', { credentials: 'include' })
+      .then((r) => r.ok ? (r.json() as Promise<{ data: PlatformSettings }>) : null)
+      .then((json) => setPlatformSettings(json?.data ?? { billing_price_public: false, billing_checkout_enabled: false }))
+      .catch(() => setPlatformSettings({ billing_price_public: false, billing_checkout_enabled: false }));
+  }, []);
 
   // 결제②-D(#2510) — Toss 위젯 리다이렉트 왕복 복귀 처리. successUrl/failUrl 둘 다
   // /settings?tab=billing 으로 돌아오므로 여기서 쿼리파라미터로 왕복 결과를 판별한다.
@@ -155,10 +168,12 @@ export function BillingTab({ orgId }: { orgId: string }) {
 
   const currentTier = toTierId(status?.tier);
   const canManage = status?.can_manage ?? false;
+  const isPricePublic = platformSettings?.billing_price_public ?? false;
+  const checkoutEnabled = platformSettings?.billing_checkout_enabled ?? false;
 
   return (
     <div className="space-y-6 p-6">
-      {!IS_PRICE_PUBLIC && (
+      {!isPricePublic && (
         <Alert variant="info">
           <AlertDescription>{t('statePendingBanner')}</AlertDescription>
         </Alert>
@@ -200,7 +215,7 @@ export function BillingTab({ orgId }: { orgId: string }) {
         </Alert>
       )}
 
-      {IS_PRICE_PUBLIC && (
+      {isPricePublic && (
         <Tabs value={cycle} onValueChange={(v) => setCycle(v as 'monthly' | 'yearly')}>
           <div className="flex items-center gap-3">
             <TabsList>
@@ -220,10 +235,10 @@ export function BillingTab({ orgId }: { orgId: string }) {
             <PricingPlanCard
               key={tierId}
               tier={tier}
-              isPricePublic={IS_PRICE_PUBLIC}
+              isPricePublic={isPricePublic}
               isCurrent={tierId === currentTier}
               displayPriceMonthlyKrw={displayPriceMonthlyKrw}
-              onUpgrade={(target) => canManage && setUpgradeTarget(target)}
+              onUpgrade={(target) => canManage && checkoutEnabled && setUpgradeTarget(target)}
             />
           );
         })}
@@ -233,8 +248,8 @@ export function BillingTab({ orgId }: { orgId: string }) {
 
       {/* 팩 실가격(원)도 대표 승인 게이트 대상 — canPurchasePacks만 보면 승인 前에도 team/business
           티어에서 실 KRW 가격이 샌다(카디르 QA #2866 발견). isPricePublic 없이는 살 것 자체가 없다. */}
-      {IS_PRICE_PUBLIC && TIER_DEFINITIONS[currentTier].limits.canPurchasePacks && (
-        <PricingPacks onBuyPack={(kind, quantity) => canManage && setPackTarget({ kind, quantity })} />
+      {isPricePublic && TIER_DEFINITIONS[currentTier].limits.canPurchasePacks && (
+        <PricingPacks onBuyPack={(kind, quantity) => canManage && checkoutEnabled && setPackTarget({ kind, quantity })} />
       )}
 
       {!canManage && (

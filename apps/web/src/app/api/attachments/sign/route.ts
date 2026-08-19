@@ -1,5 +1,6 @@
 import { getServerSession } from '@/lib/db/server';
 import { GCS_MEMO_ATTACHMENTS_BUCKET } from '@/lib/storage/config';
+import { canonicalObjectPath as _canonicalObjectPath } from '@/lib/storage/canonical';
 import { createStorageService } from '@/lib/storage/factory';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
@@ -9,16 +10,12 @@ import { handleApiError } from '@/lib/api-error';
 //
 // GET /api/attachments/sign?path=<stored url|bare path>&conversation_id=<uuid>   (또는 story_id)
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
-const PUBLIC_PREFIX = `https://storage.googleapis.com/${GCS_MEMO_ATTACHMENTS_BUCKET}/`;
 
-// stored url → canonical bare object path. BE `_canonical_object_path` 와 동일 규칙(반드시 정합).
-// 신규 = bare path 그대로 · legacy = `https://storage.googleapis.com/{bucket}/{path}` → prefix 제거
-// · 외부 도메인/타 버킷 = null(우리 객체 아님 → 차단).
+// story #2720(2026-08-17) — 이 라우트 자체 재구현을 없애고 lib/storage/canonical.ts(FE
+// canonicalization SSOT)를 이 버킷으로 호출하는 얇은 wrapper로 대체했다. BE와의 규칙 정합은
+// asset_registry.canonical_object_path(BE SSOT)와의 대조 테스트로 pin(AC3).
 function canonicalObjectPath(stored: string): string | null {
-  if (!stored) return null;
-  if (stored.startsWith(PUBLIC_PREFIX)) return stored.slice(PUBLIC_PREFIX.length);
-  if (stored.includes('://')) return null;
-  return stored;
+  return _canonicalObjectPath(stored, GCS_MEMO_ATTACHMENTS_BUCKET);
 }
 
 export async function GET(request: Request) {

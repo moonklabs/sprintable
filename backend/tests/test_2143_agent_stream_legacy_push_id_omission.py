@@ -85,6 +85,15 @@ async def test_legacy_direct_push_frame_has_no_id_line(monkeypatch):
     monkeypatch.setattr(
         "app.services.onboarding_funnel.emit_onboarding_event", AsyncMock()
     )
+    # story #2467: /stream 연결 시 자동 verify 기동(신규 배선) — 이 테스트는 legacy id-omission
+    # 프레임 형태만 검증하므로 verify 축은 no-op(이미 verified로 봐 재트리거 안 함, 다른
+    # 무관 side-effect들과 동일한 격리 원칙).
+    monkeypatch.setattr(
+        "app.services.agent_verify.get_verification_state",
+        AsyncMock(return_value={"verify_seq": None, "acked_seq": None, "verified": True, "rail": []}),
+    )
+    monkeypatch.setattr("app.services.agent_verify.start_verification", AsyncMock())
+    monkeypatch.setattr("app.services.agent_verify.push_verification_signal", AsyncMock())
     monkeypatch.setattr("app.services.presence_online.mark_online", AsyncMock())
     monkeypatch.setattr("app.services.presence_events.emit_presence", AsyncMock())
     monkeypatch.setattr(ag, "_mark_agent_disconnected", AsyncMock())

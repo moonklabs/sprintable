@@ -65,9 +65,15 @@ def test_allowed_hosts_env_read_and_protection_toggle(monkeypatch):
 
 
 def test_module_mcp_protection_off_by_default():
-    """현 모듈 mcp(빈 hosts 임포트)는 DNS-rebinding 보호 OFF — Cloud Run 호스팅 421 회피."""
-    from sprintable_mcp.server import mcp
-    assert mcp.settings.transport_security.enable_dns_rebinding_protection is False
+    """현 모듈(빈 hosts 임포트)은 DNS-rebinding 보호 OFF — Cloud Run 호스팅 421 회피.
+
+    story #2772(mcp 2.0 이관) — transport_security는 2.0.0에서 MCPServer 생성자/`.settings`
+    에서 빠지고 streamable_http_app() 호출부 인자로만 존재(실측: mcp.settings에 그 필드 자체가
+    없음, AttributeError). 그래서 이제 mcp 인스턴스가 아니라 server.py가 export하는
+    `transport_security` 모듈 변수(=__main__.py가 streamable_http_app()에 실제로 넘기는 그
+    객체)를 직접 검증한다 — 검증 대상이 "실제로 쓰이는 값"이라는 계약은 그대로."""
+    from sprintable_mcp.server import transport_security
+    assert transport_security.enable_dns_rebinding_protection is False
 
 
 def test_allowed_origins_derive_scheme():
@@ -233,3 +239,25 @@ async def test_bearer_middleware_resets_contextvar_after_request():
     from sprintable_mcp.api_client import _api_key_override
     await _run_asgi(bearer_auth_asgi, "/mcp", {"authorization": "Bearer k1"})
     assert _api_key_override.get() is None                       # 누수 없음
+
+
+# ── ⑥ mcp 2.0 max_request_body_size vs 첨부 계약(story #2772 PO AC 리뷰 CHANGES) ──────
+
+def test_mcp_request_body_cap_covers_base64_inflated_attachment_contract():
+    """2.0.0 신규 기본 max_request_body_size=4MiB가 우리 첨부 계약(MAX_TOTAL_ATTACHMENT_BYTES
+    decoded → base64 인코딩 시 4/3 팽창)을 413으로 깨던 회귀(PO 지적) — 구조적 관계 assert로
+    고정. **한쪽만 움직이는 걸 막는다**: 누군가 MAX_TOTAL_ATTACHMENT_BYTES(첨부 상한)를 올리고
+    MAX_MCP_REQUEST_BODY_SIZE(mcp 요청 캡)를 안 같이 올리면 이 테스트가 빨강이 된다."""
+    from sprintable_mcp.server import MAX_MCP_REQUEST_BODY_SIZE
+    from sprintable_mcp.tools.attachments import MAX_TOTAL_ATTACHMENT_BYTES
+
+    # base64 인코딩 팽창(ceil(n/3)*4, attachments.py의 _MAX_ATTACHMENT_BASE64_CHARS와 동일 산식).
+    base64_inflated = ((MAX_TOTAL_ATTACHMENT_BYTES + 2) // 3) * 4
+    # JSON 봉투(MCP _meta·tool call 래퍼·다른 인자 필드) 여유 — 최소 10% 마진 요구.
+    required_minimum = int(base64_inflated * 1.1)
+
+    assert MAX_MCP_REQUEST_BODY_SIZE >= required_minimum, (
+        f"MAX_MCP_REQUEST_BODY_SIZE({MAX_MCP_REQUEST_BODY_SIZE})가 첨부 계약의 base64 팽창값+"
+        f"봉투 여유({required_minimum})보다 작다 — 첨부 상한을 올렸다면 mcp 요청 캡도 같이 "
+        f"올려야 한다(server.py의 MAX_MCP_REQUEST_BODY_SIZE)."
+    )

@@ -35,7 +35,9 @@ interface ArtifactItem {
   specPins: SpecPin[];
 }
 
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T | null> {
+// export: story #2713 — standalone 상세(artifact-detail-view.tsx)가 storyId 없이 단건 로드에
+// 재사용한다(신규 로직 0, 이 파일의 기존 로더 그대로).
+export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T | null> {
   try {
     const res = await fetch(url, init);
     if (!res.ok) return null;
@@ -46,7 +48,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T | null> 
   }
 }
 
-async function loadArtifactThreads(artifactId: string, nodes: ArtifactNode[]): Promise<CommentThread[]> {
+export async function loadArtifactThreads(artifactId: string, nodes: ArtifactNode[]): Promise<CommentThread[]> {
   const [comments, versionSummaries] = await Promise.all([
     fetchJson<BeArtifactComment[]>(`/api/visual-artifacts/${artifactId}/comments`),
     fetchJson<BeArtifactVersionSummary[]>(`/api/visual-artifacts/${artifactId}/versions`),
@@ -56,7 +58,7 @@ async function loadArtifactThreads(artifactId: string, nodes: ArtifactNode[]): P
 
 /** GET /api/gates는 BE list_gates(response_model=list[...])를 그대로 pass-through — {data} 봉투가
  * 없다(_ok() 미경유). fetchJson과 별개 helper로 raw 배열을 직접 받는다(gate-inbox.tsx와 동일 관례). */
-async function loadPendingCanonicalizeVersion(artifactId: string): Promise<number | null> {
+export async function loadPendingCanonicalizeVersion(artifactId: string): Promise<number | null> {
   try {
     const res = await fetchWithAuth(`/api/gates?work_item_id=${artifactId}&status=pending`);
     const gates = res.ok ? (await res.json()) as CanonicalizeGateLookup[] : [];
@@ -133,6 +135,20 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: body, parent_id: threadId }),
+    });
+    await refreshThreads(artifactId, nodes);
+  }
+
+  /** story #2725 — 새 좌표 스레드 생성. handleReply와 동일 CREATE 엔드포인트, parent_id 대신
+   * anchor_x/anchor_y(% — CommentThread.anchor.x/y와 같은 컨벤션)를 실어 신규 스레드로 만든다.
+   * BE 신규 0(그라운딩 확認 — 기존 POST /{id}/comments가 이미 anchor_x/anchor_y를 받음). */
+  async function handleCreateThread(
+    artifactId: string, nodes: ArtifactNode[], anchorXPercent: number, anchorYPercent: number, body: string,
+  ) {
+    await fetchJson(`/api/visual-artifacts/${artifactId}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: body, anchor_x: anchorXPercent, anchor_y: anchorYPercent }),
     });
     await refreshThreads(artifactId, nodes);
   }
@@ -286,6 +302,7 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
             onEnterEdit={() => setEditingArtifactId(artifact.id)}
             onResolveThread={(threadId) => void handleResolve(artifact.id, nodes, threadId)}
             onReplyThread={(threadId, body) => void handleReply(artifact.id, nodes, threadId, body)}
+            onCreateThread={(x, y, body) => void handleCreateThread(artifact.id, nodes, x, y, body)}
             pendingCanonicalizeVersion={pendingCanonicalizeVersion}
             onProposeCanonical={(versionNumber) => void handleProposeCanonical(artifact.id, versionNumber)}
           />

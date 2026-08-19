@@ -26,10 +26,14 @@ def test_tier_enum_is_v2_3_four_tier():
     assert "solo" not in TierEnum.enums  # v2.3 D12: solo enum 신설 금지
 
 
-def test_free_limits_seats_capped_at_3():
+def test_free_limits_org_project_hardcoded():
+    """#2776: seats(=구 max_members)는 offering_versions 카탈로그 집행으로 이관돼
+    FREE_LIMITS에서 빠졌다 — free=3 seats pin은 아래
+    test_krw_v1_seed_matches_pricing_policy_v2_3_part3의 seats 단언이 담당한다.
+    org/project 축만 여전히 이 dict의 하드코딩(#2776 스코프 밖)."""
     from ee.plan_limits import FREE_LIMITS
 
-    assert FREE_LIMITS["max_members"] == 3  # 선생님 確定 2026-08-06 04:00Z(강제, 그랜드파더링 없음)
+    assert "max_members" not in FREE_LIMITS
     assert FREE_LIMITS["max_orgs_owned"] == 1
     assert FREE_LIMITS["max_projects"] == 1
 

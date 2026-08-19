@@ -190,6 +190,13 @@ services:
       - key: TOSS_PAYMENTS_SECRET_KEY
         reason: dev와 동일 사유(TOSS_PAYMENTS_CLIENT_KEY 참고) — test_sk 값, Settings.toss_payments_secret_key.
         owner: TBD
+      - key: TOSS_WEBHOOK_SECRET
+        reason: >-
+          #2728 Toss 웹훅 서명 검증용 시크릿 — Secret Manager(TOSS_WEBHOOK_SECRET_DEV)에
+          이미 발급돼 있던 값. app/core/config.py Settings.toss_webhook_secret로 읽음.
+          Secret Manager 등록·Cloud Run env 수동 배선 PO(#2728 착수 時) — TOSS_PAYMENTS_*
+          3건과 동형, 등재만 누락돼 있었음(story #2739/054edff4).
+        owner: TBD
 
   sprintable-backend-prod:
     keys:
@@ -564,20 +571,12 @@ code_read_high_baseline:
     reason: apps/web/src/app/auth/oauth-handoff/route.ts — 기본값 없음, 미triage(기능 플래그 추정).
     declared_by: PO
     until: "2026-08-27"
-  - key: LICENSE_CONSENT
-    reason: apps/web/src/lib/ee-enabled.ts — 기본값 없음, 미triage.
-    declared_by: PO
-    until: "2026-08-27"
   - key: MCP_ALLOWED_TOKEN_REFS
     reason: apps/web/src/lib/mcp-secrets.ts — 기본값 없음, 미triage.
     declared_by: PO
     until: "2026-08-27"
   - key: NEXT_PUBLIC_APP_URL
     reason: apps/web/src/lib/auth/cookies.ts 등 — 기본값 없음, 미triage.
-    declared_by: PO
-    until: "2026-08-27"
-  - key: NEXT_PUBLIC_EE_ENABLED
-    reason: apps/web/src/lib/ee.ts — 기본값 없음, 미triage(기능 플래그 추정).
     declared_by: PO
     until: "2026-08-27"
   - key: NEXT_PUBLIC_FIREBASE_API_KEY
@@ -600,13 +599,5 @@ code_read_high_baseline:
     until: "2026-08-27"
   - key: NEXT_PUBLIC_FIREBASE_PROJECT_ID
     reason: apps/web/src/lib/auth/firebase-client.ts·lib/db/server.ts — 기본값 없음, 미triage(위와 동일 축).
-    declared_by: PO
-    until: "2026-08-27"
-  - key: NEXT_PUBLIC_TOSS_CLIENT_KEY
-    reason: >-
-      apps/web/src/ee/components/billing/toss-checkout.ts(story #2510) — 기본값 없음,
-      미triage. Toss 결제위젯 SDK 초기화용 clientKey — 실 배포 時 IaC/시크릿으로 채워질
-      알려진 필수값(secret 아님, publishable 성격 — #2878의 toss_payments_client_key와
-      한 쌍이나 그건 BE Settings 축, 이건 FE 빌드타임 축이라 별도 등재).
     declared_by: PO
     until: "2026-08-27"

@@ -15,6 +15,11 @@ class AddEvidenceInput(SprintableInput):
     ref: str
     source: str | None = None
     note: str | None = None
+    # story #2722(아티팩트·evidence 버전 pin) — 이 evidence가 아티팩트를 근거로 삼을 때 그
+    # 아티팩트의 id. 버전은 여기서 고르지 않는다 — 서버가 이 호출 시각의 latest 버전을
+    # 조회해 고정한다(같은 아티팩트가 나중에 새 버전으로 바뀌어도 이 evidence의 근거는
+    # 그대로 남는다).
+    artifact_id: str | None = None
 
 
 async def add_evidence(args: AddEvidenceInput) -> list[TextContent]:
@@ -31,6 +36,8 @@ async def add_evidence(args: AddEvidenceInput) -> list[TextContent]:
             payload["source"] = args.source
         if args.note is not None:
             payload["note"] = args.note
+        if args.artifact_id is not None:
+            payload["artifact_id"] = args.artifact_id
         result = await client.post("/api/v2/evidence", json=payload)
         return ok(result)
     except Exception as exc:

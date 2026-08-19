@@ -16,6 +16,7 @@ import { AttachmentImage } from './attachment-image';
 import { AttachmentMedia } from './attachment-media';
 import { AttachmentFile } from './attachment-file';
 import { ImageLightbox, type LightboxItem } from './image-lightbox';
+import type { ReadingPanelTarget } from './reading-panel';
 import { MessageContextMenu, type CiteAction } from './message-context-menu';
 import { SenderProfilePopover } from './sender-profile-popover';
 import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from './presence-dot';
@@ -65,6 +66,10 @@ interface ChatBubbleProps {
   /** story #2637 — chat-view.tsx가 대화당 1회 배치조회한 event_definitions 카탈로그(entityStatusByKey와
    * 동일 패턴). 생략하면(undefined) 이벤트 메시지도 BE 제네릭 폴백 텍스트로 안전하게 그려진다. */
   eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
+  /** story #2766(레인 A) — ChatView가 물려주면 doc 임베드 미리보기·비-이미지 첨부 클릭이
+   * 중앙 모달/새 탭 대신 우측 ReadingPanel을 연다. 생략하면(undefined, ThreadPanel 등 아직
+   * 안 물려주는 호출부) 기존 동작(모달·window.open) 그대로 — 회귀 없음. */
+  onOpenReadingPanel?: (target: ReadingPanelTarget) => void;
 }
 
 interface ContextMenuState {
@@ -188,9 +193,10 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
   );
 }
 
-function ChatMarkdown({ content, isMine, references, entityStatusByKey }: {
+function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenReadingPanel }: {
   content: string; isMine: boolean; references: ChatMessage['references'];
   entityStatusByKey?: Record<string, EntityStatusFetchState>;
+  onOpenReadingPanel?: (target: ReadingPanelTarget) => void;
 }) {
   const text = isMine ? 'text-primary-foreground' : 'text-foreground';
   const muted = isMine ? 'text-primary-foreground/70' : 'text-muted-foreground';
@@ -220,7 +226,11 @@ function ChatMarkdown({ content, isMine, references, entityStatusByKey }: {
         // 있어 첫 자식만 읽으면 라벨이 잘린다. 전 자식을 이어붙인다(hastNodeText가
         // 재귀로 하듯 여기도 동일 패턴).
         const label = (link!.children ?? []).map(hastNodeText).join('') || m[2]!;
-        return <EmbedCard entity_type={m[1]!} entity_id={m[2]!} title={label} status={status} />;
+        const openReadingPanel = onOpenReadingPanel
+          ? (entityType: string, entityId: string, t: string | null, s: string | null, h: string | null) =>
+              onOpenReadingPanel({ kind: 'entity', entityType, entityId, title: t, status: s, href: h })
+          : undefined;
+        return <EmbedCard entity_type={m[1]!} entity_id={m[2]!} title={label} status={status} onOpenReadingPanel={openReadingPanel} />;
       }
       return <p className={`mb-1.5 [overflow-wrap:anywhere] text-sm leading-relaxed last:mb-0 ${text}`}>{children}</p>;
     },
@@ -272,7 +282,7 @@ function ChatMarkdown({ content, isMine, references, entityStatusByKey }: {
         // 주석 참조) mention_parser가 애초에 entity_references에 안 쓴다 — stored 참조와
         // 대조하면 asset 임베드가 전부 유령으로 오판된다. 유령 판정 자체를 안 태운다.
         if (m[1]!.toLowerCase() === 'asset') {
-          return <AssetEmbedCard entityId={m[2]!} label={String(children)} ownMessage={isMine} />;
+          return <AssetEmbedCard entityId={m[2]!} label={String(children)} ownMessage={isMine} onOpenReadingPanel={onOpenReadingPanel} />;
         }
         const ghost = isGhostReference(references, m[1]!, m[2]!);
         const referenceMeta = ghost ? null : findReferenceMeta(references, m[1]!, m[2]!);
@@ -290,7 +300,7 @@ function ChatMarkdown({ content, isMine, references, entityStatusByKey }: {
       }
       return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
     },
-  }), [text, muted, codeBg, border, isMine, references, entityStatusByKey]);
+  }), [text, muted, codeBg, border, isMine, references, entityStatusByKey, onOpenReadingPanel]);
 
   if (!hasMarkdown && !hasMention) {
     return (
@@ -320,7 +330,7 @@ const LONG_PRESS_MS = 500;
 export function ChatBubble({
   message, isMine, isGrouped = false, onOpenThread, onDelete, onBlockUser, presenceStatus, isWorking = false,
   highlight = false, projectId, isCiteAnchor = false, isCiteInRange = false, citeAction, entityStatusByKey,
-  hitlAnswer = null, onRespondHitl, eventDefinitionsByKey,
+  hitlAnswer = null, onRespondHitl, eventDefinitionsByKey, onOpenReadingPanel,
 }: ChatBubbleProps) {
   const t = useTranslations('chats');
   const isAgent = message.sender_type === 'agent';
@@ -561,7 +571,7 @@ export function ChatBubble({
                 ? 'rounded-tr-sm bg-primary text-primary-foreground'
                 : 'rounded-tl-sm bg-muted text-foreground'
             }`}>
-              <ChatMarkdown content={displayContent} isMine={isMine} references={message.references} entityStatusByKey={entityStatusByKey} />
+              <ChatMarkdown content={displayContent} isMine={isMine} references={message.references} entityStatusByKey={entityStatusByKey} onOpenReadingPanel={onOpenReadingPanel} />
             </div>
           )}
 
@@ -639,6 +649,12 @@ export function ChatBubble({
                     conversationId={message.memo_id}
                     label={label}
                     Icon={getFileIcon(att.content_type)}
+                    contentType={att.content_type}
+                    onOpenPanel={
+                      onOpenReadingPanel
+                        ? (t) => onOpenReadingPanel({ kind: 'attachment', ...t })
+                        : undefined
+                    }
                   />
                 );
               })}

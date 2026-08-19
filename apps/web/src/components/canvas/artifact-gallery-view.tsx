@@ -116,6 +116,15 @@ function ArtifactCard({
         <span className="shrink-0 rounded border border-border bg-muted/60 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-muted-foreground">
           {axisT('galleryLatestChip', { version: artifact.latestVersionNumber })}
         </span>
+        {/* story #2724(2026-08-17, 페드루 PO 판정) — 카드 레벨 미연결 배지. 사이드바 "무소속"
+         * 그룹 라벨(축 기준)과는 다른 축의 정보(story_id·doc_id 원자값 기준, 위 GalleryArtifact
+         * Summary 주석 참조)라 중복 아님 — 그리드 스크롤만으로 바로 보이는 게 목적(발견성).
+         * ⚠️표현(색·아이콘·문구 톤)은 스케치 — 유나 design 게이트에서 다듬어짐 전제. */}
+        {artifact.unlinked ? (
+          <span className="ml-auto shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] font-medium italic text-muted-foreground">
+            {axisT('galleryUnlinkedBadge')}
+          </span>
+        ) : null}
       </div>
     </button>
   );

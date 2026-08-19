@@ -9,8 +9,10 @@ import { ArtifactVersionRail } from './artifact-version-rail';
 import { AnchorPin } from './anchor-pin';
 import { SpecPinMarker } from './spec-pin-marker';
 import { CommentThreadCard } from './comment-thread-card';
+import { CommentComposePopover } from './comment-compose-popover';
 import { DescriptionPane } from './description-pane';
 import { ExportDialog } from './export-dialog';
+import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
 import type { ArtifactVersion, MemberRef, VisualArtifact } from '@/services/canvas';
 import type { ArtifactNode } from '@/services/canvas-nodes';
 import type { CommentThread } from '@/services/canvas-comments';
@@ -20,8 +22,6 @@ interface ArtifactViewerProps {
   artifact: VisualArtifact;
   versions: ArtifactVersion[];
   memberMap?: Record<string, MemberRef>;
-  /** mock 목적 — threads가 없을 때만 쓰이는 폴백 헤더 카운트(C2 착지 전). */
-  commentCount?: number;
   /** C2 — 좌표 앵커 스레드는 스테이지에 핀 오버레이. element 앵커는 후속(실 artifact tree
    * 좌표 유도 필요 — 지금은 좌표 앵커만 오버레이). 헤더 아래 스레드 목록 패널도 이 prop으로
    * 렌더(있으면 element/coordinate 앵커 모두 카드로 나열 — 좌표 앵커만 핀 오버레이도 겸함). */
@@ -41,6 +41,9 @@ interface ArtifactViewerProps {
   /** C2-S6 실 뮤테이션 — 생략하면 카드는 읽기전용(reply 입력/resolve 버튼이 no-op). */
   onResolveThread?: (threadId: string) => void;
   onReplyThread?: (threadId: string, body: string) => void;
+  /** story #2725 — 새 좌표 스레드 생성(핀 추가 모드에서 캔버스 픽 → 작성). 생략하면 헤더
+   * 배지가 토글 불가한 순수 카운트 표시로 폴백(onResolveThread/onReplyThread와 동일 옵션 규약). */
+  onCreateThread?: (anchorXPercent: number, anchorYPercent: number, body: string) => void;
   /** C4-S8 정본화 — 승인은 새 UI 없이 기존 GateInbox가 처리(§1), 여기선 제안만. 선택된
    * 버전에 이미 대기 중인 제안이 있으면 pendingCanonicalizeVersion === selectedVersion. */
   pendingCanonicalizeVersion?: number | null;
@@ -54,8 +57,8 @@ interface ArtifactViewerProps {
  * 받는 순수 뷰라 실 API 착지 시 fetch 래퍼만 새로 감싸면 됨(컴포넌트 자체는 안 바뀜).
  */
 export function ArtifactViewer({
-  artifact, versions, memberMap = {}, commentCount = 0, threads, nodes = [], specPins, onEnterEdit, onResolveThread, onReplyThread,
-  pendingCanonicalizeVersion, onProposeCanonical, className,
+  artifact, versions, memberMap = {}, threads, nodes = [], specPins, onEnterEdit, onResolveThread, onReplyThread,
+  onCreateThread, pendingCanonicalizeVersion, onProposeCanonical, className,
 }: ArtifactViewerProps) {
   const t = useTranslations('canvas');
   const [selectedVersion, setSelectedVersion] = useState(artifact.current_version);
@@ -65,6 +68,10 @@ export function ArtifactViewer({
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [selectedSpecPinId, setSelectedSpecPinId] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  // story #2725 — 핀 추가 모드(토글)+draft 핀(픽된 좌표, 아직 미저장). 픽 순간 모드는 꺼진다
+  // (한 번에 하나만 작성 — 연속 픽 시 이전 draft가 조용히 버려지는 혼란 방지).
+  const [pinAddMode, setPinAddMode] = useState(false);
+  const [draftPin, setDraftPin] = useState<{ x: number; y: number } | null>(null);
   // story d72db00a — ArtifactStage의 콘텐츠 레이어에 직접 꽂힌다(contentRef prop 경유),
   // 뷰어 크롬 wrapper가 아니다 — PNG export가 크롬 없이 아트보드 전체 프레임만 캡처하도록.
   const captureTargetRef = useRef<HTMLDivElement>(null);
@@ -83,6 +90,19 @@ export function ArtifactViewer({
   function selectSpecPin(id: string) {
     setSelectedSpecPinId((cur) => (cur === id ? null : id));
     setSelectedThreadId(null);
+  }
+
+  function handlePickCoordinate(xPercent: number, yPercent: number) {
+    setPinAddMode(false);
+    setDraftPin({ x: xPercent, y: yPercent });
+  }
+  function handleComposeSubmit(body: string) {
+    if (!draftPin) return;
+    onCreateThread?.(draftPin.x, draftPin.y, body);
+    setDraftPin(null);
+  }
+  function handleComposeCancel() {
+    setDraftPin(null);
   }
 
   return (
@@ -172,13 +192,26 @@ export function ArtifactViewer({
             >
               <Download className="h-3.5 w-3.5" aria-hidden />
             </button>
-            <span
-              title={threads ? undefined : t('commentsComingSoon')}
-              className={`flex items-center gap-1 text-xs ${threads ? '' : 'opacity-50'}`}
-            >
-              <MessageCircle className="h-3.5 w-3.5" aria-hidden />
-              {threads ? (openThreadCount > 0 ? openThreadCount : null) : (commentCount > 0 ? commentCount : null)}
-            </span>
+            {/* story #2725 — commentsComingSoon 자리표시자 폐기(미착지 트랙이 착지). onCreateThread
+             * 없으면(호출부 미배선) 토글 불가한 순수 카운트 표시로 폴백 — onResolveThread/onReplyThread와
+             * 동일한 "옵션 생략=읽기전용" 규약. */}
+            {onCreateThread ? (
+              <button
+                type="button"
+                onClick={() => setPinAddMode((v) => !v)}
+                aria-pressed={pinAddMode}
+                title={t('addThreadToggleAction')}
+                className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs ${pinAddMode ? 'bg-primary/10 text-primary' : 'hover:text-foreground'}`}
+              >
+                <MessageCircle className="h-3.5 w-3.5" aria-hidden />
+                {openThreadCount > 0 ? openThreadCount : null}
+              </button>
+            ) : (
+              <span className="flex items-center gap-1 text-xs">
+                <MessageCircle className="h-3.5 w-3.5" aria-hidden />
+                {openThreadCount > 0 ? openThreadCount : null}
+              </span>
+            )}
           </span>
         </div>
 
@@ -192,6 +225,8 @@ export function ArtifactViewer({
                   title={artifact.title}
                   canvasBounds={activeVersion.canvasBounds}
                   contentRef={captureTargetRef}
+                  pinAddMode={pinAddMode}
+                  onPickCoordinate={onCreateThread ? handlePickCoordinate : undefined}
                   overlay={
                     // C2 §1 — 좌표 앵커 스레드만 오버레이(element 앵커는 실 artifact tree 좌표 유도 필요, 후속).
                     // story 1948d19d §2 — 이제 ArtifactStage의 캔버스 좌표계 안에서 pan/zoom을 그대로
@@ -220,6 +255,24 @@ export function ArtifactViewer({
                           style={{ left: pin.anchorX ?? 0, top: pin.anchorY ?? 0 }}
                         />
                       )) : null}
+                      {/* story #2725 — draft 핀(저장 전) + compose 팝오버. isViewingLatest 무관하게
+                       * 항상 노출(핀 추가 자체가 항상 latest 버전 대상이라 selectedVersion과
+                       * 무관 — BE CREATE는 버전 개념 없이 artifact 스코프, spec pin과 다른 계약). */}
+                      {draftPin ? (
+                        <>
+                          <AnchorPin
+                            number={null}
+                            state="draft"
+                            className="absolute z-10"
+                            style={{ left: `${draftPin.x}%`, top: `${draftPin.y}%` }}
+                          />
+                          <CommentComposePopover
+                            onSubmit={handleComposeSubmit}
+                            onCancel={handleComposeCancel}
+                            style={{ left: `${draftPin.x}%`, top: `${draftPin.y}%` }}
+                          />
+                        </>
+                      ) : null}
                     </>
                   }
                 />
@@ -257,6 +310,10 @@ export function ArtifactViewer({
             ))}
           </div>
         ) : null}
+        {/* story #2721(아티팩트·원장 1급화 1단) — 「이것을 가리키는 것들」. 신규 뷰어 0(기존
+         * EntityBacklinksSection 재사용, doc/story와 동형) — 뷰어가 곧 상세 표면이라 여기 마운트
+         * (ArtifactExpandDialog는 순수 캔버스 프리뷰라 대상 아님). */}
+        <EntityBacklinksSection entityType="artifact" entityId={artifact.id} />
       </div>
       <ExportDialog
         open={exportOpen}

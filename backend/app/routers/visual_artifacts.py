@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import re
 import uuid
 from datetime import datetime
 
@@ -12,12 +15,15 @@ from app.dependencies.auth import AuthContext, get_current_user, get_scope_conte
 from app.dependencies.database import get_db
 from app.models.asset import Asset
 from app.services.artifact_image_url import _canonicalize_props, sign_image_srcs_in_nodes
+from app.services.asset_registry import DEFAULT_CONTAINER
+from app.services.storage import get_storage_provider
 from app.models.visual_artifact import (
     ArtifactComment, ArtifactExport, ArtifactNode, ArtifactSpecPin, ArtifactVersion, VisualArtifact,
 )
 from app.schemas.visual_artifact import (
     ArtifactCommentResponse,
     ArtifactExportResponse,
+    ArtifactNodeIn,
     ArtifactNodeOperation,
     ArtifactNodeOut,
     ArtifactVersionSummary,
@@ -29,6 +35,7 @@ from app.schemas.visual_artifact import (
     EditArtifactRequest,
     ExportUploadUrlRequest,
     ExportUploadUrlResponse,
+    ImportImageArtifactRequest,
     SpecPinResponse,
     UpdateSpecPinRequest,
     VisualArtifactDetail,
@@ -37,6 +44,13 @@ from app.schemas.visual_artifact import (
 from app.services.member_resolver import filter_org_member_ids
 from app.services.notification_dispatch import dispatch_notification
 from app.services.project_auth import assert_target_in_caller_org
+
+# story 64010b05 FE 라우트(apps/web import-image/route.ts)와 동일 상수(포팅판 — 20MB, 첨부
+# 100MB보다 보수적). 이 파일 안에서만 쓰는 로컬 상수라 GCS host 문자열도 artifact_image_url.py/
+# asset_registry.py와 같은 값을 여기 한 번 더 든다(이 두 파일의 기존 중복 관례 그대로 — 새 SSOT
+# 발명 0).
+_MAX_IMPORT_IMAGE_BYTES = 20 * 1024 * 1024
+_GCS_HOST = "storage.googleapis.com"
 
 router = APIRouter(prefix="/api/v2/visual-artifacts", tags=["visual-artifacts", "Work"])
 
@@ -187,6 +201,48 @@ async def create_artifact(
     return _ok(detail.model_dump(mode="json"), status=201)
 
 
+@router.post("/import-image", status_code=201)
+async def import_image_artifact(
+    body: ImportImageArtifactRequest,
+    auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """story b6b9c52d(#2707 부수) — MCP `sprintable_import_image_artifact` 전용 원콜 입구
+    (base64 in → artifact out). FE import-image 라우트(story 64010b05, apps/web
+    api/visual-artifacts/import-image/route.ts)의 서버사이드 GCS 업로드 로직을 포팅하고, 그 뒤를
+    이어 `create_artifact()`를 내부 함수 호출로 그대로 재사용(DB write 로직 사본 발명 0 — 두
+    갈래가 다시 어긋나면 create_artifact 한쪽만 고치고 여기를 잊는 사고가 난다는 뜻이니, 이
+    엔드포인트를 건드릴 땐 그 함수도 같이 봐야 한다)."""
+    if not body.content_type.startswith("image/"):
+        return _err("VALIDATION_ERROR", "content_type must be an image/* type", 400)
+    try:
+        image_bytes = base64.b64decode(body.image_base64, validate=True)
+    except (binascii.Error, ValueError):
+        return _err("VALIDATION_ERROR", "image_base64 is not valid base64", 400)
+    if len(image_bytes) > _MAX_IMPORT_IMAGE_BYTES:
+        return _err("VALIDATION_ERROR", "image too large (max 20MB)", 413)
+
+    org_id, project_id = scope["org_id"], scope["project_id"]
+    if not org_id:
+        return _err("FORBIDDEN", "org_id required", 403)
+
+    safe_title = re.sub(r"[^\w.-]+", "_", body.title).strip("_")[:128] or "image"
+    object_path = f"org/{org_id}/project/{project_id}/canvas-import/{uuid.uuid4()}-{safe_title}"
+    uploaded = await get_storage_provider().put_object(
+        DEFAULT_CONTAINER, object_path, image_bytes, content_type=body.content_type,
+    )
+    if not uploaded:
+        return _err("UPSTREAM_ERROR", "image upload failed", 502)
+
+    canonical_url = f"https://{_GCS_HOST}/{DEFAULT_CONTAINER}/{object_path}"
+    create_body = CreateArtifactRequest(
+        title=body.title, story_id=body.story_id, doc_id=body.doc_id, source="imported",
+        nodes=[ArtifactNodeIn(type="html_blob", props={"src": canonical_url})],
+    )
+    return await create_artifact(create_body, auth=auth, scope=scope, session=session)
+
+
 async def _get_artifact_or_404(
     session: AsyncSession, org_id: uuid.UUID, project_id: uuid.UUID, id: uuid.UUID
 ) -> VisualArtifact | None:
@@ -289,6 +345,40 @@ async def get_artifact(
     if detail is None:
         return _err("NOT_FOUND", "Artifact version not found", 404)
     return _ok(detail.model_dump(mode="json"))
+
+
+@router.get("/{id}/backlinks")
+async def get_artifact_backlinks(
+    id: uuid.UUID,
+    limit: int = Query(default=30, ge=1, le=200),
+    before: str | None = Query(default=None),
+    auth: AuthContext = Depends(get_current_user),
+    scope: dict = Depends(get_scope_context_no_key_scope_check),
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """GET /api/v2/visual-artifacts/{id}/backlinks — story #2721(아티팩트 원장 1급화 1단).
+    이 artifact를 가리키는 chat_message/doc/story 목록(역방향) — stories.py의
+    get_story_backlinks와 동형(`list_entity_backlinks` 코어 그대로 재사용, 새 쿼리 발명 0).
+    TARGET 접근 게이트는 이 파일 기존 관례인 `_get_artifact_or_404`(org_id+project_id 404,
+    story #2266 §8①이 요구하는 "호출부가 TARGET 접근을 이미 검증" 계약 충족).
+
+    WRITE(entity_references에 target_type=artifact 저장)는 이미 배선돼 있었다(reference_
+    registry.ENTITY_RESOLVERS에 artifact가 이미 등재 — 그라운딩 실PG 실증) — 이 엔드포인트가
+    이 스토리의 유일한 신규 로직이다. 이 파일 다른 GET들과 동형으로 `get_scope_context_no_key_
+    scope_check`(read 전용 — story #2708 판정) 사용."""
+    org_id, project_id = scope["org_id"], scope["project_id"]
+    if not org_id or not project_id:
+        return _err("FORBIDDEN", "org_id/project_id required", 403)
+    artifact = await _get_artifact_or_404(session, org_id, project_id, id)
+    if artifact is None:
+        return _err("NOT_FOUND", "Artifact not found", 404)
+
+    from app.services.backlinks import list_entity_backlinks
+    result = await list_entity_backlinks(
+        session, org_id=org_id, target_type="artifact", target_id=id,
+        auth=auth, limit=limit, cursor=before,
+    )
+    return _ok(result["data"], meta=result["meta"])
 
 
 @router.get("/{id}/versions")

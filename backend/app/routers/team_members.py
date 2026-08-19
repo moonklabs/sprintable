@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db, get_read_db
 from app.dependencies.ownership import _is_org_admin, assert_agent_owner
@@ -58,6 +59,10 @@ async def _inject_active_stories(
     """AC6: active_story_id → stories batch 조회 후 inject.
 
     #2120 AC2: online 키 배치조회(MGET 1회) → 있으면 last_seen_at override → computed_field online.
+
+    story #2751(설계②) — 이 함수는 오직 에이전트 리스트에만 호출된다(call site 확認, 아래
+    `list_team_members` 참고) — `verified` 배치 주입을 여기 같이 얹어도 human 응답에 새
+    분기를 안 만든다.
     """
     ids = {m.active_story_id for m in members if m.active_story_id}
     stories: dict[uuid.UUID, Story] = {}
@@ -69,6 +74,9 @@ async def _inject_active_stories(
     from app.services import presence_online
     online_map = await presence_online.get_online_map([m.id for m in members])
 
+    from app.services.agent_verify import get_verified_map
+    verified_map = await get_verified_map(session, [m.id for m in members])
+
     out = []
     for m in members:
         resp = TeamMemberResponse.model_validate(m)
@@ -78,6 +86,7 @@ async def _inject_active_stories(
             resp = resp.model_copy(update={
                 "active_story": ActiveStorySummary(id=s.id, title=s.title, status=s.status)
             })
+        resp = resp.model_copy(update={"verified": verified_map.get(m.id)})
         out.append(resp)
     return out
 
@@ -334,6 +343,12 @@ async def create_team_member(
     # project_access placement) = 유일 영속 경로. ⚠️ api_key 자동생성(아래)보다 선행 — agent_api_keys.
     # member_id→members FK(0080) 충족 + cut-on 무중단.
     if body.type == "agent":
+        # EE: story #2776 — max_agents 축 집행(offering_versions 정본). OSS에서는 로드되지 않음.
+        # anchor sync(실제 영속)보다 선행 — 캡 초과 요청이 members 앵커에 새겨지기 전에 막는다.
+        if settings.is_ee_enabled:
+            from ee.plan_limits import check_agent_add_limit  # type: ignore[import]
+            await check_agent_add_limit(session, org_id)
+
         from app.services.agent_anchor_sync import sync_agent_anchor_on_create
         await sync_agent_anchor_on_create(session, member, created_by)
 

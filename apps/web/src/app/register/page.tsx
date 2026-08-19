@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
+import { LegalFooter } from '@/components/legal/legal-footer';
 
 function checkPasswordRules(pw: string) {
   return {
@@ -77,7 +78,7 @@ export default function RegisterPage() {
   const showRules = passwordTouched && password.length > 0;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-8 bg-muted px-4 py-8">
       <div className="w-full max-w-sm space-y-6 rounded-2xl bg-background p-4 shadow-lg sm:p-8">
         <div className="flex flex-col items-center gap-3 text-center">
           <SprintableLogo
@@ -197,6 +198,7 @@ export default function RegisterPage() {
           </Link>
         </p>
       </div>
+      <LegalFooter />
     </div>
   );
 }

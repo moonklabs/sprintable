@@ -198,3 +198,96 @@ describe('EvidenceSection — 증거 연결 POST(긴급 정정 2026-07-28: 봉�
     expect(container.textContent).toContain('증거 연결 실패');
   });
 });
+
+describe('EvidenceSection — 아티팩트 버전 pin(story #2722 AC2)', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => { root.unmount(); });
+    container.remove();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('artifact_id+artifact_version_number가 있는 evidence는 링크가 아니라 버튼(그 버전 열기)으로 렌더된다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/evidence?')) {
+        return new Response(JSON.stringify({
+          data: [{
+            id: 'ev-artifact-1', org_id: 'org-1', work_item_id: 's1', work_item_type: 'story',
+            type: 'report', ref: 'entity:artifact:art-1', source: null, note: '재검증 근거',
+            created_by: 'member-1', created_at: '2026-08-17T00:00:00Z',
+            artifact_version_id: 'ver-2', artifact_id: 'art-1', artifact_version_number: 2,
+          }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response('{}', { status: 200 });
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <EvidenceSection workItemId="s1" workItemType="story" selfReported={true} humanVerified={null} humanVerifiedBy={null} humanVerifiedAt={null} />,
+      ));
+    });
+    const toggleBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('근거 보기'));
+    await act(async () => { toggleBtn!.click(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('재검증 근거');
+    const anchors = Array.from(container.querySelectorAll('a')).filter((a) => a.textContent?.includes('재검증 근거'));
+    expect(anchors).toHaveLength(0); // <a href=ref>로 렌더되면 안 됨(외부 링크 아니라 버전 pin 열기)
+    const evidenceBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('재검증 근거'));
+    expect(evidenceBtn).toBeTruthy();
+  });
+
+  it('클릭하면 pin된 버전(latest 아님)으로 아티팩트 상세를 조회한다', async () => {
+    const versionDetailCalls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/evidence?')) {
+        return new Response(JSON.stringify({
+          data: [{
+            id: 'ev-artifact-1', org_id: 'org-1', work_item_id: 's1', work_item_type: 'story',
+            type: 'report', ref: 'entity:artifact:art-1', source: null, note: '재검증 근거',
+            created_by: 'member-1', created_at: '2026-08-17T00:00:00Z',
+            artifact_version_id: 'ver-1', artifact_id: 'art-1', artifact_version_number: 1,
+          }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.includes('/versions/1')) {
+        versionDetailCalls.push(url);
+        return new Response(JSON.stringify({
+          data: {
+            id: 'art-1', title: '재검증 대상', story_id: 's1', epic_id: null, doc_id: null,
+            source: 'created', latest_version_number: 3, anchor_version: null,
+            created_by: 'member-1', created_at: '2026-08-17T00:00:00Z',
+            version_number: 1, version_summary: 'v1',
+            nodes: [{ id: 'n1', type: 'html_blob', props: { html: '<div>v1</div>' }, parent_id: null, sort_order: 0 }],
+          },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.includes('/versions')) {
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <EvidenceSection workItemId="s1" workItemType="story" selfReported={true} humanVerified={null} humanVerifiedBy={null} humanVerifiedAt={null} />,
+      ));
+    });
+    const toggleBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('근거 보기'));
+    await act(async () => { toggleBtn!.click(); await Promise.resolve(); await Promise.resolve(); });
+
+    const evidenceBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('재검증 근거'));
+    await act(async () => { evidenceBtn!.click(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    // artifact_version_number=1(pin된 값)로 조회했는지 — latest(3)로 조회했으면 이 스토리의
+    // 존재 이유(«그 시각 고정») 자체가 깨진다.
+    expect(versionDetailCalls.some((u) => u.includes('/art-1/versions/1'))).toBe(true);
+  });
+});

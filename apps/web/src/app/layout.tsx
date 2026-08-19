@@ -7,8 +7,12 @@ import { GoogleAnalytics } from '@/components/google-analytics';
 import { resolveAppUrl } from '@/services/app-url';
 import "./globals.css";
 
-const SITE_TITLE = "Sprintable — The PM tool where agents are teammates";
-const SITE_DESCRIPTION = "AI-powered sprint management. Kanban, memos, standups, retros, MCP server — with AI agents as first-class team members.";
+// story #2745(선생님 지적 2026-08-18, PR#3202 리뷰 유나 확認) — "PM tool"/"AI-powered sprint
+// management"는 옛 포지셔닝(우리는 PM 툴이 아니다). login.subtitle과 같은 철학 정본(개인이
+// 아니라 조직·열린 루프를 닫는다·조직을 위한 워크스페이스 OS)에서 도출 — title은 sprintable-landing
+// 정본 <title>과 동일(이미 선생님 승인).
+const SITE_TITLE = "Sprintable — Ship with AI agents";
+const SITE_DESCRIPTION = "The organization OS that closes open loops. Kanban, memos, standups, retros, MCP server — with AI agents as first-class team members.";
 
 const geistMono = Geist_Mono({
   variable: "--font-mono",

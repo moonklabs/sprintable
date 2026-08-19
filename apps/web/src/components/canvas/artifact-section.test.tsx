@@ -92,3 +92,78 @@ describe('ArtifactSection — 빈 상태 1급화 (story 9449da0e)', () => {
     expect(document.body.textContent).toContain('HTML 붙여넣기');
   });
 });
+
+describe('ArtifactSection — 새 좌표 코멘트 생성(story #2725, story-linked 표면)', () => {
+  let rectSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 1280, bottom: 800, width: 1280, height: 800, toJSON() { return {}; },
+    } as DOMRect);
+  });
+  afterEach(async () => {
+    await act(async () => { root.unmount(); });
+    container.remove();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    rectSpy.mockRestore();
+  });
+
+  it('picking a coordinate and submitting POSTs anchor_x/anchor_y (no parent_id) to the CREATE endpoint and refreshes threads', async () => {
+    const posted: unknown[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('?story_id=')) return { ok: true, status: 200, json: async () => ({ data: [{ id: 'art-1', title: 'T', story_id: 'story-1', epic_id: null, doc_id: null, source: 'created', latest_version_number: 1, anchor_version: null, created_by: null, created_at: '2026-08-17T00:00:00Z' }] }) };
+      if (url === '/api/visual-artifacts/art-1') return { ok: true, status: 200, json: async () => ({ data: { id: 'art-1', title: 'T', story_id: 'story-1', epic_id: null, doc_id: null, source: 'created', latest_version_number: 1, anchor_version: null, created_by: null, created_at: '2026-08-17T00:00:00Z', version_number: 1, version_summary: null, nodes: [] } }) };
+      if (url.includes('/pins')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      if (url.includes('/comments') && init?.method === 'POST') {
+        posted.push(JSON.parse(String(init.body)));
+        return { ok: true, status: 201, json: async () => ({ data: {} }) };
+      }
+      if (url.includes('/comments')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      if (url.includes('/versions')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      if (url.includes('/api/gates')) return { ok: true, status: 200, json: async () => [] };
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }) as unknown as ReturnType<typeof vi.fn>;
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ArtifactSection storyId="story-1" />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const toggle = container.querySelector('button[aria-pressed]') as HTMLButtonElement;
+    expect(toggle).not.toBeNull();
+    await act(async () => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const viewport = container.querySelector('[data-artifact-canvas-viewport]') as HTMLDivElement;
+    await act(async () => {
+      viewport.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, clientX: 640, clientY: 400, button: 0 }));
+      viewport.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX: 640, clientY: 400 }));
+    });
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '여기 확인 부탁');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent === '코멘트')!;
+    await act(async () => { submitButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(posted).toHaveLength(1);
+    const body = posted[0] as { content: string; anchor_x: number; anchor_y: number; parent_id?: string };
+    expect(body.content).toBe('여기 확인 부탁');
+    expect(body.anchor_x).toBeCloseTo(50, 5);
+    expect(body.anchor_y).toBeCloseTo(50, 5);
+    expect(body.parent_id).toBeUndefined();
+  });
+});

@@ -25,6 +25,27 @@ def _scalar_result(value):
     return r
 
 
+def _count_result(n: int):
+    r = MagicMock()
+    r.scalar.return_value = n
+    return r
+
+
+def _tier_result(tier: str | None):
+    r = MagicMock()
+    r.first.return_value = (tier,) if tier else None
+    return r
+
+
+def _offering_result(seats: int, max_agents: int | None = None):
+    """story #2776 — check_member_invite_limit/accept_limit이 하드코딩 캡 대신
+    offering_versions._get_offering_limits(included_seats, max_agents)를 추가로
+    조회하게 되면서, tier 조회와 count 조회 사이에 이 결과가 하나 더 필요해졌다."""
+    r = MagicMock()
+    r.first.return_value = (seats, max_agents)
+    return r
+
+
 # ─── 경로 ①: organizations.create_organization ──────────────────────────────
 
 
@@ -140,6 +161,10 @@ async def test_invite_accept_ensures_human_member():
     session.execute = AsyncMock(
         side_effect=[
             _scalar_result(invite),  # accept(): invite 조회
+            MagicMock(),             # story #2477: advisory xact lock
+            _tier_result("free"),    # story #2477: check_member_accept_limit._get_org_tier
+            _offering_result(3, 3),  # story #2776: offering_versions.included_seats 조회(신규)
+            _count_result(1),        # story #2477: accept-time cap 재검증(1명 < 3, 통과)
             MagicMock(),             # org_members upsert
             _scalar_result(om_id),   # _ensure_member_anchor: om_id 재조회
         ]
@@ -150,7 +175,8 @@ async def test_invite_accept_ensures_human_member():
 
     with patch(
         "app.services.agent_anchor_sync.ensure_human_member", new=AsyncMock()
-    ) as ehm:
+    ) as ehm, patch("app.repositories.org_invite.settings") as mock_settings:
+        mock_settings.is_ee_enabled = True
         result = await repo.accept(
             token="tok", user_id=user_id, user_email="invitee@example.com"
         )
