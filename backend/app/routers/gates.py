@@ -17,6 +17,7 @@ from app.models.hitl import HitlRequest
 from app.models.pm import Story, Task
 from app.models.visual_artifact import VisualArtifact
 from app.routers.agent_gateway import wake_agent
+from app.services.gate_github_check import publish_gate_check
 from app.services.gate_service import (
     GateUndoNotSelfError,
     GateUndoWindowExpiredError,
@@ -975,6 +976,10 @@ async def transition_gate_endpoint(
         await session.refresh(gate)
         # ccbcd9da(A-1): doc/epic 자동재개 wake — commit(recipient_seq 확정) 후 발화(이중전달 방지).
         _schedule_pending_deliveries(background_tasks, _pending_deliveries)
+        # story #2813 — 사람 승인/반려를 GitHub check-run(success/failure)으로 반영. commit 後
+        # 배경 태스크(fail-closed: 실패해도 이미 commit된 gate 상태엔 영향 없음, GitHub 쪽만 stale).
+        # merge 게이트 아니면 publish_gate_check 내부에서 조용히 no-op.
+        background_tasks.add_task(publish_gate_check, org_id, gate.id)
         return GateResponse.model_validate(gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

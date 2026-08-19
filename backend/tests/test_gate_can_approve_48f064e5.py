@@ -54,7 +54,9 @@ async def _call(resolved, *, execute_results, has_access=None, status="approved"
     # 를 1회 더 호출한다(risk_grade 사유-강제 가드) — side_effect 리스트 끝에 그 몫을 추가. 이 파일의
     # 관심사(project-access/self-approval authz)와 무관하므로 결과값은 무의미(None으로 충분).
     session.execute = AsyncMock(side_effect=[*execute_results, _result(None)])
-    transition = AsyncMock(return_value=SimpleNamespace())
+    # story #2813: 엔드포인트가 commit 後 publish_gate_check 배경 태스크 예약에 gate.id 를 읽는다
+    # (백그라운드 태스크 자체는 이 테스트에서 실행되지 않음 — BackgroundTasks().add_task 는 큐잉만).
+    transition = AsyncMock(return_value=SimpleNamespace(id=uuid.uuid4()))
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
     patches = [
         patch.object(gates_mod, "resolve_member", AsyncMock(return_value=resolved)),

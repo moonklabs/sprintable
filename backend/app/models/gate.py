@@ -19,7 +19,7 @@ neutral_facts: 관찰 사실만 (touches_migration, diff_size 등).
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, Text, func, text
+from sqlalchemy import BigInteger, Boolean, DateTime, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,6 +37,11 @@ _VALID_TRANSITIONS: set[tuple[str, str]] = {
     ("pending", "held"),       # S31 hold(일시정지·SLA pause)
     ("held", "pending"),       # S31 unhold(재개·SLA resume)
 }
+# story #2813(Gate→GitHub required check) — SHA 재-pending(승인 後 PR에 새 커밋 push 시 그 승인을
+# 무효화)은 `_VALID_TRANSITIONS`/`transition_gate`(사람 결재 전용 FSM — ActivityLog·line resolution·
+# doc-gate 등 사람 승인에만 맞는 부작용 체인이 딸림, RC#1)를 안 거친다. `resolve_gate_from_verdict`
+# (시스템 자동판정)가 이미 쓰는 것과 동일한 경량 경로 — `set_gate_status()` 직접 호출(gate_github_
+# check.py::reopen_gate_if_new_sha) — 을 재사용한다. 그래서 이 전이는 위 set에 없다(의도).
 
 
 def is_valid_transition(from_status: str, to_status: str) -> bool:
@@ -80,6 +85,13 @@ class Gate(Base):
     # 지점에서 값 비교 후 조건부로만 갱신한다(gate.py 직접 대입 금지, SSOT 헬퍼 경유).
     status_entered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     evidence_status_entered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story #2813(Gate→GitHub required check, 0262) — 이 게이트가 추적 중인 현재 GitHub
+    # check-run id. 같은 SHA의 pending→success/failure는 이 id로 PATCH, 새 SHA(재-pending)는
+    # 새 check-run 생성 후 이 값 교체.
+    github_check_run_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # story #2813 — "이 승인이 귀속된 SHA"(AC②). synchronize 웹훅의 새 head_sha와 다르면
+    # 재-pending(approved→pending) 트리거.
+    approved_head_sha: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

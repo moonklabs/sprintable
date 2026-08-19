@@ -48,7 +48,9 @@ async def _call(status: str, member_type: str):
         gate_type="merge_approval", work_item_type="story", work_item_id=uuid.uuid4(),
     )
     session.execute = AsyncMock(return_value=_gr)
-    transition = AsyncMock(return_value=SimpleNamespace())
+    # story #2813: 엔드포인트가 commit 後 publish_gate_check 배경 태스크 예약에 gate.id 를 읽는다
+    # (백그라운드 태스크 자체는 이 테스트에서 실행되지 않음 — BackgroundTasks().add_task 는 큐잉만).
+    transition = AsyncMock(return_value=SimpleNamespace(id=uuid.uuid4()))
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_resolved(member_type))), \
          patch.object(gates_mod, "transition_gate", transition), \
          patch.object(gates_mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)), \
