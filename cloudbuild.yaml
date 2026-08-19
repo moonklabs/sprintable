@@ -270,6 +270,27 @@ substitutions:
   _BACKEND_REDIS_DUAL_PUBLISH_ENABLED: 'false'
 
 steps:
+  # story #2806 — GCS 첨부 버킷(sprintable-memo-attachments) CORS를 SSOT로 durable화. 실측
+  # (디디군, 2026-08-19): 이 버킷은 dev/prod 공유(GCS_MEMO_ATTACHMENTS_BUCKET override가
+  # 배포 SSOT 어디에도 없어 코드 기본값 하나를 양쪽이 씀) — 지금까지 CORS가 배포 SSOT에
+  # 선언된 적이 0건(레포 전수 grep)이라 브라우저 signed-URL fetch(docx-preview류, PDF는
+  # iframe이라 무영향)가 origin 불문 전부 차단돼 있었다. `gcloud storage buckets update
+  # --cors-file=`은 **전체 교체**라 매 배포 재실행에도 멱등(파일 내용이 그대로면 결과도
+  # 그대로) — build/push와 무관해 초반부터 병행 실행.
+  - id: apply-gcs-attachments-cors
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        gcloud storage buckets update gs://sprintable-memo-attachments \
+          --cors-file=infra/gcs-attachments-cors.json \
+          --quiet
+        applied=$(gcloud storage buckets describe gs://sprintable-memo-attachments --format='value(cors)')
+        echo "OK: sprintable-memo-attachments CORS applied = $${applied}"
+    waitFor: ['-']
+
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
   - id: build-frontend
     name: gcr.io/cloud-builders/docker
