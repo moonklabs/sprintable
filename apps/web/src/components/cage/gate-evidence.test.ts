@@ -98,3 +98,27 @@ describe('gateHasEvidence — GitHub check 단독 신호도 실 증거로 친다
     expect(gateHasEvidence(gate)).toBe(false);
   });
 });
+
+// story #2814 2단(§5-④ 그라운딩·BE story #2815/PR#3245) — 관측모드 판별을 github_check_enforced
+// 필드 기반으로 승격. BE는 단건 조회(get_gate_endpoint)에서만 이 필드를 enrich한다.
+describe('githubCheckState — github_check_enforced 기반 승격(story #2814 2단)', () => {
+  it('enforced===false(관측모드 확定)면 run_id가 있어도 항상 숨김(가장 신뢰도 높은 신호가 우선)', () => {
+    const gate = baseGate({ status: 'approved', github_check_run_id: 12345, github_check_enforced: false });
+    expect(githubCheckState(gate)).toBeNull();
+  });
+
+  it('enforced===true인데 run_id가 아직 null이면 "관측모드"가 아니라 not_published로 승격 표시(1단엔 없던 상태)', () => {
+    const gate = baseGate({ status: 'pending', github_check_run_id: null, github_check_enforced: true });
+    expect(githubCheckState(gate)).toBe('not_published');
+  });
+
+  it('enforced가 undefined인 표면(list_gates/inbox 등 미enrich)은 1단 run_id 휴리스틱 그대로 폴백', () => {
+    const gate = baseGate({ status: 'pending', github_check_run_id: null });
+    expect(githubCheckState(gate)).toBeNull();
+  });
+
+  it('enforced===true + run_id 있으면 기존 status 매핑 그대로(1단 회귀 없음)', () => {
+    const gate = baseGate({ status: 'approved', github_check_run_id: 12345, github_check_enforced: true });
+    expect(githubCheckState(gate)).toBe('success');
+  });
+});

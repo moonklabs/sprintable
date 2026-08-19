@@ -93,6 +93,12 @@ export interface GateItem {
   // "이 승인이 귀속된 SHA" — synchronize 웹훅의 새 head_sha와 다르면 재-pending(approved→pending)
   // 트리거(BE reopen_gate_if_new_sha). null = 아직 승인 전이거나 재-pending으로 리셋된 상태.
   approved_head_sha?: string | null;
+  // story #2815(§5-④, PR#3245) — 이 저장소가 실제로 required check를 강제하는지 **명시** 판별.
+  // ⚠️단건 조회(`GET /api/v2/gates/{id}`)에서만 enrich된다(merge 게이트일 때만·repo 조회 1회
+  // 비용 때문) — list_gates/inbox 등 목록 표면은 이 필드가 항상 undefined다. undefined(미상)와
+  // false(관측모드 확定)를 구분해야 하므로 optional·nullable 그대로 둔다(1단 run_id 휴리스틱과
+  // 병용 — gate-evidence.tsx#githubCheckState 참조).
+  github_check_enforced?: boolean | null;
 }
 
 // story #2054: 결재함 통합 인박스에서 HitlRequest(gate_approval park) 항목 최소 스키마(BE

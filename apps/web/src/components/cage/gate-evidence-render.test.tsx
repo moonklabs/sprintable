@@ -6,7 +6,7 @@
 // 영구 누락)를 순수함수 테스트는 아예 건드리지 않았다. 이 파일은 실제 API 응답 shape
 // 그대로(github_check_run_id·github_check_run_sha·approved_head_sha 세 필드 전부 포함) 마운트해
 // SHA 텍스트가 실제로 DOM에 나타나는지 확인한다. [[feedback-render-test-over-source-grep]] 동형.
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
@@ -80,5 +80,80 @@ describe('GateEvidence — GitHub check 배지 실 응답 shape 마운트(story 
     // SHA 텍스트만 없어야 한다.
     expect(container.textContent).toContain('GitHub check');
     expect(container.textContent).not.toMatch(/SHA [0-9a-f]{7}/);
+  });
+});
+
+// story #2814 2단(§5-② 그라운딩) — GithubRependingReason은 useEffect+fetch로 원장을 지연
+// 로드한다. 순수함수 테스트로는 이 비동기 배선(호출 URL·최신 이벤트 필터링·실패 침묵)을
+// 전혀 못 잡는다는 게 정확히 까디르 QA(PR#3244)가 증명한 클래스라 처음부터 마운트+fetch mock로
+// 검증한다.
+describe('GateEvidence — 재-pending 사유(원장 지연 로드, story #2814 2단)', () => {
+  it('최신 원장 이벤트가 re_pending이면 새 SHA를 포함한 사유 문구가 실제로 DOM에 나타난다', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([
+        { id: 'evt-2', repo_full_name: 'moonklabs/sprintable', pr_number: 3244, head_sha: 'def9876543210abc9876543210def9876543210', event_type: 're_pending', check_conclusion: null, created_at: '2026-08-19T02:00:00Z' },
+        { id: 'evt-1', repo_full_name: 'moonklabs/sprintable', pr_number: 3244, head_sha: 'abc1234567890def1234567890abcdef1234567', event_type: 'published', check_conclusion: null, created_at: '2026-08-19T01:00:00Z' },
+      ]),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const gate = realApiShapedGate({ status: 'pending', github_check_run_id: 987654321 });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/gates/gate-1/github-check-events');
+    expect(container.textContent).toContain('def9876');
+    vi.unstubAllGlobals();
+  });
+
+  it('최신 원장 이벤트가 re_pending이 아니면(published 등) 사유 문구를 그리지 않는다', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([
+        { id: 'evt-1', repo_full_name: 'moonklabs/sprintable', pr_number: 3244, head_sha: 'abc1234567890def1234567890abcdef1234567', event_type: 'published', check_conclusion: null, created_at: '2026-08-19T01:00:00Z' },
+      ]),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const gate = realApiShapedGate({ status: 'pending', github_check_run_id: 987654321 });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).not.toContain('재-pending');
+    vi.unstubAllGlobals();
+  });
+
+  it('원장 조회가 실패해도(네트워크/404) 카드는 붕괴하지 않고 GithubCheckSignal은 그대로 보인다', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500 });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const gate = realApiShapedGate({ status: 'pending', github_check_run_id: 987654321 });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('GitHub check');
+    expect(container.textContent).not.toContain('재-pending');
+    vi.unstubAllGlobals();
+  });
+
+  it('success/failure 등 재-pending 여지 없는 상태는 원장 조회 자체를 하지 않는다(불필요 왕복 방지)', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const gate = realApiShapedGate({ status: 'approved', github_check_run_id: 987654321 });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });
