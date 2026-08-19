@@ -119,4 +119,50 @@ describe('FileViewer docx (story #2788)', () => {
     errorSpy.mockRestore();
     vi.useRealTimers();
   });
+
+  it('renderAsync가 진행 중일 때 timeout이 먼저 발화해도, 뒤늦게 끝난 렌더가 확정된 failed를 되돌리지 않는다(story #2788 QA 재발견 — cancelled 미설정 레이스)', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let resolveRender: () => void = () => {};
+    const pendingRender = new Promise<void>((resolve) => { resolveRender = resolve; });
+    const renderAsyncSpy = vi.fn(async (_data: unknown, el: HTMLElement) => {
+      // renderAsync가 실제로 시작돼 containerRef를 이미 붙잡았음을 표시 — Kadir 지적의
+      // 전제(fetch 대기 중이 아니라 렌더 진행 중에 timeout이 발화)를 재현하는 지점.
+      el.setAttribute('data-render-started', 'true');
+      await pendingRender;
+      el.textContent = 'PHANTOM_LATE_RENDER';
+    });
+    vi.resetModules();
+    vi.doMock('docx-preview', () => ({ renderAsync: renderAsyncSpy }));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array(REAL_DOCX_BYTES), { status: 200 })));
+
+    // 이 시나리오는 20초 상한 타이머 자체가 fake여야 하므로(마운트 시점에 컴포넌트가
+    // setTimeout(20000)을 예약한다) mount 전에 fake timer를 켠다. fetch~dynamic
+    // import~renderAsync 진입은 순수 microtask 체인이라 실제 시간 없이도 진행되므로,
+    // 0ms 어드밴스를 반복해 마이크로태스크 큐를 배출하며 renderAsync 호출을 기다린다.
+    vi.useFakeTimers();
+    mount(<FileViewer target={target} onClose={() => {}} />);
+    for (let i = 0; i < 50 && renderAsyncSpy.mock.calls.length === 0; i++) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    }
+    expect(renderAsyncSpy).toHaveBeenCalled();
+
+    // renderAsync가 pendingRender를 기다리며 멈춰 있는 도중 20초 상한 타이머가 발화 —
+    // failed 확정.
+    await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+    expect(container.textContent).toContain('미리보기를 표시하지 못했습니다');
+    vi.useRealTimers();
+
+    // 이제야 renderAsync가 뒤늦게 완료 — run 꼬리의 setStatus('ready')가 이미 확정된
+    // failed를 되돌리면 안 된다(cancelled를 catch에서 세우지 않았을 때의 실제 버그).
+    await act(async () => {
+      resolveRender();
+      await new Promise((r) => setTimeout(r, 300));
+    });
+
+    expect(container.textContent).toContain('미리보기를 표시하지 못했습니다');
+    expect(container.querySelector('.docx-preview-container')).toBeNull();
+    errorSpy.mockRestore();
+    vi.doUnmock('docx-preview');
+    vi.resetModules();
+  });
 });

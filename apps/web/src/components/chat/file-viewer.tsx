@@ -331,7 +331,12 @@ function DocxBody({ url, label }: { url: string; label: string }) {
         // 에러를 삼키지 않는다 — 폴백 UI로 사용자에겐 정직 실패를 보여주되, 원인은 콘솔에 남긴다.
         console.error('docx 인앱 렌더 실패', e);
         controller.abort();
-        if (!cancelled) setStatus('failed');
+        if (cancelled) return;
+        // story #2788 QA(까디르군) 재발견 — timeout으로 failed를 확정한 뒤에도 abort를
+        // 못 받는 renderAsync가 뒤늦게 resolve하면 run 꼬리의 setStatus('ready')가 failed를
+        // 되돌린다. cancelled를 여기서도 세워 늦게 온 resolve를 무력화해 최종 상태를 고정한다.
+        cancelled = true;
+        setStatus('failed');
       })
       .finally(() => clearTimeout(timeoutId));
     return () => { cancelled = true; controller.abort(); clearTimeout(timeoutId); };
