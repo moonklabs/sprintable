@@ -24,42 +24,30 @@ const EMPTY_METRIC: MetricDefinition = { metric: '', source: 'internal_ops', tar
 
 type Mode = 'new' | 'link';
 
-/** E-LOOP-LEDGER S18 — GET /api/workflow-recipes 응답 shape(블루프린트 §5, backend/app/routers/workflow_recipes.py 실측). */
-export interface WorkflowRecipe {
+/**
+ * story #2792(2790 P1) — 워크플로우 레시피가 사이클형 이벤트 정의로 흡수되며 `GET
+ * /api/workflow-recipes`(은퇴)를 `GET /api/events/definitions`(기존 재사용, story #2637
+ * 프록시 그대로)로 교체한다. 신규 엔드포인트 없음 — 계약 확定(페드루군·디디군 2026-08-19).
+ * 사이클형 판별은 서버가 별도 kind 필드를 안 내려주므로 클라에서 `payload_schema.properties.
+ * stage.enum` 존재로 판정한다(signal/measurement 종류는 이 경로가 비어 자동 제외).
+ */
+export interface EventDefinitionResponse {
   id: string;
-  slug: string;
+  key: string;
+  org_id: string | null;
   name: string;
-  description: string;
-  steps: { role: string; label: string; pattern: string; action: string }[];
-  builtin: boolean;
+  description: string | null;
+  payload_schema: { properties?: { stage?: { enum?: string[] } } };
+  stage_metadata: Record<string, { role?: string; action?: string }>;
 }
 
-/** localizeRecipe가 실제로 쓰는 next-intl translator 표면만 뽑은 최소 구조 타입 —
- * next-intl `Translator<Messages, Namespace>`의 깊은 제네릭에 결합하지 않아 테스트에서
- * `createTranslator()`로 만든 translator도 그대로 넘길 수 있다. */
-type RecipeTranslator = {
-  (key: string): string;
-  has(key: string): boolean;
-};
+// story #2792 QA 테스트가 순수 판별 로직을 직접 못박을 수 있게 export.
+export function cyclicStages(def: EventDefinitionResponse): string[] {
+  return def.payload_schema.properties?.stage?.enum ?? [];
+}
 
-/**
- * E-LOOP-LEDGER S18-fu — builtin 레시피는 BE `_BUILTIN_RECIPES`(Python 리터럴, 정적 콘텐츠)라
- * `workflowRecipes` 메시지 네임스페이스로 FE-only 매핑한다(BE locale 필드 불요). `t.has()`로
- * 키 존재를 직접 SSOT 삼아 커스텀(DB WorkflowTemplate) 레시피·미등록 slug는 자동으로 BE 원문
- * fallback(별도 builtin-slug 화이트리스트 불필요, 크래시 0).
- */
-export function localizeRecipe(recipe: WorkflowRecipe, tr: RecipeTranslator): WorkflowRecipe {
-  const nameKey = `${recipe.slug}.name`;
-  const descriptionKey = `${recipe.slug}.description`;
-  return {
-    ...recipe,
-    name: tr.has(nameKey) ? tr(nameKey) : recipe.name,
-    description: tr.has(descriptionKey) ? tr(descriptionKey) : recipe.description,
-    steps: recipe.steps.map((step) => {
-      const labelKey = `${recipe.slug}.steps.${step.pattern}.label`;
-      return tr.has(labelKey) ? { ...step, label: tr(labelKey) } : step;
-    }),
-  };
+export function isCyclicDefinition(def: EventDefinitionResponse): boolean {
+  return cyclicStages(def).length > 0;
 }
 
 /**
@@ -86,7 +74,6 @@ export function LoopCreateDialog({
 }) {
   const t = useTranslations('loops');
   const th = useTranslations('hypotheses');
-  const tr = useTranslations('workflowRecipes');
 
   const [title, setTitle] = useState('');
   const [mode, setMode] = useState<Mode>('new');
@@ -99,7 +86,7 @@ export function LoopCreateDialog({
   const [hypothesisSearch, setHypothesisSearch] = useState('');
   const [linkedId, setLinkedId] = useState<string | null>(null);
 
-  const [recipes, setRecipes] = useState<WorkflowRecipe[] | null>(null);
+  const [definitions, setDefinitions] = useState<EventDefinitionResponse[] | null>(null);
   const [recipesFailed, setRecipesFailed] = useState(false);
   const [recipeSlug, setRecipeSlug] = useState('');
 
@@ -166,21 +153,24 @@ export function LoopCreateDialog({
     })();
   }, [open, mode, hypotheses, projectId]);
 
-  // E-LOOP-LEDGER S18 — recipe 목록은 선택 기능이라 fetch 실패해도 select 옵션만 없어질 뿐
+  // story #2792 — recipe 목록은 선택 기능이라 fetch 실패해도 select 옵션만 없어질 뿐
   // (null-safe, "직접 진행" 기본값으로 폼은 정상 동작). 실패는 recipesFailed로만 표시하고
-  // recipes는 null로 유지 — 닫힘/재오픈(reset)마다 recipesFailed가 풀려 재시도된다(영구 실종 방지).
+  // definitions는 null로 유지 — 닫힘/재오픈(reset)마다 recipesFailed가 풀려 재시도된다(영구
+  // 실종 방지). 카탈로그 전체를 받아 사이클형만 클라에서 골라낸다(신규 엔드포인트 없음 —
+  // GET /api/events/definitions는 signal/measurement 등 비-사이클형도 섞여 온다).
   useEffect(() => {
-    if (!open || recipes !== null || recipesFailed) return;
+    if (!open || definitions !== null || recipesFailed) return;
     void (async () => {
       try {
-        const res = await fetchWithAuth('/api/workflow-recipes');
+        const res = await fetchWithAuth('/api/events/definitions');
         if (!res.ok) { setRecipesFailed(true); return; }
-        setRecipes((await res.json()) as WorkflowRecipe[]);
+        const all = (await res.json()) as EventDefinitionResponse[];
+        setDefinitions(all.filter(isCyclicDefinition));
       } catch {
         setRecipesFailed(true);
       }
     })();
-  }, [open, recipes, recipesFailed]);
+  }, [open, definitions, recipesFailed]);
 
   const setMetricPatch = (patch: Partial<MetricDefinition>) => setMetric((m) => ({ ...m, ...patch }));
 
@@ -255,8 +245,7 @@ export function LoopCreateDialog({
     h.statement.toLowerCase().includes(hypothesisSearch.trim().toLowerCase()),
   );
   const linkedHypothesis = hypotheses?.find((h) => h.id === linkedId) ?? null;
-  const localizedRecipes = recipes?.map((r) => localizeRecipe(r, tr)) ?? null;
-  const selectedRecipe = localizedRecipes?.find((r) => r.slug === recipeSlug) ?? null;
+  const selectedRecipe = definitions?.find((d) => d.key === recipeSlug) ?? null;
 
   return (
     <Dialog
@@ -284,7 +273,7 @@ export function LoopCreateDialog({
             />
           </div>
 
-          {localizedRecipes && localizedRecipes.length > 0 ? (
+          {definitions && definitions.length > 0 ? (
             <div className="space-y-1">
               <label htmlFor="loop-create-recipe" className="text-xs font-medium text-muted-foreground">{t('createLoopRecipeLabel')}</label>
               <select
@@ -294,17 +283,23 @@ export function LoopCreateDialog({
                 className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               >
                 <option value="">{t('createLoopRecipeNone')}</option>
-                {localizedRecipes.map((r) => (
-                  <option key={r.slug} value={r.slug}>{r.name}</option>
+                {definitions.map((d) => (
+                  <option key={d.key} value={d.key}>{d.name}</option>
                 ))}
               </select>
               {selectedRecipe ? (
                 <div className="space-y-1 rounded-lg border border-dashed border-border bg-muted/30 p-2 text-[10.5px] text-muted-foreground">
-                  <p>{selectedRecipe.description}</p>
+                  {selectedRecipe.description ? <p>{selectedRecipe.description}</p> : null}
                   <ol className="list-decimal space-y-0.5 pl-4">
-                    {selectedRecipe.steps.map((s, i) => (
-                      <li key={i}><span className="font-medium text-foreground">{s.label}</span> ({s.role})</li>
-                    ))}
+                    {cyclicStages(selectedRecipe).map((stage) => {
+                      const meta = selectedRecipe.stage_metadata[stage];
+                      return (
+                        <li key={stage} className="break-words">
+                          <span className="font-medium text-foreground">{meta?.action ?? stage}</span>
+                          {meta?.role ? <> ({meta.role})</> : null}
+                        </li>
+                      );
+                    })}
                   </ol>
                 </div>
               ) : null}

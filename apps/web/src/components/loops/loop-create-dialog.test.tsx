@@ -1,68 +1,51 @@
 import { describe, expect, it } from 'vitest';
-import { createTranslator } from 'next-intl';
-import enMessagesRaw from '../../../messages/en.json';
-import koMessagesRaw from '../../../messages/ko.json';
-import { localizeRecipe, type WorkflowRecipe } from './loop-create-dialog';
+import { cyclicStages, isCyclicDefinition, type EventDefinitionResponse } from './loop-create-dialog';
 
-// production `tr` (useTranslations()) resolves against the permissive default `IntlMessages`
-// generic (no global next-intl message-type augmentation in this repo) — cast here so the test
-// translator has the same loose type instead of the JSON import's inferred literal-key type.
-type LooseMessages = { [key: string]: string | LooseMessages };
-const enMessages = enMessagesRaw as unknown as LooseMessages;
-const koMessages = koMessagesRaw as unknown as LooseMessages;
+// story #2792(2790 P1) — workflow-recipes → event_definitions 전환. 서버가 kind 필드를
+// 안 내려주므로 클라 판별(payload_schema.properties.stage.enum 존재)이 유일한 사이클형
+// 필터 축이다 — 이 판별이 틀리면 signal/measurement 정의가 select에 섞이거나, 진짜
+// 사이클형 레시피가 걸러진다.
 
-const BUILTIN_RECIPE: WorkflowRecipe = {
-  id: 'loop-agency',
-  slug: 'loop-agency',
-  name: '루프 에이전시',
-  description: '목표·가설 설정 → 브리프 → 실행안 생성 → 인간 선택 → 실행 → 성과 학습까지 이어지는 복리 조직기억 워크플로우. 반복되는 실험(카피·캠페인 variant 등)에 적합.',
-  steps: [
-    { role: 'Human', label: '목표·가설 정의', pattern: 'goal_hypothesis', action: 'define' },
-    { role: 'PO', label: '브리프 작성', pattern: 'brief_doc_approval', action: 'brief' },
-  ],
-  builtin: true,
+const CYCLIC: EventDefinitionResponse = {
+  id: '1', key: 'preset.workflow.scrum_3step', org_id: null,
+  name: '3단계 스크럼', description: '기획 → 개발 → QA 3단계 워크플로우.',
+  payload_schema: {
+    properties: { stage: { enum: ['kickoff', 'implementation', 'qa_review'] } },
+  },
+  stage_metadata: {
+    kickoff: { role: 'PO', action: '기능 명세 및 AC 작성' },
+    implementation: { role: 'Dev', action: '코드 작성 및 PR 제출' },
+    qa_review: { role: 'QA', action: 'AC 체크리스트 검증 후 APPROVE/REJECT' },
+  },
 };
 
-const CUSTOM_RECIPE: WorkflowRecipe = {
-  id: 'a1b2c3',
-  slug: 'org-authored-flow',
-  name: '조직 자체 워크플로우',
-  description: '조직이 직접 작성한 커스텀 레시피 설명',
-  steps: [{ role: 'Custom', label: '커스텀 단계', pattern: 'unknown_pattern', action: 'do it' }],
-  builtin: false,
+const SIGNAL: EventDefinitionResponse = {
+  id: '2', key: 'org.acme.deploy_started', org_id: 'org-acme',
+  name: '배포 시작', description: null,
+  payload_schema: { properties: {} },
+  stage_metadata: {},
 };
 
-describe('localizeRecipe (E-LOOP-LEDGER S18-fu)', () => {
-  it('translates builtin recipe name/description/step labels for en locale', () => {
-    const tr = createTranslator({ locale: 'en', messages: enMessages, namespace: 'workflowRecipes' });
-    const localized = localizeRecipe(BUILTIN_RECIPE, tr);
-    expect(localized.name).toBe('Loop Agency');
-    expect(localized.description).toContain('Compounding org-memory workflow');
-    expect(localized.steps[0].label).toBe('Define goal & hypothesis');
-    expect(localized.steps[1].label).toBe('Write brief');
+const NO_PROPERTIES: EventDefinitionResponse = {
+  id: '3', key: 'preset.legacy.malformed', org_id: null,
+  name: '스키마 없음', description: null,
+  payload_schema: {},
+  stage_metadata: {},
+};
+
+describe('cyclicStages / isCyclicDefinition (story #2792)', () => {
+  it('사이클형 정의는 payload_schema.properties.stage.enum 순서 그대로 stage 목록을 낸다', () => {
+    expect(cyclicStages(CYCLIC)).toEqual(['kickoff', 'implementation', 'qa_review']);
+    expect(isCyclicDefinition(CYCLIC)).toBe(true);
   });
 
-  it('resolves builtin recipe through the ko table too (identity mapping, no visual change)', () => {
-    const tr = createTranslator({ locale: 'ko', messages: koMessages, namespace: 'workflowRecipes' });
-    const localized = localizeRecipe(BUILTIN_RECIPE, tr);
-    expect(localized.name).toBe(BUILTIN_RECIPE.name);
-    expect(localized.description).toBe(BUILTIN_RECIPE.description);
-    expect(localized.steps[0].label).toBe(BUILTIN_RECIPE.steps[0].label);
+  it('signal/measurement류(stage 없음)는 사이클형이 아니다', () => {
+    expect(cyclicStages(SIGNAL)).toEqual([]);
+    expect(isCyclicDefinition(SIGNAL)).toBe(false);
   });
 
-  it('falls back to BE-original text for a non-builtin (custom/DB) recipe — no crash, no key miss', () => {
-    const tr = createTranslator({ locale: 'en', messages: enMessages, namespace: 'workflowRecipes' });
-    const localized = localizeRecipe(CUSTOM_RECIPE, tr);
-    expect(localized.name).toBe(CUSTOM_RECIPE.name);
-    expect(localized.description).toBe(CUSTOM_RECIPE.description);
-    expect(localized.steps[0].label).toBe(CUSTOM_RECIPE.steps[0].label);
-  });
-
-  it('covers all 4 builtin slugs with complete en translations', () => {
-    const recipes = enMessagesRaw.workflowRecipes as Record<string, { name: string; description: string }>;
-    for (const slug of ['scrum-3step', 'kanban-simple', 'solo', 'loop-agency']) {
-      expect(recipes[slug]?.name).toBeTruthy();
-      expect(recipes[slug]?.description).toBeTruthy();
-    }
+  it('properties 자체가 없는 방어적 케이스도 크래시 없이 빈 배열로 떨어진다', () => {
+    expect(cyclicStages(NO_PROPERTIES)).toEqual([]);
+    expect(isCyclicDefinition(NO_PROPERTIES)).toBe(false);
   });
 });

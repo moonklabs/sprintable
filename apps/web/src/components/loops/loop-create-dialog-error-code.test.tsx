@@ -2,8 +2,8 @@
 //
 // story #2485 — LOOP_HYPOTHESIS_REQUIRED 외 4종 추가 code 분기(backend loops.py
 // create_loop()가 dict{code,message}로 직접 발급 — router _raise()가 그대로 통과,
-// mapApiError 경유 아님). loop-create-dialog.test.tsx(순수함수 localizeRecipe 테스트)와는
-// 별개 파일 — 여기는 풀 마운트 폼 검증.
+// mapApiError 경유 아님). loop-create-dialog.test.tsx(순수함수 cyclicStages/isCyclicDefinition
+// 테스트)와는 별개 파일 — 여기는 풀 마운트 폼 검증.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
@@ -50,7 +50,7 @@ function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: strin
 
 async function mountFilledDialog(errorCode: string) {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-    if (url === '/api/workflow-recipes') return { ok: false, json: async () => ({}) };
+    if (url === '/api/events/definitions') return { ok: false, json: async () => ({}) };
     if (url === '/api/loops' && init?.method === 'POST') {
       return { ok: false, json: async () => ({ error: { code: errorCode, message: `raw ${errorCode} message` } }) };
     }
