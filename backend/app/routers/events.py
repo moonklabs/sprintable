@@ -1425,6 +1425,128 @@ async def list_event_definitions(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# story #2793(2790 P2) — get_workflow_guide respec: "정본 패키지" 온보딩 가이드.
+# 판별 기준(카드 서두, 선생님 온보딩 철학 verbatim) = 최저 지능 에이전트로 실측 — 설명은
+# 짧고 명령형·한 번에 한 행동·다음 행동은 항상 서버가 알려준다. 이 엔드포인트가 그
+# "서버가 알려주는 다음 행동"의 유일한 소스가 된다(recipes[0] 임의 선택 완전 제거).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 짧고 명령형 — 온보딩 철학 자체를 한 단락으로. 새 규칙을 발명하지 않는다(카드 서두 원문
+# 요지의 재진술 — "설명 짧게·한 번에 한 행동·다음 행동은 서버가 알려줌"을 그대로 문장화).
+_ONBOARDING_PHILOSOPHY = (
+    "아래는 이 조직에서 발행 가능한 이벤트 전부입니다. 사이클형 이벤트는 각 단계마다 "
+    "누가(역할) 무엇을(행동) 해야 하는지 그대로 적혀 있습니다 — 외우지 말고 그때그때 이 "
+    "표를 다시 확인하세요. 한 번에 한 단계만 진행하세요. 무엇을 할지 모르겠으면 지어내지 "
+    "말고 이 표에서 찾으세요."
+)
+
+
+def _classify_event_kind(payload_schema: dict) -> str:
+    """페드루 확定 3서식 어휘(human-event-definer-design-v1) 재사용 — 새 분류 발명 안 함."""
+    props = (payload_schema or {}).get("properties") or {}
+    if isinstance((props.get("stage") or {}).get("enum"), list):
+        return "cycle"
+    if "metric_value" in props:
+        return "measurement"
+    return "signal"
+
+
+def _render_one_definition(r: "EventDefinition") -> list[str]:
+    """정의 1건을 마크다운 라인 목록으로 — 실패하면(malformed 데이터) 그대로 raise한다.
+    격리는 호출자(`_render_onboarding_guide`)의 몫(다른 부류의 격리와 동일 조직 원칙,
+    story_status_events.py류 — 함수 자체는 삼키지 않고 호출자가 포위한다)."""
+    lines = [f"## {r.name} (`{r.key}`)"]
+    if r.description:
+        lines.append(r.description)
+    kind = _classify_event_kind(r.payload_schema)
+    if kind == "cycle" and r.stage_metadata:
+        lines.append("")
+        lines.append("이 이벤트는 다음 상황에서 발행하세요:")
+        stage_order = ((r.payload_schema.get("properties") or {}).get("stage") or {}).get("enum") or []
+        for slug in stage_order:
+            meta = r.stage_metadata.get(slug)
+            if not meta:
+                continue
+            # ⛔실버그(카디르군 QA, 2026-08-19) — validate_stage_metadata(쓰기 시점)가 값
+            # 모양을 강제하지만, 이 렌더러는 그 가드를 못 거친(레거시·경합 등) 데이터가
+            # 와도 안전해야 한다 — dict가 아니거나 role/action이 없으면 명시 raise해
+            # 아래 per-row try/except가 "이 정의 1건만" 건너뛰게 한다.
+            if not isinstance(meta, dict) or not isinstance(meta.get("role"), str) or not isinstance(meta.get("action"), str):
+                raise ValueError(f"{r.key}: stage_metadata[{slug!r}] malformed({meta!r})")
+            lines.append(f"- 단계 `{slug}`: **{meta['role']}** 담당 — {meta['action']}")
+    else:
+        required = (r.payload_schema or {}).get("required") or []
+        if required:
+            lines.append("")
+            lines.append(f"발행 시 필수 항목: {', '.join(f'`{f}`' for f in required)}")
+    return lines
+
+
+def _render_onboarding_guide(rows: list["EventDefinition"]) -> str:
+    """enabled 정의만으로 마크다운 가이드 조립 — disabled를 넣으면 "발행 가능"이라는
+    잘못된 다음-행동 지시가 된다(list_event_definitions의 admin 감사 목적과 다른 축이라
+    disabled 포함 여부도 다르다, 의도적 비대칭).
+
+    ⛔실버그 fix(카디르군 QA, 2026-08-19) — 이전엔 이 루프 자체에서 렌더링해 정의 1건의
+    malformed stage_metadata가 org 전체 가이드를 500으로 죽였다(폭발 반경 = 그 org가
+    보는 모든 정의, preset 포함). 정의 1건 렌더를 `_render_one_definition`으로 분리해
+    per-row try/except로 격리 — 문제 있는 정의는 **그 항목만** 조용히 건너뛰고 나머지
+    가이드는 그대로 산다(로그로 관측 가능, exc_info 포함 — 완전 침묵 아님)."""
+    lines = [_ONBOARDING_PHILOSOPHY, ""]
+    for r in rows:
+        if not r.enabled:
+            continue
+        try:
+            lines.extend(_render_one_definition(r))
+        except Exception:
+            logger.warning(
+                "onboarding-guide: 정의 렌더 실패, 이 항목만 건너뜀(key=%s)", r.key, exc_info=True,
+            )
+            continue
+        lines.append("")
+    return "\n".join(lines).strip() + "\n"
+
+
+class OnboardingGuideResponse(BaseModel):
+    philosophy: str
+    guide: str
+    event_count: int
+
+
+@router.get("/onboarding-guide", response_model=OnboardingGuideResponse)
+async def get_onboarding_guide(
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> OnboardingGuideResponse:
+    """GET /api/v2/events/onboarding-guide — story #2793(2790 P2): MCP `get_workflow_guide`
+    가 부르는 단일 소스. `recipes[0]` 임의 선택(구 workflow-recipes 결함ⓐ)을 대체 —
+    이 엔드포인트엔 "0번째"라는 개념 자체가 없다(전체 카탈로그를 한 번에 반환).
+
+    가시성은 `list_event_definitions`와 동일 SSOT(org 프리셋 ∪ 이 org 커스텀)지만 그와
+    달리 **enabled=false는 가이드에서 제외**한다 — 저건 admin 감사용(뭐가 꺼져 있는지도
+    보여야 함), 이건 "지금 뭘 할 수 있는지"를 알려주는 운영 가이드라 꺼진 이벤트를
+    보여주면 존재하지 않는 다음-행동을 지시하게 된다.
+
+    `stage_metadata`(story #2792 P1)가 "기대 행동"의 실 데이터 소스 — 더 이상 DB
+    `workflow_templates.steps[].action` 공란(구 결함ⓑ)에 기대지 않는다.
+    """
+    from app.models.event_definition import EventDefinition
+
+    rows = (await db.execute(
+        select(EventDefinition)
+        .where(or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)))
+        .order_by(EventDefinition.key)
+    )).scalars().all()
+
+    enabled_rows = [r for r in rows if r.enabled]
+    return OnboardingGuideResponse(
+        philosophy=_ONBOARDING_PHILOSOPHY,
+        guide=_render_onboarding_guide(rows),
+        event_count=len(enabled_rows),
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # story #2636(P1b) — org 커스텀 이벤트 등록 API. doc event-registry-p1b-custom-registration-
 # detail. #2632가 확定해 둔 게이트 3종(validate_event_definition_key·validate_event_routing
 # (allow_server_derived=False)·validate_event_payload_schema_shape)을 그대로 소비한다 — 새

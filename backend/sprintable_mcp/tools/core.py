@@ -91,18 +91,12 @@ async def unlock_files(args: UnlockFilesInput) -> list[TextContent]:
 
 
 async def get_workflow_guide(args: SprintableInput) -> list[TextContent]:
-    """현재 프로젝트 워크플로우 가이드 텍스트 반환 (에이전트 system prompt 주입용)."""
+    """운영 가이드 텍스트 반환(에이전트 system prompt 자가-pull용) — story #2793(2790 P2)
+    respec. 구 `/api/v2/workflow-recipes`(recipes[0] 임의 선택 결함)를 완전히 대체하고
+    `/api/v2/events/onboarding-guide`(story #2792 P1의 stage_metadata가 실 데이터 소스)
+    단일 호출로 교체 — "0번째" 개념 자체가 없다."""
     try:
-        recipes = await client.get(
-            "/api/v2/workflow-recipes",
-            params={"project_id": client.require_project_id()},
-        )
-        if not recipes:
-            return ok({"guide": "등록된 워크플로우 레시피가 없습니다.", "recipes": []})
-        first = recipes[0]
-        recipe_id = first.get("id") or first.get("slug")
-        guide_data = await client.get(f"/api/v2/workflow-recipes/{recipe_id}/guide")
-        return ok(guide_data)
+        return ok(await client.get("/api/v2/events/onboarding-guide"))
     except Exception as exc:
         return err(str(exc))
 
