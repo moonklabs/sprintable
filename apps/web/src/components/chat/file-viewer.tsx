@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, Expand, File, FileCode, FileText, Film, Image as ImageIcon, Music, X, type LucideIcon } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/db/client';
 import { downloadAsset, openExternal } from '@/lib/native-shell-bridge';
@@ -9,8 +9,10 @@ import type { ReadingPanelTarget } from '@/components/chat/reading-panel';
 
 type AttachmentTarget = Extract<ReadingPanelTarget, { kind: 'attachment' }>;
 
-// 인계 doc 0ef7f8ab §A2 — 포맷 라우팅 표 그대로. office는 렌더러가 없다(가짜 렌더 금지).
-type Format = 'image' | 'video' | 'audio' | 'text' | 'html' | 'pdf' | 'office' | 'unknown';
+// 인계 doc 0ef7f8ab §A2 — 포맷 라우팅 표 그대로. docx는 story #2788(84ef0cb7 §4-1
+// 판정)에서 docx-preview 클라 렌더로 분리됐다. pptx/xlsx 등 나머지 office는 여전히
+// 렌더러가 없다(가짜 렌더 금지, 2771 서버 변환 트랙 대기).
+type Format = 'image' | 'video' | 'audio' | 'text' | 'html' | 'pdf' | 'docx' | 'office' | 'unknown';
 
 function resolveFormat(contentType: string | null | undefined, label: string): Format {
   const ct = (contentType ?? '').toLowerCase();
@@ -21,8 +23,9 @@ function resolveFormat(contentType: string | null | undefined, label: string): F
   if (ct === 'application/pdf' || ext === 'pdf') return 'pdf';
   if (ct === 'text/html' || ext === 'html' || ext === 'htm') return 'html';
   if (ct.startsWith('text/') || ct === 'text/markdown' || ['txt', 'md', 'markdown'].includes(ext)) return 'text';
+  if (ext === 'docx' || ct.includes('wordprocessingml')) return 'docx';
   if (
-    ['pptx', 'ppt', 'docx', 'doc', 'xlsx', 'xls'].includes(ext) ||
+    ['pptx', 'ppt', 'doc', 'xlsx', 'xls'].includes(ext) ||
     ct.includes('officedocument') ||
     ct.includes('msword') ||
     ct.includes('ms-excel') ||
@@ -35,7 +38,7 @@ function resolveFormat(contentType: string | null | undefined, label: string): F
 
 const FORMAT_LABEL: Record<Format, string> = {
   image: '이미지', video: '동영상', audio: '오디오', text: '텍스트',
-  html: 'HTML', pdf: 'PDF', office: '오피스 문서', unknown: '파일',
+  html: 'HTML', pdf: 'PDF', docx: 'Word 문서', office: '오피스 문서', unknown: '파일',
 };
 
 function iconFor(format: Format): LucideIcon {
@@ -46,6 +49,7 @@ function iconFor(format: Format): LucideIcon {
     case 'text': return FileText;
     case 'html': return FileCode;
     case 'pdf': return FileText;
+    case 'docx': return FileText;
     default: return File;
   }
 }
@@ -224,12 +228,15 @@ function FileViewerBody({ format, url, label }: { format: Format; url: string; l
       // 내용을 자연히 초기화한다(effect 안에서 수동 setState 리셋 없이 — react-hooks/
       // set-state-in-effect 규율, [[feedback-detail-page-key-remount-standard]]와 동형).
       return <TextBody key={url} url={url} />;
+    case 'docx':
+      // key={url} — 다른 첨부로 전환 시 컴포넌트를 통째로 새로 마운트(TextBody와 동형).
+      return <DocxBody key={url} url={url} label={label} />;
     case 'office':
       return (
         <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
           <FileText className="size-8 text-muted-foreground" aria-hidden />
           <p className="text-sm text-foreground">미리보기 준비 중입니다.</p>
-          <p className="text-xs text-muted-foreground">오피스 문서(pptx/docx/xlsx)는 아직 인앱 렌더를 지원하지 않습니다. 다운로드해 확인하세요.</p>
+          <p className="text-xs text-muted-foreground">오피스 문서(pptx/xlsx)는 아직 인앱 렌더를 지원하지 않습니다. 다운로드해 확인하세요.</p>
         </div>
       );
     default:
@@ -276,6 +283,69 @@ function TextBody({ url }: { url: string }) {
   return (
     <div className="p-4">
       <MdBody content={content} />
+    </div>
+  );
+}
+
+/**
+ * story #2788 — docx-preview 클라이언트 렌더(서버 변환 우회, 84ef0cb7 §4-1). 브라우저
+ * 전용 라이브러리라 useEffect 안에서 동적 import(모듈 최상단 import 시 SSR에서
+ * document 참조로 깨질 수 있음). 렌더 실패는 정직 폴백(빈 화면/무한 로딩 금지) —
+ * office(pptx 등) 미지원 배지와 동일한 톤으로 다운로드 유도.
+ */
+function DocxBody({ url, label }: { url: string; label: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<'rendering' | 'ready' | 'failed'>('rendering');
+
+  useEffect(() => {
+    let cancelled = false;
+    setStatus('rendering');
+    (async () => {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(String(res.status));
+      const blob = await res.blob();
+      const { renderAsync } = await import('docx-preview');
+      if (cancelled || !containerRef.current) return;
+      containerRef.current.innerHTML = '';
+      await renderAsync(blob, containerRef.current, undefined, {
+        inWrapper: true,
+        ignoreWidth: false,
+        ignoreHeight: true,
+        breakPages: true,
+      });
+      if (!cancelled) setStatus('ready');
+    })().catch(() => {
+      if (!cancelled) setStatus('failed');
+    });
+    return () => { cancelled = true; };
+  }, [url]);
+
+  if (status === 'failed') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+        <FileText className="size-8 text-muted-foreground" aria-hidden />
+        <p className="text-sm text-foreground">미리보기를 표시하지 못했습니다.</p>
+        <p className="text-xs text-muted-foreground">이 문서는 인앱 렌더에 실패했습니다. 다운로드해 확인하세요.</p>
+      </div>
+    );
+  }
+
+  // 바깥 패널(FileViewer)이 이미 overflow-auto — 여기선 중첩 스크롤 없이 폭만 내어준다
+  // (docx-preview는 A4 고정폭 페이지를 그리므로 모바일에선 바깥 컨테이너가 가로 스크롤).
+  return (
+    <div className="min-h-full bg-muted/30">
+      {status === 'rendering' && (
+        <div className="mx-auto flex max-w-2xl flex-col gap-2 p-6">
+          <div className="h-4 w-3/4 animate-pulse rounded bg-muted" />
+          <div className="h-4 w-1/2 animate-pulse rounded bg-muted" />
+          <div className="h-64 w-full animate-pulse rounded bg-muted" />
+        </div>
+      )}
+      <div
+        ref={containerRef}
+        aria-label={label}
+        className={status === 'ready' ? 'docx-preview-container w-fit min-w-full p-4' : 'hidden'}
+      />
     </div>
   );
 }
