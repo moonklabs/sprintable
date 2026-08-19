@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, Expand, File, FileCode, FileText, Film, Image as ImageIcon, Music, X, type LucideIcon } from 'lucide-react';
+import { Download, Expand, File, FileCode, FileText, Film, Image as ImageIcon, Loader2, Music, X, type LucideIcon } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/db/client';
 import { downloadAsset, openExternal } from '@/lib/native-shell-bridge';
 import { MdBody } from '@/components/chat/embed-card';
@@ -10,22 +10,33 @@ import type { ReadingPanelTarget } from '@/components/chat/reading-panel';
 type AttachmentTarget = Extract<ReadingPanelTarget, { kind: 'attachment' }>;
 
 // 인계 doc 0ef7f8ab §A2 — 포맷 라우팅 표 그대로. docx는 story #2788(84ef0cb7 §4-1
-// 판정)에서 docx-preview 클라 렌더로 분리됐다. pptx/xlsx 등 나머지 office는 여전히
-// 렌더러가 없다(가짜 렌더 금지, 2771 서버 변환 트랙 대기).
-type Format = 'image' | 'video' | 'audio' | 'text' | 'html' | 'pdf' | 'docx' | 'office' | 'unknown';
+// 판정)에서 docx-preview 클라 렌더로 분리됐고, pptx는 story #2803(84ef0cb7 §7)에서
+// BE 변환 파이프(POST /api/v2/attachments/{asset_id}/convert)로 분리됐다. xlsx 등
+// 나머지 office는 여전히 렌더러가 없다(가짜 렌더 금지).
+type Format = 'image' | 'video' | 'audio' | 'text' | 'html' | 'pdf' | 'docx' | 'pptx' | 'office' | 'unknown';
 
-function resolveFormat(contentType: string | null | undefined, label: string): Format {
+// story #2803 QA(까디르군) — 클래스 전체를 table-driven 테스트로 못박기 위해 export.
+export function resolveFormat(contentType: string | null | undefined, label: string): Format {
   const ct = (contentType ?? '').toLowerCase();
   const ext = label.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
+  // 까디르군 QA(#2803) 2라운드 — docx/pptx는 함수 «최상단»에서 확장자 단독으로 확정해야
+  // 한다. wordprocessingml/presentationml보다만 앞서면 여전히 그 위의 image/pdf/html 등
+  // content-type 판정에 먼저 걸려 .pptx+content-type=application/pdf류가 깨진 pdf iframe으로
+  // 오라우팅된다(정직 폴백보다 나쁜 경로). BE office_conversion.is_convertible도 확장자만
+  // 보고 판정하므로 이 두 확장자에선 ext가 최종 진실 — 오명명 파일은 convert 실패→정직
+  // 폴백으로 귀결되니 안전하다.
+  if (ext === 'docx') return 'docx';
+  if (ext === 'pptx') return 'pptx';
   if (ct.startsWith('image/')) return 'image';
   if (ct.startsWith('video/')) return 'video';
   if (ct.startsWith('audio/')) return 'audio';
   if (ct === 'application/pdf' || ext === 'pdf') return 'pdf';
   if (ct === 'text/html' || ext === 'html' || ext === 'htm') return 'html';
   if (ct.startsWith('text/') || ct === 'text/markdown' || ['txt', 'md', 'markdown'].includes(ext)) return 'text';
-  if (ext === 'docx' || ct.includes('wordprocessingml')) return 'docx';
+  if (ct.includes('wordprocessingml')) return 'docx';
+  if (ct.includes('presentationml')) return 'pptx';
   if (
-    ['pptx', 'ppt', 'doc', 'xlsx', 'xls'].includes(ext) ||
+    ['ppt', 'doc', 'xlsx', 'xls'].includes(ext) ||
     ct.includes('officedocument') ||
     ct.includes('msword') ||
     ct.includes('ms-excel') ||
@@ -38,7 +49,7 @@ function resolveFormat(contentType: string | null | undefined, label: string): F
 
 const FORMAT_LABEL: Record<Format, string> = {
   image: '이미지', video: '동영상', audio: '오디오', text: '텍스트',
-  html: 'HTML', pdf: 'PDF', docx: 'Word 문서', office: '오피스 문서', unknown: '파일',
+  html: 'HTML', pdf: 'PDF', docx: 'Word 문서', pptx: 'PowerPoint 문서', office: '오피스 문서', unknown: '파일',
 };
 
 function iconFor(format: Format): LucideIcon {
@@ -50,6 +61,7 @@ function iconFor(format: Format): LucideIcon {
     case 'html': return FileCode;
     case 'pdf': return FileText;
     case 'docx': return FileText;
+    case 'pptx': return FileText;
     default: return File;
   }
 }
@@ -195,13 +207,13 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
           </div>
         )}
 
-        {state.kind === 'ready' && <FileViewerBody format={format} url={state.url} label={target.label} />}
+        {state.kind === 'ready' && <FileViewerBody format={format} url={state.url} label={target.label} assetId={target.assetId} />}
       </div>
     </>
   );
 }
 
-function FileViewerBody({ format, url, label }: { format: Format; url: string; label: string }) {
+function FileViewerBody({ format, url, label, assetId }: { format: Format; url: string; label: string; assetId?: string }) {
   switch (format) {
     case 'image':
       // eslint-disable-next-line @next/next/no-img-element -- 서명 URL은 원격 도메인이라 next/image 정적 도메인 화이트리스트 밖(기존 lightbox와 동일 제약)
@@ -231,6 +243,19 @@ function FileViewerBody({ format, url, label }: { format: Format; url: string; l
     case 'docx':
       // key={url} — 다른 첨부로 전환 시 컴포넌트를 통째로 새로 마운트(TextBody와 동형).
       return <DocxBody key={url} url={url} label={label} />;
+    case 'pptx':
+      // assetId 없으면(구 메시지 등 asset registry 역기입 이전) 변환 자체를 트리거할 축이
+      // 없다 — 가짜 렌더 대신 office와 동일 톤의 정직 "준비 중"으로 축소.
+      if (!assetId) {
+        return (
+          <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+            <FileText className="size-8 text-muted-foreground" aria-hidden />
+            <p className="text-sm text-foreground">미리보기 준비 중입니다.</p>
+            <p className="text-xs text-muted-foreground">이 첨부는 인앱 변환 대상 식별자가 없습니다. 다운로드해 확인하세요.</p>
+          </div>
+        );
+      }
+      return <PptxBody key={assetId} assetId={assetId} label={label} />;
     case 'office':
       return (
         <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
@@ -370,4 +395,101 @@ function DocxBody({ url, label }: { url: string; label: string }) {
       />
     </div>
   );
+}
+
+/**
+ * story #2803 — pptx는 BE 변환 파이프(POST /api/attachments/convert → office_conversion.py,
+ * 84ef0cb7 §7-3)로 PDF로 바꾼 뒤 기존 PDF iframe 렌더를 그대로 재사용한다. 콜드스타트가
+ * 수십 초 걸릴 수 있어(LibreOffice 헤드리스, §7-4 timeout=120s) "변환 중" + 경과시간 정직
+ * 표시 — 무한 스피너 금지. 실패 처리는 DocxBody와 동형(AbortController+상한타이머+cancelled
+ * 레이스 가드, story #2788 QA 교훈 그대로 적용 — timeout 확정 뒤 늦은 resolve가 상태를
+ * 되돌리지 못하게 catch에서도 cancelled를 세운다).
+ */
+function PptxBody({ assetId, label }: { assetId: string; label: string }) {
+  const [status, setStatus] = useState<'converting' | 'ready' | 'failed'>('converting');
+  const [failMessage, setFailMessage] = useState<string | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [elapsedSec, setElapsedSec] = useState(0);
+
+  useEffect(() => {
+    if (status !== 'converting') return;
+    const id = setInterval(() => setElapsedSec((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [status]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout>;
+    // key={assetId}가 다른 첨부 전환 시 이 컴포넌트를 통째로 새로 마운트하므로(DocxBody와
+    // 동형) status/failMessage는 이미 useState 초기값으로 깨끗하다 — 여기서 재설정 불요.
+    const run = (async () => {
+      const convertRes = await fetchWithAuth(`/api/attachments/convert?asset_id=${encodeURIComponent(assetId)}`, {
+        method: 'POST',
+        signal: controller.signal,
+      });
+      const convertJson = (await convertRes.json().catch(() => null)) as
+        | { data?: { asset_id?: string }; error?: { message?: string } }
+        | null;
+      const convertedAssetId = convertJson?.data?.asset_id;
+      if (!convertRes.ok || !convertedAssetId) {
+        throw new Error(convertJson?.error?.message ?? String(convertRes.status));
+      }
+      if (cancelled) return;
+      const signRes = await fetchWithAuth(
+        `/api/attachments/sign?asset_id=${encodeURIComponent(convertedAssetId)}&disposition=inline`,
+        { signal: controller.signal },
+      );
+      const signJson = (await signRes.json().catch(() => null)) as { data?: { url?: string }; error?: { message?: string } } | null;
+      const url = signJson?.data?.url;
+      if (!signRes.ok || !url) {
+        throw new Error(signJson?.error?.message ?? String(signRes.status));
+      }
+      if (!cancelled) {
+        setPdfUrl(url);
+        setStatus('ready');
+      }
+    })();
+    // 백엔드 하드 타임아웃(Gotenberg 왕복 120s, 84ef0cb7 §7-4)보다 여유를 둔 클라이언트 상한 —
+    // fetch든 변환이든 어느 단계가 멈추든 무한 로딩 금지(AC2·AC3).
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('변환 시간 초과')), 130000);
+    });
+    Promise.race([run, timeout])
+      .catch((e) => {
+        console.error('pptx 변환 실패', e);
+        controller.abort();
+        if (cancelled) return;
+        cancelled = true;
+        setFailMessage(e instanceof Error ? e.message : null);
+        setStatus('failed');
+      })
+      .finally(() => clearTimeout(timeoutId));
+    return () => { cancelled = true; controller.abort(); clearTimeout(timeoutId); };
+  }, [assetId]);
+
+  if (status === 'failed') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+        <FileText className="size-8 text-muted-foreground" aria-hidden />
+        <p className="text-sm text-foreground">변환에 실패했습니다.</p>
+        <p className="text-xs text-muted-foreground">이 문서를 PDF로 변환하지 못했습니다. 다운로드해 확인하세요.</p>
+        {failMessage && (
+          <p className="w-fit rounded-md bg-destructive-tint px-2 py-1.5 font-mono text-[10.5px] text-foreground">{failMessage}</p>
+        )}
+      </div>
+    );
+  }
+
+  if (status === 'converting') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" aria-hidden />
+        <p className="text-sm text-foreground">변환 중입니다…</p>
+        <p className="text-xs text-muted-foreground">첫 열람은 최대 1~2분 걸릴 수 있습니다({elapsedSec}초 경과).</p>
+      </div>
+    );
+  }
+
+  return <iframe src={pdfUrl ?? undefined} title={label} className="h-full w-full border-0" />;
 }

@@ -20,18 +20,22 @@ interface AttachmentFileProps {
   /** story #2766(레인 A) — 채팅 호출부가 물려주면 클릭 시 새 탭 대신 ReadingPanel을 연다
    * (서명 URL 자체는 패널이 직접 뜬다 — 여기선 target 정보만 전달). 생략하면(undefined,
    * docs/kanban 등 채팅 밖 기존 호출부) 기존 window.open 다운로드 그대로 — 회귀 없음. */
-  onOpenPanel?: (target: { storedUrl: string; conversationId?: string; storyId?: string; label: string; contentType?: string | null }) => void;
+  onOpenPanel?: (target: { storedUrl: string; conversationId?: string; storyId?: string; label: string; contentType?: string | null; assetId?: string }) => void;
   contentType?: string | null;
+  /** story #2803 — 백엔드가 메시지 전송 시 asset registry에 역기입하는 denorm 필드
+   * (asset_registry.sync_attachment_assets). pptx 변환(POST /convert)은 asset_id 축이라
+   * 이게 있어야 그 뷰어 케이스가 동작한다 — 없으면(구 메시지 등) office 폴백으로 정직 축소. */
+  assetId?: string;
 }
 
-export function AttachmentFile({ storedUrl, conversationId, storyId, label, Icon, onOpenPanel, contentType }: AttachmentFileProps) {
+export function AttachmentFile({ storedUrl, conversationId, storyId, label, Icon, onOpenPanel, contentType, assetId }: AttachmentFileProps) {
   const t = useTranslations('chats');
   const { addToast } = useToast();
   const [loading, setLoading] = useState(false);
 
   const open = useCallback(async () => {
     if (onOpenPanel) {
-      onOpenPanel({ storedUrl, conversationId, storyId, label, contentType });
+      onOpenPanel({ storedUrl, conversationId, storyId, label, contentType, assetId });
       return;
     }
     if (loading) return;
@@ -57,7 +61,7 @@ export function AttachmentFile({ storedUrl, conversationId, storyId, label, Icon
     } finally {
       setLoading(false);
     }
-  }, [storedUrl, conversationId, storyId, label, contentType, loading, addToast, t, onOpenPanel]);
+  }, [storedUrl, conversationId, storyId, label, contentType, assetId, loading, addToast, t, onOpenPanel]);
 
   return (
     <button

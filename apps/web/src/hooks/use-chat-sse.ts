@@ -28,7 +28,9 @@ export interface ChatMessage {
    * 사실 필드, 렌더는 FE 몫). */
   deleted_at?: string | null;
   review_type?: string;
-  attachments: Array<{ url?: string; name?: string; content_type?: string; filename?: string }>;
+  // asset_id — story #2803: BE가 전송 시 asset registry에 역기입하는 denorm 필드
+  // (asset_registry.sync_attachment_assets). 구 메시지(registry 롤아웃 이전)엔 없을 수 있다.
+  attachments: Array<{ url?: string; name?: string; content_type?: string; filename?: string; asset_id?: string }>;
   created_at: string;
   // CB-S9: thread fields
   parent_id?: string | null;    // null = top-level message; set = this is a thread reply
