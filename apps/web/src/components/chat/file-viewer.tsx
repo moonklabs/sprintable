@@ -299,25 +299,42 @@ function DocxBody({ url, label }: { url: string; label: string }) {
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout>;
     setStatus('rendering');
-    (async () => {
-      const res = await fetch(url);
+    // story #2788 QA(까디르군) 지적 — res.blob()은 undici Blob을 만드는데 JSZip이 내부에서
+    // FileReader(jsdom 전용 API)로 읽으려 하면 cross-realm 불일치로 조용히 못 읽는다(CI
+    // headless 환경 재현). renderAsync는 ArrayBuffer도 그대로 받으므로 Blob 경유를 아예 없앤다.
+    const run = (async () => {
+      const res = await fetch(url, { signal: controller.signal });
       if (!res.ok) throw new Error(String(res.status));
-      const blob = await res.blob();
+      const buf = await res.arrayBuffer();
       const { renderAsync } = await import('docx-preview');
-      if (cancelled || !containerRef.current) return;
+      if (cancelled) return;
+      if (!containerRef.current) throw new Error('docx render target unmounted');
       containerRef.current.innerHTML = '';
-      await renderAsync(blob, containerRef.current, undefined, {
+      await renderAsync(buf, containerRef.current, undefined, {
         inWrapper: true,
         ignoreWidth: false,
         ignoreHeight: true,
         breakPages: true,
       });
       if (!cancelled) setStatus('ready');
-    })().catch(() => {
-      if (!cancelled) setStatus('failed');
+    })();
+    // AC2(무한 로딩 금지)는 개별 실패 분기만으론 구조적으로 못 지킨다 — fetch든 renderAsync든
+    // 어느 단계에서 진짜로 멈추면 20초 뒤 강제로 정직 실패로 떨어뜨린다.
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('docx render timeout')), 20000);
     });
-    return () => { cancelled = true; };
+    Promise.race([run, timeout])
+      .catch((e) => {
+        // 에러를 삼키지 않는다 — 폴백 UI로 사용자에겐 정직 실패를 보여주되, 원인은 콘솔에 남긴다.
+        console.error('docx 인앱 렌더 실패', e);
+        controller.abort();
+        if (!cancelled) setStatus('failed');
+      })
+      .finally(() => clearTimeout(timeoutId));
+    return () => { cancelled = true; controller.abort(); clearTimeout(timeoutId); };
   }, [url]);
 
   if (status === 'failed') {

@@ -44,9 +44,10 @@ function mount(node: React.ReactElement) {
 }
 
 // dynamic import('docx-preview') + JSZip 파싱은 실제 비동기 작업이라 고정 microtask 횟수로는
-// 못 맞춘다 — 조건 충족까지 실제 타이머로 폴링(최대 5초, [[feedback-verify-boring-cause-before-race]]
-// 동형: "몇 번 돌리면 되겠지" 추측 대신 실제 완료 신호를 기다린다).
-async function waitFor(check: () => boolean, timeoutMs = 5000) {
+// 못 맞춘다 — 조건 충족까지 실제 타이머로 폴링(최대 20초, CI 공유 러너의 저사양 여유분
+// 포함, [[feedback-verify-boring-cause-before-race]] 동형: "몇 번 돌리면 되겠지" 추측
+// 대신 실제 완료 신호를 기다린다).
+async function waitFor(check: () => boolean, timeoutMs = 20000) {
   const start = Date.now();
   while (!check()) {
     if (Date.now() - start > timeoutMs) throw new Error('waitFor timed out');
@@ -63,6 +64,8 @@ afterEach(() => {
 
 describe('FileViewer docx (story #2788)', () => {
   it('실물 docx(서식+표 포함)를 실제로 renderAsync에 먹여 DOM에 렌더한다', async () => {
+    const renderErrors: unknown[][] = [];
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation((...args) => { renderErrors.push(args); });
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === 'https://signed.example/fixture-2788.docx') {
         return new Response(new Uint8Array(REAL_DOCX_BYTES), { status: 200 });
@@ -74,7 +77,10 @@ describe('FileViewer docx (story #2788)', () => {
     await waitFor(() => container.querySelector('.docx-preview-container') !== null || container.textContent!.includes('표시하지 못했습니다'));
 
     const docxContainer = container.querySelector('.docx-preview-container');
-    expect(docxContainer).not.toBeNull();
+    // 실패 시 콘솔에 남긴 실제 원인을 단언 메시지에 실어 CI 로그에서 바로 보이게 한다
+    // (여기서 막혔다면 tail -80이 그 뒤 상세를 잘라먹을 수 있어 — 원인 텍스트 자체를 이 줄에 노출).
+    expect(docxContainer, `docx-preview-container 없음. console.error: ${JSON.stringify(renderErrors)}`).not.toBeNull();
+    errorSpy.mockRestore();
     // 실제 문서 텍스트(표 셀+마커 문단)가 DOM에 나타났는지 — 가짜 렌더가 아니라 실제
     // XML→DOM 변환이 일어났다는 증거.
     expect(container.textContent).toContain('DOCX_RENDER_MARKER_OK');
@@ -94,5 +100,23 @@ describe('FileViewer docx (story #2788)', () => {
     expect(container.querySelector('.animate-pulse')).toBeNull();
     expect(container.textContent).toContain('미리보기를 표시하지 못했습니다');
     expect(container.textContent).toContain('다운로드');
+  });
+
+  it('fetch가 응답하지 않고 멈춰도(hang) 상한 타이머로 정직 폴백에 도달한다 — 무한 로딩 금지(story #2788 QA 지적)', async () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));
+
+    mount(<FileViewer target={target} onClose={() => {}} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('.animate-pulse')).not.toBeNull();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+
+    expect(container.querySelector('.docx-preview-container')).toBeNull();
+    expect(container.querySelector('.animate-pulse')).toBeNull();
+    expect(container.textContent).toContain('미리보기를 표시하지 못했습니다');
+    errorSpy.mockRestore();
+    vi.useRealTimers();
   });
 });
