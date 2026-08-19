@@ -49,6 +49,8 @@ _DECLARED_SUBSTITUTIONS = {
     "_BACKEND_SSE_LEASE_REDIS_ENABLED", "_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED",
     "_FRONTEND_MIN_INSTANCES", "_FRONTEND_MAX_INSTANCES", "_LICENSE_CONSENT",
     "_NEXT_PUBLIC_APP_URL", "_ADMIN_OPERATOR_AUDIENCE", "_ADMIN_OPERATOR_ALLOWLIST",
+    # story #2771 — office-converter(Gotenberg) URL, deploy-office-converter 스텝과 짝.
+    "_GOTENBERG_SERVICE_URL", "_OFFICE_CONVERTER_MAX_INSTANCES",
     "PROJECT_ID", "PROJECT_NUMBER", "BUILD_ID", "COMMIT_SHA", "SHORT_SHA",
     "REPO_NAME", "BRANCH_NAME", "TAG_NAME", "REVISION_ID", "LOCATION",
 }
@@ -85,7 +87,7 @@ def _apply_cloudbuild_escaping(script: str) -> str:
     return script.replace("$$", "$")
 
 
-def _run_env_vars_assembly(deploy_env: str, redis_url: str) -> str:
+def _run_env_vars_assembly(deploy_env: str, redis_url: str, gotenberg_url: str = "") -> str:
     """실제 gcloud 호출부만 잘라내고 ENV_VARS 조립 로직까지만 실행 — 실제 배포 없이 결과 문자열만 얻는다."""
     script = _apply_cloudbuild_escaping(_extract_deploy_backend_script())
     # 실제 gcloud run deploy 호출 라인 이후는 잘라내고 ENV_VARS를 echo하도록 붙인다.
@@ -116,6 +118,9 @@ def _run_env_vars_assembly(deploy_env: str, redis_url: str) -> str:
         "_NEXT_PUBLIC_APP_URL": "https://example.run.app",
         "_ADMIN_OPERATOR_AUDIENCE": "https://example-audience.run.app",
         "_ADMIN_OPERATOR_ALLOWLIST": "operator@example.iam.gserviceaccount.com",
+        # story #2771 — 기본 빈 문자열(substitutions 기본값과 정합, set -u라 미설정이면 스크립트가
+        # 죽는다 — 여기 없으면 이 테스트 전체가 붕괴).
+        "_GOTENBERG_SERVICE_URL": gotenberg_url,
     }
     proc = subprocess.run(
         ["bash", "-c", assembly_only],
@@ -196,6 +201,21 @@ def test_deploy_backend_prod_excludes_admin_operator_env_vars():
     result = _run_env_vars_assembly("prod", "")
     assert "ADMIN_OPERATOR_AUDIENCE" not in result
     assert "ADMIN_OPERATOR_ALLOWLIST" not in result
+
+
+def test_deploy_backend_includes_gotenberg_service_url_when_set():
+    """story #2771 — 부트스트랩 후(_GOTENBERG_SERVICE_URL 채워짐) env var가 실린다."""
+    result = _run_env_vars_assembly(
+        "dev", "redis://10.164.120.243:6379", gotenberg_url="https://office-converter-dev.example.run.app"
+    )
+    assert "GOTENBERG_SERVICE_URL=https://office-converter-dev.example.run.app" in result
+
+
+def test_deploy_backend_excludes_gotenberg_service_url_when_unset():
+    """⭐story #2771 부트스트랩 전 상태 — 빈 값이면 키 자체를 안 싣는다(office_conversion.py가
+    미설정을 503 fail-closed로 처리하므로 이게 안전한 기본 상태)."""
+    result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", gotenberg_url="")
+    assert "GOTENBERG_SERVICE_URL" not in result
 
 
 def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
