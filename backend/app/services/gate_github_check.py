@@ -45,7 +45,7 @@ def _github_state_for_gate_status(status: str) -> tuple[str, str | None]:
     return "in_progress", None
 
 
-async def _resolve_pr_link(
+async def resolve_pr_link(
     session: AsyncSession, org_id: uuid.UUID, story_id: uuid.UUID
 ) -> PullRequestStoryLink | None:
     """story에 연결된 PR 링크 — 가장 최근 갱신 1건(⚠️단순화: 한 story에 PR 링크가 여럿이면
@@ -101,16 +101,24 @@ async def publish_gate_check(
             if gate is None or gate.gate_type != MERGE_GATE_TYPE:
                 return  # merge 게이트 아니면 이 1단계 스코프 밖(설계 doc §0).
 
-            # 링크는 항상 조회한다(head_sha가 이미 인자로 왔어도) — 웹훅 경로가 알아낸 head_sha를
-            # link.evidence에 되먹여야, 나중에 사람 승인(gates.py, head_sha를 모르는 호출자)이 같은
-            # 링크에서 "이 게이트가 지금 추적 중인 SHA"를 찾을 수 있다(단일 소스, 이중진실 방지).
-            link = await _resolve_pr_link(session, org_id, gate.work_item_id)
+            link = await resolve_pr_link(session, org_id, gate.work_item_id)
             if link is None:
                 logger.info("gate=%s: PR 링크 없음 — check 발행 skip", gate_id)
                 return
             repo_full_name = repo_full_name or link.repo_full_name
             pr_number = pr_number if pr_number is not None else link.pr_number
-            head_sha = head_sha or (link.evidence or {}).get("head_sha")
+
+            # ⛔카디르 QA(PR#3243, 2026-08-19) 레이스 fix — 여기서 link.evidence.head_sha를
+            # "지금 추적 중인 SHA"로 재해소하면, 승인(SHA A) 커밋 後·이 배경 태스크 실행 前에
+            # 새 커밋(B)의 synchronize가 먼저 link.evidence를 B로 갱신해버렸을 때 "A 승인이 B를
+            # 축복"하는 사고가 난다. approved/auto_passed는 **anchor(gate.approved_head_sha,
+            # 승인 트랜잭션에서 이미 확정 기록됨 — gates.py 참고)를 그대로 쓴다** — link.evidence는
+            # pending 상태(아직 anchor 없음)에서만 참고한다.
+            if head_sha is None:
+                if gate.status in ("approved", "auto_passed") and gate.approved_head_sha:
+                    head_sha = gate.approved_head_sha
+                else:
+                    head_sha = (link.evidence or {}).get("head_sha")
             if not head_sha:
                 logger.info("gate=%s: head_sha 미상 — check 발행 skip", gate_id)
                 return
@@ -166,12 +174,16 @@ async def reopen_gate_if_new_sha(
     """SHA 귀속(AC②) — 승인된 게이트가 더 이상 최신 커밋과 안 맞으면 pending으로 되돌린다.
     **호출자의 기존 트랜잭션 안에서 동작**(commit 안 함 — verdict_capture.py가 커밋).
     `resolve_gate_from_verdict`(시스템 자동판정)와 동일한 경량 경로(`set_gate_status` 직접 —
-    `transition_gate`의 사람-결재 부작용 체인 우회, gate.py 주석 참고). True=재-pending 발생."""
+    `transition_gate`의 사람-결재 부작용 체인 우회, gate.py 주석 참고). True=재-pending 발생.
+
+    ⛔카디르 QA(PR#3243) fail-closed 보강 — approved인데 `approved_head_sha`가 비어있는 경우
+    (정상 경로라면 gates.py 승인 트랜잭션이 항상 채워두므로 legacy/이상 상태뿐)도 **재-pending
+    쪽으로** 판정한다. "SHA를 모르는 승인"을 그대로 success로 방치하는 것이 fail-open이다."""
     if gate.gate_type != MERGE_GATE_TYPE:
         return False
     if gate.status != "approved":
         return False
-    if not gate.approved_head_sha or gate.approved_head_sha == new_head_sha:
+    if gate.approved_head_sha == new_head_sha:
         return False
     logger.info(
         "gate=%s: SHA 불일치(approved=%s new=%s) — 재-pending", gate.id, gate.approved_head_sha, new_head_sha

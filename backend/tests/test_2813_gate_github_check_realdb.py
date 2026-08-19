@@ -291,3 +291,85 @@ async def test_reopen_gate_if_new_sha_noop_when_not_approved_realdb():
         assert flipped is False
     finally:
         await engine.dispose()
+
+
+# ── 카디르 QA(PR#3243, 2026-08-19) 레이스 회귀 — 실 재현 시나리오 ──────────────────────
+#
+# ①사람 승인(SHA A) 커밋 ②publish 태스크 실행 前 새 커밋(B)의 synchronize 도착
+# ③(구 코드) anchor가 아직 None이라 reopen 스킵 ④웹훅이 link.evidence.head_sha를 B로 갱신
+# ⑤뒤늦은 승인-publish가 B를 읽어 success 발행 — "A 승인이 B를 축복"하는 사고.
+# fix①(gates.py, 승인 트랜잭션에서 anchor 즉시 기록)+fix②(reopen이 anchor 없어도 재-pending)로
+# 막힌다 — 아래 두 테스트가 그 닫힘을 실측한다.
+
+
+@pytest.mark.anyio
+async def test_race_approval_background_task_uses_anchor_not_stale_link_evidence_realdb():
+    """fix① 실측 — gates.py가 승인 트랜잭션에서 이미 `approved_head_sha=A`를 박아둔 상태를
+    시뮬레이션(라우터 레벨 재현은 무거워 서비스 레벨에서 그 결과 상태로 시작). 그 사이 synchronize
+    가 link.evidence.head_sha를 B로 먼저 덮어써도(레이스 그대로 재현), 뒤늦게 도는 승인-publish
+    (head_sha 인자 없음 — gates.py 배경 태스크 호출 시그니처와 동일)는 **anchor(A)를 그대로 써야
+    한다** — B를 읽어 success를 발행하면(구 버그) 이 테스트가 실패한다."""
+    from sqlalchemy import select
+
+    from app.models.gate import Gate
+    from app.models.pull_request_story_link import PullRequestStoryLink
+    from app.services.gate_github_check import publish_gate_check
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            # fix①이 승인 트랜잭션에서 이미 확정했다고 가정하는 상태 그대로 시드.
+            seeded = await _seed(s, gate_status="approved", approved_head_sha="sha-A")
+
+        # 레이스 재현: synchronize 웹훅이 승인-publish보다 먼저 link.evidence를 B로 덮어씀.
+        async with Session() as s:
+            link = (
+                await s.execute(
+                    select(PullRequestStoryLink).where(PullRequestStoryLink.story_id == seeded["story_id"])
+                )
+            ).scalar_one()
+            link.evidence = {"head_sha": "sha-B"}
+            await s.commit()
+
+        # 뒤늦게 도는 승인-publish(gates.py 배경 태스크 — head_sha 인자 없이 호출).
+        with patch(
+            "app.services.gate_github_check.create_check_run",
+            AsyncMock(return_value={"id": 7001}),
+        ) as create_mock, patch("app.core.database.async_session_factory", Session):
+            await publish_gate_check(seeded["org_id"], seeded["gate_id"])
+
+        # ⭐핵심 단언 — B가 아니라 A에 success가 발행돼야 한다.
+        assert create_mock.call_args.args[1:3] == ("acme/repo", "sha-A")
+
+        async with Session() as s:
+            gate = await s.get(Gate, seeded["gate_id"])
+            assert gate.approved_head_sha == "sha-A"  # B로 오염 안 됨.
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_race_reopen_fail_closed_when_anchor_missing_despite_approved_realdb():
+    """fix② 실측 — anchor(approved_head_sha)가 비어있는데 status=approved인 legacy/이상 상태에서
+    synchronize가 오면, 구 코드(`if not gate.approved_head_sha: return False`)는 침묵 스킵했지만
+    fix 後엔 **재-pending 쪽으로**(fail-closed) 판정해야 한다."""
+    from app.models.gate import Gate
+    from app.services.gate_github_check import reopen_gate_if_new_sha
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s, gate_status="approved", approved_head_sha=None)
+
+        async with Session() as s:
+            gate = await s.get(Gate, seeded["gate_id"])
+            flipped = await reopen_gate_if_new_sha(s, seeded["org_id"], gate, "sha-new")
+            await s.commit()
+
+        assert flipped is True  # 구 코드라면 False(침묵 스킵)였을 것.
+
+        async with Session() as s:
+            gate = await s.get(Gate, seeded["gate_id"])
+            assert gate.status == "pending"
+    finally:
+        await engine.dispose()

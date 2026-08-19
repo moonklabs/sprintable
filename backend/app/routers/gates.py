@@ -17,7 +17,8 @@ from app.models.hitl import HitlRequest
 from app.models.pm import Story, Task
 from app.models.visual_artifact import VisualArtifact
 from app.routers.agent_gateway import wake_agent
-from app.services.gate_github_check import publish_gate_check
+from app.services.gate_github_check import publish_gate_check, resolve_pr_link
+from app.services.merge_verdict_gate import MERGE_GATE_TYPE
 from app.services.gate_service import (
     GateUndoNotSelfError,
     GateUndoWindowExpiredError,
@@ -971,6 +972,17 @@ async def transition_gate_endpoint(
             session, org_id, id, body.status, _resolver_id, body.note,
             pending_deliveries=_pending_deliveries,
         )
+        # ⛔카디르 QA(PR#3243, 2026-08-19) 레이스 fix — anchor(gate.approved_head_sha)를 배경
+        # publish 태스크가 뒤늦게 적으면, 승인(SHA A) 직후·태스크 실행 前에 새 커밋(B)의
+        # synchronize가 먼저 도착해 link.evidence를 B로 갱신 → 뒤늦은 태스크가 B를 읽어 "A 승인이
+        # B를 축복"하는 경로가 열린다. **"승인은 그때의 커밋에" 문자 그대로 — anchor는 이 승인
+        # 트랜잭션(commit 前)에서 확정 기록**한다. 배경 태스크(publish_gate_check)는 이 값을
+        # 그대로 반영만 한다(gate_github_check.py 참고).
+        if body.status == "approved" and gate.gate_type == MERGE_GATE_TYPE:
+            _link = await resolve_pr_link(session, org_id, gate.work_item_id)
+            _head_sha = (_link.evidence or {}).get("head_sha") if _link else None
+            if _head_sha:
+                gate.approved_head_sha = _head_sha
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(gate)
