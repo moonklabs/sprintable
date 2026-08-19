@@ -168,6 +168,10 @@ class GateResponse(BaseModel):
     # GitHub check-run 상태를 FE가 읽을 수 있게 raw passthrough(신규 엔드포인트 불요). Gate ORM에
     # 이미 있는 컬럼 그대로 — additive·nullable(merge 게이트 아니거나 아직 미발행이면 None).
     github_check_run_id: int | None = None
+    # 카디르 QA(PR#3244) — Gate ORM엔 3243이 이미 이 컬럼을 추가했는데(카디르 QA③-c 신설) 이
+    # 응답 스키마에 누락돼 있어 FE의 SHA 배지가 실 API에선 영원히 undefined였다. from_attributes라
+    # ORM 컬럼명과 일치시키기만 하면 다른 construction site 변경 없이 그대로 채워진다.
+    github_check_run_sha: str | None = None
     approved_head_sha: str | None = None
     created_at: datetime
     updated_at: datetime
