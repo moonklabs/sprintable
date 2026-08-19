@@ -129,6 +129,7 @@ def _reset_public_schema(url: str) -> None:
     engine = create_engine(_sync_url(url))
     try:
         with engine.begin() as conn:
+            # destructive-sql-allow: 위 assert_disposable_test_db() 이중가드 통과 후에만 도달(story #2786 정당 예외).
             conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
             conn.execute(text("CREATE SCHEMA public"))
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
