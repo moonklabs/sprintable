@@ -24,12 +24,23 @@ const DEFINITIONS = [
       implementation: { role: 'Dev', action: '코드 작성 및 PR 제출' },
       qa_review: { role: 'QA', action: 'AC 체크리스트 검증 후 APPROVE/REJECT' },
     },
+    enabled: true,
   },
   {
     id: '2', key: 'org.acme.deploy_started', org_id: 'org-acme',
     name: '배포 시작(비-사이클형)', description: null,
     payload_schema: { properties: {} },
     stage_metadata: {},
+    enabled: true,
+  },
+  // 까디르군 QA(#3238) — GET /api/events/definitions는 admin 감사 목적으로 disabled도
+  // 의도적으로 내려준다. 구 /api/workflow-recipes는 활성만 반환했으므로 안 거르면 실회귀.
+  {
+    id: '3', key: 'org.acme.custom_flow', org_id: 'org-acme',
+    name: '커스텀 흐름(비활성 — 드롭다운에 안 뜨는 게 정상)', description: null,
+    payload_schema: { properties: { stage: { enum: ['draft', 'review'] } } },
+    stage_metadata: { draft: { role: 'Dev', action: '초안 작성' }, review: { role: 'PO', action: '검토' } },
+    enabled: false,
   },
 ];
 
@@ -75,6 +86,8 @@ describe('LoopCreateDialog 레시피 선택 (story #2792 — event_definitions �
     const options = Array.from(document.body.querySelectorAll('#loop-create-recipe option')).map((o) => o.textContent);
     expect(options).toContain('3단계 스크럼');
     expect(options).not.toContain('배포 시작(비-사이클형)');
+    // 까디르군 QA(#3238) — disabled 사이클형 정의는 stage가 있어도 드롭다운에 뜨면 안 된다.
+    expect(options).not.toContain('커스텀 흐름(비활성 — 드롭다운에 안 뜨는 게 정상)');
   });
 
   it('레시피 선택 시 stage_metadata의 action(role)을 순서대로 보여준다(짧은 label 없이도 정직 표시)', async () => {

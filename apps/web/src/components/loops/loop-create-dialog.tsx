@@ -30,6 +30,10 @@ type Mode = 'new' | 'link';
  * 프록시 그대로)로 교체한다. 신규 엔드포인트 없음 — 계약 확定(페드루군·디디군 2026-08-19).
  * 사이클형 판별은 서버가 별도 kind 필드를 안 내려주므로 클라에서 `payload_schema.properties.
  * stage.enum` 존재로 판정한다(signal/measurement 종류는 이 경로가 비어 자동 제외).
+ *
+ * 까디르군 QA(#3238) — `GET /api/events/definitions`는 admin 감사 목적으로 disabled 정의도
+ * 의도적으로 내려준다(P2에서 확定한 비대칭). 구 `/api/workflow-recipes`는 활성만 반환했으므로
+ * 여기서 안 거르면 실회귀 — 사이클형 판정에 `enabled`도 같이 본다.
  */
 export interface EventDefinitionResponse {
   id: string;
@@ -39,6 +43,7 @@ export interface EventDefinitionResponse {
   description: string | null;
   payload_schema: { properties?: { stage?: { enum?: string[] } } };
   stage_metadata: Record<string, { role?: string; action?: string }>;
+  enabled: boolean;
 }
 
 // story #2792 QA 테스트가 순수 판별 로직을 직접 못박을 수 있게 export.
@@ -47,7 +52,7 @@ export function cyclicStages(def: EventDefinitionResponse): string[] {
 }
 
 export function isCyclicDefinition(def: EventDefinitionResponse): boolean {
-  return cyclicStages(def).length > 0;
+  return def.enabled && cyclicStages(def).length > 0;
 }
 
 /**

@@ -17,6 +17,7 @@ const CYCLIC: EventDefinitionResponse = {
     implementation: { role: 'Dev', action: '코드 작성 및 PR 제출' },
     qa_review: { role: 'QA', action: 'AC 체크리스트 검증 후 APPROVE/REJECT' },
   },
+  enabled: true,
 };
 
 const SIGNAL: EventDefinitionResponse = {
@@ -24,6 +25,7 @@ const SIGNAL: EventDefinitionResponse = {
   name: '배포 시작', description: null,
   payload_schema: { properties: {} },
   stage_metadata: {},
+  enabled: true,
 };
 
 const NO_PROPERTIES: EventDefinitionResponse = {
@@ -31,6 +33,17 @@ const NO_PROPERTIES: EventDefinitionResponse = {
   name: '스키마 없음', description: null,
   payload_schema: {},
   stage_metadata: {},
+  enabled: true,
+};
+
+// 까디르군 QA(#3238) — GET /api/events/definitions는 admin 감사 목적으로 disabled 정의도
+// 의도적으로 내려준다(구 /api/workflow-recipes는 활성만 반환했으므로 안 거르면 실회귀).
+const DISABLED_CYCLIC: EventDefinitionResponse = {
+  id: '4', key: 'org.acme.custom_flow', org_id: 'org-acme',
+  name: '커스텀 흐름(비활성)', description: null,
+  payload_schema: { properties: { stage: { enum: ['draft', 'review'] } } },
+  stage_metadata: { draft: { role: 'Dev', action: '초안 작성' }, review: { role: 'PO', action: '검토' } },
+  enabled: false,
 };
 
 describe('cyclicStages / isCyclicDefinition (story #2792)', () => {
@@ -47,5 +60,10 @@ describe('cyclicStages / isCyclicDefinition (story #2792)', () => {
   it('properties 자체가 없는 방어적 케이스도 크래시 없이 빈 배열로 떨어진다', () => {
     expect(cyclicStages(NO_PROPERTIES)).toEqual([]);
     expect(isCyclicDefinition(NO_PROPERTIES)).toBe(false);
+  });
+
+  it('disabled 사이클형 정의는 stage가 있어도 선택 대상이 아니다(까디르군 QA #3238 — 구 라우터는 활성만 반환)', () => {
+    expect(cyclicStages(DISABLED_CYCLIC)).toEqual(['draft', 'review']);
+    expect(isCyclicDefinition(DISABLED_CYCLIC)).toBe(false);
   });
 });
