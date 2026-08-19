@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, String, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -33,6 +33,16 @@ class GithubInstallation(Base):
     account_login: Mapped[str | None] = mapped_column(String(255), nullable=True)
     account_type: Mapped[str | None] = mapped_column(String(32), nullable=True)  # Organization | User
     repository_selection: Mapped[str | None] = mapped_column(String(16), nullable=True)  # all | selected
+    # story #2815(§5-④, 관측모드 판별) — `sprintable/gate`를 GitHub branch protection에
+    # required로 등록한 repo 목록("owner/repo" 문자열). ⚠️설계 판단(디디군, 2026-08-20): GitHub
+    # branch-protection API 실측 조회 대신 **수동 플래그**를 택했다 — 실측 조회는
+    # `administration:read`라는 checks:write와 별개 신규 권한이 필요해(story #2813 §2-4가 이미
+    # checks:write 하나로도 승인 지연 중) 승인 마찰을 배로 늘린다. 또한 PO가 이미 "check 실발행
+    # 시작 後에만 branch protection을 건다"는 순서를 직접 통제하고 있어(story #2813 R4 PO 코멘트)
+    # 그 등록 시점을 PO 자신이 정확히 아는 유일한 주체다 — 그 사실을 코드가 재조회하는 것보다
+    # PO가 그대로 반영하는 편이 더 정확하고 저비용. 라이브 API 실측으로 전환은 후속(값이 stale해질
+    # 위험을 감수하는 트레이드오프 — PO/운영이 등록 직후 갱신 안 하면 그새 조회는 부정확).
+    enforced_check_repos: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
