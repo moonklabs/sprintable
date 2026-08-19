@@ -155,3 +155,68 @@ async def test_create_event_definition_api_rejects_stage_metadata_key_not_in_enu
         assert exc.value.status_code == 400
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_update_event_definition_api_rejects_payload_schema_shrink_that_orphans_stage_metadata():
+    """⭐카디르군 QA 커버리지 갭 지적(2026-08-19) — PATCH가 payload_schema만 줄이고
+    stage_metadata는 안 건드리면, 기존 메타의 일부 키가 새 enum 밖으로 밀려나(고아) 조용히
+    저장될 뻔한 케이스. registry 단위테스트(validate_stage_metadata 직접 호출)와 별개로
+    실제 `update_event_definition` 엔드포인트 호출로 400을 실증한다."""
+    import uuid as uuid_mod
+
+    from fastapi import HTTPException
+
+    from app.dependencies.auth import AuthContext
+    from app.models.organization import Organization
+    from app.models.project import OrgMember
+    from app.routers.events import (
+        CreateEventDefinitionRequest, UpdateEventDefinitionRequest,
+        create_event_definition, update_event_definition,
+    )
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        org_id = uuid_mod.uuid4()
+        user_id = uuid_mod.uuid4()
+        slug = f"orphorg{org_id.hex[:8]}"
+        async with Session() as s:
+            s.add(Organization(id=org_id, name="OrphanOrg", slug=slug))
+            s.add(OrgMember(id=uuid_mod.uuid4(), org_id=org_id, user_id=user_id, role="owner"))
+            await s.commit()
+
+        auth = AuthContext(user_id=str(user_id), email=None, claims={}, org_id=str(org_id))
+        create_body = CreateEventDefinitionRequest(
+            key=f"org.{slug}.custom_cycle",
+            name="테스트 사이클",
+            payload_schema={
+                "type": "object", "additionalProperties": False,
+                "required": ["stage"],
+                "properties": {"stage": {"type": "string", "enum": ["a", "b"]}},
+            },
+            routing={
+                "escalation": {"kind": "server_derived", "target": "none"},
+                "broadcast": {"kind": "server_derived", "target": "none"},
+            },
+            stage_metadata={"a": {"role": "X", "action": "Y"}, "b": {"role": "Z", "action": "W"}},
+        )
+        async with Session() as s:
+            created = await create_event_definition(create_body, db=s, auth=auth, org_id=org_id)
+
+        # payload_schema만 줄여 "b"를 enum에서 뺀다 — stage_metadata는 건드리지 않음(여전히 a·b 둘 다).
+        shrink_body = UpdateEventDefinitionRequest(
+            payload_schema={
+                "type": "object", "additionalProperties": False,
+                "required": ["stage"],
+                "properties": {"stage": {"type": "string", "enum": ["a"]}},
+            },
+        )
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc:
+                await update_event_definition(
+                    uuid_mod.UUID(created.id), shrink_body, db=s, auth=auth, org_id=org_id,
+                )
+        assert exc.value.status_code == 400
+    finally:
+        await engine.dispose()

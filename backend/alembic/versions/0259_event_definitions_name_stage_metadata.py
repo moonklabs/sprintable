@@ -13,6 +13,13 @@ name은 NOT NULL이라 기존 행(0245 프리셋 4종 + 있을 수 있는 org �
 `key`를 폴백으로 채운 뒤 NOT NULL로 잠근다(값이 없는 것보다 key라도 있는 게 안전, 프리셋
 4종은 이 마이그가 곧바로 사람이 읽을 이름으로 덮어쓴다).
 
+⛔실버그(카디르군 QA, 2026-08-19) — 백필 WHERE절을 `name IS NULL`로 짰으나 **0행만 잡힌다**.
+`ADD COLUMN ... server_default=''`는 PG11+ fast-default라 실 UPDATE 없이 기존 행에 즉시
+"missing value"로 `''`를 채운다(디스크 재기록 없음) — 그래서 기존 행은 물리적으로 NULL이
+아니라 **논리적으로 이미 `''`를 읽는다**. `WHERE name IS NULL`은 그 어떤 기존 행도 못 잡고,
+프리셋 4종은 사람이 읽을 이름 대신 `''`로 영구 고정될 뻔했다(PO AC도 이 WHERE절을 못
+잡았던 구멍 — 페드루 확認). 백필 조건을 실제 상태(`name = ''`)로 정정.
+
 Revision ID: 0259
 Revises: 0258
 Create Date: 2026-08-19
@@ -52,11 +59,11 @@ def upgrade() -> None:
     conn = op.get_bind()
     for key, name in _PRESET_NAMES.items():
         conn.execute(
-            sa.text("UPDATE event_definitions SET name = :name WHERE key = :key AND name IS NULL"),
+            sa.text("UPDATE event_definitions SET name = :name WHERE key = :key AND name = ''"),
             {"name": name, "key": key},
         )
     # 그 외(있을 수 있는 org 커스텀 행) — key를 폴백 이름으로.
-    conn.execute(sa.text("UPDATE event_definitions SET name = key WHERE name IS NULL"))
+    conn.execute(sa.text("UPDATE event_definitions SET name = key WHERE name = ''"))
 
     op.alter_column("event_definitions", "name", nullable=False)
 

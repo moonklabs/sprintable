@@ -151,10 +151,15 @@ def _block_template(name: str) -> dict:
 
 
 def _payload_schema(stage_slugs: list[str]) -> dict:
+    # ⛔실버그(카디르군 QA, 2026-08-19) — work_item_type이 properties에만 있고 required엔
+    # 없어, 기존 preset 2종(work.status_changed/assigned)과 비대칭이었다. routing.broadcast
+    # 가 server_derived/work_item_stakeholders(type+id 짝으로 해석)인데 type이 optional이면
+    # "stage+work_item_id만 있는" 스키마상 유효한 payload로 발행이 가능해져, 해석기가
+    # type을 못 받아 zero-reach로 새는 경로가 구조적으로 열려 있었다 — required에 추가.
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": ["stage", "work_item_id"],
+        "required": ["stage", "work_item_type", "work_item_id"],
         "properties": {
             "stage": {"type": "string", "enum": stage_slugs},
             "work_item_type": {"type": "string"},
