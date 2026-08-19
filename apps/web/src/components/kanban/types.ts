@@ -82,6 +82,17 @@ export interface GateItem {
   // discriminator(BE GateResponse.source, additive). 단독 엔드포인트(`/api/gates` 등)는 이 필드가
   // 응답에 없을 수 있어 optional — 그 경로 소비부는 항상 gate이므로 값이 없으면 'gate'로 취급한다.
   source?: 'gate';
+  // story #2813(Gate→GitHub required check, PR#3243)·additive — 이 게이트가 추적 중인 GitHub
+  // check-run. null = 아직 발행 안 됐거나(merge 게이트 아님 등) 이 저장소가 관측 모드(story #2814
+  // BE 조각 착지 전까지는 두 경우를 구분할 필드가 없어, FE는 null이면 표시 자체를 접는다 —
+  // "강제 중"이라는 잘못된 인상을 안 주는 쪽이 기본값).
+  github_check_run_id?: number | null;
+  // 카디르 QA(PR#3243)로 신설 — 그 check-run이 실제로 겨냥한 SHA(발행 시점 값, approved_head_sha와
+  // 별개 — 승인이 그 SHA에 "귀속"됐는지는 approved_head_sha가 SSOT).
+  github_check_run_sha?: string | null;
+  // "이 승인이 귀속된 SHA" — synchronize 웹훅의 새 head_sha와 다르면 재-pending(approved→pending)
+  // 트리거(BE reopen_gate_if_new_sha). null = 아직 승인 전이거나 재-pending으로 리셋된 상태.
+  approved_head_sha?: string | null;
 }
 
 // story #2054: 결재함 통합 인박스에서 HitlRequest(gate_approval park) 항목 최소 스키마(BE

@@ -7,7 +7,7 @@
 // 별도 읽기전용 텍스트는 "decision !== 'block'"만 보고 "Auto-passed"를 말했다 — 한 화면이
 // 반대되는 두 문장을 동시에 냈다.
 import { describe, expect, it } from 'vitest';
-import { gateDecision, gateNeedsAction } from './gate-evidence';
+import { gateDecision, gateHasEvidence, gateNeedsAction, githubCheckState } from './gate-evidence';
 import type { GateItem } from '@/components/kanban/types';
 
 function baseGate(overrides: Partial<GateItem>): GateItem {
@@ -53,5 +53,48 @@ describe('gateDecision — story #2043 판정 미거침 조합', () => {
   it('resolved(status≠pending) 게이트는 auto_decision_reason 없이는 null — 해소 문구는 status 자체로 별도 처리되므로 여기서 auto/ask를 지어내지 않는다', () => {
     const gate = baseGate({ status: 'approved', requires_human: true, auto_decision_reason: null });
     expect(gateDecision(gate)).toBeNull();
+  });
+});
+
+// story #2814 — GitHub check 상태 파생. BE gate_github_check.py::_github_state_for_gate_status와
+// 정합해야 한다(approved/auto_passed→success, rejected/voided→failure, pending/held→in_progress).
+describe('githubCheckState (story #2814)', () => {
+  it('github_check_run_id가 null이면 발행 안 됨/관측모드 둘 다 구분 못 하므로 null(표시 접음)이다', () => {
+    const gate = baseGate({ status: 'approved', github_check_run_id: null });
+    expect(githubCheckState(gate)).toBeNull();
+  });
+
+  it('github_check_run_id undefined(구버전 응답)도 동일하게 null이다', () => {
+    const gate = baseGate({ status: 'approved' });
+    expect(githubCheckState(gate)).toBeNull();
+  });
+
+  it.each([
+    ['approved', 'success'],
+    ['auto_passed', 'success'],
+    ['rejected', 'failure'],
+    ['voided', 'failure'],
+    ['pending', 'in_progress'],
+    ['held', 'in_progress'],
+  ] as const)('status=%s + check 발행됨 → %s', (status, expected) => {
+    const gate = baseGate({ status, github_check_run_id: 12345 });
+    expect(githubCheckState(gate)).toBe(expected);
+  });
+
+  it('check가 발행됐어도 gate status가 discussed 등 미정의 상태면 null이다', () => {
+    const gate = baseGate({ status: 'discussed', github_check_run_id: 12345 });
+    expect(githubCheckState(gate)).toBeNull();
+  });
+});
+
+describe('gateHasEvidence — GitHub check 단독 신호도 실 증거로 친다(story #2814)', () => {
+  it('CI/신뢰도/사유 전부 없어도 GitHub check가 발행됐으면 evidence 있음(State A로 안 가라앉음)', () => {
+    const gate = baseGate({ status: 'pending', github_check_run_id: 12345, neutral_facts: null });
+    expect(gateHasEvidence(gate)).toBe(true);
+  });
+
+  it('GitHub check도 없고 다른 신호도 전부 없으면 여전히 evidence 없음(기존 동작 보존)', () => {
+    const gate = baseGate({ status: 'pending', neutral_facts: null });
+    expect(gateHasEvidence(gate)).toBe(false);
   });
 });
