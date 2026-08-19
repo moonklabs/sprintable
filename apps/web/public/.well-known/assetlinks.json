@@ -5,7 +5,8 @@
       "namespace": "android_app",
       "package_name": "com.moonklabs.sprintable",
       "sha256_cert_fingerprints": [
-        "F5:D0:7A:92:EA:A1:BB:71:F6:AF:71:9C:EC:E7:34:65:E5:83:FA:CF:C1:90:EE:CA:A0:E1:F0:F1:02:9C:59:99"
+        "F5:D0:7A:92:EA:A1:BB:71:F6:AF:71:9C:EC:E7:34:65:E5:83:FA:CF:C1:90:EE:CA:A0:E1:F0:F1:02:9C:59:99",
+        "C6:8A:29:1D:53:3C:A7:0C:6D:9F:15:5B:CE:D0:6A:E1:C2:52:51:05:AF:82:96:A5:2C:9F:5D:9C:0D:6C:4E:37"
       ]
     }
   },
