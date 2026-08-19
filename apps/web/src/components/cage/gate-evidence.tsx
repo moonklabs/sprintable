@@ -104,6 +104,13 @@ type GithubCheckState = 'in_progress' | 'success' | 'failure';
  * `github_check_run_id`가 null이면 이 게이트가 "아직 발행 안 됨"인지 "이 저장소가 관측 모드"인지
  * 구분할 필드가 아직 없다(관측모드 판별 필드는 story #2814 BE 조각으로 분리, 미착지). 두 경우
  * 모두 null을 리턴해 표시 자체를 접는다 — "강제 중"이라는 잘못된 인상을 주는 쪽보다 안전(AC③ 정신).
+ *
+ * ⚠️페드루군 AC 노트(PR#3244, 비차단) — 이 값은 gate.status에서 파생한 "게이트가 의도한" check
+ * 상태이지, GitHub의 실제 check 상태를 조회한 값이 아니다. publish_gate_check()가 GitHub API
+ * 호출에 실패하면 실제 check는 오래된 pending에 머무는데 이 화면은 approved→success로 보일 수
+ * 있다 — GitHub 쪽은 fail-closed라 required check 미충족 시 머지가 막히므로 안전 사고는 아니고
+ * 표시 정직성 문제만 있다. 실제 원장(gate_github_check_event) 조회로 이 어긋남을 좁히는 건 2단
+ * (story #2814 BE 조각) 이후.
  */
 export function githubCheckState(gate: GateItem): GithubCheckState | null {
   if (gate.github_check_run_id == null) return null;
