@@ -77,31 +77,55 @@ def _id_token_header() -> dict[str, str]:
         return {}
 
 
+_PDF_MAGIC = b"%PDF-"
+
+
 async def _call_gotenberg(filename: str, data: bytes) -> bytes:
+    """Gotenberg 호출 — 응답을 **스트리밍**으로 읽는다(카디르군 재QA, 2026-08-19).
+
+    이전 버전은 `client.post()`로 전체 바디를 먼저 버퍼링한 뒤 매직/크기를 검사했다 —
+    캐시 오염은 막았지만, 주석이 약속한 "무제한 메모리 적재 방지" 자체는 못 지켰다(거대
+    payload가 크기 상한에 걸려 결국 거부되더라도 그 순간까진 이미 전량 메모리에 있었다).
+    `client.stream()` + `aiter_bytes()`로 청크 단위 누적하며 ①매직이 판정 가능한 즉시(5바이트
+    확보 시) 검사해 아닌 것으로 판명되면 나머지 바디를 읽지 않고 바로 중단 ②누적 바이트가
+    상한을 넘는 순간 즉시 중단 — 두 실패 경로 모두 전체 바디를 메모리에 올리기 전에 끊는다.
+    """
     if not _GOTENBERG_URL:
         raise ConversionUnavailable("GOTENBERG_SERVICE_URL not configured")
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        try:
-            resp = await client.post(
+    chunks: list[bytes] = []
+    total = 0
+    magic_checked = False
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            async with client.stream(
+                "POST",
                 f"{_GOTENBERG_URL}/forms/libreoffice/convert",
                 files={"files": (filename, data, "application/octet-stream")},
                 headers=_id_token_header(),
-            )
-        except httpx.HTTPError as exc:
-            raise ConversionFailed(f"gotenberg request error: {exc}") from exc
-    if resp.status_code != 200:
-        raise ConversionFailed(f"gotenberg returned {resp.status_code}")
-    # ⛔QA catch(카디르군, 2026-08-19) — 200이어도 body가 PDF가 아닌 응답(에러 페이지류 등
-    # 프록시/게이트웨이 오탐)이 오면 검증 없이 캐시하는 순간 영구 오염된다(§7-2 캐시는
-    # 결정적 path라 재변환 트리거 자체가 없어 다음 열람마다 그 오염을 계속 서빙). 저장 前
-    # 최소 가드: 비어있지 않음 + `%PDF-` 매직 프리픽스.
-    if not resp.content.startswith(b"%PDF-"):
+            ) as resp:
+                if resp.status_code != 200:
+                    raise ConversionFailed(f"gotenberg returned {resp.status_code}")
+                async for chunk in resp.aiter_bytes():
+                    chunks.append(chunk)
+                    total += len(chunk)
+                    if not magic_checked and total >= len(_PDF_MAGIC):
+                        if not b"".join(chunks)[: len(_PDF_MAGIC)].startswith(_PDF_MAGIC):
+                            raise ConversionFailed(
+                                "gotenberg response is not a valid PDF (missing %PDF- magic)"
+                            )
+                        magic_checked = True
+                    if total > _MAX_CONVERTED_PDF_BYTES:
+                        raise ConversionFailed(
+                            f"gotenberg response exceeds size cap (>{_MAX_CONVERTED_PDF_BYTES} bytes)"
+                        )
+    except httpx.HTTPError as exc:
+        raise ConversionFailed(f"gotenberg request error: {exc}") from exc
+
+    body = b"".join(chunks)
+    if not magic_checked and not body.startswith(_PDF_MAGIC):
+        # 5바이트 미만으로 스트림이 끝난 초단문/빈 응답 — 위 루프 중엔 판정 못 했으니 여기서.
         raise ConversionFailed("gotenberg response is not a valid PDF (missing %PDF- magic)")
-    if len(resp.content) > _MAX_CONVERTED_PDF_BYTES:
-        raise ConversionFailed(
-            f"gotenberg response exceeds size cap ({len(resp.content)} > {_MAX_CONVERTED_PDF_BYTES} bytes)"
-        )
-    return resp.content
+    return body
 
 
 def _pdf_name(source_name: str) -> str:
