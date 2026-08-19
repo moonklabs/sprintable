@@ -23,6 +23,7 @@ from app.dependencies.database import get_db
 from app.models.asset import Asset, AssetLink
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.pm import Story
+from app.services import office_conversion
 from app.services.asset_registry import canonical_object_path as _canonical_object_path
 from app.services.asset_registry import path_in_source_scope
 from app.services.member_resolver import resolve_member
@@ -196,3 +197,53 @@ async def authorize_attachment(
             raise HTTPException(status_code=403, detail="Attachment does not belong to this story")
 
     return {"authorized": True}
+
+
+@router.post("/{asset_id}/convert")
+async def convert_attachment(
+    asset_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """POST /api/v2/attachments/{asset_id}/convert — office(pptx) 첨부 → pdf 변환(story #2771).
+
+    열람 시(lazy) 트리거 — FE가 뷰어를 열 때 호출, 최초 1회만 실 변환하고 이후는 캐시(§7-2,
+    doc 84ef0cb7). authz는 `/authorize`의 asset_id 분기와 **동일**(org 매치 + has_project_access,
+    project_id NULL이면 org-level) — 변환 산출물도 원본과 동일한 org/project 경계에 생성되므로
+    이 게이트 하나로 원본·변환물 둘 다 커버한다(타 org 토큰은 애초에 org_id 필터에서 404).
+
+    변환 asset은 AssetLink 를 만들지 않는다(orphan) — FE는 반환된 `asset_id`로 기존
+    `/api/attachments/sign?asset_id=` → 이 라우터의 `/authorize` asset_id 분기를 그대로 타면
+    된다(link 0건이면 tombstone 체크를 스킵하고 통과하는 기존 로직 재사용, 신규 게이트 불요).
+    """
+    asset = (await db.execute(
+        select(Asset).where(
+            Asset.id == asset_id, Asset.org_id == org_id, Asset.deleted_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if asset.project_id is not None and not await has_project_access(
+        db, uuid.UUID(auth.user_id), asset.project_id, org_id
+    ):
+        # story #2342(존재 비노출) — has_project_access 거부는 항상 404(CI lint_project_access_403.py
+        # 가 403을 신규 위반으로 잡는다). authorize_attachment의 asset_id 분기(위)는 이 파일이
+        # 통째로 grandfather 베이스라인에 있어 403이지만, 이건 신규 코드라 정공법(404)으로 낸다.
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    if not office_conversion.is_convertible(asset.name, asset.content_type):
+        raise HTTPException(status_code=422, detail="Asset is not a convertible office document")
+
+    try:
+        converted = await office_conversion.get_or_convert_pdf(db, source_asset=asset)
+    except office_conversion.ConversionUnavailable as exc:
+        raise HTTPException(status_code=503, detail="conversion service not configured") from exc
+    except office_conversion.ConversionFailed as exc:
+        raise HTTPException(status_code=502, detail="conversion failed") from exc
+
+    return {
+        "asset_id": str(converted.id),
+        "name": converted.name,
+        "content_type": converted.content_type,
+    }
