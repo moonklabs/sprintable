@@ -207,3 +207,27 @@ async def emit_story_assignee_changed(
             await db.flush()
         except Exception:
             pass
+
+    # story #2791(P0, event-workflow-unification-design-2790) — preset.work.assigned 서버
+    # 자동발행. payload_schema(0245)가 assignee_member_id를 필수(nullable 아님)로 요구해
+    # 미배정 전이(unassign, story.assignee_id=None)는 발행 대상이 아니다 — 배정 성립 시에만.
+    # 구계통(위 dispatch_notification/webhook 등)과 병행(대체 아님), best-effort 격리는
+    # 호출자(여기) 몫.
+    if story.assignee_id:
+        try:
+            from app.routers.events import publish_preset_event
+
+            await publish_preset_event(
+                db, org_id, "preset.work.assigned",
+                {
+                    "work_item_type": "story",
+                    "work_item_id": str(story.id),
+                    "assignee_member_id": str(story.assignee_id),
+                    "assigned_by_member_id": str(actor_id) if actor_id else None,
+                },
+            )
+        except Exception:
+            logger.warning(
+                "preset.work.assigned 자동발행 실패(story=%s org=%s)",
+                story.id, org_id, exc_info=True,
+            )

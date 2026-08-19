@@ -1295,6 +1295,27 @@ async def _record_gate_review_verdict(
         facts["rubber_stamp_candidate"] = True
         gate.neutral_facts = facts
 
+    # story #2791(P0, event-workflow-unification-design-2790) — preset.gate.verdict 서버
+    # 자동발행. 위 record_verdict와 동일 게이팅(participation 존재·work_item_type=story)
+    # 스코프 그대로 — best-effort 격리는 호출자(여기) 몫.
+    try:
+        from app.routers.events import publish_preset_event
+
+        await publish_preset_event(
+            session, org_id, "preset.gate.verdict",
+            {
+                "work_item_type": gate.work_item_type,
+                "work_item_id": str(gate.work_item_id),
+                "gate_type": gate.gate_type,
+                "verdict": new_status,
+                "resolver_member_id": str(resolver_id),
+            },
+        )
+    except Exception:
+        logger.warning(
+            "preset.gate.verdict 자동발행 실패(gate=%s org=%s)", gate.id, org_id, exc_info=True,
+        )
+
 
 async def resolve_gate_from_verdict(
     session: AsyncSession,
