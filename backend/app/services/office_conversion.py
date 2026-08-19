@@ -27,6 +27,13 @@ from app.models.asset import Asset
 _GOTENBERG_URL = os.environ.get("GOTENBERG_SERVICE_URL", "").rstrip("/")
 _CONVERTIBLE_EXTS = frozenset({"pptx"})
 _TIMEOUT = httpx.Timeout(120.0)  # §7-4: 대형 pptx 변환 지연 흡수
+# ⛔QA catch(카디르군, 2026-08-19) — %PDF- 매직만으론 부족, 응답 크기도 상한 필요(무제한
+# 메모리 적재+캐시 방지). 근거: 원본 pptx 업로드 상한 = 100MB(conversations.py
+# `_MAX_ATTACHMENT_SIZE`, conversation 첨부 경로). pptx→pdf는 보통 원본과 비슷하거나 작지만
+# (임베디드 미디어는 재인코딩 안 됨), 폰트 서브셋 임베딩·벡터 도형 래스터화 워스트케이스를
+# 감안해 2배 여유(=200MB)를 상한으로 잡는다 — 정밀 측정치가 아니라 방어적 상한(§7-4 concurrency=1
+# 이라 동시 1건 기준 300MB 피크 메모리(원본+응답)는 backend 컨테이너에 안전한 범위).
+_MAX_CONVERTED_PDF_BYTES = 200 * 1024 * 1024
 
 
 class ConversionUnavailable(Exception):
@@ -90,6 +97,10 @@ async def _call_gotenberg(filename: str, data: bytes) -> bytes:
     # 최소 가드: 비어있지 않음 + `%PDF-` 매직 프리픽스.
     if not resp.content.startswith(b"%PDF-"):
         raise ConversionFailed("gotenberg response is not a valid PDF (missing %PDF- magic)")
+    if len(resp.content) > _MAX_CONVERTED_PDF_BYTES:
+        raise ConversionFailed(
+            f"gotenberg response exceeds size cap ({len(resp.content)} > {_MAX_CONVERTED_PDF_BYTES} bytes)"
+        )
     return resp.content
 
 

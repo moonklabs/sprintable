@@ -86,3 +86,22 @@ async def test_call_gotenberg_rejects_non_pdf_body_even_on_200(monkeypatch):
     with patch("httpx.AsyncClient", return_value=mock_client_empty):
         with pytest.raises(office_conversion.ConversionFailed):
             await office_conversion._call_gotenberg("x.pptx", b"data")
+
+
+async def test_call_gotenberg_rejects_oversized_response(monkeypatch):
+    """⭐QA catch(카디르군, 2026-08-19) 회귀 방지 — %PDF- 매직은 통과해도 상한(200MB) 초과 응답은
+    거부한다(무제한 메모리 적재+캐시 방지). 실제로 200MB를 만들지 않고 cap을 낮춰 검증."""
+    monkeypatch.setattr(office_conversion, "_GOTENBERG_URL", "https://example.internal")
+    monkeypatch.setattr(office_conversion, "_id_token_header", lambda: {})
+    monkeypatch.setattr(office_conversion, "_MAX_CONVERTED_PDF_BYTES", 10)
+
+    mock_client = _mock_gotenberg_response(200, b"%PDF-1.4 " + b"x" * 20)  # 매직은 유효, 크기만 초과
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        with pytest.raises(office_conversion.ConversionFailed):
+            await office_conversion._call_gotenberg("x.pptx", b"data")
+
+    # cap 이내면 통과(경계값 아래 정상 케이스도 회귀로 고정).
+    mock_client_ok = _mock_gotenberg_response(200, b"%PDF-")
+    with patch("httpx.AsyncClient", return_value=mock_client_ok):
+        result = await office_conversion._call_gotenberg("x.pptx", b"data")
+    assert result == b"%PDF-"
