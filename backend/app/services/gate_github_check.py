@@ -83,7 +83,11 @@ async def is_repo_check_enforced(
     """story #2815(§5-④, 관측모드 판별) — 이 repo가 `sprintable/gate`를 branch protection에
     required로 등록했는지. `github_installation.enforced_check_repos`(수동 플래그, PO 운영
     — 설계 근거는 0263 마이그·모델 주석) 조회. installation 없음/미설정/repo 없음이면 전부
-    False(관측모드 아님을 확언하는 게 아니라 "모른다≈아직 강제 아님"의 안전한 기본값)."""
+    False(관측모드 아님을 확언하는 게 아니라 "모른다≈아직 강제 아님"의 안전한 기본값).
+
+    카디르 QA(PR#3245) — `enforced_check_repos`는 PO가 손으로 적는 값이라 대소문자 불일치가
+    실전에서 가장 먼저 나는 함정이다("Acme/Repo" vs "acme/repo"). 양쪽을 `.lower()`로
+    정규화 후 비교 — GitHub의 `owner/repo`는 대소문자 무관 동일 저장소를 가리킨다."""
     if not repo_full_name:
         return False
     row = (
@@ -94,7 +98,10 @@ async def is_repo_check_enforced(
             )
         )
     ).scalar_one_or_none()
-    return bool(row) and repo_full_name in row
+    if not row:
+        return False
+    normalized = {r.lower() for r in row if isinstance(r, str)}
+    return repo_full_name.lower() in normalized
 
 
 async def publish_gate_check(

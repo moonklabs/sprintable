@@ -985,6 +985,10 @@ async def list_gate_github_check_events_endpoint(
     elif not is_known_project_agnostic_work_item_type(gate.work_item_type):
         raise HTTPException(status_code=404, detail="Gate not found")
 
+    # ⛔카디르 QA(PR#3245, 비차단·후속 메모) — created_at 단독 정렬은 같은 밀리초에 여러 행이
+    # 찍히면(이론상 가능 — 같은 트랜잭션 내 다중 이벤트) 동순위 tie 순서가 비결정적이다. 이
+    # 원장은 이벤트가 gate당 소량·거의 항상 시간差가 있어 실무 영향은 낮다고 판단해 이번엔
+    # 그대로 두되, 재발하면 `id`를 2차 정렬키로 추가할 것(UUID는 시간순 아니라 tie-break 용도).
     rows = (await session.execute(
         select(GateGithubCheckEvent)
         .where(GateGithubCheckEvent.gate_id == id, GateGithubCheckEvent.org_id == org_id)

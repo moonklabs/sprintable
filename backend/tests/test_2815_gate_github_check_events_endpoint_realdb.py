@@ -53,7 +53,8 @@ def _client_for(app):
 
 async def _setup_app(app, Session, org_id, user_id):
     from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
-    from app.dependencies.database import get_db
+
+    from tests.conftest import override_db_and_read
 
     async def _db():
         async with Session() as s:
@@ -70,7 +71,10 @@ async def _setup_app(app, Session, org_id, user_id):
     async def _org():
         return org_id
 
-    app.dependency_overrides[get_db] = _db
+    # 카디르 QA(PR#3245) — get_db만 걸면 get_read_db는 실 커넥션을 그대로 타 read-replica
+    # 라우팅 가드(story 83fc9cbc)에 걸린다. story #2451(§6 Phase3)의 단일 게이트 헬퍼로
+    # 두 dependency key를 항상 함께 오버라이드(구조적으로 못 빠뜨림 — conftest.py 참고).
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
 
@@ -331,3 +335,29 @@ async def test_is_repo_check_enforced_none_repo_full_name_returns_false():
     result = await is_repo_check_enforced(session, uuid.uuid4(), None)
     assert result is False
     session.execute.assert_not_awaited()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_realdb_is_repo_check_enforced_case_insensitive():
+    """카디르 QA(PR#3245) — enforced_check_repos는 PO가 손으로 적는 값이라 대소문자 불일치가
+    실전 최우선 함정. DB엔 대문자 섞어 저장돼도(사람이 실제로 그렇게 칠 법한 값) 소문자
+    질의가 True를 내야 한다."""
+    from app.models.github_installation import GithubInstallation
+    from app.services.gate_github_check import is_repo_check_enforced
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_common(s)
+            s.add(GithubInstallation(
+                id=uuid.uuid4(), org_id=seeded["org_id"], installation_id=999003,
+                account_login="Acme", enforced_check_repos=["Acme/Repo"],
+            ))
+            await s.commit()
+
+            assert await is_repo_check_enforced(s, seeded["org_id"], "acme/repo") is True
+            assert await is_repo_check_enforced(s, seeded["org_id"], "ACME/REPO") is True
+            assert await is_repo_check_enforced(s, seeded["org_id"], "acme/other") is False
+    finally:
+        await engine.dispose()
