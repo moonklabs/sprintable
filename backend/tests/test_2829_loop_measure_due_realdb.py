@@ -98,12 +98,17 @@ async def test_ac1_detects_overdue_hypothesis_and_goal_and_missing_outcome():
             summary = await _detect(s, Session)
             await s.commit()
 
-            assert summary["total_scanned"] == 3
+            # total_scanned은 전-org 글로벌 카운트라(cron 잡 설계 그대로 — command_center.py
+            # 실서비스 요구에 맞춘 것) CI의 공유 Backend pytest 세션(다른 6000+ 테스트가
+            # 같은 DB에 Goal/Hypothesis를 남길 수 있음)에서 정확한 값으로 단정할 수 없다 —
+            # 이 AC가 증명해야 하는 건 "이 3개가 실물로 잡혔다"이지 "전체가 정확히 3개"가
+            # 아니다(실측 확認: 로컬 격리 실행=3, CI 공유 세션=5도 관측·둘 다 정상).
             published_ids = {p["id"] for p in summary["published"]}
             assert str(hyp.id) in published_ids
             assert str(overdue_goal.id) in published_ids
             assert str(done_goal.id) in published_ids
-            assert summary["failed"] == []
+            my_ids = {str(hyp.id), str(overdue_goal.id), str(done_goal.id)}
+            assert not (my_ids & {f["id"] for f in summary["failed"]})
     finally:
         await engine.dispose()
 
@@ -121,19 +126,23 @@ async def test_ac2_no_infinite_republish_set_once():
 
             first = await _detect(s, Session)
             await s.commit()
-            assert len(first["published"]) == 1
+            first_ids = {p["id"] for p in first["published"]}
+            assert str(hyp.id) in first_ids
 
             second = await _detect(s, Session)
             await s.commit()
-            assert second["published"] == []
-            assert second["total_scanned"] == 0  # notified_at set → 조회 조건 자체를 벗어남.
+            # first/second 둘 다 CI 공유 Backend pytest 세션(다른 테스트가 남긴 미통지
+            # 항목과 같은 DB를 쓸 수 있음)에서 published/total_scanned 절대 수는 이 테스트
+            # 스코프 밖 — id로 직접 증명한다: 이 hyp이 두 번째 스캔에선 대상에서 빠졌다.
+            second_ids = {p["id"] for p in second["published"]}
+            assert str(hyp.id) not in second_ids
 
         async with Session() as s:
             events = await _published_events(s, org.id)
             # 정확한 행 수는 send_message()의 배달 팬아웃 정책(공유 이벤트 발행 계통, 이
             # 스토리 스코프 밖) 몫이라 단정하지 않는다 — 이 AC가 실제로 증명해야 하는 것은
-            # 위 first/second summary(두 번째 스캔=published 0·total_scanned 0)로 이미
-            # 확定됐다: **동일 대상에 두 번째 publish_preset_event 호출 자체가 없었다.**
+            # 위 first/second id 대조로 이미 확定됐다: **동일 대상에 두 번째 publish_
+            # preset_event 호출 자체가 없었다.**
             assert len(events) >= 1, "최초 1회 발행 자체는 실물로 남아야 한다"
     finally:
         await engine.dispose()
@@ -147,14 +156,16 @@ async def test_ac4_no_owner_is_skipped_not_failed():
         async with Session() as s:
             org = await _make_org(s)
             project = await _make_project(s, org.id)
-            await _make_goal(s, org.id, project.id, assignee_id=None, status="active")
+            goal = await _make_goal(s, org.id, project.id, assignee_id=None, status="active")
 
             summary = await _detect(s, Session)
             await s.commit()
 
-            assert summary["published"] == []
-            assert summary["failed"] == []
-            assert summary["skipped_no_owner"] == 1
+            # published/failed/skipped_no_owner 전부 글로벌 카운트(CI 공유 세션 - AC1/AC2와
+            # 동일 근거) — 이 goal의 id로만 직접 증명한다.
+            assert str(goal.id) not in {p["id"] for p in summary["published"]}
+            assert str(goal.id) not in {f["id"] for f in summary["failed"]}
+            assert summary["skipped_no_owner"] >= 1
     finally:
         await engine.dispose()
 
