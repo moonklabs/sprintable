@@ -170,12 +170,24 @@ async def publish_gate_check(
             if gate is None or gate.gate_type != MERGE_GATE_TYPE:
                 return  # merge 게이트 아니면 이 1단계 스코프 밖(설계 doc §0).
 
-            link = await resolve_pr_link(session, org_id, gate.work_item_id)
-            if link is None:
-                logger.info("gate=%s: PR 링크 없음 — check 발행 skip", gate_id)
-                return
-            repo_full_name = repo_full_name or link.repo_full_name
-            pr_number = pr_number if pr_number is not None else link.pr_number
+            # story #2826 잔여(카디르 판독·페드루 PO 승인 2026-08-20, #3257 실사고) — link row는
+            # "필수 전제"가 아니라 "인자로 못 받은 값의 폴백"이다. docstring은 원래 "인자로 주면
+            # 재조회를 생략"이라 약속했는데, 구현은 인자 유무와 무관하게 무조건 link를 조회해
+            # 없으면 즉시 return했다 — SID-only로 해소된 PR(merge_link_evidence/upsert_link
+            # 둘 다 row를 안 만드는 조건, #3257이 그 표본)은 story_id는 정확히 풀려 gate까지는
+            # 서는데 check 발행만 이 자리서 조용히 죽었다. 이제 docstring 그대로: repo_full_name+
+            # pr_number가 이미 인자로 왔으면 link 조회 자체를 스킵한다.
+            link: PullRequestStoryLink | None = None
+            if repo_full_name is None or pr_number is None:
+                link = await resolve_pr_link(session, org_id, gate.work_item_id)
+                if link is None:
+                    logger.info(
+                        "gate=%s: repo_full_name/pr_number 인자 없음 + PR 링크도 없음 — "
+                        "check 발행 skip(사유: 발행 대상 repo/PR 식별 불가)", gate_id,
+                    )
+                    return
+                repo_full_name = repo_full_name or link.repo_full_name
+                pr_number = pr_number if pr_number is not None else link.pr_number
 
             # ⛔카디르 R2 CRITICAL(2026-08-19, 코드 추적 재확認) — 이전 fix는 anchor 우선을
             # "head_sha 인자가 None일 때만" 적용했다. 그런데 verdict_capture.py 웹훅 경로는
@@ -204,11 +216,16 @@ async def publish_gate_check(
                     return
                 head_sha = gate.approved_head_sha  # anchor가 절대 기준 — 인자 유무 무관.
             elif head_sha is None:
-                head_sha = (link.evidence or {}).get("head_sha")
+                # link가 위에서 스킵됐으면(repo_full_name+pr_number 인자로 이미 옴) 여기서만
+                # 폴백 조회 — head_sha 인자까지 없는 건 이 함수를 approved/auto_passed 밖에서
+                # link 정보 전혀 없이 부르는 드문 경로뿐(주 호출부는 항상 head_sha를 명시 전달).
+                if link is None:
+                    link = await resolve_pr_link(session, org_id, gate.work_item_id)
+                head_sha = (link.evidence or {}).get("head_sha") if link else None
             if not head_sha:
                 logger.info("gate=%s: head_sha 미상 — check 발행 skip", gate_id)
                 return
-            if (link.evidence or {}).get("head_sha") != head_sha:
+            if link is not None and (link.evidence or {}).get("head_sha") != head_sha:
                 link.evidence = {**(link.evidence or {}), "head_sha": head_sha}
 
             installation_id = await _resolve_installation_id(session, org_id)
