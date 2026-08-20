@@ -112,17 +112,34 @@ ACTION_REQUIRED_SUMMARY = (
     "연결 후 새 커밋을 push하면(또는 PR을 재오픈하면) 이 check가 자동으로 갱신됩니다."
 )
 
+# story #2847(AC2) — participation 미등록으로 evaluate_merge_gate가 gate_id=None을 반환하는
+# 경로도 #2826과 동일하게 "말하는 부재"로. gate-less라 원장(AC④) 대상 밖인 것도 동형.
+PARTICIPATION_REQUIRED_TITLE = "Sprintable Gate — participation 미등록"
+PARTICIPATION_REQUIRED_SUMMARY = (
+    "이 PR이 연결된 story에 implementation participation이 등록돼 있지 않아 merge gate를 만들 수 "
+    "없습니다(누가 이 작업을 구현했는지 알 수 없어 신뢰 판정을 할 수 없음).\n\n"
+    "story를 claim하거나 담당자로 지정하면(claim_story/assignee 설정) participation이 자동 "
+    "등록됩니다.\n\n"
+    "등록 후 새 커밋을 push하면(또는 PR을 재오픈하면) 이 check가 자동으로 갱신됩니다."
+)
+
 
 async def publish_action_required_check(
     installation_id: int,
     repo_full_name: str,
     head_sha: str,
     pr_number: int,
+    *,
+    title: str = "Sprintable Gate — story 링크 필요",
+    summary: str = ACTION_REQUIRED_SUMMARY,
 ) -> None:
     """story #2826(부 처방, PO 확定 2026-08-20) — story 링크가 없어 gate 자체가 없는 PR에도
     `sprintable/gate`를 발행하되, 침묵 부재(check 자체가 안 뜸) 대신 **말하는 부재**로:
     conclusion=action_required + 다음 행동 안내. gate가 없으니 DB에 남길 게 없다(원장(AC④)은
     gate 존재를 전제 — 이 경로는 gate-less라 대상 밖, GitHub 쪽 UI 안내만).
+
+    story #2847(AC2)부터 title/summary를 매개변수화 — participation 미등록 사유(별도 상수)도
+    같은 함수를 재사용(새 규칙 발명 0, #2826과 동일 chokepoint).
 
     fail-closed(이 모듈 공통 규율): 예외를 삼켜 호출자(웹훅 트랜잭션 뒤 background task)를
     절대 깨뜨리지 않는다 — 실패해도 GitHub 쪽은 그냥 check가 없는 이전 상태 그대로.
@@ -131,8 +148,8 @@ async def publish_action_required_check(
         result = await create_check_run(
             installation_id, repo_full_name, head_sha,
             name=CHECK_NAME, status="completed", conclusion="action_required",
-            title="Sprintable Gate — story 링크 필요",
-            summary=ACTION_REQUIRED_SUMMARY,
+            title=title,
+            summary=summary,
         )
         if result is None:
             logger.warning(
