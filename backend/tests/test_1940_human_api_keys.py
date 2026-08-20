@@ -96,7 +96,7 @@ async def test_repo_create_list_revoke_roundtrip():
             member_id = await _seed_human_member(s, org_id, user_id)
 
             repo = HumanApiKeyRepository(s)
-            key, plaintext = await repo.create(member_id=member_id, name="laptop")
+            key, plaintext = await repo.create(member_id=member_id, name="laptop", expires_at=None)
             await s.commit()
             assert plaintext.startswith("hu_live_")
             assert key.key_prefix.startswith("hu_live_")
@@ -108,6 +108,66 @@ async def test_repo_create_list_revoke_roundtrip():
             revoked = await repo.revoke(key.id)
             await s.commit()
             assert revoked.revoked_at is not None
+    finally:
+        await engine.dispose()
+
+
+# ─── story #2839(#2838 사람 키 판) — 침묵 90일 각인 회귀가드 ──────────────────────
+
+
+def test_create_request_schema_requires_expires_at_field():
+    """expires_at 필드 자체가 요청에 없으면 422급(pydantic ValidationError) — null은 여전히
+    유효한 값(명시적 무만료), «필드 생략»만 거절한다."""
+    import pydantic
+    from app.schemas.human_api_key import CreateHumanApiKeyRequest
+
+    with pytest.raises(pydantic.ValidationError):
+        CreateHumanApiKeyRequest(name="laptop")  # expires_at 누락.
+
+    # null은 여전히 valid(명시적 무만료) — 위와 대조.
+    req = CreateHumanApiKeyRequest(name="laptop", expires_at=None)
+    assert req.expires_at is None
+
+
+@pytest.mark.anyio
+async def test_repo_create_requires_expires_at_kwarg():
+    """repo 층도 동형 — expires_at 없이 호출하면 TypeError(호출부가 반드시 의도를 명시)."""
+    from app.repositories.human_api_key import HumanApiKeyRepository
+
+    repo = HumanApiKeyRepository(session=None)  # 호출 자체가 TypeError로 죽어야 하니 세션 불요.
+    with pytest.raises(TypeError):
+        await repo.create(member_id=uuid.uuid4())  # type: ignore[call-arg]
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
+async def test_repo_create_no_more_silent_90_day_default_realdb():
+    """회귀가드 핵심 — expires_at=None을 명시하면 실제로 NULL(무만료)로 저장된다. 예전엔
+    repo 층이 몰래 now+90일을 각인했다(이 스토리의 근본 결함)."""
+    from app.repositories.human_api_key import HumanApiKeyRepository
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id = await _seed_org(s)
+            user_id = await _seed_user(s)
+            member_id = await _seed_human_member(s, org_id, user_id)
+
+            repo = HumanApiKeyRepository(s)
+            key, _plaintext = await repo.create(member_id=member_id, expires_at=None)
+            await s.commit()
+            assert key.expires_at is None
+
+        # DB 재조회로 persist 자체를 확認(세션 캐시값이 아닌 실 저장값).
+        async with Session() as s2:
+            from sqlalchemy import select
+
+            from app.models.human_api_key import HumanApiKey
+
+            reread = (await s2.execute(
+                select(HumanApiKey.expires_at).where(HumanApiKey.id == key.id)
+            )).scalar_one()
+            assert reread is None
     finally:
         await engine.dispose()
 
@@ -129,7 +189,7 @@ async def test_resolve_human_api_key_returns_jwt_shaped_context_no_api_key_id_cl
             user_id = await _seed_user(s)
             member_id = await _seed_human_member(s, org_id, user_id)
             repo = HumanApiKeyRepository(s)
-            _key, plaintext = await repo.create(member_id=member_id)
+            _key, plaintext = await repo.create(member_id=member_id, expires_at=None)
             await s.commit()
 
         async with Session() as s2:
@@ -160,7 +220,7 @@ async def test_resolve_human_api_key_rejects_revoked():
             user_id = await _seed_user(s)
             member_id = await _seed_human_member(s, org_id, user_id)
             repo = HumanApiKeyRepository(s)
-            key, plaintext = await repo.create(member_id=member_id)
+            key, plaintext = await repo.create(member_id=member_id, expires_at=None)
             await repo.revoke(key.id)
             await s.commit()
 
@@ -216,7 +276,7 @@ async def test_resolve_human_api_key_reverifies_member_still_human_fail_closed()
             user_id = await _seed_user(s)
             member_id = await _seed_human_member(s, org_id, user_id)
             repo = HumanApiKeyRepository(s)
-            _key, plaintext = await repo.create(member_id=member_id)
+            _key, plaintext = await repo.create(member_id=member_id, expires_at=None)
             await s.commit()
 
             # 전환 시나리오 대리: 그사이 member.type이 바뀌었다고 가정(직접 UPDATE)
@@ -253,7 +313,7 @@ async def test_human_key_via_agent_header_does_not_authenticate():
             user_id = await _seed_user(s)
             member_id = await _seed_human_member(s, org_id, user_id)
             repo = HumanApiKeyRepository(s)
-            _key, plaintext = await repo.create(member_id=member_id)
+            _key, plaintext = await repo.create(member_id=member_id, expires_at=None)
             await s.commit()
 
         with pytest.raises(HTTPException) as ei:
@@ -321,7 +381,7 @@ async def test_router_create_list_revoke_self_serve():
             auth = _human_auth(user_id, org_id)
 
             created = await create_my_api_key(
-                CreateHumanApiKeyRequest(name="my key"), session=s, auth=auth,
+                CreateHumanApiKeyRequest(name="my key", expires_at=None), session=s, auth=auth,
             )
             assert created.api_key.startswith("hu_live_")
 
@@ -351,7 +411,7 @@ async def test_router_cannot_revoke_other_humans_key():
             await _seed_human_member(s, org_id, owner_user_id, name="Owner")
             owner_auth = _human_auth(owner_user_id, org_id)
             created = await create_my_api_key(
-                CreateHumanApiKeyRequest(), session=s, auth=owner_auth,
+                CreateHumanApiKeyRequest(expires_at=None), session=s, auth=owner_auth,
             )
 
             intruder_user_id = await _seed_user(s, email="intruder1940@example.com")
