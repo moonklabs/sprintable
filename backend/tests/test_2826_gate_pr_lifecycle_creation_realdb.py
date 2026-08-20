@@ -29,6 +29,7 @@ pytestmark = [
 ]
 
 APP_SECRET = "app-secret-2826"
+LEGACY_SECRET = "legacy-secret-2826"
 
 
 @pytest.fixture
@@ -95,6 +96,47 @@ async def _post_app(payload, Session, *, delivery_id):
                 )
     finally:
         fastapi_app.dependency_overrides.clear()
+
+
+async def _post_legacy(payload, Session, *, delivery_id):
+    """story #2827 라이브 실사고 정정 회귀 — repo-level 웹훅(installation payload 없음)은 실제로
+    legacy secret으로 서명돼 온다(App 자체 웹훅 구독 0건, 페드루 그라운딩 실측). _post_app과
+    유일한 차이는 서명 secret과 payload에 installation 키가 없다는 것뿐."""
+    from app.main import app as fastapi_app
+    from app.routers import verdict_capture as mod
+    from tests.conftest import override_db_and_read
+
+    async def override_db():
+        async with Session() as s:
+            yield s
+
+    override_db_and_read(fastapi_app, override_db)
+    body = json.dumps(payload).encode()
+    headers = {
+        "X-GitHub-Event": "pull_request", "X-GitHub-Delivery": delivery_id,
+        "X-Hub-Signature-256": _sign(body, LEGACY_SECRET),
+    }
+    try:
+        async with AsyncClient(transport=ASGITransport(app=fastapi_app), base_url="http://test") as c:
+            with patch.object(mod.settings, "github_webhook_secret", LEGACY_SECRET), \
+                 patch.object(mod.settings, "github_app_webhook_secret", "app-secret-unused-2826"):
+                return await c.post(
+                    "/api/v2/internal/verdict/github-webhook", content=body, headers=headers,
+                )
+    finally:
+        fastapi_app.dependency_overrides.clear()
+
+
+def _pr_payload_legacy(*, action, pr_number, head_sha, title="chore: unrelated"):
+    """installation 키 없음(legacy 웹훅 실물 형태) — repo만으로 owner 매치."""
+    return {
+        "action": action,
+        "repository": {"full_name": "moonklabs/sprintable"},
+        "pull_request": {
+            "number": pr_number, "title": title, "body": "", "merged": False,
+            "head": {"sha": head_sha, "ref": "feat-branch"},
+        },
+    }
 
 
 def _pr_payload(*, action, pr_number, installation_id, head_sha, title="chore: unrelated"):
@@ -295,5 +337,37 @@ async def test_ac4_pr_open_without_link_not_enforced_publishes_nothing():
             assert resp.status_code == 200, resp.text
 
         create_mock.assert_not_called()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_ac3b_legacy_source_without_installation_still_publishes_action_required():
+    """실사고 회귀(2026-08-20, 라이브 시험 #3254 발견) — repo-level 웹훅은 실제로 legacy secret
+    으로 온다(installation payload 없음, App 자체 웹훅 구독 0건). 최초 부처방 구현이
+    `source=="app"`만 받아 이 경로에서 **한 번도 발화하지 않았다** — org_id(legacy도 repo owner
+    exactly-1-match로 이미 해소됨) 기준으로 installation_id를 재조회하는 fix를 고정."""
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, _project, _story = await _seed_org_project_story(s, with_participation=False)
+            await _seed_installation(s, org, installation_id=555005, enforced=True)
+            # 링크·story 매치 자체를 안 만든다 — resolver가 no_match로 떨어지게(AC③과 동일 조건),
+            # 이번엔 app installation 대신 legacy 서명으로 보낸다.
+
+        with patch(
+            "app.services.gate_github_check.create_check_run",
+            AsyncMock(return_value={"id": 90005}),
+        ) as create_mock, patch("app.core.database.async_session_factory", Session):
+            payload = _pr_payload_legacy(
+                action="opened", pr_number=15, head_sha="sha-ac3b",
+                title="chore: legacy webhook, no story link",
+            )
+            resp = await _post_legacy(payload, Session, delivery_id=f"dlv-{uuid.uuid4().hex[:8]}")
+            assert resp.status_code == 200, resp.text
+
+        create_mock.assert_called_once()
+        _, kwargs = create_mock.call_args
+        assert kwargs.get("conclusion") == "action_required"
     finally:
         await engine.dispose()

@@ -386,22 +386,39 @@ async def _process_webhook_event(
         ):
             skipped_reason = repo_owner_reason
         # story #2826(부 처방, PO 확定 2026-08-20) — 링크가 아예 안 풀린 PR 라이프사이클 이벤트라도
-        # (app installation이 있어 org 컨텍스트가 확실하고) 이 repo가 sprintable/gate를 required로
-        # 걸어 뒀으면, 침묵 부재 대신 action_required check로 "왜 막혔는지+다음 행동"을 안내한다.
-        # legacy(org 미상)는 대상 밖 — installation 컨텍스트 자체가 없어 어느 org 설정을 볼지 모른다.
+        # org 컨텍스트가 확실하고 이 repo가 sprintable/gate를 required로 걸어 뒀으면, 침묵 부재
+        # 대신 action_required check로 "왜 막혔는지+다음 행동"을 안내한다. org_id가 여전히 None
+        # (legacy에서 repo owner 해소도 실패)이면 대상 밖 — 어느 org 설정을 볼지 모른다.
+        #
+        # ⛔실사고 정정(2026-08-20, 라이브 시험 #3254) — 최초 버전은 `source=="app" and
+        # installation is not None`만 받았는데, 페드루군이 그라운딩에서 이미 실측해 둔 사실
+        # ("App 자체 웹훅은 이벤트 구독 0 — PR 이벤트는 repo-level 웹훅이 나른다")을 놓쳐, repo-level
+        # 웹훅이 실제로 타는 secret(legacy)에서는 `installation`이 항상 None이라 이 분기가
+        # **한 번도 발화하지 않았다**(라이브 실측으로 발견 — action_required check-run 부재
+        # 확認). 위 legacy 분기가 이미 repo owner exactly-1-match로 org_id를 풀어 두므로, app/
+        # legacy 둘 다 org_id 하나만 있으면 installation_id를 다시 조회하면 된다(installation
+        # 객체 자체를 요구하지 않는다 — app 전용 가정 제거).
         if (
-            source == "app"
-            and installation is not None
+            org_id is not None
             and event == "pull_request"
             and pr_action in ("opened", "reopened", "ready_for_review", "synchronize")
             and head_sha
             and ungated_check_publish is not None
         ):
+            from app.models.github_installation import GithubInstallation as _GithubInstallation
             from app.services.gate_github_check import is_repo_check_enforced
 
-            if await is_repo_check_enforced(session, installation.org_id, repo):
+            _installation_id = installation.installation_id if installation is not None else (
+                await session.execute(
+                    select(_GithubInstallation.installation_id).where(
+                        _GithubInstallation.org_id == org_id,
+                        _GithubInstallation.suspended_at.is_(None),
+                    )
+                )
+            ).scalar_one_or_none()
+            if _installation_id is not None and await is_repo_check_enforced(session, org_id, repo):
                 ungated_check_publish.append({
-                    "installation_id": installation.installation_id,
+                    "installation_id": _installation_id,
                     "repo_full_name": repo, "head_sha": head_sha, "pr_number": pr_number,
                 })
         return {"skipped_reason": skipped_reason, "recorded": []}, "ignored"  # no_match/auto suggestion 등.
