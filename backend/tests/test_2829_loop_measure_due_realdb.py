@@ -195,3 +195,52 @@ async def test_resolved_outcome_naturally_exits_scan():
             assert str(hyp.id) not in published_ids
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_2843_unmeasured_goal_stays_in_unclosed_loop_scan():
+    """story #2843 AC② — outcome_status="unmeasured"(done 전이 시 판정 미제공 자동 마킹)도
+    "n_a"와 동형으로 ②축(outcome 판정 없이 done된 goal)에 잡혀야 한다(P0 산식 정합)."""
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            owner_id, _ = await _make_member(s, org.id, project.id)
+            goal = await _make_goal(
+                s, org.id, project.id, owner_id,
+                status="done", measure_after=None, outcome_status="unmeasured",
+            )
+
+            summary = await _detect(s, Session)
+            await s.commit()
+
+            published_ids = {p["id"] for p in summary["published"]}
+            assert str(goal.id) in published_ids
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_2843_unmeasurable_goal_excluded_from_unclosed_loop_scan():
+    """story #2843 AC② — outcome_status="unmeasurable"(명시 «측정 불가» 선언·사유 필수)은
+    조용한 방치가 아니므로 ②축에서 제외돼야 한다(별도 카운트 축, command_center.py
+    unmeasurable_goal_count가 담당 — 이 스캔은 루프 N 쪽만)."""
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            owner_id, _ = await _make_member(s, org.id, project.id)
+            goal = await _make_goal(
+                s, org.id, project.id, owner_id,
+                status="done", measure_after=None, outcome_status="unmeasurable",
+            )
+
+            summary = await _detect(s, Session)
+            await s.commit()
+
+            published_ids = {p["id"] for p in summary["published"]}
+            assert str(goal.id) not in published_ids
+    finally:
+        await engine.dispose()
