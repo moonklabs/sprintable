@@ -27,15 +27,17 @@ def _load_check_env_drift():
 
 # ── AC1: 마스터 확定 ────────────────────────────────────────────────────────────
 
-def test_service_script_map_is_declared_master_of_seven():
-    """`_SERVICE_SCRIPT_MAP`이 7개 실서비스를 담은 마스터다 — 이 카운트가 바뀌면(신규 서비스
-    추가/삭제) 알아야 하므로 명시 고정."""
+def test_service_script_map_is_declared_master_of_eight():
+    """`_SERVICE_SCRIPT_MAP`이 8개 실서비스를 담은 마스터다 — 이 카운트가 바뀌면(신규 서비스
+    추가/삭제) 알아야 하므로 명시 고정. story #2821(2026-08-19) — office-converter-dev
+    (story #2771, gotenberg 공개 이미지) 편입으로 7→8."""
     mod = _load_check_env_drift()
     assert set(mod._SERVICE_SCRIPT_MAP) == {
         "sprintable-backend-dev", "sprintable-backend-prod",
         "sprintable-frontend-dev", "sprintable-frontend-prod",
         "sprintable-mcp-dev", "sprintable-mcp-prod",
         "sprintable-realtime-dev",
+        "office-converter-dev",
     }
 
 
@@ -101,13 +103,25 @@ def test_positive_control_ghost_in_web_code_services_is_caught(monkeypatch):
 
 # ── AC3+AC4: 외부 IaC 대조 + 주석-오탐 방지 ──────────────────────────────────────
 
-def test_external_iac_literals_match_master_exactly_today():
-    """cloudbuild.yaml·.github/workflows/*.yml·deploy_*.sh에 실선언된 서비스명 전량이 오늘
-    정확히 마스터 7개와 같다(realtime-prod는 주석에만 있으므로 여기 안 잡혀야 한다)."""
+def test_external_iac_literals_are_a_subset_of_master_today():
+    """cloudbuild.yaml·.github/workflows/*.yml·deploy_*.sh에 실선언된 서비스명 전량이 마스터의
+    부분집합이다(realtime-prod는 주석에만 있으므로 여기 안 잡혀야 한다).
+
+    ⛔story #2821(2026-08-19) — 이전엔 등식(external == master)이었으나 office-converter-dev
+    편입으로 깨졌다: `_SERVICE_NAME_RE`가 `sprintable-`로 시작하는 이름만 잡는데,
+    office-converter-dev는 cloudbuild.yaml에서 `office-converter-${_DEPLOY_ENV}`로 bash
+    변수 보간되어 있어 어느 줄에도 "office-converter-dev"라는 리터럴 문자열로 «선언»되지
+    않는다(같은 문자열이 주석·URL 값 안에 등장하긴 하지만 그건 이 정규식의 대상인 "선언"이
+    아니다). 파일 docstring이 명시하는 진짜 불변식은 애초에 한 방향(subset)이었다 —
+    이 테스트를 그 불변식에 맞춘다."""
     mod = _load_check_env_drift()
     external = mod._external_iac_service_literals()
-    assert external == set(mod._SERVICE_SCRIPT_MAP)
+    assert external <= set(mod._SERVICE_SCRIPT_MAP)
     assert "sprintable-realtime-prod" not in external
+    # office-converter-dev는 마스터엔 있지만 bash 변수 보간 때문에 이 정적 리터럴 스캔으로는
+    # 원천적으로 안 보인다 — 위 subset 관계가 이미 안전(다른 방향만 위험한 방향).
+    assert "office-converter-dev" not in external
+    assert "office-converter-dev" in mod._SERVICE_SCRIPT_MAP
 
 
 def test_comment_only_service_name_is_not_a_real_declaration():

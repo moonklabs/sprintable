@@ -163,6 +163,12 @@ _SERVICE_SCRIPT_MAP: dict[str, list[str]] = {
     "sprintable-frontend-prod": ["backend/scripts/deploy_frontend.sh"],
     "sprintable-mcp-dev": ["backend/scripts/deploy_mcp_dev.sh"],
     "sprintable-mcp-prod": ["backend/scripts/deploy_mcp_prod.sh"],
+    # story #2821 부수 발견(2026-08-19) — office-converter-dev(story #2771, gotenberg 공개
+    # 이미지)가 어제 편입됐으나 여기 미등재라 "매핑 안 된 신규 서비스"로도 안 잡히고 있었다
+    # (None-크래시가 그 자리를 가리고 있었을 뿐). cloudbuild.yaml deploy-office-converter
+    # 스텝이 env 플래그 자체를 안 실어(공통 파싱에 이미 포함) 전용 스크립트가 없다 —
+    # sprintable-realtime-dev([])와 동일 패턴.
+    "office-converter-dev": [],
 }
 
 # ② 값 대조 대상 — DRY_RUN=1로 ENV_VARS_SPEC을 stdout에 뽑아낼 수 있는 스크립트만.
@@ -214,15 +220,31 @@ def _list_live_services() -> list[str]:
 
 
 def _live_env_entries(service: str) -> list[dict]:
-    """서비스의 raw env 리스트(name + value 또는 valueFrom) — ②③이 공유."""
+    """서비스의 raw env 리스트(name + value 또는 valueFrom) — ②③이 공유.
+
+    ⛔story #2821 실사고 — `env` 필드가 컨테이너 스펙에 아예 없으면(빈 배열이 아니라 키
+    자체 부재) `--format=json(...)` 필드 프로젝션이 literal JSON `null`을 낸다(빈 문자열이
+    아니라 텍스트 "null" — `if not out`을 통과해버린다). `json.loads("null")`은 `None`이라
+    다음 줄 `data.get(...)`이 AttributeError로 죽는다. 실측(2026-08-19): office-converter-dev
+    (gotenberg 공개 이미지, cloudbuild.yaml deploy-office-converter 스텝이 env 플래그
+    자체를 안 실음)가 정확히 이 형태 — env 0건은 정상 상태이지 결함이 아니다. 조용히
+    삼키지 않고 어느 서비스가 왜 0건으로 처리됐는지 stdout에 남긴다(크래시는 빨강이되
+    진단 불가라 반쪽이라는 지적, PO 2026-08-19)."""
     out = _run([
         "gcloud", "run", "services", "describe", service,
         f"--region={_REGION}",
         "--format=json(spec.template.spec.containers[0].env)",
     ])
     if not out:
+        print(f"  ℹ️ {service}: describe 결과가 빈 문자열 — env 0건으로 처리")
         return []
     data = json.loads(out)
+    if data is None:
+        print(
+            f"  ℹ️ {service}: describe의 env 필드가 null(컨테이너 스펙에 env 키 자체가 "
+            "없음) — env 0건으로 처리"
+        )
+        return []
     return (
         data.get("spec", {}).get("template", {}).get("spec", {})
         .get("containers", [{}])[0].get("env", [])
@@ -852,5 +874,26 @@ def _parse_only_env(argv: list[str]) -> str | None:
     return value
 
 
+def _run_cli(argv: list[str]) -> int:
+    """CLI 진입점 — story #2821 축③. `_write_state_file`은 `main()`이 정상 완주해야만
+    불린다 — 이번 None-크래시처럼 루프 중간에 죽으면 그날의 state 파일이 아예 안 남고,
+    `compare_env_drift_state.py`가 "파일 없음"을 fail_lines=[]로 읽어 Discord 알림이
+    "상세 없음(호출 경로 오류 의심)"으로 나간다(실측 확認 — 이번 사고가 정확히 이 경로로
+    그 문구를 냈다. 별도 결함이 아니라 위 None-크래시와 같은 근본원인).
+
+    한 번 이 구멍을 실측했으니, 다음에 «다른» 미처리 예외가 나도 같은 증상(진단 불가한
+    침묵)이 재발하지 않게 최상위에서 잡아 예외 자체를 state 파일에 진단명으로 남기고
+    다시 던진다 — exit code·CI FAIL 판정(GHA가 트레이스백을 그대로 보므로)은 그대로다."""
+    only_env = _parse_only_env(argv)
+    try:
+        return main(only_env=only_env)
+    except Exception as exc:
+        _write_state_file(
+            [f"⚠️ check_env_drift.py 크래시(스크립트 결함 — 즉시 조사 필요): {type(exc).__name__}: {exc}"],
+            only_env=only_env,
+        )
+        raise
+
+
 if __name__ == "__main__":
-    sys.exit(main(only_env=_parse_only_env(sys.argv[1:])))
+    sys.exit(_run_cli(sys.argv[1:]))
