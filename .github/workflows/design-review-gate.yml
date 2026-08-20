@@ -243,6 +243,13 @@ jobs:
       # 이름만 빼면 "QA review gate"는 여전히 비-advisory로 잡혀, 두 라벨이 다 걸린 PR에서
       # 두 게이트가 동시에 재실행되면 서로가 서로를 "아직 안 끝남"으로 보고 상호 RED로 고착된다
       # (자동 재트리거 없어 새 pull_request 이벤트 전까지 안 풀림). 상대 게이트 이름도 같이 뺀다.
+      #
+      # ⛔story #2827(2026-08-20, qa-review-gate.yml과 동형 사본 fix·페드루 PO 판정) —
+      # "sprintable/gate"(story #2813)도 같은 범주: 사람 승인이 QA/Design 리뷰 완료를 전제하는
+      # **뒤 순서** 액션이라, 이 게이트가 그 완결을 기다리면 승인이 하염없이 안 나오고(승인이
+      # 안 나오니 gate가 안 끝나고, gate가 안 끝나니 이 게이트가 안 풀리는 결정론적 순환 —
+      # dev moonklabs/sprintable#3249 실측). qa-review-gate.yml 쪽만 고치면 사본 하나가
+      # 남아 design:pass 라벨 경로에서 동일 데드락이 재발하므로 여기도 제외.
       - name: Enforce no incomplete non-advisory checks when design:pass is claimed
         if: steps.scope.outputs.in_scope == 'true'
         env:
@@ -251,7 +258,7 @@ jobs:
         run: |
           set -euo pipefail
           INCOMPLETE="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/check-runs" --paginate \
-            --jq '.check_runs[] | select(.name != "Design review gate" and .name != "QA review gate") | select(.name | endswith("— advisory") | not) | select(.status != "completed") | .name' \
+            --jq '.check_runs[] | select(.name != "Design review gate" and .name != "QA review gate" and .name != "sprintable/gate") | select(.name | endswith("— advisory") | not) | select(.status != "completed") | .name' \
             | sort -u)"
           if [ -n "${INCOMPLETE}" ]; then
             echo "::error title=required-ish checks still incomplete::design:pass가 붙어 있지만 아직 안 끝난(비-advisory) 체크가 있다:"
