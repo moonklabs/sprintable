@@ -107,8 +107,10 @@ describe('deriveAttentionClusters', () => {
       ], t);
       expect(clusters.loop).toHaveLength(3);
       expect(clusters.loop.find((l) => l.id === 'h1')).toMatchObject({ kind: 'overdueHypothesis', title: 'A', days: 3, href: '/flow?hypothesis=h1' });
-      expect(clusters.loop.find((l) => l.id === 'g1')).toMatchObject({ kind: 'overdueGoal', title: 'B', days: 5, href: '/flow?goal=g1' });
-      expect(clusters.loop.find((l) => l.id === 'g2')).toMatchObject({ kind: 'outcomeMissing', title: 'C', days: 30, href: '/flow?goal=g2' });
+      // 유나 design:changes(2026-08-20, PR#3257) — goal 딥링크는 view=flow를 명시해야 데스크톱
+      // parseView 기본값('hypothesis')에 밀려 focusGoalId가 드롭되는 걸 막는다(flow-client.tsx).
+      expect(clusters.loop.find((l) => l.id === 'g1')).toMatchObject({ kind: 'overdueGoal', title: 'B', days: 5, href: '/flow?view=flow&goal=g1' });
+      expect(clusters.loop.find((l) => l.id === 'g2')).toMatchObject({ kind: 'outcomeMissing', title: 'C', days: 30, href: '/flow?view=flow&goal=g2' });
     });
 
     it('오래 방치된 것부터(days 내림차순)로 정렬된다', () => {

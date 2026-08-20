@@ -163,9 +163,11 @@ describe('AttentionClusterBoard', () => {
     });
 
     it('행 클릭 href가 outcome 판정 UI(/flow?goal=·/flow?hypothesis=)로 간다(유나 스티어③)', async () => {
+      // goal href는 view=flow를 반드시 동반한다(유나 design:changes, PR#3257) — 없으면
+      // 데스크톱 parseView 기본값('hypothesis')에 밀려 focusGoalId가 조용히 드롭된다.
       const items = [
         loopItem({ id: 'h1', kind: 'overdueHypothesis', href: '/flow?hypothesis=h1' }),
-        loopItem({ id: 'g1', kind: 'outcomeMissing', href: '/flow?goal=g1' }),
+        loopItem({ id: 'g1', kind: 'outcomeMissing', href: '/flow?view=flow&goal=g1' }),
       ];
       await act(async () => {
         root.render(wrap(
@@ -174,7 +176,7 @@ describe('AttentionClusterBoard', () => {
       });
       const hrefs = Array.from(container.querySelectorAll('a')).map((a) => a.getAttribute('href'));
       expect(hrefs).toContain('/flow?hypothesis=h1');
-      expect(hrefs).toContain('/flow?goal=g1');
+      expect(hrefs).toContain('/flow?view=flow&goal=g1');
     });
   });
 });

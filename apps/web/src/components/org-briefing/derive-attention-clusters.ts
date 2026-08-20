@@ -103,7 +103,12 @@ export function deriveAttentionClusters(
           kind: 'overdueGoal',
           title: a.title ?? t('clusterUnclosedOverdueGoalTitle'),
           days: a.overdue_days,
-          href: a.goal_id ? `/flow?goal=${a.goal_id}` : '/flow',
+          // 유나 design:changes(2026-08-20, PR#3257) — bare `/flow?goal=`는 데스크톱에서
+          // parseView 기본값이 'hypothesis'로 떨어져(flow-client.tsx parseView) focusGoalId가
+          // 조용히 드롭된다(NextMakerScreen이 view==='flow'일 때만 소비). 정본 경로
+          // handleNavigateToGoal(flow-client.tsx)이 이미 view=flow를 명시 세팅하는 것과 동형으로
+          // 딥링크도 명시한다.
+          href: a.goal_id ? `/flow?view=flow&goal=${a.goal_id}` : '/flow',
         },
         days: a.overdue_days,
       });
@@ -114,7 +119,12 @@ export function deriveAttentionClusters(
           kind: 'outcomeMissing',
           title: a.title ?? t('clusterUnclosedOutcomeMissingTitle'),
           days: a.done_days,
-          href: a.goal_id ? `/flow?goal=${a.goal_id}` : '/flow',
+          // 유나 design:changes(2026-08-20, PR#3257) — bare `/flow?goal=`는 데스크톱에서
+          // parseView 기본값이 'hypothesis'로 떨어져(flow-client.tsx parseView) focusGoalId가
+          // 조용히 드롭된다(NextMakerScreen이 view==='flow'일 때만 소비). 정본 경로
+          // handleNavigateToGoal(flow-client.tsx)이 이미 view=flow를 명시 세팅하는 것과 동형으로
+          // 딥링크도 명시한다.
+          href: a.goal_id ? `/flow?view=flow&goal=${a.goal_id}` : '/flow',
         },
         days: a.done_days,
       });
