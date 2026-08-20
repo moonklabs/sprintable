@@ -268,6 +268,20 @@ async def resolve_story_for_pr(
     return ResolvedLink(None, org_id, None, None, False, reason)
 
 
+def _merge_evidence(existing: dict | None, patch: dict | None) -> dict:
+    """story #2834 — evidence 병합의 단일 정의. **항상 dict-merge**(기존 키 보존·명시된 키만
+    갱신), 전체 교체 금지. `upsert_link`/`merge_link_evidence` 둘이 각자 이 의미론을 복제하고
+    있었던 게 #2832(재승인 anchor 소실)의 방아쇠였다 — `upsert_link`가 evidence를 통째로
+    갈아 끼워, 웹훅이 이미 채워 둔 head_sha가 explicit-link 호출 한 번에 사라졌다. 이제 한 곳만
+    고치면 두 호출부가 같이 옳아지게 이 함수를 공유한다(사본이 갈리는 자리를 구조적으로 없앰).
+
+    ⛔못 잡는 것(#2834 AC④, 명시 수용) — merge는 "같은 키를 서로 다른 쓰기가 쓰면 최신이 이긴다"의
+    한계를 그대로 갖는다. 지금 실측(#2834 그라운딩)으론 쓰기별 top-level 키가 겹치지 않는다
+    (head_sha/scope_check/webhook_merge/by) — 그 전제가 깨지고 같은 키를 다투는 쓰기가 새로
+    생기면 이 함수만으론 부족해 재판단이 필요하다."""
+    return {**(existing or {}), **(patch or {})}
+
+
 async def upsert_link(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -280,7 +294,10 @@ async def upsert_link(
     created_by: uuid.UUID | None = None,
     evidence: dict | None = None,
 ) -> PullRequestStoryLink:
-    """canonical 단일 링크 upsert(uq org,repo,pr). 재링크=우선순위/소스 갱신. 호출자는 org-scope 검증 후 호출."""
+    """canonical 단일 링크 upsert(uq org,repo,pr). 재링크=우선순위/소스 갱신. 호출자는 org-scope 검증 후 호출.
+
+    story #2834 — evidence는 이제 `_merge_evidence`로 병합(예전엔 전체 교체 — #2832의 방아쇠,
+    웹훅이 채운 head_sha/scope_check가 explicit-link 호출 한 번에 사라졌다)."""
     repo = normalize_repo(repo_full_name)
     existing = (
         await session.execute(
@@ -296,13 +313,14 @@ async def upsert_link(
         existing.link_source = link_source
         existing.confidence = confidence
         existing.created_by = created_by
-        existing.evidence = evidence
+        existing.evidence = _merge_evidence(existing.evidence, evidence)
         existing.deleted_at = None
         await session.flush()
         return existing
     link = PullRequestStoryLink(
         org_id=org_id, story_id=story_id, repo_full_name=repo, pr_number=pr_number,
-        link_source=link_source, confidence=confidence, created_by=created_by, evidence=evidence,
+        link_source=link_source, confidence=confidence, created_by=created_by,
+        evidence=_merge_evidence(None, evidence),
     )
     session.add(link)
     await session.flush()
@@ -321,9 +339,9 @@ async def merge_link_evidence(
     patch: dict,
 ) -> PullRequestStoryLink:
     """E-UI-DAEGBYEON P0-05 후속(doc scope-violation-signal-design §3·§4) — evidence **dict-merge**
-    upsert(덮어쓰기 금지). `upsert_link`는 explicit-link API 전용(evidence 전체 교체가 맞는 의미론)이라
-    별도 — 여기는 auto_match/sid로 **아직 행이 없을 수 있는** confident link에 scope_check 같은 신규
-    키를 안전하게 얹기 위함(기존 evidence의 다른 키 보존). 행 없으면 patch만으로 신규 생성."""
+    upsert(덮어쓰기 금지, `_merge_evidence` 공유 — story #2834). auto_match/sid로 **아직 행이
+    없을 수 있는** confident link에 scope_check 같은 신규 키를 안전하게 얹기 위함(기존 evidence의
+    다른 키 보존). 행 없으면 patch만으로 신규 생성."""
     repo = normalize_repo(repo_full_name)
     existing = (
         await session.execute(
@@ -335,13 +353,13 @@ async def merge_link_evidence(
         )
     ).scalar_one_or_none()
     if existing is not None:
-        existing.evidence = {**(existing.evidence or {}), **patch}
+        existing.evidence = _merge_evidence(existing.evidence, patch)
         existing.deleted_at = None
         await session.flush()
         return existing
     link = PullRequestStoryLink(
         org_id=org_id, story_id=story_id, repo_full_name=repo, pr_number=pr_number,
-        link_source=link_source, confidence=confidence, evidence=dict(patch),
+        link_source=link_source, confidence=confidence, evidence=_merge_evidence(None, patch),
     )
     session.add(link)
     await session.flush()
