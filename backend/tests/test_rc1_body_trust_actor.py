@@ -75,6 +75,9 @@ async def test_transition_forces_resolver_ignoring_body():
                                resolver_id=resolver_id, resolved_at=None, resolution_note=None,
                                held_until=None, neutral_facts=None, requires_human=False,
                                evidence_status=None, decision_basis=None, auto_decision_reason=None,
+                               # story #2832 — gates.py 승인 anchor 기록이 github_check_run_sha를
+                               # 1순위로 읽는다(gate 자신의 필드, story-스코프 링크 모호성 무관).
+                               github_check_run_sha=None,
                                created_at=__import__("datetime").datetime.now(),
                                updated_at=__import__("datetime").datetime.now())
 
