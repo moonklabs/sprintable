@@ -33,6 +33,7 @@ transaction" 오류가 난다(실측 확認). 개별 try/except만으로 격리�
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -161,3 +162,96 @@ async def detect_unclosed_loops(session: AsyncSession) -> dict[str, Any]:
         "skipped_no_owner": skipped_no_owner,
         "total_scanned": len(hyp_rows) + len(overdue_goal_rows) + len(done_no_outcome_rows),
     }
+
+
+async def list_measure_due_queue(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    *,
+    project_id: uuid.UUID | None = None,
+    unclaimed_only: bool = False,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """story #2845(loop-closure P2) — 「닫히지 않은 루프」 큐(읽기전용).
+
+    detect_unclosed_loops()와 동일 3축 union을 그대로 재사용하되(새 판정축 발명 0) 발행
+    부작용은 0(publish_preset_event 미호출·notified_at 미기록) — command_center.py의
+    attention_item 요약(타입당 limit=20, 대시보드 nudge용)과 달리 이 큐는 **전량**을
+    페이지네이션으로 노출한다(claim 가능한 큐 자체가 목적).
+
+    claim은 신규 엔드포인트 0 — 기존 PATCH /hypotheses/{id}(owner_member_id)·
+    PATCH /goals/{id}(assignee_id)가 이미 이 필드를 authz 검증 하에 갱신 가능(§AC⑤, 페드루
+    PO 판정 2026-08-20). 이 함수가 하는 일은 «보이게» 뿐 — claim 실행은 그 기존 경로로.
+    """
+    now = datetime.now(timezone.utc)
+    items: list[dict[str, Any]] = []
+
+    hyp_q = select(
+        Hypothesis.id, Hypothesis.statement, Hypothesis.measure_after,
+        Hypothesis.owner_member_id, Hypothesis.project_id,
+    ).where(
+        Hypothesis.org_id == org_id,
+        Hypothesis.status.in_(_ACTIVE_HYPOTHESIS_STATUSES),
+        Hypothesis.measure_after <= now,
+    )
+    if project_id is not None:
+        hyp_q = hyp_q.where(Hypothesis.project_id == project_id)
+    if unclaimed_only:
+        hyp_q = hyp_q.where(Hypothesis.owner_member_id.is_(None))
+    for hyp_id, statement, measure_after, owner_id, p_id in (await session.execute(hyp_q)).all():
+        items.append({
+            "work_item_type": "hypothesis", "work_item_id": str(hyp_id), "title": statement,
+            "owner_member_id": str(owner_id) if owner_id else None,
+            "_sort_key": measure_after,
+            "overdue_days": (now - measure_after).days if measure_after else None,
+            "reason": "measure_after_overdue",
+            "project_id": str(p_id) if p_id else None,
+        })
+
+    goal_q = select(
+        Goal.id, Goal.title, Goal.measure_after, Goal.assignee_id, Goal.project_id,
+    ).where(
+        Goal.org_id == org_id, Goal.status == "active",
+        Goal.measure_after.isnot(None), Goal.measure_after <= now,
+    )
+    if project_id is not None:
+        goal_q = goal_q.where(Goal.project_id == project_id)
+    if unclaimed_only:
+        goal_q = goal_q.where(Goal.assignee_id.is_(None))
+    for goal_id, title, measure_after, assignee_id, p_id in (await session.execute(goal_q)).all():
+        items.append({
+            "work_item_type": "epic", "work_item_id": str(goal_id), "title": title,
+            "owner_member_id": str(assignee_id) if assignee_id else None,
+            "_sort_key": measure_after,
+            "overdue_days": (now - measure_after).days if measure_after else None,
+            "reason": "measure_after_overdue",
+            "project_id": str(p_id) if p_id else None,
+        })
+
+    done_q = select(
+        Goal.id, Goal.title, Goal.updated_at, Goal.assignee_id, Goal.project_id,
+    ).where(
+        Goal.org_id == org_id, Goal.status == "done",
+        Goal.outcome_status.in_(("n_a", "unmeasured")),
+    )
+    if project_id is not None:
+        done_q = done_q.where(Goal.project_id == project_id)
+    if unclaimed_only:
+        done_q = done_q.where(Goal.assignee_id.is_(None))
+    for goal_id, title, updated_at, assignee_id, p_id in (await session.execute(done_q)).all():
+        items.append({
+            "work_item_type": "epic", "work_item_id": str(goal_id), "title": title,
+            "owner_member_id": str(assignee_id) if assignee_id else None,
+            "_sort_key": updated_at,
+            "overdue_days": None,
+            "reason": "done_without_outcome",
+            "project_id": str(p_id) if p_id else None,
+        })
+
+    items.sort(key=lambda it: it["_sort_key"] or now)
+    total = len(items)
+    page = items[offset:offset + limit]
+    for it in page:
+        del it["_sort_key"]
+    return {"items": page, "total": total, "limit": limit, "offset": offset}
