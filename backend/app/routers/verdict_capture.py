@@ -598,11 +598,23 @@ async def _process_webhook_event(
     # 전체 rollback+500으로 처리해 GitHub가 재시도하므로, 여기서 삼키지 않고 그대로 올린다.
     # story #2813(카디르 R2) — head_sha를 넘겨 auto_passed 판정 시 anchor(gate.approved_head_sha)
     # 즉시 확定(merge_verdict_gate.evaluate_merge_gate 참고).
-    await reconcile_merge_gate_with_real_evidence(
+    _reconcile_decision = await reconcile_merge_gate_with_real_evidence(
         session, org_id, story_id,
         pr_number=pr_number, repo=repo, ci_result=ci_conclusion, merged=merged,
         head_sha=head_sha,
     )
+    # story #2853(AC①) — 예전엔 이 반환값을 그냥 버려, 재평가로 decision이 AUTO_MERGE에서
+    # 이탈해도(CI 재실패·trust 재계산 등) 이미 GitHub에 선 success check-run이 안 고쳐졌다.
+    # 위 gate auto-create 분기와 동일 패턴으로 무조건 큐잉 — publish_gate_check()는 이미
+    # 스스로 안전하다(status/anchor 불일치 시 자연 skip, gate_github_check.py 참고).
+    if (
+        _reconcile_decision is not None and _reconcile_decision.gate_id is not None
+        and gate_check_publish is not None
+    ):
+        gate_check_publish.append({
+            "org_id": org_id, "gate_id": _reconcile_decision.gate_id,
+            "head_sha": head_sha, "repo_full_name": repo, "pr_number": pr_number,
+        })
 
     # ⭐story #2327 후속(PO 판정, 2026-07-30, PR#2685 실 웹훅 시험대가 드러낸 갭) — merge 시
     # PullRequestStoryLink 에도 쓴다. `Verdict`(record_verdict, 위 capture_pr_ci_verdict 안)에도

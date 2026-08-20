@@ -509,6 +509,26 @@ async def evaluate_merge_gate(
             gate.id, decision, gate.approved_head_sha,
         )
         gate.approved_head_sha = None
+        # story #2853(AC②, PO 확定 2026-08-20) — anchor-clear의 진실한 의미는 "증거가
+        # AUTO_MERGE를 더는 지지하지 않는다"이지 "누가 거부했다"가 아니다. status="rejected"는
+        # 사람 어휘를 시스템이 쓰는 것이라 reconcile의 자기 필터(위 status IN (pending,
+        # auto_passed))를 우연 상속해 이 gate를 미래 재평가에서 영구 제외시킨다. status=
+        # "auto_passed" 방치는 보드가 거짓을 말하는 것(증거 무너졌는데 통과 표시). →
+        # reopen_gate_if_new_sha(새 SHA 재-pending)와 동일 의미론의 "같은 SHA·증거 회귀" 판으로
+        # pending 재전이. publish_gate_check()의 기존 pending 발행 경로가 그대로 태워진다
+        # (gh_status="in_progress" — 새 Checks-API 코드 0).
+        #
+        # ⚠️AC③(PO 확定 — 처음엔 "self-healing 유지"라 썼다가 디디 실측으로 철회) — **자동
+        # 복귀는 없다.** create_gate()(gate_service.py)의 멱등 반환(`existing.status !=
+        # "rejected"`면 그대로 반환·disposition 재확認 0)이 이 시스템의 구조적 불변식이다 —
+        # gate.status가 일단 "pending"이 되면(신규 생성이든 이 재전이든) org policy가 여전히
+        # allow_auto여도 다음 reconcile이 `_decide(gate_status="pending", ...)`를 볼 뿐
+        # `_decide()`의 AUTO_MERGE 조건(gate_status=="auto_passed")엔 다시 못 닿는다(probe
+        # 실측 확認, 2026-08-20). 즉 CI가 나중에 회복돼도 이 gate는 auto-axis로 자동 복귀
+        # 안 하고 — 결재함에 pending으로 재노출되니 **사람이 다시 승인**하는 게 재개 경로다
+        # (rejected보다 pending을 고른 이유는 여전히 유효: 사람 어휘 비오염+결재함 재노출·
+        # reconcile이 계속 "본다"는 점만 다르지 자동 재승격 여부는 rejected와 동일하게 없음).
+        gate.status = "pending"
 
     await session.flush()
 
