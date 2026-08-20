@@ -36,7 +36,14 @@ async function loadNowFace(t: NowFaceTranslator): Promise<NowFaceLoad> {
     items: buildNowFace(raw, parseCompletionNotifications(notifs), t),
     // story #2541 — 같은 raw.attention을 story_stalled/hypothesis_falsified 전용으로 한 번 더
     // 읽어 클러스터로 묶는다(buildNowFace는 이 두 타입을 더는 flat 행으로 안 올린다).
-    clusters: deriveAttentionClusters(raw.attention, t),
+    // story #2829/#2830 — loop_* 3종도 동형(buildNowFace는 이 타입들을 flat 행으로 안 올림,
+    // 미배선이라 자연히 무시됨). count 4종은 raw에서 그대로 넘긴다.
+    clusters: deriveAttentionClusters(raw.attention, t, {
+      loopOverdueHypothesisCount: raw.loopOverdueHypothesisCount,
+      loopOverdueGoalCount: raw.loopOverdueGoalCount,
+      loopOutcomeMissingGoalCount: raw.loopOutcomeMissingGoalCount,
+      measurePlanMissingGoalCount: raw.measurePlanMissingGoalCount,
+    }),
   };
 }
 
@@ -78,7 +85,7 @@ function RowSkeleton() {
   return <div className="h-[60px] animate-pulse border-t border-border bg-muted/30 first:border-t-0" />;
 }
 
-const EMPTY_CLUSTERS: AttentionClusters = { falsified: [], stalled: [] };
+const EMPTY_CLUSTERS: AttentionClusters = { falsified: [], stalled: [], loop: [], loopTotalCount: 0, measurePlanMissingGoalCount: 0 };
 
 export function NowFace() {
   const t = useTranslations('orgBriefing');
@@ -100,7 +107,7 @@ export function NowFace() {
   const list = items ?? [];
   const shown = expanded ? list : list.slice(0, CAP);
   const overflow = Math.max(0, list.length - CAP);
-  const hasClusters = clusters.falsified.length > 0 || clusters.stalled.length > 0;
+  const hasClusters = clusters.falsified.length > 0 || clusters.stalled.length > 0 || clusters.loopTotalCount > 0;
   // story #2541 AC1/AC2 — story_stalled/hypothesis_falsified가 클러스터 보드로 옮겨간 뒤
   // NowFace 플랫 리스트가 실제로 비어도(decide/done/agent_stuck/unanswered_blocker가 0건)
   // 클러스터에 내용이 있으면 "모두 확인했어요"는 거짓이다 — 두 표면을 합쳐서 판단한다.
@@ -117,7 +124,15 @@ export function NowFace() {
           <span className="ml-auto text-[11px] text-muted-foreground">{t('nowNote', { count: items.length })}</span>
         ) : null}
       </div>
-      {items !== null ? <AttentionClusterBoard falsified={clusters.falsified} stalled={clusters.stalled} /> : null}
+      {items !== null ? (
+        <AttentionClusterBoard
+          falsified={clusters.falsified}
+          stalled={clusters.stalled}
+          loop={clusters.loop}
+          loopTotalCount={clusters.loopTotalCount}
+          measurePlanMissingGoalCount={clusters.measurePlanMissingGoalCount}
+        />
+      ) : null}
       {items === null ? (
         <div className="rounded-2xl border border-border bg-card transition-shadow hover:shadow-sm">
           {Array.from({ length: 3 }).map((_, i) => <RowSkeleton key={i} />)}
