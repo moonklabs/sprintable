@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { RefreshCw, PauseCircle, AlertTriangle } from 'lucide-react';
+import { RefreshCw, PauseCircle, AlertTriangle, FolderOpen } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { FalsifiedClusterItem, StalledClusterItem, LoopClusterItem } from './derive-attention-clusters';
@@ -57,6 +57,14 @@ function ClusterShell({
   );
 }
 
+// story #2842(0b17472c 그라운딩, PO 확定) — 항목이 뷰어의 활성 프로젝트와 다른 프로젝트
+// 소속일 때만 병기(같으면 null이라 이 컴포넌트 자체가 안 그려짐 — 노이즈 절제). 병기 값은
+// BE가 주는 project_slug 그대로(별도 표시용 프로젝트명 필드는 이 계약에 없음).
+function CrossProjectTag({ label }: { label: string | null }) {
+  if (!label) return null;
+  return <Badge variant="chip" className="shrink-0 gap-1"><FolderOpen className="size-3 shrink-0" aria-hidden />{label}</Badge>;
+}
+
 function FalsifiedRow({ item }: { item: FalsifiedClusterItem }) {
   const t = useTranslations('orgBriefing');
   return (
@@ -66,6 +74,7 @@ function FalsifiedRow({ item }: { item: FalsifiedClusterItem }) {
     >
       <div className="flex items-center gap-2">
         <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{item.title}</p>
+        <CrossProjectTag label={item.crossProjectLabel} />
         <Badge variant="info" className="shrink-0">{t('clusterFalsifiedBadge')}</Badge>
       </div>
       <p className="mt-1.5 text-xs text-muted-foreground">
@@ -99,6 +108,7 @@ function StalledRow({ item }: { item: StalledClusterItem }) {
       className="flex items-center gap-2.5 border-t border-border px-4 py-2.5 transition-colors hover:bg-muted/50"
     >
       <p className="min-w-0 flex-1 truncate text-sm text-foreground">{item.title}</p>
+      <CrossProjectTag label={item.crossProjectLabel} />
       {/* story #2420 규칙 — tint 배경 위 글자는 계열색이 아니라 text-foreground. */}
       {item.days !== null ? (
         <span className="shrink-0 rounded-md bg-info/10 px-2 py-0.5 text-[11px] font-semibold text-foreground">
@@ -131,6 +141,7 @@ function LoopRow({ item }: { item: LoopClusterItem }) {
       className="flex items-center gap-2.5 border-t border-border px-4 py-2.5 transition-colors hover:bg-muted/50"
     >
       <p className="min-w-0 flex-1 truncate text-sm text-foreground">{item.title}</p>
+      <CrossProjectTag label={item.crossProjectLabel} />
       <Badge variant="warning" className="shrink-0">{t(LOOP_KIND_BADGE_KEY[item.kind])}</Badge>
       {item.days !== null ? (
         <span className="shrink-0 rounded-md bg-warning-tint px-2 py-0.5 text-[11px] font-semibold text-foreground">

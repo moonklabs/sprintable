@@ -36,7 +36,7 @@ afterEach(async () => {
 });
 
 function stalledItem(i: number): StalledClusterItem {
-  return { id: `s${i}`, title: `스토리 ${i}`, days: 10 - i, href: `/board?story=s${i}` };
+  return { id: `s${i}`, title: `스토리 ${i}`, days: 10 - i, href: `/board?story=s${i}`, crossProjectLabel: null };
 }
 
 describe('AttentionClusterBoard', () => {
@@ -76,6 +76,7 @@ describe('AttentionClusterBoard', () => {
     const item: FalsifiedClusterItem = {
       id: 'h1', title: '온보딩 연결 완료율이 오르면 채택이 는다',
       target: 70, actual: 41, hasOutcome: true, supersededId: 'h2', href: '/flow?hypothesis=h1',
+      crossProjectLabel: null,
     };
     await act(async () => {
       root.render(wrap(<AttentionClusterBoard falsified={[item]} stalled={[]} {...NO_LOOP} />));
@@ -88,6 +89,7 @@ describe('AttentionClusterBoard', () => {
   it('대체 가설이 없으면 미연결 정직 문구를 보인다(대체 가설 제목을 지어내지 않는다)', async () => {
     const item: FalsifiedClusterItem = {
       id: 'h1', title: 'X', target: null, actual: null, hasOutcome: false, supersededId: null, href: '/flow?hypothesis=h1',
+      crossProjectLabel: null,
     };
     await act(async () => {
       root.render(wrap(<AttentionClusterBoard falsified={[item]} stalled={[]} {...NO_LOOP} />));
@@ -99,7 +101,7 @@ describe('AttentionClusterBoard', () => {
   // story #2830 — 「닫힌 적 없는 루프」 클러스터.
   describe('loop cluster (story #2830)', () => {
     function loopItem(overrides: Partial<LoopClusterItem>): LoopClusterItem {
-      return { id: 'l1', kind: 'overdueHypothesis', title: '결제 전환 가설', days: 5, href: '/flow?hypothesis=l1', ...overrides };
+      return { id: 'l1', kind: 'overdueHypothesis', title: '결제 전환 가설', days: 5, href: '/flow?hypothesis=l1', crossProjectLabel: null, ...overrides };
     }
 
     it('N=0이면 카드 자체를 안 그린다(배경음 방지)', async () => {
@@ -191,6 +193,21 @@ describe('AttentionClusterBoard', () => {
       const hrefs = Array.from(container.querySelectorAll('a')).map((a) => a.getAttribute('href'));
       expect(hrefs).toContain('/flow?hypothesis=h1');
       expect(hrefs).toContain('/flow?view=flow&goal=g1');
+    });
+
+    // story #2842(0b17472c) — cross-project 항목만 프로젝트 slug 배지가 붙는다(노이즈 절제).
+    it('crossProjectLabel이 있는 항목만 프로젝트 태그가 보인다', async () => {
+      const items = [
+        loopItem({ id: 'same', title: '같은 프로젝트', crossProjectLabel: null }),
+        loopItem({ id: 'other', title: '다른 프로젝트', crossProjectLabel: 'other-proj' }),
+      ];
+      await act(async () => {
+        root.render(wrap(
+          <AttentionClusterBoard falsified={[]} stalled={[]} loop={items} loopTotalCount={2} measurePlanMissingGoalCount={0} unmeasurableGoalCount={0} />,
+        ));
+      });
+      expect(container.textContent).toContain('other-proj');
+      expect(container.textContent?.match(/other-proj/g)).toHaveLength(1);
     });
   });
 });

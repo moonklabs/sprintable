@@ -16,6 +16,9 @@ export interface FalsifiedClusterItem {
   hasOutcome: boolean;
   supersededId: string | null;
   href: string;
+  // story #2842 — 항목 소속 프로젝트가 뷰어의 활성 프로젝트와 다를 때만 채워짐(같으면
+  // null·노이즈 절제). 값은 그 프로젝트의 slug.
+  crossProjectLabel: string | null;
 }
 
 export interface StalledClusterItem {
@@ -23,6 +26,7 @@ export interface StalledClusterItem {
   title: string;
   days: number | null;
   href: string;
+  crossProjectLabel: string | null;
 }
 
 // story #2829/#2830(loop-closure P0) — 「닫힌 적 없는 루프」 3분류 중 N에 포함되는 2류
@@ -35,6 +39,24 @@ export interface LoopClusterItem {
   title: string;
   days: number | null;
   href: string;
+  crossProjectLabel: string | null;
+}
+
+// story #2842(0b17472c 그라운딩) — 뷰어 컨텍스트. 미제공(구 호출부·테스트)이면 href는 기존
+// bare path로 폴백하고 crossProjectLabel은 항상 null(회귀 0).
+export interface ViewerContext {
+  orgSlug?: string;
+  activeProjectId?: string;
+}
+
+function projectHref(viewer: ViewerContext | undefined, projectSlug: string | null, path: string): string {
+  if (viewer?.orgSlug && projectSlug) return `/${viewer.orgSlug}/${projectSlug}${path}`;
+  return path;
+}
+
+function crossProjectLabel(viewer: ViewerContext | undefined, itemProjectId: string | null, projectSlug: string | null): string | null {
+  if (!viewer?.activeProjectId || !itemProjectId || !projectSlug) return null;
+  return itemProjectId !== viewer.activeProjectId ? projectSlug : null;
 }
 
 export interface AttentionClusters {
@@ -83,6 +105,7 @@ export function deriveAttentionClusters(
   attention: RawAttentionItem[],
   t: ClusterTranslator,
   loopCounts?: LoopCounts,
+  viewer?: ViewerContext,
 ): AttentionClusters {
   const falsified: { item: FalsifiedClusterItem; days: number | null }[] = [];
   const stalled: StalledClusterItem[] = [];
@@ -96,7 +119,8 @@ export function deriveAttentionClusters(
           kind: 'overdueHypothesis',
           title: a.statement ?? t('clusterUnclosedOverdueHypothesisTitle'),
           days: a.overdue_days,
-          href: a.hypothesis_id ? `/flow?hypothesis=${a.hypothesis_id}` : '/flow',
+          href: projectHref(viewer, a.project_slug, a.hypothesis_id ? `/flow?hypothesis=${a.hypothesis_id}` : '/flow'),
+          crossProjectLabel: crossProjectLabel(viewer, a.project_id, a.project_slug),
         },
         days: a.overdue_days,
       });
@@ -112,7 +136,8 @@ export function deriveAttentionClusters(
           // 조용히 드롭된다(NextMakerScreen이 view==='flow'일 때만 소비). 정본 경로
           // handleNavigateToGoal(flow-client.tsx)이 이미 view=flow를 명시 세팅하는 것과 동형으로
           // 딥링크도 명시한다.
-          href: a.goal_id ? `/flow?view=flow&goal=${a.goal_id}` : '/flow',
+          href: projectHref(viewer, a.project_slug, a.goal_id ? `/flow?view=flow&goal=${a.goal_id}` : '/flow'),
+          crossProjectLabel: crossProjectLabel(viewer, a.project_id, a.project_slug),
         },
         days: a.overdue_days,
       });
@@ -128,7 +153,8 @@ export function deriveAttentionClusters(
           // 조용히 드롭된다(NextMakerScreen이 view==='flow'일 때만 소비). 정본 경로
           // handleNavigateToGoal(flow-client.tsx)이 이미 view=flow를 명시 세팅하는 것과 동형으로
           // 딥링크도 명시한다.
-          href: a.goal_id ? `/flow?view=flow&goal=${a.goal_id}` : '/flow',
+          href: projectHref(viewer, a.project_slug, a.goal_id ? `/flow?view=flow&goal=${a.goal_id}` : '/flow'),
+          crossProjectLabel: crossProjectLabel(viewer, a.project_id, a.project_slug),
         },
         days: a.done_days,
       });
@@ -144,7 +170,8 @@ export function deriveAttentionClusters(
           actual,
           hasOutcome: actual !== null && target !== null,
           supersededId: a.superseded_by_hypothesis_id,
-          href: a.hypothesis_id ? `/flow?hypothesis=${a.hypothesis_id}` : '/flow',
+          href: projectHref(viewer, a.project_slug, a.hypothesis_id ? `/flow?hypothesis=${a.hypothesis_id}` : '/flow'),
+          crossProjectLabel: crossProjectLabel(viewer, a.project_id, a.project_slug),
         },
         days: a.falsified_days,
       });
@@ -153,7 +180,8 @@ export function deriveAttentionClusters(
         id: a.story_id ?? `story_stalled-${idx}`,
         title: a.title ?? t('signalStalledTitle'),
         days: a.stalled_days,
-        href: a.story_id ? `/board?story=${a.story_id}` : '/board',
+        href: projectHref(viewer, a.project_slug, a.story_id ? `/board?story=${a.story_id}` : '/board'),
+        crossProjectLabel: crossProjectLabel(viewer, a.project_id, a.project_slug),
       });
     }
   });
