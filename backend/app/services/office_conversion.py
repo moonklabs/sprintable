@@ -14,7 +14,6 @@ story #2771 §7 구현 그라운딩(doc 84ef0cb7) 결정 반영:
 """
 from __future__ import annotations
 
-import os
 import uuid
 
 import httpx
@@ -22,9 +21,13 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.asset import Asset
 
-_GOTENBERG_URL = os.environ.get("GOTENBERG_SERVICE_URL", "").rstrip("/")
+# story #2822 — Settings SSOT 경유(예전엔 os.environ 직접읽기라 infra/check_env_drift.py
+# ④축 report 대상이었다). settings도 프로세스 시작 시 1회 인스턴스화라 타이밍 동일 —
+# fail-closed 시맨틱(미설정 시 ConversionUnavailable) 그대로 보존.
+_GOTENBERG_URL = settings.gotenberg_service_url.rstrip("/")
 _CONVERTIBLE_EXTS = frozenset({"pptx"})
 _TIMEOUT = httpx.Timeout(120.0)  # §7-4: 대형 pptx 변환 지연 흡수
 # ⛔QA catch(카디르군, 2026-08-19) — %PDF- 매직만으론 부족, 응답 크기도 상한 필요(무제한
