@@ -31,6 +31,11 @@ class GateGithubCheckEvent(Base):
     repo_full_name: Mapped[str] = mapped_column(Text, nullable=False)
     pr_number: Mapped[int] = mapped_column(Integer, nullable=False)
     head_sha: Mapped[str] = mapped_column(Text, nullable=False)
+    # story #2819 — re_pending 행 전용: 무효화된 승인이 귀속됐던 SHA(reopen_gate_if_new_sha가
+    # 이미 계산해 둔 prior_sha 지역변수를 여기 같이 남긴다 — 이전엔 로그로만 나가고 원장엔
+    # head_sha(새 SHA)만 남아 "어느 SHA에서" 무효화됐는지가 조회 시점엔 이미 사라져 있었다).
+    # published/resolved 행이나 마이그레이션 이전 행은 NULL(소급 불가 — no-fiction).
+    prior_sha: Mapped[str | None] = mapped_column(Text, nullable=True)
     # published(최초/재-pending 발행) | re_pending(SHA 불일치로 게이트를 되돌림) | resolved(success/failure).
     event_type: Mapped[str] = mapped_column(Text, nullable=False)
     # GitHub check-run conclusion — pending 발행이면 NULL(status=in_progress).
