@@ -187,4 +187,7 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # 필드를 설계대로 잡은 것.
     assert "ADMIN_OPERATOR_AUDIENCE" in keys and "ADMIN_OPERATOR_ALLOWLIST" in keys
     assert "DEPLOY_ENV" in keys
-    assert len(keys) == 97
+    # story #2822(2026-08-20): gotenberg_service_url 필드 신설(office_conversion.py의
+    # os.environ 직접읽기를 Settings SSOT 경유로 교체)로 97→98. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "GOTENBERG_SERVICE_URL" in keys
+    assert len(keys) == 98
