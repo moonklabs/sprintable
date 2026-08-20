@@ -216,32 +216,40 @@ interface GithubCheckLedgerEvent {
  * 트리거는 호출부(GateEvidence)가 결정 — ghState==='in_progress'일 때만 마운트한다(success/
  * failure/not_published/null인 게이트는 재-pending 여지 자체가 없어 호출 불요).
  *
+ * ⚠️2026-08-20 라이브 AC2 재검 중 발견·즉시수정 — `events[0]`(최신 이벤트 그 자체)이 아니라
+ * "가장 최근 re_pending 이벤트"를 찾아야 한다. 실왕복 확인 결과 새 커밋 감지 시 BE가 re_pending
+ * 기록 직후(같은 웹훅 처리 안에서) 그 새 SHA로 새 check-run을 published — 즉 정상 케이스에서
+ * `events[0]`은 거의 항상 `published`이고 `re_pending`은 events[1]. 이전 코드(`events[0]?.event_type
+ * !== 're_pending'`)는 이 실측 순서에서 사실상 절대 참이 안 돼 사유 문구가 죽어있었다(AC2 미충족).
+ * ghState==='in_progress' 마운트 가드가 이미 "아직 미해결"을 보장하므로, 원장에서 가장 최근
+ * re_pending을 찾아 그 SHA로 표시하면 된다(뒤이은 published가 있어도 그 사유는 여전히 유효).
+ *
  * 실패/빈 응답은 침묵(옵션 정보라 카드 붕괴 X) — 이 신호가 evidence 판정(gateHasEvidence)에
  * 관여하지 않는 이유이기도 하다(로드 전/실패 시에도 카드가 이미 유효한 GithubCheckSignal로
  * State B/C에 들어가 있어야 함).
  */
 function GithubRependingReason({ gateId }: { gateId: string }) {
   const t = useTranslations('cage');
-  const [latest, setLatest] = useState<GithubCheckLedgerEvent | null | undefined>(undefined);
+  const [repending, setRepending] = useState<GithubCheckLedgerEvent | null | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
     fetchWithAuth(`/api/gates/${gateId}/github-check-events`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`status ${res.status}`))))
       .then((events: GithubCheckLedgerEvent[]) => {
-        if (!cancelled) setLatest(events[0] ?? null);
+        if (!cancelled) setRepending(events.find((e) => e.event_type === 're_pending') ?? null);
       })
       .catch(() => {
-        if (!cancelled) setLatest(null);
+        if (!cancelled) setRepending(null);
       });
     return () => { cancelled = true; };
   }, [gateId]);
 
-  if (!latest || latest.event_type !== 're_pending') return null;
+  if (!repending) return null;
 
   return (
     <p className="mt-1 text-[11px] text-muted-foreground">
-      {t('githubCheckRependingReason', { newSha: latest.head_sha.slice(0, 7) })}
+      {t('githubCheckRependingReason', { newSha: repending.head_sha.slice(0, 7) })}
     </p>
   );
 }
