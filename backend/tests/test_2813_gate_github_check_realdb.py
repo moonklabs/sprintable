@@ -47,7 +47,7 @@ async def _session_factory():
 
 async def _seed(
     session, *, gate_status="pending", approved_head_sha=None,
-    github_check_run_id=None, github_check_run_sha=None,
+    github_check_run_id=None, github_check_run_sha=None, with_link=True,
 ):
     from app.models.gate import Gate
     from app.models.github_installation import GithubInstallation
@@ -80,11 +80,12 @@ async def _seed(
     )
     session.add(installation)
 
-    link = PullRequestStoryLink(
-        id=uuid.uuid4(), org_id=org.id, story_id=story.id,
-        repo_full_name="acme/repo", pr_number=7, link_source="sid", confidence="high",
-    )
-    session.add(link)
+    if with_link:
+        link = PullRequestStoryLink(
+            id=uuid.uuid4(), org_id=org.id, story_id=story.id,
+            repo_full_name="acme/repo", pr_number=7, link_source="sid", confidence="high",
+        )
+        session.add(link)
     await session.commit()
     await session.refresh(gate)
 
@@ -132,6 +133,79 @@ async def test_publish_gate_check_creates_pending_check_and_ledger_row_realdb():
             assert len(events) == 1
             assert events[0].event_type == "published"
             assert events[0].head_sha == "sha-pending-1"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publish_gate_check_no_link_row_publishes_from_args_alone_realdb():
+    """story #2826 잔여(카디르 판독·페드루 PO 승인 2026-08-20, #3257 실사고 재현) — link row가
+    0개(SID-only 해소, merge_link_evidence/upsert_link 둘 다 이 조건에선 row를 안 만든다)여도
+    repo_full_name+pr_number+head_sha가 인자로 이미 왔으면 link 조회 자체를 스킵하고 그 인자만으로
+    check를 발행해야 한다 — 이전엔 link가 없다는 이유만으로 조용히 skip됐다(gate row는 서 있는데
+    check-run만 영원히 안 뜨는 상태)."""
+    from sqlalchemy import select
+
+    from app.models.gate import Gate
+    from app.models.gate_github_check_event import GateGithubCheckEvent
+    from app.services.gate_github_check import publish_gate_check
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s, gate_status="pending", with_link=False)
+
+        with patch(
+            "app.services.gate_github_check.create_check_run",
+            AsyncMock(return_value={"id": 9099}),
+        ) as create_mock, patch(
+            "app.core.database.async_session_factory", Session,
+        ):
+            await publish_gate_check(
+                seeded["org_id"], seeded["gate_id"],
+                head_sha="sha-sid-only", repo_full_name="acme/repo", pr_number=3257,
+            )
+
+        create_mock.assert_awaited_once()
+        assert create_mock.call_args.args[1:3] == ("acme/repo", "sha-sid-only")
+        assert create_mock.call_args.kwargs["status"] == "in_progress"
+
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == seeded["gate_id"]))).scalar_one()
+            assert gate.github_check_run_id == 9099
+            assert gate.github_check_run_sha == "sha-sid-only"
+
+            events = (
+                await s.execute(select(GateGithubCheckEvent).where(GateGithubCheckEvent.gate_id == gate.id))
+            ).scalars().all()
+            assert len(events) == 1
+            assert events[0].event_type == "published"
+            assert events[0].pr_number == 3257
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publish_gate_check_no_link_and_no_repo_args_skips_with_reason_logged_realdb():
+    """②(사유 로그, 침묵 부재 금지): link도 없고 repo_full_name/pr_number 인자도 없으면 발행
+    대상 자체를 특정 못 하므로 여전히 skip — 이번엔 그 사유가 로그에 명시적으로 남는지 확인한다."""
+    from app.services.gate_github_check import publish_gate_check
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s, gate_status="pending", with_link=False)
+
+        with patch(
+            "app.services.gate_github_check.create_check_run", AsyncMock(),
+        ) as create_mock, patch(
+            "app.core.database.async_session_factory", Session,
+        ), patch("app.services.gate_github_check.logger") as mock_logger:
+            await publish_gate_check(seeded["org_id"], seeded["gate_id"], head_sha="sha-x")
+
+        create_mock.assert_not_called()
+        logged = " ".join(str(c.args) for c in mock_logger.info.call_args_list)
+        assert "식별 불가" in logged, logged
     finally:
         await engine.dispose()
 
