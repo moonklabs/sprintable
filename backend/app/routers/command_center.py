@@ -373,7 +373,7 @@ async def my_actions(
     # additive로 채운다.
     stalled = (
         await session.execute(
-            select(Story.id, Story.updated_at, Story.title)
+            select(Story.id, Story.updated_at, Story.title, Story.project_id)
             .where(
                 Story.org_id == org_id,
                 Story.status.not_in(("done", "backlog")),
@@ -385,12 +385,13 @@ async def my_actions(
             .limit(20)
         )
     ).all()
-    for sid, updated_at, title in stalled:
+    for sid, updated_at, title, project_id in stalled:
         attention_items.append({
             "type": "story_stalled", "severity": "warn", "auto_detected": True,
             "title": title,
             "story_id": str(sid),
             "stalled_days": (now - updated_at).days if updated_at else None,
+            "project_id": str(project_id),
         })
     # 3) CC-BE.2 답없는 블로커(enum/ids/age — raw blocker text 0).
     # story #2538: story_stalled와 동형으로 title 추가(막힌 story 제목) — FE 구별용.
@@ -399,7 +400,7 @@ async def my_actions(
         await session.execute(
             select(
                 ItemDependency.from_id, ItemDependency.to_id, ItemDependency.created_at,
-                _BlockedU.title,
+                _BlockedU.title, _BlockedU.project_id,
             )
             .select_from(ItemDependency)
             .join(_BlockedU, _BlockedU.id == ItemDependency.to_id)
@@ -416,12 +417,13 @@ async def my_actions(
             .limit(20)
         )
     ).all()
-    for blocker_id, blocked_id, created_at, blocked_title in unanswered:
+    for blocker_id, blocked_id, created_at, blocked_title, project_id in unanswered:
         attention_items.append({
             "type": "unanswered_blocker", "severity": "warn", "auto_detected": True,
             "blocked_story_id": str(blocked_id), "blocker_id": str(blocker_id),
             "blocked_story_title": blocked_title,
             "age_days": (now - created_at).days if created_at else None,
+            "project_id": str(project_id),
         })
     # 4) story #2539: 최근 반증(falsified) 가설 — 결과 통보(in-flight 감지 아님, 위 주석 참조).
     falsified_hyps = (
@@ -429,6 +431,7 @@ async def my_actions(
             select(
                 Hypothesis.id, Hypothesis.statement, Hypothesis.outcome_result,
                 Hypothesis.updated_at, Hypothesis.superseded_by_hypothesis_id,
+                Hypothesis.project_id,
             )
             .where(
                 Hypothesis.org_id == org_id,
@@ -439,13 +442,14 @@ async def my_actions(
             .limit(20)
         )
     ).all()
-    for hyp_id, statement, outcome_result, updated_at, superseded_by in falsified_hyps:
+    for hyp_id, statement, outcome_result, updated_at, superseded_by, project_id in falsified_hyps:
         attention_items.append({
             "type": "hypothesis_falsified", "severity": "info", "auto_detected": True,
             "hypothesis_id": str(hyp_id), "statement": statement,
             "outcome_result": outcome_result,
             "falsified_days": (now - updated_at).days if updated_at else None,
             "superseded_by_hypothesis_id": str(superseded_by) if superseded_by else None,
+            "project_id": str(project_id),
         })
     # 5) story #2829(loop-closure P0, doc loop-closure-first-class-signal-design §1·§3
     # 계약=미르코군 doc a8e73bdb 그대로) — 「닫히지 않은 루프」: N에 포함되는 2류(도과+outcome
@@ -453,7 +457,10 @@ async def my_actions(
     # 센다 — 발행 성패가 "닫히지 않았다"는 사실 자체를 안 바꾼다(서비스 모듈독스트링 참조).
     overdue_hyps = (
         await session.execute(
-            select(Hypothesis.id, Hypothesis.statement, Hypothesis.measure_after, Hypothesis.owner_member_id)
+            select(
+                Hypothesis.id, Hypothesis.statement, Hypothesis.measure_after,
+                Hypothesis.owner_member_id, Hypothesis.project_id,
+            )
             .where(
                 Hypothesis.org_id == org_id,
                 Hypothesis.status.in_(("active", "measuring")),
@@ -463,16 +470,17 @@ async def my_actions(
             .limit(20)
         )
     ).all()
-    for hyp_id, statement, measure_after, owner_id in overdue_hyps:
+    for hyp_id, statement, measure_after, owner_id, project_id in overdue_hyps:
         attention_items.append({
             "type": "loop_overdue_hypothesis", "severity": "warn", "auto_detected": True,
             "hypothesis_id": str(hyp_id), "statement": statement,
             "owner_member_id": str(owner_id) if owner_id else None,
             "overdue_days": (now - measure_after).days if measure_after else None,
+            "project_id": str(project_id),
         })
     overdue_goals = (
         await session.execute(
-            select(Goal.id, Goal.title, Goal.measure_after, Goal.assignee_id)
+            select(Goal.id, Goal.title, Goal.measure_after, Goal.assignee_id, Goal.project_id)
             .where(
                 Goal.org_id == org_id,
                 Goal.status == "active",
@@ -483,12 +491,13 @@ async def my_actions(
             .limit(20)
         )
     ).all()
-    for goal_id, title, measure_after, assignee_id in overdue_goals:
+    for goal_id, title, measure_after, assignee_id, project_id in overdue_goals:
         attention_items.append({
             "type": "loop_overdue_goal", "severity": "warn", "auto_detected": True,
             "goal_id": str(goal_id), "title": title,
             "owner_member_id": str(assignee_id) if assignee_id else None,
             "overdue_days": (now - measure_after).days if measure_after else None,
+            "project_id": str(project_id),
         })
     # story #2843 — outcome_status "n_a"(아직 손 안 댐)뿐 아니라 "unmeasured"(닫혔는데
     # 판정 미제공·done 전이 시 자동 마킹)도 «닫히지 않은 루프» 축이다. n_a와 unmeasured는
@@ -496,7 +505,7 @@ async def my_actions(
     # unmeasured 자체의 구분은 GoalResponse.outcome_status 값으로 API에 이미 노출된다.
     done_no_outcome_goals = (
         await session.execute(
-            select(Goal.id, Goal.title, Goal.updated_at, Goal.assignee_id)
+            select(Goal.id, Goal.title, Goal.updated_at, Goal.assignee_id, Goal.project_id)
             .where(
                 Goal.org_id == org_id,
                 Goal.status == "done",
@@ -506,12 +515,13 @@ async def my_actions(
             .limit(20)
         )
     ).all()
-    for goal_id, title, updated_at, assignee_id in done_no_outcome_goals:
+    for goal_id, title, updated_at, assignee_id, project_id in done_no_outcome_goals:
         attention_items.append({
             "type": "loop_outcome_missing_goal", "severity": "warn", "auto_detected": True,
             "goal_id": str(goal_id), "title": title,
             "owner_member_id": str(assignee_id) if assignee_id else None,
             "done_days": (now - updated_at).days if updated_at else None,
+            "project_id": str(project_id),
         })
     # N에서 제외하되 집계는 유지(페드루 PO 보완 지시, doc a8e73bdb §2) — measure_after
     # 자체가 없는 active goal. AC상 클릭 목록 요건이 없어 개별 목록은 안 싣는다(카운트만).
@@ -568,6 +578,20 @@ async def my_actions(
             )
         )
     ).scalar_one()
+
+    # 0b17472c(미르코군 그라운딩) — attention.items[] 항목별 project_id는 이미 위 각 SELECT에서
+    # 실려 있다(3모델 Story/Hypothesis/Goal 모두 기존 컬럼) — project_slug만 배치 1쿼리로
+    # 붙인다(N+1 회피, entity_slug.resolve_project_slugs 재사용 — goals.py/stories.py와 동일
+    # 패턴). FE(미르코군) 적체 3건의 열쇠 — story #2819보다 先.
+    from app.services.entity_slug import resolve_project_slugs
+
+    _attention_project_ids = {
+        uuid.UUID(item["project_id"]) for item in attention_items if item.get("project_id")
+    }
+    _project_slug_map = await resolve_project_slugs(session, _attention_project_ids)
+    for item in attention_items:
+        if item.get("project_id"):
+            item["project_slug"] = _project_slug_map.get(uuid.UUID(item["project_id"]))
 
     return JSONResponse(content={
         "action_queue": {  # scope: member(caller) — 타 멤버 큐 노출 0.

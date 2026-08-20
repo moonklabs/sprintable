@@ -97,7 +97,7 @@ def _ma_seq(
     my_tasks=(), approval_group_counts=(), blocker_weight_counts=(), falsified=(),
     overdue_hyps=(), overdue_goals=(), done_no_outcome_goals=(), measure_plan_missing_goal_count=0,
     loop_overdue_hypothesis_count=None, loop_overdue_goal_count=None, loop_outcome_missing_goal_count=None,
-    unmeasurable_goal_count=0,
+    unmeasurable_goal_count=0, project_slugs=(),
 ):
     seq = [_r_all(approvals)]
     if approvals:
@@ -129,6 +129,13 @@ def _ma_seq(
     ))
     # story #2843(PO AC②) — unmeasurable_goal_count 스칼라 신설(#3262 CI 판독·Pedro 처방).
     seq.append(_r_scalar(unmeasurable_goal_count))
+    # 0b17472c — attention.items[] project_slug 배치 조회. resolve_project_slugs는 project_id
+    # 집합이 비면 DB 왕복 자체를 스킵(조기 return) — stalled/unanswered/falsified/overdue_*/
+    # done_no_outcome_goals 중 하나라도 있어야(그 항목들에 project_id가 실려 있어야) 이 쿼리가
+    # 발생한다(approval_group_counts/blocker_weight_counts와 동형 조건부 패턴). command_center.py
+    # 실 순서상 unmeasurable_goal_count(#2843) 스칼라 뒤에 이 배치가 온다(rebase 시 확認).
+    if stalled or unanswered or falsified or overdue_hyps or overdue_goals or done_no_outcome_goals:
+        seq.append(_r_all(project_slugs))
     return seq
 
 
@@ -250,12 +257,13 @@ async def test_my_actions_stalled_and_unanswered_blocker_enum_only():
 
     story #2538: title 추가(FE "제목+N일" 구별용) — 가설과 무관한 카피 오라벨링 정정의
     전제 데이터."""
-    sid, blocker_id, blocked_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    sid, blocker_id, blocked_id, pid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     resp, session, resolver = await _get(
         "/api/v2/command-center/my-actions",
         execute_seq=_ma_seq(
-            stalled=[(sid, _OLD, "정체된 스토리")],
-            unanswered=[(blocker_id, blocked_id, _OLD, "막힌 스토리")],
+            stalled=[(sid, _OLD, "정체된 스토리", pid)],
+            unanswered=[(blocker_id, blocked_id, _OLD, "막힌 스토리", pid)],
+            project_slugs=[(pid, "acme")],
         ))
     assert resp.status_code == 200
     types = {i["type"] for i in _data(resp)["attention"]["items"]}
@@ -264,20 +272,28 @@ async def test_my_actions_stalled_and_unanswered_blocker_enum_only():
     stalled_item = next(i for i in items if i["type"] == "story_stalled")
     assert stalled_item["story_id"] == str(sid) and isinstance(stalled_item["stalled_days"], int)
     assert stalled_item["title"] == "정체된 스토리"
+    # 0b17472c — project_id/project_slug 배치 부착 확認.
+    assert stalled_item["project_id"] == str(pid)
+    assert stalled_item["project_slug"] == "acme"
     ub = next(i for i in items if i["type"] == "unanswered_blocker")
     assert ub["blocked_story_title"] == "막힌 스토리"
     assert ub["blocked_story_id"] == str(blocked_id) and isinstance(ub["age_days"], int)
+    assert ub["project_id"] == str(pid)
+    assert ub["project_slug"] == "acme"
 
 
 @pytest.mark.anyio
 async def test_my_actions_hypothesis_falsified_result_notification():
     """story #2539: 최근 falsified 가설 결과 통보(in-flight 이상감지 아님 — severity=info,
     story_stalled/unanswered_blocker의 severity=warn과 의도적으로 다름)."""
-    hyp_id, succ_id = uuid.uuid4(), uuid.uuid4()
+    hyp_id, succ_id, pid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     outcome = {"metric": "signups", "target": 100, "actual": 42, "direction": "increase"}
     resp, session, resolver = await _get(
         "/api/v2/command-center/my-actions",
-        execute_seq=_ma_seq(falsified=[(hyp_id, "체크아웃 2단계면 가입 늘 것", outcome, _OLD, succ_id)]))
+        execute_seq=_ma_seq(
+            falsified=[(hyp_id, "체크아웃 2단계면 가입 늘 것", outcome, _OLD, succ_id, pid)],
+            project_slugs=[(pid, "acme")],
+        ))
     assert resp.status_code == 200
     items = _data(resp)["attention"]["items"]
     hf = next(i for i in items if i["type"] == "hypothesis_falsified")
@@ -292,10 +308,13 @@ async def test_my_actions_hypothesis_falsified_result_notification():
 @pytest.mark.anyio
 async def test_my_actions_hypothesis_falsified_superseded_by_null_when_unconfirmed():
     """AC — 확認된 대체 페어 없으면 superseded_by_hypothesis_id는 None(지어내지 않는다)."""
-    hyp_id = uuid.uuid4()
+    hyp_id, pid = uuid.uuid4(), uuid.uuid4()
     resp, session, resolver = await _get(
         "/api/v2/command-center/my-actions",
-        execute_seq=_ma_seq(falsified=[(hyp_id, "S", None, _OLD, None)]))
+        execute_seq=_ma_seq(
+            falsified=[(hyp_id, "S", None, _OLD, None, pid)],
+            project_slugs=[(pid, "acme")],
+        ))
     assert resp.status_code == 200
     items = _data(resp)["attention"]["items"]
     hf = next(i for i in items if i["type"] == "hypothesis_falsified")
@@ -308,25 +327,29 @@ async def test_my_actions_loop_closure_items_and_measure_plan_missing_count():
     """story #2829: 「닫히지 않은 루프」 3타입(가설 도과·goal 도과·outcome 없는 done)이
     attention.items[]에 실리고, 측정계획 없는 active goal 수는 N에서 제외된 채 별도 스칼라
     필드로만 실린다(doc a8e73bdb §2 PO 확定 — 페드루 보완 지시)."""
-    hyp_id, goal_id, done_goal_id, owner_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    hyp_id, goal_id, done_goal_id, owner_id, pid = (
+        uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    )
     resp, session, resolver = await _get(
         "/api/v2/command-center/my-actions",
         execute_seq=_ma_seq(
-            overdue_hyps=[(hyp_id, "체크아웃 개선 가설", _OLD, owner_id)],
-            overdue_goals=[(goal_id, "Q3 활성화", _OLD, owner_id)],
-            done_no_outcome_goals=[(done_goal_id, "런칭", _OLD, owner_id)],
+            overdue_hyps=[(hyp_id, "체크아웃 개선 가설", _OLD, owner_id, pid)],
+            overdue_goals=[(goal_id, "Q3 활성화", _OLD, owner_id, pid)],
+            done_no_outcome_goals=[(done_goal_id, "런칭", _OLD, owner_id, pid)],
             measure_plan_missing_goal_count=40,
             # PO 리뷰 보완①(#3253) — items[]는 top-20 cap(위 각 1건뿐)인데 total count는
             # 참값(51)이어야 한다는 게 이 보완의 핵심 — 일부러 items 길이와 다르게 준다.
             loop_outcome_missing_goal_count=51,
             # story #2843(PO AC②) — unmeasurable(명시 선언)은 N에서 제외·별도 스칼라만.
             unmeasurable_goal_count=7,
+            project_slugs=[(pid, "acme")],
         ))
     assert resp.status_code == 200
     body = _data(resp)
     items_by_type = {i["type"]: i for i in body["attention"]["items"]}
     oh = items_by_type["loop_overdue_hypothesis"]
     assert oh["hypothesis_id"] == str(hyp_id) and oh["owner_member_id"] == str(owner_id)
+    assert oh["project_id"] == str(pid) and oh["project_slug"] == "acme"
     og = items_by_type["loop_overdue_goal"]
     assert og["goal_id"] == str(goal_id) and isinstance(og["overdue_days"], int)
     om = items_by_type["loop_outcome_missing_goal"]
