@@ -371,3 +371,64 @@ async def test_ac3b_legacy_source_without_installation_still_publishes_action_re
         assert kwargs.get("conclusion") == "action_required"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_2847_ac2_pr_open_with_link_no_participation_enforced_publishes_action_required():
+    """story #2847(AC2) — 링크는 정확히 풀렸는데 participation이 0건이면 evaluate_merge_gate가
+    gate_id=None으로 조기반환(#2843/#3262 실사고 근본원인). 이 repo가 enforced면 AC③과 동형으로
+    침묵 대신 action_required check(participation 전용 문구)로 안내 — gate row는 여전히 0개."""
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, _project, story = await _seed_org_project_story(s, with_participation=False)
+            await _seed_installation(s, org, installation_id=555006, enforced=True)
+            await _seed_link(s, org, story, pr_number=16)
+            story_id = story.id
+
+        with patch(
+            "app.services.gate_github_check.create_check_run",
+            AsyncMock(return_value={"id": 90006}),
+        ) as create_mock, patch("app.core.database.async_session_factory", Session):
+            payload = _pr_payload(
+                action="opened", pr_number=16, installation_id=555006, head_sha="sha-2847ac2",
+            )
+            resp = await _post_app(payload, Session, delivery_id=f"dlv-{uuid.uuid4().hex[:8]}")
+            assert resp.status_code == 200, resp.text
+
+        create_mock.assert_called_once()
+        _, kwargs = create_mock.call_args
+        assert kwargs.get("status") == "completed"
+        assert kwargs.get("conclusion") == "action_required"
+        assert "participation" in (kwargs.get("title") or "")
+        assert "claim" in (kwargs.get("summary") or "")
+
+        async with Session() as s:
+            gates = await _gates_for_story(s, story_id)
+            assert len(gates) == 0, "participation 없으면 gate가 서면 안 된다(#2843/#3262 재발 방지)"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_2847_ac2_pr_open_with_link_no_participation_not_enforced_publishes_nothing():
+    """AC4와 동형 음성대조 — enforced가 아니면 participation 미등록도 침묵(도입 마찰 0 원칙 보존)."""
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, _project, story = await _seed_org_project_story(s, with_participation=False)
+            await _seed_installation(s, org, installation_id=555007, enforced=False)
+            await _seed_link(s, org, story, pr_number=17)
+
+        with patch(
+            "app.services.gate_github_check.create_check_run", AsyncMock(),
+        ) as create_mock, patch("app.core.database.async_session_factory", Session):
+            payload = _pr_payload(
+                action="opened", pr_number=17, installation_id=555007, head_sha="sha-2847ac2b",
+            )
+            resp = await _post_app(payload, Session, delivery_id=f"dlv-{uuid.uuid4().hex[:8]}")
+            assert resp.status_code == 200, resp.text
+
+        create_mock.assert_not_called()
+    finally:
+        await engine.dispose()

@@ -482,6 +482,32 @@ async def _process_webhook_event(
                     "org_id": org_id, "gate_id": decision.gate_id,
                     "head_sha": head_sha, "repo_full_name": repo, "pr_number": pr_number,
                 })
+            elif ungated_check_publish is not None:
+                # story #2847(AC2) — 이 chokepoint(pr_number>0 고정)에서 gate_id=None은 오직
+                # "no implementation participation" 조기반환 하나뿐(evaluate_merge_gate의
+                # no-substance 숏컷은 pr_number<=0 전용이라 여기선 절대 안 탄다 — 그라운딩
+                # 확認). #2826과 동형으로 침묵 대신 action_required check로 안내.
+                from app.models.github_installation import GithubInstallation as _GithubInstallation2
+                from app.services.gate_github_check import (
+                    PARTICIPATION_REQUIRED_SUMMARY,
+                    PARTICIPATION_REQUIRED_TITLE,
+                    is_repo_check_enforced as _is_repo_check_enforced2,
+                )
+
+                _installation_id2 = installation.installation_id if installation is not None else (
+                    await session.execute(
+                        select(_GithubInstallation2.installation_id).where(
+                            _GithubInstallation2.org_id == org_id,
+                            _GithubInstallation2.suspended_at.is_(None),
+                        )
+                    )
+                ).scalar_one_or_none()
+                if _installation_id2 is not None and await _is_repo_check_enforced2(session, org_id, repo):
+                    ungated_check_publish.append({
+                        "installation_id": _installation_id2,
+                        "repo_full_name": repo, "head_sha": head_sha, "pr_number": pr_number,
+                        "title": PARTICIPATION_REQUIRED_TITLE, "summary": PARTICIPATION_REQUIRED_SUMMARY,
+                    })
 
     # P0-05 후속(doc scope-violation-signal-design §2·§3): PR 자체 이벤트(opened/synchronize/reopened)
     # + confident link(should_auto_close 동일 신뢰 등급)일 때만 판정. 3중 침묵 조건은 헬퍼 내부.
