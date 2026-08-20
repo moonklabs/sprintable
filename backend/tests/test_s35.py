@@ -71,7 +71,8 @@ async def test_create_api_key_201():
             mock_create.return_value = (_mock_key(), PLAINTEXT)
 
             async with client as c:
-                resp = await c.post(f"/api/v2/agents/{AGENT_ID}/api-keys", json={})
+                # story #2838 — expires_at이 이제 필수 필드(기본값 제거).
+                resp = await c.post(f"/api/v2/agents/{AGENT_ID}/api-keys", json={"expires_at": None})
 
         assert resp.status_code == 201
         assert "api_key" in resp.json()

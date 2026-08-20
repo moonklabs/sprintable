@@ -63,7 +63,7 @@ async def test_cross_org_rotate_rejected_and_victim_key_untouched():
             s.add(victim_agent)
             await s.flush()
             key, _plaintext = await ApiKeyRepository(s).create(
-                team_member_id=victim_agent.id, scope=["stories"]
+                team_member_id=victim_agent.id, scope=["stories"], expires_at=None
             )
             victim_key_id, original_hash = key.id, key.key_hash
             await s.commit()

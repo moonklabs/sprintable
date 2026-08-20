@@ -105,8 +105,9 @@ async def create_org_level_agent(
         from app.repositories.api_key import ApiKeyRepository
         from app.services.mcp_toolset import ALL_GROUPS
 
+        # story #2838(PO AC 정정) — org-agent 발급도 명시적으로 무만료(발급 정책 SSOT).
         _key, api_key_plaintext = await ApiKeyRepository(session).create(
-            team_member_id=member.id, scope=list(ALL_GROUPS)
+            team_member_id=member.id, scope=list(ALL_GROUPS), expires_at=None
         )
 
     # 생성자를 agent allow_list 에 자동 등록(멱등)

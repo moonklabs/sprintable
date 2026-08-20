@@ -34,7 +34,12 @@ class RotateApiKeyRequest(BaseModel):
 
 class CreateApiKeyRequest(BaseModel):
     scope: list[str] | None = None
-    expires_at: datetime | None = None
+    # story #2838(PO AC 확定 2026-08-20) — 기본값 제거로 **필수 필드**. 이전엔 생략 가능해
+    # "호출자가 안 정함"과 "호출자가 명시적으로 무만료를 원함"이 둘 다 None으로 뭉개져
+    # repository 층에서 90일이 몰래 각인됐다(실사고: 유나 세션 침묵). 이제 발급 UI를 포함한
+    # 어떤 호출자든 반드시 명시(값 있으면 그 시각, null이면 명시적 무만료)해야 한다 — 값
+    # 자체는 여전히 nullable(무만료 표현), 필드 생략만 422로 거부.
+    expires_at: datetime | None
 
     @field_validator("scope")
     @classmethod

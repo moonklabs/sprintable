@@ -48,6 +48,17 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
   const [generatedMcpConfig, setGeneratedMcpConfig] = useState<string | null>(null);
   // 툴 권한 = 그룹키 배열(=api-key.scope). picker가 카탈로그 로드 후 전체 비파괴로 기본 초기화.
   const [selectedScopes, setSelectedScopes] = useState<string[]>([]);
+  // story #2838(PO AC 확定 2026-08-20) — 발급 UI에 만료 선택이 아예 없어 90일이 몰래
+  // 각인되던 결함(유나 세션 침묵 실사고). 이제 발급자가 항상 명시 선택(기본값도 화면에
+  // 보이는 채)하고, 그 선택을 그대로 API에 전송한다(서버도 이 값을 필수로 강제 —
+  // api_key.py CreateApiKeyRequest.expires_at 기본값 제거와 짝).
+  type ExpiryChoice = '30d' | '90d' | '180d' | '365d' | 'never';
+  const [selectedExpiry, setSelectedExpiry] = useState<ExpiryChoice>('90d');
+  const computeExpiresAt = (choice: ExpiryChoice): string | null => {
+    if (choice === 'never') return null;
+    const days = { '30d': 30, '90d': 90, '180d': 180, '365d': 365 }[choice];
+    return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+  };
   const [copiedOnboarding, setCopiedOnboarding] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
   const [revokeConfirmDialog, setRevokeConfirmDialog] = useState(false);
@@ -93,7 +104,7 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
       const response = await fetchWithAuth(`/api/agents/${agentId}/api-key`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope: selectedScopes }),
+        body: JSON.stringify({ scope: selectedScopes, expires_at: computeExpiresAt(selectedExpiry) }),
       });
       if (!response.ok) throw new Error('Failed to generate API key');
       const result = await response.json() as { data?: { api_key?: string; mcp_config?: unknown } };
@@ -252,6 +263,23 @@ export function AgentApiKeyManager({ agentId, agentName, onNewKey }: AgentApiKey
           onChange={setSelectedScopes}
           disabled={loading}
         />
+      </div>
+
+      {/* story #2838 — 만료 선택(항상 화면에 노출, 침묵 각인 금지). */}
+      <div className="mb-4">
+        <label className="text-sm font-medium mb-1 block">{t('agentApiKeyExpiryLabel')}</label>
+        <select
+          className="rounded-md border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+          value={selectedExpiry}
+          disabled={loading}
+          onChange={(e) => setSelectedExpiry(e.target.value as ExpiryChoice)}
+        >
+          <option value="30d">{t('agentApiKeyExpiry30d')}</option>
+          <option value="90d">{t('agentApiKeyExpiry90d')}</option>
+          <option value="180d">{t('agentApiKeyExpiry180d')}</option>
+          <option value="365d">{t('agentApiKeyExpiry365d')}</option>
+          <option value="never">{t('agentApiKeyExpiryNever')}</option>
+        </select>
       </div>
 
       {apiKeys.length === 0 ? (
