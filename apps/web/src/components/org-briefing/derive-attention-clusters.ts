@@ -47,6 +47,9 @@ export interface AttentionClusters {
   // N 비포함·집계만(페드루 PO 보완 지시, doc a8e73bdb §2) — measure_after 자체가 없는
   // active goal. 카드 하단 보조 텍스트 전용.
   measurePlanMissingGoalCount: number;
+  // story #2843/#2844 — 명시 "측정 불가" 선언 goal 수. N 비포함·집계만(동형 성격), 카드 하단
+  // 보조 텍스트 전용.
+  unmeasurableGoalCount: number;
 }
 
 export interface LoopCounts {
@@ -54,6 +57,7 @@ export interface LoopCounts {
   loopOverdueGoalCount: number;
   loopOutcomeMissingGoalCount: number;
   measurePlanMissingGoalCount: number;
+  unmeasurableGoalCount: number;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -171,5 +175,6 @@ export function deriveAttentionClusters(
       ? loopCounts.loopOverdueHypothesisCount + loopCounts.loopOverdueGoalCount + loopCounts.loopOutcomeMissingGoalCount
       : loop.length,
     measurePlanMissingGoalCount: loopCounts?.measurePlanMissingGoalCount ?? 0,
+    unmeasurableGoalCount: loopCounts?.unmeasurableGoalCount ?? 0,
   };
 }

@@ -14,14 +14,14 @@ function emptyRaw(): RawMyActions {
   return {
     queue: [], attention: [],
     loopOverdueHypothesisCount: 0, loopOverdueGoalCount: 0, loopOutcomeMissingGoalCount: 0,
-    measurePlanMissingGoalCount: 0,
+    measurePlanMissingGoalCount: 0, unmeasurableGoalCount: 0,
   };
 }
 
 // buildNowFace 테스트는 story #2829 count 필드를 소비하지 않는다 — 타입 충족용 0값 스프레드.
 const ZERO_LOOP_COUNTS = {
   loopOverdueHypothesisCount: 0, loopOverdueGoalCount: 0, loopOutcomeMissingGoalCount: 0,
-  measurePlanMissingGoalCount: 0,
+  measurePlanMissingGoalCount: 0, unmeasurableGoalCount: 0,
 };
 
 describe('parseMyActions', () => {

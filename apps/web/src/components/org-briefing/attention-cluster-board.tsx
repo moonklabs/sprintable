@@ -168,6 +168,19 @@ function MeasurePlanMissingNote({ count }: { count: number }) {
   );
 }
 
+// story #2843/#2844 — 명시 "측정 불가" 선언 goal 수. measure_plan_missing과 동형(N 비포함·
+// 집계만·개별 목록 없음) — 위조 채널 감시용(§4, unmeasurable 남발로 루프 N을 인위적으로
+// 줄이는 걸 브리핑에서 볼 수 있게).
+function UnmeasurableGoalNote({ count }: { count: number }) {
+  const t = useTranslations('orgBriefing');
+  if (count <= 0) return null;
+  return (
+    <p className="border-t border-border bg-muted/30 px-4 py-2 text-[11px] text-foreground">
+      {t('clusterUnclosedUnmeasurableGoal', { count })}
+    </p>
+  );
+}
+
 function ViewAllToggle({
   expanded,
   remaining,
@@ -202,12 +215,14 @@ export function AttentionClusterBoard({
   loop,
   loopTotalCount,
   measurePlanMissingGoalCount,
+  unmeasurableGoalCount,
 }: {
   falsified: FalsifiedClusterItem[];
   stalled: StalledClusterItem[];
   loop: LoopClusterItem[];
   loopTotalCount: number;
   measurePlanMissingGoalCount: number;
+  unmeasurableGoalCount: number;
 }) {
   const t = useTranslations('orgBriefing');
   const [falsifiedExpanded, setFalsifiedExpanded] = useState(false);
@@ -279,6 +294,7 @@ export function AttentionClusterBoard({
               다를 수 있다는 것을 정직하게 알린다. */}
           {loopExpanded ? <LoopCapNotice shown={loop.length} total={loopTotalCount} /> : null}
           <MeasurePlanMissingNote count={measurePlanMissingGoalCount} />
+          <UnmeasurableGoalNote count={unmeasurableGoalCount} />
         </ClusterShell>
       ) : null}
     </div>

@@ -11,7 +11,7 @@ import { AttentionClusterBoard } from './attention-cluster-board';
 import type { FalsifiedClusterItem, StalledClusterItem, LoopClusterItem } from './derive-attention-clusters';
 
 // story #2830 — falsified/stalled 기존 테스트는 loop 신호와 무관하니 빈 값으로 고정(회귀 0).
-const NO_LOOP = { loop: [] as LoopClusterItem[], loopTotalCount: 0, measurePlanMissingGoalCount: 0 };
+const NO_LOOP = { loop: [] as LoopClusterItem[], loopTotalCount: 0, measurePlanMissingGoalCount: 0, unmeasurableGoalCount: 0 };
 
 let container: HTMLDivElement;
 let root: Root;
@@ -104,7 +104,7 @@ describe('AttentionClusterBoard', () => {
 
     it('N=0이면 카드 자체를 안 그린다(배경음 방지)', async () => {
       await act(async () => {
-        root.render(wrap(<AttentionClusterBoard falsified={[]} stalled={[]} loop={[]} loopTotalCount={0} measurePlanMissingGoalCount={40} />));
+        root.render(wrap(<AttentionClusterBoard falsified={[]} stalled={[]} loop={[]} loopTotalCount={0} measurePlanMissingGoalCount={40} unmeasurableGoalCount={0} />));
       });
       // measurePlanMissingGoalCount>0이어도 loopTotalCount=0이면 루프 카드 자체가 없다 — 이
       // 보조 텍스트는 루프 카드 안에서만 존재하는 항목이라 카드가 없으면 텍스트도 없어야 한다.
@@ -114,7 +114,7 @@ describe('AttentionClusterBoard', () => {
     it('배지 색이 destructive(빨강) 아니라 warning 계열이다(방치 신호이지 실패 아님)', async () => {
       await act(async () => {
         root.render(wrap(
-          <AttentionClusterBoard falsified={[]} stalled={[]} loop={[loopItem({})]} loopTotalCount={1} measurePlanMissingGoalCount={0} />,
+          <AttentionClusterBoard falsified={[]} stalled={[]} loop={[loopItem({})]} loopTotalCount={1} measurePlanMissingGoalCount={0} unmeasurableGoalCount={0} />,
         ));
       });
       const badge = Array.from(container.querySelectorAll('span')).find((s) => s.textContent === koMessages.orgBriefing.clusterUnclosedBadgeOverdueHypothesis);
@@ -129,7 +129,7 @@ describe('AttentionClusterBoard', () => {
       const items = Array.from({ length: 20 }, (_, i) => loopItem({ id: `g${i}`, kind: 'outcomeMissing', days: i }));
       await act(async () => {
         root.render(wrap(
-          <AttentionClusterBoard falsified={[]} stalled={[]} loop={items} loopTotalCount={51} measurePlanMissingGoalCount={0} />,
+          <AttentionClusterBoard falsified={[]} stalled={[]} loop={items} loopTotalCount={51} measurePlanMissingGoalCount={0} unmeasurableGoalCount={0} />,
         ));
       });
       expect(container.textContent).toContain('51');
@@ -139,7 +139,7 @@ describe('AttentionClusterBoard', () => {
       const items = Array.from({ length: 20 }, (_, i) => loopItem({ id: `g${i}`, kind: 'outcomeMissing', days: i }));
       await act(async () => {
         root.render(wrap(
-          <AttentionClusterBoard falsified={[]} stalled={[]} loop={items} loopTotalCount={51} measurePlanMissingGoalCount={0} />,
+          <AttentionClusterBoard falsified={[]} stalled={[]} loop={items} loopTotalCount={51} measurePlanMissingGoalCount={0} unmeasurableGoalCount={0} />,
         ));
       });
       // "전체보기" 문구(clusterViewAll)를 쓰면 안 됨 — "더보기"(clusterUnclosedShowMore)만.
@@ -154,12 +154,26 @@ describe('AttentionClusterBoard', () => {
     it('measurePlanMissingGoalCount는 N에 안 더해지고 보조 텍스트로만 노출된다', async () => {
       await act(async () => {
         root.render(wrap(
-          <AttentionClusterBoard falsified={[]} stalled={[]} loop={[loopItem({})]} loopTotalCount={1} measurePlanMissingGoalCount={40} />,
+          <AttentionClusterBoard falsified={[]} stalled={[]} loop={[loopItem({})]} loopTotalCount={1} measurePlanMissingGoalCount={40} unmeasurableGoalCount={0} />,
         ));
       });
       const countBadge = container.querySelector('.rounded-full.bg-card');
       expect(countBadge?.textContent).toBe('1'); // 40이 합산 안 됨
       expect(container.textContent).toContain('40');
+    });
+
+    // story #2843/#2844 — unmeasurableGoalCount도 measurePlanMissingGoalCount와 동형(N 비합산·보조텍스트).
+    it('unmeasurableGoalCount도 N에 안 더해지고 보조 텍스트로만 노출된다', async () => {
+      await act(async () => {
+        root.render(wrap(
+          <AttentionClusterBoard falsified={[]} stalled={[]} loop={[loopItem({})]} loopTotalCount={1} measurePlanMissingGoalCount={0} unmeasurableGoalCount={7} />,
+        ));
+      });
+      const countBadge = container.querySelector('.rounded-full.bg-card');
+      expect(countBadge?.textContent).toBe('1'); // 7이 합산 안 됨
+      expect(container.textContent).toContain(
+        koMessages.orgBriefing.clusterUnclosedUnmeasurableGoal.replace('{count}', '7'),
+      );
     });
 
     it('행 클릭 href가 outcome 판정 UI(/flow?goal=·/flow?hypothesis=)로 간다(유나 스티어③)', async () => {
@@ -171,7 +185,7 @@ describe('AttentionClusterBoard', () => {
       ];
       await act(async () => {
         root.render(wrap(
-          <AttentionClusterBoard falsified={[]} stalled={[]} loop={items} loopTotalCount={2} measurePlanMissingGoalCount={0} />,
+          <AttentionClusterBoard falsified={[]} stalled={[]} loop={items} loopTotalCount={2} measurePlanMissingGoalCount={0} unmeasurableGoalCount={0} />,
         ));
       });
       const hrefs = Array.from(container.querySelectorAll('a')).map((a) => a.getAttribute('href'));

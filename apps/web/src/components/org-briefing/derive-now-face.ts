@@ -105,6 +105,9 @@ export interface RawMyActions {
   loopOverdueGoalCount: number;
   loopOutcomeMissingGoalCount: number;
   measurePlanMissingGoalCount: number;
+  // story #2843/#2844 — 명시 "측정 불가" 선언 goal 수(N 비포함·집계만, measure_plan_missing과
+  // 동형 성격 — §4 위조 채널 감시용). 카드 하단 보조 텍스트 전용.
+  unmeasurableGoalCount: number;
 }
 
 /** 실 payload → 검증된 raw 항목. 핵심 식별자 없는 항목은 링크를 지어낼 수 없어 생략(no-fiction). */
@@ -166,6 +169,7 @@ export function parseMyActions(json: unknown): RawMyActions {
     loopOverdueGoalCount: (attentionObj && num(attentionObj['loop_overdue_goal_count'])) ?? 0,
     loopOutcomeMissingGoalCount: (attentionObj && num(attentionObj['loop_outcome_missing_goal_count'])) ?? 0,
     measurePlanMissingGoalCount: (attentionObj && num(attentionObj['measure_plan_missing_goal_count'])) ?? 0,
+    unmeasurableGoalCount: (attentionObj && num(attentionObj['unmeasurable_goal_count'])) ?? 0,
   };
 }
 

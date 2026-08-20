@@ -38,7 +38,7 @@ afterEach(async () => {
 
 async function mount(onTransitioned: (s: string) => void) {
   await act(async () => {
-    root.render(wrap(<EpicStatusTransition epicId="epic-1" status="active" onTransitioned={onTransitioned} />));
+    root.render(wrap(<EpicStatusTransition epicId="epic-1" status="active" goalTitle="테스트 목표" onTransitioned={onTransitioned} />));
   });
 }
 
@@ -46,14 +46,27 @@ async function mount(onTransitioned: (s: string) => void) {
 // "완료" 항목을 클릭해 실제 POST /api/goals/:id/transition 왕복 경로(transition() 핸들러)를 태운다.
 // story #2017: LABEL_KEY의 statusDone이 ko.json에서 raw 'Done'으로 렌더되던 버그를 고쳐 이제
 // "완료"로 렌더 — 이 헬퍼도 그 정정에 맞춰 갱신(구 영문 텍스트는 더 이상 존재하지 않음).
+//
+// story #2844 — "완료" 클릭은 이제 즉시 POST하지 않고 GoalOutcomeDialog를 먼저 연다. 이 파일의
+// 테스트들은 outcome 판정 자체가 아니라 에러/gate-pending 처리를 검증하는 것이라, 실 사용자가
+// 판정 없이 빨리 닫는 경로("판정 없이 닫기"→"그대로 닫기")로 다이얼로그를 통과시켜 기존 검증
+// 대상(transition() 핸들러의 에러/pending 분기)에 그대로 도달한다 — GoalOutcomeDialog 자체의
+// 3택 폼 검증은 goal-outcome-dialog.test.tsx가 전담(중복 0).
 async function clickTransitionToDone() {
   const trigger = [...document.body.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === '상태 변경')!;
   expect(trigger).not.toBeUndefined();
   await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
   const item = [...document.body.querySelectorAll('[role="menuitem"]')].find((el) => el.textContent?.includes('완료'))!;
   expect(item).not.toBeUndefined();
+  await act(async () => { item.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+  const skipLink = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === koMessages.goals.outcomeSkipLink)!;
+  expect(skipLink).not.toBeUndefined();
+  await act(async () => { skipLink.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+  const skipConfirm = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === koMessages.goals.outcomeSkipConfirm)!;
+  expect(skipConfirm).not.toBeUndefined();
   await act(async () => {
-    item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    skipConfirm.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
   });
 }
@@ -93,6 +106,59 @@ describe('EpicStatusTransition — 구조화 에러 표면화(story #2013 리뷰
     expect(container.textContent).toContain('INVALID_EPIC_TRANSITION');
     expect(container.textContent).toContain('이 상태로는 전이할 수 없습니다');
     expect(onTransitioned).not.toHaveBeenCalled();
+  });
+});
+
+describe('EpicStatusTransition — outcome 판정 다이얼로그 배선(story #2844)', () => {
+  it('"완료" 클릭은 즉시 POST하지 않고 다이얼로그부터 연다', async () => {
+    const fetchSpy = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: { status: 'done' } }) }));
+    vi.stubGlobal('fetch', fetchSpy);
+    const onTransitioned = vi.fn();
+    await mount(onTransitioned);
+
+    const trigger = [...document.body.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === '상태 변경')!;
+    await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const item = [...document.body.querySelectorAll('[role="menuitem"]')].find((el) => el.textContent?.includes('완료'))!;
+    await act(async () => { item.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(fetchSpy).not.toHaveBeenCalled(); // 다이얼로그 확인 전엔 아무 요청도 안 나감
+    expect(document.body.textContent).toContain(koMessages.goals.outcomeChoiceHit);
+  });
+
+  it('hit 판정 제출 시 POST body에 outcome_status·outcome_result가 실린다', async () => {
+    const fetchSpy = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: { status: 'done' } }) }));
+    vi.stubGlobal('fetch', fetchSpy);
+    const onTransitioned = vi.fn();
+    await mount(onTransitioned);
+
+    const trigger = [...document.body.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === '상태 변경')!;
+    await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const item = [...document.body.querySelectorAll('[role="menuitem"]')].find((el) => el.textContent?.includes('완료'))!;
+    await act(async () => { item.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const hitBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === koMessages.goals.outcomeChoiceHit)!;
+    await act(async () => { hitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    const actualInput = document.body.querySelector<HTMLInputElement>('#goal-outcome-actual')!;
+    setter.call(actualInput, '99');
+    actualInput.dispatchEvent(new Event('input', { bubbles: true }));
+    const reasonInput = document.body.querySelector<HTMLInputElement>('#goal-outcome-reason')!;
+    setter.call(reasonInput, '목표 초과');
+    reasonInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    const submitBtn = [...document.body.querySelectorAll('button[type="submit"]')][0] as HTMLButtonElement;
+    await act(async () => {
+      submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [, init] = fetchSpy.mock.calls[0] as unknown as [string, { body: string }];
+    expect(JSON.parse(init.body)).toEqual({
+      status: 'done', outcome_status: 'hit', outcome_result: { actual: 99, reason: '목표 초과' },
+    });
+    expect(onTransitioned).toHaveBeenCalledWith('done');
   });
 });
 

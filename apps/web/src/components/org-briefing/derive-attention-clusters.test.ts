@@ -125,11 +125,12 @@ describe('deriveAttentionClusters', () => {
       const items = Array.from({ length: 20 }, (_, i) => attentionItem({ type: 'loop_outcome_missing_goal', goal_id: `g${i}`, done_days: i }));
       const clusters = deriveAttentionClusters(items, t, {
         loopOverdueHypothesisCount: 6, loopOverdueGoalCount: 2, loopOutcomeMissingGoalCount: 51,
-        measurePlanMissingGoalCount: 40,
+        measurePlanMissingGoalCount: 40, unmeasurableGoalCount: 7,
       });
       expect(clusters.loop).toHaveLength(20); // items[]는 cap된 그대로
       expect(clusters.loopTotalCount).toBe(6 + 2 + 51); // count 필드 합 — items.length(20)와 다름
       expect(clusters.measurePlanMissingGoalCount).toBe(40);
+      expect(clusters.unmeasurableGoalCount).toBe(7);
     });
 
     it('loopCounts 미제공 시(구 호출부) loopTotalCount는 items.length로 폴백한다(회귀 0)', () => {
@@ -138,6 +139,7 @@ describe('deriveAttentionClusters', () => {
       ], t);
       expect(clusters.loopTotalCount).toBe(1);
       expect(clusters.measurePlanMissingGoalCount).toBe(0);
+      expect(clusters.unmeasurableGoalCount).toBe(0);
     });
   });
 });
