@@ -20,6 +20,12 @@ def _generate_key() -> tuple[str, str, str]:
     return plaintext, prefix, key_hash
 
 
+# story #2838 — "인자를 안 줌"(레거시 내부 호출부·기존 90일 기본 동작 무회귀)과 "명시적으로
+# None(무만료)을 줌"(#2838이 고치는 발급 UI/rotate 승계 경로)을 구분하는 sentinel. 그냥
+# `expires_at=None` 기본값이면 이 둘이 도로 뭉개진다 — 그게 이 스토리가 고치는 병 그 자체.
+_UNSET = object()
+
+
 class ApiKeyRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -42,10 +48,13 @@ class ApiKeyRepository:
         self,
         team_member_id: uuid.UUID,
         scope: list[str] | None = None,
-        expires_at: datetime | None = None,
+        expires_at: datetime | None | object = _UNSET,
     ) -> tuple[ApiKey, str]:
         plaintext, prefix, key_hash = _generate_key()
-        if expires_at is None:
+        # story #2838 — 인자를 아예 안 준(_UNSET) 내부 호출부만 옛 90일 기본값을 받는다(무회귀).
+        # 명시적으로 None을 준 호출부(발급 UI 경유·rotate 승계)는 그 None을 그대로 "무만료"로
+        # 존중한다 — 여기서 90일로 되돌리면 #2838이 고치려는 병이 이 한 자리에서 재발한다.
+        if expires_at is _UNSET:
             expires_at = datetime.now(timezone.utc) + timedelta(days=90)
         key = ApiKey(
             team_member_id=team_member_id,
@@ -96,6 +105,10 @@ class ApiKeyRepository:
         new_key, plaintext = await self.create(
             team_member_id=old.team_member_id,
             scope=scope if scope is not None else old.scope,
-            expires_at=None,
+            # story #2838 AC② — 원 키의 만료 정책 그대로 승계(무만료→무만료·만료 키→같은 만료
+            # 시각). 회전이 수명을 침묵으로 늘리거나 줄이지 않는다(#2838이 고치는 병의 재발
+            # 지점이었다 — 이전엔 항상 expires_at=None을 여기서 create()에 넘겨 90일이 매
+            # rotate마다 재각인됐다). 연장이 필요하면 그건 명시 파라미터의 몫으로 남긴다.
+            expires_at=old.expires_at,
         )
         return new_key, plaintext
