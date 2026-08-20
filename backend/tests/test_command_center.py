@@ -97,7 +97,7 @@ def _ma_seq(
     my_tasks=(), approval_group_counts=(), blocker_weight_counts=(), falsified=(),
     overdue_hyps=(), overdue_goals=(), done_no_outcome_goals=(), measure_plan_missing_goal_count=0,
     loop_overdue_hypothesis_count=None, loop_overdue_goal_count=None, loop_outcome_missing_goal_count=None,
-    unmeasurable_goal_count=0, project_slugs=(),
+    unmeasurable_goal_count=0, project_slugs=(), auth_failures=(),
 ):
     seq = [_r_all(approvals)]
     if approvals:
@@ -109,6 +109,8 @@ def _ma_seq(
         seq.append(_r_all(blocker_weight_counts))
     seq.append(_r_all(waiting))
     seq.append(_r_scalars(stuck))
+    # story #2836 — 에이전트 401 연속 windowed-COUNT(agent_stuck 바로 뒤·stalled 前).
+    seq.append(_r_all(auth_failures))
     seq.append(_r_all(stalled))
     seq.append(_r_all(unanswered))
     seq.append(_r_all(falsified))  # story #2539
@@ -361,6 +363,24 @@ async def test_my_actions_loop_closure_items_and_measure_plan_missing_count():
     assert body["attention"]["loop_overdue_hypothesis_count"] == 1
     assert body["attention"]["loop_overdue_goal_count"] == 1
     assert body["attention"]["unmeasurable_goal_count"] == 7
+
+
+@pytest.mark.anyio
+async def test_my_actions_agent_auth_failure_item_shape():
+    """story #2836 — 임계 도달한 에이전트 401 연속이 attention.items[]에 실린다. reason은
+    서버가 아는 사실(④)만 — raw key 값은 이 응답 어디에도 없다(⑤, key_prefix조차 이 엔드포인트
+    응답엔 안 실림 — command_center.py는 member_id/reason/count/시각만 노출)."""
+    member_id = uuid.uuid4()
+    resp, session, resolver = await _get(
+        "/api/v2/command-center/my-actions",
+        execute_seq=_ma_seq(auth_failures=[(member_id, "revoked", 5, _OLD, _DT)]))
+    assert resp.status_code == 200
+    items = _data(resp)["attention"]["items"]
+    af = next(i for i in items if i["type"] == "agent_auth_failure")
+    assert af["member_id"] == str(member_id)
+    assert af["reason"] == "revoked"
+    assert af["failure_count"] == 5
+    assert af["severity"] == "danger" and af["auto_detected"] is True
 
 
 @pytest.mark.anyio
