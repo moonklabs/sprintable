@@ -526,6 +526,9 @@ async def get_goal_reference_candidates(
 
 class GoalTransitionRequest(BaseModel):
     status: str
+    # story #2843 — active→done 전이의 outcome 판정 계약(선택 — 미제공은 unmeasured 자동 마킹).
+    outcome_status: str | None = None
+    outcome_result: dict | None = None
 
 
 @router.post("/{id}/transition", response_model=GoalResponse)
@@ -552,7 +555,10 @@ async def transition_goal_endpoint(
         _old_status = (await session.execute(
             select(Goal.status).where(Goal.id == id, Goal.org_id == org_id)
         )).scalar_one_or_none()
-        goal = await transition_goal(session, org_id, caller, id, body.status)
+        goal = await transition_goal(
+            session, org_id, caller, id, body.status,
+            outcome_status=body.outcome_status, outcome_result=body.outcome_result,
+        )
         await session.commit()
         await emit_goal_status_changed(session, org_id, goal, _old_status, actor_id=caller.id)
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
@@ -563,6 +569,9 @@ async def transition_goal_endpoint(
         _codes = {
             "EPIC_NOT_FOUND": 404, "HUMAN_CONFIRM_REQUIRED": 403,
             "INVALID_STATUS": 422, "INVALID_EPIC_TRANSITION": 422,
+            # story #2843
+            "INVALID_OUTCOME_STATUS": 422, "OUTCOME_RESULT_REQUIRED": 422,
+            "OUTCOME_REASON_REQUIRED": 422,
         }
         raise HTTPException(
             status_code=_codes.get(e.code, 400), detail={"code": e.code, "message": e.message}

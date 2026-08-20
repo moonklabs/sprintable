@@ -97,6 +97,7 @@ def _ma_seq(
     my_tasks=(), approval_group_counts=(), blocker_weight_counts=(), falsified=(),
     overdue_hyps=(), overdue_goals=(), done_no_outcome_goals=(), measure_plan_missing_goal_count=0,
     loop_overdue_hypothesis_count=None, loop_overdue_goal_count=None, loop_outcome_missing_goal_count=None,
+    unmeasurable_goal_count=0,
 ):
     seq = [_r_all(approvals)]
     if approvals:
@@ -126,6 +127,8 @@ def _ma_seq(
     seq.append(_r_scalar(
         loop_outcome_missing_goal_count if loop_outcome_missing_goal_count is not None else len(done_no_outcome_goals)
     ))
+    # story #2843(PO AC②) — unmeasurable_goal_count 스칼라 신설(#3262 CI 판독·Pedro 처방).
+    seq.append(_r_scalar(unmeasurable_goal_count))
     return seq
 
 
@@ -316,6 +319,8 @@ async def test_my_actions_loop_closure_items_and_measure_plan_missing_count():
             # PO 리뷰 보완①(#3253) — items[]는 top-20 cap(위 각 1건뿐)인데 total count는
             # 참값(51)이어야 한다는 게 이 보완의 핵심 — 일부러 items 길이와 다르게 준다.
             loop_outcome_missing_goal_count=51,
+            # story #2843(PO AC②) — unmeasurable(명시 선언)은 N에서 제외·별도 스칼라만.
+            unmeasurable_goal_count=7,
         ))
     assert resp.status_code == 200
     body = _data(resp)
@@ -332,6 +337,7 @@ async def test_my_actions_loop_closure_items_and_measure_plan_missing_count():
     assert body["attention"]["loop_outcome_missing_goal_count"] == 51
     assert body["attention"]["loop_overdue_hypothesis_count"] == 1
     assert body["attention"]["loop_overdue_goal_count"] == 1
+    assert body["attention"]["unmeasurable_goal_count"] == 7
 
 
 @pytest.mark.anyio

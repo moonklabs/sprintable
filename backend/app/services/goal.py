@@ -18,9 +18,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.pm import Goal
 from app.schemas.goal import GOAL_STATUSES, is_valid_goal_transition
 from app.services.member_resolver import ResolvedMember
+from app.services.outcome_evidence import has_valid_outcome_evidence, has_valid_unmeasurable_reason
 
 # overlay-gated 전이(나머지는 native 직행). matrix valid_transitions 와 일치.
 _OVERLAY_TRANSITIONS = frozenset({("draft", "active"), ("active", "done")})
+
+# story #2843(PO AC 확定 2026-08-20, doc loop-closure-first-class-signal-design §2 P1) — goal
+# outcome 판정 어휘는 **기존 자동채점(cron·outcome_scorer.py) 어휘 그대로**(hit/miss) — hypothesis의
+# verified/falsified를 goal에 수입하면 같은 `outcome_status` 컬럼에 두 방언이 공존해 모든 소비처가
+# 영원히 둘 다 알아야 한다(기각된 안). FE 라벨만 "맞았다/틀렸다"로 다르게 보여준다.
+_MANUAL_OUTCOME_STATUSES = frozenset({"hit", "miss", "unmeasurable"})
+# 이미 판정된 goal(hit/miss)은 done 재전이 시 판정 재요구 안 함(旣판정 — collision 규칙②).
+_ALREADY_JUDGED = frozenset({"hit", "miss"})
 
 
 class GoalTransitionError(Exception):
@@ -39,10 +48,18 @@ async def transition_goal(
     goal_id: uuid.UUID,
     to_status: str,
     via_gate: bool = False,
+    outcome_status: str | None = None,
+    outcome_result: dict | None = None,
 ) -> Goal:
     """goal status 전이. draft→active·active→done 는 line overlay-gated(enforcing→gate·default-off→
     inline). draft→active 는 human-only(activation=human decision). via_gate=True 면 overlay 재진입 없이
-    native 직행(caller=gate approver)."""
+    native 직행(caller=gate approver).
+
+    story #2843 — active→done 전이가 outcome 판정을 계약으로 받는다(`outcome_status`∈
+    {hit,miss,unmeasurable}+`outcome_result`). **미제공이 전이를 막지 않는다** — outcome_status=
+    unmeasured 자동 마킹으로 성립(AC1·AC5, 하드 거부는 이 스토리 스코프 밖). 旣 hit/miss(collision
+    규칙②)면 판정 요구 자체를 건너뛴다. 전달된 값은 hit/miss=실측 근거(actual+reason)·
+    unmeasurable=사유만 서버가 강제(§4 반증 — `outcome_evidence.py` hypothesis #2038과 공유)."""
     goal = (await session.execute(
         select(Goal).where(Goal.id == goal_id, Goal.org_id == org_id)
     )).scalar_one_or_none()
@@ -78,6 +95,40 @@ async def transition_goal(
     # activation(draft→active)은 휴먼만(PO/owner decision). active→done 은 inline 시 caller 권한(라우터 보강).
     if to_status == "active" and caller.type != "human":
         raise GoalTransitionError("HUMAN_CONFIRM_REQUIRED", "active(activation) 전이는 휴먼만 가능합니다.")
+
+    # story #2843 — done 전이의 outcome 판정. 旣판정(hit/miss)이면 재요구 없이 통과(collision②).
+    if to_status == "done" and goal.outcome_status not in _ALREADY_JUDGED:
+        if outcome_status is not None:
+            if outcome_status not in _MANUAL_OUTCOME_STATUSES:
+                raise GoalTransitionError(
+                    "INVALID_OUTCOME_STATUS",
+                    f"알 수 없는 outcome_status: {outcome_status} (허용: hit/miss/unmeasurable)",
+                )
+            if outcome_status in ("hit", "miss") and not has_valid_outcome_evidence(outcome_result):
+                raise GoalTransitionError(
+                    "OUTCOME_RESULT_REQUIRED",
+                    "hit/miss 판정에는 실제 수치(outcome_result.actual)와 한 줄 근거"
+                    "(outcome_result.reason)가 모두 필요합니다.",
+                )
+            if outcome_status == "unmeasurable" and not has_valid_unmeasurable_reason(outcome_result):
+                raise GoalTransitionError(
+                    "OUTCOME_REASON_REQUIRED",
+                    "unmeasurable 선언에는 사유(outcome_result.reason)가 필요합니다.",
+                )
+            # story #2036과 동형(closed_by 서버 주입 — 클라 자칭 위장 차단) + collision①(cron
+            # scorer skip 가드)이 읽는 source=manual 마커.
+            goal.outcome_status = outcome_status
+            goal.outcome_result = {
+                **(outcome_result or {}),
+                "source": "manual",
+                "closed_by": caller.type,
+                "closed_by_member_id": str(caller.id),
+            }
+        else:
+            # 조용한 n_a 소멸이 목표 — 판정 미제공은 전이를 막지 않고 unmeasured로 명시 마킹
+            # (n_a=아직 손 안 댐 vs unmeasured=닫혔는데 미판정, «닫히지 않은 루프» 카운터 축에서
+            # 구분 — command_center.py/loop_measure_due.py 3곳 정합 필요).
+            goal.outcome_status = "unmeasured"
 
     goal.status = to_status
     await session.flush()

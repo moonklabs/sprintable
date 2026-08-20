@@ -490,13 +490,17 @@ async def my_actions(
             "owner_member_id": str(assignee_id) if assignee_id else None,
             "overdue_days": (now - measure_after).days if measure_after else None,
         })
+    # story #2843 — outcome_status "n_a"(아직 손 안 댐)뿐 아니라 "unmeasured"(닫혔는데
+    # 판정 미제공·done 전이 시 자동 마킹)도 «닫히지 않은 루프» 축이다. n_a와 unmeasured는
+    # 서로 다른 사실(조용한 방치 vs 명시적 스킵)이지만 둘 다 이 카운터엔 잔류(AC②) — n_a/
+    # unmeasured 자체의 구분은 GoalResponse.outcome_status 값으로 API에 이미 노출된다.
     done_no_outcome_goals = (
         await session.execute(
             select(Goal.id, Goal.title, Goal.updated_at, Goal.assignee_id)
             .where(
                 Goal.org_id == org_id,
                 Goal.status == "done",
-                Goal.outcome_status == "n_a",
+                Goal.outcome_status.in_(("n_a", "unmeasured")),
             )
             .order_by(Goal.updated_at.asc())
             .limit(20)
@@ -548,7 +552,19 @@ async def my_actions(
             select(func.count()).select_from(Goal).where(
                 Goal.org_id == org_id,
                 Goal.status == "done",
-                Goal.outcome_status == "n_a",
+                Goal.outcome_status.in_(("n_a", "unmeasured")),
+            )
+        )
+    ).scalar_one()
+    # story #2843(PO AC②) — unmeasurable(명시 «측정 불가» 선언)은 루프 N에서 **제외**하되
+    # (조용한 방치가 아니라 사유 있는 명시 선언이라 다른 성격 — §4 위조 채널 감시용 별도 노출.
+    # 전부 이쪽으로 도망치면 여기 숫자가 뛴다 — 관측 축.
+    unmeasurable_goal_count = (
+        await session.execute(
+            select(func.count()).select_from(Goal).where(
+                Goal.org_id == org_id,
+                Goal.status == "done",
+                Goal.outcome_status == "unmeasurable",
             )
         )
     ).scalar_one()
@@ -570,6 +586,10 @@ async def my_actions(
             "loop_overdue_hypothesis_count": loop_overdue_hypothesis_count,
             "loop_overdue_goal_count": loop_overdue_goal_count,
             "loop_outcome_missing_goal_count": loop_outcome_missing_goal_count,
+            # story #2843(PO AC②) — measure_plan_missing_goal_count와 같은 성격(N 비포함·집계만).
+            # unmeasurable은 명시 선언이라 루프 N에선 빠지지만, 위조 채널(전부 여기로 도망)
+            # 감시용으로 별도 노출.
+            "unmeasurable_goal_count": unmeasurable_goal_count,
         },
         "is_clear": len(queue) == 0 and len(attention_items) == 0,
     })

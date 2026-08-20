@@ -521,6 +521,12 @@ async def score_ga4_outcomes(
             )
         )
         for epic in epic_result.scalars().all():
+            # story #2843(PO collision 규칙①) — 사람이 done 전이로 먼저 수동 판정(hit/miss/
+            # unmeasurable)했으면 cron이 덮지 않는다. WHERE의 outcome_status=="pending"이 이미
+            # 대부분 걸러내지만(수동 판정은 status를 pending 밖으로 옮긴다), source=manual
+            # 마커로 명시 스킵을 한 겹 더 둔다(방어심층 — 동시성 경합 등 엣지 대비).
+            if isinstance(epic.outcome_result, dict) and epic.outcome_result.get("source") == "manual":
+                continue
             md = epic.metric_definition
             if not md:
                 continue

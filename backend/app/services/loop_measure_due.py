@@ -123,12 +123,14 @@ async def detect_unclosed_loops(session: AsyncSession) -> dict[str, Any]:
             logger.warning("loop.measure_due 발행 실패 goal=%s: %s", goal.id, exc, exc_info=True)
             failed.append({"type": "goal", "id": str(goal.id), "error": str(exc)})
 
-    # ② outcome 판정 없이 done된 goal
+    # ② outcome 판정 없이 done된 goal — story #2843: "n_a"(손 안 댐) + "unmeasured"(done 전이 시
+    # 판정 미제공 자동 마킹) 둘 다 대상. command_center.py의 동형 카운터와 정합(unmeasurable은
+    # 명시 선언이라 제외 — AC②).
     done_no_outcome_rows = (
         await session.execute(
             select(Goal).where(
                 Goal.status == "done",
-                Goal.outcome_status == "n_a",
+                Goal.outcome_status.in_(("n_a", "unmeasured")),
                 Goal.loop_measure_due_notified_at.is_(None),
             )
         )
