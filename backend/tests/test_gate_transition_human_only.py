@@ -53,7 +53,7 @@ async def _call(status: str, member_type: str):
     # 이 테스트에서 실행 안 됨 — BackgroundTasks().add_task 는 큐잉만). gate_type을 "merge"가 아닌
     # 값으로 둬 anchor 기록 분기(resolve_pr_link 추가 조회)를 건너뛴다 — 이 파일의 관심사(human-vs-
     # agent authz)와 무관.
-    transition = AsyncMock(return_value=SimpleNamespace(id=uuid.uuid4(), gate_type="merge_approval"))
+    transition = AsyncMock(return_value=SimpleNamespace(id=uuid.uuid4(), gate_type="merge_approval", neutral_facts=None))
     with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=_resolved(member_type))), \
          patch.object(gates_mod, "transition_gate", transition), \
          patch.object(gates_mod, "_non_doc_gate_approvable", AsyncMock(return_value=True)), \

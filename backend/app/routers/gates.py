@@ -1083,7 +1083,18 @@ async def transition_gate_endpoint(
         # story #2813 — 사람 승인/반려를 GitHub check-run(success/failure)으로 반영. commit 後
         # 배경 태스크(fail-closed: 실패해도 이미 commit된 gate 상태엔 영향 없음, GitHub 쪽만 stale).
         # merge 게이트 아니면 publish_gate_check 내부에서 조용히 no-op.
-        background_tasks.add_task(publish_gate_check, org_id, gate.id)
+        # story #2835(PO AC 확定 2026-08-20) — #3258은 웹훅 수명주기 경로(인자 보유)만 고쳤고, 이
+        # 승인-전이 경로는 인자 없이 호출해 여전히 link row에 의존했다 — row-less 자동 생성 gate
+        # (2826 주처방의 기본 케이스, SID 해소는 link row를 안 만든다)는 승인해도 success 발행이
+        # 죽었다(실사고: gate dbefee69/story #2834/PR#3259). `gate.neutral_facts`가 이미 SSOT로
+        # repo+pr_number를 갖고 있음을 실측(evaluate_merge_gate가 gate 생성/재평가마다 채움,
+        # merge_verdict_gate.py facts dict) — 새 컬럼/installation 도출 불요, 있으면 그대로 전달.
+        # 없으면(legacy gate 등) publish_gate_check의 기존 link-row 폴백이 그대로 받는다.
+        _nf = gate.neutral_facts or {}
+        background_tasks.add_task(
+            publish_gate_check, org_id, gate.id,
+            repo_full_name=_nf.get("repo"), pr_number=_nf.get("pr_number"),
+        )
         return GateResponse.model_validate(gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
