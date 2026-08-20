@@ -8,7 +8,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { AttentionClusterBoard } from './attention-cluster-board';
-import type { FalsifiedClusterItem, StalledClusterItem, LoopClusterItem } from './derive-attention-clusters';
+import type { AuthFailureClusterItem, FalsifiedClusterItem, StalledClusterItem, LoopClusterItem } from './derive-attention-clusters';
 
 // story #2830 — falsified/stalled 기존 테스트는 loop 신호와 무관하니 빈 값으로 고정(회귀 0).
 const NO_LOOP = { loop: [] as LoopClusterItem[], loopTotalCount: 0, measurePlanMissingGoalCount: 0, unmeasurableGoalCount: 0 };
@@ -208,6 +208,58 @@ describe('AttentionClusterBoard', () => {
       });
       expect(container.textContent).toContain('other-proj');
       expect(container.textContent?.match(/other-proj/g)).toHaveLength(1);
+    });
+  });
+
+  // story #2852(2836 FE 조각, BE PR#3266) — 에이전트 인증 실패 클러스터.
+  describe('agent auth failure cluster (story #2852)', () => {
+    function authFailureItem(overrides: Partial<AuthFailureClusterItem>): AuthFailureClusterItem {
+      return { id: 'a1', memberId: 'm1', reason: 'expired', failureCount: 6, firstFailedAt: null, lastFailedAt: null, ...overrides };
+    }
+
+    it('N=0이면 카드 자체를 안 그린다(AC4)', async () => {
+      await act(async () => {
+        root.render(wrap(<AttentionClusterBoard falsified={[]} stalled={[]} {...NO_LOOP} authFailure={[]} />));
+      });
+      expect(container.textContent).not.toContain(koMessages.orgBriefing.clusterAuthFailureTitle);
+    });
+
+    // AC1 — BE severity:"danger"를 시각으로 직결하지 않고 warning 톤을 쓴다(destructive 금지).
+    it('destructive(빨강)를 쓰지 않고 warning 계열을 쓴다(AC1)', async () => {
+      await act(async () => {
+        root.render(wrap(
+          <AttentionClusterBoard falsified={[]} stalled={[]} {...NO_LOOP} authFailure={[authFailureItem({})]} />,
+        ));
+      });
+      expect(container.innerHTML).not.toMatch(/bg-destructive/);
+      expect(container.querySelector('.bg-warning-tint')).toBeTruthy();
+    });
+
+    // AC3 — reason enum을 raw로 노출하지 않고 유저 어휘로 매핑 + 진단(최근 5분 N회) + 재발급 링크.
+    it('reason이 raw enum 아니라 유저 어휘로 매핑되고 진단·재발급 링크가 함께 뜬다(AC3)', async () => {
+      const memberNames = { m1: '디디 은두카쿠' };
+      await act(async () => {
+        root.render(wrap(
+          <AttentionClusterBoard falsified={[]} stalled={[]} {...NO_LOOP} authFailure={[authFailureItem({ reason: 'revoked', failureCount: 9 })]} memberNames={memberNames} />,
+        ));
+      });
+      expect(container.textContent).not.toContain('revoked'); // raw enum 유출 금지
+      expect(container.textContent).toContain(koMessages.orgBriefing.clusterAuthFailureReasonRevoked);
+      expect(container.textContent).toContain('디디 은두카쿠');
+      expect(container.textContent).toContain('9');
+      const link = Array.from(container.querySelectorAll('a')).find((a) => a.getAttribute('href') === '/organization/workforce/m1');
+      expect(link).toBeTruthy();
+    });
+
+    it('memberNames에 이름이 없으면(또는 memberId가 null) 이름 폴백 문구를 쓴다(no-fiction)', async () => {
+      await act(async () => {
+        root.render(wrap(
+          <AttentionClusterBoard falsified={[]} stalled={[]} {...NO_LOOP} authFailure={[authFailureItem({ memberId: null, reason: 'invalid' })]} />,
+        ));
+      });
+      expect(container.textContent).toContain(koMessages.orgBriefing.clusterAuthFailureUnknownAgent);
+      // memberId가 없으면 재발급 링크 자체를 안 만든다(어디로 갈지 지어낼 수 없음).
+      expect(container.querySelectorAll('a')).toHaveLength(0);
     });
   });
 });

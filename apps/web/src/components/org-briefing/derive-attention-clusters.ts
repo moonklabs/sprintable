@@ -42,6 +42,21 @@ export interface LoopClusterItem {
   crossProjectLabel: string | null;
 }
 
+// story #2852(2836 FE 조각, BE PR#3266) — 에이전트 인증 실패(agent_auth_failure) 관측 신호.
+// BE가 이미 (member_id, reason) windowed COUNT로 그룹핑해 낸다 — 원시 항목 1건 = 클러스터
+// 행 1건(추가 dedup 불요). member 이름은 여기서 안 붙인다(순수 함수 유지) — 렌더 시
+// memberNames 맵으로 붙인다(workforce-face.tsx parseTeamMembers와 동형 관례).
+export type AuthFailureReason = 'expired' | 'revoked' | 'invalid';
+
+export interface AuthFailureClusterItem {
+  id: string;
+  memberId: string | null;
+  reason: AuthFailureReason;
+  failureCount: number;
+  firstFailedAt: string | null;
+  lastFailedAt: string | null;
+}
+
 // story #2842(0b17472c 그라운딩) — 뷰어 컨텍스트. 미제공(구 호출부·테스트)이면 href는 기존
 // bare path로 폴백하고 crossProjectLabel은 항상 null(회귀 0).
 export interface ViewerContext {
@@ -72,6 +87,8 @@ export interface AttentionClusters {
   // story #2843/#2844 — 명시 "측정 불가" 선언 goal 수. N 비포함·집계만(동형 성격), 카드 하단
   // 보조 텍스트 전용.
   unmeasurableGoalCount: number;
+  // story #2852 — 에이전트 인증 실패 그룹(member_id, reason)별 1건.
+  authFailure: AuthFailureClusterItem[];
 }
 
 export interface LoopCounts {
@@ -110,6 +127,7 @@ export function deriveAttentionClusters(
   const falsified: { item: FalsifiedClusterItem; days: number | null }[] = [];
   const stalled: StalledClusterItem[] = [];
   const loop: { item: LoopClusterItem; days: number | null }[] = [];
+  const authFailure: { item: AuthFailureClusterItem; lastFailedAt: string | null }[] = [];
 
   attention.forEach((a, idx) => {
     if (a.type === 'loop_overdue_hypothesis') {
@@ -183,6 +201,18 @@ export function deriveAttentionClusters(
         href: projectHref(viewer, a.project_slug, a.story_id ? `/board?story=${a.story_id}` : '/board'),
         crossProjectLabel: crossProjectLabel(viewer, a.project_id, a.project_slug),
       });
+    } else if (a.type === 'agent_auth_failure' && a.reason) {
+      authFailure.push({
+        item: {
+          id: `${a.member_id ?? 'unknown'}-${a.reason}-${idx}`,
+          memberId: a.member_id,
+          reason: a.reason,
+          failureCount: a.failure_count ?? 0,
+          firstFailedAt: a.first_failed_at,
+          lastFailedAt: a.last_failed_at,
+        },
+        lastFailedAt: a.last_failed_at,
+      });
     }
   });
 
@@ -192,11 +222,14 @@ export function deriveAttentionClusters(
   stalled.sort((x, y) => (y.days ?? -Infinity) - (x.days ?? -Infinity));
   // 루프도 정체와 동형(오래 묵을수록 위) — 도과/done 경과 둘 다 "오래 방치될수록 먼저".
   loop.sort((x, y) => (y.days ?? -Infinity) - (x.days ?? -Infinity));
+  // 최근 실패부터(lastFailedAt 내림차순) — 가장 급한(지금도 진행 중일 가능성 높은) 것 먼저.
+  authFailure.sort((x, y) => (y.lastFailedAt ?? '').localeCompare(x.lastFailedAt ?? ''));
 
   return {
     falsified: falsified.map((f) => f.item),
     stalled,
     loop: loop.map((l) => l.item),
+    authFailure: authFailure.map((a) => a.item),
     // BE count 필드 3종의 합(§3 갱신, doc a8e73bdb) — items[] top-20 cap과 무관한 참값.
     // loopCounts 미제공(구 호출부·테스트) 시 loop.length로 폴백(회귀 0).
     loopTotalCount: loopCounts

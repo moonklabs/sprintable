@@ -3,10 +3,10 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { RefreshCw, PauseCircle, AlertTriangle, FolderOpen } from 'lucide-react';
+import { RefreshCw, PauseCircle, AlertTriangle, FolderOpen, KeyRound } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import type { FalsifiedClusterItem, StalledClusterItem, LoopClusterItem } from './derive-attention-clusters';
+import type { AuthFailureClusterItem, AuthFailureReason, FalsifiedClusterItem, StalledClusterItem, LoopClusterItem } from './derive-attention-clusters';
 
 // story #2541(유나 v4 SSOT f01fa94a) — 상위 2~3건만 기본 노출하고 나머지는 "전체보기"로
 // 펼친다(카드 폭발 회피, hypothesis-earth-layer.tsx의 결론난 가설 <details> 관례와 같은 결).
@@ -152,6 +152,42 @@ function LoopRow({ item }: { item: LoopClusterItem }) {
   );
 }
 
+// story #2852(2836 FE 조각) AC3 — reason enum을 화면에 그대로 노출하지 않고 유저 어휘로
+// 매핑한다. invalid는 org-스코프 attention엔 실질적으로 안 뜨지만(org_id NULL이라 귀속
+// 불가) 방어적으로 매핑해 둔다.
+const AUTH_FAILURE_REASON_KEY: Record<AuthFailureReason, string> = {
+  expired: 'clusterAuthFailureReasonExpired',
+  revoked: 'clusterAuthFailureReasonRevoked',
+  invalid: 'clusterAuthFailureReasonInvalid',
+};
+
+// story #2852 AC1 — 인증 실패는 「복구 가능한 주의 요망 상태」(키 재발급으로 복구)이지
+// kill/종결 이벤트가 아니다. BE severity:"danger"를 시각으로 직결하지 않고 loop 클러스터와
+// 동형 warning 톤을 쓴다. AC3 — 「키 재발급」 행동 경로(에이전트 상세 페이지, AgentApiKeyManager
+// 위치)를 제공해 긴급성을 색이 아니라 행동 어포던스로 전한다.
+function AuthFailureRow({ item, memberNames }: { item: AuthFailureClusterItem; memberNames: Record<string, string> }) {
+  const t = useTranslations('orgBriefing');
+  const name = (item.memberId && memberNames[item.memberId]) || t('clusterAuthFailureUnknownAgent');
+  return (
+    <div className="flex items-center gap-2.5 border-t border-border px-4 py-2.5">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm text-foreground">{name}</p>
+        <p className="truncate text-[11px] text-foreground">
+          {t(AUTH_FAILURE_REASON_KEY[item.reason])} · {t('clusterAuthFailureDiagnostic', { n: item.failureCount })}
+        </p>
+      </div>
+      {item.memberId ? (
+        <Link
+          href={`/organization/workforce/${item.memberId}`}
+          className="shrink-0 rounded-md bg-warning-tint px-2.5 py-1 text-[11.5px] font-medium text-foreground transition-colors hover:brightness-95"
+        >
+          <span className="inline-flex items-center gap-1"><KeyRound className="size-3" aria-hidden />{t('clusterAuthFailureReissue')}</span>
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
 // story #2830(유나 스티어②) — items[]가 BE top-20 cap이라(doc a8e73bdb §3) "전체보기"가 실제
 // 전체를 못 담을 수 있다. no-silent-cap 원칙상 이 경우 일반 ViewAllToggle("전체보기")을 쓰지
 // 않고 정직한 문구로 잘림을 명시한다 — 거짓 "전체"를 암시하지 않는다.
@@ -227,6 +263,8 @@ export function AttentionClusterBoard({
   loopTotalCount,
   measurePlanMissingGoalCount,
   unmeasurableGoalCount,
+  authFailure = [],
+  memberNames = {},
 }: {
   falsified: FalsifiedClusterItem[];
   stalled: StalledClusterItem[];
@@ -234,26 +272,31 @@ export function AttentionClusterBoard({
   loopTotalCount: number;
   measurePlanMissingGoalCount: number;
   unmeasurableGoalCount: number;
+  authFailure?: AuthFailureClusterItem[];
+  memberNames?: Record<string, string>;
 }) {
   const t = useTranslations('orgBriefing');
   const [falsifiedExpanded, setFalsifiedExpanded] = useState(false);
   const [stalledExpanded, setStalledExpanded] = useState(false);
   const [loopExpanded, setLoopExpanded] = useState(false);
+  const [authFailureExpanded, setAuthFailureExpanded] = useState(false);
 
   const hasLoop = loopTotalCount > 0;
-  if (falsified.length === 0 && stalled.length === 0 && !hasLoop) return null;
+  const hasAuthFailure = authFailure.length > 0;
+  if (falsified.length === 0 && stalled.length === 0 && !hasLoop && !hasAuthFailure) return null;
 
   const shownFalsified = falsifiedExpanded ? falsified : falsified.slice(0, TOP_N);
   const shownStalled = stalledExpanded ? stalled : stalled.slice(0, TOP_N);
   const shownLoop = loopExpanded ? loop : loop.slice(0, TOP_N);
-  const visibleCount = [falsified.length > 0, stalled.length > 0, hasLoop].filter(Boolean).length;
+  const shownAuthFailure = authFailureExpanded ? authFailure : authFailure.slice(0, TOP_N);
+  const visibleCount = [falsified.length > 0, stalled.length > 0, hasLoop, hasAuthFailure].filter(Boolean).length;
 
   return (
     <div
       className={cn(
         'mb-4 grid grid-cols-1 gap-3',
         visibleCount === 2 && 'lg:grid-cols-2',
-        visibleCount === 3 && 'lg:grid-cols-2 xl:grid-cols-3',
+        visibleCount >= 3 && 'lg:grid-cols-2 xl:grid-cols-3',
       )}
     >
       {falsified.length > 0 ? (
@@ -306,6 +349,22 @@ export function AttentionClusterBoard({
           {loopExpanded ? <LoopCapNotice shown={loop.length} total={loopTotalCount} /> : null}
           <MeasurePlanMissingNote count={measurePlanMissingGoalCount} />
           <UnmeasurableGoalNote count={unmeasurableGoalCount} />
+        </ClusterShell>
+      ) : null}
+      {hasAuthFailure ? (
+        <ClusterShell
+          tone="warning"
+          icon={<KeyRound className="size-4" aria-hidden="true" />}
+          title={t('clusterAuthFailureTitle')}
+          subtitle={t('clusterAuthFailureSub')}
+          count={authFailure.length}
+        >
+          {shownAuthFailure.map((item) => <AuthFailureRow key={item.id} item={item} memberNames={memberNames} />)}
+          <ViewAllToggle
+            expanded={authFailureExpanded}
+            remaining={authFailure.length - TOP_N}
+            onToggle={() => setAuthFailureExpanded((v) => !v)}
+          />
         </ClusterShell>
       ) : null}
     </div>

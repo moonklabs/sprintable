@@ -444,6 +444,14 @@
     "clusterUnclosedCapNotice": "상위 {shown}건 표시 중 · 총 {total}건",
     "clusterUnclosedMeasurePlanMissing": "+{count}건은 측정 계획이 아직 없음",
     "clusterUnclosedUnmeasurableGoal": "{count}건은 측정 불가로 선언됨",
+    "clusterAuthFailureTitle": "에이전트 인증 실패",
+    "clusterAuthFailureSub": "API 키 문제로 요청이 반복 거부됨",
+    "clusterAuthFailureReasonExpired": "API 키 만료",
+    "clusterAuthFailureReasonRevoked": "API 키 무효화",
+    "clusterAuthFailureReasonInvalid": "API 키 인식 불가",
+    "clusterAuthFailureDiagnostic": "최근 5분 {n}회",
+    "clusterAuthFailureReissue": "키 재발급",
+    "clusterAuthFailureUnknownAgent": "알 수 없는 에이전트",
     "doneGenericContext": "근거를 확인하고 승인하세요",
     "loopTitle": "실험실",
     "loopSubject": "검증 중인 가설",
@@ -3273,7 +3281,11 @@
     "groupOffline": "오프라인",
     "working": "답 생성 중",
     "assignedStory": "\"{title}\" 담당",
-    "empty": "표시할 에이전트가 없습니다"
+    "empty": "표시할 에이전트가 없습니다",
+    "authFailureBadge": "인증 실패",
+    "authFailureTooltipExpired": "API 키 만료 · 최근 5분 {n}회",
+    "authFailureTooltipRevoked": "API 키 무효화 · 최근 5분 {n}회",
+    "authFailureTooltipInvalid": "API 키 인식 불가 · 최근 5분 {n}회"
   },
   "chats": {
     "unreadMarker": "여기부터 안읽음",

@@ -28,6 +28,11 @@ function attentionItem(overrides: Partial<RawAttentionItem>): RawAttentionItem {
     done_days: null,
     project_id: null,
     project_slug: null,
+    member_id: null,
+    reason: null,
+    failure_count: null,
+    first_failed_at: null,
+    last_failed_at: null,
     ...overrides,
   };
 }
@@ -186,6 +191,47 @@ describe('deriveAttentionClusters', () => {
       ], t, undefined, { orgSlug: 'moonklabs', activeProjectId: 'p-active' });
       expect(clusters.loop[0]!.href).toBe('/flow?view=flow&goal=g1');
       expect(clusters.loop[0]!.crossProjectLabel).toBeNull();
+    });
+  });
+
+  // story #2852(2836 FE 조각, BE PR#3266) — agent_auth_failure는 BE가 이미 (member_id, reason)
+  // 그룹핑해서 낸다 — 원시 항목 1건 = 클러스터 행 1건 그대로.
+  describe('agent_auth_failure(story #2852)', () => {
+    it('member_id/reason/failure_count/first·last_failed_at을 그대로 옮긴다', () => {
+      const clusters = deriveAttentionClusters([
+        attentionItem({
+          type: 'agent_auth_failure', member_id: 'm1', reason: 'expired', failure_count: 7,
+          first_failed_at: '2026-08-20T10:00:00Z', last_failed_at: '2026-08-20T10:04:00Z',
+        }),
+      ], t);
+      expect(clusters.authFailure).toHaveLength(1);
+      expect(clusters.authFailure[0]).toMatchObject({
+        memberId: 'm1', reason: 'expired', failureCount: 7,
+        firstFailedAt: '2026-08-20T10:00:00Z', lastFailedAt: '2026-08-20T10:04:00Z',
+      });
+    });
+
+    it('reason이 없으면(BE 계약 위반·no-fiction) 항목을 만들지 않는다', () => {
+      const clusters = deriveAttentionClusters([
+        attentionItem({ type: 'agent_auth_failure', member_id: 'm1', reason: null, failure_count: 3 }),
+      ], t);
+      expect(clusters.authFailure).toHaveLength(0);
+    });
+
+    it('member_id가 null이어도(귀속 불가) reason이 있으면 항목은 만든다 — 렌더에서 이름 폴백', () => {
+      const clusters = deriveAttentionClusters([
+        attentionItem({ type: 'agent_auth_failure', member_id: null, reason: 'invalid', failure_count: 5 }),
+      ], t);
+      expect(clusters.authFailure).toHaveLength(1);
+      expect(clusters.authFailure[0]!.memberId).toBeNull();
+    });
+
+    it('최근 실패순(last_failed_at 내림차순)으로 정렬된다', () => {
+      const clusters = deriveAttentionClusters([
+        attentionItem({ type: 'agent_auth_failure', member_id: 'old', reason: 'expired', failure_count: 5, last_failed_at: '2026-08-19T00:00:00Z' }),
+        attentionItem({ type: 'agent_auth_failure', member_id: 'recent', reason: 'revoked', failure_count: 5, last_failed_at: '2026-08-20T00:00:00Z' }),
+      ], t);
+      expect(clusters.authFailure.map((a) => a.memberId)).toEqual(['recent', 'old']);
     });
   });
 });

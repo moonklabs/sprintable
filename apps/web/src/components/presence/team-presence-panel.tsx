@@ -1,11 +1,12 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { Bot, X } from 'lucide-react';
+import { Bot, KeyRound, X } from 'lucide-react';
 import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from '@/components/chat/presence-dot';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { cn } from '@/lib/utils';
 import type { TeamPresenceItem } from './use-team-presence';
+import type { AgentAuthFailureInfo } from './use-agent-auth-failures';
 
 type GroupKey = 'working' | 'online' | 'offline';
 // story #2023(ⓑ): working=시스템 활동 신호(L5) — brand(인간 서명)가 아니라 info.
@@ -28,7 +29,31 @@ function groupItems(items: TeamPresenceItem[]): { key: GroupKey; items: TeamPres
   ] as { key: GroupKey; items: TeamPresenceItem[] }[]).filter((g) => g.items.length > 0);
 }
 
-function PresenceRow({ item }: { item: TeamPresenceItem }) {
+// story #2852(2836 FE 조각) AC1 — 인증 실패는 「복구 가능한 주의 요망 상태」(키 재발급으로
+// 복구)이지 kill/종결이 아니다. destructive(빨강) 금지 — warning-tint 뱃지+text-foreground
+// (story #2420 규칙, tint 배경 위 계열색 금지). AC3 — reason enum을 raw로 안 보이고 title
+// 툴팁에 유저 어휘로 매핑.
+const AUTH_FAILURE_TOOLTIP_KEY: Record<AgentAuthFailureInfo['reason'], string> = {
+  expired: 'authFailureTooltipExpired',
+  revoked: 'authFailureTooltipRevoked',
+  invalid: 'authFailureTooltipInvalid',
+};
+
+function AuthFailureBadge({ info }: { info: AgentAuthFailureInfo | undefined }) {
+  const t = useTranslations('presence');
+  if (!info) return null;
+  return (
+    <span
+      title={t(AUTH_FAILURE_TOOLTIP_KEY[info.reason], { n: info.failureCount })}
+      className="inline-flex shrink-0 items-center gap-1 rounded-md bg-warning-tint px-1.5 py-0.5 text-[10px] font-semibold text-foreground"
+    >
+      <KeyRound className="size-2.5 shrink-0" aria-hidden />
+      {t('authFailureBadge')}
+    </span>
+  );
+}
+
+function PresenceRow({ item, authFailure }: { item: TeamPresenceItem; authFailure?: AgentAuthFailureInfo }) {
   const t = useTranslations('presence');
   const offline = !item.working && (item.presence_status === 'offline' || !item.presence_status);
   const dotStatus: PresenceStatus = item.presence_status ?? 'offline';
@@ -51,9 +76,12 @@ function PresenceRow({ item }: { item: TeamPresenceItem }) {
       </div>
 
       <div className="min-w-0 flex-1">
-        <p className={cn('truncate text-sm font-medium', offline ? 'text-muted-foreground' : 'text-foreground')}>
-          {item.name}
-        </p>
+        <div className="flex items-center gap-1.5">
+          <p className={cn('min-w-0 truncate text-sm font-medium', offline ? 'text-muted-foreground' : 'text-foreground')}>
+            {item.name}
+          </p>
+          <AuthFailureBadge info={authFailure} />
+        </div>
         <div className="truncate text-xs text-muted-foreground">
           {item.working ? (
             <span className="inline-flex max-w-full items-center gap-1 text-info">
@@ -86,9 +114,11 @@ function PresenceRow({ item }: { item: TeamPresenceItem }) {
 export function TeamPresencePanel({
   items,
   onClose,
+  authFailureByMember = {},
 }: {
   items: TeamPresenceItem[];
   onClose?: () => void;
+  authFailureByMember?: Record<string, AgentAuthFailureInfo>;
 }) {
   const t = useTranslations('presence');
   const groups = groupItems(items);
@@ -124,7 +154,7 @@ export function TeamPresencePanel({
               </div>
               <ul>
                 {g.items.map((item) => (
-                  <PresenceRow key={item.member_id} item={item} />
+                  <PresenceRow key={item.member_id} item={item} authFailure={authFailureByMember[item.member_id]} />
                 ))}
               </ul>
             </section>
