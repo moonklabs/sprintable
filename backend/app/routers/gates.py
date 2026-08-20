@@ -1057,8 +1057,22 @@ async def transition_gate_endpoint(
         # 트랜잭션(commit 前)에서 확정 기록**한다. 배경 태스크(publish_gate_check)는 이 값을
         # 그대로 반영만 한다(gate_github_check.py 참고).
         if body.status == "approved" and gate.gate_type == MERGE_GATE_TYPE:
-            _link = await resolve_pr_link(session, org_id, gate.work_item_id)
-            _head_sha = (_link.evidence or {}).get("head_sha") if _link else None
+            # story #2832(CRITICAL, PO 페드루 배정 2026-08-20) — 재-pending 후 재승인이
+            # approved_head_sha를 못 찍는 결함의 근본원인: story 하나에 PR 링크 행이 둘 이상이면
+            # (예: 이전 PR 머지 후 같은 story에 새 PR — 잔류 흔한 케이스) resolve_pr_link가
+            # story_id만으로 "가장 최근 updated_at" 행 하나를 고르는데, explicit-link API가
+            # evidence를 **전체 교체**(pr_story_link.py upsert_link)해 head_sha 없는 얕은 evidence로
+            # 갱신하면 그 행이 "가장 최근"이 돼 실제 anchor 없는 링크가 뽑힌다(실 사고 재현: gate
+            # 38430aa8, PR#3255 — 07:13:59 웹훅이 정상 anchor를 썼는데 07:14:09 explicit-link
+            # 호출이 evidence를 {"by":"explicit_api"}로 교체해 head_sha가 사라짐). gate 자신의
+            # github_check_run_sha는 이 story-스코프 다중-PR 모호성과 무관하게(publish_gate_check가
+            # 이 gate row 자체에 마지막으로 발행한 check-run의 SHA를 직접 기록) 항상 "지금 이
+            # gate가 추적 중인 SHA"를 정확히 담고 있으므로 **1순위**로 쓴다 — story 링크 조회는
+            # 그 필드가 아예 빈 legacy/이상 상태(#2813 이전 gate 등)에만 폴백으로 남긴다.
+            _head_sha = gate.github_check_run_sha
+            if not _head_sha:
+                _link = await resolve_pr_link(session, org_id, gate.work_item_id)
+                _head_sha = (_link.evidence or {}).get("head_sha") if _link else None
             if _head_sha:
                 gate.approved_head_sha = _head_sha
         await session.commit()
