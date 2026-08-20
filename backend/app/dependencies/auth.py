@@ -144,6 +144,11 @@ async def _resolve_api_key(
 
     api_key = result.scalar_one_or_none()
     if not api_key:
+        # story #2836 — 이 401이 어떤 표면에도 안 뜨던 것(유나 6시간+ 침묵·미르코 revoke 실사고)의
+        # 근본원인. 원장 기록은 자기 세션(caller는 곧 401 예외로 rollback)+실패해도 401 자체는
+        # 절대 안 막는다(agent_auth_failure.py docstring 참고).
+        from app.services.agent_auth_failure import record_auth_failure
+        await record_auth_failure(raw_key)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
     # OB-4b seam(first_auth_seen): 이 키의 최초 인증(last_used_at None)을 갱신 전 캡처 — 1회 dedup.

@@ -23,12 +23,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db, get_read_db
 from app.models.activity_event import ActivityEvent
+from app.models.agent_auth_failure import AgentAuthFailure
 from app.models.agent_run import AgentRun
 from app.models.dependency import ItemDependency
 from app.models.hypothesis import Hypothesis
 from app.models.member import AgentProjectProfile, Member
 from app.models.pm import Goal, Story, StoryActivity, Task
 from app.models.workflow_line import WorkflowLineStepApproval, WorkflowLineStepRun
+from app.services.agent_auth_failure import AUTH_FAILURE_THRESHOLD, AUTH_FAILURE_WINDOW_MINUTES
 from app.services.member_resolver import resolve_member
 
 router = APIRouter(prefix="/api/v2/command-center", tags=["command-center", "Work"])
@@ -365,6 +367,35 @@ async def my_actions(
             "entity_type": r.entity_type, "entity_id": str(r.entity_id),
             "gate_type": r.effective_gate_type,
             "stuck_since": r.started_at.isoformat() if r.started_at else None,
+        })
+    # 1b) story #2836 — 에이전트 API키 401 연속(유나 6시간+ 침묵·미르코 revoke 실사고 근본원인).
+    # windowed COUNT(agent_stuck·story_stalled와 동형 관측 패턴 — 별도 상태기계 없음). invalid
+    # reason(org_id NULL)은 원리적으로 org 귀속 불가라 이 org의 attention엔 절대 안 뜬다(④ 정직성
+    # — 다른 org에 새는 것보다 안전한 기본, agent_auth_failure.py docstring 참고).
+    auth_failure_rows = (
+        await session.execute(
+            select(
+                AgentAuthFailure.member_id, AgentAuthFailure.reason,
+                func.count().label("cnt"),
+                func.min(AgentAuthFailure.occurred_at).label("first_at"),
+                func.max(AgentAuthFailure.occurred_at).label("last_at"),
+            )
+            .where(
+                AgentAuthFailure.org_id == org_id,
+                AgentAuthFailure.occurred_at >= now - timedelta(minutes=AUTH_FAILURE_WINDOW_MINUTES),
+            )
+            .group_by(AgentAuthFailure.member_id, AgentAuthFailure.reason)
+            .having(func.count() >= AUTH_FAILURE_THRESHOLD)
+        )
+    ).all()
+    for member_id, reason, cnt, first_at, last_at in auth_failure_rows:
+        attention_items.append({
+            "type": "agent_auth_failure", "severity": "danger", "auto_detected": True,
+            "member_id": str(member_id) if member_id else None,
+            "reason": reason,  # expired | revoked | invalid — 서버가 아는 사실만(④).
+            "failure_count": cnt,
+            "first_failed_at": first_at.isoformat() if first_at else None,
+            "last_failed_at": last_at.isoformat() if last_at else None,
         })
     # 2) CC-BE.2 스토리 N일 정체(org-visible 필드만).
     # story #2538(2026-08-09): title 추가 — FE ko.json "가설이 예상과 다르게 진행됩니다"
