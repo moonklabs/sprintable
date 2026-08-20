@@ -27,7 +27,6 @@ tests/test_2003_a2a_rpc_error_contract_realdb.py::test_rpc_invalid_params_still_
 tests/test_2003_a2a_rpc_error_contract_realdb.py::test_rpc_unhandled_exception_returns_standard_internal_error	1
 tests/test_2005_a2a_rpc_timeout.py::_authed_client	1
 tests/test_2009_conversation_detail_participants_realdb.py::_setup_app_human	1
-tests/test_2027_gate_approval_reason_enforce.py::_setup_app	1
 tests/test_2038_hypothesis_outcome_result_enforce.py::_setup_app	1
 tests/test_2043_ac3_hitl_reason_enforce.py::_setup_app	1
 tests/test_2054_gate_inbox.py::_setup_app	1
