@@ -108,6 +108,14 @@ class Hypothesis(Base, OrgScopedMixin, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("hypotheses.id", ondelete="SET NULL"), nullable=True
     )
 
+    # story #2829(loop-closure P0, migration 0264) — preset.loop.measure_due 중복발행 방지.
+    # measure_after 도과 시 1회만 발행하고 이 컬럼을 찍는다(재발행 없음 — org_subscription.
+    # storage_warn_notified_at과 동형 set-once 패턴). outcome 판정으로 상태가 바뀌면 조회
+    # 조건(status IN active/measuring) 자체를 벗어나 자연히 재발행 대상에서도 빠진다.
+    loop_measure_due_notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     __table_args__ = (
         # §2.3 제약
         CheckConstraint(

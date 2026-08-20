@@ -447,6 +447,79 @@ async def my_actions(
             "falsified_days": (now - updated_at).days if updated_at else None,
             "superseded_by_hypothesis_id": str(superseded_by) if superseded_by else None,
         })
+    # 5) story #2829(loop-closure P0, doc loop-closure-first-class-signal-design §1·§3
+    # 계약=미르코군 doc a8e73bdb 그대로) — 「닫히지 않은 루프」: N에 포함되는 2류(도과+outcome
+    # 없이 done). loop_measure_due_notified_at(발행 여부)과 무관하게 항상 실물을 그대로
+    # 센다 — 발행 성패가 "닫히지 않았다"는 사실 자체를 안 바꾼다(서비스 모듈독스트링 참조).
+    overdue_hyps = (
+        await session.execute(
+            select(Hypothesis.id, Hypothesis.statement, Hypothesis.measure_after, Hypothesis.owner_member_id)
+            .where(
+                Hypothesis.org_id == org_id,
+                Hypothesis.status.in_(("active", "measuring")),
+                Hypothesis.measure_after <= now,
+            )
+            .order_by(Hypothesis.measure_after.asc())
+            .limit(20)
+        )
+    ).all()
+    for hyp_id, statement, measure_after, owner_id in overdue_hyps:
+        attention_items.append({
+            "type": "loop_overdue_hypothesis", "severity": "warn", "auto_detected": True,
+            "hypothesis_id": str(hyp_id), "statement": statement,
+            "owner_member_id": str(owner_id) if owner_id else None,
+            "overdue_days": (now - measure_after).days if measure_after else None,
+        })
+    overdue_goals = (
+        await session.execute(
+            select(Goal.id, Goal.title, Goal.measure_after, Goal.assignee_id)
+            .where(
+                Goal.org_id == org_id,
+                Goal.status == "active",
+                Goal.measure_after.isnot(None),
+                Goal.measure_after <= now,
+            )
+            .order_by(Goal.measure_after.asc())
+            .limit(20)
+        )
+    ).all()
+    for goal_id, title, measure_after, assignee_id in overdue_goals:
+        attention_items.append({
+            "type": "loop_overdue_goal", "severity": "warn", "auto_detected": True,
+            "goal_id": str(goal_id), "title": title,
+            "owner_member_id": str(assignee_id) if assignee_id else None,
+            "overdue_days": (now - measure_after).days if measure_after else None,
+        })
+    done_no_outcome_goals = (
+        await session.execute(
+            select(Goal.id, Goal.title, Goal.updated_at, Goal.assignee_id)
+            .where(
+                Goal.org_id == org_id,
+                Goal.status == "done",
+                Goal.outcome_status == "n_a",
+            )
+            .order_by(Goal.updated_at.asc())
+            .limit(20)
+        )
+    ).all()
+    for goal_id, title, updated_at, assignee_id in done_no_outcome_goals:
+        attention_items.append({
+            "type": "loop_outcome_missing_goal", "severity": "warn", "auto_detected": True,
+            "goal_id": str(goal_id), "title": title,
+            "owner_member_id": str(assignee_id) if assignee_id else None,
+            "done_days": (now - updated_at).days if updated_at else None,
+        })
+    # N에서 제외하되 집계는 유지(페드루 PO 보완 지시, doc a8e73bdb §2) — measure_after
+    # 자체가 없는 active goal. AC상 클릭 목록 요건이 없어 개별 목록은 안 싣는다(카운트만).
+    measure_plan_missing_goal_count = (
+        await session.execute(
+            select(func.count()).select_from(Goal).where(
+                Goal.org_id == org_id,
+                Goal.status == "active",
+                Goal.measure_after.is_(None),
+            )
+        )
+    ).scalar_one()
 
     return JSONResponse(content={
         "action_queue": {  # scope: member(caller) — 타 멤버 큐 노출 0.
@@ -457,6 +530,9 @@ async def my_actions(
             "scope": "org",
             "items": attention_items,
             "pending": ["time_sensitive"],  # 잔여 미구현(overdue/스프린트 D-N·due 소스 부재).
+            # story #2829 — N 비포함·집계만(doc a8e73bdb §2 PO 보완 지시). 카드 하단 보조
+            # 텍스트("+{count}건은 측정계획이 아직 없음")용, items[]엔 개별 목록 없음.
+            "measure_plan_missing_goal_count": measure_plan_missing_goal_count,
         },
         "is_clear": len(queue) == 0 and len(attention_items) == 0,
     })

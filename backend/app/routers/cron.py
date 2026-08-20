@@ -613,6 +613,29 @@ async def score_hypotheses_cron(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── POST /api/v2/internal/cron/detect-unclosed-loops ──────────────────────────
+
+@router.post("/detect-unclosed-loops")
+async def detect_unclosed_loops_cron(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """story #2829(loop-closure P0) — 「닫히지 않은 루프」 감지 + preset.loop.measure_due
+    발행. 판정 축·set-once 발행 근거는 app.services.loop_measure_due 모듈독스트링 참조.
+    """
+    verify_cron(request)
+
+    from app.services.loop_measure_due import detect_unclosed_loops
+
+    try:
+        summary = await detect_unclosed_loops(session)
+        await session.commit()
+        return _ok(summary)
+    except Exception as exc:
+        logger.exception("detect-unclosed-loops cron error: %s", exc)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── POST /api/v2/internal/cron/embed-backlog ──────────────────────────────────
 
 @router.post("/embed-backlog")

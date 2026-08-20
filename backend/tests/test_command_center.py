@@ -95,6 +95,7 @@ def _data(resp):
 def _ma_seq(
     approvals=(), reviews=(), my_blockers=(), waiting=(), stuck=(), stalled=(), unanswered=(),
     my_tasks=(), approval_group_counts=(), blocker_weight_counts=(), falsified=(),
+    overdue_hyps=(), overdue_goals=(), done_no_outcome_goals=(), measure_plan_missing_goal_count=0,
 ):
     seq = [_r_all(approvals)]
     if approvals:
@@ -109,6 +110,11 @@ def _ma_seq(
     seq.append(_r_all(stalled))
     seq.append(_r_all(unanswered))
     seq.append(_r_all(falsified))  # story #2539
+    # story #2829(loop-closure P0) — 「닫히지 않은 루프」 3쿼리 + 미설정 goal 카운트 1쿼리.
+    seq.append(_r_all(overdue_hyps))
+    seq.append(_r_all(overdue_goals))
+    seq.append(_r_all(done_no_outcome_goals))
+    seq.append(_r_scalar(measure_plan_missing_goal_count))
     return seq
 
 
@@ -281,6 +287,33 @@ async def test_my_actions_hypothesis_falsified_superseded_by_null_when_unconfirm
     hf = next(i for i in items if i["type"] == "hypothesis_falsified")
     assert hf["superseded_by_hypothesis_id"] is None
     assert hf["outcome_result"] is None
+
+
+@pytest.mark.anyio
+async def test_my_actions_loop_closure_items_and_measure_plan_missing_count():
+    """story #2829: 「닫히지 않은 루프」 3타입(가설 도과·goal 도과·outcome 없는 done)이
+    attention.items[]에 실리고, 측정계획 없는 active goal 수는 N에서 제외된 채 별도 스칼라
+    필드로만 실린다(doc a8e73bdb §2 PO 확定 — 페드루 보완 지시)."""
+    hyp_id, goal_id, done_goal_id, owner_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    resp, session, resolver = await _get(
+        "/api/v2/command-center/my-actions",
+        execute_seq=_ma_seq(
+            overdue_hyps=[(hyp_id, "체크아웃 개선 가설", _OLD, owner_id)],
+            overdue_goals=[(goal_id, "Q3 활성화", _OLD, owner_id)],
+            done_no_outcome_goals=[(done_goal_id, "런칭", _OLD, owner_id)],
+            measure_plan_missing_goal_count=40,
+        ))
+    assert resp.status_code == 200
+    body = _data(resp)
+    items_by_type = {i["type"]: i for i in body["attention"]["items"]}
+    oh = items_by_type["loop_overdue_hypothesis"]
+    assert oh["hypothesis_id"] == str(hyp_id) and oh["owner_member_id"] == str(owner_id)
+    og = items_by_type["loop_overdue_goal"]
+    assert og["goal_id"] == str(goal_id) and isinstance(og["overdue_days"], int)
+    om = items_by_type["loop_outcome_missing_goal"]
+    assert om["goal_id"] == str(done_goal_id) and isinstance(om["done_days"], int)
+    # N(=items 카운트)에 measure_plan_missing 3건은 포함 안 됨(위 3개뿐) — 별도 스칼라만.
+    assert body["attention"]["measure_plan_missing_goal_count"] == 40
 
 
 @pytest.mark.anyio
