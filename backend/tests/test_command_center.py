@@ -96,6 +96,7 @@ def _ma_seq(
     approvals=(), reviews=(), my_blockers=(), waiting=(), stuck=(), stalled=(), unanswered=(),
     my_tasks=(), approval_group_counts=(), blocker_weight_counts=(), falsified=(),
     overdue_hyps=(), overdue_goals=(), done_no_outcome_goals=(), measure_plan_missing_goal_count=0,
+    loop_overdue_hypothesis_count=None, loop_overdue_goal_count=None, loop_outcome_missing_goal_count=None,
 ):
     seq = [_r_all(approvals)]
     if approvals:
@@ -110,11 +111,21 @@ def _ma_seq(
     seq.append(_r_all(stalled))
     seq.append(_r_all(unanswered))
     seq.append(_r_all(falsified))  # story #2539
-    # story #2829(loop-closure P0) — 「닫히지 않은 루프」 3쿼리 + 미설정 goal 카운트 1쿼리.
+    # story #2829(loop-closure P0) — 「닫히지 않은 루프」 3쿼리 + 미설정 goal 카운트 1쿼리 +
+    # PO 리뷰 보완①(#3253) 류별 total count 3쿼리(items[]와 별개로 항상 참값).
     seq.append(_r_all(overdue_hyps))
     seq.append(_r_all(overdue_goals))
     seq.append(_r_all(done_no_outcome_goals))
     seq.append(_r_scalar(measure_plan_missing_goal_count))
+    seq.append(_r_scalar(
+        loop_overdue_hypothesis_count if loop_overdue_hypothesis_count is not None else len(overdue_hyps)
+    ))
+    seq.append(_r_scalar(
+        loop_overdue_goal_count if loop_overdue_goal_count is not None else len(overdue_goals)
+    ))
+    seq.append(_r_scalar(
+        loop_outcome_missing_goal_count if loop_outcome_missing_goal_count is not None else len(done_no_outcome_goals)
+    ))
     return seq
 
 
@@ -302,6 +313,9 @@ async def test_my_actions_loop_closure_items_and_measure_plan_missing_count():
             overdue_goals=[(goal_id, "Q3 활성화", _OLD, owner_id)],
             done_no_outcome_goals=[(done_goal_id, "런칭", _OLD, owner_id)],
             measure_plan_missing_goal_count=40,
+            # PO 리뷰 보완①(#3253) — items[]는 top-20 cap(위 각 1건뿐)인데 total count는
+            # 참값(51)이어야 한다는 게 이 보완의 핵심 — 일부러 items 길이와 다르게 준다.
+            loop_outcome_missing_goal_count=51,
         ))
     assert resp.status_code == 200
     body = _data(resp)
@@ -314,6 +328,10 @@ async def test_my_actions_loop_closure_items_and_measure_plan_missing_count():
     assert om["goal_id"] == str(done_goal_id) and isinstance(om["done_days"], int)
     # N(=items 카운트)에 measure_plan_missing 3건은 포함 안 됨(위 3개뿐) — 별도 스칼라만.
     assert body["attention"]["measure_plan_missing_goal_count"] == 40
+    # PO 리뷰 보완① 핵심 단정 — items[]는 1건뿐이어도 total count는 51(cap과 무관한 참값).
+    assert body["attention"]["loop_outcome_missing_goal_count"] == 51
+    assert body["attention"]["loop_overdue_hypothesis_count"] == 1
+    assert body["attention"]["loop_overdue_goal_count"] == 1
 
 
 @pytest.mark.anyio

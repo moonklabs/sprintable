@@ -15,6 +15,15 @@ owner_member_id가 없으면(goal 미배정) 발행 대상에서 제외(escalati
 field라 받는 쪽이 없으면 발행 자체가 무의미) — 카운터 API(§3, command_center.py)는 이
 필터와 무관하게 항상 실물 그대로 센다(발행 성패가 "닫히지 않았다"는 사실을 안 바꾼다).
 
+⛔못 잡는 것(AC⑤, 페드루 PO 판정 2026-08-20 — P0 관측 단계에선 fix 대신 선언으로 수용):
+set-once가 「재도과」를 못 잡는다 — 한 번 발행돼 notified_at이 찍힌 뒤, 그 hypothesis/goal의
+outcome이 해소되지 않은 채 owner가 measure_after를 미래로 늘려 잡았다가 그 새 날짜도 다시
+지나면, notified_at이 이미 non-NULL이라 재발행이 안 된다(조회 조건 `IS NULL`을 영원히
+못 만족). 카운터 API(§3)는 measure_after<=now만 보므로 이 케이스도 N에는 여전히 잡히지만
+(관측 축은 안전), preset 이벤트(액션 알림 축)만 조용히 죽는다. P1(outcome 커플링) 이후
+재검토 — 지금은 "발행 1회 보장"이 "매 재도과마다 재알림"보다 단순·안전(무한루프 방지 원칙과
+직접 충돌)하므로 이 gap을 의도적으로 수용한다.
+
 ⛔SAVEPOINT로 감싸지 않는다(hypothesis_scorer.py와 달리) — publish_preset_event는 내부
 send_message()가 자체 commit을 이미 수행하는 자기완결 트랜잭션이라, 이걸 session.
 begin_nested()로 한 번 더 감싸면 그 내부 commit이 바깥 SAVEPOINT까지 닫아버려 "closed

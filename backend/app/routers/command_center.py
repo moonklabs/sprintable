@@ -520,6 +520,38 @@ async def my_actions(
             )
         )
     ).scalar_one()
+    # 페드루 PO AC 리뷰 보완①(#3253, 2026-08-20) — items[]는 류별 top-20으로 잘리는데 N은
+    # "0으로 수렴하는가" 판별 기준 그 자체라 참값이어야 한다(실측: outcome 없는 done goal
+    # 51건 vs items 상한 20 — cap이 N을 접어 버리면 그 판별이 거짓말이 된다). items 목록과는
+    # 별도로 류별 total count를 3개 더 얹는다(카운트 쿼리라 20개 fetch보다 오히려 가볍다).
+    loop_overdue_hypothesis_count = (
+        await session.execute(
+            select(func.count()).select_from(Hypothesis).where(
+                Hypothesis.org_id == org_id,
+                Hypothesis.status.in_(("active", "measuring")),
+                Hypothesis.measure_after <= now,
+            )
+        )
+    ).scalar_one()
+    loop_overdue_goal_count = (
+        await session.execute(
+            select(func.count()).select_from(Goal).where(
+                Goal.org_id == org_id,
+                Goal.status == "active",
+                Goal.measure_after.isnot(None),
+                Goal.measure_after <= now,
+            )
+        )
+    ).scalar_one()
+    loop_outcome_missing_goal_count = (
+        await session.execute(
+            select(func.count()).select_from(Goal).where(
+                Goal.org_id == org_id,
+                Goal.status == "done",
+                Goal.outcome_status == "n_a",
+            )
+        )
+    ).scalar_one()
 
     return JSONResponse(content={
         "action_queue": {  # scope: member(caller) — 타 멤버 큐 노출 0.
@@ -533,6 +565,11 @@ async def my_actions(
             # story #2829 — N 비포함·집계만(doc a8e73bdb §2 PO 보완 지시). 카드 하단 보조
             # 텍스트("+{count}건은 측정계획이 아직 없음")용, items[]엔 개별 목록 없음.
             "measure_plan_missing_goal_count": measure_plan_missing_goal_count,
+            # PO 리뷰 보완①(#3253) — items[]의 top-20 cap과 무관한 참값. FE의 N = 이 세 필드
+            # 합(items.length가 아니라). "0으로 수렴하는가" 판별은 반드시 이 값을 써야 한다.
+            "loop_overdue_hypothesis_count": loop_overdue_hypothesis_count,
+            "loop_overdue_goal_count": loop_overdue_goal_count,
+            "loop_outcome_missing_goal_count": loop_outcome_missing_goal_count,
         },
         "is_clear": len(queue) == 0 and len(attention_items) == 0,
     })
