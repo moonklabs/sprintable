@@ -95,6 +95,12 @@ export interface RawAttentionItem {
   goal_id: string | null;
   overdue_days: number | null;
   done_days: number | null;
+  // story #2842(0b17472c, BE PR#3263) — 항목의 실제 소속 프로젝트. bare href(예: `/flow?...`)는
+  // 미들웨어가 뷰어의 "활성" 프로젝트 쿠키로 해석해버려, 다른 프로젝트 소속 항목을 클릭하면
+  // 엉뚱한 프로젝트 캔버스로 떨어진다 — slug가 있어야 `/{orgSlug}/{projectSlug}/...` 완전
+  // 경로를 지어 항목의 진짜 소속으로 못박을 수 있다.
+  project_id: string | null;
+  project_slug: string | null;
 }
 
 export interface RawMyActions {
@@ -158,6 +164,8 @@ export function parseMyActions(json: unknown): RawMyActions {
         goal_id: str(raw['goal_id']),
         overdue_days: num(raw['overdue_days']),
         done_days: num(raw['done_days']),
+        project_id: str(raw['project_id']),
+        project_slug: str(raw['project_slug']),
       });
     }
   }

@@ -1,17 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { CheckCircle2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
 import { cn } from '@/lib/utils';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import {
   buildNowFace, parseCompletionNotifications, parseMyActions,
   type NowFaceItem, type NowFaceTranslator,
 } from './derive-now-face';
-import { deriveAttentionClusters, type AttentionClusters } from './derive-attention-clusters';
+import { deriveAttentionClusters, type AttentionClusters, type ViewerContext } from './derive-attention-clusters';
 import { AttentionClusterBoard } from './attention-cluster-board';
 
 // story ded31cb3 — 조직 브리핑 "지금" 면. doc org-briefing-hypothesis-grammar-blueprint §1.3.
@@ -24,7 +25,7 @@ interface NowFaceLoad {
   clusters: AttentionClusters;
 }
 
-async function loadNowFace(t: NowFaceTranslator): Promise<NowFaceLoad> {
+async function loadNowFace(t: NowFaceTranslator, viewer: ViewerContext): Promise<NowFaceLoad> {
   // story #2689 — 콜드 재진입 시 raw fetch는 401을 재시도 없이 삼켜(!r.ok=>null) "지금" 면이
   // 빈 채로 60초 REFRESH_MS까지 안 채워졌다. fetchWithAuth로 401→refresh→재시도 경로에 태운다.
   const [ma, notifs] = await Promise.all([
@@ -44,7 +45,7 @@ async function loadNowFace(t: NowFaceTranslator): Promise<NowFaceLoad> {
       loopOutcomeMissingGoalCount: raw.loopOutcomeMissingGoalCount,
       measurePlanMissingGoalCount: raw.measurePlanMissingGoalCount,
       unmeasurableGoalCount: raw.unmeasurableGoalCount,
-    }),
+    }, viewer),
   };
 }
 
@@ -93,17 +94,23 @@ export function NowFace() {
   const [items, setItems] = useState<NowFaceItem[] | null>(null);
   const [clusters, setClusters] = useState<AttentionClusters>(EMPTY_CLUSTERS);
   const [expanded, setExpanded] = useState(false);
+  // story #2842 — loop-face.tsx와 동형(orgMemberships에서 orgSlug 파생). useMemo로 orgId/
+  // projectId(원시값)가 실제로 바뀔 때만 새 참조를 만든다 — 매 렌더 새 객체면 아래 effect가
+  // 무한 재구독된다.
+  const { orgId, orgMemberships, projectId } = useDashboardContext();
+  const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
+  const viewer = useMemo<ViewerContext>(() => ({ orgSlug, activeProjectId: projectId }), [orgSlug, projectId]);
 
   useEffect(() => {
     const load = async () => {
-      const result = await loadNowFace(t);
+      const result = await loadNowFace(t, viewer);
       setItems(result.items);
       setClusters(result.clusters);
     };
     void load();
     const id = setInterval(() => void load(), REFRESH_MS);
     return () => clearInterval(id);
-  }, [t]);
+  }, [t, viewer]);
 
   const list = items ?? [];
   const shown = expanded ? list : list.slice(0, CAP);

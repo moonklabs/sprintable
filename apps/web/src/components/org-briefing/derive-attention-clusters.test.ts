@@ -26,6 +26,8 @@ function attentionItem(overrides: Partial<RawAttentionItem>): RawAttentionItem {
     goal_id: null,
     overdue_days: null,
     done_days: null,
+    project_id: null,
+    project_slug: null,
     ...overrides,
   };
 }
@@ -140,6 +142,50 @@ describe('deriveAttentionClusters', () => {
       expect(clusters.loopTotalCount).toBe(1);
       expect(clusters.measurePlanMissingGoalCount).toBe(0);
       expect(clusters.unmeasurableGoalCount).toBe(0);
+    });
+  });
+
+  // story #2842(0b17472c 그라운딩) — href를 항목의 실제 소속 프로젝트로 짓고, 뷰어의 활성
+  // 프로젝트와 다를 때만 crossProjectLabel을 채운다.
+  describe('project-scoped href · cross-project 병기(story #2842)', () => {
+    it('viewer(orgSlug+activeProjectId) 제공 시 href가 항목 소속 프로젝트 slug로 지어진다', () => {
+      const clusters = deriveAttentionClusters([
+        attentionItem({ type: 'loop_overdue_goal', goal_id: 'g1', overdue_days: 1, project_id: 'p-other', project_slug: 'other-proj' }),
+        attentionItem({ type: 'story_stalled', story_id: 's1', stalled_days: 1, project_id: 'p-other', project_slug: 'other-proj' }),
+      ], t, undefined, { orgSlug: 'moonklabs', activeProjectId: 'p-active' });
+      expect(clusters.loop[0]!.href).toBe('/moonklabs/other-proj/flow?view=flow&goal=g1');
+      expect(clusters.stalled[0]!.href).toBe('/moonklabs/other-proj/board?story=s1');
+    });
+
+    it('같은 프로젝트 소속이면 crossProjectLabel이 null(노이즈 절제) — href는 여전히 완전 경로', () => {
+      const clusters = deriveAttentionClusters([
+        attentionItem({ type: 'loop_overdue_goal', goal_id: 'g1', overdue_days: 1, project_id: 'p-active', project_slug: 'sprintable' }),
+      ], t, undefined, { orgSlug: 'moonklabs', activeProjectId: 'p-active' });
+      expect(clusters.loop[0]!.crossProjectLabel).toBeNull();
+      expect(clusters.loop[0]!.href).toBe('/moonklabs/sprintable/flow?view=flow&goal=g1');
+    });
+
+    it('다른 프로젝트 소속이면 crossProjectLabel에 project_slug가 채워진다', () => {
+      const clusters = deriveAttentionClusters([
+        attentionItem({ type: 'loop_overdue_goal', goal_id: 'g1', overdue_days: 1, project_id: 'p-other', project_slug: 'other-proj' }),
+      ], t, undefined, { orgSlug: 'moonklabs', activeProjectId: 'p-active' });
+      expect(clusters.loop[0]!.crossProjectLabel).toBe('other-proj');
+    });
+
+    it('viewer 미제공(구 호출부)이면 crossProjectLabel은 항상 null·href는 기존 bare path로 폴백(오탐 방지·회귀 0)', () => {
+      const clusters = deriveAttentionClusters([
+        attentionItem({ type: 'loop_overdue_goal', goal_id: 'g1', overdue_days: 1, project_id: 'p-other', project_slug: 'other-proj' }),
+      ], t);
+      expect(clusters.loop[0]!.crossProjectLabel).toBeNull();
+      expect(clusters.loop[0]!.href).toBe('/flow?view=flow&goal=g1');
+    });
+
+    it('project_slug가 없으면(BE 미해소) orgSlug가 있어도 bare path로 폴백한다', () => {
+      const clusters = deriveAttentionClusters([
+        attentionItem({ type: 'loop_overdue_goal', goal_id: 'g1', overdue_days: 1, project_id: 'p-other', project_slug: null }),
+      ], t, undefined, { orgSlug: 'moonklabs', activeProjectId: 'p-active' });
+      expect(clusters.loop[0]!.href).toBe('/flow?view=flow&goal=g1');
+      expect(clusters.loop[0]!.crossProjectLabel).toBeNull();
     });
   });
 });
