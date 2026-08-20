@@ -104,6 +104,48 @@ async def is_repo_check_enforced(
     return repo_full_name.lower() in normalized
 
 
+ACTION_REQUIRED_SUMMARY = (
+    "이 PR엔 연결된 Sprintable story가 없어 merge gate를 만들 수 없습니다.\n\n"
+    "다음 중 하나로 연결하면 gate가 자동 생성됩니다:\n"
+    "- PR 제목에 `[SID:<story-id>]` 태그 포함\n"
+    "- Sprintable의 explicit PR-story link API로 연결\n\n"
+    "연결 후 새 커밋을 push하면(또는 PR을 재오픈하면) 이 check가 자동으로 갱신됩니다."
+)
+
+
+async def publish_action_required_check(
+    installation_id: int,
+    repo_full_name: str,
+    head_sha: str,
+    pr_number: int,
+) -> None:
+    """story #2826(부 처방, PO 확定 2026-08-20) — story 링크가 없어 gate 자체가 없는 PR에도
+    `sprintable/gate`를 발행하되, 침묵 부재(check 자체가 안 뜸) 대신 **말하는 부재**로:
+    conclusion=action_required + 다음 행동 안내. gate가 없으니 DB에 남길 게 없다(원장(AC④)은
+    gate 존재를 전제 — 이 경로는 gate-less라 대상 밖, GitHub 쪽 UI 안내만).
+
+    fail-closed(이 모듈 공통 규율): 예외를 삼켜 호출자(웹훅 트랜잭션 뒤 background task)를
+    절대 깨뜨리지 않는다 — 실패해도 GitHub 쪽은 그냥 check가 없는 이전 상태 그대로.
+    """
+    try:
+        result = await create_check_run(
+            installation_id, repo_full_name, head_sha,
+            name=CHECK_NAME, status="completed", conclusion="action_required",
+            title="Sprintable Gate — story 링크 필요",
+            summary=ACTION_REQUIRED_SUMMARY,
+        )
+        if result is None:
+            logger.warning(
+                "action_required check 발행 실패(fail-closed, GitHub 쪽 무영향) repo=%s pr=%s",
+                repo_full_name, pr_number,
+            )
+    except Exception:  # noqa: BLE001 — fail-closed 경계: 백그라운드 태스크는 절대 안 죽는다.
+        logger.exception(
+            "action_required check 발행 중 예외(fail-closed, GitHub 쪽 무영향) repo=%s pr=%s",
+            repo_full_name, pr_number,
+        )
+
+
 async def publish_gate_check(
     org_id: uuid.UUID,
     gate_id: uuid.UUID,
