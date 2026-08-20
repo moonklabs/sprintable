@@ -444,6 +444,14 @@
     "clusterUnclosedCapNotice": "Showing top {shown} · {total} total",
     "clusterUnclosedMeasurePlanMissing": "+{count} have no measure plan yet",
     "clusterUnclosedUnmeasurableGoal": "{count} declared unmeasurable",
+    "clusterAuthFailureTitle": "Agent auth failures",
+    "clusterAuthFailureSub": "Requests keep being rejected due to API key issues",
+    "clusterAuthFailureReasonExpired": "API key expired",
+    "clusterAuthFailureReasonRevoked": "API key revoked",
+    "clusterAuthFailureReasonInvalid": "API key not recognized",
+    "clusterAuthFailureDiagnostic": "{n} failures in last 5 min",
+    "clusterAuthFailureReissue": "Reissue key",
+    "clusterAuthFailureUnknownAgent": "Unknown agent",
     "doneGenericContext": "Review the evidence and approve",
     "loopTitle": "Lab",
     "loopSubject": "Hypotheses under test",
@@ -3273,7 +3281,11 @@
     "groupOffline": "Offline",
     "working": "Generating reply",
     "assignedStory": "On \"{title}\"",
-    "empty": "No agents to show"
+    "empty": "No agents to show",
+    "authFailureBadge": "Auth failed",
+    "authFailureTooltipExpired": "API key expired · {n} failures in last 5 min",
+    "authFailureTooltipRevoked": "API key revoked · {n} failures in last 5 min",
+    "authFailureTooltipInvalid": "API key not recognized · {n} failures in last 5 min"
   },
   "chats": {
     "unreadMarker": "Unread from here",

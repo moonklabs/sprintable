@@ -22,6 +22,7 @@ import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 import { ContextualPanelLayout, useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { TeamPresencePanel } from '@/components/presence/team-presence-panel';
 import { useTeamPresence } from '@/components/presence/use-team-presence';
+import { useAgentAuthFailures } from '@/components/presence/use-agent-auth-failures';
 import { useChatUnreadTotal } from '@/hooks/use-chat-unread-total';
 import { ReleaseNotesProvider } from '@/components/release-notes/release-notes-gate';
 import { RefreshProvider } from '@/contexts/refresh-context';
@@ -168,6 +169,9 @@ function ScrollShell({
   const { currentTeamMemberId } = useDashboardContext();
   const items = useTeamPresence(true, currentTeamMemberId);
   const workingCount = items.filter((i) => i.working).length;
+  // story #2852(2836 FE 조각) — presence 패널은 전역 상시 마운트라 「인증 실패」 뱃지 원자료도
+  // 여기서 함께 폴한다(org-briefing 진입과 무관하게 늘 최신).
+  const authFailureByMember = useAgentAuthFailures(true);
 
   return (
     <ReleaseNotesProvider userId={currentTeamMemberId}>
@@ -187,6 +191,7 @@ function ScrollShell({
             <div className={mode === 'inline' ? '2xl:sticky 2xl:top-0 2xl:h-svh 2xl:p-2' : 'h-full'}>
               <TeamPresencePanel
                 items={items}
+                authFailureByMember={authFailureByMember}
                 onClose={mode === 'inline' ? () => panel.setInlinePanelOpen(false) : closePanel}
               />
             </div>

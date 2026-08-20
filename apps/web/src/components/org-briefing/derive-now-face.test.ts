@@ -146,8 +146,8 @@ describe('buildNowFace', () => {
         { type: 'my_blockers', priority: null, title: null, context: { blocked_story_id: 's2' } },
       ],
       attention: [
-        { type: 'agent_stuck', entity_type: 'story', entity_id: 's3', gate_type: 'merge', story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null },
-        { type: 'unanswered_blocker', entity_type: null, entity_id: null, gate_type: null, story_id: null, stalled_days: null, blocked_story_id: 's5', title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null },
+        { type: 'agent_stuck', entity_type: 'story', entity_id: 's3', gate_type: 'merge', story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null, member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null },
+        { type: 'unanswered_blocker', entity_type: null, entity_id: null, gate_type: null, story_id: null, stalled_days: null, blocked_story_id: 's5', title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null, member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null },
       ],
     };
     const notifications = [{ id: 'n1', title: 'Contract done', body: 'evidence attached', href: '/inbox' }];
@@ -163,8 +163,8 @@ describe('buildNowFace', () => {
       ...ZERO_LOOP_COUNTS,
       queue: [],
       attention: [
-        { type: 'story_stalled', entity_type: null, entity_id: null, gate_type: null, story_id: 's9', stalled_days: 9, blocked_story_id: null, title: '결제 완료율 개선', hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null },
-        { type: 'hypothesis_falsified', entity_type: null, entity_id: null, gate_type: null, story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: 'h1', statement: '결제 완료율 개선', outcome_result: { target: 60, actual: 52 }, falsified_days: 2, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null },
+        { type: 'story_stalled', entity_type: null, entity_id: null, gate_type: null, story_id: 's9', stalled_days: 9, blocked_story_id: null, title: '결제 완료율 개선', hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null, member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null },
+        { type: 'hypothesis_falsified', entity_type: null, entity_id: null, gate_type: null, story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: 'h1', statement: '결제 완료율 개선', outcome_result: { target: 60, actual: 52 }, falsified_days: 2, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null, member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null },
       ],
     };
     const items = buildNowFace(raw, [], t);
@@ -176,7 +176,7 @@ describe('buildNowFace', () => {
       ...ZERO_LOOP_COUNTS,
       queue: [],
       attention: [
-        { type: 'unanswered_blocker', entity_type: null, entity_id: null, gate_type: null, story_id: null, stalled_days: null, blocked_story_id: 's7', title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null },
+        { type: 'unanswered_blocker', entity_type: null, entity_id: null, gate_type: null, story_id: null, stalled_days: null, blocked_story_id: 's7', title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null, member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null },
       ],
     };
     const items = buildNowFace(raw, [], t);
@@ -189,7 +189,7 @@ describe('buildNowFace', () => {
     const raw: RawMyActions = {
       ...ZERO_LOOP_COUNTS,
       queue: [],
-      attention: [{ type: 'agent_stuck', entity_type: 'story', entity_id: 's1', gate_type: 'merge', story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null }],
+      attention: [{ type: 'agent_stuck', entity_type: 'story', entity_id: 's1', gate_type: 'merge', story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null, member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null }],
     };
     const items = buildNowFace(raw, [], t);
     const signal = items.find((i) => i.kind === 'signal');
@@ -215,7 +215,7 @@ describe('buildNowFace', () => {
 
   it('produces no primary action when there are no decide items', () => {
     const raw: RawMyActions = {
-      ...ZERO_LOOP_COUNTS, queue: [], attention: [{ type: 'agent_stuck', entity_type: null, entity_id: 's1', gate_type: null, story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null }] };
+      ...ZERO_LOOP_COUNTS, queue: [], attention: [{ type: 'agent_stuck', entity_type: null, entity_id: 's1', gate_type: null, story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null, member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null }] };
     const items = buildNowFace(raw, [], t);
     expect(items.every((i) => i.actionTone === 'ghost')).toBe(true);
   });
@@ -224,7 +224,7 @@ describe('buildNowFace', () => {
     const raw: RawMyActions = {
       ...ZERO_LOOP_COUNTS,
       queue: [{ type: 'review_merge', priority: 'info', title: 'x', context: {} }],
-      attention: [{ type: 'agent_stuck', entity_type: null, entity_id: 's1', gate_type: null, story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null }],
+      attention: [{ type: 'agent_stuck', entity_type: null, entity_id: 's1', gate_type: null, story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null, member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null }],
     };
     const items = buildNowFace(raw, [{ id: 'n1', title: 'done', body: null, href: null }], t);
     expect(items.map((i) => i.kind)).toEqual(['decide', 'signal', 'done']);

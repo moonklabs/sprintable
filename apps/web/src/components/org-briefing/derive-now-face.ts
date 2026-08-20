@@ -52,6 +52,12 @@ function record(v: unknown): Record<string, unknown> | null {
   return isRecord(v) ? v : null;
 }
 
+// story #2852 — BE가 아는 사실 3종만 유효(AC3 raw enum 화면 노출 금지의 전제: 파싱 단계부터
+// 화이트리스트로 걸러 알 수 없는 값을 조용히 지어내지 않는다, no-fiction).
+function authFailureReason(v: unknown): 'expired' | 'revoked' | 'invalid' | null {
+  return v === 'expired' || v === 'revoked' || v === 'invalid' ? v : null;
+}
+
 interface RawQueueItem {
   type: string;
   priority: string | null;
@@ -101,6 +107,15 @@ export interface RawAttentionItem {
   // 경로를 지어 항목의 진짜 소속으로 못박을 수 있다.
   project_id: string | null;
   project_slug: string | null;
+  // story #2852(2836 FE 조각, BE PR#3266) — `agent_auth_failure` 전용. windowed COUNT로
+  // 판정된 (member_id, reason) 그룹 1건 = 항목 1건. member_id는 귀속 가능할 때만(없으면 이름
+  // 폴백). reason은 서버가 아는 사실만(expired|revoked|invalid) — 화면엔 raw enum 노출 금지,
+  // 유저 어휘로 매핑해서 보여준다(AC3).
+  member_id: string | null;
+  reason: 'expired' | 'revoked' | 'invalid' | null;
+  failure_count: number | null;
+  first_failed_at: string | null;
+  last_failed_at: string | null;
 }
 
 export interface RawMyActions {
@@ -166,6 +181,11 @@ export function parseMyActions(json: unknown): RawMyActions {
         done_days: num(raw['done_days']),
         project_id: str(raw['project_id']),
         project_slug: str(raw['project_slug']),
+        member_id: str(raw['member_id']),
+        reason: authFailureReason(raw['reason']),
+        failure_count: num(raw['failure_count']),
+        first_failed_at: str(raw['first_failed_at']),
+        last_failed_at: str(raw['last_failed_at']),
       });
     }
   }

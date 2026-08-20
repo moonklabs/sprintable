@@ -14,6 +14,7 @@ import {
 } from './derive-now-face';
 import { deriveAttentionClusters, type AttentionClusters, type ViewerContext } from './derive-attention-clusters';
 import { AttentionClusterBoard } from './attention-cluster-board';
+import { parseTeamMembers } from './derive-workforce-face';
 
 // story ded31cb3 — 조직 브리핑 "지금" 면. doc org-briefing-hypothesis-grammar-blueprint §1.3.
 // 기본 5 + "+N 더" 인라인 펼침(⛔우선순위 컷 금지 — nod 확定②: 초과분 숨김은 정보 은닉이라 폐기).
@@ -23,14 +24,18 @@ const REFRESH_MS = 60_000;
 interface NowFaceLoad {
   items: NowFaceItem[];
   clusters: AttentionClusters;
+  memberNames: Record<string, string>;
 }
 
 async function loadNowFace(t: NowFaceTranslator, viewer: ViewerContext): Promise<NowFaceLoad> {
   // story #2689 — 콜드 재진입 시 raw fetch는 401을 재시도 없이 삼켜(!r.ok=>null) "지금" 면이
   // 빈 채로 60초 REFRESH_MS까지 안 채워졌다. fetchWithAuth로 401→refresh→재시도 경로에 태운다.
-  const [ma, notifs] = await Promise.all([
+  // story #2852 — agent_auth_failure 클러스터가 member_id만 갖고 있어(BE가 이름을 안 줌)
+  // 이름 표시엔 /api/team-members가 필요하다(workforce-face.tsx parseTeamMembers와 동형 소비).
+  const [ma, notifs, membersJson] = await Promise.all([
     fetchWithAuth('/api/dashboard/my-actions').then((r) => (r.ok ? r.json() : null)).catch(() => null),
     fetchWithAuth('/api/notifications?type=task_completed&unread=true').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    fetchWithAuth('/api/team-members').then((r) => (r.ok ? r.json() : null)).catch(() => null),
   ]);
   const raw = parseMyActions(ma);
   return {
@@ -46,6 +51,7 @@ async function loadNowFace(t: NowFaceTranslator, viewer: ViewerContext): Promise
       measurePlanMissingGoalCount: raw.measurePlanMissingGoalCount,
       unmeasurableGoalCount: raw.unmeasurableGoalCount,
     }, viewer),
+    memberNames: parseTeamMembers(membersJson),
   };
 }
 
@@ -87,12 +93,13 @@ function RowSkeleton() {
   return <div className="h-[60px] animate-pulse border-t border-border bg-muted/30 first:border-t-0" />;
 }
 
-const EMPTY_CLUSTERS: AttentionClusters = { falsified: [], stalled: [], loop: [], loopTotalCount: 0, measurePlanMissingGoalCount: 0, unmeasurableGoalCount: 0 };
+const EMPTY_CLUSTERS: AttentionClusters = { falsified: [], stalled: [], loop: [], loopTotalCount: 0, measurePlanMissingGoalCount: 0, unmeasurableGoalCount: 0, authFailure: [] };
 
 export function NowFace() {
   const t = useTranslations('orgBriefing');
   const [items, setItems] = useState<NowFaceItem[] | null>(null);
   const [clusters, setClusters] = useState<AttentionClusters>(EMPTY_CLUSTERS);
+  const [memberNames, setMemberNames] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState(false);
   // story #2842 — loop-face.tsx와 동형(orgMemberships에서 orgSlug 파생). useMemo로 orgId/
   // projectId(원시값)가 실제로 바뀔 때만 새 참조를 만든다 — 매 렌더 새 객체면 아래 effect가
@@ -106,6 +113,7 @@ export function NowFace() {
       const result = await loadNowFace(t, viewer);
       setItems(result.items);
       setClusters(result.clusters);
+      setMemberNames(result.memberNames);
     };
     void load();
     const id = setInterval(() => void load(), REFRESH_MS);
@@ -115,7 +123,7 @@ export function NowFace() {
   const list = items ?? [];
   const shown = expanded ? list : list.slice(0, CAP);
   const overflow = Math.max(0, list.length - CAP);
-  const hasClusters = clusters.falsified.length > 0 || clusters.stalled.length > 0 || clusters.loopTotalCount > 0;
+  const hasClusters = clusters.falsified.length > 0 || clusters.stalled.length > 0 || clusters.loopTotalCount > 0 || clusters.authFailure.length > 0;
   // story #2541 AC1/AC2 — story_stalled/hypothesis_falsified가 클러스터 보드로 옮겨간 뒤
   // NowFace 플랫 리스트가 실제로 비어도(decide/done/agent_stuck/unanswered_blocker가 0건)
   // 클러스터에 내용이 있으면 "모두 확인했어요"는 거짓이다 — 두 표면을 합쳐서 판단한다.
@@ -140,6 +148,8 @@ export function NowFace() {
           loopTotalCount={clusters.loopTotalCount}
           measurePlanMissingGoalCount={clusters.measurePlanMissingGoalCount}
           unmeasurableGoalCount={clusters.unmeasurableGoalCount}
+          authFailure={clusters.authFailure}
+          memberNames={memberNames}
         />
       ) : null}
       {items === null ? (
