@@ -72,15 +72,15 @@ def _sign(body: bytes, secret: str) -> str:
 
 
 async def _post_app(payload, Session, *, delivery_id):
-    from app.dependencies.database import get_db
     from app.main import app as fastapi_app
     from app.routers import verdict_capture as mod
+    from tests.conftest import override_db_and_read
 
     async def override_db():
         async with Session() as s:
             yield s
 
-    fastapi_app.dependency_overrides[get_db] = override_db
+    override_db_and_read(fastapi_app, override_db)
     body = json.dumps(payload).encode()
     headers = {
         "X-GitHub-Event": "pull_request", "X-GitHub-Delivery": delivery_id,
