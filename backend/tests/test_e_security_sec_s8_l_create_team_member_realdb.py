@@ -193,6 +193,18 @@ async def test_org_admin_human_can_still_create_agent():
             assert resp.status_code == 201, resp.text
         finally:
             await client.aclose()
+
+        # story #2838(PO AC④) — 온보딩 발급 경로가 실제로 expires_at=None(무만료)을 저장하는지
+        # DB 재조회로 확인(실사고의 유력 발급 경로 중 하나 — diff 밖 grep으로 적발).
+        from sqlalchemy import select as _select
+        from app.models.api_key import ApiKey
+
+        member_id = uuid.UUID(resp.json()["id"])
+        async with Session() as s:
+            key = (
+                await s.execute(_select(ApiKey).where(ApiKey.team_member_id == member_id))
+            ).scalar_one()
+            assert key.expires_at is None
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

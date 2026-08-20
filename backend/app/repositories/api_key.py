@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy import update as sa_update
@@ -18,12 +18,6 @@ def _generate_key() -> tuple[str, str, str]:
     plaintext = f"sk_live_{raw}"
     key_hash = hashlib.sha256(plaintext.encode()).hexdigest()
     return plaintext, prefix, key_hash
-
-
-# story #2838 — "인자를 안 줌"(레거시 내부 호출부·기존 90일 기본 동작 무회귀)과 "명시적으로
-# None(무만료)을 줌"(#2838이 고치는 발급 UI/rotate 승계 경로)을 구분하는 sentinel. 그냥
-# `expires_at=None` 기본값이면 이 둘이 도로 뭉개진다 — 그게 이 스토리가 고치는 병 그 자체.
-_UNSET = object()
 
 
 class ApiKeyRepository:
@@ -48,14 +42,16 @@ class ApiKeyRepository:
         self,
         team_member_id: uuid.UUID,
         scope: list[str] | None = None,
-        expires_at: datetime | None | object = _UNSET,
+        *,
+        expires_at: datetime | None,
     ) -> tuple[ApiKey, str]:
+        """story #2838(PO AC 정정 2026-08-20) — expires_at은 **기본값 없는 필수 kwarg**. 최초
+        sentinel(_UNSET) 안은 이 repo가 인자를 안 받은 호출부에 옛 90일 기본값을 여전히
+        내려줘 그 자체가 "침묵 90일" 경로로 남았다(diff 밖 grep — team_members.py/org_agent.py/
+        recruit_service.py 셋 다 인자 미전달, 실사고의 유력 발급 경로 그 자체). 필수화해 repo
+        층이 침묵을 구조로 거부 — 모든 호출부가 명시(값 있으면 그 시각, None이면 명시적
+        무만료)해야 컴파일조차 안 된다."""
         plaintext, prefix, key_hash = _generate_key()
-        # story #2838 — 인자를 아예 안 준(_UNSET) 내부 호출부만 옛 90일 기본값을 받는다(무회귀).
-        # 명시적으로 None을 준 호출부(발급 UI 경유·rotate 승계)는 그 None을 그대로 "무만료"로
-        # 존중한다 — 여기서 90일로 되돌리면 #2838이 고치려는 병이 이 한 자리에서 재발한다.
-        if expires_at is _UNSET:
-            expires_at = datetime.now(timezone.utc) + timedelta(days=90)
         key = ApiKey(
             team_member_id=team_member_id,
             member_id=team_member_id,  # AC3-1 dual-write: agent member.id = team_member.id (1:1)

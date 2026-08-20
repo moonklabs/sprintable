@@ -97,9 +97,11 @@ def test_create_api_key_request_explicit_date_accepted():
 # ── repo.create() — _UNSET vs 명시 None 구분 ─────────────────────────────────
 @_REAL_DB_SKIP
 @pytest.mark.anyio
-async def test_create_without_arg_still_defaults_90_days_realdb():
-    """내부 호출부(recruit_service 등, 이 스토리 스코프 밖)가 expires_at 인자를 아예 안 주는
-    기존 경로는 무회귀 — 옛 90일 기본 동작 그대로."""
+async def test_create_without_expires_at_arg_rejected_realdb():
+    """PO AC 정정(2026-08-20) — sentinel 초판은 "인자 안 줌"에 옛 90일 기본값을 여전히
+    내려줬는데, 그 경로가 정확히 team_members.py/org_agent.py/recruit_service.py 셋의
+    실호출부(diff 밖 grep으로 적발, 실사고의 유력 발급 경로 그 자체)였다. 이제 필수 kwarg라
+    인자를 안 주면 TypeError — repo 층이 침묵을 구조로 거부한다(90일 기본값 자체가 없음)."""
     from app.repositories.api_key import ApiKeyRepository
 
     engine, Session = await _session()
@@ -107,13 +109,8 @@ async def test_create_without_arg_still_defaults_90_days_realdb():
         async with Session() as s:
             agent_id = await _seed_agent(s)
             repo = ApiKeyRepository(s)
-            before = datetime.now(timezone.utc)
-            key, _plaintext = await repo.create(team_member_id=agent_id, scope=["stories"])
-            await s.commit()
-
-            assert key.expires_at is not None
-            delta = key.expires_at - before
-            assert timedelta(days=89) < delta < timedelta(days=91), delta
+            with pytest.raises(TypeError):
+                await repo.create(team_member_id=agent_id, scope=["stories"])  # expires_at 누락
     finally:
         await engine.dispose()
 
@@ -183,5 +180,26 @@ async def test_rotate_inherits_existing_expiry_datetime_realdb():
             assert result is not None
             new_key, _pt2 = result
             assert new_key.expires_at == fixed_expiry
+    finally:
+        await engine.dispose()
+
+
+# ── AC④ — diff 밖 grep으로 적발된 세 내부 발급 경로가 실제로 expires_at=None을 명시
+# 전달하는지 실증(페드루 PO 리뷰 정정, 유나군 키의 유력 발급 경로가 정확히 이 축). ───────────
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_recruit_service_create_branch_issues_no_expiry_realdb():
+    """recruit_service.py::_rotate_or_create_key — 활성 키가 없는 신규 채용 분기(create 경로)가
+    expires_at=None을 명시하는지. 실사고(유나 키)의 유력 발급 경로가 정확히 여기."""
+    from app.services.recruit_service import _rotate_or_create_key
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            agent_id = await _seed_agent(s)
+            key, _plaintext = await _rotate_or_create_key(s, agent_id=agent_id, scope=["stories"])
+            await s.commit()
+
+            assert key.expires_at is None
     finally:
         await engine.dispose()

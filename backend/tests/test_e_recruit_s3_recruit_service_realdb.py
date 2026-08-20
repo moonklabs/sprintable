@@ -79,7 +79,7 @@ async def _seed_agent_and_role_templates(session):
 
     # POST /agents 가 만드는 것과 동일한 초기 ALL_GROUPS 기본 키(recruit이 이걸 좁혀야 함).
     _key, _plaintext = await ApiKeyRepository(session).create(
-        team_member_id=agent.id, scope=list(ALL_GROUPS)
+        team_member_id=agent.id, scope=list(ALL_GROUPS), expires_at=None
     )
     await session.commit()
     return agent, backend_rt, qa_rt, bogus_rt, org_id
