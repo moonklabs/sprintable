@@ -23,6 +23,9 @@ function attentionItem(overrides: Partial<RawAttentionItem>): RawAttentionItem {
     outcome_result: null,
     falsified_days: null,
     superseded_by_hypothesis_id: null,
+    goal_id: null,
+    overdue_days: null,
+    done_days: null,
     ...overrides,
   };
 }
@@ -92,5 +95,47 @@ describe('deriveAttentionClusters', () => {
     ], t);
     expect(clusters.stalled).toHaveLength(1);
     expect(clusters.falsified).toHaveLength(1);
+  });
+
+  // story #2829/#2830(loop-closure P0) — 「닫힌 적 없는 루프」 3타입.
+  describe('loop_overdue_hypothesis · loop_overdue_goal · loop_outcome_missing_goal', () => {
+    it('3타입 모두 loop 클러스터로 갈리고 kind/href가 타입별로 정확히 파생된다', () => {
+      const clusters = deriveAttentionClusters([
+        attentionItem({ type: 'loop_overdue_hypothesis', hypothesis_id: 'h1', statement: 'A', overdue_days: 3 }),
+        attentionItem({ type: 'loop_overdue_goal', goal_id: 'g1', title: 'B', overdue_days: 5 }),
+        attentionItem({ type: 'loop_outcome_missing_goal', goal_id: 'g2', title: 'C', done_days: 30 }),
+      ], t);
+      expect(clusters.loop).toHaveLength(3);
+      expect(clusters.loop.find((l) => l.id === 'h1')).toMatchObject({ kind: 'overdueHypothesis', title: 'A', days: 3, href: '/flow?hypothesis=h1' });
+      expect(clusters.loop.find((l) => l.id === 'g1')).toMatchObject({ kind: 'overdueGoal', title: 'B', days: 5, href: '/flow?goal=g1' });
+      expect(clusters.loop.find((l) => l.id === 'g2')).toMatchObject({ kind: 'outcomeMissing', title: 'C', days: 30, href: '/flow?goal=g2' });
+    });
+
+    it('오래 방치된 것부터(days 내림차순)로 정렬된다', () => {
+      const clusters = deriveAttentionClusters([
+        attentionItem({ type: 'loop_overdue_goal', goal_id: 'g1', overdue_days: 3 }),
+        attentionItem({ type: 'loop_overdue_goal', goal_id: 'g2', overdue_days: 9 }),
+      ], t);
+      expect(clusters.loop.map((l) => l.id)).toEqual(['g2', 'g1']);
+    });
+
+    it('count 3필드의 합이 loopTotalCount다 — items.length가 top-20 cap에 잘려도 참값을 유지', () => {
+      const items = Array.from({ length: 20 }, (_, i) => attentionItem({ type: 'loop_outcome_missing_goal', goal_id: `g${i}`, done_days: i }));
+      const clusters = deriveAttentionClusters(items, t, {
+        loopOverdueHypothesisCount: 6, loopOverdueGoalCount: 2, loopOutcomeMissingGoalCount: 51,
+        measurePlanMissingGoalCount: 40,
+      });
+      expect(clusters.loop).toHaveLength(20); // items[]는 cap된 그대로
+      expect(clusters.loopTotalCount).toBe(6 + 2 + 51); // count 필드 합 — items.length(20)와 다름
+      expect(clusters.measurePlanMissingGoalCount).toBe(40);
+    });
+
+    it('loopCounts 미제공 시(구 호출부) loopTotalCount는 items.length로 폴백한다(회귀 0)', () => {
+      const clusters = deriveAttentionClusters([
+        attentionItem({ type: 'loop_overdue_hypothesis', hypothesis_id: 'h1', overdue_days: 1 }),
+      ], t);
+      expect(clusters.loopTotalCount).toBe(1);
+      expect(clusters.measurePlanMissingGoalCount).toBe(0);
+    });
   });
 });

@@ -88,11 +88,23 @@ export interface RawAttentionItem {
   outcome_result: Record<string, unknown> | null;
   falsified_days: number | null;
   superseded_by_hypothesis_id: string | null;
+  // story #2829(loop-closure P0, BE PR#3253) — 3번째 attention 유형군 `loop_overdue_hypothesis`
+  // (hypothesis_id 재사용)·`loop_overdue_goal`/`loop_outcome_missing_goal`(goal_id 신규).
+  // overdue_days/done_days는 stalled_days와 동형 정렬축(오래 묵은 것 먼저) — 별개 키인 이유는
+  // 세 타입이 서로 다른 엔티티(가설/goal 2종)를 가리켜 도과일수와 done경과일수 의미가 갈려서다.
+  goal_id: string | null;
+  overdue_days: number | null;
+  done_days: number | null;
 }
 
 export interface RawMyActions {
   queue: RawQueueItem[];
   attention: RawAttentionItem[];
+  // story #2829 — attention 객체 최상위 스칼라 4종(items[] top-20 cap과 무관한 참값·doc a8e73bdb).
+  loopOverdueHypothesisCount: number;
+  loopOverdueGoalCount: number;
+  loopOutcomeMissingGoalCount: number;
+  measurePlanMissingGoalCount: number;
 }
 
 /** 실 payload → 검증된 raw 항목. 핵심 식별자 없는 항목은 링크를 지어낼 수 없어 생략(no-fiction). */
@@ -116,9 +128,11 @@ export function parseMyActions(json: unknown): RawMyActions {
     }
   }
 
+  const attentionObj = isRecord(inner) && isRecord(inner['attention'])
+    ? (inner['attention'] as Record<string, unknown>) : null;
+
   const attention: RawAttentionItem[] = [];
-  const attentionItemsRaw = isRecord(inner) && isRecord(inner['attention'])
-    ? (inner['attention'] as Record<string, unknown>)['items'] : null;
+  const attentionItemsRaw = attentionObj ? attentionObj['items'] : null;
   if (Array.isArray(attentionItemsRaw)) {
     for (const raw of attentionItemsRaw) {
       if (!isRecord(raw)) continue;
@@ -138,11 +152,21 @@ export function parseMyActions(json: unknown): RawMyActions {
         outcome_result: record(raw['outcome_result']),
         falsified_days: num(raw['falsified_days']),
         superseded_by_hypothesis_id: str(raw['superseded_by_hypothesis_id']),
+        goal_id: str(raw['goal_id']),
+        overdue_days: num(raw['overdue_days']),
+        done_days: num(raw['done_days']),
       });
     }
   }
 
-  return { queue, attention };
+  return {
+    queue,
+    attention,
+    loopOverdueHypothesisCount: (attentionObj && num(attentionObj['loop_overdue_hypothesis_count'])) ?? 0,
+    loopOverdueGoalCount: (attentionObj && num(attentionObj['loop_overdue_goal_count'])) ?? 0,
+    loopOutcomeMissingGoalCount: (attentionObj && num(attentionObj['loop_outcome_missing_goal_count'])) ?? 0,
+    measurePlanMissingGoalCount: (attentionObj && num(attentionObj['measure_plan_missing_goal_count'])) ?? 0,
+  };
 }
 
 export interface RawCompletionNotification {
