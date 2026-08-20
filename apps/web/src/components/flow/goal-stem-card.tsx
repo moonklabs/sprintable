@@ -8,6 +8,7 @@ import { deriveNextPickCandidates, NEXT_PICK_TOP_COUNT, type NextPickCandidate, 
 import type { RawReferenceCandidate } from './derive-flow-map';
 import { FlowEpicNodes } from './flow-epic-nodes';
 import { fetchWithAuth } from '@/lib/db/client';
+import { GoalOutcomeDialog, type GoalOutcomeSubmission } from '@/components/goals/goal-outcome-dialog';
 
 export interface MemberLite {
   name: string;
@@ -69,6 +70,8 @@ export function GoalStemCard({
   const [showRest, setShowRest] = useState(false);
   const [quietBusy, setQuietBusy] = useState(false);
   const [quietDismissed, setQuietDismissed] = useState(false);
+  // story #2844 — done 전이는 outcome 판정 다이얼로그를 먼저 거친다(archived는 그대로 직행).
+  const [outcomeDialogOpen, setOutcomeDialogOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,17 +110,25 @@ export function GoalStemCard({
       .finally(() => setPromotingId(null));
   }, [stem.epicId, onStoryPromoted, onPromoteFailed]);
 
-  const handleGoalTransition = useCallback((status: 'done' | 'archived') => {
+  const handleGoalTransition = useCallback((status: 'done' | 'archived', outcome?: GoalOutcomeSubmission) => {
     setQuietBusy(true);
+    // story #2844 — 'skipped'는 outcome_status를 아예 안 보낸다(#2843 계약: 미제공=unmeasured 자동
+    // 마킹, 전이 자체는 안 막힘). hit/miss/unmeasurable만 outcome_status+outcome_result를 싣는다.
+    const body = outcome && !('skipped' in outcome)
+      ? { status, outcome_status: outcome.outcome_status, outcome_result: outcome.outcome_result }
+      : { status };
     fetch(`/api/goals/${stem.epicId}/transition`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
+      body: JSON.stringify(body),
     })
       .then((r) => {
         if (r.ok) onGoalTransitioned(stem.epicId);
       })
-      .finally(() => setQuietBusy(false));
+      .finally(() => {
+        setQuietBusy(false);
+        setOutcomeDialogOpen(false);
+      });
   }, [stem.epicId, onGoalTransitioned]);
 
   return (
@@ -134,10 +145,19 @@ export function GoalStemCard({
         <QuietPrompt
           busy={quietBusy}
           onContinue={() => setQuietDismissed(true)}
-          onClose={() => handleGoalTransition('done')}
+          onClose={() => setOutcomeDialogOpen(true)}
           onArchive={() => handleGoalTransition('archived')}
         />
       )}
+
+      {outcomeDialogOpen ? (
+        <GoalOutcomeDialog
+          goalTitle={stem.title}
+          submitting={quietBusy}
+          onSubmit={(result) => handleGoalTransition('done', result)}
+          onCancel={() => setOutcomeDialogOpen(false)}
+        />
+      ) : null}
 
       {backlogStories.length === 0 ? (
         <p className="text-xs text-muted-foreground">{t('nextMakerNoCandidates')}</p>

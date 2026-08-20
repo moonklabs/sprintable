@@ -43,6 +43,7 @@ async function loadNowFace(t: NowFaceTranslator): Promise<NowFaceLoad> {
       loopOverdueGoalCount: raw.loopOverdueGoalCount,
       loopOutcomeMissingGoalCount: raw.loopOutcomeMissingGoalCount,
       measurePlanMissingGoalCount: raw.measurePlanMissingGoalCount,
+      unmeasurableGoalCount: raw.unmeasurableGoalCount,
     }),
   };
 }
@@ -85,7 +86,7 @@ function RowSkeleton() {
   return <div className="h-[60px] animate-pulse border-t border-border bg-muted/30 first:border-t-0" />;
 }
 
-const EMPTY_CLUSTERS: AttentionClusters = { falsified: [], stalled: [], loop: [], loopTotalCount: 0, measurePlanMissingGoalCount: 0 };
+const EMPTY_CLUSTERS: AttentionClusters = { falsified: [], stalled: [], loop: [], loopTotalCount: 0, measurePlanMissingGoalCount: 0, unmeasurableGoalCount: 0 };
 
 export function NowFace() {
   const t = useTranslations('orgBriefing');
@@ -131,6 +132,7 @@ export function NowFace() {
           loop={clusters.loop}
           loopTotalCount={clusters.loopTotalCount}
           measurePlanMissingGoalCount={clusters.measurePlanMissingGoalCount}
+          unmeasurableGoalCount={clusters.unmeasurableGoalCount}
         />
       ) : null}
       {items === null ? (
