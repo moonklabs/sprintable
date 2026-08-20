@@ -489,6 +489,9 @@ async def test_reopen_gate_if_new_sha_flips_approved_to_pending_realdb():
             assert events[0].event_type == "re_pending"
             assert events[0].head_sha == "new-sha"
             assert events[0].check_conclusion is None
+            # story #2819(AC1) — 무효화된 승인이 귀속됐던 SHA(gate.approved_head_sha가
+            # 리셋되기 전 값)가 원장 행에 남아야 FE가 "SHA old-sha→new-sha 무효화"를 표시.
+            assert events[0].prior_sha == "old-sha"
     finally:
         await engine.dispose()
 

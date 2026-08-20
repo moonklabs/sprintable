@@ -955,6 +955,9 @@ class GateGithubCheckEventResponse(BaseModel):
     repo_full_name: str
     pr_number: int
     head_sha: str
+    # story #2819 — re_pending 행 전용(무효화된 승인이 귀속됐던 SHA). published/resolved 행이나
+    # 마이그레이션 이전 re_pending 행은 null(소급 불가 — FE는 이미 null 폴백 설계, PR#3246).
+    prior_sha: str | None = None
     event_type: str  # published | re_pending | resolved
     check_conclusion: str | None
     created_at: datetime

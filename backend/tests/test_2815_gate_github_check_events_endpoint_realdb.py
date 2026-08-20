@@ -171,6 +171,47 @@ async def test_realdb_list_check_events_latest_first_and_shape():
             assert body[0]["pr_number"] == 7
             assert body[0]["head_sha"] == "sha-1"
             assert "org_id" not in body[0]  # 응답 스키마가 의도적으로 생략(URL이 이미 컨텍스트).
+            # story #2819(AC2/AC3) — published/resolved 행은 prior_sha 개념이 없어 null.
+            assert body[0]["prior_sha"] is None
+            assert body[1]["prior_sha"] is None
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_realdb_list_check_events_exposes_prior_sha_on_re_pending():
+    """story #2819(AC2) — re_pending 행에 실제로 기록된 prior_sha가 GET 응답에 그대로
+    노출되는지(모델 컬럼 신설만으로는 직렬화 경로가 자동 보장되지 않으므로 별도 확認)."""
+    from app.main import app
+    from app.models.gate_github_check_event import GateGithubCheckEvent
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_common(s)
+            _, gate = await _seed_merge_gate(s, seeded)
+            gate_id = gate.id
+            s.add(GateGithubCheckEvent(
+                id=uuid.uuid4(), org_id=seeded["org_id"], gate_id=gate.id, story_id=gate.work_item_id,
+                repo_full_name="acme/repo", pr_number=7, head_sha="sha-2",
+                event_type="re_pending", check_conclusion=None, prior_sha="sha-1",
+            ))
+            await s.commit()
+
+        await _setup_app(app, Session, seeded["org_id"], seeded["caller_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/gates/{gate_id}/github-check-events")
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert len(body) == 1
+            assert body[0]["event_type"] == "re_pending"
+            assert body[0]["head_sha"] == "sha-2"
+            assert body[0]["prior_sha"] == "sha-1"
         finally:
             await client.aclose()
     finally:

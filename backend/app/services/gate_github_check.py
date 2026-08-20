@@ -320,7 +320,9 @@ async def reopen_gate_if_new_sha(
     session.add(GateGithubCheckEvent(
         org_id=org_id, gate_id=gate.id, story_id=gate.work_item_id,
         repo_full_name=repo_full_name, pr_number=pr_number, head_sha=new_head_sha,
-        event_type="re_pending", check_conclusion=None,
+        # story #2819 — 이미 계산해 둔 prior_sha를 로그뿐 아니라 원장에도 남긴다(FE가
+        # "SHA {prior}에서 SHA {new}로 무효화"를 조회 시점에 만들 수 있게).
+        event_type="re_pending", check_conclusion=None, prior_sha=prior_sha,
     ))
     logger.info("gate=%s: re_pending 원장 기록(prior_sha=%s)", gate.id, prior_sha)
     await session.flush()
