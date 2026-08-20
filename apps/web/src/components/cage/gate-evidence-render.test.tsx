@@ -122,6 +122,28 @@ describe('GateEvidence — 재-pending 사유(원장 지연 로드, story #2814 
     expect(container.textContent).toContain('def9876');
   });
 
+  // 2026-08-20 dev 라이브 AC2 재검 중 실측(gate bad5ad2c, PR#3249) — 새 커밋 감지 시 BE가
+  // re_pending 기록 직후 그 SHA로 published까지 같은 처리 안에서 남겨, 원장 최신순 정렬 시
+  // events[0]이 published·re_pending이 events[1]이 되는 순서가 실운영 기본값이었다. 이 케이스에서
+  // events[0]만 보던 구버전은 사유 문구가 항상 죽어있었다(AC2 미충족) — 회귀 가드.
+  it('원장 최신 이벤트가 published여도 그 직전이 re_pending이면 사유 문구가 나타난다(실측 순서)', async () => {
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([
+        { id: 'evt-2', repo_full_name: 'moonklabs/sprintable', pr_number: 3249, head_sha: 'b01c8c3d7fdf291090e3c3e4b69a0c8d3ab03981', event_type: 'published', check_conclusion: null, created_at: '2026-08-20T02:56:36.175894Z' },
+        { id: 'evt-1', repo_full_name: 'moonklabs/sprintable', pr_number: 3249, head_sha: 'b01c8c3d7fdf291090e3c3e4b69a0c8d3ab03981', event_type: 're_pending', check_conclusion: null, created_at: '2026-08-20T02:56:36.114101Z' },
+      ]),
+    } as Response);
+
+    const gate = realApiShapedGate({ status: 'pending', github_check_run_id: 987654321 });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('b01c8c3');
+  });
+
   it('최신 원장 이벤트가 re_pending이 아니면(published 등) 사유 문구를 그리지 않는다', async () => {
     vi.mocked(fetchWithAuth).mockResolvedValue({
       ok: true,
