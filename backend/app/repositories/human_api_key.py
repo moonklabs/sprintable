@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,11 +45,13 @@ class HumanApiKeyRepository:
         self,
         member_id: uuid.UUID,
         name: str | None = None,
-        expires_at: datetime | None = None,
+        *,
+        expires_at: datetime | None,
     ) -> tuple[HumanApiKey, str]:
+        """story #2839(#2838 사람 키 판, PO 확定 패턴 그대로 이식) — 침묵 90일 각인 제거.
+        기본값 없는 필수 kwarg: 호출자가 무만료(None)를 명시적으로 골라야만 무만료가 된다 —
+        "호출자가 안 골랐다"와 "명시적으로 무만료를 골랐다"가 둘 다 None으로 뭉개지던 근본원인."""
         plaintext, prefix, key_hash = _generate_key()
-        if expires_at is None:
-            expires_at = datetime.now(timezone.utc) + timedelta(days=90)
         key = HumanApiKey(
             member_id=member_id,
             name=name,
