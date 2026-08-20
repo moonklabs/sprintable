@@ -161,6 +161,46 @@ describe('GateEvidence — 재-pending 사유(원장 지연 로드, story #2814 
     expect(container.textContent).not.toContain('재-pending');
   });
 
+  // story #2840(BE PR#3264 §2819 착지) — prior_sha가 채워진 re_pending 행은 "SHA A→B 무효화"
+  // 완전 문구로 조립된다(AC1).
+  it('re_pending 행에 prior_sha가 있으면 두 SHA 모두 담긴 완전 문구가 뜬다', async () => {
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([
+        { id: 'evt-1', repo_full_name: 'moonklabs/sprintable', pr_number: 3264, head_sha: 'def9876543210abc9876543210def9876543210', prior_sha: 'aaa1111111111111111111111111111111111a', event_type: 're_pending', check_conclusion: null, created_at: '2026-08-20T02:00:00Z' },
+      ]),
+    } as Response);
+
+    const gate = realApiShapedGate({ status: 'pending', github_check_run_id: 987654321 });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('aaa1111');
+    expect(container.textContent).toContain('def9876');
+  });
+
+  // story #2840 AC2 — prior_sha가 null(마이그레이션 이전 행·published/resolved 행)이면 두 SHA를
+  // 지어내지 않고 기존 단축 문구("새 SHA만")로 정직하게 폴백한다(no-fiction).
+  it('re_pending 행에 prior_sha가 null이면 prior SHA를 지어내지 않고 단축 문구로 폴백한다', async () => {
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([
+        { id: 'evt-1', repo_full_name: 'moonklabs/sprintable', pr_number: 3244, head_sha: 'def9876543210abc9876543210def9876543210', prior_sha: null, event_type: 're_pending', check_conclusion: null, created_at: '2026-08-19T02:00:00Z' },
+      ]),
+    } as Response);
+
+    const gate = realApiShapedGate({ status: 'pending', github_check_run_id: 987654321 });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={gate} />)); });
+
+    expect(container.textContent).toContain('def9876');
+    expect(container.textContent).not.toContain('에서 SHA');
+  });
+
   it('원장 조회가 실패해도(네트워크/404) 카드는 붕괴하지 않고 GithubCheckSignal은 그대로 보인다', async () => {
     vi.mocked(fetchWithAuth).mockResolvedValue({ ok: false, status: 500 } as Response);
 

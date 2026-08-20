@@ -191,11 +191,14 @@ function GithubCheckSignal({ state, sha }: { state: GithubCheckState; sha: strin
 }
 
 // story #2814 2단(§5-② 그라운딩) — backend/app/routers/gates.py GateGithubCheckEventResponse와 정합.
+// story #2840(BE PR#3264 §2819) — prior_sha 추가. re_pending 행 전용(무효화된 승인이 귀속됐던
+// SHA) — published/resolved 행이나 마이그레이션 이전 re_pending 행은 null(소급 불가).
 interface GithubCheckLedgerEvent {
   id: string;
   repo_full_name: string;
   pr_number: number;
   head_sha: string;
+  prior_sha: string | null;
   event_type: 'published' | 're_pending' | 'resolved';
   check_conclusion: string | null;
   created_at: string;
@@ -206,12 +209,10 @@ interface GithubCheckLedgerEvent {
  * 로드(최신순). 최신 이벤트가 `re_pending`이면 "새 커밋이 이전 승인을 무효화했다"는 문장을
  * 그 이벤트의 head_sha(무효화를 유발한 새 SHA)로 조립한다.
  *
- * ⚠️알려진 축소 범위 — "이전에 승인됐던 SHA"까지는 못 보여준다. BE
- * `reopen_gate_if_new_sha`(gate_github_check.py:256)가 `prior_sha`를 지역변수로만 로깅하고
- * `GateGithubCheckEvent` 행엔 `head_sha`(새 SHA)만 남긴다 — 원장에 prior_sha 컬럼이 없다.
- * `gate.approved_head_sha`로 메꾸려 해도 같은 함수가 그 필드를 재-pending 즉시 null로 리셋해
- * 버려(§2-2) FE 시점엔 이미 사라지고 없다. 이번 이터레이션은 "새 SHA"만으로 표시하고, prior_sha
- * 컬럼 추가는 후속 BE 조각으로 페드루/디디군에 별도 보고.
+ * story #2840(BE PR#3264 §2819 착지) — 원장에 `prior_sha`(무효화된 승인이 귀속됐던 SHA)가
+ * 추가돼 "SHA {prior}에서 SHA {new}로 무효화" 완전 문구를 조립할 수 있다. `prior_sha`가
+ * null인 행(published/resolved 행·마이그레이션 이전 re_pending 행)은 두 SHA를 지어내지
+ * 않고 기존 단축 문구("새 커밋으로 이전 승인 무효화")로 정직하게 폴백한다(no-fiction).
  *
  * 트리거는 호출부(GateEvidence)가 결정 — ghState==='in_progress'일 때만 마운트한다(success/
  * failure/not_published/null인 게이트는 재-pending 여지 자체가 없어 호출 불요).
@@ -249,7 +250,9 @@ function GithubRependingReason({ gateId }: { gateId: string }) {
 
   return (
     <p className="mt-1 text-[11px] text-muted-foreground">
-      {t('githubCheckRependingReason', { newSha: repending.head_sha.slice(0, 7) })}
+      {repending.prior_sha
+        ? t('githubCheckRependingReasonWithPrior', { priorSha: repending.prior_sha.slice(0, 7), newSha: repending.head_sha.slice(0, 7) })
+        : t('githubCheckRependingReason', { newSha: repending.head_sha.slice(0, 7) })}
     </p>
   );
 }

@@ -3709,6 +3709,7 @@
     "githubCheckFailure": "실패",
     "githubCheckShaLabel": "SHA {sha}",
     "githubCheckRependingReason": "새 커밋(SHA {newSha})으로 이전 승인이 무효화돼 재-pending 됐습니다.",
+    "githubCheckRependingReasonWithPrior": "SHA {priorSha}에서 SHA {newSha}로 무효화돼 재-pending 됐습니다.",
     "trustLabel": "신뢰도",
     "trustScorePercent": "{score}%",
     "selfReportTag": "자기보고",

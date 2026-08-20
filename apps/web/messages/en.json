@@ -3709,6 +3709,7 @@
     "githubCheckFailure": "Failed",
     "githubCheckShaLabel": "SHA {sha}",
     "githubCheckRependingReason": "A new commit (SHA {newSha}) invalidated the prior approval, moving this back to pending.",
+    "githubCheckRependingReasonWithPrior": "SHA {priorSha} was invalidated by SHA {newSha}, moving this back to pending.",
     "trustLabel": "Trust",
     "trustScorePercent": "{score}%",
     "selfReportTag": "Self-reported",
