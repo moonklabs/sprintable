@@ -4,10 +4,10 @@ import {
   createProjectSchema, createInvitationSchema, acceptInvitationSchema,
   createTeamMemberSchema, setCurrentProjectSchema, updateNotificationSchema,
   createEpicSchema, updateEpicSchema,
-  createSprintSchema,
+  createSprintSchema, updateSprintSchema,
   createStorySchema, updateStorySchema, bulkUpdateStorySchema,
   createTaskSchema, updateTaskSchema,
-  createDocSchema, createDocCommentSchema,
+  createDocSchema, updateDocSchema, createDocCommentSchema,
   saveStandupSchema,
   createStandupFeedbackSchema, updateStandupFeedbackSchema,
   createRetroSchema,
@@ -105,15 +105,18 @@ describe('Sprintable Zod Schemas', () => {
 
   // ─── Epic ─────
   describe('createEpicSchema', () => {
+    // story #2863(P0) — project_id/org_id는 route.ts가 항상 세션값으로 백필한 뒤 파싱하므로
+    // (POST /api/goals: `if (!body.project_id) body.project_id = me.project_id` 등) 스키마
+    // 레벨에서 필수(.min(1))로 요구해도 실 호출부와 무회귀 — 이 테스트도 그 전제 그대로 반영.
     it('유효한 epic를 통과', () => {
-      expect(createEpicSchema.safeParse({ title: 'E-015' }).success).toBe(true);
+      expect(createEpicSchema.safeParse({ project_id: 'p1', org_id: 'o1', title: 'E-015' }).success).toBe(true);
     });
     it('title 없으면 실패', () => {
-      expect(createEpicSchema.safeParse({}).success).toBe(false);
+      expect(createEpicSchema.safeParse({ project_id: 'p1', org_id: 'o1' }).success).toBe(false);
     });
     it('optional 필드 포함 시 통과', () => {
       expect(createEpicSchema.safeParse({
-        title: 'E-015', status: 'active', description: null,
+        project_id: 'p1', org_id: 'o1', title: 'E-015', status: 'active', description: null,
       }).success).toBe(true);
     });
   });
@@ -124,6 +127,21 @@ describe('Sprintable Zod Schemas', () => {
     });
     it('빈 객체 통과 (모두 optional)', () => {
       expect(updateEpicSchema.safeParse({}).success).toBe(true);
+    });
+    // story #2863(P0, 긴급 재발방지) — index.ts에 독립 재정의된 구판(assignee_id 등 8필드
+    // 누락)이 이 스키마의 실제 최신판(epics.ts)을 export 체인에서 가려, PATCH
+    // /api/goals/{id}(assignee_id)가 200이면서 값이 조용히 사라졌다(zod 기본 strip 동작).
+    // «success:true」만 보는 이전 테스트로는 이 클래스의 결함을 못 잡는다 — 파싱된 값
+    // 자체를 실측해야 한다.
+    it('assignee_id가 파싱 결과에 실제로 살아남는다(회귀 — 2863)', () => {
+      const parsed = updateEpicSchema.safeParse({ assignee_id: 'member-1' });
+      expect(parsed.success).toBe(true);
+      expect(parsed.success && parsed.data.assignee_id).toBe('member-1');
+    });
+    it('assignee_id=null(원복)도 실제로 반영된다', () => {
+      const parsed = updateEpicSchema.safeParse({ assignee_id: null });
+      expect(parsed.success).toBe(true);
+      expect(parsed.success && parsed.data.assignee_id).toBe(null);
     });
   });
 
@@ -136,6 +154,19 @@ describe('Sprintable Zod Schemas', () => {
     });
     it('필수 필드 누락 시 실패', () => {
       expect(createSprintSchema.safeParse({ title: 'Sprint 1' }).success).toBe(false);
+    });
+  });
+
+  // story #2863(P0) 스윕 — 같은 클래스(index.ts 지역 재정의가 sprints.ts를 가려
+  // success_hypothesis/metric_definition/measure_after가 조용히 drop됐다).
+  describe('updateSprintSchema', () => {
+    it('outcome 필드(success_hypothesis/measure_after)가 파싱 결과에 실제로 살아남는다(회귀 — 2863)', () => {
+      const parsed = updateSprintSchema.safeParse({
+        success_hypothesis: 'DAU 10% 증가', measure_after: '2026-05-01T00:00:00Z',
+      });
+      expect(parsed.success).toBe(true);
+      expect(parsed.success && parsed.data.success_hypothesis).toBe('DAU 10% 증가');
+      expect(parsed.success && parsed.data.measure_after).toBe('2026-05-01T00:00:00Z');
     });
   });
 
@@ -197,6 +228,22 @@ describe('Sprintable Zod Schemas', () => {
   describe('createDocCommentSchema', () => {
     it('유효한 코멘트를 통과', () => {
       expect(createDocCommentSchema.safeParse({ content: '좋은 문서' }).success).toBe(true);
+    });
+  });
+
+  // story #2863(P0) 스윕 — 같은 클래스(index.ts 지역 재정의가 docs.ts를 가려
+  // slug_locked/sort_order가 조용히 drop됐다).
+  describe('updateDocSchema', () => {
+    it('slug_locked/sort_order가 파싱 결과에 실제로 살아남는다(회귀 — 2863)', () => {
+      const parsed = updateDocSchema.safeParse({ slug_locked: true, sort_order: 3 });
+      expect(parsed.success).toBe(true);
+      expect(parsed.success && parsed.data.slug_locked).toBe(true);
+      expect(parsed.success && parsed.data.sort_order).toBe(3);
+    });
+    it('expected_updated_at/force_overwrite(동시성 제어)도 그대로 유지된다(무회귀)', () => {
+      const parsed = updateDocSchema.safeParse({ expected_updated_at: '2026-01-01T00:00:00Z', force_overwrite: true });
+      expect(parsed.success).toBe(true);
+      expect(parsed.success && parsed.data.expected_updated_at).toBe('2026-01-01T00:00:00Z');
     });
   });
 
