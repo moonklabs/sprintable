@@ -951,6 +951,16 @@ async def complete_png_export(
     if size_bytes is None:
         return _err("NOT_FOUND", "업로드된 객체를 찾을 수 없습니다(head_object 실패)", 404)
 
+    # story #2906(선생님 확定 2026-08-21) — 이 export 경로는 sync_attachment_assets가 아니라
+    # 별도 _upsert_export_asset(자체 ON CONFLICT)를 쓰는 두 번째 asset-생성 choke point라
+    # check_storage_capacity가 애초에 안 걸려 있었다(그라운딩에서 발견된 진짜 갭 ②).
+    # chat/story/doc 첨부와 동일 규율(ee seam·SaaS only·OSS no-op)로 upsert 直前에 건다.
+    from app.core.config import settings
+
+    if settings.is_ee_enabled:
+        from ee.plan_limits import check_storage_capacity  # type: ignore[import]
+        await check_storage_capacity(session, org_id, [{"url": body.object_path}])
+
     created_by = uuid.UUID(auth.user_id)
     asset_id = await _upsert_export_asset(
         session, org_id=org_id, project_id=project_id, object_path=body.object_path,
@@ -1017,6 +1027,13 @@ async def create_html_export(
     )
     if not ok:
         return _err("STORAGE_ERROR", "HTML export 업로드 실패", 500)
+
+    # story #2906 — PNG export와 동일 갭·동일 규율(위 complete_png_export 주석 참고).
+    from app.core.config import settings
+
+    if settings.is_ee_enabled:
+        from ee.plan_limits import check_storage_capacity  # type: ignore[import]
+        await check_storage_capacity(session, org_id, [{"url": object_path}])
 
     created_by = uuid.UUID(auth.user_id)
     asset_id = await _upsert_export_asset(

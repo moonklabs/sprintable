@@ -119,12 +119,31 @@ async def check_project_create_limit(session: AsyncSession, org_id) -> None:
         raise _plan_limit_error("project", FREE_LIMITS["max_projects"])
 
 
-def _storage_limit_error(resource: str, limit_mb: int, tier: str) -> HTTPException:
-    upgrade = tier != "pro"
-    msg = (
-        f"{tier} plan {resource} limit ({limit_mb}MB) reached. Upgrade for more capacity."
-        if upgrade else f"{resource} limit ({limit_mb}MB) reached."
-    )
+def _format_mb(mb: int) -> str:
+    return f"{mb / 1024:.1f}GB" if mb >= 1024 else f"{mb}MB"
+
+
+def _storage_limit_error(resource: str, limit_mb: int, tier: str, *, used_mb: float | None = None) -> HTTPException:
+    # story #2906(선생님 확定 2026-08-21, 페드루군 조건ⓐ) — 고객 대면 문구는 한국어로
+    # 「현재 사용량/한도」+「무엇을 하면 되는지」를 명시한다(dunning 메일 문안과 같은 규율,
+    # #2907 참고). resource="storage"=총량 초과(파일 정리 or 업그레이드 안내),
+    # resource="file_size"=단일 파일이 한도 자체를 넘음(정리로는 해결 안 됨, 업그레이드만).
+    #
+    # 유나양 design 지적(2026-08-21) — business는 더 위 tier가 없어 "업그레이드해
+    # 주세요"가 거짓 안내다(업그레이드 불가한데 업그레이드를 권함). upgrade_required
+    # (=tier != "business")를 문구 자체에도 배선 — business면 정리/문의로 갈음.
+    upgrade_required = tier != "business"
+    if resource == "file_size":
+        if upgrade_required:
+            msg = f"파일 크기가 {tier} 플랜의 파일당 한도({_format_mb(limit_mb)})를 초과했습니다. 더 작은 파일로 업로드하시거나 플랜을 업그레이드해 주세요."
+        else:
+            msg = f"파일 크기가 {tier} 플랜의 파일당 한도({_format_mb(limit_mb)})를 초과했습니다. 더 작은 파일로 업로드해 주세요."
+    else:
+        usage_str = f"{used_mb:.0f}MB" if used_mb is not None else "한도"
+        if upgrade_required:
+            msg = f"저장 공간이 부족합니다({tier} 플랜 한도 {_format_mb(limit_mb)} 중 {usage_str} 사용 중). 기존 파일을 정리하시거나 플랜을 업그레이드해 주세요."
+        else:
+            msg = f"저장 공간이 부족합니다({tier} 플랜 한도 {_format_mb(limit_mb)} 중 {usage_str} 사용 중). 기존 파일을 정리해 주세요. 추가 용량이 필요하시면 문의해 주세요."
     return HTTPException(
         status_code=402,
         detail={
@@ -132,39 +151,58 @@ def _storage_limit_error(resource: str, limit_mb: int, tier: str) -> HTTPExcepti
             "resource": resource,
             "limit_mb": limit_mb,
             "tier": tier,
-            "upgrade_required": upgrade,
+            "upgrade_required": upgrade_required,
             "message": msg,
         },
     )
 
 
-async def get_org_storage_limit_bytes(session: AsyncSession, org_id) -> int | None:
-    """org tier 의 storage 캡(bytes). 캡 미정의 tier=None(무제한). storage-usage 표시 공용(server 권위 SSOT)."""
-    tier = await _get_org_tier(session, org_id)
+async def _get_org_storage_limits(session: AsyncSession, tier: str) -> tuple[int, int] | None:
+    """(storage_mb_limit, max_file_mb) — 가격표 정본(offering_versions). story #2906
+    (선생님 확定 2026-08-21) — seats(#2776)와 동일 이관: 이전엔 `plan_tier_limits`(구
+    twin)가 SSOT였으나, 카탈로그가 이미 `offering_versions`로 통일된 뒤였다(가격·좌석은
+    거기 있는데 storage만 구 테이블에 남아 "경고 임계≠거부 임계" split-brain 위험이
+    있었다 — 지금 이 자리서 닫는다). `_get_offering_limits`와 동일 조회 패턴(currency
+    무관·ASC 1건, 통화별 값 차이 없음)."""
     row = (await session.execute(
-        text("SELECT max_storage_mb FROM plan_tier_limits WHERE tier = :t"), {"t": tier},
-    )).first()
-    return int(row[0]) * 1024 * 1024 if row else None
-
-
-async def check_storage_capacity(session: AsyncSession, org_id, attachments: list[dict] | None) -> None:
-    """S8: org storage 캡 enforce(서버 게이트·all tiers). per-file + 총량(committed+신규).
-
-    tier(org_subscriptions)→plan_tier_limits[tier]→캡. 캡 미정의 tier=무제한(no-op). **우리 버킷 객체만**
-    카운트(canonical_object_path not None·외부 URL 제외). **size 는 head_object authoritative**(까심 ①:
-    client-size:0 quota 우회·음수 size 오염 차단·sync 와 동일 source). 객체 부재(head None)=미카운트(미등록될
-    것). OSS 는 호출 안 됨(is_ee_enabled 게이트·라우터). 초과 시 402 PLAN_LIMIT_EXCEEDED.
-    """
-    if not attachments:
-        return
-    tier = await _get_org_tier(session, org_id)
-    row = (await session.execute(
-        text("SELECT max_storage_mb, max_file_mb FROM plan_tier_limits WHERE tier = :t"),
+        text(
+            "SELECT storage_mb_limit, max_file_mb FROM offering_versions "
+            "WHERE tier = :t AND effective_to IS NULL ORDER BY currency ASC LIMIT 1"
+        ),
         {"t": tier},
     )).first()
     if row is None:
-        return  # 캡 미정의 tier → 무제한
-    max_storage_mb, max_file_mb = int(row[0]), int(row[1])
+        return None
+    return int(row[0]), int(row[1])
+
+
+async def get_org_storage_limit_bytes(session: AsyncSession, org_id) -> int | None:
+    """org tier 의 storage 캡(bytes). 캡 미정의 tier=None(무제한). storage-usage 표시 공용(server 권위 SSOT)."""
+    tier = await _get_org_tier(session, org_id)
+    limits = await _get_org_storage_limits(session, tier)
+    return limits[0] * 1024 * 1024 if limits else None
+
+
+async def check_storage_capacity(session: AsyncSession, org_id, attachments: list[dict] | None) -> None:
+    """S8(story #2906 갱신, 2026-08-21): org storage 캡 enforce(서버 게이트·all tiers).
+    per-file + 총량(committed+신규).
+
+    tier(org_subscriptions)→offering_versions[tier]→캡. 캡 미정의 tier=무제한(no-op).
+    **우리 버킷 객체만** 카운트(canonical_object_path not None·외부 URL 제외). **size 는
+    head_object authoritative**(까심 ①: client-size:0 quota 우회·음수 size 오염 차단·sync
+    와 동일 source). 객체 부재(head None)=미카운트(미등록될 것). OSS 는 호출 안 됨
+    (is_ee_enabled 게이트·라우터). 초과 시 402 PLAN_LIMIT_EXCEEDED."""
+    if not attachments:
+        return
+    tier = await _get_org_tier(session, org_id)
+    if tier not in _KNOWN_TIERS:
+        logger.error("check_storage_capacity: unknown tier %r for org_id=%s — skipping cap(fail-open)", tier, org_id)
+        return
+    limits = await _get_org_storage_limits(session, tier)
+    if limits is None:
+        logger.error("check_storage_capacity: no offering_version for tier=%r org_id=%s — skipping cap(fail-open)", tier, org_id)
+        return
+    max_storage_mb, max_file_mb = limits
     max_file_bytes = max_file_mb * 1024 * 1024
     max_storage_bytes = max_storage_mb * 1024 * 1024
 
@@ -192,7 +230,7 @@ async def check_storage_capacity(session: AsyncSession, org_id, attachments: lis
         {"oid": str(org_id)},
     )).scalar() or 0
     if int(used) + new_bytes > max_storage_bytes:
-        raise _storage_limit_error("storage", max_storage_mb, tier)
+        raise _storage_limit_error("storage", max_storage_mb, tier, used_mb=int(used) / (1024 * 1024))
 
 
 async def _seat_usage(session: AsyncSession, org_id, *, include_pending_invites: bool) -> int:

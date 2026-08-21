@@ -21,7 +21,6 @@ from app.models.agent_session import AgentSession
 from app.models.asset import Asset
 from app.models.hitl import HitlRequest
 from app.models.org_subscription import OrgSubscription
-from app.models.plan_tier_limit import PlanTierLimit
 from app.models.project import OrgMember
 from app.models.user import User
 from app.services.email import send_email
@@ -821,9 +820,16 @@ async def storage_usage_warn(
         subs = list((await session.execute(
             select(OrgSubscription).where(OrgSubscription.status == "active")
         )).scalars().all())
+        # story #2906(선생님 확定 2026-08-21) — SSOT를 offering_versions로 이관(check_storage_capacity와
+        # 동일 소스, 구 twin(plan_tier_limits) 결별). 이관 전엔 「경고 임계(이 cron)≠거부 임계(#2906
+        # 이전 check_storage_capacity)」split-brain 위험이 실재했다 — DISTINCT ON으로 tier당 대표 1행
+        # (currency 무관·ASC 결정적 — `_get_org_storage_limits`와 동일 규율).
         caps = {
             t: mb for t, mb in (await session.execute(
-                select(PlanTierLimit.tier, PlanTierLimit.max_storage_mb)
+                text(
+                    "SELECT DISTINCT ON (tier) tier, storage_mb_limit FROM offering_versions "
+                    "WHERE effective_to IS NULL ORDER BY tier, currency ASC"
+                )
             )).all()
         }
         notified = 0

@@ -1098,6 +1098,7 @@ async def upload_doc_attachment(
     (has_project_access·sync_attachment_assets) — doc 은 업로드=등록이 곧 종결 액션이라(story/chat과
     달리 별도 "메시지 생성" 시점이 없음) S5식 집계 재검증이 불필요하다(이 한 호출 자체가 그 지점).
     """
+    from app.core.config import settings
     from app.models.doc import Doc
     from app.services import mcp_attachment_upload
     from app.services.asset_registry import DEFAULT_CONTAINER, sync_attachment_assets
@@ -1124,6 +1125,16 @@ async def upload_doc_attachment(
     )
     if not uploaded:
         raise HTTPException(status_code=502, detail="upload failed")
+
+    # story #2906(선생님 확定 2026-08-21) — 이 엔드포인트는 sync_attachment_assets 6개
+    # 호출부 중 유일하게 check_storage_capacity가 안 걸려 있던 자리(발견된 진짜 갭).
+    # 다른 4곳(conversations.py·docs.py 문서저장·stories.py×2)과 동일 규율(ee seam·SaaS
+    # only·OSS no-op)로 sync 直前에 건다 — put_object 直後(byte는 이미 썼지만 이 함수
+    # 자체가 head_object로 재조회하는 기존 계약이라 업로드 前 시점엔 걸 수 없다, 다른
+    # 4곳과 동형 트레이드오프).
+    if settings.is_ee_enabled:
+        from ee.plan_limits import check_storage_capacity  # type: ignore[import]
+        await check_storage_capacity(session, org_id, [{"url": object_path}])
 
     created_by: uuid.UUID | None = None
     try:
