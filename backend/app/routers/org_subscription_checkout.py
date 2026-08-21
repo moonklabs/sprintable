@@ -42,6 +42,10 @@ class ChangeTierRequest(BaseModel):
     new_tier: Literal["starter", "team", "business"]
 
 
+class DowngradeRequest(BaseModel):
+    new_tier: Literal["starter", "team", "business"]
+
+
 class CheckoutResponse(BaseModel):
     org_id: uuid.UUID
     tier: str
@@ -50,6 +54,10 @@ class CheckoutResponse(BaseModel):
     current_period_start: str | None = None
     current_period_end: str | None = None
     declined_reason: str | None = None
+    # story #2881 — 예약된 하향이 있으면 어드민/사용자 표면에 노출(페드루 지시: 응답
+    # 스키마에 pending 노출 포함). 예약 없으면 셋 다 None(가장 흔한 상태).
+    pending_tier: str | None = None
+    pending_change_apply_at: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -60,6 +68,8 @@ def _to_response(sub: OrgSubscription, *, declined_reason: str | None = None) ->
         current_period_start=sub.current_period_start.isoformat() if sub.current_period_start else None,
         current_period_end=sub.current_period_end.isoformat() if sub.current_period_end else None,
         declined_reason=declined_reason,
+        pending_tier=sub.pending_tier,
+        pending_change_apply_at=sub.pending_change_apply_at.isoformat() if sub.pending_change_apply_at else None,
     )
 
 
@@ -146,5 +156,62 @@ async def change_tier_endpoint(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return _to_response(sub)
+
+
+@router.post("/downgrade", response_model=CheckoutResponse)
+async def reserve_downgrade_endpoint(
+    body: DowngradeRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+) -> CheckoutResponse:
+    """story #2881(결제 트랙 갭②) — 하향 예약. 즉시 전이 없음 — 다음 갱신일부터 적용
+    (부분 환불 없음, v2.2 D10). 단일 슬롯이라 재호출은 이전 예약을 덮어쓴다(그것도
+    이 엔드포인트의 정상 사용 — 재호출=재예약). 응답의 `pending_tier`/
+    `pending_change_apply_at`이 예약 상태를 노출한다."""
+    settings = await get_platform_settings(session)
+    if not settings.billing_checkout_enabled:
+        raise HTTPException(status_code=403, detail="billing checkout is not yet enabled")
+
+    from app.services.project_auth import is_org_owner_or_admin
+
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(status_code=403, detail="org admin/owner role required")
+
+    from app.services.org_subscription_downgrade import DowngradeError, reserve_downgrade
+
+    try:
+        sub = await reserve_downgrade(session, org_id=org_id, new_tier=body.new_tier)
+    except DowngradeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return _to_response(sub)
+
+
+@router.delete("/downgrade", response_model=CheckoutResponse)
+async def cancel_downgrade_endpoint(
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+) -> CheckoutResponse:
+    """story #2881 — 예약 철회(재상향 아닌 단순 취소). pending_*만 클리어, 구독 원
+    tier는 무변화."""
+    settings = await get_platform_settings(session)
+    if not settings.billing_checkout_enabled:
+        raise HTTPException(status_code=403, detail="billing checkout is not yet enabled")
+
+    from app.services.project_auth import is_org_owner_or_admin
+
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(status_code=403, detail="org admin/owner role required")
+
+    from app.services.org_subscription_downgrade import DowngradeError, cancel_pending_downgrade
+
+    try:
+        sub = await cancel_pending_downgrade(session, org_id=org_id)
+    except DowngradeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return _to_response(sub)
