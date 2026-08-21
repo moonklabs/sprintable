@@ -63,6 +63,12 @@ export const updateStorySchema = z.object({
   success_hypothesis: z.string().optional().nullable(),
   metric_definition: metricDefinitionSchema.optional().nullable(),
   measure_after: z.string().datetime().optional().nullable(),
+  // story #2868/#2874 자매(2026-08-21, 페드루 라이브 프로브 실측) — docs.ts::updateDocSchema
+  // (151e05f1)엔 있는데 여기 없어 zod가 침묵 strip, 웹 프록시 경유 PATCH는 BE의 409 낙관적
+  // 동시성 가드에 아예 도달 못 했다(#2863과 동일 결함 클래스: 있다≠지금 쓰는 것). docs.ts와
+  // 동형 필드로 합집합 유지(어느 쪽도 새로 자르지 않음).
+  expected_updated_at: z.string().optional(),
+  force_overwrite: z.boolean().optional(),
 });
 
 const bulkUpdateItemSchema = z.object({

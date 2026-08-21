@@ -192,6 +192,18 @@ describe('Sprintable Zod Schemas', () => {
     it('status 없이 다른 필드만 수정 통과', () => {
       expect(updateStorySchema.safeParse({ title: '수정된 제목' }).success).toBe(true);
     });
+    // story #2868/#2874 자매(2026-08-21, 페드루 라이브 프로브 실측) — docs.ts::updateDocSchema
+    // (151e05f1)엔 있었는데 여기 없어 zod가 침묵 strip, 웹 프록시 경유 PATCH가 BE의 409
+    // 낙관적 동시성 가드에 아예 도달 못 했다(#2863과 동일 결함 클래스). docs 쪽 회귀 테스트
+    // (하단 'expected_updated_at/force_overwrite(동시성 제어)도 그대로 유지된다')와 동형.
+    it('expected_updated_at/force_overwrite(동시성 제어)도 파싱 결과에 실제로 살아남는다(회귀 — 2868/2874)', () => {
+      const parsed = updateStorySchema.safeParse({
+        expected_updated_at: '2026-01-01T00:00:00Z', force_overwrite: true,
+      });
+      expect(parsed.success).toBe(true);
+      expect(parsed.success && parsed.data.expected_updated_at).toBe('2026-01-01T00:00:00Z');
+      expect(parsed.success && parsed.data.force_overwrite).toBe(true);
+    });
   });
 
   describe('bulkUpdateStorySchema', () => {

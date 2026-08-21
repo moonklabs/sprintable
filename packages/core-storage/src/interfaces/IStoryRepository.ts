@@ -70,6 +70,11 @@ export interface UpdateStoryInput {
   success_hypothesis?: string | null;
   metric_definition?: MetricDefinition | null;
   measure_after?: string | null;
+  // story #2868/#2874 자매(2026-08-21) — BE 낙관적 동시성(409 STORY_CONFLICT) 제어 필드.
+  // updateStorySchema(zod)에 이어 이 타입에도 없으면 ALLOWED_FIELDS(story.ts)/fastapiCall
+  // 본문 어디선가 다시 조용히 새거나 컴파일 자체가 막힌다 — 전 구간 SSOT로 여기서 열어 둔다.
+  expected_updated_at?: string;
+  force_overwrite?: boolean;
 }
 
 export interface BulkUpdateItem {
