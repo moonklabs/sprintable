@@ -100,3 +100,34 @@ describe('ReadingPanel 스택 — story #2888 R5', () => {
     expect(wrapper?.className).toContain('motion-safe:fade-in');
   });
 });
+
+// story #2904 — 카디르+codex #3303 QA 확定: popOne(최상단 콘텐츠 자기 X)의 "pop-vs-close"
+// 분기가 뮤테이션 무감지였다(정적 렌더 테스트만 있고 이 클릭 자체를 아무 테스트도 안 눌렀음).
+// EntityPreviewModal(embedded) 헤더의 실 닫기 버튼(aria-label="닫기")을 직접 클릭해 왕복 검증.
+describe('ReadingPanel — story #2904 동역학 ③ popOne(최상단 자기 X) pop-vs-close', () => {
+  it('스택 2단 이상 — 콘텐츠 자기 닫기는 onClose가 아니라 onNavigateTo(length-2)를 호출한다', async () => {
+    const onNavigateTo = vi.fn();
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(<ReadingPanel stack={[A, B, C]} onNavigateTo={onNavigateTo} onClose={onClose} />);
+    });
+    const contentCloseBtn = container.querySelector('[aria-label="닫기"]') as HTMLButtonElement;
+    expect(contentCloseBtn).not.toBeNull();
+    await act(async () => { contentCloseBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onNavigateTo).toHaveBeenCalledWith(1); // stack.length(3) - 2
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('스택 1단뿐 — 콘텐츠 자기 닫기는 onNavigateTo가 아니라 onClose를 호출한다(전체 닫기와 동형)', async () => {
+    const onNavigateTo = vi.fn();
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(<ReadingPanel stack={[A]} onNavigateTo={onNavigateTo} onClose={onClose} />);
+    });
+    const contentCloseBtn = container.querySelector('[aria-label="닫기"]') as HTMLButtonElement;
+    expect(contentCloseBtn).not.toBeNull();
+    await act(async () => { contentCloseBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onNavigateTo).not.toHaveBeenCalled();
+  });
+});
