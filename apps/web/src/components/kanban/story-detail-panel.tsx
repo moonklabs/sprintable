@@ -15,6 +15,7 @@ import { parseCursorMeta } from '@/lib/pagination';
 import { AttachmentImage } from '@/components/chat/attachment-image';
 import { AttachmentFile } from '@/components/chat/attachment-file';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { parseEntityRef } from '@/components/chat/entity-ref';
 import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from '@/components/chat/reference-drop-notice';
 import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
 import { DependencyGraph } from './dependency-graph';
@@ -293,16 +294,18 @@ export function DescriptionViewer({
           </span>
         );
       }
-      // id는 UUID만 허용 — chat-bubble.tsx의 entity: 파싱 규칙과 동일.
-      const m = href?.match(/^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
+      // story #2888(S2a) — 파싱은 parseEntityRef SSOT(chat-bubble.tsx·embed-card.tsx와 공유,
+      // 정규식 정의 1곳). ghost 판정(isGhostOutgoingReference)은 이 화면 고유 축(story 서술의
+      // «나가는» 참조)이라 EmbedRenderer 결정 트리와는 별개 — 그대로 둔다.
+      const ref = parseEntityRef(href);
       // ⛔asset은 reference_registry.ENTITY_RESOLVERS 밖의 FE 전용 타입(mention_parser.py
       // 주석 참조) — chat-bubble.tsx와 동일하게 일반 EntityChip 경로를 안 태운다.
-      if (m && m[1]!.toLowerCase() !== 'asset') {
-        const ghost = isGhostOutgoingReference(references, m[1]!, m[2]!);
+      if (ref && ref.entityType.toLowerCase() !== 'asset') {
+        const ghost = isGhostOutgoingReference(references, ref.entityType, ref.entityId);
         return (
           // 긴급 정정(2026-07-28) 재발 방지 — 부모 div의 편집모드 진입 onClick으로 버블링 금지.
           <span onClick={(e) => e.stopPropagation()}>
-            <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} ghost={ghost} />
+            <EntityChip entityType={ref.entityType} entityId={ref.entityId} label={String(children)} href={getEntityHref(ref.entityType, ref.entityId)} ghost={ghost} />
           </span>
         );
       }

@@ -9,6 +9,8 @@ import { useTranslations } from 'next-intl';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
 import { EmbedCard, EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { parseEntityRef } from '@/components/chat/entity-ref';
+import { resolveEmbedDecision } from '@/components/chat/embed-renderer';
 import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
 import { AssetEmbedCard } from '@/components/chat/asset-embed-card';
 import { getFileIcon } from '@/lib/file-icon';
@@ -75,39 +77,6 @@ interface ChatBubbleProps {
 interface ContextMenuState {
   x: number;
   y: number;
-}
-
-// story #2263 AC6 — 본문 토큰(target_type+target_id)이 메시지의 stored 참조 목록에 있는지
-// 대조한다. `references === undefined`(옛 서버·SSE 디스패치 등 이 필드를 안 주는 경로)는
-// 판단 재료가 없다는 뜻이라 유령 처리를 보류한다(폴백 — 기존처럼 그대로 그린다). 대소문자
-// 차이(사용자가 UUID를 대문자로 쳐 넣는 경우)를 흡수하려 양쪽 다 lower-case로 비교한다.
-function isGhostReference(
-  references: ChatMessage['references'],
-  targetType: string,
-  targetId: string,
-): boolean {
-  if (references === undefined) return false;
-  const type = targetType.toLowerCase();
-  const id = targetId.toLowerCase();
-  return !references.some((r) => r.target_type.toLowerCase() === type && r.target_id.toLowerCase() === id);
-}
-
-// story #2262 AC1(2026-08-08) — doc `flow-map-blueprint-v1` §2-3 「사실성 · 표면 · 지점」의
-// «표면·지점» 재료. isGhostReference와 같은 대조를 한 번 더 해 form·referenced_at까지
-// 끌어온다(스토리 자신의 AC1 정의: 표면=form('mention'|'embed'|'proof'), 지점=referenced_at —
-// "이 참조가 «언제 생겼나»"이지 대상이 「언제 만들어졌나」가 아니다). 매칭 없으면(유령이거나
-// references 자체가 없으면) null — 그때는 칩에 표기하지 않는다(모르는 것을 지어내지 않는다).
-function findReferenceMeta(
-  references: ChatMessage['references'],
-  targetType: string,
-  targetId: string,
-): { form: string; referencedAt: string } | null {
-  if (!references) return null;
-  const type = targetType.toLowerCase();
-  const id = targetId.toLowerCase();
-  const match = references.find((r) => r.target_type.toLowerCase() === type && r.target_id.toLowerCase() === id);
-  if (!match || !match.form || !match.referenced_at) return null;
-  return { form: match.form, referencedAt: match.referenced_at };
 }
 
 // story #2671 — EmbedCard(ME-S5 원조 카드 렌더)가 실 렌더 경로에 미배선이던 것을 여기서
@@ -216,21 +185,25 @@ function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenRe
   const components = useMemo(() => ({
     p: ({ children, node }: { children?: React.ReactNode; node?: HastElementLike }) => {
       // story #2671 — 참조 링크 하나가 문단의 전부면(다른 텍스트 0) 카드 임베드로.
+      // story #2888(S2a) — 파싱은 parseEntityRef SSOT·결정은 resolveEmbedDecision(EmbedRenderer)
+      // 공유. 이 슬롯은 'card' kind일 때만 반응하고(allowCard:true), asset/chip은 원래도
+      // 여기선 무동작이라(기존 동작 그대로) 그대로 아래 <p> 폴백으로 떨어진다.
       const link = soleLinkChild(node);
       const href = link?.properties?.href;
-      const m = typeof href === 'string' ? href.match(/^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i) : null;
-      if (m && m[1]!.toLowerCase() !== 'asset' && !isGhostReference(references, m[1]!, m[2]!)) {
-        const statusFetch = entityStatusByKey?.[`${m[1]!.toLowerCase()}:${m[2]!.toLowerCase()}`];
+      const ref = typeof href === 'string' ? parseEntityRef(href) : null;
+      const decision = ref ? resolveEmbedDecision(ref.entityType, ref.entityId, references, { allowCard: true }) : null;
+      if (ref && decision?.kind === 'card') {
+        const statusFetch = entityStatusByKey?.[`${ref.entityType.toLowerCase()}:${ref.entityId.toLowerCase()}`];
         const status = statusFetch?.kind === 'resolved' ? statusFetch.raw : null;
         // PO 리뷰 지적 — 링크 라벨이 여러 자식(예: **강조** 섞인 텍스트)으로 쪼개질 수
         // 있어 첫 자식만 읽으면 라벨이 잘린다. 전 자식을 이어붙인다(hastNodeText가
         // 재귀로 하듯 여기도 동일 패턴).
-        const label = (link!.children ?? []).map(hastNodeText).join('') || m[2]!;
+        const label = (link!.children ?? []).map(hastNodeText).join('') || ref.entityId;
         const openReadingPanel = onOpenReadingPanel
           ? (entityType: string, entityId: string, t: string | null, s: string | null, h: string | null) =>
               onOpenReadingPanel({ kind: 'entity', entityType, entityId, title: t, status: s, href: h })
           : undefined;
-        return <EmbedCard entity_type={m[1]!} entity_id={m[2]!} title={label} status={status} onOpenReadingPanel={openReadingPanel} />;
+        return <EmbedCard entity_type={ref.entityType} entity_id={ref.entityId} title={label} status={status} onOpenReadingPanel={openReadingPanel} />;
       }
       return <p className={`mb-1.5 [overflow-wrap:anywhere] text-sm leading-relaxed last:mb-0 ${text}`}>{children}</p>;
     },
@@ -275,28 +248,32 @@ function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenRe
         );
       }
       // id 는 UUID 만 허용 — `dead`·`----` 등 비-UUID는 매칭 실패→평문 링크로 폴백(엔티티 칩/카드 미렌더).
-      const m = href?.match(/^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
-      if (m) {
+      // story #2888(S2a) — 파싱·결정은 parseEntityRef+resolveEmbedDecision(EmbedRenderer) 공유.
+      const ref = parseEntityRef(href);
+      if (ref) {
+        const decision = resolveEmbedDecision(ref.entityType, ref.entityId, references, { allowCard: false });
         // S6: 자산 토큰은 컴팩트 칩 대신 리치 임베드 카드(썸네일+메타+화살표).
         // ⛔asset은 reference_registry.ENTITY_RESOLVERS 밖의 FE 전용 타입이라(embed-card.tsx
         // 주석 참조) mention_parser가 애초에 entity_references에 안 쓴다 — stored 참조와
         // 대조하면 asset 임베드가 전부 유령으로 오판된다. 유령 판정 자체를 안 태운다.
-        if (m[1]!.toLowerCase() === 'asset') {
-          return <AssetEmbedCard entityId={m[2]!} label={String(children)} ownMessage={isMine} onOpenReadingPanel={onOpenReadingPanel} />;
+        if (decision.kind === 'asset') {
+          return <AssetEmbedCard entityId={ref.entityId} label={String(children)} ownMessage={isMine} onOpenReadingPanel={onOpenReadingPanel} />;
         }
-        const ghost = isGhostReference(references, m[1]!, m[2]!);
-        const referenceMeta = ghost ? null : findReferenceMeta(references, m[1]!, m[2]!);
-        return (
-          <EntityChip
-            entityType={m[1]!}
-            entityId={m[2]!}
-            label={String(children)}
-            href={getEntityHref(m[1]!, m[2]!)}
-            ghost={ghost}
-            referenceMeta={referenceMeta}
-            entityStatus={entityStatusByKey?.[`${m[1]!.toLowerCase()}:${m[2]!.toLowerCase()}`]}
-          />
-        );
+        // allowCard:false라 decision.kind는 여기서 항상 'chip'('card'는 불가능 — resolveEmbedDecision
+        // 계약: opts.allowCard가 false면 'card'를 반환하지 않는다).
+        if (decision.kind === 'chip') {
+          return (
+            <EntityChip
+              entityType={ref.entityType}
+              entityId={ref.entityId}
+              label={String(children)}
+              href={getEntityHref(ref.entityType, ref.entityId)}
+              ghost={decision.ghost}
+              referenceMeta={decision.referenceMeta}
+              entityStatus={entityStatusByKey?.[`${ref.entityType.toLowerCase()}:${ref.entityId.toLowerCase()}`]}
+            />
+          );
+        }
       }
       return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
     },

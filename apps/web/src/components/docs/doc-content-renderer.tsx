@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { extractDocHeadings, slugifyHeading } from './doc-heading-utils';
 // story #2639 — 본문 entity: 참조 링크를 앱 내 엔티티로 잇는다(chat/story-panel과 동일 자산 재사용).
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
+import { parseEntityRef } from '@/components/chat/entity-ref';
 import { fetchWithAuth } from '@/lib/db/client';
 
 interface DocContentRendererProps {
@@ -80,11 +81,6 @@ const docMarkdownSanitizeSchema = {
     href: [...(defaultSchema.protocols?.href ?? []), 'entity'],
   },
 };
-
-// story #2639 — 본문 엔티티 참조 토큰 `[제목](entity:타입:id)`의 href 매칭(id는 UUID만 —
-// 비-UUID는 매칭 실패→평문 링크 폴백). chat-bubble.tsx·story-detail-panel.tsx의 파싱 규칙과
-// 문자 그대로 동일하게 둔다(정의가 세 곳에 흩어지면 그 자체가 드리프트 위험).
-const ENTITY_REF_RE = /^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 // asset-ref 식별 — react-markdown 은 hast node(properties.dataAssetId) + data-* prop 양쪽을 줄 수 있어
 // 둘 다 확인한다(스키마 통과분만 도달).
@@ -540,17 +536,18 @@ export function DocContentRenderer({
     // epic→/goals/·doc→/docs?id= 동일오리진 라우트를 준다(웹뷰서 SPA 착지·셸 무변경).
     // 매핑 없는 타입은 getEntityHref=null→모달만 뜨고(무동작 0), 비-UUID/asset은 평문 링크 폴백.
     a: ({ href, children }: { href?: string; children?: ReactNode }) => {
-      const m = href?.match(ENTITY_REF_RE);
+      // story #2888(S2a) — 파싱은 parseEntityRef SSOT(chat-bubble.tsx·embed-card.tsx와 공유).
+      const ref = parseEntityRef(href);
       // asset은 story-detail-panel과 동일하게 칩 경로에서 제외한다(자산 임베드는 별 경로).
-      if (m && m[1]!.toLowerCase() !== 'asset') {
+      if (ref && ref.entityType.toLowerCase() !== 'asset') {
         // public share 뷰어: 내부 참조는 비활성 평문(메타 유출 경계 — wikiLink publicMode와 동일).
         if (publicMode) return <span className="text-sm text-muted-foreground">{children}</span>;
         return (
           <EntityChip
-            entityType={m[1]!}
-            entityId={m[2]!}
+            entityType={ref.entityType}
+            entityId={ref.entityId}
             label={String(children)}
-            href={getEntityHref(m[1]!, m[2]!)}
+            href={getEntityHref(ref.entityType, ref.entityId)}
           />
         );
       }

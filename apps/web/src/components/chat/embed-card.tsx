@@ -5,78 +5,20 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import {
-  ExternalLink, X, FileText, File, Layers, CheckSquare, Eye,
-  Calendar, Image, FlaskConical, Paperclip, type LucideIcon,
-} from 'lucide-react';
+import { ExternalLink, X, Eye } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { docViewUrl } from '@/components/docs/lib/doc-project-url';
 import { resolveScopedEntityHref, storyBoardUrl, goalUrl, sprintUrl, assetStorageUrl } from '@/lib/entity-project-url';
-import { initials } from '@/lib/storage/format';
 import { renderEntityStatusLabel, translateEntityStatus, type EntityStatusFetchState } from './entity-status-labels';
 import { ArtifactThumbnail } from '@/components/canvas/artifact-thumbnail';
 import { fetchWithAuth } from '@/lib/db/client';
+import { parseEntityRef } from './entity-ref';
+// story #2888(S2a) — 이관 후 재수출(기존 소비처 4곳 import 경로 무변경, 회귀 0). 정본은
+// entity-registry.tsx 참고.
+import { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon, EntityGlyph } from './entity-registry';
 
-// story #2302 — 이 8종은 BE reference_registry.py ENTITY_RESOLVERS 와 키 집합이 같아야 한다
-// (AC2·AC5, entity-icons.registry-parity.test.ts 가 코드스캔으로 대조). `asset`은 registry
-// 밖 FE 전용 타입(AC5 명시 예외) — 아이콘을 **일부러** 안 준다: asset은 이미지/PDF/영상 등
-// content-type이 제각각이라 타입 레벨 단일 아이콘이 의미가 없고(개별 파일 아이콘은
-// getFileIcon이 파일별로 처리), "아이콘 없으면 이름 글자로"가 AC4가 못박은 **기본값**이지
-// asset만의 예외 처리가 아니다 — 그래서 이 fallback은 `resolveEntityIcon()`이 모든 타입에
-// 공통 적용한다(Hash 캐치올을 버림 — 있지도 않은 아이콘을 그리는 거짓보다 글자가 정직하다).
-//
-// ⛔story #2263(C-7, 2026-07-29) — 한 번 여기 chat_message를 추가했다가 되돌렸다: BE
-// ENTITY_RESOLVERS에 등록하면 «완전지원 엔티티»(검색·MCP mention·project축 parity까지)를
-// 전부 갖춰야 한다는 게 CI 13건 실패로 드러났다(PO 판정). chat_message는 참조 TARGET은
-// 되지만 그 다섯 계약을 구조적으로 다 못 갖춰(검색대상 아님·project축 아님·단독조회
-// 라우트 없음) `reference_registry.TARGET_ONLY_TYPES`라는 별도 집합으로 옮겨졌다 —
-// ENTITY_RESOLVERS 밖이라 이 FE parity 대조에도 안 걸린다(의도적으로 안 나타난다).
-export const ENTITY_ICONS: Record<string, LucideIcon> = {
-  story: FileText,
-  doc: File,
-  epic: Layers,
-  task: CheckSquare,
-  sprint: Calendar,
-  artifact: Image,
-  hypothesis: FlaskConical,
-  evidence: Paperclip,
-};
-
-/** ENTITY_ICONS에 없는 타입(지금은 asset뿐) → 아이콘 대신 이름 첫 글자(들). 예외 처리 아님(위 주석). */
-export function resolveEntityIcon(entityType: string): LucideIcon | null {
-  return ENTITY_ICONS[entityType] ?? null;
-}
-
-/** 아이콘이 없는 타입(asset)의 렌더 지점 3곳(모달 헤더·EmbedCard·EntityChip)이 각자 Hash로
- * 캐치올하지 않고 한 곳에서 초성/이니셜 폴백을 공유하게 — 새 타입이 추가돼도 렌더 지점마다
- * 따로 안 고쳐도 된다. Icon은 호출부에서 미리 resolve해 prop으로 받는다(레포 관례 —
- * storage-file-glyph.tsx 동일 주석: 컴포넌트 스코프 안에서 lookup한 컴포넌트를 바로 JSX로 쓰면
- * `react-hooks/static-components`에 걸린다). */
-function EntityGlyph({ Icon, label, className }: { Icon: LucideIcon | null; label: string; className?: string }) {
-  if (Icon) return <Icon className={className ?? 'size-4 shrink-0'} />;
-  return <span className={`flex items-center justify-center text-[10px] font-bold ${className ?? 'size-4 shrink-0'}`}>{initials(label)}</span>;
-}
-
-// 엔티티 신호 토큰(하드코딩 blue/purple/emerald/slate 제거·다크 자동 정합). 타입별 절제 틴트.
-// ⛔AC4: ②/③(담긴 곳으로 보내거나 갈 곳이 없는) 상태에서는 이 틴트를 쓰지 않고 GRAY_STATE_COLOR로
-// 덮어쓴다(회색 하나로 통일 — 노랑 금지 근거는 그 상수 주석 참고). 여기 있는 색은 **①일 때만** 보인다.
-const ENTITY_COLORS: Record<string, string> = {
-  story: 'border-info/30 bg-info/8 text-foreground',
-  doc: 'border-border bg-muted/40 text-foreground',
-  epic: 'border-secondary bg-secondary/40 text-foreground',
-  task: 'border-success/30 bg-success/8 text-foreground',
-  sprint: 'border-warning/30 bg-warning/8 text-foreground',
-  artifact: 'border-info/30 bg-info/8 text-foreground',
-  hypothesis: 'border-border bg-muted/40 text-foreground',
-  evidence: 'border-border bg-muted/40 text-foreground',
-  // S6: 스토리지 자산 토큰 — info 틴트(파일 아이콘은 content-type 의존이라 AssetEmbedCard 에서 getFileIcon 처리).
-  asset: 'border-info/30 bg-info/8 text-foreground',
-};
-
-// ⛔AC4 색 규율: 노랑 금지 — 노랑은 "기다리면 풀리는 것"인데 ②/③은 사용자가 기다려서 풀 수
-// 있는 상태가 아니다(담긴 곳으로 보내거나, 애초에 갈 곳이 없는 것). 구별은 색이 아니라 말로.
-export const GRAY_STATE_COLOR = 'border-border bg-muted/40 text-muted-foreground';
+export { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon };
 
 /** story #2302 — task·evidence는 항상 담긴 곳(②) 판정에 own-href가 없다(모델 FK 그대로:
  * Task.story_id/Evidence.work_item_id 항상 NOT NULL — 항상 유일한 부모, 모호함 0).
@@ -176,18 +118,17 @@ const MdBadge = ({ label }: { label: string }) => (
 // 새 함수 참조가 되어 react-markdown이 서브트리를 리마운트한다(chat-bubble 근본원인과 동형).
 // 이 객체는 props/상태에 의존하지 않는 순수 상수이고 자식도 전부 stateless라 useMemo조차
 // 불필요 — 모듈 스코프로 끌어올려 참조를 영구 고정한다.
-// story #2639 — 본문 엔티티 참조 토큰 `[제목](entity:타입:id)`의 href 매칭(id는 UUID만).
-// doc-content-renderer.tsx·chat-bubble.tsx의 파싱 규칙과 문자 그대로 동일(드리프트 방지).
-const MDBODY_ENTITY_REF_RE = /^entity:(\w+):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
-
 const mdBodyComponents = {
   // story #2639(미르코 리뷰 ⑤) — 결재 카드 문서 미리보기(EntityPreviewModal→EntityDetail doc
   // 분기)가 이 경량 렌더러를 쓴다. doc-content-renderer와 동일하게 entity: 참조를 EntityChip으로
   // 잇는다(같은 파일의 EntityChip 재사용·사본 0). 비-UUID/asset은 평문 링크 폴백(무동작 0).
+  // story #2888(S2a) — 파싱은 parseEntityRef SSOT. 이 렌더러엔 `references` 사이드밴드가
+  // 없어(중첩 엔티티 본문) doc-content-renderer.tsx와 동일한 단순 2갈래(asset 제외 칩 or
+  // 평문 링크)를 그대로 유지한다 — asset은 원래도 AssetEmbedCard가 아니라 평문 링크 폴백.
   a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
-    const m = href?.match(MDBODY_ENTITY_REF_RE);
-    if (m && m[1]!.toLowerCase() !== 'asset') {
-      return <EntityChip entityType={m[1]!} entityId={m[2]!} label={String(children)} href={getEntityHref(m[1]!, m[2]!)} />;
+    const ref = parseEntityRef(href);
+    if (ref && ref.entityType.toLowerCase() !== 'asset') {
+      return <EntityChip entityType={ref.entityType} entityId={ref.entityId} label={String(children)} href={getEntityHref(ref.entityType, ref.entityId)} />;
     }
     return <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">{children}</a>;
   },

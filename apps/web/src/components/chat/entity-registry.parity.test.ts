@@ -1,5 +1,6 @@
 /**
- * story #2302 AC2·AC5 — ENTITY_ICONS/ENTITY_COLORS/getEntityHref가 BE
+ * story #2302 AC2·AC5(story #2888 S2a — entity-registry.tsx로 이관 후 파일명·소스경로만 갱신,
+ * 대조 로직·단언은 그대로) — ENTITY_ICONS/ENTITY_COLORS/getEntityHref가 BE
  * `reference_registry.py::ENTITY_RESOLVERS`와 어긋나면(등록된 종류를 FE가 모르는 채로 남으면)
  * CI가 코드스캔으로 잡는다. 완전 동일은 요구하지 않는다 — `asset`은 registry 밖 FE 전용 타입
  * (명시 예외, 이 파일에 그대로 선언). 가드가 자기 재료(backend 파일)를 못 찾으면 skip이 아니라
@@ -8,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { ENTITY_ICONS } from './embed-card';
+import { ENTITY_ICONS } from './entity-registry';
 
 function findRepoRoot(startDir: string): string {
   let dir = startDir;
@@ -37,23 +38,23 @@ function parseFeSwitchKeys(source: string, functionSignature: RegExp): Set<strin
   return new Set([...m[1]!.matchAll(/case '([^']+)':/g)].map((mm) => mm[1]!));
 }
 
-// asset은 BE reference_registry.py 밖의 FE 전용 타입(embed-card.tsx 주석 — 채팅 첨부는
+// asset은 BE reference_registry.py 밖의 FE 전용 타입(entity-registry.tsx 주석 — 채팅 첨부는
 // mention_parser.py write-path가 하드코딩 source_type으로 직접 다뤄 target-resolver가 없다).
 const FE_ONLY_TYPES = new Set(['asset']);
 
-describe('embed-card.tsx 엔티티 키 집합 ↔ BE ENTITY_RESOLVERS 코드스캔 동기화', () => {
+describe('entity-registry.tsx 엔티티 키 집합 ↔ BE ENTITY_RESOLVERS 코드스캔 동기화', () => {
   it('BE에 등록된 종류를 ENTITY_ICONS가 전부 안다(asset은 의도적 예외 — 아이콘 없이 글자로)', () => {
     const backendTypes = parseBackendEntityResolvers();
     const feIconTypes = new Set(Object.keys(ENTITY_ICONS));
-    // ENTITY_ICONS는 asset을 일부러 안 갖는다(embed-card.tsx 상단 주석) — 그래서 정확히 BE와 같아야 한다.
+    // ENTITY_ICONS는 asset을 일부러 안 갖는다(entity-registry.tsx 상단 주석) — 그래서 정확히 BE와 같아야 한다.
     expect(feIconTypes).toEqual(backendTypes);
   });
 
   it('BE에 등록된 종류를 ENTITY_COLORS가 전부 안다(+ asset 예외 포함)', () => {
     const backendTypes = parseBackendEntityResolvers();
-    const source = readFileSync(resolve(__dirname, 'embed-card.tsx'), 'utf-8');
-    const m = source.match(/const ENTITY_COLORS: Record<string, string> = \{([\s\S]*?)\n\};/);
-    if (!m) throw new Error('ENTITY_COLORS 정의를 embed-card.tsx에서 못 찾았다 — 리팩터로 형태가 바뀌었으면 이 정규식도 갱신');
+    const source = readFileSync(resolve(__dirname, 'entity-registry.tsx'), 'utf-8');
+    const m = source.match(/export const ENTITY_COLORS: Record<string, string> = \{([\s\S]*?)\n\};/);
+    if (!m) throw new Error('ENTITY_COLORS 정의를 entity-registry.tsx에서 못 찾았다 — 리팩터로 형태가 바뀌었으면 이 정규식도 갱신');
     const feColorTypes = new Set([...m[1]!.matchAll(/^\s*(\w+):/gm)].map((mm) => mm[1]!));
     for (const t of backendTypes) expect(feColorTypes.has(t)).toBe(true);
     expect(feColorTypes).toEqual(new Set([...backendTypes, ...FE_ONLY_TYPES]));
