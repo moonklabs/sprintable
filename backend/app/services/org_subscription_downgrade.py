@@ -166,6 +166,15 @@ async def sweep_pending_tier_downgrades(session: AsyncSession, *, now: datetime 
 
         seat_count = await count_human_seats(session, sub.org_id)
         if seat_count > new_offering.included_seats:
+            # 카디르 확定 버그(PR#3308 QA, 2026-08-21) — 아래 raw UPDATE(pending_tier=None)를
+            # session.execute()가 실행하면 SQLAlchemy Core update()의 기본 "evaluate"
+            # synchronize_session 전략이 PK로 매칭되는 이 in-session `sub` 객체를 자동으로
+            # in-place 동기화한다(populate_existing 없이도) — 그 直後 `sub.pending_tier`를
+            # 읽으면 이미 None이라, 알림 메일이 항상 "Plan downgrade to None was
+            # cancelled..."로 발송됐다(오늘 PR#3312에서 배운 identity-map staleness의
+            # 정반대 실패모드 — 거긴 sync 부재가 문제, 여긴 sync 존재가 문제). UPDATE
+            # 前에 로컬 변수로 스냅샷해 그 값을 메일에 넘긴다.
+            pending_tier_snapshot = sub.pending_tier
             await session.execute(
                 update(OrgSubscription)
                 .where(OrgSubscription.id == sub.id)
@@ -173,7 +182,7 @@ async def sweep_pending_tier_downgrades(session: AsyncSession, *, now: datetime 
             )
             await session.commit()
             await _notify_downgrade_auto_cancelled(
-                session, org_id=sub.org_id, tier=sub.pending_tier,
+                session, org_id=sub.org_id, tier=pending_tier_snapshot,
                 seat_count=seat_count, included_seats=new_offering.included_seats,
             )
             cancelled_seat_overage += 1

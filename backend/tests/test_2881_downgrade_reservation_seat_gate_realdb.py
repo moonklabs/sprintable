@@ -246,6 +246,70 @@ async def test_sweep_auto_cancels_downgrade_on_seat_overage_no_forced_removal_re
         await engine.dispose()
 
 
+async def _seed_owner_member(session, org_id, *, email):
+    from app.models.member import Member
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    user_id = uuid.uuid4()
+    session.add(User(id=user_id, email=email, hashed_password="x"))
+    await session.flush()
+    om_id = uuid.uuid4()
+    session.add(OrgMember(id=om_id, org_id=org_id, user_id=user_id, role="owner"))
+    await session.flush()
+    session.add(Member(id=om_id, org_id=org_id, type="human", user_id=user_id, name="Owner"))
+    await session.commit()
+    return om_id
+
+
+@pytest.mark.anyio
+async def test_sweep_auto_cancel_email_content_shows_real_tier_not_none_realdb():
+    """카디르 확定 버그(PR#3308 QA, 2026-08-21) 회귀 고정 — 좌석초과 자동취소 알림
+    이메일이 raw UPDATE 直後 `sub.pending_tier`를 읽어(SQLAlchemy Core update()의
+    evaluate synchronize_session이 in-session 객체를 이미 None으로 동기화한 뒤라)
+    항상 "Plan downgrade to None was cancelled"로 발송됐다. 기존 8건은 DB 상태만
+    확認하고 메일 CONTENT는 전혀 assert하지 않아 이 결함을 놓쳤다 — 여기서 실제
+    발송 인자(subject/html)에 tier명("starter")이 정확히 들어가는지 직접 확認한다."""
+    from app.services.org_subscription_downgrade import reserve_downgrade, sweep_pending_tier_downgrades
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session:
+            org_id = await _seed_org(session)
+            past_period_end = datetime.now(timezone.utc) - timedelta(hours=1)
+            await _seed_active_paid_subscription(session, org_id, tier="business", period_end=past_period_end)
+            await _seed_owner_member(session, org_id, email="owner@2881-email-content.test")
+            for _ in range(4):
+                await _seed_human_member(session, org_id)
+
+            included_seats_starter = (
+                await session.execute(text("SELECT included_seats FROM offering_versions WHERE tier='starter' AND currency='krw' AND effective_to IS NULL"))
+            ).scalar_one()
+            assert included_seats_starter < 5, "이 테스트가 의미 있으려면 starter included_seats < 5명(owner 포함)이어야 함"
+
+            await reserve_downgrade(session, org_id=org_id, new_tier="starter")
+
+            sent = []
+            with pytest.MonkeyPatch.context() as mp:
+                mp.setattr(
+                    "app.services.org_subscription_downgrade.send_email",
+                    lambda to, subject, html: sent.append((to, subject, html)),
+                )
+                result = await sweep_pending_tier_downgrades(session)
+
+            assert result["cancelled_seat_overage"] == 1
+            assert len(sent) == 1, "owner 1명 — 메일 정확히 1건"
+            to, subject, html = sent[0]
+            assert to == "owner@2881-email-content.test"
+            assert "None" not in subject, f"tier명이 None으로 새는 회귀 — subject={subject!r}"
+            assert "None" not in html, f"tier명이 None으로 새는 회귀 — html={html!r}"
+            assert "starter" in subject
+            assert "starter" in html
+    finally:
+        await engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_upgrade_direction_rejected_by_downgrade_endpoint_realdb():
     """⑤ — starter→team(상향 방향)을 이 서비스로 넣으면 거부(하향 전용)."""
