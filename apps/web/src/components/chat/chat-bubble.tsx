@@ -162,10 +162,13 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
   );
 }
 
-function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenReadingPanel }: {
+function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey }: {
   content: string; isMine: boolean; references: ChatMessage['references'];
   entityStatusByKey?: Record<string, EntityStatusFetchState>;
   onOpenReadingPanel?: (target: ReadingPanelTarget) => void;
+  /** story #2905(S2c②) — gate 단건 sole-link 참조가 ApprovalRequestCard(Block Kit 리치 블록,
+   * 사본 분화 금지 재사용)로 뜰 때 그 컴포넌트가 요구하는 카탈로그를 그대로 물려준다. */
+  eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
 }) {
   const text = isMine ? 'text-primary-foreground' : 'text-foreground';
   const muted = isMine ? 'text-primary-foreground/70' : 'text-muted-foreground';
@@ -193,6 +196,21 @@ function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenRe
       const ref = typeof href === 'string' ? parseEntityRef(href) : null;
       const decision = ref ? resolveEmbedDecision(ref.entityType, ref.entityId, references, { allowCard: true }) : null;
       if (ref && decision?.kind === 'card') {
+        // story #2905(S2c②) — gate 단건 sole-link 참조 = §3 Block Kit 리치 블록. approval-
+        // request-card.tsx를 그대로 재사용(PO 판정 — 사본 분화 금지). ApprovalRequestCard가
+        // 자체 fetch(GET /api/gates/{id}, GateResponse에 work_item_type/work_item_id 1급
+        // 필드로 실림)로 완결되므로 여기선 placeholder만 넘긴다(실사용은 fetch 후 컴포넌트
+        // 내부에서 gate 실물로 대체 — approval-request-card.tsx 자체 수정분 참고). 자체
+        // 인터랙션(승인/반려/서명)을 가진 컴포넌트라 onOpenReadingPanel 클릭-전체-래핑
+        // 대상이 아니다(버튼-안-버튼 방지, §8 "표면은 둘·실체는 하나").
+        if (ref.entityType === 'gate') {
+          return (
+            <ApprovalRequestCard
+              target={{ work_item_type: '', work_item_id: '', gate_id: ref.entityId }}
+              eventDefinitionsByKey={eventDefinitionsByKey}
+            />
+          );
+        }
         const statusFetch = entityStatusByKey?.[`${ref.entityType.toLowerCase()}:${ref.entityId.toLowerCase()}`];
         const status = statusFetch?.kind === 'resolved' ? statusFetch.raw : null;
         // PO 리뷰 지적 — 링크 라벨이 여러 자식(예: **강조** 섞인 텍스트)으로 쪼개질 수
@@ -277,7 +295,7 @@ function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenRe
       }
       return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
     },
-  }), [text, muted, codeBg, border, isMine, references, entityStatusByKey, onOpenReadingPanel]);
+  }), [text, muted, codeBg, border, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey]);
 
   if (!hasMarkdown && !hasMention) {
     return (
@@ -548,7 +566,7 @@ export function ChatBubble({
                 ? 'rounded-tr-sm bg-primary text-primary-foreground'
                 : 'rounded-tl-sm bg-muted text-foreground'
             }`}>
-              <ChatMarkdown content={displayContent} isMine={isMine} references={message.references} entityStatusByKey={entityStatusByKey} onOpenReadingPanel={onOpenReadingPanel} />
+              <ChatMarkdown content={displayContent} isMine={isMine} references={message.references} entityStatusByKey={entityStatusByKey} onOpenReadingPanel={onOpenReadingPanel} eventDefinitionsByKey={eventDefinitionsByKey} />
             </div>
           )}
 

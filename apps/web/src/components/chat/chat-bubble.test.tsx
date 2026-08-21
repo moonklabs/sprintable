@@ -1445,6 +1445,40 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
     expect(container.textContent).toContain('스토리 제목');
   });
 
+  // story #2905(S2c②) — gate 단건 sole-link 참조는 EmbedCard 대신 approval-request-card.tsx가
+  // 그대로 뜬다(§8 "표면은 둘·실체는 하나", 승인 로직 사본 분화 금지 — PO 판정).
+  it('참조 링크 하나뿐인 문단(gate)은 EmbedCard가 아니라 ApprovalRequestCard(결재 요청 카드)로 렌더된다', async () => {
+    const gateId = '44444444-4444-4444-4444-444444444444';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === `/api/gates/${gateId}`) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: {
+              id: gateId, status: 'pending', gate_type: 'doc_approval', risk_grade: 'low',
+              work_item_type: 'doc', work_item_id: 'wi-1', can_approve: true,
+              work_item_summary: { title: '기획안 v2', slug: null },
+              resolver_id: null, resolved_at: null, resolution_note: null, neutral_facts: null,
+            },
+          }),
+        };
+      }
+      return { ok: false, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, content: `[결재 요청](entity:gate:${gateId})`, references: [{ target_type: 'gate', target_id: gateId }] }}
+          isMine={false}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    // ApprovalRequestCard 전용 마커 — "결재 요청" 라벨은 EmbedCard엔 없다.
+    expect(container.textContent).toContain('기획안 v2');
+    expect(container.querySelector('button[aria-label="미리보기"]')).toBeNull(); // EmbedCard doc 전용 마커 아님
+  });
+
   it('참조가 유령(stored 참조에 없음)이면 단독 문단이어도 카드가 아니라 유령 칩(행동 0)이다', async () => {
     await act(async () => {
       root.render(wrap(

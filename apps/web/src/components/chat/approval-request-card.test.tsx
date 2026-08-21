@@ -103,6 +103,29 @@ describe('ApprovalRequestCard — 제목 미리보기 진입점, canPreviewEntit
     expect(document.body.querySelector('[data-slot="dialog-content"]')).toBeTruthy();
   });
 
+  // story #2905(S2c②) — gate 단건 sole-link 참조(chat-bubble.tsx)는 work_item_type/
+  // work_item_id를 모르는 채(빈 문자열 placeholder) target을 넘긴다. fetch된 gate 실물이
+  // 그 자리를 대신해 카드가 정상 완결되는지(제목 버튼·크래시 없음) 확인.
+  it('target.work_item_type/work_item_id가 빈 문자열(placeholder)이어도 fetch된 gate 실물로 정상 완결된다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/gates/')) {
+        return { ok: true, json: async () => ({ data: gate({ work_item_type: 'doc', work_item_id: 'wi-9', work_item_summary: { title: '플레이스홀더 대조', slug: null } }) }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: '', work_item_id: '', gate_id: 'g-1' }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('플레이스홀더 대조');
+    const titleButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('플레이스홀더 대조'));
+    expect(titleButton).toBeTruthy(); // doc은 canPreviewEntity 통과 — gate 실물 기준으로 진입점이 뜬다.
+  });
+
   it.each([
     ['loop', '루프 제목'],
     ['wf_line_version', '워크플로 버전'],

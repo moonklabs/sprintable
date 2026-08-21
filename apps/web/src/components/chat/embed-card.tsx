@@ -690,6 +690,23 @@ export function EmbedCard({
   // 노출하던 같은 클래스의 gap. translateEntityStatus로 통과시킨다(미매핑=null=뱃지 안 그림).
   const statusLabel = status ? translateEntityStatus(entity_type, status) : null;
 
+  // story #2905(S2c①) — artifact/mockup은 "실 렌더 인라인"(§3 표): 텍스트 칩이 아니라 목업
+  // 자체를 축소 프리뷰로 보여준다. version_number를 몰라 ArtifactThumbnail을 못 그렸던 갭 —
+  // ENTITY_API['artifact'](parity 대상, 이미 등록됨)로 직접 fetch(EntityPreviewModal의 detail
+  // fetch와 별개 경로 — EmbedCard는 원래 fetch를 안 했다, 이 타입 하나만 예외).
+  const [artifactDetail, setArtifactDetail] = useState<{ latest_version_number?: number; anchor_version?: number | null } | null>(null);
+  useEffect(() => {
+    if (entity_type !== 'artifact') return;
+    let cancelled = false;
+    const url = ENTITY_API.artifact?.(entity_id);
+    if (!url) return;
+    void fetchWithAuth(url)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: { data?: Record<string, unknown> } | null) => { if (!cancelled) setArtifactDetail((json?.data ?? null) as typeof artifactDetail); })
+      .catch(() => { if (!cancelled) setArtifactDetail(null); });
+    return () => { cancelled = true; };
+  }, [entity_type, entity_id]);
+
   const handleDocClick = useCallback(async () => {
     setNavigating(true);
     try {
@@ -716,7 +733,26 @@ export function EmbedCard({
     }
   }, [entity_id, router]);
 
-  const inner = (
+  // story #2905(S2c①) — artifact/mockup 실 렌더 인라인. version_number를 아직 못 받았으면(fetch
+  // 중/실패) 기존 아이콘+라벨 폼으로 정직하게 폴백(renderEntityDetail의 "있으면 열고 없으면
+  // 안 연다" 원칙과 동형 — 빈 썸네일을 거짓으로 그리지 않는다).
+  const isRichArtifact = entity_type === 'artifact' && artifactDetail?.latest_version_number != null;
+
+  const inner = isRichArtifact ? (
+    <div className={`overflow-hidden rounded-md border ${colorClass}`}>
+      <ArtifactThumbnail
+        artifactId={entity_id}
+        latestVersionNumber={artifactDetail!.latest_version_number!}
+        anchorVersion={artifactDetail!.anchor_version ?? null}
+        className="aspect-video w-full"
+      />
+      <div className="flex items-center gap-2 border-t border-current/10 px-3 py-1.5 text-sm">
+        <EntityGlyph Icon={resolveEntityIcon(entity_type)} label={label} />
+        <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+        {navigating && <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent" />}
+      </div>
+    </div>
+  ) : (
     <div className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${colorClass}`}>
       <EntityGlyph Icon={resolveEntityIcon(entity_type)} label={label} />
       <span className="font-medium">{label}</span>
