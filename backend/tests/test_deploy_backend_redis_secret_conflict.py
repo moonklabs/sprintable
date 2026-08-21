@@ -51,6 +51,8 @@ _DECLARED_SUBSTITUTIONS = {
     "_NEXT_PUBLIC_APP_URL", "_ADMIN_OPERATOR_AUDIENCE", "_ADMIN_OPERATOR_ALLOWLIST",
     # story #2771 — office-converter(Gotenberg) URL, deploy-office-converter 스텝과 짝.
     "_GOTENBERG_SERVICE_URL", "_OFFICE_CONVERTER_MAX_INSTANCES",
+    # story #2887 — avatar 전용 GCS 버킷, deploy-backend dev 분기(ADMIN_OPERATOR_*와 동일 패턴).
+    "_GCS_AVATARS_BUCKET",
     "PROJECT_ID", "PROJECT_NUMBER", "BUILD_ID", "COMMIT_SHA", "SHORT_SHA",
     "REPO_NAME", "BRANCH_NAME", "TAG_NAME", "REVISION_ID", "LOCATION",
 }
@@ -122,6 +124,8 @@ def _run_env_vars_assembly(deploy_env: str, redis_url: str, gotenberg_url: str =
         "_NEXT_PUBLIC_APP_URL": "https://example.run.app",
         "_ADMIN_OPERATOR_AUDIENCE": "https://example-audience.run.app",
         "_ADMIN_OPERATOR_ALLOWLIST": "operator@example.iam.gserviceaccount.com",
+        # story #2887 — set -u라 미설정이면 스크립트가 죽는다(ADMIN_OPERATOR_*와 동일 이유).
+        "_GCS_AVATARS_BUCKET": "sprintable-avatars-dev",
         # story #2771 — 기본 빈 문자열(substitutions 기본값과 정합, set -u라 미설정이면 스크립트가
         # 죽는다 — 여기 없으면 이 테스트 전체가 붕괴).
         "_GOTENBERG_SERVICE_URL": gotenberg_url,
@@ -207,6 +211,19 @@ def test_deploy_backend_prod_excludes_admin_operator_env_vars():
     assert "ADMIN_OPERATOR_ALLOWLIST" not in result
 
 
+def test_deploy_backend_dev_includes_avatars_bucket_env_var():
+    """story #2887 — dev는 GCS_AVATARS_BUCKET을 plain env로 넘긴다(ADMIN_OPERATOR_*와 동일 배선)."""
+    result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
+    assert "GCS_AVATARS_BUCKET=sprintable-avatars-dev" in result
+
+
+def test_deploy_backend_prod_excludes_avatars_bucket_env_var():
+    """⭐prod 버킷 미프로비저닝 상태 — 값이 있어도 prod에는 이 키 자체가 없어야 한다(REDIS_URL/
+    ADMIN_OPERATOR_*와 동일 원칙, cloudbuild.yaml의 story #2887 주석 참고)."""
+    result = _run_env_vars_assembly("prod", "")
+    assert "GCS_AVATARS_BUCKET" not in result
+
+
 def test_deploy_backend_includes_gotenberg_service_url_when_set():
     """story #2771 — 부트스트랩 후(_GOTENBERG_SERVICE_URL 채워짐) env var가 실린다."""
     result = _run_env_vars_assembly(
@@ -248,5 +265,6 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         "NEXT_PUBLIC_APP_URL=https://example.run.app,DEPLOY_ENV=dev,"
         "REDIS_URL=redis://10.164.120.243:6379,"
         "ADMIN_OPERATOR_AUDIENCE=https://example-audience.run.app,"
-        "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com"
+        "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com,"
+        "GCS_AVATARS_BUCKET=sprintable-avatars-dev"
     )
