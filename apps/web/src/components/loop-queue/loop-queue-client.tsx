@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { AlertTriangle, FolderOpen } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
 import { cn } from '@/lib/utils';
@@ -14,6 +14,9 @@ import {
 } from './derive-loop-queue';
 import type { ViewerContext } from '../org-briefing/derive-attention-clusters';
 import { parseTeamMembers } from '../org-briefing/derive-workforce-face';
+// story #2858 — CrossProjectTag는 attention-cluster-board.tsx의 단일 정의를 재사용한다
+// (페드루 PO 판정 2026-08-21, 2851 교훈 — 별개 페이지라도 로컬 재정의 금지).
+import { CrossProjectTag } from '../org-briefing/attention-cluster-board';
 
 // story #2858(loop-closure P2) AC1 — org 스코프: measure_after 오래된 순 전량 페이지네이션.
 // BE가 이미 정렬해서 낸다(loop_measure_due.py: items.sort(key=measure_after)) — FE 재정렬 X.
@@ -29,14 +32,6 @@ const KIND_DAYS_KEY: Record<LoopQueueKind, string> = {
   overdueGoal: 'clusterUnclosedDaysOverdue',
   outcomeMissing: 'clusterUnclosedDaysDone',
 };
-
-// story #2842 CrossProjectTag와 동형(attention-cluster-board.tsx) — 별개 페이지라 로컬로 둔다
-// (href/crossProjectLabel *로직*은 derive-attention-clusters.ts를 재사용해 이원화가 없다;
-// 이건 순수 표시용 소형 컴포넌트라 중복 비용이 낮다).
-function CrossProjectTag({ label }: { label: string | null }) {
-  if (!label) return null;
-  return <Badge variant="chip" className="shrink-0 gap-1"><FolderOpen className="size-3 shrink-0" aria-hidden />{label}</Badge>;
-}
 
 function QueueRow({ item, memberNames, onClaim, claiming }: {
   item: LoopQueueItem;
