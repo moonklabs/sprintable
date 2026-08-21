@@ -177,6 +177,13 @@ class StoryUpdate(BaseModel):
     # 텍스트 필드(description·acceptance_criteria)가 절반 이상 줄면 기본 거부한다(오늘 3건
     # 모두 -80%대 급감 — 정당한 축약이면 이 플래그로 명시 승인한다).
     allow_shrink: bool = False
+    # story #2868(P0, 실사고 — 2752 본문 유실): docs.py가 이미 가진 낙관적 동시성(151e05f1)을
+    # stories에도 동형 이식한다("쌍둥이 체계 약한 쪽이 실제 수준" — docs가 강한 쪽, stories가
+    # 약한 쪽이었다). expected_updated_at 제공 시 BE가 현재 updated_at과 exact match 검사 →
+    # 불일치면 409(opt-in·미제공=무체크 하위호환). force_overwrite=True면 검사 우회(last-write-
+    # wins 의도적). ⚠️ 이 2필드는 strip 금지(BE 수용, docs.py와 동일 주의).
+    expected_updated_at: datetime | None = None
+    force_overwrite: bool | None = None
 
     @field_validator("metric_definition")
     @classmethod

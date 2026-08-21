@@ -1976,6 +1976,26 @@ async def update_story(
         await _assert_human_owner(db, repo.org_id, body.human_owner_member_id)
 
     data = body.model_dump(exclude_unset=True)
+    # story #2868(P0, 실사고 — 2752 본문 유실): docs.py의 낙관적 동시성(151e05f1)을 stories에도
+    # 동형 이식 — expected_updated_at은 stories 컬럼이 아니므로 repo.update 前에 분리.
+    expected_updated_at = data.pop("expected_updated_at", None)
+    force_overwrite = data.pop("force_overwrite", None)
+    if expected_updated_at is not None and not force_overwrite and _story_for_access.updated_at is not None:
+        # ⚠️ ms 절삭 비교(docs.py와 동일 근거) — FE가 JS Date(ms 정밀도)로 round-trip하면 μs
+        # 손실 → μs-exact 비교면 매 저장 false-409(defense가 오히려 상시 저장 실패로 악화).
+        cur_ms = _story_for_access.updated_at.replace(
+            microsecond=(_story_for_access.updated_at.microsecond // 1000) * 1000
+        )
+        exp_ms = expected_updated_at.replace(microsecond=(expected_updated_at.microsecond // 1000) * 1000)
+        if cur_ms != exp_ms:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "STORY_CONFLICT",
+                    "message": "스토리가 다른 곳에서 수정됨 — 최신본을 다시 불러오세요",
+                    "current_updated_at": _story_for_access.updated_at.isoformat(),
+                },
+            )
     # S7: client 제공 asset_id strip(서버 권위·drift 방지·까심)·아래 sync url_map 으로만 역기입.
     if data.get("attachments"):
         data["attachments"] = [{**a, "asset_id": None} for a in data["attachments"]]
