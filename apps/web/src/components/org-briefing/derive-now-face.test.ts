@@ -185,6 +185,80 @@ describe('buildNowFace', () => {
     expect(signal?.id).toBe('unanswered_blocker-s7');
   });
 
+  // story #2856(2842 후속, 클래스 완결) — agent_stuck/unanswered_blocker의 bare href도 소속
+  // 프로젝트로 못박고 cross-project만 병기한다(2842 정의분 재사용).
+  describe('cross-project href/병기(story #2856)', () => {
+    it('viewer 제공 시 agent_stuck(story) href가 소속 프로젝트 slug로 지어진다', () => {
+      const raw: RawMyActions = {
+        ...ZERO_LOOP_COUNTS,
+        queue: [],
+        attention: [{ type: 'agent_stuck', entity_type: 'story', entity_id: 's1', gate_type: null, story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: 'p-other', project_slug: 'other-proj', member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null }],
+      };
+      const items = buildNowFace(raw, [], t, { orgSlug: 'moonklabs', activeProjectId: 'p-active' });
+      const signal = items.find((i) => i.kind === 'signal');
+      expect(signal?.href).toBe('/moonklabs/other-proj/board?story=s1');
+      expect(signal?.crossProjectLabel).toBe('other-proj');
+    });
+
+    it('viewer 제공 시 unanswered_blocker href도 소속 프로젝트 slug로 지어진다', () => {
+      const raw: RawMyActions = {
+        ...ZERO_LOOP_COUNTS,
+        queue: [],
+        attention: [{ type: 'unanswered_blocker', entity_type: null, entity_id: null, gate_type: null, story_id: null, stalled_days: null, blocked_story_id: 's7', title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: 'p-other', project_slug: 'other-proj', member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null }],
+      };
+      const items = buildNowFace(raw, [], t, { orgSlug: 'moonklabs', activeProjectId: 'p-active' });
+      const signal = items.find((i) => i.kind === 'signal');
+      expect(signal?.href).toBe('/moonklabs/other-proj/board?story=s7');
+      expect(signal?.crossProjectLabel).toBe('other-proj');
+    });
+
+    it('같은 프로젝트 소속이면 crossProjectLabel이 null이다(노이즈 절제)', () => {
+      const raw: RawMyActions = {
+        ...ZERO_LOOP_COUNTS,
+        queue: [],
+        attention: [{ type: 'agent_stuck', entity_type: 'story', entity_id: 's1', gate_type: null, story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: 'p-active', project_slug: 'sprintable', member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null }],
+      };
+      const items = buildNowFace(raw, [], t, { orgSlug: 'moonklabs', activeProjectId: 'p-active' });
+      const signal = items.find((i) => i.kind === 'signal');
+      expect(signal?.crossProjectLabel).toBeNull();
+      expect(signal?.href).toBe('/moonklabs/sprintable/board?story=s1');
+    });
+
+    it('viewer 미제공(구 호출부)이면 bare href·crossProjectLabel=null로 폴백한다(회귀 0)', () => {
+      const raw: RawMyActions = {
+        ...ZERO_LOOP_COUNTS,
+        queue: [],
+        attention: [{ type: 'agent_stuck', entity_type: 'story', entity_id: 's1', gate_type: null, story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: 'p-other', project_slug: 'other-proj', member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null }],
+      };
+      const items = buildNowFace(raw, [], t);
+      const signal = items.find((i) => i.kind === 'signal');
+      expect(signal?.href).toBe('/board?story=s1');
+      expect(signal?.crossProjectLabel).toBeNull();
+    });
+
+    it('agent_stuck이 story가 아니면(gates 폴백) 여전히 /inbox?tab=gates이고 crossProjectLabel=null이다', () => {
+      const raw: RawMyActions = {
+        ...ZERO_LOOP_COUNTS,
+        queue: [],
+        attention: [{ type: 'agent_stuck', entity_type: null, entity_id: null, gate_type: 'merge', story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: 'p-other', project_slug: 'other-proj', member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null }],
+      };
+      const items = buildNowFace(raw, [], t, { orgSlug: 'moonklabs', activeProjectId: 'p-active' });
+      const signal = items.find((i) => i.kind === 'signal');
+      expect(signal?.href).toBe('/inbox?tab=gates');
+      expect(signal?.crossProjectLabel).toBeNull();
+    });
+
+    it('action_queue 유래(decide) 항목은 project_id 계약이 없어 crossProjectLabel이 항상 null이다', () => {
+      const raw: RawMyActions = {
+        ...ZERO_LOOP_COUNTS,
+        queue: [{ type: 'review_merge', priority: 'info', title: 'x', context: { story_id: 's1' } }],
+        attention: [],
+      };
+      const items = buildNowFace(raw, [], t, { orgSlug: 'moonklabs', activeProjectId: 'p-active' });
+      expect(items[0]?.crossProjectLabel).toBeNull();
+    });
+  });
+
   it('never leaks raw elapsed-time text into signal context copy (surveillance framing ban — doc §1.5/§1.7)', () => {
     const raw: RawMyActions = {
       ...ZERO_LOOP_COUNTS,
