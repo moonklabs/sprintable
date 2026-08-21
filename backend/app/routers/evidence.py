@@ -196,8 +196,14 @@ async def create_evidence(
     auth: AuthContext = Depends(get_current_user),
 ) -> EvidenceResponse:
     caller = await resolve_member(auth, org_id, session)
+    # story #2042/#1936(같은 결함 클래스, 실측으로 확定): resolve_member().id는 휴먼일 때
+    # org_member.id인데 has_project_access가 기대하는 축은 raw auth.user_id(users.id) —
+    # human_grant_branch/admin_branch가 OrgMember.user_id로 매칭하기 때문(project_auth.py
+    # _project_access_predicate). caller.id를 넘기면 project_access(granted)로 정당하게
+    # 접근권을 가진 휴먼도 team_member_branch 매치 실패 시 403으로 튕긴다 — 코드베이스
+    # 전역 40+ 콜사이트가 전부 uuid.UUID(auth.user_id)를 직접 쓰는 것과 이 파일만 달랐다.
     project_id = await _assert_work_item_access(
-        session, body.work_item_id, body.work_item_type, caller.id, org_id
+        session, body.work_item_id, body.work_item_type, uuid.UUID(auth.user_id), org_id
     )
 
     artifact_version_id = None
@@ -236,8 +242,9 @@ async def list_evidence(
     if work_item_type not in _WORK_ITEM_TYPES:
         raise HTTPException(status_code=400, detail=f"work_item_type must be one of {sorted(_WORK_ITEM_TYPES)}")
 
-    caller = await resolve_member(auth, org_id, session)
-    await _assert_work_item_access(session, work_item_id, work_item_type, caller.id, org_id)
+    # story #2042/#1936 — caller.id(resolve_member) 대신 raw auth.user_id(위 create_evidence
+    # 주석과 동일 근거). resolve_member 호출 자체가 이 authz 판정엔 불필요해 제거(쿼리 1회 절감).
+    await _assert_work_item_access(session, work_item_id, work_item_type, uuid.UUID(auth.user_id), org_id)
 
     result = await session.execute(
         select(Evidence).where(
@@ -267,9 +274,10 @@ async def get_evidence(
     if evidence is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
 
-    caller = await resolve_member(auth, org_id, session)
+    # story #2042/#1936 — caller.id(resolve_member) 대신 raw auth.user_id(create_evidence
+    # 주석 참조, 동일 축 정합).
     project_id = await _project_id_of_evidence(session, org_id, id)
-    if project_id is None or not await has_project_access(session, caller.id, project_id, org_id):
+    if project_id is None or not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
         raise HTTPException(status_code=404, detail="Evidence not found")
 
     resolved_story_id: uuid.UUID | None = None

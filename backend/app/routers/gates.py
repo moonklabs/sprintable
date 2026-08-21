@@ -476,6 +476,40 @@ async def list_gates(
         from app.models.hitl_config import GATE_TYPES
         if gate_type not in GATE_TYPES:
             raise HTTPException(status_code=422, detail=f"gate_type must be one of {sorted(GATE_TYPES)}")
+
+    # story #2042(P0, 침묵 스왈로 대칭 — 이번엔 authz 방향): work_item_id로 필터할 때 이
+    # 라우트는 org_id 스코프만 걸고 project 접근권을 아예 안 물었다(has_project_access 호출
+    # 0) — 같은 work_item을 읽는 get_gate_endpoint(단건, :{id})·evidence.py list_evidence는
+    # project 인가를 강제하는데 이 목록 경로만 조직 전체에 열려 있어, project 밖 사용자가
+    # evidence는 403으로 막히면서 gates는 200으로 새는 비대칭이 실측됐다(PO 그라운딩
+    # 2026-07-20). 처방: get_gate_endpoint와 동일 판정(require_project_access, SSOT #2697)을
+    # 여기도 물린다 — 존재 비노출 관례를 그대로 따라 거부는 404(evidence의 403과 문구는
+    # 다르지만 allow/deny 판정 자체는 동일 has_project_access predicate라 AC2 일치).
+    # ⚠️PO 리뷰 지적(2026-08-21): work_item_type 없이 work_item_id만 오는 호출(artifact-
+    # section.tsx의 status=pending 병용 경로 등)을 검사 없이 통과시키면 그 필드만 생략해
+    # 인가를 우회할 수 있다(반쪽 봉합) — work_item_type을 클라 입력값으로 "추측"하는 대신
+    # gate 테이블 자신(SSOT)에서 그 work_item_id가 실제로 쓰는 work_item_type을 먼저
+    # 조회해 동일 검사를 무조건 물린다. 게이트가 0건이면(가드가 지킬 대상 자체가 없음)
+    # 조회를 스킵 — 정보 누출 없음(빈 결과는 접근거부/무매치 둘 다 동일하게 []).
+    if work_item_id is not None:
+        if work_item_type is not None:
+            resolved_wi_types = [work_item_type]
+        else:
+            resolved_wi_types = list((await session.execute(
+                select(Gate.work_item_type).where(
+                    Gate.org_id == org_id, Gate.work_item_id == work_item_id,
+                ).distinct()
+            )).scalars().all())
+        for wi_type in resolved_wi_types:
+            project_id_scope = await resolve_work_item_project_id(
+                session, org_id, wi_type, work_item_id,
+            )
+            if project_id_scope is not None:
+                await require_project_access(session, uuid.UUID(auth.user_id), project_id_scope, org_id,
+                                              not_found_detail="Gate not found")
+            elif not is_known_project_agnostic_work_item_type(wi_type):
+                raise HTTPException(status_code=404, detail="Gate not found")
+
     q = select(Gate).where(Gate.org_id == org_id)
     if work_item_id:
         q = q.where(Gate.work_item_id == work_item_id)
