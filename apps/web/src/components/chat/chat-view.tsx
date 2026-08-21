@@ -131,15 +131,18 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
   // story #2766(레인 A) — ReadingPanel도 우측 패널이라 스레드와 동일 슬롯을 공유한다(동시
   // 2패널 레이아웃은 인계 doc에 없는 새 영역이라 짓지 않음 — 열면 서로 배타적으로 닫는다).
-  const [activeReadingPanel, setActiveReadingPanel] = useState<ReadingPanelTarget | null>(null);
+  // story #2888/S2 R5 — 단일 target에서 스택(배열)으로. 빈 배열=닫힘(기존 null과 동형).
+  // 최대 깊이 3(유나군 목업 s2d-sidepane-stack-mockup 확定) — push 시 최하단부터 pop.
+  const [readingPanelStack, setReadingPanelStack] = useState<ReadingPanelTarget[]>([]);
   // activeThreadRef와 동일 이유(popstate stale closure 방지) — 모바일 뒤로가기 제스처가
   // ThreadPanel과 똑같이 이 패널도 먼저 닫아야 한다(페이지 이탈 아님).
   const activeReadingPanelRef = useRef(false);
+  const READING_PANEL_MAX_DEPTH = 3;
 
   // 스레드 열기: 현재 URL 유지한 채 history entry 추가
   const openThread = useCallback((message: ChatMessage) => {
     activeReadingPanelRef.current = false;
-    setActiveReadingPanel(null);
+    setReadingPanelStack([]);
     setActiveThread(message);
     activeThreadRef.current = true;
     const url = window.location.pathname + window.location.search;
@@ -152,18 +155,29 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     setActiveThread(null);
   }, []);
 
+  // story #2888/S2 R5 — 패널이 이미 열려 있으면(스택 비어있지 않음) push(임베드 안에서 또
+  // 임베드), 닫혀 있었으면 새 1단 스택으로 시작. 열릴 때만 history entry를 추가한다(push는
+  // 같은 "패널 열림" 상태 안의 전환이라 뒤로가기 제스처가 매 push마다 쌓이지 않게).
   const openReadingPanel = useCallback((target: ReadingPanelTarget) => {
     activeThreadRef.current = false;
     setActiveThread(null);
+    const wasClosed = !activeReadingPanelRef.current;
     activeReadingPanelRef.current = true;
-    setActiveReadingPanel(target);
-    const url = window.location.pathname + window.location.search;
-    window.history.pushState({ _sprintableReadingPanel: true }, '', url);
+    setReadingPanelStack((prev) => [...prev, target].slice(-READING_PANEL_MAX_DEPTH));
+    if (wasClosed) {
+      const url = window.location.pathname + window.location.search;
+      window.history.pushState({ _sprintableReadingPanel: true }, '', url);
+    }
+  }, []);
+
+  // 브레드크럼 세그먼트 클릭 — 그 인덱스까지 pop(그 항목이 새 최상단).
+  const navigateReadingPanelTo = useCallback((index: number) => {
+    setReadingPanelStack((prev) => prev.slice(0, index + 1));
   }, []);
 
   const closeReadingPanel = useCallback(() => {
     activeReadingPanelRef.current = false;
-    setActiveReadingPanel(null);
+    setReadingPanelStack([]);
   }, []);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -373,7 +387,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       activeThreadRef.current = false;
       setActiveThread(null);
       activeReadingPanelRef.current = false;
-      setActiveReadingPanel(null);
+      setReadingPanelStack([]);
       window.history.pushState(e.state ?? null, '', window.location.pathname + window.location.search);
     };
     window.addEventListener('popstate', handlePopState);
@@ -740,7 +754,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // story #2766(레인 A) — ReadingPanel도 같은 "메인 채팅 숨김" 규칙을 탄다(모바일 전체화면
   // 드로어). ReadingPanel 자신이 이미 자체 닫기(X) 버튼을 갖고 있어(FileViewer/EntityPreviewModal
   // 헤더) ThreadPanel처럼 별도 상단 "뒤로" 바를 새로 만들지 않는다.
-  const isMobileReadingView = activeReadingPanel !== null;
+  const isMobileReadingView = readingPanelStack.length > 0;
   const isMobileRightPanelView = isMobileThreadView || isMobileReadingView;
 
   return (
@@ -983,12 +997,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
         {/* story #2766(레인 A) §A1 — ReadingPanel: 데스크톱 clamp(480px,40vw,720px) 사이드 /
             모바일 전체 뷰. ThreadPanel과 같은 슬롯이지만 폭 규격이 다르다(320px 고정이 아님
             — 문서 가독 기준 폭). */}
-        {activeReadingPanel && (
+        {readingPanelStack.length > 0 && (
           <div
             className={`flex flex-col overflow-hidden ${isMobileReadingView ? 'flex-1' : 'hidden lg:flex'}`}
             style={isMobileReadingView ? undefined : { width: 'clamp(480px, 40vw, 720px)', flexShrink: 0 }}
           >
-            <ReadingPanel target={activeReadingPanel} onClose={closeReadingPanel} />
+            <ReadingPanel stack={readingPanelStack} onNavigateTo={navigateReadingPanelTo} onClose={closeReadingPanel} />
           </div>
         )}
       </div>
