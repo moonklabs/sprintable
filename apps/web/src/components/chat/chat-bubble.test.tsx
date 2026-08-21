@@ -1536,8 +1536,16 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
 // 렌더 경로) 회귀 반경이 넓다. 시안(유나양) 착지 전까지 지금 "그룹핑 미착수" 상태의 실제
 // 동작을 characterization test로 고정해 둔다 — ③④ 구현 시 이 스위트가 "의도한 대로 바뀐
 // 지점"과 "실수로 깨진 지점"을 가른다.
-describe('ChatBubble — story #2905 S2c③④ 착수 전 다중 sole-link 문단 베이스라인(그룹핑 미착수 상태 고정)', () => {
-  it('연속된 같은 타입(story) sole-link 문단 2개 — 오늘은 그룹핑 없이 EmbedCard 2장이 각자 독립 렌더된다', async () => {
+// story #2905 S2c③④(#3310 베이스라인 → 그룹핑 착지 후 rebase, 2026-08-22) — 이 스위트가
+// «오늘은 그룹핑 없음»으로 고정해 둔 4건 중 2건(같은 타입 연속)의 기대값이 실제로 뒤집혔다.
+// 페드루 지시: 그 뒤집힘이 diff에 명시적으로 드러나야 이 그물의 원 설계 취지(#3310의
+// "③④ 구현 시 이 스위트가 의도한 변경과 실수를 가른다")가 선다 — .rounded-md 카운트만
+// 보는 낡은 단언은 EmbedGroup(ConciseList/ArtifactCarousel)이 내부적으로도 EmbedCard를
+// 재사용하는 바람에 숫자가 우연히 그대로 맞아 "말없이 통과"할 뻔했다(실측으로 확認) — 그룹
+// wrapper(.space-y-1.5·overflow-x-auto) 존재 여부로 뮤테이션 감지력을 되살린다. 그대로 남는
+// 2건(다른 타입 섞임·산문 단절)은 §3 delta의 두 불변식을 재확認하는 자리로 성격이 바뀐다.
+describe('ChatBubble — story #2905 S2c③④ 다중 sole-link 문단(그룹핑 착지 후, #3310 베이스라인 뒤집힘 명시)', () => {
+  it('연속된 같은 타입(story) sole-link 문단 2개 — 이제 EmbedGroup(간결 리스트)으로 묶여 렌더된다(베이스라인 뒤집힘)', async () => {
     const idA = '55555555-5555-5555-5555-555555555551';
     const idB = '55555555-5555-5555-5555-555555555552';
     await act(async () => {
@@ -1552,15 +1560,18 @@ describe('ChatBubble — story #2905 S2c③④ 착수 전 다중 sole-link 문�
         />,
       ));
     });
+    // 간결 리스트 그룹 wrapper(embed-group.tsx ConciseList)가 정확히 1개 — 개별 <p> 2개로
+    // 흩어지지 않고 하나의 그룹으로 묶였다는 것 자체가 이 테스트의 요지.
+    expect(container.querySelectorAll('.space-y-1\\.5')).toHaveLength(1);
     const cards = container.querySelectorAll('.rounded-md');
     expect(cards).toHaveLength(2);
     expect(container.textContent).toContain('스토리 A');
     expect(container.textContent).toContain('스토리 B');
-    // 렌더 순서=본문 순서(캐러셀/리스트로 바뀌면 이 DOM 순서 단언부터 깨질 것 — 의도된 변경).
+    // 그룹 안에서도 렌더 순서=본문 순서는 유지된다.
     expect(container.textContent!.indexOf('스토리 A')).toBeLessThan(container.textContent!.indexOf('스토리 B'));
   });
 
-  it('연속된 서로 다른 타입(doc·story) sole-link 문단 2개도 오늘은 각자 독립 렌더된다', async () => {
+  it('연속된 서로 다른 타입(doc·story) sole-link 문단 2개 — §3 delta 「타입별 서브그룹」 불변식대로 여전히 각자 독립 렌더된다(그룹 대상 아님)', async () => {
     const docId = DOC_ID;
     const storyId = '55555555-5555-5555-5555-555555555553';
     await act(async () => {
@@ -1578,9 +1589,11 @@ describe('ChatBubble — story #2905 S2c③④ 착수 전 다중 sole-link 문�
     expect(container.querySelectorAll('.rounded-md')).toHaveLength(2);
     // doc 전용 마커(미리보기 버튼)가 정확히 doc 카드에만 붙는다 — 타입별 폼이 안 섞였는지.
     expect(container.querySelectorAll('button[aria-label="미리보기"]')).toHaveLength(1);
+    // 그룹 조건(같은 타입+2개↑)을 각자 1개씩만 채워 미달 — EmbedGroup wrapper가 안 생긴다.
+    expect(container.querySelectorAll('.space-y-1\\.5')).toHaveLength(0);
   });
 
-  it('산문으로 떨어진(연속 아닌) 같은 타입 sole-link 문단 2개 — 오늘도 앞으로도 그룹핑 대상 아님(각자 독립)', async () => {
+  it('산문으로 떨어진(연속 아닌) 같은 타입 sole-link 문단 2개 — §3 delta 「산문 문단만 run을 끊는다」 불변식대로 오늘도 앞으로도 그룹핑 영구 비대상(각자 독립)', async () => {
     const idA = '55555555-5555-5555-5555-555555555554';
     const idB = '55555555-5555-5555-5555-555555555555';
     await act(async () => {
@@ -1597,9 +1610,11 @@ describe('ChatBubble — story #2905 S2c③④ 착수 전 다중 sole-link 문�
     });
     expect(container.querySelectorAll('.rounded-md')).toHaveLength(2);
     expect(container.textContent).toContain('중간에 낀 산문 한 줄.');
+    // 산문이 run을 끊어 그룹 wrapper 자체가 안 생긴다(공백줄과 달리 산문은 진짜 단절).
+    expect(container.querySelectorAll('.space-y-1\\.5')).toHaveLength(0);
   });
 
-  it('sole-link 문단 3개 연속(artifact) — 오늘은 캐러셀/격납 없이 3장 전부 개별 렌더(카드 홍수 베이스라인)', async () => {
+  it('sole-link 문단 3개 연속(artifact) — 이제 가로 캐러셀(overflow-x-auto)로 격납돼 렌더된다(카드 홍수 베이스라인 뒤집힘)', async () => {
     const ids = ['66666666-6666-6666-6666-666666666661', '66666666-6666-6666-6666-666666666662', '66666666-6666-6666-6666-666666666663'];
     await act(async () => {
       root.render(wrap(
@@ -1614,6 +1629,10 @@ describe('ChatBubble — story #2905 S2c③④ 착수 전 다중 sole-link 문�
       ));
       await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     });
+    // 캐러셀 wrapper(embed-group.tsx ArtifactCarousel)가 정확히 1개 — 3장이 세로로 벽처럼
+    // 흩어지지 않고 가로 스크롤 한 자리로 격납됐다는 것 자체가 이 테스트의 요지(§3 「풍부
+    // 하되 격납」 불변식).
+    expect(container.querySelectorAll('.overflow-x-auto')).toHaveLength(1);
     expect(container.querySelectorAll('.rounded-md')).toHaveLength(3);
   });
 });
