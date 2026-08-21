@@ -158,6 +158,56 @@ async def _resolve_chat_messages(session: AsyncSession, org_id: uuid.UUID, ids: 
     return set(rows)
 
 
+async def _resolve_gates(session: AsyncSession, org_id: uuid.UUID, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+    """story #2889(S2h③, 페드루 확定 2026-08-21) — gate는 자유텍스트 제목이 없는(상태기계
+    레코드) 엔티티라 검색 picker UX 자체가 자연스럽지 않고, project 스코프도 work_item_type별
+    8갈래 분기(resolve_work_item_project_id)라 «완전지원» 다섯 계약(특히 검색 핸들러)을 여는
+    비용이 실효 없다 — chat_message와 동형으로 TARGET_ONLY(존재판정+backlinks+멘션 자동감지만).
+    Gate엔 soft-delete 컬럼이 없다(상태기계 row는 절대 안 지워짐, gate.py 참조) — row 존재
+    자체가 존재판정."""
+    from app.models.gate import Gate
+
+    rows = (
+        await session.execute(select(Gate.id).where(Gate.org_id == org_id, Gate.id.in_(ids)))
+    ).scalars().all()
+    return set(rows)
+
+
+async def _resolve_pull_requests(session: AsyncSession, org_id: uuid.UUID, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+    """story #2889(S2h③) — "PR" target_id는 GitHub PR 자체(uuid 없음)가 아니라 그 canonical
+    링크 행(`PullRequestStoryLink.id`, repo_full_name+pr_number+story_id를 담는 이 시스템의
+    PR 표현) — gate와 동일 이유(제목 없음·검색 UX 부자연)로 TARGET_ONLY."""
+    from app.models.pull_request_story_link import PullRequestStoryLink
+
+    rows = (
+        await session.execute(
+            select(PullRequestStoryLink.id).where(
+                PullRequestStoryLink.org_id == org_id, PullRequestStoryLink.id.in_(ids),
+                PullRequestStoryLink.deleted_at.is_(None),
+            )
+        )
+    ).scalars().all()
+    return set(rows)
+
+
+async def _resolve_members(session: AsyncSession, org_id: uuid.UUID, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+    """story #2889(S2h③) — member는 org-scoped 신원 참조라 project 축이 구조적으로 없다
+    (한 member가 여러 project에 동시 소속 가능) — PROJECT_ID_RESOLVERS가 요구하는 "정확히
+    하나의 project_id"를 낼 수 없어 완전지원(ENTITY_RESOLVERS) 등록이 아예 성립하지 않는다
+    (등록하면 POST /references가 target_project_id=None을 항상 404로 거부해 명시 생성이
+    구조적으로 막힘). chat_message·meeting과 동형 TARGET_ONLY — 존재판정+멘션 자동감지만."""
+    from app.models.member import Member
+
+    rows = (
+        await session.execute(
+            select(Member.id).where(
+                Member.org_id == org_id, Member.id.in_(ids), Member.deleted_at.is_(None),
+            )
+        )
+    ).scalars().all()
+    return set(rows)
+
+
 async def _resolve_evidence(session: AsyncSession, org_id: uuid.UUID, ids: list[uuid.UUID]) -> set[uuid.UUID]:
     from app.models.evidence import Evidence
 
@@ -209,7 +259,11 @@ SOURCE_ONLY_TYPES: frozenset[str] = frozenset({"chat_message", "meeting"})
 # 없다(conversations.py의 메시지 라우트 4개 전부 conversation_id를 path에 요구). 위
 # SOURCE_ONLY_TYPES와 겹치는 멤버(chat_message)가 있는 것은 정상이다 — source 자격과
 # target 자격은 독립된 두 질문이다.
-TARGET_ONLY_TYPES: frozenset[str] = frozenset({"chat_message"})
+# ⛔story #2889(S2h③, 페드루 확定 2026-08-21): gate·pull_request·member 3종 추가 —
+# chat_message/meeting과 동일 판정 사유("자유텍스트 제목 없음" 또는 "project 축 구조적 부재"
+# → 검색 handler·PROJECT_ID_RESOLVERS 계약이 성립 불가). 채팅 임베드 용도(존재판정+backlinks
+# 역참조+멘션 자동감지)엔 TARGET_ONLY로 충분 — 검색 picker가 실증되면 그때 별도 스토리로 승격.
+TARGET_ONLY_TYPES: frozenset[str] = frozenset({"chat_message", "gate", "pull_request", "member"})
 
 # TARGET_ONLY_TYPES 멤버의 존재판정 resolver. ENTITY_RESOLVERS와 분리된 이유는 위와 동일 —
 # 이 dict에 들어간다고 검색/MCP/project축 계약까지 진 것으로 오인되면 안 된다.
@@ -220,6 +274,9 @@ TARGET_ONLY_TYPES: frozenset[str] = frozenset({"chat_message"})
 #     13건이 깨진다(2026-07-29 실측). 「왜 여기만 따로지?」로 되돌리지 말 것.
 TARGET_ONLY_RESOLVERS: dict[str, EntityExistsResolver] = {
     "chat_message": _resolve_chat_messages,
+    "gate": _resolve_gates,
+    "pull_request": _resolve_pull_requests,
+    "member": _resolve_members,
 }
 
 

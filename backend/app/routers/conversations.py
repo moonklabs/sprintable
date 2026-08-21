@@ -2399,9 +2399,16 @@ async def send_message(
     # 예외가 그대로 propagate 되어 메시지 전송 전체가 롤백된다(AC4 원자성 — 아래 best-effort 블록들과
     # 의도적으로 다른 격리 수준).
     from app.services.mention_parser import insert_chat_mentions
+    # story #2889(S2h③, 페드루 확定 2026-08-21): gate/pull_request/member는 TARGET_ONLY_TYPES
+    # (완전지원 ENTITY_RESOLVERS 아님)라 insert_chat_mentions의 기본 target_types(=ENTITY_
+    # RESOLVERS만)엔 안 잡힌다 — "존재판정+멘션 자동감지"까지가 이 세 타입의 계약(reference_
+    # registry.py 참고)이라 여기서 명시로 넓힌다. chat_message는 안 넣는다(자기 자신을
+    # @멘션하는 토큰은 의미가 없음 — proof form의 별도 경로로만 채팅 메시지를 인용한다).
+    from app.services.reference_registry import ENTITY_RESOLVERS
     mention_result = await insert_chat_mentions(
         db, org_id=org_id, message_id=msg.id, content=msg.content, created_by=sender.id,
         auto_story_ids=frozenset(_auto_story_ids),
+        target_types=frozenset(ENTITY_RESOLVERS) | {"gate", "pull_request", "member"},
     )
 
     # E-STORAGE-SSOT S2: 첨부를 asset registry로 동기화(SAVE-time·같은 트랜잭션·orphan 0).
