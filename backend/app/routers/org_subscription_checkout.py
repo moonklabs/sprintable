@@ -16,6 +16,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.models.org_subscription import OrgSubscription
 from app.services.org_subscription_checkout import (
+    ActivePaidSubscriptionExists,
     CheckoutDeclined,
     CheckoutError,
     CheckoutInProgress,
@@ -98,6 +99,10 @@ async def checkout(
         # #2511 — 같은 org의 다른 checkout이 진행 中. 사용자 입력·내부 상태 오류가 아니라
         # 타이밍 충돌이라 409(재시도 가능함을 뜻함).
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ActivePaidSubscriptionExists as exc:
+        # ⛔P0(story a8fec107) — 호출자가 고칠 수 있는 입력 오류(잘못된 엔드포인트 진입)라
+        # 400. 메시지 자체가 정확한 복구 행동(change-tier)을 명시한다.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except CheckoutError as exc:
         # 이 지점 도달 시 tier/billing_cycle 자체는 이미 Pydantic Literal이 걸렀다 —
         # 남은 원인은 offering_version 카탈로그 갭 같은 내부 상태 문제(사용자 입력 오류

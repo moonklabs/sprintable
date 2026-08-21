@@ -108,6 +108,29 @@ def test_checkout_returns_200_pending_with_declined_reason_on_card_decline(_app_
     assert body["declined_reason"] == "카드 거절"
 
 
+def test_checkout_returns_400_when_active_paid_subscription_exists(_app_client):
+    """⛔P0(2026-08-21, story a8fec107) — 활성 유료 org의 checkout 재진입은 400·문구에
+    change-tier 경로 명시(틀린 복구 행동 유도 방지)."""
+    from app.services.org_subscription_checkout import ActivePaidSubscriptionExists
+
+    client, org_id = _app_client
+    with _checkout_enabled(), \
+         patch("app.services.project_auth.is_org_owner_or_admin", new=AsyncMock(return_value=True)), \
+         patch(
+             "app.routers.org_subscription_checkout.checkout_subscription",
+             new=AsyncMock(side_effect=ActivePaidSubscriptionExists(
+                 f"org_id={org_id}는 이미 활성 유료 구독(tier='business')입니다 — "
+                 "플랜 변경은 POST /api/v2/org-subscriptions/change-tier를 쓰세요."
+             )),
+         ):
+        resp = client.post(
+            "/api/v2/org-subscriptions/checkout",
+            json={"auth_key": "ak", "tier": "team", "billing_cycle": "monthly"},
+        )
+    assert resp.status_code == 400
+    assert "change-tier" in resp.json()["error"]["message"]
+
+
 def test_checkout_returns_502_on_toss_unreachable(_app_client):
     client, org_id = _app_client
     with _checkout_enabled(), \
