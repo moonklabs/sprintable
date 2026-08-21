@@ -27,6 +27,7 @@ import uuid
 from datetime import datetime, timezone
 
 from app.models.gate import Gate
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def make_gate(**overrides) -> Gate:
@@ -62,3 +63,33 @@ def make_gate(**overrides) -> Gate:
     )
     defaults.update(overrides)
     return Gate(**defaults)
+
+
+async def make_gate_realdb(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    work_item_id: uuid.UUID,
+    *,
+    work_item_type: str = "story",
+    gate_type: str = "merge",
+    status: str = "pending",
+    requires_human: bool = False,
+    evidence_status: str | None = None,
+    **overrides,
+) -> Gate:
+    """story #2851 — `make_gate()`의 실DB 트윈. insert+commit해 영속 Gate를 반환한다.
+
+    test_2303/test_2298/test_2533 각자 독립 중복이던 `_make_gate(...)`를 여기 하나로
+    합쳤다(2837의 순수 객체 팩토리와 이름·시그니처 결을 맞춤 — `make_gate`↔`make_gate_realdb`).
+    `**overrides`로 나머지 Gate 컬럼(neutral_facts·resolver_id 등)도 열어 둔다 — 지금 세
+    파일 중 이 다섯 개(work_item_type/gate_type/status/requires_human/evidence_status)
+    바깥을 쓰는 호출은 없지만, `make_gate()`와 동일하게 스키마에서 구조적으로 못 벗어나게
+    하기 위함(수동 defaults dict 유지 부담 반복 금지)."""
+    gate = Gate(
+        id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, work_item_type=work_item_type,
+        gate_type=gate_type, status=status, requires_human=requires_human,
+        evidence_status=evidence_status, **overrides,
+    )
+    session.add(gate)
+    await session.commit()
+    return gate

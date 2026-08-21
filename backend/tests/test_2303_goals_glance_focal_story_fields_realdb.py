@@ -18,6 +18,8 @@ import uuid
 
 import pytest
 
+from tests.gate_mock_factory import make_gate_realdb
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -105,21 +107,6 @@ async def _make_story(session, org_id, project_id, epic_id, assignee_id=None, st
     session.add(story)
     await session.commit()
     return story
-
-
-async def _make_gate(
-    session, org_id, story_id, status="pending", gate_type="human_review",
-    requires_human=False, evidence_status=None,
-):
-    from app.models.gate import Gate
-    gate = Gate(
-        id=uuid.uuid4(), org_id=org_id, work_item_id=story_id, work_item_type="story",
-        gate_type=gate_type, status=status, requires_human=requires_human,
-        evidence_status=evidence_status,
-    )
-    session.add(gate)
-    await session.commit()
-    return gate
 
 
 async def _make_evidence(session, org_id, story_id, created_by, type="url", ref="https://x"):
@@ -296,7 +283,7 @@ async def test_focal_story_auto_verify_maps_merge_gate_evidence_status(evidence_
             )
             # merge gate 자체는 status="approved"(resolved) — pending 아니어도 auto_verify는
             # evidence_status 원자료 그대로다(gate 필드=pending 전용, auto_verify=merge 전용, 별축).
-            await _make_gate(
+            await make_gate_realdb(
                 s, org.id, story.id, status="approved", gate_type="merge",
                 evidence_status=evidence_status,
             )
@@ -325,7 +312,7 @@ async def test_focal_story_gate_carries_type_and_requires_human_not_status():
                 s, org.id, project.id, goal.id, assignee_id=caller_id,
                 status="in-progress", title="Gated",
             )
-            await _make_gate(
+            await make_gate_realdb(
                 s, org.id, story.id, status="pending", gate_type="merge",
                 requires_human=True,
             )
@@ -388,7 +375,7 @@ async def test_focal_story_excludes_fields_the_screen_does_not_read():
                 s, org.id, project.id, goal.id, assignee_id=caller_id,
                 status="in-progress", title="Lean",
             )
-            await _make_gate(
+            await make_gate_realdb(
                 s, org.id, story.id, status="pending", gate_type="human_review",
                 requires_human=True,
             )
@@ -454,11 +441,11 @@ async def test_focal_story_values_match_glance_hero_for_same_story_rich_case():
             await _make_evidence(
                 s, org.id, story.id, created_by=verifier_id, type="gate_approval", ref="approved",
             )
-            await _make_gate(
+            await make_gate_realdb(
                 s, org.id, story.id, status="pending", gate_type="human_review",
                 requires_human=True,
             )
-            await _make_gate(
+            await make_gate_realdb(
                 s, org.id, story.id, status="approved", gate_type="merge",
                 evidence_status="sufficient",
             )

@@ -26,6 +26,7 @@ from tests.test_1994_backlink_api_realdb import (
     _session_factory,
     _setup_app_human,
 )
+from tests.gate_mock_factory import make_gate_realdb
 from tests.test_2301_story_body_mentions_realdb import _REAL_DB_URL, _make_story
 
 pytestmark = [
@@ -85,17 +86,6 @@ async def _link_hypothesis_epic(session, hypothesis_id, epic_id):
     await session.commit()
 
 
-async def _make_gate(session, org_id, work_item_id, status="pending"):
-    from app.models.gate import Gate
-    gate = Gate(
-        id=uuid.uuid4(), org_id=org_id, work_item_id=work_item_id, work_item_type="story",
-        gate_type="merge", status=status,
-    )
-    session.add(gate)
-    await session.commit()
-    return gate
-
-
 async def _make_evidence(session, org_id, work_item_id, created_by):
     from app.models.evidence import Evidence
     ev = Evidence(
@@ -127,7 +117,7 @@ async def test_lifecycle_assembles_goals_stories_and_evidence_realdb():
             hyp = await _make_hypothesis(s, org.id, project.id, caller_id, statement="가설 A")
             await _link_hypothesis_epic(s, hyp.id, goal.id)
             await _link_hypothesis_story(s, hyp.id, story.id)
-            await _make_gate(s, org.id, story.id, status="pending")
+            await make_gate_realdb(s, org.id, story.id, status="pending")
             await _make_evidence(s, org.id, story.id, caller_id)
             await _make_evidence(s, org.id, story.id, caller_id)
 
