@@ -4,11 +4,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { CircleHelp, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
 import { ProfileMenu } from '@/components/nav/profile-menu';
+import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import { fetchWithAuth } from '@/lib/db/client';
 import { NAV_GROUPS } from '@/lib/nav-config';
@@ -70,9 +71,6 @@ export function AppSidebar({
       || Boolean(orgSlug && currentProjectSlug && pathname.startsWith(`/${orgSlug}/${currentProjectSlug}/${resource}`));
     return { href, isActive };
   }
-  // story #2681 — docsLink는 footer 도움말 링크가 루프 밖에서 따로 참조해 개별 바인딩을
-  // 유지한다(그 외 리소스 항목은 전부 NAV_GROUPS 순회 중 resourceLink()를 그 자리에서 호출).
-  const docsLink = resourceLink('docs');
   // story #2224(IA v2.2 §7-3, AC12) — 기본 진입은 /flow, 사이드바가 통합뷰를 가리킨다.
   // 칸반은 /flow?view=list로 흡수됐다(PR#2698, `/board` 라우트 자체는 삭제) — 사이드바에
   // board를 flow와 나란히 1Depth로 세우지 않는다("나란히 두면 「내렸다」가 무효가 된다" —
@@ -224,20 +222,11 @@ export function AppSidebar({
 
       <SidebarFooter className="space-y-2 p-2">
         {userName && <ProfileMenu name={userName} />}
-        <div className="flex items-center justify-between gap-1">
-          <div className="flex items-center gap-1">
-            <LocaleSwitcher />
-            <ThemeToggle />
-          </div>
-          <Link
-            href={docsLink.href}
-            aria-label={t('help')}
-            title={t('help')}
-            className="flex size-8 items-center justify-center rounded-md text-sidebar-foreground/60 transition hover:bg-sidebar-accent hover:text-sidebar-foreground"
-          >
-            <CircleHelp className="size-4" />
-          </Link>
+        <div className="flex items-center gap-1">
+          <LocaleSwitcher />
+          <ThemeToggle />
         </div>
+        <BusinessInfoDisclosure />
       </SidebarFooter>
 
       <SidebarRail />

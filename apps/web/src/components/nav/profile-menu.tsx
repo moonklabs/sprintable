@@ -17,7 +17,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { ACCOUNT_CAP } from '@/lib/auth/account-limits';
-import { LEGAL_DOC_ROUTES } from '@/lib/legal/business-info';
 
 interface Account {
   account_id: string;
@@ -69,7 +68,6 @@ export function ProfileMenu({ name, avatarUrl }: ProfileMenuProps) {
   const t = useTranslations('accountSwitcher');
   const tc = useTranslations('common');
   const tn = useTranslations('nav');
-  const tLegal = useTranslations('legal');
 
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [busy, setBusy] = useState<string | null>(null); // account_id | 'add' | 'signout'
@@ -216,20 +214,6 @@ export function ProfileMenu({ name, avatarUrl }: ProfileMenuProps) {
           <Settings className="size-4" />
           {tn('settings')}
         </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuGroup>
-          {/* GroupLabel(base-ui)은 반드시 Group 내부 — Popup 직속이면 error #31 크래시(story #2865). */}
-          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">{tLegal('policiesHeading')}</DropdownMenuLabel>
-          <DropdownMenuItem render={<Link href={LEGAL_DOC_ROUTES.terms} />}>
-            {tLegal('termsOfService')}
-          </DropdownMenuItem>
-          <DropdownMenuItem render={<Link href={LEGAL_DOC_ROUTES.privacy} />}>
-            {tLegal('privacyPolicy')}
-          </DropdownMenuItem>
-          <DropdownMenuItem render={<Link href={LEGAL_DOC_ROUTES.refundPolicy} />}>
-            {tLegal('refundPolicy')}
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           disabled={busy !== null}
