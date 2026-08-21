@@ -74,7 +74,11 @@ export function PricingPlanCard({
           {t('currentPlanBadge')}
         </Badge>
       )}
-      {!isCurrent && isPricePublic && tier.id === 'starter' && (
+      {/* 유나양 발견(PR#3321 design 리뷰, 2026-08-21) — 이 코너 배지는 카드 하단의 방향
+          판정 CTA와 별개 자리라 P0 fix가 안 훑었다. business/team 사용 org에는 starter가
+          하향 대상인데도 «업그레이드» 라벨이 남아 있었다 — 이 PR의 존재 이유(오표기 소멸)
+          자체를 반쪽으로 만드는 잔존 인스턴스라 같이 닫는다. */}
+      {!isCurrent && isPricePublic && isUpgrade && tier.id === 'starter' && (
         <Badge variant="info" className="absolute -top-2.5 left-4">
           {t('upgradeCta')}
         </Badge>
