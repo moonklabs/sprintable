@@ -57,7 +57,13 @@ async def compute_pack_charge_minor(
     (current_period_start/end 미세팅 — #2502 갭) 집계 범위를 특정할 수 없으니 0."""
     if period_start is None or period_end is None:
         return 0
-    return (
+    # story #2892(P0, 실사고 2026-08-21) — Postgres SUM(bigint)은 SQL 표준상 numeric을
+    # 반환한다(컬럼 자체는 BigInteger인데도) — asyncpg가 그걸 Python Decimal로 디코드해,
+    # 이 값이 그대로 charge_org→TossAdapter.charge()의 JSON 바디까지 흘러 들어가 httpx의
+    # json.dumps가 "Object of type Decimal is not JSON serializable"로 500을 냈다(Toss
+    # API 호출 前 — 네트워크 왕복 자체가 안 나간 순수 인코딩 실패). 경계(DB→Python)를
+    # 넘는 즉시 명시 int 변환 — 이 함수의 반환 타입 힌트(-> int)가 실제로 참이 되게 한다.
+    result = (
         await session.execute(
             select(func.coalesce(func.sum(BillingLedgerEntry.amount_minor), 0)).where(
                 BillingLedgerEntry.org_id == org_id,
@@ -68,6 +74,7 @@ async def compute_pack_charge_minor(
             )
         )
     ).scalar_one()
+    return int(result)
 
 
 async def compute_charge_amount(session: AsyncSession, *, org_id: uuid.UUID) -> tuple[int, str]:
