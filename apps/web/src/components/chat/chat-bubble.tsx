@@ -29,6 +29,8 @@ import { HitlApprovalCard, type HitlAnswer } from './hitl-approval-card';
 import { ApprovalRequestCard } from './approval-request-card';
 import { EventBlockCard } from './event-block-card';
 import { parseBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
+import { segmentMessageContent } from './message-segments';
+import { EmbedGroup } from './embed-group';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -307,16 +309,38 @@ function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenRe
 
   const prepared = hasMention ? prepareMentions(content) : content;
 
+  // story #2905(S2c③④) — 렌더 전에 메시지를 세그먼트로 미리 쪼갠다(§3 delta 「연속 판별」).
+  // 산문/단건 sole-link 세그먼트는 원문 그대로 기존 단일 ReactMarkdown 경로(components 재사용,
+  // 회귀 0)로 흘러가고, 2개↑ 연속 sole-link 세그먼트만 EmbedGroup(캐러셀/간결 리스트/gate
+  // 접힘)으로 대체된다. references(유령·asset 판정)는 그룹 판별에도 같은 SSOT를 쓴다
+  // (message-segments.ts가 resolveEmbedDecision을 직접 호출).
+  const segments = segmentMessageContent(prepared, references);
+
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkBreaks]}
-      urlTransform={(url) =>
-        url.startsWith('entity:') || url.startsWith('mention:') ? url : defaultUrlTransform(url)
-      }
-      components={components}
-    >
-      {prepared}
-    </ReactMarkdown>
+    <>
+      {segments.map((seg, idx) =>
+        seg.kind === 'group' ? (
+          <EmbedGroup
+            key={idx}
+            entityType={seg.entityType}
+            refs={seg.refs}
+            onOpenReadingPanel={onOpenReadingPanel}
+            eventDefinitionsByKey={eventDefinitionsByKey}
+          />
+        ) : (
+          <ReactMarkdown
+            key={idx}
+            remarkPlugins={[remarkGfm, remarkBreaks]}
+            urlTransform={(url) =>
+              url.startsWith('entity:') || url.startsWith('mention:') ? url : defaultUrlTransform(url)
+            }
+            components={components}
+          >
+            {seg.text}
+          </ReactMarkdown>
+        ),
+      )}
+    </>
   );
 }
 
