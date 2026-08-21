@@ -125,13 +125,18 @@ async def _notify_downgrade_auto_cancelled(session: AsyncSession, *, org_id: uui
             )
         ).all()
     ]
-    subject = f"[Sprintable] Plan downgrade to {tier} was cancelled — seat limit exceeded"
+    # 유나양 design 반려(PR#3308, 2026-08-21) — 영문 메일이 제품의 기존 한국어 메일
+    # (초대·#3316 dunning)과 보이스가 갈렸다. 로케일별 분기 정책은 아직 없음(PO 확認) —
+    # 기존 메일 관례대로 한국어 단일. 문안은 design이 첨부한 원문 그대로(#3316 톤 매칭).
+    subject = "[Sprintable] 예약된 하향 전환이 취소되었습니다 — 좌석 한도 초과"
     html = (
-        f"<p>Your scheduled downgrade to <b>{tier}</b> was automatically cancelled because your "
-        f"organization has <b>{seat_count}</b> members, exceeding that plan's included seat limit "
-        f"of <b>{included_seats}</b>.</p>"
-        f"<p>No members were removed. Reduce your team size or keep your current plan, then "
-        f"reschedule the downgrade if you still want it.</p>"
+        f"<p>안녕하세요, Sprintable입니다.</p>"
+        f"<p>예약하신 {tier} 플랜으로의 하향 전환이 자동으로 취소되었습니다. 현재 조직 "
+        f"멤버가 {seat_count}명으로, 해당 플랜의 포함 좌석({included_seats}석)을 초과하기 "
+        f"때문입니다.</p>"
+        f"<p>기존 멤버는 제거되지 않았습니다. 팀 규모를 줄이거나 현재 플랜을 유지하신 뒤, "
+        f"하향 전환이 여전히 필요하시면 다시 예약해 주세요.</p>"
+        f"<p>문의사항이 있으시면 언제든 회신해 주세요.</p>"
     )
     for em in emails:
         try:

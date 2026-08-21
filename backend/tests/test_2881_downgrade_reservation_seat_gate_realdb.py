@@ -304,8 +304,8 @@ async def test_sweep_auto_cancel_email_content_shows_real_tier_not_none_realdb()
             assert to == "owner@2881-email-content.test"
             assert "None" not in subject, f"tier명이 None으로 새는 회귀 — subject={subject!r}"
             assert "None" not in html, f"tier명이 None으로 새는 회귀 — html={html!r}"
-            assert "starter" in subject
             assert "starter" in html
+            assert "Sprintable" in subject
     finally:
         await engine.dispose()
 
