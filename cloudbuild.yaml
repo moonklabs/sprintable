@@ -22,6 +22,12 @@ substitutions:
   # 자체의 _reject_prod() 가드까지 삼중.
   _ADMIN_OPERATOR_AUDIENCE: https://sprintable-backend-dev-57iommnikq-du.a.run.app
   _ADMIN_OPERATOR_ALLOWLIST: sprintable-admin-web@sprintable-494803.iam.gserviceaccount.com
+  # story #2887(BE 아바타 업로드) — REDIS_URL/ADMIN_OPERATOR_*와 동일 원칙: dev만 싣는다.
+  # 버킷은 avatar 전용 신규 격리 버킷(sprintable-avatars-dev, public-read·uniform bucket-level
+  # access·cloudrun-runtime-dev=objectAdmin — 페드루 확定 2026-08-21)이고 prod 버킷은 아직
+  # 프로비저닝 전(심사 후 일괄)이라 prod에는 이 키 자체가 없어야 한다(설정 부재 시 코드가
+  # 업로드 발급을 503으로 fail-closed — REDIS_URL/GOTENBERG_SERVICE_URL과 동일 이중가드 원칙).
+  _GCS_AVATARS_BUCKET: sprintable-avatars-dev
   # story #2771(pptx 서버 변환, doc 84ef0cb7 §7-4) — office-converter는 아래 deploy-office-
   # converter 스텝이 매 배포마다 재생성/갱신한다. **부트스트랩 완료(페드루군, 2026-08-19)**:
   # 최초 배포가 --port 누락(Gotenberg는 3000, Cloud Run 헬스체크 기본 8080)으로 Ready 실패
@@ -296,6 +302,32 @@ steps:
         echo "OK: dev Cloud Run regional origin confirmed in applied CORS"
     waitFor: ['-']
 
+  # story #2887 — avatar 전용 버킷(sprintable-avatars-dev) CORS. dev 전용 게이트(prod 버킷
+  # 미프로비저닝 — office-converter와 동일 스킵 관례). PUT까지 필요(memo-attachments는
+  # GET/HEAD뿐 — 아바타는 FE가 서명 URL로 직접 PUT하는 업로드 흐름이라 다름).
+  - id: apply-gcs-avatars-cors
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "${_DEPLOY_ENV}" != "dev" ]; then
+          echo "skip apply-gcs-avatars-cors: prod bucket pending (story #2887, 심사 후 일괄)"
+          exit 0
+        fi
+        gcloud storage buckets update gs://${_GCS_AVATARS_BUCKET} \
+          --cors-file=infra/gcs-avatars-cors.json \
+          --quiet
+        applied=$(gcloud storage buckets describe gs://${_GCS_AVATARS_BUCKET} --format='value(cors_config)')
+        echo "${_GCS_AVATARS_BUCKET} CORS applied = $${applied}"
+        case "$${applied}" in
+          *https://sprintable-frontend-dev-787818285179.asia-northeast3.run.app*) ;;
+          *) echo "FAIL: dev Cloud Run regional origin missing from applied CORS — 배포 검증 실패" >&2; exit 1 ;;
+        esac
+        echo "OK: dev Cloud Run regional origin confirmed in applied CORS"
+    waitFor: ['-']
+
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
   - id: build-frontend
     name: gcr.io/cloud-builders/docker
@@ -540,6 +572,13 @@ steps:
         # 부재를 fail-closed 503으로 처리) ⛔대표 승인 前 prod 결제 개입 전면금지 태세와 정합.
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},ADMIN_OPERATOR_AUDIENCE=${_ADMIN_OPERATOR_AUDIENCE},ADMIN_OPERATOR_ALLOWLIST=${_ADMIN_OPERATOR_ALLOWLIST}"
+        fi
+        # story #2887 — GCS_AVATARS_BUCKET도 위와 동일 원칙(dev만). prod 버킷 미프로비저닝
+        # 상태에서 이 키가 prod에 실리면 코드 기본값(미설정)이 아니라 존재하지 않는 버킷명이
+        # 박혀 avatar 업로드가 500으로 터질 수 있다 — REDIS_URL/ADMIN_OPERATOR_*와 동일하게
+        # "값의 유무가 아니라 prod에는 이 키 자체가 없어야 안전" 원칙.
+        if [ "${_DEPLOY_ENV}" != "prod" ]; then
+          ENV_VARS="$${ENV_VARS},GCS_AVATARS_BUCKET=${_GCS_AVATARS_BUCKET}"
         fi
         # ⛔QA catch(카디르군, 2026-08-19) — office-converter 자체가 dev 전용 하드게이트인데
         # (deploy-office-converter 스텝) 이 배선엔 REDIS_URL/ADMIN_OPERATOR_*와 같은

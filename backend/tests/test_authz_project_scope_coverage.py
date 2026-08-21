@@ -347,6 +347,14 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     "app.routers.open_api_keys:revoke_project_api_key": "resolves ProjectApiKey→key.project_id!=path project_id 인라인 체크(v1 스캔 miss)",
     "app.routers.project_access:delete_project_access": "_require_owner_or_admin→has_project_role(admin) on path project_id(1-hop miss)",
     "app.routers.workflow_line_config:update_draft_version": "_require_draft_author가 admin-level project_auth 접근권 강제(in-code 문서화)",
+    # story #2887 — path의 {id}는 team_members(member) 행이지 project가 아니다(member는
+    # project 축이 구조적으로 없음, reference_registry.py의 동형 판단 참고). 대상 리소스가
+    # project-소속이 아니라 member 자신이라 has_project_access류가 애초에 무의미한
+    # SELF_DERIVED류 — _assert_can_edit_avatar(team_members.py)가 실 가드(에이전트=
+    # assert_agent_owner, 휴먼=self/admin — avatar_url PATCH와 동일 게이트 재사용, v1
+    # 스캔이 이 커스텀 헬퍼명을 인식 못함). POST 발급/confirm 두 곳도 같은 헬퍼를 쓰지만
+    # 이 스캐너는 DELETE/PATCH/PUT만 대상이라 여기 한 건만 잡힌다.
+    "app.routers.team_members:delete_avatar_endpoint": "_assert_can_edit_avatar(에이전트 owner/admin·휴먼 self/admin — avatar_url PATCH와 동일 게이트 재사용, v1 스캔 미인식 커스텀 헬퍼)",
 }
 
 # ── known-debt: 실 project-scoped IDOR — 후속 라운드 상환(6후보·story 5285888c 감사). ──

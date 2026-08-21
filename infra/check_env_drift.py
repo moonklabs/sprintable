@@ -394,6 +394,18 @@ _WEB_CODE_SERVICES = {"sprintable-frontend-dev", "sprintable-frontend-prod"}
 # (subset - master == 공집합) 잰다.
 _SERVICE_NAME_RE = re.compile(r"sprintable-[a-z]+-(?:dev|prod)")
 
+# `_SERVICE_NAME_RE`는 모양(`sprintable-*-{dev,prod}`)만 보는 정규식이라, Cloud Run 서비스가
+# 아닌 다른 리소스(GCS 버킷 등)의 이름이 우연히 같은 모양이면 구분 못한다. 마스터
+# (_SERVICE_SCRIPT_MAP)는 "실 서비스 8개"로 고정된 목록이라 여기 편입시키면 그 불변식이
+# 깨진다 — 그 대신 사유와 함께 여기서 명시 제외한다(주석-스트립과 같은 종류의 오탐 방지,
+# 다만 "주석"이 아니라 "다른 리소스 종류"가 원인).
+_NON_SERVICE_LITERAL_ALLOWLIST: dict[str, str] = {
+    "sprintable-avatars-dev": (
+        "story #2887 — avatar 업로드 전용 GCS 버킷(cloudbuild.yaml _GCS_AVATARS_BUCKET). "
+        "Cloud Run 서비스가 아님."
+    ),
+}
+
 
 def _service_subset_wellformed_violations() -> list[str]:
     """`_SERVICE_SCRIPT_MAP`(마스터) 밖의 이름이 나머지 세 목록에 있으면 그 이름을 낸다.
@@ -440,7 +452,7 @@ def _external_iac_service_literals() -> set[str]:
     for path in targets:
         for line in path.read_text().splitlines():
             names |= set(_SERVICE_NAME_RE.findall(_strip_comment(line)))
-    return names
+    return names - set(_NON_SERVICE_LITERAL_ALLOWLIST)
 
 
 def _external_iac_wellformed_violations() -> list[str]:
