@@ -149,8 +149,11 @@ async def test_trigger_due_charges_success_rolls_period_forward_stays_active_rea
             )):
                 result = await trigger_due_charges(session)
 
-            assert result["charged"] == 1
-            assert result["failed"] == 0
+            # CI는 전체 pytest 스위트를 한 공유 실PG에서 돌린다 — trigger_due_charges는
+            # org_subscriptions 전체를 스캔하므로 다른(무관한) 테스트가 남긴 active+과거
+            # period_end 행도 함께 집혀 집계 카운트를 오염시킬 수 있다(로컬 파일단위 프레시
+            # DB에서는 안 드러남). 집계는 하한만, 실제 판정은 이 org 자신의 row로.
+            assert result["charged"] >= 1
             row = (
                 await session.execute(
                     text("SELECT status, current_period_start, current_period_end FROM org_subscriptions WHERE org_id=:oid"),
@@ -188,13 +191,14 @@ async def test_trigger_due_charges_failure_sets_past_due_and_notifies_realdb():
             )), patch("app.services.billing_scheduler.send_email", new=lambda to, subj, body: sent.append((to, subj, body))):
                 result = await trigger_due_charges(session)
 
-            assert result["failed"] == 1
+            # 공유 CI DB 오염 가능성 — 하한만(row-level이 실 판정).
+            assert result["failed"] >= 1
             row = (await session.execute(text("SELECT status FROM org_subscriptions WHERE org_id=:oid"), {"oid": org_id})).first()
             assert row.status == "past_due"
 
-            assert len(sent) == 1
-            to, subject, body = sent[0]
-            assert to == "owner2@2907.test"
+            own_emails = [s for s in sent if s[0] == "owner2@2907.test"]
+            assert len(own_emails) == 1
+            to, subject, body = own_emails[0]
             grace_expires = (datetime.now(timezone.utc).date() + timedelta(days=7)).strftime("%Y-%m-%d")
             assert grace_expires in body, "메일 문안에 grace 만료일(언제)이 없음"
             assert "삭제되지 않" in body, "메일 문안에 데이터 미삭제(어떻게) 명시가 없음"
@@ -230,7 +234,7 @@ async def test_sweep_dunning_retry_success_restores_active_from_original_due_dat
             )):
                 result = await sweep_dunning_retries(session)
 
-            assert result["retried"] == 1
+            assert result["retried"] >= 1  # 공유 CI DB 오염 가능성 — 하한만.
             row = (
                 await session.execute(
                     text("SELECT status, current_period_start, current_period_end FROM org_subscriptions WHERE org_id=:oid"),
@@ -260,7 +264,7 @@ async def test_sweep_dunning_retry_daily_dedup_no_double_attempt_same_day_realdb
                 period_start=original_due - timedelta(days=30), period_end=original_due, status="past_due",
             )
             await _seed_active_billing_key(session, org_id)
-            await _seed_renewal_failed_order(session, org_id, offering_id, original_due, created_at=original_due)
+            order_id = await _seed_renewal_failed_order(session, org_id, offering_id, original_due, created_at=original_due)
 
             call_count = 0
 
@@ -271,12 +275,21 @@ async def test_sweep_dunning_retry_daily_dedup_no_double_attempt_same_day_realdb
                 raise TossApiError("CARD_DECLINED", "카드 거절", status_code=400)
 
             with patch("app.services.payment.toss_adapter.TossAdapter._post", new=_fake_post):
-                r1 = await sweep_dunning_retries(session)
-                r2 = await sweep_dunning_retries(session)
+                await sweep_dunning_retries(session)
+                updated_at_after_r1 = (
+                    await session.execute(text("SELECT updated_at FROM billing_orders WHERE order_id=:oid"), {"oid": order_id})
+                ).scalar_one()
+                assert updated_at_after_r1.date() == datetime.now(timezone.utc).date(), "1차 스윕에서 이 order가 오늘 날짜로 재시도됐어야 함"
 
-            assert r1["retried"] == 1
-            assert r2["retried"] == 0, "같은 날 두 번째 스윕은 재시도하면 안 됨(멱등)"
-            assert call_count == 1, "Toss가 하루 두 번 불리면 안 됨"
+                await sweep_dunning_retries(session)
+
+            # 공유 CI DB에 다른 org의 재시도가 섞여도, «이 order 자신»은 두 번째 스윕에서
+            # 손대지지 않아야 한다(같은 날 dedup) — 전역 call_count/retried 집계가 아니라
+            # 이 order 고유 updated_at의 불변으로 검증(다른 org의 Toss 콜과 무관).
+            updated_at_after_r2 = (
+                await session.execute(text("SELECT updated_at FROM billing_orders WHERE order_id=:oid"), {"oid": order_id})
+            ).scalar_one()
+            assert updated_at_after_r2 == updated_at_after_r1, "같은 날 두 번째 스윕이 이 order를 다시 건드리면 안 됨(멱등)"
     finally:
         await engine.dispose()
 
@@ -302,7 +315,7 @@ async def test_sweep_dunning_downgrade_to_free_after_grace_expires_realdb():
 
             result = await sweep_dunning_retries(session)
 
-            assert result["downgraded"] == 1
+            assert result["downgraded"] >= 1  # 공유 CI DB 오염 가능성 — 하한만.
             row = (
                 await session.execute(text("SELECT tier, status FROM org_subscriptions WHERE org_id=:oid"), {"oid": org_id})
             ).first()
@@ -334,7 +347,7 @@ async def test_dunning_grace_days_platform_setting_changes_retry_window_realdb()
 
             result = await sweep_dunning_retries(session)
 
-            assert result["downgraded"] == 1, "grace_days=3이면 D+4는 downgrade여야 함(D+8이 아님)"
+            assert result["downgraded"] >= 1, "grace_days=3이면 D+4는 downgrade여야 함(D+8이 아님)"
             row = (await session.execute(text("SELECT tier FROM org_subscriptions WHERE org_id=:oid"), {"oid": org_id})).first()
             assert row.tier == "free"
     finally:
