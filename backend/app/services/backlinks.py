@@ -267,7 +267,7 @@ async def _chat_predicate_inputs(
 # 구멍»이 생긴다 — 이 함수는 TARGET 접근 검증을 스스로 하지 않고(§8①) 호출부(라우터)가
 # 이미 검증했다는 전제로 짜여 있기 때문(위 docstring 참조). 그래서 "이 타입은 호출부가 실제로
 # 게이트를 세웠다"를 이 allowlist가 보증한다 — 코드 레벨 계약이지 편의 목록이 아니다.
-BACKLINKS_ALLOWED_TARGET_TYPES = frozenset({"doc", "story", "artifact"})
+BACKLINKS_ALLOWED_TARGET_TYPES = frozenset({"doc", "story", "artifact", "gate", "pull_request"})
 # ⛔registry(reference_registry.ENTITY_RESOLVERS)의 나머지 타입(epic 등)이 여기 없는 이유는
 # "의도적 제외"가 아니라 **게이트 미비**다 — 그 타입들의 라우터에 아직 이 함수와 동형인
 # TARGET project-access 선-게이트(docs.py._require_doc_project_access ·
@@ -277,6 +277,13 @@ BACKLINKS_ALLOWED_TARGET_TYPES = frozenset({"doc", "story", "artifact"})
 # 새 게이트 발명 0. WRITE(entity_references에 target_type=artifact 저장)는 reference_registry.
 # ENTITY_RESOLVERS에 이미 등재돼 실측 확認됨(그라운딩) — 이 스토리는 READ(backlinks 조회)
 # 축만 연다.
+# story #2889(S2h①, 페드루 확定 2026-08-21) — gate·pull_request 추가. WRITE 측 등록은
+# reference_registry.ENTITY_RESOLVERS(완전지원)가 아니라 TARGET_ONLY_TYPES다(검색 handler 등
+# 나머지 계약이 안 서는 이유는 reference_registry.py의 _resolve_gates/_resolve_pull_requests
+# docstring 참고) — 이 함수는 완전지원과 무관하게 TARGET 접근이 «호출 라우터가 이미 검증»
+# 했다는 계약만 요구하므로(위 §8① 불변식) TARGET_ONLY 타입도 문제없이 연다. TARGET 게이트는
+# gates.py::get_gate_backlinks(resolve_work_item_project_id 재사용)·github_integration.py::
+# get_pr_link_backlinks(delete_link과 동일 게이트) 신규.
 
 
 class UnsupportedBacklinkTargetTypeError(ValueError):
@@ -293,10 +300,16 @@ class UnsupportedBacklinkTargetTypeError(ValueError):
 
 
 # ⛔story #2277(E-CONNECT) target_type → model — count_zero_referenced_entities 전용.
-# BACKLINKS_ALLOWED_TARGET_TYPES와 반드시 같은 키 집합이어야 한다(AC1: "#2266이 세운 허용
-# 목록과 같은 목록을 쓴다, 별도 목록을 만들지 않는다") — 이 dict의 키를 늘릴 땐 반드시
-# BACKLINKS_ALLOWED_TARGET_TYPES도 같이 늘어 있어야 한다(파생이 아니라 하드코딩인 이유: model
-# 클래스 자체는 registry가 담을 수 없는 타입정보라 여기 한 곳에만 둔다).
+# 이 dict의 키를 늘릴 땐 반드시 BACKLINKS_ALLOWED_TARGET_TYPES도 같이 늘어 있어야 한다
+# (파생이 아니라 하드코딩인 이유: model 클래스 자체는 registry가 담을 수 없는 타입정보라
+# 여기 한 곳에만 둔다) — 이 방향의 부분집합 관계만 요구된다(하위 ⊆ 상위), **역방향은 아니다**.
+# story #2889(S2h①, 2026-08-21): gate·pull_request는 BACKLINKS_ALLOWED_TARGET_TYPES엔
+# 있지만 여기 의도적으로 없다 — ①Gate엔 soft-delete 컬럼 자체가 없어(gate.py, 상태기계
+# row는 절대 안 지워짐) 아래 루프의 `model.deleted_at.is_(None)` 필터가 AttributeError로
+# 죽는다 ②"고아 참조" 감사(story #2277 원 취지)는 자유텍스트 제목이 있는 doc/story류에
+# 의미 있는 지표이지, gate/PR(제목 없는 상태 레코드)엔 적용 대상이 아니다(감사할 "미언급"
+# 개념 자체가 어색). BACKLINKS_ALLOWED_TARGET_TYPES 확장의 실 목적(chat 임베드 역참조 조회)은
+# _ZERO_REF_MODELS와 무관하게 이미 충족된다.
 _ZERO_REF_MODELS: dict[str, type] = {"doc": Doc, "story": Story, "artifact": VisualArtifact}
 
 

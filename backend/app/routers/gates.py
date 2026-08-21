@@ -1013,6 +1013,46 @@ async def get_gate_endpoint(
     return resp
 
 
+@router.get("/{id}/backlinks")
+async def get_gate_backlinks(
+    id: uuid.UUID,
+    limit: int = Query(default=30, ge=1, le=200),
+    before: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> dict:
+    """GET /api/v2/gates/{id}/backlinks — story #2889(S2h①) — 이 gate를 언급한 chat_message
+    목록(stories.py::get_story_backlinks와 동일 convention — cursor pagination, 응답
+    `{"data": [...], "meta": {"next_cursor", "has_more"}}`). 실 쿼리는
+    `list_entity_backlinks`(target_type만 다름, 재구현 0).
+
+    TARGET 게이트는 get_gate_endpoint와 동일(resolve_work_item_project_id — story #1968
+    SSOT 재사용 — + is_known_project_agnostic_work_item_type fail-closed 분기, 새 인증
+    미발명). gate 자체가 org에 없거나(취소·타org) work_item project 접근권이 없으면 404
+    (존재 비노출 — get_gate_endpoint와 동형)."""
+    gate = (await session.execute(
+        select(Gate).where(Gate.id == id, Gate.org_id == org_id)
+    )).scalar_one_or_none()
+    if gate is None:
+        raise HTTPException(status_code=404, detail="Gate not found")
+
+    project_id = await resolve_work_item_project_id(
+        session, org_id, gate.work_item_type, gate.work_item_id,
+    )
+    if project_id is not None:
+        await require_project_access(session, uuid.UUID(auth.user_id), project_id, org_id,
+                                      not_found_detail="Gate not found")
+    elif not is_known_project_agnostic_work_item_type(gate.work_item_type):
+        raise HTTPException(status_code=404, detail="Gate not found")
+
+    from app.services.backlinks import list_entity_backlinks
+    return await list_entity_backlinks(
+        session, org_id=org_id, target_type="gate", target_id=id,
+        auth=auth, limit=limit, cursor=before,
+    )
+
+
 class GateGithubCheckEventResponse(BaseModel):
     """story #2815(§5-②, 미르코군 계약 제안) — `gate_github_check_event`(0262) raw 원장 뷰.
     org_id/gate_id/story_id는 생략(이미 URL의 `{id}`가 gate 컨텍스트를 특정 — 중복 노출 불요)."""
