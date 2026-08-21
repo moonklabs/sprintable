@@ -109,22 +109,33 @@ async def checkout_subscription(
     if billing_cycle not in BILLING_CYCLES:
         raise CheckoutError(f"billing_cycle={billing_cycle!r}는 'monthly'/'annual'만 허용")
 
-    # ⛔P0 가드 — 이미 «다른» 유료 tier로 active인 org는 거부(ActivePaidSubscriptionExists
-    # 참고). ⚠️같은 tier 재제출(더블클릭·네트워크 재시도)은 막지 않는다 — 그건
-    # _checkout_order_id의 결정적 order_id + charge_org의 원자적 claim(#2493)이 이미
-    # 안전하게 수렴시키는 기존 계약(story #2511 동시성 테스트가 그 경로를 고정)이라, 여기서
-    # 막으면 그 무해한 재시도까지 오폭한다. tier가 실제로 «다른» 경우만 진짜 위험(전액
-    # 이중청구+기존 구독 덮어쓰기) — 그 경우만 가로챈다.
+    # ⛔P0 가드 — 이미 «다른» 유료 tier 또는 «다른» billing_cycle로 active인 org는
+    # 거부(ActivePaidSubscriptionExists 참고). ⚠️같은 tier·같은 cycle 재제출(더블클릭·
+    # 네트워크 재시도)만 막지 않는다 — 그건 _checkout_order_id의 결정적 order_id +
+    # charge_org의 원자적 claim(#2493)이 안전하게 수렴시키는 기존 계약(story #2511
+    # 동시성 테스트가 그 경로를 고정)이라, 여기서 막으면 그 무해한 재시도까지 오폭한다.
+    #
+    # ⛔billing_cycle도 비교 대상에 넣는 이유(페드루 실측 지적, 2026-08-21, 카디르 QA
+    # 中) — offering_version은 tier당 monthly/annual 가격을 «같은 행»에 함께 담는다
+    # (offering_version_id가 cycle과 무관). `_checkout_order_id`는 이 offering_version_id
+    # +날짜로만 키잉되므로, 같은 tier인데 cycle만 다른 요청(예: starter monthly active
+    # → 같은 날 starter annual checkout)은 offering_version_id가 같아 1차 charge와
+    # order_id가 충돌 — charge_org가 기존 confirmed order를 재사용(Toss 재호출 없음, 실PG
+    # 재현 확定: charge_count가 1로 고정)한 채 구독만 billing_cycle='annual'로 갱신된다
+    # — 이중청구가 아니라 «월납 가격에 연납 권리 획득»(반대방향 매출 누수)이 실제 결과.
+    # tier만 비교하면 이 경로를 못 막는다 — cycle도 같아야만 진짜 무해한 재시도다.
     existing_sub = (
         await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
     ).scalar_one_or_none()
     if (
         existing_sub is not None and existing_sub.status == "active"
-        and existing_sub.tier in PAID_TIERS and existing_sub.tier != tier
+        and existing_sub.tier in PAID_TIERS
+        and (existing_sub.tier != tier or existing_sub.billing_cycle != billing_cycle)
     ):
         raise ActivePaidSubscriptionExists(
-            f"org_id={org_id}는 이미 활성 유료 구독(tier={existing_sub.tier!r})입니다 — "
-            "플랜 변경은 POST /api/v2/org-subscriptions/change-tier를 쓰세요. "
+            f"org_id={org_id}는 이미 활성 유료 구독(tier={existing_sub.tier!r}, "
+            f"billing_cycle={existing_sub.billing_cycle!r})입니다 — "
+            "플랜/결제주기 변경은 POST /api/v2/org-subscriptions/change-tier를 쓰세요. "
             "checkout은 신규 결제 전용입니다."
         )
 

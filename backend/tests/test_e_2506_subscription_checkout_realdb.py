@@ -617,3 +617,64 @@ async def test_checkout_not_blocked_for_non_active_status_cancelled_org_negative
             assert sub.tier == "team"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_checkout_same_tier_different_billing_cycle_blocked_realdb():
+    """⛔P0 후속(페드루 실측 지적, 2026-08-21 — 카디르 QA 中) — 같은 tier인데 cycle만
+    다른 재제출(예: starter monthly active → 같은 날 starter annual checkout)은 tier만
+    비교하면 안 걸린다. offering_version_id가 cycle과 무관(한 tier의 monthly/annual
+    가격이 같은 행에 있음)이라 `_checkout_order_id`가 1차 charge와 order_id 충돌 →
+    charge_org가 기존 confirmed order를 재사용(Toss 재호출 없음)한 채 구독만
+    billing_cycle='annual'로 갱신되는 실 재현(디디 직접 확認, 2026-08-21) — 이중청구가
+    아니라 «월납 가격에 연납 권리 획득»(반대방향 매출 누수)이었다. 이제 cycle도 비교
+    대상이라 이 경로가 막혀야 한다."""
+    from app.services.org_subscription_checkout import ActivePaidSubscriptionExists, checkout_subscription
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session1:
+            org_id = await _seed_org_with_members(session1, human_seats=3)
+
+            toss_billing_key_response = {
+                "billingKey": "billing-key-cycle-1",
+                "card": {"issuerCode": "61", "acquirerCode": "31", "number": "12345678****000*", "cardType": "신용", "ownerType": "개인"},
+                "authenticatedAt": "2026-08-07T00:00:00+09:00",
+            }
+            toss_charge_response_1 = {"paymentKey": f"pay-{uuid.uuid4()}", "totalAmount": 5_000}
+
+            with patch("app.services.payment.toss_adapter.TossAdapter._post", new=AsyncMock(
+                side_effect=[toss_billing_key_response, toss_charge_response_1]
+            )):
+                sub1 = await checkout_subscription(
+                    session1, org_id=org_id, auth_key="ak-cycle-1", tier="starter", billing_cycle="monthly",
+                )
+            assert sub1.status == "active"
+            assert sub1.billing_cycle == "monthly"
+
+        # 같은 tier, 다른 cycle(annual) — 이제 막혀야 한다. Toss는 한 번도 다시 안 불려야
+        # 함(side_effect 비움 — 다시 호출되면 StopAsyncIteration으로 즉시 실패).
+        async with Session() as session2:
+            with patch("app.services.payment.toss_adapter.TossAdapter._post", new=AsyncMock(side_effect=[])):
+                with pytest.raises(ActivePaidSubscriptionExists, match="change-tier"):
+                    await checkout_subscription(
+                        session2, org_id=org_id, auth_key="ak-cycle-2", tier="starter", billing_cycle="annual",
+                    )
+
+            row = (
+                await session2.execute(text("SELECT tier, billing_cycle, status FROM org_subscriptions WHERE org_id=:oid"), {"oid": org_id})
+            ).first()
+            assert row.tier == "starter"
+            assert row.billing_cycle == "monthly"  # cycle이 덮어써지지 않음
+            assert row.status == "active"
+
+            charge_count = (
+                await session2.execute(
+                    text("SELECT COUNT(*) FROM billing_ledger_entries WHERE org_id=:oid AND entry_type='charge'"),
+                    {"oid": org_id},
+                )
+            ).scalar_one()
+            assert charge_count == 1  # 원 monthly charge 하나만 — 매출 누수도 이중청구도 없음
+    finally:
+        await engine.dispose()
