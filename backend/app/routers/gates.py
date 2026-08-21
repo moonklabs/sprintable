@@ -448,12 +448,34 @@ async def list_gates(
     work_item_id: uuid.UUID | None = Query(default=None),
     work_item_type: str | None = Query(default=None),
     status: str | None = Query(default=None),
+    # story #2864(P0, 침묵 스왈로): gate_type·limit·offset이 시그니처에 아예 없어 FastAPI가
+    # 미등재 쿼리 파라미터를 조용히 무시했다(#2863 zod dead-code와 동일 클래스 — 있다≠지금
+    # 쓰는 것). ⚠️`= Query(...)`를 직접 기본값으로 쓰지 않고 Annotated로 뺀 이유 — 이
+    # 라우터 함수는 HTTP 경유(FastAPI가 Query를 실값으로 해소)뿐 아니라 list_gate_inbox()가
+    # **일반 파이썬 함수로 직접 호출**한다(아래) + 테스트 다수가 동일하게 직접 호출한다.
+    # `= Query(default=None)`를 그대로 쓰면 그 호출자들이 이 인자를 안 넘겼을 때 실제
+    # 파이썬 기본값이 `None`이 아니라 Query 객체 그 자체가 돼(직접 호출은 FastAPI 의존성
+    # 해소를 안 거친다) `gate_type is not None`이 항상 참이 되고 `.limit(Query객체)`가
+    # SQLAlchemy에 그대로 들어가 런타임 TypeError로 터진다 — Annotated는 실제 파이썬
+    # 기본값을 리터럴로 유지하면서 Query 메타데이터(ge/le 등)만 얹는다.
+    gate_type: Annotated[str | None, Query()] = None,
     sort: str | None = Query(default=None),
     assigned_to_me: bool = Query(default=False),
+    # limit 기본값은 None(무제한) — list_gate_inbox의 「페이지네이션 없음(기존 GET /gates
+    # 관례 유지)」계약(미르코 합의, conversation eaa1b6cb)을 그대로 보존한다. 명시적으로
+    # 넘긴 경우에만 절단.
+    limit: Annotated[int | None, Query(ge=1, le=500)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
 ) -> list[GateResponse]:
+    # gate_type은 GATE_TYPES(GateCreateRequest.validate_gate_type과 동일 SSOT)로 검증 —
+    # 미지 값은 422(침묵 무시 대신 명시 거부).
+    if gate_type is not None:
+        from app.models.hitl_config import GATE_TYPES
+        if gate_type not in GATE_TYPES:
+            raise HTTPException(status_code=422, detail=f"gate_type must be one of {sorted(GATE_TYPES)}")
     q = select(Gate).where(Gate.org_id == org_id)
     if work_item_id:
         q = q.where(Gate.work_item_id == work_item_id)
@@ -461,11 +483,23 @@ async def list_gates(
         q = q.where(Gate.work_item_type == work_item_type)
     if status:
         q = q.where(Gate.status == status)
+    if gate_type:
+        q = q.where(Gate.gate_type == gate_type)
     # story #1973(P1a-S4): ?sort=urgency = SLA overdue 최상위 → age(created_at) 오래된 순 →
     # held(향후 만료) 최하단(gate_service.apply_gate_urgency_sort). 미지정 시(기본) 기존 동작
     # (무정렬/삽입순) 그대로 — 회귀 없음.
     if sort == "urgency":
         q = apply_gate_urgency_sort(q)
+    elif limit is not None or offset:
+        # story #2864: limit/offset이 결정적이려면 순서가 고정돼야 한다 — 무정렬(삽입순 암묵
+        # 의존)이었던 기존 동작을, 페이지네이션을 실제로 쓰는 호출에서만 created_at desc(최신
+        # 우선, 다른 목록 API들과 동형)로 명시. limit/offset 둘 다 안 쓰면 기존 무정렬 그대로
+        # (list_gate_inbox 등 기존 호출부 회귀 0).
+        q = q.order_by(Gate.created_at.desc())
+    if limit is not None:
+        q = q.limit(limit)
+    if offset:
+        q = q.offset(offset)
     result = await session.execute(q)
     gates = list(result.scalars().all())
     responses = [GateResponse.model_validate(g) for g in gates]
