@@ -29,7 +29,6 @@ ORG = uuid.UUID("28640000-0000-0000-0000-000000000001")
 OWNER_USER = uuid.UUID("28640000-0000-0000-0000-0000000000a1")
 OWNER_OM = uuid.UUID("28640000-0000-0000-0000-0000000000b1")
 PROJ = uuid.UUID("28640000-0000-0000-0000-0000000000c1")
-STORY = uuid.UUID("28640000-0000-0000-0000-0000000000d1")
 
 
 @pytest.fixture
@@ -48,9 +47,12 @@ async def _engine():
 
 
 async def _seed(s, *, n_merge: int = 1, n_qa: int = 1) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
-    """ORG · PROJ · STORY(project_id=PROJ) · human owner(project_access). n_merge건의
-    gate_type='merge' + n_qa건의 gate_type='qa' 게이트를 created_at을 벌려 심는다(offset
-    페이지네이션 결정성 확보 — created_at desc 정렬이 새 기본 순서라 나중에 심을수록 앞).
+    """ORG · PROJ · human owner(project_access). n_merge건의 gate_type='merge' +
+    n_qa건의 gate_type='qa' 게이트를 created_at을 벌려 심는다(offset 페이지네이션
+    결정성 확보 — created_at desc 정렬이 새 기본 순서라 나중에 심을수록 앞).
+    ⚠️`uq_gate_work_item_gate_type`(org_id,work_item_id,work_item_type,gate_type) 유니크
+    제약 — 게이트 1건당 story(work_item) 1건을 새로 만들어 동일 work_item에 동일
+    gate_type을 중복 심지 않는다(CI real-PG에서 IntegrityError로 확인된 결함, #3283 회신).
     (merge_ids, qa_ids) 반환 — created_at 순서(먼저 심은 것부터).
     """
     for sql in [
@@ -71,35 +73,34 @@ async def _seed(s, *, n_merge: int = 1, n_qa: int = 1) -> tuple[list[uuid.UUID],
         f"('{PROJ}','{ORG}','P','s2864-proj','warn')",
         f"INSERT INTO project_access (id,project_id,org_member_id,permission,role) VALUES "
         f"(gen_random_uuid(),'{PROJ}','{OWNER_OM}','granted','owner')",
-        f"INSERT INTO stories (id,org_id,project_id,title,status,priority) VALUES "
-        f"('{STORY}','{ORG}','{PROJ}','S','backlog','medium')",
     ]:
         await s.execute(text(sql))
-    from app.models.gate import Gate
 
     merge_ids: list[uuid.UUID] = []
     qa_ids: list[uuid.UUID] = []
     seq = 0
+
+    async def _insert_gate(gate_type: str) -> uuid.UUID:
+        nonlocal seq
+        seq += 1
+        story_id = uuid.uuid4()
+        gid = uuid.uuid4()
+        await s.execute(text(
+            "INSERT INTO stories (id,org_id,project_id,title,status,priority) VALUES "
+            f"('{story_id}','{ORG}','{PROJ}','S','backlog','medium')"
+        ))
+        await s.execute(text(
+            "INSERT INTO gate (id,org_id,work_item_id,work_item_type,gate_type,status,"
+            "neutral_facts,created_at) VALUES "
+            f"('{gid}','{ORG}','{story_id}','story','{gate_type}','pending','{{}}',"
+            f"now() + interval '{seq} seconds')"
+        ))
+        return gid
+
     for _ in range(n_merge):
-        gid = uuid.uuid4()
-        seq += 1
-        await s.execute(text(
-            "INSERT INTO gate (id,org_id,work_item_id,work_item_type,gate_type,status,"
-            "neutral_facts,created_at) VALUES "
-            f"('{gid}','{ORG}','{STORY}','story','merge','pending','{{}}',"
-            f"now() + interval '{seq} seconds')"
-        ))
-        merge_ids.append(gid)
+        merge_ids.append(await _insert_gate("merge"))
     for _ in range(n_qa):
-        gid = uuid.uuid4()
-        seq += 1
-        await s.execute(text(
-            "INSERT INTO gate (id,org_id,work_item_id,work_item_type,gate_type,status,"
-            "neutral_facts,created_at) VALUES "
-            f"('{gid}','{ORG}','{STORY}','story','qa','pending','{{}}',"
-            f"now() + interval '{seq} seconds')"
-        ))
-        qa_ids.append(gid)
+        qa_ids.append(await _insert_gate("qa"))
     await s.commit()
     return merge_ids, qa_ids
 
