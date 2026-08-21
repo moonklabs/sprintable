@@ -30,11 +30,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.billing_ledger_entry import BillingLedgerEntry
 from app.models.billing_order import BillingOrder
+from app.models.grandfather_policy import GrandfatherPolicy
 from app.models.offering_version import OfferingVersion
 from app.models.org_subscription import OrgSubscription
 from app.services.billing_charge import charge_org
@@ -49,13 +51,14 @@ GrantTier = Literal["starter", "team", "business"]
 _TIER_RANK: dict[str, int] = {"free": 0, "starter": 1, "team": 2, "business": 3}
 
 
-def _audit(*, actor_email: str, org_id: uuid.UUID, action: str, before: dict | None, after: dict) -> None:
+def _audit(*, actor_email: str, org_id: uuid.UUID | None, action: str, before: dict | None, after: dict) -> None:
+    # story #2474: offering_version은 org-scope 밖(플랫폼 카탈로그)이라 org_id=None 허용.
     audit_logger.info(
         json.dumps(
             {
                 "audit": "admin_billing",
                 "actor_email": actor_email,
-                "org_id": str(org_id),
+                "org_id": str(org_id) if org_id is not None else None,
                 "action": action,
                 "before": before,
                 "after": after,
@@ -235,3 +238,110 @@ async def grant_credit(
         after={"entry_id": str(entry.id), "tier": target_tier, "grant_expires_at": period_end.isoformat(), "amount_minor": amount_minor},
     )
     return entry
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# story #2474 — offering_version/grandfather_policy 어드민 CRUD(그릇은 #2471 A1이 이미
+# 착지, 여기선 편집 표면만 신설). 값 「수정」은 없다 — append-only 불변 행이므로 CREATE만
+# 존재하고, 새 활성 버전 등록 시 기존 활성 행을 같은 트랜잭션에서 닫는다.
+#
+# ⚠️원자성 — 최초 설계(행잠금만으로 직렬화)를 realdb 동시성 테스트로 직접 반증했다:
+# "기존 활성 행을 닫는 UPDATE가 락을 쥔다"는 그 스코프 키에 **이미 활성 행이 있을 때만**
+# 성립한다. 그 tier+currency(또는 org_id)의 **첫 버전**을 두 요청이 동시에 만들면 닫을
+# 행 자체가 없어 UPDATE가 둘 다 0건으로 즉시 통과하고, 뒤이은 INSERT 두 개가 동시에
+# 충돌해 partial unique index가 `UniqueViolationError`(500)로 터진다(실측:
+# test_concurrent_offering_version_create_serializes_via_row_lock_no_history_loss).
+# `pg_advisory_xact_lock(hashtext(...))`로 스코프 키 자체를 세션 진입 시점부터 잠근다
+# (billing_pack.py:111의 pack 구매 cap 잠금과 동일 패턴, [[feedback_check_then_insert_toctou]]
+# 교훈 그대로 — "행이 있을 때만 잠기는" SELECT/UPDATE 기반 락은 TOCTOU에 무력하다).
+# 트랜잭션 스코프 락이라 별도 해제 불요(커밋/롤백 시 자동 반납).
+# ─────────────────────────────────────────────────────────────────────────
+
+async def create_offering_version(
+    session: AsyncSession, *, actor_email: str, now: datetime | None = None, **fields: object,
+) -> OfferingVersion:
+    now = now or datetime.now(timezone.utc)
+    tier = fields["tier"]
+    currency = fields["currency"]
+
+    await session.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"offering_version:{tier}:{currency}"))))
+
+    prev_active = (
+        await session.execute(
+            select(OfferingVersion).where(
+                OfferingVersion.tier == tier,
+                OfferingVersion.currency == currency,
+                OfferingVersion.effective_to.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    prev_id = prev_active.id if prev_active is not None else None
+
+    await session.execute(
+        sa_update(OfferingVersion)
+        .where(
+            OfferingVersion.tier == tier,
+            OfferingVersion.currency == currency,
+            OfferingVersion.effective_to.is_(None),
+        )
+        .values(effective_to=now)
+    )
+
+    new_version = OfferingVersion(effective_from=now, effective_to=None, created_by=actor_email, **fields)
+    session.add(new_version)
+    await session.flush()
+    await session.refresh(new_version)
+
+    _audit(
+        actor_email=actor_email, org_id=None, action="offering_version_create",
+        before={"prev_active_id": str(prev_id) if prev_id else None, "tier": tier, "currency": currency},
+        after={"id": str(new_version.id), "version_label": new_version.version_label},
+    )
+    return new_version
+
+
+async def create_grandfather_policy(
+    session: AsyncSession, *, actor_email: str, now: datetime | None = None, **fields: object,
+) -> GrandfatherPolicy:
+    now = now or datetime.now(timezone.utc)
+    org_id = fields["org_id"]
+    offering_version_id = fields["offering_version_id"]
+
+    await session.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"grandfather_policy:{org_id}"))))
+
+    offering = (
+        await session.execute(select(OfferingVersion).where(OfferingVersion.id == offering_version_id))
+    ).scalar_one_or_none()
+    if offering is None:
+        raise AdminBillingError(
+            404, "OFFERING_VERSION_NOT_FOUND",
+            f"offering_version_id={offering_version_id} 미존재 — grandfather 정책은 실재 버전에만 묶는다",
+        )
+
+    prev_active = (
+        await session.execute(
+            select(GrandfatherPolicy).where(
+                GrandfatherPolicy.org_id == org_id,
+                GrandfatherPolicy.effective_to.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    prev_id = prev_active.id if prev_active is not None else None
+
+    await session.execute(
+        sa_update(GrandfatherPolicy)
+        .where(GrandfatherPolicy.org_id == org_id, GrandfatherPolicy.effective_to.is_(None))
+        .values(effective_to=now)
+    )
+
+    new_policy = GrandfatherPolicy(effective_from=now, effective_to=None, created_by=actor_email, **fields)
+    session.add(new_policy)
+    await session.flush()
+    await session.refresh(new_policy)
+
+    _audit(
+        actor_email=actor_email, org_id=org_id, action="grandfather_policy_create",
+        before={"prev_active_id": str(prev_id) if prev_id else None},
+        after={"id": str(new_policy.id), "offering_version_id": str(offering_version_id)},
+    )
+    return new_policy

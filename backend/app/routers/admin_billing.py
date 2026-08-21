@@ -5,17 +5,32 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.dependencies.admin_auth import AdminOperator, require_admin_operator
 from app.dependencies.database import get_db
-from app.services.admin_billing import AdminBillingError, GrantTier, grant_credit, retry_billing_order
+from app.models.grandfather_policy import GrandfatherPolicy
+from app.models.offering_version import OfferingVersion
+from app.services.admin_billing import (
+    AdminBillingError,
+    GrantTier,
+    create_grandfather_policy,
+    create_offering_version,
+    grant_credit,
+    retry_billing_order,
+)
 
 router = APIRouter(prefix="/api/v2/admin", tags=["admin"])
+
+OfferingTier = Literal["free", "starter", "team", "business"]
+OfferingCurrency = Literal["usd", "krw"]
 
 
 def _reject_prod() -> None:
@@ -74,3 +89,142 @@ async def credit_grant(
         "target_tier": entry.entry_metadata["target_tier"],
         "current_period_end": entry.entry_metadata["grant_expires_at"],
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# story #2474 — offering_version/grandfather_policy 어드민 CRUD. 값 「수정」 엔드포인트는
+# 의도적으로 없다 — append-only(effective_from/effective_to)이므로 새 값=새 행(CREATE)뿐.
+# 이 부재 자체가 계약이다(test_admin_billing_router_surface_realdb.py가 라우터 표면을
+# 값으로 단언 — 나중에 PATCH/PUT이 조용히 추가되면 그 테스트가 실패한다, PO 보강ⓐ).
+# ─────────────────────────────────────────────────────────────────────────
+
+class OfferingVersionCreateRequest(BaseModel):
+    tier: OfferingTier
+    currency: OfferingCurrency
+    version_label: str = Field(..., min_length=1)
+    monthly_price_minor: int = Field(..., ge=0)
+    annual_price_minor: int = Field(..., ge=0)
+    included_seats: int = Field(..., ge=0)
+    extra_seat_price_minor: int | None = Field(default=None, ge=0)
+    max_agents: int | None = Field(default=None, ge=0)
+    au_limit: int = Field(..., ge=0)
+    realtime_connection_limit: int = Field(..., ge=0)
+    storage_mb_limit: int = Field(..., ge=0)
+    max_file_mb: int = Field(..., ge=0)
+    lab_credit_minor: int = Field(..., ge=0)
+    rate_limit_per_min: int = Field(..., ge=0)
+    automation_rule_limit: int = Field(..., ge=0)
+    webhook_limit: int = Field(..., ge=0)
+    event_replay_days: int = Field(..., ge=0)
+    overage_allowed: bool
+    pack_catalog: dict | None = None
+
+
+class OfferingVersionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    tier: str
+    currency: str
+    version_label: str
+    monthly_price_minor: int
+    annual_price_minor: int
+    included_seats: int
+    extra_seat_price_minor: int | None
+    max_agents: int | None
+    au_limit: int
+    realtime_connection_limit: int
+    storage_mb_limit: int
+    max_file_mb: int
+    lab_credit_minor: int
+    rate_limit_per_min: int
+    automation_rule_limit: int
+    webhook_limit: int
+    event_replay_days: int
+    overage_allowed: bool
+    pack_catalog: dict | None
+    effective_from: datetime
+    effective_to: datetime | None
+    created_by: str
+    created_at: datetime
+
+
+class GrandfatherPolicyCreateRequest(BaseModel):
+    org_id: uuid.UUID
+    offering_version_id: uuid.UUID
+    auto_migrate_on_new_version: bool = False
+    grace_period_days: int | None = Field(default=None, ge=0)
+    reason: str = Field(..., min_length=1)
+
+
+class GrandfatherPolicyResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    org_id: uuid.UUID
+    offering_version_id: uuid.UUID
+    auto_migrate_on_new_version: bool
+    grace_period_days: int | None
+    reason: str
+    effective_from: datetime
+    effective_to: datetime | None
+    created_by: str
+    created_at: datetime
+
+
+@router.post("/offering-versions", response_model=OfferingVersionResponse)
+async def create_offering_version_endpoint(
+    body: OfferingVersionCreateRequest,
+    operator: AdminOperator = Depends(require_admin_operator),
+    session: AsyncSession = Depends(get_db),
+) -> OfferingVersionResponse:
+    _reject_prod()
+    new_version = await create_offering_version(session, actor_email=operator.email, **body.model_dump())
+    return OfferingVersionResponse.model_validate(new_version)
+
+
+@router.get("/offering-versions", response_model=list[OfferingVersionResponse])
+async def list_offering_versions(
+    tier: OfferingTier | None = None,
+    currency: OfferingCurrency | None = None,
+    operator: AdminOperator = Depends(require_admin_operator),
+    session: AsyncSession = Depends(get_db),
+) -> list[OfferingVersionResponse]:
+    q = select(OfferingVersion)
+    if tier is not None:
+        q = q.where(OfferingVersion.tier == tier)
+    if currency is not None:
+        q = q.where(OfferingVersion.currency == currency)
+    # PO 보강ⓑ(2026-08-21, #2864 학습 재적용) — 히스토리 목록은 정렬을 명시하지 않으면
+    # DB가 물리 순서를 그대로 줄 수 있어 비결정적. effective_from desc로 고정.
+    q = q.order_by(OfferingVersion.effective_from.desc(), OfferingVersion.id.desc())
+    rows = (await session.execute(q)).scalars().all()
+    return [OfferingVersionResponse.model_validate(r) for r in rows]
+
+
+@router.post("/grandfather-policies", response_model=GrandfatherPolicyResponse)
+async def create_grandfather_policy_endpoint(
+    body: GrandfatherPolicyCreateRequest,
+    operator: AdminOperator = Depends(require_admin_operator),
+    session: AsyncSession = Depends(get_db),
+) -> GrandfatherPolicyResponse:
+    _reject_prod()
+    try:
+        new_policy = await create_grandfather_policy(session, actor_email=operator.email, **body.model_dump())
+    except AdminBillingError as e:
+        raise HTTPException(status_code=e.status_code, detail={"code": e.code, "message": e.message}) from e
+    return GrandfatherPolicyResponse.model_validate(new_policy)
+
+
+@router.get("/grandfather-policies", response_model=list[GrandfatherPolicyResponse])
+async def list_grandfather_policies(
+    org_id: uuid.UUID | None = None,
+    operator: AdminOperator = Depends(require_admin_operator),
+    session: AsyncSession = Depends(get_db),
+) -> list[GrandfatherPolicyResponse]:
+    q = select(GrandfatherPolicy)
+    if org_id is not None:
+        q = q.where(GrandfatherPolicy.org_id == org_id)
+    q = q.order_by(GrandfatherPolicy.effective_from.desc(), GrandfatherPolicy.id.desc())
+    rows = (await session.execute(q)).scalars().all()
+    return [GrandfatherPolicyResponse.model_validate(r) for r in rows]
