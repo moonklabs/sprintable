@@ -1530,3 +1530,90 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
     expect(container.textContent).toContain('제안서.md');
   });
 });
+
+// story #2905(S2c③④ 착수 전 안전망 — 페드루 지시 2026-08-21) — 「연속 sole-link 문단
+// 그룹핑(캐러셀/간결리스트/접힌 헤더)」은 ChatMarkdown 진입점 자체를 바꾸는 축이라(전 메시지
+// 렌더 경로) 회귀 반경이 넓다. 시안(유나양) 착지 전까지 지금 "그룹핑 미착수" 상태의 실제
+// 동작을 characterization test로 고정해 둔다 — ③④ 구현 시 이 스위트가 "의도한 대로 바뀐
+// 지점"과 "실수로 깨진 지점"을 가른다.
+describe('ChatBubble — story #2905 S2c③④ 착수 전 다중 sole-link 문단 베이스라인(그룹핑 미착수 상태 고정)', () => {
+  it('연속된 같은 타입(story) sole-link 문단 2개 — 오늘은 그룹핑 없이 EmbedCard 2장이 각자 독립 렌더된다', async () => {
+    const idA = '55555555-5555-5555-5555-555555555551';
+    const idB = '55555555-5555-5555-5555-555555555552';
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{
+            ...baseMessage,
+            content: `[스토리 A](entity:story:${idA})\n\n[스토리 B](entity:story:${idB})`,
+            references: [{ target_type: 'story', target_id: idA }, { target_type: 'story', target_id: idB }],
+          }}
+          isMine={false}
+        />,
+      ));
+    });
+    const cards = container.querySelectorAll('.rounded-md');
+    expect(cards).toHaveLength(2);
+    expect(container.textContent).toContain('스토리 A');
+    expect(container.textContent).toContain('스토리 B');
+    // 렌더 순서=본문 순서(캐러셀/리스트로 바뀌면 이 DOM 순서 단언부터 깨질 것 — 의도된 변경).
+    expect(container.textContent!.indexOf('스토리 A')).toBeLessThan(container.textContent!.indexOf('스토리 B'));
+  });
+
+  it('연속된 서로 다른 타입(doc·story) sole-link 문단 2개도 오늘은 각자 독립 렌더된다', async () => {
+    const docId = DOC_ID;
+    const storyId = '55555555-5555-5555-5555-555555555553';
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{
+            ...baseMessage,
+            content: `[문서](entity:doc:${docId})\n\n[스토리](entity:story:${storyId})`,
+            references: [{ target_type: 'doc', target_id: docId }, { target_type: 'story', target_id: storyId }],
+          }}
+          isMine={false}
+        />,
+      ));
+    });
+    expect(container.querySelectorAll('.rounded-md')).toHaveLength(2);
+    // doc 전용 마커(미리보기 버튼)가 정확히 doc 카드에만 붙는다 — 타입별 폼이 안 섞였는지.
+    expect(container.querySelectorAll('button[aria-label="미리보기"]')).toHaveLength(1);
+  });
+
+  it('산문으로 떨어진(연속 아닌) 같은 타입 sole-link 문단 2개 — 오늘도 앞으로도 그룹핑 대상 아님(각자 독립)', async () => {
+    const idA = '55555555-5555-5555-5555-555555555554';
+    const idB = '55555555-5555-5555-5555-555555555555';
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{
+            ...baseMessage,
+            content: `[스토리 A](entity:story:${idA})\n\n중간에 낀 산문 한 줄.\n\n[스토리 B](entity:story:${idB})`,
+            references: [{ target_type: 'story', target_id: idA }, { target_type: 'story', target_id: idB }],
+          }}
+          isMine={false}
+        />,
+      ));
+    });
+    expect(container.querySelectorAll('.rounded-md')).toHaveLength(2);
+    expect(container.textContent).toContain('중간에 낀 산문 한 줄.');
+  });
+
+  it('sole-link 문단 3개 연속(artifact) — 오늘은 캐러셀/격납 없이 3장 전부 개별 렌더(카드 홍수 베이스라인)', async () => {
+    const ids = ['66666666-6666-6666-6666-666666666661', '66666666-6666-6666-6666-666666666662', '66666666-6666-6666-6666-666666666663'];
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{
+            ...baseMessage,
+            content: ids.map((id, i) => `[아티팩트 ${i + 1}](entity:artifact:${id})`).join('\n\n'),
+            references: ids.map((id) => ({ target_type: 'artifact', target_id: id })),
+          }}
+          isMine={false}
+        />,
+      ));
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.querySelectorAll('.rounded-md')).toHaveLength(3);
+  });
+});
