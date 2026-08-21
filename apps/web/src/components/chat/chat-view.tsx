@@ -11,6 +11,7 @@ import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } fr
 import { ChatInput, type CommandTarget } from './chat-input';
 import { ThreadPanel } from './thread-panel';
 import { ReadingPanel, type ReadingPanelTarget } from './reading-panel';
+import { useReadingPanelStack } from './use-reading-panel-stack';
 import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { normalizeToMessage, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
@@ -132,22 +133,22 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // story #2766(레인 A) — ReadingPanel도 우측 패널이라 스레드와 동일 슬롯을 공유한다(동시
   // 2패널 레이아웃은 인계 doc에 없는 새 영역이라 짓지 않음 — 열면 서로 배타적으로 닫는다).
   // story #2888/S2 R5 — 단일 target에서 스택(배열)으로. 빈 배열=닫힘(기존 null과 동형).
-  // 최대 깊이 3(유나군 목업 s2d-sidepane-stack-mockup 확定) — push 시 최하단부터 pop.
-  const [readingPanelStack, setReadingPanelStack] = useState<ReadingPanelTarget[]>([]);
-  // activeThreadRef와 동일 이유(popstate stale closure 방지) — 모바일 뒤로가기 제스처가
-  // ThreadPanel과 똑같이 이 패널도 먼저 닫아야 한다(페이지 이탈 아님).
-  const activeReadingPanelRef = useRef(false);
-  const READING_PANEL_MAX_DEPTH = 3;
+  // story #2904 — 스택 오케스트레이션(최대 깊이 truncation·history 1회 정책)은
+  // use-reading-panel-stack.ts로 추출(단위 테스트 가능). 이 컴포넌트는 스레드 패널과의
+  // 상호배타(activeThread 클리어)만 감싸서 얹는다.
+  // 훅이 반환하는 객체 자체는 매 렌더 새 참조라 그대로 deps에 넣으면 콜백 메모이제이션이
+  // 무의미해진다(exhaustive-deps도 "readingPanel 전체"를 요구해 그 무의미함을 강제) — 여기서
+  // 바로 구조분해해 안정 참조(각 함수는 훅 내부 useCallback([])로 고정)만 아래에서 쓴다.
+  const { stack: readingPanelStack, isOpenRef: activeReadingPanelRef, open: openReadingPanelStack, close: closeReadingPanelStack, navigateTo: navigateReadingPanelTo } = useReadingPanelStack();
 
   // 스레드 열기: 현재 URL 유지한 채 history entry 추가
   const openThread = useCallback((message: ChatMessage) => {
-    activeReadingPanelRef.current = false;
-    setReadingPanelStack([]);
+    closeReadingPanelStack();
     setActiveThread(message);
     activeThreadRef.current = true;
     const url = window.location.pathname + window.location.search;
     window.history.pushState({ _sprintableThread: true }, '', url);
-  }, []);
+  }, [closeReadingPanelStack]);
 
   // 스레드 닫기: history.back() 제거 — Next.js router와 충돌 방지 (P0 리그레션 원인)
   const closeThread = useCallback(() => {
@@ -156,29 +157,15 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   }, []);
 
   // story #2888/S2 R5 — 패널이 이미 열려 있으면(스택 비어있지 않음) push(임베드 안에서 또
-  // 임베드), 닫혀 있었으면 새 1단 스택으로 시작. 열릴 때만 history entry를 추가한다(push는
-  // 같은 "패널 열림" 상태 안의 전환이라 뒤로가기 제스처가 매 push마다 쌓이지 않게).
+  // 임베드), 닫혀 있었으면 새 1단 스택으로 시작(정확한 truncation·history 정책은
+  // use-reading-panel-stack.ts#open 참고).
   const openReadingPanel = useCallback((target: ReadingPanelTarget) => {
     activeThreadRef.current = false;
     setActiveThread(null);
-    const wasClosed = !activeReadingPanelRef.current;
-    activeReadingPanelRef.current = true;
-    setReadingPanelStack((prev) => [...prev, target].slice(-READING_PANEL_MAX_DEPTH));
-    if (wasClosed) {
-      const url = window.location.pathname + window.location.search;
-      window.history.pushState({ _sprintableReadingPanel: true }, '', url);
-    }
-  }, []);
+    openReadingPanelStack(target);
+  }, [openReadingPanelStack]);
 
-  // 브레드크럼 세그먼트 클릭 — 그 인덱스까지 pop(그 항목이 새 최상단).
-  const navigateReadingPanelTo = useCallback((index: number) => {
-    setReadingPanelStack((prev) => prev.slice(0, index + 1));
-  }, []);
-
-  const closeReadingPanel = useCallback(() => {
-    activeReadingPanelRef.current = false;
-    setReadingPanelStack([]);
-  }, []);
+  const closeReadingPanel = closeReadingPanelStack;
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement>(null);
@@ -386,13 +373,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       // 패널 닫기 + 현재 URL 재push → 실제 뒤로가기 취소, 채팅 화면 유지
       activeThreadRef.current = false;
       setActiveThread(null);
-      activeReadingPanelRef.current = false;
-      setReadingPanelStack([]);
+      closeReadingPanelStack();
       window.history.pushState(e.state ?? null, '', window.location.pathname + window.location.search);
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+  }, [closeReadingPanelStack, activeReadingPanelRef]);
 
   // CB-S8: 모바일 pull-to-refresh — 스크롤 최상단에서 아래로 당기면 새로고침
   // fix(story #1987): React onTouch* prop은 루트에 passive로 위임돼 있어(React 17+) preventDefault()가
