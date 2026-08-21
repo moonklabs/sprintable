@@ -583,6 +583,7 @@ async def _dispatch_conversation_event(
     sender: "ResolvedMember | TeamMember",
     exclude_ids: set[uuid.UUID] | None = None,
     webhook_covered_ids: set[uuid.UUID] | None = None,
+    references: list[dict[str, str]] | None = None,
 ) -> list[tuple[str, dict]]:
     """conversation:message → Event INSERT + flush. push 페이로드 반환 (commit 후 호출).
 
@@ -590,12 +591,16 @@ async def _dispatch_conversation_event(
     webhook_covered_ids: E-EVENT-1CONFIG — webhook 으로 전달되는(=SSE enqueue 스킵할) agent
         member 집합. send_message 요청 트랜잭션서 webhook 전달 대상과 **같은 snapshot** 으로
         산출돼 넘어온다(resolve_conversation_webhook_targets) → skip↔deliver 동일 결정·TOCTOU 차단.
+    references: story #2889(S2h, #2263 AC6이 남긴 "SSE/POST 응답은 이 키가 없다" 갭을 닫는다) —
+        send_message가 insert_chat_mentions 직후 같은 트랜잭션에서 fetch_stored_references로
+        해소해 넘긴다. None이면 기존 동작(키 자체 없음) 무변경 — 이 함수의 다른 잠재 호출부를
+        회귀시키지 않는다.
     반환값: [(pid_str, payload)] — db.commit() 완료 후 _push_to_agent() 호출용.
     """
     if not conversation.project_id:
         return []
 
-    payload = _msg_payload(msg, sender)
+    payload = _msg_payload(msg, sender, references=references)
 
     # story #2650: SSE/webhook 패리티 — conversation_webhook.py가 이미 하는 첨부 컨텍스트 주입
     # (attachment_context.py, IDOR-safe·conversation 스코프 게이트 포함)을 SSE 수신자에게도
@@ -704,18 +709,20 @@ async def _dispatch_mention_events(
     sender: TeamMember,
     mention_targets: set[uuid.UUID],
     webhook_covered_ids: set[uuid.UUID] | None = None,
+    references: list[dict[str, str]] | None = None,
 ) -> list[tuple[str, dict]]:
     """AC1: 멘션 대상에게 conversation:mention Event INSERT + flush. push 페이로드 반환 (commit 후 호출).
 
     webhook_covered_ids: E-EVENT-1CONFIG — webhook 전달 대상과 같은 snapshot 으로 산출된
         SSE-skip agent 집합(_dispatch_conversation_event 와 공유). 멘션 대상 ⊆ authorized 라
         그대로 적용 가능.
+    references: story #2889 — _dispatch_conversation_event와 동일 원칙(위 docstring 참고).
     반환값: [(pid_str, payload)] — db.commit() 완료 후 _push_to_agent() 호출용.
     """
     if not conversation.project_id or not mention_targets:
         return []
 
-    payload = _msg_payload(msg, sender)
+    payload = _msg_payload(msg, sender, references=references)
     member_rows = (await db.execute(
         select(TeamMember.id, TeamMember.type).where(TeamMember.id.in_(mention_targets))
     )).all()
@@ -770,6 +777,7 @@ async def _dispatch_human_intervention_event(
     sender: TeamMember,
     blocked_agent_recipient_ids: set[uuid.UUID],
     chain_depth_cap: int,
+    references: list[dict[str, str]] | None = None,
 ) -> list[tuple[str, dict]]:
     """story #2608 P1 AC1: 연쇄 cap 초과로 agent recipient가 막힌 메시지를, 그 대화의 human
     참가자 전원에게 `conversation.human_intervention_requested` Event로 알린다 — "왜 조용한가"
@@ -778,6 +786,8 @@ async def _dispatch_human_intervention_event(
     `_dispatch_mention_events`와 동형 구조(Event INSERT + flush, commit 후 push) — 대상만
     human 참가자로 다르다. human은 recipient_seq 개념이 없어(agent 전용 gap-free 커서)
     assign_recipient_seq를 안 부른다(_dispatch_conversation_event의 기존 관례와 동일).
+
+    references: story #2889 — _dispatch_conversation_event와 동일 원칙.
     """
     if not conversation.project_id:
         return []
@@ -792,7 +802,7 @@ async def _dispatch_human_intervention_event(
         return []
 
     payload = {
-        **_msg_payload(msg, sender),
+        **_msg_payload(msg, sender, references=references),
         "blocked_recipient_ids": [str(rid) for rid in sorted(blocked_agent_recipient_ids)],
         "chain_depth_cap": chain_depth_cap,
         "reason": "chain-expired",
@@ -2411,6 +2421,16 @@ async def send_message(
         target_types=frozenset(ENTITY_RESOLVERS) | {"gate", "pull_request", "member"},
     )
 
+    # story #2889(S2h): #2263 AC6이 남긴 갭(SSE/POST 응답엔 읽기 경로의 references[] 키가
+    # 없다 — 방금 보낸 메시지의 임베드가 즉시 리치로 안 뜬다)을 닫는다. 같은 트랜잭션·같은
+    # 세션이라 위 insert_chat_mentions가 방금 쓴 행을 이 SELECT가 그대로 본다(SQLAlchemy
+    # autoflush가 미flush 변경분도 이 쿼리 前에 flush한다 — 별도 flush 불요). 읽기 경로
+    # (list_messages 등)와 정확히 같은 함수·같은 반환 shape 재사용(재구현 0).
+    from app.services.mention_parser import fetch_stored_references
+    msg_references = (
+        await fetch_stored_references(db, org_id=org_id, source_type="chat_message", source_ids=[msg.id])
+    ).get(msg.id, [])
+
     # E-STORAGE-SSOT S2: 첨부를 asset registry로 동기화(SAVE-time·같은 트랜잭션·orphan 0).
     # S7: 반환 url→asset_id 로 JSONB asset_id 역기입(denorm·catch#4: asset_links=SSOT·JSONB=denorm).
     if body.attachments:
@@ -2526,6 +2546,7 @@ async def send_message(
                 db, conv, msg, org_id, sender,
                 exclude_ids=discord_exclude_ids | blocked_agent_ids | user_blocker_ids | preference_excluded_ids,
                 webhook_covered_ids=webhook_covered_ids,
+                references=msg_references,
             )
     except Exception as _dispatch_err:
         # dispatch 실패를 삼키지 않고 surface — 게이트웨이 이벤트 미생성 무음 방지
@@ -2561,6 +2582,7 @@ async def send_message(
                             pending_sse_pushes += await _dispatch_human_intervention_event(
                                 db, conv, msg, org_id, sender,
                                 chain_expired_agent_targets, _AGENT_CHAIN_DEPTH_CAP,
+                                references=msg_references,
                             )
                     except Exception:
                         logger.warning(
@@ -2605,6 +2627,7 @@ async def send_message(
                     pending_sse_pushes += await _dispatch_mention_events(
                         db, conv, msg, org_id, sender, mention_targets,
                         webhook_covered_ids=webhook_covered_ids,
+                        references=msg_references,
                     )
             except Exception:
                 logger.warning("mention event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
@@ -2816,7 +2839,7 @@ async def send_message(
             },
         )
 
-    response: dict = {"data": _msg_payload(msg, sender)}
+    response: dict = {"data": _msg_payload(msg, sender, references=msg_references)}
     if fork_info:
         response["forked"] = True
         response["forked_conversation_id"] = fork_info["forked_conversation_id"]
