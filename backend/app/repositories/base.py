@@ -5,12 +5,22 @@ from datetime import datetime
 from typing import Any, Generic, TypeVar
 
 from sqlalchemy import func, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import Base
 from app.models.base import SoftDeleteMixin
 
 T = TypeVar("T", bound=Base)
+
+
+class CasConflict(Exception):
+    """story #2874: update_with_cas() 낙관적 동시성 충돌 — 호출자가 .current(최신 row)로
+    409 detail(current_updated_at 등)을 구성한다."""
+
+    def __init__(self, current: Any) -> None:
+        self.current = current
+        super().__init__("optimistic concurrency conflict")
 
 # cursor 페이지네이션이 안전한 단조 정렬 컬럼 화이트리스트.
 # title/priority 등 비단조 컬럼은 cursor 중복으로 누락/중복을 유발하므로 제외한다.
@@ -122,6 +132,50 @@ class BaseRepository(Generic[T]):
         await self.session.flush()
         await self.session.refresh(obj)
         return obj
+
+    async def update_with_cas(
+        self, id: uuid.UUID, *, expected_updated_at: datetime | None = None, **data: Any
+    ) -> T | None:
+        """story #2874(하드닝): ``update()``는 재조회→setattr→flush로 check-then-write라
+        원자적이지 않다 — 같은 밀리초대 진짜 동시 PATCH 두 건이 겹치면(둘 다 "충돌 前" 값을
+        읽고 통과) 나중 flush가 먼저 것을 조용히 덮어쓸 수 있다(#3288 QA·codex 지적, 카디르
+        사실 확認). ``expected_updated_at``이 주어지면 단일 SQL 문
+        ``UPDATE ... WHERE id= AND updated_at=`` 로 승격 — DB가 원자적으로 비교+쓰기를
+        한 스텝에 한다(진짜 CAS, TOCTOU 창 없음).
+
+        ms-절삭 비교(docs.py 151e05f1 근거 그대로, 카디르 probe로 실증된 축 — DB μs=654321·
+        클라 ms절삭 654000 전송해도 false-409 없이 통과해야 함): ``date_trunc('milliseconds',
+        ...)``로 컬럼·파라미터 양쪽을 SQL 레벨에서 동일하게 절삭 후 비교한다.
+
+        rowcount=0이면 대상이 없거나(404, 호출자가 반환값 None으로 판별) 그 사이 다른 write가
+        있었다(409, ``CasConflict`` — 최신 row를 실어 올린다). ``expected_updated_at``이
+        None이면 기존 ``update()``와 완전히 동일(무CAS·하위호환)."""
+        if expected_updated_at is None:
+            return await self.update(id, **data)
+
+        values = {**data, "updated_at": func.now()}
+        result = await self.session.execute(
+            sa_update(self.model)
+            .where(
+                self._org_filter(),
+                self.model.id == id,  # type: ignore[attr-defined]
+                func.date_trunc("milliseconds", self.model.updated_at)  # type: ignore[attr-defined]
+                == func.date_trunc("milliseconds", expected_updated_at),
+            )
+            .values(**values)
+        )
+        # Core-style UPDATE는 세션 identity map을 자동 동기화하지 않는다 — 호출부가 이미
+        # 같은 id를 로드해 둔 인스턴스(예: 라우터의 사전조회 story_before)가 있으면 재조회
+        # (get)만으로는 그 캐시된 파이썬 객체를 그대로 돌려줄 뿐 새 컬럼값을 안 반영한다.
+        # expire_all()로 강제 무효화 후 재조회해야 rowcount 판정과 무관하게 항상 신선하다.
+        self.session.expire_all()
+        if result.rowcount == 1:
+            return await self.get(id)
+
+        current = await self.get(id)
+        if current is None:
+            return None
+        raise CasConflict(current)
 
     async def delete(self, id: uuid.UUID) -> bool:
         obj = await self.get(id)

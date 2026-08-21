@@ -2071,7 +2071,24 @@ async def update_story(
     # status를 그대로 씀, #2131은 status_changed **emit** 갭만 닫았지 게이트 자체는 다른 축).
     # 단건은 게이트를 거치는데 bulk는 안 거쳐 사람 승인을 우회할 수 있는 별건 갭 — #2521로
     # 후속 분리(#2156 advisory→enforcing flip 前에 닫아야 flip이 실효).
-    story = await repo.update(id, **data)
+    # story #2874: 위의 expected_updated_at 사전 체크(commit 전, 다른 side-effect 前 빠른
+    # 실패)는 non-atomic 시야라 진짜 동시 PATCH TOCTOU 창이 남는다 — 실제 write는 여기
+    # update_with_cas()의 원자 SQL(UPDATE...WHERE updated_at=)로 다시 한번, 이번엔 진짜로
+    # 강제한다(force_overwrite면 CAS 자체를 생략 — docs.py와 동일 계약).
+    from app.repositories.base import CasConflict
+    try:
+        story = await repo.update_with_cas(
+            id, expected_updated_at=None if force_overwrite else expected_updated_at, **data
+        )
+    except CasConflict as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "STORY_CONFLICT",
+                "message": "스토리가 다른 곳에서 수정됨 — 최신본을 다시 불러오세요",
+                "current_updated_at": e.current.updated_at.isoformat(),
+            },
+        )
     if story is None:
         raise HTTPException(status_code=404, detail="Story not found")
 

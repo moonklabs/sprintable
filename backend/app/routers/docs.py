@@ -506,9 +506,9 @@ async def update_doc(
     if "parent_id" in data:
         await _assert_doc_parent_in_project(session, doc.project_id, data["parent_id"])
 
-    # 일반 필드 적용 (slug 제외)
-    for attr, val in data.items():
-        setattr(doc, attr, val)
+    # story #2874(하드닝): slug/slug_locked도 아래서 setattr 직접 대신 data에 모아 뒀다가
+    # update_with_cas() 한 SQL 문으로 함께 반영한다 — 필드 적용을 두 단계(setattr 여기 +
+    # slug setattr 저기)로 나누면 그 사이에도 TOCTOU 창이 생겨 원자성이 반쪽이 된다.
 
     # slug 변경 처리 (4dd399c6)
     if slug_in is not None:
@@ -544,7 +544,7 @@ async def update_doc(
                     session, repo.org_id, doc.project_id, new_slug, exclude_doc_id=doc.id
                 )
             old_slug = doc.slug
-            doc.slug = new_slug
+            data["slug"] = new_slug
             # AC3: 구 slug → alias 보존 (이미 있으면 skip). 신 slug 가 과거 alias였다면 정리(live 우선).
             await session.execute(
                 sa_delete(DocSlugAlias).where(
@@ -569,10 +569,28 @@ async def update_doc(
                 existing_alias.doc_id = doc.id
 
     if slug_locked_in is not None:
-        doc.slug_locked = slug_locked_in
+        data["slug_locked"] = slug_locked_in
 
-    await session.flush()
-    await session.refresh(doc)
+    # story #2874: check-then-write(위 expected_updated_at 사전 체크, side-effect 前 빠른
+    # 실패용)는 non-atomic이라 진짜 동시 PATCH TOCTOU 창이 남는다 — 실제 write는 여기
+    # update_with_cas()의 원자 SQL(UPDATE...WHERE updated_at=)로 다시 한번 강제한다
+    # (force_overwrite면 CAS 생략). stories.py::update_story와 동일 공용 판정 함수(중복 구현 0).
+    from app.repositories.base import CasConflict
+    try:
+        doc = await repo.update_with_cas(
+            id, expected_updated_at=None if force_overwrite else expected_updated_at, **data
+        )
+    except CasConflict as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "DOC_CONFLICT",
+                "message": "문서가 다른 곳에서 수정됨 — 최신본을 다시 불러오세요",
+                "current_updated_at": e.current.updated_at.isoformat(),
+            },
+        )
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Doc not found")
 
     if "content" in data:
         cutoff_sq = (
