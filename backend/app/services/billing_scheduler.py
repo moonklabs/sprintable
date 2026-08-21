@@ -19,6 +19,7 @@ current_period_start/end`가 Toss 구독에는 애초에 채워지는 경로가 
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -97,11 +98,25 @@ def _renewal_order_id(org_id: uuid.UUID, offering_version_id: uuid.UUID, period_
     return f"{_RENEWAL_ORDER_PREFIX}{org_id}:{offering_version_id}:{period_end.date()}"
 
 
+# story #2907 fast-follow(유나양 design 비차단 권고①, 2026-08-21) — FE `tierName_*`
+# i18n 키(apps/web/messages/{ko,en}.json)와 동일 표시값. BE엔 별도 i18n 인프라가 없고
+# 이 표시명은 en/ko 둘 다 이미 같은 문자열이라(둘 다 "Starter"/"Team"/"Business") 이
+# 한 곳(메일)에서만 쓰는 매핑을 새로 발명하는 대신 그 사실을 그대로 반영한다.
+_TIER_DISPLAY_NAMES = {"free": "Free", "starter": "Starter", "team": "Team", "business": "Business"}
+
+
 def _dunning_email_content(*, tier: str, grace_expires_at) -> tuple[str, str]:
     """story #2907 AC3 — 매 실패마다 발송할 문안. 「언제(grace 만료일)」·「어떻게(free
     전이+신규 업로드만 차단·데이터 삭제 없음)」를 명시. tone=nice(선생님 지시) — 고객
-    대면 문구라 개야갤 톤 사용 금지."""
+    대면 문구라 개야갤 톤 사용 금지.
+
+    fast-follow(유나양 design 비차단 권고, 2026-08-21) — ①raw enum(tier) 대신 표시명
+    ②billing 페이지(`/settings?tab=billing`, FE `BillingTab` 딥링크 확認) CTA 링크
+    추가. `NEXT_PUBLIC_APP_URL`은 `org_invite_email.py`가 이미 쓰는 동일 패턴 재사용."""
     grace_date_str = grace_expires_at.strftime("%Y-%m-%d")
+    tier_display = _TIER_DISPLAY_NAMES.get(tier, tier)
+    app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
+    billing_link = f"{app_url}/settings?tab=billing"
     subject = "[Sprintable] 결제가 처리되지 않았습니다 — 확인해 주세요"
     html_body = (
         f"<p>안녕하세요, Sprintable입니다.</p>"
@@ -109,8 +124,9 @@ def _dunning_email_content(*, tier: str, grace_expires_at) -> tuple[str, str]:
         f"있으니, 등록하신 카드 정보를 확인해 주시면 감사하겠습니다.</p>"
         f"<p><b>{grace_date_str}</b>까지 결제가 완료되지 않으면 조직의 플랜이 자동으로 "
         f"Free로 전환됩니다. Free로 전환되어도 <b>기존 데이터는 삭제되지 않으며</b>, "
-        f"신규 업로드만 제한됩니다. 이후 결제를 완료하시면 즉시 원래 플랜({tier})으로 "
+        f"신규 업로드만 제한됩니다. 이후 결제를 완료하시면 즉시 원래 플랜({tier_display})으로 "
         f"복귀합니다.</p>"
+        f"<p><a href=\"{billing_link}\">결제 정보 확인하러 가기</a></p>"
         f"<p>문의사항이 있으시면 언제든 회신해 주세요.</p>"
     )
     return subject, html_body
@@ -576,7 +592,14 @@ async def trigger_due_charges(session: AsyncSession, *, now: datetime | None = N
                 update(OrgSubscription).where(OrgSubscription.org_id == sub.org_id).values(status="past_due")
             )
             await session.commit()
-            grace_expires_at = now.date() + timedelta(days=grace_days)
+            # fast-follow(유나양 design 비차단 권고④, 2026-08-21) — 이 실패 order의
+            # created_at을 앵커로 쓴다(`_sync_renewal_retry_outcome`이 재시도 실패마다
+            # 쓰는 앵커와 동일 소스). `now`는 DB 트랜잭션 타임스탬프와 미세하게(또는
+            # 자정 근처면 하루) 어긋날 수 있어 두 지점이 서로 다른 grace 만료일을
+            # 계산할 위험이 있었다 — order가 없는 극단적 실패(claim INSERT 자체가
+            # 안 됨)만 now.date()로 폴백.
+            grace_anchor = order.created_at.date() if order is not None else now.date()
+            grace_expires_at = grace_anchor + timedelta(days=grace_days)
             await _notify_dunning_failure(session, sub.org_id, tier=sub.tier, grace_expires_at=grace_expires_at)
             failed += 1
 

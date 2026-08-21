@@ -203,6 +203,55 @@ async def test_trigger_due_charges_failure_sets_past_due_and_notifies_realdb():
             assert grace_expires in body, "메일 문안에 grace 만료일(언제)이 없음"
             assert "삭제되지 않" in body, "메일 문안에 데이터 미삭제(어떻게) 명시가 없음"
             assert "Free" in body or "free" in body, "메일 문안에 free 전이(어떻게) 명시가 없음"
+            # fast-follow(유나양 design 비차단 권고, 2026-08-21) — ①raw enum 아닌 표시명 ②billing CTA 링크.
+            assert "Starter" in body, "tier가 raw enum('starter')이 아니라 표시명('Starter')이어야 함"
+            assert "/settings?tab=billing" in body, "billing 페이지 CTA 링크가 없음"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_trigger_due_charges_grace_anchor_is_order_created_at_not_now_realdb():
+    """fast-follow(유나양 design 비차단 권고④, 2026-08-21) — trigger_due_charges의
+    최초 실패 메일이 말하는 grace 만료일은 `order.created_at`(DB 타임스탬프) 기준이어야
+    한다, 호출부의 파이썬 `now` 변수 기준이 아니다 — 둘이 갈리면(자정 근처 등)
+    이 메일과 이후 sweep_dunning_retries 재시도 메일(이미 `order.created_at` 기준,
+    `_sync_renewal_retry_outcome`)이 서로 다른 날짜를 말하게 된다. `now`를 실제
+    DB commit 시각보다 훨씬 과거로 넘겨 검증(달랐다면 이 테스트가 그 차이를 드러낸다)."""
+    from app.services.billing_scheduler import trigger_due_charges
+    from app.services.payment.toss_adapter import TossApiError
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session:
+            org_id = await _seed_org_with_owner(session, email="owner7@2907.test")
+            offering_id, price = await _offering(session, "starter")
+            stale_now = datetime.now(timezone.utc) - timedelta(days=3)  # order.created_at(진짜 DB now())과 의도적으로 갈림
+            period_end = stale_now - timedelta(hours=1)  # stale_now 기준으로도 이미 도래
+            await _seed_active_paid_subscription(
+                session, org_id, tier="starter", offering_id=offering_id,
+                period_start=period_end - timedelta(days=30), period_end=period_end,
+            )
+            await _seed_active_billing_key(session, org_id)
+
+            sent = []
+            with patch("app.services.payment.toss_adapter.TossAdapter._post", new=AsyncMock(
+                side_effect=TossApiError("CARD_DECLINED", "카드 거절", status_code=400),
+            )), patch("app.services.billing_scheduler.send_email", new=lambda to, subj, body: sent.append((to, subj, body))):
+                await trigger_due_charges(session, now=stale_now)
+
+            order_created_at = (
+                await session.execute(text("SELECT created_at FROM billing_orders WHERE org_id=:oid"), {"oid": org_id})
+            ).scalar_one()
+            expected = (order_created_at.date() + timedelta(days=7)).strftime("%Y-%m-%d")
+            unexpected = (stale_now.date() + timedelta(days=7)).strftime("%Y-%m-%d")
+            assert expected != unexpected, "이 테스트가 의미 있으려면 두 anchor가 실제로 갈려야 함"
+
+            assert len(sent) == 1
+            body = sent[0][2]
+            assert expected in body, f"메일이 order.created_at 앵커({expected})가 아니라 다른 값을 씀 — body={body!r}"
+            assert unexpected not in body, "메일이 여전히 (스테일)now 앵커를 쓰고 있음 — 회귀"
     finally:
         await engine.dispose()
 
