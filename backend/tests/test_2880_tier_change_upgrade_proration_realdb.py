@@ -109,16 +109,35 @@ async def _seed_active_billing_key(session, org_id):
     await session.commit()
 
 
-async def _seed_prior_confirmed_order(session, org_id, *, amount_minor):
-    """직전 결제(원 tier 가입 시 charge)를 흉내 — 부분취소 대상."""
+async def _seed_prior_confirmed_order(session, org_id, *, amount_minor, created_at=None):
+    """직전 결제(원 tier 가입 시 charge)를 흉내 — 부분취소 대상. purpose는 컬럼
+    server_default('charge')에 맡긴다(0268)."""
     order_id = f"prior-{uuid.uuid4()}"
     payment_key = f"pay-prior-{uuid.uuid4()}"
+    created_at = created_at or datetime.now(timezone.utc)
     await session.execute(
         text(
-            "INSERT INTO billing_orders (id, org_id, order_id, amount_minor, currency, status, payment_key) "
-            "VALUES (:id, :org_id, :oid, :amt, 'krw', 'confirmed', :pk)"
+            "INSERT INTO billing_orders (id, org_id, order_id, amount_minor, currency, status, payment_key, created_at) "
+            "VALUES (:id, :org_id, :oid, :amt, 'krw', 'confirmed', :pk, :ca)"
         ),
-        {"id": uuid.uuid4(), "org_id": org_id, "oid": order_id, "amt": amount_minor, "pk": payment_key},
+        {"id": uuid.uuid4(), "org_id": org_id, "oid": order_id, "amt": amount_minor, "pk": payment_key, "ca": created_at},
+    )
+    await session.commit()
+    return order_id, payment_key
+
+
+async def _seed_pack_purchase_order(session, org_id, *, amount_minor, created_at=None):
+    """카디르 CRITICAL 재현용 — pack 구매도 같은 billing_orders 테이블에 confirmed row를
+    남긴다(billing_pack.py::purchase_packs, charge_org(entry_type="pack_purchase"))."""
+    order_id = f"pack-{uuid.uuid4()}"
+    payment_key = f"pay-pack-{uuid.uuid4()}"
+    created_at = created_at or datetime.now(timezone.utc)
+    await session.execute(
+        text(
+            "INSERT INTO billing_orders (id, org_id, order_id, amount_minor, currency, status, payment_key, purpose, created_at) "
+            "VALUES (:id, :org_id, :oid, :amt, 'krw', 'confirmed', :pk, 'pack_purchase', :ca)"
+        ),
+        {"id": uuid.uuid4(), "org_id": org_id, "oid": order_id, "amt": amount_minor, "pk": payment_key, "ca": created_at},
     )
     await session.commit()
     return order_id, payment_key
@@ -387,5 +406,126 @@ async def test_concurrent_change_tier_calls_only_one_succeeds_realdb():
         in_progress = [r for r in results if isinstance(r, TierChangeInProgress)]
         assert len(succeeded) == 1, f"정확히 하나만 성공해야 함: {results}"
         assert len(in_progress) == 1, f"나머지 하나는 TierChangeInProgress여야 함: {results}"
+    finally:
+        await engine.dispose()
+
+
+# ─── 카디르 CRITICAL 재현 회귀(2026-08-21, PR#3306 리뷰) — pack구매 오인 부분취소 ───
+
+@pytest.mark.anyio
+async def test_partial_refund_targets_subscription_charge_not_more_recent_pack_purchase_realdb():
+    """시나리오 A(카디르 재현①) — pack금액이 prorate액보다 작을 때. 정정 前엔
+    `_latest_confirmed_order`가 더 최근인 pack 주문을 골라 refund_org 자체 방어
+    (cancel_amount_minor exceeds original charge amount)로 막혀 refund_status='failed'만
+    남고, 진짜 구독 결제는 영원히 미환급이었다. 정정 後엔 purpose='charge' 필터로
+    구독 order를 정확히 골라 성공해야 한다."""
+    from app.services.org_subscription_tier_change import change_tier
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session:
+            org_id = await _seed_org(session)
+            period_start = datetime.now(timezone.utc) - timedelta(days=10)
+            period_end = period_start + timedelta(days=30)
+            _, starter_price = await _offering(session, "starter")
+            _, team_price = await _offering(session, "team")
+
+            await _seed_active_paid_subscription(session, org_id, tier="starter", period_start=period_start, period_end=period_end)
+            await _seed_active_billing_key(session, org_id)
+            # 구독 charge(10일 전, starter_price) — 부분취소 진짜 대상.
+            sub_order_id, sub_payment_key = await _seed_prior_confirmed_order(
+                session, org_id, amount_minor=starter_price, created_at=period_start,
+            )
+            # pack 구매(1일 전, 구독 charge보다 최근이지만 소액) — 오인 대상이면 안 됨.
+            pack_amount = 5_000
+            await _seed_pack_purchase_order(
+                session, org_id, amount_minor=pack_amount,
+                created_at=datetime.now(timezone.utc) - timedelta(days=1),
+            )
+
+            call_log = []
+
+            async def _fake_post(self, path, **kwargs):
+                call_log.append((path, kwargs.get("json")))
+                if "cancel" in path:
+                    return _toss_cancel_response(kwargs["json"]["cancelAmount"])
+                return {"paymentKey": f"pay-new-{uuid.uuid4()}", "totalAmount": team_price}
+
+            with patch("app.services.payment.toss_adapter.TossAdapter._post", new=_fake_post):
+                await change_tier(session, org_id=org_id, new_tier="team")
+
+            cancel_calls = [c for c in call_log if "cancel" in c[0]]
+            assert len(cancel_calls) == 1
+            assert sub_payment_key in cancel_calls[0][0], "부분취소가 구독 order를 타겟해야 함(pack 아님)"
+
+            sub_row = (
+                await session.execute(text("SELECT refund_status FROM billing_orders WHERE order_id=:oid"), {"oid": sub_order_id})
+            ).first()
+            assert sub_row.refund_status == "confirmed"
+
+            # pack 주문은 손대지 않았어야 함.
+            pack_row = (
+                await session.execute(text("SELECT refund_status FROM billing_orders WHERE purpose='pack_purchase' AND org_id=:oid"), {"oid": org_id})
+            ).first()
+            assert pack_row.refund_status is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_partial_refund_does_not_silently_cancel_unrelated_pack_purchase_when_pack_amount_larger_realdb():
+    """시나리오 B(카디르 재현②, 더 위험) — pack금액이 prorate액보다 클 때. 정정 前엔
+    refund_org의 「초과 금액 방어」가 안 걸려(pack 주문 자체 금액이 충분히 커서)
+    무관한 고객의 정상 pack 구매가 조용히 부분취소됐다(refund_status='confirmed'로
+    기록되지만 targeted_pack=True, targeted_sub=False — 아무 에러도 없이 잘못된 돈이
+    빠져나감). 정정 後엔 애초에 pack 주문이 후보에 들지 않아야 한다."""
+    from app.services.org_subscription_tier_change import change_tier
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session:
+            org_id = await _seed_org(session)
+            period_start = datetime.now(timezone.utc) - timedelta(days=10)
+            period_end = period_start + timedelta(days=30)
+            _, starter_price = await _offering(session, "starter")
+            _, team_price = await _offering(session, "team")
+
+            await _seed_active_paid_subscription(session, org_id, tier="starter", period_start=period_start, period_end=period_end)
+            await _seed_active_billing_key(session, org_id)
+            sub_order_id, sub_payment_key = await _seed_prior_confirmed_order(
+                session, org_id, amount_minor=starter_price, created_at=period_start,
+            )
+            # pack 구매 — prorate액(대략 starter_price*2/3)보다 확실히 크게, 방어선에
+            # 안 걸리도록.
+            pack_amount = starter_price * 10
+            pack_order_id, pack_payment_key = await _seed_pack_purchase_order(
+                session, org_id, amount_minor=pack_amount,
+                created_at=datetime.now(timezone.utc) - timedelta(days=1),
+            )
+
+            call_log = []
+
+            async def _fake_post(self, path, **kwargs):
+                call_log.append((path, kwargs.get("json")))
+                if "cancel" in path:
+                    return _toss_cancel_response(kwargs["json"]["cancelAmount"])
+                return {"paymentKey": f"pay-new-{uuid.uuid4()}", "totalAmount": team_price}
+
+            with patch("app.services.payment.toss_adapter.TossAdapter._post", new=_fake_post):
+                await change_tier(session, org_id=org_id, new_tier="team")
+
+            cancel_calls = [c for c in call_log if "cancel" in c[0]]
+            assert len(cancel_calls) == 1
+            targeted_pack = pack_payment_key in cancel_calls[0][0]
+            targeted_sub = sub_payment_key in cancel_calls[0][0]
+            assert not targeted_pack, "무관한 pack 구매가 취소되면 안 됨(카디르 재현 시나리오B)"
+            assert targeted_sub, "구독 charge가 부분취소 대상이어야 함"
+
+            pack_row = (
+                await session.execute(text("SELECT refund_status FROM billing_orders WHERE order_id=:oid"), {"oid": pack_order_id})
+            ).first()
+            assert pack_row.refund_status is None, "pack 주문은 절대 건드리면 안 됨"
     finally:
         await engine.dispose()

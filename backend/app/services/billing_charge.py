@@ -125,6 +125,10 @@ async def charge_org(
     claim_stmt = pg_insert(BillingOrder).values(
         id=uuid.uuid4(), org_id=org_id, order_id=order_id,
         amount_minor=amount_minor, currency=currency, status="pending",
+        # 카디르 CRITICAL(0268) — purpose를 entry_type과 같은 값으로 최초 생성 시점에
+        # 찍는다. ON CONFLICT DO NOTHING이라 재시도(같은 order_id 재호출)는 이 값을
+        # 안 건드림 — 최초 생성이 유일한 진실 시점.
+        purpose=entry_type,
     ).on_conflict_do_nothing(index_elements=["order_id"])
     claim_result = await session.execute(claim_stmt)
     await session.commit()

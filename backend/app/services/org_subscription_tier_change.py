@@ -49,7 +49,7 @@ from app.services.billing_charge_amount import (
     prorate_minor,
 )
 from app.services.billing_period import new_subscription_period
-from app.services.billing_refund import RefundError, refund_org
+from app.services.billing_refund import refund_org
 from app.services.org_subscription_checkout import STALE_CLAIM_WINDOW
 from app.services.payment.toss_adapter import TossApiError
 
@@ -81,12 +81,18 @@ async def _refetch_subscription(session: AsyncSession, org_id: uuid.UUID) -> Org
     ).scalar_one()
 
 
-async def _latest_confirmed_order(session: AsyncSession, org_id: uuid.UUID) -> BillingOrder | None:
-    """이 org의 가장 최근 confirmed billing_order — 부분취소 대상(직전 결제 건)."""
+async def _latest_confirmed_subscription_order(session: AsyncSession, org_id: uuid.UUID) -> BillingOrder | None:
+    """⛔카디르 CRITICAL(2026-08-21, PR#3306 리뷰) — 이전 버전은 org_id+status='confirmed'
+    로만 걸러 pack 구매 order를 «직전 구독 결제»로 오인했다(billing_pack.py도 같은
+    billing_orders 테이블에 confirmed row를 남긴다 — 실PG 2시나리오 재현 확定: pack금액<
+    prorate액이면 refund_org 자체 방어로 실패만 남고 진짜 구독 결제는 영원히 미환급,
+    pack금액>prorate액이면 방어선 없이 «조용히 성공»해 무관한 pack 구매가 실제로
+    취소됨). `purpose='charge'`(0268)로 구독 charge만 명시 필터 — pack_purchase는
+    구조적으로 대상에서 빠진다."""
     return (
         await session.execute(
             select(BillingOrder)
-            .where(BillingOrder.org_id == org_id, BillingOrder.status == "confirmed")
+            .where(BillingOrder.org_id == org_id, BillingOrder.status == "confirmed", BillingOrder.purpose == "charge")
             .order_by(BillingOrder.created_at.desc())
             .limit(1)
         )
@@ -162,12 +168,15 @@ async def change_tier(session: AsyncSession, *, org_id: uuid.UUID, new_tier: str
     if claim_result.rowcount == 0:
         raise TierChangeInProgress(f"org_id={org_id}에 다른 결제 작업이 이미 진행 中 — 완료 후 재시도")
 
-    # claim 이후 부분취소 대상(직전 confirmed order)을 미리 스냅샷 — claim이 이 시점부터
-    # 이 org의 결제 작업을 배타적으로 쥐므로, 이 조회와 아래 charge_org 사이에 다른 호출이
-    # 새 order를 confirmed로 만들 여지가 없다(레이스 없음).
-    old_confirmed_order = await _latest_confirmed_order(session, org_id)
-
     try:
+        # ⛔카디르 MEDIUM(2026-08-21, PR#3306 리뷰) — 이전 버전은 이 조회가 try 밖이라
+        # 조회 자체가 실패하면 finally(claim 해제)를 못 타 stale window 동안 org가
+        # 잠겼다. claim commit 직후를 try 시작점으로 당겨 이 조회도 finally 보호 안에
+        # 넣는다. claim이 이 시점부터 이 org의 결제 작업을 배타적으로 쥐므로, 이 조회와
+        # 아래 charge_org 사이에 다른 호출이 새 order를 confirmed로 만들 여지가 없다
+        # (레이스 없음 — 스냅샷 의미는 그대로).
+        old_confirmed_order = await _latest_confirmed_subscription_order(session, org_id)
+
         try:
             amount_minor, currency = await compute_full_charge_for_new_offering(
                 session, org_id=org_id, new_offering=new_offering,
@@ -251,7 +260,12 @@ async def _attempt_partial_refund(
             cancel_amount_minor=refund_amount,
         )
         refund_status = "confirmed"
-    except (RefundError, TossApiError) as exc:
+    except Exception as exc:
+        # 카디르 MEDIUM(2026-08-21, PR#3306 리뷰) — 이전엔 (RefundError, TossApiError)만
+        # 좁게 잡아, 그 외 예외(예: Toss 취소는 성공했는데 record_ledger_entry의 DB write가
+        # 실패)는 refund_status가 NULL로 남아 스윕이 못 찾는 사각지대였다. 이 함수의 계약
+        # 자체가 "실패해도 절대 전파 안 함"이라(④) — 예외 종류를 좁혀 잡을 이유가 없다,
+        # 전부 잡아 반드시 'failed'를 남긴다.
         logger.error(
             "tier change org_id=%s order_id=%s: partial refund FAILED(amount=%d) — %s. "
             "charge already confirmed, NOT rolled back — needs retry/sweep.",
