@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy import update as sa_update
@@ -42,11 +42,16 @@ class ApiKeyRepository:
         self,
         team_member_id: uuid.UUID,
         scope: list[str] | None = None,
-        expires_at: datetime | None = None,
+        *,
+        expires_at: datetime | None,
     ) -> tuple[ApiKey, str]:
+        """story #2838(PO AC 정정 2026-08-20) — expires_at은 **기본값 없는 필수 kwarg**. 최초
+        sentinel(_UNSET) 안은 이 repo가 인자를 안 받은 호출부에 옛 90일 기본값을 여전히
+        내려줘 그 자체가 "침묵 90일" 경로로 남았다(diff 밖 grep — team_members.py/org_agent.py/
+        recruit_service.py 셋 다 인자 미전달, 실사고의 유력 발급 경로 그 자체). 필수화해 repo
+        층이 침묵을 구조로 거부 — 모든 호출부가 명시(값 있으면 그 시각, None이면 명시적
+        무만료)해야 컴파일조차 안 된다."""
         plaintext, prefix, key_hash = _generate_key()
-        if expires_at is None:
-            expires_at = datetime.now(timezone.utc) + timedelta(days=90)
         key = ApiKey(
             team_member_id=team_member_id,
             member_id=team_member_id,  # AC3-1 dual-write: agent member.id = team_member.id (1:1)
@@ -96,6 +101,10 @@ class ApiKeyRepository:
         new_key, plaintext = await self.create(
             team_member_id=old.team_member_id,
             scope=scope if scope is not None else old.scope,
-            expires_at=None,
+            # story #2838 AC② — 원 키의 만료 정책 그대로 승계(무만료→무만료·만료 키→같은 만료
+            # 시각). 회전이 수명을 침묵으로 늘리거나 줄이지 않는다(#2838이 고치는 병의 재발
+            # 지점이었다 — 이전엔 항상 expires_at=None을 여기서 create()에 넘겨 90일이 매
+            # rotate마다 재각인됐다). 연장이 필요하면 그건 명시 파라미터의 몫으로 남긴다.
+            expires_at=old.expires_at,
         )
         return new_key, plaintext

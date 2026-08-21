@@ -14,10 +14,20 @@ from pathlib import Path
 import pytest
 
 _MIGRATION = Path(__file__).parent.parent / "alembic" / "versions" / "0157_role_templates_catalog_buildout.py"
+_WORKFLOW_COMPILE_MIGRATION = (
+    Path(__file__).parent.parent / "alembic" / "versions" / "0260_compile_workflow_recipes_to_cycle_events.py"
+)
 
 
 def _load_migration():
     spec = importlib.util.spec_from_file_location("rev_0157", _MIGRATION)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _load_workflow_compile_migration():
+    spec = importlib.util.spec_from_file_location("rev_0260", _WORKFLOW_COMPILE_MIGRATION)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -125,13 +135,21 @@ def test_data_analyst_uses_custom_non_claim_opening():
 
 
 def test_recipe_slugs_reference_known_builtin_recipes():
-    """default_workflow_recipe_slug가 실제 존재하는 builtin recipe를 가리키는지."""
-    from app.routers.workflow_recipes import _BUILTIN_BY_ID
+    """default_workflow_recipe_slug가 실제 존재하는 레시피를 가리키는지 — story #2792(2790 P1)
+    컴파일 이후 SSOT는 event_definitions(0260)다(구 workflow_recipes 라우터는 story #2790
+    라우터 은퇴 §4 (b) 결정으로 은퇴, 더 이상 import 불가). 구 하이픈 슬러그는 0260이
+    언더스코어로 그대로 옮긴 것과 대응 — "-"→"_" 정규화 후 preset.workflow.{slug} 키
+    존재로 판정(agent_solo 개명 건도 "solo"는 원 슬러그 그대로 옮겨져 무영향)."""
+    workflow_mod = _load_workflow_compile_migration()
+    compiled_keys = {f"preset.workflow.{slug}" for slug, *_ in workflow_mod._rows()}
 
     mod = _load_migration()
     for slug, _name, _category, _description, _tool_groups, recipe_slug in mod._SEED:
         if recipe_slug is not None:
-            assert recipe_slug in _BUILTIN_BY_ID, f"{slug}: unknown recipe slug {recipe_slug!r}"
+            expected_key = f"preset.workflow.{recipe_slug.replace('-', '_')}"
+            assert expected_key in compiled_keys, (
+                f"{slug}: unknown recipe slug {recipe_slug!r} (기대 키 {expected_key!r})"
+            )
 
 
 # ─── 실 Postgres — 실 마이그 적용 + GET 엔드포인트(22직무 전체) ────────────────

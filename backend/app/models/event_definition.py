@@ -66,11 +66,23 @@ class EventDefinition(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     key: Mapped[str] = mapped_column(Text, nullable=False)
     org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    # story #2792(2790 P1, PO 확定 2026-08-19 ①) — 사람용 표시(드롭다운 등). key는 기계용
+    # 식별자로 그대로 둔다. i18n 오버레이(role_templates류)는 신설 안 함(이번 스코프 밖).
+    # server_default는 진짜 데이터 경로(마이그 백필·API가 name 필수)를 위한 게 아니라
+    # create_all+구 시드 리터럴 직삽입(0245._SEED, name 없음) 같은 레거시/테스트 경로의
+    # 안전망 — enabled/version/stage_metadata와 동일 컨벤션.
+    name: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload_schema: Mapped[dict] = mapped_column(JSONB, nullable=False)
     routing: Mapped[dict] = mapped_column(JSONB, nullable=False)
     # P2(story #2637)가 소비 — nullable=없으면 제네릭 카드 폴백(블루프린트 §2-1 표).
     block_template: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     action_auth: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # story #2792(2790 P1) — 사이클형(payload_schema.properties.stage.enum 有) 정의의 stage별
+    # 카탈로그 메타(role/action) — "기대 행동은 정의 레벨 데이터"(발행 payload 아님). 키 집합은
+    # stage.enum의 부분집합이어야 한다(event_definition_registry.validate_stage_metadata가 등록/
+    # 수정 시점에 강제 — 오타 slug가 조용히 죽는 클래스 차단, 페드루 판정 2026-08-19).
+    stage_metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

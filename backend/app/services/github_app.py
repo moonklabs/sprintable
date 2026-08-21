@@ -126,6 +126,86 @@ async def get_installation_token(installation_id: int) -> str | None:
         return None
 
 
+async def create_check_run(
+    installation_id: int,
+    repo_full_name: str,
+    head_sha: str,
+    *,
+    name: str = "sprintable/gate",
+    status: str = "in_progress",
+    conclusion: str | None = None,
+    title: str | None = None,
+    summary: str | None = None,
+) -> dict | None:
+    """story #2813 — `POST /repos/{repo}/check-runs`(installation token). 실패/토큰없음=None
+    (fail-closed 상위 호출자 책임 — 이 함수는 예외를 삼키지 않는다, 호출자가 try/except로
+    "실패해도 GitHub 쪽 상태는 안 바뀐다"를 보장). `status='completed'`일 때만 `conclusion` 필수
+    (GitHub API 제약 — queued/in_progress엔 conclusion 없음)."""
+    token = await get_installation_token(installation_id)
+    if not token:
+        return None
+    body: dict = {"name": name, "head_sha": head_sha, "status": status}
+    if status == "completed" and conclusion:
+        body["conclusion"] = conclusion
+    if title or summary:
+        body["output"] = {"title": title or name, "summary": summary or ""}
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            f"{_GITHUB_API}/repos/{repo_full_name}/check-runs",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+            },
+            json=body,
+        )
+    if resp.status_code not in (200, 201):
+        logger.warning(
+            "check-run create 실패 HTTP %s (repo=%s sha=%s)", resp.status_code, repo_full_name, head_sha
+        )
+        return None
+    return resp.json()
+
+
+async def update_check_run(
+    installation_id: int,
+    repo_full_name: str,
+    check_run_id: int,
+    *,
+    status: str | None = None,
+    conclusion: str | None = None,
+    title: str | None = None,
+    summary: str | None = None,
+) -> dict | None:
+    """story #2813 — `PATCH /repos/{repo}/check-runs/{id}`. create_check_run과 동일 계약(예외
+    미삼킴·실패=None)."""
+    token = await get_installation_token(installation_id)
+    if not token:
+        return None
+    body: dict = {}
+    if status:
+        body["status"] = status
+    if status == "completed" and conclusion:
+        body["conclusion"] = conclusion
+    if title or summary:
+        body["output"] = {"title": title or "sprintable/gate", "summary": summary or ""}
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.patch(
+            f"{_GITHUB_API}/repos/{repo_full_name}/check-runs/{check_run_id}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+            },
+            json=body,
+        )
+    if resp.status_code != 200:
+        logger.warning(
+            "check-run update 실패 HTTP %s (repo=%s check_run_id=%s)",
+            resp.status_code, repo_full_name, check_run_id,
+        )
+        return None
+    return resp.json()
+
+
 async def fetch_installation_metadata(installation_id: int) -> dict | None:
     """`GET /app/installations/{id}`(App JWT) — account login/type·repo selection. best-effort(None=graceful)."""
     app_jwt = build_app_jwt()

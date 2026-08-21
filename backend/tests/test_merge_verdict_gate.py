@@ -179,7 +179,7 @@ def test_wilson_lower_bound_sample_aware():
 def _patch_cage(*, gate_status="auto_passed", trust_scores=None, capture=None, participation=True,
                  project_id=None):
     part = SimpleNamespace(member_id=uuid.uuid4(), role_id=uuid.uuid4()) if participation else None
-    gate = SimpleNamespace(id=uuid.uuid4(), status=gate_status, evidence_status=None)
+    gate = SimpleNamespace(id=uuid.uuid4(), status=gate_status, evidence_status=None, approved_head_sha=None)
     ctx = [
         patch.object(mod, "resolve_implementation_participation", AsyncMock(return_value=part)),
         patch.object(mod, "_role_key", AsyncMock(return_value="implementation")),
@@ -298,7 +298,7 @@ async def test_trust_computed_before_capture_records():
          patch.object(mod, "compute_member_trust_scores", side_effect=_trust), \
          patch.object(mod, "capture_pr_ci_verdict", side_effect=_capture), \
          patch.object(mod, "resolve_work_item_project_id", AsyncMock(return_value=uuid.uuid4())), \
-         patch.object(mod, "create_gate", AsyncMock(return_value=SimpleNamespace(id=uuid.uuid4(), status="auto_passed", evidence_status=None))):
+         patch.object(mod, "create_gate", AsyncMock(return_value=SimpleNamespace(id=uuid.uuid4(), status="auto_passed", evidence_status=None, approved_head_sha=None))):
         await evaluate_merge_gate(AsyncMock(), uuid.uuid4(), uuid.uuid4(), pr_number=1, repo="o/r", ci_result="pass")
 
     assert order == ["trust", "capture"], f"trust must precede capture, got {order}"
@@ -380,6 +380,7 @@ async def test_evaluate_persists_decision_metadata_on_gate():
     gate = SimpleNamespace(
         id=uuid.uuid4(), status="pending",
         requires_human=False, evidence_status=None, decision_basis=None, auto_decision_reason=None,
+        approved_head_sha=None,
     )
     part = SimpleNamespace(member_id=uuid.uuid4(), role_id=uuid.uuid4())
     with patch("app.services.merge_verdict_gate.resolve_implementation_participation",
@@ -405,7 +406,8 @@ async def test_evaluate_persists_decision_metadata_on_gate():
 @pytest.mark.anyio
 async def test_evaluate_auto_merge_metadata_sufficient():
     gate = SimpleNamespace(id=uuid.uuid4(), status="auto_passed",
-                           requires_human=True, evidence_status=None, decision_basis=None, auto_decision_reason=None)
+                           requires_human=True, evidence_status=None, decision_basis=None, auto_decision_reason=None,
+                           approved_head_sha=None)
     part = SimpleNamespace(member_id=uuid.uuid4(), role_id=uuid.uuid4())
     with patch("app.services.merge_verdict_gate.resolve_implementation_participation", AsyncMock(return_value=part)), \
          patch("app.services.merge_verdict_gate._role_key", AsyncMock(return_value="implementation")), \
@@ -513,7 +515,7 @@ async def _run_substance(*, ci_result, pr_number, disposition, source="system_de
     if explicit is None:
         explicit = source != "system_default"  # 기존 테스트들의 암묵 기대(하위호환 기본값)
     part = SimpleNamespace(member_id=uuid.uuid4(), role_id=uuid.uuid4())
-    gate = SimpleNamespace(id=uuid.uuid4(), status="pending", evidence_status=None)
+    gate = SimpleNamespace(id=uuid.uuid4(), status="pending", evidence_status=None, approved_head_sha=None)
     with contextlib.ExitStack() as stack:
         stack.enter_context(patch.object(mod, "resolve_implementation_participation",
                                          AsyncMock(return_value=part)))

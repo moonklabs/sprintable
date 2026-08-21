@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { Download, Expand, File, FileCode, FileText, Film, Image as ImageIcon, Music, X, type LucideIcon } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Download, Expand, File, FileCode, FileText, Film, Image as ImageIcon, Loader2, Music, X, type LucideIcon } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/db/client';
 import { downloadAsset, openExternal } from '@/lib/native-shell-bridge';
 import { MdBody } from '@/components/chat/embed-card';
@@ -9,20 +9,34 @@ import type { ReadingPanelTarget } from '@/components/chat/reading-panel';
 
 type AttachmentTarget = Extract<ReadingPanelTarget, { kind: 'attachment' }>;
 
-// 인계 doc 0ef7f8ab §A2 — 포맷 라우팅 표 그대로. office는 렌더러가 없다(가짜 렌더 금지).
-type Format = 'image' | 'video' | 'audio' | 'text' | 'html' | 'pdf' | 'office' | 'unknown';
+// 인계 doc 0ef7f8ab §A2 — 포맷 라우팅 표 그대로. docx는 story #2788(84ef0cb7 §4-1
+// 판정)에서 docx-preview 클라 렌더로 분리됐고, pptx는 story #2803(84ef0cb7 §7)에서
+// BE 변환 파이프(POST /api/v2/attachments/{asset_id}/convert)로 분리됐다. xlsx 등
+// 나머지 office는 여전히 렌더러가 없다(가짜 렌더 금지).
+type Format = 'image' | 'video' | 'audio' | 'text' | 'html' | 'pdf' | 'docx' | 'pptx' | 'office' | 'unknown';
 
-function resolveFormat(contentType: string | null | undefined, label: string): Format {
+// story #2803 QA(까디르군) — 클래스 전체를 table-driven 테스트로 못박기 위해 export.
+export function resolveFormat(contentType: string | null | undefined, label: string): Format {
   const ct = (contentType ?? '').toLowerCase();
   const ext = label.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
+  // 까디르군 QA(#2803) 2라운드 — docx/pptx는 함수 «최상단»에서 확장자 단독으로 확정해야
+  // 한다. wordprocessingml/presentationml보다만 앞서면 여전히 그 위의 image/pdf/html 등
+  // content-type 판정에 먼저 걸려 .pptx+content-type=application/pdf류가 깨진 pdf iframe으로
+  // 오라우팅된다(정직 폴백보다 나쁜 경로). BE office_conversion.is_convertible도 확장자만
+  // 보고 판정하므로 이 두 확장자에선 ext가 최종 진실 — 오명명 파일은 convert 실패→정직
+  // 폴백으로 귀결되니 안전하다.
+  if (ext === 'docx') return 'docx';
+  if (ext === 'pptx') return 'pptx';
   if (ct.startsWith('image/')) return 'image';
   if (ct.startsWith('video/')) return 'video';
   if (ct.startsWith('audio/')) return 'audio';
   if (ct === 'application/pdf' || ext === 'pdf') return 'pdf';
   if (ct === 'text/html' || ext === 'html' || ext === 'htm') return 'html';
   if (ct.startsWith('text/') || ct === 'text/markdown' || ['txt', 'md', 'markdown'].includes(ext)) return 'text';
+  if (ct.includes('wordprocessingml')) return 'docx';
+  if (ct.includes('presentationml')) return 'pptx';
   if (
-    ['pptx', 'ppt', 'docx', 'doc', 'xlsx', 'xls'].includes(ext) ||
+    ['ppt', 'doc', 'xlsx', 'xls'].includes(ext) ||
     ct.includes('officedocument') ||
     ct.includes('msword') ||
     ct.includes('ms-excel') ||
@@ -35,7 +49,7 @@ function resolveFormat(contentType: string | null | undefined, label: string): F
 
 const FORMAT_LABEL: Record<Format, string> = {
   image: '이미지', video: '동영상', audio: '오디오', text: '텍스트',
-  html: 'HTML', pdf: 'PDF', office: '오피스 문서', unknown: '파일',
+  html: 'HTML', pdf: 'PDF', docx: 'Word 문서', pptx: 'PowerPoint 문서', office: '오피스 문서', unknown: '파일',
 };
 
 function iconFor(format: Format): LucideIcon {
@@ -46,6 +60,8 @@ function iconFor(format: Format): LucideIcon {
     case 'text': return FileText;
     case 'html': return FileCode;
     case 'pdf': return FileText;
+    case 'docx': return FileText;
+    case 'pptx': return FileText;
     default: return File;
   }
 }
@@ -191,13 +207,13 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
           </div>
         )}
 
-        {state.kind === 'ready' && <FileViewerBody format={format} url={state.url} label={target.label} />}
+        {state.kind === 'ready' && <FileViewerBody format={format} url={state.url} label={target.label} assetId={target.assetId} />}
       </div>
     </>
   );
 }
 
-function FileViewerBody({ format, url, label }: { format: Format; url: string; label: string }) {
+function FileViewerBody({ format, url, label, assetId }: { format: Format; url: string; label: string; assetId?: string }) {
   switch (format) {
     case 'image':
       // eslint-disable-next-line @next/next/no-img-element -- 서명 URL은 원격 도메인이라 next/image 정적 도메인 화이트리스트 밖(기존 lightbox와 동일 제약)
@@ -215,21 +231,38 @@ function FileViewerBody({ format, url, label }: { format: Format; url: string; l
         </div>
       );
     case 'pdf':
-      return <iframe src={url} title={label} className="h-full w-full border-0" />;
+      // key={url} — 다른 첨부로 전환 시 컴포넌트를 통째로 새로 마운트(DocxBody와 동형).
+      return <PdfBody key={url} url={url} label={label} />;
     case 'html':
-      // 미신뢰 업로드 컨텐츠 미리보기 — allow-scripts 없음(격리, CSP 준하는 최소 권한).
-      return <iframe src={url} title={label} sandbox="allow-popups" className="h-full w-full border-0 bg-white" />;
+      // key={url} — 다른 첨부로 전환 시 컴포넌트를 통째로 새로 마운트(PdfBody와 동형).
+      return <HtmlPreviewBody key={url} url={url} label={label} />;
     case 'text':
       // key={url} — url이 바뀌면(다른 첨부로 전환) 컴포넌트를 통째로 새로 마운트해 이전
       // 내용을 자연히 초기화한다(effect 안에서 수동 setState 리셋 없이 — react-hooks/
       // set-state-in-effect 규율, [[feedback-detail-page-key-remount-standard]]와 동형).
       return <TextBody key={url} url={url} />;
+    case 'docx':
+      // key={url} — 다른 첨부로 전환 시 컴포넌트를 통째로 새로 마운트(TextBody와 동형).
+      return <DocxBody key={url} url={url} label={label} />;
+    case 'pptx':
+      // assetId 없으면(구 메시지 등 asset registry 역기입 이전) 변환 자체를 트리거할 축이
+      // 없다 — 가짜 렌더 대신 office와 동일 톤의 정직 "준비 중"으로 축소.
+      if (!assetId) {
+        return (
+          <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+            <FileText className="size-8 text-muted-foreground" aria-hidden />
+            <p className="text-sm text-foreground">미리보기 준비 중입니다.</p>
+            <p className="text-xs text-muted-foreground">이 첨부는 인앱 변환 대상 식별자가 없습니다. 다운로드해 확인하세요.</p>
+          </div>
+        );
+      }
+      return <PptxBody key={assetId} assetId={assetId} label={label} />;
     case 'office':
       return (
         <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
           <FileText className="size-8 text-muted-foreground" aria-hidden />
           <p className="text-sm text-foreground">미리보기 준비 중입니다.</p>
-          <p className="text-xs text-muted-foreground">오피스 문서(pptx/docx/xlsx)는 아직 인앱 렌더를 지원하지 않습니다. 다운로드해 확인하세요.</p>
+          <p className="text-xs text-muted-foreground">오피스 문서(pptx/xlsx)는 아직 인앱 렌더를 지원하지 않습니다. 다운로드해 확인하세요.</p>
         </div>
       );
     default:
@@ -278,4 +311,387 @@ function TextBody({ url }: { url: string }) {
       <MdBody content={content} />
     </div>
   );
+}
+
+/**
+ * story #2788 — docx-preview 클라이언트 렌더(서버 변환 우회, 84ef0cb7 §4-1). 브라우저
+ * 전용 라이브러리라 useEffect 안에서 동적 import(모듈 최상단 import 시 SSR에서
+ * document 참조로 깨질 수 있음). 렌더 실패는 정직 폴백(빈 화면/무한 로딩 금지) —
+ * office(pptx 등) 미지원 배지와 동일한 톤으로 다운로드 유도.
+ */
+function DocxBody({ url, label }: { url: string; label: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<'rendering' | 'ready' | 'failed'>('rendering');
+
+  useEffect(() => {
+    // 인시던트(2026-08-19, 선생님 실클릭 재현) — Promise.race([run, timeout])+catch/finally
+    // 조합이 실 배포 환경에서 «타임아웃이 만료됐는데도 상태 전이가 안 되는» 경로로 관측됐다
+    // (라이브 디버깅: 130초를 몇 배 넘겨도 pptx가 converting에 고정, 원인은 이 패턴의 미묘한
+    // 실패 모드로 추정 — Promise.race 자체를 걷어내고 단일 try/catch+독립 타이머로 재작성해
+    // 재발 표면을 줄인다). settled 플래그로 "먼저 끝낸 쪽이 이긴다"만 보장 — 더 단순하고
+    // 예측 가능하다.
+    let settled = false;
+    const controller = new AbortController();
+    setStatus('rendering');
+
+    const markFailed = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      console.error('docx 인앱 렌더 실패', err);
+      controller.abort();
+      setStatus('failed');
+    };
+    const markReady = () => {
+      if (settled) return;
+      settled = true;
+      setStatus('ready');
+    };
+
+    // AC2(무한 로딩 금지) — fetch든 renderAsync든 어느 단계가 멈추든 20초 뒤 강제로 정직
+    // 실패로 떨어뜨린다. run과 독립적으로 도는 타이머라 run 쪽 로직과 무관하게 항상 발화한다.
+    const timeoutId = setTimeout(() => markFailed(new Error('docx render timeout')), 20000);
+
+    (async () => {
+      try {
+        // story #2788 QA(까디르군) 지적 — res.blob()은 undici Blob을 만드는데 JSZip이
+        // 내부에서 FileReader(jsdom 전용 API)로 읽으려 하면 cross-realm 불일치로 조용히
+        // 못 읽는다(CI headless 환경 재현). renderAsync는 ArrayBuffer도 그대로 받으므로
+        // Blob 경유를 아예 없앤다.
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) throw new Error(String(res.status));
+        const buf = await res.arrayBuffer();
+        const { renderAsync } = await import('docx-preview');
+        if (settled) return;
+        if (!containerRef.current) throw new Error('docx render target unmounted');
+        containerRef.current.innerHTML = '';
+        await renderAsync(buf, containerRef.current, undefined, {
+          inWrapper: true,
+          // 인시던트(2026-08-19) — A4 고정폭 페이지가 좁은 패널에서 가로 스크롤로만
+          // 도달 가능해 실사용 판정이 "잘림"이었다(선생님 실클릭 스크린샷). ignoreWidth:true로
+          // docx-preview가 페이지/표 폭을 강제하지 않게 해 컨테이너 폭에 자연히 맞춘다
+          // (fit-width) — WYSIWYG 정확도보다 미리보기 가독성 우선.
+          ignoreWidth: true,
+          ignoreHeight: true,
+          breakPages: true,
+        });
+        clearTimeout(timeoutId);
+        markReady();
+      } catch (err) {
+        clearTimeout(timeoutId);
+        markFailed(err);
+      }
+    })();
+
+    return () => { settled = true; controller.abort(); clearTimeout(timeoutId); };
+  }, [url]);
+
+  if (status === 'failed') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+        <FileText className="size-8 text-muted-foreground" aria-hidden />
+        <p className="text-sm text-foreground">미리보기를 표시하지 못했습니다.</p>
+        <p className="text-xs text-muted-foreground">이 문서는 인앱 렌더에 실패했습니다. 다운로드해 확인하세요.</p>
+      </div>
+    );
+  }
+
+  // ignoreWidth:true라 docx-preview가 페이지/표 폭을 강제하지 않는다 — 컨테이너 폭(w-full)에
+  // 자연히 맞춰지므로(fit-width, 인시던트#2788 재발수정) 가로 스크롤에 기대지 않는다.
+  return (
+    <div className="min-h-full bg-muted/30">
+      {status === 'rendering' && (
+        <div className="mx-auto flex max-w-2xl flex-col gap-2 p-6">
+          <div className="h-4 w-3/4 animate-pulse rounded bg-muted" />
+          <div className="h-4 w-1/2 animate-pulse rounded bg-muted" />
+          <div className="h-64 w-full animate-pulse rounded bg-muted" />
+        </div>
+      )}
+      <div
+        ref={containerRef}
+        aria-label={label}
+        className={status === 'ready' ? 'docx-preview-container w-full p-4' : 'hidden'}
+      />
+    </div>
+  );
+}
+
+/**
+ * story #2807 — 예전엔 서명 GCS URL을 곧장 iframe src에 넣었는데, CSP frame-src 'none'
+ * (SEC-08)에 원천 차단됐다(선생님 실측 ERR_BLOCKED_BY_CSP — 백지의 진짜 원인). frame-src에
+ * blob:만 열려 있으므로(next.config.ts, storage.googleapis.com 같은 외부 호스트 전체
+ * 개방은 피싱 표면이라 금지 — toss-checkout 선례) fetch로 직접 받아 Blob→객체 URL로 바꿔
+ * 그것만 iframe에 건다. DocxBody와 동형 패턴(단일 try/catch+독립 타이머).
+ */
+function PdfBody({ url, label }: { url: string; label: string }) {
+  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let settled = false;
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+
+    const markFailed = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      console.error('pdf 인앱 렌더 실패', err);
+      controller.abort();
+      setStatus('failed');
+    };
+    const markReady = (u: string) => {
+      if (settled) return;
+      settled = true;
+      setBlobUrl(u);
+      setStatus('ready');
+    };
+
+    // AC(무한 로딩 금지) — fetch가 멈추든 어느 단계가 멈추든 20초 뒤 강제로 정직 실패로
+    // 떨어뜨린다. run과 독립적으로 도는 타이머라 run 쪽 로직과 무관하게 항상 발화한다.
+    const timeoutId = setTimeout(() => markFailed(new Error('pdf fetch timeout')), 20000);
+
+    (async () => {
+      try {
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) throw new Error(String(res.status));
+        const blob = await res.blob();
+        objectUrl = URL.createObjectURL(blob);
+        clearTimeout(timeoutId);
+        markReady(objectUrl);
+      } catch (err) {
+        clearTimeout(timeoutId);
+        markFailed(err);
+      }
+    })();
+
+    return () => {
+      settled = true;
+      controller.abort();
+      clearTimeout(timeoutId);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [url]);
+
+  if (status === 'failed') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+        <FileText className="size-8 text-muted-foreground" aria-hidden />
+        <p className="text-sm text-foreground">미리보기를 표시하지 못했습니다.</p>
+        <p className="text-xs text-muted-foreground">이 문서는 인앱 렌더에 실패했습니다. 다운로드해 확인하세요.</p>
+      </div>
+    );
+  }
+
+  if (status === 'loading') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" aria-hidden />
+      </div>
+    );
+  }
+
+  return <iframe src={blobUrl ?? undefined} title={label} className="h-full w-full border-0" />;
+}
+
+/**
+ * story #2809 — case 'html'도 PdfBody와 같은 근본원인(CSP frame-src)에 걸려 있었다(2807
+ * QA·카디르 발견) — 서명 GCS URL을 곧장 iframe src에 넣었으므로 blob: 전환이 똑같이
+ * 필요하다. 미신뢰 업로드 컨텐츠 미리보기라는 성격은 그대로라 `sandbox="allow-popups"`
+ * (allow-scripts·allow-same-origin 없음)도 그대로 유지 — blob: URL을 이 sandbox에 넣으면
+ * opaque origin이 되어 부모/동일출처 리소스 접근이 여전히 막힌다(격리 약화 없음, 유나군
+ * #2808 검토 재료).
+ */
+function HtmlPreviewBody({ url, label }: { url: string; label: string }) {
+  const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let settled = false;
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+
+    const markFailed = (err: unknown) => {
+      if (settled) return;
+      settled = true;
+      console.error('html 인앱 렌더 실패', err);
+      controller.abort();
+      setStatus('failed');
+    };
+    const markReady = (u: string) => {
+      if (settled) return;
+      settled = true;
+      setBlobUrl(u);
+      setStatus('ready');
+    };
+
+    const timeoutId = setTimeout(() => markFailed(new Error('html fetch timeout')), 20000);
+
+    (async () => {
+      try {
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) throw new Error(String(res.status));
+        const blob = await res.blob();
+        objectUrl = URL.createObjectURL(blob);
+        clearTimeout(timeoutId);
+        markReady(objectUrl);
+      } catch (err) {
+        clearTimeout(timeoutId);
+        markFailed(err);
+      }
+    })();
+
+    return () => {
+      settled = true;
+      controller.abort();
+      clearTimeout(timeoutId);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [url]);
+
+  if (status === 'failed') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+        <FileText className="size-8 text-muted-foreground" aria-hidden />
+        <p className="text-sm text-foreground">미리보기를 표시하지 못했습니다.</p>
+        <p className="text-xs text-muted-foreground">이 문서는 인앱 렌더에 실패했습니다. 다운로드해 확인하세요.</p>
+      </div>
+    );
+  }
+
+  if (status === 'loading') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" aria-hidden />
+      </div>
+    );
+  }
+
+  return <iframe src={blobUrl ?? undefined} title={label} sandbox="allow-popups" className="h-full w-full border-0 bg-white" />;
+}
+
+/**
+ * story #2803 — pptx는 BE 변환 파이프(POST /api/attachments/convert → office_conversion.py,
+ * 84ef0cb7 §7-3)로 PDF로 바꾼 뒤 기존 PDF iframe 렌더를 그대로 재사용한다. 콜드스타트가
+ * 수십 초 걸릴 수 있어(LibreOffice 헤드리스, §7-4 timeout=120s) "변환 중" + 경과시간 정직
+ * 표시 — 무한 스피너 금지.
+ *
+ * 인시던트(2026-08-19, 선생님 실클릭 재현·2788/2803 done→in-progress 되돌림) — 배포된
+ * dev에서 직접 puppeteer로 실 pptx를 첨부·클릭해 재현: convert가 502로 실패한 뒤에도
+ * "변환 중" 스피너가 400초+ 고정되는 것을 라이브로 확인(까디르군 QA가 잡았던 "timeout
+ * 확定 뒤 늦은 resolve가 되돌리는" 레이스와는 다른 결— Promise.race([run, timeout])
+ * +catch+finally 조합 자체가 실 배포 환경에서 상태 전이 없이 settle되는 경로를 탐).
+ * Promise.race를 걷어내고 단일 try/catch+독립 타이머로 재작성 — DocxBody와 동일 패턴.
+ */
+function PptxBody({ assetId, label }: { assetId: string; label: string }) {
+  const [status, setStatus] = useState<'converting' | 'ready' | 'failed'>('converting');
+  const [failMessage, setFailMessage] = useState<string | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [elapsedSec, setElapsedSec] = useState(0);
+
+  useEffect(() => {
+    if (status !== 'converting') return;
+    const id = setInterval(() => setElapsedSec((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [status]);
+
+  useEffect(() => {
+    // key={assetId}가 다른 첨부 전환 시 이 컴포넌트를 통째로 새로 마운트하므로(DocxBody와
+    // 동형) status/failMessage는 이미 useState 초기값으로 깨끗하다 — 여기서 재설정 불요.
+    let settled = false;
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+
+    const markFailed = (msg: string | null) => {
+      if (settled) return;
+      settled = true;
+      controller.abort();
+      setFailMessage(msg);
+      setStatus('failed');
+    };
+    const markReady = (url: string) => {
+      if (settled) return;
+      settled = true;
+      setPdfUrl(url);
+      setStatus('ready');
+    };
+
+    // 백엔드 하드 타임아웃(Gotenberg 왕복 120s, 84ef0cb7 §7-4)보다 여유를 둔 클라이언트
+    // 상한 — run과 독립적으로 도는 타이머라 run 쪽에서 무슨 일이 있어도 항상 발화한다
+    // (AC2·AC3, 무한 로딩 금지를 구조로 보장).
+    const timeoutId = setTimeout(() => {
+      console.error('pptx 변환 시간 초과(130s)');
+      markFailed('변환 시간 초과');
+    }, 130000);
+
+    (async () => {
+      try {
+        const convertRes = await fetchWithAuth(`/api/attachments/convert?asset_id=${encodeURIComponent(assetId)}`, {
+          method: 'POST',
+          signal: controller.signal,
+        });
+        const convertJson = (await convertRes.json().catch(() => null)) as
+          | { data?: { asset_id?: string }; error?: { message?: string } }
+          | null;
+        const convertedAssetId = convertJson?.data?.asset_id;
+        if (!convertRes.ok || !convertedAssetId) {
+          throw new Error(convertJson?.error?.message ?? String(convertRes.status));
+        }
+        if (settled) return;
+        const signRes = await fetchWithAuth(
+          `/api/attachments/sign?asset_id=${encodeURIComponent(convertedAssetId)}&disposition=inline`,
+          { signal: controller.signal },
+        );
+        const signJson = (await signRes.json().catch(() => null)) as { data?: { url?: string }; error?: { message?: string } } | null;
+        const signedUrl = signJson?.data?.url;
+        if (!signRes.ok || !signedUrl) {
+          throw new Error(signJson?.error?.message ?? String(signRes.status));
+        }
+        // story #2807 — 서명 URL을 곧장 iframe src에 넣으면 CSP frame-src 'none'에
+        // 원천 차단된다(선생님 실측 ERR_BLOCKED_BY_CSP — 백지의 진짜 원인). frame-src에
+        // blob:만 열려 있으므로(PdfBody와 동형) fetch로 직접 받아 Blob→객체 URL로 바꾼다.
+        const pdfRes = await fetch(signedUrl, { signal: controller.signal });
+        if (!pdfRes.ok) throw new Error(String(pdfRes.status));
+        const blob = await pdfRes.blob();
+        objectUrl = URL.createObjectURL(blob);
+        clearTimeout(timeoutId);
+        markReady(objectUrl);
+      } catch (e) {
+        clearTimeout(timeoutId);
+        // 에러를 삼키지 않는다 — 폴백 UI로 사용자에겐 정직 실패를 보여주되, 원인은 콘솔에 남긴다.
+        console.error('pptx 변환 실패', e);
+        markFailed(e instanceof Error ? e.message : null);
+      }
+    })();
+
+    return () => {
+      settled = true;
+      controller.abort();
+      clearTimeout(timeoutId);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [assetId]);
+
+  if (status === 'failed') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+        <FileText className="size-8 text-muted-foreground" aria-hidden />
+        <p className="text-sm text-foreground">변환에 실패했습니다.</p>
+        <p className="text-xs text-muted-foreground">이 문서를 PDF로 변환하지 못했습니다. 다운로드해 확인하세요.</p>
+        {failMessage && (
+          <p className="w-fit rounded-md bg-destructive-tint px-2 py-1.5 font-mono text-[10.5px] text-foreground">{failMessage}</p>
+        )}
+      </div>
+    );
+  }
+
+  if (status === 'converting') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" aria-hidden />
+        <p className="text-sm text-foreground">변환 중입니다…</p>
+        <p className="text-xs text-muted-foreground">첫 열람은 최대 1~2분 걸릴 수 있습니다({elapsedSec}초 경과).</p>
+      </div>
+    );
+  }
+
+  return <iframe src={pdfUrl ?? undefined} title={label} className="h-full w-full border-0" />;
 }

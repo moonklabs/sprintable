@@ -13,6 +13,17 @@ substitutions:
   # story #2701 — dev-safe 기본값(빈 문자열 = 이 env var 자체를 안 싣는다, 아래 deploy-mcp
   # 참조). GHA cloud-build.yml이 prod에서만 실값으로 override.
   _MCP_ALLOWED_HOSTS: ''
+  # story #2771(pptx 서버 변환, doc 84ef0cb7 §7-4) — office-converter는 아래 deploy-office-
+  # converter 스텝이 매 배포마다 재생성/갱신한다. **부트스트랩 완료(페드루군, 2026-08-19)**:
+  # 최초 배포가 --port 누락(Gotenberg는 3000, Cloud Run 헬스체크 기본 8080)으로 Ready 실패
+  # 했었다 — 수동 --port=3000 적용으로 리비전 00002 Ready 확認(위 deploy 스텝에 반영됨) 후
+  # `gcloud run services describe office-converter-dev --region=asia-northeast3
+  # --format='value(status.url)'`로 아래 canonical 해시 URL 실측(_ADMIN_OPERATOR_AUDIENCE와
+  # 동일 표기 원칙 — services list의 project번호 표기 아닌 describe의 canonical hash 그대로).
+  # invoker 바인딩(cloudrun-runtime-dev=backend-dev 런타임 SA 실명 일치, 무인증 403 확認)도
+  # 수동 적용 완료 — 위 deploy 스텝의 순서 재구성으로 다음 배포부턴 자동 수렴.
+  _GOTENBERG_SERVICE_URL: 'https://office-converter-dev-57iommnikq-du.a.run.app'
+  _OFFICE_CONVERTER_MAX_INSTANCES: '3'
   _BACKEND_MIN_INSTANCES: '1'
   # ⚠️ default '1'(아래) = _DEPLOY_ENV:dev default 와 정합한 **dev-safe fallback**(수동 `gcloud builds submit`
   #    override 없을 때 무리한 maxScale 재현 차단). GHA cloud-build.yml 이 per-env override(prod=5·dev=8, #2074 응급).
@@ -250,6 +261,32 @@ substitutions:
   _BACKEND_REDIS_DUAL_PUBLISH_ENABLED: 'false'
 
 steps:
+  # story #2806 — GCS 첨부 버킷(sprintable-memo-attachments) CORS를 SSOT로 durable화. 실측
+  # (디디군, 2026-08-19): 이 버킷은 dev/prod 공유(GCS_MEMO_ATTACHMENTS_BUCKET override가
+  # 배포 SSOT 어디에도 없어 코드 기본값 하나를 양쪽이 씀) — 지금까지 CORS가 배포 SSOT에
+  # 선언된 적이 0건(레포 전수 grep)이라 브라우저 signed-URL fetch(docx-preview류, PDF는
+  # iframe이라 무영향)가 origin 불문 전부 차단돼 있었다. `gcloud storage buckets update
+  # --cors-file=`은 **전체 교체**라 매 배포 재실행에도 멱등(파일 내용이 그대로면 결과도
+  # 그대로) — build/push와 무관해 초반부터 병행 실행.
+  - id: apply-gcs-attachments-cors
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        gcloud storage buckets update gs://sprintable-memo-attachments \
+          --cors-file=infra/gcs-attachments-cors.json \
+          --quiet
+        applied=$(gcloud storage buckets describe gs://sprintable-memo-attachments --format='value(cors_config)')
+        echo "sprintable-memo-attachments CORS applied = $${applied}"
+        case "$${applied}" in
+          *https://sprintable-frontend-dev-787818285179.asia-northeast3.run.app*) ;;
+          *) echo "FAIL: dev Cloud Run regional origin missing from applied CORS — 배포 검증 실패" >&2; exit 1 ;;
+        esac
+        echo "OK: dev Cloud Run regional origin confirmed in applied CORS"
+    waitFor: ['-']
+
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
   - id: build-frontend
     name: gcr.io/cloud-builders/docker
@@ -373,6 +410,74 @@ steps:
       - --quiet
     waitFor: [push-frontend]
 
+  # story #2771(pptx 서버 변환, doc 84ef0cb7 §7-4) — office-converter: Gotenberg(LibreOffice+
+  # Chromium 번들) 격리 배치. 자체 빌드 없음(공개 이미지 그대로) — build/push 스텝 불요,
+  # push-backend/push-frontend를 기다릴 필요도 없어 초반부터 병행 실행. ⛔dev 전용 하드게이트
+  # (deploy-realtime과 동일 컨벤션) — prod 승격은 별도 PO 판단.
+  # 보안(§7-3): --no-allow-unauthenticated — IAM 게이트(ingress 제한 아님, VPC 커넥터 불요).
+  # 호출부(backend)가 자신의 런타임 SA로 audience=이 서비스 URL인 ID 토큰을 떠 Authorization에
+  # 실어야 통과(office_conversion.py `_id_token_header()`) — admin_auth.require_admin_operator()
+  # 의 반대 방향(거긴 backend가 검증자, 여긴 backend가 호출자)과 같은 Cloud Run IAM 패턴.
+  # concurrency=1(§3-A: LibreOffice headless 사실상 단일스레드, 다중요청 동거=메모리 누수/좀비
+  # 프로세스 실보고) · min=0(열람 트리거라 상시 트래픽 없음, scale-to-zero) · timeout=120s(대형
+  # pptx 변환 지연 흡수).
+  - id: deploy-office-converter
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "${_DEPLOY_ENV}" != "dev" ]; then
+          echo "skip deploy-office-converter: prod gate pending (story #2771 dev 검증 후 오픈)"
+          exit 0
+        fi
+        # ⛔실배포 핫픽스(페드루군, 2026-08-19) — Gotenberg 이미지는 3000 포트에 듣는데 이
+        # --port 플래그가 없어 Cloud Run 기본값(8080)으로 헬스체크해 최초 배포가 Ready 실패
+        # 했다(리비전은 뜨지만 트래픽 라우팅 불가). --port=3000 명시로 근본 수정.
+        set +e
+        gcloud run deploy office-converter-${_DEPLOY_ENV} \
+          --image=gotenberg/gotenberg:8.36 \
+          --port=3000 \
+          --region=${_AR_REGION} \
+          --no-allow-unauthenticated \
+          --concurrency=1 \
+          --min-instances=0 \
+          --max-instances=${_OFFICE_CONVERTER_MAX_INSTANCES} \
+          --cpu=1 \
+          --memory=2Gi \
+          --timeout=120 \
+          --quiet
+        deploy_status=$?
+        set -e
+        # ⛔구조 수정(페드루군 지적, 2026-08-19) — 이전엔 이 바인딩이 위 deploy 성공(Ready)에
+        # 인질 잡혀 있었다: deploy가 Ready 실패(비-zero exit)하면 set -e가 스텝을 그 자리서
+        # 죽여 바인딩 명령까지 못 갔다(포트 핫픽스 이전 실측 사고 — invoker 미부여 상태로 방치,
+        # 수동 개입 필요). add-iam-policy-binding은 Ready 여부와 무관하게 서비스 리소스만
+        # 있으면 동작하므로(deploy가 Ready 실패해도 서비스 자체는 이미 생성돼 있다), deploy
+        # 성공 여부와 **분리**해 항상 시도한다(idempotent라 안전) — 그래야 향후 다른 이유로
+        # deploy가 일시적으로 non-Ready여도 IAM은 계속 맞는 상태로 수렴하고, deploy 자체의
+        # 실패는(가짜로 감추지 않고) 아래에서 그대로 다시 실패시켜 가시성을 유지한다.
+        gcloud run services add-iam-policy-binding office-converter-${_DEPLOY_ENV} \
+          --region=${_AR_REGION} \
+          --member="serviceAccount:cloudrun-runtime-${_DEPLOY_ENV}@${PROJECT_ID}.iam.gserviceaccount.com" \
+          --role="roles/run.invoker" \
+          --quiet
+        if [ "$${deploy_status}" -ne 0 ]; then
+          echo "FAIL: office-converter-${_DEPLOY_ENV} deploy did not reach Ready (exit $${deploy_status})."
+          echo "      invoker binding was applied regardless — investigate the deploy failure itself."
+          exit "$${deploy_status}"
+        fi
+        served=$(gcloud run services describe office-converter-${_DEPLOY_ENV} \
+          --region=${_AR_REGION} --format='value(status.url)')
+        echo "OK: office-converter-${_DEPLOY_ENV} = $${served}"
+        if [ -z "${_GOTENBERG_SERVICE_URL}" ]; then
+          echo "NOTE: _GOTENBERG_SERVICE_URL substitution이 비어 있다 — backend는 이 서비스를"
+          echo "      아직 모른다(503 fail-closed). 위 URL을 substitutions에 채워 재배포할 것"
+          echo "      (부트스트랩 절차, 위 substitutions 섹션 주석 참고)."
+        fi
+    waitFor: ['-']
+
   - id: deploy-backend
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
@@ -420,6 +525,16 @@ steps:
         # 달러 한 개 표기 그대로 유지 — 그건 Cloud Build가 실제로 채워야 하는 값이라 안전하다).
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},REDIS_URL=${_REDIS_URL}"
+        fi
+        # ⛔QA catch(카디르군, 2026-08-19) — office-converter 자체가 dev 전용 하드게이트인데
+        # (deploy-office-converter 스텝) 이 배선엔 REDIS_URL/ADMIN_OPERATOR_*와 같은
+        # `_DEPLOY_ENV != prod` 게이트가 빠져 있었다. 지금은 `_GOTENBERG_SERVICE_URL` 기본값이
+        # 빈 문자열이라 무해하지만, prod substitution에 값이 실수로 채워지는 단 한 번의 수동
+        # bootstrap 오조작만으로 prod backend가 dev office-converter로 테넌트 pptx를 흘리는
+        # 구조가 된다 — 값의 유무가 아니라 **prod에서는 이 키 자체가 없어야** 안전(story #2141
+        # REDIS_URL과 동일 원칙). dev만 싣는다.
+        if [ "${_DEPLOY_ENV}" != "prod" ] && [ -n "${_GOTENBERG_SERVICE_URL}" ]; then
+          ENV_VARS="$${ENV_VARS},GOTENBERG_SERVICE_URL=${_GOTENBERG_SERVICE_URL}"
         fi
         # story #2445 Phase1(2026-08-03) — dev만 DATABASE_URL/DATABASE_URL_DIRECT를 PgBouncer
         # 경유 시크릿으로 재바인딩(--update-secrets=additive, 기존 다른 시크릿 preserve — REDIS_URL_

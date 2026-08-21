@@ -21,6 +21,7 @@ from app.routers.gates import (
     transition_gate_endpoint,
 )
 from app.services.member_resolver import ResolvedMember
+from tests.gate_mock_factory import make_gate
 
 
 @pytest.fixture
@@ -41,7 +42,7 @@ def _result(obj):
 
 
 def _doc_gate(requester_id: uuid.UUID):
-    return SimpleNamespace(
+    return make_gate(
         gate_type="doc_approval",
         neutral_facts={"requested_by_member_id": str(requester_id)},
         work_item_id=uuid.uuid4(),
@@ -54,7 +55,12 @@ async def _call(resolved, *, execute_results, has_access=None, status="approved"
     # 를 1회 더 호출한다(risk_grade 사유-강제 가드) — side_effect 리스트 끝에 그 몫을 추가. 이 파일의
     # 관심사(project-access/self-approval authz)와 무관하므로 결과값은 무의미(None으로 충분).
     session.execute = AsyncMock(side_effect=[*execute_results, _result(None)])
-    transition = AsyncMock(return_value=SimpleNamespace())
+    # story #2813: 엔드포인트가 commit 前 gate.gate_type 을 읽어 merge 게이트인지 판정하고(anchor
+    # 기록 여부), commit 後 publish_gate_check 배경 태스크 예약에 gate.id 를 읽는다(태스크 자체는
+    # 이 테스트에서 실행 안 됨 — BackgroundTasks().add_task 는 큐잉만). gate_type을 "merge"가 아닌
+    # 값으로 둬 anchor 기록 분기(resolve_pr_link 추가 조회)를 건너뛴다 — 이 파일의 관심사(doc-gate
+    # authz)와 무관.
+    transition = AsyncMock(return_value=make_gate(gate_type="merge_approval", neutral_facts=None))
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
     patches = [
         patch.object(gates_mod, "resolve_member", AsyncMock(return_value=resolved)),
@@ -101,7 +107,7 @@ async def test_doc_gate_self_approval_forbidden():
 # ── ①' fail-closed: 상신자 미기록(None) → 403 (silent self-approval 우회 방지·산티아고/PO 플래그) ──
 @pytest.mark.anyio
 async def test_doc_gate_missing_requester_fail_closed():
-    gate = SimpleNamespace(gate_type="doc_approval", neutral_facts={}, work_item_id=uuid.uuid4())
+    gate = make_gate(gate_type="doc_approval", neutral_facts={}, work_item_id=uuid.uuid4())
     transition = AsyncMock()
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=[_result(gate)])
@@ -209,7 +215,7 @@ async def test_non_doc_gate_skips_doc_authz():
     # 명시(누락 시 AttributeError) — 이 테스트의 관심사는 "doc authz 분기를 안 타는가"이지 rule B
     # 자체의 project-role 판정이 아니므로 _non_doc_gate_approvable 을 직접 patch 해 True 로 고정
     # (그 판정 자체는 test_1974_gate_assigned_to_me.py/test_2198_*_realdb.py 가 커버).
-    merge_gate = SimpleNamespace(
+    merge_gate = make_gate(
         gate_type="merge_approval", neutral_facts={}, work_item_id=uuid.uuid4(),
         work_item_type="story",
     )

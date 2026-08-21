@@ -126,4 +126,21 @@ describe('NowFace', () => {
     const badge = [...container.querySelectorAll('span')].find((s) => s.textContent === '지금');
     expect(badge).not.toBeUndefined();
   });
+
+  // story #2856 — 이 테스트 하네스는 useDashboardContext()에 Provider를 안 씌워 기본값
+  // (orgSlug/activeProjectId 둘 다 undefined)을 쓴다 — viewer 미제공 구 호출부와 동형이라
+  // project_id/project_slug가 payload에 있어도 crossProjectLabel은 항상 null이어야 한다
+  // (derive-now-face.test.ts가 순수함수 축은 이미 잠금 — 여기선 그 폴백이 실 렌더에서도
+  // 안전한지만 확認).
+  it('viewer 미제공 컨텍스트에서는 project_id가 있어도 프로젝트 태그를 그리지 않는다(회귀 0)', async () => {
+    stubFetch(
+      {
+        action_queue: { items: [] },
+        attention: { items: [{ type: 'agent_stuck', entity_type: 'story', entity_id: 's1', gate_type: 'merge', project_id: 'p-other', project_slug: 'other-proj' }] },
+      },
+      { data: [] },
+    );
+    await mount();
+    expect(container.textContent).not.toContain('other-proj');
+  });
 });

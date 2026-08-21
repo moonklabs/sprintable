@@ -457,3 +457,112 @@ def test_routing_missing_leg_rejected():
 
     with pytest.raises(InvalidEventRoutingError):
         validate_event_routing({"escalation": {"kind": "server_derived", "target": "none"}})
+
+
+# ── story #2792(2790 P1) — stage_metadata 키⊆stage.enum 가드(페드루 판정 2026-08-19 가드①) ──
+
+def test_stage_metadata_accepts_keys_that_are_subset_of_stage_enum():
+    from app.services.event_definition_registry import validate_stage_metadata
+
+    payload_schema = {
+        "type": "object", "additionalProperties": False,
+        "properties": {"stage": {"type": "string", "enum": ["kickoff", "implementation", "qa_review"]}},
+    }
+    validate_stage_metadata(
+        payload_schema,
+        {"kickoff": {"role": "PO", "action": "기능 명세 작성"}, "qa_review": {"role": "QA", "action": "AC 검증"}},
+    )
+
+
+def test_stage_metadata_rejects_typo_key_not_in_enum():
+    """⭐가드①의 핵심 AC — enum에 없는 슬러그가 조용히 저장돼 영원히 안 읽히는 클래스를
+    등록 시점에 막는다. "qa_reviw"는 실제 enum("qa_review")의 오타."""
+    from app.services.event_definition_registry import (
+        InvalidStageMetadataError, validate_stage_metadata,
+    )
+
+    payload_schema = {
+        "type": "object", "additionalProperties": False,
+        "properties": {"stage": {"type": "string", "enum": ["kickoff", "implementation", "qa_review"]}},
+    }
+    with pytest.raises(InvalidStageMetadataError):
+        validate_stage_metadata(payload_schema, {"qa_reviw": {"role": "QA", "action": "AC 검증"}})
+
+
+def test_stage_metadata_empty_dict_always_passes_even_without_stage_enum():
+    """신호형/측정형 정의(stage 개념 자체가 없음)에 걸어도 안전 — 빈 stage_metadata는 무조건 통과."""
+    from app.services.event_definition_registry import validate_stage_metadata
+
+    validate_stage_metadata({"type": "object", "additionalProperties": False, "properties": {}}, {})
+
+
+def test_stage_metadata_nonempty_without_stage_enum_rejected():
+    """가리킬 enum 자체가 없는데 stage_metadata가 채워져 있으면 거부(참조 무결성 없는 고아 메타)."""
+    from app.services.event_definition_registry import (
+        InvalidStageMetadataError, validate_stage_metadata,
+    )
+
+    with pytest.raises(InvalidStageMetadataError):
+        validate_stage_metadata(
+            {"type": "object", "additionalProperties": False, "properties": {}},
+            {"kickoff": {"role": "PO", "action": "x"}},
+        )
+
+
+# ── story #2793 재QA(카디르군, 2026-08-19) — stage_metadata **값 모양** 가드 ─────────────
+# 키⊆enum만 보고 값(role/action)은 안 봐서, malformed 값이 등록을 통과한 뒤 온보딩 가이드
+# 렌더러에서 org 전체를 죽이던 버그(폭발 반경 실증). 쓰기 시점(여기)에서 값 모양을 강제.
+
+_SCHEMA_2STAGE = {
+    "type": "object", "additionalProperties": False,
+    "properties": {"stage": {"type": "string", "enum": ["kickoff", "qa_review"]}},
+}
+
+
+def test_stage_metadata_rejects_value_not_a_dict():
+    from app.services.event_definition_registry import (
+        InvalidStageMetadataError, validate_stage_metadata,
+    )
+
+    with pytest.raises(InvalidStageMetadataError):
+        validate_stage_metadata(_SCHEMA_2STAGE, {"kickoff": "PO가 명세 작성"})  # dict 아님
+
+
+def test_stage_metadata_rejects_missing_role_or_action():
+    from app.services.event_definition_registry import (
+        InvalidStageMetadataError, validate_stage_metadata,
+    )
+
+    with pytest.raises(InvalidStageMetadataError):
+        validate_stage_metadata(_SCHEMA_2STAGE, {"kickoff": {"role": "PO"}})  # action 없음
+    with pytest.raises(InvalidStageMetadataError):
+        validate_stage_metadata(_SCHEMA_2STAGE, {"kickoff": {"action": "명세 작성"}})  # role 없음
+
+
+def test_stage_metadata_rejects_non_string_role_or_action():
+    from app.services.event_definition_registry import (
+        InvalidStageMetadataError, validate_stage_metadata,
+    )
+
+    with pytest.raises(InvalidStageMetadataError):
+        validate_stage_metadata(_SCHEMA_2STAGE, {"kickoff": {"role": "PO", "action": 123}})
+    with pytest.raises(InvalidStageMetadataError):
+        validate_stage_metadata(_SCHEMA_2STAGE, {"kickoff": {"role": None, "action": "명세 작성"}})
+
+
+def test_stage_metadata_rejects_empty_string_role_or_action():
+    from app.services.event_definition_registry import (
+        InvalidStageMetadataError, validate_stage_metadata,
+    )
+
+    with pytest.raises(InvalidStageMetadataError):
+        validate_stage_metadata(_SCHEMA_2STAGE, {"kickoff": {"role": "", "action": "명세 작성"}})
+
+
+def test_stage_metadata_accepts_well_formed_values():
+    """양성대조 — 정상 형태는 여전히 통과(값 모양 가드가 유효 데이터까지 거부하지 않음)."""
+    from app.services.event_definition_registry import validate_stage_metadata
+
+    validate_stage_metadata(
+        _SCHEMA_2STAGE, {"kickoff": {"role": "PO", "action": "명세 작성"}, "qa_review": {"role": "QA", "action": "검증"}},
+    )

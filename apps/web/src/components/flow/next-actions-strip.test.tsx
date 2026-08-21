@@ -165,8 +165,22 @@ describe('NextActionsStrip — 접힌 채 기본, 펼치면 승격/전환 동사
     expect(container.textContent).toContain('아직 하는 중입니까?');
     const closeButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '닫는다');
     expect(closeButton).toBeTruthy();
+    // story #2844 — "닫는다"는 이제 즉시 POST하지 않고 outcome 판정 다이얼로그를 먼저 연다
+    // (Dialog는 document.body에 포탈됨). 이 테스트는 다이얼로그 자체가 아니라 handleGoalTransition
+    // 배선을 검증하는 것이라, 실사용 스킵 경로("판정 없이 닫기"→"그대로 닫기")로 통과시켜
+    // 기존 검증 대상({status:'done'} POST·onGoalTransitioned 콜백)에 그대로 도달한다.
     await act(async () => {
       closeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    const skipLink = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === '판정 없이 닫기');
+    expect(skipLink).toBeTruthy();
+    await act(async () => {
+      skipLink!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    const skipConfirm = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.trim() === '그대로 닫기');
+    expect(skipConfirm).toBeTruthy();
+    await act(async () => {
+      skipConfirm!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await new Promise((r) => setTimeout(r, 0));
     });
 

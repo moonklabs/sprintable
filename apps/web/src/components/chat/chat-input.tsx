@@ -662,13 +662,17 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {/* story #2805 — accept로 확장자를 좁혀도 실제 게이트가 아니다(드래그앤드롭·붙여넣기는
+            원래 accept를 안 타 이미 임의 파일 첨부가 가능했고, 서버도 타입 allowlist가 없다).
+            좁은 accept는 그저 "피커 버튼으로 고를 수 있는 파일"만 실제와 불일치시켰다 — docx/pptx
+            뷰어가 나온 날 정작 피커로는 그 파일을 못 고르던 사고. 세 경로(피커·드롭·붙여넣기)의
+            실제 동작을 일치시키기 위해 accept를 없앤다. */}
         <input
           ref={fileInputRef}
           type="file"
           multiple
           className="hidden"
           onChange={handleFileChange}
-          accept="image/*,.pdf,.txt,.md,.csv"
         />
 
         {/* Textarea */}

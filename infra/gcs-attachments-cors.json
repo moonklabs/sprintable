@@ -1,0 +1,14 @@
+[
+  {
+    "origin": [
+      "https://dev-app.sprintable.ai",
+      "https://app.sprintable.ai",
+      "https://sprintable-frontend-dev-57iommnikq-du.a.run.app",
+      "https://sprintable-frontend-dev-787818285179.asia-northeast3.run.app",
+      "http://localhost:3108"
+    ],
+    "method": ["GET", "HEAD"],
+    "responseHeader": ["Content-Type", "Content-Length", "Content-Disposition", "Range"],
+    "maxAgeSeconds": 3600
+  }
+]

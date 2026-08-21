@@ -30,6 +30,7 @@ from app.schemas.hypothesis import (
     HypothesisGuidedCreate,
     HypothesisLifecycleResponse,
     HypothesisLinkRequest,
+    HypothesisOutcomeDraftRequest,
     HypothesisResponse,
     HypothesisTransition,
     HypothesisUnlinkRequest,
@@ -80,14 +81,19 @@ def _raise(err: svc.HypothesisServiceError) -> None:
     )
 
 
-def _assert_active_authorized(caller: ResolvedMember, owner_member_id: uuid.UUID) -> None:
-    """§3.1.7 — 'active' 전이는 owner 휴먼 또는 org owner/admin만."""
+def _assert_active_authorized(caller: ResolvedMember, owner_member_id: uuid.UUID, target: str = "active") -> None:
+    """§3.1.7 — 'active' 전이는 owner 휴먼 또는 org owner/admin만.
+
+    story #2857: verified/falsified도 같은 규칙 재사용(함수명은 이력 보존을 위해 유지 —
+    첫 도입 대상이 active라 붙은 이름, 내부는 target 무관 owner/admin 판정 하나뿐). 기존
+    "ACTIVE_TRANSITION_FORBIDDEN" 에러 코드는 target=="active"에 한해 그대로 보존
+    (test_hypotheses_router.py가 이미 이 정확한 문자열을 고정 — 무회귀)."""
     if caller.id == owner_member_id or caller.role in _ADMIN_ROLES:
         return
+    code = "ACTIVE_TRANSITION_FORBIDDEN" if target == "active" else "TRANSITION_FORBIDDEN"
     raise HTTPException(
         status_code=403,
-        detail={"code": "ACTIVE_TRANSITION_FORBIDDEN",
-                "message": "active 전이는 owner 또는 org owner/admin만 가능합니다."},
+        detail={"code": code, "message": f"{target} 전이는 owner 또는 org owner/admin만 가능합니다."},
     )
 
 
@@ -249,7 +255,12 @@ async def transition_hypothesis(
     await _assert_hypothesis_project_access(session, uuid.UUID(auth.user_id), org_id, hypothesis_id)
     caller = await resolve_member(auth, org_id, session)
     # §3.1.7 active 전이 권한은 라우터에서 보강(owner 휴먼 또는 org admin/owner).
-    if body.status == "active":
+    # story #2857 AC(부수 발견 처방, 페드루 PO 판정 2026-08-20) — verified/falsified 직통로가
+    # 지금까지 human-only 가드 없이 열려 있었다(2038 시대 「근거 강제된 누구나 종결」 의도적
+    # 설계였으나, 2845-B의 «확定=휴먼» 게이트 계약과 함께 도입하지 않으면 게이트를 거치지 않고
+    # 우회할 수 있었다). 게이트 신설과 이 차단을 한 PR에서 원자적으로 — 에이전트의 유일한 길은
+    # 초안 게이트(hypothesis_outcome_confirm), 사람의 길은 이 직접 transition 그대로 유지.
+    if body.status in ("active", "verified", "falsified"):
         repo = HypothesisRepository(session, org_id)
         hyp = await repo.get(hypothesis_id)
         if hyp is None:
@@ -257,11 +268,44 @@ async def transition_hypothesis(
                 status_code=404,
                 detail={"code": "HYPOTHESIS_NOT_FOUND", "message": "가설을 찾을 수 없습니다."},
             )
-        _assert_active_authorized(caller, hyp.owner_member_id)
+        _assert_active_authorized(caller, hyp.owner_member_id, target=body.status)
     try:
         return await svc.transition_hypothesis(session, org_id, caller, hypothesis_id, body)
     except svc.HypothesisServiceError as err:
         _raise(err)
+
+
+@router.post("/{hypothesis_id}/outcome-draft")
+async def draft_hypothesis_outcome_endpoint(
+    hypothesis_id: uuid.UUID,
+    body: HypothesisOutcomeDraftRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> dict:
+    """story #2857 — 측정 판정 초안 제출(agent/human 둘 다 호출 가능·확定은 게이트 승인만).
+
+    새 authz 0 — 게이트가 항상 human-only pending(_ALWAYS_MANUAL_GATE_TYPES)이라 이
+    엔드포인트 자체는 project 접근권만 요구한다(제출≠확定, 확定 축은 transition_gate가 막는다).
+    """
+    await _assert_hypothesis_project_access(session, uuid.UUID(auth.user_id), org_id, hypothesis_id)
+    caller = await resolve_member(auth, org_id, session)
+    from app.services.hypothesis_outcome_confirm import (
+        HypothesisOutcomeConfirmError,
+        draft_hypothesis_outcome,
+    )
+
+    try:
+        gate = await draft_hypothesis_outcome(
+            session, org_id, caller.id, hypothesis_id,
+            draft_target=body.draft_target, draft_actual=body.draft_actual,
+            draft_reason=body.draft_reason,
+        )
+        await session.commit()
+    except HypothesisOutcomeConfirmError as err:
+        _status = {"HYPOTHESIS_NOT_FOUND": 404}.get(err.code, 422)
+        raise HTTPException(status_code=_status, detail={"code": err.code, "message": err.message})
+    return {"gate_id": str(gate.id), "gate_status": gate.status}
 
 
 @router.post("/{hypothesis_id}/links", response_model=HypothesisResponse)

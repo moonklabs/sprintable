@@ -2365,6 +2365,18 @@ async def update_story_status(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    # story #2847(AC1) — claim_story/assignee 경로는 이미 3414b6d7의 ensure_implementation_
+    # participation으로 보장되지만, 이 엔드포인트만 거치는 챗-킥오프 흐름(claim/assign 생략)은
+    # 여태 빠져 있었다 — merge gate의 "no implementation participation" 침묵 no-op 근본원인
+    # (#2843/#3262 실사고). caller=착수자를 그대로 implementation participant로 멱등 등록.
+    # 실패해도 전이 비차단(이 함수의 다른 side-effect들과 동일 fail-open 규율).
+    if story_before is not None and old_status != "in-progress" and body.status == "in-progress" and _line_actor_id is not None:
+        try:
+            from app.services.participation_helpers import ensure_implementation_participation
+            await ensure_implementation_participation(db, repo.org_id, id, _line_actor_id)
+        except Exception:  # noqa: BLE001
+            pass
+
     # E-DG S7: agent-handoff relay — status 적용 후 같은 트랜잭션에서 dispatch(commit=False)·step_run
     # delivery 기록(원자). wake/CC delivery 는 commit(아래) 후 recipient_seq 확정 후 발화(P1-2 불변식).
     # relay 실패도 전이 비차단(fail-open).

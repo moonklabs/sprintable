@@ -82,6 +82,11 @@ class Goal(Base, OrgScopedMixin, TimestampMixin):
     source_loop_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("loop_runs.id", ondelete="SET NULL"), nullable=True
     )
+    # story #2829(loop-closure P0, migration 0264) — preset.loop.measure_due 중복발행 방지
+    # (hypotheses.loop_measure_due_notified_at과 동형 set-once 패턴, 컬럼 주석 참조).
+    loop_measure_due_notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     project: Mapped["Project"] = relationship("Project", back_populates="epics")
     stories: Mapped[list["Story"]] = relationship("Story", back_populates="epic", lazy="select")

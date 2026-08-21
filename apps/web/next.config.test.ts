@@ -29,3 +29,24 @@ describe('CSP media-src (story #2083 regression guard)', () => {
     expect(extractDirective('media-src')).toContain('https://storage.googleapis.com');
   });
 });
+
+// story #2809 회귀가드 — 2807(PDF/pptx blob 전환)이 frame-src를 'none'→blob:로 좁혔지만,
+// 같은 근본원인에 걸리는 다른 iframe 사용처(docs YouTube/Figma embed, 채팅 html 첨부
+// 미리보기)는 그대로 남아 있었다(카디르 QA 발견). exact-origin allowlist가 정당한
+// known-service(youtube/figma, embed-node.tsx가 항상 이 두 origin으로만 재작성)와
+// blob: 전환(html 첨부, PdfBody와 동형)을 여기서 못박는다 — storage.googleapis.com 같은
+// 외부 호스트 통째 개방은 여전히 금지(피싱 표면).
+describe('CSP frame-src (story #2809 regression guard)', () => {
+  it('allows blob: (pdf/pptx/html preview 전부 fetch→Blob→객체URL 경유, story #2807/#2809)', () => {
+    expect(extractDirective('frame-src')).toContain('blob:');
+  });
+
+  it('allows the exact YouTube/Figma embed origins docs embed-node.tsx always rewrites to', () => {
+    expect(extractDirective('frame-src')).toContain('https://www.youtube.com');
+    expect(extractDirective('frame-src')).toContain('https://www.figma.com');
+  });
+
+  it('does not blanket-open storage.googleapis.com (GCS는 임의 콘텐츠를 끼울 수 있어 exact-origin allowlist 부적합 — toss-checkout 선례)', () => {
+    expect(extractDirective('frame-src')).not.toContain('storage.googleapis.com');
+  });
+});

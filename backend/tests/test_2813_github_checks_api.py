@@ -1,0 +1,108 @@
+"""story #2813(Gate→GitHub required check) — Checks API 클라이언트 단위(mock, 실서버 0).
+
+github_app.py의 App JWT/installation token은 test_github_app_bot_s.py가 이미 커버 — 여기는
+create_check_run/update_check_run만(신규 함수, 그라운딩 doc §1에서 확認한 "repo 전수 0건").
+"""
+from __future__ import annotations
+
+import time
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from app.services import github_app as ga
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def _seed_token_cache():
+    ga._token_cache[999] = ("cached-tok", time.time() + 3600)
+    yield
+    ga._token_cache.clear()
+
+
+def _resp(status_code: int, body: dict):
+    return type("R", (), {"status_code": status_code, "json": lambda self: body})()
+
+
+@pytest.mark.anyio
+async def test_create_check_run_sends_correct_payload_and_returns_result():
+    r = _resp(201, {"id": 555, "status": "in_progress"})
+    captured = {}
+
+    async def _post(self, url, headers=None, json=None):
+        captured["url"] = url
+        captured["json"] = json
+        return r
+
+    with patch("httpx.AsyncClient.post", new=_post):
+        result = await ga.create_check_run(999, "acme/repo", "abc123", status="in_progress")
+
+    assert result == {"id": 555, "status": "in_progress"}
+    assert captured["url"] == "https://api.github.com/repos/acme/repo/check-runs"
+    assert captured["json"]["name"] == "sprintable/gate"
+    assert captured["json"]["head_sha"] == "abc123"
+    assert captured["json"]["status"] == "in_progress"
+    assert "conclusion" not in captured["json"]  # in_progress엔 conclusion 없음(GitHub API 제약).
+
+
+@pytest.mark.anyio
+async def test_create_check_run_completed_includes_conclusion():
+    r = _resp(201, {"id": 556})
+    captured = {}
+
+    async def _post(self, url, headers=None, json=None):
+        captured["json"] = json
+        return r
+
+    with patch("httpx.AsyncClient.post", new=_post):
+        await ga.create_check_run(999, "acme/repo", "sha1", status="completed", conclusion="success")
+
+    assert captured["json"]["status"] == "completed"
+    assert captured["json"]["conclusion"] == "success"
+
+
+@pytest.mark.anyio
+async def test_create_check_run_http_failure_returns_none_not_raise():
+    r = _resp(500, {})
+    with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=r)):
+        result = await ga.create_check_run(999, "acme/repo", "sha1")
+    assert result is None  # fail-closed: 예외 없이 None — 호출자가 "GitHub 쪽 무영향"으로 처리.
+
+
+@pytest.mark.anyio
+async def test_create_check_run_no_token_returns_none():
+    ga._token_cache.clear()
+    with patch.object(ga, "build_app_jwt", return_value=None):
+        result = await ga.create_check_run(999, "acme/repo", "sha1")
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_update_check_run_patches_correct_url():
+    r = _resp(200, {"id": 555, "status": "completed", "conclusion": "success"})
+    captured = {}
+
+    async def _patch(self, url, headers=None, json=None):
+        captured["url"] = url
+        captured["json"] = json
+        return r
+
+    with patch("httpx.AsyncClient.patch", new=_patch):
+        result = await ga.update_check_run(999, "acme/repo", 555, status="completed", conclusion="success")
+
+    assert result["id"] == 555
+    assert captured["url"] == "https://api.github.com/repos/acme/repo/check-runs/555"
+    assert captured["json"]["conclusion"] == "success"
+
+
+@pytest.mark.anyio
+async def test_update_check_run_http_failure_returns_none_not_raise():
+    r = _resp(404, {})
+    with patch("httpx.AsyncClient.patch", new=AsyncMock(return_value=r)):
+        result = await ga.update_check_run(999, "acme/repo", 555, status="completed", conclusion="failure")
+    assert result is None

@@ -1,9 +1,10 @@
 'use client';
 
-import { Fragment } from 'react';
-import { CheckCircle, XCircle, GitPullRequest, Check, Pause, Ban, type LucideIcon } from 'lucide-react';
+import { Fragment, useEffect, useState } from 'react';
+import { CheckCircle, XCircle, GitPullRequest, Check, Pause, Ban, Loader2, type LucideIcon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
+import { fetchWithAuth } from '@/lib/db/client';
 import type { GateItem } from '@/components/kanban/types';
 
 /**
@@ -78,6 +79,30 @@ function trustScore(gate: GateItem): number | null {
   return typeof v === 'number' ? v : null; // null≠0 — 미측정 보존(AC③)
 }
 
+// story #2862(loop-closure P2-B FE, BE PR#3277) — hypothesis_outcome_confirm 게이트의
+// neutral_facts.draft_target/draft_actual/draft_reason. 에이전트가 만든 «미확정 측정
+// 초안» — 사람이 승인해야 실제 hypothesis 전이가 일어난다(backend/app/services/
+// hypothesis_outcome_confirm.py와 정합, _DRAFTABLE_TARGETS 그대로 재사용).
+type HypothesisDraftTarget = 'verified' | 'falsified' | 'killed';
+const DRAFT_TARGETS: ReadonlySet<string> = new Set(['verified', 'falsified', 'killed']);
+
+interface HypothesisOutcomeDraftFacts {
+  target: HypothesisDraftTarget;
+  actual: unknown;
+  reason: string | null;
+}
+
+function hypothesisOutcomeDraft(gate: GateItem): HypothesisOutcomeDraftFacts | null {
+  const target = gate.neutral_facts?.['draft_target'];
+  if (typeof target !== 'string' || !DRAFT_TARGETS.has(target)) return null;
+  const reason = gate.neutral_facts?.['draft_reason'];
+  return {
+    target: target as HypothesisDraftTarget,
+    actual: gate.neutral_facts?.['draft_actual'] ?? null,
+    reason: typeof reason === 'string' && reason.length > 0 ? reason : null,
+  };
+}
+
 /**
  * 카드에 사람이 평가할 '실 증거'가 있는가. 빈/cold-start 구분의 단일 소스.
  * self_report_only 단독은 증거 아님(trust 실값에 붙는 qualifier로만 — 빈카드 도배 원인 제거).
@@ -88,7 +113,55 @@ export function gateHasEvidence(gate: GateItem): boolean {
   const hasTrust = typeof f?.['trust'] === 'number'; // null≠0 — number만
   const hasSeed = f?.['cold_start_seed'] === true;
   const hasReason = Boolean(gate.decision_basis); // 실 human reason만
-  return hasCi || hasTrust || hasSeed || hasReason;
+  // story #2814 — GitHub check 발행 자체도 "실 증거"다. 이게 유일한 신호인 게이트가 State A
+  // (빈 카드)로 가라앉으면 안 된다 — State B/C 흐름에 자연히 합류시킨다.
+  const hasGithubCheck = githubCheckState(gate) !== null;
+  // story #2862 — 측정 판정 초안도 실 증거다(같은 이유, 안 그러면 hypothesis_outcome_confirm
+  // 게이트가 State A 빈 카드로 가라앉아 사람이 판정 초안을 아예 못 본다).
+  const hasDraft = hypothesisOutcomeDraft(gate) !== null;
+  return hasCi || hasTrust || hasSeed || hasReason || hasGithubCheck || hasDraft;
+}
+
+type GithubCheckState = 'not_published' | 'in_progress' | 'success' | 'failure';
+
+/**
+ * story #2814(2813 BE 조각 착지분) — BE `_github_state_for_gate_status`와 정합(gate_github_check.py):
+ * approved/auto_passed→success, rejected/voided→failure, pending/held→in_progress. 그 외 gate
+ * status(discussed 등)는 GitHub check 관점에선 미정의라 null.
+ *
+ * ⚠️페드루군 AC 노트(PR#3244, 비차단) — 이 값은 gate.status에서 파생한 "게이트가 의도한" check
+ * 상태이지, GitHub의 실제 check 상태를 조회한 값이 아니다. publish_gate_check()가 GitHub API
+ * 호출에 실패하면 실제 check는 오래된 pending에 머무는데 이 화면은 approved→success로 보일 수
+ * 있다 — GitHub 쪽은 fail-closed라 required check 미충족 시 머지가 막히므로 안전 사고는 아니고
+ * 표시 정직성 문제만 있다. 실제 원장(gate_github_check_event) 조회로 좁히는 건 재-pending 사유
+ * 표시(GithubRependingReason)가 맡는다.
+ *
+ * story #2814 2단(§5-④ 그라운딩·BE story #2815/PR#3245) — 관측모드 판별을 1단의 "run_id null이면
+ * 무조건 숨김" 휴리스틱에서 `github_check_enforced`(단건 조회에서만 enrich) 기반으로 승격:
+ *   - enforced===false(관측모드 확定) → run_id 유무·값과 무관하게 항상 숨김(가장 신뢰도 높은 신호).
+ *   - enforced===true인데 run_id가 아직 null → "관측모드"가 아니라 "아직 발행 전"임을 이제는 안다
+ *     — 1단엔 없던 not_published 상태로 승격 표시(숨기지 않음).
+ *   - enforced===undefined/null(list_gates·inbox 등 미enrich 표면) → 1단 휴리스틱 그대로 폴백
+ *     (run_id null=숨김) — 이 필드가 없는 표면에서 오판하지 않기 위한 안전망.
+ */
+export function githubCheckState(gate: GateItem): GithubCheckState | null {
+  if (gate.github_check_enforced === false) return null;
+  if (gate.github_check_run_id == null) {
+    return gate.github_check_enforced === true ? 'not_published' : null;
+  }
+  switch (gate.status) {
+    case 'approved':
+    case 'auto_passed':
+      return 'success';
+    case 'rejected':
+    case 'voided':
+      return 'failure';
+    case 'pending':
+    case 'held':
+      return 'in_progress';
+    default:
+      return null;
+  }
 }
 
 // CI 신호 — lucide CheckCircle/XCircle(gate-line-context 정합·boy-scout). null이면 호출 자체 안 함(omit).
@@ -121,6 +194,96 @@ function TrustValue({ trust, selfReportOnly }: { trust: number; selfReportOnly: 
   );
 }
 
+// GitHub check 상태 — story #2814. null(발행 안 됨/관측모드)이면 호출 자체 안 함(다른 signal들과
+// 동형 omit 규율). SHA는 짧은 표기(git 관례 7자)로, gate.status가 아니라 github_check_run_sha를
+// 보여줘 "그 check-run이 실제로 겨냥한 SHA"를 그대로 노출한다(approved_head_sha는 승인이 귀속된
+// SHA라는 다른 의미 — 재-pending 이후엔 이 둘이 갈릴 수 있어 혼용 금지).
+function GithubCheckSignal({ state, sha }: { state: GithubCheckState; sha: string | null }) {
+  const t = useTranslations('cage');
+  const META: Record<GithubCheckState, { className: string; icon: LucideIcon; labelKey: string; spin?: boolean }> = {
+    // story #2814 2단 — enforced===true인데 아직 발행 전(1단엔 없던 상태, githubCheckState 참조).
+    not_published: { className: 'text-muted-foreground', icon: Pause, labelKey: 'githubCheckNotPublished' },
+    in_progress: { className: 'text-muted-foreground', icon: Loader2, labelKey: 'githubCheckPending', spin: true },
+    success: { className: 'text-success', icon: CheckCircle, labelKey: 'githubCheckSuccess' },
+    failure: { className: 'text-destructive', icon: XCircle, labelKey: 'githubCheckFailure' },
+  };
+  const { className, icon: Icon, labelKey, spin } = META[state];
+  return (
+    <span className={`inline-flex items-center gap-1 ${className}`}>
+      <Icon className={`size-3 shrink-0 ${spin ? 'animate-spin' : ''}`} aria-hidden />
+      {t('githubCheckLabel')} {t(labelKey)}
+      {sha ? <span className="font-mono text-muted-foreground">{t('githubCheckShaLabel', { sha: sha.slice(0, 7) })}</span> : null}
+    </span>
+  );
+}
+
+// story #2814 2단(§5-② 그라운딩) — backend/app/routers/gates.py GateGithubCheckEventResponse와 정합.
+// story #2840(BE PR#3264 §2819) — prior_sha 추가. re_pending 행 전용(무효화된 승인이 귀속됐던
+// SHA) — published/resolved 행이나 마이그레이션 이전 re_pending 행은 null(소급 불가).
+interface GithubCheckLedgerEvent {
+  id: string;
+  repo_full_name: string;
+  pr_number: number;
+  head_sha: string;
+  prior_sha: string | null;
+  event_type: 'published' | 're_pending' | 'resolved';
+  check_conclusion: string | null;
+  created_at: string;
+}
+
+/**
+ * 재-pending 사유 상세(story #2814 2단 AC②) — `GET /api/gates/{id}/github-check-events` 지연
+ * 로드(최신순). 최신 이벤트가 `re_pending`이면 "새 커밋이 이전 승인을 무효화했다"는 문장을
+ * 그 이벤트의 head_sha(무효화를 유발한 새 SHA)로 조립한다.
+ *
+ * story #2840(BE PR#3264 §2819 착지) — 원장에 `prior_sha`(무효화된 승인이 귀속됐던 SHA)가
+ * 추가돼 "SHA {prior}에서 SHA {new}로 무효화" 완전 문구를 조립할 수 있다. `prior_sha`가
+ * null인 행(published/resolved 행·마이그레이션 이전 re_pending 행)은 두 SHA를 지어내지
+ * 않고 기존 단축 문구("새 커밋으로 이전 승인 무효화")로 정직하게 폴백한다(no-fiction).
+ *
+ * 트리거는 호출부(GateEvidence)가 결정 — ghState==='in_progress'일 때만 마운트한다(success/
+ * failure/not_published/null인 게이트는 재-pending 여지 자체가 없어 호출 불요).
+ *
+ * ⚠️2026-08-20 라이브 AC2 재검 중 발견·즉시수정 — `events[0]`(최신 이벤트 그 자체)이 아니라
+ * "가장 최근 re_pending 이벤트"를 찾아야 한다. 실왕복 확인 결과 새 커밋 감지 시 BE가 re_pending
+ * 기록 직후(같은 웹훅 처리 안에서) 그 새 SHA로 새 check-run을 published — 즉 정상 케이스에서
+ * `events[0]`은 거의 항상 `published`이고 `re_pending`은 events[1]. 이전 코드(`events[0]?.event_type
+ * !== 're_pending'`)는 이 실측 순서에서 사실상 절대 참이 안 돼 사유 문구가 죽어있었다(AC2 미충족).
+ * ghState==='in_progress' 마운트 가드가 이미 "아직 미해결"을 보장하므로, 원장에서 가장 최근
+ * re_pending을 찾아 그 SHA로 표시하면 된다(뒤이은 published가 있어도 그 사유는 여전히 유효).
+ *
+ * 실패/빈 응답은 침묵(옵션 정보라 카드 붕괴 X) — 이 신호가 evidence 판정(gateHasEvidence)에
+ * 관여하지 않는 이유이기도 하다(로드 전/실패 시에도 카드가 이미 유효한 GithubCheckSignal로
+ * State B/C에 들어가 있어야 함).
+ */
+function GithubRependingReason({ gateId }: { gateId: string }) {
+  const t = useTranslations('cage');
+  const [repending, setRepending] = useState<GithubCheckLedgerEvent | null | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchWithAuth(`/api/gates/${gateId}/github-check-events`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`status ${res.status}`))))
+      .then((events: GithubCheckLedgerEvent[]) => {
+        if (!cancelled) setRepending(events.find((e) => e.event_type === 're_pending') ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setRepending(null);
+      });
+    return () => { cancelled = true; };
+  }, [gateId]);
+
+  if (!repending) return null;
+
+  return (
+    <p className="mt-1 text-[11px] text-muted-foreground">
+      {repending.prior_sha
+        ? t('githubCheckRependingReasonWithPrior', { priorSha: repending.prior_sha.slice(0, 7), newSha: repending.head_sha.slice(0, 7) })
+        : t('githubCheckRependingReason', { newSha: repending.head_sha.slice(0, 7) })}
+    </p>
+  );
+}
+
 // read-only PR 칩(gate State C 납품 컬럼). 관리는 story 상세 PrLinkSection — 여기선 표시·새탭 링크만.
 function GatePrChip({ pr }: { pr: PrLinkFact }) {
   return (
@@ -138,11 +301,48 @@ function GatePrChip({ pr }: { pr: PrLinkFact }) {
   );
 }
 
+const DRAFT_TARGET_LABEL_KEY: Record<HypothesisDraftTarget, string> = {
+  verified: 'hypothesisDraftTargetVerified',
+  falsified: 'hypothesisDraftTargetFalsified',
+  killed: 'hypothesisDraftTargetKilled',
+};
+
+/**
+ * story #2862(2857 FE 조각) — «측정 판정 초안» 렌더. AC1: 초안 attribution=info 톤(제안≠확定
+ * — 확정처럼 보이면 도장 찍는 손이 빨라진다) — verified/falsified라도 success/destructive를
+ * 쓰지 않고 전부 info 하나로 통일한다. AC2: 승인 전엔 «검증됨» 같은 확정 어휘를 안 쓰고
+ * "맞음(초안)"류 잠정 어휘만 쓴다. AC3: draft_reason을 항상 병기 — 근거 없이 판정만 보이면
+ * §4가 경계하는 위조 채널의 UI판이 된다(그래서 없으면 "없음"을 정직하게 말한다, 지어내지
+ * 않음).
+ */
+function HypothesisOutcomeDraft({ draft }: { draft: HypothesisOutcomeDraftFacts }) {
+  const t = useTranslations('cage');
+  return (
+    <div className="mt-1.5 rounded-lg bg-info/10 px-2.5 py-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge variant="info" className="shrink-0">{t('hypothesisDraftBadge')}</Badge>
+        {/* story #2420 규칙 — tint 배경 위 글자는 계열색이 아니라 text-foreground. */}
+        <span className="text-[11.5px] font-medium text-foreground">{t(DRAFT_TARGET_LABEL_KEY[draft.target])}</span>
+        {draft.actual !== null ? (
+          <span className="text-[11px] text-foreground">{t('hypothesisDraftActual', { value: String(draft.actual) })}</span>
+        ) : null}
+      </div>
+      <p className="mt-1 text-[11px] text-foreground">
+        {draft.reason ? t('hypothesisDraftReason', { reason: draft.reason }) : t('hypothesisDraftReasonMissing')}
+      </p>
+    </div>
+  );
+}
+
 export function GateEvidence({ gate, className }: { gate: GateItem; className?: string }) {
   const t = useTranslations('cage');
   const decision = gateDecision(gate);
   const ci = ciResult(gate);
   const trust = trustScore(gate);
+  const ghState = githubCheckState(gate);
+  const ghSha = gate.github_check_run_sha ?? null;
+  // story #2814 2단 AC② — 재-pending 이력이 있을 수 있는 상태(in_progress)에서만 원장을 지연 조회.
+  const showRepending = ghState === 'in_progress';
   const selfReportOnly = gate.neutral_facts?.['self_report_only'] === true;
   const reason = gate.decision_basis ?? null; // 실 human reason만(auto_decision_reason echo 폴백 제거 — 배지가 이미 표시)
   // HO-S8 cold-start: 미확정 outcome은 "임시 예측"(keep/kill)으로만 — 판정/% 환원 절대 X.
@@ -153,6 +353,9 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
   const prLinks = Array.isArray(gate.neutral_facts?.['pr_links'])
     ? (gate.neutral_facts!['pr_links'] as PrLinkFact[]).filter((p) => p?.repo_full_name && typeof p?.pr_number === 'number')
     : [];
+  // story #2862 — hypothesis_outcome_confirm 게이트는 ci/trust/cold_start_seed가 없어 항상
+  // State B(부분증거)로 떨어진다 — rich(State C) 분기엔 안 걸리므로 거기는 안 건드린다.
+  const draft = hypothesisOutcomeDraft(gate);
 
   const DecisionMark = decision ? DECISION_META[decision].mark : null;
   const decisionBadge = decision ? (
@@ -186,6 +389,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
               {ci !== null ? <CiSignal ci={ci} /> : null}
               {trust !== null ? <TrustValue trust={trust} selfReportOnly={selfReportOnly} /> : null}
+              {ghState !== null ? <GithubCheckSignal state={ghState} sha={ghSha} /> : null}
               {/* Bot-L.2: 연결 PR(read-only·관리는 story 상세). 없으면 omit. AC·위험 슬롯은 후속. */}
               {prLinks.map((p, i) => <GatePrChip key={`${p.repo_full_name}#${p.pr_number}-${i}`} pr={p} />)}
             </div>
@@ -202,6 +406,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
             </div>
           </div>
         </div>
+        {showRepending ? <GithubRependingReason gateId={gate.id} /> : null}
         {reason ? (
           <p className="mt-1.5 text-[11.5px] text-muted-foreground">{t('reasonLabel')} · {reason}</p>
         ) : null}
@@ -213,6 +418,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
   const facts: React.ReactNode[] = [];
   if (ci !== null) facts.push(<CiSignal ci={ci} />);
   if (trust !== null) facts.push(<TrustValue trust={trust} selfReportOnly={selfReportOnly} />);
+  if (ghState !== null) facts.push(<GithubCheckSignal state={ghState} sha={ghSha} />);
   if (coldStartSeed && seedKey) facts.push(<Badge variant="chip" className="shrink-0">{t(seedKey)}</Badge>);
 
   return (
@@ -228,6 +434,8 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
           ))}
         </div>
       ) : null}
+      {showRepending ? <GithubRependingReason gateId={gate.id} /> : null}
+      {draft ? <HypothesisOutcomeDraft draft={draft} /> : null}
       {reason ? (
         <p className="mt-1.5 text-[11.5px] text-muted-foreground">{t('reasonLabel')} · {reason}</p>
       ) : null}

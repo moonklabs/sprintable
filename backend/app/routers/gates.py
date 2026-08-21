@@ -13,10 +13,13 @@ from app.dependencies.auth import get_current_user, get_scope_context, get_verif
 from app.dependencies.database import get_db
 from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition
+from app.models.gate_github_check_event import GateGithubCheckEvent
 from app.models.hitl import HitlRequest
 from app.models.pm import Story, Task
 from app.models.visual_artifact import VisualArtifact
 from app.routers.agent_gateway import wake_agent
+from app.services.gate_github_check import is_repo_check_enforced, publish_gate_check, resolve_pr_link
+from app.services.merge_verdict_gate import MERGE_GATE_TYPE
 from app.services.gate_service import (
     GateUndoNotSelfError,
     GateUndoWindowExpiredError,
@@ -162,6 +165,21 @@ class GateResponse(BaseModel):
     evidence_status: str | None = None
     decision_basis: str | None = None
     auto_decision_reason: str | None = None
+    # story #2813/#2814 계약 ①(미르코군 그라운딩 doc gate-github-check-fe-grounding-2814 §5) —
+    # GitHub check-run 상태를 FE가 읽을 수 있게 raw passthrough(신규 엔드포인트 불요). Gate ORM에
+    # 이미 있는 컬럼 그대로 — additive·nullable(merge 게이트 아니거나 아직 미발행이면 None).
+    github_check_run_id: int | None = None
+    # 카디르 QA(PR#3244) — Gate ORM엔 3243이 이미 이 컬럼을 추가했는데(카디르 QA③-c 신설) 이
+    # 응답 스키마에 누락돼 있어 FE의 SHA 배지가 실 API에선 영원히 undefined였다. from_attributes라
+    # ORM 컬럼명과 일치시키기만 하면 다른 construction site 변경 없이 그대로 채워진다.
+    github_check_run_sha: str | None = None
+    approved_head_sha: str | None = None
+    # story #2815(§5-④, 관측모드 판별) — `github_check_run_id`가 계속 null인 이유를 FE가
+    # 구분하게: True면 "이 repo는 required check 등록됨(발행 대기/진행 중)", False/None이면
+    # "이 repo는 애초에 관측모드"로 해석. additive·기본 None(get_gate_endpoint만 채움 — list_gates
+    # 등 타 엔드포인트는 PR 링크 N+1 조회 비용 때문에 스코프 밖, risk_grade/can_approve와 동일
+    # 선례 — Gate ORM에 이 속성이 없어 from_attributes 기본값으로 조용히 통과).
+    github_check_enforced: bool | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -895,6 +913,12 @@ async def get_gate_endpoint(
     # 미경유) + 이 gate의 gate_type을 derive_risk_grade()로 파생(doc §2 SSOT).
     _posture = await get_org_posture(session, org_id)
     resp.risk_grade = derive_risk_grade(_posture, gate.gate_type)
+    # story #2815(§5-④): merge 게이트만 의미 있음(다른 gate_type은 PR/repo 개념 자체가 없음).
+    if gate.gate_type == MERGE_GATE_TYPE:
+        _link = await resolve_pr_link(session, org_id, gate.work_item_id)
+        resp.github_check_enforced = await is_repo_check_enforced(
+            session, org_id, _link.repo_full_name if _link else None,
+        )
     # story #2198(까심 QA 적출·오르테가 확定): can_approve 가 이 엔드포인트에선 **전혀 계산되지
     # 않고** 있었다(docstring 이 enrich 목록에 project_id/work_item_summary/risk_grade 만 적어
     # 뒀던 것 자체가 증거) — doc_approval·non-doc 가릴 것 없이 Pydantic 기본값 False 가 그대로
@@ -919,6 +943,65 @@ async def get_gate_endpoint(
             _approvable = await _non_doc_can_approve(session, gate.gate_type, _uid, org_id, project_id)
             resp.can_approve = _approvable and is_valid_transition(gate.status, "approved")
     return resp
+
+
+class GateGithubCheckEventResponse(BaseModel):
+    """story #2815(§5-②, 미르코군 계약 제안) — `gate_github_check_event`(0262) raw 원장 뷰.
+    org_id/gate_id/story_id는 생략(이미 URL의 `{id}`가 gate 컨텍스트를 특정 — 중복 노출 불요)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    repo_full_name: str
+    pr_number: int
+    head_sha: str
+    # story #2819 — re_pending 행 전용(무효화된 승인이 귀속됐던 SHA). published/resolved 행이나
+    # 마이그레이션 이전 re_pending 행은 null(소급 불가 — FE는 이미 null 폴백 설계, PR#3246).
+    prior_sha: str | None = None
+    event_type: str  # published | re_pending | resolved
+    check_conclusion: str | None
+    created_at: datetime
+
+
+@router.get("/{id}/github-check-events", response_model=list[GateGithubCheckEventResponse])
+async def list_gate_github_check_events_endpoint(
+    id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> list[GateGithubCheckEventResponse]:
+    """story #2815(§5-②) — GitHub check 발행/재-pending/해소 원장(AC④, story #2813) 조회.
+    `GateEvidence`(FE)가 "check 상태·전이 이력" 섹션에서 지연 로드하는 용도 — 소량(gate당
+    보통 수 건)이라 페이지네이션 없이 최신순 전체 반환.
+
+    authz는 `get_gate_endpoint`와 **동일 패턴**(존재 비노출 — project 무권한도 404, 403 아님)을
+    그대로 재사용한다: 이 원장은 gate의 세부 정보이지 별도 리소스가 아니므로 gate 조회와 같은
+    접근권이어야 한다(gate는 보이는데 원장은 막히는 비대칭 방지)."""
+    gate = (await session.execute(
+        select(Gate).where(Gate.id == id, Gate.org_id == org_id)
+    )).scalar_one_or_none()
+    if gate is None:
+        raise HTTPException(status_code=404, detail="Gate not found")
+
+    project_id = await resolve_work_item_project_id(
+        session, org_id, gate.work_item_type, gate.work_item_id,
+    )
+    if project_id is not None:
+        await require_project_access(session, uuid.UUID(auth.user_id), project_id, org_id,
+                                      not_found_detail="Gate not found")
+    elif not is_known_project_agnostic_work_item_type(gate.work_item_type):
+        raise HTTPException(status_code=404, detail="Gate not found")
+
+    # ⛔카디르 QA(PR#3245, 비차단·후속 메모) — created_at 단독 정렬은 같은 밀리초에 여러 행이
+    # 찍히면(이론상 가능 — 같은 트랜잭션 내 다중 이벤트) 동순위 tie 순서가 비결정적이다. 이
+    # 원장은 이벤트가 gate당 소량·거의 항상 시간差가 있어 실무 영향은 낮다고 판단해 이번엔
+    # 그대로 두되, 재발하면 `id`를 2차 정렬키로 추가할 것(UUID는 시간순 아니라 tie-break 용도).
+    rows = (await session.execute(
+        select(GateGithubCheckEvent)
+        .where(GateGithubCheckEvent.gate_id == id, GateGithubCheckEvent.org_id == org_id)
+        .order_by(GateGithubCheckEvent.created_at.desc())
+    )).scalars().all()
+    return [GateGithubCheckEventResponse.model_validate(r) for r in rows]
 
 
 @router.post("/{id}/transition", response_model=GateResponse)
@@ -970,11 +1053,51 @@ async def transition_gate_endpoint(
             session, org_id, id, body.status, _resolver_id, body.note,
             pending_deliveries=_pending_deliveries,
         )
+        # ⛔카디르 QA(PR#3243, 2026-08-19) 레이스 fix — anchor(gate.approved_head_sha)를 배경
+        # publish 태스크가 뒤늦게 적으면, 승인(SHA A) 직후·태스크 실행 前에 새 커밋(B)의
+        # synchronize가 먼저 도착해 link.evidence를 B로 갱신 → 뒤늦은 태스크가 B를 읽어 "A 승인이
+        # B를 축복"하는 경로가 열린다. **"승인은 그때의 커밋에" 문자 그대로 — anchor는 이 승인
+        # 트랜잭션(commit 前)에서 확정 기록**한다. 배경 태스크(publish_gate_check)는 이 값을
+        # 그대로 반영만 한다(gate_github_check.py 참고).
+        if body.status == "approved" and gate.gate_type == MERGE_GATE_TYPE:
+            # story #2832(CRITICAL, PO 페드루 배정 2026-08-20) — 재-pending 후 재승인이
+            # approved_head_sha를 못 찍는 결함의 근본원인: story 하나에 PR 링크 행이 둘 이상이면
+            # (예: 이전 PR 머지 후 같은 story에 새 PR — 잔류 흔한 케이스) resolve_pr_link가
+            # story_id만으로 "가장 최근 updated_at" 행 하나를 고르는데, explicit-link API가
+            # evidence를 **전체 교체**(pr_story_link.py upsert_link)해 head_sha 없는 얕은 evidence로
+            # 갱신하면 그 행이 "가장 최근"이 돼 실제 anchor 없는 링크가 뽑힌다(실 사고 재현: gate
+            # 38430aa8, PR#3255 — 07:13:59 웹훅이 정상 anchor를 썼는데 07:14:09 explicit-link
+            # 호출이 evidence를 {"by":"explicit_api"}로 교체해 head_sha가 사라짐). gate 자신의
+            # github_check_run_sha는 이 story-스코프 다중-PR 모호성과 무관하게(publish_gate_check가
+            # 이 gate row 자체에 마지막으로 발행한 check-run의 SHA를 직접 기록) 항상 "지금 이
+            # gate가 추적 중인 SHA"를 정확히 담고 있으므로 **1순위**로 쓴다 — story 링크 조회는
+            # 그 필드가 아예 빈 legacy/이상 상태(#2813 이전 gate 등)에만 폴백으로 남긴다.
+            _head_sha = gate.github_check_run_sha
+            if not _head_sha:
+                _link = await resolve_pr_link(session, org_id, gate.work_item_id)
+                _head_sha = (_link.evidence or {}).get("head_sha") if _link else None
+            if _head_sha:
+                gate.approved_head_sha = _head_sha
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(gate)
         # ccbcd9da(A-1): doc/epic 자동재개 wake — commit(recipient_seq 확정) 후 발화(이중전달 방지).
         _schedule_pending_deliveries(background_tasks, _pending_deliveries)
+        # story #2813 — 사람 승인/반려를 GitHub check-run(success/failure)으로 반영. commit 後
+        # 배경 태스크(fail-closed: 실패해도 이미 commit된 gate 상태엔 영향 없음, GitHub 쪽만 stale).
+        # merge 게이트 아니면 publish_gate_check 내부에서 조용히 no-op.
+        # story #2835(PO AC 확定 2026-08-20) — #3258은 웹훅 수명주기 경로(인자 보유)만 고쳤고, 이
+        # 승인-전이 경로는 인자 없이 호출해 여전히 link row에 의존했다 — row-less 자동 생성 gate
+        # (2826 주처방의 기본 케이스, SID 해소는 link row를 안 만든다)는 승인해도 success 발행이
+        # 죽었다(실사고: gate dbefee69/story #2834/PR#3259). `gate.neutral_facts`가 이미 SSOT로
+        # repo+pr_number를 갖고 있음을 실측(evaluate_merge_gate가 gate 생성/재평가마다 채움,
+        # merge_verdict_gate.py facts dict) — 새 컬럼/installation 도출 불요, 있으면 그대로 전달.
+        # 없으면(legacy gate 등) publish_gate_check의 기존 link-row 폴백이 그대로 받는다.
+        _nf = gate.neutral_facts or {}
+        background_tasks.add_task(
+            publish_gate_check, org_id, gate.id,
+            repo_full_name=_nf.get("repo"), pr_number=_nf.get("pr_number"),
+        )
         return GateResponse.model_validate(gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

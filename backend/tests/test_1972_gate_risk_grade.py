@@ -220,7 +220,11 @@ async def test_get_gate_endpoint_populates_risk_grade():
                        AsyncMock(return_value=project_id)), \
          patch("app.services.project_auth.has_project_access", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "_resolve_work_item_summary", AsyncMock(return_value=None)), \
-         patch.object(gates_mod, "get_org_posture", AsyncMock(return_value="balanced")) as posture_spy:
+         patch.object(gates_mod, "get_org_posture", AsyncMock(return_value="balanced")) as posture_spy, \
+         patch.object(gates_mod, "resolve_pr_link", AsyncMock(return_value=None)):
+        # story #2815: gate_type=="merge"라 github_check_enforced enrich(resolve_pr_link 호출)
+        # 도 도는 것 — 이 테스트 관심사(risk_grade)와 무관, session.execute 단일 고정 mock
+        # 재사용 충돌 방지(gates.py:916, test_1970과 동형 원인).
         result = await get_gate_endpoint(id=gate_id, session=session, org_id=org_id, auth=auth)
 
     assert result.risk_grade == "high"  # balanced + merge(2차 축) → high
@@ -243,7 +247,9 @@ async def test_get_gate_endpoint_risk_grade_low_permissive():
                        AsyncMock(return_value=project_id)), \
          patch("app.services.project_auth.has_project_access", AsyncMock(return_value=True)), \
          patch.object(gates_mod, "_resolve_work_item_summary", AsyncMock(return_value=None)), \
-         patch.object(gates_mod, "get_org_posture", AsyncMock(return_value="permissive")):
+         patch.object(gates_mod, "get_org_posture", AsyncMock(return_value="permissive")), \
+         patch.object(gates_mod, "resolve_pr_link", AsyncMock(return_value=None)):
+        # story #2815: 위 테스트와 동일 사유(gate_type="merge" → github_check_enforced enrich).
         result = await get_gate_endpoint(id=gate_id, session=session, org_id=org_id, auth=auth)
 
     assert result.risk_grade == "low"  # 1차 축(posture)이 2차 축(gate_type)을 이김

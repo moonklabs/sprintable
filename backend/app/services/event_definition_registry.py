@@ -57,6 +57,12 @@ class InvalidBlockTemplateError(ValueError):
     위반 — 등록 시점 구조 게이트(치환 렌더링은 FE 몫, 여기는 구조만)."""
 
 
+class InvalidStageMetadataError(ValueError):
+    """story #2792(2790 P1) — stage_metadata 키가 payload_schema.properties.stage.enum의
+    부분집합이 아님(페드루 판정 2026-08-19, 가드①). 오타 slug가 조용히 죽는 클래스
+    (stage_metadata에는 있는데 실제 stage.enum엔 없어 영원히 안 읽히는 항목) 차단."""
+
+
 class InvalidActionAuthError(ValueError):
     """story #2637 §범위3(미르코 발견 후속, 2026-08-14): action_auth 어휘(human_only·role)
     위반 — block_template.actions[].auth와 EventDefinition.action_auth 둘 다 이 함수 하나로
@@ -262,6 +268,49 @@ def validate_event_payload_schema_shape(payload_schema: dict) -> None:
             "payload_schema는 top-level 'additionalProperties: false'를 명시해야 합니다 — "
             "미선언 스키마는 모르는 필드를 조용히 통과시켜 등록을 거부합니다."
         )
+
+
+def validate_stage_metadata(payload_schema: dict, stage_metadata: dict) -> None:
+    """story #2792(2790 P1, 페드루 판정 2026-08-19 가드①) — stage_metadata의 키 집합이
+    `payload_schema.properties.stage.enum`의 부분집합인지 강제. 이 검증이 없으면 stage_metadata
+    에 오타 slug(예: enum엔 "in_review"인데 메타는 "inreview")를 넣어도 저장은 되고, 그
+    항목은 정의상 도달 불가능한 채로 영원히 조용히 죽는다(get_workflow_guide 등 소비처가
+    실제 stage 값으로만 조회하므로) — 경계를 넘는 이름이 통과하는 클래스, 등록/수정 시점에
+    막는다.
+
+    stage_metadata가 빈 dict({})면 항상 통과(사이클형이 아닌 정의는 이 슬롯을 안 씀 — 신호형/
+    측정형 정의도 이 함수를 걸어도 안전). payload_schema에 stage enum 자체가 없는데
+    stage_metadata가 비어있지 않으면(가리킬 enum이 없음) 거부."""
+    if not stage_metadata:
+        return
+    stage_prop = (payload_schema.get("properties") or {}).get("stage") or {}
+    enum = stage_prop.get("enum")
+    if not isinstance(enum, list):
+        raise InvalidStageMetadataError(
+            "stage_metadata가 있으려면 payload_schema.properties.stage.enum이 먼저 선언돼야 합니다."
+        )
+    valid = set(enum)
+    unknown = sorted(set(stage_metadata.keys()) - valid)
+    if unknown:
+        raise InvalidStageMetadataError(
+            f"stage_metadata에 payload_schema.properties.stage.enum에 없는 키가 있습니다: {unknown} "
+            f"(허용된 stage: {sorted(valid)})"
+        )
+    # ⛔실버그(카디르군 QA, 2026-08-19 — story #2793 재현) — 키⊆enum만 보고 **값의 모양**은
+    # 안 봤다. malformed 값(dict가 아니거나 role/action이 없거나 문자열이 아님)이 등록을
+    # 통과하면 소비처(온보딩 가이드 렌더러)가 `meta.get('role')`에서 죽는데, 그 렌더러가
+    # org 전 정의를 한 루프로 돌아 **커스텀 1건 오염이 그 org 가이드 전체를 죽이는** 폭발
+    # 반경이었다 — 쓰기 시점(여기)에서 값 모양 자체를 강제해 근본 차단.
+    for slug, meta in stage_metadata.items():
+        if not isinstance(meta, dict):
+            raise InvalidStageMetadataError(
+                f"stage_metadata[{slug!r}]는 object({{role, action}})여야 합니다 — {type(meta).__name__} 아님."
+            )
+        for field in ("role", "action"):
+            if not isinstance(meta.get(field), str) or not meta[field]:
+                raise InvalidStageMetadataError(
+                    f"stage_metadata[{slug!r}].{field}는 비어있지 않은 문자열이어야 합니다."
+                )
 
 
 def validate_event_payload(payload_schema: dict, payload: dict) -> None:

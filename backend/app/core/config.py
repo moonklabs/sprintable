@@ -370,6 +370,12 @@ class Settings(BaseSettings):
     # §7.3: 사용자당 bounded N개 active installation — 초과 등록은 fresh re-auth(이미 강제,
     # 5분 auth_time freshness)+MFA(user.totp_enabled 전제) 요구.
     device_installation_max_active_per_user: int = 5
+    # story #2822 — office_conversion.py(pptx→pdf, #2771)가 소비하는 배포 설정값. 예전엔
+    # 이 필드를 안 거치고 os.environ 을 모듈 레벨에서 직접 읽어(둘 다 프로세스 시작 시 1회
+    # 스냅샷이라 타이밍은 동일) infra/check_env_drift.py ④축(Settings 커버리지)이 매번
+    # report했다. 미설정 시 변환은 ConversionUnavailable(가짜 렌더 금지, 인프라 배치 전엔
+    # 그냥 비활성) — 이 필드로 옮겨도 그 fail-closed 시맨틱은 그대로.
+    gotenberg_service_url: str = ""
 
     @property
     def is_ee_enabled(self) -> bool:

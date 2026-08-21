@@ -58,7 +58,9 @@ async def _rotate_or_create_key(
         result = await key_repo.rotate(active.id, scope=scope)
         assert result is not None  # active 조회 직후 rotate — 레이스 없는 한 항상 존재
         return result
-    return await key_repo.create(team_member_id=agent_id, scope=scope)
+    # story #2838(PO AC 정정) — 신규 채용 발급도 명시적으로 무만료(발급 정책 SSOT). 유나군 키의
+    # 유력 발급 경로가 정확히 여기(recruit) — 실사고 재발 방지 그 자체.
+    return await key_repo.create(team_member_id=agent_id, scope=scope, expires_at=None)
 
 
 async def recruit_agent(

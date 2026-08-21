@@ -6,6 +6,7 @@ import { ChevronDown, ShieldCheck, Clock } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ToastContainer, useToast } from '@/components/ui/toast';
+import { GoalOutcomeDialog, type GoalOutcomeSubmission } from '@/components/goals/goal-outcome-dialog';
 
 /**
  * E-DG RC#2 ⓶ — epic status-transition 컨트롤(상세 헤더). status badge + 유효 next-state만 dropdown
@@ -45,27 +46,35 @@ const VARIANT: Record<string, 'secondary' | 'info' | 'success' | 'outline'> = {
 export function EpicStatusTransition({
   epicId,
   status,
+  goalTitle,
   onTransitioned,
 }: {
   epicId: string;
   status: string;
+  /** story #2844 — done 전이 outcome 다이얼로그에 표시할 goal 제목. */
+  goalTitle: string;
   onTransitioned: (newStatus: string) => void;
 }) {
   const t = useTranslations('goals');
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState(false); // gate 생성·승인 대기(status 미변경)
+  // story #2844 — active→done은 outcome 다이얼로그를 먼저 거친다(다른 전이는 그대로 직행).
+  const [outcomeDialogOpen, setOutcomeDialogOpen] = useState(false);
   const { toasts, addToast, dismissToast } = useToast();
 
   const nexts = VALID_NEXT[status] ?? [];
 
-  const transition = async (to: string) => {
+  const transition = async (to: string, outcome?: GoalOutcomeSubmission) => {
     if (busy) return;
     setBusy(true);
     try {
+      const body = outcome && !('skipped' in outcome)
+        ? { status: to, outcome_status: outcome.outcome_status, outcome_result: outcome.outcome_result }
+        : { status: to };
       const res = await fetch(`/api/goals/${epicId}/transition`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: to }),
+        body: JSON.stringify(body),
       });
       const json = (await res.json()) as {
         data?: { status?: string };
@@ -96,6 +105,7 @@ export function EpicStatusTransition({
       addToast({ type: 'error', title: t('transitionFailedTitle'), body: t('transitionFailedFallback') });
     } finally {
       setBusy(false);
+      setOutcomeDialogOpen(false);
     }
   };
 
@@ -120,7 +130,12 @@ export function EpicStatusTransition({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
             {nexts.map((to) => (
-              <DropdownMenuItem key={to} disabled={busy} onClick={() => void transition(to)}>
+              <DropdownMenuItem
+                key={to}
+                disabled={busy}
+                // story #2844 — active→done만 다이얼로그를 먼저 연다(다른 전이는 그대로 직행).
+                onClick={() => (to === 'done' ? setOutcomeDialogOpen(true) : void transition(to))}
+              >
                 {t(LABEL_KEY[to] ?? to)}
                 {GATED.has(`${status}>${to}`) ? (
                   <span className="ml-2 inline-flex items-center gap-0.5 text-[10px] text-warning-strong" title={t('transitionGateHint')}>
@@ -131,6 +146,14 @@ export function EpicStatusTransition({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+      ) : null}
+      {outcomeDialogOpen ? (
+        <GoalOutcomeDialog
+          goalTitle={goalTitle}
+          submitting={busy}
+          onSubmit={(result) => void transition('done', result)}
+          onCancel={() => setOutcomeDialogOpen(false)}
+        />
       ) : null}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>

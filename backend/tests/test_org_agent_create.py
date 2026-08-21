@@ -125,11 +125,16 @@ async def test_create_org_level_agent_fans_out_grants(monkeypatch):
         "app.services.agent_message_policy.ensure_creator_allowlisted", AsyncMock()
     )
 
+    captured_expires_at = {}
+
     class _FakeApiKeyRepo:
         def __init__(self, _s):
             pass
 
-        async def create(self, team_member_id, scope):
+        async def create(self, team_member_id, scope, *, expires_at):
+            # story #2838(PO AC④) — org-agent 발급 경로가 실제로 expires_at=None(무만료)을
+            # 명시 전달하는지 확인(실사고의 유력 발급 경로 중 하나).
+            captured_expires_at["value"] = expires_at
             return (MagicMock(), "sk_live_test")
 
     monkeypatch.setattr("app.repositories.api_key.ApiKeyRepository", _FakeApiKeyRepo)
@@ -148,6 +153,7 @@ async def test_create_org_level_agent_fans_out_grants(monkeypatch):
     assert member.project_id == p1  # 앵커 프로젝트
     assert member.type == "agent"
     assert key == "sk_live_test"
+    assert captured_expires_at["value"] is None  # story #2838 AC④ — 무만료 명시
 
 
 @pytest.mark.anyio

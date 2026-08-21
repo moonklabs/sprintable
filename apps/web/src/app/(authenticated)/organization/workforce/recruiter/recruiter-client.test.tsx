@@ -182,7 +182,6 @@ function mkRole(overrides: Partial<RoleTemplateSummary> & Pick<RoleTemplateSumma
   return {
     description: null,
     default_tool_groups: [],
-    default_workflow_recipe_slug: null,
     is_builtin: true,
     tier: 'full',
     version: 1,

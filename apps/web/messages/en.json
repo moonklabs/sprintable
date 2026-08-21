@@ -430,6 +430,29 @@
     "clusterStalledOpen": "Open →",
     "clusterViewAll": "View all {n} →",
     "clusterViewLess": "Collapse",
+    "clusterUnclosedTitle": "Loops never closed",
+    "clusterUnclosedSub": "Past their measure date or missing an outcome verdict",
+    "clusterUnclosedBadgeOverdueHypothesis": "Past measure date",
+    "clusterUnclosedBadgeOverdueGoal": "Past measure date",
+    "clusterUnclosedBadgeOutcomeMissing": "No verdict",
+    "clusterUnclosedOverdueHypothesisTitle": "A hypothesis is past its measure date",
+    "clusterUnclosedOverdueGoalTitle": "A goal is past its measure date",
+    "clusterUnclosedOutcomeMissingTitle": "A completed goal has no outcome verdict",
+    "clusterUnclosedDaysOverdue": "{n}d overdue",
+    "clusterUnclosedDaysDone": "{n}d unverdicted",
+    "clusterUnclosedShowMore": "Show {n} more",
+    "clusterUnclosedCapNotice": "Showing top {shown} · {total} total",
+    "clusterUnclosedViewQueue": "View full queue",
+    "clusterUnclosedMeasurePlanMissing": "+{count} have no measure plan yet",
+    "clusterUnclosedUnmeasurableGoal": "{count} declared unmeasurable",
+    "clusterAuthFailureTitle": "Agent auth failures",
+    "clusterAuthFailureSub": "Requests keep being rejected due to API key issues",
+    "clusterAuthFailureReasonExpired": "API key expired",
+    "clusterAuthFailureReasonRevoked": "API key revoked",
+    "clusterAuthFailureReasonInvalid": "API key not recognized",
+    "clusterAuthFailureDiagnostic": "{n} failures in last 5 min",
+    "clusterAuthFailureReissue": "Reissue key",
+    "clusterAuthFailureUnknownAgent": "Unknown agent",
     "doneGenericContext": "Review the evidence and approve",
     "loopTitle": "Lab",
     "loopSubject": "Hypotheses under test",
@@ -1553,6 +1576,12 @@
     "agentApiKeySingleRevokeDialogBody": "Any agent connected with this key will no longer be authenticated. This can't be undone.",
     "agentApiKeySingleRevokeConfirmCta": "Revoke",
     "agentApiKeyScopeLabel": "Tool permissions for this key",
+    "agentApiKeyExpiryLabel": "Expiration",
+    "agentApiKeyExpiry30d": "30 days",
+    "agentApiKeyExpiry90d": "90 days",
+    "agentApiKeyExpiry180d": "180 days",
+    "agentApiKeyExpiry365d": "1 year",
+    "agentApiKeyExpiryNever": "Never expires",
     "agentApiKeyOnboardingInstruction": "Send your agent the onboarding message below:",
     "agentApiKeyOnboardingMessageBase": "Please onboard yourself using the info below.\nsprintable agent name : {agentName}\nsprintable agent api key : {apiKey}\n{llmsUrl}",
     "agentApiKeyOnboardingMessageMcpSuffix": "\n\nMCP server config (merge into .mcp.json):\n{mcpConfig}",
@@ -2921,6 +2950,18 @@
     "saving": "Saving…",
     "deleting": "Deleting…",
     "saveFailed": "Couldn't save. Please try again in a moment.",
+    "outcomeDialogTitle": "Closing this goal — judge the outcome",
+    "outcomeChoiceHit": "Hit",
+    "outcomeChoiceMiss": "Miss",
+    "outcomeChoiceUnmeasurable": "Unmeasurable",
+    "outcomeActualLabel": "Actual value",
+    "outcomeReasonLabel": "Reason (one line)",
+    "outcomeReasonHint": "A reason is required to close this.",
+    "outcomeUnmeasurableReasonHint": "Explain why this can't be measured.",
+    "outcomeSkipLink": "Close without judging",
+    "outcomeSkipWarning": "Closing without a judgment marks this «unmeasured» and it stays in «Loops never closed».",
+    "outcomeSkipConfirm": "Close anyway",
+    "outcomeSubmit": "Save verdict",
     "progress": "Progress",
     "edit": "Edit",
     "itemCount": "{count} items",
@@ -3241,7 +3282,11 @@
     "groupOffline": "Offline",
     "working": "Generating reply",
     "assignedStory": "On \"{title}\"",
-    "empty": "No agents to show"
+    "empty": "No agents to show",
+    "authFailureBadge": "Auth failed",
+    "authFailureTooltipExpired": "API key expired · {n} failures in last 5 min",
+    "authFailureTooltipRevoked": "API key revoked · {n} failures in last 5 min",
+    "authFailureTooltipInvalid": "API key not recognized · {n} failures in last 5 min"
   },
   "chats": {
     "unreadMarker": "Unread from here",
@@ -3485,6 +3530,8 @@
     "statusHit": "On target",
     "statusMiss": "Off target",
     "statusPending": "Awaiting",
+    "statusUnmeasured": "Closed unjudged",
+    "statusUnmeasurable": "Unmeasurable",
     "hypothesisLabel": "Hypothesis",
     "target": "Target",
     "actual": "Actual",
@@ -3668,10 +3715,25 @@
     "ciPass": "Passed",
     "ciFail": "Failed",
     "ciUnknown": "Unknown",
+    "githubCheckLabel": "GitHub check",
+    "githubCheckNotPublished": "Not published yet",
+    "githubCheckPending": "Checking",
+    "githubCheckSuccess": "Passed",
+    "githubCheckFailure": "Failed",
+    "githubCheckShaLabel": "SHA {sha}",
+    "githubCheckRependingReason": "A new commit (SHA {newSha}) invalidated the prior approval, moving this back to pending.",
+    "githubCheckRependingReasonWithPrior": "SHA {priorSha} was invalidated by SHA {newSha}, moving this back to pending.",
     "trustLabel": "Trust",
     "trustScorePercent": "{score}%",
     "selfReportTag": "Self-reported",
     "reasonLabel": "Reason",
+    "hypothesisDraftBadge": "Draft verdict",
+    "hypothesisDraftTargetVerified": "Hit",
+    "hypothesisDraftTargetFalsified": "Miss",
+    "hypothesisDraftTargetKilled": "Kill",
+    "hypothesisDraftActual": "Measured {value}",
+    "hypothesisDraftReason": "Reason · {reason}",
+    "hypothesisDraftReasonMissing": "No reason given — verify before confirming",
     "gateReadonlyBlock": "Auto-blocked · read-only",
     "gateReadonlyAuto": "Auto-passed · no action needed",
     "gateReadonlyNoVerdict": "No verdict recorded · nothing to review",
@@ -3707,47 +3769,6 @@
     "sigConsequenceNote": "Approving records your signature",
     "sigRequestChanges": "Request changes",
     "sigApproveAndSign": "Approve & sign"
-  },
-  "workflowRecipes": {
-    "scrum-3step": {
-      "name": "3-Step Scrum",
-      "description": "Plan → Build → QA three-stage workflow. Fits small to mid-size sprints.",
-      "steps": {
-        "kickoff": { "label": "Define requirements" },
-        "implementation": { "label": "Build" },
-        "qa_review": { "label": "Verify" }
-      }
-    },
-    "kanban-simple": {
-      "name": "Simple Kanban",
-      "description": "To Do → In Progress → Done flow. Fits continuous delivery environments.",
-      "steps": {
-        "task_created": { "label": "Pick up task" },
-        "in_progress": { "label": "In progress" },
-        "done_check": { "label": "Confirm done" }
-      }
-    },
-    "solo": {
-      "name": "Solo Agent",
-      "description": "A single agent handles every stage. Fits simple automated tasks.",
-      "steps": {
-        "received": { "label": "Receive & analyze" },
-        "execute": { "label": "Execute" },
-        "report": { "label": "Report" }
-      }
-    },
-    "loop-agency": {
-      "name": "Loop Agency",
-      "description": "Compounding org-memory workflow — goal & hypothesis → brief → generate variants → human pick → execute → learn from outcomes. Fits recurring experiments (copy tests, campaign variants, etc.).",
-      "steps": {
-        "goal_hypothesis": { "label": "Define goal & hypothesis" },
-        "brief_doc_approval": { "label": "Write brief" },
-        "generate_variants": { "label": "Generate variants" },
-        "loop_decision": { "label": "Human decision" },
-        "execute": { "label": "Execute" },
-        "track_and_learn": { "label": "Track & learn" }
-      }
-    }
   },
   "recruiter": {
     "title": "Recruiter",
@@ -4042,5 +4063,20 @@
     "viewDecision": "Decision",
     "conversationEmpty": "No messages yet",
     "conversationFooter": "Only directives, decisions, evidence, and change requests scoped to this work. Switching views (Run/Evidence/Decision) = same thread, different lens."
+  },
+  "loopQueue": {
+    "title": "Unclosed loop queue",
+    "subtitle": "Everything past its measure date or missing an outcome",
+    "unclaimedOnlyToggle": "Unclaimed only",
+    "loading": "Loading…",
+    "empty": "No unclosed loops right now",
+    "claimedBy": "Claimed by {name}",
+    "unclaimed": "Unclaimed",
+    "claimAction": "Claim it",
+    "judgeAction": "Judge",
+    "pageSummary": "{from}–{to} of {total}",
+    "prevPage": "Previous",
+    "nextPage": "Next",
+    "loopQueueUntitled": "Untitled item"
   }
 }

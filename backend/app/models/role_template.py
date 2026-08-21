@@ -45,8 +45,6 @@ class RoleTemplate(Base, TimestampMixin):
     default_tool_groups: Mapped[list[str]] = mapped_column(
         ARRAY(Text), nullable=False, default=list
     )
-    # workflow_recipes.slug 참조(느슨 — 코드 전용 builtin recipe 도 있어 FK 강제 안 함).
-    default_workflow_recipe_slug: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 런타임별 오버라이드(파일명·MCP 배선 노트 등 — 블루프린트 §4 런타임 어댑터). 미정 = {}.
     runtime_overrides: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     # true = 이 seed 마이그(제품 기본 카탈로그)가 심은 행 — 향후 커스텀 role_template 여지 남김.

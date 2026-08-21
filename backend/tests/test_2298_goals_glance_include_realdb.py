@@ -14,6 +14,8 @@ import uuid
 
 import pytest
 
+from tests.gate_mock_factory import make_gate_realdb
+
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
 pytestmark = [
@@ -101,17 +103,6 @@ async def _make_story(session, org_id, project_id, epic_id, assignee_id=None, st
     session.add(story)
     await session.commit()
     return story
-
-
-async def _make_gate(session, org_id, story_id, status="pending", gate_type="human_review"):
-    from app.models.gate import Gate
-    gate = Gate(
-        id=uuid.uuid4(), org_id=org_id, work_item_id=story_id, work_item_type="story",
-        gate_type=gate_type, status=status,
-    )
-    session.add(gate)
-    await session.commit()
-    return gate
 
 
 def _client_for(app):
@@ -266,7 +257,7 @@ async def test_focal_story_prefers_gate_pending_over_more_recently_created():
                 s, org.id, project.id, goal.id, assignee_id=caller_id,
                 status="in-progress", title="Older, gate-pending",
             )
-            await _make_gate(s, org.id, older_gated.id, status="pending")
+            await make_gate_realdb(s, org.id, older_gated.id, status="pending", gate_type="human_review")
             # 더 나중에 생성 — created_at DESC tiebreak이면 이게 이겨야 하지만 gate가 없다.
             await _make_story(
                 s, org.id, project.id, goal.id, assignee_id=caller_id,

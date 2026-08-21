@@ -11,8 +11,18 @@ const koMessages = koMessagesRaw as unknown as LooseMessages;
 const t = createTranslator({ locale: 'ko', messages: koMessages, namespace: 'orgBriefing' }) as unknown as NowFaceTranslator;
 
 function emptyRaw(): RawMyActions {
-  return { queue: [], attention: [] };
+  return {
+    queue: [], attention: [],
+    loopOverdueHypothesisCount: 0, loopOverdueGoalCount: 0, loopOutcomeMissingGoalCount: 0,
+    measurePlanMissingGoalCount: 0, unmeasurableGoalCount: 0,
+  };
 }
+
+// buildNowFace 테스트는 story #2829 count 필드를 소비하지 않는다 — 타입 충족용 0값 스프레드.
+const ZERO_LOOP_COUNTS = {
+  loopOverdueHypothesisCount: 0, loopOverdueGoalCount: 0, loopOutcomeMissingGoalCount: 0,
+  measurePlanMissingGoalCount: 0, unmeasurableGoalCount: 0,
+};
 
 describe('parseMyActions', () => {
   it('unwraps the {data:{...}} proxy envelope', () => {
@@ -129,14 +139,15 @@ describe('buildNowFace', () => {
   // agent_stuck/unanswered_blocker 둘만 여전히 이 함수의 kind=signal 몫이다.
   it('maps gate_approval/review_merge/my_blockers to kind=decide, agent_stuck/unanswered_blocker to kind=signal, notifications to kind=done', () => {
     const raw: RawMyActions = {
+      ...ZERO_LOOP_COUNTS,
       queue: [
         { type: 'gate_approval', priority: 'warn', title: null, context: {} },
         { type: 'review_merge', priority: 'info', title: 'My Story', context: { story_id: 's1' } },
         { type: 'my_blockers', priority: null, title: null, context: { blocked_story_id: 's2' } },
       ],
       attention: [
-        { type: 'agent_stuck', entity_type: 'story', entity_id: 's3', gate_type: 'merge', story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null },
-        { type: 'unanswered_blocker', entity_type: null, entity_id: null, gate_type: null, story_id: null, stalled_days: null, blocked_story_id: 's5', title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null },
+        { type: 'agent_stuck', entity_type: 'story', entity_id: 's3', gate_type: 'merge', story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null, member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null },
+        { type: 'unanswered_blocker', entity_type: null, entity_id: null, gate_type: null, story_id: null, stalled_days: null, blocked_story_id: 's5', title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null, member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null },
       ],
     };
     const notifications = [{ id: 'n1', title: 'Contract done', body: 'evidence attached', href: '/inbox' }];
@@ -149,10 +160,11 @@ describe('buildNowFace', () => {
 
   it('story_stalled/hypothesis_falsified는 이 함수의 산출에서 완전히 빠진다(클러스터 보드로 이관, story #2541)', () => {
     const raw: RawMyActions = {
+      ...ZERO_LOOP_COUNTS,
       queue: [],
       attention: [
-        { type: 'story_stalled', entity_type: null, entity_id: null, gate_type: null, story_id: 's9', stalled_days: 9, blocked_story_id: null, title: '결제 완료율 개선', hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null },
-        { type: 'hypothesis_falsified', entity_type: null, entity_id: null, gate_type: null, story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: 'h1', statement: '결제 완료율 개선', outcome_result: { target: 60, actual: 52 }, falsified_days: 2, superseded_by_hypothesis_id: null },
+        { type: 'story_stalled', entity_type: null, entity_id: null, gate_type: null, story_id: 's9', stalled_days: 9, blocked_story_id: null, title: '결제 완료율 개선', hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null, member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null },
+        { type: 'hypothesis_falsified', entity_type: null, entity_id: null, gate_type: null, story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: 'h1', statement: '결제 완료율 개선', outcome_result: { target: 60, actual: 52 }, falsified_days: 2, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null, member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null },
       ],
     };
     const items = buildNowFace(raw, [], t);
@@ -161,9 +173,10 @@ describe('buildNowFace', () => {
 
   it('unanswered_blocker href/id는 blocked_story_id 기반이다(entity_id는 BE가 안 준다)', () => {
     const raw: RawMyActions = {
+      ...ZERO_LOOP_COUNTS,
       queue: [],
       attention: [
-        { type: 'unanswered_blocker', entity_type: null, entity_id: null, gate_type: null, story_id: null, stalled_days: null, blocked_story_id: 's7', title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null },
+        { type: 'unanswered_blocker', entity_type: null, entity_id: null, gate_type: null, story_id: null, stalled_days: null, blocked_story_id: 's7', title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null, member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null },
       ],
     };
     const items = buildNowFace(raw, [], t);
@@ -172,10 +185,85 @@ describe('buildNowFace', () => {
     expect(signal?.id).toBe('unanswered_blocker-s7');
   });
 
+  // story #2856(2842 후속, 클래스 완결) — agent_stuck/unanswered_blocker의 bare href도 소속
+  // 프로젝트로 못박고 cross-project만 병기한다(2842 정의분 재사용).
+  describe('cross-project href/병기(story #2856)', () => {
+    it('viewer 제공 시 agent_stuck(story) href가 소속 프로젝트 slug로 지어진다', () => {
+      const raw: RawMyActions = {
+        ...ZERO_LOOP_COUNTS,
+        queue: [],
+        attention: [{ type: 'agent_stuck', entity_type: 'story', entity_id: 's1', gate_type: null, story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: 'p-other', project_slug: 'other-proj', member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null }],
+      };
+      const items = buildNowFace(raw, [], t, { orgSlug: 'moonklabs', activeProjectId: 'p-active' });
+      const signal = items.find((i) => i.kind === 'signal');
+      expect(signal?.href).toBe('/moonklabs/other-proj/board?story=s1');
+      expect(signal?.crossProjectLabel).toBe('other-proj');
+    });
+
+    it('viewer 제공 시 unanswered_blocker href도 소속 프로젝트 slug로 지어진다', () => {
+      const raw: RawMyActions = {
+        ...ZERO_LOOP_COUNTS,
+        queue: [],
+        attention: [{ type: 'unanswered_blocker', entity_type: null, entity_id: null, gate_type: null, story_id: null, stalled_days: null, blocked_story_id: 's7', title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: 'p-other', project_slug: 'other-proj', member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null }],
+      };
+      const items = buildNowFace(raw, [], t, { orgSlug: 'moonklabs', activeProjectId: 'p-active' });
+      const signal = items.find((i) => i.kind === 'signal');
+      expect(signal?.href).toBe('/moonklabs/other-proj/board?story=s7');
+      expect(signal?.crossProjectLabel).toBe('other-proj');
+    });
+
+    it('같은 프로젝트 소속이면 crossProjectLabel이 null이다(노이즈 절제)', () => {
+      const raw: RawMyActions = {
+        ...ZERO_LOOP_COUNTS,
+        queue: [],
+        attention: [{ type: 'agent_stuck', entity_type: 'story', entity_id: 's1', gate_type: null, story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: 'p-active', project_slug: 'sprintable', member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null }],
+      };
+      const items = buildNowFace(raw, [], t, { orgSlug: 'moonklabs', activeProjectId: 'p-active' });
+      const signal = items.find((i) => i.kind === 'signal');
+      expect(signal?.crossProjectLabel).toBeNull();
+      expect(signal?.href).toBe('/moonklabs/sprintable/board?story=s1');
+    });
+
+    it('viewer 미제공(구 호출부)이면 bare href·crossProjectLabel=null로 폴백한다(회귀 0)', () => {
+      const raw: RawMyActions = {
+        ...ZERO_LOOP_COUNTS,
+        queue: [],
+        attention: [{ type: 'agent_stuck', entity_type: 'story', entity_id: 's1', gate_type: null, story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: 'p-other', project_slug: 'other-proj', member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null }],
+      };
+      const items = buildNowFace(raw, [], t);
+      const signal = items.find((i) => i.kind === 'signal');
+      expect(signal?.href).toBe('/board?story=s1');
+      expect(signal?.crossProjectLabel).toBeNull();
+    });
+
+    it('agent_stuck이 story가 아니면(gates 폴백) 여전히 /inbox?tab=gates이고 crossProjectLabel=null이다', () => {
+      const raw: RawMyActions = {
+        ...ZERO_LOOP_COUNTS,
+        queue: [],
+        attention: [{ type: 'agent_stuck', entity_type: null, entity_id: null, gate_type: 'merge', story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: 'p-other', project_slug: 'other-proj', member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null }],
+      };
+      const items = buildNowFace(raw, [], t, { orgSlug: 'moonklabs', activeProjectId: 'p-active' });
+      const signal = items.find((i) => i.kind === 'signal');
+      expect(signal?.href).toBe('/inbox?tab=gates');
+      expect(signal?.crossProjectLabel).toBeNull();
+    });
+
+    it('action_queue 유래(decide) 항목은 project_id 계약이 없어 crossProjectLabel이 항상 null이다', () => {
+      const raw: RawMyActions = {
+        ...ZERO_LOOP_COUNTS,
+        queue: [{ type: 'review_merge', priority: 'info', title: 'x', context: { story_id: 's1' } }],
+        attention: [],
+      };
+      const items = buildNowFace(raw, [], t, { orgSlug: 'moonklabs', activeProjectId: 'p-active' });
+      expect(items[0]?.crossProjectLabel).toBeNull();
+    });
+  });
+
   it('never leaks raw elapsed-time text into signal context copy (surveillance framing ban — doc §1.5/§1.7)', () => {
     const raw: RawMyActions = {
+      ...ZERO_LOOP_COUNTS,
       queue: [],
-      attention: [{ type: 'agent_stuck', entity_type: 'story', entity_id: 's1', gate_type: 'merge', story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null }],
+      attention: [{ type: 'agent_stuck', entity_type: 'story', entity_id: 's1', gate_type: 'merge', story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null, member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null }],
     };
     const items = buildNowFace(raw, [], t);
     const signal = items.find((i) => i.kind === 'signal');
@@ -186,6 +274,7 @@ describe('buildNowFace', () => {
 
   it('marks only the single highest-priority decide item as primary; every other row (including other decide rows) is ghost', () => {
     const raw: RawMyActions = {
+      ...ZERO_LOOP_COUNTS,
       queue: [
         { type: 'my_blockers', priority: null, title: null, context: {} }, // priority -1 (highest)
         { type: 'gate_approval', priority: 'danger', title: null, context: {} },
@@ -199,15 +288,17 @@ describe('buildNowFace', () => {
   });
 
   it('produces no primary action when there are no decide items', () => {
-    const raw: RawMyActions = { queue: [], attention: [{ type: 'agent_stuck', entity_type: null, entity_id: 's1', gate_type: null, story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null }] };
+    const raw: RawMyActions = {
+      ...ZERO_LOOP_COUNTS, queue: [], attention: [{ type: 'agent_stuck', entity_type: null, entity_id: 's1', gate_type: null, story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null, member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null }] };
     const items = buildNowFace(raw, [], t);
     expect(items.every((i) => i.actionTone === 'ghost')).toBe(true);
   });
 
   it('sorts decide before signal before done', () => {
     const raw: RawMyActions = {
+      ...ZERO_LOOP_COUNTS,
       queue: [{ type: 'review_merge', priority: 'info', title: 'x', context: {} }],
-      attention: [{ type: 'agent_stuck', entity_type: null, entity_id: 's1', gate_type: null, story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null }],
+      attention: [{ type: 'agent_stuck', entity_type: null, entity_id: 's1', gate_type: null, story_id: null, stalled_days: null, blocked_story_id: null, title: null, hypothesis_id: null, statement: null, outcome_result: null, falsified_days: null, superseded_by_hypothesis_id: null, goal_id: null, overdue_days: null, done_days: null, project_id: null, project_slug: null, member_id: null, reason: null, failure_count: null, first_failed_at: null, last_failed_at: null }],
     };
     const items = buildNowFace(raw, [{ id: 'n1', title: 'done', body: null, href: null }], t);
     expect(items.map((i) => i.kind)).toEqual(['decide', 'signal', 'done']);

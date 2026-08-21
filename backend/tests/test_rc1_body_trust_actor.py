@@ -14,6 +14,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.gate_mock_factory import make_gate
+
 
 def _non_doc_gate_session():
     """48f064e5: 엔드포인트가 doc-gate authz용 게이트 로드 → 비-doc 게이트 반환으로 그 분기 skip.
@@ -22,8 +24,19 @@ def _non_doc_gate_session():
     _non_doc_gate_approvable 을 별도로 patch 해 그 판정 자체를 우회한다."""
     s = AsyncMock()
     gr = MagicMock()
+    # story #2837 — 여긴 make_gate()로 안 옮긴다: session.execute가 단일 고정 return_value라
+    # 이 한 mock이 Gate SELECT뿐 아니라 뒤이은 PullRequestStoryLink SELECT까지 대신 받는다
+    # (아래 evidence는 Gate 필드가 아니라 그 링크 조회 쪽 attribute) — 순수 Gate mock이 아닌
+    # 다중-쿼리 재사용 hack이라 make_gate 대상 밖(Gate에 없는 필드를 억지로 끼워 넣게 됨).
     gr.scalar_one_or_none.return_value = SimpleNamespace(
         gate_type="merge", work_item_type="story", work_item_id=uuid.uuid4(),
+        # story #2813 — session.execute가 단일 고정 return_value라, gates.py의 신규
+        # resolve_pr_link(SELECT PullRequestStoryLink) 호출도 이 같은 목을 되돌려 받는다
+        # (이 파일의 관심사는 resolver_id 강제이지 PR 링크 조회가 아님). `.evidence`가 없으면
+        # gates.py의 anchor 기록 분기(status=="approved" and gate_type=="merge"에서 항상 발동
+        # — 이 목의 gate_type이 정확히 "merge")가 AttributeError로 죽는다 — None으로 명시해
+        # "링크 없음/head_sha 미상"과 동형 무해 경로를 타게 한다.
+        evidence=None,
     )
     s.execute = AsyncMock(return_value=gr)
     return s
@@ -63,13 +76,10 @@ async def test_transition_forces_resolver_ignoring_body():
 
     async def _fake_transition(session, org_id, gate_id, status, resolver_id, note, *, pending_deliveries=None):
         captured["resolver_id"] = resolver_id
-        return SimpleNamespace(id=gate_id, org_id=org_id, work_item_id=uuid.uuid4(),
-                               work_item_type="story", gate_type="merge", status=status,
-                               resolver_id=resolver_id, resolved_at=None, resolution_note=None,
-                               held_until=None, neutral_facts=None, requires_human=False,
-                               evidence_status=None, decision_basis=None, auto_decision_reason=None,
-                               created_at=__import__("datetime").datetime.now(),
-                               updated_at=__import__("datetime").datetime.now())
+        # story #2837 — 예전엔 이 자리가 SimpleNamespace 손수 필드나열이라 gates.py가 새 Gate
+        # 필드를 읽을 때마다 AttributeError로 깨졌다(#2832의 github_check_run_sha가 그 사례).
+        # make_gate()는 실 Gate 필드셋을 그대로 기본 채움 — override만 명시.
+        return make_gate(id=gate_id, org_id=org_id, status=status, resolver_id=resolver_id)
 
     from fastapi import BackgroundTasks
     with patch.object(mod, "resolve_member", AsyncMock(return_value=caller)), \

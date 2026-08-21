@@ -13,7 +13,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -315,6 +315,9 @@ async def _resolve_legacy_org_by_repo_owner(
 async def _process_webhook_event(
     session: AsyncSession, source: str, event: str, payload: dict, installation_id: int | None,
     delivery: GithubWebhookDelivery,
+    *,
+    gate_check_publish: list[dict] | None = None,
+    ungated_check_publish: list[dict] | None = None,
 ) -> tuple[dict, str]:
     """검증·dedup 통과한 이벤트 처리(legacy/app 라우팅·Bot-L.1 resolver 체인). (result, status) 반환.
 
@@ -326,6 +329,11 @@ async def _process_webhook_event(
 
     P0-05 후속(doc scope-violation-signal-design §2): scope-violation 판정은 머지/CI 액션가능신호와
     **독립**(PR 자체 이벤트에서 판정) — resolver를 그 skip보다 먼저 실행해 두 판정이 서로를 막지 않게 한다.
+
+    ``gate_check_publish``(story #2813, ccbcd9da A-1 `pending_deliveries`와 동형 outparam): 넘기면
+    PR 라이프사이클 이벤트(opened/reopened/ready_for_review/synchronize)가 발행해야 할 GitHub
+    check-run 정보를 append — 호출자(github_webhook)가 **commit 後** 배경 태스크로 발행(fail-closed:
+    GitHub 외부 API 호출을 DB 트랜잭션 성공 확정 前에 하지 않는다).
     """
     texts = _candidate_texts(payload)
     repo = (payload.get("repository") or {}).get("full_name") or ""
@@ -377,10 +385,129 @@ async def _process_webhook_event(
             and rl.reason == "story_number_requires_org_scope"
         ):
             skipped_reason = repo_owner_reason
+        # story #2826(부 처방, PO 확定 2026-08-20) — 링크가 아예 안 풀린 PR 라이프사이클 이벤트라도
+        # org 컨텍스트가 확실하고 이 repo가 sprintable/gate를 required로 걸어 뒀으면, 침묵 부재
+        # 대신 action_required check로 "왜 막혔는지+다음 행동"을 안내한다. org_id가 여전히 None
+        # (legacy에서 repo owner 해소도 실패)이면 대상 밖 — 어느 org 설정을 볼지 모른다.
+        #
+        # ⛔실사고 정정(2026-08-20, 라이브 시험 #3254) — 최초 버전은 `source=="app" and
+        # installation is not None`만 받았는데, 페드루군이 그라운딩에서 이미 실측해 둔 사실
+        # ("App 자체 웹훅은 이벤트 구독 0 — PR 이벤트는 repo-level 웹훅이 나른다")을 놓쳐, repo-level
+        # 웹훅이 실제로 타는 secret(legacy)에서는 `installation`이 항상 None이라 이 분기가
+        # **한 번도 발화하지 않았다**(라이브 실측으로 발견 — action_required check-run 부재
+        # 확認). 위 legacy 분기가 이미 repo owner exactly-1-match로 org_id를 풀어 두므로, app/
+        # legacy 둘 다 org_id 하나만 있으면 installation_id를 다시 조회하면 된다(installation
+        # 객체 자체를 요구하지 않는다 — app 전용 가정 제거).
+        if (
+            org_id is not None
+            and event == "pull_request"
+            and pr_action in ("opened", "reopened", "ready_for_review", "synchronize")
+            and head_sha
+            and ungated_check_publish is not None
+        ):
+            from app.models.github_installation import GithubInstallation as _GithubInstallation
+            from app.services.gate_github_check import is_repo_check_enforced
+
+            _installation_id = installation.installation_id if installation is not None else (
+                await session.execute(
+                    select(_GithubInstallation.installation_id).where(
+                        _GithubInstallation.org_id == org_id,
+                        _GithubInstallation.suspended_at.is_(None),
+                    )
+                )
+            ).scalar_one_or_none()
+            if _installation_id is not None and await is_repo_check_enforced(session, org_id, repo):
+                ungated_check_publish.append({
+                    "installation_id": _installation_id,
+                    "repo_full_name": repo, "head_sha": head_sha, "pr_number": pr_number,
+                })
         return {"skipped_reason": skipped_reason, "recorded": []}, "ignored"  # no_match/auto suggestion 등.
     story_id = rl.story_id
     org_id = rl.org_id  # app=입력 org·legacy=story.org_id(resolver 검증). 단일 진실원.
     delivery.org_id = org_id
+
+    # story #2813 — PR 라이프사이클 자체(opened/reopened/ready_for_review/synchronize)는 CI/merge
+    # 증거와 무관하게 merge 게이트를 GitHub check-run으로 반영한다. 설계 doc §2-1(PO 승인): 카드
+    # 원안 "push 이벤트" 대신 `pull_request.synchronize`를 쓴다 — PR번호+head_sha가 payload에
+    # 이미 있어 브랜치→PR 매칭 추가조회가 불요. synchronize는 SHA 재-pending(§2-2)도 겸한다.
+    #
+    # ⛔카디르 QA(PR#3243)③-b — 재-pending 가드를 synchronize 하나에만 걸면, PR이 **다른
+    # head로 재오픈**(close→reopen 사이 강제 push 등)되거나 draft→ready_for_review로 전환되며
+    # 그새 커밋이 바뀐 경우를 못 잡는다. 네 액션 전부에서 동일 가드를 돌린다(비교 비용은 동일).
+    if (
+        event == "pull_request"
+        and pr_action in ("opened", "reopened", "ready_for_review", "synchronize")
+        and head_sha
+        and gate_check_publish is not None
+    ):
+        from app.models.gate import Gate as _Gate
+        from app.services.gate_github_check import reopen_gate_if_new_sha
+        from app.services.merge_verdict_gate import MERGE_GATE_TYPE as _MERGE_GATE_TYPE
+
+        merge_gate = (
+            await session.execute(
+                select(_Gate).where(
+                    _Gate.org_id == org_id, _Gate.work_item_id == story_id,
+                    _Gate.work_item_type == "story", _Gate.gate_type == _MERGE_GATE_TYPE,
+                )
+            )
+        ).scalar_one_or_none()
+        if merge_gate is not None:
+            await reopen_gate_if_new_sha(
+                session, org_id, merge_gate, head_sha,
+                repo_full_name=repo, pr_number=pr_number,
+            )
+            gate_check_publish.append({
+                "org_id": org_id, "gate_id": merge_gate.id,
+                "head_sha": head_sha, "repo_full_name": repo, "pr_number": pr_number,
+            })
+        else:
+            # story #2826(주 처방, PO 확定 2026-08-20) — story 링크는 해소됐는데 gate가 아직
+            # 없다(지금까지 유일한 생성 경로였던 board →done preflight를 아직 안 거쳤다는 뜻,
+            # 그라운딩 참고: create_gate(merge) 실 호출부는 evaluate_merge_gate 하나뿐). PR
+            # 자체가 연결된 실 신호이므로 이 자리에서 즉시 평가·생성한다 — **판정 로직은
+            # evaluate_merge_gate 재사용**(board preflight와 동일 chokepoint, 새 규칙 발명 0).
+            # pr_number>0을 넘겨 "no-substance"(§P0 no-gate) 숏컷을 건너뛴다 — 연결된 PR
+            # 자체가 그 숏컷이 요구하는 "실 신호"다. create_gate의 uq(work_item,gate_type) 멱등이
+            # 이 경로와 board-preflight 경로 사이 중복 생성을 이미 막는다(어느 쪽이 먼저 오든
+            # 나중 쪽은 기존 gate를 그대로 반환) — 별도 dedup 로직 불필요.
+            from app.services.merge_verdict_gate import evaluate_merge_gate as _evaluate_merge_gate
+
+            decision = await _evaluate_merge_gate(
+                session, org_id, story_id,
+                pr_number=pr_number, repo=repo, ci_result=None, head_sha=head_sha,
+            )
+            if decision.gate_id is not None:
+                gate_check_publish.append({
+                    "org_id": org_id, "gate_id": decision.gate_id,
+                    "head_sha": head_sha, "repo_full_name": repo, "pr_number": pr_number,
+                })
+            elif ungated_check_publish is not None:
+                # story #2847(AC2) — 이 chokepoint(pr_number>0 고정)에서 gate_id=None은 오직
+                # "no implementation participation" 조기반환 하나뿐(evaluate_merge_gate의
+                # no-substance 숏컷은 pr_number<=0 전용이라 여기선 절대 안 탄다 — 그라운딩
+                # 확認). #2826과 동형으로 침묵 대신 action_required check로 안내.
+                from app.models.github_installation import GithubInstallation as _GithubInstallation2
+                from app.services.gate_github_check import (
+                    PARTICIPATION_REQUIRED_SUMMARY,
+                    PARTICIPATION_REQUIRED_TITLE,
+                    is_repo_check_enforced as _is_repo_check_enforced2,
+                )
+
+                _installation_id2 = installation.installation_id if installation is not None else (
+                    await session.execute(
+                        select(_GithubInstallation2.installation_id).where(
+                            _GithubInstallation2.org_id == org_id,
+                            _GithubInstallation2.suspended_at.is_(None),
+                        )
+                    )
+                ).scalar_one_or_none()
+                if _installation_id2 is not None and await _is_repo_check_enforced2(session, org_id, repo):
+                    ungated_check_publish.append({
+                        "installation_id": _installation_id2,
+                        "repo_full_name": repo, "head_sha": head_sha, "pr_number": pr_number,
+                        "title": PARTICIPATION_REQUIRED_TITLE, "summary": PARTICIPATION_REQUIRED_SUMMARY,
+                    })
 
     # P0-05 후속(doc scope-violation-signal-design §2·§3): PR 자체 이벤트(opened/synchronize/reopened)
     # + confident link(should_auto_close 동일 신뢰 등급)일 때만 판정. 3중 침묵 조건은 헬퍼 내부.
@@ -469,10 +596,25 @@ async def _process_webhook_event(
     # 배달은 영구 no-op(processed로 커밋)"이 돼 GitHub 재시도를 못 받는다(delivery 모델
     # 자체 계약 — "실패=rollback→retry 보존"). 이 함수 밖(github_webhook)이 이미 예외를
     # 전체 rollback+500으로 처리해 GitHub가 재시도하므로, 여기서 삼키지 않고 그대로 올린다.
-    await reconcile_merge_gate_with_real_evidence(
+    # story #2813(카디르 R2) — head_sha를 넘겨 auto_passed 판정 시 anchor(gate.approved_head_sha)
+    # 즉시 확定(merge_verdict_gate.evaluate_merge_gate 참고).
+    _reconcile_decision = await reconcile_merge_gate_with_real_evidence(
         session, org_id, story_id,
         pr_number=pr_number, repo=repo, ci_result=ci_conclusion, merged=merged,
+        head_sha=head_sha,
     )
+    # story #2853(AC①) — 예전엔 이 반환값을 그냥 버려, 재평가로 decision이 AUTO_MERGE에서
+    # 이탈해도(CI 재실패·trust 재계산 등) 이미 GitHub에 선 success check-run이 안 고쳐졌다.
+    # 위 gate auto-create 분기와 동일 패턴으로 무조건 큐잉 — publish_gate_check()는 이미
+    # 스스로 안전하다(status/anchor 불일치 시 자연 skip, gate_github_check.py 참고).
+    if (
+        _reconcile_decision is not None and _reconcile_decision.gate_id is not None
+        and gate_check_publish is not None
+    ):
+        gate_check_publish.append({
+            "org_id": org_id, "gate_id": _reconcile_decision.gate_id,
+            "head_sha": head_sha, "repo_full_name": repo, "pr_number": pr_number,
+        })
 
     # ⭐story #2327 후속(PO 판정, 2026-07-30, PR#2685 실 웹훅 시험대가 드러낸 갭) — merge 시
     # PullRequestStoryLink 에도 쓴다. `Verdict`(record_verdict, 위 capture_pr_ci_verdict 안)에도
@@ -596,6 +738,7 @@ async def _maybe_check_scope_violation(
 @router.post("/github-webhook")
 async def github_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
     x_github_event: str | None = Header(default=None),
     x_hub_signature_256: str | None = Header(default=None),
@@ -606,6 +749,9 @@ async def github_webhook(
     보안(산티아고 lock): ⭐**HMAC-before-parse**(검증 前 parse/DB/dedup/capture 0)·source 는 **검증된
     secret 으로만**(payload 금지)·dedup `(source, delivery_id)` insert+side-effect+status **동일 트랜잭션**
     (실패=rollback→GitHub retry 보존·중복=2xx no-op)·app=installation resolve 後 org-scope(anti-IDOR).
+
+    story #2813: PR 라이프사이클 이벤트가 만든 GitHub check-run 발행은 **commit 後**(fail-closed —
+    외부 API 호출을 DB 트랜잭션 확정 前에 하지 않는다) `background_tasks`로.
     """
     raw = await request.body()
 
@@ -643,9 +789,13 @@ async def github_webhook(
         return _ok({"skipped_reason": "duplicate_delivery", "recorded": []})
 
     # 5) 처리 + status 갱신 + commit 을 **동일 트랜잭션**으로. 실패=rollback(delivery row 도 함께 → retry 보존).
+    _gate_check_publish: list[dict] = []
+    _ungated_check_publish: list[dict] = []
     try:
         result, status_label = await _process_webhook_event(
-            session, source, event, payload, installation_id, delivery
+            session, source, event, payload, installation_id, delivery,
+            gate_check_publish=_gate_check_publish,
+            ungated_check_publish=_ungated_check_publish,
         )
         delivery.status = status_label
         # story #2327(재정의): "ignored"의 실제 사유를 delivery 행에도 남긴다 — HTTP 응답
@@ -653,6 +803,18 @@ async def github_webhook(
         delivery.skipped_reason = result.get("skipped_reason") if status_label == "ignored" else None
         delivery.processed_at = datetime.now(timezone.utc)
         await session.commit()
+        # story #2813: commit 확정 後에만 GitHub check-run 발행(fail-closed).
+        if _gate_check_publish:
+            from app.services.gate_github_check import publish_gate_check
+
+            for _payload in _gate_check_publish:
+                background_tasks.add_task(publish_gate_check, **_payload)
+        # story #2826(부 처방): gate-less action_required 안내도 동일하게 commit 後 발행.
+        if _ungated_check_publish:
+            from app.services.gate_github_check import publish_action_required_check
+
+            for _payload in _ungated_check_publish:
+                background_tasks.add_task(publish_action_required_check, **_payload)
         return _ok(result)
     except Exception as exc:
         await session.rollback()  # delivery insert 포함 전부 rollback → GitHub retry 가 재처리(영구 no-op 금지).

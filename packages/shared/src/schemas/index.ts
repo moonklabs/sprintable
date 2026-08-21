@@ -97,38 +97,18 @@ export const createMemoLinkedDocSchema = z.object({
 });
 
 // ─── Epic ────────────────────────────────────
-export const createEpicSchema = z.object({
-  project_id: z.string().min(1).optional(),
-  org_id: z.string().min(1).optional(),
-  title: z.string().min(1),
-  status: z.string().optional(),
-  priority: z.string().optional(),
-  description: z.string().optional().nullable(),
-});
-
-export const updateEpicSchema = z.object({
-  title: z.string().min(1).optional(),
-  status: z.string().optional(),
-  priority: z.string().optional(),
-  description: z.string().optional().nullable(),
-});
+// story #2863(P0, 긴급) — 이 자리에 독립 정의된 구판(4필드뿐, assignee_id 등 8개 필드
+// 누락)이 epics.ts의 실제 최신판을 export 체인에서 완전히 가렸다(epics.ts는 어디서도
+// re-export 안 됨 — 도달 불가능한 죽은 코드였음). zod가 미인식 키를 조용히 strip해
+// PATCH /api/goals/{id}(assignee_id)가 200+무반영이었던 근본원인. updateHypothesisSchema
+// 처럼 실 정의 파일을 그대로 재노출(정의 중복 0)하는 형태로 통일한다.
+export { createEpicSchema, updateEpicSchema, EPIC_STATUSES } from './epics';
 
 // ─── Sprint ──────────────────────────────────
-export const createSprintSchema = z.object({
-  project_id: z.string().min(1).optional(),
-  org_id: z.string().min(1).optional(),
-  title: z.string().min(1),
-  start_date: z.string().min(1),
-  end_date: z.string().min(1),
-  team_size: z.number().int().positive().optional(),
-});
-
-export const updateSprintSchema = z.object({
-  title: z.string().min(1).optional(),
-  start_date: z.string().optional(),
-  end_date: z.string().optional(),
-  team_size: z.number().int().positive().optional(),
-});
+// story #2863(P0) 스윕 — epics와 동일 클래스(지역 재정의가 sprints.ts를 죽은 코드로 가려
+// success_hypothesis/metric_definition/measure_after가 조용히 drop되고 있었다). sprints.ts로
+// 필드 합집합 병합 후 재노출로 통일.
+export { createSprintSchema, updateSprintSchema } from './sprints';
 
 // ─── Story ───────────────────────────────────
 export { createStorySchema, updateStorySchema, bulkUpdateStoriesSchema as bulkUpdateStorySchema, VALID_STORY_TRANSITIONS, STORY_STATUSES, STORY_PRIORITIES, STORY_SP_VALUES } from './stories';
@@ -164,32 +144,10 @@ export const updateTaskSchema = z.object({
 });
 
 // ─── Doc ─────────────────────────────────────
-export const createDocSchema = z.object({
-  title: z.string().min(1),
-  slug: z.string().optional(),
-  content: z.string().optional(),
-  content_format: z.enum(['markdown', 'html']).optional(),
-  icon: z.string().optional().nullable(),
-  tags: z.array(z.string()).optional(),
-  parent_id: z.string().optional().nullable(),
-  is_folder: z.boolean().optional(),
-});
-
-export const updateDocSchema = z.object({
-  title: z.string().min(1).optional(),
-  slug: z.string().optional(),
-  content: z.string().optional(),
-  content_format: z.enum(['markdown', 'html']).optional(),
-  icon: z.string().optional().nullable(),
-  tags: z.array(z.string()).optional(),
-  parent_id: z.string().optional().nullable(),
-  expected_updated_at: z.string().optional(),
-  force_overwrite: z.boolean().optional(),
-});
-
-export const createDocCommentSchema = z.object({
-  content: z.string().min(1),
-});
+// story #2863(P0) 스윕 — epics와 동일 클래스(지역 재정의가 docs.ts를 죽은 코드로 가림).
+// docs.ts로 필드 합집합 병합 후 재노출로 통일(docCommentSchema는 기존 공개 이름 보존을
+// 위해 createDocCommentSchema로 별칭).
+export { createDocSchema, updateDocSchema, docCommentSchema as createDocCommentSchema } from './docs';
 
 // ─── Standup ─────────────────────────────────
 export const saveStandupSchema = z.object({

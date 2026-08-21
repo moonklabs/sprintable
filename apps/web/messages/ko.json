@@ -430,6 +430,29 @@
     "clusterStalledOpen": "열기 →",
     "clusterViewAll": "{n}건 전체보기 →",
     "clusterViewLess": "접기",
+    "clusterUnclosedTitle": "닫힌 적 없는 루프",
+    "clusterUnclosedSub": "측정 기한이 지났거나 결과 판정이 없는 항목",
+    "clusterUnclosedBadgeOverdueHypothesis": "측정 기한 지남",
+    "clusterUnclosedBadgeOverdueGoal": "측정 기한 지남",
+    "clusterUnclosedBadgeOutcomeMissing": "결과 미판정",
+    "clusterUnclosedOverdueHypothesisTitle": "가설 측정 기한이 지났습니다",
+    "clusterUnclosedOverdueGoalTitle": "목표 측정 기한이 지났습니다",
+    "clusterUnclosedOutcomeMissingTitle": "완료된 목표에 결과 판정이 없습니다",
+    "clusterUnclosedDaysOverdue": "{n}일 지남",
+    "clusterUnclosedDaysDone": "{n}일째 미판정",
+    "clusterUnclosedShowMore": "{n}건 더보기",
+    "clusterUnclosedCapNotice": "상위 {shown}건 표시 중 · 총 {total}건",
+    "clusterUnclosedViewQueue": "전체 큐 보기",
+    "clusterUnclosedMeasurePlanMissing": "+{count}건은 측정 계획이 아직 없음",
+    "clusterUnclosedUnmeasurableGoal": "{count}건은 측정 불가로 선언됨",
+    "clusterAuthFailureTitle": "에이전트 인증 실패",
+    "clusterAuthFailureSub": "API 키 문제로 요청이 반복 거부됨",
+    "clusterAuthFailureReasonExpired": "API 키 만료",
+    "clusterAuthFailureReasonRevoked": "API 키 무효화",
+    "clusterAuthFailureReasonInvalid": "API 키 인식 불가",
+    "clusterAuthFailureDiagnostic": "최근 5분 {n}회",
+    "clusterAuthFailureReissue": "키 재발급",
+    "clusterAuthFailureUnknownAgent": "알 수 없는 에이전트",
     "doneGenericContext": "근거를 확인하고 승인하세요",
     "loopTitle": "실험실",
     "loopSubject": "검증 중인 가설",
@@ -1553,6 +1576,12 @@
     "agentApiKeySingleRevokeDialogBody": "무효화하면 이 키로 연결된 에이전트는 더 이상 인증되지 않습니다. 되돌릴 수 없습니다.",
     "agentApiKeySingleRevokeConfirmCta": "키 무효화",
     "agentApiKeyScopeLabel": "이 키의 툴 권한 (scope)",
+    "agentApiKeyExpiryLabel": "만료 기간",
+    "agentApiKeyExpiry30d": "30일",
+    "agentApiKeyExpiry90d": "90일",
+    "agentApiKeyExpiry180d": "180일",
+    "agentApiKeyExpiry365d": "1년",
+    "agentApiKeyExpiryNever": "만료 없음",
     "agentApiKeyOnboardingInstruction": "에이전트에게 아래 온보딩 메시지를 전달하세요:",
     "agentApiKeyOnboardingMessageBase": "아래의 정보를 읽고 온보딩하기 바람.\nsprintable agent name : {agentName}\nsprintable agent api key : {apiKey}\n{llmsUrl}",
     "agentApiKeyOnboardingMessageMcpSuffix": "\n\nMCP 서버 설정(.mcp.json에 병합):\n{mcpConfig}",
@@ -2921,6 +2950,18 @@
     "saving": "저장 중…",
     "deleting": "삭제 중…",
     "saveFailed": "저장하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    "outcomeDialogTitle": "목표를 닫습니다 — 결과를 판정해 주세요",
+    "outcomeChoiceHit": "맞았다",
+    "outcomeChoiceMiss": "틀렸다",
+    "outcomeChoiceUnmeasurable": "측정 불가",
+    "outcomeActualLabel": "실제 수치",
+    "outcomeReasonLabel": "근거 (한 줄)",
+    "outcomeReasonHint": "근거 없이는 닫을 수 없습니다.",
+    "outcomeUnmeasurableReasonHint": "측정 불가 사유를 적어주세요.",
+    "outcomeSkipLink": "판정 없이 닫기",
+    "outcomeSkipWarning": "판정 없이 닫으면 «unmeasured」로 마킹되어 「닫힌 적 없는 루프」에 남습니다.",
+    "outcomeSkipConfirm": "그대로 닫기",
+    "outcomeSubmit": "판정 저장",
     "progress": "진행 상황",
     "edit": "편집",
     "itemCount": "{count}건",
@@ -3241,7 +3282,11 @@
     "groupOffline": "오프라인",
     "working": "답 생성 중",
     "assignedStory": "\"{title}\" 담당",
-    "empty": "표시할 에이전트가 없습니다"
+    "empty": "표시할 에이전트가 없습니다",
+    "authFailureBadge": "인증 실패",
+    "authFailureTooltipExpired": "API 키 만료 · 최근 5분 {n}회",
+    "authFailureTooltipRevoked": "API 키 무효화 · 최근 5분 {n}회",
+    "authFailureTooltipInvalid": "API 키 인식 불가 · 최근 5분 {n}회"
   },
   "chats": {
     "unreadMarker": "여기부터 안읽음",
@@ -3485,6 +3530,8 @@
     "statusHit": "적중",
     "statusMiss": "빗나감",
     "statusPending": "측정 대기",
+    "statusUnmeasured": "판정 없이 닫힘",
+    "statusUnmeasurable": "측정 불가",
     "hypothesisLabel": "세웠던 가설",
     "target": "목표",
     "actual": "실제",
@@ -3668,10 +3715,25 @@
     "ciPass": "통과",
     "ciFail": "실패",
     "ciUnknown": "알 수 없음",
+    "githubCheckLabel": "GitHub check",
+    "githubCheckNotPublished": "발행 대기",
+    "githubCheckPending": "확인 중",
+    "githubCheckSuccess": "통과",
+    "githubCheckFailure": "실패",
+    "githubCheckShaLabel": "SHA {sha}",
+    "githubCheckRependingReason": "새 커밋(SHA {newSha})으로 이전 승인이 무효화돼 재-pending 됐습니다.",
+    "githubCheckRependingReasonWithPrior": "SHA {priorSha}에서 SHA {newSha}로 무효화돼 재-pending 됐습니다.",
     "trustLabel": "신뢰도",
     "trustScorePercent": "{score}%",
     "selfReportTag": "자기보고",
     "reasonLabel": "사유",
+    "hypothesisDraftBadge": "판정 초안",
+    "hypothesisDraftTargetVerified": "맞음",
+    "hypothesisDraftTargetFalsified": "틀림",
+    "hypothesisDraftTargetKilled": "폐기",
+    "hypothesisDraftActual": "측정값 {value}",
+    "hypothesisDraftReason": "근거 · {reason}",
+    "hypothesisDraftReasonMissing": "근거 없음 — 확定 전 확인 필요",
     "gateReadonlyBlock": "자동 차단 · 읽기 전용",
     "gateReadonlyAuto": "자동 통과 · 액션 불필요",
     "gateReadonlyNoVerdict": "판정 미거침 · 표시할 액션 없음",
@@ -3707,47 +3769,6 @@
     "sigConsequenceNote": "승인은 당신의 서명으로 기록됩니다",
     "sigRequestChanges": "변경 요청",
     "sigApproveAndSign": "승인하고 서명"
-  },
-  "workflowRecipes": {
-    "scrum-3step": {
-      "name": "3단계 스크럼",
-      "description": "기획 → 개발 → QA 3단계 워크플로우. 소규모~중규모 스프린트에 적합.",
-      "steps": {
-        "kickoff": { "label": "요구사항 정의" },
-        "implementation": { "label": "구현" },
-        "qa_review": { "label": "검증" }
-      }
-    },
-    "kanban-simple": {
-      "name": "칸반 심플",
-      "description": "할 일 → 진행 중 → 완료 단순 흐름. 지속적 딜리버리 환경에 적합.",
-      "steps": {
-        "task_created": { "label": "작업 접수" },
-        "in_progress": { "label": "진행" },
-        "done_check": { "label": "완료 확인" }
-      }
-    },
-    "solo": {
-      "name": "솔로 에이전트",
-      "description": "단일 에이전트가 전 단계를 처리. 간단한 자동화 태스크에 적합.",
-      "steps": {
-        "received": { "label": "수신 및 분석" },
-        "execute": { "label": "실행" },
-        "report": { "label": "보고" }
-      }
-    },
-    "loop-agency": {
-      "name": "루프 에이전시",
-      "description": "목표·가설 설정 → 브리프 → 실행안 생성 → 인간 선택 → 실행 → 성과 학습까지 이어지는 복리 조직기억 워크플로우. 반복되는 실험(카피·캠페인 variant 등)에 적합.",
-      "steps": {
-        "goal_hypothesis": { "label": "목표·가설 정의" },
-        "brief_doc_approval": { "label": "브리프 작성" },
-        "generate_variants": { "label": "실행안 생성" },
-        "loop_decision": { "label": "인간 선택" },
-        "execute": { "label": "실행" },
-        "track_and_learn": { "label": "추적 및 학습" }
-      }
-    }
   },
   "recruiter": {
     "title": "채용관",
@@ -4042,5 +4063,20 @@
     "viewDecision": "결정",
     "conversationEmpty": "아직 메시지가 없습니다",
     "conversationFooter": "이 작업에 귀속된 지시·판단·증거·수정요청만. 뷰 전환(실행/증거/결정)=같은 스레드 다른 렌즈."
+  },
+  "loopQueue": {
+    "title": "닫히지 않은 루프 큐",
+    "subtitle": "측정 기한이 지났거나 결과 판정이 없는 항목 전부",
+    "unclaimedOnlyToggle": "담당자 없는 항목만",
+    "loading": "불러오는 중…",
+    "empty": "지금은 닫히지 않은 루프가 없습니다",
+    "claimedBy": "{name} 담당",
+    "unclaimed": "담당자 없음",
+    "claimAction": "내가 맡기",
+    "judgeAction": "판정하러 가기",
+    "pageSummary": "{from}–{to} / 총 {total}건",
+    "prevPage": "이전",
+    "nextPage": "다음",
+    "loopQueueUntitled": "제목 없는 항목"
   }
 }

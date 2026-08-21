@@ -206,9 +206,19 @@ jobs:
       # "Design review gate"는 여전히 비-advisory로 잡혀, 두 라벨이 다 걸린 PR에서 두 게이트가
       # 동시에 재실행되면(오늘 3086/3088류 실물 — 한 PR에 qa:pass+design:pass 둘 다 필요하면
       # 흔한 정상 상황) 서로가 서로를 "아직 안 끝남"으로 보고 상호 RED로 고착된다(둘 다 완료된
-      # 뒤에도 자동 재트리거가 없어 새 pull_request 이벤트 전까지 안 풀림). 상대 게이트 이름도
+      # 뒤에도 자동 재트리거가 없어 새 pull_request 이벤트 전까지 안 풀린다). 상대 게이트 이름도
       # 같이 뺀다 — 순환 대기를 구조적으로 없앤다(광범위 제외라 "advisory 아닌 다른 게이트류"가
       # 미래에 더 생기면 그때 또 추가해야 하는 갭은 남는다, 지금은 이 리포에 게이트가 이 둘뿐).
+      #
+      # ⛔story #2827(2026-08-20, 페드루 PO 판정·라이브 실사고 실측) — "sprintable/gate"(story
+      # #2813, Gate→GitHub required check)도 같은 범주다: 이 check는 사람이 gate를 승인해야
+      # success로 넘어가는데, 그 승인이 "QA/Design 리뷰가 이미 끝났다"를 전제로 하는 **뒤 순서**
+      # 액션이다 — QA review gate가 sprintable/gate의 완결을 기다리면 승인이 안 나온 채로는 QA
+      # gate가 영원히 안 풀리고, QA gate가 안 풀리면(비-advisory 미완료 판정에 걸려) gate의
+      # ci_result가 fail이 돼 승인 자체가 막힌다(결정론적 순환, rerun으로 안 풀림 — dev
+      # moonklabs/sprintable#3249 실측으로 확定). 위 QA/Design 상호제외와 동일한 근본 원인(둘 다
+      # "review-gate류"가 자기보다 늦게 끝나는 다른 review-gate류를 기다리는 카테고리 착오)이라
+      # 같은 처방을 적용 — sprintable/gate도 제외 목록에 추가한다.
       - name: Enforce no incomplete non-advisory checks when qa:pass is claimed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -216,7 +226,7 @@ jobs:
         run: |
           set -euo pipefail
           INCOMPLETE="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/check-runs" --paginate \
-            --jq '.check_runs[] | select(.name != "QA review gate" and .name != "Design review gate") | select(.name | endswith("— advisory") | not) | select(.status != "completed") | .name' \
+            --jq '.check_runs[] | select(.name != "QA review gate" and .name != "Design review gate" and .name != "sprintable/gate") | select(.name | endswith("— advisory") | not) | select(.status != "completed") | .name' \
             | sort -u)"
           if [ -n "${INCOMPLETE}" ]; then
             echo "::error title=required-ish checks still incomplete::qa:pass가 붙어 있지만 아직 안 끝난(비-advisory) 체크가 있다 — 「CI green」은 이것들이 전부 completed일 때만 참이다:"

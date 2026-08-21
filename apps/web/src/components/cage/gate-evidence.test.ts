@@ -7,7 +7,7 @@
 // 별도 읽기전용 텍스트는 "decision !== 'block'"만 보고 "Auto-passed"를 말했다 — 한 화면이
 // 반대되는 두 문장을 동시에 냈다.
 import { describe, expect, it } from 'vitest';
-import { gateDecision, gateNeedsAction } from './gate-evidence';
+import { gateDecision, gateHasEvidence, gateNeedsAction, githubCheckState } from './gate-evidence';
 import type { GateItem } from '@/components/kanban/types';
 
 function baseGate(overrides: Partial<GateItem>): GateItem {
@@ -53,5 +53,91 @@ describe('gateDecision — story #2043 판정 미거침 조합', () => {
   it('resolved(status≠pending) 게이트는 auto_decision_reason 없이는 null — 해소 문구는 status 자체로 별도 처리되므로 여기서 auto/ask를 지어내지 않는다', () => {
     const gate = baseGate({ status: 'approved', requires_human: true, auto_decision_reason: null });
     expect(gateDecision(gate)).toBeNull();
+  });
+});
+
+// story #2814 — GitHub check 상태 파생. BE gate_github_check.py::_github_state_for_gate_status와
+// 정합해야 한다(approved/auto_passed→success, rejected/voided→failure, pending/held→in_progress).
+describe('githubCheckState (story #2814)', () => {
+  it('github_check_run_id가 null이면 발행 안 됨/관측모드 둘 다 구분 못 하므로 null(표시 접음)이다', () => {
+    const gate = baseGate({ status: 'approved', github_check_run_id: null });
+    expect(githubCheckState(gate)).toBeNull();
+  });
+
+  it('github_check_run_id undefined(구버전 응답)도 동일하게 null이다', () => {
+    const gate = baseGate({ status: 'approved' });
+    expect(githubCheckState(gate)).toBeNull();
+  });
+
+  it.each([
+    ['approved', 'success'],
+    ['auto_passed', 'success'],
+    ['rejected', 'failure'],
+    ['voided', 'failure'],
+    ['pending', 'in_progress'],
+    ['held', 'in_progress'],
+  ] as const)('status=%s + check 발행됨 → %s', (status, expected) => {
+    const gate = baseGate({ status, github_check_run_id: 12345 });
+    expect(githubCheckState(gate)).toBe(expected);
+  });
+
+  it('check가 발행됐어도 gate status가 discussed 등 미정의 상태면 null이다', () => {
+    const gate = baseGate({ status: 'discussed', github_check_run_id: 12345 });
+    expect(githubCheckState(gate)).toBeNull();
+  });
+});
+
+describe('gateHasEvidence — GitHub check 단독 신호도 실 증거로 친다(story #2814)', () => {
+  it('CI/신뢰도/사유 전부 없어도 GitHub check가 발행됐으면 evidence 있음(State A로 안 가라앉음)', () => {
+    const gate = baseGate({ status: 'pending', github_check_run_id: 12345, neutral_facts: null });
+    expect(gateHasEvidence(gate)).toBe(true);
+  });
+
+  it('GitHub check도 없고 다른 신호도 전부 없으면 여전히 evidence 없음(기존 동작 보존)', () => {
+    const gate = baseGate({ status: 'pending', neutral_facts: null });
+    expect(gateHasEvidence(gate)).toBe(false);
+  });
+
+  // story #2862 — hypothesis_outcome_confirm 게이트는 ci/trust/cold_start_seed가 전혀 없어
+  // draft_target 신호가 없으면 gateHasEvidence가 false로 착시(=State A 빈 카드로 가라앉아
+  // 사람이 판정 초안을 아예 못 봄)를 회귀 가드.
+  it('draft_target이 있으면(다른 신호 전무여도) evidence 있음 — hypothesis_outcome_confirm 게이트가 State A로 안 가라앉는다', () => {
+    const gate = baseGate({
+      gate_type: 'hypothesis_outcome_confirm', status: 'pending',
+      neutral_facts: { draft_target: 'verified', draft_actual: 42, draft_reason: 'X' },
+    });
+    expect(gateHasEvidence(gate)).toBe(true);
+  });
+
+  it('draft_target이 계약 밖 값이면 evidence로 안 친다(no-fiction — 방어)', () => {
+    const gate = baseGate({
+      gate_type: 'hypothesis_outcome_confirm', status: 'pending',
+      neutral_facts: { draft_target: 'unknown' },
+    });
+    expect(gateHasEvidence(gate)).toBe(false);
+  });
+});
+
+// story #2814 2단(§5-④ 그라운딩·BE story #2815/PR#3245) — 관측모드 판별을 github_check_enforced
+// 필드 기반으로 승격. BE는 단건 조회(get_gate_endpoint)에서만 이 필드를 enrich한다.
+describe('githubCheckState — github_check_enforced 기반 승격(story #2814 2단)', () => {
+  it('enforced===false(관측모드 확定)면 run_id가 있어도 항상 숨김(가장 신뢰도 높은 신호가 우선)', () => {
+    const gate = baseGate({ status: 'approved', github_check_run_id: 12345, github_check_enforced: false });
+    expect(githubCheckState(gate)).toBeNull();
+  });
+
+  it('enforced===true인데 run_id가 아직 null이면 "관측모드"가 아니라 not_published로 승격 표시(1단엔 없던 상태)', () => {
+    const gate = baseGate({ status: 'pending', github_check_run_id: null, github_check_enforced: true });
+    expect(githubCheckState(gate)).toBe('not_published');
+  });
+
+  it('enforced가 undefined인 표면(list_gates/inbox 등 미enrich)은 1단 run_id 휴리스틱 그대로 폴백', () => {
+    const gate = baseGate({ status: 'pending', github_check_run_id: null });
+    expect(githubCheckState(gate)).toBeNull();
+  });
+
+  it('enforced===true + run_id 있으면 기존 status 매핑 그대로(1단 회귀 없음)', () => {
+    const gate = baseGate({ status: 'approved', github_check_run_id: 12345, github_check_enforced: true });
+    expect(githubCheckState(gate)).toBe('success');
   });
 });

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import random
 import time
 import uuid
@@ -42,6 +43,7 @@ from app.models.event import Event
 from app.services.member_resolver import assert_caller_is_member, resolve_member_identity
 
 router = APIRouter(prefix="/api/v2/events", tags=["events", "Organization"])
+logger = logging.getLogger(__name__)
 
 # ─── Agent connection registry (S2/S3: 에이전트별 SSE) ───────────────────────
 # member_id (str) → set[Queue] — 다중 연결 지원, 해제 시 해당 queue만 제거
@@ -1015,9 +1017,31 @@ async def publish_registry_event(
     이름을 다른 뜻으로 되쓰면 그 가드가 "부활"로 오판하는 게 아니라(가드는 hasattr만 보므로
     실제로 트립됐다), 미래 독자가 두 개념을 착각할 여지도 같이 없앤다.
 
-    definition_key+payload를 검증하고
-    routing(상신선·전파선)을 실 member_id로 풀어 기존 단일 판정 파이프(route_message/
-    DeliveryDecision, AC2)로 전달한다."""
+    실 로직은 `_publish_registry_event_core`(story #2791 P0 추출) — 서버 자동발행
+    (`publish_preset_event`)도 HTTP 요청 컨텍스트 없이 같은 core를 호출해 단일 파이프
+    원칙(#2633 AC2)을 유지한다. 이 엔드포인트는 auth 의존성 해석만 하고 넘긴다."""
+    return await _publish_registry_event_core(
+        db, org_id, auth, body.definition_key, body.payload, background_tasks,
+        request=request, extra_broadcast_member_ids=body.extra_broadcast_member_ids,
+    )
+
+
+async def _publish_registry_event_core(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    auth: AuthContext,
+    definition_key: str,
+    payload: dict,
+    background_tasks: BackgroundTasks,
+    *,
+    request: Request | None = None,
+    extra_broadcast_member_ids: "list[uuid.UUID] | None" = None,
+) -> dict:
+    """`publish_registry_event`(HTTP)·`publish_preset_event`(서버 자동발행, story #2791 P0)의
+    공유 core — definition_key+payload를 검증하고 routing(상신선·전파선)을 실 member_id로
+    풀어 기존 단일 판정 파이프(route_message/DeliveryDecision, AC2)로 전달한다. HTTP 전용
+    폴백(`request`가 있을 때만 쓰는 `resolve_required_project_id`)만 옵션 처리 — 자동발행
+    호출부는 항상 payload에 work_item/goal 참조를 실어 이 폴백에 안 걸린다."""
     from app.services.member_resolver import resolve_member
 
     sender = await resolve_member(auth, org_id, db)
@@ -1027,7 +1051,7 @@ async def publish_registry_event(
     definition = (await db.execute(
         select(EventDefinition)
         .where(
-            EventDefinition.key == body.definition_key,
+            EventDefinition.key == definition_key,
             EventDefinition.enabled.is_(True),
             or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
         )
@@ -1038,7 +1062,7 @@ async def publish_registry_event(
     )).scalars().first()
     if definition is None:
         raise HTTPException(
-            status_code=404, detail=f"event definition not found or disabled: {body.definition_key!r}",
+            status_code=404, detail=f"event definition not found or disabled: {definition_key!r}",
         )
 
     # story #2637 §범위3(미르코 발견 후속, 2026-08-14): action_auth 실 집행 — 정의에 걸려
@@ -1068,7 +1092,7 @@ async def publish_registry_event(
     from app.services.event_definition_registry import InvalidEventPayloadError, validate_event_payload
 
     try:
-        validate_event_payload(definition.payload_schema, body.payload)
+        validate_event_payload(definition.payload_schema, payload)
     except InvalidEventPayloadError as e:
         # story #2634 후속(#2633 정합): api_client.py의 _extract_error_message가 인식하는
         # {"detail":{"code","message"}} shape으로 맞춘다 — 신규 파싱 분기를 MCP 쪽에 안 만들고
@@ -1088,10 +1112,10 @@ async def publish_registry_event(
 
     try:
         escalation_ids = await resolve_routing_leg(
-            definition.routing["escalation"], payload=body.payload, org_id=org_id, db=db,
+            definition.routing["escalation"], payload=payload, org_id=org_id, db=db,
         )
         broadcast_ids = await resolve_routing_leg(
-            definition.routing["broadcast"], payload=body.payload, org_id=org_id, db=db,
+            definition.routing["broadcast"], payload=payload, org_id=org_id, db=db,
         )
     except (MissingRoutingPayloadFieldError, InvalidWorkItemReferenceError, UnknownRoutingMemberError) as e:
         raise HTTPException(
@@ -1099,7 +1123,7 @@ async def publish_registry_event(
             detail={"code": "invalid_payload", "message": str(e), "errors": [str(e)]},
         ) from e
 
-    if body.extra_broadcast_member_ids:
+    if extra_broadcast_member_ids:
         # story #2693(AC2): payload_field routing과 동일 검증 — 예전엔 filter_org_member_ids로
         # 비회원 id를 조용히 걸러내고(silent drop) 발행을 그대로 진행했다. AC1의 원자성
         # 요구(비회원이면 conv/msg 어느 것도 만들지 않는다)와 일관되게, 여기도 걸러내는 대신
@@ -1107,7 +1131,7 @@ async def publish_registry_event(
         # 동일 철학).
         from app.services.member_resolver import filter_org_member_ids
 
-        requested_extra = set(body.extra_broadcast_member_ids)
+        requested_extra = set(extra_broadcast_member_ids)
         valid_extra = await filter_org_member_ids(requested_extra, org_id, db)
         unknown_extra = requested_extra - valid_extra
         if unknown_extra:
@@ -1123,7 +1147,7 @@ async def publish_registry_event(
         broadcast_ids |= valid_extra
 
     try:
-        project_id = await _resolve_event_project_id(db, org_id=org_id, payload=body.payload)
+        project_id = await _resolve_event_project_id(db, org_id=org_id, payload=payload)
     except InvalidWorkItemReferenceError as e:
         raise HTTPException(
             status_code=400,
@@ -1138,8 +1162,8 @@ async def publish_registry_event(
         # 골라주면 더 헷갈린다 — 그대로 명시 거부(test_publish_unresolvable_project_400의
         # 기존 계약, AC2 무회귀).
         attempted_reference = bool(
-            (body.payload.get("work_item_type") and body.payload.get("work_item_id"))
-            or body.payload.get("goal_id")
+            (payload.get("work_item_type") and payload.get("work_item_id"))
+            or payload.get("goal_id")
         )
         if attempted_reference:
             raise HTTPException(
@@ -1175,9 +1199,9 @@ async def publish_registry_event(
     # "이벤트 발행분"으로 인지하고 event_key로 event_definitions를 조회해 block_template
     # 렌더러를 태울 근거. 렌더러 자체는 #2637 FE 레인(이 커밋은 스키마 배선만).
     send_body = SendMessageRequest(
-        content=_render_event_message_content(definition.key, body.payload),
+        content=_render_event_message_content(definition.key, payload),
         mentioned_ids=list(escalation_ids),
-        event_context={"event_key": definition.key, "payload": body.payload},
+        event_context={"event_key": definition.key, "payload": payload},
     )
     msg_response = await send_message(
         conv.id, send_body, background_tasks, db=db, auth=auth, org_id=org_id,
@@ -1204,6 +1228,149 @@ async def publish_registry_event(
     return result
 
 
+async def _get_or_create_system_publisher(db: AsyncSession, org_id: uuid.UUID) -> "Member":
+    """story #2791(P0) — 서버 도메인 전이 자동발행 전용 시스템 발신자. org당 정확히 1행
+    (0258 부분 유니크 인덱스로 DB 레벨 동시성 가드), get-or-create 멱등.
+
+    ⚠️`team_members`가 아니라 **`members`**(anchor 테이블)에 직접 쓴다 — `team_members`는
+    0088+에서 `members`/`project_access`/`agent_project_profiles` 위 3-way UNION ALL VIEW로
+    전환됐다(초판 실수 CI가 실측으로 잡아냄, 0258 참조). `send_message`의 sender 해석
+    (conversations.py::`_resolve_member`, api_key 분기)은 `team_members` 뷰를 `TeamMember.id
+    == auth.user_id`로 SELECT하므로, 이 member가 뷰에 최소 1행 투영되려면 `project_access`
+    grant가 최소 1건 있어야 한다(뷰의 3번째 UNION 브랜치 — profile 없는 agent-grant-only).
+
+    소유·수명: 이 org가 존재하는 한 영구 — 별도 TTL·수동 정리 없음(자동발행 자체가 이 org
+    수명과 결합돼 있어 "고아 리소스" 클래스가 아니다).
+
+    project_access의 `project_id`는 org 내 아무 project 하나에 anchor해도 무방(2026-08-19
+    실측, story #2791 PR 참조) — sender 해석 자체는 project 무관, 그 project를 특정
+    대화방에 결부시키는 것도 아니다(발행 대상 conversation의 project_id는 매 호출마다
+    `_resolve_event_project_id`가 payload의 work_item/goal에서 별도로 뽑는다).
+
+    `type='agent'`로 만들어 기존 서킷브레이커(agent 발신자 전용, story #2630)가 자동발행
+    폭주(전이 루프)도 그대로 방어하게 한다 — 의도적으로 끄지 않는다(P0 가드②). 마커는
+    `members.runtime_type`(9종 enum이지만 `get_runtime_capability`가 미등록 문자열을
+    UNSUPPORTED_CAPABILITY로 안전 처리 — app/services/agent_runtime.py 확인) 재사용 —
+    `team_members` 뷰가 이 컬럼을 그대로 투영해 `send_message()` 등 뷰 기반 호출부가 값을
+    직접 읽을 수 있다(초판은 `handle`을 썼으나 뷰가 그 컬럼을 투영 안 해 재QA 중 정정,
+    0258 참조). 이 마커가 실제로 쓰이는 자리 — `send_message()`가 발신자 `runtime_type`이
+    이 값이면 presence/working 방출을 스킵한다(아래 가드③ 참조: system 발신자는 애초에
+    "지금 활동 중"이라는 presence 개념이 성립하지 않는 존재라 org 전체에 그 신호를 쏘는
+    것 자체가 의미론적으로 틀렸다는 판단, 페드루 2026-08-19).
+    이름 "시스템 발행"은 채팅 카드의 sender 표시가 사람 눈에 시스템 발행임을 신규 FE 없이
+    이름만으로 읽히게 하기 위함(P0 가드④) — 팀멤버 목록·리더보드·워크포스 표면에는 이 이름
+    그대로의 agent 1명으로 노출된다(관측 기록, P0 스코프 밖 — 페드루 2026-08-19 확認).
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.models.member import Member
+    from app.models.project import Project
+    from app.models.project_access import ProjectAccess
+
+    existing = (await db.execute(
+        select(Member).where(
+            Member.org_id == org_id, Member.runtime_type == "system-publisher", Member.type == "agent",
+        ).limit(1)
+    )).scalars().first()
+    if existing is not None:
+        return existing
+
+    anchor_project_id = (await db.execute(
+        select(Project.id)
+        .where(Project.org_id == org_id, Project.deleted_at.is_(None))
+        .order_by(Project.created_at.asc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if anchor_project_id is None:
+        raise ValueError(f"org {org_id}에 anchor할 project가 없음 — 시스템 발신자 프로비저닝 불가")
+
+    ins = pg_insert(Member).values(
+        id=uuid.uuid4(), org_id=org_id, type="agent", name="시스템 발행",
+        runtime_type="system-publisher", is_active=True,
+    ).on_conflict_do_nothing(
+        index_elements=["org_id"],
+        index_where=(and_(Member.runtime_type == "system-publisher", Member.type == "agent")),
+    ).returning(Member.id)
+    member_id = (await db.execute(ins)).scalar_one_or_none()
+    if member_id is None:
+        # 동시요청 레이스로 다른 트랜잭션이 먼저 생성 — 재조회(asset_registry.py와 동일 TOCTOU 대응).
+        return (await db.execute(
+            select(Member).where(
+                Member.org_id == org_id, Member.runtime_type == "system-publisher", Member.type == "agent",
+            )
+        )).scalars().one()
+
+    # team_members 뷰(3번째 UNION 브랜치)에 투영되려면 project_access grant가 최소 1건 필요.
+    # 별도 on_conflict 불요 — 위 members insert가 org당 1행을 이미 원자적으로 게이팅해서,
+    # 이 라인엔 그 레이스를 이긴 트랜잭션 단 하나만 도달한다(재조회 분기는 여기 안 옴).
+    db.add(ProjectAccess(
+        id=uuid.uuid4(), project_id=anchor_project_id, org_member_id=None,
+        member_id=member_id, permission="granted", role="member",
+    ))
+    await db.flush()
+    return (await db.execute(select(Member).where(Member.id == member_id))).scalars().one()
+
+
+async def publish_preset_event(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    definition_key: str,
+    payload: dict,
+) -> dict | None:
+    """story #2791(P0, event-workflow-unification-design-2790) — 서버 도메인 전이 지점
+    (상태변경·배정·게이트판정·목표측정)에서 호출하는 자동발행 진입점. HTTP 요청 컨텍스트
+    없이(4개 호출부 전부 `BackgroundTasks` 미보유 — 시그니처 확장 대신 이 함수가 자체
+    `BackgroundTasks()`를 만들어 `_publish_registry_event_core` 완료 직후 즉시 실행한다,
+    HTTP 응답 이후로 미룰 대상이 없으므로 안전) `_publish_registry_event_core`를 그대로
+    호출해 #2633 AC2 단일 발행 파이프 원칙을 지킨다 — 신규 발행 갈래를 만들지 않는다.
+
+    **구계통(story_status_events.py 등 SSE·웹훅·알림)과의 관계는 병행이다, 대체가 아니다**
+    — 이 함수는 기존 5-effect 옆에 프리셋 발행을 하나 더 추가할 뿐, 기존 effect를 하나도
+    안 건드린다(이중발송처럼 보이지만 서로 다른 채널: 구계통=SSE/webhook/notification,
+    신계통=이벤트 레지스트리 발행 대화 메시지 — 수신자가 같아도 매체가 다르다).
+
+    ⚠️호출자 계약(story_status_events.py::emit_story_status_changed와 동형) — 이 함수는
+    예외를 삼키지 않는다. best-effort 격리(실패가 도메인 전이 자체를 깨면 안 됨)는
+    **호출자**가 개별 try/except로 감싸는 몫이다 — 이 함수 안에서 조용히 삼키면 실패
+    자체를 관측할 수 없다(기존 5-effect와 동일 조직 원칙).
+
+    반환값 `None` = definition이 비활성/미등록이라 정상 no-op(아직 이 org가 프리셋을 안
+    켰거나 #2636 커스텀 오버라이드로 비활성화한 경우 — 발행 실패가 아니다). zero-reach는
+    HTTP 응답 필드 대신 서버 로그(`logger.warning`)로 남긴다 — 이 호출엔 응답을 읽는 사람이
+    없어(핵심 제약②, 침묵 실패 금지) 응답 필드에만 실으면 완전히 유실된다.
+    """
+    from app.models.event_definition import EventDefinition
+
+    definition = (await db.execute(
+        select(EventDefinition)
+        .where(
+            EventDefinition.key == definition_key,
+            EventDefinition.enabled.is_(True),
+            or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)),
+        )
+        .limit(1)
+    )).scalars().first()
+    if definition is None:
+        return None
+
+    system_member = await _get_or_create_system_publisher(db, org_id)
+    auth = AuthContext(
+        user_id=str(system_member.id), email=None,
+        claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(org_id),
+    )
+    background_tasks = BackgroundTasks()
+    result = await _publish_registry_event_core(
+        db, org_id, auth, definition_key, payload, background_tasks,
+    )
+    await background_tasks()
+    if result.get("zero_reach_warning"):
+        logger.warning(
+            "preset event zero_reach — 도달 0명(org=%s definition=%s payload_keys=%s)",
+            org_id, definition_key, sorted(payload.keys()),
+        )
+    return result
+
+
 class EventDefinitionResponse(BaseModel):
     # story #2663 — id가 없어 GET 목록에서 얻은 정의를 PATCH(uuid 필수)로 못 이어갔다(org
     # admin도 DB를 직접 파야 하는 갭이었다 — 2026-08-15 P2 어휘 집행 중 실측). 값은
@@ -1211,9 +1378,17 @@ class EventDefinitionResponse(BaseModel):
     id: str
     key: str
     org_id: str | None
+    # story #2792(2790 P1) — name/description 신설(PO 확定 2026-08-19 ①). key는 여전히
+    # 기계용 식별자, name이 사람용 표시(드롭다운 등) — role_templates류 i18n 오버레이는
+    # 여기 없음(신규 서브시스템 얹지 않는다, 이번 스코프 밖).
+    name: str
+    description: str | None
     payload_schema: dict
     routing: dict
     block_template: dict | None
+    # 사이클형 정의의 stage별 role/action 카탈로그 메타 — {slug: {role, action}}. 신호형/
+    # 측정형 정의는 빈 dict.
+    stage_metadata: dict
     enabled: bool
     version: int
 
@@ -1240,11 +1415,135 @@ async def list_event_definitions(
     return [
         EventDefinitionResponse(
             id=str(r.id), key=r.key, org_id=str(r.org_id) if r.org_id else None,
+            name=r.name, description=r.description,
             payload_schema=r.payload_schema, routing=r.routing,
-            block_template=r.block_template, enabled=r.enabled, version=r.version,
+            block_template=r.block_template, stage_metadata=r.stage_metadata,
+            enabled=r.enabled, version=r.version,
         )
         for r in rows
     ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# story #2793(2790 P2) — get_workflow_guide respec: "정본 패키지" 온보딩 가이드.
+# 판별 기준(카드 서두, 선생님 온보딩 철학 verbatim) = 최저 지능 에이전트로 실측 — 설명은
+# 짧고 명령형·한 번에 한 행동·다음 행동은 항상 서버가 알려준다. 이 엔드포인트가 그
+# "서버가 알려주는 다음 행동"의 유일한 소스가 된다(recipes[0] 임의 선택 완전 제거).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 짧고 명령형 — 온보딩 철학 자체를 한 단락으로. 새 규칙을 발명하지 않는다(카드 서두 원문
+# 요지의 재진술 — "설명 짧게·한 번에 한 행동·다음 행동은 서버가 알려줌"을 그대로 문장화).
+_ONBOARDING_PHILOSOPHY = (
+    "아래는 이 조직에서 발행 가능한 이벤트 전부입니다. 사이클형 이벤트는 각 단계마다 "
+    "누가(역할) 무엇을(행동) 해야 하는지 그대로 적혀 있습니다 — 외우지 말고 그때그때 이 "
+    "표를 다시 확인하세요. 한 번에 한 단계만 진행하세요. 무엇을 할지 모르겠으면 지어내지 "
+    "말고 이 표에서 찾으세요."
+)
+
+
+def _classify_event_kind(payload_schema: dict) -> str:
+    """페드루 확定 3서식 어휘(human-event-definer-design-v1) 재사용 — 새 분류 발명 안 함."""
+    props = (payload_schema or {}).get("properties") or {}
+    if isinstance((props.get("stage") or {}).get("enum"), list):
+        return "cycle"
+    if "metric_value" in props:
+        return "measurement"
+    return "signal"
+
+
+def _render_one_definition(r: "EventDefinition") -> list[str]:
+    """정의 1건을 마크다운 라인 목록으로 — 실패하면(malformed 데이터) 그대로 raise한다.
+    격리는 호출자(`_render_onboarding_guide`)의 몫(다른 부류의 격리와 동일 조직 원칙,
+    story_status_events.py류 — 함수 자체는 삼키지 않고 호출자가 포위한다)."""
+    lines = [f"## {r.name} (`{r.key}`)"]
+    if r.description:
+        lines.append(r.description)
+    kind = _classify_event_kind(r.payload_schema)
+    if kind == "cycle" and r.stage_metadata:
+        lines.append("")
+        lines.append("이 이벤트는 다음 상황에서 발행하세요:")
+        stage_order = ((r.payload_schema.get("properties") or {}).get("stage") or {}).get("enum") or []
+        for slug in stage_order:
+            meta = r.stage_metadata.get(slug)
+            if not meta:
+                continue
+            # ⛔실버그(카디르군 QA, 2026-08-19) — validate_stage_metadata(쓰기 시점)가 값
+            # 모양을 강제하지만, 이 렌더러는 그 가드를 못 거친(레거시·경합 등) 데이터가
+            # 와도 안전해야 한다 — dict가 아니거나 role/action이 없으면 명시 raise해
+            # 아래 per-row try/except가 "이 정의 1건만" 건너뛰게 한다.
+            if not isinstance(meta, dict) or not isinstance(meta.get("role"), str) or not isinstance(meta.get("action"), str):
+                raise ValueError(f"{r.key}: stage_metadata[{slug!r}] malformed({meta!r})")
+            lines.append(f"- 단계 `{slug}`: **{meta['role']}** 담당 — {meta['action']}")
+    else:
+        required = (r.payload_schema or {}).get("required") or []
+        if required:
+            lines.append("")
+            lines.append(f"발행 시 필수 항목: {', '.join(f'`{f}`' for f in required)}")
+    return lines
+
+
+def _render_onboarding_guide(rows: list["EventDefinition"]) -> str:
+    """enabled 정의만으로 마크다운 가이드 조립 — disabled를 넣으면 "발행 가능"이라는
+    잘못된 다음-행동 지시가 된다(list_event_definitions의 admin 감사 목적과 다른 축이라
+    disabled 포함 여부도 다르다, 의도적 비대칭).
+
+    ⛔실버그 fix(카디르군 QA, 2026-08-19) — 이전엔 이 루프 자체에서 렌더링해 정의 1건의
+    malformed stage_metadata가 org 전체 가이드를 500으로 죽였다(폭발 반경 = 그 org가
+    보는 모든 정의, preset 포함). 정의 1건 렌더를 `_render_one_definition`으로 분리해
+    per-row try/except로 격리 — 문제 있는 정의는 **그 항목만** 조용히 건너뛰고 나머지
+    가이드는 그대로 산다(로그로 관측 가능, exc_info 포함 — 완전 침묵 아님)."""
+    lines = [_ONBOARDING_PHILOSOPHY, ""]
+    for r in rows:
+        if not r.enabled:
+            continue
+        try:
+            lines.extend(_render_one_definition(r))
+        except Exception:
+            logger.warning(
+                "onboarding-guide: 정의 렌더 실패, 이 항목만 건너뜀(key=%s)", r.key, exc_info=True,
+            )
+            continue
+        lines.append("")
+    return "\n".join(lines).strip() + "\n"
+
+
+class OnboardingGuideResponse(BaseModel):
+    philosophy: str
+    guide: str
+    event_count: int
+
+
+@router.get("/onboarding-guide", response_model=OnboardingGuideResponse)
+async def get_onboarding_guide(
+    db: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+) -> OnboardingGuideResponse:
+    """GET /api/v2/events/onboarding-guide — story #2793(2790 P2): MCP `get_workflow_guide`
+    가 부르는 단일 소스. `recipes[0]` 임의 선택(구 workflow-recipes 결함ⓐ)을 대체 —
+    이 엔드포인트엔 "0번째"라는 개념 자체가 없다(전체 카탈로그를 한 번에 반환).
+
+    가시성은 `list_event_definitions`와 동일 SSOT(org 프리셋 ∪ 이 org 커스텀)지만 그와
+    달리 **enabled=false는 가이드에서 제외**한다 — 저건 admin 감사용(뭐가 꺼져 있는지도
+    보여야 함), 이건 "지금 뭘 할 수 있는지"를 알려주는 운영 가이드라 꺼진 이벤트를
+    보여주면 존재하지 않는 다음-행동을 지시하게 된다.
+
+    `stage_metadata`(story #2792 P1)가 "기대 행동"의 실 데이터 소스 — 더 이상 DB
+    `workflow_templates.steps[].action` 공란(구 결함ⓑ)에 기대지 않는다.
+    """
+    from app.models.event_definition import EventDefinition
+
+    rows = (await db.execute(
+        select(EventDefinition)
+        .where(or_(EventDefinition.org_id == org_id, EventDefinition.org_id.is_(None)))
+        .order_by(EventDefinition.key)
+    )).scalars().all()
+
+    enabled_rows = [r for r in rows if r.enabled]
+    return OnboardingGuideResponse(
+        philosophy=_ONBOARDING_PHILOSOPHY,
+        guide=_render_onboarding_guide(rows),
+        event_count=len(enabled_rows),
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1256,6 +1555,11 @@ async def list_event_definitions(
 
 class CreateEventDefinitionRequest(BaseModel):
     key: str
+    # story #2792(2790 P1, PO 확定 2026-08-19 ①) — 사람용 표시 이름(드롭다운 등). key는
+    # 기계용 식별자로 그대로 둔다. 기본값 ""은 DB server_default와 동일 안전망 컨벤션(#2636
+    # 기존 호출부가 name 없이도 여전히 동작 — 신규 필드가 기존 계약을 안 깬다).
+    name: str = ""
+    description: str | None = None
     payload_schema: dict
     routing: dict
     # story #2637 §범위1/5: optional — 없으면 렌더러가 현행 제네릭 폴백을 쓴다(비회귀).
@@ -1265,24 +1569,34 @@ class CreateEventDefinitionRequest(BaseModel):
     # (버튼/REST/MCP 전부 이 단일 엔드포인트를 탄다 — #2633 AC2 단일 파이프 덕에 별도
     # 집행 지점이 필요 없다).
     action_auth: dict | None = None
+    # story #2792(2790 P1) — 사이클형 정의의 stage별 role/action 카탈로그 메타. 키는
+    # payload_schema.properties.stage.enum의 부분집합이어야 한다(validate_stage_metadata,
+    # 가드①) — 비어 있으면(신호형/측정형) 검증 스킵.
+    stage_metadata: dict = {}
 
 
 class UpdateEventDefinitionRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
     payload_schema: dict | None = None
     routing: dict | None = None
     enabled: bool | None = None
     block_template: dict | None = None
     action_auth: dict | None = None
+    stage_metadata: dict | None = None
 
 
 class EventDefinitionDetailResponse(BaseModel):
     id: str
     key: str
     org_id: str | None
+    name: str
+    description: str | None
     payload_schema: dict
     routing: dict
     block_template: dict | None
     action_auth: dict | None
+    stage_metadata: dict
     enabled: bool
     version: int
     created_by: str | None
@@ -1291,8 +1605,10 @@ class EventDefinitionDetailResponse(BaseModel):
 def _event_definition_detail(d: "EventDefinition") -> EventDefinitionDetailResponse:
     return EventDefinitionDetailResponse(
         id=str(d.id), key=d.key, org_id=str(d.org_id) if d.org_id else None,
+        name=d.name, description=d.description,
         payload_schema=d.payload_schema, routing=d.routing,
         block_template=d.block_template, action_auth=d.action_auth,
+        stage_metadata=d.stage_metadata,
         enabled=d.enabled, version=d.version,
         created_by=str(d.created_by) if d.created_by else None,
     )
@@ -1330,11 +1646,13 @@ async def create_event_definition(
         InvalidEventDefinitionKeyError,
         InvalidEventRoutingError,
         InvalidPayloadSchemaError,
+        InvalidStageMetadataError,
         validate_action_auth,
         validate_block_template,
         validate_event_definition_key,
         validate_event_payload_schema_shape,
         validate_event_routing,
+        validate_stage_metadata,
     )
     from app.services.member_resolver import resolve_member
 
@@ -1350,9 +1668,11 @@ async def create_event_definition(
             validate_block_template(body.block_template)
         if body.action_auth is not None:
             validate_action_auth(body.action_auth)
+        validate_stage_metadata(body.payload_schema, body.stage_metadata)
     except (
         InvalidEventDefinitionKeyError, InvalidPayloadSchemaError,
         InvalidEventRoutingError, InvalidBlockTemplateError, InvalidActionAuthError,
+        InvalidStageMetadataError,
     ) as e:
         raise HTTPException(
             status_code=400, detail={"code": "invalid_definition", "message": str(e)},
@@ -1372,8 +1692,10 @@ async def create_event_definition(
     sender = await resolve_member(auth, org_id, db)
     definition = EventDefinition(
         id=uuid.uuid4(), key=body.key, org_id=org_id,
+        name=body.name, description=body.description,
         payload_schema=body.payload_schema, routing=body.routing,
         block_template=body.block_template, action_auth=body.action_auth,
+        stage_metadata=body.stage_metadata,
         created_by=sender.id,
     )
     db.add(definition)
@@ -1400,18 +1722,21 @@ async def update_event_definition(
         InvalidBlockTemplateError,
         InvalidEventRoutingError,
         InvalidPayloadSchemaError,
+        InvalidStageMetadataError,
         validate_action_auth,
         validate_block_template,
         validate_event_payload_schema_shape,
         validate_event_routing,
+        validate_stage_metadata,
     )
 
     if not await _is_org_admin(db, org_id, uuid.UUID(auth.user_id)):
         raise HTTPException(status_code=403, detail="org admin/owner required")
 
     if (
-        body.payload_schema is None and body.routing is None and body.enabled is None
-        and body.block_template is None and body.action_auth is None
+        body.name is None and body.description is None
+        and body.payload_schema is None and body.routing is None and body.enabled is None
+        and body.block_template is None and body.action_auth is None and body.stage_metadata is None
     ):
         raise HTTPException(status_code=400, detail="at least one field must be provided")
 
@@ -1423,7 +1748,32 @@ async def update_event_definition(
     if definition is None:
         raise HTTPException(status_code=404, detail="event definition not found")
 
+    # story #2792 가드① — stage_metadata는 payload_schema와 짝인 검증이라, 둘 중 하나만
+    # 바뀌어도 **유효 조합**(새 값 있으면 새 값·없으면 기존 값)으로 재검증한다. payload_schema만
+    # 줄어들고 stage_metadata를 안 건드리면 기존 메타가 고아가 될 수 있어(예: enum에서 stage
+    # 하나를 뺐는데 그 slug를 가리키던 메타는 그대로) — 이 경우도 여기서 걸린다.
+    if body.payload_schema is not None or body.stage_metadata is not None:
+        effective_schema = body.payload_schema if body.payload_schema is not None else definition.payload_schema
+        effective_stage_metadata = (
+            body.stage_metadata if body.stage_metadata is not None else definition.stage_metadata
+        )
+        try:
+            validate_stage_metadata(effective_schema, effective_stage_metadata)
+        except InvalidStageMetadataError as e:
+            raise HTTPException(
+                status_code=400, detail={"code": "invalid_definition", "message": str(e)},
+            ) from e
+
     content_changed = False
+    if body.name is not None:
+        definition.name = body.name
+        content_changed = True
+    if body.description is not None:
+        definition.description = body.description
+        content_changed = True
+    if body.stage_metadata is not None:
+        definition.stage_metadata = body.stage_metadata
+        content_changed = True
     if body.payload_schema is not None:
         try:
             validate_event_payload_schema_shape(body.payload_schema)

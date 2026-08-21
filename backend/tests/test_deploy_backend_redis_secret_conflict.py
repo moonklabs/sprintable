@@ -49,6 +49,8 @@ _DECLARED_SUBSTITUTIONS = {
     "_BACKEND_SSE_LEASE_REDIS_ENABLED", "_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED",
     "_FRONTEND_MIN_INSTANCES", "_FRONTEND_MAX_INSTANCES", "_LICENSE_CONSENT",
     "_NEXT_PUBLIC_APP_URL",
+    # story #2771 — office-converter(Gotenberg) URL, deploy-office-converter 스텝과 짝.
+    "_GOTENBERG_SERVICE_URL", "_OFFICE_CONVERTER_MAX_INSTANCES",
     "PROJECT_ID", "PROJECT_NUMBER", "BUILD_ID", "COMMIT_SHA", "SHORT_SHA",
     "REPO_NAME", "BRANCH_NAME", "TAG_NAME", "REVISION_ID", "LOCATION",
 }
@@ -60,7 +62,11 @@ _DECLARED_SUBSTITUTIONS = {
 # 아니라 이 스텝들로 좁힌다 — 넓히면 순수 YAML 주석(예: 다른 스텝을 설명하는 프로즈 안의
 # `${ENV}` 언급)에 오탐이 나서 안전한 주석을 억지로 고치게 만든다. bash entrypoint 스텝이
 # 새로 생기면 이 목록에 추가할 것(오르테가 지시 — deploy-realtime도 같은 함정 자리라 포함).
-_BASH_ENTRYPOINT_STEP_IDS = ("deploy-backend", "deploy-realtime")
+# story #2771 후속(2026-08-19) — deploy-office-converter도 실 substitution(${_DEPLOY_ENV} 등)을
+# 쓰는 bash entrypoint라 포함.
+_BASH_ENTRYPOINT_STEP_IDS = (
+    "deploy-backend", "deploy-realtime", "deploy-office-converter", "apply-gcs-attachments-cors",
+)
 
 
 def _extract_step_script(step_id: str) -> str:
@@ -85,7 +91,7 @@ def _apply_cloudbuild_escaping(script: str) -> str:
     return script.replace("$$", "$")
 
 
-def _run_env_vars_assembly(deploy_env: str, redis_url: str) -> str:
+def _run_env_vars_assembly(deploy_env: str, redis_url: str, gotenberg_url: str = "") -> str:
     """실제 gcloud 호출부만 잘라내고 ENV_VARS 조립 로직까지만 실행 — 실제 배포 없이 결과 문자열만 얻는다."""
     script = _apply_cloudbuild_escaping(_extract_deploy_backend_script())
     # 실제 gcloud run deploy 호출 라인 이후는 잘라내고 ENV_VARS를 echo하도록 붙인다.
@@ -114,6 +120,9 @@ def _run_env_vars_assembly(deploy_env: str, redis_url: str) -> str:
         "_REDIS_URL": redis_url,
         "_LICENSE_CONSENT": "agreed",
         "_NEXT_PUBLIC_APP_URL": "https://example.run.app",
+        # story #2771 — 기본 빈 문자열(substitutions 기본값과 정합, set -u라 미설정이면 스크립트가
+        # 죽는다 — 여기 없으면 이 테스트 전체가 붕괴).
+        "_GOTENBERG_SERVICE_URL": gotenberg_url,
     }
     proc = subprocess.run(
         ["bash", "-c", assembly_only],
@@ -178,6 +187,35 @@ def test_deploy_backend_prod_excludes_plain_redis_url():
     동명 충돌 방지, 값의 유무와 무관하게 키 자체가 없어야 한다)."""
     result = _run_env_vars_assembly("prod", "")
     assert "REDIS_URL" not in result
+
+
+
+
+def test_deploy_backend_includes_gotenberg_service_url_when_set():
+    """story #2771 — 부트스트랩 후(_GOTENBERG_SERVICE_URL 채워짐) env var가 실린다."""
+    result = _run_env_vars_assembly(
+        "dev", "redis://10.164.120.243:6379", gotenberg_url="https://office-converter-dev.example.run.app"
+    )
+    assert "GOTENBERG_SERVICE_URL=https://office-converter-dev.example.run.app" in result
+
+
+def test_deploy_backend_excludes_gotenberg_service_url_when_unset():
+    """⭐story #2771 부트스트랩 전 상태 — 빈 값이면 키 자체를 안 싣는다(office_conversion.py가
+    미설정을 503 fail-closed로 처리하므로 이게 안전한 기본 상태)."""
+    result = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", gotenberg_url="")
+    assert "GOTENBERG_SERVICE_URL" not in result
+
+
+def test_deploy_backend_prod_excludes_gotenberg_service_url_even_when_set():
+    """⭐QA catch(카디르군, 2026-08-19) 회귀 방지 — office-converter는 dev 전용 하드게이트
+    (deploy-office-converter 스텝)인데 이 배선에 REDIS_URL/ADMIN_OPERATOR_*와 같은 prod
+    게이트가 없었다. **값이 채워져 있어도** prod에서는 이 키 자체가 없어야 한다(#2141 원칙과
+    동일 — 값 유무가 아니라 키 존재 자체가 신호). substitution에 실수로 값이 남아 있는
+    상태를 흉내내 검증(빈 값 fallback에 기대지 않음)."""
+    result = _run_env_vars_assembly(
+        "prod", "", gotenberg_url="https://office-converter-dev.example.run.app"
+    )
+    assert "GOTENBERG_SERVICE_URL" not in result
 
 
 def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():

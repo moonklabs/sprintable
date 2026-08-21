@@ -180,4 +180,8 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     assert "TOSS_WEBHOOK_SECRET" in keys
     assert "AGENT_GROUP_DEFAULT_MENTIONS" in keys
     assert "CHAIN_ESCALATION_NOTIFY_ENABLED" not in keys
-    assert len(keys) == 94
+    # story #2822(2026-08-20): gotenberg_service_url 필드 신설(office_conversion.py의
+    # os.environ 직접읽기를 Settings SSOT 경유로 교체)로 97→98. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "GOTENBERG_SERVICE_URL" in keys
+    # promote(2026-08-21): main은 #2777 3필드(ADMIN_OPERATOR 2+DEPLOY_ENV)를 싣지 않는다 — dev 98 - 3 = 95.
+    assert len(keys) == 95

@@ -399,6 +399,7 @@ export default function EpicDetailPage() {
             <EpicStatusTransition
               epicId={epic.id}
               status={epic.status}
+              goalTitle={epic.title}
               onTransitioned={(s) => setEpic((prev) => (prev ? { ...prev, status: s as EpicStatus } : prev))}
             />
             <Badge variant={priorityBadgeVariant(epic.priority)}>{t(priorityLabelKey(epic.priority))}</Badge>

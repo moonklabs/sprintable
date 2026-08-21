@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import logging
-import math
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -22,6 +21,7 @@ from app.models.evidence import Evidence
 from app.models.gate import Gate
 from app.models.hypothesis import HYPOTHESIS_STATUSES, Hypothesis, HypothesisStoryLink, is_valid_transition
 from app.models.pm import Goal, Sprint, Story
+from app.services.outcome_evidence import has_valid_outcome_evidence
 
 logger = logging.getLogger(__name__)
 from app.repositories.hypothesis import HypothesisRepository
@@ -63,19 +63,9 @@ class HypothesisServiceError(Exception):
         self.message = message
 
 
-def _has_valid_outcome_evidence(outcome_result: dict | None) -> bool:
-    """story #2038 — verified/falsified 서버측 강제 판정. FE(HypothesisResolveDialog)의
-    canSubmit(`actualNum !== null && !Number.isNaN(actualNum) && reason.trim().length > 0`)와
-    동형. bool은 Python에서 int 서브클래스라 명시적으로 배제(isinstance(True, int) is True 함정)."""
-    if not isinstance(outcome_result, dict):
-        return False
-    actual = outcome_result.get("actual")
-    if isinstance(actual, bool) or not isinstance(actual, (int, float)):
-        return False
-    if isinstance(actual, float) and math.isnan(actual):
-        return False
-    reason = outcome_result.get("reason")
-    return isinstance(reason, str) and bool(reason.strip())
+# story #2843 — 근거 판정 헬퍼를 outcome_evidence.py로 추출(goal hit/miss와 공유). 이 이름은
+# 그 재노출(하위호환 — 이 모듈 안 기존 호출부 무변경).
+_has_valid_outcome_evidence = has_valid_outcome_evidence
 
 
 async def batch_stories_with_hypothesis_link(
@@ -500,10 +490,13 @@ async def transition_hypothesis(
             await session.refresh(hyp)
             return await _to_response(repo, hyp)
 
-    # 'active' 확정은 휴먼만(§2.5.2). org admin/owner 검증은 라우터(S3)에서 보강.
-    if target == "active" and caller.type != "human":
+    # 'active'·'verified'·'falsified' 확定은 휴먼만(§2.5.2 + story #2857 AC — 게이트 경유
+    # via_gate=True는 이 서비스를 직호출하는 라우터 authz를 이미 통과한 human resolver라
+    # caller.type이 항상 "human"이므로 이 체크와 자연 정합). org admin/owner 검증은
+    # 라우터(S3/#2857)에서 보강.
+    if target in ("active", "verified", "falsified") and caller.type != "human":
         raise HypothesisServiceError(
-            "HUMAN_CONFIRM_REQUIRED", "active 전이는 휴먼만 가능합니다."
+            "HUMAN_CONFIRM_REQUIRED", f"{target} 전이는 휴먼만 가능합니다."
         )
 
     # story #2038(까심 QA 적출, #2027과 동일 패턴): verified/falsified는 FE(HypothesisResolveDialog)

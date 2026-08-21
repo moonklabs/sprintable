@@ -19,6 +19,7 @@ from app.models.event import Event
 from app.models.event_outbox import EventOutbox
 from app.models.delivery_job import DeliveryJob
 from app.models.gate import Gate
+from app.models.gate_github_check_event import GateGithubCheckEvent
 from app.models.github_installation import GithubInstallation, GithubInstallNonce, GithubWebhookDelivery
 from app.models.hitl import HitlPolicy, HitlRequest
 from app.models.judgment import Judgment
@@ -26,6 +27,7 @@ from app.models.usage_meter import UsageMeter
 from app.models.user import RefreshToken, User
 from app.models.workflow_version import WorkflowVersion
 from app.models.api_key import ApiKey
+from app.models.agent_auth_failure import AgentAuthFailure
 from app.models.human_api_key import HumanApiKey
 from app.models.org_subscription import OrgSubscription
 from app.models.pricing_version import PricingVersion
@@ -133,6 +135,7 @@ __all__ = [
     "EventOutbox",
     "DeliveryJob",
     "Gate",
+    "GateGithubCheckEvent",
     "GithubInstallation",
     "GithubInstallNonce",
     "GithubWebhookDelivery",
