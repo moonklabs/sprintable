@@ -97,6 +97,25 @@ describe('gateHasEvidence — GitHub check 단독 신호도 실 증거로 친다
     const gate = baseGate({ status: 'pending', neutral_facts: null });
     expect(gateHasEvidence(gate)).toBe(false);
   });
+
+  // story #2862 — hypothesis_outcome_confirm 게이트는 ci/trust/cold_start_seed가 전혀 없어
+  // draft_target 신호가 없으면 gateHasEvidence가 false로 착시(=State A 빈 카드로 가라앉아
+  // 사람이 판정 초안을 아예 못 봄)를 회귀 가드.
+  it('draft_target이 있으면(다른 신호 전무여도) evidence 있음 — hypothesis_outcome_confirm 게이트가 State A로 안 가라앉는다', () => {
+    const gate = baseGate({
+      gate_type: 'hypothesis_outcome_confirm', status: 'pending',
+      neutral_facts: { draft_target: 'verified', draft_actual: 42, draft_reason: 'X' },
+    });
+    expect(gateHasEvidence(gate)).toBe(true);
+  });
+
+  it('draft_target이 계약 밖 값이면 evidence로 안 친다(no-fiction — 방어)', () => {
+    const gate = baseGate({
+      gate_type: 'hypothesis_outcome_confirm', status: 'pending',
+      neutral_facts: { draft_target: 'unknown' },
+    });
+    expect(gateHasEvidence(gate)).toBe(false);
+  });
 });
 
 // story #2814 2단(§5-④ 그라운딩·BE story #2815/PR#3245) — 관측모드 판별을 github_check_enforced

@@ -224,3 +224,67 @@ describe('GateEvidence — 재-pending 사유(원장 지연 로드, story #2814 
     expect(fetchWithAuth).not.toHaveBeenCalled();
   });
 });
+
+// story #2862(loop-closure P2-B FE, BE PR#3277) — hypothesis_outcome_confirm 게이트의
+// neutral_facts.draft_target/draft_actual/draft_reason 렌더.
+describe('GateEvidence — 측정 판정 초안 렌더(story #2862)', () => {
+  function draftGate(overrides: Partial<GateItem> = {}, neutralFacts: Record<string, unknown> = {}): GateItem {
+    return realApiShapedGate({
+      gate_type: 'hypothesis_outcome_confirm',
+      work_item_type: 'hypothesis',
+      status: 'pending',
+      github_check_run_id: null,
+      neutral_facts: { draft_target: 'verified', draft_actual: 42, draft_reason: '목표치 초과 달성', ...neutralFacts },
+      ...overrides,
+    });
+  }
+
+  it('draft_target/draft_actual/draft_reason이 실제로 DOM에 나타난다(AC1)', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateEvidence gate={draftGate()} />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.hypothesisDraftBadge);
+    expect(container.textContent).toContain(koMessages.cage.hypothesisDraftTargetVerified);
+    expect(container.textContent).toContain('42');
+    expect(container.textContent).toContain('목표치 초과 달성');
+  });
+
+  // AC1/AC2 — 초안은 destructive/success가 아니라 info 톤 하나로만 표현한다(맞음이든 틀림이든
+  // 확정처럼 보이면 안 된다).
+  it('destructive/success 색을 쓰지 않고 info 톤만 쓴다(AC1/AC2 — verified/falsified 무관)', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(wrap(<GateEvidence gate={draftGate({}, { draft_target: 'falsified' })} />));
+    });
+
+    expect(container.innerHTML).not.toMatch(/bg-destructive|text-destructive/);
+    expect(container.innerHTML).not.toMatch(/bg-success|text-success/);
+    expect(container.querySelector('.bg-info\\/10')).toBeTruthy();
+  });
+
+  it('draft_reason이 없으면 근거 없음을 정직하게 알린다(AC3 — 지어내지 않음)', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(wrap(<GateEvidence gate={draftGate({}, { draft_reason: null })} />));
+    });
+
+    expect(container.textContent).toContain(koMessages.cage.hypothesisDraftReasonMissing);
+  });
+
+  it('draft_target이 계약 밖 값이면(BE 위반 방어) 초안 블록을 그리지 않는다(no-fiction)', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(wrap(<GateEvidence gate={draftGate({}, { draft_target: 'unknown_target' })} />));
+    });
+
+    expect(container.textContent).not.toContain(koMessages.cage.hypothesisDraftBadge);
+  });
+});
