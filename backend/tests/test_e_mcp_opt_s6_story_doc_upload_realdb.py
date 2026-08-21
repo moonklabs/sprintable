@@ -122,7 +122,9 @@ async def test_story_upload_no_project_access_403(monkeypatch, tmp_path):
 
 @pytest.mark.anyio
 async def test_story_update_rejects_mcp_attachments_over_declared_limit(monkeypatch, tmp_path):
-    """S5 #2 와 동일 갭을 story 에서 처음부터 막는지 — 6개(>5) mcp-태그 첨부 참조 update_story 는 400."""
+    """S5 #2 와 동일 갭을 story 에서 처음부터 막는지 — 6개(>5) mcp-태그 첨부 참조 update_story 는
+    422(story #2044 AC4: 예전엔 400·첨부 개수/크기 상한(Pydantic validator)은 422 — 서로 다른
+    상태코드로 갈려 호출자가 오판하기 쉬웠다. 422로 통일)."""
     monkeypatch.setenv("STORAGE_PROVIDER", "local")
     monkeypatch.setenv("STORAGE_LOCAL_ROOT", str(tmp_path))
     from app.routers.stories import (
@@ -157,7 +159,7 @@ async def test_story_update_rejects_mcp_attachments_over_declared_limit(monkeypa
                 await update_story(
                     STORY, update_body, BackgroundTasks(), repo=repo, db=s, auth=_auth(AGENT_IN),
                 )
-            assert ei.value.status_code == 400
+            assert ei.value.status_code == 422
     finally:
         await eng.dispose()
 
