@@ -310,8 +310,13 @@ async def resolve_work_item_project_id(
 # 'loop_decision'(E-LOOP-LEDGER S5): variant 선택도 동일 이유로 항상 human pending — GATE_TYPES에도
 # 미등록(doc_approval과 동일 선례. org gate override 설정 대상에서 제외=애초에 자동화 불가 명시).
 # 'artifact_canonicalize'(E-CANVAS C4-S8): 정본화=계약(§1) — org auto posture 무관 항상 HITL.
+# 'hypothesis_outcome_confirm'(story #2857): 측정 판정 초안=에이전트·확定=휴먼 계약 그 자체가
+# 존재 이유라 org posture 무관 항상 HITL(agent_decision_request와 동형 근거).
 _ALWAYS_MANUAL_GATE_TYPES: frozenset[str] = frozenset(
-    {"doc_approval", "loop_decision", "artifact_canonicalize", "agent_decision_request"}
+    {
+        "doc_approval", "loop_decision", "artifact_canonicalize", "agent_decision_request",
+        "hypothesis_outcome_confirm",
+    }
 )
 # ⚠️story #2709 — agent_decision_request가 항상 manual(=posture 무관 항상 pending)인 이유:
 # 이 게이트는 "사람의 판단"이 존재 이유인데, org posture가 permissive라고 자동 allow_auto가
@@ -641,6 +646,11 @@ async def transition_gate(
         await _resolve_artifact_canonicalize_gate(session, gate, new_status)
         # HITL crux(story 7726a003) — A2A task INPUT_REQUIRED 복귀. writer 미배선이라 오늘은 no-op.
         await _resume_a2a_task_on_gate_resolve(session, gate, new_status)
+        # story #2857(loop-closure P2-B): 측정 판정 초안=에이전트·확定=휴먼 — approve 시만
+        # hypothesis 실 전이(via_gate=True). 새 gate_type 외 no-op(기존 함수들과 동형 자리).
+        from app.services.hypothesis_outcome_confirm import resolve_hypothesis_outcome_confirm_gate
+
+        await resolve_hypothesis_outcome_confirm_gate(session, gate, new_status, resolver_id)
 
     # E-VERIFY V0-S2(story 3fbd048d): 휴먼 gate 승인 → gate_approval evidence 자동 편입(순수
     # additive — approved+story/task work_item_type 아니면 no-op).

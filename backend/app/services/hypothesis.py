@@ -490,10 +490,13 @@ async def transition_hypothesis(
             await session.refresh(hyp)
             return await _to_response(repo, hyp)
 
-    # 'active' 확정은 휴먼만(§2.5.2). org admin/owner 검증은 라우터(S3)에서 보강.
-    if target == "active" and caller.type != "human":
+    # 'active'·'verified'·'falsified' 확定은 휴먼만(§2.5.2 + story #2857 AC — 게이트 경유
+    # via_gate=True는 이 서비스를 직호출하는 라우터 authz를 이미 통과한 human resolver라
+    # caller.type이 항상 "human"이므로 이 체크와 자연 정합). org admin/owner 검증은
+    # 라우터(S3/#2857)에서 보강.
+    if target in ("active", "verified", "falsified") and caller.type != "human":
         raise HypothesisServiceError(
-            "HUMAN_CONFIRM_REQUIRED", "active 전이는 휴먼만 가능합니다."
+            "HUMAN_CONFIRM_REQUIRED", f"{target} 전이는 휴먼만 가능합니다."
         )
 
     # story #2038(까심 QA 적출, #2027과 동일 패턴): verified/falsified는 FE(HypothesisResolveDialog)
