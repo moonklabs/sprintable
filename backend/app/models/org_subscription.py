@@ -51,6 +51,15 @@ class OrgSubscription(Base):
     offering_version_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("offering_versions.id"), nullable=True
     )
+    # story #2881(0268) — 하향 예약(단일 슬롯, 큐 아님 — 재예약은 이전 예약을 덮어씀).
+    # pending_change_apply_at=NULL이 "예약 없음"(가장 흔한 상태). sweep(billing_scheduler.
+    # sweep_pending_tier_downgrades)이 apply_at<=now()인 행만 적용한다 — 즉시 전이 없음
+    # (v2.2 D10, 부분 환불 없음).
+    pending_tier: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pending_offering_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("offering_versions.id"), nullable=True
+    )
+    pending_change_apply_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

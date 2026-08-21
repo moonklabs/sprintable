@@ -970,15 +970,20 @@ async def toss_billing_maintenance(
             sweep_expired_grants,
             sweep_stale_pending_orders,
         )
+        from app.services.org_subscription_downgrade import sweep_pending_tier_downgrades
 
         dunning_result = await sweep_dunning_retries(session)
         reconciliation_result = await sweep_stale_pending_orders(session)
         # story #2777 PR2 — 어드민 credit_grant의 자가회수. 신규 cron 잡 발명 대신 이
         # 기존 billing-maintenance 표면에 동거(PO 지시 2026-08-18).
         grant_sweep_result = await sweep_expired_grants(session)
+        # story #2881 — 하향 예약 갱신일 적용도 동일 원칙(신규 cron 잡 발명 대신 동거).
+        # ⛔이 엔드포인트 자체를 부르는 Cloud Scheduler 잡이 아직 전 리전 0건(story #2896
+        # 대기) — 코드는 완결이지만 라이브 집행은 그 잡 착지 後(PR 본문 참고).
+        downgrade_sweep_result = await sweep_pending_tier_downgrades(session)
         return _ok({
             "dunning": dunning_result, "reconciliation": reconciliation_result,
-            "grant_sweep": grant_sweep_result,
+            "grant_sweep": grant_sweep_result, "downgrade_sweep": downgrade_sweep_result,
         })
     except Exception as exc:
         logger.exception("toss-billing-maintenance cron error: %s", exc)

@@ -23,6 +23,10 @@ def _sub(*, org_id, status="active"):
     s.status = status
     s.current_period_start = datetime(2026, 8, 7, tzinfo=timezone.utc)
     s.current_period_end = datetime(2026, 9, 7, tzinfo=timezone.utc)
+    # story #2881 — CheckoutResponse가 이 필드들을 읽는다(pending 하향 노출).
+    s.pending_tier = None
+    s.pending_offering_version_id = None
+    s.pending_change_apply_at = None
     return s
 
 
