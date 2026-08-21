@@ -248,8 +248,9 @@ async def test_trigger_due_charges_grace_anchor_is_order_created_at_not_now_real
             unexpected = (stale_now.date() + timedelta(days=7)).strftime("%Y-%m-%d")
             assert expected != unexpected, "이 테스트가 의미 있으려면 두 anchor가 실제로 갈려야 함"
 
-            assert len(sent) == 1
-            body = sent[0][2]
+            own_emails = [s for s in sent if s[0] == "owner7@2907.test"]  # 공유 CI DB — 다른 org 메일 섞일 수 있음
+            assert len(own_emails) == 1
+            body = own_emails[0][2]
             assert expected in body, f"메일이 order.created_at 앵커({expected})가 아니라 다른 값을 씀 — body={body!r}"
             assert unexpected not in body, "메일이 여전히 (스테일)now 앵커를 쓰고 있음 — 회귀"
     finally:
