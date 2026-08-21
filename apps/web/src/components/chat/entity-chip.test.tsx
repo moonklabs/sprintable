@@ -1,0 +1,104 @@
+// @vitest-environment jsdom
+//
+// story #2886(S2b) — 선생님 실증(전체 제목+메타 4항이 산문을 익사시킴)에 대한 처방 회귀가드.
+// default(inline) 변형은 짧은 라벨만 상시 표기하고, 격납 메타(관찰됨·form·point·status)는
+// hover/focus tooltip으로만 낸다. inline-meta 변형은 기존 전개 그대로(독립 표시용 escape hatch).
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { EntityChip } from './embed-card';
+
+vi.mock('@/app/dashboard/dashboard-shell', () => ({
+  useDashboardContext: () => ({ projectMemberships: [] }),
+}));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: () => {} }) }));
+
+let container: HTMLDivElement;
+let root: Root;
+
+beforeEach(() => {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({}) })));
+});
+
+afterEach(async () => {
+  await act(async () => { root.unmount(); });
+  container.remove();
+  vi.unstubAllGlobals();
+});
+
+const LONG_LABEL = '이것은 아주 길고 상세한 스토리 제목으로 산문 속에서 문장을 익사시킬 수 있다';
+const META = { form: 'mention', referencedAt: '2026-07-26T00:00:00.000Z' };
+
+describe('EntityChip variant=inline(기본) — story #2886', () => {
+  it('긴 라벨은 truncate 클래스를 갖고, referenceMeta/status가 컨테이너 텍스트에 상시 노출되지 않는다', async () => {
+    await act(async () => {
+      root.render(<EntityChip entityType="story" entityId="s-1" label={LONG_LABEL} href={null} referenceMeta={META} />);
+    });
+    const labelSpan = Array.from(container.querySelectorAll('span')).filter((s) => s.textContent === LONG_LABEL).at(-1);
+    expect(labelSpan?.className).toContain('truncate');
+    expect(container.textContent).not.toContain('관찰됨');
+  });
+
+  it('트리거에 포커스를 주면 tooltip(portal)에 전체 라벨+관찰됨 메타가 뜬다', async () => {
+    await act(async () => {
+      root.render(<EntityChip entityType="story" entityId="s-1" label={LONG_LABEL} href={null} referenceMeta={META} />);
+    });
+    await act(async () => { container.querySelector('button')!.focus(); });
+    expect(document.body.textContent).toContain(LONG_LABEL);
+    expect(document.body.textContent).toContain('관찰됨');
+    expect(document.body.textContent).toContain('멘션');
+    expect(document.body.textContent).toContain('7/26');
+  });
+
+  it('격납할 메타가 없으면(referenceMeta·status 둘 다 無) tooltip을 안 씌운다', async () => {
+    await act(async () => {
+      root.render(<EntityChip entityType="story" entityId="s-1" label="짧은 제목" href={null} />);
+    });
+    const trigger = container.querySelector('button')!;
+    // base-ui Tooltip.Trigger는 aria-describedby 등 트리거 전용 속성을 부여한다 — 안 씌웠으면
+    // 순수 button 그대로.
+    expect(trigger.tagName).toBe('BUTTON');
+    await act(async () => { trigger.focus(); });
+    expect(document.body.textContent).not.toContain('관찰됨');
+  });
+
+  it('전체 라벨은 native title 속성으로도 보장된다(AC3 접근성 폴백)', async () => {
+    await act(async () => {
+      root.render(<EntityChip entityType="story" entityId="s-1" label={LONG_LABEL} href={null} />);
+    });
+    const labelSpan = Array.from(container.querySelectorAll('span')).filter((s) => s.textContent === LONG_LABEL).at(-1);
+    expect(labelSpan?.getAttribute('title')).toBe(LONG_LABEL);
+  });
+});
+
+describe('EntityChip variant=inline-meta — 기존 전개 그대로(escape hatch)', () => {
+  it('메타가 컨테이너 텍스트에 항상 인라인 표기된다(포커스 불요)', async () => {
+    await act(async () => {
+      root.render(<EntityChip entityType="story" entityId="s-1" label={LONG_LABEL} href={null} referenceMeta={META} variant="inline-meta" />);
+    });
+    expect(container.textContent).toContain('관찰됨');
+    expect(container.textContent).toContain('멘션');
+    expect(container.textContent).toContain('7/26');
+  });
+
+  it('라벨에 truncate 클래스가 없다(전체 제목 그대로)', async () => {
+    await act(async () => {
+      root.render(<EntityChip entityType="story" entityId="s-1" label={LONG_LABEL} href={null} variant="inline-meta" />);
+    });
+    const labelSpan = Array.from(container.querySelectorAll('span')).filter((s) => s.textContent === LONG_LABEL).at(-1);
+    expect(labelSpan?.className).not.toContain('truncate');
+  });
+});
+
+describe('EntityChip ghost — variant 무관 무동작 유지', () => {
+  it('ghost는 inline이든 inline-meta든 항상 "대상이 없습니다"·클릭 없음', async () => {
+    await act(async () => {
+      root.render(<EntityChip entityType="story" entityId="s-1" label={LONG_LABEL} href={null} ghost referenceMeta={META} />);
+    });
+    expect(container.textContent).toContain('대상이 없습니다');
+    expect(container.querySelector('button')).toBeNull();
+  });
+});

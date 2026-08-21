@@ -6,7 +6,9 @@ import { useRouter } from 'next/navigation';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ExternalLink, X, Eye } from 'lucide-react';
+import { cva, type VariantProps } from 'class-variance-authority';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { docViewUrl } from '@/components/docs/lib/doc-project-url';
 import { resolveScopedEntityHref, storyBoardUrl, goalUrl, sprintUrl, assetStorageUrl } from '@/lib/entity-project-url';
@@ -769,6 +771,22 @@ function formatReferencePoint(iso: string): string {
   return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
 }
 
+/**
+ * story #2886(S2b) — 선생님 실증(2026-08-21): 인라인 칩이 전체 제목+메타 4항을 항상 펼쳐
+ * 산문을 익사시켰다. `inline`(기본) = 아이콘+짧은 라벨만, 메타(관찰됨·form·point·status)는
+ * hover/focus 시 tooltip으로 격납. `inline-meta` = 기존 그대로 전개(독립 표시용 — 예:
+ * 산문 밖에서 칩 하나만 크게 보여줄 때). S1 variant 체계(cva) 준수.
+ */
+const entityChipLabelVariants = cva('', {
+  variants: {
+    variant: {
+      inline: 'max-w-[14ch] truncate',
+      'inline-meta': '',
+    },
+  },
+  defaultVariants: { variant: 'inline' },
+});
+
 export function EntityChip({
   entityType,
   entityId,
@@ -777,6 +795,7 @@ export function EntityChip({
   ghost = false,
   referenceMeta = null,
   entityStatus,
+  variant = 'inline',
 }: {
   entityType: string;
   entityId?: string;
@@ -795,7 +814,7 @@ export function EntityChip({
    * 폴백한다(has-status면 "아직 모름", no-status-concept이면 "상태 없음" — renderEntityStatusLabel이
    * entityType으로 그 둘을 이미 가른다). */
   entityStatus?: EntityStatusFetchState;
-}) {
+} & VariantProps<typeof entityChipLabelVariants>) {
   const [showModal, setShowModal] = useState(false);
   const colorClass = ghost ? GRAY_STATE_COLOR : (ENTITY_COLORS[entityType] ?? GRAY_STATE_COLOR);
 
@@ -849,25 +868,49 @@ export function EntityChip({
   };
 
   const statusLabel = ghost ? null : renderEntityStatusLabel(entityType, localDocStatus ? { kind: 'resolved', raw: localDocStatus } : (entityStatus ?? { kind: 'loading' }));
+  // story #2886(S2b) — inline-meta는 기존 그대로 항상 펼침. inline(기본)은 인라인 메타를
+  // 감추고(격납) hover/focus tooltip으로만 낸다 — 산문 속 반복 전개 제거가 이 스토리의 요지.
+  const showInlineMeta = variant === 'inline-meta';
 
   const inner = (
     <span className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-xs font-medium ${colorClass}`}>
       <EntityGlyph Icon={resolveEntityIcon(entityType)} label={label} className="size-3 shrink-0" />
-      <span>{ghost ? '대상이 없습니다' : label}</span>
+      {/* AC3 — truncate된 라벨의 전체 텍스트를 title(native)로도 보장(가장 낮은 공통분모
+          접근성 폴백 — 아래 커스텀 tooltip과 별개, JS 없이도 동작). */}
+      <span className={entityChipLabelVariants({ variant })} title={ghost ? undefined : label}>
+        {ghost ? '대상이 없습니다' : label}
+      </span>
       {/* AC1 — 사실성(상수 "관찰됨": entity_references 자체가 관찰됨 tier) · 표면 · 지점.
-          ⛔색으로만 구분하지 않고 글자로 적는다(가디언 규율 재사용). */}
-      {referenceMeta ? (
+          ⛔색으로만 구분하지 않고 글자로 적는다(가디언 규율 재사용). inline-meta 변형에서만
+          항상 펼친다 — inline(기본)은 아래 tooltip으로 격납. */}
+      {showInlineMeta && referenceMeta ? (
         <span className="opacity-70">
           · 관찰됨 · {FORM_LABELS[referenceMeta.form] ?? referenceMeta.form} · {formatReferencePoint(referenceMeta.referencedAt)}
         </span>
       ) : null}
-      {statusLabel ? <span className="opacity-70">· {statusLabel}</span> : null}
+      {showInlineMeta && statusLabel ? <span className="opacity-70">· {statusLabel}</span> : null}
     </span>
   );
 
   if (ghost) {
     return <span className="inline-flex cursor-default no-underline">{inner}</span>;
   }
+
+  // story #2886(S2b) AC2 — 격납 메타(관찰됨·form·point·status)를 hover/focus tooltip으로.
+  // base-ui Tooltip은 hover+focus 둘 다 기본 지원(키보드 Tab으로 트리거에 도달 가능) — 별도
+  // 배선 불요. inline-meta 변형이거나 표시할 메타가 아예 없으면 tooltip을 안 씌운다(불필요한
+  // 빈 popover 방지).
+  const tooltipContent = !showInlineMeta && (referenceMeta || statusLabel) ? (
+    <div className="space-y-0.5">
+      <p className="font-medium">{label}</p>
+      {referenceMeta ? (
+        <p className="opacity-80">
+          관찰됨 · {FORM_LABELS[referenceMeta.form] ?? referenceMeta.form} · {formatReferencePoint(referenceMeta.referencedAt)}
+        </p>
+      ) : null}
+      {statusLabel ? <p className="opacity-80">{statusLabel}</p> : null}
+    </div>
+  ) : null;
 
   if (entityId) {
     // story #2669(B2) — "쓰던 자리에 이미 있어야 한다": 모달을 열지 않고도 칩 자체에 상태별
@@ -893,15 +936,22 @@ export function EntityChip({
         </Link>
       ) : null
     ) : null;
+    const triggerButtonProps = {
+      type: 'button' as const,
+      onClick: () => setShowModal(true),
+      className: 'inline-flex no-underline transition-opacity hover:opacity-80',
+    };
+    const chipButton = tooltipContent ? (
+      <Tooltip>
+        <TooltipTrigger render={<button {...triggerButtonProps} />}>{inner}</TooltipTrigger>
+        <TooltipContent side="top">{tooltipContent}</TooltipContent>
+      </Tooltip>
+    ) : (
+      <button {...triggerButtonProps}>{inner}</button>
+    );
     return (
       <span className="inline-flex flex-wrap items-center gap-1">
-        <button
-          type="button"
-          onClick={() => setShowModal(true)}
-          className="inline-flex no-underline transition-opacity hover:opacity-80"
-        >
-          {inner}
-        </button>
+        {chipButton}
         {docCta}
         {submitError ? <span className="text-xs text-destructive">상신 실패, 다시 시도해 주세요</span> : null}
         {showModal && (

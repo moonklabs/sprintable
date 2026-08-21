@@ -149,9 +149,12 @@ describe('ChatBubble — story #2262 AC1(사실성·표면·지점 표기, doc f
         />,
       ));
     });
-    expect(container.textContent).toContain('관찰됨');
-    expect(container.textContent).toContain('멘션');
-    expect(container.textContent).toContain('7/26');
+    // story #2886(S2b) — 격납 메타는 hover/focus tooltip으로 이동(더는 항상 인라인 표기 안 함).
+    // 트리거에 포커스를 줘 tooltip을 열고, base-ui Portal이 document.body에 그리는 내용을 본다.
+    await act(async () => { container.querySelector('button')!.focus(); });
+    expect(document.body.textContent).toContain('관찰됨');
+    expect(document.body.textContent).toContain('멘션');
+    expect(document.body.textContent).toContain('7/26');
   });
 
   it('매칭되는 stored 참조가 있어도 form·referenced_at이 없으면(구서버 폴백) 표기를 지어내지 않는다', async () => {
@@ -179,8 +182,10 @@ describe('ChatBubble — story #2262 AC2 PR② 1단계(2026-08-07 유나양 카�
     await act(async () => {
       root.render(wrap(<ChatBubble message={{ ...baseMessage, references: undefined }} isMine={false} />));
     });
-    expect(container.textContent).toContain('아직 모름');
-    expect(container.textContent).not.toContain('상태 없음');
+    // story #2886(S2b) — 상태 라벨은 격납(hover/focus tooltip)으로 이동. 포커스로 열고 확認.
+    await act(async () => { container.querySelector('button')!.focus(); });
+    expect(document.body.textContent).toContain('아직 모름');
+    expect(document.body.textContent).not.toContain('상태 없음');
   });
 
   it('no-status-concept 타입(hypothesis) 칩은 "상태 없음"을 보인다(로딩이 아니라 구조적 부재)', async () => {
@@ -193,8 +198,9 @@ describe('ChatBubble — story #2262 AC2 PR② 1단계(2026-08-07 유나양 카�
         />,
       ));
     });
-    expect(container.textContent).toContain('상태 없음');
-    expect(container.textContent).not.toContain('아직 모름');
+    await act(async () => { container.querySelector('button')!.focus(); });
+    expect(document.body.textContent).toContain('상태 없음');
+    expect(document.body.textContent).not.toContain('아직 모름');
   });
 
   it('유령 칩에는 상태 라벨을 안 보인다(대상 자체가 없는데 상태를 말할 수 없다)', async () => {
@@ -217,8 +223,10 @@ describe('ChatBubble — story #2262 AC2 PR② 2단계(chat-view.tsx 실 배치�
         />,
       ));
     });
-    expect(container.textContent).toContain('확定');
-    expect(container.textContent).not.toContain('아직 모름');
+    // story #2886(S2b) — 상태 라벨은 격납(hover/focus tooltip)으로 이동. 포커스로 열고 확認.
+    await act(async () => { container.querySelector('button')!.focus(); });
+    expect(document.body.textContent).toContain('확定');
+    expect(document.body.textContent).not.toContain('아직 모름');
   });
 
   it('entityId가 대문자 UUID 토큰이어도 소문자로 정규화해 캐시 키와 매칭한다', async () => {
@@ -244,7 +252,8 @@ describe('ChatBubble — story #2262 AC2 PR② 2단계(chat-view.tsx 실 배치�
         />,
       ));
     });
-    expect(container.textContent).toContain('아직 모름');
+    await act(async () => { container.querySelector('button')!.focus(); });
+    expect(document.body.textContent).toContain('아직 모름');
   });
 
   it('배치조회가 error로 끝나면 loading과 같은 급인 "아직 모름"을 보인다(가짜 "확認 중" 아님)', async () => {
@@ -257,7 +266,8 @@ describe('ChatBubble — story #2262 AC2 PR② 2단계(chat-view.tsx 실 배치�
         />,
       ));
     });
-    expect(container.textContent).toContain('아직 모름');
+    await act(async () => { container.querySelector('button')!.focus(); });
+    expect(document.body.textContent).toContain('아직 모름');
   });
 });
 
@@ -1275,7 +1285,10 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
     expect(transitionCall?.method).toBe('POST');
     expect(JSON.parse(transitionCall!.body!)).toEqual({ status: 'pending' });
     // 재조회 없이 로컬 반영 — 배지가 "검토 중"으로, 버튼은 "결재로 올리기"에서 "결재함에서 보기"로.
-    expect(container.textContent).toContain('검토 중');
+    // story #2886(S2b) — 상태 배지는 격납(hover/focus tooltip)으로 이동 — 칩 트리거(첫 버튼)에
+    // 포커스를 줘 확認(제출 클릭으로 포커스가 그쪽 버튼에 있었으므로 다시 옮겨야 한다).
+    await act(async () => { container.querySelectorAll('button')[0]!.focus(); });
+    expect(document.body.textContent).toContain('검토 중');
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
     expect(container.textContent).toContain('결재함에서 보기');
   });
@@ -1343,7 +1356,9 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
       ));
       await Promise.resolve(); await Promise.resolve();
     });
-    expect(container.textContent).toContain('반려됨');
+    // story #2886(S2b) — 상태 배지는 격납(hover/focus tooltip)으로 이동.
+    await act(async () => { container.querySelectorAll('button')[0]!.focus(); });
+    expect(document.body.textContent).toContain('반려됨');
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
     expect(Array.from(container.querySelectorAll('a')).some((a) => a.textContent === '결재함에서 보기')).toBe(false);
   });
@@ -1359,7 +1374,9 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
       ));
       await Promise.resolve(); await Promise.resolve();
     });
-    expect(container.textContent).toContain('확定');
+    // story #2886(S2b) — 상태 배지는 격납(hover/focus tooltip)으로 이동.
+    await act(async () => { container.querySelectorAll('button')[0]!.focus(); });
+    expect(document.body.textContent).toContain('확定');
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
   });
 
