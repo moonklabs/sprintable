@@ -145,6 +145,32 @@ async def test_gates_denies_human_with_no_project_access():
         await eng.dispose()
 
 
+# ───────────── ②' PO 리뷰 지적(2026-08-21): work_item_type 생략(id-only)만으로 우회 ─────────────
+
+@pytest.mark.anyio
+async def test_gates_denies_id_only_call_without_work_item_type():
+    """work_item_type을 안 넘기면(artifact-section.tsx의 실제 호출 형태) 가드를 안 타고
+    그대로 새던 구멍 — work_item_id만으로도 동일 인가가 걸려야 한다(work_item_type을
+    클라 입력으로 추측하지 않고 gate 테이블 자신에서 실제 타입을 조회해 검사)."""
+    from app.routers.gates import list_gates
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc_info:
+                await list_gates(
+                    work_item_id=STORY, work_item_type=None, status=None, gate_type=None,
+                    sort=None, assigned_to_me=False, limit=None, offset=0,
+                    session=s, org_id=ORG, auth=_auth_human(DENIED_USER),
+                )
+        assert exc_info.value.status_code == 404, (
+            "work_item_type 생략만으로 인가가 우회되면(id-only bypass) 원 결함이 반쪽만 봉합된 것"
+        )
+    finally:
+        await eng.dispose()
+
+
 # ───────────── AC2 — 같은 사용자·같은 work_item, evidence·gates 판정 일치(양쪽 다) ─────────────
 
 @pytest.mark.anyio
