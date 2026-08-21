@@ -16,6 +16,7 @@ import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-h
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 import { fetchWithAuth } from '@/lib/db/client';
+import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
 
 // story #1954(P1a-S4) — Gate 3종(게이트·문서결재·머지게이트) canonical 상세. P1a·P2 공용 유일
 // per-gate 라우트(중복 빌드 봉쇄) — decision(inbox_items)은 별도 표면(오르테가군 PO 판단+
@@ -304,6 +305,11 @@ export default function GateDetailPage() {
                 </Button>
               </div>
             )}
+
+            {/* story #2902(후보 B, S2h①③ list_entity_backlinks 확장 소비처) — 「이 게이트를
+                언급한 대화」 역참조. 기성 EntityBacklinksSection(3곳 소비 중) 그대로 재사용 —
+                신규 뷰어 0. gate는 TARGET_ONLY라 액션 없이 조회만(§8 계약과 정합). */}
+            <EntityBacklinksSection entityType="gate" entityId={gate.id} />
           </>
         )}
       </div>
