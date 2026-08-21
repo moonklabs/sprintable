@@ -610,9 +610,15 @@ async def test_send_message_filters_cross_org_mentions_group():
         user_blocker_result = MagicMock()
         user_blocker_result.scalars.return_value.all.return_value = []
 
-        # 실제 코드 순서: conv → _resolve_member(TM) → participant → user_blocker_ids
+        # story #2889: insert_chat_mentions 직후 fetch_stored_references가 1회 추가(SSE/POST
+        # 응답에 방금 저장된 references를 즉시 싣기 위함) — .all() 사용, 이 테스트는 멘션
+        # cross-org 필터링만 검증하므로 빈 결과로 충분.
+        fetch_refs_result = MagicMock()
+        fetch_refs_result.all.return_value = []
+
+        # 실제 코드 순서: conv → _resolve_member(TM) → participant → user_blocker_ids → fetch_stored_references
         session.execute = AsyncMock(
-            side_effect=[conv_result, member_result, participant_result, user_blocker_result]
+            side_effect=[conv_result, member_result, participant_result, user_blocker_result, fetch_refs_result]
         )
 
         captured = {}
@@ -631,7 +637,7 @@ async def test_send_message_filters_cross_org_mentions_group():
 
         mention_calls = {}
         async def _capture_mention(db, conversation, msg, org_id, sender, mention_targets,
-                                   webhook_covered_ids=None):
+                                   webhook_covered_ids=None, references=None):
             mention_calls["targets"] = set(mention_targets)
             return []
 
