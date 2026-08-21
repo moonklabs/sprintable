@@ -154,7 +154,12 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
     }
   };
 
-  const Icon = resolveEntityIcon(toEntityType(target.work_item_type)) ?? FileText;
+  // story #2905(S2c②) — gate 단건 sole-link 참조(chat-bubble.tsx) 호출부는 work_item_type을
+  // 모르는 채(빈 문자열 placeholder) 부른다 — fetch 완료 후엔 gate 실물(GateResponse가
+  // work_item_type을 1급 필드로 실어 옴, 페드루 확定 2026-08-21)을 우선한다. 기존 approval_target
+  // 메시지 호출부(BE가 정확한 work_item_type을 이미 실어 보냄)는 무변경(fetch 전 잠깐만 prop 사용).
+  const headerWorkItemType = state.kind === 'ready' ? state.gate.work_item_type : target.work_item_type;
+  const Icon = resolveEntityIcon(toEntityType(headerWorkItemType)) ?? FileText;
 
   return (
     <div className="min-w-0 max-w-full rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
