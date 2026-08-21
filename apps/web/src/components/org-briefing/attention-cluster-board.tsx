@@ -60,7 +60,10 @@ function ClusterShell({
 // story #2842(0b17472c 그라운딩, PO 확定) — 항목이 뷰어의 활성 프로젝트와 다른 프로젝트
 // 소속일 때만 병기(같으면 null이라 이 컴포넌트 자체가 안 그려짐 — 노이즈 절제). 병기 값은
 // BE가 주는 project_slug 그대로(별도 표시용 프로젝트명 필드는 이 계약에 없음).
-function CrossProjectTag({ label }: { label: string | null }) {
+// story #2858 — loop-queue-client.tsx도 이 컴포넌트를 그대로 재사용한다(export). 페드루 PO
+// 판정(2026-08-21, 2851 교훈 적용) — 별개 페이지라도 표시 컴포넌트는 단일 정의를 유지한다
+// (로컬 재정의는 중복 정의 규율 위반).
+export function CrossProjectTag({ label }: { label: string | null }) {
   if (!label) return null;
   return <Badge variant="chip" className="shrink-0 gap-1"><FolderOpen className="size-3 shrink-0" aria-hidden />{label}</Badge>;
 }
@@ -191,12 +194,17 @@ function AuthFailureRow({ item, memberNames }: { item: AuthFailureClusterItem; m
 // story #2830(유나 스티어②) — items[]가 BE top-20 cap이라(doc a8e73bdb §3) "전체보기"가 실제
 // 전체를 못 담을 수 있다. no-silent-cap 원칙상 이 경우 일반 ViewAllToggle("전체보기")을 쓰지
 // 않고 정직한 문구로 잘림을 명시한다 — 거짓 "전체"를 암시하지 않는다.
+// story #2858(loop-closure P2) — 잘림 고지 옆에 «전부» 볼 수 있는 실제 경로(전량 페이지네이션
+// 큐)를 바로 붙인다. 문구만 정직하고 갈 곳이 없으면 그 정직함이 막다른 길이다.
 function LoopCapNotice({ shown, total }: { shown: number; total: number }) {
   const t = useTranslations('orgBriefing');
   if (shown >= total) return null;
   return (
     <p className="border-t border-border px-4 py-2.5 text-center text-[11px] text-muted-foreground">
-      {t('clusterUnclosedCapNotice', { shown, total })}
+      {t('clusterUnclosedCapNotice', { shown, total })}{' '}
+      <Link href="/loop-queue" className="font-medium text-primary hover:underline">
+        {t('clusterUnclosedViewQueue')}
+      </Link>
     </p>
   );
 }

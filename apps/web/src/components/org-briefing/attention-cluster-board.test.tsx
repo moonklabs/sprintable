@@ -153,6 +153,21 @@ describe('AttentionClusterBoard', () => {
         .replace('{shown}', '20').replace('{total}', '51'));
     });
 
+    // story #2858 — 잘림 고지 옆에 전량 큐 페이지로 가는 실제 경로가 붙는다(no dead-end honesty).
+    it('cap 고지에 /loop-queue로 가는 링크가 함께 뜬다', async () => {
+      const items = Array.from({ length: 20 }, (_, i) => loopItem({ id: `g${i}`, kind: 'outcomeMissing', days: i }));
+      await act(async () => {
+        root.render(wrap(
+          <AttentionClusterBoard falsified={[]} stalled={[]} loop={items} loopTotalCount={51} measurePlanMissingGoalCount={0} unmeasurableGoalCount={0} />,
+        ));
+      });
+      const toggle = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('더보기'));
+      await act(async () => { toggle!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      const queueLink = Array.from(container.querySelectorAll('a')).find((a) => a.getAttribute('href') === '/loop-queue');
+      expect(queueLink).toBeTruthy();
+      expect(queueLink!.textContent).toBe(koMessages.orgBriefing.clusterUnclosedViewQueue);
+    });
+
     it('measurePlanMissingGoalCount는 N에 안 더해지고 보조 텍스트로만 노출된다', async () => {
       await act(async () => {
         root.render(wrap(

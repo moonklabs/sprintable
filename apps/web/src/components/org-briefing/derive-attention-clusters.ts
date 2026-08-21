@@ -64,12 +64,14 @@ export interface ViewerContext {
   activeProjectId?: string;
 }
 
-function projectHref(viewer: ViewerContext | undefined, projectSlug: string | null, path: string): string {
+// story #2858 — loop-measure-due 큐 페이지도 동일 cross-project 규율을 승계한다(AC5).
+// export해 derive-loop-queue.ts에서 재사용 — href 조립·병기 판정 로직 이원화 방지.
+export function projectHref(viewer: ViewerContext | undefined, projectSlug: string | null, path: string): string {
   if (viewer?.orgSlug && projectSlug) return `/${viewer.orgSlug}/${projectSlug}${path}`;
   return path;
 }
 
-function crossProjectLabel(viewer: ViewerContext | undefined, itemProjectId: string | null, projectSlug: string | null): string | null {
+export function crossProjectLabel(viewer: ViewerContext | undefined, itemProjectId: string | null, projectSlug: string | null): string | null {
   if (!viewer?.activeProjectId || !itemProjectId || !projectSlug) return null;
   return itemProjectId !== viewer.activeProjectId ? projectSlug : null;
 }

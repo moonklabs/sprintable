@@ -442,6 +442,7 @@
     "clusterUnclosedDaysDone": "{n}d unverdicted",
     "clusterUnclosedShowMore": "Show {n} more",
     "clusterUnclosedCapNotice": "Showing top {shown} · {total} total",
+    "clusterUnclosedViewQueue": "View full queue",
     "clusterUnclosedMeasurePlanMissing": "+{count} have no measure plan yet",
     "clusterUnclosedUnmeasurableGoal": "{count} declared unmeasurable",
     "clusterAuthFailureTitle": "Agent auth failures",
@@ -4055,5 +4056,20 @@
     "viewDecision": "Decision",
     "conversationEmpty": "No messages yet",
     "conversationFooter": "Only directives, decisions, evidence, and change requests scoped to this work. Switching views (Run/Evidence/Decision) = same thread, different lens."
+  },
+  "loopQueue": {
+    "title": "Unclosed loop queue",
+    "subtitle": "Everything past its measure date or missing an outcome",
+    "unclaimedOnlyToggle": "Unclaimed only",
+    "loading": "Loading…",
+    "empty": "No unclosed loops right now",
+    "claimedBy": "Claimed by {name}",
+    "unclaimed": "Unclaimed",
+    "claimAction": "Claim it",
+    "judgeAction": "Judge",
+    "pageSummary": "{from}–{to} of {total}",
+    "prevPage": "Previous",
+    "nextPage": "Next",
+    "loopQueueUntitled": "Untitled item"
   }
 }
