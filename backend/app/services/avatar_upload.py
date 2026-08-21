@@ -16,11 +16,14 @@ prod는 버킷 미프로비저닝(심사 후 일괄, cloudbuild.yaml 참고) —
 전 함수 503(auth_configured류 fail-closed 원칙, admin_auth.py와 동형)."""
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from app.services.storage import get_storage_provider
+
+logger = logging.getLogger("sprintable.avatar_upload")
 
 AVATARS_BUCKET = os.environ.get("GCS_AVATARS_BUCKET") or None
 _PUBLIC_BASE = f"https://storage.googleapis.com/{AVATARS_BUCKET}/" if AVATARS_BUCKET else None
@@ -104,10 +107,16 @@ async def confirm_upload(
         raise AvatarUploadError(413, "AVATAR_TOO_LARGE", f"{size}bytes가 상한 {MAX_AVATAR_BYTES}bytes 초과")
 
     new_url = _PUBLIC_BASE + object_path
-    # 조건ⓑ: 교체=새 키+구 키 삭제(같은 키 덮어쓰기 금지). best-effort — 실패해도 신규 반영은 진행.
+    # 조건ⓑ: 교체=새 키+구 키 삭제(같은 키 덮어쓰기 금지). best-effort — 실패해도 신규 반영은
+    # 진행해야 하는데(주석 원문 그대로) delete_object 자체가 내부 예외를 삼키지만, 그 계약을
+    # 이 호출부가 코드로도 보장한다(페드루 QA 정정, 2026-08-21) — transient 에러가 confirm
+    # 전체를 넘어뜨리지 않게 명시 방어.
     old_path = canonical_avatar_object_path(previous_avatar_url)
     if old_path and old_path != object_path:
-        await provider.delete_object(bucket, old_path)
+        try:
+            await provider.delete_object(bucket, old_path)
+        except Exception:
+            logger.warning("avatar_upload: 구 blob 삭제 실패(best-effort, 신규 반영은 계속) path=%s", old_path, exc_info=True)
     return new_url
 
 

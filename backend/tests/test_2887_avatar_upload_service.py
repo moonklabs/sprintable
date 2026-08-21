@@ -168,6 +168,34 @@ async def test_confirm_upload_deletes_old_blob_on_replace():
 
 
 @pytest.mark.asyncio
+async def test_confirm_upload_survives_transient_old_blob_delete_failure(avatar_service, monkeypatch):
+    """페드루 QA 정정(2026-08-21, LOW) — 구 blob 삭제는 주석상 best-effort인데 코드는
+    try 없는 await라 delete_object가 예외를 던지면(transient GCS 에러 등) confirm 전체가
+    죽는다. 실제로 예외를 던지는 delete_object로 재현 — confirm은 그래도 새 avatar_url을
+    반환해야 한다(신규 반영은 계속)."""
+    org_id, member_id = uuid.uuid4(), uuid.uuid4()
+    provider = avatar_service.get_storage_provider()
+
+    old_path = f"avatar/{org_id}/{member_id}/{uuid.uuid4().hex}.png"
+    await provider.put_object(avatar_service.AVATARS_BUCKET, old_path, b"old", content_type="image/png")
+    old_url = f"https://storage.googleapis.com/test-avatars-bucket/{old_path}"
+
+    new_path = f"avatar/{org_id}/{member_id}/{uuid.uuid4().hex}.png"
+    await provider.put_object(avatar_service.AVATARS_BUCKET, new_path, b"new", content_type="image/png")
+
+    async def _raising_delete(container, object_path):
+        raise RuntimeError("transient GCS error(재현용)")
+
+    monkeypatch.setattr(provider, "delete_object", _raising_delete)
+    monkeypatch.setattr(avatar_service, "get_storage_provider", lambda: provider)
+
+    new_url = await avatar_service.confirm_upload(
+        org_id=org_id, member_id=member_id, object_path=new_path, previous_avatar_url=old_url,
+    )
+    assert new_url.endswith(new_path), "구 blob 삭제 실패가 confirm 전체를 넘어뜨림 — best-effort 계약 위반"
+
+
+@pytest.mark.asyncio
 async def test_delete_avatar_removes_blob(avatar_service):
     org_id, member_id = uuid.uuid4(), uuid.uuid4()
     object_path = f"avatar/{org_id}/{member_id}/{uuid.uuid4().hex}.png"
