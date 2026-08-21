@@ -191,22 +191,48 @@ async def test_list_entity_backlinks_rejects_unsupported_target_type():
 
 @pytest.mark.anyio
 async def test_backlinks_allowlist_contains_exactly_doc_and_story():
-    """story #2721(2026-08-17)이 artifact를 추가 — 허용목록은 정확히 {doc, story, artifact}뿐
-    (다음 판이 늘리기 전까지 고정, 함수명은 이력 보존을 위해 유지)."""
+    """story #2889(2026-08-21)가 gate·pull_request를 추가 — 허용목록은 정확히
+    {doc, story, artifact, gate, pull_request}뿐(다음 판이 늘리기 전까지 고정, 함수명은
+    이력 보존을 위해 유지)."""
     from app.services.backlinks import BACKLINKS_ALLOWED_TARGET_TYPES
-    assert BACKLINKS_ALLOWED_TARGET_TYPES == frozenset({"doc", "story", "artifact"})
+    assert BACKLINKS_ALLOWED_TARGET_TYPES == frozenset(
+        {"doc", "story", "artifact", "gate", "pull_request"}
+    )
 
 
-def test_zero_ref_models_key_set_matches_allowlist():
-    """story #2721 — backlinks.py 자기 주석("_ZERO_REF_MODELS의 키를 늘릴 땐 반드시
-    BACKLINKS_ALLOWED_TARGET_TYPES도 같이 늘어야 한다")이 지금까지 코드로 강제된 적이 없었다
-    (grep 확認 — 이 테스트가 최초). count_zero_referenced_entities()가 `_ZERO_REF_MODELS
-    [target_type]`을 BACKLINKS_ALLOWED_TARGET_TYPES 전체에 대해 순회하므로, 두 집합이 어긋나면
-    한쪽만 늘어도 조용히 넘어가는 게 아니라 **KeyError로 즉시 죽는다**(런타임 크래시 —
-    다음 사람이 한쪽만 고치면 이 함수가 다음 cron 실행에서 바로 터진다) — 그 자리를 이 테스트가
-    push 前에 잡는다."""
+def test_zero_ref_models_key_set_is_subset_of_allowlist():
+    """⛔story #2889 카디르 CRITICAL(2026-08-21, cron 3중 재현) — 이 테스트는 원래 «동일
+    집합»을 요구했으나 그 전제 자체가 count_zero_referenced_entities()의 순회 버그였다:
+    함수가 `BACKLINKS_ALLOWED_TARGET_TYPES` 전체를 돌며 `_ZERO_REF_MODELS[target_type]`를
+    찾아, gate/pull_request처럼 허용목록에만 있고 `_ZERO_REF_MODELS`엔 없는(의도적 제외 —
+    backlinks.py 클래스 주석 참고) 타입에서 KeyError로 죽었다. 정정: 함수는 이제
+    `_ZERO_REF_MODELS`(부분집합) 쪽을 순회 기준으로 삼는다 — 두 집합은 «동일»이 아니라
+    **`_ZERO_REF_MODELS` ⊆ `BACKLINKS_ALLOWED_TARGET_TYPES`**만 요구된다(역방향은 아님,
+    backlinks.py 자신의 주석과 정합). 이 부등식이 깨지면(즉 `_ZERO_REF_MODELS`에 허용목록
+    밖 유령 타입이 들어가면) 그건 여전히 실제 결함이라 여기서 잡는다."""
     from app.services.backlinks import _ZERO_REF_MODELS, BACKLINKS_ALLOWED_TARGET_TYPES
-    assert set(_ZERO_REF_MODELS) == BACKLINKS_ALLOWED_TARGET_TYPES
+    assert set(_ZERO_REF_MODELS) <= BACKLINKS_ALLOWED_TARGET_TYPES
+
+
+@pytest.mark.anyio
+async def test_count_zero_referenced_entities_does_not_crash_with_gate_and_pull_request_in_allowlist():
+    """⛔story #2889 카디르 CRITICAL 회귀 가드 — 위 pin 테스트는 집합 «관계»만 재는 정적
+    테스트라, 실제로 `count_zero_referenced_entities()`를 호출하는 런타임 경로(cron이
+    부르는 그 경로, app/routers/cron.py의 zero-referenced 엔드포인트)는 아무도 실행해
+    본 적이 없었다 — 그래서 KeyError가 3번 재현될 때까지 안 잡혔다. 이 테스트는 실PG로
+    직접 호출해 그 경로 자체가 죽지 않는지 증명한다(gate/pull_request가 결과 dict에
+    없어야 한다는 것도 같이 확認 — _ZERO_REF_MODELS 기준 순회이므로)."""
+    from app.services.backlinks import count_zero_referenced_entities
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            result = await count_zero_referenced_entities(s)
+            assert set(result) == {"doc", "story", "artifact"}
+            assert "gate" not in result
+            assert "pull_request" not in result
+    finally:
+        await engine.dispose()
 
 
 # ─── ②story TARGET 게이트 — AC2 money test(권한 대조: 있음 vs 없음) ────────────

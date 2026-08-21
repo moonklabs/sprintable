@@ -317,8 +317,12 @@ async def count_zero_referenced_entities(
     session: AsyncSession, org_id: uuid.UUID | None = None,
 ) -> dict[str, int]:
     """story #2277 AC1/AC2 — target_type별로 "가리키는 참조가 0건"인 엔티티 수를 센다.
-    대상 타입은 #2266이 세운 `BACKLINKS_ALLOWED_TARGET_TYPES`(doc·story)와 동일 허용목록만
-    쓴다(AC1 — 별도 목록을 새로 만들지 않는다). org_id=None(기본)이면 전체 org 스코프.
+    대상 타입은 `_ZERO_REF_MODELS`의 키만 순회한다(`BACKLINKS_ALLOWED_TARGET_TYPES`의
+    부분집합 — 위 클래스 주석 참조). ⛔story #2889 카디르 CRITICAL(2026-08-21): 이전엔
+    `BACKLINKS_ALLOWED_TARGET_TYPES`를 직접 순회해 gate/pull_request 추가 시
+    `_ZERO_REF_MODELS[target_type]`가 KeyError로 죽었다(cron이 부르는 실경로, 3중 재현) —
+    부분집합 쪽을 순회 기준으로 삼아 구조적으로 재발을 막는다. org_id=None(기본)이면
+    전체 org 스코프.
 
     ⛔AC2 후속(PO 정정, 2026-07-29): 이 함수가 세는 수는 「고아」가 아니라 「이 항목을 가리키는
     mention/embed/proof 참조가 entity_references에 0건」이라는 사실뿐이다 — `entity_references`
@@ -327,7 +331,7 @@ async def count_zero_referenced_entities(
     `count_entity_references_total`(아래)도 같이 불러 분모를 나란히 실어야 한다(cron endpoint
     참조) — 절대값만 단독으로 보고하지 않는다."""
     counts: dict[str, int] = {}
-    for target_type in sorted(BACKLINKS_ALLOWED_TARGET_TYPES):
+    for target_type in sorted(_ZERO_REF_MODELS):
         model = _ZERO_REF_MODELS[target_type]
         stmt = (
             select(func.count())
