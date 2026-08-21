@@ -165,8 +165,11 @@ export function ThreadPanel({
         />
       </div>
 
-      {/* Thread messages */}
-      <div className="flex-1 overflow-y-auto py-3 pr-4">
+      {/* Thread messages — 유나양 design 반려 fix(2026-08-21, 로컬 렌더 실측): 이전
+          `py-3`의 top 12px가 pin 블록 rail-bottom과 답글 rail-top 사이를 세로로 끊었다
+          (「코드 연속≠픽셀 연속」). pt-0으로 상단 패딩 제거해 flush — border-b는 구분자로
+          그대로 유지. */}
+      <div className="flex-1 overflow-y-auto pt-0 pb-3 pr-4">
         {loading ? (
           <p className="text-center text-sm text-muted-foreground">불러오는 중…</p>
         ) : messages.length === 0 ? (
