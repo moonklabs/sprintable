@@ -123,23 +123,64 @@ async def test_compute_pack_charge_minor_zero_when_no_period():
         await engine.dispose()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_toss_adapter_charge_json_body_amount_is_native_int_even_given_decimal():
-    """어댑터 경계 방어(둘째 층) — 호출부가 실수로 Decimal을 넘겨도 charge()가 int로
-    강제 변환해 httpx json 인코딩이 죽지 않는다. 실 Toss 호출은 안 나가게 시크릿
-    미설정으로 그 전 단계(_auth_header)에서 명시 실패시켜 네트워크 접촉 0으로 검증."""
+    """⛔story #2897 카디르 발견(2026-08-21, QA secondary on #3301) — 이 테스트의 이전
+    버전은 `toss_payments_secret_key=""`로 만들어 `_auth_header()`가 `int(amount_minor)`
+    캐스트(toss_adapter.py:148)와 json 바디 조립에 도달하기 前에 RuntimeError로
+    먼저 죽었다 — «캐스트가 실제로 동작하는지»를 한 번도 실행하지 않은 채 이름만
+    맞는 tautology였다(시크릿 없어도 통과·있어도 통과·캐스트를 지워도 통과). 이제
+    `_post`를 mock해 실제로 그 지점까지 코드가 도달하게 한 뒤, mock에 넘어간 kwargs의
+    `json["amount"]`가 진짜 `int`(Decimal 아님)인지 타입으로 직접 확認한다."""
     from decimal import Decimal
+    from unittest.mock import AsyncMock, patch
     from app.services.payment.toss_adapter import TossAdapter
     from app.core.config import settings
 
     adapter = TossAdapter()
     original_secret = settings.toss_payments_secret_key
-    settings.toss_payments_secret_key = ""
+    settings.toss_payments_secret_key = "test-secret-key"
     try:
-        with pytest.raises(RuntimeError, match="TOSS_PAYMENTS_SECRET_KEY"):
+        with patch.object(
+            adapter, "_post",
+            new=AsyncMock(return_value={"paymentKey": "pay-1", "totalAmount": 29000}),
+        ) as mock_post:
             await adapter.charge(
                 billing_key="bk_test", customer_key="ck_test", order_id="ord_test",
                 amount_minor=Decimal("29000"), order_name="test",
             )
+        sent_amount = mock_post.await_args.kwargs["json"]["amount"]
+        assert type(sent_amount) is int, f"amount가 여전히 {type(sent_amount)} — 캐스트가 죽었거나 우회됨"
+        assert sent_amount == 29000
+    finally:
+        settings.toss_payments_secret_key = original_secret
+
+
+@pytest.mark.anyio
+async def test_toss_adapter_refund_json_body_cancel_amount_is_native_int_even_given_decimal():
+    """⛔story #2897 — 위 charge 테스트의 짝(부재 축). `TossAdapter.refund()`의
+    `cancelAmount` 캐스트(toss_adapter.py:203)도 같은 클래스의 방어가 필요한데 지금까지
+    이 캐스트를 Decimal 입력으로 실증한 테스트가 0건이었다(기존 refund 테스트들은 전부
+    이미 int인 값만 넘겼다 — test_e_2495_c4_refund_reconciliation.py 확認)."""
+    from decimal import Decimal
+    from unittest.mock import AsyncMock, patch
+    from app.services.payment.toss_adapter import TossAdapter
+    from app.core.config import settings
+
+    adapter = TossAdapter()
+    original_secret = settings.toss_payments_secret_key
+    settings.toss_payments_secret_key = "test-secret-key"
+    try:
+        with patch.object(
+            adapter, "_post",
+            new=AsyncMock(return_value={"cancels": [{"transactionKey": "tx-1", "cancelAmount": 10000}]}),
+        ) as mock_post:
+            await adapter.refund(
+                payment_key="pay_test", cancel_reason="test",
+                cancel_amount_minor=Decimal("10000"), idempotency_key="idem-1",
+            )
+        sent_cancel_amount = mock_post.await_args.kwargs["json"]["cancelAmount"]
+        assert type(sent_cancel_amount) is int, f"cancelAmount가 여전히 {type(sent_cancel_amount)} — 캐스트가 죽었거나 우회됨"
+        assert sent_cancel_amount == 10000
     finally:
         settings.toss_payments_secret_key = original_secret
