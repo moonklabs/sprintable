@@ -1,0 +1,341 @@
+"""story #2907(선생님 확定 2026-08-21) — 결제 실패 dunning 실PG 검증.
+
+grace 7일(어드민 관리값, platform_settings.dunning_grace_days) — 갱신 charge 실패 시
+org_subscriptions.status='active'→'past_due', 매일 1회 재시도(D+1..D+grace_days), 매
+실패마다 owner 메일, 성공 시 원 주기 유지+active 복귀, grace 만료(D+grace_days+1) 시
+free 전이(기존 데이터 유지).
+
+커버:
+  AC1: 갱신 charge 실패 → active→past_due.
+  AC2: 재시도 스윕 — 같은 날 중복 재시도 금지(멱등) + 성공 시 원 주기 유지+active 복귀.
+  AC3: 실패 통보 메일 — 매 실패마다, 문안에 grace 만료일+제한 방식 명시.
+  AC4: grace 만료 실패 시 free 전이 — 데이터 삭제 없음(tier=free/status=active).
+  AC6: dunning_grace_days가 하드코딩이 아니라 실제로 판단을 바꾼다(load-bearing).
+"""
+from __future__ import annotations
+
+import os
+import uuid
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+_RAW = os.environ.get("ALEMBIC_DATABASE_URL") or os.environ.get("PARITY_TEST_DATABASE_URL") or ""
+_ASYNC = _RAW.replace("postgresql+psycopg2://", "postgresql+asyncpg://").replace(
+    "postgresql://", "postgresql+asyncpg://"
+)
+
+pytestmark = pytest.mark.skipif(not _RAW, reason="real-DB URL 미설정 — skip")
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def _crypto_key(monkeypatch):
+    import app.core.config as config_module
+    from app.services import billing_key_crypto
+
+    monkeypatch.setattr(config_module.settings, "org_billing_key_encryption_key", "W3x6lXDky6UQE36FyRU_Snf9m7d73Aev59D4PvS4-N0=")
+    billing_key_crypto._get_multi_fernet.cache_clear()
+    yield
+    billing_key_crypto._get_multi_fernet.cache_clear()
+
+
+async def _seed_org_with_owner(session, *, email):
+    org_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    await session.execute(
+        text("INSERT INTO organizations (id, name, slug, plan) VALUES (:id, :name, :slug, 'free')"),
+        {"id": org_id, "name": f"test-org-{org_id}", "slug": f"slug-{org_id}"},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO users (id,email,hashed_password,display_name,is_active,email_verified,"
+            "login_fail_count,totp_enabled,totp_fail_count) VALUES "
+            "(:id,:email,'x','Owner',true,true,0,false,0)"
+        ),
+        {"id": user_id, "email": email},
+    )
+    await session.execute(
+        text("INSERT INTO org_members (id, org_id, user_id, role) VALUES (:id, :org_id, :uid, 'owner')"),
+        {"id": uuid.uuid4(), "org_id": org_id, "uid": user_id},
+    )
+    await session.commit()
+    return org_id
+
+
+async def _offering(session, tier):
+    row = (
+        await session.execute(
+            text("SELECT id, monthly_price_minor FROM offering_versions WHERE tier=:t AND currency='krw' AND effective_to IS NULL"),
+            {"t": tier},
+        )
+    ).first()
+    assert row is not None, f"offering_version(tier={tier!r}, krw) 시드 없음"
+    return row.id, row.monthly_price_minor
+
+
+async def _seed_active_paid_subscription(session, org_id, *, tier, offering_id, period_start, period_end, status="active"):
+    await session.execute(
+        text(
+            "INSERT INTO org_subscriptions "
+            "(id, org_id, tier, billing_cycle, status, currency, provider, offering_version_id, "
+            " current_period_start, current_period_end) "
+            "VALUES (:id, :org_id, :tier, 'monthly', :status, 'krw', 'toss', :oid, :ps, :pe)"
+        ),
+        {"id": uuid.uuid4(), "org_id": org_id, "tier": tier, "status": status, "oid": offering_id, "ps": period_start, "pe": period_end},
+    )
+    await session.commit()
+
+
+async def _seed_active_billing_key(session, org_id):
+    from app.services.billing_key_crypto import encrypt_billing_key
+
+    await session.execute(
+        text(
+            "INSERT INTO org_billing_keys (id, org_id, customer_key, encrypted_billing_key, status, issued_at) "
+            "VALUES (:id, :org_id, :ck, :ebk, 'active', now())"
+        ),
+        {"id": uuid.uuid4(), "org_id": org_id, "ck": f"org-{org_id}", "ebk": encrypt_billing_key("plaintext-billing-key-test")},
+    )
+    await session.commit()
+
+
+async def _seed_renewal_failed_order(session, org_id, offering_id, period_end, *, created_at):
+    from app.services.billing_scheduler import _renewal_order_id
+
+    order_id = _renewal_order_id(org_id, offering_id, period_end)
+    await session.execute(
+        text(
+            "INSERT INTO billing_orders (id, org_id, order_id, amount_minor, currency, status, created_at, updated_at) "
+            "VALUES (:id, :org_id, :oid, 100000, 'krw', 'failed', :ca, :ca)"
+        ),
+        {"id": uuid.uuid4(), "org_id": org_id, "oid": order_id, "ca": created_at},
+    )
+    await session.commit()
+    return order_id
+
+
+async def _set_grace_days(session, days):
+    await session.execute(text("UPDATE platform_settings SET dunning_grace_days = :d"), {"d": days})
+    await session.commit()
+
+
+@pytest.mark.anyio
+async def test_trigger_due_charges_success_rolls_period_forward_stays_active_realdb():
+    from app.services.billing_scheduler import trigger_due_charges
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session:
+            org_id = await _seed_org_with_owner(session, email="owner1@2907.test")
+            offering_id, price = await _offering(session, "starter")
+            period_start = datetime.now(timezone.utc) - timedelta(days=30)
+            period_end = datetime.now(timezone.utc) - timedelta(hours=1)  # 이미 도래
+            await _seed_active_paid_subscription(
+                session, org_id, tier="starter", offering_id=offering_id, period_start=period_start, period_end=period_end,
+            )
+            await _seed_active_billing_key(session, org_id)
+
+            with patch("app.services.payment.toss_adapter.TossAdapter._post", new=AsyncMock(
+                return_value={"paymentKey": f"pay-{uuid.uuid4()}", "totalAmount": price},
+            )):
+                result = await trigger_due_charges(session)
+
+            assert result["charged"] == 1
+            assert result["failed"] == 0
+            row = (
+                await session.execute(
+                    text("SELECT status, current_period_start, current_period_end FROM org_subscriptions WHERE org_id=:oid"),
+                    {"oid": org_id},
+                )
+            ).first()
+            assert row.status == "active"
+            assert row.current_period_start == period_end  # 원 도래일이 새 시작일
+            assert row.current_period_end > period_end + timedelta(days=29)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_trigger_due_charges_failure_sets_past_due_and_notifies_realdb():
+    from app.services.payment.toss_adapter import TossApiError
+    from app.services.billing_scheduler import trigger_due_charges
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session:
+            org_id = await _seed_org_with_owner(session, email="owner2@2907.test")
+            offering_id, price = await _offering(session, "starter")
+            period_end = datetime.now(timezone.utc) - timedelta(hours=1)
+            await _seed_active_paid_subscription(
+                session, org_id, tier="starter", offering_id=offering_id,
+                period_start=period_end - timedelta(days=30), period_end=period_end,
+            )
+            await _seed_active_billing_key(session, org_id)
+
+            sent = []
+            with patch("app.services.payment.toss_adapter.TossAdapter._post", new=AsyncMock(
+                side_effect=TossApiError("CARD_DECLINED", "카드 거절", status_code=400),
+            )), patch("app.services.billing_scheduler.send_email", new=lambda to, subj, body: sent.append((to, subj, body))):
+                result = await trigger_due_charges(session)
+
+            assert result["failed"] == 1
+            row = (await session.execute(text("SELECT status FROM org_subscriptions WHERE org_id=:oid"), {"oid": org_id})).first()
+            assert row.status == "past_due"
+
+            assert len(sent) == 1
+            to, subject, body = sent[0]
+            assert to == "owner2@2907.test"
+            grace_expires = (datetime.now(timezone.utc).date() + timedelta(days=7)).strftime("%Y-%m-%d")
+            assert grace_expires in body, "메일 문안에 grace 만료일(언제)이 없음"
+            assert "삭제되지 않" in body, "메일 문안에 데이터 미삭제(어떻게) 명시가 없음"
+            assert "Free" in body or "free" in body, "메일 문안에 free 전이(어떻게) 명시가 없음"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_sweep_dunning_retry_success_restores_active_from_original_due_date_realdb():
+    """AC2 — 재결제 성공 시 «원 주기 유지»: D+3에 성공해도 새 period_start는 원래
+    도래했어야 할 날짜(D+0)를 기준으로 계산돼야 한다(늦게 성공했다고 유예일을 공짜로
+    더 받지 않음)."""
+    from app.services.billing_scheduler import sweep_dunning_retries
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session:
+            org_id = await _seed_org_with_owner(session, email="owner3@2907.test")
+            offering_id, price = await _offering(session, "starter")
+            original_due = datetime.now(timezone.utc) - timedelta(days=3, hours=1)
+            await _seed_active_paid_subscription(
+                session, org_id, tier="starter", offering_id=offering_id,
+                period_start=original_due - timedelta(days=30), period_end=original_due, status="past_due",
+            )
+            await _seed_active_billing_key(session, org_id)
+            failed_created_at = datetime.now(timezone.utc) - timedelta(days=3)
+            await _seed_renewal_failed_order(session, org_id, offering_id, original_due, created_at=failed_created_at)
+
+            with patch("app.services.payment.toss_adapter.TossAdapter._post", new=AsyncMock(
+                return_value={"paymentKey": f"pay-{uuid.uuid4()}", "totalAmount": price},
+            )):
+                result = await sweep_dunning_retries(session)
+
+            assert result["retried"] == 1
+            row = (
+                await session.execute(
+                    text("SELECT status, current_period_start, current_period_end FROM org_subscriptions WHERE org_id=:oid"),
+                    {"oid": org_id},
+                )
+            ).first()
+            assert row.status == "active"
+            assert row.current_period_start == original_due
+            assert row.current_period_end > original_due + timedelta(days=29)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_sweep_dunning_retry_daily_dedup_no_double_attempt_same_day_realdb():
+    from app.services.billing_scheduler import sweep_dunning_retries
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session:
+            org_id = await _seed_org_with_owner(session, email="owner4@2907.test")
+            offering_id, price = await _offering(session, "starter")
+            original_due = datetime.now(timezone.utc) - timedelta(days=1, hours=1)
+            await _seed_active_paid_subscription(
+                session, org_id, tier="starter", offering_id=offering_id,
+                period_start=original_due - timedelta(days=30), period_end=original_due, status="past_due",
+            )
+            await _seed_active_billing_key(session, org_id)
+            await _seed_renewal_failed_order(session, org_id, offering_id, original_due, created_at=original_due)
+
+            call_count = 0
+
+            async def _fake_post(self, path, **kwargs):
+                nonlocal call_count
+                call_count += 1
+                from app.services.payment.toss_adapter import TossApiError
+                raise TossApiError("CARD_DECLINED", "카드 거절", status_code=400)
+
+            with patch("app.services.payment.toss_adapter.TossAdapter._post", new=_fake_post):
+                r1 = await sweep_dunning_retries(session)
+                r2 = await sweep_dunning_retries(session)
+
+            assert r1["retried"] == 1
+            assert r2["retried"] == 0, "같은 날 두 번째 스윕은 재시도하면 안 됨(멱등)"
+            assert call_count == 1, "Toss가 하루 두 번 불리면 안 됨"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_sweep_dunning_downgrade_to_free_after_grace_expires_realdb():
+    """AC4 — grace 만료(D+grace_days+1) 시 free 전이. 데이터 삭제 없음(tier=free만 되돌림,
+    이 스윕은 다른 리소스 테이블을 안 건드린다 — downgrade_to_free 자체가 기존 검증됨)."""
+    from app.services.billing_scheduler import sweep_dunning_retries
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session:
+            org_id = await _seed_org_with_owner(session, email="owner5@2907.test")
+            offering_id, price = await _offering(session, "starter")
+            original_due = datetime.now(timezone.utc) - timedelta(days=8, hours=1)
+            await _seed_active_paid_subscription(
+                session, org_id, tier="starter", offering_id=offering_id,
+                period_start=original_due - timedelta(days=30), period_end=original_due, status="past_due",
+            )
+            await _seed_renewal_failed_order(session, org_id, offering_id, original_due, created_at=original_due)
+
+            result = await sweep_dunning_retries(session)
+
+            assert result["downgraded"] == 1
+            row = (
+                await session.execute(text("SELECT tier, status FROM org_subscriptions WHERE org_id=:oid"), {"oid": org_id})
+            ).first()
+            assert row.tier == "free"
+            assert row.status == "active"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_dunning_grace_days_platform_setting_changes_retry_window_realdb():
+    """AC6 load-bearing — grace_days를 3으로 바꾸면 D+4가 (D+7이 아니라) downgrade
+    트리거일이 돼야 한다. 하드코딩이었다면 이 테스트는 downgraded==0으로 실패한다."""
+    from app.services.billing_scheduler import sweep_dunning_retries
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session:
+            await _set_grace_days(session, 3)
+            org_id = await _seed_org_with_owner(session, email="owner6@2907.test")
+            offering_id, price = await _offering(session, "starter")
+            original_due = datetime.now(timezone.utc) - timedelta(days=4, hours=1)
+            await _seed_active_paid_subscription(
+                session, org_id, tier="starter", offering_id=offering_id,
+                period_start=original_due - timedelta(days=30), period_end=original_due, status="past_due",
+            )
+            await _seed_renewal_failed_order(session, org_id, offering_id, original_due, created_at=original_due)
+
+            result = await sweep_dunning_retries(session)
+
+            assert result["downgraded"] == 1, "grace_days=3이면 D+4는 downgrade여야 함(D+8이 아님)"
+            row = (await session.execute(text("SELECT tier FROM org_subscriptions WHERE org_id=:oid"), {"oid": org_id})).first()
+            assert row.tier == "free"
+    finally:
+        await engine.dispose()
