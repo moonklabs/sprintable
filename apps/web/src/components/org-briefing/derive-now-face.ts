@@ -10,6 +10,7 @@
  * 데이터 = `/api/dashboard/my-actions`(action_queue=caller org-wide 결정대기·attention=org 자동감지) +
  * `/api/notifications?type=task_completed`(완료 보고). 신규 BE 0 — 두 기존 BFF만 조합.
  */
+import { projectHref, crossProjectLabel, type ViewerContext } from './derive-attention-clusters';
 
 export type NowKind = 'decide' | 'signal' | 'done';
 
@@ -24,6 +25,10 @@ export interface NowFaceItem {
   href: string;
   /** 정렬용 내부 우선순위(작을수록 상단) — 화면에 노출되지 않음(시간 낙인 금지). */
   priority: number;
+  // story #2856(2842 후속, 클래스 완결) — org-wide 자동감지 신호(agent_stuck·unanswered_blocker)
+  // 만 채워짐(project_id를 가진 attention 유래 항목). action_queue 유래(gate_approval·
+  // review_merge·my_blockers)는 project_id 자체가 없어 항상 null(선행 BE 계약 의존, 스코프 밖).
+  crossProjectLabel: string | null;
 }
 
 export interface NowFaceTranslator {
@@ -235,7 +240,9 @@ function ctxStr(context: Record<string, unknown>, key: string): string | null {
  * 대기 중 최우선 1건만 primary, 나머지 ghost — 우발 mutation 방지 위해 전부 상세 표면으로 네비게이션만
  * (즉시 mutation 0, action-zone.tsx의 동일 원칙 재사용).
  */
-export function buildNowFace(raw: RawMyActions, notifications: RawCompletionNotification[], t: NowFaceTranslator): NowFaceItem[] {
+export function buildNowFace(
+  raw: RawMyActions, notifications: RawCompletionNotification[], t: NowFaceTranslator, viewer?: ViewerContext,
+): NowFaceItem[] {
   const items: NowFaceItem[] = [];
 
   for (const q of raw.queue) {
@@ -248,6 +255,7 @@ export function buildNowFace(raw: RawMyActions, notifications: RawCompletionNoti
         actionLabel: t('actionApprove'), actionTone: 'ghost',
         href: '/inbox?tab=gates',
         priority: PRIORITY_RANK[q.priority ?? 'info'] ?? 2,
+        crossProjectLabel: null, // org-level 표면(스코프 밖) — 프로젝트 개념 자체가 없음.
       });
     } else if (q.type === 'review_merge') {
       const storyId = ctxStr(q.context, 'story_id');
@@ -259,6 +267,8 @@ export function buildNowFace(raw: RawMyActions, notifications: RawCompletionNoti
         actionLabel: t('actionReview'), actionTone: 'ghost',
         href: storyId ? `/board?story=${storyId}` : '/board',
         priority: 10 + (PRIORITY_RANK[q.priority ?? 'info'] ?? 2),
+        // story #2856 — RawQueueItem엔 project_id/slug가 없어(선행 BE 계약 필요) 항상 null.
+        crossProjectLabel: null,
       });
     } else if (q.type === 'my_blockers') {
       const blockedId = ctxStr(q.context, 'blocked_story_id');
@@ -270,6 +280,7 @@ export function buildNowFace(raw: RawMyActions, notifications: RawCompletionNoti
         actionLabel: t('actionReview'), actionTone: 'ghost',
         href: blockedId ? `/board?story=${blockedId}` : '/board',
         priority: -1, // danger — 내가 남을 막고 있음, 최우선.
+        crossProjectLabel: null, // 동형(RawQueueItem 계약 밖).
       });
     }
   }
@@ -284,8 +295,15 @@ export function buildNowFace(raw: RawMyActions, notifications: RawCompletionNoti
         // 노출하면 원시 enum 유출이 된다(카피 스윕 §3-4). 고정 문구만 쓴다(no-fiction).
         context: t('signalAgentStuckContext'),
         actionLabel: t('actionOpen'), actionTone: 'ghost',
-        href: a.entity_type === 'story' && a.entity_id ? `/board?story=${a.entity_id}` : '/inbox?tab=gates',
+        // story #2856(2842 후속 클래스 완결) — /inbox?tab=gates는 org-level이라 그대로,
+        // /board?story= bare path만 소속 프로젝트로 못박는다(viewer/slug 미제공 시 폴백).
+        href: a.entity_type === 'story' && a.entity_id
+          ? projectHref(viewer, a.project_slug, `/board?story=${a.entity_id}`)
+          : '/inbox?tab=gates',
         priority: 20,
+        crossProjectLabel: a.entity_type === 'story' && a.entity_id
+          ? crossProjectLabel(viewer, a.project_id, a.project_slug)
+          : null,
       });
     } else if (a.type === 'unanswered_blocker') {
       items.push({
@@ -294,8 +312,11 @@ export function buildNowFace(raw: RawMyActions, notifications: RawCompletionNoti
         title: t('signalBlockerTitle'),
         context: t('signalBlockerContext'),
         actionLabel: t('actionOpen'), actionTone: 'ghost',
-        href: a.blocked_story_id ? `/board?story=${a.blocked_story_id}` : '/board',
+        href: a.blocked_story_id
+          ? projectHref(viewer, a.project_slug, `/board?story=${a.blocked_story_id}`)
+          : '/board',
         priority: 22,
+        crossProjectLabel: a.blocked_story_id ? crossProjectLabel(viewer, a.project_id, a.project_slug) : null,
       });
     }
     // story #2541 — story_stalled·hypothesis_falsified는 여기서 더는 flat 행으로 안 올린다.
@@ -312,6 +333,7 @@ export function buildNowFace(raw: RawMyActions, notifications: RawCompletionNoti
       actionLabel: t('actionConfirm'), actionTone: 'ghost',
       href: n.href ?? '/inbox',
       priority: 30,
+      crossProjectLabel: null, // 알림 유래 — project_id 계약 자체가 없음.
     });
   }
 

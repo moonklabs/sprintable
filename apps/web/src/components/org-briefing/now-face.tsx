@@ -13,7 +13,7 @@ import {
   type NowFaceItem, type NowFaceTranslator,
 } from './derive-now-face';
 import { deriveAttentionClusters, type AttentionClusters, type ViewerContext } from './derive-attention-clusters';
-import { AttentionClusterBoard } from './attention-cluster-board';
+import { AttentionClusterBoard, CrossProjectTag } from './attention-cluster-board';
 import { parseTeamMembers } from './derive-workforce-face';
 
 // story ded31cb3 — 조직 브리핑 "지금" 면. doc org-briefing-hypothesis-grammar-blueprint §1.3.
@@ -39,7 +39,7 @@ async function loadNowFace(t: NowFaceTranslator, viewer: ViewerContext): Promise
   ]);
   const raw = parseMyActions(ma);
   return {
-    items: buildNowFace(raw, parseCompletionNotifications(notifs), t),
+    items: buildNowFace(raw, parseCompletionNotifications(notifs), t, viewer),
     // story #2541 — 같은 raw.attention을 story_stalled/hypothesis_falsified 전용으로 한 번 더
     // 읽어 클러스터로 묶는다(buildNowFace는 이 두 타입을 더는 flat 행으로 안 올린다).
     // story #2829/#2830 — loop_* 3종도 동형(buildNowFace는 이 타입들을 flat 행으로 안 올림,
@@ -72,7 +72,10 @@ function NowRow({ item }: { item: NowFaceItem }) {
     >
       <KindBadge kind={item.kind} label={item.kindLabel} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13.5px] font-medium text-foreground">{item.title}</span>
+        <span className="flex items-center gap-1.5">
+          <span className="min-w-0 truncate text-[13.5px] font-medium text-foreground">{item.title}</span>
+          <CrossProjectTag label={item.crossProjectLabel} />
+        </span>
         <span className="block truncate text-xs text-muted-foreground">{item.context}</span>
       </span>
       <span
