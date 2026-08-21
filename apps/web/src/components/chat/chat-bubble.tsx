@@ -31,6 +31,7 @@ import { EventBlockCard } from './event-block-card';
 import { parseBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
 import { segmentMessageContent } from './message-segments';
 import { EmbedGroup } from './embed-group';
+import { toEmbedCardOpenPanel } from './embed-card-open-panel-adapter';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -219,10 +220,10 @@ function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenRe
         // 있어 첫 자식만 읽으면 라벨이 잘린다. 전 자식을 이어붙인다(hastNodeText가
         // 재귀로 하듯 여기도 동일 패턴).
         const label = (link!.children ?? []).map(hastNodeText).join('') || ref.entityId;
-        const openReadingPanel = onOpenReadingPanel
-          ? (entityType: string, entityId: string, t: string | null, s: string | null, h: string | null) =>
-              onOpenReadingPanel({ kind: 'entity', entityType, entityId, title: t, status: s, href: h })
-          : undefined;
+        // object(ReadingPanelTarget)→5-인자 어댑터는 embed-card-open-panel-adapter.ts SSOT
+        // (embed-group.tsx의 캐러셀/간결 리스트와 진짜 같은 참조 — 카디르 QA #3319 지적으로
+        // 각자 로컬 구현하던 드리프트를 제거했다).
+        const openReadingPanel = toEmbedCardOpenPanel(onOpenReadingPanel);
         return <EmbedCard entity_type={ref.entityType} entity_id={ref.entityId} title={label} status={status} onOpenReadingPanel={openReadingPanel} />;
       }
       return <p className={`mb-1.5 [overflow-wrap:anywhere] text-sm leading-relaxed last:mb-0 ${text}`}>{children}</p>;
