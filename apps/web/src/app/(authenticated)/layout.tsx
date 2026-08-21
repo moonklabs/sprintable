@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
 import { getServerSession } from '@/lib/db/server';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
+import { resolveProjectMemberships } from '@/lib/resolve-project-memberships';
 import { DashboardShell } from '../dashboard/dashboard-shell';
 import { StorageCapacityToastProvider } from '@/components/storage/storage-capacity-toast-provider';
 import { CrossProjectToastProvider } from '@/components/chat/cross-project-toast-provider';
@@ -74,9 +75,8 @@ export default async function AuthenticatedLayout({
   if (!me?.org_id) redirect('/onboarding');
   const memberships: { projectId: string; projectName: string }[] =
     membershipsRes?.ok ? ((await membershipsRes.json()) as { projectId: string; projectName: string }[]) : [];
-  let projectMemberships = memberships.length > 0
-    ? memberships
-    : me ? [{ projectId: me.project_id, projectName: me.project_name }] : [];
+  // story #2885 — sentinel(0-프로젝트 org) 오염 가드, 근거는 resolve-project-memberships.ts 참고.
+  let projectMemberships = resolveProjectMemberships(memberships, me);
 
   const rawOrgs: OrgMembership[] = orgsRes?.ok ? ((await orgsRes.json()) as OrgMembership[]) : [];
   const orgMemberships = rawOrgs.map((o) => ({
