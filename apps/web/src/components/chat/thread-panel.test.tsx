@@ -160,3 +160,77 @@ describe('ThreadPanel — story #2911 좌측 rail(R4 위계 시각화)', () => {
     expect(container.textContent).toContain('답글 2(같은 발신자 — 그룹핑)');
   });
 });
+
+// story #2911(S2e②③/R4) — 「s2e-thread-depth-grammar」 확定 회귀가드. ThreadPanel 헤더가
+// ReadingPanel과 같은 칩 브레드크럼 문법(칩 버튼 + `›` 구분자)으로 통일됐는지, 세그먼트가
+// 정확히 2개(대화 › 원 메시지 요약)인지, 원 메시지 칩은 비클릭(span, 버튼 아님)인지 잰다.
+describe('ThreadPanel — story #2911(S2e②③) 헤더 칩 브레드크럼(대화 › 원 메시지 요약)', () => {
+  async function mountWithNoReplies() {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
+    await act(async () => { root.render(wrap(<Harness />)); });
+    await flush();
+  }
+
+  it('「스레드」 평문 폐기 — 헤더에 그 문구가 없다', async () => {
+    await mountWithNoReplies();
+    const header = container.querySelector('.border-b.border-border\\/80');
+    expect(header?.textContent).not.toContain('스레드');
+  });
+
+  it('세그먼트 정확히 2개(대화·원 메시지 요약) — 구분자 `›`가 정확히 1개', async () => {
+    await mountWithNoReplies();
+    const header = container.querySelector('.border-b.border-border\\/80')!;
+    const seps = Array.from(header.querySelectorAll('span')).filter((s) => s.textContent === '›');
+    expect(seps).toHaveLength(1);
+    expect(header.textContent).toContain('대화');
+    expect(header.textContent).toContain('원본 메시지'); // parentMessage.content 그대로(마크다운 없음)
+  });
+
+  it('「대화」 칩은 버튼(클릭 시 onClose) — 원 메시지 요약 칩은 span(비클릭, 현재 위치)', async () => {
+    const onClose = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
+    await act(async () => {
+      root.render(wrap(
+        <ThreadPanel parentMessage={parentMessage} conversationId="conv-1" currentTeamMemberId="member-1" projectId="proj-1" onClose={onClose} />,
+      ));
+    });
+    await flush();
+    const header = container.querySelector('.border-b.border-border\\/80')!;
+    const convChip = Array.from(header.querySelectorAll('button')).find((b) => b.textContent?.includes('대화'));
+    expect(convChip).toBeTruthy();
+    await act(async () => { convChip!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onClose).toHaveBeenCalled();
+    // 원 메시지 요약은 버튼이 아니라 span이어야(비클릭) 한다.
+    const summarySpan = Array.from(header.querySelectorAll('span')).find((s) => s.textContent?.includes('원본 메시지'));
+    expect(summarySpan?.tagName).toBe('SPAN');
+  });
+
+  it('원 메시지 요약 칩은 native title로 전문을 갖는다(truncate 대비 접근성 폴백)', async () => {
+    const longMessage: ChatMessage = { ...parentMessage, content: '이것은 아주 길어서 truncate가 실제로 적용될 만한 원본 메시지 본문입니다' };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
+    await act(async () => {
+      root.render(wrap(
+        <ThreadPanel parentMessage={longMessage} conversationId="conv-1" currentTeamMemberId="member-1" projectId="proj-1" onClose={() => {}} />,
+      ));
+    });
+    await flush();
+    const header = container.querySelector('.border-b.border-border\\/80')!;
+    const summarySpan = Array.from(header.querySelectorAll('span')).find((s) => s.getAttribute('title')?.includes('아주 길어서'));
+    expect(summarySpan).toBeTruthy();
+  });
+
+  it('원 메시지가 마크다운 링크(sole-link 등)면 요약 칩에는 라벨만 남는다(카드/칩 중첩 방지)', async () => {
+    const linkMessage: ChatMessage = { ...parentMessage, content: '[작업 A](entity:task:33333333-3333-3333-3333-333333333333)' };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
+    await act(async () => {
+      root.render(wrap(
+        <ThreadPanel parentMessage={linkMessage} conversationId="conv-1" currentTeamMemberId="member-1" projectId="proj-1" onClose={() => {}} />,
+      ));
+    });
+    await flush();
+    const header = container.querySelector('.border-b.border-border\\/80')!;
+    expect(header.textContent).toContain('작업 A');
+    expect(header.textContent).not.toContain('entity:task:');
+    expect(header.querySelector('button[type="button"]')).toBeTruthy(); // 대화 칩만 버튼(요약은 span)
+  });
+});

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
-import { X } from 'lucide-react';
+import { ArrowLeft, MessageSquare, X } from 'lucide-react';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { normalizeToMessage } from '@/hooks/use-chat-sse';
 import { ChatBubble } from './chat-bubble';
@@ -16,6 +16,18 @@ import { fetchWithAuth } from '@/lib/db/client';
 // 렌더 새 배열을 만들면 useEntityStatusBatchFetch의 effect가 messages 변경으로 오인해
 // 매번 재실행된다 — 어차피 빈 배열이라 fetch는 안 나가지만 불필요한 재실행 자체를 막는다).
 const EMPTY_THREAD_MESSAGES: ChatMessage[] = [];
+
+// story #2911(S2e②③) — 헤더 칩의 "원 메시지 요약"은 순수 텍스트라야 한다(ChatBubble의 마크다운
+// 렌더 전체를 여기 또 태우면 칩 안에 카드/칩이 중첩되는 사고). 마크다운 링크 `[라벨](...)`는
+// 라벨만 남기고, 기본 강조 마커는 지운 뒤 공백을 접는다 — 시안이 요구하는 "≤15ch truncate"는
+// CSS(max-w+truncate, ReadingPanel과 동일 패턴)가 처리하므로 여기선 자르지 않는다.
+function plainPreview(content: string): string {
+  return content
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[*_`#]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 interface ThreadPanelProps {
   parentMessage: ChatMessage;
@@ -136,14 +148,41 @@ export function ThreadPanel({
 
   return (
     <div className="flex h-full flex-col overflow-hidden border-l border-border bg-background">
-      {/* Header */}
-      <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-2.5">
-        <span className="text-sm font-medium text-foreground">스레드</span>
+      {/* Header — story #2911(S2e②③/R4) 「s2e-thread-depth-grammar」 확定: ReadingPanel과
+          «같은 칩 브레드크럼» 문법(칩 버튼 + `›` text-border 구분자, 동일 토큰/스타일).
+          「스레드」 평문 폐기. 스레드는 단일 레벨이라 세그먼트는 정확히 2개 — [대화](뒤로
+          어포던스, 모바일 「← 대화」 텍스트 바를 이 칩이 대체) › [원 메시지 요약](스크롤로
+          pin이 밀려도 헤더에 «어느 스레드인지» 상시 유지, 현 위치라 비클릭·ReadingPanel의
+          최상단 세그먼트와 같은 문법). tint는 유나양 확定(2026-08-21) — chat_message는
+          의도적 무색(§2263 C-7)이고 메시지는 5계열 어느 의미도 아니라 둘 다 중립 muted bg
+          하나로 통일, 구분은 색이 아니라 아이콘+텍스트 weight로만(아래). */}
+      <div className="flex flex-shrink-0 items-center gap-1 overflow-x-auto border-b border-border/80 px-2 py-1.5">
+        {/* story #2911 — 유나양 확定(2026-08-21, C-7 논거: chat_message는 의도적 무색이고
+            메시지는 5계열 어느 «의미」도 아니라 없는 뜻을 억지로 안 붙인다): 둘 다 muted bg
+            하나로 통일, 구분은 색이 아니라 **아이콘+텍스트 weight**로만 — 「대화」=뒤로
+            어포던스(ArrowLeft)+text-muted-foreground, 원 메시지=현재 위치(MessageSquare)+
+            text-foreground font-medium. 신규 색 0. */}
         <button
           type="button"
           onClick={onClose}
-          className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-1 text-xs text-muted-foreground transition hover:text-foreground"
+        >
+          <ArrowLeft className="size-3 shrink-0" />
+          <span>대화</span>
+        </button>
+        <span className="text-xs text-border">›</span>
+        <span
+          title={plainPreview(parentMessage.content)}
+          className="flex max-w-32 shrink items-center gap-1 rounded bg-muted px-1.5 py-1 text-xs font-medium text-foreground"
+        >
+          <MessageSquare className="size-3 shrink-0" />
+          <span className="truncate">{plainPreview(parentMessage.content)}</span>
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
           aria-label="스레드 닫기"
+          className="ml-auto shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           <X className="h-4 w-4" />
         </button>
