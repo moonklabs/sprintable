@@ -802,21 +802,6 @@ export default function SettingsPage() {
                   />
                 )}
                 <BlockedUsersSection />
-
-                <SectionCard>
-                  <SectionCardHeader>
-                    <div className="space-y-1">
-                      <h2 className="text-base font-semibold text-foreground">{tLegal('policiesHeading')}</h2>
-                    </div>
-                  </SectionCardHeader>
-                  <SectionCardBody className="space-y-4">
-                    <LegalLinks className="justify-start text-sm text-muted-foreground" />
-                    <div className="border-t border-border pt-4">
-                      <p className="mb-1.5 text-xs font-medium text-muted-foreground">{tLegal('businessInfoHeading')}</p>
-                      <BusinessInfoBlock className="justify-start text-xs text-muted-foreground" />
-                    </div>
-                  </SectionCardBody>
-                </SectionCard>
               </div>
             </TabsContent>
 
@@ -1371,6 +1356,15 @@ export default function SettingsPage() {
               </SectionCard>
             </TabsContent>
 
+            {/* 설정 전역 법적 고지 푸터 — 활성 탭 무관 상시 노출 (story #2865) */}
+            <div className="mt-8 border-t border-border pt-6">
+              <h2 className="mb-3 text-sm font-medium text-foreground">{tLegal('policiesHeading')}</h2>
+              <LegalLinks className="justify-start text-sm text-muted-foreground" />
+              <div className="mt-4 border-t border-border pt-4">
+                <p className="mb-1.5 text-xs font-medium text-muted-foreground">{tLegal('businessInfoHeading')}</p>
+                <BusinessInfoBlock className="justify-start text-xs text-muted-foreground" />
+              </div>
+            </div>
           </div>
         </div>
       </Tabs>
