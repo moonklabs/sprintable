@@ -128,3 +128,35 @@ describe('ThreadPanel — 스레드 답글 전용 참조가 실제로 배치조�
     expect(container.textContent).not.toContain('아직 모름');
   });
 });
+
+// story #2911(S2e①/R4) — 좌측 rail(원 메시지→답글 잇는 시각선) 회귀가드.
+describe('ThreadPanel — story #2911 좌측 rail(R4 위계 시각화)', () => {
+  it('원본 메시지 블록과 답글 목록 wrapper 둘 다 border-l-2(같은 rail 토큰)를 갖는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/messages?thread_id=')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 'reply-1', created_by: 'agent-2', sender: { id: 'agent-2', name: '유나', type: 'agent' }, content: '답글 1', created_at: '2026-08-08T00:01:00.000Z' },
+              { id: 'reply-2', created_by: 'agent-2', sender: { id: 'agent-2', name: '유나', type: 'agent' }, content: '답글 2(같은 발신자 — 그룹핑)', created_at: '2026-08-08T00:02:00.000Z' },
+            ],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+
+    await act(async () => {
+      root.render(wrap(<Harness />));
+    });
+    await flush();
+
+    const railed = container.querySelectorAll('.border-l-2.border-border');
+    // 원본 메시지 블록 1 + 답글 목록 wrapper 1 = 최소 2곳(개별 ChatBubble마다 따로 안 생김 —
+    // AC3: 그룹핑된 답글이 rail을 분절시키지 않는다는 것 자체가 "wrapper 하나"라는 뜻).
+    expect(railed.length).toBeGreaterThanOrEqual(2);
+    expect(container.textContent).toContain('답글 1');
+    expect(container.textContent).toContain('답글 2(같은 발신자 — 그룹핑)');
+  });
+});

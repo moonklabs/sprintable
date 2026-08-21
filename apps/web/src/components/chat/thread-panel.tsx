@@ -149,8 +149,11 @@ export function ThreadPanel({
         </button>
       </div>
 
-      {/* AC9: 원본 메시지 */}
-      <div className="flex-shrink-0 border-b border-border/60 bg-muted/30 px-4 py-3">
+      {/* AC9: 원본 메시지. story #2911(S2e①/R4) — 좌측 rail(border-l-2)이 이 블록에서
+          시작해 아래 답글 목록까지 같은 x-오프셋(pl-3)으로 끊김 없이 이어진다(스펙 §5 "원
+          메시지 pin + 좌측 라인" — 답글이 원 메시지에서 뻗어나온 것처럼). 기존 border-border
+          토큰 재사용(신규 색 0). */}
+      <div className="flex-shrink-0 border-b border-l-2 border-border bg-muted/30 py-3 pl-3 pr-4">
         <p className="mb-1 text-[10px] font-medium text-muted-foreground">원본 메시지</p>
         <ChatBubble
           message={parentMessage}
@@ -163,13 +166,17 @@ export function ThreadPanel({
       </div>
 
       {/* Thread messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-3">
+      <div className="flex-1 overflow-y-auto py-3 pr-4">
         {loading ? (
           <p className="text-center text-sm text-muted-foreground">불러오는 중…</p>
         ) : messages.length === 0 ? (
           <p className="text-center text-sm text-muted-foreground">아직 답글이 없습니다.</p>
         ) : (
-          <div className="flex flex-col gap-2">
+          // story #2911 — rail은 목록 전체를 감싸는 이 wrapper 하나(border-l-2, 원본 메시지
+          // 블록과 동일 x-오프셋 — 둘 다 컨테이너 왼쪽 끝에서 시작)뿐이라 개별 ChatBubble
+          // 그룹핑(isGrouped)과 무관하게 끊기지 않는다(AC3 — 한 줄로 쭉 이어지고, 그 안의
+          // 버블 간격만 gap-2로 나뉜다).
+          <div className="flex flex-col gap-2 border-l-2 border-border pl-3">
             {messages.map((msg, idx) => {
               const prev = messages[idx - 1];
               const isGrouped = Boolean(prev && prev.created_by === msg.created_by);
