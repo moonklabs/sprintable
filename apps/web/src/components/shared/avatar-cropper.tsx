@@ -133,6 +133,9 @@ export function AvatarCropper({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
       >
+        {/* imageUrl은 로컬 File을 URL.createObjectURL()로 감싼 blob: URI(next/image가 요구하는
+            정적 크기/원격 도메인 전제와 안 맞음) + 캔버스 좌표계산이 실 픽셀 치수를 그대로
+            참조해야 해 next/image의 자체 리사이즈 개입을 피한다. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={imageUrl}

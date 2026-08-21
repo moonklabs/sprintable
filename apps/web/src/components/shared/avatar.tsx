@@ -43,6 +43,10 @@ export function Avatar({
         )}
       >
         {avatarUrl ? (
+          // avatar_url은 avatar 전용 GCS public-read 버킷의 임의 서빙 도메인(dev/prod
+          // 버킷명이 갈리고 next.config의 remotePatterns 사전 등록이 안 됨) — 기존 관례
+          // (storage-uploader-avatar.tsx·team-presence-panel.tsx·profile-menu.tsx 전부 동일
+          // 이유로 raw img)와 동형. next/image 전환은 별도 remotePatterns 검토 스토리 몫.
           // eslint-disable-next-line @next/next/no-img-element
           <img src={avatarUrl} alt={name} className="h-full w-full object-cover" />
         ) : name.trim() ? (
