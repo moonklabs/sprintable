@@ -6,8 +6,8 @@
 예약 없음(가장 흔한 상태) — sweep(`sweep_pending_tier_downgrades`, toss-billing-
 maintenance cron)이 이 값 <= now()인 행만 훑는다.
 
-Revision ID: 0268
-Revises: 0267
+Revision ID: 0269
+Revises: 0268
 Create Date: 2026-08-21
 """
 from __future__ import annotations
@@ -16,8 +16,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0268"
-down_revision = "0267"
+revision = "0269"
+down_revision = "0268"
 branch_labels = None
 depends_on = None
 
