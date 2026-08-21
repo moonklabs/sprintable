@@ -88,7 +88,7 @@ export function ReadingPanel({
             const isLast = i === stack.length - 1;
             return (
               <div key={i} className="flex shrink-0 items-center gap-1">
-                {i > 0 && <span className="text-xs text-muted-foreground/60">›</span>}
+                {i > 0 && <span className="text-xs text-border">›</span>}
                 <button
                   type="button"
                   onClick={() => onNavigateTo(i)}
