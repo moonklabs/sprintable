@@ -8,6 +8,7 @@ import type { GateItem } from '@/components/kanban/types';
 import { fetchWithAuth } from '@/lib/db/client';
 import type { ReadingPanelTarget } from './reading-panel';
 import type { EventDefinitionSummary } from '@/lib/block-template';
+import { toEmbedCardOpenPanel } from './embed-card-open-panel-adapter';
 
 // story #2905(S2c③④) — delta 시안(`s2c-delta-grouping-states`) §② collapsed/expanded 상태.
 // «풍부하되 격납» 불변식 재확認: 여럿=격납이 default, 헤더가 개수/성격 요약, 펼침은 사용자 액션.
@@ -92,17 +93,9 @@ function GateGroup({ refs, eventDefinitionsByKey }: { refs: EmbedGroupProps['ref
 
 /** artifact 그룹 — «가로 슬라이드 캐러셀»(§3 표: 썸네일/미리보기가 값을 갖는 여럿). 각 항목은
  * EmbedCard(artifact)를 그대로 재사용(S2c① 실 렌더 인라인 로직·사본 0) — 고정폭 열로 늘어놓고
- * overflow-x-auto로 스크롤(1스크린 자연 노출 + 나머지는 옆으로). */
-// EmbedCard는 (entityType, entityId, title, status, href) 5-인자 위치 시그니처를 받는다
-// (기존 EmbedCard 계약, 변경 없음) — chat-bubble.tsx의 `p` 핸들러가 이미 쓰는 것과 동일한
-// object(ReadingPanelTarget)→5-인자 어댑터를 여기서도 그대로 재사용(사본 아님, 같은 변환 로직).
-type EmbedCardOpenPanel = (entityType: string, entityId: string, title: string | null, status: string | null, href: string | null) => void;
-function toEmbedCardOpenPanel(onOpenReadingPanel?: EmbedGroupProps['onOpenReadingPanel']): EmbedCardOpenPanel | undefined {
-  if (!onOpenReadingPanel) return undefined;
-  return (entityType, entityId, title, status, href) =>
-    onOpenReadingPanel({ kind: 'entity', entityType, entityId, title, status, href });
-}
-
+ * overflow-x-auto로 스크롤(1스크린 자연 노출 + 나머지는 옆으로). object→5-인자 어댑터는
+ * embed-card-open-panel-adapter.ts SSOT(chat-bubble.tsx `p` 핸들러와 진짜 같은 참조 — 카디르
+ * QA #3319 지적 반영, 각자 로컬 구현 드리프트 제거). */
 function ArtifactCarousel({ refs, onOpenReadingPanel }: { refs: EmbedGroupProps['refs']; onOpenReadingPanel?: EmbedGroupProps['onOpenReadingPanel'] }) {
   const openPanel = toEmbedCardOpenPanel(onOpenReadingPanel);
   return (
