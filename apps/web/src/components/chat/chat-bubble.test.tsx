@@ -152,8 +152,10 @@ describe('ChatBubble — story #2262 AC1(사실성·표면·지점 표기, doc f
     // story #2886(S2b) — 격납 메타는 hover/focus tooltip으로 이동(더는 항상 인라인 표기 안 함).
     // 트리거에 포커스를 줘 tooltip을 열고, base-ui Portal이 document.body에 그리는 내용을 본다.
     await act(async () => { container.querySelector('button')!.focus(); });
-    expect(document.body.textContent).toContain('관찰됨');
+    // story #2886(S2b) — 유나군 하이파이 목업 대조: 툴팁은 라벨:값 행 구조(상태·참조 형태·관찰).
+    expect(document.body.textContent).toContain('참조 형태');
     expect(document.body.textContent).toContain('멘션');
+    expect(document.body.textContent).toContain('관찰');
     expect(document.body.textContent).toContain('7/26');
   });
 

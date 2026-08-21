@@ -48,8 +48,10 @@ describe('EntityChip variant=inline(기본) — story #2886', () => {
     });
     await act(async () => { container.querySelector('button')!.focus(); });
     expect(document.body.textContent).toContain(LONG_LABEL);
-    expect(document.body.textContent).toContain('관찰됨');
+    // story #2886(S2b) — 유나군 하이파이 목업 대조: 툴팁은 라벨:값 행 구조(상태·참조 형태·관찰).
+    expect(document.body.textContent).toContain('참조 형태');
     expect(document.body.textContent).toContain('멘션');
+    expect(document.body.textContent).toContain('관찰');
     expect(document.body.textContent).toContain('7/26');
   });
 

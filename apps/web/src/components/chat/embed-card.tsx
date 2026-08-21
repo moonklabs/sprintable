@@ -900,15 +900,23 @@ export function EntityChip({
   // base-ui Tooltip은 hover+focus 둘 다 기본 지원(키보드 Tab으로 트리거에 도달 가능) — 별도
   // 배선 불요. inline-meta 변형이거나 표시할 메타가 아예 없으면 tooltip을 안 씌운다(불필요한
   // 빈 popover 방지).
+  // story #2886(S2b) — 유나군 하이파이 목업(S2b 칩 가독성 목업) 대조: 툴팁은 한 줄 문장이
+  // 아니라 라벨:값 행 구조(상태·참조 형태·관찰) — 목업의 「열기(side pane)」 버튼은 S2d(side
+  // pane 정형화) 스코프라 이번엔 제외한다(별도 CTA 배선 없음, 이 스토리 AC 밖).
+  const tooltipRow = (rowLabel: string, value: string) => (
+    <div className="flex items-baseline justify-between gap-4">
+      <span className="text-[10px] text-background/60">{rowLabel}</span>
+      <span className="font-medium">{value}</span>
+    </div>
+  );
   const tooltipContent = !showInlineMeta && (referenceMeta || statusLabel) ? (
-    <div className="space-y-0.5">
-      <p className="font-medium">{label}</p>
-      {referenceMeta ? (
-        <p className="opacity-80">
-          관찰됨 · {FORM_LABELS[referenceMeta.form] ?? referenceMeta.form} · {formatReferencePoint(referenceMeta.referencedAt)}
-        </p>
-      ) : null}
-      {statusLabel ? <p className="opacity-80">{statusLabel}</p> : null}
+    <div className="space-y-1">
+      <p className="font-semibold">{label}</p>
+      <div className="space-y-0.5 border-t border-background/20 pt-1">
+        {statusLabel ? tooltipRow('상태', statusLabel) : null}
+        {referenceMeta ? tooltipRow('참조 형태', FORM_LABELS[referenceMeta.form] ?? referenceMeta.form) : null}
+        {referenceMeta ? tooltipRow('관찰', formatReferencePoint(referenceMeta.referencedAt)) : null}
+      </div>
     </div>
   ) : null;
 
