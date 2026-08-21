@@ -15,7 +15,9 @@ story #2505로 별도 추적) 지금은 항상 0을 반환한다. current_period
 없으니 집계 자체를 건너뛴다)."""
 from __future__ import annotations
 
+import math
 import uuid
+from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,22 +79,13 @@ async def compute_pack_charge_minor(
     return int(result)
 
 
-async def compute_charge_amount(session: AsyncSession, *, org_id: uuid.UUID) -> tuple[int, str]:
-    """(amount_minor, currency) 반환. 기저가(월/연) + 좌석초과분 + 팩분."""
-    sub = (
-        await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
-    ).scalar_one_or_none()
-    if sub is None:
-        raise ChargeAmountError(f"no org_subscription row for org_id={org_id}")
-    if sub.offering_version_id is None:
-        raise ChargeAmountError(
-            f"org_subscription(org_id={org_id})에 offering_version_id가 바인딩되지 않음"
-        )
-
-    offering = await session.get(OfferingVersion, sub.offering_version_id)
-    if offering is None:
-        raise ChargeAmountError(f"offering_version {sub.offering_version_id}를 찾을 수 없음")
-
+async def _compute_amount_for_offering(
+    session: AsyncSession, *, org_id: uuid.UUID, sub: OrgSubscription, offering: OfferingVersion,
+) -> tuple[int, str]:
+    """기저가(월/연) + 좌석초과분 + 팩분 — `offering`을 명시로 받는다(story #2880: 티어
+    전환 시점엔 `sub`가 아직 구 tier라 sub.offering_version_id 그대로는 신 tier 금액을
+    못 낸다 — `compute_charge_amount`/`compute_full_charge_for_new_offering` 둘 다
+    이 헬퍼로 수렴, 로직 재구현 0)."""
     # 카디르 결함사냥(#2509, 2026-08-07) — org_subscriptions.billing_cycle에 DB CHECK가
     # 없어(Text nullable) NULL·'Annual'·'yearly'·오타가 조용히 monthly로 폴백해 annual
     # 구독을 10배 저청구할 수 있었다. "annual 아니면 monthly=안전한 기본값"이라는 판단
@@ -137,3 +130,62 @@ async def compute_charge_amount(session: AsyncSession, *, org_id: uuid.UUID) -> 
         )
 
     return base_amount + seat_amount + pack_amount, offering.currency
+
+
+async def _load_sub(session: AsyncSession, org_id: uuid.UUID) -> OrgSubscription:
+    sub = (
+        await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
+    ).scalar_one_or_none()
+    if sub is None:
+        raise ChargeAmountError(f"no org_subscription row for org_id={org_id}")
+    return sub
+
+
+async def compute_charge_amount(session: AsyncSession, *, org_id: uuid.UUID) -> tuple[int, str]:
+    """(amount_minor, currency) 반환. 기저가(월/연) + 좌석초과분 + 팩분 — sub의 현재
+    offering_version_id 기준."""
+    sub = await _load_sub(session, org_id)
+    if sub.offering_version_id is None:
+        raise ChargeAmountError(
+            f"org_subscription(org_id={org_id})에 offering_version_id가 바인딩되지 않음"
+        )
+    offering = await session.get(OfferingVersion, sub.offering_version_id)
+    if offering is None:
+        raise ChargeAmountError(f"offering_version {sub.offering_version_id}를 찾을 수 없음")
+    return await _compute_amount_for_offering(session, org_id=org_id, sub=sub, offering=offering)
+
+
+async def compute_full_charge_for_new_offering(
+    session: AsyncSession, *, org_id: uuid.UUID, new_offering: OfferingVersion,
+) -> tuple[int, str]:
+    """story #2880 — 유료→유료 상향 시 «신 offering 전액»(좌석초과+팩 포함, 선생님 확定
+    2026-08-21: 일할 차감 없이 신 tier 전액을 즉시 청구한다 — 구 tier 잔여분은 charge
+    쪽이 아니라 별도 부분취소(refund) 경로가 정산한다, org_subscription_tier_change.py
+    참고). sub는 여전히 구 tier인 시점에 호출된다는 전제(호출부가 confirmed 확認 前에
+    부른다)."""
+    sub = await _load_sub(session, org_id)
+    return await _compute_amount_for_offering(session, org_id=org_id, sub=sub, offering=new_offering)
+
+
+def prorate_minor(
+    price_minor: int, *, now: datetime, period_start: datetime, period_end: datetime,
+) -> int:
+    """story #2880 — `price_minor`의 잔여기간 비례 몫(minor unit), 순수 함수(DB 접근
+    없음). (period_end − now) / (period_end − period_start) 비율을 곱한다 — 초 단위
+    정밀도(타임스탬프가 이미 초 단위 저장이므로 일 단위로 먼저 절삭하지 않는다).
+
+    ⛔라운딩 방향은 **floor**로 확定(페드루 지시 ⓒ, 2026-08-21 — 돈은 방향이 계약이라
+    round()의 기본 반올림에 맡기지 않는다, 항상 사용자 유리).
+
+    선생님 재확定(2026-08-21) 후 이 함수는 «청구액»이 아니라 **구 tier 잔여분 부분취소
+    (refund) 금액**을 잰다 — 상향 자체의 청구는 신 offering 전액(`compute_full_charge_
+    for_new_offering`)이고, 이 값은 그 직전 confirmed 결제 건에 Toss cancelAmount로
+    넘긴다(org_subscription_tier_change.py 참고)."""
+    total_seconds = (period_end - period_start).total_seconds()
+    remaining_seconds = (period_end - now).total_seconds()
+    if total_seconds <= 0 or remaining_seconds <= 0:
+        raise ChargeAmountError(
+            f"잔여기간 계산 불가(total_seconds={total_seconds}, remaining_seconds={remaining_seconds})"
+        )
+    remaining_seconds = min(remaining_seconds, total_seconds)
+    return math.floor(price_minor * remaining_seconds / total_seconds)

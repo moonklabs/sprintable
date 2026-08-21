@@ -24,3 +24,8 @@ class BillingOrder(Base, TimestampMixin, OrgScopedMixin):
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     payment_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #2880(0267) — 이 confirmed order에 대한 부분취소 시도 결과. NULL=시도 없음.
+    # "confirmed"/"failed" — 마지막 시도 결과만(누적 이력 아님). 부분취소 실패가 이 order의
+    # 원 charge(status='confirmed')를 되돌리지 않는다(선생님 지시) — 그래서 실패 표기는
+    # status가 아니라 이 별도 필드다.
+    refund_status: Mapped[str | None] = mapped_column(Text, nullable=True)
