@@ -19,6 +19,7 @@ current_period_start/end`가 Toss 구독에는 애초에 채워지는 경로가 
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -30,40 +31,127 @@ from app.models.billing_order import BillingOrder
 from app.models.offering_version import OfferingVersion
 from app.models.org_billing_key import OrgBillingKey
 from app.models.org_subscription import OrgSubscription
+from app.models.project import OrgMember
+from app.models.user import User
 from app.services.billing_charge import (
     _confirm_with_ledger,
     _mark_failed_if_not_confirmed,
     charge_org,
 )
+from app.services.billing_charge_amount import ChargeAmountError, compute_charge_amount
+from app.services.billing_period import compute_period_end
+from app.services.email import send_email
 from app.services.org_subscription_checkout import STALE_CLAIM_WINDOW
 from app.services.payment.toss_adapter import TossAdapter
+from app.services.platform_settings import get_platform_settings
 
 logger = logging.getLogger(__name__)
 
-# pricing-policy-proposal-v1 §12.1(2026-08-07 재확認) — 지어내지 않음, 문서 원문 그대로.
-_DUNNING_RETRY_DAYS = frozenset({1, 3, 5})
-_DUNNING_DOWNGRADE_DAY = 8
+# pricing-policy-proposal-v1 §12.1(2026-08-07 재확認)이 원 근거였으나, story #2907
+# (선생님 확定 2026-08-21)이 cadence를 daily로 대체했다 — 3회(1/3/5일)가 아니라
+# D+1..D+grace_days 매일 1회, downgrade는 D+grace_days+1. grace_days는 이제
+# platform_settings.dunning_grace_days(어드민 관리값, AC6)에서 온다 — 이 상수들은
+# grace_days를 안 넘겨주는 극소수 호출부를 위한 기본값(7)일 뿐, 실 판단은 아래
+# next_dunning_action의 grace_days 파라미터로 한다.
+_DEFAULT_DUNNING_GRACE_DAYS = 7
 
 # Toss charge는 최대 60초(공식 문서) — 그보다 넉넉히 오래 pending이면 크래시/타임아웃으로
 # 간주해 대사 대상.
 PENDING_STALE_AFTER = timedelta(minutes=5)
 
 
-def next_dunning_action(order: BillingOrder, *, now: datetime) -> str:
+def next_dunning_action(
+    order: BillingOrder, *, now: datetime, grace_days: int = _DEFAULT_DUNNING_GRACE_DAYS,
+) -> str:
     """failed order 하나에 대해 지금 뭘 해야 하는지 — 순수 함수(DB/네트워크 접촉 없음).
     "wait" | "retry" | "downgrade_to_free" 중 하나.
+
+    story #2907 cadence(선생님 확定) — 재시도 창은 D+1..D+grace_days **매일** 1회
+    (구 {1,3,5}일 3회 정책을 대체), downgrade는 D+grace_days+1.
 
     같은 날 중복 재시도 방지: `updated_at`이 오늘 이미 갱신됐으면(=오늘 이미 시도함) 또
     재시도하지 않는다 — cron이 하루에 여러 번 돌아도(예: */10분) 하루 1회만 재결제한다."""
     if order.status != "failed":
         return "wait"
     age_days = (now.date() - order.created_at.date()).days
-    if age_days >= _DUNNING_DOWNGRADE_DAY:
+    if age_days >= grace_days + 1:
         return "downgrade_to_free"
     already_attempted_today = order.updated_at.date() >= now.date()
-    if age_days in _DUNNING_RETRY_DAYS and not already_attempted_today:
+    if 1 <= age_days <= grace_days and not already_attempted_today:
         return "retry"
     return "wait"
+
+
+# 갱신 charge order_id 접두사 — 이 접두사로만 "이 실패 order가 갱신(정기결제) 실패인지"를
+# 판별한다. checkout/tier_change의 실패 order도 같은 billing_orders.status='failed' 값을
+# 쓰지만(purpose 컬럼도 둘 다 'charge'라 구분 안 됨 — 확認: entry_type을 명시하는 호출부는
+# billing_pack.py뿐) org_subscriptions.status를 'past_due'로 전이시키는 건 갱신 실패
+# 뿐이어야 한다(checkout 실패=아직 active 아니었던 org, tier_change 실패=원 tier 그대로
+# 유지된 org — 둘 다 "이미 활성 유료였다가 갱신을 놓친" past_due 의미가 아니다).
+_RENEWAL_ORDER_PREFIX = "renewal:"
+
+
+def _renewal_order_id(org_id: uuid.UUID, offering_version_id: uuid.UUID, period_end: datetime) -> str:
+    """org+offering+«원래 결제 도래일»로 결정적 키잉 — 같은 갱신 시도는 재시도 내내
+    (D+1..D+grace_days) 항상 같은 order_id를 가리킨다(charge_org의 failed→pending CAS
+    재청구 경로가 그대로 이 재시도를 태운다, 재구현 0)."""
+    return f"{_RENEWAL_ORDER_PREFIX}{org_id}:{offering_version_id}:{period_end.date()}"
+
+
+# story #2907 fast-follow(유나양 design 비차단 권고①, 2026-08-21) — FE `tierName_*`
+# i18n 키(apps/web/messages/{ko,en}.json)와 동일 표시값. BE엔 별도 i18n 인프라가 없고
+# 이 표시명은 en/ko 둘 다 이미 같은 문자열이라(둘 다 "Starter"/"Team"/"Business") 이
+# 한 곳(메일)에서만 쓰는 매핑을 새로 발명하는 대신 그 사실을 그대로 반영한다.
+_TIER_DISPLAY_NAMES = {"free": "Free", "starter": "Starter", "team": "Team", "business": "Business"}
+
+
+def _dunning_email_content(*, tier: str, grace_expires_at) -> tuple[str, str]:
+    """story #2907 AC3 — 매 실패마다 발송할 문안. 「언제(grace 만료일)」·「어떻게(free
+    전이+신규 업로드만 차단·데이터 삭제 없음)」를 명시. tone=nice(선생님 지시) — 고객
+    대면 문구라 개야갤 톤 사용 금지.
+
+    fast-follow(유나양 design 비차단 권고, 2026-08-21) — ①raw enum(tier) 대신 표시명
+    ②billing 페이지(`/settings?tab=billing`, FE `BillingTab` 딥링크 확認) CTA 링크
+    추가. `NEXT_PUBLIC_APP_URL`은 `org_invite_email.py`가 이미 쓰는 동일 패턴 재사용."""
+    grace_date_str = grace_expires_at.strftime("%Y-%m-%d")
+    tier_display = _TIER_DISPLAY_NAMES.get(tier, tier)
+    app_url = os.getenv("NEXT_PUBLIC_APP_URL", "https://app.sprintable.ai")
+    billing_link = f"{app_url}/settings?tab=billing"
+    subject = "[Sprintable] 결제가 처리되지 않았습니다 — 확인해 주세요"
+    html_body = (
+        f"<p>안녕하세요, Sprintable입니다.</p>"
+        f"<p>정기결제 시도가 처리되지 않았습니다. 저희 쪽에서 매일 자동으로 재시도하고 "
+        f"있으니, 등록하신 카드 정보를 확인해 주시면 감사하겠습니다.</p>"
+        f"<p><b>{grace_date_str}</b>까지 결제가 완료되지 않으면 조직의 플랜이 자동으로 "
+        f"Free로 전환됩니다. Free로 전환되어도 <b>기존 데이터는 삭제되지 않으며</b>, "
+        f"신규 업로드만 제한됩니다. 이후 결제를 완료하시면 즉시 원래 플랜({tier_display})으로 "
+        f"복귀합니다.</p>"
+        f"<p><a href=\"{billing_link}\">결제 정보 확인하러 가기</a></p>"
+        f"<p>문의사항이 있으시면 언제든 회신해 주세요.</p>"
+    )
+    return subject, html_body
+
+
+async def _notify_dunning_failure(session: AsyncSession, org_id: uuid.UUID, *, tier: str, grace_expires_at) -> None:
+    """실패 통보 메일 — org owner/admin 전원 수신(storage-usage-warn과 동일 조회 패턴,
+    S8). best-effort(개별 흡수) — 메일 실패가 스윕 자체를 막으면 안 된다."""
+    subject, html_body = _dunning_email_content(tier=tier, grace_expires_at=grace_expires_at)
+    emails = [
+        r[0] for r in (await session.execute(
+            select(User.email)
+            .join(OrgMember, User.id == OrgMember.user_id)
+            .where(
+                OrgMember.org_id == org_id,
+                OrgMember.role.in_(["owner", "admin"]),
+                OrgMember.deleted_at.is_(None),
+            )
+        )).all()
+    ]
+    for em in emails:
+        try:
+            send_email(em, subject, html_body)
+        except Exception:
+            logger.warning("dunning failure email 실패 org=%s", org_id, exc_info=True)
 
 
 async def downgrade_to_free(session: AsyncSession, org_id: uuid.UUID, order_id: str) -> None:
@@ -180,15 +268,22 @@ async def downgrade_to_free(session: AsyncSession, org_id: uuid.UUID, order_id: 
 
 
 async def sweep_dunning_retries(session: AsyncSession, *, now: datetime | None = None) -> dict:
-    """failed billing_orders를 스윕 — §12.1 케이던스대로 재시도하거나 Free로 전환."""
+    """failed billing_orders를 스윕 — cadence대로 재시도하거나 Free로 전환.
+
+    story #2907 — `renewal:` 접두사(=trigger_due_charges가 만든 갱신 실패 order)는 재시도
+    결과에 따라 org_subscriptions.status를 'active'⇄'past_due'로 동기화하고 매 실패마다
+    owner 메일을 보낸다(AC1-3). 그 외(checkout/tier_change 실패 order)는 기존 동작 그대로
+    — past_due 전이 대상이 아니다(둘 다 "이미 활성 유료였다가 갱신을 놓친" 상태가 아님)."""
     now = now or datetime.now(timezone.utc)
+    grace_days = (await get_platform_settings(session)).dunning_grace_days
     failed_orders = (
         await session.execute(select(BillingOrder).where(BillingOrder.status == "failed"))
     ).scalars().all()
 
     retried = downgraded = 0
     for order in failed_orders:
-        action = next_dunning_action(order, now=now)
+        action = next_dunning_action(order, now=now, grace_days=grace_days)
+        is_renewal = order.order_id.startswith(_RENEWAL_ORDER_PREFIX)
         if action == "retry":
             try:
                 # charge_org 자체가 이미 claim/멱등/원장 불변식을 다 지킨다(#2493) — 여기서는
@@ -201,11 +296,50 @@ async def sweep_dunning_retries(session: AsyncSession, *, now: datetime | None =
             except Exception:
                 logger.exception("dunning retry failed for order_id=%s", order.order_id)
             retried += 1
+            if is_renewal:
+                await _sync_renewal_retry_outcome(session, order.org_id, order.order_id, grace_days=grace_days, now=now)
         elif action == "downgrade_to_free":
             await downgrade_to_free(session, order.org_id, order.order_id)
             downgraded += 1
 
     return {"failed_orders_seen": len(failed_orders), "retried": retried, "downgraded": downgraded}
+
+
+async def _sync_renewal_retry_outcome(
+    session: AsyncSession, org_id: uuid.UUID, order_id: str, *, grace_days: int, now: datetime,
+) -> None:
+    """갱신 재시도(retry) 시도 直後 — 그 시도가 confirmed로 끝났으면 원 주기 유지한 채
+    active로 복귀·period 롤오버(AC2 "성공 시 원 주기 유지"), 아직 failed면 past_due
+    유지+이번 실패도 통보(AC3 "매 실패마다")."""
+    order = (
+        await session.execute(select(BillingOrder).where(BillingOrder.order_id == order_id))
+    ).scalar_one()
+    sub = (
+        await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
+    ).scalar_one_or_none()
+    if sub is None:
+        return
+
+    if order.status == "confirmed":
+        # AC2 — 재결제 성공 시 원 주기 유지: sub.current_period_end는 실패 후에도 «원래
+        # 도래했어야 할 날짜» 그대로다(trigger_due_charges가 실패 시 굴리지 않는다) — 그
+        # 값을 새 period_start로 삼아 다음 주기를 계산한다(추가 유예일을 공짜로 주지 않음).
+        old_due = sub.current_period_end
+        new_end = compute_period_end(old_due, sub.billing_cycle)
+        await session.execute(
+            update(OrgSubscription).where(OrgSubscription.org_id == org_id).values(
+                status="active", current_period_start=old_due, current_period_end=new_end,
+            )
+        )
+        await session.commit()
+    else:
+        await session.execute(
+            update(OrgSubscription).where(OrgSubscription.org_id == org_id, OrgSubscription.status != "past_due")
+            .values(status="past_due")
+        )
+        await session.commit()
+        grace_expires_at = order.created_at.date() + timedelta(days=grace_days)
+        await _notify_dunning_failure(session, org_id, tier=sub.tier, grace_expires_at=grace_expires_at)
 
 
 async def sweep_stale_pending_orders(session: AsyncSession, *, now: datetime | None = None) -> dict:
@@ -395,13 +529,81 @@ async def sweep_expired_grants(session: AsyncSession, *, now: datetime | None = 
     }
 
 
-async def trigger_due_charges(session: AsyncSession) -> dict:
-    """오늘 신규 결제 주기가 도래한 org를 찾아 charge_org를 트리거하는 자리 — 이 스토리
-    스코프 밖(PO 확認, 2026-08-07). `org_subscriptions.current_period_start/end`가 Toss
-    구독에 세팅되는 경로 자체가 아직 없다(story #2502가 그 전제를 채운다). #2502 완료
-    후 이 함수를 채운다."""
-    raise NotImplementedError(
-        "trigger_due_charges — blocked on story #2502(Toss 구독 주기 확定). "
-        "org_subscriptions.current_period_start/end가 Toss 경로에 세팅되지 않아 "
-        "\"누가 오늘 청구 대상인지\" 판단할 데이터 소스가 없다."
-    )
+async def trigger_due_charges(session: AsyncSession, *, now: datetime | None = None) -> dict:
+    """오늘 신규 결제 주기가 도래한 org를 찾아 갱신 청구를 트리거한다 — story #2502가
+    #2907 착수 前 완료돼(current_period_start/end가 Toss 경로에도 세팅됨, checkout §③/
+    tier_change ③) 이 자리를 막던 전제가 사라졌다(2026-08-21 그라운딩 재확認). story
+    #2907(dunning)의 진입점 — 여기서 청구가 실패해야 dunning이 시작된다.
+
+    대상: status='active'·유료 tier·current_period_end 도래(<=now)인 org. 성공 시
+    다음 주기로 롤오버(active 유지). 실패 시 status='past_due' 전이 + 1차 통보 메일
+    (AC1·AC3 — "매 실패마다"는 이 첫 실패도 포함)."""
+    now = now or datetime.now(timezone.utc)
+    grace_days = (await get_platform_settings(session)).dunning_grace_days
+    due_subs = (
+        await session.execute(
+            select(OrgSubscription).where(
+                OrgSubscription.status == "active",
+                OrgSubscription.tier != "free",
+                OrgSubscription.current_period_end.is_not(None),
+                OrgSubscription.current_period_end <= now,
+            )
+        )
+    ).scalars().all()
+
+    charged = failed = skipped_catalog_error = 0
+    for sub in due_subs:
+        if sub.offering_version_id is None:
+            # 카탈로그 바인딩 자체가 없는 org — 고객 결제 실패가 아니라 내부 데이터 갭이라
+            # past_due로 벌하지 않는다(로그만 남기고 다음 스윕이 다시 본다).
+            logger.error("trigger_due_charges: org_id=%s active paid without offering_version_id — skip", sub.org_id)
+            skipped_catalog_error += 1
+            continue
+        order_id = _renewal_order_id(sub.org_id, sub.offering_version_id, sub.current_period_end)
+        try:
+            amount_minor, currency = await compute_charge_amount(session, org_id=sub.org_id)
+        except ChargeAmountError:
+            logger.exception("trigger_due_charges: compute_charge_amount failed for org_id=%s", sub.org_id)
+            skipped_catalog_error += 1
+            continue
+
+        try:
+            order = await charge_org(
+                session, org_id=sub.org_id, order_id=order_id, amount_minor=amount_minor,
+                currency=currency, order_name="Sprintable 정기결제(갱신)",
+            )
+        except Exception:
+            logger.exception("trigger_due_charges: charge_org failed for org_id=%s order_id=%s", sub.org_id, order_id)
+            order = (
+                await session.execute(select(BillingOrder).where(BillingOrder.order_id == order_id))
+            ).scalar_one_or_none()
+
+        if order is not None and order.status == "confirmed":
+            new_end = compute_period_end(sub.current_period_end, sub.billing_cycle)
+            await session.execute(
+                update(OrgSubscription).where(OrgSubscription.org_id == sub.org_id).values(
+                    current_period_start=sub.current_period_end, current_period_end=new_end,
+                )
+            )
+            await session.commit()
+            charged += 1
+        else:
+            await session.execute(
+                update(OrgSubscription).where(OrgSubscription.org_id == sub.org_id).values(status="past_due")
+            )
+            await session.commit()
+            # fast-follow(유나양 design 비차단 권고④, 2026-08-21) — 이 실패 order의
+            # created_at을 앵커로 쓴다(`_sync_renewal_retry_outcome`이 재시도 실패마다
+            # 쓰는 앵커와 동일 소스). `now`는 DB 트랜잭션 타임스탬프와 미세하게(또는
+            # 자정 근처면 하루) 어긋날 수 있어 두 지점이 서로 다른 grace 만료일을
+            # 계산할 위험이 있었다 — order가 없는 극단적 실패(claim INSERT 자체가
+            # 안 됨)만 now.date()로 폴백.
+            grace_anchor = order.created_at.date() if order is not None else now.date()
+            grace_expires_at = grace_anchor + timedelta(days=grace_days)
+            await _notify_dunning_failure(session, sub.org_id, tier=sub.tier, grace_expires_at=grace_expires_at)
+            failed += 1
+
+    return {
+        "due_subs_seen": len(due_subs), "charged": charged, "failed": failed,
+        "skipped_catalog_error": skipped_catalog_error,
+    }

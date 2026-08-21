@@ -1,5 +1,13 @@
-"""#2494(C3) — dunning 재시도 상태기계(pricing-policy-proposal-v1 §12.1) + pending 대사.
-PO 계약(2026-08-07): (b)-narrowed — "신규 결제 주기 도래" 판정은 스코프 밖(#2502 대기)."""
+"""#2494(C3) — dunning 재시도 상태기계 + pending 대사.
+
+⚠️cadence 갱신(story #2907, 선생님 확定 2026-08-21) — 원 §12.1의 {1,3,5}일 3회 정책은
+매일 1회(D+1..D+grace_days) 정책으로 대체됐다. grace_days 자체는 하드코딩이 아니라
+platform_settings.dunning_grace_days(어드민 관리값, 기본 7)에서 온다 — 이 파일은 그
+기본값(7) 파라미터로 next_dunning_action의 순수 로직만 검증(그라운딩값 자체의
+admin-설정 가능 여부는 test_2907_dunning_past_due_grace_realdb.py가 실PG로 검증).
+
+"신규 결제 주기 도래" 판정(trigger_due_charges)은 #2502(완료, 2026-08-21 이전)가
+전제를 채운 뒤 #2907이 실제로 구현했다 — 더 이상 NotImplementedError가 아니다."""
 from __future__ import annotations
 
 import uuid
@@ -28,13 +36,13 @@ def _order(*, status: str, created_days_ago: int, updated_days_ago: int, now: da
     [
         ("confirmed", 3, 3, "wait"),          # confirmed는 애초에 대상 아님
         ("pending", 3, 3, "wait"),             # pending도 dunning 대상 아님(대사 몫)
-        ("failed", 0, 0, "wait"),              # 최초 실패 당일 — §12.1 "기능 유지"만, 재시도 없음
-        ("failed", 1, 1, "retry"),             # +1일 1차 재결제
-        ("failed", 2, 2, "wait"),              # +2일 — 케이던스에 없는 날
-        ("failed", 3, 3, "retry"),             # +3일 2차
-        ("failed", 5, 5, "retry"),             # +5일 3차
-        ("failed", 7, 7, "wait"),              # +7일 = 유예종료 "알림"이지 재시도 아님
-        ("failed", 8, 7, "downgrade_to_free"), # +8일 Free 전환
+        ("failed", 0, 0, "wait"),              # 최초 실패 당일 — 재시도는 +1일부터
+        ("failed", 1, 1, "retry"),             # +1일
+        ("failed", 2, 2, "retry"),             # +2일 — 매일 1회(구 정책의 "케이던스 없는 날" 폐기)
+        ("failed", 3, 3, "retry"),             # +3일
+        ("failed", 5, 5, "retry"),             # +5일
+        ("failed", 7, 7, "retry"),             # +7일 = grace 마지막 날, 여전히 재시도
+        ("failed", 8, 7, "downgrade_to_free"), # +8일(grace_days+1) Free 전환
         ("failed", 10, 7, "downgrade_to_free"),# 8일 지나면 계속 downgrade(멱등)
     ],
 )
@@ -285,7 +293,9 @@ async def test_sweep_dunning_retries_retries_and_downgrades(monkeypatch):
     now = datetime(2026, 8, 15, tzinfo=timezone.utc)
     retry_order = _order(status="failed", created_days_ago=1, updated_days_ago=1, now=now)
     downgrade_order = _order(status="failed", created_days_ago=9, updated_days_ago=8, now=now)
-    wait_order = _order(status="failed", created_days_ago=2, updated_days_ago=2, now=now)
+    # story #2907(daily cadence) — day 2도 이제 retry 대상이라, "오늘은 대상 아님"을
+    # 보여주려면 대신 "오늘 이미 재시도됨"(updated_days_ago=0) 케이스를 쓴다.
+    wait_order = _order(status="failed", created_days_ago=2, updated_days_ago=0, now=now)
 
     session = AsyncMock()
     orders_result = MagicMock()
@@ -296,6 +306,10 @@ async def test_sweep_dunning_retries_retries_and_downgrades(monkeypatch):
     downgrade_mock = AsyncMock()
     monkeypatch.setattr(sched, "charge_org", charge_mock)
     monkeypatch.setattr(sched, "downgrade_to_free", downgrade_mock)
+    # story #2907 — grace_days는 이제 platform_settings에서 온다. retry_order/downgrade_order의
+    # order_id가 "renewal:" 접두사가 아니라 _sync_renewal_retry_outcome은 안 탄다(기존
+    # checkout/tier_change 실패 order 시나리오 그대로 유지).
+    monkeypatch.setattr(sched, "get_platform_settings", AsyncMock(return_value=MagicMock(dunning_grace_days=7)))
 
     result = await sched.sweep_dunning_retries(session, now=now)
 
@@ -323,6 +337,7 @@ async def test_sweep_dunning_retries_charge_exception_does_not_abort_sweep(monke
 
     monkeypatch.setattr(sched, "charge_org", AsyncMock(side_effect=RuntimeError("toss down")))
     monkeypatch.setattr(sched, "downgrade_to_free", AsyncMock())
+    monkeypatch.setattr(sched, "get_platform_settings", AsyncMock(return_value=MagicMock(dunning_grace_days=7)))
 
     result = await sched.sweep_dunning_retries(session, now=now)
     assert result["retried"] == 1
@@ -421,14 +436,25 @@ async def test_sweep_stale_pending_leaves_pending_on_transient_lookup_error(monk
     confirm_mock.assert_not_awaited()
 
 
-# ─── trigger_due_charges — 명시 스코프 밖 ───────────────────────────────────
+# ─── trigger_due_charges — story #2907이 실제로 채웠다(구 NotImplementedError 폐기) ────
+# 갱신 charge 성공/실패의 실제 산식(period 롤오버·past_due 전이·메일)은 실PG로만 뜻이
+# 있어(charge_org·compute_charge_amount 등 여러 실 write가 얽힘) 여기선 "due 대상이
+# 없으면 아무것도 안 건드리고 0으로 끝난다"는 최소 스모크만 — 나머지는
+# test_2907_dunning_past_due_grace_realdb.py 전담.
 
 @pytest.mark.anyio
-async def test_trigger_due_charges_not_implemented_pending_story_2502():
-    from app.services.billing_scheduler import trigger_due_charges
+async def test_trigger_due_charges_no_due_subs_is_noop(monkeypatch):
+    import app.services.billing_scheduler as sched
 
-    with pytest.raises(NotImplementedError, match="#2502"):
-        await trigger_due_charges(AsyncMock())
+    session = AsyncMock()
+    empty_result = MagicMock()
+    empty_result.scalars.return_value.all.return_value = []
+    session.execute = AsyncMock(return_value=empty_result)
+    monkeypatch.setattr(sched, "get_platform_settings", AsyncMock(return_value=MagicMock(dunning_grace_days=7)))
+
+    result = await sched.trigger_due_charges(session)
+
+    assert result == {"due_subs_seen": 0, "charged": 0, "failed": 0, "skipped_catalog_error": 0}
 
 
 # ─── cron endpoint ───────────────────────────────────────────────────────────

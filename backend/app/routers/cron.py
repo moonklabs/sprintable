@@ -955,9 +955,10 @@ async def db_connection_stats(
 
 
 # ─── GET /api/v2/internal/cron/toss-billing-maintenance ───────────────────────
-# 결제②-C3(story #2494): dunning 재시도(pricing-policy-proposal-v1 §12.1) + pending
-# 대사(reconciliation). "신규 결제 주기 도래" 트리거는 스코프 밖(story #2502 대기) —
-# billing_scheduler.trigger_due_charges()가 그 자리를 NotImplementedError로 명시해둔다.
+# 결제②-C3(story #2494): dunning 재시도(story #2907 daily cadence) + pending 대사
+# (reconciliation). "신규 결제 주기 도래" 트리거(trigger_due_charges)는 story #2502
+# (완료, 2026-08-21 이전)가 전제를 채운 뒤 #2907이 실제로 채웠다 — dunning의 진입점
+# (여기서 실패해야 sweep_dunning_retries가 이어받는다)이라 dunning보다 먼저 돈다.
 @router.get("/toss-billing-maintenance")
 async def toss_billing_maintenance(
     request: Request,
@@ -969,9 +970,11 @@ async def toss_billing_maintenance(
             sweep_dunning_retries,
             sweep_expired_grants,
             sweep_stale_pending_orders,
+            trigger_due_charges,
         )
         from app.services.org_subscription_downgrade import sweep_pending_tier_downgrades
 
+        renewal_result = await trigger_due_charges(session)
         dunning_result = await sweep_dunning_retries(session)
         reconciliation_result = await sweep_stale_pending_orders(session)
         # story #2777 PR2 — 어드민 credit_grant의 자가회수. 신규 cron 잡 발명 대신 이
@@ -982,8 +985,9 @@ async def toss_billing_maintenance(
         # 대기) — 코드는 완결이지만 라이브 집행은 그 잡 착지 後(PR 본문 참고).
         downgrade_sweep_result = await sweep_pending_tier_downgrades(session)
         return _ok({
-            "dunning": dunning_result, "reconciliation": reconciliation_result,
-            "grant_sweep": grant_sweep_result, "downgrade_sweep": downgrade_sweep_result,
+            "renewal": renewal_result, "dunning": dunning_result,
+            "reconciliation": reconciliation_result, "grant_sweep": grant_sweep_result,
+            "downgrade_sweep": downgrade_sweep_result,
         })
     except Exception as exc:
         logger.exception("toss-billing-maintenance cron error: %s", exc)

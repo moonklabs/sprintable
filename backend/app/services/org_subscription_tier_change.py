@@ -80,7 +80,17 @@ async def _refetch_subscription(session: AsyncSession, org_id: uuid.UUID) -> Org
     참고, 2026-08-21 P0 작업 中 실증) — 이 함수 진입 前에 이미 이 org_id 행을 SELECT한
     적이 있으면(이 함수 자체가 change_tier() 첫 줄의 `sub` 조회 이후에 불린다)
     SQLAlchemy identity map이 캐시된 인스턴스를 돌려줄 위험이 있다.
-    `populate_existing()`으로 항상 강제 재조회한다."""
+    `populate_existing()`으로 항상 강제 재조회한다.
+
+    카디르군 관찰(2907 PR 리뷰, 2026-08-21) — 이 모듈의 write 3곳(claim·tier리셋·claim
+    해제)이 전부 순수 `update(OrgSubscription)` Core구문이라 SQLAlchemy의
+    synchronize_session='auto'가 identity map을 이미 자동 동기화한다 — 실측(populate_existing
+    임시제거+test_2880 9건 재실행) 결과 현재 코드경로 기준으로는 inert(어느 테스트도 못
+    잡음, checkout.py의 `pg_insert().on_conflict_do_update()`와 달리 이쪽은 INSERT
+    구문이 아님). 그래도 걷어내지 않는다 — 이 write 중 하나가 훗날 upsert류로 바뀌면
+    (예: claim을 pg_insert 기반으로 바꾸는 리팩터) 같은 staleness 클래스가 조용히
+    재발할 수 있는 방어선이라, 인위적으로 조작한 테스트로 "증명"하는 대신 이 주석으로
+    위험을 명시해둔다."""
     return (
         await session.execute(
             select(OrgSubscription).where(OrgSubscription.org_id == org_id).execution_options(populate_existing=True)
