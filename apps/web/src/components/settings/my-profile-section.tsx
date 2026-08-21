@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { TrustScoreCard } from '@/components/cage/trust-score-card';
+import { AvatarEditCard } from '@/components/shared/avatar-edit-card';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -17,10 +18,20 @@ interface MyProfile {
   role: string;
 }
 
+/** story #2887(S2g) — /api/v2/me는 avatar_url을 안 싣는다(BE 갭·이 세션 범위 밖). team-members
+ * GET은 이미 avatar_url을 반환하므로(_build_org_human_response) profile.id로 별도 조회. */
+async function fetchAvatarUrl(memberId: string): Promise<string | null> {
+  const res = await fetchWithAuth(`/api/team-members/${memberId}`);
+  if (!res.ok) return null;
+  const json = await res.json() as { data: { avatar_url?: string | null } };
+  return json.data.avatar_url ?? null;
+}
+
 export function MyProfileSection() {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const [profile, setProfile] = useState<MyProfile | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -32,6 +43,7 @@ export function MyProfileSection() {
     const json = await res.json() as { data: MyProfile };
     setProfile(json.data);
     setEditName(json.data.name);
+    setAvatarUrl(await fetchAvatarUrl(json.data.id));
   }, []);
 
   useEffect(() => { void fetchProfile(); }, [fetchProfile]);
@@ -69,6 +81,14 @@ export function MyProfileSection() {
         </div>
       </SectionCardHeader>
       <SectionCardBody className="space-y-4">
+        <AvatarEditCard
+          memberId={profile.id}
+          name={profile.name}
+          avatarUrl={avatarUrl}
+          actorType="human"
+          onUpdated={setAvatarUrl}
+        />
+
         <div className="divide-y divide-border text-sm">
           <div className="flex items-center gap-4 py-2.5">
             <span className="w-20 shrink-0 text-muted-foreground">{t('profileName')}</span>
