@@ -4,6 +4,7 @@
  * 즉시 처리되거나(change-tier) 순수 메타데이터 write(downgrade/cancel)라 위젯 리다이렉트가
  * 없다 — 단순 fetch로 완결.
  */
+import { fetchWithAuth } from '@/lib/db/client';
 import type { TierId } from './pricing-data';
 
 export interface ChangeTierResult {
@@ -24,7 +25,7 @@ export type ChangeTierOutcome =
   | { kind: 'error'; status: number };
 
 async function postBillingAction(path: string, body?: object): Promise<ChangeTierOutcome> {
-  const res = await fetch(path, {
+  const res = await fetchWithAuth(path, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -59,7 +60,7 @@ export async function cancelSubscription(): Promise<ChangeTierOutcome> {
  * (재구현 0 — BE `cancel_pending_downgrade`가 이미 동형).
  */
 export async function revokePendingChange(): Promise<ChangeTierOutcome> {
-  const res = await fetch('/api/billing/downgrade', { method: 'DELETE', credentials: 'include' });
+  const res = await fetchWithAuth('/api/billing/downgrade', { method: 'DELETE', credentials: 'include' });
   if (!res.ok) {
     return { kind: 'error', status: res.status };
   }
