@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
-from app.models.base import OrgScopedMixin, SoftDeleteMixin, TimestampMixin
+from app.models.base import MONOTONIC_UPDATED_AT_ONUPDATE, OrgScopedMixin, SoftDeleteMixin, TimestampMixin
 
 
 class Sprint(Base, OrgScopedMixin, TimestampMixin):
@@ -99,6 +99,14 @@ class Story(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
         # app.repositories.story.allocate_story_number(advisory xact lock)이 보장, 이 제약은
         # 그 보장이 깨졌을 때(버그·우회 write) 조용히 중복 채번되는 걸 막는 최후 방어선.
         UniqueConstraint("project_id", "story_number", name="uq_stories_project_id_story_number"),
+    )
+
+    # story #2874/#3291(카디르 QA rework): update_with_cas()가 이 컬럼을 CAS 토큰으로 쓴다 —
+    # TimestampMixin의 기본 onupdate=func.now()를 override(MONOTONIC_UPDATED_AT_ONUPDATE,
+    # app/models/base.py 상수 참조 — 근거 그 파일에 있음).
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=MONOTONIC_UPDATED_AT_ONUPDATE,
+        nullable=False,
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

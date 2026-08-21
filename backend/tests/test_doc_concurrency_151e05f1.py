@@ -37,10 +37,27 @@ def _doc(updated_at=T1):
 
 
 async def _call(body_kwargs, doc_updated_at=T1):
+    from app.repositories.base import CasConflict
+
     repo = MagicMock()
     repo.org_id = uuid.uuid4()
     d = _doc(doc_updated_at)
     repo.get = AsyncMock(return_value=d)
+
+    # story #2874: 실 write는 이제 repo.update_with_cas()로 위임된다(check-then-write에서
+    # 원자 CAS로 승격) — 이 목(mock) repo도 그 계약(ms-절삭 비교·불일치 시 CasConflict)을
+    # 재현해야 이 파일이 검증하려는 동시성 의미(409/통과 분기)가 그대로 유효하다.
+    async def _fake_update_with_cas(_id, *, expected_updated_at=None, **data):
+        if expected_updated_at is not None:
+            cur_ms = d.updated_at.replace(microsecond=(d.updated_at.microsecond // 1000) * 1000)
+            exp_ms = expected_updated_at.replace(microsecond=(expected_updated_at.microsecond // 1000) * 1000)
+            if cur_ms != exp_ms:
+                raise CasConflict(d)
+        for k, v in data.items():
+            setattr(d, k, v)
+        return d
+
+    repo.update_with_cas = AsyncMock(side_effect=_fake_update_with_cas)
     session = AsyncMock()
     session.execute = AsyncMock()
     session.flush = AsyncMock()

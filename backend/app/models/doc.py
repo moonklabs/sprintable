@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
-from app.models.base import OrgScopedMixin, SoftDeleteMixin, TimestampMixin
+from app.models.base import MONOTONIC_UPDATED_AT_ONUPDATE, OrgScopedMixin, SoftDeleteMixin, TimestampMixin
 
 # E-DG S22: doc decision lifecycle(doc-specific·work status 아님). hypothesis _VALID_TRANSITIONS 패턴 미러.
 # E-DG doc-gate(48f064e5): draft→pending(상신·Gate inbox 노출)→confirmed/denied(gate 해소). pending=
@@ -33,6 +33,14 @@ def is_valid_doc_transition(from_status: str, to_status: str) -> bool:
 
 class Doc(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "docs"
+
+    # story #2874/#3291(카디르 QA rework): update_with_cas()가 이 컬럼을 CAS 토큰으로 쓴다 —
+    # TimestampMixin의 기본 onupdate=func.now()를 override(MONOTONIC_UPDATED_AT_ONUPDATE,
+    # app/models/base.py 상수 참조 — 근거 그 파일에 있음, stories.py와 동일 처방).
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=MONOTONIC_UPDATED_AT_ONUPDATE,
+        nullable=False,
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(
