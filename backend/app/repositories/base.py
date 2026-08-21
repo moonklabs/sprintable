@@ -147,13 +147,22 @@ class BaseRepository(Generic[T]):
         클라 ms절삭 654000 전송해도 false-409 없이 통과해야 함): ``date_trunc('milliseconds',
         ...)``로 컬럼·파라미터 양쪽을 SQL 레벨에서 동일하게 절삭 후 비교한다.
 
+        ⚠️#3291 카디르 QA rework(2026-08-21, SQL 레벨 결정적 재현): ms-절삭 토큰을 CAS 비교에
+        쓰면 「T1의 write가 만든 새 updated_at이 원래 값과 같은 ms 버킷에 떨어지는」 경우
+        T2가 낡은 expected를 들고 와도 date_trunc 비교가 통과해 rowcount=1로 조용히
+        덮어쓴다(같은 버킷=같은 절삭값). 이 메서드는 절대 ``updated_at``을 explicit으로
+        SET하지 않는다 — 대상 모델(Story/Doc)이 컬럼 자체의 ``onupdate``를 「매 write마다
+        직전 값보다 최소 1ms 전진」(``GREATEST(clock_timestamp(), updated_at + 1ms)``,
+        app/models/pm.py·doc.py)로 override해 뒀으므로, 이 CAS 경로뿐 아니라 일반
+        ``update()``(setattr+flush, onupdate가 그대로 적용)까지 **같은 한 곳의 선언**으로
+        모노토닉이 강제된다(둘 중 하나만 고치면 반쪽이 되는 걸 원천 차단).
+
         rowcount=0이면 대상이 없거나(404, 호출자가 반환값 None으로 판별) 그 사이 다른 write가
         있었다(409, ``CasConflict`` — 최신 row를 실어 올린다). ``expected_updated_at``이
         None이면 기존 ``update()``와 완전히 동일(무CAS·하위호환)."""
         if expected_updated_at is None:
             return await self.update(id, **data)
 
-        values = {**data, "updated_at": func.now()}
         result = await self.session.execute(
             sa_update(self.model)
             .where(
@@ -162,7 +171,7 @@ class BaseRepository(Generic[T]):
                 func.date_trunc("milliseconds", self.model.updated_at)  # type: ignore[attr-defined]
                 == func.date_trunc("milliseconds", expected_updated_at),
             )
-            .values(**values)
+            .values(**data)
         )
         # Core-style UPDATE는 세션 identity map을 자동 동기화하지 않는다 — 호출부가 이미
         # 같은 id를 로드해 둔 인스턴스(예: 라우터의 사전조회 story_before)가 있으면 재조회

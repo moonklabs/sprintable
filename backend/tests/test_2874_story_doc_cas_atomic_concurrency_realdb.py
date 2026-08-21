@@ -274,3 +274,101 @@ async def test_story_genuinely_different_ms_is_rejected_409():
         assert exc_info.value.status_code == 409
     finally:
         await eng.dispose()
+
+
+# ───────────── ③ #3291 카디르 QA rework — ms-절삭 CAS 토큰의 same-bucket 퇴화 ─────────────
+#
+# 카디르 SQL 레벨 결정적 재현(2026-08-21): T1의 write가 만든 새 updated_at이 원래 값과 같은
+# ms 버킷에 떨어지면(양쪽 다 date_trunc('milliseconds', ...)로 같은 값), T2가 T0(원래) 시점의
+# 낡은 expected_updated_at을 들고 와도 CAS 비교가 통과해 rowcount=1로 조용히 덮어쓴다 —
+# 타이밍 운이 아니라 같은 ms 안에서는 항상 재현되는 결정적 결함. 처방: onupdate 자체를
+# GREATEST(clock_timestamp(), updated_at + 1ms)로 바꿔 매 write가 최소 1ms(=최소 1 버킷)는
+# 반드시 전진하게 강제(app/models/base.py::MONOTONIC_UPDATED_AT_ONUPDATE, Story/Doc가 override).
+# 이 아래 테스트는 실 타이밍(비결정적)에 기대지 않고 저장값을 직접 조작해 **결정적으로** 잰다.
+
+@pytest.mark.anyio
+async def test_story_onupdate_strictly_advances_ms_bucket_even_when_stored_value_is_far_future():
+    """수학적 불변식 직접 검증 — updated_at을 실제 시각보다 훨씬 미래로 박아 두면
+    clock_timestamp() 단독으로는 절대 못 앞서므로, GREATEST의 «updated_at+1ms» 분기가
+    반드시 이겨야 한다(그렇지 않으면 뒤로 가거나 제자리 — 둘 다 same-bucket 퇴화의 원인).
+    ms 경계에 딱 붙은 microsecond(999000)로 앞서 최악 케이스까지 잡는다."""
+    from app.repositories.story import StoryRepository
+    from app.routers.stories import get_story, update_story
+    from app.schemas.story import StoryUpdate
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+            # 실 시각보다 100년 미래 + ms 경계에 딱 붙은 microsecond — clock_timestamp()가
+            # 이 값을 절대 못 앞지르는 조건을 만든다(GREATEST의 +1ms 분기 강제 발동 검증).
+            await s.execute(text(
+                f"UPDATE stories SET updated_at = '2126-01-01 00:00:00.999000+00' WHERE id='{STORY}'"
+            ))
+            await s.commit()
+
+        async with Session() as s:
+            repo = StoryRepository(s, ORG)
+            before = await get_story(STORY, repo, _auth_human(USER))
+
+        async with Session() as s:
+            repo = StoryRepository(s, ORG)
+            after = await update_story(
+                STORY, StoryUpdate(description="ADVANCED"), BackgroundTasks(), repo, s, _auth_human(USER),
+            )
+
+        before_ms_bucket = before.updated_at.replace(microsecond=(before.updated_at.microsecond // 1000) * 1000)
+        after_ms_bucket = after.updated_at.replace(microsecond=(after.updated_at.microsecond // 1000) * 1000)
+        assert after_ms_bucket > before_ms_bucket, (
+            f"onupdate가 ms 버킷을 전진 못 시키면 same-bucket 퇴화가 재현된다 — "
+            f"before={before.updated_at} after={after.updated_at}"
+        )
+        assert after.updated_at >= before.updated_at + timedelta(milliseconds=1)
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_story_cas_rejects_stale_token_after_write_forced_into_far_future_bucket():
+    """통합 레벨 — T0 스냅숏(미래로 박아 둔 값)을 들고 온 T2가, T1이 이미 다른 값을 쓴
+    뒤에도 여전히 409로 거부되는지(설령 T1의 새 값이 T0와 «가까운» ms대라도 onupdate가
+    최소 1버킷은 반드시 벌려 둬서 date_trunc 비교가 다시는 우연히 일치하지 않는다)."""
+    from app.repositories.story import StoryRepository
+    from app.routers.stories import get_story, update_story
+    from app.schemas.story import StoryUpdate
+
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+            await s.execute(text(
+                f"UPDATE stories SET updated_at = '2126-01-01 00:00:00.999000+00' WHERE id='{STORY}'"
+            ))
+            await s.commit()
+
+        async with Session() as s:
+            repo = StoryRepository(s, ORG)
+            t0_snapshot = await get_story(STORY, repo, _auth_human(USER))
+
+        async with Session() as s:
+            repo = StoryRepository(s, ORG)
+            await update_story(
+                STORY, StoryUpdate(description="T1_WRITE"), BackgroundTasks(), repo, s, _auth_human(USER),
+            )
+
+        async with Session() as s:
+            repo = StoryRepository(s, ORG)
+            with pytest.raises(HTTPException) as exc_info:
+                await update_story(
+                    STORY,
+                    StoryUpdate(description="T2_STALE", expected_updated_at=t0_snapshot.updated_at),
+                    BackgroundTasks(), repo, s, _auth_human(USER),
+                )
+        assert exc_info.value.status_code == 409
+
+        async with Session() as s:
+            repo = StoryRepository(s, ORG)
+            final = await get_story(STORY, repo, _auth_human(USER))
+        assert final.description == "T1_WRITE", "T2가 거부돼야 T1의 write가 안 덮인다"
+    finally:
+        await eng.dispose()
