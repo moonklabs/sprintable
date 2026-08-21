@@ -40,5 +40,5 @@ class PlatformSetting(Base, TimestampMixin):
     updated_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     # story #2907(선생님 확定 2026-08-21) — dunning grace 기간(일). 재시도 창=D+1..
     # D+dunning_grace_days, downgrade 트리거일=D+dunning_grace_days+1. 하드코딩 금지
-    # 원칙(AC6)에 따라 어드민 관리값으로 — 기본 7일(마이그 0269 시드).
+    # 원칙(AC6)에 따라 어드민 관리값으로 — 기본 7일(마이그 0270 시드).
     dunning_grace_days: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("7"))
