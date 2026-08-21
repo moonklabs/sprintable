@@ -82,12 +82,28 @@ async def get_billing_status(
             "can_manage": can_manage,
         }
 
+    # story #2892(P0, 실사고 2026-08-21) — org_subscription_checkout.py의 상태기계는
+    # "청구 성공 時에만 status='active' 전이"를 명시 계약으로 문서화해 뒀는데(그 파일
+    # 모듈 docstring §4), 이 엔드포인트는 그 계약을 안 보고 `tier`를 무조건 내보냈다.
+    # checkout claim UPSERT는 Toss 청구를 부르기 *전에* 이미 커밋된다(TOCTOU 방지를 위한
+    # 의도된 설계, org_subscription_checkout.py 참고) — 그래서 청구가 크래시/거절되면
+    # status='pending'인 채 새 tier 값이 이미 이 행에 앉아 있는 상태가 실존한다. 실사고:
+    # `TypeError: Decimal is not JSON serializable`(billing_charge_amount.py, 별도 fix)로
+    # Toss 호출 자체가 500으로 죽었는데, 이 엔드포인트가 status를 안 보고 tier='starter'를
+    # 그대로 내보내 "돈은 안 냈는데 플랜은 적용된 것처럼" 화면에 잡혔다(재로그인 후에도
+    # 재현 — 이 GET이 그 소스). status가 'active'가 아니면(pending·downgraded 등) 실제로
+    # 확定된 유료 권리가 없다 — tier를 'free'로 낸다(billing_cycle/current_period_end도
+    # 같이 무의미해지므로 None). status 필드 자체는 원값 그대로 실어(FE가 pending 상태를
+    # 구분해 "결제 진행/재시도 필요" 안내를 그릴 여지는 남긴다).
+    effective_tier = sub.tier if sub.status == "active" else "free"
     return {
         "org_id": str(org_id),
-        "tier": sub.tier,
-        "billing_cycle": sub.billing_cycle,
+        "tier": effective_tier,
+        "billing_cycle": sub.billing_cycle if sub.status == "active" else None,
         "status": sub.status,
-        "current_period_end": sub.current_period_end.isoformat() if sub.current_period_end else None,
+        "current_period_end": sub.current_period_end.isoformat() if (
+            sub.status == "active" and sub.current_period_end
+        ) else None,
         "can_manage": can_manage,
     }
 

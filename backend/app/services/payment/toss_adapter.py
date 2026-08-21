@@ -130,13 +130,22 @@ class TossAdapter(PaymentProvider):
         규율을 강제하지 않는다 — 순수 PG 왕복 레이어).
 
         amount_minor: KRW는 무소수 통화라 minor unit이 곧 원 단위 정수 — Toss의 `amount`
-        필드에 그대로 넘긴다(달러처럼 /100 환산 불요)."""
+        필드에 그대로 넘긴다(달러처럼 /100 환산 불요).
+
+        ⚠️story #2892(P0, 실사고 2026-08-21) — 파이썬 타입힌트(`int`)는 런타임에 강제되지
+        않는다. 실제로 `compute_pack_charge_minor`(SQL `SUM(bigint)`가 Postgres 표준상
+        `numeric`을 반환 → asyncpg가 Decimal로 디코드)가 이 계약을 어기고 Decimal을 흘려
+        보내, httpx의 `json.dumps`가 "Object of type Decimal is not JSON serializable"로
+        Toss 네트워크 호출조차 못 나가고 500을 냈다(charge_org의 pending 청구 기록이
+        confirm 못 받고 영구 pending). 호출부(billing_charge_amount.py)에서도 고쳤지만,
+        이 어댑터가 PG로 나가는 «최종 경계»이므로 여기서도 한 번 더 강제 변환한다 —
+        미래의 다른 호출부가 같은 계약을 또 어겨도 이 함수를 지나는 순간 사고가 죽는다."""
         return await self._post(
             f"/v1/billing/{billing_key}",
             json={
                 "customerKey": customer_key,
                 "orderId": order_id,
-                "amount": amount_minor,
+                "amount": int(amount_minor),
                 "orderName": order_name,
             },
             timeout=65,  # Toss 문서: 최대 60초 소요 가능 — 여유 5초.
@@ -190,7 +199,8 @@ class TossAdapter(PaymentProvider):
         넘겨야 재시도가 중복 취소를 만들지 않는다."""
         body: dict[str, Any] = {"cancelReason": cancel_reason}
         if cancel_amount_minor is not None:
-            body["cancelAmount"] = cancel_amount_minor
+            # story #2892 — charge()와 동일 경계 방어(Decimal이 이 인자에도 흘러들 수 있음).
+            body["cancelAmount"] = int(cancel_amount_minor)
         return await self._post(
             f"/v1/payments/{payment_key}/cancel",
             json=body,
