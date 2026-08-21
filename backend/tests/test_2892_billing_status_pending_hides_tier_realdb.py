@@ -154,3 +154,54 @@ async def test_downgraded_subscription_also_reports_free_not_stale_tier():
             assert resp["status"] == "downgraded"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_status_exposes_pending_tier_change_for_fe_downgrade_cta_realdb():
+    """story #2909② — FE가 카드에 "예약됨"+철회 CTA를 그리려면 pending_tier/
+    pending_change_apply_at이 이 GET에 실려야 한다(#2881/#2882 공유 슬롯). 이전에는 이
+    필드 자체가 응답에 없어(그라운딩 확認) FE가 예약 상태를 알 방법이 없었다."""
+    from ee.routers.billing import get_billing_status
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, user_id = await _seed_org_with_member(s, sub_status="active", tier="business")
+            apply_at = datetime.now(timezone.utc) + timedelta(days=12)
+            from sqlalchemy import update as sa_update
+            from app.models.org_subscription import OrgSubscription
+            await s.execute(
+                sa_update(OrgSubscription).where(OrgSubscription.org_id == org_id).values(
+                    pending_tier="starter", pending_change_apply_at=apply_at,
+                )
+            )
+            await s.commit()
+
+        async with Session() as s:
+            resp = await get_billing_status(
+                org_id=org_id, auth=_auth(user_id), session=s, _ee=None,
+            )
+            assert resp["pending_tier"] == "starter"
+            assert resp["pending_change_apply_at"] is not None
+            assert resp["pending_change_apply_at"].startswith(apply_at.date().isoformat())
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_status_pending_tier_null_when_no_reservation_realdb():
+    from ee.routers.billing import get_billing_status
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, user_id = await _seed_org_with_member(s, sub_status="active", tier="team")
+
+        async with Session() as s:
+            resp = await get_billing_status(
+                org_id=org_id, auth=_auth(user_id), session=s, _ee=None,
+            )
+            assert resp["pending_tier"] is None
+            assert resp["pending_change_apply_at"] is None
+    finally:
+        await engine.dispose()
