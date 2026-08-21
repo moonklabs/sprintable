@@ -86,4 +86,31 @@ describe('Avatar — story #2887 S2g', () => {
     });
     expect(container.querySelector('[role="img"]')).toBeNull();
   });
+
+  // 카디르군 QA(#3304, HIGH) — avatar_url이 실제로는 깨진 이미지(삭제된 GCS object 등)일 때
+  // native onError를 받아 이니셜 tier로 진짜 폴백하는지.
+  it('이미지 로드 실패(onError) 시 이니셜로 폴백한다', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="송윤재" avatarUrl="https://example.com/broken.png" actorType="human" />));
+    });
+    const img = container.querySelector('img')!;
+    expect(img).not.toBeNull();
+    await act(async () => { img.dispatchEvent(new Event('error')); });
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).toContain('송');
+  });
+
+  it('avatar_url이 바뀌면(교체 업로드) 이전 에러 상태를 잊고 새 URL을 다시 시도한다', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="송윤재" avatarUrl="https://example.com/broken.png" actorType="human" />));
+    });
+    await act(async () => { container.querySelector('img')!.dispatchEvent(new Event('error')); });
+    expect(container.querySelector('img')).toBeNull();
+
+    await act(async () => {
+      root.render(wrap(<Avatar name="송윤재" avatarUrl="https://example.com/new.png" actorType="human" />));
+    });
+    const img = container.querySelector('img');
+    expect(img?.src).toBe('https://example.com/new.png');
+  });
 });

@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { Bot, User } from 'lucide-react';
 import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from '@/components/chat/presence-dot';
 import { avatarColor, initials } from '@/lib/storage/format';
@@ -34,6 +35,20 @@ export function Avatar({
   const initSize = Math.round(size * 0.4);
   const badgeSize = Math.max(14, Math.round(size * 0.32));
 
+  // 카디르군 QA(#3304, HIGH) — avatar_url 「문자열 유무」만 보고 이미지 tier로 갔다: GCS
+  // object 삭제·서명 만료·환경간 버킷 불일치로 실제 로드가 실패해도 native onError를 안 받아
+  // 깨진 이미지가 영구 잔류했다(3단 폴백 계약의 본체 결함). onError로 감지해 다음 tier(이니셜/
+  // 아이콘)로 실제 폴백한다 — avatar_url이 바뀌면(교체 업로드 등) 새 URL을 다시 시도해야 하므로
+  // "prop 변경에 맞춰 state 조정"을 렌더 중(effect 아님, react-hooks/set-state-in-effect 회피)에
+  // 한다 — React 공식 패턴(https://react.dev/learn/you-might-not-need-an-effect).
+  const [imgError, setImgError] = useState(false);
+  const [lastAvatarUrl, setLastAvatarUrl] = useState(avatarUrl);
+  if (avatarUrl !== lastAvatarUrl) {
+    setLastAvatarUrl(avatarUrl);
+    setImgError(false);
+  }
+  const showImage = !!avatarUrl && !imgError;
+
   return (
     <div className={cn('relative shrink-0', className)} style={{ width: size, height: size }}>
       <div
@@ -42,13 +57,13 @@ export function Avatar({
           isAgent && (isWorking ? WORKING_RING_CLASS : 'ring-2 ring-accent-claim ring-offset-1 ring-offset-background'),
         )}
       >
-        {avatarUrl ? (
+        {showImage ? (
           // avatar_url은 avatar 전용 GCS public-read 버킷의 임의 서빙 도메인(dev/prod
           // 버킷명이 갈리고 next.config의 remotePatterns 사전 등록이 안 됨) — 기존 관례
           // (storage-uploader-avatar.tsx·team-presence-panel.tsx·profile-menu.tsx 전부 동일
           // 이유로 raw img)와 동형. next/image 전환은 별도 remotePatterns 검토 스토리 몫.
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={avatarUrl} alt={name} className="h-full w-full object-cover" />
+          <img src={avatarUrl} alt={name} className="h-full w-full object-cover" onError={() => setImgError(true)} />
         ) : name.trim() ? (
           <span
             className={cn('flex h-full w-full items-center justify-center font-semibold text-white', avatarColor(name))}
