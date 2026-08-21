@@ -87,4 +87,16 @@ describe('ReadingPanel 스택 — story #2888 R5', () => {
     });
     expect(container.firstChild).toBeNull();
   });
+
+  // story #2910(S2f/R3) — 스택 top 전환(push/pop) 시 slide-up+fade가 자연 발화하는 자리
+  // (key로 리마운트되는 그 wrapper)에 motion-safe: 게이팅 클래스가 실려 있는지.
+  it('스택 top 콘텐츠 wrapper에 motion-safe 전환 클래스가 실려 있다(reduce-motion 자동 제거)', async () => {
+    await act(async () => {
+      root.render(<ReadingPanel stack={[A]} onNavigateTo={() => {}} onClose={() => {}} />);
+    });
+    const wrapper = container.querySelector('.motion-safe\\:animate-in');
+    expect(wrapper).not.toBeNull();
+    expect(wrapper?.className).toContain('motion-safe:slide-in-from-bottom-2');
+    expect(wrapper?.className).toContain('motion-safe:fade-in');
+  });
 });

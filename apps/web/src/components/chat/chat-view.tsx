@@ -976,7 +976,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
         {/* AC7/AC8: 스레드 패널 — 데스크톱 사이드 패널 / 모바일 전체 뷰 */}
         {activeThread && (
-          <div className={`flex flex-col overflow-hidden ${isMobileThreadView ? 'flex-1' : 'hidden w-80 flex-shrink-0 lg:flex'}`}>
+          // story #2910(S2f/R3) — ReadingPanel과 동형 slide-in(1회, activeThread가 null→값
+          // 전환될 때만 — 다른 스레드로 전환은 ThreadPanel 자체 key가 담당, 이 wrapper는 안
+          // 리마운트돼 재발화 없음). exit 애니 의도적 무(ReadingPanel과 동일 판정).
+          <div className={`motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right duration-150 flex flex-col overflow-hidden ${isMobileThreadView ? 'flex-1' : 'hidden w-80 flex-shrink-0 lg:flex'}`}>
             <ThreadPanel
               key={activeThread.id}
               parentMessage={activeThread}
@@ -998,8 +1001,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             모바일 전체 뷰. ThreadPanel과 같은 슬롯이지만 폭 규격이 다르다(320px 고정이 아님
             — 문서 가독 기준 폭). */}
         {readingPanelStack.length > 0 && (
+          // story #2910(S2f/R3) — 패널이 처음 열릴 때 1회만 slide-in(이 div는 push/pop마다
+          // readingPanelStack 참조만 바뀔 뿐 리마운트되지 않아 재발화 안 함 — 스택 전환은
+          // reading-panel.tsx 안쪽 콘텐츠 wrapper가 자기 key로 별도 담당, 자연 분리).
+          // exit(닫기) 애니는 의도적 무(PO 판정 — 즉시 사라짐=반응성 피드백).
           <div
-            className={`flex flex-col overflow-hidden ${isMobileReadingView ? 'flex-1' : 'hidden lg:flex'}`}
+            className={`motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right duration-150 flex flex-col overflow-hidden ${isMobileReadingView ? 'flex-1' : 'hidden lg:flex'}`}
             style={isMobileReadingView ? undefined : { width: 'clamp(480px, 40vw, 720px)', flexShrink: 0 }}
           >
             <ReadingPanel stack={readingPanelStack} onNavigateTo={navigateReadingPanelTo} onClose={closeReadingPanel} />

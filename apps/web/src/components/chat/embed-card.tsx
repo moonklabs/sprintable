@@ -769,12 +769,16 @@ export function EmbedCard({
   // 자신의 명시 액션으로 이동, EntityPreviewModal 풋터 링크가 이미 그 역할). 채팅 밖 호출부
   // (onOpenReadingPanel 미제공 — chat-input.tsx 작성 중 미리보기 등)는 아래 타입별 기존
   // 분기를 그대로 유지(회귀 0).
+  // story #2910(S2f/R3) — 「칩→카드→패널 연속」을 shared-element 모핑(비용 대비 장식, §6 위반
+  // 소지) 대신 press 즉각 스케일 피드백 + 뒤이은 패널 slide-in 순차 배치로 전달(PO 판정
+  // 2026-08-21). 이 파일의 클릭 가능 지점 4곳(이 버튼·doc 버튼·EntityChip 트리거·plain
+  // Link) 전부 동일 패턴.
   if (onOpenReadingPanel) {
     return (
       <button
         type="button"
         onClick={() => onOpenReadingPanel(entity_type, entity_id, title, status, href)}
-        className="block w-full text-left transition-opacity hover:opacity-80"
+        className="block w-full text-left transition hover:opacity-80 motion-safe:active:scale-[0.98]"
       >
         {inner}
       </button>
@@ -833,7 +837,7 @@ export function EmbedCard({
       <button
         type="button"
         onClick={() => setShowModal(true)}
-        className="block w-full text-left transition-opacity hover:opacity-80"
+        className="block w-full text-left transition hover:opacity-80 motion-safe:active:scale-[0.98]"
       >
         {inner}
       </button>
@@ -1044,7 +1048,7 @@ export function EntityChip({
     const triggerButtonProps = {
       type: 'button' as const,
       onClick: () => setShowModal(true),
-      className: 'inline-flex no-underline transition-opacity hover:opacity-80',
+      className: 'inline-flex no-underline transition hover:opacity-80 motion-safe:active:scale-[0.98]',
     };
     const chipButton = tooltipContent ? (
       <Tooltip>
@@ -1075,7 +1079,7 @@ export function EntityChip({
 
   if (href) {
     return (
-      <Link href={href} className="inline-flex no-underline transition-opacity hover:opacity-80">
+      <Link href={href} className="inline-flex no-underline transition hover:opacity-80 motion-safe:active:scale-[0.98]">
         {inner}
       </Link>
     );

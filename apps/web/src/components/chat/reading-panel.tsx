@@ -115,14 +115,16 @@ export function ReadingPanel({
           </button>
         </div>
       )}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {/* 스택 top이 바뀔 때마다(어느 방향이든) 확실히 리마운트 — 대상 정체성 자체를 key로
-            (stack.length만으론 pop→다른 대상 push가 같은 길이일 때 리마운트가 안 됨). */}
-        <ReadingPanelContent
-          key={top.kind === 'entity' ? `entity:${top.entityType}:${top.entityId}` : `attachment:${top.assetId ?? top.storedUrl ?? top.label}`}
-          target={top}
-          onClose={popOne}
-        />
+      <div
+        // story #2910(S2f/R3) — 스택 top이 바뀔 때마다(어느 방향이든) 확실히 리마운트 — 대상
+        // 정체성 자체를 key로(stack.length만으론 pop→다른 대상 push가 같은 길이일 때 리마운트가
+        // 안 됨). 리마운트가 slide-up+fade를 push/pop 매번 자연 재발화시킨다(exit 애니는 의도적
+        // 무 — PO 판정 2026-08-21: 즉시 사라짐=반응성 피드백, isClosing 지연-unmount는 스택
+        // 동역학 테스트 부채(#2904) 자리에 회귀 반경만 키움).
+        key={top.kind === 'entity' ? `entity:${top.entityType}:${top.entityId}` : `attachment:${top.assetId ?? top.storedUrl ?? top.label}`}
+        className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 flex min-h-0 flex-1 flex-col overflow-hidden duration-150"
+      >
+        <ReadingPanelContent target={top} onClose={popOne} />
       </div>
     </div>
   );
