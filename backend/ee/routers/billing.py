@@ -105,6 +105,11 @@ async def get_billing_status(
             sub.status == "active" and sub.current_period_end
         ) else None,
         "can_manage": can_manage,
+        # story #2909② — 하향 예약(#2881)/취소 예약(#2882)이 같은 pending_* 슬롯을 쓴다
+        # (pending_tier='free'=취소, 그 외=하향). FE가 카드에 "예약됨" 상태·철회 CTA를
+        # 그리려면 필요 — 이 엔드포인트가 지금까지 안 실었을 뿐, 값 자체는 이미 있었다.
+        "pending_tier": sub.pending_tier,
+        "pending_change_apply_at": sub.pending_change_apply_at.isoformat() if sub.pending_change_apply_at else None,
     }
 
 

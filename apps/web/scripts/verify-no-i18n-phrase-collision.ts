@@ -149,6 +149,13 @@ export function flattenMessages(obj: Record<string, unknown>, prefix = ''): Map<
 //                story #2666 — eventKeyPrefixHint의 원래 값이 "org.{조직 slug}."처럼 ICU
 //                무효 자리표시자였던 걸 "org.{slug}."로 고치며 처음 이 가드에 노출됐다
 //                (전엔 파싱 실패로 스캔 자체가 이 문구를 못 봤다).
+//   tier       — 요금제 이름(free/starter/team/business — role·project와 같은 축, 카운트
+//                아님). story #2909②(카디르 QA, PR#3321, 2026-08-21) — billing-tab.tsx
+//                신규 문안(changeTierDialogTitle="{tier}로 플랜 변경" 등)이 이 이름을 몰라
+//                「진짜 카운트가 있다」로 오판해, «플랜»·«취소» 같은 짧은 기존 라벨과 부분
+//                문자열로 겹쳤다(카디르군 실측 4건, 전부 이 이름 하나가 원인). "실제로 채우는
+//                값을 먼저 읽는다"(위 규율) — checkoutDialogTitle의 기존 {tier}도 동일 축이며
+//                지금까지 우연히 이 스캔에 안 걸렸을 뿐 이름·경로류가 맞다.
 // ⛔새 이름을 여기 더하기 前에(PO 지적, 2026-08-02): 그 이름이 실제로 채우는 ko.json 값을
 // 먼저 읽는다. 정말 이름·경로류(수가 아님)면 더한다. 그런데 만약 «숫자인» 값인데 여기 걸려
 // EXEMPT_PAIRS에 다시 나타난다면, 그건 denylist 후보가 아니라 «진짜 충돌»이다 — 그 경우
@@ -158,7 +165,7 @@ export function flattenMessages(obj: Record<string, unknown>, prefix = ''): Map<
 // 재는지 모르게 되는 것)이 재발한다.
 const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   'name', 'runtime', 'filename', 'promptFile', 'gate', 'role', 'project', 'teamId', 'dir',
-  'sources', 'excludes', 'slug',
+  'sources', 'excludes', 'slug', 'tier',
 ]);
 const PLACEHOLDER_NAME_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
 
