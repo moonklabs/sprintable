@@ -79,6 +79,30 @@ function trustScore(gate: GateItem): number | null {
   return typeof v === 'number' ? v : null; // null≠0 — 미측정 보존(AC③)
 }
 
+// story #2862(loop-closure P2-B FE, BE PR#3277) — hypothesis_outcome_confirm 게이트의
+// neutral_facts.draft_target/draft_actual/draft_reason. 에이전트가 만든 «미확정 측정
+// 초안» — 사람이 승인해야 실제 hypothesis 전이가 일어난다(backend/app/services/
+// hypothesis_outcome_confirm.py와 정합, _DRAFTABLE_TARGETS 그대로 재사용).
+type HypothesisDraftTarget = 'verified' | 'falsified' | 'killed';
+const DRAFT_TARGETS: ReadonlySet<string> = new Set(['verified', 'falsified', 'killed']);
+
+interface HypothesisOutcomeDraftFacts {
+  target: HypothesisDraftTarget;
+  actual: unknown;
+  reason: string | null;
+}
+
+function hypothesisOutcomeDraft(gate: GateItem): HypothesisOutcomeDraftFacts | null {
+  const target = gate.neutral_facts?.['draft_target'];
+  if (typeof target !== 'string' || !DRAFT_TARGETS.has(target)) return null;
+  const reason = gate.neutral_facts?.['draft_reason'];
+  return {
+    target: target as HypothesisDraftTarget,
+    actual: gate.neutral_facts?.['draft_actual'] ?? null,
+    reason: typeof reason === 'string' && reason.length > 0 ? reason : null,
+  };
+}
+
 /**
  * 카드에 사람이 평가할 '실 증거'가 있는가. 빈/cold-start 구분의 단일 소스.
  * self_report_only 단독은 증거 아님(trust 실값에 붙는 qualifier로만 — 빈카드 도배 원인 제거).
@@ -92,7 +116,10 @@ export function gateHasEvidence(gate: GateItem): boolean {
   // story #2814 — GitHub check 발행 자체도 "실 증거"다. 이게 유일한 신호인 게이트가 State A
   // (빈 카드)로 가라앉으면 안 된다 — State B/C 흐름에 자연히 합류시킨다.
   const hasGithubCheck = githubCheckState(gate) !== null;
-  return hasCi || hasTrust || hasSeed || hasReason || hasGithubCheck;
+  // story #2862 — 측정 판정 초안도 실 증거다(같은 이유, 안 그러면 hypothesis_outcome_confirm
+  // 게이트가 State A 빈 카드로 가라앉아 사람이 판정 초안을 아예 못 본다).
+  const hasDraft = hypothesisOutcomeDraft(gate) !== null;
+  return hasCi || hasTrust || hasSeed || hasReason || hasGithubCheck || hasDraft;
 }
 
 type GithubCheckState = 'not_published' | 'in_progress' | 'success' | 'failure';
@@ -274,6 +301,39 @@ function GatePrChip({ pr }: { pr: PrLinkFact }) {
   );
 }
 
+const DRAFT_TARGET_LABEL_KEY: Record<HypothesisDraftTarget, string> = {
+  verified: 'hypothesisDraftTargetVerified',
+  falsified: 'hypothesisDraftTargetFalsified',
+  killed: 'hypothesisDraftTargetKilled',
+};
+
+/**
+ * story #2862(2857 FE 조각) — «측정 판정 초안» 렌더. AC1: 초안 attribution=info 톤(제안≠확定
+ * — 확정처럼 보이면 도장 찍는 손이 빨라진다) — verified/falsified라도 success/destructive를
+ * 쓰지 않고 전부 info 하나로 통일한다. AC2: 승인 전엔 «검증됨» 같은 확정 어휘를 안 쓰고
+ * "맞음(초안)"류 잠정 어휘만 쓴다. AC3: draft_reason을 항상 병기 — 근거 없이 판정만 보이면
+ * §4가 경계하는 위조 채널의 UI판이 된다(그래서 없으면 "없음"을 정직하게 말한다, 지어내지
+ * 않음).
+ */
+function HypothesisOutcomeDraft({ draft }: { draft: HypothesisOutcomeDraftFacts }) {
+  const t = useTranslations('cage');
+  return (
+    <div className="mt-1.5 rounded-lg bg-info/10 px-2.5 py-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge variant="info" className="shrink-0">{t('hypothesisDraftBadge')}</Badge>
+        {/* story #2420 규칙 — tint 배경 위 글자는 계열색이 아니라 text-foreground. */}
+        <span className="text-[11.5px] font-medium text-foreground">{t(DRAFT_TARGET_LABEL_KEY[draft.target])}</span>
+        {draft.actual !== null ? (
+          <span className="text-[11px] text-foreground">{t('hypothesisDraftActual', { value: String(draft.actual) })}</span>
+        ) : null}
+      </div>
+      <p className="mt-1 text-[11px] text-foreground">
+        {draft.reason ? t('hypothesisDraftReason', { reason: draft.reason }) : t('hypothesisDraftReasonMissing')}
+      </p>
+    </div>
+  );
+}
+
 export function GateEvidence({ gate, className }: { gate: GateItem; className?: string }) {
   const t = useTranslations('cage');
   const decision = gateDecision(gate);
@@ -293,6 +353,9 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
   const prLinks = Array.isArray(gate.neutral_facts?.['pr_links'])
     ? (gate.neutral_facts!['pr_links'] as PrLinkFact[]).filter((p) => p?.repo_full_name && typeof p?.pr_number === 'number')
     : [];
+  // story #2862 — hypothesis_outcome_confirm 게이트는 ci/trust/cold_start_seed가 없어 항상
+  // State B(부분증거)로 떨어진다 — rich(State C) 분기엔 안 걸리므로 거기는 안 건드린다.
+  const draft = hypothesisOutcomeDraft(gate);
 
   const DecisionMark = decision ? DECISION_META[decision].mark : null;
   const decisionBadge = decision ? (
@@ -372,6 +435,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
         </div>
       ) : null}
       {showRepending ? <GithubRependingReason gateId={gate.id} /> : null}
+      {draft ? <HypothesisOutcomeDraft draft={draft} /> : null}
       {reason ? (
         <p className="mt-1.5 text-[11.5px] text-muted-foreground">{t('reasonLabel')} · {reason}</p>
       ) : null}
