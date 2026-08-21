@@ -2,6 +2,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   TAB_PROJECT_STORAGE_KEY,
+  resolveEffectiveOrgId,
   resolveEffectiveProjectId,
   installProjectHeaderInterceptor,
   setEffectiveProjectId,
@@ -156,5 +157,28 @@ describe('installProjectHeaderInterceptor — X-Project-Id 옆에 X-Org-Id가 �
 
     const [, init] = baseFetch.mock.calls[0] as [string, RequestInit | undefined];
     expect(init?.headers).toBeUndefined();
+  });
+});
+
+describe('resolveEffectiveOrgId (story #2873 — 0-프로젝트 org 전환 후 침묵 오배달 재발방지)', () => {
+  it('pathOrgId(경로 resolve 결과)가 있으면 최우선 — jwtOrgId/orgId 무관', () => {
+    expect(resolveEffectiveOrgId('path-org', 'jwt-org', 'chain-org')).toBe('path-org');
+    expect(resolveEffectiveOrgId('path-org', undefined, 'chain-org')).toBe('path-org');
+  });
+
+  it('flat 라우트(pathOrgId 없음) — jwtOrgId가 project-chain 파생값(orgId)보다 우선한다', () => {
+    // 라이브 재현 그대로: 0-프로젝트 org로 전환하면 switch-org가 새 JWT의 org_id 클레임은
+    // 정확히 새 org로 갱신하지만(jwtOrgId), CURRENT_PROJECT_COOKIE엔 앵커할 project가 없어
+    // project-chain 파생값(orgId)은 여전히 전환 前 org를 가리킨다 — jwtOrgId를 써야 새 org로
+    // 실제 반영된다(전에는 orgId를 써서 여기서 전환 前 org가 나와 조용히 오배달됐다).
+    expect(resolveEffectiveOrgId(undefined, 'sk-leak-test-org', 'mungclab-org')).toBe('sk-leak-test-org');
+  });
+
+  it('flat 라우트에서 jwtOrgId가 없으면(Firebase 세션 등) orgId(project-chain)로 폴백한다', () => {
+    expect(resolveEffectiveOrgId(undefined, undefined, 'chain-org')).toBe('chain-org');
+  });
+
+  it('전부 없으면 undefined', () => {
+    expect(resolveEffectiveOrgId(undefined, undefined, undefined)).toBeUndefined();
   });
 });
