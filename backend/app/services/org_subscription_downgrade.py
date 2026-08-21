@@ -50,6 +50,47 @@ async def _refetch_subscription(session: AsyncSession, org_id: uuid.UUID) -> Org
     ).scalar_one()
 
 
+async def _active_paid_sub_or_raise(session: AsyncSession, org_id: uuid.UUID) -> OrgSubscription:
+    """reserve_downgrade·cancel_subscription 공통 전제 — 활성 유료 구독+적용일을 정할
+    current_period_end가 있어야 한다(재구현 0)."""
+    sub = (
+        await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
+    ).scalar_one_or_none()
+    if sub is None or sub.status != "active" or sub.tier not in PAID_TIERS:
+        raise DowngradeError(f"org_id={org_id} 활성 유료 구독이 아님 — 하향/취소 예약 대상 아님")
+    if sub.current_period_end is None:
+        raise DowngradeError(f"org_id={org_id} current_period_end 없음 — 적용일을 정할 수 없음")
+    return sub
+
+
+async def _offering_or_raise(session: AsyncSession, *, tier: str, currency: str) -> OfferingVersion:
+    offering = (
+        await session.execute(
+            select(OfferingVersion).where(
+                OfferingVersion.tier == tier,
+                OfferingVersion.currency == currency,
+                OfferingVersion.effective_to.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if offering is None:
+        raise DowngradeError(f"tier={tier!r}의 활성 offering_version({currency!r})을 찾을 수 없음")
+    return offering
+
+
+async def _reserve_pending_change(session: AsyncSession, *, sub: OrgSubscription, new_tier: str, offering_id: uuid.UUID) -> OrgSubscription:
+    await session.execute(
+        update(OrgSubscription)
+        .where(OrgSubscription.org_id == sub.org_id)
+        .values(
+            pending_tier=new_tier, pending_offering_version_id=offering_id,
+            pending_change_apply_at=sub.current_period_end,
+        )
+    )
+    await session.commit()
+    return await _refetch_subscription(session, sub.org_id)
+
+
 async def reserve_downgrade(session: AsyncSession, *, org_id: uuid.UUID, new_tier: str) -> OrgSubscription:
     """①③④ — 하향 예약(단일 슬롯, 재예약은 이전 예약을 덮어씀). 돈이 안 걸린 순수
     메타데이터 write라 checkout/change-tier류의 claim(checkout_claimed_at) 불요 —
@@ -58,40 +99,36 @@ async def reserve_downgrade(session: AsyncSession, *, org_id: uuid.UUID, new_tie
     if new_tier not in PAID_TIERS:
         raise DowngradeError(f"new_tier={new_tier!r}는 유료 티어만(starter/team/business) — free 전환은 구독 취소(story #2882)")
 
-    sub = (
-        await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
-    ).scalar_one_or_none()
-    if sub is None or sub.status != "active" or sub.tier not in PAID_TIERS:
-        raise DowngradeError(f"org_id={org_id} 활성 유료 구독이 아님 — 하향 예약 대상 아님")
-    if sub.current_period_end is None:
-        raise DowngradeError(f"org_id={org_id} current_period_end 없음 — 적용일을 정할 수 없음")
+    sub = await _active_paid_sub_or_raise(session, org_id)
     if _TIER_RANK.get(new_tier, 0) >= _TIER_RANK.get(sub.tier, 0):
         raise DowngradeError(
             f"{sub.tier!r}→{new_tier!r}는 하향이 아님(상향/동일) — 상향은 story #2880(change-tier)"
         )
 
-    new_offering = (
-        await session.execute(
-            select(OfferingVersion).where(
-                OfferingVersion.tier == new_tier,
-                OfferingVersion.currency == sub.currency,
-                OfferingVersion.effective_to.is_(None),
-            )
-        )
-    ).scalar_one_or_none()
-    if new_offering is None:
-        raise DowngradeError(f"tier={new_tier!r}의 활성 offering_version({sub.currency!r})을 찾을 수 없음")
+    new_offering = await _offering_or_raise(session, tier=new_tier, currency=sub.currency)
+    return await _reserve_pending_change(session, sub=sub, new_tier=new_tier, offering_id=new_offering.id)
 
-    await session.execute(
-        update(OrgSubscription)
-        .where(OrgSubscription.org_id == org_id)
-        .values(
-            pending_tier=new_tier, pending_offering_version_id=new_offering.id,
-            pending_change_apply_at=sub.current_period_end,
-        )
-    )
-    await session.commit()
-    return await _refetch_subscription(session, org_id)
+
+async def cancel_subscription(session: AsyncSession, *, org_id: uuid.UUID) -> OrgSubscription:
+    """story #2882(구독 취소, 선생님 확定 2026-08-21) — v2.1 §12 「월간 구독 취소: 현재
+    기간 말까지 사용, 다음 갱신 중지, 부분 환불 없음」. 메커니즘은 reserve_downgrade와
+    동일(즉시 전이 없음·단일 슬롯 재예약·`sweep_pending_tier_downgrades`가 갱신일에
+    적용)이라 «tier=free로의 하향»으로 취급 — 같은 pending_* 슬롯·같은 sweep 재사용
+    (새 컬럼·새 스윕 발명 0).
+
+    ⛔단, 좌석 게이트는 **타지 않는다**(페드루 확定 판정, #2881의 유료↔유료 하향과
+    결정적으로 다른 지점) — 하향은 «선택»이라 조건 미충족 시 안 해줘도 되지만, 취소는
+    «해지 의사»라 좌석 초과를 이유로 거부하면 사용자가 결제를 끊을 수 없는 상태가
+    된다(해지 방해). `sweep_pending_tier_downgrades`가 `pending_tier == "free"`일 때
+    이 스킵을 구현한다(이 함수 자체는 예약만 걸 뿐, 게이트 스킵은 sweep 쪽 책임).
+    초과 좌석 기존 멤버는 제거하지 않고, free 전이 後 **신규 좌석 추가만** 기존
+    `ee/plan_limits.check_member_invite_limit`(무수정 재사용)가 자연히 막는다 — 스토리
+    #2906(storage 초과=신규 업로드만 차단)과 같은 판별.
+
+    월납만(연납은 §12의 별도 환불식이 필요해 미착수 — story #2880/#2881과 동일 선례)."""
+    sub = await _active_paid_sub_or_raise(session, org_id)
+    free_offering = await _offering_or_raise(session, tier="free", currency=sub.currency)
+    return await _reserve_pending_change(session, sub=sub, new_tier="free", offering_id=free_offering.id)
 
 
 async def cancel_pending_downgrade(session: AsyncSession, *, org_id: uuid.UUID) -> OrgSubscription:
@@ -169,8 +206,15 @@ async def sweep_pending_tier_downgrades(session: AsyncSession, *, now: datetime 
             skipped += 1
             continue
 
-        seat_count = await count_human_seats(session, sub.org_id)
-        if seat_count > new_offering.included_seats:
+        # story #2882(선생님 확定 2026-08-21) — 취소(pending_tier="free")는 좌석 게이트를
+        # 타지 않는다. 하향은 «선택»이라 조건 미충족 시 거부해도 되지만, 취소는 «해지
+        # 의사»라 좌석 초과를 이유로 거부하면 사용자가 결제를 끊을 수 없는 상태가 된다
+        # (해지 방해 — 소비자 보호·심사 관점 둘 다 위험). free 전이는 무조건 실행하고,
+        # 초과 멤버는 제거하지 않는다 — 이후 신규 좌석 추가만 기존
+        # ee/plan_limits.check_member_invite_limit이 자연히 막는다(재구현 0).
+        is_cancellation = sub.pending_tier == "free"
+        seat_count = 0 if is_cancellation else await count_human_seats(session, sub.org_id)
+        if not is_cancellation and seat_count > new_offering.included_seats:
             # 카디르 확定 버그(PR#3308 QA, 2026-08-21) — 아래 raw UPDATE(pending_tier=None)를
             # session.execute()가 실행하면 SQLAlchemy Core update()의 기본 "evaluate"
             # synchronize_session 전략이 PK로 매칭되는 이 in-session `sub` 객체를 자동으로
@@ -193,15 +237,23 @@ async def sweep_pending_tier_downgrades(session: AsyncSession, *, now: datetime 
             cancelled_seat_overage += 1
             continue
 
-        new_period_end = compute_period_end(now, sub.billing_cycle or "monthly")
+        if is_cancellation:
+            # free는 Toss 결제 주기가 없다 — downgrade_to_free(dunning 강제전환)의 free
+            # upsert 관례와 동형으로 billing_cycle/period를 비운다(재구현 0).
+            update_values = {
+                "tier": "free", "offering_version_id": sub.pending_offering_version_id,
+                "billing_cycle": None, "current_period_start": None, "current_period_end": None,
+                "pending_tier": None, "pending_offering_version_id": None, "pending_change_apply_at": None,
+            }
+        else:
+            new_period_end = compute_period_end(now, sub.billing_cycle or "monthly")
+            update_values = {
+                "tier": sub.pending_tier, "offering_version_id": sub.pending_offering_version_id,
+                "current_period_start": now, "current_period_end": new_period_end,
+                "pending_tier": None, "pending_offering_version_id": None, "pending_change_apply_at": None,
+            }
         await session.execute(
-            update(OrgSubscription)
-            .where(OrgSubscription.id == sub.id)
-            .values(
-                tier=sub.pending_tier, offering_version_id=sub.pending_offering_version_id,
-                current_period_start=now, current_period_end=new_period_end,
-                pending_tier=None, pending_offering_version_id=None, pending_change_apply_at=None,
-            )
+            update(OrgSubscription).where(OrgSubscription.id == sub.id).values(**update_values)
         )
         await session.commit()
         applied += 1
