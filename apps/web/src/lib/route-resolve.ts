@@ -66,7 +66,7 @@ export const RESERVED_FIRST_SEGMENTS = new Set([
   // 라우트. `scripts/verify-reserved-first-segments-sync.ts`가 어긋남을 CI에서 잡는다.
   'activity', 'api', 'apple-icon.png', 'auth', 'channel', 'chats', 'dashboard',
   'favicon.ico', 'forgot-password', 'gates', 'icon.svg', 'inbox', 'internal-dogfood',
-  'invite', 'login', 'manifest.webmanifest', 'meetings', 'mfa', 'more', 'onboarding',
+  'invite', 'login', 'loop-queue', 'manifest.webmanifest', 'meetings', 'mfa', 'more', 'onboarding',
   'org-briefing', 'organization', 'privacy', 'refund-policy', 'register', 'reset-password',
   'rewards', 'settings', 'share', 'terms', 'verify-email',
 ]);

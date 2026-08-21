@@ -191,12 +191,17 @@ function AuthFailureRow({ item, memberNames }: { item: AuthFailureClusterItem; m
 // story #2830(유나 스티어②) — items[]가 BE top-20 cap이라(doc a8e73bdb §3) "전체보기"가 실제
 // 전체를 못 담을 수 있다. no-silent-cap 원칙상 이 경우 일반 ViewAllToggle("전체보기")을 쓰지
 // 않고 정직한 문구로 잘림을 명시한다 — 거짓 "전체"를 암시하지 않는다.
+// story #2858(loop-closure P2) — 잘림 고지 옆에 «전부» 볼 수 있는 실제 경로(전량 페이지네이션
+// 큐)를 바로 붙인다. 문구만 정직하고 갈 곳이 없으면 그 정직함이 막다른 길이다.
 function LoopCapNotice({ shown, total }: { shown: number; total: number }) {
   const t = useTranslations('orgBriefing');
   if (shown >= total) return null;
   return (
     <p className="border-t border-border px-4 py-2.5 text-center text-[11px] text-muted-foreground">
-      {t('clusterUnclosedCapNotice', { shown, total })}
+      {t('clusterUnclosedCapNotice', { shown, total })}{' '}
+      <Link href="/loop-queue" className="font-medium text-primary hover:underline">
+        {t('clusterUnclosedViewQueue')}
+      </Link>
     </p>
   );
 }

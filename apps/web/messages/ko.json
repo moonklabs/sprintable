@@ -442,6 +442,7 @@
     "clusterUnclosedDaysDone": "{n}일째 미판정",
     "clusterUnclosedShowMore": "{n}건 더보기",
     "clusterUnclosedCapNotice": "상위 {shown}건 표시 중 · 총 {total}건",
+    "clusterUnclosedViewQueue": "전체 큐 보기",
     "clusterUnclosedMeasurePlanMissing": "+{count}건은 측정 계획이 아직 없음",
     "clusterUnclosedUnmeasurableGoal": "{count}건은 측정 불가로 선언됨",
     "clusterAuthFailureTitle": "에이전트 인증 실패",
@@ -4055,5 +4056,20 @@
     "viewDecision": "결정",
     "conversationEmpty": "아직 메시지가 없습니다",
     "conversationFooter": "이 작업에 귀속된 지시·판단·증거·수정요청만. 뷰 전환(실행/증거/결정)=같은 스레드 다른 렌즈."
+  },
+  "loopQueue": {
+    "title": "닫히지 않은 루프 큐",
+    "subtitle": "측정 기한이 지났거나 결과 판정이 없는 항목 전부",
+    "unclaimedOnlyToggle": "담당자 없는 항목만",
+    "loading": "불러오는 중…",
+    "empty": "지금은 닫히지 않은 루프가 없습니다",
+    "claimedBy": "{name} 담당",
+    "unclaimed": "담당자 없음",
+    "claimAction": "내가 맡기",
+    "judgeAction": "판정하러 가기",
+    "pageSummary": "{from}–{to} / 총 {total}건",
+    "prevPage": "이전",
+    "nextPage": "다음",
+    "loopQueueUntitled": "제목 없는 항목"
   }
 }
