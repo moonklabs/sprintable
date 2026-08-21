@@ -340,14 +340,22 @@ async def test_transition_verified_server_stamps_closed_by_from_human_caller():
 
 
 async def test_transition_verified_ignores_client_declared_closed_by():
-    """⛔ gate 1(오르테가군): agent 자격증명으로 직접 호출해 outcome_result에 closed_by="human"을
-    실어 보내도 저장된 값은 human이 아니어야 한다 — 클라이언트 자칭 위장 차단."""
+    """⛔ gate 1(오르테가군): 클라이언트가 outcome_result에 임의 closed_by_member_id를
+    실어 보내도 저장된 값은 실 caller의 것이어야 한다 — 클라이언트 자칭 위장 차단.
+
+    카디르 QA(story #2857, 2026-08-20) — 원래 caller="agent"로 이 불변식을 증명했으나,
+    #2857이 verified/falsified 직통로를 human-only로 막으면서(caller.type!="human"이면
+    HUMAN_CONFIRM_REQUIRED로 이 지점 도달 前에 raise) 그 caller가 이제 이 경로에 못
+    들어온다. 하지만 「서버가 closed_by를 결정한다」는 human 전용이 아니라 이 경로(직접
+    transition)가 살아 있는 한 human 클라이언트에도 그대로 지켜야 하는 불변식 — 죽은
+    경로(agent)의 주장을 삭제하는 대신 산 경로(human)로 이전한다(게이트 경로는
+    test_2857_hypothesis_outcome_confirm_realdb.py가 별도로 잡는다)."""
     repo = _repo_mock(_hyp_stub(status="measuring"))
     p_repo, p_lookup = _patch(repo, "human")
     p_verdict, p_loop = _patch_verified_downstream()
     with p_repo, p_lookup, p_verdict, p_loop:
         await svc.transition_hypothesis(
-            MagicMock(), ORG_ID, _caller("agent"), HYP_ID,
+            MagicMock(), ORG_ID, _caller("human"), HYP_ID,
             HypothesisTransition(
                 status="verified",
                 outcome_result={
@@ -357,8 +365,9 @@ async def test_transition_verified_ignores_client_declared_closed_by():
             ),
         )
     outcome = repo.update.call_args.kwargs["outcome_result"]
-    assert outcome["closed_by"] == "agent"  # 실 caller.type — 클라이언트 자칭("human") 무시
-    assert outcome["closed_by_member_id"] == str(CALLER_AGENT_ID)
+    assert outcome["closed_by"] == "human"  # 실 caller.type
+    # 클라이언트가 보낸 임의 UUID가 아니라 실 caller.id — 자칭 위장 무시.
+    assert outcome["closed_by_member_id"] == str(CALLER_HUMAN_ID)
 
 
 # ── update: allowlist / NO_VALID_FIELDS / owner=human ─────────────────────────

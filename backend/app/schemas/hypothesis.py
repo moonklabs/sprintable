@@ -91,6 +91,13 @@ class HypothesisTransition(BaseModel):
     outcome_result: dict[str, Any] | None = None
 
 
+class HypothesisOutcomeDraftRequest(BaseModel):
+    """story #2857 — 측정 판정 초안(에이전트 제출). 확定은 게이트 승인(휴먼)만 반영한다."""
+    draft_target: str
+    draft_actual: Any
+    draft_reason: str
+
+
 class HypothesisLinkRequest(BaseModel):
     epic_ids: list[uuid.UUID] = []
     story_ids: list[uuid.UUID] = []
