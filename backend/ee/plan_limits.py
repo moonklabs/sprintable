@@ -128,11 +128,22 @@ def _storage_limit_error(resource: str, limit_mb: int, tier: str, *, used_mb: fl
     # 「현재 사용량/한도」+「무엇을 하면 되는지」를 명시한다(dunning 메일 문안과 같은 규율,
     # #2907 참고). resource="storage"=총량 초과(파일 정리 or 업그레이드 안내),
     # resource="file_size"=단일 파일이 한도 자체를 넘음(정리로는 해결 안 됨, 업그레이드만).
+    #
+    # 유나양 design 지적(2026-08-21) — business는 더 위 tier가 없어 "업그레이드해
+    # 주세요"가 거짓 안내다(업그레이드 불가한데 업그레이드를 권함). upgrade_required
+    # (=tier != "business")를 문구 자체에도 배선 — business면 정리/문의로 갈음.
+    upgrade_required = tier != "business"
     if resource == "file_size":
-        msg = f"파일 크기가 {tier} 플랜의 파일당 한도({_format_mb(limit_mb)})를 초과했습니다. 더 작은 파일로 업로드하시거나 플랜을 업그레이드해 주세요."
+        if upgrade_required:
+            msg = f"파일 크기가 {tier} 플랜의 파일당 한도({_format_mb(limit_mb)})를 초과했습니다. 더 작은 파일로 업로드하시거나 플랜을 업그레이드해 주세요."
+        else:
+            msg = f"파일 크기가 {tier} 플랜의 파일당 한도({_format_mb(limit_mb)})를 초과했습니다. 더 작은 파일로 업로드해 주세요."
     else:
         usage_str = f"{used_mb:.0f}MB" if used_mb is not None else "한도"
-        msg = f"저장 공간이 부족합니다({tier} 플랜 한도 {_format_mb(limit_mb)} 중 {usage_str} 사용 중). 기존 파일을 정리하시거나 플랜을 업그레이드해 주세요."
+        if upgrade_required:
+            msg = f"저장 공간이 부족합니다({tier} 플랜 한도 {_format_mb(limit_mb)} 중 {usage_str} 사용 중). 기존 파일을 정리하시거나 플랜을 업그레이드해 주세요."
+        else:
+            msg = f"저장 공간이 부족합니다({tier} 플랜 한도 {_format_mb(limit_mb)} 중 {usage_str} 사용 중). 기존 파일을 정리해 주세요. 추가 용량이 필요하시면 문의해 주세요."
     return HTTPException(
         status_code=402,
         detail={
@@ -140,7 +151,7 @@ def _storage_limit_error(resource: str, limit_mb: int, tier: str, *, used_mb: fl
             "resource": resource,
             "limit_mb": limit_mb,
             "tier": tier,
-            "upgrade_required": tier != "business",
+            "upgrade_required": upgrade_required,
             "message": msg,
         },
     )

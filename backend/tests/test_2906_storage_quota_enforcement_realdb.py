@@ -294,7 +294,6 @@ async def test_visual_artifact_png_export_rejected_over_quota_realdb(monkeypatch
 
     from app.core.config import settings
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
     from app.main import app
     from app.models.member import Member
     from app.models.project import Project
@@ -302,6 +301,7 @@ async def test_visual_artifact_png_export_rejected_over_quota_realdb(monkeypatch
     from app.models.visual_artifact import ArtifactVersion, VisualArtifact
     from app.services.asset_registry import DEFAULT_CONTAINER
     from app.services.storage import get_storage_provider
+    from tests.conftest import override_db_and_read
 
     monkeypatch.setattr(settings, "license_consent", "agreed")  # is_ee_enabled 게이트 통과
     engine, Session = await _session_factory()
@@ -344,7 +344,7 @@ async def test_visual_artifact_png_export_rejected_over_quota_realdb(monkeypatch
                 claims={"app_metadata": {"org_id": str(org_id), "project_id": str(project_id)}},
             )
 
-        app.dependency_overrides[get_db] = _db
+        override_db_and_read(app, _db)
         app.dependency_overrides[get_current_user] = _auth
         client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
         try:
