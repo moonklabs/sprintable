@@ -491,15 +491,21 @@ async def _preflight_merge_gate(
 
 def _enforce_mcp_attachment_declared_limit(attachments: list[dict]) -> None:
     """E-MCP-OPT S6: chat(S5 #2)과 동일 갭을 story 에서 처음부터 막는다 — mcp-태그 첨부(dict shape:
-    url/size 키) 부분집합만 선언한도(5개/6MiB) 재검증. FE 업로드 첨부(마커 없음)는 무관."""
+    url/size 키) 부분집합만 선언한도(5개/6MiB) 재검증. FE 업로드 첨부(마커 없음)는 무관.
+
+    story #2044 AC4: 개수/전체 상한 초과가 여기(예전엔 400)와 첨부 개수·개별 크기 상한
+    (StoryAttachment 필드 validator, 422)이 서로 다른 상태코드로 갈려 호출자가 원인을
+    오판하기 쉬웠다 — 422로 통일(Pydantic 검증류와 동일 관례)하고, 실측값(몇 개/몇 바이트)을
+    메시지에 싣는다."""
     mcp_origin = [a for a in attachments if mcp_attachment_upload.is_mcp_upload_object_path(a["url"], kind="story")]
+    total_bytes = sum(a["size"] for a in mcp_origin)
     if len(mcp_origin) > mcp_attachment_upload.MCP_MAX_ATTACHMENTS or (
-        sum(a["size"] for a in mcp_origin) > mcp_attachment_upload.MCP_MAX_TOTAL_ATTACHMENT_BYTES
+        total_bytes > mcp_attachment_upload.MCP_MAX_TOTAL_ATTACHMENT_BYTES
     ):
         raise HTTPException(
-            status_code=400,
+            status_code=422,
             detail=(
-                f"mcp attachments exceed declared limit "
+                f"mcp attachments exceed declared limit: {len(mcp_origin)} files / {total_bytes} bytes "
                 f"(max {mcp_attachment_upload.MCP_MAX_ATTACHMENTS} files / "
                 f"{mcp_attachment_upload.MCP_MAX_TOTAL_ATTACHMENT_BYTES} bytes total)"
             ),
@@ -2125,11 +2131,20 @@ async def update_story(
     if "assignee_id" in data and old_assignee_id != story.assignee_id:
         # story #2172 근본수정(AC1): 이 side-effects를 PATCH /bulk과 공유하는 단일 helper로
         # 추출 — 두 라우트가 발행 지점을 갈라 갖던 #2131류 결함 재발을 막는다.
-        await emit_story_assignee_changed(
-            db, repo.org_id, story, old_assignee_id,
-            background_tasks=background_tasks,
-            actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
-        )
+        # story #2044 AC2(2026-08-21): 이 라우트는 위에서 이미 db.commit()으로 write를 확정했다
+        # ("side effects 에러가 rollback시키지 않도록") — 그 설계가 실효되려면 commit 뒤 코드가
+        # 예외를 던져 500으로 새면 안 된다(성공한 쓰기가 실패로 위장). 알림 발행 실패는 write
+        # 자체와 무관한 best-effort라 position-event push(아래)와 동일하게 log+continue.
+        try:
+            await emit_story_assignee_changed(
+                db, repo.org_id, story, old_assignee_id,
+                background_tasks=background_tasks,
+                actor_id=actor_id, actor_name=actor_name, actor_role=actor_role, actor_type=actor_type,
+            )
+        except Exception:
+            logger.warning(
+                "assignee_changed 알림 발행 실패(story=%s, write는 이미 commit됨)", story.id, exc_info=True,
+            )
 
     # story #2172 AC2 판정(오르테가군 지시 — "재정렬 전용 이벤트가 필요한지, 기존 것으로
     # 되는지 판단하고 근거 남길 것"): 신규 전용 event_type(`story.position_changed`)을 쓰되,
@@ -2198,10 +2213,26 @@ async def update_story(
             context=_context,
         )
 
-    await _attach_assignee_ids(db, repo.org_id, [story])
-    await _attach_has_evidence(db, [story])
-    await _attach_has_hypothesis_or_goal(db, [story])
-    await _attach_org_project_slugs(db, repo.org_id, [story])
+    # story #2044 AC2: 아래 4개는 응답에 denorm 필드를 얹는 순수 enrichment다(각 helper
+    # docstring 그대로 — assignee_ids/has_evidence/has_hypothesis_or_goal/org_slug 전부
+    # "positive 단방향, 없으면 미설정"이 기존 계약이라 실패해도 필드가 비는 것 이상의 의미
+    # 손실이 없다). commit()이 이미 위에서 write를 확정했으므로(2112) 이 중 하나가 예외를
+    # 던져 500으로 새면 "저장은 성공, 응답은 실패"라는 원 결함 그대로 재발한다 — 각자
+    # log+continue로 격리해 한 곳이 죽어도 나머지 enrichment와 핵심 응답(title/attachments/
+    # status 등)은 살아남는다.
+    for _attach_fn, _args in (
+        (_attach_assignee_ids, (db, repo.org_id, [story])),
+        (_attach_has_evidence, (db, [story])),
+        (_attach_has_hypothesis_or_goal, (db, [story])),
+        (_attach_org_project_slugs, (db, repo.org_id, [story])),
+    ):
+        try:
+            await _attach_fn(*_args)
+        except Exception:
+            logger.warning(
+                "%s enrichment 실패(story=%s, write는 이미 commit됨)",
+                _attach_fn.__name__, story.id, exc_info=True,
+            )
     # story #2459 prod 회귀(2026-08-05): model_validate는 동기 호출이라 story의 어떤 컬럼이
     # unloaded 상태면(원인 미확定 — repo.update()가 flush+refresh 直後인데도 관측됨)
     # MissingGreenlet 500(await_only 호출 불가 — sync 컨텍스트에서 lazy load 시도)으로

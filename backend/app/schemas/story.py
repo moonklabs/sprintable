@@ -88,13 +88,15 @@ class StoryAttachment(BaseModel):
         if v < 0:
             raise ValueError("size must be >= 0")
         if v > _MAX_ATTACHMENT_SIZE:
-            raise ValueError(f"attachment too large (max {_MAX_ATTACHMENT_SIZE} bytes)")
+            # story #2044 AC4: "몇 개/몇 바이트가 넘었는지" 실측값을 메시지에 싣는다 — 상한만
+            # 적으면 호출자가 자기 요청의 어느 첨부가 얼마나 초과했는지 재계산해야 한다.
+            raise ValueError(f"attachment too large: {v} bytes (max {_MAX_ATTACHMENT_SIZE} bytes)")
         return v
 
 
 def _limit_story_attachments(v: list) -> list:
     if v is not None and len(v) > _MAX_STORY_ATTACHMENTS:
-        raise ValueError(f"too many attachments (max {_MAX_STORY_ATTACHMENTS})")
+        raise ValueError(f"too many attachments: {len(v)} (max {_MAX_STORY_ATTACHMENTS})")
     return v
 
 
