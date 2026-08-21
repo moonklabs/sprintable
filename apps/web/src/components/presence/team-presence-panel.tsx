@@ -1,8 +1,9 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { Bot, KeyRound, X } from 'lucide-react';
-import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from '@/components/chat/presence-dot';
+import { KeyRound, X } from 'lucide-react';
+import type { PresenceStatus } from '@/components/chat/presence-dot';
+import { Avatar } from '@/components/shared/avatar';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { cn } from '@/lib/utils';
 import type { TeamPresenceItem } from './use-team-presence';
@@ -64,19 +65,14 @@ function PresenceRow({ item, authFailure }: { item: TeamPresenceItem; authFailur
 
   return (
     <li className={cn('flex items-center gap-2.5 rounded-lg px-2 py-1.5', offline && 'opacity-60')}>
-      <div className={cn('relative size-8 shrink-0 rounded-full', item.working && WORKING_RING_CLASS)}>
-        {item.avatar_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={item.avatar_url} alt="" className="size-8 rounded-full object-cover" />
-        ) : (
-          // story #2590(TIER1 아이콘) — text-warning은 tint 유무와 무관하게 3.0 미달(실측,
-          // #2420 doc) — text-foreground로 잠정 통일(진한 토큰 신설은 범위 밖).
-          <span className="flex size-8 items-center justify-center rounded-full bg-warning-tint text-foreground">
-            <Bot className="size-4" />
-          </span>
-        )}
-        <PresenceDot status={dotStatus} size="md" className="absolute -bottom-0.5 -right-0.5" />
-      </div>
+      <Avatar
+        name={item.name}
+        avatarUrl={item.avatar_url}
+        actorType="agent"
+        size={32}
+        presenceStatus={dotStatus}
+        isWorking={item.working}
+      />
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
