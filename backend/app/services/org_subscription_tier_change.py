@@ -76,8 +76,15 @@ class TierChangeInProgress(Exception):
 
 
 async def _refetch_subscription(session: AsyncSession, org_id: uuid.UUID) -> OrgSubscription:
+    """⛔같은 클래스 latent 버그 방어(org_subscription_checkout.py::_refetch_subscription
+    참고, 2026-08-21 P0 작업 中 실증) — 이 함수 진입 前에 이미 이 org_id 행을 SELECT한
+    적이 있으면(이 함수 자체가 change_tier() 첫 줄의 `sub` 조회 이후에 불린다)
+    SQLAlchemy identity map이 캐시된 인스턴스를 돌려줄 위험이 있다.
+    `populate_existing()`으로 항상 강제 재조회한다."""
     return (
-        await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
+        await session.execute(
+            select(OrgSubscription).where(OrgSubscription.org_id == org_id).execution_options(populate_existing=True)
+        )
     ).scalar_one()
 
 

@@ -466,11 +466,14 @@ async def test_checkout_unexpected_exception_mid_flow_still_releases_claim_reald
 
 
 @pytest.mark.anyio
-async def test_checkout_sequential_different_tier_after_completion_not_blocked_realdb():
-    """#2511 AC2 — 정상 순차(1차 완결 後 다른 tier로 재구독)는 막지 않는다. 진행 中
-    claim은 1차가 finally에서 해제하므로, 겹치지 않는 순차 2차 checkout은 정상 성공해야
-    한다(회귀 0 — «미완결 진행 중»에만 걸리는 락)."""
-    from app.services.org_subscription_checkout import checkout_subscription
+async def test_checkout_sequential_different_tier_after_completion_blocked_by_active_paid_guard_realdb():
+    """⛔#2511 AC2를 뒤집는다(페드루 P0 실측 지시, 2026-08-21, story a8fec107) — 이
+    테스트는 원래 "1차 완결 後 다른 tier로 순차 재구독은 막지 않는다"를 의도된 동작으로
+    고정하고 있었다. 그런데 그게 정확히 실 사고 경로였다: claim 해제(1차 완결) 後엔
+    org가 이미 active+유료인 상태로 checkout_subscription에 다시 들어가면 기존 구독을
+    pending으로 덮어쓰고 신 tier 전액을 재청구했다 — «막으면 안 된다»가 아니라 «막아야
+    한다»가 맞는 판정이었다. ActivePaidSubscriptionExists(400)로 거부해야 한다."""
+    from app.services.org_subscription_checkout import ActivePaidSubscriptionExists, checkout_subscription
 
     # 두 호출에 별개 세션을 쓴다 — 실제로도 서로 다른 HTTP 요청은 각자 새 세션을 받는다
     # (같은 세션을 재사용하면 expire_on_commit=False identity map이 1차 refetch 시
@@ -499,17 +502,21 @@ async def test_checkout_sequential_different_tier_after_completion_not_blocked_r
             assert sub1.tier == "starter"
 
         # 1차가 완전히 끝난 後(claim 해제됨) — 다른 tier로 순차 재구독(새 세션, 새 요청
-        # 흉내). 막히면 안 된다.
+        # 흉내). ⛔이제는 막혀야 한다 — Toss는 한 번도 안 불려야 함(side_effect를
+        # 비워 둬서, 만약 다시 호출되면 StopAsyncIteration으로 즉시 실패한다).
         async with Session() as session2:
-            toss_charge_response_2 = {"paymentKey": f"pay-{uuid.uuid4()}", "totalAmount": 59_000}
-            with patch("app.services.payment.toss_adapter.TossAdapter._post", new=AsyncMock(
-                side_effect=[toss_billing_key_response, toss_charge_response_2]
-            )):
-                sub2 = await checkout_subscription(
-                    session2, org_id=org_id, auth_key="ak-seq-2", tier="team", billing_cycle="monthly",
-                )
-            assert sub2.status == "active"
-            assert sub2.tier == "team"
+            with patch("app.services.payment.toss_adapter.TossAdapter._post", new=AsyncMock(side_effect=[])):
+                with pytest.raises(ActivePaidSubscriptionExists, match="change-tier"):
+                    await checkout_subscription(
+                        session2, org_id=org_id, auth_key="ak-seq-2", tier="team", billing_cycle="monthly",
+                    )
+
+            # 기존 starter 구독이 그대로 살아있어야 한다(덮어써지지 않음).
+            row = (
+                await session2.execute(text("SELECT tier, status FROM org_subscriptions WHERE org_id=:oid"), {"oid": org_id})
+            ).first()
+            assert row.tier == "starter"
+            assert row.status == "active"
 
             charge_count = (
                 await session2.execute(
@@ -517,6 +524,96 @@ async def test_checkout_sequential_different_tier_after_completion_not_blocked_r
                     {"oid": org_id},
                 )
             ).scalar_one()
-            assert charge_count == 2  # 둘 다 정당한 별개 청구(순차·비중첩)
+            assert charge_count == 1  # 2차 청구가 절대 나가지 않았어야 함(이중청구 방지 = 이 P0의 핵심)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_checkout_sequential_same_tier_after_completion_not_blocked_realdb():
+    """P0 가드의 음성대조 — «같은» tier 재제출(더블클릭·네트워크 재시도)은 여전히
+    막지 않는다(claim-supersede 무해 경로, story #2511 원 취지는 이 축에서만 유효)."""
+    from app.services.org_subscription_checkout import checkout_subscription
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session1:
+            org_id = await _seed_org_with_members(session1, human_seats=3)
+
+            toss_billing_key_response = {
+                "billingKey": "billing-key-same-tier",
+                "card": {"issuerCode": "61", "acquirerCode": "31", "number": "12345678****000*", "cardType": "신용", "ownerType": "개인"},
+                "authenticatedAt": "2026-08-07T00:00:00+09:00",
+            }
+            toss_charge_response = {"paymentKey": f"pay-{uuid.uuid4()}", "totalAmount": 59_000}
+
+            with patch("app.services.payment.toss_adapter.TossAdapter._post", new=AsyncMock(
+                side_effect=[toss_billing_key_response, toss_charge_response]
+            )):
+                sub1 = await checkout_subscription(
+                    session1, org_id=org_id, auth_key="ak-1", tier="team", billing_cycle="monthly",
+                )
+            assert sub1.status == "active"
+
+        # 같은 org_id, 같은 tier로 재요청 — 오늘 날짜라 order_id가 같은 값으로 수렴,
+        # DUPLICATED_ORDER_ID 조회 경로만 타야 하므로 billing-key 발급만 있고 charge
+        # 호출은 없어야 한다(기존 계약 그대로).
+        async with Session() as session2:
+            with patch("app.services.payment.toss_adapter.TossAdapter._post", new=AsyncMock(
+                side_effect=[toss_billing_key_response]
+            )):
+                sub2 = await checkout_subscription(
+                    session2, org_id=org_id, auth_key="ak-2", tier="team", billing_cycle="monthly",
+                )
+            assert sub2.status == "active"
+            assert sub2.tier == "team"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_checkout_not_blocked_for_non_active_status_cancelled_org_negative_control_realdb():
+    """P0 가드의 두 번째 음성대조(페드루 AC③) — «취소 상태 org의 재결제»는 막으면 안
+    되는 경계. story #2882(구독 취소)가 아직 없어 실제 'cancelled' 상태 전이 코드는
+    없지만, 이 가드 자체의 판정 로직(status=='active'만 막는다, 그 외 어떤 비-active
+    값이든 통과)을 직접 seed로 실증한다 — #2882가 실제로 그 상태를 쓰게 될 때 이 가드가
+    자동으로 올바르게 열려 있을 것을 보장."""
+    from app.services.org_subscription_checkout import checkout_subscription
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as session:
+            org_id = await _seed_org_with_members(session, human_seats=3)
+            offering_id = (
+                await session.execute(
+                    text("SELECT id FROM offering_versions WHERE tier='starter' AND currency='krw' AND effective_to IS NULL")
+                )
+            ).scalar_one()
+            await session.execute(
+                text(
+                    "INSERT INTO org_subscriptions (id, org_id, tier, billing_cycle, status, currency, provider, offering_version_id) "
+                    "VALUES (:id, :org_id, 'starter', 'monthly', 'cancelled', 'krw', 'toss', :oid)"
+                ),
+                {"id": uuid.uuid4(), "org_id": org_id, "oid": offering_id},
+            )
+            await session.commit()
+
+            toss_billing_key_response = {
+                "billingKey": "billing-key-cancelled-resub",
+                "card": {"issuerCode": "61", "acquirerCode": "31", "number": "12345678****000*", "cardType": "신용", "ownerType": "개인"},
+                "authenticatedAt": "2026-08-07T00:00:00+09:00",
+            }
+            toss_charge_response = {"paymentKey": f"pay-{uuid.uuid4()}", "totalAmount": 59_000}
+
+            with patch("app.services.payment.toss_adapter.TossAdapter._post", new=AsyncMock(
+                side_effect=[toss_billing_key_response, toss_charge_response]
+            )):
+                sub = await checkout_subscription(
+                    session, org_id=org_id, auth_key="ak-resub", tier="team", billing_cycle="monthly",
+                )
+            assert sub.status == "active"
+            assert sub.tier == "team"
     finally:
         await engine.dispose()
