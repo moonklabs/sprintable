@@ -94,8 +94,14 @@ _UUID_RE = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-f
 # 안 된) `]`에서만 멈춘다. `build_reference_token`(reference_token.py)이 title을
 # backslash-escape하는 것과 **짝**이다 — 한쪽만 고치면(escape만 하고 파서는 그대로) 여전히
 # 안 열린다는 것을 실측으로 확인했다.
+# story #2889(S2h①③) — `[a-z]+`는 언더스코어를 모른다. TARGET_ONLY_TYPES에 새로 편입된
+# `pull_request`(reference_registry.py)가 정확히 이 모양이라, 이 클래스를 안 넓히면 그
+# 타입의 채팅 멘션은 토큰이 «모양은 맞는데» 정규식이 애초에 매치를 못해 항상 0건으로
+# 조용히 죽는다(chat_message도 언더스코어가 있지만 그 타입은 채팅 본문 토큰 경로로
+# 쓰이지 않아 — proof form 별도 경로 — 지금까지 이 구멍이 안 드러났을 뿐). `[a-z_]+`로
+# 넓혀 두 정규식(아래 SHAPE_RE도 동일 근거) 다 대비한다.
 _CHAT_TOKEN_RE = re.compile(
-    r"\[(?:[^\]\\]|\\.)*\]\(entity:(?P<type>[a-z]+):(?P<id>" + _UUID_RE + r")\)"
+    r"\[(?:[^\]\\]|\\.)*\]\(entity:(?P<type>[a-z_]+):(?P<id>" + _UUID_RE + r")\)"
 )
 
 
@@ -161,7 +167,7 @@ def extract_chat_entity_mentions(content: str) -> list[tuple[str, uuid.UUID]]:
 # 이유: 코어는 이미 파싱된 `extracted_refs`만 받는 계약이라(#2301) 애초에 추출조차 안 된
 # 토큰은 코어의 시야 밖 — #2301의 "얇은 변환" 원칙 위반이 아니라 코어가 볼 수 없는 축이다.
 _CHAT_TOKEN_SHAPE_RE = re.compile(
-    r"\[(?:[^\]\\]|\\.)*\]\(entity:(?P<type>[a-z]+):(?P<id>[^)]*)\)"
+    r"\[(?:[^\]\\]|\\.)*\]\(entity:(?P<type>[a-z_]+):(?P<id>[^)]*)\)"
 )
 
 
