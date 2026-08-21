@@ -220,3 +220,60 @@ async def cancel_downgrade_endpoint(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return _to_response(sub)
+
+
+@router.post("/cancel", response_model=CheckoutResponse)
+async def cancel_subscription_endpoint(
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+) -> CheckoutResponse:
+    """story #2882(구독 취소) — 「tier=free로의 하향」으로 예약(같은 pending_* 슬롯·같은
+    sweep). 즉시 전이 없음 — 현재 기간 말까지 사용, 다음 갱신 중지, 부분 환불 없음
+    (v2.1 §12). 좌석 게이트는 타지 않는다(해지 의사는 좌석 초과를 이유로 거부하지
+    않는다 — `org_subscription_downgrade.cancel_subscription` docstring 참고)."""
+    settings = await get_platform_settings(session)
+    if not settings.billing_checkout_enabled:
+        raise HTTPException(status_code=403, detail="billing checkout is not yet enabled")
+
+    from app.services.project_auth import is_org_owner_or_admin
+
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(status_code=403, detail="org admin/owner role required")
+
+    from app.services.org_subscription_downgrade import DowngradeError, cancel_subscription
+
+    try:
+        sub = await cancel_subscription(session, org_id=org_id)
+    except DowngradeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return _to_response(sub)
+
+
+@router.delete("/cancel", response_model=CheckoutResponse)
+async def revoke_cancellation_endpoint(
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+) -> CheckoutResponse:
+    """story #2882 — 취소 철회(재구독 의사). 같은 pending_* 슬롯이라
+    `cancel_pending_downgrade`를 그대로 재사용(재구현 0) — 예약된 게 하향이든
+    취소(free)든 pending_*만 클리어하는 동작은 동일하다."""
+    settings = await get_platform_settings(session)
+    if not settings.billing_checkout_enabled:
+        raise HTTPException(status_code=403, detail="billing checkout is not yet enabled")
+
+    from app.services.project_auth import is_org_owner_or_admin
+
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(status_code=403, detail="org admin/owner role required")
+
+    from app.services.org_subscription_downgrade import DowngradeError, cancel_pending_downgrade
+
+    try:
+        sub = await cancel_pending_downgrade(session, org_id=org_id)
+    except DowngradeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return _to_response(sub)
