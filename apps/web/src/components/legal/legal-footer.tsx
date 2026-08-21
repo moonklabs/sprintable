@@ -66,6 +66,29 @@ export function BusinessInfoBlock({ className = '' }: { className?: string }) {
   );
 }
 
+/** 사업자정보 6종 — 세로 스택(라벨+값), 좁은 폭(GNB 등)용. justify는 호출부에서 지정. */
+export function BusinessInfoList({ className = '' }: { className?: string }) {
+  const t = useTranslations('legal');
+  const rows = [
+    { label: null, value: BUSINESS_INFO.companyName },
+    { label: t('ceoLabel'), value: BUSINESS_INFO.ceo },
+    { label: t('registrationLabel'), value: BUSINESS_INFO.registrationNumber },
+    { label: t('mailOrderLabel'), value: BUSINESS_INFO.mailOrderNumber },
+    { label: null, value: BUSINESS_INFO.address },
+    { label: null, value: BUSINESS_INFO.phone },
+  ];
+  return (
+    <div className={`space-y-0.5 ${className}`}>
+      {rows.map((row, i) => (
+        <div key={i} className="text-xs leading-relaxed">
+          {row.label && <span className="text-sidebar-foreground/60">{row.label} </span>}
+          <span className="text-sidebar-foreground">{row.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /**
  * 비로그인 클러스터(로그인·가입·legal 페이지) 하단 푸터.
  * 사업자정보 + 법적 문서 링크를 가운데 정렬로 묶는다.

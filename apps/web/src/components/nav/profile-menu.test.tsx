@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 //
-// story #2865 — ProfileMenu 드롭다운에 「약관 및 정책」 그룹(3링크)이 상시 접근 경로로
-// 추가됐다. 배선이 아니라 «표시를 테스트»한다: 드롭다운을 열었을 때 3개 링크가 실제로
-// 렌더되고 기존 legal 라우트로 걸리는지 화면 결과로 확인한다.
+// story #2870 — GNB의 법적 고지 접점이 단일화됐다(사이드바 footer 「사업자 정보」 토글로
+// 수렴). ProfileMenu의 「약관 및 정책」 그룹(story #2865에서 추가)은 중복이라 제거됐다 —
+// 이 스위트는 그 회귀를 막는다: 배선이 아니라 «표시 부재»를 테스트한다.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
@@ -58,25 +58,19 @@ async function openMenu() {
   await act(async () => { trigger.click(); });
 }
 
-describe('ProfileMenu — 약관 및 정책 드롭다운 그룹 (story #2865)', () => {
-  it('드롭다운을 열면 약관 및 정책 3링크가 렌더되고 기존 legal 라우트로 걸린다', async () => {
+describe('ProfileMenu — 약관 및 정책 그룹 제거 회귀가드 (story #2870)', () => {
+  it('드롭다운에 법적 문서 링크가 0건이다(GNB footer 토글로 수렴)', async () => {
     await mount(<ProfileMenu name="송윤재" />);
     await openMenu();
 
-    // base-ui Menu.Portal은 document.body에 렌더된다(컨테이너 내부가 아님).
     const anchors = Array.from(document.querySelectorAll('[data-slot="dropdown-menu-content"] a'));
     const hrefs = anchors.map((a) => a.getAttribute('href'));
-    expect(hrefs).toContain('/terms');
-    expect(hrefs).toContain('/privacy');
-    expect(hrefs).toContain('/refund-policy');
-
-    const labels = anchors.map((a) => a.textContent);
-    expect(labels).toContain('이용약관');
-    expect(labels).toContain('개인정보처리방침');
-    expect(labels).toContain('환불정책');
+    expect(hrefs).not.toContain('/terms');
+    expect(hrefs).not.toContain('/privacy');
+    expect(hrefs).not.toContain('/refund-policy');
   });
 
-  it('약관 및 정책 그룹이 설정↔로그아웃 사이에 위치한다', async () => {
+  it('설정 항목 바로 다음이 로그아웃이다(약관 그룹 자리가 완전히 비었다)', async () => {
     await mount(<ProfileMenu name="송윤재" />);
     await openMenu();
 
@@ -86,17 +80,8 @@ describe('ProfileMenu — 약관 및 정책 드롭다운 그룹 (story #2865)', 
       (el) => el.textContent ?? '',
     );
     const settingsIdx = items.findIndex((t) => t.includes('설정'));
-    const termsIdx = items.findIndex((t) => t.includes('이용약관'));
     const signOutIdx = items.findIndex((t) => t.includes('로그아웃'));
     expect(settingsIdx).toBeGreaterThanOrEqual(0);
-    expect(termsIdx).toBeGreaterThan(settingsIdx);
-    expect(signOutIdx).toBeGreaterThan(termsIdx);
-  });
-
-  it('raw i18n 키가 노출되지 않는다', async () => {
-    await mount(<ProfileMenu name="송윤재" />);
-    await openMenu();
-    const text = document.querySelector('[data-slot="dropdown-menu-content"]')?.textContent ?? '';
-    expect(text).not.toMatch(/policiesHeading|termsOfService|privacyPolicy|refundPolicy/);
+    expect(signOutIdx).toBe(settingsIdx + 1);
   });
 });

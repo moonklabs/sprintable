@@ -205,4 +205,14 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1)', () =>
       expect(link!.getAttribute('href'), `"${label}"의 href`).toBe(expectedHref);
     }
   });
+
+  // story #2870 — footer `?` docs 도움말 링크(docsLink)가 「사업자 정보」 토글로 대체됐다.
+  // /docs는 이미 knowledge 그룹의 1차 내비 항목이라 footer 단축 제거로 도달성 손실은 없다.
+  it('footer에 docs 도움말 링크(?)가 없고, 「사업자 정보」 토글이 대신 존재한다', async () => {
+    await mount();
+    const docsHelpLink = [...container.querySelectorAll('a[href="/docs"][aria-label]')];
+    expect(docsHelpLink).toHaveLength(0);
+    const businessInfoToggle = [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-expanded') !== null);
+    expect(businessInfoToggle).toBeDefined();
+  });
 });
