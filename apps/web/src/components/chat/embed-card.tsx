@@ -287,6 +287,33 @@ function renderEntityDetail(entityType: string, entityId: string, detail: Record
   return null;
 }
 
+// story #2889(S2h①③)·S2d(미르코) — gate는 TARGET_ONLY라 renderEntityDetail/RICH_PREVIEW_TYPES
+// (parity 대상)엔 안 들어간다. 완전히 독립된 렌더 함수 — 위 renderEntityDetail과 대칭이되 이
+// 파일의 parity 계약과 무관(entity-registry.parity.test.ts는 이 함수를 스캔하지 않는다).
+// 요약만(제목·상태·risk 배지) — 근거확인/서명/승인 액션은 여기 안 붙인다(approval-request-
+// card.tsx가 이미 챗 카드에서 그 몫을 완결하고 있다, 사본 분화 금지 — 이건 "칩 클릭시 훑어보는
+// 요약"이지 결재 액션 표면이 아니다).
+function renderGateSummary(detail: Record<string, unknown>): React.ReactNode | null {
+  const d = detail as {
+    gate_type?: string; status?: string; risk_grade?: 'low' | 'high' | 'unknown' | null;
+    work_item_summary?: { title: string; slug: string | null } | null; work_item_id?: string;
+  };
+  if (!d.status && !d.gate_type) return null;
+  const statusLabel = d.status ? translateEntityStatus('gate', d.status) : null;
+  const title = d.work_item_summary?.title ?? (d.work_item_id ? `#${d.work_item_id.slice(0, 8)}` : null);
+  return (
+    <div className="space-y-2">
+      {title && <p className="text-sm font-medium text-foreground">{title}</p>}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {d.gate_type && <MdBadge label={d.gate_type} />}
+        {statusLabel && <MdBadge label={statusLabel} />}
+        {d.risk_grade === 'high' && <MdBadge label="High risk" />}
+        {d.risk_grade === 'unknown' && <MdBadge label="Risk unknown" />}
+      </div>
+    </div>
+  );
+}
+
 // story #2627 — 결재 카드(chat/approval-request-card.tsx)가 doc 본문 열람을 위해 그대로
 // 재사용한다(신규 뷰어 금지·사본 분화 금지, PO 확定). 이전엔 이 파일 내부(EntityChip)만
 // 소비하는 비-export 컴포넌트였다 — export만 추가, 내부 로직은 무변경.
@@ -316,7 +343,12 @@ export function EntityPreviewModal({
   // 다른 타입(hypothesis·evidence·미등록 타입)은 아래 effect의 `if (!url) return` 이 loading을
   // 영영 false로 안 만들어 **무한 스피너**였다(실측으로 발견 — 이 스토리가 고치기 전까지 잠복
   // 결함). fetch 전략이 있는 타입(doc 특수분기 포함)만 loading=true로 시작한다.
-  const hasFetchStrategy = entityType === 'doc' || Boolean(ENTITY_API[entityType]);
+  // story #2889(S2h①③)·S2d(미르코, gate 프리뷰) — gate는 reference_registry의
+  // TARGET_ONLY_TYPES라 ENTITY_API/RICH_PREVIEW_TYPES/getEntityHref(전부 entity-registry.
+  // parity.test.ts가 BE ENTITY_RESOLVERS와 엄격 대조하는 자리)엔 못 들어간다. 그 계약 밖에서
+  // gate 전용 fetch/href/렌더를 독립적으로 붙인다(parity 가드 무영향) — GateSummary(아래)가
+  // 유일한 소비 지점.
+  const hasFetchStrategy = entityType === 'doc' || entityType === 'gate' || Boolean(ENTITY_API[entityType]);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(hasFetchStrategy);
   // ㉠ "대상이 없습니다" 판정 — fetch를 **시도했는데** 실패한 경우만 켠다(fetch를 아예 안 하는
@@ -365,6 +397,25 @@ export function EntityPreviewModal({
           if (!cancelled) setDetail(docJson.data ?? null);
         } catch {
           if (!cancelled) setNotFound(true); // ㉠ — preview 해소든 본문 조회든 실패=대상이 없다.
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      })();
+      return () => { cancelled = true; };
+    }
+
+    if (entityType === 'gate') {
+      // gates/[id]/page.tsx·approval-request-card.tsx와 동일 계약(GET /api/gates/{id},
+      // {data:GateItem} envelope) — parity 대상 ENTITY_API를 거치지 않는 독립 fetch.
+      // fetchWithAuth 필수([[feedback-client-fetch-use-fetchwithauth]]).
+      void (async () => {
+        try {
+          const res = await fetchWithAuth(`/api/gates/${entityId}`);
+          if (!res.ok) throw new Error();
+          const json = (await res.json()) as { data?: Record<string, unknown> };
+          if (!cancelled) setDetail(json.data ?? null);
+        } catch {
+          if (!cancelled) setNotFound(true);
         } finally {
           if (!cancelled) setLoading(false);
         }
@@ -500,6 +551,12 @@ export function EntityPreviewModal({
     // ③ 고정 — 위 getEntityHref 주석 참고.
     resolvedHref = null;
     linkKind = null;
+  } else if (entityType === 'gate') {
+    // gate 상세(/gates/[id])는 story #1954부터 이미 org-scope 플랫 라우트(워크스페이스/
+    // 프로젝트 slug 세그먼트 없음, gates/[id]/page.tsx 그대로) — story/epic처럼 슬러그 해소가
+    // 필요 없다. getEntityHref의 parity 스위치는 안 거친다(gate는 그 계약 밖).
+    resolvedHref = `/gates/${entityId}`;
+    linkKind = 'own';
   } else {
     // story·epic·sprint·asset — own-href ①. story #2642(BE #3044)부터 각 detail 응답이
     // org_slug/project_slug를 직접 싣는다 — 엔티티 자신의 project로 직행(뷰어의 현재 프로젝트
@@ -549,6 +606,8 @@ export function EntityPreviewModal({
   // 덜 정직한 새 위반형). "RICH 타입인가"가 아니라 "실제로 보여줄 내용이 있는가"로 이
   // 문구를 하나로 통일한다 — 한 번만 계산해 조건과 렌더 양쪽에 쓴다(이중 호출 금지).
   const richContent = detail && RICH_PREVIEW_TYPES.has(entityType) ? renderEntityDetail(entityType, entityId, detail) : null;
+  // gate는 RICH_PREVIEW_TYPES 밖(parity 계약) — richContent와 별개 축으로 계산해 병합.
+  const gateSummary = detail && entityType === 'gate' ? renderGateSummary(detail) : null;
 
   const body = (
     <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -561,6 +620,8 @@ export function EntityPreviewModal({
         <p className="py-4 text-xs text-muted-foreground">대상을 찾을 수 없습니다.</p>
       ) : richContent !== null ? (
         richContent
+      ) : gateSummary !== null ? (
+        gateSummary
       ) : (
         <p className="py-4 text-xs text-muted-foreground">이 엔티티는 별도 미리보기가 없습니다.</p>
       )}
