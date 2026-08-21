@@ -2,6 +2,15 @@ name: CI
 
 on:
   pull_request:
+    # story #2912(2899 그라운딩 갈래D 처방) — 기본값([opened, synchronize, reopened])엔
+    # edited가 없어, base branch만 바뀌고 새 커밋이 없는 재타겟(synchronize 미발화)에서
+    # 이 required 워크플로 자체가 재트리거되지 않았다(#3317 실사고). edited를 명시 추가해
+    # base 재타겟도 새 런을 튼다 — required 3잡(alembic-fresh-db·backend-test·ci)엔
+    # changes.base skip-필터를 걸지 않는다(그 잡들의 기존 `if: always()`가 스킵-캐스케이드
+    # 방지용이라, skip 조건을 더하면 그 방지를 무력화한다 — [[ci-stuck-c-d-remedy-design-20260822]]
+    # landmine 참고). title/body 편집에도 전체 재실행되지만 PR#3324의 concurrency그룹이
+    # 연속 편집 시 구run을 자동취소해 낭비를 완화한다.
+    types: [opened, synchronize, reopened, edited]
     branches: [main, develop]
   push:
     branches: [main, develop]
