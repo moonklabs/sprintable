@@ -101,6 +101,25 @@ class ApiKeyRepository:
         await self.session.refresh(key)
         return key
 
+    async def revoke_all_active(self, team_member_id: uuid.UUID) -> list[uuid.UUID]:
+        """story #2944(PO 정책 확定) — 「발급=교체」 통일의 원자적 절반: 이 agent의 활성 키 전량을
+        한 UPDATE로 revoke한다. 단일 키 CAS(`rotate()`가 `api_key_id` 하나만 대상)와 달리 여기는
+        "지금 활성인 것 전부"가 대상이라 다건이어도 안전 — WHERE 절 매칭 행 전부를 원자적으로
+        잠그고 갱신하므로(story #2941의 `sync_active_scope`와 동일 RETURNING 패턴, 후속 SELECT로
+        분리하지 않는다 — MultipleResultsFound 재발 클래스 원천 차단).
+
+        동시성: 두 발급 요청이 겹치면 Postgres 행잠금이 직렬화한다 — 먼저 커밋된 쪽이 revoke한
+        구키 위에 신규 키를 만들고, 나중 요청은 그 신규 키까지 다시 매칭해 재차 revoke 후 자기
+        신규 키를 만든다 — 최종적으로 활성 키는 항상 정확히 1개로 수렴(레이스가 나중 커밋
+        승자로 자연 정리, 별도 CAS 재시도 로직 불요)."""
+        result = await self.session.execute(
+            sa_update(ApiKey)
+            .where(ApiKey.team_member_id == team_member_id, ApiKey.revoked_at.is_(None))
+            .values(revoked_at=datetime.now(timezone.utc))
+            .returning(ApiKey.id)
+        )
+        return list(result.scalars().all())
+
     async def rotate(
         self, api_key_id: uuid.UUID, scope: list[str] | None = None
     ) -> tuple[ApiKey, str] | None:

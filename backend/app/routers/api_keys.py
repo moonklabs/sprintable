@@ -77,6 +77,14 @@ async def create_agent_api_key(
     repo: ApiKeyRepository = Depends(_get_repo),
 ) -> ApiKeyCreatedResponse:
     await assert_agent_owner(agent_id, session, org_id, uuid.UUID(auth.user_id))
+    # story #2944(PO 정책 확定, 카디르 HIGH 발견 후속) — 「발급=교체」 통일: 이 엔드포인트가
+    # 예전엔 기존 활성 키 확인 없이 무조건 신규 발급이라 다건 활성 키가 합법으로 생겼다(2941의
+    # 다중 키 방어는 그 결과를 다루는 임시 봉합, 이건 유입 자체를 막는 정본). FE
+    # (agent-api-key-manager.tsx)도 이미 이 의도(활성 키 있으면 revoke-확認 다이얼로그)로 설계돼
+    # 있었다 — 서버가 그 의도를 원자적으로 강제한다. rotate()와 같은 agent-scoped lock으로
+    # recruit_agent()/rotate와도 직렬화(크로스엔드포인트 레이스 봉인, 기존 컨벤션 재사용).
+    await acquire_agent_mutation_lock(session, agent_id)
+    await repo.revoke_all_active(agent_id)
     key, plaintext = await repo.create(
         team_member_id=agent_id,
         scope=body.scope,
