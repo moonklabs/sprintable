@@ -15,6 +15,7 @@ import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateInboxItem, GateItem, HitlInboxItem } from '@/components/kanban/types';
+import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -355,14 +356,30 @@ export function ApprovalsQueue() {
               </div>
             );
           }
+          // story #2926(P0-F F3, 유나 확定①) — 「밀도는 항목의 액션 무게를 따른다」. 이
+          // 항목(inlineResolvable=false·미해소 — held/무권한/unknown 등 클릭-스루만 가능)은
+          // 경량이라 ProofCapsule density="row"로 셸만 교체한다. 3버튼 인라인 결재 카드·
+          // resolved 카드는 2923(결재함 완전목록 overflow=card로 정식화될 표면)이 다룰
+          // 영역이라 F3 스코프에서 명시적으로 뺐다(선점 금지).
+          //
+          // ⛔정보 축소 고지 — InlineRow는 risk/gate_type 배지·org 컨텍스트를 담을 슬롯이
+          // 없다(row 밀도 자체의 기존 한계, Attention Queue 원안 문서에 이미 "위험도 표시는
+          // row에서 생략 가능"으로 명시돼 있던 것 그대로 — F3이 새로 만든 제약이 아니다).
+          // claim(제목)+state(pending=결재 대기·held=보류중)+age(duration)만 남는다.
           return (
             <button
               key={gate.id}
               type="button"
               onClick={() => router.push(`/gates/${gate.id}`)}
-              className="flex min-h-12 w-full flex-col items-start gap-1 rounded-xl border border-border bg-card px-4 py-3 text-left transition-colors hover:bg-muted/40"
+              className="block w-full text-left"
             >
-              {gateBody}
+              <ProofCapsule
+                density="row"
+                proofState={'amber' as ProofState}
+                stateLabel={held ? t('heldBadge') : t('gateDetailStatusPending')}
+                claim={gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
+                duration={formatAge(gate.created_at, t)}
+              />
             </button>
           );
         }

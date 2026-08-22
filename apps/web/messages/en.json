@@ -3783,6 +3783,7 @@
     "evidenceNonePrompt": "No evidence yet — review by content",
     "gateDetailBackToInbox": "Approvals",
     "gateDetailNotFound": "Gate not found.",
+    "gateDetailStatusPending": "Pending approval",
     "gateDetailResolvedStatus": "Already resolved — status: {status}",
     "gateDetailResolvedByStatus": "Resolved by {name} — status: {status}",
     "queueAgeToday": "Filed today",
