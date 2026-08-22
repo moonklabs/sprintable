@@ -3,7 +3,7 @@
 // organization/settings 등, #1958 "전체" 스텁 목록 그대로)이 전부 회색이었다. getActiveTabKey가
 // #1951 매니페스트 SSOT(상세→parentTab)를 그대로 재사용해 정확히 판정하는지 고정.
 import { describe, expect, it } from 'vitest';
-import { getActiveTabKey, TABS } from './mobile-tab-bar';
+import { getActiveTabKey, TABS, CHAT_FAB_HREF } from './mobile-tab-bar';
 
 describe('getActiveTabKey', () => {
   it('/{ws}/{proj}/flow 및 하위 경로는 now — story #2224, "지금" 탭의 새 목적지', () => {
@@ -77,5 +77,18 @@ describe('TABS — story #2279 회귀가드', () => {
       const pathnameOnly = tab.href.split('?')[0]!;
       expect(getActiveTabKey(pathnameOnly)).toBe(tab.key);
     }
+  });
+
+  // story #2930(P0-G) I2 — 챗은 TABS 밖(FAB로 승격)이라 위 왕복시험 루프가 더 이상 안
+  // 커버한다. 같은 안전망을 CHAT_FAB_HREF 하나에 개별적으로 유지한다(href를 나중에 또
+  // 바꿔도 이 시험이 자동 재검증 — 위 루프와 동일 원칙).
+  it('챗 FAB(TABS 밖)도 같은 왕복 회귀가드를 유지한다 — CHAT_FAB_HREF→getActiveTabKey→"chat"', () => {
+    expect(getActiveTabKey(CHAT_FAB_HREF)).toBe('chat');
+  });
+
+  it('챗이 TABS 배열 자체엔 없다(구역/탭 밖 1급 승격 — flex-1 탭으로 나란히 서지 않는다)', () => {
+    // TABS 자체의 key 유니온엔 이제 'chat'이 없다(그게 이 테스트의 요점) — 런타임 문자열
+    // 비교라 타입 단언만 필요.
+    expect(TABS.find((t) => (t.key as string) === 'chat')).toBeUndefined();
   });
 });

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Search } from 'lucide-react';
+import { Search, MessageSquare } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
@@ -12,7 +12,7 @@ import { ProfileMenu } from '@/components/nav/profile-menu';
 import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import { fetchWithAuth } from '@/lib/db/client';
-import { NAV_GROUPS } from '@/lib/nav-config';
+import { NAV_GROUPS, CHAT_CENTER_ITEM } from '@/lib/nav-config';
 import {
   Sidebar,
   SidebarContent,
@@ -175,11 +175,41 @@ export function AppSidebar({
         </button>
       </SidebarHeader>
 
+      {/* story #2930(P0-G) I2, doc ia-4zone-redesign-2930 — 챗 「center(중심 꽃)」. 4구역
+          «밖» 1급으로 승격(선생님 확定) — NAV_GROUPS 순회에 안 실린다(구역에 묻으면 강등이라는
+          게 이 승격의 요점). 시안 아티팩트(6242dffb .chatc) 그대로: 상시 blue-soft 카드,
+          active/inactive로 톤이 안 바뀐다(항상 눈에 띄어야 하는 1급 자리라 일반 nav 항목의
+          "현재 페이지만 강조" 관례를 안 따름 — 시안에도 active 변형이 없다). */}
+      <div className="mx-2.5 mt-2">
+        <Link
+          href={CHAT_CENTER_ITEM.path}
+          // hover 시 solid fill로 전환하는 톤 자체는 GATE_BUTTON_TONE.primary(proof-capsule.tsx)와
+          // 동형이지만, 그 기존 패턴의 hover:text-white는 다크 모드에서 3.21(AA 4.5 미달·수동
+          // 확認)이라 그대로 베끼지 않고 여기서는 sidebar-primary-foreground(다크=근흑색, 위
+          // 배지와 동일 근거)로 바꿔 통과시킨다.
+          className="flex items-center gap-2 rounded-[9px] border border-proof-blue bg-proof-blue-soft px-2.5 py-2 text-proof-blue transition hover:bg-sidebar-primary hover:text-sidebar-primary-foreground"
+        >
+          <MessageSquare className="size-[18px] shrink-0" />
+          <span className="flex-1 truncate text-[13px] font-bold">{t(CHAT_CENTER_ITEM.labelKey)}</span>
+          {/* text-white 대신 sidebar-primary-foreground(다크에서 근흑색 — 수동 대비 확認,
+              4.61 라이트·4.81 다크는 카드 톤이고 이 자리는 solid pill이라 별도 확認 필요했다:
+              bg-proof-blue+text-white는 다크에서 3.21로 AA 미달. sidebar-primary-foreground는
+              sidebar-primary(=proof-blue)와 짝으로 설계된 토큰이라 이 자리에 맞다). */}
+          {chatUnreadTotal > 0 ? (
+            <span className="shrink-0 rounded-full bg-sidebar-primary px-1.5 py-0.5 text-[9px] font-bold text-sidebar-primary-foreground">
+              {chatUnreadTotal > 99 ? '99+' : chatUnreadTotal}
+            </span>
+          ) : null}
+        </Link>
+      </div>
+
       <SidebarContent>
         {/* story #2681 — 데스크톱 GNB와 모바일 /more 허브(S2)가 한 정의(NAV_GROUPS)에서
             파생된다(doc mobile-ia-full-completion-2678 §2.5-3). 그룹·항목 목록 자체는
             nav-config.ts가 유일한 출처이고, 여기선 오직 순회+렌더만 한다 — 순서·라벨·아이콘·
-            그룹핑은 이 리팩터 전과 동일(시각 회귀 0, AC1). */}
+            그룹핑은 이 리팩터 전과 동일(시각 회귀 0, AC1). story #2930 I1 — 이제 4구역+관리
+            프레임 순서(오늘→워크스페이스→신뢰→지식→조직→설정)로 재편됐다. chats는 위
+            챗 center로 승격돼 이 순회 밖이라 badgeKey는 이제 'inbox' 하나만 실질 도달한다. */}
         {NAV_GROUPS.map((group) => (
           <SidebarGroup key={group.id}>
             {group.labelKey ? <SidebarGroupLabel>{t(group.labelKey)}</SidebarGroupLabel> : null}
@@ -190,9 +220,7 @@ export function AppSidebar({
                     ? { href: item.path, isActive: isActive(item.path) }
                     : resourceLink(item.path);
                   const Icon = item.icon;
-                  const badgeCount = item.badgeKey === 'inbox' ? inboxPendingCount
-                    : item.badgeKey === 'chats' ? chatUnreadTotal
-                    : 0;
+                  const badgeCount = item.badgeKey === 'inbox' ? inboxPendingCount : 0;
                   const badgeCap = item.badgeKey === 'inbox' ? 9 : 99;
                   const label = t(item.labelKey);
                   return (
