@@ -379,9 +379,14 @@ async def test_list_conversations():
         latest_msg_result = MagicMock()
         latest_msg_result.scalar_one_or_none.return_value = mock_msg
 
+        # story #2925: linked_proof 배치 조회(approval_target 참조 0건 → gates 배치조회는
+        # 안 불림 — _batch_resolve_linked_proof가 approval_rows 빈 결과에서 조기 return).
+        approval_rows_result = MagicMock()
+        approval_rows_result.all.return_value = []
+
         session.execute = AsyncMock(side_effect=[
             member_result, conv_ids_result, total_result,
-            convs_result, p_rows_result, unread_result, latest_msg_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
         ])
 
         async with client as c:
