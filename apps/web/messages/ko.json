@@ -3441,6 +3441,8 @@
     "dmSection": "DM",
     "groupSection": "그룹 채팅",
     "newConversation": "새 대화",
+    "collapseRail": "목록 닫기",
+    "expandRail": "목록 열기",
     "noConversations": "대화가 없습니다",
     "startNewConversation": "새 대화를 시작해보세요",
     "selectMembers": "대화 상대 선택",

@@ -3441,6 +3441,8 @@
     "dmSection": "Direct Messages",
     "groupSection": "Group Chats",
     "newConversation": "New Conversation",
+    "collapseRail": "Hide list",
+    "expandRail": "Show list",
     "noConversations": "No conversations yet",
     "startNewConversation": "Start a new conversation",
     "selectMembers": "Select members",
