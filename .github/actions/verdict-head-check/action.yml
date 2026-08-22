@@ -1,0 +1,75 @@
+name: Verdict head check
+description: >
+  qa/design review gate 공용 — 최신 판정 코멘트가 명시한 head SHA가 현재 PR head와
+  일치하는지 확認(fail-closed). story #2676(신설)·#2912(2899 그라운딩 갈래C, 컴포지트
+  액션 추출) 참고.
+
+# story #2912 — qa-review-gate.yml과 design-review-gate.yml이 이 로직(코멘트 fetch·
+# 최신순 정렬·빈값 fail-closed·head추출·비교·에러메시지)을 그대로 복붙하고 있었다
+# (story #2676·#2827 fix가 양쪽에 각각 따로 적용된 이력이 그 증거). 그 중복만 여기로
+# 수렴한다.
+#
+# ⛔header-regex·head-extract-regex는 «파라미터로 유지한다» — 하나로 통일하지 않는다.
+# 이유: qa-review-gate.yml은 "**Head:** `sha`" 고정포맷(카디르 자신의 규율)을 엄격 매치
+# 하지만, design-review-gate.yml은 유나의 실제 리뷰 코멘트 포맷이 그만큼 고정적이지
+# 않음을 실측(design-review-gate.yml 자체 주석: "리뷰 head: `9c8867e9`"·"PASS (head
+# `dd37eecb`)" 둘 다 관찰)해 의도적으로 느슨하게 잡은 것 — 드리프트가 아니라 리뷰어별
+# 실제 관행 차이를 반영한 정책 차이다(2026-08-22, 카디르 재대조+페드루 PO 판정 확定).
+# 여기를 하나의 정규식으로 «통일»하면 design 쪽 실제 리뷰 포맷 다수가 "verdict comment
+# not found"로 새로 fail-closed된다(진짜 회귀) — 다음 사람이 "왜 하나로 안 합쳤냐"고
+# 물으면 이 문단이 답이다.
+
+inputs:
+  label-name:
+    description: 판정 라벨 이름(예 qa:pass·design:pass) — 에러 메시지 표기용.
+    required: true
+  header-regex:
+    description: >
+      최신 판정 코멘트를 찾는 jq test() 패턴(POSIX ERE, comment.body 전체에 매치).
+      소비자마다 다르게 유지 — 위 ⛔주석 참고.
+    required: true
+  head-extract-regex:
+    description: >
+      판정 코멘트 본문에서 head SHA를 뽑는 grep -ioE 패턴(마지막 hex 그룹이 head).
+      소비자마다 다르게 유지 — 위 ⛔주석 참고.
+    required: true
+  gh-token:
+    description: gh api 호출용 토큰.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.gh-token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        LABEL_NAME: ${{ inputs.label-name }}
+        HEADER_REGEX: ${{ inputs.header-regex }}
+        HEAD_EXTRACT_REGEX: ${{ inputs.head-extract-regex }}
+      run: |
+        set -euo pipefail
+        LATEST_VERDICT_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate \
+          --jq --arg re "${HEADER_REGEX}" '.[] | select(.body | test($re)) | [.created_at, .body] | @tsv' \
+          | sort | tail -1 | cut -f2-)"
+        if [ -z "${LATEST_VERDICT_BODY}" ]; then
+          echo "::error title=${LABEL_NAME} verdict comment not found::${LABEL_NAME} 라벨은 있는데 그 근거 판정 코멘트를 못 찾았다(패턴: ${HEADER_REGEX}) — head 대조 불가. fail-closed."
+          exit 1
+        fi
+        VERDICT_HEAD="$(printf '%s' "${LATEST_VERDICT_BODY}" | grep -ioE "${HEAD_EXTRACT_REGEX}" | head -1 | grep -oE '[0-9a-f]{7,40}$')"
+        if [ -z "${VERDICT_HEAD}" ]; then
+          echo "::error title=${LABEL_NAME} verdict head unparsable::가장 최근 ${LABEL_NAME} 판정 코멘트에서 head sha를 못 찾았다(패턴: ${HEAD_EXTRACT_REGEX}) — head 대조 불가. fail-closed."
+          exit 1
+        fi
+        echo "latest ${LABEL_NAME} verdict comment states head: ${VERDICT_HEAD}"
+        echo "current PR head: ${HEAD_SHA}"
+        case "${HEAD_SHA}" in
+          "${VERDICT_HEAD}"*)
+            echo "일치 — 가장 최근 ${LABEL_NAME} verdict가 현재 head를 보고 판정했다."
+            ;;
+          *)
+            echo "::error title=${LABEL_NAME} verdict is for a stale head::가장 최근 ${LABEL_NAME} 판정 코멘트가 명시한 head(${VERDICT_HEAD})가 현재 PR head(${HEAD_SHA})와 다르다 — 그 사이 새 커밋이 끼어들었다(story #2676). 재리뷰 후 ${LABEL_NAME}를 다시 붙일 것."
+            exit 1
+            ;;
+        esac

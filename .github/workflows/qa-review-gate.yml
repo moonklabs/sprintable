@@ -162,36 +162,19 @@ jobs:
       # ⛔이 스텝이 못 잡는 것 — QA verdict 코멘트가 "**Head:** \`sha\`" 포맷을 안 지키면(예:
       # 코멘트 형식을 사람이 바꾸면) fail-closed(모르면 통과가 아니라 실패)로 막긴 하지만,
       # «다른 포맷을 다른 포맷으로 오인식»해 틀린 head를 뽑을 가능성까지는 없앨 수 없다.
+      #
+      # story #2912(2899 그라운딩 갈래C) — design-review-gate.yml이 이 로직을 그대로
+      # 복붙해 갖고 있었다(story #2676·#2827 fix가 양쪽에 각각 적용된 이력이 그 증거) —
+      # 공유 컴포지트 액션(.github/actions/verdict-head-check)으로 수렴. 정규식은 이
+      # 게이트의 기존 엄격 패턴 그대로 전달(디자인 쪽과 다른 이유는 그 액션 자체의 주석
+      # 참고 — 통일 대상 아님, 리뷰어별 실제 코멘트 관행 차이를 반영한 의도적 차이).
       - name: Enforce qa:pass verdict comment's stated head matches current PR head
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          LATEST_VERDICT_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate \
-            --jq '.[] | select(.body | test("^## QA verdict: approved \\(qa:pass\\)")) | [.created_at, .body] | @tsv' \
-            | sort | tail -1 | cut -f2-)"
-          if [ -z "${LATEST_VERDICT_BODY}" ]; then
-            echo "::error title=qa:pass verdict comment not found::qa:pass 라벨은 있는데 그 근거인 '## QA verdict: approved (qa:pass)' 코멘트를 못 찾았다 — head 대조 불가. fail-closed."
-            exit 1
-          fi
-          VERDICT_HEAD="$(printf '%s' "${LATEST_VERDICT_BODY}" | grep -oE '\*\*Head:\*\*[^0-9a-f]*[0-9a-f]{7,40}' | head -1 | grep -oE '[0-9a-f]{7,40}$')"
-          if [ -z "${VERDICT_HEAD}" ]; then
-            echo "::error title=qa:pass verdict head unparsable::가장 최근 QA verdict 코멘트에서 '**Head:** \`<sha>\`' 패턴을 못 찾았다 — head 대조 불가. fail-closed."
-            exit 1
-          fi
-          echo "latest QA verdict comment states head: ${VERDICT_HEAD}"
-          echo "current PR head: ${HEAD_SHA}"
-          case "${HEAD_SHA}" in
-            "${VERDICT_HEAD}"*)
-              echo "일치 — 가장 최근 qa:pass verdict가 현재 head를 보고 판정했다."
-              ;;
-            *)
-              echo "::error title=qa:pass verdict is for a stale head::가장 최근 QA verdict 코멘트가 명시한 head(${VERDICT_HEAD})가 현재 PR head(${HEAD_SHA})와 다르다 — 그 사이 새 커밋이 끼어들었다(story #2676, PR#3088 실사고와 동형). 재리뷰 후 qa:pass를 다시 붙일 것."
-              exit 1
-              ;;
-          esac
+        uses: ./.github/actions/verdict-head-check
+        with:
+          label-name: qa:pass
+          header-regex: '^## QA verdict: approved \(qa:pass\)'
+          head-extract-regex: '\*\*Head:\*\*[^0-9a-f]*[0-9a-f]{7,40}'
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
 
       # story #2676 AC2 — PR#3088 실사고 ③: 최초 qa:pass 승인이 Backend pytest가 아직
       # in_progress이던 도중(job 95074664724, 21:49~21:59) 21:54에 나갔다 — 리뷰 코멘트가
