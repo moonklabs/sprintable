@@ -1526,13 +1526,19 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           // 이 소PR 스코프 밖). 기본축이 trust로 바뀌면서 이 CTA가 신호를 받을 컬럼 자체가
           // 없어 무반응해지는 걸 막기 위해, 클릭 시 클래식 축으로 먼저 전환한다(무한 회귀
           // onboarding 실종보다 «클래식으로 넘어가서 만든다»가 정직한 임시 처방).
+          //
+          // ⚠️QA changes(PR#3378, 카디르+codex, 2026-08-22, HIGH) — handleSetAxisMode를 쓰면
+          // saveAxisMode까지 타 localStorage에 'status'가 **영구 저장**된다(CTA 클릭이 명시적
+          // 사용자 선택이 아닌데도 명시 선택처럼 기록돼, 이 프로젝트가 재마운트해도 다시는
+          // trust로 안 돌아간다 — 플립의 취지 자체를 무효화). 저장 없는 setAxisMode만 써서
+          // 이번 세션 한정 임시 전환으로 좁힌다.
           <div className="shrink-0 border-b border-border/60 px-6 py-4">
             <EmptyState
               icon={<Workflow className="size-8" />}
               title={t('boardEmptyTitle')}
               description={t('boardEmptyDescription')}
               action={
-                <Button size="sm" onClick={() => { handleSetAxisMode('status'); setAutoComposeNonce((n) => n + 1); }}>
+                <Button size="sm" onClick={() => { setAxisMode('status'); setAutoComposeNonce((n) => n + 1); }}>
                   <Plus className="size-3.5" />
                   {t('boardEmptyCta')}
                 </Button>

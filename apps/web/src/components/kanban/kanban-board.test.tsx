@@ -173,6 +173,32 @@ describe('KanbanBoard — 보드 first-touch 절제된 배너', () => {
     expect(container.querySelector('input, textarea')).not.toBeNull();
   });
 
+  // ⚠️QA changes(PR#3378, 카디르+codex, 2026-08-22, HIGH) — CTA 브리지가 handleSetAxisMode를
+  // 쓰면 saveAxisMode까지 타 localStorage에 'status'가 영구 저장돼, CTA를 한 번만 눌러도
+  // 그 프로젝트가 조용히 classic으로 고정된다(재마운트해도 trust로 안 돌아옴 — 기본값
+  // 플립의 취지 자체가 무효화). setAxisMode만 쓰는 세션 한정 전환으로 좁혀 이 저장이
+  // 없는지 직접 증명한다.
+  it('배너 CTA 클릭은 축 전환을 localStorage에 저장하지 않는다 — 재마운트하면 다시 신뢰축 기본값', async () => {
+    stubFetch([]);
+    await mount();
+    const ctaButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('첫 스토리 만들기'));
+    await act(async () => { ctaButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.querySelector('input, textarea')).not.toBeNull(); // 임시 전환 자체는 여전히 동작.
+
+    await act(async () => { root.unmount(); });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    vi.resetModules();
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', trust_stage: 'queued' }]);
+    stubEventSource();
+    await mount();
+    // CTA 클릭이 명시 선택으로 저장됐다면 여기서도 classic(5-status)일 것 — 저장 안 됐으므로
+    // 기본값(trust)으로 복귀해 신뢰축 라벨이 다시 보인다.
+    expect(container.textContent).toContain('입력 필요');
+  });
+
   it('스토리 데이터가 있으면 배너가 렌더되지 않는다(회귀 0)', async () => {
     stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }]);
     await mount();
