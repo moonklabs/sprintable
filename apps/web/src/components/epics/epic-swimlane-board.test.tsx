@@ -117,6 +117,10 @@ type FetchStub = {
   singlePatchOk?: boolean;
   bulkPatchOk?: boolean;
   storiesGetSpy?: () => void;
+  // ⚠️QA changes 6R HIGH②(PR#3377, 카디르+codex, 2026-08-22) — 서버 maxLimit=100 clamp +
+  // hasMore/nextCursor 소진 재현용. 지정하면 `stories` 대신 커서(=페이지 인덱스 문자열)
+  // 기준으로 순차 페이지를 응답한다.
+  storyPages?: Array<{ stories: Array<Record<string, unknown>>; hasMore: boolean }>;
 };
 
 // ⚠️QA changes 4R(PR#3377, 카디르+codex, 2026-08-22) — CI 실행 명령까지 정확 재현해 8+1회
@@ -127,7 +131,7 @@ type FetchStub = {
 // 하는데 항상 bulk 2건만이라 결정론적 환경 차 가능성).
 let callLog: string[] = [];
 
-function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singlePatchSpy, singlePatchOk = true, bulkPatchOk = true, storiesGetSpy }: FetchStub) {
+function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singlePatchSpy, singlePatchOk = true, bulkPatchOk = true, storiesGetSpy, storyPages }: FetchStub) {
   callLog = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
     callLog.push(`${init?.method ?? 'GET'} ${url}`);
@@ -144,6 +148,13 @@ function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singl
     }
     if (typeof url === 'string' && url.startsWith('/api/stories?')) {
       storiesGetSpy?.();
+      if (storyPages) {
+        const cursorParam = new URL(url, 'http://localhost').searchParams.get('cursor');
+        const pageIndex = cursorParam ? Number(cursorParam) : 0;
+        const page = storyPages[pageIndex] ?? { stories: [], hasMore: false };
+        const nextCursor = page.hasMore ? String(pageIndex + 1) : null;
+        return { ok: true, json: async () => ({ data: page.stories, meta: { hasMore: page.hasMore, nextCursor } }) };
+      }
       return { ok: true, json: async () => ({ data: stories }) };
     }
     if (typeof url === 'string' && url.startsWith('/api/goals?')) {
@@ -229,6 +240,38 @@ describe('EpicSwimlaneBoard — 행 구성(story #2931)', () => {
     await act(async () => { toggle!.click(); });
     expect(container.textContent).toContain('에픽4');
     expect(container.textContent).toContain('에픽5');
+  });
+
+  // ⚠️QA changes 6R HIGH①(PR#3377, 카디르+codex, 2026-08-22) — kanban-board의 문서화 불변식
+  // (story #2187/b8157376 — is_excluded=true인 라이브 QA 임시 카드는 삭제 권한이 없는
+  // 화면에서라도 무조건 숨김·토글 없음)을 이 신설 뷰가 상속하지 않았다 — 노출되면 레인
+  // 카운트·상위3 큐레이션이 부풀려진다.
+  it('is_excluded=true인 카드는 무조건 숨는다(kanban-board와 동형 불변식, 토글 없음)', async () => {
+    await mount({
+      epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }],
+      stories: [
+        { id: 's1', title: '정상카드', status: 'backlog', priority: 'medium', epic_id: 'e1' },
+        { id: 's2', title: '임시QA카드', status: 'backlog', priority: 'medium', epic_id: 'e1', is_excluded: true },
+      ],
+    });
+    expect(container.textContent).toContain('정상카드');
+    expect(container.textContent).not.toContain('임시QA카드');
+  });
+
+  // ⚠️QA changes 6R HIGH②(PR#3377, 카디르+codex, 2026-08-22) — /api/stories 프록시는
+  // maxLimit=100으로 clamp한다. 기존 limit=1000 단발 요청은 hasMore/nextCursor를 소비하지
+  // 않아 100건 초과 프로젝트에서 조용히 잘렸다. 2페이지 모킹으로 두 페이지 모두 실제로
+  // 소진되는지(=1페이지에서 멈추지 않는지) 직접 증명한다.
+  it('100건 초과(다중 페이지)여도 hasMore를 소진해 전량을 반영한다(조용한 누락 금지)', async () => {
+    await mount({
+      epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }],
+      storyPages: [
+        { stories: [{ id: 's1', title: '1페이지카드', status: 'backlog', priority: 'medium', epic_id: 'e1' }], hasMore: true },
+        { stories: [{ id: 's2', title: '2페이지카드', status: 'backlog', priority: 'medium', epic_id: 'e1' }], hasMore: false },
+      ],
+    });
+    expect(container.textContent).toContain('1페이지카드');
+    expect(container.textContent).toContain('2페이지카드'); // 두 번째 페이지가 조용히 누락되지 않았음.
   });
 });
 
