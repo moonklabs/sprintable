@@ -844,6 +844,13 @@ async def create_story(
     if story.epic_id is not None:
         story.has_hypothesis_or_goal = True
     await _attach_org_project_slugs(session, org_id, [story])
+    # story #2933 H4(카디르 QA 실결함, PR#3366 2026-08-22 처방) — 이 인라인 생성 경로에
+    # _attach_trust_stage가 빠져 있어 새로 만든 story의 응답이 StoryResponse 기본값
+    # trust_stage=None을 그대로 직렬화했다. FE kanban-board.tsx의 storyTrustColumn은
+    # status!=='done'이면 story.trust_stage를 그대로 컬럼 판별자로 쓰므로(FE 재파생
+    # 폴백 없음, H1/H3 처방과 정합), 이 트랜지언트 속성이 없는 새 story는 신뢰축 뷰의
+    # 어느 컬럼에도 안 잡혀(실종) — get_story/list_stories엔 이미 있던 호출을 여기도 붙인다.
+    await _attach_trust_stage(session, org_id, [story])
     return StoryResponse.model_validate(story)
 
 
@@ -1891,6 +1898,14 @@ async def bulk_update_stories(
     await _attach_has_evidence(db, updated)
     await _attach_has_hypothesis_or_goal(db, updated)
     await _attach_org_project_slugs(db, repo.org_id, updated)
+    # story #2933 H4 qa:changes(카디르+codex, 2026-08-22) — 이 응답이 이제 보드 드래그(교차
+    # 신뢰컬럼)라는 실 소비자를 얻었다. H1 당시엔 "뮤테이션 응답 갱신은 SSE/H2 몫"이라 bulk를
+    # 의도적으로 스코프 밖에 뒀지만, 그 결정은 "소비자 0"을 전제한 것 — 지금은 FE가 이 응답의
+    # trust_stage를 낙관 갱신에 직접 병합해야만 한다(그러지 않으면 status만 바뀌고 trust_stage는
+    # 스프레드로 구값 잔존 → 컬럼 판정이 틀어져 카드가 옛 컬럼에 남거나, done→비done 이동 시
+    # null 유지로 어느 컬럼에도 안 걸려 보드에서 실종). flush 後·commit 前 — 방금 setattr한
+    # 새 status를 그대로 읽어(같은 트랜잭션 내 read-your-writes) 새 trust_stage를 계산한다.
+    await _attach_trust_stage(db, repo.org_id, updated)
 
     # 응답(violation flag 포함) + violation 이벤트 페이로드를 commit 前에 빌드(commit 시 attr expire→
     # MissingGreenlet 방지·기존 results 빌드와 동일 시점). 이벤트 발화는 commit 後(/status 와 동일 순서).
@@ -2291,6 +2306,13 @@ async def update_story(
         (_attach_has_evidence, (db, [story])),
         (_attach_has_hypothesis_or_goal, (db, [story])),
         (_attach_org_project_slugs, (db, repo.org_id, [story])),
+        # story #2933 H4 qa:changes 2R(카디르, 2026-08-22) — bulk_update_stories·update_
+        # story_status는 이미 배선됐으나 이 일반 PATCH(assignee/title 등)만 빠져 있어
+        # 항상 trust_stage:null을 반환하던 API 계약 비일관. FE는 handleTrustDragEnd 경로
+        # 밖(assignee 변경 등)이라 spread-preserve로 버텨 UI 회귀는 없었지만, 이 응답을
+        # 직접 소비하는 다른(미래) 호출자는 값을 잃는다 — {list·create·get·bulk·status·
+        # update} 전 StoryResponse 엔드포인트를 이걸로 완결한다.
+        (_attach_trust_stage, (db, repo.org_id, [story])),
     ):
         try:
             await _attach_fn(*_args)
@@ -2591,6 +2613,10 @@ async def update_story_status(
     # story #2459 prod 회귀(2026-08-05): update_story와 동형 — model_validate 直前 명시
     # refresh로 unloaded 컬럼(예: updated_at) MissingGreenlet 500을 막는다.
     await db.refresh(story)
+    # story #2933 H4 qa:changes — bulk_update_stories와 동일 이유(보드 드래그 실 소비자
+    # 등장). refresh 後에도 transient attr는 보존되지만, 순서를 model_validate 直前으로
+    # 맞춰 그 값이 응답에 확실히 실린다.
+    await _attach_trust_stage(db, repo.org_id, [story])
     resp = StoryResponse.model_validate(story)
     # 정공법 A: 비순차 점프면 응답에 violation flag(차단 없이 가시화·/bulk 와 동일 SSOT).
     resp.violation = build_violation_flag(old_status, story.status)

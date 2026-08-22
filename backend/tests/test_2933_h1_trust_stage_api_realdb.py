@@ -256,3 +256,174 @@ async def test_list_stories_generic_filter_branch_also_exposes_trust_stage():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_create_story_response_includes_trust_stage():
+    """story #2933 H4(카디르 QA 실결함, PR#3366 2026-08-22) — create_story 인라인 경로가
+    _attach_trust_stage를 안 태워 신규 story 응답의 trust_stage가 항상 None이었다(default
+    status='backlog'이므로 정직한 값은 'queued'). FE kanban-board.tsx가 이 필드를 그대로
+    컬럼 판별자로 쓰므로(재파생 폴백 없음), 방금 만든 story가 신뢰축 뷰의 어느 컬럼에도
+    안 잡히는 실종 버그로 이어졌다 — 재발 방지 회귀가드.
+    """
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id, caller_id = await _base_org_project_caller(s)
+        await _setup_app(app, Session, caller_id, org_id)
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                "/api/v2/stories",
+                json={"project_id": str(project_id), "org_id": str(org_id), "title": "새 스토리"},
+            )
+            assert resp.status_code == 201, resp.text
+            body = resp.json()
+            data = body.get("data", body)
+            assert data["status"] == "backlog"
+            assert data["trust_stage"] == "queued", data
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_bulk_update_stories_response_reflects_new_status_trust_stage():
+    """story #2933 H4 qa:changes(카디르+codex, PR#3366 2026-08-22) — 보드 교차 신뢰컬럼
+    드래그가 PATCH /stories/bulk 응답의 trust_stage를 낙관 갱신에 그대로 병합해야 하는데,
+    이 엔드포인트가 H1 당시 _attach_trust_stage 배선에서 빠져 있어(뮤테이션 응답은 스코프
+    밖이라는 결정 — 그땐 소비자가 없었다) 응답이 항상 trust_stage=None이었다. 병합하면
+    오히려 카드가 실종되는 역효과(FE 재파생 폴백 없음 — PO 조건②) — 재발 방지 회귀가드.
+    ready-for-dev('queued') → in-progress로 bulk 전이하면 응답이 'running'을 실어야 한다."""
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id, caller_id = await _base_org_project_caller(s)
+            story = _story(org_id, project_id, "드래그 대상", status="ready-for-dev")
+            s.add(story)
+            await s.commit()
+            story_id = story.id
+        await _setup_app(app, Session, caller_id, org_id)
+        client = _client_for(app)
+        try:
+            resp = await client.patch(
+                "/api/v2/stories/bulk",
+                json={"items": [{"id": str(story_id), "status": "in-progress"}]},
+            )
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            data = body if isinstance(body, list) else body.get("data", body)
+            assert isinstance(data, list) and len(data) == 1
+            assert data[0]["status"] == "in-progress"
+            assert data[0]["trust_stage"] == "running", data[0]
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_bulk_update_stories_done_transition_trust_stage_is_null_not_stale():
+    """카디르+codex 지적 두 번째 케이스 — done으로 옮기는 bulk 전이. trust_stage는 done
+    파이프라인 스코프 밖(§7 확定④)이라 null이 «정직한» 값이다(FE storyTrustColumn이
+    status==='done' 특별취급이라 null이어도 무해). 이 응답이 여전히 None을 실으면(구
+    스코프-밖 상태) FE가 구값을 영구 잔존시킬 위험 자체가 있었다는 것만 별도로 고정."""
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id, caller_id = await _base_org_project_caller(s)
+            story = _story(org_id, project_id, "완료 전이 대상", status="in-review")
+            s.add(story)
+            await s.commit()
+            story_id = story.id
+        await _setup_app(app, Session, caller_id, org_id)
+        client = _client_for(app)
+        try:
+            resp = await client.patch(
+                "/api/v2/stories/bulk",
+                json={"items": [{"id": str(story_id), "status": "done"}]},
+            )
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            data = body if isinstance(body, list) else body.get("data", body)
+            assert data[0]["status"] == "done"
+            assert data[0]["trust_stage"] is None, data[0]
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_update_story_status_response_reflects_new_trust_stage():
+    """PATCH /stories/{id}/status(단건 — 카드별 상태변경 메뉴 등 bulk를 안 타는 경로)도
+    bulk와 동일 이유로 _attach_trust_stage 배선. in-review('claimed_done') →
+    in-progress('running')로 단건 전이하면 응답이 'running'을 실어야 한다."""
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id, caller_id = await _base_org_project_caller(s)
+            story = _story(org_id, project_id, "단건 전이 대상", status="in-review")
+            s.add(story)
+            await s.commit()
+            story_id = story.id
+        await _setup_app(app, Session, caller_id, org_id)
+        client = _client_for(app)
+        try:
+            resp = await client.patch(
+                f"/api/v2/stories/{story_id}/status",
+                json={"status": "in-progress"},
+            )
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            data = body.get("data", body)
+            assert data["status"] == "in-progress"
+            assert data["trust_stage"] == "running", data
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_update_story_response_includes_trust_stage():
+    """PATCH /stories/{id}(일반 — assignee/title 등, status 필드 자체가 없다)도 카디르 QA
+    2R(PR#3366, 2026-08-22)로 배선. 이 엔드포인트는 status를 안 바꾸므로 trust_stage가
+    바뀌진 않지만, 응답 자체가 항상 None이던 API 계약 비일관을 닫는다 — {list·create·get·
+    bulk·status·update} 전 StoryResponse 엔드포인트가 이걸로 완결(codex 분류표 마지막 칸)."""
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id, caller_id = await _base_org_project_caller(s)
+            story = _story(org_id, project_id, "제목만 바꿀 대상", status="ready-for-dev")
+            s.add(story)
+            await s.commit()
+            story_id = story.id
+        await _setup_app(app, Session, caller_id, org_id)
+        client = _client_for(app)
+        try:
+            resp = await client.patch(
+                f"/api/v2/stories/{story_id}",
+                json={"title": "제목 변경됨"},
+            )
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            data = body.get("data", body)
+            assert data["title"] == "제목 변경됨"
+            assert data["status"] == "ready-for-dev"  # 이 엔드포인트는 status를 안 건드림.
+            assert data["trust_stage"] == "queued", data
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
