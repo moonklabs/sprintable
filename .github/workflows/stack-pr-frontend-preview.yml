@@ -1,0 +1,152 @@
+name: Frontend preview (stack PR)
+
+# story #2929([CI] 스택 PR(중간 feat/* base) 풀 CI 미트리거 — branches 필터 保완,
+# 2893-G8 분리) — ci.yml의 `pull_request.branches: [main, develop]` 필터 때문에 base가
+# develop/main이 아닌 스택 PR(예: W4→W5→W6처럼 PR이 이전 미머지 feat/* 브랜치를 base로
+# 잡는 경우)은 풀 CI(Lint/Type/Test/Build+Contrast guard)가 원천 미트리거였다 — smoke
+# (docker-smoke-test.yml, paths 필터라 base 무관하게 돎)만 돌아 실제 lint/type/test/build
+# 신호 없이 스택이 쌓였다. 오늘(2026-08-22) W4·W5·W6가 이 갭을 실물로 맞았고, 로컬
+# vitest/tsc/eslint+codex 교차로 대체 완주했다.
+#
+# 처방(후보① 채택, 카디르 권고·PO 승인) — branches 필터를 걷어 스택 PR도 CI 신호를 받게
+# 하되, «스택-base 초록 ≠ develop 합류 검증» 원칙(2026-08-22 유나·PO 합의)을 지킨다:
+#
+#   ① 이 워크플로는 ci.yml과 **완전히 분리된 별도 파일**이다 — ci.yml의 `ci` job(required
+#      check "Lint, Type Check, Test, Build")을 reusable workflow(`workflow_call`)로
+#      리팩터해 재사용하지 «않았다». reusable workflow 호출은 GitHub 쪽 체크 이름 렌더링을
+#      `<caller job id> / <inner job name>` 형태로 바꾸는데, ci.yml 자신의 주석(alembic-
+#      fresh-db job)이 이미 경고하는 바로 그 landmine — "이 job 이름은 develop 필수 상태
+#      체크 문자열이라 바꾸지 않았다, 바꿨으면 branch protection이 이름 매칭 실패로 조용히
+#      안 걸렸을 것"과 동일 클래스 사고를, required 체크 자체에 낼 위험을 감수하느니 스텝
+#      목록을 그대로 복제하는 쪽을 택했다(이 파일이 develop/main 필수 체크에 전혀 관여하지
+#      않는다는 것을 트리거 자체(`branches-ignore`)로 구조적으로 보장하는 편이 더 안전).
+#      과거 이 리포도 postgres `services:` 블록 등 YAML 스텝-목록 중복을 다른 곳(alembic-
+#      fresh-db·backend-test-destructive·backend-test·main-alembic-preflight·
+#      contrast-guard-e2e)에서 이미 허용해 온 스타일과 같은 결이다(실행 로직 자체는 각
+#      `pnpm --filter web verify:*` 스크립트에 이미 DRY돼 있어, 여기서 늘어나는 것은
+#      «오케스트레이션 스텝 목록»뿐 — 스크립트 신규 추가 시 양쪽에 반영 필요, 리뷰에서 확인).
+#   ② required 체크가 아니다(branch protection은 develop/main 대상 PR에만 걸리고, 이
+#      워크플로는 `branches-ignore: [main, develop]`라 그 PR들에는 아예 나타나지 않는다 —
+#      "미실행=스킵=통과로 세어질 위험"이 원천적으로 없다, ci.yml의 다른 job들이 job-레벨
+#      `if:`로 required 체크 자체를 스킵하지 않는 것과 같은 원칙을 다른 방식(트리거 분리)
+#      으로 지킨다).
+#   ③ job 이름에 "stack preview — not develop-merge verification"을 명시해, 이 체크가
+#      develop 합류를 보증하지 않는다는 것을 실행 로그/PR 체크 목록에서 바로 읽히게 한다.
+#   ④ 비용 제어(스토리 §후보① "paths/조건") — 무거운 백엔드 DB 클러스터(alembic-fresh-db·
+#      backend-test-destructive 4-way·backend-test·contrast-guard-e2e, 각 20~25분)는
+#      **의도적으로 이관하지 않는다**. 그 잡들이 재는 것("이 변경이 develop의 실제 마이그
+#      레이션 head/DB 상태에 깨끗이 얹히는가")은 스택 중간 지점에서는 애초에 구조적으로
+#      의미가 없다(develop head가 스택 완주 전에도 계속 움직인다 — 진짜 검증 지점은 최종
+#      재타겟 시점, 오늘 실제로 그렇게 운영해 통과했다). 이 워크플로는 백엔드 DB와 무관한
+#      `ci` job(Lint/Type/Test/Build — TS/lint/vitest/next build, develop 상태에 안 걸림)
+#      **하나만** 복제한다 — 스토리가 named한 갭 중 가장 저비용·최고가치인 축.
+#
+# ⛔이 워크플로가 못 잡는 것: 백엔드 Python 변경(lint/type/pytest/alembic) 전부, Contrast
+# guard(axe e2e, story #2590 B) — 둘 다 최종 develop 재타겟 시점의 required 체크가 여전히
+# 유일한 검증처다. 이 워크플로 하나로 "스택 PR도 이제 다 검증된다"로 읽으면 안 된다.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+    branches-ignore: [main, develop]
+
+concurrency:
+  group: stack-pr-frontend-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-preview:
+    name: "Lint, Type Check, Test, Build (stack preview — not develop-merge verification)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Type Check
+        run: pnpm type-check
+
+      - name: "Verify no new md: breakpoint (story #1957 regression guard)"
+        run: pnpm --filter web verify:no-new-md-breakpoint
+
+      - name: "Verify no alpha on focus ring (story #2057 regression guard)"
+        run: pnpm --filter web verify:no-alpha-focus-ring
+
+      - name: "Verify no text-muted-foreground alpha (story #2611 regression guard)"
+        run: pnpm --filter web verify:no-muted-foreground-alpha
+
+      - name: "Verify no hand-rolled modal without accessibility (story #2061 regression guard)"
+        run: pnpm --filter web verify:no-handrolled-modal
+
+      - name: "Verify no request.url used as URL base (story #1933 regression guard)"
+        run: pnpm --filter web verify:no-request-url-as-base
+
+      - name: "Verify focus-inset coverage on scroll containers (story #2062 regression guard)"
+        run: pnpm --filter web verify:focus-inset-coverage
+
+      - name: "Verify no i18n phrase substring collision (story #2367 regression guard)"
+        run: pnpm --filter web verify:no-i18n-phrase-collision
+
+      - name: "Verify no duplicate sibling i18n keys (story #2395 regression guard)"
+        run: pnpm --filter web verify:no-duplicate-i18n-keys
+
+      - name: "Verify tint background × foreground contrast (story #2420 regression guard)"
+        run: pnpm --filter web verify:tint-foreground-contrast
+
+      - name: "Verify muted-foreground contrast (story #2480 regression guard)"
+        run: pnpm --filter web verify:muted-foreground-contrast
+
+      - name: "Verify no new raw error.message exposure (story #2484 advisory nudge)"
+        run: pnpm --filter web verify:no-raw-error-message
+
+      - name: "Verify no new tint-background × family-color-text usage (story #2420 AC7 regression guard)"
+        run: pnpm --filter web verify:no-new-tint-color-text
+
+      - name: "Verify no new cross-element tint × family-color-text (story #2590 A regression guard)"
+        run: pnpm --filter web verify:cross-element-tint-text
+
+      - name: "Verify i18n translation keys (story #2371 regression guard)"
+        run: pnpm verify:i18n-keys
+
+      - name: "Verify no orphan resource routes (story #2376 regression guard)"
+        run: pnpm --filter web verify:no-orphan-resource-routes
+
+      - name: "Verify RESERVED_FIRST_SEGMENTS sync (story #2393 regression guard)"
+        run: pnpm --filter web verify:reserved-first-segments-sync
+
+      - name: "Verify MIGRATED_RESOURCES sync (story #1971 regression guard)"
+        run: pnpm --filter web verify:migrated-resources-sync
+
+      - name: "Verify no new raw fetch('/api/*') (story #2691 regression guard)"
+        run: pnpm --filter web verify:no-new-raw-fetch-api
+
+      - name: Test
+        run: |
+          set -o pipefail
+          pnpm vitest run 2>&1 | tail -80
+
+      - name: Build
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+          LICENSE_CONSENT: agreed
+
+      - name: Verify build schema integrity (story d3dd358b regression guard)
+        run: pnpm --filter web verify:build-schema-integrity
