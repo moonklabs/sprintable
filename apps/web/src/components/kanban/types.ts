@@ -274,6 +274,37 @@ export const COLUMNS = [
 
 export type ColumnId = (typeof COLUMNS)[number]['id'];
 
+// story #2933 H4(P0-H) — 6단계 신뢰축+완료 7컬럼(doc/아티팩트 e65f1016 v4, SSOT=backend
+// trust_pipeline.py derive_trust_stage). settable(드래그 가능) 4개=queued/running/
+// claimed_done/done — status에서 직접 나온다. 파생(드래그 불가) 3개=needs_input/verified/
+// merge_ready — 게이트/증거 사실(has_pending_human_gate·human_verified·blocker·verify_fail)
+// 이 계산, 드래그로 못 만들고 못 뺀다(게이트 해소가 유일한 이탈 경로). done은 파이프라인
+// 밖(derive_trust_stage=None)이지만 제품제약("완료물은 기본 뷰에 보인다")상 7번째 컬럼으로
+// 같은 보드에 둔다(별도 대시보드 신설 아님 — 계승조각 ⓐ 6레인 기각과 정합, 이건 6레인이
+// 아니라 6+1).
+export const TRUST_COLUMNS = [
+  { id: 'queued', i18nKey: 'trustQueued', locked: false },
+  { id: 'running', i18nKey: 'trustRunning', locked: false },
+  { id: 'needs_input', i18nKey: 'trustNeedsInput', locked: true },
+  { id: 'claimed_done', i18nKey: 'trustClaimedDone', locked: false },
+  { id: 'verified', i18nKey: 'trustVerified', locked: true },
+  { id: 'merge_ready', i18nKey: 'trustMergeReady', locked: true },
+  { id: 'done', i18nKey: 'trustDone', locked: false },
+] as const;
+
+export type TrustColumnId = (typeof TRUST_COLUMNS)[number]['id'];
+
+// story #2933 H4 — settable 트러스트 컬럼 드롭 시 set할 status(v4 §C 매핑표 그대로). PO
+// 확定④: queued는 backlog+ready-for-dev를 흡수하지만 드롭(다른 컬럼→queued로 이동)은 항상
+// ready-for-dev로 승격 — backlog 강등은 이 보드에서 안 하고(5-status 클래식 뷰/카드 메뉴 몫).
+// 파생 3개는 여기 없다 — resolveTrustColumnId가 그 컬럼으로의 드롭 자체를 절대 허용하지 않는다.
+export const TRUST_COLUMN_TO_STATUS: Partial<Record<TrustColumnId, string>> = {
+  queued: 'ready-for-dev',
+  running: 'in-progress',
+  claimed_done: 'in-review',
+  done: 'done',
+};
+
 // story #2133: assignee_id(단일)/assignee_ids(배열) 이중표현이 생산처마다 손으로
 // 맞춰지다 하루 2회(#2384·#2130) 동일 클래스로 어긋났다. assignee_ids를 단일 SSOT로 두고
 // assignee_id는 항상 그 파생값으로만 존재하게 해 "한쪽만 갱신" 자체를 불가능하게 만든다.

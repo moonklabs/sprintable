@@ -591,3 +591,93 @@ describe('KanbanBoard — is_excluded 카드 숨김(story #2187)', () => {
     expect(container.textContent).not.toContain('숨김');
   });
 });
+
+// story #2933 H4(P0-H, v4 아티팩트 e65f1016) — 6단계 신뢰축+완료 7컬럼 뷰. SSOT=story.trust_stage
+// (H1) — FE 재계산 0. 판별: queued가 backlog+ready-for-dev를 흡수·done은 status==='done' 별도
+// 대조로 파이프라인 밖 7번째 컬럼·파생 3컬럼(needs_input/verified/merge_ready)은 카드가
+// 드래그 wiring 자체를 잃는다(locked → useSortable disabled → aria-roledescription 미부착).
+describe('KanbanBoard — 6단계 신뢰축 뷰(story #2933 H4)', () => {
+  async function toggleToTrustAxis() {
+    const btn = [...container.querySelectorAll('button')].find((b) => b.textContent === '6단계 신뢰축 + 완료');
+    expect(btn, '신뢰축 토글 버튼을 못 찾음').toBeDefined();
+    await act(async () => { btn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+  }
+
+  it('기본은 5-status 클래식 뷰 — 신뢰축 컬럼 라벨이 안 보인다', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', trust_stage: 'queued' }]);
+    await mount();
+    expect(container.textContent).not.toContain('입력 필요');
+    expect(container.textContent).not.toContain('머지 준비');
+  });
+
+  it('토글 클릭 시 7컬럼(대기/실행 중/입력 필요/주장 완료/검증·잔존/머지 준비/완료) 전부 렌더된다', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', trust_stage: 'queued' }]);
+    await mount();
+    await toggleToTrustAxis();
+    for (const label of ['대기', '실행 중', '입력 필요', '주장 완료', '검증·잔존', '머지 준비', '완료']) {
+      expect(container.textContent, `"${label}" 컬럼 라벨 부재`).toContain(label);
+    }
+  });
+
+  it('queued가 backlog+ready-for-dev를 흡수한다 — 서로 다른 status의 두 카드가 같은 "대기" 컬럼에 함께 뜬다', async () => {
+    stubFetch([
+      { id: 's-backlog', title: '백로그카드', status: 'backlog', priority: 'medium', trust_stage: 'queued' },
+      { id: 's-ready', title: '개발대기카드', status: 'ready-for-dev', priority: 'medium', trust_stage: 'queued' },
+    ]);
+    await mount();
+    await toggleToTrustAxis();
+    expect(container.textContent).toContain('백로그카드');
+    expect(container.textContent).toContain('개발대기카드');
+  });
+
+  it('trust_stage="needs_input" 카드는 "입력 필요" 컬럼에 뜨고 드래그 wiring이 없다(locked)', async () => {
+    stubFetch([
+      { id: 's-locked', title: '잠긴카드', status: 'in-progress', priority: 'medium', trust_stage: 'needs_input' },
+    ]);
+    await mount();
+    await toggleToTrustAxis();
+    expect(container.textContent).toContain('잠긴카드');
+    // locked 카드는 aria-roledescription="sortable"이 안 붙는다(useSortable disabled).
+    const sortableCards = Array.from(container.querySelectorAll('[aria-roledescription="sortable"]'));
+    const lockedCardIsSortable = sortableCards.some((el) => el.textContent?.includes('잠긴카드'));
+    expect(lockedCardIsSortable).toBe(false);
+  });
+
+  it('trust_stage=null이어도 status="in-progress"(running, settable)면 정상적으로 드래그 wiring이 붙는다', async () => {
+    stubFetch([
+      { id: 's-running', title: '실행중카드', status: 'in-progress', priority: 'medium', trust_stage: 'running' },
+    ]);
+    await mount();
+    await toggleToTrustAxis();
+    const sortableCards = Array.from(container.querySelectorAll('[aria-roledescription="sortable"]'));
+    const runningCardIsSortable = sortableCards.some((el) => el.textContent?.includes('실행중카드'));
+    expect(runningCardIsSortable).toBe(true);
+  });
+
+  it('status="done"(trust_stage=null·파이프라인 밖)이면 "완료" 컬럼에 뜬다', async () => {
+    stubFetch([
+      { id: 's-done', title: '완료카드', status: 'done', priority: 'medium', trust_stage: null },
+    ]);
+    await mount();
+    await toggleToTrustAxis();
+    expect(container.textContent).toContain('완료카드');
+  });
+
+  it('축 선택이 localStorage에 저장되고 재마운트 후에도 유지된다', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', trust_stage: 'queued' }]);
+    await mount();
+    await toggleToTrustAxis();
+    expect(container.textContent).toContain('입력 필요');
+
+    await act(async () => { root.unmount(); });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    vi.resetModules();
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', trust_stage: 'queued' }]);
+    stubEventSource();
+    await mount();
+    expect(container.textContent).toContain('입력 필요'); // 재마운트 후에도 신뢰축 뷰 유지
+  });
+});

@@ -104,9 +104,15 @@ interface StoryCardProps {
   /** E-VERIFY P0-04 — story.human_verified_by(UUID)를 호출부가 미리 resolve해 넘긴 것(assignee/
    * assignees와 동일 패턴). 결재자가 현재 담당자가 아닐 수 있어(assigneeList와 별개 조회). */
   verifiedBy?: KanbanMember;
+  /** story #2933 H4(P0-H) — 트러스트축 파생 컬럼(needs_input/verified/merge_ready)의 카드는
+   * 게이트/증거 사실이 소속을 계산한다(v4 결정⑤ — 빼는 길=게이트 해소뿐). true면 드래그 wiring
+   * 자체를 끄고(useSortable disabled, dnd-kit 리스너 미부착 — goals-client.tsx/retro page.tsx의
+   * `disabled: !sortable`류 기존 관례 재사용) "상태 변경" 우클릭 메뉴도 숨긴다(수동 상태변경도
+   * 이 카드엔 안 맞음 — 게이트가 정하므로). 클릭(상세 열기)은 그대로 살아있다. */
+  locked?: boolean;
 }
 
-export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [], lineStatus, verifiedBy }: StoryCardProps) {
+export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [], lineStatus, verifiedBy, locked = false }: StoryCardProps) {
   const t = useTranslations('board');
   // E-BOARD S6: 복수 assignee. assignees 우선, 없으면 단일 assignee 폴백. agent 한 명이라도 있으면 agent 취급(glow).
   const assigneeList = (assignees && assignees.length > 0) ? assignees : (assignee ? [assignee] : []);
@@ -164,6 +170,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: story.id,
     data: { story },
+    disabled: locked,
   });
 
   const style = {
@@ -289,8 +296,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     <div
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
+      {...(locked ? {} : attributes)}
+      {...(locked ? {} : listeners)}
       onClick={onClick}
       onContextMenu={handleContextMenu}
       title={story.story_number ? `#${story.story_number}` : story.title}
@@ -452,7 +459,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
               {t('editStory')}
             </button>
           )}
-          {onChangeStatus && (
+          {onChangeStatus && !locked && (
             <div className="relative">
               <button
                 ref={statusTriggerRef}
