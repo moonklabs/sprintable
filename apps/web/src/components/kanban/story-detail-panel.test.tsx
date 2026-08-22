@@ -224,6 +224,50 @@ describe('StoryDetailPanel — Workcell pipelineStage = story.trust_stage 직결
   });
 });
 
+// story #2933 H3(P0-H 정직성 감사, PO 부수기록ⓐ) — P0-04 in-flight 칩(trustChip, 제목 옆
+// "입력 필요"/"병합 대기" 배지)도 구 gate-목록 재파생(deriveInFlightTrustChip, 폐기됨)이 아니라
+// pipelineStage(=story.trust_stage, H1) 하나로 수렴했는지 고정. gate fetch 응답과 무관해야
+// 한다(H1의 스테퍼 테스트와 동일 취지) — chipGates는 fetch 실패(stubFetch)로 항상 빈 배열.
+describe('StoryDetailPanel — trustChip도 story.trust_stage로 수렴(story #2933 H3)', () => {
+  const HUMAN_ID = 'human-1';
+  const memberMap = { [HUMAN_ID]: { id: HUMAN_ID, name: '책임자', type: 'human' } };
+
+  async function mountWithTrustStage(trustStage: KanbanStory['trust_stage']) {
+    stubFetch();
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel
+          story={makeStory({ status: 'in-progress', assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID], trust_stage: trustStage })}
+          tasks={[]} onClose={() => {}} memberMap={memberMap}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('trust_stage="needs_input" → "입력 필요" 칩(gate fetch는 항상 실패 응답 — 무관하게 뜬다)', async () => {
+    await mountWithTrustStage('needs_input');
+    expect(container.textContent).toContain('입력 필요');
+  });
+
+  it('trust_stage="merge_ready" → "병합 대기" 칩', async () => {
+    await mountWithTrustStage('merge_ready');
+    expect(container.textContent).toContain('병합 대기');
+  });
+
+  it('trust_stage="running"(needs_input/merge_ready 둘 다 아님) → 칩 자체가 안 뜬다', async () => {
+    await mountWithTrustStage('running');
+    expect(container.textContent).not.toContain('입력 필요');
+    expect(container.textContent).not.toContain('병합 대기');
+  });
+
+  it('trust_stage=null(done 등) → 칩 미표시(TrustSeal과 동어반복 금지, 구 deriveInFlightTrustChip의 done 강제와 결과 동일)', async () => {
+    await mountWithTrustStage(null);
+    expect(container.textContent).not.toContain('입력 필요');
+    expect(container.textContent).not.toContain('병합 대기');
+  });
+});
+
 // story #2933 H2(P0-H) — Workcell 스테퍼가 `story.trust_stage_changed` SSE를 라이브 갱신
 // 트리거로 쓰는지(AttentionQueueView, story #2923와 동형 패턴). SSE payload 자체는 신뢰의
 // 소스가 아니다(트리거일 뿐) — REST 재조회(GET /api/stories/{id})의 값만 반영한다(PO 조건②
