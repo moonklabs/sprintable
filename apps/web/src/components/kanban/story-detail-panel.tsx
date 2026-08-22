@@ -26,6 +26,7 @@ import { EvidenceSection } from '@/components/verify/evidence-section';
 import { ChatProofSection, parseStoryProofReferences } from '@/components/verify/chat-proof-section';
 import { deriveInFlightTrustChip, pickRelevantMergeGate } from '@/services/verify';
 import { Workcell, type WorkcellMessage, type WorkcellPipelineStage } from '@/components/workcell/workcell';
+import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
 import type { TrustSealClaimedProps, TrustSealVerifiedProps } from '@/components/verify/trust-seal';
 import { initials, formatDate } from '@/lib/storage/format';
@@ -360,6 +361,67 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [savingTitle, setSavingTitle] = useState(false);
   const [savingStatus, setSavingStatus] = useState(false);
   const [localStatus, setLocalStatus] = useState(story.status);
+
+  // story #2933 H2(P0-H) — Workcell 스테퍼(pipelineStage, H1이 story.trust_stage 직결로 배선)를
+  // `story.trust_stage_changed` SSE로 라이브 갱신한다. AttentionQueueView(story #2923)와 동형
+  // 패턴 — SSE payload를 신뢰의 소스로 안 쓰고(트리거로만) 실제 값은 항상 REST 재조회로 얻는다
+  // (진실은 서버). undefined=아직 SSE 오버라이드 없음(story prop의 trust_stage 그대로 씀).
+  const [ssePipelineStage, setSsePipelineStage] = useState<WorkcellPipelineStage | null | undefined>(undefined);
+  const sseDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // PO 리뷰 MEDIUM(PR#3363, 2026-08-22) — story.id 변경 시 「대기 중 타이머」는 지워져도
+  // 「이미 발화해 in-flight인 fetch」는 못 막는다. 늦게 도착한 응답이 새 story 패널에 옛
+  // story의 stage를 override로 붙이는 레이스였다 — 해소 시점에 「fetch를 쏜 id == 지금 보고
+  // 있는 id」를 대조해야 진짜로 막힌다(리셋만으론 pre-fetch 케이스만 덮고 in-flight는 못 덮음).
+  const currentStoryIdRef = useRef(story.id);
+  // PO 리뷰 확장(PR#3363 codex 교차모델, 2026-08-22) — 위 currentStoryIdRef 가드는 "다른
+  // story로 전환"만 막는다. 같은 story에 연속 발화한 두 SSE 이벤트(E1 debounce 만료→fetchA
+  // in-flight 상태에서 E2 도착→fetchB 발사)의 응답이 네트워크에서 역순 도착하면(B 먼저,
+  // A 나중) — 둘 다 firedForId가 같아 위 가드를 통과하고, 나중에 도착한(=먼저 쏜, 더 옛
+  // stage인) A가 이미 반영된 B(더 신선한 stage)를 덮어써 부당 회귀한다(다음 SSE 없으면
+  // 자체 회복 안 됨). 처방: AbortController로 in-flight 자체를 최대 1개로 강제 — 새 fetch를
+  // 쏘기 직전 이전 컨트롤러를 abort하면 오래된 fetch는 AbortError로 죽어 절대 응답을
+  // 반영하지 못한다(순서 문제가 "가장 최근 것만 살아있다"는 불변식으로 구조적 소멸).
+  const fetchAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    currentStoryIdRef.current = story.id;
+    setSsePipelineStage(undefined);
+    return () => {
+      if (sseDebounceRef.current) clearTimeout(sseDebounceRef.current);
+      fetchAbortRef.current?.abort();
+    };
+  }, [story.id]);
+
+  const handleTrustStageChanged = useCallback((_eventName: string, data: unknown) => {
+    if (typeof data !== 'object' || data === null) return;
+    if ((data as Record<string, unknown>)['story_id'] !== story.id) return;
+    const firedForId = story.id; // 클로저 캡처 — 이 콜백은 story.id별로 useCallback 재생성됨.
+    if (sseDebounceRef.current) clearTimeout(sseDebounceRef.current);
+    sseDebounceRef.current = setTimeout(() => {
+      sseDebounceRef.current = null;
+      // 이전 in-flight fetch를 abort — 동시 in-flight 0건 불변식(위 주석). 새 컨트롤러로 교체.
+      fetchAbortRef.current?.abort();
+      const controller = new AbortController();
+      fetchAbortRef.current = controller;
+      // story #2933 H2(PO 조건②) — 재파생 폴백 없음: SSE payload의 new_stage를 바로 안 쓰고
+      // (그 값은 트리거일 뿐), get_story(H1이 trust_stage 배선한 그 엔드포인트)를 다시 불러
+      // BE 판정값을 그대로 반영한다. 실패하면 조용히 무시(기존 표시값 유지 — 재파생 0).
+      fetchWithAuth(`/api/stories/${firedForId}`, { signal: controller.signal })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((json) => {
+          // 레이스 가드 — fetch를 쏜 뒤 다른 story로 전환됐으면(currentStoryIdRef가 그새
+          // 바뀜) 늦게 도착한 이 응답은 버린다. 새 story 패널에 옛 값이 새는 것 방지.
+          if (currentStoryIdRef.current !== firedForId) return;
+          const fresh = json?.data as { trust_stage?: WorkcellPipelineStage | null } | undefined;
+          if (fresh && 'trust_stage' in fresh) setSsePipelineStage(fresh.trust_stage ?? null);
+        })
+        .catch(() => { /* 무시(abort 포함) — 기존 표시값 유지, 재파생 안 함 */ });
+    }, 500);
+  }, [story.id]);
+
+  useSseNotifications({
+    extraEventNames: ['story.trust_stage_changed'],
+    onExtraEvent: handleTrustStageChanged,
+  });
 
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState(story.description ?? '');
@@ -762,10 +824,13 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   // 판정은 BE 한 곳(trust_pipeline.derive_trust_stage)에만 존재, FE 재계산 0.
   // PO 조건②(2933) — story prop이 이 필드를 못 채운 응답에서 온 경우(예: handleChangeStatus의
   // `onStoryUpdate?.({ ...story, status: newStatus })` 낙관적 갱신 — status만 덮어쓰고
-  // trust_stage는 스프레드로 이전 값이 그대로 남는다)도 이 한 줄이 "기존값 유지"를 자동으로
-  // 만족한다 — 별도 로컬 state/재파생 폴백을 얹지 않는다. 뮤테이션 직후의 실시간 갱신은
-  // H2(SSE 구독) 몫.
-  const pipelineStage: WorkcellPipelineStage | null = (story.trust_stage as WorkcellPipelineStage | null) ?? null;
+  // trust_stage는 스프레드로 이전 값이 그대로 남는다)도 "기존값 유지"를 자동으로 만족한다 —
+  // 별도 재파생 폴백은 없다. story #2933 H2 — ssePipelineStage(위, `story.trust_stage_changed`
+  // 구독 결과)가 있으면 그걸 우선(더 최신 BE 조회값), 없으면(SSE 미도달·아직 이 story에서
+  // 이벤트 0건) story prop 그대로.
+  const pipelineStage: WorkcellPipelineStage | null = ssePipelineStage !== undefined
+    ? ssePipelineStage
+    : (story.trust_stage as WorkcellPipelineStage | null) ?? null;
   const assigneeIds = story.assignee_ids?.length ? story.assignee_ids : (story.assignee_id ? [story.assignee_id] : []);
   const proofHumanId = assigneeIds.find((id) => memberMap[id] && memberMap[id]!.type !== 'agent');
   const proofAgentId = assigneeIds.find((id) => memberMap[id]?.type === 'agent');
