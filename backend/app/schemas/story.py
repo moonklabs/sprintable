@@ -334,6 +334,21 @@ class StoryResponse(BaseModel):
     def _coerce_human_verified_at(cls, v):
         return v if isinstance(v, datetime) else None
 
+    # story #2933 H1(P0-H) — Trust Pipeline 6단계 판정값(trust_pipeline.derive_trust_stage) 노출.
+    # ORM 컬럼 아님(신규 status 컬럼 0 원칙, doc trust-pipeline-be-design §1 그대로 계승) —
+    # 라우터가 model_validate 前 transient attr로 세팅(has_evidence 패턴 동형). PO 조건②(2933) —
+    # 이 필드가 안 실린 응답(bulk_update/update_story 등 이번 스코프 밖 경로)에서 FE는 재파생
+    # 폴백을 두지 않는다(None="정직한 미상", 기존 표시값 유지가 FE 몫). None이면 done/미지
+    # status(파이프라인 스코프 밖, §7 확定④)이거나 이번 응답 경로가 이 필드를 아예 안 채운
+    # 것 — 두 경우를 이 필드 하나로는 구분 못 한다(정직한 한계, FE는 "기존값 유지"로 대응).
+    trust_stage: str | None = None
+
+    @field_validator("trust_stage", mode="before")
+    @classmethod
+    def _coerce_trust_stage(cls, v):
+        from app.services.trust_pipeline import TRUST_STAGES
+        return v if v in TRUST_STAGES else None
+
     # story #2642(웹·칩 공통, 2026-08-14) — 엔티티 «전체 보기» 착지가 뷰어의 현재 프로젝트로
     # 새는 버그 fix: FE가 뷰어 컨텍스트 대신 이 스토리 자신의 org/project로 직행 URL을 짓게
     # additive로 싣는다(#2168 DocPreviewResponse와 동일 패턴). org_slug는 항상 있음(Organization.

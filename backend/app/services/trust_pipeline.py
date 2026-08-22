@@ -169,35 +169,52 @@ async def batch_scope_violation(
     return set(result.scalars().all())
 
 
+async def batch_trust_facts(
+    session: AsyncSession, org_id: uuid.UUID, story_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, TrustFacts]:
+    """N개 story의 현재 trust facts를 실시간 파생(신규 쓰기 0 — 순수 조회, 고정 6쿼리 — story
+    수와 무관). story #2933 H1 — `GET /stories`(보드 주경로, 최대 limit=2000)에 story별 루프로
+    `compute_trust_facts`를 태우면 N×6 쿼리가 되는 것을 막는다. 존재하지 않거나(soft-delete
+    포함) org가 다른 story_id는 반환 dict에서 조용히 빠진다(그 자리는 呼출부가 None 취급)."""
+    if not story_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(Story.id, Story.status, Story.project_id).where(
+                Story.id.in_(story_ids), Story.org_id == org_id, Story.deleted_at.is_(None)
+            )
+        )
+    ).all()
+    if not rows:
+        return {}
+    found_ids = [row[0] for row in rows]
+    verified_map = await batch_human_verified(session, found_ids, "story")
+    pending_gate_ids = await batch_pending_human_gate(session, org_id, found_ids)
+    verify_fail_ids = await batch_verify_fail(session, org_id, found_ids)
+    blocker_ids = await batch_unresolved_blocker(session, org_id, found_ids)
+    scope_violation_ids = await batch_scope_violation(session, org_id, found_ids)
+    return {
+        story_id: TrustFacts(
+            status=status,
+            project_id=project_id,
+            human_verified=story_id in verified_map,
+            has_pending_human_gate=story_id in pending_gate_ids,
+            has_verify_fail=story_id in verify_fail_ids,
+            has_unresolved_blocker=story_id in blocker_ids,
+            has_scope_violation=story_id in scope_violation_ids,
+        )
+        for story_id, status, project_id in rows
+    }
+
+
 async def compute_trust_facts(
     session: AsyncSession, org_id: uuid.UUID, story_id: uuid.UUID
 ) -> TrustFacts | None:
-    """1개 story의 현재 trust facts를 실시간 파생(신규 쓰기 0 — 순수 조회). story 없으면 None."""
-    row = (
-        await session.execute(
-            select(Story.status, Story.project_id).where(
-                Story.id == story_id, Story.org_id == org_id, Story.deleted_at.is_(None)
-            )
-        )
-    ).first()
-    if row is None:
-        return None
-    status, project_id = row
-    ids = [story_id]
-    verified_map = await batch_human_verified(session, ids, "story")
-    pending_gate_ids = await batch_pending_human_gate(session, org_id, ids)
-    verify_fail_ids = await batch_verify_fail(session, org_id, ids)
-    blocker_ids = await batch_unresolved_blocker(session, org_id, ids)
-    scope_violation_ids = await batch_scope_violation(session, org_id, ids)
-    return TrustFacts(
-        status=status,
-        project_id=project_id,
-        human_verified=story_id in verified_map,
-        has_pending_human_gate=story_id in pending_gate_ids,
-        has_verify_fail=story_id in verify_fail_ids,
-        has_unresolved_blocker=story_id in blocker_ids,
-        has_scope_violation=story_id in scope_violation_ids,
-    )
+    """1개 story의 현재 trust facts. story #2933 H1(PO 조건①) — 판정(derive_trust_stage)뿐 아니라
+    수집(facts) 경로도 단일/배치 갈리지 않게 batch_trust_facts(1건 리스트) 위 얇은 래퍼로 접는다
+    — 두 구현이 갈리면 FE에서 죽인 결함 클래스(#3336 드리프트)를 BE에 다시 심는 꼴이라서."""
+    facts_map = await batch_trust_facts(session, org_id, [story_id])
+    return facts_map.get(story_id)
 
 
 async def _maybe_emit(

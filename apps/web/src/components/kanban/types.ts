@@ -39,6 +39,12 @@ export interface KanbanStory {
   // 지표에서는 뺐으나(#2187 관측) 보드/백로그 화면은 그 플래그를 안 봐 그대로 남아 있었다 —
   // 이 필드로 화면도 존중해 숨긴다(삭제 아닌 숨김, DB엔 남음).
   is_excluded?: boolean;
+  // story #2933 H1(P0-H) — BE trust_pipeline.derive_trust_stage() 판정값(get_story·list_stories
+  // 둘 다 배선). null="done/미지 status(파이프라인 스코프 밖)" 또는 "이 응답 경로가 이 필드를
+  // 아예 안 채움"(bulk_update/update_story 등 H1 스코프 밖) 둘 다일 수 있어 이 필드 하나로는
+  // 구분 못 한다(정직한 한계, story.py trust_stage 필드 주석과 동형) — 소비부는 재파생 폴백을
+  // 두지 않고 "기존값 유지"로 대응한다(story-detail-panel.tsx pipelineStage 참고).
+  trust_stage?: 'queued' | 'running' | 'needs_input' | 'claimed_done' | 'verified' | 'merge_ready' | null;
 }
 
 export interface GateItem {
