@@ -144,3 +144,46 @@ describe('EmbedGroup — gate 그룹(collapsed/expanded + 헤더 라벨 정직�
     expect(container.textContent).toContain('게이트 둘');
   });
 });
+
+// story #2905(#3322 QA 채무, 카디르 지적) — 「open-panel 클릭 왕복이 레포 전체에서 테스트
+// 0건」 처방. embed-group.tsx도 embed-card-open-panel-adapter.ts를 통해 onOpenReadingPanel을
+// 소비한다 — chat-bubble.tsx의 소비처와 별개로 이 경로도 직접 눌러 값으로 확認한다.
+describe('EmbedGroup — story #2905 open-panel 클릭 왕복(회귀가드)', () => {
+  it('간결 리스트 항목 클릭 시 onOpenReadingPanel이 올바른 ReadingPanelTarget으로 호출된다', async () => {
+    const onOpenReadingPanel = vi.fn();
+    await act(async () => {
+      root.render(<EmbedGroup entityType="story" refs={REFS_3} onOpenReadingPanel={onOpenReadingPanel} />);
+    });
+    const itemButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('스토리 하나'));
+    expect(itemButton).toBeTruthy();
+    await act(async () => { itemButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onOpenReadingPanel).toHaveBeenCalledTimes(1);
+    expect(onOpenReadingPanel).toHaveBeenCalledWith({
+      kind: 'entity',
+      entityType: 'story',
+      entityId: 's-1',
+      title: '스토리 하나',
+      status: null,
+      href: '/board?story=s-1',
+    });
+  });
+
+  it('artifact 캐러셀 항목 클릭도 동일하게 onOpenReadingPanel이 호출된다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({}) })));
+    const onOpenReadingPanel = vi.fn();
+    const refs = [{ entityId: 'a-1', label: '목업 하나' }];
+    await act(async () => {
+      root.render(<EmbedGroup entityType="artifact" refs={refs} onOpenReadingPanel={onOpenReadingPanel} />);
+    });
+    const itemButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('목업 하나'));
+    expect(itemButton).toBeTruthy();
+    await act(async () => { itemButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onOpenReadingPanel).toHaveBeenCalledTimes(1);
+    expect(onOpenReadingPanel).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'entity',
+      entityType: 'artifact',
+      entityId: 'a-1',
+      title: '목업 하나',
+    }));
+  });
+});
