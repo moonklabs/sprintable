@@ -332,6 +332,7 @@ async def reopen_gate_if_new_sha(
     *,
     repo_full_name: str,
     pr_number: int,
+    pr_updated_at: datetime | None = None,
 ) -> bool:
     """SHA 귀속(AC②) — 승인된 게이트가 더 이상 최신 커밋과 안 맞으면 pending으로 되돌린다.
     **호출자의 기존 트랜잭션 안에서 동작**(commit 안 함 — verdict_capture.py가 커밋).
@@ -351,12 +352,37 @@ async def reopen_gate_if_new_sha(
     ⛔카디르 R2 CRITICAL(2026-08-19) — `auto_passed`도 `approved`와 동일하게 다룬다. 정책이
     allow_auto로 내린 통과도 "그 SHA에 대한" 승인이라 새 커밋엔 무효 — 자동통과 정책이 새
     증거로 다시 통과시키는 것은 `evaluate_merge_gate`(재평가 시 anchor 재확定)의 몫이지,
-    구 anchor를 새 SHA에 그대로 붙여두는 것의 몫이 아니다."""
+    구 anchor를 새 SHA에 그대로 붙여두는 것의 몫이 아니다.
+
+    pr_updated_at: story #2932(완주조건 HIGH2, 0273, codex+카디르 일치판단) — GitHub가 웹훅
+    배달 순서를 보장하지 않아, 이미 최신 SHA로 승인된 게이트에 **뒤늦게 도착한 옛 배달**이
+    그 옛 SHA와의 불일치만 보고 부당 재-pending시킬 수 있었다("승인은 그때의 커밋에" —
+    story #2893 핵심 보증을 이 클래스가 직접 깬다). `pull_request.updated_at`(GitHub가
+    실 갱신마다 단조증가시킴)을 `gate.pr_head_observed_at`에 워터마크로 남겨, 새 이벤트의
+    `updated_at`이 이미 관측된 값보다 오래되면(<=) SHA 불일치와 무관하게 stale로 skip한다.
+    폴링/GitHub API 재조회 없이(story #2893 §4 C1 원칙과 동형) 페이로드 자체 신호만 쓴다.
+    None이면(payload에 없거나 파싱 실패 등) 검증을 건너뛰고 기존 SHA-diff-only 동작 그대로
+    (새로 나빠지지 않음, 다만 이 방지축을 못 얻을 뿐)."""
     if gate.gate_type != MERGE_GATE_TYPE:
         return False
     if gate.status not in ("approved", "auto_passed"):
         return False
+    if (
+        pr_updated_at is not None
+        and gate.pr_head_observed_at is not None
+        and pr_updated_at <= gate.pr_head_observed_at
+    ):
+        logger.info(
+            "gate=%s: stale/순서역전 웹훅 무시(pr_updated_at=%s <= 이미 관측된 %s) — 재-pending skip",
+            gate.id, pr_updated_at, gate.pr_head_observed_at,
+        )
+        return False
     if gate.approved_head_sha == new_head_sha:
+        if pr_updated_at is not None and (
+            gate.pr_head_observed_at is None or pr_updated_at > gate.pr_head_observed_at
+        ):
+            gate.pr_head_observed_at = pr_updated_at  # SHA는 그대로여도 워터마크는 전진.
+            await session.flush()
         return False
     logger.info(
         "gate=%s: SHA 불일치(approved=%s new=%s) — 재-pending", gate.id, gate.approved_head_sha, new_head_sha
@@ -366,6 +392,8 @@ async def reopen_gate_if_new_sha(
     gate.approved_head_sha = None
     gate.github_check_run_id = None  # 새 SHA는 새 check-run(같은 SHA의 pending→success 갱신 축과 분리).
     gate.github_check_run_sha = None
+    if pr_updated_at is not None:
+        gate.pr_head_observed_at = pr_updated_at
     session.add(GateGithubCheckEvent(
         org_id=org_id, gate_id=gate.id, story_id=gate.work_item_id,
         repo_full_name=repo_full_name, pr_number=pr_number, head_sha=new_head_sha,

@@ -108,6 +108,10 @@ class Gate(Base):
     # 웹훅의 새 head_sha와 다르면 재-pending(approved→pending) 트리거(카디르 QA③-b: reopen 가드를
     # synchronize만이 아니라 네 액션 전부에서 돌림 — 다른 head로 돌아온 재오픈 PR도 잡는다).
     approved_head_sha: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #2932(완주조건 HIGH2, 0273) — GitHub `pull_request.updated_at`(실 PR 갱신마다
+    # 단조증가) 워터마크. reopen_gate_if_new_sha가 이걸로 stale/순서역전 웹훅 배달을
+    # 걸러 이미 최신 SHA로 승인된 게이트를 옛 배달로 부당 재-pending시키지 않는다.
+    pr_head_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

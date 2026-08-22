@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -36,6 +37,46 @@ async def _dispose_global_engine_after_test():
     yield
     from app.core.database import engine as _global_engine
     await _global_engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_repo_unknown_query_does_not_crash_on_cross_repo_multiple_matches():
+    """카디르 QA(story #2932, PR#3359 3라운드, codex 발견) — 이 PR 자신이 도입한 신규
+    회귀. repo를 모르는 조회(report-done류 self-report의 실 경로, workflow_report.py:198
+    `evaluate_merge_gate(pr_number=N, repo="")`)가, 이 PR이 정당하게 허용한 "같은
+    pr_number·다른 repo 2행" 상태를 만나면 repo 필터 없는 단독쿼리가 MultipleResultsFound
+    (500)로 죽었다. repo_full_name=None 조회는 repo도 모르는 행(NULL)만 매치해야
+    구조적으로 모호성이 없다 — 크래시 없이 None(확신 있는 매치 없음)을 받아야 한다."""
+    from app.models.gate import Gate
+    from app.services.gate_service import find_gate_slot_with_pr_fallback
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, _project, story = await _seed_org_project_story(s, with_participation=True)
+            s.add_all([
+                Gate(
+                    id=uuid.uuid4(), org_id=org.id, work_item_id=story.id, work_item_type="story",
+                    gate_type="merge", status="pending", pr_number=99, repo_full_name="acme/repo-a",
+                ),
+                Gate(
+                    id=uuid.uuid4(), org_id=org.id, work_item_id=story.id, work_item_type="story",
+                    gate_type="merge", status="pending", pr_number=99, repo_full_name="acme/repo-b",
+                ),
+            ])
+            await s.commit()
+            story_id, org_id = story.id, org.id
+
+        async with Session() as s:
+            # 크래시 없이(MultipleResultsFound 0) None을 받아야 한다 — repo를 모르므로
+            # repo-a/repo-b 둘 중 어느 것도 "확신 있는 매치"가 아니다.
+            found = await find_gate_slot_with_pr_fallback(
+                s, org_id=org_id, work_item_id=story_id, work_item_type="story",
+                gate_type="merge", pr_number=99, repo_full_name=None,
+            )
+            assert found is None, "repo 모름 + cross-repo 다중매치 = 확신 있는 단일 매치 없음(None)이어야 함"
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.anyio
@@ -369,5 +410,134 @@ async def test_b3_reevaluate_does_not_synthesize_fictitious_repo_pr_tuple():
         finally:
             await client.aclose()
             app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_stale_webhook_does_not_repend_already_approved_gate():
+    """HIGH2 핵심(완주 조건) — 이미 최신 SHA로 승인된 게이트에 뒤늦게 도착한 옛
+    synchronize 배달(pr_updated_at이 이미 관측된 워터마크보다 과거)이 SHA 불일치와
+    무관하게 재-pending을 skip해야 한다. GitHub 웹훅은 순서를 보장하지 않으므로 —
+    story #2893의 핵심 보증("승인은 그때의 커밋에")을 이 클래스가 직접 지킨다."""
+    from app.models.gate import Gate
+    from app.services.gate_github_check import reopen_gate_if_new_sha
+    from app.services.merge_verdict_gate import MERGE_GATE_TYPE
+
+    engine, Session = await _session_factory()
+    try:
+        watermark = datetime(2026, 8, 22, 12, 0, 0, tzinfo=timezone.utc)
+        async with Session() as s:
+            org, _project, story = await _seed_org_project_story(s, with_participation=True)
+            gate = Gate(
+                id=uuid.uuid4(), org_id=org.id, work_item_id=story.id, work_item_type="story",
+                gate_type=MERGE_GATE_TYPE, status="approved", pr_number=42,
+                repo_full_name="acme/repo", approved_head_sha="sha-latest",
+                pr_head_observed_at=watermark,
+            )
+            s.add(gate)
+            await s.commit()
+            gate_id, org_id = gate.id, org.id
+
+        stale_delivery = watermark - timedelta(minutes=5)  # 워터마크보다 과거 배달.
+        async with Session() as s:
+            gate = await s.get(Gate, gate_id)
+            repended = await reopen_gate_if_new_sha(
+                s, org_id, gate, "sha-from-stale-delivery",
+                repo_full_name="acme/repo", pr_number=42, pr_updated_at=stale_delivery,
+            )
+            await s.commit()
+            assert repended is False, "stale 배달은 SHA가 달라도 재-pending을 발생시키면 안 됨"
+
+        async with Session() as s:
+            gate = await s.get(Gate, gate_id)
+            assert gate.status == "approved", "stale 배달 후에도 승인 상태가 유지돼야 함"
+            assert gate.approved_head_sha == "sha-latest", "stale 배달이 최신 승인 SHA를 덮어쓰면 안 됨"
+            assert gate.pr_head_observed_at == watermark, "stale 배달은 워터마크를 되돌리면 안 됨"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_genuinely_newer_webhook_still_repends_correctly():
+    """회귀 방지 — 진짜로 더 최신인 배달(pr_updated_at이 워터마크보다 미래)은 HIGH2
+    가드가 생기기 전과 동일하게 SHA 불일치 시 정상적으로 재-pending해야 한다."""
+    from app.models.gate import Gate
+    from app.services.gate_github_check import reopen_gate_if_new_sha
+    from app.services.merge_verdict_gate import MERGE_GATE_TYPE
+
+    engine, Session = await _session_factory()
+    try:
+        watermark = datetime(2026, 8, 22, 12, 0, 0, tzinfo=timezone.utc)
+        async with Session() as s:
+            org, _project, story = await _seed_org_project_story(s, with_participation=True)
+            gate = Gate(
+                id=uuid.uuid4(), org_id=org.id, work_item_id=story.id, work_item_type="story",
+                gate_type=MERGE_GATE_TYPE, status="approved", pr_number=42,
+                repo_full_name="acme/repo", approved_head_sha="sha-old",
+                pr_head_observed_at=watermark,
+            )
+            s.add(gate)
+            await s.commit()
+            gate_id, org_id = gate.id, org.id
+
+        newer_delivery = watermark + timedelta(minutes=5)
+        async with Session() as s:
+            gate = await s.get(Gate, gate_id)
+            repended = await reopen_gate_if_new_sha(
+                s, org_id, gate, "sha-new",
+                repo_full_name="acme/repo", pr_number=42, pr_updated_at=newer_delivery,
+            )
+            await s.commit()
+            assert repended is True, "진짜 신규 배달은 SHA 불일치 시 재-pending해야 함(회귀 금지)"
+
+        async with Session() as s:
+            gate = await s.get(Gate, gate_id)
+            assert gate.status == "pending"
+            assert gate.approved_head_sha is None
+            assert gate.pr_head_observed_at == newer_delivery, "재-pending 시 워터마크도 새 배달 시각으로 전진해야 함"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_sha_unchanged_but_newer_delivery_advances_watermark_without_status_change():
+    """HIGH2 부속 — SHA는 그대로인데(예: 라벨만 바뀐 재전송 등) pr_updated_at만 더
+    최신이면, 상태 변화 없이 워터마크만 전진해야 한다(다음 stale 판정의 기준선을
+    갱신 — 안 그러면 옛 워터마크에 머물러 미래의 진짜 stale 배달을 못 거른다)."""
+    from app.models.gate import Gate
+    from app.services.gate_github_check import reopen_gate_if_new_sha
+    from app.services.merge_verdict_gate import MERGE_GATE_TYPE
+
+    engine, Session = await _session_factory()
+    try:
+        watermark = datetime(2026, 8, 22, 12, 0, 0, tzinfo=timezone.utc)
+        async with Session() as s:
+            org, _project, story = await _seed_org_project_story(s, with_participation=True)
+            gate = Gate(
+                id=uuid.uuid4(), org_id=org.id, work_item_id=story.id, work_item_type="story",
+                gate_type=MERGE_GATE_TYPE, status="approved", pr_number=42,
+                repo_full_name="acme/repo", approved_head_sha="sha-same",
+                pr_head_observed_at=watermark,
+            )
+            s.add(gate)
+            await s.commit()
+            gate_id, org_id = gate.id, org.id
+
+        newer_delivery = watermark + timedelta(minutes=1)
+        async with Session() as s:
+            gate = await s.get(Gate, gate_id)
+            repended = await reopen_gate_if_new_sha(
+                s, org_id, gate, "sha-same",
+                repo_full_name="acme/repo", pr_number=42, pr_updated_at=newer_delivery,
+            )
+            await s.commit()
+            assert repended is False, "SHA가 그대로면 재-pending은 아니어야 함"
+
+        async with Session() as s:
+            gate = await s.get(Gate, gate_id)
+            assert gate.status == "approved"
+            assert gate.approved_head_sha == "sha-same"
+            assert gate.pr_head_observed_at == newer_delivery, "워터마크는 상태변화 없이도 전진해야 함"
     finally:
         await engine.dispose()

@@ -450,9 +450,17 @@ async def find_gate_slot_with_pr_fallback(
     repo_full_name: story #2932(HIGH1, 0272) — pr_number 단독은 repo 경계가 없어(같은
     스토리에 다른 repo의 동일 번호 PR이 링크되면 슬롯을 공유) SHA/evidence가 섞일 수
     있었다(카디르 소스 직접확認). repo_full_name이 주어지면 정확매치가 (pr_number,
-    repo_full_name) 둘 다로 스코프된다 — 다른 repo의 같은 pr_number는 별개 슬롯. 주어지지
-    않으면(호출부가 정말 모르는 극히 드문 경우) pr_number 단독 매치로 물러난다(0271
-    당시 동작과 동형 — 새로 나빠지진 않는다, 다만 disambiguation을 못 할 뿐).
+    repo_full_name) 둘 다로 스코프된다 — 다른 repo의 같은 pr_number는 별개 슬롯.
+
+    ⛔카디르 QA(PR#3359 3라운드, codex 발견) — repo_full_name이 **주어지지 않으면**
+    (호출부가 정말 모름 — report-done류 self-report의 실 경로, workflow_report.py) "repo
+    무관 아무 행이나 매치"로 물러나면 안 된다. 이 PR이 정당하게 허용한 「같은 pr_number·
+    다른 repo 2행 이상」 상태에서 그런 조회가 `MultipleResultsFound`(500)로 죽었다(실사고).
+    `pr_number IS NULL`(PR 컨텍스트 자체 미상)과 대칭으로, repo_full_name=None 조회는
+    **repo도 마찬가지로 모르는 행**(`repo_full_name IS NULL`)만 매치한다 — 그 조건을
+    만족하는 행은 구조적으로 최대 1개뿐이라(`uq_gate_work_item_gate_type_pr_no_repo`)
+    모호성이 원천적으로 없다. repo를 아는 기존 행과는 별개 identity로 남는다(멋대로
+    병합하지 않는다 — 어느 쪽이 "진짜"인지 여기서 판단할 근거가 없다).
 
     **동시성**(story #2932 HIGH2): NULL-슬롯 승격은 read-then-write라 동시 웹훅 2개가
     같은 NULL-슬롯을 서로 다른 PR로 경쟁 승격할 수 있었다(나중 커밋이 조용히 덮어씀).
@@ -481,8 +489,20 @@ async def find_gate_slot_with_pr_fallback(
             Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
             Gate.pr_number == pr_number,
         ]
-        if repo_full_name is not None:
-            exact_conditions.append(Gate.repo_full_name == repo_full_name)
+        # 카디르 QA(story #2932, PR#3359 3라운드, codex 발견) — repo_full_name이 없을 때
+        # (호출부가 정말 모름 — report-done류 self-report의 실 경로) repo 필터를 아예
+        # 안 걸면, 이 PR이 정당하게 허용한 「같은 pr_number·다른 repo 2행 이상」 상태를
+        # 만나 scalar_one_or_none()이 MultipleResultsFound로 500을 낸다(실사고). repo를
+        # 모른다는 것을 "아무 repo나 매치"로 지어내지 않는다 — `Gate.pr_number.is_(None)`
+        # (아래 NULL-슬롯 매치)과 대칭으로, repo_full_name=None 조회는 **repo도 마찬가지로
+        # 모르는 행**(repo_full_name IS NULL, 이 함수 자신이 승격시켜 둔 행 포함)만 매치한다
+        # — 정확히 한 행만 있을 수 있는 조건(uq_gate_work_item_gate_type_pr_no_repo)이라
+        # 구조적으로 모호성이 없다. repo를 아는 기존 행과는 다른 identity로 남는다(멋대로
+        # 병합하지 않는다 — 어느 쪽이 "진짜"인지 여기서 판단할 근거가 없다).
+        exact_conditions.append(
+            Gate.repo_full_name == repo_full_name if repo_full_name is not None
+            else Gate.repo_full_name.is_(None)
+        )
         exact = (
             await session.execute(select(Gate).where(*exact_conditions))
         ).scalar_one_or_none()
