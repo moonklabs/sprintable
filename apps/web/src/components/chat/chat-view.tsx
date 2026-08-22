@@ -27,6 +27,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useChatRail } from '@/app/(authenticated)/chats/chat-rail-context';
 
 interface ChatViewProps {
   threadId: string;
@@ -140,6 +141,15 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // 무의미해진다(exhaustive-deps도 "readingPanel 전체"를 요구해 그 무의미함을 강제) — 여기서
   // 바로 구조분해해 안정 참조(각 함수는 훅 내부 useCallback([])로 고정)만 아래에서 쓴다.
   const { stack: readingPanelStack, isOpenRef: activeReadingPanelRef, open: openReadingPanelStack, close: closeReadingPanelStack, navigateTo: navigateReadingPanelTo } = useReadingPanelStack();
+
+  // story #2921 S6 — layout.tsx의 리스트 레일에 "지금 ReadingPanel이 열려 있는지"를 끌어올린다
+  // (xl 미만에서 rail 자동 접힘 판단에 필요, 이 컴포넌트만 아는 상태라 layout.tsx가 직접 볼 수
+  // 없다). Thread는 이 신호 대상이 아니다(chat-rail-context.tsx 주석 — w-80이 480보다 훨씬
+  // 좁아 같은 폭에서 눌림이 덜하고 유나 확定 문구가 "Reading 열림"만 명시).
+  const { railMode, setReadingOpen } = useChatRail();
+  useEffect(() => {
+    setReadingOpen(readingPanelStack.length > 0);
+  }, [readingPanelStack.length, setReadingOpen]);
 
   // 스레드 열기: 현재 URL 유지한 채 history entry 추가
   const openThread = useCallback((message: ChatMessage) => {
@@ -993,7 +1003,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
           // exit(닫기) 애니는 의도적 무(PO 판정 — 즉시 사라짐=반응성 피드백).
           <div
             className={`motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right duration-150 flex flex-col overflow-hidden ${isMobileReadingView ? 'flex-1' : 'hidden lg:flex'}`}
-            style={isMobileReadingView ? undefined : { width: 'clamp(480px, 40vw, 720px)', flexShrink: 0 }}
+            // story #2921 S6(유나 확定④) — rail이 접힌/오버레이 상태(xl 미만+reading 열림)에선
+            // clamp 대신 480px 고정(Pedro 산수: main 544 보장은 reading=480 전제). xl↑나
+            // reading 닫힘(=railMode 'normal')은 기존 clamp(480,40vw,720) 그대로.
+            style={isMobileReadingView ? undefined : { width: railMode === 'normal' ? 'clamp(480px, 40vw, 720px)' : '480px', flexShrink: 0 }}
           >
             <ReadingPanel stack={readingPanelStack} onNavigateTo={navigateReadingPanelTo} onClose={closeReadingPanel} />
           </div>
