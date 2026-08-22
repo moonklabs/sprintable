@@ -64,8 +64,14 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   // 소스 순서로 컴파일하므로 xl:flex가 lg:hidden을 폭 ≥1280에서 CSS 캐스케이드로 자연히 이긴다).
   // railMode==='overlay'는 고정 오버레이로 뜬다 — main/reading 폭을 다시 누르지 않는다(③④).
   const railHiddenClass = railMode === 'collapsed' ? 'lg:hidden' : '';
+  // story #2921 S6 후속(PO dev 라이브 실측, 2026-08-22) — 이 fixed 분기 컨테이너에 배경이
+  // 없어(rail 자신의 base className은 border-border만 지정하고 bg-*는 어디에도 없다) docked
+  // 상태(문서 흐름 안, 뒤에 아무것도 없음)에선 안 보이던 투명 배경이 overlay(뒤에 GNB가
+  // 그대로 있는 fixed 오버레이)에서 GNB 텍스트와 겹쳐 가독을 깼다. bg-background(불투명 판)
+  // +border-r border-border(docked의 lg:border-r는 overlay 폭 구간(<1280)에서도 이미
+  // 걸리지만, 이 분기 자체에 명시해 향후 base className 리팩터에도 안전하게 둔다).
   const railOverlayClass = railMode === 'overlay'
-    ? 'fixed inset-y-0 left-0 z-40 w-[270px] shadow-xl lg:!flex xl:static xl:z-auto xl:w-[270px] xl:shadow-none'
+    ? 'fixed inset-y-0 left-0 z-40 w-[270px] bg-background shadow-xl border-r border-border lg:!flex xl:static xl:z-auto xl:w-[270px] xl:shadow-none'
     : '';
 
   return (
