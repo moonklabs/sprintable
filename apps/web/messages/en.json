@@ -856,7 +856,6 @@
     "verificationPending": "Verification pending",
     "verificationRequested": "Verification requested",
     "verificationRequestFailed": "Failed to request verification",
-    "workcellStateInProgress": "In progress",
     "workcellDodMissing": "No DoD specified",
     "workcellBlockedReason": "Waiting on dependency stories",
     "workcellNextNeedInProgress": "Request review once work is done",
@@ -4094,7 +4093,14 @@
     "viewEvidence": "Evidence",
     "viewDecision": "Decision",
     "conversationEmpty": "No messages yet",
-    "conversationFooter": "Only directives, decisions, evidence, and change requests scoped to this work. Switching views (Run/Evidence/Decision) = same thread, different lens."
+    "conversationFooter": "Only directives, decisions, evidence, and change requests scoped to this work. Switching views (Run/Evidence/Decision) = same thread, different lens.",
+    "pipelineQuestion": "How far along (trust pipeline)",
+    "pipelineQueued": "Queued",
+    "pipelineRunning": "Running",
+    "pipelineNeedsInput": "Needs input",
+    "pipelineClaimedDone": "Claimed done",
+    "pipelineVerified": "Verified",
+    "pipelineMergeReady": "Merge-ready"
   },
   "loopQueue": {
     "title": "Unclosed loop queue",

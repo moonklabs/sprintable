@@ -17,8 +17,7 @@ function renderKo(ui: ReactElement): string {
 
 const BASE: WorkcellProps = {
   title: '결제 복구 플로우 — 재시도 로직',
-  proofState: 'blue',
-  stateLabel: '실행 중',
+  pipelineStage: 'running',
   brief: {
     goal: '실패한 결제를 재시도로 복구',
     dod: 'AC 4 충족 · 자동검증 passed · 정본 승인',
@@ -46,10 +45,10 @@ describe('Workcell (4층 — Brief/Run/Evidence/Conversation)', () => {
     expect(markup).toContain('Conversation');
   });
 
-  it('renders the header title and state label together (색만으로 의미 전달 금지)', () => {
+  it('renders the header title and the current pipeline stage label together (색만으로 의미 전달 금지)', () => {
     const markup = renderKo(<Workcell {...BASE} />);
     expect(markup).toContain(BASE.title);
-    expect(markup).toContain('실행 중');
+    expect(markup).toContain('Running');
   });
 
   it('renders Brief goal/dod/owner/agent', () => {
@@ -58,6 +57,28 @@ describe('Workcell (4층 — Brief/Run/Evidence/Conversation)', () => {
     expect(markup).toContain('AC 4 충족');
     expect(markup).toContain('책임 윤재');
     expect(markup).toContain('실행 미르코군');
+  });
+});
+
+describe('Workcell — story #2922 W1 신뢰 파이프라인 헤더 스테퍼(6상태) + 2×2 구획', () => {
+  it('renders all six pipeline stage labels regardless of current stage', () => {
+    const markup = renderKo(<Workcell {...BASE} pipelineStage="queued" />);
+    expect(markup).toContain('Queued');
+    expect(markup).toContain('Running');
+    expect(markup).toContain('Needs input');
+    expect(markup).toContain('Claimed done');
+    expect(markup).toContain('Verified');
+    expect(markup).toContain('Merge-ready');
+  });
+
+  it('marks the current stage with aria-current="step" (색만 금지 — 스크린리더도 현재단계를 안다)', () => {
+    const markup = renderKo(<Workcell {...BASE} pipelineStage="claimed_done" />);
+    expect(markup).toContain('aria-current="step"');
+  });
+
+  it('renders a 2×2 quadrant body (Brief|Run / Evidence|Conversation), not a vertical 4-stack', () => {
+    const markup = renderKo(<Workcell {...BASE} />);
+    expect(markup).toContain('grid-cols-2');
   });
 });
 

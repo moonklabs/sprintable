@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
-import { ProofAvatar, ProofCapsule, type ProofCapsuleProps, type ProofState } from '@/components/proof-capsule/proof-capsule';
+import { ProofAvatar, ProofCapsule, type ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
 
 export interface WorkcellOwner {
   name: string;
@@ -45,13 +45,16 @@ export interface WorkcellConversation {
   messages: WorkcellMessage[];
 }
 
+/** story #2922(P0-D 재설계) — 신뢰 파이프라인 6상태. 현행 5-status(backlog/ready-for-dev/
+ * in-progress/in-review/done)로는 표현 못 하는 needs_input·verified는 파생(호출부 책임,
+ * doc workcell-redesign-2922 §매핑표). 순서 자체가 파이프라인 진행 축(STAGES 배열과 동일). */
+export type WorkcellPipelineStage = 'queued' | 'running' | 'needs_input' | 'claimed_done' | 'verified' | 'merge_ready';
+
 export interface WorkcellProps {
   title: string;
-  proofState: ProofState;
-  /** workcell-fe-spec-handoff §2 인터페이스엔 없지만, Proofline 자체(§1) 및 도크트린 ③(색만
-   * 금지 텍스트 병기)이 이 헤더 배지에도 동일 적용 — ProofCapsule.stateLabel과 같은 관례로
-   * 필수화(목업 pstate가 실제로 "실행 중" 텍스트를 렌더하므로 스펙 인터페이스의 누락 보완). */
-  stateLabel: string;
+  /** story #2922 — 구 단일 proofState 배지(3색 점+텍스트)를 헤더 6상태 파이프라인 스테퍼로
+   * 대체(doc workcell-redesign-2922 축②). */
+  pipelineStage: WorkcellPipelineStage;
   brief: WorkcellBrief;
   run: WorkcellRun;
   /** null = 아직 증거 없음(정직한 빈 상태) — Proof Capsule 컴포넌트 그대로 재사용. */
@@ -60,43 +63,80 @@ export interface WorkcellProps {
   className?: string;
 }
 
+const PIPELINE_STAGES: WorkcellPipelineStage[] = ['queued', 'running', 'needs_input', 'claimed_done', 'verified', 'merge_ready'];
 
-const STATE_TONE: Record<ProofState, string> = {
-  blue: 'text-proof-blue', amber: 'text-proof-amber', green: 'text-proof-green', red: 'text-proof-red',
-};
-const STATE_DOT: Record<ProofState, string> = {
-  blue: 'bg-proof-blue', amber: 'bg-proof-amber', green: 'bg-proof-green', red: 'bg-proof-red',
-};
+function PipelineStepper({ stage }: { stage: WorkcellPipelineStage }) {
+  const t = useTranslations('workcell');
+  const label: Record<WorkcellPipelineStage, string> = {
+    queued: t('pipelineQueued'), running: t('pipelineRunning'), needs_input: t('pipelineNeedsInput'),
+    claimed_done: t('pipelineClaimedDone'), verified: t('pipelineVerified'), merge_ready: t('pipelineMergeReady'),
+  };
+  const curIdx = PIPELINE_STAGES.indexOf(stage);
+  return (
+    <div className="mb-2.5 flex flex-wrap items-center gap-x-0 gap-y-1" role="list" aria-label={t('pipelineQuestion')}>
+      {PIPELINE_STAGES.map((s, i) => {
+        const status = i < curIdx ? 'done' : i === curIdx ? 'current' : 'pending';
+        return (
+          <span key={s} className="flex items-center" role="listitem">
+            <span
+              className={cn(
+                'flex items-center gap-1.5 pr-1.5 text-[9px] font-semibold leading-none',
+                status === 'done' && 'text-proof-green',
+                status === 'current' && 'font-bold text-proof-blue',
+                status === 'pending' && 'text-proof-faint',
+              )}
+              aria-current={status === 'current' ? 'step' : undefined}
+            >
+              <span
+                className={cn(
+                  'size-1.5 rounded-full',
+                  status === 'done' && 'bg-proof-green',
+                  status === 'current' && 'bg-proof-blue ring-2 ring-proof-blue/20',
+                  status === 'pending' && 'bg-proof-line',
+                )}
+                aria-hidden="true"
+              />
+              {label[s]}
+            </span>
+            {i < PIPELINE_STAGES.length - 1 ? <span className="px-1 text-[9px] text-proof-line" aria-hidden="true">›</span> : null}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
 
 /**
- * Workcell — Story 상세 우측 패널의 4층 재구성(workcell-fe-spec-handoff). "10초 리트머스":
- * 열고 10초 안에 무엇을(Brief)·누가(Brief)·어디까지(Run+Evidence)·무엇이 필요한지(Run
- * nextNeed) 답 가능해야 한다. Brief(약속)→Run(현재행위+다음요구, 진행률바 없음)→Evidence
- * (Proof Capsule 재사용)→Conversation(작업-귀속, 전역 chat과 분리) 순.
+ * Workcell — Story 상세 우측 패널의 4구획 재구성(story #2922 P0-D, workcell-fe-spec-handoff
+ * 초판 위 재설계). "10초 리트머스": 열고 10초 안에 무엇을(Brief)·누가(Brief)·어디까지
+ * (Run+Evidence)·무엇이 필요한지(Run nextNeed) 답 가능해야 한다. 2×2 구획(Brief|Run /
+ * Evidence|Conversation, 탭 0)+헤더 신뢰 파이프라인 6상태 스테퍼(Queued→…→Merge-ready).
  *
- * 도크트린 5 준수: ①약속>활동(Brief가 최상단) ②주장>로그(활동 로그 필드 자체가 없음)
- * ③예외 선명(막힘은 숨기지 않되 빨강 아닌 info 톤) ④자동화 경계(agent 마커 항상 구분)
- * ⑤인간=책임 주체(Evidence의 Human gate가 결정점). 안티패턴 0 — 진행률 바(%) 자체를
- * 렌더하지 않는 게 Run 층의 핵심 계약.
+ * 도크트린 5 준수: ①약속>활동(Brief가 좌상단) ②주장>로그(활동 로그 필드 자체가 없음)
+ * ③예외 선명(막힘은 숨기지 않되 빨강 아닌 info 톤, 파이프라인 단계도 색+텍스트 병기)
+ * ④자동화 경계(agent 마커 항상 구분) ⑤인간=책임 주체(Evidence의 Human gate가 결정점).
+ * 안티패턴 0 — 진행률 바(%) 자체를 렌더하지 않는 게 Run 구획의 핵심 계약.
  */
-export function Workcell({ title, proofState, stateLabel, brief, run, evidence, conversation, className }: WorkcellProps) {
+export function Workcell({ title, pipelineStage, brief, run, evidence, conversation, className }: WorkcellProps) {
   return (
     <div
       className={cn('overflow-hidden rounded-[6px] border border-proof-line bg-proof-panel', className)}
       style={{ clipPath: 'polygon(0 0, calc(100% - 24px) 0, 100% 24px, 100% 100%, 0 100%)' }}
     >
-      <div className="flex items-center gap-3 border-b border-proof-line px-4.5 py-3.5">
+      <div className="border-b border-proof-line px-4.5 py-3.5">
+        <PipelineStepper stage={pipelineStage} />
         <span className="text-[17px] font-bold leading-tight tracking-[-0.012em] text-proof-ink">{title}</span>
-        <span className={cn('ml-auto inline-flex items-center gap-1.5 text-[11px] font-semibold', STATE_TONE[proofState])}>
-          <span className={cn('size-1.5 rounded-full', STATE_DOT[proofState])} aria-hidden="true" />
-          {stateLabel}
-        </span>
       </div>
 
-      <BriefLayer brief={brief} />
-      <RunLayer run={run} />
-      <EvidenceLayer evidence={evidence} />
-      <ConversationLayer conversation={conversation} />
+      {/* story #2922 W1 — 4구획 세로 나열 → 2×2 그리드(Brief|Run / Evidence|Conversation).
+          gap-px+bg-proof-line가 각 구획 사이 헤어라인을 만든다(개별 레이어의 border-b는
+          이제 이 그리드 갭과 중복이라 제거됨). */}
+      <div className="grid grid-cols-2 gap-px bg-proof-line">
+        <div className="bg-proof-panel"><BriefLayer brief={brief} /></div>
+        <div className="bg-proof-panel"><RunLayer run={run} /></div>
+        <div className="bg-proof-panel"><EvidenceLayer evidence={evidence} /></div>
+        <div className="bg-proof-panel"><ConversationLayer conversation={conversation} /></div>
+      </div>
     </div>
   );
 }
@@ -113,7 +153,7 @@ function LayerLabel({ title, question, className }: { title: string; question: s
 function BriefLayer({ brief }: { brief: WorkcellBrief }) {
   const t = useTranslations('workcell');
   return (
-    <div className="border-b border-proof-line-soft px-4.5 py-3.5">
+    <div className="h-full px-4.5 py-3.5">
       <LayerLabel title="Brief" question={t('briefQuestion')} className="mb-2.5" />
       <div className="flex gap-2 text-[13px] leading-[1.5] text-proof-ink-2">
         <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">{t('briefGoal')}</span>
@@ -140,7 +180,7 @@ function BriefLayer({ brief }: { brief: WorkcellBrief }) {
 function RunLayer({ run }: { run: WorkcellRun }) {
   const t = useTranslations('workcell');
   return (
-    <div className="border-b border-proof-line-soft px-4.5 py-3.5">
+    <div className="h-full px-4.5 py-3.5">
       <LayerLabel title="Run" question={t('runQuestion')} className="mb-2.5" />
       <div className="mb-2 text-[13.5px] font-semibold text-proof-ink">{t('runNow')}: {run.now}</div>
       <div className="mb-2.5 flex flex-wrap gap-3.5 text-[11px] text-proof-ink-3">
@@ -161,7 +201,7 @@ function RunLayer({ run }: { run: WorkcellRun }) {
 function EvidenceLayer({ evidence }: { evidence: ProofCapsuleProps | null }) {
   const t = useTranslations('workcell');
   return (
-    <div className="border-b border-proof-line-soft px-4.5 py-3.5">
+    <div className="h-full px-4.5 py-3.5">
       <LayerLabel title="Evidence" question={t('evidenceQuestion')} className="mb-2.5" />
       {evidence ? (
         <ProofCapsule {...evidence} />
@@ -181,7 +221,7 @@ function ConversationLayer({ conversation }: { conversation: WorkcellConversatio
     run: t('viewRun'), evidence: t('viewEvidence'), decision: t('viewDecision'),
   };
   return (
-    <div className="px-4.5 py-3.5">
+    <div className="h-full px-4.5 py-3.5">
       <div className="mb-2.5 flex items-center gap-2">
         <LayerLabel title="Conversation" question={t('conversationQuestion')} />
         <div className="ml-auto inline-flex overflow-hidden rounded-[6px] border border-proof-line">
