@@ -11,6 +11,13 @@ on:
       - ee/**
       - .github/workflows/docker-smoke-test.yml
 
+# story #2912(2899 그라운딩 갈래B 처방) — 같은 PR에 새 커밋이 들어오면 구head 런이 여전히
+# 러너를 붙든 채(오늘 실사례 #3302: 구head shard 20분+ in_progress) 신head 런과 캐파를
+# 다툰다. cancel-in-progress로 구head 런을 즉시 접어 캐파를 신head에 양보한다.
+concurrency:
+  group: docker-smoke-test-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   smoke-test:
     runs-on: ubuntu-latest

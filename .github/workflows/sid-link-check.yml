@@ -9,6 +9,12 @@ on:
   pull_request:
     branches: [main, develop]
 
+# story #2912(2899 그라운딩 갈래B 처방) — 구head 런이 캐파를 계속 붙들지 않게 신 커밋이
+# 오면 즉시 취소(다른 gate들과 동형 패턴).
+concurrency:
+  group: sid-link-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   sid-link-check:
     name: Story link (SID) — advisory
