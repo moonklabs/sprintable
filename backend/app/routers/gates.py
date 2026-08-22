@@ -291,6 +291,45 @@ class DecisionRequestCreate(BaseModel):
     related_work_item_id: uuid.UUID | None = None
 
 
+async def _notify_decision_request_card(
+    session: AsyncSession, org_id: uuid.UUID, gate: Gate, *, requester_id: uuid.UUID, project_id: uuid.UUID,
+) -> None:
+    """story #8bc11434(2891) — request_decision(agent_decision_request 게이트) 상신 시 결재자
+    (org owner/admin) 챗에 원탭 결재 카드 자동 발행. app/services/doc.py의
+    _notify_doc_approval_requested()와 동형(approver 해소·best-effort try/except 관용구 그대로
+    재사용 — doc steer-event-axis-design-2927 §5 권고) — 이 gate_type의 승인 자격이 정확히
+    org owner/admin임은 _non_doc_gate_approvable()(agent_decision은 project-agnostic이라
+    project_id=None 분기, is_org_owner_or_admin)로 이미 확定돼 있어 별도 판단 아님. create_gate()
+    의 generic 벨(gate.pending_approval)은 그대로 유지(notify=False 안 씀 — doc.py와 달리 이
+    gate_type엔 대체할 리치 벨이 없어 끄면 알림 자체가 0이 된다), 이 함수는 챗 카드만 추가."""
+    try:
+        from app.models.project import OrgMember
+        approver_ids = list((await session.execute(
+            select(OrgMember.id).where(
+                OrgMember.org_id == org_id,
+                OrgMember.role.in_(("owner", "admin")),
+                OrgMember.deleted_at.is_(None),
+                OrgMember.id != requester_id,
+            )
+        )).scalars().all())
+    except Exception:  # noqa: BLE001 — 조회 실패는 상신 비중단.
+        logger.warning("decision-request 결재자 조회 실패 gate=%s", gate.id, exc_info=True)
+        return
+
+    if not approver_ids:
+        return
+
+    try:
+        from app.services.approval_delivery import dispatch_approval_request_cards
+        await dispatch_approval_request_cards(
+            session, org_id=org_id, work_item_type="agent_decision", work_item_id=gate.id,
+            project_id=project_id, title=gate.neutral_facts.get("question", "결정 요청") if gate.neutral_facts else "결정 요청",
+            gate_id=gate.id, requester_id=requester_id, approver_ids=approver_ids,
+        )
+    except Exception:  # noqa: BLE001 — 카드 배달 실패는 상신 비중단(Gate inbox 폴백 항상 존재).
+        logger.warning("decision-request 결재자 카드(챗) 배달 실패 gate=%s", gate.id, exc_info=True)
+
+
 @router.post("/decisions", response_model=GateResponse, status_code=201)
 async def create_decision_request(
     body: DecisionRequestCreate,
@@ -343,6 +382,8 @@ async def create_decision_request(
         project_id=project_id,
         gate_id=gate_id,
     )
+    await session.flush()
+    await _notify_decision_request_card(session, org_id, gate, requester_id=caller_id, project_id=project_id)
     await session.commit()
     await session.refresh(gate)
     resp = GateResponse.model_validate(gate)
