@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ShieldCheck } from 'lucide-react';
+import { ShieldCheck, ChevronRight } from 'lucide-react';
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { formatRelativeTime } from '@/lib/storage/format';
@@ -228,11 +228,24 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
               onNavigate={(href) => router.push(href)}
             />
           ))}
+          {/* story #2923(P0-E AQ3, doc attention-audit-redesign-2923) — 「결재함=완전 목록
+              overflow·Attention GATE 앵커」. 상한(cap) 초과분이 사라지지 않고 결재함(현 gates
+              탭, ApprovalsQueue=Gate 3종 완전 목록)에 그대로 있다는 걸 클릭 가능한 앵커로
+              보여준다(예전엔 순수 텍스트, 갈 곳이 없었다). overflow가 GATE 버킷만은 아닐 수
+              있어(bucket 정밀 필터는 AQ2 이후) 「결재함도 포함해 계속 보기」로 정직하게 표현
+              — 「거기 전부 있다」로 과장하지 않는다. 착지 탭 기본값 변경(B3 보류)은 스코프
+              밖(PO 확定, 2026-08-22) — 이 앵커는 명시적 tab=gates 링크일 뿐 기본 착지를
+              바꾸지 않는다. */}
           {overflow > 0 ? (
-            <div className="flex items-center gap-1.5 border-t border-proof-line-soft bg-proof-sunk px-5 py-2.5 text-[12.5px] text-proof-ink-3">
+            <button
+              type="button"
+              onClick={() => router.push('/inbox?tab=gates')}
+              className="flex w-full items-center gap-1.5 border-t border-proof-line-soft bg-proof-sunk px-5 py-2.5 text-left text-[12.5px] text-proof-ink-3 transition-colors hover:bg-proof-line-soft hover:text-proof-ink-2"
+            >
               <span className="size-1 rounded-full bg-proof-faint" aria-hidden="true" />
-              {t('flowDemoted', { overflow })}
-            </div>
+              <span className="flex-1">{t('flowDemoted', { overflow })}</span>
+              <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />
+            </button>
           ) : null}
         </div>
       )}
