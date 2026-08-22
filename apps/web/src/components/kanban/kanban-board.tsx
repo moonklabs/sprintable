@@ -1452,27 +1452,36 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
             </button>
           </div>
 
-          {/* story #2933 H4(P0-H) — 5-status/6단계 신뢰축 컬럼 축 토글. I3 WorkspaceFrameTabs
-              (같은 페이지 안 "뷰"처럼 보이는 얕은 전환)와 다른 형태긴 하나 동일 원칙(진짜
-              데이터 전환 아닌 같은 stories 배열의 다른 렌더) — 여기선 이미 board/list
-              토글이 그 정확한 선례라 그 아이콘-버튼 쌍 스타일을 그대로 잇는다. list 뷰에선
-              숨김(trust axis는 board 렌더 전용, 이번 슬라이스 스코프). */}
+          {/* story #2933 H4(P0-H, 유나 판정 2026-08-22) — 5-status/6단계 신뢰축 컬럼 축 토글.
+              애초 board/list 아이콘-토글 스타일(pill+bg-muted)을 그대로 이었었으나, 유나가
+              PR#3358(I3) 위계 규율을 재확인 — 「프레임 레벨 토글=WorkspaceFrameTabs underline이
+              정본·pill=flow 내부 뷰 탭 전용」. 이 토글은 아이콘 버튼 한 쌍(board/list)과 달리
+              보드가 렌더하는 «컬럼 체계 자체»를 바꾸는 프레임급 전환이라 pill이 아니라
+              workspace-frame-tabs.tsx와 동일한 underline 패턴(border-b-2+text-sm font-semibold,
+              active=border-primary/text-foreground)을 직접 재사용한다(별도 컴포넌트 추출 없이
+              — 이 자리 2탭뿐이라 workspace-frame-tabs.tsx의 라우팅 전용 구조를 억지로 씌우기보다
+              그 시각 어휘만 인라인 차용, 신규 발명 아님). list 뷰에선 숨김(trust axis는 board
+              렌더 전용, 이번 슬라이스 스코프). */}
           {viewMode === 'board' && (
-            <div className="flex items-center overflow-hidden rounded-md border border-border/60">
+            <div className="flex items-center gap-3 border-b border-border/60" role="tablist" aria-label={t('trustAxisView')}>
               <button
                 type="button"
+                role="tab"
+                aria-selected={axisMode === 'status'}
                 onClick={() => handleSetAxisMode('status')}
-                className={`h-7 whitespace-nowrap px-2 text-[11px] font-medium transition-colors ${
-                  axisMode === 'status' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'
+                className={`-mb-px whitespace-nowrap border-b-2 px-0.5 pb-1.5 text-[11px] font-semibold transition ${
+                  axisMode === 'status' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
                 }`}
               >
                 {t('trustClassicView')}
               </button>
               <button
                 type="button"
+                role="tab"
+                aria-selected={axisMode === 'trust'}
                 onClick={() => handleSetAxisMode('trust')}
-                className={`h-7 whitespace-nowrap px-2 text-[11px] font-medium transition-colors ${
-                  axisMode === 'trust' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'
+                className={`-mb-px whitespace-nowrap border-b-2 px-0.5 pb-1.5 text-[11px] font-semibold transition ${
+                  axisMode === 'trust' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
                 }`}
               >
                 {t('trustAxisView')}
