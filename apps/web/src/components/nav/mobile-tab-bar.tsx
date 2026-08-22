@@ -24,10 +24,6 @@ import { fetchWithAuth } from '@/lib/db/client';
 // 목적지를 직접 가리킨다(한 홉 절약 + 이름-목적지 일치, #2224 §④ "사람이 누르는 진입점"
 // 표면). `/flow`는 아직 모바일 전용 화면(#2225)이 없어 데스크톱과 같은 레이아웃을 그대로
 // 받는다 — 이번 판에서는 "폰에서 깨지지 않게"까지만 손대고, 본격 모바일 재설계는 #2225.
-// story #2930(P0-G) I2, doc ia-4zone-redesign-2930 — 챗은 이 배열에 없다. 4구역 밖 1급
-// 「center」로 승격돼 별도 FAB(아래 CHAT_FAB_KEY)로 뜬다 — 데스크톱 사이드바 챗 center
-// (app-sidebar.tsx)와 동형 승격. getActiveTabKey의 '/chats' 판정은 그대로 남긴다(FAB의
-// active 표시가 그 판정을 그대로 재사용한다).
 export const TABS = [
   { key: 'now', href: '/flow', icon: CircleDot, labelKey: 'now' as const },
   // story #2279(PO 판정, 2026-07-29): 라벨("결재")·배지(게이트 대기 수)와 착지가 어긋나
@@ -35,16 +31,12 @@ export const TABS = [
   // 탭과 일치" 규칙은 그대로 두고 착지 쪽을 게이트 탭으로 옮긴다(라벨을 규칙에 맞춘다).
   // "알림" 탭은 안 없어진다 — /inbox 페이지 내부 탭 스위처로 한 번 더 탭하면 그대로 있다.
   { key: 'approvals', href: '/inbox?tab=gates', icon: Inbox, labelKey: 'approvals' as const },
+  { key: 'chat', href: '/chats', icon: MessageSquare, labelKey: 'chat' as const },
   // "전체"는 시안상 정식 목록화 대상(S9/#1965) — 기존 모바일 GNB Sheet(햄버거) 재사용은
   // blueprint §3.2 "모바일 사이드바 폐기" 방향과 충돌해 하지 않는다(오르테가군 확定). 이 스토리
   // 에서는 최소 스텁 라우트로만 연결 — S9가 정식 목록으로 교체.
   { key: 'more', href: '/more', icon: Grid2x2, labelKey: 'more' as const },
 ] as const;
-
-// story #2930 I2 — 챗 FAB 전용 상수(TABS 밖). href/labelKey는 옛 'chat' 탭 시절과 완전
-// 동일(불변) — 렌더 위치만 승격.
-export const CHAT_FAB_HREF = '/chats';
-export const CHAT_FAB_LABEL_KEY = 'chat' as const;
 
 // story #1991(navigate 불안정 1차 근원 B, 유나 UX 감사): 기존 isTabActive는 4탭 href 자체와
 // 정확일치/그 직계 하위 경로만 인식해, gate/doc/story 상세(canonical 라우트가 탭 href 트리
@@ -74,11 +66,7 @@ function isFlowPath(pathname: string): boolean {
 //     board/goals/loops/sprints/standup/retro/organization/settings/... 는 애초에 4탭
 //     밖의 프로젝트/org 영역이라 more 페이지 자체가 이들의 진입점(ITEMS 목록, #1958 확定)
 //     — "전체"가 이 전부의 소속 탭이라는 게 이미 그 스텁 페이지 설계로 확定돼 있다.
-// story #2930 I2 — 반환 타입을 `(typeof TABS)[number]['key']`(파생) 대신 명시 유니온으로 뗀다.
-// 'chat'이 TABS 배열엔 더 이상 없지만(FAB로 승격) 이 함수의 실제 반환값 중 하나는 여전히
-// 'chat'이다(아래 '/chats' 분기) — 파생 타입을 그대로 뒀으면 'chat'이 타입에서 사라져 그
-// 분기 자체가 타입 에러가 났을 것.
-export function getActiveTabKey(pathname: string): (typeof TABS)[number]['key'] | 'chat' {
+export function getActiveTabKey(pathname: string): (typeof TABS)[number]['key'] {
   if (isFlowPath(pathname) || pathname === '/glance' || pathname.startsWith('/glance/')) return 'now';
   if (pathname === '/inbox' || pathname.startsWith('/gates/')) return 'approvals';
   if (pathname === '/chats' || pathname.startsWith('/chats/')) return 'chat';
@@ -138,42 +126,21 @@ export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
   }, []);
 
   const activeKey = getActiveTabKey(pathname);
-  const chatActive = activeKey === 'chat';
 
   return (
     <nav
       aria-label={t('navLabel')}
-      className="relative flex h-16 shrink-0 border-t border-border bg-card lg:hidden"
+      className="flex h-16 shrink-0 border-t border-border bg-card lg:hidden"
     >
-      {/* story #2930(P0-G) I2, doc ia-4zone-redesign-2930 — 챗 「center(중심 꽃)」 모바일
-          FAB. 시안 아티팩트(6242dffb .fab) 그대로: 탭바 위로 겹쳐 뜨는 원형 버튼(4구역 밖
-          1급 승격, 데스크톱 챗 center 카드와 동형 지위). TABS.map 밖의 별도 sibling —
-          일반 탭과 flex-1로 나란히 서지 않는다(그러면 "구역 중 하나"로 도로 강등되므로).
-          getActiveTabKey의 '/chats' 판정을 그대로 재사용(로직 무변화, 렌더 자리만 이동). */}
-      <Link
-        href={CHAT_FAB_HREF}
-        aria-label={t(CHAT_FAB_LABEL_KEY)}
-        aria-current={chatActive ? 'page' : undefined}
-        className={cn(
-          'absolute left-1/2 top-[-18px] flex size-11 -translate-x-1/2 items-center justify-center rounded-full border-[3px] border-card bg-primary text-primary-foreground shadow-lg transition',
-          chatActive && 'ring-2 ring-primary/40',
-        )}
-      >
-        <MessageSquare className="size-5" strokeWidth={1.8} />
-        {chatUnreadTotal > 0 ? (
-          <span
-            aria-hidden
-            className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-card px-1 text-[10px] font-bold leading-none text-primary ring-1 ring-primary/30"
-          >
-            {/* story #1977 선례: 채팅 unread 총합은 99+ 상한(시안 768e89b5 v2). */}
-            {chatUnreadTotal > 99 ? '99+' : chatUnreadTotal}
-          </span>
-        ) : null}
-      </Link>
-
       {TABS.map(({ key, href, icon: Icon, labelKey }) => {
         const active = key === activeKey;
-        const badge = key === 'approvals' && pendingCount > 0 ? pendingCount : null;
+        // story #1977: "채팅" 탭 배지 = GNB unread 총합(결재함 배지와 동일 brand, 구분은
+        // 색이 아니라 아이콘+탭 순서 — 유나 시안 768e89b5 v2 디자인 노트).
+        const badge = key === 'approvals' && pendingCount > 0
+          ? pendingCount
+          : key === 'chat' && chatUnreadTotal > 0
+            ? chatUnreadTotal
+            : null;
         return (
           <Link
             key={key}
@@ -191,7 +158,8 @@ export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
                   aria-hidden
                   className="absolute -top-1 left-full ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold leading-none text-primary-foreground"
                 >
-                  {badge > 9 ? '9+' : badge}
+                  {/* story #1977: 채팅 unread 총합은 99+ 상한(시안 768e89b5 v2) — 결재함은 기존 9+ 유지 */}
+                  {key === 'chat' ? (badge > 99 ? '99+' : badge) : badge > 9 ? '9+' : badge}
                 </span>
               ) : null}
             </span>

@@ -54,11 +54,11 @@ describe('findDepthViolations — story #2684 AC1(양성대조)', () => {
 describe('실 NAV_GROUPS — story #2684 AC3 판별자(이벤트 포함 전 관리면 depth ≤2)', () => {
   const hubGroupIds = new Set(MOBILE_HUB_GROUP_ORDER);
 
-  // story #2930(P0-G) I2 — chats가 NAV_GROUPS 자체에서 빠져(사이드바/모바일 챗 center로
-  // 승격) 21→20항목. 챗 center 자신의 depth 1(바텀 탭바 FAB — 어떤 탭 안에도 안 묻힌 직행
-  // 위치)은 이 순수 데이터 스캔의 시야 밖이라 이 스위트가 못 잰다(nav-config.ts 상단
-  // "AC2 — 이 가드가 못 잡는 것" ㉢류와 동형 — MobileTabBar 구조 자체는 별도 관심사). 실제
-  // FAB 배선의 depth-1 대응 검증은 mobile-tab-bar.test.ts의 챗 FAB 왕복 회귀가드가 맡는다.
+  // story #2930(P0-G) I2 — chats가 NAV_GROUPS 자체에서 빠져(데스크톱 사이드바 챗 center로
+  // 승격 — 유나 확定 ⓒ, 모바일은 그대로 develop 5탭이라 대상 밖) 21→20항목. 데스크톱 챗
+  // center의 depth-1 대응(사이드바 상단 고정, 어떤 구역에도 안 묻힘)은 이 순수 데이터
+  // 스캔의 시야 밖이라 이 스위트가 못 잰다(nav-config.ts 상단 "AC2 — 이 가드가 못 잡는 것"
+  // ㉢·㉥류와 동형) — 렌더 검증은 app-sidebar.test.tsx가 맡는다.
   it('전 20항목(챗 center 제외)이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
     const entries = computeMobileDepths(NAV_GROUPS, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
     expect(findDepthViolations(entries, MAX_MOBILE_DEPTH)).toEqual([]);
