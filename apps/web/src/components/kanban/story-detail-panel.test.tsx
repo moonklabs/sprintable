@@ -340,6 +340,70 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
 
     expect(currentStageLabel()).toBe('Claimed done');
   });
+
+  // PO 리뷰 확장(PR#3363 codex 교차모델, 2026-08-22) — 위 두 테스트가 덮는 "다른 story로
+  // 전환" 레이스와 달리, 이건 **같은 story**에 연속 발화한 두 SSE 이벤트의 응답이 네트워크에서
+  // 역순 도착하는 경우(E1→fetchA 보류→E2→fetchB→B 먼저 도착→A가 늦게 도착)다. story.id가
+  // 안 바뀌므로 currentStoryIdRef 가드는 둘 다 통과시킨다 — AbortController가 fetchA 자체를
+  // 죽여야(늦게 온 응답이 절대 반영되지 않아야) 막힌다.
+  it('같은 story에 연속 발화한 두 SSE의 fetch가 역순 도착해도, 먼저 쏜(옛) fetch는 abort돼 나중 값(fetchB)이 유지된다', async () => {
+    const { useSseNotifications } = await import('@/hooks/use-sse-notifications');
+    let capturedOnExtraEvent: ((eventName: string, data: unknown) => void) | undefined;
+    (useSseNotifications as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      (o: { onExtraEvent?: typeof capturedOnExtraEvent }) => { capturedOnExtraEvent = o.onExtraEvent; },
+    );
+    const story = makeStory({ id: 'story-x', status: 'in-progress', assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID], trust_stage: 'running' });
+
+    let callCount = 0;
+    let rejectFirstCall: ((e: unknown) => void) | undefined;
+    let resolveSecondCall: ((v: unknown) => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: { signal?: AbortSignal }) => {
+      if (typeof url === 'string' && /\/api\/stories\/story-x(\?|$)/.test(url)) {
+        callCount += 1;
+        const thisCall = callCount;
+        return new Promise((resolve, reject) => {
+          if (thisCall === 1) rejectFirstCall = reject;
+          if (thisCall === 2) resolveSecondCall = resolve;
+          // 실 fetch abort 동형 — signal이 abort되면 pending promise가 AbortError로 reject.
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+        });
+      }
+      return Promise.resolve({ ok: false, json: async () => null });
+    }));
+
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={story} tasks={[]} onClose={() => {}} memberMap={memberMap} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(currentStageLabel()).toBe('Running');
+
+    // E1 — 디바운스 소진 → fetchA 발사(deferred, 아직 안 끝남).
+    await act(async () => { capturedOnExtraEvent!('story.trust_stage_changed', { story_id: 'story-x', new_stage: 'needs_input' }); });
+    await act(async () => { vi.advanceTimersByTime(500); await Promise.resolve(); });
+    expect(callCount).toBe(1);
+
+    // E2 — fetchA가 아직 in-flight인 채로 새 이벤트 발화 → 디바운스 재소진 시점에 fetchA를
+    // abort하고 fetchB를 발사한다.
+    await act(async () => { capturedOnExtraEvent!('story.trust_stage_changed', { story_id: 'story-x', new_stage: 'verified' }); });
+    await act(async () => { vi.advanceTimersByTime(500); await Promise.resolve(); });
+    expect(callCount).toBe(2);
+    expect(rejectFirstCall).toBeDefined(); // fetchA의 signal이 실제로 abort listener를 받음.
+
+    // fetchB(나중 이벤트) 먼저 도착 — 최신값(Verified) 반영.
+    await act(async () => {
+      resolveSecondCall!({ ok: true, json: async () => ({ data: { ...story, trust_stage: 'verified' } }) });
+      await Promise.resolve(); await Promise.resolve();
+    });
+    expect(currentStageLabel()).toBe('Verified');
+
+    // fetchA(먼저 쏜 옛 fetch)가 이제야 응답 — abort로 이미 reject됐으므로 .then은 아예 실행
+    // 안 되지만, 방어적으로 늦게 resolve를 시도해도(실 abort면 불가능하지만) 무해함을 재확認.
+    await act(async () => {
+      try { rejectFirstCall!(new DOMException('Aborted', 'AbortError')); } catch { /* already settled */ }
+      await Promise.resolve(); await Promise.resolve();
+    });
+    expect(currentStageLabel()).toBe('Verified'); // 역순 도착에도 회귀 없음.
+  });
 });
 
 // story #2922 W2 — Evidence 구획 = ProofCapsule density="full" 실배선. glance-hero.tsx의

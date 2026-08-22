@@ -373,11 +373,21 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   // story의 stage를 override로 붙이는 레이스였다 — 해소 시점에 「fetch를 쏜 id == 지금 보고
   // 있는 id」를 대조해야 진짜로 막힌다(리셋만으론 pre-fetch 케이스만 덮고 in-flight는 못 덮음).
   const currentStoryIdRef = useRef(story.id);
+  // PO 리뷰 확장(PR#3363 codex 교차모델, 2026-08-22) — 위 currentStoryIdRef 가드는 "다른
+  // story로 전환"만 막는다. 같은 story에 연속 발화한 두 SSE 이벤트(E1 debounce 만료→fetchA
+  // in-flight 상태에서 E2 도착→fetchB 발사)의 응답이 네트워크에서 역순 도착하면(B 먼저,
+  // A 나중) — 둘 다 firedForId가 같아 위 가드를 통과하고, 나중에 도착한(=먼저 쏜, 더 옛
+  // stage인) A가 이미 반영된 B(더 신선한 stage)를 덮어써 부당 회귀한다(다음 SSE 없으면
+  // 자체 회복 안 됨). 처방: AbortController로 in-flight 자체를 최대 1개로 강제 — 새 fetch를
+  // 쏘기 직전 이전 컨트롤러를 abort하면 오래된 fetch는 AbortError로 죽어 절대 응답을
+  // 반영하지 못한다(순서 문제가 "가장 최근 것만 살아있다"는 불변식으로 구조적 소멸).
+  const fetchAbortRef = useRef<AbortController | null>(null);
   useEffect(() => {
     currentStoryIdRef.current = story.id;
     setSsePipelineStage(undefined);
     return () => {
       if (sseDebounceRef.current) clearTimeout(sseDebounceRef.current);
+      fetchAbortRef.current?.abort();
     };
   }, [story.id]);
 
@@ -388,10 +398,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     if (sseDebounceRef.current) clearTimeout(sseDebounceRef.current);
     sseDebounceRef.current = setTimeout(() => {
       sseDebounceRef.current = null;
+      // 이전 in-flight fetch를 abort — 동시 in-flight 0건 불변식(위 주석). 새 컨트롤러로 교체.
+      fetchAbortRef.current?.abort();
+      const controller = new AbortController();
+      fetchAbortRef.current = controller;
       // story #2933 H2(PO 조건②) — 재파생 폴백 없음: SSE payload의 new_stage를 바로 안 쓰고
       // (그 값은 트리거일 뿐), get_story(H1이 trust_stage 배선한 그 엔드포인트)를 다시 불러
       // BE 판정값을 그대로 반영한다. 실패하면 조용히 무시(기존 표시값 유지 — 재파생 0).
-      fetchWithAuth(`/api/stories/${firedForId}`)
+      fetchWithAuth(`/api/stories/${firedForId}`, { signal: controller.signal })
         .then((r) => (r.ok ? r.json() : null))
         .then((json) => {
           // 레이스 가드 — fetch를 쏜 뒤 다른 story로 전환됐으면(currentStoryIdRef가 그새
@@ -400,7 +414,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
           const fresh = json?.data as { trust_stage?: WorkcellPipelineStage | null } | undefined;
           if (fresh && 'trust_stage' in fresh) setSsePipelineStage(fresh.trust_stage ?? null);
         })
-        .catch(() => { /* 무시 — 기존 표시값 유지, 재파생 안 함 */ });
+        .catch(() => { /* 무시(abort 포함) — 기존 표시값 유지, 재파생 안 함 */ });
     }, 500);
   }, [story.id]);
 
