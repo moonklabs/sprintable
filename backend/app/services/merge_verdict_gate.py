@@ -625,3 +625,75 @@ async def reconcile_merge_gate_with_real_evidence(
         pr_result=("pass" if merged else None),
         head_sha=head_sha,
     )
+
+
+async def trigger_gate_creation_for_late_participation(
+    session: AsyncSession, org_id: uuid.UUID, story_id: uuid.UUID,
+) -> None:
+    """story #2893 후속(카디르 4라운드 verdict, PR#3357 qa:changes) — 순서 조합 갭: PR
+    opened(참여 無)→라벨정렬(웹훅 트리거는 실행되나 evaluate_merge_gate가 "no implementation
+    participation"으로 gate_id=None 즉시반환)→참여등록(재평가 훅 0)→이후 웹훅 이벤트 없음
+    → **게이트 row가 영구 미생성**된다(2893 원 증상 — close/reopen 강제 그대로 재현. B3
+    재평가 API도 gate id가 없어 호출 불가하므로 이 순서에선 탈출구가 없었다).
+
+    참여 생성 공유 chokepoint(`ensure_implementation_participation`— assignee 자동참여·
+    story claim 양쪽이 공유·`add_participation` 라우터의 직접 생성) 양쪽에서 이 훅을 불러,
+    지금 story에 연결된 PR마다 게이트가 아직 없으면 즉시 만든다(B3의 원격 GitHub 조회
+    조합을 그대로 재사용 — get_pull_request로 현재 head SHA/merged를, fetch_status_check_
+    rollup으로 CI를 읽어 evaluate_merge_gate 재호출. 새 규칙 발명 0).
+
+    best-effort — 실패해도 호출자의 주 액션(참여 등록 자체)을 막으면 안 된다. 링크된 PR이
+    없거나(story #2893 스코프 밖 board-preflight 전용 story 등) GitHub installation이
+    없으면 조용히 no-op(fail-closed: 외부 신호를 지어내지 않는다)."""
+    from app.models.github_installation import GithubInstallation
+    from app.models.pull_request_story_link import PullRequestStoryLink
+    from app.services.github_app import get_installation_token, get_pull_request
+    from app.services.verdict_capture import fetch_status_check_rollup
+
+    try:
+        links = (
+            await session.execute(
+                select(PullRequestStoryLink).where(
+                    PullRequestStoryLink.org_id == org_id,
+                    PullRequestStoryLink.story_id == story_id,
+                )
+            )
+        ).scalars().all()
+        if not links:
+            return
+        installation = (
+            await session.execute(
+                select(GithubInstallation).where(
+                    GithubInstallation.org_id == org_id, GithubInstallation.suspended_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if installation is None:
+            return
+        for link in links:
+            existing = await find_gate_slot_with_pr_fallback(
+                session, org_id=org_id, work_item_id=story_id, work_item_type="story",
+                gate_type=MERGE_GATE_TYPE, pr_number=link.pr_number,
+            )
+            if existing is not None:
+                continue  # 이미 게이트가 있음 — 이 훅이 고치려는 갭이 아니다.
+            token = await get_installation_token(installation.installation_id)
+            if not token:
+                continue
+            pr = await get_pull_request(installation.installation_id, link.repo_full_name, link.pr_number)
+            if pr is None:
+                continue
+            head_sha = (pr.get("head") or {}).get("sha")
+            if not head_sha:
+                continue
+            ci_result, _reason = await fetch_status_check_rollup(link.repo_full_name, head_sha, token)
+            await evaluate_merge_gate(
+                session, org_id, story_id,
+                pr_number=link.pr_number, repo=link.repo_full_name,
+                ci_result=ci_result, head_sha=head_sha,
+            )
+    except Exception:  # noqa: BLE001 — best-effort: 참여 등록 자체를 절대 깨뜨리지 않는다.
+        logger.warning(
+            "story=%s: 참여등록 후 게이트 생성 재시도 실패(best-effort, 참여 등록 자체엔 무영향)",
+            story_id, exc_info=True,
+        )

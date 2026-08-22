@@ -71,4 +71,11 @@ async def ensure_implementation_participation(
     p_repo = ParticipationRepository(session, org_id)
     if not await p_repo.exists(story_id, member_id, default_role.id):
         await p_repo.create(story_id=story_id, member_id=member_id, role_id=default_role.id)
+        # story #2893 후속(PR#3357 qa:changes) — PR opened가 참여 등록보다 먼저면
+        # evaluate_merge_gate가 그때 "no implementation participation"으로 gate row를
+        # 영구 미생성했을 수 있다. 지금 막 생긴 participation이 그 갭을 메울 유일한 계기라
+        # 여기서 재시도한다(assignee 자동참여·story claim 양쪽이 이 helper를 공유).
+        from app.services.merge_verdict_gate import trigger_gate_creation_for_late_participation
+
+        await trigger_gate_creation_for_late_participation(session, org_id, story_id)
     return True

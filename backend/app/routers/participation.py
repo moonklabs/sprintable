@@ -68,6 +68,11 @@ async def add_participation(
         member_id=body.member_id,
         role_id=body.role_id,
     )
+    # story #2893 후속(PR#3357 qa:changes) — 직접 참여 등록도 assignee 자동참여와 동일하게
+    # 게이트 생성 갭을 메울 계기다(app/services/participation_helpers.py의 동형 훅 참고).
+    from app.services.merge_verdict_gate import trigger_gate_creation_for_late_participation
+
+    await trigger_gate_creation_for_late_participation(repo.session, repo.org_id, body.story_id)
     return ParticipationResponse.model_validate(p)
 
 
