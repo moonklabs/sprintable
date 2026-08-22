@@ -43,11 +43,15 @@ export function StorageUploaderAvatar({ createdBy, size = 22 }: StorageUploaderA
     );
   }
 
+  // story #2921 S4 후속(유나 design:changes) — avatarColor가 이제 actorType 기반 2값(agent=
+  // blue-soft·human=sunk)이라 AssetCreatedBy엔 없는 정보다. 이 표면은 자산 업로더 표기라
+  // 사람이 대다수(에이전트 업로드도 있으나 구분 신호가 응답에 없다, 지어내지 않음) — human
+  // 처리를 보수적 기본값으로 둔다.
   return (
     <span
       className={cn(
-        'inline-grid shrink-0 place-items-center rounded-full font-semibold text-white',
-        avatarColor(createdBy.id || createdBy.name),
+        'inline-grid shrink-0 place-items-center rounded-full font-semibold',
+        avatarColor(false),
       )}
       style={{ width: size, height: size, fontSize: Math.round(size * 0.4) }}
       aria-label={createdBy.name}

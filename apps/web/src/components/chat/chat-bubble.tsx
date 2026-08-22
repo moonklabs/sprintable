@@ -174,10 +174,14 @@ function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenRe
    * 사본 분화 금지 재사용)로 뜰 때 그 컴포넌트가 요구하는 카탈로그를 그대로 물려준다. */
   eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
 }) {
-  const text = isMine ? 'text-primary-foreground' : 'text-foreground';
-  const muted = isMine ? 'text-primary-foreground/70' : 'text-muted-foreground';
-  const codeBg = isMine ? 'bg-primary-foreground/10 text-primary-foreground' : 'bg-muted text-foreground';
-  const border = isMine ? 'border-primary-foreground/30' : 'border-border';
+  // story #2921 S4(유나 확定) — 「내 메시지=blue-soft」로 바뀌며 isMine 버블도 밝은 배경이
+  // 됐다(옛 solid bg-primary 위 흰 글자 전제가 깨졌다). 이제 양쪽 다 밝은 무채/blue-soft
+  // 패널 위 어두운 ink라 isMine으로 갈릴 이유가 없다 — Proof Capsule(proof-capsule.tsx)도
+  // 발화자와 무관하게 항상 proof-ink/proof-ink-2를 쓰는 것과 같은 이치.
+  const text = 'text-foreground';
+  const muted = 'text-muted-foreground';
+  const codeBg = 'bg-muted text-foreground';
+  const border = 'border-border';
 
   const hasMention = /@[\w가-힣]+/.test(content);
   const hasMarkdown = /[*_`#\[\]>~]|entity:/.test(content);
@@ -263,8 +267,11 @@ function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenRe
     blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className={`mb-1.5 border-l-2 pl-3 ${border} ${muted}`}>{children}</blockquote>,
     a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
       if (href?.startsWith('mention:')) {
+        // story #2921 S4 — 옛 isMine 분기(흰 글자 vs text-primary)는 solid bg-primary 버블
+        // 전제였다. blue-soft로 바뀐 지금은 발화자 무관하게 같은 밝은 배경이라 갈릴 이유가
+        // 없다(위 text/muted/codeBg/border와 동일 논리).
         return (
-          <span className={`font-medium ${isMine ? 'text-primary-foreground underline decoration-primary-foreground/40' : 'text-primary'}`}>
+          <span className="font-medium text-primary underline decoration-primary/40">
             {children}
           </span>
         );
@@ -491,8 +498,9 @@ export function ChatBubble({
             className={`flex-shrink-0 ${isMine ? '' : 'cursor-pointer'}`}
           >
             {/* story #2349 — "상대 프로필" 진입점. 자기 자신 아바타는 클릭 불가(role/tabIndex도 안 붙임).
-                story #2901 — Avatar 프리미티브(이미지→이니셜→Bot/User 아이콘 3단 폴백, onError 하드닝
-                포함)로 교체. presence dot·working ring·AI 배지는 컴포넌트 내부가 이미 처리한다. */}
+                story #2901(3335)+#2921 S4(3339) 합성(유나 확定 5규칙, avatar-unification-design-memo-2921) —
+                Avatar가 정본(사본 분화 금지) — shape(에이전트=circle·human=square)·idle blue 링·
+                working citron 펄스·human 테두리는 전부 avatar.tsx 내부가 결정한다. */}
             <Avatar
               name={displayName}
               avatarUrl={message.sender_avatar_url ?? null}
@@ -585,10 +593,14 @@ export function ChatBubble({
               </code>
             </div>
           ) : (
-            <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm leading-relaxed [overflow-wrap:anywhere] ${
+            /* story #2921 S4(유나 확定) — 버블=무채 panel(내 메시지=blue-soft). 옛
+               bg-primary(solid 채색)+text-primary-foreground(흰 글자)를 proof-blue-soft
+               (밝은 틴트)+text-foreground(어두운 ink)로 — Proof Capsule과 같은 어휘(옅은
+               배경 위 ink, 색은 아이콘/배지가 진다는 #2420 규율과 동형). */
+            <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm leading-relaxed text-foreground [overflow-wrap:anywhere] ${
               isMine
-                ? 'rounded-tr-sm bg-primary text-primary-foreground'
-                : 'rounded-tl-sm bg-muted text-foreground'
+                ? 'rounded-tr-sm bg-proof-blue-soft'
+                : 'rounded-tl-sm bg-proof-panel'
             }`}>
               <ChatMarkdown content={displayContent} isMine={isMine} references={message.references} entityStatusByKey={entityStatusByKey} onOpenReadingPanel={onOpenReadingPanel} eventDefinitionsByKey={eventDefinitionsByKey} />
             </div>

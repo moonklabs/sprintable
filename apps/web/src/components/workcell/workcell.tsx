@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
-import { ProofAvatar, ProofCapsule, type ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
+import { ProofCapsule, type ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
+import { Avatar } from '@/components/shared/avatar';
 
 export interface WorkcellOwner {
   name: string;
@@ -165,9 +166,9 @@ function BriefLayer({ brief }: { brief: WorkcellBrief }) {
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-2 gap-y-1.5 text-[13px] leading-[1.5] text-proof-ink-2">
         <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">{t('briefRoles')}</span>
-        <span className="inline-flex items-center gap-1.5"><ProofAvatar label={brief.owner.name.slice(0, 1)} size={18} />{t('briefOwner')} {brief.owner.name}</span>
+        <span className="inline-flex items-center gap-1.5"><Avatar name={brief.owner.name} actorType="human" size={18} />{t('briefOwner')} {brief.owner.name}</span>
         {brief.agent ? (
-          <span className="inline-flex items-center gap-1.5"><ProofAvatar label={brief.agent.initial} isAgent size={18} />{t('briefAgent')} {brief.agent.name}</span>
+          <span className="inline-flex items-center gap-1.5"><Avatar name={brief.agent.name} actorType="agent" size={18} />{t('briefAgent')} {brief.agent.name}</span>
         ) : null}
         {brief.scopes && brief.scopes.length > 0 ? (
           <span className="font-mono text-[10.5px] text-proof-ink-3">{brief.scopes.join(' · ')}</span>

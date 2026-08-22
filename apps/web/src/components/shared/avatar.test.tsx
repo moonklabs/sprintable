@@ -66,18 +66,51 @@ describe('Avatar — story #2887 S2g', () => {
     expect(container.querySelector('[role="img"]')).not.toBeNull(); // PresenceDot
   });
 
-  it('working=true면 pulsing WORKING_RING 클래스, false면 정적 accent-claim 링', async () => {
+  // story #2921(유나 합성 5규칙③, avatar-unification-design-memo-2921, 2026-08-22 확定) —
+  // 옛 값(idle=citron 정적·working=info(=proof-blue 별칭) 펄스)이 규칙③과 정반대였다(3339
+  // 그라운딩에서 실측 발견) — swap: idle=blue 정적·working=citron 펄스가 정본.
+  it('working=true면 citron 펄스(AGENT_LIVE_RING_CLASS), false면 정적 proof-blue 링', async () => {
     await act(async () => {
       root.render(wrap(<Avatar name="유나" avatarUrl={null} actorType="agent" isWorking />));
     });
-    const ringEl = container.querySelector('.ring-info');
-    expect(ringEl).not.toBeNull();
+    expect(container.querySelector('.ring-proof-citron')).not.toBeNull();
+    expect(container.querySelector('.ring-proof-blue')).toBeNull();
 
     await act(async () => {
       root.render(wrap(<Avatar name="유나" avatarUrl={null} actorType="agent" isWorking={false} />));
     });
-    expect(container.querySelector('.ring-accent-claim')).not.toBeNull();
-    expect(container.querySelector('.ring-info')).toBeNull();
+    expect(container.querySelector('.ring-proof-blue')).not.toBeNull();
+    expect(container.querySelector('.ring-proof-citron')).toBeNull();
+  });
+
+  // story #2921(유나 합성 5규칙②) — 형태는 actorType에서 자동 유도(호출부가 shape를 안 넘김).
+  // 이미지가 있어도 같은 클립(overflow-hidden 래퍼의 반경)을 받는다.
+  it('에이전트=circle(rounded-full)·human=square(rounded-md)+무채 테두리(색과 별개의 redundant 경계 신호)', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" avatarUrl={null} actorType="agent" />));
+    });
+    const agentWrapper = container.querySelector('.rounded-full');
+    expect(agentWrapper).toBeTruthy();
+    expect(container.querySelector('.rounded-md')).toBeNull();
+    expect(container.querySelector('.border-proof-line')).toBeNull(); // 에이전트는 링이 그 역할.
+
+    await act(async () => {
+      root.render(wrap(<Avatar name="송윤재" avatarUrl={null} actorType="human" />));
+    });
+    const humanWrapper = container.querySelector('.rounded-md');
+    expect(humanWrapper).toBeTruthy();
+    expect(humanWrapper?.className).toContain('border-proof-line');
+    expect(container.querySelector('.rounded-full')).toBeNull();
+  });
+
+  it('human도 이미지가 있으면 square로 클립된다(이미지 tier도 형태 예외 없음)', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="송윤재" avatarUrl="https://example.com/a.png" actorType="human" />));
+    });
+    expect(container.querySelector('img')).toBeTruthy();
+    const wrapper = container.querySelector('.rounded-md');
+    expect(wrapper).toBeTruthy();
+    expect(wrapper?.querySelector('img')).toBeTruthy();
   });
 
   it('presenceStatus 없으면(휴먼 기본) dot 미표시 — 에이전트라도 null이면 미표시', async () => {
