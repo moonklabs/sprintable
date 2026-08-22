@@ -338,7 +338,10 @@ function InlineRow({
               둔다(proofState의 문자 신호 유지 — 도크트린 "색만으로 의미 전달 금지"가 요구하는
               stateLabel 텍스트 병기를 이 배지 추가로 잃지 않는다). */}
           {typeBadge ? (
-            <span className="rounded-[4px] border border-proof-line bg-proof-sunk px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.04em] text-proof-ink-2">
+            // 유나 비차단 refinement(2026-08-22, PR#3356) — GATE/STEER/BLOCK/Q 글자수 편차
+            // (1~5자)로 auto-width면 claim 좌측 정렬이 들쭉날쭉했다. min-w로 폭 통일(최장
+            // 라벨 STEER 기준)+text-center로 짧은 라벨(Q)도 같은 자리에 정렬.
+            <span className="min-w-[30px] rounded-[4px] border border-proof-line bg-proof-sunk px-1.5 py-0.5 text-center text-[8px] font-bold uppercase tracking-[0.04em] text-proof-ink-2">
               {typeBadge}
             </span>
           ) : null}
