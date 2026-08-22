@@ -26,6 +26,26 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
 }));
 
+// story #2933 H4 qa:changes(카디르+codex, 2026-08-22) — handleTrustDragEnd(교차 신뢰컬럼
+// 드래그)를 실제로 발화시켜 검증하려면 <DndContext onDragEnd={...}>의 그 콜백을 손에 쥐어야
+// 한다. 이 코드베이스 전체에 dnd-kit 실 포인터 제스처 시뮬레이션 선례가 0(grep 확認) —
+// useSseNotifications를 모킹해 콜백을 캡처하는 기존 관례(story-detail-panel.test.tsx)와
+// 동형으로, DndContext만 부분 모킹해 onDragEnd를 캡처한다(다른 export는 실물 그대로 재사용 —
+// useDroppable/useSortable 등은 실제 dnd-kit 훅이라야 카드 wiring 테스트가 의미 있음).
+const { capturedDragEndHandlers } = vi.hoisted(() => ({
+  capturedDragEndHandlers: [] as Array<(event: unknown) => void>,
+}));
+vi.mock('@dnd-kit/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@dnd-kit/core')>();
+  return {
+    ...actual,
+    DndContext: ({ onDragEnd, children }: { onDragEnd?: (event: unknown) => void; children?: React.ReactNode }) => {
+      if (onDragEnd) capturedDragEndHandlers.push(onDragEnd);
+      return children;
+    },
+  };
+});
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -100,6 +120,7 @@ beforeEach(() => {
   stubLocalStorage();
   stubEventSource();
   useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human' });
+  capturedDragEndHandlers.length = 0;
 });
 
 afterEach(async () => {
@@ -679,5 +700,94 @@ describe('KanbanBoard — 6단계 신뢰축 뷰(story #2933 H4)', () => {
     stubEventSource();
     await mount();
     expect(container.textContent).toContain('입력 필요'); // 재마운트 후에도 신뢰축 뷰 유지
+  });
+
+  // ⚠️QA changes(PR#3366, 카디르+codex, 2026-08-22, HIGH) — 교차 신뢰컬럼 드래그의 낙관 갱신이
+  // status+position만 바꾸고 trust_stage는 스프레드로 구값 잔존 — queued→running 이동은 카드가
+  // 옛 컬럼(queued)에 남고, done 카드를 다른 컬럼으로 옮기면 trust_stage=null 유지로 카드가
+  // 보드에서 실종된다. 처방: bulk PATCH 응답(BE가 이제 _attach_trust_stage로 채워 돌려줌)의
+  // trust_stage를 응답 도착 시점에 병합. 두 케이스를 각각 재현한다.
+  describe('교차 신뢰컬럼 드래그 — trust_stage 병합(PO 처방)', () => {
+    // "카드 텍스트가 문서 어딘가에 있다"만으론 "옛 컬럼에 계속 남아있어도" 통과하는 동어반복
+    // (실측 확認 — 이 헬퍼 없이 첫 버전을 프로덕션 fix 제거 상태로 재실행하면 queued→running
+    // 케이스가 거짓 green이었다). 컬럼별 헤더 라벨로 그 컬럼의 DOM 서브트리를 좁혀 카드가
+    // «그 컬럼 안에» 있는지까지 스코프한다.
+    function columnTextContaining(label: string): string {
+      const columns = [...container.querySelectorAll('[class*="w-\\[280px\\]"]')] as HTMLElement[];
+      const col = columns.find((el) => el.querySelector('h3')?.textContent?.trim().startsWith(label));
+      return col?.textContent ?? '';
+    }
+
+    function stubFetchWithBulkPatch(
+      stories: Array<Record<string, unknown> & { status: string }>,
+      bulkResponseTrustStage: string | null,
+    ) {
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+        if (typeof url === 'string' && url.startsWith('/api/stories?')) {
+          const status = new URL(url, 'http://localhost').searchParams.get('status');
+          const matched = stories.filter((s) => s.status === status);
+          return { ok: true, json: async () => ({ data: matched, meta: { total: matched.length, nextCursor: null } }) };
+        }
+        if (typeof url === 'string' && url.startsWith('/api/members')) {
+          return { ok: true, json: async () => ({ data: [] }) };
+        }
+        if (typeof url === 'string' && url === '/api/stories/bulk' && init?.method === 'PATCH') {
+          const body = JSON.parse(init.body ?? '{}') as { items: { id: string; status: string }[] };
+          const item = body.items[0];
+          return {
+            ok: true,
+            json: async () => ({
+              data: [{ id: item.id, status: item.status, trust_stage: bulkResponseTrustStage, violation: null }],
+            }),
+          };
+        }
+        return { ok: false, json: async () => null };
+      }));
+    }
+
+    it('queued→running 드래그 — bulk 응답 도착 後 trust_stage가 running으로 갱신돼 카드가 "실행 중" 컬럼으로 실제로 옮겨간다', async () => {
+      stubFetchWithBulkPatch(
+        [{ id: 's-queued', title: '대기카드', status: 'ready-for-dev', priority: 'medium', trust_stage: 'queued' }],
+        'running',
+      );
+      await mount();
+      await toggleToTrustAxis();
+      expect(container.textContent).toContain('대기카드');
+
+      const handler = capturedDragEndHandlers.at(-1);
+      expect(handler, 'handleTrustDragEnd를 캡처 못 함').toBeDefined();
+      await act(async () => {
+        handler!({ active: { id: 's-queued' }, over: { id: 'running' } });
+        await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      });
+
+      // 컬럼별로 스코프 — "문서 어딘가엔 있다"만으론 "옛 컬럼에 계속 남아있어도" 통과하는
+      // 동어반복이 된다(실측 확認 — 프로덕션 fix 제거 상태로 재실행하면 이 assertion 없이는
+      // 거짓 green이었다). 병합 後엔 "대기" 컬럼에서 빠지고 "실행 중" 컬럼으로 실제로 옮겨간다.
+      expect(columnTextContaining('대기')).not.toContain('대기카드');
+      expect(columnTextContaining('실행 중')).toContain('대기카드');
+    });
+
+    it('done 카드를 다른 컬럼으로 드래그 — bulk 응답의 trust_stage(null 아닌 새 값)가 반영돼 카드가 보드에서 실종되지 않는다', async () => {
+      stubFetchWithBulkPatch(
+        [{ id: 's-done', title: '완료복귀카드', status: 'done', priority: 'medium', trust_stage: null }],
+        'running',
+      );
+      await mount();
+      await toggleToTrustAxis();
+      expect(container.textContent).toContain('완료복귀카드');
+
+      const handler = capturedDragEndHandlers.at(-1);
+      expect(handler, 'handleTrustDragEnd를 캡처 못 함').toBeDefined();
+      await act(async () => {
+        handler!({ active: { id: 's-done' }, over: { id: 'running' } });
+        await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      });
+
+      // 처방 前(trust_stage 병합 없음)이었다면 status='in-progress'+trust_stage=null(구값
+      // 잔존)이 돼 storyTrustColumn이 null을 반환해 카드가 어느 컬럼에도 안 걸려 사라졌을
+      // 것 — 지금은 bulk 응답의 새 trust_stage('running')가 병합돼 여전히 렌더된다.
+      expect(container.textContent).toContain('완료복귀카드');
+    });
   });
 });

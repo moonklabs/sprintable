@@ -784,8 +784,22 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         return;
       }
       const okItems = await res.json().then((j) => j?.data ?? j).catch(() => null);
-      const violation = Array.isArray(okItems) ? okItems.find((x) => x?.id === storyId)?.violation : null;
+      const okItem = Array.isArray(okItems) ? okItems.find((x) => x?.id === storyId) : null;
+      const violation = okItem?.violation ?? null;
       if (violation) addToast({ type: 'warning', title: t('transitionViolation') });
+      // story #2933 H4 qa:changes(카디르+codex, 2026-08-22) — 위 낙관 갱신(L764-766)은
+      // status/position만 바꿔 trust_stage는 이전 값 그대로 스프레드된다. queued→running
+      // 이동은 카드가 옛 컬럼(queued)에 그대로 남고, done 카드를 다른 컬럼으로 옮기면
+      // trust_stage=null이 유지돼(그 카드가 done이던 동안 원래 null이었으므로) status만
+      // 바뀐 뒤에는 storyTrustColumn이 어느 컬럼과도 안 맞아 카드가 보드에서 실종된다. 서버가
+      // 이제(backend/app/routers/stories.py bulk_update_stories에 _attach_trust_stage 배선
+      // 추가) 계산해 돌려준 진짜 trust_stage를 응답 도착 시점에 병합 — 재파생 폴백 아님(PO
+      // 조건② 그대로, BE 판정값을 그대로 반영할 뿐).
+      if (okItem && 'trust_stage' in okItem) {
+        setStories((prev) =>
+          prev.map((s) => (s.id === storyId ? { ...s, trust_stage: okItem.trust_stage ?? null } : s)),
+        );
+      }
       void fetch(`/api/stories/${storyId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
