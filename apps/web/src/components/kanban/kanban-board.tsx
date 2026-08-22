@@ -116,9 +116,13 @@ function axisModeKey(projectId: string | undefined): string {
   return `board_axis_mode_${projectId ?? 'default'}`;
 }
 
+// PO 긴급 fix(선생님 지적, 2026-08-22) — 방향서 P0-04 원문 «5-status를 보조 뷰로 남기고
+// 기본 상태는 신뢰 파이프라인으로» = 기본값은 'trust'가 스펙. localStorage 미설정 시 'status'로
+// 낙하하던 게 실측 결함(#2933 done 선언 당시 전원이 놓친 사각) — 명시적으로 저장된 'status'
+// 선택만 존중하고, 그 외(미설정 포함)엔 'trust'로 낙하한다.
 function loadAxisMode(projectId: string | undefined): 'status' | 'trust' {
-  if (typeof window === 'undefined') return 'status';
-  return localStorage.getItem(axisModeKey(projectId)) === 'trust' ? 'trust' : 'status';
+  if (typeof window === 'undefined') return 'trust';
+  return localStorage.getItem(axisModeKey(projectId)) === 'status' ? 'status' : 'trust';
 }
 
 function saveAxisMode(projectId: string | undefined, mode: 'status' | 'trust'): void {
@@ -167,7 +171,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // story #2933 H4(P0-H) — 5-status/6단계 신뢰축 컬럼 축 토글. viewMode(board/list)와 직교
   // (list 뷰는 이번 슬라이스 스코프 밖 — trust 축은 board 렌더 안에서만). doneCollapsed와
   // 동형 localStorage 패턴(project별) — 재방문해도 마지막 선택 유지.
-  const [axisMode, setAxisMode] = useState<'status' | 'trust'>('status');
+  const [axisMode, setAxisMode] = useState<'status' | 'trust'>('trust');
   useEffect(() => {
     setAxisMode(loadAxisMode(projectId));
   }, [projectId]);
@@ -1516,13 +1520,19 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           // ⚠️컬럼 그리드를 대체하지 않고 그 위 배너로만 — CTA가 여는 백로그 인라인 컴포저
           // (autoComposeSignal)가 KanbanColumn 내부 상태라, 컬럼 자체가 마운트돼 있어야
           // CTA 클릭이 실제로 컴포저를 연다(대체했다면 신호를 받을 컬럼이 없어 무반응했을 것).
+          //
+          // PO 긴급 fix(P0-04 기본축 trust 플립, 2026-08-22) — 인라인 컴포저는 KanbanColumn
+          // (5-status 클래식) 전용이라 KanbanTrustColumn엔 아직 없다(별도 스토리 필요 규모라
+          // 이 소PR 스코프 밖). 기본축이 trust로 바뀌면서 이 CTA가 신호를 받을 컬럼 자체가
+          // 없어 무반응해지는 걸 막기 위해, 클릭 시 클래식 축으로 먼저 전환한다(무한 회귀
+          // onboarding 실종보다 «클래식으로 넘어가서 만든다»가 정직한 임시 처방).
           <div className="shrink-0 border-b border-border/60 px-6 py-4">
             <EmptyState
               icon={<Workflow className="size-8" />}
               title={t('boardEmptyTitle')}
               description={t('boardEmptyDescription')}
               action={
-                <Button size="sm" onClick={() => setAutoComposeNonce((n) => n + 1)}>
+                <Button size="sm" onClick={() => { handleSetAxisMode('status'); setAutoComposeNonce((n) => n + 1); }}>
                   <Plus className="size-3.5" />
                   {t('boardEmptyCta')}
                 </Button>
