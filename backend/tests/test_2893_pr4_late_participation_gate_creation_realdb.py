@@ -162,7 +162,8 @@ async def test_late_participation_after_opened_and_labeled_creates_missing_gate(
         async with Session() as s:
             assert len(await _gates_for_story(s, story_id)) == 0, "라벨정렬로도 참여 無면 여전히 없어야 함(전제)"
 
-        # 3) 참여 등록(늦게) — 이 훅이 갭을 메워야 한다.
+        # 3) 참여 등록(늦게) — 이 훅이 갭을 메워야 한다. 훅은 호출자 세션(s)을 그대로 쓴다
+        #    (카디르 QA② — SAVEPOINT 격리, 별도 세션 아님. read-your-own-write 유지).
         p1, p2, p3 = _live_pr_patches(head_sha="sha-late-1", ci_result="success")
         async with Session() as s:
             with p1, p2, p3:
@@ -313,5 +314,135 @@ async def test_participation_hook_noop_when_gate_already_exists():
         async with Session() as s:
             gates = await _gates_for_story(s, story_id)
             assert len(gates) == 1, "이미 있던 게이트를 중복 생성하면 안 됨"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_one_pr_failure_does_not_block_other_pr_gate_creation():
+    """카디르 QA②-①(PR#3357 재재verdict) — link별 예외 격리. 같은 스토리에 링크된 PR 2개
+    중 하나(701) 처리가 실패해도, 다른 하나(702)는 정상적으로 게이트를 받아야 한다(예전엔
+    전체를 감싼 단일 try가 첫 실패에서 나머지 링크 처리를 통째로 건너뛰었다)."""
+    from app.services.participation_helpers import ensure_implementation_participation
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, _project, story = await _seed_org_project_story_no_role(s)
+            await _seed_installation(s, org, installation_id=680701)
+            await _seed_link(s, org, story, pr_number=701)
+            await _seed_link(s, org, story, pr_number=702)
+            story_id = story.id
+
+        async def _get_pr_fails_for_701(installation_id, repo_full_name, pr_number):
+            if pr_number == 701:
+                raise RuntimeError("simulated GitHub fetch failure for PR 701")
+            return {"head": {"sha": "sha-702"}, "merged": False}
+
+        async with Session() as s:
+            with (
+                patch("app.services.github_app.get_installation_token", AsyncMock(return_value="inst-tok")),
+                patch("app.services.github_app.get_pull_request", new=_get_pr_fails_for_701),
+                patch(
+                    "app.services.verdict_capture.fetch_status_check_rollup",
+                    AsyncMock(return_value=("success", None)),
+                ),
+            ):
+                ok = await ensure_implementation_participation(s, org.id, story_id, uuid.uuid4())
+                await s.commit()
+        assert ok is True
+
+        async with Session() as s:
+            gates = {g.pr_number: g for g in await _gates_for_story(s, story_id)}
+            assert 702 in gates, "701 처리가 실패해도 702는 정상적으로 게이트를 받아야 함(link별 격리)"
+            assert 701 not in gates, "701 자체는 실패했으니 게이트가 없어야 함(지어내지 않음)"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_link_failure_does_not_poison_session_participation_still_commits():
+    """카디르 QA②-②(PR#3357 재재verdict) — 세션 오염 차단. 훅 내부에서 **실 DB 레벨 에러**
+    (Postgres division_by_zero — mock이 아니라 진짜 DBAPI 에러라야 세션이 실제로 오염된다)가
+    나도 호출자 세션이 오염되면 안 된다 — SAVEPOINT 격리 덕에 참여 등록 자체(호출자의
+    flush·commit)는 여전히 성공해야 한다는 것을 직접 증명한다."""
+    from app.services.participation_helpers import ensure_implementation_participation
+
+    async def _evaluate_merge_gate_with_real_db_error(session, org_id, story_id, **kwargs):
+        from sqlalchemy import text
+        await session.execute(text("SELECT 1/0"))  # 실 Postgres division_by_zero — 진짜 세션 오염.
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, _project, story = await _seed_org_project_story_no_role(s)
+            await _seed_installation(s, org, installation_id=680703)
+            await _seed_link(s, org, story, pr_number=703)
+            story_id = story.id
+
+        member_id = uuid.uuid4()
+        p1, p2 = _live_pr_patches(head_sha="sha-703", ci_result="success")[:2]
+        async with Session() as s:
+            with (
+                p1, p2,
+                patch(
+                    "app.services.merge_verdict_gate.evaluate_merge_gate",
+                    new=_evaluate_merge_gate_with_real_db_error,
+                ),
+            ):
+                ok = await ensure_implementation_participation(s, org.id, story_id, member_id)
+                # 핵심 단언: 훅이 실 DB 에러를 만났어도, 이 commit 자체가 안 죽어야 한다
+                # (PendingRollbackError 등으로 여기서 raise되면 세션이 오염됐다는 뜻).
+                await s.commit()
+            assert ok is True
+
+        async with Session() as s:
+            from app.models.participation import Participation
+
+            rows = (
+                await s.execute(select(Participation).where(Participation.story_id == story_id))
+            ).scalars().all()
+            assert len(rows) == 1 and rows[0].member_id == member_id, (
+                "참여 행이 실제로 커밋돼 있어야 함(세션 오염이 없었다는 최종 증거)"
+            )
+            assert len(await _gates_for_story(s, story_id)) == 0, "실패한 evaluate_merge_gate가 게이트를 만들면 안 됨"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_soft_deleted_link_is_not_revived_by_late_participation():
+    """카디르 QA②-③(PR#3357 재재verdict) — soft-delete 필터. 사용자가 명시로 끊은 연결
+    (deleted_at 有)은 참여등록이 늦게 와도 되살아나면 안 된다."""
+    from app.services.participation_helpers import ensure_implementation_participation
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, _project, story = await _seed_org_project_story_no_role(s)
+            await _seed_installation(s, org, installation_id=680704)
+            story_id = story.id
+
+            from datetime import datetime, timezone
+
+            from app.models.pull_request_story_link import PullRequestStoryLink
+
+            s.add(PullRequestStoryLink(
+                id=uuid.uuid4(), org_id=org.id, story_id=story_id,
+                repo_full_name="moonklabs/sprintable", pr_number=704,
+                link_source="explicit", confidence="high",
+                deleted_at=datetime.now(timezone.utc),
+            ))
+            await s.commit()
+
+        p1, p2, p3 = _live_pr_patches(head_sha="sha-704", ci_result="success")
+        async with Session() as s:
+            with p1, p2, p3:
+                ok = await ensure_implementation_participation(s, org.id, story_id, uuid.uuid4())
+                await s.commit()
+        assert ok is True
+
+        async with Session() as s:
+            assert len(await _gates_for_story(s, story_id)) == 0, "soft-delete된 링크는 부활하면 안 됨"
     finally:
         await engine.dispose()

@@ -642,9 +642,26 @@ async def trigger_gate_creation_for_late_participation(
     조합을 그대로 재사용 — get_pull_request로 현재 head SHA/merged를, fetch_status_check_
     rollup으로 CI를 읽어 evaluate_merge_gate 재호출. 새 규칙 발명 0).
 
-    best-effort — 실패해도 호출자의 주 액션(참여 등록 자체)을 막으면 안 된다. 링크된 PR이
-    없거나(story #2893 스코프 밖 board-preflight 전용 story 등) GitHub installation이
-    없으면 조용히 no-op(fail-closed: 외부 신호를 지어내지 않는다)."""
+    ⚠️호출자의 세션을 그대로 받는다(별도 세션 아님) — 방금 `flush`된(아직 커밋 前) participation
+    행을 evaluate_merge_gate가 같은 트랜잭션 안에서 즉시 봐야 하기 때문(실측: 별도 세션으로
+    분리했더니 그 세션엔 아직 안 보이는 미커밋 행 탓에 "no implementation participation"으로
+    재실패 — read-your-own-write가 세션 경계를 못 넘는다). 대신 **세션 오염은 SAVEPOINT로
+    막는다**(카디르 QA②) — 링크마다 `session.begin_nested()`로 감싸, 그 PR의 DB 예외가
+    SAVEPOINT까지만 롤백되고 호출자의 participation flush·다른 링크의 처리·최종 commit에는
+    전혀 새지 않는다.
+
+    카디르 QA(PR#3357 재재verdict, 2026-08-22) 3건 하드닝:
+    ①**link별 예외 격리** — 하나의 PR 처리 실패가 나머지 PR을 막으면 안 된다(전체를 감싸던
+    단일 try를 per-link try로 분리).
+    ②**세션 오염 차단** — 위 SAVEPOINT 격리(개별 세션이 아니라 개별 SAVEPOINT — 이유는
+    docstring 서두 참조).
+    ③**soft-delete 필터** — `resolve_pr_link`(canonical reader)와 동일하게
+    `deleted_at IS NULL`만 조회한다 — 없으면 사용자가 명시로 끊은 연결(explicit unlink)이
+    이 훅으로 되살아나는 의미 결함이었다.
+
+    best-effort — 어느 PR이 실패해도 다른 PR·호출자의 참여 등록 자체를 절대 막지 않는다.
+    링크된 PR이 없거나(board-preflight 전용 story 등) GitHub installation이 없으면 조용히
+    no-op(fail-closed: 외부 신호를 지어내지 않는다)."""
     from app.models.github_installation import GithubInstallation
     from app.models.pull_request_story_link import PullRequestStoryLink
     from app.services.github_app import get_installation_token, get_pull_request
@@ -656,6 +673,7 @@ async def trigger_gate_creation_for_late_participation(
                 select(PullRequestStoryLink).where(
                     PullRequestStoryLink.org_id == org_id,
                     PullRequestStoryLink.story_id == story_id,
+                    PullRequestStoryLink.deleted_at.is_(None),
                 )
             )
         ).scalars().all()
@@ -670,30 +688,40 @@ async def trigger_gate_creation_for_late_participation(
         ).scalar_one_or_none()
         if installation is None:
             return
-        for link in links:
-            existing = await find_gate_slot_with_pr_fallback(
-                session, org_id=org_id, work_item_id=story_id, work_item_type="story",
-                gate_type=MERGE_GATE_TYPE, pr_number=link.pr_number,
-            )
-            if existing is not None:
-                continue  # 이미 게이트가 있음 — 이 훅이 고치려는 갭이 아니다.
-            token = await get_installation_token(installation.installation_id)
-            if not token:
-                continue
-            pr = await get_pull_request(installation.installation_id, link.repo_full_name, link.pr_number)
-            if pr is None:
-                continue
-            head_sha = (pr.get("head") or {}).get("sha")
-            if not head_sha:
-                continue
-            ci_result, _reason = await fetch_status_check_rollup(link.repo_full_name, head_sha, token)
-            await evaluate_merge_gate(
-                session, org_id, story_id,
-                pr_number=link.pr_number, repo=link.repo_full_name,
-                ci_result=ci_result, head_sha=head_sha,
-            )
-    except Exception:  # noqa: BLE001 — best-effort: 참여 등록 자체를 절대 깨뜨리지 않는다.
+        installation_id = installation.installation_id
+    except Exception:  # noqa: BLE001 — best-effort: 준비 단계 실패도 참여 등록을 안 막는다.
         logger.warning(
-            "story=%s: 참여등록 후 게이트 생성 재시도 실패(best-effort, 참여 등록 자체엔 무영향)",
+            "story=%s: 참여등록 후 게이트 생성 재시도 준비 단계 실패(best-effort)",
             story_id, exc_info=True,
         )
+        return
+
+    for link in links:
+        try:
+            async with session.begin_nested():  # SAVEPOINT — 이 링크만 롤백, 호출자 트랜잭션은 무영향.
+                existing = await find_gate_slot_with_pr_fallback(
+                    session, org_id=org_id, work_item_id=story_id, work_item_type="story",
+                    gate_type=MERGE_GATE_TYPE, pr_number=link.pr_number,
+                )
+                if existing is not None:
+                    continue  # 이미 게이트가 있음 — 이 훅이 고치려는 갭이 아니다.
+                token = await get_installation_token(installation_id)
+                if not token:
+                    continue
+                pr = await get_pull_request(installation_id, link.repo_full_name, link.pr_number)
+                if pr is None:
+                    continue
+                head_sha = (pr.get("head") or {}).get("sha")
+                if not head_sha:
+                    continue
+                ci_result, _reason = await fetch_status_check_rollup(link.repo_full_name, head_sha, token)
+                await evaluate_merge_gate(
+                    session, org_id, story_id,
+                    pr_number=link.pr_number, repo=link.repo_full_name,
+                    ci_result=ci_result, head_sha=head_sha,
+                )
+        except Exception:  # noqa: BLE001 — 이 링크만 실패 처리(SAVEPOINT 롤백), 다른 링크·호출자 세션엔 무영향.
+            logger.warning(
+                "story=%s pr=%s: 참여등록 후 게이트 생성 재시도 실패(best-effort, 다른 PR·참여 등록 자체엔 무영향)",
+                story_id, link.pr_number, exc_info=True,
+            )
