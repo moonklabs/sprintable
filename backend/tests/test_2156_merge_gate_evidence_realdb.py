@@ -410,3 +410,86 @@ async def test_create_gate_sets_requires_human_false_for_auto_passed_gate_realdb
             assert gate.requires_human is False
     finally:
         await engine.dispose()
+
+
+# ─── story #2912(2899 그라운딩 갈래D 처방③, BE 레이어) ──────────────────────
+# pull_request.edited가 base retarget(새 커밋 없이 base branch만 바뀜, #3317 실사고)에도
+# 뜨는데, 이 웹훅 핸들러의 두 체크런 재발행 분기(ungated_check_publish·gate_check_publish)
+# 는 edited를 아예 안 들었다 — GHA 레이어(PR①/#3326)와 독립적으로 같은 갭. changes.base
+# 유무로 순수 title/body 편집과 base 변경을 가른다(GitHub이 base가 실제로 바뀐 edited
+# 이벤트에만 payload.changes.base를 채워 보낸다).
+
+def _base_retarget_payload(*, pr_number=42, changes_base=True):
+    payload = {
+        "repository": {"full_name": "moonklabs/sprintable"},
+        "pull_request": {
+            "number": pr_number, "merged": False, "title": "fix(#1): x",
+            "head": {"ref": "fix/1-x", "sha": "newsha123"},
+        },
+        "action": "edited",
+        "installation": {"id": 123},
+    }
+    if changes_base:
+        payload["changes"] = {"base": {"ref": {"from": "main"}, "sha": {"from": "oldbasesha"}}}
+    else:
+        payload["changes"] = {"title": {"from": "old title"}}  # 순수 제목편집, base 무변화
+    return payload
+
+
+def test_is_base_retarget_edit_computation_pure():
+    """is_base_retarget_edit 계산 자체(순수 함수적 조각) — edited+changes.base 有일 때만
+    True, 그 외(edited인데 base없음·edited아닌 다른 action)는 전부 False."""
+    def _compute(pr_action, payload):
+        return pr_action == "edited" and bool((payload.get("changes") or {}).get("base"))
+
+    assert _compute("edited", {"changes": {"base": {"ref": {"from": "main"}}}}) is True
+    assert _compute("edited", {"changes": {"title": {"from": "old"}}}) is False
+    assert _compute("edited", {}) is False
+    assert _compute("edited", {"changes": None}) is False
+    assert _compute("synchronize", {"changes": {"base": {"ref": {"from": "main"}}}}) is False
+    assert _compute(None, {}) is False
+
+
+@pytest.mark.anyio
+async def test_ungated_check_publish_fires_on_base_retarget_edit_but_not_pure_title_edit():
+    """unlinked story(rl.story_id=None) 경로 — base retarget edited는 ungated_check_publish에
+    (installation_id 등) append돼야 하고, 순수 title 편집(changes.base 없음)은 append 안 돼야
+    한다(낭비 재발행 방지 — GHA required 잡과 달리 skip 상태 landmine은 없는 자리)."""
+    from app.models.github_installation import GithubInstallation, GithubWebhookDelivery
+    from app.routers.verdict_capture import _process_webhook_event
+    from app.services.pr_story_link import ResolvedLink
+
+    org_id = uuid.uuid4()
+    installation = GithubInstallation(
+        id=uuid.uuid4(), installation_id=123, org_id=org_id, account_login="moonklabs",
+    )
+
+    async def _run(payload):
+        delivery = GithubWebhookDelivery(
+            id=uuid.uuid4(), source="app", delivery_id=f"d-{uuid.uuid4()}",
+            event="pull_request", status="received",
+        )
+        session = AsyncMock()
+        exec_result = AsyncMock()
+        exec_result.scalar_one_or_none = lambda: installation
+        session.execute = AsyncMock(return_value=exec_result)
+        ungated: list[dict] = []
+        with (
+            patch(
+                "app.routers.verdict_capture.resolve_story_for_pr",
+                AsyncMock(return_value=ResolvedLink(None, None, None, None, False, "no_match")),
+            ),
+            patch("app.services.gate_github_check.is_repo_check_enforced", AsyncMock(return_value=True)),
+        ):
+            await _process_webhook_event(
+                session, "app", "pull_request", payload, 123, delivery,
+                gate_check_publish=[], ungated_check_publish=ungated,
+            )
+        return ungated
+
+    base_retarget = await _run(_base_retarget_payload(changes_base=True))
+    assert len(base_retarget) == 1, "base retarget edited는 ungated_check_publish에 정확히 1건 append돼야 함"
+    assert base_retarget[0]["installation_id"] == 123
+
+    title_only = await _run(_base_retarget_payload(changes_base=False))
+    assert title_only == [], "순수 title 편집(changes.base 없음)은 append 0건이어야 함(낭비 재발행 방지)"

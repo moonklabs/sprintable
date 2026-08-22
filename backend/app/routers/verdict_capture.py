@@ -339,6 +339,15 @@ async def _process_webhook_event(
     repo = (payload.get("repository") or {}).get("full_name") or ""
     pr_number, merged, ci_conclusion, head_sha = _extract_pr_ci(event, payload)
     pr_action = payload.get("action") if event == "pull_request" else None
+    # story #2912(2899 그라운딩 갈래D 처방③, BE 레이어) — pull_request.edited는 title/body
+    # 편집에도 뜨고 base branch 변경에도 뜬다(GitHub 공식 문서). 이 두 아래 체크런
+    # (재)발행 분기는 "새 커밋 없이 base만 바뀌어 synchronize가 안 뜬 재타겟"(#3317 실사고)을
+    # 커버해야 하므로 edited를 추가하되, title/body만 바뀐 edited까지 매번 재발행하면 낭비다
+    # — GHA 워크플로 required 잡(PR①/#3326)과 달리 여기는 "skipped 상태" 개념이 없는 순수
+    # 백엔드 사이드이펙트(체크런 재발행 여부)라 changes.base 유무로 필터링해도 그 landmine이
+    # 없다([[ci-stuck-c-d-remedy-design-20260822]] 참고) — payload.changes.base는 base가
+    # 실제로 바뀐 edited 이벤트에만 GitHub이 채워 보낸다.
+    is_base_retarget_edit = pr_action == "edited" and bool((payload.get("changes") or {}).get("base"))
 
     installation: GithubInstallation | None = None
     org_id: uuid.UUID | None = None
@@ -401,7 +410,7 @@ async def _process_webhook_event(
         if (
             org_id is not None
             and event == "pull_request"
-            and pr_action in ("opened", "reopened", "ready_for_review", "synchronize")
+            and (pr_action in ("opened", "reopened", "ready_for_review", "synchronize") or is_base_retarget_edit)
             and head_sha
             and ungated_check_publish is not None
         ):
@@ -436,7 +445,7 @@ async def _process_webhook_event(
     # 그새 커밋이 바뀐 경우를 못 잡는다. 네 액션 전부에서 동일 가드를 돌린다(비교 비용은 동일).
     if (
         event == "pull_request"
-        and pr_action in ("opened", "reopened", "ready_for_review", "synchronize")
+        and (pr_action in ("opened", "reopened", "ready_for_review", "synchronize") or is_base_retarget_edit)
         and head_sha
         and gate_check_publish is not None
     ):
