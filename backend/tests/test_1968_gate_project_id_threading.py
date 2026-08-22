@@ -199,7 +199,16 @@ async def test_merge_gate_threads_resolved_project_id():
     from app.services import merge_verdict_gate as mvg
 
     org_id, story_id, project_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    # 카디르 QA(PR#3349 재재verdict, 2026-08-22) — evaluate_merge_gate가 이제 내부에서
+    # find_gate_slot_with_pr_fallback(session.execute 최대 2회)를 거친다. 완전 미설정
+    # AsyncMock()은 `.scalar_one_or_none()`(동기 메서드)까지 AsyncMock 자손이라 호출 시
+    # 「awaited 안 된 coroutine」을 그대로 반환해(is not None) "게이트 찾음"으로 오판,
+    # `.status` 접근에서 AttributeError. session.execute(...)가 항상 "게이트 없음"을
+    # 뜻하는 동기 결과를 반환하도록 미리 배선한다.
     session = AsyncMock()
+    _no_row = MagicMock()
+    _no_row.scalar_one_or_none = MagicMock(return_value=None)
+    session.execute = AsyncMock(return_value=_no_row)
     part = SimpleNamespace(member_id=uuid.uuid4(), role_id=uuid.uuid4())
     gate = SimpleNamespace(id=uuid.uuid4(), status="auto_passed", evidence_status=None)
 
