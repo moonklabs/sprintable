@@ -318,6 +318,7 @@ async def _process_webhook_event(
     *,
     gate_check_publish: list[dict] | None = None,
     ungated_check_publish: list[dict] | None = None,
+    label_unlabel_publish: list[dict] | None = None,
 ) -> tuple[dict, str]:
     """검증·dedup 통과한 이벤트 처리(legacy/app 라우팅·Bot-L.1 resolver 체인). (result, status) 반환.
 
@@ -335,6 +336,10 @@ async def _process_webhook_event(
     바뀐 경우만**, story #2912)가 발행해야 할 GitHub check-run 정보를 append — 호출자(github_webhook)
     가 **commit 後** 배경 태스크로 발행(fail-closed: GitHub 외부 API 호출을 DB 트랜잭션 성공 확정
     前에 하지 않는다).
+
+    ``label_unlabel_publish``(story #2893 설계안 §3 B2-a, 위와 동형 outparam): `reopen_gate_if_new_sha`
+    가 실제로 SHA 재-pending을 발생시킨 경우에만(단순 재확인·SHA 일치는 대상 아님) qa:pass/
+    design:pass 라벨 제거 요청을 append — 마찬가지로 commit 後 background_tasks로 발행.
     """
     texts = _candidate_texts(payload)
     repo = (payload.get("repository") or {}).get("full_name") or ""
@@ -468,7 +473,7 @@ async def _process_webhook_event(
             gate_type=_MERGE_GATE_TYPE, pr_number=(pr_number if pr_number > 0 else None),
         )
         if merge_gate is not None:
-            await reopen_gate_if_new_sha(
+            _repended = await reopen_gate_if_new_sha(
                 session, org_id, merge_gate, head_sha,
                 repo_full_name=repo, pr_number=pr_number,
             )
@@ -476,6 +481,17 @@ async def _process_webhook_event(
                 "org_id": org_id, "gate_id": merge_gate.id,
                 "head_sha": head_sha, "repo_full_name": repo, "pr_number": pr_number,
             })
+            # story #2893(설계안 §3 B2-a) — 「라벨=검증된 SHA에 대한 약속」. 실제 재-pending이
+            # 일어난 경우(SHA 실불일치)에만 qa:pass/design:pass를 뗀다(재검토 강제) — SHA가
+            # 그대로면(False) 아직 유효한 약속이므로 라벨은 안 건드린다. diff 분류 fast-path
+            # (문서만 변경 등 자동 재라벨)는 PO 명시 스코프 밖 — 여기 조건분기 0.
+            if _repended and label_unlabel_publish is not None:
+                from app.services.gate_github_check import RECHECK_LABELS
+
+                label_unlabel_publish.append({
+                    "org_id": org_id, "repo_full_name": repo, "pr_number": pr_number,
+                    "labels": list(RECHECK_LABELS),
+                })
         else:
             # story #2826(주 처방, PO 확定 2026-08-20) — story 링크는 해소됐는데 gate가 아직
             # 없다(지금까지 유일한 생성 경로였던 board →done preflight를 아직 안 거쳤다는 뜻,
@@ -806,11 +822,13 @@ async def github_webhook(
     # 5) 처리 + status 갱신 + commit 을 **동일 트랜잭션**으로. 실패=rollback(delivery row 도 함께 → retry 보존).
     _gate_check_publish: list[dict] = []
     _ungated_check_publish: list[dict] = []
+    _label_unlabel_publish: list[dict] = []
     try:
         result, status_label = await _process_webhook_event(
             session, source, event, payload, installation_id, delivery,
             gate_check_publish=_gate_check_publish,
             ungated_check_publish=_ungated_check_publish,
+            label_unlabel_publish=_label_unlabel_publish,
         )
         delivery.status = status_label
         # story #2327(재정의): "ignored"의 실제 사유를 delivery 행에도 남긴다 — HTTP 응답
@@ -830,6 +848,13 @@ async def github_webhook(
 
             for _payload in _ungated_check_publish:
                 background_tasks.add_task(publish_action_required_check, **_payload)
+        # story #2893(설계안 §3 B2-a): SHA 재-pending으로 인한 qa:pass/design:pass 라벨 제거도
+        # 동일하게 commit 後 발행(fail-closed).
+        if _label_unlabel_publish:
+            from app.services.gate_github_check import publish_label_unlabel
+
+            for _payload in _label_unlabel_publish:
+                background_tasks.add_task(publish_label_unlabel, **_payload)
         return _ok(result)
     except Exception as exc:
         await session.rollback()  # delivery insert 포함 전부 rollback → GitHub retry 가 재처리(영구 no-op 금지).

@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from urllib.parse import quote
 
 import httpx
 from jose import JWTError, jwt
@@ -204,6 +205,34 @@ async def update_check_run(
         )
         return None
     return resp.json()
+
+
+async def remove_pr_label(installation_id: int, repo_full_name: str, pr_number: int, label: str) -> bool:
+    """story #2893(설계안 §3 B2-a) — `DELETE /repos/{repo}/issues/{pr}/labels/{name}`(PR도 issue
+    라벨 엔드포인트 공유, GitHub 공식). SHA 재-pending 시 qa:pass/design:pass를 강제로 뗀다
+    (「라벨=검증된 SHA에 대한 약속」 시맨틱 — 새 커밋이 오면 그 약속은 깨진 것).
+
+    404(그 라벨이 애초에 PR에 없음)는 목표 상태(라벨 없음)와 동일하므로 성공 취급(idempotent —
+    "있으면 떼고 없으면 그대로"). 그 외 실패만 경고 로그+False. create_check_run과 동일 계약:
+    예외 미삼킴(호출자가 fail-closed try/except 담당)."""
+    token = await get_installation_token(installation_id)
+    if not token:
+        return False
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.delete(
+            f"{_GITHUB_API}/repos/{repo_full_name}/issues/{pr_number}/labels/{quote(label, safe='')}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+            },
+        )
+    if resp.status_code not in (200, 404):
+        logger.warning(
+            "label 제거 실패 HTTP %s (repo=%s pr=%s label=%s)",
+            resp.status_code, repo_full_name, pr_number, label,
+        )
+        return False
+    return True
 
 
 async def fetch_installation_metadata(installation_id: int) -> dict | None:

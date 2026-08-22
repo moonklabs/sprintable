@@ -292,6 +292,38 @@ async def publish_gate_check(
         logger.exception("gate=%s: check 발행 처리 중 예외(fail-closed, GitHub 쪽 무영향)", gate_id)
 
 
+# story #2893(설계안 §3 B2-a) — 재검토를 강제하는 대상 라벨. 「라벨=검증된 SHA에 대한 약속」
+# 시맨틱이라 SHA 재-pending 시 이 둘을 뗀다. diff 분류 fast-path(문서만 변경 등)는 설계상
+# 스코프 밖(PO 명시 제외, 2026-08-21) — 여기 조건 분기 0.
+RECHECK_LABELS = ("qa:pass", "design:pass")
+
+
+async def publish_label_unlabel(org_id: uuid.UUID, repo_full_name: str, pr_number: int, labels: list[str]) -> None:
+    """story #2893(설계안 §3 B2-a) — SHA 재-pending 시 qa:pass/design:pass 라벨을 GitHub에서
+    제거한다. `publish_gate_check`와 동일 background-task 패턴(자기 세션 열어 installation_id만
+    해소 — gate row 조회는 이 함수 관심사 밖, 호출자(verdict_capture.py)가 재-pending 판단을
+    이미 끝내고 넘긴다). 절대 예외를 던지지 않는다 — 실패는 로그만(fail-closed: 라벨이 안
+    떨어져도 GitHub 쪽은 이전 상태 그대로일 뿐, DB 트랜잭션은 이미 커밋 완료된 뒤라 무관)."""
+    from app.core.database import async_session_factory
+    from app.services.github_app import remove_pr_label
+
+    try:
+        async with async_session_factory() as session:
+            installation_id = await _resolve_installation_id(session, org_id)
+        if installation_id is None:
+            logger.info("org=%s: GitHub installation 없음 — 라벨 제거 skip", org_id)
+            return
+        for label in labels:
+            ok = await remove_pr_label(installation_id, repo_full_name, pr_number, label)
+            if not ok:
+                logger.warning(
+                    "repo=%s pr=%s label=%s 제거 실패(fail-closed, GitHub 쪽 무영향)",
+                    repo_full_name, pr_number, label,
+                )
+    except Exception:  # noqa: BLE001 — fail-closed 경계: 백그라운드 태스크는 절대 안 죽는다.
+        logger.exception("repo=%s pr=%s: 라벨 제거 처리 중 예외(fail-closed)", repo_full_name, pr_number)
+
+
 async def reopen_gate_if_new_sha(
     session: AsyncSession,
     org_id: uuid.UUID,
