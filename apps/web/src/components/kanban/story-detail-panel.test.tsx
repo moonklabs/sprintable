@@ -169,3 +169,46 @@ describe('StoryDetailPanel — org-switch 잔여 레이스 stale-guard (story #2
     expect(trigger()?.textContent).toBe('Comments (1)'); // 여전히 1 — stale 응답이 2번째로 덮어쓰지 않았다
   });
 });
+
+// story #2922 W1 — 카디르군 QA(#3336 MEDIUM) 지적 회귀가드: Workcell 헤더 pipelineStage
+// 파생이 needs_input/verified 둘 다 localStatus 무관 단독판정이어야 한다. verified만
+// `localStatus==='in-review'`로 게이팅됐던 결함 때문에 in-progress+webhook발 merge
+// 게이트(ci_result=pass)가 running으로 오표시됐다 — 이 async 왕복이 그 정확한 경로를 판다.
+describe('StoryDetailPanel — Workcell pipelineStage 파생(story #2922, 카디르군 #3336 MEDIUM 회귀가드)', () => {
+  const HUMAN_ID = 'human-1';
+  const memberMap = { [HUMAN_ID]: { id: HUMAN_ID, name: '책임자', type: 'human' } };
+
+  async function mountWithGates(status: string, gates: Array<{ gate_type: string; status: string; neutral_facts?: Record<string, unknown> }>) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/api/gates?work_item_id=')) {
+        return { ok: true, json: async () => gates };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel
+          story={makeStory({ status, assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID] })}
+          tasks={[]} onClose={() => {}} memberMap={memberMap}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  // 스테퍼가 6라벨을 항상 전부 렌더하므로(현재단계=스타일만 다름) textContent.toContain으로는
+  // "어느 단계가 current인지" 못 잰다 — aria-current="step"이 붙은 그 원소의 텍스트로만 확인.
+  function currentStageLabel(): string | null {
+    return container.querySelector('[aria-current="step"]')?.textContent?.trim() ?? null;
+  }
+
+  it('in-progress + merge 게이트 pending(ci_result=pass) → Verified (수정 전엔 Running으로 오표시됨)', async () => {
+    await mountWithGates('in-progress', [{ gate_type: 'merge', status: 'pending', neutral_facts: { ci_result: 'pass' } }]);
+    expect(currentStageLabel()).toBe('Verified');
+  });
+
+  it('in-progress + needs-input류 게이트 pending(doc_approval) → Needs input (기존에도 정상, 대칭 확인)', async () => {
+    await mountWithGates('in-progress', [{ gate_type: 'doc_approval', status: 'pending' }]);
+    expect(currentStageLabel()).toBe('Needs input');
+  });
+});

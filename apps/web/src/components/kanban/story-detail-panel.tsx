@@ -745,12 +745,16 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   // 기존 trustChip(deriveInFlightTrustChip, P0-04)을 그대로 재사용 — merge 게이트 pending+
   // ci_result=pass가 "Verified"(AC/자동검증 통과·merge gate 前)와 정확히 같은 신호, needs_input
   // 게이트 pending이 그대로 "Needs input"이다. 신규 BE 필드 0(B1은 doc상 "명시만", 구현 스코프 아님).
+  // 카디르군 QA(#3336 MEDIUM, 2026-08-22) — verified만 `localStatus==='in-review'`로 게이팅해
+  // needs_input과 비대칭이었다: webhook발 merge 게이트가 in-progress 구간에 이미 pending+
+  // ci_result=pass로 도달 가능한 실경로(test_2826 realdb 실증)에서 running으로 오표시되던 결함.
+  // needs_input과 동일하게 trustChip 값만으로 단독판정(status 무관)하도록 정정.
   const PIPELINE_STAGE_BY_STATUS: Record<string, WorkcellPipelineStage> = {
     backlog: 'queued', 'ready-for-dev': 'queued', done: 'merge_ready',
   };
   const pipelineStage: WorkcellPipelineStage | null = PIPELINE_STAGE_BY_STATUS[localStatus]
     ?? (trustChip === 'needs_input' ? 'needs_input'
-      : localStatus === 'in-review' && trustChip === 'merge_ready' ? 'verified'
+      : trustChip === 'merge_ready' ? 'verified'
         : localStatus === 'in-review' ? 'claimed_done'
           : localStatus === 'in-progress' ? 'running'
             : null);
