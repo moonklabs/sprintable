@@ -197,3 +197,64 @@ async def test_patch_tool_allowlist_no_active_key_is_noop_not_error():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_patch_tool_allowlist_resyncs_all_active_keys_when_agent_has_multiple():
+    """카디르 HIGH 재발견(2026-08-22): "활성 키 최대 1개"는 recruit 경로에서만 참인
+    불변식 — 일반 발급 엔드포인트(POST /agents/{agent_id}/api-keys)는 기존 활성 키를
+    확인 안 하고 무조건 신규 발급이라 활성 키가 합법적으로 2개 이상일 수 있다. 이 상태서
+    PATCH로 권한을 축소하면 (a) 크래시 없이 (b) 두 키 전부 새 scope로 갱신돼야 한다."""
+    from app.core.database import Base
+    from app.models.team import TeamMember
+    from app.models.api_key import ApiKey
+    from app.repositories.agent_persona import AgentPersonaRepository
+
+    engine, Session = await _session()
+    try:
+        org_id, project_id = uuid.uuid4(), uuid.uuid4()
+        async with Session() as s:
+            await _bypass_fk(s)
+            member = TeamMember(
+                id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent",
+                name="Multi Active Key Test Agent", role="member", is_active=True,
+            )
+            s.add(member)
+            await s.flush()
+
+            repo = AgentPersonaRepository(s)
+            persona = await repo.create(
+                org_id=org_id, project_id=project_id, agent_id=member.id, actor_id=uuid.uuid4(),
+                name="Multi Active Key Persona", tool_allowlist=["read", "write", "admin"],
+            )
+            key_a = ApiKey(
+                id=uuid.uuid4(), team_member_id=member.id, key_prefix="sk_live_multia",
+                key_hash="fake-hash-multi-a", scope=["read", "write", "admin"],
+            )
+            key_b = ApiKey(
+                id=uuid.uuid4(), team_member_id=member.id, key_prefix="sk_live_multib",
+                key_hash="fake-hash-multi-b", scope=["read", "write", "admin"],
+            )
+            s.add_all([key_a, key_b])
+            await s.commit()
+            persona_id, key_a_id, key_b_id = persona.id, key_a.id, key_b.id
+
+        async with Session() as s:
+            repo = AgentPersonaRepository(s)
+            # 크래시(MultipleResultsFound → 트랜잭션 롤백) 없이 완료돼야 한다.
+            await repo.update(
+                persona_id, org_id, project_id, uuid.uuid4(),
+                tool_allowlist=["read"],
+            )
+            await s.commit()
+
+        async with Session() as s:
+            from sqlalchemy import select
+            refreshed_a = (await s.execute(select(ApiKey).where(ApiKey.id == key_a_id))).scalar_one()
+            refreshed_b = (await s.execute(select(ApiKey).where(ApiKey.id == key_b_id))).scalar_one()
+            assert refreshed_a.scope == ["read"], f"key A 미갱신: {refreshed_a.scope}"
+            assert refreshed_b.scope == ["read"], f"key B 미갱신: {refreshed_b.scope}"
+    finally:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()

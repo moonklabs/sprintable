@@ -417,14 +417,25 @@ async def _build_agent_card(session: AsyncSession, member: TeamMember, base_url:
         ]
 
     # 방향서 03·에이전트 속성(#2939 슬라이스②) — 권한 범위 표시 SSOT는 ApiKey.scope(실제
-    # 매 요청 집행되는 값). recruit 불변식상 활성(revoked_at IS NULL) 키는 최대 1개
-    # (`recruit_service._rotate_or_create_key` — 있으면 회전, 없으면 신규, 절대 2건 동시 생성
-    # 안 함). 방어적으로 created_at desc 1순위를 취한다(설계 doc §1 미확定 항목의 구현 판정).
+    # 매 요청 집행되는 값). ⚠️카디르 HIGH 재발견(story #2941, 2026-08-22): "활성 키 최대 1개"는
+    # recruit(`_rotate_or_create_key`) 경로에서만 참인 불변식 — 일반 발급 엔드포인트
+    # (`POST /agents/{agent_id}/api-keys`)는 기존 활성 키 확인 없이 무조건 신규 발급이라
+    # 합법적으로 활성 키가 2개 이상일 수 있다. 표시=집행값 원칙을 지키려면 "어느 한 키"를
+    # 임의로 골라 보여주면 안 된다(그 키로는 안 되고 다른 활성 키로는 되는 액션이 있을 수
+    # 있어 과소평가 위험) — 전 활성 키 scope의 **합집합**을 보인다("이 에이전트가 가진 어떤
+    # 자격증명으로도 할 수 있는 것" = 실제 노출 표면의 상한, no-fiction 원칙상 절대 과소평가
+    # 하지 않는 쪽). 활성 키 중 하나라도 scope=None(무제한)이면 전체를 무제한으로 표시
+    # (좁은 목록을 보여줘 실제보다 안전해 보이게 하는 것 자체가 과소평가).
     from app.repositories.api_key import ApiKeyRepository
 
     api_keys = await ApiKeyRepository(session).list_by_member(member.id)
-    active_key = next((k for k in api_keys if k.revoked_at is None), None)
-    permission_scope = list(active_key.scope) if active_key is not None and active_key.scope else None
+    active_keys = [k for k in api_keys if k.revoked_at is None]
+    if not active_keys:
+        permission_scope = None
+    elif any(k.scope is None for k in active_keys):
+        permission_scope = None
+    else:
+        permission_scope = sorted({s for k in active_keys for s in k.scope})
 
     interface_url = f"{base_url}/api/v2/a2a/members/{member.id}/rpc"
     return AgentCard(
