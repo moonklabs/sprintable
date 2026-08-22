@@ -270,3 +270,53 @@ describe('StoryDetailPanel — Workcell Evidence 구획 실배선(story #2922 W2
     expect(container.textContent).toContain('아직 증거 없음');
   });
 });
+
+// story #2922 W5 — GET /{id}/references?direction=outgoing 응답을 ChatProofSection과 동일
+// parseStoryProofReferences로 재해석해 Workcell Conversation 구획 요약(건수+링크)을 채운다.
+// 전용 fetch 신설 없이 기존 outgoingRefs 왕복에 편승하는 배선이 실제로 도는지 mount로 검증.
+describe('StoryDetailPanel — Workcell Conversation 구획 대화근거 요약 배선(story #2922 W5)', () => {
+  const HUMAN_ID = 'human-1';
+  const memberMap = { [HUMAN_ID]: { id: HUMAN_ID, name: '책임자', type: 'human' } };
+
+  async function mountWithReferences(referencesJson: unknown) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/references?direction=outgoing')) {
+        return { ok: true, json: async () => referencesJson };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel
+          story={makeStory({ status: 'in-review', assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID] })}
+          tasks={[]} onClose={() => {}} memberMap={memberMap}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('proof 참조가 있으면 Workcell Conversation 구획에 건수+링크가 렌더된다', async () => {
+    await mountWithReferences({
+      data: [{
+        id: 'ref-1', created_at: '2026-08-20T00:00:00Z', form: 'proof', target_type: 'chat_message', still_exists: true,
+        proof_payload: {
+          conversation_id: 'conv-1', start_message_id: 'msg-1',
+          snapshot: [{ message_id: 'msg-1', author_id: 'a1', content: 'hi', created_at: '2026-08-20T00:00:00Z' }],
+        },
+      }],
+    });
+    // href만으로는 아래 독립 ChatProofSection(같은 엔드포인트 소비)도 동일 href를 만들어
+    // 확실한 구분자가 못 된다 — Workcell 전용 문구("대화 근거 N건 보기", ChatProofSection의
+    // "대화 근거 · 날짜"와 다른 문구)를 가진 링크로 좁힌다.
+    const link = Array.from(container.querySelectorAll('a')).find(
+      (a) => a.getAttribute('href') === '/chats/conv-1?messageId=msg-1' && a.textContent?.includes('대화 근거 1건 보기'),
+    );
+    expect(link).toBeTruthy();
+  });
+
+  it('proof 참조가 0건이면 "연결된 대화 없음"이 정직하게 뜬다(침묵 아님)', async () => {
+    await mountWithReferences({ data: [] });
+    expect(container.textContent).toContain('연결된 대화 없음');
+  });
+});

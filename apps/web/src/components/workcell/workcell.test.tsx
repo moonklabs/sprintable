@@ -152,12 +152,13 @@ describe('Workcell Evidence layer (Proof Capsule 재사용 · null=정직한 빈
 });
 
 describe('Workcell Conversation layer (작업-귀속 · 전역 chat과 분리 · 뷰 가소성)', () => {
-  it('shows an honest empty state when there are no messages', () => {
+  it('renders no toggle/messages block at all when there are no comments (rule④ — disclosure 자체 미표시)', () => {
     const markup = renderKo(<Workcell {...BASE} conversation={{ view: 'run', messages: [] }} />);
-    expect(markup).toContain('아직 메시지가 없습니다');
+    expect(markup).not.toContain('<details');
+    expect(markup).not.toContain('실행</button>');
   });
 
-  it('renders all three view-toggle labels (실행/증거/결정) and the real messages with author+body', () => {
+  it('renders all three view-toggle labels (실행/증거/결정) and the real messages inside a collapsed disclosure', () => {
     const markup = renderKo(
       <Workcell
         {...BASE}
@@ -170,6 +171,7 @@ describe('Workcell Conversation layer (작업-귀속 · 전역 chat과 분리 ·
         }}
       />,
     );
+    expect(markup).toContain('<details');
     expect(markup).toContain('실행');
     expect(markup).toContain('증거');
     expect(markup).toContain('결정');
@@ -177,5 +179,60 @@ describe('Workcell Conversation layer (작업-귀속 · 전역 chat과 분리 ·
     expect(markup).toContain('위계 낮음');
     expect(markup).toContain('↳ v4 반영');
     expect(markup).toContain('미르코군');
+  });
+});
+
+// story #2922 W5 — 유나양 확定 4규칙: ①구획 본체=ChatProofSection 요약 ②story 댓글=하위
+// 접힘 disclosure(기능 무손실) ③위계(챗=주·댓글=부) ④0건 정직표시(댓글0=미표시·스레드0="연결된
+// 대화 없음"). ChatProofSummaryRow는 전용 sub-describe로 분리 검증.
+describe('Workcell — story #2922 W5 Conversation 구획 = ChatProofSection 요약 + 댓글 하위접힘', () => {
+  it('chatProof가 undefined(로딩 중)면 요약 자체를 렌더 보류한다(no-fiction — 성급한 "없음" 단정 금지)', () => {
+    const markup = renderKo(<Workcell {...BASE} conversation={{ view: 'run', messages: [], chatProof: undefined }} />);
+    expect(markup).not.toContain('연결된 대화 없음');
+    expect(markup).not.toContain('대화 근거');
+  });
+
+  it('count=null(확認된 0건) → "연결된 대화 없음" 정직 표시(침묵 아님)', () => {
+    const markup = renderKo(<Workcell {...BASE} conversation={{ view: 'run', messages: [], chatProof: { count: null, href: null } }} />);
+    expect(markup).toContain('연결된 대화 없음');
+  });
+
+  it('count>0 → 건수+링크 렌더, href는 첫 근거의 대화로', () => {
+    const markup = renderKo(
+      <Workcell {...BASE} conversation={{ view: 'run', messages: [], chatProof: { count: 3, href: '/chats/conv-1?messageId=msg-1' } }} />,
+    );
+    expect(markup).toContain('대화 근거 3건 보기');
+    expect(markup).toContain('href="/chats/conv-1?messageId=msg-1"');
+  });
+
+  it('위계 — 챗 요약(본체)이 댓글 disclosure(부)보다 마크업상 먼저 온다', () => {
+    const markup = renderKo(
+      <Workcell
+        {...BASE}
+        conversation={{
+          view: 'run',
+          messages: [{ author: '유나양', body: '코멘트' }],
+          chatProof: { count: 1, href: '/chats/conv-1?messageId=msg-1' },
+        }}
+      />,
+    );
+    const chatProofIdx = markup.indexOf('대화 근거 1건 보기');
+    const disclosureIdx = markup.indexOf('<details');
+    expect(chatProofIdx).toBeGreaterThan(-1);
+    expect(disclosureIdx).toBeGreaterThan(-1);
+    expect(chatProofIdx).toBeLessThan(disclosureIdx);
+  });
+
+  it('댓글 N건 disclosure 라벨에 정확한 건수가 들어간다', () => {
+    const markup = renderKo(
+      <Workcell
+        {...BASE}
+        conversation={{
+          view: 'run',
+          messages: [{ author: 'A', body: '1' }, { author: 'B', body: '2' }],
+        }}
+      />,
+    );
+    expect(markup).toContain('댓글 2건');
   });
 });

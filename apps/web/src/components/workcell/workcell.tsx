@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { ArrowRight, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ProofCapsule, type ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
 import { Avatar } from '@/components/shared/avatar';
@@ -41,9 +42,18 @@ export interface WorkcellMessage {
 
 export type WorkcellConversationView = 'run' | 'evidence' | 'decision';
 
+/** story #2922 W5 — ChatProofSection(대화 근거) 요약. count=null은 확認된 0건(정직한
+ * "연결된 대화 없음"), undefined는 아직 모름(로딩 중 — 이 요약 자체를 렌더 보류, 성급한
+ * "없음" 단정 방지). href는 count>0일 때만 의미 있음. */
+export interface WorkcellChatProofSummary {
+  count: number | null;
+  href: string | null;
+}
+
 export interface WorkcellConversation {
   view: WorkcellConversationView;
   messages: WorkcellMessage[];
+  chatProof?: WorkcellChatProofSummary;
 }
 
 /** story #2922(P0-D 재설계) — 신뢰 파이프라인 6상태. 현행 5-status(backlog/ready-for-dev/
@@ -230,6 +240,30 @@ function EvidenceLayer({ evidence }: { evidence: ProofCapsuleProps | null }) {
   );
 }
 
+/**
+ * story #2922 W5 — Conversation 구획 본체 = ChatProofSection 요약(스레드 건수+대화 링크,
+ * compact — "10초 리트머스" 유지). 유나양 확定 4규칙: ①본체=요약 ②story 댓글=하위 접힘
+ * disclosure(기능 무손실, 교체 아님) ③위계(챗=주·댓글=부, 평평 나열 금지) ④0건 정직표시
+ * (댓글 0=disclosure 자체 미표시·스레드 0=「연결된 대화 없음」 명시, 침묵 아님).
+ */
+function ChatProofSummaryRow({ summary }: { summary: WorkcellChatProofSummary | undefined }) {
+  const t = useTranslations('workcell');
+  // undefined = 아직 모름(로딩 중) — "없음"을 성급히 단정하지 않고 렌더 자체를 보류(no-fiction).
+  if (summary === undefined) return null;
+  if (summary.count === null || summary.count === 0) {
+    return <p className="text-[11.5px] text-proof-faint">{t('conversationNoThreads')}</p>;
+  }
+  return (
+    <a
+      href={summary.href ?? undefined}
+      className="inline-flex items-center gap-1 text-[13px] font-medium text-proof-blue hover:underline"
+    >
+      {t('conversationChatProofCount', { count: summary.count })}
+      <ArrowRight className="size-3" aria-hidden="true" />
+    </a>
+  );
+}
+
 function ConversationLayer({ conversation }: { conversation: WorkcellConversation }) {
   const t = useTranslations('workcell');
   const [view, setView] = useState<WorkcellConversationView>(conversation.view);
@@ -238,42 +272,51 @@ function ConversationLayer({ conversation }: { conversation: WorkcellConversatio
   };
   return (
     <div className="h-full px-4.5 py-3.5">
-      <div className="mb-2.5 flex items-center gap-2">
-        <LayerLabel title="Conversation" question={t('conversationQuestion')} />
-        <div className="ml-auto inline-flex overflow-hidden rounded-[6px] border border-proof-line">
-          {(['run', 'evidence', 'decision'] as const).map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => setView(v)}
-              className={cn(
-                'px-2.5 py-1 text-[10px] transition-colors duration-[140ms]',
-                v === view ? 'bg-proof-sunk font-semibold text-proof-ink' : 'text-proof-ink-3',
-              )}
-            >
-              {viewLabel[v]}
-            </button>
-          ))}
-        </div>
-      </div>
-      {conversation.messages.length === 0 ? (
-        <p className="text-[11.5px] text-proof-faint">{t('conversationEmpty')}</p>
-      ) : (
-        <div className="space-y-1">
-          {conversation.messages.map((m, i) => (
-            <div key={i} className="flex gap-2 py-0.5 text-[12.5px] leading-[1.5] text-proof-ink-2">
-              <span className="shrink-0 whitespace-nowrap font-semibold text-proof-ink">{m.author}</span>
-              <span className="min-w-0">
-                {m.body}
-                {m.resultLink ? <span className="ml-1.5 font-mono text-[10.5px] text-proof-blue">{m.resultLink}</span> : null}
-              </span>
+      <LayerLabel title="Conversation" question={t('conversationQuestion')} className="mb-2.5" />
+      <ChatProofSummaryRow summary={conversation.chatProof} />
+      {conversation.messages.length > 0 ? (
+        <details className="mt-2.5 group">
+          <summary className="cursor-pointer select-none text-[11px] font-medium text-proof-ink-3 marker:content-none">
+            <span className="inline-flex items-center gap-1">
+              <ChevronRight className="size-3 transition-transform duration-[140ms] group-open:rotate-90" aria-hidden="true" />
+              {t('conversationCommentsDisclosure', { count: conversation.messages.length })}
+            </span>
+          </summary>
+          <div className="mt-2 border-t border-proof-line-soft pt-2">
+            <div className="mb-2 flex items-center justify-end">
+              <div className="inline-flex overflow-hidden rounded-[6px] border border-proof-line">
+                {(['run', 'evidence', 'decision'] as const).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setView(v)}
+                    className={cn(
+                      'px-2.5 py-1 text-[10px] transition-colors duration-[140ms]',
+                      v === view ? 'bg-proof-sunk font-semibold text-proof-ink' : 'text-proof-ink-3',
+                    )}
+                  >
+                    {viewLabel[v]}
+                  </button>
+                ))}
+              </div>
             </div>
-          ))}
-        </div>
-      )}
-      <p className="mt-2 text-[10px] text-proof-faint">
-        {t('conversationFooter')}
-      </p>
+            <div className="space-y-1">
+              {conversation.messages.map((m, i) => (
+                <div key={i} className="flex gap-2 py-0.5 text-[12.5px] leading-[1.5] text-proof-ink-2">
+                  <span className="shrink-0 whitespace-nowrap font-semibold text-proof-ink">{m.author}</span>
+                  <span className="min-w-0">
+                    {m.body}
+                    {m.resultLink ? <span className="ml-1.5 font-mono text-[10.5px] text-proof-blue">{m.resultLink}</span> : null}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-[10px] text-proof-faint">
+              {t('conversationFooter')}
+            </p>
+          </div>
+        </details>
+      ) : null}
     </div>
   );
 }
