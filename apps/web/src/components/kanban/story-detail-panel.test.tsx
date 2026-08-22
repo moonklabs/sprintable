@@ -346,6 +346,17 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
   // 역순 도착하는 경우(E1→fetchA 보류→E2→fetchB→B 먼저 도착→A가 늦게 도착)다. story.id가
   // 안 바뀌므로 currentStoryIdRef 가드는 둘 다 통과시킨다 — AbortController가 fetchA 자체를
   // 죽여야(늦게 온 응답이 절대 반영되지 않아야) 막힌다.
+  // ⚠️QA 2R(PR#3363, 카디르 뮤테이션+codex 교차모델 완전독립재현 일치, 2026-08-22) — 이전
+  // 버전은 fetchB를 resolve한 뒤 fetchA를 **수동으로 rejectFirstCall!()**해 통과시켰는데,
+  // 이 수동 거부가 abort 메커니즘의 실제 작동 여부와 무관하게 항상 같은 결과를 만들어
+  // 동어반복이었다(프로덕션의 `fetchAbortRef.current?.abort()` 호출을 제거해도 21/21 그대로
+  // 통과 — 회귀보호 0). 처방(codex 구체안): ①첫 fetch의 signal을 저장해 E2 후
+  // `signal.aborted===true`를 수동 개입 없이 직접 assert ②수동 reject 완전 삭제 ③fetchA를
+  // **성공 응답**으로 resolve해 진짜 역순 도착을 재현 — signal의 abort 리스너(실 fetch의
+  // 네이티브 동작 시뮬레이션, 수동 개입 아님)가 실제로 먼저 그 promise를 죽였다면 이 resolve는
+  // 이미-settled promise에 대한 무해한 no-op이고, 그게 아니라면(뮤테이션으로 abort()가
+  // 빠지면) 이 resolve가 실제로 적용돼 UI가 부당하게 되돌아간다 — 뮤테이션 시 ①②(아래) 두
+  // 경로 모두에서 확실히 실패한다.
   it('같은 story에 연속 발화한 두 SSE의 fetch가 역순 도착해도, 먼저 쏜(옛) fetch는 abort돼 나중 값(fetchB)이 유지된다', async () => {
     const { useSseNotifications } = await import('@/hooks/use-sse-notifications');
     let capturedOnExtraEvent: ((eventName: string, data: unknown) => void) | undefined;
@@ -355,16 +366,18 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
     const story = makeStory({ id: 'story-x', status: 'in-progress', assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID], trust_stage: 'running' });
 
     let callCount = 0;
-    let rejectFirstCall: ((e: unknown) => void) | undefined;
+    let firstSignal: AbortSignal | undefined;
+    let resolveFirstCall: ((v: unknown) => void) | undefined;
     let resolveSecondCall: ((v: unknown) => void) | undefined;
     vi.stubGlobal('fetch', vi.fn((url: string, init?: { signal?: AbortSignal }) => {
       if (typeof url === 'string' && /\/api\/stories\/story-x(\?|$)/.test(url)) {
         callCount += 1;
         const thisCall = callCount;
         return new Promise((resolve, reject) => {
-          if (thisCall === 1) rejectFirstCall = reject;
+          if (thisCall === 1) { firstSignal = init?.signal; resolveFirstCall = resolve; }
           if (thisCall === 2) resolveSecondCall = resolve;
-          // 실 fetch abort 동형 — signal이 abort되면 pending promise가 AbortError로 reject.
+          // 실 fetch의 네이티브 동작 시뮬레이션(수동 개입 아님) — signal이 abort되면 그 즉시
+          // pending promise가 죽는다. 프로덕션이 실제로 .abort()를 호출했을 때만 발동.
           init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
         });
       }
@@ -381,13 +394,15 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
     await act(async () => { capturedOnExtraEvent!('story.trust_stage_changed', { story_id: 'story-x', new_stage: 'needs_input' }); });
     await act(async () => { vi.advanceTimersByTime(500); await Promise.resolve(); });
     expect(callCount).toBe(1);
+    expect(firstSignal?.aborted).toBe(false); // 아직 E2 前 — abort 안 됨.
 
     // E2 — fetchA가 아직 in-flight인 채로 새 이벤트 발화 → 디바운스 재소진 시점에 fetchA를
     // abort하고 fetchB를 발사한다.
     await act(async () => { capturedOnExtraEvent!('story.trust_stage_changed', { story_id: 'story-x', new_stage: 'verified' }); });
     await act(async () => { vi.advanceTimersByTime(500); await Promise.resolve(); });
     expect(callCount).toBe(2);
-    expect(rejectFirstCall).toBeDefined(); // fetchA의 signal이 실제로 abort listener를 받음.
+    // ①수동 개입 없는 직접 assert — 프로덕션이 실제로 이전 컨트롤러를 abort했는지.
+    expect(firstSignal?.aborted).toBe(true);
 
     // fetchB(나중 이벤트) 먼저 도착 — 최신값(Verified) 반영.
     await act(async () => {
@@ -396,13 +411,15 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
     });
     expect(currentStageLabel()).toBe('Verified');
 
-    // fetchA(먼저 쏜 옛 fetch)가 이제야 응답 — abort로 이미 reject됐으므로 .then은 아예 실행
-    // 안 되지만, 방어적으로 늦게 resolve를 시도해도(실 abort면 불가능하지만) 무해함을 재확認.
+    // ③fetchA(먼저 쏜 옛 fetch)를 성공 응답으로 resolve — 진짜 역순 «성공» 도착 재현(수동
+    // reject 없음). 진짜 abort됐다면(firstSignal.aborted===true, 위에서 이미 확認) 이
+    // promise는 abort 리스너가 이미 reject해 settled 상태라 이 resolve 시도는 무해한 no-op.
     await act(async () => {
-      try { rejectFirstCall!(new DOMException('Aborted', 'AbortError')); } catch { /* already settled */ }
+      resolveFirstCall!({ ok: true, json: async () => ({ data: { ...story, trust_stage: 'needs_input' } }) });
       await Promise.resolve(); await Promise.resolve();
     });
-    expect(currentStageLabel()).toBe('Verified'); // 역순 도착에도 회귀 없음.
+    // ②늦은 «성공» 응답이 부당 반영되지 않았는지 — Verified 유지.
+    expect(currentStageLabel()).toBe('Verified');
   });
 });
 
