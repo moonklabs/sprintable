@@ -756,24 +756,16 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   //   buildEvidence와 동일 규율) 렌더 안 함 — trustSeal(human_verified/self_reported)+
   //   evidence.autoVerify(merge 게이트 neutral_facts.ci_result)+gate(그 게이트 자체)만 real signal.
   // - human assignee 없으면 Workcell 렌더 자체를 생략(허구 human 금지, ProofCapsule 배선과 동일 규율).
-  // story #2922 W1 — 구 3색 proofState 배지를 신뢰 파이프라인 6상태로 대체(doc
-  // workcell-redesign-2922 §매핑표). needs_input/verified는 5-status로 표현 불가한 파생값이라
-  // 기존 trustChip(deriveInFlightTrustChip, P0-04)을 그대로 재사용 — merge 게이트 pending+
-  // ci_result=pass가 "Verified"(AC/자동검증 통과·merge gate 前)와 정확히 같은 신호, needs_input
-  // 게이트 pending이 그대로 "Needs input"이다. 신규 BE 필드 0(B1은 doc상 "명시만", 구현 스코프 아님).
-  // 카디르군 QA(#3336 MEDIUM, 2026-08-22) — verified만 `localStatus==='in-review'`로 게이팅해
-  // needs_input과 비대칭이었다: webhook발 merge 게이트가 in-progress 구간에 이미 pending+
-  // ci_result=pass로 도달 가능한 실경로(test_2826 realdb 실증)에서 running으로 오표시되던 결함.
-  // needs_input과 동일하게 trustChip 값만으로 단독판정(status 무관)하도록 정정.
-  const PIPELINE_STAGE_BY_STATUS: Record<string, WorkcellPipelineStage> = {
-    backlog: 'queued', 'ready-for-dev': 'queued', done: 'merge_ready',
-  };
-  const pipelineStage: WorkcellPipelineStage | null = PIPELINE_STAGE_BY_STATUS[localStatus]
-    ?? (trustChip === 'needs_input' ? 'needs_input'
-      : trustChip === 'merge_ready' ? 'verified'
-        : localStatus === 'in-review' ? 'claimed_done'
-          : localStatus === 'in-progress' ? 'running'
-            : null);
+  // story #2933 H1(P0-H) — 구 FE 재파생(PIPELINE_STAGE_BY_STATUS+trustChip 조합, #3336
+  // 드리프트 실사례로 이미 1회 버그난 그 로직)을 폐기하고 BE derive_trust_stage() 판정값을
+  // story.trust_stage로 직접 소비한다(get_story/list_stories 둘 다 배선됨). PO 조건①(2933) —
+  // 판정은 BE 한 곳(trust_pipeline.derive_trust_stage)에만 존재, FE 재계산 0.
+  // PO 조건②(2933) — story prop이 이 필드를 못 채운 응답에서 온 경우(예: handleChangeStatus의
+  // `onStoryUpdate?.({ ...story, status: newStatus })` 낙관적 갱신 — status만 덮어쓰고
+  // trust_stage는 스프레드로 이전 값이 그대로 남는다)도 이 한 줄이 "기존값 유지"를 자동으로
+  // 만족한다 — 별도 로컬 state/재파생 폴백을 얹지 않는다. 뮤테이션 직후의 실시간 갱신은
+  // H2(SSE 구독) 몫.
+  const pipelineStage: WorkcellPipelineStage | null = (story.trust_stage as WorkcellPipelineStage | null) ?? null;
   const assigneeIds = story.assignee_ids?.length ? story.assignee_ids : (story.assignee_id ? [story.assignee_id] : []);
   const proofHumanId = assigneeIds.find((id) => memberMap[id] && memberMap[id]!.type !== 'agent');
   const proofAgentId = assigneeIds.find((id) => memberMap[id]?.type === 'agent');

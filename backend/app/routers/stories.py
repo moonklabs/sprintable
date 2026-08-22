@@ -189,6 +189,7 @@ async def list_stories(
         await _attach_has_evidence(repo.session, stories)
         await _attach_has_hypothesis_or_goal(repo.session, stories)
         await _attach_org_project_slugs(repo.session, repo.org_id, stories)
+        await _attach_trust_stage(repo.session, repo.org_id, stories)
         return [StoryResponse.model_validate(s) for s in stories]
 
     # story #2188 ④-b(2026-07-25, 오르테가군 판정 — 의도된 제약, 코드 고칠 이유 없음):
@@ -217,6 +218,7 @@ async def list_stories(
         await _attach_has_evidence(repo.session, stories)
         await _attach_has_hypothesis_or_goal(repo.session, stories)
         await _attach_org_project_slugs(repo.session, repo.org_id, stories)
+        await _attach_trust_stage(repo.session, repo.org_id, stories)
         return [StoryResponse.model_validate(s) for s in stories]
 
     # CB-S4: status + project_id 조합 시 board 쿼리 (order_by + cursor + done 7일 제한)
@@ -244,6 +246,7 @@ async def list_stories(
         await _attach_has_evidence(repo.session, stories)
         await _attach_has_hypothesis_or_goal(repo.session, stories)
         await _attach_org_project_slugs(repo.session, repo.org_id, stories)
+        await _attach_trust_stage(repo.session, repo.org_id, stories)
         return [StoryResponse.model_validate(s) for s in stories]
 
     filters: dict = {}
@@ -283,6 +286,7 @@ async def list_stories(
         )
     await _attach_has_hypothesis_or_goal(repo.session, stories)
     await _attach_org_project_slugs(repo.session, repo.org_id, stories)
+    await _attach_trust_stage(repo.session, repo.org_id, stories)
     return [StoryResponse.model_validate(s) for s in stories]
 
 
@@ -393,6 +397,30 @@ async def _attach_has_hypothesis_or_goal(session: AsyncSession, stories: list[St
     for s in stories:
         if s.epic_id is not None or s.id in ids_with_hypothesis:
             s.has_hypothesis_or_goal = True
+
+
+async def _attach_trust_stage(
+    session: AsyncSession, org_id: uuid.UUID, stories: list[Story]
+) -> None:
+    """story #2933 H1(P0-H) — Trust Pipeline 6단계 판정(transient attr, ORM 컬럼 아님·
+    story-status-primary-axis 전제 유지). PO 조건①: 판정(derive_trust_stage)뿐 아니라 수집
+    (batch_trust_facts) 경로도 단일/배치 어디서 호출하든 이 함수 하나만 거친다 — get_story
+    (단일)·list_stories(보드 주경로) 둘 다 여기로 수렴, FE의 별도 재파생(구
+    deriveInFlightTrustChip+PIPELINE_STAGE_BY_STATUS, #3336 드리프트 실사례)을 없애는 게
+    목적이라 BE 쪽에 그 결함 클래스를 다시 심지 않는다. done/미지 status는 None(파이프라인
+    스코프 밖, §7 확定④) — _attach_has_evidence류의 "positive 단방향" 규율과 달리 이 필드는
+    None 자체가 유효한 판정값이다(has_evidence처럼 "미설정=신호없음"이 아니라
+    derive_trust_stage가 실제로 None을 반환하는 경우가 있음)."""
+    if not stories:
+        return
+    from app.services.trust_pipeline import batch_trust_facts, derive_trust_stage
+
+    story_ids = [s.id for s in stories]
+    facts_map = await batch_trust_facts(session, org_id, story_ids)
+    for s in stories:
+        facts = facts_map.get(s.id)
+        if facts is not None:
+            s.trust_stage = derive_trust_stage(facts)
 
 
 async def _attach_org_project_slugs(
@@ -885,6 +913,7 @@ async def get_story(
     await _attach_has_evidence(repo.session, [story])
     await _attach_has_hypothesis_or_goal(repo.session, [story])
     await _attach_org_project_slugs(repo.session, repo.org_id, [story])
+    await _attach_trust_stage(repo.session, repo.org_id, [story])
     return StoryResponse.model_validate(story)
 
 

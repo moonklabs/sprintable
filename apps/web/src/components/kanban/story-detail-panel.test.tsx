@@ -170,25 +170,20 @@ describe('StoryDetailPanel — org-switch 잔여 레이스 stale-guard (story #2
   });
 });
 
-// story #2922 W1 — 카디르군 QA(#3336 MEDIUM) 지적 회귀가드: Workcell 헤더 pipelineStage
-// 파생이 needs_input/verified 둘 다 localStatus 무관 단독판정이어야 한다. verified만
-// `localStatus==='in-review'`로 게이팅됐던 결함 때문에 in-progress+webhook발 merge
-// 게이트(ci_result=pass)가 running으로 오표시됐다 — 이 async 왕복이 그 정확한 경로를 판다.
-describe('StoryDetailPanel — Workcell pipelineStage 파생(story #2922, 카디르군 #3336 MEDIUM 회귀가드)', () => {
+// story #2933 H1(P0-H) — 구 FE 재파생(gate 목록+localStatus 조합, #3336 MEDIUM 드리프트
+// 실사례로 이미 1회 버그난 그 로직)을 폐기하고 story.trust_stage(BE derive_trust_stage()
+// 판정값)를 그대로 소비한다는 회귀가드. gate fetch를 몰라도(PO 조건① — 판정은 BE 한 곳)
+// pipelineStage가 정확히 그 prop 값으로 뜨는지만 잰다.
+describe('StoryDetailPanel — Workcell pipelineStage = story.trust_stage 직결(story #2933 H1)', () => {
   const HUMAN_ID = 'human-1';
   const memberMap = { [HUMAN_ID]: { id: HUMAN_ID, name: '책임자', type: 'human' } };
 
-  async function mountWithGates(status: string, gates: Array<{ gate_type: string; status: string; neutral_facts?: Record<string, unknown> }>) {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (typeof url === 'string' && url.includes('/api/gates?work_item_id=')) {
-        return { ok: true, json: async () => gates };
-      }
-      return { ok: false, json: async () => null };
-    }));
+  async function mountWithTrustStage(trustStage: KanbanStory['trust_stage']) {
+    stubFetch();
     await act(async () => {
       root.render(wrap(
         <StoryDetailPanel
-          story={makeStory({ status, assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID] })}
+          story={makeStory({ status: 'in-progress', assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID], trust_stage: trustStage })}
           tasks={[]} onClose={() => {}} memberMap={memberMap}
         />,
       ));
@@ -202,14 +197,24 @@ describe('StoryDetailPanel — Workcell pipelineStage 파생(story #2922, 카디
     return container.querySelector('[aria-current="step"]')?.textContent?.trim() ?? null;
   }
 
-  it('in-progress + merge 게이트 pending(ci_result=pass) → Verified (수정 전엔 Running으로 오표시됨)', async () => {
-    await mountWithGates('in-progress', [{ gate_type: 'merge', status: 'pending', neutral_facts: { ci_result: 'pass' } }]);
+  it('trust_stage="verified" → Verified(gate fetch 응답과 무관 — BE 판정값 그대로)', async () => {
+    await mountWithTrustStage('verified');
     expect(currentStageLabel()).toBe('Verified');
   });
 
-  it('in-progress + needs-input류 게이트 pending(doc_approval) → Needs input (기존에도 정상, 대칭 확인)', async () => {
-    await mountWithGates('in-progress', [{ gate_type: 'doc_approval', status: 'pending' }]);
+  it('trust_stage="needs_input" → Needs input', async () => {
+    await mountWithTrustStage('needs_input');
     expect(currentStageLabel()).toBe('Needs input');
+  });
+
+  it('trust_stage=null(done/미지 status 또는 필드 미채움) → 스테퍼 자체가 안 뜬다(no-fiction, 지어낸 단계 0)', async () => {
+    await mountWithTrustStage(null);
+    expect(container.querySelector('[aria-current="step"]')).toBeNull();
+  });
+
+  it('trust_stage=undefined(구 응답 경로) → null과 동일하게 스테퍼 미표시(재파생 폴백 없음)', async () => {
+    await mountWithTrustStage(undefined);
+    expect(container.querySelector('[aria-current="step"]')).toBeNull();
   });
 });
 
@@ -228,8 +233,11 @@ describe('StoryDetailPanel — Workcell Evidence 구획 실배선(story #2922 W2
     }));
     await act(async () => {
       root.render(wrap(
+        // story #2933 H1 — Workcell 자체가 pipelineStage(=story.trust_stage) 없으면 렌더 안
+        // 되므로(no-fiction 게이트), 이 스위트의 실제 대상(Evidence 구획)과 무관하게 값을
+        // 채워 Workcell을 띄운다. storyOverrides가 trust_stage를 명시하면 그게 우선.
         <StoryDetailPanel
-          story={makeStory({ status: 'in-review', assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID], ...storyOverrides })}
+          story={makeStory({ status: 'in-review', assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID], trust_stage: 'claimed_done', ...storyOverrides })}
           tasks={[]} onClose={() => {}} memberMap={memberMap}
         />,
       ));
@@ -287,8 +295,11 @@ describe('StoryDetailPanel — Workcell Conversation 구획 대화근거 요약 
     }));
     await act(async () => {
       root.render(wrap(
+        // story #2933 H1 — Workcell 자체가 pipelineStage(=story.trust_stage) 없으면 렌더 안
+        // 되므로(no-fiction 게이트), 이 스위트의 실제 대상(Conversation 구획)과 무관하게
+        // 값을 채워 Workcell을 띄운다.
         <StoryDetailPanel
-          story={makeStory({ status: 'in-review', assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID] })}
+          story={makeStory({ status: 'in-review', assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID], trust_stage: 'claimed_done' })}
           tasks={[]} onClose={() => {}} memberMap={memberMap}
         />,
       ));
