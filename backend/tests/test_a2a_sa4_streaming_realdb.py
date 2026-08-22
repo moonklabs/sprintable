@@ -352,3 +352,72 @@ async def test_agent_card_permission_scope_ignores_revoked_key():
         assert card.permission_scope is None
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_agent_card_permission_scope_unions_multiple_active_keys():
+    """카디르 HIGH 재발견(story #2941): 활성 키가 2개 이상일 수 있다(POST /agents/{id}/
+    api-keys는 recruit과 달리 기존 활성 키 확인 없이 무조건 신규 발급). "표시=집행값"
+    원칙상 어느 한 키만 임의로 보여주면 과소평가 위험 — 전 활성 키 scope의 합집합을 보인다."""
+    from app.routers.a2a import _build_agent_card
+    from app.models.team import TeamMember
+    from app.models.api_key import ApiKey
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            await _bypass_fk(s)
+            member = TeamMember(
+                id=uuid.uuid4(), org_id=uuid.uuid4(), project_id=uuid.uuid4(), type="agent",
+                name="Multi Key Union Card Test Agent", role="member", is_active=True,
+            )
+            s.add(member)
+            await s.flush()
+            key_a = ApiKey(
+                id=uuid.uuid4(), team_member_id=member.id, key_prefix="sk_live_uniona",
+                key_hash="fake-hash-union-a", scope=["read", "write"],
+            )
+            key_b = ApiKey(
+                id=uuid.uuid4(), team_member_id=member.id, key_prefix="sk_live_unionb",
+                key_hash="fake-hash-union-b", scope=["deploy"],
+            )
+            s.add_all([key_a, key_b])
+            await s.commit()
+            card = await _build_agent_card(s, member, "http://test")
+        assert card.permission_scope == ["deploy", "read", "write"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_agent_card_permission_scope_none_when_any_active_key_unrestricted():
+    """무제한(scope=None) 활성 키가 하나라도 있으면 좁은 목록으로 과소평가하지 않고
+    전체를 None(무제한)으로 표시한다."""
+    from app.routers.a2a import _build_agent_card
+    from app.models.team import TeamMember
+    from app.models.api_key import ApiKey
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            await _bypass_fk(s)
+            member = TeamMember(
+                id=uuid.uuid4(), org_id=uuid.uuid4(), project_id=uuid.uuid4(), type="agent",
+                name="Unrestricted Key Card Test Agent", role="member", is_active=True,
+            )
+            s.add(member)
+            await s.flush()
+            narrow_key = ApiKey(
+                id=uuid.uuid4(), team_member_id=member.id, key_prefix="sk_live_narrow",
+                key_hash="fake-hash-narrow", scope=["read"],
+            )
+            unrestricted_key = ApiKey(
+                id=uuid.uuid4(), team_member_id=member.id, key_prefix="sk_live_unres",
+                key_hash="fake-hash-unrestricted", scope=None,
+            )
+            s.add_all([narrow_key, unrestricted_key])
+            await s.commit()
+            card = await _build_agent_card(s, member, "http://test")
+        assert card.permission_scope is None
+    finally:
+        await engine.dispose()
