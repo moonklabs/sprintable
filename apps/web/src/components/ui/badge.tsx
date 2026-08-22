@@ -32,7 +32,14 @@ const badgeVariants = cva(
         success: "border-success-border bg-success-tint text-foreground",
         info: "border-info-border bg-info-tint text-foreground",
         warning: "border-warning-border bg-warning-tint text-foreground",
-        chip: "border-border/80 bg-muted/70 text-muted-foreground",
+        // story #2937(유나 P0-02 chip 전수 감사, 2026-08-22) — tint 배경 변형 중 chip만
+        // text-muted-foreground(ink-3) 잔존해 위 success/info/warning/destructive와 같은
+        // #2420 v3 규칙("tint 배경 위 글자는 text-foreground")을 못 지키고 있었다. 실측: ink-3
+        // on bg-muted/70 = 3.55 라이트(AA 4.5 미달)·소비처 ~30(loops/retro/standup/gates/
+        // trust/recruiter/agents/cage) 라이트 체계적 갭. text-foreground로 이행. 위계
+        // de-emphasis는 색이 아니라 tint 배경+작은 크기+pill 형태가 담당(다른 tint 변형이
+        // 이미 증명) — 무회귀.
+        chip: "border-border/80 bg-muted/70 text-foreground",
         counter: "border-transparent bg-destructive text-destructive-foreground",
       },
     },
