@@ -102,6 +102,7 @@ function AttentionRow({ item, highlighted, onNavigate }: {
         density="row"
         proofState={item.proofState}
         stateLabel={item.kindLabel}
+        typeBadge={item.bucket}
         claim={item.claim}
         human={item.actor && !item.actor.isAgent ? { name: item.actor.name, role: '' } : undefined}
         agent={item.actor?.isAgent ? { name: item.actor.name, initial: item.actor.name.slice(0, 1) } : undefined}

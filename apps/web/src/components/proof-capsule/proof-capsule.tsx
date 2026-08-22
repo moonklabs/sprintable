@@ -50,6 +50,12 @@ export interface ProofCapsuleProps {
    * 미리 포맷해 넘긴다(예: "3일 전"). 모르면 아예 넘기지 않는다(빈 문자열/"모름" 라벨로 지어내지
    * 않음 — glance.py의 entered_state_at이 null인 신호는 값 자체가 없다). */
   duration?: string;
+  /** row 밀도 전용(story #2923 AQ2, doc attention-audit-redesign-2923) — 「지금 개입할 것」의
+   * 개입 유형(예: GATE/STEER/BLOCK/Q) compact 배지. Yuna AQ2 확定(2026-08-22): 「색은 신뢰상태
+   * 축 하나(레일/점)뿐」 — 이 배지는 무채(monochrome)로만 렌더한다(색 이중 인코딩 금지). 값은
+   * 호출부가 이미 계산해 넘긴다(feature-agnostic 컴포넌트가 특정 도메인의 버킷 열거형을 몰라도
+   * 되게 plain string으로 받는다 — AttentionQueueItem.bucket 등). */
+  typeBadge?: string;
   /** full/audit만 사용 — card/row는 다중 담당자(예: Board card의 assignee 스택)를 자체
    * 렌더하는 경우가 많아 요구하지 않는다(optional, 2026-07-11 Board 확산 시 완화). */
   human?: ProofCapsuleHuman;
@@ -87,7 +93,7 @@ export interface ProofCapsuleProps {
  * glow·999px pill·숫자 KPI화·raw CoT·초록만-완료 전부 미사용(색은 항상 stateLabel 텍스트 병기).
  */
 export function ProofCapsule({
-  proofState, stateLabel, claim, human, agent, now, evidence, gate, trustSeal, density, footer, className, duration, onClaimClick,
+  proofState, stateLabel, claim, human, agent, now, evidence, gate, trustSeal, density, footer, className, duration, onClaimClick, typeBadge,
 }: ProofCapsuleProps) {
   if (density === 'audit') {
     return (
@@ -98,7 +104,7 @@ export function ProofCapsule({
     return (
       <InlineRow
         proofState={proofState} stateLabel={stateLabel} claim={claim} human={human} agent={agent}
-        gate={gate} duration={duration} className={className}
+        gate={gate} duration={duration} className={className} typeBadge={typeBadge}
       />
     );
   }
@@ -320,12 +326,24 @@ const GATE_BUTTON_TONE: Record<NonNullable<ProofCapsuleGate['tone']>, string> = 
 };
 
 function InlineRow({
-  proofState, stateLabel, claim, human, agent, gate, duration, className,
-}: Pick<ProofCapsuleProps, 'proofState' | 'stateLabel' | 'claim' | 'human' | 'agent' | 'gate' | 'duration' | 'className'>) {
+  proofState, stateLabel, claim, human, agent, gate, duration, className, typeBadge,
+}: Pick<ProofCapsuleProps, 'proofState' | 'stateLabel' | 'claim' | 'human' | 'agent' | 'gate' | 'duration' | 'className' | 'typeBadge'>) {
   return (
     <CutCornerShell state={proofState} cut={16} className={cn('w-full', className)}>
       <div className="flex min-h-[52px] min-w-0 flex-1 items-center gap-2.5 px-3 py-2">
-        <span className="w-24 shrink-0"><StateHeader state={proofState} label={stateLabel} /></span>
+        <span className="flex shrink-0 items-center gap-1.5">
+          {/* story #2923 AQ2(Yuna 확定 2026-08-22) — 개입유형(GATE/STEER/BLOCK/Q) compact
+              배지. 「색은 신뢰상태 축 하나(레일/점+아래 StateHeader)뿐」 — 이 배지는 무채
+              (bg-proof-sunk·text-proof-ink-2, 색 없음)로만 렌더한다. StateHeader는 그대로
+              둔다(proofState의 문자 신호 유지 — 도크트린 "색만으로 의미 전달 금지"가 요구하는
+              stateLabel 텍스트 병기를 이 배지 추가로 잃지 않는다). */}
+          {typeBadge ? (
+            <span className="rounded-[4px] border border-proof-line bg-proof-sunk px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.04em] text-proof-ink-2">
+              {typeBadge}
+            </span>
+          ) : null}
+          <StateHeader state={proofState} label={stateLabel} />
+        </span>
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-proof-ink">{claim}</span>
         <span className="inline-flex shrink-0 items-center gap-2">
           {duration ? <span className="shrink-0 text-[10.5px] font-medium text-proof-ink-3">{duration}</span> : null}
