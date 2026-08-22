@@ -44,6 +44,7 @@ const PAGE_HARD_CAP = 50; // 안전판(최대 5000건) — 정상 프로젝트 �
 async function fetchAllPages<T>(basePath: string, projectId: string, source: string): Promise<T[]> {
   const all: T[] = [];
   let cursor: string | null = null;
+  let exhaustedNaturally = false;
   for (let page = 0; page < PAGE_HARD_CAP; page += 1) {
     const url = `${basePath}?project_id=${projectId}&limit=${PAGE_LIMIT}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
     const res = await fetchWithAuth(url);
@@ -61,8 +62,15 @@ async function fetchAllPages<T>(basePath: string, projectId: string, source: str
     // `meta`로 두면 가드의 텍스트 스캔이 `meta.hasMore`류로 오탐하므로 `pageMeta`로 회피
     // (기존 관용구 — agent-runs-list.tsx 등도 동일 이유로 변수 저장 없이 즉시 체이닝).
     const pageMeta = parseCursorMeta(json.meta, source);
-    if (!pageMeta.hasMore || !pageMeta.nextCursor) break;
+    if (!pageMeta.hasMore || !pageMeta.nextCursor) { exhaustedNaturally = true; break; }
     cursor = pageMeta.nextCursor;
+  }
+  // QA changes 9R(카디르+codex, 2026-08-22) — 하드캡(PAGE_HARD_CAP) 소진 시 마지막 페이지가
+  // hasMore=true였는데도 조용히 return하면 바로 위 8R②가 세운 "부분-성공 금지" 원칙이 이
+  // 경로만 비켜간다(같은 클래스). 안전판 소진도 실패의 일종으로 취급해 throw — 기존
+  // loadError 정직 표시로 통일.
+  if (!exhaustedNaturally) {
+    throw new Error(`${source}: 안전판(${PAGE_HARD_CAP}페이지) 소진 — 아직 더 있음(hasMore=true), 부분 집합을 반환하지 않는다.`);
   }
   return all;
 }

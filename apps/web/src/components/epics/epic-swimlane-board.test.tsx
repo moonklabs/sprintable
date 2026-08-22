@@ -131,6 +131,10 @@ type FetchStub = {
   // ⚠️QA changes 8R HIGH②(PR#3377, 카디르+codex, 2026-08-22) — fetchAllPages 중간 실패
   // 재현용. true면 /api/stories? GET이 ok:false(500)로 응답한다.
   storiesFetchFails?: boolean;
+  // ⚠️QA changes 9R(PR#3377, 카디르+codex, 2026-08-22) — 안전판(PAGE_HARD_CAP=50) 소진 재현용.
+  // true면 /api/stories? GET이 몇 번을 불러도 항상 hasMore:true인 무한 스트림처럼 응답한다
+  // (storyPages 배열 길이로는 이 시나리오를 못 만든다 — 소진 후 자동 hasMore:false 낙하).
+  storiesAlwaysHasMore?: boolean;
 };
 
 // ⚠️QA changes 4R(PR#3377, 카디르+codex, 2026-08-22) — CI 실행 명령까지 정확 재현해 8+1회
@@ -141,7 +145,7 @@ type FetchStub = {
 // 하는데 항상 bulk 2건만이라 결정론적 환경 차 가능성).
 let callLog: string[] = [];
 
-function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singlePatchSpy, singlePatchOk = true, bulkPatchOk = true, storiesGetSpy, storyPages, epicPages, singlePatchResponseData, bulkPatchResponseData, storiesFetchFails = false }: FetchStub) {
+function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singlePatchSpy, singlePatchOk = true, bulkPatchOk = true, storiesGetSpy, storyPages, epicPages, singlePatchResponseData, bulkPatchResponseData, storiesFetchFails = false, storiesAlwaysHasMore = false }: FetchStub) {
   callLog = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
     callLog.push(`${init?.method ?? 'GET'} ${url}`);
@@ -159,6 +163,11 @@ function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singl
     if (typeof url === 'string' && url.startsWith('/api/stories?')) {
       storiesGetSpy?.();
       if (storiesFetchFails) return { ok: false, status: 500, json: async () => ({ error: { message: 'boom' } }) };
+      if (storiesAlwaysHasMore) {
+        const cursorParam = new URL(url, 'http://localhost').searchParams.get('cursor');
+        const pageIndex = cursorParam ? Number(cursorParam) : 0;
+        return { ok: true, json: async () => ({ data: [], meta: { hasMore: true, nextCursor: String(pageIndex + 1) } }) };
+      }
       if (storyPages) {
         const cursorParam = new URL(url, 'http://localhost').searchParams.get('cursor');
         const pageIndex = cursorParam ? Number(cursorParam) : 0;
@@ -326,6 +335,22 @@ describe('EpicSwimlaneBoard — 로드 실패(story #2931, QA changes 8R HIGH②
       '로드 실패 에러 상태',
     );
     expect(container.textContent).not.toContain('부분로드에픽'); // 부분 성공(에픽만 로드됨)을 완전한 것처럼 보이지 않는다.
+    expect(container.textContent).toContain('다시 시도');
+  });
+
+  // ⚠️QA changes 9R(카디르+codex, 2026-08-22) — 8R②가 세운 "부분-성공 금지" 원칙이 중간
+  // 실패 경로엔 섰지만, 안전판(PAGE_HARD_CAP) 소진 경로엔 아직 안 섰었다 — 마지막 페이지가
+  // hasMore=true인 채로 루프가 끝나도 조용히 return했다(같은 클래스). 무한 hasMore:true
+  // 스트림으로 안전판 소진을 직접 재현한다.
+  it('안전판(하드캡) 소진 시에도 아직 더 있으면(hasMore=true) 조용히 반환하지 않고 에러 상태를 보인다', async () => {
+    stubFetch({ storiesAlwaysHasMore: true });
+    await act(async () => {
+      root.render(withIntl(<EpicSwimlaneBoard projectId="p1" />));
+    });
+    await waitForCondition(
+      () => container.textContent?.includes('불러오지 못했습니다') ?? false,
+      '안전판 소진 에러 상태',
+    );
     expect(container.textContent).toContain('다시 시도');
   });
 });
