@@ -24,7 +24,7 @@ import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses
 import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { EvidenceSection } from '@/components/verify/evidence-section';
 import { ChatProofSection, parseStoryProofReferences } from '@/components/verify/chat-proof-section';
-import { deriveInFlightTrustChip, pickRelevantMergeGate } from '@/services/verify';
+import { pickRelevantMergeGate } from '@/services/verify';
 import { Workcell, type WorkcellMessage, type WorkcellPipelineStage } from '@/components/workcell/workcell';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
@@ -803,11 +803,6 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const statusKey = statusKeyMap[localStatus];
   const statusLabel = statusKey ? t(statusKey) : localStatus;
 
-  // P0-04(trust-pipeline-minimal-decision) — in-flight 전용 칩. done엔 항상 무표시(TrustSeal
-  // 담당·중복 금지, deriveInFlightTrustChip 내부에서 강제). 무신호=칩 자체 미렌더(no-fiction).
-  const trustChip = deriveInFlightTrustChip(localStatus, chipGates);
-  const trustChipLabel = trustChip === 'needs_input' ? t('trustChipNeedsInput') : trustChip === 'merge_ready' ? t('trustChipMergeReady') : null;
-
   // E-UI-DAEGBYEON P0 — Workcell 최소 실화면 배선(story `e5310d1b`, dead-path 방지).
   // 정직한 최소 표면: 실 필드(title/status/assignee/description/acceptance_criteria/
   // blocked_by/comments)만으로 채울 수 있는 것만 채운다 — 없는 값은 허구로 안 채움:
@@ -831,6 +826,28 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const pipelineStage: WorkcellPipelineStage | null = ssePipelineStage !== undefined
     ? ssePipelineStage
     : (story.trust_stage as WorkcellPipelineStage | null) ?? null;
+
+  // story #2933 H3(P0-H 정직성 감사, PO 부수기록ⓐ) — P0-04 in-flight 칩(trustChip)도 BE
+  // trust_stage로 수렴한다. 예전엔 deriveInFlightTrustChip(gate 목록 별도 재파생)이 판정했는데
+  // pipelineStage의 needs_input/merge_ready가 정확히 같은 개념(BE 판정 SoT, H1)이라 그대로
+  // 재사용 — FE 재파생의 두 번째 온상을 닫는다(H1이 스테퍼 쪽을, 이번엔 이 배지 쪽을).
+  // done엔 pipelineStage 자체가 이미 null(derive_trust_stage §7 확定④)이라 구 함수가 하던
+  // "담당·중복 금지" 강제를 별도 코드 없이 그대로 계승한다 — 단, 이건 story.trust_stage가
+  // 실제로 서버에서 새로 온 경우에만 참이다.
+  // ⚠️QA changes(PR#3364, codex 교차모델, 2026-08-22) — handleChangeStatus의 낙관적 갱신은
+  // `onStoryUpdate?.({ ...story, status: newStatus })`로 status만 덮어쓰고 trust_stage는
+  // 스프레드로 «이전 값 그대로» 남긴다(PO 조건②·바로 위 주석). localStatus는 이 낙관 갱신으로
+  // 즉시 'done'이 되지만, pipelineStage(=story.trust_stage)는 실 BE 재조회(SSE 트리거
+  // 재fetch)가 도착하기 전까지 옛 값(예: 'needs_input')에 머무는 창이 생긴다 — 그 창에서
+  // "done인데 in-flight 칩"이 뜨는 부당 표시(구 deriveInFlightTrustChip이 갖고 있던
+  // status==='done' 하드가드가 수렴 과정에서 소실됐던 회귀). localStatus==='done'이면
+  // pipelineStage 값과 무관하게 명시적으로 차단 — 낙관 갱신 창의 신뢰 축을 status(즉시 반영)
+  // 로 고정한다(pipelineStage는 곧 뒤따라 null로 수렴하지만 그 사이 창을 UI에 노출 안 함).
+  const trustChip: 'needs_input' | 'merge_ready' | null = localStatus === 'done'
+    ? null
+    : pipelineStage === 'needs_input' ? 'needs_input' : pipelineStage === 'merge_ready' ? 'merge_ready' : null;
+  const trustChipLabel = trustChip === 'needs_input' ? t('trustChipNeedsInput') : trustChip === 'merge_ready' ? t('trustChipMergeReady') : null;
+
   const assigneeIds = story.assignee_ids?.length ? story.assignee_ids : (story.assignee_id ? [story.assignee_id] : []);
   const proofHumanId = assigneeIds.find((id) => memberMap[id] && memberMap[id]!.type !== 'agent');
   const proofAgentId = assigneeIds.find((id) => memberMap[id]?.type === 'agent');

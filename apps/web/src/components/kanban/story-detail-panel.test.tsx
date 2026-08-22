@@ -224,6 +224,98 @@ describe('StoryDetailPanel — Workcell pipelineStage = story.trust_stage 직결
   });
 });
 
+// story #2933 H3(P0-H 정직성 감사, PO 부수기록ⓐ) — P0-04 in-flight 칩(trustChip, 제목 옆
+// "입력 필요"/"병합 대기" 배지)도 구 gate-목록 재파생(deriveInFlightTrustChip, 폐기됨)이 아니라
+// pipelineStage(=story.trust_stage, H1) 하나로 수렴했는지 고정. gate fetch 응답과 무관해야
+// 한다(H1의 스테퍼 테스트와 동일 취지) — chipGates는 fetch 실패(stubFetch)로 항상 빈 배열.
+describe('StoryDetailPanel — trustChip도 story.trust_stage로 수렴(story #2933 H3)', () => {
+  const HUMAN_ID = 'human-1';
+  const memberMap = { [HUMAN_ID]: { id: HUMAN_ID, name: '책임자', type: 'human' } };
+
+  async function mountWithTrustStage(trustStage: KanbanStory['trust_stage']) {
+    stubFetch();
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel
+          story={makeStory({ status: 'in-progress', assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID], trust_stage: trustStage })}
+          tasks={[]} onClose={() => {}} memberMap={memberMap}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('trust_stage="needs_input" → "입력 필요" 칩(gate fetch는 항상 실패 응답 — 무관하게 뜬다)', async () => {
+    await mountWithTrustStage('needs_input');
+    expect(container.textContent).toContain('입력 필요');
+  });
+
+  it('trust_stage="merge_ready" → "병합 대기" 칩', async () => {
+    await mountWithTrustStage('merge_ready');
+    expect(container.textContent).toContain('병합 대기');
+  });
+
+  it('trust_stage="running"(needs_input/merge_ready 둘 다 아님) → 칩 자체가 안 뜬다', async () => {
+    await mountWithTrustStage('running');
+    expect(container.textContent).not.toContain('입력 필요');
+    expect(container.textContent).not.toContain('병합 대기');
+  });
+
+  it('trust_stage=null(done 등) → 칩 미표시(TrustSeal과 동어반복 금지, 구 deriveInFlightTrustChip의 done 강제와 결과 동일)', async () => {
+    await mountWithTrustStage(null);
+    expect(container.textContent).not.toContain('입력 필요');
+    expect(container.textContent).not.toContain('병합 대기');
+  });
+
+  // ⚠️QA changes(PR#3364, codex 교차모델, 2026-08-22) — 구 deriveInFlightTrustChip이 갖고
+  // 있던 "status==='done'이면 무조건 null" 하드가드가 trustChip을 story.trust_stage 하나로
+  // 수렴시키는 과정에서 소실됐다. handleChangeStatus의 낙관적 done 전이는 localStatus를 즉시
+  // 'done'으로 바꾸지만(L915), story.trust_stage는 PATCH /status 응답이 돌아와 onStoryUpdate가
+  // 호출될 때까지(그마저도 spread로 옛 값을 보존 — PO 조건②) 그대로 남는다 — 그 창에서
+  // "done인데 in-flight 칩 표시"라는 부당 상태가 뜬다(codex 실물 재현). 이 테스트는 PATCH
+  // 응답을 deferred로 붙잡아 그 창을 직접 관측한다.
+  it('낙관적 done 전이 직후(trust_stage는 아직 옛값) — trustChip이 즉시 사라진다(localStatus 우선)', async () => {
+    let resolveStatusPatch: ((v: unknown) => void) | undefined;
+    const statusPatchPromise = new Promise((resolve) => { resolveStatusPatch = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && /\/api\/stories\/s1\/status(\?|$)/.test(url)) {
+        return statusPatchPromise as Promise<{ ok: boolean; json: () => Promise<unknown> }>;
+      }
+      return { ok: false, json: async () => null };
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel
+          story={makeStory({ status: 'in-review', assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID], trust_stage: 'needs_input' })}
+          tasks={[]} onClose={() => {}} memberMap={memberMap}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('입력 필요'); // 전이 前 — 기존 칩 정상 표시.
+
+    const statusTrigger = document.body.querySelector('button[aria-label="Status"], button[aria-label="상태"]') as HTMLButtonElement | null;
+    expect(statusTrigger).toBeTruthy();
+    await act(async () => { statusTrigger!.click(); });
+    const doneItem = [...document.body.querySelectorAll('[role="menuitem"], button')]
+      .find((el) => el.textContent?.trim() === '완료') as HTMLButtonElement | undefined;
+    expect(doneItem).toBeTruthy();
+    await act(async () => { doneItem!.click(); }); // handleChangeStatus('done') → localStatus 즉시 'done', PATCH는 deferred.
+
+    // 낙관 전이 직후 — story.trust_stage(=pipelineStage)는 여전히 'needs_input'이지만
+    // localStatus는 이미 'done'. 칩이 남아있으면 회귀.
+    expect(container.textContent).not.toContain('입력 필요');
+    expect(container.textContent).not.toContain('병합 대기');
+
+    await act(async () => {
+      resolveStatusPatch!({ ok: true, json: async () => ({ data: { violation: null } }) });
+      await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.textContent).not.toContain('입력 필요'); // PATCH 완료 後에도 계속 미표시.
+  });
+});
+
 // story #2933 H2(P0-H) — Workcell 스테퍼가 `story.trust_stage_changed` SSE를 라이브 갱신
 // 트리거로 쓰는지(AttentionQueueView, story #2923와 동형 패턴). SSE payload 자체는 신뢰의
 // 소스가 아니다(트리거일 뿐) — REST 재조회(GET /api/stories/{id})의 값만 반영한다(PO 조건②
