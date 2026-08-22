@@ -1445,6 +1445,37 @@ describe('ChatBubble — story #2671 EmbedCard 단독 참조 문단 카드 렌�
     expect(container.textContent).toContain('스토리 제목');
   });
 
+  // story #2905(#3322 QA 채무, 카디르 지적 2026-08-21) — 「open-panel 클릭 왕복이 레포 전체에서
+  // 테스트 0건(어댑터를 no-op으로 무력화해도 전부 통과)」의 정확한 처방. sole-link EmbedCard를
+  // 실제로 클릭해 onOpenReadingPanel prop이 올바른 ReadingPanelTarget 값으로 호출되는지 잰다
+  // — 이 테스트가 없던 시절엔 toEmbedCardOpenPanel을 no-op으로 바꿔도 위 두 렌더 테스트는
+  // 여전히 그린이었다(클릭 자체를 아무도 안 눌렀으므로).
+  it('sole-link EmbedCard를 클릭하면 onOpenReadingPanel이 올바른 ReadingPanelTarget으로 호출된다(open-panel 왕복 회귀가드)', async () => {
+    const storyId = '55555555-5555-5555-5555-555555555556';
+    const onOpenReadingPanel = vi.fn();
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, content: `[스토리 제목](entity:story:${storyId})`, references: [{ target_type: 'story', target_id: storyId }] }}
+          isMine={false}
+          onOpenReadingPanel={onOpenReadingPanel}
+        />,
+      ));
+    });
+    const cardButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('스토리 제목'));
+    expect(cardButton).toBeTruthy();
+    await act(async () => { cardButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onOpenReadingPanel).toHaveBeenCalledTimes(1);
+    expect(onOpenReadingPanel).toHaveBeenCalledWith({
+      kind: 'entity',
+      entityType: 'story',
+      entityId: storyId,
+      title: '스토리 제목',
+      status: null,
+      href: '/board?story=' + storyId,
+    });
+  });
+
   // story #2905(S2c②) — gate 단건 sole-link 참조는 EmbedCard 대신 approval-request-card.tsx가
   // 그대로 뜬다(§8 "표면은 둘·실체는 하나", 승인 로직 사본 분화 금지 — PO 판정).
   it('참조 링크 하나뿐인 문단(gate)은 EmbedCard가 아니라 ApprovalRequestCard(결재 요청 카드)로 렌더된다', async () => {
