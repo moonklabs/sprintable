@@ -6,7 +6,7 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { AlertTriangle, ArrowLeftRight, Check, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
-import type { KanbanStory, KanbanMember, DependencyEdge } from './types';
+import type { KanbanStory, KanbanMember, DependencyEdge, GateItem } from './types';
 import { normalizeAssigneePatch } from './types';
 import type { SendAttachment } from '@/hooks/use-chat-sse';
 import { getFileIcon } from '@/lib/file-icon';
@@ -26,7 +26,9 @@ import { EvidenceSection } from '@/components/verify/evidence-section';
 import { ChatProofSection } from '@/components/verify/chat-proof-section';
 import { deriveInFlightTrustChip } from '@/services/verify';
 import { Workcell, type WorkcellMessage, type WorkcellPipelineStage } from '@/components/workcell/workcell';
-import { initials } from '@/lib/storage/format';
+import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
+import type { TrustSealClaimedProps, TrustSealVerifiedProps } from '@/components/verify/trust-seal';
+import { initials, formatDate } from '@/lib/storage/format';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
@@ -388,9 +390,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
 
   const [deps, setDeps] = useState<DependencyEdge[]>([]);
   const [loadingDeps, setLoadingDeps] = useState(false);
-  // P0-04(trust-pipeline-minimal-decision) — in-flight 전용 신뢰 칩. gate_type/status/
-  // neutral_facts.ci_result만 필요(GateItem 전체 불요) — 얇은 로컬 타입으로 충분.
-  const [chipGates, setChipGates] = useState<{ gate_type: string; status: string; neutral_facts?: Record<string, unknown> | null }[]>([]);
+  // P0-04(trust-pipeline-minimal-decision) — in-flight 전용 신뢰 칩. story #2922 W2에서
+  // GateItem 전체로 넓힘(id·risk_grade도 필요 — Workcell Evidence 구획의 merge 게이트 링크/위험도).
+  const [chipGates, setChipGates] = useState<GateItem[]>([]);
   const [showAddDep, setShowAddDep] = useState(false);
   const [depQuery, setDepQuery] = useState('');
   const [depQueryResults, setDepQueryResults] = useState<{ id: string; title: string }[]>([]);
@@ -648,7 +650,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
     try {
       const res = await fetch(`/api/stories/${story.id}/request-verification`, { method: 'POST' });
       if (res.ok) {
-        const gate = await res.json() as { gate_type: string; status: string; neutral_facts?: Record<string, unknown> | null };
+        const gate = await res.json() as GateItem;
         setChipGates((prev) => [...prev.filter((g) => g.gate_type !== 'qa'), gate]);
         addToast({ type: 'success', title: t('verificationRequested') });
       } else {
@@ -737,8 +739,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   // blocked_by/comments)만으로 채울 수 있는 것만 채운다 — 없는 값은 허구로 안 채움:
   // - Run.now/stage는 story.status(coarse) 이상의 세부 행위 신호가 없어 statusLabel 그대로
   //   사용(과장 없음). tools/scopes는 실 데이터 없어 빈 배열(빈 배열=정직, 조작 아님).
-  // - Evidence는 ProofCapsuleProps 실 매핑 인프라(EvidenceSection 재사용)가 후속 스코프라
-  //   지금은 null(정직한 "아직 증거 없음" — 스펙이 명시적으로 허용하는 케이스).
+  // - story #2922 W2 — Evidence는 이제 실 매핑(아래 workcellEvidence). ac/diff/proofCount는
+  //   신호 자체가 없어(story.acceptance_criteria는 freeform 텍스트라 카운트=fiction, glance-hero.tsx
+  //   buildEvidence와 동일 규율) 렌더 안 함 — trustSeal(human_verified/self_reported)+
+  //   evidence.autoVerify(merge 게이트 neutral_facts.ci_result)+gate(그 게이트 자체)만 real signal.
   // - human assignee 없으면 Workcell 렌더 자체를 생략(허구 human 금지, ProofCapsule 배선과 동일 규율).
   // story #2922 W1 — 구 3색 proofState 배지를 신뢰 파이프라인 6상태로 대체(doc
   // workcell-redesign-2922 §매핑표). needs_input/verified는 5-status로 표현 불가한 파생값이라
@@ -763,6 +767,44 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const proofAgentId = assigneeIds.find((id) => memberMap[id]?.type === 'agent');
   const proofHuman = proofHumanId ? memberMap[proofHumanId] : null;
   const proofAgent = proofAgentId ? memberMap[proofAgentId] : null;
+
+  // story #2922 W2 — Workcell Evidence 구획 = ProofCapsule density="full" 실배선. glance-hero.tsx
+  // (GlanceHero의 buildEvidence/buildTrustSeal, 유일한 기존 density="full" 실 호출부)와 동일 규율:
+  // 신호 없는 필드는 절대 지어내지 않는다(no-fiction). claim=story.title(GlanceHero 선례 그대로).
+  const EVIDENCE_STATE_LABEL_BY_STATUS: Partial<Record<string, ProofState>> = {
+    'in-progress': 'blue', 'in-review': 'amber', done: 'green',
+  };
+  const evidenceProofState = EVIDENCE_STATE_LABEL_BY_STATUS[localStatus] ?? null;
+  const evidenceStateLabel = evidenceProofState
+    ? { blue: t('proofCapsuleStateRunning'), amber: t('proofCapsuleStateReviewing'), green: t('proofCapsuleStateProven') }[evidenceProofState]
+    : null;
+  const mergeGate = chipGates.find((g) => g.gate_type === 'merge') ?? null;
+  const GATE_RISK_MAP: Record<'low' | 'high', '낮음' | '높음'> = { low: '낮음', high: '높음' };
+  const ciResult = mergeGate?.neutral_facts?.['ci_result'];
+  const evidenceAutoVerify: 'passed' | 'failed' | null = ciResult === 'pass' ? 'passed' : ciResult === 'fail' ? 'failed' : null;
+  const workcellEvidenceSignal: ProofCapsuleEvidence | undefined = evidenceAutoVerify ? { autoVerify: evidenceAutoVerify } : undefined;
+  const humanVerifiedByName = story.human_verified_by ? (memberMap[story.human_verified_by]?.name ?? story.human_verified_by.slice(0, 6)) : null;
+  const workcellTrustSeal: TrustSealClaimedProps | TrustSealVerifiedProps | undefined =
+    story.human_verified && humanVerifiedByName && story.human_verified_at
+      ? { variant: 'verified', humanName: humanVerifiedByName, when: formatDate(story.human_verified_at) }
+      : story.self_reported
+        ? (proofAgent ? { variant: 'claimed', agentInitial: initials(proofAgent.name) } : { variant: 'claimed' })
+        : undefined;
+  // Human gate는 pending(아직 결정 안 됨)일 때만 "결정을 청하는" 표면 의미가 있다 — resolved 게이트를
+  // 다시 열자고 하면 no-fiction 위반(이미 끝난 결정을 대기 중처럼 보여줌).
+  const workcellGate: ProofCapsuleGate | undefined =
+    mergeGate && mergeGate.status === 'pending'
+      ? { risk: mergeGate.risk_grade ? GATE_RISK_MAP[mergeGate.risk_grade] : undefined, action: t('workcellGateAction'), href: `/gates/${mergeGate.id}` }
+      : undefined;
+  const workcellEvidence: ProofCapsuleProps | null =
+    evidenceProofState && evidenceStateLabel && (workcellEvidenceSignal || workcellTrustSeal || workcellGate)
+      ? {
+          density: 'full', proofState: evidenceProofState, stateLabel: evidenceStateLabel, claim: story.title,
+          human: proofHuman ? { name: proofHuman.name, role: 'human' } : undefined,
+          agent: proofAgent ? { name: proofAgent.name, initial: initials(proofAgent.name) } : undefined,
+          evidence: workcellEvidenceSignal, trustSeal: workcellTrustSeal, gate: workcellGate,
+        }
+      : null;
 
   const WORKCELL_NEXT_NEED_BY_STATUS: Record<string, string> = {
     'in-progress': t('workcellNextNeedInProgress'),
@@ -1298,7 +1340,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   blocked: story.blocked_by?.length ? t('workcellBlockedReason') : null,
                   nextNeed: WORKCELL_NEXT_NEED_BY_STATUS[localStatus] ?? statusLabel,
                 }}
-                evidence={null}
+                evidence={workcellEvidence}
                 conversation={{ view: 'run', messages: workcellMessages }}
               />
             ) : null}

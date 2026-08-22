@@ -212,3 +212,61 @@ describe('StoryDetailPanel — Workcell pipelineStage 파생(story #2922, 카디
     expect(currentStageLabel()).toBe('Needs input');
   });
 });
+
+// story #2922 W2 — Evidence 구획 = ProofCapsule density="full" 실배선. glance-hero.tsx의
+// buildEvidence/buildTrustSeal와 동일 no-fiction 규율(신호 없는 필드는 렌더 안 함)을 판다.
+describe('StoryDetailPanel — Workcell Evidence 구획 실배선(story #2922 W2)', () => {
+  const HUMAN_ID = 'human-1';
+  const memberMap = { [HUMAN_ID]: { id: HUMAN_ID, name: '책임자', type: 'human' } };
+
+  async function mountEvidence(storyOverrides: Record<string, unknown>, gates: Array<Record<string, unknown>>) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/api/gates?work_item_id=')) {
+        return { ok: true, json: async () => gates };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel
+          story={makeStory({ status: 'in-review', assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID], ...storyOverrides })}
+          tasks={[]} onClose={() => {}} memberMap={memberMap}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('pending merge 게이트(risk_grade=high) → 게이트 액션 버튼이 그 게이트로 링크된다', async () => {
+    await mountEvidence({}, [{ id: 'gate-1', gate_type: 'merge', status: 'pending', risk_grade: 'high', neutral_facts: {} }]);
+    const link = Array.from(container.querySelectorAll('a')).find((a) => a.getAttribute('href') === '/gates/gate-1');
+    expect(link).toBeTruthy();
+    expect(link?.textContent).toContain('Merge gate');
+  });
+
+  it('merge 게이트가 이미 resolved면 게이트 버튼을 다시 안 띄운다(no-fiction — 끝난 결정을 대기 중처럼 보이면 안 됨)', async () => {
+    await mountEvidence({ human_verified: true, human_verified_by: HUMAN_ID, human_verified_at: '2026-08-20T00:00:00Z' }, [
+      { id: 'gate-1', gate_type: 'merge', status: 'approved', risk_grade: 'high', neutral_facts: {} },
+    ]);
+    const link = Array.from(container.querySelectorAll('a')).find((a) => a.getAttribute('href') === '/gates/gate-1');
+    expect(link).toBeFalsy();
+  });
+
+  it('human_verified → TrustSeal이 검증자 실명으로 렌더된다(주장이 아니라 검증)', async () => {
+    await mountEvidence({ human_verified: true, human_verified_by: HUMAN_ID, human_verified_at: '2026-08-20T00:00:00Z' }, [
+      { id: 'gate-1', gate_type: 'merge', status: 'approved', neutral_facts: {} },
+    ]);
+    expect(container.textContent).toContain('책임자');
+  });
+
+  it('merge 게이트 neutral_facts.ci_result=pass → Evidence autoVerify passed 신호가 렌더된다', async () => {
+    await mountEvidence({ self_reported: true }, [{ id: 'gate-1', gate_type: 'merge', status: 'pending', neutral_facts: { ci_result: 'pass' } }]);
+    // ProofCapsule FullVariant의 evidence.autoVerify==='passed' 렌더 텍스트(proofCapsule.evidence.autoPassed).
+    expect(container.textContent).toMatch(/자동|검증|passed/i);
+  });
+
+  it('신호가 하나도 없으면(게이트 0·self_reported/human_verified 둘 다 false) 정직한 빈 상태 그대로다', async () => {
+    await mountEvidence({}, []);
+    expect(container.textContent).toContain('아직 증거 없음');
+  });
+});
