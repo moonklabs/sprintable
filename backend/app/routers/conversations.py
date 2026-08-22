@@ -459,6 +459,7 @@ def _msg_payload(
             "id": str(sender.id),
             "name": sender.name,
             "type": sender.type,
+            "avatar_url": sender.avatar_url,
         } if sender else None,
         # e2608901: 알림 카피 — raw event_type 대신 사람-친화 summary를 payload에 동봉.
         "summary": _build_message_summary(msg.content, sender.name if sender else None, bool(attachments)),

@@ -48,6 +48,7 @@ async def test_anchor_resolve_member_agent(monkeypatch):
     member.name = "Agent Bot"
     member.type = "agent"
     member.org_id = org_id
+    member.avatar_url = "https://cdn.test/agent.png"
 
     session = AsyncMock()
     # Member(agent) → ProjectAccess.role → AgentProjectProfile.project_id
@@ -59,6 +60,7 @@ async def test_anchor_resolve_member_agent(monkeypatch):
     assert resolved.role == "member"
     assert resolved.project_id == proj_id
     assert resolved.user_id is None
+    assert resolved.avatar_url == "https://cdn.test/agent.png"  # story #2901
 
 
 @pytest.mark.anyio
@@ -74,6 +76,7 @@ async def test_anchor_resolve_member_human(monkeypatch):
     member.user_id = user_id
     member.org_id = org_id
     member.org_role = "admin"
+    member.avatar_url = "https://cdn.test/human.png"
     user = MagicMock()
     user.email = "human@test.com"
 
@@ -86,6 +89,7 @@ async def test_anchor_resolve_member_human(monkeypatch):
     assert resolved.user_id == user_id
     assert resolved.role == "admin"   # org_role
     assert resolved.name == "human@test.com"
+    assert resolved.avatar_url == "https://cdn.test/human.png"  # story #2901 — Member 소싱
 
 
 @pytest.mark.anyio
@@ -119,6 +123,7 @@ async def test_anchor_lookup_direct_member(monkeypatch):
     mid = uuid.uuid4()
     m = MagicMock()
     m.id = mid; m.user_id = uuid.uuid4(); m.name = "H"; m.type = "human"; m.org_role = "member"; m.org_id = uuid.uuid4()
+    m.avatar_url = "https://cdn.test/h.png"
 
     session = AsyncMock()
     # Member.in_(ids) → [m]
@@ -130,6 +135,7 @@ async def test_anchor_lookup_direct_member(monkeypatch):
     assert out[mid].type == "human"
     assert out[mid].role == "member"
     assert out[mid].name == "h@test.com"  # M1: 휴먼 name=email
+    assert out[mid].avatar_url == "https://cdn.test/h.png"  # story #2901
 
 
 @pytest.mark.anyio

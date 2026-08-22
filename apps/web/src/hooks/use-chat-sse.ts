@@ -22,6 +22,9 @@ export interface ChatMessage {
   created_by: string;     // backend: sender.id
   sender_name: string;    // backend: sender.name
   sender_type: string;    // backend: sender.type ('human' | 'agent')
+  // story #2901 — backend: sender.avatar_url. TeamMember/Member 소싱만 값이 있고
+  // OrgMember 소싱(레거시 JWT-휴먼 일부 경로)은 컬럼 자체가 없어 항상 null.
+  sender_avatar_url: string | null;
   content: string;
   /** story #2319 — set이면 tombstone됨(행은 남고 content는 서버가 이미 ""로 스크럽했다).
    * ChatBubble이 이 필드로 placeholder를 렌더한다(#2299 still_exists와 같은 축 — 「끊어짐」은
@@ -73,7 +76,7 @@ export interface ChatMessage {
 
 // Normalize backend _to_chat_message format → ChatMessage
 export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
-  const sender = raw.sender as { id?: string; name?: string; type?: string } | undefined;
+  const sender = raw.sender as { id?: string; name?: string; type?: string; avatar_url?: string | null } | undefined;
   return {
     id: (raw.id ?? '') as string,
     // conversation:message uses conversation_id; chat:message uses thread_id or memo_id
@@ -81,6 +84,7 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     created_by: (raw.created_by ?? sender?.id ?? '') as string,
     sender_name: (sender?.name ?? '') as string,
     sender_type: (sender?.type ?? 'human') as string,
+    sender_avatar_url: (sender?.avatar_url ?? null) as string | null,
     content: (raw.content ?? '') as string,
     deleted_at: (raw.deleted_at ?? null) as string | null,
     attachments: (raw.attachments ?? []) as ChatMessage['attachments'],

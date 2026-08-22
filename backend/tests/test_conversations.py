@@ -20,13 +20,16 @@ def anyio_backend():
     return "asyncio"
 
 
-def _make_member(member_id: uuid.UUID = MEMBER_ID, member_type: str = "human") -> MagicMock:
+def _make_member(
+    member_id: uuid.UUID = MEMBER_ID, member_type: str = "human", avatar_url: str | None = None,
+) -> MagicMock:
     m = MagicMock()
     m.id = member_id
     m.name = "테스트 멤버"
     m.type = member_type
     m.org_id = ORG_ID
     m.user_id = uuid.uuid4()
+    m.avatar_url = avatar_url
     return m
 
 
@@ -126,6 +129,35 @@ def test_msg_payload_includes_summary():
     payload = _msg_payload(msg, sender)
     assert "summary" in payload
     assert payload["summary"].startswith(f"{sender.name}: ")
+
+
+def test_msg_payload_sender_includes_avatar_url():
+    """story #2901 — sender dict에 avatar_url 동봉(read+SSE+POST 응답 전부의 SSOT인
+    _msg_payload 한 지점만 고치면 되는 이유 — 호출부 7곳이 전부 이 함수를 거친다)."""
+    from app.routers.conversations import _msg_payload
+    msg = _make_msg()
+    sender = _make_member(avatar_url="https://cdn.test/member.png")
+    payload = _msg_payload(msg, sender)
+    assert payload["sender"]["avatar_url"] == "https://cdn.test/member.png"
+
+
+def test_msg_payload_sender_avatar_url_none_when_sender_has_none():
+    """avatar_url 미보유 sender(예: 레거시 org_member 전용 휴먼)는 None으로 정직하게 떨어짐
+    (없는 값을 지어내지 않음)."""
+    from app.routers.conversations import _msg_payload
+    msg = _make_msg()
+    sender = _make_member()  # avatar_url 기본값 None
+    payload = _msg_payload(msg, sender)
+    assert payload["sender"]["avatar_url"] is None
+
+
+def test_msg_payload_sender_none_when_no_sender():
+    """sender 자체가 없으면(orphan 등) payload["sender"]는 None 그대로 — avatar_url 키를
+    억지로 만들지 않음(기존 계약 무변경 확認)."""
+    from app.routers.conversations import _msg_payload
+    msg = _make_msg()
+    payload = _msg_payload(msg, None)
+    assert payload["sender"] is None
 
 
 def test_msg_payload_exposes_approval_target_when_present():

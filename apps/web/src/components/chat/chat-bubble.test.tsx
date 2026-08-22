@@ -64,6 +64,7 @@ const baseMessage: ChatMessage = {
   created_by: 'agent-1',
   sender_name: '오르테가',
   sender_type: 'agent',
+  sender_avatar_url: null,
   // story #2671 — 링크 하나뿐인 문단은 이제 EmbedCard(카드)로 렌더된다(신규 기능, 아래
   // 전용 describe에서 검증). 이 파일의 나머지 스위트는 전부 EntityChip 특화 동작(사실성
   // 표기·상태 배지·결재 CTA·모달 재렌더 생존 등)을 재는 게 목적이라 앞에 문맥어를 붙여

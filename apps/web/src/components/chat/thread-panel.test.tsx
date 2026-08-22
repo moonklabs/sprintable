@@ -49,6 +49,7 @@ const parentMessage: ChatMessage = {
   created_by: 'agent-1',
   sender_name: '오르테가',
   sender_type: 'agent',
+  sender_avatar_url: null,
   content: '원본 메시지',
   attachments: [],
   created_at: '2026-08-08T00:00:00.000Z',

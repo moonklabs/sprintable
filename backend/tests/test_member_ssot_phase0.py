@@ -38,7 +38,7 @@ def _make_auth(user_id: uuid.UUID = USER_ID, is_api_key: bool = False) -> MagicM
     return ctx
 
 
-def _make_team_member(tid=AGENT_TM_ID, ttype="agent", org_id=ORG_ID):
+def _make_team_member(tid=AGENT_TM_ID, ttype="agent", org_id=ORG_ID, avatar_url=None):
     tm = MagicMock()
     tm.id = tid
     tm.user_id = None
@@ -47,11 +47,12 @@ def _make_team_member(tid=AGENT_TM_ID, ttype="agent", org_id=ORG_ID):
     tm.role = "agent"
     tm.org_id = org_id
     tm.project_id = PROJECT_ID
+    tm.avatar_url = avatar_url
     return tm
 
 
 def _make_org_member(oid=ORG_MEMBER_ID, user_id=USER_ID, org_id=ORG_ID):
-    om = MagicMock()
+    om = MagicMock(spec=["id", "user_id", "org_id", "role", "deleted_at"])
     om.id = oid
     om.user_id = user_id
     om.org_id = org_id
@@ -77,6 +78,22 @@ async def test_resolve_member_api_key_returns_team_member_id():
     assert resolved.id == AGENT_TM_ID
     assert resolved.type == "agent"
     assert resolved.user_id is None
+
+
+@pytest.mark.anyio
+async def test_resolve_member_api_key_includes_avatar_url():
+    """story #2901 — TeamMember 소싱 분기는 avatar_url을 그대로 전달해야 함(ChatMessage
+    sender 페이로드의 선행 조건)."""
+    auth = _make_auth(is_api_key=True)
+    tm = _make_team_member(avatar_url="https://cdn.test/agent.png")
+
+    session = AsyncMock()
+    result = MagicMock()
+    result.scalars.return_value.first.return_value = tm
+    session.execute = AsyncMock(return_value=result)
+
+    resolved = await resolve_member(auth, ORG_ID, session)
+    assert resolved.avatar_url == "https://cdn.test/agent.png"
 
 
 @pytest.mark.anyio
@@ -117,6 +134,27 @@ async def test_resolve_member_jwt_returns_org_member_id():
     assert resolved.type == "human"
     assert resolved.user_id == USER_ID
     assert resolved.name == "user@test.com"
+
+
+@pytest.mark.anyio
+async def test_resolve_member_jwt_avatar_url_none_no_column():
+    """story #2901 — OrgMember(+User) 소싱 분기는 avatar_url 컬럼 자체가 없어 None이
+    정직한 값(_make_org_member가 spec=[...]로 제한돼 있어 프로덕션 코드가 om.avatar_url을
+    건드리면 이 테스트가 AttributeError로 즉시 잡는다)."""
+    auth = _make_auth()
+    om = _make_org_member()
+
+    session = AsyncMock()
+    user_mock = MagicMock()
+    user_mock.email = "user@test.com"
+    om_result = MagicMock(); om_result.scalar_one_or_none.return_value = om
+    user_result = MagicMock(); user_result.scalar_one_or_none.return_value = user_mock
+
+    with patch("app.services.member_resolver.has_project_access", return_value=True):
+        session.execute = AsyncMock(side_effect=[om_result, user_result])
+        resolved = await resolve_member(auth, ORG_ID, session, project_id=PROJECT_ID)
+
+    assert resolved.avatar_url is None
 
 
 @pytest.mark.anyio
@@ -165,6 +203,19 @@ async def test_lookup_members_team_member_first():
 
 
 @pytest.mark.anyio
+async def test_lookup_members_team_member_includes_avatar_url():
+    """story #2901 — 배치 조회(list_messages 읽기 경로가 실제로 소비)도 TeamMember 소싱
+    시 avatar_url을 전달해야 함."""
+    tm = _make_team_member(avatar_url="https://cdn.test/agent.png")
+    session = AsyncMock()
+    tm_result = MagicMock(); tm_result.scalars.return_value.all.return_value = [tm]
+    session.execute = AsyncMock(return_value=tm_result)
+
+    result = await lookup_members_by_ids({AGENT_TM_ID}, session)
+    assert result[AGENT_TM_ID].avatar_url == "https://cdn.test/agent.png"
+
+
+@pytest.mark.anyio
 async def test_lookup_members_falls_back_to_org_member():
     """TeamMember에 없으면 OrgMember에서 fallback."""
     om = _make_org_member()
@@ -177,6 +228,7 @@ async def test_lookup_members_falls_back_to_org_member():
     result = await lookup_members_by_ids({ORG_MEMBER_ID}, session)
     assert ORG_MEMBER_ID in result
     assert result[ORG_MEMBER_ID].type == "human"
+    assert result[ORG_MEMBER_ID].avatar_url is None  # story #2901 — OrgMember 소싱, 컬럼 없음
 
 
 # ── _enforce_agent_creator_policy 유닛 테스트 ────────────────────────────────
