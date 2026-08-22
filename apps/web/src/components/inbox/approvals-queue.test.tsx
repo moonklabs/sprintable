@@ -152,10 +152,15 @@ describe('ApprovalsQueue', () => {
     expect(container.textContent).not.toContain(koMessages.cage.riskUnknown);
   });
 
-  it('held 아닌 pending gate는 위험도(unknown) 배지를 표시한다', async () => {
+  // story #2926(P0-F F3, 유나 확定①) — 이 항목(클릭-스루만 가능·인라인 액션 없음)이
+  // ProofCapsule density="row"로 바뀌며 위험도 배지 슬롯이 없어졌다(row 밀도 자체의 기존
+  // 한계 — Attention Queue 원안에도 이미 있던 제약, F3이 새로 만든 게 아니다). 대신
+  // stateLabel("결재 대기")이 그 자리의 상태 신호를 잇는다.
+  it('held 아닌 pending gate는 stateLabel(결재 대기)을 표시한다(row 밀도라 위험도 배지는 생략)', async () => {
     mockFetches([gate({ id: 'g-pending' })], []);
     await mount();
-    expect(container.textContent).toContain(koMessages.cage.riskUnknown);
+    expect(container.textContent).toContain(koMessages.cage.gateDetailStatusPending);
+    expect(container.textContent).not.toContain(koMessages.cage.riskUnknown);
   });
 
   it('created_at이 오늘이면 "오늘 접수", 과거면 "N일 대기"로 노화를 표시한다', async () => {
@@ -178,6 +183,27 @@ describe('ApprovalsQueue', () => {
     const button = container.querySelector('button');
     await act(async () => { button?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(pushMock).toHaveBeenCalledWith('/gates/g-tap');
+  });
+
+  // story #2926(P0-F F3) — 클릭-스루 전용 항목은 ProofCapsule density="row"(컷코너+신뢰단계
+  // 레일)로 셸이 바뀐다. 3버튼 인라인 결재 카드·resolved 카드는 F3 스코프 밖(현행 rounded-xl
+  // border 카드 그대로 — 2923이 다룰 표면)이라 이 항목만 겨냥해 확認한다.
+  it('클릭-스루 항목(inlineResolvable=false·미해소)은 ProofCapsule row 셸(컷코너)로 렌더된다', async () => {
+    mockFetches([gate({ id: 'g-row' })], []);
+    await mount();
+    // ProofCapsule의 CutCornerShell 자체 시그니처 — clip-path 컷코너.
+    const capsule = container.querySelector('[style*="clip-path"]');
+    expect(capsule).toBeTruthy();
+    expect(capsule?.className).toContain('bg-proof-panel');
+  });
+
+  it('3버튼 인라인 결재 카드는 F3 스코프 밖 — 현행 rounded-xl border 카드 셸 그대로다(2923 선점 안 함)', async () => {
+    mockFetches([lowRiskActionable()], []);
+    await mount();
+    // 인라인 액션 카드는 여전히 기존 셸(ProofCapsule 컷코너 아님) — 승인/변경요청 버튼이
+    // 그 증거(row 밀도엔 그런 버튼 슬롯이 없다).
+    expect(container.textContent).toContain(koMessages.cage.gateApprove);
+    expect(container.querySelector('[style*="clip-path"]')).toBeNull();
   });
 
   it('pending·held 둘 다 비어 있으면 빈 상태 문구를 렌더한다', async () => {
