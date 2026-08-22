@@ -395,6 +395,9 @@ async def evaluate_merge_gate(
     # 자체가 없음)은 DB에 0을 지어내지 않고 NULL로 정직하게 유지. 0271의 부분 유니크
     # 인덱스가 NULL 구간=옛 "스토리+gate_type당 1행" 계약을 그대로 지킨다.
     db_pr_number = pr_number if pr_number > 0 else None
+    # story #2932(HIGH1) — pr_number와 짝으로 repo도 정직하게: 빈 문자열("", no-substance
+    # self-report shell의 관례값)은 "모름"이지 실 repo가 아니므로 None으로 정규화.
+    db_repo_full_name = repo or None
     # story #2118(E-DG-REAL ②): create_gate()가 이미 pending인 기존 gate를 멱등 반환할 때(예:
     # report-done/board-preflight가 이 함수를 반복 호출)마다 승인요청 카드를 중복 배달하지 않으려면
     # "이 호출에서 방금 pending이 됐는지"(신규 생성 또는 rejected/voided→재오픈)를 알아야 한다 —
@@ -407,7 +410,7 @@ async def evaluate_merge_gate(
     # 승격 포함)과 다른 답을 낼 수 있어 fallback 헬퍼로 통일한다(같은 물음엔 같은 답).
     _prior_gate = await find_gate_slot_with_pr_fallback(
         session, org_id=org_id, work_item_id=story_id, work_item_type="story",
-        gate_type=MERGE_GATE_TYPE, pr_number=db_pr_number,
+        gate_type=MERGE_GATE_TYPE, pr_number=db_pr_number, repo_full_name=db_repo_full_name,
     )
     _prior_status = _prior_gate.status if _prior_gate is not None else None
     gate = await create_gate(
@@ -421,6 +424,7 @@ async def evaluate_merge_gate(
         project_id=project_id,
         neutral_facts=facts,
         pr_number=db_pr_number,
+        repo_full_name=db_repo_full_name,
     )
 
     # 재제출 re-open(doc-gate 48f064e5 선례 이식): uq(work_item,gate_type)=1행 + terminal=immutable
@@ -515,6 +519,11 @@ async def evaluate_merge_gate(
     if decision == AUTO_MERGE:
         if head_sha:
             gate.approved_head_sha = head_sha
+            # story #2932 완주조건 HIGH2(5라운드) — 이전엔 여기서 서버 now()로
+            # pr_head_observed_at을 씨딩했으나(4라운드), 서로 다른 시계(서버시각 vs GitHub
+            # 실시각)를 같은 필드에 섞는 결함으로 판명(카디르 5라운드+codex 실물재현) —
+            # 삭제했다. 이 필드는 이제 reopen_gate_if_new_sha(gate_github_check.py) 오직
+            # 한 곳, 오직 실 webhook payload의 pr_updated_at에서만 채워진다.
     elif gate.status == "auto_passed" and gate.approved_head_sha:
         logger.info(
             "gate=%s: 재평가로 decision이 AUTO_MERGE 이탈(%s) — auto-axis anchor(%s) 무효화",
@@ -616,6 +625,7 @@ async def reconcile_merge_gate_with_real_evidence(
     existing = await find_gate_slot_with_pr_fallback(
         session, org_id=org_id, work_item_id=story_id, work_item_type="story",
         gate_type=MERGE_GATE_TYPE, pr_number=(pr_number if pr_number > 0 else None),
+        repo_full_name=(repo or None),
     )
     if existing is None or existing.status not in ("pending", "auto_passed"):
         return None
@@ -702,6 +712,7 @@ async def trigger_gate_creation_for_late_participation(
                 existing = await find_gate_slot_with_pr_fallback(
                     session, org_id=org_id, work_item_id=story_id, work_item_type="story",
                     gate_type=MERGE_GATE_TYPE, pr_number=link.pr_number,
+                    repo_full_name=link.repo_full_name,
                 )
                 if existing is not None:
                     continue  # 이미 게이트가 있음 — 이 훅이 고치려는 갭이 아니다.

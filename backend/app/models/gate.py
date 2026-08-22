@@ -71,6 +71,11 @@ class Gate(Base):
     # 2개로 분리(NULL 구간=옛 계약 그대로, NOT NULL 구간=+pr_number). create_gate() 호출부
     # 전수는 gate_service.py 참조.
     pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # story #2932(HIGH1, 0272) — pr_number 단독은 repo 경계가 없어(전역이 아니라 스토리
+    # 스코프 안에서도) 다른 repo의 같은 번호 PR이 슬롯을 공유할 수 있었다(cross-repo
+    # 충돌). pr_number와 짝으로 멱등 키에 편입 — find_gate_slot_with_pr_fallback.py 참조.
+    # NULL=pr_number와 동형 사유(PR 컨텍스트 없음/레거시 미백필).
+    repo_full_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
     resolver_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -103,6 +108,10 @@ class Gate(Base):
     # 웹훅의 새 head_sha와 다르면 재-pending(approved→pending) 트리거(카디르 QA③-b: reopen 가드를
     # synchronize만이 아니라 네 액션 전부에서 돌림 — 다른 head로 돌아온 재오픈 PR도 잡는다).
     approved_head_sha: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #2932(완주조건 HIGH2, 0273) — GitHub `pull_request.updated_at`(실 PR 갱신마다
+    # 단조증가) 워터마크. reopen_gate_if_new_sha가 이걸로 stale/순서역전 웹훅 배달을
+    # 걸러 이미 최신 SHA로 승인된 게이트를 옛 배달로 부당 재-pending시키지 않는다.
+    pr_head_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

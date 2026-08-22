@@ -371,6 +371,18 @@ async def _process_webhook_event(
         }
         is_label_alignment_trigger = all(name in _label_names for name in RECHECK_LABELS)
 
+    # story #2932(완주조건 HIGH2, 0273) — stale/순서역전 웹훅이 최신 승인 SHA를 부당
+    # 재-pending시키는 것을 막는 워터마크. GitHub는 pull_request 이벤트마다 현재
+    # pull_request.updated_at(실 갱신 단조증가)을 동봉한다 — 파싱 실패/부재는 None(그
+    # 이벤트는 이 방지축 없이 기존 SHA-diff-only 동작으로 fail-open, 크래시 아님).
+    _pr_updated_at_raw = (payload.get("pull_request") or {}).get("updated_at")
+    pr_updated_at: datetime | None = None
+    if _pr_updated_at_raw:
+        try:
+            pr_updated_at = datetime.fromisoformat(str(_pr_updated_at_raw).replace("Z", "+00:00"))
+        except ValueError:
+            pr_updated_at = None
+
     installation: GithubInstallation | None = None
     org_id: uuid.UUID | None = None
     if source == "app":
@@ -491,11 +503,13 @@ async def _process_webhook_event(
         merge_gate = await find_gate_slot_with_pr_fallback(
             session, org_id=org_id, work_item_id=story_id, work_item_type="story",
             gate_type=_MERGE_GATE_TYPE, pr_number=(pr_number if pr_number > 0 else None),
+            repo_full_name=(repo or None),
         )
         if merge_gate is not None:
             _repended = await reopen_gate_if_new_sha(
                 session, org_id, merge_gate, head_sha,
                 repo_full_name=repo, pr_number=pr_number,
+                pr_updated_at=pr_updated_at,
             )
             gate_check_publish.append({
                 "org_id": org_id, "gate_id": merge_gate.id,
