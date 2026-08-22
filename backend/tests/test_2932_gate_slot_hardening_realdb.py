@@ -541,3 +541,263 @@ async def test_sha_unchanged_but_newer_delivery_advances_watermark_without_statu
             assert gate.pr_head_observed_at == newer_delivery, "워터마크는 상태변화 없이도 전진해야 함"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_ui_approval_seeds_pr_head_watermark_realdb():
+    """story #2932 완주조건 HIGH2(4라운드, 카디르 자기정정) — 사람 UI 승인 경로
+    (`gates.py::transition_gate_endpoint`)가 approved_head_sha를 세우면서 pr_head_observed_at
+    워터마크도 함께 씨드해야 한다. 원래는 이 자리가 비어 있어(writer 3곳 중 이 경로만
+    누락), 정상 승인 직후에도 워터마크=None으로 남아 다음 stale webhook을 못 걸렀다."""
+    from tests.test_2835_gate_approval_publish_self_sufficient_realdb import (
+        _client_for,
+        _seed_common,
+        _setup_app,
+    )
+    from app.main import app
+    from app.models.gate import Gate
+    from app.models.github_installation import GithubInstallation
+    from app.models.pm import Story
+    from app.services.merge_verdict_gate import MERGE_GATE_TYPE
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_common(s)
+            story = Story(
+                id=uuid.uuid4(), org_id=seeded["org_id"], project_id=seeded["project_id"],
+                title="UI 승인 워터마크 씨드",
+            )
+            s.add(story)
+            await s.commit()
+            s.add(GithubInstallation(
+                id=uuid.uuid4(), org_id=seeded["org_id"], installation_id=293201, account_login="acme",
+            ))
+            await s.commit()
+            gate = Gate(
+                id=uuid.uuid4(), org_id=seeded["org_id"], work_item_id=story.id, work_item_type="story",
+                gate_type=MERGE_GATE_TYPE, status="pending",
+                approved_head_sha=None, github_check_run_id=1, github_check_run_sha="sha-ui-approve",
+                pr_head_observed_at=None,
+                neutral_facts={"repo": "acme/ui-approve-repo", "pr_number": 2932},
+            )
+            s.add(gate)
+            await s.commit()
+            gate_id = gate.id
+
+        await _setup_app(app, Session, seeded["org_id"], seeded["caller_id"])
+        client = _client_for(app)
+        try:
+            # publish_gate_check(background task)는 「승인」과 별개 writer(gate_github_check.py
+            # 자신의 success-발행 경로)라 이 endpoint 자신의 워터마크 로직을 노 no-op으로 만들어도
+            # 그 태스크가 대신 워터마크를 씨드해 뮤테이션을 가릴 수 있다 — 이 테스트는 UI 승인
+            # 코드 자체를 고립시키려 그 태스크를 통째로 no-op 처리한다.
+            with (
+                patch("app.routers.gates.publish_gate_check", AsyncMock()),
+                patch("app.core.database.async_session_factory", Session),
+            ):
+                resp = await client.post(
+                    f"/api/v2/gates/{gate_id}/transition",
+                    json={"status": "approved", "note": "워터마크 씨드 확인", "evidence_viewed": True},
+                )
+                assert resp.status_code == 200, resp.text
+        finally:
+            await client.aclose()
+
+        async with Session() as s:
+            refetched = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            assert refetched.status == "approved"
+            assert refetched.approved_head_sha == "sha-ui-approve"
+            assert refetched.pr_head_observed_at is not None, (
+                "UI 승인이 approved_head_sha를 세우면서 pr_head_observed_at 워터마크도 함께 씨드해야 함"
+            )
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_ui_approval_then_stale_webhook_does_not_repend_realdb():
+    """story #2932 완주조건 HIGH2 — 카디르 4라운드가 정확히 지적한 시나리오: 사람이 UI에서
+    막 승인한 직후, 그 승인보다 «과거» pr_updated_at을 가진 지연 webhook(다른 SHA)이
+    도착해도 spurious 재-pending이 일어나면 안 된다. 이게 원래 처방이 실패하던 «주경로»다."""
+    from tests.test_2835_gate_approval_publish_self_sufficient_realdb import (
+        _client_for,
+        _seed_common,
+        _setup_app,
+    )
+    from app.main import app
+    from app.models.gate import Gate
+    from app.models.github_installation import GithubInstallation
+    from app.models.pm import Story
+    from app.services.gate_github_check import reopen_gate_if_new_sha
+    from app.services.merge_verdict_gate import MERGE_GATE_TYPE
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_common(s)
+            story = Story(
+                id=uuid.uuid4(), org_id=seeded["org_id"], project_id=seeded["project_id"],
+                title="UI 승인 직후 stale webhook",
+            )
+            s.add(story)
+            await s.commit()
+            s.add(GithubInstallation(
+                id=uuid.uuid4(), org_id=seeded["org_id"], installation_id=293202, account_login="acme",
+            ))
+            await s.commit()
+            gate = Gate(
+                id=uuid.uuid4(), org_id=seeded["org_id"], work_item_id=story.id, work_item_type="story",
+                gate_type=MERGE_GATE_TYPE, status="pending",
+                approved_head_sha=None, github_check_run_id=2, github_check_run_sha="sha-primary-path",
+                pr_head_observed_at=None,
+                neutral_facts={"repo": "acme/primary-path-repo", "pr_number": 2933},
+            )
+            s.add(gate)
+            await s.commit()
+            gate_id = gate.id
+            org_id = seeded["org_id"]
+
+        await _setup_app(app, Session, seeded["org_id"], seeded["caller_id"])
+        client = _client_for(app)
+        try:
+            # 위 테스트와 동일 이유 — publish_gate_check 배경 태스크의 독립 워터마크-씨드가
+            # endpoint 자신의 로직을 가리지 않도록 no-op 처리.
+            with (
+                patch("app.routers.gates.publish_gate_check", AsyncMock()),
+                patch("app.core.database.async_session_factory", Session),
+            ):
+                resp = await client.post(
+                    f"/api/v2/gates/{gate_id}/transition",
+                    json={"status": "approved", "note": "주경로 재현", "evidence_viewed": True},
+                )
+                assert resp.status_code == 200, resp.text
+        finally:
+            await client.aclose()
+
+        # 승인 직후 워터마크가 실제로 세팅됐는지 전제 확인.
+        async with Session() as s:
+            approved_gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            assert approved_gate.pr_head_observed_at is not None, "전제: UI 승인이 워터마크를 씨드해야 함"
+            watermark_at_approval = approved_gate.pr_head_observed_at
+
+        # 승인보다 과거 pr_updated_at을 가진 지연 webhook — 다른(옛) SHA를 실어 도착.
+        stale_delivery = watermark_at_approval - timedelta(minutes=10)
+        async with Session() as s:
+            gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            repended = await reopen_gate_if_new_sha(
+                s, org_id, gate, "sha-stale-delayed-delivery",
+                repo_full_name="acme/primary-path-repo", pr_number=2933,
+                pr_updated_at=stale_delivery,
+            )
+            await s.commit()
+            assert repended is False, (
+                "UI 승인 직후 도착한 stale webhook이 spurious 재-pending을 일으키면 안 됨"
+                "(카디르 4라운드가 지적한 정확히 이 시나리오)"
+            )
+
+        async with Session() as s:
+            final_gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            assert final_gate.status == "approved", "stale webhook 후에도 승인 상태 유지돼야 함"
+            assert final_gate.approved_head_sha == "sha-primary-path", "stale webhook이 anchor를 덮으면 안 됨"
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_publish_gate_check_success_seeds_pr_head_watermark_realdb():
+    """story #2932 완주조건 HIGH2(4라운드) — writer 3곳 중 마지막 하나: `publish_gate_check`
+    (background 발행 태스크)가 conclusion=success를 발행할 때도 워터마크를 함께 씨드해야
+    한다. ⚠️그라운딩(이 테스트 작성 중 실측): approved/auto_passed 게이트는 이 함수 자신의
+    fail-closed 가드(anchor 없으면 발행 자체를 skip — 위쪽 코드)때문에 `approved_head_sha`가
+    **이미** 세팅돼 있어야만 이 지점에 도달한다 — 즉 이 write는 "새 anchor 확立"이 아니라
+    "기존 anchor 재확인"이다. 그래도 워터마크가 비어 있던 legacy 게이트(이 필드가 생기기 前
+    승인된 것 등)가 재발행될 때 씨드 기회를 놓치면 안 되므로, 전제를 "이미 anchor는 있고
+    워터마크만 비어 있음"으로 세팅해 검증한다."""
+    from app.models.gate import Gate
+    from app.models.github_installation import GithubInstallation
+    from app.services.gate_github_check import publish_gate_check
+    from app.services.merge_verdict_gate import MERGE_GATE_TYPE
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, _project, story = await _seed_org_project_story(s, with_participation=True)
+            s.add(GithubInstallation(
+                id=uuid.uuid4(), org_id=org.id, installation_id=293401, account_login="acme",
+            ))
+            await s.commit()
+            gate = Gate(
+                id=uuid.uuid4(), org_id=org.id, work_item_id=story.id, work_item_type="story",
+                gate_type=MERGE_GATE_TYPE, status="approved", pr_number=2934,
+                repo_full_name="acme/publish-writer-repo", approved_head_sha="sha-publish-writer",
+                github_check_run_id=None, github_check_run_sha=None,
+                pr_head_observed_at=None,
+            )
+            s.add(gate)
+            await s.commit()
+            gate_id, org_id = gate.id, org.id
+
+        with (
+            patch("app.services.gate_github_check.create_check_run", AsyncMock(return_value={"id": 99})),
+            patch("app.core.database.async_session_factory", Session),
+        ):
+            await publish_gate_check(
+                org_id, gate_id,
+                head_sha="sha-publish-writer", repo_full_name="acme/publish-writer-repo", pr_number=2934,
+            )
+
+        async with Session() as s:
+            refetched = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            assert refetched.approved_head_sha == "sha-publish-writer"
+            assert refetched.pr_head_observed_at is not None, (
+                "publish_gate_check success 발행이 워터마크를 함께 씨드해야 함(legacy 빈 워터마크 회복)"
+            )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_equal_timestamp_different_sha_still_repends():
+    """카디르 4라운드(codex 발견) — `<=`(동일 timestamp도 stale)는 서로 다른 두 진짜 배달이
+    같은 초 단위 timestamp를 우연히 공유하면 신규 SHA를 stale로 오판했다. `<`로 완화한 뒤엔
+    동일 timestamp가 staleness guard를 안 타고 기존 SHA-diff 비교로 넘어가 정상 재-pending
+    해야 한다."""
+    from app.models.gate import Gate
+    from app.services.gate_github_check import reopen_gate_if_new_sha
+    from app.services.merge_verdict_gate import MERGE_GATE_TYPE
+
+    engine, Session = await _session_factory()
+    try:
+        watermark = datetime(2026, 8, 22, 15, 0, 0, tzinfo=timezone.utc)
+        async with Session() as s:
+            org, _project, story = await _seed_org_project_story(s, with_participation=True)
+            gate = Gate(
+                id=uuid.uuid4(), org_id=org.id, work_item_id=story.id, work_item_type="story",
+                gate_type=MERGE_GATE_TYPE, status="approved", pr_number=42,
+                repo_full_name="acme/repo", approved_head_sha="sha-old-tie",
+                pr_head_observed_at=watermark,
+            )
+            s.add(gate)
+            await s.commit()
+            gate_id, org_id = gate.id, org.id
+
+        async with Session() as s:
+            gate = await s.get(Gate, gate_id)
+            repended = await reopen_gate_if_new_sha(
+                s, org_id, gate, "sha-new-same-timestamp",
+                repo_full_name="acme/repo", pr_number=42, pr_updated_at=watermark,
+            )
+            await s.commit()
+            assert repended is True, (
+                "동일 timestamp라도 SHA가 다르면 stale로 오판하지 않고 정상 재-pending해야 함"
+            )
+
+        async with Session() as s:
+            gate = await s.get(Gate, gate_id)
+            assert gate.status == "pending"
+            assert gate.approved_head_sha is None
+    finally:
+        await engine.dispose()

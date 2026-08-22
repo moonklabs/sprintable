@@ -439,6 +439,32 @@ async def test_evaluate_auto_merge_metadata_sufficient():
     assert gate.auto_decision_reason == AUTO_MERGE
 
 
+@pytest.mark.anyio
+async def test_evaluate_auto_merge_with_head_sha_seeds_pr_head_watermark():
+    """story #2932 완주조건 HIGH2(4라운드, 카디르 자기정정) — approved_head_sha가 새로
+    세워지는 writer 3곳 중 하나(AUTO_MERGE 경로)가 `pr_head_observed_at` 워터마크도 함께
+    씨드해야 한다. 안 그러면 이 결정 직후 도착하는 stale webhook이 워터마크=None이라
+    `reopen_gate_if_new_sha`의 staleness guard를 아예 못 타 spurious 재-pending이 재발한다
+    (사람 UI 승인 경로와 동일 결함 클래스)."""
+    gate = SimpleNamespace(id=uuid.uuid4(), status="auto_passed",
+                           requires_human=True, evidence_status=None, decision_basis=None, auto_decision_reason=None,
+                           approved_head_sha=None, pr_head_observed_at=None)
+    part = SimpleNamespace(member_id=uuid.uuid4(), role_id=uuid.uuid4())
+    with patch("app.services.merge_verdict_gate.resolve_implementation_participation", AsyncMock(return_value=part)), \
+         patch("app.services.merge_verdict_gate._role_key", AsyncMock(return_value="implementation")), \
+         patch("app.services.merge_verdict_gate.capture_pr_ci_verdict", AsyncMock(return_value={"recorded": ["pr"], "skipped_reason": None})), \
+         patch("app.services.merge_verdict_gate.compute_member_trust_scores",
+               AsyncMock(return_value={"scores": [{"role_key": "implementation", "clean_pass_rate": 0.95,
+                   "hit": 95, "resolved": 100, "pending": 0, "hit_rate": 0.95}]})), \
+         patch("app.services.merge_verdict_gate.create_gate", AsyncMock(return_value=gate)):
+        res = await evaluate_merge_gate(_mock_session(), uuid.uuid4(), uuid.uuid4(),
+                                        pr_number=1, repo="o/r", ci_result="pass", pr_result="pass",
+                                        head_sha="sha-auto-merge")
+    assert res.decision == AUTO_MERGE
+    assert gate.approved_head_sha == "sha-auto-merge"
+    assert gate.pr_head_observed_at is not None, "AUTO_MERGE anchor 세팅 시 워터마크도 함께 씨드돼야 함"
+
+
 # ── HO-S6 키스톤 실DB: 가설 적중 이력만으로 auto_merge ──────────────────────────
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")

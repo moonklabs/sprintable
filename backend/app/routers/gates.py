@@ -19,7 +19,12 @@ from app.models.hitl import HitlRequest
 from app.models.pm import Story, Task
 from app.models.visual_artifact import VisualArtifact
 from app.routers.agent_gateway import wake_agent
-from app.services.gate_github_check import is_repo_check_enforced, publish_gate_check, resolve_pr_link
+from app.services.gate_github_check import (
+    is_repo_check_enforced,
+    publish_gate_check,
+    resolve_pr_link,
+    seed_pr_head_watermark,
+)
 from app.services.github_app import get_installation_token, get_pull_request
 from app.services.merge_verdict_gate import MERGE_GATE_TYPE, reconcile_merge_gate_with_real_evidence
 from app.services.verdict_capture import fetch_status_check_rollup
@@ -1194,6 +1199,11 @@ async def transition_gate_endpoint(
                 _head_sha = (_link.evidence or {}).get("head_sha") if _link else None
             if _head_sha:
                 gate.approved_head_sha = _head_sha
+                # story #2932 완주조건 HIGH2(4라운드 카디르 자기정정) — 사람 UI 승인이 이
+                # 워터마크를 못 얻던 원 결함의 정확한 자리(writer 3곳 중 하나). 여기서 안
+                # 찍으면 승인 직후 도착하는 stale webhook이 워터마크=None이라 staleness guard가
+                # 아예 발동을 못 한다.
+                seed_pr_head_watermark(gate)
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(gate)

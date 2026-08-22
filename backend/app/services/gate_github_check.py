@@ -280,6 +280,7 @@ async def publish_gate_check(
 
             if gh_status == "completed" and gh_conclusion == "success":
                 gate.approved_head_sha = head_sha
+                seed_pr_head_watermark(gate)  # story #2932 완주조건 HIGH2(4라운드) — writer 3곳 중 하나.
 
             event_type = "resolved" if gh_status == "completed" else "published"
             session.add(GateGithubCheckEvent(
@@ -324,6 +325,27 @@ async def publish_label_unlabel(org_id: uuid.UUID, repo_full_name: str, pr_numbe
         logger.exception("repo=%s pr=%s: 라벨 제거 처리 중 예외(fail-closed)", repo_full_name, pr_number)
 
 
+def seed_pr_head_watermark(gate: Gate, *, now: datetime | None = None) -> None:
+    """story #2932(완주조건 HIGH2, 4라운드 카디르 자기정정+codex 반박) — `approved_head_sha`가
+    새로 세워지는 **모든** 자리(사람 UI 승인·AUTO_MERGE 평가·check-run success 발행)는
+    `pr_head_observed_at`도 함께 씨드해야 한다. 원래 처방은 `reopen_gate_if_new_sha` 내부
+    (재-pending·워터마크-전진 두 분기)에서만 워터마크를 썼는데, 그 함수는 gate.status가
+    이미 approved/auto_passed일 때만 도달한다 — 즉 **최초로 그 상태가 되는 순간**(사람이
+    막 승인한 직후 등)엔 아무도 워터마크를 안 찍어 None으로 남았다. 그 직후 도착하는
+    stale webhook은 워터마크=None이라 staleness guard가 아예 발동을 못 해, 이 story가
+    막으려던 spurious 재-pending이 **정상 승인 경로의 기본 상태**로 재발했다(카디르 4라운드
+    발견·정정). 전 3개 writer(gates.py `transition_gate_endpoint`·merge_verdict_gate.py
+    `evaluate_merge_gate` AUTO_MERGE·gate_github_check.py `publish_gate_check` success)가
+    이 헬퍼를 공유 chokepoint로 호출한다(전수 grep으로 확定, approved_head_sha를 새 값으로
+    세우는 자리는 이 3곳+reopen_gate_if_new_sha 자신뿐).
+
+    이 세 경로엔 GitHub의 실 `pull_request.updated_at`이 없다(웹훅 payload가 없는 UI/시스템
+    평가 경로) — 서버 `now()`를 하한 워터마크로 쓴다: "이 시점 이전에 관측된 배달은 이미 아는
+    상태를 설명한다"는 가정이 성립하는 가장 보수적인 근사(신규 GitHub API 재조회 없음, 폴링 0
+    원칙 유지)."""
+    gate.pr_head_observed_at = now or datetime.now(timezone.utc)
+
+
 async def reopen_gate_if_new_sha(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -359,10 +381,18 @@ async def reopen_gate_if_new_sha(
     그 옛 SHA와의 불일치만 보고 부당 재-pending시킬 수 있었다("승인은 그때의 커밋에" —
     story #2893 핵심 보증을 이 클래스가 직접 깬다). `pull_request.updated_at`(GitHub가
     실 갱신마다 단조증가시킴)을 `gate.pr_head_observed_at`에 워터마크로 남겨, 새 이벤트의
-    `updated_at`이 이미 관측된 값보다 오래되면(<=) SHA 불일치와 무관하게 stale로 skip한다.
-    폴링/GitHub API 재조회 없이(story #2893 §4 C1 원칙과 동형) 페이로드 자체 신호만 쓴다.
-    None이면(payload에 없거나 파싱 실패 등) 검증을 건너뛰고 기존 SHA-diff-only 동작 그대로
-    (새로 나빠지지 않음, 다만 이 방지축을 못 얻을 뿐)."""
+    `updated_at`이 이미 관측된 값보다 **엄격히 과거면**(`<`) SHA 불일치와 무관하게 stale로
+    skip한다. 폴링/GitHub API 재조회 없이(story #2893 §4 C1 원칙과 동형) 페이로드 자체
+    신호만 쓴다. None이면(payload에 없거나 파싱 실패 등) 검증을 건너뛰고 기존
+    SHA-diff-only 동작 그대로(새로 나빠지지 않음, 다만 이 방지축을 못 얻을 뿐).
+
+    ⛔카디르 4라운드(codex 발견) — 원래 `<=`(동일 timestamp도 stale)는 서로 다른 두 진짜
+    배달이 같은 초 단위 timestamp를 우연히 공유하면(연속 push 등, GitHub 해상도 제약) 신규
+    SHA를 stale로 오판해 skip할 위험이 있었다. `<`로 완화하면 동일 timestamp는 이 가드를
+    안 타고 아래 **기존 SHA-diff 비교**(approved_head_sha == new_head_sha)로 자연히
+    넘어간다 — "동일 timestamp면 SHA로 갈라라"는 요구를 새 비교 축을 추가하지 않고 이미 있는
+    분기가 그대로 흡수한다(SHA가 같으면 no-op, 다르면 정상 재-pending — 타임스탬프 동률은
+    stale 여부 판정에서 아예 빠지고 SHA가 유일한 진실이 된다)."""
     if gate.gate_type != MERGE_GATE_TYPE:
         return False
     if gate.status not in ("approved", "auto_passed"):
@@ -370,10 +400,10 @@ async def reopen_gate_if_new_sha(
     if (
         pr_updated_at is not None
         and gate.pr_head_observed_at is not None
-        and pr_updated_at <= gate.pr_head_observed_at
+        and pr_updated_at < gate.pr_head_observed_at
     ):
         logger.info(
-            "gate=%s: stale/순서역전 웹훅 무시(pr_updated_at=%s <= 이미 관측된 %s) — 재-pending skip",
+            "gate=%s: stale/순서역전 웹훅 무시(pr_updated_at=%s < 이미 관측된 %s) — 재-pending skip",
             gate.id, pr_updated_at, gate.pr_head_observed_at,
         )
         return False

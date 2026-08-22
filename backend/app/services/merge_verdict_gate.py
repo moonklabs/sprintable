@@ -519,6 +519,11 @@ async def evaluate_merge_gate(
     if decision == AUTO_MERGE:
         if head_sha:
             gate.approved_head_sha = head_sha
+            # story #2932 완주조건 HIGH2(4라운드) — AUTO_MERGE도 writer 3곳 중 하나(순환
+            # import 회피 위해 함수-로컬 import — gate_github_check.py가 이 모듈의
+            # MERGE_GATE_TYPE을 이미 module-level로 가져다 쓴다).
+            from app.services.gate_github_check import seed_pr_head_watermark
+            seed_pr_head_watermark(gate)
     elif gate.status == "auto_passed" and gate.approved_head_sha:
         logger.info(
             "gate=%s: 재평가로 decision이 AUTO_MERGE 이탈(%s) — auto-axis anchor(%s) 무효화",
