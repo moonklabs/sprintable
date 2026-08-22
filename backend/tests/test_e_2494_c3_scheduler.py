@@ -465,10 +465,10 @@ async def test_sweep_stale_pending_not_found_payment_leaves_pending_without_exce
     orders_result.scalars.return_value.all.return_value = [stale_order]
     session.execute = AsyncMock(return_value=orders_result)
 
-    monkeypatch.setattr(
-        sched.TossAdapter, "get_payment_by_order_id",
-        AsyncMock(side_effect=TossApiError("NOT_FOUND_PAYMENT", "결제 정보를 찾을 수 없습니다", status_code=404)),
+    lookup_mock = AsyncMock(
+        side_effect=TossApiError("NOT_FOUND_PAYMENT", "결제 정보를 찾을 수 없습니다", status_code=404)
     )
+    monkeypatch.setattr(sched.TossAdapter, "get_payment_by_order_id", lookup_mock)
     fail_mock = AsyncMock()
     confirm_mock = AsyncMock()
     monkeypatch.setattr(sched, "_mark_failed_if_not_confirmed", fail_mock)
@@ -483,6 +483,13 @@ async def test_sweep_stale_pending_not_found_payment_leaves_pending_without_exce
     }
     fail_mock.assert_not_awaited()
     confirm_mock.assert_not_awaited()
+    # story #2913 후속(페드루군 2896 라이브 실측) — 어댑터 자신의 ERROR 로그도 낮추려면
+    # 호출자가 quiet_codes를 명시해야 한다(TossAdapter._get 참고, opt-in 설계). 그 전달이
+    # 안 되면 이 스윕의 INFO 카운터-로그와 별개로 어댑터가 매번 ERROR를 또 찍어 원 증상
+    # (일 단위 ERROR 반복)이 절반 남는다 — 그 전달 자체를 여기서 고정한다.
+    lookup_mock.assert_awaited_once_with(
+        order_id=stale_order.order_id, quiet_codes=frozenset({"NOT_FOUND_PAYMENT"}),
+    )
     # 풀 traceback(exc_info) 없이 INFO 레벨 한 줄만 — logger.exception이 아니라 logger.info.
     assert any(
         r.levelno == logging.INFO and "NOT_FOUND_PAYMENT" in r.getMessage() and r.exc_info is None

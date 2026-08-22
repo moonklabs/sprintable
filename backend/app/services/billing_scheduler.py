@@ -357,7 +357,9 @@ async def sweep_stale_pending_orders(session: AsyncSession, *, now: datetime | N
     confirmed = failed = skipped = not_found = 0
     for order in stale_orders:
         try:
-            lookup = await TossAdapter().get_payment_by_order_id(order_id=order.order_id)
+            lookup = await TossAdapter().get_payment_by_order_id(
+                order_id=order.order_id, quiet_codes=frozenset({"NOT_FOUND_PAYMENT"}),
+            )
         except TossApiError as exc:
             if exc.code == "NOT_FOUND_PAYMENT":
                 # story #2913(2896 첫 실행 실증) — Toss가 이 주문을 애초에 모른다는
