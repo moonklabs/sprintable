@@ -308,10 +308,13 @@ describe('GateDetailPage — evidence_viewed 서버 계약 (story #2027 AC2)', (
   });
 });
 
-// story P0-02(유나 full 검산, PR#3367 2026-08-22) — gate_type "chip" 배지가 AA 미달(실측
-// 3.55)이라 처음엔 이 지점만 className 오버라이드(text-foreground)로 처방했다. story #2937
-// (PR#3372)로 chip variant 기본 자체가 text-foreground로 이행 — 지점 오버라이드는 걷었고
-// (badge.tsx가 이제 이 값을 자동으로 준다), 이 가드는 그대로 유지(회귀 시 잡아냄).
+// story P0-02(PR#3367 2026-08-22) — gate_type "chip" 배지에 처음엔 이 지점만 className
+// 오버라이드(text-foreground)로 처방했다. ⚠️정정(2026-08-22, 유나 재검산·codex 교차확인) —
+// 당시 인용된 "3.55(AA 미달)"는 측정 아티팩트(bg-blend 버그)로 판명, 실측은 5.20/5.65로
+// 이미 AA 통과였다 — #3367은 「위반 수정」이 아니라 「#2420 캐논 규칙(tint 배경 위 글자=
+// text-foreground) 정합」이었다. story #2937(PR#3372)로 chip variant 기본 자체가
+// text-foreground로 이행 — 지점 오버라이드는 걷었고(badge.tsx가 이제 이 값을 자동으로
+// 준다), 이 가드는 그대로 유지(회귀 시 잡아냄).
 describe('GateDetailPage — gate_type 배지 대비(P0-02, chip variant 기본으로 승계·#2937)', () => {
   it('gate_type 배지가 text-foreground를 쓴다(chip variant 기본값 — #2937 이후 지점 오버라이드 불요)', async () => {
     await mount(gate({ gate_type: 'merge_gate' }));
