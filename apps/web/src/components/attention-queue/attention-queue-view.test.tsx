@@ -62,20 +62,6 @@ async function mount(fetchImpl: (url: string) => Promise<{ ok: boolean; json: ()
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
-function mockGatePendingOnly() {
-  return async (url: string) => {
-    if (url.includes('/api/glance/attention')) {
-      return {
-        ok: true,
-        json: async () => ({
-          data: { items: [{ kind: 'gate_pending', story_id: 's1', title: '가격 콘솔', ref: {}, entered_state_at: null }] },
-        }),
-      };
-    }
-    return { ok: true, json: async () => ({ data: [] }) };
-  };
-}
-
 describe('AttentionQueueView — HIGH1 project_id 필터(story #2923, 카디르 QA)', () => {
   it('/api/inbox 호출 URL에 project_id가 실린다(BE attention fetch와 동형)', async () => {
     const calledUrls: string[] = [];
@@ -145,18 +131,18 @@ describe('AttentionQueueView — HIGH2 cross-source dedup(story #2923, 카디르
   });
 });
 
-describe('AttentionQueueView — typeBadge 배선 (story #2923 AQ2)', () => {
-  it('gate_pending 신호(decision_needed·GATE 버킷)의 행에 "GATE" 배지가 뜬다', async () => {
-    await mount(mockGatePendingOnly());
-    expect(container.textContent).toContain('GATE');
-  });
-});
-
-describe('AttentionQueueView — overflow anchor (story #2923 AQ3)', () => {
-  it('overflow > 0이면 클릭 가능한 앵커가 뜨고, 클릭하면 /inbox?tab=gates로 이동한다', async () => {
+describe('AttentionQueueView — overflow anchor (story #2923 AQ3 + MEDIUM① GATE 정밀판정, 카디르 QA PR#3353)', () => {
+  it('overflow에 GATE 버킷이 있으면 클릭 가능한 앵커가 뜨고, 클릭하면 /inbox?tab=gates로 이동한다', async () => {
+    // needs_input 9건(전부 STEER, s0~s8) + gate_pending 1건(GATE, s9) — cap=7이라 뒤쪽(8·9번째,
+    // s7·s8 STEER + gate_pending s9 GATE)이 overflow로 잘린다. cut에 GATE가 섞여 있어야 앵커.
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/glance/attention')) {
-        return { ok: true, json: async () => ({ data: { items: manySignals(10) } }) }; // cap=7 → overflow=3
+        return {
+          ok: true,
+          json: async () => ({
+            data: { items: [...manySignals(9), beItem({ kind: 'gate_pending', story_id: 's9' })] },
+          }),
+        };
       }
       return { ok: true, json: async () => ({ data: [] }) };
     }));
@@ -170,7 +156,27 @@ describe('AttentionQueueView — overflow anchor (story #2923 AQ3)', () => {
     expect(pushMock).toHaveBeenCalledWith('/inbox?tab=gates');
   });
 
-  it('overflow = 0이면(캡 이내) 앵커 자체가 안 뜬다', async () => {
+  // 카디르 QA MEDIUM①(PR#3353, 2026-08-22, 실 재현) — needs_input 10건→overflow 3, 전부
+  // STEER(GATE 0)인데 예전엔 무조건 앵커가 떴다. 결재함(gates 탭)엔 GATE 3종만 있어 눌러도
+  // 그 항목이 없었다 — bucket 정밀판정으로 이 조합에선 비내비게이션 텍스트로 폴백해야 한다.
+  it('overflow가 전부 STEER(GATE 0)면 앵커 대신 기존 비내비게이션 텍스트로 폴백한다(재현: needs_input만 10건)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/glance/attention')) {
+        return { ok: true, json: async () => ({ data: { items: manySignals(10) } }) }; // cap=7 → overflow=3, 전부 STEER
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { AttentionQueueView } = await import('./attention-queue-view');
+    await act(async () => { root.render(wrap(<AttentionQueueView projectId="proj-1" />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const anchor = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('나머지는'));
+    expect(anchor).toBeUndefined();
+    // 앵커는 없지만 정직한 카운트 텍스트 자체는 여전히 뜬다(사라지지 않음 — 정보 손실 아님).
+    expect(container.textContent).toContain('나머지는');
+  });
+
+  it('overflow = 0이면(캡 이내) 앵커·텍스트 둘 다 안 뜬다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/glance/attention')) {
         return { ok: true, json: async () => ({ data: { items: manySignals(3) } }) }; // cap=7 미만 → overflow=0
@@ -183,5 +189,6 @@ describe('AttentionQueueView — overflow anchor (story #2923 AQ3)', () => {
 
     const anchor = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('나머지는'));
     expect(anchor).toBeUndefined();
+    expect(container.textContent).not.toContain('나머지는');
   });
 });

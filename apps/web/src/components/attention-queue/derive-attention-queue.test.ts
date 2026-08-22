@@ -228,6 +228,34 @@ describe('buildAttentionQueue', () => {
     expect(shown).toHaveLength(1);
     expect(overflow).toBe(0);
   });
+
+  // story #2923 AQ3 MEDIUM①(카디르 QA, PR#3353 2026-08-22) — overflow로 잘린 항목 중 GATE
+  // 버킷이 있는지 정직하게 판정(결재함=Gate 3종 완전 목록이라 GATE 아닌 잘린 항목은 거기
+  // 없다 — 앵커를 걸면 눌러도 없는 결과).
+  describe('overflowHasGate', () => {
+    it('잘린(overflow) 항목 중 GATE 버킷이 하나라도 있으면 true(merge_ready=GATE)', () => {
+      // cap=1 → sortKey 큰 순으로 1개만 shown, 나머지 cut. merge_ready는 KIND_PRIORITY가
+      // 낮은 티어(amber보다 뒤)라 amber 항목들 뒤로 밀려 cut에 포함된다.
+      const items = [
+        ...Array.from({ length: 3 }, (_, i) => item('verify_fail', 100 + i)),
+        item('merge_ready', 1),
+      ];
+      const { overflowHasGate } = buildAttentionQueue(items, 1);
+      expect(overflowHasGate).toBe(true);
+    });
+
+    it('잘린 항목이 전부 GATE 아닌 버킷이면(재현: needs_input류만) false', () => {
+      const items = Array.from({ length: 10 }, (_, i) => item('decision_needed', i)); // bucket=STEER
+      const { overflow, overflowHasGate } = buildAttentionQueue(items); // cap=7 → overflow=3, 전부 STEER
+      expect(overflow).toBe(3);
+      expect(overflowHasGate).toBe(false);
+    });
+
+    it('overflow=0(캡 이내)이면 당연히 false(잘린 게 없으니 GATE도 없음)', () => {
+      const { overflowHasGate } = buildAttentionQueue([item('verify_fail', 1)]);
+      expect(overflowHasGate).toBe(false);
+    });
+  });
 });
 
 describe('diffAttentionQueueItemIds (9ef0f914 — SSE-triggered refetch diff)', () => {

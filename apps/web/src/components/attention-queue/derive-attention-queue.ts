@@ -401,13 +401,22 @@ const KIND_PRIORITY: Record<AttentionKind, number> = {
  * 우선순위(amber 3종 > green 1종) 정렬 후 3~7 상한 cap. 미달이어도 억지로 안 채우고(스펙 §4),
  * 초과분은 "흐름" 강등 카운트(overflow)로만 — 별도 fabricated activity 지표 없음.
  */
+/** story #2923 AQ3 MEDIUM①(카디르 QA, PR#3353 2026-08-22 처방) — overflow로 잘린 항목 중
+ * GATE 버킷이 1개라도 있어야 결재함(gates 탭) 앵커가 정직하다(결재함=Gate 3종 완전 목록이라
+ * GATE 아닌 잘린 항목은 거기 없다). 0건이면 앵커 자체를 안 보여준다(호출부가 기존 비내비게이션
+ * 텍스트로 폴백) — bucket 필드(AQ1)가 이제 있어 가능해진 정밀 판정. */
 export function buildAttentionQueue(
   items: AttentionQueueItem[],
   cap = 7,
-): { shown: AttentionQueueItem[]; overflow: number } {
+): { shown: AttentionQueueItem[]; overflow: number; overflowHasGate: boolean } {
   const sorted = [...items].sort((a, b) => {
     const p = KIND_PRIORITY[a.kind] - KIND_PRIORITY[b.kind];
     return p !== 0 ? p : b.sortKey - a.sortKey;
   });
-  return { shown: sorted.slice(0, cap), overflow: Math.max(0, sorted.length - cap) };
+  const cut = sorted.slice(cap);
+  return {
+    shown: sorted.slice(0, cap),
+    overflow: Math.max(0, cut.length),
+    overflowHasGate: cut.some((item) => item.bucket === 'GATE'),
+  };
 }

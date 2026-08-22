@@ -194,7 +194,7 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
     onExtraEvent: handleTrustStageChanged,
   });
 
-  const { shown, overflow } = buildAttentionQueue(items, CAP);
+  const { shown, overflow, overflowHasGate } = buildAttentionQueue(items, CAP);
 
   return (
     <div className="overflow-hidden rounded-2xl border border-proof-line bg-proof-panel" style={{ clipPath: 'polygon(0 0, calc(100% - 24px) 0, 100% 24px, 100% 100%, 0 100%)' }}>
@@ -231,12 +231,15 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
           {/* story #2923(P0-E AQ3, doc attention-audit-redesign-2923) — 「결재함=완전 목록
               overflow·Attention GATE 앵커」. 상한(cap) 초과분이 사라지지 않고 결재함(현 gates
               탭, ApprovalsQueue=Gate 3종 완전 목록)에 그대로 있다는 걸 클릭 가능한 앵커로
-              보여준다(예전엔 순수 텍스트, 갈 곳이 없었다). overflow가 GATE 버킷만은 아닐 수
-              있어(bucket 정밀 필터는 AQ2 이후) 「결재함도 포함해 계속 보기」로 정직하게 표현
-              — 「거기 전부 있다」로 과장하지 않는다. 착지 탭 기본값 변경(B3 보류)은 스코프
-              밖(PO 확定, 2026-08-22) — 이 앵커는 명시적 tab=gates 링크일 뿐 기본 착지를
-              바꾸지 않는다. */}
-          {overflow > 0 ? (
+              보여준다(예전엔 순수 텍스트, 갈 곳이 없었다).
+              MEDIUM①(카디르 QA, PR#3353 2026-08-22) — overflow가 GATE 버킷 0건일 수도
+              있는데(잘린 게 전부 STEER/BLOCK/Q라면) 그때 gates 탭 앵커를 걸면 눌러도 결재함에
+              그 항목이 없다(재현: needs_input 10건→overflow 3, 전부 STEER라 GATE 0). bucket
+              필드(AQ1)로 정밀 판정 — GATE가 1개라도 잘려나갔을 때만 앵커, 0건이면 기존
+              비내비게이션 텍스트로 정직하게 폴백(「거기 전부 있다」로 과장 안 함). 착지 탭
+              기본값 변경(B3 보류)은 스코프 밖(PO 확定) — 이 앵커는 명시적 tab=gates 링크일
+              뿐 기본 착지를 바꾸지 않는다. */}
+          {overflow > 0 && overflowHasGate ? (
             <button
               type="button"
               onClick={() => router.push('/inbox?tab=gates')}
@@ -246,6 +249,11 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
               <span className="flex-1">{t('flowDemoted', { overflow })}</span>
               <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />
             </button>
+          ) : overflow > 0 ? (
+            <div className="flex items-center gap-1.5 border-t border-proof-line-soft bg-proof-sunk px-5 py-2.5 text-[12.5px] text-proof-ink-3">
+              <span className="size-1 rounded-full bg-proof-faint" aria-hidden="true" />
+              {t('flowDemoted', { overflow })}
+            </div>
           ) : null}
         </div>
       )}
