@@ -249,21 +249,29 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
         : s
     )));
 
+    // ⚠️QA changes(PR#3377 HIGH, 카디르+codex, 2026-08-22) — fetchWithAuth는 401 외의
+    // 비-2xx(500 등)를 res.ok=false Response로 «그냥 반환»할 뿐 throw하지 않는다(코드
+    // 확認 — 재시도는 401 전용). try/catch만으론 그 흔한 실패 모드를 영영 못 잡아
+    // "부분 실패=재조회로 정직 복구" claim이 실제로는 안 돌았다(낙관 UI가 서버 truth와
+    // 불일치한 채 영구 잔존 — no-fiction 위반). 형제(kanban-board.tsx handleDragEnd/
+    // handleTrustDragEnd)가 이미 쓰는 `if (!res.ok)` 명시 체크를 그대로 적용.
     try {
       if (laneChanged) {
-        await fetchWithAuth(`/api/stories/${storyId}`, {
+        const res = await fetchWithAuth(`/api/stories/${storyId}`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ epic_id: newEpicId }),
         });
+        if (!res.ok) { void fetchAll(); return; }
       }
       if (columnChanged && newStatus) {
-        await fetchWithAuth('/api/stories/bulk', {
+        const res = await fetchWithAuth('/api/stories/bulk', {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ items: [{ id: storyId, status: newStatus }] }),
         });
+        if (!res.ok) { void fetchAll(); return; }
       }
     } catch {
-      void fetchAll(); // 실패 시 재조회로 정직한 상태 복구(개별 롤백 대신 — 두 PATCH 조합 롤백은 재조회가 더 정확).
+      void fetchAll(); // 네트워크 예외(fetch 자체가 throw) — 실패 시 재조회로 정직한 상태 복구.
     }
   }, [stories, columns, axisMode, fetchAll]);
 

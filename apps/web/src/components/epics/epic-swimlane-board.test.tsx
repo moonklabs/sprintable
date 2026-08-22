@@ -67,20 +67,29 @@ type FetchStub = {
   members?: Array<Record<string, unknown>>;
   bulkPatchSpy?: (body: unknown) => void;
   singlePatchSpy?: (id: string, body: unknown) => void;
+  // ⚠️QA changes(PR#3377 HIGH) — 500 부분 실패 재현용. false면 그 PATCH가 ok:false(HTTP 500류)로
+  // 응답한다(fetchWithAuth는 401 외 비-ok를 throw 안 하고 그냥 반환 — try/catch만으론 못 잡히는
+  // 자리를 직접 재현).
+  singlePatchOk?: boolean;
+  bulkPatchOk?: boolean;
+  storiesGetSpy?: () => void;
 };
 
-function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singlePatchSpy }: FetchStub) {
+function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singlePatchSpy, singlePatchOk = true, bulkPatchOk = true, storiesGetSpy }: FetchStub) {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
     if (typeof url === 'string' && url.startsWith('/api/stories/bulk') && init?.method === 'PATCH') {
       bulkPatchSpy?.(JSON.parse(init.body ?? '{}'));
+      if (!bulkPatchOk) return { ok: false, status: 500, json: async () => ({ error: { message: 'boom' } }) };
       return { ok: true, json: async () => ({ data: [] }) };
     }
     if (typeof url === 'string' && /^\/api\/stories\/[^/]+$/.test(url) && init?.method === 'PATCH') {
       const id = url.split('/').pop()!;
       singlePatchSpy?.(id, JSON.parse(init.body ?? '{}'));
+      if (!singlePatchOk) return { ok: false, status: 500, json: async () => ({ error: { message: 'boom' } }) };
       return { ok: true, json: async () => ({ data: {} }) };
     }
     if (typeof url === 'string' && url.startsWith('/api/stories?')) {
+      storiesGetSpy?.();
       return { ok: true, json: async () => ({ data: stories }) };
     }
     if (typeof url === 'string' && url.startsWith('/api/goals?')) {
@@ -226,5 +235,70 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
       await flush();
     });
     expect(anyPatchCalled).toBe(false);
+  });
+
+  // story #2931(PASS 판정·영구 테스트 없음은 비차단, 카디르 권고 2026-08-22) — 에픽 레인에서
+  // 미할당 레인으로 드래그하면 epic_id가 null로 PATCH된다(반대 방향도 확認해 두는 회귀가드).
+  it('에픽 레인에서 미할당 레인으로 드래그하면 epic_id=null로 PATCH된다', async () => {
+    let patchedBody: unknown = null;
+    await mount({
+      epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }],
+      stories: [{ id: 's1', title: '카드', status: 'backlog', priority: 'medium', epic_id: 'e1' }],
+      singlePatchSpy: (_id, body) => { patchedBody = body; },
+    });
+
+    const handler = capturedDragEndHandlers.at(-1);
+    await act(async () => {
+      handler!({ active: { id: 's1' }, over: { id: '__unassigned__::backlog' } });
+      await flush();
+    });
+
+    expect(patchedBody).toEqual({ epic_id: null });
+  });
+
+  // ⚠️QA changes(PR#3377 HIGH, 카디르+codex, 2026-08-22) — fetchWithAuth는 401 외 비-ok
+  // (500 등)를 throw 없이 그냥 반환한다. try/catch만 믿으면 이 흔한 실패 모드에서 낙관 UI가
+  // 서버 truth와 불일치한 채 영구 잔존한다(no-fiction 위반) — `if (!res.ok)` 명시 체크가
+  // 실제로 재조회를 발동시키는지 직접 증명한다(단건 epic_id PATCH가 500인 케이스).
+  it('epic_id PATCH가 500이면(throw 없이 ok:false) 재조회(fetchAll)가 실제로 발동한다', async () => {
+    let storiesGetCount = 0;
+    await mount({
+      epics: [
+        { id: 'e1', title: '출발', status: 'active', position: 1 },
+        { id: 'e2', title: '도착', status: 'active', position: 2 },
+      ],
+      stories: [{ id: 's1', title: '카드', status: 'backlog', priority: 'medium', epic_id: 'e1' }],
+      singlePatchOk: false,
+      storiesGetSpy: () => { storiesGetCount += 1; },
+    });
+    expect(storiesGetCount).toBe(1); // 최초 mount 1회.
+
+    const handler = capturedDragEndHandlers.at(-1);
+    await act(async () => {
+      handler!({ active: { id: 's1' }, over: { id: 'e2::backlog' } });
+      await flush();
+    });
+
+    expect(storiesGetCount).toBe(2); // 500 응답 後 fetchAll이 실제로 재발화(재조회로 정직 복구).
+  });
+
+  // 같은 클래스 — bulk(컬럼) PATCH 축도 동일 가드가 걸리는지 대칭 확認.
+  it('bulk status PATCH가 500이면 재조회(fetchAll)가 실제로 발동한다', async () => {
+    let storiesGetCount = 0;
+    await mount({
+      epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }],
+      stories: [{ id: 's1', title: '카드', status: 'backlog', priority: 'medium', epic_id: 'e1' }],
+      bulkPatchOk: false,
+      storiesGetSpy: () => { storiesGetCount += 1; },
+    });
+    expect(storiesGetCount).toBe(1);
+
+    const handler = capturedDragEndHandlers.at(-1);
+    await act(async () => {
+      handler!({ active: { id: 's1' }, over: { id: 'e1::in-progress' } });
+      await flush();
+    });
+
+    expect(storiesGetCount).toBe(2);
   });
 });
