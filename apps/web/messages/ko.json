@@ -3639,6 +3639,11 @@
   },
   "cage": {
     "gatePending": "게이트 대기",
+    "gateStatusPending": "결재 대기",
+    "gateStatusApproved": "승인됨",
+    "gateStatusRejected": "반려됨",
+    "gateStatusHeld": "보류됨",
+    "gateStatusVoided": "무효화됨",
     "lineApproverApproved": "승인",
     "lineApproverRejected": "반려",
     "lineApproverPending": "대기",

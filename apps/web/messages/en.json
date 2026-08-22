@@ -3639,6 +3639,11 @@
   },
   "cage": {
     "gatePending": "gate pending",
+    "gateStatusPending": "Pending approval",
+    "gateStatusApproved": "Approved",
+    "gateStatusRejected": "Rejected",
+    "gateStatusHeld": "Held",
+    "gateStatusVoided": "Voided",
     "lineApproverApproved": "Approved",
     "lineApproverRejected": "Rejected",
     "lineApproverPending": "Pending",

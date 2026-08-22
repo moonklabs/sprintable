@@ -3,7 +3,7 @@
 // usesSignatureFlow 축은 story #1954 정책(오르테가군 판정, 2026-07-17) 그대로 유지 — unknown/high는
 // 서명 게이팅, low만 인라인 원탭 승인.
 import { describe, expect, it } from 'vitest';
-import { deriveRiskLevel, usesSignatureFlow } from './gate-risk';
+import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState } from './gate-risk';
 import type { GateItem } from '../kanban/types';
 
 function gate(overrides: Partial<GateItem>): GateItem {
@@ -50,5 +50,34 @@ describe('gate-risk', () => {
 
   it('low만 인라인 원탭 승인(서명 게이팅 미적용) 경로를 탄다', () => {
     expect(usesSignatureFlow('low')).toBe(false);
+  });
+});
+
+// story #2926(P0-F 잔여 fast-follow, 카디르 F2 QA LOW②) — F1/F2/F3이 각자 갖고 있던 동일
+// 판정 로직(pending=amber·approved=green·그 외=red)을 단일 함수로 승격. LOW①(문구 불일치)도
+// GATE_STATUS_I18N_KEYS 단일 키셋으로 닫는다.
+describe('deriveGateProofState', () => {
+  it('pending=amber, 통일 키(gateStatusPending)', () => {
+    expect(deriveGateProofState('pending')).toEqual({ proofState: 'amber', statusKey: 'gateStatusPending' });
+  });
+
+  it('approved=green, 통일 키(gateStatusApproved)', () => {
+    expect(deriveGateProofState('approved')).toEqual({ proofState: 'green', statusKey: 'gateStatusApproved' });
+  });
+
+  it('rejected=red, 통일 키(gateStatusRejected)', () => {
+    expect(deriveGateProofState('rejected')).toEqual({ proofState: 'red', statusKey: 'gateStatusRejected' });
+  });
+
+  it('held=red(옛 코드도 approved만 다르게 취급 — 신규 구분 아님), 통일 키(gateStatusHeld)', () => {
+    expect(deriveGateProofState('held')).toEqual({ proofState: 'red', statusKey: 'gateStatusHeld' });
+  });
+
+  it('voided=red, 통일 키(gateStatusVoided)', () => {
+    expect(deriveGateProofState('voided')).toEqual({ proofState: 'red', statusKey: 'gateStatusVoided' });
+  });
+
+  it('매핑 안 된 값(신설/희귀 status)은 statusKey=null — 호출부가 원문을 그대로 보여준다(지어내지 않음)', () => {
+    expect(deriveGateProofState('archived')).toEqual({ proofState: 'red', statusKey: null });
   });
 });
