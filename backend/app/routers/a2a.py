@@ -416,6 +416,16 @@ async def _build_agent_card(session: AsyncSession, member: TeamMember, base_url:
             )
         ]
 
+    # 방향서 03·에이전트 속성(#2939 슬라이스②) — 권한 범위 표시 SSOT는 ApiKey.scope(실제
+    # 매 요청 집행되는 값). recruit 불변식상 활성(revoked_at IS NULL) 키는 최대 1개
+    # (`recruit_service._rotate_or_create_key` — 있으면 회전, 없으면 신규, 절대 2건 동시 생성
+    # 안 함). 방어적으로 created_at desc 1순위를 취한다(설계 doc §1 미확定 항목의 구현 판정).
+    from app.repositories.api_key import ApiKeyRepository
+
+    api_keys = await ApiKeyRepository(session).list_by_member(member.id)
+    active_key = next((k for k in api_keys if k.revoked_at is None), None)
+    permission_scope = list(active_key.scope) if active_key is not None and active_key.scope else None
+
     interface_url = f"{base_url}/api/v2/a2a/members/{member.id}/rpc"
     return AgentCard(
         name=member.name,
@@ -444,6 +454,9 @@ async def _build_agent_card(session: AsyncSession, member: TeamMember, base_url:
         default_output_modes=["text/plain"],
         skills=skills,
         model=persona.model if persona is not None else None,
+        permission_scope=permission_scope,
+        expected_cost=persona.expected_cost_note if persona is not None else None,
+        stop_condition=persona.stop_condition_note if persona is not None else None,
         security_schemes={
             _SECURITY_SCHEME_KEY: SecurityScheme(
                 http_auth_security_scheme=HTTPAuthSecurityScheme(

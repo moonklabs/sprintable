@@ -83,6 +83,8 @@ async def create_persona(
             system_prompt=body.system_prompt,
             style_prompt=body.style_prompt,
             model=body.model,
+            expected_cost_note=body.expected_cost_note,
+            stop_condition_note=body.stop_condition_note,
             base_persona_id=body.base_persona_id,
             tool_allowlist=body.tool_allowlist,
             is_default=body.is_default or False,
