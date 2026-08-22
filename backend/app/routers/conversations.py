@@ -20,6 +20,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db, get_read_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.event import Event
+from app.models.gate import Gate
 from app.models.project import OrgMember, Project
 from app.models.team import AgentMessageAllowlist, TeamMember
 from app.models.agent_deployment import AgentAuditLog
@@ -412,6 +413,101 @@ async def _fetch_conversation_participants(
             "runtime_type": runtime_type_map.get(r.member_id),
         })
     return conv_participants
+
+
+# story #2925(2921-S2 선행, 유나 확定 스펙) — L1 대화 행을 ProofCapsule card로 승격시킬지
+# 판별하는 신호. 「참조(게이트/작업) 있는 대화만 승격·색은 참조 대상의 실제 상태가 몬다·
+# 참조 없으면 plain(fail-safe·거짓 색 금지)」(2921-S2 서면 확定). 오늘 코드베이스에서 대화가
+# 게이트를 "임베드"하는 유일한 실 메커니즘은 `dispatch_approval_request_cards`(approval_
+# delivery.py)가 심는 `msg_metadata['approval_target']['gate_id']`뿐이다 — entity_references
+# (source_type='chat_message', target_type='gate')는 이 delivery 경로가 안 거쳐(mentions
+# 추출은 insert_chat_mentions·conversations.py의 일반 send_message 경로에서만 발화) 실제로
+# 채워지지 않는다. 「작업(task) 상태」 폴백은 이 그라운딩에서 대화-임베드 메커니즘을 찾지
+# 못해(지어내지 않는다) 이번 판에는 뺐다 — gate 참조가 없으면 null(스토리 fail-safe 원칙
+# 그대로), task 전용 대화-임베드 축은 별도 결정 필요(PO/유나 확認 대상으로 완료 보고에 명시).
+#
+# 상태 매핑(PO 전달 유나 확定): rejected→violation(red) · approved/auto_passed→verified
+# (green) · pending+requires_human→pending_human(blue) · pending(아직 human 단계 아님)·
+# held→waiting(amber). voided는 4상태 어디에도 안 맞는(관리자 회수·실 판정 아님) 상태라
+# 후보에서 제외한다(거짓 색 금지 원칙 — 차라리 null이 낫다).
+def _derive_gate_proof_state(gate: "Gate") -> str | None:
+    if gate.status == "rejected":
+        return "violation"
+    if gate.status in ("approved", "auto_passed"):
+        return "verified"
+    if gate.status == "pending":
+        return "pending_human" if gate.requires_human else "waiting"
+    if gate.status == "held":
+        return "waiting"
+    return None  # voided(또는 알려지지 않은 값) — 지어내지 않는다.
+
+
+_OPEN_GATE_STATUSES = ("pending", "held")
+
+
+async def _batch_resolve_linked_proof(
+    conv_ids: list[uuid.UUID],
+    org_id: uuid.UUID,
+    db: AsyncSession,
+) -> dict[uuid.UUID, dict | None]:
+    """대화(들)의 「행 승격 신호」 배치 조회 — N+1 방지(리스트 크기 무관 쿼리 2개 고정,
+    `_fetch_conversation_participants`/unread_map과 동일 배치 패턴). 대화당 여러 approval
+    카드가 있으면(재상신 등) 열린(pending/held) 게이트를 우선하고, 없으면 가장 최근에
+    해소된 게이트를 반환한다(승인 완료도 "증명"으로서 보여줄 가치가 있다는 2916-B 원칙).
+    voided뿐이거나 참조가 아예 없으면 None(스토리의 fail-safe 원칙)."""
+    if not conv_ids:
+        return {}
+
+    approval_rows = (await db.execute(
+        select(
+            ConversationMessage.conversation_id,
+            ConversationMessage.msg_metadata["approval_target"]["gate_id"].astext.label("gate_id"),
+            ConversationMessage.created_at,
+        ).where(
+            ConversationMessage.conversation_id.in_(conv_ids),
+            ConversationMessage.msg_metadata["approval_target"]["gate_id"].astext.isnot(None),
+        )
+    )).all()
+    if not approval_rows:
+        return {}
+
+    conv_candidates: dict[uuid.UUID, list[tuple[uuid.UUID, object]]] = defaultdict(list)
+    all_gate_ids: set[uuid.UUID] = set()
+    for row in approval_rows:
+        try:
+            gate_id = uuid.UUID(row.gate_id)
+        except (ValueError, TypeError, AttributeError):
+            continue  # 손상된/구형 payload — 지어내지 않고 건너뜀.
+        conv_candidates[row.conversation_id].append((gate_id, row.created_at))
+        all_gate_ids.add(gate_id)
+
+    gates = (await db.execute(
+        select(Gate).where(Gate.id.in_(all_gate_ids), Gate.org_id == org_id)
+    )).scalars().all()
+    gate_map: dict[uuid.UUID, Gate] = {g.id: g for g in gates}
+
+    result: dict[uuid.UUID, dict | None] = {}
+    for conv_id, candidates in conv_candidates.items():
+        # 최신 배달 우선(같은 게이트가 재상신돼도 최신 참조가 "그 대화가 지금 가리키는 것").
+        candidates.sort(key=lambda c: c[1], reverse=True)
+        open_pick: Gate | None = None
+        fallback_pick: Gate | None = None
+        for gate_id, _created_at in candidates:
+            gate = gate_map.get(gate_id)
+            if gate is None or gate.status == "voided":
+                continue
+            if gate.status in _OPEN_GATE_STATUSES and open_pick is None:
+                open_pick = gate
+            elif fallback_pick is None:
+                fallback_pick = gate
+        chosen = open_pick or fallback_pick
+        if chosen is None:
+            continue
+        state = _derive_gate_proof_state(chosen)
+        if state is None:
+            continue
+        result[conv_id] = {"kind": "gate", "state": state, "gate_id": str(chosen.id)}
+    return result
 
 
 _SUMMARY_PREVIEW_MAX = 80
@@ -1313,6 +1409,9 @@ async def list_conversations(
     )).all() if conv_id_list else []
     unread_map: dict[uuid.UUID, int] = {r[0]: r[1] for r in unread_rows}
 
+    # story #2925: 행 승격 신호 배치 조회(N+1 방지 — 쿼리 2개 고정, 리스트 크기 무관).
+    linked_proof_map = await _batch_resolve_linked_proof(conv_id_list, org_id, db)
+
     result = []
     for conv in convs:
         latest_msg = (await db.execute(
@@ -1337,6 +1436,8 @@ async def list_conversations(
                 if caller_last_read_at.get(conv.id) else None
             ),
             "unread_count": unread_map.get(conv.id, 0),
+            # story #2925(2921-S2 선행) — 참조 없으면 null(fail-safe, 거짓 색 금지).
+            "linked_proof": linked_proof_map.get(conv.id),
             "latest_message": {
                 "content": latest_msg.content,
                 "created_at": latest_msg.created_at.isoformat(),
