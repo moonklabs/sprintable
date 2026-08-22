@@ -4,7 +4,7 @@ import { startTransition, useEffect, useRef, useState, type ReactNode } from 're
 import { useTranslations } from 'next-intl';
 import { ArrowRight, Check, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { initials } from '@/lib/storage/format';
+import { Avatar } from '@/components/shared/avatar';
 import { Proofline, type ProofState } from './proofline';
 import { TrustSeal, type TrustSealClaimedProps, type TrustSealVerifiedProps } from '@/components/verify/trust-seal';
 
@@ -134,30 +134,6 @@ function StateHeader({ state, label }: { state: ProofState; label: string }) {
   );
 }
 
-/** Workcell 등 다른 Proof Capsule 계열 컴포넌트가 동일 아바타 스타일을 재사용할 수 있게 export.
- * story #2921 S4 — shape 추가(기본 circle, 기존 호출부 전부 무변화). chat-redesign-2921 §4축
- * 「에이전트=blue 링 아바타·human=무채 사각」이 square 변형을 요구해 추가했다(circle=에이전트,
- * square=human). children이 있으면 label 텍스트 대신 렌더(아이콘 아바타 지원 — 챗은 이름이
- * 없을 수 있는 표시라 이니셜만으론 부족, Bot/User 아이콘을 그대로 쓴다). */
-export function ProofAvatar({
-  label, isAgent, size = 19, shape = 'circle', children,
-}: { label: string; isAgent?: boolean; size?: number; shape?: 'circle' | 'square'; children?: ReactNode }) {
-  return (
-    <span
-      className={cn(
-        'inline-flex shrink-0 items-center justify-center border text-[9px] font-semibold',
-        shape === 'circle' ? 'rounded-full' : 'rounded-md',
-        isAgent
-          ? 'border-proof-blue bg-proof-blue-soft text-proof-blue'
-          : 'border-proof-line bg-proof-sunk text-proof-ink-2',
-      )}
-      style={{ width: size, height: size }}
-    >
-      {children ?? label}
-    </span>
-  );
-}
-
 /** canonical(비-i18n) risk 식별자 → `proofCapsule.risk.*` 번역키. */
 const RISK_KEY: Record<NonNullable<ProofCapsuleGate['risk']>, 'low' | 'medium' | 'high'> = {
   '낮음': 'low', '보통': 'medium', '높음': 'high',
@@ -262,13 +238,13 @@ function FullVariant({
         <div className="mt-2.5 flex flex-wrap items-center gap-3 text-[11px] text-proof-ink-3">
           {human ? (
             <span className="inline-flex items-center gap-1.5">
-              <ProofAvatar label={initials(human.name)} />
+              <Avatar name={human.name} actorType="human" size={19} />
               {t.rich('gate.owner', { name: human.name, b: (chunks) => <>{chunks}</> })}
             </span>
           ) : null}
           {agent ? (
             <span className="inline-flex items-center gap-1.5">
-              <ProofAvatar label={agent.initial} isAgent />
+              <Avatar name={agent.name} actorType="agent" size={19} />
               {t('claim.executor', { name: agent.name })}
             </span>
           ) : null}
@@ -334,8 +310,8 @@ function InlineRow({
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-proof-ink">{claim}</span>
         <span className="inline-flex shrink-0 items-center gap-2">
           {duration ? <span className="shrink-0 text-[10.5px] font-medium text-proof-ink-3">{duration}</span> : null}
-          {human ? <ProofAvatar label={initials(human.name)} size={22} /> : null}
-          {agent ? <ProofAvatar label={agent.initial} isAgent size={22} /> : null}
+          {human ? <Avatar name={human.name} actorType="human" size={22} /> : null}
+          {agent ? <Avatar name={agent.name} actorType="agent" size={22} /> : null}
           {gate ? (
             <a
               href={gate.href}

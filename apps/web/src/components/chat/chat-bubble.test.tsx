@@ -1664,31 +1664,36 @@ describe('ChatBubble — story #2921 S4(유나 확定, 버블·아바타 Proofli
     expect(container.querySelector('.rounded-tl-sm.bg-proof-blue-soft')).toBeNull();
   });
 
-  it('에이전트 아바타=circle+blue 링(ProofAvatar isAgent 재사용, 사본 분화 금지)', async () => {
+  // story #2921 S4 후속(2026-08-22, 유나 합성 5규칙 확定·avatar-unification-design-memo-2921) —
+  // ProofAvatar가 폐기되고 Avatar(components/shared/avatar.tsx)로 통합됐다 — 형태(circle/
+  // square)·idle blue 링·human 테두리는 이제 Avatar 내부가 결정한다. 아래 2건은 그 통합
+  // 결과를 잰다(옛 ProofAvatar 전용 클래스 대신 Avatar의 실 출력 클래스로 갱신).
+  it('에이전트 아바타=circle+idle blue 링(Avatar 통합, 사본 분화 금지)', async () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [], sender_type: 'agent' }} isMine={false} />));
     });
-    const avatar = container.querySelector('.border-proof-blue.bg-proof-blue-soft');
+    const avatar = container.querySelector('.ring-proof-blue');
     expect(avatar).toBeTruthy();
     expect(avatar?.className).toContain('rounded-full');
     expect(avatar?.className).not.toContain('rounded-md');
   });
 
-  it('human 아바타=square+무채(본인·상대 공통) — 에이전트만 circle이다', async () => {
+  it('human 아바타=square+무채 테두리(본인·상대 공통) — 에이전트만 circle+링이다', async () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [], sender_type: 'human' }} isMine={false} />));
     });
-    const avatar = container.querySelector('.border-proof-line.bg-proof-sunk');
+    const avatar = container.querySelector('.border-proof-line');
     expect(avatar).toBeTruthy();
     expect(avatar?.className).toContain('rounded-md');
     expect(avatar?.className).not.toContain('rounded-full');
+    expect(avatar?.className).not.toContain('ring-proof-blue');
 
     await act(async () => { root.unmount(); });
     root = createRoot(container);
     await act(async () => {
       root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [], sender_type: 'human' }} isMine />));
     });
-    const mineAvatar = container.querySelector('.border-proof-line.bg-proof-sunk');
+    const mineAvatar = container.querySelector('.border-proof-line');
     expect(mineAvatar).toBeTruthy();
     expect(mineAvatar?.className).toContain('rounded-md');
   });

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Bot, User } from 'lucide-react';
-import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from '@/components/chat/presence-dot';
+import { PresenceDot, AGENT_LIVE_RING_CLASS, type PresenceStatus } from '@/components/chat/presence-dot';
 import { avatarColor, initials } from '@/lib/storage/format';
 import { cn } from '@/lib/utils';
 
@@ -14,8 +14,8 @@ export interface AvatarProps {
   size?: number;
   /** agent 전용 — 연결 축 dot. 휴먼은 항상 미표시. */
   presenceStatus?: PresenceStatus | null;
-  /** agent 전용 — 활동 축(WORKING_RING_CLASS, pulsing). 미작동 시 정적 accent-claim 링(항상
-   * "에이전트임" 식별 — 이미지가 있어도 유지, S2g 목업 규칙). */
+  /** agent 전용 — 활동 축(AGENT_LIVE_RING_CLASS, citron pulse). 미작동 시 정적 proof-blue 링
+   * (항상 "에이전트임" 식별 — 이미지가 있어도 유지, S2g 목업 규칙+#2921 규칙③ 색 스왑). */
   isWorking?: boolean;
   className?: string;
 }
@@ -25,6 +25,16 @@ export interface AvatarProps {
  * Bot/User 아이콘) + 에이전트 식별(정적 링 + presence dot + BOT 배지, 이미지 있어도 유지 —
  * 휴먼과 안 헷갈리게). 목업 `s2g-avatar-mockup` 1:1. storage-uploader-avatar.tsx의 initials/
  * avatarColor 헬퍼를 그대로 재사용(이니셜 폴백 로직 중복 방지).
+ *
+ * story #2921(유나 합성 5규칙, avatar-unification-design-memo-2921, 2026-08-22 확定) — 3339
+ * (챗 Proofline)의 ProofAvatar를 여기로 흡수·폐기(사본 분화 금지, 규칙⑤ 단일 컴포넌트).
+ * 스코프=전 표면 단일 문법(규칙 확定 ⓐ) — 챗 전용 override 없음, 아래 소비처 전부(챗·조직
+ * 인력·아바타 편집·팀 프레즌스 패널) 동일 시각을 받는다:
+ * ②형태 — shape는 actorType에서 자동 유도(agent=circle·human=square, 이미지도 그 형태로
+ * clip — overflow-hidden 래퍼의 반경만 바꾸면 이미지 tier도 자동으로 따라온다). human은
+ * 색과 별개의 테두리(border-proof-line)로 redundant 경계 신호를 더한다.
+ * ③idle 에이전트=Proof Blue 정적 링(ring-proof-blue)·working=citron 펄스(AGENT_LIVE_RING_CLASS,
+ * presence-dot.tsx — 옛 WORKING_RING_CLASS 개명+색 스왑, 그 파일 주석 참고).
  */
 export function Avatar({
   name, avatarUrl, actorType, size = 32, presenceStatus, isWorking = false, className,
@@ -53,8 +63,9 @@ export function Avatar({
     <div className={cn('relative shrink-0', className)} style={{ width: size, height: size }}>
       <div
         className={cn(
-          'h-full w-full overflow-hidden rounded-full',
-          isAgent && (isWorking ? WORKING_RING_CLASS : 'ring-2 ring-accent-claim ring-offset-1 ring-offset-background'),
+          'h-full w-full overflow-hidden',
+          isAgent ? 'rounded-full' : 'rounded-md border border-proof-line',
+          isAgent && (isWorking ? AGENT_LIVE_RING_CLASS : 'ring-2 ring-proof-blue ring-offset-1 ring-offset-background'),
         )}
       >
         {showImage ? (
