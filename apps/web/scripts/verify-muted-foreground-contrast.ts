@@ -13,7 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseOklchToRgba, compositeOver } from '../src/lib/oklch-contrast';
 import { contrastRatio } from '../src/lib/color-contrast';
-import { extractCssVarBlock } from './verify-tint-foreground-contrast';
+import { extractCssVarBlock, resolveCssVarValue } from './verify-tint-foreground-contrast';
 
 const GLOBALS_CSS_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/app/globals.css');
 const AA_THRESHOLD = 4.5;
@@ -31,21 +31,21 @@ export function computeMutedForegroundContrasts(css: string): MutedForegroundCon
     const { vars } = extractCssVarBlock(css, selector);
     const pageBgRaw = vars.get('background');
     if (!pageBgRaw) throw new Error(`--background not defined in ${selector}`);
-    const pageBg = parseOklchToRgba(pageBgRaw);
-    if (!pageBg) throw new Error(`--background = "${pageBgRaw}" in ${selector} is not a plain oklch() value`);
+    const pageBg = parseOklchToRgba(resolveCssVarValue(vars, pageBgRaw));
+    if (!pageBg) throw new Error(`--background = "${pageBgRaw}" in ${selector} is not a plain oklch()/hex value`);
     const pageBgRgb: [number, number, number] = [pageBg.r, pageBg.g, pageBg.b];
 
     const fgRaw = vars.get('muted-foreground');
     if (!fgRaw) throw new Error(`--muted-foreground not defined in ${selector}`);
-    const fg = parseOklchToRgba(fgRaw);
-    if (!fg) throw new Error(`--muted-foreground = "${fgRaw}" in ${selector} is not a plain oklch() value`);
+    const fg = parseOklchToRgba(resolveCssVarValue(vars, fgRaw));
+    if (!fg) throw new Error(`--muted-foreground = "${fgRaw}" in ${selector} is not a plain oklch()/hex value`);
     const fgOnPage = compositeOver(fg, pageBgRgb);
 
     for (const bgVar of BG_VARS) {
       const bgRaw = vars.get(bgVar);
       if (!bgRaw) throw new Error(`--${bgVar} not defined in ${selector}`);
-      const bg = parseOklchToRgba(bgRaw);
-      if (!bg) throw new Error(`--${bgVar} = "${bgRaw}" in ${selector} is not a plain oklch() value`);
+      const bg = parseOklchToRgba(resolveCssVarValue(vars, bgRaw));
+      if (!bg) throw new Error(`--${bgVar} = "${bgRaw}" in ${selector} is not a plain oklch()/hex value`);
       const bgOnPage = compositeOver(bg, pageBgRgb);
       const ratio = contrastRatio(fgOnPage, bgOnPage);
       results.push({ theme, bgVar, ratio });

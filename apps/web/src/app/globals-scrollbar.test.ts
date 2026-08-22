@@ -116,12 +116,16 @@ describe('실제 스크롤 요소(shiki가 만드는 <pre> 자신)에도 scrollb
 // 알파)은 대비 ~1.2:1로 사실상 안 보였다(story 원 결함) — 45%/65%(hover 65%/80%)로 올려
 // 3:1(WCAG 비텍스트 UI 컴포넌트 문턱) 이상을 확保. ⛔jsdom은 실 canvas 렌더를 안 하므로
 // oklch 알파합성을 여기서 재현하지 않는다 — 이미 sRGB로 환산된 실측 RGB를 고정값으로 쓴다.
-const LIGHT_BG = [255, 255, 255] as const; // --background(light) = oklch(1 0 0)
-const LIGHT_THUMB_OLD = [229, 229, 229] as const; // oklch(0 0 0 / 10%) — 원 결함
-const LIGHT_THUMB = [140, 140, 140] as const; // oklch(0 0 0 / 45%)
-const DARK_BG = [17, 17, 20] as const; // --background(dark) = oklch(0.18 0.005 285.823)
-const DARK_THUMB_OLD = [36, 36, 39] as const; // oklch(1 0 0 / 8%) — 원 결함
-const DARK_THUMB = [172, 172, 173] as const; // oklch(1 0 0 / 65%)
+//
+// story #2917 후속(2026-08-22, 유나 홀름 design:changes 재실측) — --background가
+// var(--proof-bg)로 별칭되며 배경이 Bone(#F4F2EC)/Carbon(#0B0C0D)으로 바뀌어 반투명 썸의
+// 합성색도 함께 이동했다. 45%/65% 알파는 그대로, 배경만 새 값으로 재합성한 결과.
+const LIGHT_BG = [244, 242, 236] as const; // --background(light) = var(--proof-bg) = Bone #F4F2EC
+const LIGHT_THUMB_OLD = [229, 229, 229] as const; // oklch(0 0 0 / 10%) — 원 결함(구 배경 기준)
+const LIGHT_THUMB = [134, 133, 130] as const; // black 45% on Bone
+const DARK_BG = [11, 12, 13] as const; // --background(dark) = var(--proof-bg) = Carbon #0B0C0D
+const DARK_THUMB_OLD = [36, 36, 39] as const; // oklch(1 0 0 / 8%) — 원 결함(구 배경 기준)
+const DARK_THUMB = [170, 170, 170] as const; // white 65% on Carbon
 
 describe('스크롤바 썸/배경 대비 (#2601 — «스크롤바 미표시» 실은 대비 실패)', () => {
   it('양성대조 — 원래 값(10%/8% 알파)은 실측 대비 ~1.2:1로 3:1 미달이었다(원 결함 재현)', () => {
@@ -139,8 +143,11 @@ describe('스크롤바 썸/배경 대비 (#2601 — «스크롤바 미표시» �
 
   it('회귀 가드 — --background 값이 이 값 그대로일 때만 위 판정이 유효하다(값이 바뀌면 재실측 필요)', () => {
     const css = fs.readFileSync(path.resolve(__dirname, 'globals.css'), 'utf8');
-    expect(css).toContain('--background: oklch(1 0 0);');
-    expect(css).toContain('--background: oklch(0.18 0.005 285.823);');
+    // story #2917(2026-08-22) — --background가 var(--proof-bg)로 별칭됐다(값-SSOT 이전).
+    // 리터럴 대신 별칭 참조 자체와 그 참조가 가리키는 proof-bg 리터럴 둘 다를 고정한다.
+    expect(css).toContain('--background: var(--proof-bg);');
+    expect(css).toContain('--proof-bg: #F4F2EC;');
+    expect(css).toContain('--proof-bg: #0B0C0D;');
   });
 });
 

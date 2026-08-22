@@ -70,11 +70,16 @@ export function extractCssVarBlock(css: string, selector: string): CssVarBlock {
 
 /** vars 맵에서 `--<family>-tint` 형태의 키를 전부 뽑는다 — «어떤 계열이 있는지»를 코드가
  * 아니라 정의 자체에서 읽는다(story #2420의 핵심 — 새 계열이 자동으로 대상이 되는 이유). */
+/** story #2917 — `--proof-bg` 등은 「값-SSOT」 기저층이지 destructive/success류 «status
+ * family»가 아니다(proof-tint는 애초에 없고, proof-bg는 페이지 배경 자체 — family 취급하면
+ * 의미 없는 자기-대조 행이 하나 더 생긴다). 한 단어 이름 규칙은 그대로 두고 이 이름만 제외. */
+const NON_STATUS_FAMILY_NAMES = new Set(['proof']);
+
 export function discoverTintFamilies(vars: Map<string, string>): string[] {
   const families: string[] = [];
   for (const key of vars.keys()) {
     const m = /^([\w]+)-tint$/.exec(key);
-    if (m) families.push(m[1]!);
+    if (m && !NON_STATUS_FAMILY_NAMES.has(m[1]!)) families.push(m[1]!);
   }
   return families.sort();
 }
@@ -88,16 +93,34 @@ export function discoverBgFamilies(vars: Map<string, string>): string[] {
   const families: string[] = [];
   for (const key of vars.keys()) {
     const m = /^([\w]+)-bg$/.exec(key);
-    if (m) families.push(m[1]!);
+    if (m && !NON_STATUS_FAMILY_NAMES.has(m[1]!)) families.push(m[1]!);
   }
   return families.sort();
+}
+
+const VAR_REF_RE = /^var\(\s*--([\w-]+)\s*\)$/;
+
+/** story #2917(Proofline 토큰 매핑표 §8) — 표준 semantic 토큰이 이제 `var(--proof-*)`로
+ * 값-SSOT를 참조한다(예: `--background: var(--proof-bg)`). 같은 :root/.dark 블록 안에서
+ * 재귀적으로 var() 체인을 풀어 최종 리터럴(oklch()/hex)에 도달한다 — 순환 참조는 명시적으로
+ * 실패시킨다(이 파일의 "정의 시점에 못 재면 없는 것과 같다" 규율 그대로, 조용히 포기 금지). */
+export function resolveCssVarValue(vars: Map<string, string>, raw: string, seen: Set<string> = new Set()): string {
+  const m = VAR_REF_RE.exec(raw.trim());
+  if (!m) return raw;
+  const refName = m[1]!;
+  if (seen.has(refName)) throw new Error(`circular var() reference detected at --${refName}`);
+  seen.add(refName);
+  const refValue = vars.get(refName);
+  if (refValue === undefined) throw new Error(`var(--${refName}) referenced but --${refName} not defined in this block`);
+  return resolveCssVarValue(vars, refValue, seen);
 }
 
 function resolveOklchVar(vars: Map<string, string>, name: string): { r: number; g: number; b: number } {
   const raw = vars.get(name);
   if (!raw) throw new Error(`--${name} not defined in this block`);
-  const rgba = parseOklchToRgba(raw);
-  if (!rgba) throw new Error(`--${name} = "${raw}" is not a plain oklch() value — resolveOklchVar can't handle var()/other functions, extend it if this is legitimate`);
+  const resolved = resolveCssVarValue(vars, raw);
+  const rgba = parseOklchToRgba(resolved);
+  if (!rgba) throw new Error(`--${name} = "${raw}"(resolved: "${resolved}") is not a plain oklch()/hex value — resolveOklchVar can't handle it, extend it if this is legitimate`);
   return rgba;
 }
 
@@ -124,8 +147,12 @@ function computeOneFamilyBackground(
 ): { backgroundRgb: [number, number, number]; foregroundOnBackgroundRatio: number; familyColorOnBackgroundRatio: number } | null {
   const bgRaw = vars.get(`${family}-${suffix}`);
   if (!bgRaw) return null;
-  const bgRgba = parseOklchToRgba(bgRaw);
-  if (!bgRgba) return null; // var()/color-mix()/hex(예 proof-bg) 등 이 파서가 못 푸는 형태면 스킵
+  // story #2917 — var() 체인(예: --success-tint: var(--proof-green-soft))을 먼저 풀어야
+  // proof-* SSOT 전환 이후에도 이 계열이 «스킵되지 않고» 실제로 검사된다(전엔 이 파서가
+  // var()/hex를 못 풀면 조용히 스킵했다 — 그게 검사 공백이 될 뻔한 지점).
+  const bgResolved = resolveCssVarValue(vars, bgRaw);
+  const bgRgba = parseOklchToRgba(bgResolved);
+  if (!bgRgba) return null; // color-mix() 등 정말 못 푸는 형태만 스킵(oklch/hex/var 체인은 이제 풀림)
   const backgroundRgb = compositeOver(bgRgba, pageBgRgb);
 
   const foregroundOnBackgroundRatio = contrastRatio(fgRgb, backgroundRgb);
@@ -133,7 +160,7 @@ function computeOneFamilyBackground(
   let familyColorOnBackgroundRatio = NaN;
   const familyRaw = vars.get(family);
   if (familyRaw) {
-    const familyParsed = parseOklchToRgba(familyRaw);
+    const familyParsed = parseOklchToRgba(resolveCssVarValue(vars, familyRaw));
     if (familyParsed) {
       const familyRgb: [number, number, number] = [familyParsed.r, familyParsed.g, familyParsed.b];
       familyColorOnBackgroundRatio = contrastRatio(familyRgb, backgroundRgb);
@@ -195,14 +222,14 @@ export function computeCrossFamilyBgReference(css: string): CrossFamilyBgReferen
     for (const bgFamily of bgFamilies) {
       const bgRaw = vars.get(`${bgFamily}-bg`);
       if (!bgRaw) continue;
-      const bgRgba = parseOklchToRgba(bgRaw);
+      const bgRgba = parseOklchToRgba(resolveCssVarValue(vars, bgRaw));
       if (!bgRgba) continue;
       const backgroundRgb = compositeOver(bgRgba, pageBgRgb);
 
       for (const textFamily of textFamilies) {
         const textRaw = vars.get(textFamily);
         if (!textRaw) continue;
-        const textParsed = parseOklchToRgba(textRaw);
+        const textParsed = parseOklchToRgba(resolveCssVarValue(vars, textRaw));
         if (!textParsed) continue;
         const textRgb: [number, number, number] = [textParsed.r, textParsed.g, textParsed.b];
         const ratio = contrastRatio(textRgb, backgroundRgb);

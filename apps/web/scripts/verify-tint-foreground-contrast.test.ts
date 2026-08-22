@@ -183,18 +183,23 @@ describe('computeCrossFamilyBgReference — story #2575 AC4 양성대조(교차-
     expect(hit!.ratio).toBeGreaterThan(0);
   });
 
-  it('실 globals.css로 계산하면 light/destructive-on-warning-bg가 #2960 실측값(4.37)과 근사 일치한다', () => {
+  // story #2917(Proofline 토큰 매핑표) — globals.css의 destructive/warning 값이 proof-red/
+  // proof-amber로 바뀌어 이 참고값(과거 #2960 사고 재현치)이 새 팔레트 수치로 이동했다. 이
+  // 테스트의 역할은 "그 사고가 지금도 재현되는가"가 아니라 "계산이 실 globals.css 정의로부터
+  // 결정적으로 같은 값을 낸다"는 회귀가드이므로, 새 팔레트에서 실측한 값으로 갱신한다(#2960
+  // 원 사고 자체는 위 첫 테스트가 합성 CSS로 이미 영구 고정해 재현 가능하다).
+  it('실 globals.css로 계산하면 light/destructive-on-warning-bg가 proof 팔레트 실측값(4.67)과 근사 일치한다', () => {
     const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
     const results = computeCrossFamilyBgReference(css);
     const hit = results.find((r) => r.theme === 'light' && r.textFamily === 'destructive' && r.bgFamily === 'warning')!;
-    expect(hit.ratio).toBeCloseTo(4.37, 1);
+    expect(hit.ratio).toBeCloseTo(4.67, 1);
   });
 
-  it('같은-계열 쌍(textFamily === bgFamily)도 참고표에 포함된다 — warning-on-warning-bg가 #2960 2.06과 근사 일치', () => {
+  it('같은-계열 쌍(textFamily === bgFamily)도 참고표에 포함된다 — warning-on-warning-bg가 proof 팔레트 실측값(3.25)과 근사 일치', () => {
     const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
     const results = computeCrossFamilyBgReference(css);
     const hit = results.find((r) => r.theme === 'light' && r.textFamily === 'warning' && r.bgFamily === 'warning')!;
-    expect(hit.ratio).toBeCloseTo(2.06, 1);
+    expect(hit.ratio).toBeCloseTo(3.25, 1);
   });
 });
 
@@ -231,9 +236,11 @@ describe('real repo globals.css — 실제 정의가 전 조합 AA(4.5)를 통�
     expect(bgResults.length).toBe(8); // 4 families × 2 themes
   });
 
-  // story #2575 AC4 — 오늘 #2960 수치가 이 정의 검사 자체(같은-계열 참고값)에서도 재현된다.
-  it('AC4 양성대조 — light/warning의 familyColorOnBackgroundRatio(-bg)가 #2960 2.06과 근사 일치한다', () => {
+  // story #2575 AC4 — #2960 수치가 이 정의 검사 자체(같은-계열 참고값)에서도 재현된다.
+  // story #2917: proof-amber 팔레트로 값이 이동(3.25) — 위 computeCrossFamilyBgReference
+  // 테스트 주석과 동일 이유.
+  it('AC4 양성대조 — light/warning의 familyColorOnBackgroundRatio(-bg)가 proof 팔레트 실측값(3.25)과 근사 일치한다', () => {
     const r = results.find((x) => x.theme === 'light' && x.family === 'warning' && x.kind === 'bg')!;
-    expect(r.familyColorOnBackgroundRatio).toBeCloseTo(2.06, 1);
+    expect(r.familyColorOnBackgroundRatio).toBeCloseTo(3.25, 1);
   });
 });

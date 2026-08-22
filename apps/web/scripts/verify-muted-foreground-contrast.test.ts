@@ -64,8 +64,11 @@ describe('real repo globals.css — story #2480: muted-foreground가 muted/backg
     }
   });
 
-  it('light on bg-muted lands at ~5.02 (story #2480 실측치 — 회귀 시 이 값이 4.39 쪽으로 움직인다)', () => {
+  // story #2917(Proofline 매핑표) — proof-ink-3(#2480 이후의 muted-foreground 값-SSOT)가
+  // #6D6F67→#63655D로 조정(유나 확定, 매핑표 §5 sunk 행 실측 사각 처방) — 5.02→4.91로 이동.
+  // 4.5 문턱 자체는 위 「every combination passes 4.5」 테스트가 계속 지킨다.
+  it('light on bg-muted lands at ~4.91 (story #2917 proof-ink-3 조정 후 실측치 — 회귀 시 4.39 쪽으로 움직인다)', () => {
     const lightOnMuted = results.find((r) => r.theme === 'light' && r.bgVar === 'muted')!;
-    expect(lightOnMuted.ratio).toBeCloseTo(5.02, 1);
+    expect(lightOnMuted.ratio).toBeCloseTo(4.91, 1);
   });
 });
