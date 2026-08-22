@@ -50,6 +50,9 @@ class AgentPersona(Base):
     system_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
     style_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 방향서 03·에이전트 속성(story #2939 슬라이스②) — 1차=선언(자유 텍스트), 실측 계측/집행 불요.
+    expected_cost_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stop_condition_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     is_builtin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

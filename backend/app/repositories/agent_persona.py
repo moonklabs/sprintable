@@ -58,6 +58,8 @@ def _build_summary(persona: AgentPersona, is_in_use: bool, base: AgentPersona | 
         resolved_system_prompt=resolved_system,
         resolved_style_prompt=resolved_style,
         model=persona.model,
+        expected_cost_note=persona.expected_cost_note,
+        stop_condition_note=persona.stop_condition_note,
         config=persona.config,
         is_builtin=persona.is_builtin,
         is_default=persona.is_default,
@@ -172,6 +174,8 @@ class AgentPersonaRepository:
         system_prompt: str | None = None,
         style_prompt: str | None = None,
         model: str | None = None,
+        expected_cost_note: str | None = None,
+        stop_condition_note: str | None = None,
         base_persona_id: uuid.UUID | None = None,
         tool_allowlist: list[str] | None = None,
         is_default: bool = False,
@@ -200,6 +204,8 @@ class AgentPersonaRepository:
             system_prompt=(system_prompt or "").strip(),
             style_prompt=style_prompt.strip() if style_prompt else None,
             model=model.strip() if model else None,
+            expected_cost_note=expected_cost_note.strip() if expected_cost_note else None,
+            stop_condition_note=stop_condition_note.strip() if stop_condition_note else None,
             config=config,
             is_builtin=False,
             is_default=is_default,
@@ -258,7 +264,10 @@ class AgentPersonaRepository:
             await self._clear_default(org_id, project_id, persona.agent_id, exclude_id=persona_id)
 
         patch: dict[str, Any] = {"config": config, "updated_at": datetime.now(timezone.utc)}
-        for key in ("name", "slug", "description", "system_prompt", "style_prompt", "model", "is_default"):
+        for key in (
+            "name", "slug", "description", "system_prompt", "style_prompt", "model",
+            "expected_cost_note", "stop_condition_note", "is_default",
+        ):
             if key in fields and (fields[key] is not None or key in force_none_fields):
                 val = fields[key]
                 if key == "name":
@@ -267,7 +276,7 @@ class AgentPersonaRepository:
                     val = _slugify(val)
                 elif key in ("description", "system_prompt", "style_prompt"):
                     val = val.strip() if val else None
-                elif key == "model":
+                elif key in ("model", "expected_cost_note", "stop_condition_note"):
                     val = val.strip() if val else None
                 patch[key] = val
 
