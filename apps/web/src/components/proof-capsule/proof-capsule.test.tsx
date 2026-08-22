@@ -167,7 +167,7 @@ describe('ProofCapsule (human optional — Board card 확산, bf9037cb) — 다�
   });
 });
 
-describe('ProofCapsule (footer slot — card density, Board card 확산 실기능 이관)', () => {
+describe('ProofCapsule (footer slot — card·full 밀도, Board card 확산+story #2926 P0-F F2 gates/[id] 실기능 이관)', () => {
   it('renders arbitrary footer content below the claim/evidence in card density', () => {
     const markup = renderWithIntl(
       <ProofCapsule
@@ -179,12 +179,26 @@ describe('ProofCapsule (footer slot — card density, Board card 확산 실기�
     expect(markup).toContain('보드 카드 실기능 마커');
   });
 
-  it('ignores the footer prop on non-card densities (no accidental leak)', () => {
-    for (const density of ['full', 'row', 'audit'] as const) {
+  // story #2926(P0-F F2) — full 밀도도 footer를 받는다: GateRow(단일 버튼 추상)로는 gates/[id]
+  // 페이지의 4갈래 상태 분기(읽기전용/무권한/서명플로우/평버튼)를 못 담아, org/project 컨텍스트·
+  // 배지·상태분기·EntityBacklinksSection 전부를 footer로 이관했다(카드 전용이던 전제가 바뀜).
+  it('renders arbitrary footer content below claim/gate in full density too', () => {
+    const markup = renderWithIntl(
+      <ProofCapsule
+        {...BASE}
+        density="full"
+        footer={<span data-testid="gate-detail-footer-marker">gates/[id] 상태분기 마커</span>}
+      />,
+    );
+    expect(markup).toContain('gates/[id] 상태분기 마커');
+  });
+
+  it('ignores the footer prop on row/audit densities (no accidental leak — 이 둘은 여전히 전용 아님)', () => {
+    for (const density of ['row', 'audit'] as const) {
       const markup = renderWithIntl(
-        <ProofCapsule {...BASE} density={density} footer={<span>카드 전용 마커</span>} />,
+        <ProofCapsule {...BASE} density={density} footer={<span>카드·full 전용 마커</span>} />,
       );
-      expect(markup).not.toContain('카드 전용 마커');
+      expect(markup).not.toContain('카드·full 전용 마커');
     }
   });
 });

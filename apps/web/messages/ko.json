@@ -3784,6 +3784,7 @@
     "evidenceNonePrompt": "근거 데이터 없음 — 내용으로 직접 판단",
     "gateDetailBackToInbox": "결재함",
     "gateDetailNotFound": "게이트를 찾을 수 없습니다.",
+    "gateDetailStatusPending": "결재 대기",
     "gateDetailResolvedStatus": "이미 처리됨 — 상태: {status}",
     "gateDetailResolvedByStatus": "{name}님이 처리 — 상태: {status}",
     "queueAgeToday": "오늘 접수",
