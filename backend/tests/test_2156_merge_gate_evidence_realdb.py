@@ -545,7 +545,10 @@ async def test_gate_check_publish_fires_on_base_retarget_edit_when_story_linked(
     installation_result.scalar_one_or_none = lambda: installation
     no_gate_result = AsyncMock()
     no_gate_result.scalar_one_or_none = lambda: None  # 기존 merge Gate row 없음 → evaluate 분기.
-    session.execute = AsyncMock(side_effect=[installation_result, no_gate_result])
+    # story #2893 후속(카디르 QA, PR#3349 CI 실패 2건) — find_gate_slot_with_pr_fallback가
+    # 정확매치(없음) 後 NULL-슬롯 폴백까지 조회한다(2 SELECT). 이 테스트는 둘 다 "없음"인
+    # 시나리오(진짜 신규)라 두 번째 자리도 no_gate_result 재사용으로 충분.
+    session.execute = AsyncMock(side_effect=[installation_result, no_gate_result, no_gate_result])
     evaluate = AsyncMock(return_value=SimpleNamespace(gate_id=gate_id))
     gate_check_publish: list[dict] = []
 

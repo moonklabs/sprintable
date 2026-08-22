@@ -29,7 +29,11 @@ from app.services.gate_resolver import (
     SOURCE_ORG_POLICY,
     resolve_disposition,
 )
-from app.services.gate_service import create_gate, resolve_work_item_project_id
+from app.services.gate_service import (
+    create_gate,
+    find_gate_slot_with_pr_fallback,
+    resolve_work_item_project_id,
+)
 from app.services.trust_score import compute_member_trust_scores
 from app.services.verdict_capture import (
     capture_pr_ci_verdict,
@@ -398,14 +402,14 @@ async def evaluate_merge_gate(
     # 호출 *전* 상태를 가볍게 먼저 조회해 비교한다(create_gate 내부의 멱등 조회와 동형 SELECT).
     # story #2893 — pr_number를 키에 편입(0271): 안 넣으면 "이 PR의 게이트가 방금
     # pending이 됐는지"가 아니라 "같은 스토리 다른 PR의 상태"를 잘못 비교해 카드
-    # 배달 판정이 어긋난다(그 PR 실사고류와 동일 클래스).
-    _prior_status = (await session.execute(
-        select(Gate.status).where(
-            Gate.org_id == org_id, Gate.work_item_id == story_id,
-            Gate.work_item_type == "story", Gate.gate_type == MERGE_GATE_TYPE,
-            Gate.pr_number == db_pr_number,
-        )
-    )).scalar_one_or_none()
+    # 배달 판정이 어긋난다(그 PR 실사고류와 동일 클래스). 카디르 QA(PR#3349 CI 실패①,
+    # 2026-08-22) — 정확매치 only는 이 바로 아래 create_gate() 호출이 찾을 행(NULL-슬롯
+    # 승격 포함)과 다른 답을 낼 수 있어 fallback 헬퍼로 통일한다(같은 물음엔 같은 답).
+    _prior_gate = await find_gate_slot_with_pr_fallback(
+        session, org_id=org_id, work_item_id=story_id, work_item_type="story",
+        gate_type=MERGE_GATE_TYPE, pr_number=db_pr_number,
+    )
+    _prior_status = _prior_gate.status if _prior_gate is not None else None
     gate = await create_gate(
         session,
         org_id,
@@ -606,17 +610,14 @@ async def reconcile_merge_gate_with_real_evidence(
     # CI/merge 증거"로 story의 아무 pending/auto_passed 게이트(실은 PR A 것일 수 있음)를
     # 재평가해버린다 — 실사고1/2와 정확히 같은 클래스(엉뚱한 PR의 SHA/증거가 다른 PR의
     # 게이트에 새는 것).
-    existing = await session.execute(
-        select(Gate).where(
-            Gate.org_id == org_id,
-            Gate.work_item_id == story_id,
-            Gate.work_item_type == "story",
-            Gate.gate_type == MERGE_GATE_TYPE,
-            Gate.pr_number == (pr_number if pr_number > 0 else None),
-            Gate.status.in_(("pending", "auto_passed")),
-        ).limit(1)
+    # 카디르 QA(PR#3349 CI 실패②, 2026-08-22) — 정확매치 only 조회는 line-engine/board-
+    # preflight self-report shell(pr_number 모름, NULL로 생성)이 나중에 실 PR로 reconcile
+    # 되는 정상 경로를 놓친다(gate_service.find_gate_slot_with_pr_fallback 참조).
+    existing = await find_gate_slot_with_pr_fallback(
+        session, org_id=org_id, work_item_id=story_id, work_item_type="story",
+        gate_type=MERGE_GATE_TYPE, pr_number=(pr_number if pr_number > 0 else None),
     )
-    if existing.scalar_one_or_none() is None:
+    if existing is None or existing.status not in ("pending", "auto_passed"):
         return None
     return await evaluate_merge_gate(
         session, org_id, story_id,

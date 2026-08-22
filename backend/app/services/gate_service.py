@@ -421,6 +421,70 @@ async def _reopen_rejected_gate(
     return gate
 
 
+async def find_gate_slot_with_pr_fallback(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    work_item_id: uuid.UUID,
+    work_item_type: str,
+    gate_type: str,
+    pr_number: int | None,
+) -> Gate | None:
+    """story #2893(§2 A1, 0271) 후속 — 카디르 QA(PR#3349 CI 실 실패 2건, 2026-08-22):
+    pr_number를 멱등 키에 편입한 것(정확매치 only)이 「PR 컨텍스트가 나중에 밝혀지는」
+    정상 케이스까지 «다른 PR»과 똑같이 취급해 새 행을 만들며 옛 행을 고아화시켰다 —
+    ①line-engine/board-preflight self-report shell(pr_number 모름, NULL) 後 실 PR이
+    연결되는 경우 ②legacy/백필 누락 행의 재제출(rejected reopen). A1의 취지는 «서로
+    다른 PR 간 격리»지 「PR 컨텍스트가 나중에 채워지는 같은 게이트의 분열」이 아니다
+    (PO 확定).
+
+    pr_number가 주어지면(실 PR 문맥) 먼저 그 PR 전용 슬롯을 정확매치로 찾는다. 없으면
+    아직 pr_number를 모르던 시절의 NULL-슬롯이 있는지 찾아 **승격**(pr_number를 채워
+    재사용 — flush까지 이 함수 책임, 호출자가 추가로 flush 안 해도 이후 조회에
+    반영됨)한다. 승격 後엔 그 행이 이 PR에 귀속되므로(정확매치 슬롯으로 편입) 다른 PR이
+    같은 NULL-슬롯을 다시 가로챌 길이 없다 — 실사고1/2가 막던 축(서로 다른 PR의 SHA가
+    같은 슬롯을 공유)은 그대로 보존된다(승격은 "미상→특정 PR" 1회성 전이일 뿐, "PR A→PR
+    B" 전이는 이 함수가 만들어내지 않는다).
+
+    pr_number가 None(PR 컨텍스트가 원래 없는 gate_type 또는 board-preflight no-substance)
+    이면 옛 계약 그대로 NULL-슬롯만 찾는다 — 승격 대상 자체가 없다("PR 컨텍스트 있음"으로
+    바꿀 근거가 없다)."""
+    if pr_number is not None:
+        exact = (
+            await session.execute(
+                select(Gate).where(
+                    Gate.org_id == org_id, Gate.work_item_id == work_item_id,
+                    Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
+                    Gate.pr_number == pr_number,
+                )
+            )
+        ).scalar_one_or_none()
+        if exact is not None:
+            return exact
+        null_slot = (
+            await session.execute(
+                select(Gate).where(
+                    Gate.org_id == org_id, Gate.work_item_id == work_item_id,
+                    Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
+                    Gate.pr_number.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if null_slot is not None:
+            null_slot.pr_number = pr_number
+            await session.flush()
+        return null_slot
+    return (
+        await session.execute(
+            select(Gate).where(
+                Gate.org_id == org_id, Gate.work_item_id == work_item_id,
+                Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
+                Gate.pr_number.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+
+
 async def create_gate(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -465,18 +529,13 @@ async def create_gate(
     공용 chokepoint 성격을 유지한다.
     """
     # 멱등: 이미 존재하면 기존 반환. story #2893 — pr_number도 키에 편입(0271 부분
-    # 유니크 인덱스와 동형 조건: 둘 다 None이면 NULL=NULL 매치가 아니라 `==` 연산자가
-    # SQLAlchemy에서 자동으로 IS NULL로 번역되므로 그대로 동작한다).
-    existing_r = await session.execute(
-        select(Gate).where(
-            Gate.org_id == org_id,
-            Gate.work_item_id == work_item_id,
-            Gate.work_item_type == work_item_type,
-            Gate.gate_type == gate_type,
-            Gate.pr_number == pr_number,
-        ).limit(1)
+    # 유니크 인덱스와 동형 조건). find_gate_slot_with_pr_fallback가 정확매치 우선+
+    # NULL-슬롯 승격 폴백까지 처리(카디르 QA, PR#3349 CI 실패 2건 후속 — pr_number가
+    # 나중에 밝혀지는 정상 케이스를 다른 PR과 혼동해 고아 행을 만들던 결함).
+    existing = await find_gate_slot_with_pr_fallback(
+        session, org_id=org_id, work_item_id=work_item_id,
+        work_item_type=work_item_type, gate_type=gate_type, pr_number=pr_number,
     )
-    existing = existing_r.scalar_one_or_none()
     if existing is not None:
         # story #2150 근본수정: rejected는 재제출 시 새 결재 사이클을 연다(그 외 terminal
         # status는 기존 그대로 불변 반환 — 판단 근거는 _reopen_rejected_gate 참조).
