@@ -66,8 +66,12 @@ async def test_create_api_key_201():
     client, session, app = await _client()
     try:
         with patch("app.routers.api_keys.assert_agent_owner", new_callable=AsyncMock), \
+             patch("app.routers.api_keys.acquire_agent_mutation_lock", new_callable=AsyncMock), \
              patch("app.services.agent_message_policy.ensure_creator_allowlisted", new_callable=AsyncMock), \
+             patch("app.repositories.api_key.ApiKeyRepository.revoke_all_active", new_callable=AsyncMock) as mock_revoke_all, \
              patch("app.repositories.api_key.ApiKeyRepository.create", new_callable=AsyncMock) as mock_create:
+            # story #2944 — 「발급=교체」: 이 엔드포인트가 이제 기존 활성 키를 먼저 전량 revoke한다.
+            mock_revoke_all.return_value = []
             mock_create.return_value = (_mock_key(), PLAINTEXT)
 
             async with client as c:
