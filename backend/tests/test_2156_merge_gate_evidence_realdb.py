@@ -183,7 +183,14 @@ async def test_reconcile_updates_pending_merge_gate_with_real_evidence_realdb():
     """⭐핵심 — reconcile_merge_gate_with_real_evidence가 실 ci/pr 증거로 pending merge 게이트를
     재평가한다. cold-start(outcome 표본 0<3)라 최종 decision은 여전히 ask_human이지만, 그
     reason이 "CI unknown"에서 "outcome sample insufficient"로 바뀐다 — 실 증거가 게이트에
-    도달했다는 관측 가능한 증거."""
+    도달했다는 관측 가능한 증거.
+
+    story #2893(§2 A1, 0271) 갱신 — 멱등 키가 pr_number를 포함한다. 두 호출을 **같은 PR
+    번호(42)**로 통일 — 이게 실제 프로덕션 체인과도 정합된다(reconcile은 verdict_capture.py
+    웹훅 핸들러에서만 불리고, 그 핸들러는 실 PR 이벤트에서만 pr_number를 뽑아 항상 >0이다
+    — pr_number=0인 reconcile 호출은 애초에 실사용 경로가 아니다). 다른 PR 번호로 만든
+    게이트에 이 증거가 새면 안 된다는 게 정확히 이 스토리의 요지 — 그 회귀가드는
+    test_2893_gate_pr_scoped_isolation_realdb가 전담한다."""
     from app.services.merge_verdict_gate import evaluate_merge_gate, reconcile_merge_gate_with_real_evidence
 
     engine, Session = await _session_factory()
@@ -202,7 +209,7 @@ async def test_reconcile_updates_pending_merge_gate_with_real_evidence_realdb():
             ):
                 await evaluate_merge_gate(
                     s, seeded["org_id"], seeded["story_id"],
-                    pr_number=0, repo="", ci_result=None, pr_result=None,
+                    pr_number=42, repo="", ci_result=None, pr_result=None,
                 )
                 await s.commit()
 
@@ -538,7 +545,10 @@ async def test_gate_check_publish_fires_on_base_retarget_edit_when_story_linked(
     installation_result.scalar_one_or_none = lambda: installation
     no_gate_result = AsyncMock()
     no_gate_result.scalar_one_or_none = lambda: None  # 기존 merge Gate row 없음 → evaluate 분기.
-    session.execute = AsyncMock(side_effect=[installation_result, no_gate_result])
+    # story #2893 후속(카디르 QA, PR#3349 CI 실패 2건) — find_gate_slot_with_pr_fallback가
+    # 정확매치(없음) 後 NULL-슬롯 폴백까지 조회한다(2 SELECT). 이 테스트는 둘 다 "없음"인
+    # 시나리오(진짜 신규)라 두 번째 자리도 no_gate_result 재사용으로 충분.
+    session.execute = AsyncMock(side_effect=[installation_result, no_gate_result, no_gate_result])
     evaluate = AsyncMock(return_value=SimpleNamespace(gate_id=gate_id))
     gate_check_publish: list[dict] = []
 

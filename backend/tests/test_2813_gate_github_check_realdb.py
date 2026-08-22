@@ -903,7 +903,12 @@ async def test_evaluate_merge_gate_clears_auto_axis_anchor_when_decision_leaves_
 async def test_evaluate_merge_gate_never_clears_human_approved_anchor_realdb():
     """카디르 R4① 안전경계 — `gate.status=="approved"`(사람 승인, gates.py 축)는
     evaluate_merge_gate 재평가가 **절대** 못 건드린다. 시스템 재평가가 사람 결재를 역전시키면
-    사고이므로, 클리어 조건은 반드시 `gate.status=="auto_passed"`로만 스코프돼야 한다."""
+    사고이므로, 클리어 조건은 반드시 `gate.status=="auto_passed"`로만 스코프돼야 한다.
+
+    story #2893(§2 A1, 0271) 갱신 — 멱등 키가 pr_number를 포함한다. 최초 create_gate에도
+    아래 evaluate_merge_gate와 같은 pr_number(99)를 넘겨 «같은 PR이 재평가되는» 실 시나리오와
+    일치시킨다(다른 pr_number면 서로 다른 gate row가 돼 재평가 자체가 이 게이트에 안 닿는다
+    — 그건 이 테스트의 관심사가 아니라 test_2893_gate_pr_scoped_isolation_realdb의 관심사)."""
     from app.services.gate_service import create_gate
     from app.services.merge_verdict_gate import BLOCK, MERGE_GATE_TYPE, evaluate_merge_gate
 
@@ -915,7 +920,7 @@ async def test_evaluate_merge_gate_never_clears_human_approved_anchor_realdb():
             # 사람이 이미 승인한 상태를 직접 시뮬레이션(gates.py 축과 동형 — status=approved+anchor).
             gate = await create_gate(
                 s, seeded["org_id"], seeded["story_id"], "story", MERGE_GATE_TYPE,
-                seeded["member_id"], None, project_id=None, neutral_facts={},
+                seeded["member_id"], None, project_id=None, neutral_facts={}, pr_number=99,
             )
             gate.status = "approved"
             gate.approved_head_sha = "sha-human-approved"

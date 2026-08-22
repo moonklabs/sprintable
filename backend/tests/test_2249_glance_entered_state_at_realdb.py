@@ -345,3 +345,56 @@ async def test_entered_state_at_is_optional_and_backward_compatible():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_verify_fail_dedups_by_story_when_multiple_blocked_merge_gates():
+    """카디르 QA(PR#3349, 2026-08-22) — story #2893(§2 A1)부터 merge gate가 스토리당 여러 개
+    (PR마다 1행)일 수 있다. 같은 스토리의 merge gate 2개가 동시에 evidence_status='blocked'
+    여도 verify_fail 항목은 **스토리당 1개**만 나와야 한다(중복 노출 회귀가드) — entered_at은
+    그중 더 이른(=더 오래 blocked인) 시각(MIN)이어야 한다(체류시간 위계 설계와 정합)."""
+    from app.main import app
+    from app.models.gate import Gate
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_base(s)
+            story = _story(seeded["org_id"], seeded["project_id"], "Multi-PR Verify Fail Story")
+            s.add(story)
+            await s.commit()
+
+            older_entered = datetime(2026, 7, 1, 0, 0, 0, tzinfo=timezone.utc)
+            newer_entered = datetime(2026, 8, 10, 0, 0, 0, tzinfo=timezone.utc)
+            s.add_all([
+                Gate(
+                    id=uuid.uuid4(), org_id=seeded["org_id"], work_item_id=story.id,
+                    work_item_type="story", gate_type="merge", status="pending",
+                    pr_number=1, evidence_status="blocked",
+                    evidence_status_entered_at=older_entered,
+                ),
+                Gate(
+                    id=uuid.uuid4(), org_id=seeded["org_id"], work_item_id=story.id,
+                    work_item_type="story", gate_type="merge", status="pending",
+                    pr_number=2, evidence_status="blocked",
+                    evidence_status_entered_at=newer_entered,
+                ),
+            ])
+            await s.commit()
+
+        await _setup_app(app, Session, seeded["caller_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/glance/attention?project_id={seeded['project_id']}")
+            assert resp.status_code == 200, resp.text
+            items = resp.json()["items"]
+
+            vf_items = [i for i in items if i["kind"] == "verify_fail" and i["story_id"] == str(story.id)]
+            assert len(vf_items) == 1, f"스토리당 1개여야 하는데 {len(vf_items)}개 중복 노출됨"
+            got = datetime.fromisoformat(vf_items[0]["entered_state_at"].replace("Z", "+00:00"))
+            assert got == older_entered, "MIN(evidence_status_entered_at) — 더 오래 blocked인 시각이어야 함"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

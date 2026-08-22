@@ -29,7 +29,11 @@ from app.services.gate_resolver import (
     SOURCE_ORG_POLICY,
     resolve_disposition,
 )
-from app.services.gate_service import create_gate, resolve_work_item_project_id
+from app.services.gate_service import (
+    create_gate,
+    find_gate_slot_with_pr_fallback,
+    resolve_work_item_project_id,
+)
 from app.services.trust_score import compute_member_trust_scores
 from app.services.verdict_capture import (
     capture_pr_ci_verdict,
@@ -387,18 +391,25 @@ async def evaluate_merge_gate(
     # story #1968: 이 함수는 story_id(uuid)만 갖고 Story 객체를 로드하지 않으므로(participation/
     # verdict/trust 경로 전부 story_id만 소비) resolve_work_item_project_id()로 신규 조회.
     project_id = await resolve_work_item_project_id(session, org_id, "story", story_id)
+    # story #2893(설계안 §2 A1) — pr_number<=0(no-substance/board-preflight, PR 컨텍스트
+    # 자체가 없음)은 DB에 0을 지어내지 않고 NULL로 정직하게 유지. 0271의 부분 유니크
+    # 인덱스가 NULL 구간=옛 "스토리+gate_type당 1행" 계약을 그대로 지킨다.
+    db_pr_number = pr_number if pr_number > 0 else None
     # story #2118(E-DG-REAL ②): create_gate()가 이미 pending인 기존 gate를 멱등 반환할 때(예:
     # report-done/board-preflight가 이 함수를 반복 호출)마다 승인요청 카드를 중복 배달하지 않으려면
     # "이 호출에서 방금 pending이 됐는지"(신규 생성 또는 rejected/voided→재오픈)를 알아야 한다 —
     # create_gate()는 그 신호를 반환하지 않으므로(반환형 변경은 8개 호출부 전체에 영향, 스코프 밖)
-    # 호출 *전* 상태를 가볍게 먼저 조회해 비교한다(create_gate 내부의 멱등 조회와 동형 SELECT,
-    # 신규 인덱스 불필요 — uq(work_item_id, work_item_type, gate_type) 이미 있음).
-    _prior_status = (await session.execute(
-        select(Gate.status).where(
-            Gate.org_id == org_id, Gate.work_item_id == story_id,
-            Gate.work_item_type == "story", Gate.gate_type == MERGE_GATE_TYPE,
-        )
-    )).scalar_one_or_none()
+    # 호출 *전* 상태를 가볍게 먼저 조회해 비교한다(create_gate 내부의 멱등 조회와 동형 SELECT).
+    # story #2893 — pr_number를 키에 편입(0271): 안 넣으면 "이 PR의 게이트가 방금
+    # pending이 됐는지"가 아니라 "같은 스토리 다른 PR의 상태"를 잘못 비교해 카드
+    # 배달 판정이 어긋난다(그 PR 실사고류와 동일 클래스). 카디르 QA(PR#3349 CI 실패①,
+    # 2026-08-22) — 정확매치 only는 이 바로 아래 create_gate() 호출이 찾을 행(NULL-슬롯
+    # 승격 포함)과 다른 답을 낼 수 있어 fallback 헬퍼로 통일한다(같은 물음엔 같은 답).
+    _prior_gate = await find_gate_slot_with_pr_fallback(
+        session, org_id=org_id, work_item_id=story_id, work_item_type="story",
+        gate_type=MERGE_GATE_TYPE, pr_number=db_pr_number,
+    )
+    _prior_status = _prior_gate.status if _prior_gate is not None else None
     gate = await create_gate(
         session,
         org_id,
@@ -409,6 +420,7 @@ async def evaluate_merge_gate(
         role_id,
         project_id=project_id,
         neutral_facts=facts,
+        pr_number=db_pr_number,
     )
 
     # 재제출 re-open(doc-gate 48f064e5 선례 이식): uq(work_item,gate_type)=1행 + terminal=immutable
@@ -594,16 +606,18 @@ async def reconcile_merge_gate_with_real_evidence(
     부른다. 이 함수를 `capture_pr_ci_verdict` 본문 안에서 부르면 무한 재귀가 된다 — 반드시
     그 호출부(웹훅 핸들러 등) 쪽에서, `capture_pr_ci_verdict` 리턴 後에 별도로 부를 것.
     """
-    existing = await session.execute(
-        select(Gate).where(
-            Gate.org_id == org_id,
-            Gate.work_item_id == story_id,
-            Gate.work_item_type == "story",
-            Gate.gate_type == MERGE_GATE_TYPE,
-            Gate.status.in_(("pending", "auto_passed")),
-        ).limit(1)
+    # story #2893(설계안 §2 A1) — pr_number를 키에 편입: 안 넣으면 "이 웹훅이 나른 PR B의
+    # CI/merge 증거"로 story의 아무 pending/auto_passed 게이트(실은 PR A 것일 수 있음)를
+    # 재평가해버린다 — 실사고1/2와 정확히 같은 클래스(엉뚱한 PR의 SHA/증거가 다른 PR의
+    # 게이트에 새는 것).
+    # 카디르 QA(PR#3349 CI 실패②, 2026-08-22) — 정확매치 only 조회는 line-engine/board-
+    # preflight self-report shell(pr_number 모름, NULL로 생성)이 나중에 실 PR로 reconcile
+    # 되는 정상 경로를 놓친다(gate_service.find_gate_slot_with_pr_fallback 참조).
+    existing = await find_gate_slot_with_pr_fallback(
+        session, org_id=org_id, work_item_id=story_id, work_item_type="story",
+        gate_type=MERGE_GATE_TYPE, pr_number=(pr_number if pr_number > 0 else None),
     )
-    if existing.scalar_one_or_none() is None:
+    if existing is None or existing.status not in ("pending", "auto_passed"):
         return None
     return await evaluate_merge_gate(
         session, org_id, story_id,

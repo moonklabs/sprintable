@@ -176,6 +176,22 @@ def test_wilson_lower_bound_sample_aware():
 
 # ── evaluate_merge_gate 오케스트레이션 (Cage 합성·AC⑥) ──────────────────────────
 
+def _mock_session() -> AsyncMock:
+    """카디르 QA(PR#3349 재재verdict, 2026-08-22) — evaluate_merge_gate가 이제 내부에서
+    find_gate_slot_with_pr_fallback(gate_service.py, 최대 2회 session.execute)를 거친다.
+    완전 미설정 `AsyncMock()`은 `.scalar_one_or_none()`(실제론 동기 메서드)까지 AsyncMock
+    자손이라, 호출하면(await 없이) 「awaited 안 된 coroutine」객체를 그대로 반환한다 — 그
+    코루틴이 `is not None`이라 헬퍼가 "게이트 찾음"으로 오판, `.status` 접근에서
+    AttributeError. 이 세션은 session.execute(...)가 항상 "게이트 없음"을 뜻하는 **동기**
+    결과를 반환하도록 미리 배선해 그 함정을 없앤다(pr_number 유무에 따라 1~2회 호출돼도
+    return_value 방식이라 호출 횟수 무관)."""
+    no_row = MagicMock()
+    no_row.scalar_one_or_none = MagicMock(return_value=None)
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=no_row)
+    return session
+
+
 def _patch_cage(*, gate_status="auto_passed", trust_scores=None, capture=None, participation=True,
                  project_id=None):
     part = SimpleNamespace(member_id=uuid.uuid4(), role_id=uuid.uuid4()) if participation else None
@@ -209,7 +225,7 @@ async def _run(**cage):
             patch.object(mod, "create_gate", AsyncMock(return_value=gate))
         )
         res = await evaluate_merge_gate(
-            AsyncMock(), uuid.uuid4(), uuid.uuid4(),
+            _mock_session(), uuid.uuid4(), uuid.uuid4(),
             pr_number=12, repo="o/r", ci_result="pass", pr_result="pass",
         )
     return res, create_spy
@@ -267,7 +283,7 @@ async def test_evaluate_ci_fail_blocks():
             stack.enter_context(p)
         stack.enter_context(patch.object(mod, "create_gate", AsyncMock(return_value=gate)))
         res = await evaluate_merge_gate(
-            AsyncMock(), uuid.uuid4(), uuid.uuid4(),
+            _mock_session(), uuid.uuid4(), uuid.uuid4(),
             pr_number=1, repo="o/r", ci_result="failure",
         )
     assert res.decision == BLOCK and res.ci_result == "fail"
@@ -299,7 +315,7 @@ async def test_trust_computed_before_capture_records():
          patch.object(mod, "capture_pr_ci_verdict", side_effect=_capture), \
          patch.object(mod, "resolve_work_item_project_id", AsyncMock(return_value=uuid.uuid4())), \
          patch.object(mod, "create_gate", AsyncMock(return_value=SimpleNamespace(id=uuid.uuid4(), status="auto_passed", evidence_status=None, approved_head_sha=None))):
-        await evaluate_merge_gate(AsyncMock(), uuid.uuid4(), uuid.uuid4(), pr_number=1, repo="o/r", ci_result="pass")
+        await evaluate_merge_gate(_mock_session(), uuid.uuid4(), uuid.uuid4(), pr_number=1, repo="o/r", ci_result="pass")
 
     assert order == ["trust", "capture"], f"trust must precede capture, got {order}"
 
@@ -392,7 +408,7 @@ async def test_evaluate_persists_decision_metadata_on_gate():
                AsyncMock(return_value={"scores": []})), \
          patch("app.services.merge_verdict_gate.create_gate", AsyncMock(return_value=gate)):
         res = await evaluate_merge_gate(
-            AsyncMock(), uuid.uuid4(), uuid.uuid4(),
+            _mock_session(), uuid.uuid4(), uuid.uuid4(),
             pr_number=1, repo="o/r", ci_result="pass", pr_result="pass",
         )
     assert res.decision == ASK_HUMAN  # trust None(pending) → ask_human.
@@ -416,7 +432,7 @@ async def test_evaluate_auto_merge_metadata_sufficient():
                AsyncMock(return_value={"scores": [{"role_key": "implementation", "clean_pass_rate": 0.95,
                    "hit": 95, "resolved": 100, "pending": 0, "hit_rate": 0.95}]})), \
          patch("app.services.merge_verdict_gate.create_gate", AsyncMock(return_value=gate)):
-        res = await evaluate_merge_gate(AsyncMock(), uuid.uuid4(), uuid.uuid4(),
+        res = await evaluate_merge_gate(_mock_session(), uuid.uuid4(), uuid.uuid4(),
                                         pr_number=1, repo="o/r", ci_result="pass", pr_result="pass")
     assert res.decision == AUTO_MERGE
     assert gate.requires_human is False and gate.evidence_status == "sufficient"
@@ -530,7 +546,7 @@ async def _run_substance(*, ci_result, pr_number, disposition, source="system_de
                                          AsyncMock(return_value={"scores": []})))
         create_spy = stack.enter_context(patch.object(mod, "create_gate", AsyncMock(return_value=gate)))
         res = await evaluate_merge_gate(
-            AsyncMock(), uuid.uuid4(), uuid.uuid4(),
+            _mock_session(), uuid.uuid4(), uuid.uuid4(),
             pr_number=pr_number, repo=("o/r" if pr_number else ""),
             ci_result=ci_result, pr_result=None,
         )

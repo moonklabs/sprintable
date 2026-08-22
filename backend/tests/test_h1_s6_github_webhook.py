@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import itertools
 import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -105,10 +106,19 @@ async def _post(payload: dict, *, event: str, story=..., sign=True, installation
     if installation is ...:
         session.execute = AsyncMock(return_value=result)  # 모든 query 동일(기존 동작).
     else:
-        # 1st execute=story select, 2nd=installation select(native CI 블록), 이후 installation 반복.
+        # 1st execute=story select, 이후 전부 installation select(native CI 블록 등) 동형 반복.
+        #
+        # 카디르 QA(PR#3349 4라운드, 2026-08-22) — story #2893 후속(find_gate_slot_with_pr_
+        # fallback 위임)이 이 웹훅 경로에 session.execute 호출을 추가로 얹으며, 고정 길이
+        # side_effect 리스트가 소진돼 StopAsyncIteration(merge_link_evidence 등 더 뒤의
+        # 호출부에서 표면화). 이 파일명에 "gate"가 없어 -k gate/merge_gate 스윕 밖이었다 —
+        # 실 CI 「6750 passed 中 1 failed」로 발견. itertools.chain으로 1번째(story) 이후는
+        # inst_result를 **무한 반복**시켜 이후 추가되는 호출 수와 무관하게 안정화한다(13건에
+        # 쓴 `_mock_session()`의 return_value 방식과 동형 의도 — "그 다음부터는 전부 같은
+        # 결과"라는 실제 의미를 유한 리스트 대신 정확히 표현).
         inst_result = MagicMock()
         inst_result.scalar_one_or_none.return_value = installation
-        session.execute = AsyncMock(side_effect=[result, inst_result, inst_result, inst_result])
+        session.execute = AsyncMock(side_effect=itertools.chain([result], itertools.repeat(inst_result)))
 
     async def override_db():
         yield session

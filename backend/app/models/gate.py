@@ -19,7 +19,7 @@ neutral_facts: 관찰 사실만 (touches_migration, diff_size 등).
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, String, Text, func, text
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -64,6 +64,13 @@ class Gate(Base):
     work_item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     work_item_type: Mapped[str] = mapped_column(String(20), nullable=False)
     gate_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    # story #2893(0271) — 멱등 키 확장: (org_id, work_item_id, work_item_type, gate_type)
+    # 1슬롯 공유가 「PR A 서명이 PR B의 SHA를 뭄」실사고(설계안 §2 A1)의 근본원인이었다.
+    # NULL=PR 컨텍스트 없음(board-preflight no-substance 경로) 또는 애초에 PR 개념이 없는
+    # gate_type(doc_approval 등) — 지어내지 않는다. DB 제약은 0271에서 부분 유니크 인덱스
+    # 2개로 분리(NULL 구간=옛 계약 그대로, NOT NULL 구간=+pr_number). create_gate() 호출부
+    # 전수는 gate_service.py 참조.
+    pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
     resolver_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
