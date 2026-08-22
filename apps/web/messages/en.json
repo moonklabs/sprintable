@@ -861,6 +861,7 @@
     "workcellNextNeedInProgress": "Request review once work is done",
     "workcellNextNeedInReview": "Awaiting reviewer approval / QA",
     "workcellNextNeedDone": "None (done)",
+    "workcellGateAction": "Open merge gate",
     "noStories": "No stories",
     "boardEmptyTitle": "Nothing moving yet",
     "boardEmptyDescription": "This is where the work people and AI have taken on flows through, right now.",
