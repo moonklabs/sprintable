@@ -150,3 +150,36 @@ async def test_remove_pr_label_no_token_returns_false():
     with patch.object(ga, "build_app_jwt", return_value=None):
         result = await ga.remove_pr_label(999, "acme/repo", 42, "qa:pass")
     assert result is False
+
+
+# story #2893(설계안 §3 B3) — get_pull_request(신규, create_check_run과 동형 계약).
+@pytest.mark.anyio
+async def test_get_pull_request_sends_get_to_correct_url_and_returns_body():
+    r = _resp(200, {"number": 42, "head": {"sha": "abc123"}, "merged": True})
+    captured = {}
+
+    async def _get(self, url, headers=None):
+        captured["url"] = url
+        return r
+
+    with patch("httpx.AsyncClient.get", new=_get):
+        result = await ga.get_pull_request(999, "acme/repo", 42)
+
+    assert result == {"number": 42, "head": {"sha": "abc123"}, "merged": True}
+    assert captured["url"] == "https://api.github.com/repos/acme/repo/pulls/42"
+
+
+@pytest.mark.anyio
+async def test_get_pull_request_http_failure_returns_none_not_raise():
+    r = _resp(404, {})
+    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=r)):
+        result = await ga.get_pull_request(999, "acme/repo", 42)
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_get_pull_request_no_token_returns_none():
+    ga._token_cache.clear()
+    with patch.object(ga, "build_app_jwt", return_value=None):
+        result = await ga.get_pull_request(999, "acme/repo", 42)
+    assert result is None

@@ -14,12 +14,15 @@ from app.dependencies.database import get_db
 from app.models.doc import Doc
 from app.models.gate import Gate, is_valid_transition
 from app.models.gate_github_check_event import GateGithubCheckEvent
+from app.models.github_installation import GithubInstallation
 from app.models.hitl import HitlRequest
 from app.models.pm import Story, Task
 from app.models.visual_artifact import VisualArtifact
 from app.routers.agent_gateway import wake_agent
 from app.services.gate_github_check import is_repo_check_enforced, publish_gate_check, resolve_pr_link
-from app.services.merge_verdict_gate import MERGE_GATE_TYPE
+from app.services.github_app import get_installation_token, get_pull_request
+from app.services.merge_verdict_gate import MERGE_GATE_TYPE, reconcile_merge_gate_with_real_evidence
+from app.services.verdict_capture import fetch_status_check_rollup
 from app.services.gate_service import (
     GateUndoNotSelfError,
     GateUndoWindowExpiredError,
@@ -1214,6 +1217,101 @@ async def transition_gate_endpoint(
         return GateResponse.model_validate(gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/{id}/reevaluate", response_model=GateResponse)
+async def reevaluate_gate_endpoint(
+    id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> GateResponse:
+    """story #2893(설계안 §3 B3) — 명시적 재평가 API. reopen(PR을 실제로 close→reopen)이나
+    「참여등록 후 빈 커밋 push」 같은 우회(오늘 #3324가 실제로 쓴 수동 경로)를 표준 경로로
+    승격한다. reopen과 달리 **GitHub 쪽 리뷰/체크 상태를 전혀 건드리지 않는다** — PR의 현재
+    head SHA/merged 상태를 순수 GET으로 읽어와 우리 쪽 게이트 판정만
+    `reconcile_merge_gate_with_real_evidence`(웹훅 경로와 동일 chokepoint)로 재실행한다.
+
+    authz: get_gate_endpoint과 동일(project_id 해소+has_project_access, 무권한은 404 —
+    존재 비노출 규율) — 승인/거부(_authorize_gate_approve_equivalent)보다 낮은 문턱이다.
+    「재평가를 트리거」는 결정이 아니라 「지금 상태를 정직하게 반영해 달라」는 요청이라
+    approver가 아닌 PR 관련자(오늘까지 close/reopen을 직접 하던 사람들)도 할 수 있어야
+    이 API가 그 우회를 실제로 대체한다.
+
+    scope: merge 게이트·status가 pending/auto_passed일 때만(reconcile_merge_gate_with_
+    real_evidence의 기존 자격조건과 동일 — approved는 landed 작업이라 재평가 대상이 아니고,
+    rejected/voided/held는 사람이 이미 명시 결정한 상태라 재평가로 우회하면 안 된다)."""
+    gate = (await session.execute(
+        select(Gate).where(Gate.id == id, Gate.org_id == org_id)
+    )).scalar_one_or_none()
+    if gate is None:
+        raise HTTPException(status_code=404, detail="Gate not found")
+
+    project_id = await resolve_work_item_project_id(
+        session, org_id, gate.work_item_type, gate.work_item_id,
+    )
+    if project_id is not None:
+        await require_project_access(session, uuid.UUID(auth.user_id), project_id, org_id,
+                                      not_found_detail="Gate not found")
+    elif not is_known_project_agnostic_work_item_type(gate.work_item_type):
+        raise HTTPException(status_code=404, detail="Gate not found")
+
+    if gate.gate_type != MERGE_GATE_TYPE:
+        raise HTTPException(status_code=422, detail="merge 게이트만 재평가를 지원합니다.")
+    if gate.status not in ("pending", "auto_passed"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"게이트 상태({gate.status})는 재평가 대상이 아닙니다(pending/auto_passed만 가능).",
+        )
+
+    # gate.pr_number(story #2893 A1, 0271)가 이 게이트가 귀속된 PR의 1차 SSOT — neutral_facts는
+    # repo만 보강(백필 이전 legacy gate는 link row로 폴백).
+    pr_number = gate.pr_number
+    repo = (gate.neutral_facts or {}).get("repo")
+    if not repo or not pr_number:
+        _link = await resolve_pr_link(session, org_id, gate.work_item_id)
+        repo = repo or (_link.repo_full_name if _link else None)
+        pr_number = pr_number or (_link.pr_number if _link else None)
+    if not repo or not pr_number:
+        raise HTTPException(
+            status_code=422, detail="게이트에 연결된 PR 정보가 없어 재평가할 수 없습니다.",
+        )
+
+    installation = (
+        await session.execute(
+            select(GithubInstallation).where(
+                GithubInstallation.org_id == org_id, GithubInstallation.suspended_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if installation is None:
+        raise HTTPException(status_code=422, detail="GitHub App 설치가 없어 재평가할 수 없습니다.")
+    token = await get_installation_token(installation.installation_id)
+    if not token:
+        raise HTTPException(status_code=502, detail="GitHub 인증 토큰 발급 실패 — 잠시 후 다시 시도해 주세요.")
+
+    pr = await get_pull_request(installation.installation_id, repo, pr_number)
+    if pr is None:
+        raise HTTPException(status_code=502, detail="GitHub PR 정보 조회 실패 — 잠시 후 다시 시도해 주세요.")
+    head_sha = (pr.get("head") or {}).get("sha")
+    if not head_sha:
+        raise HTTPException(status_code=502, detail="GitHub PR head SHA를 확인할 수 없습니다.")
+    merged = bool(pr.get("merged"))
+    ci_result, _ci_reason = await fetch_status_check_rollup(repo, head_sha, token)
+
+    await reconcile_merge_gate_with_real_evidence(
+        session, org_id, gate.work_item_id,
+        pr_number=pr_number, repo=repo, ci_result=ci_result, merged=merged, head_sha=head_sha,
+    )
+    await session.commit()
+    # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+    await session.refresh(gate)
+    background_tasks.add_task(
+        publish_gate_check, org_id, gate.id,
+        repo_full_name=repo, pr_number=pr_number, head_sha=head_sha,
+    )
+    return GateResponse.model_validate(gate)
 
 
 class GateVoidRequest(BaseModel):
