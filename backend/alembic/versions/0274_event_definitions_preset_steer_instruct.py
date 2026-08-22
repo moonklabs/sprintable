@@ -12,9 +12,16 @@ block_template은 doc §1 초안을 그대로 옮긴다 — action_auth는 이�
 했고, 옛 doc 쪽에 혼동방지 배너를 부착했다. `preset.roadmap.*`류가 실제로 필요해지면 그건
 별도 네임스페이스를 쓸 것 — 이 마이그와 충돌하지 않는다.
 
-Revision ID: 0272
-Revises: 0271
+Revision ID: 0274
+Revises: 0273
 Create Date: 2026-08-22
+
+⚠️재넘버링(2026-08-22, PO 지시 #3368 qa:changes): 원래 0272로 작성됐으나 그 사이 develop에
+머지된 #3359(story #2932)의 0272_gate_repo_scoped_slot.py와 리비전 번호가 충돌해(sibling-PR
+가드가 정확히 검출, 로직 무관 순수 넘버링 문제) 0274로 재넘버링·down_revision을 develop 실제
+head(0273)로 rebase. 같은 작성자의 다른 열린 PR(#3371, story #2939)도 0274를 먼저 예약해
+있어 그쪽을 0275로 재넘버링해 체인시켰다(이 마이그가 먼저 머지된다고 가정 — 순서가 바뀌면
+그때 다시 조정).
 """
 from __future__ import annotations
 
@@ -24,8 +31,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0272"
-down_revision = "0271"
+revision = "0274"
+down_revision = "0273"
 branch_labels = None
 depends_on = None
 
