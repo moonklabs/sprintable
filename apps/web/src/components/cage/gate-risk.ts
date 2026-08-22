@@ -25,13 +25,14 @@ export function usesSignatureFlow(riskLevel: RiskLevel): boolean {
 // 3곳 동시수정을 강제하는 안전장치 부재 — 현재는 결과 완전동일이라 안전한 중복이었으나,
 // 안전장치로 승격). LOW①(F1↔F2 stateLabel 문구 불일치 — held "보류됨" vs "보류중"·approved
 // "승인됨" vs "승인 완료")도 여기서 함께 닫는다: 'cage' 네임스페이스에 신규 통일 키(아래)를
-// 두고 3곳 다 이 키로 수렴시킨다(F1의 'chats' 네임스페이스 approvalRequestStatus*·F2/F3의
-// queueResolved*/heldBadge/gateDetailStatusPending 등 옛 지역 키는 폐기 대상 — rebase 시
-// 3파일 각각에서 이 함수+아래 GATE_STATUS_I18N_KEYS로 교체).
+// 두고 F1/F2가 이 키로 수렴한다(F1의 'chats' 네임스페이스 approvalRequestStatusPending·
+// F2의 queueResolved*/heldBadge/gateDetailStatusPending 지역 키는 폐기 완료).
 //
-// ⚠️로컬 준비 단계(2026-08-22, PO 지시) — F1/F2/F3가 아직 develop에 없어(qa:pass 완료·머지
-// 대기) 실제 3파일 교체는 못 한다. 이 파일과 아래 i18n 키만 먼저 짜 두고, F1~F3 머지 후
-// 이 브랜치를 rebase하며 3파일의 중복 로직을 이 함수 호출로 교체한다.
+// F3(approvals-queue.tsx)의 row-density 클릭스루 분기는 stateLabel만 이 통일 키로 맞추고
+// proofState는 의도적으로 amber 고정 유지 — 그 분기는 !resolved만 타 gate.status가 실질
+// pending/held뿐이고, held도 "아직 조치 대기" 의미라 F1/F2가 held를 종결취급(red)하는 문맥과
+// 다르다(색은 갈리지만 문구는 같은 개념이라 통일). F1~F3 머지(2026-08-22) 후 이 브랜치를
+// rebase해 3파일 모두 실제 배선 완료.
 export type GateStatusKey = 'gateStatusPending' | 'gateStatusApproved' | 'gateStatusRejected' | 'gateStatusHeld' | 'gateStatusVoided';
 
 const GATE_STATUS_I18N_KEYS: Record<string, GateStatusKey> = {

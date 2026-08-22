@@ -8,13 +8,13 @@ import { Badge } from '@/components/ui/badge';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
-import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
+import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState } from '@/components/cage/gate-risk';
 import { EntityPreviewModal, canPreviewEntity, getEntityHref } from '@/components/chat/embed-card';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 import { parseBlockTemplate, renderBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
 import { renderStaticEventBlock } from '@/components/chat/event-block-card';
-import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
+import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -89,6 +89,9 @@ const RESOLVED_STATUS_LABEL_KEYS: Record<string, string> = {
  */
 export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalRequestCardProps) {
   const t = useTranslations('chats');
+  // story #2926(P0-F 잔여 fast-follow, 카디르 F2 QA LOW①) — 아래 stateLabel 유도가
+  // deriveGateProofState()의 통일 키(gateStatus*)를 쓴다 — 그 키들은 'cage' 네임스페이스.
+  const tCage = useTranslations('cage');
   const [state, setState] = useState<CardState>({ kind: 'loading' });
   const [resolving, setResolving] = useState(false);
   const [transitionError, setTransitionError] = useState<string | null>(null);
@@ -184,13 +187,12 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
   const title = gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`;
   const previewEntityType = toEntityType(gate.work_item_type);
   const canPreview = canPreviewEntity(previewEntityType);
-  // story #2926(P0-F F1) — attention-queue의 기존 PROOF_STATE 관례(gate_pending→amber) 그대로:
-  // pending=amber(인간 검토 대기)·승인=green·그 외(rejected/held/voided)=red — 옛 코드도
-  // approved만 Check/primary고 나머지는 전부 X/destructive였다(line 298 선례), 신규 구분 아님.
-  const proofState: ProofState = gate.status === 'pending' ? 'amber' : gate.status === 'approved' ? 'green' : 'red';
-  const stateLabel = gate.status === 'pending'
-    ? t('approvalRequestStatusPending')
-    : (RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status);
+  // story #2926(P0-F 잔여 fast-follow, 카디르 F2 QA LOW①·② 처방) — F1/F2/F3 3곳 중복 판정
+  // 로직을 gate-risk.ts의 deriveGateProofState()로 승격, stateLabel 문구도 'cage' 네임스페이스
+  // 통일 키로 수렴(F1↔F2 held/approved 문구 불일치 해소). 매핑 안 된 값은 원문 그대로(지어내지
+  // 않음, 기존 관례 유지).
+  const { proofState, statusKey } = deriveGateProofState(gate.status);
+  const stateLabel = statusKey ? tCage(statusKey) : gate.status;
 
   return (
     <>

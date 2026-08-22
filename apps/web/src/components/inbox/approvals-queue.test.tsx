@@ -145,21 +145,25 @@ describe('ApprovalsQueue', () => {
     expect(container.querySelectorAll('button').length).toBeGreaterThanOrEqual(4);
   });
 
-  it('held gate는 보류중 배지를 표시하고 위험도 배지는 생략한다', async () => {
+  // story #2926(잔여 fast-follow, 카디르 F2 QA LOW①) — stateLabel 문구가 통일 키
+  // gateStatusHeld("보류됨")로 바뀌었다(F1/F2와 문구 통일, 옛 heldBadge="보류중"은 이
+  // 렌더 슬롯에서 폐기 — heldBadge 자체는 다른 슬롯(인라인 카드 배지, line 294)에 여전히 산다).
+  it('held gate는 보류됨 상태를 표시하고 위험도 배지는 생략한다', async () => {
     mockFetches([], [gate({ id: 'g-held', status: 'held', held_until: null })]);
     await mount();
-    expect(container.textContent).toContain(koMessages.cage.heldBadge);
+    expect(container.textContent).toContain(koMessages.cage.gateStatusHeld);
     expect(container.textContent).not.toContain(koMessages.cage.riskUnknown);
   });
 
   // story #2926(P0-F F3, 유나 확定①) — 이 항목(클릭-스루만 가능·인라인 액션 없음)이
   // ProofCapsule density="row"로 바뀌며 위험도 배지 슬롯이 없어졌다(row 밀도 자체의 기존
   // 한계 — Attention Queue 원안에도 이미 있던 제약, F3이 새로 만든 게 아니다). 대신
-  // stateLabel("결재 대기")이 그 자리의 상태 신호를 잇는다.
+  // stateLabel("결재 대기")이 그 자리의 상태 신호를 잇는다. 잔여 fast-follow로 통일 키
+  // gateStatusPending으로 갱신(F1/F2와 동일 키).
   it('held 아닌 pending gate는 stateLabel(결재 대기)을 표시한다(row 밀도라 위험도 배지는 생략)', async () => {
     mockFetches([gate({ id: 'g-pending' })], []);
     await mount();
-    expect(container.textContent).toContain(koMessages.cage.gateDetailStatusPending);
+    expect(container.textContent).toContain(koMessages.cage.gateStatusPending);
     expect(container.textContent).not.toContain(koMessages.cage.riskUnknown);
   });
 
@@ -450,7 +454,7 @@ describe('ApprovalsQueue', () => {
   it('pending 상태에 held_until만 세팅돼도 인라인 버튼이 안 뜬다(보류 배지·원탭 버튼 공존 봉쇄)', async () => {
     mockFetches([lowRiskActionable({ id: 'g-pending-held-until', held_until: new Date().toISOString() })], []);
     await mount();
-    expect(container.textContent).toContain(koMessages.cage.heldBadge);
+    expect(container.textContent).toContain(koMessages.cage.gateStatusHeld);
     const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
   });
