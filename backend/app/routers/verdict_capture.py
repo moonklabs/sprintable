@@ -331,9 +331,10 @@ async def _process_webhook_event(
     **독립**(PR 자체 이벤트에서 판정) — resolver를 그 skip보다 먼저 실행해 두 판정이 서로를 막지 않게 한다.
 
     ``gate_check_publish``(story #2813, ccbcd9da A-1 `pending_deliveries`와 동형 outparam): 넘기면
-    PR 라이프사이클 이벤트(opened/reopened/ready_for_review/synchronize)가 발행해야 할 GitHub
-    check-run 정보를 append — 호출자(github_webhook)가 **commit 後** 배경 태스크로 발행(fail-closed:
-    GitHub 외부 API 호출을 DB 트랜잭션 성공 확정 前에 하지 않는다).
+    PR 라이프사이클 이벤트(opened/reopened/ready_for_review/synchronize/**edited-단 base가 실제로
+    바뀐 경우만**, story #2912)가 발행해야 할 GitHub check-run 정보를 append — 호출자(github_webhook)
+    가 **commit 後** 배경 태스크로 발행(fail-closed: GitHub 외부 API 호출을 DB 트랜잭션 성공 확정
+    前에 하지 않는다).
     """
     texts = _candidate_texts(payload)
     repo = (payload.get("repository") or {}).get("full_name") or ""
