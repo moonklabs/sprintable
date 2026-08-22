@@ -39,6 +39,66 @@ async def _dispose_global_engine_after_test():
 
 
 @pytest.mark.anyio
+async def test_repo_case_and_whitespace_variants_resolve_to_same_slot():
+    """카디르 QA(story #2932 HIGH1, 이 PR 자체 재재verdict) — repo identity 대소문자/공백
+    정규화 누락. `Acme/Repo`와 `acme/repo`(대소문자만 다름)·` acme/repo `(공백)가 전부
+    같은 실 repo인데 정규화 없이 비교하면 슬롯이 분열한다(DB 유니크 인덱스도 case-
+    sensitive라 막지 못함). 기존 SSOT pr_story_link.py::normalize_repo(strip+lower)를
+    find_gate_slot_with_pr_fallback이 관통시켜야 한다."""
+    from app.models.gate import Gate
+    from app.services.gate_service import find_gate_slot_with_pr_fallback
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org, _project, story = await _seed_org_project_story(s, with_participation=True)
+            # 정규화된 형태(lower+strip)로 저장된 기존 행 — create_gate/승격 경로가
+            # 실제로 저장하는 형태를 시뮬레이션.
+            gate = Gate(
+                id=uuid.uuid4(), org_id=org.id, work_item_id=story.id, work_item_type="story",
+                gate_type="merge", status="pending", pr_number=77, repo_full_name="acme/repo",
+            )
+            s.add(gate)
+            await s.commit()
+            gate_id = gate.id
+            story_id, org_id = story.id, org.id
+
+        # 대소문자/공백이 섞인 변형들이 전부 같은 행을 찾아야 한다.
+        for variant in ("Acme/Repo", "ACME/REPO", " acme/repo ", "AcMe/RePo"):
+            async with Session() as s:
+                found = await find_gate_slot_with_pr_fallback(
+                    s, org_id=org_id, work_item_id=story_id, work_item_type="story",
+                    gate_type="merge", pr_number=77, repo_full_name=variant,
+                )
+                assert found is not None and found.id == gate_id, (
+                    f"repo 변형 {variant!r}이 정규화된 기존 슬롯을 찾아야 함"
+                )
+
+        # 승격 경로도 정규화된 값을 저장해야 한다(원본 대소문자를 그대로 쓰면 다음 조회가
+        # 또 못 찾는다).
+        async with Session() as s:
+            null_gate = Gate(
+                id=uuid.uuid4(), org_id=org_id, work_item_id=story_id, work_item_type="story",
+                gate_type="merge", status="pending", pr_number=None,
+            )
+            s.add(null_gate)
+            await s.commit()
+
+        async with Session() as s:
+            promoted = await find_gate_slot_with_pr_fallback(
+                s, org_id=org_id, work_item_id=story_id, work_item_type="story",
+                gate_type="merge", pr_number=88, repo_full_name="ACME/Other-Repo",
+            )
+            assert promoted is not None
+            assert promoted.repo_full_name == "acme/other-repo", (
+                f"승격 저장값이 정규화(lower+strip)돼야 하는데 {promoted.repo_full_name!r}로 남음"
+            )
+            await s.commit()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_cross_repo_same_pr_number_get_independent_gates():
     """HIGH1 핵심 — 같은 스토리에 다른 repo의 동일 pr_number가 링크되면(예: 모노레포
     분리·조직 재구성 등) 두 게이트가 독립 행이어야 한다(슬롯 공유=SHA/evidence 오염)."""

@@ -464,7 +464,17 @@ async def find_gate_slot_with_pr_fallback(
 
     pr_number가 None(PR 컨텍스트가 원래 없는 gate_type 또는 board-preflight no-substance)
     이면 옛 계약 그대로 NULL-슬롯만 찾는다 — 승격 대상 자체가 없다("PR 컨텍스트 있음"으로
-    바꿀 근거가 없다)."""
+    바꿀 근거가 없다).
+
+    카디르 QA(story #2932 HIGH1, 2026-08-22, 이 PR 자체 재재verdict) — repo_full_name을
+    대소문자/공백 그대로 비교하면 `Acme/Repo`≠`acme/repo`로 같은 실 repo가 다른 슬롯으로
+    분열한다(DB 유니크 인덱스도 case-sensitive). 기존 SSOT `pr_story_link.py::normalize_repo`
+    (strip+lower)를 여기(읽기·쓰기 둘 다의 단일 관문)서 관통시킨다 — 호출부가 원본 대소문자를
+    그대로 넘겨도 이 함수 안에서 항상 정규화되므로 4개 호출부 전부를 개별 수정할 필요가
+    없다(단일 chokepoint)."""
+    if repo_full_name is not None:
+        from app.services.pr_story_link import normalize_repo
+        repo_full_name = normalize_repo(repo_full_name) or None
     if pr_number is not None:
         exact_conditions = [
             Gate.org_id == org_id, Gate.work_item_id == work_item_id,
@@ -571,6 +581,14 @@ async def create_gate(
     全 호출부 무회귀). gate_type/work_item_type별 하드코딩 대신 호출부 판단으로 남겨 이 함수의
     공용 chokepoint 성격을 유지한다.
     """
+    # 카디르 QA(story #2932 HIGH1, 2026-08-22) — repo_full_name도 find_gate_slot_with_pr_
+    # fallback과 동일하게 여기서 정규화한다: 이 함수의 Gate(...) INSERT는 그 헬퍼를 거치지
+    # 않으므로(조회만 거침) 별도로 정규화해야 저장값 자체가 일관된다(대소문자 다른 두
+    # 호출이 같은 실 repo인데 다른 슬롯으로 분열하는 것 방지).
+    if repo_full_name is not None:
+        from app.services.pr_story_link import normalize_repo
+        repo_full_name = normalize_repo(repo_full_name) or None
+
     # 멱등: 이미 존재하면 기존 반환. story #2893 — pr_number도 키에 편입(0271 부분
     # 유니크 인덱스와 동형 조건). find_gate_slot_with_pr_fallback가 정확매치 우선+
     # NULL-슬롯 승격 폴백까지 처리(카디르 QA, PR#3349 CI 실패 2건 후속 — pr_number가

@@ -32,13 +32,17 @@ depends_on = None
 def upgrade() -> None:
     op.add_column("gate", sa.Column("repo_full_name", sa.Text(), nullable=True))
 
+    # 카디르 QA(story #2932 HIGH1, 2026-08-22, 이 PR 자체 재재verdict) — 기존 SSOT
+    # pr_story_link.py::normalize_repo(strip+lower)와 정합하지 않으면 `Acme/Repo`가
+    # 백필된 뒤 애플리케이션이 조회할 땐 소문자로 비교해 못 찾는다 — 백필 자체를
+    # lower(trim(...))로 정규화한다.
     op.execute(
         """
         UPDATE gate
-        SET repo_full_name = (neutral_facts->>'repo')
+        SET repo_full_name = lower(trim(neutral_facts->>'repo'))
         WHERE gate_type = 'merge'
           AND neutral_facts ? 'repo'
-          AND (neutral_facts->>'repo') <> ''
+          AND trim(neutral_facts->>'repo') <> ''
         """
     )
 
