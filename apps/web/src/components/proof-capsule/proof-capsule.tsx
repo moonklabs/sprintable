@@ -91,7 +91,7 @@ export function ProofCapsule({
 }: ProofCapsuleProps) {
   if (density === 'audit') {
     return (
-      <AuditRow proofState={proofState} claim={claim} now={now} human={human} className={className} />
+      <AuditRow proofState={proofState} claim={claim} now={now} human={human} agent={agent} className={className} />
     );
   }
   if (density === 'row') {
@@ -348,15 +348,23 @@ function InlineRow({
   );
 }
 
-function AuditRow({ proofState, claim, now, human, className }: Pick<ProofCapsuleProps, 'proofState' | 'claim' | 'now' | 'human' | 'className'>) {
+// story #2923(P0-E AQ4, 2926-08-22 그라운딩 발견) — 시안(attention-audit-redesign-2923)이
+// audit density에 "아바타 shape로 human/agent 구분"을 명시했는데, 이 행은 그동안 human?.name을
+// mono 텍스트로만 붙일 뿐 아바타 자체를 전혀 안 그렸고(agent prop은 애초에 dispatch에서도
+// 안 넘어옴 — 위 ProofCapsule 본체 참고) human/agent 구분 신호가 텍스트 role 문자열 하나뿐이라
+// 도크트린④(자동화 경계, 항상 구분된 마커)를 audit density만 못 채우고 있었다. 공유 Avatar를
+// size=16(시안 .av 16px 그대로)으로 재사용 — 신규 아바타 컴포넌트 0.
+function AuditRow({ proofState, claim, now, human, agent, className }: Pick<ProofCapsuleProps, 'proofState' | 'claim' | 'now' | 'human' | 'agent' | 'className'>) {
   const dotTone: Record<ProofState, string> = {
     blue: 'bg-proof-blue', amber: 'bg-proof-amber', green: 'bg-proof-green', red: 'bg-proof-red',
   };
+  const actorName = agent?.name ?? human?.name;
   return (
     <div className={cn('flex items-center gap-2 rounded-[6px] border border-proof-line bg-proof-panel px-3 py-2 text-[11px]', className)}>
       <span className={cn('size-1.5 shrink-0 rounded-full', dotTone[proofState])} aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate font-medium text-proof-ink">{claim}</span>
-      <span className="shrink-0 font-mono text-[9.5px] text-proof-faint">{[now, human?.name].filter(Boolean).join(' ')}</span>
+      {actorName ? <Avatar name={actorName} actorType={agent ? 'agent' : 'human'} size={16} /> : null}
+      <span className="shrink-0 font-mono text-[9.5px] text-proof-faint">{[now, actorName].filter(Boolean).join(' ')}</span>
     </div>
   );
 }
