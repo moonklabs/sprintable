@@ -139,8 +139,8 @@ function PageEmbedView({ node, updateAttributes, extension }: ReactNodeViewProps
   if (circular) {
     return (
       <NodeViewWrapper data-testid="page-embed-circular">
-        <div className="flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/8 px-4 py-3 text-sm text-rose-400">
-          <AlertCircle className="size-4 shrink-0" />
+        <div className="flex items-center gap-2 rounded-xl border border-destructive-border bg-destructive-tint px-4 py-3 text-sm text-foreground">
+          <AlertCircle className="size-4 shrink-0 text-destructive" />
           <span>Circular embed detected — a document cannot embed itself.</span>
         </div>
       </NodeViewWrapper>

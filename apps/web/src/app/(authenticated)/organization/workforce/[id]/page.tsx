@@ -394,7 +394,7 @@ export default function AgentDetailPage() {
                   placeholder="role"
                   className="max-w-32"
                 />
-                <button type="button" onClick={() => void handleSaveEdit()} disabled={savingEdit} className="text-emerald-500 hover:text-emerald-400 disabled:opacity-50">
+                <button type="button" onClick={() => void handleSaveEdit()} disabled={savingEdit} className="text-success transition hover:opacity-80 disabled:opacity-50">
                   <Check className="h-4 w-4" />
                 </button>
                 <button type="button" onClick={() => setEditingName(false)} className="text-muted-foreground hover:text-foreground">

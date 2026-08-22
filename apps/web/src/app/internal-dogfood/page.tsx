@@ -28,7 +28,7 @@ export default async function InternalDogfoodPage({ searchParams }: PageProps) {
   const actor = session ? resolveInternalDogfoodActor(session.teamMemberId) : null;
 
   return (
-    <div className="min-h-screen bg-gray-50 px-4 py-10">
+    <div className="min-h-screen bg-muted px-4 py-10">
       <div className="mx-auto max-w-5xl space-y-6">
         <PageHeader
           eyebrow="Internal dogfood"
@@ -44,7 +44,7 @@ export default async function InternalDogfoodPage({ searchParams }: PageProps) {
         {signedOut ? (
           <SectionCard>
             <SectionCardBody>
-              <p className="text-sm text-emerald-700">내부 dogfood 세션 종료 완료한.</p>
+              <p className="text-sm text-success">내부 dogfood 세션 종료 완료한.</p>
             </SectionCardBody>
           </SectionCard>
         ) : null}
@@ -52,7 +52,7 @@ export default async function InternalDogfoodPage({ searchParams }: PageProps) {
         {error ? (
           <SectionCard>
             <SectionCardBody>
-              <p className="text-sm text-rose-700" role="alert" aria-live="assertive" aria-atomic="true">오류: {error}</p>
+              <p className="text-sm text-destructive" role="alert" aria-live="assertive" aria-atomic="true">오류: {error}</p>
             </SectionCardBody>
           </SectionCard>
         ) : null}
@@ -78,16 +78,16 @@ export default async function InternalDogfoodPage({ searchParams }: PageProps) {
               {actors.length ? (
                 <form action="/api/internal-dogfood/session" method="post" className="space-y-4">
                   <div className="space-y-2">
-                    <label htmlFor="team_member_id" className="block text-sm font-medium text-gray-700">내부 계정</label>
-                    <select id="team_member_id" name="team_member_id" className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm" defaultValue={actors[0]?.id}>
+                    <label htmlFor="team_member_id" className="block text-sm font-medium text-foreground">내부 계정</label>
+                    <select id="team_member_id" name="team_member_id" className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm" defaultValue={actors[0]?.id}>
                       {actors.map((item) => (
                         <option key={item.id} value={item.id}>{item.name} · {item.project_name}</option>
                       ))}
                     </select>
                   </div>
                   <div className="space-y-2">
-                    <label htmlFor="secret" className="block text-sm font-medium text-gray-700">공유 시크릿</label>
-                    <input id="secret" name="secret" type="password" className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm" placeholder="internal access secret" required />
+                    <label htmlFor="secret" className="block text-sm font-medium text-foreground">공유 시크릿</label>
+                    <input id="secret" name="secret" type="password" className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm" placeholder="internal access secret" required />
                   </div>
                   <Button type="submit">내부 세션 시작</Button>
                 </form>
@@ -118,20 +118,20 @@ export default async function InternalDogfoodPage({ searchParams }: PageProps) {
                 <SectionCardBody>
                   <form action="/api/internal-dogfood/memos" method="post" className="space-y-4">
                     <div className="space-y-2">
-                      <label htmlFor="memo-title" className="block text-sm font-medium text-gray-700">제목</label>
-                      <input id="memo-title" name="title" className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm" placeholder="예: [PO][BE] blocker 확인" />
+                      <label htmlFor="memo-title" className="block text-sm font-medium text-foreground">제목</label>
+                      <input id="memo-title" name="title" className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm" placeholder="예: [PO][BE] blocker 확인" />
                     </div>
                     <div className="space-y-2">
-                      <label htmlFor="memo-type" className="block text-sm font-medium text-gray-700">memo_type</label>
-                      <input id="memo-type" name="memo_type" defaultValue="memo" className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm" />
+                      <label htmlFor="memo-type" className="block text-sm font-medium text-foreground">memo_type</label>
+                      <input id="memo-type" name="memo_type" defaultValue="memo" className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm" />
                     </div>
                     <div className="space-y-2">
-                      <label htmlFor="memo-assigned" className="block text-sm font-medium text-gray-700">담당자 team member id</label>
-                      <input id="memo-assigned" name="assigned_to" className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm" placeholder="예: 9cac9d96-5474-45f7-941e-787407597b52" />
+                      <label htmlFor="memo-assigned" className="block text-sm font-medium text-foreground">담당자 team member id</label>
+                      <input id="memo-assigned" name="assigned_to" className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm" placeholder="예: 9cac9d96-5474-45f7-941e-787407597b52" />
                     </div>
                     <div className="space-y-2">
-                      <label htmlFor="memo-content" className="block text-sm font-medium text-gray-700">내용</label>
-                      <textarea id="memo-content" name="content" required rows={8} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm" placeholder="메모 내용" />
+                      <label htmlFor="memo-content" className="block text-sm font-medium text-foreground">내용</label>
+                      <textarea id="memo-content" name="content" required rows={8} className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm" placeholder="메모 내용" />
                     </div>
                     <Button type="submit">메모 생성</Button>
                   </form>
@@ -145,21 +145,21 @@ export default async function InternalDogfoodPage({ searchParams }: PageProps) {
                 <SectionCardBody>
                   <form action="/api/internal-dogfood/stories" method="post" className="space-y-4">
                     <div className="space-y-2">
-                      <label htmlFor="story-title" className="block text-sm font-medium text-gray-700">제목</label>
-                      <input id="story-title" name="title" required className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm" placeholder="예: Sprintable communication migration blocker" />
+                      <label htmlFor="story-title" className="block text-sm font-medium text-foreground">제목</label>
+                      <input id="story-title" name="title" required className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm" placeholder="예: Sprintable communication migration blocker" />
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
-                        <label htmlFor="story-status" className="block text-sm font-medium text-gray-700">상태</label>
-                        <select id="story-status" name="status" defaultValue="backlog" className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm">
+                        <label htmlFor="story-status" className="block text-sm font-medium text-foreground">상태</label>
+                        <select id="story-status" name="status" defaultValue="backlog" className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm">
                           <option value="backlog">backlog</option>
                           <option value="ready-for-dev">ready-for-dev</option>
                           <option value="in-progress">in-progress</option>
                         </select>
                       </div>
                       <div className="space-y-2">
-                        <label htmlFor="story-priority" className="block text-sm font-medium text-gray-700">우선순위</label>
-                        <select id="story-priority" name="priority" defaultValue="medium" className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm">
+                        <label htmlFor="story-priority" className="block text-sm font-medium text-foreground">우선순위</label>
+                        <select id="story-priority" name="priority" defaultValue="medium" className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm">
                           <option value="low">low</option>
                           <option value="medium">medium</option>
                           <option value="high">high</option>
@@ -168,12 +168,12 @@ export default async function InternalDogfoodPage({ searchParams }: PageProps) {
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <label htmlFor="story-assignee" className="block text-sm font-medium text-gray-700">담당자 team member id</label>
-                      <input id="story-assignee" name="assignee_id" className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm" placeholder="예: cff9055b-c671-4401-8436-a17f804a0406" />
+                      <label htmlFor="story-assignee" className="block text-sm font-medium text-foreground">담당자 team member id</label>
+                      <input id="story-assignee" name="assignee_id" className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm" placeholder="예: cff9055b-c671-4401-8436-a17f804a0406" />
                     </div>
                     <div className="space-y-2">
-                      <label htmlFor="story-description" className="block text-sm font-medium text-gray-700">설명</label>
-                      <textarea id="story-description" name="description" rows={8} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm" placeholder="스토리 설명" />
+                      <label htmlFor="story-description" className="block text-sm font-medium text-foreground">설명</label>
+                      <textarea id="story-description" name="description" rows={8} className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm" placeholder="스토리 설명" />
                     </div>
                     <Button type="submit">스토리 생성</Button>
                   </form>

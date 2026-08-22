@@ -145,7 +145,7 @@ export default function RewardsPage() {
                         <Badge variant="outline">#{i + 1}</Badge>
                         <span className="text-sm font-medium text-foreground">{memberMap[e.member_id] ?? t('unknown')}</span>
                       </div>
-                      <span className={`text-sm font-bold ${e.balance >= 0 ? 'text-emerald-600' : 'text-destructive'}`}>
+                      <span className={`text-sm font-bold ${e.balance >= 0 ? 'text-success' : 'text-destructive'}`}>
                         {e.balance >= 0 ? '+' : ''}{e.balance.toLocaleString()} TJSB
                       </span>
                     </div>
@@ -216,7 +216,7 @@ export default function RewardsPage() {
                         <p className="text-xs text-muted-foreground">{e.reason}</p>
                       </div>
                       <div className="text-right">
-                        <p className={`text-sm font-bold ${e.amount >= 0 ? 'text-emerald-600' : 'text-destructive'}`}>
+                        <p className={`text-sm font-bold ${e.amount >= 0 ? 'text-success' : 'text-destructive'}`}>
                           {e.amount >= 0 ? '+' : ''}{e.amount.toLocaleString()} TJSB
                         </p>
                         <p className="text-xs text-muted-foreground">{new Date(e.created_at).toLocaleDateString()}</p>

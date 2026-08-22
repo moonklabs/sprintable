@@ -252,11 +252,11 @@ export function ConnectStep({ agentId, apiKey, onFinish }: ConnectStepProps) {
   if (!apiKey) {
     return (
       <div className="space-y-4">
-        <div className="space-y-2 rounded-md border border-amber-500/20 bg-amber-500/10 p-3">
-          <p className="text-sm text-amber-600 dark:text-amber-400">{t('apiKeyFailedMembers')}</p>
+        <div className="space-y-2 rounded-md border border-warning-border bg-warning-tint p-3">
+          <p className="text-sm text-warning-strong">{t('apiKeyFailedMembers')}</p>
           <Link
             href="/settings?tab=members"
-            className="inline-block rounded border border-amber-500/30 bg-background px-3 py-1 text-xs font-medium text-amber-600 transition-colors hover:bg-amber-500/10 dark:text-amber-400"
+            className="inline-block rounded border border-warning-border bg-background px-3 py-1 text-xs font-medium text-warning-strong transition-colors hover:bg-warning-tint"
           >
             {t('goToMembersAgents')} →
           </Link>

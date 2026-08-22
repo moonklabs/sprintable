@@ -139,13 +139,13 @@ export function CreateOrganizationDialog({
         </DialogHeader>
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
           {planLimitHit && (
-            <div key={planLimitNonce} role="alert" aria-live="assertive" aria-atomic="true" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm space-y-1">
-              <p className="font-medium text-amber-800">{t('orgLimitBannerTitle')}</p>
-              <p className="text-amber-700">{tOnboarding('orgLimitExceededError', { limit: 1 })}</p>
+            <div key={planLimitNonce} role="alert" aria-live="assertive" aria-atomic="true" className="rounded-md border border-warning-border bg-warning-tint px-3 py-3 text-sm space-y-1">
+              <p className="font-medium text-warning-strong">{t('orgLimitBannerTitle')}</p>
+              <p className="text-warning-strong">{tOnboarding('orgLimitExceededError', { limit: 1 })}</p>
               {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2 오탐, invite-accept-client.tsx 주석 참고 */}
               <a
                 href="/settings?tab=billing"
-                className="inline-block mt-1 text-xs font-medium text-amber-800 underline underline-offset-2 hover:text-amber-900"
+                className="inline-block mt-1 text-xs font-medium text-warning-strong underline underline-offset-2 transition hover:opacity-80"
               >
                 {t('orgLimitUpgradeLink')}
               </a>
