@@ -26,6 +26,7 @@ import { EvidenceSection } from '@/components/verify/evidence-section';
 import { ChatProofSection, parseStoryProofReferences } from '@/components/verify/chat-proof-section';
 import { deriveInFlightTrustChip, pickRelevantMergeGate } from '@/services/verify';
 import { Workcell, type WorkcellMessage, type WorkcellPipelineStage } from '@/components/workcell/workcell';
+import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
 import type { TrustSealClaimedProps, TrustSealVerifiedProps } from '@/components/verify/trust-seal';
 import { initials, formatDate } from '@/lib/storage/format';
@@ -360,6 +361,44 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [savingTitle, setSavingTitle] = useState(false);
   const [savingStatus, setSavingStatus] = useState(false);
   const [localStatus, setLocalStatus] = useState(story.status);
+
+  // story #2933 H2(P0-H) — Workcell 스테퍼(pipelineStage, H1이 story.trust_stage 직결로 배선)를
+  // `story.trust_stage_changed` SSE로 라이브 갱신한다. AttentionQueueView(story #2923)와 동형
+  // 패턴 — SSE payload를 신뢰의 소스로 안 쓰고(트리거로만) 실제 값은 항상 REST 재조회로 얻는다
+  // (진실은 서버). undefined=아직 SSE 오버라이드 없음(story prop의 trust_stage 그대로 씀),
+  // navigate away(story.id 변경)하면 리셋 — 다른 story의 값이 새 story 카드에 새는 것 방지.
+  const [ssePipelineStage, setSsePipelineStage] = useState<WorkcellPipelineStage | null | undefined>(undefined);
+  const sseDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    setSsePipelineStage(undefined);
+    return () => {
+      if (sseDebounceRef.current) clearTimeout(sseDebounceRef.current);
+    };
+  }, [story.id]);
+
+  const handleTrustStageChanged = useCallback((_eventName: string, data: unknown) => {
+    if (typeof data !== 'object' || data === null) return;
+    if ((data as Record<string, unknown>)['story_id'] !== story.id) return;
+    if (sseDebounceRef.current) clearTimeout(sseDebounceRef.current);
+    sseDebounceRef.current = setTimeout(() => {
+      sseDebounceRef.current = null;
+      // story #2933 H2(PO 조건②) — 재파생 폴백 없음: SSE payload의 new_stage를 바로 안 쓰고
+      // (그 값은 트리거일 뿐), get_story(H1이 trust_stage 배선한 그 엔드포인트)를 다시 불러
+      // BE 판정값을 그대로 반영한다. 실패하면 조용히 무시(기존 표시값 유지 — 재파생 0).
+      fetchWithAuth(`/api/stories/${story.id}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((json) => {
+          const fresh = json?.data as { trust_stage?: WorkcellPipelineStage | null } | undefined;
+          if (fresh && 'trust_stage' in fresh) setSsePipelineStage(fresh.trust_stage ?? null);
+        })
+        .catch(() => { /* 무시 — 기존 표시값 유지, 재파생 안 함 */ });
+    }, 500);
+  }, [story.id]);
+
+  useSseNotifications({
+    extraEventNames: ['story.trust_stage_changed'],
+    onExtraEvent: handleTrustStageChanged,
+  });
 
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState(story.description ?? '');
@@ -762,10 +801,13 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   // 판정은 BE 한 곳(trust_pipeline.derive_trust_stage)에만 존재, FE 재계산 0.
   // PO 조건②(2933) — story prop이 이 필드를 못 채운 응답에서 온 경우(예: handleChangeStatus의
   // `onStoryUpdate?.({ ...story, status: newStatus })` 낙관적 갱신 — status만 덮어쓰고
-  // trust_stage는 스프레드로 이전 값이 그대로 남는다)도 이 한 줄이 "기존값 유지"를 자동으로
-  // 만족한다 — 별도 로컬 state/재파생 폴백을 얹지 않는다. 뮤테이션 직후의 실시간 갱신은
-  // H2(SSE 구독) 몫.
-  const pipelineStage: WorkcellPipelineStage | null = (story.trust_stage as WorkcellPipelineStage | null) ?? null;
+  // trust_stage는 스프레드로 이전 값이 그대로 남는다)도 "기존값 유지"를 자동으로 만족한다 —
+  // 별도 재파생 폴백은 없다. story #2933 H2 — ssePipelineStage(위, `story.trust_stage_changed`
+  // 구독 결과)가 있으면 그걸 우선(더 최신 BE 조회값), 없으면(SSE 미도달·아직 이 story에서
+  // 이벤트 0건) story prop 그대로.
+  const pipelineStage: WorkcellPipelineStage | null = ssePipelineStage !== undefined
+    ? ssePipelineStage
+    : (story.trust_stage as WorkcellPipelineStage | null) ?? null;
   const assigneeIds = story.assignee_ids?.length ? story.assignee_ids : (story.assignee_id ? [story.assignee_id] : []);
   const proofHumanId = assigneeIds.find((id) => memberMap[id] && memberMap[id]!.type !== 'agent');
   const proofAgentId = assigneeIds.find((id) => memberMap[id]?.type === 'agent');

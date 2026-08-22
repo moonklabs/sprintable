@@ -19,6 +19,12 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
 }));
 
+// story #2933 H2 — SSE push가 재조회를 "트리거"하는지 직접 잰다(verify-rail.test.tsx #2467
+// respec과 동형 관례) — useSseNotifications를 모킹해 onExtraEvent 콜백을 손으로 쥐고 실행.
+vi.mock('@/hooks/use-sse-notifications', () => ({
+  useSseNotifications: vi.fn(),
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -215,6 +221,74 @@ describe('StoryDetailPanel — Workcell pipelineStage = story.trust_stage 직결
   it('trust_stage=undefined(구 응답 경로) → null과 동일하게 스테퍼 미표시(재파생 폴백 없음)', async () => {
     await mountWithTrustStage(undefined);
     expect(container.querySelector('[aria-current="step"]')).toBeNull();
+  });
+});
+
+// story #2933 H2(P0-H) — Workcell 스테퍼가 `story.trust_stage_changed` SSE를 라이브 갱신
+// 트리거로 쓰는지(AttentionQueueView, story #2923와 동형 패턴). SSE payload 자체는 신뢰의
+// 소스가 아니다(트리거일 뿐) — REST 재조회(GET /api/stories/{id})의 값만 반영한다(PO 조건②
+// 재파생 폴백 없음과 정합, verify-rail.test.tsx #2467 respec 관례 재사용).
+describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story #2933 H2)', () => {
+  const HUMAN_ID = 'human-1';
+  const memberMap = { [HUMAN_ID]: { id: HUMAN_ID, name: '책임자', type: 'human' } };
+
+  function currentStageLabel(): string | null {
+    return container.querySelector('[aria-current="step"]')?.textContent?.trim() ?? null;
+  }
+
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('story.trust_stage_changed(이 story_id) 수신 → 디바운스 後 GET /api/stories/{id} 재조회로 스테퍼가 갱신된다', async () => {
+    const { useSseNotifications } = await import('@/hooks/use-sse-notifications');
+    let capturedOnExtraEvent: ((eventName: string, data: unknown) => void) | undefined;
+    (useSseNotifications as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      (o: { onExtraEvent?: typeof capturedOnExtraEvent }) => { capturedOnExtraEvent = o.onExtraEvent; },
+    );
+    const story = makeStory({ id: 's-live', status: 'in-progress', assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID], trust_stage: 'running' });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      // 정확 일치만 — '/api/stories/s-live/comments' 등 하위 경로가 substring으로 오매칭돼
+      // story payload를 comments state에 흘려보내면 안 된다(comments.map 크래시로 실제로 걸림).
+      if (typeof url === 'string' && /\/api\/stories\/s-live(\?|$)/.test(url)) {
+        return { ok: true, json: async () => ({ data: { ...story, trust_stage: 'needs_input' } }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={story} tasks={[]} onClose={() => {}} memberMap={memberMap} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(currentStageLabel()).toBe('Running');
+
+    expect(capturedOnExtraEvent).toBeDefined();
+    await act(async () => { capturedOnExtraEvent!('story.trust_stage_changed', { story_id: 's-live', new_stage: 'needs_input' }); });
+    await act(async () => { vi.advanceTimersByTime(500); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(currentStageLabel()).toBe('Needs input');
+  });
+
+  it('다른 story_id의 이벤트는 무시한다(이 패널이 보는 story 밖 전이)', async () => {
+    const { useSseNotifications } = await import('@/hooks/use-sse-notifications');
+    let capturedOnExtraEvent: ((eventName: string, data: unknown) => void) | undefined;
+    (useSseNotifications as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      (o: { onExtraEvent?: typeof capturedOnExtraEvent }) => { capturedOnExtraEvent = o.onExtraEvent; },
+    );
+    const fetchMock = vi.fn(async () => ({ ok: false, json: async () => null }));
+    vi.stubGlobal('fetch', fetchMock);
+    const story = makeStory({ id: 's-live', status: 'in-progress', assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID], trust_stage: 'running' });
+
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={story} tasks={[]} onClose={() => {}} memberMap={memberMap} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    fetchMock.mockClear();
+
+    await act(async () => { capturedOnExtraEvent!('story.trust_stage_changed', { story_id: 'other-story', new_stage: 'merge_ready' }); });
+    await act(async () => { vi.advanceTimersByTime(500); await Promise.resolve(); });
+
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('/api/stories/s-live'), expect.anything());
+    expect(currentStageLabel()).toBe('Running');
   });
 });
 
