@@ -43,11 +43,11 @@ afterEach(async () => {
 });
 
 describe('WorkspaceFrameTabs — story #2930 I3', () => {
-  it('보드·스프린트 두 탭만 렌더한다(에픽은 단독 표면 부재로 스코프 밖, PO 확定 ①=ⓒ)', async () => {
+  it('보드·스프린트·에픽 3탭이 렌더한다(story #2931로 에픽 스윔레인 실체 생겨 3번째 탭 합류)', async () => {
     const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
     const tabs = [...container.querySelectorAll('[role="tab"]')];
-    expect(tabs.map((t) => t.textContent)).toEqual(['보드', '스프린트']);
+    expect(tabs.map((t) => t.textContent)).toEqual(['보드', '스프린트', '에픽']);
   });
 
   it('active="board"면 보드 탭에 aria-selected=true가 붙는다', async () => {
@@ -75,10 +75,18 @@ describe('WorkspaceFrameTabs — story #2930 I3', () => {
     expect(pushMock).toHaveBeenCalledWith('/my-ws/my-proj/flow');
   });
 
+  it('story #2931 — 에픽 탭 클릭 시 /{ws}/{proj}/epics로 이동한다', async () => {
+    const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
+    await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
+    const epicTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '에픽');
+    await act(async () => { epicTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).toHaveBeenCalledWith('/my-ws/my-proj/epics');
+  });
+
   it('en 로케일에서도 렌더된다(ko/en 파리티)', async () => {
     const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />, enMessages)); });
     const tabs = [...container.querySelectorAll('[role="tab"]')];
-    expect(tabs.map((t) => t.textContent)).toEqual(['Board', 'Sprints']);
+    expect(tabs.map((t) => t.textContent)).toEqual(['Board', 'Sprints', 'Epic']);
   });
 });
