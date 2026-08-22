@@ -199,3 +199,55 @@ async def test_agent_card_advertises_streaming_true():
         assert card.capabilities.streaming is True
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_agent_card_surfaces_persona_model_when_set():
+    """방향서 03·에이전트 속성 슬라이스① — AgentPersona.model이 카드 API에 실제로 배관됐는지."""
+    from app.routers.a2a import _build_agent_card
+    from app.models.team import TeamMember
+    from app.models.agent_deployment import AgentPersona
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            await _bypass_fk(s)
+            member = TeamMember(
+                id=uuid.uuid4(), org_id=uuid.uuid4(), project_id=uuid.uuid4(), type="agent",
+                name="Model Card Test Agent", role="member", is_active=True,
+            )
+            s.add(member)
+            await s.flush()
+            persona = AgentPersona(
+                id=uuid.uuid4(), org_id=member.org_id, project_id=member.project_id,
+                agent_id=member.id, slug="model-card-test",
+                name="Model Card Test Persona", is_default=True, model="claude-sonnet-5",
+            )
+            s.add(persona)
+            await s.commit()
+            card = await _build_agent_card(s, member, "http://test")
+        assert card.model == "claude-sonnet-5"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_agent_card_model_is_honest_none_when_persona_has_none():
+    """no-fiction: 미배정/persona 없음이면 지어내지 않고 None 그대로 노출."""
+    from app.routers.a2a import _build_agent_card
+    from app.models.team import TeamMember
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            await _bypass_fk(s)
+            member = TeamMember(
+                id=uuid.uuid4(), org_id=uuid.uuid4(), project_id=uuid.uuid4(), type="agent",
+                name="No Persona Card Test Agent", role="member", is_active=True,
+            )
+            s.add(member)
+            await s.commit()
+            card = await _build_agent_card(s, member, "http://test")
+        assert card.model is None
+    finally:
+        await engine.dispose()
