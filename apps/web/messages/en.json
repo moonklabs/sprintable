@@ -860,6 +860,8 @@
     "epicSwimlaneTitle": "Epic swimlanes",
     "epicSwimlaneUnassigned": "Unassigned",
     "epicSwimlaneOverflowToggle": "{count} more epics",
+    "epicSwimlaneLoadError": "Couldn't load. Please try again in a moment.",
+    "epicSwimlaneRetry": "Retry",
     "proofCapsuleStateRunning": "Running",
     "proofCapsuleStateReviewing": "Awaiting verification",
     "proofCapsuleStateProven": "Proven",

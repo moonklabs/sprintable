@@ -47,7 +47,13 @@ async function fetchAllPages<T>(basePath: string, projectId: string, source: str
   for (let page = 0; page < PAGE_HARD_CAP; page += 1) {
     const url = `${basePath}?project_id=${projectId}&limit=${PAGE_LIMIT}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
     const res = await fetchWithAuth(url);
-    if (!res.ok) break;
+    // ⚠️QA changes 8R HIGH②(카디르+codex, 2026-08-22) — 중간 페이지 실패를 `break`로 삼키면
+    // 그때까지 모은 부분 집합을 완전 집합처럼 반환한다(6R/7R이 막으려던 "조용한 누락"과
+    // 같은 클래스, 실패 경로에서 재발). 부분-성공을 허용하지 않는다 — throw해 호출부
+    // (fetchAll)가 정직한 에러 상태로 처리하게 한다.
+    if (!res.ok) {
+      throw new Error(`${source}: 페이지 ${page} 로드 실패(status=${res.status})`);
+    }
     const json = await res.json() as { data?: T[]; meta?: unknown };
     all.push(...(json.data ?? []));
     // story #2231 AC5 가드(pagination-envelope-consumers.test.ts) — meta 직접 옵셔널체이닝
@@ -184,6 +190,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
   const [epics, setEpics] = useState<KanbanEpic[]>([]);
   const [members, setMembers] = useState<KanbanMember[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [axisMode, setAxisMode] = useState<AxisMode>('status');
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [selectedStoryId, setSelectedStoryId] = useState<string | null>(null);
@@ -208,6 +215,13 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
       setStories(stories.filter((s) => !s.is_excluded));
       setEpics(epics);
       if (membersRes.ok) { const json = await membersRes.json(); setMembers(json.data ?? []); }
+      setLoadError(false);
+    } catch {
+      // QA changes 8R HIGH②(카디르+codex, 2026-08-22) — fetchAllPages가 이제 중간 실패를
+      // throw로 승격하니 여기서 정직한 에러 상태로 받는다. stories/epics를 손대지 않고
+      // (부분 데이터로 덮어써 "이 프로젝트엔 원래 이만큼만 있다"처럼 보이는 재발 방지)
+      // 전용 에러 화면으로 대체한다.
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -277,8 +291,10 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
       : targetColumnId;
 
     // 낙관 갱신 — story #2933 H4 qa:changes 교훈(trust_stage 스프레드-보존 실종 버그) 재발
-    // 방지: status/epic_id만 바꾸고 trust_stage는 손대지 않는다(다음 SSE/재조회가 진짜 값을
-    // 채운다 — PO 조건② 재파생 폴백 금지 그대로).
+    // 방지: status/epic_id만 바꾸고 trust_stage는 손대지 않는다. (QA changes 8R HIGH① 정정,
+    // 카디르+codex 2026-08-22 — 예전 주석은 "다음 SSE/재조회가 채운다"였지만 이 컴포넌트엔
+    // SSE 구독이 없어 거짓 주석이었다. 실제로는 아래 PATCH 응답 도착 시점에 직접 병합한다
+    // — PO 조건② 재파생 폴백 금지는 그대로, 그 값을 어디서 얻는지만 정정.)
     setStories((prev) => prev.map((s) => (
       s.id === storyId
         ? { ...s, epic_id: newEpicId, status: (columnChanged && newStatus) ? newStatus : s.status }
@@ -298,6 +314,13 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
           body: JSON.stringify({ epic_id: newEpicId }),
         });
         if (!res.ok) { void fetchAll(); return; }
+        // QA changes 8R HIGH①(카디르+codex, 2026-08-22) — 형제(kanban-board.tsx
+        // handleTrustDragEnd, story #2933 H4 qa:changes)와 동형: 응답에 실린 진짜
+        // trust_stage를 병합한다(재파생 아님, BE 판정값 그대로 — PO 조건②).
+        const okItem = await res.json().then((j) => j?.data ?? null).catch(() => null);
+        if (okItem && 'trust_stage' in okItem) {
+          setStories((prev) => prev.map((s) => (s.id === storyId ? { ...s, trust_stage: okItem.trust_stage ?? null } : s)));
+        }
       }
       if (columnChanged && newStatus) {
         const res = await fetchWithAuth('/api/stories/bulk', {
@@ -305,6 +328,11 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
           body: JSON.stringify({ items: [{ id: storyId, status: newStatus }] }),
         });
         if (!res.ok) { void fetchAll(); return; }
+        const okItems = await res.json().then((j) => j?.data ?? j).catch(() => null);
+        const okItem = Array.isArray(okItems) ? okItems.find((x) => x?.id === storyId) : null;
+        if (okItem && 'trust_stage' in okItem) {
+          setStories((prev) => prev.map((s) => (s.id === storyId ? { ...s, trust_stage: okItem.trust_stage ?? null } : s)));
+        }
       }
     } catch {
       void fetchAll(); // 네트워크 예외(fetch 자체가 throw) — 실패 시 재조회로 정직한 상태 복구.
@@ -321,6 +349,17 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
 
         {loading ? (
           <div className="p-4 text-sm text-muted-foreground">{t('loading')}</div>
+        ) : loadError ? (
+          <div className="flex flex-col items-start gap-2 p-4">
+            <p role="alert" className="text-sm text-destructive">{t('epicSwimlaneLoadError')}</p>
+            <button
+              type="button"
+              onClick={() => { void fetchAll(); }}
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+            >
+              {t('epicSwimlaneRetry')}
+            </button>
+          </div>
         ) : (
           <>
             <div className="flex items-center justify-between px-1">

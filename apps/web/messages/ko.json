@@ -860,6 +860,8 @@
     "epicSwimlaneTitle": "에픽 스윔레인",
     "epicSwimlaneUnassigned": "미할당",
     "epicSwimlaneOverflowToggle": "에픽 {count}개 더 보기",
+    "epicSwimlaneLoadError": "불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    "epicSwimlaneRetry": "다시 시도",
     "proofCapsuleStateRunning": "실행 중",
     "proofCapsuleStateReviewing": "검증 대기",
     "proofCapsuleStateProven": "증명 완료",

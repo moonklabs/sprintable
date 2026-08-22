@@ -124,6 +124,13 @@ type FetchStub = {
   // ⚠️QA changes 7R(PR#3377, 카디르+codex, 2026-08-22) — /api/goals도 동일 clamp. storyPages와
   // 동형(에픽 버전).
   epicPages?: Array<{ epics: Array<Record<string, unknown>>; hasMore: boolean }>;
+  // ⚠️QA changes 8R HIGH①(PR#3377, 카디르+codex, 2026-08-22) — trust_stage 응답 병합 재현용.
+  // 지정하면 PATCH 응답 data에 그대로 실려 온다(kanban-board와 동형 okItem 병합 검증).
+  singlePatchResponseData?: Record<string, unknown>;
+  bulkPatchResponseData?: Array<Record<string, unknown>>;
+  // ⚠️QA changes 8R HIGH②(PR#3377, 카디르+codex, 2026-08-22) — fetchAllPages 중간 실패
+  // 재현용. true면 /api/stories? GET이 ok:false(500)로 응답한다.
+  storiesFetchFails?: boolean;
 };
 
 // ⚠️QA changes 4R(PR#3377, 카디르+codex, 2026-08-22) — CI 실행 명령까지 정확 재현해 8+1회
@@ -134,23 +141,24 @@ type FetchStub = {
 // 하는데 항상 bulk 2건만이라 결정론적 환경 차 가능성).
 let callLog: string[] = [];
 
-function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singlePatchSpy, singlePatchOk = true, bulkPatchOk = true, storiesGetSpy, storyPages, epicPages }: FetchStub) {
+function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singlePatchSpy, singlePatchOk = true, bulkPatchOk = true, storiesGetSpy, storyPages, epicPages, singlePatchResponseData, bulkPatchResponseData, storiesFetchFails = false }: FetchStub) {
   callLog = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
     callLog.push(`${init?.method ?? 'GET'} ${url}`);
     if (typeof url === 'string' && url.startsWith('/api/stories/bulk') && init?.method === 'PATCH') {
       bulkPatchSpy?.(JSON.parse(init.body ?? '{}'));
       if (!bulkPatchOk) return { ok: false, status: 500, json: async () => ({ error: { message: 'boom' } }) };
-      return { ok: true, json: async () => ({ data: [] }) };
+      return { ok: true, json: async () => ({ data: bulkPatchResponseData ?? [] }) };
     }
     if (typeof url === 'string' && /^\/api\/stories\/[^/]+$/.test(url) && init?.method === 'PATCH') {
       const id = url.split('/').pop()!;
       singlePatchSpy?.(id, JSON.parse(init.body ?? '{}'));
       if (!singlePatchOk) return { ok: false, status: 500, json: async () => ({ error: { message: 'boom' } }) };
-      return { ok: true, json: async () => ({ data: {} }) };
+      return { ok: true, json: async () => ({ data: singlePatchResponseData ?? {} }) };
     }
     if (typeof url === 'string' && url.startsWith('/api/stories?')) {
       storiesGetSpy?.();
+      if (storiesFetchFails) return { ok: false, status: 500, json: async () => ({ error: { message: 'boom' } }) };
       if (storyPages) {
         const cursorParam = new URL(url, 'http://localhost').searchParams.get('cursor');
         const pageIndex = cursorParam ? Number(cursorParam) : 0;
@@ -296,6 +304,29 @@ describe('EpicSwimlaneBoard — 행 구성(story #2931)', () => {
     });
     expect(container.textContent).toContain('1페이지에픽');
     expect(container.textContent).toContain('2페이지에픽'); // 두 번째 페이지 에픽 레인이 조용히 누락되지 않았음.
+  });
+});
+
+describe('EpicSwimlaneBoard — 로드 실패(story #2931, QA changes 8R HIGH②)', () => {
+  // ⚠️QA changes 8R HIGH②(카디르+codex, 2026-08-22) — fetchAllPages의 `!res.ok → break`가
+  // 중간 실패를 부분 집합을 완전 집합처럼 반환했다(6R/7R이 막으려던 "조용한 누락"과 같은
+  // 클래스, 실패 경로에서 재발). 이제 throw로 승격해 fetchAll이 정직한 에러 상태로 받는지
+  // 직접 증명한다 — mount() 헬퍼는 로드 完了 신호(축 토글)를 기다리는데 에러 경로에선 그게
+  // 영영 안 뜨니 이 테스트만 별도로 에러 문구를 신호로 기다린다.
+  it('/api/stories 로드가 실패하면 부분 데이터를 렌더하지 않고 정직한 에러 상태를 보인다', async () => {
+    stubFetch({
+      epics: [{ id: 'e1', title: '부분로드에픽', status: 'active', position: 1 }],
+      storiesFetchFails: true,
+    });
+    await act(async () => {
+      root.render(withIntl(<EpicSwimlaneBoard projectId="p1" />));
+    });
+    await waitForCondition(
+      () => container.textContent?.includes('불러오지 못했습니다') ?? false,
+      '로드 실패 에러 상태',
+    );
+    expect(container.textContent).not.toContain('부분로드에픽'); // 부분 성공(에픽만 로드됨)을 완전한 것처럼 보이지 않는다.
+    expect(container.textContent).toContain('다시 시도');
   });
 });
 
@@ -466,5 +497,65 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     });
 
     expect(storiesGetCount).toBe(2);
+  });
+
+  // TRUST_COLUMNS 고정 순서(queued=0,running=1,needs_input=2,claimed_done=3,verified=4,
+  // merge_ready=5,done=6) — SwimlaneColumnHeader가 맨 위에 7칸을 한 번 그리고, 그 뒤로
+  // 레인마다 같은 순서로 7칸씩 그린다(헤더는 label 텍스트, 레인 칸은 카드). laneIndex번째
+  // 레인의 columnIndex번째 칸을 반환.
+  function nthLaneCell(laneIndex: number, columnIndex: number): Element | undefined {
+    const cells = [...container.querySelectorAll('div[class*="w-\\[220px\\]"]')];
+    return cells[7 + laneIndex * 7 + columnIndex];
+  }
+
+  // ⚠️QA changes 8R HIGH①(PR#3377, 카디르+codex, 2026-08-22) — 형제(kanban-board.tsx
+  // handleTrustDragEnd, story #2933 H4 qa:changes)와 동형: 레인 변경(단건 epic_id PATCH)
+  // 성공 응답에 실린 진짜 trust_stage를 병합하는지 직접 증명한다. 이전엔 "다음 SSE가
+  // 채운다"는 거짓 주석뿐 — 이 컴포넌트엔 SSE 구독이 없어 카드가 옛 트러스트컬럼에
+  // 영구 고정됐다.
+  it('레인 변경(epic_id PATCH) 응답의 trust_stage를 병합한다(SSE 없음 — 응답 병합만이 유일한 갱신 경로)', async () => {
+    await mount({
+      epics: [
+        { id: 'e1', title: '출발', status: 'active', position: 1 },
+        { id: 'e2', title: '도착', status: 'active', position: 2 },
+      ],
+      stories: [{ id: 's1', title: '병합카드', status: 'backlog', priority: 'medium', epic_id: 'e1', trust_stage: 'queued' }],
+      singlePatchResponseData: { id: 's1', trust_stage: 'running' },
+    });
+    const trustToggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '6단계 신뢰축 + 완료');
+    await act(async () => { trustToggle!.click(); });
+
+    const handler = capturedDragEndHandlers.at(-1);
+    // 컬럼은 그대로 queued(0)인 채 레인만 e2로 — laneChanged만 발화, columnChanged=false.
+    // (자체검산 발견) waitForCondition을 dispatch와 같은 act() 안에 중첩하면 React가 그
+    // act() 스코프가 열려있는 동안 커밋을 미뤄 폴링이 그 갱신을 영영 못 보고 데드락처럼
+    // timeout난다 — dispatch act()를 먼저 닫고, DOM 조건 대기는 그 밖에서 한다(직접 최소
+    // 재현으로 확認한 React act() 동작).
+    await act(async () => {
+      handler!({ active: { id: 's1' }, over: { id: 'e2::queued' } });
+    });
+    await waitForCondition(() => (nthLaneCell(1, 1)?.textContent ?? '').includes('병합카드'), '레인변경 trust_stage 병합');
+
+    expect(nthLaneCell(1, 1)?.textContent).toContain('병합카드'); // e2 레인의 running(1) 칸.
+    expect(nthLaneCell(1, 0)?.textContent).not.toContain('병합카드'); // 옛 queued(0) 칸엔 안 남음.
+  });
+
+  // 같은 클래스 — 컬럼 변경(bulk PATCH) 축도 동일 병합이 걸리는지 대칭 확認.
+  it('컬럼 변경(bulk PATCH) 응답의 trust_stage를 병합한다', async () => {
+    await mount({
+      epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }],
+      stories: [{ id: 's1', title: '병합카드2', status: 'backlog', priority: 'medium', epic_id: 'e1', trust_stage: 'queued' }],
+      bulkPatchResponseData: [{ id: 's1', trust_stage: 'claimed_done' }],
+    });
+    const trustToggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '6단계 신뢰축 + 완료');
+    await act(async () => { trustToggle!.click(); });
+
+    const handler = capturedDragEndHandlers.at(-1);
+    await act(async () => {
+      handler!({ active: { id: 's1' }, over: { id: 'e1::running' } });
+    });
+    await waitForCondition(() => (nthLaneCell(0, 3)?.textContent ?? '').includes('병합카드2'), '컬럼변경 trust_stage 병합');
+
+    expect(nthLaneCell(0, 3)?.textContent).toContain('병합카드2'); // claimed_done(3) 칸 — 서버 응답값이 이겼다.
   });
 });
