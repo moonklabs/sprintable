@@ -4,7 +4,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
-import { Bot, Check, Copy, MessageSquare, Terminal, User } from 'lucide-react';
+import { Check, Copy, MessageSquare, Terminal } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
@@ -21,7 +21,8 @@ import { ImageLightbox, type LightboxItem } from './image-lightbox';
 import type { ReadingPanelTarget } from './reading-panel';
 import { MessageContextMenu, type CiteAction } from './message-context-menu';
 import { SenderProfilePopover } from './sender-profile-popover';
-import { PresenceDot, WORKING_RING_CLASS, type PresenceStatus } from './presence-dot';
+import { type PresenceStatus } from './presence-dot';
+import { Avatar } from '@/components/shared/avatar';
 import { ReferenceSuggestionRow } from './reference-suggestion-row';
 import { IntentSuggestionCard } from './intent-suggestion-card';
 import { parseHitlRequest } from '@/lib/hitl-classifier';
@@ -482,26 +483,24 @@ export function ChatBubble({
         {isGrouped ? (
           <div className="w-7 flex-shrink-0" />
         ) : (
-          <div className="relative h-7 w-7 flex-shrink-0">
-            {/* story #2349 — "상대 프로필" 진입점. 자기 자신 아바타는 클릭 불가(role/tabIndex도 안 붙임). */}
-            <div
-              role={isMine ? undefined : 'button'}
-              tabIndex={isMine ? undefined : 0}
-              onClick={isMine ? undefined : handleOpenProfilePopover}
-              onKeyDown={isMine ? undefined : (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpenProfilePopover(e); } }}
-              className={`flex h-full w-full items-center justify-center rounded-full text-xs font-medium ${
-                isAgent
-                  ? 'bg-accent-claim/15 text-accent-claim'
-                  : isMine
-                    ? 'bg-primary/20 text-primary'
-                    : 'bg-muted text-muted-foreground'
-              } ${isAgent && isWorking ? WORKING_RING_CLASS : ''} ${isMine ? '' : 'cursor-pointer'}`}
-            >
-              {isAgent ? <Bot className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
-            </div>
-            {isAgent && presenceStatus ? (
-              <PresenceDot status={presenceStatus} className="absolute -bottom-0.5 -right-0.5" />
-            ) : null}
+          <div
+            role={isMine ? undefined : 'button'}
+            tabIndex={isMine ? undefined : 0}
+            onClick={isMine ? undefined : handleOpenProfilePopover}
+            onKeyDown={isMine ? undefined : (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpenProfilePopover(e); } }}
+            className={`flex-shrink-0 ${isMine ? '' : 'cursor-pointer'}`}
+          >
+            {/* story #2349 — "상대 프로필" 진입점. 자기 자신 아바타는 클릭 불가(role/tabIndex도 안 붙임).
+                story #2901 — Avatar 프리미티브(이미지→이니셜→Bot/User 아이콘 3단 폴백, onError 하드닝
+                포함)로 교체. presence dot·working ring·AI 배지는 컴포넌트 내부가 이미 처리한다. */}
+            <Avatar
+              name={displayName}
+              avatarUrl={message.sender_avatar_url ?? null}
+              actorType={isAgent ? 'agent' : 'human'}
+              size={28}
+              presenceStatus={isAgent ? presenceStatus : null}
+              isWorking={isWorking}
+            />
           </div>
         )}
 
