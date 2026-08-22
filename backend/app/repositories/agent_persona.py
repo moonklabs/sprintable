@@ -257,6 +257,10 @@ class AgentPersonaRepository:
                 config.pop(key, None)
             if tl is not None:
                 config["tool_allowlist"] = tl
+                # story #2941 — 표시용(tool_allowlist)과 집행용(ApiKey.scope) 권한이 갈라지지
+                # 않도록 같은 세션·같은 트랜잭션에서 원자 재동기화(같은 커밋에 함께 들어간다).
+                from app.repositories.api_key import ApiKeyRepository
+                await ApiKeyRepository(self.session).sync_active_scope(persona.agent_id, tl)
             if rtid:
                 config["role_template_id"] = str(rtid)
 

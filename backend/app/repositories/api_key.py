@@ -38,6 +38,23 @@ class ApiKeyRepository:
         )
         return result.scalar_one_or_none()
 
+    async def sync_active_scope(self, team_member_id: uuid.UUID, scope: list[str]) -> ApiKey | None:
+        """story #2941 — `PATCH /agent_personas`가 표시용 tool_allowlist만 바꾸고 실제 집행값
+        `ApiKey.scope`(매 요청 `_check_api_key_scope`로 검증)를 재동기화 안 하던 갭 봉합.
+        `rotate()`와 달리 새 키를 발급하지 않는다 — 스코프 축소가 기존에 발급된 키에 **즉시**
+        반영되는 게 보안 취지(호출자가 새 plaintext를 다시 받아야 하는 건 이 작업의 목적이
+        아니다). 활성(revoked_at IS NULL) 키가 없으면(persona만 만들고 아직 recruit/키 발급이
+        없는 경우) no-op — None 반환, 에러 아님."""
+        await self.session.execute(
+            sa_update(ApiKey)
+            .where(ApiKey.team_member_id == team_member_id, ApiKey.revoked_at.is_(None))
+            .values(scope=scope)
+        )
+        result = await self.session.execute(
+            select(ApiKey).where(ApiKey.team_member_id == team_member_id, ApiKey.revoked_at.is_(None))
+        )
+        return result.scalar_one_or_none()
+
     async def create(
         self,
         team_member_id: uuid.UUID,
