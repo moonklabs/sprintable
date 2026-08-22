@@ -306,24 +306,33 @@ export function resolveInboxItemHref(
   return null;
 }
 
-/** story #2923 AQ1(카디르 QA HIGH2, PR#3352 2026-08-22 처방) — gate_pending(Gate 1차 소스)과
- * approval(inbox_items, 외부 producer)이 같은 story에 대해 동시 존재하면 같은 사실이 두 행으로
- * 중복 노출된다. Gate가 1차 소스라 gate_pending 우선·겹치는 inbox approval은 drop한다.
- * merge_ready(=CI 통과·병합 준비)는 대상 밖 — "결재 대기 중"이라는 같은 사실이 아니라 다른
- * lifecycle 사실이라, gate_pending과 달리 approval과 진짜 중복이 아니다(지어내지 않음).
+/** story #2923 AQ1(카디르 QA HIGH2, PR#3352 2026-08-22 처방 — 같은 라운드 MEDIUM 2건 추가
+ * 처방 포함) — gate_pending(Gate 1차 소스)과 approval(inbox_items, 외부 producer)이 같은
+ * story에 대해 동시 존재하면 같은 사실이 두 행으로 중복 노출된다. Gate가 1차 소스라
+ * gate_pending 우선·겹치는 inbox approval은 drop한다. merge_ready(=CI 통과·병합 준비)는
+ * 대상 밖 — "결재 대기 중"이라는 같은 사실이 아니라 다른 lifecycle 사실이라, gate_pending과
+ * 달리 approval과 진짜 중복이 아니다(지어내지 않음).
  *
  * origin_chain에 story가 없는 approval(inbox_items가 story 귀속을 안 줌 — memo/run/initiative
  * 기반)은 dedup 판정 자체가 불가능하므로 그대로 둔다(둘 다 노출이 정직 — 근거 없이 지우지
- * 않음). */
+ * 않음).
+ *
+ * MEDIUM①: origin_chain에 story 노드가 여러 개일 수 있는데 `.find`는 첫 번째만 봐서 두 번째
+ * 이후 story가 gate_pending과 겹쳐도 못 잡았다 — `.some`으로 전부 검사.
+ * MEDIUM②: Gate의 story_id는 항상 lowercase UUID(DB 관례)인데 inbox_items의 origin_chain은
+ * 외부 producer가 채워 형식 제약이 없다(대문자 UUID 등) — 대소문자만 다른 같은 story가
+ * 안 겹쳐 보일 수 있어 양쪽 다 `.toLowerCase()`로 정규화 후 비교(UUID 아닌 id 문자열에도
+ * 무해 — 단순 소문자화라 형식 가정 자체가 없다). */
 export function dedupInboxApprovalsAgainstGatePending(
   inboxItems: InboxAttentionItem[],
   gatePendingStoryIds: Set<string>,
 ): InboxAttentionItem[] {
+  const normalizedGateIds = new Set([...gatePendingStoryIds].map((id) => id.toLowerCase()));
   return inboxItems.filter((item) => {
     if (item.kind !== 'approval') return true;
-    const story = item.origin_chain.find((n) => n.type === 'story');
-    if (!story) return true;
-    return !gatePendingStoryIds.has(story.id);
+    const storyNodes = item.origin_chain.filter((n) => n.type === 'story');
+    if (storyNodes.length === 0) return true;
+    return !storyNodes.some((story) => normalizedGateIds.has(story.id.toLowerCase()));
   });
 }
 

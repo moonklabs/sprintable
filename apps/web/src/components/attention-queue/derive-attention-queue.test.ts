@@ -483,4 +483,27 @@ describe('dedupInboxApprovalsAgainstGatePending (story #2923, 카디르 QA HIGH2
     const result = dedupInboxApprovalsAgainstGatePending(items, new Set(['s1']));
     expect(result.map((i) => i.id)).toEqual(['a2']);
   });
+
+  // 카디르 재verdict MEDIUM①(PR#3352, 2026-08-22) — origin_chain에 story 노드가 2개 이상일
+  // 수 있는데 첫 번째만 보면(.find) 두 번째 이후 story가 gate_pending과 겹쳐도 못 잡는다.
+  it('origin_chain에 story 노드가 여러 개면(첫 번째가 안 겹쳐도) 전부 검사해 하나라도 겹치면 drop한다', () => {
+    const items = [inboxItem({
+      id: 'a1', kind: 'approval',
+      origin_chain: [{ type: 'story', id: 's-not-matching' }, { type: 'story', id: 's1' }],
+    })];
+    const result = dedupInboxApprovalsAgainstGatePending(items, new Set(['s1']));
+    expect(result).toEqual([]);
+  });
+
+  // 카디르 재verdict MEDIUM②(PR#3352, 2026-08-22) — Gate의 story_id는 항상 lowercase UUID(DB
+  // 관례)인데 inbox_items의 origin_chain은 외부 producer가 채워 형식 제약이 없다 — 대소문자만
+  // 다른 같은 story가 dedup을 피해가면 안 된다.
+  it('id 대소문자가 달라도(외부 producer가 대문자 UUID를 보내도) 같은 story로 정확히 매칭돼 drop한다', () => {
+    const items = [inboxItem({
+      id: 'a1', kind: 'approval',
+      origin_chain: [{ type: 'story', id: 'S1-UPPER-CASE' }],
+    })];
+    const result = dedupInboxApprovalsAgainstGatePending(items, new Set(['s1-upper-case']));
+    expect(result).toEqual([]);
+  });
 });
