@@ -207,6 +207,31 @@ async def update_check_run(
     return resp.json()
 
 
+async def get_pull_request(installation_id: int, repo_full_name: str, pr_number: int) -> dict | None:
+    """story #2893(설계안 §3 B3) — `GET /repos/{repo}/pulls/{pr}`. `POST /gates/{id}/reevaluate`
+    (웹훅 페이로드 없이 사용자가 직접 재평가를 트리거)가 지금 이 PR의 **실 head SHA/merged**
+    상태를 읽어오는 데 쓴다 — reopen처럼 GitHub 쪽 리뷰/체크 상태를 건드리지 않고(순수 GET),
+    우리 쪽 게이트 판정만 최신 증거로 재실행한다. create_check_run과 동일 계약: 예외 미삼킴,
+    실패/토큰없음=None."""
+    token = await get_installation_token(installation_id)
+    if not token:
+        return None
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            f"{_GITHUB_API}/repos/{repo_full_name}/pulls/{pr_number}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+            },
+        )
+    if resp.status_code != 200:
+        logger.warning(
+            "PR 조회 실패 HTTP %s (repo=%s pr=%s)", resp.status_code, repo_full_name, pr_number,
+        )
+        return None
+    return resp.json()
+
+
 async def remove_pr_label(installation_id: int, repo_full_name: str, pr_number: int, label: str) -> bool:
     """story #2893(설계안 §3 B2-a) — `DELETE /repos/{repo}/issues/{pr}/labels/{name}`(PR도 issue
     라벨 엔드포인트 공유, GitHub 공식). SHA 재-pending 시 qa:pass/design:pass를 강제로 뗀다
