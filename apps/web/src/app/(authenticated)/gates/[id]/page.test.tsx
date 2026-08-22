@@ -308,13 +308,12 @@ describe('GateDetailPage — evidence_viewed 서버 계약 (story #2027 AC2)', (
   });
 });
 
-// story P0-02(유나 full 검산, PR#3367 2026-08-22) — gate_type "chip" 배지가 Badge 기본
-// variant(text-muted-foreground on bg-muted/70)를 그대로 쓰면 AA 미달(실측 3.55). 전역
-// variant는 다른 소비처 파급이라 이 지점만 className 오버라이드(text-foreground — #2420 v3
-// "tint 배경 위 글자=text-foreground" 규칙과 동형, badge.tsx의 destructive/success/info/
-// warning variant가 이미 같은 규칙을 쓰고 chip만 예외였다).
-describe('GateDetailPage — gate_type 배지 대비(P0-02, PR#3367)', () => {
-  it('gate_type 배지가 text-foreground를 쓴다(chip variant 기본 text-muted-foreground 오버라이드)', async () => {
+// story P0-02(유나 full 검산, PR#3367 2026-08-22) — gate_type "chip" 배지가 AA 미달(실측
+// 3.55)이라 처음엔 이 지점만 className 오버라이드(text-foreground)로 처방했다. story #2937
+// (PR#3372)로 chip variant 기본 자체가 text-foreground로 이행 — 지점 오버라이드는 걷었고
+// (badge.tsx가 이제 이 값을 자동으로 준다), 이 가드는 그대로 유지(회귀 시 잡아냄).
+describe('GateDetailPage — gate_type 배지 대비(P0-02, chip variant 기본으로 승계·#2937)', () => {
+  it('gate_type 배지가 text-foreground를 쓴다(chip variant 기본값 — #2937 이후 지점 오버라이드 불요)', async () => {
     await mount(gate({ gate_type: 'merge_gate' }));
     const chipEl = [...container.querySelectorAll('span')].find((el) => el.textContent === 'merge_gate');
     expect(chipEl, 'gate_type 배지를 못 찾음').toBeDefined();
