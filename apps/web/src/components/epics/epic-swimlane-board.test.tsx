@@ -12,6 +12,13 @@ import { EpicSwimlaneBoard } from './epic-swimlane-board';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// QA changes 4R 자체검산 — waitForCondition의 내부 vi.waitFor(timeout:5000)가 vitest 기본
+// 테스트 타임아웃(5000ms)과 정확히 경합해, 실패 시 vitest 자체 타임아웃이 먼저 죽여버려
+// waitForCondition의 진단(callLog) 에러가 리포트에 아예 안 뜨는 자리를 직접 시뮬레이션해
+// 발견(프로덕션 bulk PATCH 호출을 임시로 꺼서 재현). 파일 전체 테스트 타임아웃을 여유
+// 있게 올려 "내부 waitFor가 먼저 타임아웃→진단 에러가 실제로 리포트된다"를 보장한다.
+vi.setConfig({ testTimeout: 8000 });
+
 // flow-client.test.tsx와 동형 관례 — TopBarSlot은 TopBarProvider 컨텍스트가 필요한 실 크롬
 // 컴포넌트라 이 컴포넌트의 로직과 무관한 부분은 얕게 스텁한다. WorkspaceFrameTabs가
 // useRouter/useParams를 쓰므로 next/navigation도 동형 스텁.
@@ -75,8 +82,18 @@ type FetchStub = {
   storiesGetSpy?: () => void;
 };
 
+// ⚠️QA changes 4R(PR#3377, 카디르+codex, 2026-08-22) — CI 실행 명령까지 정확 재현해 8+1회
+// 전부 green(로컬 재현 실패) — CI 전용·같은 2건(둘 다 bulk 경로) 3연속. 재현 못 하는 실패는
+// 흔적을 남기는 수밖에 없다 — 모든 fetch 호출을 순서대로 기록해, waitFor가 결국 timeout나면
+// 그 로그를 에러 메시지에 실어 「bulk가 아예 안 불림(환경/로직 차)」 vs 「늦게 불림(순수
+// 지연)」을 CI 로그만으로 갈라준다(페드루 의심 — 순수 지연이면 레인 테스트도 가끔 튀어야
+// 하는데 항상 bulk 2건만이라 결정론적 환경 차 가능성).
+let callLog: string[] = [];
+
 function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singlePatchSpy, singlePatchOk = true, bulkPatchOk = true, storiesGetSpy }: FetchStub) {
+  callLog = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+    callLog.push(`${init?.method ?? 'GET'} ${url}`);
     if (typeof url === 'string' && url.startsWith('/api/stories/bulk') && init?.method === 'PATCH') {
       bulkPatchSpy?.(JSON.parse(init.body ?? '{}'));
       if (!bulkPatchOk) return { ok: false, status: 500, json: async () => ({ error: { message: 'boom' } }) };
@@ -115,6 +132,17 @@ async function flush() {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+// QA changes 4R — ①timeout 5000ms로 명시 상향(카디르 CI 러너 자원 경쟁 가설) ②timeout
+// 시 fetch 호출 로그를 에러 메시지에 동봉(위 callLog 주석 참고) — 5R이 오더라도 CI 로그
+// 자체가 "bulk 자체가 안 불림" vs "불렸는데 이 창을 넘겨 늦게 옴"을 갈라준다.
+async function waitForCondition(check: () => boolean, label: string) {
+  await vi.waitFor(() => {
+    if (!check()) {
+      throw new Error(`${label} — timeout. fetch call log(순서대로):\n${callLog.map((l, i) => `  ${i}: ${l}`).join('\n') || '  (없음)'}`);
+    }
+  }, { timeout: 5000 });
+}
+
 async function mount(stub: FetchStub) {
   stubFetch(stub);
   await act(async () => {
@@ -123,7 +151,7 @@ async function mount(stub: FetchStub) {
   // «시간 기다리기» 대신 «상태 기다리기» — 로딩 문구(TopBarSlot 타이틀은 로딩 중에도
   // 항상 보이므로 신호가 못 됨) 대신 로드 完了 분기에서만 뜨는 축 토글 텍스트로 조건을 잰다.
   await act(async () => {
-    await vi.waitFor(() => { expect(container.textContent).toContain('5-status 클래식'); });
+    await waitForCondition(() => container.textContent?.includes('5-status 클래식') ?? false, 'mount 로딩 完了');
   });
 }
 
@@ -198,7 +226,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     expect(handler, 'handleDragEnd를 캡처 못 함').toBeDefined();
     await act(async () => {
       handler!({ active: { id: 's1' }, over: { id: 'e2::backlog' } });
-      await vi.waitFor(() => { expect(patchedBody).not.toBeNull(); });
+      await waitForCondition(() => patchedBody !== null, '레인 간 드래그(epic_id PATCH)');
     });
 
     expect(patchedId).toBe('s1');
@@ -218,7 +246,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     const handler = capturedDragEndHandlers.at(-1);
     await act(async () => {
       handler!({ active: { id: 's1' }, over: { id: 'e1::in-progress' } });
-      await vi.waitFor(() => { expect(bulkBody).not.toBeNull(); });
+      await waitForCondition(() => bulkBody !== null, '같은 레인 내 컬럼 드래그(bulk PATCH)');
     });
 
     expect(bulkBody).toEqual({ items: [{ id: 's1', status: 'in-progress' }] });
@@ -260,7 +288,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     const handler = capturedDragEndHandlers.at(-1);
     await act(async () => {
       handler!({ active: { id: 's1' }, over: { id: '__unassigned__::backlog' } });
-      await vi.waitFor(() => { expect(patchedBody).not.toBeNull(); });
+      await waitForCondition(() => patchedBody !== null, '미할당 레인으로 드래그(epic_id=null PATCH)');
     });
 
     expect(patchedBody).toEqual({ epic_id: null });
@@ -286,7 +314,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     const handler = capturedDragEndHandlers.at(-1);
     await act(async () => {
       handler!({ active: { id: 's1' }, over: { id: 'e2::backlog' } });
-      await vi.waitFor(() => { expect(storiesGetCount).toBe(2); });
+      await waitForCondition(() => storiesGetCount === 2, 'epic_id PATCH 500→재조회');
     });
 
     expect(storiesGetCount).toBe(2); // 500 응답 後 fetchAll이 실제로 재발화(재조회로 정직 복구).
@@ -306,7 +334,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     const handler = capturedDragEndHandlers.at(-1);
     await act(async () => {
       handler!({ active: { id: 's1' }, over: { id: 'e1::in-progress' } });
-      await vi.waitFor(() => { expect(storiesGetCount).toBe(2); });
+      await waitForCondition(() => storiesGetCount === 2, 'bulk status PATCH 500→재조회');
     });
 
     expect(storiesGetCount).toBe(2);
