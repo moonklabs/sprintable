@@ -48,6 +48,11 @@ interface ChatViewProps {
   // 전(meta fetch 레이스, "여기부터 안읽음" 마커 계산을 그 값 도착까지 보류) · null=한 번도 안
   // 읽음(모든 타인 메시지 앞에 마커) · string=그 시각 이후 타인 메시지 앞에 마커.
   initialLastReadAt?: string | null;
+  // story #2942(2921-S5) — composer STEER 모드의 대상 피커. 대화 참가자로 한정해야
+  // (doc steer-event-axis-design-2927 §4) POST /events/publish의 conversation_id 오버라이드
+  // fail-closed(§2 보강, 422 conversation_target_mismatch)를 애초에 안 만난다. 없으면(구
+  // 호출부·비-2942 화면) STEER 토글 자체를 숨긴다(graceful — 신규 표면 0 강제 아님).
+  participants?: { member_id: string; name: string | null }[];
 }
 
 interface MessageGroup {
@@ -70,7 +75,7 @@ function groupByDate(messages: ChatMessage[]): MessageGroup[] {
   return Object.entries(groups).map(([date, msgs]) => ({ date, messages: msgs }));
 }
 
-export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref = '/chats', commandTargets, presenceById, scrollToMessageId, initialLastReadAt }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref = '/chats', commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants }: ChatViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const t = useTranslations('chats');
@@ -955,6 +960,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             commandTargets={commandTargets}
             placeholder={isMobile ? t('inputPlaceholderMobile') : t('inputPlaceholderFull')}
             onEscape={() => router.replace(backHref)}
+            currentTeamMemberId={currentTeamMemberId}
+            participants={participants}
           />
 
           {/* story #2265(C-7) — 확定된 범위를 어느 스토리에 붙일지 고르는 자리. 기존
