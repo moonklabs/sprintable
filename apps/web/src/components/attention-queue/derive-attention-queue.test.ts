@@ -3,6 +3,7 @@ import { createTranslator } from 'next-intl';
 import {
   parseAttentionQueueSignals, buildAttentionQueueFromBe, buildAttentionQueue, diffAttentionQueueItemIds,
   parseInboxAttentionItems, resolveInboxItemHref, buildAttentionQueueFromInbox,
+  dedupInboxApprovalsAgainstGatePending,
   BUCKET_BY_KIND,
   type BeAttentionItem, type AttentionQueueItem, type AttentionQueueTranslator,
 } from './derive-attention-queue';
@@ -433,5 +434,53 @@ describe('buildAttentionQueueFromInbox (story #2923 AQ1 — DecisionsWaiting 흡
     const [item] = buildAttentionQueueFromInbox([inboxItem({ kind: 'approval' })], tEn, new Map());
     expect(item!.actionLabel).toBe('Approve');
     expect(item!.kindLabel).toBe('Approval needed');
+  });
+});
+
+// story #2923(카디르 QA HIGH2, PR#3352 2026-08-22 처방) — gate_pending(Gate 1차 소스)과
+// approval(inbox_items, 외부 producer)이 같은 story에 동시 존재하면 같은 사실이 두 행으로
+// 중복 노출된다. Gate 우선·겹치는 inbox approval은 drop.
+describe('dedupInboxApprovalsAgainstGatePending (story #2923, 카디르 QA HIGH2)', () => {
+  it('같은 story를 가리키는 approval은 gate_pending 존재 시 drop된다', () => {
+    const items = [inboxItem({ id: 'a1', kind: 'approval', origin_chain: [{ type: 'story', id: 's1' }] })];
+    const result = dedupInboxApprovalsAgainstGatePending(items, new Set(['s1']));
+    expect(result).toEqual([]);
+  });
+
+  it('다른 story를 가리키는 approval은(겹치지 않음) 그대로 남는다', () => {
+    const items = [inboxItem({ id: 'a1', kind: 'approval', origin_chain: [{ type: 'story', id: 's2' }] })];
+    const result = dedupInboxApprovalsAgainstGatePending(items, new Set(['s1']));
+    expect(result).toHaveLength(1);
+  });
+
+  it('gate_pending 집합이 비어 있으면(겹치는 story 자체가 없음) 전부 그대로 남는다', () => {
+    const items = [inboxItem({ id: 'a1', kind: 'approval', origin_chain: [{ type: 'story', id: 's1' }] })];
+    const result = dedupInboxApprovalsAgainstGatePending(items, new Set());
+    expect(result).toHaveLength(1);
+  });
+
+  it('approval인데 origin_chain에 story가 없으면(memo/run/initiative만) dedup 판정 불가라 그대로 남는다(정직 — 근거 없이 안 지움)', () => {
+    const items = [inboxItem({ id: 'a1', kind: 'approval', origin_chain: [{ type: 'memo', id: 'm1' }] })];
+    const result = dedupInboxApprovalsAgainstGatePending(items, new Set(['s1']));
+    expect(result).toHaveLength(1);
+  });
+
+  it('approval이 아닌 kind(decision/blocker/mention)는 story가 겹쳐도 절대 안 지운다(gate_pending과 진짜 중복인 건 approval뿐)', () => {
+    const items = [
+      inboxItem({ id: 'd1', kind: 'decision', origin_chain: [{ type: 'story', id: 's1' }] }),
+      inboxItem({ id: 'b1', kind: 'blocker', origin_chain: [{ type: 'story', id: 's1' }] }),
+      inboxItem({ id: 'm1', kind: 'mention', origin_chain: [{ type: 'story', id: 's1' }] }),
+    ];
+    const result = dedupInboxApprovalsAgainstGatePending(items, new Set(['s1']));
+    expect(result).toHaveLength(3);
+  });
+
+  it('approval 여러 건 중 겹치는 것만 선택적으로 drop한다(전체 삭제 아님)', () => {
+    const items = [
+      inboxItem({ id: 'a1', kind: 'approval', origin_chain: [{ type: 'story', id: 's1' }] }),
+      inboxItem({ id: 'a2', kind: 'approval', origin_chain: [{ type: 'story', id: 's2' }] }),
+    ];
+    const result = dedupInboxApprovalsAgainstGatePending(items, new Set(['s1']));
+    expect(result.map((i) => i.id)).toEqual(['a2']);
   });
 });

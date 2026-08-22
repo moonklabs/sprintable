@@ -210,6 +210,7 @@ async def upsert_notification_setting(
 @router.get("/inbox", response_model=list[InboxItemResponse])
 async def list_inbox(
     assignee_member_id: uuid.UUID = Query(...),
+    project_id: uuid.UUID = Query(...),
     state: str | None = Query(default=None),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
@@ -217,23 +218,28 @@ async def list_inbox(
     repo: InboxRepository = Depends(_inbox_repo),
 ) -> list[InboxItemResponse]:
     """까심 델타 재QA HIGH(S19): 무가드로 남아 타 member의 inbox를 누구나 조회할 수 있었다
-    (정보노출). resolve/dismiss와 동일한 self-or-org-admin 게이트 적용."""
+    (정보노출). resolve/dismiss와 동일한 self-or-org-admin 게이트 적용.
+
+    카디르 QA HIGH1(PR#3352, 2026-08-22): project_id 필터 부재로 다른 프로젝트의 inbox 항목이
+    섞여 나왔다 — 필수 쿼리 파라미터로 승격."""
     await _assert_self_or_org_admin(assignee_member_id, auth, session, org_id)
-    items = await repo.list(assignee_member_id=assignee_member_id, state=state)
+    items = await repo.list(assignee_member_id=assignee_member_id, project_id=project_id, state=state)
     return [InboxItemResponse.model_validate(i) for i in items]
 
 
 @router.get("/inbox/incoming", response_model=list[InboxItemResponse])
 async def list_incoming(
     assignee_member_id: uuid.UUID = Query(...),
+    project_id: uuid.UUID = Query(...),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
     repo: InboxRepository = Depends(_inbox_repo),
 ) -> list[InboxItemResponse]:
-    """까심 델타 재QA HIGH(S19): list_inbox와 동일 갭 — self-or-org-admin 게이트 적용."""
+    """까심 델타 재QA HIGH(S19): list_inbox와 동일 갭 — self-or-org-admin 게이트 적용.
+    카디르 QA HIGH1(PR#3352, 2026-08-22): list_inbox와 동일 project_id 필터 처방."""
     await _assert_self_or_org_admin(assignee_member_id, auth, session, org_id)
-    items = await repo.list_incoming(assignee_member_id=assignee_member_id)
+    items = await repo.list_incoming(assignee_member_id=assignee_member_id, project_id=project_id)
     return [InboxItemResponse.model_validate(i) for i in items]
 
 

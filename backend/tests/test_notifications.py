@@ -296,7 +296,7 @@ async def test_list_inbox_200():
             mock_list.return_value = [_mock_inbox()]
 
             async with client as c:
-                resp = await c.get(f"/api/v2/inbox?assignee_member_id={MEMBER_ID}")
+                resp = await c.get(f"/api/v2/inbox?assignee_member_id={MEMBER_ID}&project_id={PROJECT_ID}")
 
         assert resp.status_code == 200
         assert len(resp.json()) == 1
@@ -313,7 +313,7 @@ async def test_list_inbox_403_when_not_self_or_admin():
         with patch("app.routers.notifications.is_caller_member", new_callable=AsyncMock, return_value=False), \
              patch("app.routers.notifications._is_org_admin", new_callable=AsyncMock, return_value=False):
             async with client as c:
-                resp = await c.get(f"/api/v2/inbox?assignee_member_id={MEMBER_ID}")
+                resp = await c.get(f"/api/v2/inbox?assignee_member_id={MEMBER_ID}&project_id={PROJECT_ID}")
         assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()
@@ -329,7 +329,7 @@ async def test_list_incoming_200():
             mock_list.return_value = [_mock_inbox()]
 
             async with client as c:
-                resp = await c.get(f"/api/v2/inbox/incoming?assignee_member_id={MEMBER_ID}")
+                resp = await c.get(f"/api/v2/inbox/incoming?assignee_member_id={MEMBER_ID}&project_id={PROJECT_ID}")
 
         assert resp.status_code == 200
         assert resp.json()[0]["kind"] == "approval"
@@ -345,7 +345,7 @@ async def test_list_incoming_403_when_not_self_or_admin():
         with patch("app.routers.notifications.is_caller_member", new_callable=AsyncMock, return_value=False), \
              patch("app.routers.notifications._is_org_admin", new_callable=AsyncMock, return_value=False):
             async with client as c:
-                resp = await c.get(f"/api/v2/inbox/incoming?assignee_member_id={MEMBER_ID}")
+                resp = await c.get(f"/api/v2/inbox/incoming?assignee_member_id={MEMBER_ID}&project_id={PROJECT_ID}")
         assert resp.status_code == 403
     finally:
         app.dependency_overrides.clear()

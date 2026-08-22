@@ -132,11 +132,19 @@ class InboxRepository(BaseRepository[InboxItem]):
         super().__init__(InboxItem, session, org_id)
 
     async def list(
-        self, assignee_member_id: uuid.UUID, state: str | None = None, limit: int = 200
+        self, assignee_member_id: uuid.UUID, project_id: uuid.UUID, state: str | None = None, limit: int = 200
     ) -> list[InboxItem]:  # type: ignore[override]
+        # 카디르 QA HIGH1(PR#3352, 2026-08-22) — project_id 필터 부재로 member가 소속된 다른
+        # 프로젝트의 inbox 항목까지 섞여 나왔다(Attention Queue 7개 cap을 무관 항목이 잠식).
+        # InboxItem.project_id는 DB nullable=False(models/notification.py)+양쪽 생성 경로
+        # (createInboxItemSchema·incomingInboxItemSchema, packages/shared/src/schemas/inbox.ts)
+        # 모두 project_id를 필수(z.string().min(1))로 강제해 NULL 행이 존재할 수 없다(전체 쓰기
+        # 경로 코드감사로 확認 — 이 환경엔 라이브 DB 조회 권한이 없어 실측은 이 감사로 갈음).
+        # 그래서 project_id를 선택적 완화(NULL 포함) 없이 필수 파라미터+단순 동등비교로 건다.
         q = select(InboxItem).where(
             self._org_filter(),
             InboxItem.assignee_member_id == assignee_member_id,
+            InboxItem.project_id == project_id,
         )
         if state is not None:
             q = q.where(InboxItem.state == state)
@@ -144,8 +152,8 @@ class InboxRepository(BaseRepository[InboxItem]):
         result = await self.session.execute(q)
         return list(result.scalars().all())
 
-    async def list_incoming(self, assignee_member_id: uuid.UUID) -> list[InboxItem]:
-        return await self.list(assignee_member_id, state="pending")
+    async def list_incoming(self, assignee_member_id: uuid.UUID, project_id: uuid.UUID) -> list[InboxItem]:
+        return await self.list(assignee_member_id, project_id, state="pending")
 
     async def resolve(
         self,

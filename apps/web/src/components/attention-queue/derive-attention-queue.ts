@@ -170,8 +170,10 @@ const PROOF_STATE: Record<AttentionKind, ProofState> = {
 
 /** story #2923 AQ1 — PO 매핑표(2026-08-22 정본, doc attention-audit-redesign-2923) 그대로.
  * gate_pending/needs_input이 decision_needed로 합쳐지는 기존 dedup(PO 콜 2026-07-13)은
- * 안 건드린다 — 합쳐지기 전 "먼저 도착한 원신호"의 kind로 버킷을 가른다(GATE vs STEER는
- * 합쳐진 뒤엔 구분 불가라 dedup 이전 시점에 결정해 둬야 한다). */
+ * 안 건드린다 — 합쳐지기 전 원신호의 kind로 버킷을 가른다. 카디르 QA(PR#3352) 정정 —
+ * "먼저 도착한 신호" 아님: gate_pending이 도착 순서와 무관하게 항상 GATE로 단방향 승격된다
+ * (PO 리뷰 처방, 아래 buildAttentionQueueFromBe의 existing.originKind 갱신 로직 참고 —
+ * needs_input이 먼저 와도 gate_pending이 나중에 오면 GATE로 전환, 역방향 강등은 없음). */
 export const BUCKET_BY_KIND: Record<AttentionKind, AttentionBucket> = {
   gate_pending: 'GATE', merge_ready: 'GATE', approval: 'GATE',
   decision_needed: 'STEER', decision: 'STEER',
@@ -193,9 +195,11 @@ export function buildAttentionQueueFromBe(
 ): AttentionQueueItem[] {
   const items: AttentionQueueItem[] = [];
   const blockedByStory = new Map<string, { title: string; count: number; enteredAtMs: number | null }>();
-  // story_id → { title, enteredAtMs, originKind }(첫 등장 것 — needs_input/gate_pending 중
-  // 먼저 온 신호 기준. originKind는 story #2923 AQ1 버킷 판정용 — decision_needed로 합쳐지기
-  // 전의 원신호를 기억해 둔다, 합쳐진 뒤엔 GATE vs STEER 구분이 불가하므로.)
+  // story_id → { title, enteredAtMs, originKind }. title/enteredAtMs는 첫 등장 것(first-wins,
+  // 무변경). originKind는 다르다 — 카디르 QA(PR#3352) 정정: "먼저 온 신호 기준"이 아니라
+  // gate_pending 단방향 우선(아래 루프에서 gate_pending이 나중에 와도 승격, 역방향 강등 없음).
+  // decision_needed로 합쳐지기 전의 원신호를 기억해 둔다 — 합쳐진 뒤엔 GATE vs STEER 구분이
+  // 불가하므로.
   const decisionNeededByStory = new Map<string, { title: string; enteredAtMs: number | null; originKind: 'gate_pending' | 'needs_input' }>();
 
   for (const sig of signals) {
@@ -300,6 +304,27 @@ export function resolveInboxItemHref(
     if (slug) return `/docs/${slug}`;
   }
   return null;
+}
+
+/** story #2923 AQ1(카디르 QA HIGH2, PR#3352 2026-08-22 처방) — gate_pending(Gate 1차 소스)과
+ * approval(inbox_items, 외부 producer)이 같은 story에 대해 동시 존재하면 같은 사실이 두 행으로
+ * 중복 노출된다. Gate가 1차 소스라 gate_pending 우선·겹치는 inbox approval은 drop한다.
+ * merge_ready(=CI 통과·병합 준비)는 대상 밖 — "결재 대기 중"이라는 같은 사실이 아니라 다른
+ * lifecycle 사실이라, gate_pending과 달리 approval과 진짜 중복이 아니다(지어내지 않음).
+ *
+ * origin_chain에 story가 없는 approval(inbox_items가 story 귀속을 안 줌 — memo/run/initiative
+ * 기반)은 dedup 판정 자체가 불가능하므로 그대로 둔다(둘 다 노출이 정직 — 근거 없이 지우지
+ * 않음). */
+export function dedupInboxApprovalsAgainstGatePending(
+  inboxItems: InboxAttentionItem[],
+  gatePendingStoryIds: Set<string>,
+): InboxAttentionItem[] {
+  return inboxItems.filter((item) => {
+    if (item.kind !== 'approval') return true;
+    const story = item.origin_chain.find((n) => n.type === 'story');
+    if (!story) return true;
+    return !gatePendingStoryIds.has(story.id);
+  });
 }
 
 const INBOX_ITEM_META: Record<InboxItemKind, { kindLabelKey: string; actionLabelKey: string; actionTone: 'primary' | 'neutral' }> = {

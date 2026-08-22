@@ -10,7 +10,7 @@ import { formatRelativeTime } from '@/lib/storage/format';
 import { cn } from '@/lib/utils';
 import {
   parseAttentionQueueSignals, buildAttentionQueueFromBe, parseInboxAttentionItems, buildAttentionQueueFromInbox,
-  buildAttentionQueue, diffAttentionQueueItemIds,
+  dedupInboxApprovalsAgainstGatePending, buildAttentionQueue, diffAttentionQueueItemIds,
   type AttentionQueueItem, type AttentionQueueTranslator, type InboxAttentionItem,
 } from './derive-attention-queue';
 
@@ -49,12 +49,22 @@ async function resolveMemoSlugs(items: InboxAttentionItem[]): Promise<Map<string
 }
 
 async function fetchAttentionQueue(projectId: string, t: AttentionQueueTranslator): Promise<AttentionQueueItem[]> {
+  // 카디르 QA HIGH1(PR#3352, 2026-08-22) — project_id 파라미터 부재로 다른 프로젝트의 inbox
+  // 항목까지 섞여 나왔다. 위 BE attention fetch와 동형으로 project_id를 싣는다(BE도 필수
+  // 쿼리 파라미터로 처방 완료 — backend/app/routers/notifications.py list_inbox).
   const [beJson, inboxJson] = await Promise.all([
     fetchWithAuth(`/api/glance/attention?project_id=${projectId}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    fetchWithAuth('/api/inbox?state=pending').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    fetchWithAuth(`/api/inbox?state=pending&project_id=${projectId}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
   ]);
-  const beItems = buildAttentionQueueFromBe(parseAttentionQueueSignals(beJson), t);
-  const inboxItems = parseInboxAttentionItems(inboxJson);
+  const signals = parseAttentionQueueSignals(beJson);
+  const beItems = buildAttentionQueueFromBe(signals, t);
+  // 카디르 QA HIGH2(PR#3352, 2026-08-22) — gate_pending(Gate 1차 소스)과 approval(inbox_items)
+  // 이 같은 story에 동시 존재하면 같은 사실이 두 행으로 중복 노출된다. gate_pending 원신호의
+  // story_id 집합을 뽑아 inbox approval 쪽에서 겹치는 것만 drop(Gate가 1차 소스 우선).
+  const gatePendingStoryIds = new Set(
+    signals.filter((s) => s.kind === 'gate_pending' && s.story_id).map((s) => s.story_id!),
+  );
+  const inboxItems = dedupInboxApprovalsAgainstGatePending(parseInboxAttentionItems(inboxJson), gatePendingStoryIds);
   const docSlugById = await resolveMemoSlugs(inboxItems);
   return [...beItems, ...buildAttentionQueueFromInbox(inboxItems, t, docSlugById)];
 }
