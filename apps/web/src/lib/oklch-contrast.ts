@@ -74,12 +74,34 @@ export function oklchToSrgb255(l: number, c: number, h: number): [number, number
   ];
 }
 
-/** "oklch(...)" 문자열을 sRGB+alpha로 직접 변환. */
+const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+
+/** "#RGB"/"#RGBA"/"#RRGGBB"/"#RRGGBBAA" 문자열을 sRGB+alpha로 변환. story #2917(Proofline
+ * 토큰 매핑표) — `--proof-*` SSOT가 hex 리터럴(Figma 실측 정본, oklch 이중 변환 오차 회피
+ * 의도적 선택, globals.css 자체 주석 참고)이라 이 파일의 대비 계산 소비처(verify-tint-
+ * foreground-contrast.ts 등)가 hex도 다뤄야 한다. */
+export function parseHexToRgba(value: string): RgbaColor | null {
+  const m = HEX_RE.exec(value.trim());
+  if (!m) return null;
+  let hex = m[1]!;
+  if (hex.length === 3 || hex.length === 4) hex = hex.split('').map((c) => c + c).join('');
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  const a = hex.length === 8 ? parseInt(hex.slice(6, 8), 16) / 255 : 1;
+  return { r, g, b, a };
+}
+
+/** "oklch(...)" 또는 "#hex" 문자열을 sRGB+alpha로 직접 변환(둘 중 매칭되는 형식을 시도) —
+ * story #2917: proof-* SSOT 편입 이후 globals.css의 색 리터럴이 oklch·hex 두 형식을 섞어
+ * 쓰므로 이 함수 하나가 양쪽을 흡수한다(호출부 무변경). */
 export function parseOklchToRgba(value: string): RgbaColor | null {
   const parsed = parseOklch(value);
-  if (!parsed) return null;
-  const [r, g, b] = oklchToSrgb255(parsed.l, parsed.c, parsed.h);
-  return { r, g, b, a: parsed.alpha };
+  if (parsed) {
+    const [r, g, b] = oklchToSrgb255(parsed.l, parsed.c, parsed.h);
+    return { r, g, b, a: parsed.alpha };
+  }
+  return parseHexToRgba(value);
 }
 
 /** source-over 알파 합성(단순, sRGB 감마공간에서) — fg가 반투명 배경 위에 올라간 실제
