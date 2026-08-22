@@ -919,6 +919,13 @@ class EventPublishRequest(BaseModel):
     # 정의의 routing.broadcast가 선언한 대상 외에 발행 시점에 추가로 공람시킬 대상(옵션 — P1
     # 플랜 §2-2 "추가 전파 대상"). org 소속만 허용(cross-org 필터, send_message와 동형).
     extra_broadcast_member_ids: list[uuid.UUID] = []
+    # story #2935(설계 doc steer-event-axis-design-2927 §2) — 발행 대상 conversation을
+    # 호출자가 직접 지정(예: composer가 "지금 보는 스레드"에 STEER 지시를 남기는 경우).
+    # 지정되면 _get_or_create_event_conversation의 참가자-집합 자동계산을 건너뛰고 그
+    # conversation에 바로 발행한다. None이면(기존 호출부 전부) 현행 동작 그대로 — additive,
+    # 무회귀. escalation 대상이 그 conversation의 실 참가자가 아니면 422로 거부한다(doc
+    # "⚠️§2 보강" — fail-closed, 조용한 미도달 방지).
+    conversation_id: uuid.UUID | None = None
 
 
 async def _resolve_event_project_id(
@@ -1023,6 +1030,7 @@ async def publish_registry_event(
     return await _publish_registry_event_core(
         db, org_id, auth, body.definition_key, body.payload, background_tasks,
         request=request, extra_broadcast_member_ids=body.extra_broadcast_member_ids,
+        conversation_id=body.conversation_id,
     )
 
 
@@ -1036,6 +1044,7 @@ async def _publish_registry_event_core(
     *,
     request: Request | None = None,
     extra_broadcast_member_ids: "list[uuid.UUID] | None" = None,
+    conversation_id: uuid.UUID | None = None,
 ) -> dict:
     """`publish_registry_event`(HTTP)·`publish_preset_event`(서버 자동발행, story #2791 P0)의
     공유 core — definition_key+payload를 검증하고 routing(상신선·전파선)을 실 member_id로
@@ -1188,10 +1197,47 @@ async def _publish_registry_event_core(
             ) from None
 
     participant_ids = {sender.id} | escalation_ids | broadcast_ids
-    conv = await _get_or_create_event_conversation(
-        db, org_id=org_id, project_id=project_id,
-        participant_ids=participant_ids, created_by=sender.id,
-    )
+
+    if conversation_id is not None:
+        # story #2935(설계 doc §2 보강) — 지정 conversation에 바로 발행. sender의 참가자
+        # 여부는 send_message()의 기존 인가가 그대로 검증(및 human+non-dm이면 auto-join)한다
+        # — 여기서 중복 검사하지 않는다. 이 함수가 추가로 지켜야 하는 것은 escalation 대상
+        # ("실제로 도달해야 하는" 대상 — routing이 계산한 것)이 그 conversation의 실 참가자가
+        # 아닌 경우다: 정상 경로(_get_or_create_event_conversation)는 참가자 집합 자체를 그
+        # 대상들로 구성하므로 이 문제가 구조적으로 없는데, 오버라이드는 그 계산을 건너뛰므로
+        # escalation 대상이 실제로 그 스레드에 없으면 메시지가 "성공"해도 대상은 못 보는
+        # 조용한 미도달이 된다 — fail-closed 422로 거부(doc §2 "⚠️§2 보강", 대안: 자동 멘션
+        # 부여는 프라이버시 침범+신규 전달계통 원칙 위반으로 기각됨).
+        from app.models.conversation import Conversation, ConversationParticipant
+
+        conv = (await db.execute(
+            select(Conversation).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+        )).scalar_one_or_none()
+        if conv is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        conv_participant_ids = set((await db.execute(
+            select(ConversationParticipant.member_id).where(
+                ConversationParticipant.conversation_id == conv.id
+            )
+        )).scalars().all())
+        missing_escalation = escalation_ids - conv_participant_ids
+        if missing_escalation:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "conversation_target_mismatch",
+                    "message": (
+                        "지정된 conversation_id에 escalation 대상이 참가자로 없어 발행을 "
+                        "거부합니다(지시가 조용히 미도달하는 것을 막기 위함)."
+                    ),
+                    "errors": [str(i) for i in missing_escalation],
+                },
+            )
+    else:
+        conv = await _get_or_create_event_conversation(
+            db, org_id=org_id, project_id=project_id,
+            participant_ids=participant_ids, created_by=sender.id,
+        )
 
     from app.routers.conversations import SendMessageRequest, send_message
 
