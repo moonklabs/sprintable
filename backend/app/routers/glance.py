@@ -259,9 +259,19 @@ async def glance_attention(
 
     # ⑤ verify_fail = 프로젝트의 오픈 story 중 검증(merge gate) 실패(glance/hero의 기존
     # evidence_status=="blocked" 계약 재사용).
+    #
+    # 카디르 QA(PR#3349, 2026-08-22) — story #2893(§2 A1)부터 merge gate가 스토리당 여러 개일
+    # 수 있다(PR마다 1행). 예전(gate-row 기준 select, dedup 없음)엔 같은 스토리가 blocked인
+    # merge gate 수만큼 중복 노출됐고, LIMIT이 gate-row를 세다 보니 실제로는 서로 다른
+    # 스토리인데 화면에 못 뜨는(밀리는) 사용자 도달 실갭이었다. Story.id/title로 GROUP BY해
+    # ①중복 제거 ②LIMIT을 "스토리 수" 기준으로 되돌린다. entered_at은 MIN(가장 먼저
+    # blocked에 들어간 시각) — 유나 설계(체류시간이 위계를 만든다)와 같은 축: 스토리가
+    # blocked로 «가장 오래» 묶여 있던 시점을 보여줘야 밀린 순서가 거짓으로 짧아지지 않는다.
+    # 나머지 3곳(trust_pipeline/merge_gate_metrics/goal 리포지토리)은 동일 갭이 있을 수 있으나
+    # PR① 스코프 밖 후속으로 유지(PR① 본문 명기).
     verify_fail_rows = (
         await session.execute(
-            select(Story.id, Story.title, Gate.evidence_status_entered_at)
+            select(Story.id, Story.title, func.min(Gate.evidence_status_entered_at))
             .select_from(Gate)
             .join(Story, (Story.id == Gate.work_item_id) & (Gate.work_item_type == "story"))
             .where(
@@ -272,6 +282,7 @@ async def glance_attention(
                 Story.status.not_in(_OPEN_EXCLUDED_STATUSES),
                 Story.deleted_at.is_(None),
             )
+            .group_by(Story.id, Story.title)
             .limit(_LIMIT)
         )
     ).all()

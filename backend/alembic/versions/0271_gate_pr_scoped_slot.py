@@ -67,6 +67,31 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # 카디르 QA(PR#3349, 2026-08-22, codex 소스분석 예측→실 재현 확定) — 같은 4-튜플
+    # (org_id, work_item_id, work_item_type, gate_type)에 pr_number만 다른 행이 2개 이상
+    # 실존하면(=이 마이그 upgrade의 목적 자체가 만드는 정상 상태) 옛 4열 UNIQUE 복원이
+    # UniqueViolation으로 막혀 downgrade 자체가 죽는다. 옛 스키마엔 pr_number 컬럼이
+    # 없으므로 "무손실 복원"은 구조상 불가능 — **lossy 복원**(PO 확定): 그룹당 pr_number가
+    # 가장 큰(=가장 최근 PR) 행만 남기고 나머지를 삭제한 뒤 제약을 되돌린다. NULL은
+    # NULLS LAST(최하순위) — PR 컨텍스트가 있는 행이 없는 행보다 항상 우선한다(FE
+    # pickRelevantMergeGate/verify.ts의 "최근 PR 우선"과 같은 축의 판단). 어느 행이
+    # 살아남는지는 이 규칙 하나뿐 — 애매하게 두지 않는다.
+    op.execute(
+        """
+        DELETE FROM gate
+        WHERE id IN (
+            SELECT id FROM (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY org_id, work_item_id, work_item_type, gate_type
+                           ORDER BY pr_number DESC NULLS LAST, id DESC
+                       ) AS rn
+                FROM gate
+            ) ranked
+            WHERE rn > 1
+        )
+        """
+    )
     op.drop_index("uq_gate_work_item_gate_type_pr", table_name="gate")
     op.drop_index("uq_gate_work_item_gate_type_no_pr", table_name="gate")
     op.create_unique_constraint(
