@@ -51,6 +51,13 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   useParams: () => ({ ws: 'ws1', proj: 'proj1' }),
 }));
+// QA changes 10R HIGH③(카디르+codex, 2026-08-22) — StoryDetailPanel의 영구삭제 트리거는
+// HumanOnlyAction(useDashboardContext().currentMemberType==='human')로 감싸여 있다
+// (kanban-board.test.tsx와 동형 관례). Provider 없이는 기본 컨텍스트값에 currentMemberType이
+// 아예 없어(fail-closed) 버튼이 항상 숨는다 — onDeleteSuccess 배선을 실제로 증명하려면 human으로 스텁.
+vi.mock('@/app/dashboard/dashboard-shell', () => ({
+  useDashboardContext: () => ({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human' }),
+}));
 
 const { capturedDragEndHandlers } = vi.hoisted(() => ({
   capturedDragEndHandlers: [] as Array<(event: unknown) => void>,
@@ -135,6 +142,10 @@ type FetchStub = {
   // true면 /api/stories? GET이 몇 번을 불러도 항상 hasMore:true인 무한 스트림처럼 응답한다
   // (storyPages 배열 길이로는 이 시나리오를 못 만든다 — 소진 후 자동 hasMore:false 낙하).
   storiesAlwaysHasMore?: boolean;
+  // QA changes 10R HIGH③(카디르+codex, 2026-08-22) — StoryDetailPanel 배선 검증용(tasks
+  // 실 fetch·delete 성공 시 카드 제거). story_id별 태스크 목록.
+  tasksByStoryId?: Record<string, Array<Record<string, unknown>>>;
+  deleteStorySpy?: (id: string) => void;
 };
 
 // ⚠️QA changes 4R(PR#3377, 카디르+codex, 2026-08-22) — CI 실행 명령까지 정확 재현해 8+1회
@@ -145,7 +156,7 @@ type FetchStub = {
 // 하는데 항상 bulk 2건만이라 결정론적 환경 차 가능성).
 let callLog: string[] = [];
 
-function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singlePatchSpy, singlePatchOk = true, bulkPatchOk = true, storiesGetSpy, storyPages, epicPages, singlePatchResponseData, bulkPatchResponseData, storiesFetchFails = false, storiesAlwaysHasMore = false }: FetchStub) {
+function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singlePatchSpy, singlePatchOk = true, bulkPatchOk = true, storiesGetSpy, storyPages, epicPages, singlePatchResponseData, bulkPatchResponseData, storiesFetchFails = false, storiesAlwaysHasMore = false, tasksByStoryId = {}, deleteStorySpy }: FetchStub) {
   callLog = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
     callLog.push(`${init?.method ?? 'GET'} ${url}`);
@@ -154,11 +165,20 @@ function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singl
       if (!bulkPatchOk) return { ok: false, status: 500, json: async () => ({ error: { message: 'boom' } }) };
       return { ok: true, json: async () => ({ data: bulkPatchResponseData ?? [] }) };
     }
+    if (typeof url === 'string' && /^\/api\/stories\/[^/]+$/.test(url) && init?.method === 'DELETE') {
+      const id = url.split('/').pop()!;
+      deleteStorySpy?.(id);
+      return { ok: true, json: async () => ({ data: { id } }) };
+    }
     if (typeof url === 'string' && /^\/api\/stories\/[^/]+$/.test(url) && init?.method === 'PATCH') {
       const id = url.split('/').pop()!;
       singlePatchSpy?.(id, JSON.parse(init.body ?? '{}'));
       if (!singlePatchOk) return { ok: false, status: 500, json: async () => ({ error: { message: 'boom' } }) };
       return { ok: true, json: async () => ({ data: singlePatchResponseData ?? {} }) };
+    }
+    if (typeof url === 'string' && url.startsWith('/api/tasks?')) {
+      const storyId = new URL(url, 'http://localhost').searchParams.get('story_id') ?? '';
+      return { ok: true, json: async () => ({ data: tasksByStoryId[storyId] ?? [], meta: { hasMore: false, nextCursor: null } }) };
     }
     if (typeof url === 'string' && url.startsWith('/api/stories?')) {
       storiesGetSpy?.();
@@ -175,7 +195,12 @@ function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singl
         const nextCursor = page.hasMore ? String(pageIndex + 1) : null;
         return { ok: true, json: async () => ({ data: page.stories, meta: { hasMore: page.hasMore, nextCursor } }) };
       }
-      return { ok: true, json: async () => ({ data: stories }) };
+      // QA changes 10R HIGH①(카디르+codex, 2026-08-22) — 실 /api/stories 프록시는
+      // buildCursorPageMeta로 meta를 항상 짓는다(app/api/stories/route.ts) — 이 고정
+      // (storyPages/epicPages 안 쓰는 단순 케이스)이 meta 없이 응답하던 게 실 BE와
+      // 어긋난 지점. malformed 판정(HIGH① 처방)이 이걸 그대로 통과시키면 모든 기본
+      // 테스트가 "meta 규약 밖"으로 throw돼 loadError로 떨어진다 — 실 계약대로 정정.
+      return { ok: true, json: async () => ({ data: stories, meta: { hasMore: false, nextCursor: null } }) };
     }
     if (typeof url === 'string' && url.startsWith('/api/goals?')) {
       if (epicPages) {
@@ -185,7 +210,7 @@ function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singl
         const nextCursor = page.hasMore ? String(pageIndex + 1) : null;
         return { ok: true, json: async () => ({ data: page.epics, meta: { hasMore: page.hasMore, nextCursor } }) };
       }
-      return { ok: true, json: async () => ({ data: epics }) };
+      return { ok: true, json: async () => ({ data: epics, meta: { hasMore: false, nextCursor: null } }) };
     }
     if (typeof url === 'string' && url.startsWith('/api/members')) {
       return { ok: true, json: async () => ({ data: members }) };
@@ -350,6 +375,59 @@ describe('EpicSwimlaneBoard — 로드 실패(story #2931, QA changes 8R HIGH②
     await waitForCondition(
       () => container.textContent?.includes('불러오지 못했습니다') ?? false,
       '안전판 소진 에러 상태',
+    );
+    expect(container.textContent).toContain('다시 시도');
+  });
+
+  // ⚠️QA changes 10R HIGH①(카디르+codex, 2026-08-22) — parseCursorMeta는 meta가 규약 A
+  // 형태가 아니면(malformed) "더 보기 없음"으로 낙하한다(다른 소비처엔 의도된 graceful
+  // fallback, story #2231 AC4). 이 뷰는 «전체 집합 필수»라 그 낙하를 자연 소진과 구분
+  // 못 하면 8R②/9R이 막은 것과 같은 클래스(부분 집합을 완전 집합처럼 반환)가 재발한다 —
+  // meta 자체가 규약 밖(offset+limit류)이면 자연 소진이 아니라 에러 상태여야 한다.
+  it('/api/stories meta가 규약 A 형태가 아니면(malformed) 자연 소진으로 오분류하지 않고 에러 상태를 보인다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.startsWith('/api/stories?')) {
+        return { ok: true, json: async () => ({ data: [], meta: { items: [], total: 0, offset: 0 } }) }; // 규약 C — 규약 A 아님.
+      }
+      if (typeof url === 'string' && url.startsWith('/api/goals?')) {
+        return { ok: true, json: async () => ({ data: [], meta: { hasMore: false, nextCursor: null } }) };
+      }
+      if (typeof url === 'string' && url.startsWith('/api/members')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(withIntl(<EpicSwimlaneBoard projectId="p1" />));
+    });
+    await waitForCondition(
+      () => container.textContent?.includes('불러오지 못했습니다') ?? false,
+      'malformed meta 에러 상태',
+    );
+    expect(container.textContent).toContain('다시 시도');
+  });
+
+  // 같은 원칙의 대칭 케이스 — hasMore=true인데 nextCursor가 없는 모순 상태도 자연 소진이
+  // 아니다(파서가 규약 A로는 파싱했지만 값 자체가 내적으로 모순).
+  it('hasMore=true인데 nextCursor가 없으면(모순) 자연 소진으로 오분류하지 않고 에러 상태를 보인다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.startsWith('/api/stories?')) {
+        return { ok: true, json: async () => ({ data: [], meta: { hasMore: true, nextCursor: null } }) };
+      }
+      if (typeof url === 'string' && url.startsWith('/api/goals?')) {
+        return { ok: true, json: async () => ({ data: [], meta: { hasMore: false, nextCursor: null } }) };
+      }
+      if (typeof url === 'string' && url.startsWith('/api/members')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      return { ok: false, json: async () => null };
+    }));
+    await act(async () => {
+      root.render(withIntl(<EpicSwimlaneBoard projectId="p1" />));
+    });
+    await waitForCondition(
+      () => container.textContent?.includes('불러오지 못했습니다') ?? false,
+      'hasMore/nextCursor 모순 에러 상태',
     );
     expect(container.textContent).toContain('다시 시도');
   });
@@ -582,5 +660,99 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     await waitForCondition(() => (nthLaneCell(0, 3)?.textContent ?? '').includes('병합카드2'), '컬럼변경 trust_stage 병합');
 
     expect(nthLaneCell(0, 3)?.textContent).toContain('병합카드2'); // claimed_done(3) 칸 — 서버 응답값이 이겼다.
+  });
+
+  // ⚠️QA changes 10R HIGH②(카디르+codex, 2026-08-22) — bulk PATCH는 gate가 막은 항목도
+  // HTTP200으로 반환하되 status는 기존값 유지+violation에 사유를 담는다(story #2521
+  // PO확定②안). 형제(kanban-board)는 SSE가 결국 채워 정합시키지만 이 뷰엔 SSE가 없다 —
+  // 응답의 진짜 status를 즉시 병합하지 않으면 gate 차단 낙관값이 영구 잔존한다(no-fiction).
+  it('bulk PATCH가 gate 차단(violation)이면 낙관 status를 응답의 진짜 status로 되돌리고 경고를 띄운다', async () => {
+    // 기본축(status, 5컬럼: backlog/ready-for-dev/in-progress/in-review/done) 기준 —
+    // 위 nthLaneCell(7컬럼 트러스트축 전용)과 달리 이 테스트는 축 토글을 하지 않는다.
+    function nthLaneCellStatusAxis(laneIndex: number, columnIndex: number): Element | undefined {
+      const cells = [...container.querySelectorAll('div[class*="w-\\[220px\\]"]')];
+      return cells[5 + laneIndex * 5 + columnIndex];
+    }
+    await mount({
+      epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }],
+      stories: [{ id: 's1', title: '차단카드', status: 'backlog', priority: 'medium', epic_id: 'e1' }],
+      // gate가 in-progress 전이를 막아 status는 원래(backlog) 그대로 응답 — violation 동봉.
+      bulkPatchResponseData: [{ id: 's1', status: 'backlog', violation: { reason: '워크플로우 위반' } }],
+    });
+
+    const handler = capturedDragEndHandlers.at(-1);
+    await act(async () => {
+      handler!({ active: { id: 's1' }, over: { id: 'e1::in-progress' } });
+    });
+    // 응답 병합 後 카드는 backlog(0) 칸으로 되돌아가고 in-progress(2) 칸엔 안 남는다.
+    await waitForCondition(() => (nthLaneCellStatusAxis(0, 0)?.textContent ?? '').includes('차단카드'), 'gate 차단 status 되돌림');
+    expect(nthLaneCellStatusAxis(0, 0)?.textContent).toContain('차단카드');
+    expect(nthLaneCellStatusAxis(0, 2)?.textContent ?? '').not.toContain('차단카드');
+    // 경고 토스트(형제 kanban-board와 동형 문구).
+    expect(container.textContent).toContain('단계를 건너뛴 전이입니다');
+  });
+});
+
+// ⚠️QA changes 10R HIGH③(카디르+codex, 2026-08-22) — StoryDetailPanel 배선 셋 미전달: 형제
+// (kanban-board.tsx)는 tasks={storyTasks}(실 fetch)+members+onDeleteSuccess를 넘기는데 이
+// 뷰는 tasks={[]} 하드코딩(실 fetch 없음)·members 미전달(담당자 편집 후보 0)·
+// onDeleteSuccess 미전달(ghost 카드)이었다 — 카드 클릭할 때마다 매번 발생하는 결함이라
+// 최우선 처방.
+describe('EpicSwimlaneBoard — StoryDetailPanel 배선(story #2931, QA changes 10R HIGH③)', () => {
+  it('카드를 클릭하면 실제로 /api/tasks를 불러 Tasks 탭에 반영한다(하드코딩된 tasks=[] 아님)', async () => {
+    await mount({
+      epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }],
+      stories: [{ id: 's1', title: '패널카드', status: 'backlog', priority: 'medium', epic_id: 'e1' }],
+      tasksByStoryId: { s1: [{ id: 't1', title: '실제태스크', status: 'in-progress' }] },
+    });
+    const card = container.querySelector('[title="패널카드"]') as HTMLElement;
+    expect(card, '카드를 못 찾음').not.toBeNull();
+    await act(async () => { card.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    await waitForCondition(() => container.textContent?.includes('실제태스크') ?? false, 'StoryDetailPanel 실 tasks fetch');
+    expect(container.textContent).toContain('Tasks (1)'); // 하드코딩 tasks=[]였다면 항상 (0).
+    expect(container.textContent).toContain('실제태스크');
+  });
+
+  it('members가 전달돼 담당자 편집 후보가 0명이 아니다', async () => {
+    await mount({
+      epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }],
+      stories: [{ id: 's1', title: '패널카드2', status: 'backlog', priority: 'medium', epic_id: 'e1' }],
+      members: [{ id: 'm1', name: '담당자후보' }],
+    });
+    const card = container.querySelector('[title="패널카드2"]') as HTMLElement;
+    await act(async () => { card.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await waitForCondition(() => container.textContent?.includes('패널카드2') ?? false, '패널 오픈');
+
+    const editBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('편집'));
+    expect(editBtn, '담당자 편집 버튼을 못 찾음').toBeDefined();
+    await act(async () => { editBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(container.textContent).toContain('담당자후보'); // members=[] 하드코딩이었다면 후보 0명.
+  });
+
+  it('onDeleteSuccess가 전달돼 삭제 성공 시 보드에서 카드가 실제로 사라진다(ghost 카드 아님)', async () => {
+    let deletedId: string | null = null;
+    await mount({
+      epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }],
+      stories: [{ id: 's1', title: '삭제될카드', status: 'backlog', priority: 'medium', epic_id: 'e1' }],
+      deleteStorySpy: (id) => { deletedId = id; },
+    });
+    const card = container.querySelector('[title="삭제될카드"]') as HTMLElement;
+    await act(async () => { card.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await waitForCondition(() => container.textContent?.includes('삭제될카드') ?? false, '패널 오픈');
+
+    const deleteTrigger = container.querySelector('[aria-label="스토리 삭제"]') as HTMLElement;
+    expect(deleteTrigger, '삭제 트리거를 못 찾음').not.toBeNull();
+    await act(async () => { deleteTrigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    // Dialog는 document.body에 포탈되므로 container가 아닌 document 전체에서 찾는다.
+    const confirmBtn = [...document.querySelectorAll('button')].find((b) => b.textContent === '영구 삭제');
+    expect(confirmBtn, '삭제 확인 버튼을 못 찾음').toBeDefined();
+    await act(async () => { confirmBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    await waitForCondition(() => deletedId === 's1', 'DELETE 호출 발화');
+    await waitForCondition(() => !(container.textContent?.includes('삭제될카드') ?? false), '삭제 후 카드 실종(onDeleteSuccess 배선)');
+    expect(container.textContent).not.toContain('삭제될카드');
   });
 });

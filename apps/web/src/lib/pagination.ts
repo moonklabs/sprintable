@@ -10,6 +10,11 @@ export interface CursorPageMeta {
   limit: number;
   hasMore: boolean;
   nextCursor: string | null;
+  /** story #2931 PR#3377 QA changes 10R HIGH① — meta가 규약 A 형태가 아니라 파서가
+   * "더 보기 없음"으로 낙하시킨 경우 true. 대부분의 소비처는 graceful fallback을 원해
+   * 무시해도 되지만(house style), «전체 집합 필수» 뷰는 이 플래그로 진짜 자연 소진과
+   * 구분해야 한다(EpicSwimlaneBoard.fetchAllPages 참고). */
+  malformed?: boolean;
   [key: string]: unknown;
 }
 
@@ -66,7 +71,7 @@ export function parseCursorMeta(meta: unknown, source: string): CursorPageMeta {
       const nextCursorRaw = hasCamel ? m['nextCursor'] : m['next_cursor'];
       const nextCursor = typeof nextCursorRaw === 'string' ? nextCursorRaw : null;
       const limit = typeof m['limit'] === 'number' ? m['limit'] : 0;
-      return { ...m, limit, hasMore, nextCursor };
+      return { ...m, limit, hasMore, nextCursor, malformed: false };
     }
   }
   console.error(
@@ -74,7 +79,7 @@ export function parseCursorMeta(meta: unknown, source: string): CursorPageMeta {
     `"더 보기 없음"으로 낙하하지만 실제로는 더 있을 수 있다(story #2231 AC4). meta=`,
     meta,
   );
-  return { limit: 0, hasMore: false, nextCursor: null };
+  return { limit: 0, hasMore: false, nextCursor: null, malformed: true };
 }
 
 export function buildCursorPageMeta<T extends object, K extends keyof T & string>(

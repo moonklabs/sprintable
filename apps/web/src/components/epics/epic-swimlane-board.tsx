@@ -10,7 +10,8 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { parseCursorMeta } from '@/lib/pagination';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { StoryCard } from '@/components/kanban/story-card';
-import { StoryDetailPanel } from '@/components/kanban/story-detail-panel';
+import { StoryDetailPanel, type Task } from '@/components/kanban/story-detail-panel';
+import { useToast, ToastContainer } from '@/components/ui/toast';
 import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
 import {
   COLUMNS, TRUST_COLUMNS, TRUST_COLUMN_TO_STATUS,
@@ -62,7 +63,19 @@ async function fetchAllPages<T>(basePath: string, projectId: string, source: str
     // `meta`로 두면 가드의 텍스트 스캔이 `meta.hasMore`류로 오탐하므로 `pageMeta`로 회피
     // (기존 관용구 — agent-runs-list.tsx 등도 동일 이유로 변수 저장 없이 즉시 체이닝).
     const pageMeta = parseCursorMeta(json.meta, source);
-    if (!pageMeta.hasMore || !pageMeta.nextCursor) { exhaustedNaturally = true; break; }
+    // QA changes 10R HIGH①(카디르+codex, 2026-08-22) — parseCursorMeta가 규약 밖 meta를
+    // 만나면 "더 보기 없음"(hasMore=false)으로 낙하한다(다른 소비처엔 의도된 graceful
+    // fallback, story #2231 AC4). 이 뷰는 «전체 집합 필수»라 그 낙하를 자연 소진과
+    // 구분 못 하면 8R②/9R이 막은 것과 같은 클래스(부분 집합을 완전 집합처럼 반환)가 이
+    // 경로로 재발한다 — malformed는 자연 소진이 아니라 throw(정직한 에러 상태로).
+    if (pageMeta.malformed) {
+      throw new Error(`${source}: 페이지 ${page} meta가 규약 A 형태가 아님 — 전체 집합 요구 뷰라 부분 반환 금지`);
+    }
+    // hasMore=true인데 nextCursor가 없는 모순 상태도 자연 소진이 아니다(같은 원칙).
+    if (pageMeta.hasMore && !pageMeta.nextCursor) {
+      throw new Error(`${source}: 페이지 ${page} hasMore=true인데 nextCursor 없음(모순) — 부분 반환 금지`);
+    }
+    if (!pageMeta.hasMore) { exhaustedNaturally = true; break; }
     cursor = pageMeta.nextCursor;
   }
   // QA changes 9R(카디르+codex, 2026-08-22) — 하드캡(PAGE_HARD_CAP) 소진 시 마지막 페이지가
@@ -202,8 +215,41 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
   const [axisMode, setAxisMode] = useState<AxisMode>('status');
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [selectedStoryId, setSelectedStoryId] = useState<string | null>(null);
+  const [storyTasks, setStoryTasks] = useState<Task[]>([]);
+  const [storyTasksNextCursor, setStoryTasksNextCursor] = useState<string | null>(null);
+  const [loadingMoreStoryTasks, setLoadingMoreStoryTasks] = useState(false);
+  const { toasts, addToast, dismissToast } = useToast();
 
   useEffect(() => { setAxisMode(loadAxisMode(projectId)); }, [projectId]);
+
+  // QA changes 10R HIGH③(카디르+codex, 2026-08-22) — 형제(kanban-board.tsx handleStoryClick)는
+  // 카드 클릭 시 실제로 /api/tasks를 불러 StoryDetailPanel에 전달하는데 이 뷰는 tasks={[]}를
+  // 하드코딩해 클릭할 때마다 "태스크가 없습니다"가 뜬다(실제 유무와 무관). 형제와 동형으로
+  // selectedStoryId 변화에 맞춰 fetch한다.
+  useEffect(() => {
+    if (!selectedStoryId) {
+      setStoryTasks([]);
+      setStoryTasksNextCursor(null);
+      return;
+    }
+    let cancelled = false;
+    setStoryTasks([]);
+    setStoryTasksNextCursor(null);
+    (async () => {
+      try {
+        const res = await fetchWithAuth(`/api/tasks?story_id=${selectedStoryId}&limit=20`);
+        if (cancelled) return;
+        if (res.ok) {
+          const json = await res.json();
+          setStoryTasks(json.data ?? []);
+          setStoryTasksNextCursor(parseCursorMeta(json.meta, 'EpicSwimlaneBoard tasks').nextCursor);
+        }
+      } catch {
+        if (!cancelled) { setStoryTasks([]); setStoryTasksNextCursor(null); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedStoryId]);
   const handleSetAxisMode = useCallback((mode: AxisMode) => {
     setAxisMode(mode);
     saveAxisMode(projectId, mode);
@@ -338,19 +384,49 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
         if (!res.ok) { void fetchAll(); return; }
         const okItems = await res.json().then((j) => j?.data ?? j).catch(() => null);
         const okItem = Array.isArray(okItems) ? okItems.find((x) => x?.id === storyId) : null;
-        if (okItem && 'trust_stage' in okItem) {
-          setStories((prev) => prev.map((s) => (s.id === storyId ? { ...s, trust_stage: okItem.trust_stage ?? null } : s)));
+        // QA changes 10R HIGH②(카디르+codex, 2026-08-22) — bulk PATCH는 gate가 막은 항목도
+        // HTTP200으로 반환하되 status는 기존값 유지+violation에 사유(story #2521 PO확定②안,
+        // backend/app/routers/stories.py). 형제(kanban-board)는 이 상황을 SSE가 결국 채워
+        // 정합시키지만 이 뷰엔 SSE 구독이 없다(원 스코프 밖) — 응답에 실린 진짜 status를
+        // 즉시 병합해야만 gate 차단 낙관값이 영구 잔존하지 않는다(no-fiction, 재파생 아님).
+        if (okItem) {
+          if (okItem.violation) addToast({ type: 'warning', title: t('transitionViolation') });
+          setStories((prev) => prev.map((s) => (s.id === storyId
+            ? {
+                ...s,
+                status: typeof okItem.status === 'string' ? okItem.status : s.status,
+                trust_stage: 'trust_stage' in okItem ? (okItem.trust_stage ?? null) : s.trust_stage,
+              }
+            : s)));
         }
       }
     } catch {
       void fetchAll(); // 네트워크 예외(fetch 자체가 throw) — 실패 시 재조회로 정직한 상태 복구.
     }
-  }, [stories, columns, axisMode, fetchAll]);
+  }, [stories, columns, axisMode, fetchAll, addToast, t]);
 
   const selectedStory = selectedStoryId ? stories.find((s) => s.id === selectedStoryId) ?? null : null;
 
+  // QA changes 10R(카디르+codex, 2026-08-22) — 형제(kanban-board)가 StoryDetailPanel에
+  // 넘기는 계약면 grep 전수 대조. storyMap/epicMap은 이 뷰가 이미 들고 있는 stories/epics로
+  // 공짜로 만들 수 있다(의존성 그래프 다른-스토리 이름 표시·클릭 이동용) — sprintMap은
+  // 이 뷰가 sprint를 아예 fetch하지 않아 제외(활동로그 표시용 코스메틱 폴백뿐이라 비차단,
+  // sprintName() 부재 시 "—"로 안전 낙하 — overlayPosition도 이 뷰는 팝오버 아닌 전체화면
+  // 드로어라 N/A, 형제와 동형).
+  const storyMap = useMemo(() => {
+    const map: Record<string, { title: string; status: string }> = {};
+    for (const s of stories) map[s.id] = { title: s.title, status: s.status };
+    return map;
+  }, [stories]);
+  const epicMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const e of epics) map[e.id] = e.title;
+    return map;
+  }, [epics]);
+
   return (
     <>
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       <TopBarSlot title={<h1 className="text-sm font-medium">{t('epicSwimlaneTitle')}</h1>} showContextChip />
       <div className="space-y-3 p-4">
         <WorkspaceFrameTabs active="epic" />
@@ -455,10 +531,38 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
             {selectedStory && (
               <StoryDetailPanel
                 story={selectedStory}
-                tasks={[]}
+                tasks={storyTasks}
+                nextTasksCursor={storyTasksNextCursor}
+                loadingMoreTasks={loadingMoreStoryTasks}
+                onLoadMoreTasks={async () => {
+                  if (!selectedStoryId || !storyTasksNextCursor) return;
+                  setLoadingMoreStoryTasks(true);
+                  try {
+                    const res = await fetchWithAuth(`/api/tasks?story_id=${selectedStoryId}&limit=20&cursor=${encodeURIComponent(storyTasksNextCursor)}`);
+                    if (res.ok) {
+                      const json = await res.json();
+                      setStoryTasks((prev) => {
+                        const existingIds = new Set(prev.map((task) => task.id));
+                        return [...prev, ...((json.data ?? []) as Task[]).filter((task) => !existingIds.has(task.id))];
+                      });
+                      setStoryTasksNextCursor(parseCursorMeta(json.meta, 'EpicSwimlaneBoard tasks(loadMore)').nextCursor);
+                    }
+                  } finally {
+                    setLoadingMoreStoryTasks(false);
+                  }
+                }}
                 onClose={() => setSelectedStoryId(null)}
                 memberMap={memberMap}
+                members={members}
+                storyMap={storyMap}
+                epicMap={epicMap}
+                projectId={projectId}
+                onNavigate={(storyId) => setSelectedStoryId(storyId)}
                 onStoryUpdate={(updated) => setStories((prev) => prev.map((s) => (s.id === updated.id ? { ...s, ...updated } : s)))}
+                onDeleteSuccess={(id) => {
+                  setStories((prev) => prev.filter((s) => s.id !== id));
+                  setSelectedStoryId(null);
+                }}
               />
             )}
           </>
