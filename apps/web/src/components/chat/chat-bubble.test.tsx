@@ -1637,3 +1637,59 @@ describe('ChatBubble — story #2905 S2c③④ 다중 sole-link 문단(그룹핑
     expect(container.querySelectorAll('.rounded-md')).toHaveLength(3);
   });
 });
+
+describe('ChatBubble — story #2921 S4(유나 확定, 버블·아바타 Proofline 재도장)', () => {
+  const plainMessage: ChatMessage = {
+    ...baseMessage,
+    content: '안녕한 일반 텍스트 메시지인 — 참조 없음',
+  };
+
+  it('버블=무채 panel(내 메시지=blue-soft) — isMine이면 bg-proof-blue-soft, 아니면 bg-proof-panel', async () => {
+    // ⛔bg-proof-blue-soft는 에이전트 아바타(ProofAvatar isAgent)에도 붙어 셀렉터가 겹친다 —
+    // 버블 고유 모서리 클래스(rounded-tr-sm/rounded-tl-sm)와 함께 잡아 버블 자신만 특정한다.
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [], sender_type: 'human' }} isMine />));
+    });
+    expect(container.querySelector('.rounded-tr-sm.bg-proof-blue-soft')).toBeTruthy();
+    expect(container.querySelector('.rounded-tr-sm.bg-proof-panel')).toBeNull();
+    // 옛 solid 배경+흰 글자 조합이 안 남아있다(눈에 안 보이는 흰 글자 회귀 방지).
+    expect(container.querySelector('.bg-primary.text-primary-foreground')).toBeNull();
+
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [], sender_type: 'human' }} isMine={false} />));
+    });
+    expect(container.querySelector('.rounded-tl-sm.bg-proof-panel')).toBeTruthy();
+    expect(container.querySelector('.rounded-tl-sm.bg-proof-blue-soft')).toBeNull();
+  });
+
+  it('에이전트 아바타=circle+blue 링(ProofAvatar isAgent 재사용, 사본 분화 금지)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [], sender_type: 'agent' }} isMine={false} />));
+    });
+    const avatar = container.querySelector('.border-proof-blue.bg-proof-blue-soft');
+    expect(avatar).toBeTruthy();
+    expect(avatar?.className).toContain('rounded-full');
+    expect(avatar?.className).not.toContain('rounded-md');
+  });
+
+  it('human 아바타=square+무채(본인·상대 공통) — 에이전트만 circle이다', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [], sender_type: 'human' }} isMine={false} />));
+    });
+    const avatar = container.querySelector('.border-proof-line.bg-proof-sunk');
+    expect(avatar).toBeTruthy();
+    expect(avatar?.className).toContain('rounded-md');
+    expect(avatar?.className).not.toContain('rounded-full');
+
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [], sender_type: 'human' }} isMine />));
+    });
+    const mineAvatar = container.querySelector('.border-proof-line.bg-proof-sunk');
+    expect(mineAvatar).toBeTruthy();
+    expect(mineAvatar?.className).toContain('rounded-md');
+  });
+});

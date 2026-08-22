@@ -134,19 +134,26 @@ function StateHeader({ state, label }: { state: ProofState; label: string }) {
   );
 }
 
-/** Workcell 등 다른 Proof Capsule 계열 컴포넌트가 동일 아바타 스타일을 재사용할 수 있게 export. */
-export function ProofAvatar({ label, isAgent, size = 19 }: { label: string; isAgent?: boolean; size?: number }) {
+/** Workcell 등 다른 Proof Capsule 계열 컴포넌트가 동일 아바타 스타일을 재사용할 수 있게 export.
+ * story #2921 S4 — shape 추가(기본 circle, 기존 호출부 전부 무변화). chat-redesign-2921 §4축
+ * 「에이전트=blue 링 아바타·human=무채 사각」이 square 변형을 요구해 추가했다(circle=에이전트,
+ * square=human). children이 있으면 label 텍스트 대신 렌더(아이콘 아바타 지원 — 챗은 이름이
+ * 없을 수 있는 표시라 이니셜만으론 부족, Bot/User 아이콘을 그대로 쓴다). */
+export function ProofAvatar({
+  label, isAgent, size = 19, shape = 'circle', children,
+}: { label: string; isAgent?: boolean; size?: number; shape?: 'circle' | 'square'; children?: ReactNode }) {
   return (
     <span
       className={cn(
-        'inline-flex shrink-0 items-center justify-center rounded-full border text-[9px] font-semibold',
+        'inline-flex shrink-0 items-center justify-center border text-[9px] font-semibold',
+        shape === 'circle' ? 'rounded-full' : 'rounded-md',
         isAgent
           ? 'border-proof-blue bg-proof-blue-soft text-proof-blue'
           : 'border-proof-line bg-proof-sunk text-proof-ink-2',
       )}
       style={{ width: size, height: size }}
     >
-      {label}
+      {children ?? label}
     </span>
   );
 }
