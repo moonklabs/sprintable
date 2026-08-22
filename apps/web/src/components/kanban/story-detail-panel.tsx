@@ -23,7 +23,7 @@ import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outc
 import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
 import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { EvidenceSection } from '@/components/verify/evidence-section';
-import { ChatProofSection } from '@/components/verify/chat-proof-section';
+import { ChatProofSection, parseStoryProofReferences } from '@/components/verify/chat-proof-section';
 import { deriveInFlightTrustChip } from '@/services/verify';
 import { Workcell, type WorkcellMessage, type WorkcellPipelineStage } from '@/components/workcell/workcell';
 import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
@@ -489,11 +489,15 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   // 를 받아 DescriptionViewer의 render-time 치환에 넘긴다. undefined면 치환 자체를 보류(축A
   // 미로드와 동형 폴백 — 안 뜨는 게 거짓 렌더보다 안전).
   const [bareNumberTargets, setBareNumberTargets] = useState<Record<string, string> | undefined>(undefined);
+  // story #2922 W5 — Workcell Conversation 구획 요약(대화 근거 건수+링크). count=null이면
+  // 확認된 0건(정직한 "연결된 대화 없음"), undefined면 로딩/실패라 렌더 보류(no-fiction).
+  const [chatProofSummary, setChatProofSummary] = useState<{ count: number | null; href: string | null } | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
     setOutgoingRefs(undefined);
     setBareNumberTargets(undefined);
+    setChatProofSummary(undefined);
     fetchWithAuth(`/api/stories/${story.id}/references?direction=outgoing`, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
       .then((json: { data?: unknown; bare_number_targets?: unknown } | null) => {
@@ -509,8 +513,16 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
         if (json.bare_number_targets && typeof json.bare_number_targets === 'object') {
           setBareNumberTargets(json.bare_number_targets as Record<string, string>);
         }
+        // story #2922 W5 — 같은 응답을 ChatProofSection과 동일 파서(parseStoryProofReferences)로
+        // 재해석해 Workcell 요약도 채운다(전용 fetch 신설 0). 가장 최근(첫) 근거의 대화로 링크.
+        const { items } = parseStoryProofReferences(json);
+        const first = items[0] ?? null;
+        setChatProofSummary({
+          count: items.length,
+          href: first ? `/chats/${first.conversationId}?messageId=${first.startMessageId}` : null,
+        });
       })
-      .catch(() => { /* undefined 유지 — 유령/치환 판정 보류 */ });
+      .catch(() => { /* undefined 유지 — 유령/치환/대화요약 판정 전부 보류 */ });
     return () => { cancelled = true; };
   }, [story.id, orgSyncVersion]);
 
@@ -1341,7 +1353,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
                   nextNeed: WORKCELL_NEXT_NEED_BY_STATUS[localStatus] ?? statusLabel,
                 }}
                 evidence={workcellEvidence}
-                conversation={{ view: 'run', messages: workcellMessages }}
+                conversation={{ view: 'run', messages: workcellMessages, chatProof: chatProofSummary }}
               />
             ) : null}
             <div>
