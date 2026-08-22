@@ -84,6 +84,7 @@ async def _resolve_member_legacy(
             role=tm.role,
             org_id=tm.org_id,
             project_id=tm.project_id,
+            avatar_url=tm.avatar_url,
         )
 
     # JWT 휴먼
@@ -108,6 +109,9 @@ async def _resolve_member_legacy(
     )).scalar_one_or_none()
     name = user.email if user else str(user_id)
 
+    # story #2901 — OrgMember·User 둘 다 avatar_url 컬럼이 없다(TeamMember/Member만 보유) —
+    # 지어낼 수 없어 dataclass 기본값(None) 그대로 둔다. JWT-휴먼이 TeamMember 행도 없는
+    # 레거시 org-member-only 케이스에 한정된 사각(앵커 모드 전환 시 Member 통합으로 해소).
     return ResolvedMember(
         id=om.id,
         user_id=user_id,
@@ -164,6 +168,7 @@ async def _resolve_member_anchor(
             role=role or "member",
             org_id=m.org_id,
             project_id=proj,
+            avatar_url=m.avatar_url,
         )
 
     # JWT 휴먼
@@ -203,6 +208,8 @@ async def _resolve_member_anchor(
         )).scalar_one_or_none()
         if om is None:
             raise HTTPException(status_code=400, detail="Organization member not found")
+        # story #2901 — 이 폴백은 om(OrgMember) 소싱이라 위 L111 레거시 분기와 동일하게
+        # avatar_url 컬럼이 없다(지어낼 수 없어 dataclass 기본값 None 유지).
         return ResolvedMember(
             id=om.id,
             user_id=user_id,
@@ -221,6 +228,7 @@ async def _resolve_member_anchor(
         role=m.org_role or "member",
         org_id=m.org_id,
         project_id=project_id,
+        avatar_url=m.avatar_url,
     )
 
 
@@ -251,6 +259,7 @@ async def _lookup_members_by_ids_legacy(
         m.id: ResolvedMember(
             id=m.id, user_id=m.user_id, name=m.name,
             type=m.type, role=m.role, org_id=m.org_id, project_id=m.project_id,
+            avatar_url=m.avatar_url,
         )
         for m in tms
     }
@@ -270,6 +279,7 @@ async def _lookup_members_by_ids_legacy(
             users_map = {u.id: u.email for u in users}
 
         for om in oms:
+            # story #2901 — om(OrgMember) 소싱, avatar_url 컬럼 없음(위 단일 resolve와 동일 사각).
             result[om.id] = ResolvedMember(
                 id=om.id,
                 user_id=om.user_id,
@@ -368,12 +378,14 @@ async def _lookup_members_by_ids_anchor(
                 id=m.id, user_id=None, name=m.name, type="agent",
                 role=role_by_member.get(m.id, "member"), org_id=m.org_id,
                 project_id=proj_by_member.get(m.id),
+                avatar_url=m.avatar_url,
             )
         else:
             result[orig_id] = ResolvedMember(
                 id=m.id, user_id=m.user_id,
                 name=email_by_user.get(m.user_id) if m.user_id else str(m.id),
                 type="human", role=m.org_role or "member", org_id=m.org_id, project_id=None,
+                avatar_url=m.avatar_url,
             )
 
     # 3. 진짜 orphan(member/alias 모두 없음) — telemetry-only + 크래시 방지 placeholder
