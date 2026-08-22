@@ -113,18 +113,24 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
         </div>
       </div>
 
-      {/* story #2921 S6 — railMode==='collapsed'일 때만 보이는 재호출 토글(lg~xl 사이에서만,
-          평소·overlay·모바일에는 안 뜬다). */}
-      {railMode === 'collapsed' && (
-        <button
-          type="button"
-          aria-label={t('expandRail')}
-          onClick={toggleManualExpand}
-          className="fixed left-0 top-1/2 z-30 hidden -translate-y-1/2 rounded-r-md border border-l-0 border-border bg-card p-1.5 text-muted-foreground shadow-sm transition hover:text-foreground lg:block xl:hidden"
-        >
-          <PanelLeftOpen className="h-4 w-4" />
-        </button>
-      )}
+      {/* story #2921 S6 후속(카디르 #3337 QA, 2026-08-22 라이브 키보드 재현 HIGH 발견) —
+          railMode==='collapsed'일 때만 보이는 재호출 토글. 예전엔 이 버튼을 조건부로
+          마운트/언마운트했는데(`{railMode==='collapsed' && (...)}`), overlay가 Esc로 닫힐 때
+          useFocusTrap의 "이전 포커스 노드로 복귀" 전제(그 DOM 노드가 안정적으로 존재)가
+          깨졌다 — 트리거가 이미 언마운트된 상태라 focus()가 조용히 no-op되고 포커스가
+          숨겨진 rail 안 「새 대화」 버튼으로 새 나갔다. 처방: 항상 마운트하고 CSS로만
+          숨긴다(`!hidden`, display:none — 네이티브 hidden 속성이 아니라 Tailwind 클래스로
+          강제해야 lg:block과의 특이도 경쟁에서 확実히 이긴다). display:none 요소는 자동으로
+          tab 순서·접근성 트리에서 빠지므로 inert 속성 없이도 동일 효과 — DOM 노드 자체가
+          안 사라지는 것만으로 useFocusTrap의 ref가 계속 유효해진다. */}
+      <button
+        type="button"
+        aria-label={t('expandRail')}
+        onClick={toggleManualExpand}
+        className={`fixed left-0 top-1/2 z-30 hidden -translate-y-1/2 rounded-r-md border border-l-0 border-border bg-card p-1.5 text-muted-foreground shadow-sm transition hover:text-foreground lg:block xl:hidden ${railMode !== 'collapsed' ? '!hidden' : ''}`}
+      >
+        <PanelLeftOpen className="h-4 w-4" />
+      </button>
 
       {/* 대화 outlet — 모바일은 리스트가 아닌 라우트(`/chats/[id]`)일 때만 전체화면, 데스크톱은
           항상 리스트 옆에 병렬로 보인다. */}

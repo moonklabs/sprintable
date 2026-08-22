@@ -148,7 +148,9 @@ describe('ChatsLayout — story #2921 S6(xl 미만 + Reading 열림 → rail 자
     });
     const rail = container.querySelector('[data-testid="chat-rail"]');
     expect(rail?.className).not.toMatch(/(^|\s)lg:hidden(\s|$)/);
-    expect(container.querySelector('[aria-label="목록 열기"]')).toBeNull();
+    // 카디르 #3337 QA 처방(포커스 복귀 버그) 후 — 트리거는 이제 항상 마운트되고 CSS로만
+    // 숨는다(DOM 부재가 아니라 !hidden 클래스). 존재 자체가 아니라 숨김 클래스를 잰다.
+    expect(container.querySelector('[aria-label="목록 열기"]')?.className).toContain('!hidden');
   });
 
   it('lg~xl 사이 + Reading 닫힘 — 현행 2-pane 그대로(무변화, ②)', async () => {
@@ -169,7 +171,9 @@ describe('ChatsLayout — story #2921 S6(xl 미만 + Reading 열림 → rail 자
     });
     const rail = container.querySelector('[data-testid="chat-rail"]');
     expect(rail?.className).toMatch(/(^|\s)lg:hidden(\s|$)/);
-    expect(container.querySelector('[aria-label="목록 열기"]')).toBeTruthy();
+    const expandBtn = container.querySelector('[aria-label="목록 열기"]');
+    expect(expandBtn).toBeTruthy();
+    expect(expandBtn?.className).not.toContain('!hidden');
   });
 
   it('접힌 rail을 토글로 다시 부르면 오버레이(fixed)로 뜬다 — main/reading 폭을 다시 누르지 않는다(④)', async () => {
@@ -183,9 +187,10 @@ describe('ChatsLayout — story #2921 S6(xl 미만 + Reading 열림 → rail 자
     const rail = container.querySelector('[data-testid="chat-rail"]');
     expect(rail?.className).toContain('fixed');
     expect(rail?.className).toContain('z-40');
-    // 오버레이 상태에선 collapsed 전용 재호출 토글이 사라지고, backdrop이 대신 뜬다(장식용
-    // click-catcher — 접근성 트리에서는 빠진다, aria-hidden).
-    expect(container.querySelector('[aria-label="목록 열기"]')).toBeNull();
+    // 오버레이 상태에선 collapsed 전용 재호출 토글이 !hidden으로 숨고(DOM 부재 아님 — 카디르
+    // #3337 QA 처방, 포커스 복귀 안정성), backdrop이 대신 뜬다(장식용 click-catcher —
+    // 접근성 트리에서는 빠진다, aria-hidden).
+    expect(container.querySelector('[aria-label="목록 열기"]')?.className).toContain('!hidden');
     const backdrop = Array.from(container.querySelectorAll('button')).find((b) => b.getAttribute('aria-hidden') === 'true');
     expect(backdrop).toBeTruthy();
   });
@@ -233,8 +238,28 @@ describe('ChatsLayout — story #2921 S6(xl 미만 + Reading 열림 → rail 자
     await act(async () => {
       root.render(wrap(<ChatsLayout><ReadingOpenProbe open /></ChatsLayout>));
     });
-    // 리셋됐다면 다시 collapsed(재호출 토글 존재)로 돌아온다 — overlay가 안 남아있다.
-    expect(container.querySelector('[aria-label="목록 열기"]')).toBeTruthy();
+    // 리셋됐다면 다시 collapsed(재호출 토글이 !hidden 없이 보임)로 돌아온다 — overlay가 안 남아있다.
+    expect(container.querySelector('[aria-label="목록 열기"]')?.className).not.toContain('!hidden');
     expect(container.querySelector('[data-testid="chat-rail"]')?.className).not.toContain('fixed');
+  });
+
+  it('카디르 #3337 QA(2026-08-22, HIGH) — Escape로 오버레이를 닫으면 포커스가 트리거로 정확히 돌아온다(숨겨진 rail 안 다른 버튼으로 새지 않는다)', async () => {
+    usePathnameMock.mockReturnValue('/chats/conv-123');
+    mqMatches = true;
+    await act(async () => {
+      root.render(wrap(<ChatsLayout><ReadingOpenProbe open /></ChatsLayout>));
+    });
+    const expandBtn = container.querySelector('[aria-label="목록 열기"]') as HTMLButtonElement;
+    expandBtn.focus();
+    await act(async () => { expandBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // 트리거가 언마운트되지 않고 !hidden으로만 숨는다 — DOM에 여전히 있다(포커스 복귀 대상이
+    // 살아있어야 하는 이 처방의 핵심 전제).
+    expect(expandBtn.isConnected).toBe(true);
+    expect(expandBtn.className).toContain('!hidden');
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(document.activeElement).toBe(expandBtn);
+    expect(expandBtn.className).not.toContain('!hidden');
   });
 });
