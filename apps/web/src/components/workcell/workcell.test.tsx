@@ -82,8 +82,14 @@ describe('Workcell — story #2922 W4 책임자/실행자 헤더 승격(중복 �
 // 어느 것도 아니라(신호 없음) 회색 폴백이어야 한다(no-fiction — 색을 지어내지 않음).
 describe('Workcell — story #2922 W6 Proofline 레일(단계→색 파생)', () => {
   it('merge_ready → bg-proof-green 레일', () => {
+    // 카디르군 QA(#3345 HIGH) — 이전 정규식(전역 class+aria-hidden 매치)이 레일이 아니라
+    // merge_ready일 때 PipelineStepper의 «선행완료 점»(동일하게 bg-proof-green+
+    // aria-hidden="true")에 우연매치해 로드베어링이 아니었다(뮤테이션해도 안 깨짐, 실증
+    // — codex+카디르 완전독립 이중재현). 최상위 첫 자식(레일 그 자체)에만 앵커링한다.
     const markup = renderKo(<Workcell {...BASE} pipelineStage="merge_ready" />);
-    expect(markup).toMatch(/class="[^"]*bg-proof-green[^"]*"[^>]*aria-hidden="true"/);
+    const railMatch = markup.match(/^<div\b[^>]*><div class="([^"]*)" aria-hidden="true"><\/div>/);
+    expect(railMatch).toBeTruthy();
+    expect(railMatch![1].split(/\s+/)).toContain('bg-proof-green');
   });
 
   it('needs_input → bg-proof-amber 레일', () => {
