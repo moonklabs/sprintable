@@ -51,12 +51,30 @@ describe('Workcell (4층 — Brief/Run/Evidence/Conversation)', () => {
     expect(markup).toContain('Running');
   });
 
-  it('renders Brief goal/dod/owner/agent', () => {
+  it('renders Brief goal/dod + header owner/agent(story #2922 W4 — 헤더로 승격)', () => {
     const markup = renderKo(<Workcell {...BASE} />);
     expect(markup).toContain('실패한 결제를 재시도로 복구');
     expect(markup).toContain('AC 4 충족');
     expect(markup).toContain('책임 윤재');
     expect(markup).toContain('실행 미르코군');
+  });
+});
+
+// story #2922 W4 — 책임자/실행자가 헤더 한 곳으로 승격됐다(Brief 구획 중복 제거).
+describe('Workcell — story #2922 W4 책임자/실행자 헤더 승격(중복 제거 회귀가드)', () => {
+  it('owner/agent "라벨+이름" 텍스트가 정확히 한 번씩만 렌더된다(헤더 SSOT, Brief에 중복 없음)', () => {
+    // #3339(2921) 이후 Avatar 컴포넌트가 접근성용 aria-label={name}도 함께 심는다 —
+    // 이름 substring 단독 카운트는 그 aria-label과 겹쳐 거짓 "2회"로 보이므로, 실제
+    // 헤더가 렌더하는 "라벨+이름" 조합 문구로 좁혀서 정확히 1회임을 확인한다.
+    const markup = renderKo(<Workcell {...BASE} />);
+    expect(markup.split('책임 윤재').length - 1).toBe(1);
+    expect(markup.split('실행 미르코군').length - 1).toBe(1);
+  });
+
+  it('agent 없으면(브리핑에 실행자 미배정) 실행 라벨 자체가 안 뜬다(no-fiction)', () => {
+    const markup = renderKo(<Workcell {...BASE} brief={{ ...BASE.brief, agent: undefined }} />);
+    expect(markup).toContain('책임 윤재');
+    expect(markup).not.toContain('실행 미르코군');
   });
 });
 

@@ -119,6 +119,7 @@ function PipelineStepper({ stage }: { stage: WorkcellPipelineStage }) {
  * 안티패턴 0 — 진행률 바(%) 자체를 렌더하지 않는 게 Run 구획의 핵심 계약.
  */
 export function Workcell({ title, pipelineStage, brief, run, evidence, conversation, className }: WorkcellProps) {
+  const t = useTranslations('workcell');
   return (
     <div
       className={cn('overflow-hidden rounded-[6px] border border-proof-line bg-proof-panel', className)}
@@ -127,6 +128,22 @@ export function Workcell({ title, pipelineStage, brief, run, evidence, conversat
       <div className="border-b border-proof-line px-4.5 py-3.5">
         <PipelineStepper stage={pipelineStage} />
         <span className="text-[17px] font-bold leading-tight tracking-[-0.012em] text-proof-ink">{title}</span>
+        {/* story #2922 W4 — 책임자/실행자를 헤더로 승격("10초 리트머스": 스크롤 없이 «누가»가
+            보임). #3339(2921 아바타 단일통합)가 ProofAvatar를 폐기·Avatar로 수렴시켰다 —
+            여기도 그 정본을 그대로 소비(신규 변형 0). Brief 구획의 중복 표기는 제거(SSOT=
+            헤더 이 한 자리). */}
+        <div className="mt-2 flex flex-wrap items-center gap-3.5 text-[11px] text-proof-ink-3">
+          <span className="inline-flex items-center gap-1.5">
+            <Avatar name={brief.owner.name} actorType="human" size={18} />
+            {t('briefOwner')} {brief.owner.name}
+          </span>
+          {brief.agent ? (
+            <span className="inline-flex items-center gap-1.5">
+              <Avatar name={brief.agent.name} actorType="agent" size={18} />
+              {t('briefAgent')} {brief.agent.name}
+            </span>
+          ) : null}
+        </div>
       </div>
 
       {/* story #2922 W1 — 4구획 세로 나열 → 2×2 그리드(Brief|Run / Evidence|Conversation).
@@ -164,16 +181,14 @@ function BriefLayer({ brief }: { brief: WorkcellBrief }) {
         <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">{t('briefDod')}</span>
         <span className="text-proof-ink">{brief.dod}</span>
       </div>
-      <div className="mt-1.5 flex flex-wrap items-center gap-2 gap-y-1.5 text-[13px] leading-[1.5] text-proof-ink-2">
-        <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">{t('briefRoles')}</span>
-        <span className="inline-flex items-center gap-1.5"><Avatar name={brief.owner.name} actorType="human" size={18} />{t('briefOwner')} {brief.owner.name}</span>
-        {brief.agent ? (
-          <span className="inline-flex items-center gap-1.5"><Avatar name={brief.agent.name} actorType="agent" size={18} />{t('briefAgent')} {brief.agent.name}</span>
-        ) : null}
-        {brief.scopes && brief.scopes.length > 0 ? (
+      {/* story #2922 W4 — owner/agent는 헤더로 승격됐다(위 Workcell 헤더 참조, SSOT 이동).
+          scopes만 남아 briefRoles 라벨을 계승. */}
+      {brief.scopes && brief.scopes.length > 0 ? (
+        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[13px] leading-[1.5] text-proof-ink-2">
+          <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">{t('briefRoles')}</span>
           <span className="font-mono text-[10.5px] text-proof-ink-3">{brief.scopes.join(' · ')}</span>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
