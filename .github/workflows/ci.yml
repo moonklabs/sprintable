@@ -855,6 +855,11 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # story #2929 — base가 develop/main이 아닌 스택 PR(feat/* 위 feat/*)에는 이 job이 전혀
+  # 안 돈다(트리거 `branches: [main, develop]`, 위). 그 갭은 `stack-pr-frontend-preview.yml`
+  # (별도 파일, `branches-ignore: [main, develop]`)이 required 체크 이름을 건드리지 않고
+  # 메운다 — 이 job과 완전 분리라 required 체크 의미론엔 영향 없음. 새 verify:* 스텝을
+  # 여기 추가하면 그 파일에도 반영할 것(리뷰에서 확인).
   ci:
     name: Lint, Type Check, Test, Build
     runs-on: ubuntu-latest
