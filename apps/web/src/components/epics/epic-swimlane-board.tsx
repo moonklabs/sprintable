@@ -35,23 +35,26 @@ const UNASSIGNED_LANE_ID = '__unassigned__';
 // 조용히 잘려 레인 카운트·상위3 큐레이션이 틀어졌다. 이 뷰는 kanban-board(컬럼별 "더보기"
 // UX)와 달리 레인×컬럼 버킷팅 자체가 «전체 집합»을 요구해 부분 로드로는 정직할 수 없다 —
 // hasMore가 꺼질 때까지 커서를 소진한다("정직한 더-있음 표시"보다 전량 소진이 이 뷰엔 맞음).
-const STORY_PAGE_LIMIT = 100;
-const STORY_PAGE_HARD_CAP = 50; // 안전판(최대 5000건) — 정상 프로젝트 규모를 크게 상회.
+// QA changes 7R(카디르+codex, 2026-08-22) — 원 발견의 «에픽» 절반: /api/goals도 동일
+// maxLimit=100 clamp라 활성 에픽 100+ 프로젝트에서 레인 자체가 조용히 누락된다. stories
+// 전용이던 헬퍼를 basePath 파라미터화해 goals에도 동형 적용(중복 루프 제거).
+const PAGE_LIMIT = 100;
+const PAGE_HARD_CAP = 50; // 안전판(최대 5000건) — 정상 프로젝트 규모를 크게 상회.
 
-async function fetchAllStoryPages(projectId: string): Promise<KanbanStory[]> {
-  const all: KanbanStory[] = [];
+async function fetchAllPages<T>(basePath: string, projectId: string, source: string): Promise<T[]> {
+  const all: T[] = [];
   let cursor: string | null = null;
-  for (let page = 0; page < STORY_PAGE_HARD_CAP; page += 1) {
-    const url = `/api/stories?project_id=${projectId}&limit=${STORY_PAGE_LIMIT}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+  for (let page = 0; page < PAGE_HARD_CAP; page += 1) {
+    const url = `${basePath}?project_id=${projectId}&limit=${PAGE_LIMIT}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
     const res = await fetchWithAuth(url);
     if (!res.ok) break;
-    const json = await res.json() as { data?: KanbanStory[]; meta?: unknown };
+    const json = await res.json() as { data?: T[]; meta?: unknown };
     all.push(...(json.data ?? []));
     // story #2231 AC5 가드(pagination-envelope-consumers.test.ts) — meta 직접 옵셔널체이닝
     // 금지, 공유 parseCursorMeta()로만 읽는다(규약 밖 형태 조용히 낙하 방지). 변수명도
     // `meta`로 두면 가드의 텍스트 스캔이 `meta.hasMore`류로 오탐하므로 `pageMeta`로 회피
     // (기존 관용구 — agent-runs-list.tsx 등도 동일 이유로 변수 저장 없이 즉시 체이닝).
-    const pageMeta = parseCursorMeta(json.meta, 'EpicSwimlaneBoard fetchAllStoryPages');
+    const pageMeta = parseCursorMeta(json.meta, source);
     if (!pageMeta.hasMore || !pageMeta.nextCursor) break;
     cursor = pageMeta.nextCursor;
   }
@@ -194,16 +197,16 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [stories, epicsRes, membersRes] = await Promise.all([
-        fetchAllStoryPages(projectId),
-        fetchWithAuth(`/api/goals?project_id=${projectId}&limit=100`),
+      const [stories, epics, membersRes] = await Promise.all([
+        fetchAllPages<KanbanStory>('/api/stories', projectId, 'EpicSwimlaneBoard fetchAll(stories)'),
+        fetchAllPages<KanbanEpic>('/api/goals', projectId, 'EpicSwimlaneBoard fetchAll(goals)'),
         fetchWithAuth(`/api/members?project_id=${projectId}`),
       ]);
       // story #2187/b8157376(kanban-board와 동형 불변식, QA changes 6R HIGH①) — is_excluded=true
       // (라이브 QA 임시 카드 등)는 삭제 권한이 없는 화면에서라도 무조건 숨긴다. 토글 없음 —
       // 노출되면 레인 카운트·상위3 큐레이션이 부풀려진다.
       setStories(stories.filter((s) => !s.is_excluded));
-      if (epicsRes.ok) { const json = await epicsRes.json(); setEpics(json.data ?? []); }
+      setEpics(epics);
       if (membersRes.ok) { const json = await membersRes.json(); setMembers(json.data ?? []); }
     } finally {
       setLoading(false);

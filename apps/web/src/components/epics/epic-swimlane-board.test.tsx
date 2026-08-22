@@ -121,6 +121,9 @@ type FetchStub = {
   // hasMore/nextCursor 소진 재현용. 지정하면 `stories` 대신 커서(=페이지 인덱스 문자열)
   // 기준으로 순차 페이지를 응답한다.
   storyPages?: Array<{ stories: Array<Record<string, unknown>>; hasMore: boolean }>;
+  // ⚠️QA changes 7R(PR#3377, 카디르+codex, 2026-08-22) — /api/goals도 동일 clamp. storyPages와
+  // 동형(에픽 버전).
+  epicPages?: Array<{ epics: Array<Record<string, unknown>>; hasMore: boolean }>;
 };
 
 // ⚠️QA changes 4R(PR#3377, 카디르+codex, 2026-08-22) — CI 실행 명령까지 정확 재현해 8+1회
@@ -131,7 +134,7 @@ type FetchStub = {
 // 하는데 항상 bulk 2건만이라 결정론적 환경 차 가능성).
 let callLog: string[] = [];
 
-function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singlePatchSpy, singlePatchOk = true, bulkPatchOk = true, storiesGetSpy, storyPages }: FetchStub) {
+function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singlePatchSpy, singlePatchOk = true, bulkPatchOk = true, storiesGetSpy, storyPages, epicPages }: FetchStub) {
   callLog = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
     callLog.push(`${init?.method ?? 'GET'} ${url}`);
@@ -158,6 +161,13 @@ function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singl
       return { ok: true, json: async () => ({ data: stories }) };
     }
     if (typeof url === 'string' && url.startsWith('/api/goals?')) {
+      if (epicPages) {
+        const cursorParam = new URL(url, 'http://localhost').searchParams.get('cursor');
+        const pageIndex = cursorParam ? Number(cursorParam) : 0;
+        const page = epicPages[pageIndex] ?? { epics: [], hasMore: false };
+        const nextCursor = page.hasMore ? String(pageIndex + 1) : null;
+        return { ok: true, json: async () => ({ data: page.epics, meta: { hasMore: page.hasMore, nextCursor } }) };
+      }
       return { ok: true, json: async () => ({ data: epics }) };
     }
     if (typeof url === 'string' && url.startsWith('/api/members')) {
@@ -272,6 +282,20 @@ describe('EpicSwimlaneBoard — 행 구성(story #2931)', () => {
     });
     expect(container.textContent).toContain('1페이지카드');
     expect(container.textContent).toContain('2페이지카드'); // 두 번째 페이지가 조용히 누락되지 않았음.
+  });
+
+  // ⚠️QA changes 7R(PR#3377, 카디르+codex, 2026-08-22) — 원 발견의 «에픽» 절반: /api/goals도
+  // 동일 maxLimit=100 clamp라 활성 에픽 100+ 프로젝트에서 레인 자체가 조용히 누락됐다.
+  // stories와 동형으로 hasMore 소진 검증.
+  it('에픽도 100건 초과(다중 페이지)면 hasMore를 소진해 레인이 조용히 누락되지 않는다', async () => {
+    await mount({
+      epicPages: [
+        { epics: [{ id: 'e1', title: '1페이지에픽', status: 'active', position: 1 }], hasMore: true },
+        { epics: [{ id: 'e2', title: '2페이지에픽', status: 'active', position: 2 }], hasMore: false },
+      ],
+    });
+    expect(container.textContent).toContain('1페이지에픽');
+    expect(container.textContent).toContain('2페이지에픽'); // 두 번째 페이지 에픽 레인이 조용히 누락되지 않았음.
   });
 });
 
