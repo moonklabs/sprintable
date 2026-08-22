@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
 
 // story 5e229540(doc resource-view-firsttouch-identity-pattern §4 "스프린트" 행 — 정체성=
 // 한 번의 집중 사이클·시작 시 가설 선언·끝에 배움 종합·visual=선택 기간bar): 실험실(원형
@@ -704,6 +705,11 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         }
         showContextChip
       />
+      {/* story #2930(P0-G) I3 — flow 쪽과 짝(WorkspaceFrameTabs 컴포넌트 주석 참고). nav에서
+          sprints 1차 메뉴가 빠진 자리를 메우는 얕은 프레임. */}
+      <div className="px-6 pt-3">
+        <WorkspaceFrameTabs active="sprints" />
+      </div>
       <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* Sprint list */}
       <div className={`flex flex-col gap-3 overflow-y-auto p-6 transition-all duration-300 ${selected ? 'hidden w-1/2 lg:flex' : 'w-full'}`}>

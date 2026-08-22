@@ -16,6 +16,7 @@ import { FlowNodeStoryPanel } from '@/components/flow/flow-node-story-panel';
 import { HypothesisEarthLayer } from '@/components/flow/hypothesis-earth-layer';
 import { HypothesisNarrativePanel } from '@/components/flow/hypothesis-narrative-panel';
 import { ScaleLadder } from '@/components/flow/scale-ladder';
+import { WorkspaceFrameTabs } from '@/components/workspace/workspace-frame-tabs';
 
 interface FlowPageClientProps {
   projectId: string;
@@ -212,6 +213,11 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
       <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
 
       <div className="space-y-4 p-4">
+        {/* story #2930(P0-G) I3 — nav에서 flow+sprints가 「보드」 단일 항목으로 접히며 사라진
+            sprints 진입점을 메우는 얕은 프레임(WorkspaceFrameTabs). 아래 3탭(가설|갈래|칸반)과
+            다른 층 — 그건 안 건드린다(E-FLOW-V4 기 확定). */}
+        <WorkspaceFrameTabs active="board" />
+
         {/* ② 세 칸 세그(가설|갈래|칸반) — story #2531(E-FLOW-V4 S1)에서 「가설」 칸을
             맨 앞에 신설(v4 조직원리 §2, 축척 최상위=가설). 갈래·칸반 두 칸은 07-23
             시안(`e15905e8`)에서 되찾은 것(IA 개정 때 조용히 지워졌던 것, 유나 지적

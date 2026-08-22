@@ -21,6 +21,12 @@ vi.mock('@/components/nav/top-bar-slot', () => ({
   ),
 }));
 
+// story #2930 I3 — WorkspaceFrameTabs는 useParams(next/navigation, 이 스위트가 mock 안 함)를
+// 쓴다. sprints-client 자체의 로직과 무관한 크롬이라 TopBarSlot과 동형으로 스텁한다.
+vi.mock('@/components/workspace/workspace-frame-tabs', () => ({
+  WorkspaceFrameTabs: () => null,
+}));
+
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),

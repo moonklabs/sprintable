@@ -3,7 +3,6 @@ import {
   BookOpen,
   Bot,
   Brain,
-  CalendarRange,
   ClipboardList,
   FlaskConical,
   GalleryVerticalEnd,
@@ -15,11 +14,9 @@ import {
   Newspaper,
   Settings,
   Shield,
-  Users,
   Users2,
   Workflow,
   Zap,
-  Gauge,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -63,9 +60,18 @@ export interface NavGroupConfig {
 // 그대로 위반한다(라벨만 앞서가고 착지는 그대로라 다시 어긋남) — B3 확定 후 착지가
 // attention으로 바뀌는 시점에 라벨도 같이 바꾼다.
 //
-// work 존 6항목(flow/sprints/goals/loops/standup/retro)의 "보드/목표/실험 뷰 전환+자동 리듬"
-// 재라벨은 I3(워크스페이스 뷰 프레임) 스코프 — 지금 라벨만 바꾸면 6항목이 여전히 개별
-// 메뉴로 보이는 채로 "보드"라는 통합 뷰 이름을 참칭하게 된다. I3가 실제로 접을 때 같이 바꾼다.
+// story #2930 I3(doc ia-4zone-redesign-2930, PO 스코프 확定 2026-08-22) — work 존 6항목
+// (flow/sprints/goals/loops/standup/retro) 재편:
+// ①=ⓒ flow+sprints를 1차 메뉴에서 「보드」 단일 항목으로 접는다(id 'board', path는 기존
+//   'flow' 그대로 — 라우트 불변). sprints 라우트 자체는 안 건드리고(URL 직접 진입 가능)
+//   1차 nav 항목만 뺀다. "에픽"(시안 3뷰 중 하나)은 코드상 단독 표면이 없어(analytics API만
+//   존재) 이 슬라이스 스코프 밖(PO: 신규 페이지 제작은 I3=nav 프레임 스코프 밖·후속 스토리로
+//   별도 등재). /flow·/sprints 페이지 상단엔 WorkspaceFrameTabs(신규 공유 컴포넌트)로 두
+//   라우트를 오가는 얕은 「뷰」 전환처럼 보이는 프레임을 얹는다(flow 자체의 기존 3탭
+//   가설/갈래/칸반은 안 건드림 — 그건 다른 층, E-FLOW-V4 기 확定 기능).
+// ②=ⓐ standup/retro는 1차 메뉴에서만 뺀다(라우트/페이지 보존, URL 직접 진입 가능) — 「자동
+//   리듬 표면」으로의 실제 이관(트리거 발행 등 BE 함의)은 doc B2가 "명시만·구현 PO"로 이미
+//   선을 그어 이 슬라이스 몫이 아니다.
 export const NAV_GROUPS: NavGroupConfig[] = [
   {
     id: 'now',
@@ -82,12 +88,9 @@ export const NAV_GROUPS: NavGroupConfig[] = [
     id: 'work',
     labelKey: 'zoneWork',
     items: [
-      { id: 'flow', labelKey: 'flow', icon: Workflow, kind: 'resource', path: 'flow', kbdHint: 'B' },
-      { id: 'sprints', labelKey: 'sprints', icon: CalendarRange, kind: 'resource', path: 'sprints' },
+      { id: 'board', labelKey: 'board', icon: Workflow, kind: 'resource', path: 'flow', kbdHint: 'B' },
       { id: 'goals', labelKey: 'goals', icon: Layers, kind: 'resource', path: 'goals' },
       { id: 'loops', labelKey: 'loops', icon: FlaskConical, kind: 'resource', path: 'loops' },
-      { id: 'standup', labelKey: 'standup', icon: Users, kind: 'resource', path: 'standup', kbdHint: 'S' },
-      { id: 'retro', labelKey: 'retro', icon: Gauge, kind: 'resource', path: 'retro', kbdHint: 'R' },
     ],
   },
   {
@@ -151,7 +154,9 @@ export const MOBILE_HUB_GROUP_ORDER = ['now', 'work', 'trust', 'knowledge', 'org
 // story #2930 I2 — chats가 NAV_GROUPS 배열 자체에서 빠지므로(사이드바 챗 center로 승격) 이
 // id는 이제 실질적으로 no-op이지만, 모바일 탭바(I4가 다룰 영역)가 chat을 FAB로 승격하며 같은
 // "허브에 중복 진입점 금지" 원칙이 유효하므로 방어적으로 남겨둔다(제거해도 부작용 없음).
-export const MOBILE_HUB_EXCLUDE_IDS = new Set(['flow', 'inbox', 'chats']);
+// story #2930 I3 — 'flow'는 id가 'board'로 접혔다(work 존 재편, 위 참고). depth-1 취급
+// 의도는 그대로(빠른 접근 대상)라 exclude id도 같이 개명.
+export const MOBILE_HUB_EXCLUDE_IDS = new Set(['board', 'inbox', 'chats']);
 
 // story #2930(P0-G) I2 — 챗은 4구역 밖 1급 「center」(중심 꽃, 선생님 확定). NAV_GROUPS
 // 배열엔 없다(구역에 묻지 않는다는 게 이 승격의 요점) — 데스크톱 사이드바 상단 고정 카드
