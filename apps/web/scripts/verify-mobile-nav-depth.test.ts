@@ -59,7 +59,10 @@ describe('실 NAV_GROUPS — story #2684 AC3 판별자(이벤트 포함 전 관�
   // center의 depth-1 대응(사이드바 상단 고정, 어떤 구역에도 안 묻힘)은 이 순수 데이터
   // 스캔의 시야 밖이라 이 스위트가 못 잰다(nav-config.ts 상단 "AC2 — 이 가드가 못 잡는 것"
   // ㉢·㉥류와 동형) — 렌더 검증은 app-sidebar.test.tsx가 맡는다.
-  it('전 20항목(챗 center 제외)이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
+  // story #2930 I3(PO 스코프 확定 2026-08-22) — work 존 흐름+스프린트가 「보드」 단일 항목으로
+  // 접혀 20→19항목(스탠드업·회고는 CI orphan 가드가 nav 제거를 막아 잔존 — nav-config.ts
+  // 상단 주석 참고, «자동 리듬 표면»이 설 때까지의 커플링).
+  it('전 19항목(챗 center 제외)이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
     const entries = computeMobileDepths(NAV_GROUPS, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
     expect(findDepthViolations(entries, MAX_MOBILE_DEPTH)).toEqual([]);
   });
@@ -72,11 +75,12 @@ describe('실 NAV_GROUPS — story #2684 AC3 판별자(이벤트 포함 전 관�
 
   // story #2930 I2 — 'chats'는 이제 NAV_GROUPS에 없어(챗 center 승격) 이 스캔 대상 밖이다.
   // MOBILE_HUB_EXCLUDE_IDS엔 방어적으로 'chats'가 여전히 남아있지만(nav-config.ts 주석 참고)
-  // 매칭될 항목 자체가 없어 depth1Ids엔 안 잡힌다.
-  it('flow·inbox는 depth 1이고 그 외는 전부 depth 2다(바텀 탭 축과 정확히 일치)', () => {
+  // 매칭될 항목 자체가 없어 depth1Ids엔 안 잡힌다. story #2930 I3 — 'flow' id가 'board'로
+  // 개명(work 존 재편)돼 exclude set도 같이 갱신됐다(nav-config.ts 참고).
+  it('board·inbox는 depth 1이고 그 외는 전부 depth 2다(바텀 탭 축과 정확히 일치)', () => {
     const entries = computeMobileDepths(NAV_GROUPS, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
     const depth1Ids = entries.filter((e) => e.depth === 1).map((e) => e.id).sort();
-    expect(depth1Ids).toEqual(['flow', 'inbox']);
+    expect(depth1Ids).toEqual(['board', 'inbox']);
     expect(entries.filter((e) => e.depth === 2).length).toBe(entries.length - 2);
   });
 

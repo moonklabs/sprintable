@@ -86,8 +86,10 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     const links = [...container.querySelectorAll('a')];
     const membersLink = links.find((a) => a.textContent?.includes('구성원'));
     expect(membersLink?.getAttribute('href')).toBe('/organization/members');
-    const sprintsLink = links.find((a) => a.textContent?.includes('스프린트'));
-    expect(sprintsLink?.getAttribute('href')).toBe('/sprints');
+    // story #2930 I3 — '스프린트'는 nav-config work 존에서 '보드'로 접혀 빠졌다(href는 옛
+    // 흐름의 '/flow' 그대로 보존). resource 폴백 규약 자체를 확認하는 게 목적이라 대체 항목으로.
+    const goalsLink = links.find((a) => a.textContent?.includes('목표'));
+    expect(goalsLink?.getAttribute('href')).toBe('/goals');
   });
 
   it('설정 섹션이 그룹 라벨로 뜬다(desktop 무라벨 footer와 달리 허브에선 명시 섹션)', async () => {

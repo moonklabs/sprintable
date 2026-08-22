@@ -21,6 +21,12 @@ vi.mock('@/components/nav/top-bar-slot', () => ({
   ),
 }));
 
+// story #2930 I3 — WorkspaceFrameTabs는 useParams(next/navigation, 이 스위트가 mock 안 함)를
+// 쓴다. sprints-client 자체의 로직과 무관한 크롬이라 TopBarSlot과 동형으로 스텁한다.
+vi.mock('@/components/workspace/workspace-frame-tabs', () => ({
+  WorkspaceFrameTabs: () => null,
+}));
+
 // story #2104 — HumanOnlyAction(스프린트 삭제 트리거를 감싼다)이 useDashboardContext를 읽는다.
 // 기본은 human(기존 first-touch 스위트는 게이팅과 무관). agent 케이스만 개별 override.
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
