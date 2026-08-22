@@ -19,12 +19,7 @@ from app.models.hitl import HitlRequest
 from app.models.pm import Story, Task
 from app.models.visual_artifact import VisualArtifact
 from app.routers.agent_gateway import wake_agent
-from app.services.gate_github_check import (
-    is_repo_check_enforced,
-    publish_gate_check,
-    resolve_pr_link,
-    seed_pr_head_watermark,
-)
+from app.services.gate_github_check import is_repo_check_enforced, publish_gate_check, resolve_pr_link
 from app.services.github_app import get_installation_token, get_pull_request
 from app.services.merge_verdict_gate import MERGE_GATE_TYPE, reconcile_merge_gate_with_real_evidence
 from app.services.verdict_capture import fetch_status_check_rollup
@@ -1199,11 +1194,14 @@ async def transition_gate_endpoint(
                 _head_sha = (_link.evidence or {}).get("head_sha") if _link else None
             if _head_sha:
                 gate.approved_head_sha = _head_sha
-                # story #2932 완주조건 HIGH2(4라운드 카디르 자기정정) — 사람 UI 승인이 이
-                # 워터마크를 못 얻던 원 결함의 정확한 자리(writer 3곳 중 하나). 여기서 안
-                # 찍으면 승인 직후 도착하는 stale webhook이 워터마크=None이라 staleness guard가
-                # 아예 발동을 못 한다.
-                seed_pr_head_watermark(gate)
+                # story #2932 완주조건 HIGH2(5라운드 재설계) — 이전엔(4라운드) 여기서 서버
+                # now()로 pr_head_observed_at을 씨딩했으나, 서로 다른 시계(서버시각 vs GitHub
+                # 실시각)를 같은 필드에 섞는 결함으로 판명(카디르 5라운드+codex 실물재현) —
+                # 삭제했다. 이 필드는 이제 reopen_gate_if_new_sha(gate_github_check.py) 오직
+                # 한 곳, 오직 실 webhook payload의 pr_updated_at에서만 채워진다(그 함수가
+                # gate.status 무관하게 "관측"은 항상 기록하도록 바뀌어, PR이 opened/
+                # synchronize될 때 거의 항상 먼저 오는 실 웹훅이 승인보다 앞서 워터마크를
+                # 이미 심어 둔다 — 이 승인 지점은 그 값을 그대로 둔다).
         await session.commit()
         # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
         await session.refresh(gate)

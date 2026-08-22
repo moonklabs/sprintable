@@ -519,11 +519,11 @@ async def evaluate_merge_gate(
     if decision == AUTO_MERGE:
         if head_sha:
             gate.approved_head_sha = head_sha
-            # story #2932 완주조건 HIGH2(4라운드) — AUTO_MERGE도 writer 3곳 중 하나(순환
-            # import 회피 위해 함수-로컬 import — gate_github_check.py가 이 모듈의
-            # MERGE_GATE_TYPE을 이미 module-level로 가져다 쓴다).
-            from app.services.gate_github_check import seed_pr_head_watermark
-            seed_pr_head_watermark(gate)
+            # story #2932 완주조건 HIGH2(5라운드) — 이전엔 여기서 서버 now()로
+            # pr_head_observed_at을 씨딩했으나(4라운드), 서로 다른 시계(서버시각 vs GitHub
+            # 실시각)를 같은 필드에 섞는 결함으로 판명(카디르 5라운드+codex 실물재현) —
+            # 삭제했다. 이 필드는 이제 reopen_gate_if_new_sha(gate_github_check.py) 오직
+            # 한 곳, 오직 실 webhook payload의 pr_updated_at에서만 채워진다.
     elif gate.status == "auto_passed" and gate.approved_head_sha:
         logger.info(
             "gate=%s: 재평가로 decision이 AUTO_MERGE 이탈(%s) — auto-axis anchor(%s) 무효화",

@@ -440,12 +440,12 @@ async def test_evaluate_auto_merge_metadata_sufficient():
 
 
 @pytest.mark.anyio
-async def test_evaluate_auto_merge_with_head_sha_seeds_pr_head_watermark():
-    """story #2932 완주조건 HIGH2(4라운드, 카디르 자기정정) — approved_head_sha가 새로
-    세워지는 writer 3곳 중 하나(AUTO_MERGE 경로)가 `pr_head_observed_at` 워터마크도 함께
-    씨드해야 한다. 안 그러면 이 결정 직후 도착하는 stale webhook이 워터마크=None이라
-    `reopen_gate_if_new_sha`의 staleness guard를 아예 못 타 spurious 재-pending이 재발한다
-    (사람 UI 승인 경로와 동일 결함 클래스)."""
+async def test_evaluate_auto_merge_with_head_sha_does_not_touch_pr_head_observed_at():
+    """story #2932 완주조건 HIGH2(5라운드 재설계) — AUTO_MERGE는 approved_head_sha를
+    세우지만 pr_head_observed_at은 **더 이상 건드리지 않는다**(4라운드는 서버 now()로
+    씨딩했으나, 서로 다른 시계를 같은 필드에 섞는 결함으로 판명 — 카디르 5라운드+codex
+    실물재현). 이 필드는 이제 gate_github_check.py::reopen_gate_if_new_sha 오직 한 곳,
+    오직 실 webhook payload에서만 채워진다."""
     gate = SimpleNamespace(id=uuid.uuid4(), status="auto_passed",
                            requires_human=True, evidence_status=None, decision_basis=None, auto_decision_reason=None,
                            approved_head_sha=None, pr_head_observed_at=None)
@@ -462,7 +462,7 @@ async def test_evaluate_auto_merge_with_head_sha_seeds_pr_head_watermark():
                                         head_sha="sha-auto-merge")
     assert res.decision == AUTO_MERGE
     assert gate.approved_head_sha == "sha-auto-merge"
-    assert gate.pr_head_observed_at is not None, "AUTO_MERGE anchor 세팅 시 워터마크도 함께 씨드돼야 함"
+    assert gate.pr_head_observed_at is None, "AUTO_MERGE는 서버시각을 이 필드에 절대 쓰면 안 됨(5라운드 원칙)"
 
 
 # ── HO-S6 키스톤 실DB: 가설 적중 이력만으로 auto_merge ──────────────────────────
