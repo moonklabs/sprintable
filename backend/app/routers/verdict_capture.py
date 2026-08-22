@@ -333,7 +333,8 @@ async def _process_webhook_event(
 
     ``gate_check_publish``(story #2813, ccbcd9da A-1 `pending_deliveries`와 동형 outparam): 넘기면
     PR 라이프사이클 이벤트(opened/reopened/ready_for_review/synchronize/**edited-단 base가 실제로
-    바뀐 경우만**, story #2912)가 발행해야 할 GitHub check-run 정보를 append — 호출자(github_webhook)
+    바뀐 경우만**, story #2912/**qa:pass+design:pass 라벨이 둘 다 갖춰진 labeled 이벤트**, story
+    #2893 설계안 §4 C1)가 발행해야 할 GitHub check-run 정보를 append — 호출자(github_webhook)
     가 **commit 後** 배경 태스크로 발행(fail-closed: GitHub 외부 API 호출을 DB 트랜잭션 성공 확정
     前에 하지 않는다).
 
@@ -354,6 +355,21 @@ async def _process_webhook_event(
     # 없다([[ci-stuck-c-d-remedy-design-20260822]] 참고) — payload.changes.base는 base가
     # 실제로 바뀐 edited 이벤트에만 GitHub이 채워 보낸다.
     is_base_retarget_edit = pr_action == "edited" and bool((payload.get("changes") or {}).get("base"))
+    # story #2893(설계안 §4 C1) — 원 스토리(#2893) 증상 자체("QA·design·CI 전부 서고도 merge
+    # 게이트 레코드가 없어 PR 작성자가 close→reopen으로 수동 생성") 최종 처방: qa:pass+
+    # design:pass 라벨이 **둘 다** 갖춰지는 순간(pull_request.labeled, GitHub raw 웹훅 —
+    # 폴링 0)을 게이트 생성 트리거로 더한다. `pull_request` 페이로드는 어떤 action이든 현재
+    # 라벨 전체 집합(labels)을 동봉하므로 추가 조회 불요. RECHECK_LABELS(B2-a와 동일 SSOT) —
+    # "이 두 라벨이 갖춰지면 게이트가 있어야 한다"는 명제가 "SHA 불일치 시 이 두 라벨을 뗀다"는
+    # B2-a 명제와 정확히 대칭이라 같은 상수를 공유한다.
+    is_label_alignment_trigger = False
+    if pr_action == "labeled":
+        from app.services.gate_github_check import RECHECK_LABELS
+
+        _label_names = {
+            (label.get("name") or "") for label in (payload.get("pull_request") or {}).get("labels") or []
+        }
+        is_label_alignment_trigger = all(name in _label_names for name in RECHECK_LABELS)
 
     installation: GithubInstallation | None = None
     org_id: uuid.UUID | None = None
@@ -451,7 +467,11 @@ async def _process_webhook_event(
     # 그새 커밋이 바뀐 경우를 못 잡는다. 네 액션 전부에서 동일 가드를 돌린다(비교 비용은 동일).
     if (
         event == "pull_request"
-        and (pr_action in ("opened", "reopened", "ready_for_review", "synchronize") or is_base_retarget_edit)
+        and (
+            pr_action in ("opened", "reopened", "ready_for_review", "synchronize")
+            or is_base_retarget_edit
+            or is_label_alignment_trigger
+        )
         and head_sha
         and gate_check_publish is not None
     ):
