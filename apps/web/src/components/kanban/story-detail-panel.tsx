@@ -25,8 +25,7 @@ import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { EvidenceSection } from '@/components/verify/evidence-section';
 import { ChatProofSection } from '@/components/verify/chat-proof-section';
 import { deriveInFlightTrustChip } from '@/services/verify';
-import type { ProofState } from '@/components/proof-capsule/proof-capsule';
-import { Workcell, type WorkcellMessage } from '@/components/workcell/workcell';
+import { Workcell, type WorkcellMessage, type WorkcellPipelineStage } from '@/components/workcell/workcell';
 import { initials } from '@/lib/storage/format';
 import { ArtifactSection } from '@/components/canvas/artifact-section';
 import { StuckHandoffSection } from '@/components/cage/stuck-handoff-section';
@@ -741,21 +740,20 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   // - Evidence는 ProofCapsuleProps 실 매핑 인프라(EvidenceSection 재사용)가 후속 스코프라
   //   지금은 null(정직한 "아직 증거 없음" — 스펙이 명시적으로 허용하는 케이스).
   // - human assignee 없으면 Workcell 렌더 자체를 생략(허구 human 금지, ProofCapsule 배선과 동일 규율).
-  // P0-04 그라운딩(2026-07-11): GET /api/v2/agent-runs가 story_id 필터를 지원하지 않아(BE
-  // AgentRunRepository.list()는 project_id/agent_id만 필터) FE가 "지금 실제로 도는 에이전트가
-  // 있는지" 알 방법이 없다. 종전엔 blue 상태에 공용 "실행 중"(proofCapsuleStateRunning) 라벨을
-  // 썼는데, 이는 story.status='in-progress'라는 coarse 신호를 "에이전트가 지금 실행 중"이라는
-  // 더 구체적인 주장으로 과장한 것 — no-fiction 위반(파운더 독트린: 실시간 이벤트 텍스트≠실
-  // 실시간 신호). Workcell 전용으로 "진행 중"(workcellStateInProgress, 순수 status 반영, 실행
-  // 주장 없음)으로 정정. Board/Audit의 공용 blue="실행 중" 라벨은 별개 표면이라 스코프 밖
-  // (그쪽도 같은 근본 갭이 있으면 후속 별도 판단). 실 AgentRun story_id 필터는 디디 BE 티켓.
-  const PROOF_STATE_BY_STATUS: Record<string, ProofState> = {
-    'in-progress': 'blue', 'in-review': 'amber', done: 'green',
+  // story #2922 W1 — 구 3색 proofState 배지를 신뢰 파이프라인 6상태로 대체(doc
+  // workcell-redesign-2922 §매핑표). needs_input/verified는 5-status로 표현 불가한 파생값이라
+  // 기존 trustChip(deriveInFlightTrustChip, P0-04)을 그대로 재사용 — merge 게이트 pending+
+  // ci_result=pass가 "Verified"(AC/자동검증 통과·merge gate 前)와 정확히 같은 신호, needs_input
+  // 게이트 pending이 그대로 "Needs input"이다. 신규 BE 필드 0(B1은 doc상 "명시만", 구현 스코프 아님).
+  const PIPELINE_STAGE_BY_STATUS: Record<string, WorkcellPipelineStage> = {
+    backlog: 'queued', 'ready-for-dev': 'queued', done: 'merge_ready',
   };
-  const proofState = PROOF_STATE_BY_STATUS[localStatus];
-  const proofStateLabel = proofState
-    ? { blue: t('workcellStateInProgress'), amber: t('proofCapsuleStateReviewing'), green: t('proofCapsuleStateProven'), red: t('proofCapsuleStateViolation') }[proofState]
-    : null;
+  const pipelineStage: WorkcellPipelineStage | null = PIPELINE_STAGE_BY_STATUS[localStatus]
+    ?? (trustChip === 'needs_input' ? 'needs_input'
+      : localStatus === 'in-review' && trustChip === 'merge_ready' ? 'verified'
+        : localStatus === 'in-review' ? 'claimed_done'
+          : localStatus === 'in-progress' ? 'running'
+            : null);
   const assigneeIds = story.assignee_ids?.length ? story.assignee_ids : (story.assignee_id ? [story.assignee_id] : []);
   const proofHumanId = assigneeIds.find((id) => memberMap[id] && memberMap[id]!.type !== 'agent');
   const proofAgentId = assigneeIds.find((id) => memberMap[id]?.type === 'agent');
@@ -1273,14 +1271,15 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
             옵트인(신규 CSS 아님) — .tableWrapper(#2203)가 이미 라이브 양성으로 검증한 패턴. */}
         <div className="scrollbar-visible flex-1 overflow-y-auto p-5">
           <div className="space-y-5">
-            {/* E-UI-DAEGBYEON P0 — Workcell 4층 데뷔(최소 실화면 배선, story `e5310d1b`).
-                Evidence는 null(정직한 "아직 증거 없음" — EvidenceSection/StoryMergeGate 실
-                데이터 매핑은 후속 스코프, 대체 아님). human assignee 없으면 전체 생략. */}
-            {proofState && proofStateLabel && proofHuman ? (
+            {/* E-UI-DAEGBYEON P0 — Workcell 데뷔(최소 실화면 배선, story `e5310d1b`) + story #2922
+                W1 2×2 재설계. Evidence는 null(정직한 "아직 증거 없음" — EvidenceSection/
+                StoryMergeGate 실데이터 매핑은 후속 스코프, 대체 아님). human assignee 없으면 전체
+                생략. pipelineStage는 5-status 전 구간(backlog 포함) 항상 파생 가능해졌으므로
+                (Queued 신설) 가드에서 제외 — human 부재만 남는다. */}
+            {pipelineStage && proofHuman ? (
               <Workcell
                 title={story.title}
-                proofState={proofState}
-                stateLabel={proofStateLabel}
+                pipelineStage={pipelineStage}
                 brief={{
                   goal: story.description?.trim() || story.title,
                   dod: story.acceptance_criteria?.trim() || t('workcellDodMissing'),

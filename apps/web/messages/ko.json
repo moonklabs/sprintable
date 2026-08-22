@@ -856,7 +856,6 @@
     "verificationPending": "검증 대기 중",
     "verificationRequested": "검증 요청됨",
     "verificationRequestFailed": "검증 요청 실패",
-    "workcellStateInProgress": "진행 중",
     "workcellDodMissing": "완료 조건 미기재",
     "workcellBlockedReason": "의존 스토리 대기 중",
     "workcellNextNeedInProgress": "작업 완료 후 리뷰 요청",
@@ -4094,7 +4093,14 @@
     "viewEvidence": "증거",
     "viewDecision": "결정",
     "conversationEmpty": "아직 메시지가 없습니다",
-    "conversationFooter": "이 작업에 귀속된 지시·판단·증거·수정요청만. 뷰 전환(실행/증거/결정)=같은 스레드 다른 렌즈."
+    "conversationFooter": "이 작업에 귀속된 지시·판단·증거·수정요청만. 뷰 전환(실행/증거/결정)=같은 스레드 다른 렌즈.",
+    "pipelineQuestion": "지금 어디까지 왔나 (신뢰 파이프라인)",
+    "pipelineQueued": "Queued",
+    "pipelineRunning": "Running",
+    "pipelineNeedsInput": "Needs input",
+    "pipelineClaimedDone": "Claimed done",
+    "pipelineVerified": "Verified",
+    "pipelineMergeReady": "Merge-ready"
   },
   "loopQueue": {
     "title": "닫히지 않은 루프 큐",
