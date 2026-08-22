@@ -1,6 +1,7 @@
 import type { ProofState } from '@/components/proof-capsule/proof-capsule';
 import {
   buildAttentionQueue,
+  BUCKET_BY_KIND,
   type AttentionQueueItem,
 } from '@/components/attention-queue/derive-attention-queue';
 
@@ -112,6 +113,8 @@ export function toExceptionQueueItems(
   const items: AttentionQueueItem[] = signals.map((sig, idx) => ({
     id: idFor(sig, idx),
     kind: sig.kind,
+    // story #2923 AQ1 — 공유 BUCKET_BY_KIND 재사용(별도 매핑 신설 0, PO 9→4 표와 정합 보장).
+    bucket: BUCKET_BY_KIND[sig.kind],
     kindLabel: labels.kind[sig.kind],
     proofState: PROOF_BY_KIND[sig.kind],
     claim: sig.title,

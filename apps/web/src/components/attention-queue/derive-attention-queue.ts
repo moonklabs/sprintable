@@ -1,6 +1,15 @@
 import type { ProofState } from '@/components/proof-capsule/proof-capsule';
 
-export type AttentionKind = 'verify_fail' | 'decision_needed' | 'gate_pending' | 'blocked' | 'merge_ready';
+// story #2923(P0-E AQ1) — DecisionsWaiting(/api/inbox)이 흡수하는 4종 kind를 기존 5종에 합류.
+// approval/decision/blocker/mention은 doc attention-audit-redesign-2923(2026-08-22 PO 정본
+// 반영)의 9→4 버킷표에 따라 각각 GATE/STEER/BLOCK/Q에 귀속된다(아래 AttentionBucket).
+export type AttentionKind =
+  | 'verify_fail' | 'decision_needed' | 'gate_pending' | 'blocked' | 'merge_ready'
+  | 'approval' | 'decision' | 'blocker' | 'mention';
+
+/** story #2923 AQ1 — "사용자가 요구받는 판단의 종류" 축(PO 매핑표 정본, 2026-08-22).
+ * AQ2가 이 값을 실제 배지로 렌더한다(이 슬라이스는 데이터 계층만 — 시각화 아님). */
+export type AttentionBucket = 'GATE' | 'STEER' | 'BLOCK' | 'Q';
 
 export interface AttentionActor {
   name: string;
@@ -10,13 +19,18 @@ export interface AttentionActor {
 export interface AttentionQueueItem {
   id: string;
   kind: AttentionKind;
+  bucket: AttentionBucket;
   kindLabel: string;
   proofState: ProofState;
   claim: string;
   actor: AttentionActor | null;
   actionLabel: string;
   actionTone: 'primary' | 'neutral' | 'ready';
-  href: string;
+  /** story #2923 AQ1(PO 실측, 2026-08-22) — inbox 병합 항목 중 origin_chain이 story/memo
+   * 어느 쪽도 없으면(run/initiative만 있으면) 상세 라우트가 FE에 아예 없다(notification-
+   * navigation도 doc 계열만 다룸, 지어내지 않음) — null이면 호출부가 행 자체를 비내비게이션
+   * 처리(버튼 비표시)한다. 기존 BE 신호(story_id 필수)는 항상 non-null. */
+  href: string | null;
   /** story #2249 — 「그 상태에 들어간 시각」epoch ms(모르면 null. blocked는 BE가 항상 값을
    * 안 실어 null — glance.py 모듈 docstring: 재진입 시각 미기록이라 "모름"이지 근사 아님). FE는
    * null 여부만으로 갈라 쓴다("exact"|null 두 상태뿐 — BE에 "approx"는 존재하지 않음, precision
@@ -95,6 +109,42 @@ export function parseAttentionQueueSignals(json: unknown): BeAttentionItem[] {
   return signals;
 }
 
+const KNOWN_INBOX_KINDS = new Set<InboxItemKind>(['approval', 'decision', 'blocker', 'mention']);
+
+/** story #2923 AQ1 — `/api/inbox` 실 payload(`{data:[...]}`) → 검증된 InboxAttentionItem
+ * 배열. unwrapEnvelope 재사용(`data`가 배열이면 그대로 배열째 반환하는 기존 동작이 이 응답
+ * 형상과 그대로 맞는다). 형상 불일치는 조용히 생략(throw 0, parseAttentionQueueSignals와
+ * 동형 원칙) — id/title 없는 항목은 claim/집계 키를 지어낼 수 없으니 제외. */
+export function parseInboxAttentionItems(json: unknown): InboxAttentionItem[] {
+  const inner = unwrapEnvelope(json);
+  if (!Array.isArray(inner)) return [];
+
+  const items: InboxAttentionItem[] = [];
+  for (const raw of inner) {
+    if (!isRecord(raw)) continue;
+    const kind = raw['kind'];
+    if (typeof kind !== 'string' || !KNOWN_INBOX_KINDS.has(kind as InboxItemKind)) continue;
+    const id = typeof raw['id'] === 'string' && raw['id'] ? raw['id'] : null;
+    if (!id) continue;
+    const title = typeof raw['title'] === 'string' ? (raw['title'] as string).trim() : '';
+    if (!title) continue;
+    const rawChain = Array.isArray(raw['origin_chain']) ? raw['origin_chain'] : [];
+    const origin_chain: InboxOriginNode[] = [];
+    for (const node of rawChain) {
+      if (!isRecord(node)) continue;
+      const type = node['type'];
+      const nodeId = node['id'];
+      if (typeof type === 'string' && ['memo', 'story', 'run', 'initiative'].includes(type) && typeof nodeId === 'string' && nodeId) {
+        origin_chain.push({ type: type as InboxOriginType, id: nodeId });
+      }
+    }
+    const created_at = typeof raw['created_at'] === 'string' ? raw['created_at'] : '';
+    if (!created_at) continue; // 정렬키를 지어낼 수 없으니 제외(no-fiction)
+    items.push({ id, kind: kind as InboxItemKind, title, origin_chain, created_at });
+  }
+  return items;
+}
+
 /** ISO 문자열 → epoch ms(모르면 null). 파싱 실패도 모름으로 취급(지어내지 않음). */
 function toEpochMs(iso: string | null): number | null {
   if (!iso) return null;
@@ -113,6 +163,20 @@ const PROOF_STATE: Record<AttentionKind, ProofState> = {
   gate_pending: 'amber',
   blocked: 'amber',
   merge_ready: 'green',
+  // story #2923 AQ1 — inbox 4종은 전부 "아직 판단 대기"(merge_ready 같은 "좋은 소식" 뉘앙스가
+  // 없다 — DecisionsWaiting도 항상 warning 톤 패널이었다) — amber로 통일, 지어내지 않음.
+  approval: 'amber', decision: 'amber', blocker: 'amber', mention: 'amber',
+};
+
+/** story #2923 AQ1 — PO 매핑표(2026-08-22 정본, doc attention-audit-redesign-2923) 그대로.
+ * gate_pending/needs_input이 decision_needed로 합쳐지는 기존 dedup(PO 콜 2026-07-13)은
+ * 안 건드린다 — 합쳐지기 전 "먼저 도착한 원신호"의 kind로 버킷을 가른다(GATE vs STEER는
+ * 합쳐진 뒤엔 구분 불가라 dedup 이전 시점에 결정해 둬야 한다). */
+export const BUCKET_BY_KIND: Record<AttentionKind, AttentionBucket> = {
+  gate_pending: 'GATE', merge_ready: 'GATE', approval: 'GATE',
+  decision_needed: 'STEER', decision: 'STEER',
+  verify_fail: 'BLOCK', blocked: 'BLOCK', blocker: 'BLOCK',
+  mention: 'Q',
 };
 
 /**
@@ -129,8 +193,10 @@ export function buildAttentionQueueFromBe(
 ): AttentionQueueItem[] {
   const items: AttentionQueueItem[] = [];
   const blockedByStory = new Map<string, { title: string; count: number; enteredAtMs: number | null }>();
-  // story_id → { title, enteredAtMs }(첫 등장 것 — needs_input/gate_pending 중 먼저 온 신호 기준)
-  const decisionNeededByStory = new Map<string, { title: string; enteredAtMs: number | null }>();
+  // story_id → { title, enteredAtMs, originKind }(첫 등장 것 — needs_input/gate_pending 중
+  // 먼저 온 신호 기준. originKind는 story #2923 AQ1 버킷 판정용 — decision_needed로 합쳐지기
+  // 전의 원신호를 기억해 둔다, 합쳐진 뒤엔 GATE vs STEER 구분이 불가하므로.)
+  const decisionNeededByStory = new Map<string, { title: string; enteredAtMs: number | null; originKind: 'gate_pending' | 'needs_input' }>();
 
   for (const sig of signals) {
     if (!sig.title || !sig.story_id) continue; // 방어적 재확인(parseAttentionQueueSignals가 이미 보장하지만 직접호출 대비)
@@ -147,18 +213,18 @@ export function buildAttentionQueueFromBe(
       blockedByStory.set(sig.story_id, entry);
     } else if (sig.kind === 'needs_input' || sig.kind === 'gate_pending') {
       if (!decisionNeededByStory.has(sig.story_id)) {
-        decisionNeededByStory.set(sig.story_id, { title: sig.title, enteredAtMs });
+        decisionNeededByStory.set(sig.story_id, { title: sig.title, enteredAtMs, originKind: sig.kind });
       }
     } else if (sig.kind === 'verify_fail') {
       items.push({
-        id: `verify_fail-${sig.story_id}`, kind: 'verify_fail', kindLabel: t('kindVerifyFail'),
+        id: `verify_fail-${sig.story_id}`, kind: 'verify_fail', bucket: BUCKET_BY_KIND.verify_fail, kindLabel: t('kindVerifyFail'),
         proofState: PROOF_STATE.verify_fail, claim: t('claimVerifyFail', { title: sig.title }),
         actor: null, actionLabel: t('actionRework'), actionTone: 'neutral',
         href: `/board?story=${sig.story_id}`, enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
       });
     } else if (sig.kind === 'merge_ready') {
       items.push({
-        id: `merge_ready-${sig.story_id}`, kind: 'merge_ready', kindLabel: t('kindMergeReady'),
+        id: `merge_ready-${sig.story_id}`, kind: 'merge_ready', bucket: BUCKET_BY_KIND.merge_ready, kindLabel: t('kindMergeReady'),
         proofState: PROOF_STATE.merge_ready, claim: t('claimMergeReady', { title: sig.title }),
         actor: null, actionLabel: t('actionMerge'), actionTone: 'ready',
         href: `/board?story=${sig.story_id}`, enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
@@ -168,21 +234,100 @@ export function buildAttentionQueueFromBe(
 
   for (const [storyId, { title, count, enteredAtMs }] of blockedByStory) {
     items.push({
-      id: `blocked-${storyId}`, kind: 'blocked', kindLabel: t('kindBlocked'),
+      id: `blocked-${storyId}`, kind: 'blocked', bucket: BUCKET_BY_KIND.blocked, kindLabel: t('kindBlocked'),
       proofState: PROOF_STATE.blocked, claim: t('claimBlocked', { title, count }),
       actor: null, actionLabel: t('actionCoordinate'), actionTone: 'neutral',
       href: `/board?story=${storyId}`, enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
     });
   }
-  for (const [storyId, { title, enteredAtMs }] of decisionNeededByStory) {
+  for (const [storyId, { title, enteredAtMs, originKind }] of decisionNeededByStory) {
     items.push({
-      id: `decision_needed-${storyId}`, kind: 'decision_needed', kindLabel: t('kindDecisionNeeded'),
+      // originKind는 'gate_pending'|'needs_input'(BeAttentionKind 부분집합)이라 AttentionKind
+      // 전체를 키로 삼는 BUCKET_BY_KIND엔 'needs_input' 항목이 없다(item.kind로 실제 등장하는
+      // 값이 아니라서 그 테이블에 넣지 않았다) — 여기서만 직접 분기.
+      id: `decision_needed-${storyId}`, kind: 'decision_needed', bucket: originKind === 'gate_pending' ? 'GATE' : 'STEER', kindLabel: t('kindDecisionNeeded'),
       proofState: PROOF_STATE.decision_needed, claim: t('claimDecisionNeeded', { title }),
       actor: null, actionLabel: t('actionDecide'), actionTone: 'primary',
       href: `/board?story=${storyId}`, enteredStateAtMs: enteredAtMs, sortKey: toSortKey(enteredAtMs),
     });
   }
   return items;
+}
+
+// story #2923(P0-E AQ1) — DecisionsWaiting(/api/inbox)이 흡수되는 원본 타입. 다건 옵션
+// resolve(approve/approve-alt/reassign/changes)·dismiss는 PO 확定①(2026-08-22, "단순화")로
+// row에 안 옮긴다 — row는 단일 버튼(상세 이동)만, 신중 결재(다건 사유)는 상세 화면 몫(게이트
+// 「확認과 비가역을 한 호출에 안 묶는」 규율과 같은 결). options/priority 필드는 그래서 이
+// 병합에서 안 씀(지어내지 않음 — 쓰지도 않을 필드를 타입에 안 얹는다).
+export type InboxItemKind = 'approval' | 'decision' | 'blocker' | 'mention';
+export type InboxOriginType = 'memo' | 'story' | 'run' | 'initiative';
+
+export interface InboxOriginNode {
+  type: InboxOriginType;
+  id: string;
+}
+
+export interface InboxAttentionItem {
+  id: string;
+  kind: InboxItemKind;
+  title: string;
+  origin_chain: InboxOriginNode[];
+  created_at: string;
+}
+
+/** story #2923 AQ1(PO 실측, 2026-08-22) — origin_chain에서 상세 라우트가 실재하는 노드만
+ * 찾아 href를 만든다. 우선순위: story(기존 `/board?story=` 관례) > memo(doc 실물 — id→slug
+ * 사전 해소된 맵 필요, notification-navigation.ts의 buildDocHref 관례) > 없음(run/initiative는
+ * FE 상세 라우트 자체가 없다 — notification-navigation도 doc 계열만 다루고, 현행
+ * DecisionsWaiting조차 origin을 링크 아닌 텍스트 라벨로만 보여줬다. 있지도 않은 라우트를
+ * 지어내지 않는다 — null이면 호출부가 행을 비내비게이션 처리). */
+export function resolveInboxItemHref(
+  originChain: InboxOriginNode[],
+  docSlugById: Map<string, string>,
+): string | null {
+  const story = originChain.find((n) => n.type === 'story');
+  if (story) return `/board?story=${story.id}`;
+  const memo = originChain.find((n) => n.type === 'memo');
+  if (memo) {
+    const slug = docSlugById.get(memo.id);
+    if (slug) return `/docs/${slug}`;
+  }
+  return null;
+}
+
+const INBOX_ITEM_META: Record<InboxItemKind, { kindLabelKey: string; actionLabelKey: string; actionTone: 'primary' | 'neutral' }> = {
+  approval: { kindLabelKey: 'kindApproval', actionLabelKey: 'actionApprove', actionTone: 'primary' },
+  decision: { kindLabelKey: 'kindDecision', actionLabelKey: 'actionConfirm', actionTone: 'primary' },
+  blocker: { kindLabelKey: 'kindBlocker', actionLabelKey: 'actionResolve', actionTone: 'neutral' },
+  mention: { kindLabelKey: 'kindMention', actionLabelKey: 'actionReply', actionTone: 'neutral' },
+};
+
+/** story #2923 AQ1 — DecisionsWaiting 패널 폐기, 그 데이터를 AQ 행으로 흡수. item.title은
+ * BE가 이미 완결된 설명 문자열이라(DecisionsWaiting 기존 렌더도 그대로 썼다) claimXxx 템플릿
+ * 래핑 없이 그대로 claim으로 쓴다(BE raw entity title을 감싸야 했던 verify_fail류와 다름). */
+export function buildAttentionQueueFromInbox(
+  items: InboxAttentionItem[],
+  t: AttentionQueueTranslator,
+  docSlugById: Map<string, string>,
+): AttentionQueueItem[] {
+  return items.map((item) => {
+    const meta = INBOX_ITEM_META[item.kind];
+    const enteredAtMs = toEpochMs(item.created_at);
+    return {
+      id: `inbox-${item.id}`,
+      kind: item.kind,
+      bucket: BUCKET_BY_KIND[item.kind],
+      kindLabel: t(meta.kindLabelKey),
+      proofState: PROOF_STATE[item.kind],
+      claim: item.title,
+      actor: null,
+      actionLabel: t(meta.actionLabelKey),
+      actionTone: meta.actionTone,
+      href: resolveInboxItemHref(item.origin_chain, docSlugById),
+      enteredStateAtMs: enteredAtMs,
+      sortKey: toSortKey(enteredAtMs),
+    };
+  });
 }
 
 /**
@@ -204,8 +349,11 @@ export function diffAttentionQueueItemIds(
   return changed;
 }
 
+// story #2923 AQ1 — inbox 4종은 기존 amber 3종과 동일 우선순위 티어(0)에 둔다. 위험·나이 기반
+// 정밀 정렬은 AQ5 스코프("「3~7」 상한: 우선순위 정렬")라 여기서 새로 설계하지 않는다.
 const KIND_PRIORITY: Record<AttentionKind, number> = {
   verify_fail: 0, decision_needed: 0, gate_pending: 0, blocked: 0, merge_ready: 1,
+  approval: 0, decision: 0, blocker: 0, mention: 0,
 };
 
 /**

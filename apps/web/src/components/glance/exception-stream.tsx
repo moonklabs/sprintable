@@ -49,7 +49,13 @@ export function ExceptionStream({ items = [] }: ExceptionStreamProps) {
       {items.map((it) => (
         <li key={it.id}>
           <Link
-            href={it.href}
+            // story #2923 AQ1 — AttentionQueueItem.href가 이제 string|null(inbox 병합 항목의
+            // run/initiative 미가용 라우트 정직 처리)이라 타입이 넓어졌다. 이 스트림은
+            // toExceptionQueueItems만 소비하는데 그쪽 hrefFor는 항상 non-null 문자열을 낸다
+            // (gate_pending/blocked/merge_ready 3종 전부 안전 폴백 포함) — 이 null 분기는
+            // 현재 아키텍처상 도달 불가지만, 타입을 거짓으로 좁히지 않고 hrefFor 자신의 기존
+            // 관례(story_id 없으면 /board)와 동형으로 방어 폴백만 둔다.
+            href={it.href ?? '/board'}
             className="flex items-start gap-2.5 rounded-lg border border-proof-line-soft bg-proof-panel px-3 py-2 transition-colors hover:border-proof-line"
           >
             <span className={`mt-1 size-1.5 shrink-0 rounded-full ${DOT_BY_STATE[it.proofState] ?? 'bg-proof-ink-3'}`} aria-hidden="true" />

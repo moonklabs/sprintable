@@ -2158,7 +2158,15 @@
     "actionRework": "Send back",
     "actionMerge": "Merge",
     "actionDecide": "Decide",
-    "actionCoordinate": "Coordinate"
+    "actionCoordinate": "Coordinate",
+    "kindApproval": "Approval needed",
+    "kindDecision": "Steer needed",
+    "kindBlocker": "Blocked",
+    "kindMention": "Reply needed",
+    "actionApprove": "Approve",
+    "actionConfirm": "Confirm",
+    "actionResolve": "Resolve",
+    "actionReply": "Reply"
   },
   "inbox": {
     "attentionTabLabel": "Today",

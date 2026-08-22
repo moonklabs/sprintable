@@ -21,8 +21,9 @@ import { fetchWithAuth } from '@/lib/db/client';
 
 // story #1960(P2-S4) — 결재함 통합 큐. Gate 3종(게이트·문서결재·머지게이트, gate_type/
 // work_item_type discriminator로 단일 Gate 테이블에 자연 수렴 — #1954에서 확定된 스코프
-// 그대로 재사용) 단일 목록. decision(inbox_items)은 별도 표면(/inbox 기본 탭 DecisionsWaiting
-// 유지) — 이 큐엔 편입하지 않는다(PO+디디+유나 확定).
+// 그대로 재사용) 단일 목록. decision(inbox_items)은 별도 표면(story #2923 AQ1부터 attention
+// 탭의 AttentionQueueView가 흡수 — 구 DecisionsWaiting 패널은 폐기됨) — 이 큐엔 편입하지
+// 않는다(PO+디디+유나 확定, #1954/#1960).
 //
 // 정렬(긴급도) — `?sort=urgency`(story #1973, 배포 완료)가 SLA overdue 최상위→age(created_at)
 // 오래된 순 정렬을 내려준다. `status` 필터는 여전히 하드 필터라(list_gates가 `Gate.status==

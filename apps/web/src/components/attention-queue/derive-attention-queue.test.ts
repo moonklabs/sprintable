@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createTranslator } from 'next-intl';
 import {
   parseAttentionQueueSignals, buildAttentionQueueFromBe, buildAttentionQueue, diffAttentionQueueItemIds,
+  parseInboxAttentionItems, resolveInboxItemHref, buildAttentionQueueFromInbox,
+  BUCKET_BY_KIND,
   type BeAttentionItem, type AttentionQueueItem, type AttentionQueueTranslator,
 } from './derive-attention-queue';
 import koMessagesRaw from '../../../messages/ko.json';
@@ -198,7 +200,7 @@ describe('buildAttentionQueueFromBe', () => {
 describe('buildAttentionQueue', () => {
   function item(kind: AttentionQueueItem['kind'], sortKey: number): AttentionQueueItem {
     return {
-      id: `${kind}-${sortKey}`, kind, kindLabel: kind, proofState: kind === 'merge_ready' ? 'green' : 'amber',
+      id: `${kind}-${sortKey}`, kind, bucket: BUCKET_BY_KIND[kind], kindLabel: kind, proofState: kind === 'merge_ready' ? 'green' : 'amber',
       claim: kind, actor: null, actionLabel: '가기', actionTone: 'neutral', href: '/board',
       enteredStateAtMs: null, sortKey,
     };
@@ -230,7 +232,7 @@ describe('buildAttentionQueue', () => {
 describe('diffAttentionQueueItemIds (9ef0f914 — SSE-triggered refetch diff)', () => {
   function item(id: string, claim: string): AttentionQueueItem {
     return {
-      id, kind: 'blocked', kindLabel: '막힘', proofState: 'amber', claim,
+      id, kind: 'blocked', bucket: 'BLOCK', kindLabel: '막힘', proofState: 'amber', claim,
       actor: null, actionLabel: '조율', actionTone: 'neutral', href: '/board',
       enteredStateAtMs: null, sortKey: 0,
     };
@@ -256,5 +258,168 @@ describe('diffAttentionQueueItemIds (9ef0f914 — SSE-triggered refetch diff)', 
     const prev = [item('a', 'x'), item('b', 'y')];
     const next = [item('a', 'x')];
     expect(diffAttentionQueueItemIds(prev, next)).toEqual(new Set());
+  });
+});
+
+// story #2923(P0-E AQ1, PO 9→4 매핑표 정본 2026-08-22) — GATE=gate_pending·merge_ready·approval
+// / STEER=decision·needs_input / BLOCK=verify_fail·blocked·blocker / Q=mention.
+describe('buildAttentionQueueFromBe (story #2923 AQ1 — bucket 판정)', () => {
+  it('verify_fail → BLOCK, blocked → BLOCK, merge_ready → GATE', () => {
+    const items = buildAttentionQueueFromBe([
+      beItem({ kind: 'verify_fail', story_id: 's1' }),
+      beItem({ kind: 'blocked', story_id: 's2' }),
+      beItem({ kind: 'merge_ready', story_id: 's3' }),
+    ], t);
+    const bucketByKind = Object.fromEntries(items.map((i) => [i.kind, i.bucket]));
+    expect(bucketByKind['verify_fail']).toBe('BLOCK');
+    expect(bucketByKind['blocked']).toBe('BLOCK');
+    expect(bucketByKind['merge_ready']).toBe('GATE');
+  });
+
+  it('gate_pending origin → decision_needed row bucketed GATE (합쳐지기 전 원신호 기억)', () => {
+    const items = buildAttentionQueueFromBe([beItem({ kind: 'gate_pending', story_id: 's1' })], t);
+    expect(items[0]!.kind).toBe('decision_needed');
+    expect(items[0]!.bucket).toBe('GATE');
+  });
+
+  it('needs_input origin → decision_needed row bucketed STEER (gate_pending과 버킷이 갈린다)', () => {
+    const items = buildAttentionQueueFromBe([beItem({ kind: 'needs_input', story_id: 's1' })], t);
+    expect(items[0]!.kind).toBe('decision_needed');
+    expect(items[0]!.bucket).toBe('STEER');
+  });
+
+  it('같은 story에 gate_pending이 먼저 도착하면 needs_input이 뒤이어 와도 GATE 버킷을 유지한다(첫 신호 기준, 기존 dedup 무변경)', () => {
+    const items = buildAttentionQueueFromBe([
+      beItem({ kind: 'gate_pending', story_id: 's1' }),
+      beItem({ kind: 'needs_input', story_id: 's1' }),
+    ], t);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.bucket).toBe('GATE');
+  });
+});
+
+function inboxItem(overrides: Partial<import('./derive-attention-queue').InboxAttentionItem> = {}): import('./derive-attention-queue').InboxAttentionItem {
+  return { id: 'inbox-1', kind: 'approval', title: '가격 콘솔 결재 요청', origin_chain: [], created_at: '2026-08-20T00:00:00.000Z', ...overrides };
+}
+
+describe('parseInboxAttentionItems (story #2923 AQ1 — /api/inbox {data:[...]} shape-safety)', () => {
+  it('unwraps the {data:[...]} envelope', () => {
+    const items = parseInboxAttentionItems({ data: [inboxItem()] });
+    expect(items).toHaveLength(1);
+    expect(items[0]!.kind).toBe('approval');
+  });
+
+  it('returns [] for malformed shapes (no-fiction)', () => {
+    expect(parseInboxAttentionItems(null)).toEqual([]);
+    expect(parseInboxAttentionItems({ foo: 'bar' })).toEqual([]);
+    expect(parseInboxAttentionItems('not an object')).toEqual([]);
+  });
+
+  it('skips unknown kinds without crashing', () => {
+    const items = parseInboxAttentionItems({ data: [inboxItem(), { id: 'x', kind: 'scope_violation', title: 't', origin_chain: [], created_at: '2026-01-01' }] });
+    expect(items).toHaveLength(1);
+  });
+
+  it('skips items missing id/title/created_at (cannot fabricate claim/sort key)', () => {
+    const items = parseInboxAttentionItems({
+      data: [
+        { kind: 'approval', title: 't', origin_chain: [], created_at: '2026-01-01' }, // no id
+        { id: 'x', kind: 'approval', origin_chain: [], created_at: '2026-01-01' }, // no title
+        { id: 'x', kind: 'approval', title: 't', origin_chain: [] }, // no created_at
+      ],
+    });
+    expect(items).toEqual([]);
+  });
+
+  it('drops malformed origin_chain nodes but keeps well-formed ones', () => {
+    const items = parseInboxAttentionItems({
+      data: [inboxItem({ origin_chain: [{ type: 'story', id: 's1' }, { type: 'unknown_type', id: 'x' }, { type: 'memo' }] as never })],
+    });
+    expect(items[0]!.origin_chain).toEqual([{ type: 'story', id: 's1' }]);
+  });
+});
+
+describe('resolveInboxItemHref (story #2923 AQ1 — PO 실측 라우트 우선순위: story > memo(slug 있으면) > null)', () => {
+  it('story가 있으면 항상 그것을 쓴다(기존 /board?story= 관례)', () => {
+    const href = resolveInboxItemHref([{ type: 'memo', id: 'm1' }, { type: 'story', id: 's1' }], new Map([['m1', 'my-doc']]));
+    expect(href).toBe('/board?story=s1');
+  });
+
+  it('story 없고 memo만 있으면 사전 해소된 slug로 /docs/{slug}를 만든다', () => {
+    const href = resolveInboxItemHref([{ type: 'memo', id: 'm1' }], new Map([['m1', 'my-doc']]));
+    expect(href).toBe('/docs/my-doc');
+  });
+
+  it('memo인데 slug가 해소 안 됐으면(맵에 없음) null(지어내지 않음)', () => {
+    const href = resolveInboxItemHref([{ type: 'memo', id: 'm1' }], new Map());
+    expect(href).toBeNull();
+  });
+
+  it('run/initiative만 있으면(story/memo 둘 다 없음) null — FE 상세 라우트가 실재하지 않는다(PO 실측)', () => {
+    expect(resolveInboxItemHref([{ type: 'run', id: 'r1' }], new Map())).toBeNull();
+    expect(resolveInboxItemHref([{ type: 'initiative', id: 'i1' }], new Map())).toBeNull();
+  });
+
+  it('origin_chain이 비어 있으면 null', () => {
+    expect(resolveInboxItemHref([], new Map())).toBeNull();
+  });
+});
+
+describe('buildAttentionQueueFromInbox (story #2923 AQ1 — DecisionsWaiting 흡수)', () => {
+  it('approval → GATE 버킷·결재 액션·amber', () => {
+    const [item] = buildAttentionQueueFromInbox([inboxItem({ kind: 'approval' })], t, new Map());
+    expect(item!.bucket).toBe('GATE');
+    expect(item!.actionLabel).toBe('결재');
+    expect(item!.proofState).toBe('amber');
+    expect(item!.actionTone).toBe('primary');
+  });
+
+  it('decision → STEER 버킷·확認 액션', () => {
+    const [item] = buildAttentionQueueFromInbox([inboxItem({ kind: 'decision' })], t, new Map());
+    expect(item!.bucket).toBe('STEER');
+    expect(item!.actionLabel).toBe('확認');
+  });
+
+  it('blocker → BLOCK 버킷·해소 액션', () => {
+    const [item] = buildAttentionQueueFromInbox([inboxItem({ kind: 'blocker' })], t, new Map());
+    expect(item!.bucket).toBe('BLOCK');
+    expect(item!.actionLabel).toBe('해소');
+    expect(item!.actionTone).toBe('neutral');
+  });
+
+  it('mention → Q 버킷·답 액션', () => {
+    const [item] = buildAttentionQueueFromInbox([inboxItem({ kind: 'mention' })], t, new Map());
+    expect(item!.bucket).toBe('Q');
+    expect(item!.actionLabel).toBe('답');
+  });
+
+  it('claim은 item.title 그대로 쓴다(BE가 이미 완결된 문자열이라 템플릿 래핑 없음)', () => {
+    const [item] = buildAttentionQueueFromInbox([inboxItem({ title: '가격 콘솔 결재 요청' })], t, new Map());
+    expect(item!.claim).toBe('가격 콘솔 결재 요청');
+  });
+
+  it('href는 resolveInboxItemHref 그대로 반영한다(story 있으면 그걸로)', () => {
+    const [item] = buildAttentionQueueFromInbox(
+      [inboxItem({ origin_chain: [{ type: 'story', id: 's1' }] })], t, new Map(),
+    );
+    expect(item!.href).toBe('/board?story=s1');
+  });
+
+  it('run만 있어 라우트가 없으면 href=null(호출부가 비내비게이션 처리)', () => {
+    const [item] = buildAttentionQueueFromInbox(
+      [inboxItem({ origin_chain: [{ type: 'run', id: 'r1' }] })], t, new Map(),
+    );
+    expect(item!.href).toBeNull();
+  });
+
+  it('id에 inbox- 접두어를 붙여 BE 신호 id와 네임스페이스 충돌을 막는다', () => {
+    const [item] = buildAttentionQueueFromInbox([inboxItem({ id: 'abc123' })], t, new Map());
+    expect(item!.id).toBe('inbox-abc123');
+  });
+
+  it('ko/en 파리티 — en translator로도 렌더된다', () => {
+    const [item] = buildAttentionQueueFromInbox([inboxItem({ kind: 'approval' })], tEn, new Map());
+    expect(item!.actionLabel).toBe('Approve');
+    expect(item!.kindLabel).toBe('Approval needed');
   });
 });
