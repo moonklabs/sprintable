@@ -1553,6 +1553,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     storyLabelsMap={storyLabelsMap}
                     storyGatesMap={storyGatesMap}
                     storyLineMap={storyLineMap}
+                    isDragging={activeId != null}
                   />
                 );
               })}

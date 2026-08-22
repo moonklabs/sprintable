@@ -51,6 +51,13 @@ interface KanbanTrustColumnProps {
   storyLabelsMap?: Record<string, { id: string; name: string; color: string | null }[]>;
   storyGatesMap?: Record<string, { id: string; gate_type: string; status: string }[]>;
   storyLineMap?: Record<string, LineStatusSummary>;
+  // story #2933 H4(PO 리뷰 질문, PR#3366 2026-08-22) — 드래그가 진행 중인지(어떤 카드든).
+  // v4 아티팩트 §B("파생 3개가 «닫힌다»") — 파생 컬럼은 «항상» 무효 타깃이라 5-status의
+  // dragStatus별 valid/invalid 판정과 달리 뭘 끌든 똑같이 닫힌다. 정적 상태(잠금배지+힌트
+  // 텍스트, 위 locked && ...)는 이미 항상 보이지만, 드래그 中엔 흐림(opacity)까지 더해
+  // "지금 이 순간 못 놓는다"는 동적 신호를 얹는다(resolveTrustColumnId의 조용한 무효화만으론
+  // "왜 안 되는지" 안 보여 반쪽 — PO 지적).
+  isDragging?: boolean;
 }
 
 /**
@@ -71,16 +78,18 @@ interface KanbanTrustColumnProps {
 export function KanbanTrustColumn({
   id, label, locked, stories, epicMap, memberMap, onStoryClick, onEditStory, onChangeStatus, onDeleteStory,
   projectId, onKickoffStory, executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap,
+  isDragging = false,
 }: KanbanTrustColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id, disabled: locked });
   const t = useTranslations('board');
   const dotClass = TRUST_COLUMN_DOT[id];
+  const closedDuringDrag = locked && isDragging;
 
   return (
     <div
       ref={setNodeRef}
       className={`flex h-full w-[280px] min-w-[240px] flex-col rounded-xl p-3 transition ${
-        locked ? 'bg-muted/20' : isOver ? 'bg-primary/5 ring-1 ring-primary/20' : 'bg-transparent'
+        closedDuringDrag ? 'bg-muted/20 opacity-45' : locked ? 'bg-muted/20' : isOver ? 'bg-primary/5 ring-1 ring-primary/20' : 'bg-transparent'
       }`}
     >
       <div className="mb-3 flex items-center justify-between gap-2">
@@ -92,7 +101,9 @@ export function KanbanTrustColumn({
         <span className="text-xs tabular-nums text-muted-foreground">{stories.length}</span>
       </div>
       {locked && (
-        <p className="mb-2 text-[10px] leading-snug text-muted-foreground">{t('trustLockedDropHint')}</p>
+        <p className={`mb-2 text-[10px] leading-snug ${closedDuringDrag ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>
+          {t('trustLockedDropHint')}
+        </p>
       )}
 
       <SortableContextCompat items={stories.map((s) => s.id)} strategy={verticalListSortingStrategy} disabled={locked}>
