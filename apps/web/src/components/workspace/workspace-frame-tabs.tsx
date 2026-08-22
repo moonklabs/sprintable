@@ -28,7 +28,12 @@ export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey })
   const params = useParams<{ ws: string; proj: string }>();
 
   return (
-    <div className="flex items-center gap-1 border-b border-border pb-2" role="tablist" aria-label={t('workspace')}>
+    // 유나 QA 블로커(PR#3358, 2026-08-22) — flow-client 내부 3탭(가설/갈래/칸반)과 스타일이
+    // byte-identical(둘 다 rounded pill+bg-muted active)이라 스택되면 «동일 탭 행 2개」로
+    // 위계 구분이 안 됐다. 처방(유나 확定): 상위 프레임은 text-sm+하단 인디케이터(underline)로
+    // — 페이지-크롬(notification-bell.tsx 필터 탭과 동형 패턴, 신규 발명 아님). 내부 뷰 탭의
+    // rounded pill과 kind 자체가 달라 한눈에 "이건 다른 층"으로 읽힌다.
+    <div className="flex items-center gap-4 border-b border-border" role="tablist" aria-label={t('workspace')}>
       {TABS.map((tab) => (
         <button
           key={tab.key}
@@ -36,7 +41,7 @@ export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey })
           role="tab"
           aria-selected={active === tab.key}
           onClick={() => router.push(`/${params.ws}/${params.proj}/${tab.path}`)}
-          className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${active === tab.key ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+          className={`-mb-px border-b-2 px-1 pb-2 text-sm font-semibold transition ${active === tab.key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
         >
           {t(tab.key)}
         </button>
