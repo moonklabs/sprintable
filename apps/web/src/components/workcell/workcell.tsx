@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { ArrowRight, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ProofCapsule, type ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
+import { Proofline, type ProofState } from '@/components/proof-capsule/proofline';
 import { Avatar } from '@/components/shared/avatar';
 
 export interface WorkcellOwner {
@@ -76,6 +77,28 @@ export interface WorkcellProps {
 
 const PIPELINE_STAGES: WorkcellPipelineStage[] = ['queued', 'running', 'needs_input', 'claimed_done', 'verified', 'merge_ready'];
 
+// story #2922 W6 — 유나양 확定 트러스트-시맨틱 컬러 매핑(2026-08-22, 시안 335f138d 갱신).
+// 색=그 단계 자체의 신뢰상태(위치 무관 고정) — Running/Claimed done=blue(실행·주장,
+// 미검증)·Needs input=amber(대기)·Verified/Merge-ready=green(증명). Queued는 매핑에 없음
+// (아직 신호 자체가 없다 — 4색 중 어느 것도 지어내지 않고 중립 faint/line 토큰으로 대체).
+// 레일(Proofline)과 헤더 스테퍼 둘 다 이 SSOT 하나를 공유(동작 이중선언 금지).
+const PIPELINE_STAGE_TRUST_COLOR: Partial<Record<WorkcellPipelineStage, ProofState>> = {
+  running: 'blue', needs_input: 'amber', claimed_done: 'blue', verified: 'green', merge_ready: 'green',
+};
+
+const TRUST_TEXT_CLASS: Record<ProofState, string> = {
+  blue: 'text-proof-blue', amber: 'text-proof-amber', green: 'text-proof-green', red: 'text-proof-red',
+};
+const TRUST_BG_CLASS: Record<ProofState, string> = {
+  blue: 'bg-proof-blue', amber: 'bg-proof-amber', green: 'bg-proof-green', red: 'bg-proof-red',
+};
+const TRUST_BORDER_CLASS: Record<ProofState, string> = {
+  blue: 'border-proof-blue', amber: 'border-proof-amber', green: 'border-proof-green', red: 'border-proof-red',
+};
+const TRUST_RING_CLASS: Record<ProofState, string> = {
+  blue: 'ring-proof-blue/20', amber: 'ring-proof-amber/20', green: 'ring-proof-green/20', red: 'ring-proof-red/20',
+};
+
 function PipelineStepper({ stage }: { stage: WorkcellPipelineStage }) {
   const t = useTranslations('workcell');
   const label: Record<WorkcellPipelineStage, string> = {
@@ -86,24 +109,28 @@ function PipelineStepper({ stage }: { stage: WorkcellPipelineStage }) {
   return (
     <div className="mb-2.5 flex flex-wrap items-center gap-x-0 gap-y-1" role="list" aria-label={t('pipelineQuestion')}>
       {PIPELINE_STAGES.map((s, i) => {
-        const status = i < curIdx ? 'done' : i === curIdx ? 'current' : 'pending';
+        const isCurrent = i === curIdx;
+        const color = PIPELINE_STAGE_TRUST_COLOR[s];
+        // story #2922 W6 델타(유나양 확定) — 색=신뢰상태(위치 무관, 위 표) · 강조=위치
+        // (ring/weight/dot-fill로만, current만 채워진 점+ring+굵기). "지나온" 단계라고
+        // 강제로 초록 처리하지 않는다 — 그 자체가 이미 초록(예: verified)이 아닌 한.
         return (
           <span key={s} className="flex items-center" role="listitem">
             <span
               className={cn(
-                'flex items-center gap-1.5 pr-1.5 text-[9px] font-semibold leading-none',
-                status === 'done' && 'text-proof-green',
-                status === 'current' && 'font-bold text-proof-blue',
-                status === 'pending' && 'text-proof-faint',
+                'flex items-center gap-1.5 pr-1.5 text-[9px] leading-none',
+                color ? TRUST_TEXT_CLASS[color] : 'text-proof-faint',
+                isCurrent && 'font-bold',
+                !isCurrent && 'font-semibold',
               )}
-              aria-current={status === 'current' ? 'step' : undefined}
+              aria-current={isCurrent ? 'step' : undefined}
             >
               <span
                 className={cn(
                   'size-1.5 rounded-full',
-                  status === 'done' && 'bg-proof-green',
-                  status === 'current' && 'bg-proof-blue ring-2 ring-proof-blue/20',
-                  status === 'pending' && 'bg-proof-line',
+                  isCurrent
+                    ? cn(color ? TRUST_BG_CLASS[color] : 'bg-proof-line', 'ring-2', color ? TRUST_RING_CLASS[color] : 'ring-proof-line/40')
+                    : cn('border bg-transparent', color ? TRUST_BORDER_CLASS[color] : 'border-proof-line'),
                 )}
                 aria-hidden="true"
               />
@@ -130,40 +157,46 @@ function PipelineStepper({ stage }: { stage: WorkcellPipelineStage }) {
  */
 export function Workcell({ title, pipelineStage, brief, run, evidence, conversation, className }: WorkcellProps) {
   const t = useTranslations('workcell');
+  const railState = PIPELINE_STAGE_TRUST_COLOR[pipelineStage];
   return (
     <div
-      className={cn('overflow-hidden rounded-[6px] border border-proof-line bg-proof-panel', className)}
+      className={cn('flex overflow-hidden rounded-[6px] border border-proof-line bg-proof-panel', className)}
       style={{ clipPath: 'polygon(0 0, calc(100% - 24px) 0, 100% 24px, 100% 100%, 0 100%)' }}
     >
-      <div className="border-b border-proof-line px-4.5 py-3.5">
-        <PipelineStepper stage={pipelineStage} />
-        <span className="text-[17px] font-bold leading-tight tracking-[-0.012em] text-proof-ink">{title}</span>
-        {/* story #2922 W4 — 책임자/실행자를 헤더로 승격("10초 리트머스": 스크롤 없이 «누가»가
-            보임). #3339(2921 아바타 단일통합)가 ProofAvatar를 폐기·Avatar로 수렴시켰다 —
-            여기도 그 정본을 그대로 소비(신규 변형 0). Brief 구획의 중복 표기는 제거(SSOT=
-            헤더 이 한 자리). */}
-        <div className="mt-2 flex flex-wrap items-center gap-3.5 text-[11px] text-proof-ink-3">
-          <span className="inline-flex items-center gap-1.5">
-            <Avatar name={brief.owner.name} actorType="human" size={18} />
-            {t('briefOwner')} {brief.owner.name}
-          </span>
-          {brief.agent ? (
+      {/* story #2922 W6(선행 조각) — Proofline 좌측 레일(ProofCapsule CutCornerShell과 동형
+          부품 재사용, 신규 컴포넌트 0). */}
+      {railState ? <Proofline state={railState} /> : <div className="w-1 shrink-0 self-stretch bg-proof-line" aria-hidden="true" />}
+      <div className="min-w-0 flex-1">
+        <div className="border-b border-proof-line px-4.5 py-3.5">
+          <PipelineStepper stage={pipelineStage} />
+          <span className="text-[17px] font-bold leading-tight tracking-[-0.012em] text-proof-ink">{title}</span>
+          {/* story #2922 W4 — 책임자/실행자를 헤더로 승격("10초 리트머스": 스크롤 없이 «누가»가
+              보임). #3339(2921 아바타 단일통합)가 ProofAvatar를 폐기·Avatar로 수렴시켰다 —
+              여기도 그 정본을 그대로 소비(신규 변형 0). Brief 구획의 중복 표기는 제거(SSOT=
+              헤더 이 한 자리). */}
+          <div className="mt-2 flex flex-wrap items-center gap-3.5 text-[11px] text-proof-ink-3">
             <span className="inline-flex items-center gap-1.5">
-              <Avatar name={brief.agent.name} actorType="agent" size={18} />
-              {t('briefAgent')} {brief.agent.name}
+              <Avatar name={brief.owner.name} actorType="human" size={18} />
+              {t('briefOwner')} {brief.owner.name}
             </span>
-          ) : null}
+            {brief.agent ? (
+              <span className="inline-flex items-center gap-1.5">
+                <Avatar name={brief.agent.name} actorType="agent" size={18} />
+                {t('briefAgent')} {brief.agent.name}
+              </span>
+            ) : null}
+          </div>
         </div>
-      </div>
 
-      {/* story #2922 W1 — 4구획 세로 나열 → 2×2 그리드(Brief|Run / Evidence|Conversation).
-          gap-px+bg-proof-line가 각 구획 사이 헤어라인을 만든다(개별 레이어의 border-b는
-          이제 이 그리드 갭과 중복이라 제거됨). */}
-      <div className="grid grid-cols-2 gap-px bg-proof-line">
-        <div className="bg-proof-panel"><BriefLayer brief={brief} /></div>
-        <div className="bg-proof-panel"><RunLayer run={run} /></div>
-        <div className="bg-proof-panel"><EvidenceLayer evidence={evidence} /></div>
-        <div className="bg-proof-panel"><ConversationLayer conversation={conversation} /></div>
+        {/* story #2922 W1 — 4구획 세로 나열 → 2×2 그리드(Brief|Run / Evidence|Conversation).
+            gap-px+bg-proof-line가 각 구획 사이 헤어라인을 만든다(개별 레이어의 border-b는
+            이제 이 그리드 갭과 중복이라 제거됨). */}
+        <div className="grid grid-cols-2 gap-px bg-proof-line">
+          <div className="bg-proof-panel"><BriefLayer brief={brief} /></div>
+          <div className="bg-proof-panel"><RunLayer run={run} /></div>
+          <div className="bg-proof-panel"><EvidenceLayer evidence={evidence} /></div>
+          <div className="bg-proof-panel"><ConversationLayer conversation={conversation} /></div>
+        </div>
       </div>
     </div>
   );
