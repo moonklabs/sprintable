@@ -51,7 +51,7 @@ runs:
       run: |
         set -euo pipefail
         LATEST_VERDICT_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate \
-          --jq --arg re "${HEADER_REGEX}" '.[] | select(.body | test($re)) | [.created_at, .body] | @tsv' \
+          | jq -r --arg re "${HEADER_REGEX}" '.[] | select(.body | test($re)) | [.created_at, .body] | @tsv' \
           | sort | tail -1 | cut -f2-)"
         if [ -z "${LATEST_VERDICT_BODY}" ]; then
           echo "::error title=${LABEL_NAME} verdict comment not found::${LABEL_NAME} 라벨은 있는데 그 근거 판정 코멘트를 못 찾았다(패턴: ${HEADER_REGEX}) — head 대조 불가. fail-closed."
