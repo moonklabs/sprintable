@@ -19,7 +19,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gate import Gate, set_gate_status
@@ -401,29 +401,58 @@ async def reopen_gate_if_new_sha(
     경우만 워터마크가 여전히 None — 그 직후 첫 webhook은 SHA-diff-only(#2932 이전
     baseline)로 판정한다. 새로 나빠지는 게 아니라 그 좁은 창에서만 원래 상태로 되돌아가는
     것 — 5라운드가 낸 "진짜 새 커밋을 영영 못 지운다" 사고는 이 설계에서 서버시각이 이
-    필드에 원천적으로 안 쓰이므로 구조적으로 재발 불가."""
+    필드에 원천적으로 안 쓰이므로 구조적으로 재발 불가.
+
+    ⛔카디르 6라운드(codex 발견, 이 PR 자신이 도입한 신규 결함) — 5라운드의 관측 블록은
+    "읽고(Python) 비교하고 쓰는" 3단계라, exact-match SELECT(gate_service.py의
+    `find_gate_slot_with_pr_fallback`)가 `.with_for_update()` 없이 이 gate row를 가져오는
+    한 동시성 레이스에 노출된다: 워터마크=T0인 gate에 Tx A(웹훅 T2, 진짜 최신)와 Tx B(웹훅
+    T1, T0<T1<T2)가 동시 도착 → 둘 다 언락 SELECT로 T0를 읽고 각자 "내 값이 T0보다
+    새롭다"로 독립 판정 → A가 T2로 먼저 commit → 대기하던 B의 UPDATE가 **T1으로 덮어씀**
+    (row-lock은 write만 직렬화할 뿐, Python 비교 결과를 lock 획득 後 재계산하지 않음) →
+    최종 워터마크가 T2가 아니라 T1으로 **역행** → 이후 T1<Tmid<T2인 진짜 stale webhook이
+    가드를 통과해 부당 재-pending. HIGH2(NULL 슬롯 승격)가 이미 같은 클래스 레이스를
+    `.with_for_update()`로 막았는데 관측 로직엔 그 보호가 빠져 있었다.
+
+    **처방(DB 원자적 GREATEST, 페드루 PO 소견 채택)**: FOR UPDATE 잠금 대신 단일 원자적
+    `UPDATE ... SET pr_head_observed_at = GREATEST(pr_head_observed_at, :new)
+    RETURNING pr_head_observed_at`로 관측을 수행한다. PostgreSQL은 각 UPDATE 문을 그
+    실행 시점의 **최신 커밋된** 행 값에 대해 계산한다 — 두 번째 UPDATE는 첫 번째가 커밋해
+    락을 놓은 뒤에야 진행되고, 그때는 이미 첫 번째가 쓴 값을 본 채로 GREATEST를 재계산한다.
+    그 결과 커밋 순서와 무관하게 최종 워터마크는 항상 "지금까지 관측된 모든 값의 최댓값"이
+    된다 — 단조성이 Python 비교(코드 규율)가 아니라 GREATEST라는 **DB 성질 자체**가 되어
+    역행이 구조적으로 불가능해진다(FOR UPDATE처럼 락 대기를 추가로 도입할 필요도 없음).
+    staleness 판정도 같은 원자적 왕복에서 얻는다 — RETURNING된 값이 내 `pr_updated_at`과
+    같으면 내 배달이 GREATEST에서 이겼다(=stale 아님, 4라운드 동일-timestamp tie-break도
+    이 비교가 자연히 흡수 — 같으면 stale 아님, SHA-diff로 넘어감), 다르면(더 큰 값이
+    이미 기록돼 있었다) stale이다."""
     if gate.gate_type != MERGE_GATE_TYPE:
         return False
-    # 관측(상태 무관, 항상) — 판정(승인된 게이트에서만) 보다 먼저 수행. staleness 비교는
-    # "갱신 前" 워터마크(prior_watermark)와 해야 하므로 먼저 old값을 잡아둔다.
-    prior_watermark = gate.pr_head_observed_at
-    if pr_updated_at is not None and (prior_watermark is None or pr_updated_at > prior_watermark):
-        gate.pr_head_observed_at = pr_updated_at
-        await session.flush()
+    # 관측(상태 무관, 항상) — DB 원자적 GREATEST 갱신(위 6라운드 설명 참조). 판정(승인된
+    # 게이트에서만)보다 먼저 수행.
+    is_stale_delivery = False
+    if pr_updated_at is not None:
+        result = await session.execute(
+            text(
+                "UPDATE gate SET pr_head_observed_at = GREATEST(pr_head_observed_at, "
+                "CAST(:new_ts AS timestamptz)) WHERE id = CAST(:gate_id AS uuid) "
+                "RETURNING pr_head_observed_at"
+            ),
+            {"new_ts": pr_updated_at, "gate_id": gate.id},
+        )
+        new_watermark = result.scalar_one()
+        gate.pr_head_observed_at = new_watermark  # ORM 인스턴스를 실제 DB 값과 동기화.
+        is_stale_delivery = new_watermark != pr_updated_at
     if gate.status not in ("approved", "auto_passed"):
         return False  # pending 등 — 관측은 위에서 이미 기록됨(status 무관), 재-pending 판정 대상만 아님.
-    if (
-        pr_updated_at is not None
-        and prior_watermark is not None
-        and pr_updated_at < prior_watermark
-    ):
+    if is_stale_delivery:
         logger.info(
-            "gate=%s: stale/순서역전 웹훅 무시(pr_updated_at=%s < 이미 관측된 %s) — 재-pending skip",
-            gate.id, pr_updated_at, prior_watermark,
+            "gate=%s: stale/순서역전 웹훅 무시(pr_updated_at=%s, 이미 관측된 워터마크=%s) — 재-pending skip",
+            gate.id, pr_updated_at, gate.pr_head_observed_at,
         )
         return False
     if gate.approved_head_sha == new_head_sha:
-        return False  # 워터마크는 위에서 이미 전진 처리됨(newer였다면) — 중복 세팅 불요.
+        return False  # 워터마크는 위에서 이미 원자적으로 전진 처리됨 — 중복 세팅 불요.
     logger.info(
         "gate=%s: SHA 불일치(approved=%s new=%s) — 재-pending", gate.id, gate.approved_head_sha, new_head_sha
     )

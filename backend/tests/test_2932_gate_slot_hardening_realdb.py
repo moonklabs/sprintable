@@ -693,6 +693,89 @@ async def test_watermark_survives_approval_and_blocks_subsequent_stale_webhook()
 
 
 @pytest.mark.anyio
+async def test_concurrent_webhook_deliveries_never_regress_watermark():
+    """story #2932 완주조건 HIGH2(6라운드, 카디르+codex 발견) — 관측 블록이 "읽고(Python)
+    비교하고 쓰는" 3단계였다면, 동시(실 Postgres 트랜잭션 2개) 웹훅 2건 중 나중에 commit된
+    쪽이 «더 과거» 값으로 워터마크를 덮어써 역행시킬 수 있었다(HIGH2가 NULL-슬롯 승격에서
+    이미 FOR UPDATE로 막은 것과 같은 클래스 레이스가 관측 로직엔 없었음). DB 원자적
+    GREATEST 갱신은 commit 순서와 무관하게 최종 워터마크가 항상 두 배달 중 최댓값이어야
+    한다 — SHA는 동일(gate.approved_head_sha와 일치)하게 둬 재-pending 분기를 안 타게
+    하고, 순수하게 워터마크 관측 경쟁만 격리해서 검증한다."""
+    from app.models.gate import Gate
+    from app.services.gate_github_check import reopen_gate_if_new_sha
+    from app.services.merge_verdict_gate import MERGE_GATE_TYPE
+
+    engine, Session = await _session_factory()
+    try:
+        t0 = datetime(2026, 8, 22, 10, 0, 0, tzinfo=timezone.utc)
+        t_older = t0 + timedelta(minutes=5)   # 두 배달 중 "더 과거"인 쪽(그래도 t0보단 새로움).
+        t_newest = t0 + timedelta(minutes=10)  # 진짜 최신.
+
+        async with Session() as s:
+            org, _project, story = await _seed_org_project_story(s, with_participation=True)
+            gate = Gate(
+                id=uuid.uuid4(), org_id=org.id, work_item_id=story.id, work_item_type="story",
+                gate_type=MERGE_GATE_TYPE, status="approved", pr_number=2938,
+                repo_full_name="acme/race-repo", approved_head_sha="sha-race-base",
+                pr_head_observed_at=t0,
+            )
+            s.add(gate)
+            await s.commit()
+            gate_id, org_id = gate.id, org.id
+
+        # HIGH2(6라운드) 재현 시나리오 그대로: "진짜 최신(T2)" 배달이 먼저 commit되고,
+        # 그보다 옛(T1) 배달이 그 뒤에 처리되는 순서 — 둘 다 자신의 `s.get()`으로 같은
+        # prior(T0)를 이미 읽어둔 채로 경쟁한다(구 코드의 버그 전제 그대로 재현). 두
+        # 트랜잭션 모두 UPDATE(GREATEST 원자 갱신)까지 마친 뒤 commit 타이밍만 이벤트로
+        # 통제 — "newest"가 먼저 커밋해 락을 놓고, "older"의 blocked UPDATE가 그 뒤에
+        # 재개되도록 강제한다(null-슬롯 승격 동시성 테스트와 동일 기법 — 실 row-lock 대기).
+        newest_ready = asyncio.Event()
+        older_started_wait = asyncio.Event()
+        result_holder: dict[str, bool] = {}
+
+        async def _newest():
+            async with Session() as s:
+                gate = await s.get(Gate, gate_id)
+                repended = await reopen_gate_if_new_sha(
+                    s, org_id, gate, "sha-race-base",
+                    repo_full_name="acme/race-repo", pr_number=2938, pr_updated_at=t_newest,
+                )
+                newest_ready.set()
+                # "older"가 자신의 UPDATE를 발사해(락 대기 진입) 이 시점 이후에야 commit —
+                # older의 UPDATE가 진짜로 blocked 상태에 들어갈 시간을 준다.
+                await asyncio.sleep(0.3)
+                await s.commit()
+                result_holder["newest"] = repended
+
+        async def _older():
+            await newest_ready.wait()
+            async with Session() as s:
+                gate = await s.get(Gate, gate_id)  # newest commit 前이므로 여전히 prior=T0를 봄.
+                older_started_wait.set()
+                repended = await reopen_gate_if_new_sha(
+                    s, org_id, gate, "sha-race-base",
+                    repo_full_name="acme/race-repo", pr_number=2938, pr_updated_at=t_older,
+                )  # newest의 UPDATE가 아직 안 커밋됐으면 여기서 row-lock에 걸려 대기.
+                await s.commit()
+                result_holder["older"] = repended
+
+        await asyncio.gather(_newest(), _older())
+
+        assert result_holder["newest"] is False and result_holder["older"] is False, (
+            "동일 SHA면 둘 다 no-op(재-pending 아님)이어야 함"
+        )
+
+        async with Session() as s:
+            final_gate = (await s.execute(select(Gate).where(Gate.id == gate_id))).scalar_one()
+            assert final_gate.pr_head_observed_at == t_newest, (
+                f"동시성 레이스 후 워터마크는 항상 최댓값(t_newest)이어야 하는데 "
+                f"{final_gate.pr_head_observed_at}로 나옴 — 역행 발생(GREATEST 원자성 깨짐)"
+            )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_never_webhooked_gate_has_no_watermark_after_approval_documented_gap():
     """story #2932 완주조건 HIGH2(5라운드) — 정직하게 남기는 한계: 이 gate가 «한 번도» 실
     webhook을 받은 적 없이(순수 self-report/board-preflight 등) 승인되면, 워터마크는 여전히
