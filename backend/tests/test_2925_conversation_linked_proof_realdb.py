@@ -133,7 +133,7 @@ def _client_for(app):
 
 async def _setup_app_human(app, Session, user_id, org_id):
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     async def _db():
         async with Session() as s:
@@ -150,7 +150,7 @@ async def _setup_app_human(app, Session, user_id, org_id):
             claims={"app_metadata": {"org_id": str(org_id)}},
         )
 
-    app.dependency_overrides[get_db] = _db
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
 
 
