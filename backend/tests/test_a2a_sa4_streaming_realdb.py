@@ -249,5 +249,106 @@ async def test_agent_card_model_is_honest_none_when_persona_has_none():
             await s.commit()
             card = await _build_agent_card(s, member, "http://test")
         assert card.model is None
+        assert card.permission_scope is None
+        assert card.expected_cost is None
+        assert card.stop_condition is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_agent_card_surfaces_expected_cost_and_stop_condition_when_declared():
+    """방향서 03·에이전트 속성 슬라이스② — 선언 필드(예상 비용·중단 조건) 배관."""
+    from app.routers.a2a import _build_agent_card
+    from app.models.team import TeamMember
+    from app.models.agent_deployment import AgentPersona
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            await _bypass_fk(s)
+            member = TeamMember(
+                id=uuid.uuid4(), org_id=uuid.uuid4(), project_id=uuid.uuid4(), type="agent",
+                name="Declared Attrs Card Test Agent", role="member", is_active=True,
+            )
+            s.add(member)
+            await s.flush()
+            persona = AgentPersona(
+                id=uuid.uuid4(), org_id=member.org_id, project_id=member.project_id,
+                agent_id=member.id, slug="declared-attrs-test",
+                name="Declared Attrs Test Persona", is_default=True,
+                expected_cost_note="월 5만원 내외(추정)", stop_condition_note="예산 초과 시 정지",
+            )
+            s.add(persona)
+            await s.commit()
+            card = await _build_agent_card(s, member, "http://test")
+        assert card.expected_cost == "월 5만원 내외(추정)"
+        assert card.stop_condition == "예산 초과 시 정지"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_agent_card_permission_scope_reflects_active_api_key_not_persona_config():
+    """표시 SSOT=ApiKey.scope(실제 집행값) — persona.config.tool_allowlist가 달라도 카드는
+    실제 발급된 활성 키의 scope를 보인다(설계 doc §1의 드리프트 경고를 직접 검증)."""
+    from app.routers.a2a import _build_agent_card
+    from app.models.team import TeamMember
+    from app.models.agent_deployment import AgentPersona
+    from app.models.api_key import ApiKey
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            await _bypass_fk(s)
+            member = TeamMember(
+                id=uuid.uuid4(), org_id=uuid.uuid4(), project_id=uuid.uuid4(), type="agent",
+                name="Scope Card Test Agent", role="member", is_active=True,
+            )
+            s.add(member)
+            await s.flush()
+            persona = AgentPersona(
+                id=uuid.uuid4(), org_id=member.org_id, project_id=member.project_id,
+                agent_id=member.id, slug="scope-drift-test", name="Scope Drift Test Persona",
+                is_default=True, config={"tool_allowlist": ["stale_persona_only_tool"]},
+            )
+            s.add(persona)
+            key = ApiKey(
+                id=uuid.uuid4(), team_member_id=member.id, key_prefix="sk_live_testpfx",
+                key_hash="fake-hash-for-test", scope=["real_enforced_tool"],
+            )
+            s.add(key)
+            await s.commit()
+            card = await _build_agent_card(s, member, "http://test")
+        assert card.permission_scope == ["real_enforced_tool"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_agent_card_permission_scope_ignores_revoked_key():
+    from app.routers.a2a import _build_agent_card
+    from app.models.team import TeamMember
+    from app.models.api_key import ApiKey
+
+    engine, Session = await _session()
+    try:
+        async with Session() as s:
+            await _bypass_fk(s)
+            member = TeamMember(
+                id=uuid.uuid4(), org_id=uuid.uuid4(), project_id=uuid.uuid4(), type="agent",
+                name="Revoked Key Card Test Agent", role="member", is_active=True,
+            )
+            s.add(member)
+            await s.flush()
+            revoked = ApiKey(
+                id=uuid.uuid4(), team_member_id=member.id, key_prefix="sk_live_revoked",
+                key_hash="fake-hash-revoked", scope=["should_not_appear"],
+                revoked_at=datetime.now(timezone.utc),
+            )
+            s.add(revoked)
+            await s.commit()
+            card = await _build_agent_card(s, member, "http://test")
+        assert card.permission_scope is None
     finally:
         await engine.dispose()
