@@ -55,6 +55,11 @@
  * AC7 — 이 가드가 «못 잡는 것» (선언 없이 초록이면 「전부 봤다」로 읽힌다):
  *   ㉠런타임에 조립되는 경로 — `resourceLink(variable)`처럼 문자열 리터럴이 아닌 인자, 또는
  *     `router.push(`/${x}`)`류 템플릿 조합. 정규식은 리터럴만 본다.
+ *     실사례(story #2930 I3, 2026-08-22): `sprints`가 nav-config work 존에서 'board'로
+ *     접혀 사이드바 진입점이 사라진 뒤에도 이 가드가 계속 초록인 건 command-palette.tsx의
+ *     `go-sprints`(리터럴 href) 덕분이다 — WorkspaceFrameTabs가 만든 진짜 진입점(router.push
+ *     템플릿 리터럴)은 바로 이 ㉠ 시야 밖이라 안 보인다. command-palette 쪽 주석에 "지우지
+ *     말 것" 경고를 남겨 뒀다(PO 확定) — 지우면 이 가드가 못 잡는 조용한 orphan이 된다.
  *   ㉡`(authenticated)` 안이라도 `[ws]/[proj]` 밖의 라우트(`/organization/workforce`처럼
  *     세그먼트가 2개 이상인 하드코딩 href, `/gates/[id]` 등 엔티티 상세) — AC1이 대조하는
  *     축 자체가 `[ws]/[proj]/<resource>` 하나뿐이다.

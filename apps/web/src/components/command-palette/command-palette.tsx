@@ -51,6 +51,12 @@ const STATIC_ITEMS: CommandItem[] = [
   { id: 'go-inbox', group: 'navigate', icon: Inbox, labelKey: 'goInbox', href: '/inbox', shortcut: ['G', 'I'] },
   { id: 'go-dashboard', group: 'navigate', icon: LayoutDashboard, labelKey: 'goDashboard', href: '/dashboard', shortcut: ['G', 'D'] },
   { id: 'go-board', group: 'navigate', icon: FolderKanban, labelKey: 'goBoard', href: '/board', shortcut: ['G', 'B'] },
+  // story #2930 I3(PO 확定 2026-08-22) — nav-config.ts work 존에서 'sprints'가 'board'로
+  // 접혀 사이드바 진입점이 사라진 뒤, 이 리터럴 href가 verify-no-orphan-resource-routes
+  // (story #2376) 가드의 유일하게 «보이는» /sprints 앵커다. WorkspaceFrameTabs(flow/sprints
+  // 페이지 상단 프레임)도 실제 도달 경로지만 router.push(템플릿 리터럴)이라 그 가드의 정적
+  // 스캔 시야 밖(가드 파일 AC7㉠에 이미 그렇게 명시돼 있다) — 이 항목을 "중복이니 삭제"하면
+  // 가드가 못 보는 조용한 orphan이 된다. 지우지 말 것.
   { id: 'go-sprints', group: 'navigate', icon: CalendarRange, labelKey: 'goSprints', href: '/sprints' },
   { id: 'go-chats', group: 'navigate', icon: MessageSquareMore, labelKey: 'goChats', href: '/chats', shortcut: ['G', 'M'] },
   { id: 'go-agents', group: 'navigate', icon: Bot, labelKey: 'goAgents', href: '/organization/workforce', shortcut: ['G', 'A'] },

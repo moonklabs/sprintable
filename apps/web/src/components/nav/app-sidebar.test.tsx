@@ -85,11 +85,13 @@ async function mount() {
 // story #2930(P0-G) I1·I2·I3 처방(doc ia-4zone-redesign-2930) — 「리팩터 전 하드코딩 JSX 정본」
 // 전제는 이제 지난 얘기다. 12+메뉴→오늘/워크스페이스/신뢰/지식 4구역+관리(조직·설정) 프레임
 // 재편(라우트 전부 불변)+챗을 zone에서 빼 사이드바 챗 center로 승격(I2)+work 존 흐름·스프린트를
-// 「보드」 단일 항목으로 접고 스탠드업·회고를 1차 메뉴에서 뺌(I3, PO 스코프 확定 ①=ⓒ·②=ⓐ
-// 2026-08-22)한 이후의 실 마크업이 이 표의 정본이다.
+// 「보드」 단일 항목으로 접음(I3, PO 스코프 확定 ①=ⓒ 2026-08-22). 스탠드업·회고는 애초 I3에서
+// 1차 메뉴 제거를 시도했으나 CI orphan 가드(story #2376)가 막았다 — command-palette에 대체
+// entry가 없어 nav서 빼면 진짜 orphan이 됐다(sprints와 달리). 「자동 리듬 표면」(doc B2, 구현
+// PO)이 아직 없어 생긴 커플링이라 표면이 설 때까지 nav에 남긴다(②=ⓐ→되돌림, 유나 QA 처방).
 const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
   { labelKey: 'zoneNow', labels: ['조직 브리핑', '알림', '대시보드'] },
-  { labelKey: 'zoneWork', labels: ['보드', '목표', '실험실'] },
+  { labelKey: 'zoneWork', labels: ['보드', '목표', '실험실', '스탠드업', '회고'] },
   { labelKey: 'zoneTrust', labels: ['활동 로그', '신뢰 센터'] },
   { labelKey: 'zoneKnowledge', labels: ['문서', '산출물', '스토리지', '기억'] },
   { labelKey: 'zoneOrganization', labels: ['구성원', '워크포스', '권한', '이벤트'] },
@@ -102,8 +104,8 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
 // 구멍을 닫는다 — org/project slug 없는 테스트 환경이라 resource 항목은 bare `/${resource}`로
 // 폴백한 값(기존 resourceLink()와 동일 규칙). story #2930 — '신뢰'→'신뢰 센터'로 키 갱신
 // (org-trust 라벨 개명, href 자체는 불변). I3 — '흐름'+'스프린트'가 '보드'(href는 옛 흐름의
-// '/flow' 그대로) 하나로 접히고, '스탠드업'/'회고'는 1차 메뉴에서 빠졌다(라우트는 보존 —
-// URL 직접 진입은 여전히 가능, 이 표는 "nav에 뜨는 링크"만의 정본이라 빠진다).
+// '/flow' 그대로) 하나로 접혔다. 스탠드업/회고는 CI orphan 가드가 막아 nav에 그대로 남았다
+// (위 EXPECTED_GROUPS 주석 참고).
 const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '구성원': '/organization/members',
   '워크포스': '/organization/workforce',
@@ -117,6 +119,8 @@ const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '보드': '/flow',
   '목표': '/goals',
   '실험실': '/loops',
+  '스탠드업': '/standup',
+  '회고': '/retro',
   '활동 로그': '/activity',
   '문서': '/docs',
   '산출물': '/artifacts',
@@ -153,10 +157,12 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     expect(boardLink?.getAttribute('href')).toBe('/flow');
   });
 
-  it('kbd 힌트(보드=B)가 붙는다', async () => {
+  it('kbd 힌트(보드=B·스탠드업=S)가 항목별로 정확히 붙는다', async () => {
     await mount();
     const boardBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('보드'));
     expect(boardBtn?.textContent).toContain('B');
+    const standupBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('스탠드업'));
+    expect(standupBtn?.textContent).toContain('S');
   });
 
   it('현재 경로와 일치하는 정적 항목이 active로 표시된다(isActive 판정 보존)', async () => {
@@ -196,10 +202,11 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   });
 
   // 카디르 QA(PR#3100) 지적 — 라벨은 그대로인 채 href만 다른 항목과 뒤바뀌는 뮤테이션은 앞
-  // 테스트들(그룹별 라벨 순서 대조 + 4항목만 개별 href 대조)로는 못 잡는다. NAV_GROUPS 17항목
-  // (챗 center 자체 href는 별도 스위트에서 대조 — I2로 21→20, I3로 work 존 6→3이라 20→17)
-  // 전부를 라벨→href 쌍으로 개별 대조해 "라벨은 맞는데 목적지가 틀림"을 확실히 막는다.
-  it('전 17항목(챗 center 제외)의 라벨→href 쌍이 정확하다(뒤바뀐 목적지 방지, 카디르 QA 지적 반영)', async () => {
+  // 테스트들(그룹별 라벨 순서 대조 + 4항목만 개별 href 대조)로는 못 잡는다. NAV_GROUPS 19항목
+  // (챗 center 자체 href는 별도 스위트에서 대조 — I2로 21→20, I3로 flow+sprints가 board로
+  // 접혀 20→19, 스탠드업/회고는 CI orphan 가드로 되돌려 그대로 잔존) 전부를 라벨→href 쌍으로
+  // 개별 대조해 "라벨은 맞는데 목적지가 틀림"을 확실히 막는다.
+  it('전 19항목(챗 center 제외)의 라벨→href 쌍이 정확하다(뒤바뀐 목적지 방지, 카디르 QA 지적 반영)', async () => {
     await mount();
     const links = [...container.querySelectorAll('a')];
     for (const [label, expectedHref] of Object.entries(EXPECTED_HREF_BY_LABEL)) {

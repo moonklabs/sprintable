@@ -14,9 +14,11 @@ import {
   Newspaper,
   Settings,
   Shield,
+  Users,
   Users2,
   Workflow,
   Zap,
+  Gauge,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -69,9 +71,14 @@ export interface NavGroupConfig {
 //   별도 등재). /flow·/sprints 페이지 상단엔 WorkspaceFrameTabs(신규 공유 컴포넌트)로 두
 //   라우트를 오가는 얕은 「뷰」 전환처럼 보이는 프레임을 얹는다(flow 자체의 기존 3탭
 //   가설/갈래/칸반은 안 건드림 — 그건 다른 층, E-FLOW-V4 기 확定 기능).
-// ②=ⓐ standup/retro는 1차 메뉴에서만 뺀다(라우트/페이지 보존, URL 직접 진입 가능) — 「자동
-//   리듬 표면」으로의 실제 이관(트리거 발행 등 BE 함의)은 doc B2가 "명시만·구현 PO"로 이미
-//   선을 그어 이 슬라이스 몫이 아니다.
+// ②=ⓐ→되돌림(유나 QA·PO 확定, 2026-08-22): standup/retro를 1차 메뉴에서 빼려 했으나 CI
+//   orphan 가드(verify-no-orphan-resource-routes, story #2376)가 routeWithoutEntry로
+//   막았다 — sprints와 달리 standup/retro는 command-palette.tsx에도 대체 entry가 없어
+//   nav서 빼면 «URL 직접 진입만 가능한 진짜 orphan»(그 URL을 아는 사람만 도달, 가드가
+//   정확히 잡으려던 바로 그 상황)이 된다. 「자동 리듬 표면」(doc B2, 구현 PO)이 아직 없어서
+//   생긴 커플링 — FAB↔B3·배지↔4탭과 동형 패턴("표면이 설 때 nav서 뺀다", 오늘 세 번째
+//   사례). 그래서 standup/retro는 nav에 그대로 남긴다(work 존 6→3이 아니라 6→5 — board가
+//   flow+sprints를 흡수한 만큼만 준다).
 export const NAV_GROUPS: NavGroupConfig[] = [
   {
     id: 'now',
@@ -91,6 +98,8 @@ export const NAV_GROUPS: NavGroupConfig[] = [
       { id: 'board', labelKey: 'board', icon: Workflow, kind: 'resource', path: 'flow', kbdHint: 'B' },
       { id: 'goals', labelKey: 'goals', icon: Layers, kind: 'resource', path: 'goals' },
       { id: 'loops', labelKey: 'loops', icon: FlaskConical, kind: 'resource', path: 'loops' },
+      { id: 'standup', labelKey: 'standup', icon: Users, kind: 'resource', path: 'standup', kbdHint: 'S' },
+      { id: 'retro', labelKey: 'retro', icon: Gauge, kind: 'resource', path: 'retro', kbdHint: 'R' },
     ],
   },
   {

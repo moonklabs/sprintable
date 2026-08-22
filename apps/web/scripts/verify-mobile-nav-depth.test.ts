@@ -60,9 +60,9 @@ describe('실 NAV_GROUPS — story #2684 AC3 판별자(이벤트 포함 전 관�
   // 스캔의 시야 밖이라 이 스위트가 못 잰다(nav-config.ts 상단 "AC2 — 이 가드가 못 잡는 것"
   // ㉢·㉥류와 동형) — 렌더 검증은 app-sidebar.test.tsx가 맡는다.
   // story #2930 I3(PO 스코프 확定 2026-08-22) — work 존 흐름+스프린트가 「보드」 단일 항목으로
-  // 접히고 스탠드업·회고가 1차 메뉴에서 빠져(라우트는 보존, 이 스캔은 nav 항목 존재 여부만
-  // 잰다) 20→17항목.
-  it('전 17항목(챗 center 제외)이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
+  // 접혀 20→19항목(스탠드업·회고는 CI orphan 가드가 nav 제거를 막아 잔존 — nav-config.ts
+  // 상단 주석 참고, «자동 리듬 표면»이 설 때까지의 커플링).
+  it('전 19항목(챗 center 제외)이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
     const entries = computeMobileDepths(NAV_GROUPS, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
     expect(findDepthViolations(entries, MAX_MOBILE_DEPTH)).toEqual([]);
   });
