@@ -288,11 +288,16 @@ async def test_upsert_notification_setting_403_when_not_self_or_admin():
 
 @pytest.mark.anyio
 async def test_list_inbox_200():
-    """까심 델타 재QA HIGH(S19): 무가드였던 GET — self 통과 시 정상 동작."""
+    """까심 델타 재QA HIGH(S19): 무가드였던 GET — self 통과 시 정상 동작.
+    PO 지시(CI test_authz_project_scope_coverage 적발, 2026-08-22) — has_project_access를
+    명시 모킹한다(AsyncMock session에 실행시키면 result.scalar_one_or_none()가 우연히
+    truthy MagicMock을 내 "어쩌다 통과"가 될 수 있다 — 이 테스트의 의도(접근권 있음)를
+    명시적으로 만든다, test_1970_gate_single_get.py의 has_project_access 모킹 관례와 동형)."""
     client, session, app = await _client()
     try:
         with patch("app.repositories.notification.InboxRepository.list", new_callable=AsyncMock) as mock_list, \
-             patch("app.routers.notifications.is_caller_member", new_callable=AsyncMock, return_value=True):
+             patch("app.routers.notifications.is_caller_member", new_callable=AsyncMock, return_value=True), \
+             patch("app.routers.notifications.has_project_access", new_callable=AsyncMock, return_value=True):
             mock_list.return_value = [_mock_inbox()]
 
             async with client as c:
@@ -301,6 +306,23 @@ async def test_list_inbox_200():
         assert resp.status_code == 200
         assert len(resp.json()) == 1
         assert resp.json()[0]["state"] == "pending"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_inbox_404_when_no_project_access():
+    """PO 지시(CI test_authz_project_scope_coverage 적발, 2026-08-22) — project_id를 받기만
+    하고 caller의 그 프로젝트 접근권을 검증하지 않던 갭 처방(activity_logs.py 기존 관례와
+    동형). self-or-org-admin은 통과해도(자기 assignee_member_id) 접근권 없는 project_id를
+    넣으면 404."""
+    client, session, app = await _client()
+    try:
+        with patch("app.routers.notifications.is_caller_member", new_callable=AsyncMock, return_value=True), \
+             patch("app.routers.notifications.has_project_access", new_callable=AsyncMock, return_value=False):
+            async with client as c:
+                resp = await c.get(f"/api/v2/inbox?assignee_member_id={MEMBER_ID}&project_id={PROJECT_ID}")
+        assert resp.status_code == 404
     finally:
         app.dependency_overrides.clear()
 
@@ -321,11 +343,13 @@ async def test_list_inbox_403_when_not_self_or_admin():
 
 @pytest.mark.anyio
 async def test_list_incoming_200():
-    """까심 델타 재QA HIGH(S19): 무가드였던 GET — self 통과 시 정상 동작."""
+    """까심 델타 재QA HIGH(S19): 무가드였던 GET — self 통과 시 정상 동작.
+    PO 지시(2026-08-22) — has_project_access 명시 모킹(test_list_inbox_200과 동일 근거)."""
     client, session, app = await _client()
     try:
         with patch("app.repositories.notification.InboxRepository.list_incoming", new_callable=AsyncMock) as mock_list, \
-             patch("app.routers.notifications.is_caller_member", new_callable=AsyncMock, return_value=True):
+             patch("app.routers.notifications.is_caller_member", new_callable=AsyncMock, return_value=True), \
+             patch("app.routers.notifications.has_project_access", new_callable=AsyncMock, return_value=True):
             mock_list.return_value = [_mock_inbox()]
 
             async with client as c:
@@ -333,6 +357,20 @@ async def test_list_incoming_200():
 
         assert resp.status_code == 200
         assert resp.json()[0]["kind"] == "approval"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_list_incoming_404_when_no_project_access():
+    """PO 지시(2026-08-22) — list_inbox와 동일 has_project_access 처방(대칭 회귀가드)."""
+    client, session, app = await _client()
+    try:
+        with patch("app.routers.notifications.is_caller_member", new_callable=AsyncMock, return_value=True), \
+             patch("app.routers.notifications.has_project_access", new_callable=AsyncMock, return_value=False):
+            async with client as c:
+                resp = await c.get(f"/api/v2/inbox/incoming?assignee_member_id={MEMBER_ID}&project_id={PROJECT_ID}")
+        assert resp.status_code == 404
     finally:
         app.dependency_overrides.clear()
 

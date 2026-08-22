@@ -11,6 +11,7 @@ from app.dependencies.database import get_db, get_read_db
 from app.dependencies.ownership import _is_org_admin
 from app.models.team import TeamMember
 from app.repositories.notification import InboxRepository, NotificationRepository, NotificationSettingRepository
+from app.services.project_auth import has_project_access
 from app.schemas.notification import (
     InboxItemResponse,
     NotificationResponse,
@@ -221,8 +222,15 @@ async def list_inbox(
     (정보노출). resolve/dismiss와 동일한 self-or-org-admin 게이트 적용.
 
     카디르 QA HIGH1(PR#3352, 2026-08-22): project_id 필터 부재로 다른 프로젝트의 inbox 항목이
-    섞여 나왔다 — 필수 쿼리 파라미터로 승격."""
+    섞여 나왔다 — 필수 쿼리 파라미터로 승격.
+
+    CI 게이트 실패(test_authz_project_scope_coverage, PO 지시 2026-08-22): project_id를
+    받기만 하고 caller가 그 프로젝트에 접근권이 있는지 검증이 없었다 — self-or-org-admin은
+    "이 assignee_member_id가 나(또는 내가 admin인) 것인가"만 보지 "이 project_id에 내가
+    접근권이 있는가"는 별개 축(activity_logs.py의 기존 resource-actual 관례와 동형 처방)."""
     await _assert_self_or_org_admin(assignee_member_id, auth, session, org_id)
+    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=404, detail="Project not found")
     items = await repo.list(assignee_member_id=assignee_member_id, project_id=project_id, state=state)
     return [InboxItemResponse.model_validate(i) for i in items]
 
@@ -237,8 +245,12 @@ async def list_incoming(
     repo: InboxRepository = Depends(_inbox_repo),
 ) -> list[InboxItemResponse]:
     """까심 델타 재QA HIGH(S19): list_inbox와 동일 갭 — self-or-org-admin 게이트 적용.
-    카디르 QA HIGH1(PR#3352, 2026-08-22): list_inbox와 동일 project_id 필터 처방."""
+    카디르 QA HIGH1(PR#3352, 2026-08-22): list_inbox와 동일 project_id 필터 처방.
+    CI 게이트 실패(test_authz_project_scope_coverage, PO 지시 2026-08-22): list_inbox와
+    동일 has_project_access 처방."""
     await _assert_self_or_org_admin(assignee_member_id, auth, session, org_id)
+    if not await has_project_access(session, uuid.UUID(auth.user_id), project_id, org_id):
+        raise HTTPException(status_code=404, detail="Project not found")
     items = await repo.list_incoming(assignee_member_id=assignee_member_id, project_id=project_id)
     return [InboxItemResponse.model_validate(i) for i in items]
 
