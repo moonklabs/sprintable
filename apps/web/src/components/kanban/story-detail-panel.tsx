@@ -24,7 +24,7 @@ import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses
 import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { EvidenceSection } from '@/components/verify/evidence-section';
 import { ChatProofSection, parseStoryProofReferences } from '@/components/verify/chat-proof-section';
-import { deriveInFlightTrustChip } from '@/services/verify';
+import { deriveInFlightTrustChip, pickRelevantMergeGate } from '@/services/verify';
 import { Workcell, type WorkcellMessage, type WorkcellPipelineStage } from '@/components/workcell/workcell';
 import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
 import type { TrustSealClaimedProps, TrustSealVerifiedProps } from '@/components/verify/trust-seal';
@@ -790,7 +790,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const evidenceStateLabel = evidenceProofState
     ? { blue: t('proofCapsuleStateRunning'), amber: t('proofCapsuleStateReviewing'), green: t('proofCapsuleStateProven') }[evidenceProofState]
     : null;
-  const mergeGate = chipGates.find((g) => g.gate_type === 'merge') ?? null;
+  // story #2893(설계안 §2 A1) — 스토리당 merge 게이트가 여러 개(PR마다 1개)일 수 있어졌다.
+  // pickRelevantMergeGate(미종결 우선·동순위는 최근 PR 우선)로 하나를 고른다 — 옛
+  // "배열의 첫 번째"는 실사고1/2의 근본원인과 같은 축(어느 PR인지 무작위로 고정)이었다.
+  const mergeGate = pickRelevantMergeGate(chipGates) ?? null;
   const GATE_RISK_MAP: Record<'low' | 'high', '낮음' | '높음'> = { low: '낮음', high: '높음' };
   const ciResult = mergeGate?.neutral_facts?.['ci_result'];
   const evidenceAutoVerify: 'passed' | 'failed' | null = ciResult === 'pass' ? 'passed' : ciResult === 'fail' ? 'failed' : null;

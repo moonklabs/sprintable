@@ -454,11 +454,16 @@ async def _process_webhook_event(
         from app.services.gate_github_check import reopen_gate_if_new_sha
         from app.services.merge_verdict_gate import MERGE_GATE_TYPE as _MERGE_GATE_TYPE
 
+        # story #2893(설계안 §2 A1) — pr_number 없이 조회하면 같은 스토리의 다른 열린 PR
+        # 게이트를 집어 그 게이트를 "이 PR"의 새 SHA로 재-pending 시켜버린다(실사고1/2
+        # 그 자체). PR-scoped 게이트가 없으면(None) else 분기가 evaluate_merge_gate로
+        # 정확히 이 PR용 게이트를 새로 만든다 — 기존 동작(#2826 auto-create)과 동형.
         merge_gate = (
             await session.execute(
                 select(_Gate).where(
                     _Gate.org_id == org_id, _Gate.work_item_id == story_id,
                     _Gate.work_item_type == "story", _Gate.gate_type == _MERGE_GATE_TYPE,
+                    _Gate.pr_number == (pr_number if pr_number > 0 else None),
                 )
             )
         ).scalar_one_or_none()

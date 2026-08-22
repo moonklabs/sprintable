@@ -145,6 +145,11 @@ class GateResponse(BaseModel):
     # decider 버튼 게이팅 소스(parallel-approver 목록 아님). 비-doc/무자격/비-휴먼은 False(fail-closed·
     # additive 하위호환). ⚠️실 authz 는 BE transition 강제(이 필드는 가시성뿐). [[can_approve_doc_gate_reason]]
     can_approve: bool = False
+    # story #2893(설계안 §2 A1, 0271) — merge-type만 실제 값을 갖는다(PR 컨텍스트 없는
+    # 평가·PR 개념이 없는 타 gate_type은 None). FE가 "이 스토리의 여러 merge 게이트 중
+    # 어느 PR 것인지" 고르는 축. additive·Gate ORM 컬럼과 이름 일치라 from_attributes로
+    # 자동 채워짐(github_check_run_sha와 동일 선례).
+    pr_number: int | None = None
     # story #1972(P1a-S4): 게이트 위험도 UX 등급 — **새 위험도 판정 필드가 아니다**. 기존
     # OrgGatePolicy.posture + Gate.gate_type을 순수 파생(gate_service.derive_risk_grade)한 UX
     # 힌트일 뿐(doc `gate-risk-ux-classification-criteria` §2 SSOT). "risk_level" 이름은 의도적으로

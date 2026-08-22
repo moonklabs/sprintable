@@ -433,8 +433,15 @@ async def create_gate(
     project_id: uuid.UUID | None = None,
     notify: bool = True,
     gate_id: uuid.UUID | None = None,
+    pr_number: int | None = None,
 ) -> Gate:
     """config 기반 게이트 생성 (멱등: 이미 있으면 기존 반환).
+
+    pr_number: story #2893(설계안 §2 A1) — merge-type만 실제로 쓴다(호출부는
+    evaluate_merge_gate 하나뿐, 그라운딩 확認). 나머지 7개 호출부는 인자를 안 넘겨
+    기본값 None 그대로 — 멱등 키가 `(work_item_id, work_item_type, gate_type)` 옛
+    계약대로 유지된다(무회귀). None이면 "PR 컨텍스트 없음"을 지어내지 않고 그대로 둔다
+    (0 같은 sentinel로 바꾸지 않음 — DB 컬럼 자체가 nullable Integer).
 
     gate_id: story #2709(2026-08-17, PO 판정) — self-referencing standalone anchor(work_item이
     없는 순수 질문류 gate_type)를 위한 파라미터. 호출측(MCP 도구)이 uuid4를 미리 만들어
@@ -457,13 +464,16 @@ async def create_gate(
     全 호출부 무회귀). gate_type/work_item_type별 하드코딩 대신 호출부 판단으로 남겨 이 함수의
     공용 chokepoint 성격을 유지한다.
     """
-    # 멱등: 이미 존재하면 기존 반환
+    # 멱등: 이미 존재하면 기존 반환. story #2893 — pr_number도 키에 편입(0271 부분
+    # 유니크 인덱스와 동형 조건: 둘 다 None이면 NULL=NULL 매치가 아니라 `==` 연산자가
+    # SQLAlchemy에서 자동으로 IS NULL로 번역되므로 그대로 동작한다).
     existing_r = await session.execute(
         select(Gate).where(
             Gate.org_id == org_id,
             Gate.work_item_id == work_item_id,
             Gate.work_item_type == work_item_type,
             Gate.gate_type == gate_type,
+            Gate.pr_number == pr_number,
         ).limit(1)
     )
     existing = existing_r.scalar_one_or_none()
@@ -494,6 +504,7 @@ async def create_gate(
         work_item_id=work_item_id,
         work_item_type=work_item_type,
         gate_type=gate_type,
+        pr_number=pr_number,
         status=status,
         # #2156 AC3(2026-08-07) — merge-type만 evaluate_merge_gate가 이후 이 필드를 정확히
         # 채웠고(decision 기반), 그 외 gate_type(qa·pr_review·deploy 등)은 create_gate가 여태

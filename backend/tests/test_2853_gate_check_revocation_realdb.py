@@ -39,10 +39,14 @@ def anyio_backend():
     return "asyncio"
 
 
-async def _seed_anchored_auto_passed_gate(session, seeded, *, head_sha="sha-live"):
+async def _seed_anchored_auto_passed_gate(session, seeded, *, head_sha="sha-live", pr_number=1):
     """이미 AUTO_MERGE를 통과해(anchor+success check 발행이 전제됐던) 상태를 직접 시드 —
     evaluate_merge_gate로 그 상태에 자연 도달하려면 trust cold-start를 전부 채워야 해(무관한
-    복잡도) 회귀가 검증하려는 축(anchor-clear 분기)만 격리해 직접 만든다."""
+    복잡도) 회귀가 검증하려는 축(anchor-clear 분기)만 격리해 직접 만든다.
+
+    story #2893(§2 A1, 0271) — pr_number 기본값(1)이 이 파일의 모든 reconcile 호출부가 쓰는
+    pr_number=1과 일치해야 한다(멱등 키에 편입됐으므로 안 맞으면 reconcile이 이 게이트를
+    못 찾는다 — test_2893_gate_pr_scoped_isolation_realdb가 그 정확한 격리를 별도로 잰다)."""
     from app.models.gate import Gate
     from app.services.merge_verdict_gate import MERGE_GATE_TYPE
 
@@ -50,7 +54,7 @@ async def _seed_anchored_auto_passed_gate(session, seeded, *, head_sha="sha-live
         id=uuid.uuid4(), org_id=seeded["org_id"], work_item_id=seeded["story_id"],
         work_item_type="story", gate_type=MERGE_GATE_TYPE, status="auto_passed",
         approved_head_sha=head_sha, github_check_run_id=90001, github_check_run_sha=head_sha,
-        requires_human=False,
+        requires_human=False, pr_number=pr_number,
     )
     session.add(gate)
     await session.commit()

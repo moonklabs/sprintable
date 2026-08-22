@@ -71,6 +71,10 @@ export interface GateItem {
   // 가 OrgGatePolicy.posture+gate_type에서 순수 파생해 list/단건 조회 둘 다 동봉(additive). null/undefined는
   // BE가 아직 못 보낸 구버전 응답 대비 방어적 폴백일 뿐 — 정상 응답은 항상 "low"|"high" 둘 중 하나.
   risk_grade?: 'low' | 'high' | null;
+  // story #2893(설계안 §2 A1, 0271) — merge-type만 실제 값을 갖는다(PR 컨텍스트 없는 평가·
+  // PR 개념이 없는 타 gate_type은 null). 한 스토리에 merge 게이트가 여러 개(PR마다 1개)일
+  // 수 있게 된 뒤로, FE가 "이 gates 배열 중 어느 게 지금 관심 있는 PR의 것인지" 고르는 축.
+  pr_number?: number | null;
   // H1-S3 머지 verdict 게이트 evidence(GateResponse·additive·하위호환 default). null≠0(AC③).
   requires_human?: boolean;
   evidence_status?: string | null; // sufficient | blocked | insufficient

@@ -248,8 +248,14 @@ async def test_ac1_pr_open_with_link_creates_gate_and_publishes_pending_check():
 
 @pytest.mark.anyio
 async def test_ac2_pr_open_reuses_existing_gate_no_duplicate():
-    """AC②: board-preflight(또는 이전 PR 이벤트)가 이미 gate를 만들어 뒀으면, PR-open 경로가
-    새로 만들지 않고 그 gate 하나만 유지한다(2 경로 교차해도 gate 1개)."""
+    """AC②: 같은 PR에 대해 board-preflight(또는 이전 PR 이벤트)가 이미 gate를 만들어 뒀으면,
+    PR-open 경로가 새로 만들지 않고 그 gate 하나만 유지한다(2 경로 교차해도 gate 1개).
+
+    story #2893(§2 A1) 갱신 — 멱등 키가 이제 pr_number를 포함한다(0271). 기존 gate는 «이
+    PR(12)»용으로 이미 존재해야 재사용 대상이다 — pr_number 없는(PR 컨텍스트 자체가 없던)
+    gate는 더 이상 "아무 PR에나 재사용 가능한 슬롯"이 아니다(그게 실사고1/2의 근본원인이었다
+    — 그 가정 자체를 폐기하는 게 이 스토리의 요지, test_2893_gate_pr_scoped_isolation_realdb
+    참조)."""
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
@@ -262,7 +268,7 @@ async def test_ac2_pr_open_reuses_existing_gate_no_duplicate():
 
             existing_gate = Gate(
                 id=uuid.uuid4(), org_id=org.id, work_item_id=story.id, work_item_type="story",
-                gate_type=MERGE_GATE_TYPE, status="pending",
+                gate_type=MERGE_GATE_TYPE, status="pending", pr_number=12,
             )
             s.add(existing_gate)
             await s.commit()
