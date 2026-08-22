@@ -3375,6 +3375,7 @@
     "hitlExpired": "만료됨",
     "hitlSendFailed": "전송에 실패했습니다. 다시 시도해 주세요.",
     "approvalRequestLabel": "결재 요청",
+    "approvalRequestStatusPending": "결재 대기",
     "approvalRequestNotFound": "결재 게이트를 찾을 수 없습니다.",
     "approvalRequestLoadError": "결재 정보를 불러오지 못했습니다.",
     "approvalRequestResolvedStatus": "처리됨 — 상태: {status}",

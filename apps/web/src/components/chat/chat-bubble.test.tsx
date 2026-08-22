@@ -703,7 +703,10 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     await act(async () => {
       root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
     });
-    expect(container.textContent).toContain('결재 요청');
+    // story #2926(P0-F F1) — 「결재 요청」 정적 라벨 행은 ProofCapsule 셸로 전환되며
+    // 빠졌다(카드 정체성은 이제 컷코너+레일 모양이 진다). 대신 stateLabel(pending=
+    // 「결재 대기」)이 그 자리를 잇는다 — 텍스트 내용은 더 구체적으로 유지.
+    expect(container.textContent).toContain('결재 대기');
     expect(container.textContent).toContain('제안서.md');
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(true);
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('반려'))).toBe(true);
@@ -959,7 +962,10 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
       await act(async () => {
         root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} eventDefinitionsByKey={withGateVerdictCatalog} />));
       });
-      expect(container.textContent).toContain('결재 요청'); // Q3 — 카드 라벨은 그대로.
+      // story #2926(P0-F F1) — Q3(카드 라벨은 그대로)의 실현 방식이 바뀌었다: 정적 「결재
+      // 요청」 텍스트 행 대신 ProofCapsule stateLabel(resolved="승인됨", 아래서 검증)이
+      // 카드 정체성을 잇는다 — 카드 자체가 사라지거나 라벨 없이 뜨는 게 아니라는 Q3 취지는
+      // 유지, 표현 수단만 shape+stateLabel로 옮겨갔다.
       expect(container.textContent).not.toContain('게이트 판정'); // header는 부분소비 제외.
       expect(container.textContent).not.toContain(DOC_ID); // Q2 — UUID 노출 금지.
       expect(container.textContent).toContain('doc_approval');

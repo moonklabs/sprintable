@@ -65,6 +65,11 @@ export interface ProofCapsuleProps {
   /** card 밀도 전용 — claim/evidence 아래 호출부 컨텐츠(예: Board card의 담당자 스택·배지·
    * 컨텍스트 메뉴 앵커) 삽입 슬롯. Proof Capsule 자체 필드로 표현 안 되는 실 기능을 안 잃게. */
   footer?: ReactNode;
+  /** story #2926(P0-F F1) — card 밀도 전용. claim 자체가 상세/미리보기 진입점인 호출부(예:
+   * 챗 ApprovalRequestCard의 doc/story 제목 클릭→EntityPreviewModal)를 위한 훅. 있으면 claim이
+   * `<button>`(hover underline)으로, 없으면 기존과 동일한 순수 텍스트로 렌더된다 — 기존
+   * card 호출부(Board story-card.tsx 등)는 전부 무변화. */
+  onClaimClick?: () => void;
   className?: string;
 }
 
@@ -79,7 +84,7 @@ export interface ProofCapsuleProps {
  * glow·999px pill·숫자 KPI화·raw CoT·초록만-완료 전부 미사용(색은 항상 stateLabel 텍스트 병기).
  */
 export function ProofCapsule({
-  proofState, stateLabel, claim, human, agent, now, evidence, gate, trustSeal, density, footer, className, duration,
+  proofState, stateLabel, claim, human, agent, now, evidence, gate, trustSeal, density, footer, className, duration, onClaimClick,
 }: ProofCapsuleProps) {
   if (density === 'audit') {
     return (
@@ -96,7 +101,7 @@ export function ProofCapsule({
   }
   if (density === 'card') {
     return (
-      <CardVariant proofState={proofState} stateLabel={stateLabel} claim={claim} evidence={evidence} footer={footer} className={className} />
+      <CardVariant proofState={proofState} stateLabel={stateLabel} claim={claim} evidence={evidence} footer={footer} className={className} onClaimClick={onClaimClick} />
     );
   }
   return (
@@ -271,12 +276,22 @@ function FullVariant({
   );
 }
 
-function CardVariant({ proofState, stateLabel, claim, evidence, footer, className }: Pick<ProofCapsuleProps, 'proofState' | 'stateLabel' | 'claim' | 'evidence' | 'footer' | 'className'>) {
+function CardVariant({ proofState, stateLabel, claim, evidence, footer, className, onClaimClick }: Pick<ProofCapsuleProps, 'proofState' | 'stateLabel' | 'claim' | 'evidence' | 'footer' | 'className' | 'onClaimClick'>) {
   return (
     <CutCornerShell state={proofState} cut={16} className={cn('w-full max-w-[280px]', className)}>
       <div className="min-w-0 flex-1 px-3 py-2.5">
         <StateHeader state={proofState} label={stateLabel} />
-        <div className="mt-1.5 line-clamp-2 text-[12.5px] font-semibold leading-snug text-proof-ink">{claim}</div>
+        {onClaimClick ? (
+          <button
+            type="button"
+            onClick={onClaimClick}
+            className="mt-1.5 line-clamp-2 w-full text-left text-[12.5px] font-semibold leading-snug text-proof-ink hover:underline"
+          >
+            {claim}
+          </button>
+        ) : (
+          <div className="mt-1.5 line-clamp-2 text-[12.5px] font-semibold leading-snug text-proof-ink">{claim}</div>
+        )}
         {evidence ? (
           <div className="mt-1.5 flex items-center gap-2.5 text-[10.5px] text-proof-ink-3">
             {evidence.acMet != null && evidence.acTotal != null ? (

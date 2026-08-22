@@ -285,3 +285,21 @@ describe('ProofCapsule (EN locale — regression: 전면 하드코딩 한국어�
     }
   });
 });
+
+describe('ProofCapsule — story #2926(P0-F F1) onClaimClick (card density only)', () => {
+  it('renders claim as a <button> when onClaimClick is provided(F1 소비처 — approval-request-card.tsx)', () => {
+    const markup = renderWithIntl(
+      <ProofCapsule {...BASE} density="card" onClaimClick={() => {}} />,
+    );
+    expect(markup).toContain('<button');
+    expect(markup).toContain(BASE.claim);
+  });
+
+  it('renders claim as plain text when onClaimClick is omitted(기존 card 호출부 — Board story-card.tsx 등 — 무변화)', () => {
+    const markup = renderWithIntl(
+      <ProofCapsule {...BASE} density="card" />,
+    );
+    expect(markup).not.toContain('<button');
+    expect(markup).toContain(BASE.claim);
+  });
+});

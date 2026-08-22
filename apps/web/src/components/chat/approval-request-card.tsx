@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Eye, FileText, X } from 'lucide-react';
+import { Check, FileText, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -9,11 +9,12 @@ import { GateSignatureApproval } from '@/components/cage/gate-signature-approval
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
-import { EntityPreviewModal, canPreviewEntity, getEntityHref, resolveEntityIcon } from '@/components/chat/embed-card';
+import { EntityPreviewModal, canPreviewEntity, getEntityHref } from '@/components/chat/embed-card';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 import { parseBlockTemplate, renderBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
 import { renderStaticEventBlock } from '@/components/chat/event-block-card';
+import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -91,6 +92,9 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
   const [state, setState] = useState<CardState>({ kind: 'loading' });
   const [resolving, setResolving] = useState(false);
   const [transitionError, setTransitionError] = useState<string | null>(null);
+  // story #2926(P0-F F1) — claim 클릭(제목 미리보기)이 이제 ProofCapsule 셸 소관이라 이
+  // state도 그쪽에 맞춰 여기(바깥 컴포넌트)로 끌어올렸다(기존 ApprovalRequestBody 소유였음).
+  const [showPreview, setShowPreview] = useState(false);
 
   const fetchGate = useCallback(async () => {
     try {
@@ -154,49 +158,81 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
     }
   };
 
-  // story #2905(S2c②) — gate 단건 sole-link 참조(chat-bubble.tsx) 호출부는 work_item_type을
-  // 모르는 채(빈 문자열 placeholder) 부른다 — fetch 완료 후엔 gate 실물(GateResponse가
-  // work_item_type을 1급 필드로 실어 옴, 페드루 확定 2026-08-21)을 우선한다. 기존 approval_target
-  // 메시지 호출부(BE가 정확한 work_item_type을 이미 실어 보냄)는 무변경(fetch 전 잠깐만 prop 사용).
-  const headerWorkItemType = state.kind === 'ready' ? state.gate.work_item_type : target.work_item_type;
-  const Icon = resolveEntityIcon(toEntityType(headerWorkItemType)) ?? FileText;
+  // story #2926(P0-F F1) — loading/not-found/error는 claim(제목)이 아직 없는 과도 상태라
+  // Proof Capsule 셸을 억지로 씌우지 않는다(claim이 빈 이야기를 지어내는 게 되므로) — 기존
+  // 가벼운 placeholder 그대로 유지. AC1(3서피스 단일 ProofCapsule 소비)의 대상은 실 데이터가
+  // 있는 'ready' 상태다.
+  if (state.kind !== 'ready') {
+    return (
+      <div className="min-w-0 max-w-full rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
+        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+          <FileText className="h-3 w-3" aria-hidden />
+          {t('approvalRequestLabel')}
+        </div>
+        {state.kind === 'loading' ? (
+          <div className="h-8 animate-pulse rounded-lg bg-muted" />
+        ) : state.kind === 'not-found' ? (
+          <p className="text-xs text-muted-foreground">{t('approvalRequestNotFound')}</p>
+        ) : (
+          <p className="text-xs text-muted-foreground">{t('approvalRequestLoadError')}</p>
+        )}
+      </div>
+    );
+  }
+
+  const gate = state.gate;
+  const title = gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`;
+  const previewEntityType = toEntityType(gate.work_item_type);
+  const canPreview = canPreviewEntity(previewEntityType);
+  // story #2926(P0-F F1) — attention-queue의 기존 PROOF_STATE 관례(gate_pending→amber) 그대로:
+  // pending=amber(인간 검토 대기)·승인=green·그 외(rejected/held/voided)=red — 옛 코드도
+  // approved만 Check/primary고 나머지는 전부 X/destructive였다(line 298 선례), 신규 구분 아님.
+  const proofState: ProofState = gate.status === 'pending' ? 'amber' : gate.status === 'approved' ? 'green' : 'red';
+  const stateLabel = gate.status === 'pending'
+    ? t('approvalRequestStatusPending')
+    : (RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status);
 
   return (
-    <div className="min-w-0 max-w-full rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
-      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-foreground">
-        <Icon className="h-3 w-3" aria-hidden />
-        {t('approvalRequestLabel')}
-      </div>
-
-      {state.kind === 'loading' ? (
-        <div className="h-8 animate-pulse rounded-lg bg-muted" />
-      ) : state.kind === 'not-found' ? (
-        <p className="text-xs text-muted-foreground">{t('approvalRequestNotFound')}</p>
-      ) : state.kind === 'error' ? (
-        <p className="text-xs text-muted-foreground">{t('approvalRequestLoadError')}</p>
-      ) : (
-        <ApprovalRequestBody
-          gate={state.gate}
-          resolving={resolving}
-          transitionError={transitionError}
-          onApprove={(reason, evidenceViewed) => void transition('approved', reason, evidenceViewed)}
-          onReject={(reason) => void transition('rejected', reason)}
-          onDiscuss={(reason) => void discuss(reason)}
-          onDiscussClick={() => setDiscussDialogOpen(true)}
-          onUndone={() => void fetchGate()}
-          eventDefinitionsByKey={eventDefinitionsByKey}
+    <>
+      <ProofCapsule
+        density="card"
+        proofState={proofState}
+        stateLabel={stateLabel}
+        claim={title}
+        onClaimClick={canPreview ? () => setShowPreview(true) : undefined}
+        className="max-w-full"
+        footer={
+          <ApprovalRequestBody
+            gate={gate}
+            resolving={resolving}
+            transitionError={transitionError}
+            onApprove={(reason, evidenceViewed) => void transition('approved', reason, evidenceViewed)}
+            onReject={(reason) => void transition('rejected', reason)}
+            onDiscuss={(reason) => void discuss(reason)}
+            onDiscussClick={() => setDiscussDialogOpen(true)}
+            onUndone={() => void fetchGate()}
+            eventDefinitionsByKey={eventDefinitionsByKey}
+          />
+        }
+      />
+      <GateDiscussDialog
+        open={discussDialogOpen}
+        onOpenChange={setDiscussDialogOpen}
+        onSubmit={(reason) => void discuss(reason)}
+        submitting={discussSubmitting}
+        error={discussError}
+      />
+      {showPreview && (
+        <EntityPreviewModal
+          entityType={previewEntityType}
+          entityId={gate.work_item_id}
+          title={title}
+          status={null}
+          href={getEntityHref(previewEntityType, gate.work_item_id)}
+          onClose={() => setShowPreview(false)}
         />
       )}
-      {state.kind === 'ready' ? (
-        <GateDiscussDialog
-          open={discussDialogOpen}
-          onOpenChange={setDiscussDialogOpen}
-          onSubmit={(reason) => void discuss(reason)}
-          submitting={discussSubmitting}
-          error={discussError}
-        />
-      ) : null}
-    </div>
+    </>
   );
 }
 
@@ -256,30 +292,12 @@ function ApprovalRequestBody({
   const riskLevel = deriveRiskLevel(gate);
   const needsFullFlow = usesSignatureFlow(riskLevel);
   const canAct = gate.status === 'pending' && gate.can_approve === true;
-  const [showPreview, setShowPreview] = useState(false);
-  // story #2118(E-DG-REAL) — doc 전용이던 제목 진입점을 전 work_item_type으로 확장하되,
-  // «클릭에 값이 있는 타입»만(페드루 리뷰). canPreviewEntity가 RICH_PREVIEW/ENTITY_API fetch
-  // 전략/own-href 셋 다 없는 타입(loop·wf_line_version 등)을 걸러 빈 모달 진입점을 안 만든다
-  // — story #2118(P2.2) AC④("미리보기 없는 타입에 억지로 진입점 달아 빈 모달 여는 거짓 안
-  // 만든다")와 동형 판정을 embed-card.tsx 공유 함수로 그대로 재사용.
-  const previewEntityType = toEntityType(gate.work_item_type);
-  const canPreview = canPreviewEntity(previewEntityType);
 
   return (
     <div className="space-y-2">
-      {canPreview ? (
-        <button
-          type="button"
-          onClick={() => setShowPreview(true)}
-          className="group/preview flex w-full min-w-0 items-center gap-1 text-left"
-        >
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground group-hover/preview:underline">{title}</span>
-          <Eye className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-        </button>
-      ) : (
-        <p className="truncate text-sm font-medium text-foreground">{title}</p>
-      )}
-
+      {/* story #2926(P0-F F1) — 제목(claim)·미리보기 진입점·EntityPreviewModal은 이제 바깥
+          ApprovalRequestCard의 ProofCapsule 셸이 소유한다(claim=onClaimClick). 이 body는
+          claim 아래의 실 기능(위험 배지·서명 플로우·회신 상태·액션 버튼)만 담당. */}
       {gate.status === 'pending' && (riskLevel === 'high' || riskLevel === 'unknown') ? (
         <Badge variant={riskLevel === 'high' ? 'warning' : 'outline'} className={riskLevel === 'unknown' ? 'text-muted-foreground' : undefined}>
           {riskLevel === 'high' ? tCage('riskHigh') : tCage('riskUnknown')}
@@ -363,17 +381,6 @@ function ApprovalRequestBody({
             {tCage('gateDiscussSubmit')}
           </Button>
         </>
-      )}
-
-      {showPreview && (
-        <EntityPreviewModal
-          entityType={previewEntityType}
-          entityId={gate.work_item_id}
-          title={title}
-          status={null}
-          href={getEntityHref(previewEntityType, gate.work_item_id)}
-          onClose={() => setShowPreview(false)}
-        />
       )}
     </div>
   );

@@ -3375,6 +3375,7 @@
     "hitlExpired": "Expired",
     "hitlSendFailed": "Failed to send. Please try again.",
     "approvalRequestLabel": "Approval request",
+    "approvalRequestStatusPending": "Pending approval",
     "approvalRequestNotFound": "The approval gate could not be found.",
     "approvalRequestLoadError": "Failed to load approval details.",
     "approvalRequestResolvedStatus": "Resolved — status: {status}",
