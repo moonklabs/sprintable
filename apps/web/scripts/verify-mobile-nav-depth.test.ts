@@ -54,7 +54,12 @@ describe('findDepthViolations — story #2684 AC1(양성대조)', () => {
 describe('실 NAV_GROUPS — story #2684 AC3 판별자(이벤트 포함 전 관리면 depth ≤2)', () => {
   const hubGroupIds = new Set(MOBILE_HUB_GROUP_ORDER);
 
-  it('전 21항목이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
+  // story #2930(P0-G) I2 — chats가 NAV_GROUPS 자체에서 빠져(데스크톱 사이드바 챗 center로
+  // 승격 — 유나 확定 ⓒ, 모바일은 그대로 develop 5탭이라 대상 밖) 21→20항목. 데스크톱 챗
+  // center의 depth-1 대응(사이드바 상단 고정, 어떤 구역에도 안 묻힘)은 이 순수 데이터
+  // 스캔의 시야 밖이라 이 스위트가 못 잰다(nav-config.ts 상단 "AC2 — 이 가드가 못 잡는 것"
+  // ㉢·㉥류와 동형) — 렌더 검증은 app-sidebar.test.tsx가 맡는다.
+  it('전 20항목(챗 center 제외)이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
     const entries = computeMobileDepths(NAV_GROUPS, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
     expect(findDepthViolations(entries, MAX_MOBILE_DEPTH)).toEqual([]);
   });
@@ -65,11 +70,14 @@ describe('실 NAV_GROUPS — story #2684 AC3 판별자(이벤트 포함 전 관�
     expect(events?.depth).toBe(2);
   });
 
-  it('flow·inbox·chats는 depth 1이고 그 외는 전부 depth 2다(바텀 탭 축과 정확히 일치)', () => {
+  // story #2930 I2 — 'chats'는 이제 NAV_GROUPS에 없어(챗 center 승격) 이 스캔 대상 밖이다.
+  // MOBILE_HUB_EXCLUDE_IDS엔 방어적으로 'chats'가 여전히 남아있지만(nav-config.ts 주석 참고)
+  // 매칭될 항목 자체가 없어 depth1Ids엔 안 잡힌다.
+  it('flow·inbox는 depth 1이고 그 외는 전부 depth 2다(바텀 탭 축과 정확히 일치)', () => {
     const entries = computeMobileDepths(NAV_GROUPS, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
     const depth1Ids = entries.filter((e) => e.depth === 1).map((e) => e.id).sort();
-    expect(depth1Ids).toEqual(['chats', 'flow', 'inbox']);
-    expect(entries.filter((e) => e.depth === 2).length).toBe(entries.length - 3);
+    expect(depth1Ids).toEqual(['flow', 'inbox']);
+    expect(entries.filter((e) => e.depth === 2).length).toBe(entries.length - 2);
   });
 
   it('NAV_GROUPS의 모든 그룹 id가 MOBILE_HUB_GROUP_ORDER에 있다(도달불가 0건 실증)', () => {

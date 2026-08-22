@@ -82,32 +82,35 @@ async function mount() {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
 
-// 리팩터 전 하드코딩 JSX의 그룹/항목 순서를 그대로 옮긴 기대값 — nav-config.ts 자체가 그
-// 원본에서 1:1로 추출된 것이라 이 표가 "리팩터 전 실제 마크업"의 정본이다.
+// story #2930(P0-G) I1·I2 처방(doc ia-4zone-redesign-2930) — 「리팩터 전 하드코딩 JSX 정본」
+// 전제는 이제 지난 얘기다. 12+메뉴→오늘/워크스페이스/신뢰/지식 4구역+관리(조직·설정) 프레임
+// 재편(라우트 전부 불변)+챗을 zone에서 빼 사이드바 챗 center로 승격(I2, 별도 테스트 스위트
+// 아래 참고)한 이후의 실 마크업이 이 표의 정본이다.
 const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
-  { labelKey: 'zoneOrganization', labels: ['구성원', '워크포스', '권한', '신뢰', '기억', '이벤트'] },
-  { labelKey: 'zoneNow', labels: ['조직 브리핑', '알림', '대시보드', '채팅'] },
+  { labelKey: 'zoneNow', labels: ['조직 브리핑', '알림', '대시보드'] },
   { labelKey: 'zoneWork', labels: ['흐름', '스프린트', '목표', '실험실', '스탠드업', '회고'] },
-  { labelKey: 'zoneTrust', labels: ['활동 로그'] },
-  { labelKey: 'zoneKnowledge', labels: ['문서', '산출물', '스토리지'] },
+  { labelKey: 'zoneTrust', labels: ['활동 로그', '신뢰 센터'] },
+  { labelKey: 'zoneKnowledge', labels: ['문서', '산출물', '스토리지', '기억'] },
+  { labelKey: 'zoneOrganization', labels: ['구성원', '워크포스', '권한', '이벤트'] },
   { labelKey: null, labels: ['설정'] },
 ];
 
 // 카디르 QA(PR#3100) 지적 — 라벨은 맞는데 href가 다른 항목과 뒤바뀐 뮤테이션은 그룹별 라벨
-// 순서 대조(위 EXPECTED_GROUPS)만으론 못 잡는다(라벨 목록 자체는 안 바뀌므로). 21항목 전부의
-// 라벨→href 쌍을 개별 대조해 그 구멍을 닫는다 — org/project slug 없는 테스트 환경이라
-// resource 항목은 bare `/${resource}`로 폴백한 값(리팩터 전 resourceLink()와 동일 규칙).
+// 순서 대조(위 EXPECTED_GROUPS)만으론 못 잡는다(라벨 목록 자체는 안 바뀌므로). 21항목(챗
+// center 제외 20 + 챗 center 1, 아래 별도 스위트) 전부의 라벨→href 쌍을 개별 대조해 그
+// 구멍을 닫는다 — org/project slug 없는 테스트 환경이라 resource 항목은 bare `/${resource}`로
+// 폴백한 값(기존 resourceLink()와 동일 규칙). story #2930 — '신뢰'→'신뢰 센터'로 키 갱신
+// (org-trust 라벨 개명, href 자체는 불변).
 const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '구성원': '/organization/members',
   '워크포스': '/organization/workforce',
   '권한': '/organization/roles',
-  '신뢰': '/organization/trust',
+  '신뢰 센터': '/organization/trust',
   '기억': '/organization/memory',
   '이벤트': '/organization/events',
   '조직 브리핑': '/org-briefing',
   '알림': '/inbox',
   '대시보드': '/dashboard',
-  '채팅': '/chats',
   '흐름': '/flow',
   '스프린트': '/sprints',
   '목표': '/goals',
@@ -121,11 +124,11 @@ const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '설정': '/settings',
 };
 
-describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1)', () => {
-  it('그룹 순서·라벨·항목 순서·라벨이 리팩터 전과 동일하다', async () => {
+describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story #2930 I1 4구역 재편', () => {
+  it('그룹 순서·라벨·항목 순서·라벨이 2930 확定대로다(오늘→워크스페이스→신뢰→지식→조직→설정)', async () => {
     await mount();
     const groupLabels = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')].map((el) => el.textContent);
-    expect(groupLabels).toEqual(['조직', '홈', '작업', '신뢰', '지식']);
+    expect(groupLabels).toEqual(['오늘', '워크스페이스', '신뢰', '지식', '조직']);
 
     const groups = [...container.querySelectorAll('[data-slot="sidebar-group"]')];
     expect(groups.length).toBe(EXPECTED_GROUPS.length);
@@ -135,7 +138,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1)', () =>
     });
   });
 
-  it('정적 항목(조직 그룹)의 href가 리팩터 전과 동일하다', async () => {
+  it('정적 항목(조직 그룹)의 href가 무변화다(path 전부 불변, 2930 I1 핵심 제약)', async () => {
     await mount();
     const membersLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('구성원'));
     expect(membersLink?.getAttribute('href')).toBe('/organization/members');
@@ -194,9 +197,10 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1)', () =>
   });
 
   // 카디르 QA(PR#3100) 지적 — 라벨은 그대로인 채 href만 다른 항목과 뒤바뀌는 뮤테이션은 앞
-  // 테스트들(그룹별 라벨 순서 대조 + 4항목만 개별 href 대조)로는 못 잡는다. 21항목 전부를
-  // 라벨→href 쌍으로 개별 대조해 "라벨은 맞는데 목적지가 틀림"을 확실히 막는다.
-  it('전 21항목의 라벨→href 쌍이 정확하다(뒤바뀐 목적지 방지, 카디르 QA 지적 반영)', async () => {
+  // 테스트들(그룹별 라벨 순서 대조 + 4항목만 개별 href 대조)로는 못 잡는다. NAV_GROUPS 20항목
+  // (story #2930 I2로 챗이 이 배열에서 빠져 21→20 — 챗 center 자체 href는 별도 스위트에서
+  // 대조) 전부를 라벨→href 쌍으로 개별 대조해 "라벨은 맞는데 목적지가 틀림"을 확실히 막는다.
+  it('전 20항목(챗 center 제외)의 라벨→href 쌍이 정확하다(뒤바뀐 목적지 방지, 카디르 QA 지적 반영)', async () => {
     await mount();
     const links = [...container.querySelectorAll('a')];
     for (const [label, expectedHref] of Object.entries(EXPECTED_HREF_BY_LABEL)) {
