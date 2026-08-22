@@ -98,6 +98,10 @@ class AgentCard(BaseModel):
     default_input_modes: list[str] = Field(alias="defaultInputModes")
     default_output_modes: list[str] = Field(alias="defaultOutputModes")
     skills: list[AgentSkill]
+    model: str | None = Field(
+        default=None,
+        description="방향서 03·에이전트 속성 — 사용 모델. AgentPersona.model 실물 값만 표시(no-fiction, 미배정이면 None).",
+    )
     security_schemes: dict[str, SecurityScheme] = Field(
         default_factory=dict, alias="securitySchemes"
     )

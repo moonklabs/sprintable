@@ -443,6 +443,7 @@ async def _build_agent_card(session: AsyncSession, member: TeamMember, base_url:
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
         skills=skills,
+        model=persona.model if persona is not None else None,
         security_schemes={
             _SECURITY_SCHEME_KEY: SecurityScheme(
                 http_auth_security_scheme=HTTPAuthSecurityScheme(
