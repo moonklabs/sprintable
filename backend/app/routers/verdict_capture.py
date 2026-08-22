@@ -491,6 +491,7 @@ async def _process_webhook_event(
         merge_gate = await find_gate_slot_with_pr_fallback(
             session, org_id=org_id, work_item_id=story_id, work_item_type="story",
             gate_type=_MERGE_GATE_TYPE, pr_number=(pr_number if pr_number > 0 else None),
+            repo_full_name=(repo or None),
         )
         if merge_gate is not None:
             _repended = await reopen_gate_if_new_sha(

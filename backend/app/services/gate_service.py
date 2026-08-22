@@ -429,6 +429,7 @@ async def find_gate_slot_with_pr_fallback(
     work_item_type: str,
     gate_type: str,
     pr_number: int | None,
+    repo_full_name: str | None = None,
 ) -> Gate | None:
     """story #2893(§2 A1, 0271) 후속 — 카디르 QA(PR#3349 CI 실 실패 2건, 2026-08-22):
     pr_number를 멱등 키에 편입한 것(정확매치 only)이 「PR 컨텍스트가 나중에 밝혀지는」
@@ -439,39 +440,76 @@ async def find_gate_slot_with_pr_fallback(
     (PO 확定).
 
     pr_number가 주어지면(실 PR 문맥) 먼저 그 PR 전용 슬롯을 정확매치로 찾는다. 없으면
-    아직 pr_number를 모르던 시절의 NULL-슬롯이 있는지 찾아 **승격**(pr_number를 채워
-    재사용 — flush까지 이 함수 책임, 호출자가 추가로 flush 안 해도 이후 조회에
-    반영됨)한다. 승격 後엔 그 행이 이 PR에 귀속되므로(정확매치 슬롯으로 편입) 다른 PR이
-    같은 NULL-슬롯을 다시 가로챌 길이 없다 — 실사고1/2가 막던 축(서로 다른 PR의 SHA가
-    같은 슬롯을 공유)은 그대로 보존된다(승격은 "미상→특정 PR" 1회성 전이일 뿐, "PR A→PR
-    B" 전이는 이 함수가 만들어내지 않는다).
+    아직 pr_number를 모르던 시절의 NULL-슬롯이 있는지 찾아 **승격**(pr_number+
+    repo_full_name을 채워 재사용 — flush까지 이 함수 책임, 호출자가 추가로 flush 안 해도
+    이후 조회에 반영됨)한다. 승격 後엔 그 행이 이 PR(과 이 repo)에 귀속되므로(정확매치
+    슬롯으로 편입) 다른 PR이 같은 NULL-슬롯을 다시 가로챌 길이 없다 — 실사고1/2가 막던
+    축(서로 다른 PR의 SHA가 같은 슬롯을 공유)은 그대로 보존된다(승격은 "미상→특정 PR"
+    1회성 전이일 뿐, "PR A→PR B" 전이는 이 함수가 만들어내지 않는다).
+
+    repo_full_name: story #2932(HIGH1, 0272) — pr_number 단독은 repo 경계가 없어(같은
+    스토리에 다른 repo의 동일 번호 PR이 링크되면 슬롯을 공유) SHA/evidence가 섞일 수
+    있었다(카디르 소스 직접확認). repo_full_name이 주어지면 정확매치가 (pr_number,
+    repo_full_name) 둘 다로 스코프된다 — 다른 repo의 같은 pr_number는 별개 슬롯. 주어지지
+    않으면(호출부가 정말 모르는 극히 드문 경우) pr_number 단독 매치로 물러난다(0271
+    당시 동작과 동형 — 새로 나빠지진 않는다, 다만 disambiguation을 못 할 뿐).
+
+    **동시성**(story #2932 HIGH2): NULL-슬롯 승격은 read-then-write라 동시 웹훅 2개가
+    같은 NULL-슬롯을 서로 다른 PR로 경쟁 승격할 수 있었다(나중 커밋이 조용히 덮어씀).
+    NULL-슬롯 조회에 `SELECT ... FOR UPDATE`를 걸어 두 번째 트랜잭션이 첫 번째의 커밋을
+    기다리게 한다 — 커밋 後 재평가되는 WHERE(`pr_number IS NULL`)가 더는 참이 아니므로
+    두 번째는 자연히 None을 받아(이미 승격된 슬롯을 못 봄) 새 실 INSERT 경로로 빠진다
+    (row가 이미 존재하는 UPDATE류 경합이라 SELECT FOR UPDATE가 유효 — row 자체가 없는
+    check-then-insert TOCTOU와는 다른 축, feedback_check_then_insert_toctou 참고).
 
     pr_number가 None(PR 컨텍스트가 원래 없는 gate_type 또는 board-preflight no-substance)
     이면 옛 계약 그대로 NULL-슬롯만 찾는다 — 승격 대상 자체가 없다("PR 컨텍스트 있음"으로
     바꿀 근거가 없다)."""
     if pr_number is not None:
+        exact_conditions = [
+            Gate.org_id == org_id, Gate.work_item_id == work_item_id,
+            Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
+            Gate.pr_number == pr_number,
+        ]
+        if repo_full_name is not None:
+            exact_conditions.append(Gate.repo_full_name == repo_full_name)
         exact = (
-            await session.execute(
-                select(Gate).where(
-                    Gate.org_id == org_id, Gate.work_item_id == work_item_id,
-                    Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
-                    Gate.pr_number == pr_number,
-                )
-            )
+            await session.execute(select(Gate).where(*exact_conditions))
         ).scalar_one_or_none()
         if exact is not None:
             return exact
+
+        # story #2932(HIGH1 잔여) — pr_number는 이미 정확히 아는데 repo만 몰랐던 legacy/
+        # 미백필 행이 있으면(0272 백필 누락·neutral_facts.repo 부재 등) 「repo가 나중에
+        # 밝혀지는」 같은 클래스의 정상 케이스다 — NULL-슬롯 승격과 대칭: pr_number 대신
+        # repo_full_name 하나만 미상인 슬롯을 찾아 승격한다(고아화 방지, 새 규칙 발명 0).
+        if repo_full_name is not None:
+            repo_unknown_slot = (
+                await session.execute(
+                    select(Gate).where(
+                        Gate.org_id == org_id, Gate.work_item_id == work_item_id,
+                        Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
+                        Gate.pr_number == pr_number, Gate.repo_full_name.is_(None),
+                    ).with_for_update()  # story #2932 HIGH2와 동일 이유 — 동시 승격 경쟁 직렬화.
+                )
+            ).scalar_one_or_none()
+            if repo_unknown_slot is not None:
+                repo_unknown_slot.repo_full_name = repo_full_name
+                await session.flush()
+                return repo_unknown_slot
+
         null_slot = (
             await session.execute(
                 select(Gate).where(
                     Gate.org_id == org_id, Gate.work_item_id == work_item_id,
                     Gate.work_item_type == work_item_type, Gate.gate_type == gate_type,
                     Gate.pr_number.is_(None),
-                )
+                ).with_for_update()  # story #2932 HIGH2 — 동시 승격 경쟁 직렬화.
             )
         ).scalar_one_or_none()
         if null_slot is not None:
             null_slot.pr_number = pr_number
+            null_slot.repo_full_name = repo_full_name
             await session.flush()
         return null_slot
     return (
@@ -498,6 +536,7 @@ async def create_gate(
     notify: bool = True,
     gate_id: uuid.UUID | None = None,
     pr_number: int | None = None,
+    repo_full_name: str | None = None,
 ) -> Gate:
     """config 기반 게이트 생성 (멱등: 이미 있으면 기존 반환).
 
@@ -506,6 +545,10 @@ async def create_gate(
     기본값 None 그대로 — 멱등 키가 `(work_item_id, work_item_type, gate_type)` 옛
     계약대로 유지된다(무회귀). None이면 "PR 컨텍스트 없음"을 지어내지 않고 그대로 둔다
     (0 같은 sentinel로 바꾸지 않음 — DB 컬럼 자체가 nullable Integer).
+
+    repo_full_name: story #2932(HIGH1) — pr_number와 짝. pr_number 단독은 repo 경계가
+    없어 다른 repo의 같은 번호 PR이 슬롯을 공유할 수 있었다(cross-repo 충돌). pr_number를
+    넘기는 유일 호출부(evaluate_merge_gate)가 항상 실 repo를 알고 있어 함께 넘긴다.
 
     gate_id: story #2709(2026-08-17, PO 판정) — self-referencing standalone anchor(work_item이
     없는 순수 질문류 gate_type)를 위한 파라미터. 호출측(MCP 도구)이 uuid4를 미리 만들어
@@ -535,6 +578,7 @@ async def create_gate(
     existing = await find_gate_slot_with_pr_fallback(
         session, org_id=org_id, work_item_id=work_item_id,
         work_item_type=work_item_type, gate_type=gate_type, pr_number=pr_number,
+        repo_full_name=repo_full_name,
     )
     if existing is not None:
         # story #2150 근본수정: rejected는 재제출 시 새 결재 사이클을 연다(그 외 terminal
@@ -564,6 +608,7 @@ async def create_gate(
         work_item_type=work_item_type,
         gate_type=gate_type,
         pr_number=pr_number,
+        repo_full_name=repo_full_name,
         status=status,
         # #2156 AC3(2026-08-07) — merge-type만 evaluate_merge_gate가 이후 이 필드를 정확히
         # 채웠고(decision 기반), 그 외 gate_type(qa·pr_review·deploy 등)은 create_gate가 여태

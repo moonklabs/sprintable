@@ -71,6 +71,11 @@ class Gate(Base):
     # 2개로 분리(NULL 구간=옛 계약 그대로, NOT NULL 구간=+pr_number). create_gate() 호출부
     # 전수는 gate_service.py 참조.
     pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # story #2932(HIGH1, 0272) — pr_number 단독은 repo 경계가 없어(전역이 아니라 스토리
+    # 스코프 안에서도) 다른 repo의 같은 번호 PR이 슬롯을 공유할 수 있었다(cross-repo
+    # 충돌). pr_number와 짝으로 멱등 키에 편입 — find_gate_slot_with_pr_fallback.py 참조.
+    # NULL=pr_number와 동형 사유(PR 컨텍스트 없음/레거시 미백필).
+    repo_full_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
     resolver_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

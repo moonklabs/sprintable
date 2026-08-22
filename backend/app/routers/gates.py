@@ -1265,12 +1265,21 @@ async def reevaluate_gate_endpoint(
             detail=f"게이트 상태({gate.status})는 재평가 대상이 아닙니다(pending/auto_passed만 가능).",
         )
 
-    # gate.pr_number(story #2893 A1, 0271)가 이 게이트가 귀속된 PR의 1차 SSOT — neutral_facts는
-    # repo만 보강(백필 이전 legacy gate는 link row로 폴백).
+    # gate.pr_number(story #2893 A1, 0271)가 이 게이트가 귀속된 PR의 1차 SSOT.
+    # gate.repo_full_name(story #2932 HIGH1, 0272)이 repo의 1차 SSOT — neutral_facts.repo는
+    # 그 컬럼이 아직 없던 legacy gate만을 위한 2차 폴백.
     pr_number = gate.pr_number
-    repo = (gate.neutral_facts or {}).get("repo")
+    repo = gate.repo_full_name or (gate.neutral_facts or {}).get("repo")
     if not repo or not pr_number:
+        # 카디르 QA(story #2932 HIGH3) — pr_number가 이미 알려진 상태에서 repo만 없으면
+        # (구 컬럼 미백필 등) "이 스토리의 가장 최근 링크"를 무조건 빌려오면 안 된다 —
+        # 그 링크가 **다른 PR**의 것이면 (그 repo, 이 pr_number) 조합은 실존한 적 없는
+        # 합성(fictitious) 튜플이 되고, 그 조합으로 GitHub GET을 날리게 된다(실사고). PR
+        # 컨텍스트가 이미 있으면(pr_number 있음) 반드시 그 PR과 일치하는 링크로만 repo를
+        # 보강한다 — pr_number 자체가 없을 때만(둘 다 미상) story 최신 링크를 신뢰한다.
         _link = await resolve_pr_link(session, org_id, gate.work_item_id)
+        if pr_number and _link is not None and _link.pr_number != pr_number:
+            _link = None  # 다른 PR의 링크 — 지어내지 않는다.
         repo = repo or (_link.repo_full_name if _link else None)
         pr_number = pr_number or (_link.pr_number if _link else None)
     if not repo or not pr_number:

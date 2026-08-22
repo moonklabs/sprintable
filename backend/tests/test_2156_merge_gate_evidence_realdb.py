@@ -207,9 +207,12 @@ async def test_reconcile_updates_pending_merge_gate_with_real_evidence_realdb():
                     AsyncMock(return_value=True),
                 ),
             ):
+                # story #2932(HIGH1) — repo도 이제 멱등 키 일부다. 두 호출을 같은 repo로
+                # 통일(실제 프로덕션 체인과도 정합 — pr_number=42는 항상 실 repo와 짝으로
+                # 옴, repo=""는 pr_number<=0 no-substance 전용 관례값이지 이 케이스가 아님).
                 await evaluate_merge_gate(
                     s, seeded["org_id"], seeded["story_id"],
-                    pr_number=42, repo="", ci_result=None, pr_result=None,
+                    pr_number=42, repo="moonklabs/sprintable", ci_result=None, pr_result=None,
                 )
                 await s.commit()
 
@@ -545,10 +548,12 @@ async def test_gate_check_publish_fires_on_base_retarget_edit_when_story_linked(
     installation_result.scalar_one_or_none = lambda: installation
     no_gate_result = AsyncMock()
     no_gate_result.scalar_one_or_none = lambda: None  # 기존 merge Gate row 없음 → evaluate 분기.
-    # story #2893 후속(카디르 QA, PR#3349 CI 실패 2건) — find_gate_slot_with_pr_fallback가
-    # 정확매치(없음) 後 NULL-슬롯 폴백까지 조회한다(2 SELECT). 이 테스트는 둘 다 "없음"인
-    # 시나리오(진짜 신규)라 두 번째 자리도 no_gate_result 재사용으로 충분.
-    session.execute = AsyncMock(side_effect=[installation_result, no_gate_result, no_gate_result])
+    # story #2893/#2932 후속(카디르 QA) — find_gate_slot_with_pr_fallback가 정확매치(없음)→
+    # repo-unknown 슬롯(없음, story #2932 HIGH1 잔여)→NULL-슬롯 폴백까지 조회한다(3 SELECT).
+    # 이 테스트는 전부 "없음"인 시나리오(진짜 신규)라 매 자리 no_gate_result 재사용으로 충분.
+    session.execute = AsyncMock(
+        side_effect=[installation_result, no_gate_result, no_gate_result, no_gate_result]
+    )
     evaluate = AsyncMock(return_value=SimpleNamespace(gate_id=gate_id))
     gate_check_publish: list[dict] = []
 
