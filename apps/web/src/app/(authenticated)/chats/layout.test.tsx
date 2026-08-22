@@ -187,6 +187,11 @@ describe('ChatsLayout — story #2921 S6(xl 미만 + Reading 열림 → rail 자
     const rail = container.querySelector('[data-testid="chat-rail"]');
     expect(rail?.className).toContain('fixed');
     expect(rail?.className).toContain('z-40');
+    // story #2921 S6 후속(PO dev 라이브 실측, 2026-08-22) — 오버레이 rail에 배경이 없어
+    // 뒤 GNB 텍스트가 그대로 비쳐 가독을 깼다(docked 상태는 뒤에 아무것도 없어 안 보였다).
+    // 불투명 배경+테두리 회귀가드.
+    expect(rail?.className).toContain('bg-background');
+    expect(rail?.className).toContain('border-border');
     // 오버레이 상태에선 collapsed 전용 재호출 토글이 !hidden으로 숨고(DOM 부재 아님 — 카디르
     // #3337 QA 처방, 포커스 복귀 안정성), backdrop이 대신 뜬다(장식용 click-catcher —
     // 접근성 트리에서는 빠진다, aria-hidden).
