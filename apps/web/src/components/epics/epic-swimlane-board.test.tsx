@@ -19,6 +19,28 @@ import { EpicSwimlaneBoard } from './epic-swimlane-board';
 // 있게 올려 "내부 waitFor가 먼저 타임아웃→진단 에러가 실제로 리포트된다"를 보장한다.
 vi.setConfig({ testTimeout: 8000 });
 
+// ⚠️QA changes 5R 자체검산(2026-08-22) — 5R 처방으로 beforeEach에 `localStorage.clear()`를
+// 추가하려다 직접 실행해 보니 이 워크스페이스의 jsdom 환경엔 `window.localStorage`가 아예
+// 없다(undefined — probe로 typeof 직접 확認, "ExperimentalWarning: localStorage is not
+// available" 경고가 그 증거). loadAxisMode/saveAxisMode의 프로덕션 try/catch가 매번 조용히
+// 삼켜서 로컬에서는 axisMode가 순수 in-memory useState로만 동작 — 크로스테스트 누수
+// 메커니즘 자체가 로컬에서 구조적으로 재현 불가능했다(이게 「로컬 3회 재실행 전부 green」의
+// 진짜 이유). bare `localStorage.clear()`도 undefined라 즉시 throw(직접 확認).
+//
+// 그래서 존재 여부에 기대는 guard(?.  나 try/catch)가 아니라, 매 테스트마다 진짜 동작하는
+// in-memory Storage 구현으로 window.localStorage/bare localStorage를 통째로 교체한다 —
+// CI가 갖고 있(었)을 실 localStorage와 로컬 환경의 격차 자체를 없애, 이 회귀가드가 로컬
+// 에서도 RED→GREEN으로 실제 검증되고, CI와 동일한 신뢰도로 항상 동작하게 만든다.
+class MemoryStorage implements Storage {
+  private store = new Map<string, string>();
+  get length() { return this.store.size; }
+  clear() { this.store.clear(); }
+  getItem(key: string) { return this.store.has(key) ? this.store.get(key)! : null; }
+  key(index: number) { return [...this.store.keys()][index] ?? null; }
+  removeItem(key: string) { this.store.delete(key); }
+  setItem(key: string, value: string) { this.store.set(key, value); }
+}
+
 // flow-client.test.tsx와 동형 관례 — TopBarSlot은 TopBarProvider 컨텍스트가 필요한 실 크롬
 // 컴포넌트라 이 컴포넌트의 로직과 무관한 부분은 얕게 스텁한다. WorkspaceFrameTabs가
 // useRouter/useParams를 쓰므로 next/navigation도 동형 스텁.
@@ -60,6 +82,21 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   capturedDragEndHandlers.length = 0;
+  // ⚠️QA changes 5R(PR#3377, 카디르+codex, 2026-08-22) — 진단 로그(4R)가 답을 줬다: bulk
+  // 호출이 아예 없었다(자원 경쟁 기각). 근본원인: 여기 localStorage 초기화가 없어 "토글
+  // 클릭 시 트러스트 축으로 바뀐다" 테스트가 남긴 axisMode='trust'(loadAxisMode/
+  // saveAxisMode 키, 같은 projectId='p1')를 파일 내 뒤 테스트가 그대로 물려받으면
+  // TRUST_COLUMN_TO_STATUS['in-progress']=undefined→newStatus undefined→bulk 게이트
+  // (columnChanged && newStatus)가 조용히 스킵된다. CI의 파일 내 테스트 실행 순서/샤딩이
+  // 로컬과 달라 "항상 같은 2건(둘 다 bulk 경로)"으로만 재현된 것 — 결정론적 환경 차.
+  // 가설과 무관하게도 테스트 간 격리는 그 자체로 정당하다.
+  //
+  // (자체검산 후 처방 수정) 이 워크스페이스 jsdom엔 window.localStorage가 아예 없어
+  // (undefined) bare `localStorage.clear()`는 즉시 throw한다 — 존재 유무에 기대는 대신
+  // 매 테스트마다 진짜 동작하는 MemoryStorage로 통째 교체해 사용한다(위 클래스 주석 참고).
+  const freshStorage = new MemoryStorage();
+  vi.stubGlobal('localStorage', freshStorage);
+  Object.defineProperty(window, 'localStorage', { value: freshStorage, configurable: true, writable: true });
 });
 
 afterEach(async () => {
@@ -206,6 +243,30 @@ describe('EpicSwimlaneBoard — 열 축 토글(story #2931, H4 공유)', () => {
     const toggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '6단계 신뢰축 + 완료');
     await act(async () => { toggle!.click(); });
     expect(container.textContent).toContain('입력 필요');
+  });
+
+  // ⚠️QA changes 5R(PR#3377 근본원인, 카디르+codex, 2026-08-22) — 바로 위 테스트가 이
+  // projectId(p1)에 axisMode='trust'를 localStorage(loadAxisMode/saveAxisMode 키)에
+  // 남긴다. beforeEach의 localStorage.clear()가 없었다면 이 테스트(파일 내 다음 순번)가
+  // 그 잔존값을 그대로 물려받아 기본 classic 축 기대가 깨지고, 드래그도
+  // TRUST_COLUMN_TO_STATUS['in-progress']=undefined→newStatus undefined→bulk 게이트가
+  // 조용히 스킵된다(4R 진단 로그가 정확히 잡아낸 증상). 이 테스트가 그 cross-test 격리를
+  // 직접 고정한다 — 선언 순서(직전 테스트 바로 뒤)가 재현 조건의 일부라 옮기지 않는다.
+  it('[격리] 직전 테스트가 남긴 트러스트 축 잔존이 다음 마운트로 새지 않는다', async () => {
+    let bulkBody: unknown = null;
+    await mount({
+      epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }],
+      stories: [{ id: 's1', title: '카드', status: 'backlog', priority: 'medium', epic_id: 'e1' }],
+      bulkPatchSpy: (body) => { bulkBody = body; },
+    });
+    expect(container.textContent).not.toContain('입력 필요'); // 트러스트 라벨 부재 = classic 축으로 뜸.
+
+    const handler = capturedDragEndHandlers.at(-1);
+    await act(async () => {
+      handler!({ active: { id: 's1' }, over: { id: 'e1::in-progress' } });
+      await waitForCondition(() => bulkBody !== null, '잔존 축 격리 — 같은 레인 내 컬럼 드래그(bulk PATCH)');
+    });
+    expect(bulkBody).toEqual({ items: [{ id: 's1', status: 'in-progress' }] }); // undefined status로 스킵되지 않았음.
   });
 });
 
