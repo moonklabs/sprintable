@@ -365,11 +365,16 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   // story #2933 H2(P0-H) — Workcell 스테퍼(pipelineStage, H1이 story.trust_stage 직결로 배선)를
   // `story.trust_stage_changed` SSE로 라이브 갱신한다. AttentionQueueView(story #2923)와 동형
   // 패턴 — SSE payload를 신뢰의 소스로 안 쓰고(트리거로만) 실제 값은 항상 REST 재조회로 얻는다
-  // (진실은 서버). undefined=아직 SSE 오버라이드 없음(story prop의 trust_stage 그대로 씀),
-  // navigate away(story.id 변경)하면 리셋 — 다른 story의 값이 새 story 카드에 새는 것 방지.
+  // (진실은 서버). undefined=아직 SSE 오버라이드 없음(story prop의 trust_stage 그대로 씀).
   const [ssePipelineStage, setSsePipelineStage] = useState<WorkcellPipelineStage | null | undefined>(undefined);
   const sseDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // PO 리뷰 MEDIUM(PR#3363, 2026-08-22) — story.id 변경 시 「대기 중 타이머」는 지워져도
+  // 「이미 발화해 in-flight인 fetch」는 못 막는다. 늦게 도착한 응답이 새 story 패널에 옛
+  // story의 stage를 override로 붙이는 레이스였다 — 해소 시점에 「fetch를 쏜 id == 지금 보고
+  // 있는 id」를 대조해야 진짜로 막힌다(리셋만으론 pre-fetch 케이스만 덮고 in-flight는 못 덮음).
+  const currentStoryIdRef = useRef(story.id);
   useEffect(() => {
+    currentStoryIdRef.current = story.id;
     setSsePipelineStage(undefined);
     return () => {
       if (sseDebounceRef.current) clearTimeout(sseDebounceRef.current);
@@ -379,15 +384,19 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const handleTrustStageChanged = useCallback((_eventName: string, data: unknown) => {
     if (typeof data !== 'object' || data === null) return;
     if ((data as Record<string, unknown>)['story_id'] !== story.id) return;
+    const firedForId = story.id; // 클로저 캡처 — 이 콜백은 story.id별로 useCallback 재생성됨.
     if (sseDebounceRef.current) clearTimeout(sseDebounceRef.current);
     sseDebounceRef.current = setTimeout(() => {
       sseDebounceRef.current = null;
       // story #2933 H2(PO 조건②) — 재파생 폴백 없음: SSE payload의 new_stage를 바로 안 쓰고
       // (그 값은 트리거일 뿐), get_story(H1이 trust_stage 배선한 그 엔드포인트)를 다시 불러
       // BE 판정값을 그대로 반영한다. 실패하면 조용히 무시(기존 표시값 유지 — 재파생 0).
-      fetchWithAuth(`/api/stories/${story.id}`)
+      fetchWithAuth(`/api/stories/${firedForId}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((json) => {
+          // 레이스 가드 — fetch를 쏜 뒤 다른 story로 전환됐으면(currentStoryIdRef가 그새
+          // 바뀜) 늦게 도착한 이 응답은 버린다. 새 story 패널에 옛 값이 새는 것 방지.
+          if (currentStoryIdRef.current !== firedForId) return;
           const fresh = json?.data as { trust_stage?: WorkcellPipelineStage | null } | undefined;
           if (fresh && 'trust_stage' in fresh) setSsePipelineStage(fresh.trust_stage ?? null);
         })

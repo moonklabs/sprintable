@@ -290,6 +290,56 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('/api/stories/s-live'), expect.anything());
     expect(currentStageLabel()).toBe('Running');
   });
+
+  // PO 리뷰 MEDIUM(PR#3363, 2026-08-22) — story.id 변경 시 「대기 중 타이머」는 지워져도
+  // 「이미 발화해 in-flight인 fetch」는 못 막는다. 늦게 도착한 응답이 새 story 패널에 옛
+  // story의 stage를 override로 붙이는 레이스를 직접 재현한다: story A에서 SSE 발화→디바운스
+  // 만료(fetch 발사)까지 간 다음, fetch가 아직 안 끝난 상태에서 story B로 전환(re-render)하고,
+  // 그 뒤에야 story A의 응답이 도착하게 만든다 — story B 값이 안 덮이는지 확認.
+  it('SSE로 쏜 fetch가 in-flight인 채 다른 story로 전환되면, 늦게 도착한 응답이 새 story를 덮지 않는다', async () => {
+    const { useSseNotifications } = await import('@/hooks/use-sse-notifications');
+    let capturedOnExtraEvent: ((eventName: string, data: unknown) => void) | undefined;
+    (useSseNotifications as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      (o: { onExtraEvent?: typeof capturedOnExtraEvent }) => { capturedOnExtraEvent = o.onExtraEvent; },
+    );
+    const storyA = makeStory({ id: 'story-a', status: 'in-progress', assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID], trust_stage: 'running' });
+    const storyB = makeStory({ id: 'story-b', status: 'in-review', assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID], trust_stage: 'claimed_done' });
+
+    // story-a의 fetch만 손으로 붙잡아 둔다(deferred) — story-b로 전환된 뒤에야 해소한다.
+    let resolveStoryAFetch: ((v: unknown) => void) | undefined;
+    const storyAFetchPromise = new Promise((resolve) => { resolveStoryAFetch = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && /\/api\/stories\/story-a(\?|$)/.test(url)) {
+        return storyAFetchPromise as Promise<{ ok: boolean; json: () => Promise<unknown> }>;
+      }
+      return { ok: false, json: async () => null };
+    }));
+
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={storyA} tasks={[]} onClose={() => {}} memberMap={memberMap} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(currentStageLabel()).toBe('Running');
+
+    // story-a SSE 발화 → 디바운스 500ms 소진 → fetch 발사(아직 안 끝남, deferred).
+    await act(async () => { capturedOnExtraEvent!('story.trust_stage_changed', { story_id: 'story-a', new_stage: 'merge_ready' }); });
+    await act(async () => { vi.advanceTimersByTime(500); await Promise.resolve(); });
+
+    // story-a의 fetch가 in-flight인 채로 story-b로 전환(부모가 다른 카드를 클릭한 상황).
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={storyB} tasks={[]} onClose={() => {}} memberMap={memberMap} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(currentStageLabel()).toBe('Claimed done');
+
+    // 이제야 story-a의 응답이 늦게 도착 — story-b 패널에 새면 안 된다.
+    await act(async () => {
+      resolveStoryAFetch!({ ok: true, json: async () => ({ data: { ...storyA, trust_stage: 'merge_ready' } }) });
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+
+    expect(currentStageLabel()).toBe('Claimed done');
+  });
 });
 
 // story #2922 W2 — Evidence 구획 = ProofCapsule density="full" 실배선. glance-hero.tsx의
