@@ -111,8 +111,17 @@ export function ArtifactThumbnail({ artifactId, latestVersionNumber, anchorVersi
       {state.kind === 'loading' ? (
         <div className="size-full animate-pulse bg-muted/60" />
       ) : state.kind === 'image' ? (
+        // story #2895(BUG·결재 표면, 선생님 실증) — object-cover는 PNG export처럼 컨테이너와
+        // 비슷한 종횡비일 때만 무해하다. "imported" 아티팩트(전체 페이지 캡처, 세로로 매우
+        // 긴 이미지 — 실측 2480×3560, 종횡비 ~0.7:1)를 16:9 aspect-video 박스에 object-cover로
+        // 넣으면 세로 내용의 대부분이 크롭돼 사라지고, 잘려 남은 좁은 가로 슬라이스가 우연히
+        // 여백/패딩 구간에 걸리면 "흰 배경으로 깨진" 것처럼 보인다(결재자가 근거 실물을 못
+        // 봄). artifact-stage.tsx(전체 뷰어)는 이미 object-contain을 쓴다 — 썸네일만 이 버그가
+        // 있었다. object-contain(레터박스·크롭 0)으로 통일해 «보여줄 게 있으면 전부 보여준다»
+        // 원칙(이 파일 상단 no-fiction 규율)에 맞춘다. PNG export도 object-contain으로 무해(종횡비
+        // 유사·최악의 경우도 크롭보다 레터박스가 더 정직).
         // eslint-disable-next-line @next/next/no-img-element -- PNG export/artifact content는 외부·동적 URL이라 next/image 도메인 화이트리스트와 안 맞음.
-        <img src={state.url} alt="" className="size-full object-cover" />
+        <img src={state.url} alt="" className="size-full object-contain" />
       ) : state.kind === 'live' ? (
         <div ref={stageRef} className="pointer-events-none size-full" style={{ height: state.bounds.h * scale }}>
           <iframe
