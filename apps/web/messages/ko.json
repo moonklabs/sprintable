@@ -2158,7 +2158,15 @@
     "actionRework": "재작업 지시",
     "actionMerge": "병합",
     "actionDecide": "결정",
-    "actionCoordinate": "조율"
+    "actionCoordinate": "조율",
+    "kindApproval": "결재 필요",
+    "kindDecision": "방향 확認 필요",
+    "kindBlocker": "막힘",
+    "kindMention": "응답 필요",
+    "actionApprove": "결재",
+    "actionConfirm": "확認",
+    "actionResolve": "해소",
+    "actionReply": "답"
   },
   "inbox": {
     "attentionTabLabel": "오늘",

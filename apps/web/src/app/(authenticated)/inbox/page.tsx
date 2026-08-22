@@ -7,7 +7,6 @@ import { ArrowLeft, ChevronDown, ChevronRight, Inbox as InboxIcon, Zap, ZapOff, 
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
-import { DecisionsWaiting } from '@/components/inbox/decisions-waiting';
 import { ApprovalsQueue } from '@/components/inbox/approvals-queue';
 import { AttentionQueueView } from '@/components/attention-queue/attention-queue-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
@@ -458,8 +457,9 @@ export default function InboxPage() {
           </div>
         ) : (
         <>
-        <DecisionsWaiting onChange={() => void refreshNotifications()} />
-
+        {/* story #2923(P0-E AQ1) — DecisionsWaiting 패널 폐기(doc attention-audit-redesign-2923).
+            그 데이터(/api/inbox pending)는 이제 attention 탭의 AttentionQueueView가 흡수해
+            보여준다(별 패널 제거, GATE/STEER/BLOCK/Q 병합). */}
         {workflowExecs.length > 0 && (
           <div className="shrink-0 border-b border-border/80 px-4 py-3">
             <p className="mb-2 text-[11px] font-medium text-muted-foreground">워크플로우 실행</p>

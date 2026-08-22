@@ -9,8 +9,9 @@ import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { formatRelativeTime } from '@/lib/storage/format';
 import { cn } from '@/lib/utils';
 import {
-  parseAttentionQueueSignals, buildAttentionQueueFromBe, buildAttentionQueue, diffAttentionQueueItemIds,
-  type AttentionQueueItem, type AttentionQueueTranslator,
+  parseAttentionQueueSignals, buildAttentionQueueFromBe, parseInboxAttentionItems, buildAttentionQueueFromInbox,
+  dedupInboxApprovalsAgainstGatePending, buildAttentionQueue, diffAttentionQueueItemIds,
+  type AttentionQueueItem, type AttentionQueueTranslator, type InboxAttentionItem,
 } from './derive-attention-queue';
 
 import { fetchWithAuth } from '@/lib/db/client';
@@ -21,12 +22,51 @@ const REFETCH_DEBOUNCE_MS = 500;
 // 신규/갱신 행 1회 하이라이트 지속(트랜지션 700ms보다 살짝 길게 — transition-colors 완주 보장).
 const HIGHLIGHT_MS = 900;
 
+/** story #2923 AQ1 — inbox 항목 중 origin_chain에 story가 없고 memo만 있는 것들의 doc id→slug
+ * 를 배치 해소한다(`/api/docs/{id}/summary`, loop-detail-client.tsx 선례와 동형 — id→slug
+ * 전용 lightweight 엔드포인트, 신규 API 없음). 병렬 fetch — inbox 항목은 3~7개 티어라 N+1이
+ * 문제될 규모가 아니다. 실패한 건은 조용히 맵에서 빠져(resolveInboxItemHref가 그 경우 그대로
+ * null로 정직 처리) 페이지 전체가 안 죽는다. */
+async function resolveMemoSlugs(items: InboxAttentionItem[]): Promise<Map<string, string>> {
+  const memoIds = new Set<string>();
+  for (const item of items) {
+    const hasStory = item.origin_chain.some((n) => n.type === 'story');
+    if (hasStory) continue; // story 우선순위가 이기므로 memo 해소가 아예 불필요
+    for (const node of item.origin_chain) {
+      if (node.type === 'memo') memoIds.add(node.id);
+    }
+  }
+  const entries = await Promise.all(
+    [...memoIds].map(async (id) => {
+      const json = await fetchWithAuth(`/api/docs/${id}/summary`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+      const slug = json?.data?.slug;
+      return typeof slug === 'string' && slug ? ([id, slug] as const) : null;
+    }),
+  );
+  return new Map(entries.filter((e): e is readonly [string, string] => e !== null));
+}
+
 async function fetchAttentionQueue(projectId: string, t: AttentionQueueTranslator): Promise<AttentionQueueItem[]> {
-  const json = await fetchWithAuth(`/api/glance/attention?project_id=${projectId}`)
-    .then((r) => (r.ok ? r.json() : null))
-    .catch(() => null);
-  const signals = parseAttentionQueueSignals(json);
-  return buildAttentionQueueFromBe(signals, t);
+  // 카디르 QA HIGH1(PR#3352, 2026-08-22) — project_id 파라미터 부재로 다른 프로젝트의 inbox
+  // 항목까지 섞여 나왔다. 위 BE attention fetch와 동형으로 project_id를 싣는다(BE도 필수
+  // 쿼리 파라미터로 처방 완료 — backend/app/routers/notifications.py list_inbox).
+  const [beJson, inboxJson] = await Promise.all([
+    fetchWithAuth(`/api/glance/attention?project_id=${projectId}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    fetchWithAuth(`/api/inbox?state=pending&project_id=${projectId}`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+  ]);
+  const signals = parseAttentionQueueSignals(beJson);
+  const beItems = buildAttentionQueueFromBe(signals, t);
+  // 카디르 QA HIGH2(PR#3352, 2026-08-22) — gate_pending(Gate 1차 소스)과 approval(inbox_items)
+  // 이 같은 story에 동시 존재하면 같은 사실이 두 행으로 중복 노출된다. gate_pending 원신호의
+  // story_id 집합을 뽑아 inbox approval 쪽에서 겹치는 것만 drop(Gate가 1차 소스 우선).
+  const gatePendingStoryIds = new Set(
+    signals.filter((s) => s.kind === 'gate_pending' && s.story_id).map((s) => s.story_id!),
+  );
+  const inboxItems = dedupInboxApprovalsAgainstGatePending(parseInboxAttentionItems(inboxJson), gatePendingStoryIds);
+  const docSlugById = await resolveMemoSlugs(inboxItems);
+  return [...beItems, ...buildAttentionQueueFromInbox(inboxItems, t, docSlugById)];
 }
 
 function RowSkeleton() {
@@ -36,19 +76,24 @@ function RowSkeleton() {
 function AttentionRow({ item, highlighted, onNavigate }: {
   item: AttentionQueueItem; highlighted: boolean; onNavigate: (href: string) => void;
 }) {
+  // story #2923 AQ1(PO 실측, 2026-08-22) — inbox 병합 항목 중 origin_chain이 story/memo 어느
+  // 쪽도 없으면(run/initiative만) href가 null이다(상세 라우트 자체가 FE에 없다, 지어내지
+  // 않음) — 그 경우 행을 비내비게이션 처리(role/tabIndex/onClick/버튼 전부 생략, 정적 표시만).
+  const navigable = item.href !== null;
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={(e) => {
+      role={navigable ? 'button' : undefined}
+      tabIndex={navigable ? 0 : undefined}
+      onClick={navigable ? (e) => {
         if ((e.target as HTMLElement).closest('a')) return;
-        onNavigate(item.href);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') onNavigate(item.href);
-      }}
+        onNavigate(item.href!);
+      } : undefined}
+      onKeyDown={navigable ? (e) => {
+        if (e.key === 'Enter') onNavigate(item.href!);
+      } : undefined}
       className={cn(
-        'cursor-pointer border-b border-proof-line-soft last:border-b-0 hover:bg-proof-sunk',
+        'border-b border-proof-line-soft last:border-b-0',
+        navigable && 'cursor-pointer hover:bg-proof-sunk',
         'motion-safe:transition-colors motion-safe:duration-700',
         highlighted && 'motion-safe:bg-proof-citron/15',
       )}
@@ -60,7 +105,7 @@ function AttentionRow({ item, highlighted, onNavigate }: {
         claim={item.claim}
         human={item.actor && !item.actor.isAgent ? { name: item.actor.name, role: '' } : undefined}
         agent={item.actor?.isAgent ? { name: item.actor.name, initial: item.actor.name.slice(0, 1) } : undefined}
-        gate={{ action: item.actionLabel, href: item.href, tone: item.actionTone }}
+        gate={navigable ? { action: item.actionLabel, href: item.href!, tone: item.actionTone } : undefined}
         duration={item.enteredStateAtMs !== null ? formatRelativeTime(new Date(item.enteredStateAtMs).toISOString()) : undefined}
         className="rounded-none border-0"
       />
@@ -78,6 +123,13 @@ function AttentionRow({ item, highlighted, onNavigate }: {
  * 병합대기) — 범위이탈(Red)은 BE가 §7 확定②로 여전히 미구현이라 항상 빈 신호(no-fiction 렌더
  * 생략). actor(human/agent 아바타)는 BE `AttentionItem`에 assignee 필드가 없어 당분간 없음
  * (P0-03 `human_owner_member_id` 노출 시 복원 예정 — 별도 low 스토리).
+ *
+ * story #2923(P0-E AQ1, doc attention-audit-redesign-2923) — 별도 패널이던 DecisionsWaiting
+ * (`/api/inbox?state=pending`)을 이 뷰로 흡수(패널 폐기, decisions-waiting.tsx 삭제). 두 BE
+ * 소스를 병렬 fetch 후 병합(derive-attention-queue.ts의 buildAttentionQueueFromBe/FromInbox)
+ * — 다건 옵션 resolve/reassign/dismiss는 PO 확定(단순화)으로 row에 안 옮기고 상세 화면 몫으로
+ * 남긴다. 각 항목엔 이제 `bucket`(GATE/STEER/BLOCK/Q, PO 9→4 매핑표)이 붙는데, 이 슬라이스는
+ * 데이터 계층만 — 실제 배지 렌더는 AQ2가 한다(아직 시각 변화 없음).
  *
  * SSE 실시간 반영(9ef0f914, P0-04 "새로고침 없이" 완료기준의 잔여): `story.trust_stage_changed`
  * 수신을 **트리거로만** 쓴다 — payload의 exception_signals는 이 story 하나의 불리언일 뿐(gate_pending

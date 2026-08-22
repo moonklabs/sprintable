@@ -27,7 +27,6 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock, replace: replaceMock }),
   useSearchParams: () => new URLSearchParams(),
 }));
-vi.mock('@/components/inbox/decisions-waiting', () => ({ DecisionsWaiting: () => null }));
 vi.mock('@/components/inbox/approvals-queue', () => ({ ApprovalsQueue: () => null }));
 vi.mock('@/components/attention-queue/attention-queue-view', () => ({ AttentionQueueView: () => null }));
 
