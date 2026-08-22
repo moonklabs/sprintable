@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Plus, PanelLeftOpen } from 'lucide-react';
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { ChatListView } from '@/components/chat/chat-list-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { EmptyState } from '@/components/ui/empty-state';
+import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { ChatRailProvider, useChatRail } from './chat-rail-context';
 
 /**
@@ -37,6 +38,12 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   const { currentTeamMemberId, projectId } = useDashboardContext();
   const [showModal, setShowModal] = useState(false);
   const { railMode, toggleManualExpand } = useChatRail();
+  // story #2921 S6 후속(유나 design:changes 2026-08-22, CI a11y 가드 지적 처방) — overlay는
+  // 모바일 드로어와 동형인데 접근 가능한 dialog 시맨틱이 없었다(「손수 구현된 모달」로 CI가
+  // 정당하게 잡음). contextual-panel-layout.tsx의 기존 반응형 드로어와 같은 useFocusTrap
+  // 배선을 재사용한다(사본 분화 금지) — Tab 순환+Esc 닫힘+포커스 반환.
+  const closeOverlay = useCallback(() => toggleManualExpand(), [toggleManualExpand]);
+  const trapRef = useFocusTrap(railMode === 'overlay', closeOverlay);
 
   // `/chats` 정확히 그 경로일 때만 "리스트가 곧 전체화면"인 모바일 상태 — `/chats/[id]`류는
   // 전부 대화 쪽이 전체화면이다(이미 열람 중인 대화 화면에 리스트를 노출하지 않는다, 기존
@@ -64,11 +71,13 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* story #2921 S6 — collapsed 상태에서 backdrop 클릭으로 오버레이를 다시 접는다(overlay일
-          때만 존재, 데스크톱 전용이라 모바일 기존 동작과 안 겹침). */}
+          때만 존재, 데스크톱 전용이라 모바일 기존 동작과 안 겹침). 장식용 click-catcher일 뿐
+          실제 콘텐츠(rail 자신)가 role="dialog"를 지므로 접근성 트리에서 뺀다(aria-hidden). */}
       {railMode === 'overlay' && (
         <button
           type="button"
-          aria-label={t('collapseRail')}
+          aria-hidden="true"
+          tabIndex={-1}
           onClick={toggleManualExpand}
           className="fixed inset-0 z-30 hidden bg-black/20 lg:block xl:hidden"
         />
@@ -76,13 +85,19 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
 
       {/* 리스트 레일 — 모바일은 `/chats`일 때만 전체화면(현행 유지), 데스크톱(lg↑)은 항상
           270px 고정 폭으로 보인다(§S1 확定 수치). §S6: xl 미만에서 reading이 열리면 자동
-          숨김(collapsed)·토글로 오버레이(overlay) 재호출 가능. */}
+          숨김(collapsed)·토글로 오버레이(overlay) 재호출 가능 — overlay일 때만 dialog
+          시맨틱(role/aria-modal/aria-labelledby)을 얹는다(평소엔 모달이 아니라 부여 안 함). */}
       <div
+        ref={trapRef}
         data-testid="chat-rail"
-        className={`${isListRoute ? 'flex' : 'hidden'} lg:flex min-h-0 w-full flex-col overflow-hidden border-border lg:w-[270px] lg:shrink-0 lg:border-r ${railHiddenClass} xl:flex ${railOverlayClass}`}
+        tabIndex={-1}
+        role={railMode === 'overlay' ? 'dialog' : undefined}
+        aria-modal={railMode === 'overlay' ? true : undefined}
+        aria-labelledby={railMode === 'overlay' ? 'chat-rail-heading' : undefined}
+        className={`${isListRoute ? 'flex' : 'hidden'} lg:flex min-h-0 w-full flex-col overflow-hidden border-border outline-none lg:w-[270px] lg:shrink-0 lg:border-r ${railHiddenClass} xl:flex ${railOverlayClass}`}
       >
         <div className="flex flex-shrink-0 items-center justify-between border-b border-border px-3 py-2.5">
-          <h1 className="text-sm font-medium text-foreground">{t('title')}</h1>
+          <h1 id="chat-rail-heading" className="text-sm font-medium text-foreground">{t('title')}</h1>
           <Button size="sm" variant="outline" onClick={() => setShowModal(true)}>
             <Plus className="mr-1.5 h-3.5 w-3.5" />
             {t('newConversation')}

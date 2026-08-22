@@ -183,9 +183,37 @@ describe('ChatsLayout — story #2921 S6(xl 미만 + Reading 열림 → rail 자
     const rail = container.querySelector('[data-testid="chat-rail"]');
     expect(rail?.className).toContain('fixed');
     expect(rail?.className).toContain('z-40');
-    // 오버레이 상태에선 collapsed 전용 재호출 토글이 사라지고, backdrop이 대신 뜬다.
+    // 오버레이 상태에선 collapsed 전용 재호출 토글이 사라지고, backdrop이 대신 뜬다(장식용
+    // click-catcher — 접근성 트리에서는 빠진다, aria-hidden).
     expect(container.querySelector('[aria-label="목록 열기"]')).toBeNull();
-    expect(container.querySelector('[aria-label="목록 닫기"]')).toBeTruthy();
+    const backdrop = Array.from(container.querySelectorAll('button')).find((b) => b.getAttribute('aria-hidden') === 'true');
+    expect(backdrop).toBeTruthy();
+  });
+
+  it('오버레이는 접근 가능한 dialog다 — rail 자체가 role="dialog"+aria-modal+aria-labelledby를 지닌다(CI a11y 가드 처방)', async () => {
+    usePathnameMock.mockReturnValue('/chats/conv-123');
+    mqMatches = true;
+    await act(async () => {
+      root.render(wrap(<ChatsLayout><ReadingOpenProbe open /></ChatsLayout>));
+    });
+    const expandBtn = container.querySelector('[aria-label="목록 열기"]') as HTMLButtonElement;
+    await act(async () => { expandBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const rail = container.querySelector('[data-testid="chat-rail"]');
+    expect(rail?.getAttribute('role')).toBe('dialog');
+    expect(rail?.getAttribute('aria-modal')).toBe('true');
+    expect(rail?.getAttribute('aria-labelledby')).toBe('chat-rail-heading');
+    expect(container.querySelector('#chat-rail-heading')).toBeTruthy();
+  });
+
+  it('평소(collapsed 아닌 정상 상태)엔 rail이 dialog 시맨틱을 안 지닌다(항상 열려있는 걸 모달이라 우기지 않는다)', async () => {
+    usePathnameMock.mockReturnValue('/chats/conv-123');
+    mqMatches = false;
+    await act(async () => {
+      root.render(wrap(<ChatsLayout><ReadingOpenProbe open={false} /></ChatsLayout>));
+    });
+    const rail = container.querySelector('[data-testid="chat-rail"]');
+    expect(rail?.getAttribute('role')).toBeNull();
+    expect(rail?.getAttribute('aria-modal')).toBeNull();
   });
 
   it('Reading이 닫히면 수동 펼침 상태도 리셋된다(다음에 다시 열릴 때 자동접힘부터 재시작)', async () => {
