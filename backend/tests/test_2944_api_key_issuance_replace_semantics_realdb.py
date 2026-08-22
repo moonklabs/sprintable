@@ -144,7 +144,6 @@ async def _client_and_session():
     import app.models  # noqa: F401
     from app.main import app
     from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
-    from app.dependencies.database import get_db
     from httpx import ASGITransport, AsyncClient
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from app.core.database import Base
@@ -165,6 +164,9 @@ async def _client_and_session():
     async def override_db():
         async with Session() as s:
             try:
+                # 동시 요청은 각자 새 물리 커넥션을 열 수 있어(풀에서 재사용 안 됨) 시딩
+                # 세션에만 건 session_replication_role=replica가 안 이어진다 — 매 세션마다.
+                await _bypass_fk(s)
                 yield s
                 await s.commit()
             except Exception:
@@ -177,7 +179,8 @@ async def _client_and_session():
     async def override_org_id():
         return org_id
 
-    app.dependency_overrides[get_db] = override_db
+    from tests.conftest import override_db_and_read
+    override_db_and_read(app, override_db)
     app.dependency_overrides[get_current_user] = override_auth
     app.dependency_overrides[get_verified_org_id] = override_org_id
 
@@ -314,6 +317,60 @@ async def test_direct_api_first_issuance_unaffected_when_no_prior_key():
             repo = ApiKeyRepository(s)
             active = [k for k in await repo.list_by_member(agent_id) if k.revoked_at is None]
             assert len(active) == 1
+    finally:
+        app.dependency_overrides.clear()
+        async with engine.begin() as conn:
+            from app.core.database import Base
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_concurrent_issuance_calls_serialize_to_exactly_one_active_key():
+    """카디르 QA 축 — agent-scoped advisory lock(`acquire_agent_mutation_lock`)이 실제로
+    동시 발급을 직렬화하는지 실증. 락 없이 두 요청이 동시에 revoke_all_active→create를
+    인터리빙하면(둘 다 "지금은 활성 키 없음"을 보고 각자 신규 발급) 활성 키가 2개 남을
+    위험이 있다 — 락이 실동작하면 항상 정확히 1개로 수렴해야 한다."""
+    import asyncio
+    from app.models.team import TeamMember
+    from app.repositories.api_key import ApiKeyRepository
+    from httpx import ASGITransport, AsyncClient
+
+    client, Session, app, org_id, actor_id, engine = await _client_and_session()
+    try:
+        async with Session() as s:
+            await _bypass_fk(s)
+            member = TeamMember(
+                id=uuid.uuid4(), org_id=org_id, project_id=uuid.uuid4(), type="agent",
+                name="Concurrent Issuance Test Agent", role="member", is_active=True,
+                created_by=actor_id,
+            )
+            s.add(member)
+            await s.commit()
+            agent_id = member.id
+
+            repo = ApiKeyRepository(s)
+            await repo.create(team_member_id=agent_id, scope=["read"], expires_at=None)
+            await s.commit()
+
+        async def _issue(scope: list[str]) -> int:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+                resp = await c.post(
+                    f"/api/v2/agents/{agent_id}/api-keys",
+                    json={"scope": scope, "expires_at": None},
+                )
+                return resp.status_code
+
+        statuses = await asyncio.gather(_issue(["stories"]), _issue(["tasks"]))
+        assert all(s == 201 for s in statuses), statuses
+
+        async with Session() as s:
+            repo = ApiKeyRepository(s)
+            active = [k for k in await repo.list_by_member(agent_id) if k.revoked_at is None]
+            assert len(active) == 1, (
+                f"동시 발급 후 활성 키가 정확히 1개여야 하는데 {len(active)}개 — "
+                f"agent-scoped lock이 직렬화 못함"
+            )
     finally:
         app.dependency_overrides.clear()
         async with engine.begin() as conn:
