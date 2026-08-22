@@ -213,7 +213,13 @@ export default function GateDetailPage() {
             footer={
               <div className="mt-3.5 space-y-3 border-t border-proof-line-soft pt-3">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <Badge variant="chip">{gate.gate_type}</Badge>
+                  {/* 유나 P0-02 full 검산(2026-08-22, PR#3367) — Badge "chip" variant 기본
+                      (text-muted-foreground on bg-muted/70)이 이 자리에서 AA 미달 실측(3.55).
+                      전역 variant를 고치면 다른 소비처 전부 파급이라 이 지점만 className
+                      오버라이드(text-foreground — #2420 "tint 위 계열색 글자=text-foreground"
+                      규칙과 동형). 전역 chip variant 자체의 대비 상향 여부는 유나 별도 판단
+                      (발견만 기록, 이 PR 스코프 아님). */}
+                  <Badge variant="chip" className="text-foreground">{gate.gate_type}</Badge>
                   {deriveRiskLevel(gate) === 'high' ? (
                     <Badge variant="warning">{t('riskHigh')}</Badge>
                   ) : deriveRiskLevel(gate) === 'unknown' ? (
