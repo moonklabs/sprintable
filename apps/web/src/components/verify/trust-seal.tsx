@@ -60,7 +60,7 @@ export function TrustSeal(props: TrustSealProps) {
   if (props.variant === 'verified') {
     return (
       <div className={cn('flex items-center gap-2 rounded-[10px] bg-proof-green-soft px-2.5 py-2 text-[11.5px]', props.className)}>
-        <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full bg-proof-green text-[9px] font-bold text-white dark:text-[#0B0C0D]">
+        <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full bg-proof-green text-[9px] font-bold text-white dark:text-proof-bg">
           {initials(props.humanName)}
         </span>
         <span className="min-w-0 flex-1 text-proof-ink-3">

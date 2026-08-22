@@ -55,7 +55,7 @@ export function NextMakerHeader({ headline, zeroStage }: NextMakerHeaderProps) {
         {headline.aboutToStallCount > 0 && (
           <>
             {' — '}
-            <b className="font-mono text-amber-600 dark:text-amber-400">
+            <b className="font-mono text-warning-strong">
               {t('nextMakerHeadlineStall', { n: headline.aboutToStallCount })}
             </b>
           </>
@@ -87,7 +87,7 @@ function ZeroStageCell({
   const valueClass = {
     brand: 'text-primary',
     info: 'text-info',
-    warn: 'text-amber-600 dark:text-amber-400',
+    warn: 'text-warning-strong',
     neutral: 'text-foreground',
   }[tone];
 
