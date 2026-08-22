@@ -78,6 +78,28 @@ describe('Workcell — story #2922 W4 책임자/실행자 헤더 승격(중복 �
   });
 });
 
+// story #2922 W6(선행 조각) — Proofline 좌측 레일. queued는 4색(blue/amber/green/red) 중
+// 어느 것도 아니라(신호 없음) 회색 폴백이어야 한다(no-fiction — 색을 지어내지 않음).
+describe('Workcell — story #2922 W6 Proofline 레일(단계→색 파생)', () => {
+  it('merge_ready → bg-proof-green 레일', () => {
+    const markup = renderKo(<Workcell {...BASE} pipelineStage="merge_ready" />);
+    expect(markup).toMatch(/class="[^"]*bg-proof-green[^"]*"[^>]*aria-hidden="true"/);
+  });
+
+  it('needs_input → bg-proof-amber 레일', () => {
+    const markup = renderKo(<Workcell {...BASE} pipelineStage="needs_input" />);
+    expect(markup).toMatch(/class="[^"]*bg-proof-amber[^"]*"[^>]*aria-hidden="true"/);
+  });
+
+  it('queued(신호 없음) → 4색 어느 것도 안 쓰고 중립 회색(bg-proof-line)만', () => {
+    const markup = renderKo(<Workcell {...BASE} pipelineStage="queued" />);
+    const railMatch = markup.match(/<div class="w-1 shrink-0 self-stretch[^"]*" aria-hidden="true"><\/div>/);
+    expect(railMatch).toBeTruthy();
+    expect(railMatch![0]).toContain('bg-proof-line');
+    expect(railMatch![0]).not.toMatch(/bg-proof-(blue|amber|green|red)/);
+  });
+});
+
 describe('Workcell — story #2922 W1 신뢰 파이프라인 헤더 스테퍼(6상태) + 2×2 구획', () => {
   it('renders all six pipeline stage labels regardless of current stage', () => {
     const markup = renderKo(<Workcell {...BASE} pipelineStage="queued" />);

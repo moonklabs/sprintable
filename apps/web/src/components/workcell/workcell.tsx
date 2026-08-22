@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { ProofCapsule, type ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
+import { Proofline, type ProofState } from '@/components/proof-capsule/proofline';
 import { Avatar } from '@/components/shared/avatar';
 
 export interface WorkcellOwner {
@@ -66,6 +67,14 @@ export interface WorkcellProps {
 
 const PIPELINE_STAGES: WorkcellPipelineStage[] = ['queued', 'running', 'needs_input', 'claimed_done', 'verified', 'merge_ready'];
 
+// story #2922 W6(선행 조각) — Proofline 좌측 레일 색(ProofCapsule CutCornerShell과 동형 부품
+// 재사용). queued는 "아직 신호 없음"이라 4색(blue/amber/green/red) 중 어느 것도 지어내지
+// 않는다 — ProofState에 없는 매핑은 아래에서 회색(bg-proof-line, 스테퍼 pending 점과 동일
+// 토큰) 레일로 정직하게 대체한다(색만으로 의미 전달 금지 — 헤더 stepper 텍스트가 항상 병기).
+const PIPELINE_TO_RAIL_STATE: Partial<Record<WorkcellPipelineStage, ProofState>> = {
+  running: 'blue', needs_input: 'amber', claimed_done: 'blue', verified: 'blue', merge_ready: 'green',
+};
+
 function PipelineStepper({ stage }: { stage: WorkcellPipelineStage }) {
   const t = useTranslations('workcell');
   const label: Record<WorkcellPipelineStage, string> = {
@@ -120,40 +129,46 @@ function PipelineStepper({ stage }: { stage: WorkcellPipelineStage }) {
  */
 export function Workcell({ title, pipelineStage, brief, run, evidence, conversation, className }: WorkcellProps) {
   const t = useTranslations('workcell');
+  const railState = PIPELINE_TO_RAIL_STATE[pipelineStage];
   return (
     <div
-      className={cn('overflow-hidden rounded-[6px] border border-proof-line bg-proof-panel', className)}
+      className={cn('flex overflow-hidden rounded-[6px] border border-proof-line bg-proof-panel', className)}
       style={{ clipPath: 'polygon(0 0, calc(100% - 24px) 0, 100% 24px, 100% 100%, 0 100%)' }}
     >
-      <div className="border-b border-proof-line px-4.5 py-3.5">
-        <PipelineStepper stage={pipelineStage} />
-        <span className="text-[17px] font-bold leading-tight tracking-[-0.012em] text-proof-ink">{title}</span>
-        {/* story #2922 W4 — 책임자/실행자를 헤더로 승격("10초 리트머스": 스크롤 없이 «누가»가
-            보임). #3339(2921 아바타 단일통합)가 ProofAvatar를 폐기·Avatar로 수렴시켰다 —
-            여기도 그 정본을 그대로 소비(신규 변형 0). Brief 구획의 중복 표기는 제거(SSOT=
-            헤더 이 한 자리). */}
-        <div className="mt-2 flex flex-wrap items-center gap-3.5 text-[11px] text-proof-ink-3">
-          <span className="inline-flex items-center gap-1.5">
-            <Avatar name={brief.owner.name} actorType="human" size={18} />
-            {t('briefOwner')} {brief.owner.name}
-          </span>
-          {brief.agent ? (
+      {/* story #2922 W6(선행 조각) — Proofline 좌측 레일(ProofCapsule CutCornerShell과 동형
+          부품 재사용, 신규 컴포넌트 0). */}
+      {railState ? <Proofline state={railState} /> : <div className="w-1 shrink-0 self-stretch bg-proof-line" aria-hidden="true" />}
+      <div className="min-w-0 flex-1">
+        <div className="border-b border-proof-line px-4.5 py-3.5">
+          <PipelineStepper stage={pipelineStage} />
+          <span className="text-[17px] font-bold leading-tight tracking-[-0.012em] text-proof-ink">{title}</span>
+          {/* story #2922 W4 — 책임자/실행자를 헤더로 승격("10초 리트머스": 스크롤 없이 «누가»가
+              보임). #3339(2921 아바타 단일통합)가 ProofAvatar를 폐기·Avatar로 수렴시켰다 —
+              여기도 그 정본을 그대로 소비(신규 변형 0). Brief 구획의 중복 표기는 제거(SSOT=
+              헤더 이 한 자리). */}
+          <div className="mt-2 flex flex-wrap items-center gap-3.5 text-[11px] text-proof-ink-3">
             <span className="inline-flex items-center gap-1.5">
-              <Avatar name={brief.agent.name} actorType="agent" size={18} />
-              {t('briefAgent')} {brief.agent.name}
+              <Avatar name={brief.owner.name} actorType="human" size={18} />
+              {t('briefOwner')} {brief.owner.name}
             </span>
-          ) : null}
+            {brief.agent ? (
+              <span className="inline-flex items-center gap-1.5">
+                <Avatar name={brief.agent.name} actorType="agent" size={18} />
+                {t('briefAgent')} {brief.agent.name}
+              </span>
+            ) : null}
+          </div>
         </div>
-      </div>
 
-      {/* story #2922 W1 — 4구획 세로 나열 → 2×2 그리드(Brief|Run / Evidence|Conversation).
-          gap-px+bg-proof-line가 각 구획 사이 헤어라인을 만든다(개별 레이어의 border-b는
-          이제 이 그리드 갭과 중복이라 제거됨). */}
-      <div className="grid grid-cols-2 gap-px bg-proof-line">
-        <div className="bg-proof-panel"><BriefLayer brief={brief} /></div>
-        <div className="bg-proof-panel"><RunLayer run={run} /></div>
-        <div className="bg-proof-panel"><EvidenceLayer evidence={evidence} /></div>
-        <div className="bg-proof-panel"><ConversationLayer conversation={conversation} /></div>
+        {/* story #2922 W1 — 4구획 세로 나열 → 2×2 그리드(Brief|Run / Evidence|Conversation).
+            gap-px+bg-proof-line가 각 구획 사이 헤어라인을 만든다(개별 레이어의 border-b는
+            이제 이 그리드 갭과 중복이라 제거됨). */}
+        <div className="grid grid-cols-2 gap-px bg-proof-line">
+          <div className="bg-proof-panel"><BriefLayer brief={brief} /></div>
+          <div className="bg-proof-panel"><RunLayer run={run} /></div>
+          <div className="bg-proof-panel"><EvidenceLayer evidence={evidence} /></div>
+          <div className="bg-proof-panel"><ConversationLayer conversation={conversation} /></div>
+        </div>
       </div>
     </div>
   );
