@@ -7,6 +7,9 @@
 // Attention GATE 앵커」. 예전엔 overflow 표시가 순수 텍스트라 캡(3~7) 초과분을 볼 방법이
 // 없었다 — 이 스위트는 그 표시가 실제로 클릭 가능한 앵커(/inbox?tab=gates)로 동작하는지,
 // overflow=0일 때는 그 앵커 자체가 서지 않는지를 고정한다.
+// story #2923(P0-E AQ2, doc attention-audit-redesign-2923) — 개입유형(GATE/STEER/BLOCK/Q)
+// compact 배지 배선. bucket 값이 실제로 ProofCapsule의 typeBadge prop까지 전달되는지 고정
+// (배지 자체의 무채 스타일링은 proof-capsule.test.tsx에서 컴포넌트 단위로 이미 검증됨).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -60,6 +63,20 @@ async function mount(fetchImpl: (url: string) => Promise<{ ok: boolean; json: ()
   const { AttentionQueueView } = await import('./attention-queue-view');
   await act(async () => { root.render(wrap(<AttentionQueueView projectId="proj-1" />)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+}
+
+function mockGatePendingOnly() {
+  return async (url: string) => {
+    if (url.includes('/api/glance/attention')) {
+      return {
+        ok: true,
+        json: async () => ({
+          data: { items: [{ kind: 'gate_pending', story_id: 's1', title: '가격 콘솔', ref: {}, entered_state_at: null }] },
+        }),
+      };
+    }
+    return { ok: true, json: async () => ({ data: [] }) };
+  };
 }
 
 describe('AttentionQueueView — HIGH1 project_id 필터(story #2923, 카디르 QA)', () => {
@@ -190,5 +207,12 @@ describe('AttentionQueueView — overflow anchor (story #2923 AQ3 + MEDIUM① GA
     const anchor = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('나머지는'));
     expect(anchor).toBeUndefined();
     expect(container.textContent).not.toContain('나머지는');
+  });
+});
+
+describe('AttentionQueueView — typeBadge 배선 (story #2923 AQ2)', () => {
+  it('gate_pending 신호(decision_needed·GATE 버킷)의 행에 "GATE" 배지가 뜬다', async () => {
+    await mount(mockGatePendingOnly());
+    expect(container.textContent).toContain('GATE');
   });
 });

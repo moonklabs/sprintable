@@ -145,6 +145,34 @@ describe('ProofCapsule (안티패턴 자체 체크 — 도크트린 준수 회�
     expect(markup).not.toContain('일 전');
     expect(markup).not.toContain('시간 전');
   });
+
+  // story #2923(P0-E AQ2, Yuna 확定 2026-08-22) — 개입유형(GATE/STEER/BLOCK/Q) compact 배지.
+  // 「색은 신뢰상태 축 하나(레일/점)뿐」 — 이 배지는 무채(색 클래스 0)로만 렌더돼야 한다.
+  it('row density renders the typeBadge text with monochrome classes (bg-proof-sunk/text-proof-ink-2 — no proofState color)', () => {
+    const markup = renderWithIntl(
+      <ProofCapsule {...BASE} density="row" gate={{ action: '결재' }} typeBadge="GATE" />,
+    );
+    // 배지 자체의 스타일 클래스가 무채(proof-sunk/ink-2)인지 — 이 두 클래스는 이 컴포넌트
+    // 어디에도 상태색(blue/green/amber/red) 용도로 안 쓰인다(proof-capsule.tsx 실측).
+    expect(markup).toContain('GATE');
+    expect(markup).toContain('bg-proof-sunk');
+    expect(markup).toContain('text-proof-ink-2');
+  });
+
+  it('row density renders no typeBadge element when omitted (다른 밀도 호출부·전 F1~F3는 이 prop 자체를 안 준다, 무변화)', () => {
+    const markup = renderWithIntl(
+      <ProofCapsule {...BASE} density="row" gate={{ action: '결재' }} />,
+    );
+    expect(markup).not.toContain('GATE');
+    expect(markup).not.toContain('STEER');
+  });
+
+  it('typeBadge는 row 밀도 전용 — full/card/audit에는 안 새어나간다(스코프 밖 밀도 무누출)', () => {
+    for (const density of ['full', 'card', 'audit'] as const) {
+      const markup = renderWithIntl(<ProofCapsule {...BASE} density={density} typeBadge="GATE" />);
+      expect(markup).not.toContain('>GATE<');
+    }
+  });
 });
 
 describe('ProofCapsule (human optional — Board card 확산, bf9037cb) — 다중 담당자 등 human 필드로 표현 안 되는 실 기능을 위한 완화', () => {
