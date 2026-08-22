@@ -77,7 +77,7 @@ export function Avatar({
           <img src={avatarUrl} alt={name} className="h-full w-full object-cover" onError={() => setImgError(true)} />
         ) : name.trim() ? (
           <span
-            className={cn('flex h-full w-full items-center justify-center font-semibold text-white', avatarColor(name))}
+            className={cn('flex h-full w-full items-center justify-center font-semibold', avatarColor(isAgent))}
             style={{ fontSize: initSize }}
             aria-label={name}
           >
