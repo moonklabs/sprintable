@@ -104,6 +104,50 @@ describe('Workcell — story #2922 W6 Proofline 레일(단계→색 파생)', ()
     expect(railMatch![0]).toContain('bg-proof-line');
     expect(railMatch![0]).not.toMatch(/bg-proof-(blue|amber|green|red)/);
   });
+
+  it('verified → bg-proof-green 레일(유나양 확定 델타 — 이전엔 blue였다)', () => {
+    const markup = renderKo(<Workcell {...BASE} pipelineStage="verified" />);
+    const railMatch = markup.match(/^<div\b[^>]*><div class="([^"]*)" aria-hidden="true"><\/div>/);
+    expect(railMatch).toBeTruthy();
+    expect(railMatch![1].split(/\s+/)).toContain('bg-proof-green');
+  });
+});
+
+// story #2922 W6 델타(유나양 확定, 2026-08-22) — 스테퍼 색을 위치기반(done=항상 green)에서
+// 트러스트-시맨틱(각 단계 자체의 신뢰상태, 위치 무관)으로 전환. 판별 핵심: "지나온" 단계가
+// 자기 고유 색(예: running=blue)을 유지해야 하며, 그저 지나왔다고 강제로 green이 되면 안 된다
+// — 이게 옛 위치기반 로직과의 진짜 차이(#3345 부수 논의가 지적한 지점).
+describe('Workcell — story #2922 W6 스테퍼 트러스트-시맨틱 컬러(유나양 확定)', () => {
+  // 각 단계의 label-wrapper class는 `role="listitem"`으로 블록을 쪼갠 뒤 그 블록의 첫
+  // class="..."(레이블+색을 쥔 중간 span — 바깥 span의 class는 role 앞이라 분할로 이미
+  // 소비됨, 점(dot) span의 class는 이보다 뒤에 옴)로 정확히 좁힌다.
+  function stageWrapperClass(markup: string, label: string): string {
+    const block = markup.split('role="listitem"').slice(1).find((b) => b.includes(`>${label}</span>`));
+    if (!block) throw new Error(`stage block not found for label: ${label}`);
+    const m = block.match(/class="([^"]*)"/);
+    if (!m) throw new Error(`class attr not found for label: ${label}`);
+    return m[1];
+  }
+
+  it('merge_ready가 current일 때, 이미 지나온 Running 단계는 강제로 green이 되지 않고 자기 고유색(blue) 유지', () => {
+    const markup = renderKo(<Workcell {...BASE} pipelineStage="merge_ready" />);
+    const runningClass = stageWrapperClass(markup, 'Running');
+    expect(runningClass.split(/\s+/)).toContain('text-proof-blue');
+    expect(runningClass.split(/\s+/)).not.toContain('text-proof-green');
+  });
+
+  it('verified가 current일 때 그 자신은 green(자기 색이 진짜 green이므로)', () => {
+    const markup = renderKo(<Workcell {...BASE} pipelineStage="verified" />);
+    const verifiedClass = stageWrapperClass(markup, 'Verified');
+    expect(verifiedClass.split(/\s+/)).toContain('text-proof-green');
+    expect(verifiedClass.split(/\s+/)).toContain('font-bold');
+  });
+
+  it('claimed_done이 current일 때 그 자신은 blue(주장·미검증 — 아직 green 아님)', () => {
+    const markup = renderKo(<Workcell {...BASE} pipelineStage="claimed_done" />);
+    const claimedClass = stageWrapperClass(markup, 'Claimed done');
+    expect(claimedClass.split(/\s+/)).toContain('text-proof-blue');
+  });
 });
 
 describe('Workcell — story #2922 W1 신뢰 파이프라인 헤더 스테퍼(6상태) + 2×2 구획', () => {

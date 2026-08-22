@@ -67,12 +67,26 @@ export interface WorkcellProps {
 
 const PIPELINE_STAGES: WorkcellPipelineStage[] = ['queued', 'running', 'needs_input', 'claimed_done', 'verified', 'merge_ready'];
 
-// story #2922 W6(선행 조각) — Proofline 좌측 레일 색(ProofCapsule CutCornerShell과 동형 부품
-// 재사용). queued는 "아직 신호 없음"이라 4색(blue/amber/green/red) 중 어느 것도 지어내지
-// 않는다 — ProofState에 없는 매핑은 아래에서 회색(bg-proof-line, 스테퍼 pending 점과 동일
-// 토큰) 레일로 정직하게 대체한다(색만으로 의미 전달 금지 — 헤더 stepper 텍스트가 항상 병기).
-const PIPELINE_TO_RAIL_STATE: Partial<Record<WorkcellPipelineStage, ProofState>> = {
-  running: 'blue', needs_input: 'amber', claimed_done: 'blue', verified: 'blue', merge_ready: 'green',
+// story #2922 W6 — 유나양 확定 트러스트-시맨틱 컬러 매핑(2026-08-22, 시안 335f138d 갱신).
+// 색=그 단계 자체의 신뢰상태(위치 무관 고정) — Running/Claimed done=blue(실행·주장,
+// 미검증)·Needs input=amber(대기)·Verified/Merge-ready=green(증명). Queued는 매핑에 없음
+// (아직 신호 자체가 없다 — 4색 중 어느 것도 지어내지 않고 중립 faint/line 토큰으로 대체).
+// 레일(Proofline)과 헤더 스테퍼 둘 다 이 SSOT 하나를 공유(동작 이중선언 금지).
+const PIPELINE_STAGE_TRUST_COLOR: Partial<Record<WorkcellPipelineStage, ProofState>> = {
+  running: 'blue', needs_input: 'amber', claimed_done: 'blue', verified: 'green', merge_ready: 'green',
+};
+
+const TRUST_TEXT_CLASS: Record<ProofState, string> = {
+  blue: 'text-proof-blue', amber: 'text-proof-amber', green: 'text-proof-green', red: 'text-proof-red',
+};
+const TRUST_BG_CLASS: Record<ProofState, string> = {
+  blue: 'bg-proof-blue', amber: 'bg-proof-amber', green: 'bg-proof-green', red: 'bg-proof-red',
+};
+const TRUST_BORDER_CLASS: Record<ProofState, string> = {
+  blue: 'border-proof-blue', amber: 'border-proof-amber', green: 'border-proof-green', red: 'border-proof-red',
+};
+const TRUST_RING_CLASS: Record<ProofState, string> = {
+  blue: 'ring-proof-blue/20', amber: 'ring-proof-amber/20', green: 'ring-proof-green/20', red: 'ring-proof-red/20',
 };
 
 function PipelineStepper({ stage }: { stage: WorkcellPipelineStage }) {
@@ -85,24 +99,28 @@ function PipelineStepper({ stage }: { stage: WorkcellPipelineStage }) {
   return (
     <div className="mb-2.5 flex flex-wrap items-center gap-x-0 gap-y-1" role="list" aria-label={t('pipelineQuestion')}>
       {PIPELINE_STAGES.map((s, i) => {
-        const status = i < curIdx ? 'done' : i === curIdx ? 'current' : 'pending';
+        const isCurrent = i === curIdx;
+        const color = PIPELINE_STAGE_TRUST_COLOR[s];
+        // story #2922 W6 델타(유나양 확定) — 색=신뢰상태(위치 무관, 위 표) · 강조=위치
+        // (ring/weight/dot-fill로만, current만 채워진 점+ring+굵기). "지나온" 단계라고
+        // 강제로 초록 처리하지 않는다 — 그 자체가 이미 초록(예: verified)이 아닌 한.
         return (
           <span key={s} className="flex items-center" role="listitem">
             <span
               className={cn(
-                'flex items-center gap-1.5 pr-1.5 text-[9px] font-semibold leading-none',
-                status === 'done' && 'text-proof-green',
-                status === 'current' && 'font-bold text-proof-blue',
-                status === 'pending' && 'text-proof-faint',
+                'flex items-center gap-1.5 pr-1.5 text-[9px] leading-none',
+                color ? TRUST_TEXT_CLASS[color] : 'text-proof-faint',
+                isCurrent && 'font-bold',
+                !isCurrent && 'font-semibold',
               )}
-              aria-current={status === 'current' ? 'step' : undefined}
+              aria-current={isCurrent ? 'step' : undefined}
             >
               <span
                 className={cn(
                   'size-1.5 rounded-full',
-                  status === 'done' && 'bg-proof-green',
-                  status === 'current' && 'bg-proof-blue ring-2 ring-proof-blue/20',
-                  status === 'pending' && 'bg-proof-line',
+                  isCurrent
+                    ? cn(color ? TRUST_BG_CLASS[color] : 'bg-proof-line', 'ring-2', color ? TRUST_RING_CLASS[color] : 'ring-proof-line/40')
+                    : cn('border bg-transparent', color ? TRUST_BORDER_CLASS[color] : 'border-proof-line'),
                 )}
                 aria-hidden="true"
               />
@@ -129,7 +147,7 @@ function PipelineStepper({ stage }: { stage: WorkcellPipelineStage }) {
  */
 export function Workcell({ title, pipelineStage, brief, run, evidence, conversation, className }: WorkcellProps) {
   const t = useTranslations('workcell');
-  const railState = PIPELINE_TO_RAIL_STATE[pipelineStage];
+  const railState = PIPELINE_STAGE_TRUST_COLOR[pipelineStage];
   return (
     <div
       className={cn('flex overflow-hidden rounded-[6px] border border-proof-line bg-proof-panel', className)}
