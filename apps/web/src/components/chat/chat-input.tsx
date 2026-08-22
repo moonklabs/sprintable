@@ -657,7 +657,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                 className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground"
               />
               {workItemPicker.entityResults.length > 0 && (
-                <ul role="listbox" aria-label={t('steerPanelWorkItemLabel')} className="absolute top-full left-0 z-50 mt-1 max-h-40 w-full overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                <ul role="listbox" aria-label={t('steerPanelWorkItemLabel')} className="focus-inset absolute top-full left-0 z-50 mt-1 max-h-40 w-full overflow-y-auto rounded-md border border-border bg-popover shadow-md">
                   {workItemPicker.entityResults.map((ent) => (
                     <li key={`${ent.entity_type}:${ent.entity_id}`}>
                       <button
