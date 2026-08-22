@@ -32,16 +32,17 @@ def anyio_backend():
 
 
 def _load_steer_definition():
-    """0272 마이그의 시드 데이터를 실 코드에서 동적 로드 — test_2633의 `_load_seed_definitions`
-    (0245 로드)와 동일 패턴, 신규 헬퍼 발명 금지."""
+    """0274 마이그의 시드 데이터를 실 코드에서 동적 로드 — test_2633의 `_load_seed_definitions`
+    (0245 로드)와 동일 패턴, 신규 헬퍼 발명 금지. (원래 0272로 작성됐으나 develop #3359와
+    번호 충돌해 0274로 재넘버링됨 — PR#3368 코멘트 참조.)"""
     import importlib.util
     import os
 
     spec = importlib.util.spec_from_file_location(
-        "_m0272steer",
+        "_m0274steer",
         os.path.join(
             os.path.dirname(__file__), "..", "alembic", "versions",
-            "0272_event_definitions_preset_steer_instruct.py",
+            "0274_event_definitions_preset_steer_instruct.py",
         ),
     )
     m = importlib.util.module_from_spec(spec)
