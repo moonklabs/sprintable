@@ -308,6 +308,7 @@ export default function ConversationPage() {
             presenceById={presenceById}
             scrollToMessageId={scrollToMessageId}
             initialLastReadAt={meta ? meta.lastReadAt : undefined}
+            participants={meta?.participants ?? []}
           />
         )}
       </div>
