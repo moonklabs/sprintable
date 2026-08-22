@@ -212,8 +212,15 @@ export function buildAttentionQueueFromBe(
       }
       blockedByStory.set(sig.story_id, entry);
     } else if (sig.kind === 'needs_input' || sig.kind === 'gate_pending') {
-      if (!decisionNeededByStory.has(sig.story_id)) {
+      const existing = decisionNeededByStory.get(sig.story_id);
+      if (!existing) {
         decisionNeededByStory.set(sig.story_id, { title: sig.title, enteredAtMs, originKind: sig.kind });
+      } else if (sig.kind === 'gate_pending' && existing.originKind !== 'gate_pending') {
+        // PO 리뷰(PR#3352, 2026-08-22) — title/enteredAtMs는 여전히 first-wins(위 !existing
+        // 분기, 변경 없음)지만 originKind(=버킷)만은 BE 배열 도착 순서라는 우연에 맡기지 않는다.
+        // needs_input이 먼저 와도 gate_pending이 나중에 뜨면 GATE로 승격한다 — 결재 대기(GATE)가
+        // 입력 대기(STEER)보다 개입 의미가 강해, 순서와 무관하게 더 강한 신호가 이겨야 한다.
+        existing.originKind = 'gate_pending';
       }
     } else if (sig.kind === 'verify_fail') {
       items.push({

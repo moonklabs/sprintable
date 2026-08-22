@@ -288,10 +288,22 @@ describe('buildAttentionQueueFromBe (story #2923 AQ1 — bucket 판정)', () => 
     expect(items[0]!.bucket).toBe('STEER');
   });
 
-  it('같은 story에 gate_pending이 먼저 도착하면 needs_input이 뒤이어 와도 GATE 버킷을 유지한다(첫 신호 기준, 기존 dedup 무변경)', () => {
+  it('같은 story에 gate_pending이 먼저 도착하면 needs_input이 뒤이어 와도 GATE 버킷을 유지한다(title/enteredAtMs는 여전히 first-wins, dedup 자체는 무변경)', () => {
     const items = buildAttentionQueueFromBe([
       beItem({ kind: 'gate_pending', story_id: 's1' }),
       beItem({ kind: 'needs_input', story_id: 's1' }),
+    ], t);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.bucket).toBe('GATE');
+  });
+
+  // PO 리뷰(PR#3352, 2026-08-22) — 버킷이 BE 배열 «도착 순서»라는 우연에 결박되면 안 된다.
+  // needs_input이 먼저 와도 gate_pending이 나중에 도착하면 GATE로 승격돼야 한다(결재 대기가
+  // 입력 대기보다 개입 의미가 강하다 — 더 강한 신호가 순서와 무관하게 이겨야 정확한 개입 신호).
+  it('같은 story에 needs_input이 먼저 도착해도 gate_pending이 뒤이어 오면 GATE로 승격된다(순서에 안 결박)', () => {
+    const items = buildAttentionQueueFromBe([
+      beItem({ kind: 'needs_input', story_id: 's1' }),
+      beItem({ kind: 'gate_pending', story_id: 's1' }),
     ], t);
     expect(items).toHaveLength(1);
     expect(items[0]!.bucket).toBe('GATE');
