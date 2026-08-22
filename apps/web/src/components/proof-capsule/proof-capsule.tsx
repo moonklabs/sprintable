@@ -163,7 +163,7 @@ function EvidenceRow({ evidence, sweep }: { evidence: ProofCapsuleEvidence; swee
           aria-hidden="true"
         />
       ) : null}
-      <div className="mb-2 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-faint">
+      <div className="mb-2 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-ink-3">
         {t('evidence.label')}
       </div>
       <div className="flex flex-wrap items-center gap-3.5 text-[13px] leading-[1.45] text-proof-ink-2">
@@ -200,7 +200,7 @@ function GateRow({ gate, human }: { gate: ProofCapsuleGate; human: ProofCapsuleH
   const t = useTranslations('proofCapsule');
   return (
     <div className="mt-3.5 border-t border-proof-line-soft pt-3">
-      <div className="mb-2 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-faint">
+      <div className="mb-2 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-ink-3">
         {t('gate.label')}
       </div>
       <div className="flex flex-wrap items-center gap-3.5 text-[13px] text-proof-ink-2">
@@ -245,7 +245,7 @@ function FullVariant({
     <CutCornerShell state={proofState} cut={24} className={className}>
       <div className="min-w-0 flex-1 px-4.5 py-4">
         <StateHeader state={proofState} label={stateLabel} />
-        <div className="mb-1 mt-3 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-faint">
+        <div className="mb-1 mt-3 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-ink-3">
           {t('claim.label')}
         </div>
         <div className="text-[19px] font-bold leading-[1.25] tracking-[-0.012em] text-proof-ink">{claim}</div>
@@ -385,7 +385,7 @@ function AuditRow({ proofState, claim, now, human, agent, className }: Pick<Proo
       <span className={cn('size-1.5 shrink-0 rounded-full', dotTone[proofState])} aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate font-medium text-proof-ink">{claim}</span>
       {actorName ? <Avatar name={actorName} actorType={agent ? 'agent' : 'human'} size={16} /> : null}
-      <span className="shrink-0 font-mono text-[9.5px] text-proof-faint">{[now, actorName].filter(Boolean).join(' ')}</span>
+      <span className="shrink-0 font-mono text-[9.5px] text-proof-ink-3">{[now, actorName].filter(Boolean).join(' ')}</span>
     </div>
   );
 }

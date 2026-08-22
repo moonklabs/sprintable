@@ -173,6 +173,34 @@ describe('ProofCapsule (안티패턴 자체 체크 — 도크트린 준수 회�
       expect(markup).not.toContain('>GATE<');
     }
   });
+
+  // story P0-02(유나 full 검산, PR#3368 2026-08-22) — full 밀도 eyebrow 라벨(evidence/gate/claim
+  // 3곳)+audit 밀도 mono 타임스탬프가 전부 --proof-panel 배경 위 text-proof-faint였다. 수동
+  // WCAG 계산(python, 이 PR): light 2.72·dark 2.84(둘 다 AA 4.5 미달) → text-proof-ink-3(light
+  // 5.92·dark 5.43, 둘 다 통과). proof-* 페어링은 자동 tint-contrast 가드 대상 밖(NON_STATUS_
+  // FAMILY_NAMES 제외)이라 이 회귀가드가 유일한 고정점.
+  it('full 밀도 eyebrow 라벨(evidence/gate/claim)이 text-proof-faint 대신 text-proof-ink-3를 쓴다(AA 대비)', () => {
+    const markup = renderWithIntl(
+      <ProofCapsule
+        {...BASE}
+        density="full"
+        evidence={{ acMet: 1, acTotal: 1 }}
+        gate={{ risk: '낮음', action: '결재' }}
+        human={{ name: '유나', role: '' }}
+      />,
+    );
+    expect(markup).not.toContain('text-proof-faint');
+    // eyebrow 3곳(evidence.label/gate.label/claim.label) 전부 ink-3 — 최소 3회 등장 확인.
+    expect((markup.match(/text-proof-ink-3/g) ?? []).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('audit 밀도 타임스탬프(now+actorName)도 text-proof-faint 대신 text-proof-ink-3를 쓴다(같은 AA 처방)', () => {
+    const markup = renderWithIntl(
+      <ProofCapsule {...BASE} density="audit" now="3일 전" human={{ name: '유나', role: '' }} />,
+    );
+    expect(markup).not.toContain('text-proof-faint');
+    expect(markup).toContain('text-proof-ink-3');
+  });
 });
 
 describe('ProofCapsule (human optional — Board card 확산, bf9037cb) — 다중 담당자 등 human 필드로 표현 안 되는 실 기능을 위한 완화', () => {
