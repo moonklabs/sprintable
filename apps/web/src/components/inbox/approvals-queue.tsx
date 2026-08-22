@@ -365,7 +365,14 @@ export function ApprovalsQueue() {
           // ⛔정보 축소 고지 — InlineRow는 risk/gate_type 배지·org 컨텍스트를 담을 슬롯이
           // 없다(row 밀도 자체의 기존 한계, Attention Queue 원안 문서에 이미 "위험도 표시는
           // row에서 생략 가능"으로 명시돼 있던 것 그대로 — F3이 새로 만든 제약이 아니다).
-          // claim(제목)+state(pending=결재 대기·held=보류중)+age(duration)만 남는다.
+          // claim(제목)+state(pending=결재 대기·held=보류)+age(duration)만 남는다.
+          //
+          // story #2926(잔여 fast-follow, 카디르 F2 QA LOW①·②) — stateLabel 문구는
+          // deriveGateProofState()의 통일 키(gateStatusPending/Held)로 F1/F2와 맞춘다.
+          // proofState는 의도적으로 amber 고정 유지(F1/F2와 다름) — 이 분기는 !resolved만
+          // 타므로 여기 오는 gate.status는 실질 pending/held뿐이고, held도 "아직 조치 대기"
+          // 의미라 이 큐에서는 amber가 맞다(F1/F2가 held를 종결취급=red로 보는 것과 다른
+          // 문맥 — 색은 갈리지만 문구는 같은 개념이라 통일한다).
           return (
             <button
               key={gate.id}
@@ -376,7 +383,7 @@ export function ApprovalsQueue() {
               <ProofCapsule
                 density="row"
                 proofState={'amber' as ProofState}
-                stateLabel={held ? t('heldBadge') : t('gateDetailStatusPending')}
+                stateLabel={held ? t('gateStatusHeld') : t('gateStatusPending')}
                 claim={gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
                 duration={formatAge(gate.created_at, t)}
               />

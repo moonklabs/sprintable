@@ -11,13 +11,13 @@ import { GateEvidence, gateNeedsAction, gateDecision } from '@/components/cage/g
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
-import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
+import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState } from '@/components/cage/gate-risk';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 import { fetchWithAuth } from '@/lib/db/client';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
-import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
+import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 
 // story #1954(P1a-S4) — Gate 3종(게이트·문서결재·머지게이트) canonical 상세. P1a·P2 공용 유일
 // per-gate 라우트(중복 빌드 봉쇄) — decision(inbox_items)은 별도 표면(오르테가군 PO 판단+
@@ -33,17 +33,6 @@ interface GateDetail extends GateItem {
   org_id: string;
   project_id?: string | null;
 }
-
-// story #2926(P0-F F2) — ProofCapsule stateLabel(resolved)용. approval-request-card.tsx(F1)의
-// RESOLVED_STATUS_LABEL_KEYS와 같은 값 계열을 'cage' 네임스페이스 기존 키로 매핑(queue*Badge
-// 류가 이미 있어 신규 키를 최소화 — voided/held는 그대로, approved/rejected만 F1과 문구를
-// 맞춘다). 매핑 안 된 값은 원문 그대로(지어내지 않음, F1과 동형).
-const GATE_DETAIL_STATUS_LABEL_KEYS: Record<string, string> = {
-  approved: 'queueResolvedApproved',
-  rejected: 'queueResolvedRejected',
-  held: 'heldBadge',
-  voided: 'voidedBadge',
-};
 
 export default function GateDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -206,20 +195,19 @@ export default function GateDetailPage() {
         ) : notFound || !gate ? (
           <p className="text-sm text-muted-foreground">{t('gateDetailNotFound')}</p>
         ) : (
-          // story #2926(P0-F F2) — 셸만 ProofCapsule density="full"로 교체, 내부 로직(4갈래
-          // 상태 분기·서명 플로우·GateEvidence·EntityBacklinksSection) 100% 무변경. GateRow
-          // (full 밀도 내장)는 단일 버튼 추상이라 이 페이지의 다상태 액션 분기를 못 담아 —
-          // gate/human 프롭은 안 주고(GateRow 자체를 비활성) 전부 footer로 이관했다. proofState
-          // 매핑은 approval-request-card.tsx(F1)와 동일 관례(attention-queue PROOF_STATE
-          // 재사용) — pending=amber·approved=green·그 외=red.
+          // story #2926(P0-F F2, 잔여 fast-follow로 갱신) — 셸만 ProofCapsule density="full"로
+          // 교체, 내부 로직(4갈래 상태 분기·서명 플로우·GateEvidence·EntityBacklinksSection)
+          // 100% 무변경. GateRow(full 밀도 내장)는 단일 버튼 추상이라 이 페이지의 다상태 액션
+          // 분기를 못 담아 — gate/human 프롭은 안 주고(GateRow 자체를 비활성) 전부 footer로
+          // 이관했다. proofState/stateLabel은 gate-risk.ts의 deriveGateProofState()로 F1/F3와
+          // 공유(카디르 F2 QA LOW①·② 처방 — 3곳 중복 로직 단일화+문구 통일).
           <ProofCapsule
             density="full"
-            proofState={(gate.status === 'pending' ? 'amber' : gate.status === 'approved' ? 'green' : 'red') as ProofState}
-            stateLabel={
-              gate.status === 'pending'
-                ? t('gateDetailStatusPending')
-                : (GATE_DETAIL_STATUS_LABEL_KEYS[gate.status] ? t(GATE_DETAIL_STATUS_LABEL_KEYS[gate.status]!) : gate.status)
-            }
+            proofState={deriveGateProofState(gate.status).proofState}
+            stateLabel={(() => {
+              const { statusKey } = deriveGateProofState(gate.status);
+              return statusKey ? t(statusKey) : gate.status;
+            })()}
             claim={gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
             className="max-w-none"
             footer={
