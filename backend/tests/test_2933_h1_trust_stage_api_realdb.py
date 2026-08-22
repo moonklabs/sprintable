@@ -256,3 +256,35 @@ async def test_list_stories_generic_filter_branch_also_exposes_trust_stage():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_create_story_response_includes_trust_stage():
+    """story #2933 H4(카디르 QA 실결함, PR#3366 2026-08-22) — create_story 인라인 경로가
+    _attach_trust_stage를 안 태워 신규 story 응답의 trust_stage가 항상 None이었다(default
+    status='backlog'이므로 정직한 값은 'queued'). FE kanban-board.tsx가 이 필드를 그대로
+    컬럼 판별자로 쓰므로(재파생 폴백 없음), 방금 만든 story가 신뢰축 뷰의 어느 컬럼에도
+    안 잡히는 실종 버그로 이어졌다 — 재발 방지 회귀가드.
+    """
+    from app.main import app
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id, caller_id = await _base_org_project_caller(s)
+        await _setup_app(app, Session, caller_id, org_id)
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                "/api/v2/stories",
+                json={"project_id": str(project_id), "org_id": str(org_id), "title": "새 스토리"},
+            )
+            assert resp.status_code == 201, resp.text
+            body = resp.json()
+            data = body.get("data", body)
+            assert data["status"] == "backlog"
+            assert data["trust_stage"] == "queued", data
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

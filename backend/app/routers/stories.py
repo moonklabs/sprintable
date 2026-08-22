@@ -844,6 +844,13 @@ async def create_story(
     if story.epic_id is not None:
         story.has_hypothesis_or_goal = True
     await _attach_org_project_slugs(session, org_id, [story])
+    # story #2933 H4(카디르 QA 실결함, PR#3366 2026-08-22 처방) — 이 인라인 생성 경로에
+    # _attach_trust_stage가 빠져 있어 새로 만든 story의 응답이 StoryResponse 기본값
+    # trust_stage=None을 그대로 직렬화했다. FE kanban-board.tsx의 storyTrustColumn은
+    # status!=='done'이면 story.trust_stage를 그대로 컬럼 판별자로 쓰므로(FE 재파생
+    # 폴백 없음, H1/H3 처방과 정합), 이 트랜지언트 속성이 없는 새 story는 신뢰축 뷰의
+    # 어느 컬럼에도 안 잡혀(실종) — get_story/list_stories엔 이미 있던 호출을 여기도 붙인다.
+    await _attach_trust_stage(session, org_id, [story])
     return StoryResponse.model_validate(story)
 
 
