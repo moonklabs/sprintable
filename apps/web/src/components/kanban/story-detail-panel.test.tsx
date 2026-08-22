@@ -266,6 +266,54 @@ describe('StoryDetailPanel — trustChip도 story.trust_stage로 수렴(story #2
     expect(container.textContent).not.toContain('입력 필요');
     expect(container.textContent).not.toContain('병합 대기');
   });
+
+  // ⚠️QA changes(PR#3364, codex 교차모델, 2026-08-22) — 구 deriveInFlightTrustChip이 갖고
+  // 있던 "status==='done'이면 무조건 null" 하드가드가 trustChip을 story.trust_stage 하나로
+  // 수렴시키는 과정에서 소실됐다. handleChangeStatus의 낙관적 done 전이는 localStatus를 즉시
+  // 'done'으로 바꾸지만(L915), story.trust_stage는 PATCH /status 응답이 돌아와 onStoryUpdate가
+  // 호출될 때까지(그마저도 spread로 옛 값을 보존 — PO 조건②) 그대로 남는다 — 그 창에서
+  // "done인데 in-flight 칩 표시"라는 부당 상태가 뜬다(codex 실물 재현). 이 테스트는 PATCH
+  // 응답을 deferred로 붙잡아 그 창을 직접 관측한다.
+  it('낙관적 done 전이 직후(trust_stage는 아직 옛값) — trustChip이 즉시 사라진다(localStatus 우선)', async () => {
+    let resolveStatusPatch: ((v: unknown) => void) | undefined;
+    const statusPatchPromise = new Promise((resolve) => { resolveStatusPatch = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && /\/api\/stories\/s1\/status(\?|$)/.test(url)) {
+        return statusPatchPromise as Promise<{ ok: boolean; json: () => Promise<unknown> }>;
+      }
+      return { ok: false, json: async () => null };
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel
+          story={makeStory({ status: 'in-review', assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID], trust_stage: 'needs_input' })}
+          tasks={[]} onClose={() => {}} memberMap={memberMap}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('입력 필요'); // 전이 前 — 기존 칩 정상 표시.
+
+    const statusTrigger = document.body.querySelector('button[aria-label="Status"], button[aria-label="상태"]') as HTMLButtonElement | null;
+    expect(statusTrigger).toBeTruthy();
+    await act(async () => { statusTrigger!.click(); });
+    const doneItem = [...document.body.querySelectorAll('[role="menuitem"], button')]
+      .find((el) => el.textContent?.trim() === '완료') as HTMLButtonElement | undefined;
+    expect(doneItem).toBeTruthy();
+    await act(async () => { doneItem!.click(); }); // handleChangeStatus('done') → localStatus 즉시 'done', PATCH는 deferred.
+
+    // 낙관 전이 직후 — story.trust_stage(=pipelineStage)는 여전히 'needs_input'이지만
+    // localStatus는 이미 'done'. 칩이 남아있으면 회귀.
+    expect(container.textContent).not.toContain('입력 필요');
+    expect(container.textContent).not.toContain('병합 대기');
+
+    await act(async () => {
+      resolveStatusPatch!({ ok: true, json: async () => ({ data: { violation: null } }) });
+      await Promise.resolve(); await Promise.resolve();
+    });
+    expect(container.textContent).not.toContain('입력 필요'); // PATCH 완료 後에도 계속 미표시.
+  });
 });
 
 // story #2933 H2(P0-H) — Workcell 스테퍼가 `story.trust_stage_changed` SSE를 라이브 갱신

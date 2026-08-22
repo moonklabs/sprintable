@@ -832,9 +832,20 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   // pipelineStage의 needs_input/merge_ready가 정확히 같은 개념(BE 판정 SoT, H1)이라 그대로
   // 재사용 — FE 재파생의 두 번째 온상을 닫는다(H1이 스테퍼 쪽을, 이번엔 이 배지 쪽을).
   // done엔 pipelineStage 자체가 이미 null(derive_trust_stage §7 확定④)이라 구 함수가 하던
-  // "담당·중복 금지" 강제를 별도 코드 없이 그대로 계승한다.
-  const trustChip: 'needs_input' | 'merge_ready' | null =
-    pipelineStage === 'needs_input' ? 'needs_input' : pipelineStage === 'merge_ready' ? 'merge_ready' : null;
+  // "담당·중복 금지" 강제를 별도 코드 없이 그대로 계승한다 — 단, 이건 story.trust_stage가
+  // 실제로 서버에서 새로 온 경우에만 참이다.
+  // ⚠️QA changes(PR#3364, codex 교차모델, 2026-08-22) — handleChangeStatus의 낙관적 갱신은
+  // `onStoryUpdate?.({ ...story, status: newStatus })`로 status만 덮어쓰고 trust_stage는
+  // 스프레드로 «이전 값 그대로» 남긴다(PO 조건②·바로 위 주석). localStatus는 이 낙관 갱신으로
+  // 즉시 'done'이 되지만, pipelineStage(=story.trust_stage)는 실 BE 재조회(SSE 트리거
+  // 재fetch)가 도착하기 전까지 옛 값(예: 'needs_input')에 머무는 창이 생긴다 — 그 창에서
+  // "done인데 in-flight 칩"이 뜨는 부당 표시(구 deriveInFlightTrustChip이 갖고 있던
+  // status==='done' 하드가드가 수렴 과정에서 소실됐던 회귀). localStatus==='done'이면
+  // pipelineStage 값과 무관하게 명시적으로 차단 — 낙관 갱신 창의 신뢰 축을 status(즉시 반영)
+  // 로 고정한다(pipelineStage는 곧 뒤따라 null로 수렴하지만 그 사이 창을 UI에 노출 안 함).
+  const trustChip: 'needs_input' | 'merge_ready' | null = localStatus === 'done'
+    ? null
+    : pipelineStage === 'needs_input' ? 'needs_input' : pipelineStage === 'merge_ready' ? 'merge_ready' : null;
   const trustChipLabel = trustChip === 'needs_input' ? t('trustChipNeedsInput') : trustChip === 'merge_ready' ? t('trustChipMergeReady') : null;
 
   const assigneeIds = story.assignee_ids?.length ? story.assignee_ids : (story.assignee_id ? [story.assignee_id] : []);
