@@ -167,6 +167,36 @@ describe('ProofCapsule (human optional — Board card 확산, bf9037cb) — 다�
   });
 });
 
+// story #2923(P0-E AQ4, 카디르 QA 이전 그라운딩 발견) — audit density가 human?.name을 mono
+// 텍스트로만 붙일 뿐 아바타 자체를 안 그려(agent prop도 dispatch에서 안 넘어옴) 시안의
+// "아바타 shape로 human/agent 구분"이 안 걸렸다. 공유 Avatar(shared/avatar.tsx) 재사용 —
+// agent=rounded-full·human=rounded-md+border-proof-line(S4 avatar-unification 정본 그대로).
+describe('ProofCapsule (audit density — actor avatar shape, story #2923 AQ4)', () => {
+  it('renders a rounded-md avatar (human shape) for a human actor', () => {
+    const markup = renderWithIntl(
+      <ProofCapsule {...BASE} density="audit" human={{ name: '윤재', role: 'owner' }} />,
+    );
+    expect(markup).toContain('rounded-md');
+    expect(markup).toContain('border-proof-line');
+    expect(markup).toContain('윤재');
+  });
+
+  it('renders a rounded-full avatar (agent shape) for an agent actor', () => {
+    const { human: _human, ...withoutHuman } = BASE;
+    const markup = renderWithIntl(
+      <ProofCapsule {...withoutHuman} density="audit" agent={{ name: '미르코', initial: '미' }} />,
+    );
+    expect(markup).toContain('rounded-full');
+    expect(markup).toContain('미르코');
+  });
+
+  it('omits the avatar entirely when neither human nor agent is provided (no crash, no undefined leak)', () => {
+    const { human: _human, ...withoutHuman } = BASE;
+    const markup = renderWithIntl(<ProofCapsule {...withoutHuman} density="audit" />);
+    expect(markup).not.toContain('undefined');
+  });
+});
+
 describe('ProofCapsule (footer slot — card·full 밀도, Board card 확산+story #2926 P0-F F2 gates/[id] 실기능 이관)', () => {
   it('renders arbitrary footer content below the claim/evidence in card density', () => {
     const markup = renderWithIntl(

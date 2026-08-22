@@ -316,12 +316,27 @@ export function auditContextTooltip(item: ActivityLogItem): string | undefined {
   return lines.join('\n');
 }
 
+// story #2923(P0-E AQ4, 그라운딩 발견) — actor_type 무관하게 항상 human prop으로만 넘겨(agent
+// prop 미사용) 시안의 "아바타 shape로 human/agent 구분"이 이 표면에서 안 걸렸다. AuditRow가
+// agent prop을 이제 실제로 그려(proof-capsule.tsx 처방) — actor_type==='agent'만 agent로,
+// 그 외(human·null=미상)는 기존처럼 human으로(보수적 기본값, storage-uploader-avatar.tsx
+// 선례와 동형 — 지어내지 않음). auditClaim/auditContextTooltip과 동형 패턴(순수함수 export)으로
+// 렌더 없이 유닛테스트 가능하게 분리.
+export function auditActorProps(item: ActivityLogItem): {
+  human?: { name: string; role: string };
+  agent?: { name: string; initial: string };
+} {
+  if (!item.actor_name) return {};
+  if (item.actor_type === 'agent') return { agent: { name: item.actor_name, initial: item.actor_name.slice(0, 1) } };
+  return { human: { name: item.actor_name, role: item.actor_type ?? 'human' } };
+}
+
 function ActivityRow({ item }: { item: ActivityLogItem }) {
   const locale = typeof document !== 'undefined' ? document.documentElement.lang || 'en' : 'en';
   const time = new Date(item.created_at).toLocaleString(locale, {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
   });
-
+  const { human, agent } = auditActorProps(item);
   return (
     <div title={auditContextTooltip(item)}>
       <ProofCapsule
@@ -330,7 +345,8 @@ function ActivityRow({ item }: { item: ActivityLogItem }) {
         stateLabel={item.action}
         claim={auditClaim(item)}
         now={time}
-        human={item.actor_name ? { name: item.actor_name, role: item.actor_type ?? 'human' } : undefined}
+        human={human}
+        agent={agent}
       />
     </div>
   );
