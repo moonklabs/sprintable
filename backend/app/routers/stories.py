@@ -2306,6 +2306,13 @@ async def update_story(
         (_attach_has_evidence, (db, [story])),
         (_attach_has_hypothesis_or_goal, (db, [story])),
         (_attach_org_project_slugs, (db, repo.org_id, [story])),
+        # story #2933 H4 qa:changes 2R(카디르, 2026-08-22) — bulk_update_stories·update_
+        # story_status는 이미 배선됐으나 이 일반 PATCH(assignee/title 등)만 빠져 있어
+        # 항상 trust_stage:null을 반환하던 API 계약 비일관. FE는 handleTrustDragEnd 경로
+        # 밖(assignee 변경 등)이라 spread-preserve로 버텨 UI 회귀는 없었지만, 이 응답을
+        # 직접 소비하는 다른(미래) 호출자는 값을 잃는다 — {list·create·get·bulk·status·
+        # update} 전 StoryResponse 엔드포인트를 이걸로 완결한다.
+        (_attach_trust_stage, (db, repo.org_id, [story])),
     ):
         try:
             await _attach_fn(*_args)
