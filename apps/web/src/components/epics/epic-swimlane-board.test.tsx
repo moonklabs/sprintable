@@ -93,12 +93,22 @@ function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singl
   }));
 }
 
+// ⚠️QA changes(PR#3377, 카디르, 2026-08-22) — 로컬 481 green이었으나 CI에서만 「같은 레인
+// 내 컬럼 드래그→bulk PATCH」 테스트가 bulkBody:null로 실패. 원인 후보로 지목된 "고정
+// tick 수 대기"(fetchAll의 Promise.all(3-fetch)+순차 res.json()×3+setState 체인 깊이가
+// 환경(Node/V8 버전 등)에 따라 마이크로태스크 홉 수가 달라질 수 있음) 자체를 없앤다 —
+// `Promise.resolve()`를 N번 세는 대신 실 매크로태스크(setTimeout 0)로 미결 마이크로태스크
+// 큐 전체를 비운다(홉 수와 무관하게 항상 안전).
+async function flush() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 async function mount(stub: FetchStub) {
   stubFetch(stub);
   await act(async () => {
     root.render(withIntl(<EpicSwimlaneBoard projectId="p1" />));
   });
-  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  await act(async () => { await flush(); });
 }
 
 describe('EpicSwimlaneBoard — 행 구성(story #2931)', () => {
@@ -172,7 +182,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     expect(handler, 'handleDragEnd를 캡처 못 함').toBeDefined();
     await act(async () => {
       handler!({ active: { id: 's1' }, over: { id: 'e2::backlog' } });
-      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      await flush();
     });
 
     expect(patchedId).toBe('s1');
@@ -192,7 +202,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     const handler = capturedDragEndHandlers.at(-1);
     await act(async () => {
       handler!({ active: { id: 's1' }, over: { id: 'e1::in-progress' } });
-      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      await flush();
     });
 
     expect(bulkBody).toEqual({ items: [{ id: 's1', status: 'in-progress' }] });
@@ -213,7 +223,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     const handler = capturedDragEndHandlers.at(-1);
     await act(async () => {
       handler!({ active: { id: 's1' }, over: { id: 'e1::needs_input' } });
-      await Promise.resolve(); await Promise.resolve();
+      await flush();
     });
     expect(anyPatchCalled).toBe(false);
   });
