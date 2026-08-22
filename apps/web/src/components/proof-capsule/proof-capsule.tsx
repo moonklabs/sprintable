@@ -62,8 +62,11 @@ export interface ProofCapsuleProps {
    * 타입·렌더만 준비(호출부 없음 무방 — density="full"와 동일 선례). */
   trustSeal?: TrustSealClaimedProps | TrustSealVerifiedProps;
   density: ProofCapsuleDensity;
-  /** card 밀도 전용 — claim/evidence 아래 호출부 컨텐츠(예: Board card의 담당자 스택·배지·
-   * 컨텍스트 메뉴 앵커) 삽입 슬롯. Proof Capsule 자체 필드로 표현 안 되는 실 기능을 안 잃게. */
+  /** card·full 밀도 — claim/evidence 아래 호출부 컨텐츠(예: Board card의 담당자 스택·배지,
+   * /gates/[id] 상세의 org/project 컨텍스트·상태별 액션 분기·EntityBacklinksSection) 삽입
+   * 슬롯. Proof Capsule 자체 필드로 표현 안 되는 실 기능을 안 잃게(story #2926 P0-F F2 —
+   * full 밀도의 GateRow는 단일 버튼 추상이라 gates/[id]의 다상태 액션 분기를 못 담아
+   * footer로 이관). */
   footer?: ReactNode;
   /** story #2926(P0-F F1) — card 밀도 전용. claim 자체가 상세/미리보기 진입점인 호출부(예:
    * 챗 ApprovalRequestCard의 doc/story 제목 클릭→EntityPreviewModal)를 위한 훅. 있으면 claim이
@@ -107,7 +110,7 @@ export function ProofCapsule({
   return (
     <FullVariant
       proofState={proofState} stateLabel={stateLabel} claim={claim} human={human} agent={agent}
-      now={now} evidence={evidence} gate={gate} trustSeal={trustSeal} className={className}
+      now={now} evidence={evidence} gate={gate} trustSeal={trustSeal} className={className} footer={footer}
     />
   );
 }
@@ -228,7 +231,7 @@ function useEvidenceSweep(evidence: ProofCapsuleEvidence | undefined) {
 }
 
 function FullVariant({
-  proofState, stateLabel, claim, human, agent, now, evidence, gate, trustSeal, className,
+  proofState, stateLabel, claim, human, agent, now, evidence, gate, trustSeal, className, footer,
 }: Omit<ProofCapsuleProps, 'density'>) {
   const t = useTranslations('proofCapsule');
   const sweep = useEvidenceSweep(evidence);
@@ -271,6 +274,7 @@ function FullVariant({
         ) : null}
         {/* Human gate는 도크트린⑤(인간=책임 주체)상 책임자 없이 못 열림 — human 없으면 생략. */}
         {gate && human ? <GateRow gate={gate} human={human} /> : null}
+        {footer}
       </div>
     </CutCornerShell>
   );

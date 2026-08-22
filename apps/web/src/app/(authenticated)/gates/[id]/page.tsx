@@ -17,6 +17,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 import { fetchWithAuth } from '@/lib/db/client';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
+import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
 
 // story #1954(P1a-S4) — Gate 3종(게이트·문서결재·머지게이트) canonical 상세. P1a·P2 공용 유일
 // per-gate 라우트(중복 빌드 봉쇄) — decision(inbox_items)은 별도 표면(오르테가군 PO 판단+
@@ -32,6 +33,17 @@ interface GateDetail extends GateItem {
   org_id: string;
   project_id?: string | null;
 }
+
+// story #2926(P0-F F2) — ProofCapsule stateLabel(resolved)용. approval-request-card.tsx(F1)의
+// RESOLVED_STATUS_LABEL_KEYS와 같은 값 계열을 'cage' 네임스페이스 기존 키로 매핑(queue*Badge
+// 류가 이미 있어 신규 키를 최소화 — voided/held는 그대로, approved/rejected만 F1과 문구를
+// 맞춘다). 매핑 안 된 값은 원문 그대로(지어내지 않음, F1과 동형).
+const GATE_DETAIL_STATUS_LABEL_KEYS: Record<string, string> = {
+  approved: 'queueResolvedApproved',
+  rejected: 'queueResolvedRejected',
+  held: 'heldBadge',
+  voided: 'voidedBadge',
+};
 
 export default function GateDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -194,123 +206,137 @@ export default function GateDetailPage() {
         ) : notFound || !gate ? (
           <p className="text-sm text-muted-foreground">{t('gateDetailNotFound')}</p>
         ) : (
-          <>
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Badge variant="chip">{gate.gate_type}</Badge>
-                {deriveRiskLevel(gate) === 'high' ? (
-                  <Badge variant="warning">{t('riskHigh')}</Badge>
-                ) : deriveRiskLevel(gate) === 'unknown' ? (
-                  <Badge variant="outline" className="text-muted-foreground">{t('riskUnknown')}</Badge>
-                ) : null}
-              </div>
-              <h1 className="text-base font-semibold text-foreground">
-                {gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
-              </h1>
-              <p className="text-xs text-muted-foreground">
-                {t('gateDetailOrgContext', {
-                  org: orgMemberships.find((o) => o.orgId === gate.org_id)?.orgName ?? gate.org_id.slice(0, 8),
-                })}
-                {gate.project_id
-                  ? ` · ${projectMemberships.find((p) => p.projectId === gate.project_id)?.projectName ?? gate.project_id.slice(0, 8)}`
-                  : ''}
-              </p>
-            </div>
-
-            {!needsAction ? (
-              <div className="space-y-3">
-                <GateEvidence gate={gate} />
-                {/* story #2043 AC1: status·requires_human·evidence_status 조합별 단일 문장 —
-                    조합표(코드 근거):
-                    - status≠pending → 이미 해소됨(무엇으로 닫혔는지)
-                    - status=pending, decision=block → 자동 차단·읽기전용
-                    - status=pending, decision=auto_merge(requires_human 무관, 실제 BE 판정값) → 자동 통과·액션 불필요
-                    - status=pending, 그 외 전부(decision=null 또는 requires_human=false라 액션 미노출)
-                      → "판정 미거침" — gateDecision()이 이미 requires_human을 반영해 null을
-                      리턴하므로 여기서 "Auto-passed"를 함부로 말하지 않는다(진짜 판정 없이
-                      Auto로 단정하던 게 자기모순의 절반이었다). */}
-                <p className="text-[11px] text-muted-foreground">
-                  {gate.status !== 'pending'
-                    ? (gate.resolver_id
-                        ? t('gateDetailResolvedByStatus', { name: memberNames[gate.resolver_id] ?? gate.resolver_id.slice(0, 8), status: gate.status })
-                        : t('gateDetailResolvedStatus', { status: gate.status }))
-                    : gateDecision(gate) === 'block' ? t('gateReadonlyBlock')
-                    : gateDecision(gate) === 'auto_merge' ? t('gateReadonlyAuto')
-                    : t('gateReadonlyNoVerdict')}
-                </p>
-                {/* story #2631 — 오클릭 정정(방금 본인이 해소한 게이트, 5분 창). */}
-                {isUndoEligible(gate, currentTeamMemberId) ? (
-                  <GateUndoButton gateId={gate.id} onUndone={() => void fetchGate()} />
-                ) : null}
-              </div>
-            ) : !canAct ? (
-              // story #2091(P0) — needsAction=true(게이트 자체는 사람 판단이 필요)이지만
-              // gate.can_approve=false(이 caller는 승인 권한 없음, BE per-caller 판정). 액션
-              // 버튼을 렌더하지 않고 왜 못 누르는지를 정직하게 알린다 — "이미 처리됨"과는
-              // 다른 사유이므로 별개 문구(gateReadonlyNotAuthorized)를 쓴다.
-              <div className="space-y-3">
-                <GateEvidence gate={gate} />
-                <p className="text-[11px] text-muted-foreground">{t('gateReadonlyNotAuthorized')}</p>
-              </div>
-            ) : usesSignatureFlow(deriveRiskLevel(gate)) ? (
-              <GateSignatureApproval
-                gate={gate}
-                resolving={resolving}
-                error={transitionError}
-                onApprove={(reason) => void transition('approved', reason, true)}
-                onReject={(reason) => void transition('rejected', reason)}
-                onDiscuss={(reason) => void discuss(reason)}
-              />
-            ) : (
-              <div className="space-y-3">
-                <GateEvidence gate={gate} />
-                {transitionError ? (
-                  <p
-                    className="rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-foreground"
-                    role="alert"
-                    aria-live="assertive"
-                    aria-atomic="true"
-                  >
-                    {t('gateTransitionError', { reason: transitionError })}
-                  </p>
-                ) : null}
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    className="min-h-12 flex-1 gap-1.5"
-                    disabled={resolving}
-                    onClick={() => void transition('rejected')}
-                  >
-                    <XCircle className="size-4" />
-                    {t('gateReject')}
-                  </Button>
-                  <Button
-                    className="min-h-12 flex-1 gap-1.5"
-                    disabled={resolving}
-                    onClick={() => void transition('approved')}
-                  >
-                    <CheckCircle className="size-4" />
-                    {resolving ? '...' : t('gateApprove')}
-                  </Button>
+          // story #2926(P0-F F2) — 셸만 ProofCapsule density="full"로 교체, 내부 로직(4갈래
+          // 상태 분기·서명 플로우·GateEvidence·EntityBacklinksSection) 100% 무변경. GateRow
+          // (full 밀도 내장)는 단일 버튼 추상이라 이 페이지의 다상태 액션 분기를 못 담아 —
+          // gate/human 프롭은 안 주고(GateRow 자체를 비활성) 전부 footer로 이관했다. proofState
+          // 매핑은 approval-request-card.tsx(F1)와 동일 관례(attention-queue PROOF_STATE
+          // 재사용) — pending=amber·approved=green·그 외=red.
+          <ProofCapsule
+            density="full"
+            proofState={(gate.status === 'pending' ? 'amber' : gate.status === 'approved' ? 'green' : 'red') as ProofState}
+            stateLabel={
+              gate.status === 'pending'
+                ? t('gateDetailStatusPending')
+                : (GATE_DETAIL_STATUS_LABEL_KEYS[gate.status] ? t(GATE_DETAIL_STATUS_LABEL_KEYS[gate.status]!) : gate.status)
+            }
+            claim={gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
+            className="max-w-none"
+            footer={
+              <div className="mt-3.5 space-y-3 border-t border-proof-line-soft pt-3">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Badge variant="chip">{gate.gate_type}</Badge>
+                  {deriveRiskLevel(gate) === 'high' ? (
+                    <Badge variant="warning">{t('riskHigh')}</Badge>
+                  ) : deriveRiskLevel(gate) === 'unknown' ? (
+                    <Badge variant="outline" className="text-muted-foreground">{t('riskUnknown')}</Badge>
+                  ) : null}
                 </div>
-                {/* story #2631 — 「보류(논의 필요)」. 저위험 경로엔 사유 입력창이 없어 다이얼로그로. */}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="w-full text-muted-foreground"
-                  disabled={resolving}
-                  onClick={() => setDiscussDialogOpen(true)}
-                >
-                  {t('gateDiscussSubmit')}
-                </Button>
-              </div>
-            )}
+                <p className="text-xs text-muted-foreground">
+                  {t('gateDetailOrgContext', {
+                    org: orgMemberships.find((o) => o.orgId === gate.org_id)?.orgName ?? gate.org_id.slice(0, 8),
+                  })}
+                  {gate.project_id
+                    ? ` · ${projectMemberships.find((p) => p.projectId === gate.project_id)?.projectName ?? gate.project_id.slice(0, 8)}`
+                    : ''}
+                </p>
 
-            {/* story #2902(후보 B, S2h①③ list_entity_backlinks 확장 소비처) — 「이 게이트를
-                언급한 대화」 역참조. 기성 EntityBacklinksSection(3곳 소비 중) 그대로 재사용 —
-                신규 뷰어 0. gate는 TARGET_ONLY라 액션 없이 조회만(§8 계약과 정합). */}
-            <EntityBacklinksSection entityType="gate" entityId={gate.id} />
-          </>
+                {!needsAction ? (
+                  <div className="space-y-3">
+                    <GateEvidence gate={gate} />
+                    {/* story #2043 AC1: status·requires_human·evidence_status 조합별 단일 문장 —
+                        조합표(코드 근거):
+                        - status≠pending → 이미 해소됨(무엇으로 닫혔는지)
+                        - status=pending, decision=block → 자동 차단·읽기전용
+                        - status=pending, decision=auto_merge(requires_human 무관, 실제 BE 판정값) → 자동 통과·액션 불필요
+                        - status=pending, 그 외 전부(decision=null 또는 requires_human=false라 액션 미노출)
+                          → "판정 미거침" — gateDecision()이 이미 requires_human을 반영해 null을
+                          리턴하므로 여기서 "Auto-passed"를 함부로 말하지 않는다(진짜 판정 없이
+                          Auto로 단정하던 게 자기모순의 절반이었다). */}
+                    <p className="text-[11px] text-muted-foreground">
+                      {gate.status !== 'pending'
+                        ? (gate.resolver_id
+                            ? t('gateDetailResolvedByStatus', { name: memberNames[gate.resolver_id] ?? gate.resolver_id.slice(0, 8), status: gate.status })
+                            : t('gateDetailResolvedStatus', { status: gate.status }))
+                        : gateDecision(gate) === 'block' ? t('gateReadonlyBlock')
+                        : gateDecision(gate) === 'auto_merge' ? t('gateReadonlyAuto')
+                        : t('gateReadonlyNoVerdict')}
+                    </p>
+                    {/* story #2631 — 오클릭 정정(방금 본인이 해소한 게이트, 5분 창). */}
+                    {isUndoEligible(gate, currentTeamMemberId) ? (
+                      <GateUndoButton gateId={gate.id} onUndone={() => void fetchGate()} />
+                    ) : null}
+                  </div>
+                ) : !canAct ? (
+                  // story #2091(P0) — needsAction=true(게이트 자체는 사람 판단이 필요)이지만
+                  // gate.can_approve=false(이 caller는 승인 권한 없음, BE per-caller 판정). 액션
+                  // 버튼을 렌더하지 않고 왜 못 누르는지를 정직하게 알린다 — "이미 처리됨"과는
+                  // 다른 사유이므로 별개 문구(gateReadonlyNotAuthorized)를 쓴다.
+                  <div className="space-y-3">
+                    <GateEvidence gate={gate} />
+                    <p className="text-[11px] text-muted-foreground">{t('gateReadonlyNotAuthorized')}</p>
+                  </div>
+                ) : usesSignatureFlow(deriveRiskLevel(gate)) ? (
+                  <GateSignatureApproval
+                    gate={gate}
+                    resolving={resolving}
+                    error={transitionError}
+                    onApprove={(reason) => void transition('approved', reason, true)}
+                    onReject={(reason) => void transition('rejected', reason)}
+                    onDiscuss={(reason) => void discuss(reason)}
+                  />
+                ) : (
+                  <div className="space-y-3">
+                    <GateEvidence gate={gate} />
+                    {transitionError ? (
+                      <p
+                        className="rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-foreground"
+                        role="alert"
+                        aria-live="assertive"
+                        aria-atomic="true"
+                      >
+                        {t('gateTransitionError', { reason: transitionError })}
+                      </p>
+                    ) : null}
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        className="min-h-12 flex-1 gap-1.5"
+                        disabled={resolving}
+                        onClick={() => void transition('rejected')}
+                      >
+                        <XCircle className="size-4" />
+                        {t('gateReject')}
+                      </Button>
+                      <Button
+                        className="min-h-12 flex-1 gap-1.5"
+                        disabled={resolving}
+                        onClick={() => void transition('approved')}
+                      >
+                        <CheckCircle className="size-4" />
+                        {resolving ? '...' : t('gateApprove')}
+                      </Button>
+                    </div>
+                    {/* story #2631 — 「보류(논의 필요)」. 저위험 경로엔 사유 입력창이 없어 다이얼로그로. */}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="w-full text-muted-foreground"
+                      disabled={resolving}
+                      onClick={() => setDiscussDialogOpen(true)}
+                    >
+                      {t('gateDiscussSubmit')}
+                    </Button>
+                  </div>
+                )}
+
+                {/* story #2902(후보 B, S2h①③ list_entity_backlinks 확장 소비처) — 「이 게이트를
+                    언급한 대화」 역참조. 기성 EntityBacklinksSection(3곳 소비 중) 그대로 재사용 —
+                    신규 뷰어 0. gate는 TARGET_ONLY라 액션 없이 조회만(§8 계약과 정합). */}
+                <EntityBacklinksSection entityType="gate" entityId={gate.id} />
+              </div>
+            }
+          />
         )}
       </div>
       {gate ? (
