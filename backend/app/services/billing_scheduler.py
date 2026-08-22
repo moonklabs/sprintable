@@ -42,7 +42,7 @@ from app.services.billing_charge_amount import ChargeAmountError, compute_charge
 from app.services.billing_period import compute_period_end
 from app.services.email import send_email
 from app.services.org_subscription_checkout import STALE_CLAIM_WINDOW
-from app.services.payment.toss_adapter import TossAdapter
+from app.services.payment.toss_adapter import TossAdapter, TossApiError
 from app.services.platform_settings import get_platform_settings
 
 logger = logging.getLogger(__name__)
@@ -354,10 +354,28 @@ async def sweep_stale_pending_orders(session: AsyncSession, *, now: datetime | N
         )
     ).scalars().all()
 
-    confirmed = failed = skipped = 0
+    confirmed = failed = skipped = not_found = 0
     for order in stale_orders:
         try:
             lookup = await TossAdapter().get_payment_by_order_id(order_id=order.order_id)
+        except TossApiError as exc:
+            if exc.code == "NOT_FOUND_PAYMENT":
+                # story #2913(2896 첫 실행 실증) — Toss가 이 주문을 애초에 모른다는
+                # *확정* 신호(위젯 진입 前 이탈 등)라, 아래 일반 except의 "조회 자체
+                # 실패(네트워크 등) = 혹시 성공했을 수도 있다"는 전제와 다르다. pending은
+                # 그대로 둔다(#2884 안전측 설계 그대로 — 삭제·failed 전환 없음) — 이
+                # 주문은 cutoff를 넘은 이상 매일 재스윕되고 매번 같은 결과를 받는데, 그걸
+                # logger.exception(풀 traceback)으로 매번 다시 찍으면 운영 로그가 "확정된
+                # 무해 사실"로 영구 오염된다. 별도 카운트+INFO 한 줄로 조용히 넘긴다.
+                logger.info(
+                    "stale pending order_id=%s — Toss NOT_FOUND_PAYMENT(확정 미발생, 위젯 진입 前 이탈 등) — leaving pending",
+                    order.order_id,
+                )
+                not_found += 1
+                continue
+            logger.exception("stale pending reconciliation lookup failed for order_id=%s — leaving pending", order.order_id)
+            skipped += 1
+            continue
         except Exception:
             # PO fix-forward(#2884 리뷰) — 조회 자체가 실패(네트워크 일시 장애 등)한 것과
             # "Toss가 이 주문을 모른다/실패로 안다"는 다른 신호다. 전자를 failed로 찍으면
@@ -382,7 +400,7 @@ async def sweep_stale_pending_orders(session: AsyncSession, *, now: datetime | N
 
     return {
         "stale_pending_seen": len(stale_orders), "confirmed": confirmed,
-        "failed": failed, "skipped_lookup_error": skipped,
+        "failed": failed, "skipped_lookup_error": skipped, "not_found_confirmed_absent": not_found,
     }
 
 

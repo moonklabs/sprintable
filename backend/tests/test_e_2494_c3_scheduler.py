@@ -368,7 +368,10 @@ async def test_sweep_stale_pending_confirms_when_toss_lookup_done(monkeypatch):
 
     result = await sched.sweep_stale_pending_orders(session, now=now)
 
-    assert result == {"stale_pending_seen": 1, "confirmed": 1, "failed": 0, "skipped_lookup_error": 0}
+    assert result == {
+        "stale_pending_seen": 1, "confirmed": 1, "failed": 0,
+        "skipped_lookup_error": 0, "not_found_confirmed_absent": 0,
+    }
     confirm_mock.assert_awaited_once_with(
         session, org_id=stale_order.org_id, order_id=stale_order.order_id,
         amount_minor=stale_order.amount_minor, currency=stale_order.currency,
@@ -400,7 +403,10 @@ async def test_sweep_stale_pending_marks_failed_when_toss_lookup_not_done(monkey
 
     result = await sched.sweep_stale_pending_orders(session, now=now)
 
-    assert result == {"stale_pending_seen": 1, "confirmed": 0, "failed": 1, "skipped_lookup_error": 0}
+    assert result == {
+        "stale_pending_seen": 1, "confirmed": 0, "failed": 1,
+        "skipped_lookup_error": 0, "not_found_confirmed_absent": 0,
+    }
     confirm_mock.assert_not_awaited()
     fail_mock.assert_awaited_once()
 
@@ -431,9 +437,57 @@ async def test_sweep_stale_pending_leaves_pending_on_transient_lookup_error(monk
 
     result = await sched.sweep_stale_pending_orders(session, now=now)
 
-    assert result == {"stale_pending_seen": 1, "confirmed": 0, "failed": 0, "skipped_lookup_error": 1}
+    assert result == {
+        "stale_pending_seen": 1, "confirmed": 0, "failed": 0,
+        "skipped_lookup_error": 1, "not_found_confirmed_absent": 0,
+    }
     fail_mock.assert_not_awaited()
     confirm_mock.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_sweep_stale_pending_not_found_payment_leaves_pending_without_exception_log(monkeypatch, caplog):
+    """story #2913(2896 첫 실행 실증) — Toss NOT_FOUND_PAYMENT는 "혹시 성공했을 수도"인
+    조회실패(위 테스트)와 달리 확정 미발생 신호. failed로도 skipped_lookup_error로도 안
+    찍히고 별도 카운트(not_found_confirmed_absent)로만 집계, order는 안 건드림(pending
+    유지) + logger.exception(풀 traceback)이 아니라 INFO 한 줄이어야 매일 재스윕에도
+    로그가 오염 안 됨."""
+    import logging
+
+    import app.services.billing_scheduler as sched
+    from app.services.payment.toss_adapter import TossApiError
+
+    now = datetime(2026, 8, 15, tzinfo=timezone.utc)
+    stale_order = _order(status="pending", created_days_ago=1, updated_days_ago=1, now=now)
+
+    session = AsyncMock()
+    orders_result = MagicMock()
+    orders_result.scalars.return_value.all.return_value = [stale_order]
+    session.execute = AsyncMock(return_value=orders_result)
+
+    monkeypatch.setattr(
+        sched.TossAdapter, "get_payment_by_order_id",
+        AsyncMock(side_effect=TossApiError("NOT_FOUND_PAYMENT", "결제 정보를 찾을 수 없습니다", status_code=404)),
+    )
+    fail_mock = AsyncMock()
+    confirm_mock = AsyncMock()
+    monkeypatch.setattr(sched, "_mark_failed_if_not_confirmed", fail_mock)
+    monkeypatch.setattr(sched, "_confirm_with_ledger", confirm_mock)
+
+    with caplog.at_level(logging.INFO, logger=sched.logger.name):
+        result = await sched.sweep_stale_pending_orders(session, now=now)
+
+    assert result == {
+        "stale_pending_seen": 1, "confirmed": 0, "failed": 0,
+        "skipped_lookup_error": 0, "not_found_confirmed_absent": 1,
+    }
+    fail_mock.assert_not_awaited()
+    confirm_mock.assert_not_awaited()
+    # 풀 traceback(exc_info) 없이 INFO 레벨 한 줄만 — logger.exception이 아니라 logger.info.
+    assert any(
+        r.levelno == logging.INFO and "NOT_FOUND_PAYMENT" in r.getMessage() and r.exc_info is None
+        for r in caplog.records
+    )
 
 
 # ─── trigger_due_charges — story #2907이 실제로 채웠다(구 NotImplementedError 폐기) ────
