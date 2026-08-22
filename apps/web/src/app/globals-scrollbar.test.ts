@@ -12,6 +12,24 @@ const css = fs.readFileSync(
   'utf8',
 );
 
+// story #2924 — 「css.toContain(x)」는 x가 :root/.dark 어느 블록에서 왔는지 구분 못 한다. 한
+// 테마만 리터럴로 되돌려도(다른 테마는 별칭 유지) 문자열이 어딘가엔 남아 통과해버린 것(카디르
+// #3329 QA 뮤테이션 실증). 블록 경계(중괄호 균형)로 잘라 테마별로 독립 대조한다.
+function extractTopLevelBlock(source: string, selectorLine: string): string {
+  const start = source.indexOf(selectorLine);
+  if (start === -1) throw new Error(`selector not found: ${selectorLine}`);
+  const braceStart = source.indexOf('{', start);
+  let depth = 0;
+  for (let i = braceStart; i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    if (source[i] === '}') {
+      depth--;
+      if (depth === 0) return source.slice(braceStart, i + 1);
+    }
+  }
+  throw new Error(`unbalanced braces for selector: ${selectorLine}`);
+}
+
 describe('전역 스크롤바 숨김 CSS 불변식 (#2165)', () => {
   it('전역 * 규칙이 scrollbar-width:none + webkit scrollbar display:none 이다', () => {
     expect(css).toMatch(/\*\s*\{\s*scrollbar-width:\s*none;\s*\}/);
@@ -145,9 +163,19 @@ describe('스크롤바 썸/배경 대비 (#2601 — «스크롤바 미표시» �
     const css = fs.readFileSync(path.resolve(__dirname, 'globals.css'), 'utf8');
     // story #2917(2026-08-22) — --background가 var(--proof-bg)로 별칭됐다(값-SSOT 이전).
     // 리터럴 대신 별칭 참조 자체와 그 참조가 가리키는 proof-bg 리터럴 둘 다를 고정한다.
-    expect(css).toContain('--background: var(--proof-bg);');
-    expect(css).toContain('--proof-bg: #F4F2EC;');
-    expect(css).toContain('--proof-bg: #0B0C0D;');
+    //
+    // story #2924 후속(2026-08-22, 카디르 #3329 QA 발견) — 라이트/다크 둘 다 같은
+    // `var(--proof-bg)` 문자열로 합쳐지며 파일 전체 toContain만으론 "한 테마만 리터럴로
+    // 되돌아가도 다른 테마가 살아있으면 통과"하는 구분력 상실이 생겼다(뮤테이션 실증). :root/
+    // .dark 블록을 중괄호 경계로 잘라 각 테마의 --background 우변을 독립적으로 대조한다.
+    const rootBlock = extractTopLevelBlock(css, ':root {');
+    const darkBlock = extractTopLevelBlock(css, '.dark {');
+    expect(rootBlock).toContain('--background: var(--proof-bg);');
+    expect(darkBlock).toContain('--background: var(--proof-bg);');
+    // --proof-bg 리터럴도 같은 방식으로 테마별 독립 대조(라이트=Bone·다크=Carbon, 값 자체가
+    // 다르므로 이쪽은 문자열이 애초에 안 겹친다 — 대칭성을 위해 블록 스코프로 통일).
+    expect(rootBlock).toContain('--proof-bg: #F4F2EC;');
+    expect(darkBlock).toContain('--proof-bg: #0B0C0D;');
   });
 });
 
