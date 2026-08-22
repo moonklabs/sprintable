@@ -102,12 +102,15 @@ function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singl
   }));
 }
 
-// ⚠️QA changes(PR#3377, 카디르, 2026-08-22) — 로컬 481 green이었으나 CI에서만 「같은 레인
-// 내 컬럼 드래그→bulk PATCH」 테스트가 bulkBody:null로 실패. 원인 후보로 지목된 "고정
-// tick 수 대기"(fetchAll의 Promise.all(3-fetch)+순차 res.json()×3+setState 체인 깊이가
-// 환경(Node/V8 버전 등)에 따라 마이크로태스크 홉 수가 달라질 수 있음) 자체를 없앤다 —
-// `Promise.resolve()`를 N번 세는 대신 실 매크로태스크(setTimeout 0)로 미결 마이크로태스크
-// 큐 전체를 비운다(홉 수와 무관하게 항상 안전).
+// ⚠️QA changes 3R(PR#3377, 카디르+codex, 2026-08-22) — 1R 처방(고정 tick 카운팅→단일
+// flush())도 여전히 «시간 세기»의 동류였다(CI에서 bulk 경로+신규 500 테스트가 같은
+// bulkBody:null 패턴으로 재발). 근본은 "얼마나 기다릴지"를 매직 상수(N tick·1 flush)로
+// 정하는 것 자체 — 환경마다 실제로 필요한 시간이 다르면 어떤 상수도 결국 깨진다. 그래서
+// «시간 기다리기»를 완전히 버리고 «상태 기다리기»(vi.waitFor — 조건이 참이 될 때까지
+// 폴링, 실 타이머 기반이라 event loop 홉 수와 무관)로 클래스를 닫는다. positive 케이스
+// (스파이가 호출됐다/재조회 카운트가 늘었다)만 waitFor 대상 — negative 케이스(호출 자체가
+// 없어야 함)는 "없다"를 폴링할 수 없으므로 짧은 flush 유지(부재 확認은 더 오래 기다려도
+// 더 확실해질 뿐 더 flaky해지지 않는다 — positive-wait와 위험 성격이 다름).
 async function flush() {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -117,7 +120,11 @@ async function mount(stub: FetchStub) {
   await act(async () => {
     root.render(withIntl(<EpicSwimlaneBoard projectId="p1" />));
   });
-  await act(async () => { await flush(); });
+  // «시간 기다리기» 대신 «상태 기다리기» — 로딩 문구(TopBarSlot 타이틀은 로딩 중에도
+  // 항상 보이므로 신호가 못 됨) 대신 로드 完了 분기에서만 뜨는 축 토글 텍스트로 조건을 잰다.
+  await act(async () => {
+    await vi.waitFor(() => { expect(container.textContent).toContain('5-status 클래식'); });
+  });
 }
 
 describe('EpicSwimlaneBoard — 행 구성(story #2931)', () => {
@@ -191,7 +198,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     expect(handler, 'handleDragEnd를 캡처 못 함').toBeDefined();
     await act(async () => {
       handler!({ active: { id: 's1' }, over: { id: 'e2::backlog' } });
-      await flush();
+      await vi.waitFor(() => { expect(patchedBody).not.toBeNull(); });
     });
 
     expect(patchedId).toBe('s1');
@@ -211,7 +218,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     const handler = capturedDragEndHandlers.at(-1);
     await act(async () => {
       handler!({ active: { id: 's1' }, over: { id: 'e1::in-progress' } });
-      await flush();
+      await vi.waitFor(() => { expect(bulkBody).not.toBeNull(); });
     });
 
     expect(bulkBody).toEqual({ items: [{ id: 's1', status: 'in-progress' }] });
@@ -231,6 +238,9 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
 
     const handler = capturedDragEndHandlers.at(-1);
     await act(async () => {
+      // negative 케이스(호출이 «없어야» 함) — waitFor로 폴링할 조건이 없다(부재를 기다릴
+      // 수 없음). flush()는 여기선 안전하다: 더 오래 기다려도 "여전히 없음"이 더 확실해질
+      // 뿐 positive-wait처럼 "아직 안 왔을 뿐"이 실패로 오판될 위험이 없다.
       handler!({ active: { id: 's1' }, over: { id: 'e1::needs_input' } });
       await flush();
     });
@@ -250,7 +260,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     const handler = capturedDragEndHandlers.at(-1);
     await act(async () => {
       handler!({ active: { id: 's1' }, over: { id: '__unassigned__::backlog' } });
-      await flush();
+      await vi.waitFor(() => { expect(patchedBody).not.toBeNull(); });
     });
 
     expect(patchedBody).toEqual({ epic_id: null });
@@ -276,7 +286,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     const handler = capturedDragEndHandlers.at(-1);
     await act(async () => {
       handler!({ active: { id: 's1' }, over: { id: 'e2::backlog' } });
-      await flush();
+      await vi.waitFor(() => { expect(storiesGetCount).toBe(2); });
     });
 
     expect(storiesGetCount).toBe(2); // 500 응답 後 fetchAll이 실제로 재발화(재조회로 정직 복구).
@@ -296,7 +306,7 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
     const handler = capturedDragEndHandlers.at(-1);
     await act(async () => {
       handler!({ active: { id: 's1' }, over: { id: 'e1::in-progress' } });
-      await flush();
+      await vi.waitFor(() => { expect(storiesGetCount).toBe(2); });
     });
 
     expect(storiesGetCount).toBe(2);
