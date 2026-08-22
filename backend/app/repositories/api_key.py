@@ -38,6 +38,33 @@ class ApiKeyRepository:
         )
         return result.scalar_one_or_none()
 
+    async def sync_active_scope(self, team_member_id: uuid.UUID, scope: list[str]) -> list[uuid.UUID]:
+        """story #2941 — `PATCH /agent_personas`가 표시용 tool_allowlist만 바꾸고 실제 집행값
+        `ApiKey.scope`(매 요청 `_check_api_key_scope`로 검증)를 재동기화 안 하던 갭 봉합.
+        `rotate()`와 달리 새 키를 발급하지 않는다 — 스코프 축소가 기존에 발급된 키에 **즉시**
+        반영되는 게 보안 취지(호출자가 새 plaintext를 다시 받아야 하는 건 이 작업의 목적이
+        아니다). 활성(revoked_at IS NULL) 키가 없으면(persona만 만들고 아직 recruit/키 발급이
+        없는 경우) no-op — 빈 리스트 반환, 에러 아님.
+
+        ⚠️카디르 HIGH 재발견(2026-08-22): "활성 키는 항상 최대 1개"는 recruit
+        (`_rotate_or_create_key`) 경로에서만 참인 불변식이다 — 일반 발급 엔드포인트
+        `POST /agents/{agent_id}/api-keys`(`api_keys.py::create_agent_api_key`)는 기존 활성
+        키 존재 여부를 확인하지 않고 무조건 `repo.create()`로 신규 발급하므로, 한 agent가
+        합법적으로 활성 키를 2개 이상 가질 수 있다. UPDATE 문 자체는 WHERE 절에 매칭되는
+        모든 행을 원자적으로 갱신하므로 다중 키에도 원래 안전했지만, 예전 구현은 결과 확인용
+        후속 SELECT에 `scalar_one_or_none()`을 써 다중 키 케이스에서 `MultipleResultsFound`로
+        크래시했다 — 트랜잭션 전체 롤백으로 이어져 **권한 축소가 가장 필요한 다중 키 상황에서
+        정확히 실패**하는 최악의 결과였다. 처방: 후속 SELECT 자체를 없애고 UPDATE의
+        `RETURNING`으로 갱신된 모든 행의 id를 그대로 받는다 — 단일/다중 키 모두 동일 코드
+        경로로 안전."""
+        result = await self.session.execute(
+            sa_update(ApiKey)
+            .where(ApiKey.team_member_id == team_member_id, ApiKey.revoked_at.is_(None))
+            .values(scope=scope)
+            .returning(ApiKey.id)
+        )
+        return list(result.scalars().all())
+
     async def create(
         self,
         team_member_id: uuid.UUID,
