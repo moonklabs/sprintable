@@ -1937,6 +1937,7 @@
     "indexNoResults": "No documents match these filters",
     "breadcrumbKnowledgeRoot": "Knowledge",
     "readMinutes": "{minutes} min read",
+    "docGateGoToEditorSign": "Sign off in editor",
     "docGateRejectModalTitle": "Reject review",
     "docGateRejectReasonLabel": "Rejection reason (shared with the author)",
     "docGateRejectReasonPlaceholder": "Describe what needs to be improved…",

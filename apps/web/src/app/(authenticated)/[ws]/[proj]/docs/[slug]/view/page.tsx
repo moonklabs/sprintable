@@ -136,7 +136,7 @@ export default function DocViewPage() {
             </div>
 
             <div className="mt-6">
-              <DocStatusHeader docId={doc.id} status={doc.status} onTransitioned={refetch} />
+              <DocStatusHeader docId={doc.id} status={doc.status} editHref={docUrl(wsSlug, projSlug, slug)} onTransitioned={refetch} />
             </div>
 
             <div className="mt-8">
