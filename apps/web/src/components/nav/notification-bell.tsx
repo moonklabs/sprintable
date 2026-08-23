@@ -37,7 +37,7 @@ function getNotificationTab(eventType: string): 'story' | 'system' {
   return 'system';
 }
 
-interface EventNotification {
+export interface EventNotification {
   id: string;
   event_type: string;
   source_entity_type: string | null;
@@ -52,7 +52,9 @@ interface EventNotification {
   created_at: string;
 }
 
-function getEntityHref(notification: EventNotification): string | null {
+// export — story #2956 QA changes(카디르+codex, 2026-08-23) 회귀가드(notification-bell.test.tsx)가
+// 전체 컴포넌트 마운트 없이 딥링크 판정만 직접 검증.
+export function getEntityHref(notification: EventNotification): string | null {
   const { source_entity_type, source_entity_id } = notification;
   if (!source_entity_id) return null;
   switch (source_entity_type) {
@@ -61,7 +63,13 @@ function getEntityHref(notification: EventNotification): string | null {
     case 'task':
       return `/board?task_id=${source_entity_id}`;
     case 'epic':
-      return `/epics/${source_entity_id}`;
+      // ⚠️QA changes(PR#3381, 카디르+codex, 2026-08-23) — 이 딥링크는 story #2956이 지운
+      // RENAMED_RESOURCES(epics→goals) 301에 얹혀 살고 있었다: `/epics/{id}`가 bare 승격
+      // (MIGRATED_RESOURCES) 後 `/{ws}/{proj}/epics/{id}`가 됐다가 그 rename이 다시
+      // `/{ws}/{proj}/goals/{id}`로 옮겨줬다 — 신 `[ws]/[proj]/epics/`엔 목록(`page.tsx`)만
+      // 있고 `[id]` 서브라우트가 없어(#3377 스코프에 상세 페이지 없음), rename 제거로
+      // 404가 됐다. Goal=Epic이라 `goals/[id]`가 이미 에픽 상세 정본 — 직접 가리킨다.
+      return `/goals/${source_entity_id}`;
     case 'sprint':
       // sprints-client.tsx에서 id 파라미터 처리 추가됨
       return `/sprints?id=${source_entity_id}`;

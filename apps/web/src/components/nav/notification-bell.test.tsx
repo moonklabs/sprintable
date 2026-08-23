@@ -12,7 +12,8 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }));
 
-const { NotificationBell } = await import('./notification-bell');
+const { NotificationBell, getEntityHref } = await import('./notification-bell');
+import type { EventNotification } from './notification-bell';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -293,5 +294,30 @@ describe('NotificationBell — conversation.read SSE 즉시 unread-count 재fetc
     await act(async () => { await Promise.resolve(); });
 
     expect(fetchMock.mock.calls.length).toBe(beforeCalls);
+  });
+});
+
+// ⚠️QA changes(PR#3381, 카디르+codex, 2026-08-23) — story #2956이 지운 RENAMED_RESOURCES
+// (epics→goals) 301에 이 딥링크가 얹혀 살고 있었다(테스트 0건이었음). `/epics/{id}`는
+// bare 승격(MIGRATED_RESOURCES) 後 `/{ws}/{proj}/epics/{id}`가 됐다가 옛 rename이 다시
+// `/{ws}/{proj}/goals/{id}`로 옮겨줬는데, 신 `[ws]/[proj]/epics/`엔 목록(`page.tsx`)만
+// 있고 `[id]` 서브라우트가 없어(#3377 스코프에 상세 페이지 없음) rename 제거로 404가
+// 됐다. 회귀가드: 이 딥링크 계약(entity_type='epic' → 유효한 상세 라우트)을 명시로 고정.
+function baseNotification(overrides: Partial<EventNotification>): EventNotification {
+  return {
+    id: 'n1', event_type: 'story.status_changed', source_entity_type: null, source_entity_id: null,
+    payload: null, read_at: null, created_at: '2026-08-23T00:00:00Z',
+    ...overrides,
+  };
+}
+
+describe('getEntityHref — 딥링크 계약(story #2956 QA changes)', () => {
+  it("entity_type='epic' → /goals/{id}(Goal=Epic, goals/[id]가 에픽 상세 정본 — /epics/{id} 아님)", () => {
+    const href = getEntityHref(baseNotification({ source_entity_type: 'epic', source_entity_id: 'e-123' }));
+    expect(href).toBe('/goals/e-123');
+  });
+
+  it('source_entity_id가 없으면 null(다른 타입도 동형)', () => {
+    expect(getEntityHref(baseNotification({ source_entity_type: 'epic', source_entity_id: null }))).toBeNull();
   });
 });
