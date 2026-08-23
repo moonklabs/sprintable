@@ -61,6 +61,9 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
   const lastEventIdRef = useRef<string | null>(null);
   const memberIdRef = useRef(memberId);
   useEffect(() => { memberIdRef.current = memberId; }, [memberId]);
+  // story #2940 카디르 QA(PR#3388) HIGH — memberId가 진짜로 바뀐 재실행(마운트·enabled 단독
+  // 토글이 아니라)인지 판별용. 초기값을 memberId로 잡아 마운트 시점엔 항상 "안 바뀜"이 된다.
+  const prevMemberIdForResetRef = useRef(memberId);
 
   const dispatchNamed = useCallback((eventName: string, data: string, eventId?: string) => {
     // story #2162 — presence·conversation.working처럼 DB Event 행이 없는 B계열은 재개 커서로
@@ -99,6 +102,15 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
 
   useEffect(() => {
     if (!enabled || typeof EventSource === 'undefined') return;
+
+    // story #2940 카디르 QA(PR#3388) HIGH — memberId가 실제로 바뀐 재실행이면(org 전환) 옛
+    // org에서 받은 마지막 event id를 버린다. 안 버리면 새 org 커넥션 URL에 옛 org의
+    // last_event_id가 그대로 실리고, BE(events.py)가 org/member 스코프 없이 그 id의
+    // 생성시각만으로 백필 기준시각을 잡아 — 새 org의 더 이른 시각 이벤트가 조용히
+    // 백필에서 빠진다("재연결 안 됨"이 "잘못된 커서로 일부 누락"으로 증상만 이동). enabled
+    // 단독 토글이나 최초 마운트에선 리셋하지 않는다(불필요한 전량 백필 방지).
+    if (prevMemberIdForResetRef.current !== memberId) lastEventIdRef.current = null;
+    prevMemberIdForResetRef.current = memberId;
 
     let closed = false;
     const backoff = createReconnectBackoffState();
@@ -159,7 +171,13 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
     return () => {
       closed = true;
       setConnected(false);
-      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      // 카디르 QA(PR#3388) MEDIUM — clearTimeout만으론 stale ref가 남아, 재마운트(예: memberId
+      // 전환) 직후 대기 중이던 백오프 재시도의 scheduleRetry()가 `if (retryTimerRef.current)
+      // return` 가드에 stale 값으로 걸려 재시도를 건너뛸 수 있었다. null로 명시 리셋.
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
       esRef.current?.close();
       esRef.current = null;
     };

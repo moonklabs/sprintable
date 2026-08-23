@@ -140,6 +140,26 @@ describe('useSseMultiplexer — story #2078', () => {
       expect(handler).toHaveBeenCalledTimes(2);
     });
 
+    it('memberId 전환 시 옛 org의 last_event_id를 새 커넥션 URL에 안 싣는다 — 카디르 QA(PR#3388) HIGH', async () => {
+      // codex+카디르 발견: 재연결 자체는 되지만 lastEventIdRef가 org 전환에도 안 지워지면
+      // 새 org 커넥션이 옛 org의 last_event_id를 그대로 보낸다 — BE가 org 스코프 없이 그
+      // id의 생성시각만으로 백필기준을 잡아, 새 org의 더 이른 이벤트가 조용히 누락된다.
+      await act(async () => {
+        root.render(<Harness memberId="member-org-a" enabled />);
+      });
+      await act(async () => { handle!.subscribe('story.status_changed', vi.fn()); });
+      act(() => { dispatchNamed(instances[0]!, 'story.status_changed', {}, 'org-a-last-event-id'); });
+
+      await act(async () => {
+        root.render(<Harness memberId="member-org-b" enabled />);
+      });
+
+      const reconnectUrl = new URL(instances[instances.length - 1]!.url, 'http://localhost');
+      expect(reconnectUrl.searchParams.get('member_id')).toBe('member-org-b');
+      // ⭐핵심 — 옛 org(org-a)의 last_event_id가 새 org 커넥션에 새면 안 된다.
+      expect(reconnectUrl.searchParams.get('last_event_id')).toBeNull();
+    });
+
     it('memberId가 안 바뀌면(무관한 리렌더) 재연결하지 않는다 — 과잉 재연결 금지', async () => {
       await act(async () => {
         root.render(<Harness memberId="member-org-a" enabled />);
