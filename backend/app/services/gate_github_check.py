@@ -26,7 +26,7 @@ from app.models.gate import Gate, set_gate_status
 from app.models.gate_github_check_event import GateGithubCheckEvent
 from app.models.github_installation import GithubInstallation
 from app.models.pull_request_story_link import PullRequestStoryLink
-from app.services.github_app import create_check_run, update_check_run
+from app.services.github_app import create_check_run, list_check_runs_for_ref, update_check_run
 from app.services.merge_verdict_gate import MERGE_GATE_TYPE
 
 logger = logging.getLogger(__name__)
@@ -255,18 +255,50 @@ async def publish_gate_check(
             # 카디르 QA③-c — check-run은 **SHA당 1개**가 정본. 기존 run이 다른 SHA에 대한
             # 것이면(github_check_run_sha 불일치) PATCH가 아니라 새 run을 만든다 — 안 그러면 새
             # head로는 영원히 check가 안 생겨 required가 영구 미충족되는 데드엔드가 생긴다.
+            #
+            # story #2908(실사고 그라운딩) — 위 전제("이 Gate 행이 모르면 없다")가 이 Gate 행
+            # 스코프에서만 참이다. 서로 다른 Gate 행(다른 PR 번호)이 같은 SHA에 바인딩되는 경우
+            # (스택 PR을 통합 PR로 재타겟하는 워크플로 등) 각자 "나는 모른다"고 독립적으로
+            # create해 한 SHA에 동명 check-run이 중복 생성됐다 — 승인된 쪽만 완결되고 먼저
+            # 만들어진 쪽은 영원히 in_progress 고아로 남았다(실측: story 2905, PR #3307/#3331).
+            # 처방(PO 확定, 후보 C): create 前 GitHub 쪽 실 상태를 직접 물어(list_check_runs_
+            # for_ref) 이미 있으면 그걸 PATCH — "SHA당 실물 1개"를 캐시가 아니라 GitHub 자신에게
+            # 확인해 강제한다. 조회 실패(None)는 fail-closed 폴백(PO 확定) — skip은 신규 SHA의
+            # 정상 첫 check-run 생성까지 막는 과잉살상이라, 최악에도 기존 동작(create-new)으로.
             if gate.github_check_run_id is None or gate.github_check_run_sha != head_sha:
-                result = await create_check_run(
-                    installation_id, repo_full_name, head_sha,
-                    name=CHECK_NAME, status=gh_status, conclusion=gh_conclusion,
-                    title="Sprintable Gate",
-                    summary=f"게이트 상태: {gate.status}",
+                existing_runs = await list_check_runs_for_ref(
+                    installation_id, repo_full_name, head_sha, name=CHECK_NAME,
                 )
-                if result is None:
-                    logger.warning("gate=%s: check-run 생성 실패(fail-closed, GitHub 쪽 무영향)", gate_id)
-                    return
-                gate.github_check_run_id = result.get("id")
-                gate.github_check_run_sha = head_sha
+                if existing_runs is None:
+                    logger.warning(
+                        "gate=%s: check-run 조회 실패 — 기존 create-new 폴백(PO 확定, fail-closed)",
+                        gate_id,
+                    )
+                reused_id = existing_runs[0].get("id") if existing_runs else None
+                if reused_id is not None:
+                    result = await update_check_run(
+                        installation_id, repo_full_name, reused_id,
+                        status=gh_status, conclusion=gh_conclusion,
+                        title="Sprintable Gate",
+                        summary=f"게이트 상태: {gate.status}",
+                    )
+                    if result is None:
+                        logger.warning("gate=%s: check-run 갱신 실패(fail-closed, GitHub 쪽 무영향)", gate_id)
+                        return
+                    gate.github_check_run_id = reused_id
+                    gate.github_check_run_sha = head_sha
+                else:
+                    result = await create_check_run(
+                        installation_id, repo_full_name, head_sha,
+                        name=CHECK_NAME, status=gh_status, conclusion=gh_conclusion,
+                        title="Sprintable Gate",
+                        summary=f"게이트 상태: {gate.status}",
+                    )
+                    if result is None:
+                        logger.warning("gate=%s: check-run 생성 실패(fail-closed, GitHub 쪽 무영향)", gate_id)
+                        return
+                    gate.github_check_run_id = result.get("id")
+                    gate.github_check_run_sha = head_sha
             else:
                 result = await update_check_run(
                     installation_id, repo_full_name, gate.github_check_run_id,
