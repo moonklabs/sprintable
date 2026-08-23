@@ -139,6 +139,67 @@ describe('ChatListView — 다른 프로젝트 섹션 (story #2168 PR-②)', () 
   });
 });
 
+// story #2968(선생님 실사용 발견) — 리스트가 avatar.tsx(정본, #2887/#2921)를 안 쓰고 Bot 아이콘/
+// 이니셜만 그려 avatar_url이 애초에 죽은 데이터였다(캐시·BE 스냅샷 문제 아님 — 3층 그라운딩
+// 실측으로 확認: BE는 write/read 전부 members.avatar_url 라이브, 업로드도 매번 새 uuid4 키).
+function stubFetchWithConversations(items: unknown[]) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.includes('/api/conversations/recent-outside-project')) {
+      return { ok: true, json: async () => ({ data: [] }) };
+    }
+    if (url.includes('/api/conversations?')) {
+      return { ok: true, json: async () => ({ data: items, total: items.length }) };
+    }
+    return { ok: false, status: 404, json: async () => null };
+  }));
+}
+
+describe('ChatListView — 리스트 아바타 실사진(story #2968)', () => {
+  it('DM 상대의 avatar_url이 있으면 이니셜/아이콘 대신 실사진(<img>)을 렌더한다', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-dm-1', type: 'dm', title: null,
+      latest_message: null, updated_at: '2026-08-23T00:00:00Z', unread_count: 0,
+      participants: [
+        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+        { member_id: 'them-1', name: '유나', avatar_url: 'https://storage.googleapis.com/bucket/avatar/a.png', type: 'human' },
+      ],
+    }]);
+    await mount();
+    const img = container.querySelector('img');
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute('src')).toBe('https://storage.googleapis.com/bucket/avatar/a.png');
+  });
+
+  it('avatar_url이 없으면(레거시·미업로드) Avatar 정본 자체의 이니셜 폴백으로 떨어진다(img 없음)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-dm-2', type: 'dm', title: null,
+      latest_message: null, updated_at: '2026-08-23T00:00:00Z', unread_count: 0,
+      participants: [
+        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+        { member_id: 'them-2', name: '유나', avatar_url: null, type: 'human' },
+      ],
+    }]);
+    await mount();
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).toContain('유나');
+  });
+
+  // 음성대조 — group은 특정 1인 사진이 의미 없어(다인원) 기존 Users 아이콘 자리를 그대로 유지한다.
+  it('group 대화는 여전히 단일 실사진을 그리지 않는다(다인원, 회귀 0)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-group-1', type: 'group', title: '팀 채널',
+      latest_message: null, updated_at: '2026-08-23T00:00:00Z', unread_count: 0,
+      participants: [
+        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+        { member_id: 'them-1', name: '유나', avatar_url: 'https://storage.googleapis.com/bucket/avatar/a.png', type: 'human' },
+        { member_id: 'them-2', name: '카디르', avatar_url: 'https://storage.googleapis.com/bucket/avatar/b.png', type: 'human' },
+      ],
+    }]);
+    await mount();
+    expect(container.querySelector('img')).toBeNull();
+  });
+});
+
 // story #1978(트랙C) — SSE 드롭 후 놓친 conversation.message_created가 목록에 미백필되던
 // 두 구멍(재연결·백그라운드 복귀)을 고정한다. useChatSse는 위에서 옵션 캡처용으로만 목했으므로
 // 실제 SSE 백오프/타이머는 재현하지 않는다 — onReconnect 콜백이 넘어왔는지, 그리고 그 콜백을
