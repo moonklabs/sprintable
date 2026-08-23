@@ -165,8 +165,9 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
       </span>
       <div className="min-w-0 flex-1">
         <div className="text-[15px] font-bold text-foreground">{t(STATE_LABEL_KEY[state])}</div>
+        {/* story #2967 — resolveName은 한글 사람 이름이라 mono 걷음(동일 결함 클래스). */}
         {state === 'confirmed' && gate ? (
-          <div className="font-mono text-xs text-muted-foreground">{resolveName(gate.resolver_id)} · {fmtDate(gate.resolved_at)}</div>
+          <div className="text-xs text-muted-foreground">{resolveName(gate.resolver_id)} · {fmtDate(gate.resolved_at)}</div>
         ) : state === 'denied' ? (
           <div className="mt-1 text-xs text-foreground">
             <span className="font-medium">{t('docGateDeniedReason')}:</span> {gate?.resolution_note?.trim() || t('docGateNoReason')}
@@ -249,9 +250,31 @@ export function DocEvidenceRail({ docId, status }: { docId: string; status: stri
 
   if (auditEvents.length === 0) return null;
 
+  // story #2967(선생님 실사용 판정 ④) — 이력 1~2건일 때 316px 세로 레일(선+노드 여백)이
+  // 텅 빈 공간을 만들어 판이 왼쪽으로 쏠려 보였다. 노드 2개 이하면 세로 타임라인(선·점) 대신
+  // 컴팩트 가로 스트립으로 강등 — ProofCapsule(density="audit") 자체는 그대로 재사용(발명
+  // 0), 세로선 장식만 걷어 짧은 이력이 "미완성"이 아니라 "원래 이 정도"로 읽히게 한다.
+  if (auditEvents.length <= 2) {
+    return (
+      <div className="flex flex-col gap-2">
+        {auditEvents.map((ev) => (
+          <ProofCapsule
+            key={ev.key}
+            density="audit"
+            proofState={ev.proofState}
+            stateLabel={auditKindLabel[ev.kind]}
+            claim={`${auditKindLabel[ev.kind]}${ev.version ? ` (v${ev.version})` : ''}`}
+            now={fmtDate(ev.at)}
+            human={{ name: ev.name, role: '' }}
+          />
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div>
-      <div className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+      <div className="text-[12px] font-semibold text-muted-foreground">
         {t('docGateAuditTitle')}
       </div>
       {/* 수직 타임라인 — 기존 접힌 리스트(doc-gate-section.tsx)를 상시 레일로 공간화(§3/§6).

@@ -7,7 +7,7 @@ import { BookOpen, LayoutGrid, List as ListIcon, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useDocsLayout, type Doc } from './docs-context';
-import { docViewUrl } from '@/components/docs/lib/doc-project-url';
+import { docUrl } from '@/components/docs/lib/doc-project-url';
 
 /**
  * story #2955 §2/§6(doc docs-index-reader-redesign-handoff) — 셸 A "지식 인덱스". 미선택
@@ -108,7 +108,11 @@ export function DocsIndex() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, categoryFilter, statusFilter]);
 
-  const goToDoc = (slug: string) => router.push(docViewUrl(wsSlug, projSlug, slug));
+  // story #2967(선생님 실사용 판정) — 인덱스 클릭이 리더(docViewUrl)로 가면 트리 사이드바
+  // (에디터 직행)와 목적지가 갈려 편집까지 2스텝(인덱스→리더→편집)이 됐다. 트리와 동선을
+  // 통일해 에디터 직행 1스텝으로 되돌린다 — 리더는 에디터 상단의 opt-in "읽기 보기" 링크로만
+  // 진입(삭제 아님, default만 이동).
+  const goToDoc = (slug: string) => router.push(docUrl(wsSlug, projSlug, slug));
 
   // story #2955 §6(PO 요건②) — "문서를 선택하세요" 재현 금지. 0건은 에러가 아니라 만들
   // 데이터로서 설계 — 첫 문서 CTA + 왜 0인지 맥락(신규 프로젝트) 병기.

@@ -353,6 +353,17 @@ export default function DocSlugPage() {
       >
         {mdCopied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
       </button>
+      {/* story #2967(선생님 실사용 판정 ⑤) — 인덱스 클릭 목적지를 리더→에디터로 되돌리며
+          리더 진입점이 사라지면 안 되니 opt-in 명시 링크를 "..." 드롭다운에서 상단 아이콘
+          버튼으로 승격(발견성). 목적지·라벨(t('preview'))은 기존 그대로 — 위치만 이동. */}
+      <Link
+        href={`${docUrl(wsSlug, projSlug, slug)}/view`}
+        title={t('preview')}
+        aria-label={t('preview')}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+      >
+        <Eye className="h-4 w-4" />
+      </Link>
       <button
         type="button"
         onClick={() => setShareDialogOpen(true)}
@@ -367,10 +378,6 @@ export default function DocSlugPage() {
           <MoreHorizontal className="h-4 w-4" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
-          <DropdownMenuItem render={<Link href={`${docUrl(wsSlug, projSlug, slug)}/view`} />}>
-            <Eye className="mr-2 h-4 w-4" />
-            {t('preview')}
-          </DropdownMenuItem>
           {selectedDoc.doc_type !== 'sprint_report' && (
             <>
               <DropdownMenuItem onClick={() => setUrlDialogOpen(true)}>

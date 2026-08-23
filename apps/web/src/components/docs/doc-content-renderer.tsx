@@ -36,6 +36,19 @@ interface DocContentRendererProps {
   publicImageLabel?: string;
   /** authed-mode label shown when an asset-ref image fails to resolve via the signed route. */
   assetImageErrorLabel?: string;
+  /** story #2967(선생님 실사용 판정) — 리더가 마스트헤드 H1(doc.title)을 그리는데 본문 첫
+   * 줄이 같은 제목을 `#`로 다시 쓴 문서가 대부분이라 2중 렌더로 보였다. 이 값(=doc.title)이
+   * 본문 첫 heading과 정규화 비교(대소문자·공백·선행 # 무시) 동일하면 그 heading만 생략한다
+   * — 리더 전용 opt-in(prop 생략 시 기존 동작 100% 유지, 에디터 프리뷰 등 다른 소비처 무접촉). */
+  suppressLeadingTitle?: string;
+  /** story #2967 — 다크에서 본문 문단이 text-foreground/92라 WCAG는 통과(14.88)하지만 체감
+   * 눌림(full=17.66과 대비). 리더만 'full'로 옵트인 — 기본(미지정)은 기존 /92 그대로라
+   * 공유 렌더러의 다른 소비처(에디터 프리뷰 등) 무접촉. */
+  bodyEmphasis?: 'default' | 'full';
+}
+
+function normalizeHeadingForTitleCompare(s: string): string {
+  return s.trim().replace(/^#+\s*/, '').replace(/\s+/g, ' ').toLowerCase();
 }
 
 // 마크다운 경로 sanitize 스키마 — rehype-sanitize 기본 스키마는 img/div 의 data-* 를 제거하므로
@@ -176,6 +189,8 @@ export function DocContentRenderer({
   publicAttachmentLabel = 'Attachment unavailable in public view',
   publicImageLabel = 'Image unavailable in public view',
   assetImageErrorLabel = 'This image could not be loaded',
+  suppressLeadingTitle,
+  bodyEmphasis = 'default',
 }: DocContentRendererProps) {
   const internalRef = useRef<HTMLDivElement | null>(null);
   const headings = useMemo(() => extractDocHeadings(content, contentFormat), [content, contentFormat]);
@@ -600,7 +615,9 @@ export function DocContentRenderer({
     '[&_h1]:scroll-mt-24 [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:tracking-tight',
     '[&_h2]:scroll-mt-24 [&_h2]:mt-10 [&_h2]:text-2xl [&_h2]:font-semibold',
     '[&_h3]:scroll-mt-24 [&_h3]:mt-8 [&_h3]:text-xl [&_h3]:font-semibold',
-    '[&_p]:leading-7 [&_p]:text-foreground/92',
+    // story #2967 — 다크 체감 눌림(/92=14.88 vs full=17.66, 둘 다 WCAG 통과지만 체감 차).
+    // 리더만 bodyEmphasis='full' 옵트인 — 기본은 기존 /92 그대로(다른 소비처 무접촉).
+    bodyEmphasis === 'full' ? '[&_p]:leading-7 [&_p]:text-foreground' : '[&_p]:leading-7 [&_p]:text-foreground/92',
     // story #2023 ⓒ(§5-2): 유틸 부재로 인한 var() 우회 참조를 정식 토큰으로 되돌림 — 문서 본문
     // 링크색, L1~L5 재분류 아님(콘텐츠 하이퍼링크는 서명·시스템상태 어느 축도 아님).
     '[&_a]:text-brand-soft [&_a]:underline [&_a]:underline-offset-4',
@@ -644,7 +661,12 @@ export function DocContentRenderer({
         urlTransform={(url) => (url.startsWith('entity:') ? url : defaultUrlTransform(url))}
         components={{
           h1: ({ children }) => {
-            const heading = headings[headingIndex++];
+            const idx = headingIndex++;
+            const heading = headings[idx];
+            // story #2967 — 첫 heading(idx===0)이 doc.title과 정규화 동일하면 생략(2중 렌더 제거).
+            if (idx === 0 && suppressLeadingTitle && heading && normalizeHeadingForTitleCompare(heading.text) === normalizeHeadingForTitleCompare(suppressLeadingTitle)) {
+              return null;
+            }
             return <h1 id={heading?.id}>{children}</h1>;
           },
           h2: ({ children }) => {
