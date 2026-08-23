@@ -25,7 +25,11 @@ export function RouteErrorState({
 
   return (
     <div className={`flex items-center justify-center ${compact ? 'min-h-[50vh]' : 'min-h-screen bg-background'}`}>
-      <div className={`space-y-4 rounded-2xl bg-card text-center shadow-lg ${compact ? 'w-full max-w-lg border p-6' : 'w-full max-w-sm p-8'}`}>
+      {/* story #2969 §2 C행(doc proofline-system-layer-2969, PR-6) — rounded-2xl→rounded-lg
+          (§1.1 퇴역). 이 표면은 인라인(오버레이 아님·portal/backdrop 없음)이라 shadow-lg
+          제거(§1.2, doc 요약행 "route-error(인라인이면 제거)") — border(compact variant는
+          이미 있음)만으로 경계. */}
+      <div className={`space-y-4 rounded-lg bg-card text-center ${compact ? 'w-full max-w-lg border p-6' : 'w-full max-w-sm border p-8'}`}>
         <div className="space-y-2">
           <p className={`${compact ? 'text-base' : 'text-lg'} font-semibold text-foreground`}>
             {title ?? t('error')}
