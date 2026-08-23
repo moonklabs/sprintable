@@ -787,8 +787,19 @@ async def transition_gate(
         if _wake_payload is not None and pending_deliveries is not None:
             pending_deliveries.append(_wake_payload)
     else:
-        # H1-FIX-2: merge 게이트 approve → work item 스토리를 done으로 진행(_preflight 재평가 우회).
-        await _advance_story_on_merge_approve(session, gate, new_status)
+        # story #2965(PO 판정 2026-08-23) — H1-FIX-2가 여기서 story를 done으로 자동전진시키던
+        # 것을 제거했다. merge 게이트 approve는 이 이벤트 자체가 "머지됐다"는 뜻이 아니다(PR이
+        # 아직 미머지인 채 approve만 된 상태가 정상 경로 — design 라벨·CLEAN 대기 등) — approve
+        # 순간 done이 되면 배포되지 않은 것을 "완료"라 말하는 no-fiction 위반이었다(2933→2931
+        # →2952→2958에서 하루 4회 재발, 매번 PO가 in-review로 수동 되돌림).
+        # ⛔되살리기 前 반드시 확認할 것 — story #2327(2026-07-30, PO 판정)이 같은 문제를 다른
+        # 트리거(PR merge 웹훅 close-on-merge)로 이미 겪고 정지시켰다: "머지 ≠ done, done은 사람
+        # 확認 後"가 이 조직의 규율이다. 트리거를 gate-approve든 PR-merge든 무엇으로 바꿔도, 사람의
+        # AC 전량 대조 확認 없이 이벤트 하나로 done을 미는 것 자체가 그 판정의 대상이다. done은
+        # 오직 사람이 board에서 명시 PATCH하는 경로 하나로 통일한다(그 경로는 그대로 살아있다).
+        # advance_story_to_done()(story_status_events.py) 자체는 삭제하지 않는다 — 조직 단위
+        # auto-done on/off 설정이 생기면(#2327이 남긴 되살리기 조건, 아직 없음) 그 설정을 읽어
+        # 조건부로 재배선할 단일 idempotent 헬퍼로 의도적으로 남겨둔다.
         # E-DG doc-gate(48f064e5): doc 결재 게이트 approve→confirmed·reject→denied.
         await _resolve_doc_gate(session, gate, new_status)
         # story #2624: 해소 결과를 상신자에게 회신(approval_delivery.py 반대 방향) — 선생님
@@ -1381,28 +1392,6 @@ async def _resume_a2a_task_on_gate_resolve(session: AsyncSession, gate: Gate, ne
         return  # 링크 없음(writer 미배선) 또는 이미 다른 경로로 해소됨 — no-op.
     task.state = "TASK_STATE_WORKING" if new_status == "approved" else "TASK_STATE_REJECTED"
     await session.flush()
-
-
-async def _advance_story_on_merge_approve(session: AsyncSession, gate: Gate, new_status: str) -> None:
-    """merge 게이트 approve 시 work_item 스토리를 done으로 진행(H1-FIX-2).
-
-    사람이 이미 approve했으므로 done PATCH의 _preflight 재평가를 우회해 직접 전이한다. reject나
-    비-merge 게이트는 진행하지 않는다(reject→in-review 유지). 이미 done이면 no-op(멱등).
-    """
-    if gate.gate_type != "merge" or gate.work_item_type != "story" or new_status != "approved":
-        return
-    from app.models.pm import Story  # 순환 회피 lazy import.
-
-    # Bot-L.1: gate-approve 와 PR-merge close-on-merge 가 **단일 idempotent 헬퍼**(advance_story_to_done)를
-    # 공유한다 — 상태전이 정책을 1곳에 둬 중복 advance/drift 0. 헬퍼가 done side-effects(events→L1 verdict
-    # 증거·webhook·L2·notification·activity)를 발화(board parity). actor=resolver(승인 휴먼·#1504). 이미
-    # done/부재면 no-op(멱등).
-    from app.services.story_status_events import advance_story_to_done
-
-    story = await session.get(Story, gate.work_item_id)
-    await advance_story_to_done(
-        session, gate.org_id, story, actor_id=gate.resolver_id, actor_type="human",
-    )
 
 
 # gate_type → verdict source (qa→qa·merge→merge·deploy→design·pr_review→pr).

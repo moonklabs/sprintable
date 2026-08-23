@@ -708,9 +708,11 @@ async def _process_webhook_event(
     # 이었다(should_auto_close는 org/workflow 설정이 아니라 매 PR confidence로 즉석 계산되는 값).
     # SID 정규식 fix(story_number 인식, 이 PR)가 이 분기의 도달률을 정상적으로 되돌리면, 그 순간
     # «거짓 done 자동화»가 라이브에서 돌기 시작한다 — 그래서 fix와 같은 PR에서 정지시킨다.
-    # ⛔advance_story_to_done()은 gate-approve(_advance_story_on_merge_approve)와 공유 헬퍼라
-    # 그 함수 자체는 손대지 않는다 — 이 호출부(webhook merge 분기) 하나만 멈춘다. `would_close`로
-    # "정지 안 했으면 벌어졌을 일"은 계속 보이게 남겨(관측 가능·소급 판단 재료), 실제 mutation만 뺀다.
+    # ⛔advance_story_to_done() 자체는 손대지 않는다 — 이 호출부(webhook merge 분기) 하나만
+    # 멈춘다. `would_close`로 "정지 안 했으면 벌어졌을 일"은 계속 보이게 남겨(관측 가능·소급
+    # 판단 재료), 실제 mutation만 뺀다. (story #2965, 2026-08-23 — gate-approve 쪽의 공유
+    # 호출부였던 `_advance_story_on_merge_approve`도 같은 이유로 이후 완전히 제거됐다: 트리거가
+    # 뭐든 이벤트 하나만으로 done을 미는 것 자체가 이 조직의 규율 위반이다.)
     #
     # ⛔PO 지적(2026-07-30, em-dash PR#2668/2670 되돌림과 같은 교훈 — "지운 이유를 안 남기면
     # 다음 사람이 «자동 done이 빠졌네」로 되살린다"): 여기 다시 advance_story_to_done()을 넣기
