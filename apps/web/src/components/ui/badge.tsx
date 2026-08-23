@@ -24,8 +24,11 @@ const badgeVariants = cva(
         // 실패 박스와 동일 조합). story #2420 v3 규칙(계열별 토큰 대신 규칙 하나) — tint 배경
         // 위 글자는 text-foreground(16.72, scripts/verify-tint-foreground-contrast.ts가 정의
         // 시점에 검증). --foreground 자체가 테마마다 값을 가지므로 dark: 짝이 따로 필요 없다.
+        // story #2969 §2 PR-1(유나 판정, 2026-08-23) — 형제 tint variant(success/info/warning)는
+        // 전부 border-{color}-border+tint bg인데 destructive만 border 없이 shadow 의존이라
+        // shadow-sm 제거 후 odd-one-out이었다. --destructive-border(=proof-red, 既존 토큰)로 닫는다.
         destructive:
-          "bg-destructive/10 text-foreground focus-visible:ring-destructive dark:bg-destructive/20 dark:focus-visible:ring-destructive [a]:hover:bg-destructive/20",
+          "border-destructive-border bg-destructive/10 text-foreground focus-visible:ring-destructive dark:bg-destructive/20 dark:focus-visible:ring-destructive [a]:hover:bg-destructive/20",
         outline:
           "border-border/80 bg-background text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
         ghost:
