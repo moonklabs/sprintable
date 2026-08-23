@@ -51,6 +51,30 @@ function normalizeHeadingForTitleCompare(s: string): string {
   return s.trim().replace(/^#+\s*/, '').replace(/\s+/g, ' ').toLowerCase();
 }
 
+// story #2967 후속(PO 배포후 실픽셀 재검, 2026-08-23) — 제목 2중이 일부 문서에 잔존했다.
+// 원인: 우리 doc 제목 관례가 "…설계안(story #1234)" 처럼 괄호 스토리 접미를 붙이는데
+// 본문 첫 heading은 그 접미 없이 순수 제목만 쓴다 — 정규화해도 완전 일치가 안 났다.
+// 처방: 양쪽 다 "말미 괄호(...)" 를 벗겨(반복 적용 — 접미가 여러 겹이어도) 한 번 더
+// 비교한다. 완전 다른 제목은 벗겨도 여전히 다르므로 음성대조 유지(허구 생략 없음).
+function stripTrailingParenthetical(s: string): string {
+  let prev: string;
+  let next = s;
+  do {
+    prev = next;
+    next = prev.replace(/\s*[([][^()[\]]*[)\]]\s*$/, '');
+  } while (next !== prev);
+  return next;
+}
+
+function isLikelyDuplicateTitle(headingText: string, docTitle: string): boolean {
+  const a = normalizeHeadingForTitleCompare(headingText);
+  const b = normalizeHeadingForTitleCompare(docTitle);
+  if (a === b) return true;
+  const aStripped = stripTrailingParenthetical(a).trim();
+  const bStripped = stripTrailingParenthetical(b).trim();
+  return aStripped.length > 0 && aStripped === bStripped;
+}
+
 // 마크다운 경로 sanitize 스키마 — rehype-sanitize 기본 스키마는 img/div 의 data-* 를 제거하므로
 // asset-ref(data-asset-id) + 파일첨부(data-type)가 리졸버까지 도달하지 못한다.
 // img(asset-ref 이미지) + div(fileAttachment·data-type/asset-ref/legacy data-file-data) 양쪽 허용 추가.
@@ -664,7 +688,7 @@ export function DocContentRenderer({
             const idx = headingIndex++;
             const heading = headings[idx];
             // story #2967 — 첫 heading(idx===0)이 doc.title과 정규화 동일하면 생략(2중 렌더 제거).
-            if (idx === 0 && suppressLeadingTitle && heading && normalizeHeadingForTitleCompare(heading.text) === normalizeHeadingForTitleCompare(suppressLeadingTitle)) {
+            if (idx === 0 && suppressLeadingTitle && heading && isLikelyDuplicateTitle(heading.text, suppressLeadingTitle)) {
               return null;
             }
             return <h1 id={heading?.id}>{children}</h1>;
