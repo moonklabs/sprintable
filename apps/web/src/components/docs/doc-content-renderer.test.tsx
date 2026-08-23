@@ -168,6 +168,30 @@ describe('DocContentRenderer', () => {
       );
       expect(markup).toContain('결제 스펙 v2</h1>');
     });
+
+    // PO 배포후 실픽셀 재검(2026-08-23) — doc.title이 "…설계안(story #1234)"처럼 괄호
+    // 스토리 접미를 다는 관례라 본문(접미 없음)과 완전일치가 안 나 2중이 잔존했다.
+    it('doc.title에 "(story #NNNN)" 접미가 있고 본문 h1은 접미 없이 같으면 생략한다', () => {
+      const markup = renderToStaticMarkup(
+        <DocContentRenderer content={'# 워크플로 결함 근본 수리 — 설계안\n\n본문'} contentFormat="markdown" suppressLeadingTitle="워크플로 결함 근본 수리 — 설계안(story #1234)" />,
+      );
+      expect(markup).not.toContain('<h1');
+    });
+
+    it('반대 방향(본문 h1에 접미·title은 접미 없음)도 생략한다(대칭)', () => {
+      const markup = renderToStaticMarkup(
+        <DocContentRenderer content={'# 워크플로 결함 근본 수리 — 설계안(story #1234)\n\n본문'} contentFormat="markdown" suppressLeadingTitle="워크플로 결함 근본 수리 — 설계안" />,
+      );
+      expect(markup).not.toContain('<h1');
+    });
+
+    // 음성대조 — 접미를 벗겨도 완전 다른 제목이면 생략하지 않는다(허구 생략 금지 유지).
+    it('접미를 벗겨도 본문 제목이 다르면 여전히 생략하지 않는다(음성대조)', () => {
+      const markup = renderToStaticMarkup(
+        <DocContentRenderer content={'# 전혀 다른 문서 제목\n\n본문'} contentFormat="markdown" suppressLeadingTitle="워크플로 결함 근본 수리 — 설계안(story #1234)" />,
+      );
+      expect(markup).toContain('전혀 다른 문서 제목</h1>');
+    });
   });
 
   // story #2967(선생님 실사용 판정 ③) — 다크 본문 체감 눌림 교정(WCAG는 이미 통과·체감 문제).
