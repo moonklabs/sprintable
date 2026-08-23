@@ -153,10 +153,13 @@ export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
           >
             <span className="relative">
               <Icon className="size-[22px]" strokeWidth={1.8} />
+              {/* story #2938(유나 design 처방·WCAG 실측) — bg-primary(solid)+text-primary-
+                  foreground(white) 소형 count가 AA 미달(다크 3.21). bg-proof-blue-soft+
+                  text-foreground로 교체(라이트 16.13/다크 13.94), 전역 badge.tsx 무접촉. */}
               {badge !== null ? (
                 <span
                   aria-hidden
-                  className="absolute -top-1 left-full ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold leading-none text-primary-foreground"
+                  className="absolute -top-1 left-full ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-proof-blue-soft px-1 text-[10px] font-bold leading-none text-foreground"
                 >
                   {/* story #1977: 채팅 unread 총합은 99+ 상한(시안 768e89b5 v2) — 결재함은 기존 9+ 유지 */}
                   {key === 'chat' ? (badge > 99 ? '99+' : badge) : badge > 9 ? '9+' : badge}

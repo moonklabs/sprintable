@@ -194,8 +194,12 @@ function ConversationRow({
         {participantLayer}
         <div className="flex items-center justify-between gap-1">
           <p className="truncate text-xs text-muted-foreground">{preview}</p>
+          {/* story #2938(유나 design 처방·WCAG 실측) — 소형 count 배지는 bg-primary(solid)+
+              text-primary-foreground(white)가 AA 미달(다크 3.21). bg-proof-blue-soft+
+              text-foreground로 교체(라이트 16.13/다크 13.94) — 전역 badge.tsx 무접촉, 이
+              usage에만 스코프. */}
           {unread > 0 && (
-            <span className="flex-shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">
+            <span className="flex-shrink-0 rounded-full bg-proof-blue-soft px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
               {unread > 99 ? '99+' : unread}
             </span>
           )}

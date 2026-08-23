@@ -443,8 +443,9 @@ export function DocsShellClient({ projectId }: DocsShellClientProps) {
                 {tagsCollapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
                 {t('tagFilter')}
                 {/* AC3: 접힌 상태에서 활성 태그 수 뱃지 */}
+                {/* story #2938(유나 design 처방) — 소형 count 배지 AA 교정, 전역 badge.tsx 무접촉. */}
                 {tagsCollapsed && selectedTags.length > 0 && (
-                  <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">
+                  <span className="rounded-full bg-proof-blue-soft px-1.5 py-0.5 text-[10px] font-semibold text-foreground">
                     {selectedTags.length}
                   </span>
                 )}

@@ -184,3 +184,37 @@ describe('ChatListView — SSE 재연결·백그라운드 복귀 재fetch (story
     expect(countMyConversationsFetchCalls(fetchMock)).toBe(beforeCount);
   });
 });
+
+// story #2938(유나 design 처방·WCAG 실측 2026-08-23) — unread count 배지가 bg-primary(solid)+
+// text-primary-foreground(white)라 소형 텍스트 AA 미달(다크 3.21). bg-proof-blue-soft+
+// text-foreground로 교정(라이트 16.13/다크 13.94) — 전역 badge.tsx 무접촉, 이 usage만.
+describe('ChatListView — unread count 배지 대비 교정(story #2938)', () => {
+  function stubFetchWithUnread(unreadCount: number) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url.includes('/api/conversations?')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [{ id: 'conv-1', type: 'dm', title: '읽지 않은 대화', unread_count: unreadCount }],
+            total: 1,
+          }),
+        };
+      }
+      return { ok: false, status: 404, json: async () => null };
+    }));
+  }
+
+  it('unread>0이면 배지가 bg-proof-blue-soft+text-foreground로 뜬다(bg-primary 잔존 0)', async () => {
+    stubFetchWithUnread(3);
+    await mount();
+    const badge = [...container.querySelectorAll('span')].find((s) => s.textContent === '3');
+    expect(badge).toBeTruthy();
+    expect(badge!.className).toContain('bg-proof-blue-soft');
+    expect(badge!.className).toContain('text-foreground');
+    expect(badge!.className).not.toContain('bg-primary');
+    expect(badge!.className).not.toContain('text-primary-foreground');
+  });
+});
