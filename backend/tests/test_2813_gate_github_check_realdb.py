@@ -497,6 +497,49 @@ async def test_reopen_gate_if_new_sha_flips_approved_to_pending_realdb():
 
 
 @pytest.mark.anyio
+async def test_reopen_gate_if_new_sha_clears_resolver_fields_realdb():
+    """story #2961(실 DB 관측, story 2905 pr_number=3307 gate 재현) — 재-pending 시
+    resolver_id/resolved_at/resolution_note가 status와 함께 지워지는지. 다른 두 재-pending
+    경로(gate_service.py의 _reopen_rejected_gate·undo_gate_resolution)는 이미 이 셋을
+    같이 지우는데 이 함수만 빠뜨려, "해소됐다"는 흔적(resolved_at 有)이 status=pending인
+    게이트에 그대로 남아있었다(불변식 위반: 이 셋은 status!=pending일 때만 값을 가져야 함)."""
+    from datetime import datetime, timezone
+    import uuid
+
+    from app.models.gate import Gate
+    from app.services.gate_github_check import reopen_gate_if_new_sha
+
+    engine, Session = await _session_factory()
+    try:
+        resolver_id = uuid.uuid4()
+        stale_resolved_at = datetime(2026, 8, 21, 16, 33, 20, tzinfo=timezone.utc)
+        async with Session() as s:
+            seeded = await _seed(
+                s, gate_status="approved", approved_head_sha="old-sha", github_check_run_id=9001,
+            )
+            gate = await s.get(Gate, seeded["gate_id"])
+            gate.resolver_id = resolver_id
+            gate.resolved_at = stale_resolved_at
+            gate.resolution_note = "approved via PR review"
+            await s.commit()
+
+        async with Session() as s:
+            gate = await s.get(Gate, seeded["gate_id"])
+            await reopen_gate_if_new_sha(s, seeded["org_id"], gate, "new-sha", repo_full_name="acme/repo", pr_number=7)
+            await s.commit()
+
+        async with Session() as s:
+            gate = await s.get(Gate, seeded["gate_id"])
+            assert gate.status == "pending"
+            # ⭐핵심 — 셋 다 status와 함께 지워져야(다른 두 재-pending 경로와 동형).
+            assert gate.resolver_id is None
+            assert gate.resolved_at is None
+            assert gate.resolution_note is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_reopen_gate_if_new_sha_noop_when_sha_matches_realdb():
     """양성대조 — SHA가 같으면 재-pending 안 한다(vacuous하게 항상 flip하는 버그 방지)."""
     from app.models.gate import Gate
