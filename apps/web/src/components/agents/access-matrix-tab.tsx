@@ -68,8 +68,12 @@ export function AccessMatrixTab() {
     setLoading(true);
     setLoadError(false);
     try {
+      // story #2952 AC2 — 이 매트릭스는 관리(비활성화/재활성) 화면이 아니라 grant 조회/편집
+      // 화면이라, deactivate된 에이전트는 관리탭(AgentManagementTab)의 "활성화" 경로로만
+      // 다시 마주친다. include_inactive=true였을 때 비활성 에이전트 행이 grant 0개인 채
+      // 그대로 남아 "창구 불일치"(deactivate가 화면에서 안 지워짐)의 절반이었다.
       const [agentsRes, projectsRes, matrixRes] = await Promise.all([
-        fetchWithAuth('/api/team-members?type=agent&include_inactive=true'),
+        fetchWithAuth('/api/team-members?type=agent'),
         fetchWithAuth('/api/projects'),
         fetchWithAuth('/api/agents/access-matrix'),
       ]);

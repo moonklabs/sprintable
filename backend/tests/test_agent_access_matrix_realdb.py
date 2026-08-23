@@ -53,11 +53,11 @@ async def _seed_org_project(session, *, admin_user_id: uuid.UUID) -> tuple[uuid.
     return org_id, project_id
 
 
-async def _seed_agent_grant(session, *, org_id, project_id, name="agent"):
+async def _seed_agent_grant(session, *, org_id, project_id, name="agent", is_active=True):
     from app.models.member import Member
     from app.models.project_access import ProjectAccess
 
-    agent = Member(id=uuid.uuid4(), org_id=org_id, type="agent", name=name, is_active=True)
+    agent = Member(id=uuid.uuid4(), org_id=org_id, type="agent", name=name, is_active=is_active)
     session.add(agent)
     await session.flush()
     record = ProjectAccess(project_id=project_id, member_id=agent.id, org_member_id=None, permission="granted")
@@ -177,6 +177,39 @@ async def test_access_matrix_403_for_non_admin():
             with pytest.raises(HTTPException) as ei:
                 await get_agent_access_matrix(session=s, auth=auth, org_id=org_id)
         assert ei.value.status_code == 403
+    finally:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요(PARITY/ALEMBIC_DATABASE_URL)")
+@pytest.mark.anyio
+async def test_access_matrix_excludes_deactivated_agent():
+    """story #2952 AC2 — `m.deleted_at IS NULL`만 보고 `is_active`를 안 봐 deactivate된
+    에이전트의 grant가 매트릭스에 그대로 잔존했다(창구 불일치, PO 실측). is_active=false
+    에이전트는 하드 삭제(deleted_at) 안 됐어도 이 매트릭스에서 제외돼야 한다."""
+    from unittest.mock import MagicMock
+    from sqlalchemy import text as _text
+    from app.core.database import Base
+    from app.routers.agents import get_agent_access_matrix
+
+    engine, Session = await _session()
+    try:
+        admin_user_id = uuid.uuid4()
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s, admin_user_id=admin_user_id)
+            active_agent, active_record = await _seed_agent_grant(s, org_id=org_id, project_id=project_id, name="active")
+            await _seed_agent_grant(s, org_id=org_id, project_id=project_id, name="deactivated", is_active=False)
+
+        async with Session() as s:
+            await s.execute(_text("SET session_replication_role = replica"))
+            auth = MagicMock(user_id=str(admin_user_id))
+            out = await get_agent_access_matrix(session=s, auth=auth, org_id=org_id)
+
+        assert len(out) == 1, f"deactivate된 에이전트의 grant가 잔존 — {out}"
+        assert out[0]["agent_member_id"] == str(active_agent.id)
+        assert out[0]["record_id"] == str(active_record.id)
     finally:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
