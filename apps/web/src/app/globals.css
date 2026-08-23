@@ -244,6 +244,7 @@
   --color-proof-sunk: var(--proof-sunk);
   --color-proof-line: var(--proof-line);
   --color-proof-line-soft: var(--proof-line-soft);
+  --color-proof-line-strong: var(--proof-line-strong);
   --color-proof-ink: var(--proof-ink);
   --color-proof-ink-2: var(--proof-ink-2);
   --color-proof-ink-3: var(--proof-ink-3);
@@ -409,6 +410,12 @@
   --proof-sunk: #ECEAE2;
   --proof-line: #E0DDD3;
   --proof-line-soft: #EAE8E0;
+  /* story #2969 §1.2(PR-4, doc proofline-system-layer-2969) — 오버레이 전용 강조 hairline.
+     "오버레이는 항상 --elev-overlay + 1px hairline(--proof-line-strong) 동반 — 그림자만으론
+     엣지가 흐리다"(§1.2). PR-T에서 이연했던 토큰 — 값은 기존 --proof-line을 --proof-ink
+     (그 테마의 최고-대비 텍스트색) 쪽으로 50% 블렌드해 유도(값-SSOT 재사용, 신규 hex 없음).
+     ⚠️제안값 — 유나 확認 전 임시(라이트/다크 둘 다 동일 공식이라 자동 대칭).*/
+  --proof-line-strong: color-mix(in oklch, var(--proof-line) 50%, var(--proof-ink) 50%);
   --proof-ink: #121310;
   --proof-ink-2: #3B3D37;
   /* story #2917 — 유나양 확定(2026-08-22): 원값 #6D6F67은 --muted(proof-sunk) 위에서 4.23:1로
@@ -577,6 +584,10 @@
   --proof-sunk: #111315;
   --proof-line: #2B2E2D;
   --proof-line-soft: #232628;
+  /* story #2969 §1.2(PR-4) — 다크 오버레이 강조 hairline. 라이트와 동일 공식(color-mix 50%
+     proof-ink) — 다크 proof-ink는 밝은 텍스트색이라 자동으로 "더 밝은/눈에 띄는" 방향으로
+     간다(테마별 반전 로직 불요). ⚠️제안값 — 유나 확認 전 임시. */
+  --proof-line-strong: color-mix(in oklch, var(--proof-line) 50%, var(--proof-ink) 50%);
   --proof-ink: #F2F4ED;
   --proof-ink-2: #C4C7BE;
   --proof-ink-3: #8D9088;

@@ -40,7 +40,7 @@ function Toast({ item, onDismiss }: ToastProps) {
           ? 'border-l-4 border-l-destructive'
           : item.type === 'info'
             ? 'border-l-4 border-l-info'
-            : 'border-l-4 border-l-border';
+            : 'border-l-4 border-l-proof-line-strong';
 
   // story #2096 — 토스트는 조작 결과(담당자 지정 성공 등)를 알리는 유일한 수단인 경우가
   // 많은데 role·aria-live가 없어 스크린리더가 아예 안 읽었다(까심군이 #2384 검수 때 자동으로
@@ -57,7 +57,9 @@ function Toast({ item, onDismiss }: ToastProps) {
       role={isUrgent ? 'alert' : 'status'}
       aria-live={isUrgent ? 'assertive' : 'polite'}
       aria-atomic="true"
-      className={`animate-slide-in rounded-lg border border-border bg-popover p-4 shadow-lg ${borderColor}`}
+      // story #2969 §2 PR-4(doc proofline-system-layer-2969) — shadow-lg→--elev-overlay·
+      // 나머지 3면 hairline을 proof-line-strong으로(좌측은 type별 색이 계속 덮어씀).
+      className={`animate-slide-in rounded-lg border border-proof-line-strong bg-popover p-4 shadow-[var(--elev-overlay)] ${borderColor}`}
     >
       <div className="flex items-start justify-between">
         {/* 유나 지적(error-display 폴리시) — 공백 없는 초장문(토큰·URL 등)이 토스트 폭을

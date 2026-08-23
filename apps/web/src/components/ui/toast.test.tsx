@@ -104,4 +104,16 @@ describe('Toast 접근성 (story #2096)', () => {
     paragraphs.forEach((p) => expect(p.className).toContain('[overflow-wrap:anywhere]'));
     expect(container.querySelector('.min-w-0')).not.toBeNull();
   });
+
+  // story #2969 §2 PR-4(doc proofline-system-layer-2969) — shadow-lg→--elev-overlay·
+  // 나머지 3면 hairline을 proof-line-strong으로.
+  it('토스트 컨테이너가 --elev-overlay 그림자와 proof-line-strong hairline을 갖는다', async () => {
+    await act(async () => {
+      root.render(wrap(<ToastContainer toasts={[toast({})]} onDismiss={() => {}} />));
+    });
+    const el = container.querySelector('[role="status"]');
+    expect(el?.className).toContain('shadow-[var(--elev-overlay)]');
+    expect(el?.className).toContain('border-proof-line-strong');
+    expect(el?.className).not.toContain('shadow-lg');
+  });
 });
