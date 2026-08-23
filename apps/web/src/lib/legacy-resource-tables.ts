@@ -33,18 +33,18 @@ export const MIGRATED_RESOURCES: Record<string, string[]> = {
   // 안 보였는데, mobile-tab-bar.tsx의 "지금" 탭 href를 bare `/flow`로 바꾸며(옛 `/glance`
   // 대체) 처음으로 실사용 경로가 생겼다 — 등록 없이 나갔으면 즉시 404였을 것.
   flow: [],
-  // story #2016: 8fc51517(B1 리네이밍)이 epics→goals 경로 리터럴을 바꾸면서 RENAMED_RESOURCES에만
-  // 반영되고 여기(MIGRATED_RESOURCES)엔 신 이름 'goals'를 안 넣었다 — bare `/epics`는 이 표를 거쳐
-  // `/{ws}/{proj}/epics`로 301된 뒤 redirectRenamedResourcePath가 2차로 `goals`로 다시 301하지만,
-  // bare `/goals`(신 이름 그대로 오는 딥링크·북마크·검색결과)는 애초에 이 표에 키가 없어 redirectLegacyResourcePath가
-  // 즉시 null 반환 → Next 자체 404. 호스트/쿠키 무관 리소스 등록 누락 실측 확認(direct Cloud Run 호스트에서
-  // /board는 301 정상·/goals만 404, 동일 JWT fallback 경로 재사용).
+  // story #2016: 당시 8fc51517(B1 리네이밍)이 epics→goals 경로 리터럴을 RENAMED_RESOURCES에만
+  // 반영하고 여기(MIGRATED_RESOURCES)엔 신 이름 'goals'를 안 넣어, bare `/goals`(신 이름 그대로
+  // 오는 딥링크·북마크·검색결과)가 이 표에 키가 없어 즉시 404였다(호스트/쿠키 무관 실측 확認).
+  // goals 자체는 여전히 실 리소스라 이 키는 그대로 둔다 — story #2956(2026-08-23)에서 정리된
+  // 것은 RENAMED_RESOURCES 쪽의 `epics: 'goals'` 행(아래 참조, epics가 별개 실 리소스로
+  // 독립하며 그 행 자체가 폐기 대상이 됨)이지 이 goals 항목이 아니다.
   goals: [],
 };
 
 /**
  * story 8fc51517(계층 리네이밍 B1, doc hierarchy-renaming-url-implementation-design §ⓑ) —
- * `/{ws}/{proj}/{resource}` 안의 **경로 리터럴**이 신 용어로 바뀔 때(에픽→목표 등)의 301.
+ * `/{ws}/{proj}/{resource}` 안의 **경로 리터럴**이 신 용어로 바뀔 때(board→flow 등)의 301.
  * proxy.ts의 `redirectLegacyResourcePath`와 다른 관심사 — 저건 ws/proj 세그먼트 자체가 없던
  * 옛 flat URL을 org/project 재조회로 채워 넣는 것이고, 이건 ws/proj가 **이미 URL에 있으므로**
  * 3번째 세그먼트(리소스명)만 신 이름으로 교체하면 된다(org/project 재조회 fetch 불요).
@@ -54,9 +54,18 @@ export const MIGRATED_RESOURCES: Record<string, string[]> = {
  * 스냅샷이었다 — story #2378 리뷰에서 유나양이 발견). story #2393(2026-08-01) — route-resolve.ts의
  * RESERVED_FIRST_SEGMENTS도 여기서 파생시킨다(순환참조 회피를 위해 이 표 자체를 proxy.ts
  * 밖으로 뺀 것이 그 이유).
+ *
+ * ⛔story #2956(2026-08-23, PO 배포 실픽셀 검증 발견) — 여기 있던 `epics: 'goals'` 행(2016년
+ * B1 리네이밍의 화석)이 #3377(story #2931)이 신설한 실 라우트 `[ws]/[proj]/epics/page.tsx`와
+ * 이름이 충돌했다. proxy.ts(edge 미들웨어)는 항상 Next 파일 라우팅보다 먼저 실행되므로, 이
+ * 표에 `epics` 키가 남아있는 한 그 실 라우트는 **영원히 도달 불가**(모든 요청이 301로 /goals에
+ * 가로채임)였다 — 새 리소스가 예전에 rename됐던 이름을 그대로 재사용할 수 있다는 걸 아무도
+ * 미리 대조하지 않은 게이트 사각(verify-no-orphan-resource-routes.ts도 이 이름을 "이미 아는
+ * 별칭"으로 exempt 처리해 놓쳤다 — findAliasedLiveRoutes로 그 가드도 함께 확장했다). epics가
+ * 이제 독립된 실 리소스이므로 이 행 자체를 제거한다 — 2016년 시절 "에픽→목표" 딥링크/북마크가
+ * 새 에픽 뷰로 열리는 것은 수용(진짜 목적지가 goals였던 그 링크들은 이미 8년 전에 죽었다).
  */
 export const RENAMED_RESOURCES: Record<string, string> = {
-  epics: 'goals',
   // story #2224(선생님 정정 2026-07-30) — glance는 이제 /flow 안의 한 조각. 위 MIGRATED_RESOURCES
   // 항목과 짝: bare `/glance` → (redirectLegacyResourcePath) → `/{ws}/{proj}/glance` →
   // (여기) → `/{ws}/{proj}/flow`. `?story=`/`?task_id=` 등 쿼리는 두 함수 다 request.nextUrl을
@@ -70,7 +79,7 @@ export const RENAMED_RESOURCES: Record<string, string> = {
 
 /**
  * story #2378(2026-08-01, 유나양 design:changes) — `RENAMED_RESOURCES`와 «성격이 다른» 은퇴.
- * 위 표(epics/glance/board)는 같은 행이 새 이름을 받은 rename이라 id를 그대로 들고 가도 안전
+ * 위 표(glance/board)는 같은 행이 새 이름을 받은 rename이라 id를 그대로 들고 가도 안전
  * (mockups 3번째 세그먼트 뒤 id가 있으면 「그 id」로 다시 찾을 수 있다). 여기는 반대 —
  * `RETIRED_RESOURCES`에 오르면 옛 리소스가 «폐기»되고 다른 리소스가 그 자리를 대신할 뿐이라
  * id 공간이 다르다(mockup id ≠ artifact id). id를 그대로 옮기면 두 가지 결과가 갈리는데

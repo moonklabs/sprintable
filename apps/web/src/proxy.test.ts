@@ -828,7 +828,7 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
   });
 });
 
-describe('proxy — 경로 리터럴 rename 301(story 8fc51517, 에픽→목표): [ws]/[proj]/epics/* → [ws]/[proj]/goals/*', () => {
+describe('proxy — 경로 리터럴 rename 301(story 8fc51517): [ws]/[proj]/board/* → [ws]/[proj]/flow/*', () => {
   beforeEach(() => {
     process.env['JWT_SECRET'] = JWT_SECRET;
     process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://localhost:8000';
@@ -839,24 +839,23 @@ describe('proxy — 경로 리터럴 rename 301(story 8fc51517, 에픽→목표)
     delete process.env['JWT_SECRET'];
   });
 
-  it('/{ws}/{proj}/epics → 301 /{ws}/{proj}/goals(같은 ws/proj 세그먼트 보존, org/project 재조회 없음)', async () => {
+  // ⛔story #2956(2026-08-23, PO 배포 실픽셀 검증) — 여기 있던 epics→goals rename 301 테스트
+  // 2건이 정확히 이 사고의 "그린 테스트가 버그를 고정해버린" 자리였다: #3377이 실 라우트
+  // `[ws]/[proj]/epics`를 신설했는데 RENAMED_RESOURCES.epics='goals'가 여전히 남아있어 그
+  // 실 라우트가 영원히 도달 불가였다 — 이 테스트들은 «그 도달 불가를 정확한 스펙으로»
+  // 계속 지키고 있었다(리네이밍 표에서 epics 행을 지운 지금은 이 옛 기대값 자체가 틀렸다).
+  // epics는 이제 독립 실 리소스이므로 아래에서 "리다이렉트 없음"으로 정반대 방향의 회귀
+  // 가드를 세운다.
+  it('/{ws}/{proj}/epics → 리다이렉트 없이 통과(2016년 rename 화석 제거 확認 — 실 EpicSwimlaneBoard가 렌더될 자리)', async () => {
     const token = await makeAccessToken({ orgId: 'org-1' });
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ org_id: 'org-1', org_slug: 'moonklabs', org_role: 'member', project_id: 'proj-1', project_slug: 'sprintable' }),
+    });
     const response = await middleware(makeRequest('/moonklabs/sprintable/epics', {
       sp_at: token, sprintable_current_project_id: 'proj-1',
     }));
-    expect(response.status).toBe(301);
-    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/goals');
-    // 3번째 세그먼트만 교체하는 순수 문자열 치환이라 org/project fetch가 전혀 없어야 한다.
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-
-  it('/{ws}/{proj}/epics/{id} — 딥링크(id 서브패스)도 손실 없이 이동', async () => {
-    const token = await makeAccessToken({ orgId: 'org-1' });
-    const response = await middleware(makeRequest('/moonklabs/sprintable/epics/e-123', {
-      sp_at: token, sprintable_current_project_id: 'proj-1',
-    }));
-    expect(response.status).toBe(301);
-    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/goals/e-123');
+    expect(response.status).not.toBe(301);
   });
 
   it('/{ws}/{proj}/board → 301 /{ws}/{proj}/flow(board도 RENAMED_RESOURCES 대상 — #2373 prod 승격 board 은퇴 회귀가드)', async () => {
@@ -866,7 +865,7 @@ describe('proxy — 경로 리터럴 rename 301(story 8fc51517, 에픽→목표)
     }));
     expect(response.status).toBe(301);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
-    // 3번째 세그먼트만 교체하는 순수 문자열 치환이라 org/project fetch가 전혀 없어야 한다(epics→goals와 동형).
+    // 3번째 세그먼트만 교체하는 순수 문자열 치환이라 org/project fetch가 전혀 없어야 한다.
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -910,7 +909,7 @@ describe('proxy — 폐기된 리소스 301(story #2378, 유나양 design:change
       sp_at: token, sprintable_current_project_id: 'proj-1',
     }));
     expect(response.status).toBe(301);
-    // ⛔/artifacts/abc123 이 아니다 — RENAMED_RESOURCES(epics→goals)와 정확히 다른 지점.
+    // ⛔/artifacts/abc123 이 아니다 — RENAMED_RESOURCES(board→flow 등, id 보존)와 정확히 다른 지점.
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/artifacts');
     expect(mockFetch).not.toHaveBeenCalled();
   });
