@@ -293,10 +293,6 @@ export function ApprovalsQueue() {
               <Badge variant="chip">{gate.gate_type}</Badge>
               {held ? (
                 <Badge variant="secondary">{t('heldBadge')}</Badge>
-              ) : deriveRiskLevel(gate) === 'high' ? (
-                <Badge variant="warning">{t('riskHigh')}</Badge>
-              ) : deriveRiskLevel(gate) === 'unknown' ? (
-                <Badge variant="outline" className="text-muted-foreground">{t('riskUnknown')}</Badge>
               ) : null}
               <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{formatAge(gate.created_at, t)}</span>
             </div>
