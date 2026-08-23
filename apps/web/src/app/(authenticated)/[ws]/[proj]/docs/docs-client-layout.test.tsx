@@ -148,6 +148,35 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     expect(localStorage.getItem('docs-sort-mode:proj-1')).toBe('title');
   });
 
+  // PR#3391 카디르 QA CHANGES(2026-08-23, codex 교차검증) — select→3버튼 전환에서
+  // aria-pressed 등 선택상태 접근성 시맨틱이 소실됐던 것을 복원.
+  it('정렬 토글 — 그룹에 접근 가능한 이름이 있고, 선택된 버튼만 aria-pressed=true다', async () => {
+    stubFetch();
+    await mount();
+    const foldersTab = [...container.querySelectorAll('button')].find((b) => b.textContent === '내 폴더');
+    await act(async () => { foldersTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const group = container.querySelector('[role="group"]');
+    expect(group?.getAttribute('aria-label')).toBe('정렬');
+    const manualBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '수동 순서');
+    const titleBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '이름순');
+    expect(manualBtn?.getAttribute('aria-pressed')).toBe('true');
+    expect(titleBtn?.getAttribute('aria-pressed')).toBe('false');
+    await act(async () => { titleBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(manualBtn?.getAttribute('aria-pressed')).toBe('false');
+    expect(titleBtn?.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  // PR#3391 카디르 QA CHANGES — 236px 레일에서 긴 로케일 문자열(영문 등)이 넘치지 않게
+  // flex-wrap으로 여러 줄 감쌈을 허용하는지(overflow 대신 wrap) 고정.
+  it('정렬 토글 행은 flex-wrap이라 긴 라벨이 넘치지 않고 줄바꿈된다(영문 로케일 회귀가드)', async () => {
+    stubFetch();
+    await mount();
+    const foldersTab = [...container.querySelectorAll('button')].find((b) => b.textContent === '내 폴더');
+    await act(async () => { foldersTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const group = container.querySelector('[role="group"]');
+    expect(group?.className).toContain('flex-wrap');
+  });
+
   it('④드래그 재정렬 — DocTree(내 폴더 뷰)에 onReorder/onMove/onMoveDenied 핸들러가 배선된다(수동 모드)', async () => {
     stubFetch();
     await mount();

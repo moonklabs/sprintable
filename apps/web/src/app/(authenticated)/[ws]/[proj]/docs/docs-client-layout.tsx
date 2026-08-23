@@ -429,15 +429,21 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           사용자가 고를 정렬 축이 아니다. 정렬은 "브라우징 중인 트리"에만 의미가 있다.
           #2193: 정렬 토글은 "내 폴더"(기존 트리) 뷰에서만 의미가 있다 — 자동 묶음 뷰는
           그룹 크기 기준 자체 정렬을 쓴다. */}
-      {/* story #2963 §2 — native <select> → 인라인 mono 토글(수동/제목/최근). setSortMode·
-          localStorage 저장 로직은 완전 무변경 — 같은 상태를 다른 컨트롤로 바꿀 뿐. */}
+      {/* story #2963 §2 — native <select> → 인라인 토글(수동/제목/최근). setSortMode·
+          localStorage 저장 로직은 완전 무변경 — 같은 상태를 다른 컨트롤로 바꿀 뿐.
+          ⚠️PR#3391 카디르 QA(2026-08-23, codex 교차검증) — ①select 대체 과정에서 선택
+          상태의 접근성 시맨틱(보조기기에 컨트롤명+현재값 자동 전달)이 소실됐었다 —
+          role="group"+aria-label(그룹명)+각 버튼 aria-pressed로 복원. ②236px 레일에서
+          영문 라벨("Manual order" 등)이 한 줄 flex로 넘칠 구조였다 — flex-wrap 추가.
+          #2967 교훈(mono+한글=흐림)도 반영해 font-mono 제거(이 라벨도 한글). */}
       {!isSearching && viewMode === 'folders' && (
-        <div className="flex items-center gap-2.5 border-b border-border/60 px-3 py-1.5 font-mono text-[10px]">
+        <div role="group" aria-label={t('sortModeLabel')} className="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-border/60 px-3 py-1.5 text-[11px]">
           <span className="text-muted-foreground">{t('sortModeLabel')}</span>
           {(['manual', 'title', 'updated_at'] as const).map((mode) => (
             <button
               key={mode}
               type="button"
+              aria-pressed={sortMode === mode}
               onClick={() => setSortMode(mode)}
               className={cn(
                 'transition-colors',
@@ -552,8 +558,12 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
       {/* Unified: children rendered exactly once — sidebar responsive via breakpoint classes */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Desktop sidebar — hidden on mobile */}
+        {/* PR#3391 QA(카디르, codex 교차검증) — overflow-y만 있고 overflow-x 처리가
+            없어 긴 로케일 문자열(영문 정렬 라벨 등)이 넘칠 구조였다. 소스(정렬 토글 row)를
+            flex-wrap으로 고쳤지만, 236px 고정폭 레일 전체에 대한 방어로 overflow-x-hidden도
+            동반(다른 미래 콘텐츠의 동일 결함 클래스 재발 방지). */}
         {!sidebarCollapsed && (
-          <aside className="focus-inset relative hidden w-[236px] flex-shrink-0 flex-col overflow-y-auto border-r border-border/80 bg-background lg:flex">
+          <aside className="focus-inset relative hidden w-[236px] flex-shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-border/80 bg-background lg:flex">
             <button
               type="button"
               onClick={handleToggleSidebar}
