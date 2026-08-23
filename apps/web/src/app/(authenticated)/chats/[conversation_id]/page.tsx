@@ -10,6 +10,7 @@ import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { AddParticipantModal } from '@/components/chat/add-participant-modal';
 import { DeliveryContractModal } from '@/components/chat/delivery-contract-modal';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Avatar } from '@/components/shared/avatar';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 
@@ -193,6 +194,12 @@ export default function ConversationPage() {
     ? formatHeaderTitle(meta, currentTeamMemberId)
     : (meta === null ? '채팅' : '로딩 중…');
 
+  // story #2968 — 리스트(chat-list-view.tsx)와 동일 원칙: 1:1(DM)만 상대가 특정되므로
+  // avatar.tsx 정본으로 실사진을 보여준다. group은 다인원이라 대표 사진이 없어 미표시 유지.
+  const headerAvatarParticipant = meta?.type === 'dm'
+    ? meta.participants.find((p) => p.member_id !== currentTeamMemberId)
+    : null;
+
   // S8 #2: pre-send capability 경고 대상 = 에이전트 participant(본인 제외)·runtime_type 필드 존재시만.
   // (S8b 미머지 → runtime_type undefined → commandTargets 빈 배열 → 경고 미표시 graceful.)
   const commandTargets = (meta?.participants ?? [])
@@ -219,6 +226,15 @@ export default function ConversationPage() {
               <ChevronLeft className="h-4 w-4" />
               <span className="lg:hidden">채팅</span>
             </button>
+            {headerAvatarParticipant && (
+              <Avatar
+                name={headerAvatarParticipant.name ?? '?'}
+                avatarUrl={headerAvatarParticipant.avatar_url ?? null}
+                actorType={headerAvatarParticipant.type === 'agent' ? 'agent' : 'human'}
+                size={24}
+                className="flex-shrink-0"
+              />
+            )}
             {editingTitle && meta?.type === 'group' ? (
               <input
                 autoFocus

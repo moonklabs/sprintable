@@ -147,3 +147,51 @@ describe('ConversationPage — 실패 자리 (story #2168 PR-②, 능동 클릭 
     expect(container.textContent).toContain('해당 프로젝트에 접근 권한이 없습니다');
   });
 });
+
+// story #2968(선생님 실사용 발견) — 채팅 헤더는 이전까지 avatar_url을 애초에 안 그렸다(제목
+// 텍스트만). avatar.tsx 정본(#2887/#2921) 배선으로 DM 상대의 실사진을 헤더에도 노출한다.
+describe('ConversationPage — 헤더 아바타(story #2968)', () => {
+  it('DM 상대의 avatar_url이 있으면 헤더에 실사진(<img>)을 렌더한다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/conv-1')) {
+        return {
+          ok: true,
+          json: async () => ({
+            title: null, type: 'dm', muted: false, lastReadAt: null, freeResponse: false,
+            participants: [
+              { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+              { member_id: 'them-1', name: '유나', avatar_url: 'https://storage.googleapis.com/bucket/avatar/a.png', type: 'human' },
+            ],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await mount();
+
+    const img = container.querySelector('img');
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute('src')).toBe('https://storage.googleapis.com/bucket/avatar/a.png');
+  });
+
+  it('group 대화는 헤더에 단일 실사진을 그리지 않는다(다인원, 회귀 0)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/conv-1')) {
+        return {
+          ok: true,
+          json: async () => ({
+            title: '팀 채널', type: 'group', muted: false, lastReadAt: null, freeResponse: false,
+            participants: [
+              { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+              { member_id: 'them-1', name: '유나', avatar_url: 'https://storage.googleapis.com/bucket/avatar/a.png', type: 'human' },
+            ],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await mount();
+
+    expect(container.querySelector('img')).toBeNull();
+  });
+});

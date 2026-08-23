@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bot, MessageSquare, Users } from 'lucide-react';
+import { MessageSquare, Users } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -10,6 +10,7 @@ import { NewConversationModal } from './new-conversation-modal';
 import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { queuePendingToast } from './cross-project-toast-provider';
+import { Avatar } from '@/components/shared/avatar';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -104,13 +105,19 @@ function ConversationRow({
   const time = conv.latest_message?.created_at ?? conv.updated_at;
   const unread = conv.unread_count ?? 0;
 
-  const avatarInitial = !isAgentConv && conv.type === 'dm' && conv.participants
-    ? (conv.participants.find((p) => p.member_id !== currentMemberId)?.name?.slice(0, 2) ?? 'DM')
-    : null;
-
   const others = conv.participants ? getOtherParticipants(conv.participants, currentMemberId) : [];
   const isAgentInConv = conv.participants ? hasAgentParticipant(conv.participants) : false;
   const agentCount = others.filter((p) => p.type === 'agent').length;
+  // story #2968 — 1:1(conv.type==='dm')만 상대가 특정되므로 avatar_url 실사진을 그대로 쓴다
+  // (avatar.tsx=정본, story #2887/#2921 — 3단 폴백[이미지→이니셜→아이콘]도 그쪽이 갖고 있다).
+  // group은 "그 방을 대표하는 단일 인물"이 없어(다인원) 기존 Users 아이콘을 유지한다.
+  //
+  // 카디르 QA(#3397, HIGH) — isAgentConv를 조건에 넣으면 agent탭의 group 대화까지 걸려
+  // others[0](임의 참가자 1인)을 대표사진처럼 노출했다(agentOnlyConvs 필터가 conv.type을
+  // 안 가려 group에도 isAgentConv=true가 붙는다, ChatListView 참고). 순수 conv.type만 본다
+  // — isAgentConv는 이름/actorType 폴백에서만 쓴다(agent탭 DM의 상대가 실제 에이전트임을
+  // 보강하는 용도, group 판정에는 관여하지 않는다).
+  const oneOnOneParticipant = conv.type === 'dm' ? others[0] : null;
 
   const participantLayer = conv.participants && conv.participants.length > 0 ? (
     conv.type === 'dm' ? (
@@ -165,25 +172,20 @@ function ConversationRow({
       onClick={onClick}
       className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-muted/60 active:bg-muted"
     >
-      {/* Avatar — story #2590(TIER1 아이콘): 계열 글자는 tint 유무와 무관하게(카드/배경/muted
-          전부) 3.0 미달이라(--warning L=0.75 자체가 옅음) tint 제거+ring으로도 안 풀린다(직접
-          재실측: warning on card 2.25·warning-border on card 1.65 — 둘 다 실패). 진한 warning
-          토큰 신설은 이 스토리 범위 밖(#2420 doc "별건") — foreground로 잠정 통일. */}
-      <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-sm font-medium ${
-        isAgentConv
-          ? 'bg-warning-tint text-foreground'
-          : conv.type === 'dm'
-            ? 'bg-primary/15 text-primary'
-            : 'bg-info/15 text-info'
-      }`}>
-        {isAgentConv
-          ? <Bot className="h-4 w-4" />
-          : conv.type === 'dm' && avatarInitial
-            ? avatarInitial
-            : conv.type === 'dm'
-              ? <MessageSquare className="h-4 w-4" />
-              : <Users className="h-4 w-4" />}
-      </div>
+      {/* story #2968 — 1:1(DM·agent 탭)은 avatar.tsx 정본으로 실사진(3단 폴백은 그 컴포넌트
+          책임). group은 특정 1인 사진이 의미가 없어(다인원) 기존 아이콘 자리를 유지한다. */}
+      {oneOnOneParticipant ? (
+        <Avatar
+          name={oneOnOneParticipant.name ?? (isAgentConv ? t('agent') : 'DM')}
+          avatarUrl={oneOnOneParticipant.avatar_url ?? null}
+          actorType={isAgentConv || oneOnOneParticipant.type === 'agent' ? 'agent' : 'human'}
+          size={36}
+        />
+      ) : (
+        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-info/15 text-foreground">
+          {conv.type === 'dm' ? <MessageSquare className="h-4 w-4" /> : <Users className="h-4 w-4" />}
+        </div>
+      )}
 
       {/* Info */}
       <div className="min-w-0 flex-1">
