@@ -57,3 +57,19 @@ export function deriveGateProofState(status: string): GateProofStateResult {
   const proofState: ProofState = status === 'pending' ? 'amber' : status === 'approved' ? 'green' : 'red';
   return { proofState, statusKey: GATE_STATUS_I18N_KEYS[status] ?? null };
 }
+
+// story #2950 슬라이스②(PO 설계안 승인, doc gate-risk-real-discriminator-design-2950 §3/§7)
+// — risk_grade 칩(변별 0)을 대체하는 «관찰 사실 그대로 노출». 판정/재분류 없음 — BE
+// neutral_facts.diff_size/touches_migration이 있으면 그대로 보이고, 없으면(관찰 실패·이
+// gate_type엔 파일-diff 개념 자체가 없음 등) 지어내지 않고 null(호출부가 아예 렌더 안 함).
+export interface DiffFacts {
+  fileCount: number;
+  touchesMigration: boolean;
+}
+
+export function deriveDiffFacts(gate: GateItem): DiffFacts | null {
+  const fileCount = gate.neutral_facts?.['diff_size'];
+  if (typeof fileCount !== 'number') return null;
+  const touchesMigration = gate.neutral_facts?.['touches_migration'] === true;
+  return { fileCount, touchesMigration };
+}
