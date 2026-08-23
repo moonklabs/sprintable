@@ -347,6 +347,17 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
 
   const sidebarContent = (
     <>
+      {/* story #2963 §2 — 에디토리얼 마스트헤드(1호 인덱스 축소판). 상태·핸들러 무접촉,
+          형태만 승격 — 6 능력 어디에도 속하지 않는 순수 헤더 삽입. */}
+      <div className="px-3 pb-1.5 pt-3">
+        <div className="font-mono text-[9px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          {t('railKicker')}
+        </div>
+        <div className="mt-0.5 font-editorial-heading text-[20px] leading-none tracking-[-0.03em] text-foreground">
+          {t('title')}
+        </div>
+        <hr className="mt-2 h-[3px] w-8 border-0 bg-proof-citron" />
+      </div>
       <TreeSearchInput
         value={searchQuery}
         onChange={setSearchQuery}
@@ -401,9 +412,11 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
               type="button"
               onClick={() => setViewMode(mode)}
               className={cn(
-                'flex-1 border-b-2 px-2 pb-1.5 text-[11px] font-medium transition-colors',
+                // story #2963 §2 — 언더라인 탭(I3 정본, docs-index.tsx 카테고리 탭과 동일 클래스
+                // 조합: border-b-2 border-proof-citron). setViewMode 호출·localStorage 저장은 무변경.
+                'flex-1 border-b-2 px-2 pb-1.5 text-[11px] font-semibold transition-colors',
                 viewMode === mode
-                  ? 'border-primary text-foreground'
+                  ? 'border-proof-citron text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground',
               )}
             >
@@ -416,19 +429,24 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           사용자가 고를 정렬 축이 아니다. 정렬은 "브라우징 중인 트리"에만 의미가 있다.
           #2193: 정렬 토글은 "내 폴더"(기존 트리) 뷰에서만 의미가 있다 — 자동 묶음 뷰는
           그룹 크기 기준 자체 정렬을 쓴다. */}
+      {/* story #2963 §2 — native <select> → 인라인 mono 토글(수동/제목/최근). setSortMode·
+          localStorage 저장 로직은 완전 무변경 — 같은 상태를 다른 컨트롤로 바꿀 뿐. */}
       {!isSearching && viewMode === 'folders' && (
-        <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-1.5">
-          <label htmlFor="docs-sort-mode" className="text-[11px] text-muted-foreground">{t('sortModeLabel')}</label>
-          <select
-            id="docs-sort-mode"
-            value={sortMode}
-            onChange={(e) => setSortMode(e.target.value as DocSortMode)}
-            className="rounded-md border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground"
-          >
-            <option value="manual">{t('sortModeManual')}</option>
-            <option value="title">{t('sortModeTitle')}</option>
-            <option value="updated_at">{t('sortModeUpdatedAt')}</option>
-          </select>
+        <div className="flex items-center gap-2.5 border-b border-border/60 px-3 py-1.5 font-mono text-[10px]">
+          <span className="text-muted-foreground">{t('sortModeLabel')}</span>
+          {(['manual', 'title', 'updated_at'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setSortMode(mode)}
+              className={cn(
+                'transition-colors',
+                sortMode === mode ? 'font-bold text-foreground' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {mode === 'manual' ? t('sortModeManual') : mode === 'title' ? t('sortModeTitle') : t('sortModeUpdatedAt')}
+            </button>
+          ))}
         </div>
       )}
       {!isSearching && (() => {
@@ -441,14 +459,19 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
                 {tagsCollapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
                 {t('tagFilter')}
                 {tagsCollapsed && selectedTags.length > 0 && (
-                  <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">{selectedTags.length}</span>
+                  <span className="proof-cut-xs bg-proof-blue-soft px-1.5 py-0.5 text-[10px] font-semibold text-foreground">{selectedTags.length}</span>
                 )}
               </span>
             </button>
+            {/* story #2963 §2 — collapsible pill → .proof-cut 칩(선택=blue-soft/blue·비선택=
+                sunk/ink-3). selectedTags state·toggle 로직은 완전 무변경. */}
             {!tagsCollapsed && (
               <div className="flex max-h-[120px] flex-wrap gap-1 overflow-y-auto px-4 py-1">
                 {allTags.map((tag) => (
-                  <button key={tag} type="button" onClick={() => setSelectedTags((prev) => prev.includes(tag) ? prev.filter((tg) => tg !== tag) : [...prev, tag])} className={`rounded-full px-2 py-0.5 text-[11px] font-medium transition ${selectedTags.includes(tag) ? 'bg-primary text-primary-foreground' : 'bg-muted/60 text-muted-foreground hover:bg-muted'}`}>
+                  // AC4(#2420 캐논) — tint 배경 위 계열색 텍스트 금지, StatusChip과 동일하게
+                  // text-foreground(선택)로 대비를 지킨다(시안 원안의 text-proof-blue는 이
+                  // 규율과 충돌해 안 따름).
+                  <button key={tag} type="button" onClick={() => setSelectedTags((prev) => prev.includes(tag) ? prev.filter((tg) => tg !== tag) : [...prev, tag])} className={`proof-cut-xs px-2 py-0.5 text-[11px] font-semibold transition ${selectedTags.includes(tag) ? 'bg-proof-blue-soft text-foreground' : 'bg-proof-sunk text-proof-ink-3 hover:bg-muted'}`}>
                     #{tag}
                   </button>
                 ))}

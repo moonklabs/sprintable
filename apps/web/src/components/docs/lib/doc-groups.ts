@@ -10,6 +10,9 @@ export interface GroupableDoc {
   slug: string;
   title: string;
   created_at?: string;
+  // story #2963 §3 — 레일 v2 proof 상태 도트 소스(doc.status). 트리 데이터엔 이미 있었으나
+  // 이 타입엔 없었을 뿐(#2955 docs-context.tsx Doc 타입과 동형 갭).
+  status?: string;
 }
 
 export interface DocGroup {

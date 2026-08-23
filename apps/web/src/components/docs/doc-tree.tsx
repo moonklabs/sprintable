@@ -12,6 +12,13 @@ import { useTouchSafePointerSensor } from '@/hooks/use-touch-safe-pointer-sensor
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useTreeExpanded } from './use-tree-expanded';
 import { fetchWithAuth } from '@/lib/db/client';
+import { DOC_STATUS_TONE, toDocStatusFilter } from './lib/doc-status-tone';
+
+// story #2963 §3 — proof 상태 도트(6px). 색은 도트에만(§4 대비 규율).
+function StatusDot({ status }: { status: string | undefined }) {
+  const tone = DOC_STATUS_TONE[toDocStatusFilter(status)];
+  return <span className={cn('size-1.5 shrink-0 rounded-full', tone.dot)} aria-hidden="true" />;
+}
 
 // ─── Preview Card ─────────────────────────────────────────────────────────────
 
@@ -59,6 +66,8 @@ interface Doc {
   sort_order: number;
   is_folder?: boolean;
   updated_at?: string;
+  // story #2963 §3 — 레일 v2 proof 상태 도트 소스.
+  status?: string;
 }
 
 export type DocSortMode = 'manual' | 'title' | 'updated_at';
@@ -290,7 +299,8 @@ function TreeNode({
           ) : (
             <FileText className="size-4 shrink-0 text-muted-foreground" />
           )}
-          <span className="flex-1 truncate">
+          <StatusDot status={doc.status} />
+          <span className="flex-1 truncate font-semibold">
             {doc.title}
           </span>
         </button>

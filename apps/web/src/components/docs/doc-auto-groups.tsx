@@ -4,6 +4,13 @@ import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { bucketDocsByTime, computeDocGroups, type DocGroup, type GroupableDoc } from './lib/doc-groups';
+import { DOC_STATUS_TONE, toDocStatusFilter } from './lib/doc-status-tone';
+
+// story #2963 §3 — proof 상태 도트(6px). 색은 도트에만(§4 대비 규율) — 라벨 텍스트는 무변경.
+function StatusDot({ status }: { status: string | undefined }) {
+  const tone = DOC_STATUS_TONE[toDocStatusFilter(status)];
+  return <span className={cn('size-1.5 shrink-0 rounded-full', tone.dot)} aria-hidden="true" />;
+}
 
 // story #2193 — "자동 묶음" 뷰. 기존 DocTree(폴더 계층·드래그 이동)는 그대로 두고, 이건
 // 완전히 별개의 읽기전용 브라우징 뷰다. 폴더에 담겼는지와 무관하게 slug 접두어로 문서를
@@ -48,12 +55,13 @@ function GroupMemberList({ members, moreLabel, selectedSlug, onSelect }: {
             type="button"
             onClick={() => onSelect(doc.slug)}
             className={cn(
-              'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors',
+              'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] font-semibold transition-colors',
               selectedSlug === doc.slug
                 ? 'bg-primary/10 text-primary'
                 : 'text-foreground/80 hover:bg-muted hover:text-foreground',
             )}
           >
+            <StatusDot status={doc.status} />
             <FileText className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="truncate">{doc.title}</span>
           </button>
@@ -94,11 +102,13 @@ function GroupHeader({ group, inFolderLabel, looseAtRootLabel, moreLabel, select
         type="button"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
-        className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-foreground/90 hover:bg-muted"
+        className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left hover:bg-muted"
       >
         {expanded ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />}
-        <span className="flex-1 truncate">{group.label}</span>
-        <span className="text-[11px] tabular-nums text-muted-foreground">{total}</span>
+        {/* story #2963 §2 — meta-caps 그룹 라벨("제품 · 5"), mono 소문자 규율은 editorial 헤더와 동형. */}
+        <span className="flex-1 truncate font-mono text-[9.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+          {group.label} <span className="text-border">·</span> {total}
+        </span>
       </button>
       {expanded && (
         <div className="space-y-1.5 pb-1 pl-4">
