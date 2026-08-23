@@ -3835,6 +3835,8 @@
     "gateDetailOrgContext": "조직 {org}",
     "riskUnknown": "위험도 확인 중",
     "riskHigh": "고위험 · 신중 결재",
+    "diffFactsFileCount": "파일 {count}",
+    "diffFactsMigrationTouch": "마이그레이션 접촉",
     "sigEvidenceLabel": "근거",
     "sigEvidenceViewedLabel": "위 근거를 확인했습니다",
     "sigReasonLabel": "결정 사유",

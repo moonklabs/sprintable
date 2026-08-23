@@ -3835,6 +3835,8 @@
     "gateDetailOrgContext": "Org {org}",
     "riskUnknown": "Risk pending",
     "riskHigh": "High risk · review closely",
+    "diffFactsFileCount": "{count} files",
+    "diffFactsMigrationTouch": "touches migration",
     "sigEvidenceLabel": "Evidence",
     "sigEvidenceViewedLabel": "I have reviewed the evidence above",
     "sigReasonLabel": "Decision reason",

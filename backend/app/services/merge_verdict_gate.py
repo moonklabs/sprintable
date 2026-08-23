@@ -262,6 +262,57 @@ async def _role_key(session: AsyncSession, role_id: uuid.UUID) -> str | None:
     return role.key if role is not None else None
 
 
+async def _observe_pr_diff_facts(
+    session: AsyncSession, org_id: uuid.UUID, repo: str, pr_number: int
+) -> dict[str, Any]:
+    """story #2950 슬라이스②(PO 설계안 승인, doc gate-risk-real-discriminator-design-2950 §3) —
+    diff_size(변경 파일 수)·touches_migration(마이그레이션 파일 접촉)을 **관찰 사실로만**
+    neutral_facts에 남긴다. ⚠️판정 아님 — risk_grade 재계산에 이 값을 쓰지 않는다(doc §6 §1972
+    정합 논거 그대로: `Gate` 모델 독스트링이 애초에 이 두 필드를 "관찰 사실"로 예견했다).
+    임계값·low/high 재판정은 v1 스코프 밖(PO 명시, 별도 승인 필요).
+
+    `fetch_pr_changed_files`(verdict_capture.py)가 이미 GitHub PR-files API를 호출하는 능력을
+    scope-violation 체크 전용으로만 썼던 것을 여기로 확장 — 신규 API 통합 0. best-effort:
+    installation 없음/토큰 발급 실패/API 실패 어느 단계든 조용히 `{}` 반환(기존 `_reopen_gate_
+    hook_after_participation` 등과 동일 fail-closed 관례 — 외부 신호를 지어내지 않는다). 이
+    관찰 실패가 머지 게이트 평가 자체를 절대 막지 않는다."""
+    from app.models.github_installation import GithubInstallation
+    from app.services.github_app import get_installation_token
+    from app.services.verdict_capture import fetch_pr_changed_files
+
+    try:
+        installation = (
+            await session.execute(
+                select(GithubInstallation).where(
+                    GithubInstallation.org_id == org_id, GithubInstallation.suspended_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if installation is None:
+            return {}
+        token = await get_installation_token(installation.installation_id)
+        if not token:
+            return {}
+        changed_files = await fetch_pr_changed_files(repo, pr_number, token)
+        if changed_files is None:
+            return {}
+        return {
+            "diff_size": len(changed_files),
+            # 카디르 QA(PR#3383, 2026-08-23) — GitHub PR-files API는 레포 루트 기준 경로를
+            # 준다(실측: #3376 파일 전부 "backend/..."). 이 모노레포의 실 alembic 위치는
+            # "backend/alembic/versions/"이지 "alembic/versions/"가 아니다 — 원래 버전은
+            # 이 축이 영구 False였다("틀릴 수 없는 표본" 클래스, 신규 테스트가 매치 로직을
+            # 실제로 돌리지 않아 못 잡았다).
+            "touches_migration": any(f.startswith("backend/alembic/versions/") for f in changed_files),
+        }
+    except Exception:  # noqa: BLE001 — best-effort 관찰, 실패해도 게이트 평가를 막지 않는다.
+        logger.warning(
+            "merge gate: PR diff facts 관찰 실패(best-effort) org=%s repo=%s pr=%d",
+            org_id, repo, pr_number, exc_info=True,
+        )
+        return {}
+
+
 async def evaluate_merge_gate(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -398,6 +449,10 @@ async def evaluate_merge_gate(
     # story #2932(HIGH1) — pr_number와 짝으로 repo도 정직하게: 빈 문자열("", no-substance
     # self-report shell의 관례값)은 "모름"이지 실 repo가 아니므로 None으로 정규화.
     db_repo_full_name = repo or None
+    # story #2950 슬라이스② — 관찰 사실(diff_size/touches_migration)만 neutral_facts에 병합.
+    # no-substance shell(db_pr_number/db_repo_full_name 둘 다 None)이면 관찰 대상 자체가 없다.
+    if db_pr_number is not None and db_repo_full_name is not None:
+        facts.update(await _observe_pr_diff_facts(session, org_id, db_repo_full_name, db_pr_number))
     # story #2118(E-DG-REAL ②): create_gate()가 이미 pending인 기존 gate를 멱등 반환할 때(예:
     # report-done/board-preflight가 이 함수를 반복 호출)마다 승인요청 카드를 중복 배달하지 않으려면
     # "이 호출에서 방금 pending이 됐는지"(신규 생성 또는 rejected/voided→재오픈)를 알아야 한다 —

@@ -167,6 +167,54 @@ describe('ApprovalsQueue', () => {
     expect(container.textContent).not.toContain(koMessages.cage.riskUnknown);
   });
 
+  // story #2950 슬라이스②(PO 설계안 승인) — risk_grade 칩을 대체하는 관찰 사실 노출.
+  // can_approve=true인 인라인 카드 경로(density="full")에서만 diffFacts 슬롯이 산다.
+  it('neutral_facts.diff_size/touches_migration이 있으면 「파일 N · 마이그레이션 접촉」을 표시한다', async () => {
+    mockFetches(
+      [gate({
+        id: 'g-diff', can_approve: true, requires_human: true,
+        neutral_facts: { diff_size: 12, touches_migration: true },
+      })],
+      [],
+    );
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).toContain('파일 12');
+    expect(text).toContain(koMessages.cage.diffFactsMigrationTouch);
+  });
+
+  it('touches_migration=false면 마이그레이션 접촉 문구 없이 파일 수만 표시한다', async () => {
+    mockFetches(
+      [gate({
+        id: 'g-diff-no-migration', can_approve: true, requires_human: true,
+        neutral_facts: { diff_size: 3, touches_migration: false },
+      })],
+      [],
+    );
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).toContain('파일 3');
+    expect(text).not.toContain(koMessages.cage.diffFactsMigrationTouch);
+  });
+
+  it('neutral_facts가 없으면 diffFacts를 지어내지 않고 아예 표시하지 않는다', async () => {
+    mockFetches([gate({ id: 'g-no-facts', can_approve: true, requires_human: true, neutral_facts: null })], []);
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('파일');
+  });
+
+  it('risk_grade 칩(고위험/위험도 확인 중)은 어떤 경우에도 더 이상 렌더되지 않는다', async () => {
+    mockFetches(
+      [gate({ id: 'g-no-chip', can_approve: true, requires_human: true, risk_grade: 'high' })],
+      [],
+    );
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).not.toContain(koMessages.cage.riskHigh);
+    expect(text).not.toContain(koMessages.cage.riskUnknown);
+  });
+
   it('created_at이 오늘이면 "오늘 접수", 과거면 "N일 대기"로 노화를 표시한다', async () => {
     const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000).toISOString();
     mockFetches(

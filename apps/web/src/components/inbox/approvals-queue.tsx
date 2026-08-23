@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CheckCircle, XCircle } from 'lucide-react';
-import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
+import { deriveRiskLevel, usesSignatureFlow, deriveDiffFacts } from '@/components/cage/gate-risk';
 import { gateNeedsAction } from '@/components/cage/gate-evidence';
 import { GateUndoButton, UNDO_WINDOW_MS } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
@@ -287,6 +287,7 @@ export function ApprovalsQueue() {
         const orgName = orgMemberships.find((o) => o.orgId === gate.org_id)?.orgName;
         const resolved = resolvedGates[gate.id];
         const inlineResolvable = !resolved && canInlineResolve(gate);
+        const diffFacts = deriveDiffFacts(gate);
         const gateBody = (
           <>
             <div className="flex w-full flex-wrap items-center gap-1.5">
@@ -304,6 +305,12 @@ export function ApprovalsQueue() {
               {gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
             </p>
             {orgName ? <p className="text-[11px] text-muted-foreground">{orgName}</p> : null}
+            {diffFacts ? (
+              <p className="text-[11px] text-muted-foreground">
+                {t('diffFactsFileCount', { count: diffFacts.fileCount })}
+                {diffFacts.touchesMigration ? ` · ${t('diffFactsMigrationTouch')}` : ''}
+              </p>
+            ) : null}
           </>
         );
 
