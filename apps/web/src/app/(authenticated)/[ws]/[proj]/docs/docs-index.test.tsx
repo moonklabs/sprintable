@@ -121,12 +121,15 @@ describe('DocsIndex — 문서 있음(§2 마스트헤드+목록)', () => {
     expect(container.textContent).toContain('반려된 문서');
   });
 
-  it('항목을 클릭하면 에디터(docUrl)가 아니라 리더(docViewUrl)로 이동한다', async () => {
+  // story #2967(선생님 실사용 판정 ⑤) — 원래는 리더(docViewUrl)로 갔으나, 트리 사이드바
+  // (에디터 직행)와 목적지가 갈려 편집까지 2스텝이 되는 문제가 실사용에서 적발됐다. 인덱스도
+  // 에디터 직행으로 되돌려 트리와 동선을 통일한다(리더는 에디터의 opt-in "미리보기" 링크로만).
+  it('항목을 클릭하면 트리 사이드바와 동일하게 에디터(docUrl)로 직행한다', async () => {
     useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree });
     await mount();
     const item = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('결제 스펙 v2'));
     await act(async () => { item!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(pushMock).toHaveBeenCalledWith('/ws1/proj1/docs/payments-v2/view');
+    expect(pushMock).toHaveBeenCalledWith('/ws1/proj1/docs/payments-v2');
   });
 
   it('격자 보기로 전환해도 문서 항목이 그대로 보인다(뷰 전환만, 데이터 손실 없음)', async () => {

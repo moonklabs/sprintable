@@ -205,7 +205,9 @@ describe('gateTransition 데이터 레이어 안전판(§ 우회 금지, UI 은�
 });
 
 describe('DocEvidenceRail — 증거 레일(§3/§6, 접힌 audit 리스트→상시 타임라인)', () => {
-  it('revision+승인 이력이 있으면 타임라인 노드가 렌더된다', async () => {
+  // story #2967(선생님 실사용 판정 ④) — 이력 1~2건은 316px 세로 레일이 텅 비어 보여 판이
+  // 왼쪽으로 쏠렸다. 노드 2개 이하는 세로선·제목 없이 컴팩트 가로 스트립으로 강등한다.
+  it('이력이 2건 이하면 세로 타임라인(제목·세로선) 없이 컴팩트 스트립으로 뜬다', async () => {
     stubFetch({
       gates: [gate({ status: 'approved', resolver_id: 'm1', resolved_at: '2026-08-21T14:32:00Z' })],
       revisions: [{ id: 'r1', created_by: 'm2', created_at: '2026-08-19T00:00:00Z' }],
@@ -214,11 +216,28 @@ describe('DocEvidenceRail — 증거 레일(§3/§6, 접힌 audit 리스트→�
     const { DocEvidenceRail } = await import('./doc-status-rail');
     await act(async () => { root.render(wrap(<DocEvidenceRail docId="doc-1" status="confirmed" />)); });
     await flush();
-    expect(container.textContent).toContain('결재 이력');
+    expect(container.textContent).not.toContain('결재 이력');
+    expect(container.querySelector('ol')).toBeNull();
     expect(container.textContent).toContain('검토 요청');
     expect(container.textContent).toContain('승인');
     expect(container.textContent).toContain('윤도선');
     expect(container.textContent).toContain('송윤재');
+  });
+
+  it('이력이 3건 이상이면 세로 타임라인(제목·세로선 있는 정규 레일)으로 뜬다', async () => {
+    stubFetch({
+      gates: [gate({ status: 'approved', resolver_id: 'm1', resolved_at: '2026-08-21T14:32:00Z' })],
+      revisions: [
+        { id: 'r1', created_by: 'm2', created_at: '2026-08-18T00:00:00Z' },
+        { id: 'r2', created_by: 'm2', created_at: '2026-08-19T00:00:00Z' },
+      ],
+      members: [{ id: 'm1', name: '윤도선' }, { id: 'm2', name: '송윤재' }],
+    });
+    const { DocEvidenceRail } = await import('./doc-status-rail');
+    await act(async () => { root.render(wrap(<DocEvidenceRail docId="doc-1" status="confirmed" />)); });
+    await flush();
+    expect(container.textContent).toContain('결재 이력');
+    expect(container.querySelector('ol')).not.toBeNull();
   });
 
   it('이력이 전혀 없으면(draft, gate/revision 0건) 아무것도 렌더하지 않는다(노이즈 0)', async () => {

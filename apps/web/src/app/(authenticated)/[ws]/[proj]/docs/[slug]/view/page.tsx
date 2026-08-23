@@ -102,8 +102,11 @@ export default function DocViewPage() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* breadcrumb 상단 바(§3) — 옛 인라인 타이틀+TOC+편집 바를 대체. */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/20 px-4 py-2.5 font-mono text-[11.5px] text-muted-foreground lg:px-8">
+      {/* breadcrumb 상단 바(§3) — 옛 인라인 타이틀+TOC+편집 바를 대체.
+          story #2967(선생님 실사용 판정) — font-mono가 한글에서 가늘고 흐리다(에디토리얼
+          mono 문법은 라틴 고정폭 전제라 한글엔 안 맞음). meta-caps는 라틴 전용으로 한정하고
+          한글 경로는 sans 본문체로 — 위계는 크기/weight/citron rule로만 낸다. */}
+      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/20 px-4 py-2.5 text-[12px] text-muted-foreground lg:px-8">
         <Link href={docsListUrl(wsSlug, projSlug)} className="hover:text-foreground hover:underline">{t('breadcrumbKnowledgeRoot')}</Link>
         {categoryLabel ? (<><span className="text-muted-foreground">/</span><span>{categoryLabel}</span></>) : null}
         <span className="text-muted-foreground">/</span>
@@ -123,11 +126,14 @@ export default function DocViewPage() {
         <div className="grid grid-cols-1 gap-8 px-4 py-8 lg:grid-cols-[minmax(0,1fr)_316px] lg:px-8">
           {/* 리딩 컬럼(§3) — 68ch 정본(§8 확定), 본문 렌더는 무변경(DocContentRenderer). */}
           <article className="mx-auto w-full max-w-[68ch]">
-            <div className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-proof-blue">
+            {/* story #2967 — kicker/byline은 한글 콘텐츠(카테고리명·작성자명)라 mono+uppercase+
+                wide tracking을 걷는다(«처방도 언어 축을 탄다» — 라틴 전용 문법을 한글에
+                강제하지 않는다). 위계는 색(citron 라인 계열 blue)+굵기로만 유지. */}
+            <div className="text-[13px] font-semibold text-proof-blue">
               {categoryLabel ?? t('indexCategoryUncategorized')}
             </div>
             <h1 className="mt-2 font-editorial-heading text-[38px] leading-[1.1] tracking-[-0.03em] text-foreground">{doc.title}</h1>
-            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[12.5px] text-muted-foreground">
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
               {doc.assignee ? (<><span>{doc.assignee.name}</span><span className="text-border">|</span></>) : null}
               <span>{doc.updated_at ? new Date(doc.updated_at).toLocaleDateString() : ''}</span>
               <span className="text-border">|</span>
@@ -147,6 +153,8 @@ export default function DocViewPage() {
                 codeCopyLabel={t('codeCopy')}
                 codeCopiedLabel={t('codeCopied')}
                 assetImageErrorLabel={t('attachImageUnavailable')}
+                suppressLeadingTitle={doc.title}
+                bodyEmphasis="full"
               />
             </div>
             {/* 두 번째 backlinks 자리(첫 자리: story-detail-panel, story #2299) — 컴포넌트
