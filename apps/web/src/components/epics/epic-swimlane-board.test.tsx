@@ -59,15 +59,19 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => ({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human' }),
 }));
 
-const { capturedDragEndHandlers } = vi.hoisted(() => ({
+const { capturedDragEndHandlers, capturedDragStartHandlers } = vi.hoisted(() => ({
   capturedDragEndHandlers: [] as Array<(event: unknown) => void>,
+  // story #2954 — draggingActive 시각화(onDragStart→dim) 검증용. 기존 onDragEnd 캡처
+  // 관례와 동형으로 확장.
+  capturedDragStartHandlers: [] as Array<(event: unknown) => void>,
 }));
 vi.mock('@dnd-kit/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@dnd-kit/core')>();
   return {
     ...actual,
-    DndContext: ({ onDragEnd, children }: { onDragEnd?: (event: unknown) => void; children?: React.ReactNode }) => {
+    DndContext: ({ onDragEnd, onDragStart, children }: { onDragEnd?: (event: unknown) => void; onDragStart?: (event: unknown) => void; children?: React.ReactNode }) => {
       if (onDragEnd) capturedDragEndHandlers.push(onDragEnd);
+      if (onDragStart) capturedDragStartHandlers.push(onDragStart);
       return children;
     },
   };
@@ -89,6 +93,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   capturedDragEndHandlers.length = 0;
+  capturedDragStartHandlers.length = 0;
   // ⚠️QA changes 5R(PR#3377, 카디르+codex, 2026-08-22) — 진단 로그(4R)가 답을 줬다: bulk
   // 호출이 아예 없었다(자원 경쟁 기각). 근본원인: 여기 localStorage 초기화가 없어 "토글
   // 클릭 시 트러스트 축으로 바뀐다" 테스트가 남긴 axisMode='trust'(loadAxisMode/
@@ -156,7 +161,25 @@ type FetchStub = {
 // 하는데 항상 bulk 2건만이라 결정론적 환경 차 가능성).
 let callLog: string[] = [];
 
+// story #2959(PO 배포 실픽셀, 2026-08-23) — 기본축이 trust로 반전되면서(kanban-board.tsx
+// #3378 도입분에 이어 이 뷰도) trust_stage 없는 고정 fixture가 어느 컬럼에도 안 걸려
+// 카드가 조용히 사라졌다(storyColumnId: axisMode==='trust'면 status!=='done'일 때
+// trust_stage ?? null). 실 BE는 derive_trust_stage()로 매 요청마다 항상 계산해 내려주므로
+// (done/미지 status 제외 None 없음), kanban-board.test.tsx가 이미 쓰는 것과 동일한 파생
+// 규칙을 이 stub에도 적용한다 — 축과 무관한 기존 테스트 다수를 일일이 안 건드림.
+function deriveDefaultTrustStage(status: string): string | null {
+  if (status === 'backlog' || status === 'ready-for-dev') return 'queued';
+  if (status === 'in-progress') return 'running';
+  if (status === 'in-review') return 'claimed_done';
+  return null; // done/미지 status — derive_trust_stage와 동형.
+}
+function withDefaultTrustStage(list: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return list.map((s) => ('trust_stage' in s ? s : { ...s, trust_stage: deriveDefaultTrustStage(String(s['status'])) }));
+}
+
 function stubFetch({ stories = [], epics = [], members = [], bulkPatchSpy, singlePatchSpy, singlePatchOk = true, bulkPatchOk = true, storiesGetSpy, storyPages, epicPages, singlePatchResponseData, bulkPatchResponseData, storiesFetchFails = false, storiesAlwaysHasMore = false, tasksByStoryId = {}, deleteStorySpy }: FetchStub) {
+  stories = withDefaultTrustStage(stories);
+  storyPages = storyPages?.map((page) => ({ ...page, stories: withDefaultTrustStage(page.stories) }));
   callLog = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
     callLog.push(`${init?.method ?? 'GET'} ${url}`);
@@ -434,40 +457,44 @@ describe('EpicSwimlaneBoard — 로드 실패(story #2931, QA changes 8R HIGH②
 });
 
 describe('EpicSwimlaneBoard — 열 축 토글(story #2931, H4 공유)', () => {
-  it('기본은 5-status 클래식 축 — 트러스트 컬럼 라벨이 안 보인다', async () => {
+  // story #2959(PO 배포 실픽셀, 2026-08-23) — kanban-board.tsx(#3378)와 동형 반전. 이 뷰도
+  // COLUMNS/TRUST_COLUMNS를 같은 형제 상수로 공유하는데 기본만 옛 'status' 잔재였다(유나 판정:
+  // P0-04 «기본=신뢰 파이프라인»은 워크스페이스 뷰 3종 전역 프레임).
+  it('기본은 6단계 신뢰축 — 5-status 클래식 라벨이 안 보인다', async () => {
     await mount({ epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }] });
+    expect(container.textContent).toContain('입력 필요');
+    expect(container.textContent).not.toContain('개발 대기');
+  });
+
+  it('명시적으로 클래식 축을 선택하면(로컬 클릭) 존중되고, 재마운트 후에도 유지된다', async () => {
+    await mount({ epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }] });
+    const toggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '5-status 클래식');
+    await act(async () => { toggle!.click(); });
     expect(container.textContent).not.toContain('입력 필요');
   });
 
-  it('토글 클릭 시 6단계 신뢰축 컬럼으로 바뀐다', async () => {
-    await mount({ epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }] });
-    const toggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '6단계 신뢰축 + 완료');
-    await act(async () => { toggle!.click(); });
-    expect(container.textContent).toContain('입력 필요');
-  });
-
-  // ⚠️QA changes 5R(PR#3377 근본원인, 카디르+codex, 2026-08-22) — 바로 위 테스트가 이
-  // projectId(p1)에 axisMode='trust'를 localStorage(loadAxisMode/saveAxisMode 키)에
-  // 남긴다. beforeEach의 localStorage.clear()가 없었다면 이 테스트(파일 내 다음 순번)가
-  // 그 잔존값을 그대로 물려받아 기본 classic 축 기대가 깨지고, 드래그도
-  // TRUST_COLUMN_TO_STATUS['in-progress']=undefined→newStatus undefined→bulk 게이트가
-  // 조용히 스킵된다(4R 진단 로그가 정확히 잡아낸 증상). 이 테스트가 그 cross-test 격리를
-  // 직접 고정한다 — 선언 순서(직전 테스트 바로 뒤)가 재현 조건의 일부라 옮기지 않는다.
-  it('[격리] 직전 테스트가 남긴 트러스트 축 잔존이 다음 마운트로 새지 않는다', async () => {
+  // ⚠️QA changes 5R(PR#3377 근본원인, 카디르+codex, 2026-08-22) — 직전 테스트가 이
+  // projectId(p1)에 axisMode를 localStorage(loadAxisMode/saveAxisMode 키)에 남긴다.
+  // beforeEach의 localStorage.clear()가 없었다면 이 테스트(파일 내 다음 순번)가 그 잔존값을
+  // 그대로 물려받는다 — 이 테스트가 그 cross-test 격리를 직접 고정한다(선언 순서가 재현
+  // 조건의 일부라 옮기지 않는다). story #2959로 기본이 trust로 반전된 뒤에도 격리 자체의
+  // 성격은 동일 — 트러스트 컬럼 id(`running`)로 드래그해 TRUST_COLUMN_TO_STATUS 매핑이
+  // 여전히 살아있는지(잔존 'status' 값에 안 덮이는지) 확認한다.
+  it('[격리] 직전 테스트가 남긴 축 선택 잔존이 다음 마운트로 새지 않는다(기본 trust 유지)', async () => {
     let bulkBody: unknown = null;
     await mount({
       epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }],
       stories: [{ id: 's1', title: '카드', status: 'backlog', priority: 'medium', epic_id: 'e1' }],
       bulkPatchSpy: (body) => { bulkBody = body; },
     });
-    expect(container.textContent).not.toContain('입력 필요'); // 트러스트 라벨 부재 = classic 축으로 뜸.
+    expect(container.textContent).toContain('입력 필요'); // 기본(trust) 유지 — 직전 테스트의 명시 'status' 잔존에 안 물듦.
 
     const handler = capturedDragEndHandlers.at(-1);
     await act(async () => {
-      handler!({ active: { id: 's1' }, over: { id: 'e1::in-progress' } });
+      handler!({ active: { id: 's1' }, over: { id: 'e1::running' } });
       await waitForCondition(() => bulkBody !== null, '잔존 축 격리 — 같은 레인 내 컬럼 드래그(bulk PATCH)');
     });
-    expect(bulkBody).toEqual({ items: [{ id: 's1', status: 'in-progress' }] }); // undefined status로 스킵되지 않았음.
+    expect(bulkBody).toEqual({ items: [{ id: 's1', status: 'in-progress' }] }); // TRUST_COLUMN_TO_STATUS['running']=in-progress, undefined로 스킵되지 않았음.
   });
 });
 
@@ -504,6 +531,10 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
       bulkPatchSpy: (body) => { bulkBody = body; },
       singlePatchSpy: () => { singlePatchCalled = true; },
     });
+    // story #2959로 기본이 trust로 반전 — 이 테스트는 status 축의 'in-progress' 컬럼 id를
+    // 드롭 타깃으로 쓰므로(축 자체 검증이 목적 아님) 명시적으로 클래식 축으로 전환한다.
+    const classicToggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '5-status 클래식');
+    await act(async () => { classicToggle!.click(); });
 
     const handler = capturedDragEndHandlers.at(-1);
     await act(async () => {
@@ -535,6 +566,42 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
       await flush();
     });
     expect(anyPatchCalled).toBe(false);
+  });
+
+  // story #2954(유나 처방 — H4 kanban-trust-column.tsx 문법 이식, 신규 토큰·컴포넌트 0).
+  // 처방①: at-rest(드래그 무관)에도 헤더에 Lock 표식 — 잠긴 열임을 드래그 시작 前에 미리 안다.
+  it('트러스트 축의 잠긴(파생) 컬럼은 헤더에 항상 Lock 아이콘이 뜬다(at-rest)', async () => {
+    await mount({ epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }] });
+    const toggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '6단계 신뢰축 + 완료');
+    await act(async () => { toggle!.click(); });
+
+    // 헤더는 격자 맨 위 1회만(레인마다 반복 안 함) — 잠긴 3열(needs_input/verified/merge_ready)
+    // 각각에 Lock 아이콘 1개씩, 총 3개.
+    expect(container.querySelectorAll('.lucide-lock').length).toBe(3);
+  });
+
+  // 처방②: 드래그 中에만 잠긴 열을 dim 처리(H4 kanban-trust-column.tsx:86,92 opacity-45 이식).
+  // handleDragEnd:333의 targetLocked 방어(PATCH 0건)는 이미 있었지만 침묵 실패였다 — 시각이
+  // 그 침묵을 메운다.
+  it('드래그 中에만 잠긴(파생) 열 셀이 dim 처리되고, 드래그가 끝나면 원복된다', async () => {
+    await mount({
+      epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }],
+      stories: [{ id: 's1', title: '카드', status: 'in-progress', priority: 'medium', epic_id: 'e1', trust_stage: 'running' }],
+    });
+    const toggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '6단계 신뢰축 + 완료');
+    await act(async () => { toggle!.click(); });
+
+    const lockedCell = () => nthLaneCell(0, 2); // TRUST_COLUMNS[2] = needs_input(잠김).
+    expect(lockedCell()?.className ?? '').not.toContain('opacity-45'); // at-rest — 아직 dim 아님.
+
+    const startHandler = capturedDragStartHandlers.at(-1);
+    expect(startHandler, 'onDragStart를 캡처 못 함').toBeDefined();
+    await act(async () => { startHandler!({ active: { id: 's1' } }); });
+    expect(lockedCell()?.className ?? '').toContain('opacity-45'); // 드래그 中 — dim.
+
+    const endHandler = capturedDragEndHandlers.at(-1);
+    await act(async () => { endHandler!({ active: { id: 's1' }, over: null }); });
+    expect(lockedCell()?.className ?? '').not.toContain('opacity-45'); // 드래그 종료 — 원복.
   });
 
   // story #2931(PASS 판정·영구 테스트 없음은 비차단, 카디르 권고 2026-08-22) — 에픽 레인에서
@@ -592,6 +659,10 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
       storiesGetSpy: () => { storiesGetCount += 1; },
     });
     expect(storiesGetCount).toBe(1);
+    // story #2959로 기본이 trust로 반전 — 이 테스트는 status 축의 'in-progress' 컬럼 id를
+    // 드롭 타깃으로 쓰므로(축 자체 검증이 목적 아님) 명시적으로 클래식 축으로 전환한다.
+    const classicToggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '5-status 클래식');
+    await act(async () => { classicToggle!.click(); });
 
     const handler = capturedDragEndHandlers.at(-1);
     await act(async () => {
@@ -679,6 +750,10 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
       // gate가 in-progress 전이를 막아 status는 원래(backlog) 그대로 응답 — violation 동봉.
       bulkPatchResponseData: [{ id: 's1', status: 'backlog', violation: { reason: '워크플로우 위반' } }],
     });
+    // story #2959로 기본이 trust로 반전 — 이 테스트는 원래부터 명시적으로 클래식 축(주석
+    // 참조)을 가정해 만들어졌으나 이제 그 가정 자체를 명시로 만들어야 한다.
+    const classicToggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '5-status 클래식');
+    await act(async () => { classicToggle!.click(); });
 
     const handler = capturedDragEndHandlers.at(-1);
     await act(async () => {

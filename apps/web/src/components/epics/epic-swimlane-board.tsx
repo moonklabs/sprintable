@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Lock } from 'lucide-react';
 import {
   DndContext, type DragEndEvent, PointerSensor, useDroppable, useSensor, useSensors,
 } from '@dnd-kit/core';
@@ -93,12 +93,16 @@ type AxisMode = 'status' | 'trust';
 function axisModeKey(projectId: string | undefined): string {
   return `epic_swimlane_axis_mode_${projectId ?? 'default'}`;
 }
+// story #2959(PO 배포 실픽셀, 2026-08-23) — kanban-board.tsx(#3378)와 동형 반전. P0-04
+// «기본=신뢰 파이프라인»은 워크스페이스 뷰 3종(보드·스프린트·에픽) 전역 프레임이고 이 뷰도
+// 같은 COLUMNS/TRUST_COLUMNS 상수를 재사용하는 형제라 갈리면 프레임이 파손된다(유나 판정).
+// 명시적으로 저장된 'status' 선택만 존중하고, 그 외(미설정 포함)엔 'trust'로 낙하한다.
 function loadAxisMode(projectId: string | undefined): AxisMode {
-  if (typeof window === 'undefined') return 'status';
+  if (typeof window === 'undefined') return 'trust';
   try {
-    return window.localStorage.getItem(axisModeKey(projectId)) === 'trust' ? 'trust' : 'status';
+    return window.localStorage.getItem(axisModeKey(projectId)) === 'status' ? 'status' : 'trust';
   } catch {
-    return 'status';
+    return 'trust';
   }
 }
 function saveAxisMode(projectId: string | undefined, mode: AxisMode): void {
@@ -119,15 +123,21 @@ interface SwimlaneCellProps {
   stories: KanbanStory[];
   memberMap: Record<string, KanbanMember>;
   onStoryClick: (story: KanbanStory) => void;
+  isDragging: boolean;
 }
 
-function SwimlaneCell({ laneId, columnId, locked, stories, memberMap, onStoryClick }: SwimlaneCellProps) {
+// story #2954(유나 처방·H4 kanban-trust-column.tsx:86,92 문법 이식) — 드래그 中엔 잠긴
+// (파생) 열이 "지금 못 놓는다"는 게 정적 상태만으론 안 드러났다(handleDragEnd:333의
+// targetLocked 방어는 침묵 실패 — 드롭해도 조용히 무효화). opacity-45로 드래그 중에만
+// 어둡게 해 시각이 그 침묵을 메운다.
+function SwimlaneCell({ laneId, columnId, locked, stories, memberMap, onStoryClick, isDragging }: SwimlaneCellProps) {
   const { setNodeRef, isOver } = useDroppable({ id: `${laneId}::${columnId}`, disabled: locked });
+  const closedDuringDrag = locked && isDragging;
   return (
     <div
       ref={setNodeRef}
       className={`flex h-full min-h-[64px] w-[220px] shrink-0 flex-col gap-1.5 rounded-lg p-1.5 transition ${
-        locked ? 'bg-muted/20' : isOver ? 'bg-primary/5 ring-1 ring-primary/20' : 'bg-transparent'
+        closedDuringDrag ? 'bg-muted/20 opacity-45' : locked ? 'bg-muted/20' : isOver ? 'bg-primary/5 ring-1 ring-primary/20' : 'bg-transparent'
       }`}
     >
       {stories.map((story) => (
@@ -151,8 +161,12 @@ function SwimlaneColumnHeader({ columns }: { columns: readonly { id: string; lab
   return (
     <div className="flex gap-2 border-b border-border px-1 pb-1.5">
       {columns.map((col) => (
-        <div key={col.id} className="w-[220px] shrink-0 text-xs font-semibold text-foreground">
+        <div key={col.id} className="flex w-[220px] shrink-0 items-center gap-1 text-xs font-semibold text-foreground">
           {col.label}
+          {/* story #2954(유나 처방·H4 kanban-trust-column.tsx:99 문법 이식) — at-rest(드래그
+              중이 아니어도) 파생 열임을 한 번 알린다. 레인×열 격자라 per-셀 힌트 텍스트는
+              소음(유나 밀도 판단) — 헤더 1회+드래그 dim(SwimlaneCell)으로 충분. */}
+          {col.locked && <Lock className="size-3 text-muted-foreground" aria-hidden />}
         </div>
       ))}
     </div>
@@ -168,9 +182,10 @@ interface SwimlaneRowProps {
   axisMode: AxisMode;
   memberMap: Record<string, KanbanMember>;
   onStoryClick: (story: KanbanStory) => void;
+  isDragging: boolean;
 }
 
-function SwimlaneRow({ laneId, title, subtitle, columns, stories, axisMode, memberMap, onStoryClick }: SwimlaneRowProps) {
+function SwimlaneRow({ laneId, title, subtitle, columns, stories, axisMode, memberMap, onStoryClick, isDragging }: SwimlaneRowProps) {
   const byColumn = useMemo(() => {
     const map: Record<string, KanbanStory[]> = {};
     for (const col of columns) map[col.id] = [];
@@ -198,6 +213,7 @@ function SwimlaneRow({ laneId, title, subtitle, columns, stories, axisMode, memb
             stories={byColumn[col.id] ?? []}
             memberMap={memberMap}
             onStoryClick={onStoryClick}
+            isDragging={isDragging}
           />
         ))}
       </div>
@@ -212,9 +228,13 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
   const [members, setMembers] = useState<KanbanMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [axisMode, setAxisMode] = useState<AxisMode>('status');
+  const [axisMode, setAxisMode] = useState<AxisMode>('trust');
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [selectedStoryId, setSelectedStoryId] = useState<string | null>(null);
+  // story #2954(유나 처방·kanban-board.tsx activeId 문법 이식) — 드래그 中에만 잠긴(파생)
+  // 열을 dim 처리하기 위한 신호. onDragEnd/onDragCancel 둘 다에서 클리어(Escape 취소도
+  // "드래그 중" 표시가 눌어붙지 않게).
+  const [draggingActive, setDraggingActive] = useState(false);
   const [storyTasks, setStoryTasks] = useState<Task[]>([]);
   const [storyTasksNextCursor, setStoryTasksNextCursor] = useState<string | null>(null);
   const [loadingMoreStoryTasks, setLoadingMoreStoryTasks] = useState(false);
@@ -476,7 +496,12 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
 
             <SwimlaneColumnHeader columns={columns} />
 
-            <DndContext sensors={sensors} onDragEnd={(e) => { void handleDragEnd(e); }}>
+            <DndContext
+              sensors={sensors}
+              onDragStart={() => setDraggingActive(true)}
+              onDragEnd={(e) => { setDraggingActive(false); void handleDragEnd(e); }}
+              onDragCancel={() => setDraggingActive(false)}
+            >
               <div>
                 {topEpics.map((epic) => (
                   <SwimlaneRow
@@ -488,6 +513,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
                     axisMode={axisMode}
                     memberMap={memberMap}
                     onStoryClick={(s) => setSelectedStoryId(s.id)}
+                    isDragging={draggingActive}
                   />
                 ))}
 
@@ -511,6 +537,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
                         axisMode={axisMode}
                         memberMap={memberMap}
                         onStoryClick={(s) => setSelectedStoryId(s.id)}
+                        isDragging={draggingActive}
                       />
                     ))}
                   </div>
@@ -524,6 +551,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
                   axisMode={axisMode}
                   memberMap={memberMap}
                   onStoryClick={(s) => setSelectedStoryId(s.id)}
+                  isDragging={draggingActive}
                 />
               </div>
             </DndContext>
