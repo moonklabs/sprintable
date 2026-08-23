@@ -59,15 +59,19 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => ({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human' }),
 }));
 
-const { capturedDragEndHandlers } = vi.hoisted(() => ({
+const { capturedDragEndHandlers, capturedDragStartHandlers } = vi.hoisted(() => ({
   capturedDragEndHandlers: [] as Array<(event: unknown) => void>,
+  // story #2954 — draggingActive 시각화(onDragStart→dim) 검증용. 기존 onDragEnd 캡처
+  // 관례와 동형으로 확장.
+  capturedDragStartHandlers: [] as Array<(event: unknown) => void>,
 }));
 vi.mock('@dnd-kit/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@dnd-kit/core')>();
   return {
     ...actual,
-    DndContext: ({ onDragEnd, children }: { onDragEnd?: (event: unknown) => void; children?: React.ReactNode }) => {
+    DndContext: ({ onDragEnd, onDragStart, children }: { onDragEnd?: (event: unknown) => void; onDragStart?: (event: unknown) => void; children?: React.ReactNode }) => {
       if (onDragEnd) capturedDragEndHandlers.push(onDragEnd);
+      if (onDragStart) capturedDragStartHandlers.push(onDragStart);
       return children;
     },
   };
@@ -89,6 +93,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   capturedDragEndHandlers.length = 0;
+  capturedDragStartHandlers.length = 0;
   // ⚠️QA changes 5R(PR#3377, 카디르+codex, 2026-08-22) — 진단 로그(4R)가 답을 줬다: bulk
   // 호출이 아예 없었다(자원 경쟁 기각). 근본원인: 여기 localStorage 초기화가 없어 "토글
   // 클릭 시 트러스트 축으로 바뀐다" 테스트가 남긴 axisMode='trust'(loadAxisMode/
@@ -535,6 +540,42 @@ describe('EpicSwimlaneBoard — 드래그(story #2931)', () => {
       await flush();
     });
     expect(anyPatchCalled).toBe(false);
+  });
+
+  // story #2954(유나 처방 — H4 kanban-trust-column.tsx 문법 이식, 신규 토큰·컴포넌트 0).
+  // 처방①: at-rest(드래그 무관)에도 헤더에 Lock 표식 — 잠긴 열임을 드래그 시작 前에 미리 안다.
+  it('트러스트 축의 잠긴(파생) 컬럼은 헤더에 항상 Lock 아이콘이 뜬다(at-rest)', async () => {
+    await mount({ epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }] });
+    const toggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '6단계 신뢰축 + 완료');
+    await act(async () => { toggle!.click(); });
+
+    // 헤더는 격자 맨 위 1회만(레인마다 반복 안 함) — 잠긴 3열(needs_input/verified/merge_ready)
+    // 각각에 Lock 아이콘 1개씩, 총 3개.
+    expect(container.querySelectorAll('.lucide-lock').length).toBe(3);
+  });
+
+  // 처방②: 드래그 中에만 잠긴 열을 dim 처리(H4 kanban-trust-column.tsx:86,92 opacity-45 이식).
+  // handleDragEnd:333의 targetLocked 방어(PATCH 0건)는 이미 있었지만 침묵 실패였다 — 시각이
+  // 그 침묵을 메운다.
+  it('드래그 中에만 잠긴(파생) 열 셀이 dim 처리되고, 드래그가 끝나면 원복된다', async () => {
+    await mount({
+      epics: [{ id: 'e1', title: '에픽', status: 'active', position: 1 }],
+      stories: [{ id: 's1', title: '카드', status: 'in-progress', priority: 'medium', epic_id: 'e1', trust_stage: 'running' }],
+    });
+    const toggle = [...container.querySelectorAll('button')].find((b) => b.textContent === '6단계 신뢰축 + 완료');
+    await act(async () => { toggle!.click(); });
+
+    const lockedCell = () => nthLaneCell(0, 2); // TRUST_COLUMNS[2] = needs_input(잠김).
+    expect(lockedCell()?.className ?? '').not.toContain('opacity-45'); // at-rest — 아직 dim 아님.
+
+    const startHandler = capturedDragStartHandlers.at(-1);
+    expect(startHandler, 'onDragStart를 캡처 못 함').toBeDefined();
+    await act(async () => { startHandler!({ active: { id: 's1' } }); });
+    expect(lockedCell()?.className ?? '').toContain('opacity-45'); // 드래그 中 — dim.
+
+    const endHandler = capturedDragEndHandlers.at(-1);
+    await act(async () => { endHandler!({ active: { id: 's1' }, over: null }); });
+    expect(lockedCell()?.className ?? '').not.toContain('opacity-45'); // 드래그 종료 — 원복.
   });
 
   // story #2931(PASS 판정·영구 테스트 없음은 비차단, 카디르 권고 2026-08-22) — 에픽 레인에서
