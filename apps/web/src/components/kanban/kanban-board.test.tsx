@@ -59,13 +59,28 @@ function wrap(node: React.ReactNode) {
   );
 }
 
+// PO 긴급 fix(P0-04 기본축 trust 플립, 2026-08-22) — 실 BE는 trust_stage를 매 요청마다
+// derive_trust_stage()로 항상 계산해 내려준다(backend/app/services/trust_pipeline.py, done/미지
+// status 제외 None 없음). 이 축과 무관한 기존 테스트 다수가 trust_stage 없는 고정(fixture)을
+// 써왔는데, 기본 뷰가 trust로 바뀌면 그 고정이 실 BE 응답과 달라 카드가 어느 컬럼에도 안 걸려
+// 사라진다(storyTrustColumn: status!=='done'이면 trust_stage ?? null). 개별 테스트 50여곳을
+// 일일이 고치는 대신 이 stub 자체를 실 BE 파생 규칙과 정합시킨다 — 명시적으로 trust_stage를
+// 지정한 케이스(H4 테스트 등, null 명시 포함)는 그대로 존중하고 아예 안 준 경우만 채운다.
+function deriveDefaultTrustStage(status: string): string | null {
+  if (status === 'backlog' || status === 'ready-for-dev') return 'queued';
+  if (status === 'in-progress') return 'running';
+  if (status === 'in-review') return 'claimed_done';
+  return null; // done/미지 status — derive_trust_stage와 동형.
+}
+
 function stubFetch(stories: Array<Record<string, unknown> & { status: string }>, members: Array<Record<string, unknown>> = []) {
+  const withTrustStage = stories.map((s) => ('trust_stage' in s ? s : { ...s, trust_stage: deriveDefaultTrustStage(s.status) }));
   // CB-S4: 보드는 status별 5회 독립 호출(/api/stories?...&status=<col>) — 각 호출에 해당
   // status만 필터링해 {data:[...]} 형태(meta 포함)로 응답해야 실제 파싱 경로(json.data ?? [])와 맞는다.
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (typeof url === 'string' && url.startsWith('/api/stories?')) {
       const status = new URL(url, 'http://localhost').searchParams.get('status');
-      const matched = stories.filter((s) => s.status === status);
+      const matched = withTrustStage.filter((s) => s.status === status);
       return { ok: true, json: async () => ({ data: matched, meta: { total: matched.length, nextCursor: null } }) };
     }
     if (typeof url === 'string' && url.startsWith('/api/members')) {
@@ -156,6 +171,32 @@ describe('KanbanBoard — 보드 first-touch 절제된 배너', () => {
     await act(async () => { ctaButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     // 컴포저가 열리면 입력 필드(placeholder 또는 textbox role)가 나타난다.
     expect(container.querySelector('input, textarea')).not.toBeNull();
+  });
+
+  // ⚠️QA changes(PR#3378, 카디르+codex, 2026-08-22, HIGH) — CTA 브리지가 handleSetAxisMode를
+  // 쓰면 saveAxisMode까지 타 localStorage에 'status'가 영구 저장돼, CTA를 한 번만 눌러도
+  // 그 프로젝트가 조용히 classic으로 고정된다(재마운트해도 trust로 안 돌아옴 — 기본값
+  // 플립의 취지 자체가 무효화). setAxisMode만 쓰는 세션 한정 전환으로 좁혀 이 저장이
+  // 없는지 직접 증명한다.
+  it('배너 CTA 클릭은 축 전환을 localStorage에 저장하지 않는다 — 재마운트하면 다시 신뢰축 기본값', async () => {
+    stubFetch([]);
+    await mount();
+    const ctaButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('첫 스토리 만들기'));
+    await act(async () => { ctaButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.querySelector('input, textarea')).not.toBeNull(); // 임시 전환 자체는 여전히 동작.
+
+    await act(async () => { root.unmount(); });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    vi.resetModules();
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', trust_stage: 'queued' }]);
+    stubEventSource();
+    await mount();
+    // CTA 클릭이 명시 선택으로 저장됐다면 여기서도 classic(5-status)일 것 — 저장 안 됐으므로
+    // 기본값(trust)으로 복귀해 신뢰축 라벨이 다시 보인다.
+    expect(container.textContent).toContain('입력 필요');
   });
 
   it('스토리 데이터가 있으면 배너가 렌더되지 않는다(회귀 0)', async () => {
@@ -624,11 +665,36 @@ describe('KanbanBoard — 6단계 신뢰축 뷰(story #2933 H4)', () => {
     await act(async () => { btn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
   }
 
-  it('기본은 5-status 클래식 뷰 — 신뢰축 컬럼 라벨이 안 보인다', async () => {
+  // PO 긴급 fix(선생님 지적, 2026-08-22) — 방향서 P0-04 원문 «기본 상태는 신뢰 파이프라인으로»를
+  // #2933 done 선언 당시 전원(오르테가·QA·design)이 놓쳐 기본값이 거꾸로 'status'였다(실측
+  // 결함). 이 테스트는 원래 그 잘못된 기본값을 그린으로 고정했던 자리 — 스펙대로 뒤집는다.
+  it('기본은 6단계 신뢰축 뷰(P0-04 스펙) — localStorage 미설정 시 5-status 클래식 라벨이 안 보인다', async () => {
     stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', trust_stage: 'queued' }]);
     await mount();
+    expect(container.textContent).toContain('입력 필요');
+    expect(container.textContent).toContain('머지 준비');
+    expect(container.textContent).not.toContain('개발 대기');
+  });
+
+  it('사용자가 명시적으로 5-status 클래식을 선택하면(localStorage) 기본값 뒤집기와 무관하게 존중된다', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', trust_stage: 'queued' }]);
+    await mount();
+    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5-status 클래식');
+    expect(classicBtn, '클래식 토글 버튼을 못 찾음').toBeDefined();
+    await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(container.textContent).not.toContain('입력 필요');
-    expect(container.textContent).not.toContain('머지 준비');
+
+    await act(async () => { root.unmount(); });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    vi.resetModules();
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', trust_stage: 'queued' }]);
+    stubEventSource();
+    await mount();
+    // 재마운트 후에도 명시 선택('status')이 새 기본값('trust')을 덮어쓰지 않고 유지된다.
+    expect(container.textContent).not.toContain('입력 필요');
   });
 
   it('토글 클릭 시 7컬럼(대기/실행 중/입력 필요/주장 완료/검증·잔존/머지 준비/완료) 전부 렌더된다', async () => {
