@@ -222,4 +222,30 @@ describe('ConversationPage — 헤더 타이틀 Claim 무게(story #2969 PR-5)',
     expect(titleEl?.className).toContain('font-semibold');
     expect(titleEl?.className).not.toContain('font-medium');
   });
+
+  // 카디르 QA독립검증(PR#3405) — PR-5 신규 테스트가 DM(plain span)만 렌더해 group(editable
+  // 버튼 분기)의 동일 처방이 무테스트였던 갭. PR-6(#3405 이월분)에 편입.
+  it('group 방이름(편집 가능 버튼 분기)도 font-semibold(Claim 무게)를 갖는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/conv-1')) {
+        return {
+          ok: true,
+          json: async () => ({
+            title: '팀 채널', type: 'group', muted: false, lastReadAt: null, freeResponse: false,
+            participants: [
+              { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+              { member_id: 'them-1', name: '유나', avatar_url: null, type: 'human' },
+            ],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await mount();
+
+    const titleEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '팀 채널');
+    expect(titleEl).not.toBeUndefined();
+    expect(titleEl?.className).toContain('font-semibold');
+    expect(titleEl?.className).not.toContain('font-medium');
+  });
 });

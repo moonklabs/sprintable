@@ -304,4 +304,15 @@ describe('ChatListView — 대화명 Claim 무게(story #2969 PR-5)', () => {
     expect(nameEl?.className).toContain('font-semibold');
     expect(nameEl?.className).not.toContain('font-medium');
   });
+
+  // 카디르 QA독립검증(PR#3405) — PR-5가 ConversationRow만 커버해 OutsideProjectRow의 동일
+  // 처방(§1.3-b)이 무테스트였던 갭. PR-6(#3405 이월분)에 편입.
+  it('"다른 프로젝트" 항목의 대화명도 font-semibold(Claim 무게)를 갖는다', async () => {
+    stubFetch([OUTSIDE_CONV]);
+    await mount();
+    const nameEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '댄군과의 대화');
+    expect(nameEl).not.toBeUndefined();
+    expect(nameEl?.className).toContain('font-semibold');
+    expect(nameEl?.className).not.toContain('font-medium');
+  });
 });

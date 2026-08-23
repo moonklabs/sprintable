@@ -17,7 +17,11 @@ async function mount(node: React.ReactNode): Promise<{ el: HTMLElement; root: Ro
   return { el: container.firstElementChild as HTMLElement, root };
 }
 
-const ORIGINAL_TITLE_CLASSES = 'font-heading text-2xl font-bold tracking-tight text-foreground md:text-3xl';
+// story #2969 §1.3/§2 C행(PR-6) 갱신 — Display tier 적용: font-bold(700)→
+// --font-weight-editorial-heading(820, 인라인 style — font-editorial-heading 유틸리티가
+// tailwind-merge와 충돌해 font-heading을 지우는 것 회피, page-header.test.tsx 참고)·
+// tracking-tight→tracking-[-0.02em](§1.3 Display 정의 그대로).
+const ORIGINAL_TITLE_CLASSES = 'font-heading text-2xl tracking-[-0.02em] text-foreground md:text-3xl';
 
 function classSet(s: string): Set<string> {
   return new Set(s.split(/\s+/).filter(Boolean));
@@ -28,6 +32,14 @@ describe('PageHeader size variant (story #2879)', () => {
     const { el } = await mount(<PageHeader title="제목" />);
     const h1 = el.querySelector('h1')!;
     expect(classSet(h1.className)).toEqual(classSet(ORIGINAL_TITLE_CLASSES));
+  });
+
+  // story #2969 §1.3(PR-6) — Display tier 무게(820)가 인라인 style로 걸린다(tailwind-merge
+  // 충돌 회피, 위 주석 참고).
+  it('h1이 --font-weight-editorial-heading을 인라인 font-weight로 갖는다', async () => {
+    const { el } = await mount(<PageHeader title="제목" />);
+    const h1 = el.querySelector('h1')! as HTMLElement;
+    expect(h1.style.fontWeight).toBe('var(--font-weight-editorial-heading)');
   });
 
   it('size=page가 기존과 동일하다', async () => {
