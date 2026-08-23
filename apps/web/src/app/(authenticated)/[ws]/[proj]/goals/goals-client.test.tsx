@@ -199,6 +199,17 @@ describe('GoalsClient — 결과 원장 재조립(§2 이중 신호·§3 마스�
     expect(container.querySelector('.proof-cut-xs')?.className).not.toContain('proof-green');
   });
 
+  // QA독립검증(카디르, PR#3399) — globals.css의 .proof-cut-xs는 --proof-cut 값만 바꾸고
+  // clip-path 자체를 여는 .proof-cut 베이스 클래스가 없으면 컷이 안 그려진다(#2958 원 커밋
+  // 버그, #3399가 수정). 이 회귀를 잡는 전용 테스트가 없었다 — 뮤테이션으로 확인(베이스 클래스
+  // 제거해도 기존 16건 전부 그대로 PASS) 후 신설. PR-2(card 층)에 편입 예정(PO 처분).
+  it('상태 칩이 proof-cut 베이스 클래스를 갖는다(proof-cut-xs만으론 clip-path 안 열림, #3399 회귀가드)', async () => {
+    stubFetch([{ id: 'e1', title: 'H', status: 'done', total_stories: 1, done_stories: 1 }]);
+    await mount();
+    const chip = container.querySelector('.proof-cut-xs');
+    expect(chip?.className.split(' ')).toContain('proof-cut');
+  });
+
   it('green은 결과 필(OutcomeStatusBadge)에서만 뜬다 — outcome=hit일 때 bg-success-tint가 존재', async () => {
     stubFetch([{ id: 'e1', title: 'H', status: 'done', total_stories: 1, done_stories: 1, outcome_status: 'hit' }]);
     await mount();

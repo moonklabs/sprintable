@@ -25,9 +25,13 @@ async function mountAndGetRoot(node: React.ReactNode): Promise<{ el: HTMLElement
 }
 
 // 이관 前 손코딩 원본(section-card.tsx/glass-panel.tsx git 이력) — 정본 리터럴로 대조.
-const ORIGINAL_SECTION_CARD_CLASSES = 'rounded-2xl border border-border/80 bg-card text-card-foreground shadow-sm';
+// story #2969 §2 PR-2(doc proofline-system-layer-2969) 갱신 — radius='card' 자체가
+// rounded-2xl→rounded-lg(§1.1, 2xl은 인라인 표면에서 퇴역)로 바뀌어 두 리터럴 다 반영.
+// solid(SectionCard)는 인라인 표면이라 shadow-sm 제거(§1.2). glass는 "정책 검토"로 이
+// PR 범위 밖(§2 C행) — shadow-sm 그대로 유지.
+const ORIGINAL_SECTION_CARD_CLASSES = 'rounded-lg border border-border/80 bg-card text-card-foreground';
 const ORIGINAL_GLASS_PANEL_CLASSES =
-  'rounded-2xl border border-border/80 bg-card/95 text-card-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/88';
+  'rounded-lg border border-border/80 bg-card/95 text-card-foreground shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/88';
 
 describe('cardVariants (story #2877)', () => {
   it('surface=solid·radius=card가 SectionCard 원본 클래스 집합과 정확히 일치한다', () => {
@@ -76,7 +80,7 @@ describe('SectionCard/GlassPanel — 얇은 alias 회귀가드 (story #2877)', (
   it('추가 className이 병합되고 원본 클래스를 지우지 않는다', async () => {
     const { el } = await mountAndGetRoot(<SectionCard className="mt-4">hi</SectionCard>);
     expect(el.className).toContain('mt-4');
-    expect(el.className).toContain('rounded-2xl');
+    expect(el.className).toContain('rounded-lg');
   });
 });
 
@@ -86,6 +90,17 @@ describe('Card 신규 프리미티브 — variant·서브컴포넌트 (story #28
     expect(cardVariants({ surface: 'subtle', radius: 'compact' })).toContain('rounded-xl');
     expect(cardVariants({ surface: 'plain', radius: 'inline' })).toContain('rounded-lg');
     expect(cardVariants({ surface: 'plain', radius: 'inline' })).not.toContain('shadow-sm');
+  });
+
+  // story #2969 §1.4(doc proofline-system-layer-2969) — 히어로/시그니처 카드 전용 옵트인.
+  it('radius=signature는 rounded-* 대신 proof-cut(컷코너) 클래스를 낸다', () => {
+    const classes = cardVariants({ surface: 'solid', radius: 'signature' });
+    expect(classes).toContain('proof-cut');
+    expect(classes).not.toMatch(/rounded-(lg|xl|2xl)\b/);
+  });
+
+  it('solid surface는 shadow-sm이 없다(§1.2 — 인라인 표면은 그림자 대신 hairline)', () => {
+    expect(cardVariants({ surface: 'solid', radius: 'card' })).not.toContain('shadow-sm');
   });
 
   it('Card/CardHeader/CardBody/CardFooter가 각자 올바른 data-slot으로 렌더된다', async () => {
