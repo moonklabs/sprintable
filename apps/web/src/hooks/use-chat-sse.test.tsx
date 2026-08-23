@@ -177,3 +177,48 @@ describe('useChatSse — 동시 마운트된 두 인스턴스가 같은 이벤�
     expect(onMessageB).toHaveBeenCalledTimes(1);
   });
 });
+
+// story #2964(sse-multiplexer.ts #2940과 동일 클래스, 폴백 경로 전용) — mux OFF(Provider 밖,
+// 이 파일 전체가 이미 그 조건)일 때만 실제로 발현하던 결함. mux ON(RealtimeProvider 안)이면
+// 이 훅은 애초에 이 effect 자체를 안 타므로(위 mux 분기), 이 회귀가드는 구조적으로 "폴백
+// 경로 전용" 검증이다 — dev가 지금 mux live라 급하진 않되(story 설명 그대로), 같은 클래스
+// 결함을 사전에 닫는다.
+describe('useChatSse — org 전환(memberId 변경) 재연결(story #2964, mux OFF 폴백 경로 전용)', () => {
+  it('currentTeamMemberId가 바뀌면 옛 커넥션을 닫고 새 member_id로 재연결한다', async () => {
+    await act(async () => { root.render(<Harness currentTeamMemberId="member-org-a" />); });
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0]!.url).toContain('member_id=member-org-a');
+    expect(FakeEventSource.instances[0]!.closed).toBe(false);
+
+    await act(async () => { root.render(<Harness currentTeamMemberId="member-org-b" />); });
+
+    expect(FakeEventSource.instances[0]!.closed).toBe(true);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.instances[1]!.url).toContain('member_id=member-org-b');
+  });
+
+  it('memberId 전환 시 옛 org의 last_event_id를 새 커넥션 URL에 안 싣는다', async () => {
+    await act(async () => { root.render(<Harness currentTeamMemberId="member-org-a" />); });
+    act(() => {
+      FakeEventSource.instances[0]!.emit(
+        'conversation.message_created', { id: 'm1' }, 'org-a-last-event-id',
+      );
+    });
+
+    await act(async () => { root.render(<Harness currentTeamMemberId="member-org-b" />); });
+
+    const url = lastReconnectUrl();
+    expect(url.searchParams.get('member_id')).toBe('member-org-b');
+    expect(url.searchParams.get('last_event_id')).toBeNull(); // ⭐핵심 — 옛 org 커서가 안 샌다.
+  });
+
+  it('memberId가 안 바뀌면(무관한 리렌더) 재연결하지 않는다 — 과잉 재연결 금지', async () => {
+    await act(async () => { root.render(<Harness currentTeamMemberId="member-org-a" />); });
+    expect(FakeEventSource.instances).toHaveLength(1);
+
+    await act(async () => { root.render(<Harness currentTeamMemberId="member-org-a" />); });
+
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0]!.closed).toBe(false);
+  });
+});
