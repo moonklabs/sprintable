@@ -217,11 +217,6 @@ export default function GateDetailPage() {
                       text-foreground로 이행 — PR#3367의 이 지점 className 오버라이드는
                       이제 중복. 클래스가 닫혔으니 지점 처방을 걷는다(PO 지시). */}
                   <Badge variant="chip">{gate.gate_type}</Badge>
-                  {deriveRiskLevel(gate) === 'high' ? (
-                    <Badge variant="warning">{t('riskHigh')}</Badge>
-                  ) : deriveRiskLevel(gate) === 'unknown' ? (
-                    <Badge variant="outline" className="text-muted-foreground">{t('riskUnknown')}</Badge>
-                  ) : null}
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {t('gateDetailOrgContext', {
