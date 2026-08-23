@@ -255,11 +255,13 @@ export default function ConversationPage() {
                 className="group/title flex min-w-0 items-center gap-1"
                 aria-label="방 이름 편집"
               >
-                <span className="min-w-0 truncate text-sm font-medium text-foreground">{headerTitle}</span>
+                {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 헤더 상대명/
+                    방이름=Claim(600)로 재분류(리스트 대화명과 동일 처방, 구조·크기 불변). */}
+                <span className="min-w-0 truncate text-sm font-semibold text-foreground">{headerTitle}</span>
                 <Pencil className="size-3 flex-shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/title:opacity-100" aria-hidden />
               </button>
             ) : (
-              <span className="min-w-0 truncate text-sm font-medium text-foreground">{headerTitle}</span>
+              <span className="min-w-0 truncate text-sm font-semibold text-foreground">{headerTitle}</span>
             )}
           </div>
         }
