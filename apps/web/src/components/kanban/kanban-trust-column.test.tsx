@@ -92,3 +92,115 @@ describe('KanbanTrustColumn — 파생 컬럼 드래그 중 "닫힘" 시각(stor
     expect(container.textContent).not.toContain('드롭 불가');
   });
 });
+
+// story #2949 — settable 컬럼(locked=false)에 이식된 인라인 컴포저. KanbanColumn과 동형 계약
+// (autoComposeSignal로 open·onCreateStory(id, title)로 제출) — 이 컴포넌트는 TrustColumnId→
+// 실 status 매핑을 모른다(호출자 몫), 그래서 onCreateStory에 그대로 id를 넘기는지만 잰다.
+describe('KanbanTrustColumn — 인라인 컴포저(story #2949)', () => {
+  it('locked=false + onCreateStory 있으면 "+" 버튼이 뜨고, 클릭하면 컴포저가 열린다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <KanbanTrustColumn
+          id="queued" label="대기" locked={false} stories={[]}
+          epicMap={{}} memberMap={{}} onStoryClick={() => {}} onCreateStory={() => {}}
+        />,
+      ));
+    });
+    const addButton = container.querySelector('button[aria-label="스토리 추가"]');
+    expect(addButton).not.toBeNull();
+    expect(container.querySelector('input')).toBeNull(); // 클릭 전엔 닫혀있음.
+    await act(async () => { addButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.querySelector('input')).not.toBeNull();
+  });
+
+  it('locked=true(파생 컬럼)는 onCreateStory가 있어도 "+" 버튼을 안 그린다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <KanbanTrustColumn
+          id="needs_input" label="입력 필요" locked stories={[]}
+          epicMap={{}} memberMap={{}} onStoryClick={() => {}} onCreateStory={() => {}}
+        />,
+      ));
+    });
+    expect(container.querySelector('button[aria-label="스토리 추가"]')).toBeNull();
+  });
+
+  it('autoComposeSignal이 0보다 커지면(부모의 CTA 트리거) "+" 클릭 없이도 컴포저가 열린다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <KanbanTrustColumn
+          id="queued" label="대기" locked={false} stories={[]}
+          epicMap={{}} memberMap={{}} onStoryClick={() => {}} onCreateStory={() => {}}
+          autoComposeSignal={0}
+        />,
+      ));
+    });
+    expect(container.querySelector('input')).toBeNull();
+    await act(async () => {
+      root.render(wrap(
+        <KanbanTrustColumn
+          id="queued" label="대기" locked={false} stories={[]}
+          epicMap={{}} memberMap={{}} onStoryClick={() => {}} onCreateStory={() => {}}
+          autoComposeSignal={1}
+        />,
+      ));
+    });
+    expect(container.querySelector('input')).not.toBeNull();
+  });
+
+  it('제출하면 onCreateStory(id, title)가 TrustColumnId 그대로(매핑 안 함) 호출된다', async () => {
+    const created: Array<[string, string]> = [];
+    await act(async () => {
+      root.render(wrap(
+        <KanbanTrustColumn
+          id="queued" label="대기" locked={false} stories={[]}
+          epicMap={{}} memberMap={{}} onStoryClick={() => {}}
+          onCreateStory={(colId, title) => { created.push([colId, title]); }}
+        />,
+      ));
+    });
+    const addButton = container.querySelector('button[aria-label="스토리 추가"]')!;
+    await act(async () => { addButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const input = container.querySelector('input') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, '새 스토리');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    expect(created).toEqual([['queued', '새 스토리']]); // ⭐매핑은 호출자 몫 — 여기선 id 그대로.
+  });
+
+  it('Escape를 누르면 컴포저가 닫힌다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <KanbanTrustColumn
+          id="queued" label="대기" locked={false} stories={[]}
+          epicMap={{}} memberMap={{}} onStoryClick={() => {}} onCreateStory={() => {}}
+        />,
+      ));
+    });
+    const addButton = container.querySelector('button[aria-label="스토리 추가"]')!;
+    await act(async () => { addButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.querySelector('input')).not.toBeNull();
+    const input = container.querySelector('input') as HTMLInputElement;
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    expect(container.querySelector('input')).toBeNull();
+  });
+
+  it('onCreateStory가 없으면(호출자가 이 컬럼에서 생성을 안 허용) "+" 버튼 자체가 없다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <KanbanTrustColumn
+          id="queued" label="대기" locked={false} stories={[]}
+          epicMap={{}} memberMap={{}} onStoryClick={() => {}}
+        />,
+      ));
+    });
+    expect(container.querySelector('button[aria-label="스토리 추가"]')).toBeNull();
+  });
+});
