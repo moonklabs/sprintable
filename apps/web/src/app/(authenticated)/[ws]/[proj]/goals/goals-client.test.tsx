@@ -124,3 +124,54 @@ describe('GoalsClient — 목표 first-touch 정체성', () => {
     expect(container.querySelector('button[aria-label="목표 삭제"]')).toBeNull();
   });
 });
+
+// story #2958(doc goals-outcome-ledger-redesign-handoff §2/§3) — 진척바 → 이중 신호(작업
+// Claimed/결과 Verified) 재조립 회귀가드.
+describe('GoalsClient — 결과 원장 재조립(§2 이중 신호·§3 마스트헤드)', () => {
+  it('마스트헤드(kicker+H1+dek)가 목표 활성/완료 카운트와 함께 렌더된다', async () => {
+    stubFetch([
+      { id: 'e1', title: '목표A', status: 'active', total_stories: 2, done_stories: 1 },
+      { id: 'e2', title: '목표B', status: 'done', total_stories: 4, done_stories: 4 },
+    ]);
+    await mount();
+    expect(container.textContent).toContain('OUTCOMES');
+    expect(container.querySelector('h1')?.textContent).toBe('목표');
+    expect(container.textContent).toContain('활성 1');
+    expect(container.textContent).toContain('완료 1');
+  });
+
+  it('작업(Claimed) 바는 중립색(proof-ink-3)이지 primary(파랑)가 아니다 — done=100%여도 green 아님', async () => {
+    stubFetch([{ id: 'e1', title: '완료된 목표', status: 'done', total_stories: 4, done_stories: 4, outcome_status: 'pending' }]);
+    await mount();
+    const fill = container.querySelector('.bg-proof-ink-3');
+    expect(fill).not.toBeNull();
+    expect(container.querySelector('.bg-primary')).toBeNull();
+  });
+
+  it('결과(Verified) 줄 — outcome_status=hit이면 초록 톤 "적중" 텍스트가 뜬다', async () => {
+    stubFetch([{ id: 'e1', title: '달성 목표', status: 'done', total_stories: 2, done_stories: 2, outcome_status: 'hit' }]);
+    await mount();
+    expect(container.textContent).toContain('적중');
+    expect(container.querySelector('.text-proof-green')).not.toBeNull();
+  });
+
+  it('결과(Verified) 줄 — outcome_status=miss는 빨강이 아니라 중립 톤이다(soul-lock)', async () => {
+    stubFetch([{ id: 'e1', title: '미달 목표', status: 'done', total_stories: 2, done_stories: 2, outcome_status: 'miss' }]);
+    await mount();
+    expect(container.textContent).toContain('빗나감');
+    expect(container.querySelector('.text-destructive')).toBeNull();
+  });
+
+  it('결과 미측정+measure_after 있으면 "측정 예정 · 날짜"를 보여준다(수치 지어내지 않음)', async () => {
+    stubFetch([{ id: 'e1', title: '진행 목표', status: 'active', total_stories: 3, done_stories: 1, outcome_status: 'pending', measure_after: '2026-09-01' }]);
+    await mount();
+    expect(container.textContent).toContain('측정 예정');
+  });
+
+  it('작업 100%인데 결과 미측정이면 두 신호가 동시에 눈에 띈다(§2 핵심 가치)', async () => {
+    stubFetch([{ id: 'e1', title: '일은 끝 결과는 아직', status: 'done', total_stories: 5, done_stories: 5, outcome_status: 'unmeasured' }]);
+    await mount();
+    expect(container.textContent).toContain('5/5');
+    expect(container.textContent).toContain('판정 없이 닫힘');
+  });
+});

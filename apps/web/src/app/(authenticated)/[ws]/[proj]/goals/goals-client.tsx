@@ -88,7 +88,9 @@ interface Goal {
   success_hypothesis?: string | null;
   metric_definition?: Record<string, unknown> | null;
   measure_after?: string | null;
-  outcome_status?: 'n_a' | 'pending' | 'hit' | 'miss' | null;
+  // story #2958 — outcome-status-badge.tsx는 이미 unmeasured/unmeasurable을 지원했으나 이 타입엔
+  // 없었다(타입 갭, 실 BE 값은 이미 이 4종 전부 낼 수 있음).
+  outcome_status?: 'n_a' | 'pending' | 'hit' | 'miss' | 'unmeasured' | 'unmeasurable' | null;
   outcome_result?: Record<string, unknown> | null;
   // E1 S8b: BE EpicResponse가 list 응답에 부착하는 연결 가설 집계(미부착 경로는 기본값).
   hypothesis_count?: number;
@@ -499,8 +501,28 @@ interface GoalRowProps {
   sortable: boolean;
 }
 
+// story #2958 §2(doc goals-outcome-ledger-redesign-handoff) — 목표별 "결과" 텍스트 줄. 실
+// outcome_result는 비정형(Record<string,unknown>)이라 수치를 지어내지 않는다(§8 "데이터 있는
+// 만큼만") — 라벨 재사용 + measure_after가 있으면 그 날짜만 덧붙인다(허구 금지).
+function outcomeLineText(
+  t: ReturnType<typeof useTranslations<'goals'>>,
+  tOutcome: ReturnType<typeof useTranslations<'outcomeLoop'>>,
+  status: Goal['outcome_status'],
+  measureAfter: string | null | undefined,
+  locale: string,
+): { text: string; tone: 'green' | 'blue' | 'neutral' } {
+  if (status === 'hit') return { text: tOutcome('statusHit'), tone: 'green' };
+  if (status === 'miss') return { text: tOutcome('statusMiss'), tone: 'neutral' };
+  if (status === 'unmeasured') return { text: tOutcome('statusUnmeasured'), tone: 'neutral' };
+  if (status === 'unmeasurable') return { text: tOutcome('statusUnmeasurable'), tone: 'neutral' };
+  // pending/n_a/null — 아직 결과 없음. measure_after가 있으면 "측정 예정 · 날짜"까지만(추측 금지).
+  if (measureAfter) return { text: `${t('outcomeAwaitingMeasure')} · ${formatDate(measureAfter, locale)}`, tone: 'blue' };
+  return { text: tOutcome('statusPending'), tone: 'neutral' };
+}
+
 function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalRowProps) {
   const t = useTranslations('goals');
+  const tOutcome = useTranslations('outcomeLoop');
   const locale = useLocale();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: epic.id,
@@ -521,6 +543,7 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
   const spProgress = calcSpProgress(stories);
   const spExceeded = typeof epic.target_sp === 'number' && epic.target_sp > 0 && spProgress.total > epic.target_sp;
+  const outcomeLine = outcomeLineText(t, tOutcome, epic.outcome_status, epic.measure_after, locale);
 
   const statusLabel: Record<GoalStatus, string> = {
     draft: t('statusDraft'),
@@ -566,7 +589,27 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(); }}
       >
         <div className="flex items-start justify-between gap-2">
-          <p className="text-sm font-semibold leading-snug text-foreground">{epic.title}</p>
+          {/* story #2958 §2/§3 — 상태 칩(proof-cut-xs)+결과 필이 이중 신호의 «상태·결과» 열.
+              status 배지(원래 shadcn Badge)는 그대로 두되(우측 무리에 존속, 회귀 없음), 왼쪽에
+              proof 색규율을 따르는 신규 컷코너 칩을 하나 더 앞세운다 — outcome은 기존
+              OutcomeStatusBadge를 그대로 재사용(발명 0, 색 의미 불변). */}
+          <div className="flex shrink-0 flex-col items-start gap-1">
+            <span
+              className={`proof-cut-xs inline-flex items-center gap-1 px-2 py-0.5 text-[10.5px] font-bold ${
+                epic.status === 'done' ? 'bg-proof-green-soft text-proof-green'
+                : epic.status === 'active' ? 'bg-proof-blue-soft text-proof-blue'
+                : 'bg-proof-sunk text-proof-ink-3'
+              }`}
+            >
+              <span className={`size-1.5 rounded-full ${
+                epic.status === 'done' ? 'bg-proof-green' : epic.status === 'active' ? 'bg-proof-blue' : 'bg-proof-faint'
+              }`}
+              />
+              {statusLabel[epic.status]}
+            </span>
+            {epic.outcome_status && epic.outcome_status !== 'n_a' ? <OutcomeStatusBadge status={epic.outcome_status} /> : null}
+          </div>
+          <p className="min-w-0 flex-1 text-editorial-claim font-editorial-claim leading-snug text-foreground">{epic.title}</p>
           <div className="flex shrink-0 items-center gap-1.5">
             {sortable ? (
               curated ? (
@@ -584,7 +627,6 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
                 {t('steerLoopSuggest')}
               </span>
             ) : null}
-            <Badge variant={statusBadgeVariant(epic.status)}>{statusLabel[epic.status]}</Badge>
             <Badge variant={priorityBadgeVariant(epic.priority)}>{priorityLabel[epic.priority]}</Badge>
             {/* story #2104 — BE goals.py:352가 human-only로 삭제를 403 거부한다(되돌릴 수 없는
                 조작). 에이전트 계정에도 트리거를 열어두면 #2091/#2103과 같은 결함이라 미리
@@ -606,13 +648,33 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
           <p className="text-xs text-muted-foreground line-clamp-1">{epic.description.split('\n')[0]?.replace(/^#+\s*/, '')}</p>
         ) : null}
 
+        {/* story #2958 §2 핵심 이동 — 단일 진척바 → 이중 신호(작업 Claimed 중립 / 결과 Verified).
+            작업 바는 반드시 중립색(proof-ink-3) — green은 outcome=hit에만(§8 설계 확定, soul-lock). */}
+        {total > 0 ? (
+          <div className="flex items-center gap-2">
+            <span className="w-8 shrink-0 font-mono text-[10px] text-muted-foreground">{t('taskLabel')}</span>
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-border">
+              <div className="h-full rounded-full bg-proof-ink-3 transition-all duration-300" style={{ width: `${pct}%` }} />
+            </div>
+            <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{done}/{total}</span>
+          </div>
+        ) : null}
+        <div className="flex items-center gap-2">
+          <span className="w-8 shrink-0 font-mono text-[10px] text-muted-foreground">{t('outcomeLabel')}</span>
+          <span className={`text-xs font-semibold ${
+            outcomeLine.tone === 'green' ? 'text-proof-green' : outcomeLine.tone === 'blue' ? 'text-proof-blue' : 'text-muted-foreground'
+          }`}
+          >
+            {outcomeLine.text}
+          </span>
+        </div>
+
         {/* 가설요약 추가로 메타 항목이 늘어 고밀도 카드(마감일+SP초과 동반)가 narrow 폭서
             가로 오버플로 잠재 → flex-wrap 헤지(가디언 라이브게이트 선제·기존 행 robustness↑). */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           {epic.target_date ? (
             <span>{t('targetDate')}: {formatDate(epic.target_date, locale)}</span>
           ) : null}
-          <span>{done}/{total} {t('stories')}</span>
           <HypothesesSummary count={epic.hypothesis_count ?? 0} riskyStatus={epic.risky_status ?? null} />
           {spExceeded ? (
             <span className="rounded-full bg-destructive/10 px-1.5 py-0.5 text-xs font-semibold text-foreground">
@@ -620,20 +682,6 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
             </span>
           ) : null}
         </div>
-
-        {total > 0 ? (
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
-            <div
-              className="h-full rounded-full bg-primary transition-all duration-300"
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-        ) : null}
-        {epic.outcome_status && epic.outcome_status !== 'n_a' ? (
-          <div className="pt-0.5">
-            <OutcomeStatusBadge status={epic.outcome_status} />
-          </div>
-        ) : null}
       </div>
     </div>
   );
@@ -1001,8 +1049,23 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   // 커밋("조타 보내기")은 큐레이션(position≠null)이 하나라도 있을 때만 의미 있다.
   const hasCurated = epics.some((e) => typeof e.position === 'number');
 
+  const activeCount = epics.filter((e) => e.status === 'active').length;
+  const doneCount = epics.filter((e) => e.status === 'done').length;
+
   const listPanel = (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-muted/35">
+
+      {/* story #2958 §3 — 에디토리얼 마스트헤드(docs 재조립 #2955와 동형 언어, editorial 타이포
+          스케일 goals 첫 소비처). TopBarSlot(아래)은 얇은 전역 브레드크럼 칩이라 존속 — 이
+          마스트헤드가 실질 콘텐츠 헤더. */}
+      <div className="shrink-0 border-b border-border px-4 pb-4 pt-5 sm:px-6">
+        <div className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-proof-blue">{t('indexKicker')}</div>
+        <h1 className="mt-1.5 font-editorial-heading text-[28px] leading-none tracking-[-0.03em] text-foreground sm:text-[34px]">{t('title')}</h1>
+        <hr className="my-3 h-[3px] w-16 border-0 bg-proof-citron" />
+        <p className="text-editorial-ui text-muted-foreground">
+          {t('indexDek')} <span className="text-muted-foreground">{t('indexCountActive', { count: activeCount })} · {t('indexCountDone', { count: doneCount })}</span>
+        </p>
+      </div>
 
       {/* Status filter — story #2017: 'all' 아닌 나머지는 raw status 값을 그대로 렌더해(t() 미호출)
           KO 로케일에서도 draft/active/done/archived 영문 그대로 보였음. 배지·드롭다운(epic-status-
