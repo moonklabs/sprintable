@@ -598,8 +598,11 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
               전용 — 두 축이 색에서도 안 섞여야 "일 끝≠목표 달성"이 시각으로 선다(작업 축의 첫
               처방 "done&&hit만 green"조차 두 축을 섞는 것이라 유나 판정으로 대체됨). */}
           <div className="flex shrink-0 flex-col items-start gap-1">
+            {/* story #2969 PR-1 발견 버그 — 아래 proof-cut-xs가 --proof-cut 값만 바꾸고
+                clip-path 자체를 여는 proof-cut 베이스 클래스가 빠져 있어(#2958 원 커밋 실수)
+                컷 자체가 안 그려지고 있었다(globals.css 참고). 즉시 수정. */}
             <span
-              className={`proof-cut-xs inline-flex items-center gap-1 px-2 py-0.5 text-[10.5px] font-bold ${
+              className={`proof-cut proof-cut-xs inline-flex items-center gap-1 px-2 py-0.5 text-[10.5px] font-bold ${
                 epic.status === 'active' ? 'bg-proof-blue-soft text-proof-blue' : 'bg-proof-sunk text-proof-ink-3'
               }`}
             >
