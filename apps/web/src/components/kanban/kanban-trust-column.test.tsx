@@ -204,3 +204,26 @@ describe('KanbanTrustColumn — 인라인 컴포저(story #2949)', () => {
     expect(container.querySelector('button[aria-label="스토리 추가"]')).toBeNull();
   });
 });
+
+// story #2969 §1.3-b(doc proofline-system-layer-2969, PR-6) — 유나 실픽셀 갭 fix:
+// kanban-column.tsx(클래식 축)만 하고 이 컴포넌트(6단계 신뢰축=기본 보드 화면)를
+// 놓쳤던 것. 컬럼헤더=소헤딩(Heading 무게), 크기/sans 불변.
+describe('KanbanTrustColumn — 컬럼헤더 소헤딩(story #2969 PR-6)', () => {
+  it('컬럼헤더가 font-extrabold(Heading 무게)를 갖고 크기(text-xs)는 그대로다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <KanbanTrustColumn
+          id="queued" label="대기" locked={false} stories={[]}
+          epicMap={{}} memberMap={{}} onStoryClick={() => {}}
+        />,
+      ));
+    });
+    const header = container.querySelector('h3');
+    expect(header).not.toBeNull();
+    expect(header?.className).toContain('font-extrabold');
+    expect(header?.className).toContain('text-xs');
+    expect(header?.className).not.toContain('font-semibold');
+    expect(header?.className).not.toContain('font-mono');
+    expect(header?.className).not.toContain('uppercase');
+  });
+});

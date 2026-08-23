@@ -137,7 +137,10 @@ export function KanbanTrustColumn({
       }`}
     >
       <div className="mb-3 flex items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 text-xs font-semibold text-foreground">
+        {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-6) — 유나 실픽셀 갭 fix:
+            kanban-column.tsx(클래식 축)만 하고 이 파일(6단계 신뢰축=기본 보드 화면)을
+            놓쳤던 것. 컬럼헤더=소헤딩(Heading 무게), 크기(text-xs)·sans 불변. */}
+        <h3 className="flex items-center gap-2 text-xs font-extrabold text-foreground">
           <span className={`size-1.5 shrink-0 rounded-full ${dotClass}`} aria-hidden="true" />
           {label}
           {locked && <Lock className="size-3 text-muted-foreground" aria-hidden="true" />}
