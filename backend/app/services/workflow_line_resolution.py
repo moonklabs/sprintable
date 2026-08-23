@@ -2,8 +2,9 @@
 
 gate 승인/반려가 ``transition_gate()`` 를 타면, 그 gate 에 묶인 active line step_run 을 찾아 line
 정책대로 status 를 적용한다. H1 approve 와 line approve 가 **동일 status side-effect 경로**
-(``emit_story_status_changed``)를 타도록 통일한다(신규 승인경로 0). line run 이 없으면 호출부가
-legacy ``_advance_story_on_merge_approve`` 로 폴백한다(무회귀).
+(``emit_story_status_changed``)를 타도록 통일한다(신규 승인경로 0). line run 이 없으면(legacy
+경로) story #2965(2026-08-23) 이후로는 story.status 를 아예 건드리지 않는다(구
+``_advance_story_on_merge_approve`` 의 done 자동전진은 제거됨 — done은 사람 명시 PATCH만).
 
 P1-1 idempotency: story/run 을 row lock(SELECT FOR UPDATE)하고, stale ``from_status``(story 가 이미
 다른 status 로 이동)면 적용하지 않는다. 이미 목표 status 면 no-op.

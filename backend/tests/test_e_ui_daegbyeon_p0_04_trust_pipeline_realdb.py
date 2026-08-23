@@ -257,12 +257,18 @@ async def test_gate_transition_emits_trust_stage_changed_on_stage_change():
 
 
 @pytest.mark.anyio
-async def test_gate_transition_dedupes_when_status_also_advances():
-    """merge gate approve가 story를 done까지 자동전진(_advance_story_on_merge_approve)시키는 경로 —
-    훅③(status 변경)이 이미 old_stage/new_stage를 정확히 잡으므로 훅①은 skip해 중복 emit 0(doc §4
-    이벤트 폭주 방지)."""
+async def test_gate_transition_emits_trust_stage_via_hook1_only_no_status_advance():
+    """story #2965(PO 판정 2026-08-23) 후속 정정 — 이 테스트는 원래 merge gate approve가 story를
+    done까지 자동전진(`_advance_story_on_merge_approve`, 이제 제거됨)시켜 훅③(status 변경)이
+    old_stage/new_stage를 잡고 훅①은 skip하는 dedup을 검증했다. #2965로 그 자동전진 자체가
+    없어져(머지≠done, done은 사람 명시 PATCH) 이제 story.status는 in-review 그대로 — 훅③이
+    발화할 status 변경이 없으므로 훅①(`maybe_emit_trust_stage_changed`)만 정상 발화한다(dedup
+    스킵할 대상 자체가 없음, 이 축이 여전히 정확히 1회만 emit함을 확認)."""
     from app.models.gate import Gate
     from app.models.member import Member
+    from app.models.project import OrgMember
+    from app.models.project_access import ProjectAccess
+    from app.models.user import User
     from app.services.gate_service import transition_gate
 
     engine, Session = await _session_factory()
@@ -272,8 +278,24 @@ async def test_gate_transition_dedupes_when_status_also_advances():
             story = _story(org_id, project_id, "Merge Story", status="in-review")
             s.add(story)
             await s.commit()
-            resolver = Member(id=uuid.uuid4(), org_id=org_id, type="human", name="Resolver", org_role="admin")
-            s.add(resolver)
+            # anchor 경로(members+org_members+project_access) — evidence_service의
+            # resolve_member_identity가 `team_members`(0088로 VIEW화, members⋈project_access)를
+            # 조회해 "실 휴먼"인지 판별한다(SOUL-LOCK choke-point, e1063967). team_members는 뷰라
+            # 직접 INSERT 불가(plain TeamMember(...) add는 "cannot insert into view") — anchor
+            # 행만 세팅하면 뷰가 자동 투영한다. 안 하면 human_verified 신호가 안 붙어 new_stage가
+            # merge_ready로 못 올라간다(unresolved로 evidence skip).
+            resolver_user_id = uuid.uuid4()
+            s.add(User(id=resolver_user_id, email=f"r-{resolver_user_id.hex[:8]}@test.com", hashed_password="x"))
+            await s.commit()
+            om = OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=resolver_user_id, role="member")
+            s.add(om)
+            await s.commit()
+            resolver_id = om.id
+            s.add(Member(id=resolver_id, org_id=org_id, type="human", user_id=resolver_user_id, name="Resolver"))
+            s.add(ProjectAccess(
+                id=uuid.uuid4(), project_id=project_id, org_member_id=om.id, member_id=resolver_id,
+                permission="granted", role="member",
+            ))
             await s.commit()
             gate = Gate(
                 id=uuid.uuid4(), org_id=org_id, work_item_id=story.id, work_item_type="story",
@@ -285,16 +307,23 @@ async def test_gate_transition_dedupes_when_status_also_advances():
             push = MagicMock()
             with patch(
                 "app.services.project_auth.project_accessible_member_ids",
-                AsyncMock(return_value={resolver.id}),
+                AsyncMock(return_value={resolver_id}),
             ), patch("app.routers.events._push_to_agent", push):
-                await transition_gate(s, org_id, gate.id, "approved", resolver_id=resolver.id)
+                await transition_gate(s, org_id, gate.id, "approved", resolver_id=resolver_id)
                 await s.commit()
 
+            from sqlalchemy import text as _text
+
+            status = (await s.execute(
+                _text("SELECT status FROM stories WHERE id=:id"), {"id": story.id}
+            )).scalar()
+            assert status == "in-review"  # ⭐핵심 — done 자동전진 없음.
+
             calls = _trust_stage_calls(push, story.id)
-            assert len(calls) == 1, calls  # 훅①·③ 둘 다 발화 가능한 상황이나 정확히 1회만.
+            assert len(calls) == 1, calls  # 훅①만 발화 — 정확히 1회.
             payload = calls[0].args[1]
             assert payload["old_stage"] == "claimed_done"
-            assert payload["new_stage"] is None  # done = 파이프라인 스코프 밖.
+            assert payload["new_stage"] == "merge_ready"  # in-review+human_verified → merge_ready.
     finally:
         await engine.dispose()
 

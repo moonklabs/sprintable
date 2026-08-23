@@ -348,10 +348,15 @@ async def advance_story_to_done(
 ) -> bool:
     """story 를 done 으로 전이하는 **단일 idempotent 헬퍼**(E-GHAPP Bot-L.1).
 
-    gate-approve(`_advance_story_on_merge_approve`)와 PR-merge close-on-merge 가 **공유**한다 — 상태전이
-    정책을 한 곳에 둬 중복 advance/drift 를 막는다. story None/이미 done 이면 **no-op(False)**. 전이 시
-    emit_story_status_changed 로 status_changed side-effects(events·webhook·L2·notification·activity)를
-    동일하게 발화(board 경로와 parity). 호출자는 org-scope 로 story 를 조회해 넘긴다(anti-IDOR).
+    story #2965(2026-08-23)·story #2327(2026-07-30) — 예전엔 gate-approve(구
+    `_advance_story_on_merge_approve`, 제거됨)와 PR-merge close-on-merge(정지됨) 둘 다 이 헬퍼를
+    이벤트 하나만으로 직접 불렀다. 둘 다 "머지/승인 ≠ done, done은 사람 확認 後" 규율 위반으로
+    PO가 정지시켜, **현재 이 함수를 부르는 자리는 board의 사람 명시 status PATCH 경로뿐**이다.
+    함수 자체는 삭제하지 않는다 — 조직 단위 auto-done on/off 설정이 생기면(아직 없음) 그 설정을
+    읽어 조건부로 재배선할 단일 idempotent 헬퍼로 의도적으로 남겨둔다. story None/이미 done
+    이면 **no-op(False)**. 전이 시 emit_story_status_changed 로 status_changed side-effects
+    (events·webhook·L2·notification·activity)를 발화(board 경로와 parity). 호출자는 org-scope
+    로 story 를 조회해 넘긴다(anti-IDOR).
     """
     if story is None or story.status == "done":
         return False  # 멱등: 이미 done/부재 → no-op.
