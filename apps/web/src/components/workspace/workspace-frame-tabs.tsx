@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 const TABS = [
   { key: 'board', path: 'flow' },
   { key: 'sprints', path: 'sprints' },
+  { key: 'epic', path: 'epics' },
 ] as const;
 
 type WorkspaceFrameTabKey = (typeof TABS)[number]['key'];
@@ -19,8 +20,9 @@ type WorkspaceFrameTabKey = (typeof TABS)[number]['key'];
  * 데이터 페칭은 서로 안 건드린다. flow-client.tsx 자체의 기존 3탭(가설/갈래/칸반, E-FLOW-V4
  * 기 확定)과는 다른 층이라 그건 그대로 둔다 — 이 프레임은 그 위(바깥)에 얹힌다.
  *
- * "에픽"(시안 3뷰 중 하나)은 코드상 단독 표면이 없어(analytics API만 존재) 이 슬라이스
- * 스코프 밖(PO 확定, 신규 페이지 제작은 후속 스토리) — 그래서 TABS가 2개뿐이다.
+ * story #2931(2930-I3 분리, 유나 (a) 시안 확定) — "에픽"(시안 3뷰 중 하나)이 그때는 코드상
+ * 단독 표면이 없어(analytics API만 존재) 스코프 밖이었으나, 이제 에픽 스윔레인
+ * (epic-swimlane-board.tsx, /epics)으로 실체가 생겨 3번째 탭으로 합류한다.
  */
 export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey }) {
   const t = useTranslations('nav');

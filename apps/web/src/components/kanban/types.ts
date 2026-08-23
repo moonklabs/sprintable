@@ -242,6 +242,11 @@ export interface DependencyEdge {
 export interface KanbanEpic {
   id: string;
   title: string;
+  // story #2931 — 에픽 스윔레인의 "기본 active만" 필터+정렬에 필요(GoalResponse가 이미
+  // 응답에 싣는 필드, BE 신규 작업 0 — 기존 kanban-board.tsx epicMap은 title만 뽑아 썼지만
+  // 원본 응답엔 이미 있었다).
+  status?: string;
+  position?: number | null;
 }
 
 export interface KanbanSprint {

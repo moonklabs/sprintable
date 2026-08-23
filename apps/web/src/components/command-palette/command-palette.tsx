@@ -58,6 +58,10 @@ const STATIC_ITEMS: CommandItem[] = [
   // 스캔 시야 밖(가드 파일 AC7㉠에 이미 그렇게 명시돼 있다) — 이 항목을 "중복이니 삭제"하면
   // 가드가 못 보는 조용한 orphan이 된다. 지우지 말 것.
   { id: 'go-sprints', group: 'navigate', icon: CalendarRange, labelKey: 'goSprints', href: '/sprints' },
+  // story #2931 — /sprints와 동일 사정(위 주석). /epics도 WorkspaceFrameTabs(router.push
+  // 템플릿 리터럴)로만 도달해 verify-no-orphan-resource-routes의 정적 스캔 시야 밖 —
+  // 이 항목이 그 가드의 유일한 「보이는」 /epics 앵커다.
+  { id: 'go-epics', group: 'navigate', icon: FolderKanban, labelKey: 'goEpics', href: '/epics' },
   { id: 'go-chats', group: 'navigate', icon: MessageSquareMore, labelKey: 'goChats', href: '/chats', shortcut: ['G', 'M'] },
   { id: 'go-agents', group: 'navigate', icon: Bot, labelKey: 'goAgents', href: '/organization/workforce', shortcut: ['G', 'A'] },
   { id: 'go-docs', group: 'navigate', icon: BookOpen, labelKey: 'goDocs', href: '/docs', shortcut: ['G', 'S'] },
