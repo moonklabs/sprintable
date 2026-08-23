@@ -13,15 +13,23 @@ import { cn } from '@/lib/utils';
 export const cardVariants = cva('border text-card-foreground', {
   variants: {
     surface: {
-      solid: 'border-border/80 bg-card shadow-sm',
+      // story #2969 §2 PR-2(doc proofline-system-layer-2969) — solid는 인라인 표면(§1.2)이라
+      // shadow-sm 제거·hairline(기존 border-border/80)만으로 경계. glass는 §2 C행에서
+      // "정책 검토"로 별도 보류된 축(glass-panel.tsx 소비처 2곳·이 PR 범위 밖)이라 무변경.
+      solid: 'border-border/80 bg-card',
       glass: 'border-border/80 bg-card/95 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/88',
       subtle: 'border-border/60 bg-muted/30',
       plain: 'border-border/80 bg-card',
     },
     radius: {
-      card: 'rounded-2xl',
+      // story #2969 §1.1 — rounded-2xl(7.2px, PR-T 이후 값)은 "카드·인라인 표면에서 퇴역"
+      // 대상(§1.1 명시)이라 크리스프 lg(4px)로.
+      card: 'rounded-lg',
       compact: 'rounded-xl',
       inline: 'rounded-lg',
+      // story #2969 §1.4 — 히어로/시그니처 카드(섹션 리드·활성·측정 중 카드 1종, 화면당 소수)
+      // 전용 옵트인. 라운드 대신 컷코너(큰 시그니처 컷, --proof-cut 기본 24px).
+      signature: 'proof-cut',
     },
   },
   defaultVariants: { surface: 'solid', radius: 'card' },
