@@ -251,7 +251,18 @@ export function findSubstringCollisions(
 // 아니라 "제목(수 없음)"과 "그 제목 명사를 포함하는 카운트 문장"이 같은 화면에 서는
 // 흔한 정상 패턴이다(H1 "문서" 다음 "24개 문서"라는 산문이 오는 건 혼동을 안 낳는다).
 // 카디르 QA/유나 design 리뷰가 이 추가의 승인 자리(가드 규율 §41번째 항목부터).
+// story #2958(2026-08-23, goals-client.tsx/goal-trust-rail.tsx) — #2955와 정확히 같은 클래스
+// 3건. ①②는 마스트헤드 dek의 "활성 N·완료 M" 카운트(goals.indexCountActive/indexCountDone)와
+// 상태 필터 칩의 "활성"/"완료"(goals.statusActive/statusDone) — 제목류 단문+그 단문을 포함하는
+// 카운트 문장, #2955의 docs.title<->docs.indexDocCount와 동형. ③은 goal-trust-rail.tsx의
+// ProofCapsule(density="audit") stateLabel prop에 goals.outcomeLabel="결과"를 채우는데(그
+// 값 자체는 AuditRow가 시각 렌더하지 않는 required prop 채움용, #2955 doc-status-rail.tsx와
+// 동일 관례) 같은 컴포넌트가 goals.trustRailOutcomeJudged="결과 확定 · {label}"도 렌더한다 —
+// 부분문자열은 겹치지만 하나는 애초에 안 보이는 값이라 혼동 여지가 실질 0.
 export const EXEMPT_PAIRS = new Set<string>([
+  'goals.indexCountActive <-> goals.statusActive',
+  'goals.indexCountDone <-> goals.statusDone',
+  'goals.outcomeLabel <-> goals.trustRailOutcomeJudged',
   'docs.indexDocCount <-> docs.title',
   'sprints.days <-> sprints.overdueBadge',
   'onboarding.projectLimitExceededError <-> settings.tabProjects',

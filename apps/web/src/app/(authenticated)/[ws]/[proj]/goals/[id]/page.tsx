@@ -22,6 +22,7 @@ import { ToastContainer, useToast } from '@/components/ui/toast';
 import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
 import { EpicStatusTransition } from '@/components/epics/epic-status-transition';
 import { HypothesesSection } from '@/components/hypotheses/hypotheses-section';
+import { GoalTrustRail } from '@/components/goals/goal-trust-rail';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -54,7 +55,8 @@ interface Epic {
   success_hypothesis?: string | null;
   metric_definition?: Record<string, unknown> | null;
   measure_after?: string | null;
-  outcome_status?: 'n_a' | 'pending' | 'hit' | 'miss' | null;
+  // story #2958 — 타입 갭 정정(outcome-status-badge.tsx는 이미 4종 지원, 이 타입엔 없었음).
+  outcome_status?: 'n_a' | 'pending' | 'hit' | 'miss' | 'unmeasured' | 'unmeasurable' | null;
   outcome_result?: Record<string, unknown> | null;
 }
 
@@ -369,7 +371,11 @@ export default function EpicDetailPage() {
         }
       />
 
-      <div className="mx-auto max-w-3xl px-4 py-6 space-y-8">
+      {/* story #2958 §4 — 결과 캡슐 셸: [리딩(max 760/68ch) | 328px 수직 신뢰 레일]. 좁은
+          화면에선 레일이 컬럼 아래로 자연 스택(grid-cols-1, #2955와 동형 반응형 판단 —
+          PR 본문에 명기). */}
+      <div className="grid grid-cols-1 gap-8 px-4 py-6 lg:grid-cols-[minmax(0,1fr)_328px] lg:px-8">
+      <article className="mx-auto w-full max-w-3xl space-y-8 lg:mx-0">
         {/* Header */}
         <div className="space-y-3">
           <div className="flex items-start justify-between gap-4">
@@ -406,6 +412,36 @@ export default function EpicDetailPage() {
             {epic.outcome_status && epic.outcome_status !== 'n_a' ? <OutcomeStatusBadge status={epic.outcome_status} /> : null}
             {epic.target_date && <span className="text-xs text-muted-foreground">{t('targetDate')}: {formatDate(epic.target_date, locale)}</span>}
             {epic.target_sp != null && <span className="text-xs text-muted-foreground">{t('targetSp')}: {epic.target_sp}</span>}
+          </div>
+        </div>
+
+        {/* story #2958 §2/§4 핵심 재조립 — 이중 신호 캡슐 2개(작업 Claimed/결과 Verified),
+            나란히. 작업 진척은 반드시 중립(proof-ink-3) — green은 outcome=hit에만(§8 확定). */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="proof-cut border border-border bg-card px-4 py-3.5">
+            <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">{t('taskCapsuleTitle')}</div>
+            <div className="mt-1.5 flex items-baseline gap-2">
+              <span className="font-editorial-heading text-[26px] tracking-[-0.02em] text-foreground">{done}/{stories.length}</span>
+              <span className="font-mono text-xs text-muted-foreground">{t('stories')}</span>
+            </div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+              <div className="h-full rounded-full bg-proof-ink-3 transition-all duration-300" style={{ width: `${stories.length > 0 ? Math.round((done / stories.length) * 100) : 0}%` }} />
+            </div>
+            <div className="mt-2 text-[11px] text-muted-foreground">{t('taskCapsuleHint')}</div>
+          </div>
+          <div className="proof-cut border border-proof-blue/25 bg-proof-blue-soft px-4 py-3.5">
+            <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-proof-blue">{t('outcomeCapsuleTitle')}</div>
+            <div className="mt-1.5 font-editorial-heading text-[22px] tracking-[-0.02em] text-proof-blue">
+              {epic.outcome_status === 'hit' ? t('outcomeCapsuleHit')
+                : epic.outcome_status === 'miss' ? t('outcomeCapsuleMiss')
+                : epic.outcome_status === 'unmeasured' ? t('outcomeCapsuleUnmeasured')
+                : epic.outcome_status === 'unmeasurable' ? t('outcomeCapsuleUnmeasurable')
+                : t('outcomeCapsuleUnmeasuredYet')}
+            </div>
+            <div className="mt-2 text-[13px] leading-snug text-foreground/80">
+              {epic.success_criteria?.trim() ? epic.success_criteria.split('\n')[0] : t('outcomeCapsuleNoCriteria')}
+              {epic.measure_after ? ` · ${t('targetDate')} ${formatDate(epic.measure_after, locale)}` : ''}
+            </div>
           </div>
         </div>
 
@@ -468,20 +504,14 @@ export default function EpicDetailPage() {
           </>
         )}
 
-        {/* Progress */}
-        <section className="space-y-4">
-          <h2 className="text-xs font-medium text-muted-foreground">{t('progress')}</h2>
-          <div>
-            <p className="mb-1 text-xs text-muted-foreground">{t('storiesProgress')}</p>
-            <ProgressBar done={done} total={stories.length} />
-          </div>
-          {spTotal > 0 && (
-            <div>
-              <p className="mb-1 text-xs text-muted-foreground">{t('spProgress')}</p>
-              <ProgressBar done={spDone} total={spTotal} />
-            </div>
-          )}
-        </section>
+        {/* story #2958 — 스토리 진척 단일 바는 위 이중 신호 캡슐(작업 Claimed)로 승격돼 중복이라
+            제거(§2). SP 진척은 별개 지표(스토리 수≠SP)라 그대로 존속. */}
+        {spTotal > 0 && (
+          <section className="space-y-2">
+            <h2 className="text-xs font-medium text-muted-foreground">{t('spProgress')}</h2>
+            <ProgressBar done={spDone} total={spTotal} />
+          </section>
+        )}
 
         {/* Stories — grouped by status */}
         <section className="space-y-4">
@@ -525,6 +555,18 @@ export default function EpicDetailPage() {
             </div>
           )}
         </section>
+      </article>
+
+        {/* 수직 신뢰 레일(§4/§6) */}
+        <aside className="lg:border-l lg:border-border lg:pl-6">
+          <GoalTrustRail
+            outcomeStatus={epic.outcome_status}
+            measureAfter={epic.measure_after}
+            createdAt={epic.created_at}
+            epicId={epic.id}
+            projectId={epic.project_id ?? ''}
+          />
+        </aside>
       </div>
 
       {/* Delete confirm dialog */}

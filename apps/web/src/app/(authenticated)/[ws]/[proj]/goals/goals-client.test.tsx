@@ -124,3 +124,97 @@ describe('GoalsClient — 목표 first-touch 정체성', () => {
     expect(container.querySelector('button[aria-label="목표 삭제"]')).toBeNull();
   });
 });
+
+// story #2958(doc goals-outcome-ledger-redesign-handoff §2/§3) — 진척바 → 이중 신호(작업
+// Claimed/결과 Verified) 재조립 회귀가드.
+describe('GoalsClient — 결과 원장 재조립(§2 이중 신호·§3 마스트헤드)', () => {
+  it('마스트헤드(kicker+H1+dek)가 목표 활성/완료 카운트와 함께 렌더된다', async () => {
+    stubFetch([
+      { id: 'e1', title: '목표A', status: 'active', total_stories: 2, done_stories: 1 },
+      { id: 'e2', title: '목표B', status: 'done', total_stories: 4, done_stories: 4 },
+    ]);
+    await mount();
+    expect(container.textContent).toContain('OUTCOMES');
+    expect(container.querySelector('h1')?.textContent).toBe('목표');
+    expect(container.textContent).toContain('활성 1');
+    expect(container.textContent).toContain('완료 1');
+  });
+
+  it('작업(Claimed) 바는 중립색(proof-ink-3)이지 primary(파랑)가 아니다 — done=100%여도 green 아님', async () => {
+    stubFetch([{ id: 'e1', title: '완료된 목표', status: 'done', total_stories: 4, done_stories: 4, outcome_status: 'pending' }]);
+    await mount();
+    const fill = container.querySelector('.bg-proof-ink-3');
+    expect(fill).not.toBeNull();
+    expect(container.querySelector('.bg-primary')).toBeNull();
+  });
+
+  it('결과(Verified) 줄 — outcome_status=hit이면 초록 톤 "적중" 텍스트가 뜬다', async () => {
+    stubFetch([{ id: 'e1', title: '달성 목표', status: 'done', total_stories: 2, done_stories: 2, outcome_status: 'hit' }]);
+    await mount();
+    expect(container.textContent).toContain('적중');
+    expect(container.querySelector('.text-proof-green')).not.toBeNull();
+  });
+
+  // PR#3387 카디르 QA(2026-08-23)·PO soul-lock 확定 — 이 테스트가 "text-destructive 없음"만
+  // 잰 게 구멍이었다(done+miss가 status 칩에서 green으로 뜨는 실회귀를 놓침). green 클래스
+  // 자체가 없다는 걸 직접 잰다 — "빨강이 아니다"와 "초록이 아니다"는 다른 주장이다.
+  it('결과(Verified) 줄 — outcome_status=miss는 빨강도 초록도 아니라 중립 톤이다(soul-lock)', async () => {
+    stubFetch([{ id: 'e1', title: '미달 목표', status: 'done', total_stories: 2, done_stories: 2, outcome_status: 'miss' }]);
+    await mount();
+    expect(container.textContent).toContain('빗나감');
+    expect(container.querySelector('.text-destructive')).toBeNull();
+    expect(container.querySelector('.bg-proof-green-soft')).toBeNull();
+    expect(container.querySelector('.text-proof-green')).toBeNull();
+  });
+
+  // PR#3387 QA 처방 ①② — status==='done'만으론 상태 칩이 green이면 안 된다. outcome_status별
+  // 명시 케이스로 고정(회귀 재발 시 바로 여기서 걸린다).
+  it('상태 칩 — done+miss는 초록이 아니라 중립(sunk)이다', async () => {
+    stubFetch([{ id: 'e1', title: 'M', status: 'done', total_stories: 1, done_stories: 1, outcome_status: 'miss' }]);
+    await mount();
+    expect(container.querySelector('.bg-proof-green-soft')).toBeNull();
+    expect(container.querySelector('.bg-proof-sunk')).not.toBeNull();
+  });
+
+  it('상태 칩 — done+unmeasured는 초록이 아니라 중립(sunk)이다', async () => {
+    stubFetch([{ id: 'e1', title: 'U', status: 'done', total_stories: 1, done_stories: 1, outcome_status: 'unmeasured' }]);
+    await mount();
+    expect(container.querySelector('.bg-proof-green-soft')).toBeNull();
+    expect(container.querySelector('.bg-proof-sunk')).not.toBeNull();
+  });
+
+  it('상태 칩 — done+pending(아직 판정 없음)은 초록이 아니라 중립(sunk)이다', async () => {
+    stubFetch([{ id: 'e1', title: 'P', status: 'done', total_stories: 1, done_stories: 1, outcome_status: 'pending' }]);
+    await mount();
+    expect(container.querySelector('.bg-proof-green-soft')).toBeNull();
+    expect(container.querySelector('.bg-proof-sunk')).not.toBeNull();
+  });
+
+  // PR#3387 처방 갱신(유나 원작자 정본 채택, PO 2026-08-23) — 미르코의 첫 처방("done&&hit만
+  // green")조차 두 축(작업/결과)을 섞는 것이었다. 최종 규율: **상태 칩은 green을 아예 안 쓴다**
+  // (done+hit이어도) — green은 결과 필(OutcomeStatusBadge, bg-success-tint)에만 존재한다.
+  it('상태 칩 — done+hit이어도 상태 칩 자체엔 green 클래스가 없다(두 축 분리)', async () => {
+    stubFetch([{ id: 'e1', title: 'H', status: 'done', total_stories: 1, done_stories: 1, outcome_status: 'hit' }]);
+    await mount();
+    expect(container.querySelector('.proof-cut-xs')?.className).not.toContain('proof-green');
+  });
+
+  it('green은 결과 필(OutcomeStatusBadge)에서만 뜬다 — outcome=hit일 때 bg-success-tint가 존재', async () => {
+    stubFetch([{ id: 'e1', title: 'H', status: 'done', total_stories: 1, done_stories: 1, outcome_status: 'hit' }]);
+    await mount();
+    expect(container.querySelector('.bg-success-tint')).not.toBeNull();
+  });
+
+  it('결과 미측정+measure_after 있으면 "측정 예정 · 날짜"를 보여준다(수치 지어내지 않음)', async () => {
+    stubFetch([{ id: 'e1', title: '진행 목표', status: 'active', total_stories: 3, done_stories: 1, outcome_status: 'pending', measure_after: '2026-09-01' }]);
+    await mount();
+    expect(container.textContent).toContain('측정 예정');
+  });
+
+  it('작업 100%인데 결과 미측정이면 두 신호가 동시에 눈에 띈다(§2 핵심 가치)', async () => {
+    stubFetch([{ id: 'e1', title: '일은 끝 결과는 아직', status: 'done', total_stories: 5, done_stories: 5, outcome_status: 'unmeasured' }]);
+    await mount();
+    expect(container.textContent).toContain('5/5');
+    expect(container.textContent).toContain('판정 없이 닫힘');
+  });
+});
