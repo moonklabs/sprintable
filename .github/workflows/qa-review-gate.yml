@@ -94,12 +94,33 @@ jobs:
         with:
           fetch-depth: 0
 
+      # story #2973(미르코 그라운딩, 2026-08-23) — `github.event.pull_request.labels`는
+      # 이 워크플로를 트리거한 그 웹훅 «페이로드 스냅샷»이다(라이브 조회가 아니다). QA·
+      # Design 두 리뷰어가 근접한 시각에 각자 라벨을 달면, 먼저 도착한 labeled 이벤트의
+      # job이 "그 시점 페이로드"(상대 라벨이 아직 안 실린)만 보고 HAS_*_PASS=false로
+      # 잘못 실패한다(실측: #3399 08:40:39 실패 run 로그 — "형제 run 미완" 판정이 아니라
+      # 이 레이스였다. #3391도 동일 뿌리 — rerun이 같은 스테일 페이로드로 재생돼 "GH가
+      # rerun을 거부"로 보이는 증상까지 설명한다). 처방: 판정 자체를 이벤트 페이로드가
+      # 아니라 `gh api`로 "지금 이 순간의" 라벨을 라이브 재조회해서 낸다 — 대기-폴링(그래도
+      # 타임아웃 전에 실패할 여지가 남는다)이 아니라, 판정 시점의 진짜 상태를 본다.
+      - name: Fetch live PR labels (avoid stale webhook-payload race — story #2973)
+        id: live_labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          LABELS_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/labels" --paginate --jq '[.[].name]')"
+          echo "live labels: ${LABELS_JSON}"
+          echo "has_qa_pass=$(echo "${LABELS_JSON}" | jq 'index("qa:pass") != null')" >> "$GITHUB_OUTPUT"
+          echo "has_qa_changes=$(echo "${LABELS_JSON}" | jq 'index("qa:changes") != null')" >> "$GITHUB_OUTPUT"
+
       # ⭐design-review-gate.yml과 대칭(유나신 지적, 2026-07-31) — qa:changes가 열려 있으면
       # qa:pass 유무와 무관하게 무조건 빨강. 두 changes 라벨이 기계적으로 배타가 되어 changes
       # 라벨도 "하는 일"이 생긴다(전엔 설명뿐이었다).
       - name: Enforce qa:changes blocks merge (unconditional — regardless of qa:pass)
         env:
-          HAS_QA_CHANGES: ${{ contains(github.event.pull_request.labels.*.name, 'qa:changes') }}
+          HAS_QA_CHANGES: ${{ steps.live_labels.outputs.has_qa_changes }}
         run: |
           set -euo pipefail
           if [ "${HAS_QA_CHANGES}" = "true" ]; then
@@ -112,7 +133,7 @@ jobs:
       # 떼면 이 스텝이 다시 돌아 빨강으로 되돌아간다. ⛔경로 필터 없음 — 모든 PR에 적용(AC2).
       - name: Enforce qa:pass label (no path scoping — applies to every PR)
         env:
-          HAS_QA_PASS: ${{ contains(github.event.pull_request.labels.*.name, 'qa:pass') }}
+          HAS_QA_PASS: ${{ steps.live_labels.outputs.has_qa_pass }}
         run: |
           set -euo pipefail
           if [ "${HAS_QA_PASS}" = "true" ]; then
