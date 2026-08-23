@@ -101,6 +101,61 @@ describe('useSseMultiplexer — story #2078', () => {
     expect(instances).toHaveLength(0);
   });
 
+  describe('org 전환(memberId 변경) 재연결 — story #2940(실사고 재현)', () => {
+    it('memberId가 바뀌면 옛 커넥션을 닫고 새 member_id로 재연결한다', async () => {
+      await act(async () => {
+        root.render(<Harness memberId="member-org-a" enabled />);
+      });
+      expect(instances).toHaveLength(1);
+      expect(instances[0]!.url).toContain('member_id=member-org-a');
+      expect(instances[0]!.closed).toBe(false);
+
+      // org 전환 흉내 — 부모가 새 memberId로 리렌더.
+      await act(async () => {
+        root.render(<Harness memberId="member-org-b" enabled />);
+      });
+
+      expect(instances[0]!.closed).toBe(true); // 옛 커넥션은 닫힘.
+      expect(instances).toHaveLength(2); // 새 커넥션이 열림.
+      expect(instances[1]!.url).toContain('member_id=member-org-b');
+      expect(instances[1]!.closed).toBe(false);
+    });
+
+    it('재연결 후에도 전환 前 구독이 그대로 살아 새 커넥션의 이벤트를 받는다(구독 복원)', async () => {
+      await act(async () => {
+        root.render(<Harness memberId="member-org-a" enabled />);
+      });
+      const handler = vi.fn();
+      await act(async () => { handle!.subscribe('notification', handler); });
+      act(() => { dispatchNamed(instances[0]!, 'notification', { from: 'org-a' }); });
+      expect(handler).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        root.render(<Harness memberId="member-org-b" enabled />);
+      });
+
+      // ⭐핵심 — 재연결 前에 구독한 handler가, 재연결로 새로 열린 커넥션의 이벤트도 받아야 한다
+      // (subscribe를 다시 호출할 필요 없이 namedSubscribersRef가 재연결을 관통해 유지됨).
+      act(() => { dispatchNamed(instances[1]!, 'notification', { from: 'org-b' }); });
+      expect(handler).toHaveBeenCalledTimes(2);
+    });
+
+    it('memberId가 안 바뀌면(무관한 리렌더) 재연결하지 않는다 — 과잉 재연결 금지', async () => {
+      await act(async () => {
+        root.render(<Harness memberId="member-org-a" enabled />);
+      });
+      expect(instances).toHaveLength(1);
+
+      // 같은 memberId로 리렌더(예: 부모가 다른 이유로 리렌더된 경우).
+      await act(async () => {
+        root.render(<Harness memberId="member-org-a" enabled />);
+      });
+
+      expect(instances).toHaveLength(1); // 새 커넥션 없음.
+      expect(instances[0]!.closed).toBe(false);
+    });
+  });
+
   it('같은 이벤트명에 구독자 여러 개(다른 훅 흉내)가 전부 이벤트를 받는다 — 멀티플렉싱 핵심', async () => {
     await act(async () => {
       root.render(<Harness memberId="me-1" enabled />);

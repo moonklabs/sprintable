@@ -163,8 +163,14 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
       esRef.current?.close();
       esRef.current = null;
     };
+  // story #2940(실사고 재현·codex 발견) — org 전환으로 memberId가 바뀌어도 이 effect가
+  // 재실행되지 않아(구 deps=[enabled]) 커넥션이 옛 member_id로 남아있었다. memberIdRef는
+  // connect() 재호출 시점의 최신값을 읽으려는 용도였지 effect 재트리거는 못 준다 — ref 쓰기는
+  // effect를 재실행시키지 않는다. memberId를 deps에 편입해 값이 실제로 바뀔 때만(문자열 값
+  // 비교라 참조 흔들림에 안 낚임) 재구독을 강제한다 — 그 외 참조 안정적인 항목(attachIfNeeded
+  // 등)은 여전히 의도적으로 제외라 disable 유지.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled]);
+  }, [enabled, memberId]);
 
   // story #2144 — connectedRef는 매 렌더 최신 connected를 반영(렌더 중 ref 대입은 다음
   // 커밋 전에 끝나 안전 — React 규칙상 자기 자신이 렌더링 중인 컴포넌트의 ref를 렌더 중
