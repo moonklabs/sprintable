@@ -449,7 +449,11 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             {!tagsCollapsed && (
               <div className="flex max-h-[120px] flex-wrap gap-1 overflow-y-auto px-4 py-1">
                 {allTags.map((tag) => (
-                  <button key={tag} type="button" onClick={() => setSelectedTags((prev) => prev.includes(tag) ? prev.filter((tg) => tg !== tag) : [...prev, tag])} className={`rounded-full px-2 py-0.5 text-[11px] font-medium transition ${selectedTags.includes(tag) ? 'bg-primary text-primary-foreground' : 'bg-muted/60 text-muted-foreground hover:bg-muted'}`}>
+                  // story #2938(카디르 QA 재검·2026-08-23) — 선택된 태그 pill도 count 배지와
+                  // 동일 색쌍(bg-primary+text-primary-foreground, 11px)이라 같은 다크 AA 미달.
+                  // 같은 처방(bg-proof-blue-soft+text-foreground)으로 교정 — "버튼은 대형만
+                  // 예외"가 이 pill(11px)엔 적용 안 됨(QA 지적 그대로).
+                  <button key={tag} type="button" onClick={() => setSelectedTags((prev) => prev.includes(tag) ? prev.filter((tg) => tg !== tag) : [...prev, tag])} className={`rounded-full px-2 py-0.5 text-[11px] font-medium transition ${selectedTags.includes(tag) ? 'bg-proof-blue-soft text-foreground' : 'bg-muted/60 text-muted-foreground hover:bg-muted'}`}>
                     #{tag}
                   </button>
                 ))}
