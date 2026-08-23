@@ -242,7 +242,10 @@ function Sidebar({
         <div
           data-sidebar="sidebar"
           data-slot="sidebar-inner"
-          className="flex size-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:shadow-sm group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-sidebar-border"
+          // story #2969 §2 PR-3(doc proofline-system-layer-2969) — floating variant shadow-sm
+          // 제거(§1.2: 인라인 표면은 그림자 대신 라인 — 기존 ring-1 ring-sidebar-border가 이미
+          // 그 hairline 역할을 겸하고 있어 대체 없이 제거만으로 충분).
+          className="flex size-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-sidebar-border"
         >
           {children}
         </div>
@@ -515,7 +518,12 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
 }
 
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
+  // story #2969 §2 PR-3(doc proofline-system-layer-2969) — 활성 항목에 시트론 좌측 엣지
+  // 추가(border-l-2 border-l-proof-citron, alert.tsx/PR-2와 동일 문법). doc의 "carbon"
+  // (활성 배경을 어두운 톤으로) 축은 확定 토큰·값이 없어(globals.css에 "carbon"이라는
+  // 색 토큰 자체가 없음 — 다크 테마 코드네임일 뿐) 이 PR서 추측 구현하지 않는다 — 유나
+  // 확認 필요 사항으로 남김(PR 본문에 플래그).
+  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md border-l-2 border-l-transparent p-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:border-l-proof-citron data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
   {
     variants: {
       variant: {
@@ -752,6 +760,7 @@ export {
   SidebarMenuItem,
   SidebarMenuSkeleton,
   SidebarMenuSub,
+  sidebarMenuButtonVariants,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
   SidebarProvider,
