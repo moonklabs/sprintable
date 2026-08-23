@@ -490,6 +490,16 @@ async def reopen_gate_if_new_sha(
     )
     prior_sha = gate.approved_head_sha
     set_gate_status(gate, "pending", now=datetime.now(timezone.utc))
+    # story #2961(실 DB 관측, story 2905 gate 재현) — 이 함수만 재-pending 3종 중 유일하게
+    # resolver_id/resolved_at/resolution_note를 안 지웠다. gate_service.py의 다른 두 재-pending
+    # 경로(_reopen_rejected_gate·undo_gate_resolution)는 이 셋을 항상 함께 지운다 — status가
+    # pending으로 돌아가면 "누가 언제 무슨 사유로 해소했나"는 더 이상 참이 아니므로(그 해소는
+    # 이제 무효화된 옛 SHA에 대한 것), 셋을 같이 null로 되돌려 그 불변식(해소 3종 필드는
+    # status!=pending일 때만 값을 가진다)을 여기서도 지킨다. 감사 이력은 유실 안 됨 — 아래
+    # GateGithubCheckEvent(re_pending, prior_sha)가 별도로 원장에 남긴다.
+    gate.resolver_id = None
+    gate.resolved_at = None
+    gate.resolution_note = None
     gate.approved_head_sha = None
     gate.github_check_run_id = None  # 새 SHA는 새 check-run(같은 SHA의 pending→success 갱신 축과 분리).
     gate.github_check_run_sha = None
