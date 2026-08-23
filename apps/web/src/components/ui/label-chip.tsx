@@ -16,8 +16,11 @@ export const LABEL_PRESET_COLORS = [
 ] as const;
 
 export function LabelChip({ label, className }: { label: LabelData; className?: string }) {
+  // story #2969 §1.4(doc proofline-system-layer-2969) — label-chip.tsx는 §1.4 "proof-cut-xs
+  // 소 컷(태그·마커류)" 목록에 badge.tsx/status-badge.tsx와 함께 명시 등재. rounded-full→
+  // proof-cut+proof-cut-xs.
   return (
-    <span className={cn('inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground', className)}>
+    <span className={cn('proof-cut proof-cut-xs inline-flex items-center gap-1.5 bg-muted px-2 py-0.5 text-xs font-medium text-foreground', className)}>
       <span
         className="h-2 w-2 shrink-0 rounded-full"
         style={{ backgroundColor: label.color ?? '#8A8F98' }}
