@@ -1,12 +1,15 @@
 'use client';
 
 import type { ComponentType } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useTranslations } from 'next-intl';
-import { Lock } from 'lucide-react';
+import { Lock, Plus } from 'lucide-react';
 import { StoryCard } from './story-card';
 import type { KanbanStory, KanbanMember, LineStatusSummary, TrustColumnId } from './types';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 type SortableContextCompatProps = {
   children?: React.ReactNode;
@@ -51,6 +54,15 @@ interface KanbanTrustColumnProps {
   storyLabelsMap?: Record<string, { id: string; name: string; color: string | null }[]>;
   storyGatesMap?: Record<string, { id: string; gate_type: string; status: string }[]>;
   storyLineMap?: Record<string, LineStatusSummary>;
+  // story #2949 — settable 컬럼(locked=false: queued/running/claimed_done/done) 전용 인라인
+  // 컴포저. KanbanColumn(kanban-column.tsx)의 동일 기능을 그대로 이식(발명 0) — 다만 이 컬럼은
+  // "story status"가 아니라 TrustColumnId를 다루므로, id(TrustColumnId)→실제 status 매핑은
+  // 호출자(kanban-board.tsx, TRUST_COLUMN_TO_STATUS)가 onCreateStory 넘기기 前에 해소한다 —
+  // 이 컴포넌트는 그 매핑을 몰라도 된다(과결합 회피, 이 파일 상단 설계 원칙 그대로).
+  onCreateStory?: (columnId: string, title: string) => Promise<void> | void;
+  // f1910a31과 동형 — nonce가 바뀔 때마다(0→1, 1→2…) 컴포저 재오픈. CTA가 트러스트 뷰에서도
+  // 바로 열리게(축 전환 브리지 제거, story #2949).
+  autoComposeSignal?: number;
   // story #2933 H4(PO 리뷰 질문, PR#3366 2026-08-22) — 드래그가 진행 중인지(어떤 카드든).
   // v4 아티팩트 §B("파생 3개가 «닫힌다»") — 파생 컬럼은 «항상» 무효 타깃이라 5-status의
   // dragStatus별 valid/invalid 판정과 달리 뭘 끌든 똑같이 닫힌다. 정적 상태(잠금배지+힌트
@@ -62,11 +74,13 @@ interface KanbanTrustColumnProps {
 
 /**
  * story #2933 H4(P0-H) — 6단계 신뢰축+완료 7컬럼 중 1개. KanbanColumn(5-status)과 별도
- * 컴포넌트로 새로 만든 이유: WIP limit·done-collapse·backlog 인라인 컴포저 등 KanbanColumn의
- * 부가 기능 대부분이 «status 컬럼» 전용 개념이라(WIP는 status별 한도, 컴포저는 backlog
- * 전용) 트러스트 컬럼엔 안 맞는다 — 억지로 끼워맞추느니 이 뷰가 실제로 필요한 최소(헤더+
- * 카드 목록+잠금 표시)만 담은 별도 컴포넌트가 더 정직하다(과결합 회피, 새 KanbanColumn prop
- * 10여개를 트러스트뷰용으로 옵셔널/무의미하게 늘리지 않음).
+ * 컴포넌트로 새로 만든 이유: WIP limit·done-collapse 등 KanbanColumn의 부가 기능 대부분이
+ * «status 컬럼» 전용 개념이라(WIP는 status별 한도) 트러스트 컬럼엔 안 맞는다 — 억지로
+ * 끼워맞추느니 이 뷰가 실제로 필요한 최소만 담은 별도 컴포넌트가 더 정직하다(과결합 회피).
+ * 단 인라인 컴포저는 예외(story #2949) — 트러스트 축이 기본이 된 이상 "기본 화면에서 바로
+ * 스토리 생성"은 1급 경로라 settable 컬럼(locked=false)에 KanbanColumn과 동형으로 이식했다
+ * (발명 0). id(TrustColumnId)→실제 story status 매핑은 이 컴포넌트가 모른다 — 호출자
+ * (kanban-board.tsx)가 TRUST_COLUMN_TO_STATUS로 해소한 뒤 onCreateStory를 넘긴다.
  *
  * locked=true(파생 컬럼: needs_input/verified/merge_ready) — useDroppable disabled로 이
  * 컬럼 자체가 드롭 타깃이 되지 않는다(kanban-board.tsx resolveTrustColumnId가 이미 한 번
@@ -78,12 +92,42 @@ interface KanbanTrustColumnProps {
 export function KanbanTrustColumn({
   id, label, locked, stories, epicMap, memberMap, onStoryClick, onEditStory, onChangeStatus, onDeleteStory,
   projectId, onKickoffStory, executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap,
-  isDragging = false,
+  onCreateStory, autoComposeSignal, isDragging = false,
 }: KanbanTrustColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id, disabled: locked });
   const t = useTranslations('board');
   const dotClass = TRUST_COLUMN_DOT[id];
   const closedDuringDrag = locked && isDragging;
+
+  const [composing, setComposing] = useState(false);
+  const [draftTitle, setDraftTitle] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (autoComposeSignal && autoComposeSignal > 0) setComposing(true);
+  }, [autoComposeSignal]);
+
+  const startCompose = () => {
+    setDraftTitle('');
+    setComposing(true);
+  };
+  const cancelCompose = () => {
+    setComposing(false);
+    setDraftTitle('');
+  };
+  const submitCompose = async () => {
+    const title = draftTitle.trim();
+    if (!title || !onCreateStory || submitting) return;
+    setSubmitting(true);
+    try {
+      await onCreateStory(id, title);
+      setDraftTitle('');
+      setComposing(false);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div
@@ -98,7 +142,20 @@ export function KanbanTrustColumn({
           {label}
           {locked && <Lock className="size-3 text-muted-foreground" aria-hidden="true" />}
         </h3>
-        <span className="text-xs tabular-nums text-muted-foreground">{stories.length}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs tabular-nums text-muted-foreground">{stories.length}</span>
+          {!locked && onCreateStory ? (
+            <button
+              type="button"
+              aria-label={t('addStory')}
+              title={t('addStory')}
+              onClick={startCompose}
+              className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+        </div>
       </div>
       {locked && (
         <p className={`mb-2 text-[10px] leading-snug ${closedDuringDrag ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>
@@ -106,9 +163,49 @@ export function KanbanTrustColumn({
         </p>
       )}
 
+      {!locked && composing ? (
+        <div className="mb-2 rounded-xl border border-primary/30 bg-background/50 p-2">
+          <Input
+            ref={inputRef}
+            autoFocus
+            value={draftTitle}
+            onChange={(e) => setDraftTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void submitCompose();
+              } else if (e.key === 'Escape') {
+                cancelCompose();
+              }
+            }}
+            placeholder={t('addStoryPlaceholder')}
+            className="h-8 text-sm"
+          />
+          <div className="mt-2 flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="default"
+              className="h-7 px-2 text-xs"
+              onClick={() => void submitCompose()}
+              disabled={submitting || !draftTitle.trim()}
+            >
+              {t('addStorySubmit')}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs text-muted-foreground"
+              onClick={cancelCompose}
+            >
+              {t('addStoryCancel')}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <SortableContextCompat items={stories.map((s) => s.id)} strategy={verticalListSortingStrategy} disabled={locked}>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto p-1.5 [&>*]:shrink-0">
-          {stories.length === 0 ? (
+          {stories.length === 0 && !composing ? (
             <div className="flex min-h-[100px] items-center justify-center px-4 text-center">
               <p className="text-xs text-muted-foreground">{t('noStories')}</p>
             </div>

@@ -1066,6 +1066,15 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     }
   }, [projectId, selectedSprintId, selectedEpicId, t, adjustColumnTotal, bumpTransitionErrorNonce]);
 
+  // story #2949 — 트러스트 뷰의 인라인 컴포저는 TrustColumnId(예: 'queued')를 넘긴다.
+  // handleCreateStory는 그 값을 그대로 story.status로 POST하므로(classic 뷰는 컬럼id=status라
+  // 문제 없음), TRUST_COLUMN_TO_STATUS(H4 확定 매핑, 드롭과 동일 규칙)로 실 status를 먼저
+  // 해소한 뒤 위임한다 — 생성 로직 자체는 발명 0(같은 handleCreateStory 재사용).
+  const handleCreateStoryTrust = useCallback((columnId: string, title: string) => {
+    const status = TRUST_COLUMN_TO_STATUS[columnId as TrustColumnId] ?? columnId;
+    return handleCreateStory(status, title);
+  }, [handleCreateStory]);
+
   // AC1/AC5: WIP limit 핸들러
   const handleWipLimitEdit = useCallback((columnId: string) => {
     setWipLimits((prev) => ({
@@ -1517,28 +1526,23 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           // 1문장) — 보드 자체가 이미 레인 시각이라 별도 visual/AI hint는 중복·클러터.
           // stories(unfiltered 원본)로 진짜 빈 프로젝트만 판정 — 필터/검색 결과 0건은 여기 안 타고
           // 기존 per-column "스토리가 없습니다" 그대로(에픽 PR#2209에서 배운 필터빈 vs 진짜빈 구분).
-          // ⚠️컬럼 그리드를 대체하지 않고 그 위 배너로만 — CTA가 여는 백로그 인라인 컴포저
-          // (autoComposeSignal)가 KanbanColumn 내부 상태라, 컬럼 자체가 마운트돼 있어야
-          // CTA 클릭이 실제로 컴포저를 연다(대체했다면 신호를 받을 컬럼이 없어 무반응했을 것).
+          // ⚠️컬럼 그리드를 대체하지 않고 그 위 배너로만 — CTA가 여는 인라인 컴포저
+          // (autoComposeSignal)가 컬럼 내부 상태라, 컬럼 자체가 마운트돼 있어야 CTA 클릭이
+          // 실제로 컴포저를 연다(대체했다면 신호를 받을 컬럼이 없어 무반응했을 것).
           //
-          // PO 긴급 fix(P0-04 기본축 trust 플립, 2026-08-22) — 인라인 컴포저는 KanbanColumn
-          // (5-status 클래식) 전용이라 KanbanTrustColumn엔 아직 없다(별도 스토리 필요 규모라
-          // 이 소PR 스코프 밖). 기본축이 trust로 바뀌면서 이 CTA가 신호를 받을 컬럼 자체가
-          // 없어 무반응해지는 걸 막기 위해, 클릭 시 클래식 축으로 먼저 전환한다(무한 회귀
-          // onboarding 실종보다 «클래식으로 넘어가서 만든다»가 정직한 임시 처방).
-          //
-          // ⚠️QA changes(PR#3378, 카디르+codex, 2026-08-22, HIGH) — handleSetAxisMode를 쓰면
-          // saveAxisMode까지 타 localStorage에 'status'가 **영구 저장**된다(CTA 클릭이 명시적
-          // 사용자 선택이 아닌데도 명시 선택처럼 기록돼, 이 프로젝트가 재마운트해도 다시는
-          // trust로 안 돌아간다 — 플립의 취지 자체를 무효화). 저장 없는 setAxisMode만 써서
-          // 이번 세션 한정 임시 전환으로 좁힌다.
+          // story #2949(본편, PR#3378의 축 전환 브리지 대체) — 인라인 컴포저가 이제
+          // KanbanTrustColumn(settable 4컬럼)에도 있어, 축 전환 없이 **현재 보이는 축의
+          // settable 첫 컬럼**(trust=queued/status=backlog)이 바로 컴포저를 연다. #3378의
+          // 임시 브리지(클릭 시 클래식으로 강제 전환)는 신호를 받을 컬럼이 없을 때만 필요했던
+          // 처방이라 여기서 제거 — 축 전환 자체가 없으니 유나 #3378 design 판정이 지적한
+          // "전환 시각 큐 부재"도 함께 소멸(전환이 안 일어나므로 큐가 지킬 대상이 없음).
           <div className="shrink-0 border-b border-border/60 px-6 py-4">
             <EmptyState
               icon={<Workflow className="size-8" />}
               title={t('boardEmptyTitle')}
               description={t('boardEmptyDescription')}
               action={
-                <Button size="sm" onClick={() => { setAxisMode('status'); setAutoComposeNonce((n) => n + 1); }}>
+                <Button size="sm" onClick={() => setAutoComposeNonce((n) => n + 1)}>
                   <Plus className="size-3.5" />
                   {t('boardEmptyCta')}
                 </Button>
@@ -1593,6 +1597,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     storyGatesMap={storyGatesMap}
                     storyLineMap={storyLineMap}
                     isDragging={activeId != null}
+                    onCreateStory={handleCreateStoryTrust}
+                    autoComposeSignal={col.id === 'queued' ? autoComposeNonce : 0}
                   />
                 );
               })}

@@ -2,8 +2,11 @@
 //
 // story bb78f14b(doc resource-view-firsttouch-identity-pattern §4 "보드" 행 — ⚠️과함 주의): 진짜
 // 빈 보드(stories.length===0, unfiltered)에 절제된 3요소 배너(아이콘+headline+CTA)가 컬럼 그리드
-// "위"에 뜨는지(대체 아님 — 백로그 컬럼이 계속 마운트돼 있어야 CTA의 autoComposeSignal이
+// "위"에 뜨는지(대체 아님 — settable 첫 컬럼이 계속 마운트돼 있어야 CTA의 autoComposeSignal이
 // 실제로 컴포저를 연다), 데이터 있으면 배너가 안 뜨는지 왕복 검증한다.
+//
+// story #2949 — 기본축이 trust인 이상 CTA는 이제 축 전환 없이 트러스트 뷰의 queued 컬럼(현재
+// 보이는 축의 settable 첫 컬럼)에서 바로 컴포저를 연다(#3378의 임시 클래식 전환 브리지 제거).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -163,7 +166,7 @@ describe('KanbanBoard — 보드 first-touch 절제된 배너', () => {
     expect(html).toContain('스토리가 없습니다');
   });
 
-  it('배너 CTA 클릭 시 백로그 컬럼의 인라인 컴포저(제목 입력 필드)가 열린다', async () => {
+  it('배너 CTA 클릭 시 트러스트 뷰 queued 컬럼의 인라인 컴포저(제목 입력 필드)가 열린다 — 축 전환 없음', async () => {
     stubFetch([]);
     await mount();
     const ctaButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('첫 스토리 만들기'));
@@ -171,14 +174,42 @@ describe('KanbanBoard — 보드 first-touch 절제된 배너', () => {
     await act(async () => { ctaButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     // 컴포저가 열리면 입력 필드(placeholder 또는 textbox role)가 나타난다.
     expect(container.querySelector('input, textarea')).not.toBeNull();
+    // ⭐핵심(story #2949) — 축 전환 브리지가 사라졌으니 트러스트 축 라벨(예: "입력 필요")이
+    // 여전히 보여야 한다(클래식 5-status로 튕기지 않음).
+    expect(container.textContent).toContain('입력 필요');
   });
 
-  // ⚠️QA changes(PR#3378, 카디르+codex, 2026-08-22, HIGH) — CTA 브리지가 handleSetAxisMode를
-  // 쓰면 saveAxisMode까지 타 localStorage에 'status'가 영구 저장돼, CTA를 한 번만 눌러도
-  // 그 프로젝트가 조용히 classic으로 고정된다(재마운트해도 trust로 안 돌아옴 — 기본값
-  // 플립의 취지 자체가 무효화). setAxisMode만 쓰는 세션 한정 전환으로 좁혀 이 저장이
-  // 없는지 직접 증명한다.
-  it('배너 CTA 클릭은 축 전환을 localStorage에 저장하지 않는다 — 재마운트하면 다시 신뢰축 기본값', async () => {
+  it('컴포저에서 제출하면 H4 매핑(queued→ready-for-dev)대로 status가 실린 POST가 나간다', async () => {
+    const posted: Array<Record<string, unknown>> = [];
+    stubFetch([]);
+    const baseFetch = vi.mocked(fetch);
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url === '/api/stories' && init?.method === 'POST') {
+        const body = JSON.parse(init.body as string) as Record<string, unknown>;
+        posted.push(body);
+        return { ok: true, json: async () => ({ data: { id: 'new-1', ...body } }) };
+      }
+      return baseFetch(url, init);
+    }));
+    await mount();
+    const ctaButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('첫 스토리 만들기'));
+    await act(async () => { ctaButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const input = container.querySelector('input') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, '새 스토리');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const submitButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('추가'));
+    expect(submitButton).not.toBeUndefined();
+    await act(async () => { submitButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(posted).toHaveLength(1);
+    expect(posted[0]?.['status']).toBe('ready-for-dev'); // TRUST_COLUMN_TO_STATUS.queued
+    expect(posted[0]?.['title']).toBe('새 스토리');
+  });
+
+  it('배너 CTA 클릭은 축 전환을 localStorage에 저장하지 않는다(회귀 0 — 애초에 전환 자체가 없음)', async () => {
     stubFetch([]);
     await mount();
     const ctaButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('첫 스토리 만들기'));
