@@ -198,6 +198,46 @@ describe('ChatListView — 리스트 아바타 실사진(story #2968)', () => {
     await mount();
     expect(container.querySelector('img')).toBeNull();
   });
+
+  // 카디르 QA(#3397, HIGH 재발) — agentOnlyConvs 필터(`!myConvIds.has(c.id)`)는 conv.type을
+  // 안 가려 group 대화도 isAgentConv=true로 렌더된다. 그 경로에서까지 "임의 참가자 1인 사진을
+  // 대표사진처럼" 보여주면 안 된다(PR 자신의 group 원칙 위반) — 기존 group 테스트는 일반탭만
+  // 커버해 이 회귀를 놓쳤다. agent 탭을 실제로 열어(role="tab" 클릭) 검증한다.
+  it('agent 탭의 group 대화도 임의 참가자 사진을 대표사진처럼 노출하지 않는다(회귀 재발 방지)', async () => {
+    useDashboardContextMock.mockReturnValue({ role: 'admin' });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) {
+        return { ok: true, json: async () => ({ data: [] }) };
+      }
+      if (url.includes('include_agent_conversations=true')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [{
+              id: 'conv-agent-group-1', type: 'group', title: '에이전트 그룹',
+              latest_message: null, updated_at: '2026-08-23T00:00:00Z', unread_count: 0,
+              participants: [
+                { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+                { member_id: 'agent-1', name: '올리베이라', avatar_url: 'https://storage.googleapis.com/bucket/avatar/agent.png', type: 'agent' },
+                { member_id: 'human-1', name: '유나', avatar_url: 'https://storage.googleapis.com/bucket/avatar/yuna.png', type: 'human' },
+              ],
+            }],
+            total: 1,
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [], total: 0 }) };
+    }));
+    await mount();
+
+    const agentTab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('에이전트'));
+    expect(agentTab).not.toBeUndefined();
+    await act(async () => { agentTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('에이전트 그룹');
+    expect(container.querySelector('img')).toBeNull();
+  });
 });
 
 // story #1978(트랙C) — SSE 드롭 후 놓친 conversation.message_created가 목록에 미백필되던

@@ -108,10 +108,16 @@ function ConversationRow({
   const others = conv.participants ? getOtherParticipants(conv.participants, currentMemberId) : [];
   const isAgentInConv = conv.participants ? hasAgentParticipant(conv.participants) : false;
   const agentCount = others.filter((p) => p.type === 'agent').length;
-  // story #2968 — 1:1(DM·agent 탭)은 상대 1인이 특정되므로 avatar_url 실사진을 그대로 쓴다
+  // story #2968 — 1:1(conv.type==='dm')만 상대가 특정되므로 avatar_url 실사진을 그대로 쓴다
   // (avatar.tsx=정본, story #2887/#2921 — 3단 폴백[이미지→이니셜→아이콘]도 그쪽이 갖고 있다).
   // group은 "그 방을 대표하는 단일 인물"이 없어(다인원) 기존 Users 아이콘을 유지한다.
-  const oneOnOneParticipant = (conv.type === 'dm' || isAgentConv) ? others[0] : null;
+  //
+  // 카디르 QA(#3397, HIGH) — isAgentConv를 조건에 넣으면 agent탭의 group 대화까지 걸려
+  // others[0](임의 참가자 1인)을 대표사진처럼 노출했다(agentOnlyConvs 필터가 conv.type을
+  // 안 가려 group에도 isAgentConv=true가 붙는다, ChatListView 참고). 순수 conv.type만 본다
+  // — isAgentConv는 이름/actorType 폴백에서만 쓴다(agent탭 DM의 상대가 실제 에이전트임을
+  // 보강하는 용도, group 판정에는 관여하지 않는다).
+  const oneOnOneParticipant = conv.type === 'dm' ? others[0] : null;
 
   const participantLayer = conv.participants && conv.participants.length > 0 ? (
     conv.type === 'dm' ? (

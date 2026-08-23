@@ -735,6 +735,7 @@ export function ChatBubble({
           y={profilePopover.y}
           name={displayName}
           isAgent={isAgent}
+          avatarUrl={message.sender_avatar_url ?? null}
           onClose={() => setProfilePopover(null)}
           onBlock={onBlockUser}
         />
