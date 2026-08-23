@@ -198,7 +198,8 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
   const { shown, overflow, overflowHasGate } = buildAttentionQueue(items, CAP);
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-proof-line bg-proof-panel" style={{ clipPath: 'polygon(0 0, calc(100% - 24px) 0, 100% 24px, 100% 100%, 0 100%)' }}>
+    // story #2955 §5 — 인라인 clip-path를 정본 `.proof-cut` 유틸(globals.css)로 이관(24px 기본값 그대로).
+    <div className="proof-cut overflow-hidden rounded-2xl border border-proof-line bg-proof-panel">
       <div className="flex items-baseline justify-between gap-3 border-b border-proof-line-soft px-5 py-3.5">
         <div>
           <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-proof-faint">{t('kicker')}</div>

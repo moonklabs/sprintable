@@ -45,9 +45,12 @@ describe('ProofCapsule (density variants)', () => {
   });
 
   it('applies a clip-path cut-corner on full/card/row (not a plain rounded-full pill anywhere)', () => {
+    // story #2955 §5 — clip-path 지오메트리 계산이 인라인 style에서 globals.css의 `.proof-cut`
+    // 단일 정본으로 이관됐다(CutCornerShell). 렌더 마크업엔 이제 'polygon(' 리터럴이 없다
+    // (외부 스타일시트가 그 값을 갖는다) — 클래스명으로 컷코너 적용 자체를 검증한다.
     for (const density of ['full', 'card', 'row'] as const) {
       const markup = renderWithIntl(<ProofCapsule {...BASE} density={density} />);
-      expect(markup).toContain('polygon(');
+      expect(markup).toContain('proof-cut');
     }
   });
 });
