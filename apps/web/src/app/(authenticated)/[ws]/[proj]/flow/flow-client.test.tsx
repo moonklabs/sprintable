@@ -530,3 +530,17 @@ describe('FlowPageClient — story #2535 지구→대륙→도시 드릴다운',
     expect(container.textContent).toContain(koMessages.flow.ladderName_building);
   });
 });
+
+// story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — TopBar 타이틀=Heading
+// 무게로 재분류(크기는 TopBar 유지·구조 불변).
+describe('FlowPageClient — TopBar 타이틀 Heading 무게(story #2969 PR-5)', () => {
+  it('TopBar 타이틀 h1이 font-extrabold를 갖고 크기(text-sm)는 그대로다', async () => {
+    await renderFlowClient();
+
+    const h1 = container.querySelector('h1');
+    expect(h1).not.toBeNull();
+    expect(h1?.className).toContain('font-extrabold');
+    expect(h1?.className).toContain('text-sm');
+    expect(h1?.className).not.toContain('font-medium');
+  });
+});

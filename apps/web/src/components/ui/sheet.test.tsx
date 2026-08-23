@@ -37,4 +37,33 @@ describe('SheetContent — --elev-overlay + proof-line-strong(story #2969 PR-4)'
     expect(popup?.className).toContain('border-l-proof-line-strong');
     expect(popup?.className).not.toContain('shadow-lg');
   });
+
+  // 카디르 QA독립검증(PR#3402) — right만 커버해 나머지 3방향(top/bottom/left) 뮤테이션에
+  // 무영향이던 커버리지 갭. PR-5(#3402 이월분)에 편입.
+  it.each(['top', 'bottom', 'left'] as const)(
+    'side=%s도 그 방향의 proof-line-strong 보더를 갖는다(3방 커버리지 보강)',
+    async (side) => {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await act(async () => {
+        root.render(
+          <Sheet open>
+            <SheetContent side={side}>
+              <SheetTitle>제목</SheetTitle>
+            </SheetContent>
+          </Sheet>,
+        );
+      });
+      const popup = document.querySelector('[data-slot="sheet-content"]');
+      expect(popup).not.toBeNull();
+      // 시트가 슬라이드해 들어오는 방향의 "반대편"(콘텐츠와 맞닿는 안쪽 모서리)에 hairline이
+      // 선다 — top 시트는 아래쪽(border-b)·bottom 시트는 위쪽(border-t)·left 시트는
+      // 오른쪽(border-r)이 콘텐츠 접면(sheet.tsx의 data-[side=X]:border-* 매핑과 동일).
+      const borderSideClass = side === 'top' ? 'border-b-proof-line-strong'
+        : side === 'bottom' ? 'border-t-proof-line-strong'
+        : 'border-r-proof-line-strong';
+      expect(popup?.className).toContain(borderSideClass);
+    },
+  );
 });

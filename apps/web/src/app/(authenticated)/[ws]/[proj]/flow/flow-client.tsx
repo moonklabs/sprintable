@@ -210,7 +210,9 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
 
   return (
     <>
-      <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} showContextChip />
+      {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 재분류(구조·크기 불변):
+          TopBar 타이틀=Heading(무게↑만·크기는 TopBar 유지). */}
+      <TopBarSlot title={<h1 className="text-sm font-extrabold">{t('title')}</h1>} showContextChip />
 
       <div className="space-y-4 p-4">
         {/* story #2930(P0-G) I3 — nav에서 flow+sprints가 「보드」 단일 항목으로 접히며 사라진
