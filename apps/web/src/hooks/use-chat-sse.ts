@@ -148,6 +148,9 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
   const onConversationReadRef = useRef(onConversationRead);
   const onReconnectRef = useRef(onReconnect);
   const memberIdRef = useRef(currentTeamMemberId);
+  // story #2964(#2940과 동일 클래스, 폴백 경로 전용) — memberId가 진짜로 바뀐 재실행(마운트·
+  // mux 단독 토글이 아니라)인지 판별용.
+  const prevMemberIdForResetRef = useRef(currentTeamMemberId);
 
   // useLayoutEffect: DOM commit 후 동기 실행 — useEffect(비동기)보다 먼저 실행되어
   // SSE 이벤트 도달 전에 ref가 항상 최신 콜백을 가리킴 (stale closure 방지)
@@ -201,6 +204,16 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
   // 독립 연결 폴백(플래그 OFF 또는 Provider 밖) — story #2078 이전과 완전히 동일한 코드.
   useEffect(() => {
     if (mux || typeof EventSource === 'undefined') return;
+
+    // story #2964(sse-multiplexer.ts #2940과 동일 클래스) — org 전환으로 currentTeamMemberId가
+    // 바뀌어도 이 effect가 재실행되지 않으면(구 deps=[mux, backoff]) 커넥션이 옛 member_id로
+    // 남는다. memberIdRef 쓰기는 effect를 재트리거하지 못한다 — currentTeamMemberId를 deps에
+    // 편입해 값이 실제로 바뀔 때만(문자열 값 비교) 재구독을 강제한다. 동시에 memberId가 진짜
+    // 바뀐 경우에만 옛 org의 lastEventIdRef를 버린다(#3388 카디르 QA와 동일 근거 — 새 org
+    // 커넥션에 옛 org의 last_event_id가 실리면 BE가 org 스코프 없이 그 id의 생성시각만으로
+    // 백필기준을 잡아 조용히 누락된다). mux 단독 토글이나 최초 마운트에선 리셋하지 않는다.
+    if (prevMemberIdForResetRef.current !== currentTeamMemberId) lastEventIdRef.current = null;
+    prevMemberIdForResetRef.current = currentTeamMemberId;
 
     function connect() {
       sourceRef.current?.close();
@@ -271,11 +284,16 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
     connect();
 
     return () => {
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      // #3388 카디르 QA MEDIUM과 동일 근거 — clearTimeout만으론 stale ref가 남아, 재마운트
+      // (memberId 전환) 직후 대기 中이던 백오프 재시도가 stale ref에 걸려 건너뛸 수 있었다.
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
       sourceRef.current?.close();
       sourceRef.current = null;
     };
-  }, [mux, backoff]);
+  }, [mux, backoff, currentTeamMemberId]);
 
   // mux 경로에서는 로컬 connected state를 동기화하지 않고(setState-in-effect 회피) 멀티플렉서
   // 자신의 connected를 그대로 노출한다 — 이미 반응형(context 값 변경 시 이 훅도 리렌더).

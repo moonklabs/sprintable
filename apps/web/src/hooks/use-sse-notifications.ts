@@ -178,5 +178,12 @@ export function useSseNotifications({
       if (retryTimer) clearTimeout(retryTimer);
       es?.close();
     };
-  }, [mux, enabled]);
+  // story #2964(sse-multiplexer.ts #2940과 동일 클래스) — org 전환으로 memberId가 바뀌어도
+  // 이 effect가 재실행되지 않으면(구 deps=[mux, enabled]) 커넥션이 옛 member_id로 남는다.
+  // memberIdRef 쓰기는 effect를 재트리거하지 못한다 — memberId를 deps에 편입해 값이 실제로
+  // 바뀔 때만(문자열 값 비교) 재구독을 강제한다. `lastEventId`가 이 effect 본문의 지역
+  // 변수(ref 아님)라 재실행마다 자동으로 새로 초기화되므로 — memberId가 실제로 바뀐 재실행에서
+  // 옛 org의 커서가 자동으로 버려진다(#3388 카디르 QA와 동일 목표를 use-chat-sse.ts의
+  // prevMemberIdForResetRef 같은 별도 판별 없이 이 파일의 기존 설계가 이미 충족).
+  }, [mux, enabled, memberId]);
 }
