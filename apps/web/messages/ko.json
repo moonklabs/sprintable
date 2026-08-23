@@ -1935,6 +1935,8 @@
     "indexViewGrid": "격자",
     "indexLeadBadge": "핀",
     "indexNoResults": "조건에 맞는 문서가 없습니다",
+    "breadcrumbKnowledgeRoot": "지식",
+    "readMinutes": "읽기 {minutes}분",
     "docGateRejectModalTitle": "검토 반려",
     "docGateRejectReasonLabel": "반려 사유 (작성자에게 전달됩니다)",
     "docGateRejectReasonPlaceholder": "어떤 점을 보완해야 하는지 적어 주세요…",
