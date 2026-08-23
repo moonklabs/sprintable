@@ -518,12 +518,11 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
 }
 
 const sidebarMenuButtonVariants = cva(
-  // story #2969 §2 PR-3(doc proofline-system-layer-2969) — 활성 항목에 시트론 좌측 엣지
-  // 추가(border-l-2 border-l-proof-citron, alert.tsx/PR-2와 동일 문법). doc의 "carbon"
-  // (활성 배경을 어두운 톤으로) 축은 확定 토큰·값이 없어(globals.css에 "carbon"이라는
-  // 색 토큰 자체가 없음 — 다크 테마 코드네임일 뿐) 이 PR서 추측 구현하지 않는다 — 유나
-  // 확認 필요 사항으로 남김(PR 본문에 플래그).
-  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md border-l-2 border-l-transparent p-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:border-l-proof-citron data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
+  // story #2969 §2 sidebar 행(유나 확定) — 활성 항목="carbon fill"(sidebar-active-fill,
+  // 테마 무관 고정 다크 톤)+시트론 좌측 엣지(PR-3, border-l-2 border-l-proof-citron)+light
+  // 텍스트(sidebar-active-fill-foreground). "generic shadcn 결"이던 bg-sidebar-accent
+  // 갈음을 대체 — hover/열림 상태는 기존 sidebar-accent 그대로(활성 상태만 시그니처).
+  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md border-l-2 border-l-transparent p-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:border-l-proof-citron data-active:bg-sidebar-active-fill data-active:font-medium data-active:text-sidebar-active-fill-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
   {
     variants: {
       variant: {
