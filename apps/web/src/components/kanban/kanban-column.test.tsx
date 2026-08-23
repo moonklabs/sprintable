@@ -75,3 +75,33 @@ describe('KanbanColumn — story #2062 포커스 링 클리핑', () => {
     expect(scrollContainer?.className).toContain('p-1.5');
   });
 });
+
+// story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 컬럼헤더=소헤딩(Heading
+// 무게로 재분류·크기/sans 불변, 한글이라 caps/mono 금지).
+describe('KanbanColumn — 컬럼헤더 소헤딩(story #2969 PR-5)', () => {
+  it('컬럼헤더가 font-extrabold(Heading 무게)를 갖고 크기(text-xs)는 그대로다', async () => {
+    await act(async () => {
+      root.render(
+        wrap(
+          <KanbanColumn
+            id="backlog"
+            label="백로그"
+            stories={[]}
+            epicMap={{}}
+            memberMap={{}}
+            onStoryClick={vi.fn()}
+          />,
+        ),
+      );
+    });
+
+    const header = container.querySelector('h3');
+    expect(header).not.toBeNull();
+    expect(header?.className).toContain('font-extrabold');
+    expect(header?.className).toContain('text-xs');
+    expect(header?.className).not.toContain('font-semibold');
+    // 한글 라벨 — mono/uppercase/caps 금지(2967 교훈, [[feedback_copy_from_korean_convention]]).
+    expect(header?.className).not.toContain('font-mono');
+    expect(header?.className).not.toContain('uppercase');
+  });
+});
