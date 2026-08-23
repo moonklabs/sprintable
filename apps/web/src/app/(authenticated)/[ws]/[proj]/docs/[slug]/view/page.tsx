@@ -105,8 +105,8 @@ export default function DocViewPage() {
       {/* breadcrumb 상단 바(§3) — 옛 인라인 타이틀+TOC+편집 바를 대체. */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/20 px-4 py-2.5 font-mono text-[11.5px] text-muted-foreground lg:px-8">
         <Link href={docsListUrl(wsSlug, projSlug)} className="hover:text-foreground hover:underline">{t('breadcrumbKnowledgeRoot')}</Link>
-        {categoryLabel ? (<><span className="text-muted-foreground/50">/</span><span>{categoryLabel}</span></>) : null}
-        <span className="text-muted-foreground/50">/</span>
+        {categoryLabel ? (<><span className="text-muted-foreground">/</span><span>{categoryLabel}</span></>) : null}
+        <span className="text-muted-foreground">/</span>
         <span className="truncate text-foreground">{doc.title}</span>
         <span className="ml-auto flex shrink-0 items-center gap-1">
           <DocToc headings={extractDocHeadings(doc.content, doc.content_format ?? 'markdown')} onHeadingClick={scrollToHeading} />
@@ -119,7 +119,7 @@ export default function DocViewPage() {
         </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="focus-inset flex-1 overflow-y-auto">
         <div className="grid grid-cols-1 gap-8 px-4 py-8 lg:grid-cols-[minmax(0,1fr)_316px] lg:px-8">
           {/* 리딩 컬럼(§3) — 68ch 정본(§8 확定), 본문 렌더는 무변경(DocContentRenderer). */}
           <article className="mx-auto w-full max-w-[68ch]">

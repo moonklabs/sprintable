@@ -9,6 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import type { GateItem } from '@/components/kanban/types';
+import { useDocGateData } from './doc-status-rail';
 
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
@@ -174,6 +175,32 @@ describe('DocStatusHeader — 상태별 렌더(§3, 접힌 박스→상시 캡�
     await act(async () => { editBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const call = fetchMock.mock.calls.find((c) => typeof c[0] === 'string' && (c[0] as string).includes('/transition'));
     expect(JSON.parse((call![1] as RequestInit).body as string)).toEqual({ status: 'draft' });
+  });
+});
+
+// PR#3384 카디르 QA 선택 처방 — "gateTransition 안전판 줄(isSigFlow면 거부)을 빼도 기존
+// 테스트가 안 깨진다"는 뮤테이션 gap. UI가 버튼을 안 그리는 것과 무관하게, 데이터 레이어
+// 함수 자체가 우회를 거부하는지 직접 호출로 검증한다(useDocGateData를 테스트 전용 export).
+function GateTransitionHarness({ docId, status }: { docId: string; status: string }) {
+  const { gateTransition } = useDocGateData(docId, status);
+  return (
+    <button data-testid="raw-attempt" onClick={() => void gateTransition({ status: 'approved', resolver_id: 'member-1' }, () => {})}>
+      go
+    </button>
+  );
+}
+
+describe('gateTransition 데이터 레이어 안전판(§ 우회 금지, UI 은닉과 별개)', () => {
+  it('isSigFlow=true(기본 risk_grade=high)면 UI를 우회해 직접 호출해도 게이트 전이 fetch가 안 나간다', async () => {
+    const fetchMock = stubFetch({ gates: [gate({ can_approve: true })] });
+    await act(async () => {
+      root.render(wrap(<GateTransitionHarness docId="doc-1" status="pending" />));
+    });
+    await flush();
+    const btn = container.querySelector('[data-testid="raw-attempt"]') as HTMLButtonElement;
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    expect(fetchMock.mock.calls.some((c) => typeof c[0] === 'string' && (c[0] as string).includes('/gates/gate-1/transition'))).toBe(false);
   });
 });
 

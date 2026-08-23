@@ -52,7 +52,10 @@ interface DocRevision {
   created_at?: string;
 }
 
-function useDocGateData(docId: string, status: string | undefined) {
+// export: 테스트 전용(doc-status-rail.test.tsx) — isSigFlow일 때 gateTransition 자체가
+// 거부하는 데이터 레이어 안전판을 UI(버튼 미노출) 우회 없이 직접 검증하기 위함(PR#3384
+// 카디르 QA 선택 처방 — "안전판 줄을 빼도 기존 테스트가 안 깨지는" 뮤테이션 gap을 닫는다).
+export function useDocGateData(docId: string, status: string | undefined) {
   const [gate, setGate] = useState<GateItem | null>(null);
   const [revisions, setRevisions] = useState<DocRevision[]>([]);
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
@@ -114,7 +117,7 @@ function useDocGateData(docId: string, status: string | undefined) {
     setError(null);
     setBusy(true);
     try {
-      const res = await fetch(`/api/gates/${gate.id}/transition`, {
+      const res = await fetchWithAuth(`/api/gates/${gate.id}/transition`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       if (res.ok) { onDone(); await load(); } else { setError(await parseErrorBody(res)); }
@@ -141,7 +144,7 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
       <div className="proof-cut flex flex-wrap items-center gap-3 border border-proof-line bg-proof-panel px-4 py-3">
         <Icon className="size-5 shrink-0 text-muted-foreground" />
         <p className="min-w-0 flex-1 text-sm text-muted-foreground">{t('docGateRequestReviewHint')}</p>
-        <Button size="sm" disabled={busy} onClick={() => void docTransition('pending', onTransitioned)}>
+        <Button size="sm" className="focus-outset" disabled={busy} onClick={() => void docTransition('pending', onTransitioned)}>
           {t('docGateRequestReview')}
         </Button>
         {errorBanner}

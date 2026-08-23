@@ -146,7 +146,7 @@ export function DocsIndex() {
         </h1>
         <hr className="my-4 h-[3px] w-[88px] border-0 bg-proof-citron" />
         <p className="text-editorial-ui text-muted-foreground">
-          {t('indexDek')} <span className="text-muted-foreground/70">{t('indexDocCount', { count: items.length })}</span>
+          {t('indexDek')} <span className="text-muted-foreground">{t('indexDocCount', { count: items.length })}</span>
         </p>
       </div>
 
