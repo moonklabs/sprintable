@@ -56,6 +56,10 @@ async def test_has_project_access_includes_agent_grant_branch():
     assert "project_access.member_id = members.id" in sql
     assert "members.type = 'agent'" in sql
     assert "project_access.permission = 'granted'" in sql
+    # story #2953: team_member_branch(휴먼)는 이미 is_active를 봤는데 이 agent 분기만
+    # deleted_at만 보고 있던 비대칭 — 비활성(is_active=false·미삭제) 에이전트의 기존 grant가
+    # 계속 유효로 통과하던 결함. 존재 가드에도 이 조건을 고정.
+    assert "members.is_active IS true" in sql
 
 
 @pytest.mark.anyio
@@ -65,6 +69,8 @@ async def test_accessible_project_ids_includes_agent_grant_branch():
     sql = _last_sql(s)
     assert "pa.member_id = m.id" in sql
     assert "m.type = 'agent'" in sql
+    # story #2953 — 위와 동일 이유, raw text() 축 쌍.
+    assert "m.is_active = true" in sql
 
 
 # ── project_access POST — 에이전트 grant(member_id) 경로 ──────────────────────

@@ -249,6 +249,13 @@ def _project_access_predicate(
             Member.id == user_id,
             Member.type == "agent",
             Member.deleted_at.is_(None),
+            # story #2953 — team_member_branch(휴먼)는 이미 is_active를 본다(위 참조).
+            # 이 agent 분기만 deleted_at만 보고 있었다 — 비활성화(is_active=false·미삭제)된
+            # 에이전트의 기존 grant row가 계속 유효로 통과하던 비대칭. 심층방어 정합
+            # (그라운딩 결과 — 이 predicate가 단독 인가 관문이 되는 자리는 없다: 모든 호출부가
+            # 이미 is_active를 검증한 살아있는 인증 컨텍스트의 user_id만 넘긴다. 그래도 SSOT
+            # 하나뿐이라 여기서 고치면 70+ 콜사이트 전부가 한 번에 정합해진다).
+            Member.is_active.is_(True),
             ProjectAccess.permission == "granted",
             org_scope_agent_grant,
         )
@@ -669,12 +676,15 @@ async def accessible_project_ids_in_org(
                 )
                 OR EXISTS (
                     -- 18073a52: 에이전트 grant 분기 (has_project_access와 lockstep).
+                    -- story #2953: is_active=false(비활성·미삭제) 에이전트의 기존 grant가
+                    -- 계속 유효로 통과하던 비대칭 수정 — 위 team_member 분기(휴먼)와 정합.
                     SELECT 1 FROM project_access pa
                     JOIN members m ON pa.member_id = m.id
                     WHERE pa.project_id = p.id
                       AND m.id = :user_id
                       AND m.type = 'agent'
                       AND m.deleted_at IS NULL
+                      AND m.is_active = true
                       AND pa.permission = 'granted'
                       AND m.org_id = :org_id
                 )
