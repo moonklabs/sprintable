@@ -190,7 +190,10 @@ function ConversationRow({
       {/* Info */}
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-1">
-          <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
+          {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 대화명=Claim(600)로
+              재분류(구조·크기 불변). preview는 이미 text-xs+muted+기본무게(400)라 Body-small
+              규칙에 이미 부합 — 무편집. */}
+          <span className="truncate text-sm font-semibold text-foreground">{displayName}</span>
           <span className="flex-shrink-0 text-[10px] text-muted-foreground">{formatTime(time)}</span>
         </div>
         {participantLayer}
@@ -233,7 +236,8 @@ function OutsideProjectRow({
         {conv.type === 'dm' ? <MessageSquare className="h-4 w-4" /> : <Users className="h-4 w-4" />}
       </div>
       <div className="min-w-0 flex-1">
-        <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
+        {/* story #2969 §1.3-b(PR-5) — 대화명=Claim(600), ConversationRow와 동일 처방. */}
+        <span className="truncate text-sm font-semibold text-foreground">{displayName}</span>
         {/* ⭐AC③ — 프로젝트명 병기("왜 여기 있지"를 그 자리서 답한다) */}
         <p className="truncate text-xs text-muted-foreground">{conv.project_name}</p>
       </div>

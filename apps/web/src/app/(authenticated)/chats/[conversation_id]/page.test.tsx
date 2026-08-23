@@ -195,3 +195,31 @@ describe('ConversationPage — 헤더 아바타(story #2968)', () => {
     expect(container.querySelector('img')).toBeNull();
   });
 });
+
+// story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 헤더 상대명/방이름=Claim(600)
+// 로 재분류(구조·크기 불변).
+describe('ConversationPage — 헤더 타이틀 Claim 무게(story #2969 PR-5)', () => {
+  it('DM 헤더 타이틀이 font-semibold(Claim 무게)를 갖는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/conv-1')) {
+        return {
+          ok: true,
+          json: async () => ({
+            title: null, type: 'dm', muted: false, lastReadAt: null, freeResponse: false,
+            participants: [
+              { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+              { member_id: 'them-1', name: '유나', avatar_url: null, type: 'human' },
+            ],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await mount();
+
+    const titleEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '유나');
+    expect(titleEl).not.toBeUndefined();
+    expect(titleEl?.className).toContain('font-semibold');
+    expect(titleEl?.className).not.toContain('font-medium');
+  });
+});

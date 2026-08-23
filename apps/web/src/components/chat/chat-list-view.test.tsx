@@ -285,3 +285,23 @@ describe('ChatListView — SSE 재연결·백그라운드 복귀 재fetch (story
     expect(countMyConversationsFetchCalls(fetchMock)).toBe(beforeCount);
   });
 });
+
+// story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 대화명=Claim(600)로 재분류
+// (구조·크기 불변, preview는 이미 Body-small 부합이라 무편집).
+describe('ChatListView — 대화명 Claim 무게(story #2969 PR-5)', () => {
+  it('대화명이 font-semibold(Claim 무게)를 갖는다', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-dm-1', type: 'dm', title: '유나',
+      latest_message: null, updated_at: '2026-08-23T00:00:00Z', unread_count: 0,
+      participants: [
+        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+        { member_id: 'them-1', name: '유나', avatar_url: null, type: 'human' },
+      ],
+    }]);
+    await mount();
+    const nameEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '유나');
+    expect(nameEl).not.toBeUndefined();
+    expect(nameEl?.className).toContain('font-semibold');
+    expect(nameEl?.className).not.toContain('font-medium');
+  });
+});
