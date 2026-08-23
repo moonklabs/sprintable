@@ -22,7 +22,9 @@ export function OperatorSelect({ className, ...props }: React.ComponentProps<'se
     <select
       className={cn(
         operatorControlClassName,
-        "h-10 cursor-pointer appearance-none rounded-xl border-border/80 bg-[image:linear-gradient(45deg,transparent_50%,currentColor_50%),linear-gradient(135deg,currentColor_50%,transparent_50%)] bg-[position:calc(100%-18px)_calc(50%-2px),calc(100%-12px)_calc(50%-2px)] bg-[size:6px_6px,6px_6px] bg-no-repeat pr-10 text-foreground shadow-sm hover:border-primary/40 hover:bg-muted/30",
+        // story #2969 §2 PR-3(doc proofline-system-layer-2969) — shadow-sm 제거(§1.2, 이미
+        // border-border/80 hairline이 경계 역할을 겸함).
+        "h-10 cursor-pointer appearance-none rounded-xl border-border/80 bg-[image:linear-gradient(45deg,transparent_50%,currentColor_50%),linear-gradient(135deg,currentColor_50%,transparent_50%)] bg-[position:calc(100%-18px)_calc(50%-2px),calc(100%-12px)_calc(50%-2px)] bg-[size:6px_6px,6px_6px] bg-no-repeat pr-10 text-foreground hover:border-primary/40 hover:bg-muted/30",
         className,
       )}
       {...props}
