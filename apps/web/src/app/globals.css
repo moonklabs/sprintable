@@ -294,7 +294,11 @@
   --chart-3: oklch(0.442 0.017 285.786);
   --chart-4: oklch(0.37 0.013 285.805);
   --chart-5: oklch(0.274 0.006 286.033);
-  --radius: 0.625rem;
+  /* story #2969 §1.1(PR-T, 유나 확定 2026-08-23) — 0.625rem(10px, shadcn 기본값)→0.25rem(4px).
+     전 표면 균일 soft round(default 결)를 크리스프로. 파생 스케일(sm~4xl)은 이 값의 calc()라
+     자동 추종 — 별도 편집 불요. 시그니처면(히어로 카드·활성 상태 등)은 이 반경 대신 `.proof-cut`
+     컷코너를 쓴다(적용 표면 목록=doc proofline-system-layer-2969 §1.4가 정본, 이 PR은 토큰만). */
+  --radius: 0.25rem;
   /* story #2917: sidebar도 --card/--primary/--muted/--border/--ring과 같은 값을 거울처럼
      따라간다(기존 #2318 불변식 — "안 맞추면 사이드바만 옛 파랑" 그대로 유지, 소스만 proof-*로). */
   --sidebar: var(--proof-panel);
@@ -422,6 +426,15 @@
   --proof-amber-soft: #FBF1DE;
   --proof-red: #C33B3B;
   --proof-red-soft: #FBEAEA;
+
+  /* story #2969 §1.2(PR-T, 유나 확定 2026-08-23) — 오버레이(dialog/dropdown-menu/sheet/toast/
+     tooltip/popover 등 «떠 있는» 표면) 전용 그림자. 인라인 표면(card/badge/button 등, 문서
+     흐름 안)은 이 토큰을 쓰지 않는다 — 그쪽은 §1.2 처방대로 drop-shadow 대신 hairline border로
+     간다(이 PR은 토큰만·컴포넌트 적용은 PR-4). Carbon-tinted(cold black 아님·북유럽 warm)·
+     2레이어(crisp 근접+soft 확산)·현행 shadow-lg보다 tighter·softer. 오버레이 소비 시 항상
+     1px hairline(`--proof-line-strong`, PR-4에서 오버레이 컴포넌트와 함께 신설 예정) 동반 —
+     그림자만으론 엣지가 흐리다는 게 doc §1.2의 명시 규칙. */
+  --elev-overlay: 0 1px 2px rgba(20, 21, 15, .05), 0 10px 30px -8px rgba(20, 21, 15, .22);
 
   /* story #2955 §5(doc docs-index-reader-redesign-handoff) — 컷코너 3단 토큰 정식화.
      기존 산발 clip-path 4곳(proof-capsule.tsx CutCornerShell·attention-queue-view.tsx·
@@ -577,6 +590,9 @@
   --proof-amber-soft: #2A2214;
   --proof-red: #E06767;
   --proof-red-soft: #2A1717;
+
+  /* story #2969 §1.2(PR-T) — 다크 오버레이 그림자(라이트 대응값의 doc §1.2 지정 다크값). */
+  --elev-overlay: 0 1px 2px rgba(0, 0, 0, .5), 0 12px 34px -8px rgba(0, 0, 0, .62);
 }
 
 /* Sidebar: open triggers get active background */
