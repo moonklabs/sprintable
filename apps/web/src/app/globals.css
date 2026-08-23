@@ -422,6 +422,29 @@
   --proof-amber-soft: #FBF1DE;
   --proof-red: #C33B3B;
   --proof-red-soft: #FBEAEA;
+
+  /* story #2955 §5(doc docs-index-reader-redesign-handoff) — 컷코너 3단 토큰 정식화.
+     기존 산발 clip-path 4곳(proof-capsule.tsx CutCornerShell·attention-queue-view.tsx·
+     artifact-gallery-view.tsx·workcell.tsx)이 정본 없이 각자 인라인으로 같은 지오메트리를
+     반복하다 artifact-gallery-view.tsx만 22px로 드리프트했다(정본 부재가 벌린 값 그 자체가
+     정식화 근거). 라이트/다크 무관(색이 아니라 지오메트리)이라 이 블록 한 곳에서만 정의. */
+  --proof-cut: 24px;
+  --proof-cut-sm: 16px;
+  --proof-cut-xs: 8px;
+}
+
+/* story #2955 §5 — `.proof-cut`가 지오메트리 계산 유일 정본. 크기 모디파이어
+   (`.proof-cut-sm`/`.proof-cut-xs`)는 `--proof-cut` 값만 바꿔치기하고 계산식은 재정의하지
+   않는다(합성 — `className="proof-cut proof-cut-sm"`). 인스턴스별 임의값이 필요하면(예:
+   CutCornerShell의 동적 `cut` prop) 인라인 style로 `--proof-cut`만 오버라이드한다. */
+.proof-cut {
+  clip-path: polygon(0 0, calc(100% - var(--proof-cut)) 0, 100% var(--proof-cut), 100% 100%, 0 100%);
+}
+.proof-cut-sm {
+  --proof-cut: var(--proof-cut-sm);
+}
+.proof-cut-xs {
+  --proof-cut: var(--proof-cut-xs);
 }
 
 /* ─── Dark Mode (OKLCH zinc) ─── */

@@ -366,10 +366,9 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
             {railContent}
           </div>
 
-          <div
-            className="overflow-hidden rounded-xl border border-border bg-card px-5 py-4"
-            style={{ clipPath: 'polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 0 100%)' }}
-          >
+          {/* story #2955 §5 — 정본 부재로 22px 드리프트(24px가 맞음)였다. `.proof-cut` 유틸
+              (globals.css)로 이관해 정본값으로 정정. */}
+          <div className="proof-cut overflow-hidden rounded-xl border border-border bg-card px-5 py-4">
             <div className="mb-3 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{axisLabel(axis)}</div>
             {!selectedGroup || selectedGroup.artifacts.length === 0 ? (
               <p className="py-8 text-center text-[12.5px] text-muted-foreground">{t('galleryGroupEmpty')}</p>

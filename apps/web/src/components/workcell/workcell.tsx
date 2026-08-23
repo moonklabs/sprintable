@@ -159,10 +159,8 @@ export function Workcell({ title, pipelineStage, brief, run, evidence, conversat
   const t = useTranslations('workcell');
   const railState = PIPELINE_STAGE_TRUST_COLOR[pipelineStage];
   return (
-    <div
-      className={cn('flex overflow-hidden rounded-[6px] border border-proof-line bg-proof-panel', className)}
-      style={{ clipPath: 'polygon(0 0, calc(100% - 24px) 0, 100% 24px, 100% 100%, 0 100%)' }}
-    >
+    // story #2955 §5 — 인라인 clip-path를 정본 `.proof-cut` 유틸(globals.css)로 이관(24px 기본값 그대로).
+    <div className={cn('proof-cut flex overflow-hidden rounded-[6px] border border-proof-line bg-proof-panel', className)}>
       {/* story #2922 W6(선행 조각) — Proofline 좌측 레일(ProofCapsule CutCornerShell과 동형
           부품 재사용, 신규 컴포넌트 0). */}
       {railState ? <Proofline state={railState} /> : <div className="w-1 shrink-0 self-stretch bg-proof-line" aria-hidden="true" />}

@@ -243,8 +243,10 @@ describe('ApprovalsQueue', () => {
   it('클릭-스루 항목(inlineResolvable=false·미해소)은 ProofCapsule row 셸(컷코너)로 렌더된다', async () => {
     mockFetches([gate({ id: 'g-row' })], []);
     await mount();
-    // ProofCapsule의 CutCornerShell 자체 시그니처 — clip-path 컷코너.
-    const capsule = container.querySelector('[style*="clip-path"]');
+    // ProofCapsule의 CutCornerShell 자체 시그니처 — 컷코너. story #2955 §5로 clip-path
+    // 지오메트리 계산이 인라인 style에서 globals.css `.proof-cut` 정본으로 이관돼, 이제
+    // 클래스명으로 식별한다(인라인 style엔 --proof-cut 변수 오버라이드만 남는다).
+    const capsule = container.querySelector('.proof-cut');
     expect(capsule).toBeTruthy();
     expect(capsule?.className).toContain('bg-proof-panel');
   });

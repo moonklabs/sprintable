@@ -244,7 +244,15 @@ export function findSubstringCollisions(
 // 문장에 우연히 포함) — #2352/#2365가 잡으려는 "같은 화면에 선 두 «수»가 헷갈리는" 병이
 // 아니다: tabProjects/roleMember 양쪽 다 그 자체엔 수가 없다(단순 라벨). 겹치는 건 오직
 // "프로젝트"/"멤버"라는 공통 명사 부분이지, 두 카운트가 시각적으로 혼동되는 상황이 아니다.
+// story #2955(2026-08-23, docs-index.tsx) — docs.title="문서"(마스트헤드 H1, 수 없음)
+// <-> docs.indexDocCount="{count}개 문서"(dek의 총 문서 수). 같은 파일에 이미 그라운핑된
+// 동형 쌍(docs.title <-> docs.searchResultCount="{count}개 문서 일치", 위 GRANDFATHER_
+// BASELINE #2367 최초 스캔에 등재)과 정확히 같은 클래스 — «두 개의 수가 헷갈리는» 병이
+// 아니라 "제목(수 없음)"과 "그 제목 명사를 포함하는 카운트 문장"이 같은 화면에 서는
+// 흔한 정상 패턴이다(H1 "문서" 다음 "24개 문서"라는 산문이 오는 건 혼동을 안 낳는다).
+// 카디르 QA/유나 design 리뷰가 이 추가의 승인 자리(가드 규율 §41번째 항목부터).
 export const EXEMPT_PAIRS = new Set<string>([
+  'docs.indexDocCount <-> docs.title',
   'sprints.days <-> sprints.overdueBadge',
   'onboarding.projectLimitExceededError <-> settings.tabProjects',
   'settings.memberLimitExceededError <-> settings.roleMember',

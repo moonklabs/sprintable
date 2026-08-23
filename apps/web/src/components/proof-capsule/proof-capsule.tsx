@@ -122,10 +122,13 @@ export function ProofCapsule({
 }
 
 function CutCornerShell({ state, cut, className, children }: { state: ProofState; cut: number; className?: string; children: React.ReactNode }) {
+  // story #2955 §5 — 지오메트리 계산은 globals.css의 `.proof-cut`(단일 정본)에 위임하고,
+  // 이 컴포넌트는 `--proof-cut`만 오버라이드한다(24/16 두 호출부 그대로 — 값-SSOT는 여기가
+  // 아니라 CSS에 있다).
   return (
     <div
-      className={cn('flex overflow-hidden rounded-[6px] border border-proof-line bg-proof-panel', className)}
-      style={{ clipPath: `polygon(0 0, calc(100% - ${cut}px) 0, 100% ${cut}px, 100% 100%, 0 100%)` }}
+      className={cn('proof-cut flex overflow-hidden rounded-[6px] border border-proof-line bg-proof-panel', className)}
+      style={{ '--proof-cut': `${cut}px` } as React.CSSProperties}
     >
       <Proofline state={state} />
       {children}
