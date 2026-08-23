@@ -592,19 +592,18 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
           {/* story #2958 §2/§3 — 상태 칩(proof-cut-xs)+결과 필이 이중 신호의 «상태·결과» 열.
               status 배지(원래 shadcn Badge)는 그대로 두되(우측 무리에 존속, 회귀 없음), 왼쪽에
               proof 색규율을 따르는 신규 컷코너 칩을 하나 더 앞세운다 — outcome은 기존
-              OutcomeStatusBadge를 그대로 재사용(발명 0, 색 의미 불변). */}
+              OutcomeStatusBadge를 그대로 재사용(발명 0, 색 의미 불변).
+              ⚠️PR#3387 카디르 QA(2026-08-23)·유나 원작자 정본 채택(PO 갱신 지시) — **상태 칩은
+              green을 아예 안 쓴다**(done+hit이어도). green은 결과(Verified) 필(OutcomeStatusBadge)
+              전용 — 두 축이 색에서도 안 섞여야 "일 끝≠목표 달성"이 시각으로 선다(작업 축의 첫
+              처방 "done&&hit만 green"조차 두 축을 섞는 것이라 유나 판정으로 대체됨). */}
           <div className="flex shrink-0 flex-col items-start gap-1">
             <span
               className={`proof-cut-xs inline-flex items-center gap-1 px-2 py-0.5 text-[10.5px] font-bold ${
-                epic.status === 'done' ? 'bg-proof-green-soft text-proof-green'
-                : epic.status === 'active' ? 'bg-proof-blue-soft text-proof-blue'
-                : 'bg-proof-sunk text-proof-ink-3'
+                epic.status === 'active' ? 'bg-proof-blue-soft text-proof-blue' : 'bg-proof-sunk text-proof-ink-3'
               }`}
             >
-              <span className={`size-1.5 rounded-full ${
-                epic.status === 'done' ? 'bg-proof-green' : epic.status === 'active' ? 'bg-proof-blue' : 'bg-proof-faint'
-              }`}
-              />
+              <span className={`size-1.5 rounded-full ${epic.status === 'active' ? 'bg-proof-blue' : 'bg-proof-faint'}`} />
               {statusLabel[epic.status]}
             </span>
             {epic.outcome_status && epic.outcome_status !== 'n_a' ? <OutcomeStatusBadge status={epic.outcome_status} /> : null}
