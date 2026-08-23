@@ -298,7 +298,12 @@ async def _observe_pr_diff_facts(
             return {}
         return {
             "diff_size": len(changed_files),
-            "touches_migration": any(f.startswith("alembic/versions/") for f in changed_files),
+            # 카디르 QA(PR#3383, 2026-08-23) — GitHub PR-files API는 레포 루트 기준 경로를
+            # 준다(실측: #3376 파일 전부 "backend/..."). 이 모노레포의 실 alembic 위치는
+            # "backend/alembic/versions/"이지 "alembic/versions/"가 아니다 — 원래 버전은
+            # 이 축이 영구 False였다("틀릴 수 없는 표본" 클래스, 신규 테스트가 매치 로직을
+            # 실제로 돌리지 않아 못 잡았다).
+            "touches_migration": any(f.startswith("backend/alembic/versions/") for f in changed_files),
         }
     except Exception:  # noqa: BLE001 — best-effort 관찰, 실패해도 게이트 평가를 막지 않는다.
         logger.warning(

@@ -729,7 +729,10 @@ async def test_observe_pr_diff_facts_no_installation_returns_empty():
 @pytest.mark.anyio
 async def test_observe_pr_diff_facts_computes_size_and_migration_touch():
     """설치+토큰+PR 파일 조회 전부 성공 시 diff_size(파일 수)·touches_migration(경로 매치)을
-    정확히 계산한다."""
+    정확히 계산한다. ⚠️카디르 QA(PR#3383, 2026-08-23) — GitHub PR-files API는 레포 루트
+    기준 경로를 준다(이 모노레포 실측: "backend/..."). 이전 버전은 이 테스트 fixture가
+    "alembic/versions/..."(prefix 없이)라 버그(코드가 정확히 그 잘못된 prefix를 기대)와
+    우연히 맞아떨어져 매치 로직 결함을 못 잡았다 — 실 형상 경로로 교정."""
     from app.services.merge_verdict_gate import _observe_pr_diff_facts
 
     installation = SimpleNamespace(installation_id=999)
@@ -739,9 +742,9 @@ async def test_observe_pr_diff_facts_computes_size_and_migration_touch():
     session.execute = AsyncMock(return_value=row)
 
     changed_files = [
-        "app/routers/gates.py",
-        "app/services/merge_verdict_gate.py",
-        "alembic/versions/0276_something.py",
+        "backend/app/routers/gates.py",
+        "backend/app/services/merge_verdict_gate.py",
+        "backend/alembic/versions/0276_something.py",
     ]
     with patch("app.services.github_app.get_installation_token", AsyncMock(return_value="tok")), \
          patch("app.services.verdict_capture.fetch_pr_changed_files", AsyncMock(return_value=changed_files)):
@@ -752,6 +755,7 @@ async def test_observe_pr_diff_facts_computes_size_and_migration_touch():
 
 @pytest.mark.anyio
 async def test_observe_pr_diff_facts_no_migration_file_is_false():
+    """양성대조 짝 — 실 형상 경로인데 마이그레이션 파일이 없으면 False(실패할 수 있는 대조)."""
     from app.services.merge_verdict_gate import _observe_pr_diff_facts
 
     installation = SimpleNamespace(installation_id=999)
@@ -760,7 +764,7 @@ async def test_observe_pr_diff_facts_no_migration_file_is_false():
     session = AsyncMock()
     session.execute = AsyncMock(return_value=row)
 
-    changed_files = ["app/routers/gates.py", "tests/test_gates.py"]
+    changed_files = ["backend/app/routers/gates.py", "backend/tests/test_gates.py"]
     with patch("app.services.github_app.get_installation_token", AsyncMock(return_value="tok")), \
          patch("app.services.verdict_capture.fetch_pr_changed_files", AsyncMock(return_value=changed_files)):
         result = await _observe_pr_diff_facts(session, uuid.uuid4(), "o/r", 12)
