@@ -93,12 +93,16 @@ type AxisMode = 'status' | 'trust';
 function axisModeKey(projectId: string | undefined): string {
   return `epic_swimlane_axis_mode_${projectId ?? 'default'}`;
 }
+// story #2959(PO 배포 실픽셀, 2026-08-23) — kanban-board.tsx(#3378)와 동형 반전. P0-04
+// «기본=신뢰 파이프라인»은 워크스페이스 뷰 3종(보드·스프린트·에픽) 전역 프레임이고 이 뷰도
+// 같은 COLUMNS/TRUST_COLUMNS 상수를 재사용하는 형제라 갈리면 프레임이 파손된다(유나 판정).
+// 명시적으로 저장된 'status' 선택만 존중하고, 그 외(미설정 포함)엔 'trust'로 낙하한다.
 function loadAxisMode(projectId: string | undefined): AxisMode {
-  if (typeof window === 'undefined') return 'status';
+  if (typeof window === 'undefined') return 'trust';
   try {
-    return window.localStorage.getItem(axisModeKey(projectId)) === 'trust' ? 'trust' : 'status';
+    return window.localStorage.getItem(axisModeKey(projectId)) === 'status' ? 'status' : 'trust';
   } catch {
-    return 'status';
+    return 'trust';
   }
 }
 function saveAxisMode(projectId: string | undefined, mode: AxisMode): void {
@@ -224,7 +228,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
   const [members, setMembers] = useState<KanbanMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [axisMode, setAxisMode] = useState<AxisMode>('status');
+  const [axisMode, setAxisMode] = useState<AxisMode>('trust');
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [selectedStoryId, setSelectedStoryId] = useState<string | null>(null);
   // story #2954(유나 처방·kanban-board.tsx activeId 문법 이식) — 드래그 中에만 잠긴(파생)
