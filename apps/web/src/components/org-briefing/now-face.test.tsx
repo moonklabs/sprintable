@@ -73,6 +73,18 @@ describe('NowFace', () => {
     expect(html).not.toContain('merge'); // gate_type 슬러그 미노출
   });
 
+  // story #3009(로드맵 P2·PR-F, L1) — hover 시 인라인 카드 강조는 --elev-card.
+  it('카드 셸이 hover:shadow-[var(--elev-card)]를 쓰고 hover:shadow-sm은 안 쓴다', async () => {
+    stubFetch(
+      { action_queue: { items: [{ type: 'gate_approval', priority: 'warn', context: { kind: 'canonical' } }] }, attention: { items: [] } },
+      { data: [] },
+    );
+    await mount();
+    const card = container.querySelector('.rounded-2xl.border.border-border.bg-card');
+    expect(card?.className).toContain('hover:shadow-[var(--elev-card)]');
+    expect(card?.className).not.toMatch(/hover:shadow-sm(\s|$)/);
+  });
+
   it('renders the calm empty state ("모두 확인했어요") when both sources are empty — no alarming iconography text', async () => {
     stubFetch(
       { action_queue: { items: [] }, attention: { items: [] } },

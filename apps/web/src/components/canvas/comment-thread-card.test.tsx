@@ -55,4 +55,12 @@ describe('CommentThreadCard', () => {
       expect(markup).not.toContain(forbidden);
     }
   });
+
+  // story #3009(로드맵 P2·PR-F, L1) — 인라인 카드는 --elev-card.
+  it('카드 셸이 shadow-[var(--elev-card)]를 쓰고 shadow-sm은 안 쓴다', () => {
+    const open = MOCK_THREADS.find((t) => t.rollup === 'open')!;
+    const markup = renderToStaticMarkup(wrap(<CommentThreadCard thread={open} memberMap={MOCK_MEMBERS} />));
+    expect(markup).toContain('shadow-[var(--elev-card)]');
+    expect(markup).not.toMatch(/shadow-sm["\s]/);
+  });
 });

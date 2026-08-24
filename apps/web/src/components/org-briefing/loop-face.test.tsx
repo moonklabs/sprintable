@@ -118,4 +118,13 @@ describe('LoopFace', () => {
     await mount();
     expect(container.innerHTML).toContain('bg-info');
   });
+
+  // story #3009(로드맵 P2·PR-F, L1) — hover 시 인라인 카드 강조는 --elev-card.
+  it('카드 셸이 hover:shadow-[var(--elev-card)]를 쓰고 hover:shadow-sm은 안 쓴다', async () => {
+    stubFetch({ data: [] }, { data: { project_status: { epics: [] } } });
+    await mount();
+    const card = container.firstElementChild;
+    expect(card?.className).toContain('hover:shadow-[var(--elev-card)]');
+    expect(card?.className).not.toMatch(/hover:shadow-sm(\s|$)/);
+  });
 });

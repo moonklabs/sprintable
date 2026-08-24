@@ -98,7 +98,8 @@ export function WorkforceFace({ projectId }: { projectId: string }) {
   }, [projectId, t]);
 
   return (
-    <div className="rounded-2xl border border-border bg-card p-4 transition-shadow hover:shadow-sm">
+    // story #3009(로드맵 P2·PR-F, L1) — hover 시 인라인 카드 강조는 --elev-card.
+    <div className="rounded-2xl border border-border bg-card p-4 transition-shadow hover:shadow-[var(--elev-card)]">
       <div className="mb-3 flex items-baseline gap-2.5">
         <span className="size-1.5 shrink-0 rounded-full bg-success" aria-hidden="true" />
         <h2 className="text-sm font-semibold text-foreground">{t('workforceTitle')}</h2>
