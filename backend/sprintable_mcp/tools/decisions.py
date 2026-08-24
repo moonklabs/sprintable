@@ -19,6 +19,11 @@ class RequestDecisionInput(SprintableInput):
     options: list[str] | None = None  # 힌트로만 렌더(강제 아님) — 사람은 자유텍스트로도 답함.
     related_work_item_type: str | None = None
     related_work_item_id: str | None = None
+    # story #3004(선생님 정책 확定 2026-08-24) — 결재선(org member_id) 필수. 이 도구는
+    # #2985 당시 designated_approver_id 자체를 노출하지 않은 갭이 있었다(HTTP 레이어
+    # DecisionRequestCreate.approver_member_id만 있었음) — 이번에 처음 배선하며 정책대로
+    # 곧바로 required로 건다(optional로 시작했다가 다시 조이는 두 단계를 밟지 않는다).
+    approver_member_id: str
 
 
 async def request_decision(args: RequestDecisionInput) -> list[TextContent]:
@@ -27,7 +32,10 @@ async def request_decision(args: RequestDecisionInput) -> list[TextContent]:
     가정 확인, reject=note에 실제 답), 답이 오면 poll_events로 왕복한다. 즉답을 강제하지
     않는다(원탭 승인 — 서명/근거열람 불요, 빠른 확인이 이 도구의 존재 이유)."""
     try:
-        body: dict = {"question": args.question, "assumption": args.assumption}
+        body: dict = {
+            "question": args.question, "assumption": args.assumption,
+            "approver_member_id": args.approver_member_id,
+        }
         if args.options:
             body["options"] = args.options
         if args.related_work_item_type and args.related_work_item_id:

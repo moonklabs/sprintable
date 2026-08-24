@@ -108,7 +108,8 @@ async def test_doc_submit_notifies_approver_exactly_once():
 
             caller = ResolvedMember(id=requester_id, user_id=uuid.uuid4(), name="req",
                                      type="human", role="member", org_id=org_id)
-            out = await transition_doc(s, org_id, caller, doc.id, "pending")
+            # story #3004 — approver_member_id 필수. 이 파일의 유일한 admin을 지정.
+            out = await transition_doc(s, org_id, caller, doc.id, "pending", designated_approver_id=_admin_member_id)
             await s.commit()
             assert out.status == "pending"
 
@@ -149,7 +150,8 @@ async def test_doc_resubmit_after_reject_notifies_approver_exactly_once():
 
             caller = ResolvedMember(id=requester_id, user_id=uuid.uuid4(), name="req",
                                      type="human", role="member", org_id=org_id)
-            await transition_doc(s, org_id, caller, doc.id, "pending")
+            # story #3004 — approver_member_id 필수.
+            await transition_doc(s, org_id, caller, doc.id, "pending", designated_approver_id=_admin_member_id)
             await s.commit()
 
             before_count = len((await s.execute(
@@ -168,7 +170,7 @@ async def test_doc_resubmit_after_reject_notifies_approver_exactly_once():
             doc.status = "draft"
             await s.commit()
 
-            await transition_doc(s, org_id, caller, doc.id, "pending")
+            await transition_doc(s, org_id, caller, doc.id, "pending", designated_approver_id=_admin_member_id)
             await s.commit()
 
             rows = (await s.execute(

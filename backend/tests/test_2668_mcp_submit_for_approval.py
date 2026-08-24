@@ -32,11 +32,14 @@ def test_attach_next_action_for_draft_doc():
             "method": "POST",
             "url": "https://backend.example/api/v2/docs/doc-1/transition",
             "headers": {"Authorization": "Bearer <YOUR_SPRINTABLE_API_KEY>"},
-            "body": {"status": "pending"},
+            # story #3004 — approver_member_id가 서버 필수가 되며 이 광고도 지어낸 값 대신
+            # placeholder로 그 요구를 정직하게 드러낸다(Authorization 헤더와 동형 관례).
+            "body": {"status": "pending", "approver_member_id": "<APPROVER_MEMBER_ID>"},
             "note": (
                 "sprintable_submit_for_approval 도구가 이 세션에 안 보이면(구 세션 —"
                 " 이 도구가 등록된 뒤 재연결 안 한 경우) 이 REST 호출을 직접 실행해도"
-                " 동일하게 상신된다."
+                " 동일하게 상신된다. approver_member_id는 결재자로 지정할 org member_id"
+                "(owner/admin)로 채워야 한다 — 미지정/본인 지정은 서버가 거부한다."
             ),
         },
     }
@@ -91,7 +94,9 @@ async def test_create_doc_response_carries_submit_for_approval_next_action():
     assert parsed["next_action"]["fallback_rest"]["url"] == (
         "https://backend.example/api/v2/docs/doc-1/transition"
     )
-    assert parsed["next_action"]["fallback_rest"]["body"] == {"status": "pending"}
+    assert parsed["next_action"]["fallback_rest"]["body"] == {
+        "status": "pending", "approver_member_id": "<APPROVER_MEMBER_ID>",
+    }
 
 
 @pytest.mark.anyio
@@ -133,7 +138,11 @@ async def test_fallback_rest_path_matches_submit_for_approval_actual_call():
         with patch("sprintable_mcp.tools.docs.client") as mock_client:
             mock_client.post = AsyncMock(return_value={"id": doc_id, "status": "pending"})
             mock_client.get = AsyncMock(return_value=[])
-            await submit_for_approval(SubmitForApprovalInput(doc_id=doc_id))
+            # story #3004 — advertised_body의 approver_member_id는 attach 시점엔 대상을 몰라
+            # placeholder(<APPROVER_MEMBER_ID>)다. 이 parity 테스트는 «구조(키가 같다)»를
+            # 고정하는 것이 목적이라 실제 호출도 같은 placeholder 문자열로 맞춰 값까지 바이트
+            # 동일하게 만든다(실 approver_id를 쓰면 값 자체가 달라 의미 없는 실패가 난다).
+            await submit_for_approval(SubmitForApprovalInput(doc_id=doc_id, approver_member_id="<APPROVER_MEMBER_ID>"))
 
     actual_path, actual_kwargs = mock_client.post.call_args
     actual_full_url = f"https://backend.example{actual_path[0]}"
@@ -153,10 +162,10 @@ async def test_submit_for_approval_calls_transition_and_attaches_real_pending_ga
     with patch("sprintable_mcp.tools.docs.client") as mock_client:
         mock_client.post = AsyncMock(return_value=doc_resp)
         mock_client.get = AsyncMock(return_value=gate_resp)
-        out = await submit_for_approval(SubmitForApprovalInput(doc_id="doc-1"))
+        out = await submit_for_approval(SubmitForApprovalInput(doc_id="doc-1", approver_member_id="approver-1"))
 
     mock_client.post.assert_awaited_once_with(
-        "/api/v2/docs/doc-1/transition", json={"status": "pending"},
+        "/api/v2/docs/doc-1/transition", json={"status": "pending", "approver_member_id": "approver-1"},
     )
     mock_client.get.assert_awaited_once_with(
         "/api/v2/gates",
@@ -177,7 +186,7 @@ async def test_submit_for_approval_gate_none_when_lookup_empty_no_crash():
     with patch("sprintable_mcp.tools.docs.client") as mock_client:
         mock_client.post = AsyncMock(return_value=doc_resp)
         mock_client.get = AsyncMock(return_value=[])
-        out = await submit_for_approval(SubmitForApprovalInput(doc_id="doc-2"))
+        out = await submit_for_approval(SubmitForApprovalInput(doc_id="doc-2", approver_member_id="approver-1"))
 
     parsed = json.loads(out[0].text)
     assert parsed["doc"] == doc_resp
@@ -190,7 +199,7 @@ async def test_submit_for_approval_transition_error_surfaces_as_err_not_crash():
 
     with patch("sprintable_mcp.tools.docs.client") as mock_client:
         mock_client.post = AsyncMock(side_effect=RuntimeError("HTTP 422: INVALID_DOC_TRANSITION"))
-        out = await submit_for_approval(SubmitForApprovalInput(doc_id="doc-3"))
+        out = await submit_for_approval(SubmitForApprovalInput(doc_id="doc-3", approver_member_id="approver-1"))
 
     assert out[0].text.startswith("Error:")
     assert "INVALID_DOC_TRANSITION" in out[0].text

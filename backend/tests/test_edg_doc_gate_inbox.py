@@ -55,7 +55,7 @@ async def test_submit_creates_doc_gate_and_pending_status():
          patch("app.services.workflow_line_config._default_role_id",
                new=AsyncMock(return_value=role_id)):
         caller = _human(org)
-        out = await transition_doc(session, org, caller, doc.id, "pending")
+        out = await transition_doc(session, org, caller, doc.id, "pending", designated_approver_id=uuid.uuid4())
     assert out.status == "pending"  # 결재 대기
     # doc-gate(work_item_type='doc'·gate_type='doc_approval') 생성 → /api/gates?status=pending 노출
     args = mock_cg.await_args.args
@@ -81,7 +81,7 @@ async def test_submit_server_stamps_requester_over_forged_pending_gate():
          patch("app.services.workflow_line_config._default_role_id",
                new=AsyncMock(return_value=uuid.uuid4())):
         caller = _human(org)
-        await transition_doc(session, org, caller, doc.id, "pending")
+        await transition_doc(session, org, caller, doc.id, "pending", designated_approver_id=uuid.uuid4())
     # forged 가 caller.id 로 server-stamp 됨(우회 봉).
     assert gate.neutral_facts["requested_by_member_id"] == str(caller.id)
     assert gate.neutral_facts["requested_by_member_id"] != str(forged)
@@ -151,7 +151,7 @@ async def test_resubmit_reopens_terminal_gate():
     with patch("app.services.gate_service.create_gate", new=AsyncMock(return_value=rejected)), \
          patch("app.services.workflow_line_config._default_role_id",
                new=AsyncMock(return_value=uuid.uuid4())):
-        await transition_doc(session, org, _human(org), doc.id, "pending")
+        await transition_doc(session, org, _human(org), doc.id, "pending", designated_approver_id=uuid.uuid4())
     assert rejected.status == "pending"          # re-open
     assert rejected.resolver_id is None and rejected.resolved_at is None
     assert rejected.resolution_note is None
@@ -276,7 +276,7 @@ async def test_submit_calls_create_gate_with_notify_false():
          patch("app.services.workflow_line_config._default_role_id",
                new=AsyncMock(return_value=role_id)), \
          patch("app.services.doc._notify_doc_approval_requested", new=AsyncMock()):
-        await transition_doc(session, org, _human(org), doc.id, "pending")
+        await transition_doc(session, org, _human(org), doc.id, "pending", designated_approver_id=uuid.uuid4())
     assert mock_cg.await_args.kwargs["notify"] is False
 
 
@@ -294,5 +294,5 @@ async def test_resubmit_calls_create_gate_with_notify_false():
          patch("app.services.workflow_line_config._default_role_id",
                new=AsyncMock(return_value=uuid.uuid4())), \
          patch("app.services.doc._notify_doc_approval_requested", new=AsyncMock()):
-        await transition_doc(session, org, _human(org), doc.id, "pending")
+        await transition_doc(session, org, _human(org), doc.id, "pending", designated_approver_id=uuid.uuid4())
     assert mock_cg.await_args.kwargs["notify"] is False

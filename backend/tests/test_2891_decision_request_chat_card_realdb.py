@@ -117,7 +117,10 @@ async def test_create_decision_request_dispatches_chat_card_to_org_admin():
             admin_id = await _seed_admin_approver(s, org_id)
             requester_id = await _seed_agent_requester(s, org_id, project_id)
 
-            body = DecisionRequestCreate(question="A로 갈지 B로 갈지?", assumption="A가 기본값")
+            # story #3004(선생님 정책 확定 2026-08-24) — approver_member_id가 이제 필수(미지정
+            # 400). 지정한다고 카드 수가 바뀌지 않는(이 worktree는 #3001 배타화 이전 상태라
+            # 여전히 지정자=액션 카드 1장 — admin이 org에 1명뿐이라 어느 쪽이든 1장).
+            body = DecisionRequestCreate(question="A로 갈지 B로 갈지?", assumption="A가 기본값", approver_member_id=admin_id)
             auth = AuthContext(user_id=str(requester_id), email=None, claims={}, org_id=str(org_id))
             resp = await create_decision_request(
                 body=body, session=s,
@@ -142,12 +145,15 @@ async def test_create_decision_request_dispatches_chat_card_to_org_admin():
 
 
 @pytest.mark.anyio
-async def test_create_decision_request_no_approver_no_crash():
-    """org owner/admin이 0명이면 카드 0장 — 상신 자체는 여전히 성공(best-effort 비중단)."""
+async def test_create_decision_request_missing_approver_rejected():
+    """story #3004(선생님 정책 확定 2026-08-24) — 「받는 사람이 없는 결재는 존재할 수 없다」.
+    이 테스트는 원래(#2891) "org owner/admin 0명 → 카드 0장·상신은 성공"을 검증했으나, 그
+    시나리오 자체가 이제 도달 불가(approver_member_id 미지정은 org 상태와 무관하게 즉시
+    400 — best-effort 폴백이 아니라 생성 자체를 막는 hard reject)."""
+    from fastapi import HTTPException
+
     from app.routers.gates import DecisionRequestCreate, create_decision_request
     from app.dependencies.auth import AuthContext
-    from app.models.conversation import Conversation, ConversationMessage
-    from sqlalchemy import select
 
     engine, Session = await _session_factory()
     try:
@@ -157,17 +163,40 @@ async def test_create_decision_request_no_approver_no_crash():
 
             body = DecisionRequestCreate(question="블로킹 질문", assumption="가정")
             auth = AuthContext(user_id=str(requester_id), email=None, claims={}, org_id=str(org_id))
-            resp = await create_decision_request(
-                body=body, session=s,
-                scope={"org_id": org_id, "project_id": project_id}, auth=auth,
-            )
-            assert resp.status == "pending"
+            with pytest.raises(HTTPException) as exc_info:
+                await create_decision_request(
+                    body=body, session=s,
+                    scope={"org_id": org_id, "project_id": project_id}, auth=auth,
+                )
+            assert exc_info.value.status_code == 400
+            assert exc_info.value.detail["code"] == "APPROVER_REQUIRED"
+    finally:
+        await engine.dispose()
 
-            msgs = (await s.execute(
-                select(ConversationMessage).join(
-                    Conversation, Conversation.id == ConversationMessage.conversation_id
-                ).where(Conversation.org_id == org_id)
-            )).scalars().all()
-            assert len(msgs) == 0
+
+@pytest.mark.anyio
+async def test_create_decision_request_ineligible_approver_rejected():
+    """story #3004 — approver_member_id를 지정해도 owner/admin이 아니면(자격 밖) 400."""
+    from fastapi import HTTPException
+
+    from app.routers.gates import DecisionRequestCreate, create_decision_request
+    from app.dependencies.auth import AuthContext
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            requester_id = await _seed_agent_requester(s, org_id, project_id)
+            not_approver_id = await _seed_agent_requester(s, org_id, project_id)  # role=member
+
+            body = DecisionRequestCreate(question="블로킹 질문", assumption="가정", approver_member_id=not_approver_id)
+            auth = AuthContext(user_id=str(requester_id), email=None, claims={}, org_id=str(org_id))
+            with pytest.raises(HTTPException) as exc_info:
+                await create_decision_request(
+                    body=body, session=s,
+                    scope={"org_id": org_id, "project_id": project_id}, auth=auth,
+                )
+            assert exc_info.value.status_code == 400
+            assert exc_info.value.detail["code"] == "APPROVER_INELIGIBLE"
     finally:
         await engine.dispose()

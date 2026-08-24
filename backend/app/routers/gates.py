@@ -304,9 +304,8 @@ class DecisionRequestCreate(BaseModel):
     assumption: str
     related_work_item_type: str | None = None
     related_work_item_id: uuid.UUID | None = None
-    # story #2985(PO 설계 확定 2026-08-24) — 결재선 지정(선택). None이면 현행(org owner/admin
-    # 전원 액션) 그대로 — 회귀 0. approver_ids 밖 값은 dispatch_approval_request_cards가
-    # fail-safe로 미지정 취급.
+    # story #2985(PO 설계 확定 2026-08-24)에서 신설, story #3004(선생님 정책 확定)부터 **필수**
+    # — create_decision_request가 None을 400으로 거부(doc.py transition_doc과 동형).
     approver_member_id: uuid.UUID | None = None
 
 
@@ -374,6 +373,26 @@ async def create_decision_request(
 
     gate_id = uuid.uuid4()
     caller_id = uuid.UUID(auth.user_id)
+
+    # story #3004(선생님 정책 확定 2026-08-24) — 「받는 사람이 없는 결재」는 생성 자체가 막혀야
+    # 한다. doc.py transition_doc()의 동일 검증(필수+self-designation 금지+owner/admin 자격)과
+    # 동형 재사용 — 새 판단을 짓지 않는다.
+    if body.approver_member_id is None:
+        raise HTTPException(status_code=400, detail={"code": "APPROVER_REQUIRED", "message": "결정 요청은 결재자를 지정해야 합니다."})
+    if body.approver_member_id == caller_id:
+        raise HTTPException(status_code=422, detail={"code": "APPROVER_SELF_NOT_ALLOWED", "message": "본인을 결재자로 지정할 수 없습니다."})
+    from app.models.project import OrgMember as _OrgMember
+
+    _eligible = (await session.execute(
+        select(_OrgMember.id).where(
+            _OrgMember.org_id == org_id,
+            _OrgMember.id == body.approver_member_id,
+            _OrgMember.role.in_(("owner", "admin")),
+            _OrgMember.deleted_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if _eligible is None:
+        raise HTTPException(status_code=400, detail={"code": "APPROVER_INELIGIBLE", "message": "지정한 결재자는 결재 자격(owner/admin)이 없습니다."})
 
     from app.services.workflow_line_config import _default_role_id
     # doc.py의 동일 관례 재사용(role_id는 _ALWAYS_MANUAL_GATE_TYPES라 disposition 결과에

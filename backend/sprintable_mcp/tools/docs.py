@@ -202,11 +202,16 @@ def _attach_submit_for_approval_next_action(doc: object) -> None:
                 "method": "POST",
                 "url": f"{client._base_url}/api/v2/docs/{doc_id}/transition",
                 "headers": {"Authorization": "Bearer <YOUR_SPRINTABLE_API_KEY>"},
-                "body": {"status": "pending"},
+                # story #3004(선생님 정책 확定 2026-08-24) — approver_member_id가 서버 필수(400
+                # APPROVER_REQUIRED)가 됐다. 이 광고 시점엔 대상을 알 수 없어(create_doc/
+                # update_doc 응답에 없음) 기존 관례(Authorization 헤더와 동형) 그대로 각괄호
+                # placeholder로 명시 — 지어낸 값 대신 "채워 넣어야 하는 자리"임을 정직하게 드러낸다.
+                "body": {"status": "pending", "approver_member_id": "<APPROVER_MEMBER_ID>"},
                 "note": (
                     "sprintable_submit_for_approval 도구가 이 세션에 안 보이면(구 세션 —"
                     " 이 도구가 등록된 뒤 재연결 안 한 경우) 이 REST 호출을 직접 실행해도"
-                    " 동일하게 상신된다."
+                    " 동일하게 상신된다. approver_member_id는 결재자로 지정할 org member_id"
+                    "(owner/admin)로 채워야 한다 — 미지정/본인 지정은 서버가 거부한다."
                 ),
             },
         }
@@ -247,10 +252,11 @@ async def update_doc(args: UpdateDocInput) -> list[TextContent]:
 
 class SubmitForApprovalInput(SprintableInput):
     doc_id: str
-    # story #2985(PO 설계 확定 2026-08-24) — "이 결재는 특정하게 이 사람에게" 지정(선택,
-    # org member_id). 비우면 현행(org/project owner+admin 전원 액션 카드) 그대로 — 회귀 0.
-    # 값이 실 승인권자가 아니면 서버가 fail-safe로 미지정 취급(approval_delivery.py).
-    approver_member_id: str | None = None
+    # story #2985(PO 설계 확定 2026-08-24)에서 신설(선택), story #3004(선생님 정책 확定
+    # 2026-08-24)부터 **필수**(org member_id) — "받는 사람이 없는 결재는 존재할 수 없다".
+    # 서버(transition_doc)가 최종 자격 검증(owner/admin·not-self)을 하지만, 이 필드를 Pydantic
+    # required로 걸어 두면 호출 즉시(왕복 前) 명확한 에러를 받는다.
+    approver_member_id: str
 
 
 async def submit_for_approval(args: SubmitForApprovalInput) -> list[TextContent]:
@@ -262,9 +268,7 @@ async def submit_for_approval(args: SubmitForApprovalInput) -> list[TextContent]
     게이트 실물까지 왕복).
     """
     try:
-        body: dict[str, object] = {"status": "pending"}
-        if args.approver_member_id:
-            body["approver_member_id"] = args.approver_member_id
+        body: dict[str, object] = {"status": "pending", "approver_member_id": args.approver_member_id}
         doc = await client.post(f"/api/v2/docs/{args.doc_id}/transition", json=body)
         gates = await client.get(
             "/api/v2/gates", params={"work_item_id": args.doc_id, "work_item_type": "doc", "status": "pending"},
