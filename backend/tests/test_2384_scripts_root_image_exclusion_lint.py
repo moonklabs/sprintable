@@ -36,6 +36,7 @@ _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
     "lint_destructive_test_sql.py",               # story #2786 — CI lint 게이트(tests/ 재귀 AST 스캔, 운영 DB 무접속)
     "lint_project_access_403.py",                 # story #2342 AC7 — CI lint 게이트
     "lint_query_sentinel_direct_calls.py",        # story #2335 — CI lint 게이트
+    "lint_no_script_output_artifacts.py",         # story #3008 — CI lint 게이트(scripts/ 파일명·내용 정적 스캔, 운영 DB 무접속)
     "model_db_drift_audit.py",                    # story #2181 — 로컬 1회성 감사(읽기 전용)
     "shard_destructive_tests.py",                 # story #2293 — CI 매트릭스 샤딩 유틸
 })
