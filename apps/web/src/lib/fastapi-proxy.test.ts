@@ -182,3 +182,41 @@ describe('fastapi-proxy — null-body status(204 등) 재구성이 안 던진다
     expect(await res.json()).toEqual({ ok: true });
   });
 });
+
+// story #2975(페드루 PO QA 필수 축 지정, 2026-08-24) — gates.py transition_gate_endpoint가 이
+// 엔드포인트 처음으로 409에 dict detail({code, message, current_head_sha})을 내보낸다. FE
+// (gates/[id]/page.tsx)는 body.error.code로 재조회 여부를 가른다 — 이 프록시가 res.text()로
+// 읽어 새 Response로 재구성하는 자리(res.json()이 아니라 텍스트 그대로)라 필드가 안 사라지는
+// 것은 코드상 자명해 보이지만, 실제로 실물 경계(mock fetch 응답 → proxyToFastapi 재구성 →
+// 최종 Response.json())를 왕복시켜 증명한다 — "코드를 읽고 될 것 같다"와 "실제로 됨"은 다르다.
+describe('fastapi-proxy — dict-detail 409(error.code) passthrough(story #2975)', () => {
+  beforeEach(() => {
+    getServerSessionMock.mockReset();
+    getServerSessionMock.mockResolvedValue({ access_token: 'token-1', org_id: 'org-1', project_id: 'proj-1' });
+  });
+
+  it('BE의 409 error.code/current_head_sha가 프록시 재구성을 거쳐도 그대로 살아남는다', async () => {
+    global.fetch = vi.fn(async () => new Response(
+      JSON.stringify({
+        data: null,
+        error: {
+          code: 'gate_head_changed',
+          message: '게이트 대상 커밋이 승인 확인 이후 변경되었습니다. 최신 내용을 다시 확인한 뒤 승인해주세요.',
+          current_head_sha: 'sha-race-landed',
+        },
+        meta: null,
+      }),
+      { status: 409, headers: { 'content-type': 'application/json' } },
+    ));
+    const request = new Request('http://localhost/api/gates/gate-1/transition', {
+      method: 'POST', body: JSON.stringify({ status: 'approved', reviewed_head_sha: 'sha-reviewed' }),
+    });
+
+    const res = await proxyToFastapi(request, '/api/v2/gates/gate-1/transition');
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { code: string; message: string; current_head_sha: string } };
+    expect(body.error.code).toBe('gate_head_changed');
+    expect(body.error.current_head_sha).toBe('sha-race-landed');
+  });
+});
