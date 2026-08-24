@@ -313,12 +313,19 @@ function CardVariant({
   return (
     <CutCornerShell state={proofState} cut={16} className={cn('w-full max-w-[280px]', className)}>
       <div className="min-w-0 flex-1 px-3 py-2.5">
-        {/* headerAside 없으면 justify-between이 단일 자식(StateHeader)의 위치에 영향을 주지
-            않는다 — 다른 card 소비처(headerAside 미전달)는 렌더 결과 byte-identical. */}
-        <div className="flex items-center justify-between gap-2">
+        {/* 카디르 QA(#3446) REQUEST_CHANGES 적출 — 이전엔 headerAside 유무와 무관하게
+            justify-between div로 항상 감쌌다("영향 없음"은 시각적 얘기였을 뿐, DOM은
+            달랐다 — approval-request-card.tsx 실측 625B→684B, byte-identical 주장이
+            거짓이었음). headerAside가 없을 때는 새 wrapper div 자체를 렌더하지 않고
+            StateHeader를 예전과 완전히 같은 위치에 직접 렌더해야 진짜 byte-identical이다. */}
+        {headerAside ? (
+          <div className="flex items-center justify-between gap-2">
+            <StateHeader state={proofState} label={stateLabel} />
+            {headerAside}
+          </div>
+        ) : (
           <StateHeader state={proofState} label={stateLabel} />
-          {headerAside}
-        </div>
+        )}
         {cardHeader}
         {onClaimClick ? (
           <button
