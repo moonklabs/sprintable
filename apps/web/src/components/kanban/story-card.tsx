@@ -356,9 +356,11 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                     {assigneeList.slice(0, 3).map((m) => (
                       <div
                         key={m.id}
+                        // story #2993 로드맵 PR-A(L5) — 정적(비-pulse) agent 정체성 마킹은
+                        // proof-blue(avatar.tsx idle 링과 정합) — citron은 live pulse(실행) 전용.
                         className={`relative flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-medium ring-1 ring-background ${
                           m.type === 'agent'
-                            ? 'border-accent-claim/30 bg-accent-claim/10 text-foreground'
+                            ? 'border-proof-blue/30 bg-proof-blue-soft text-foreground'
                             : 'border-border bg-muted text-muted-foreground'
                         }`}
                         title={m.name}
@@ -448,7 +450,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
         <div
           ref={menuRef}
           style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, width: MENU_WIDTH }}
-          className="z-50 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+          // story #2993 로드맵 PR-A(L1) — floating 팝업은 --elev-overlay(오버레이 전용) 토큰으로.
+          className="z-50 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-[var(--elev-overlay)]"
           onClick={(e) => e.stopPropagation()}
         >
           {onEdit && (
@@ -479,7 +482,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                 <div
                   ref={statusMenuRef}
                   style={{ position: 'fixed', top: statusMenuPos.top, left: statusMenuPos.left, width: MENU_WIDTH }}
-                  className="z-50 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+                  // story #2993 로드맵 PR-A(L1) — floating 팝업은 --elev-overlay(오버레이 전용) 토큰으로.
+          className="z-50 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-[var(--elev-overlay)]"
                   onClick={(e) => e.stopPropagation()}
                 >
                   {statuses.map((status) => (
