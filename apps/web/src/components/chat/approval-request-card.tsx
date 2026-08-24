@@ -15,6 +15,7 @@ import type { GateItem } from '@/components/kanban/types';
 import { parseBlockTemplate, renderBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
 import { renderStaticEventBlock } from '@/components/chat/event-block-card';
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
+import { useSseMultiplexerContext } from '@/components/realtime-provider';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -114,6 +115,24 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
   }, [target.gate_id]);
 
   useEffect(() => { void fetchGate(); }, [fetchGate]);
+
+  // story #2985 AC2(PO 계약 확定 2026-08-24) — 다른 승인자가 이 게이트를 먼저 해소하면,
+  // 이 카드를 보고 있는 화면도 새로고침 없이 "처리됨"으로 갱신된다. BE가
+  // notify_gate_card_recipients_resolved(approval_delivery.py)에서 원 카드(액션+정보성
+  // 무관) 받았던 전원에게 새 ConversationMessage 없이 순수 SSE 이벤트만 심는다 — 그 계약의
+  // FE 절반. mux가 없으면(RealtimeProvider 밖·플래그 OFF) 조용히 스킵 — 이 경우 기존처럼
+  // 마운트 1회 fetchGate만 유효(회귀 아님, 저하일 뿐).
+  const mux = useSseMultiplexerContext();
+  useEffect(() => {
+    if (!mux) return;
+    const unsub = mux.subscribe('conversation.gate_resolved', (raw) => {
+      try {
+        const payload = JSON.parse(raw) as { gate_id?: string };
+        if (payload.gate_id === target.gate_id) void fetchGate();
+      } catch { /* malformed — 무시(다음 정상 이벤트나 fetchGate 재시도로 자연 회복) */ }
+    });
+    return unsub;
+  }, [mux, target.gate_id, fetchGate]);
 
   const transition = async (status: 'approved' | 'rejected', note?: string, evidenceViewed?: boolean) => {
     setResolving(true);

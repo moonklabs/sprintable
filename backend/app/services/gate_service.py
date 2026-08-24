@@ -334,6 +334,7 @@ async def _reopen_rejected_gate(
     neutral_facts: dict[str, Any] | None,
     project_id: uuid.UUID | None,
     notify: bool = True,
+    designated_approver_id: uuid.UUID | None = None,
 ) -> Gate:
     """story #2150(P1) 근본수정 — create_gate()의 멱등 조회에 status 필터가 없어 rejected
     게이트를 그대로 반환했다(merge_verdict_gate.py의 ``gate_status=="rejected"`` 체크와
@@ -385,6 +386,9 @@ async def _reopen_rejected_gate(
     gate.resolver_id = None
     gate.resolution_note = None
     gate.resolved_at = datetime.now(timezone.utc) if new_status != "pending" else None
+    # story #2985 — 재제출(새 결재 사이클)이면 이번 상신의 결재선으로 재stamp(doc.py의
+    # requested_by_member_id 재stamp와 동일 관례 — 옛 사이클의 지정을 그대로 물려받지 않는다).
+    gate.designated_approver_id = designated_approver_id
     merged_facts = dict(neutral_facts or {})
     merged_facts["decision_history"] = prior_history
     gate.neutral_facts = merged_facts
@@ -567,6 +571,7 @@ async def create_gate(
     gate_id: uuid.UUID | None = None,
     pr_number: int | None = None,
     repo_full_name: str | None = None,
+    designated_approver_id: uuid.UUID | None = None,
 ) -> Gate:
     """config 기반 게이트 생성 (멱등: 이미 있으면 기존 반환).
 
@@ -600,6 +605,12 @@ async def create_gate(
     보낼 때, 이 generic "gate.pending_approval" 벨과의 중복을 끄는 opt-out(기본값 True=기존
     全 호출부 무회귀). gate_type/work_item_type별 하드코딩 대신 호출부 판단으로 남겨 이 함수의
     공용 chokepoint 성격을 유지한다.
+
+    designated_approver_id: story #2985(PO 설계 확定 2026-08-24) — 상신 시 지정한 결재선(선택).
+    None(기본값, 기존 全 호출부 무회귀)이면 지정 없음 — dispatch_approval_request_cards가
+    권한자 전원에게 액션 카드를 보내는 현행 그대로. 지정하면 그 1인만 액션·나머지는 정보성
+    (호출부가 이 값을 실 dispatch_approval_request_cards 호출에도 같이 넘겨야 실제로
+    갈린다 — 여기서는 Gate 행에 저장만).
     """
     # 카디르 QA(story #2932 HIGH1, 2026-08-22) — repo_full_name도 find_gate_slot_with_pr_
     # fallback과 동일하게 여기서 정규화한다: 이 함수의 Gate(...) INSERT는 그 헬퍼를 거치지
@@ -626,7 +637,7 @@ async def create_gate(
         return await _reopen_rejected_gate(
             session, existing, org_id=org_id, member_id=member_id, role_id=role_id,
             gate_type=gate_type, neutral_facts=neutral_facts, project_id=project_id,
-            notify=notify,
+            notify=notify, designated_approver_id=designated_approver_id,
         )
 
     # SID 301ee45d/#2047: 반환값이 (disposition, source) — 이 범용 생성기는 disposition→status
@@ -660,6 +671,7 @@ async def create_gate(
         status_entered_at=datetime.now(timezone.utc),
         neutral_facts=neutral_facts,
         resolved_at=datetime.now(timezone.utc) if status != "pending" else None,
+        designated_approver_id=designated_approver_id,
     )
     session.add(gate)
     await session.flush()
@@ -776,6 +788,26 @@ async def transition_gate(
     from app.services.cold_start_seed import record_cold_start_seed  # 순환 회피 lazy import.
 
     await record_cold_start_seed(session, org_id, gate, new_status, resolver_id)
+
+    # story #2985 AC2(PO 계약 확定 2026-08-24) — 원 카드(액션+정보성 무관) 받았던 전원의 열린
+    # 화면이 새로고침 없이 "처리됨"으로 갱신되게. gate_type/line-bound 여부와 무관하게 항상
+    # (아래 line-resolution 분기 이전) — best-effort(실패해도 해소 자체는 막지 않음, 다른
+    # notify_* 형제들과 동일 관례). Event 행 자체는 pending_deliveries 유무와 무관하게 항상
+    # 남긴다(재연결 backfill로도 도달 — durable). 즉시(live) push는 호출부가
+    # pending_deliveries를 넘겼을 때만 추가로 시도(호출부가 이미 commit-후-push 계약을 쓰고
+    # 있다는 뜻 — 없으면 backfill 경로로만 도달, 무강제).
+    if new_status in ("approved", "rejected"):
+        try:
+            from app.services.approval_delivery import notify_gate_card_recipients_resolved
+            _sse_pushes = await notify_gate_card_recipients_resolved(
+                session, org_id=org_id, gate_id=gate.id, status=new_status,
+                resolver_id=resolver_id, resolved_at=gate.resolved_at,
+            )
+            if pending_deliveries is not None:
+                for _pid_str, _sse_payload in _sse_pushes:
+                    pending_deliveries.append({"sse_push": {"pid_str": _pid_str, "payload": _sse_payload}})
+        except Exception:  # noqa: BLE001 — best-effort, 실시간 반영 실패가 게이트 해소를 막지 않음.
+            logger.warning("gate_resolved 카드 실시간 반영 배선 실패 gate=%s", gate.id, exc_info=True)
 
     # E-DG S6: gate 전이를 범용 line resolution 에 배선. gate 에 묶인 active line step_run 이 있으면
     # apply_workflow_line_resolution(H1/line approve 동일 status side-effect 경로)·없으면 legacy

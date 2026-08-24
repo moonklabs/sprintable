@@ -37,6 +37,14 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
+// story #2985 AC2 — useSseMultiplexerContext() 훅 자체를 모킹해 subscribe 핸들러를 테스트가
+// 직접 잡아 fire할 수 있게 한다(RealtimeProvider+실 EventSource 전체를 띄우는 무거운 경로
+// 대신, use-team-presence.test.tsx와 다른 더 가벼운 단위테스트 전략).
+const muxSubscribeMock = vi.fn((_eventName: string, _handler: (raw: string, eventId?: string) => void) => () => {});
+vi.mock('@/components/realtime-provider', () => ({
+  useSseMultiplexerContext: () => ({ subscribe: muxSubscribeMock }),
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -58,6 +66,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'member-1' });
+  muxSubscribeMock.mockClear();
 });
 
 afterEach(async () => {
@@ -180,5 +189,82 @@ describe('ApprovalRequestCard — 409(gate_already_resolved) 거부 처리(story
     expect(getCount).toBe(2); // 최초 로드(1) + 409 이후 재조회(2) — 화면이 옛 status에 안 멈춘다.
     const buttonsAfter = [...container.querySelectorAll('button')].map((b) => b.textContent);
     expect(buttonsAfter.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+  });
+});
+
+describe('ApprovalRequestCard — 실시간 해소 반영(story #2985 AC2)', () => {
+  it('mux가 conversation.gate_resolved(같은 gate_id)를 쏘면 fetchGate가 재호출된다', async () => {
+    let getCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/gates/')) {
+        getCount += 1;
+        return { ok: true, json: async () => ({ data: gate({ status: 'pending' }) }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(getCount).toBe(1); // 마운트 1회 fetch.
+
+    // 카드가 실제로 'conversation.gate_resolved'로 구독했는지 + 그 핸들러를 잡아 직접 fire.
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_resolved');
+    expect(call).toBeTruthy();
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'g-1', status: 'approved' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(getCount).toBe(2); // 새로고침 없이 재조회.
+  });
+
+  it('다른 gate_id의 이벤트는 무시한다(내 카드가 아닌 해소로 불필요 재조회 안 함)', async () => {
+    let getCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/gates/')) {
+        getCount += 1;
+        return { ok: true, json: async () => ({ data: gate({ status: 'pending' }) }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(getCount).toBe(1);
+
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_resolved');
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'other-gate', status: 'approved' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(getCount).toBe(1); // 무관한 게이트 — 재조회 안 함.
+  });
+
+  it('malformed payload는 크래시 없이 무시한다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/gates/')) return { ok: true, json: async () => ({ data: gate({ status: 'pending' }) }) };
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_resolved');
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    expect(() => handler('not-json{')).not.toThrow();
   });
 });
