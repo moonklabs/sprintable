@@ -4184,6 +4184,8 @@
     "briefRoles": "권한",
     "briefOwner": "책임",
     "briefAgent": "실행",
+    "ownerUnassigned": "책임자 미지정",
+    "outOfPipeline": "완료 — 신뢰 파이프라인 범위 밖",
     "runQuestion": "어디까지 · 무엇이 필요 (현재 행위, 진행률바 아님)",
     "runNow": "지금",
     "runStage": "단계",

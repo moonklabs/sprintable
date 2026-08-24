@@ -34,6 +34,10 @@ export interface KanbanStory {
   human_verified?: boolean | null;
   human_verified_by?: string | null;
   human_verified_at?: string | null;
+  // story #2993 — P0-03(backend/app/schemas/story.py StoryResponse)이 이미 배선해 반환하던
+  // 필드인데 FE가 소비한 적이 없었다(FE 타입 부재). Workcell 책임자 표시 폴백체인(human_owner_
+  // member_id → human_verified_by → assigneeIds 스캔)의 최우선 소스.
+  human_owner_member_id?: string | null;
   // story #2187 — 라이브 QA가 만든 임시 카드([TEMP-QA] 등)는 삭제가 휴먼 전용(에이전트 API키
   // 403)이라 만든 쪽이 못 치운다. PO가 우선 is_excluded=true로 마킹해 analytics/command_center
   // 지표에서는 뺐으나(#2187 관측) 보드/백로그 화면은 그 플래그를 안 봐 그대로 남아 있었다 —

@@ -812,7 +812,9 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   //   신호 자체가 없어(story.acceptance_criteria는 freeform 텍스트라 카운트=fiction, glance-hero.tsx
   //   buildEvidence와 동일 규율) 렌더 안 함 — trustSeal(human_verified/self_reported)+
   //   evidence.autoVerify(merge 게이트 neutral_facts.ci_result)+gate(그 게이트 자체)만 real signal.
-  // - human assignee 없으면 Workcell 렌더 자체를 생략(허구 human 금지, ProofCapsule 배선과 동일 규율).
+  // - story #2993(PO 확定①) — human assignee 없어도 Workcell은 렌더한다(2993 이전엔 여기서
+  //   전체 생략했으나 "주전장이 안 보인다" 실사고 근본원인 중 하나였다). owner 자리는 정직한
+  //   "책임자 미지정"으로 대체(허구 human 여전히 금지 — ProofCapsule 배선 규율 그대로).
   // story #2933 H1(P0-H) — 구 FE 재파생(PIPELINE_STAGE_BY_STATUS+trustChip 조합, #3336
   // 드리프트 실사례로 이미 1회 버그난 그 로직)을 폐기하고 BE derive_trust_stage() 판정값을
   // story.trust_stage로 직접 소비한다(get_story/list_stories 둘 다 배선됨). PO 조건①(2933) —
@@ -849,7 +851,17 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const trustChipLabel = trustChip === 'needs_input' ? t('trustChipNeedsInput') : trustChip === 'merge_ready' ? t('trustChipMergeReady') : null;
 
   const assigneeIds = story.assignee_ids?.length ? story.assignee_ids : (story.assignee_id ? [story.assignee_id] : []);
-  const proofHumanId = assigneeIds.find((id) => memberMap[id] && memberMap[id]!.type !== 'agent');
+  // story #2993(PO 확定①③) — 「책임자=assignee 중 human」이 유일 소스였던 게 에이전트
+  // 단독배정 스토리(오늘 세션 다수 실사례)에서 Workcell 전체를 지우던 근본원인. 우선순위
+  // 폴백체인(실데이터 있을 때만 — 지어내지 않음): human_owner_member_id(P0-03, BE가 이미
+  // human만 지정 가능하도록 write-time 검증함) → human_verified_by(who 검증했나) →
+  // assigneeIds 중 human. memberMap에 실제로 해당 멤버가 resolve된 경우만 채택(부분
+  // 데이터로 이름을 지어내지 않는다).
+  const proofHumanId =
+    (story.human_owner_member_id && memberMap[story.human_owner_member_id] ? story.human_owner_member_id : null) ??
+    (story.human_verified_by && memberMap[story.human_verified_by] ? story.human_verified_by : null) ??
+    assigneeIds.find((id) => memberMap[id] && memberMap[id]!.type !== 'agent') ??
+    null;
   const proofAgentId = assigneeIds.find((id) => memberMap[id]?.type === 'agent');
   const proofHuman = proofHumanId ? memberMap[proofHumanId] : null;
   const proofAgent = proofAgentId ? memberMap[proofAgentId] : null;
@@ -1408,31 +1420,32 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
           <div className="space-y-5">
             {/* E-UI-DAEGBYEON P0 — Workcell 데뷔(최소 실화면 배선, story `e5310d1b`) + story #2922
                 W1 2×2 재설계. Evidence는 null(정직한 "아직 증거 없음" — EvidenceSection/
-                StoryMergeGate 실데이터 매핑은 후속 스코프, 대체 아님). human assignee 없으면 전체
-                생략. pipelineStage는 5-status 전 구간(backlog 포함) 항상 파생 가능해졌으므로
-                (Queued 신설) 가드에서 제외 — human 부재만 남는다. */}
-            {pipelineStage && proofHuman ? (
-              <Workcell
-                title={story.title}
-                pipelineStage={pipelineStage}
-                brief={{
-                  goal: story.description?.trim() || story.title,
-                  dod: story.acceptance_criteria?.trim() || t('workcellDodMissing'),
-                  owner: { name: proofHuman.name, role: 'human' },
-                  agent: proofAgent ? { name: proofAgent.name, initial: initials(proofAgent.name) } : undefined,
-                }}
-                run={{
-                  now: statusLabel,
-                  stage: statusLabel,
-                  tools: [],
-                  scopes: [],
-                  blocked: story.blocked_by?.length ? t('workcellBlockedReason') : null,
-                  nextNeed: WORKCELL_NEXT_NEED_BY_STATUS[localStatus] ?? statusLabel,
-                }}
-                evidence={workcellEvidence}
-                conversation={{ view: 'run', messages: workcellMessages, chatProof: chatProofSummary }}
-              />
-            ) : null}
+                StoryMergeGate 실데이터 매핑은 후속 스코프, 대체 아님).
+                story #2993(PO 확定①②) — 이전엔 pipelineStage(done=null)·proofHuman(에이전트
+                단독배정=null) 둘 중 하나만 없어도 Workcell 전체가 사라져 "주전장이 안
+                보인다" 실사고로 이어졌다. 이제 무조건 렌더 — 각자 정직한 빈 상태로 대체
+                (owner=null→"책임자 미지정", pipelineStage=null→"파이프라인 범위 밖"). 지어낸
+                값은 여전히 0(no-fiction 원칙 유지). */}
+            <Workcell
+              title={story.title}
+              pipelineStage={pipelineStage}
+              brief={{
+                goal: story.description?.trim() || story.title,
+                dod: story.acceptance_criteria?.trim() || t('workcellDodMissing'),
+                owner: proofHuman ? { name: proofHuman.name, role: 'human' } : null,
+                agent: proofAgent ? { name: proofAgent.name, initial: initials(proofAgent.name) } : undefined,
+              }}
+              run={{
+                now: statusLabel,
+                stage: statusLabel,
+                tools: [],
+                scopes: [],
+                blocked: story.blocked_by?.length ? t('workcellBlockedReason') : null,
+                nextNeed: WORKCELL_NEXT_NEED_BY_STATUS[localStatus] ?? statusLabel,
+              }}
+              evidence={workcellEvidence}
+              conversation={{ view: 'run', messages: workcellMessages, chatProof: chatProofSummary }}
+            />
             <div>
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('assignee')}</span>

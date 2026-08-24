@@ -231,6 +231,72 @@ describe('StoryDetailPanel — Workcell pipelineStage = story.trust_stage 직결
   });
 });
 
+// story #2993(PO 확定①②, 2026-08-24, 선생님 실사고 「주전장이 안 보인다」) — 이전엔
+// pipelineStage(=trust_stage null)와 proofHuman(human assignee 없음) 둘 중 하나만 없어도
+// Workcell 전체가 사라졌다. 합성값(status 매핑 폴백·허구 human)을 만들지 않으면서 각자
+// 정직한 빈 상태로 대체해 Workcell 자체는 항상 뜨는지 고정한다.
+describe('StoryDetailPanel — Workcell 항상 렌더(story #2993)', () => {
+  const HUMAN_ID = 'human-1';
+  const AGENT_ID = 'agent-1';
+  const memberMap = {
+    [HUMAN_ID]: { id: HUMAN_ID, name: '책임자', type: 'human' },
+    [AGENT_ID]: { id: AGENT_ID, name: '에이전트군', type: 'agent' },
+  };
+
+  async function mount(storyOverrides: Partial<KanbanStory>) {
+    stubFetch();
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel
+          story={makeStory({ status: 'in-progress', ...storyOverrides })}
+          tasks={[]} onClose={() => {}} memberMap={memberMap}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('에이전트만 배정(human 0)이어도 Workcell이 렌더되고 "책임자 미지정"이 정직하게 뜬다', async () => {
+    await mount({ trust_stage: 'running', assignee_id: AGENT_ID, assignee_ids: [AGENT_ID] });
+    expect(container.textContent).toContain('책임자 미지정');
+    expect(container.textContent).toContain('에이전트군');
+  });
+
+  it('status=done(trust_stage=null)이어도 Workcell이 렌더되고 "파이프라인 범위 밖"이 정직하게 뜬다(합성 stage 없음)', async () => {
+    await mount({ status: 'done', trust_stage: null, assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID] });
+    expect(container.textContent).toContain('완료 — 신뢰 파이프라인 범위 밖');
+  });
+
+  it('human_owner_member_id가 있으면 assigneeIds 스캔보다 우선한다(PO 확定③, 실데이터 우선)', async () => {
+    const OWNER_ID = 'owner-1';
+    const map = { ...memberMap, [OWNER_ID]: { id: OWNER_ID, name: '진짜책임자', type: 'human' } };
+    stubFetch();
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel
+          story={makeStory({
+            status: 'in-progress', trust_stage: 'running',
+            assignee_id: AGENT_ID, assignee_ids: [AGENT_ID],
+            human_owner_member_id: OWNER_ID,
+          })}
+          tasks={[]} onClose={() => {}} memberMap={map}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('진짜책임자');
+    expect(container.textContent).not.toContain('책임자 미지정');
+  });
+
+  it('human_owner_member_id가 memberMap에 없으면(미해결 참조) 지어내지 않고 다음 우선순위(assigneeIds)로 폴백한다', async () => {
+    await mount({
+      trust_stage: 'running', assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID],
+      human_owner_member_id: 'unresolvable-ghost-id',
+    });
+    expect(container.textContent).toContain('책임 책임자');
+  });
+});
+
 // story #2933 H3(P0-H 정직성 감사, PO 부수기록ⓐ) — P0-04 in-flight 칩(trustChip, 제목 옆
 // "입력 필요"/"병합 대기" 배지)도 구 gate-목록 재파생(deriveInFlightTrustChip, 폐기됨)이 아니라
 // pipelineStage(=story.trust_stage, H1) 하나로 수렴했는지 고정. gate fetch 응답과 무관해야
