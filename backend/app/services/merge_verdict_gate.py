@@ -422,6 +422,12 @@ async def evaluate_merge_gate(
 
     # 3. 정책 disposition 아티팩트 gate row(Cage·AC⑥). create_gate가 disposition→status 설정·멱등.
     facts = {
+        # story #1715(PO 판정 2026-08-24) — 상신자 해소 회신(gate_service.py::
+        # _notify_doc_gate_requester)용 stash. 새 식별 로직 0 — member_id는 이 함수가 이미
+        # participation.member_id(누가 실작업했는지)로 계산해 create_gate()의 정책판정에
+        # 쓰던 그 값 그대로, doc.py의 동명 필드와 같은 계약(neutral_facts에 저장해두면 해소
+        # 시점에 그 값으로 회신 대상을 찾는다).
+        "requested_by_member_id": str(member_id),
         "ci_result": ci,
         "pr_result": pr,
         # HO-S6(AC⑥): 신뢰 근거 = 가설 적중 이력(CI clean-pass 아님). 명시 노출.
