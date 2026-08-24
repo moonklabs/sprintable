@@ -210,7 +210,15 @@ export default function ConversationPage() {
     <>
       <TopBarSlot
         title={
-          <div className="flex min-w-0 items-center gap-1">
+          // story #2988(선생님 실사용 지적) — top-bar.tsx의 `[&>*]:min-w-0 [&>*]:truncate`가
+          // 이 title 루트 div 자신에 `overflow:hidden`을 건다(빌드 CSS 실측:
+          // `.truncate{overflow:hidden;...}`). 텍스트 말줄임(6df91dce)이 원 의도였는데, 이
+          // div의 자연 높이는 가장 큰 자식(Avatar 24px)에 맞춰지고, agent Avatar의
+          // `ring-2 ring-offset-1`은 box-shadow라 레이아웃 박스 밖으로 3px 번진다(빌드 CSS
+          // 실측: `calc(2px + 1px)` 링 반경) — overflow:hidden이 그 3px를 상하로 그대로
+          // 잘라 "위아래가 잘려 렌더"됐다. py-1(4px)로 클립 경계를 링 밖까지 밀어낸다(회귀
+          // 0 — 텍스트 말줄임 동작은 overflow:hidden이 여전히 걸려있어 그대로 유지).
+          <div className="flex min-w-0 items-center gap-1 py-1">
             <button
               type="button"
               // story #1990: replace(), not push() — 콜드-진입 합성 스택에 세번째 엔트리를
