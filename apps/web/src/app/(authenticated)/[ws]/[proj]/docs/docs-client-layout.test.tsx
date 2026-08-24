@@ -257,3 +257,18 @@ describe('DocsClientLayout — 레일 v2 신규 요소(§3 proof 상태 도트·
     expect(container.querySelector('.bg-warning')).not.toBeNull(); // DOC_B pending
   });
 });
+
+// story #3007(로드맵 P2·PR-E, L1) — 모바일 스와이프 드로어는 floating이라 --elev-overlay.
+describe('DocsClientLayout — 로드맵 P2·PR-E L1(모바일 드로어 elevation 토큰)', () => {
+  it('트리 열기 버튼으로 연 드로어 패널이 shadow-[var(--elev-overlay)]를 쓰고 shadow-lg는 안 쓴다', async () => {
+    stubFetch();
+    await mount();
+    const openBtn = container.querySelector('button[aria-label="문서 트리 열기"]') as HTMLButtonElement;
+    await act(async () => { openBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const panel = document.querySelector('[role="dialog"][aria-label="문서 트리"]')
+      ?? [...document.querySelectorAll('[role="dialog"]')][0];
+    expect(panel).toBeTruthy();
+    expect(panel?.className).toContain('shadow-[var(--elev-overlay)]');
+    expect(panel?.className).not.toMatch(/(^|\s)shadow-lg(\s|$)/);
+  });
+});

@@ -96,3 +96,27 @@ describe('EntityDispatchPanel — 까심군 QA 회귀 (envelope unwrap)', () => 
     expect(document.body.textContent).toContain('담당자가 지정되지 않았습니다');
   });
 });
+
+// story #3007(로드맵 P2·PR-E, L1) — "더보기" 드롭다운은 floating이라 --elev-overlay.
+describe('EntityDispatchPanel — 로드맵 P2·PR-E L1(더보기 드롭다운 elevation 토큰)', () => {
+  it('더보기 드롭다운이 shadow-[var(--elev-overlay)]를 쓰고 shadow-md는 안 쓴다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/members')) return { ok: true, json: async () => ({ data: MEMBERS }) };
+      if (url === '/api/stories/s1') return { ok: true, json: async () => ({ data: {} }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <EntityDispatchPanel entityType="story" entityId="s1" projectId="p1" currentAssigneeId="m1" mobileMode="assignee-only" />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    const moreBtn = container.querySelector('button[aria-label="더보기"]') as HTMLButtonElement;
+    await act(async () => { moreBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const dropdown = container.querySelector('.shadow-\\[var\\(--elev-overlay\\)\\]');
+    expect(dropdown).not.toBeNull();
+    expect(container.querySelector('.shadow-md')).toBeNull();
+  });
+});

@@ -70,8 +70,10 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   // 그대로 있는 fixed 오버레이)에서 GNB 텍스트와 겹쳐 가독을 깼다. bg-background(불투명 판)
   // +border-r border-border(docked의 lg:border-r는 overlay 폭 구간(<1280)에서도 이미
   // 걸리지만, 이 분기 자체에 명시해 향후 base className 리팩터에도 안전하게 둔다).
+  // story #3007(로드맵 P2·PR-E, L1) — 모바일 드로어는 floating이라 shadow-xl 리터럴 대신
+  // --elev-overlay.
   const railOverlayClass = railMode === 'overlay'
-    ? 'fixed inset-y-0 left-0 z-40 w-[270px] bg-background shadow-xl border-r border-border lg:!flex xl:static xl:z-auto xl:w-[270px] xl:shadow-none'
+    ? 'fixed inset-y-0 left-0 z-40 w-[270px] bg-background shadow-[var(--elev-overlay)] border-r border-border lg:!flex xl:static xl:z-auto xl:w-[270px] xl:shadow-none'
     : '';
 
   return (

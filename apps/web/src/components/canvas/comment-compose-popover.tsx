@@ -46,7 +46,8 @@ export function CommentComposePopover({ onSubmit, onCancel, style, className }: 
     <div
       ref={containerRef}
       style={style}
-      className={`absolute z-20 w-56 rounded-lg border border-border bg-card p-2 shadow-md ${className ?? ''}`}
+      // story #3007(로드맵 P2·PR-E, L1) — 팝오버는 floating이라 --elev-overlay.
+      className={`absolute z-20 w-56 rounded-lg border border-border bg-card p-2 shadow-[var(--elev-overlay)] ${className ?? ''}`}
       onKeyDown={(e) => { if (e.key === 'Escape') onCancel(); }}
     >
       <textarea

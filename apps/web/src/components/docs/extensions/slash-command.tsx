@@ -633,7 +633,8 @@ const SlashMenu = forwardRef<
   return (
     <div
       ref={containerRef}
-      className="max-h-72 w-64 overflow-y-auto rounded-xl border border-white/10 bg-card p-1 shadow-lg"
+      // story #3007(로드맵 P2·PR-E, L1) — 슬래시메뉴는 floating이라 --elev-overlay.
+      className="max-h-72 w-64 overflow-y-auto rounded-xl border border-white/10 bg-card p-1 shadow-[var(--elev-overlay)]"
     >
       {grouped ? (
         grouped.map((group) => (

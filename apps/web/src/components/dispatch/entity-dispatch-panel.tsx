@@ -168,8 +168,9 @@ export function EntityDispatchPanel({
           >
             <MoreHorizontal className="size-4" />
           </button>
+          {/* story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay. */}
           {moreOpen && (
-            <div className="absolute right-0 top-full z-10 mt-1 min-w-[140px] rounded-md border border-border bg-background py-1 shadow-md">
+            <div className="absolute right-0 top-full z-10 mt-1 min-w-[140px] rounded-md border border-border bg-background py-1 shadow-[var(--elev-overlay)]">
               <button
                 type="button"
                 disabled={!assigneeId || dispatching}
