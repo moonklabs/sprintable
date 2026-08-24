@@ -115,13 +115,17 @@ async def test_create_decision_request_dispatches_chat_card_to_org_admin():
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s)
             admin_id = await _seed_admin_approver(s, org_id)
-            requester_id = await _seed_agent_requester(s, org_id, project_id)
+            # 카디르 CRITICAL(PR #3435 QA) — 실 JWT 휴먼 인증 재현(_seed_human_caller,
+            # 아래 정의). auth.user_id에는 User.id를, resolve_member가 그걸로 OrgMember를
+            # 역해소한다(member_resolver.py 휴먼 분기) — org_member.id를 auth.user_id에
+            # 직접 넣던 구관례(_seed_agent_requester)는 이 버그 클래스를 못 잡았다.
+            requester_user_id, _requester_member_id = await _seed_human_caller(s, org_id)
 
             # story #3004(선생님 정책 확定 2026-08-24) — approver_member_id가 이제 필수(미지정
             # 400). 지정한다고 카드 수가 바뀌지 않는(이 worktree는 #3001 배타화 이전 상태라
             # 여전히 지정자=액션 카드 1장 — admin이 org에 1명뿐이라 어느 쪽이든 1장).
             body = DecisionRequestCreate(question="A로 갈지 B로 갈지?", assumption="A가 기본값", approver_member_id=admin_id)
-            auth = AuthContext(user_id=str(requester_id), email=None, claims={}, org_id=str(org_id))
+            auth = AuthContext(user_id=str(requester_user_id), email=None, claims={}, org_id=str(org_id))
             resp = await create_decision_request(
                 body=body, session=s,
                 scope={"org_id": org_id, "project_id": project_id}, auth=auth,
@@ -159,10 +163,10 @@ async def test_create_decision_request_missing_approver_rejected():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s)
-            requester_id = await _seed_agent_requester(s, org_id, project_id)
+            requester_user_id, _requester_member_id = await _seed_human_caller(s, org_id)
 
             body = DecisionRequestCreate(question="블로킹 질문", assumption="가정")
-            auth = AuthContext(user_id=str(requester_id), email=None, claims={}, org_id=str(org_id))
+            auth = AuthContext(user_id=str(requester_user_id), email=None, claims={}, org_id=str(org_id))
             with pytest.raises(HTTPException) as exc_info:
                 await create_decision_request(
                     body=body, session=s,
@@ -186,11 +190,11 @@ async def test_create_decision_request_ineligible_approver_rejected():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s)
-            requester_id = await _seed_agent_requester(s, org_id, project_id)
-            not_approver_id = await _seed_agent_requester(s, org_id, project_id)  # role=member
+            requester_user_id, _requester_member_id = await _seed_human_caller(s, org_id)
+            not_approver_id = await _seed_agent_requester(s, org_id, project_id)  # role=member(순수 대상, 호출자 아님)
 
             body = DecisionRequestCreate(question="블로킹 질문", assumption="가정", approver_member_id=not_approver_id)
-            auth = AuthContext(user_id=str(requester_id), email=None, claims={}, org_id=str(org_id))
+            auth = AuthContext(user_id=str(requester_user_id), email=None, claims={}, org_id=str(org_id))
             with pytest.raises(HTTPException) as exc_info:
                 await create_decision_request(
                     body=body, session=s,
@@ -198,5 +202,59 @@ async def test_create_decision_request_ineligible_approver_rejected():
                 )
             assert exc_info.value.status_code == 400
             assert exc_info.value.detail["code"] == "APPROVER_INELIGIBLE"
+    finally:
+        await engine.dispose()
+
+
+async def _seed_human_caller(session, org_id):
+    """카디르 CRITICAL(PR #3435 QA, 2026-08-24) — 실 JWT 휴먼 인증 재현. User.id(=auth.user_id)
+    와 OrgMember.id(=member_id, 응답/비교에 쓰이는 값)를 **서로 다른 UUID**로 seed한다 —
+    _seed_agent_requester()는 API-key(에이전트) 관례를 흉내 내 auth.user_id에 org_member.id를
+    그대로 넣으므로 두 공간이 우연히 일치해 이 버그 클래스를 못 잡는다(회귀 놓친 원인)."""
+    from app.core.security import hash_password
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    user_id = uuid.uuid4()
+    session.add(User(
+        id=user_id, email=f"human-{user_id.hex[:8]}@test.com",
+        hashed_password=hash_password("x"), is_active=True, email_verified=True,
+    ))
+    await session.commit()
+    member_id = uuid.uuid4()
+    session.add(OrgMember(id=member_id, org_id=org_id, user_id=user_id, role="member"))
+    await session.commit()
+    return user_id, member_id
+
+
+@pytest.mark.anyio
+async def test_create_decision_request_human_caller_self_designation_rejected():
+    """카디르 CRITICAL(PR #3435 QA) 회귀가드 — 인간 호출자가 자신의 approver_member_id
+    (org_members.id)를 그대로 지정해도 422로 거부돼야 한다. 수정 前: create_decision_request가
+    caller_id=uuid.UUID(auth.user_id)(=users.id 공간)를 approver_member_id(org_members.id
+    공간)와 직접 비교해 인간 호출자에겐 그 둘이 애초에 절대 같을 수 없으므로 이 가드가 원천
+    무력화(본인지정이 201로 성공) — 이 테스트가 그 재현+수정 확認."""
+    from fastapi import HTTPException
+
+    from app.routers.gates import DecisionRequestCreate, create_decision_request
+    from app.dependencies.auth import AuthContext
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            caller_user_id, caller_member_id = await _seed_human_caller(s, org_id)
+
+            body = DecisionRequestCreate(question="블로킹 질문", assumption="가정", approver_member_id=caller_member_id)
+            # claims에 api_key_id가 없으므로 resolve_member가 JWT-휴먼 분기(OrgMember.user_id
+            # 매칭)를 탄다 — is_api_key=False, member_resolver.py:64 참조.
+            auth = AuthContext(user_id=str(caller_user_id), email=None, claims={}, org_id=str(org_id))
+            with pytest.raises(HTTPException) as exc_info:
+                await create_decision_request(
+                    body=body, session=s,
+                    scope={"org_id": org_id, "project_id": project_id}, auth=auth,
+                )
+            assert exc_info.value.status_code == 422
+            assert exc_info.value.detail["code"] == "APPROVER_SELF_NOT_ALLOWED"
     finally:
         await engine.dispose()

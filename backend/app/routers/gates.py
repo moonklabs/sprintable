@@ -372,7 +372,14 @@ async def create_decision_request(
         raise HTTPException(status_code=403, detail="org_id/project_id required")
 
     gate_id = uuid.uuid4()
-    caller_id = uuid.UUID(auth.user_id)
+    # 카디르 CRITICAL(PR #3435 QA, 2026-08-24) — auth.user_id는 users.id 공간이지
+    # org_members.id 공간이 아니다([[feedback_member_bound_resource_resolve_member_axis]]
+    # #1728과 동일 클래스). 이 값을 caller_id로 그대로 써 온 것 자체가 #2709 원문의 갭 —
+    # 에이전트 호출자는 두 공간이 우연히 일치해 안 걸리다가, 인간 호출자(실측: 본인의
+    # approver_member_id=org_members.id를 그대로 지정)로 실제 재현됐다. resolve_member()
+    # 로 해소한 org_members.id를 caller_id로 삼아 전체 함수(생성 stamp·self-designation
+    # 검증)에 일관 적용한다.
+    caller_id = (await resolve_member(auth, org_id, session)).id
 
     # story #3004(선생님 정책 확定 2026-08-24) — 「받는 사람이 없는 결재」는 생성 자체가 막혀야
     # 한다. doc.py transition_doc()의 동일 검증(필수+self-designation 금지+owner/admin 자격)과
