@@ -80,11 +80,10 @@ export interface ChatMessage {
    * 없으면 content(BE의 제네릭 폴백 텍스트, #2633 _render_event_message_content)를 그대로
    * 렌더한다(비회귀). 구서버/일반 메시지는 `?? null`로 통일(approval_target과 같은 이유). */
   event?: { event_key: string; payload: Record<string, unknown> } | null;
-  /** story #2985(유나 FE 스펙) — 이 카드가 액션인지(request) 정보성인지(request_info) 판별
-   * SSOT. approval_target.designated와 같은 신호를 담지만(BE msg_metadata.activation.kind
-   * → _activation_payload가 top-level message_kind로 노출), 렌더 분기는 이 필드 하나만
-   * 기준으로 삼는다(두 신호를 각자 읽으면 언젠가 갈리는 조용한 버그 축 — 유나 지적).
-   * 'result'(회신 카드)·구서버(undefined/null)는 기존 렌더로 무회귀. */
+  /** story #2985 — 'request'(액션 카드)/'result'(회신 카드) 판별(BE msg_metadata.activation.kind
+   * → _activation_payload가 top-level로 노출). story #3001부터 'request_info'는 BE가 더
+   * 이상 발행하지 않는다(정보성 카드 폐기 — 카드 자체가 지정자에게만 간다). 구서버(undefined/
+   * null)는 기존 렌더로 무회귀. */
   message_kind?: string | null;
 }
 

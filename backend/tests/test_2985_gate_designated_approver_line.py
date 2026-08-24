@@ -1,11 +1,12 @@
-"""story #2985(PO 설계 확定 2026-08-24) — 결재선(수신자) 개념. 핵심 검증축:
-①dispatch_approval_request_cards가 designated_approver_id 지정 시 그 1인만 kind="request"
-(액션)·나머지는 kind="request_info"(정보성)로 갈리는지 ②미지정(None)이면 전원 "request"
-그대로(회귀 0) ③designated_approver_id가 approver_ids 밖이면 fail-safe로 미지정 취급
-④create_gate()가 신규+rejected재오픈 경로 둘 다에서 designated_approver_id를 저장하는지
-⑤notify_gate_card_recipients_resolved가 "실제 카드 심어진" 모든 conversation(액션+정보성
-무관)에 conversation.gate_resolved Event를 심는지, 카드가 없으면 no-op인지. 로컬 PG 미설정
-시 skip(CI 관례 동일)."""
+"""story #2985(PO 설계 확定 2026-08-24)+#3001(선생님 정책 확定, 같은 날 후속 정정) — 결재선
+(수신자) 개념. #3001이 ①의 "정보성 카드"(kind="request_info") 발상 자체를 걷어냈다 — 지정
+시 비지정자는 카드를 아예 안 받는다(감사는 결재함·로그 표면 담당). 핵심 검증축:
+①dispatch_approval_request_cards가 designated_approver_id 지정 시 그 1인**만** 카드를
+받고 나머지는 카드 자체가 없는지 ②미지정(None)이면 전원 "request"(회귀 0) ③designated_
+approver_id가 approver_ids 밖이면 fail-safe로 미지정 취급 ④create_gate()가 신규+rejected
+재오픈 경로 둘 다에서 designated_approver_id를 저장하는지 ⑤notify_gate_card_recipients_
+resolved가 "실제 카드 심어진"(지정 시=지정자 1인뿐) conversation에 conversation.gate_resolved
+Event를 심는지, 카드가 없으면 no-op인지. 로컬 PG 미설정 시 skip(CI 관례 동일)."""
 from __future__ import annotations
 
 import os
@@ -78,7 +79,9 @@ async def _seed_doc(session, org_id, project_id, *, title="설계 문서"):
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
-async def test_dispatch_splits_designated_action_vs_others_informational():
+async def test_dispatch_sends_only_to_designated_others_get_nothing():
+    """story #3001(선생님 정책 확定) — 지정 시 그 1인만 카드를 받는다. 비지정 approver_ids는
+    정보성조차 받지 않는다(#2985의 kind="request_info" 분기는 이 스토리로 완전 삭제)."""
     from app.services.approval_delivery import dispatch_approval_request_cards
     from app.models.conversation import ConversationMessage
     from sqlalchemy import select
@@ -102,24 +105,15 @@ async def test_dispatch_splits_designated_action_vs_others_informational():
             await s.commit()
 
             msgs = (await s.execute(select(ConversationMessage))).scalars().all()
-            assert len(msgs) == 2
-            by_recipient = {uuid.UUID(str(m.mentioned_ids[0])): m for m in msgs}
+            assert len(msgs) == 1  # other는 카드 자체가 없다.
+            designated_msg = msgs[0]
+            assert uuid.UUID(str(designated_msg.mentioned_ids[0])) == designated
 
-            designated_msg = by_recipient[designated]
             assert designated_msg.msg_metadata["activation"]["kind"] == "request"
             assert designated_msg.msg_metadata["activation"]["expects_response"] is True
             assert designated_msg.msg_metadata["approval_target"]["designated"] is True
-            # 유나 FE 스펙(2026-08-24) — 정보성 카드의 "{이름}에게 요청된 결재" 안내문구용
-            # 실명. 지정자 자신의 카드에도 같이 실리지만(단순화 — 별도 분기 없음) 안 읽힘.
             assert designated_msg.msg_metadata["approval_target"]["designated_approver_name"] == "po"
-
-            other_msg = by_recipient[other]
-            assert other_msg.msg_metadata["activation"]["kind"] == "request_info"
-            assert other_msg.msg_metadata["activation"]["expects_response"] is False
-            assert other_msg.msg_metadata["approval_target"]["designated"] is False
-            assert other_msg.msg_metadata["approval_target"]["designated_approver_name"] == "po"
-            # 정보성이어도 해소 권한 자체는 유지 — actions는 그대로.
-            assert other_msg.msg_metadata["approval_target"]["actions"] == ["approve", "reject"]
+            assert designated_msg.msg_metadata["approval_target"]["actions"] == ["approve", "reject"]
     finally:
         await engine.dispose()
 
@@ -270,9 +264,11 @@ async def test_create_gate_reopen_restamps_designated_approver_id():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
-async def test_notify_gate_card_recipients_resolved_reaches_both_action_and_informational():
-    """AC2 — 해소 시 원 카드를 받았던 전원(액션+정보성 무관)에게 conversation.gate_resolved
-    Event가 심긴다. 새 ConversationMessage는 생기지 않는다(챗버블 스팸 방지)."""
+async def test_notify_gate_card_recipients_resolved_reaches_designated_only():
+    """AC2 — 해소 시 원 카드를 받았던 사람(#3001 이후: 지정 시 지정자 1인뿐)에게
+    conversation.gate_resolved Event가 심긴다. 카드를 아예 못 받은 other는 이벤트도
+    없다(«실제 카드 심어진 곳» 역조회 원칙 — approver_ids 재계산 아님, 이 파일 다른
+    테스트와 동일 축). 새 ConversationMessage는 생기지 않는다(챗버블 스팸 방지)."""
     from app.services.approval_delivery import dispatch_approval_request_cards, notify_gate_card_recipients_resolved
     from app.models.event import Event
     from app.models.conversation import ConversationMessage
@@ -308,7 +304,7 @@ async def test_notify_gate_card_recipients_resolved_reaches_both_action_and_info
             )
             await s.commit()
 
-            assert {p[0] for p in pushes} == {str(designated), str(other)}
+            assert {p[0] for p in pushes} == {str(designated)}  # other는 카드가 없어 push도 없음.
             for _pid, payload in pushes:
                 assert payload["gate_id"] == str(gate_id)
                 assert payload["status"] == "approved"
@@ -318,7 +314,7 @@ async def test_notify_gate_card_recipients_resolved_reaches_both_action_and_info
             events = (await s.execute(
                 select(Event).where(Event.event_type == "conversation.gate_resolved")
             )).scalars().all()
-            assert {e.recipient_id for e in events} == {designated, other}
+            assert {e.recipient_id for e in events} == {designated}
             for e in events:
                 assert e.payload["gate_id"] == str(gate_id)
                 assert e.status == "pending"

@@ -61,6 +61,10 @@ export interface GateItem {
   gate_type: string;
   status: string;
   resolver_id: string | null;
+  // story #3001(선생님 정책 확定 2026-08-24) — 결재선(수신자) 지정+위임. resolver_id의
+  // 사전 대칭짝(#2985 BE 신설, additive)이 이제까지 이 타입엔 누락돼 있었음 — 위임 버튼
+  // 노출 판단(현재 로그인 사용자==이 값)과 "위임됨" 표시 판단(원 카드 수신자!=이 값)에 쓴다.
+  designated_approver_id?: string | null;
   resolved_at: string | null;
   resolution_note: string | null;
   held_until?: string | null; // E-DG S31: 보류(hold) 만료(무기한=null·시한부=ISO). 디디 BE 병렬·additive.

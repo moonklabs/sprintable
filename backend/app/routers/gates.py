@@ -181,6 +181,11 @@ class GateResponse(BaseModel):
     resolver_id: uuid.UUID | None = None
     resolved_at: datetime | None = None
     resolution_note: str | None = None
+    # story #3001(선생님 정책 확定 2026-08-24) — FE가 "이 카드 원 수신자==나인데 지금은 다른
+    # 사람이 지정돼 있다"(위임됨)를 로컬 판단하는 데 필요. Gate ORM 컬럼과 이름 일치라
+    # from_attributes로 자동 채워짐(resolver_id와 동일 선례) — 오늘(#2985) 이 필드 자체를
+    # 빠뜨렸던 걸 여기서 보강.
+    designated_approver_id: uuid.UUID | None = None
     held_until: datetime | None = None  # S31: status='held' 시 시한부 만료(무기한이면 None)·additive
     neutral_facts: dict[str, Any] | None = None
     # H1-S3: merge verdict gate evidence metadata (0118)·additive·하위호환 default.
@@ -1652,6 +1657,88 @@ async def request_gate_discussion_endpoint(
         return GateResponse.model_validate(gate)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+class GateDelegateRequest(BaseModel):
+    new_approver_member_id: uuid.UUID
+
+
+@router.post("/{id}/delegate", response_model=GateResponse)
+async def delegate_gate_endpoint(
+    id: uuid.UUID,
+    body: GateDelegateRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> GateResponse:
+    """story #3001(선생님 정책 확定 2026-08-24) — 지정 결재자 본인이 다른 결재자에게
+    「튕겨낸다」(위임). #2985가 만들었던 "대신 처리" 폴드의 대체 정책 — 「감사는 읽기만
+    있으면 되고, 승계는 결재를 받는 사람이 튕겨내게 하는 게 올바른 방법」(선생님 원문,
+    결정권이 라인을 떠나지 않는 위임 모델). 인가는 좁다: 호출자가 이 게이트의 **현재**
+    designated_approver_id 본인이어야만(SoD와 동일 축 — 다른 사람이 남의 결재를 대신
+    튕길 수 없음). #3002(지정자 완전 부재 시 admin 강제 재지정)와는 별개 축이라 이
+    엔드포인트는 admin bypass가 없다(의도적 — 그 스코프는 후속 스토리)."""
+    resolved = await resolve_member(auth, org_id, session)
+    # transition_gate_endpoint와 동일 이유(#2975) — FOR UPDATE로 이 gate 행에 대한 concurrent
+    # 재지정(다른 위임 요청 등)을 블록, 대조와 갱신이 같은 락 스코프 안에서 원자적.
+    _gate = (await session.execute(
+        select(Gate).where(Gate.id == id, Gate.org_id == org_id).with_for_update()
+    )).scalar_one_or_none()
+    if _gate is None:
+        raise HTTPException(status_code=404, detail="Gate not found")
+    if _gate.status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "gate_already_resolved", "message": "이미 처리된 결재는 위임할 수 없습니다."},
+        )
+    if _gate.designated_approver_id is None or _gate.designated_approver_id != resolved.id:
+        raise HTTPException(status_code=403, detail="지정 결재자 본인만 위임할 수 있습니다.")
+    if body.new_approver_member_id == resolved.id:
+        raise HTTPException(status_code=422, detail="본인에게 위임할 수 없습니다.")
+
+    # story #2985와 동일 fail-safe 축(approval_delivery.dispatch_approval_request_cards의
+    # designated_approver_id 밖 값 처리와 동형) — 여기선 서버가 400으로 명시 거부한다(라우터
+    # 경계 검증, PO 보강① — 권한 없는 이에게 튕기면 결재 불능 카드가 되는 것을 사전 차단).
+    from app.models.project import OrgMember
+    eligible_ids = set((await session.execute(
+        select(OrgMember.id).where(
+            OrgMember.org_id == org_id,
+            OrgMember.role.in_(("owner", "admin")),
+            OrgMember.deleted_at.is_(None),
+        )
+    )).scalars().all())
+    if body.new_approver_member_id not in eligible_ids:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "ineligible_delegate_target",
+                "message": "위임 대상이 이 조직의 결재 권한자(owner/admin)가 아닙니다.",
+            },
+        )
+
+    old_approver_id = _gate.designated_approver_id
+    _gate.designated_approver_id = body.new_approver_member_id
+
+    from app.services.activity_log import ActivityLogService
+    await ActivityLogService(session).record(
+        org_id=org_id, action="gate_delegated", actor_id=resolved.id, actor_type="human",
+        entity_type="gate", entity_id=_gate.id,
+        context={
+            "from_member_id": str(old_approver_id),
+            "to_member_id": str(body.new_approver_member_id),
+        },
+    )
+    await session.commit()
+    await session.refresh(_gate)
+
+    # best-effort — 신규 카드 배달+원 카드 실시간 반영 실패가 위임 자체(위 commit으로 이미
+    # 확정된 designated_approver_id 갱신+감사기록)를 막지 않는다.
+    from app.services.gate_service import dispatch_gate_delegation
+    await dispatch_gate_delegation(
+        session, _gate, old_approver_id=old_approver_id, new_approver_id=body.new_approver_member_id,
+    )
+
+    return GateResponse.model_validate(_gate)
 
 
 class GateReassignRequest(BaseModel):
