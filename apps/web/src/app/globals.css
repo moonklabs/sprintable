@@ -120,16 +120,25 @@
 }
 
 @theme inline {
-  /* story #2974 §1(PR-D0, 가역성 1급) — Display 헤딩(§1.3 최상단 페이지 lead·히어로) 전용
-     페이스 스위치. 초기값=var(--font-sans)(Pretendard) — D0는 배선만, 시각 변화 0. 세리프
-     켜기(D1~)는 이 한 줄만 `'Noto Serif KR', var(--font-serif), serif`로 바꾸면 전체
-     전환(뒤집힐 때도 이 한 줄로 전체 복귀). 개별 화면에 폰트명 하드코딩 금지 — 전부 이
-     토큰(또는 font-display 유틸) 경유. weight(--font-weight-editorial-heading)와는 별개
-     축(family) — 소헤딩·본문·메타·숫자는 대상 아님(Pretendard/mono 유지). */
-  --font-display: var(--font-sans);
+  /* story #2974 §1(PR-D0 배선→PR-D1 점등, 가역성 1급) — Display 헤딩(§1.3 최상단 페이지
+     lead·히어로) 전용 페이스 스위치. D0 초기값=var(--font-sans)(Pretendard)·시각 변화 0.
+     D1(여기)=layout.tsx의 next/font/local(NotoSerifKR-display.woff2, wght=820 단일
+     인스턴스·KS X 1001 상용 2350자+Latin+숫자+구두점 서브셋, §4)이 노출하는
+     --font-serif-kr 변수를 그대로 참조 — 폴백은 generic `serif`(서브셋 밖 벽자가 와도
+     시스템 세리프로 떨어져 세리프 헤딩 안에 산세리프 글자가 안 섞인다). 개별 화면에
+     폰트명 하드코딩 금지 — 전부 이 토큰(또는 font-display 유틸) 경유. 뒤집힐 때 이 한
+     줄만 var(--font-sans)로 되돌리면 전체 복귀. weight(--font-weight-editorial-heading)
+     와는 별개 축(family) — 소헤딩·본문·메타·숫자는 대상 아님(Pretendard/mono 유지).
+     D1 한정 제외(PO 확定 2026-08-24, ③): page-header.tsx h1·flow TopBar 타이틀은 이번
+     PR에서 font-display 배선을 잠시 걷어 font-heading(Pretendard 고정)으로 되돌렸다 —
+     D0 원복이 아니라 "세리프 적용 대상에서만 제외"(대표 1~2화면 표본만 켠다는 선생님
+     confirm 제약 보존 + flow TopBar의 세리프 적정성 미결정을 D2로 미루는 정합 효과).
+     D2에서 선생님 라이브 감 confirm 後 두 자리 다시 font-display로 태운다. */
+  --font-display: var(--font-serif-kr), serif;
   --font-heading: var(--font-sans);
   --font-sans: var(--font-sans);
   --font-serif: var(--font-serif);
+  --font-serif-kr: var(--font-serif-kr);
   --font-mono: var(--font-mono);
   /* story #2529: 워드마크 전용(font-wordmark 유틸리티) — 전역 font-sans와 분리. */
   --font-wordmark: var(--font-wordmark);

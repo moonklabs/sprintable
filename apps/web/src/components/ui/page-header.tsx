@@ -36,7 +36,13 @@ import { cn } from '@/lib/utils';
 // 파일이 doc §3의 "가장 대표" Display 소비처로 명시된 자리 — 세리프 켜기(D1~)가 실제로
 // 이 h1부터 반영되게 하려면 반드시 이 토큰을 경유해야 한다(font-heading으로 남으면 세리프
 // 전환에서 이 화면만 빠짐).
-const pageHeaderVariants = cva('font-display tracking-[-0.02em] text-foreground', {
+//
+// ⚠️D1 한정 제외(PO 확定 2026-08-24, doc §2 갱신 대응 ③) — `font-display`→`font-heading`
+// 임시 회귀. D0 배선 원복이 아니다: 이 컴포넌트의 실사용처(internal-dogfood·agent-run-detail,
+// grep 확인)가 doc이 지목한 "대표 1~2화면"(docs·goals)이 아니라서, 전역 스위치를 그대로
+// 뒤집으면 선생님 confirm의 "작은 표본으로 감을 본다"는 제약을 넘어 무관한 화면까지 같이
+// 켜진다 — D1에서만 제외하고 D2(선생님 라이브 감 confirm 後)에서 다시 font-display로 태운다.
+const pageHeaderVariants = cva('font-heading tracking-[-0.02em] text-foreground', {
   variants: {
     size: {
       page: 'text-2xl md:text-3xl',

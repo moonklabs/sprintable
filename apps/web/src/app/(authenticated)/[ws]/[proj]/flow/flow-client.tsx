@@ -214,8 +214,13 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           TopBar 타이틀=Heading(무게↑만·크기는 TopBar 유지).
           story #2974 §3(PR-D0) — doc이 명시한 소비처: 무게(font-extrabold)는 이미 Heading
           그대로 두고, 페이스(family)만 별도 축으로 font-display 토큰 경유 추가(D0 값=
-          var(--font-sans)라 시각 변화 0 — 세리프 켜지면 board TopBar 타이틀도 함께 전환). */}
-      <TopBarSlot title={<h1 className="text-sm font-display font-extrabold">{t('title')}</h1>} showContextChip />
+          var(--font-sans)라 시각 변화 0 — 세리프 켜지면 board TopBar 타이틀도 함께 전환).
+          ⚠️D1 한정 제외(PO 확定 2026-08-24 ③) — font-display 클래스를 걷어냈다(font-extrabold
+          는 유지). doc §3 "전수 갭" 항목이 스스로 짚은 대로 flow만 배선돼 있고 나머지 TopBar
+          (docs·goals·loops·retro·chats·more)는 미배선이라 "TopBar가 Display 표면인가" 자체가
+          미결정 — 이 제외가 그 판정을 D2로 미루는 정합 효과도 있다(14px에 세리프가 설지는
+          그 자체가 시각 판정). D0 원복 아님, D2에서 재태움. */}
+      <TopBarSlot title={<h1 className="text-sm font-extrabold">{t('title')}</h1>} showContextChip />
 
       <div className="space-y-4 p-4">
         {/* story #2930(P0-G) I3 — nav에서 flow+sprints가 「보드」 단일 항목으로 접히며 사라진
