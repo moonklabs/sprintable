@@ -174,6 +174,49 @@ def test_deploy_backend_no_unescaped_shell_vars_in_cloudbuild_substitution_synta
         )
 
 
+_CLOUDBUILD_STEP_ARG_BYTE_LIMIT = 10_000
+
+
+def test_bash_entrypoint_steps_under_cloudbuild_arg_byte_limit():
+    """⭐story #3031 핫픽스(2026-08-24) — Cloud Build 실사고: `deploy-realtime` 스텝이
+    "invalid .steps field: build step 11 arg 1 too long (max: 10000)"로 dev develop
+    배포를 2연속 실패시켰다(4d8014ab3·2406e6f89).
+
+    함정의 본체: 그 스텝은 **문자 수로는 7,590자**(다른 스텝들과 비슷한 규모)였는데
+    **UTF-8 바이트로는 11,459바이트**였다 — 한글 완성형 1글자가 UTF-8에서 3바이트라,
+    한글 주석이 많은 스텝은 "문자 수 감각"으로 안전해 보여도 실제 한도(Cloud Build는
+    **바이트** 기준)를 조용히 넘길 수 있다. 리뷰에서 육안으로 "길다"는 못 느끼면서
+    바이트 한도를 넘기는 이 클래스는 다시 재발할 수 있다 — 그래서 문자 수가 아니라
+    **`.encode('utf-8')` 길이**로 정적 고정한다(에디터 표시 글자수를 믿지 않는다).
+
+    ⛔PO 리뷰 지적(2026-08-24, PR#3455 1라운드) — 최초 버전은 `_BASH_ENTRYPOINT_STEP_IDS`
+    (substitution-escape 가드용 4개 목록, 위)만 순회해 apply-gcs-avatars-cors·
+    update-migrate-job·deploy-mcp·deploy-realtime-gce 4개 스텝이 가드 밖이었다 — 이
+    함정은 "한글 주석이 자라는 어느 bash 스텝에서든" 재발하는 클래스라 목록 상수(용도가
+    다른 가드와 공유하는 고정 집합)로는 원천적으로 사각을 만든다. 그래서 이 가드만큼은
+    `entrypoint == "bash"`인 스텝 **전부**를 cloudbuild.yaml에서 동적으로 순회한다(신규
+    bash 스텝이 나중에 추가돼도 목록 갱신 없이 자동 커버 — `_BASH_ENTRYPOINT_STEP_IDS`는
+    $$ substitution 가드 용도로만 그대로 둔다, 그쪽은 실 substitution 참조가 있는
+    스텝만 의도적으로 좁힌 것이라 별개 스코프).
+
+    ⛔이 값(10,000)은 story #3031 사고 당시 GitHub 에러 메시지("max: 10000")를 그대로
+    반영한 것 — Cloud Build 쪽 실제 한도가 바뀌면(추정: 인프라 변경 없이는 안 바뀜) 이
+    상수도 같이 갱신할 것.
+    """
+    doc = yaml.safe_load(_CLOUDBUILD_YAML.read_text())
+    bash_steps = [s for s in doc["steps"] if s.get("entrypoint") == "bash"]
+    assert bash_steps, "cloudbuild.yaml에 bash entrypoint 스텝이 0개 — 이 가드 자체가 무의미해짐(파일 구조 변경 의심)"
+    for step in bash_steps:
+        script = step["args"][1]
+        byte_len = len(script.encode("utf-8"))
+        assert byte_len < _CLOUDBUILD_STEP_ARG_BYTE_LIMIT, (
+            f"cloudbuild.yaml {step['id']} 스텝 args가 UTF-8 {byte_len}바이트로 Cloud Build "
+            f"한도({_CLOUDBUILD_STEP_ARG_BYTE_LIMIT})를 넘김(문자 수={len(script)} — 문자 "
+            "수만으로는 안 걸리는 게 story #3031 사고의 정확한 함정). 긴 한글 주석은 "
+            "관련 테스트 파일 docstring 등 외부로 옮기고 스텝엔 짧은 포인터만 남길 것."
+        )
+
+
 def test_deploy_backend_is_bash_entrypoint():
     """story #2141 정정 — env 조건분기를 위해 gcloud 단순 args에서 bash로 전환됐다."""
     doc = yaml.safe_load(_CLOUDBUILD_YAML.read_text())
