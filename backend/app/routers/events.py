@@ -181,7 +181,15 @@ def _push_to_agent(member_id: str, payload: dict, _from_listener: bool = False) 
     queues = _agent_connections.get(member_id)
     pushed = False
     if queues:
-        dead: list[asyncio.Queue] = []
+        # story #2530(2026-08-24, agent_gateway.py::wake_agent과 형제 결함·동일 처방) —
+        # 예전엔 QueueFull이 그 큐(연결)를 `_agent_connections`에서 통째로 제거하는
+        # 신호였다: 스트림 자체는 안 끊긴 채("연결은 살아 보이는" 상태) 이 member로 오는
+        # 모든 이후 push가 이 연결을 dict에서 영원히 못 찾아 조용히 no-op되는 반쪽 상태가
+        # 코드로 가능했다. 처방: 큐를 ring-buffer로 다뤄 가장 오래된 항목을 버리고 자리를
+        # 만들어 이번 payload를 넣는다 — 연결을 절대 dict에서 지우지 않는다. A계열(event_id
+        # 有)은 재연결 시 DB backfill로 회수되니 무해·B계열(transient) 1건 유실은 발생할 수
+        # 있으나, 예전처럼 "연결 자체가 사라져 그 뒤 전부 유실"보다는 항상 개선(strict
+        # improvement) — 연결이 dict에 남아있는 한 다음 push부터는 정상 도달한다.
         for q in list(queues):
             try:
                 # story #3029(카디르+codex 발견, #3447 QA) — 이 member의 모든 큐에 **같은
@@ -196,9 +204,22 @@ def _push_to_agent(member_id: str, payload: dict, _from_listener: bool = False) 
                 q.put_nowait(dict(payload))
                 pushed = True
             except asyncio.QueueFull:
-                dead.append(q)
-        for q in dead:
-            queues.discard(q)
+                logger.warning(
+                    "_push_to_agent: queue full(maxsize=%d) for member=%s — dropping oldest "
+                    "pending payload to make room (connection kept registered, not discarded)",
+                    q.maxsize, member_id,
+                )
+                try:
+                    q.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                try:
+                    q.put_nowait(dict(payload))
+                    pushed = True
+                except asyncio.QueueFull:
+                    # 극단적 경합 — 이번 push만 포기(무한 재시도 금지). 연결은 dict에 남아
+                    # 다음 push부터 정상 도달(agent_gateway.py wake_agent과 동일 근거).
+                    pass
     if not _from_listener:
         # prod 커넥션 누수 근본fix(2026-07-08) — 참조 미보관 create_task는 GC가 pg_notify()의
         # async with async_session_factory() 도중 태스크를 조기수거할 수 있다(공식 문서 경고) —
