@@ -184,7 +184,16 @@ def _push_to_agent(member_id: str, payload: dict, _from_listener: bool = False) 
         dead: list[asyncio.Queue] = []
         for q in list(queues):
             try:
-                q.put_nowait(payload)
+                # story #3029(카디르+codex 발견, #3447 QA) — 이 member의 모든 큐에 **같은
+                # dict 객체**를 넣으면, generate()의 라이브 루프가 그 객체에서
+                # `_sse_transient_id`를 pop()할 때(#2158) 공유 객체라 다른 연결 큐에 든
+                # "같은" 항목에서도 키가 사라진다 — 두 번째로 처리되는 연결은 원본 id를
+                # 잃고 즉석 uuid4를 새로 발급해, 그 연결이 재연결 후 Redis replay로 같은
+                # 이벤트를 원본 id로 받으면 라이브 때 발급한 가짜 id와 안 맞아 클라
+                # dedup이 무력화된다(3026과 같은 "다중 연결" 문제군의 B계열 발현). 큐마다
+                # 독립 객체를 넣어(얕은 복사 — payload 값 자체는 불변으로 다뤄지므로 얕은
+                # 복사로 충분) 한 연결의 pop이 다른 연결의 사본에 안 번지게 한다.
+                q.put_nowait(dict(payload))
                 pushed = True
             except asyncio.QueueFull:
                 dead.append(q)
