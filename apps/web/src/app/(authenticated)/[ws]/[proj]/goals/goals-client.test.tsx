@@ -242,3 +242,75 @@ describe('GoalsClient — 결과 원장 재조립(§2 이중 신호·§3 마스�
     expect(container.textContent).toContain('판정 없이 닫힘');
   });
 });
+
+// story #3005(로드맵 P2·PR-C, L2) — 상세 패널의 스토리진행/SP진행 ProgressBar(위 "작업(Claimed)"
+// 바와는 별개 컴포넌트)도 물리량이라 proof-blue(bg-primary)가 아니라 무채(bg-proof-ink-3)여야
+// 한다.
+describe('GoalsClient — 로드맵 P2·PR-C L2(스토리진행/SP진행 ProgressBar 무채화)', () => {
+  // GoalDetailPanel(스토리진행/SP진행 ProgressBar가 사는 곳)은 행 클릭이 아니라(그건 라우터
+  // 딥링크로 나가버림, AC5) 생성 직후 onCreated 콜백으로만 이 컴포넌트 트리 안에서 열린다 —
+  // 생성 플로우를 실제로 태워서 연다.
+  it('생성 직후 열리는 상세 패널의 스토리진행 바가 bg-proof-ink-3를 쓰고 bg-primary는 안 쓴다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (typeof url === 'string' && url.includes('/api/goals?')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/goals' && init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({
+            data: {
+              id: 'e1', title: '진행 목표', status: 'active', priority: 'medium', created_at: '2026-08-24',
+              stories: [
+                { id: 's1', title: 'A', status: 'done' },
+                { id: 's2', title: 'B', status: 'done' },
+                { id: 's3', title: 'C', status: 'in-progress' },
+                { id: 's4', title: 'D', status: 'in-progress' },
+              ],
+            },
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    const { GoalsClient } = await import('./goals-client');
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-1" />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const createBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.goals.newGoal));
+    await act(async () => { createBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const titleInput = document.body.querySelector('input[type="text"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(titleInput, '진행 목표');
+      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    const form = titleInput.closest('form')!;
+    await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    // ⚠️같은 화면에 이미 무채인 "작업(Claimed)" 바(§2, GoalRow)가 별도로 존재해 document 전체
+    // .bg-proof-ink-3 grep은 그 바로 오탐한다 — done/total 텍스트("2 / 4")로 이 ProgressBar
+    // 인스턴스 자신의 wrapper만 좁혀서 잰다.
+    const doneTotal = [...document.body.querySelectorAll('span')].find((s) => s.textContent === '2 / 4');
+    expect(doneTotal).toBeTruthy();
+    const wrapper = doneTotal!.closest('.space-y-1')!;
+    expect(wrapper.querySelector('.bg-proof-ink-3')).toBeTruthy();
+    expect(wrapper.querySelector('.bg-primary')).toBeNull();
+  });
+});
+
+// story #3005(로드맵 P2·PR-C, L1) — 에픽 행(카드)은 rest 상태에서 --elev-card를 쓴다. dragging=true
+// 축은 dnd-kit useSortable이 실 포인터 시퀀스에 걸려 jsdom 합성 이벤트로 안정 재현이 안 되는
+// 기지 한계([[feedback-render-test-over-source-grep]]류 synthetic dnd-kit 불안정 교훈, STEER
+// 작업 당시 확인) — rest(비드래그) 축만 유닛으로 고정하고 드래그 중 elev-overlay 전환은 라이브
+// 픽셀로 검증한다.
+describe('GoalsClient — 로드맵 P2·PR-C L1(에픽 카드 elevation 토큰, rest 축)', () => {
+  it('비드래그 상태의 에픽 행이 --elev-card를 쓰고 shadow-lg 리터럴은 안 쓴다', async () => {
+    stubFetch([{ id: 'e1', title: '목표A', status: 'active', total_stories: 2, done_stories: 1 }]);
+    await mount();
+    const row = [...container.querySelectorAll('div')].find((d) => d.className.includes('shadow-[var(--elev-card)]'));
+    expect(row).toBeTruthy();
+    expect(container.querySelector('.shadow-lg')).toBeNull();
+  });
+});

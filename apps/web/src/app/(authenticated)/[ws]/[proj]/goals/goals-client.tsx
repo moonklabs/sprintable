@@ -182,8 +182,11 @@ function ProgressBar({ done, total, label }: ProgressBarProps) {
         </div>
       ) : null}
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
+        {/* story #3005(로드맵 P2·PR-C, L2) — done/total은 물리량 게이지라 proof-blue(정체성
+            신호) 대신 무채 명도. 같은 화면의 "작업(Claimed)" 바(§2)가 이미 쓰는
+            bg-proof-ink-3 관례 그대로 재사용(신규 하드코딩 색 0, §7 규율). */}
         <div
-          className="h-full rounded-full bg-primary transition-all duration-300"
+          className="h-full rounded-full bg-proof-ink-3 transition-all duration-300"
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -567,7 +570,11 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
         isSelected
           ? 'border-primary/40 bg-primary/5'
           : 'border-border bg-card hover:border-primary/30 hover:bg-primary/5'
-      } ${isDragging ? 'shadow-lg' : ''}`}
+      } ${
+        // story #3005(로드맵 P2·PR-C, L1) — 드래그로 «들린» 상태는 일시적 floating이라
+        // --elev-overlay, rest 복귀 시 인라인 카드 기본값 --elev-card(PO 판정 2026-08-24).
+        isDragging ? 'shadow-[var(--elev-overlay)]' : 'shadow-[var(--elev-card)]'
+      }`}
     >
       {sortable ? (
         <button
