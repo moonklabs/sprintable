@@ -759,6 +759,12 @@ async def transition_gate(
             "work_item_type": gate.work_item_type,
             "work_item_id": str(gate.work_item_id),
             "note": note,
+            # story #2975 AC4(PO 확定 2026-08-24) — 「이 액션이 어느 SHA에 대한 것이었나」를
+            # 이 시점의 gate.github_check_run_sha로 스냅샷. gate.approved_head_sha 컬럼은
+            # 이후 재-pending 시 null로 되돌아가(gate_github_check.py::reopen_gate_if_new_sha)
+            # 그 시점의 역사가 사라지므로, append-only인 이 context가 유일한 영속 기록이 된다.
+            # merge 게이트가 아니면 애초에 None(무관 필드 — 조용히 무해).
+            "head_sha": gate.github_check_run_sha,
         },
     )
 
@@ -892,6 +898,8 @@ async def undo_gate_resolution(
     _prev_resolver_id = gate.resolver_id
     _prev_resolved_at = gate.resolved_at
     _prev_note = gate.resolution_note
+    # story #2975 AC4 — approved_head_sha(무엇이 승인됐었나)도 취소로 곧 사라질 값이라 스냅샷.
+    _prev_approved_head_sha = gate.approved_head_sha
 
     from app.services.doc import DOC_GATE_TYPE, DOC_GATE_WORK_ITEM_TYPE
     if gate.work_item_type == DOC_GATE_WORK_ITEM_TYPE and gate.gate_type == DOC_GATE_TYPE:
@@ -926,6 +934,8 @@ async def undo_gate_resolution(
             "previous_resolver_id": str(_prev_resolver_id) if _prev_resolver_id else None,
             "previous_resolved_at": _prev_resolved_at.isoformat() if _prev_resolved_at else None,
             "previous_note": _prev_note,
+            # story #2975 AC4 — 무엇이 취소됐는지(어느 SHA에 대한 승인이었는지)의 스냅샷.
+            "previous_approved_head_sha": _prev_approved_head_sha,
         },
     )
 
@@ -1045,7 +1055,8 @@ async def void_gate(
     ⚠️void ≠ approval: 묶인 line step_run 을 ``skipped`` 로 해소해 엔티티가 unblock(re-route 가능)되되
     "승인됨"으로 전진하지 않는다(전이 미적용). voider 는 인증 caller(라우터가 강제·body 신뢰 금지·
     S23 RC① 패턴). audit = gate 행(status='voided'·resolver_id·resolution_note)이 distinct 추적
-    (approve/reject 와 **status 로 구분**) + app-log. void=복구 액션이라 strict SoD 불요(PO Q4).
+    (approve/reject 와 **status 로 구분**) + ActivityLog(story #2975 AC4, approve/reject/undo와
+    동형 — 이전엔 logger.info뿐이라 DB 조회 불가였음). void=복구 액션이라 strict SoD 불요(PO Q4).
     """
     gate = (await session.execute(
         select(Gate).where(Gate.id == gate_id, Gate.org_id == org_id)
@@ -1075,8 +1086,27 @@ async def void_gate(
             sr.routing_reason = f"gate voided by admin: {reason}"[:500]
             sr.resolved_at = datetime.now(timezone.utc)
 
-    # void 는 별개 액션으로 app-log 추적(DB distinct 추적은 gate.status='voided'). ⚠️permission_audit_logs
-    # 는 action CHECK(member_* 만)라 사용 불가·HitlGateAudit 는 enforce-coverage 전용 → gate 행+log 채택.
+    # story #2975 AC4(PO 확定 2026-08-24) — 위 주석이 남긴 이유(permission_audit_logs=member 전용·
+    # HitlGateAudit=enforce-coverage 전용)로 여태 logger.info() 뿐이었다(Cloud Logging 한정,
+    # DB 비영속·조회불가) — 진짜 감사 갭이었다. approve/reject/undo와 동형으로 ActivityLog에
+    # 옮긴다(신규 테이블 불요, 기존 표 재사용).
+    from app.services.activity_log import ActivityLogService
+
+    await ActivityLogService(session).record(
+        org_id=org_id,
+        action="gate_voided",
+        actor_id=voider_id,
+        actor_type="human",
+        entity_type="gate",
+        entity_id=gate.id,
+        context={
+            "gate_type": gate.gate_type,
+            "work_item_type": gate.work_item_type,
+            "work_item_id": str(gate.work_item_id),
+            "reason": reason,
+            "head_sha": gate.github_check_run_sha,
+        },
+    )
     logger.info(
         "gate_voided org=%s gate=%s voider=%s work=%s/%s step_run=%s reason=%s",
         org_id, gate_id, voider_id, gate.work_item_type, gate.work_item_id, sr_id, reason,
@@ -1603,6 +1633,26 @@ async def override_gate(
             },
             correlation_id=sr.correlation_id,
         ))
+    # story #2975 AC4(PO 확定 2026-08-24, ㉮) — 위 WorkflowLineStepRunEvent는 sr(line step_run)이
+    # 있을 때만 쓰인다. line-less override는 지금까지 gate.neutral_facts(위)뿐이었는데 그건
+    # mutable이라 다음 전이가 덮어써 감사 기록이 못 된다 — line 유무 무관하게 ActivityLog에도
+    # 항상 남긴다(transition_gate가 이미 base gate_approved/rejected를 쓰지만, override 고유
+    # 메타(bypassed_sod·override_reason)는 그 안 담기므로 별개 action으로 append).
+    from app.services.activity_log import ActivityLogService
+
+    await ActivityLogService(session).record(
+        org_id=org_id,
+        action="gate_overridden",
+        actor_id=owner_id,
+        actor_type="human",
+        entity_type="gate",
+        entity_id=gate.id,
+        context={
+            "decision": decision, "reason": reason, "bypassed_sod": True,
+            "bypassed_approver_ids": [str(x) for x in bypassed],
+            "head_sha": gate.github_check_run_sha,
+        },
+    )
     logger.warning(
         "gate_overridden org=%s gate=%s decision=%s owner=%s bypassed_approvers=%d reason=%s",
         org_id, gate_id, decision, owner_id, len(bypassed), reason,

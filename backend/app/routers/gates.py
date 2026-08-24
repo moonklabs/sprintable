@@ -1169,6 +1169,78 @@ async def list_gate_github_check_events_endpoint(
     return [GateGithubCheckEventResponse.model_validate(r) for r in rows]
 
 
+class GateActivityItem(BaseModel):
+    """story #2975 AC4(PO 확定 2026-08-24) — 사람 결재 행위(approve/reject/undo/void/override)
+    이력. `ActivityLog`(story #2631이 이미 append-only로 기록해 두고 있던 것)를 gate 스코프로
+    투영한다 — 신규 테이블 0."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    action: str
+    actor_id: uuid.UUID | None
+    actor_name: str | None = None
+    context: dict
+    created_at: datetime
+
+
+@router.get("/{id}/activity", response_model=list[GateActivityItem])
+async def list_gate_activity_endpoint(
+    id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> list[GateActivityItem]:
+    """story #2975 AC4 — 「누가·언제·무엇을·어느 SHA에」 결재했는지 조회. 2026-08-23 두 실사고
+    (PR#3402 취소 반영 여부 판별 불가·PR#3406 approved의 actor 판별 불가)가 이 표면 부재가
+    원인이었다 — `ActivityLog`엔 이미 기록돼 있었고(transition_gate/undo_gate_resolution)
+    조회 표면만 없었다. `github-check-events`(위)와 대칭인 gate-scope sub-resource로 신설
+    (범용 `/api/v2/activity-logs?entity_type=gate&entity_id=`도 같은 데이터를 반환하지만,
+    이 엔드포인트가 이미 하는 project-access 존재비노출 authz를 그쪽은 안 함 — gate 상세와
+    같은 접근권 경계가 필요해 이 라우터에 둔다)."""
+    from app.models.activity_log import ActivityLog
+    from app.services.member_resolver import lookup_members_by_ids
+
+    gate = (await session.execute(
+        select(Gate).where(Gate.id == id, Gate.org_id == org_id)
+    )).scalar_one_or_none()
+    if gate is None:
+        raise HTTPException(status_code=404, detail="Gate not found")
+
+    project_id = await resolve_work_item_project_id(
+        session, org_id, gate.work_item_type, gate.work_item_id,
+    )
+    if project_id is not None:
+        await require_project_access(session, uuid.UUID(auth.user_id), project_id, org_id,
+                                      not_found_detail="Gate not found")
+    elif not is_known_project_agnostic_work_item_type(gate.work_item_type):
+        raise HTTPException(status_code=404, detail="Gate not found")
+
+    rows = (await session.execute(
+        select(ActivityLog)
+        .where(
+            ActivityLog.entity_type == "gate", ActivityLog.entity_id == id,
+            ActivityLog.org_id == org_id,
+        )
+        .order_by(ActivityLog.created_at.desc())
+    )).scalars().all()
+
+    actor_ids = {r.actor_id for r in rows if r.actor_id}
+    actor_name_map: dict[uuid.UUID, str] = {}
+    if actor_ids:
+        resolved = await lookup_members_by_ids(actor_ids, session)
+        actor_name_map = {mid: rm.name for mid, rm in resolved.items() if rm and rm.name}
+
+    return [
+        GateActivityItem(
+            id=r.id, action=r.action, actor_id=r.actor_id,
+            actor_name=actor_name_map.get(r.actor_id) if r.actor_id else None,
+            context=r.context, created_at=r.created_at,
+        )
+        for r in rows
+    ]
+
+
 @router.post("/{id}/transition", response_model=GateResponse)
 async def transition_gate_endpoint(
     id: uuid.UUID,

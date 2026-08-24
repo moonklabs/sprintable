@@ -284,6 +284,80 @@ function GithubRependingReason({ gateId }: { gateId: string }) {
   );
 }
 
+// story #2975 AC4(PO 확定 2026-08-24) — backend/app/routers/gates.py GateActivityItem과 정합.
+interface GateActivityLogItem {
+  id: string;
+  action: string;
+  actor_id: string | null;
+  actor_name: string | null;
+  context: Record<string, unknown>;
+  created_at: string;
+}
+
+// action(BE ActivityLog.action 원문, gate_service.py) → i18n 키. 매핑에 없는 action은 원문 그대로
+// 폴백 렌더(신규 action 추가 시 이 화면이 죽는 대신 정직하게 raw string을 보여줌 — no-fiction).
+const GATE_ACTIVITY_LABEL_KEY: Record<string, string> = {
+  gate_approved: 'gateActivityActionApproved',
+  gate_rejected: 'gateActivityActionRejected',
+  gate_resolution_undone: 'gateActivityActionUndone',
+  gate_voided: 'gateActivityActionVoided',
+  gate_overridden: 'gateActivityActionOverridden',
+};
+
+/**
+ * story #2975 AC4(PO 확定 2026-08-24) — 「누가·언제·무엇을·어느 SHA에」 결재했는지. 2026-08-23
+ * 두 실사고(PR#3402 취소 반영 여부 판별 불가·PR#3406 approved의 actor 판별 불가)의 근본원인이
+ * 이 표면 부재였다 — `GET /api/gates/{id}/activity`(github-check-events와 대칭)를 최신순 지연
+ * 로드. 실패/빈 응답은 GithubRependingReason과 동형으로 조용히(카드 붕괴 방지) — 단 성공+0건은
+ * "이력 없음"을 정직하게 보여준다(신규 gate에서 당연한 상태와, 로드 실패를 구분).
+ */
+export function GateActivityHistory({ gateId }: { gateId: string }) {
+  const t = useTranslations('cage');
+  const [items, setItems] = useState<GateActivityLogItem[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchWithAuth(`/api/gates/${gateId}/activity`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`status ${res.status}`))))
+      .then((data: unknown) => {
+        // BE는 bare array를 낸다(github-check-events와 대칭, {data} 봉투 아님) — 방어적으로
+        // 배열이 아니면(테스트 mock의 범용 폴백 등) 빈 목록으로 조용히 폴백(카드 붕괴 방지).
+        if (!cancelled) setItems(Array.isArray(data) ? (data as GateActivityLogItem[]) : []);
+      })
+      .catch(() => {
+        if (!cancelled) setItems(null);
+      });
+    return () => { cancelled = true; };
+  }, [gateId]);
+
+  if (items === null) return null;
+
+  return (
+    <div>
+      <p className="mb-1.5 text-[11px] font-semibold text-muted-foreground">{t('gateActivityHistoryTitle')}</p>
+      {items.length === 0 ? (
+        <p className="text-[11px] italic text-muted-foreground">{t('gateActivityEmpty')}</p>
+      ) : (
+        <ul className="space-y-1">
+          {items.map((item) => {
+            const sha = typeof item.context['head_sha'] === 'string' ? (item.context['head_sha'] as string) : null;
+            const labelKey = GATE_ACTIVITY_LABEL_KEY[item.action];
+            return (
+              <li key={item.id} className="text-[11px] text-muted-foreground">
+                <span className="font-medium text-foreground">{item.actor_name ?? t('gateActivityActorFallback')}</span>
+                {' · '}
+                {labelKey ? t(labelKey) : item.action}
+                {sha ? <span className="ml-1 font-mono">{t('githubCheckShaLabel', { sha: sha.slice(0, 7) })}</span> : null}
+                <span className="ml-1">· {new Date(item.created_at).toLocaleString()}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // read-only PR 칩(gate State C 납품 컬럼). 관리는 story 상세 PrLinkSection — 여기선 표시·새탭 링크만.
 function GatePrChip({ pr }: { pr: PrLinkFact }) {
   return (
