@@ -181,20 +181,25 @@ async def test_find_pending_merge_gates_by_head_sha_is_org_scoped_and_status_fil
 
 
 @pytest.mark.anyio
-async def test_reconcile_sha_fallback_updates_ci_only_preserves_pr_result_cross_story_realdb():
+async def test_reconcile_sha_fallback_updates_ci_only_never_claims_pr_result_cross_story_realdb():
     """⭐핵심 — pr_number 경로가 못 찾으면(웹훅이 형제 PR로 오배선), SHA로 **다른 story의**
-    게이트까지 찾아 ci_result만 갱신하고 pr_result(이미 "pass")는 그대로 보존한다.
+    게이트까지 찾아 ci_result만 갱신한다.
 
-    ⚠️`gate.neutral_facts`(JSONB)는 게이트 **생성 시점 1회**만 채워진다(`create_gate`의
-    멱등 반환 분기 — 이미 존재하는 pending/auto_passed 게이트는 neutral_facts를 다시
-    쓰지 않는다, gate_service.py 실측 확認). 그래서 "ci_result만 갱신·pr_result 보존"을
-    DB에 쌓인 neutral_facts로는 검증할 수 없다(애초에 둘 다 재기록 안 됨) — 실제로
-    매 호출마다 갱신되는 건 `gate.decision_basis`/`requires_human`(별도 컬럼, `_decide()`
-    직후 무조건 write-back) 쪽이고, 그 `_decide()`에 **어떤 pr 값이 실제로 들어갔는지**가
-    이 fix의 핵심(참고: outcome 표본 0인 fresh seed에서는 `_decide()`가 outcome-insufficient
-    로 조기 리턴해 pr 값이 reason 문자열에 아예 안 드러나 — 그래서 `evaluate_merge_gate`를
-    직접 모킹해 **호출 인자**를 대조한다. 이게 "pr_result가 None으로 새는지"를 검증하는
-    가장 직접적이고 seeding 부담이 없는 방법이다).
+    ⛔카디르+codex QA 1라운드(PR#3456, 2026-08-24) — 최초 버전은 `gate.neutral_facts
+    ["pr_result"]`(게이트 **생성 시점 스냅샷** — `create_gate`의 멱등 반환 분기가 기존
+    게이트는 재기록 안 함, gate_service.py 실측)를 읽어 "보존"했는데, 그건 stale일 수
+    있다. CI-완료 이벤트(check_suite/workflow_run/status)엔 PR 머지/클로즈 여부가
+    구조적으로 안 실린다 — 그 「모름」을 stale snapshot으로 위조하면, 우연히 옛
+    "pass"를 들고 있는 `gate_status=="auto_passed"` 게이트에서 **상향 오판**(auto_merge
+    잘못 승인)이 실PG로 재현됐다. PO 정정(2026-08-24): SHA 폴백은 pr_result를
+    **항상 명시로 None**(모름)을 넘긴다 — `_decide()`의 AUTO_MERGE 분기는 `pr=="pass"`
+    정확 일치만 통과시켜 None은 항상 막고(상향 전이 원천 차단), `capture_pr_ci_verdict`는
+    merged=False일 때 pr verdict 자체를 기록 안 해(아래 별도 테스트로 고정) "미머지"를
+    이력에 지어내지도 않는다.
+
+    ⚠️`gate.neutral_facts`가 재평가마다 안 갱신된다는 사실 때문에 "pr_result에 실제로
+    무엇이 넘어갔는지"를 DB로는 검증할 수 없다 — `evaluate_merge_gate`를 직접 모킹해
+    **호출 인자**를 대조한다(seeding 부담 없는 가장 직접적인 방법).
 
     story 경계를 넘어 매치되는 걸 일부러 검증한다 — PO 판정의 핵심("SHA는 PR이 아니라
     커밋의 속성, story 스코프가 아니다")이 실제 실사고(#3350/#3307, 같은 story 안 형제
@@ -208,18 +213,17 @@ async def test_reconcile_sha_fallback_updates_ci_only_preserves_pr_result_cross_
     try:
         sha = f"sha{uuid.uuid4().hex}"
         async with Session() as s:
-            # story A = 웹훅이 실제로 의도한 원 PR(이미 머지됨, pr_result=pass로 생성됨).
+            # story A = 웹훅이 실제로 의도한 원 PR(이미 머지됨, neutral_facts엔 stale하게 pass가 남음).
             seeded_a = await _seed_story_with_participation(s, org_slug_prefix="org")
             gate_a = await _seed_pending_merge_gate_with_sha(
                 s, seeded_a, pr_number=100, repo="acme/repo", head_sha=sha, pr_result="pass", ci_result=None,
             )
-            assert gate_a.neutral_facts["pr_result"] == "pass"
+            assert gate_a.neutral_facts["pr_result"] == "pass"  # stale snapshot — 이걸 믿으면 안 됨.
 
             # story B = 무관한 다른 story(같은 org — story 경계만 다르다는 걸 보이기 위해).
             seeded_b = await _seed_story_with_participation(s, seeded_a["org_id"])
 
             captured_calls: list[dict] = []
-            real_evaluate = None
 
             async def _spy(session_arg, org_id_arg, work_item_id_arg, **kwargs):
                 captured_calls.append({"work_item_id": work_item_id_arg, **kwargs})
@@ -245,17 +249,78 @@ async def test_reconcile_sha_fallback_updates_ci_only_preserves_pr_result_cross_
             call = captured_calls[0]
             assert call["work_item_id"] == seeded_a["story_id"]
             assert call["ci_result"] == "pass", "SHA 폴백이 새 ci_result를 그대로 넘겨야 함"
-            assert call["pr_result"] == "pass", (
-                "pr_result는 이 폴백의 관심사가 아니다 — gate_a의 기존 값(pass)을 읽어 그대로 "
-                "되돌려 넣어야 함(None을 넘기면 evaluate_merge_gate 내부에서 무조건부 덮어쓰기로 "
-                "지워지는 landmine — evaluate_merge_gate 자체는 이미 확認됐으므로 여기선 "
-                "reconcile이 «무엇을 넘기는지»만 정확히 대조한다)"
+            assert call["pr_result"] is None, (
+                "SHA 폴백은 pr_result를 절대 '알고 있는 척' 하면 안 된다 — gate_a.neutral_facts에 "
+                "stale 'pass'가 남아 있어도(위에서 확認) 그걸 읽어 되돌려 넣지 않고 명시로 None을 "
+                "넘겨야 함(카디르+codex가 실PG로 재현한 auto_merge 상향 오판의 정확한 원인)"
             )
             assert call["head_sha"] == sha
 
             # story B는 무관 — 애초에 이 SHA와 아무 관계도 없으므로 게이트 자체가 없어야 함.
             gate_b = await _gate_row(s, seeded_b["story_id"])
             assert gate_b is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_reconcile_sha_fallback_never_fabricates_pr_verdict_history_realdb():
+    """⭐PO 지시(2026-08-24, REQUEST_CHANGES 재검 판별 축) — SHA 폴백 경로에서 pr_result=
+    None을 넘겨도 «미머지 사실»이 Verdict 이력 어디에도 기록되면 안 된다(그것도 위조 —
+    "모른다"를 "머지 안 됐다"로 지어내는 것과 같은 클래스).
+
+    실 `evaluate_merge_gate`(모킹 없음)로 SHA 폴백을 실행해 그 story의 participation에
+    걸린 `Verdict` 행을 전수 조회 — `source='pr'`인 행이 하나도 없어야 한다(capture_pr_
+    ci_verdict가 merged=True일 때만 그 소스를 기록하므로, merged=False로 정규화되는
+    pr_result=None은 애초에 그 기록 자체를 건너뛴다 — 참조: verdict_capture.py
+    capture_pr_ci_verdict `if merged:` 가드)."""
+    from sqlalchemy import select
+
+    from app.models.verdict import Verdict
+    from app.services.merge_verdict_gate import reconcile_merge_gate_with_real_evidence
+
+    engine, Session = await _session_factory()
+    try:
+        sha = f"sha{uuid.uuid4().hex}"
+        async with Session() as s:
+            seeded = await _seed_story_with_participation(s)
+            # ⚠️seed 자체가 evaluate_merge_gate(pr_result="pass")를 한 번 부르므로(원 PR이
+            # 실제로 merged=True였던 순간을 재현) 그 시점에 정당한 ("pr","pass") verdict가
+            # 이미 남는다 — 그건 진짜 사실 기록이라 있어도 된다. 폴백 호출 «이후에 새로
+            # 추가된» 것이 있는지(델타)만 본다, 절대 개수 0이 아니라.
+            gate = await _seed_pending_merge_gate_with_sha(
+                s, seeded, pr_number=100, repo="acme/repo", head_sha=sha, pr_result="pass", ci_result=None,
+            )
+
+            from app.models.participation import Participation
+
+            participation = (
+                await s.execute(
+                    select(Participation).where(Participation.story_id == seeded["story_id"])
+                )
+            ).scalar_one()
+            before_ids = {
+                v.id for v in (
+                    await s.execute(select(Verdict).where(Verdict.participation_id == participation.id))
+                ).scalars().all()
+            }
+
+            # pr_number 경로가 못 찾도록(999) — SHA 폴백을 실제로 태운다.
+            await reconcile_merge_gate_with_real_evidence(
+                s, seeded["org_id"], seeded["story_id"],
+                pr_number=999, repo="acme/repo", ci_result="pass", merged=False, head_sha=sha,
+            )
+            await s.commit()
+
+            after = (
+                await s.execute(select(Verdict).where(Verdict.participation_id == participation.id))
+            ).scalars().all()
+            new_verdicts = [v for v in after if v.id not in before_ids]
+            new_pr_verdicts = [v for v in new_verdicts if v.source == "pr"]
+            assert not new_pr_verdicts, (
+                f"SHA 폴백(pr_result=None) 호출 자체가 새 pr-source verdict를 추가하면 안 됨 "
+                f"('미머지' 위조 방지) — 신규 발견: {[(v.source, v.result) for v in new_pr_verdicts]}"
+            )
     finally:
         await engine.dispose()
 

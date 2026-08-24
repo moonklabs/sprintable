@@ -784,12 +784,25 @@ async def reconcile_merge_gate_with_real_evidence(
     for gate in sibling_gates:
         gate_pr_number = gate.pr_number or 0
         gate_repo = (gate.neutral_facts or {}).get("repo") or gate.repo_full_name or repo
-        # 각 게이트의 기존 pr_result를 그대로 되돌려 넣는다 — SHA 폴백은 ci_result만 갱신.
-        preserved_pr_result = (gate.neutral_facts or {}).get("pr_result")
         decision = await evaluate_merge_gate(
             session, org_id, gate.work_item_id,
             pr_number=gate_pr_number, repo=gate_repo, ci_result=ci_result,
-            pr_result=preserved_pr_result,
+            # story #3033(PO 정정, 2026-08-24, 1라운드 QA REQUEST_CHANGES) — 최초 버전은
+            # gate.neutral_facts["pr_result"]를 읽어 "보존"했는데, 그건 게이트 **생성 시점
+            # 스냅샷**이라(neutral_facts는 이후 재평가마다 안 갱신됨, 위 docstring 참조)
+            # 실제로는 stale일 수 있다. CI-완료 이벤트(check_suite/workflow_run/status)엔
+            # PR 머지/클로즈 여부가 구조적으로 안 실린다 — 그 「모름」을 stale snapshot으로
+            # 위조하면(카디르+codex 실PG 재현) neutral_facts가 우연히 옛 "pass"를 들고 있는
+            # gate_status=="auto_passed" 게이트에서 «상향 오판»(auto_merge 잘못 승인)이
+            # 난다. 그래서 명시로 None(모름)을 넘긴다 — `_decide()`의 AUTO_MERGE 분기는
+            # pr=="pass" 정확 일치만 통과시켜 None은 항상 막고(상향 전이 없음, PO 요건②),
+            # `capture_pr_ci_verdict`는 merged=False일 때 pr verdict 자체를 기록 안 해(그
+            # 함수 참조 — merged=True일 때만 기록) "미머지"를 이력에 지어내지도 않는다(PO
+            # 요건①). status=="pending"(실사고 #3350/#3307 둘 다 이 케이스)인 게이트는
+            # `_decide()`가 pr 값과 무관하게 "policy disposition=ask"로 조기 반환하므로
+            # 실사고 재현 시나리오엔 아예 영향이 없다 — 이 정정은 auto_passed 게이트에서만
+            # 실제로 갈린다.
+            pr_result=None,
             head_sha=head_sha,
         )
         if gate_check_publish is not None and decision.gate_id is not None:
