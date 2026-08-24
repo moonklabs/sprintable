@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { User, UserPlus } from 'lucide-react';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
+import { initials as toInitials } from '@/lib/storage/format';
 
 /**
  * 박스1: 담당자 아바타 + popover. 슬림 헤더 액션 클러스터에 glanceable owner 신호(누가 owner인지 보여야 함).
@@ -42,7 +43,9 @@ export function DocAssigneeControl({
 
   const assigned = !!currentAssigneeId;
   // currentAssigneeId 가드: 담당자 해제/변경 시 stale memberName 무시(render 파생).
-  const initials = assigned && memberName ? memberName.slice(0, 2).toUpperCase() : null;
+  // story #2986(PO beyond-diff 지적) — 정본(lib/storage/format.ts#initials) 우회하던 인라인
+  // slice(0,2)를 정본 경유로 접음(산개 구현 금지, avatar.tsx 등 다른 5개 소비처와 동일 규칙).
+  const initials = assigned && memberName ? toInitials(memberName) : null;
   const label = assigned ? `${t('assignee')}: ${memberName ?? ''}`.trim() : t('assigneeUnassigned');
 
   return (
