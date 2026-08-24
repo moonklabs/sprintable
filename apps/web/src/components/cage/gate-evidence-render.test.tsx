@@ -10,7 +10,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
-import { GateEvidence } from './gate-evidence';
+import { GateEvidence, GateActivityHistory } from './gate-evidence';
 import { fetchWithAuth } from '@/lib/db/client';
 import type { GateItem } from '@/components/kanban/types';
 import koMessages from '../../../messages/ko.json';
@@ -286,5 +286,80 @@ describe('GateEvidence — 측정 판정 초안 렌더(story #2862)', () => {
     });
 
     expect(container.textContent).not.toContain(koMessages.cage.hypothesisDraftBadge);
+  });
+});
+
+// story #2975 AC4(PO 확定 2026-08-24) — 결재 이력(GET /gates/{id}/activity) 실 응답 shape
+// 마운트. gates.py GateActivityItem과 정합(id/action/actor_id/actor_name/context/created_at).
+describe('GateActivityHistory — 결재 이력 실 응답 shape 마운트(story #2975 AC4)', () => {
+  afterEach(() => {
+    vi.mocked(fetchWithAuth).mockReset();
+  });
+
+  it('승인+취소 두 건이 actor_name·action 라벨·SHA와 함께 그려진다(미스터리①②의 UI판)', async () => {
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([
+        {
+          id: 'log-2', action: 'gate_resolution_undone', actor_id: 'm-1', actor_name: 'po@test.com',
+          context: { previous_status: 'approved', previous_approved_head_sha: 'sha-a1b2c3d4e5' },
+          created_at: '2026-08-23T19:05:00Z',
+        },
+        {
+          id: 'log-1', action: 'gate_approved', actor_id: 'm-1', actor_name: 'po@test.com',
+          context: { head_sha: 'sha-a1b2c3d4e5' }, created_at: '2026-08-23T18:57:00Z',
+        },
+      ]),
+    } as Response);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
+
+    expect(fetchWithAuth).toHaveBeenCalledWith('/api/gates/gate-1/activity');
+    expect(container.textContent).toContain('po@test.com');
+    expect(container.textContent).toContain(koMessages.cage.gateActivityActionApproved);
+    expect(container.textContent).toContain(koMessages.cage.gateActivityActionUndone);
+    expect(container.textContent).toContain('sha-a1b'); // SHA 짧은형(7자) 표시.
+  });
+
+  it('actor_name이 없으면(orphan) 정직한 폴백 문구를 보여준다(actor_id로 지어내지 않음)', async () => {
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([
+        { id: 'log-1', action: 'gate_voided', actor_id: 'm-gone', actor_name: null, context: { reason: 'x' }, created_at: '2026-08-23T00:00:00Z' },
+      ]),
+    } as Response);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.gateActivityActorFallback);
+    expect(container.textContent).toContain(koMessages.cage.gateActivityActionVoided);
+  });
+
+  it('빈 이력은 "이력 없음"을 정직하게 보여준다(로드 실패와 구분)', async () => {
+    vi.mocked(fetchWithAuth).mockResolvedValue({ ok: true, json: () => Promise.resolve([]) } as Response);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
+
+    expect(container.textContent).toContain(koMessages.cage.gateActivityEmpty);
+  });
+
+  it('조회 실패는 조용히(카드 붕괴 없이) 아무것도 안 그린다', async () => {
+    vi.mocked(fetchWithAuth).mockResolvedValue({ ok: false, status: 500 } as Response);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.gateActivityHistoryTitle);
   });
 });

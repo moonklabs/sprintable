@@ -130,17 +130,34 @@ async def test_override_rejected():
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
 async def test_override_single_gate_no_approvers():
-    """단일 gate(approver row 없음)도 override 가능(force-resolve)·닫을 approver 0."""
+    """단일 gate(approver row 없음)도 override 가능(force-resolve)·닫을 approver 0.
+
+    story #2975 AC4(PO 확定 2026-08-24, ㉮) — line-less override는 sr(step_run)이 없어
+    WorkflowLineStepRunEvent가 안 쓰인다. 이전엔 gate.neutral_facts(mutable, 다음 전이가
+    덮어씀)뿐이라 감사 기록이 못 됐다 — 이제 ActivityLog(action="gate_overridden")에도
+    남는지 직접 확認(이 파일에서 유일한 실 line-less 케이스)."""
+    from sqlalchemy import select
+    from app.models.activity_log import ActivityLog
     from app.services.gate_service import override_gate
     engine, Session = await _session()
     async with Session() as s:
         org = uuid.uuid4()
+        owner = uuid.uuid4()
         gate, _, _ = await _seed_gate(s, org, n_approvers=0)
         await s.commit()
-        result = await override_gate(s, org, gate.id, uuid.uuid4(), "approved", "단일 gate 강제 통과")
+        result = await override_gate(s, org, gate.id, owner, "approved", "단일 gate 강제 통과")
         await s.commit()
         assert result.status == "approved"
         assert result.neutral_facts["overridden"] is True
+
+        log = (await s.execute(
+            select(ActivityLog).where(
+                ActivityLog.entity_id == gate.id, ActivityLog.action == "gate_overridden",
+            )
+        )).scalar_one()
+        assert log.actor_id == owner
+        assert log.context["bypassed_sod"] is True
+        assert log.context["reason"] == "단일 gate 강제 통과"
     await engine.dispose()
 
 

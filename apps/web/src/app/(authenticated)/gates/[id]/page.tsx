@@ -7,7 +7,7 @@ import { ChevronLeft, CheckCircle, XCircle } from 'lucide-react';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { GateEvidence, gateNeedsAction, gateDecision } from '@/components/cage/gate-evidence';
+import { GateEvidence, GateActivityHistory, gateNeedsAction, gateDecision } from '@/components/cage/gate-evidence';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
@@ -347,6 +347,13 @@ export default function GateDetailPage() {
                     언급한 대화」 역참조. 기성 EntityBacklinksSection(3곳 소비 중) 그대로 재사용 —
                     신규 뷰어 0. gate는 TARGET_ONLY라 액션 없이 조회만(§8 계약과 정합). */}
                 <EntityBacklinksSection entityType="gate" entityId={gate.id} />
+
+                {/* story #2975 AC4(PO 확定 2026-08-24) — 결재 이력(누가·언제·무엇을·어느 SHA에).
+                    needsAction/canAct 분기와 무관하게 항상 렌더 — 감사 표면은 액션 가능 여부와
+                    별개로 "사람이 보는 쪽"에 항상 서 있어야 실사고 때 쓰인다(PO 요구 ㉯). */}
+                <div className="border-t border-proof-line-soft pt-3">
+                  <GateActivityHistory gateId={gate.id} />
+                </div>
               </div>
             }
           />
