@@ -1926,6 +1926,7 @@
     "docGateTransitionErrorGeneric": "Failed to process the gate. Please try again.",
     "docGateReject": "Reject",
     "indexKicker": "KNOWLEDGE BASE",
+    "railKicker": "Knowledge · Index",
     "indexDek": "What's confirmed, and what's under review.",
     "indexDocCount": "{count} documents",
     "indexCategoryAll": "All",

@@ -29,8 +29,10 @@ export function TreeSearchInput({
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
-    <div className="flex-shrink-0 px-2 pb-1 pt-2">
-      <div className="flex items-center gap-1.5 rounded-xl bg-muted/60 px-2.5 py-1.5 ring-1 ring-transparent focus-within:ring-primary/30">
+    <div className="flex-shrink-0 px-3 pb-2 pt-1">
+      {/* story #2963 §2 — 에디토리얼 검색 필드(hairline border·proof-bg). debounce·API·핸들러
+          무변경, 형태만(shadcn rounded-xl+muted bg → hairline+proof-bg). */}
+      <div className="flex items-center gap-1.5 border border-border bg-muted/40 px-2.5 py-1.5 ring-1 ring-transparent focus-within:ring-primary/30">
         <Search className="size-3.5 shrink-0 text-muted-foreground" />
         <input
           ref={inputRef}

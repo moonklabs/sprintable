@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useDocsLayout, type Doc } from './docs-context';
 import { docUrl } from '@/components/docs/lib/doc-project-url';
+import { DOC_STATUS_TONE, toDocStatusFilter, docStatusLabelKey, type DocStatusFilter } from '@/components/docs/lib/doc-status-tone';
 
 /**
  * story #2955 §2/§6(doc docs-index-reader-redesign-handoff) — 셸 A "지식 인덱스". 미선택
@@ -28,40 +29,21 @@ import { docUrl } from '@/components/docs/lib/doc-project-url';
  * 어긋나지 않는다).
  */
 
-type StatusFilter = 'draft' | 'pending' | 'confirmed' | 'denied';
+// story #2963 — 색 매핑을 doc-status-tone.ts 공유 모듈로 이관(값 무변경, #2963 레일 v2가
+// "1호 인덱스 StatusChip과 같은 doc.status 소스"로 재사용하기 위함). 이 파일 로컬 타입은
+// alias만 유지.
+type StatusFilter = DocStatusFilter;
 const STATUS_FILTERS: StatusFilter[] = ['confirmed', 'pending', 'denied', 'draft'];
 const UNCATEGORIZED = '__uncategorized__';
 
-function statusLabelKey(status: StatusFilter): string {
-  switch (status) {
-    case 'confirmed': return 'docGateConfirmed';
-    case 'pending': return 'docGatePending';
-    case 'denied': return 'docGateDenied';
-    case 'draft': return 'indexStatusDraft';
-  }
-}
-
-// story #2955 §4 — 대비 주의(실측 대비표): 소형 텍스트에 계열색을 직접 못 씀(라이트 AA
-// 미달 위험) — 칩은 배경(soft)+상태 라벨어 병기, dot만 순색.
-const STATUS_CHIP_TONE: Record<StatusFilter, { bg: string; dot: string; text: string }> = {
-  confirmed: { bg: 'bg-success-tint', dot: 'bg-success', text: 'text-foreground' },
-  pending: { bg: 'bg-warning-tint', dot: 'bg-warning', text: 'text-foreground' },
-  denied: { bg: 'bg-destructive/10', dot: 'bg-destructive', text: 'text-foreground' },
-  draft: { bg: 'bg-muted', dot: 'bg-muted-foreground', text: 'text-muted-foreground' },
-};
-
-function toStatusFilter(status: string | undefined): StatusFilter {
-  return status === 'pending' || status === 'confirmed' || status === 'denied' ? status : 'draft';
-}
-
 function StatusChip({ status, size = 'sm' }: { status: string | undefined; size?: 'sm' | 'xs' }) {
   const t = useTranslations('docs');
-  const s = toStatusFilter(status);
-  const tone = STATUS_CHIP_TONE[s];
+  const s = toDocStatusFilter(status);
+  const tone = DOC_STATUS_TONE[s];
   return (
     <span className={`proof-cut proof-cut-${size} inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-[11.5px] font-bold ${tone.bg} ${tone.text}`}>
       <span className={`size-1.5 rounded-full ${tone.dot}`} aria-hidden="true" />
-      {t(statusLabelKey(s))}
+      {t(docStatusLabelKey(s))}
     </span>
   );
 }
@@ -96,14 +78,14 @@ export function DocsIndex() {
 
   const statusCounts = useMemo(() => {
     const counts: Record<StatusFilter, number> = { confirmed: 0, pending: 0, denied: 0, draft: 0 };
-    for (const item of items) counts[toStatusFilter(item.status)] += 1;
+    for (const item of items) counts[toDocStatusFilter(item.status)] += 1;
     return counts;
   }, [items]);
 
   const filtered = useMemo(() => {
     return items
       .filter((item) => (categoryFilter === null ? true : categoryOf(item) === categoryFilter))
-      .filter((item) => (statusFilter === null ? true : toStatusFilter(item.status) === statusFilter))
+      .filter((item) => (statusFilter === null ? true : toDocStatusFilter(item.status) === statusFilter))
       .sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? ''));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, categoryFilter, statusFilter]);

@@ -1926,6 +1926,7 @@
     "docGateTransitionErrorGeneric": "게이트 처리에 실패했습니다. 다시 시도해 주세요.",
     "docGateReject": "반려",
     "indexKicker": "지식 · KNOWLEDGE BASE",
+    "railKicker": "지식 · INDEX",
     "indexDek": "확인된 것과 확인 중인 것.",
     "indexDocCount": "{count}개 문서",
     "indexCategoryAll": "전체",
