@@ -172,6 +172,97 @@ describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () 
     expect(container.textContent).not.toContain('HTTP 500');
     expect(container.textContent).toContain(koMessages.cage.gateTransitionErrorGeneric);
   });
+
+  // story #2975(PO 요구 ①②③, 2026-08-24) — merge 게이트 승인 anchor SHA 레이스 근본처방.
+  // BE가 409(code=gate_head_changed)로 거부하면 화면은 옛 SHA를 보여준 채 멈추지 않고
+  // gate를 재조회(fetchGate)해 최신 상태로 재렌더해야 「새 커밋 도착·재확認」이 실제로 된다.
+  it('409 gate_head_changed 거부 시 사유를 보여주고 gate를 재조회한다', async () => {
+    let gateFetchCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/gates/gate-1' && !init) {
+        gateFetchCount += 1;
+        const sha = gateFetchCount === 1 ? 'sha-old-reviewed' : 'sha-new-race-landed';
+        return { ok: true, status: 200, json: async () => ({ data: gate({ can_approve: true, risk_grade: 'low', github_check_run_sha: sha }) }) };
+      }
+      if (url === '/api/gates/gate-1/transition') {
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({
+            data: null,
+            error: { code: 'gate_head_changed', message: '게이트 대상 커밋이 승인 확인 이후 변경되었습니다. 최신 내용을 다시 확인한 뒤 승인해주세요.', current_head_sha: 'sha-new-race-landed' },
+            meta: null,
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const approveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    await act(async () => { approveBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('게이트 대상 커밋이 승인 확인 이후 변경되었습니다');
+    expect(gateFetchCount).toBe(2); // 최초 로드(1) + 409 이후 재조회(2) — 화면이 옛 SHA에 안 멈춘다.
+  });
+
+  // story #2975(유나양 design 판정 2026-08-24, PO 확定) — 409→fetchGate() 재조회 後
+  // GateSignatureApproval의 evidenceViewed/reason state가 안 리셋되면 canSign이 그대로 true라
+  // PO가 새 SHA(B)를 실제로 안 보고도 재승인 버튼을 바로 누를 수 있었다(서버가 막은 "리뷰
+  // 안 한 SHA 승인"이 UX 층에서 뚫림). key={github_check_run_sha}로 SHA 변경 시 강제 remount
+  // 해 열람 체크·사유가 초기화되는지 — 「새 SHA 열람 前 canSign=false」를 직접 증명한다.
+  it('409 재조회로 SHA가 바뀌면 근거열람 체크·사유가 리셋돼 재승인 버튼이 다시 비활성화된다', async () => {
+    let gateFetchCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/gates/gate-1' && !init) {
+        gateFetchCount += 1;
+        const sha = gateFetchCount === 1 ? 'sha-A-reviewed' : 'sha-B-race-landed';
+        return { ok: true, status: 200, json: async () => ({ data: gate({ can_approve: true, risk_grade: 'high', github_check_run_sha: sha }) }) };
+      }
+      if (url === '/api/gates/gate-1/transition') {
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({
+            data: null,
+            error: { code: 'gate_head_changed', message: 'SHA changed', current_head_sha: 'sha-B-race-landed' },
+            meta: null,
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    // SHA A 열람: 체크+사유 입력 → 서명 버튼이 활성화됨을 먼저 확인(사전조건).
+    const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    await act(async () => { checkbox.click(); });
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, 'SHA A 검토 완료');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    let signBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.sigApproveAndSign));
+    expect(signBtn?.disabled).toBe(false);
+
+    // 승인 클릭 → 409(SHA B로 바뀜) → fetchGate() 재조회 → key 변경으로 강제 remount.
+    await act(async () => { signBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(gateFetchCount).toBe(2);
+    const checkboxAfter = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    expect(checkboxAfter.checked).toBe(false); // remount로 evidenceViewed 리셋 확認.
+    signBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.sigApproveAndSign));
+    expect(signBtn?.disabled).toBe(true); // canSign=false — 새 SHA B를 실제로 다시 봐야만 재활성화.
+  });
 });
 
 // story #2631(FE 계약 doc bb733f26) — 「보류(논의 필요)」+ 오클릭 정정(취소). 저위험 경로

@@ -658,7 +658,10 @@ async def test_watermark_survives_approval_and_blocks_subsequent_stale_webhook()
             ):
                 resp = await client.post(
                     f"/api/v2/gates/{gate_id}/transition",
-                    json={"status": "approved", "note": "e2e 승인", "evidence_viewed": True},
+                    json={
+                        "status": "approved", "note": "e2e 승인", "evidence_viewed": True,
+                        "reviewed_head_sha": "sha-real-head",  # story #2975 — review-time SHA 대조.
+                    },
                 )
                 assert resp.status_code == 200, resp.text
         finally:
@@ -827,7 +830,10 @@ async def test_never_webhooked_gate_has_no_watermark_after_approval_documented_g
             ):
                 resp = await client.post(
                     f"/api/v2/gates/{gate_id}/transition",
-                    json={"status": "approved", "note": "webhook 이력 없는 승인", "evidence_viewed": True},
+                    json={
+                        "status": "approved", "note": "webhook 이력 없는 승인", "evidence_viewed": True,
+                        "reviewed_head_sha": "sha-self-report",  # story #2975 — review-time SHA 대조.
+                    },
                 )
                 assert resp.status_code == 200, resp.text
         finally:

@@ -172,7 +172,10 @@ async def test_realdb_reapproval_anchors_to_gate_tracked_sha_not_stale_link_evid
         try:
             resp = await client.post(
                 f"/api/v2/gates/{gate_id}/transition",
-                json={"status": "approved", "note": "재승인 anchor 회귀 확인", "evidence_viewed": True},
+                json={
+                    "status": "approved", "note": "재승인 anchor 회귀 확인", "evidence_viewed": True,
+                    "reviewed_head_sha": SHA_CURRENT_PR,  # story #2975 — PO가 review한 SHA 필수 대조.
+                },
             )
             assert resp.status_code == 200, resp.text
             body = resp.json()
