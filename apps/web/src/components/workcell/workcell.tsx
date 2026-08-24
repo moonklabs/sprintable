@@ -73,6 +73,11 @@ export interface WorkcellProps {
   evidence: ProofCapsuleProps | null;
   conversation: WorkcellConversation;
   className?: string;
+  /** story #2984 §6(가역성 1급) — bento 형태·재질 재편(§1~§4) 켜기/끄기 단일 스위치.
+   * 기본값 true(선생님 결재 confirm으로 라이브 기본). 선생님 라이브 감이 반려되면 이
+   * 기본값 한 줄(true→false)만 뒤집으면 균등 2×2 + 색 스테퍼로 전체 복귀(D0 세리프
+   * 토큰 복귀 선례와 동형 — 개별 소비처 산개 금지, 이 prop 하나만 경유). */
+  bentoLayout?: boolean;
 }
 
 const PIPELINE_STAGES: WorkcellPipelineStage[] = ['queued', 'running', 'needs_input', 'claimed_done', 'verified', 'merge_ready'];
@@ -144,6 +149,71 @@ function PipelineStepper({ stage }: { stage: WorkcellPipelineStage }) {
   );
 }
 
+// story #2984 §3(doc workcell-bento-form-material-spec-2984, 유나 설계·선생님 결재 confirm) —
+// 6단계 신뢰를 «채움 눈금 + 도달 노드»(물리량)로 표기. 색 스테퍼(PipelineStepper)의 색맹·
+// 저대비 취약점을 없앤다 — 색은 §7 규율대로 의미 신호로만 남긴다(이 게이지는 무채색).
+// 노드 위치는 트랙 8%~95% 구간에 6개를 균등 배치(끝 여백 확보). fill은 "마지막 도달 노드
+// 위치 + 다음 노드까지 절반"까지 채운다 — "이 단계까지 왔고, 다음으로 가는 중"을 물리적으로
+// 읽히게 하는 의도(유나 시안 db9bdfdf의 66%↔3/6 오버슛 관찰과 동형 원리, 정확한 %는 실 렌더
+// 여백 기준으로 재계산했다 — 시안 픽셀값을 그대로 베끼지 않음, 조정 필요하면 이 상수만).
+const CONFIDENCE_NODE_START_PCT = 8;
+const CONFIDENCE_NODE_END_PCT = 95;
+
+function nodePositions(): number[] {
+  const span = CONFIDENCE_NODE_END_PCT - CONFIDENCE_NODE_START_PCT;
+  const step = span / (PIPELINE_STAGES.length - 1);
+  return PIPELINE_STAGES.map((_, i) => CONFIDENCE_NODE_START_PCT + i * step);
+}
+
+function ConfidenceGauge({ stage }: { stage: WorkcellPipelineStage }) {
+  const t = useTranslations('workcell');
+  const label: Record<WorkcellPipelineStage, string> = {
+    queued: t('pipelineQueued'), running: t('pipelineRunning'), needs_input: t('pipelineNeedsInput'),
+    claimed_done: t('pipelineClaimedDone'), verified: t('pipelineVerified'), merge_ready: t('pipelineMergeReady'),
+  };
+  const curIdx = PIPELINE_STAGES.indexOf(stage);
+  const reachedCount = curIdx + 1; // 현재 단계까지 포함해 "도달"로 센다(mockup 3/6 판독과 동형).
+  const positions = nodePositions();
+  const lastReachedPos = positions[reachedCount - 1] ?? CONFIDENCE_NODE_START_PCT;
+  const nextPos = positions[reachedCount];
+  const fillPct = reachedCount >= PIPELINE_STAGES.length
+    ? 100
+    : lastReachedPos + (nextPos! - lastReachedPos) / 2;
+
+  return (
+    <div className="mb-2.5" role="progressbar" aria-valuemin={0} aria-valuemax={PIPELINE_STAGES.length} aria-valuenow={reachedCount} aria-valuetext={`${reachedCount}/${PIPELINE_STAGES.length} · ${label[stage]}`}>
+      <div className="flex items-center gap-2.5">
+        <div className="relative h-[22px] flex-1 overflow-hidden rounded-[4px] bg-proof-sunk">
+          {/* story #2984 §3 — 물리량 채움. 두 톤 반복 눈금(색 신호 아님, --proof-sunk/--proof-ink-3
+              에서 color-mix로 파생 — 신규 하드코딩 색 0, §7 규율). */}
+          <div
+            className="absolute inset-y-0 left-0"
+            style={{
+              width: `${fillPct}%`,
+              backgroundImage: 'repeating-linear-gradient(90deg, color-mix(in oklch, var(--proof-sunk) 35%, var(--proof-ink-3) 65%) 0 15px, color-mix(in oklch, var(--proof-sunk) 15%, var(--proof-ink-3) 85%) 15px 16px)',
+            }}
+          />
+          {positions.map((pos, i) => (
+            <span
+              key={PIPELINE_STAGES[i]}
+              className={cn(
+                'absolute top-1/2 size-[9px] -translate-x-1/2 -translate-y-1/2 rounded-full border-[1.5px]',
+                i < reachedCount ? 'border-proof-ink bg-proof-ink' : 'border-proof-line-strong bg-proof-panel',
+              )}
+              style={{ left: `${pos}%` }}
+              aria-hidden="true"
+            />
+          ))}
+        </div>
+        <span className="whitespace-nowrap font-mono text-[10px] text-proof-ink-3">
+          {t('confidenceCaption', { done: reachedCount, total: PIPELINE_STAGES.length })}
+        </span>
+      </div>
+      <p className="mt-1 text-[11px] font-semibold text-proof-ink-2" data-testid="workcell-current-stage">{label[stage]}</p>
+    </div>
+  );
+}
+
 /**
  * Workcell — Story 상세 우측 패널의 4구획 재구성(story #2922 P0-D, workcell-fe-spec-handoff
  * 초판 위 재설계). "10초 리트머스": 열고 10초 안에 무엇을(Brief)·누가(Brief)·어디까지
@@ -155,7 +225,7 @@ function PipelineStepper({ stage }: { stage: WorkcellPipelineStage }) {
  * ④자동화 경계(agent 마커 항상 구분) ⑤인간=책임 주체(Evidence의 Human gate가 결정점).
  * 안티패턴 0 — 진행률 바(%) 자체를 렌더하지 않는 게 Run 구획의 핵심 계약.
  */
-export function Workcell({ title, pipelineStage, brief, run, evidence, conversation, className }: WorkcellProps) {
+export function Workcell({ title, pipelineStage, brief, run, evidence, conversation, className, bentoLayout = true }: WorkcellProps) {
   const t = useTranslations('workcell');
   const railState = PIPELINE_STAGE_TRUST_COLOR[pipelineStage];
   return (
@@ -166,7 +236,8 @@ export function Workcell({ title, pipelineStage, brief, run, evidence, conversat
       {railState ? <Proofline state={railState} /> : <div className="w-1 shrink-0 self-stretch bg-proof-line" aria-hidden="true" />}
       <div className="min-w-0 flex-1">
         <div className="border-b border-proof-line px-4.5 py-3.5">
-          <PipelineStepper stage={pipelineStage} />
+          {/* story #2984 §3/§6 — bentoLayout=true(기본)면 색 스테퍼 대신 물리량 게이지. */}
+          {bentoLayout ? <ConfidenceGauge stage={pipelineStage} /> : <PipelineStepper stage={pipelineStage} />}
           <span className="text-[17px] font-bold leading-tight tracking-[-0.012em] text-proof-ink">{title}</span>
           {/* story #2922 W4 — 책임자/실행자를 헤더로 승격("10초 리트머스": 스크롤 없이 «누가»가
               보임). #3339(2921 아바타 단일통합)가 ProofAvatar를 폐기·Avatar로 수렴시켰다 —
@@ -186,15 +257,41 @@ export function Workcell({ title, pipelineStage, brief, run, evidence, conversat
           </div>
         </div>
 
-        {/* story #2922 W1 — 4구획 세로 나열 → 2×2 그리드(Brief|Run / Evidence|Conversation).
-            gap-px+bg-proof-line가 각 구획 사이 헤어라인을 만든다(개별 레이어의 border-b는
-            이제 이 그리드 갭과 중복이라 제거됨). */}
-        <div className="grid grid-cols-2 gap-px bg-proof-line">
-          <div className="bg-proof-panel"><BriefLayer brief={brief} /></div>
-          <div className="bg-proof-panel"><RunLayer run={run} /></div>
-          <div className="bg-proof-panel"><EvidenceLayer evidence={evidence} /></div>
-          <div className="bg-proof-panel"><ConversationLayer conversation={conversation} /></div>
-        </div>
+        {bentoLayout ? (
+          // story #2984 §1/§2/§4 — 균등 2×2 → 크기 차등 bento(Evidence=최우선 큰 셀)+계보
+          // 연결선+Evidence만 elevation. 가운데 4px 열은 연결선 전용 트랙(§2) — 매직 픽셀
+          // 좌표 없이 CSS Grid 라인에 그대로 앵커링해 실 렌더 폰트/패딩에 안 흔들린다.
+          <div className="relative grid grid-cols-[1.7fr_4px_1fr] grid-rows-[auto_auto_auto] gap-3 p-3">
+            <div className="col-start-2 row-start-1 row-span-2 flex justify-center" aria-hidden="true">
+              <div className="relative w-[1.5px] bg-proof-line-strong">
+                <span className="absolute left-1/2 top-0 size-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-proof-ink" />
+                <span className="absolute left-1/2 top-1/2 size-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-proof-ink" />
+              </div>
+            </div>
+            <div className="col-start-1 row-start-1 row-span-2 overflow-hidden rounded-[10px] border border-proof-line-strong bg-proof-panel shadow-[var(--elev-overlay)]">
+              <EvidenceLayer evidence={evidence} />
+            </div>
+            <div className="col-start-3 row-start-1 overflow-hidden rounded-[10px] border border-proof-line bg-proof-panel shadow-[0_1px_0_var(--proof-line)]">
+              <RunLayer run={run} />
+            </div>
+            <div className="col-start-3 row-start-2 overflow-hidden rounded-[10px] border border-proof-line bg-proof-panel shadow-[0_1px_0_var(--proof-line)]">
+              <BriefLayer brief={brief} />
+            </div>
+            <div className="col-span-3 row-start-3 overflow-hidden rounded-[10px] border border-proof-line bg-proof-panel shadow-[0_1px_0_var(--proof-line)]">
+              <ConversationLayer conversation={conversation} />
+            </div>
+          </div>
+        ) : (
+          // story #2922 W1 — 4구획 세로 나열 → 2×2 그리드(Brief|Run / Evidence|Conversation).
+          // gap-px+bg-proof-line가 각 구획 사이 헤어라인을 만든다(개별 레이어의 border-b는
+          // 이제 이 그리드 갭과 중복이라 제거됨).
+          <div className="grid grid-cols-2 gap-px bg-proof-line">
+            <div className="bg-proof-panel"><BriefLayer brief={brief} /></div>
+            <div className="bg-proof-panel"><RunLayer run={run} /></div>
+            <div className="bg-proof-panel"><EvidenceLayer evidence={evidence} /></div>
+            <div className="bg-proof-panel"><ConversationLayer conversation={conversation} /></div>
+          </div>
+        )}
       </div>
     </div>
   );
