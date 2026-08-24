@@ -4194,7 +4194,8 @@
     "pipelineNeedsInput": "Needs input",
     "pipelineClaimedDone": "Claimed done",
     "pipelineVerified": "Verified",
-    "pipelineMergeReady": "Merge-ready"
+    "pipelineMergeReady": "Merge-ready",
+    "confidenceCaption": "Verified {done}/{total} · fill = reached amount"
   },
   "loopQueue": {
     "title": "Unclosed loop queue",

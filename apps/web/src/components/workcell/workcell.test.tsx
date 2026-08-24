@@ -117,7 +117,10 @@ describe('Workcell — story #2922 W6 Proofline 레일(단계→색 파생)', ()
 // 트러스트-시맨틱(각 단계 자체의 신뢰상태, 위치 무관)으로 전환. 판별 핵심: "지나온" 단계가
 // 자기 고유 색(예: running=blue)을 유지해야 하며, 그저 지나왔다고 강제로 green이 되면 안 된다
 // — 이게 옛 위치기반 로직과의 진짜 차이(#3345 부수 논의가 지적한 지점).
-describe('Workcell — story #2922 W6 스테퍼 트러스트-시맨틱 컬러(유나양 확定)', () => {
+// story #2984 §6 — 이 축(PipelineStepper 컬러 로직)은 bentoLayout=false 폴백 경로에만
+// 남아있다(기본은 ConfidenceGauge, 물리량이지 색이 아니다) — 복귀 스위치를 켰을 때도 옛
+// 로직이 안 죽었는지 고정하기 위해 bentoLayout={false}로 명시한다.
+describe('Workcell — story #2922 W6 스테퍼 트러스트-시맨틱 컬러(유나양 확定, bentoLayout=false 폴백)', () => {
   // 각 단계의 label-wrapper class는 `role="listitem"`으로 블록을 쪼갠 뒤 그 블록의 첫
   // class="..."(레이블+색을 쥔 중간 span — 바깥 span의 class는 role 앞이라 분할로 이미
   // 소비됨, 점(dot) span의 class는 이보다 뒤에 옴)로 정확히 좁힌다.
@@ -130,29 +133,29 @@ describe('Workcell — story #2922 W6 스테퍼 트러스트-시맨틱 컬러(�
   }
 
   it('merge_ready가 current일 때, 이미 지나온 Running 단계는 강제로 green이 되지 않고 자기 고유색(blue) 유지', () => {
-    const markup = renderKo(<Workcell {...BASE} pipelineStage="merge_ready" />);
+    const markup = renderKo(<Workcell {...BASE} pipelineStage="merge_ready" bentoLayout={false} />);
     const runningClass = stageWrapperClass(markup, 'Running');
     expect(runningClass.split(/\s+/)).toContain('text-proof-blue');
     expect(runningClass.split(/\s+/)).not.toContain('text-proof-green');
   });
 
   it('verified가 current일 때 그 자신은 green(자기 색이 진짜 green이므로)', () => {
-    const markup = renderKo(<Workcell {...BASE} pipelineStage="verified" />);
+    const markup = renderKo(<Workcell {...BASE} pipelineStage="verified" bentoLayout={false} />);
     const verifiedClass = stageWrapperClass(markup, 'Verified');
     expect(verifiedClass.split(/\s+/)).toContain('text-proof-green');
     expect(verifiedClass.split(/\s+/)).toContain('font-bold');
   });
 
   it('claimed_done이 current일 때 그 자신은 blue(주장·미검증 — 아직 green 아님)', () => {
-    const markup = renderKo(<Workcell {...BASE} pipelineStage="claimed_done" />);
+    const markup = renderKo(<Workcell {...BASE} pipelineStage="claimed_done" bentoLayout={false} />);
     const claimedClass = stageWrapperClass(markup, 'Claimed done');
     expect(claimedClass.split(/\s+/)).toContain('text-proof-blue');
   });
 });
 
-describe('Workcell — story #2922 W1 신뢰 파이프라인 헤더 스테퍼(6상태) + 2×2 구획', () => {
+describe('Workcell — story #2922 W1 신뢰 파이프라인 헤더 스테퍼(6상태) + 2×2 구획 (bentoLayout=false 폴백)', () => {
   it('renders all six pipeline stage labels regardless of current stage', () => {
-    const markup = renderKo(<Workcell {...BASE} pipelineStage="queued" />);
+    const markup = renderKo(<Workcell {...BASE} pipelineStage="queued" bentoLayout={false} />);
     expect(markup).toContain('Queued');
     expect(markup).toContain('Running');
     expect(markup).toContain('Needs input');
@@ -162,13 +165,52 @@ describe('Workcell — story #2922 W1 신뢰 파이프라인 헤더 스테퍼(6�
   });
 
   it('marks the current stage with aria-current="step" (색만 금지 — 스크린리더도 현재단계를 안다)', () => {
-    const markup = renderKo(<Workcell {...BASE} pipelineStage="claimed_done" />);
+    const markup = renderKo(<Workcell {...BASE} pipelineStage="claimed_done" bentoLayout={false} />);
     expect(markup).toContain('aria-current="step"');
   });
 
   it('renders a 2×2 quadrant body (Brief|Run / Evidence|Conversation), not a vertical 4-stack', () => {
-    const markup = renderKo(<Workcell {...BASE} />);
+    const markup = renderKo(<Workcell {...BASE} bentoLayout={false} />);
     expect(markup).toContain('grid-cols-2');
+  });
+});
+
+// story #2984 §1~§4/§6(doc workcell-bento-form-material-spec-2984) — bentoLayout 기본값
+// true의 실 착지 회귀가드. §6 복귀 스위치 자체(=bentoLayout prop이 실제로 옛 모습을
+// 복원하는지)는 바로 위 두 describe(bentoLayout={false} 명시)가 고정한다 — "1줄 복귀"의
+// 그 1줄이 정말 옛 마크업을 그대로 살려내는지가 검증 대상이었다.
+describe('Workcell — story #2984 §1~§4 bento 기본 레이아웃(bentoLayout 기본값 true)', () => {
+  it('§1 — Evidence·Run·Brief·Conversation 4셀이 bento grid(1.7fr:4px:1fr 열)로 렌더된다', () => {
+    const markup = renderKo(<Workcell {...BASE} />);
+    expect(markup).toContain('grid-cols-[1.7fr_4px_1fr]');
+    expect(markup).not.toContain('grid-cols-2');
+  });
+
+  it('§2 — Brief/Run과 Evidence를 잇는 계보 연결선(가운데 트랙)이 렌더된다', () => {
+    const markup = renderKo(<Workcell {...BASE} />);
+    expect(markup).toContain('col-start-2 row-start-1 row-span-2');
+    expect(markup).toContain('bg-proof-line-strong');
+  });
+
+  it('§4 — Evidence 셀만 elevation(--elev-overlay) 그림자를 갖고 나머지는 flat', () => {
+    const markup = renderKo(<Workcell {...BASE} />);
+    expect(markup).toContain('shadow-[var(--elev-overlay)]');
+    expect(markup).toContain('shadow-[0_1px_0_var(--proof-line)]');
+  });
+
+  it('§3 — 헤더가 색 스테퍼가 아니라 물리량 게이지(role=progressbar)로 렌더된다', () => {
+    const markup = renderKo(<Workcell {...BASE} pipelineStage="needs_input" />);
+    expect(markup).toContain('role="progressbar"');
+    expect(markup).toContain('aria-valuenow="3"');
+    expect(markup).toContain('aria-valuemax="6"');
+    expect(markup).not.toContain('role="list"');
+  });
+
+  it('§6 — bentoLayout={false}로 뒤집으면 §1~§4 마크업이 전부 사라지고 옛 모습으로 복귀한다', () => {
+    const markup = renderKo(<Workcell {...BASE} bentoLayout={false} />);
+    expect(markup).not.toContain('grid-cols-[1.7fr_4px_1fr]');
+    expect(markup).not.toContain('shadow-[var(--elev-overlay)]');
+    expect(markup).not.toContain('role="progressbar"');
   });
 });
 
@@ -178,12 +220,16 @@ describe('Workcell Run layer (진행률바 0 — 현재행위+다음요구만)',
     expect(markup).toContain('지금: 재시도 로직 검증 테스트 작성 중');
     expect(markup).toContain('다음 요구');
     expect(markup).toContain('까심군 QA 리뷰 대기');
-    // clip-path(컷코너)는 CSS 값이라 '%'를 포함하는 게 정상이고, LayerLabel 설명 문구도
-    // "진행률바 아님"이라 그 단어 자체는 등장한다(부재를 명시하는 문구) — 실제로 검사할 건
-    // 진행률 바 "구현"(role/class/width:N% 스타일) 자체가 없다는 것.
-    expect(markup).not.toMatch(/role="progressbar"/);
-    expect(markup).not.toContain('progress-bar');
-    expect(markup).not.toMatch(/width:\s*\d+%/);
+    // story #2984 §3 — 헤더 Confidence 게이지는 물리량 채움 %를 의도적으로 쓴다(전혀 다른
+    // 계약, 위 "§3" 테스트가 고정). 이 안티패턴 검사는 Run 레이어 자신의 마크업(LayerLabel
+    // "Run" 이후·다음 LayerLabel "Evidence" 이전 구간)에만 좁힌다 — Run 자신은 여전히 %
+    // 진행률을 렌더하면 안 된다는 원래 도크트린 그대로.
+    const runStart = markup.indexOf('>Run<');
+    const runEnd = markup.indexOf('>Evidence<');
+    const runMarkup = markup.slice(runStart, runEnd);
+    expect(runMarkup).not.toMatch(/role="progressbar"/);
+    expect(runMarkup).not.toContain('progress-bar');
+    expect(runMarkup).not.toMatch(/width:\s*\d+%/);
   });
 
   it('shows "없음" for blocked when null, and the blocked value when present (never hidden — 도크트린 ③)', () => {

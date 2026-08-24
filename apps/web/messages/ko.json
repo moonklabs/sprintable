@@ -4194,7 +4194,8 @@
     "pipelineNeedsInput": "Needs input",
     "pipelineClaimedDone": "Claimed done",
     "pipelineVerified": "Verified",
-    "pipelineMergeReady": "Merge-ready"
+    "pipelineMergeReady": "Merge-ready",
+    "confidenceCaption": "검증 {done}/{total} · 채움 = 도달 물리량"
   },
   "loopQueue": {
     "title": "닫히지 않은 루프 큐",

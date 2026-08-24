@@ -199,8 +199,15 @@ describe('StoryDetailPanel — Workcell pipelineStage = story.trust_stage 직결
 
   // 스테퍼가 6라벨을 항상 전부 렌더하므로(현재단계=스타일만 다름) textContent.toContain으로는
   // "어느 단계가 current인지" 못 잰다 — aria-current="step"이 붙은 그 원소의 텍스트로만 확인.
+  // story #2984 §3/§6 — bentoLayout 기본값 true는 색 스테퍼(aria-current="step" 리스트)
+  // 대신 물리량 게이지를 렌더한다(현재 단계 라벨은 data-testid="workcell-current-stage"
+  // 한 곳). aria-current를 먼저 시도해 bentoLayout={false} 폴백 경로도 계속 커버한다 —
+  // 이 SSE 라이브 갱신 테스트들의 관심사는 "어느 단계가 뜨는가"이지 스테퍼 시각 표현이
+  // 아니므로 어느 레이아웃이든 같은 헬퍼로 잡는다.
   function currentStageLabel(): string | null {
-    return container.querySelector('[aria-current="step"]')?.textContent?.trim() ?? null;
+    const legacy = container.querySelector('[aria-current="step"]')?.textContent?.trim();
+    if (legacy) return legacy;
+    return container.querySelector('[data-testid="workcell-current-stage"]')?.textContent?.trim() ?? null;
   }
 
   it('trust_stage="verified" → Verified(gate fetch 응답과 무관 — BE 판정값 그대로)', async () => {
@@ -324,8 +331,15 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
   const HUMAN_ID = 'human-1';
   const memberMap = { [HUMAN_ID]: { id: HUMAN_ID, name: '책임자', type: 'human' } };
 
+  // story #2984 §3/§6 — bentoLayout 기본값 true는 색 스테퍼(aria-current="step" 리스트)
+  // 대신 물리량 게이지를 렌더한다(현재 단계 라벨은 data-testid="workcell-current-stage"
+  // 한 곳). aria-current를 먼저 시도해 bentoLayout={false} 폴백 경로도 계속 커버한다 —
+  // 이 SSE 라이브 갱신 테스트들의 관심사는 "어느 단계가 뜨는가"이지 스테퍼 시각 표현이
+  // 아니므로 어느 레이아웃이든 같은 헬퍼로 잡는다.
   function currentStageLabel(): string | null {
-    return container.querySelector('[aria-current="step"]')?.textContent?.trim() ?? null;
+    const legacy = container.querySelector('[aria-current="step"]')?.textContent?.trim();
+    if (legacy) return legacy;
+    return container.querySelector('[data-testid="workcell-current-stage"]')?.textContent?.trim() ?? null;
   }
 
   beforeEach(() => { vi.useFakeTimers(); });
