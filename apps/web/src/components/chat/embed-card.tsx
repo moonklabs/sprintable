@@ -921,16 +921,16 @@ export function EntityChip({
 
   // story #2669(B2) — doc이 chat-view.tsx 배치조회로 draft라고 확認되면, 상신 가능(project
   // write access) 여부를 딱 그 경우에만 추가 조회한다(모든 doc 칩마다 매번 조회하면 N+1 —
-  // 대부분의 참조는 이미 confirmed라 draft만 걸러 조회 비용을 줄인다). 승인 직후엔 서버
-  // 재조회 없이 이 칩의 로컬 상태만 'pending'으로 넘겨 즉시 반영(배치조회 다음 폴백까지
-  // "결재로 올리기"가 다시 뜨는 깜빡임을 막는다).
+  // 대부분의 참조는 이미 confirmed라 draft만 걸러 조회 비용을 줄인다).
+  // story #3004(선생님 정책 확定 2026-08-24) — approver_member_id가 서버 필수가 되며 이 칩
+  // 자체에서 즉시 상신하던 경로(및 그 낙관적 로컬 상태 갱신)를 걷어냈다 — 이 인라인 칩은
+  // 결재자 픽커를 담을 공간이 없다(Pedro 리뷰, PR #3435). draft=문서 페이지로 route-first
+  // 딥링크(doc-gate-section.tsx가 이미 그 픽커를 가진다), pending=기존과 동일하게 결재함
+  // 딥링크 — "쓰던 자리" 원칙(#2669)은 실 제출 액션에서만 후퇴, 목적지 발견성은 유지.
   const { projectMemberships } = useDashboardContext();
-  const [localDocStatus, setLocalDocStatus] = useState<string | null>(null);
   const [canSubmit, setCanSubmit] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState(false);
   const rawDocStatus = entityStatus?.kind === 'resolved' ? entityStatus.raw : null;
-  const effectiveDocStatus = localDocStatus ?? rawDocStatus;
+  const effectiveDocStatus = rawDocStatus;
 
   useEffect(() => {
     if (entityType !== 'doc' || !entityId || effectiveDocStatus !== 'draft') { setCanSubmit(false); return; }
@@ -949,26 +949,7 @@ export function EntityChip({
     return () => { cancelled = true; };
   }, [entityType, entityId, effectiveDocStatus, projectMemberships]);
 
-  const submitForApproval = async () => {
-    if (!entityId || submitting) return;
-    setSubmitting(true);
-    setSubmitError(false);
-    try {
-      const res = await fetch(`/api/docs/${entityId}/transition`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'pending' }),
-      });
-      if (!res.ok) throw new Error();
-      setLocalDocStatus('pending');
-    } catch {
-      setSubmitError(true);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const statusLabel = ghost ? null : renderEntityStatusLabel(entityType, localDocStatus ? { kind: 'resolved', raw: localDocStatus } : (entityStatus ?? { kind: 'loading' }));
+  const statusLabel = ghost ? null : renderEntityStatusLabel(entityType, entityStatus ?? { kind: 'loading' });
   // story #2886(S2b) — inline-meta는 기존 그대로 항상 펼침. inline(기본)은 인라인 메타를
   // 감추고(격납) hover/focus tooltip으로만 낸다 — 산문 속 반복 전개 제거가 이 스토리의 요지.
   const showInlineMeta = variant === 'inline-meta';
@@ -1023,18 +1004,20 @@ export function EntityChip({
 
   if (entityId) {
     // story #2669(B2) — "쓰던 자리에 이미 있어야 한다": 모달을 열지 않고도 칩 자체에 상태별
-    // CTA가 상시 붙는다. draft=상신 가능자에게만 「결재로 올리기」(fail-closed) · pending=
-    // 「결재함에서 보기」 딥링크. confirmed/denied는 위 statusLabel 배지로 이미 정직하게 표시.
+    // CTA가 상시 붙는다. pending=「결재함에서 보기」 딥링크. confirmed/denied는 위 statusLabel
+    // 배지로 이미 정직하게 표시.
+    // story #3004 — draft="결재로 올리기"는 더 이상 이 칩에서 직접 제출하지 않는다(결재자
+    // 지정이 서버 필수가 됐고, 이 인라인 칩엔 픽커를 놓을 공간이 없다 — Pedro 리뷰 PR #3435).
+    // 문서 페이지(doc-gate-section.tsx, 픽커 실물 보유)로 route-first 딥링크한다.
     const docCta = entityType === 'doc' && !ghost ? (
       effectiveDocStatus === 'draft' && canSubmit ? (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); void submitForApproval(); }}
-          disabled={submitting}
-          className="inline-flex shrink-0 items-center rounded border border-primary/40 px-1.5 py-0.5 text-xs font-medium text-primary no-underline hover:bg-primary/10 disabled:opacity-60"
+        <Link
+          href={getEntityHref('doc', entityId) ?? '#'}
+          onClick={(e) => e.stopPropagation()}
+          className="inline-flex shrink-0 items-center rounded border border-primary/40 px-1.5 py-0.5 text-xs font-medium text-primary no-underline hover:bg-primary/10"
         >
-          {submitting ? '...' : '결재로 올리기'}
-        </button>
+          결재자 지정하고 올리기
+        </Link>
       ) : effectiveDocStatus === 'pending' ? (
         <Link
           href="/inbox?tab=gates"
@@ -1062,7 +1045,6 @@ export function EntityChip({
       <span className="inline-flex flex-wrap items-center gap-1">
         {chipButton}
         {docCta}
-        {submitError ? <span className="text-xs text-destructive">상신 실패, 다시 시도해 주세요</span> : null}
         {showModal && (
           <EntityPreviewModal
             entityType={entityType}

@@ -908,9 +908,9 @@ async def get_doc_backlinks(
 
 class DocTransitionRequest(BaseModel):
     status: str
-    # story #2985(PO 설계 확定 2026-08-24) — draft→pending 상신 시 결재선 지정(선택). None이면
-    # 현행(권한자 전원 액션) 그대로 — approval_delivery.dispatch_approval_request_cards가
-    # approver_ids 밖 값은 fail-safe로 미지정 취급(라우터에서 추가 검증 불요).
+    # story #2985(PO 설계 확定 2026-08-24)에서 신설, story #3004(선생님 정책 확定)부터
+    # draft→pending 상신 시 **필수**(transition_doc이 None을 400 APPROVER_REQUIRED로 거부).
+    # Optional 타입은 그대로 두는(다른 to_status 값엔 이 필드가 안 쓰이므로 애초 무관).
     approver_member_id: uuid.UUID | None = None
 
 
@@ -946,6 +946,8 @@ async def transition_doc_endpoint(
         _codes = {
             "DOC_NOT_FOUND": 404, "HUMAN_CONFIRM_REQUIRED": 403,
             "INVALID_STATUS": 422, "INVALID_DOC_TRANSITION": 422,
+            # story #3004 — 결재선 필수화(상신 시 designated_approver_id 미지정/부적격).
+            "APPROVER_REQUIRED": 400, "APPROVER_SELF_NOT_ALLOWED": 422, "APPROVER_INELIGIBLE": 400,
         }
         raise HTTPException(
             status_code=_codes.get(e.code, 400), detail={"code": e.code, "message": e.message}
