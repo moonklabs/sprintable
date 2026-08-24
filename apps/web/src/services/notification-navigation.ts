@@ -99,6 +99,15 @@ export async function attachNotificationHrefs<T extends NotificationReference>(
       return { ...notification, href: slug ? buildDocHref(slug, comment.id) : '/docs' };
     }
 
+    // story #0d1c69f3(v2 4호) — 그룹 펼침의 항목별 CTA가 "죽은 링크 0"이려면 게이트 알림
+    // (gate.pending_approval 등, reference_type='gate')에 실제 href가 있어야 한다. 지금까지
+    // 이 분기가 없어 게이트 알림은 전부 href:null(클릭해도 아무 일도 안 일어남)이었다 —
+    // /gates/[id] 상세 라우트(이미 존재, approval-request-card.tsx가 같은 라우트로 fetch)로
+    // 직결한다. DB 조회 불필요(reference_id를 그대로 경로에 싣는다).
+    if (notification.reference_type === 'gate') {
+      return { ...notification, href: `/gates/${referenceId}` };
+    }
+
     return { ...notification, href: null };
   });
 }
