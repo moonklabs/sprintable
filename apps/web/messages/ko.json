@@ -963,6 +963,7 @@
     "dispatchSuccessTitle": "전달했습니다",
     "moreOptionsAria": "더보기",
     "blockedBy": "{count}개에 의해 차단됨",
+    "nextActionPrefix": "다음:",
     "allLabels": "모든 라벨",
     "labelsActive": "{count}개 라벨",
     "searchLabels": "라벨 검색...",

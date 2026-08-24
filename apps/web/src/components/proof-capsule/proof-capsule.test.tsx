@@ -421,3 +421,69 @@ describe('ProofCapsule — story #2926(P0-F F1) onClaimClick (card density only)
     expect(markup).toContain(BASE.claim);
   });
 });
+
+// story #32dcc294(v2 #2, 시안 a230cfd5) — card 밀도 전용 신규 슬롯(headerAside/cardHeader).
+// 둘 다 optional·미전달 시 렌더 결과가 기존과 완전히 동일해야 다른 card 소비처
+// (approval-request-card.tsx)가 무영향임이 보장된다.
+describe('ProofCapsule — story #32dcc294 headerAside/cardHeader(card 밀도 전용 신규 슬롯)', () => {
+  // 카디르 QA(#3446) REQUEST_CHANGES 적출 — 이전 버전은 post-PR 코드끼리 같은 렌더를 두 번
+  // 비교하는 동어반복이라 어떤 변경에도 통과하는 무효 가드였다(구현이 깨져도 절대 안 빨개짐).
+  // "byte-identical"은 옛 마크업 구조(=고정 문자열 리터럴)와 대조해야만 실패할 수 있는 가드가
+  // 된다 — 아래는 StateHeader의 <span>이 wrapper div 없이 outer div의 직계 자식으로 오는지를
+  // 옛 마크업 그대로 박아 확인한다(양성대조: headerAside를 주면 이 단언은 반드시 깨져야 한다).
+  it('headerAside를 안 넘기면 wrapper div 자체가 렌더되지 않는다 — StateHeader가 옛 구조 그대로 outer div의 직계 자식(byte-identical, 고정 문자열 대조)', () => {
+    const markup = renderWithIntl(<ProofCapsule {...BASE} density="card" />);
+    expect(markup).toContain(
+      '<div class="min-w-0 flex-1 px-3 py-2.5"><span class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-proof-green">',
+    );
+    // 새 wrapper(headerAside 전용)는 아예 없어야 한다.
+    expect(markup).not.toContain('class="flex items-center justify-between gap-2"');
+  });
+
+  it('양성대조 — headerAside를 주면 위 "직계 자식" 단언이 실제로 깨진다(가드가 진짜 실패할 수 있음을 증명)', () => {
+    const markup = renderWithIntl(<ProofCapsule {...BASE} density="card" headerAside={<span>x</span>} />);
+    expect(markup).not.toContain(
+      '<div class="min-w-0 flex-1 px-3 py-2.5"><span class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-proof-green">',
+    );
+    expect(markup).toContain('class="flex items-center justify-between gap-2"');
+  });
+
+  it('cardHeader를 안 넘기면 claim div가 옛 구조 그대로 StateHeader 바로 다음에 온다(byte-identical, 고정 문자열 대조)', () => {
+    const markup = renderWithIntl(<ProofCapsule {...BASE} density="card" />);
+    expect(markup).toContain(
+      '</span><div class="mt-1.5 line-clamp-2 text-[12.5px] font-semibold leading-snug text-proof-ink">',
+    );
+  });
+
+  it('headerAside를 넘기면 StateHeader와 같은 justify-between 행에 렌더된다', () => {
+    const markup = renderWithIntl(
+      <ProofCapsule {...BASE} density="card" headerAside={<span data-testid="aside">#3017</span>} />,
+    );
+    expect(markup).toContain('#3017');
+    // justify-between 행의 자식 순서: StateHeader(span)가 먼저, aside(span data-testid)가
+    // 그 바로 뒤 형제로 같은 부모 div 안에 들어간다.
+    const rowStart = markup.indexOf('class="flex items-center justify-between gap-2"');
+    const stateHeaderIdx = markup.indexOf('증명 완료', rowStart);
+    const asideIdx = markup.indexOf('data-testid="aside"', rowStart);
+    expect(rowStart).toBeGreaterThan(-1);
+    expect(stateHeaderIdx).toBeGreaterThan(rowStart);
+    expect(asideIdx).toBeGreaterThan(stateHeaderIdx);
+  });
+
+  it('cardHeader를 넘기면 StateHeader 행 다음·claim 앞에 렌더된다', () => {
+    const markup = renderWithIntl(
+      <ProofCapsule {...BASE} density="card" cardHeader={<div data-testid="header">다음: 게이트 승인 대기</div>} />,
+    );
+    const headerIdx = markup.indexOf('다음: 게이트 승인 대기');
+    const claimIdx = markup.indexOf(BASE.claim);
+    expect(headerIdx).toBeGreaterThan(-1);
+    expect(claimIdx).toBeGreaterThan(-1);
+    expect(headerIdx).toBeLessThan(claimIdx);
+  });
+
+  it('다른 card 소비처(예: approval-request-card.tsx)가 새 prop을 안 쓰는 렌더는 여전히 button/claim 규약을 그대로 지킨다(회귀 0)', () => {
+    const markup = renderWithIntl(<ProofCapsule {...BASE} density="card" onClaimClick={() => {}} />);
+    expect(markup).toContain('<button');
+    expect(markup).toContain(BASE.claim);
+  });
+});

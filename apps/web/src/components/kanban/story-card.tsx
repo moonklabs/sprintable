@@ -6,6 +6,7 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useTranslations } from 'next-intl';
 import type { KanbanStory, KanbanMember, LineStatusSummary } from './types';
+import { parseStoryCardTitle } from '@/lib/story-card-title';
 import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, ChevronRight, EyeOff, History, Pause, Rocket, Zap, ZapOff, type LucideIcon } from 'lucide-react';
 import { LabelChip } from '@/components/ui/label-chip';
@@ -128,6 +129,30 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   const lineBadge = deriveLineBadge(lineStatus, hasPendingGate);
   const lineBadgeMeta = lineBadge && lineBadge !== 'pending_gate' ? LINE_BADGE_META[lineBadge] : null;
   const pendingGateType = lineBadge === 'pending_gate' ? gates.find((g) => g.status === 'pending')?.gate_type : undefined;
+
+  // story #32dcc294(v2 #2, 시안 a230cfd5) — 제목 파싱: 선두 [태그]→카테고리 칩, 나머지는
+  // verbatim lead(리라이트 0, 3015 규율 동일). #번호는 story.story_number를 그대로 쓴다
+  // (이전엔 claim 문자열 앞에 직접 접두했으나, 이제 headerAside로 분리 렌더).
+  const { categoryTag, lead: titleLead } = parseStoryCardTitle(story.title);
+
+  // boy-scout 절제: «행동 필요» 신호 중 최우선 1개만 카드 상단 1급 라인("다음: …")으로
+  // 승격한다. 각 분기 텍스트는 meta row가 이미 만들던 문구 그대로(diff로 신규 파생 0
+  // 증명) — 위치·강조만 바뀐다. 정보성(engine_degraded·grandfathered)은 승격 대상 아님.
+  const isBlockedForAction = blockedBy.length > 0 && story.status !== 'done';
+  const nextAction: { Icon: LucideIcon; label: string } | null = isBlockedForAction
+    ? { Icon: AlertTriangle, label: t('blockedBy', { count: blockedBy.length }) }
+    : lineBadge === 'handoff_stuck'
+    ? { Icon: LINE_BADGE_META.handoff_stuck.Icon, label: tCage(LINE_BADGE_META.handoff_stuck.labelKey) }
+    : lineBadge === 'waiting_human'
+    ? { Icon: LINE_BADGE_META.waiting_human.Icon, label: tCage(LINE_BADGE_META.waiting_human.labelKey) }
+    : lineBadge === 'pending_gate'
+    ? { Icon: Pause, label: pendingGateType ? `${pendingGateType} ${tCage('gatePending')}` : tCage('gatePending') }
+    : null;
+  // 승격된 lineBadge 신호는 meta row에서 중복 렌더하지 않는다(같은 신호를 두 자리에 보여
+  // 주지 않음 — boy-scout 1배지 원칙 유지). blocked가 승격을 가져간 경우엔 lineBadge가
+  // 여전히 별개 사실이라 meta row에 남을 수 있다(중복 아님).
+  const lineBadgePromoted = !isBlockedForAction
+    && (lineBadge === 'handoff_stuck' || lineBadge === 'waiting_human' || lineBadge === 'pending_gate');
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   // story #2416 — native confirm() 대체.
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -312,7 +337,29 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
         density="card"
         proofState={proofState}
         stateLabel={proofStateLabel}
-        claim={story.story_number ? `#${story.story_number} ${story.title}` : story.title}
+        claim={titleLead}
+        headerAside={
+          story.story_number ? (
+            <span className="shrink-0 font-mono text-[10px] text-muted-foreground">#{story.story_number}</span>
+          ) : undefined
+        }
+        cardHeader={
+          <>
+            {nextAction ? (
+              <div className="mb-1.5 flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-[11px] font-semibold text-warning-strong">
+                <nextAction.Icon className="size-3 shrink-0" aria-hidden="true" />
+                <span className="min-w-0 truncate">{t('nextActionPrefix')} {nextAction.label}</span>
+              </div>
+            ) : null}
+            {categoryTag ? (
+              <div className="mb-1.5">
+                <span className="inline-block rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                  {categoryTag}
+                </span>
+              </div>
+            ) : null}
+          </>
+        }
         footer={
           <div className="mt-2">
             {/* E-MODERN A: 에픽 = 작은 색 dot + muted 라벨(일관 식별·랜덤 채움배지 퇴출) */}
@@ -322,19 +369,17 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                 <span className="min-w-0 truncate">{epicName}</span>
               </div>
             ) : null}
-            {/* E-MODERN A meta row — blocked=신호(text-warning+dot)·label 칩·line/gate=boy-scout 1배지(muted) */}
-            {(blockedBy.length > 0 && story.status !== 'done') || labels.length > 0 || lineBadge ? (
+            {/* E-MODERN A meta row — label 칩·line/gate=boy-scout 1배지(muted). blocked 텍스트와
+                lineBadge(handoff_stuck/waiting_human/pending_gate)는 story #32dcc294(v2 #2)
+                에서 카드 상단 「다음: …」 1급 라인으로 승격됐다 — 여기서 중복 렌더하지 않는다
+                (nextAction/lineBadgePromoted 계산 위 참고, boy-scout 1배지 원칙 그대로).
+                정보성(engine_degraded·grandfathered)만 여기 그대로 남는다. */}
+            {labels.length > 0 || (!lineBadgePromoted && lineBadge) ? (
               <div className="mb-2 flex flex-wrap items-center gap-1.5">
-                {blockedBy.length > 0 && story.status !== 'done' ? (
-                  <span className="inline-flex items-center gap-1 text-[10px] text-warning-strong">
-                    <span className="size-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
-                    {t('blockedBy', { count: blockedBy.length })}
-                  </span>
-                ) : null}
                 {labels.map((label) => (
                   <LabelChip key={label.id} label={label} />
                 ))}
-                {lineBadge === 'pending_gate' ? (
+                {lineBadgePromoted ? null : lineBadge === 'pending_gate' ? (
                   <Badge variant="outline" className="gap-1">
                     <Pause className="size-3 shrink-0" />
                     <span>{pendingGateType ? `${pendingGateType} ${tCage('gatePending')}` : tCage('gatePending')}</span>

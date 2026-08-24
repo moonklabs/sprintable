@@ -963,6 +963,7 @@
     "dispatchSuccessTitle": "Dispatched",
     "moreOptionsAria": "More options",
     "blockedBy": "blocked by {count}",
+    "nextActionPrefix": "Next:",
     "allLabels": "All Labels",
     "labelsActive": "{count} label(s)",
     "searchLabels": "Search labels...",
