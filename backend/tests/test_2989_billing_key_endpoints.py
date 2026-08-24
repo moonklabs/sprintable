@@ -73,15 +73,21 @@ async def test_delete_billing_key_endpoint_409_when_active_subscription_blocks(
     test_client, mock_session, monkeypatch, org_id
 ):
     """P3 — revoke_billing_key가 ActiveSubscriptionBlocksRevoke를 던지면 라우터가 409로
-    매핑하고 FE가 분기할 code+tier를 싣는다(gate_head_changed 계보 관례 재사용)."""
+    매핑하고 FE가 분기할 code+tier+current_period_end를 싣는다(gate_head_changed 계보
+    관례 재사용). PO 재지적(2026-08-24, PR#3423 리뷰) — "해지 후 다시 시도"는 해지가
+    예약형이라 거짓 안내다, 대신 실 종료일을 실어야 한다."""
     import app.routers.billing_keys as router_module
     import app.services.project_auth as project_auth
+    from datetime import datetime, timezone
     from app.services.org_billing_key import ActiveSubscriptionBlocksRevoke
 
     monkeypatch.setattr(project_auth, "is_org_owner_or_admin", AsyncMock(return_value=True))
+    period_end = datetime(2026, 9, 24, tzinfo=timezone.utc)
     monkeypatch.setattr(
         router_module, "revoke_billing_key",
-        AsyncMock(side_effect=ActiveSubscriptionBlocksRevoke(org_id=org_id, tier="starter", billing_cycle="monthly")),
+        AsyncMock(side_effect=ActiveSubscriptionBlocksRevoke(
+            org_id=org_id, tier="starter", billing_cycle="monthly", current_period_end=period_end,
+        )),
     )
 
     resp = await test_client.delete("/api/v2/org-billing-keys")
@@ -89,6 +95,8 @@ async def test_delete_billing_key_endpoint_409_when_active_subscription_blocks(
     body = resp.json()["error"]
     assert body["code"] == "active_subscription_blocks_revoke"
     assert body["tier"] == "starter"
+    assert body["current_period_end"] == period_end.isoformat()
+    assert "해지 후 다시 시도" not in body["message"]
 
 
 @pytest.mark.anyio

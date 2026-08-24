@@ -91,12 +91,17 @@ describe('PaymentMethodSection(story #2989)', () => {
     expect(container.textContent).toContain(koMessages.pricingPlans.paymentMethodNone);
   });
 
-  it('409(active_subscription_blocks_revoke)면 tier를 포함한 차단 배너를 보여준다(P3 서버강제)', async () => {
+  it('409(active_subscription_blocks_revoke)면 tier+실 종료일을 포함한 차단 배너를 보여준다(P3 서버강제)', async () => {
+    // PO 재지적(2026-08-24, PR#3423 리뷰, 유나 관찰) — 해지는 예약형이라 "해지 후 다시
+    // 시도" 안내는 거짓. 배너가 실 종료일(current_period_end)을 찍어야 한다.
     vi.mocked(fetchWithAuth).mockImplementation(async (_url: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === 'DELETE') {
         return {
           ok: false, status: 409,
-          json: async () => ({ data: null, error: { code: 'active_subscription_blocks_revoke', message: 'x', tier: 'starter' } }),
+          json: async () => ({
+            data: null,
+            error: { code: 'active_subscription_blocks_revoke', message: 'x', tier: 'starter', current_period_end: '2026-09-24T00:00:00+00:00' },
+          }),
         } as unknown as Response;
       }
       return { ok: true, json: async () => ({ data: { org_id: 'org-1', status: 'active', card_issuer_code: '91', card_number_masked: '54258677****176*', card_type: 'CREDIT' } }) } as Response;
@@ -110,7 +115,33 @@ describe('PaymentMethodSection(story #2989)', () => {
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
     expect(container.textContent).toContain('starter');
+    expect(container.textContent).toContain('2026-09-24');
+    expect(container.textContent).not.toContain('해지 후 다시 시도');
     // 카드는 여전히 남아있다(BE가 삭제 자체를 거부했으므로 목록에서 안 사라져야 함).
     expect(container.textContent).toContain('54258677****176*');
+  });
+
+  it('409 응답에 current_period_end가 없으면 날짜 없는 폴백 문구를 보여준다', async () => {
+    vi.mocked(fetchWithAuth).mockImplementation(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'DELETE') {
+        return {
+          ok: false, status: 409,
+          json: async () => ({
+            data: null,
+            error: { code: 'active_subscription_blocks_revoke', message: 'x', tier: 'team', current_period_end: null },
+          }),
+        } as unknown as Response;
+      }
+      return { ok: true, json: async () => ({ data: { org_id: 'org-1', status: 'active', card_issuer_code: '91', card_number_masked: '54258677****176*', card_type: 'CREDIT' } }) } as Response;
+    });
+
+    await mount(<PaymentMethodSection canManage={true} />);
+    const openBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.pricingPlans.paymentMethodDeleteButton));
+    await act(async () => { openBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const confirmBtn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.trim() === koMessages.pricingPlans.paymentMethodDeleteConfirm);
+    await act(async () => { confirmBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain(koMessages.pricingPlans.paymentMethodDeleteBlocked.replace('{tier}', 'team'));
   });
 });

@@ -70,7 +70,10 @@ async def _session_factory():
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
-async def _seed_org(session, *, tier: str | None = None, sub_status: str = "active"):
+async def _seed_org(
+    session, *, tier: str | None = None, sub_status: str = "active",
+    current_period_end: datetime | None = None,
+):
     from app.models.organization import Organization
     from app.models.org_subscription import OrgSubscription
 
@@ -78,7 +81,10 @@ async def _seed_org(session, *, tier: str | None = None, sub_status: str = "acti
     session.add(org)
     await session.flush()
     if tier is not None:
-        session.add(OrgSubscription(id=uuid.uuid4(), org_id=org.id, tier=tier, status=sub_status))
+        session.add(OrgSubscription(
+            id=uuid.uuid4(), org_id=org.id, tier=tier, status=sub_status,
+            current_period_end=current_period_end,
+        ))
         await session.flush()
     await session.commit()
     return org.id
@@ -108,19 +114,24 @@ async def _seed_billing_key(
 
 @pytest.mark.asyncio
 async def test_revoke_billing_key_blocks_when_active_paid_subscription():
-    """P3 — 활성 유료 구독이 있으면(force 아닐 때) 결제수단 삭제를 서버가 명시 거부한다."""
+    """P3 — 활성 유료 구독이 있으면(force 아닐 때) 결제수단 삭제를 서버가 명시 거부한다.
+    PO 재지적(2026-08-24, PR#3423 리뷰, 유나 관찰) — 해지는 예약형이라 "해지 후 다시
+    시도" 안내는 거짓이다. 예외가 current_period_end를 정확히 실어야 라우터/FE가 실
+    날짜를 보여줄 수 있다."""
     from app.services.org_billing_key import ActiveSubscriptionBlocksRevoke, revoke_billing_key
 
+    period_end = datetime(2026, 9, 24, tzinfo=timezone.utc)
     engine, maker = await _session_factory()
     try:
         async with maker() as s:
-            org_id = await _seed_org(s, tier="starter", sub_status="active")
+            org_id = await _seed_org(s, tier="starter", sub_status="active", current_period_end=period_end)
             await _seed_billing_key(s, org_id=org_id)
 
         async with maker() as s:
             with pytest.raises(ActiveSubscriptionBlocksRevoke) as exc_info:
                 await revoke_billing_key(s, org_id=org_id, actor_id=uuid.uuid4(), actor_type="human")
             assert exc_info.value.tier == "starter"
+            assert exc_info.value.current_period_end == period_end
     finally:
         await engine.dispose()
 
@@ -311,8 +322,11 @@ async def test_issue_billing_key_reissue_revokes_old_toss_key_after_new_key_save
     try:
         async with maker() as s:
             org_id = await _seed_org(s, tier="free")
+            # customer_key는 unique 제약 대상 — _seed_billing_key 기본 생성(uuid 접미)에
+            # 맡긴다(고정 리터럴을 썼다가 재실행 시 잔존행과 충돌해 UniqueViolationError를
+            # 자초한 적이 있다, 이 파일의 다른 헬퍼들과 동일 관례로 정정).
             _, customer_key = await _seed_billing_key(
-                s, org_id=org_id, plaintext="old_billing_key_plaintext", customer_key="cust-fixed-2989",
+                s, org_id=org_id, plaintext="old_billing_key_plaintext",
             )
 
         mock_create = AsyncMock(return_value={

@@ -133,12 +133,22 @@ async def delete_billing_key(
             session, org_id=org_id, actor_id=resolved_actor_id, actor_type="human",
         )
     except ActiveSubscriptionBlocksRevoke as exc:
+        # PO 재지적(2026-08-24, PR#3423 리뷰, 유나 관찰) — 해지는 예약형(종료일까지 tier가
+        # 여전히 active)이라 "해지 후 다시 시도"는 해지 직후에도 또 409가 나는 거짓 안내.
+        # current_period_end를 실어 FE가 실 날짜를 찍게 한다(파싱 없이 그대로 전달할 수
+        # 있게 ISO 문자열).
+        current_period_end_iso = exc.current_period_end.isoformat() if exc.current_period_end else None
         raise HTTPException(
             status_code=409,
             detail={
                 "code": "active_subscription_blocks_revoke",
-                "message": "활성 유료 구독이 있어 결제수단을 지울 수 없습니다. 구독 해지 후 다시 시도해주세요.",
+                "message": (
+                    f"구독 종료일({current_period_end_iso}) 후 삭제 가능합니다."
+                    if current_period_end_iso
+                    else "활성 유료 구독이 종료된 후 결제수단을 삭제할 수 있습니다."
+                ),
                 "tier": exc.tier,
+                "current_period_end": current_period_end_iso,
             },
         ) from exc
     return result

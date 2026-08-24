@@ -2548,7 +2548,8 @@
     "paymentMethodDeleteConfirm": "Remove",
     "paymentMethodDeleteCancel": "Cancel",
     "paymentMethodDeleteSuccess": "Payment method removed.",
-    "paymentMethodDeleteBlocked": "You have an active paid subscription ({tier}) — cancel it before removing your payment method.",
+    "paymentMethodDeleteBlocked": "You have an active paid subscription ({tier}) — you can't remove your payment method yet.",
+    "paymentMethodDeleteBlockedUntil": "Your active paid subscription ({tier}) runs until {date}. You can remove your payment method after that.",
     "paymentMethodDeleteError": "Couldn't remove the payment method. Please try again."
   },
   "usage": {

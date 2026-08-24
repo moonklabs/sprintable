@@ -25,15 +25,26 @@ class ActiveSubscriptionBlocksRevoke(Exception):
     수단을 지우면 다음 청구가 "no active billing key"로 조용히 실패한다(billing_charge.py
     charge_org의 기존 active-필터 가드 재사용, 신규 분기 불요 — mark_billing_key_deleted
     docstring과 동형 근거). 차단이 기본값: 구독 해지가 먼저(org_subscription_checkout.py의
-    change-tier/cancel 레일), 결제수단 삭제는 그 다음이라는 순서를 서버가 강제한다."""
+    change-tier/cancel 레일), 결제수단 삭제는 그 다음이라는 순서를 서버가 강제한다.
 
-    def __init__(self, *, org_id: uuid.UUID, tier: str, billing_cycle: str | None):
+    PO 재지적(2026-08-24, PR#3423 리뷰, 유나 관찰) — 해지는 예약형(다음 갱신까지 tier가
+    여전히 active로 남는다, org_subscription_checkout.py의 cancel 레일)이라 "해지 후 다시
+    시도"는 해지 직후에도 또 409가 나는 거짓 안내다. 판별자(P3 원문)는 "현재 유효한 기간이
+    지났는가"뿐 — 그 실 시점(current_period_end)을 예외가 실어 라우터/FE가 정확한 날짜를
+    보여주게 한다."""
+
+    def __init__(
+        self, *, org_id: uuid.UUID, tier: str, billing_cycle: str | None,
+        current_period_end: datetime | None,
+    ):
         self.org_id = org_id
         self.tier = tier
         self.billing_cycle = billing_cycle
+        self.current_period_end = current_period_end
         super().__init__(
             f"org_id={org_id}는 활성 유료 구독(tier={tier!r})이 있어 결제수단을 지울 수 "
-            "없습니다 — 구독 해지/변경을 먼저 진행하세요."
+            f"없습니다 — 구독 종료일({current_period_end.isoformat() if current_period_end else '미정'}) "
+            "이후 삭제할 수 있습니다."
         )
 
 
@@ -196,7 +207,10 @@ async def revoke_billing_key(
             await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
         ).scalar_one_or_none()
         if sub is not None and sub.status == "active" and sub.tier in PAID_TIERS:
-            raise ActiveSubscriptionBlocksRevoke(org_id=org_id, tier=sub.tier, billing_cycle=sub.billing_cycle)
+            raise ActiveSubscriptionBlocksRevoke(
+                org_id=org_id, tier=sub.tier, billing_cycle=sub.billing_cycle,
+                current_period_end=sub.current_period_end,
+            )
 
     masked_card = key.card_number_masked
     toss_revoked = False

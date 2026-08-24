@@ -29,7 +29,9 @@ export function PaymentMethodSection({ canManage }: { canManage: boolean }) {
   const [key, setKey] = useState<BillingKeyInfo | null | undefined>(undefined);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [banner, setBanner] = useState<{ kind: 'success' | 'blocked' | 'error'; tier?: string } | null>(null);
+  const [banner, setBanner] = useState<
+    { kind: 'success' | 'blocked' | 'error'; tier?: string; periodEndDate?: string } | null
+  >(null);
 
   const refetch = () => {
     void fetchBillingKey().then(setKey);
@@ -57,7 +59,13 @@ export function PaymentMethodSection({ canManage }: { canManage: boolean }) {
       setBanner({ kind: 'success' });
       refetch();
     } else if (outcome.kind === 'blocked') {
-      setBanner({ kind: 'blocked', tier: outcome.tier });
+      // PO 재지적(2026-08-24, PR#3423 리뷰) — 해지가 예약형이라 "해지 후 다시 시도"는
+      // 거짓 안내. current_period_end를 YYYY-MM-DD로 잘라 실 날짜를 보여준다(라이브러리
+      // 없이 결정적 — 타임존/로케일 분기로 테스트가 흔들리지 않게).
+      setBanner({
+        kind: 'blocked', tier: outcome.tier,
+        periodEndDate: outcome.currentPeriodEnd?.slice(0, 10),
+      });
     } else {
       setBanner({ kind: 'error' });
     }
@@ -74,7 +82,11 @@ export function PaymentMethodSection({ canManage }: { canManage: boolean }) {
       )}
       {banner?.kind === 'blocked' && (
         <Alert variant="warning" className="mb-2">
-          <AlertDescription>{t('paymentMethodDeleteBlocked', { tier: banner.tier ?? '' })}</AlertDescription>
+          <AlertDescription>
+            {banner.periodEndDate
+              ? t('paymentMethodDeleteBlockedUntil', { tier: banner.tier ?? '', date: banner.periodEndDate })
+              : t('paymentMethodDeleteBlocked', { tier: banner.tier ?? '' })}
+          </AlertDescription>
         </Alert>
       )}
       {banner?.kind === 'error' && (
