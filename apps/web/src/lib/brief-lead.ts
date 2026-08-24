@@ -22,7 +22,11 @@ function stripInlineMarkdown(text: string): string {
     .replace(/`([^`]*)`/g, '$1') // `code` -> code
     .replace(/\*\*([^*]+)\*\*/g, '$1') // **bold** -> bold(단일 별표 강조보다 먼저)
     .replace(/\*([^*\n]+)\*/g, '$1') // *italic* -> italic
-    .replace(/(?<![\w_])_([^_\n]+)_(?![\w_])/g, '$1') // _italic_ -> italic(단어 경계 필수 — snake_case 오파괴 방지)
+    // _italic_ -> italic(단어 경계 필수 — snake_case 오파괴 방지). story #3027 — \w는 ASCII
+    // 전용이라 한글은 애초에 "단어 문자"로 안 잡혀, `한국어_강조_한국어`류 밑줄 감싼 한글
+    // 텍스트가 전부 이탤릭 마커로 오인돼 밑줄이 소실되고 단어가 붙었다(verbatim 위반) — u
+    // 플래그+\p{L}(유니코드 문자 카테고리)로 한글도 "단어 문자"에 포함시켜 동일하게 보호한다.
+    .replace(/(?<![\p{L}\p{N}_])_([^_\n]+)_(?![\p{L}\p{N}_])/gu, '$1')
     .trim();
 }
 

@@ -68,6 +68,18 @@ describe('extractBriefLead — 카디르 QA(#3445) HIGH: 굵게·기울임·인�
     expect(extractBriefLead('workcell_bento_form 식별자')).toBe('workcell_bento_form 식별자');
   });
 
+  // story #3027 — 카디르 #3445 재QA 중 codex 교차 발견: 위 단어 경계 가드가 \w(ASCII 전용)라
+  // 한글은 "단어 문자"로 안 잡혀 밑줄 감싼 한글 텍스트가 전부 이탤릭으로 오인 스트립됐다
+  // (밑줄 소실+단어 붙음, verbatim 위반). \p{L}(유니코드 문자)로 교체한 fix의 회귀가드.
+  it('한글로 감싸인 밑줄은 snake_case와 동형으로 보호한다(verbatim — 밑줄 소실 없음)', () => {
+    // 원 repro: extractBriefLead('한국어_강조_한국어') → '한국어강조한국어'(버그 — 밑줄 소실+단어 붙음)
+    expect(extractBriefLead('한국어_강조_한국어')).toBe('한국어_강조_한국어');
+  });
+
+  it('한글 텍스트 사이에서도 진짜 이탤릭(공백/문장부호 경계)은 정상 스트립된다(회귀 0)', () => {
+    expect(extractBriefLead('문서 _강조된 부분_ 확認')).toBe('문서 강조된 부분 확認');
+  });
+
   it('인용 마커(>)를 줄 앞에서 제거한다', () => {
     expect(extractBriefLead('> 인용된 문장')).toBe('인용된 문장');
   });
