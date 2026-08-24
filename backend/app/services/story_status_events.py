@@ -336,6 +336,20 @@ async def emit_story_status_changed(
             story.id, org_id, exc_info=True,
         )
 
+    # story #f2b66f32(3025, BE·상태 자가회수) — done 전이 시 이 story에 걸린 pending merge-type
+    # 게이트를 voided로 자가회수(승인 위조 아님, AC3 — gate_self_reclamation.py 모듈 docstring
+    # 참조). best-effort 격리(다른 side-effect들과 동일 — 실패해도 status 전이 무영향).
+    if story.status == "done":
+        try:
+            from app.services.gate_self_reclamation import reclaim_stale_merge_gates_for_story
+
+            await reclaim_stale_merge_gates_for_story(db, org_id, story.id)
+        except Exception:
+            logger.warning(
+                "merge gate 자가회수 실패(story=%s org=%s)",
+                story.id, org_id, exc_info=True,
+            )
+
 
 async def advance_story_to_done(
     db: AsyncSession,

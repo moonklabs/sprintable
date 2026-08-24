@@ -111,6 +111,61 @@ async def test_trust_pipeline_raise_does_not_propagate():
         )  # 예외 없이 반환.
 
 
+# ── story #f2b66f32(3025, BE·상태 자가회수) — merge gate 자가회수도 다른 5종과 동일하게
+#    격리돼야 한다(실패해도 done 전이 자체는 무영향). _story()는 status="done" 고정이라 이
+#    side-effect가 실제로 시도되는 경로를 그대로 탄다. ───────────────────────────────────
+@pytest.mark.anyio
+async def test_gate_self_reclamation_raise_does_not_propagate():
+    with ExitStack() as stack:
+        _base_patches(stack)
+        stack.enter_context(patch(
+            "app.services.gate_self_reclamation.reclaim_stale_merge_gates_for_story",
+            AsyncMock(side_effect=RuntimeError("reclaim down")),
+        ))
+        await emit_story_status_changed(
+            AsyncMock(), uuid.uuid4(), _story(), "in-review",
+            actor_id=uuid.uuid4(), actor_type="human",
+        )  # 예외 없이 반환.
+
+
+@pytest.mark.anyio
+async def test_gate_self_reclamation_called_only_when_status_is_done():
+    """음성대조(페드루 PO 요청) — done이 아닌 전이(예: in-progress)에서는 아예 호출 안 됨."""
+    reclaim = AsyncMock()
+    story = SimpleNamespace(
+        id=uuid.uuid4(), epic_id=None, title="S", priority="low",
+        project_id=uuid.uuid4(), status="in-progress", assignee_id=uuid.uuid4(),
+    )
+    with ExitStack() as stack:
+        _base_patches(stack)
+        stack.enter_context(patch(
+            "app.services.gate_self_reclamation.reclaim_stale_merge_gates_for_story", reclaim,
+        ))
+        await emit_story_status_changed(
+            AsyncMock(), uuid.uuid4(), story, "backlog",
+            actor_id=uuid.uuid4(), actor_type="human",
+        )
+    reclaim.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_gate_self_reclamation_called_when_status_is_done():
+    """양성대조 — done 전이에서는 실제로 호출됨(자기 자신의 story_id로)."""
+    reclaim = AsyncMock()
+    story = _story()  # status="done"
+    with ExitStack() as stack:
+        _base_patches(stack)
+        stack.enter_context(patch(
+            "app.services.gate_self_reclamation.reclaim_stale_merge_gates_for_story", reclaim,
+        ))
+        await emit_story_status_changed(
+            AsyncMock(), uuid.uuid4(), story, "in-review",
+            actor_id=uuid.uuid4(), actor_type="human",
+        )
+    reclaim.assert_awaited_once()
+    assert reclaim.call_args.args[2] == story.id
+
+
 def test_single_item_callsite_intentionally_unwrapped_source_pin():
     """단건 콜사이트(update_story_status)가 emit_story_status_changed를 try/except 없이
     부르는 것이 실수로 안 감싸진 게 아니라 #2173 판정에 근거한 의도적 상태임을 소스에 고정
