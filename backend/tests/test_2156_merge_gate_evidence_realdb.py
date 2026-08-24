@@ -569,9 +569,11 @@ async def test_gate_check_publish_fires_on_base_retarget_edit_when_story_linked(
             gate_check_publish=gate_check_publish, ungated_check_publish=[],
         )
 
+    # story #3035(2026-08-24) — 이 late-gate-creation 분기가 pr_result를 명시로 None
+    # 넘기도록 정정됐다(과거엔 생략→evaluate_merge_gate 기본값 "pass"가 낙관적으로 확定).
     evaluate.assert_awaited_once_with(
         session, org_id, story_id, pr_number=42, repo="moonklabs/sprintable",
-        ci_result=None, head_sha="newsha123",
+        ci_result=None, pr_result=None, head_sha="newsha123",
     )
     assert gate_check_publish == [{
         "org_id": org_id, "gate_id": gate_id, "head_sha": "newsha123",

@@ -538,9 +538,19 @@ async def _process_webhook_event(
             # 나중 쪽은 기존 gate를 그대로 반환) — 별도 dedup 로직 불필요.
             from app.services.merge_verdict_gate import evaluate_merge_gate as _evaluate_merge_gate
 
+            # story #3035(2026-08-24, 카디르+codex QA #3456 부수발견, PO 판정) — 이 분기
+            # 자체가 pull_request 라이프사이클 이벤트(opened/reopened/ready_for_review/
+            # synchronize) 전용이다(위 바깥 if의 pr_action 조건) — merge closed 이벤트는
+            # 함수 앞부분에서 이미 별도로 처리된다. 즉 이 시점에 PR은 **구조적으로 아직
+            # 안 머지된 상태**인데, `pr_result`를 생략하면 `evaluate_merge_gate`의 기본값
+            # "pass"가 그대로 게이트 생성 시점(neutral_facts)에 낙관적으로 확定돼 버렸다
+            # — #3033(SHA 폴백)이 세운 규율과 동일: 모름/아직-아님을 "pass"로 위조하지
+            # 않는다. 여기선 실제로 "미머지"를 안다(이벤트 종류 자체가 증거)면서도 기본값이
+            # "머지됨"을 지어내던 landmine이라 #3033보다 더 명백한 오류 — 명시로 None을
+            # 넘겨 `_decide()`가 AUTO_MERGE(pr=="pass" 요건)를 잘못 통과시키지 않게 한다.
             decision = await _evaluate_merge_gate(
                 session, org_id, story_id,
-                pr_number=pr_number, repo=repo, ci_result=None, head_sha=head_sha,
+                pr_number=pr_number, repo=repo, ci_result=None, pr_result=None, head_sha=head_sha,
             )
             if decision.gate_id is not None:
                 gate_check_publish.append({
