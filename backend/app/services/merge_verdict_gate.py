@@ -313,6 +313,49 @@ async def _observe_pr_diff_facts(
         return {}
 
 
+async def _observe_pr_reviewer_facts(
+    session: AsyncSession, org_id: uuid.UUID, repo: str, pr_number: int
+) -> dict[str, Any]:
+    """story #3014(2995 보류 결정의 관찰 슬라이스, PO 2026-08-24) — PR의 requested_reviewers를
+    **관찰 사실로만** neutral_facts에 남긴다. ⚠️판정 아님 — designated_approver_id 배선도, 어떤
+    임계값 분기도 하지 않는다(_observe_pr_diff_facts와 동형 관례). GitHub reviewer login을
+    Sprintable member_id로 바꿀 조인키가 시스템에 없음이 2995 재그라운딩에서 확定됐으므로(지어내지
+    않는다), 이 슬라이스는 raw login 문자열과 개수만 세어 "«정확히 1명» 게이트가 실제로 얼마나
+    되는지"를 실측하는 게 유일한 목적 — 그 숫자가 선행(identity linking, story de7a115b의
+    보류 사유)의 착수 우선순위를 정한다.
+
+    _observe_pr_diff_facts와 동일한 fail-open 관례: installation 없음/토큰 발급 실패/API 실패
+    어느 단계든 조용히 `{}` 반환 — 이 관찰 실패가 게이트 생성 자체를 절대 막지 않는다."""
+    from app.models.github_installation import GithubInstallation
+    from app.services.github_app import get_installation_token, get_pull_request
+
+    try:
+        installation = (
+            await session.execute(
+                select(GithubInstallation).where(
+                    GithubInstallation.org_id == org_id, GithubInstallation.suspended_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if installation is None:
+            return {}
+        token = await get_installation_token(installation.installation_id)
+        if not token:
+            return {}
+        pr = await get_pull_request(installation.installation_id, repo, pr_number)
+        if pr is None:
+            return {}
+        reviewers = pr.get("requested_reviewers") or []
+        logins = sorted({r.get("login") for r in reviewers if isinstance(r, dict) and r.get("login")})
+        return {"reviewer_count": len(logins), "reviewer_logins": logins}
+    except Exception:  # noqa: BLE001 — best-effort 관찰, 실패해도 게이트 평가를 막지 않는다.
+        logger.warning(
+            "merge gate: PR reviewer facts 관찰 실패(best-effort) org=%s repo=%s pr=%d",
+            org_id, repo, pr_number, exc_info=True,
+        )
+        return {}
+
+
 async def evaluate_merge_gate(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -459,6 +502,8 @@ async def evaluate_merge_gate(
     # no-substance shell(db_pr_number/db_repo_full_name 둘 다 None)이면 관찰 대상 자체가 없다.
     if db_pr_number is not None and db_repo_full_name is not None:
         facts.update(await _observe_pr_diff_facts(session, org_id, db_repo_full_name, db_pr_number))
+        # story #3014 — reviewer 관찰 사실(판정 무영향). _observe_pr_reviewer_facts docstring 참고.
+        facts.update(await _observe_pr_reviewer_facts(session, org_id, db_repo_full_name, db_pr_number))
     # story #2118(E-DG-REAL ②): create_gate()가 이미 pending인 기존 gate를 멱등 반환할 때(예:
     # report-done/board-preflight가 이 함수를 반복 호출)마다 승인요청 카드를 중복 배달하지 않으려면
     # "이 호출에서 방금 pending이 됐는지"(신규 생성 또는 rejected/voided→재오픈)를 알아야 한다 —
