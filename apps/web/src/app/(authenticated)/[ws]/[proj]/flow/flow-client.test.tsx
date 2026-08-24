@@ -544,14 +544,13 @@ describe('FlowPageClient — TopBar 타이틀 Heading 무게(story #2969 PR-5)',
     expect(h1?.className).not.toContain('font-medium');
   });
 
-  // story #2974(PR-D1 delta, PO 확定 2026-08-24 ③) — D1 한정 제외: font-display를 걷어냈다
-  // (font-extrabold는 유지) — TopBar가 Display 표면인지 미결정이라 D2로 판정을 미룬다.
-  // D0 원복이 아니라 "세리프 적용 대상에서만 제외".
-  it('TopBar 타이틀 h1이 D1에서는 font-display를 안 경유한다(#2974 D1 제외, font-extrabold는 유지)', async () => {
+  // story #2974 §1/§3(PR-D0) — 페이스(family)는 무게와 별개 축으로 font-display 토큰 경유
+  // (D0=Pretendard, 시각 무변화 — 세리프 전환 시 이 타이틀도 함께 전환되게 하는 배선).
+  it('TopBar 타이틀 h1이 font-display 토큰도 경유한다(#2974 D0 배선, 무게와 무관)', async () => {
     await renderFlowClient();
 
     const h1 = container.querySelector('h1');
-    expect(h1?.className).not.toContain('font-display');
+    expect(h1?.className).toContain('font-display');
     expect(h1?.className).toContain('font-extrabold');
   });
 });
