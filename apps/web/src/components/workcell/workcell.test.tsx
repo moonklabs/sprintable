@@ -188,13 +188,26 @@ describe('Workcell — story #2984 §1~§4 bento 기본 레이아웃(bentoLayout
 
   it('§2 — Brief/Run과 Evidence를 잇는 계보 연결선(가운데 트랙)이 렌더된다', () => {
     const markup = renderKo(<Workcell {...BASE} />);
-    expect(markup).toContain('col-start-2 row-start-1 row-span-2');
+    expect(markup).toContain('lg:col-start-2 lg:row-start-1 lg:row-span-2');
     expect(markup).toContain('bg-proof-line-strong');
   });
 
-  it('§4 — Evidence 셀만 elevation(--elev-overlay) 그림자를 갖고 나머지는 flat', () => {
+  // story bc9ee586(critical, 선생님 실사고 2026-08-24) — 3열 그리드가 모바일(390px)에서
+  // 그대로 유지돼 Evidence 제목 어절 세로 낙하·Run CTA 글자 꺾임. base=단일 컬럼 스택,
+  // lg: 이상만 3열(GNB lg:hidden과 일치하는 breakpoint — CLAUDE.md md 사용 금지 규율).
+  it('bc9ee586 — base는 단일 컬럼 스택(grid-cols-1), 3열/연결선은 lg: 이상에서만 적용된다', () => {
     const markup = renderKo(<Workcell {...BASE} />);
-    expect(markup).toContain('shadow-[var(--elev-overlay)]');
+    expect(markup).toContain('grid-cols-1');
+    // 연결선 wrapper는 모바일에서 숨김(hidden), lg:flex로만 드러난다.
+    expect(markup).toContain('class="hidden lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:flex lg:justify-center"');
+  });
+
+  it('§4 — Evidence 셀만 elevation(--elev-card, 인라인 카드 전용) 그림자를 갖고 나머지는 flat', () => {
+    // story #2990 §4 fast-follow(유나 확定) — elev-overlay(오버레이 전용)는 "팝오버처럼
+    // 분리"되는 의미 혼용이라 elev-card(인라인 카드 전용, 약한 강도)로 교체.
+    const markup = renderKo(<Workcell {...BASE} />);
+    expect(markup).toContain('shadow-[var(--elev-card)]');
+    expect(markup).not.toContain('shadow-[var(--elev-overlay)]');
     expect(markup).toContain('shadow-[0_1px_0_var(--proof-line)]');
   });
 
@@ -209,7 +222,7 @@ describe('Workcell — story #2984 §1~§4 bento 기본 레이아웃(bentoLayout
   it('§6 — bentoLayout={false}로 뒤집으면 §1~§4 마크업이 전부 사라지고 옛 모습으로 복귀한다', () => {
     const markup = renderKo(<Workcell {...BASE} bentoLayout={false} />);
     expect(markup).not.toContain('grid-cols-[1.7fr_4px_1fr]');
-    expect(markup).not.toContain('shadow-[var(--elev-overlay)]');
+    expect(markup).not.toContain('shadow-[var(--elev-card)]');
     expect(markup).not.toContain('role="progressbar"');
   });
 });

@@ -261,23 +261,31 @@ export function Workcell({ title, pipelineStage, brief, run, evidence, conversat
           // story #2984 §1/§2/§4 — 균등 2×2 → 크기 차등 bento(Evidence=최우선 큰 셀)+계보
           // 연결선+Evidence만 elevation. 가운데 4px 열은 연결선 전용 트랙(§2) — 매직 픽셀
           // 좌표 없이 CSS Grid 라인에 그대로 앵커링해 실 렌더 폰트/패딩에 안 흔들린다.
-          <div className="relative grid grid-cols-[1.7fr_4px_1fr] grid-rows-[auto_auto_auto] gap-3 p-3">
-            <div className="col-start-2 row-start-1 row-span-2 flex justify-center" aria-hidden="true">
+          // story bc9ee586(critical, 선생님 실사고 2026-08-24) — 3열 그리드가 모바일에서
+          // 그대로 유지돼 Evidence 제목 어절 세로 낙하·Run CTA 글자 꺾임. base=단일 컬럼
+          // 스택(DOM 순서 그대로 Evidence→Run→Brief→Conversation), lg: 이상만 3열 그리드로
+          // 전환(GNB lg:hidden과 일치하는 breakpoint — CLAUDE.md md 사용 금지 규율이라
+          // 페드루군 구두 지시의 "md:"를 lg:로 치환). 계보 연결선은 모바일에서 숨김.
+          <div className="relative grid grid-cols-1 gap-3 p-3 lg:grid-cols-[1.7fr_4px_1fr] lg:grid-rows-[auto_auto_auto]">
+            <div className="hidden lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:flex lg:justify-center" aria-hidden="true">
               <div className="relative w-[1.5px] bg-proof-line-strong">
                 <span className="absolute left-1/2 top-0 size-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-proof-ink" />
                 <span className="absolute left-1/2 top-1/2 size-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-proof-ink" />
               </div>
             </div>
-            <div className="col-start-1 row-start-1 row-span-2 overflow-hidden rounded-[10px] border border-proof-line-strong bg-proof-panel shadow-[var(--elev-overlay)]">
+            {/* story #2990 §4 fast-follow(유나 확定) — elev-overlay(오버레이 전용)는 인라인
+                카드에 과한 "팝오버처럼 분리" 신호라 elev-card(인라인 카드 전용, 약한 강도)로
+                교체. */}
+            <div className="lg:col-start-1 lg:row-start-1 lg:row-span-2 overflow-hidden rounded-[10px] border border-proof-line-strong bg-proof-panel shadow-[var(--elev-card)]">
               <EvidenceLayer evidence={evidence} />
             </div>
-            <div className="col-start-3 row-start-1 overflow-hidden rounded-[10px] border border-proof-line bg-proof-panel shadow-[0_1px_0_var(--proof-line)]">
+            <div className="lg:col-start-3 lg:row-start-1 overflow-hidden rounded-[10px] border border-proof-line bg-proof-panel shadow-[0_1px_0_var(--proof-line)]">
               <RunLayer run={run} />
             </div>
-            <div className="col-start-3 row-start-2 overflow-hidden rounded-[10px] border border-proof-line bg-proof-panel shadow-[0_1px_0_var(--proof-line)]">
+            <div className="lg:col-start-3 lg:row-start-2 overflow-hidden rounded-[10px] border border-proof-line bg-proof-panel shadow-[0_1px_0_var(--proof-line)]">
               <BriefLayer brief={brief} />
             </div>
-            <div className="col-span-3 row-start-3 overflow-hidden rounded-[10px] border border-proof-line bg-proof-panel shadow-[0_1px_0_var(--proof-line)]">
+            <div className="lg:col-span-3 lg:row-start-3 overflow-hidden rounded-[10px] border border-proof-line bg-proof-panel shadow-[0_1px_0_var(--proof-line)]">
               <ConversationLayer conversation={conversation} />
             </div>
           </div>
