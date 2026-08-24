@@ -19,6 +19,10 @@ def test_admin_billing_router_surface_is_pinned():
         ("/api/v2/admin/offering-versions", "GET"),
         ("/api/v2/admin/offering-versions", "POST"),
         ("/api/v2/admin/orgs/{org_id}/billing/credit-grant", "POST"),
+        # story #2989 — admin 결제수단 초기화(테스트/운영 개입). GET/POST만(mutation은
+        # POST로 명시 액션화 — PATCH/PUT류로 슬쩍 상태를 바꾸지 않는다는 이 파일의 원 취지와
+        # 정합).
+        ("/api/v2/admin/orgs/{org_id}/billing/reset-billing-key", "POST"),
         ("/api/v2/admin/orgs/{org_id}/billing/retry", "POST"),
     ], (
         "admin_billing 라우터 표면이 바뀌었다 — offering_version/grandfather_policy는 "

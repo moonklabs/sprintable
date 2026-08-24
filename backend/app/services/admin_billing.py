@@ -113,6 +113,30 @@ async def retry_billing_order(
     return refreshed
 
 
+async def reset_billing_key(session: AsyncSession, *, org_id: uuid.UUID, actor_email: str) -> dict:
+    """story #2989 AC3 — admin 개입용 결제수단 초기화(테스트/운영 개입, 예: 심사·테스트
+    계정 재등록). `revoke_billing_key(force=True)`로 셀프서브와 동일한 단일 레일을 타되
+    (Toss 실 폐기 먼저·DB는 그 다음 — 신규 규칙 발명 0), 활성 유료 구독 차단을 우회한다
+    (이 경로 자체가 "정상 사용자 플로우 밖의 명시적 개입"이라는 뜻이므로 그 가드가
+    여기선 장애물일 뿐 — retry_billing_order와 동형으로 이 라우터의 admin 인가
+    (require_admin_operator)가 이미 그 신뢰를 감당)."""
+    from app.services.org_billing_key import ActiveSubscriptionBlocksRevoke, revoke_billing_key
+
+    try:
+        result = await revoke_billing_key(session, org_id=org_id, actor_id=None, actor_type="agent", force=True)
+    except ActiveSubscriptionBlocksRevoke:
+        # force=True라 이 분기는 원리적으로 안 탄다 — 방어적 재-raise(향후 force 인자
+        # 제거/리팩터가 이 불변식을 실수로 깨도 조용히 안 통과하게).
+        raise AdminBillingError(409, "ACTIVE_SUBSCRIPTION_BLOCKS_REVOKE", "예상치 못한 차단(force=True인데 발생)")
+
+    _audit(
+        actor_email=actor_email, org_id=org_id, action="billing_key_reset",
+        before={"had_billing_key": result.get("deleted", False)},
+        after=result,
+    )
+    return result
+
+
 async def _derive_grant_amount_minor(session: AsyncSession, *, target_tier: GrantTier, currency: str, months: int) -> int:
     """checkout과 동일 가격 원천(offering_versions)에서 파생 — 어드민 손입력 금지(PO
     지적③: 지어낸 수를 장부에 남기지 않는다). 원천 없으면 조용한 0/추정 대신 fail loud."""

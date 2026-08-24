@@ -102,7 +102,11 @@ async def test_issue_billing_key_delegates_customer_key_to_ensure_customer_key()
 
     org_id = uuid.uuid4()
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[MagicMock(), _exec_result(MagicMock())])
+    # story #2989(PO 재지적, PR#3423 리뷰) — issue_billing_key가 덮어쓰기 前에 구
+    # encrypted_billing_key를 preread하는 session.execute 호출이 하나 더 생겼다(재발급 시
+    # 구 키 Toss 폐기용). 신규 org라 구 행이 없으므로 None — 이 값 축은 이 테스트의 관심사
+    # (ensure_customer_key 위임 확認) 밖이라 그냥 통과만 시킨다.
+    session.execute = AsyncMock(side_effect=[_exec_result(None), MagicMock(), _exec_result(MagicMock())])
     session.commit = AsyncMock()
 
     toss_response = {
@@ -125,7 +129,7 @@ async def test_issue_billing_key_delegates_customer_key_to_ensure_customer_key()
     create_call_kwargs = MockAdapter.return_value.create_billing_key.await_args.kwargs
     assert create_call_kwargs["customer_key"] == "org-converged-key"  # ensure_customer_key 값 그대로
 
-    upsert_call = session.execute.call_args_list[0]
+    upsert_call = session.execute.call_args_list[1]
     compiled = upsert_call.args[0].compile().params
     assert compiled["status"] == "active"
     assert compiled["encrypted_billing_key"] == "encrypted-value"

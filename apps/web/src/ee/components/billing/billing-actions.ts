@@ -67,3 +67,47 @@ export async function revokePendingChange(): Promise<ChangeTierOutcome> {
   const json = (await res.json()) as { data: ChangeTierResult };
   return { kind: 'active', result: json.data };
 }
+
+// story #2989 — 결제수단 조회+셀프서브 삭제. FE가 등록만 하고 지금 뭐가 등록돼 있는지
+// 보여줄 표면이 아예 없던 갭(그라운딩 실측) — 이 둘이 그 표면.
+export interface BillingKeyInfo {
+  org_id: string;
+  status: string;
+  card_issuer_code: string | null;
+  card_number_masked: string | null;
+  card_type: string | null;
+}
+
+export async function fetchBillingKey(): Promise<BillingKeyInfo | null> {
+  const res = await fetchWithAuth('/api/billing/billing-key', { credentials: 'include' });
+  if (!res.ok) return null;
+  const json = (await res.json()) as { data: BillingKeyInfo | null };
+  return json.data;
+}
+
+export type DeleteBillingKeyOutcome =
+  | { kind: 'deleted' }
+  | { kind: 'blocked'; tier: string; currentPeriodEnd: string | null }
+  | { kind: 'error'; status: number };
+
+/** 셀프서브 결제수단 삭제 — Toss 실 폐기 포함(BE revoke_billing_key). 활성 유료 구독이
+ * 있으면 서버가 409(active_subscription_blocks_revoke)로 거부한다(P3, 선생님 정책
+ * 확定 2026-08-24 — 판별자는 「현재 유효 여부」뿐, 예약된 해지/다운그레이드는 안 봄).
+ * PO 재지적(2026-08-24, PR#3423 리뷰) — 해지는 예약형(종료일까지 유효)이라 「해지 후
+ * 다시 시도」는 해지 직후에도 또 막히는 거짓 안내다. current_period_end를 그대로 전달해
+ * 화면이 실 날짜를 찍게 한다. */
+export async function deleteBillingKey(): Promise<DeleteBillingKeyOutcome> {
+  const res = await fetchWithAuth('/api/billing/billing-key', { method: 'DELETE', credentials: 'include' });
+  if (res.status === 409) {
+    const body = (await res.json().catch(() => null)) as {
+      error?: { tier?: string; current_period_end?: string | null };
+    } | null;
+    return {
+      kind: 'blocked',
+      tier: body?.error?.tier ?? '',
+      currentPeriodEnd: body?.error?.current_period_end ?? null,
+    };
+  }
+  if (!res.ok) return { kind: 'error', status: res.status };
+  return { kind: 'deleted' };
+}

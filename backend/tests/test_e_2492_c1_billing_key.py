@@ -168,9 +168,13 @@ async def test_issue_billing_key_new_org_generates_customer_key_and_persists(mon
 
     org_id = uuid.uuid4()
     session = AsyncMock()
+    # story #2989 — issue_billing_key가 덮어쓰기 前에 구 빌링키 존재여부를 먼저 읽는다
+    # (재발급 시 구 키 Toss 폐기용, PR#3423 리뷰). 신규 org라 구 행이 없으므로 None.
+    old_key_result = MagicMock()
+    old_key_result.scalar_one_or_none.return_value = None
     persisted = MagicMock()
     persisted.scalar_one.return_value = MagicMock(spec=OrgBillingKey)
-    session.execute = AsyncMock(side_effect=[MagicMock(), persisted])
+    session.execute = AsyncMock(side_effect=[old_key_result, MagicMock(), persisted])
     session.commit = AsyncMock()
 
     monkeypatch.setattr(svc, "ensure_configured", MagicMock())
@@ -189,7 +193,7 @@ async def test_issue_billing_key_new_org_generates_customer_key_and_persists(mon
     result = await svc.issue_billing_key(session, org_id=org_id, auth_key="auth_x")
 
     assert result is not None
-    insert_call = session.execute.call_args_list[0]
+    insert_call = session.execute.call_args_list[1]
     compiled_params = insert_call.args[0].compile().params
     assert compiled_params["org_id"] == org_id
     assert compiled_params["customer_key"] == "org-generated-key"
@@ -206,8 +210,10 @@ async def test_issue_billing_key_reuses_existing_customer_key(monkeypatch):
 
     org_id = uuid.uuid4()
     session = AsyncMock()
+    old_key_result = MagicMock()
+    old_key_result.scalar_one_or_none.return_value = None
     persisted = MagicMock()
-    session.execute = AsyncMock(side_effect=[MagicMock(), persisted])
+    session.execute = AsyncMock(side_effect=[old_key_result, MagicMock(), persisted])
     session.commit = AsyncMock()
 
     monkeypatch.setattr(svc, "ensure_configured", MagicMock())
@@ -256,8 +262,12 @@ async def test_issue_billing_key_reissue_bumps_updated_at(monkeypatch):
     session = AsyncMock()
     existing_result = MagicMock()
     existing_result.scalar_one_or_none.return_value = existing_row
+    # story #2989 — 구 빌링키 preread(PR#3423 리뷰 반영). None으로 두어 이 테스트의 관심사
+    # (updated_at 명시 갱신) 밖인 구 키 Toss 폐기 분기가 끼어들지 않게 한다.
+    old_key_result = MagicMock()
+    old_key_result.scalar_one_or_none.return_value = None
     persisted = MagicMock()
-    session.execute = AsyncMock(side_effect=[existing_result, MagicMock(), persisted])
+    session.execute = AsyncMock(side_effect=[existing_result, old_key_result, MagicMock(), persisted])
     session.commit = AsyncMock()
 
     monkeypatch.setattr(svc, "ensure_configured", MagicMock())
@@ -269,7 +279,7 @@ async def test_issue_billing_key_reissue_bumps_updated_at(monkeypatch):
 
     await svc.issue_billing_key(session, org_id=org_id, auth_key="auth_z")
 
-    insert_call = session.execute.call_args_list[1]
+    insert_call = session.execute.call_args_list[2]
     stmt = insert_call.args[0]
     on_conflict_set = stmt._post_values_clause.update_values_to_set
     set_columns = {c if isinstance(c, str) else c.name for c, _ in on_conflict_set}

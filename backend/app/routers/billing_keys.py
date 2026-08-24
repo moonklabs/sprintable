@@ -12,11 +12,13 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
-from app.services.org_billing_key import ensure_customer_key, issue_billing_key
+from app.models.org_billing_key import OrgBillingKey
+from app.services.org_billing_key import ActiveSubscriptionBlocksRevoke, ensure_customer_key, issue_billing_key, revoke_billing_key
 
 router = APIRouter(prefix="/api/v2/org-billing-keys", tags=["billing", "Organization"])
 
@@ -86,3 +88,67 @@ async def create_billing_key(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return BillingKeyResponse.model_validate(key)
+
+
+@router.get("", response_model=BillingKeyResponse | None)
+async def get_billing_key(
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+) -> BillingKeyResponse | None:
+    """story #2989(AC1 선행) — 저장된 결제수단을 화면에 보여줄 표면이 없던 갭(FE가 등록만
+    하고 «지금 뭐가 등록돼 있는지»를 조회할 GET이 아예 없었다, 그라운딩 실측). status=
+    'deleted'는 「지금은 없다」와 동형이라 None으로 응답(카드 흔적을 지어내지 않음)."""
+    from app.services.project_auth import is_org_owner_or_admin
+
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(status_code=403, detail="org admin/owner role required")
+
+    key = (
+        await session.execute(select(OrgBillingKey).where(OrgBillingKey.org_id == org_id))
+    ).scalar_one_or_none()
+    if key is None or key.status == "deleted":
+        return None
+    return BillingKeyResponse.model_validate(key)
+
+
+@router.delete("", response_model=dict)
+async def delete_billing_key(
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+) -> dict:
+    """story #2989 AC1·AC2 — 셀프서브 결제수단 삭제. Toss 실 폐기 포함(revoke_billing_key
+    참고). 활성 유료 구독이 있으면(P3 — 판별자는 «현재 유효 여부»뿐, 예약된 해지/다운
+    그레이드 여부는 안 봄, 선생님 정책 확定 2026-08-24) 서버가 명시 거부한다(force 인자를
+    이 라우터는 절대 안 노출 — 우회는 admin 전용 경로(admin_billing.py)뿐)."""
+    from app.services.project_auth import is_org_owner_or_admin
+
+    if not await is_org_owner_or_admin(session, uuid.UUID(auth.user_id), org_id):
+        raise HTTPException(status_code=403, detail="org admin/owner role required")
+
+    resolved_actor_id = uuid.UUID(auth.user_id)
+    try:
+        result = await revoke_billing_key(
+            session, org_id=org_id, actor_id=resolved_actor_id, actor_type="human",
+        )
+    except ActiveSubscriptionBlocksRevoke as exc:
+        # PO 재지적(2026-08-24, PR#3423 리뷰, 유나 관찰) — 해지는 예약형(종료일까지 tier가
+        # 여전히 active)이라 "해지 후 다시 시도"는 해지 직후에도 또 409가 나는 거짓 안내.
+        # current_period_end를 실어 FE가 실 날짜를 찍게 한다(파싱 없이 그대로 전달할 수
+        # 있게 ISO 문자열).
+        current_period_end_iso = exc.current_period_end.isoformat() if exc.current_period_end else None
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "active_subscription_blocks_revoke",
+                "message": (
+                    f"구독 종료일({current_period_end_iso}) 후 삭제 가능합니다."
+                    if current_period_end_iso
+                    else "활성 유료 구독이 종료된 후 결제수단을 삭제할 수 있습니다."
+                ),
+                "tier": exc.tier,
+                "current_period_end": current_period_end_iso,
+            },
+        ) from exc
+    return result

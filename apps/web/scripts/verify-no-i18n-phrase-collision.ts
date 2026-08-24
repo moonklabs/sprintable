@@ -156,6 +156,11 @@ export function flattenMessages(obj: Record<string, unknown>, prefix = ''): Map<
 //                문자열로 겹쳤다(카디르군 실측 4건, 전부 이 이름 하나가 원인). "실제로 채우는
 //                값을 먼저 읽는다"(위 규율) — checkoutDialogTitle의 기존 {tier}도 동일 축이며
 //                지금까지 우연히 이 스캔에 안 걸렸을 뿐 이름·경로류가 맞다.
+//   date       — YYYY-MM-DD 형식 캘린더 날짜(story #2989, PR#3423 리뷰 — 구독 종료일
+//                표시). payment-method-section.tsx가 채우는 값은
+//                `outcome.currentPeriodEnd?.slice(0, 10)`(예: "2026-09-24") — teamId·slug와
+//                같은 축의 «불투명 포맷 값»이지 «N개/N건류 카운트»가 아니다(자릿수가 늘거나
+//                줄어도 문법이 안 바뀜 — 이 가드가 지키려는 «수와 함께 서는 문구» 축과 무관).
 // ⛔새 이름을 여기 더하기 前에(PO 지적, 2026-08-02): 그 이름이 실제로 채우는 ko.json 값을
 // 먼저 읽는다. 정말 이름·경로류(수가 아님)면 더한다. 그런데 만약 «숫자인» 값인데 여기 걸려
 // EXEMPT_PAIRS에 다시 나타난다면, 그건 denylist 후보가 아니라 «진짜 충돌»이다 — 그 경우
@@ -165,7 +170,7 @@ export function flattenMessages(obj: Record<string, unknown>, prefix = ''): Map<
 // 재는지 모르게 되는 것)이 재발한다.
 const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   'name', 'runtime', 'filename', 'promptFile', 'gate', 'role', 'project', 'teamId', 'dir',
-  'sources', 'excludes', 'slug', 'tier',
+  'sources', 'excludes', 'slug', 'tier', 'date',
 ]);
 const PLACEHOLDER_NAME_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
 

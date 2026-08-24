@@ -2538,7 +2538,19 @@
     "packDialogConfirm": "구매 확인",
     "packDialogNote": "확인을 눌러야만 청구됩니다. 언제든 다음 결제 주기부터 해지할 수 있습니다.",
     "loadError": "요금제 정보를 불러올 수 없습니다.",
-    "memberNotice": "결제 관리는 owner 또는 admin만 가능합니다. 플랜 변경이 필요하면 관리자에게 문의해 주세요."
+    "memberNotice": "결제 관리는 owner 또는 admin만 가능합니다. 플랜 변경이 필요하면 관리자에게 문의해 주세요.",
+    "paymentMethodTitle": "결제수단",
+    "paymentMethodNone": "등록된 결제수단이 없습니다.",
+    "paymentMethodMasked": "{issuer} {number}",
+    "paymentMethodDeleteButton": "결제수단 삭제",
+    "paymentMethodDeleteConfirmTitle": "결제수단을 삭제할까요?",
+    "paymentMethodDeleteConfirmBody": "등록된 카드가 결제사에서 실제로 폐기되며, 되돌릴 수 없습니다. 새 카드는 다시 등록할 수 있습니다.",
+    "paymentMethodDeleteConfirm": "삭제",
+    "paymentMethodDeleteCancel": "취소",
+    "paymentMethodDeleteSuccess": "결제수단이 삭제되었습니다.",
+    "paymentMethodDeleteBlocked": "활성 유료 구독({tier})이 있어 결제수단을 삭제할 수 없습니다.",
+    "paymentMethodDeleteBlockedUntil": "활성 유료 구독({tier})은 {date}까지 유효합니다. 그 이후에 결제수단을 삭제할 수 있어요.",
+    "paymentMethodDeleteError": "결제수단 삭제에 실패했습니다. 잠시 후 다시 시도해주세요."
   },
   "usage": {
     "eyebrow": "OPERATOR USAGE",
