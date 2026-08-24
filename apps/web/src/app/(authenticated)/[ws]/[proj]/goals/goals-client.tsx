@@ -1065,7 +1065,9 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
         {/* story #2974(PR-D0) delta — font-display(페이스)+font-editorial-heading(무게 유틸,
             --font-weight-editorial-heading:820) 병기. docs-index.tsx 마스트헤드 주석 참고. */}
         <h1 className="mt-1.5 font-display font-editorial-heading text-[28px] leading-none tracking-[-0.03em] text-foreground sm:text-[34px]">{t('title')}</h1>
-        <hr className="my-3 h-[3px] w-16 border-0 bg-proof-citron" />
+        {/* story #2983(유나 확定) — 정적 장식 citron 퇴출(citron=live pulse 신호 전용).
+            시그니처는 무채 두께(3px)·길이로 유지. */}
+        <hr className="my-3 h-[3px] w-16 border-0 bg-proof-line-strong" />
         <p className="text-editorial-ui text-muted-foreground">
           {t('indexDek')} <span className="text-muted-foreground">{t('indexCountActive', { count: activeCount })} · {t('indexCountDone', { count: doneCount })}</span>
         </p>

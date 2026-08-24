@@ -599,7 +599,7 @@ export default function InboxPage() {
                             {(notification.type === 'agent_joined' || reasonKey) ? (
                               <div className="flex flex-wrap items-center gap-1.5">
                                 {notification.type === 'agent_joined' ? (
-                                  <Badge className="gap-0.5 bg-accent-claim/15 text-accent-claim text-[10px]">
+                                  <Badge className="gap-0.5 bg-accent-claim/15 text-foreground text-[10px]">
                                     <Bot className="size-2.5" />Bot
                                   </Badge>
                                 ) : null}
