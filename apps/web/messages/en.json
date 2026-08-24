@@ -4184,6 +4184,8 @@
     "briefRoles": "Roles",
     "briefOwner": "Owner",
     "briefAgent": "Agent",
+    "ownerUnassigned": "No owner assigned",
+    "outOfPipeline": "Done — outside trust pipeline scope",
     "runQuestion": "How far · What's needed (current activity, not a progress bar)",
     "runNow": "Now",
     "runStage": "Stage",

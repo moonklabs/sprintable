@@ -21,7 +21,9 @@ export interface WorkcellAgent {
 export interface WorkcellBrief {
   goal: string;
   dod: string;
-  owner: WorkcellOwner;
+  /** story #2993(PO 확定①) — 에이전트 단독배정 스토리도 Workcell을 렌더한다(허구 human
+   * 금지 원칙은 유지 — 없으면 null로 정직하게 "책임자 미지정" 표시, 지어내지 않음). */
+  owner: WorkcellOwner | null;
   agent?: WorkcellAgent;
   scopes?: string[];
 }
@@ -65,8 +67,11 @@ export type WorkcellPipelineStage = 'queued' | 'running' | 'needs_input' | 'clai
 export interface WorkcellProps {
   title: string;
   /** story #2922 — 구 단일 proofState 배지(3색 점+텍스트)를 헤더 6상태 파이프라인 스테퍼로
-   * 대체(doc workcell-redesign-2922 축②). */
-  pipelineStage: WorkcellPipelineStage;
+   * 대체(doc workcell-redesign-2922 축②). story #2993(PO 확定②) — null=이 스토리가 신뢰
+   * 파이프라인 스코프 밖(현재는 done만 해당, BE trust_pipeline.derive_trust_stage §7 확定④
+   * 그대로)일 때. status 기반 합성 stage로 되돌리지 않고(#2933 H1 조건②가 금지) 정직한
+   * "파이프라인 범위 밖" 표시로 대체한다. */
+  pipelineStage: WorkcellPipelineStage | null;
   brief: WorkcellBrief;
   run: WorkcellRun;
   /** null = 아직 증거 없음(정직한 빈 상태) — Proof Capsule 컴포넌트 그대로 재사용. */
@@ -227,7 +232,7 @@ function ConfidenceGauge({ stage }: { stage: WorkcellPipelineStage }) {
  */
 export function Workcell({ title, pipelineStage, brief, run, evidence, conversation, className, bentoLayout = true }: WorkcellProps) {
   const t = useTranslations('workcell');
-  const railState = PIPELINE_STAGE_TRUST_COLOR[pipelineStage];
+  const railState = pipelineStage ? PIPELINE_STAGE_TRUST_COLOR[pipelineStage] : undefined;
   return (
     // story #2955 §5 — 인라인 clip-path를 정본 `.proof-cut` 유틸(globals.css)로 이관(24px 기본값 그대로).
     <div className={cn('proof-cut flex overflow-hidden rounded-[6px] border border-proof-line bg-proof-panel', className)}>
@@ -236,17 +241,31 @@ export function Workcell({ title, pipelineStage, brief, run, evidence, conversat
       {railState ? <Proofline state={railState} /> : <div className="w-1 shrink-0 self-stretch bg-proof-line" aria-hidden="true" />}
       <div className="min-w-0 flex-1">
         <div className="border-b border-proof-line px-4.5 py-3.5">
-          {/* story #2984 §3/§6 — bentoLayout=true(기본)면 색 스테퍼 대신 물리량 게이지. */}
-          {bentoLayout ? <ConfidenceGauge stage={pipelineStage} /> : <PipelineStepper stage={pipelineStage} />}
+          {/* story #2984 §3/§6 — bentoLayout=true(기본)면 색 스테퍼 대신 물리량 게이지.
+              story #2993(PO 확定②) — pipelineStage=null이면 게이지/스테퍼 대신 정직한
+              "파이프라인 범위 밖" 표시(합성 stage 금지, #2933 H1 조건②). */}
+          {pipelineStage
+            ? (bentoLayout ? <ConfidenceGauge stage={pipelineStage} /> : <PipelineStepper stage={pipelineStage} />)
+            : <p className="text-[11px] font-semibold text-proof-ink-3" data-testid="workcell-out-of-pipeline">{t('outOfPipeline')}</p>}
           <span className="text-[17px] font-bold leading-tight tracking-[-0.012em] text-proof-ink">{title}</span>
           {/* story #2922 W4 — 책임자/실행자를 헤더로 승격("10초 리트머스": 스크롤 없이 «누가»가
               보임). #3339(2921 아바타 단일통합)가 ProofAvatar를 폐기·Avatar로 수렴시켰다 —
               여기도 그 정본을 그대로 소비(신규 변형 0). Brief 구획의 중복 표기는 제거(SSOT=
-              헤더 이 한 자리). */}
+              헤더 이 한 자리). story #2993(PO 확定①) — owner=null(에이전트 단독배정)이면
+              지어내지 않고 "책임자 미지정" 정직 표시(muted). */}
           <div className="mt-2 flex flex-wrap items-center gap-3.5 text-[11px] text-proof-ink-3">
             <span className="inline-flex items-center gap-1.5">
-              <Avatar name={brief.owner.name} actorType="human" size={18} />
-              {t('briefOwner')} {brief.owner.name}
+              {brief.owner ? (
+                <>
+                  <Avatar name={brief.owner.name} actorType="human" size={18} />
+                  {t('briefOwner')} {brief.owner.name}
+                </>
+              ) : (
+                // story #2993 — 유나 design 판정(2026-08-24): text-proof-faint는 라이트 대비
+                // ~2.72(AA 미달)+"조용히 소실"이라 지정을 촉진 못 함. text-proof-ink-3(4.9)로
+                // 상향 — 읽히되 과하지 않은 muted.
+                <span className="text-proof-ink-3">{t('ownerUnassigned')}</span>
+              )}
             </span>
             {brief.agent ? (
               <span className="inline-flex items-center gap-1.5">

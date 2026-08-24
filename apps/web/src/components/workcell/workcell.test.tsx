@@ -367,3 +367,34 @@ describe('Workcell — story #2922 W5 Conversation 구획 = ChatProofSection 요
     expect(markup).toContain('댓글 2건');
   });
 });
+
+// story #2993(PO 확定①②, 2026-08-24) — pipelineStage/owner 둘 다 이전엔 null이면 Workcell
+// 전체를 지웠다("주전장이 안 보인다" 실사고 근본원인). 이제 무조건 렌더하고 각자 정직한
+// 빈 상태로 대체한다(합성값 금지 — #2933 H1 조건②·no-fiction 유지).
+describe('Workcell — story #2993 pipelineStage/owner null 정직 빈 상태(합성 금지)', () => {
+  it('pipelineStage=null이면 게이지/스테퍼 대신 "파이프라인 범위 밖" 표시, role=progressbar/listitem 렌더 안 함', () => {
+    const markup = renderKo(<Workcell {...BASE} pipelineStage={null} />);
+    expect(markup).toContain('완료 — 신뢰 파이프라인 범위 밖');
+    expect(markup).not.toContain('role="progressbar"');
+    expect(markup).not.toContain('role="listitem"');
+  });
+
+  it('pipelineStage=null이어도 나머지 구획(Brief/Run/Evidence/Conversation)은 그대로 렌더된다', () => {
+    const markup = renderKo(<Workcell {...BASE} pipelineStage={null} />);
+    expect(markup).toContain('Brief');
+    expect(markup).toContain('Run');
+    expect(markup).toContain('Evidence');
+    expect(markup).toContain('Conversation');
+  });
+
+  it('brief.owner=null이면 "책임자 미지정" 정직 표시(허구 human 이름 없음)', () => {
+    const markup = renderKo(<Workcell {...BASE} brief={{ ...BASE.brief, owner: null }} />);
+    expect(markup).toContain('책임자 미지정');
+    expect(markup).not.toContain('책임 윤재');
+  });
+
+  it('agent만 있고 owner=null이어도 agent 표기는 정상 렌더(둘은 독립 축)', () => {
+    const markup = renderKo(<Workcell {...BASE} brief={{ ...BASE.brief, owner: null }} />);
+    expect(markup).toContain('실행 미르코군');
+  });
+});
