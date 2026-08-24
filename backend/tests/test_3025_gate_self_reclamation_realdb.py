@@ -120,6 +120,33 @@ async def test_negative_control_doc_approval_untouched():
 
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 @pytest.mark.anyio
+async def test_negative_control_qa_gate_on_story_untouched():
+    """음성대조(story #d2dad0d2, 카디르 QA(#3454) 부수 발견) — doc_approval 음성대조는
+    gate_type·work_item_type 두 축을 동시에 바꿔 시딩돼, gate_type=="merge" 필터만 mutation
+    으로 제거해도 work_item_type 축이 여전히 걸러 vacuous(그 mutation을 못 잡음). 진짜 인접
+    위험은 gate_type="qa"+work_item_type="story"(라이브 실재 조합, work_item_type은 대상
+    story와 동일) — 이 축만 다르게 시딩해 gate_type 필터 단독 mutation을 정확히 잡는다."""
+    from app.services.gate_self_reclamation import reclaim_stale_merge_gates_for_story
+    engine, Session = await _session()
+    async with Session() as s:
+        org = uuid.uuid4()
+        story_id = uuid.uuid4()
+        qa_gate, _ = await _seed_gate(
+            s, org, story_id, gate_type="qa", work_item_type="story", with_step_run=False,
+        )
+        await s.commit()
+
+        reclaimed = await reclaim_stale_merge_gates_for_story(s, org, story_id)
+        await s.commit()
+
+        assert reclaimed == []
+        await s.refresh(qa_gate)
+        assert qa_gate.status == "pending"  # 완전 무변경 — merge가 아닌 qa 게이트는 안 건드림.
+    await engine.dispose()
+
+
+@pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
+@pytest.mark.anyio
 async def test_negative_control_other_story_untouched():
     """음성대조 — 다른 story_id의 게이트는 안 건드림(work_item_id 정확 매치만)."""
     from app.services.gate_self_reclamation import reclaim_stale_merge_gates_for_story

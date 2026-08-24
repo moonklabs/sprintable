@@ -26,6 +26,10 @@ export const REPORT_DENSITY_MIN_CHARS = 400;
 
 function stripInlineMarkers(text: string): string {
   return text
+    // story #3030 — 삼중별표(***bold+italic***)는 아래 굵게(**) 패턴이 먼저 잡으면 한
+    // 쪽에 별표 하나씩 잔존한다(`**`가 안쪽 2개만 소비, 바깥쪽 1개씩 남음) — 굵게보다
+    // 먼저 3개짜리를 통째로 벗겨야 한다.
+    .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/`([^`]*)`/g, '$1')
     .trim();
@@ -71,10 +75,16 @@ export function extractLeadSentence(content: string): string {
   if (!trimmed) return '';
 
   const newlineIdx = trimmed.indexOf('\n');
-  const puncMatch = trimmed.match(/[.!?](?:\s|$)/);
-  const puncIdx = puncMatch && puncMatch.index !== undefined ? puncMatch.index + 1 : -1;
+  // story #3030 — 예전엔 .match()(non-global)라 마침표 후보가 첫 하나뿐이었다. 그 첫
+  // 마침표가 마커 불균형 지점에 떨어지면(예: "**Summary. Done** 이어지는 문장.") 뒤에
+  // 더 이른(=더 짧은) 균형 잡힌 경계가 있어도 못 찾고 바로 전체 폴백으로 건너뛰었다 —
+  // matchAll로 전 구간 후보를 모아 그중 가장 이른 균형 경계를 채택한다.
+  const puncIndices = [...trimmed.matchAll(/[.!?](?:\s|$)/g)]
+    .map((m) => m.index)
+    .filter((idx): idx is number => idx !== undefined)
+    .map((idx) => idx + 1);
 
-  const candidates = [puncIdx, newlineIdx].filter((n) => n !== -1).sort((a, b) => a - b);
+  const candidates = [...puncIndices, newlineIdx].filter((n) => n !== -1).sort((a, b) => a - b);
   const end = candidates.find((c) => isBalancedCut(trimmed.slice(0, c))) ?? trimmed.length;
 
   return stripInlineMarkers(trimmed.slice(0, end));

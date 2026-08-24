@@ -96,6 +96,31 @@ describe('extractLeadSentence (story #ec57c80c — 첫 문장 verbatim, 3015 규
       expect(extractLeadSentence('**중요**. 둘째 문장.')).toBe('중요.');
     });
   });
+
+  // story #3030 — 카디르 #3448 재QA 중 codex 비차단 발견①: 경계 탐색이 .match()(non-global)라
+  // 첫 마침표만 후보였다. 첫 마침표가 불균형이면(뒤에 더 균형 잡힌 경계가 있어도) 곧장 전체
+  // 폴백으로 건너뛰었다 — matchAll로 전 구간을 순회해 가장 이른 균형 경계를 찾도록 fix.
+  describe('story #3030 — global 경계 탐색(첫 마침표 불균형이어도 뒤의 균형 경계를 찾는다)', () => {
+    it('첫 마침표가 볼드 중간(불균형)이어도 그 뒤의 균형 잡힌 마침표에서 끊는다(전체 폴백 아님)', () => {
+      const content = '**Summary. Done** 계속되는 문장입니다. 셋째 문장.';
+      const lead = extractLeadSentence(content);
+      expect(lead).toBe('Summary. Done 계속되는 문장입니다.');
+      expect(lead).not.toContain('셋째');
+    });
+  });
+
+  // story #3030 — 카디르 #3448 재QA 중 codex 비차단 발견②: 삼중별표(***bold+italic***)를
+  // 기존 굵게(**) 정규식이 안쪽 2개만 소비해 바깥쪽에 별표 1개씩 잔존시켰다.
+  describe('story #3030 — 삼중별표(bold+italic) 스트립', () => {
+    it('***bold+italic***을 낱개 별표 잔존 없이 완전히 벗긴다', () => {
+      expect(extractLeadSentence('***강조된 문장***입니다')).toBe('강조된 문장입니다');
+    });
+
+    it('삼중별표 뒤에 일반 굵게가 이어져도 각각 정확히 스트립된다(회귀 0)', () => {
+      expect(extractLeadSentence('***매우 중요*** 그리고 **일반 강조**도 있다'))
+        .toBe('매우 중요 그리고 일반 강조도 있다');
+    });
+  });
 });
 
 describe('extractTopLevelItems (story #ec57c80c — 최상위 목록만, 하위/표/산문 제외)', () => {
