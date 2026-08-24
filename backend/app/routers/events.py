@@ -264,6 +264,18 @@ async def push_to_org_members(
         _push_to_agent(mid, {"event_type": event_type, **data})
 
 
+def _should_skip_live_event(eid: str | None, sent_event_ids: set[str]) -> bool:
+    """story #3026 — 라이브 루프의 pre-yield dedup 판단을 순수함수로 뽑아 직접 단위테스트
+    가능하게 한다(generate()는 클로저라 직접 호출 불가). `sent_event_ids`는 **연결-로컬**
+    집합이어야 한다 — 이 함수 자체는 그 계약을 강제하지 않으므로(순수함수라 호출자 책임),
+    호출부(generate())가 매 연결마다 새 집합을 만들어 넘기는 것으로 보장한다. 예전엔 이
+    판단을 `Event.status`(DB, org 전체 공유)로 했다 — 같은 member의 다른 연결이 먼저
+    yield하면 이 함수 상당 로직이 전역적으로 "이미 처리됨"을 봐서, 자기 큐에 항목이 와
+    있는 다른 연결까지 전부 skip시켰다(#3026 실사고 근본원인, 968fe78d 실측). 연결-로컬
+    집합으로 바꾸면 그 결함이 구조적으로 성립 안 한다."""
+    return bool(eid) and eid in sent_event_ids
+
+
 def _event_to_payload(event: "Event") -> dict:
     return {
         "event_id": str(event.id),
@@ -396,6 +408,19 @@ async def agent_event_stream(
     _lifespan_deadline = time.monotonic() + _SSE_LIFESPAN_SEC + random.uniform(0, _SSE_LIFESPAN_JITTER_SEC)
 
     async def generate():
+        # story #3026(실사고, PO 확定 2026-08-24) — 이 연결이 실제로 클라에 내보낸(yield
+        # 성공한) A계열(eid 有) event_id 집합. **연결-로컬**이다(다른 연결과 공유 안 함) —
+        # 이게 이 스토리의 핵심 처방. 예전엔 이 dedup을 `Event.status`(DB, org 전체 공유
+        # 상태)로 판별해 "같은 member의 다른 연결(다른 탭·프로브·잔존 연결)이 먼저 yield해
+        # delivered로 찍으면 나머지 연결 전부가 스킵"되는 결함이 있었다(동시 연결 N개 중
+        # 1개만 실제 갱신 — 968fe78d 실사고 실측, delivered_at 편차 +0.1s~+103s). `_push_to_
+        # agent`의 fan-out(멤버의 모든 큐에 push) 자체는 정상이었으므로, 문제는 순전히 "누가
+        # 이미 봤나"를 연결이 아니라 이벤트 자체에 물었던 것 — 연결-로컬 집합으로 바꾸면
+        # 같은 연결 내 중복(백필+라이브 겹침)은 그대로 막히면서, 다른 연결은 서로 완전히
+        # 독립적으로 판단해 진짜 fan-out이 된다. `Event.status`/`delivered_at` DB 마킹
+        # 자체는 그대로 유지(백필 원칙 — "재연결 시 이미 delivered여도 다시 준다"는 이
+        # 값을 재연결 커서 판정에 계속 쓴다, 라이브 dedup의 판단 근거로만 안 쓸 뿐).
+        _sent_event_ids: set[str] = set()
         try:
             # 즉시 heartbeat → HTTP 응답 헤더 즉시 반환 (대량 백필 전 hang 방지)
             yield "event: heartbeat\ndata: {}\n\n"
@@ -514,6 +539,10 @@ async def agent_event_stream(
                     # 남아 영구 누락. 후마킹 + 클라 seen_ids dedup 으로 손실 0(재전송 허용).
                     for data, evt in zip(batch_data, batch):
                         yield f"event: {evt.event_type}\nid: {evt.id}\ndata: {json.dumps({**data, 'is_backfill': True})}\n\n"
+                        # story #3026 — 이 연결이 백필로 이미 내보낸 id. 아래 라이브 루프의
+                        # 큐에 같은 event_id가 겹쳐 들어와도(레이스 윈도우) 이 연결에서 또
+                        # 안 보낸다(연결-로컬 dedup, DB 공유상태 아님).
+                        _sent_event_ids.add(str(evt.id))
                     for evt in batch:
                         evt.status = "delivered"
                         evt.delivered_at = now
@@ -578,24 +607,17 @@ async def agent_event_stream(
                             continue
                         event_data = get_task.result()
                         event_type = event_data.get("event_type", "message")
-                        # 1c22da3e fix: yield 전엔 pending 여부만 확인(skip 판정, 마킹 X),
-                        # delivered 마킹은 yield 성공 후로 미룬다 → yield 실패 시 영구 누락 방지.
+                        # story #3026 — dedup 판단은 이 연결이 이미 보냈는지(연결-로컬
+                        # `_sent_event_ids`)만 본다. ⚠️예전엔 여기서 `Event.status`(DB, org
+                        # 전체 공유)를 조회해 "이미 delivered"면 skip했는데, 그러면 같은
+                        # member의 다른 연결이 먼저 yield한 순간 **이 연결은 자기 큐에 항목이
+                        # 와 있어도 영원히 못 보낸다**(동시 다중 탭 중 1개만 갱신되는 실사고
+                        # 근본원인, 968fe78d 실측). 연결-로컬 판단으로 바꾸면 그 결함이
+                        # 구조적으로 성립 안 한다 — 부수로 매 라이브 이벤트마다의 DB 왕복도
+                        # 없앴다(hot-path DB 0, #2158 B계열과 동일 원칙을 A계열에도 적용).
                         eid = event_data.get("event_id")
-                        if eid:
-                            try:
-                                async with async_session_factory() as db:
-                                    r = await db.execute(
-                                        select(Event.status).where(
-                                            Event.id == uuid.UUID(eid),
-                                            Event.org_id == org_id,
-                                        )
-                                    )
-                                    _status = r.scalar_one_or_none()
-                                    if _status is not None and _status != "pending":
-                                        # 이미 백필/타 연결에서 delivered → 중복 skip
-                                        continue
-                            except Exception:
-                                pass
+                        if _should_skip_live_event(eid, _sent_event_ids):
+                            continue  # 이 연결이 이미 보낸 id(백필 또는 이전 라이브) — 중복 skip.
                         # event_id 없는 경로(chats direct push 등)도 id: 보장 — 재연결 추적 약화 방지
                         # is_backfill: False 명시 + event_id 동기화 — SeenIdsCache dedup 및 relay 필터 정합성
                         # #2158: B계열은 `_push_to_agent`가 발행 시점에 부여한 `_sse_transient_id`를
@@ -610,6 +632,12 @@ async def agent_event_stream(
                         if event_type == "conversation.message_created":
                             yield f"event: conversation:message\nid: {_live_id}\ndata: {_sse_data}\n\n"
                         yield f"event: {event_type}\nid: {_live_id}\ndata: {_sse_data}\n\n"
+                        # story #3026 — 이 연결이 방금 보낸 id를 기록(연결-로컬, 위 pre-yield
+                        # 체크가 읽는 그 집합). yield가 여기까지 왔다는 건 이미 성공했다는
+                        # 뜻이라 실패 시 기록 안 남는 걱정은 없다(아래 DB 마킹과 동일 순서
+                        # 원칙 — "성공 후에만" 기록).
+                        if eid:
+                            _sent_event_ids.add(eid)
                         # yield 성공 후 delivered 마킹 (1c22da3e: 손실 방지, dup은 클라 dedup)
                         if eid:
                             try:
