@@ -394,4 +394,63 @@ describe('useSseMultiplexer — story #2078', () => {
       vi.useRealTimers();
     });
   });
+
+  // story #2987(선생님 실사용 지적) — "앱을 나갔다 들어와야 채팅이 갱신된다"의 근본원인
+  // 회귀가드. readyState는 좀비 커넥션(브라우저가 아직 못 알아챈 죽은 소켓)을 못 잡으므로,
+  // 가시성 복귀 시 그걸 안 보고 무조건 강제 재연결해야 한다.
+  describe('가시성 복귀 강제 재연결(#2987)', () => {
+    function setVisibility(state: DocumentVisibilityState) {
+      Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }
+
+    afterEach(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    });
+
+    it('임계값(3s) 이상 숨겨졌다 돌아오면 기존 커넥션을 닫고 새로 연다', async () => {
+      vi.useFakeTimers();
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      act(() => { instances[0]!.onopen?.(); });
+      expect(instances).toHaveLength(1);
+
+      act(() => { setVisibility('hidden'); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      act(() => { setVisibility('visible'); });
+
+      expect(instances).toHaveLength(2);
+      expect(instances[0]!.closed).toBe(true);
+      vi.useRealTimers();
+    });
+
+    it('임계값(3s) 미만의 짧은 전환은 재연결하지 않는다 — 처칭 방지', async () => {
+      vi.useFakeTimers();
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      act(() => { instances[0]!.onopen?.(); });
+
+      act(() => { setVisibility('hidden'); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      act(() => { setVisibility('visible'); });
+
+      expect(instances).toHaveLength(1);
+      vi.useRealTimers();
+    });
+
+    it('강제 재연결이 열리면 backoff 이력과 무관하게 subscribeReconnect 핸들러가 불린다(backfill 트리거)', async () => {
+      vi.useFakeTimers();
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      const onReconnect = vi.fn();
+      await act(async () => { handle!.subscribeReconnect(onReconnect); });
+      act(() => { instances[0]!.onopen?.(); }); // 최초 open(onError 이력 없음)
+      expect(onReconnect).not.toHaveBeenCalled();
+
+      act(() => { setVisibility('hidden'); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      act(() => { setVisibility('visible'); });
+      act(() => { instances[1]!.onopen?.(); }); // 강제 재연결의 새 커넥션이 open
+
+      expect(onReconnect).toHaveBeenCalledTimes(1);
+      vi.useRealTimers();
+    });
+  });
 });

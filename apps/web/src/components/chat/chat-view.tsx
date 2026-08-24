@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, RefreshCw } from 'lucide-react';
+import { ChevronLeft, RefreshCw, WifiOff } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChatBubble } from './chat-bubble';
@@ -372,12 +372,25 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
   useEffect(() => { void fetchWorking(); }, [fetchWorking]);
 
-  useChatSse({
+  // story #2987 — AC2 후반(연결 끊김 표시+수동 갱신). `connected`는 훅이 이미 반환하던 값
+  // (mux 경로는 getter로 최신값을 항상 읽되 참조 안정적 — story #2144)인데 이 컴포넌트가
+  // 그동안 아무도 안 읽고 있었다.
+  const { connected } = useChatSse({
     currentTeamMemberId,
     onConversationMessage: handleConversationMessage,
     onWorking: handleWorking,
     onReconnect: handleReconnect,
   });
+  // 짧은 순단(정상 60초 재연결 사이클, sse-reconnect-backoff.ts 주석 참고)까지 매번 배너를
+  // 띄우면 소음이라, 끊김이 일정 시간(2s) 이상 지속될 때만 보인다 — 자동 재연결(#2987 §1)이
+  // 대부분 그 안에 복구하므로 실사용자는 배너를 거의 못 본다. 안 붙으면(주소창 없는 앱에서
+  // 자동 재연결도 실패) 수동 갱신 affordance가 유일한 탈출구가 된다.
+  const [showDisconnectedBanner, setShowDisconnectedBanner] = useState(false);
+  useEffect(() => {
+    if (connected) { setShowDisconnectedBanner(false); return; }
+    const timer = setTimeout(() => setShowDisconnectedBanner(true), 2000);
+    return () => clearTimeout(timer);
+  }, [connected]);
 
   // fix: popstate — 스레드/리딩패널 열린 상태에서만 가로채기 (Next.js 네비게이션 비간섭)
   useEffect(() => {
@@ -781,6 +794,24 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
         {/* Main chat — AC8: 모바일에서 스레드/리딩패널 뷰 활성 시 hidden */}
         <div className={`flex min-w-0 flex-1 flex-col overflow-hidden ${isMobileRightPanelView ? 'hidden lg:flex' : 'flex'}`}>
+          {/* story #2987 AC2 후반 — 자동 재연결(§1)이 대부분 소리 없이 복구하지만, 실패하면
+              (예: 서버가 실제로 죽음) 주소창 없는 앱에선 새로고침 우회조차 없다 — 수동 갱신
+              affordance가 유일한 탈출구. 빨강(destructive) 아님 — "네가 실패했다"가 아니라
+              "연결이 끊긴 상태"(reference-drop-notice.tsx와 동일 warning-tint 관례). */}
+          {showDisconnectedBanner && (
+            <div className="flex flex-shrink-0 items-center gap-2 border-b border-warning-border bg-warning-tint px-3 py-2 text-xs text-foreground">
+              <WifiOff className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="flex-1">{t('connectionLost')}</span>
+              <button
+                type="button"
+                onClick={() => void fetchMessages()}
+                className="flex items-center gap-1 rounded px-1.5 py-1 font-medium hover:bg-warning-border/40"
+              >
+                <RefreshCw className="h-3 w-3" />
+                {t('refreshNow')}
+              </button>
+            </div>
+          )}
           {/* Messages */}
           <div
             ref={scrollRef}
