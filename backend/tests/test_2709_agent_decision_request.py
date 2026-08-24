@@ -59,6 +59,29 @@ async def _seed_org_project(session):
     return org.id, project.id
 
 
+async def _seed_human_member(session, org_id, *, user_id=None, role="member"):
+    """story #3004(선생님 정책 확定 2026-08-24) — approver_member_id가 create_decision_request의
+    필수 인자가 되며, 실 HTTP 왕복 테스트는 (a) 호출자를 실 User+OrgMember로(카디르 CRITICAL,
+    PR #3435 QA — resolve_member가 JWT 분기에서 OrgMember.user_id를 조회하므로 seed 없이는
+    400 Organization member not found) (b) 지정할 owner/admin 대상도 실 OrgMember로 갖춰야
+    한다. user_id를 지정하면(호출자 축) 그 값으로 User를 만들어 auth.user_id와 정확히
+    일치시킨다."""
+    from app.core.security import hash_password
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    uid = user_id or uuid.uuid4()
+    session.add(User(
+        id=uid, email=f"u-{uid.hex[:8]}@test.com",
+        hashed_password=hash_password("x"), is_active=True, email_verified=True,
+    ))
+    await session.commit()
+    member_id = uuid.uuid4()
+    session.add(OrgMember(id=member_id, org_id=org_id, user_id=uid, role=role))
+    await session.commit()
+    return member_id
+
+
 @pytest.mark.anyio
 async def test_self_referencing_anchor_gate_id_equals_work_item_id():
     """gate.id == gate.work_item_id — 1 INSERT 원자 생성(생성 後 UPDATE 2단계 아님)."""
@@ -224,13 +247,19 @@ async def test_http_endpoint_creates_pending_low_risk_decision_gate():
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s)
-        caller_id = uuid.uuid4()
+            caller_id = uuid.uuid4()  # User.id — 아래서 그대로 seed(auth.user_id와 일치시킴).
+            await _seed_human_member(s, org_id, user_id=caller_id, role="member")
+            approver_member_id = await _seed_human_member(s, org_id, role="admin")
         await _setup_app_jwt(app, Session, org_id, project_id, caller_id)
         client = _client_for(app)
         try:
             resp = await client.post(
                 "/api/v2/gates/decisions",
-                json={"question": "approach A or B?", "assumption": "A", "options": ["A", "B"]},
+                json={
+                    "question": "approach A or B?", "assumption": "A", "options": ["A", "B"],
+                    # story #3004 — 이제 필수(미지정 400 APPROVER_REQUIRED).
+                    "approver_member_id": str(approver_member_id),
+                },
             )
             assert resp.status_code == 201, resp.text
             body = resp.json()
