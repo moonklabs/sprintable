@@ -146,6 +146,30 @@ describe('인박스 알림 그룹핑 — story #0d1c69f3(v2 4호, 라이브 121�
     expect(pushMock).toHaveBeenCalledWith('/gates/gate-target-b');
   });
 
+  // 페드루군 부수 지적(#3450, 비차단) — generic 그룹은 121개 서로 다른 대상을 묶은 것이라
+  // 헤더 클릭이 "최신 1건" 같은 임의 대상으로 내비하면 나머지 120건은 못 찾는다(정직 유의
+  // 위반). 헤더 클릭은 펼침 토글만 해야 하고 router.push는 절대 호출되면 안 된다.
+  it('그룹 헤더(칩·chevron이 아닌 본문) 클릭은 펼침 토글만 하고, 임의 대상으로 내비하지 않는다', async () => {
+    const items = [genericGateNotif('n1', 'gate-a'), genericGateNotif('n2', 'gate-b')];
+    stubFetch(items);
+    const { default: InboxPage } = await import('./page');
+    await mount(InboxPage);
+
+    const chevronBtn = [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label')?.includes('펼치기'))!;
+    const headerBtn = [...container.querySelectorAll('button')].find(
+      (b) => b !== chevronBtn && b.textContent?.includes('결재 대기 중인 게이트가 있습니다'),
+    );
+    expect(headerBtn).toBeTruthy();
+
+    await act(async () => { headerBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); });
+
+    // 임의 내비 없음(latest.href로도 도망가지 않음) — 대신 펼쳐져 개별 CTA가 나타난다.
+    expect(pushMock).not.toHaveBeenCalled();
+    const ctaLinks = [...container.querySelectorAll('a')].filter((a) => a.textContent === '열기 →');
+    expect(ctaLinks).toHaveLength(2);
+  });
+
   it('짧은(비반복) 알림 상태에서는 그룹핑이 미발동한다 — 개별 그대로(AC3 회귀 가드)', async () => {
     stubFetch([docApprovalNotif('solo')]);
     const { default: InboxPage } = await import('./page');

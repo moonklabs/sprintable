@@ -65,6 +65,29 @@ describe('groupByIdenticalContent (story #0d1c69f3, v2 4호 — 제네릭 알림
     const sizes = groups.map((g) => g.notifications.length).sort();
     expect(sizes).toEqual([2, 3]);
   });
+
+  // 카디르 QA(#3450) 적출 — 옛 `${type}::${title}::${body}` 문자열 조인 키는 title/body
+  // 안의 리터럴 "::"와 델리미터가 충돌해, title='b::c'+body='d'와 title='b'+body='c::d'가
+  // 같은 조인 문자열이 돼 서로 다른 알림이 한 그룹으로 오분류됐다(카디르 재현 그대로).
+  it('title/body 안에 "::" 리터럴이 있어도 서로 다른 알림을 한 그룹으로 오분류하지 않는다', () => {
+    const items = [
+      n({ id: 'x', title: 'b::c', body: 'd' }),
+      n({ id: 'y', title: 'b', body: 'c::d' }),
+    ];
+    const { groups, ungrouped } = groupByIdenticalContent(items);
+    expect(groups).toHaveLength(0);
+    expect(ungrouped.map((it) => it.id).sort()).toEqual(['x', 'y']);
+  });
+
+  it('실제로 title/body가 완전히 같으면(리터럴 "::" 포함) 정상적으로 묶인다(양성대조)', () => {
+    const items = [
+      n({ id: 'x', title: 'a::b', body: 'c::d' }),
+      n({ id: 'y', title: 'a::b', body: 'c::d' }),
+    ];
+    const { groups } = groupByIdenticalContent(items);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.notifications.map((it) => it.id).sort()).toEqual(['x', 'y']);
+  });
 });
 
 describe('referenceTypeLabel (story #0d1c69f3 — 구체 참조 칩 라벨)', () => {

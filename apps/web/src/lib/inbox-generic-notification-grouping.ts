@@ -25,7 +25,12 @@ export function groupByIdenticalContent<T extends GenericGroupable>(
 ): { groups: GenericGroup<T>[]; ungrouped: T[] } {
   const buckets = new Map<string, T[]>();
   for (const n of items) {
-    const key = `${n.type}::${n.title}::${n.body ?? ''}`;
+    // 카디르 QA(#3450) 적출 — 예전엔 `${type}::${title}::${body}` 문자열 조인이었는데,
+    // title/body는 자유텍스트(BE 생성)라 그 안에 "::"가 실제로 들어올 수 있다(예:
+    // title='b::c'+body='d' 가 title='b'+body='c::d' 와 같은 조인 문자열이 돼 서로 다른
+    // 알림이 한 그룹으로 오분류된다). JSON.stringify는 각 필드를 이스케이프해 실어서
+    // 배열 경계가 절대 안 흔들린다.
+    const key = JSON.stringify([n.type, n.title, n.body ?? '']);
     const arr = buckets.get(key) ?? [];
     arr.push(n);
     buckets.set(key, arr);
