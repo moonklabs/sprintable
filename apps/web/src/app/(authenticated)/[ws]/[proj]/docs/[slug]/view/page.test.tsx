@@ -86,11 +86,13 @@ describe('DocViewPage — 에디토리얼 리더 배선(§3)', () => {
   });
 
   // story #2974 §1/§3(PR-D0) — 리더 마스트헤드 h1이 font-display 토큰 경유(D0=Pretendard,
-  // 시각 무변화).
-  it('마스트헤드 h1이 font-display 토큰을 경유한다(#2974 D0 배선)', async () => {
+  // 시각 무변화). delta(PO/유나 지적 2026-08-24) — font-editorial-heading(무게 유틸, 820)도
+  // 같이 있어야 한다(family-only 치환이 무게 820→400을 조용히 지웠던 회귀 재발 방지).
+  it('마스트헤드 h1이 font-display+font-editorial-heading 둘 다 경유한다(#2974 D0 배선)', async () => {
     await mount();
     const h1 = container.querySelector('h1');
     expect(h1?.className).toContain('font-display');
+    expect(h1?.className).toContain('font-editorial-heading');
   });
 
   it('상태 헤더와 증거 레일에 문서 status가 그대로 배선된다', async () => {

@@ -82,13 +82,17 @@ describe('DocsIndex — 문서 있음(§2 마스트헤드+목록)', () => {
 
   // story #2974 §1/§3(PR-D0) — Display 헤딩(마스트헤드 h1·리드 카드 h2)이 font-display
   // 토큰 경유(family)로 페이스를 받는다(D0 값=Pretendard·시각 무변화, 세리프 전환 전제조건).
-  it('마스트헤드 h1·리드 h2가 font-display 토큰을 경유한다(#2974 D0 배선)', async () => {
+  // delta(PO/유나 지적 2026-08-24) — font-editorial-heading(무게 유틸, 820)도 같이
+  // 있어야 한다(family-only 치환이 무게 820→400을 조용히 지웠던 회귀 재발 방지).
+  it('마스트헤드 h1·리드 h2가 font-display+font-editorial-heading 둘 다 경유한다(#2974 D0 배선)', async () => {
     useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree });
     await mount();
     const h1 = container.querySelector('h1');
     expect(h1?.className).toContain('font-display');
+    expect(h1?.className).toContain('font-editorial-heading');
     const h2 = container.querySelector('h2');
     expect(h2?.className).toContain('font-display');
+    expect(h2?.className).toContain('font-editorial-heading');
   });
 
   it('폴더(is_folder)는 목록 항목에서 제외되고 카테고리 필터로만 뜬다', async () => {

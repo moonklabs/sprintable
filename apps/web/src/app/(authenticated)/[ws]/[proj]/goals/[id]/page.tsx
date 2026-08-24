@@ -416,12 +416,14 @@ export default function EpicDetailPage() {
         </div>
 
         {/* story #2958 §2/§4 핵심 재조립 — 이중 신호 캡슐 2개(작업 Claimed/결과 Verified),
-            나란히. 작업 진척은 반드시 중립(proof-ink-3) — green은 outcome=hit에만(§8 확定). */}
+            나란히. 작업 진척은 반드시 중립(proof-ink-3) — green은 outcome=hit에만(§8 확定).
+            story #2974(PR-D0) delta — 아래 두 숫자는 doc상 Display 대상이 아니라(유나 확定)
+            font-display는 안 붙이고 font-editorial-heading(무게 유틸, 820)만 유지한다. */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="proof-cut border border-border bg-card px-4 py-3.5">
             <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">{t('taskCapsuleTitle')}</div>
             <div className="mt-1.5 flex items-baseline gap-2">
-              <span className="font-display text-[26px] tracking-[-0.02em] text-foreground">{done}/{stories.length}</span>
+              <span className="font-editorial-heading text-[26px] tracking-[-0.02em] text-foreground">{done}/{stories.length}</span>
               <span className="font-mono text-xs text-muted-foreground">{t('stories')}</span>
             </div>
             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
@@ -431,7 +433,7 @@ export default function EpicDetailPage() {
           </div>
           <div className="proof-cut border border-proof-blue/25 bg-proof-blue-soft px-4 py-3.5">
             <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-proof-blue">{t('outcomeCapsuleTitle')}</div>
-            <div className="mt-1.5 font-display text-[22px] tracking-[-0.02em] text-proof-blue">
+            <div className="mt-1.5 font-editorial-heading text-[22px] tracking-[-0.02em] text-proof-blue">
               {epic.outcome_status === 'hit' ? t('outcomeCapsuleHit')
                 : epic.outcome_status === 'miss' ? t('outcomeCapsuleMiss')
                 : epic.outcome_status === 'unmeasured' ? t('outcomeCapsuleUnmeasured')

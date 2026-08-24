@@ -152,12 +152,15 @@ describe('EpicDetailPage — 403 vs 404 분리 (story #2545)', () => {
     expect(container.textContent).toContain('목표 제목');
   });
 
-  // story #2974 §1/§3(PR-D0) — 진행률/제목 Display 헤딩 2곳이 font-display 토큰 경유
-  // (D0=Pretendard, 시각 무변화).
-  it('진행률·제목 Display 헤딩이 font-display 토큰을 경유한다(#2974 D0 배선)', async () => {
+  // story #2974(PR-D0 delta, 유나 확定 2026-08-23) — 이 두 숫자(진행률/outcome)는 doc상
+  // Display 대상이 아니다(font-display 미부착). 대신 무게 유틸(font-editorial-heading,
+  // --font-weight-editorial-heading:820)만 유지 — D0 초판(font-display 단독 치환)이 이
+  // 무게를 조용히 지웠던 회귀를 여기서 고정한다.
+  it('진행률·outcome 숫자는 font-display가 아니라 font-editorial-heading(무게 820)만 경유한다(#2974 D0 delta)', async () => {
     await mount(vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: epicFixture() }) })));
-    const displayEls = [...container.querySelectorAll('.font-display')];
-    expect(displayEls.length).toBeGreaterThanOrEqual(2);
+    const weightEls = [...container.querySelectorAll('.font-editorial-heading')];
+    expect(weightEls.length).toBeGreaterThanOrEqual(2);
+    expect(weightEls.every((el) => !el.classList.contains('font-display'))).toBe(true);
   });
 });
 
