@@ -136,3 +136,49 @@ describe('ApprovalRequestCard — 제목 미리보기 진입점, canPreviewEntit
     expect(container.textContent).toContain(title);
   });
 });
+
+// story #2982(선생님 실사용 리포트, PO 확定 2026-08-24) — 죽은 버튼 클릭~서버 응답 사이 레이스로
+// 다른 채널이 먼저 해소한 게이트를 이 챗 카드에서 승인/반려 시도하면 서버가 409로 거부한다.
+// AC1(재조회로 죽은 버튼이 다시 안 뜬다)+AC3(인간 문구)를 검증한다.
+describe('ApprovalRequestCard — 409(gate_already_resolved) 거부 처리(story #2982)', () => {
+  it('AC1·AC3 — 이미 해소된 게이트 승인 시도는 409로 거부되고, 재조회 後 완료 카드+사람 문구로 전환된다', async () => {
+    let getCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST') {
+        return {
+          ok: false, status: 409,
+          json: async () => ({
+            data: null,
+            error: { code: 'gate_already_resolved', message: '이미 처리된 결재입니다. 되돌리려면 PO에게 재검토를 요청해주세요.', current_status: 'approved' },
+            meta: null,
+          }),
+        };
+      }
+      if (url.includes('/api/gates/')) {
+        getCount += 1;
+        const status = getCount === 1 ? 'pending' : 'approved';
+        return { ok: true, json: async () => ({ data: gate({ status, resolver_id: 'member-2', resolved_at: new Date().toISOString() }) }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const approveBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    await act(async () => { approveBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    // 「완료」 카드로 재조회 後 전환됐다 — 그 자체가 AC3의 명시 안내다(진짜 상태를 정직하게
+    // 보여주는 것으로 답이 된다 — 별도 에러 배너를 겹쳐 보이지 않음).
+    expect(container.textContent).toContain(koMessages.chats.approvalRequestResolvedStatus.split('{status}')[0]);
+    expect(getCount).toBe(2); // 최초 로드(1) + 409 이후 재조회(2) — 화면이 옛 status에 안 멈춘다.
+    const buttonsAfter = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttonsAfter.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+  });
+});

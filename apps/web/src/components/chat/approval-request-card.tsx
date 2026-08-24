@@ -124,11 +124,29 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
         headers: { 'Content-Type': 'application/json' },
         // story #2027 AC2 — gates/[id]/page.tsx와 동일 계약(evidence_viewed는 고위험 서명
         // 플로우 onApprove에서만 true로 실린다, 아래 ApprovalRequestBody 배선 참조).
-        body: JSON.stringify({ status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false }),
+        // story #2975 회귀 자체발견(#2982 작업 중) — reviewed_head_sha 누락(gates/[id]/
+        // page.tsx만 #2975에서 고쳐지고 이 챗 카드는 빠져 있었다). known SHA 있는 merge
+        // 게이트를 이 카드에서 승인하면 #3410 착지 後 항상 409(gate_head_changed)로
+        // 거부되는 라이브 회귀 — state.gate(fetchGate 실측)에서 채운다.
+        body: JSON.stringify({
+          status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false,
+          reviewed_head_sha: state.kind === 'ready' ? (state.gate.github_check_run_sha ?? null) : null,
+        }),
       });
       if (res.ok) { await fetchGate(); return; }
-      const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-      setTransitionError(body?.error?.message ?? `HTTP ${res.status}`);
+      const body = await res.json().catch(() => null) as { error?: { message?: string; code?: string } } | null;
+      const code = body?.error?.code;
+      // story #2975·#2982(PO 확定) — code 부착 거부는 raw BE 문구(한국어 평문) 대신 사람
+      // 문구로 매핑(gates/[id]/page.tsx와 동형). 둘 다 "화면이 아는 상태가 서버와
+      // 어긋났다"는 뜻이라 재조회로 실제 현재 상태를 반영(AC1 — 죽은 버튼이 다시 안 뜬다).
+      if (code === 'gate_head_changed' || code === 'gate_already_resolved') {
+        await fetchGate();
+      }
+      setTransitionError(
+        code === 'gate_head_changed' ? tCage('gateHeadChangedError')
+          : code === 'gate_already_resolved' ? tCage('gateAlreadyResolvedError')
+          : (body?.error?.message ?? `HTTP ${res.status}`)
+      );
     } catch {
       setTransitionError(t('hitlSendFailed'));
     } finally {
@@ -350,7 +368,12 @@ function ApprovalRequestBody({
         // "액션 불가" 사유는 무권한뿐이다.
         <p className="text-[11px] text-muted-foreground">{tCage('gateReadonlyNotAuthorized')}</p>
       ) : needsFullFlow ? (
+        // story #2975(유나양 design 판정 2026-08-24) 갭 자체발견(#2982 작업 중) — 그 블로커
+        // 처방(key={SHA}로 재조회 後 evidenceViewed/reason 강제 리셋)이 gates/[id]/page.tsx
+        // 에만 적용되고 이 챗 카드는 빠져 있었다. 같은 컴포넌트·같은 취약(SHA 바뀐 뒤에도
+        // 열람체크가 살아있어 재확認 없이 재승인 가능)이라 동형 처방.
         <GateSignatureApproval
+          key={gate.github_check_run_sha}
           gate={gate}
           resolving={resolving}
           error={transitionError}

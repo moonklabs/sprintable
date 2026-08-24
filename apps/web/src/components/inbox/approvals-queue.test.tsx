@@ -424,7 +424,7 @@ describe('ApprovalsQueue', () => {
 
     const postCall = calls.find((c) => c.method === 'POST');
     expect(postCall?.url).toBe('/api/gates/g-low/transition');
-    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'approved', note: null, evidence_viewed: false });
+    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'approved', note: null, evidence_viewed: false, reviewed_head_sha: null });
 
     expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
     expect(container.textContent).toContain(koMessages.cage.queueViewRecord);
@@ -434,6 +434,47 @@ describe('ApprovalsQueue', () => {
     // 재조회(fetchGates) 없이 이 렌더만으로 반영됐다 — GET 호출 수가 mount 시점(pending+held
     // 각 1회=2)에서 늘지 않았다.
     expect(calls.filter((c) => c.method === undefined || c.method === 'GET')).toHaveLength(2);
+  });
+
+  // story #2982(선생님 실사용 리포트, PO 확定 2026-08-24) — 이 큐의 stale items[] 스냅샷(주석
+  // 위 L125 참고 — resolveGate() 성공 後에도 status=pending 그대로) 때문에, 다른 채널이 먼저
+  // 해소한 게이트를 여기서 다시 승인/반려 시도하면 서버가 409(gate_already_resolved)로 거부한다.
+  // AC1(죽은 버튼이 다시 안 뜬다)+AC3(인간 문구)를 재조회 없이(current_status로 즉시) 만족해야 함.
+  it('AC1·AC3 — 다른 채널이 먼저 해소한 게이트를 클릭하면 서버가 409(gate_already_resolved)로 거부하고, 재조회 없이 즉시 완료 카드+사람 문구로 전환된다', async () => {
+    const calls: { url: string; method?: string; body?: string }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+      calls.push({ url, method: init?.method, body: init?.body });
+      if (init?.method === 'POST') {
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({
+            data: null,
+            error: {
+              code: 'gate_already_resolved',
+              message: '이미 처리된 결재입니다. 되돌리려면 PO에게 재검토를 요청해주세요.',
+              current_status: 'approved',
+            },
+            meta: null,
+          }),
+        };
+      }
+      if (url.includes('status=pending')) return { ok: true, json: async () => [lowRiskActionable()] };
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    await act(async () => { approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    // 「완료」 카드로 즉시 전환됐다 — 그 자체가 AC3의 명시 안내다(별도 에러 배너를 겹쳐
+    // 보이는 게 아니라, 진짜 상태를 정직하게 보여주는 것으로 "그래서 뭘 해야 하는지"가
+    // 이미 답이 된다: 되돌리려면 undo 창 안이면 취소 버튼, 밖이면 기록 보기뿐).
+    expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
+    // 재조회(GET) 없이 body의 current_status만으로 전환됐다 — mount 시점(pending+held=2)에서
+    // POST 1건 추가된 것 외 GET 호출 수가 안 늘어야 한다.
+    expect(calls.filter((c) => c.method === undefined || c.method === 'GET')).toHaveLength(2);
+    const buttonsAfter = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttonsAfter.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
   });
 
   it('AC "중복 탭 중복 실행 0" — 승인 요청이 아직 안 끝난 상태에서 버튼이 비활성화돼 재클릭이 두 번째 요청을 만들지 않는다', async () => {
@@ -470,7 +511,7 @@ describe('ApprovalsQueue', () => {
     const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigRequestChanges));
     await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const postCall = calls.find((c) => c.method === 'POST');
-    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'rejected', note: null, evidence_viewed: false });
+    expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'rejected', note: null, evidence_viewed: false, reviewed_head_sha: null });
     expect(container.textContent).toContain(koMessages.cage.queueResolvedRejected);
   });
 
@@ -684,7 +725,7 @@ describe('ApprovalsQueue', () => {
 
       const postCall = calls.find((c) => c.method === 'POST' && c.url.includes('/transition'));
       expect(postCall?.url).toBe('/api/gates/g-sig-approve/transition');
-      expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'approved', note: '근거 확認·서명 사유', evidence_viewed: true });
+      expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'approved', note: '근거 확認·서명 사유', evidence_viewed: true, reviewed_head_sha: null });
       expect(document.body.querySelector('[data-slot="dialog-content"]')).toBeFalsy();
       expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
     });
@@ -703,7 +744,7 @@ describe('ApprovalsQueue', () => {
       await act(async () => { rejectButtons[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
       const postCall = calls.find((c) => c.method === 'POST' && c.url.includes('/transition'));
-      expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'rejected', note: '재작업 필요', evidence_viewed: false });
+      expect(JSON.parse(postCall?.body ?? '{}')).toEqual({ status: 'rejected', note: '재작업 필요', evidence_viewed: false, reviewed_head_sha: null });
       expect(container.textContent).toContain(koMessages.cage.queueResolvedRejected);
     });
 

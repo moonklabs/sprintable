@@ -204,12 +204,21 @@ export function ApprovalsQueue() {
     setResolvingIds((prev) => new Set(prev).add(id));
     setGateErrors((prev) => { const next = { ...prev }; delete next[id]; return next; });
     try {
+      // story #2975 회귀 자체발견(#2982 작업 중) — 이 큐의 인라인 승인(원탭·서명모달 둘 다
+      // 이 함수 하나를 공유)이 reviewed_head_sha를 전혀 안 보냈다. gates/[id]/page.tsx만
+      // #2975에서 고쳐졌고 이 큐는 빠져 있어, #3410 착지 後 known SHA가 있는 merge 게이트를
+      // 이 큐에서 승인하면 항상 409(gate_head_changed)로 거부되는 라이브 회귀였다 — items[]
+      // 에서 찾아 동일 계약으로 채운다.
+      const g = items.find((it) => it.id === id && !isHitl(it)) as GateItem | undefined;
       const res = await fetch(`/api/gates/${id}/transition`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // story #2027 AC2 — gates/[id]/page.tsx와 동일 계약(evidence_viewed는 고위험 서명
         // 플로우 onApprove에서만 true로 실린다, 아래 GateSignatureApproval 배선 참조).
-        body: JSON.stringify({ status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false }),
+        body: JSON.stringify({
+          status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false,
+          reviewed_head_sha: g?.github_check_run_sha ?? null,
+        }),
       });
       if (res.ok) {
         setResolvedGates((prev) => ({ ...prev, [id]: status }));
@@ -218,8 +227,26 @@ export function ApprovalsQueue() {
         // 잘못 닫지 않도록 대상 id 일치 확認).
         setSignatureTargetId((cur) => (cur === id ? null : cur));
       } else {
-        const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        setGateErrors((prev) => ({ ...prev, [id]: body?.error?.message ?? t('gateTransitionErrorGeneric') }));
+        const body = await res.json().catch(() => null) as { error?: { message?: string; code?: string; current_status?: string } } | null;
+        const code = body?.error?.code;
+        // story #2975·#2982(PO 확定) — code 부착 거부는 raw BE 문구(한국어 평문·i18n 안 됨)
+        // 대신 사람 문구로. gate_already_resolved는 이 시점부터 서버 진실을 아는 것이므로
+        // (current_status), 재조회 없이도 즉시 「완료」 카드로 전환할 수 있다(AC1 — 죽은
+        // 버튼이 다시 안 뜬다) — approved/rejected만 이 큐의 표시 슬롯이 있고, 그 외
+        // (held/voided 등)는 표시할 슬롯이 없어 목록에서만 제거(클릭-스루로 상세에서 확認).
+        if (code === 'gate_already_resolved') {
+          const cur = body?.error?.current_status;
+          if (cur === 'approved' || cur === 'rejected') {
+            setResolvedGates((prev) => ({ ...prev, [id]: cur }));
+          } else {
+            setItems((prev) => prev.filter((it) => it.id !== id));
+          }
+          setSignatureTargetId((c) => (c === id ? null : c));
+        }
+        const reason = code === 'gate_head_changed' ? t('gateHeadChangedError')
+          : code === 'gate_already_resolved' ? t('gateAlreadyResolvedError')
+          : (body?.error?.message ?? t('gateTransitionErrorGeneric'));
+        setGateErrors((prev) => ({ ...prev, [id]: reason }));
       }
     } finally {
       setResolvingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
@@ -493,7 +520,10 @@ export function ApprovalsQueue() {
             </DialogTitle>
           </DialogHeader>
           {signatureGate ? (
+            // story #2975(유나양 design 판정) 갭 자체발견(#2982 작업 중) — 동형 처방(SHA
+            // 변경 시 evidenceViewed/reason 강제 리셋). page.tsx만 #2975에서 고쳐졌었다.
             <GateSignatureApproval
+              key={signatureGate.github_check_run_sha}
               gate={signatureGate}
               resolving={resolvingIds.has(signatureGate.id)}
               error={gateErrors[signatureGate.id]}
