@@ -102,6 +102,8 @@ async def _call_list_stories(session, org_id, agent_id, ids_param):
         # direct_calls.py) baseline과 missing-set을 맞추기 위해 명시(이 호출부는 ids
         # 분기라 다른 미기재 Query 파라미터들은 기존 baseline grandfather 그대로 둔다).
         unattached=False,
+        # story #3019: epic_ids/include_unassigned/done_within_days 신규 Query 파라미터 — 동일 이유로 명시.
+        epic_ids=None, include_unassigned=False, done_within_days=None,
     )
 
 

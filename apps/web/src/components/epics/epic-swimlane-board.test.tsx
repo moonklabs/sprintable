@@ -831,3 +831,74 @@ describe('EpicSwimlaneBoard — StoryDetailPanel 배선(story #2931, QA changes 
     expect(container.textContent).not.toContain('삭제될카드');
   });
 });
+
+// story #3019(실사고, PO 확定 2026-08-24) — 매 로드마다 project 전체 역사(이 프로젝트 실측
+// 3018 스토리)를 페이지네이션하던 것을 서버측 스코프(활성 에픽+미배정, done은 최근 7일)로
+// 좁혔다. 31회 순차 왕복=37초+ 멈춤의 근본 처방 — 이 축의 실물 계약(요청 URL이 실제로
+// 좁혀진 파라미터를 싣는지)을 고정한다.
+describe('EpicSwimlaneBoard — 스코프 축소(story #3019)', () => {
+  it('stories 요청이 활성 에픽 id만 epic_ids로, epic_unassigned=true·done_within_days=7을 싣는다(비활성 에픽 제외)', async () => {
+    await mount({
+      epics: [
+        { id: 'e-active-1', title: '활성1', status: 'active', position: 1 },
+        { id: 'e-active-2', title: '활성2', status: 'active', position: 2 },
+        { id: 'e-inactive', title: '완료된 에픽', status: 'completed', position: 3 },
+      ],
+      stories: [],
+    });
+
+    const storiesCall = callLog.find((l) => l.startsWith('GET /api/stories?'));
+    expect(storiesCall, 'stories GET 호출을 못 찾음').toBeDefined();
+    const url = new URL(storiesCall!.replace('GET ', ''), 'http://localhost');
+    const epicIds = (url.searchParams.get('epic_ids') ?? '').split(',').filter(Boolean);
+    expect(new Set(epicIds)).toEqual(new Set(['e-active-1', 'e-active-2']));
+    expect(epicIds).not.toContain('e-inactive');
+    expect(url.searchParams.get('epic_unassigned')).toBe('true');
+    expect(url.searchParams.get('done_within_days')).toBe('7');
+  });
+
+  it('활성 에픽이 0개여도 epic_unassigned=true는 그대로 실려 미배정 레인은 여전히 조회된다', async () => {
+    await mount({
+      epics: [{ id: 'e-inactive', title: '완료된 에픽', status: 'completed', position: 1 }],
+      stories: [],
+    });
+
+    const storiesCall = callLog.find((l) => l.startsWith('GET /api/stories?'));
+    const url = new URL(storiesCall!.replace('GET ', ''), 'http://localhost');
+    expect(url.searchParams.has('epic_ids')).toBe(false); // 빈 목록은 아예 안 보낸다(서버 elif 분기).
+    expect(url.searchParams.get('epic_unassigned')).toBe('true');
+  });
+
+  it('타임아웃(LOAD_TIMEOUT_MS) 경과 시 정직한 타임아웃 문구로 떨어진다(일반 에러와 구분)', async () => {
+    vi.useFakeTimers();
+    try {
+      // goals는 정상 응답하되 stories fetch가 영원히 안 끝나는 것을 시뮬레이션(AbortSignal
+      // 자체는 이 스텁이 못 흉내내므로, 타임아웃 도달 시 실제 abort된 fetch가 reject하는
+      // 대신 "응답이 안 옴"을 직접 재현 — 컴포넌트의 setTimeout(abort) 발동 자체를 검증).
+      vi.stubGlobal('fetch', vi.fn((url: string, init?: { signal?: AbortSignal }) => {
+        if (typeof url === 'string' && url.startsWith('/api/goals')) {
+          return Promise.resolve({ ok: true, json: async () => ({ data: [], meta: { hasMore: false, nextCursor: null } }) });
+        }
+        if (typeof url === 'string' && url.startsWith('/api/stories?')) {
+          // 영원히 응답 안 옴 — 컴포넌트의 AbortController(setTimeout 발동)만이 유일한
+          // 탈출. 실 fetch/AbortSignal 계약을 흉내: signal이 abort되면 reject.
+          return new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => {
+              reject(new DOMException('The operation was aborted.', 'AbortError'));
+            });
+          });
+        }
+        return Promise.resolve({ ok: true, json: async () => ({ data: [] }) });
+      }));
+
+      await act(async () => {
+        root.render(withIntl(<EpicSwimlaneBoard projectId="p1" />));
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+
+      expect(container.textContent).toContain('불러오는 데 시간이 너무 오래 걸려 중단했습니다');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

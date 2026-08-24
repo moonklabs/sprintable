@@ -146,6 +146,28 @@ async def list_stories(
     ids: str | None = Query(default=None, description="comma-separated story ids — 배치 앵커 조회(정확한 집합, ORDER BY/limit 무관)"),
     story_number: int | None = Query(default=None, description="프로젝트 내 사람-읽는 #N(project_id와 함께 사용 — N은 project 내에서만 유일)"),
     q: str | None = Query(default=None, description="title 부분검색(ILIKE) — 기존 필터와 AND 결합"),
+    epic_ids: str | None = Query(
+        default=None,
+        description=(
+            "story #3019 — comma-separated epic ids(IN 필터). epic_id(단일)와 별개 파라미터 "
+            "— include_unassigned=true와 함께 쓰면 OR(이 에픽들 소속 «또는» 미배정) 결합."
+        ),
+    ),
+    include_unassigned: bool = Query(
+        default=False,
+        description=(
+            "story #3019 — epic_id IS NULL(가설 링크 유무 무관, 기존 unattached와 다른 개념) "
+            "인 story도 결과에 포함. epic_ids와 단독으로도 쓸 수 있다(그 경우 미배정만)."
+        ),
+    ),
+    done_within_days: int | None = Query(
+        default=None,
+        ge=1,
+        description=(
+            "story #3019 — status=done row만 created_at이 최근 N일 이내인 것으로 제한(list_board "
+            "의 done-7일 관례를 제네릭 경로에 일반화). done 아닌 상태는 무관."
+        ),
+    ),
     boost_candidates_from: uuid.UUID | None = Query(
         default=None,
         description=(
@@ -167,6 +189,19 @@ async def list_stories(
     # 오는데, 센티널은 항상 truthy라 `if unattached:`가 무조건 참이 돼 기존 테스트 전부가
     # 조용히 필터링당한다 — `isinstance` 가드로 실제 bool일 때만 필터를 켠다.
     unattached = unattached if isinstance(unattached, bool) else False
+    # story #3019 — 동일 함정(위 boost_candidates_from 주석 참조), 신규 파라미터 3종에도 그대로 적용.
+    include_unassigned = include_unassigned if isinstance(include_unassigned, bool) else False
+    epic_ids = epic_ids if isinstance(epic_ids, str) else None
+    done_within_days = done_within_days if isinstance(done_within_days, int) else None
+
+    parsed_epic_ids: list[uuid.UUID] | None = None
+    if epic_ids is not None:
+        try:
+            parsed_epic_ids = [uuid.UUID(x) for x in epic_ids.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(status_code=422, detail="invalid epic id in epic_ids")
+        if len(parsed_epic_ids) > 200:  # ids 파라미터와 동형 방어(과대 IN 금지).
+            raise HTTPException(status_code=422, detail="too many epic ids (max 200)")
 
     if ids is not None:
         # story ca37b2b0 ②: 갤러리 등 정확한 story 집합이 필요한 소비자용 — base.list()의
@@ -266,7 +301,11 @@ async def list_stories(
     # FE(buildCursorPageMeta)가 계산한 nextCursor가 다음 요청에서 조용히 무시돼 같은 페이지가
     # 반복된다(sprints/standup "더 보기" 중복 누적의 원인).
     cursor_dt = _parse_stories_cursor(cursor)
-    stories, total = await repo.list(limit=limit, q=q, cursor=cursor_dt, unattached=unattached, **filters)
+    stories, total = await repo.list(
+        limit=limit, q=q, cursor=cursor_dt, unattached=unattached,
+        epic_ids=parsed_epic_ids, include_unassigned=include_unassigned,
+        done_within_days=done_within_days, **filters,
+    )
     if response is not None:
         response.headers["X-Total-Count"] = str(total)
     await _attach_assignee_ids(repo.session, repo.org_id, stories)

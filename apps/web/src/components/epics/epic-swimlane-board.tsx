@@ -34,21 +34,38 @@ const UNASSIGNED_LANE_ID = '__unassigned__';
 // 하게 서버에서 maxLimit=100으로 clamp한다(apps/web/src/app/api/stories/route.ts). 기존
 // limit=1000 단발 요청은 100건 초과 프로젝트에서 hasMore/nextCursor를 소비하지 않은 채
 // 조용히 잘려 레인 카운트·상위3 큐레이션이 틀어졌다. 이 뷰는 kanban-board(컬럼별 "더보기"
-// UX)와 달리 레인×컬럼 버킷팅 자체가 «전체 집합»을 요구해 부분 로드로는 정직할 수 없다 —
-// hasMore가 꺼질 때까지 커서를 소진한다("정직한 더-있음 표시"보다 전량 소진이 이 뷰엔 맞음).
+// UX)와 달리 레인×컬럼 버킷팅 자체가 «필요한 전체 집합»을 요구해 부분 로드로는 정직할 수
+// 없다 — hasMore가 꺼질 때까지 커서를 소진한다("정직한 더-있음 표시"보다 전량 소진이 이
+// 뷰엔 맞음).
 // QA changes 7R(카디르+codex, 2026-08-22) — 원 발견의 «에픽» 절반: /api/goals도 동일
 // maxLimit=100 clamp라 활성 에픽 100+ 프로젝트에서 레인 자체가 조용히 누락된다. stories
 // 전용이던 헬퍼를 basePath 파라미터화해 goals에도 동형 적용(중복 루프 제거).
+// ⚠️story #3019(실사고, PO 확定 2026-08-24) — 위 "«전체 집합»을 요구"는 «org 역사 전체»가
+// 아니라 «화면이 실제로 그리는 것(활성 에픽+미배정)의 전체»로 재정의됐다. 예전엔 이 구분이
+// 없어 project_id만 걸고 페이지네이션했고, 이 프로젝트 실측(3018 스토리)에서 31회 순차
+// 왕복=37초+ 멈춤을 냈다 — 이제 fetchAll()이 epic_ids(활성 에픽)+epic_unassigned+
+// done_within_days=7로 BE 쿼리 자체를 좁힌 뒤 그 좁혀진 결과에 한해 전량 소진한다(보통
+// 1~2페이지, 안전판은 그대로 살아있다 — 활성 에픽 하나가 실제로 5000건을 넘는 극단만 throw).
 const PAGE_LIMIT = 100;
 const PAGE_HARD_CAP = 50; // 안전판(최대 5000건) — 정상 프로젝트 규모를 크게 상회.
+// story #3019 가드레일② — 스코프 축소 後 정상 케이스는 수 초 내 완료가 기대치. 20초는
+// 그 기대치의 넉넉한 배수(정상 편차 흡수)이면서 "멈춤"을 사용자가 무한정 기다리게
+// 두지는 않는 상한.
+const LOAD_TIMEOUT_MS = 20_000;
 
-async function fetchAllPages<T>(basePath: string, projectId: string, source: string): Promise<T[]> {
+async function fetchAllPages<T>(
+  basePath: string, projectId: string, source: string,
+  extraParams?: Record<string, string>, signal?: AbortSignal,
+): Promise<T[]> {
+  const extra = extraParams
+    ? Object.entries(extraParams).map(([k, v]) => `&${k}=${encodeURIComponent(v)}`).join('')
+    : '';
   const all: T[] = [];
   let cursor: string | null = null;
   let exhaustedNaturally = false;
   for (let page = 0; page < PAGE_HARD_CAP; page += 1) {
-    const url = `${basePath}?project_id=${projectId}&limit=${PAGE_LIMIT}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
-    const res = await fetchWithAuth(url);
+    const url = `${basePath}?project_id=${projectId}&limit=${PAGE_LIMIT}${extra}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+    const res = await fetchWithAuth(url, signal ? { signal } : undefined);
     // ⚠️QA changes 8R HIGH②(카디르+codex, 2026-08-22) — 중간 페이지 실패를 `break`로 삼키면
     // 그때까지 모은 부분 집합을 완전 집합처럼 반환한다(6R/7R이 막으려던 "조용한 누락"과
     // 같은 클래스, 실패 경로에서 재발). 부분-성공을 허용하지 않는다 — throw해 호출부
@@ -227,7 +244,11 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
   const [epics, setEpics] = useState<KanbanEpic[]>([]);
   const [members, setMembers] = useState<KanbanMember[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
+  // story #3019(실사고 처방) — "느림"과 "멈춤"이 구분 안 되던 축(타임아웃 부재+진행표시 0)도
+  // 결함의 절반이었다. loadError를 원인별로 갈라 문구를 정직하게(지어내지 않고 실제
+  // 사유대로) 낸다.
+  const [loadError, setLoadError] = useState<'timeout' | 'generic' | null>(null);
+  const [loadingElapsedSec, setLoadingElapsedSec] = useState(0);
   const [axisMode, setAxisMode] = useState<AxisMode>('trust');
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [selectedStoryId, setSelectedStoryId] = useState<string | null>(null);
@@ -277,11 +298,35 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
+    setLoadingElapsedSec(0);
+    // story #3019 가드레일② — 타임아웃은 "선택"이 아니라 스코프 축소와 동승. 백엔드가
+    // 정말로 응답을 안 주는 극단(스코프 축소가 못 막는 유일한 남은 축)에서도 화면이
+    // 무한정 "불러오는 중"으로 얼어붙지 않고 LOAD_TIMEOUT_MS 뒤 정직한 타임아웃 에러로
+    // 떨어진다.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), LOAD_TIMEOUT_MS);
     try {
-      const [stories, epics, membersRes] = await Promise.all([
-        fetchAllPages<KanbanStory>('/api/stories', projectId, 'EpicSwimlaneBoard fetchAll(stories)'),
-        fetchAllPages<KanbanEpic>('/api/goals', projectId, 'EpicSwimlaneBoard fetchAll(goals)'),
-        fetchWithAuth(`/api/members?project_id=${projectId}`),
+      // story #3019 근본 처방 — epics를 먼저 확定해야 "활성 에픽 집합"을 알 수 있다
+      // (stories 쿼리의 epic_ids가 그 집합에 의존) — Promise.all로 병렬화할 수 없는 진짜
+      // 순차 의존(이전엔 이 의존이 아예 없었다 — 매번 project 전체를 불렀으니까).
+      const epics = await fetchAllPages<KanbanEpic>(
+        '/api/goals', projectId, 'EpicSwimlaneBoard fetchAll(goals)', undefined, controller.signal,
+      );
+      const activeEpicIds = epics
+        .filter((e) => (e.status ?? 'active') === 'active')
+        .map((e) => e.id);
+      // story #3019 — 화면이 실제로 그리는 것(활성 에픽 소속+미배정)만, done은 최근 7일만
+      // (list_board의 done-7일 관례를 일반화). 스토리에 명기한 범위 선언 그대로: 비활성
+      // 에픽 소속 스토리는 애초에 어느 레인에도 안 그려지므로 제외해도 화면상 무변화이고,
+      // 미배정+done 7일 초과분만 유일하게 눈에 보이는 축소(kanban-board.tsx의 done 컬럼과
+      // 동일 관례로의 정합 — 새 제약 발명이 아니다).
+      const storyParams: Record<string, string> = { done_within_days: '7', epic_unassigned: 'true' };
+      if (activeEpicIds.length > 0) storyParams.epic_ids = activeEpicIds.join(',');
+      const [stories, membersRes] = await Promise.all([
+        fetchAllPages<KanbanStory>(
+          '/api/stories', projectId, 'EpicSwimlaneBoard fetchAll(stories)', storyParams, controller.signal,
+        ),
+        fetchWithAuth(`/api/members?project_id=${projectId}`, { signal: controller.signal }),
       ]);
       // story #2187/b8157376(kanban-board와 동형 불변식, QA changes 6R HIGH①) — is_excluded=true
       // (라이브 QA 임시 카드 등)는 삭제 권한이 없는 화면에서라도 무조건 숨긴다. 토글 없음 —
@@ -289,19 +334,29 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
       setStories(stories.filter((s) => !s.is_excluded));
       setEpics(epics);
       if (membersRes.ok) { const json = await membersRes.json(); setMembers(json.data ?? []); }
-      setLoadError(false);
-    } catch {
+      setLoadError(null);
+    } catch (_err) {
       // QA changes 8R HIGH②(카디르+codex, 2026-08-22) — fetchAllPages가 이제 중간 실패를
       // throw로 승격하니 여기서 정직한 에러 상태로 받는다. stories/epics를 손대지 않고
       // (부분 데이터로 덮어써 "이 프로젝트엔 원래 이만큼만 있다"처럼 보이는 재발 방지)
       // 전용 에러 화면으로 대체한다.
-      setLoadError(true);
+      setLoadError(controller.signal.aborted ? 'timeout' : 'generic');
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   }, [projectId]);
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
+
+  // story #3019 가드레일② — 진행 표시 0이 "느림"과 "멈춤"을 구분 못 하게 했다. 초 단위
+  // 하트비트만으로도 "화면이 살아있다"는 신호는 충분(페이지 수 기반 진행률은 스코프 축소
+  // 後엔 보통 1~2회라 의미 있는 분모가 없다 — 지어내지 않는다).
+  useEffect(() => {
+    if (!loading) return;
+    const intervalId = setInterval(() => setLoadingElapsedSec((s) => s + 1), 1000);
+    return () => clearInterval(intervalId);
+  }, [loading]);
 
   const memberMap = useMemo(() => {
     const map: Record<string, KanbanMember> = {};
@@ -452,10 +507,14 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
         <WorkspaceFrameTabs active="epic" />
 
         {loading ? (
-          <div className="p-4 text-sm text-muted-foreground">{t('loading')}</div>
+          <div className="p-4 text-sm text-muted-foreground">
+            {t('epicSwimlaneLoadingElapsed', { seconds: loadingElapsedSec })}
+          </div>
         ) : loadError ? (
           <div className="flex flex-col items-start gap-2 p-4">
-            <p role="alert" className="text-sm text-destructive">{t('epicSwimlaneLoadError')}</p>
+            <p role="alert" className="text-sm text-destructive">
+              {t(loadError === 'timeout' ? 'epicSwimlaneLoadTimeout' : 'epicSwimlaneLoadError')}
+            </p>
             <button
               type="button"
               onClick={() => { void fetchAll(); }}

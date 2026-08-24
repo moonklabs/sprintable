@@ -103,7 +103,8 @@ class StoryRepository(BaseRepository[Story]):
 
     async def list(
         self, limit: int = 1000, *, q: str | None = None, cursor: datetime | None = None,
-        unattached: bool = False, **filters,
+        unattached: bool = False, epic_ids: list[uuid.UUID] | None = None,
+        include_unassigned: bool = False, done_within_days: int | None = None, **filters,
     ) -> tuple[list[Story], int]:
         """story #2537(카디르 QA #2932 실측, 2026-08-09) — `list_board()`와 동형으로
         `(stories, total)` 튜플을 반환한다. 이전엔 `list[Story]`만 반환해 이 분기(status
@@ -141,7 +142,22 @@ class StoryRepository(BaseRepository[Story]):
         걸친 행은 이론상 다음 페이지에서 스킵될 수 있다(중복 전달보다는 덜 나쁜 실패 모드로
         의도적으로 선택). board 분기도 동일한 구조적 한계를 이미 갖고 있다 — 실제로 skip이
         관측되면 그때 복합 커서(`created_at`+`id`)로 승격한다.
-        """
+
+        story #3019(실사고, PO 확定 2026-08-24) — 에픽 스윔레인 뷰가 매 로드마다 프로젝트
+        전체 역사(이 프로젝트 실측 3018건)를 31회 순차 페이지네이션으로 끌어와 37초+ 멈춤을
+        냈다. 근본은 «화면이 실제로 그리는 건 활성 에픽 소속+미배정뿐인데 org 전체를 부른다»
+        — epic_ids(IN)+include_unassigned(OR)로 그 스코프를 서버측에서 정확히 좁힌다.
+
+        `epic_ids`/`include_unassigned`는 **OR** 결합(활성 에픽 소속 «또는» 미배정) —
+        AND라면 "이 에픽들에 속하면서 동시에 미배정"이 돼 공집합이 된다. `unattached`
+        (기존 파라미터, #2532)와 다른 개념이다 — `_unattached_clause()`는 "에픽도 가설도
+        둘 다 안 매달림"이고, 여기 `include_unassigned`는 스윔레인의 "미배정 레인"과 순수
+        1:1 대응하는 "에픽만 없음"(가설 링크 유무 무관) — 기존 `unattached`를 재사용하면
+        가설이 매달린 미배정 스토리가 스윔레인에서 조용히 누락되는 별개 결함을 만든다.
+
+        `done_within_days`는 list_board()의 "done: 최근 7일" 관례(CB-S4)를 이 제네릭 경로에
+        일반화한 것 — done 아닌 상태는 무관(그 상태들은 자연히 유한하다, 완료 이력만 무한
+        누적), done만 `created_at >= now - N일`로 좁힌다. None(기본)이면 기존 동작 그대로."""
         query = select(Story).where(self._org_filter(), Story.deleted_at.is_(None))
         for attr, val in filters.items():
             query = query.where(getattr(Story, attr) == val)
@@ -151,6 +167,14 @@ class StoryRepository(BaseRepository[Story]):
             query = query.where(Story.created_at < cursor)
         if unattached:
             query = query.where(_unattached_clause())
+        if epic_ids is not None:
+            epic_clause = Story.epic_id.in_(epic_ids)
+            query = query.where(or_(epic_clause, Story.epic_id.is_(None)) if include_unassigned else epic_clause)
+        elif include_unassigned:
+            query = query.where(Story.epic_id.is_(None))
+        if done_within_days is not None:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=done_within_days)
+            query = query.where(or_(Story.status != "done", Story.created_at >= cutoff))
 
         count_q = select(func.count()).select_from(query.subquery())
         total = (await self.session.execute(count_q)).scalar_one()
