@@ -3400,6 +3400,8 @@
     "authFailureTooltipInvalid": "API key not recognized · {n} failures in last 5 min"
   },
   "chats": {
+    "reportViewFull": "View full →",
+    "reportCollapse": "Collapse",
     "unreadMarker": "Unread from here",
     "citationAnchored": "Cited from here — pick the last message",
     "citationSelectedCount": "{count} messages selected",
