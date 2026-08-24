@@ -340,18 +340,22 @@ function BriefLayer({ brief }: { brief: WorkcellBrief }) {
       <LayerLabel title="Brief" question={t('briefQuestion')} className="mb-2.5" />
       <div className="flex gap-2 text-[13px] leading-[1.5] text-proof-ink-2">
         <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">{t('briefGoal')}</span>
-        <span className="text-proof-ink">{brief.goal}</span>
+        {/* story 38f524e1(critical, 선생님 실사고 2026-08-24) — flex 자식 기본 min-width:auto가
+            긴 무단절 토큰(인라인 코드·경로)의 min-content 폭을 그대로 요구해 축소를 거부하고
+            셀(246px) 밖까지 뻗어 조상 overflow-hidden에 글자 중간이 잘렸다. min-w-0으로 축소
+            허용 + break-words로 그 폭에서 토큰 내부 줄바꿈. */}
+        <span className="min-w-0 break-words text-proof-ink">{brief.goal}</span>
       </div>
       <div className="mt-1.5 flex gap-2 text-[13px] leading-[1.5] text-proof-ink-2">
         <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">{t('briefDod')}</span>
-        <span className="text-proof-ink">{brief.dod}</span>
+        <span className="min-w-0 break-words text-proof-ink">{brief.dod}</span>
       </div>
       {/* story #2922 W4 — owner/agent는 헤더로 승격됐다(위 Workcell 헤더 참조, SSOT 이동).
           scopes만 남아 briefRoles 라벨을 계승. */}
       {brief.scopes && brief.scopes.length > 0 ? (
         <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[13px] leading-[1.5] text-proof-ink-2">
           <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">{t('briefRoles')}</span>
-          <span className="font-mono text-[10.5px] text-proof-ink-3">{brief.scopes.join(' · ')}</span>
+          <span className="min-w-0 break-words font-mono text-[10.5px] text-proof-ink-3">{brief.scopes.join(' · ')}</span>
         </div>
       ) : null}
     </div>
@@ -366,8 +370,10 @@ function RunLayer({ run }: { run: WorkcellRun }) {
       <div className="mb-2 text-[13.5px] font-semibold text-proof-ink">{t('runNow')}: {run.now}</div>
       <div className="mb-2.5 flex flex-wrap gap-3.5 text-[11px] text-proof-ink-3">
         <span>{t('runStage')} <b className="font-semibold text-proof-ink-2">{run.stage}</b></span>
-        {run.tools.length > 0 ? <span className="font-mono text-[10.5px]">{t('runTools')} {run.tools.join(', ')}</span> : null}
-        {run.scopes.length > 0 ? <span className="font-mono text-[10.5px]">{t('runScopes')} {run.scopes.join(', ')}</span> : null}
+        {/* 38f524e1 동형 처방 — runScopes는 실제 파일경로 토큰(예: apps/web/src/…)이라
+            동일 클리핑 소지, min-w-0 + break-words 선제 적용. */}
+        {run.tools.length > 0 ? <span className="min-w-0 break-words font-mono text-[10.5px]">{t('runTools')} {run.tools.join(', ')}</span> : null}
+        {run.scopes.length > 0 ? <span className="min-w-0 break-words font-mono text-[10.5px]">{t('runScopes')} {run.scopes.join(', ')}</span> : null}
       </div>
       <div className="mb-2 text-[11.5px] text-proof-ink-3">
         {t('runBlocked')}: <b className={cn('font-semibold', run.blocked ? 'text-proof-amber' : 'text-proof-ink-2')}>{run.blocked ?? t('none')}</b>

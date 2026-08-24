@@ -60,6 +60,49 @@ describe('Workcell (4층 — Brief/Run/Evidence/Conversation)', () => {
   });
 });
 
+// story 38f524e1(critical, 선생님 실사고 2026-08-24) — Brief 셀 label+값 flex 행의 값
+// 컬럼에 min-w-0이 없어 긴 무단절 토큰(코드·경로)이 min-content 폭을 강제, lg 3열 좁은
+// 우열(246px)에서 셀 밖까지 뻗어 조상 overflow-hidden에 글자 중간 클리핑됐다. jsdom은 실제
+// 레이아웃을 측정 못 하므로(라이브 픽셀 검증은 별도, feedback-render-test-over-source-grep)
+// 이 테스트는 클리핑을 막는 CSS 메커니즘(min-w-0 + break-words)이 값 컬럼에 실제로 배선돼
+// 있는지에 대한 회귀가드다.
+describe('Workcell — story 38f524e1 Brief 값 컬럼 min-w-0/break-words 회귀가드', () => {
+  it('goal/dod/scopes 값 span 모두 min-w-0 break-words를 갖는다(긴 코드·경로 토큰도 셀 폭 안에 수납)', () => {
+    const longToken = 'workcell-bento-form-material-spec-2984-extremely-long-inline-code-path-token';
+    const markup = renderKo(
+      <Workcell
+        {...BASE}
+        brief={{ ...BASE.brief, goal: longToken, dod: longToken, scopes: [longToken] }}
+      />,
+    );
+    // goal·dod·scopes(단일 원소라 join 결과도 동일 문자열) 셋 다 같은 긴 토큰이라 span이
+    // 3개 생긴다 — 셋 다 min-w-0 break-words를 갖는지 개별 확인해 하나만 고치고 방치하는
+    // 회귀를 잡는다.
+    const valueMatches = [...markup.matchAll(/<span class="([^"]*)">workcell-bento-form-material-spec-2984-extremely-long-inline-code-path-token<\/span>/g)];
+    expect(valueMatches).toHaveLength(3);
+    for (const m of valueMatches) {
+      expect(m[1].split(/\s+/)).toEqual(expect.arrayContaining(['min-w-0', 'break-words']));
+    }
+
+    expect(markup).toMatch(/class="[^"]*\bmin-w-0\b[^"]*\bbreak-words\b[^"]*font-mono[^"]*"/);
+  });
+
+  it('Run 요약(tools/scopes)도 실 파일경로 토큰 리스크가 있어 동형 처방(min-w-0 break-words)이 붙는다', () => {
+    const markup = renderKo(
+      <Workcell {...BASE} run={{ ...BASE.run, tools: ['apps/web/src/components/workcell/workcell.tsx'], scopes: ['apps/web/src/components/workcell/'] }} />,
+    );
+    // ko.json workcell.runTools = "도구" — 그 라벨을 안은 span의 class에 min-w-0/break-words가
+    // 실제로 붙었는지 확인(라벨 텍스트로 정확히 좁혀 다른 span과 오탐 방지).
+    const runToolsMatch = markup.match(/<span class="([^"]*)">도구 apps\/web\/src\/components\/workcell\/workcell\.tsx<\/span>/);
+    expect(runToolsMatch).toBeTruthy();
+    expect(runToolsMatch![1].split(/\s+/)).toEqual(expect.arrayContaining(['min-w-0', 'break-words']));
+
+    const runScopesMatch = markup.match(/<span class="([^"]*)">권한 apps\/web\/src\/components\/workcell\/<\/span>/);
+    expect(runScopesMatch).toBeTruthy();
+    expect(runScopesMatch![1].split(/\s+/)).toEqual(expect.arrayContaining(['min-w-0', 'break-words']));
+  });
+});
+
 // story #2922 W4 — 책임자/실행자가 헤더 한 곳으로 승격됐다(Brief 구획 중복 제거).
 describe('Workcell — story #2922 W4 책임자/실행자 헤더 승격(중복 제거 회귀가드)', () => {
   it('owner/agent "라벨+이름" 텍스트가 정확히 한 번씩만 렌더된다(헤더 SSOT, Brief에 중복 없음)', () => {
