@@ -280,9 +280,19 @@ export default function GateDetailPage() {
                   // gate.can_approve=false(이 caller는 승인 권한 없음, BE per-caller 판정). 액션
                   // 버튼을 렌더하지 않고 왜 못 누르는지를 정직하게 알린다 — "이미 처리됨"과는
                   // 다른 사유이므로 별개 문구(gateReadonlyNotAuthorized)를 쓴다.
+                  //
+                  // story #3006(유나 design 관찰, 페드루 확定 2026-08-24) — #3001 카드배타화
+                  // 이후 이 표면(gate 상세, 직접 URL/감사 진입)이 「무권한」과 「지정 결재선이
+                  // 걸려 있음」을 같은 문구로 뭉뚱그리던 유일한 실 표적(챗카드는 비지정자에게
+                  // 애초 안 감 — approval-request-card.tsx 주석 참조). 이름은 안 싣는다(BE도
+                  // 안 주고, 지어내지 않는다는 이 코드베이스 관례 그대로).
                   <div className="space-y-3">
                     <GateEvidence gate={gate} />
-                    <p className="text-[11px] text-muted-foreground">{t('gateReadonlyNotAuthorized')}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {gate.designated_approver_id && gate.designated_approver_id !== currentTeamMemberId
+                        ? t('gateReadonlyDesignatedElsewhere')
+                        : t('gateReadonlyNotAuthorized')}
+                    </p>
                   </div>
                 ) : usesSignatureFlow(deriveRiskLevel(gate)) ? (
                   // story #2975(유나양 design 판정 2026-08-24, PO 확定) — 409(gate_head_changed)
