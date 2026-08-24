@@ -33,6 +33,7 @@ import { parseBlockTemplate, type EventDefinitionSummary } from '@/lib/block-tem
 import { segmentMessageContent } from './message-segments';
 import { EmbedGroup } from './embed-group';
 import { toEmbedCardOpenPanel } from './embed-card-open-panel-adapter';
+import { ReportMessageSummary } from './report-message-summary';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -166,7 +167,9 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
   );
 }
 
-function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey }: {
+// story #ec57c80c(v2 3호) — report-message-summary.tsx가 「전문 보기」 펼침 상태에서 이
+// 컴포넌트를 그대로 재사용한다(사본 분화 금지 — 접힘 해제 시 원래 렌더 경로와 완전히 동일).
+export function ChatMarkdown({ content, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey }: {
   content: string; isMine: boolean; references: ChatMessage['references'];
   entityStatusByKey?: Record<string, EntityStatusFetchState>;
   onOpenReadingPanel?: (target: ReadingPanelTarget) => void;
@@ -604,7 +607,19 @@ export function ChatBubble({
                 ? 'rounded-tr-sm bg-proof-blue-soft'
                 : 'rounded-tl-sm bg-proof-panel'
             }`}>
-              <ChatMarkdown content={displayContent} isMine={isMine} references={message.references} entityStatusByKey={entityStatusByKey} onOpenReadingPanel={onOpenReadingPanel} eventDefinitionsByKey={eventDefinitionsByKey} />
+              {/* story #ec57c80c(v2 3호) — report성 밀도 재설계는 에이전트 메시지에만
+                  적용한다(진단·처방 전부 "에이전트 report성 메시지" 범위, human 메시지는
+                  무변경). ReportMessageSummary 내부가 발동 조건(computeReportDensity) 미충족
+                  이면 곧바로 ChatMarkdown으로 폴백하므로 인간 메시지 경로는 항상 원본 그대로. */}
+              {isAgent ? (
+                <ReportMessageSummary
+                  content={displayContent} messageKind={message.message_kind} isMine={isMine}
+                  references={message.references} entityStatusByKey={entityStatusByKey}
+                  onOpenReadingPanel={onOpenReadingPanel} eventDefinitionsByKey={eventDefinitionsByKey}
+                />
+              ) : (
+                <ChatMarkdown content={displayContent} isMine={isMine} references={message.references} entityStatusByKey={entityStatusByKey} onOpenReadingPanel={onOpenReadingPanel} eventDefinitionsByKey={eventDefinitionsByKey} />
+              )}
             </div>
           )}
 

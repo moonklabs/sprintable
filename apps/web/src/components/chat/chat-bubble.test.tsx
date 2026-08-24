@@ -1721,3 +1721,123 @@ describe('ChatBubble — 로드맵 PR-B L5(Bot 배지 배경 proof-blue-soft)', 
     expect(badge?.className).not.toContain('accent-claim');
   });
 });
+
+// story #ec57c80c(v2 3호, 아티팩트 2fdc81aa) — report성 메시지 밀도 재설계(kicker+리드+
+// 최상위 목록+전문 보기). 발동은 에이전트의 긴 report성 메시지만(AC1), 짧은 대화·human
+// 메시지는 무변경(회귀 가드), kicker 오분류는 안전측으로 미표시(AC2, 강제 테스트).
+describe('ChatBubble — story #ec57c80c report성 메시지 밀도(kicker+리드+최상위 목록+전문 보기)', () => {
+  const REPORT_CONTENT = [
+    '**전체 판정 — PASS**',
+    '오늘 배포한 3개 표면 전부 실측 완료했는.',
+    '**① 3009 — PASS**',
+    '- 인라인 카드 elev-card 토큰 확認.',
+    '**② 3010 — PASS**',
+    '- inbox Bot칩 확認.',
+    '**③ 3011 — PASS**',
+    '- Workcell 잘림 fix 확認.',
+  ].join('\n');
+
+  const AMBIGUOUS_LONG_CONTENT = [
+    '**진행 상황 업데이트**',
+    '오늘 작업한 내용을 정리해서 공유하는.',
+    '**작업 1**',
+    '- 세부 내용 1',
+    '**작업 2**',
+    '- 세부 내용 2',
+    '**작업 3**',
+    '- 세부 내용 3',
+  ].join('\n');
+
+  it('짧은 agent 메시지는 무변경 — kicker/전문보기 UI 자체가 없다(AC1 회귀 가드)', async () => {
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, content: '고맙는!', references: [] }} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('전문 보기');
+    expect(container.textContent).toContain('고맙는!');
+  });
+
+  it('긴 report성 agent 메시지 + message_kind="result" — kicker "판정"+리드+최상위 목록+전문보기가 뜬다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble message={{ ...baseMessage, content: REPORT_CONTENT, message_kind: 'result', references: [] }} isMine={false} />,
+      ));
+    });
+    expect(container.textContent).toContain('판정');
+    // 실렌더 harness로 적발된 회귀 — 첫 줄이 리드로도 목록 첫 항목으로도 중복 노출됐었다.
+    // "전체 판정 — PASS"는 리드 한 번만 나와야 한다(목록엔 중복 제거).
+    expect(container.textContent!.split('전체 판정 — PASS').length - 1).toBe(1);
+    expect(container.textContent).toContain('① 3009 — PASS');
+    expect(container.textContent).toContain('전문 보기');
+    // 접힌 상태에선 하위 상세("인라인 카드 elev-card 토큰 확認")는 안 보여야 한다(폴딩).
+    expect(container.textContent).not.toContain('인라인 카드 elev-card 토큰 확認');
+  });
+
+  it('「전문 보기」 클릭 시 실제로 펼쳐져 하위 상세까지 전부 보인다(정보 소실 0) — 실 클릭 시뮬레이션', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble message={{ ...baseMessage, content: REPORT_CONTENT, message_kind: 'result', references: [] }} isMine={false} />,
+      ));
+    });
+    const viewFullBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('전문 보기'));
+    expect(viewFullBtn).toBeTruthy();
+    await act(async () => { viewFullBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // 펼친 뒤엔 하위 상세 원문이 실제로 나타난다(폴딩 이전엔 없었던 텍스트).
+    expect(container.textContent).toContain('인라인 카드 elev-card 토큰 확認');
+    expect(container.textContent).toContain('접기');
+
+    const collapseBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '접기');
+    expect(collapseBtn).toBeTruthy();
+    await act(async () => { collapseBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // 다시 접으면 하위 상세가 사라지고 요약 뷰로 돌아온다.
+    expect(container.textContent).not.toContain('인라인 카드 elev-card 토큰 확認');
+    expect(container.textContent).toContain('전문 보기');
+  });
+
+  it('message_kind 없고 패턴도 불확실하면 — 발동은 하되(길이 조건 충족) kicker는 미표시(AC2 강제 테스트, 오분류 방지)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble message={{ ...baseMessage, content: AMBIGUOUS_LONG_CONTENT, message_kind: null, references: [] }} isMine={false} />,
+      ));
+    });
+    expect(container.textContent).toContain('전문 보기');
+    expect(container.textContent).toContain('진행 상황 업데이트');
+    expect(container.textContent).not.toContain('판정');
+  });
+
+  it('human 발신 메시지는 아무리 길어도 report 밀도 처리 대상이 아니다(범위=에이전트 메시지만)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, content: REPORT_CONTENT, message_kind: 'result', sender_type: 'human', references: [] }}
+          isMine={false}
+        />,
+      ));
+    });
+    expect(container.textContent).not.toContain('전문 보기');
+    // 원문(하위 상세 포함)이 그대로 렌더돼야 한다 — 접힘 없음.
+    expect(container.textContent).toContain('인라인 카드 elev-card 토큰 확認');
+  });
+
+  // 카디르 QA(#3448) 적출 — 첫 줄 문장 경계가 볼드 스팬 중간에 떨어지면(마침표가 "**" 안에
+  // 있으면) 리드가 "**Summary."처럼 닫는 마커 없이 잘려 화면에 미완성 ** 문자가 그대로
+  // 노출됐다(dedup도 이 변형에서 무력화). 실렌더로 미완성 마커 부재를 직접 확認한다.
+  it('첫 줄이 볼드 스팬 중간에서 잘리는 경우에도 미완성 마커(**)가 화면에 안 샌다', async () => {
+    const raw = [
+      '**Summary. Done**',
+      '오늘 배포한 3개 표면 전부 실측 완료했는.',
+      '**① 3009 — PASS**',
+      '- 인라인 카드 elev-card 토큰 확認.',
+      '**② 3010 — PASS**',
+      '- inbox Bot칩 확認.',
+      '**③ 3011 — PASS**',
+      '- Workcell 잘림 fix 확認.',
+    ].join('\n');
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, content: raw, message_kind: 'result', references: [] }} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('**');
+    expect(container.textContent).toContain('Summary. Done');
+    // "Summary. Done"이 리드 한 번만 나와야 한다(목록에 중복 노출 금지).
+    expect(container.textContent!.split('Summary. Done').length - 1).toBe(1);
+  });
+});
