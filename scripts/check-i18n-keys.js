@@ -76,10 +76,28 @@ function escapeRegExp(s) {
  * 눈에 띄었다 — AC9-c와 같은 교훈: 놀란 수가 나오면 자리부터 볼 게 아니라 자부터 본다).
  * 문자열/템플릿 리터럴 내용은 보존하고 `//`·`/* *\/` 주석만 제거한다.
  */
+// story #3023(카디르 QA #3445 근본추적) — 정규식 리터럴 안의 백틱을 아래 backtick 분기가
+// 문자열 델리미터로 오인하면, 짝이 안 맞는(홀수 개) 백틱을 담은 정규식(예:
+// `INLINE_CODE_SPAN_RE = /`[^`\n]*`/g`처럼 백틱 자체를 매칭하는 패턴 — story-detail-
+// panel.tsx L144 실측)이 그 뒤 남은 파일 전체를 "닫히지 않은 문자열 안"으로 착각시켜,
+// 그 이후의 진짜 `//` 주석이 전부 인식을 놓친다(실제로 지금까지 벌어진 CI 오탐의 원인).
+// '/' 직전의 마지막 유의미 문자가 이 목록에 있을 때만(정규식 리터럴이 실제로 오는 흔한
+// 문맥 — `= /../`, `(/../`, `, /../` 등) 정규식으로 판별해 안쪽을 통째로(백틱·따옴표
+// 델리미터 취급 없이) 건너뛴다. 일부러 좁게(allowlist) 잡았다 — `<`(JSX 닫는 태그
+// `</div>`)처럼 정규식이 아닌데 '/' 앞에 오는 문맥까지 넓히면 JSX가 널린 .tsx 전체에서
+// 새로운 오탐을 만든다. `return /regex/` 류(직전이 식별자 끝 문자라 division 취급되는
+// 소수 케이스)는 이 좁은 스코프 밖(story AC 범위 — 알려진 한계로 남김).
+const REGEX_LITERAL_CONTEXT_CHARS = new Set(['=', '(', ',', ':', ';', '!', '&', '|', '?', '[']);
+
 function stripComments(source) {
   let out = '';
   let i = 0;
   const n = source.length;
+  let lastSig = ''; // 마지막으로 출력한 공백 아닌 문자(정규식 vs 나눗셈 판별용).
+  const emit = (ch) => {
+    out += ch;
+    if (!/\s/.test(ch)) lastSig = ch;
+  };
   while (i < n) {
     const c = source[i];
     const c2 = source[i + 1];
@@ -93,29 +111,48 @@ function stripComments(source) {
       i += 2;
       continue;
     }
+    if (c === '/' && c2 !== '/' && c2 !== '*' && REGEX_LITERAL_CONTEXT_CHARS.has(lastSig)) {
+      let j = i + 1;
+      let inClass = false;
+      let closed = false;
+      while (j < n && source[j] !== '\n') {
+        if (source[j] === '\\') { j += 2; continue; }
+        if (source[j] === '[') { inClass = true; j++; continue; }
+        if (source[j] === ']') { inClass = false; j++; continue; }
+        if (source[j] === '/' && !inClass) { j++; closed = true; break; }
+        j++;
+      }
+      if (closed) {
+        while (j < n && /[a-z]/i.test(source[j])) j++; // 플래그(g/i/m/s/u/y 등) 소비.
+        for (let k = i; k < j; k++) emit(source[k]);
+        i = j;
+        continue;
+      }
+      // 줄 끝까지 닫는 '/'를 못 찾으면 정규식이 아니었다(오판) — 아래 일반 처리로 폴백.
+    }
     if (c === '"' || c === "'") {
       const quote = c;
-      out += c; i++;
+      emit(c); i++;
       while (i < n && source[i] !== quote) {
-        if (source[i] === '\\') { out += source[i]; i++; if (i < n) { out += source[i]; i++; } continue; }
-        out += source[i]; i++;
+        if (source[i] === '\\') { emit(source[i]); i++; if (i < n) { emit(source[i]); i++; } continue; }
+        emit(source[i]); i++;
       }
-      if (i < n) { out += source[i]; i++; }
+      if (i < n) { emit(source[i]); i++; }
       continue;
     }
     if (c === '`') {
-      out += c; i++;
+      emit(c); i++;
       let depth = 0;
       while (i < n) {
-        if (source[i] === '\\') { out += source[i]; i++; if (i < n) { out += source[i]; i++; } continue; }
-        if (source[i] === '`' && depth === 0) { out += source[i]; i++; break; }
-        if (source[i] === '$' && source[i + 1] === '{') { depth++; out += source[i] + source[i + 1]; i += 2; continue; }
-        if (source[i] === '}' && depth > 0) { depth--; out += source[i]; i++; continue; }
-        out += source[i]; i++;
+        if (source[i] === '\\') { emit(source[i]); i++; if (i < n) { emit(source[i]); i++; } continue; }
+        if (source[i] === '`' && depth === 0) { emit(source[i]); i++; break; }
+        if (source[i] === '$' && source[i + 1] === '{') { depth++; emit(source[i]); emit(source[i + 1]); i += 2; continue; }
+        if (source[i] === '}' && depth > 0) { depth--; emit(source[i]); i++; continue; }
+        emit(source[i]); i++;
       }
       continue;
     }
-    out += c; i++;
+    emit(c); i++;
   }
   return out;
 }
