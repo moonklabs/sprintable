@@ -32,6 +32,7 @@ from app.services.gate_resolver import (
 from app.services.gate_service import (
     create_gate,
     find_gate_slot_with_pr_fallback,
+    find_pending_merge_gates_by_head_sha,
     resolve_work_item_project_id,
 )
 from app.services.trust_score import compute_member_trust_scores
@@ -691,6 +692,7 @@ async def reconcile_merge_gate_with_real_evidence(
     ci_result: str | None,
     merged: bool,
     head_sha: str | None = None,
+    gate_check_publish: list[dict] | None = None,
 ) -> MergeGateDecision | None:
     """story #2156 AC2(2026-08-07) — GitHub 웹훅이 잡은 실 CI/PR verdict를 merge-type
     게이트에 반영한다.
@@ -720,7 +722,31 @@ async def reconcile_merge_gate_with_real_evidence(
     ⚠️호출 위치 주의 — `evaluate_merge_gate` 자신이 내부에서 `capture_pr_ci_verdict`를 이미
     부른다. 이 함수를 `capture_pr_ci_verdict` 본문 안에서 부르면 무한 재귀가 된다 — 반드시
     그 호출부(웹훅 핸들러 등) 쪽에서, `capture_pr_ci_verdict` 리턴 後에 별도로 부를 것.
-    """
+
+    ⭐story #3033(2026-08-24, PO 판정) — pr_number 경로가 아무 게이트도 못 찾으면(아래),
+    SHA 폴백으로 한 번 더 시도한다. 그라운딩(디디, #3350/#3307 2/2 실물): 스택형 형제 PR이
+    같은 head SHA를 공유하면, 원 PR이 머지된 뒤 도착하는 CI-완료 웹훅(check_suite/
+    workflow_run/status)의 pull_requests[]에서 GitHub이 그 PR을 빼버려 pr_number 자체가
+    틀린 PR(형제)을 가리킨다 — «같은 story의 게이트» 스코프로는 못 잡는다(story 자체를
+    그 틀린 pr_number 경유로 아는 순환이라). CI verdict는 PR이 아니라 SHA의 속성이라는
+    PO 판정에 따라, org+github_check_run_sha로만(story 무관) 찾는다
+    (`find_pending_merge_gates_by_head_sha`). 일치가 여럿이면 전부 갱신 — **ci_result만**.
+    pr_result(머지/클로즈)는 PR별 사실이라 SHA로 공유될 근거가 없으므로 각 게이트의 기존
+    값을 그대로 보존한다(evaluate_merge_gate의 pr_result 파라미터는 무조건부 덮어쓰기라
+    None을 넘기면 기존 값을 지운다 — 그래서 명시로 읽어 되돌려 넣는다).
+
+    ⚠️반환 계약은 그대로 유지(하위 호환 — 이 함수를 직접 호출하는 기존 realdb 테스트
+    다수(#2156/#2520/#2853/#2893)가 단일 `MergeGateDecision | None`을 전제로 한다): SHA
+    폴백이 갱신한 형제 게이트들은 이 반환값에 실리지 않는다(원래 pr_number 경로가 찾은
+    "그 story의" 결정만 반환). 대신 `gate_check_publish`(옵션, `_process_webhook_event`의
+    동형 outparam 관례 그대로 — 넘기면 형제 게이트마다 자신의 pr_number/repo로 항목을
+    append) 로 그 결과에 접근한다. 안 넘기면(기존 모든 호출부) DB 쓰기(ci_result 갱신)는
+    그대로 일어나되 GitHub check-run publish 신호만 안 나간다 — 그 쓰기 자체가 이 fix의
+    본체(게이트가 영원히 pending에 갇히는 것 해소)이므로 publish는 부가.
+
+    관측(AC2, PO 지시) — 폴백이 발동하면 info 로그(매치 건수 포함), pr_number 경로도
+    SHA 폴백도 둘 다 못 찾으면 warning(«이 CI 신호가 어떤 게이트에도 안 닿았다»가 조용히
+    묻히지 않게)."""
     # story #2893(설계안 §2 A1) — pr_number를 키에 편입: 안 넣으면 "이 웹훅이 나른 PR B의
     # CI/merge 증거"로 story의 아무 pending/auto_passed 게이트(실은 PR A 것일 수 있음)를
     # 재평가해버린다 — 실사고1/2와 정확히 같은 클래스(엉뚱한 PR의 SHA/증거가 다른 PR의
@@ -733,14 +759,58 @@ async def reconcile_merge_gate_with_real_evidence(
         gate_type=MERGE_GATE_TYPE, pr_number=(pr_number if pr_number > 0 else None),
         repo_full_name=(repo or None),
     )
-    if existing is None or existing.status not in ("pending", "auto_passed"):
+    if existing is not None and existing.status in ("pending", "auto_passed"):
+        return await evaluate_merge_gate(
+            session, org_id, story_id,
+            pr_number=pr_number, repo=repo, ci_result=ci_result,
+            pr_result=("pass" if merged else None),
+            head_sha=head_sha,
+        )
+
+    if not head_sha:
         return None
-    return await evaluate_merge_gate(
-        session, org_id, story_id,
-        pr_number=pr_number, repo=repo, ci_result=ci_result,
-        pr_result=("pass" if merged else None),
-        head_sha=head_sha,
+    sibling_gates = await find_pending_merge_gates_by_head_sha(session, org_id=org_id, head_sha=head_sha)
+    if not sibling_gates:
+        logger.warning(
+            "merge gate reconcile: no pending/auto_passed gate matched by pr_number(=%s) or "
+            "sha=%s (org=%s repo=%s) — this CI/merge signal reached no gate",
+            pr_number, head_sha, org_id, repo,
+        )
+        return None
+    logger.info(
+        "merge gate SHA fallback triggered: sha=%s matched %d sibling gate(s) (pr_number=%s path found none)",
+        head_sha, len(sibling_gates), pr_number,
     )
+    for gate in sibling_gates:
+        gate_pr_number = gate.pr_number or 0
+        gate_repo = (gate.neutral_facts or {}).get("repo") or gate.repo_full_name or repo
+        decision = await evaluate_merge_gate(
+            session, org_id, gate.work_item_id,
+            pr_number=gate_pr_number, repo=gate_repo, ci_result=ci_result,
+            # story #3033(PO 정정, 2026-08-24, 1라운드 QA REQUEST_CHANGES) — 최초 버전은
+            # gate.neutral_facts["pr_result"]를 읽어 "보존"했는데, 그건 게이트 **생성 시점
+            # 스냅샷**이라(neutral_facts는 이후 재평가마다 안 갱신됨, 위 docstring 참조)
+            # 실제로는 stale일 수 있다. CI-완료 이벤트(check_suite/workflow_run/status)엔
+            # PR 머지/클로즈 여부가 구조적으로 안 실린다 — 그 「모름」을 stale snapshot으로
+            # 위조하면(카디르+codex 실PG 재현) neutral_facts가 우연히 옛 "pass"를 들고 있는
+            # gate_status=="auto_passed" 게이트에서 «상향 오판»(auto_merge 잘못 승인)이
+            # 난다. 그래서 명시로 None(모름)을 넘긴다 — `_decide()`의 AUTO_MERGE 분기는
+            # pr=="pass" 정확 일치만 통과시켜 None은 항상 막고(상향 전이 없음, PO 요건②),
+            # `capture_pr_ci_verdict`는 merged=False일 때 pr verdict 자체를 기록 안 해(그
+            # 함수 참조 — merged=True일 때만 기록) "미머지"를 이력에 지어내지도 않는다(PO
+            # 요건①). status=="pending"(실사고 #3350/#3307 둘 다 이 케이스)인 게이트는
+            # `_decide()`가 pr 값과 무관하게 "policy disposition=ask"로 조기 반환하므로
+            # 실사고 재현 시나리오엔 아예 영향이 없다 — 이 정정은 auto_passed 게이트에서만
+            # 실제로 갈린다.
+            pr_result=None,
+            head_sha=head_sha,
+        )
+        if gate_check_publish is not None and decision.gate_id is not None:
+            gate_check_publish.append({
+                "org_id": org_id, "gate_id": decision.gate_id,
+                "head_sha": head_sha, "repo_full_name": gate_repo, "pr_number": gate_pr_number,
+            })
+    return None
 
 
 async def trigger_gate_creation_for_late_participation(

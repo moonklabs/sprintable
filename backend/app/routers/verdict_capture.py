@@ -663,10 +663,14 @@ async def _process_webhook_event(
     # 전체 rollback+500으로 처리해 GitHub가 재시도하므로, 여기서 삼키지 않고 그대로 올린다.
     # story #2813(카디르 R2) — head_sha를 넘겨 auto_passed 판정 시 anchor(gate.approved_head_sha)
     # 즉시 확定(merge_verdict_gate.evaluate_merge_gate 참고).
+    # story #3033(2026-08-24) — SHA 폴백(형제 PR 게이트 여럿 갱신 가능)의 publish 큐잉은
+    # 이 함수 자신이 담당(각 형제가 자기 pr_number/repo로 append — 웹훅 자신의 pr_number/
+    # repo는 그 형제 중 하나만 가리켜 잘못된 PR에 check-run을 publish할 위험이 있다).
+    # 반환값은 그대로 원래 pr_number 경로가 찾은 "이 story의" 단일 decision(하위 호환).
     _reconcile_decision = await reconcile_merge_gate_with_real_evidence(
         session, org_id, story_id,
         pr_number=pr_number, repo=repo, ci_result=ci_conclusion, merged=merged,
-        head_sha=head_sha,
+        head_sha=head_sha, gate_check_publish=gate_check_publish,
     )
     # story #2853(AC①) — 예전엔 이 반환값을 그냥 버려, 재평가로 decision이 AUTO_MERGE에서
     # 이탈해도(CI 재실패·trust 재계산 등) 이미 GitHub에 선 success check-run이 안 고쳐졌다.
