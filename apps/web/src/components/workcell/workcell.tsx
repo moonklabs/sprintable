@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { ArrowRight, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { extractBriefLead } from '@/lib/brief-lead';
 import { ProofCapsule, type ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
 import { Proofline, type ProofState } from '@/components/proof-capsule/proofline';
 import { Avatar } from '@/components/shared/avatar';
@@ -20,12 +21,21 @@ export interface WorkcellAgent {
 
 export interface WorkcellBrief {
   goal: string;
-  dod: string;
+  /** story #178c7c6d(3015②) — null=완료 조건 미기재(정직). 예전엔 호출부가 "완료 조건
+   * 미기재" 문자열 센티널을 직접 만들어 넘겼으나, 그 표시 문구는 BriefLayer가 소유해야
+   * i18n·"본문 AC 보기" 링크 배선이 한 곳에 모인다. */
+  dod: string | null;
   /** story #2993(PO 확定①) — 에이전트 단독배정 스토리도 Workcell을 렌더한다(허구 human
    * 금지 원칙은 유지 — 없으면 null로 정직하게 "책임자 미지정" 표시, 지어내지 않음). */
   owner: WorkcellOwner | null;
   agent?: WorkcellAgent;
   scopes?: string[];
+  /** story #178c7c6d(3015②) — goal 리드의 "더 보기" 클릭 시 기존 Description 영역으로
+   * 위임(새 화면·모달 금지). undefined면 링크 자체를 렌더하지 않는다(갈 곳 없는 링크
+   * 금지 — 정직). */
+  onGoalMore?: () => void;
+  /** dod 리드의 "더 보기"(있을 때) / "본문 AC 보기"(null일 때) 클릭 시 AC 영역으로 위임. */
+  onDodMore?: () => void;
 }
 
 export interface WorkcellRun {
@@ -333,8 +343,25 @@ function LayerLabel({ title, question, className }: { title: string; question: s
   );
 }
 
+function BriefMoreLink({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mt-0.5 text-[11.5px] font-semibold text-proof-blue hover:underline"
+    >
+      {children}
+    </button>
+  );
+}
+
 function BriefLayer({ brief }: { brief: WorkcellBrief }) {
   const t = useTranslations('workcell');
+  // story #178c7c6d(3015②) — 원문 덤프(마크다운 기호·헤딩 이후 구현세부·경로) 대신 첫
+  // 헤딩 前 리드를 verbatim 추출(리라이트·요약 생성 0). 소스(story.description 등) 자체는
+  // 무변경 — 표현 층 전용 런타임 변환.
+  const goalLead = extractBriefLead(brief.goal);
+  const dodLead = brief.dod != null ? extractBriefLead(brief.dod) : null;
   return (
     <div className="h-full px-4.5 py-3.5">
       <LayerLabel title="Brief" question={t('briefQuestion')} className="mb-2.5" />
@@ -343,12 +370,35 @@ function BriefLayer({ brief }: { brief: WorkcellBrief }) {
         {/* story 38f524e1(critical, 선생님 실사고 2026-08-24) — flex 자식 기본 min-width:auto가
             긴 무단절 토큰(인라인 코드·경로)의 min-content 폭을 그대로 요구해 축소를 거부하고
             셀(246px) 밖까지 뻗어 조상 overflow-hidden에 글자 중간이 잘렸다. min-w-0으로 축소
-            허용 + break-words로 그 폭에서 토큰 내부 줄바꿈. */}
-        <span className="min-w-0 break-words text-proof-ink">{brief.goal}</span>
+            허용 + break-words로 그 폭에서 토큰 내부 줄바꿈(3015②에서도 유지 — line-clamp는
+            세로만 자르고 가로 무단절 토큰은 그대로 못 막는다). */}
+        <div className="min-w-0">
+          <p className="line-clamp-3 break-words text-proof-ink">{goalLead}</p>
+          {brief.onGoalMore ? <BriefMoreLink onClick={brief.onGoalMore}>{t('briefMore')}</BriefMoreLink> : null}
+        </div>
       </div>
       <div className="mt-1.5 flex gap-2 text-[13px] leading-[1.5] text-proof-ink-2">
         <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">{t('briefDod')}</span>
-        <span className="min-w-0 break-words text-proof-ink">{brief.dod}</span>
+        <div className="min-w-0">
+          {dodLead != null ? (
+            <>
+              <p className="line-clamp-3 break-words text-proof-ink">{dodLead}</p>
+              {brief.onDodMore ? <BriefMoreLink onClick={brief.onDodMore}>{t('briefMore')}</BriefMoreLink> : null}
+            </>
+          ) : (
+            <p className="break-words italic text-proof-ink-3">
+              {t('briefDodMissing')}
+              {brief.onDodMore ? (
+                <>
+                  {' · '}
+                  <button type="button" onClick={brief.onDodMore} className="not-italic font-semibold text-proof-blue hover:underline">
+                    {t('briefDodViewAc')}
+                  </button>
+                </>
+              ) : null}
+            </p>
+          )}
+        </div>
       </div>
       {/* story #2922 W4 — owner/agent는 헤더로 승격됐다(위 Workcell 헤더 참조, SSOT 이동).
           scopes만 남아 briefRoles 라벨을 계승. */}

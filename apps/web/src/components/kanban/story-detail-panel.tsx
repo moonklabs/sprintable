@@ -429,6 +429,17 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
   const [editingAC, setEditingAC] = useState(false);
   const [acDraft, setAcDraft] = useState(story.acceptance_criteria ?? '');
   const [savingAC, setSavingAC] = useState(false);
+  // story #178c7c6d(3015②) — Workcell Brief의 "더 보기"가 위임할 기존 본문 섹션 앵커.
+  // ref 기반(전역 DOM id 아님) — 이 패널이 kanban/epic-swimlane/flow-node 여러 곳에서
+  // 마운트되므로 id 충돌 없이 인스턴스별로 정확한 자기 섹션을 스크롤한다.
+  const descriptionSectionRef = useRef<HTMLDivElement | null>(null);
+  const acSectionRef = useRef<HTMLDivElement | null>(null);
+  const scrollToDescriptionSection = useCallback(() => {
+    descriptionSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+  const scrollToAcceptanceCriteriaSection = useCallback(() => {
+    acSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
   // story #2315 — description/acceptance_criteria PATCH가 참조를 조용히 거를 수 있다(#2294와
   // 같은 병, story 저장 축). BE가 아직 사이드밴드를 안 실어도(parseDroppedReferences가 빈
   // 배열로 폴백) 안 깨지고, 실으면 바로 뜬다 — ephemeral(persist 안 함·패널 재오픈 시 소멸).
@@ -1433,9 +1444,14 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               pipelineStage={pipelineStage}
               brief={{
                 goal: story.description?.trim() || story.title,
-                dod: story.acceptance_criteria?.trim() || t('workcellDodMissing'),
+                // story #178c7c6d(3015②) — 문자열 센티널(t('workcellDodMissing')) 대신
+                // null로 정직하게 부재를 표현. 표시 문구·"본문 AC 보기" 링크는 BriefLayer가
+                // 소유(워크셀 자체 i18n 네임스페이스로 이관, board 네임스페이스 키는 폐기).
+                dod: story.acceptance_criteria?.trim() || null,
                 owner: proofHuman ? { name: proofHuman.name, role: 'human' } : null,
                 agent: proofAgent ? { name: proofAgent.name, initial: initials(proofAgent.name) } : undefined,
+                onGoalMore: scrollToDescriptionSection,
+                onDodMore: scrollToAcceptanceCriteriaSection,
               }}
               run={{
                 now: statusLabel,
@@ -1550,7 +1566,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
             ) : null}
 
             {/* Description */}
-            <div>
+            <div ref={descriptionSectionRef}>
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('description')}</span>
                 {!editingDescription && (
@@ -1609,7 +1625,7 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
             </div>
 
             {/* Acceptance Criteria — Description 블록 미러 (E-BOARD-UX S3) */}
-            <div>
+            <div ref={acSectionRef}>
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('acceptanceCriteria')}</span>
                 {!editingAC && (
