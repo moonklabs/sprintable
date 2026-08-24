@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useSseMultiplexerContext } from '@/components/realtime-provider';
+import { useSseMultiplexerContext, useSseConnectedContext } from '@/components/realtime-provider';
 import { shouldSuppressDuplicateSseEvent, createSeenIdTracker } from '@/lib/realtime/sse-event-dedup';
 import { createReconnectBackoffState, type ReconnectBackoffState } from '@/lib/realtime/sse-reconnect-backoff';
 import { isSessionAlive } from '@/lib/realtime/sse-session-guard';
@@ -205,6 +205,11 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
   // 이미 살아있는 canonical 경로 `conversation.message_created`(S-COMM-12, 아래
   // handleConversationMessage)가 전부 커버한다 — 별도 기능 손실 없이 제거.
   const mux = useSseMultiplexerContext();
+  // story 6ddaa086(critical, 선생님 실사고) — mux.connected(getter)는 mux 핸들 자체가
+  // 참조안정적(realtime-provider.tsx 주석 참고)이라 값이 바뀌어도 리렌더를 못 유발했다
+  // ("연결 끊겼어요" 배너가 정상 재연결 후에도 안 풀리는 근본원인). 반응형 전용 컨텍스트로
+  // 교체.
+  const muxConnected = useSseConnectedContext();
 
   useEffect(() => {
     if (!mux) return;
@@ -333,7 +338,8 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
     };
   }, [mux, backoff, currentTeamMemberId]);
 
-  // mux 경로에서는 로컬 connected state를 동기화하지 않고(setState-in-effect 회피) 멀티플렉서
-  // 자신의 connected를 그대로 노출한다 — 이미 반응형(context 값 변경 시 이 훅도 리렌더).
-  return { connected: mux ? mux.connected : connected };
+  // story 6ddaa086 — 이전 주석은 "mux.connected가 이미 반응형"이라 적었으나 틀렸다: mux
+  // 핸들 자체는 참조안정적이라(realtime-provider.tsx) getter 뒤 값이 바뀌어도 이 컴포넌트가
+  // 리렌더되지 않았다. muxConnected(위, 전용 컨텍스트)만 실제로 반응형이다.
+  return { connected: mux ? muxConnected : connected };
 }
