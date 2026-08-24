@@ -1263,13 +1263,12 @@ describe('ChatBubble — story #2037 이미지 라이트박스 진입점', () =>
 describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
   const DOC_STATUS_KEY = `doc:${DOC_ID.toLowerCase()}`;
 
-  it('draft + project 멤버 — "결재로 올리기" 버튼이 뜨고 클릭하면 transition POST 후 pending으로 즉시 반영된다', async () => {
+  it('story #3004(선생님 정책 확定) — draft + project 멤버는 "결재자 지정하고 올리기" 링크가 뜨고 문서 페이지로 딥링크한다(직접 제출 없음)', async () => {
     mockDashboardContext.projectMemberships = [{ projectId: 'doc-proj-1', projectName: 'Doc Project' }];
     const calls: { url: string; method?: string; body?: string }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
       calls.push({ url, method: init?.method, body: init?.body });
       if (url.startsWith('/api/docs/preview')) return { ok: true, json: async () => ({ data: { projectId: 'doc-proj-1' } }) };
-      if (url === `/api/docs/${DOC_ID}/transition` && init?.method === 'POST') return { ok: true, json: async () => ({ data: {} }) };
       return { ok: false, json: async () => ({}) };
     }));
     await act(async () => {
@@ -1283,26 +1282,17 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
       await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     });
 
-    const submitBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '결재로 올리기');
-    expect(submitBtn).toBeDefined();
-    await act(async () => {
-      submitBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-    });
-
-    const transitionCall = calls.find((c) => c.url === `/api/docs/${DOC_ID}/transition`);
-    expect(transitionCall?.method).toBe('POST');
-    expect(JSON.parse(transitionCall!.body!)).toEqual({ status: 'pending' });
-    // 재조회 없이 로컬 반영 — 배지가 "검토 중"으로, 버튼은 "결재로 올리기"에서 "결재함에서 보기"로.
-    // story #2886(S2b) — 상태 배지는 격납(hover/focus tooltip)으로 이동 — 칩 트리거(첫 버튼)에
-    // 포커스를 줘 확認(제출 클릭으로 포커스가 그쪽 버튼에 있었으므로 다시 옮겨야 한다).
-    await act(async () => { container.querySelectorAll('button')[0]!.focus(); });
-    expect(document.body.textContent).toContain('검토 중');
+    // story #3004 — approver_member_id가 서버 필수가 되며 이 인라인 칩은 더 이상 직접
+    // 제출하지 않는다(픽커를 놓을 공간이 없다 — Pedro 리뷰 PR #3435). 문서 페이지
+    // (doc-gate-section.tsx, 픽커 실물 보유)로 route-first 딥링크한다.
+    const goToDocLink = Array.from(container.querySelectorAll('a')).find((a) => a.textContent === '결재자 지정하고 올리기');
+    expect(goToDocLink).toBeDefined();
+    expect(goToDocLink!.getAttribute('href')).toBe(`/docs?id=${DOC_ID}`);
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
-    expect(container.textContent).toContain('결재함에서 보기');
+    expect(calls.some((c) => c.url === `/api/docs/${DOC_ID}/transition`)).toBe(false);
   });
 
-  it('draft지만 doc의 project 멤버가 아니면 "결재로 올리기" 버튼이 안 뜬다(fail-closed)', async () => {
+  it('draft지만 doc의 project 멤버가 아니면 "결재자 지정하고 올리기" 링크가 안 뜬다(fail-closed)', async () => {
     mockDashboardContext.projectMemberships = [{ projectId: 'other-proj', projectName: 'Other' }];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.startsWith('/api/docs/preview')) return { ok: true, json: async () => ({ data: { projectId: 'doc-proj-1' } }) };
@@ -1318,10 +1308,10 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
       ));
       await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     });
-    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
+    expect(Array.from(container.querySelectorAll('a')).some((a) => a.textContent === '결재자 지정하고 올리기')).toBe(false);
   });
 
-  it('draft + 권한조회(preview) 실패 — 조용히 무권한 취급(버튼 노출 안 함, 카드 자체는 안 죽음)', async () => {
+  it('draft + 권한조회(preview) 실패 — 조용히 무권한 취급(링크 노출 안 함, 카드 자체는 안 죽음)', async () => {
     mockDashboardContext.projectMemberships = [{ projectId: 'doc-proj-1', projectName: 'Doc Project' }];
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({}) })));
     await act(async () => {
@@ -1334,7 +1324,7 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
       ));
       await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     });
-    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
+    expect(Array.from(container.querySelectorAll('a')).some((a) => a.textContent === '결재자 지정하고 올리기')).toBe(false);
     expect(container.textContent).toContain('제안서.md');
   });
 
@@ -1389,31 +1379,9 @@ describe('ChatBubble — story #2669(B2) doc 칩 결재 CTA', () => {
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(false);
   });
 
-  it('상신 실패(transition 500) — 재시도 가능한 에러 문구를 보이고 버튼은 draft 그대로 남는다', async () => {
-    mockDashboardContext.projectMemberships = [{ projectId: 'doc-proj-1', projectName: 'Doc Project' }];
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
-      if (url.startsWith('/api/docs/preview')) return { ok: true, json: async () => ({ data: { projectId: 'doc-proj-1' } }) };
-      if (url === `/api/docs/${DOC_ID}/transition` && init?.method === 'POST') return { ok: false, json: async () => ({}) };
-      return { ok: false, json: async () => ({}) };
-    }));
-    await act(async () => {
-      root.render(wrap(
-        <ChatBubble
-          message={{ ...baseMessage, references: [{ target_type: 'doc', target_id: DOC_ID }] }}
-          isMine={false}
-          entityStatusByKey={{ [DOC_STATUS_KEY]: { kind: 'resolved', raw: 'draft' } }}
-        />,
-      ));
-      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-    });
-    const submitBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '결재로 올리기') as HTMLButtonElement;
-    await act(async () => {
-      submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-    });
-    expect(container.textContent).toContain('상신 실패');
-    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '결재로 올리기')).toBe(true);
-  });
+  // story #3004 — 이 인라인 칩은 더 이상 직접 transition을 쏘지 않는다(위 route-first 테스트
+  // 참조) — "상신 실패(transition 500)" 시나리오 자체가 이 컴포넌트에서 도달 불가가 됐다.
+  // 실패 처리 책임은 doc-gate-section.tsx(문서 페이지, 실제 제출 지점)로 옮겨갔다.
 });
 
 // story #2671 — EmbedCard(ME-S5 원조 카드, "메모 기능 퇴역" PR#924 이후 실 렌더 경로 0건이던

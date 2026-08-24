@@ -3418,6 +3418,7 @@
     "intentSuggestionCompletionCta": "Mark this as complete?",
     "intentSuggestionAssignmentCta": "Assign this to me?",
     "intentSuggestionConfirm": "Yes",
+    "intentSuggestionGoToDoc": "Assign a reviewer in the document",
     "intentSuggestionSubmitting": "Submitting…",
     "intentSuggestionDismiss": "Dismiss",
     "intentSuggestionFailed": "Failed",

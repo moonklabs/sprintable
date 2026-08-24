@@ -64,7 +64,7 @@ describe('IntentSuggestionCard — mount', () => {
     vi.unstubAllGlobals();
   });
 
-  it('AC1/AC2 — 승인 의도 감지 시 카드가 뜨고, 확認 클릭 1회로 transition을 호출한다', async () => {
+  it('AC1/AC2(story #3004로 갱신) — 승인 의도 감지 시 카드가 뜨고, CTA는 문서 페이지로 route-first 딥링크한다(직접 제출 없음)', async () => {
     await act(async () => {
       root = createRoot(container);
       root.render(
@@ -78,17 +78,18 @@ describe('IntentSuggestionCard — mount', () => {
     });
 
     expect(container.textContent).toContain('chats.intentSuggestionApprovalCta');
-    const confirmBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'chats.intentSuggestionConfirm');
-    expect(confirmBtn).toBeTruthy();
-
-    await act(async () => { confirmBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-
-    expect(fetchMock).toHaveBeenCalledWith(`/api/docs/${DOC_ID}/transition`, expect.objectContaining({
-      method: 'POST', body: JSON.stringify({ status: 'pending' }),
-    }));
-    // 성공 후 카드는 사라진다(state.status==='done').
-    expect(container.textContent).not.toContain('chats.intentSuggestionApprovalCta');
+    // story #3004(선생님 정책 확定 2026-08-24) — approver_member_id가 서버 필수가 되며 이
+    // 슬림 카드는 더 이상 직접 제출하지 않는다(픽커를 놓을 공간이 없다 — Pedro 리뷰 PR
+    // #3435). 문서 페이지(doc-gate-section.tsx, 픽커 실물 보유)로 route-first 딥링크.
+    const goToDocLink = Array.from(container.querySelectorAll('a')).find((a) => a.textContent === 'chats.intentSuggestionGoToDoc');
+    expect(goToDocLink).toBeTruthy();
+    expect(goToDocLink!.getAttribute('href')).toBe(`/docs?id=${DOC_ID}`);
+    // "예"(handleConfirm 버튼)가 이 kind엔 더 이상 렌더되지 않는다 — 순수 링크뿐이라 클릭이
+    // fetch를 쏠 방법 자체가 없다(next/link의 jsdom 클릭 시뮬레이션은 라우터 부재로 불안정해
+    // 별도로 시도하지 않는다 — 구조적 부재로 충분히 증명됨).
+    const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
+    expect(buttons).not.toContain('chats.intentSuggestionConfirm');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('음성대조 — 남의 메시지(isMine=false)엔 조건이 다 맞아도 카드가 안 뜬다', async () => {

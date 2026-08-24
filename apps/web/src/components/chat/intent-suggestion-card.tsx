@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { ArrowUpCircle, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import {
@@ -95,6 +96,8 @@ export function IntentSuggestionCard({ messageId, content, isMine, entityStatusB
     setDismissedLocally(true);
   };
 
+  // story #3004 — 'approval'은 이제 handleConfirm에 안 닿는다(위 렌더가 Link로 갈라놨다).
+  // 남는 kind는 completion/assignment 둘 다 PATCH.
   const handleConfirm = async () => {
     setState({ status: 'submitting' });
     try {
@@ -104,7 +107,7 @@ export function IntentSuggestionCard({ messageId, content, isMine, entityStatusB
         body = { assignee_id: currentTeamMemberId };
       }
       const res = await fetch(suggestion.endpoint, {
-        method: suggestion.kind === 'approval' ? 'POST' : 'PATCH',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
@@ -120,14 +123,28 @@ export function IntentSuggestionCard({ messageId, content, isMine, entityStatusB
       <ArrowUpCircle className="size-3.5 shrink-0 text-primary" aria-hidden />
       <span className="flex-1">{t(suggestion.label)}</span>
       {state.status === 'failed' && <span className="text-destructive">{t('intentSuggestionFailed')}</span>}
-      <button
-        type="button"
-        onClick={() => void handleConfirm()}
-        disabled={state.status === 'submitting'}
-        className="rounded border border-primary/40 px-1.5 py-0.5 font-medium text-primary hover:bg-primary/10 disabled:opacity-60"
-      >
-        {state.status === 'submitting' ? t('intentSuggestionSubmitting') : t('intentSuggestionConfirm')}
-      </button>
+      {suggestion.kind === 'approval' ? (
+        // story #3004(선생님 정책 확定 2026-08-24) — approver_member_id가 서버 필수이 되며
+        // 이 슬림 카드에서 직접 제출하던 경로를 걷어냈다(결재자 픽커를 놓을 공간이 없다 —
+        // Pedro 리뷰 PR #3435). 문서 페이지(doc-gate-section.tsx, 픽커 실물 보유)로
+        // route-first 딥링크한다.
+        <Link
+          href={`/docs?id=${suggestion.ref.id}`}
+          onClick={handleDismiss}
+          className="rounded border border-primary/40 px-1.5 py-0.5 font-medium text-primary hover:bg-primary/10"
+        >
+          {t('intentSuggestionGoToDoc')}
+        </Link>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void handleConfirm()}
+          disabled={state.status === 'submitting'}
+          className="rounded border border-primary/40 px-1.5 py-0.5 font-medium text-primary hover:bg-primary/10 disabled:opacity-60"
+        >
+          {state.status === 'submitting' ? t('intentSuggestionSubmitting') : t('intentSuggestionConfirm')}
+        </button>
+      )}
       <button type="button" onClick={handleDismiss} className="shrink-0 text-muted-foreground hover:text-foreground" aria-label={t('intentSuggestionDismiss')}>
         <X className="size-3.5" aria-hidden />
       </button>

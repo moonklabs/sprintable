@@ -3418,6 +3418,7 @@
     "intentSuggestionCompletionCta": "완료 처리할까요?",
     "intentSuggestionAssignmentCta": "나에게 배정할까요?",
     "intentSuggestionConfirm": "예",
+    "intentSuggestionGoToDoc": "문서에서 결재자 지정",
     "intentSuggestionSubmitting": "처리 중…",
     "intentSuggestionDismiss": "닫기",
     "intentSuggestionFailed": "처리에 실패했습니다",
