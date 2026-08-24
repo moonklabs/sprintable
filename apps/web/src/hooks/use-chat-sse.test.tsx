@@ -222,3 +222,52 @@ describe('useChatSse — org 전환(memberId 변경) 재연결(story #2964, mux 
     expect(FakeEventSource.instances[0]!.closed).toBe(false);
   });
 });
+
+// story #2987(선생님 실사용 지적, standalone-fallback 경로) — sse-multiplexer.test.tsx의
+// "가시성 복귀 강제 재연결" 회귀가드와 동형(mux OFF일 때 이 훅이 직접 여는 EventSource도
+// 같은 처방을 받아야 한다).
+describe('useChatSse — 가시성 복귀 강제 재연결(#2987, standalone-fallback)', () => {
+  function setVisibility(state: DocumentVisibilityState) {
+    Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }
+
+  afterEach(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+  });
+
+  it('임계값(3s) 이상 숨겨졌다 돌아오면 기존 커넥션을 닫고 새로 연다', async () => {
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" />); });
+    expect(FakeEventSource.instances).toHaveLength(1);
+
+    act(() => { setVisibility('hidden'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    act(() => { setVisibility('visible'); });
+
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.instances[0]!.closed).toBe(true);
+  });
+
+  it('임계값(3s) 미만의 짧은 전환은 재연결하지 않는다 — 처칭 방지', async () => {
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" />); });
+
+    act(() => { setVisibility('hidden'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    act(() => { setVisibility('visible'); });
+
+    expect(FakeEventSource.instances).toHaveLength(1);
+  });
+
+  it('강제 재연결이 열리면 onReconnect가 불린다(backfill 트리거, backoff 이력 무관)', async () => {
+    const onReconnect = vi.fn();
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" onReconnect={onReconnect} />); });
+    expect(onReconnect).not.toHaveBeenCalled();
+
+    act(() => { setVisibility('hidden'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    act(() => { setVisibility('visible'); });
+    act(() => { FakeEventSource.instances[1]!.onopen?.(); });
+
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+  });
+});

@@ -6,6 +6,7 @@ import { shouldSuppressDuplicateSseEvent, createSeenIdTracker } from '@/lib/real
 import { createReconnectBackoffState, type ReconnectBackoffState } from '@/lib/realtime/sse-reconnect-backoff';
 import { isSessionAlive } from '@/lib/realtime/sse-session-guard';
 import { isCursorEligibleEventName } from '@/lib/realtime/sse-cursor-eligibility';
+import { createVisibilityReconnectState } from '@/lib/realtime/sse-visibility-reconnect';
 
 // chat-attach: 메시지 전송 시 첨부 메타 (BE MessageAttachment 계약과 동일).
 export interface SendAttachment {
@@ -215,6 +216,11 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
     if (prevMemberIdForResetRef.current !== currentTeamMemberId) lastEventIdRef.current = null;
     prevMemberIdForResetRef.current = currentTeamMemberId;
 
+    // story #2987 — sse-multiplexer.ts와 동일 처방(그쪽 주석 참고). 가시성 복귀 강제 재연결은
+    // backoff.isReconnect()를 안 거치므로(onError 미경유) 이 플래그로 onReconnect(=backfill)를
+    // 확실히 태운다.
+    let pendingForcedReconnect = false;
+
     function connect() {
       sourceRef.current?.close();
       sourceRef.current = null;
@@ -227,7 +233,8 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
       sourceRef.current = source;
 
       source.onopen = () => {
-        const isReconnect = backoff.isReconnect();
+        const isReconnect = backoff.isReconnect() || pendingForcedReconnect;
+        pendingForcedReconnect = false;
         setConnected(true);
         backoff.onOpen();
         // AC4: 재연결 시 backfill 트리거
@@ -283,7 +290,23 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
 
     connect();
 
+    // story #2987 — sse-multiplexer.ts와 동일 처방(그쪽 주석 참고, sse-visibility-reconnect.ts
+    // 공용 모듈). readyState는 좀비 커넥션을 못 잡으므로 가시성 복귀 시 무조건 강제 재연결한다.
+    const visibilityState = createVisibilityReconnectState();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        visibilityState.onHidden();
+        return;
+      }
+      if (visibilityState.onVisible()) {
+        pendingForcedReconnect = true;
+        connect();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       // #3388 카디르 QA MEDIUM과 동일 근거 — clearTimeout만으론 stale ref가 남아, 재마운트
       // (memberId 전환) 직후 대기 中이던 백오프 재시도가 stale ref에 걸려 건너뛸 수 있었다.
       if (reconnectTimerRef.current) {

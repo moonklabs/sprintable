@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createReconnectBackoffState } from './sse-reconnect-backoff';
 import { isSessionAlive } from './sse-session-guard';
 import { isCursorEligibleEventName } from './sse-cursor-eligibility';
+import { createVisibilityReconnectState } from './sse-visibility-reconnect';
 
 /**
  * story #2078(E-ARCH 0단계) — presence·notification·chat이 각자 EventSource를 열어 탭당 장수
@@ -114,6 +115,11 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
 
     let closed = false;
     const backoff = createReconnectBackoffState();
+    // story #2987 — 가시성 복귀로 강제 재연결할 때는 backoff.isReconnect()(과거 onError
+    // 이력 여부)가 아니라 이 플래그로 reconnectSubscribers(=chat-view의 backfill fetch 등)를
+    // 확실히 태운다. onError를 거치지 않은 강제 재연결이라 backoff 내부 상태는 그대로 두고
+    // (실패 카운트·healthy-cycle 판정 오염 방지) 이 자리에서만 별도로 신호한다.
+    let pendingForcedReconnect = false;
 
     const connect = () => {
       if (closed) return;
@@ -130,7 +136,8 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
       for (const eventName of namedSubscribersRef.current.keys()) attachIfNeeded(eventName);
 
       es.onopen = () => {
-        const isReconnect = backoff.isReconnect();
+        const isReconnect = backoff.isReconnect() || pendingForcedReconnect;
+        pendingForcedReconnect = false;
         backoff.onOpen();
         setConnected(true);
         if (isReconnect) for (const handler of reconnectSubscribersRef.current) handler();
@@ -168,9 +175,27 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
 
     connect();
 
+    // story #2987 — 앱이 백그라운드로 갔다 돌아와도 커넥션이 실제로 살아있는지 아무도 확認
+    // 안 하던 것(선생님 실사용 지적 "나갔다 들어와야 갱신됨"의 근본원인). readyState는 좀비
+    // 커넥션(브라우저가 아직 끊김을 감지 못한 상태)을 못 잡으므로, 숨겨진 시간이 임계값
+    // 이상이면 readyState를 안 보고 무조건 강제 재연결한다(sse-visibility-reconnect.ts).
+    const visibilityState = createVisibilityReconnectState();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        visibilityState.onHidden();
+        return;
+      }
+      if (visibilityState.onVisible()) {
+        pendingForcedReconnect = true;
+        connect();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       closed = true;
       setConnected(false);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       // 카디르 QA(PR#3388) MEDIUM — clearTimeout만으론 stale ref가 남아, 재마운트(예: memberId
       // 전환) 직후 대기 중이던 백오프 재시도의 scheduleRetry()가 `if (retryTimerRef.current)
       // return` 가드에 stale 값으로 걸려 재시도를 건너뛸 수 있었다. null로 명시 리셋.

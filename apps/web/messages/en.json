@@ -3523,6 +3523,8 @@
     "groupTitlePlaceholder": "Group chat name",
     "dmWith": "DM",
     "noMessages": "Send the first message",
+    "connectionLost": "Connection lost",
+    "refreshNow": "Refresh",
     "create": "Start chat",
     "myChatsTab": "My Chats",
     "agentChatsTab": "Agent Chats",
