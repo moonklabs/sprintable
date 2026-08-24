@@ -335,7 +335,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
       setEpics(epics);
       if (membersRes.ok) { const json = await membersRes.json(); setMembers(json.data ?? []); }
       setLoadError(null);
-    } catch (err) {
+    } catch (_err) {
       // QA changes 8R HIGH②(카디르+codex, 2026-08-22) — fetchAllPages가 이제 중간 실패를
       // throw로 승격하니 여기서 정직한 에러 상태로 받는다. stories/epics를 손대지 않고
       // (부분 데이터로 덮어써 "이 프로젝트엔 원래 이만큼만 있다"처럼 보이는 재발 방지)
