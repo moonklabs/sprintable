@@ -46,8 +46,9 @@ export function RecentsSection({ recentSlugs, docs, selectedSlug, onSelect, labe
       >
         {collapsed ? <ChevronRight className="size-3 shrink-0" /> : <ChevronDown className="size-3 shrink-0" />}
         <Clock className="size-3 shrink-0" />
-        {/* story #2963 §2 — meta-caps 라벨(레일 마스트헤드·그룹 라벨과 동형 mono uppercase). */}
-        <span className="flex-1 text-left font-mono text-[9.5px] font-semibold uppercase tracking-[0.1em]">{label}</span>
+        {/* rebase 발견(2026-08-23, #2973/#3391 rebase 중) — label(t('recentDocs'))이 한글이라
+            mono uppercase가 2967과 동일 결함(흐림)을 낸다 — sans로. */}
+        <span className="flex-1 text-left text-[9.5px] font-semibold">{label}</span>
         {recentDocs.length > 0 && (
           <span className="font-mono text-[9.5px] tabular-nums">{recentDocs.length}</span>
         )}

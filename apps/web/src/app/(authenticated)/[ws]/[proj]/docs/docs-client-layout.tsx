@@ -348,9 +348,14 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   const sidebarContent = (
     <>
       {/* story #2963 §2 — 에디토리얼 마스트헤드(1호 인덱스 축소판). 상태·핸들러 무접촉,
-          형태만 승격 — 6 능력 어디에도 속하지 않는 순수 헤더 삽입. */}
+          형태만 승격 — 6 능력 어디에도 속하지 않는 순수 헤더 삽입.
+          rebase 발견(2026-08-23, #2973/#3391 rebase 중) — railKicker 값이 "지식 · INDEX"
+          (한글+라틴 혼합)인데 font-mono uppercase tracking을 걸어 "지식"까지 mono로
+          흐려지고 있었다(2967 교훈과 동일 결함 클래스, 이 파일의 정렬 토글 라벨과 같은
+          이유로 그때 이미 한 번 고쳐졌던 것을 이 자리는 놓쳤음). sans로 통일 — 계열 대문자
+          표기("INDEX")는 카피 자체가 이미 담당. */}
       <div className="px-3 pb-1.5 pt-3">
-        <div className="font-mono text-[9px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+        <div className="text-[9px] font-semibold text-muted-foreground">
           {t('railKicker')}
         </div>
         <div className="mt-0.5 font-editorial-heading text-[20px] leading-none tracking-[-0.03em] text-foreground">

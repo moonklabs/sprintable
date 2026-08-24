@@ -105,8 +105,9 @@ function GroupHeader({ group, inFolderLabel, looseAtRootLabel, moreLabel, select
         className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left hover:bg-muted"
       >
         {expanded ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />}
-        {/* story #2963 §2 — meta-caps 그룹 라벨("제품 · 5"), mono 소문자 규율은 editorial 헤더와 동형. */}
-        <span className="flex-1 truncate font-mono text-[9.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+        {/* rebase 발견(2026-08-23, #2973/#3391 rebase 중) — group.label이 한글(예: "제품")이라
+            mono uppercase가 2967과 동일 결함(흐림)을 낸다 — sans로(숫자 total은 이미 별도라 영향 없음). */}
+        <span className="flex-1 truncate text-[9.5px] font-semibold text-muted-foreground">
           {group.label} <span className="text-border">·</span> {total}
         </span>
       </button>
