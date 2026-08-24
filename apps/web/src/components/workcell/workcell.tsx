@@ -465,7 +465,9 @@ function ConversationLayer({ conversation }: { conversation: WorkcellConversatio
               {conversation.messages.map((m, i) => (
                 <div key={i} className="flex gap-2 py-0.5 text-[12.5px] leading-[1.5] text-proof-ink-2">
                   <span className="shrink-0 whitespace-nowrap font-semibold text-proof-ink">{m.author}</span>
-                  <span className="min-w-0">
+                  {/* story 8df36496(high, 3011 동일 클래스 잔존) — min-w-0만 있고 break-words가
+                      없었다. m.body는 자유텍스트라 URL·해시 등 무단절 토큰 실 위험군. */}
+                  <span className="min-w-0 break-words">
                     {m.body}
                     {m.resultLink ? <span className="ml-1.5 font-mono text-[10.5px] text-proof-blue">{m.resultLink}</span> : null}
                   </span>

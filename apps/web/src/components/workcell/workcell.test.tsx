@@ -397,6 +397,28 @@ describe('Workcell — story #2922 W5 Conversation 구획 = ChatProofSection 요
     expect(chatProofIdx).toBeLessThan(disclosureIdx);
   });
 
+  // story 8df36496(high, 3011 동일 클래스 잔존) — 카디르 QA(#3440) 발견: 메시지 본문 값 span이
+  // min-w-0만 갖고 break-words가 없었다. m.body는 자유텍스트라 URL·해시 등 무단절 토큰 실
+  // 위험군(#3440 하네스가 증명한 대로 min-w-0 단독으론 클리핑이 재현된다).
+  it('story 8df36496 — 메시지 본문 값 span이 min-w-0과 break-words를 동시에 갖는다(무단절 토큰 클리핑 회귀가드)', () => {
+    const longToken = 'https://example.com/xtremelylongunbrokenidentifiertoken1234567890abcdefghijklmnop';
+    const markup = renderKo(
+      <Workcell
+        {...BASE}
+        conversation={{ view: 'run', messages: [{ author: 'A', body: longToken }] }}
+      />,
+    );
+    // 정규식 이스케이프 없이 순수 문자열 탐색으로 토큰 직전의 span class를 역추적한다
+    // (동적 토큰을 정규식에 끼워넣는 이스케이프 버그를 원천 차단).
+    const bodyIdx = markup.indexOf(`>${longToken}`);
+    expect(bodyIdx).toBeGreaterThan(-1);
+    const spanOpenIdx = markup.lastIndexOf('<span class="', bodyIdx);
+    const classStart = spanOpenIdx + '<span class="'.length;
+    const classEnd = markup.indexOf('"', classStart);
+    const spanClass = markup.slice(classStart, classEnd);
+    expect(spanClass.split(/\s+/)).toEqual(expect.arrayContaining(['min-w-0', 'break-words']));
+  });
+
   it('댓글 N건 disclosure 라벨에 정확한 건수가 들어간다', () => {
     const markup = renderKo(
       <Workcell
