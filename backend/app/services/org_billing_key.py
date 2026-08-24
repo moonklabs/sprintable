@@ -5,6 +5,7 @@ ON CONFLICT DO UPDATE를 쓴다 — org_billing_keys는 append-only가 아니다
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -15,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.org_billing_key import OrgBillingKey
 from app.services.billing_key_crypto import decrypt_billing_key, encrypt_billing_key, ensure_configured
 from app.services.payment.toss_adapter import TossAdapter
+
+logger = logging.getLogger("sprintable.billing_key")
 
 
 class ActiveSubscriptionBlocksRevoke(Exception):
@@ -77,8 +80,9 @@ async def issue_billing_key(
     """FE 위젯 인증 완료 후 authKey로 실 빌링키를 발급받아 저장한다.
 
     기존 행이 있으면(재발급 = 카드 교체) 그 customer_key를 재사용 — Toss 쪽 고객 식별을
-    유지한다. 새 billingKey로 UPDATE(이전 빌링키의 Toss측 폐기는 story C4 대상, 여기서는
-    저장 갱신만).
+    유지한다. 새 billingKey로 UPDATE — story #2989(PO 동승 권고, PR#3423 리뷰) 이전엔
+    이전 빌링키의 Toss측 폐기가 C4 유예 항목이었으나, 이제 delete_billing_key가 생겨
+    같은 함수 안에서 닫는다(신 키 저장 성공 → 구 키 Toss 폐기, 순서 고정 — 아래 참고).
 
     카디르 결함사냥 fix(#2892 리뷰, 2026-08-07) — 크로스-커넥션 레이스: 예전엔 이 함수가
     raw SELECT로 스스로 customer_key를 결정했다. ensure_customer_key()의 원자적 INSERT..
@@ -93,6 +97,16 @@ async def issue_billing_key(
     ensure_configured()
 
     customer_key = await ensure_customer_key(session, org_id=org_id)
+
+    # story #2989(PO 동승 권고, PR#3423 리뷰) — 재발급이 아래 ON CONFLICT DO UPDATE로 구
+    # 행을 덮어쓰기 前에 구 encrypted_billing_key를 미리 읽어둔다(덮어쓴 뒤엔 사라짐).
+    # placeholder(awaiting_auth, encrypted_billing_key=None)면 폐기할 실 키가 없어 자연히
+    # None — revoke_billing_key의 placeholder-skip과 동형 판단.
+    old_encrypted_billing_key = (
+        await session.execute(
+            select(OrgBillingKey.encrypted_billing_key).where(OrgBillingKey.org_id == org_id)
+        )
+    ).scalar_one_or_none()
 
     result = await TossAdapter().create_billing_key(auth_key=auth_key, customer_key=customer_key)
 
@@ -130,6 +144,19 @@ async def issue_billing_key(
     )
     await session.execute(stmt)
     await session.commit()
+
+    if old_encrypted_billing_key:
+        # 신 키 저장은 이미 커밋됐다(PO 지시 순서: 성공 후 구 키 폐기, 폐기가 실패해도
+        # 신 키 저장은 유지 — 롤백하지 않는다). Toss 실패는 org_id를 남겨 수동 정리가
+        # 가능하게만 로깅한다.
+        try:
+            old_plaintext = decrypt_billing_key(old_encrypted_billing_key)
+            await TossAdapter().delete_billing_key(billing_key=old_plaintext)
+        except Exception:
+            logger.warning(
+                "재발급 후 구 빌링키 Toss 폐기 실패(org_id=%s) — 신 키 저장은 유지, 수동 정리 필요",
+                org_id, exc_info=True,
+            )
 
     return (
         await session.execute(select(OrgBillingKey).where(OrgBillingKey.org_id == org_id))

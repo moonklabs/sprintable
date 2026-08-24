@@ -4,7 +4,9 @@ force 아닐 때) ②force=True(admin)면 그 차단을 우회 ③Toss 실 폐�
 실 Toss 왕복은 이 스위트 스코프 밖) ④DB 행이 status='deleted'+카드정보 전부 NULL로
 정리되지만 customer_key는 보존(재등록 시 재사용) ⑤이미 삭제됐거나 카드가 아예 없으면
 no-op(idempotent) ⑥placeholder(awaiting_auth, encrypted_billing_key=None)는 Toss 호출 없이
-DB 정리만 ⑦ActivityLog에 billing_key_revoked 기록. 로컬 PG 미설정 시 skip(CI 관례 동일)."""
+DB 정리만 ⑦ActivityLog에 billing_key_revoked 기록 ⑧issue_billing_key 재발급(카드 교체)이
+신 키 저장 성공 後 구 키를 Toss에서도 폐기(PO 동승 권고, PR#3423 리뷰 — C4 유예 갭을 이
+스토리가 닫음), 폐기 실패해도 신 키 저장은 유지. 로컬 PG 미설정 시 skip(CI 관례 동일)."""
 from __future__ import annotations
 
 import os
@@ -292,6 +294,106 @@ async def test_revoke_billing_key_records_activity_log():
             assert log.context["toss_revoked"] is True
             assert log.context["card_number_masked"] == "1234********5678"
             assert log.context["force"] is False
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_issue_billing_key_reissue_revokes_old_toss_key_after_new_key_saved():
+    """story #2989(PO 동승 권고, PR#3423 리뷰) — 카드 교체(재발급) 성공 後 구 빌링키를
+    Toss에서도 실 폐기한다(신 키 저장 커밋이 먼저, 그 다음 구 키 폐기). 이전엔 구 키가
+    Toss에 고아로 남는 C4 유예 갭이었다(issue_billing_key 옛 docstring)."""
+    from app.services.org_billing_key import issue_billing_key
+    from app.models.org_billing_key import OrgBillingKey
+    from sqlalchemy import select
+
+    engine, maker = await _session_factory()
+    try:
+        async with maker() as s:
+            org_id = await _seed_org(s, tier="free")
+            _, customer_key = await _seed_billing_key(
+                s, org_id=org_id, plaintext="old_billing_key_plaintext", customer_key="cust-fixed-2989",
+            )
+
+        mock_create = AsyncMock(return_value={
+            "billingKey": "new_billing_key_plaintext",
+            "authenticatedAt": "2026-08-24T00:00:00+09:00",
+            "card": {"issuerCode": "61", "number": "9999********0000", "cardType": "신용", "ownerType": "개인"},
+        })
+        mock_delete = AsyncMock()
+        with patch("app.services.org_billing_key.TossAdapter.create_billing_key", new=mock_create), \
+                patch("app.services.org_billing_key.TossAdapter.delete_billing_key", new=mock_delete):
+            async with maker() as s:
+                await issue_billing_key(s, org_id=org_id, auth_key="auth_reissue")
+
+        # 구 키가 정확히 그 평문으로 폐기 호출됐는지(암호화 토큰이 아니라 복호된 원문).
+        mock_delete.assert_awaited_once_with(billing_key="old_billing_key_plaintext")
+
+        async with maker() as s:
+            row = (await s.execute(select(OrgBillingKey).where(OrgBillingKey.org_id == org_id))).scalar_one()
+            assert row.customer_key == customer_key  # 재발급이라 customer_key는 유지
+            assert row.card_number_masked == "9999********0000"  # 새 카드로 갱신됨
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_issue_billing_key_new_org_no_old_key_skips_toss_delete():
+    """신규 org(구 행 없음)면 old-key preread가 None → Toss delete 호출 자체가 없다."""
+    from app.services.org_billing_key import issue_billing_key
+
+    engine, maker = await _session_factory()
+    try:
+        async with maker() as s:
+            org_id = await _seed_org(s, tier="free")
+            # org_billing_keys 행 자체를 세팅하지 않음(최초 발급 시나리오).
+
+        mock_create = AsyncMock(return_value={
+            "billingKey": "first_billing_key_plaintext",
+            "authenticatedAt": "2026-08-24T00:00:00+09:00",
+            "card": {"issuerCode": "61", "number": "1111********2222", "cardType": "신용", "ownerType": "개인"},
+        })
+        mock_delete = AsyncMock()
+        with patch("app.services.org_billing_key.TossAdapter.create_billing_key", new=mock_create), \
+                patch("app.services.org_billing_key.TossAdapter.delete_billing_key", new=mock_delete):
+            async with maker() as s:
+                await issue_billing_key(s, org_id=org_id, auth_key="auth_first")
+
+        mock_delete.assert_not_awaited()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_issue_billing_key_reissue_keeps_new_key_saved_even_if_old_key_toss_delete_fails():
+    """PO 지시 순서 — 구 키 Toss 폐기 실패는 신 키 저장을 롤백하지 않는다(신 키는 이미
+    커밋됨, 폐기 실패는 로깅만)."""
+    from app.services.org_billing_key import issue_billing_key
+    from app.models.org_billing_key import OrgBillingKey
+    from sqlalchemy import select
+
+    engine, maker = await _session_factory()
+    try:
+        async with maker() as s:
+            org_id = await _seed_org(s, tier="free")
+            await _seed_billing_key(s, org_id=org_id, plaintext="old_billing_key_plaintext")
+
+        mock_create = AsyncMock(return_value={
+            "billingKey": "new_billing_key_plaintext",
+            "authenticatedAt": "2026-08-24T00:00:00+09:00",
+            "card": {"issuerCode": "61", "number": "9999********0000", "cardType": "신용", "ownerType": "개인"},
+        })
+        mock_delete = AsyncMock(side_effect=RuntimeError("Toss 5xx"))
+        with patch("app.services.org_billing_key.TossAdapter.create_billing_key", new=mock_create), \
+                patch("app.services.org_billing_key.TossAdapter.delete_billing_key", new=mock_delete):
+            async with maker() as s:
+                result = await issue_billing_key(s, org_id=org_id, auth_key="auth_reissue")
+
+        assert result is not None
+        async with maker() as s:
+            row = (await s.execute(select(OrgBillingKey).where(OrgBillingKey.org_id == org_id))).scalar_one()
+            assert row.status == "active"
+            assert row.card_number_masked == "9999********0000"  # 신 키 저장은 유지
     finally:
         await engine.dispose()
 
