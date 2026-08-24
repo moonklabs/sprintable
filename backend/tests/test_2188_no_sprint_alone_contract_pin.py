@@ -86,6 +86,9 @@ async def test_actual_behavior_no_sprint_without_project_id_falls_through_to_gen
             # story #2532: 신규 Query 파라미터 — sentinel lint(scripts/lint_query_sentinel_
             # direct_calls.py) baseline과 missing-set을 맞추기 위해 명시.
             unattached=False,
+            # story #3019: epic_ids/include_unassigned/done_within_days 신규 Query
+            # 파라미터 — 위와 동일 이유로 명시(boost_candidates_from만 baseline 그대로 유지).
+            epic_ids=None, include_unassigned=False, done_within_days=None,
         )
         assert result == []
         repo.list.assert_awaited_once()
