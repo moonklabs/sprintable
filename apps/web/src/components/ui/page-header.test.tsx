@@ -23,7 +23,10 @@ async function mount(node: React.ReactNode): Promise<{ el: HTMLElement; root: Ro
 // tracking-tight→tracking-[-0.02em](§1.3 Display 정의 그대로).
 // story #2974 §1(PR-D0) 갱신 — 페이스(family)가 font-heading(Pretendard 고정)에서
 // font-display(§1 신규 토큰, D0 값=var(--font-sans)라 시각 변화 0)로 전환.
-const ORIGINAL_TITLE_CLASSES = 'font-display text-2xl tracking-[-0.02em] text-foreground md:text-3xl';
+// story #2974(PR-D1 delta, PO 확定 2026-08-24 ③) — D1 한정 제외: 이 컴포넌트 실사용처가
+// doc의 "대표 1~2화면"(docs·goals)이 아니라서 font-heading으로 되돌림. D0 원복이 아니라
+// "세리프 적용 대상에서만 제외" — D2(선생님 라이브 감 confirm 後)에서 font-display로 복귀.
+const ORIGINAL_TITLE_CLASSES = 'font-heading text-2xl tracking-[-0.02em] text-foreground md:text-3xl';
 
 function classSet(s: string): Set<string> {
   return new Set(s.split(/\s+/).filter(Boolean));

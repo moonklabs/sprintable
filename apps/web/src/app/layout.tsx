@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Source_Serif_4 } from "next/font/google";
+import localFont from "next/font/local";
 import { NextIntlClientProvider } from 'next-intl';
 import { getLocale, getMessages } from 'next-intl/server';
 import { ThemeProvider } from '@/components/providers/theme-provider';
@@ -23,6 +24,19 @@ const sourceSerif = Source_Serif_4({
   variable: "--font-serif",
   subsets: ["latin"],
   style: ["normal", "italic"],
+});
+
+// story #2974 §4(PR-D1) — Display 헤딩 전용 한글 세리프. OFL 1.1·서브셋(KS X 1001 상용
+// 2350자+Latin+숫자+구두점)·wght=820 단일 인스턴스(가변 축 통째로 안 실음, §4 확定).
+// next/font/local이 만드는 CSS 변수를 globals.css `--font-display`(§1)가 그대로
+// 참조한다 — 폴백은 generic `serif`(서브셋 밖 벽자가 와도 시스템 세리프로 떨어져 세리프
+// 헤딩 안에 산세리프 글자가 안 섞인다). 라이선스: public/fonts/NotoSerifKR-OFL.txt 동봉.
+const notoSerifKR = localFont({
+  src: "../../public/fonts/NotoSerifKR-display.woff2",
+  variable: "--font-serif-kr",
+  weight: "820",
+  style: "normal",
+  display: "swap",
 });
 
 // story #2022: 링크 공유 미리보기(OG) 신설 — 이전엔 metadata.openGraph 자체가 없어 공유 시
@@ -70,7 +84,7 @@ export default async function RootLayout({
   return (
     <html
       lang={locale}
-      className={`${geistMono.variable} ${sourceSerif.variable} h-full antialiased`}
+      className={`${geistMono.variable} ${sourceSerif.variable} ${notoSerifKR.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <head>
