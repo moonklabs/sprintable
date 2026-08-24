@@ -137,6 +137,38 @@ describe('ChatListView — 다른 프로젝트 섹션 (story #2168 PR-②)', () 
 
     expect(sessionStorage.getItem('sprintable_pending_toast')).toBe('sprintable-content 프로젝트로 이동');
   });
+
+  // story #2972(선생님 admin 세션 실측) — "다른 프로젝트" DM 행은 title이 항상 NULL(list_
+  // conversations 관례)인데 BE가 participants를 안 줘 FE가 상대 이름을 조립할 재료가 없었다.
+  // 그 결과 "님과의 대화"(이름 앞이 빈 채 조사만 남은 접미 조각)가 그대로 노출됐다 — BE delta로
+  // participants를 실었으니 여기서도 ConversationRow와 동일하게 조립되는지 고정한다.
+  it('title=null인 DM 행은 participants로 상대 이름을 조립한다(#2972 fix)', async () => {
+    stubFetch([{
+      id: 'conv-outside-dm-1', type: 'dm', title: null,
+      project_id: 'proj-content', project_name: 'sprintable-content', project_slug: 'sprintable-content',
+      participants: [
+        { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+        { member_id: 'them-1', name: '댄', avatar_url: null, type: 'human' },
+      ],
+    }]);
+    await mount();
+    expect(container.textContent).toContain('댄');
+    expect(container.textContent).not.toContain('님과의 대화');
+  });
+
+  // 참가자 정보 자체가 없는 진짜 무재료 상황(구 데이터·participants 필드 부재)만 no-fiction
+  // 폴백으로 떨어진다 — "님과의 대화"라는 반쪽 문자열이 아니라 완결된 단어("DM", dmSection과
+  // 동일 관례)여야 한다.
+  it('participants가 없는 DM 행은 완결된 "DM" 폴백을 쓴다 — 조사만 남는 조립 금지(#2972 AC2)', async () => {
+    stubFetch([{
+      id: 'conv-outside-dm-2', type: 'dm', title: null,
+      project_id: 'proj-content', project_name: 'sprintable-content', project_slug: 'sprintable-content',
+    }]);
+    await mount();
+    expect(container.textContent).not.toContain('님과의 대화');
+    const nameEl = [...container.querySelectorAll('span')].find((el) => el.textContent === 'DM');
+    expect(nameEl).not.toBeUndefined();
+  });
 });
 
 // story #2968(선생님 실사용 발견) — 리스트가 avatar.tsx(정본, #2887/#2921)를 안 쓰고 Bot 아이콘/

@@ -64,7 +64,7 @@ async def _clean(s):
         f"(SELECT id FROM projects WHERE org_id='{ORG}')",
         f"DELETE FROM projects WHERE org_id='{ORG}'",
         f"DELETE FROM org_members WHERE org_id='{ORG}'",
-        f"DELETE FROM users WHERE id='{CALLER_USER}'",
+        f"DELETE FROM users WHERE id IN ('{CALLER_USER}','{OTHER_USER}')",
         f"DELETE FROM organizations WHERE id='{ORG}'",
     ]:
         await s.execute(text(sql))
@@ -120,6 +120,41 @@ async def _add_conv(s, *, conv_id, project_id, caller_om_id, last_read_at):
     await s.execute(text(
         f"INSERT INTO conversation_participants (id,conversation_id,member_id,last_read_at) VALUES "
         f"(gen_random_uuid(),'{conv_id}','{caller_om_id}',{lra})"
+    ))
+    await s.commit()
+
+
+OTHER_USER = uuid.UUID("d2168000-0000-0000-0000-000000000099")
+
+
+async def _seed_other_org_member(s) -> uuid.UUID:
+    """story #2972 — DM 상대역 org_member(별도 user). TeamMember 행은 안 만든다(_seed_base와
+    동일 이유 — team_members는 실 배포 스키마에서 VIEW라 create_all 드리프트를 피한다)."""
+    await s.execute(text(
+        f"INSERT INTO users (id,email,hashed_password,display_name,is_active,email_verified,"
+        f"login_fail_count,totp_enabled,totp_fail_count) VALUES "
+        f"('{OTHER_USER}','other@d2168.test','x','Other Person',true,true,0,false,0)"
+    ))
+    om_row = (await s.execute(text(
+        f"INSERT INTO org_members (id,org_id,user_id,role) VALUES "
+        f"(gen_random_uuid(),'{ORG}','{OTHER_USER}','member') RETURNING id"
+    ))).one()
+    await s.commit()
+    return om_row[0]
+
+
+async def _add_dm_conv(s, *, conv_id, project_id, caller_om_id, other_om_id, last_read_at):
+    """story #2972 — DM 대화는 title=NULL(list_conversations 관례 그대로, 표시명은 참가자
+    이름으로 클라 조립)로 심는다. group과 달리 참가자 2인(caller+other)."""
+    await s.execute(text(
+        f"INSERT INTO conversations (id,org_id,project_id,type,title,status) VALUES "
+        f"('{conv_id}','{ORG}','{project_id}','dm',NULL,'open')"
+    ))
+    lra = f"'{last_read_at.isoformat()}'" if last_read_at is not None else "NULL"
+    await s.execute(text(
+        f"INSERT INTO conversation_participants (id,conversation_id,member_id,last_read_at) VALUES "
+        f"(gen_random_uuid(),'{conv_id}','{caller_om_id}',{lra}),"
+        f"(gen_random_uuid(),'{conv_id}','{other_om_id}',NULL)"
     ))
     await s.commit()
 
@@ -185,5 +220,47 @@ async def test_caps_at_limit_dropping_least_recently_read():
         ids = [row["id"] for row in out["data"]]
         assert ids == [str(c) for c in conv_ids[:5]], ids
         assert str(conv_ids[5]) not in ids, "가장 오래 안 들어간(hours=5) 것부터 잘려야 함"
+    finally:
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_dm_row_carries_participants_for_client_side_name_assembly():
+    """story #2972 — DM 행(title=NULL)이 participants를 실어 내려줘야 FE가 상대 이름을 조립할
+    재료가 생긴다(이전엔 participants가 아예 없어 "님과의 대화"라는 접미 조각만 노출되던 버그).
+    group 행은 title이 있어 회귀 없음(스펙 그대로 유지) 확인도 같이 잰다."""
+    from app.routers.conversations import list_recent_conversations_outside_project
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            caller_om_id = await _seed_base(s)
+            other_om_id = await _seed_other_org_member(s)
+            conv_dm = uuid.uuid4()
+            conv_group = uuid.uuid4()
+            await _add_dm_conv(
+                s, conv_id=conv_dm, project_id=PROJ_A,
+                caller_om_id=caller_om_id, other_om_id=other_om_id,
+                last_read_at=NOW - timedelta(hours=1),
+            )
+            await _add_conv(
+                s, conv_id=conv_group, project_id=PROJ_B,
+                caller_om_id=caller_om_id, last_read_at=NOW - timedelta(hours=2),
+            )
+        async with Session() as s:
+            out = await list_recent_conversations_outside_project(
+                project_id=PROJ_CURRENT, limit=5, db=s, auth=_auth(), org_id=ORG,
+            )
+        by_id = {row["id"]: row for row in out["data"]}
+
+        dm_row = by_id[str(conv_dm)]
+        assert dm_row["title"] is None, "DM 행 title은 항상 NULL(list_conversations 관례)"
+        dm_member_ids = {p["member_id"] for p in dm_row["participants"]}
+        assert dm_member_ids == {str(caller_om_id), str(other_om_id)}
+        other_p = next(p for p in dm_row["participants"] if p["member_id"] == str(other_om_id))
+        assert other_p["name"], "상대 참가자 이름이 채워져야 FE가 «X님과의 대화»를 조립할 수 있음"
+        assert other_p["name"] != str(other_om_id)[:8], "orphan fallback(8자 UUID)이 아니라 실명이어야 함"
+
+        group_row = by_id[str(conv_group)]
+        assert group_row["title"] == f"T-{conv_group}", "group 행 title 노출은 회귀 없음"
     finally:
         await eng.dispose()

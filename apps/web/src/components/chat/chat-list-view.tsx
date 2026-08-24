@@ -40,6 +40,8 @@ interface ChatListViewProps {
 
 // story #2168 PR-② — 현재 프로젝트 밖에서 caller가 참여 중인 최근 대화(BE
 // GET /conversations/recent-outside-project, caller last_read_at DESC·최대 5개).
+// story #2972 — participants 추가(BE delta). DM 행은 title이 항상 NULL이라 이게 없으면
+// FE가 상대 이름을 조립할 재료가 아예 없었다("님과의 대화" 반쪽 문자열 버그의 원인).
 interface OutsideProjectConversation {
   id: string;
   type: 'dm' | 'group';
@@ -47,6 +49,7 @@ interface OutsideProjectConversation {
   project_id: string;
   project_name: string;
   project_slug: string;
+  participants?: Participant[];
 }
 
 function formatTime(iso: string): string {
@@ -216,13 +219,22 @@ function ConversationRow({
 // 병기)도 이쪽에만 있다. onClick은 부모가 준다(project 전환+토스트는 목록 상태를 알아야 함).
 function OutsideProjectRow({
   conv,
+  currentMemberId,
   onClick,
 }: {
   conv: OutsideProjectConversation;
+  currentMemberId: string;
   onClick: () => void;
 }) {
   const t = useTranslations('chats');
-  const displayName = conv.title ?? (conv.type === 'dm' ? t('dmWith') : t('groupSection'));
+  // story #2972 — DM 행 title은 항상 NULL(list_conversations 관례)이라 participants로
+  // 조립해야만 상대 이름이 뜬다(ConversationRow와 동일 패턴). BE가 이제 participants를
+  // 실어줘(delta) 여기서도 formatParticipantNames를 탈 수 있다 — participants가 비어있는
+  // 진짜 무재료 상황만 no-fiction 폴백(dmWith/groupSection, 완결된 단어로 수정됨)으로 떨어진다.
+  const displayName = conv.title ??
+    (conv.participants && conv.participants.length > 0
+      ? formatParticipantNames(conv.participants, currentMemberId, conv.type, t)
+      : conv.type === 'dm' ? t('dmWith') : t('groupSection'));
 
   return (
     <button
@@ -496,7 +508,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         {t('otherProjectsSection')}
       </p>
       {outsideProjectConvs.map((conv) => (
-        <OutsideProjectRow key={conv.id} conv={conv} onClick={() => handleOutsideProjectClick(conv)} />
+        <OutsideProjectRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onClick={() => handleOutsideProjectClick(conv)} />
       ))}
     </div>
   );
