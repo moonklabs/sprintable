@@ -204,3 +204,41 @@ describe('useSseNotifications — org 전환(memberId 변경) 재연결(story #2
     expect(FakeEventSource.instances[0]!.closed).toBe(false);
   });
 });
+
+// story #2987(PO beyond-diff 지적) — chat과 동일 좀비 커넥션 클래스가 알림 SSE의 mux OFF
+// 폴백 경로에도 있었다(mux ON이면 sse-multiplexer.ts 처방이 이미 커버 — 이 회귀가드는
+// fallback 전용). sse-multiplexer.test.tsx·use-chat-sse.test.tsx와 동형 시나리오.
+describe('useSseNotifications — 가시성 복귀 강제 재연결(#2987, mux OFF 폴백 경로 전용)', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => {
+    vi.useRealTimers();
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+  });
+
+  function setVisibility(state: DocumentVisibilityState) {
+    Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }
+
+  it('임계값(3s) 이상 숨겨졌다 돌아오면 기존 커넥션을 닫고 새로 연다', async () => {
+    await act(async () => { root.render(<Harness onNotification={vi.fn()} memberId="m1" />); });
+    expect(FakeEventSource.instances).toHaveLength(1);
+
+    act(() => { setVisibility('hidden'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    act(() => { setVisibility('visible'); });
+
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.instances[0]!.closed).toBe(true);
+  });
+
+  it('임계값(3s) 미만의 짧은 전환은 재연결하지 않는다 — 처칭 방지', async () => {
+    await act(async () => { root.render(<Harness onNotification={vi.fn()} memberId="m1" />); });
+
+    act(() => { setVisibility('hidden'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    act(() => { setVisibility('visible'); });
+
+    expect(FakeEventSource.instances).toHaveLength(1);
+  });
+});
