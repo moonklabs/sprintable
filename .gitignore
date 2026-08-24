@@ -51,3 +51,12 @@ test-results/
 .omc/
 .sisyphus/
 .qa-worktrees/
+
+# story #3008(카디르 3003 축② 발견) — backend/scripts/의 ad-hoc 진단 스크립트가 실행 결과를
+# 실 prod 접속정보·직원 이메일·내부 UUID 매핑째로 커밋한 사고(fk_null_survey_result.json)
+# 재발 방지. 정본 IaC 스크립트(provision_*.sh 등)는 이 패턴에 안 걸린다 — *_result/*_survey/
+# *_dump 명명은 "실행해서 나온 산출물"에만 관례적으로 붙는다(CI 가드가 동일 패턴을 재확인).
+backend/scripts/*_result.json
+backend/scripts/*_survey*.json
+backend/scripts/*_dump.json
+backend/scripts/*_dump.csv

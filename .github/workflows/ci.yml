@@ -576,6 +576,17 @@ jobs:
         working-directory: backend
         run: python3 scripts/lint_destructive_test_sql.py
 
+  no-script-output-artifacts-lint:
+    name: no script output artifacts lint (guard, story #3008)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Scan backend/scripts/ for committed ad-hoc diagnostic output (prod IP/PII residue — fk_null_survey_result.json class)
+        working-directory: backend
+        run: python3 scripts/lint_no_script_output_artifacts.py
+
   # story bda4beac: alembic-fresh-db(위)는 checkout된 브랜치(develop/PR)의 파일셋 기준이라
   # main이 develop과 다른 파일셋(ee_pricing 0146/0147 부재)일 때의 그래프 단절을 원천적으로
   # 못 잡는다(실제로 못 잡아서 prod 승격이 롤백된 그 사고). PR base가 main일 때만 도는 이
