@@ -861,6 +861,8 @@
     "epicSwimlaneUnassigned": "Unassigned",
     "epicSwimlaneOverflowToggle": "{count} more epics",
     "epicSwimlaneLoadError": "Couldn't load. Please try again in a moment.",
+    "epicSwimlaneLoadTimeout": "Loading took too long, so we stopped. Please try again.",
+    "epicSwimlaneLoadingElapsed": "Loading… ({seconds}s)",
     "epicSwimlaneRetry": "Retry",
     "proofCapsuleStateRunning": "Running",
     "proofCapsuleStateReviewing": "Awaiting verification",

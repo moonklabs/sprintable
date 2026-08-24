@@ -112,6 +112,16 @@ export interface StoryListFilters extends PaginationOptions {
   /** story #2328(C-11 ㉡층) — 이 story_id의 의미 후보를 결과 맨 앞으로 재정렬(필터 아님,
    * q 비어도 동작). 해당 항목엔 is_reference_candidate=true·matched_snippet이 실린다. */
   boost_candidates_from?: string;
+  /** story #3019(실사고 처방) — epic_id IN(...) 필터. `epic_id`(단일)와 별개 — 여러 에픽을
+   * 한 번에(스윔레인 뷰의 "활성 에픽 전체") 좁힌다. `epic_unassigned`와 함께 쓰면 OR 결합. */
+  epic_ids?: string[];
+  /** story #3019 — epic_id IS NULL인 story도 포함(가설 링크 유무 무관). `unattached`(#2532,
+   * 가설까지 검사)나 `unassigned`(담당자 미배정, 완전 별개 축)와 다른 개념 — 이름 충돌
+   * 방지로 "unassigned" 단독이 아닌 "epic_unassigned"로 명명. */
+  epic_unassigned?: boolean;
+  /** story #3019 — status=done row만 created_at이 최근 N일 이내인 것으로 제한(list_board의
+   * done-7일 관례를 제네릭 경로에 일반화). done 아닌 상태는 나이 무관 전부 포함. */
+  done_within_days?: number;
 }
 
 export interface IStoryRepository {

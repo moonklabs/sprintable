@@ -94,6 +94,12 @@ export async function GET(request: Request) {
       // story #2328(C-11 ㉡층) — 083176e8/story_number와 같은 클래스(있는 필드가 프록시에서
       // 빠지는 것) 재발 방지로 처음부터 포함.
       boost_candidates_from: searchParams.get('boost_candidates_from') ?? undefined,
+      // story #3019(실사고 처방) — epic_ids(comma-separated)+epic_unassigned+done_within_days.
+      // 이 셋이 함께 오면 buildCursorPageMeta의 limit+1 오버페치 계약을 그대로 타 hasMore가
+      // 정확히 서는 좁혀진(스코프 축소) 결과에 대해서도 성립한다 — 별도 분기 불요.
+      epic_ids: searchParams.get('epic_ids')?.split(',').map((id) => id.trim()).filter(Boolean),
+      epic_unassigned: searchParams.get('epic_unassigned') === 'true' ? true : undefined,
+      done_within_days: searchParams.get('done_within_days') ? Number(searchParams.get('done_within_days')) : undefined,
       limit: pageInput.limit + 1,  // RC3: 오버페치 → buildCursorPageMeta hasMore 판단
       cursor: pageInput.cursor,
     });

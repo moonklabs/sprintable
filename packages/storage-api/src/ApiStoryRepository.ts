@@ -29,6 +29,11 @@ export class ApiStoryRepository implements IStoryRepository {
         story_number: filters.story_number,
         // story #2328(C-11 ㉡층, PR#2659) — 같은 클래스 재발 방지로 처음부터 여기 포함.
         boost_candidates_from: filters.boost_candidates_from,
+        // story #3019(실사고 처방) — BE(stories.py) epic_ids/include_unassigned/
+        // done_within_days 3종. epic_ids는 comma-separated로(ids와 동형 관례).
+        epic_ids: filters.epic_ids?.join(','),
+        include_unassigned: filters.epic_unassigned,
+        done_within_days: filters.done_within_days,
       },
     });
   }
