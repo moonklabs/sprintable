@@ -557,6 +557,46 @@ async def find_gate_slot_with_pr_fallback(
     ).scalar_one_or_none()
 
 
+async def find_pending_merge_gates_by_head_sha(
+    session: AsyncSession, *, org_id: uuid.UUID, head_sha: str,
+) -> list[Gate]:
+    """story #3033(2026-08-24, PO 판정) — CI verdict는 PR의 속성이 아니라 SHA의 속성이다.
+
+    실사고 그라운딩(#3350 MERGED·#3307 CLOSED, 2/2 실물): 스택형 형제 PR이 같은 head SHA를
+    공유하면(브랜치를 다른 PR에 이어 붙이는 관례), 원 PR이 머지된 뒤 도착하는 CI-완료 웹훅
+    (check_suite/workflow_run/status)의 `pull_requests[]`에서 GitHub이 그 PR을 빼버린다
+    (머지된 PR은 더는 그 SHA의 "현재 head"가 아니므로) — 남는 건 그 SHA를 여전히 물고 있는
+    형제 PR뿐이다. `_extract_pr_ci`가 그 페이로드에서 뽑는 pr_number는 그래서 **원 PR이
+    아니라 형제 PR**을 가리키고, `find_gate_slot_with_pr_fallback`(work_item_id=story_id
+    스코프)는 애초에 "다른 story일 수도 있는" 그 형제 게이트를 찾을 근거가 없다(순환 —
+    story 자체를 pr_number 경유로 아는데, 그 pr_number가 이미 틀렸다).
+
+    그래서 이 폴백은 **story 스코프를 걷어내고 org+SHA로만** 찾는다 — `gate.github_check_run_sha`
+    는 그 게이트가 생성될 때 찍힌 실 head SHA(anchor)라 「이 SHA의 CI가 완료됐다」는 사실을
+    story 경계 없이 그대로 반영할 수 있다(SHA는 조직 전역에서 유일). 일치가 여럿(형제 PR
+    각자의 게이트, 같은 story든 다른 story든)이면 **전부** 후보 — 같은 SHA의 CI 결과는
+    사실 그 자체로 공유되는 것이지 임의 선택이 아니다.
+
+    ⛔pending/auto_passed만: `find_gate_slot_with_pr_fallback`과 동일 이유(rejected/voided/
+    held는 사람이 이미 명시 결정했거나 일시정지한 것 — CI 이벤트로 조용히 재오픈/간섭 금지).
+    ⛔pr_result는 이 함수의 관심사가 아니다 — 호출자(`reconcile_merge_gate_with_real_evidence`)
+    가 ci_result만 갱신하고 pr_result는 각 게이트의 기존 값을 보존한다(머지/클로즈 여부는
+    PR별 사실이라 SHA로 공유될 근거가 없다 — PO 명시 구분)."""
+    # 순환 import 회피(merge_verdict_gate.py가 이 모듈을 모듈 레벨에서 import) — 이 파일의
+    # 1444행 기존 관례와 동일하게 함수 안에서 지역 import.
+    from app.services.merge_verdict_gate import MERGE_GATE_TYPE
+
+    return list((
+        await session.execute(
+            select(Gate).where(
+                Gate.org_id == org_id, Gate.gate_type == MERGE_GATE_TYPE,
+                Gate.github_check_run_sha == head_sha,
+                Gate.status.in_(("pending", "auto_passed")),
+            )
+        )
+    ).scalars().all())
+
+
 async def create_gate(
     session: AsyncSession,
     org_id: uuid.UUID,
