@@ -13,8 +13,25 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.org_billing_key import OrgBillingKey
-from app.services.billing_key_crypto import encrypt_billing_key, ensure_configured
+from app.services.billing_key_crypto import decrypt_billing_key, encrypt_billing_key, ensure_configured
 from app.services.payment.toss_adapter import TossAdapter
+
+
+class ActiveSubscriptionBlocksRevoke(Exception):
+    """story #2989 AC2(PO 확定 2026-08-24, block 정책) — 활성 유료 구독이 있는 채로 결제
+    수단을 지우면 다음 청구가 "no active billing key"로 조용히 실패한다(billing_charge.py
+    charge_org의 기존 active-필터 가드 재사용, 신규 분기 불요 — mark_billing_key_deleted
+    docstring과 동형 근거). 차단이 기본값: 구독 해지가 먼저(org_subscription_checkout.py의
+    change-tier/cancel 레일), 결제수단 삭제는 그 다음이라는 순서를 서버가 강제한다."""
+
+    def __init__(self, *, org_id: uuid.UUID, tier: str, billing_cycle: str | None):
+        self.org_id = org_id
+        self.tier = tier
+        self.billing_cycle = billing_cycle
+        super().__init__(
+            f"org_id={org_id}는 활성 유료 구독(tier={tier!r})이 있어 결제수단을 지울 수 "
+            "없습니다 — 구독 해지/변경을 먼저 진행하세요."
+        )
 
 
 def generate_customer_key(org_id: uuid.UUID) -> str:
@@ -117,6 +134,81 @@ async def issue_billing_key(
     return (
         await session.execute(select(OrgBillingKey).where(OrgBillingKey.org_id == org_id))
     ).scalar_one()
+
+
+async def revoke_billing_key(
+    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID | None, actor_type: str,
+    force: bool = False,
+) -> dict:
+    """story #2989(AC1·AC3) — 사용자 셀프서브 삭제 + admin 초기화가 공유하는 단일 레일
+    (신규 규칙 발명 0, [[feedback_behavior_declared_one_place]] 동형 — 어디서 부르든
+    같은 불변식). 순서 고정: ①활성 유료 구독 차단(force가 아니면) ②**Toss 실 폐기가
+    먼저**(성공해야 DB를 건드림 — 반대 순서면 Toss엔 남고 DB만 지워진 유령 상태) ③DB
+    행을 status='deleted'로 마킹(mark_billing_key_deleted와 동형 — customer_key는
+    유지해 재등록 시 ensure_customer_key()가 그대로 재사용, 신규 customer_key 발급 불요)
+    ④ActivityLog에 감사 기록(actor·masked card·revoke 시각 — admin 초기화의 AC3 요건이나
+    셀프서브도 동일하게 남겨 감사 표면 일관).
+
+    `force=True`(admin 전용 경로가 넘김) — 활성 구독 차단을 우회한다(테스트/운영 개입,
+    story #2989 AC3 "admin 개입용 초기화"가 명시한 그 예외 — 셀프서브 라우터는 이 인자를
+    노출하지 않는다).
+
+    반환: 삭제 여부(deleted)·이미 카드가 없던 경우(no-op)·마스킹 카드 정보 — 호출자
+    (라우터·admin 스크립트)가 "무엇을 지웠는지"를 사람이 읽을 형태로 보고할 수 있게."""
+    from app.models.org_subscription import OrgSubscription
+    from app.services.org_subscription_checkout import PAID_TIERS
+
+    key = (
+        await session.execute(select(OrgBillingKey).where(OrgBillingKey.org_id == org_id))
+    ).scalar_one_or_none()
+    if key is None or key.status == "deleted":
+        return {"deleted": False, "reason": "no_active_billing_key"}
+
+    if not force:
+        sub = (
+            await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
+        ).scalar_one_or_none()
+        if sub is not None and sub.status == "active" and sub.tier in PAID_TIERS:
+            raise ActiveSubscriptionBlocksRevoke(org_id=org_id, tier=sub.tier, billing_cycle=sub.billing_cycle)
+
+    masked_card = key.card_number_masked
+    toss_revoked = False
+    if key.encrypted_billing_key:
+        plaintext = decrypt_billing_key(key.encrypted_billing_key)
+        # ⛔平문은 이 스코프를 벗어나지 않는다(issue_billing_key의 동형 guard 재사용) —
+        # Toss 호출 인자로만 쓰고 로깅·반환값에 절대 안 실음.
+        await TossAdapter().delete_billing_key(billing_key=plaintext)
+        toss_revoked = True
+    # placeholder(status='awaiting_auth', encrypted_billing_key=None)는 Toss에 애초에
+    # 발급된 적이 없어 폐기할 대상이 없다 — DB 정리만으로 충분(no-fiction: 안 한 걸 했다고
+    # 안 함).
+
+    key.status = "deleted"
+    key.encrypted_billing_key = None
+    key.card_issuer_code = None
+    key.card_acquirer_code = None
+    key.card_number_masked = None
+    key.card_type = None
+    key.card_owner_type = None
+
+    from app.services.activity_log import ActivityLogService
+
+    await ActivityLogService(session).record(
+        org_id=org_id,
+        action="billing_key_revoked",
+        actor_id=actor_id,
+        actor_type=actor_type,
+        entity_type="org_billing_key",
+        entity_id=key.id,
+        context={
+            "toss_revoked": toss_revoked,
+            "card_number_masked": masked_card,
+            "force": force,
+        },
+    )
+    await session.commit()
+
+    return {"deleted": True, "toss_revoked": toss_revoked, "card_number_masked": masked_card}
 
 
 async def mark_billing_key_deleted(session: AsyncSession, *, customer_key: str) -> None:

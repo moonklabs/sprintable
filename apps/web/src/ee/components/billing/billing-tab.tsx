@@ -31,6 +31,7 @@ import { PricingPlanCard } from './pricing-plan-card';
 import { PricingLimitsTable } from './pricing-limits-table';
 import { PricingPacks, type PackKind } from './pricing-packs';
 import { completeCheckout, startBillingAuth, type CheckoutOutcome } from './toss-checkout';
+import { PaymentMethodSection } from './payment-method-section';
 import {
   cancelSubscription,
   changeTier,
@@ -232,6 +233,8 @@ export function BillingTab({ orgId }: { orgId: string }) {
           <AlertDescription>{t('checkoutWidgetFailedBanner')}</AlertDescription>
         </Alert>
       )}
+
+      <PaymentMethodSection canManage={canManage} />
 
       {isPricePublic && (
         <Tabs value={cycle} onValueChange={(v) => setCycle(v as 'monthly' | 'yearly')}>

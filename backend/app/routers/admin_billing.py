@@ -24,6 +24,7 @@ from app.services.admin_billing import (
     create_grandfather_policy,
     create_offering_version,
     grant_credit,
+    reset_billing_key,
     retry_billing_order,
 )
 
@@ -65,6 +66,24 @@ async def retry_billing(
     except AdminBillingError as e:
         raise HTTPException(status_code=e.status_code, detail={"code": e.code, "message": e.message}) from e
     return {"order_id": order.order_id, "status": order.status}
+
+
+@router.post("/orgs/{org_id}/billing/reset-billing-key")
+async def reset_billing_key_endpoint(
+    org_id: uuid.UUID,
+    operator: AdminOperator = Depends(require_admin_operator),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """story #2989 AC3 — 테스트/운영 개입용 결제수단 초기화. retry_billing과 동형(admin
+    인가+prod 차단+구조화 audit). 셀프서브(billing_keys.py DELETE)와 같은 레일
+    (revoke_billing_key)을 타되 활성 구독 차단을 우회한다(force=True, reset_billing_key
+    docstring 참고)."""
+    _reject_prod()
+    try:
+        result = await reset_billing_key(session, org_id=org_id, actor_email=operator.email)
+    except AdminBillingError as e:
+        raise HTTPException(status_code=e.status_code, detail={"code": e.code, "message": e.message}) from e
+    return result
 
 
 @router.post("/orgs/{org_id}/billing/credit-grant")

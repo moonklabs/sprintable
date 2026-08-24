@@ -113,6 +113,35 @@ class TossAdapter(PaymentProvider):
 
         return resp.json()
 
+    async def _delete(self, path: str, *, timeout: float, op_label: str) -> None:
+        """공용 DELETE 왕복(story #2989) — 빌링키 삭제 전용. 공식 문서 직접 대조
+        (2026-08-24, 훈련데이터 안 믿음 원칙 — 이 파일 상단 주석과 동형): `DELETE
+        /v1/billing/{billingKey}`는 성공 시 200+빈 바디를 낸다(_post/_get과 달리
+        resp.json()을 성공 경로에서 아예 호출하지 않는다 — 빈 바디에 json()을 부르면
+        JSONDecodeError)."""
+        headers = self._auth_header()
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.delete(f"{_API_BASE}{path}", headers=headers)
+        except httpx.RequestError as exc:
+            logger.exception("Toss %s request failed", op_label)
+            raise RuntimeError("Cannot reach Toss API") from exc
+
+        if resp.status_code != 200:
+            body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+            code = body.get("code", str(resp.status_code))
+            logger.error("Toss %s error: status=%s code=%s", op_label, resp.status_code, code)
+            raise TossApiError(code, f"Toss {op_label} failed", status_code=resp.status_code)
+
+    async def delete_billing_key(self, *, billing_key: str) -> None:
+        """DELETE /v1/billing/{billingKey}(story #2989) — 빌링키를 Toss 측에서 실 폐기.
+        DB 행 정리만으로는 반쪽(카드가 PG 쪽에 계속 살아있어 재청구/재조회가 가능한 채로
+        남음, 페드루 PO 실측 지적 2026-08-24) — 호출자는 이 호출이 성공한 *後에* DB
+        상태를 정리해야 한다(반대 순서면 DB엔 없는데 Toss엔 남는 유령 빌링키가 생긴다)."""
+        await self._delete(
+            f"/v1/billing/{billing_key}", timeout=15, op_label="billing key deletion",
+        )
+
     async def create_billing_key(self, *, auth_key: str, customer_key: str) -> dict:
         """POST /v1/billing/authorizations/issue — FE 위젯이 넘긴 authKey + customerKey로
         재사용 가능한 billingKey를 발급받는다. 응답 그대로 반환(billingKey 평문 포함 —

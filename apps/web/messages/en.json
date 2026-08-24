@@ -2538,7 +2538,18 @@
     "packDialogConfirm": "Confirm purchase",
     "packDialogNote": "Charges apply only after you confirm. You can cancel starting next cycle at any time.",
     "loadError": "Couldn't load pricing information.",
-    "memberNotice": "Only owners or admins can manage billing. Contact an admin if you need to change plans."
+    "memberNotice": "Only owners or admins can manage billing. Contact an admin if you need to change plans.",
+    "paymentMethodTitle": "Payment method",
+    "paymentMethodNone": "No payment method on file.",
+    "paymentMethodMasked": "{issuer} {number}",
+    "paymentMethodDeleteButton": "Remove payment method",
+    "paymentMethodDeleteConfirmTitle": "Remove this payment method?",
+    "paymentMethodDeleteConfirmBody": "The card will be permanently revoked with the payment provider and this cannot be undone. You can register a new card afterward.",
+    "paymentMethodDeleteConfirm": "Remove",
+    "paymentMethodDeleteCancel": "Cancel",
+    "paymentMethodDeleteSuccess": "Payment method removed.",
+    "paymentMethodDeleteBlocked": "You have an active paid subscription ({tier}) — cancel it before removing your payment method.",
+    "paymentMethodDeleteError": "Couldn't remove the payment method. Please try again."
   },
   "usage": {
     "eyebrow": "OPERATOR USAGE",
