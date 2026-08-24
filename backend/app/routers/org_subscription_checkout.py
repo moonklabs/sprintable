@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.models.org_subscription import OrgSubscription
-from app.models.platform_setting import PlatformSetting
 from app.services.org_subscription_checkout import (
     ActivePaidSubscriptionExists,
     CheckoutDeclined,
@@ -29,22 +28,9 @@ from app.services.org_subscription_tier_change import (
     TierChangeInProgress,
     change_tier,
 )
-from app.services.platform_settings import get_platform_settings
+from app.services.platform_settings import get_platform_settings, require_billing_checkout_enabled
 
 router = APIRouter(prefix="/api/v2/org-subscriptions", tags=["billing", "Organization"])
-
-
-def _require_billing_checkout_enabled(settings: PlatformSetting) -> None:
-    """story #2728(PO 확定, 2026-08-24) — 거부는 403+명시 에러코드로 구조화한다(평문
-    문자열이 아니라 `{"code": ..., "message": ...}`) — 클라이언트가 「기능 비활성」을
-    다른 4xx 사유와 구별 처리할 수 있게(admin_billing.py의 AdminBillingError 응답
-    구조와 동형). 6개 진입점(checkout·change-tier·downgrade 왕복·cancel 왕복)이 전부
-    이 헬퍼 하나로 판정한다 — 판정 로직이 갈라지면 그 자체가 결함이다."""
-    if not settings.billing_checkout_enabled:
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "BILLING_NOT_LIVE", "message": "billing checkout is not yet enabled"},
-        )
 
 
 class CheckoutRequest(BaseModel):
@@ -105,7 +91,7 @@ async def checkout(
     켜야만(sprintable-admin/internal-api 경유) 도달 가능해진다. auth 체크보다 먼저 —
     기능 자체가 꺼진 상태에선 호출자의 org 권한과 무관하게 전원 차단이 정답."""
     settings = await get_platform_settings(session)
-    _require_billing_checkout_enabled(settings)
+    require_billing_checkout_enabled(settings)
 
     from app.services.project_auth import is_org_owner_or_admin
 
@@ -156,7 +142,7 @@ async def change_tier_endpoint(
     갭 같은 순수 내부 상태 문제뿐이지만, 이쪽은 «잘못된 대상 tier 선택»이 호출자가 고칠
     수 있는 흔한 경로다)."""
     settings = await get_platform_settings(session)
-    _require_billing_checkout_enabled(settings)
+    require_billing_checkout_enabled(settings)
 
     from app.services.project_auth import is_org_owner_or_admin
 
@@ -189,7 +175,7 @@ async def reserve_downgrade_endpoint(
     이 엔드포인트의 정상 사용 — 재호출=재예약). 응답의 `pending_tier`/
     `pending_change_apply_at`이 예약 상태를 노출한다."""
     settings = await get_platform_settings(session)
-    _require_billing_checkout_enabled(settings)
+    require_billing_checkout_enabled(settings)
 
     from app.services.project_auth import is_org_owner_or_admin
 
@@ -215,7 +201,7 @@ async def cancel_downgrade_endpoint(
     """story #2881 — 예약 철회(재상향 아닌 단순 취소). pending_*만 클리어, 구독 원
     tier는 무변화."""
     settings = await get_platform_settings(session)
-    _require_billing_checkout_enabled(settings)
+    require_billing_checkout_enabled(settings)
 
     from app.services.project_auth import is_org_owner_or_admin
 
@@ -243,7 +229,7 @@ async def cancel_subscription_endpoint(
     (v2.1 §12). 좌석 게이트는 타지 않는다(해지 의사는 좌석 초과를 이유로 거부하지
     않는다 — `org_subscription_downgrade.cancel_subscription` docstring 참고)."""
     settings = await get_platform_settings(session)
-    _require_billing_checkout_enabled(settings)
+    require_billing_checkout_enabled(settings)
 
     from app.services.project_auth import is_org_owner_or_admin
 
@@ -270,7 +256,7 @@ async def revoke_cancellation_endpoint(
     `cancel_pending_downgrade`를 그대로 재사용(재구현 0) — 예약된 게 하향이든
     취소(free)든 pending_*만 클리어하는 동작은 동일하다."""
     settings = await get_platform_settings(session)
-    _require_billing_checkout_enabled(settings)
+    require_billing_checkout_enabled(settings)
 
     from app.services.project_auth import is_org_owner_or_admin
 

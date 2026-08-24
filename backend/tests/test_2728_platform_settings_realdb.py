@@ -212,6 +212,90 @@ async def test_change_tier_also_rejected_with_same_structured_code():
         await engine.dispose()
 
 
+# ── 카디르 QA(PR#3460) REQUEST_CHANGES — org_subscription_checkout.py의 6개 진입점
+#    밖에도 결제 처리형 엔드포인트가 더 있었다(billing_packs.py·ee/routers/billing.py,
+#    codex ASGI 실측으로 둘 다 error.code=FORBIDDEN 확認済). 같은 헬퍼
+#    (require_billing_checkout_enabled)로 정합하고 각각 응답 shape을 고정한다. ──────
+@pytest.mark.anyio
+async def test_billing_packs_purchase_rejected_with_same_structured_code():
+    """billing_packs.py POST /packs — 상시 등록되는 라이브 라우트(EE 무관). checkout과
+    같은 헬퍼를 공유하는지 응답 shape으로 고정."""
+    from app.main import app
+    from app.models.member import Member
+    from app.models.organization import Organization
+    from app.models.project import OrgMember
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = Organization(id=uuid.uuid4(), name="2728 Org5", slug=f"s2728e-{uuid.uuid4().hex[:8]}")
+            s.add(org)
+            await s.commit()
+            member = Member(id=uuid.uuid4(), org_id=org.id, type="human", name="Owner", is_active=True)
+            s.add(member)
+            await s.commit()
+            s.add(OrgMember(org_id=org.id, user_id=member.id, role="owner"))
+            await s.commit()
+            org_id, member_id = org.id, member.id
+
+        await _setup_app(app, Session, member_id, org_id)
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                "/api/v2/org-subscriptions/packs",
+                json={"resource": "au", "quantity": 1, "idempotency_key": str(uuid.uuid4())},
+            )
+            assert resp.status_code == 403, resp.text
+            assert resp.json()["error"]["code"] == "BILLING_NOT_LIVE", resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_ee_billing_checkout_rejected_with_same_structured_code():
+    """ee/routers/billing.py POST /checkout(Polar 구세계) — EE 환경서 라이브 등록되는
+    라우트인데 이 축 테스트가 0건이었다(카디르 실측 적출). main.py의 EE 라우터 등록이
+    import 시점 `is_ee_enabled` 조건부라(app.main 이미 import된 뒤 몽키패치해도 라우트가
+    소급 등록 안 됨) HTTP 왕복 대신 라우트 함수를 직접 호출한다(_require_ee는 별개
+    관심사라 우회 — 이 테스트는 billing 게이트 하나만 검증)."""
+    from app.models.member import Member
+    from app.models.organization import Organization
+    from app.dependencies.auth import AuthContext
+    from ee.routers.billing import CheckoutRequest, create_checkout_session
+    from fastapi import HTTPException
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = Organization(id=uuid.uuid4(), name="2728 Org6", slug=f"s2728f-{uuid.uuid4().hex[:8]}")
+            s.add(org)
+            await s.commit()
+            member = Member(id=uuid.uuid4(), org_id=org.id, type="human", name="Owner", is_active=True)
+            s.add(member)
+            await s.commit()
+            org_id, member_id = org.id, member.id
+
+            auth = AuthContext(
+                user_id=str(member_id), email="owner@test",
+                claims={"app_metadata": {"org_id": str(org_id)}},
+            )
+            body = CheckoutRequest(plan_id="team", billing_cycle="monthly")
+
+            with pytest.raises(HTTPException) as exc_info:
+                await create_checkout_session(
+                    body=body, org_id=org_id, auth=auth, session=s, _ee=None,
+                )
+            assert exc_info.value.status_code == 403
+            assert exc_info.value.detail == {
+                "code": "BILLING_NOT_LIVE", "message": "billing checkout is not yet enabled",
+            }
+    finally:
+        await engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_toggling_row_directly_takes_effect_next_request_no_cache():
     """③④ 통합 — off→confirmed 403 재현 後, 같은 행을 true로 바꾸고(어드민 PATCH의
