@@ -67,7 +67,11 @@ describe('Workcell (4층 — Brief/Run/Evidence/Conversation)', () => {
 // 이 테스트는 클리핑을 막는 CSS 메커니즘(min-w-0 + break-words)이 값 컬럼에 실제로 배선돼
 // 있는지에 대한 회귀가드다.
 describe('Workcell — story 38f524e1 Brief 값 컬럼 min-w-0/break-words 회귀가드', () => {
-  it('goal/dod/scopes 값 span 모두 min-w-0 break-words를 갖는다(긴 코드·경로 토큰도 셀 폭 안에 수납)', () => {
+  it('goal/dod 값 wrapper(div)는 min-w-0, 본문(p)은 break-words를 갖는다(긴 코드·경로 토큰도 셀 폭 안에 수납)', () => {
+    // story #178c7c6d(3015②) 이후 goal/dod 값은 <span> 평면 구조가 아니라
+    // <div class="min-w-0"><p class="line-clamp-3 break-words">…</p></div>로 바뀌었다
+    // (line-clamp+더보기 배선을 위한 wrapper). min-w-0은 wrapper(div, flex 자식)가 갖고
+    // break-words는 실제 텍스트를 담는 p가 갖는다 — 3011/3012의 클리핑 방지 축은 유지.
     const longToken = 'workcell-bento-form-material-spec-2984-extremely-long-inline-code-path-token';
     const markup = renderKo(
       <Workcell
@@ -75,16 +79,17 @@ describe('Workcell — story 38f524e1 Brief 값 컬럼 min-w-0/break-words 회�
         brief={{ ...BASE.brief, goal: longToken, dod: longToken, scopes: [longToken] }}
       />,
     );
-    // goal·dod·scopes(단일 원소라 join 결과도 동일 문자열) 셋 다 같은 긴 토큰이라 span이
-    // 3개 생긴다 — 셋 다 min-w-0 break-words를 갖는지 개별 확인해 하나만 고치고 방치하는
-    // 회귀를 잡는다.
-    const valueMatches = [...markup.matchAll(/<span class="([^"]*)">workcell-bento-form-material-spec-2984-extremely-long-inline-code-path-token<\/span>/g)];
-    expect(valueMatches).toHaveLength(3);
-    for (const m of valueMatches) {
-      expect(m[1].split(/\s+/)).toEqual(expect.arrayContaining(['min-w-0', 'break-words']));
+    const pMatches = [...markup.matchAll(/<div class="(min-w-0)"><p class="([^"]*)">workcell-bento-form-material-spec-2984-extremely-long-inline-code-path-token<\/p>/g)];
+    // goal·dod 둘 다 같은 긴 토큰이라 이 패턴이 2번 생긴다.
+    expect(pMatches).toHaveLength(2);
+    for (const m of pMatches) {
+      expect(m[2].split(/\s+/)).toEqual(expect.arrayContaining(['line-clamp-3', 'break-words']));
     }
 
-    expect(markup).toMatch(/class="[^"]*\bmin-w-0\b[^"]*\bbreak-words\b[^"]*font-mono[^"]*"/);
+    // scopes는 여전히 평면 span 구조(font-mono) — min-w-0+break-words 둘 다 그대로.
+    const scopesMatch = markup.match(/<span class="(min-w-0 break-words font-mono[^"]*)">workcell-bento-form-material-spec-2984-extremely-long-inline-code-path-token<\/span>/);
+    expect(scopesMatch).toBeTruthy();
+    expect(scopesMatch![1].split(/\s+/)).toEqual(expect.arrayContaining(['min-w-0', 'break-words']));
   });
 
   it('Run 요약(tools/scopes)도 실 파일경로 토큰 리스크가 있어 동형 처방(min-w-0 break-words)이 붙는다', () => {
@@ -461,5 +466,65 @@ describe('Workcell — story #2993 pipelineStage/owner null 정직 빈 상태(�
   it('agent만 있고 owner=null이어도 agent 표기는 정상 렌더(둘은 독립 축)', () => {
     const markup = renderKo(<Workcell {...BASE} brief={{ ...BASE.brief, owner: null }} />);
     expect(markup).toContain('실행 미르코군');
+  });
+});
+
+// story #5b3aea5e(구현, 3015 시안 178c7c6d ② 표현층) — Brief 「원문 덤프」 폐지. 마크다운
+// 스트립+리드 추출+3줄 클램프+「더 보기」기존 본문 위임. 소스(story.description 등) 자체는
+// 무변경 — Workcell은 여전히 전달받은 문자열을 표현만 변환한다(리라이트·요약 생성 금지).
+describe('Workcell — story #5b3aea5e Brief 콘텐츠 층(마크다운 스트립·리드 추출·클램프·더보기)', () => {
+  const RAW_GOAL = 'doc `workcell-bento-form-material-spec-2984`가 구현 SSOT.\n\n## 범위\n- 대상: `apps/web/src/components/kanban/story-detail-panel.tsx`\n## 처방\n뭔가';
+
+  it('마크다운 기호(##·백틱·리스트 대시) 원문이 렌더 결과에 노출되지 않는다', () => {
+    const markup = renderKo(<Workcell {...BASE} brief={{ ...BASE.brief, goal: RAW_GOAL }} />);
+    expect(markup).not.toContain('##');
+    expect(markup).not.toContain('`workcell-bento-form-material-spec-2984`');
+    expect(markup).not.toContain('- 대상');
+  });
+
+  it('첫 ## 헤딩 前 프로즈만 verbatim 노출(리라이트·요약 없음) — 헤딩 이후 섹션(범위·처방)은 렌더되지 않는다', () => {
+    const markup = renderKo(<Workcell {...BASE} brief={{ ...BASE.brief, goal: RAW_GOAL }} />);
+    expect(markup).toContain('doc workcell-bento-form-material-spec-2984가 구현 SSOT.');
+    expect(markup).not.toContain('story-detail-panel.tsx');
+    expect(markup).not.toContain('처방');
+  });
+
+  it('goal 값에 line-clamp-3가 적용된다(3줄 상한 — 잘림 아닌 의도된 절제)', () => {
+    const markup = renderKo(<Workcell {...BASE} />);
+    expect(markup).toMatch(/class="[^"]*\bline-clamp-3\b[^"]*"[^>]*>실패한 결제를 재시도로 복구/);
+  });
+
+  it('onGoalMore 콜백이 있으면 "더 보기" 링크가 렌더되고 클릭 시 콜백이 호출된다', () => {
+    let called = false;
+    const markup = renderKo(<Workcell {...BASE} brief={{ ...BASE.brief, onGoalMore: () => { called = true; } }} />);
+    expect(markup).toContain('더 보기 →');
+    // renderToStaticMarkup은 이벤트 핸들러를 실행할 DOM이 없다 — 콜백 자체가 prop으로
+    // 전달돼 실제로 쓰였는지는 마크업에 링크가 등장하는지로 간접 확인(정직한 한계 고지).
+    expect(called).toBe(false);
+  });
+
+  it('onGoalMore가 없으면 "더 보기" 링크 자체를 렌더하지 않는다(갈 곳 없는 링크 금지)', () => {
+    const markup = renderKo(<Workcell {...BASE} />);
+    expect(markup).not.toContain('더 보기 →');
+  });
+
+  it('dod=null이면 "완료 조건 미기재 · 본문 AC 보기"를 정직 표시한다(onDodMore 제공 시)', () => {
+    const markup = renderKo(<Workcell {...BASE} brief={{ ...BASE.brief, dod: null, onDodMore: () => {} }} />);
+    expect(markup).toContain('완료 조건 미기재');
+    expect(markup).toContain('본문 AC 보기');
+  });
+
+  it('dod=null·onDodMore 없으면 "본문 AC 보기" 링크 없이 "완료 조건 미기재"만 뜬다', () => {
+    const markup = renderKo(<Workcell {...BASE} brief={{ ...BASE.brief, dod: null }} />);
+    expect(markup).toContain('완료 조건 미기재');
+    expect(markup).not.toContain('본문 AC 보기');
+  });
+
+  it('dod가 있으면 goal과 동형으로 스트립+리드+클램프 처리된다(마크다운 노출 0)', () => {
+    const rawDod = '## AC\n- `tsc --noEmit` clean\n- 전체 vitest green';
+    const markup = renderKo(<Workcell {...BASE} brief={{ ...BASE.brief, dod: rawDod }} />);
+    // 전체가 헤딩(## AC)으로 시작 — extractBriefLead가 헤딩 텍스트 자체로 폴백한다.
+    expect(markup).not.toContain('##');
+    expect(markup).not.toContain('- `tsc');
   });
 });
