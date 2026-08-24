@@ -51,6 +51,13 @@ interface ThreadPanelProps {
   /** story #2637 — chat-view.tsx의 event_definitions 카탈로그 캐시를 그대로 물려받는다
    * (entityStatusByKey와 동일 이유·별도로 안 만든다). */
   eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
+  /** 답글 뱃지 안 꺼지는 버그 fix(2026-08-24, 선생님 리포트) — chat-view.tsx의 markRead(top-level
+   * mark-read와 동일 엔드포인트·멱등 GREATEST 래칫)를 그대로 물려받는다. 이 패널은 열리면 항상
+   * 최신 답글까지 자동 스크롤(위 shouldScrollToBottomRef)이라 "열람=끝까지 봄"이 성립 — 로드
+   * 완료 시·신규 답글 수신 시 마크리드해야 conversation-level unread_count가 내려간다(스레드
+   * 답글도 parent_id 구분 없이 unread_count를 올리는 chat-list-view.tsx#applyConversationMessageUpdate
+   * 와 대칭). */
+  onMarkRead?: (upToIso: string) => void;
 }
 
 export function ThreadPanel({
@@ -65,6 +72,7 @@ export function ThreadPanel({
   requestedEntityStatusKeysRef,
   setEntityStatusByKey,
   eventDefinitionsByKey,
+  onMarkRead,
 }: ThreadPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,11 +99,16 @@ export function ThreadPanel({
       if (!res.ok) return;
       const raw = await res.json() as Record<string, unknown>;
       const rawData = (Array.isArray(raw) ? raw : (raw.data ?? [])) as Record<string, unknown>[];
-      setMessages(rawData.map(normalizeToMessage));
+      const data = rawData.map(normalizeToMessage);
+      setMessages(data);
+      // 패널이 열리면 항상 하단까지 스크롤(아래 effect)이라 "로드=최신까지 열람" — 답글이
+      // 없으면 원 메시지까지만 본 것이므로 parentMessage.created_at으로 마크리드.
+      const latest = data[data.length - 1];
+      onMarkRead?.(latest ? latest.created_at : parentMessage.created_at);
     } finally {
       setLoading(false);
     }
-  }, [conversationId, parentMessage.id]);
+  }, [conversationId, parentMessage.id, parentMessage.created_at, onMarkRead]);
 
   useEffect(() => {
     void fetchThreadMessages();
@@ -114,7 +127,10 @@ export function ThreadPanel({
       return [...prev, incomingMessage];
     });
     shouldScrollToBottomRef.current = true;
-  }, [incomingMessage]);
+    // 패널이 열려있는 동안 도착한 답글도 자동 스크롤로 즉시 열람됨 — top-level chat-view.tsx의
+    // addMessage(nearBottom일 때 markRead)와 동형.
+    onMarkRead?.(incomingMessage.created_at);
+  }, [incomingMessage, onMarkRead]);
 
   // AC6: 매 render 후 플래그 확인 → DOM 업데이트 직후 스크롤 (bare useEffect)
   useEffect(() => {
