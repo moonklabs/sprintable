@@ -46,3 +46,59 @@ describe('extractBriefLead (story #178c7c6d, 3015 시안 ② 표현층)', () => 
     expect(extractBriefLead('  앞뒤 공백 텍스트  \n\n')).toBe('앞뒤 공백 텍스트');
   });
 });
+
+// 카디르 QA(#3445 head 6c88b2ef3) HIGH 적출 — 굵게(**)·기울임(_/*)·인용(>)·이미지(![alt](url))가
+// 안 걷혀 "마크다운 노출 0" 주장과 실측 불일치. 카디르가 직접 실측한 repro 그대로 회귀가드화.
+describe('extractBriefLead — 카디르 QA(#3445) HIGH: 굵게·기울임·인용·이미지 스트립', () => {
+  it('카디르 실측 repro 그대로 — 인용·굵게·기울임·이미지가 전부 스트립된다', () => {
+    // 원 repro: extractBriefLead('> **bold** and _italic_ ![alt](img.png)') → '> **bold** and _italic_ !alt'(버그)
+    expect(extractBriefLead('> **bold** and _italic_ ![alt](img.png)')).toBe('bold and italic alt');
+  });
+
+  it('굵게(**text**)를 스트립한다', () => {
+    expect(extractBriefLead('**중요** 표시')).toBe('중요 표시');
+  });
+
+  it('기울임(*text*)을 스트립한다(리스트 별표 마커와 구분 — 마커는 뒤에 공백, 강조는 공백 없음)', () => {
+    expect(extractBriefLead('*강조* 표시')).toBe('강조 표시');
+  });
+
+  it('기울임(_text_)을 스트립하되, snake_case 식별자는 훼손하지 않는다(단어 경계 가드)', () => {
+    expect(extractBriefLead('_강조_ 표시')).toBe('강조 표시');
+    expect(extractBriefLead('workcell_bento_form 식별자')).toBe('workcell_bento_form 식별자');
+  });
+
+  it('인용 마커(>)를 줄 앞에서 제거한다', () => {
+    expect(extractBriefLead('> 인용된 문장')).toBe('인용된 문장');
+  });
+
+  it('이미지 ![alt](url)를 alt 텍스트만 남기고 스트립한다("!" 잔존 없음)', () => {
+    expect(extractBriefLead('![스크린샷](img.png) 참고')).toBe('스크린샷 참고');
+  });
+
+  it('+ 리스트 마커·1) 형 순서 리스트 마커도 제거한다', () => {
+    expect(extractBriefLead('+ 플러스 항목')).toBe('플러스 항목');
+    expect(extractBriefLead('1) 괄호형 항목')).toBe('괄호형 항목');
+  });
+
+  it('task-list 체크박스(- [ ]/- [x])를 마커째 제거한다', () => {
+    expect(extractBriefLead('- [ ] 할 일\n- [x] 완료한 일')).toBe('할 일\n완료한 일');
+  });
+});
+
+// 카디르 QA(#3445) MEDIUM 적출 — 빈 헤딩 폴백이 "빈 Brief 방지" 취지와 어긋남.
+describe('extractBriefLead — 카디르 QA(#3445) MEDIUM: 빈 헤딩 폴백', () => {
+  it('빈 헤딩(## 뒤 공백만) 다음에 실제 본문이 있으면, 그 본문을 리드로 쓴다(빈 값 반환 금지)', () => {
+    // 원 repro: extractBriefLead('##   \nbody after') → ''(버그 — 본문이 있는데 빈 값)
+    expect(extractBriefLead('##   \nbody after')).toBe('body after');
+  });
+
+  it('빈 헤딩만 있고 뒤에 아무 내용도 없으면 정직하게 빈 문자열(## 마커 잔존 없음)', () => {
+    // 원 repro: extractBriefLead('## ') → '##'(버그 — 마커 잔존)
+    expect(extractBriefLead('## ')).toBe('');
+  });
+
+  it('연속된 빈 헤딩 여러 개를 전부 건너뛰고 그 다음 실제 내용을 찾는다', () => {
+    expect(extractBriefLead('##  \n###   \n실제 내용')).toBe('실제 내용');
+  });
+});

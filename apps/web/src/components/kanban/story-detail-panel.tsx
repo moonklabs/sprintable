@@ -1444,9 +1444,10 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               pipelineStage={pipelineStage}
               brief={{
                 goal: story.description?.trim() || story.title,
-                // story #178c7c6d(3015②) — 문자열 센티널(t('workcellDodMissing')) 대신
-                // null로 정직하게 부재를 표현. 표시 문구·"본문 AC 보기" 링크는 BriefLayer가
-                // 소유(워크셀 자체 i18n 네임스페이스로 이관, board 네임스페이스 키는 폐기).
+                // story #178c7c6d(3015②) — 예전엔 board 네임스페이스의 옛 DoD 미기재 문자열
+                // 키를 직접 호출해 넘겼으나, 이제 null로 정직하게 부재를 표현한다. 표시
+                // 문구·"본문 AC 보기" 링크는 BriefLayer가 소유(워크셀 자체 i18n으로 이관,
+                // 그 옛 board 키는 폐기).
                 dod: story.acceptance_criteria?.trim() || null,
                 owner: proofHuman ? { name: proofHuman.name, role: 'human' } : null,
                 agent: proofAgent ? { name: proofAgent.name, initial: initials(proofAgent.name) } : undefined,
