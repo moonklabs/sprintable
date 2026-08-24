@@ -809,6 +809,15 @@ async def transition_gate(
         except Exception:  # noqa: BLE001 — best-effort, 실시간 반영 실패가 게이트 해소를 막지 않음.
             logger.warning("gate_resolved 카드 실시간 반영 배선 실패 gate=%s", gate.id, exc_info=True)
 
+    # story #1715(PO 판정 2026-08-24) — 상신자(requested_by_member_id) 회신은 gate_type/
+    # line-bound 분기와 무관하게 **이 한 자리에서만** 부른다(아래 if/else 갈리기 전) — 두
+    # 경로 양쪽에 각자 호출을 심으면 "구조적으로 배타적"이라는 주장이 코드 두 곳의 일치에
+    # 의존하게 된다(다음 사람이 한쪽만 고치면 조용히 깨지는 자리). 단일 호출점이면 이중발송
+    # 자체가 원리적으로 불가능 — _notify_doc_gate_requester 내부가 gate_type 스위치가 아니라
+    # neutral_facts.requested_by_member_id **유무**로 자기 자신을 게이트한다(PO 지적 — 판별축
+    # 정정: gate_type이 아니라 "상신자가 실제로 있는가"가 맞는 축).
+    await _notify_doc_gate_requester(session, gate, new_status)
+
     # E-DG S6: gate 전이를 범용 line resolution 에 배선. gate 에 묶인 active line step_run 이 있으면
     # apply_workflow_line_resolution(H1/line approve 동일 status side-effect 경로)·없으면 legacy
     # _advance_story_on_merge_approve 유지(무회귀). 신규 승인경로 0.
@@ -840,10 +849,9 @@ async def transition_gate(
         # 조건부로 재배선할 단일 idempotent 헬퍼로 의도적으로 남겨둔다.
         # E-DG doc-gate(48f064e5): doc 결재 게이트 approve→confirmed·reject→denied.
         await _resolve_doc_gate(session, gate, new_status)
-        # story #2624: 해소 결과를 상신자에게 회신(approval_delivery.py 반대 방향) — 선생님
-        # 직접 지적(폴링해야만 반려를 알던 실사례). doc.status 변경 후 호출돼도 무방(회신
-        # 내용은 gate 필드에서만 유도).
-        await _notify_doc_gate_requester(session, gate, new_status)
+        # story #2624 — 상신자 회신은 이제 이 if/else 진입 前 단일 호출점(위 story #1715 주석
+        # 참조)에서 이미 처리됨. doc.status 변경 순서와 무관(회신 내용은 gate 필드에서만
+        # 유도 — _notify_doc_gate_requester가 아래서 다시 안 불림, 여기 있던 호출 제거).
         # E-CANVAS C4-S8(story a5118cb0): 정본화 게이트 approve→anchor_version set·reject→재논의 코멘트.
         await _resolve_artifact_canonicalize_gate(session, gate, new_status)
         # HITL crux(story 7726a003) — A2A task INPUT_REQUIRED 복귀. writer 미배선이라 오늘은 no-op.
@@ -1322,6 +1330,7 @@ async def _notify_doc_gate_requester(session: AsyncSession, gate: Gate, new_stat
     격리하지만, requester_id 파싱 등 그 앞 단계도 안전해야 한다)."""
     try:
         from app.services.doc import DOC_GATE_TYPE, DOC_GATE_WORK_ITEM_TYPE
+        from app.services.merge_verdict_gate import MERGE_GATE_TYPE
         if new_status not in ("approved", "rejected") or gate.resolver_id is None:
             return
 
@@ -1362,6 +1371,25 @@ async def _notify_doc_gate_requester(session: AsyncSession, gate: Gate, new_stat
                 requester_id=requester_id, resolver_id=gate.resolver_id,
                 decision=new_status, resolution_note=gate.resolution_note,
                 event_type="agent_decision_resolved",
+            )
+        elif gate.gate_type == MERGE_GATE_TYPE:
+            # story #1715(PO 판정 2026-08-24) — merge gate(work_item_type="story")도 상신자
+            # 회신 대상에 편입. requested_by_member_id는 evaluate_merge_gate()가 이미 계산해
+            # 두던 participation.member_id(누가 실작업했는지)를 neutral_facts에 stash만 추가한
+            # 것(merge_verdict_gate.py) — 새 식별 로직 0.
+            from app.models.pm import Story
+            story_title = (await session.execute(
+                select(Story.title).where(Story.id == gate.work_item_id, Story.org_id == gate.org_id)
+            )).scalar_one_or_none() or f"#{str(gate.work_item_id)[:8]}"
+            project_id = await resolve_work_item_project_id(session, gate.org_id, "story", gate.work_item_id)
+            if not project_id:
+                return
+            await dispatch_approval_result_reply(
+                session, org_id=gate.org_id, work_item_type="story", work_item_id=gate.work_item_id,
+                project_id=project_id, title=story_title, gate_id=gate.id,
+                requester_id=requester_id, resolver_id=gate.resolver_id,
+                decision=new_status, resolution_note=gate.resolution_note,
+                event_type="merge_gate_resolved",
             )
     except Exception:  # noqa: BLE001 — best-effort, 회신 실패가 게이트 해소를 막지 않는다.
         logger.warning(
