@@ -1312,6 +1312,81 @@ async def _resolve_doc_gate(session: AsyncSession, gate: Gate, new_status: str) 
     await session.flush()
 
 
+async def _resolve_designatable_gate_context(
+    session: AsyncSession, gate: Gate,
+) -> tuple[str, uuid.UUID, uuid.UUID] | None:
+    """story #3001 — 위임(delegate) 대상 카드 배달용 (title, project_id, requester_id) 해소.
+    _notify_doc_gate_requester의 doc_approval/agent_decision_request 두 분기와 같은 근원
+    (Doc row·neutral_facts) — merge는 여기 없다(#2985가 designated_approver_id 배선 자체를
+    보류해 뒀으므로 delegate 엔드포인트가 애초에 merge gate에 도달 못 함, 별도 분기 불요).
+    해소 못 하면(doc 없음·필드 없음 등) None(지어내지 않음, 호출부가 no-op 처리)."""
+    from app.services.doc import DOC_GATE_TYPE, DOC_GATE_WORK_ITEM_TYPE
+
+    facts = gate.neutral_facts or {}
+    requester_raw = facts.get("requested_by_member_id")
+    if not requester_raw:
+        return None
+    requester_id = uuid.UUID(str(requester_raw))
+
+    if gate.work_item_type == DOC_GATE_WORK_ITEM_TYPE and gate.gate_type == DOC_GATE_TYPE:
+        from app.models.doc import Doc
+        doc = (await session.execute(
+            select(Doc).where(Doc.id == gate.work_item_id, Doc.org_id == gate.org_id)
+        )).scalar_one_or_none()
+        if doc is None or not doc.project_id:
+            return None
+        return doc.title, doc.project_id, requester_id
+    if gate.gate_type == "agent_decision_request":
+        project_id_raw = facts.get("project_id")
+        question = facts.get("question")
+        if not project_id_raw or not question:
+            return None
+        return str(question), uuid.UUID(str(project_id_raw)), requester_id
+    return None
+
+
+async def dispatch_gate_delegation(
+    session: AsyncSession, gate: Gate, *, old_approver_id: uuid.UUID, new_approver_id: uuid.UUID,
+) -> None:
+    """story #3001(선생님 정책 확定 2026-08-24) — 위임 실행: 새 지정자에게 실 액션 카드
+    배달(dispatch_approval_request_cards 재사용, 신규 카드 메커니즘 0) + 원 지정자(호출자)
+    카드가 "위임됨"으로 실시간 갱신되도록 conversation.gate_delegated 이벤트 전파(오늘
+    #2985가 만든 conversation.gate_resolved 형제 — 새 ConversationMessage는 안 만든다,
+    같은 이유로 챗버블 스팸 방지).
+
+    best-effort(카드/이벤트 배달 실패가 위임 자체 — gate.designated_approver_id 갱신+
+    ActivityLog — 를 막지 않는다, 라우터가 이미 그 둘을 먼저 commit한 後 이 함수를 부른다)."""
+    ctx = await _resolve_designatable_gate_context(session, gate)
+    if ctx is None:
+        logger.warning("gate delegate 컨텍스트 해소 실패 gate=%s — 카드/이벤트 배달 스킵", gate.id)
+        return
+    title, project_id, requester_id = ctx
+
+    try:
+        from app.services.approval_delivery import dispatch_approval_request_cards
+        await dispatch_approval_request_cards(
+            session, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
+            project_id=project_id, title=title, gate_id=gate.id,
+            requester_id=requester_id, approver_ids=[new_approver_id],
+            designated_approver_id=new_approver_id,
+        )
+    except Exception:  # noqa: BLE001 — best-effort, 신규 카드 배달 실패가 위임 자체를 막지 않음.
+        logger.warning("gate delegate 신규 카드 배달 실패 gate=%s new_approver=%s", gate.id, new_approver_id, exc_info=True)
+
+    try:
+        from app.services.approval_delivery import notify_gate_delegated_to_old_approver
+        pushes = await notify_gate_delegated_to_old_approver(
+            session, org_id=gate.org_id, gate_id=gate.id,
+            old_approver_id=old_approver_id, new_approver_id=new_approver_id,
+        )
+        await session.commit()
+        for pid_str, payload in pushes:
+            from app.routers.events import _push_to_agent
+            _push_to_agent(pid_str, payload)
+    except Exception:  # noqa: BLE001 — best-effort, 실시간 반영 실패가 위임 자체를 막지 않음.
+        logger.warning("gate delegate 실시간 반영 배선 실패 gate=%s", gate.id, exc_info=True)
+
+
 async def _notify_doc_gate_requester(session: AsyncSession, gate: Gate, new_status: str) -> None:
     """story #2624: doc 결재 게이트 해소 결과를 상신자에게 회신 —
     dispatch_approval_request_cards(상신→승인자)의 반대 방향. P2(#3007)는 전방 경로만

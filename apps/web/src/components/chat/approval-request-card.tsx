@@ -5,6 +5,7 @@ import { Check, FileText, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
@@ -28,13 +29,12 @@ export interface ApprovalTarget {
    * 이 컴포넌트에서 실제로 읽히지 않는다(gate 상태는 항상 fetchGate()의 실물로 판단) —
    * optional로 둬 두 메시지 종류(request/result) 모두 같은 타입으로 수용한다. */
   actions?: string[];
-  /** story #2985 — 결재선 지정 시 이 카드 수신자가 지정 결재자인지(true)/정보성 강등된
-   * 나머지 owner·admin인지(false). 미지정 상신이면 전원 true(회귀 0). undefined는 이
-   * 필드를 아직 안 보내는 구서버(항상 true와 동형 취급 — 지정 개념이 없던 시절과 동일하게
-   * 액션으로 뜬다). */
+  /** story #2985 — 결재선 지정 시 이 카드가 지정 결재자에게 간 액션 카드인지. story #3001
+   * (선생님 정책 확定) 이후로는 카드 자체가 지정자에게만 발행되므로(비지정자는 카드 자체를
+   * 못 받는다) 항상 true와 동형 — 이 필드는 구메시지 호환용으로만 남는다. */
   designated?: boolean;
-  /** story #2985 — 지정 결재자 표시 이름(정보성 카드 안내문구용). 지정 없음/미확인이면
-   * null — FE가 "지정 결재자"로 폴백한다(지어내지 않음, BE도 이름을 지어내지 않는다). */
+  /** story #2985 — 발송 당시 지정 결재자 표시 이름(스냅샷). story #3001부터는 정보성 카드
+   * 문구용으로는 쓰이지 않는다(그 렌더 자체가 폐기) — 남겨는 두되 현재 미사용. */
   designated_approver_name?: string | null;
 }
 
@@ -45,11 +45,6 @@ interface ApprovalRequestCardProps {
    * resolved(회신) 분기가 이 카탈로그의 preset.gate.verdict 항목을 찾아 정적 표현부(text·
    * fields)만 소비한다 — pending(요청·서명·버튼) 분기는 그대로다. */
   eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
-  /** story #2985(유나 FE 스펙) — 분기 SSOT. message_kind==='request_info'일 때만 정보성
-   * 렌더(기본 접힘+대신 처리 폴드) — target.designated는 이 판단에 쓰지 않는다(라벨 문구용
-   * designated_approver_name만 target에서 읽는다, 신호 이중화 방지). 'request'·'result'·
-   * 구서버(undefined/null)는 전부 기존 렌더 그대로. */
-  messageKind?: string | null;
 }
 
 type CardState =
@@ -101,7 +96,7 @@ const RESOLVED_STATUS_LABEL_KEYS: Record<string, string> = {
  * (`GateSignatureApproval`)와 형제로 렌더돼 모달 열람/닫기가 그 로컬 state(근거확인·사유)를
  * 건드리지 않는다(AC③, 언마운트 없음).
  */
-export function ApprovalRequestCard({ target, eventDefinitionsByKey, messageKind }: ApprovalRequestCardProps) {
+export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalRequestCardProps) {
   const t = useTranslations('chats');
   // story #2926(P0-F 잔여 fast-follow, 카디르 F2 QA LOW①) — 아래 stateLabel 유도가
   // deriveGateProofState()의 통일 키(gateStatus*)를 쓴다 — 그 키들은 'cage' 네임스페이스.
@@ -143,6 +138,21 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, messageKind
         const payload = JSON.parse(raw) as { gate_id?: string };
         if (payload.gate_id === target.gate_id) void fetchGate();
       } catch { /* malformed — 무시(다음 정상 이벤트나 fetchGate 재시도로 자연 회복) */ }
+    });
+    return unsub;
+  }, [mux, target.gate_id, fetchGate]);
+
+  // story #3001(위임) — 원 지정자가 위임으로 밀려나면(gate.designated_approver_id가
+  // 더 이상 자신이 아니게 되면) 그 사람이 보고 있는 이 카드도 새로고침 없이 "위임됨"으로
+  // 갱신된다. BE notify_gate_delegated_to_old_approver가 gate_resolved와 동형 계약
+  // (ConversationMessage 없이 순수 SSE 이벤트만) — 동일 구독 패턴 재사용.
+  useEffect(() => {
+    if (!mux) return;
+    const unsub = mux.subscribe('conversation.gate_delegated', (raw) => {
+      try {
+        const payload = JSON.parse(raw) as { gate_id?: string };
+        if (payload.gate_id === target.gate_id) void fetchGate();
+      } catch { /* malformed — 무시 */ }
     });
     return unsub;
   }, [mux, target.gate_id, fetchGate]);
@@ -258,8 +268,6 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, messageKind
             gate={gate}
             resolving={resolving}
             transitionError={transitionError}
-            messageKind={messageKind}
-            designatedApproverName={target.designated_approver_name}
             onApprove={(reason, evidenceViewed) => void transition('approved', reason, evidenceViewed)}
             onReject={(reason) => void transition('rejected', reason)}
             onDiscuss={(reason) => void discuss(reason)}
@@ -292,7 +300,6 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, messageKind
 
 function ApprovalRequestBody({
   gate, resolving, transitionError, onApprove, onReject, onDiscuss, onDiscussClick, onUndone, eventDefinitionsByKey,
-  messageKind, designatedApproverName,
 }: {
   gate: GateItem;
   resolving: boolean;
@@ -305,18 +312,11 @@ function ApprovalRequestBody({
   onDiscussClick: () => void;
   onUndone: () => void;
   eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
-  /** story #2985(유나 FE 스펙) — 분기 SSOT. 'request_info'면 정보성 강등(기본 접힘+"대신
-   * 처리" 폴드). 'request'/'result'/구서버(undefined·null)는 현행 그대로, 무회귀. */
-  messageKind?: string | null;
-  designatedApproverName?: string | null;
 }) {
   const t = useTranslations('chats');
   // gates/[id]/page.tsx와 같은 문구를 쓴다(동일 개념=동일 어휘, DS 원칙) — 그 키들은 'cage'
   // 네임스페이스에 있다('chats'엔 없음, 그라운딩 중 확認).
   const tCage = useTranslations('cage');
-  // story #2985 — 정보성 카드의 "대신 처리" 폴드 상태(기본 닫힘). designated===false일
-  // 때만 의미 있음(다른 경우 이 state는 안 읽힌다).
-  const [actingOnBehalf, setActingOnBehalf] = useState(false);
   const { currentTeamMemberId } = useDashboardContext();
   const title = gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`;
 
@@ -354,6 +354,11 @@ function ApprovalRequestBody({
   const riskLevel = deriveRiskLevel(gate);
   const needsFullFlow = usesSignatureFlow(riskLevel);
   const canAct = gate.status === 'pending' && gate.can_approve === true;
+  // story #3001 — 지정이 걸린 게이트인데 지금 이 카드를 보는 나는 더 이상 그 지정자가
+  // 아니다(위임됨). 미지정(broadcast) 게이트는 gate.designated_approver_id가 애초 null이라
+  // 이 분기 자체가 안 걸린다(회귀 0).
+  const isDelegatedAway = gate.status === 'pending' && !!gate.designated_approver_id && gate.designated_approver_id !== currentTeamMemberId;
+  const canDelegate = canAct && !isDelegatedAway && !!gate.designated_approver_id && gate.designated_approver_id === currentTeamMemberId;
 
   return (
     <div className="space-y-2">
@@ -404,30 +409,19 @@ function ApprovalRequestBody({
             <GateUndoButton gateId={gate.id} onUndone={onUndone} compact />
           ) : null}
         </>
+      ) : isDelegatedAway ? (
+        // story #3001(선생님 정책 확定) — 이 카드의 원 수신자(=지금 보고 있는 나)가 위임으로
+        // 밀려났다. "위임됨"은 BE rule A상 여전히 canAct===true로 잡힐 수 있어도(transition
+        // authz는 이 스토리 스코프 밖 — designated_approver_id는 카드 배달만 좌우) 화면에서는
+        // 무조건 읽기전용으로 좁힌다 — 결정 권한이 여기 남아있는 것처럼 보이는 UI 자체가
+        // "승계는 튕겨내기로만" 원칙(선생님)의 시각적 위반이라(누구 이름인지는 지어내지
+        // 않는다 — GateResponse가 현재 지정자 이름을 안 실어 보낸다).
+        <p className="text-xs text-muted-foreground">{t('approvalRequestDelegatedAway')}</p>
       ) : !canAct ? (
         // story #2091(P0)과 동일 fail-closed 규율 — can_approve=false(무권한 뷰어)는 액션을
         // 렌더하지 않는다. 고위험도 이제 챗 안에서 완결되므로(#2625) 여기 남는 유일한
         // "액션 불가" 사유는 무권한뿐이다.
         <p className="text-[11px] text-muted-foreground">{tCage('gateReadonlyNotAuthorized')}</p>
-      ) : messageKind === 'request_info' && !actingOnBehalf ? (
-        // story #2985(유나 FE 스펙) — 정보성 강등(비지정 owner/admin) 기본 뷰: 액션 숨김+
-        // "요청됨" 안내(무채·info 톤, 강조색 금지)+"대신 처리" ghost 폴드. 열면 지정자와
-        // 동일한 액션 UI로 떨어진다(SoD 불변 — 이 아래는 canAct===true라 서버 인가는 이미
-        // 확認됨, 여기선 시각 위계만 좁혔다 넓히는 것).
-        <div className="space-y-1.5">
-          <p className="text-xs text-muted-foreground">
-            {designatedApproverName
-              ? t('approvalRequestDesignatedToNamed', { name: designatedApproverName })
-              : t('approvalRequestDesignatedToUnnamed')}
-          </p>
-          <Button
-            type="button" size="sm" variant="ghost"
-            onClick={() => setActingOnBehalf(true)}
-            className="w-full text-muted-foreground"
-          >
-            {t('approvalRequestActOnBehalf')}
-          </Button>
-        </div>
       ) : needsFullFlow ? (
         // story #2975(유나양 design 판정 2026-08-24) 갭 자체발견(#2982 작업 중) — 그 블로커
         // 처방(key={SHA}로 재조회 後 evidenceViewed/reason 강제 리셋)이 gates/[id]/page.tsx
@@ -468,6 +462,97 @@ function ApprovalRequestBody({
           </Button>
         </>
       )}
+      {/* story #3001 — 위임(튕겨내기). 승인/반려 판단 여부와 무관하게(서명 고위험 플로우
+          아래서도) 항상 같은 자리에 둔다 — 위임은 "판단을 남에게 넘기는" 행위라 evidence
+          확인 게이트(needsFullFlow)와는 별개 축. */}
+      {canDelegate ? <DelegateApprovalControl gateId={gate.id} onDelegated={onUndone} /> : null}
+    </div>
+  );
+}
+
+function DelegateApprovalControl({ gateId, onDelegated }: { gateId: string; onDelegated: () => void }) {
+  const t = useTranslations('chats');
+  const { currentTeamMemberId } = useDashboardContext();
+  const [open, setOpen] = useState(false);
+  const [members, setMembers] = useState<SelectOption[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [selected, setSelected] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const openPicker = async () => {
+    setOpen(true);
+    setError(null);
+    if (members.length > 0) return;
+    setLoadingMembers(true);
+    try {
+      const res = await fetchWithAuth('/api/org-members');
+      const json = await res.json().catch(() => null) as {
+        data?: Array<{ id: string; user_id: string | null; name?: string | null; email?: string | null; role: 'owner' | 'admin' | 'member' }>;
+      } | null;
+      // story #3001 하드닝(PO 확定) — 위임 대상 자격은 BE가 400으로 최종 강제하지만(owner/admin
+      // fresh 조회), 여기서도 같은 축(owner/admin·본인 제외)으로 미리 좁혀 자격 밖 클릭 자체를
+      // 줄인다(지어낸 자격 판단이 아니라 BE와 같은 규칙 재사용 — org-members-section.tsx와 동형).
+      const eligible = (json?.data ?? [])
+        .filter((m) => (m.role === 'owner' || m.role === 'admin') && m.id !== currentTeamMemberId)
+        .map((m) => ({
+          value: m.id,
+          label: (m.name?.trim() || null) ?? m.email?.split('@')[0] ?? m.user_id?.slice(0, 8) ?? m.id.slice(0, 8),
+        }));
+      setMembers(eligible);
+    } catch {
+      setError(t('hitlSendFailed'));
+    } finally {
+      setLoadingMembers(false);
+    }
+  };
+
+  const submit = async () => {
+    if (!selected) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetchWithAuth(`/api/gates/${gateId}/delegate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ new_approver_member_id: selected }),
+      });
+      if (res.ok) { setOpen(false); onDelegated(); return; }
+      const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+      setError(body?.error?.message ?? `HTTP ${res.status}`);
+    } catch {
+      setError(t('hitlSendFailed'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <Button type="button" size="sm" variant="ghost" onClick={() => void openPicker()} className="w-full text-muted-foreground">
+        {t('approvalRequestDelegate')}
+      </Button>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {error ? <p role="alert" aria-live="assertive" className="text-[11px] text-foreground">{error}</p> : null}
+      <OperatorDropdownSelect
+        value={selected}
+        onValueChange={setSelected}
+        options={members}
+        placeholder={loadingMembers ? t('approvalRequestDelegateLoading') : t('approvalRequestDelegatePickPlaceholder')}
+        disabled={loadingMembers || submitting}
+      />
+      <div className="flex gap-1.5">
+        <Button type="button" size="sm" onClick={() => void submit()} disabled={!selected || submitting} className="flex-1">
+          {t('approvalRequestDelegateConfirm')}
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)} disabled={submitting} className="flex-1">
+          {t('approvalRequestDelegateCancel')}
+        </Button>
+      </div>
     </div>
   );
 }

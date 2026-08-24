@@ -269,71 +269,109 @@ describe('ApprovalRequestCard — 실시간 해소 반영(story #2985 AC2)', () 
   });
 });
 
-describe('ApprovalRequestCard — 결재선 정보성 강등(story #2985 ③ 유나 FE 스펙)', () => {
-  async function mountWithKind(messageKind: string | null | undefined, designatedApproverName?: string | null) {
+describe('ApprovalRequestCard — 결재선 위임(story #3001, 선생님 정책 확定)', () => {
+  async function mountWithDesignated(designatedApproverId: string | null | undefined) {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url.includes('/api/gates/')) return { ok: true, json: async () => ({ data: gate({ status: 'pending' }) }) };
+      if (url.includes('/api/gates/')) {
+        return { ok: true, json: async () => ({ data: gate({ status: 'pending', designated_approver_id: designatedApproverId ?? null }) }) };
+      }
       return { ok: true, json: async () => ({}) };
     }));
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-          <ApprovalRequestCard
-            target={{
-              work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'],
-              designated_approver_name: designatedApproverName,
-            }}
-            messageKind={messageKind}
-          />
+          <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
         </NextIntlClientProvider>,
       );
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
   }
 
-  it('kind=request_info — 기본 접힘: 액션 버튼 숨김+「대신 처리」트리거만 뜬다', async () => {
-    await mountWithKind('request_info', '올리베이라군');
+  it('내가 지정 결재자다(designated_approver_id===currentTeamMemberId) — 액션+「위임」트리거 둘 다 뜬다', async () => {
+    await mountWithDesignated('member-1');
+    const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
+    expect(buttons.some((t) => t?.includes(koMessages.chats.approvalRequestDelegate))).toBe(true);
+  });
+
+  it('다른 사람에게 위임됨(designated_approver_id!==currentTeamMemberId) — 액션·위임 버튼 없이 "위임됨" 문구만', async () => {
+    await mountWithDesignated('member-2');
     const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
-    expect(buttons.some((t) => t?.includes(koMessages.cage.gateReject))).toBe(false);
-    expect(buttons.some((t) => t?.includes(koMessages.chats.approvalRequestActOnBehalf))).toBe(true);
+    expect(buttons.some((t) => t?.includes(koMessages.chats.approvalRequestDelegate))).toBe(false);
+    expect(container.textContent).toContain(koMessages.chats.approvalRequestDelegatedAway);
   });
 
-  it('kind=request_info + 이름 있음 — "{이름}에게 요청된 결재" 표기', async () => {
-    await mountWithKind('request_info', '올리베이라군');
-    expect(container.textContent).toContain(
-      koMessages.chats.approvalRequestDesignatedToNamed.replace('{name}', '올리베이라군'),
+  it('미지정(broadcast, designated_approver_id=null) — 액션은 뜨되 위임 버튼은 없다(회귀 0)', async () => {
+    await mountWithDesignated(null);
+    const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
+    expect(buttons.some((t) => t?.includes(koMessages.chats.approvalRequestDelegate))).toBe(false);
+    expect(container.textContent).not.toContain(koMessages.chats.approvalRequestDelegatedAway);
+  });
+
+  it('mux가 conversation.gate_delegated(같은 gate_id)를 쏘면 fetchGate가 재호출된다', async () => {
+    let getCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/gates/')) {
+        getCount += 1;
+        return { ok: true, json: async () => ({ data: gate({ status: 'pending', designated_approver_id: 'member-2' }) }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(getCount).toBe(1);
+
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_delegated');
+    expect(call).toBeTruthy();
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'g-1', new_approver_id: 'member-3' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(getCount).toBe(2);
+  });
+
+  it('「위임」 클릭 시 /api/org-members를 불러와 owner/admin·본인 제외로 좁힌 피커를 연다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/org-members')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 'member-1', user_id: 'u-1', name: '나', role: 'owner' }, // 본인 — 제외돼야
+              { id: 'member-2', user_id: 'u-2', name: '올리베이라군', role: 'admin' },
+              { id: 'member-3', user_id: 'u-3', name: '멤버', role: 'member' }, // member — 제외돼야
+            ],
+          }),
+        };
+      }
+      if (url.includes('/api/gates/')) return { ok: true, json: async () => ({ data: gate({ status: 'pending', designated_approver_id: 'member-1' }) }) };
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const delegateBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes(koMessages.chats.approvalRequestDelegate),
     );
-  });
+    await act(async () => { delegateBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-  it('kind=request_info + 이름 없음(null) — 지어내지 않고 총칭 폴백 문구', async () => {
-    await mountWithKind('request_info', null);
-    expect(container.textContent).toContain(koMessages.chats.approvalRequestDesignatedToUnnamed);
-    expect(container.textContent).not.toContain('null');
-  });
-
-  it('「대신 처리」 클릭 → 지정자와 동일한 액션 UI로 펼쳐진다(SoD 불변 — 서버 인가는 이미 canAct로 확認됨)', async () => {
-    await mountWithKind('request_info', '올리베이라군');
-    const actOnBehalfBtn = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent?.includes(koMessages.chats.approvalRequestActOnBehalf),
-    );
-    await act(async () => { actOnBehalfBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-
+    // 취소 버튼이 뜬 것 자체가 피커가 열렸다는 증거(fetch 완료 後 로딩 placeholder→선택 UI 전환).
     const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
-    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
-    expect(buttons.some((t) => t?.includes(koMessages.cage.gateReject))).toBe(true);
-  });
-
-  it('kind=request(지정자) — 현행 그대로 액션 버튼이 바로 뜬다(회귀 0)', async () => {
-    await mountWithKind('request');
-    const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
-    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
-    expect(buttons.some((t) => t?.includes(koMessages.chats.approvalRequestActOnBehalf))).toBe(false);
-  });
-
-  it('kind 미지정(undefined, 구서버) — 현행 그대로 액션 버튼(회귀 0)', async () => {
-    await mountWithKind(undefined);
-    const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
-    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
+    expect(buttons.some((t) => t?.includes(koMessages.chats.approvalRequestDelegateCancel))).toBe(true);
   });
 });

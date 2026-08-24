@@ -108,11 +108,12 @@ async def dispatch_approval_request_cards(
 ) -> None:
     """승인자별 DM에 message_kind="request" 카드 메시지 게시 + SSE 이벤트(AC1/AC2).
 
-    designated_approver_id: story #2985(PO 설계 확定 2026-08-24) — 지정하면 그 1인만
-    kind="request"(액션)로 받고, approver_ids의 나머지(비지정 owner/admin)는 kind=
-    "request_info"(정보성 — 해소 권한 자체는 유지·approval_target.actions는 그대로 두되
-    kind으로 FE가 기본 접힘/«대신 처리» 폴드를 판단, 유나 FE 축). None(미지정, 기본값)이면
-    approver_ids 전원이 종전처럼 "request"(회귀 0).
+    designated_approver_id: story #3001(선생님 정책 확定 2026-08-24, PR#3426 조건부→
+    #3001로 정정) — 지정하면 그 1인에게만 카드가 간다(kind="request"). 나머지 approver_ids
+    는 **카드 자체를 안 받는다** — "결재라인을 지정하면 그 사람에게만 도달해야" 원문,
+    챗은 감사 공간이 아니라는 판정. #2985가 처음 만들었던 kind="request_info"(정보성 접힘)
+    분기는 이 스토리로 걷어냈다(감사 가시성은 결재함·감사 로그가 담당). None(미지정)이면
+    approver_ids 전원이 종전처럼 "request"(④ 미확定 — 현행 유지, 회귀 0).
 
     story #2118(E-DG-REAL ②, 2026-08-16) 이전엔 ``doc: Doc``을 직접 받는 doc 전용 함수였다 —
     호출부(merge_verdict_gate.py 등 다른 gate_type)가 doc 객체를 갖고 있지 않아 그대로 확장할
@@ -155,17 +156,22 @@ async def dispatch_approval_request_cards(
         )
         return
 
-    # story #2985(유나 FE 스펙, PO 계약 확定 2026-08-24) — 정보성 카드가 "{지정자 이름}에게
-    # 요청된 결재"를 보여주려면 그 이름이 필요하다. 없으면(예: 지정자 미확인) FE가 "지정
-    # 결재자"로 폴백한다는 게 그 스펙 원문 — 여기선 있으면만 싣고 없으면 지어내지 않는다.
+    # story #2985 잔존 — designated_approver_name은 이제 정보성 카드가 아니라 "위임됨" 표기
+    # (story #3001)에서도 쓰인다(원 지정자 카드가 "{새 지정자 이름}에게 위임됨"을 보여줄 때).
+    # 없으면(지정자 미확인) FE가 "지정 결재자"로 폴백 — 지어내지 않는다.
     designated_approver_name: str | None = None
     if designated_approver_id is not None:
         designated_member = (await lookup_members_by_ids({designated_approver_id}, db)).get(designated_approver_id)
         designated_approver_name = designated_member.name if designated_member is not None else None
 
-    for approver_id in approver_ids:
-        is_designated = designated_approver_id is None or approver_id == designated_approver_id
-        card_kind = "request" if is_designated else "request_info"
+    # story #3001 — 지정이 있으면 그 1인에게만(나머지는 카드 자체를 안 받음). 미지정이면
+    # 현행대로 approver_ids 전원(④ 미확定, 회귀 0). 이 루프에 도달하는 수신자는 두 경우
+    # 다 "이 카드의 액션 주체"라 kind="request"·expects_response=True·designated=True가
+    # 항상 성립한다(정보성 kind="request_info" 분기는 이 스토리로 완전히 걷어냈다 — 카드가
+    # 안 갈 사람은 애초에 이 루프 자체에 안 들어온다).
+    recipients = [designated_approver_id] if designated_approver_id is not None else approver_ids
+
+    for approver_id in recipients:
         try:
             async with db.begin_nested():
                 conv = await _get_or_create_approval_dm(
@@ -183,15 +189,15 @@ async def dispatch_approval_request_cards(
                     msg_metadata={
                         "activation": {
                             "audience": [str(approver_id)],
-                            "kind": card_kind,
-                            "expects_response": is_designated,
+                            "kind": "request",
+                            "expects_response": True,
                         },
                         "approval_target": {
                             "work_item_type": work_item_type,
                             "work_item_id": str(work_item_id),
                             "gate_id": str(gate_id),
                             "actions": ["approve", "reject"],
-                            "designated": is_designated,
+                            "designated": True,
                             "designated_approver_name": designated_approver_name,
                         },
                     },
@@ -494,3 +500,63 @@ async def notify_gate_card_recipients_resolved(
              "recipient_id": str(event.recipient_id)},
         ))
     return pushes
+
+
+async def notify_gate_delegated_to_old_approver(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    gate_id: uuid.UUID,
+    old_approver_id: uuid.UUID,
+    new_approver_id: uuid.UUID,
+) -> list[tuple[str, dict]]:
+    """story #3001(선생님 정책 확定 2026-08-24) — 위임 시 원 지정자(호출자)의 열린 카드가
+    새로고침 없이 "위임됨"으로 갱신되도록 conversation.gate_delegated 이벤트를 심는다.
+    notify_gate_card_recipients_resolved와 동일 계약 — 새 ConversationMessage는 안 만들고
+    (챗버블 스팸 방지), Event를 DB에 남기고 [(pid_str, payload)]를 반환할 뿐. 실 SSE push
+    (`_push_to_agent`)는 호출자가 commit 後에 한다.
+
+    old_approver_id의 project_id는 그 사람이 실제로 카드를 받았던 conversation(원 요청
+    카드가 심어진 DM)에서 그대로 가져온다 — notify_gate_card_recipients_resolved의 "실제
+    카드 심어진 곳" 역조회와 동일 원칙(gate_type별 project_id 재해소 로직 불필요)."""
+    row = (await db.execute(
+        select(ConversationMessage.conversation_id).where(
+            ConversationMessage.msg_metadata["approval_target"]["gate_id"].astext == str(gate_id),
+            ConversationMessage.mentioned_ids.contains([old_approver_id]),
+        ).limit(1)
+    )).first()
+    if row is None:
+        return []
+    conversation_id = row[0]
+    proj_id = (await db.execute(
+        select(Conversation.project_id).where(Conversation.id == conversation_id)
+    )).scalar_one_or_none()
+    if proj_id is None:
+        return []
+
+    from app.services.member_resolver import lookup_members_by_ids
+    members = await lookup_members_by_ids({old_approver_id, new_approver_id}, db)
+    old_member = members.get(old_approver_id)
+    new_member = members.get(new_approver_id)
+
+    payload_base = {
+        "gate_id": str(gate_id),
+        "new_approver_id": str(new_approver_id),
+        "new_approver_name": new_member.name if new_member is not None else None,
+    }
+
+    event = Event(
+        project_id=proj_id, org_id=org_id, event_type="conversation.gate_delegated",
+        source_entity_type="gate", source_entity_id=gate_id,
+        sender_id=new_approver_id, recipient_id=old_approver_id,
+        recipient_type=old_member.type if old_member is not None else "human",
+        payload=payload_base, status="pending",
+    )
+    db.add(event)
+    await db.flush()
+
+    return [(
+        str(old_approver_id),
+        {"event_id": str(event.id), "event_type": "conversation.gate_delegated", **payload_base,
+         "recipient_id": str(old_approver_id)},
+    )]

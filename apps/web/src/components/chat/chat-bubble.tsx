@@ -570,7 +570,7 @@ export function ChatBubble({
               </button>
             </div>
           ) : approvalTarget ? (
-            <ApprovalRequestCard target={approvalTarget} eventDefinitionsByKey={eventDefinitionsByKey} messageKind={message.message_kind} />
+            <ApprovalRequestCard target={approvalTarget} eventDefinitionsByKey={eventDefinitionsByKey} />
           ) : eventTarget && eventBlockTemplate ? (
             <EventBlockCard
               template={eventBlockTemplate}
