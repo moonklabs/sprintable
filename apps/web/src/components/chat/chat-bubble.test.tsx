@@ -726,7 +726,7 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     const transitionCall = fetchMock.mock.calls.find((call: unknown[]) => (call[0] as string).includes('/transition'));
     expect(transitionCall).toBeDefined();
-    expect(JSON.parse((transitionCall![1] as { body: string }).body)).toEqual({ status: 'approved', note: null, evidence_viewed: false });
+    expect(JSON.parse((transitionCall![1] as { body: string }).body)).toEqual({ status: 'approved', note: null, evidence_viewed: false, reviewed_head_sha: null });
     expect(container.textContent).toContain('처리됨');
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(false);
   });
@@ -779,7 +779,7 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
 
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     const transitionCall = fetchMock.mock.calls.find((call: unknown[]) => (call[0] as string).includes('/transition'));
-    expect(JSON.parse((transitionCall![1] as { body: string }).body)).toEqual({ status: 'approved', note: '근거 확인함, 승인', evidence_viewed: true });
+    expect(JSON.parse((transitionCall![1] as { body: string }).body)).toEqual({ status: 'approved', note: '근거 확인함, 승인', evidence_viewed: true, reviewed_head_sha: null });
   });
 
   it('이미 처리된 게이트(status=approved)는 버튼 없이 처리됨 상태만 보인다', async () => {
