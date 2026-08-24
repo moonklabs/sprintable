@@ -14,9 +14,10 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../messages/ko.json';
 import type { GateItem } from '@/components/kanban/types';
 
-const { useDashboardContextMock, replaceMock } = vi.hoisted(() => ({
+const { useDashboardContextMock, replaceMock, muxSubscribeMock } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
   replaceMock: vi.fn(),
+  muxSubscribeMock: vi.fn((_eventName: string, _handler: (raw: string, eventId?: string) => void) => () => {}),
 }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
@@ -26,6 +27,12 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: replaceMock, push: vi.fn() }),
   useParams: () => ({ id: 'gate-1' }),
+}));
+
+// story #2985 AC2 — approval-request-card.test.tsx와 동일 전략: useSseMultiplexerContext()
+// 훅을 모킹해 subscribe 핸들러를 테스트가 직접 잡아 fire한다.
+vi.mock('@/components/realtime-provider', () => ({
+  useSseMultiplexerContext: () => ({ subscribe: muxSubscribeMock }),
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -69,6 +76,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   useDashboardContextMock.mockReturnValue({ orgMemberships: [], projectMemberships: [] });
+  muxSubscribeMock.mockClear();
 });
 
 afterEach(async () => {
@@ -442,5 +450,93 @@ describe('GateDetailPage — gate_type 배지 대비(P0-02, chip variant 기본�
     expect(chipEl, 'gate_type 배지를 못 찾음').toBeDefined();
     expect(chipEl!.className).toContain('text-foreground');
     expect(chipEl!.className).not.toContain('text-muted-foreground');
+  });
+});
+
+describe('GateDetailPage — 실시간 해소 반영(story #2985 AC2)', () => {
+  it('mux가 conversation.gate_resolved(같은 gate_id)를 쏘면 재조회된다', async () => {
+    let getCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/gate-1') {
+        getCount += 1;
+        return { ok: true, status: 200, json: async () => ({ data: gate({ status: 'pending' }) }) };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(getCount).toBe(1);
+
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_resolved');
+    expect(call).toBeTruthy();
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'gate-1', status: 'approved' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(getCount).toBe(2); // 새로고침 없이 재조회.
+  });
+
+  it('다른 gate_id의 이벤트는 무시한다', async () => {
+    let getCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/gate-1') {
+        getCount += 1;
+        return { ok: true, status: 200, json: async () => ({ data: gate({ status: 'pending' }) }) };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(getCount).toBe(1);
+
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_resolved');
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'other-gate', status: 'approved' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(getCount).toBe(1);
+  });
+
+  it('mux가 conversation.gate_delegated(같은 gate_id)를 쏘면 재조회된다', async () => {
+    let getCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/gate-1') {
+        getCount += 1;
+        return { ok: true, status: 200, json: async () => ({ data: gate({ status: 'pending' }) }) };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(getCount).toBe(1);
+
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_delegated');
+    expect(call).toBeTruthy();
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'gate-1', new_approver_id: 'member-3' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(getCount).toBe(2);
+  });
+
+  it('malformed payload는 크래시 없이 무시한다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/gate-1') return { ok: true, status: 200, json: async () => ({ data: gate({ status: 'pending' }) }) };
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    const { default: GateDetailPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+    await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_resolved');
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    expect(() => handler('not-json{')).not.toThrow();
   });
 });
