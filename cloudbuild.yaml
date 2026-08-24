@@ -652,30 +652,10 @@ steps:
           echo "      --substitutions 에 _REALTIME_URL=<realtime 서비스 URL> 을 명시할 것."
           exit 1
         fi
-        # story #3031(2026-08-24) — realtime path-filter, Cloud Run 버전. deploy-realtime-gce
-        # (아래, story #2089)엔 이미 이 필터가 있는데 **실제로 브라우저 SSE를 서빙하는 건
-        # 이 Cloud Run 서비스**라 그 비대칭이 뿌리였다 — 매 develop 머지가 무조건 이 스텝을
-        # 재실행시켜, 관련 없는 코드가 섞인 커밋에서도 재배포·롤아웃마다 라이브 SSE 전 연결이
-        # 절단(재연결/백필 사이클 반복)됐다(오늘 08-24 리비전 12개, PO 실측). #3026/#3029로
-        # 고친 건 코드층 dedup 버그이고, 이건 별개의 인프라층 원인 — 둘 다 있어야 #2985 AC②
-        # 라이브 재검이 안정된다.
-        # GCE MIG는 인스턴스 템플릿 이름에서 직전 SHA를 grep으로 뽑아야 했지만(임의 이름이라),
-        # Cloud Run은 서빙 리비전의 이미지 태그 자체가 정확히 그 SHA다(아래 --image=...:
-        # ${COMMIT_SHA} 컨벤션 그대로) — grep 휴리스틱 불요, 태그를 그대로 쓴다.
-        # ⛔"서빙"(트래픽 100%) 리비전이어야 한다 — describe의 spec.template은 다음 배포
-        # 대상이지 실제 트래픽이 아니다(배포 실효=서빙 리비전 digest 교훈, 이 세션 #2985
-        # 조사에서 재확인). status.traffic[]에서 100%를 받는 리비전 이름을 먼저 뽑고, 그
-        # 리비전 자체를 describe해 이미지 태그를 읽는다.
-        # fail-safe는 GCE 선례와 동일: 판별 불가(첫 배포·트래픽 스플릿 중·describe 실패)면
-        # 스킵하지 않고 배포로 진행(check_realtime_relevant_diff.sh 자체의 fail-safe도 동일
-        # 방향 — "필터가 실수로 좁아도 조용히 안 새게").
-        # ⛔story #2421 교훈(deploy-backend 핫픽스, 위 test_deploy_backend_redis_secret_conflict.py
-        # 가드) — Cloud Build 자신의 substitution 파서가 bash 실행 前에 args 문자열 전체를
-        # 먼저 훑어, `${선언안된이름}`을 substitution 오류로 build submit 자체를 거부한다.
-        # 그래서 이 스텝 안에서 새로 짓는 로컬 셸 변수(serving_revision·last_image·last_sha)는
-        # 참조할 때마다 `$$`로 이스케이프해야 한다(Cloud Build가 `$$`→`$`로 한 번 접어 bash에
-        # 넘긴다) — GCE 선례(current_template·last_sha, 아래 deploy-realtime-gce)는 이
-        # 가드 대상 스텝 목록 밖이라 안 걸렸을 뿐, 실제로는 같은 함정 자리다.
+        # story #3031 — realtime path-filter(Cloud Run). 근거·설계 전문은
+        # backend/tests/test_3031_realtime_cloudrun_deploy_path_filter.py 참조(이 스텝의
+        # UTF-8 바이트 한도 초과 핫픽스로 이관). 로컬 변수는 $$ 이스케이프 필수(Cloud
+        # Build 자신의 substitution 파서가 bash 실행 前에 미선언 substitution 참조를 거부).
         serving_revision="$(gcloud run services describe sprintable-realtime-${_DEPLOY_ENV} \
           --region="${_AR_REGION}" --project="${PROJECT_ID}" \
           --format='value(status.traffic.filter(percent=100).revisionName)' 2>/dev/null || echo '')"

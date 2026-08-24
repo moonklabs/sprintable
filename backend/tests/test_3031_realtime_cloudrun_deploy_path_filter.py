@@ -1,11 +1,35 @@
 """story #3031(2026-08-24) — deploy-realtime-gce(GCE, story #2089)엔 이미 realtime-relevant
 path-filter가 있었는데 **실제로 브라우저 SSE를 서빙하는** deploy-realtime(Cloud Run) 스텝엔
 그게 없어, 관련 없는 코드만 섞인 develop merge에서도 매번 무조건 재배포됐다 — 오늘(08-24)
-sprintable-realtime-dev 리비전 12개(PO 실측), 롤아웃마다 라이브 SSE 전 연결 절단.
+sprintable-realtime-dev 리비전 12개(PO 실측), 롤아웃마다 라이브 SSE 전 연결 절단(재연결/
+백필 사이클 반복). #3026/#3029로 고친 건 코드층 dedup 버그이고, 이건 별개의 인프라층
+원인 — 둘 다 있어야 #2985 AC② 라이브 재검이 안정된다.
 
 이 테스트는 그 비대칭이 해소됐음을 cloudbuild.yaml 내용으로 고정한다(test_2178_realtime_
 flag_parity.py와 동일 관례 — 실제 gcloud/git 호출은 CI 밖이라 실행 자체를 테스트할 수
-없고, "무조건 재배포하던 이전 상태로 되돌아가지 않는다"를 구조 검사로 pin한다)."""
+없고, "무조건 재배포하던 이전 상태로 되돌아가지 않는다"를 구조 검사로 pin한다).
+
+## 설계 상세(원래 cloudbuild.yaml 스텝 주석에 있었으나, deploy-realtime 스텝이 UTF-8
+바이트 한도(10,000, Cloud Build args 제약)를 넘겨 2연속 배포 실패를 낸 핫픽스로 여기
+이관됨 — 한글 주석 1자=UTF-8 3바이트라 문자수로는 안 걸리던 게 함정의 본체였다):
+
+- GCE MIG는 인스턴스 템플릿 이름에서 직전 SHA를 grep으로 뽑아야 했지만(임의 이름이라),
+  Cloud Run은 서빙 리비전의 이미지 태그 자체가 정확히 그 SHA다(`--image=...:${COMMIT_SHA}`
+  컨벤션 그대로) — grep 휴리스틱 불요, 태그를 그대로 쓴다.
+- "서빙"(트래픽 100%) 리비전이어야 한다 — `describe`의 `spec.template`은 다음 배포
+  대상이지 실제 트래픽이 아니다(배포 실효=서빙 리비전 digest 교훈, #2985 조사에서
+  재확인). `status.traffic[]`에서 100%를 받는 리비전 이름을 먼저 뽑고, 그 리비전 자체를
+  describe해 이미지 태그를 읽는다.
+- fail-safe는 GCE 선례와 동일: 판별 불가(첫 배포·트래픽 스플릿 중·describe 실패)면
+  스킵하지 않고 배포로 진행(`check_realtime_relevant_diff.sh` 자체의 fail-safe도 동일
+  방향 — "필터가 실수로 좁아도 조용히 안 새게").
+- story #2421 교훈(deploy-backend 핫픽스, `test_deploy_backend_redis_secret_conflict.py`
+  가드) — Cloud Build 자신의 substitution 파서가 bash 실행 前에 args 문자열 전체를 먼저
+  훑어, `${선언안된이름}`을 substitution 오류로 build submit 자체를 거부한다. 그래서 이
+  스텝 안에서 새로 짓는 로컬 셸 변수(`serving_revision`·`last_image`·`last_sha`)는
+  참조할 때마다 `$$`로 이스케이프해야 한다(Cloud Build가 `$$`→`$`로 한 번 접어 bash에
+  넘긴다) — GCE 선례(`current_template`·`last_sha`, `deploy-realtime-gce` 스텝)는 이
+  가드 대상 스텝 목록 밖이라 안 걸렸을 뿐, 실제로는 같은 함정 자리다."""
 from __future__ import annotations
 
 from pathlib import Path
