@@ -114,6 +114,35 @@ describe('GateDetailPage — can_approve 게이팅 (story #2091)', () => {
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
   });
 
+  // story #3006(유나 design 관찰, 페드루 확定 2026-08-24) — can_approve=false가 "무권한"과
+  // "지정 결재선이 걸려 있음(그저 내가 아님)"을 뭉뚱그리던 것을 갈라 문맥을 회복한다.
+  it('can_approve=false + designated_approver_id가 나(currentTeamMemberId) 아니면 "지정됨" 문구로 분기한다', async () => {
+    useDashboardContextMock.mockReturnValue({
+      orgMemberships: [], projectMemberships: [], currentTeamMemberId: 'member-1',
+    });
+    await mount(gate({ can_approve: false, designated_approver_id: 'member-2' }));
+    expect(container.textContent).toContain(koMessages.cage.gateReadonlyDesignatedElsewhere);
+    expect(container.textContent).not.toContain(koMessages.cage.gateReadonlyNotAuthorized);
+  });
+
+  it('can_approve=false + designated_approver_id가 없으면(일반 게이트) 기존 일반 무권한 문구 그대로(회귀 0)', async () => {
+    useDashboardContextMock.mockReturnValue({
+      orgMemberships: [], projectMemberships: [], currentTeamMemberId: 'member-1',
+    });
+    await mount(gate({ can_approve: false, designated_approver_id: null }));
+    expect(container.textContent).toContain(koMessages.cage.gateReadonlyNotAuthorized);
+    expect(container.textContent).not.toContain(koMessages.cage.gateReadonlyDesignatedElsewhere);
+  });
+
+  it('can_approve=false + designated_approver_id가 나 자신이면(예: 프로젝트 접근을 잃은 지정자) 일반 무권한 문구(지정 사실이 이유가 아님)', async () => {
+    useDashboardContextMock.mockReturnValue({
+      orgMemberships: [], projectMemberships: [], currentTeamMemberId: 'member-1',
+    });
+    await mount(gate({ can_approve: false, designated_approver_id: 'member-1' }));
+    expect(container.textContent).toContain(koMessages.cage.gateReadonlyNotAuthorized);
+    expect(container.textContent).not.toContain(koMessages.cage.gateReadonlyDesignatedElsewhere);
+  });
+
   it('needsAction 자체가 false(예: block 판정)면 can_approve=true여도 버튼이 없다(게이트가 액션을 요구하지 않음)', async () => {
     await mount(gate({ can_approve: true, auto_decision_reason: 'block' }));
     const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);

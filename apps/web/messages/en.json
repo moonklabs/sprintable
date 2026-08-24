@@ -3873,6 +3873,7 @@
     "gateReadonlyAuto": "Auto-passed · no action needed",
     "gateReadonlyNoVerdict": "No verdict recorded · nothing to review",
     "gateReadonlyNotAuthorized": "You don't have permission to approve this gate",
+    "gateReadonlyDesignatedElsewhere": "This approval is assigned to a designated approver",
     "mergeGateTitle": "Merge gate",
     "outcomeTrustLabel": "Outcome trust",
     "outcomeSummary": "{hit} hit · {resolved} resolved · last {days}d",
