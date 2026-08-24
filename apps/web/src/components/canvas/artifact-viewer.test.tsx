@@ -385,3 +385,14 @@ describe('ArtifactViewer — 새 좌표 코멘트 생성(story #2725, commentsCo
     expect(container.querySelector('textarea')).toBeNull();
   });
 });
+
+// story #3009(로드맵 P2·PR-F, L1) — 인라인 카드는 --elev-card.
+describe('ArtifactViewer — 로드맵 P2·PR-F L1(인라인 카드 elevation 토큰)', () => {
+  it('카드 셸이 shadow-[var(--elev-card)]를 쓰고 shadow-sm은 안 쓴다', () => {
+    const markup = renderToStaticMarkup(
+      wrap(<ArtifactViewer artifact={MOCK_ARTIFACT} versions={MOCK_VERSIONS} memberMap={MOCK_MEMBERS} />),
+    );
+    expect(markup).toContain('shadow-[var(--elev-card)]');
+    expect(markup).not.toMatch(/shadow-sm["\s]/);
+  });
+});

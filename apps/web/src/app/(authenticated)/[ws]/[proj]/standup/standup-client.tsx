@@ -511,7 +511,8 @@ export default function StandupPage({ projectId }: StandupClientProps) {
                         <div className="space-y-3">
                           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                             {stories.map((story) => (
-                              <div key={story.id} className="rounded-xl border border-border/70 bg-background p-4 shadow-sm">
+                              // story #3009(로드맵 P2·PR-F, L1) — 인라인 카드는 --elev-card(아래 2곳).
+                              <div key={story.id} className="rounded-xl border border-border/70 bg-background p-4 shadow-[var(--elev-card)]">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <p className="text-sm font-medium text-foreground">{story.title}</p>
                                   <Badge variant="outline">{story.status}</Badge>
@@ -638,7 +639,7 @@ export default function StandupPage({ projectId }: StandupClientProps) {
 
                       if (isCurrentUser && editingSelf) {
                         return (
-                          <div key={member.id} className="rounded-xl border border-brand/40 bg-card p-4 shadow-sm space-y-4">
+                          <div key={member.id} className="rounded-xl border border-brand/40 bg-card p-4 shadow-[var(--elev-card)] space-y-4">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="space-y-0.5">
                                 <h3 className="text-sm font-semibold text-foreground">{t('orgLevelTitle')}</h3>

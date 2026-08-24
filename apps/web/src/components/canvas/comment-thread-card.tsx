@@ -47,7 +47,8 @@ export function CommentThreadCard({
   };
 
   return (
-    <div className={cn('rounded-xl border border-border bg-card shadow-sm', resolved && 'opacity-70', className)}>
+    // story #3009(로드맵 P2·PR-F, L1) — 인라인 카드는 --elev-card.
+    <div className={cn('rounded-xl border border-border bg-card shadow-[var(--elev-card)]', resolved && 'opacity-70', className)}>
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <AnchorPin
           number={thread.pin_number}

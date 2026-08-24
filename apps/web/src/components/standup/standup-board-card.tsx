@@ -33,7 +33,8 @@ export function StandupBoardCard({
   const commentCount = feedback.filter((f) => f.review_type === 'comment').length;
 
   return (
-    <div className={cn('flex flex-col rounded-xl border border-border bg-card shadow-sm', isCurrentUser && 'ring-1 ring-brand/40')}>
+    // story #3009(로드맵 P2·PR-F, L1) — 인라인 카드는 --elev-card.
+    <div className={cn('flex flex-col rounded-xl border border-border bg-card shadow-[var(--elev-card)]', isCurrentUser && 'ring-1 ring-brand/40')}>
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-2 px-4 pt-4">
         <div className="min-w-0 flex-1 space-y-1">

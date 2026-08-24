@@ -111,6 +111,15 @@ describe('HypothesisEarthLayer — story #2531 AC(measuring 선명·proposed 흐
     expect(card?.className).toContain('opacity-60');
   });
 
+  // story #3009(로드맵 P2·PR-F, L1) — hover 시 인라인 카드 강조는 --elev-card.
+  it('카드가 hover:shadow-[var(--elev-card)]를 쓰고 hover:shadow-sm은 안 쓴다', async () => {
+    await renderLayer(vi.fn(() => jsonResponse([makeHypothesis({ id: 'h1', status: 'measuring', statement: 'Q1' })])));
+
+    const card = Array.from(container.querySelectorAll('p')).find((p) => p.textContent === 'Q1')?.closest('div');
+    expect(card?.className).toContain('hover:shadow-[var(--elev-card)]');
+    expect(card?.className).not.toMatch(/hover:shadow-sm(\s|$)/);
+  });
+
   it('archived는 그리드·결론난 섹션 어디에도 안 뜬다(더미 미표시)', async () => {
     await renderLayer(vi.fn(() => jsonResponse([
       makeHypothesis({ id: 'h6', status: 'archived', statement: 'DEAD-archived' }),
