@@ -155,6 +155,14 @@ async def dispatch_approval_request_cards(
         )
         return
 
+    # story #2985(유나 FE 스펙, PO 계약 확定 2026-08-24) — 정보성 카드가 "{지정자 이름}에게
+    # 요청된 결재"를 보여주려면 그 이름이 필요하다. 없으면(예: 지정자 미확인) FE가 "지정
+    # 결재자"로 폴백한다는 게 그 스펙 원문 — 여기선 있으면만 싣고 없으면 지어내지 않는다.
+    designated_approver_name: str | None = None
+    if designated_approver_id is not None:
+        designated_member = (await lookup_members_by_ids({designated_approver_id}, db)).get(designated_approver_id)
+        designated_approver_name = designated_member.name if designated_member is not None else None
+
     for approver_id in approver_ids:
         is_designated = designated_approver_id is None or approver_id == designated_approver_id
         card_kind = "request" if is_designated else "request_info"
@@ -184,6 +192,7 @@ async def dispatch_approval_request_cards(
                             "gate_id": str(gate_id),
                             "actions": ["approve", "reject"],
                             "designated": is_designated,
+                            "designated_approver_name": designated_approver_name,
                         },
                     },
                 )

@@ -28,6 +28,14 @@ export interface ApprovalTarget {
    * 이 컴포넌트에서 실제로 읽히지 않는다(gate 상태는 항상 fetchGate()의 실물로 판단) —
    * optional로 둬 두 메시지 종류(request/result) 모두 같은 타입으로 수용한다. */
   actions?: string[];
+  /** story #2985 — 결재선 지정 시 이 카드 수신자가 지정 결재자인지(true)/정보성 강등된
+   * 나머지 owner·admin인지(false). 미지정 상신이면 전원 true(회귀 0). undefined는 이
+   * 필드를 아직 안 보내는 구서버(항상 true와 동형 취급 — 지정 개념이 없던 시절과 동일하게
+   * 액션으로 뜬다). */
+  designated?: boolean;
+  /** story #2985 — 지정 결재자 표시 이름(정보성 카드 안내문구용). 지정 없음/미확인이면
+   * null — FE가 "지정 결재자"로 폴백한다(지어내지 않음, BE도 이름을 지어내지 않는다). */
+  designated_approver_name?: string | null;
 }
 
 interface ApprovalRequestCardProps {
@@ -37,6 +45,11 @@ interface ApprovalRequestCardProps {
    * resolved(회신) 분기가 이 카탈로그의 preset.gate.verdict 항목을 찾아 정적 표현부(text·
    * fields)만 소비한다 — pending(요청·서명·버튼) 분기는 그대로다. */
   eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
+  /** story #2985(유나 FE 스펙) — 분기 SSOT. message_kind==='request_info'일 때만 정보성
+   * 렌더(기본 접힘+대신 처리 폴드) — target.designated는 이 판단에 쓰지 않는다(라벨 문구용
+   * designated_approver_name만 target에서 읽는다, 신호 이중화 방지). 'request'·'result'·
+   * 구서버(undefined/null)는 전부 기존 렌더 그대로. */
+  messageKind?: string | null;
 }
 
 type CardState =
@@ -88,7 +101,7 @@ const RESOLVED_STATUS_LABEL_KEYS: Record<string, string> = {
  * (`GateSignatureApproval`)와 형제로 렌더돼 모달 열람/닫기가 그 로컬 state(근거확인·사유)를
  * 건드리지 않는다(AC③, 언마운트 없음).
  */
-export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalRequestCardProps) {
+export function ApprovalRequestCard({ target, eventDefinitionsByKey, messageKind }: ApprovalRequestCardProps) {
   const t = useTranslations('chats');
   // story #2926(P0-F 잔여 fast-follow, 카디르 F2 QA LOW①) — 아래 stateLabel 유도가
   // deriveGateProofState()의 통일 키(gateStatus*)를 쓴다 — 그 키들은 'cage' 네임스페이스.
@@ -245,6 +258,8 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
             gate={gate}
             resolving={resolving}
             transitionError={transitionError}
+            messageKind={messageKind}
+            designatedApproverName={target.designated_approver_name}
             onApprove={(reason, evidenceViewed) => void transition('approved', reason, evidenceViewed)}
             onReject={(reason) => void transition('rejected', reason)}
             onDiscuss={(reason) => void discuss(reason)}
@@ -277,6 +292,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
 
 function ApprovalRequestBody({
   gate, resolving, transitionError, onApprove, onReject, onDiscuss, onDiscussClick, onUndone, eventDefinitionsByKey,
+  messageKind, designatedApproverName,
 }: {
   gate: GateItem;
   resolving: boolean;
@@ -289,11 +305,18 @@ function ApprovalRequestBody({
   onDiscussClick: () => void;
   onUndone: () => void;
   eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
+  /** story #2985(유나 FE 스펙) — 분기 SSOT. 'request_info'면 정보성 강등(기본 접힘+"대신
+   * 처리" 폴드). 'request'/'result'/구서버(undefined·null)는 현행 그대로, 무회귀. */
+  messageKind?: string | null;
+  designatedApproverName?: string | null;
 }) {
   const t = useTranslations('chats');
   // gates/[id]/page.tsx와 같은 문구를 쓴다(동일 개념=동일 어휘, DS 원칙) — 그 키들은 'cage'
   // 네임스페이스에 있다('chats'엔 없음, 그라운딩 중 확認).
   const tCage = useTranslations('cage');
+  // story #2985 — 정보성 카드의 "대신 처리" 폴드 상태(기본 닫힘). designated===false일
+  // 때만 의미 있음(다른 경우 이 state는 안 읽힌다).
+  const [actingOnBehalf, setActingOnBehalf] = useState(false);
   const { currentTeamMemberId } = useDashboardContext();
   const title = gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`;
 
@@ -386,6 +409,25 @@ function ApprovalRequestBody({
         // 렌더하지 않는다. 고위험도 이제 챗 안에서 완결되므로(#2625) 여기 남는 유일한
         // "액션 불가" 사유는 무권한뿐이다.
         <p className="text-[11px] text-muted-foreground">{tCage('gateReadonlyNotAuthorized')}</p>
+      ) : messageKind === 'request_info' && !actingOnBehalf ? (
+        // story #2985(유나 FE 스펙) — 정보성 강등(비지정 owner/admin) 기본 뷰: 액션 숨김+
+        // "요청됨" 안내(무채·info 톤, 강조색 금지)+"대신 처리" ghost 폴드. 열면 지정자와
+        // 동일한 액션 UI로 떨어진다(SoD 불변 — 이 아래는 canAct===true라 서버 인가는 이미
+        // 확認됨, 여기선 시각 위계만 좁혔다 넓히는 것).
+        <div className="space-y-1.5">
+          <p className="text-xs text-muted-foreground">
+            {designatedApproverName
+              ? t('approvalRequestDesignatedToNamed', { name: designatedApproverName })
+              : t('approvalRequestDesignatedToUnnamed')}
+          </p>
+          <Button
+            type="button" size="sm" variant="ghost"
+            onClick={() => setActingOnBehalf(true)}
+            className="w-full text-muted-foreground"
+          >
+            {t('approvalRequestActOnBehalf')}
+          </Button>
+        </div>
       ) : needsFullFlow ? (
         // story #2975(유나양 design 판정 2026-08-24) 갭 자체발견(#2982 작업 중) — 그 블로커
         // 처방(key={SHA}로 재조회 後 evidenceViewed/reason 강제 리셋)이 gates/[id]/page.tsx

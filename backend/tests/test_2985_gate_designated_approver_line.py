@@ -109,11 +109,15 @@ async def test_dispatch_splits_designated_action_vs_others_informational():
             assert designated_msg.msg_metadata["activation"]["kind"] == "request"
             assert designated_msg.msg_metadata["activation"]["expects_response"] is True
             assert designated_msg.msg_metadata["approval_target"]["designated"] is True
+            # 유나 FE 스펙(2026-08-24) — 정보성 카드의 "{이름}에게 요청된 결재" 안내문구용
+            # 실명. 지정자 자신의 카드에도 같이 실리지만(단순화 — 별도 분기 없음) 안 읽힘.
+            assert designated_msg.msg_metadata["approval_target"]["designated_approver_name"] == "po"
 
             other_msg = by_recipient[other]
             assert other_msg.msg_metadata["activation"]["kind"] == "request_info"
             assert other_msg.msg_metadata["activation"]["expects_response"] is False
             assert other_msg.msg_metadata["approval_target"]["designated"] is False
+            assert other_msg.msg_metadata["approval_target"]["designated_approver_name"] == "po"
             # 정보성이어도 해소 권한 자체는 유지 — actions는 그대로.
             assert other_msg.msg_metadata["approval_target"]["actions"] == ["approve", "reject"]
     finally:
