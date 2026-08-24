@@ -194,6 +194,34 @@ describe('ConversationPage — 헤더 아바타(story #2968)', () => {
 
     expect(container.querySelector('img')).toBeNull();
   });
+
+  // story #2988(선생님 실사용 지적, 스크린샷) — top-bar.tsx의 `[&>*]:truncate`가 title 루트
+  // div 자신에 overflow:hidden을 건다(빌드 CSS 실측). agent Avatar의 ring-2 ring-offset-1은
+  // box-shadow라 레이아웃 박스 밖 3px까지 번지는데, 그 div가 overflow:hidden이면서 자기
+  // 자식(24px Avatar)에 딱 맞는 높이라 링이 상하로 잘렸다. py-1(4px, 3px보다 여유)로 클립
+  // 경계를 밀어내는 fix의 회귀가드 — 실제 DOM에서 padding 클래스가 걸려있는지 고정한다.
+  it('agent 상대 헤더의 title 루트가 py-1을 가져 ring(box-shadow)이 overflow:hidden에 안 잘린다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/conv-1')) {
+        return {
+          ok: true,
+          json: async () => ({
+            title: null, type: 'dm', muted: false, lastReadAt: null, freeResponse: false,
+            participants: [
+              { member_id: 'me-1', name: '나', avatar_url: null, type: 'human' },
+              { member_id: 'them-1', name: '페드루', avatar_url: null, type: 'agent' },
+            ],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await mount();
+
+    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('채팅'));
+    const titleRoot = backBtn?.parentElement;
+    expect(titleRoot?.className).toContain('py-1');
+  });
 });
 
 // story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 헤더 상대명/방이름=Claim(600)
