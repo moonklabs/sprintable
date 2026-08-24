@@ -4,7 +4,7 @@
 // 오염 방지 회귀가드. Provider 없이 렌더하면 useSseMultiplexerContext()가 null을 반환해
 // 독립 EventSource 폴백 분기를 타는 것을 이용한다(SseMultiplexerContext 기본값 null).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { useChatSse, normalizeToMessage } from './use-chat-sse';
 
@@ -269,5 +269,88 @@ describe('useChatSse — 가시성 복귀 강제 재연결(#2987, standalone-fal
     act(() => { FakeEventSource.instances[1]!.onopen?.(); });
 
     expect(onReconnect).toHaveBeenCalledTimes(1);
+  });
+});
+
+// story 6ddaa086(critical, 선생님 실사고) — 「연결이 끊겼어요」 배너가 실 연결(readyState=1
+// OPEN) 정상 도달 뒤에도 안 풀리던 결함. 근본원인: mux 핸들(sse-multiplexer.ts)이 #2144
+// 처방으로 참조안정적인데, chat-view의 배너는 mux.connected를 getter로 직접 읽어 그 값이
+// 바뀌어도 리렌더를 못 받았다(핸들 참조=Context 값이 안 바뀌므로 Provider가 소비자를
+// 스킵). realtime-provider.tsx에 connected 전용 반응형 컨텍스트(SseConnectedContext)를
+// 신설해 분리 — mux 핸들 자체의 참조안정성(#2144 보존)과 connected 리렌더 반응성을 둘 다
+// 만족시킨다. use-team-presence.test.tsx #2144 스위트와 동일한 vi.stubEnv+resetModules+
+// 동적 import 패턴(mux 공유 커넥션 경로 재현에 필수).
+describe('useChatSse — mux 공유 커넥션 경로에서 connected 리렌더 반응성(story 6ddaa086)', () => {
+  afterEach(() => { vi.resetModules(); });
+
+  it('mux 최초 open(false→true)이 이 훅을 리렌더시켜 connected=true를 즉시 반영한다', async () => {
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED', 'true');
+    const { RealtimeProvider } = await import('@/components/realtime-provider');
+    const { useChatSse: useChatSseFresh } = await import('./use-chat-sse');
+
+    const connectedCapture = { current: false };
+    function Consumer() {
+      const { connected } = useChatSseFresh({ currentTeamMemberId: 'm1' });
+      useEffect(() => { connectedCapture.current = connected; }, [connected]);
+      return null;
+    }
+
+    await act(async () => {
+      root.render(
+        <RealtimeProvider currentTeamMemberId="m1">
+          <Consumer />
+        </RealtimeProvider>,
+      );
+      await Promise.resolve();
+    });
+    expect(connectedCapture.current).toBe(false);
+
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => { es.onopen?.(); await Promise.resolve(); });
+
+    // 옛 버그: mux 핸들 참조가 안 바뀌어 Consumer가 리렌더 안 되고 connectedCapture가 false에
+    // 고착됐다(PO 실측 — readyState=1인데 배너만 남는 그 증상). 고친 뒤엔 이 open 자체가
+    // 곧바로 리렌더를 유발해 true로 반영된다 — 다른 무관한 트리거(새 메시지 등) 불필요.
+    expect(connectedCapture.current).toBe(true);
+  });
+
+  it('재연결(error→새 인스턴스 open)에서도 다른 무관한 리렌더 없이 connected가 다시 true로 풀린다(PO 재현 시나리오)', async () => {
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED', 'true');
+    const { RealtimeProvider } = await import('@/components/realtime-provider');
+    const { useChatSse: useChatSseFresh } = await import('./use-chat-sse');
+
+    const connectedCapture = { current: false };
+    function Consumer() {
+      const { connected } = useChatSseFresh({ currentTeamMemberId: 'm1' });
+      useEffect(() => { connectedCapture.current = connected; }, [connected]);
+      return null;
+    }
+
+    await act(async () => {
+      root.render(
+        <RealtimeProvider currentTeamMemberId="m1">
+          <Consumer />
+        </RealtimeProvider>,
+      );
+      await Promise.resolve();
+    });
+    const first = FakeEventSource.instances[0]!;
+    await act(async () => { first.onopen?.(); await Promise.resolve(); });
+    expect(connectedCapture.current).toBe(true);
+
+    // 끊김 — PO 실측대로 배너가 뜨는 쪽(정상 동작).
+    await act(async () => { first.readyState = FakeEventSource.CONNECTING; first.onerror?.(); await Promise.resolve(); });
+    expect(connectedCapture.current).toBe(false);
+
+    // 재연결 — 새 EventSource 인스턴스가 open(신규 인스턴스라는 게 PO 가설①의 핵심 축).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000); // backoff 재시도 대기
+      const second = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
+      second.onopen?.();
+      await Promise.resolve();
+    });
+    expect(connectedCapture.current).toBe(true);
   });
 });
