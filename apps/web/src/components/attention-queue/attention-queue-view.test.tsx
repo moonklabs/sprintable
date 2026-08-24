@@ -216,3 +216,36 @@ describe('AttentionQueueView — typeBadge 배선 (story #2923 AQ2)', () => {
     expect(container.textContent).toContain('GATE');
   });
 });
+
+// story #3010(로드맵 P3, L5 대비) — kicker/empty body는 text-proof-faint(라이트 대비 미달)
+// 대신 text-proof-ink-3.
+describe('AttentionQueueView — 로드맵 P3 L5(faint 텍스트 대비 정정)', () => {
+  it('kicker가 text-proof-ink-3를 쓰고 text-proof-faint는 안 쓴다', async () => {
+    await mount(mockGatePendingOnly());
+    const kicker = [...container.querySelectorAll('div')].find((d) => d.className.includes('uppercase') && d.className.includes('tracking-[0.12em]'));
+    expect(kicker?.className).toContain('text-proof-ink-3');
+    expect(container.querySelector('.text-proof-faint')).toBeNull();
+  });
+
+  it('빈 상태 empty body가 text-proof-ink-3를 쓰고 text-proof-faint는 안 쓴다', async () => {
+    await mount(async (url: string) => {
+      if (url.includes('/api/glance/attention')) return { ok: true, json: async () => ({ data: { items: [] } }) };
+      return { ok: true, json: async () => ({ data: [] }) };
+    });
+    const emptyBody = [...container.querySelectorAll('p')].find((p) => p.className.includes('text-[12.5px]'));
+    expect(emptyBody?.className).toContain('text-proof-ink-3');
+    expect(container.querySelector('.text-proof-faint')).toBeNull();
+  });
+});
+
+// story #3010(로드맵 P3, L6, 유나 판정 2026-08-24) — 섹션 주 제목 h2는 font-editorial-heading
+// (820 weight)로, 19px 크기는 유지.
+describe('AttentionQueueView — 로드맵 P3 L6(섹션 제목 editorial weight)', () => {
+  it('h2가 font-editorial-heading을 쓰고 text-[19px]는 유지한다', async () => {
+    await mount(mockGatePendingOnly());
+    const h2 = container.querySelector('h2');
+    expect(h2?.className).toContain('font-editorial-heading');
+    expect(h2?.className).toContain('text-[19px]');
+    expect(h2?.className).not.toContain('font-extrabold');
+  });
+});

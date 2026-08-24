@@ -201,9 +201,14 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
     // story #2955 §5 — 인라인 clip-path를 정본 `.proof-cut` 유틸(globals.css)로 이관(24px 기본값 그대로).
     <div className="proof-cut overflow-hidden rounded-2xl border border-proof-line bg-proof-panel">
       <div className="flex items-baseline justify-between gap-3 border-b border-proof-line-soft px-5 py-3.5">
+        {/* story #3010(로드맵 P3, L5 대비) — text-proof-faint 라이트 대비 미달(story #2993
+            유나 처방과 동일 클래스) → text-proof-ink-3(아래 kicker·empty body 2곳). */}
         <div>
-          <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-proof-faint">{t('kicker')}</div>
-          <h2 className="text-[19px] font-extrabold leading-tight tracking-[-0.014em] text-proof-ink">{t('title')}</h2>
+          <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-proof-ink-3">{t('kicker')}</div>
+          {/* story #3010(로드맵 P3, L6, 유나 판정 2026-08-24) — 이 h2는 반복 그룹 라벨이 아니라
+              섹션 주 제목(단일 마운트)이라 L6 대상. weight만 font-editorial-heading(820)로
+              교체, 19px 크기는 유지. */}
+          <h2 className="text-[19px] font-editorial-heading leading-tight tracking-[-0.014em] text-proof-ink">{t('title')}</h2>
         </div>
         {!loading ? (
           <div className="shrink-0 text-[13px] font-medium text-proof-ink-3">
@@ -220,7 +225,7 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
             <ShieldCheck className="size-3.5" aria-hidden="true" />{t('allClear')}
           </div>
           <p className="text-[15px] font-semibold text-proof-ink-2">{t('emptyTitle')}</p>
-          <p className="text-[12.5px] text-proof-faint">{t('emptyBody')}</p>
+          <p className="text-[12.5px] text-proof-ink-3">{t('emptyBody')}</p>
         </div>
       ) : (
         <div>

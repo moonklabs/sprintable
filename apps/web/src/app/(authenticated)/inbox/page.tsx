@@ -595,11 +595,13 @@ export default function InboxPage() {
                             {notification.body ? (
                               <p className="line-clamp-1 text-xs text-muted-foreground">{notification.body}</p>
                             ) : null}
-                            {/* 목업 ⑤: 타입 1급 — agent_joined=Bot 칩(accent-claim)·도달사유 칩 */}
+                            {/* 목업 ⑤: 타입 1급 — agent_joined=Bot 칩·도달사유 칩. story #3010(로드맵
+                                P3, L5) — 정적 정체성 마킹은 citron이 아니라 proof-blue-soft
+                                (P1 PR-B 챗 Bot배지·avatar.tsx 관례와 동형). */}
                             {(notification.type === 'agent_joined' || reasonKey) ? (
                               <div className="flex flex-wrap items-center gap-1.5">
                                 {notification.type === 'agent_joined' ? (
-                                  <Badge className="gap-0.5 bg-accent-claim/15 text-foreground text-[10px]">
+                                  <Badge className="gap-0.5 bg-proof-blue-soft text-foreground text-[10px]">
                                     <Bot className="size-2.5" />Bot
                                   </Badge>
                                 ) : null}

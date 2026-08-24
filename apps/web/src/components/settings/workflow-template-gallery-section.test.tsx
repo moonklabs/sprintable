@@ -121,3 +121,22 @@ describe('WorkflowTemplateGallerySection — error.code 분기 (story #2501)', (
     expect(container.textContent).toContain('적용 실패');
   });
 });
+
+// story #3010(로드맵 P3, L1) — 선택 가능한 템플릿 카드는 인라인 카드라 --elev-card.
+describe('WorkflowTemplateGallerySection — 로드맵 P3 L1(템플릿 카드 elevation 토큰)', () => {
+  it('템플릿 카드가 hover:shadow-[var(--elev-card)]를 쓰고 hover:shadow-sm은 안 쓴다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/workflow-templates' && !init) return { ok: true, json: async () => [TEMPLATE] };
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/api/v1/agent-routing-rules')) return { ok: true, json: async () => ({ data: [] }) };
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<WorkflowTemplateGallerySection projectId="proj-1" />)); });
+    await flush();
+
+    const tmplBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('테스트 템플릿'));
+    expect(tmplBtn).not.toBeUndefined();
+    expect(tmplBtn?.className).toContain('hover:shadow-[var(--elev-card)]');
+    expect(tmplBtn?.className).not.toMatch(/hover:shadow-sm(\s|$)/);
+  });
+});
