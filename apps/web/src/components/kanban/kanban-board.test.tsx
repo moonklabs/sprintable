@@ -327,6 +327,26 @@ describe('KanbanBoard — 스토리 생성 실패 접근성(story #2105 2차)', 
     expect(second).not.toBeNull();
     expect(second).not.toBe(first);
   });
+
+  // story #3007(로드맵 P2·PR-E, L1) — 토스트성 에러배너는 floating이라 --elev-overlay.
+  it('생성 실패 배너가 shadow-[var(--elev-overlay)]를 쓰고 shadow-md는 안 쓴다', async () => {
+    stubFetch([]);
+    await mount();
+    const ctaButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('첫 스토리 만들기'));
+    await act(async () => { ctaButton!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const titleInput = container.querySelector('input') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(titleInput, '새 스토리');
+      titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      titleInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    const alertEl = await waitForAlert();
+    expect(alertEl?.className).toContain('shadow-[var(--elev-overlay)]');
+    expect(alertEl?.className).not.toMatch(/(^|\s)shadow-md(\s|$)/);
+  });
 });
 
 // story #2059 — 보드 실시간 반영. 새 EventSource를 여는 대신 기존 useSseNotifications의

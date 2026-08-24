@@ -267,4 +267,18 @@ describe('ChatsLayout — story #2921 S6(xl 미만 + Reading 열림 → rail 자
     expect(document.activeElement).toBe(expandBtn);
     expect(expandBtn.className).not.toContain('!hidden');
   });
+
+  // story #3007(로드맵 P2·PR-E, L1) — 오버레이 rail은 floating이라 --elev-overlay.
+  it('오버레이 rail이 shadow-[var(--elev-overlay)]를 쓰고 shadow-xl은 안 쓴다', async () => {
+    usePathnameMock.mockReturnValue('/chats/conv-123');
+    mqMatches = true;
+    await act(async () => {
+      root.render(wrap(<ChatsLayout><ReadingOpenProbe open /></ChatsLayout>));
+    });
+    const expandBtn = container.querySelector('[aria-label="목록 열기"]') as HTMLButtonElement;
+    await act(async () => { expandBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const rail = container.querySelector('[data-testid="chat-rail"]');
+    expect(rail?.className).toContain('shadow-[var(--elev-overlay)]');
+    expect(rail?.className).not.toMatch(/(^|\s)shadow-xl(\s|$)/);
+  });
 });

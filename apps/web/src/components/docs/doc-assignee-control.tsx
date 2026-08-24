@@ -64,7 +64,8 @@ export function DocAssigneeControl({
         {assigned ? (initials ?? <User className="size-3.5" />) : <UserPlus className="size-3.5" />}
       </button>
       {open ? (
-        <div className="absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-border bg-popover p-2 shadow-md">
+        // story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay.
+        <div className="absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-border bg-popover p-2 shadow-[var(--elev-overlay)]">
           <EntityDispatchPanel
             entityType="doc"
             entityId={docId}

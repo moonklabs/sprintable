@@ -145,7 +145,8 @@ export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps
   if (state.kind === 'loading' || (!isMobile && !overlayPosition)) {
     return (
       <div
-        className="fixed inset-x-4 top-4 z-50 mx-auto max-w-xl rounded-lg border border-border bg-background p-3 text-xs text-muted-foreground shadow-xl sm:inset-x-auto sm:right-4 sm:w-full"
+        // story #3007(로드맵 P2·PR-E, L1) — 플로팅 패널은 floating이라 --elev-overlay(아래 3곳).
+        className="fixed inset-x-4 top-4 z-50 mx-auto max-w-xl rounded-lg border border-border bg-background p-3 text-xs text-muted-foreground shadow-[var(--elev-overlay)] sm:inset-x-auto sm:right-4 sm:w-full"
         style={!isMobile && overlayPosition ? { top: overlayPosition.top } : undefined}
       >
         {t('nodesLoading')}
@@ -155,7 +156,7 @@ export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps
   if (state.kind === 'error') {
     return (
       <div
-        className="fixed inset-x-4 top-4 z-50 mx-auto max-w-xl rounded-lg border border-border bg-background p-3 text-xs text-muted-foreground shadow-xl sm:inset-x-auto sm:right-4 sm:w-full"
+        className="fixed inset-x-4 top-4 z-50 mx-auto max-w-xl rounded-lg border border-border bg-background p-3 text-xs text-muted-foreground shadow-[var(--elev-overlay)] sm:inset-x-auto sm:right-4 sm:w-full"
         style={!isMobile && overlayPosition ? { top: overlayPosition.top } : undefined}
       >
         {t('nodesError')}
@@ -171,7 +172,7 @@ export function FlowNodeStoryPanel({ storyId, onClose }: FlowNodeStoryPanelProps
       type="button"
       size="sm"
       variant="secondary"
-      className="fixed right-4 top-4 z-[60] shadow-md"
+      className="fixed right-4 top-4 z-[60] shadow-[var(--elev-overlay)]"
       onClick={() => setReviewQueueOpen(true)}
     >
       {t('relationReviewEntryButton', { count: unconfirmedCount })}

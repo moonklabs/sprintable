@@ -1279,9 +1279,11 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
         role="dialog"
         aria-modal="true"
         aria-label={story.title}
+        // story #3007(로드맵 P2·PR-E, L1) — 모바일 시트/데스크톱 사이드시트 둘 다 floating이라
+        // --elev-overlay.
         className={overlayPosition
-          ? 'fixed inset-x-4 z-50 mx-auto max-w-xl overflow-hidden rounded-lg border border-border bg-background shadow-xl outline-none backdrop-blur-xl sm:inset-x-auto sm:right-4 sm:w-full'
-          : 'fixed inset-0 z-50 bg-background shadow-xl outline-none backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-3xl lg:border-l lg:border-border'}
+          ? 'fixed inset-x-4 z-50 mx-auto max-w-xl overflow-hidden rounded-lg border border-border bg-background shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl sm:inset-x-auto sm:right-4 sm:w-full'
+          : 'fixed inset-0 z-50 bg-background shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-3xl lg:border-l lg:border-border'}
         style={overlayPosition ? { top: overlayPosition.top, height: overlayPosition.heightPx } : undefined}
       >
       <div className="flex h-full flex-col">

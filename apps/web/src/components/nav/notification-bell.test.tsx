@@ -321,3 +321,14 @@ describe('getEntityHref — 딥링크 계약(story #2956 QA changes)', () => {
     expect(getEntityHref(baseNotification({ source_entity_type: 'epic', source_entity_id: null }))).toBeNull();
   });
 });
+
+// story #3007(로드맵 P2·PR-E, L1) — 데스크톱 드롭다운 패널은 floating이라 --elev-overlay.
+describe('NotificationBell — 로드맵 P2·PR-E L1(드롭다운 패널 elevation 토큰)', () => {
+  it('데스크톱 드롭다운(.w-80)이 shadow-[var(--elev-overlay)]를 쓰고 shadow-lg는 안 쓴다', async () => {
+    stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
+    await openBell();
+    const desktopPanel = container.querySelector('.w-80');
+    expect(desktopPanel?.className).toContain('shadow-[var(--elev-overlay)]');
+    expect(desktopPanel?.className).not.toMatch(/(^|\s)shadow-lg(\s|$)/);
+  });
+});

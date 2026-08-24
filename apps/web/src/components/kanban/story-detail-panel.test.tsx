@@ -98,6 +98,27 @@ describe('StoryDetailPanel — overlayPosition (story #2354, 지도 위에 겹�
     expect(panel.style.height).toBe('300px');
   });
 
+  // story #3007(로드맵 P2·PR-E, L1) — 모바일 시트/오버레이 패널 둘 다 floating이라 --elev-overlay.
+  it('두 분기(전체화면 드로어·overlayPosition 팝오버) 모두 panel이 shadow-[var(--elev-overlay)]를 쓰고 shadow-xl은 안 쓴다(story #3007)', async () => {
+    await act(async () => {
+      root.render(wrap(<StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} />));
+    });
+    const drawerPanel = container.querySelector('[role="dialog"]');
+    expect(drawerPanel?.className).toContain('shadow-[var(--elev-overlay)]');
+    expect(drawerPanel?.className).not.toMatch(/(^|\s)shadow-xl(\s|$)/);
+
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel story={makeStory()} tasks={[]} onClose={() => {}} overlayPosition={{ top: 120, heightPx: 300 }} />,
+      ));
+    });
+    const overlayPanel = container.querySelector('[role="dialog"]');
+    expect(overlayPanel?.className).toContain('shadow-[var(--elev-overlay)]');
+    expect(overlayPanel?.className).not.toMatch(/(^|\s)shadow-xl(\s|$)/);
+  });
+
   it('overlay panel content is the SAME component internals — story title still renders (재사용 확認, AC7)', async () => {
     await act(async () => {
       root.render(wrap(

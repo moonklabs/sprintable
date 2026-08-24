@@ -348,7 +348,10 @@ export function ByomKeyManagement({ projectId }: { projectId: string }) {
       {/* Delete confirmation dialog */}
       {showDeleteConfirm ? (
         <Dialog open={showDeleteConfirm} onOpenChange={(open) => { if (!open && !deleting) setShowDeleteConfirm(false); }}>
-          <DialogContent className="max-w-sm rounded-2xl border-white/10 bg-muted shadow-xl backdrop-blur-xl" showCloseButton={false}>
+          {/* story #3007(로드맵 P2·PR-E, L1) — 이 consumer가 얹는 className이 DialogContent
+              기본 --elev-overlay를 덮어써 shadow-xl 리터럴로 갈라져 있었다. 원시(Dialog) 교체는
+              동작 리스크 판단상 보류(PO 확定) — 토큰만 치환. */}
+          <DialogContent className="max-w-sm rounded-2xl border-white/10 bg-muted shadow-[var(--elev-overlay)] backdrop-blur-xl" showCloseButton={false}>
             <DialogTitle className="text-lg font-semibold text-destructive">{t('deleteConfirmTitle')}</DialogTitle>
             <p className="mt-2 text-sm text-muted-foreground">{t('deleteConfirmDesc')}</p>
             <div className="mt-6 flex gap-3">

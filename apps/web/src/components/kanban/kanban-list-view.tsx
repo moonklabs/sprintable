@@ -102,7 +102,8 @@ function ListStoryRow({ story, epicMap, memberMap, onStoryClick, onChangeStatus 
         </button>
 
         {statusOpen && validNext.length > 0 && (
-          <div className="absolute right-0 top-full z-50 mt-1 min-w-[140px] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md">
+          // story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay.
+          <div className="absolute right-0 top-full z-50 mt-1 min-w-[140px] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-[var(--elev-overlay)]">
             {validNext.map((nextStatus) => {
               const col = COLUMNS.find((c) => c.id === nextStatus);
               if (!col) return null;

@@ -634,7 +634,8 @@ export function DocEditor({
                   <div
                     role="menu"
                     onClick={(e) => e.stopPropagation()}
-                    className="absolute left-7 top-0 w-36 overflow-hidden rounded-lg border border-border bg-card p-1 shadow-lg"
+                    // story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay.
+                    className="absolute left-7 top-0 w-36 overflow-hidden rounded-lg border border-border bg-card p-1 shadow-[var(--elev-overlay)]"
                   >
                     <button
                       type="button"

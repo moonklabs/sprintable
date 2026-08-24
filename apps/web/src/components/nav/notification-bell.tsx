@@ -568,7 +568,8 @@ export function NotificationBell() {
 
       {/* 데스크톱 드롭다운 (lg+) */}
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 hidden w-80 overflow-hidden rounded-lg border bg-background shadow-lg lg:flex lg:flex-col" style={{ maxHeight: '480px' }}>
+        // story #3007(로드맵 P2·PR-E, L1) — 드롭다운 패널은 floating이라 --elev-overlay.
+        <div className="absolute right-0 top-full z-50 mt-1 hidden w-80 overflow-hidden rounded-lg border bg-background shadow-[var(--elev-overlay)] lg:flex lg:flex-col" style={{ maxHeight: '480px' }}>
           <NotificationPanel
             notifications={notifications}
             onMarkAllRead={handleMarkAllRead}

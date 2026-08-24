@@ -633,7 +633,8 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           role="dialog"
           aria-modal="true"
           aria-label={t('title')}
-          className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden border-r border-border bg-background shadow-lg outline-none lg:hidden"
+          // story #3007(로드맵 P2·PR-E, L1) — 모바일 드로어는 floating이라 --elev-overlay.
+          className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden border-r border-border bg-background shadow-[var(--elev-overlay)] outline-none lg:hidden"
           style={{
             transform: `translateX(${(drawerProgress - 1) * 100}%)`,
             transition: drawerDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1)',
