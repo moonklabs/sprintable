@@ -24,9 +24,7 @@ import { cn } from '@/lib/utils';
  */
 // story #2969 §1.3/§2 C행(doc proofline-system-layer-2969, PR-6) — Display tier(에디토리얼
 // 디스플레이 타이포) 적용: font-bold(700)→--font-weight-editorial-heading(820)·
-// tracking-tight→-0.02em(§1.3 Display 정의 그대로). ⚠️무게는 유틸리티 클래스가 아니라
-// 인라인 style로 건다 — tailwind-merge가 페이스 클래스와 (구)무게 클래스를 같은 충돌군으로
-// 오인해 하나를 지우던 전례가 있었다(직접 실측 완료, page-header.test.tsx에 회귀가드).
+// tracking-tight→-0.02em(§1.3 Display 정의 그대로).
 // §1.4가 이 파일의 "히어로 판"에 proof-cut도 요구하지만, 이 컴포넌트는 현재 배경/패딩이
 // 없는 순수 타이포 블록이라(panel이 아님) cut이 보일 표면 자체가 없다 — 유나가 이 요건을
 // 철회함(2026-08-23, «page-header는 Display 타이포까지가 끝»).
@@ -36,7 +34,19 @@ import { cn } from '@/lib/utils';
 // 파일이 doc §3의 "가장 대표" Display 소비처로 명시된 자리 — 세리프 켜기(D1~)가 실제로
 // 이 h1부터 반영되게 하려면 반드시 이 토큰을 경유해야 한다(font-heading으로 남으면 세리프
 // 전환에서 이 화면만 빠짐).
-const pageHeaderVariants = cva('font-display tracking-[-0.02em] text-foreground', {
+//
+// story #2976(근본처방) — 무게는 이제 유틸리티 클래스(`font-editorial-heading`)로 건다.
+// 과거 인라인 style 우회는 반창고였다: tailwind-merge가 자체 Tailwind 설정을 안 읽어
+// `font-editorial-heading`(무게)을 `font-family` 충돌군으로 오인, `font-display`/
+// `font-heading`과 병기 시 하나를 조용히 지우던 게 원인 — `lib/utils.ts`의 `cn()`을
+// `extendTailwindMerge`로 교체해 이 이름을 정확한 `font-weight` 충돌군에 등록했다(실측
+// 확認 완료). 이 파일이 그 반창고의 발원지였으니 여기서 먼저 되돌린다.
+//
+// story #2974 D1 revert(PO 판정 2026-08-24, PR#3416) — D1(세리프 점등)이 반려돼 페이스는
+// 다시 D0 값(font-display=var(--font-sans), 시각 무변화)이다. D1 한정 제외 주석은 D1 자체가
+// 없어져 더 이상 유효하지 않아 걷어냄 — 무게(font-editorial-heading)는 D1 존재 여부와
+// 무관하게 항상 유틸리티 클래스로 건다.
+const pageHeaderVariants = cva('font-display font-editorial-heading tracking-[-0.02em] text-foreground', {
   variants: {
     size: {
       page: 'text-2xl md:text-3xl',
@@ -60,10 +70,7 @@ export function PageHeader({ eyebrow, title, description, actions, className, si
     <section className={cn('flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between', className)}>
       <div className="space-y-1.5">
         {eyebrow ? <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">{eyebrow}</div> : null}
-        <h1
-          className={cn(pageHeaderVariants({ size }))}
-          style={{ fontWeight: 'var(--font-weight-editorial-heading)' }}
-        >
+        <h1 className={cn(pageHeaderVariants({ size }))}>
           {title}
         </h1>
         {description ? <p className="max-w-2xl text-sm text-muted-foreground">{description}</p> : null}
