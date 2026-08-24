@@ -788,3 +788,113 @@ async def test_observe_pr_diff_facts_fetch_failure_returns_empty():
         result = await _observe_pr_diff_facts(session, uuid.uuid4(), "o/r", 12)
 
     assert result == {}
+
+
+# ── story #3014(2995 보류 결정의 관찰 슬라이스) — reviewer_count/reviewer_logins 관찰 사실(판정 아님) ──
+
+
+@pytest.mark.anyio
+async def test_evaluate_merge_gate_merges_observed_reviewer_facts_into_neutral_facts():
+    """관찰되면 neutral_facts에 그대로 병합돼야 한다(재판정 없음, 기존 facts 키와 나란히) —
+    _observe_pr_diff_facts 병합 테스트와 동형."""
+    with patch.object(mod, "_observe_pr_reviewer_facts",
+                       AsyncMock(return_value={"reviewer_count": 1, "reviewer_logins": ["alice"]})):
+        res, create_spy = await _run()
+    assert res.gate_id is not None
+    neutral_facts = create_spy.call_args.kwargs["neutral_facts"]
+    assert neutral_facts["reviewer_count"] == 1
+    assert neutral_facts["reviewer_logins"] == ["alice"]
+    assert neutral_facts["ci_result"] == "pass"  # 기존 facts 보존(덮어쓰기 아님).
+
+
+@pytest.mark.anyio
+async def test_evaluate_merge_gate_reviewer_facts_observation_failure_is_silent():
+    """관찰 실패(설치 없음/토큰 없음/API 실패)는 게이트 평가 자체를 막지 않는다 — facts에
+    reviewer_count/reviewer_logins 키가 그냥 없을 뿐."""
+    with patch.object(mod, "_observe_pr_reviewer_facts", AsyncMock(return_value={})):
+        res, create_spy = await _run()
+    assert res.gate_id is not None
+    neutral_facts = create_spy.call_args.kwargs["neutral_facts"]
+    assert "reviewer_count" not in neutral_facts
+    assert "reviewer_logins" not in neutral_facts
+
+
+@pytest.mark.anyio
+async def test_evaluate_merge_gate_no_substance_shell_skips_reviewer_observation():
+    """pr_number<=0(no-substance shell)이면 관찰 대상 PR 자체가 없다 — _observe_pr_reviewer_facts를
+    아예 호출하지 않는다(불필요한 GitHub API 호출 방지)."""
+    observe_spy = AsyncMock(return_value={"reviewer_count": 1, "reviewer_logins": ["alice"]})
+    with patch.object(mod, "_observe_pr_reviewer_facts", observe_spy):
+        await _run_substance(ci_result="fail", pr_number=0, disposition="ask")
+    observe_spy.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_observe_pr_reviewer_facts_no_installation_returns_empty():
+    """GithubInstallation 없음(미연동 org) — 조용히 {} 반환, 예외 없음."""
+    from app.services.merge_verdict_gate import _observe_pr_reviewer_facts
+
+    no_row = MagicMock()
+    no_row.scalar_one_or_none = MagicMock(return_value=None)
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=no_row)
+
+    result = await _observe_pr_reviewer_facts(session, uuid.uuid4(), "o/r", 12)
+    assert result == {}
+
+
+@pytest.mark.anyio
+async def test_observe_pr_reviewer_facts_counts_and_lists_logins():
+    """설치+토큰+PR 조회 전부 성공 시 reviewer_count·reviewer_logins(정렬된 dedup 목록)을
+    정확히 계산한다 — GitHub PR 응답의 requested_reviewers는 [{"login": ...}, ...] 형태."""
+    from app.services.merge_verdict_gate import _observe_pr_reviewer_facts
+
+    installation = SimpleNamespace(installation_id=999)
+    row = MagicMock()
+    row.scalar_one_or_none = MagicMock(return_value=installation)
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=row)
+
+    pr = {"requested_reviewers": [{"login": "bob"}, {"login": "alice"}]}
+    with patch("app.services.github_app.get_installation_token", AsyncMock(return_value="tok")), \
+         patch("app.services.github_app.get_pull_request", AsyncMock(return_value=pr)):
+        result = await _observe_pr_reviewer_facts(session, uuid.uuid4(), "o/r", 12)
+
+    assert result == {"reviewer_count": 2, "reviewer_logins": ["alice", "bob"]}
+
+
+@pytest.mark.anyio
+async def test_observe_pr_reviewer_facts_zero_reviewers_returns_count_zero():
+    """양성대조 짝 — 대부분의 실경로일 zero-reviewer 케이스가 예외 없이 count 0을 낸다(AC②)."""
+    from app.services.merge_verdict_gate import _observe_pr_reviewer_facts
+
+    installation = SimpleNamespace(installation_id=999)
+    row = MagicMock()
+    row.scalar_one_or_none = MagicMock(return_value=installation)
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=row)
+
+    pr = {"requested_reviewers": []}
+    with patch("app.services.github_app.get_installation_token", AsyncMock(return_value="tok")), \
+         patch("app.services.github_app.get_pull_request", AsyncMock(return_value=pr)):
+        result = await _observe_pr_reviewer_facts(session, uuid.uuid4(), "o/r", 12)
+
+    assert result == {"reviewer_count": 0, "reviewer_logins": []}
+
+
+@pytest.mark.anyio
+async def test_observe_pr_reviewer_facts_fetch_failure_returns_empty():
+    """get_pull_request가 None(조회 실패/판정불가)이면 관찰 사실 없이 {} — 지어내지 않는다(AC③)."""
+    from app.services.merge_verdict_gate import _observe_pr_reviewer_facts
+
+    installation = SimpleNamespace(installation_id=999)
+    row = MagicMock()
+    row.scalar_one_or_none = MagicMock(return_value=installation)
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=row)
+
+    with patch("app.services.github_app.get_installation_token", AsyncMock(return_value="tok")), \
+         patch("app.services.github_app.get_pull_request", AsyncMock(return_value=None)):
+        result = await _observe_pr_reviewer_facts(session, uuid.uuid4(), "o/r", 12)
+
+    assert result == {}
