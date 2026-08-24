@@ -80,6 +80,17 @@ describe('DocsIndex — 문서 있음(§2 마스트헤드+목록)', () => {
     expect(container.textContent).toContain('지식 · KNOWLEDGE BASE');
   });
 
+  // story #2974 §1/§3(PR-D0) — Display 헤딩(마스트헤드 h1·리드 카드 h2)이 font-display
+  // 토큰 경유(family)로 페이스를 받는다(D0 값=Pretendard·시각 무변화, 세리프 전환 전제조건).
+  it('마스트헤드 h1·리드 h2가 font-display 토큰을 경유한다(#2974 D0 배선)', async () => {
+    useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree });
+    await mount();
+    const h1 = container.querySelector('h1');
+    expect(h1?.className).toContain('font-display');
+    const h2 = container.querySelector('h2');
+    expect(h2?.className).toContain('font-display');
+  });
+
   it('폴더(is_folder)는 목록 항목에서 제외되고 카테고리 필터로만 뜬다', async () => {
     useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree });
     await mount();

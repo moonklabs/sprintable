@@ -140,6 +140,16 @@ describe('GoalsClient — 결과 원장 재조립(§2 이중 신호·§3 마스�
     expect(container.textContent).toContain('완료 1');
   });
 
+  // story #2974 §1/§3(PR-D0) — 마스트헤드 h1이 font-display 토큰 경유(D0=Pretendard, 시각 무변화).
+  // ⚠️h1이 이 화면에 2개 존재(TopBarSlot title도 h1이고 같은 t('title') 텍스트라 textContent로는
+  // 안 갈린다) — querySelector('h1')이 어느 쪽을 줄지 보장 없어 크기 클래스(text-[28px])로 특정.
+  it('마스트헤드 h1이 font-display 토큰을 경유한다(#2974 D0 배선)', async () => {
+    stubFetch([{ id: 'e1', title: '목표A', status: 'active', total_stories: 2, done_stories: 1 }]);
+    await mount();
+    const mastheadH1 = [...container.querySelectorAll('h1')].find((h1) => h1.className.includes('text-[28px]'));
+    expect(mastheadH1?.className).toContain('font-display');
+  });
+
   it('작업(Claimed) 바는 중립색(proof-ink-3)이지 primary(파랑)가 아니다 — done=100%여도 green 아님', async () => {
     stubFetch([{ id: 'e1', title: '완료된 목표', status: 'done', total_stories: 4, done_stories: 4, outcome_status: 'pending' }]);
     await mount();

@@ -132,7 +132,7 @@ export default function DocViewPage() {
             <div className="text-[13px] font-semibold text-proof-blue">
               {categoryLabel ?? t('indexCategoryUncategorized')}
             </div>
-            <h1 className="mt-2 font-editorial-heading text-[38px] leading-[1.1] tracking-[-0.03em] text-foreground">{doc.title}</h1>
+            <h1 className="mt-2 font-display text-[38px] leading-[1.1] tracking-[-0.03em] text-foreground">{doc.title}</h1>
             <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
               {doc.assignee ? (<><span>{doc.assignee.name}</span><span className="text-border">|</span></>) : null}
               <span>{doc.updated_at ? new Date(doc.updated_at).toLocaleDateString() : ''}</span>

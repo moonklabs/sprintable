@@ -145,7 +145,7 @@ export function DocsIndex() {
         <div className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
           {t('indexKicker')}
         </div>
-        <h1 className="mt-2 font-editorial-heading text-[46px] leading-none tracking-[-0.035em] text-foreground">
+        <h1 className="mt-2 font-display text-[46px] leading-none tracking-[-0.035em] text-foreground">
           {t('title')}
         </h1>
         <hr className="my-4 h-[3px] w-[88px] border-0 bg-proof-citron" />
@@ -257,7 +257,7 @@ export function DocsIndex() {
                 <StatusChip status={lead.status} />
                 <span className="font-mono text-[11px] uppercase tracking-[0.05em] text-muted-foreground">{t('indexLeadBadge')}</span>
               </div>
-              <h2 className="font-editorial-heading text-[27px] leading-[1.15] tracking-[-0.02em] text-foreground">{lead.title}</h2>
+              <h2 className="font-display text-[27px] leading-[1.15] tracking-[-0.02em] text-foreground">{lead.title}</h2>
               <div className="font-mono text-[12px] text-muted-foreground">{formatDate(lead.updated_at)}</div>
             </button>
           ) : null}

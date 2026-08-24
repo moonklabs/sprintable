@@ -85,6 +85,14 @@ describe('DocViewPage — 에디토리얼 리더 배선(§3)', () => {
     expect(container.textContent).toContain('v3');
   });
 
+  // story #2974 §1/§3(PR-D0) — 리더 마스트헤드 h1이 font-display 토큰 경유(D0=Pretendard,
+  // 시각 무변화).
+  it('마스트헤드 h1이 font-display 토큰을 경유한다(#2974 D0 배선)', async () => {
+    await mount();
+    const h1 = container.querySelector('h1');
+    expect(h1?.className).toContain('font-display');
+  });
+
   it('상태 헤더와 증거 레일에 문서 status가 그대로 배선된다', async () => {
     await mount();
     const header = container.querySelector('[data-testid="status-header"]');

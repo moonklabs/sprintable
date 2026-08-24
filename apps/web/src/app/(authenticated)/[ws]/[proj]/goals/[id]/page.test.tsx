@@ -151,6 +151,14 @@ describe('EpicDetailPage — 403 vs 404 분리 (story #2545)', () => {
     expect(replaceMock).not.toHaveBeenCalled();
     expect(container.textContent).toContain('목표 제목');
   });
+
+  // story #2974 §1/§3(PR-D0) — 진행률/제목 Display 헤딩 2곳이 font-display 토큰 경유
+  // (D0=Pretendard, 시각 무변화).
+  it('진행률·제목 Display 헤딩이 font-display 토큰을 경유한다(#2974 D0 배선)', async () => {
+    await mount(vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: epicFixture() }) })));
+    const displayEls = [...container.querySelectorAll('.font-display')];
+    expect(displayEls.length).toBeGreaterThanOrEqual(2);
+  });
 });
 
 // story #2587 AC3·AC4 — org-sync가 이 경로에 대해 아무 것도 할 게 없는(orgSyncPending=false,

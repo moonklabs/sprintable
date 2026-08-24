@@ -1062,7 +1062,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
           마스트헤드가 실질 콘텐츠 헤더. */}
       <div className="shrink-0 border-b border-border px-4 pb-4 pt-5 sm:px-6">
         <div className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-proof-blue">{t('indexKicker')}</div>
-        <h1 className="mt-1.5 font-editorial-heading text-[28px] leading-none tracking-[-0.03em] text-foreground sm:text-[34px]">{t('title')}</h1>
+        <h1 className="mt-1.5 font-display text-[28px] leading-none tracking-[-0.03em] text-foreground sm:text-[34px]">{t('title')}</h1>
         <hr className="my-3 h-[3px] w-16 border-0 bg-proof-citron" />
         <p className="text-editorial-ui text-muted-foreground">
           {t('indexDek')} <span className="text-muted-foreground">{t('indexCountActive', { count: activeCount })} · {t('indexCountDone', { count: doneCount })}</span>

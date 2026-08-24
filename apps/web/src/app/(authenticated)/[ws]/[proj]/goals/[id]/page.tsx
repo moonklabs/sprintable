@@ -421,7 +421,7 @@ export default function EpicDetailPage() {
           <div className="proof-cut border border-border bg-card px-4 py-3.5">
             <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">{t('taskCapsuleTitle')}</div>
             <div className="mt-1.5 flex items-baseline gap-2">
-              <span className="font-editorial-heading text-[26px] tracking-[-0.02em] text-foreground">{done}/{stories.length}</span>
+              <span className="font-display text-[26px] tracking-[-0.02em] text-foreground">{done}/{stories.length}</span>
               <span className="font-mono text-xs text-muted-foreground">{t('stories')}</span>
             </div>
             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
@@ -431,7 +431,7 @@ export default function EpicDetailPage() {
           </div>
           <div className="proof-cut border border-proof-blue/25 bg-proof-blue-soft px-4 py-3.5">
             <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-proof-blue">{t('outcomeCapsuleTitle')}</div>
-            <div className="mt-1.5 font-editorial-heading text-[22px] tracking-[-0.02em] text-proof-blue">
+            <div className="mt-1.5 font-display text-[22px] tracking-[-0.02em] text-proof-blue">
               {epic.outcome_status === 'hit' ? t('outcomeCapsuleHit')
                 : epic.outcome_status === 'miss' ? t('outcomeCapsuleMiss')
                 : epic.outcome_status === 'unmeasured' ? t('outcomeCapsuleUnmeasured')
