@@ -261,7 +261,10 @@ export function Workcell({ title, pipelineStage, brief, run, evidence, conversat
                   {t('briefOwner')} {brief.owner.name}
                 </>
               ) : (
-                <span className="text-proof-faint">{t('ownerUnassigned')}</span>
+                // story #2993 — 유나 design 판정(2026-08-24): text-proof-faint는 라이트 대비
+                // ~2.72(AA 미달)+"조용히 소실"이라 지정을 촉진 못 함. text-proof-ink-3(4.9)로
+                // 상향 — 읽히되 과하지 않은 muted.
+                <span className="text-proof-ink-3">{t('ownerUnassigned')}</span>
               )}
             </span>
             {brief.agent ? (
