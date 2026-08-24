@@ -3880,7 +3880,16 @@
     "sigReasonPlaceholder": "기록에 남을 결정 사유를 입력하세요",
     "sigConsequenceNote": "승인은 당신의 서명으로 기록됩니다",
     "sigRequestChanges": "변경 요청",
-    "sigApproveAndSign": "승인하고 서명"
+    "sigApproveAndSign": "승인하고 서명",
+    "gateActivityHistoryTitle": "결재 이력",
+    "gateActivityActorFallback": "알 수 없음",
+    "gateActivityEmpty": "결재 이력 없음",
+    "gateActivityActionApproved": "승인",
+    "gateActivityActionRejected": "반려",
+    "gateActivityActionUndone": "취소(오클릭 정정)",
+    "gateActivityActionVoided": "무효화",
+    "gateActivityActionOverridden": "강제 결정",
+    "gateHeadChangedError": "게이트 대상 커밋이 승인 확인 이후 변경되었습니다. 최신 내용을 다시 확인한 뒤 승인해주세요."
   },
   "recruiter": {
     "title": "채용관",

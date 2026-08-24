@@ -3880,7 +3880,16 @@
     "sigReasonPlaceholder": "Enter a reason to record with this decision",
     "sigConsequenceNote": "Approving records your signature",
     "sigRequestChanges": "Request changes",
-    "sigApproveAndSign": "Approve & sign"
+    "sigApproveAndSign": "Approve & sign",
+    "gateActivityHistoryTitle": "Approval history",
+    "gateActivityActorFallback": "Unknown",
+    "gateActivityEmpty": "No approval history yet",
+    "gateActivityActionApproved": "Approved",
+    "gateActivityActionRejected": "Rejected",
+    "gateActivityActionUndone": "Undone (correction)",
+    "gateActivityActionVoided": "Voided",
+    "gateActivityActionOverridden": "Overridden",
+    "gateHeadChangedError": "The commit this gate targets changed after you confirmed. Please review the latest changes before approving."
   },
   "recruiter": {
     "title": "Recruiter",

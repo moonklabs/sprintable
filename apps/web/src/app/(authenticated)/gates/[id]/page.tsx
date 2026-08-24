@@ -147,7 +147,12 @@ export default function GateDetailPage() {
       // 평문 문자열이지만 handler가 error.message로 재포장한다, gates.py:885). 올바른
       // 필드로 교정 — #2027의 "고위험 승인 사유 필수" 문구가 실제로 화면에 뜨게 된다.
       const body = await res.json().catch(() => null) as { error?: { message?: string; code?: string } } | null;
-      const reason = body?.error?.message ?? t('gateTransitionErrorGeneric');
+      // story #2975(페드루 PO 비차단 관찰, 2026-08-24) — BE의 gate_head_changed 메시지는
+      // 한국어 평문(i18n 안 됨). FE가 이미 code를 파싱하므로 code→i18n 매핑으로 렌더(영어
+      // 로케일에서도 정상 표시). 그 외 code는 기존대로 BE message 그대로 통과.
+      const reason = body?.error?.code === 'gate_head_changed'
+        ? t('gateHeadChangedError')
+        : (body?.error?.message ?? t('gateTransitionErrorGeneric'));
       setTransitionError(reason);
       // story #2975(PO 요구 ③): 409 gate_head_changed — 승인 확인 사이 대상 커밋이 바뀌어
       // 서버가 거부했다는 뜻. 화면을 그대로 두면 PO가 옛 SHA를 보며 같은 버튼을 다시 눌러
@@ -276,7 +281,16 @@ export default function GateDetailPage() {
                     <p className="text-[11px] text-muted-foreground">{t('gateReadonlyNotAuthorized')}</p>
                   </div>
                 ) : usesSignatureFlow(deriveRiskLevel(gate)) ? (
+                  // story #2975(유나양 design 판정 2026-08-24, PO 확定) — 409(gate_head_changed)
+                  // 후 fetchGate() 재조회로 gate.github_check_run_sha가 바뀌어도, key 없이는 이
+                  // 컴포넌트가 그대로 살아있어 evidenceViewed/reason state가 안 리셋된다 —
+                  // canSign이 true로 유지된 채 새 SHA(B)로 자동 재승인 가능(PO가 B를 실제로
+                  // 다시 안 봄) = 서버가 막은 "리뷰 안 한 SHA 승인"이 UX 층에서 그대로 뚫림.
+                  // key={SHA}로 SHA가 바뀔 때마다 강제 remount — 세밀한 useEffect 리셋 목록은
+                  // 미래 state 추가마다 리셋 누락 사각을 만드는 구조(이번 사고와 동형 클래스)라
+                  // PO가 명시 기각, remount가 미래 state까지 구조적으로 안전(최소안 채택).
                   <GateSignatureApproval
+                    key={gate.github_check_run_sha}
                     gate={gate}
                     resolving={resolving}
                     error={transitionError}
