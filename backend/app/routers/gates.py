@@ -1266,6 +1266,24 @@ async def transition_gate_endpoint(
         select(Gate).where(Gate.id == id, Gate.org_id == org_id).with_for_update()
     )).scalar_one_or_none()
     await _authorize_gate_approve_equivalent(session, _gate, resolved, auth, org_id)
+    # story #2982(선생님 실사용 리포트, PO 확定 2026-08-24) — 이미 해소된(pending 아닌) 게이트에
+    # 승인/반려를 시도하면 여기까지 도달해 transition_gate()의 is_valid_transition이 ValueError를
+    # 던졌고, 그게 그대로 "불법 전이: approved → rejected. pending에서만..." 개발자 문구로 화면에
+    # 노출됐다. FE가 상태별 버튼을 숨기게 고쳐도(AC1) 클릭~서버 응답 사이 레이스 창은 원리적으로
+    # 남는다(#2975의 SHA 레이스와 동형 클래스) — 여기서 machine-readable code로 먼저 걸러야 FE가
+    # 사람 문구로 번역할 수 있다(gate_head_changed 선례와 동형). 위 FOR UPDATE로 이미 잠근 행이라
+    # 이 판정도 레이스-프리.
+    if body.status in ("approved", "rejected") and _gate is not None and _gate.status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "gate_already_resolved",
+                "message": "이미 처리된 결재입니다. 되돌리려면 PO에게 재검토를 요청해주세요.",
+                "current_status": _gate.status,
+                "resolver_id": str(_gate.resolver_id) if _gate.resolver_id else None,
+                "resolved_at": _gate.resolved_at.isoformat() if _gate.resolved_at else None,
+            },
+        )
     # story #2027(까심 QA 적출): 고위험(risk_grade=high) 게이트의 approved 전이는 사유(note) 서버측
     # 강제 — void_gate/override_gate 기존 관례(reason 없으면 ValueError→422, void_gate 참고)에
     # 맞추는 작업이다(신규 규칙 아님). 이전엔 FE 버튼 disable(evidenceViewed && reason.trim())만

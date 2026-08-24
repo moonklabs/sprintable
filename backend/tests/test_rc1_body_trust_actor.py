@@ -42,6 +42,9 @@ def _non_doc_gate_session():
         # 관심사(resolver_id 강제, RC#1)와 무관하게 명시 필요 — None="known SHA 없음"으로 그
         # 검증 자체가 대상 밖임을 분명히 한다(evidence=None과 동형 처리).
         github_check_run_sha=None,
+        # story #2982 — 이미해소 가드(status!='pending'이면 409)도 이 값을 읽는다. SimpleNamespace는
+        # 미선언 속성이 AttributeError라 명시 필요 — "pending"으로 그 가드가 대상 밖임을 분명히 한다.
+        status="pending", resolver_id=None, resolved_at=None,
     )
     s.execute = AsyncMock(return_value=gr)
     return s

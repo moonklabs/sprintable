@@ -147,18 +147,22 @@ export default function GateDetailPage() {
       // 평문 문자열이지만 handler가 error.message로 재포장한다, gates.py:885). 올바른
       // 필드로 교정 — #2027의 "고위험 승인 사유 필수" 문구가 실제로 화면에 뜨게 된다.
       const body = await res.json().catch(() => null) as { error?: { message?: string; code?: string } } | null;
-      // story #2975(페드루 PO 비차단 관찰, 2026-08-24) — BE의 gate_head_changed 메시지는
-      // 한국어 평문(i18n 안 됨). FE가 이미 code를 파싱하므로 code→i18n 매핑으로 렌더(영어
-      // 로케일에서도 정상 표시). 그 외 code는 기존대로 BE message 그대로 통과.
-      const reason = body?.error?.code === 'gate_head_changed'
-        ? t('gateHeadChangedError')
+      // story #2975(페드루 PO 비차단 관찰)·#2982(선생님 실사용 리포트, PO 확定 2026-08-24) —
+      // BE의 code 부착 거부(gate_head_changed·gate_already_resolved)는 한국어 평문이라
+      // i18n 안 됨. FE가 이미 code를 파싱하므로 code→i18n 매핑으로 렌더(영어 로케일에서도
+      // 정상 표시). 그 외 code는 기존대로 BE message 그대로 통과.
+      const code = body?.error?.code;
+      const reason = code === 'gate_head_changed' ? t('gateHeadChangedError')
+        : code === 'gate_already_resolved' ? t('gateAlreadyResolvedError')
         : (body?.error?.message ?? t('gateTransitionErrorGeneric'));
       setTransitionError(reason);
-      // story #2975(PO 요구 ③): 409 gate_head_changed — 승인 확인 사이 대상 커밋이 바뀌어
-      // 서버가 거부했다는 뜻. 화면을 그대로 두면 PO가 옛 SHA를 보며 같은 버튼을 다시 눌러
-      // 똑같이 거부당한다 — 최신 상태(새 github_check_run_sha)로 재조회해 "새 커밋 도착·
-      // 재확認"이 실제로 재렌더되게 한다.
-      if (body?.error?.code === 'gate_head_changed') {
+      // story #2975(PO 요구 ③)·#2982(AC1·AC3, 죽은 버튼 클릭~서버 응답 사이 레이스로 다른
+      // 채널이 먼저 해소한 경우) — 둘 다 "화면이 보여준 상태가 서버와 어긋났다"는 뜻의
+      // 거부다. 화면을 그대로 두면 사람이 옛 상태를 보며 같은 버튼을 다시 눌러 똑같이
+      // 거부당한다 — 최신 상태로 재조회해 실제 현재 상태(resolved 카드 등)로 재렌더되게
+      // 한다(gates/[id]/page.tsx의 needsAction 분기가 이미 status!=='pending'을 올바르게
+      // 읽지 못하는 액션-숨김 표시로 처리하므로, 재조회만 하면 AC1이 자동으로 성립한다).
+      if (code === 'gate_head_changed' || code === 'gate_already_resolved') {
         void fetchGate();
       }
     } finally {

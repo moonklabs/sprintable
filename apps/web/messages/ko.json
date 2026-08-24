@@ -3890,7 +3890,8 @@
     "gateActivityActionUndone": "취소(오클릭 정정)",
     "gateActivityActionVoided": "무효화",
     "gateActivityActionOverridden": "강제 결정",
-    "gateHeadChangedError": "게이트 대상 커밋이 승인 확인 이후 변경되었습니다. 최신 내용을 다시 확인한 뒤 승인해주세요."
+    "gateHeadChangedError": "게이트 대상 커밋이 승인 확인 이후 변경되었습니다. 최신 내용을 다시 확인한 뒤 승인해주세요.",
+    "gateAlreadyResolvedError": "이미 처리된 결재입니다. 되돌리려면 PO에게 재검토를 요청해주세요."
   },
   "recruiter": {
     "title": "채용관",

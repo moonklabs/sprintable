@@ -3890,7 +3890,8 @@
     "gateActivityActionUndone": "Undone (correction)",
     "gateActivityActionVoided": "Voided",
     "gateActivityActionOverridden": "Overridden",
-    "gateHeadChangedError": "The commit this gate targets changed after you confirmed. Please review the latest changes before approving."
+    "gateHeadChangedError": "The commit this gate targets changed after you confirmed. Please review the latest changes before approving.",
+    "gateAlreadyResolvedError": "This approval has already been processed. Ask the PO for a re-review if you'd like it reconsidered."
   },
   "recruiter": {
     "title": "Recruiter",
