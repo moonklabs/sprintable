@@ -132,7 +132,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          LABELS_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/labels" --paginate --jq '[.[].name]')"
+          LABELS_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/labels" --paginate --slurp | jq '[.[][] | .name]')"
           echo "live labels: ${LABELS_JSON}"
           echo "has_design_pass=$(echo "${LABELS_JSON}" | jq 'index("design:pass") != null')" >> "$GITHUB_OUTPUT"
           echo "has_design_changes=$(echo "${LABELS_JSON}" | jq 'index("design:changes") != null')" >> "$GITHUB_OUTPUT"
