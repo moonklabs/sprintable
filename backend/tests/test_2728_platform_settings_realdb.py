@@ -155,7 +155,56 @@ async def test_checkout_rejected_403_when_disabled_real_db():
                 json={"auth_key": "fake-not-a-real-toss-key", "tier": "team", "billing_cycle": "monthly"},
             )
             assert resp.status_code == 403, resp.text
-            assert "not yet enabled" in resp.text
+            # PO 확定(2026-08-24) — prod 실측(페드루 curl)이 잡은 그대로: 앱 전역
+            # http_exception_handler(app/main.py)가 모든 HTTPException을
+            # {"data":null,"error":{code,message},"meta":null}로 감싼다. detail이
+            # 평문 문자열이면 code가 상태코드 매핑(403→범용 "FORBIDDEN")으로 뭉개져
+            # "기능 비활성"과 "권한 없음"을 클라이언트가 구별 못 했다 — 이게 오늘 fix
+            # 대상. detail을 dict로 주면 그 안의 "code"가 그대로 패스스루된다(핸들러
+            # 로직 확인 완료) — 그래서 BILLING_NOT_LIVE가 최종 응답에 그대로 나와야 한다.
+            body = resp.json()
+            assert body["error"]["code"] == "BILLING_NOT_LIVE", resp.text
+            assert "not yet enabled" in body["error"]["message"]
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_change_tier_also_rejected_with_same_structured_code():
+    """PO 확定(2026-08-24) — 6개 진입점(checkout·change-tier·downgrade 왕복·cancel 왕복)이
+    전부 같은 헬퍼(_require_billing_checkout_enabled) 하나로 판정해야 한다(「판정 로직이
+    갈라지면 그 자체가 결함」) — checkout이 아닌 다른 진입점(change-tier)도 동일 구조화
+    코드로 거부하는지를 별도로 고정해, 그 주장이 실제로 전 진입점에 적용됐음을 검증한다."""
+    from app.main import app
+    from app.models.member import Member
+    from app.models.organization import Organization
+    from app.models.project import OrgMember
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = Organization(id=uuid.uuid4(), name="2728 Org4", slug=f"s2728d-{uuid.uuid4().hex[:8]}")
+            s.add(org)
+            await s.commit()
+            member = Member(id=uuid.uuid4(), org_id=org.id, type="human", name="Owner", is_active=True)
+            s.add(member)
+            await s.commit()
+            s.add(OrgMember(org_id=org.id, user_id=member.id, role="owner"))
+            await s.commit()
+            org_id, member_id = org.id, member.id
+
+        await _setup_app(app, Session, member_id, org_id)
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                "/api/v2/org-subscriptions/change-tier",
+                json={"new_tier": "business"},
+            )
+            assert resp.status_code == 403, resp.text
+            assert resp.json()["error"]["code"] == "BILLING_NOT_LIVE", resp.text
         finally:
             await client.aclose()
     finally:
