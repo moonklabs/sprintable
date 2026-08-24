@@ -1507,6 +1507,12 @@ async def list_recent_conversations_outside_project(
     "오래 안 들어간 것부터" 캡의 의미론에 애초에 안 낀다 — list_conversations의
     `include_agent_conversations`처럼 별도 admin 전용 노출 축이 필요하면 그건 이 스토리
     스코프 밖의 별개 결정).
+
+    story #2972 — participants는 unread_count/latest_message와 달리 "미리보기용 부가정보"가
+    아니라 DM 행의 **유일한 이름 소스**다(Conversation.title은 DM에서 항상 NULL — 표시명은
+    참가자 이름으로 클라 조립하는 게 list_conversations 관례). 애초 스펙(#2168)이 이걸
+    "미리보기"로 묶어 함께 뺐던 게 원인 — limit≤5라 배치조회 비용은 무시 가능해 여기만
+    되살린다(unread_count/latest_message는 스펙 그대로 계속 뺀다).
     """
     sender = await _resolve_member(auth, org_id, db, project_id=None)
     uid = uuid.UUID(str(auth.user_id))
@@ -1537,6 +1543,12 @@ async def list_recent_conversations_outside_project(
     )
     rows = (await db.execute(stmt)).all()
 
+    # story #2972 — DM 행은 title이 항상 NULL(대화명은 참가자 이름으로 클라 조립, list_conversations
+    # 관례 그대로)인데 이 엔드포인트가 participants를 안 내려줘 FE가 조립할 재료 자체가 없었다
+    # ("님과의 대화"라는 접미 조각만 그대로 노출되던 원인). limit≤5라 배치조회 비용 무시 가능
+    # — list_conversations/get_conversation과 동일 헬퍼(_fetch_conversation_participants) 재사용.
+    conv_participants = await _fetch_conversation_participants([conv.id for conv, *_ in rows], db)
+
     return {
         "data": [
             {
@@ -1547,6 +1559,7 @@ async def list_recent_conversations_outside_project(
                 "project_name": project_name,
                 "project_slug": project_slug,
                 "last_read_at": last_read_at.isoformat() if last_read_at else None,
+                "participants": conv_participants.get(conv.id, []),
             }
             for conv, project_name, project_slug, last_read_at in rows
         ]
