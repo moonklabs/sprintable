@@ -18,12 +18,16 @@ async function mount(node: React.ReactNode): Promise<{ el: HTMLElement; root: Ro
 }
 
 // story #2969 §1.3/§2 C행(PR-6) 갱신 — Display tier 적용: font-bold(700)→
-// --font-weight-editorial-heading(820, 인라인 style — 과거 font-editorial-heading
-// 유틸리티가 tailwind-merge와 충돌해 font-heading을 지우던 것을 회피)·
-// tracking-tight→tracking-[-0.02em](§1.3 Display 정의 그대로).
+// --font-weight-editorial-heading(820)·tracking-tight→tracking-[-0.02em]
+// (§1.3 Display 정의 그대로).
 // story #2974 §1(PR-D0) 갱신 — 페이스(family)가 font-heading(Pretendard 고정)에서
 // font-display(§1 신규 토큰, D0 값=var(--font-sans)라 시각 변화 0)로 전환.
-const ORIGINAL_TITLE_CLASSES = 'font-display text-2xl tracking-[-0.02em] text-foreground md:text-3xl';
+// story #2976(근본처방) 갱신 — 무게가 인라인 style에서 유틸리티 클래스(font-editorial-heading)
+// 로 복귀. cn()이 extendTailwindMerge로 이 이름을 font-weight 충돌군에 등록해 font-display와
+// 안전하게 병기된다(lib/utils.ts 참고) — 더 이상 인라인 style 우회가 필요 없다.
+// story #2974 D1 revert(PO 판정 2026-08-24, PR#3416) — D1이 반려돼 페이스는 다시 D0 값
+// (font-display=var(--font-sans), 시각 무변화)이다.
+const ORIGINAL_TITLE_CLASSES = 'font-display font-editorial-heading text-2xl tracking-[-0.02em] text-foreground md:text-3xl';
 
 function classSet(s: string): Set<string> {
   return new Set(s.split(/\s+/).filter(Boolean));
@@ -36,12 +40,14 @@ describe('PageHeader size variant (story #2879)', () => {
     expect(classSet(h1.className)).toEqual(classSet(ORIGINAL_TITLE_CLASSES));
   });
 
-  // story #2969 §1.3(PR-6) — Display tier 무게(820)가 인라인 style로 걸린다(tailwind-merge
-  // 충돌 회피, 위 주석 참고).
-  it('h1이 --font-weight-editorial-heading을 인라인 font-weight로 갖는다', async () => {
+  // story #2976(근본처방) — 무게가 인라인 style이 아니라 font-editorial-heading 유틸리티
+  // 클래스로 걸린다(twMerge가 이제 font-display와의 병기를 정확한 충돌군으로 구분해 안전).
+  it('h1이 인라인 style 없이 font-editorial-heading 클래스로 무게를 받는다', async () => {
     const { el } = await mount(<PageHeader title="제목" />);
     const h1 = el.querySelector('h1')! as HTMLElement;
-    expect(h1.style.fontWeight).toBe('var(--font-weight-editorial-heading)');
+    expect(h1.className).toContain('font-editorial-heading');
+    expect(h1.className).toContain('font-display');
+    expect(h1.style.fontWeight).toBe('');
   });
 
   it('size=page가 기존과 동일하다', async () => {
