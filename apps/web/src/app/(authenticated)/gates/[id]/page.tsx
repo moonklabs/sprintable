@@ -122,7 +122,13 @@ export default function GateDetailPage() {
         // 실려온다(그 컴포넌트 자체가 canSign=evidenceViewed&&reason로 버튼을 막아 이 콜백에
         // 도달했다는 사실 자체가 열람 확인 — 아래 저위험 경로는 안 보내 undefined→백엔드가
         // risk_grade=='high'가 아니면 아예 안 봄).
-        body: JSON.stringify({ status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false }),
+        // story #2975(PO 설계 확定 2026-08-24): reviewed_head_sha — 지금 이 화면이 보여주는
+        // gate.github_check_run_sha를 「내가 review한 SHA」로 실어 보낸다. merge 게이트가 아니면
+        // BE가 무시(SHA 개념 자체가 없는 gate_type)하므로 gate_type 분기 없이 항상 보낸다.
+        body: JSON.stringify({
+          status, note: note?.trim() || null, evidence_viewed: evidenceViewed ?? false,
+          reviewed_head_sha: gate.github_check_run_sha ?? null,
+        }),
       });
       // story #1990: push()는 콜드-진입 합성 스택([parentTab, target])에 세번째 엔트리를
       // 쌓아 브라우저 BACK 1회가 이 상세를 재진입시키는 트랩을 만든다(§3.2 재진입 트랩).
@@ -140,13 +146,20 @@ export default function GateDetailPage() {
       // 없는 필드라 이 분기는 항상 죽어있었다(그라운딩 확認 — BE HTTPException(detail=...)은
       // 평문 문자열이지만 handler가 error.message로 재포장한다, gates.py:885). 올바른
       // 필드로 교정 — #2027의 "고위험 승인 사유 필수" 문구가 실제로 화면에 뜨게 된다.
-      const body = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+      const body = await res.json().catch(() => null) as { error?: { message?: string; code?: string } } | null;
       const reason = body?.error?.message ?? t('gateTransitionErrorGeneric');
       setTransitionError(reason);
+      // story #2975(PO 요구 ③): 409 gate_head_changed — 승인 확인 사이 대상 커밋이 바뀌어
+      // 서버가 거부했다는 뜻. 화면을 그대로 두면 PO가 옛 SHA를 보며 같은 버튼을 다시 눌러
+      // 똑같이 거부당한다 — 최신 상태(새 github_check_run_sha)로 재조회해 "새 커밋 도착·
+      // 재확認"이 실제로 재렌더되게 한다.
+      if (body?.error?.code === 'gate_head_changed') {
+        void fetchGate();
+      }
     } finally {
       setResolving(false);
     }
-  }, [gate, router, t]);
+  }, [gate, router, t, fetchGate]);
 
   // story #2631 — «보류(논의 필요)». transition()과 형제: 상태 전이가 없어(pending 유지)
   // 페이지 이동 없이 그 자리서 fetchGate()로 discussion_requested만 갱신한다.

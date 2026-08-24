@@ -171,7 +171,10 @@ async def test_realdb_rowless_autocreated_gate_approve_publishes_success_via_neu
                  patch("app.core.database.async_session_factory", Session):
                 resp = await client.post(
                     f"/api/v2/gates/{gate_id}/transition",
-                    json={"status": "approved", "note": "row-less 발행 자립 확인", "evidence_viewed": True},
+                    json={
+                        "status": "approved", "note": "row-less 발행 자립 확인", "evidence_viewed": True,
+                        "reviewed_head_sha": "sha-rowless",  # story #2975 — review-time SHA 대조.
+                    },
                 )
                 assert resp.status_code == 200, resp.text
         finally:

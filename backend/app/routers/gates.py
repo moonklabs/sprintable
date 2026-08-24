@@ -101,6 +101,14 @@ class GateTransitionRequest(BaseModel):
     # 몰라 기본값 False로 막힌다 — AC1의 note 강제와 같은 방어선). 기본값 False = 안 보내면
     # 고위험에서 막힘(저위험은 아래 강제 블록이 risk_grade=="high"일 때만 돌아 무관).
     evidence_viewed: bool = False
+    # story #2975(HIGH, 게이트 신선도 구멍) — merge 게이트 승인의 anchor SHA 레이스 근본 처방.
+    # PO가 화면에서 review한 SHA를 여기 실어 보내야, 서버가 「지금 이 순간의 github_check_run_sha」
+    # (승인 클릭~서버 커밋 사이 웹훅 레이스로 이미 딴 SHA일 수 있음)를 review-time SHA와 대조할
+    # 수 있다. Optional 유지 이유: 이 엔드포인트는 merge 게이트 전용이 아니라 doc_approval·
+    # artifact_canonicalize 등 SHA 개념이 없는 gate_type도 함께 처리(공유 계약) — 그쪽엔 강제 불가.
+    # merge 게이트 승인 시의 fail-closed 강제는 transition_gate_endpoint 본문에서(None도 「안 보냄」
+    # 취급돼 known SHA와 불일치로 거부됨 — "안 보내면 조용히 통과"라는 구멍 자체가 생기지 않는다).
+    reviewed_head_sha: str | None = None
 
     @field_validator("status")
     @classmethod
@@ -1177,8 +1185,13 @@ async def transition_gate_endpoint(
     # E-DG 48f064e5 / #2198(까심 QA·오르테가 PO): doc/non-doc 인가 규칙 —
     # story #2631 로 _authorize_gate_approve_equivalent 로 추출(discuss 액션과 공유, 위 정의부 주석 참고).
     resolved = await resolve_member(auth, org_id, session)
+    # story #2975 — FOR UPDATE: 이 트랜잭션이 커밋할 때까지 이 gate 행에 대한 concurrent
+    # UPDATE(웹훅 구동 publish_gate_check의 github_check_run_sha 갱신 포함, gate_github_check.py)를
+    # Postgres 행 잠금으로 블록한다. 아래 reviewed_head_sha 대조가 "읽고 나중에 커밋" 창에서
+    # 딴 값으로 덮이지 않고, 대조에 쓴 값 그대로 approved_head_sha에 확정 기록됨을 보장(PO 요구 ②
+    # — 대조와 anchor 쓰기가 같은 락 스코프 안에서 원자적).
     _gate = (await session.execute(
-        select(Gate).where(Gate.id == id, Gate.org_id == org_id)
+        select(Gate).where(Gate.id == id, Gate.org_id == org_id).with_for_update()
     )).scalar_one_or_none()
     await _authorize_gate_approve_equivalent(session, _gate, resolved, auth, org_id)
     # story #2027(까심 QA 적출): 고위험(risk_grade=high) 게이트의 approved 전이는 사유(note) 서버측
@@ -1201,6 +1214,27 @@ async def transition_gate_endpoint(
                     status_code=422,
                     detail="고위험(risk_grade=high) 게이트 승인은 근거 열람 확인(evidence_viewed=true)이 필수입니다.",
                 )
+    # story #2975(HIGH, 게이트 신선도 구멍 근본처방·페드루 PO 설계 확定 2026-08-24) — merge 게이트
+    # 승인의 anchor SHA 레이스. 위 FOR UPDATE로 이 gate 행을 이미 잠근 상태이므로 여기서 읽는
+    # _gate.github_check_run_sha는 이 트랜잭션이 커밋할 때까지 그 누구도 못 바꾸는 값이다(레이스
+    # 윈도가 줄어든 게 아니라 없음). PO가 화면에서 review한 SHA(body.reviewed_head_sha)가 이 값과
+    # 다르면 — body가 그 필드를 아예 안 보낸 경우(None)도 포함 — 승인을 진행하지 않고 즉시 409로
+    # 거부한다. known SHA가 없는 legacy 게이트(github_check_run_sha=None)는 애초에 대조할 review
+    # 시점 값이 없으므로 기존 동작(아래 anchor 블록의 PR-link 폴백) 그대로 통과.
+    if body.status == "approved" and _gate is not None and _gate.gate_type == MERGE_GATE_TYPE:
+        _known_head_sha = _gate.github_check_run_sha
+        if _known_head_sha is not None and body.reviewed_head_sha != _known_head_sha:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "gate_head_changed",
+                    "message": (
+                        "게이트 대상 커밋이 승인 확인 이후 변경되었습니다. "
+                        "최신 내용을 다시 확인한 뒤 승인해주세요."
+                    ),
+                    "current_head_sha": _known_head_sha,
+                },
+            )
     # ⭐S23 RC① + RC#1(방어심층): resolver_id 를 **전 status 무조건 인증 caller 로 강제**(body 무시).
     # body 조작(타인 UUID)으로 SoD(approver≠owner) 우회·confirmed_by_member_id 위조 차단.
     _resolver_id = resolved.id
