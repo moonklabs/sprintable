@@ -62,11 +62,20 @@ export function avatarColor(isAgent: boolean): string {
 export function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '?';
+  const first = parts[0] ?? '';
+  const isLatin = /[a-zA-Z]/.test(first);
   if (parts.length === 1) {
-    const p = parts[0] ?? '';
-    return /[a-zA-Z]/.test(p) ? p.slice(0, 2).toUpperCase() : p.slice(0, 1);
+    return isLatin ? first.slice(0, 2).toUpperCase() : first.slice(0, 1);
   }
-  return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase();
+  // story #2986(선생님 실사용 발견) — 어절별 첫 글자를 조합하면(라틴 이니셜 관례) 한글에서
+  // 우연히 실제 단어(간혹 비속어)가 조립될 구조적 위험이 있다 — 「시스템 발행」→「시」+「발」
+  // =「시발」실사고. 한글(및 그 외 비라틴) 다어절 이름은 조합하지 않고 첫 어절 첫 글자
+  // 1자만 쓴다(단일 어절일 때와 동일 규칙). 라틴 다어절(예: John Smith)은 국제 관례대로
+  // 각 단어 첫 글자 조합(JS)을 유지 — 위험은 한글류 음절 문자에 한정된다.
+  if (isLatin) {
+    return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase();
+  }
+  return first.slice(0, 1);
 }
 
 /** 파일 확장자 라벨 — 파일명 우선, 없으면 content-type subtype. (예: PNG·PDF·DOCX·JSON) */
