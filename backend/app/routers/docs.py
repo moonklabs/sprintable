@@ -908,6 +908,10 @@ async def get_doc_backlinks(
 
 class DocTransitionRequest(BaseModel):
     status: str
+    # story #2985(PO 설계 확定 2026-08-24) — draft→pending 상신 시 결재선 지정(선택). None이면
+    # 현행(권한자 전원 액션) 그대로 — approval_delivery.dispatch_approval_request_cards가
+    # approver_ids 밖 값은 fail-safe로 미지정 취급(라우터에서 추가 검증 불요).
+    approver_member_id: uuid.UUID | None = None
 
 
 @router.post("/{id}/transition", response_model=DocResponse)
@@ -928,7 +932,10 @@ async def transition_doc_endpoint(
     # 잡던 갭). via_gate 시스템 경로(gate 해소)는 transition_doc 직호출이라 무영향(이 엔드포인트만 user authz).
     await _require_doc_project_access(session, id, uuid.UUID(auth.user_id), org_id)
     try:
-        doc = await transition_doc(session, org_id, caller, id, body.status)
+        doc = await transition_doc(
+            session, org_id, caller, id, body.status,
+            designated_approver_id=body.approver_member_id,
+        )
         await session.commit()
         # 48f064e5 fix: UPDATE 후 commit 으로 server-onupdate 컬럼(updated_at)이 expired → model_validate
         # 의 동기 컨텍스트서 lazy-load 시 MissingGreenlet(async IO) → 500. refresh 로 async 컨텍스트서

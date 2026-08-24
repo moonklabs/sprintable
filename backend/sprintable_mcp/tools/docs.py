@@ -247,6 +247,10 @@ async def update_doc(args: UpdateDocInput) -> list[TextContent]:
 
 class SubmitForApprovalInput(SprintableInput):
     doc_id: str
+    # story #2985(PO 설계 확定 2026-08-24) — "이 결재는 특정하게 이 사람에게" 지정(선택,
+    # org member_id). 비우면 현행(org/project owner+admin 전원 액션 카드) 그대로 — 회귀 0.
+    # 값이 실 승인권자가 아니면 서버가 fail-safe로 미지정 취급(approval_delivery.py).
+    approver_member_id: str | None = None
 
 
 async def submit_for_approval(args: SubmitForApprovalInput) -> list[TextContent]:
@@ -258,7 +262,10 @@ async def submit_for_approval(args: SubmitForApprovalInput) -> list[TextContent]
     게이트 실물까지 왕복).
     """
     try:
-        doc = await client.post(f"/api/v2/docs/{args.doc_id}/transition", json={"status": "pending"})
+        body: dict[str, object] = {"status": "pending"}
+        if args.approver_member_id:
+            body["approver_member_id"] = args.approver_member_id
+        doc = await client.post(f"/api/v2/docs/{args.doc_id}/transition", json=body)
         gates = await client.get(
             "/api/v2/gates", params={"work_item_id": args.doc_id, "work_item_type": "doc", "status": "pending"},
         )

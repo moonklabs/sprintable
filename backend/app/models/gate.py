@@ -80,6 +80,12 @@ class Gate(Base):
     resolver_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #2985(PO 설계 확定 2026-08-24) — 「누가 해야 하는지」(사전 지정, resolver_id의
+    # 대칭짝). 상신 시 지정하면 그 1인에게만 액션 카드·나머지 org/project owner+admin은
+    # 정보성으로 강등(dispatch_approval_request_cards). 미지정(None)이면 현행(권한자 전원
+    # 액션) 그대로 — 회귀 0. 지정자가 아니어도 owner/admin의 해소 권한 자체는 무변화(SoD와
+    # 별개 축 — 이건 «기본 노출»만 좁힌다).
+    designated_approver_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     # ⭐S31: hold 만료(시한부 보류). status='held' 일 때만 의미·무기한 hold 면 None. 0132 마이그(post-0096).
     # FE 가 gate 직독으로 held_until 배지 렌더(step_run 경유 leaky 회피)·step_run.held_until 도 SLA 동기화.
     held_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -66,6 +66,13 @@ export interface ChatMessage {
   approval_target?: {
     work_item_type: string; work_item_id: string; gate_id: string;
     actions?: string[]; decision?: string; resolution_note?: string | null;
+    /** story #2985 — 결재선 지정 시 이 카드의 수신자가 지정 결재자인지(true)/정보성으로
+     * 강등된 나머지 owner·admin인지(false). 미지정 상신(designated_approver_id=None)이면
+     * 전원 true(회귀 0) — approval_delivery.py::dispatch_approval_request_cards. */
+    designated?: boolean;
+    /** story #2985 — 지정 결재자 표시 이름(정보성 카드 안내문구용). 지정 없음/미확인이면
+     * null. */
+    designated_approver_name?: string | null;
   } | null;
   /** story #2637 AC0-a — BE(#3036)가 msg_metadata['event']를 payload top-level에 additive로
    * 노출(`_event_payload`, approval_target과 동형 패턴). 있으면 이 메시지는 이벤트 레지스트리
@@ -73,6 +80,12 @@ export interface ChatMessage {
    * 없으면 content(BE의 제네릭 폴백 텍스트, #2633 _render_event_message_content)를 그대로
    * 렌더한다(비회귀). 구서버/일반 메시지는 `?? null`로 통일(approval_target과 같은 이유). */
   event?: { event_key: string; payload: Record<string, unknown> } | null;
+  /** story #2985(유나 FE 스펙) — 이 카드가 액션인지(request) 정보성인지(request_info) 판별
+   * SSOT. approval_target.designated와 같은 신호를 담지만(BE msg_metadata.activation.kind
+   * → _activation_payload가 top-level message_kind로 노출), 렌더 분기는 이 필드 하나만
+   * 기준으로 삼는다(두 신호를 각자 읽으면 언젠가 갈리는 조용한 버그 축 — 유나 지적).
+   * 'result'(회신 카드)·구서버(undefined/null)는 기존 렌더로 무회귀. */
+  message_kind?: string | null;
 }
 
 // Normalize backend _to_chat_message format → ChatMessage
@@ -104,6 +117,8 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     approval_target: (raw.approval_target ?? null) as ChatMessage['approval_target'],
     // story #2637 AC0-a — approval_target과 동일 규율.
     event: (raw.event ?? null) as ChatMessage['event'],
+    // story #2985 — _activation_payload가 top-level에 싣는 message_kind 그대로.
+    message_kind: (raw.message_kind ?? null) as string | null,
   };
 }
 

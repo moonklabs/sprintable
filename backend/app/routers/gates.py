@@ -19,6 +19,7 @@ from app.models.hitl import HitlRequest
 from app.models.pm import Story, Task
 from app.models.visual_artifact import VisualArtifact
 from app.routers.agent_gateway import wake_agent
+from app.routers.events import _push_to_agent
 from app.services.gate_github_check import is_repo_check_enforced, publish_gate_check, resolve_pr_link
 from app.services.github_app import get_installation_token, get_pull_request
 from app.services.merge_verdict_gate import MERGE_GATE_TYPE, reconcile_merge_gate_with_real_evidence
@@ -64,6 +65,12 @@ def _schedule_pending_deliveries(
         delivery = payload.get("delivery")
         if delivery:
             background_tasks.add_task(deliver_injected_event_webhook, **delivery)
+        # story #2985 AC2 — notify_gate_card_recipients_resolved가 모은 SSE push(Event는 이미
+        # DB에 커밋된 상태 — conversations.py::_dispatch_conversation_event와 동일 레이스 방지
+        # 원칙, commit 後에만 _push_to_agent 호출).
+        sse_push = payload.get("sse_push")
+        if sse_push:
+            _push_to_agent(sse_push["pid_str"], sse_push["payload"])
 
 logger = logging.getLogger(__name__)
 
@@ -297,10 +304,15 @@ class DecisionRequestCreate(BaseModel):
     assumption: str
     related_work_item_type: str | None = None
     related_work_item_id: uuid.UUID | None = None
+    # story #2985(PO 설계 확定 2026-08-24) — 결재선 지정(선택). None이면 현행(org owner/admin
+    # 전원 액션) 그대로 — 회귀 0. approver_ids 밖 값은 dispatch_approval_request_cards가
+    # fail-safe로 미지정 취급.
+    approver_member_id: uuid.UUID | None = None
 
 
 async def _notify_decision_request_card(
     session: AsyncSession, org_id: uuid.UUID, gate: Gate, *, requester_id: uuid.UUID, project_id: uuid.UUID,
+    designated_approver_id: uuid.UUID | None = None,
 ) -> None:
     """story #8bc11434(2891) — request_decision(agent_decision_request 게이트) 상신 시 결재자
     (org owner/admin) 챗에 원탭 결재 카드 자동 발행. app/services/doc.py의
@@ -333,6 +345,7 @@ async def _notify_decision_request_card(
             session, org_id=org_id, work_item_type="agent_decision", work_item_id=gate.id,
             project_id=project_id, title=gate.neutral_facts.get("question", "결정 요청") if gate.neutral_facts else "결정 요청",
             gate_id=gate.id, requester_id=requester_id, approver_ids=approver_ids,
+            designated_approver_id=designated_approver_id,
         )
     except Exception:  # noqa: BLE001 — 카드 배달 실패는 상신 비중단(Gate inbox 폴백 항상 존재).
         logger.warning("decision-request 결재자 카드(챗) 배달 실패 gate=%s", gate.id, exc_info=True)
@@ -389,9 +402,13 @@ async def create_decision_request(
         neutral_facts=neutral_facts,
         project_id=project_id,
         gate_id=gate_id,
+        designated_approver_id=body.approver_member_id,
     )
     await session.flush()
-    await _notify_decision_request_card(session, org_id, gate, requester_id=caller_id, project_id=project_id)
+    await _notify_decision_request_card(
+        session, org_id, gate, requester_id=caller_id, project_id=project_id,
+        designated_approver_id=body.approver_member_id,
+    )
     await session.commit()
     await session.refresh(gate)
     resp = GateResponse.model_validate(gate)

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.doc import Doc
+from app.models.event import Event
 
 logger = logging.getLogger(__name__)
 
@@ -103,8 +104,15 @@ async def dispatch_approval_request_cards(
     gate_id: uuid.UUID,
     requester_id: uuid.UUID,
     approver_ids: list[uuid.UUID],
+    designated_approver_id: uuid.UUID | None = None,
 ) -> None:
     """승인자별 DM에 message_kind="request" 카드 메시지 게시 + SSE 이벤트(AC1/AC2).
+
+    designated_approver_id: story #2985(PO 설계 확定 2026-08-24) — 지정하면 그 1인만
+    kind="request"(액션)로 받고, approver_ids의 나머지(비지정 owner/admin)는 kind=
+    "request_info"(정보성 — 해소 권한 자체는 유지·approval_target.actions는 그대로 두되
+    kind으로 FE가 기본 접힘/«대신 처리» 폴드를 판단, 유나 FE 축). None(미지정, 기본값)이면
+    approver_ids 전원이 종전처럼 "request"(회귀 0).
 
     story #2118(E-DG-REAL ②, 2026-08-16) 이전엔 ``doc: Doc``을 직접 받는 doc 전용 함수였다 —
     호출부(merge_verdict_gate.py 등 다른 gate_type)가 doc 객체를 갖고 있지 않아 그대로 확장할
@@ -126,6 +134,17 @@ async def dispatch_approval_request_cards(
     if not project_id or not approver_ids:
         return
 
+    # story #2985 — designated_approver_id는 반드시 approver_ids(해소 권한 실보유자) 안에
+    # 있어야 유효하다. 벗어난 값(오탈자·이미 org를 떠난 member 등)을 그대로 믿으면 지정자가
+    # 카드 자체를 못 받거나(루프가 approver_ids만 돎), 권한 없는 사람에게 액션 카드를 주는
+    # 두 실패 중 하나가 조용히 난다 — fail-safe로 미지정(현행 전원-액션) 취급.
+    if designated_approver_id is not None and designated_approver_id not in approver_ids:
+        logger.warning(
+            "approval-request designated_approver_id가 approver_ids 밖 — 미지정 취급 %s=%s designated=%s",
+            work_item_type, work_item_id, designated_approver_id,
+        )
+        designated_approver_id = None
+
     from app.routers.conversations import _dispatch_conversation_event
     from app.services.member_resolver import lookup_members_by_ids
 
@@ -136,7 +155,17 @@ async def dispatch_approval_request_cards(
         )
         return
 
+    # story #2985(유나 FE 스펙, PO 계약 확定 2026-08-24) — 정보성 카드가 "{지정자 이름}에게
+    # 요청된 결재"를 보여주려면 그 이름이 필요하다. 없으면(예: 지정자 미확인) FE가 "지정
+    # 결재자"로 폴백한다는 게 그 스펙 원문 — 여기선 있으면만 싣고 없으면 지어내지 않는다.
+    designated_approver_name: str | None = None
+    if designated_approver_id is not None:
+        designated_member = (await lookup_members_by_ids({designated_approver_id}, db)).get(designated_approver_id)
+        designated_approver_name = designated_member.name if designated_member is not None else None
+
     for approver_id in approver_ids:
+        is_designated = designated_approver_id is None or approver_id == designated_approver_id
+        card_kind = "request" if is_designated else "request_info"
         try:
             async with db.begin_nested():
                 conv = await _get_or_create_approval_dm(
@@ -154,14 +183,16 @@ async def dispatch_approval_request_cards(
                     msg_metadata={
                         "activation": {
                             "audience": [str(approver_id)],
-                            "kind": "request",
-                            "expects_response": True,
+                            "kind": card_kind,
+                            "expects_response": is_designated,
                         },
                         "approval_target": {
                             "work_item_type": work_item_type,
                             "work_item_id": str(work_item_id),
                             "gate_id": str(gate_id),
                             "actions": ["approve", "reject"],
+                            "designated": is_designated,
+                            "designated_approver_name": designated_approver_name,
                         },
                     },
                 )
@@ -375,3 +406,91 @@ async def dispatch_approval_discussion_reply(
             "approval-discussion 벨 알림 실패 doc=%s requester=%s",
             doc.id, requester_id, exc_info=True,
         )
+
+
+async def notify_gate_card_recipients_resolved(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    gate_id: uuid.UUID,
+    status: str,
+    resolver_id: uuid.UUID | None,
+    resolved_at,
+) -> list[tuple[str, dict]]:
+    """story #2985 AC2(PO 계약 확定 2026-08-24) — 해소 시 원 카드(액션 kind="request"·정보성
+    kind="request_info" 무관)를 받았던 모든 승인자의 열린 화면이 새로고침 없이 "처리됨"으로
+    갱신되도록, `conversation.gate_resolved` 이벤트를 심는다.
+
+    새 ConversationMessage는 만들지 않는다(정보성 카드까지 해소마다 챗버블 스팸이 되는 것을
+    피한다 — 순수 SSE 신호, 챗 히스토리에 안 남음).
+
+    "실제 카드가 심어진 곳" 역조회 — approver_ids를 다시 계산하지 않고,
+    dispatch_approval_request_cards가 그때 실제로 ConversationMessage.mentioned_ids에 태운
+    값을 msg_metadata.approval_target.gate_id로 찾는다(conversations.py::
+    _batch_resolve_linked_proof와 동일 축의 조회, 이 스토리에서 새로 발명한 메커니즘 아님) —
+    그 사이 조직 멤버십이 바뀌어도(탈퇴 등) "그때 실제로 카드를 봤던 사람" 기준이라 안전.
+    Event.project_id도 이 조회로 찾은 conversation의 실 project_id를 그대로 쓴다(호출자가
+    gate_type별 project_id 해소 로직을 또 만들 필요 없음 — 카드가 이미 project-scope된 DM에
+    심어져 있으므로).
+
+    `_dispatch_conversation_event`(conversations.py)와 동일 계약 — Event를 DB에 남기고
+    [(pid_str, payload)]를 반환할 뿐, 실 SSE push(`_push_to_agent`)는 호출자가 commit 後에
+    한다(레이스 방지 원칙 동일 — Event가 커밋된 상태에서 push해야 클라가 재조회해도 일관된
+    값을 본다)."""
+    rows = (await db.execute(
+        select(ConversationMessage.conversation_id, ConversationMessage.mentioned_ids).where(
+            ConversationMessage.msg_metadata["approval_target"]["gate_id"].astext == str(gate_id),
+        )
+    )).all()
+    if not rows:
+        return []
+
+    conv_ids = {row.conversation_id for row in rows}
+    conv_project_ids = dict((await db.execute(
+        select(Conversation.id, Conversation.project_id).where(Conversation.id.in_(conv_ids))
+    )).all())
+
+    recipient_project_ids: dict[uuid.UUID, uuid.UUID] = {}
+    for row in rows:
+        proj_id = conv_project_ids.get(row.conversation_id)
+        if proj_id is None:
+            continue  # project 없는 conversation은 스킵(Event.project_id NOT NULL) — 조용히 건너뜀.
+        for mid in (row.mentioned_ids or []):
+            try:
+                recipient_project_ids[uuid.UUID(str(mid))] = proj_id
+            except (ValueError, TypeError, AttributeError):
+                continue  # 손상된/구형 payload — 지어내지 않고 건너뜀(_batch_resolve_linked_proof 동일 관례).
+    if not recipient_project_ids:
+        return []
+
+    from app.services.member_resolver import lookup_members_by_ids
+    members = await lookup_members_by_ids(set(recipient_project_ids), db)
+
+    payload_base = {
+        "gate_id": str(gate_id), "status": status,
+        "resolver_id": str(resolver_id) if resolver_id else None,
+        "resolved_at": resolved_at.isoformat() if resolved_at else None,
+    }
+
+    events: list[Event] = []
+    for member_id, proj_id in recipient_project_ids.items():
+        member = members.get(member_id)
+        m_type = member.type if member is not None else "human"
+        event = Event(
+            project_id=proj_id, org_id=org_id, event_type="conversation.gate_resolved",
+            source_entity_type="gate", source_entity_id=gate_id,
+            sender_id=resolver_id, recipient_id=member_id, recipient_type=m_type,
+            payload=payload_base, status="pending",
+        )
+        db.add(event)
+        events.append(event)
+
+    await db.flush()
+    pushes: list[tuple[str, dict]] = []
+    for event in events:
+        pushes.append((
+            str(event.recipient_id),
+            {"event_id": str(event.id), "event_type": "conversation.gate_resolved", **payload_base,
+             "recipient_id": str(event.recipient_id)},
+        ))
+    return pushes

@@ -23,7 +23,8 @@ DOC_GATE_TYPE = "doc_approval"
 
 
 async def _notify_doc_approval_requested(
-    session: AsyncSession, org_id: uuid.UUID, doc: Doc, gate_id: uuid.UUID, *, requester_id: uuid.UUID
+    session: AsyncSession, org_id: uuid.UUID, doc: Doc, gate_id: uuid.UUID, *, requester_id: uuid.UUID,
+    designated_approver_id: uuid.UUID | None = None,
 ) -> None:
     """doc-gate v2 갭2: doc 상신 → org owner/admin 휴먼 결재자에게 in-app 알림(상신자 본인 제외).
     best-effort·비중단(알림 실패가 상신을 막지 않음). transition_gate 해소 알림과 대칭.
@@ -75,6 +76,7 @@ async def _notify_doc_approval_requested(
             session, org_id=org_id, work_item_type=DOC_GATE_WORK_ITEM_TYPE, work_item_id=doc.id,
             project_id=doc.project_id, title=doc.title, gate_id=gate_id,
             requester_id=requester_id, approver_ids=approver_ids,
+            designated_approver_id=designated_approver_id,
         )
     except Exception:  # noqa: BLE001 — 카드 배달 실패는 상신 비중단(Gate inbox 폴백 항상 존재).
         logger.warning("doc 상신 결재자 카드(챗) 배달 실패 doc=%s", doc.id, exc_info=True)
@@ -96,9 +98,14 @@ async def transition_doc(
     doc_id: uuid.UUID,
     to_status: str,
     via_gate: bool = False,
+    designated_approver_id: uuid.UUID | None = None,
 ) -> Doc:
     """doc status 전이. draft→confirmed 는 human-only(+enforcing 시 line overlay). via_gate=True 면
-    overlay 재진입(re-gate 루프) 없이 native 직행(caller=gate approver·human)."""
+    overlay 재진입(re-gate 루프) 없이 native 직행(caller=gate approver·human).
+
+    designated_approver_id: story #2985(PO 설계 확定 2026-08-24) — draft→pending 상신 시
+    "이 결재는 특정하게 이 사람에게" 지정(선택). None(기본값)이면 현행(org/project owner+
+    admin 전원 액션 브로드캐스트) 그대로 — 회귀 0."""
     doc = (await session.execute(
         select(Doc).where(Doc.id == doc_id, Doc.org_id == org_id, Doc.deleted_at.is_(None))
     )).scalar_one_or_none()
@@ -128,6 +135,7 @@ async def transition_doc(
             # 리치 알림(벨+카드)을 별도로 쏘므로, create_gate() generic "gate.pending_approval"
             # 벨은 끈다(중복 제거 — 신규생성·rejected재오픈 두 경로 모두 해당).
             notify=False,
+            designated_approver_id=designated_approver_id,
         )
         # ⚠️재상신 RC(산티아고): uq(work_item_id,gate_type)=1 gate·terminal(approved/rejected)=immutable →
         # create_gate 멱등이 기존 **terminal gate 를 반환**해(상태필터 없음) 재상신 시 새 pending gate 0 →
@@ -166,7 +174,10 @@ async def transition_doc(
         # doc transition 은 event/notification 0이라 상신해도 결재자가 모름(transition_gate 해소엔
         # dispatch_notification 있는데 상신엔 없던 비대칭). best-effort(알림 실패는 상신 비중단·SoD상
         # 상신자 본인 제외).
-        await _notify_doc_approval_requested(session, org_id, doc, gate.id, requester_id=caller.id)
+        await _notify_doc_approval_requested(
+            session, org_id, doc, gate.id, requester_id=caller.id,
+            designated_approver_id=designated_approver_id,
+        )
         return doc
 
     # 결재 대기(pending) 문서의 승인/반려는 **gate 해소(via_gate)로만** — 직접 API self-confirm 차단.
