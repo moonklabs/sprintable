@@ -258,14 +258,49 @@ def wake_agent(agent_id: str, seq: int, _from_listener: bool = False) -> None:
     payload = {"__wake__": True, "seq": seq}
     queues = _agent_connections.get(agent_id)
     if queues:
-        dead = []
+        # story #2530(2026-08-24, PO 판정) — 예전엔 QueueFull을 그 큐(연결)를
+        # `_agent_connections`에서 통째로 제거하는 신호로 썼다: 스트림 자체는 안 끊긴 채
+        # ("연결은 살아 보이는" 상태) 이 agent_id로 오는 모든 이후 wake_agent() 호출이
+        # 이 연결을 dict에서 영원히 못 찾아 조용히 no-op — "연결은 살았는데 신호만 죽는"
+        # 반쪽 상태가 코드로 가능했다(#2530 그라운딩에서 발견, 「선생님→에이전트 왕왕
+        # 미도달」과 정합하는 실 후보로 격상). 처방: 큐를 ring-buffer로 다뤄 **가장
+        # 오래된 항목을 버리고 자리를 만들어 이번 신호를 넣는다** — 연결을 절대 dict에서
+        # 지우지 않는다. wake 신호는 "그 seq 하나"가 아니라 "재조회하라"는 트리거일
+        # 뿐이라(recipient_seq 기반 전체 rescan, 이 함수 상단 docstring 참조) 오래된
+        # 신호를 버려도 살아남은 신호가 여전히 전체 catch-up을 끌어낸다 — 연결이
+        # dict에 남아있는 한 "연결이 살아있으면 신호도 언젠가 닿는다"가 코드로 보증된다.
+        # story #2530(2026-08-24, PO 판정) — 예전엔 QueueFull을 그 큐(연결)를
+        # `_agent_connections`에서 통째로 제거하는 신호로 썼다: 스트림 자체는 안 끊긴 채
+        # ("연결은 살아 보이는" 상태) 이 agent_id로 오는 모든 이후 wake_agent() 호출이
+        # 이 연결을 dict에서 영원히 못 찾아 조용히 no-op — "연결은 살았는데 신호만 죽는"
+        # 반쪽 상태가 코드로 가능했다(#2530 그라운딩에서 발견, 「선생님→에이전트 왕왕
+        # 미도달」과 정합하는 실 후보로 격상). 처방: 큐를 ring-buffer로 다뤄 **가장
+        # 오래된 항목을 버리고 자리를 만들어 이번 신호를 넣는다** — 연결을 절대 dict에서
+        # 지우지 않는다. wake 신호는 "그 seq 하나"가 아니라 "재조회하라"는 트리거일
+        # 뿐이라(recipient_seq 기반 전체 rescan, 이 함수 상단 docstring 참조) 오래된
+        # 신호를 버려도 살아남은 신호가 여전히 전체 catch-up을 끌어낸다 — 연결이
+        # dict에 남아있는 한 "연결이 살아있으면 신호도 언젠가 닿는다"가 코드로 보증된다.
         for q in list(queues):
             try:
                 q.put_nowait(payload)
             except asyncio.QueueFull:
-                dead.append(q)
-        for q in dead:
-            queues.discard(q)
+                logger.warning(
+                    "wake_agent: queue full(maxsize=%d) for agent=%s — dropping oldest "
+                    "pending signal to make room (connection kept registered, not discarded)",
+                    q.maxsize, agent_id,
+                )
+                try:
+                    q.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                try:
+                    q.put_nowait(payload)
+                except asyncio.QueueFull:
+                    # 극단적 경합(드롭 직후 다른 태스크가 그 자리를 먼저 채움) — 이번
+                    # put만 포기한다(무한 재시도 금지). 연결은 여전히 dict에 남아 다음
+                    # wake_agent() 호출이 다시 시도할 것 — "연결 자체가 사라지지 않는다"는
+                    # 불변식만 지키면 충분하다(개별 신호 1건의 일시 유실은 안전, 위 근거).
+                    pass
     if not _from_listener:
         from app.services.pg_pubsub import fire_and_forget
         from app.core.config import settings as _settings

@@ -80,21 +80,29 @@ async def test_push_to_agent_fans_out_to_all_queues_of_same_member():
 
 @pytest.mark.anyio
 async def test_push_to_agent_survives_one_dead_queue_among_many():
-    """부수 회귀가드 — 동시 연결 중 하나가 죽어있어도(QueueFull) 나머지 연결은 정상 수신
-    (`_push_to_agent`의 기존 dead-queue 청소 로직이 이 처방과 계속 정합하는지)."""
+    """부수 회귀가드 — 동시 연결 중 하나가 꽉 차 있어도(QueueFull) 나머지 연결은 정상 수신.
+
+    ⚠️story #2530(2026-08-24) 정정 — 이 테스트는 원래 QueueFull 시 그 큐(연결)가
+    `_agent_connections`에서 **제거**되는 걸 기대했다. #2530 그라운딩에서 그 discard
+    자체가 "연결은 살아 보이는데 신호만 영구히 죽는" 실사고 후보로 밝혀져, 처방을
+    "가장 오래된 항목을 버리고 자리를 만들어 연결은 유지"로 바꿨다(agent_gateway.py
+    wake_agent과 동일 원칙 — 상세: test_2530_agent_wake_queue_overflow_keeps_connection.py).
+    이 테스트는 이제 그 새 계약(연결 유지+ring-buffer)을 고정한다."""
     member_id = str(uuid.uuid4())
-    dead_queue: asyncio.Queue = asyncio.Queue(maxsize=1)
-    dead_queue.put_nowait({"event_type": "filler"})  # 꽉 채워 QueueFull 유도.
+    full_queue: asyncio.Queue = asyncio.Queue(maxsize=1)
+    full_queue.put_nowait({"event_type": "filler"})  # 꽉 채워 QueueFull 유도.
     alive_queue: asyncio.Queue = asyncio.Queue(maxsize=10)
-    _agent_connections[member_id] = {dead_queue, alive_queue}
+    _agent_connections[member_id] = {full_queue, alive_queue}
 
     try:
         eid = str(uuid.uuid4())
         pushed = _push_to_agent(member_id, {"event_type": "conversation.gate_resolved", "event_id": eid})
 
-        assert pushed is True  # alive_queue 쪽은 성공.
+        assert pushed is True  # 둘 다 성공(가득 찼던 쪽도 드롭+재시도로 성공).
         assert alive_queue.get_nowait()["event_id"] == eid
-        # dead_queue는 자동 정리(discard)돼 등록에서 빠졌는지.
-        assert dead_queue not in _agent_connections[member_id]
+        # full_queue는 제거되지 않고 남아있어야 함(#2530) — 오래된 "filler"는 버려지고
+        # 이번 이벤트가 대신 들어가 있다.
+        assert full_queue in _agent_connections[member_id]
+        assert full_queue.get_nowait()["event_id"] == eid
     finally:
         _agent_connections.pop(member_id, None)
