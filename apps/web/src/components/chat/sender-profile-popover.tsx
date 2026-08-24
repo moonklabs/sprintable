@@ -46,7 +46,8 @@ export function SenderProfilePopover({ x, y, name, isAgent, avatarUrl, onClose, 
       ref={ref}
       role="dialog"
       aria-label={name}
-      className="fixed z-50 min-w-[200px] overflow-hidden rounded-lg border border-border bg-popover py-2 shadow-md"
+      // story #3000 로드맵 PR-B(L1) — floating 팝업은 --elev-overlay(오버레이 전용) 토큰으로.
+      className="fixed z-50 min-w-[200px] overflow-hidden rounded-lg border border-border bg-popover py-2 shadow-[var(--elev-overlay)]"
       style={{ left: clampedX, top: clampedY }}
     >
       <div className="flex items-center gap-2.5 px-3 py-1.5">

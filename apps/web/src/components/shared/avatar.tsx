@@ -97,8 +97,11 @@ export function Avatar({
       </div>
 
       {isAgent && (
+        // story #3000 로드맵 PR-B(L5, 페드루군 동승 판정) — 정적 "AI" 코너배지는 citron이
+        // 아니라 proof-blue 틴트(정체성 마킹 — citron은 live pulse 전용, AGENT_LIVE_RING_CLASS
+        // 참고). 텍스트는 기왕 text-foreground.
         <span
-          className="absolute -right-1.5 -top-1.5 rounded border border-accent-claim/40 bg-accent-claim/15 font-bold text-foreground"
+          className="absolute -right-1.5 -top-1.5 rounded border border-proof-blue/40 bg-proof-blue-soft font-bold text-foreground"
           style={{ fontSize: Math.max(7, Math.round(badgeSize * 0.55)), lineHeight: 1, padding: '2px 3px' }}
         >
           AI

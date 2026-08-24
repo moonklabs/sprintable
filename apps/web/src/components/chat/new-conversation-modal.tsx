@@ -118,8 +118,10 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
                       {m.name?.slice(0, 2)?.toUpperCase() ?? '?'}
                     </div>
                     <span className="flex-1 truncate">{m.name}</span>
+                    {/* story #3000 로드맵 PR-B(L5) — 정적 Bot 배지 배경은 citron이 아니라
+                        proof-blue-soft(정체성 마킹). */}
                     {m.type === 'agent' && (
-                      <span className="rounded-sm bg-accent-claim/15 px-1 py-0.5 text-[9px] font-medium text-foreground">Bot</span>
+                      <span className="rounded-sm bg-proof-blue-soft px-1 py-0.5 text-[9px] font-medium text-foreground">Bot</span>
                     )}
                     {selected.includes(m.id) && <Check className="h-3.5 w-3.5 flex-shrink-0 text-primary" />}
                   </button>

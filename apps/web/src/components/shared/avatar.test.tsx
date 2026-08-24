@@ -66,6 +66,19 @@ describe('Avatar — story #2887 S2g', () => {
     expect(container.querySelector('[role="img"]')).not.toBeNull(); // PresenceDot
   });
 
+  // story #3000 로드맵 PR-B(L5, 페드루군 동승 판정) — 정적 "AI" 코너배지는 citron이 아니라
+  // proof-blue 틴트여야 한다(정체성 마킹 — citron은 live pulse 전용).
+  it('AI 코너배지가 border-proof-blue/bg-proof-blue-soft를 쓰고 citron은 안 쓴다', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" avatarUrl={null} actorType="agent" />));
+    });
+    const badge = [...container.querySelectorAll('span')].find((s) => s.textContent === 'AI');
+    expect(badge).toBeTruthy();
+    expect(badge?.className).toContain('border-proof-blue/40');
+    expect(badge?.className).toContain('bg-proof-blue-soft');
+    expect(badge?.className).not.toContain('accent-claim');
+  });
+
   // story #2921(유나 합성 5규칙③, avatar-unification-design-memo-2921, 2026-08-22 확定) —
   // 옛 값(idle=citron 정적·working=info(=proof-blue 별칭) 펄스)이 규칙③과 정반대였다(3339
   // 그라운딩에서 실측 발견) — swap: idle=blue 정적·working=citron 펄스가 정본.

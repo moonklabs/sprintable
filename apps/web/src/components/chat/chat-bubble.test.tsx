@@ -1735,3 +1735,20 @@ describe('ChatBubble — story #2921 S4(유나 확定, 버블·아바타 Proofli
     expect(mineAvatar?.className).toContain('rounded-md');
   });
 });
+
+// story #3000 로드맵 PR-B(L5) — Bot 배지 배경은 정적(비-pulse) 정체성 마킹이라 citron이 아니라
+// proof-blue-soft여야 한다(story-card 아바타·avatar.tsx idle 링과 정합).
+describe('ChatBubble — 로드맵 PR-B L5(Bot 배지 배경 proof-blue-soft)', () => {
+  it('agent 발신 메시지의 Bot 배지가 bg-proof-blue-soft를 쓰고 citron은 안 쓴다', async () => {
+    // ⛔avatar.tsx의 "AI" 코너 배지(별개 소비처, 이번 PR-B 스코프 밖)도 accent-claim/15를
+    // 쓰므로 이 원소 자신의 클래스만 좁혀서 잰다(container 전체 grep이 아니라).
+    const plainMessage: ChatMessage = { ...baseMessage, content: '봇 메시지', sender_type: 'agent' };
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [] }} isMine={false} />));
+    });
+    const badge = container.querySelector('.rounded-sm.bg-proof-blue-soft');
+    expect(badge).toBeTruthy();
+    expect(badge?.textContent).toBe('Bot');
+    expect(badge?.className).not.toContain('accent-claim');
+  });
+});

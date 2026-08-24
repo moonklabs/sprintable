@@ -530,7 +530,9 @@ export function ChatBubble({
                 {displayName}
               </span>
               {isAgent && (
-                <span className="rounded-sm bg-accent-claim/15 px-1 py-0.5 text-[9px] font-medium text-foreground">
+                // story #3000 로드맵 PR-B(L5) — 정적(비-pulse) Bot 배지 배경은 citron이 아니라
+                // proof-blue-soft(정체성 마킹, story-card 아바타·avatar.tsx idle 링과 정합).
+                <span className="rounded-sm bg-proof-blue-soft px-1 py-0.5 text-[9px] font-medium text-foreground">
                   Bot
                 </span>
               )}
