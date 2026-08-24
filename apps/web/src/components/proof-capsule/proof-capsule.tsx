@@ -79,6 +79,14 @@ export interface ProofCapsuleProps {
    * `<button>`(hover underline)으로, 없으면 기존과 동일한 순수 텍스트로 렌더된다 — 기존
    * card 호출부(Board story-card.tsx 등)는 전부 무변화. */
   onClaimClick?: () => void;
+  /** card 밀도 전용(story #32dcc294, v2 보드 카드 재설계) — StateHeader와 같은 줄 우측에
+   * 나란히 놓을 보조 콘텐츠(예: #스토리번호 약화 배지). 없으면 기존과 완전히 동일하게
+   * StateHeader 단독 렌더 — 다른 card 소비처(approval-request-card.tsx 등)는 이 prop을
+   * 넘기지 않아 렌더 결과가 그대로 유지된다. */
+  headerAside?: ReactNode;
+  /** card 밀도 전용(story #32dcc294) — StateHeader 아래·claim 위에 삽입할 콘텐츠(예: 「다음:
+   * …」1급 라인·카테고리 칩). 없으면 기존과 동일(렌더 자체가 생략) — 다른 소비처 무영향. */
+  cardHeader?: ReactNode;
   className?: string;
 }
 
@@ -93,7 +101,7 @@ export interface ProofCapsuleProps {
  * glow·999px pill·숫자 KPI화·raw CoT·초록만-완료 전부 미사용(색은 항상 stateLabel 텍스트 병기).
  */
 export function ProofCapsule({
-  proofState, stateLabel, claim, human, agent, now, evidence, gate, trustSeal, density, footer, className, duration, onClaimClick, typeBadge,
+  proofState, stateLabel, claim, human, agent, now, evidence, gate, trustSeal, density, footer, className, duration, onClaimClick, typeBadge, headerAside, cardHeader,
 }: ProofCapsuleProps) {
   if (density === 'audit') {
     return (
@@ -110,7 +118,10 @@ export function ProofCapsule({
   }
   if (density === 'card') {
     return (
-      <CardVariant proofState={proofState} stateLabel={stateLabel} claim={claim} evidence={evidence} footer={footer} className={className} onClaimClick={onClaimClick} />
+      <CardVariant
+        proofState={proofState} stateLabel={stateLabel} claim={claim} evidence={evidence} footer={footer}
+        className={className} onClaimClick={onClaimClick} headerAside={headerAside} cardHeader={cardHeader}
+      />
     );
   }
   return (
@@ -296,11 +307,19 @@ function FullVariant({
   );
 }
 
-function CardVariant({ proofState, stateLabel, claim, evidence, footer, className, onClaimClick }: Pick<ProofCapsuleProps, 'proofState' | 'stateLabel' | 'claim' | 'evidence' | 'footer' | 'className' | 'onClaimClick'>) {
+function CardVariant({
+  proofState, stateLabel, claim, evidence, footer, className, onClaimClick, headerAside, cardHeader,
+}: Pick<ProofCapsuleProps, 'proofState' | 'stateLabel' | 'claim' | 'evidence' | 'footer' | 'className' | 'onClaimClick' | 'headerAside' | 'cardHeader'>) {
   return (
     <CutCornerShell state={proofState} cut={16} className={cn('w-full max-w-[280px]', className)}>
       <div className="min-w-0 flex-1 px-3 py-2.5">
-        <StateHeader state={proofState} label={stateLabel} />
+        {/* headerAside 없으면 justify-between이 단일 자식(StateHeader)의 위치에 영향을 주지
+            않는다 — 다른 card 소비처(headerAside 미전달)는 렌더 결과 byte-identical. */}
+        <div className="flex items-center justify-between gap-2">
+          <StateHeader state={proofState} label={stateLabel} />
+          {headerAside}
+        </div>
+        {cardHeader}
         {onClaimClick ? (
           <button
             type="button"

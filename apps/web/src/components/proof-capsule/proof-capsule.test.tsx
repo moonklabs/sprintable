@@ -421,3 +421,46 @@ describe('ProofCapsule — story #2926(P0-F F1) onClaimClick (card density only)
     expect(markup).toContain(BASE.claim);
   });
 });
+
+// story #32dcc294(v2 #2, 시안 a230cfd5) — card 밀도 전용 신규 슬롯(headerAside/cardHeader).
+// 둘 다 optional·미전달 시 렌더 결과가 기존과 완전히 동일해야 다른 card 소비처
+// (approval-request-card.tsx)가 무영향임이 보장된다.
+describe('ProofCapsule — story #32dcc294 headerAside/cardHeader(card 밀도 전용 신규 슬롯)', () => {
+  it('headerAside/cardHeader를 안 넘기면 기존과 동일 — 새 마크업이 추가되지 않는다', () => {
+    const withNewProps = renderWithIntl(<ProofCapsule {...BASE} density="card" />);
+    const withoutNewProps = renderWithIntl(<ProofCapsule {...BASE} density="card" />);
+    expect(withNewProps).toBe(withoutNewProps);
+  });
+
+  it('headerAside를 넘기면 StateHeader와 같은 justify-between 행에 렌더된다', () => {
+    const markup = renderWithIntl(
+      <ProofCapsule {...BASE} density="card" headerAside={<span data-testid="aside">#3017</span>} />,
+    );
+    expect(markup).toContain('#3017');
+    // justify-between 행의 자식 순서: StateHeader(span)가 먼저, aside(span data-testid)가
+    // 그 바로 뒤 형제로 같은 부모 div 안에 들어간다.
+    const rowStart = markup.indexOf('class="flex items-center justify-between gap-2"');
+    const stateHeaderIdx = markup.indexOf('증명 완료', rowStart);
+    const asideIdx = markup.indexOf('data-testid="aside"', rowStart);
+    expect(rowStart).toBeGreaterThan(-1);
+    expect(stateHeaderIdx).toBeGreaterThan(rowStart);
+    expect(asideIdx).toBeGreaterThan(stateHeaderIdx);
+  });
+
+  it('cardHeader를 넘기면 StateHeader 행 다음·claim 앞에 렌더된다', () => {
+    const markup = renderWithIntl(
+      <ProofCapsule {...BASE} density="card" cardHeader={<div data-testid="header">다음: 게이트 승인 대기</div>} />,
+    );
+    const headerIdx = markup.indexOf('다음: 게이트 승인 대기');
+    const claimIdx = markup.indexOf(BASE.claim);
+    expect(headerIdx).toBeGreaterThan(-1);
+    expect(claimIdx).toBeGreaterThan(-1);
+    expect(headerIdx).toBeLessThan(claimIdx);
+  });
+
+  it('다른 card 소비처(예: approval-request-card.tsx)가 새 prop을 안 쓰는 렌더는 여전히 button/claim 규약을 그대로 지킨다(회귀 0)', () => {
+    const markup = renderWithIntl(<ProofCapsule {...BASE} density="card" onClaimClick={() => {}} />);
+    expect(markup).toContain('<button');
+    expect(markup).toContain(BASE.claim);
+  });
+});
