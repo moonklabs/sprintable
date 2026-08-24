@@ -51,9 +51,21 @@ export function deriveKicker(content: string, messageKind?: string | null): stri
   return null;
 }
 
+// 카디르 QA(#3448) 적출 — "**Summary. Done**"류에서 문장 경계(마침표)가 볼드 스팬
+// 중간에 떨어지면 절단 결과가 "**Summary."(닫는 ** 없음)가 돼 미완성 마커가 그대로
+// 화면에 샌다. 굵게·인라인코드 마커(짝수 개수) 균형이 안 맞는 절단은 "미절단 폴백"(정직
+// 측)으로 건너뛴다.
+function isBalancedCut(text: string): boolean {
+  const boldCount = (text.match(/\*\*/g) ?? []).length;
+  const codeCount = (text.match(/`/g) ?? []).length;
+  return boldCount % 2 === 0 && codeCount % 2 === 0;
+}
+
 /** 첫 문장을 verbatim으로 추출(리라이트 0). 문장 경계 = 마침표/느낌표/물음표+공백(또는
  * 문자열 끝) 또는 첫 줄바꿈 중 먼저 오는 지점 — report 메시지는 첫 줄이 이미 한 논지인
- * 경우가 많아(볼드 헤더 라인 관례) 줄바꿈도 유효한 경계로 취급한다. */
+ * 경우가 많아(볼드 헤더 라인 관례) 줄바꿈도 유효한 경계로 취급한다. 두 경계 다 마커
+ * (굵게·인라인코드)를 반으로 가르면 더 늦은(안전한) 경계로, 그마저 없으면 전체로
+ * 폴백한다(「미절단 폴백」— 정직 측, 미완성 마커 노출 방지). */
 export function extractLeadSentence(content: string): string {
   const trimmed = content.trim();
   if (!trimmed) return '';
@@ -62,9 +74,8 @@ export function extractLeadSentence(content: string): string {
   const puncMatch = trimmed.match(/[.!?](?:\s|$)/);
   const puncIdx = puncMatch && puncMatch.index !== undefined ? puncMatch.index + 1 : -1;
 
-  let end = trimmed.length;
-  if (newlineIdx !== -1) end = Math.min(end, newlineIdx);
-  if (puncIdx !== -1) end = Math.min(end, puncIdx);
+  const candidates = [puncIdx, newlineIdx].filter((n) => n !== -1).sort((a, b) => a - b);
+  const end = candidates.find((c) => isBalancedCut(trimmed.slice(0, c))) ?? trimmed.length;
 
   return stripInlineMarkers(trimmed.slice(0, end));
 }

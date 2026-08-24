@@ -1817,4 +1817,27 @@ describe('ChatBubble — story #ec57c80c report성 메시지 밀도(kicker+리�
     // 원문(하위 상세 포함)이 그대로 렌더돼야 한다 — 접힘 없음.
     expect(container.textContent).toContain('인라인 카드 elev-card 토큰 확認');
   });
+
+  // 카디르 QA(#3448) 적출 — 첫 줄 문장 경계가 볼드 스팬 중간에 떨어지면(마침표가 "**" 안에
+  // 있으면) 리드가 "**Summary."처럼 닫는 마커 없이 잘려 화면에 미완성 ** 문자가 그대로
+  // 노출됐다(dedup도 이 변형에서 무력화). 실렌더로 미완성 마커 부재를 직접 확認한다.
+  it('첫 줄이 볼드 스팬 중간에서 잘리는 경우에도 미완성 마커(**)가 화면에 안 샌다', async () => {
+    const raw = [
+      '**Summary. Done**',
+      '오늘 배포한 3개 표면 전부 실측 완료했는.',
+      '**① 3009 — PASS**',
+      '- 인라인 카드 elev-card 토큰 확認.',
+      '**② 3010 — PASS**',
+      '- inbox Bot칩 확認.',
+      '**③ 3011 — PASS**',
+      '- Workcell 잘림 fix 확認.',
+    ].join('\n');
+    await act(async () => {
+      root.render(wrap(<ChatBubble message={{ ...baseMessage, content: raw, message_kind: 'result', references: [] }} isMine={false} />));
+    });
+    expect(container.textContent).not.toContain('**');
+    expect(container.textContent).toContain('Summary. Done');
+    // "Summary. Done"이 리드 한 번만 나와야 한다(목록에 중복 노출 금지).
+    expect(container.textContent!.split('Summary. Done').length - 1).toBe(1);
+  });
 });

@@ -75,6 +75,27 @@ describe('extractLeadSentence (story #ec57c80c — 첫 문장 verbatim, 3015 규
     expect(extractLeadSentence('')).toBe('');
     expect(extractLeadSentence('   ')).toBe('');
   });
+
+  // 카디르 QA(#3448) 적출 — 문장 경계(마침표)가 볼드 스팬 중간에 떨어지면 절단 결과가
+  // "**Summary."(닫는 ** 없음)가 돼 미완성 마커가 화면에 그대로 샌다. 마커가 짝 안 맞는
+  // 절단은 건너뛰고 더 늦은(안전한) 경계 또는 전체로 폴백해야 한다.
+  describe('카디르 repro — 마커 균형 폴백(미완성 ** 노출 방지)', () => {
+    it('원 repro — "**Summary. Done**"에서 마침표가 볼드 중간에 있어도 미완성 마커가 안 샌다', () => {
+      expect(extractLeadSentence('**Summary. Done**')).toBe('Summary. Done');
+    });
+
+    it('볼드 스팬 뒤에 더 안전한 줄바꿈 경계가 있으면 그쪽으로 폴백한다', () => {
+      expect(extractLeadSentence('**Summary. Done**\n둘째 줄')).toBe('Summary. Done');
+    });
+
+    it('백틱(인라인 코드) 스팬 중간에 마침표가 있어도 미완성 백틱이 안 샌다', () => {
+      expect(extractLeadSentence('`workcell.tsx 파일. 확認`')).toBe('workcell.tsx 파일. 확認');
+    });
+
+    it('정상적으로 짝이 맞는 절단은 기존대로 그대로 동작한다(회귀 0)', () => {
+      expect(extractLeadSentence('**중요**. 둘째 문장.')).toBe('중요.');
+    });
+  });
 });
 
 describe('extractTopLevelItems (story #ec57c80c — 최상위 목록만, 하위/표/산문 제외)', () => {
