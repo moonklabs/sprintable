@@ -16,6 +16,7 @@ import { GateSignatureApproval } from '@/components/cage/gate-signature-approval
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateInboxItem, GateItem, HitlInboxItem } from '@/components/kanban/types';
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
+import { useSseMultiplexerContext } from '@/components/realtime-provider';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -179,6 +180,46 @@ export function ApprovalsQueue() {
     });
     return () => { cancelled = true; };
   }, []);
+
+  // story #2985 AC2(PO 계약 확定 2026-08-24) — 다른 승인자가 큐에 있는 게이트를 먼저
+  // 해소하면, 이 화면도 새로고침 없이 갱신된다. resolveGate()가 본인 해소 시 이미 쓰는
+  // resolvedGates 오버레이를 그대로 재사용(신규 렌더 분기 0) — resolvedAtMs는 일부러
+  // 안 채운다(그건 "이 세션에서 내가 방금 해소했다"는 undo 자격 신호라 남이 해소한 건에는
+  // undo 버튼이 뜨면 안 된다, 위 resolvedAtMs 주석 참조). BE 계약은 approval-request-
+  // card.tsx/gates/[id]/page.tsx와 동일(notify_gate_card_recipients_resolved, 신규 배관 0).
+  // ⚠️items를 deps에 넣지 않는다(items.some(...) 멤버십 가드는 fetchGates 완료 前 빈
+  // 배열을 캡처한 stale effect가 재구독으로 안 씻겨나가는 함정이 있다 — mux.subscribe가
+  // 리스너 목록에 append만 하고 이전 것을 안 지우는 구현이면 첫 구독(빈 items)이 계속 살아
+  // 있어 항상 no-op이 된다). 대신 무조건 기록 — items에 없는 gate_id가 들어와도 그 키는
+  // 그냥 안 쓰일 뿐(렌더는 items.map()이 도는 항목만 resolvedGates[gate.id]를 읽는다).
+  const mux = useSseMultiplexerContext();
+  useEffect(() => {
+    if (!mux) return;
+    const unsub = mux.subscribe('conversation.gate_resolved', (raw) => {
+      try {
+        const payload = JSON.parse(raw) as { gate_id?: string; status?: 'approved' | 'rejected' };
+        if (!payload.gate_id || !payload.status) return;
+        setResolvedGates((prev) => ({ ...prev, [payload.gate_id!]: payload.status! }));
+      } catch { /* malformed — 무시 */ }
+    });
+    return unsub;
+  }, [mux]);
+
+  // story #3001(위임) — 이 큐는 assigned_to_me=true로 이미 스코프돼 있다. 지정자가
+  // 위임으로 밀려나면 그 게이트는 더 이상 "내 할 일"이 아니므로(재조회하면 안 옴), 목록에서
+  // 바로 제거한다 — gate_resolved(완료 오버레이 유지)와 다르게 여긴 실제 삭제가 재조회
+  // 결과와 정확히 일치한다.
+  useEffect(() => {
+    if (!mux) return;
+    const unsub = mux.subscribe('conversation.gate_delegated', (raw) => {
+      try {
+        const payload = JSON.parse(raw) as { gate_id?: string };
+        if (!payload.gate_id) return;
+        setItems((prev) => prev.filter((it) => it.id !== payload.gate_id));
+      } catch { /* malformed — 무시 */ }
+    });
+    return unsub;
+  }, [mux]);
 
   // story #2054 AC3: HitlRequest는 상세 페이지가 없어 이 큐 안에서 바로 승인/반려한다 —
   // 승인 후 원래 작업(report-done)이 통과하는지는 사용자 왕복(재시도)으로 확認된다.

@@ -18,6 +18,7 @@ import type { GateItem } from '@/components/kanban/types';
 import { fetchWithAuth } from '@/lib/db/client';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
+import { useSseMultiplexerContext } from '@/components/realtime-provider';
 
 // story #1954(P1a-S4) — Gate 3종(게이트·문서결재·머지게이트) canonical 상세. P1a·P2 공용 유일
 // per-gate 라우트(중복 빌드 봉쇄) — decision(inbox_items)은 별도 표면(오르테가군 PO 판단+
@@ -71,6 +72,35 @@ export default function GateDetailPage() {
   }, [id]);
 
   useEffect(() => { void fetchGate(); }, [fetchGate]);
+
+  // story #2985 AC2(PO 계약 확定 2026-08-24) — 다른 승인자가 이 게이트를 먼저 해소하거나
+  // 위임하면, 이 상세 페이지를 보고 있는 화면도 새로고침 없이 갱신된다. approval-request-
+  // card.tsx(챗 카드)와 완전히 동형 구독 — BE 계약(notify_gate_card_recipients_resolved/
+  // notify_gate_delegated_to_old_approver)은 이미 존재(신규 배관 0), 여기가 빠져 있던 두
+  // FE 표면 중 하나. mux가 없으면(RealtimeProvider 밖) 조용히 스킵 — 기존처럼 마운트 1회
+  // fetchGate만 유효(회귀 아님, 저하일 뿐).
+  const mux = useSseMultiplexerContext();
+  useEffect(() => {
+    if (!mux) return;
+    const unsub = mux.subscribe('conversation.gate_resolved', (raw) => {
+      try {
+        const payload = JSON.parse(raw) as { gate_id?: string };
+        if (payload.gate_id === id) void fetchGate();
+      } catch { /* malformed — 무시(다음 정상 이벤트나 fetchGate 재시도로 자연 회복) */ }
+    });
+    return unsub;
+  }, [mux, id, fetchGate]);
+
+  useEffect(() => {
+    if (!mux) return;
+    const unsub = mux.subscribe('conversation.gate_delegated', (raw) => {
+      try {
+        const payload = JSON.parse(raw) as { gate_id?: string };
+        if (payload.gate_id === id) void fetchGate();
+      } catch { /* malformed — 무시 */ }
+    });
+    return unsub;
+  }, [mux, id, fetchGate]);
 
   // story #2631 QA중 발견 — memberNames를 deps에 넣으면 setMemberNames가 매번 새 객체
   // 레퍼런스를 만들어(resolver가 응답 목록에 없는 한) 이 effect가 무한 재실행됐다(fetch

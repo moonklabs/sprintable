@@ -12,9 +12,10 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import type { GateItem, HitlInboxItem } from '../kanban/types';
 
-const { useDashboardContextMock, pushMock } = vi.hoisted(() => ({
+const { useDashboardContextMock, pushMock, muxSubscribeMock } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
   pushMock: vi.fn(),
+  muxSubscribeMock: vi.fn((_eventName: string, _handler: (raw: string, eventId?: string) => void) => () => {}),
 }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
@@ -23,6 +24,11 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock, replace: vi.fn() }),
+}));
+
+// story #2985 AC2 — approval-request-card.test.tsx와 동일 전략.
+vi.mock('@/components/realtime-provider', () => ({
+  useSseMultiplexerContext: () => ({ subscribe: muxSubscribeMock }),
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -86,6 +92,7 @@ beforeEach(() => {
     projectMemberships: [],
     currentMemberType: 'human',
   });
+  muxSubscribeMock.mockClear();
 });
 
 afterEach(async () => {
@@ -803,5 +810,69 @@ describe('ApprovalsQueue', () => {
       expect(wrapper.parentElement).toBe(actionRow);
       expect(mobileOrderOf(primary!)).toBeLessThan(mobileOrderOf(wrapper));
     }
+  });
+});
+
+describe('ApprovalsQueue — 실시간 해소/위임 반영(story #2985 AC2)', () => {
+  function actionableGate(overrides: Partial<GateItem> = {}): GateItem {
+    return gate({
+      id: 'g-live', gate_type: 'merge_gate', status: 'pending', requires_human: true,
+      can_approve: true, risk_grade: 'low', work_item_summary: { title: '실시간 대상 항목', slug: null },
+      ...overrides,
+    });
+  }
+
+  it('mux가 conversation.gate_resolved(큐에 있는 gate_id)를 쏘면 그 항목이 완료 상태로 바뀐다(undo 버튼 없이)', async () => {
+    mockFetches([actionableGate()], []);
+    await mount();
+    expect(container.textContent).toContain('실시간 대상 항목');
+    expect(container.textContent).not.toContain(koMessages.cage.queueResolvedApproved);
+
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_resolved');
+    expect(call).toBeTruthy();
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'g-live', status: 'approved' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
+    // 남이 해소한 건 — 이 세션에서 내가 한 게 아니므로 undo(정정) 버튼은 안 뜬다.
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateUndo))).toBe(false);
+  });
+
+  it('큐에 없는 gate_id의 이벤트는 무시한다', async () => {
+    mockFetches([actionableGate()], []);
+    await mount();
+
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_resolved');
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'not-in-queue', status: 'approved' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).not.toContain(koMessages.cage.queueResolvedApproved);
+  });
+
+  it('mux가 conversation.gate_delegated를 쏘면 그 항목이 큐에서 사라진다(assigned_to_me 스코프 이탈)', async () => {
+    mockFetches([actionableGate()], []);
+    await mount();
+    expect(container.textContent).toContain('실시간 대상 항목');
+
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_delegated');
+    expect(call).toBeTruthy();
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'g-live', new_approver_id: 'member-3' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).not.toContain('실시간 대상 항목');
+  });
+
+  it('malformed payload는 크래시 없이 무시한다', async () => {
+    mockFetches([actionableGate()], []);
+    await mount();
+
+    const resolvedHandler = muxSubscribeMock.mock.calls.find(([e]) => e === 'conversation.gate_resolved')![1] as (raw: string) => void;
+    const delegatedHandler = muxSubscribeMock.mock.calls.find(([e]) => e === 'conversation.gate_delegated')![1] as (raw: string) => void;
+    expect(() => resolvedHandler('not-json{')).not.toThrow();
+    expect(() => delegatedHandler('not-json{')).not.toThrow();
   });
 });
