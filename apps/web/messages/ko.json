@@ -1941,6 +1941,7 @@
     "indexNoResults": "조건에 맞는 문서가 없습니다",
     "breadcrumbKnowledgeRoot": "지식",
     "readMinutes": "읽기 {minutes}분",
+    "tocOnThisDoc": "이 문서",
     "docGateGoToEditorSign": "에디터에서 서명 결재",
     "docGateRejectModalTitle": "검토 반려",
     "docGateRejectReasonLabel": "반려 사유 (작성자에게 전달됩니다)",

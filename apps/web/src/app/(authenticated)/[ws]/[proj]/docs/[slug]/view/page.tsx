@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { DocContentRenderer } from '@/components/docs/doc-content-renderer';
 import { DocToc } from '@/components/docs/doc-toc';
+import { DocMiniToc } from '@/components/docs/doc-mini-toc';
+import { useActiveDocHeading } from '@/components/docs/doc-active-heading';
 import { extractDocHeadings } from '@/components/docs/doc-heading-utils';
 import { DocStatusHeader, DocEvidenceRail } from '@/components/docs/doc-status-rail';
 import { Button } from '@/components/ui/button';
@@ -50,10 +52,17 @@ export default function DocViewPage() {
 
   const [doc, setDoc] = useState<DocState>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const scrollRootRef = useRef<HTMLDivElement | null>(null);
 
   const scrollToHeading = useCallback((id: string) => {
     contentRef.current?.querySelector<HTMLElement>(`#${CSS.escape(id)}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
+
+  const headings = useMemo(
+    () => (doc ? extractDocHeadings(doc.content, doc.content_format ?? 'markdown') : []),
+    [doc],
+  );
+  const activeHeadingId = useActiveDocHeading(contentRef, headings, scrollRootRef);
 
   useEffect(() => {
     if (!projectId || !slug) return;
@@ -112,7 +121,7 @@ export default function DocViewPage() {
         <span className="text-muted-foreground">/</span>
         <span className="truncate text-foreground">{doc.title}</span>
         <span className="ml-auto flex shrink-0 items-center gap-1">
-          <DocToc headings={extractDocHeadings(doc.content, doc.content_format ?? 'markdown')} onHeadingClick={scrollToHeading} />
+          <DocToc headings={headings} onHeadingClick={scrollToHeading} />
           <Button asChild size="sm" variant="ghost">
             <Link href={docUrl(wsSlug, projSlug, slug)}>
               <Edit2 className="mr-1.5 h-3.5 w-3.5" />
@@ -122,7 +131,7 @@ export default function DocViewPage() {
         </span>
       </div>
 
-      <div className="focus-inset flex-1 overflow-y-auto">
+      <div ref={scrollRootRef} className="focus-inset flex-1 overflow-y-auto">
         <div className="grid grid-cols-1 gap-8 px-4 py-8 lg:grid-cols-[minmax(0,1fr)_316px] lg:px-8">
           {/* 리딩 컬럼(§3) — 68ch 정본(§8 확定), 본문 렌더는 무변경(DocContentRenderer). */}
           <article className="mx-auto w-full max-w-[68ch]">
@@ -166,6 +175,9 @@ export default function DocViewPage() {
 
           {/* 수직 증거 레일(§3/§6) — 접힌 gate 박스를 상시 공간으로 승격. */}
           <aside className="lg:border-l lg:border-border lg:pl-6">
+            {/* story #f546601e(v2 5호) — 긴 문서(N헤딩↑)만 자동 노출, 짧은 문서는 무변경
+                (MINI_TOC_MIN_HEADINGS 가드는 컴포넌트 내부). */}
+            <DocMiniToc headings={headings} activeId={activeHeadingId} onHeadingClick={scrollToHeading} className="mb-6" />
             <DocEvidenceRail docId={doc.id} status={doc.status} />
           </aside>
         </div>
