@@ -78,4 +78,18 @@ describe('attachNotificationHrefs', () => {
       expect.objectContaining({ id: 'notif-8', href: '/board?story=story-1' }),
     ]);
   });
+
+  // story #0d1c69f3(v2 4호) — 그룹핑 시안 AC2("죽은 링크 0")의 전제조건 버그 발견: 게이트
+  // 알림(reference_type='gate', gate.pending_approval 등 gate_service.py가 실제로 만드는
+  // 알림)이 이 함수에서 아예 매칭되지 않아 href:null(클릭해도 무반응)이었다. 실 상세
+  // 라우트(/gates/[id], 이미 존재)로 직결하도록 고쳤다 — reference_id를 그대로 경로에 싣는다.
+  it('builds a /gates/[id] deep link for gate notifications(gate.pending_approval 등, story #0d1c69f3 발견 fix)', async () => {
+    const notifications = await attachNotificationHrefs(createDbStub(), [
+      { id: 'notif-10', reference_type: 'gate', reference_id: 'gate-1' },
+    ]);
+
+    expect(notifications).toEqual([
+      expect.objectContaining({ id: 'notif-10', href: '/gates/gate-1' }),
+    ]);
+  });
 });
