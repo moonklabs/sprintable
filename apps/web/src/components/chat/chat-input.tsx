@@ -656,8 +656,10 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                 aria-label={t('steerPanelWorkItemLabel')}
                 className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground"
               />
+              {/* story #3000 로드맵 PR-B(L1) — 이 파일의 floating 드롭다운 4곳(작업항목·커맨드·
+                  멘션·엔티티 후보) 전부 --elev-overlay(오버레이 전용) 토큰으로 통일. */}
               {workItemPicker.entityResults.length > 0 && (
-                <ul role="listbox" aria-label={t('steerPanelWorkItemLabel')} className="focus-inset absolute top-full left-0 z-50 mt-1 max-h-40 w-full overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                <ul role="listbox" aria-label={t('steerPanelWorkItemLabel')} className="focus-inset absolute top-full left-0 z-50 mt-1 max-h-40 w-full overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
                   {workItemPicker.entityResults.map((ent) => (
                     <li key={`${ent.entity_type}:${ent.entity_id}`}>
                       <button
@@ -685,7 +687,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       <div className="relative flex items-end gap-2">
         {/* Command dropdown (선생님 B·mockup #3) — mention/entity 셸·키보드 nav 동일·command 활성=info 신호 토큰 */}
         {commandCandidates.length > 0 && (
-          <ul role="listbox" aria-label="커맨드 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+          <ul role="listbox" aria-label="커맨드 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {commandCandidates.map((cmd, idx) => (
               <li key={cmd.name}>
                 <button
@@ -707,7 +709,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
         {/* Mention dropdown */}
         {mentionMembers.length > 0 && (
-          <ul role="listbox" aria-label="멘션 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-56 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+          <ul role="listbox" aria-label="멘션 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-56 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {mentionMembers.map((member, idx) => (
               <li key={member.id}>
                 <button
@@ -729,7 +731,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         {/* Entity dropdown — story #2263(C-5) ㉡: 종류별 구역(머리글)으로 묶되 열은 안 나눈다
             (entityResults가 이미 groupEntitiesByType로 그룹 순서라 렌더 순서=entityIndex 순서). */}
         {entityPicker.entityResults.length > 0 && (
-          <ul role="listbox" aria-label="엔티티 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+          <ul role="listbox" aria-label="엔티티 후보" className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {entityPicker.entityResults.map((entity, idx) => {
               const EntityIcon = ENTITY_ICONS[entity.entity_type] ?? Hash;
               const isNewGroup = idx === 0 || entityPicker.entityResults[idx - 1]!.entity_type !== entity.entity_type;

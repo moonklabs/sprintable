@@ -403,3 +403,28 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
     expect(container.textContent).toContain('방향 전환 지시');
   });
 });
+
+// story #3000 로드맵 PR-B(L1) — floating 드롭다운(멘션 등)은 --elev-overlay 토큰이어야 한다
+// (shadow-md 리터럴 회귀가드).
+describe('ChatInput — 로드맵 PR-B L1(floating elev-overlay)', () => {
+  it('멘션 후보 드롭다운이 shadow-[var(--elev-overlay)]를 쓰고 shadow-md는 안 쓴다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{ id: 'm1', name: '오르테가' }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } })));
+    await act(async () => {
+      root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} />));
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '@오');
+      el.selectionStart = 2;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const listbox = container.querySelector('[role="listbox"]');
+    expect(listbox).not.toBeNull();
+    expect(listbox?.className).toContain('shadow-[var(--elev-overlay)]');
+    expect(listbox?.className).not.toContain('shadow-md');
+  });
+});

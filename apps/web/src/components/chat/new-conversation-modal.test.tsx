@@ -134,3 +134,22 @@ describe('NewConversationModal — 에이전트 정책 거부 구조화 안내(s
     expect(document.body.textContent).toContain('대화 생성에 실패했습니다. 다시 시도해보세요.');
   });
 });
+
+// story #3000 로드맵 PR-B(L5) — 후보 목록의 Bot 배지 배경은 정적 정체성 마킹이라 citron이
+// 아니라 proof-blue-soft여야 한다.
+describe('NewConversationModal — 로드맵 PR-B L5(Bot 배지 배경 proof-blue-soft)', () => {
+  it('agent 후보 항목의 Bot 배지가 bg-proof-blue-soft를 쓰고 bg-accent-claim은 안 쓴다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/members')) return { ok: true, json: async () => ({ data: MEMBERS }) };
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(wrap(<NewConversationModal projectId={PROJECT_ID} onClose={() => {}} onCreated={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const badge = document.body.querySelector('.rounded-sm.bg-proof-blue-soft');
+    expect(badge).toBeTruthy();
+    expect(badge?.textContent).toBe('Bot');
+    expect(document.body.querySelector('.bg-accent-claim\\/15')).toBeNull();
+  });
+});

@@ -101,3 +101,27 @@ describe('AddParticipantModal — 에이전트 정책 거부 구조화 안내(st
     expect(document.body.querySelectorAll('a[href^="/organization/workforce/"]').length).toBe(0);
   });
 });
+
+// story #3000 로드맵 PR-B(L5) — 후보 목록의 Bot 배지 배경은 정적 정체성 마킹이라 citron이
+// 아니라 proof-blue-soft여야 한다.
+describe('AddParticipantModal — 로드맵 PR-B L5(Bot 배지 배경 proof-blue-soft)', () => {
+  it('agent 후보 항목의 Bot 배지가 bg-proof-blue-soft를 쓰고 bg-accent-claim은 안 쓴다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/members')) return { ok: true, json: async () => ({ data: MEMBERS }) };
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(wrap(
+        <AddParticipantModal
+          conversationId={CONV_ID} conversationType="group" projectId={PROJECT_ID}
+          existingParticipantIds={['m-yuna']} onClose={() => {}} onAdded={() => {}}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const badge = document.body.querySelector('.rounded-sm.bg-proof-blue-soft');
+    expect(badge).toBeTruthy();
+    expect(badge?.textContent).toBe('Bot');
+    expect(document.body.querySelector('.bg-accent-claim\\/15')).toBeNull();
+  });
+});
