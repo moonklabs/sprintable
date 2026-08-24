@@ -53,6 +53,21 @@ describe('ProofCapsule (density variants)', () => {
       expect(markup).toContain('proof-cut');
     }
   });
+
+  it('regression #2978 — CutCornerShell never compresses below content height in a vertical flex chain (shrink-0 alongside overflow-hidden)', () => {
+    // 선생님 실사용 발견 — /gates/[id] 상세가 overflow-y-auto 조상 안에서 뷰포트가 좁으면
+    // 스크롤이 원천 봉쇄됐다. 원인: overflow-hidden인 flex item의 CSS 스펙상 automatic
+    // minimum size가 0이라, shrink-0 없이는 셸이 내용 실제 높이보다 찌그러들며 잘림을
+    // overflow-hidden이 감춰 조상 스크롤러가 넘침을 못 본다.
+    // ⚠️row/audit 밀도는 셸 내부 아이콘 span 등에 무관한 shrink-0가 이미 있어 단순
+    // `.toContain('shrink-0')`는 이 fix와 무관하게도 통과하는 약한 assert가 된다 — 반드시
+    // CutCornerShell 자신의 리터럴 클래스 조합("proof-cut flex shrink-0")으로 특정한다
+    // (mutation-검증: shrink-0 제거 시 이 assert만 RED, 위 span들은 무관).
+    for (const density of ['full', 'card', 'row'] as const) {
+      const markup = renderWithIntl(<ProofCapsule {...BASE} density={density} />);
+      expect(markup).toContain('proof-cut flex shrink-0');
+    }
+  });
 });
 
 describe('ProofCapsule (4 proof states — 색만으로 의미 전달 금지, stateLabel 텍스트 항상 병기)', () => {
