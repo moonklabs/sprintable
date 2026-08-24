@@ -151,6 +151,17 @@ describe('EpicDetailPage — 403 vs 404 분리 (story #2545)', () => {
     expect(replaceMock).not.toHaveBeenCalled();
     expect(container.textContent).toContain('목표 제목');
   });
+
+  // story #2974(PR-D0 delta, 유나 확定 2026-08-23) — 이 두 숫자(진행률/outcome)는 doc상
+  // Display 대상이 아니다(font-display 미부착). 대신 무게 유틸(font-editorial-heading,
+  // --font-weight-editorial-heading:820)만 유지 — D0 초판(font-display 단독 치환)이 이
+  // 무게를 조용히 지웠던 회귀를 여기서 고정한다.
+  it('진행률·outcome 숫자는 font-display가 아니라 font-editorial-heading(무게 820)만 경유한다(#2974 D0 delta)', async () => {
+    await mount(vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: epicFixture() }) })));
+    const weightEls = [...container.querySelectorAll('.font-editorial-heading')];
+    expect(weightEls.length).toBeGreaterThanOrEqual(2);
+    expect(weightEls.every((el) => !el.classList.contains('font-display'))).toBe(true);
+  });
 });
 
 // story #2587 AC3·AC4 — org-sync가 이 경로에 대해 아무 것도 할 게 없는(orgSyncPending=false,

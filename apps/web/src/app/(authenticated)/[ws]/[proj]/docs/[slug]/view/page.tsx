@@ -132,7 +132,9 @@ export default function DocViewPage() {
             <div className="text-[13px] font-semibold text-proof-blue">
               {categoryLabel ?? t('indexCategoryUncategorized')}
             </div>
-            <h1 className="mt-2 font-editorial-heading text-[38px] leading-[1.1] tracking-[-0.03em] text-foreground">{doc.title}</h1>
+            {/* story #2974(PR-D0) delta — font-display(페이스)+font-editorial-heading(무게 유틸,
+                --font-weight-editorial-heading:820) 병기. docs-index.tsx 마스트헤드 주석 참고. */}
+            <h1 className="mt-2 font-display font-editorial-heading text-[38px] leading-[1.1] tracking-[-0.03em] text-foreground">{doc.title}</h1>
             <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
               {doc.assignee ? (<><span>{doc.assignee.name}</span><span className="text-border">|</span></>) : null}
               <span>{doc.updated_at ? new Date(doc.updated_at).toLocaleDateString() : ''}</span>

@@ -127,7 +127,11 @@ export function DocsIndex() {
         <div className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
           {t('indexKicker')}
         </div>
-        <h1 className="mt-2 font-editorial-heading text-[46px] leading-none tracking-[-0.035em] text-foreground">
+        {/* story #2974(PR-D0) delta — `font-editorial-heading`은 무게 유틸(--font-weight-editorial-heading:
+            820, Tailwind가 자동생성)이지 페이스 토큰이 아니다. font-display 단독 치환이 무게 820을
+            조용히 지웠던 걸 유나군이 배포 CSS로 실증(2026-08-23) — 페이스(font-display)+무게
+            (font-editorial-heading) 병기로 복원. 정적 className이라 twMerge 충돌군 문제 없음. */}
+        <h1 className="mt-2 font-display font-editorial-heading text-[46px] leading-none tracking-[-0.035em] text-foreground">
           {t('title')}
         </h1>
         <hr className="my-4 h-[3px] w-[88px] border-0 bg-proof-citron" />
@@ -239,7 +243,7 @@ export function DocsIndex() {
                 <StatusChip status={lead.status} />
                 <span className="font-mono text-[11px] uppercase tracking-[0.05em] text-muted-foreground">{t('indexLeadBadge')}</span>
               </div>
-              <h2 className="font-editorial-heading text-[27px] leading-[1.15] tracking-[-0.02em] text-foreground">{lead.title}</h2>
+              <h2 className="font-display font-editorial-heading text-[27px] leading-[1.15] tracking-[-0.02em] text-foreground">{lead.title}</h2>
               <div className="font-mono text-[12px] text-muted-foreground">{formatDate(lead.updated_at)}</div>
             </button>
           ) : null}

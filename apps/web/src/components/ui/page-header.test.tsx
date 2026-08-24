@@ -18,10 +18,12 @@ async function mount(node: React.ReactNode): Promise<{ el: HTMLElement; root: Ro
 }
 
 // story #2969 §1.3/§2 C행(PR-6) 갱신 — Display tier 적용: font-bold(700)→
-// --font-weight-editorial-heading(820, 인라인 style — font-editorial-heading 유틸리티가
-// tailwind-merge와 충돌해 font-heading을 지우는 것 회피, page-header.test.tsx 참고)·
+// --font-weight-editorial-heading(820, 인라인 style — 과거 font-editorial-heading
+// 유틸리티가 tailwind-merge와 충돌해 font-heading을 지우던 것을 회피)·
 // tracking-tight→tracking-[-0.02em](§1.3 Display 정의 그대로).
-const ORIGINAL_TITLE_CLASSES = 'font-heading text-2xl tracking-[-0.02em] text-foreground md:text-3xl';
+// story #2974 §1(PR-D0) 갱신 — 페이스(family)가 font-heading(Pretendard 고정)에서
+// font-display(§1 신규 토큰, D0 값=var(--font-sans)라 시각 변화 0)로 전환.
+const ORIGINAL_TITLE_CLASSES = 'font-display text-2xl tracking-[-0.02em] text-foreground md:text-3xl';
 
 function classSet(s: string): Set<string> {
   return new Set(s.split(/\s+/).filter(Boolean));

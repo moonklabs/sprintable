@@ -120,6 +120,13 @@
 }
 
 @theme inline {
+  /* story #2974 §1(PR-D0, 가역성 1급) — Display 헤딩(§1.3 최상단 페이지 lead·히어로) 전용
+     페이스 스위치. 초기값=var(--font-sans)(Pretendard) — D0는 배선만, 시각 변화 0. 세리프
+     켜기(D1~)는 이 한 줄만 `'Noto Serif KR', var(--font-serif), serif`로 바꾸면 전체
+     전환(뒤집힐 때도 이 한 줄로 전체 복귀). 개별 화면에 폰트명 하드코딩 금지 — 전부 이
+     토큰(또는 font-display 유틸) 경유. weight(--font-weight-editorial-heading)와는 별개
+     축(family) — 소헤딩·본문·메타·숫자는 대상 아님(Pretendard/mono 유지). */
+  --font-display: var(--font-sans);
   --font-heading: var(--font-sans);
   --font-sans: var(--font-sans);
   --font-serif: var(--font-serif);

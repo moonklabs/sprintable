@@ -211,8 +211,11 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
   return (
     <>
       {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 재분류(구조·크기 불변):
-          TopBar 타이틀=Heading(무게↑만·크기는 TopBar 유지). */}
-      <TopBarSlot title={<h1 className="text-sm font-extrabold">{t('title')}</h1>} showContextChip />
+          TopBar 타이틀=Heading(무게↑만·크기는 TopBar 유지).
+          story #2974 §3(PR-D0) — doc이 명시한 소비처: 무게(font-extrabold)는 이미 Heading
+          그대로 두고, 페이스(family)만 별도 축으로 font-display 토큰 경유 추가(D0 값=
+          var(--font-sans)라 시각 변화 0 — 세리프 켜지면 board TopBar 타이틀도 함께 전환). */}
+      <TopBarSlot title={<h1 className="text-sm font-display font-extrabold">{t('title')}</h1>} showContextChip />
 
       <div className="space-y-4 p-4">
         {/* story #2930(P0-G) I3 — nav에서 flow+sprints가 「보드」 단일 항목으로 접히며 사라진

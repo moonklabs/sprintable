@@ -24,15 +24,19 @@ import { cn } from '@/lib/utils';
  */
 // story #2969 §1.3/§2 C행(doc proofline-system-layer-2969, PR-6) — Display tier(에디토리얼
 // 디스플레이 타이포) 적용: font-bold(700)→--font-weight-editorial-heading(820)·
-// tracking-tight→-0.02em(§1.3 Display 정의 그대로). ⚠️무게는 `font-editorial-heading`
-// 유틸리티 클래스가 아니라 인라인 style로 건다 — tailwind-merge가 `font-heading`(폰트
-// 패밀리)과 `font-editorial-heading`(무게)을 같은 충돌군으로 오인해 하나를 지운다(직접
-// 실측: twMerge('font-heading font-editorial-heading') === 'font-editorial-heading',
-// font-heading이 조용히 사라짐). §1.4가 이 파일의 "히어로 판"에 proof-cut도 요구하지만,
-// 이 컴포넌트는 현재 배경/패딩이 없는 순수 타이포 블록이라(panel이 아님) cut이 보일
-// 표면 자체가 없다 — bg/padding을 새로 지어 넣는 것은 구조 추가라 추측 구현하지 않음
-// (유나 확認 필요 사항으로 남김).
-const pageHeaderVariants = cva('font-heading tracking-[-0.02em] text-foreground', {
+// tracking-tight→-0.02em(§1.3 Display 정의 그대로). ⚠️무게는 유틸리티 클래스가 아니라
+// 인라인 style로 건다 — tailwind-merge가 페이스 클래스와 (구)무게 클래스를 같은 충돌군으로
+// 오인해 하나를 지우던 전례가 있었다(직접 실측 완료, page-header.test.tsx에 회귀가드).
+// §1.4가 이 파일의 "히어로 판"에 proof-cut도 요구하지만, 이 컴포넌트는 현재 배경/패딩이
+// 없는 순수 타이포 블록이라(panel이 아님) cut이 보일 표면 자체가 없다 — 유나가 이 요건을
+// 철회함(2026-08-23, «page-header는 Display 타이포까지가 끝»).
+//
+// story #2974 §1(PR-D0) — 페이스(family)를 `font-heading`(=Pretendard 고정)에서
+// `font-display`(§1 신규 토큰, D0 초기값도 var(--font-sans)라 시각 변화 0)로 전환. 이
+// 파일이 doc §3의 "가장 대표" Display 소비처로 명시된 자리 — 세리프 켜기(D1~)가 실제로
+// 이 h1부터 반영되게 하려면 반드시 이 토큰을 경유해야 한다(font-heading으로 남으면 세리프
+// 전환에서 이 화면만 빠짐).
+const pageHeaderVariants = cva('font-display tracking-[-0.02em] text-foreground', {
   variants: {
     size: {
       page: 'text-2xl md:text-3xl',
