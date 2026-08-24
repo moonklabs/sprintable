@@ -902,10 +902,20 @@ async def trigger_gate_creation_for_late_participation(
                 if not head_sha:
                     continue
                 ci_result, _reason = await fetch_status_check_rollup(link.repo_full_name, head_sha, token)
+                # story #3035(2026-08-24, #3033 QA 부수발견 — verdict_capture.py:541과 형제
+                # 결함) — 바로 위에서 GitHub REST로 이 PR의 실 `merged` 상태를 이미 받아왔는데
+                # (head_sha 추출에만 쓰고) 여기 안 넘겼다 — `evaluate_merge_gate`가 그래서
+                # 기본값 "pass"로 낙관적 확定(아직 안 머지된 PR도 "머지됨"으로 게이트 생성
+                # 시점에 고정)했다. 이미 아는 사실을 던져버리고 근거없는 기본값으로 대체하던
+                # landmine — #3033과 동일 원칙(모름/아직-아님을 pass로 위조 안 함) 그대로
+                # 명시 배선. merged=False(아직 열려 있거나 머지 없이 닫힘)는 "실패"가 아니라
+                # 중립(None)으로 — 다른 웹훅 경로(`reconcile_merge_gate_with_real_evidence`
+                # 등)와 동일 관례.
+                merged = bool(pr.get("merged"))
                 await evaluate_merge_gate(
                     session, org_id, story_id,
                     pr_number=link.pr_number, repo=link.repo_full_name,
-                    ci_result=ci_result, head_sha=head_sha,
+                    ci_result=ci_result, pr_result=("pass" if merged else None), head_sha=head_sha,
                 )
         except Exception:  # noqa: BLE001 — 이 링크만 실패 처리(SAVEPOINT 롤백), 다른 링크·호출자 세션엔 무영향.
             logger.warning(
