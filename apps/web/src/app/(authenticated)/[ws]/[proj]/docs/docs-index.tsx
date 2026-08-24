@@ -134,7 +134,9 @@ export function DocsIndex() {
         <h1 className="mt-2 font-display font-editorial-heading text-[46px] leading-none tracking-[-0.035em] text-foreground">
           {t('title')}
         </h1>
-        <hr className="my-4 h-[3px] w-[88px] border-0 bg-proof-citron" />
+        {/* story #2983(유나 확定) — 정적 장식 citron 퇴출(citron=live pulse 신호 전용).
+            시그니처는 무채 두께(3px)·길이로 유지. */}
+        <hr className="my-4 h-[3px] w-[88px] border-0 bg-proof-line-strong" />
         <p className="text-editorial-ui text-muted-foreground">
           {t('indexDek')} <span className="text-muted-foreground">{t('indexDocCount', { count: items.length })}</span>
         </p>

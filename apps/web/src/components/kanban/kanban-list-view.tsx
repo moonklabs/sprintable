@@ -77,7 +77,7 @@ function ListStoryRow({ story, epicMap, memberMap, onStoryClick, onChangeStatus 
           <div className="mt-1 flex items-center gap-2 relative z-10">
             <p className="text-xs text-muted-foreground">{memberMap[story.assignee_id].name}</p>
             {memberMap[story.assignee_id].type === 'agent' && (
-              <div className="flex items-center gap-1.5 text-[10px] font-mono text-accent-claim">
+              <div className="flex items-center gap-1.5 text-[10px] font-mono text-foreground">
                 <span className="relative flex h-1.5 w-1.5">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-claim opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent-claim"></span>

@@ -358,7 +358,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                         key={m.id}
                         className={`relative flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-medium ring-1 ring-background ${
                           m.type === 'agent'
-                            ? 'border-accent-claim/30 bg-accent-claim/10 text-accent-claim'
+                            ? 'border-accent-claim/30 bg-accent-claim/10 text-foreground'
                             : 'border-border bg-muted text-muted-foreground'
                         }`}
                         title={m.name}
@@ -380,7 +380,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                   <div />
                 )}
                 {hasAgent && (
-                  <span className="inline-flex items-center gap-1 text-[10px] text-accent-claim">
+                  <span className="inline-flex items-center gap-1 text-[10px] text-foreground">
                     <span className="size-1.5 shrink-0 rounded-full bg-accent-claim" aria-hidden="true" />
                     {t('filterAgents')}
                   </span>

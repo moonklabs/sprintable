@@ -361,7 +361,9 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         <div className="mt-0.5 font-editorial-heading text-[20px] leading-none tracking-[-0.03em] text-foreground">
           {t('title')}
         </div>
-        <hr className="mt-2 h-[3px] w-8 border-0 bg-proof-citron" />
+        {/* story #2983(유나 확定) — 정적 장식 citron 퇴출(citron=live pulse 신호 전용).
+            시그니처는 무채 두께(3px)·길이로 유지. */}
+        <hr className="mt-2 h-[3px] w-8 border-0 bg-proof-line-strong" />
       </div>
       <TreeSearchInput
         value={searchQuery}

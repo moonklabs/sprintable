@@ -376,9 +376,13 @@
   /* DS-S13: Extended semantic tokens */
   --overlay-backdrop: oklch(0 0 0 / 50%);
   --text-disabled: oklch(0.68 0 0);
-  /* story #2917: Citron(#C7F85A)은 라이트/다크 동일값·텍스트 절대 금지(매핑표 §5 실측
-     dark ink 대비 1.11 FAIL) — pulse/accent 전용, 기존 accent-claim 소비처(WORKING_RING_CLASS
-     등 장식적 링·배지)와 계약 그대로 일치. */
+  /* story #2917: 텍스트 절대 금지(매핑표 §5 실측 dark ink 대비 1.11 FAIL) — pulse/accent
+     전용, 기존 accent-claim 소비처(WORKING_RING_CLASS 등 장식적 링·배지)와 계약 그대로 일치.
+     story #2983(선생님 실사고 2026-08-24): #2917 당시 "라이트/다크 동일값"은 텍스트-대비축만
+     실측했고, 실사용(포커스링·active탭 등 비텍스트 border/ring) 축의 라이트 대비는 미실측이었다
+     — 실측하니 라이트 전 배경 1.03~1.24:1(비텍스트 최소 3:1 대폭 미달, 다크는 11~16:1로
+     정상). --proof-citron을 라이트 전용으로 분리(동일 hue/sat, L만 하향 — 다크는 무변경).
+     텍스트 금지 원칙은 그대로 유지. */
   --accent-claim: var(--proof-citron);
   --accent-claim-foreground: oklch(0.985 0 0);
   --highlight-search-bg: oklch(0.88 0.14 85 / 40%);
@@ -443,7 +447,12 @@
   --proof-faint: #9C9E93;
   --proof-blue: #3157FF;
   --proof-blue-soft: #EAEEFF;
-  --proof-citron: #C7F85A;
+  /* story #2983 — 라이트 전용 재조정값(다크 #C7F85A와 hue/sat 동일, L만 하향, 유나 확定
+     2026-08-24). vs proof-panel(white) 4.22:1 · vs proof-sunk(#ECEAE2) 3.50:1 — 비텍스트
+     3:1 최소 위 여유 margin. 텍스트(작은 배지 라벨 등)로는 4.5:1 미달이라 그 축은 값을
+     더 내리지 않고 text-accent-claim 소비처를 text-foreground로 전환해 해소(색값을 텍스트급
+     까지 내리면 링/dot이 과채도가 되는 트레이드오프 회피 — 유나 판단). */
+  --proof-citron: #5F8706;
   --proof-green: #1F9D57;
   --proof-green-soft: #E7F6EE;
   --proof-amber: #B7791F;

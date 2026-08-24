@@ -530,7 +530,7 @@ export function ChatBubble({
                 {displayName}
               </span>
               {isAgent && (
-                <span className="rounded-sm bg-accent-claim/15 px-1 py-0.5 text-[9px] font-medium text-accent-claim">
+                <span className="rounded-sm bg-accent-claim/15 px-1 py-0.5 text-[9px] font-medium text-foreground">
                   Bot
                 </span>
               )}
