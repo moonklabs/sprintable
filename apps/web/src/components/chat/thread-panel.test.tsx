@@ -235,3 +235,86 @@ describe('ThreadPanel — story #2911(S2e②③) 헤더 칩 브레드크럼(대�
     expect(header.querySelector('button[type="button"]')).toBeTruthy(); // 대화 칩만 버튼(요약은 span)
   });
 });
+
+// 2026-08-24(선생님 리포트) — 답글을 읽어도 GNB/리스트 unread 배지 (2)가 안 꺼지는 버그 회귀가드.
+// 원인: ThreadPanel이 mark-read(POST .../read)를 한 번도 호출하지 않았다(chat-view.tsx#markRead가
+// top-level 메시지에만 물려있었음). chat-list-view.tsx#applyConversationMessageUpdate는 parent_id
+// 구분 없이 모든 conversation.message_created(스레드 답글 포함)에서 unread_count를 올리므로,
+// 답글을 읽어도 내려갈 방법이 없었다.
+describe('ThreadPanel — 답글 열람 시 mark-read(onMarkRead) 배선(2026-08-24 뱃지 고착 fix)', () => {
+  it('로드 완료 시 최신 답글의 created_at으로 onMarkRead를 호출한다', async () => {
+    const onMarkRead = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/messages?thread_id=')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { id: 'reply-1', created_by: 'agent-2', sender: { id: 'agent-2', name: '유나', type: 'agent' }, content: '답글 1', created_at: '2026-08-08T00:01:00.000Z' },
+              { id: 'reply-2', created_by: 'agent-2', sender: { id: 'agent-2', name: '유나', type: 'agent' }, content: '답글 2', created_at: '2026-08-08T00:02:00.000Z' },
+            ],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+
+    await act(async () => {
+      root.render(wrap(
+        <ThreadPanel parentMessage={parentMessage} conversationId="conv-1" currentTeamMemberId="member-1" projectId="proj-1" onClose={() => {}} onMarkRead={onMarkRead} />,
+      ));
+    });
+    await flush();
+
+    expect(onMarkRead).toHaveBeenCalledWith('2026-08-08T00:02:00.000Z');
+  });
+
+  it('답글이 없으면 parentMessage.created_at으로 onMarkRead를 호출한다(원 메시지만 열람)', async () => {
+    const onMarkRead = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
+
+    await act(async () => {
+      root.render(wrap(
+        <ThreadPanel parentMessage={parentMessage} conversationId="conv-1" currentTeamMemberId="member-1" projectId="proj-1" onClose={() => {}} onMarkRead={onMarkRead} />,
+      ));
+    });
+    await flush();
+
+    expect(onMarkRead).toHaveBeenCalledWith(parentMessage.created_at);
+  });
+
+  it('패널이 열린 채로 신규 답글(incomingMessage)이 도착하면 그 created_at으로 onMarkRead를 재호출한다', async () => {
+    const onMarkRead = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
+
+    await act(async () => {
+      root.render(wrap(
+        <ThreadPanel parentMessage={parentMessage} conversationId="conv-1" currentTeamMemberId="member-1" projectId="proj-1" onClose={() => {}} onMarkRead={onMarkRead} />,
+      ));
+    });
+    await flush();
+    onMarkRead.mockClear();
+
+    const incoming: ChatMessage = {
+      id: 'reply-live',
+      memo_id: 'conv-1',
+      created_by: 'agent-3',
+      sender_name: '카디르',
+      sender_type: 'agent',
+      sender_avatar_url: null,
+      content: '실시간 답글',
+      attachments: [],
+      created_at: '2026-08-08T00:05:00.000Z',
+      parent_id: 'parent-1',
+    };
+
+    await act(async () => {
+      root.render(wrap(
+        <ThreadPanel parentMessage={parentMessage} conversationId="conv-1" currentTeamMemberId="member-1" projectId="proj-1" onClose={() => {}} onMarkRead={onMarkRead} incomingMessage={incoming} />,
+      ));
+    });
+    await flush();
+
+    expect(onMarkRead).toHaveBeenCalledWith('2026-08-08T00:05:00.000Z');
+  });
+});
