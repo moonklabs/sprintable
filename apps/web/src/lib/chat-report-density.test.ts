@@ -161,6 +161,17 @@ describe('extractLeadSentence (story #ec57c80c — 첫 문장 verbatim, 3015 규
       expect(lead).not.toContain('](entity:');
       expect(lead).toBe('문장. 안에 마침표가 있는 라벨 뒤이어지는 내용.');
     });
+
+    it('라벨 내부 이스케이프(\\]) 다음에 마침표가 오면 조기 절단으로 오판하지 않는다(story #3486 카디르 QA #3448 재발견 — isBalancedCut 이스케이프 미처리)', () => {
+      // 카디르 재현: 원문 세는 대괄호 카운트가 `\]`를 실제 닫는 대괄호로 착각해 "[label \]."
+      // 에서 조기 절단 → entity 토큰 정규식과 안 맞아 raw `[label \].`가 그대로 샌다.
+      const uuid = '55555555-5555-5555-5555-555555555555';
+      const raw = `[label \\]. rest](entity:story:${uuid}) next.`;
+      const lead = extractLeadSentence(raw);
+      expect(lead).not.toContain('[label');
+      expect(lead).not.toContain('](entity:');
+      expect(lead).toBe('label ]. rest next.');
+    });
   });
 });
 

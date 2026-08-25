@@ -70,11 +70,17 @@ export function deriveKicker(content: string, messageKind?: string | null): stri
 // story #3080 — entity 참조 토큰(`[라벨](entity:...)`)도 같은 결함 클래스: 마침표가 토큰
 // 중간(라벨 안·href 안)에 떨어지면 절단 결과가 여는 대괄호만 남은 `[라벨 일부`가 그대로
 // 샌다. 대괄호 개수 균형도 함께 본다 — 같은 "미절단 폴백" 정직 측 원칙 재사용.
+// story #3486(카디르 QA #3448 재발견) — 이 함수는 stripInlineMarkers(42행) 적용 前 원문
+// 위에서 세는데, 라벨 안 리터럴 대괄호를 이스케이프한 `\[`/`\]`(42행 관례)를 실제 여닫는
+// 대괄호로 착각해 균형을 오판한다("[label \]. rest]..."가 "\]"까지만 보고 1:1로 착각) —
+// 카운트용 사본에서 백슬래시 이스케이프 시퀀스부터 걷어낸다(42행의 원복과 달리 여기선
+// 문법 문자로도 안 세야 하므로 통째로 제거).
 function isBalancedCut(text: string): boolean {
-  const boldCount = (text.match(/\*\*/g) ?? []).length;
-  const codeCount = (text.match(/`/g) ?? []).length;
-  const openBracket = (text.match(/\[/g) ?? []).length;
-  const closeBracket = (text.match(/\]/g) ?? []).length;
+  const unescaped = text.replace(/\\./g, '');
+  const boldCount = (unescaped.match(/\*\*/g) ?? []).length;
+  const codeCount = (unescaped.match(/`/g) ?? []).length;
+  const openBracket = (unescaped.match(/\[/g) ?? []).length;
+  const closeBracket = (unescaped.match(/\]/g) ?? []).length;
   return boldCount % 2 === 0 && codeCount % 2 === 0 && openBracket === closeBracket;
 }
 
