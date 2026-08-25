@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, ChevronRight, EyeOff, History, Pause, Rocket, Zap, ZapOff, type LucideIcon } from 'lucide-react';
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import { LabelChip } from '@/components/ui/label-chip';
+import { MaterialChip } from '@/components/ui/material-chip';
 import { cn } from '@/lib/utils';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { TrustSeal } from '@/components/verify/trust-seal';
@@ -360,9 +361,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
             ) : null}
             {categoryTag ? (
               <div className="mb-1.5">
-                <span className="inline-block rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
-                  {categoryTag}
-                </span>
+                {/* story #3050(2984-S2) — MaterialChip(S1) 채택, bg-muted fill 폐지. */}
+                <MaterialChip>{categoryTag}</MaterialChip>
               </div>
             ) : null}
           </>
