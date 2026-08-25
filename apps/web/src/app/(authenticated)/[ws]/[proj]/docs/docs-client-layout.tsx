@@ -15,6 +15,7 @@ import { TreeSearchInput } from '@/components/docs/tree-search-input';
 import { DocSearchResults, type DocSearchResult } from '@/components/docs/doc-search-results';
 import { useTreeExpanded } from '@/components/docs/use-tree-expanded';
 import { Button } from '@/components/ui/button';
+import { CountBadge } from '@/components/ui/count-badge';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ToastContainer, useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -471,8 +472,10 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
               <span className="flex items-center gap-1.5">
                 {tagsCollapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
                 {t('tagFilter')}
+                {/* story #3053(2984-S5) — CountBadge(S1, mono+엠보스 inset) 채택,
+                    bg-proof-blue-soft 채움 폐지. */}
                 {tagsCollapsed && selectedTags.length > 0 && (
-                  <span className="proof-cut-xs bg-proof-blue-soft px-1.5 py-0.5 text-[10px] font-semibold text-foreground">{selectedTags.length}</span>
+                  <CountBadge count={selectedTags.length} />
                 )}
               </span>
             </button>
@@ -481,10 +484,10 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             {!tagsCollapsed && (
               <div className="flex max-h-[120px] flex-wrap gap-1 overflow-y-auto px-4 py-1">
                 {allTags.map((tag) => (
-                  // AC4(#2420 캐논) — tint 배경 위 계열색 텍스트 금지, StatusChip과 동일하게
-                  // text-foreground(선택)로 대비를 지킨다(시안 원안의 text-proof-blue는 이
-                  // 규율과 충돌해 안 따름).
-                  <button key={tag} type="button" onClick={() => setSelectedTags((prev) => prev.includes(tag) ? prev.filter((tg) => tg !== tag) : [...prev, tag])} className={`proof-cut-xs px-2 py-0.5 text-[11px] font-semibold transition ${selectedTags.includes(tag) ? 'bg-proof-blue-soft text-foreground' : 'bg-proof-sunk text-proof-ink-3 hover:bg-muted'}`}>
+                  // story #3053(2984-S5) — 선택 상태는 subtle 헤어라인 채택, bg-proof-blue-soft
+                  // 채움 폐지(비선택 bg-proof-sunk는 무채 중립 배경이라 SHIFT 대상 밖 — S1
+                  // 선례와 동형).
+                  <button key={tag} type="button" onClick={() => setSelectedTags((prev) => prev.includes(tag) ? prev.filter((tg) => tg !== tag) : [...prev, tag])} className={`proof-cut-xs px-2 py-0.5 text-[11px] font-semibold transition ${selectedTags.includes(tag) ? 'border border-proof-line bg-transparent text-foreground' : 'bg-proof-sunk text-proof-ink-3 hover:bg-muted'}`}>
                     #{tag}
                   </button>
                 ))}

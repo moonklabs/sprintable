@@ -13,6 +13,7 @@ import { useGoalsRoute } from './goals-context';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
+import { MaterialChip } from '@/components/ui/material-chip';
 import { EmptyState } from '@/components/ui/empty-state';
 
 // story 3995840c(doc resource-view-firsttouch-identity-pattern §4 "에픽" 행 — 정체성=하나의 큰
@@ -608,14 +609,13 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
             {/* story #2969 PR-1 발견 버그 — 아래 proof-cut-xs가 --proof-cut 값만 바꾸고
                 clip-path 자체를 여는 proof-cut 베이스 클래스가 빠져 있어(#2958 원 커밋 실수)
                 컷 자체가 안 그려지고 있었다(globals.css 참고). 즉시 수정. */}
-            <span
-              className={`proof-cut proof-cut-xs inline-flex items-center gap-1 px-2 py-0.5 text-[10.5px] font-bold ${
-                epic.status === 'active' ? 'bg-proof-blue-soft text-proof-blue' : 'bg-proof-sunk text-proof-ink-3'
-              }`}
-            >
+            {/* story #3053(2984-S5) — MaterialChip(S1, 헤어라인+fill 0) 채택, 상태별
+                bg-proof-blue-soft/bg-proof-sunk 채움 폐지. dot 신호(active=blue·비active=
+                faint)는 이미 있던 신호라 그대로 KEEP. */}
+            <MaterialChip className="gap-1 text-[10.5px]">
               <span className={`size-1.5 rounded-full ${epic.status === 'active' ? 'bg-proof-blue' : 'bg-proof-faint'}`} />
               {statusLabel[epic.status]}
-            </span>
+            </MaterialChip>
             {epic.outcome_status && epic.outcome_status !== 'n_a' ? <OutcomeStatusBadge status={epic.outcome_status} /> : null}
           </div>
           <p className="min-w-0 flex-1 text-editorial-claim font-editorial-claim leading-snug text-foreground">{epic.title}</p>
@@ -1116,11 +1116,13 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
           **커밋 성공 後에만** 표시(드래그 아님·no-fiction). 지정 수신자만 표기·활동량/타임스탬프 0.
           Proof Blue·부드러운 호흡·reduced-motion 대응. */}
       {justDispatched ? (
-        <div className="flex shrink-0 items-center gap-2 border-y border-proof-line-soft bg-proof-blue-soft px-4 py-2 text-[11.5px] font-semibold text-proof-blue">
+        // story #3053(2984-S5) — 헤어라인+elev(S1 재질 언어) 채택, bg-proof-blue-soft 채움
+        // 폐지. pulse dot(라이브 신호)은 그대로 KEEP — proof-blue.
+        <div className="flex shrink-0 items-center gap-2 border-y border-proof-line bg-proof-panel px-4 py-2 text-[11.5px] font-semibold text-foreground shadow-[var(--elev-card)]">
           <span className="size-1.5 shrink-0 rounded-full bg-proof-blue motion-safe:animate-pulse" aria-hidden="true" />
           <span>{t('steerHandoffReceived')} · <b className="font-bold">{t('steerHandoffOrchestrating')}</b></span>
           {dispatchedTo.length > 0 ? (
-            <span className="ml-auto max-w-[45%] truncate text-[9.5px] font-bold text-proof-blue/80">{dispatchedTo.join(', ')}</span>
+            <span className="ml-auto max-w-[45%] truncate text-[9.5px] font-bold text-muted-foreground">{dispatchedTo.join(', ')}</span>
           ) : null}
         </div>
       ) : null}

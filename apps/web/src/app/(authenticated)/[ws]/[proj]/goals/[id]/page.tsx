@@ -431,7 +431,11 @@ export default function EpicDetailPage() {
             </div>
             <div className="mt-2 text-[11px] text-muted-foreground">{t('taskCapsuleHint')}</div>
           </div>
-          <div className="proof-cut border border-proof-blue/25 bg-proof-blue-soft px-4 py-3.5">
+          {/* story #3053(2984-S5) — 헤어라인+elev(S1 재질 언어) 채택, bg-proof-blue-soft 채움
+              폐지. 강조 색은 이 카드의 항상-고정 blue(상태별 분기 없음, 기존 동작 그대로)를
+              proof-line 헤어라인+elev-card 깊이로 이전 — 텍스트 강조는 유지(신호가 아니라
+              위계라 색 텍스트는 남긴다, MaterialChip류의 "장식 fill"과는 다른 자리). */}
+          <div className="proof-cut border border-proof-line bg-proof-panel px-4 py-3.5 shadow-[var(--elev-card)]">
             <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-proof-blue">{t('outcomeCapsuleTitle')}</div>
             <div className="mt-1.5 font-editorial-heading text-[22px] tracking-[-0.02em] text-proof-blue">
               {epic.outcome_status === 'hit' ? t('outcomeCapsuleHit')

@@ -167,4 +167,13 @@ describe('DocsIndex — 문서 있음(§2 마스트헤드+목록)', () => {
     await act(async () => { draftChip!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(container.textContent).toContain('조건에 맞는 문서가 없습니다');
   });
+
+  // story #3053(2984-S5) — lead 문서 좌측 액센트가 무채(border-proof-line-strong)를 쓰고
+  // citron 정적 장식은 안 쓴다(citron은 live pulse 전용).
+  it('lead 문서 좌측 액센트가 무채 헤어라인을 쓰고 bg-proof-citron은 안 쓴다', async () => {
+    useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree });
+    await mount();
+    expect(container.querySelector('.bg-proof-line-strong')).toBeTruthy();
+    expect(container.querySelector('.bg-proof-citron')).toBeNull();
+  });
 });

@@ -240,7 +240,10 @@ export function DocsIndex() {
               onClick={() => goToDoc(lead.slug)}
               className="relative mb-3 flex w-full flex-col items-start gap-2 border border-border bg-card px-6 py-5 pl-7 text-left transition hover:border-foreground/30"
             >
-              <span className="absolute inset-y-0 left-0 w-1 bg-proof-citron" aria-hidden="true" />
+              {/* story #3053(2984-S5) — 무채 헤어라인 액센트 채택, citron 정적 장식 폐지
+                  (citron은 live pulse 신호 전용 — 위 §2983 주석과 동일 규율, 이 스트라이프는
+                  라이브가 아닌 정적 "lead" 표식이라 애초에 citron 대상이 아니었다). */}
+              <span className="absolute inset-y-0 left-0 w-1 bg-proof-line-strong" aria-hidden="true" />
               <div className="flex items-center gap-2.5">
                 <StatusChip status={lead.status} />
                 <span className="font-mono text-[11px] uppercase tracking-[0.05em] text-muted-foreground">{t('indexLeadBadge')}</span>

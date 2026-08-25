@@ -318,4 +318,22 @@ describe('EpicDetailPage — 결과 캡슐 재조립(§2 이중 신호·§4 신�
     await mountByUrl({ outcome_status: 'n_a' });
     expect(container.textContent).toContain('목표 생성');
   });
+
+  // story #3053(2984-S5) — Outcome Capsule은 헤어라인+elev(border-proof-line·bg-proof-panel·
+  // --elev-card)를 쓰고 bg-proof-blue-soft 채움은 안 쓴다.
+  it('결과 캡슐 — 헤어라인+elev를 쓰고 bg-proof-blue-soft는 안 쓴다', async () => {
+    await mountByUrl({ outcome_status: 'hit' });
+    const capsule = container.querySelector('.proof-cut.border-proof-line');
+    expect(capsule).toBeTruthy();
+    expect(capsule?.className).toContain('shadow-[var(--elev-card)]');
+    expect(container.querySelector('.bg-proof-blue-soft')).toBeNull();
+  });
+
+  // story #3053(2984-S5) — KEEP 재검(§2): 「생성」노드 dot이 형제(가설) 노드와 같은 solid
+  // bg-proof-blue를 쓰고 옛 -soft(옅은 틴트)는 안 쓴다.
+  it('신뢰 레일 — "생성" 노드 dot이 solid bg-proof-blue를 쓰고 bg-proof-blue-soft는 안 쓴다', async () => {
+    await mountByUrl({ outcome_status: 'n_a' });
+    expect(container.querySelector('.bg-proof-blue')).toBeTruthy();
+    expect(container.querySelector('.bg-proof-blue-soft')).toBeNull();
+  });
 });

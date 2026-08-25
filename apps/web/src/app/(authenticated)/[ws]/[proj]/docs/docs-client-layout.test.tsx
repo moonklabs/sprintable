@@ -137,6 +137,26 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     expect(calls.some((u) => u.includes('tags='))).toBe(true);
   });
 
+  // story #3053(2984-S5) — 선택 태그 칩은 헤어라인(border-proof-line+bg-transparent)을 쓰고
+  // 옛 bg-proof-blue-soft 채움은 안 쓴다. 태그 접었을 때 카운트는 CountBadge(mono+엠보스)로.
+  it('④재질 — 선택 태그 칩이 헤어라인을 쓰고 bg-proof-blue-soft는 안 쓴다, 접으면 CountBadge가 뜬다', async () => {
+    stubFetch();
+    await mount();
+    const tagToggle = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('태그'));
+    await act(async () => { tagToggle!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const tagChip = [...container.querySelectorAll('button')].find((b) => b.textContent === '#스펙');
+    await act(async () => { tagChip!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(tagChip?.className).toContain('border-proof-line');
+    expect(tagChip?.className).not.toContain('bg-proof-blue-soft');
+
+    // 접으면 카운트 배지(CountBadge, mono+엠보스 inset)가 뜬다.
+    await act(async () => { tagToggle!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const badge = container.querySelector('.font-mono.shadow-\\[var\\(--elev-inset\\)\\]');
+    expect(badge).toBeTruthy();
+    expect(badge?.textContent).toBe('1');
+    expect(container.querySelector('.bg-proof-blue-soft')).toBeNull();
+  });
+
   it('③정렬 3모드 — "내 폴더" 뷰에서 정렬 토글 3개가 뜨고 클릭이 sortMode를 localStorage에 저장한다', async () => {
     stubFetch();
     await mount();

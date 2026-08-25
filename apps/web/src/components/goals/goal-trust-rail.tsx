@@ -96,7 +96,10 @@ export function GoalTrustRail({ outcomeStatus, measureAfter, createdAt, epicId, 
 
         {/* 생성 — 항상. created_by 필드가 BE 스키마에 없어(그라운딩 확認) 이름은 안 지어낸다. */}
         <li className="relative">
-          <span className="absolute -left-[19px] top-2 size-2 rounded-full border-2 border-background bg-proof-blue-soft" />
+          {/* story #3053(2984-S5) — KEEP 재검(doc §2): 형제 노드(위 hypotheses)는 solid
+              bg-proof-amber인데 이 dot만 -soft(옅은 틴트)라 재질 불일치였다 — dot은 신호라
+              유지하되, 솔리드 채도로 정합(제거 아니라 정제). */}
+          <span className="absolute -left-[19px] top-2 size-2 rounded-full border-2 border-background bg-proof-blue" />
           <div className="text-[13px] font-medium text-foreground">{t('trustRailCreated')}</div>
           <div className="font-mono text-[11px] text-muted-foreground">{fmtDate(createdAt)}</div>
         </li>

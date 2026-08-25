@@ -182,25 +182,37 @@ describe('GoalsClient — 결과 원장 재조립(§2 이중 신호·§3 마스�
 
   // PR#3387 QA 처방 ①② — status==='done'만으론 상태 칩이 green이면 안 된다. outcome_status별
   // 명시 케이스로 고정(회귀 재발 시 바로 여기서 걸린다).
-  it('상태 칩 — done+miss는 초록이 아니라 중립(sunk)이다', async () => {
+  it('상태 칩 — done+miss는 초록이 아니라 중립(faint dot)이다', async () => {
     stubFetch([{ id: 'e1', title: 'M', status: 'done', total_stories: 1, done_stories: 1, outcome_status: 'miss' }]);
     await mount();
     expect(container.querySelector('.bg-proof-green-soft')).toBeNull();
-    expect(container.querySelector('.bg-proof-sunk')).not.toBeNull();
+    // story #3053(2984-S5) — MaterialChip 채택 후 상태 칩은 항상 헤어라인(border-proof-line
+    // bg-transparent)이고, active/비active 구분은 내부 dot(bg-proof-blue/bg-proof-faint)이
+    // 짊어진다 — bg-proof-sunk 채움 자체가 이제 없다(옛 fill 규율의 흔적 제거).
+    expect(container.querySelector('.bg-proof-faint')).not.toBeNull();
+    expect(container.querySelector('.bg-proof-sunk')).toBeNull();
   });
 
-  it('상태 칩 — done+unmeasured는 초록이 아니라 중립(sunk)이다', async () => {
+  it('상태 칩 — done+unmeasured는 초록이 아니라 중립(faint dot)이다', async () => {
     stubFetch([{ id: 'e1', title: 'U', status: 'done', total_stories: 1, done_stories: 1, outcome_status: 'unmeasured' }]);
     await mount();
     expect(container.querySelector('.bg-proof-green-soft')).toBeNull();
-    expect(container.querySelector('.bg-proof-sunk')).not.toBeNull();
+    // story #3053(2984-S5) — MaterialChip 채택 후 상태 칩은 항상 헤어라인(border-proof-line
+    // bg-transparent)이고, active/비active 구분은 내부 dot(bg-proof-blue/bg-proof-faint)이
+    // 짊어진다 — bg-proof-sunk 채움 자체가 이제 없다(옛 fill 규율의 흔적 제거).
+    expect(container.querySelector('.bg-proof-faint')).not.toBeNull();
+    expect(container.querySelector('.bg-proof-sunk')).toBeNull();
   });
 
-  it('상태 칩 — done+pending(아직 판정 없음)은 초록이 아니라 중립(sunk)이다', async () => {
+  it('상태 칩 — done+pending(아직 판정 없음)은 초록이 아니라 중립(faint dot)이다', async () => {
     stubFetch([{ id: 'e1', title: 'P', status: 'done', total_stories: 1, done_stories: 1, outcome_status: 'pending' }]);
     await mount();
     expect(container.querySelector('.bg-proof-green-soft')).toBeNull();
-    expect(container.querySelector('.bg-proof-sunk')).not.toBeNull();
+    // story #3053(2984-S5) — MaterialChip 채택 후 상태 칩은 항상 헤어라인(border-proof-line
+    // bg-transparent)이고, active/비active 구분은 내부 dot(bg-proof-blue/bg-proof-faint)이
+    // 짊어진다 — bg-proof-sunk 채움 자체가 이제 없다(옛 fill 규율의 흔적 제거).
+    expect(container.querySelector('.bg-proof-faint')).not.toBeNull();
+    expect(container.querySelector('.bg-proof-sunk')).toBeNull();
   });
 
   // PR#3387 처방 갱신(유나 원작자 정본 채택, PO 2026-08-23) — 미르코의 첫 처방("done&&hit만
