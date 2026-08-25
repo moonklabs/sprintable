@@ -13,6 +13,7 @@ import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosur
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import { fetchWithAuth } from '@/lib/db/client';
 import { NAV_GROUPS, CHAT_CENTER_ITEM } from '@/lib/nav-config';
+import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import {
   Sidebar,
   SidebarContent,
@@ -116,6 +117,7 @@ export function AppSidebar({
   }, []);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mux = useSseMultiplexerContext();
 
   useEffect(() => {
     let cancelled = false;
@@ -123,11 +125,16 @@ export function AppSidebar({
       try {
         // story #2160 — 30초 폴링이 401을 조용히 삼키던 자리(fetchWithAuth로 전환) — 그
         // 규율은 story #1981의 새 엔드포인트에도 그대로 적용한다.
-        const res = await fetchWithAuth('/api/gates?status=pending&assigned_to_me=true');
+        // story #3084(2026-08-25 층1, PO 확定) — assigned_to_me(project access+not-author,
+        // "누가 승인 자격이 있나"의 넓은 질문)를 designated-pending-count(순수 "내가 지정
+        // 결재자로 지정된 미해소 건이 몇 개인가", room 추론 0)로 교체. #3001부터 카드가
+        // 지정 라인 전용으로만 발행되므로 이 좁은 쿼리가 GNB "미확認" 뱃지의 정확한 SSOT다
+        // (BE 문서 gates.py::get_designated_pending_count — "AC1이 이 층에서 닫히는 근거").
+        const res = await fetchWithAuth('/api/gates/designated-pending-count');
         if (!res.ok || cancelled) return;
-        const gates = await res.json() as unknown[];
+        const json = await res.json() as { count?: number };
         if (!cancelled) {
-          setInboxPendingCount(Array.isArray(gates) ? gates.length : 0);
+          setInboxPendingCount(typeof json.count === 'number' ? json.count : 0);
         }
       } catch { /* noop */ }
     };
@@ -146,6 +153,27 @@ export function AppSidebar({
       document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, []);
+
+  // story #3084(2026-08-25 층1) — "라이브 카운트"(유나 규격 §3). 승인/토스/위임 어느 쪽이든
+  // 이 뱃지가 세는 집합(designated_approver_id=me AND status=pending)을 바꿀 수 있는 3
+  // 이벤트 전부에서 즉시 재조회(30초 폴링은 mux 미연결/이벤트 유실 대비 안전망으로 유지).
+  useEffect(() => {
+    if (!mux) return;
+    const refetch = () => {
+      void fetchWithAuth('/api/gates/designated-pending-count')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((json: { count?: number } | null) => {
+          if (json && typeof json.count === 'number') setInboxPendingCount(json.count);
+        })
+        .catch(() => { /* noop — 다음 정상 이벤트나 30초 폴링으로 자연 회복 */ });
+    };
+    const unsubs = [
+      mux.subscribe('conversation.gate_resolved', refetch),
+      mux.subscribe('conversation.gate_delegated', refetch),
+      mux.subscribe('conversation.gate_tossed', refetch),
+    ];
+    return () => { for (const unsub of unsubs) unsub(); };
+  }, [mux]);
 
   function isActive(href: string) {
     return pathname === href || (href !== '/' && pathname.startsWith(href));

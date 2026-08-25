@@ -174,11 +174,13 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     expect(membersBtn?.hasAttribute('data-active')).toBe(false);
   });
 
-  // story #1981 — 배지 소스가 "안 읽은 알림 수"에서 "내 결재 대기 수"(/api/gates?status=
-  // pending&assigned_to_me=true, mobile-tab-bar.tsx와 동일 계약)로 바뀌었다. 응답이 원시
-  // 배열이라 .length가 그대로 배지 숫자다.
+  // story #1981 — 배지 소스가 "안 읽은 알림 수"에서 "내 결재 대기 수"로 바뀌었다.
+  // story #3084(2026-08-25 층1, PO 확定) — 그 소스가 다시 /api/gates?status=pending&
+  // assigned_to_me=true(원시 배열)에서 /api/gates/designated-pending-count({count})로
+  // 교체됐다 — designated_approver_id=me AND status=pending만 세는 room-무관 SSOT
+  // (BE gates.py::get_designated_pending_count 문서 — "AC1이 이 층에서 닫히는 근거").
   it('결재 대기 배지(inbox)가 카운트>0일 때만 렌더된다', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([{ id: 'g1' }, { id: 'g2' }, { id: 'g3' }]), {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ count: 3 }), {
       status: 200, headers: { 'content-type': 'application/json' },
     })));
     await mount();
@@ -187,7 +189,7 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
   });
 
   it('결재 대기 0건이면 배지가 안 뜬다', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([]), {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ count: 0 }), {
       status: 200, headers: { 'content-type': 'application/json' },
     })));
     await mount();

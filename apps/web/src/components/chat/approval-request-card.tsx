@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { Check, FileText, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Check, FileText, Forward, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -21,6 +21,8 @@ import { useSseMultiplexerContext } from '@/components/realtime-provider';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
+import { useToast, ToastContainer } from '@/components/ui/toast';
+import { TossSheet } from '@/components/chat/toss-sheet';
 
 export interface ApprovalTarget {
   work_item_type: string;
@@ -112,6 +114,10 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
   // story #461e9a54(P0) — approvals-queue.tsx(인박스, 채팅 밖)에서도 이 카드가 쓰인다 —
   // Provider 밖이면 null이라 기존 Dialog 모달 폴백(회귀 0).
   const readingPanel = useReadingPanel();
+  // story #3084(2026-08-25 층3) — 토스 성공/409 안내용. 이 카드 인스턴스 로컬(다른 카드
+  // 인스턴스와 공유 안 함) — attachment-file.tsx와 동일 선례, ToastContainer도 이 카드가
+  // 직접 렌더한다(fixed 오버레이라 DOM 위치 무관하게 뜬다).
+  const { toasts, addToast, dismissToast } = useToast();
 
   const fetchGate = useCallback(async () => {
     try {
@@ -154,6 +160,22 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
   useEffect(() => {
     if (!mux) return;
     const unsub = mux.subscribe('conversation.gate_delegated', (raw) => {
+      try {
+        const payload = JSON.parse(raw) as { gate_id?: string };
+        if (payload.gate_id === target.gate_id) void fetchGate();
+      } catch { /* malformed — 무시 */ }
+    });
+    return unsub;
+  }, [mux, target.gate_id, fetchGate]);
+
+  // story #3084(2026-08-25 층3, PO 확定 — FE 요건②) — 이 gate_id의 사본을 갖고 있던 모든
+  // conversation 수신자에게 방출되는 순수 SSE 이벤트(gate_resolved/gate_delegated와 동형,
+  // 새 ConversationMessage는 안 만듦). conversation_id 무관 gate_id 매칭이라 신규 사본이
+  // 하나 더 생겼다는 사실이 이미 열린 화면 전부(원 카드·기존 사본 전부)에 자동 반영된다 —
+  // AC2(여러 방 동기 전이)의 FE 절반이 이 구독 하나로 끝난다.
+  useEffect(() => {
+    if (!mux) return;
+    const unsub = mux.subscribe('conversation.gate_tossed', (raw) => {
       try {
         const payload = JSON.parse(raw) as { gate_id?: string };
         if (payload.gate_id === target.gate_id) void fetchGate();
@@ -288,9 +310,11 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
             onDiscussClick={() => setDiscussDialogOpen(true)}
             onUndone={() => void fetchGate()}
             eventDefinitionsByKey={eventDefinitionsByKey}
+            addToast={addToast}
           />
         }
       />
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       <GateDiscussDialog
         open={discussDialogOpen}
         onOpenChange={setDiscussDialogOpen}
@@ -314,6 +338,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
 
 function ApprovalRequestBody({
   gate, resolving, transitionError, onApprove, onReject, onDiscuss, onDiscussClick, onUndone, eventDefinitionsByKey,
+  addToast,
 }: {
   gate: GateItem;
   resolving: boolean;
@@ -326,13 +351,53 @@ function ApprovalRequestBody({
   onDiscussClick: () => void;
   onUndone: () => void;
   eventDefinitionsByKey?: Record<string, EventDefinitionSummary> | null;
+  /** story #3084(층3) — 토스 성공/409 안내 토스트(카드 인스턴스가 소유한 useToast, 부모가 전달). */
+  addToast: (toast: { type?: 'info' | 'warning' | 'success' | 'error'; title: string; body?: string }) => void;
 }) {
   const t = useTranslations('chats');
   // gates/[id]/page.tsx와 같은 문구를 쓴다(동일 개념=동일 어휘, DS 원칙) — 그 키들은 'cage'
   // 네임스페이스에 있다('chats'엔 없음, 그라운딩 중 확認).
   const tCage = useTranslations('cage');
-  const { currentTeamMemberId } = useDashboardContext();
+  const { currentTeamMemberId, projectId } = useDashboardContext();
   const title = gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`;
+
+  // story #3084(2026-08-25, 유나 픽셀 규격 v1 §부록A — 상태 파생표 SSOT) — «대기·requester»/
+  // «대기·관찰자»/토스 시트 문구가 필요로 하는 이름 2종(designated_approver_id·resolver_id)을
+  // gates/[id]/page.tsx의 fetchedResolverIdRef 관례와 동형으로 지연 조회한다(카드마다 독립
+  // — DelegateApprovalControl의 openPicker on-demand 조회와 같은 결).
+  const [memberNames, setMemberNames] = useState<Record<string, string>>({});
+  const fetchedNameIdsRef = useRef<string | null>(null);
+  const requesterId = (() => {
+    const raw = gate.neutral_facts?.['requested_by_member_id'];
+    return typeof raw === 'string' ? raw : null;
+  })();
+  const hasDesignatedLine = !!gate.designated_approver_id;
+  const isDesignatedViewer = hasDesignatedLine && gate.designated_approver_id === currentTeamMemberId;
+  const isRequesterViewer = !isDesignatedViewer && !!requesterId && requesterId === currentTeamMemberId;
+  const needsDesignatedName = gate.status === 'pending' && hasDesignatedLine && !isDesignatedViewer;
+  const needsResolverName = gate.status !== 'pending' && !!gate.resolver_id && gate.resolver_id !== currentTeamMemberId;
+  useEffect(() => {
+    const idsKey = `${needsDesignatedName ? gate.designated_approver_id : ''}|${needsResolverName ? gate.resolver_id : ''}`;
+    if (idsKey === '|' || fetchedNameIdsRef.current === idsKey) return;
+    fetchedNameIdsRef.current = idsKey;
+    void fetchWithAuth('/api/team-members')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: { data?: { id: string; name: string }[] } | null) => {
+        if (!json?.data) return;
+        const names: Record<string, string> = {};
+        for (const m of json.data) names[m.id] = m.name;
+        setMemberNames((prev) => ({ ...prev, ...names }));
+      })
+      .catch(() => { /* non-critical — id 스니펫 폴백으로 graceful */ });
+  }, [needsDesignatedName, needsResolverName, gate.designated_approver_id, gate.resolver_id]);
+  const designatedApproverName = gate.designated_approver_id
+    ? memberNames[gate.designated_approver_id] ?? gate.designated_approver_id.slice(0, 8)
+    : null;
+
+  // story #3084 층3 — 토스 시트 open state. 진입점은 아래 canToss 게이트(designated 본인
+  // ⋯ 오버플로 / requester 본인 "다른 방에도 보내기" 버튼) 둘 다 공유.
+  const [tossOpen, setTossOpen] = useState(false);
+  const canToss = gate.status === 'pending' && hasDesignatedLine && (isDesignatedViewer || isRequesterViewer);
 
   // story #2637 AC4(PO 08-14 확定, Q2/Q3 그라운딩) — resolved(회신) 분기만 preset.gate.verdict
   // block_template을 부분 소비(text·fields만 — header/actions는 안 씀, 「결재 요청」 라벨은
@@ -412,6 +477,18 @@ function ApprovalRequestBody({
                   fetchGate()로 실측한 최신 값이라 어느 메시지(request/result)를 눌러 들어왔든
                   같은 값을 보여준다.
                   story #2637 AC4 — 템플릿 없음/파싱실패 시 폴백(비회귀 안전망, AC2와 동형). */}
+              {/* story #3084(2026-08-25, 유나 픽셀 규격 부록A) — 「남이 처리」 상태만 처리자
+                  이름 표기(「내가 처리」는 굳이 이름을 안 붙여도 자명 — 상태 어휘표 그대로).
+                  gates/[id]/page.tsx의 gateDetailResolvedByStatus를 그대로 재사용(동일 개념=
+                  동일 어휘, DS 원칙 — 새 키 안 만듦). */}
+              {gate.resolver_id && gate.resolver_id !== currentTeamMemberId ? (
+                <p className="text-[11px] text-muted-foreground">
+                  {tCage('gateDetailResolvedByStatus', {
+                    name: memberNames[gate.resolver_id] ?? gate.resolver_id.slice(0, 8),
+                    status: RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status,
+                  })}
+                </p>
+              ) : null}
               {gate.resolution_note ? (
                 <p className="text-[11px] text-muted-foreground">{t('approvalRequestResolutionNote', { note: gate.resolution_note })}</p>
               ) : null}
@@ -423,6 +500,28 @@ function ApprovalRequestBody({
             <GateUndoButton gateId={gate.id} onUndone={onUndone} compact />
           ) : null}
         </>
+      ) : isRequesterViewer ? (
+        // story #3084(2026-08-25, 유나 픽셀 규격 부록A) — 「대기·requester」. requesterId를
+        // gate.neutral_facts에서 확실히 아는 경우에만(⚠️아래 관찰자 분기와 함께, requesterId가
+        // null인 legacy/무기록 게이트는 이 분기 자체가 안 걸려 그대로 isDelegatedAway로
+        // 폴백한다 — #3001 당시엔 이 구분이 없었던 것과 동형 안전망, 회귀 0).
+        <>
+          <div className="flex items-center gap-1.5 text-xs font-medium text-warning-strong">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden />
+            {t('approvalRequestWaitingOn', { name: designatedApproverName ?? '' })}
+          </div>
+          <Button type="button" size="sm" variant="secondary" onClick={() => setTossOpen(true)} className="w-full">
+            {t('approvalRequestTossTrigger')}
+          </Button>
+        </>
+      ) : requesterId && hasDesignatedLine && !isDesignatedViewer ? (
+        // story #3084 — 「대기·관찰자」(그룹방 3자). requesterId를 알고 있고 그게 나도 아니고
+        // designated도 내가 아닌, 진짜 제3자 시점 — 액션 없음(#3001 delegate와 무관한 축이라
+        // "위임됨" 문구는 부정확해 안 쓴다).
+        <div className="flex items-center gap-1.5 text-xs font-medium text-warning-strong">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden />
+          {t('approvalRequestWaitingOn', { name: designatedApproverName ?? '' })}
+        </div>
       ) : isDelegatedAway ? (
         // story #3001(선생님 정책 확定) — 이 카드의 원 수신자(=지금 보고 있는 나)가 위임으로
         // 밀려났다. "위임됨"은 BE rule A상 여전히 canAct===true로 잡힐 수 있어도(transition
@@ -430,6 +529,8 @@ function ApprovalRequestBody({
         // 무조건 읽기전용으로 좁힌다 — 결정 권한이 여기 남아있는 것처럼 보이는 UI 자체가
         // "승계는 튕겨내기로만" 원칙(선생님)의 시각적 위반이라(누구 이름인지는 지어내지
         // 않는다 — GateResponse가 현재 지정자 이름을 안 실어 보낸다).
+        // story #3084 — requesterId를 모르는(legacy/무기록) 게이트의 「대기·requester/관찰자」
+        // 판정 불가 케이스도 이 분기로 안전 폴백(위 두 분기가 requesterId 존재를 전제).
         <p className="text-xs text-muted-foreground">{t('approvalRequestDelegatedAway')}</p>
       ) : !canAct ? (
         // story #2091(P0)과 동일 fail-closed 규율 — can_approve=false(무권한 뷰어)는 액션을
@@ -476,10 +577,38 @@ function ApprovalRequestBody({
           </Button>
         </>
       )}
+      {/* story #3084(층3) — designated 본인의 토스 진입점. 승인/반려 판단 여부와 무관하게
+          (서명 고위험 플로우 아래서도) 항상 같은 자리 — 토스는 "판단"이 아니라 "도달 경로
+          추가"라 evidence 확인 게이트(needsFullFlow)·delegate와 별개 축. */}
+      {canToss && isDesignatedViewer ? (
+        <Button type="button" size="sm" variant="ghost" onClick={() => setTossOpen(true)} className="w-full text-muted-foreground">
+          <Forward className="h-3.5 w-3.5" aria-hidden />
+          {t('approvalRequestTossTrigger')}
+        </Button>
+      ) : null}
       {/* story #3001 — 위임(튕겨내기). 승인/반려 판단 여부와 무관하게(서명 고위험 플로우
           아래서도) 항상 같은 자리에 둔다 — 위임은 "판단을 남에게 넘기는" 행위라 evidence
           확인 게이트(needsFullFlow)와는 별개 축. */}
       {canDelegate ? <DelegateApprovalControl gateId={gate.id} onDelegated={onUndone} /> : null}
+      {canToss && projectId ? (
+        <TossSheet
+          open={tossOpen}
+          onOpenChange={setTossOpen}
+          gateId={gate.id}
+          projectId={projectId}
+          currentTeamMemberId={currentTeamMemberId ?? ''}
+          designatedApproverId={gate.designated_approver_id ?? ''}
+          designatedApproverName={designatedApproverName}
+          onTossed={(conversationTitle) => {
+            addToast({ type: 'info', title: t('approvalRequestTossSuccessToast', { conversation: conversationTitle }) });
+            onUndone();
+          }}
+          onAlreadyResolved={() => {
+            addToast({ type: 'warning', title: tCage('gateAlreadyResolvedError') });
+            onUndone();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
