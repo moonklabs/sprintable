@@ -4,6 +4,7 @@ All endpoints require CRON_SECRET via Authorization: Bearer header.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import uuid
@@ -451,13 +452,26 @@ async def retry_agent_runs(
 @router.post("/score-ga4-outcomes")
 async def score_ga4_outcomes(
     request: Request,
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_worker_db),
 ) -> JSONResponse:
     """E-OUTCOME-LOOP S5: GA4 지연 채점 잡.
 
     measure_after <= now AND outcome_status = 'pending' AND source = 'ga4'인
     story·sprint를 GA4 Data API로 채점.
-    """
+
+    story #2041(그라운딩 doc 67b44d1e, PR-C) 근본수정 — ①`get_db`(요청 primary pool) 대신
+    `get_worker_db`(story #2461과 동일 전용 소형 풀)로 이관 — GA4 Data API 왕복이 아무리
+    길어져도 요청 커넥션 예산을 소모하지 않는다. ②`score_ga4_outcome`의 실 구현(`ga4_client.
+    fetch_ga4_metric`)이 동기 blocking gRPC 호출이라 `asyncio.to_thread`로 감싸 이벤트루프도
+    블록하지 않게 한다(같은 프로세스의 다른 요청이 이 크론 동안 멈추던 문제 해소).
+
+    ⚠️겹침 방지 미비(그라운딩 시 확認, 이 PR이 새로 만든 결함 아님) — 이 엔드포인트는
+    `outcome_status == 'pending'` WHERE 필터 하나뿐, `FOR UPDATE`/advisory lock 등 행 단위
+    claim이 없다. 크론 스케줄러가 중첩 호출을 안 만든다는 전제(verify_cron은 인증만, 겹침
+    방지 아님)로 원래부터 동작해 왔다 — 이 PR은 그 전제를 바꾸지 않는다(worker pool 이관+
+    to_thread 포장 모두 SELECT/커밋 시점 자체는 안 건드림). 겹침 시 최악은 같은 GA4 채점
+    호출 중복(비용·quota 낭비)이지 데이터 훼손은 아니다(마지막 write가 이김, 멱등). 실 겹침
+    위험이 실측되면 별도 스토리로 SKIP LOCKED/advisory lock 도입 검토."""
     verify_cron(request)
 
     from app.models.pm import Goal, Sprint, Story
@@ -481,7 +495,7 @@ async def score_ga4_outcomes(
             if not md or md.get("source") != "ga4":
                 continue
             try:
-                scoring = score_ga4_outcome(md)
+                scoring = await asyncio.to_thread(score_ga4_outcome, md)
                 sprint.outcome_status = scoring["outcome_status"]
                 sprint.outcome_result = scoring["outcome_result"]
                 scored.append({"type": "sprint", "id": str(sprint.id), "outcome_status": scoring["outcome_status"]})
@@ -503,7 +517,7 @@ async def score_ga4_outcomes(
             if not md or md.get("source") != "ga4":
                 continue
             try:
-                scoring = score_ga4_outcome(md)
+                scoring = await asyncio.to_thread(score_ga4_outcome, md)
                 story.outcome_status = scoring["outcome_status"]
                 story.outcome_result = scoring["outcome_result"]
                 scored.append({"type": "story", "id": str(story.id), "outcome_status": scoring["outcome_status"]})
@@ -532,7 +546,7 @@ async def score_ga4_outcomes(
             source = md.get("source")
             try:
                 if source == "ga4":
-                    scoring = score_ga4_outcome(md)
+                    scoring = await asyncio.to_thread(score_ga4_outcome, md)
                 elif source == "internal_ops":
                     # 하위 스토리 진행률 계산
                     story_rows = await session.execute(
@@ -597,14 +611,18 @@ async def score_ga4_outcomes(
 @router.post("/score-hypotheses")
 async def score_hypotheses_cron(
     request: Request,
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_worker_db),
 ) -> JSONResponse:
     """E1-S4: Hypothesis 지연 채점 잡(블루프린트 §8.3).
 
     measure_after <= now 인 active/measuring 가설을 채점 — active→measuring 전이 후
     ga4/internal_ops 지표로 verified|falsified 판정(실패·미지원은 measuring 유지). legacy
     /score-ga4-outcomes와 분리(hypotheses 테이블만). 스케줄 배선은 별도 운영 story.
-    """
+
+    story #2041(그라운딩 doc 67b44d1e, PR-C) — `score-ga4-outcomes`와 동일 근거로
+    `get_db`(요청 primary pool) 대신 `get_worker_db`로 이관. GA4 채점 자체(동기 blocking
+    호출 to_thread 포장)는 `hypothesis_scorer.score_hypotheses` 내부에서 처리(단일 소유
+    지점 유지 — 이 함수는 세션 소스만 바꾼다)."""
     verify_cron(request)
 
     from app.services.hypothesis_scorer import score_hypotheses
