@@ -22,7 +22,7 @@ from app.models.org_subscription import OrgSubscription
 from app.models.pricing_version import PricingVersion
 from app.models.project import OrgMember
 from app.services.payment.factory import get_payment_adapter
-from app.services.platform_settings import get_platform_settings
+from app.services.platform_settings import get_platform_settings, require_billing_checkout_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -152,10 +152,11 @@ async def create_checkout_session(
     """Polar checkout 세션 생성 — owner/admin 전용.
 
     story #2728(선생님 결정②) — 구세계(Polar) checkout도 신세계와 동일하게 서버측 전면
-    차단(org_subscription_checkout.py의 checkout과 동일 근거·동일 스위치)."""
+    차단(org_subscription_checkout.py의 checkout과 동일 근거·동일 스위치). 카디르 QA
+    (PR#3460) — EE 환경서 라이브 등록되는데 이 축 테스트가 0건이었다(실측 적출). 같은
+    헬퍼(require_billing_checkout_enabled)를 공유해 판정이 갈라지지 않게 한다."""
     platform_settings = await get_platform_settings(session)
-    if not platform_settings.billing_checkout_enabled:
-        raise HTTPException(status_code=403, detail="billing checkout is not yet enabled")
+    require_billing_checkout_enabled(platform_settings)
 
     # owner/admin 권한 확인
     role_result = await session.execute(
