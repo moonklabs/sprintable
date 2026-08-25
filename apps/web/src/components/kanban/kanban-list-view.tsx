@@ -1,18 +1,12 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Badge } from '@/components/ui/badge';
-import { COLUMNS, VALID_TRANSITIONS, type KanbanStory, type KanbanMember } from './types';
-
-const PRIORITY_BADGE: Record<string, 'default' | 'info' | 'success' | 'destructive' | 'outline'> = {
-  critical: 'destructive',
-  high: 'outline',
-  medium: 'info',
-  low: 'default',
-};
+import { COLUMNS, type KanbanStory, type KanbanMember, type LineStatusSummary } from './types';
+import { StoryCard } from './story-card';
+import type { LabelData } from '@/components/ui/label-chip';
 
 interface KanbanListViewProps {
   stories: KanbanStory[];
@@ -20,108 +14,16 @@ interface KanbanListViewProps {
   memberMap: Record<string, KanbanMember>;
   onStoryClick: (story: KanbanStory) => void;
   onChangeStatus: (storyId: string, newStatus: string) => Promise<void>;
-}
-
-interface ListStoryRowProps {
-  story: KanbanStory;
-  epicMap: Record<string, string>;
-  memberMap: Record<string, KanbanMember>;
-  onStoryClick: (story: KanbanStory) => void;
-  onChangeStatus: (storyId: string, newStatus: string) => Promise<void>;
-}
-
-function ListStoryRow({ story, epicMap, memberMap, onStoryClick, onChangeStatus }: ListStoryRowProps) {
-  const t = useTranslations('board');
-  const [statusOpen, setStatusOpen] = useState(false);
-  const validNext = VALID_TRANSITIONS[story.status] ?? [];
-
-  const handleStatusChange = useCallback(
-    async (newStatus: string) => {
-      setStatusOpen(false);
-      await onChangeStatus(story.id, newStatus);
-    },
-    [story.id, onChangeStatus],
-  );
-
-  const currentColumn = COLUMNS.find((c) => c.id === story.status);
-
-  return (
-    <div className={`relative flex items-center gap-3 rounded-lg border px-4 py-3 transition-all ${
-      story.assignee_id && memberMap[story.assignee_id]?.type === 'agent'
-        ? 'border-accent-claim/50 bg-background shadow-[0_0_15px_color-mix(in_oklch,var(--accent-claim),transparent_85%)] hover:border-accent-claim/80 hover:shadow-[0_0_20px_color-mix(in_oklch,var(--accent-claim),transparent_75%)]'
-        : 'border-border bg-background hover:border-primary/30 hover:bg-muted/50'
-    }`}>
-      {story.assignee_id && memberMap[story.assignee_id]?.type === 'agent' && (
-        <div className="absolute inset-0 pointer-events-none rounded-lg border border-transparent bg-gradient-to-r from-accent-claim/10 to-purple-500/10 opacity-50" />
-      )}
-      <button
-        className="min-h-[44px] flex-1 text-left"
-        onClick={() => onStoryClick(story)}
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          {story.epic_id && epicMap[story.epic_id] && (
-            <Badge variant="info" className="text-[10px]">{epicMap[story.epic_id]}</Badge>
-          )}
-          {story.priority && (
-            <Badge variant={PRIORITY_BADGE[story.priority] ?? 'default'} className="text-[10px] capitalize">{story.priority as string}</Badge>
-          )}
-          {story.story_points != null && (
-            <span className="text-[10px] text-muted-foreground">{t('storyPointsBadge', { count: story.story_points })}</span>
-          )}
-        </div>
-        <p className="mt-1 text-sm font-medium text-foreground line-clamp-2 relative z-10">
-          {story.story_number ? <span className="mr-1 text-muted-foreground">#{story.story_number}</span> : null}
-          {story.title}
-        </p>
-        {story.assignee_id && memberMap[story.assignee_id] && (
-          <div className="mt-1 flex items-center gap-2 relative z-10">
-            <p className="text-xs text-muted-foreground">{memberMap[story.assignee_id].name}</p>
-            {memberMap[story.assignee_id].type === 'agent' && (
-              <div className="flex items-center gap-1.5 text-[10px] font-mono text-foreground">
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-claim opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent-claim"></span>
-                </span>
-                <span>&gt; Agent active</span>
-              </div>
-            )}
-          </div>
-        )}
-      </button>
-
-      <div className="relative shrink-0">
-        <button
-          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-border bg-muted/50 px-2 text-xs text-muted-foreground transition hover:bg-muted relative z-10"
-          onClick={(e) => {
-            e.stopPropagation();
-            setStatusOpen((prev) => !prev);
-          }}
-        >
-          <span className="max-w-[80px] truncate">{currentColumn ? t(currentColumn.i18nKey) : story.status}</span>
-          <ChevronDown className="ml-1 size-3 shrink-0" />
-        </button>
-
-        {statusOpen && validNext.length > 0 && (
-          // story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay.
-          <div className="absolute right-0 top-full z-50 mt-1 min-w-[140px] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-[var(--elev-overlay)]">
-            {validNext.map((nextStatus) => {
-              const col = COLUMNS.find((c) => c.id === nextStatus);
-              if (!col) return null;
-              return (
-                <button
-                  key={nextStatus}
-                  className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
-                  onClick={() => void handleStatusChange(nextStatus)}
-                >
-                  {t(col.i18nKey)}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  // story #3043(PO+유나 IA 확定 ⓒ, 2026-08-25) — 이 뷰의 행 atom을 자체 마크업(ListStoryRow)
+  // 대신 SID 3018 보드 카드(StoryCard)로 교체하면서 board 뷰(KanbanColumn)와 동일한 부가
+  // 데이터가 필요해졌다. 전부 optional(map에 키 없으면 story-card.tsx 자체 기본값으로
+  // 후퇴 — 카드 쪽이 이미 그 후퇴를 규율하므로 여기서 재구현하지 않는다).
+  executionMap?: Record<string, { status: string; rule_name?: string | null; completed_at?: string | null }>;
+  blockedByMap?: Record<string, string[]>;
+  storyLabelsMap?: Record<string, LabelData[]>;
+  storyGatesMap?: Record<string, { id: string; gate_type: string; status: string }[]>;
+  storyLineMap?: Record<string, LineStatusSummary>;
+  projectId?: string;
 }
 
 interface StatusGroupProps {
@@ -132,14 +34,24 @@ interface StatusGroupProps {
   memberMap: Record<string, KanbanMember>;
   onStoryClick: (story: KanbanStory) => void;
   onChangeStatus: (storyId: string, newStatus: string) => Promise<void>;
+  executionMap?: KanbanListViewProps['executionMap'];
+  blockedByMap?: KanbanListViewProps['blockedByMap'];
+  storyLabelsMap?: KanbanListViewProps['storyLabelsMap'];
+  storyGatesMap?: KanbanListViewProps['storyGatesMap'];
+  storyLineMap?: KanbanListViewProps['storyLineMap'];
+  projectId?: string;
 }
 
-function StatusGroup({ columnId, label, stories, epicMap, memberMap, onStoryClick, onChangeStatus }: StatusGroupProps) {
+function StatusGroup({
+  columnId, label, stories, epicMap, memberMap, onStoryClick, onChangeStatus,
+  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId,
+}: StatusGroupProps) {
   const [expanded, setExpanded] = useState(columnId !== 'done');
 
   return (
     <div>
       <button
+        type="button"
         className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-sm font-semibold text-foreground hover:bg-muted/50"
         onClick={() => setExpanded((p) => !p)}
       >
@@ -153,15 +65,28 @@ function StatusGroup({ columnId, label, stories, epicMap, memberMap, onStoryClic
           {stories.length === 0 ? (
             <p className="px-3 text-xs text-muted-foreground">—</p>
           ) : (
+            // story #3043 AC ⓒ — <lg 단일열은 컬럼을 가로로 두지 않는다(status는 이 섹션
+            // 그룹 헤더가 이미 표현). full-width(w-full)만 얹고 카드 재질 자체는 board 뷰와
+            // 완전히 동일한 StoryCard를 재사용(kanban-column.tsx의 호출부와 동형).
             stories.map((story) => (
-              <ListStoryRow
-                key={story.id}
-                story={story}
-                epicMap={epicMap}
-                memberMap={memberMap}
-                onStoryClick={onStoryClick}
-                onChangeStatus={onChangeStatus}
-              />
+              <div key={story.id} className="w-full">
+                <StoryCard
+                  className="max-w-none"
+                  story={story}
+                  epicName={story.epic_id ? epicMap[story.epic_id] : undefined}
+                  assignee={story.assignee_id ? memberMap[story.assignee_id] : undefined}
+                  assignees={(story.assignee_ids ?? []).flatMap((id) => (memberMap[id] ? [memberMap[id]] : []))}
+                  onClick={() => onStoryClick(story)}
+                  onChangeStatus={(storyId, newStatus) => void onChangeStatus(storyId, newStatus)}
+                  projectId={projectId}
+                  lastExecution={executionMap?.[story.id] ?? null}
+                  blockedBy={blockedByMap?.[story.id] ?? []}
+                  labels={storyLabelsMap?.[story.id] ?? []}
+                  gates={storyGatesMap?.[story.id] ?? []}
+                  lineStatus={storyLineMap?.[story.id]}
+                  verifiedBy={story.human_verified_by ? memberMap[story.human_verified_by] : undefined}
+                />
+              </div>
             ))
           )}
         </div>
@@ -170,7 +95,10 @@ function StatusGroup({ columnId, label, stories, epicMap, memberMap, onStoryClic
   );
 }
 
-export function KanbanListView({ stories, epicMap, memberMap, onStoryClick, onChangeStatus }: KanbanListViewProps) {
+export function KanbanListView({
+  stories, epicMap, memberMap, onStoryClick, onChangeStatus,
+  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId,
+}: KanbanListViewProps) {
   const t = useTranslations('board');
 
   return (
@@ -187,6 +115,12 @@ export function KanbanListView({ stories, epicMap, memberMap, onStoryClick, onCh
             memberMap={memberMap}
             onStoryClick={onStoryClick}
             onChangeStatus={onChangeStatus}
+            executionMap={executionMap}
+            blockedByMap={blockedByMap}
+            storyLabelsMap={storyLabelsMap}
+            storyGatesMap={storyGatesMap}
+            storyLineMap={storyLineMap}
+            projectId={projectId}
           />
         );
       })}

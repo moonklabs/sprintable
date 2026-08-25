@@ -24,6 +24,16 @@ vi.mock('@/components/nav/top-bar-slot', () => ({
   ),
 }));
 
+// story #3043(PO+유나 IA 확定 ⓒ, 2026-08-25) — viewMode 기본값이 이제 useIsMobile()로 갈리므로
+// (예전엔 'board' 하드코딩) jsdom엔 window.matchMedia가 없어(use-mobile.ts가 그걸 직접 부른다)
+// 이 파일의 기존 테스트 전부가 크래시했다. flow-client.test.tsx와 동일 패턴 — 훅 자체를
+// 모킹해 desktop(false)을 기본값으로 고정, 이 스토리의 신규 describe에서만 true로 override.
+let isMobileMock = false;
+vi.mock('@/hooks/use-mobile', () => ({
+  useIsMobile: () => isMobileMock,
+  MOBILE_BREAKPOINT: 1024,
+}));
+
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
@@ -139,6 +149,7 @@ beforeEach(() => {
   stubEventSource();
   useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human' });
   capturedDragEndHandlers.length = 0;
+  isMobileMock = false;
 });
 
 afterEach(async () => {
@@ -906,5 +917,55 @@ describe('KanbanBoard — 6단계 신뢰축 뷰(story #2933 H4)', () => {
       // 것 — 지금은 bulk 응답의 새 trust_stage('running')가 병합돼 여전히 렌더된다.
       expect(container.textContent).toContain('완료복귀카드');
     });
+  });
+});
+
+// story #3043(PO+유나 IA 확定 ⓒ, 2026-08-25) — viewMode('board'|'list')가 예전엔 뷰포트 무관
+// 'board'로 하드코딩돼 있었다(유나 실측: flow-client의 view='list' 세그로 진입해도 여기서
+// 다시 'board'로 떨어져 3.55배 가로 overflow 재발 — 이름이 같은 두 「board/list」 개념 충돌).
+describe('KanbanBoard — story #3043 <lg 기본값=list(칸반 다열은 opt-in)', () => {
+  it('모바일(isMobile=true)이면 기본값이 list다 — board 다열 컬럼이 아니라 KanbanListView가 뜬다', async () => {
+    isMobileMock = true;
+    stubFetch([{ id: 's-mobile', title: '모바일카드', status: 'backlog', priority: 'medium' }]);
+    await mount();
+
+    // board 뷰 전용 placeholder("스토리가 없습니다", 빈 컬럼마다 반복)는 list 뷰엔 없다 —
+    // list 뷰는 상태별 그룹 헤더(카운트 배지)로만 존재를 표현한다.
+    expect(container.textContent).not.toContain('스토리가 없습니다');
+    expect(container.textContent).toContain('모바일카드');
+  });
+
+  it('데스크톱(isMobile=false)이면 기존대로 board가 기본값이다(회귀 없음)', async () => {
+    isMobileMock = false;
+    stubFetch([{ id: 's-desktop', title: '데스크톱카드', status: 'backlog', priority: 'medium' }]);
+    await mount();
+
+    expect(container.textContent).toContain('스토리가 없습니다');
+  });
+
+  it('모바일이라도 다열(board) 토글을 직접 누르면 그 선택이 뷰포트와 무관하게 유지된다(칸반 opt-in)', async () => {
+    isMobileMock = true;
+    stubFetch([{ id: 's-toggle', title: '토글카드', status: 'backlog', priority: 'medium' }]);
+    await mount();
+
+    const boardToggle = container.querySelector<HTMLButtonElement>('button[title="Board view"]');
+    expect(boardToggle).not.toBeNull();
+    await act(async () => { boardToggle!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(container.textContent).toContain('스토리가 없습니다');
+  });
+
+  it('list 뷰의 행은 board 뷰와 동일한 StoryCard atom(SID 3018)을 재사용한다 — full-width(max-w-none)로', async () => {
+    isMobileMock = true;
+    stubFetch([{ id: 's-atom', title: '원자카드', status: 'backlog', priority: 'medium' }]);
+    await mount();
+
+    // CardVariant(ProofCapsule density="card")의 CutCornerShell 마커 — 예전 ListStoryRow
+    // 자체 마크업(rounded-lg border, proof-cut 없음)엔 없던 클래스라 진짜 atom 재사용의 증거.
+    expect(container.innerHTML).toContain('proof-cut');
+    // max-w-[280px](desktop 컬럼 고정폭 전제) 캡이 이 경로에선 max-w-none으로 override돼야
+    // full-width row가 된다 — cn()=twMerge라 나중 클래스가 이긴다(story-card.tsx 확認).
+    expect(container.innerHTML).toContain('max-w-none');
+    expect(container.innerHTML).not.toContain('max-w-[280px]');
   });
 });

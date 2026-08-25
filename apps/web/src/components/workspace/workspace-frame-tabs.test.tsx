@@ -17,6 +17,15 @@ vi.mock('next/navigation', () => ({
   useParams: () => ({ ws: 'my-ws', proj: 'my-proj' }),
 }));
 
+// story #3043(PO+유나 IA 확定 ⓐ, 2026-08-25) — <lg에서 이 탭행 텍스트·인디케이터가 커진다
+// (useIsMobile). jsdom엔 window.matchMedia가 없어 훅 자체를 모킹(flow-client.test.tsx와
+// 동일 패턴) — 기존 6개 테스트는 desktop(false) 기본값으로 회귀 0 유지.
+let isMobileMock = false;
+vi.mock('@/hooks/use-mobile', () => ({
+  useIsMobile: () => isMobileMock,
+  MOBILE_BREAKPOINT: 1024,
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -34,6 +43,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  isMobileMock = false;
 });
 
 afterEach(async () => {
@@ -88,5 +98,36 @@ describe('WorkspaceFrameTabs — story #2930 I3', () => {
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />, enMessages)); });
     const tabs = [...container.querySelectorAll('[role="tab"]')];
     expect(tabs.map((t) => t.textContent)).toEqual(['Board', 'Sprints', 'Epic']);
+  });
+
+  // story #3043(PO+유나 IA 확定 ⓐ, 2026-08-25) — "「지금」 탭을 열 때 여기가 보드인 것이
+  // 즉시 읽히게" 시각 위계 승격. PR#3358 규율(상위=underline·내부=pill)은 유지하고 그 안에서
+  // <lg만 텍스트·인디케이터를 키운다.
+  describe('<lg 시각 위계 승격', () => {
+    it('모바일이면 탭 텍스트가 더 커진다(text-base) — 데스크톱은 text-sm 그대로', async () => {
+      isMobileMock = true;
+      const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
+      await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
+      const boardTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '보드');
+      expect(boardTab?.className).toContain('text-base');
+      expect(boardTab?.className).not.toContain('text-sm');
+    });
+
+    it('데스크톱(기본값)이면 기존 text-sm 그대로다(회귀 없음)', async () => {
+      const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
+      await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
+      const boardTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '보드');
+      expect(boardTab?.className).toContain('text-sm');
+    });
+
+    it('모바일에서도 라우팅·aria-selected 동작은 회귀 없다', async () => {
+      isMobileMock = true;
+      const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
+      await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="sprints" />)); });
+      const boardTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '보드');
+      expect(boardTab?.getAttribute('aria-selected')).toBe('false');
+      await act(async () => { boardTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(pushMock).toHaveBeenCalledWith('/my-ws/my-proj/flow');
+    });
   });
 });

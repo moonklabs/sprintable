@@ -375,13 +375,21 @@ describe('FlowPageClient — story #2531(E-FLOW-V4 S1) 가설이 기본·최상�
 });
 
 // 카디르 라이브 QA(2026-08-09, S1) — REQUEST_CHANGES 2건 회귀가드.
-describe('FlowPageClient — 카디르 QA fix(2026-08-09) ①모바일 dead-end', () => {
-  it('모바일(isMobile=true)·?view= 없음 이면 기본값이 가설이 아니라 flow(NextMakerScreen)다 — 갈래·목록으로 갈 UI 경로가 0이 되는 dead-end 방지', async () => {
+// story #3043(PO+유나 IA 확定 ⓑ, 2026-08-25) — 모바일 기본값이 다시 갈렸다. 예전엔
+// #2225(모바일 3화면 대체 세그)가 곧 착지할 것을 전제로 flow(NextMakerScreen)를 기본값
+// 삼았으나, #2225는 실제로 한 줄도 안 짜인 채 status=backlog로 남아있었다(그라운딩 확認)
+// — 세그 자체도 숨겨져 있었으니 모바일에서 갈래·목록(칸반) 둘 다 도달 UI 경로가 0인
+// dead-end였다(PO가 "모바일에 보드 없다"고 오답할 정도의 실사고). 이제 세그를 모바일에서도
+// 그대로 그리고(아래 새 describe), 파라미터 없을 때의 기본값도 list(칸반)로 바꾼다 — 원
+// 신고("보드가 안 보인다")에 가장 가까운 화면을 첫 진입 기본값으로 세운다.
+describe('FlowPageClient — story #3043(PO+유나 IA 확定) 모바일 기본값=list(칸반)', () => {
+  it('모바일(isMobile=true)·?view= 없음 이면 기본값이 list(KanbanBoard)다', async () => {
     isMobileMock = true;
     await renderFlowClient();
 
-    expect(container.querySelector('[data-testid="next-maker-screen-stub"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="kanban-board-stub"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).toBeNull();
+    expect(container.querySelector('[data-testid="next-maker-screen-stub"]')).toBeNull();
   });
 
   it('데스크톱(isMobile=false)·?view= 없음 이면 기존대로 가설이 기본값이다(회귀 없음)', async () => {
@@ -389,6 +397,24 @@ describe('FlowPageClient — 카디르 QA fix(2026-08-09) ①모바일 dead-end'
     await renderFlowClient();
 
     expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).not.toBeNull();
+  });
+
+  it('모바일이라도 세그(가설|갈래|칸반)가 그려진다(예전엔 isMobile이면 렌더 자체를 안 했다)', async () => {
+    isMobileMock = true;
+    await renderFlowClient();
+
+    const labels = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
+    expect(labels).toContain(koMessages.flow.viewHypothesis);
+    expect(labels).toContain(koMessages.flow.viewFlow);
+    expect(labels).toContain(koMessages.flow.viewList);
+  });
+
+  it('모바일이라도 ?view=flow가 명시돼 있으면 그 값을 그대로 존중한다(주소로 갈래 진입 회귀 없음)', async () => {
+    isMobileMock = true;
+    currentSearch = 'view=flow';
+    await renderFlowClient();
+
+    expect(container.querySelector('[data-testid="next-maker-screen-stub"]')).not.toBeNull();
   });
 
   it('모바일이라도 ?view=hypothesis가 URL에 명시돼 있으면 그대로 존중한다(주소로는 진입 가능)', async () => {
