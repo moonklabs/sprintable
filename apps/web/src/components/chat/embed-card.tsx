@@ -16,6 +16,7 @@ import { renderEntityStatusLabel, translateEntityStatus, type EntityStatusFetchS
 import { ArtifactThumbnail } from '@/components/canvas/artifact-thumbnail';
 import { fetchWithAuth } from '@/lib/db/client';
 import { parseEntityRef } from './entity-ref';
+import { useReadingPanel } from './reading-panel-context';
 // story #2888(S2a) — 이관 후 재수출(기존 소비처 4곳 import 경로 무변경, 회귀 0). 정본은
 // entity-registry.tsx 참고.
 import { ENTITY_ICONS, ENTITY_COLORS, GRAY_STATE_COLOR, resolveEntityIcon, EntityGlyph } from './entity-registry';
@@ -917,6 +918,9 @@ export function EntityChip({
   entityStatus?: EntityStatusFetchState;
 } & VariantProps<typeof entityChipLabelVariants>) {
   const [showModal, setShowModal] = useState(false);
+  // story #461e9a54(P0) — 채팅 트리(ReadingPanelProvider 하위)에서는 패널로, 밖(doc-content-
+  // renderer.tsx·story-detail-panel.tsx 등)에서는 null이라 기존 Dialog 모달로 폴백(회귀 0).
+  const readingPanel = useReadingPanel();
   const colorClass = ghost ? GRAY_STATE_COLOR : (ENTITY_COLORS[entityType] ?? GRAY_STATE_COLOR);
 
   // story #2669(B2) — doc이 chat-view.tsx 배치조회로 draft라고 확認되면, 상신 가능(project
@@ -1030,7 +1034,13 @@ export function EntityChip({
     ) : null;
     const triggerButtonProps = {
       type: 'button' as const,
-      onClick: () => setShowModal(true),
+      onClick: () => {
+        if (readingPanel) {
+          readingPanel.open({ kind: 'entity', entityType, entityId, title: label, status: null, href });
+          return;
+        }
+        setShowModal(true);
+      },
       className: 'inline-flex no-underline transition hover:opacity-80 motion-safe:active:scale-[0.98]',
     };
     const chipButton = tooltipContent ? (
@@ -1045,7 +1055,7 @@ export function EntityChip({
       <span className="inline-flex flex-wrap items-center gap-1">
         {chipButton}
         {docCta}
-        {showModal && (
+        {!readingPanel && showModal && (
           <EntityPreviewModal
             entityType={entityType}
             entityId={entityId}
