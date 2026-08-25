@@ -261,7 +261,9 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
         {/* story #2535(E-FLOW-V4 S5) — 축척 브레드크럼. 가설 뷰는 HypothesisEarthLayer가
             자기 안에서 이미 사다리를 그리므로(지구=활성) 여기서 중복 안 그린다. 갈래=도시·
             목록=건물 — 「지금 보는 층 = 묻는 질문 전환」을 탭 전환마다 같은 자리에서 보인다. */}
-        {view !== 'hypothesis' ? <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'building'} /> : null}
+        {view !== 'hypothesis' ? (
+          <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'building'} compact={isMobile} />
+        ) : null}
 
         {view === 'hypothesis' ? (
           // story #2531(E-FLOW-V4 S1) — 새 기본 랜딩. 가설(질문)을 최상위 조직 단위로 삼는

@@ -76,4 +76,30 @@ describe('ScaleLadder', () => {
     expect(cityRung?.className).toContain('bg-gradient-to-b');
     expect(earthRung?.className).not.toContain('bg-gradient-to-b');
   });
+
+  // story #3043(PO+유나 IA 확定 ⓐ, 2026-08-25) — <lg에서 이 카드열(이름+질문 5칸)이 「주」처럼
+  // 보여 보드(칸반) 콘텐츠를 아래로 밀어냈다(유나 실측). compact 모드는 이름만 남긴 칩열이다.
+  describe('compact(ⓐ 렌즈/필터 축소)', () => {
+    it('compact=true면 질문 문구(ladderQuestion_*)는 안 그린다 — 이름만 남는다', () => {
+      act(() => { root.render(wrap(<ScaleLadder compact />)); });
+      expect(container.textContent).toContain(koMessages.flow.ladderName_earth);
+      expect(container.textContent).not.toContain(koMessages.flow.ladderQuestion_earth);
+    });
+
+    it('compact=true여도 activeLevel 강조는 유지된다(정보 손실 없음)', () => {
+      act(() => { root.render(wrap(<ScaleLadder compact activeLevel="city" />)); });
+      const chips = Array.from(container.querySelectorAll('span')).filter((s) =>
+        Object.values(koMessages.flow).some((v) => v === s.textContent),
+      );
+      const cityChip = chips.find((s) => s.textContent === koMessages.flow.ladderName_city);
+      const earthChip = chips.find((s) => s.textContent === koMessages.flow.ladderName_earth);
+      expect(cityChip?.className).toContain('text-brand');
+      expect(earthChip?.className).not.toContain('text-brand');
+    });
+
+    it('compact=false(기본값)는 기존 카드열 그대로다(회귀 없음)', () => {
+      act(() => { root.render(wrap(<ScaleLadder />)); });
+      expect(container.textContent).toContain(koMessages.flow.ladderQuestion_earth);
+    });
+  });
 });

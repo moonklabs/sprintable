@@ -111,9 +111,14 @@ interface StoryCardProps {
    * `disabled: !sortable`류 기존 관례 재사용) "상태 변경" 우클릭 메뉴도 숨긴다(수동 상태변경도
    * 이 카드엔 안 맞음 — 게이트가 정하므로). 클릭(상세 열기)은 그대로 살아있다. */
   locked?: boolean;
+  /** story #3043(PO+유나 IA 확定 ⓒ, 2026-08-25) — CardVariant(ProofCapsule density="card")가
+   * `max-w-[280px]`를 하드코딩(desktop KanbanColumn 고정폭 전제) — 모바일 단일열(list) 재사용 시
+   * full-width row가 되려면 이 캡을 호출부가 override해야 한다. `cn()`이 twMerge라 나중 클래스가
+   * 이긴다 — 새 prop 없이 max-w-none을 넘기면 그대로 해소(신규 시각 언어 발명 없음). */
+  className?: string;
 }
 
-export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [], lineStatus, verifiedBy, locked = false }: StoryCardProps) {
+export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [], lineStatus, verifiedBy, locked = false, className }: StoryCardProps) {
   const t = useTranslations('board');
   // E-BOARD S6: 복수 assignee. assignees 우선, 없으면 단일 assignee 폴백. agent 한 명이라도 있으면 agent 취급(glow).
   const assigneeList = (assignees && assignees.length > 0) ? assignees : (assignee ? [assignee] : []);
@@ -488,6 +493,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
             </div>
           </div>
         }
+        className={className}
       />
 
       {/* Context Menu — body portal + position:fixed(뷰포트 좌표 clamp), 카드 위치와 무관하게 항상 화면 안 */}

@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import {
   DropdownMenu,
@@ -167,7 +168,15 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [assigneeTypeFilter, setAssigneeTypeFilter] = useState<'' | 'human' | 'agent'>('');
-  const [viewMode, setViewMode] = useState<'board' | 'list'>('board');
+  // story #3043(PO+유나 IA 확定 ⓒ, 2026-08-25) — 예전엔 이 state가 뷰포트 무관 'board'로
+  // 하드코딩돼 있었다(유나 실측: flow-client의 view='list' 세그로 진입해도 여기서 다시
+  // 'board'로 떨어져 3.55배 가로 overflow가 재발 — 이름이 같은 두 「board/list」 개념 충돌).
+  // null=아직 사용자가 명시로 안 고름(URL이나 클릭 없음) → isMobile로 유도한 기본값을 쓴다.
+  // 사용자가 토글 버튼을 누르면(setViewMode 직접 호출) 그 이후엔 뷰포트 변화와 무관하게
+  // 그 선택을 고정 존중(flow-client.tsx의 `?view=` 우선·isMobile 폴백과 동일한 위계).
+  const [viewModeOverride, setViewMode] = useState<'board' | 'list' | null>(null);
+  const isMobile = useIsMobile();
+  const viewMode = viewModeOverride ?? (isMobile ? 'list' : 'board');
   // story #2933 H4(P0-H) — 5-status/6단계 신뢰축 컬럼 축 토글. viewMode(board/list)와 직교
   // (list 뷰는 이번 슬라이스 스코프 밖 — trust 축은 board 렌더 안에서만). doneCollapsed와
   // 동형 localStorage 패턴(project별) — 재방문해도 마지막 선택 유지.
@@ -1561,6 +1570,12 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               memberMap={memberMap}
               onStoryClick={handleStoryClick}
               onChangeStatus={handleChangeStatus}
+              executionMap={executionMap}
+              blockedByMap={blockedByMap}
+              storyLabelsMap={storyLabelsMap}
+              storyGatesMap={storyGatesMap}
+              storyLineMap={storyLineMap}
+              projectId={projectId}
             />
           </div>
         ) : axisMode === 'trust' ? (

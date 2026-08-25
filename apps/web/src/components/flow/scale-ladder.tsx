@@ -15,8 +15,36 @@ import { cn } from '@/lib/utils';
 export const LADDER_LEVELS = ['earth', 'continent', 'city', 'street', 'building'] as const;
 export type LadderLevel = (typeof LADDER_LEVELS)[number];
 
-export function ScaleLadder({ activeLevel = 'earth' }: { activeLevel?: LadderLevel }) {
+export function ScaleLadder({ activeLevel = 'earth', compact = false }: { activeLevel?: LadderLevel; compact?: boolean }) {
   const t = useTranslations('flow');
+
+  // story #3043(PO+유나 IA 확定 ⓐ, 2026-08-25) — <lg에서 이 카드열(이름+질문 5칸, py-2.5)이
+  // 「주」처럼 보여 보드(칸반) 콘텐츠를 아래로 밀어냈다(유나 실측). 래더는 원래 역할이 보드의
+  // 렌즈/필터(지금 보는 층 표시)일 뿐이라 — 칩열로 낮춘다. 질문 문구(ladderQuestion_*)는
+  // 이 압축판에서 뺀다(공간 예산 안에서 이름만으로도 "지금 보는 층" 신호는 충분 — active
+  // 강조·순서 자체가 이미 그 정보를 나른다). 상호작용(onClick)은 원본에도 없던 것이라
+  // 여기서도 추가하지 않는다(read-only 브레드크럼 그대로, 회귀 0).
+  if (compact) {
+    return (
+      <div className="flex items-center gap-1 overflow-x-auto rounded-lg border border-border bg-card px-1.5 py-1">
+        {LADDER_LEVELS.map((level) => {
+          const active = level === activeLevel;
+          return (
+            <span
+              key={level}
+              className={cn(
+                'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium transition',
+                active ? 'bg-brand/10 text-brand' : 'text-muted-foreground',
+              )}
+            >
+              {t(`ladderName_${level}`)}
+            </span>
+          );
+        })}
+      </div>
+    );
+  }
+
   return (
     <div className="flex overflow-hidden rounded-xl border border-border bg-card">
       {LADDER_LEVELS.map((level) => {

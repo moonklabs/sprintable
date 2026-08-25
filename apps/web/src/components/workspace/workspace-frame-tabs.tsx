@@ -2,6 +2,8 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { cn } from '@/lib/utils';
 
 const TABS = [
   { key: 'board', path: 'flow' },
@@ -28,6 +30,11 @@ export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey })
   const t = useTranslations('nav');
   const router = useRouter();
   const params = useParams<{ ws: string; proj: string }>();
+  // story #3043(PO+유나 IA 확定 ⓐ, 2026-08-25) — "「지금」 탭을 열 때 여기가 보드인 것이
+  // 즉시 읽히게" 시각 위계 승격. PR#3358(유나 QA)이 세운 「상위 프레임=underline·내부 뷰
+  // 탭=rounded pill」구분 자체는 유효한 규율이라 유지(pill로 갈아타지 않음 — 재규격이 아니라
+  // <lg에서만 이 underline 계열 안에서 텍스트·인디케이터 두께를 키운다).
+  const isMobile = useIsMobile();
 
   return (
     // 유나 QA 블로커(PR#3358, 2026-08-22) — flow-client 내부 3탭(가설/갈래/칸반)과 스타일이
@@ -43,7 +50,12 @@ export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey })
           role="tab"
           aria-selected={active === tab.key}
           onClick={() => router.push(`/${params.ws}/${params.proj}/${tab.path}`)}
-          className={`-mb-px border-b-2 px-1 pb-2 text-sm font-semibold transition ${active === tab.key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+          className={cn(
+            'font-semibold transition',
+            isMobile
+              ? `-mb-px border-b-[3px] px-1 pb-2.5 text-base ${active === tab.key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`
+              : `-mb-px border-b-2 px-1 pb-2 text-sm ${active === tab.key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`,
+          )}
         >
           {t(tab.key)}
         </button>
