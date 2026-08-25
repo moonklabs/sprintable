@@ -562,6 +562,19 @@ async def evaluate_merge_gate(
             "merge gate re-opened on resubmit story=%s gate=%s prior=%s",
             story_id, gate.id, prior["status"],
         )
+    elif gate.status in ("pending", "auto_passed") and _prior_gate is not None:
+        # story #3039(2026-08-25, 근본원인 fix②) — create_gate()의 멱등 반환은 이미 존재하는
+        # gate에 새 neutral_facts를 전혀 반영하지 않는다(신규 생성 시점에만 씀). 그래서 CI/PR
+        # 증거가 나중에(웹훅으로) 갱신돼도 이 함수가 매번 새로 계산한 ci_result/pr_result 등이
+        # DB에 영구 반영 안 되고 증발했다 — decision_basis/auto_decision_reason(아래 H1-FIX-1,
+        # gate row 컬럼)은 이미 재평가마다 write-back되는데 neutral_facts(JSONB, FE가 실제
+        # "CI 통과/사유"를 읽는 자리)만 최초 생성 시점 값에 영구히 갇혀 있었다(실사고: PR#3460 —
+        # 5개 워크플로 전부 green check_suite completed 웹훅을 200으로 수신했으나
+        # gate.neutral_facts.ci_result가 계속 null). 기존 키(과거 reopen이 남긴
+        # decision_history 등)는 보존하고 이번에 새로 계산된 관찰사실/증거만 병합 갱신한다
+        # (전체교체 아님 — #2832 교훈과 동형).
+        gate.neutral_facts = {**(gate.neutral_facts or {}), **facts}
+        await session.flush()
 
     # story #2118(E-DG-REAL ②) — doc.py의 dispatch_approval_request_cards(#2604) 패턴을 merge
     # gate까지 확장: 이 호출에서 gate가 «방금» pending이 된 경우만(_prior_status와 비교, 위 주석

@@ -551,8 +551,10 @@ async def test_gate_check_publish_fires_on_base_retarget_edit_when_story_linked(
     # story #2893/#2932 후속(카디르 QA) — find_gate_slot_with_pr_fallback가 정확매치(없음)→
     # repo-unknown 슬롯(없음, story #2932 HIGH1 잔여)→NULL-슬롯 폴백까지 조회한다(3 SELECT).
     # 이 테스트는 전부 "없음"인 시나리오(진짜 신규)라 매 자리 no_gate_result 재사용으로 충분.
+    # story #3039 — resolve_story_for_pr가 sid(비-stored) 경로로 해소되면 upsert_link()가
+    # 그 자리서 링크를 영속화한다(기존 PullRequestStoryLink 존재여부 확인 SELECT 1건 추가).
     session.execute = AsyncMock(
-        side_effect=[installation_result, no_gate_result, no_gate_result, no_gate_result]
+        side_effect=[installation_result, no_gate_result, no_gate_result, no_gate_result, no_gate_result]
     )
     evaluate = AsyncMock(return_value=SimpleNamespace(gate_id=gate_id))
     gate_check_publish: list[dict] = []

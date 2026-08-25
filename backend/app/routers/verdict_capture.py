@@ -27,7 +27,7 @@ from app.models.pm import Story
 from app.routers.cron import CRON_SECRET, _err, _ok, verify_cron
 from app.services.github_app import get_installation_token
 from app.services.merge_verdict_gate import reconcile_merge_gate_with_real_evidence
-from app.services.pr_story_link import merge_link_evidence, resolve_story_for_pr
+from app.services.pr_story_link import merge_link_evidence, resolve_story_for_pr, upsert_link
 from app.services.verdict_capture import (
     capture_pr_ci_verdict,
     capture_review_verdict,
@@ -468,6 +468,33 @@ async def _process_webhook_event(
     story_id = rl.story_id
     org_id = rl.org_id  # app=입력 org·legacy=story.org_id(resolver 검증). 단일 진실원.
     delivery.org_id = org_id
+
+    # story #3039(2026-08-25, PO 판정) — resolve_story_for_pr()의 SID/auto_match/text 해소는
+    # 매 호출 휘발성(반환만·미영속)이다. pull_request류 이벤트는 payload에 title/body가
+    # 있어(_candidate_texts) 매번 SID 텍스트로 재해소되지만, check_suite/workflow_run/status
+    # 이벤트는 그 텍스트 자체가 payload에 없어 이 경로로는 다시는 못 찾는다 — 최초
+    # pull_request.opened 웹훅에서 SID로 딱 한 번 풀리고, 그 뒤 도착하는 CI-완료 웹훅은 전부
+    # "story 못 찾음"으로 조용히 ignored 처리돼(위 skipped_reason 분기) 게이트 재평가
+    # (reconcile_merge_gate_with_real_evidence)가 원천적으로 다시 안 태워지는 근본원인이었다
+    # (실 사례: PR#3460 — 5개 워크플로 전부 green·check_suite completed 웹훅 200 배달 확認됐으나
+    # 게이트 neutral_facts.ci_result 영구 null, evaluate_merge_gate 재호출 로그 0건). 비-stored
+    # 경로(explicit/stored_link 가 아닌, 즉 이번에 텍스트/auto_match 로 새로 풀린 것)로 해소되면
+    # 그 자리서 canonical link 로 영속화 — 다음부턴 이 함수의 1)단계(explicit/stored link, 텍스트
+    # 불요)가 바로 찾는다. #2832 교훈대로 upsert_link 는 evidence 병합(전체교체 아님)이라 이후
+    # 웹훅이 채우는 head_sha/scope_check 와 충돌 없다. 저장 실패는 이 요청의 처리 자체를 막지
+    # 않는다(비차단 — 최악의 경우 이번에도 못 찾은 것과 동일하게 남을 뿐).
+    if org_id is not None and repo and pr_number > 0 and rl.reason not in ("stored_explicit", "stored_link"):
+        try:
+            await upsert_link(
+                session, org_id, story_id, repo, pr_number,
+                link_source=rl.source or "auto_match", confidence=rl.confidence or "medium",
+                evidence=rl.evidence,
+            )
+        except Exception:  # noqa: BLE001 — 링크 캐싱 실패가 이번 웹훅 처리 자체를 막으면 안 된다.
+            logger.warning(
+                "PR-story link 영속화 실패(비차단) repo=%s pr=%s story=%s",
+                repo, pr_number, story_id, exc_info=True,
+            )
 
     # story #2813 — PR 라이프사이클 자체(opened/reopened/ready_for_review/synchronize)는 CI/merge
     # 증거와 무관하게 merge 게이트를 GitHub check-run으로 반영한다. 설계 doc §2-1(PO 승인): 카드
