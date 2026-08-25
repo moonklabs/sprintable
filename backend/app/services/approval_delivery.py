@@ -611,20 +611,21 @@ async def maybe_nudge_draft_doc_shared_in_chat(
     if author is None:
         return
 
-    # ①동시성-안전 1회성 anchor — DM/메시지 생성보다 *먼저*, 별도 SAVEPOINT로 시도한다.
-    # UNIQUE 위반은 "이미 누가 예약했다"는 확실한 신호라 여기서 조용히 반환(재시도 불요 —
-    # 그 다른 호출이 이미 실 배달을 책임진다).
+    # 카디르 QA 2R(#3465, 2026-08-25) — reservation INSERT와 실 배달(DM/메시지)을 **분리한
+    # 두 SAVEPOINT**로 짜면 반대편 구멍이 열린다: reservation이 먼저 release된 뒤 배달이
+    # 실패(예: 일시적 DB 오류)하면 그 예외는 흡수되고 reservation만 외부 트랜잭션에 남아
+    # 그 doc 넛지가 **영구 0건**(모든 미래 재시도가 "이미 있음"으로 오판)이 된다 — 중복
+    # (무해)보다 침묵 영구화(기능 무력화)가 더 나쁜 실패 모드였다(카디르 probe 실증).
+    # 반드시 **같은 SAVEPOINT 원자 단위**로 묶는다 — 배달이 실패하면 reservation도 함께
+    # 롤백돼 재시도 가능한 상태로 남는다. UNIQUE 위반(IntegrityError)은 이 단위 진입
+    # 직후(reservation INSERT 시점)에 발생하므로 중복 방어는 그대로 유지된다.
     try:
         async with db.begin_nested():
             db.add(DocChatNudgeDispatch(
                 id=uuid.uuid4(), org_id=org_id, doc_id=doc_id, author_id=doc_author_id,
             ))
-            await db.flush()
-    except IntegrityError:
-        return
+            await db.flush()  # UNIQUE(org_id, doc_id) 위반이면 여기서 IntegrityError.
 
-    try:
-        async with db.begin_nested():
             conv = await _get_or_create_approval_dm(
                 db, org_id=org_id, project_id=project_id,
                 requester_id=sender_id, approver_id=doc_author_id,
@@ -655,5 +656,9 @@ async def maybe_nudge_draft_doc_shared_in_chat(
                     reference_type="doc", reference_id=doc_id,
                     source_project_id=project_id, via_outbox=True,
                 )
+    except IntegrityError:
+        return  # 이미 다른 호출이 성공적으로 예약+배달까지 마쳤다(같은 원자 단위였으므로).
     except Exception:  # noqa: BLE001 — 넛지 실패는 메시지 전송 자체를 막지 않는다(best-effort).
+        # SAVEPOINT가 reservation INSERT까지 함께 롤백했으므로 이 doc은 "미예약" 상태로
+        # 남는다 — 다음 mention 시 정상 재시도된다(영구 침묵 아님).
         logger.warning("draft doc 채팅공유 넛지 실패(비차단) doc=%s author=%s", doc_id, doc_author_id, exc_info=True)

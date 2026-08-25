@@ -1,7 +1,9 @@
 """story #2747(2026-08-25, PO 판정) — draft 문서가 채팅에서 mention될 때 작성자에게
 1회성 넛지(결재 상신 여부를 묻는다). PO AC 2개를 실 PG로 고정한다:
-①1회성이 실제로 1회(같은 doc이 반복 mention돼도 중복 발송 금지 — 새 테이블/컬럼 없이
-DM 메시지 로그 자체를 SSOT로 멱등 판정) ②수신자는 doc 작성자만(대화 참여자 전체 아님).
+①1회성이 실제로 1회 — 발신자·대화 무관 **작성자당 전역 1회**(DocChatNudgeDispatch
+uq(org_id, doc_id) reservation row·카디르 QA 2R로 배달과 같은 SAVEPOINT 원자단위로
+정정) ②수신자는 doc 작성자만(대화 참여자 전체 아님). 회귀가드 3경로: 순차 2발신자·
+동시 asyncio.gather·배달 강제실패 後 정상 재시도.
 """
 from __future__ import annotations
 
@@ -291,5 +293,64 @@ async def test_self_share_does_not_nudge():
         async with Session() as s:
             rows = await _count_nudge_messages(s, doc_id)
             assert len(rows) == 0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_delivery_failure_rolls_back_reservation_and_retry_succeeds():
+    """⭐카디르 QA 2R(#3465) probe 재현 — reservation과 실 배달이 분리된 두 SAVEPOINT였을 때는
+    배달 실패(예: DM/이벤트 dispatch 도중 예외) 後 reservation만 남아 그 doc이 영구히
+    "이미 넛지 보냄"으로 오판돼 이후 정상 재시도까지 전부 조용히 막혔다(중복보다 나쁜
+    영구 침묵). 같은 SAVEPOINT 원자 단위로 묶은 뒤에는: ①강제 실패 시 메시지 0건(reservation도
+    같이 롤백) ②그 다음 정상 호출이 실제로 성공해 메시지 1건이 생긴다(재시도 가능)."""
+    from unittest.mock import patch
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            author_id = await _seed_human_member(s, org_id, project_id, name="Author")
+            sender_id = await _seed_human_member(s, org_id, project_id, name="Sender")
+            doc_id = await _seed_doc(s, org_id, project_id, author_id)
+
+        from app.services.approval_delivery import maybe_nudge_draft_doc_shared_in_chat
+
+        # 1차: 배달 단계(이벤트 dispatch)에서 강제 예외 — reservation도 같이 롤백돼야 한다.
+        async with Session() as s:
+            with patch(
+                "app.routers.conversations._dispatch_conversation_event",
+                side_effect=RuntimeError("일시적 배달 실패(강제)"),
+            ):
+                await maybe_nudge_draft_doc_shared_in_chat(
+                    s, org_id=org_id, project_id=project_id, doc_id=doc_id,
+                    doc_title="온보딩 리서치", doc_status="draft",
+                    doc_author_id=author_id, sender_id=sender_id,
+                )
+                await s.commit()
+
+        async with Session() as s:
+            rows = await _count_nudge_messages(s, doc_id)
+            assert len(rows) == 0, "강제 실패 後에도 메시지가 생김(예상 밖)"
+            from app.models.doc_chat_nudge_dispatch import DocChatNudgeDispatch
+            reservations = (await s.execute(
+                select(DocChatNudgeDispatch).where(DocChatNudgeDispatch.doc_id == doc_id)
+            )).scalars().all()
+            assert len(reservations) == 0, (
+                f"reservation이 배달 실패에도 살아남음(영구 침묵 버그 재발): {len(reservations)}건"
+            )
+
+        # 2차: 정상 재시도 — 이번엔 실제로 성공해야 한다(영구 침묵 아님).
+        async with Session() as s:
+            await maybe_nudge_draft_doc_shared_in_chat(
+                s, org_id=org_id, project_id=project_id, doc_id=doc_id,
+                doc_title="온보딩 리서치", doc_status="draft",
+                doc_author_id=author_id, sender_id=sender_id,
+            )
+            await s.commit()
+
+        async with Session() as s:
+            rows = await _count_nudge_messages(s, doc_id)
+            assert len(rows) == 1, f"재시도가 정상 성공하지 못함: {len(rows)}건"
     finally:
         await engine.dispose()
