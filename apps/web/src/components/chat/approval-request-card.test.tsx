@@ -12,6 +12,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ApprovalRequestCard, toEntityType } from './approval-request-card';
 import type { GateItem } from '@/components/kanban/types';
+import { ReadingPanelProvider } from '@/components/chat/reading-panel-context';
 
 describe('toEntityType (story #2118) — Gate.work_item_type ↔ entity_type 어휘 변환', () => {
   it('visual_artifact → artifact(embed-card.tsx 어휘로 변환)', () => {
@@ -143,6 +144,36 @@ describe('ApprovalRequestCard — 제목 미리보기 진입점, canPreviewEntit
     const titleButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(title));
     expect(titleButton).toBeFalsy();
     expect(container.textContent).toContain(title);
+  });
+});
+
+// story #461e9a54(P0) — 채팅 컨텍스트(ReadingPanelProvider 하위)에서는 제목 클릭이 Dialog
+// 모달이 아니라 우측 ReadingPanel을 연다. approvals-queue.tsx(인박스, 채팅 밖)는 Provider가
+// 없어 기존 Dialog 모달 그대로(위 "visual_artifact 클릭 시... 모달이 연다" 테스트가 이미
+// 그 폴백을 고정한다 — 회귀 0).
+describe('ApprovalRequestCard — story #461e9a54 ReadingPanel 라우팅(채팅 컨텍스트)', () => {
+  it('ReadingPanelProvider 하위에서 제목 클릭 시 open()이 정확한 target으로 불리고, Dialog는 안 뜬다', async () => {
+    const open = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/gates/')) {
+        return { ok: true, json: async () => ({ data: gate({ work_item_type: 'story', work_item_id: 'story-9', work_item_summary: { title: '패널 라우팅 대조', slug: null } }) }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ReadingPanelProvider value={{ open, close: vi.fn(), navigateTo: vi.fn() }}>
+            <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'story-9', gate_id: 'g-panel' }} />
+          </ReadingPanelProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const titleButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('패널 라우팅 대조'));
+    await act(async () => { titleButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ kind: 'entity', entityType: 'story', entityId: 'story-9', title: '패널 라우팅 대조' }));
+    expect(document.body.querySelector('[data-slot="dialog-content"]')).toBeNull();
   });
 });
 

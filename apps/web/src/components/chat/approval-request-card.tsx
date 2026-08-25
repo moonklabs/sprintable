@@ -11,6 +11,7 @@ import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-butt
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
 import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState } from '@/components/cage/gate-risk';
 import { EntityPreviewModal, canPreviewEntity, getEntityHref } from '@/components/chat/embed-card';
+import { useReadingPanel } from '@/components/chat/reading-panel-context';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 import { parseBlockTemplate, renderBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
@@ -108,6 +109,9 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
   // story #2926(P0-F F1) — claim 클릭(제목 미리보기)이 이제 ProofCapsule 셸 소관이라 이
   // state도 그쪽에 맞춰 여기(바깥 컴포넌트)로 끌어올렸다(기존 ApprovalRequestBody 소유였음).
   const [showPreview, setShowPreview] = useState(false);
+  // story #461e9a54(P0) — approvals-queue.tsx(인박스, 채팅 밖)에서도 이 카드가 쓰인다 —
+  // Provider 밖이면 null이라 기존 Dialog 모달 폴백(회귀 0).
+  const readingPanel = useReadingPanel();
 
   const fetchGate = useCallback(async () => {
     try {
@@ -262,7 +266,16 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
         proofState={proofState}
         stateLabel={stateLabel}
         claim={title}
-        onClaimClick={canPreview ? () => setShowPreview(true) : undefined}
+        onClaimClick={canPreview ? () => {
+          if (readingPanel) {
+            readingPanel.open({
+              kind: 'entity', entityType: previewEntityType, entityId: gate.work_item_id,
+              title, status: null, href: getEntityHref(previewEntityType, gate.work_item_id),
+            });
+            return;
+          }
+          setShowPreview(true);
+        } : undefined}
         className="max-w-full"
         footer={
           <ApprovalRequestBody
@@ -285,7 +298,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey }: ApprovalR
         submitting={discussSubmitting}
         error={discussError}
       />
-      {showPreview && (
+      {!readingPanel && showPreview && (
         <EntityPreviewModal
           entityType={previewEntityType}
           entityId={gate.work_item_id}

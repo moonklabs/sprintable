@@ -12,6 +12,7 @@ import { ChatInput, type CommandTarget } from './chat-input';
 import { ThreadPanel } from './thread-panel';
 import { ReadingPanel, type ReadingPanelTarget } from './reading-panel';
 import { useReadingPanelStack } from './use-reading-panel-stack';
+import { ReadingPanelProvider } from './reading-panel-context';
 import type { ChatMessage, SendAttachment } from '@/hooks/use-chat-sse';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { normalizeToMessage, useChatSse, type SseWorkingPayload } from '@/hooks/use-chat-sse';
@@ -771,7 +772,16 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const isMobileReadingView = readingPanelStack.length > 0;
   const isMobileRightPanelView = isMobileThreadView || isMobileReadingView;
 
+  // story #461e9a54(P0) — 채팅 하위 트리 전체(메시지·입력창 포함)를 이 Provider로 감싼다.
+  // EntityChip(embed-card.tsx)·approval-request-card.tsx가 이 값을 useReadingPanel()로
+  // 직접 소비 — prop-drilling 없이도 새 임베드 소비처가 자동으로 패널行 된다.
+  const readingPanelContextValue = useMemo(
+    () => ({ open: openReadingPanel, close: closeReadingPanel, navigateTo: navigateReadingPanelTo }),
+    [openReadingPanel, closeReadingPanel, navigateReadingPanelTo],
+  );
+
   return (
+    <ReadingPanelProvider value={readingPanelContextValue}>
     <div className="flex h-full flex-col overflow-hidden">
       {/* Mobile thread back — only while a thread panel is open (closes it). The page
           TopBar owns the conversation header, so this no longer duplicates it (S2). */}
@@ -1063,5 +1073,6 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
         onConfirm={() => { if (!blockSubmitting) void handleConfirmBlockUser(); }}
       />
     </div>
+    </ReadingPanelProvider>
   );
 }

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { EntityChip } from './embed-card';
+import { ReadingPanelProvider } from './reading-panel-context';
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => ({ projectMemberships: [] }),
@@ -102,5 +103,33 @@ describe('EntityChip ghost — variant 무관 무동작 유지', () => {
     });
     expect(container.textContent).toContain('대상이 없습니다');
     expect(container.querySelector('button')).toBeNull();
+  });
+});
+
+// story #461e9a54(P0) — 채팅 임베드는 전부 우측 ReadingPanel로(모달 0). ReadingPanelProvider
+// 유무로 갈리는 두 경로를 각각 고정한다.
+describe('EntityChip — story #461e9a54 ReadingPanel 라우팅', () => {
+  it('ReadingPanelProvider 하위에서 클릭하면 open()이 정확한 target으로 불리고, Dialog는 안 뜬다', async () => {
+    const open = vi.fn();
+    await act(async () => {
+      root.render(
+        <ReadingPanelProvider value={{ open, close: vi.fn(), navigateTo: vi.fn() }}>
+          <EntityChip entityType="story" entityId="s-1" label="스토리 제목" href="/board?story=s-1" />
+        </ReadingPanelProvider>,
+      );
+    });
+    await act(async () => { container.querySelector('button')!.click(); });
+    expect(open).toHaveBeenCalledWith({
+      kind: 'entity', entityType: 'story', entityId: 's-1', title: '스토리 제목', status: null, href: '/board?story=s-1',
+    });
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('Provider 밖(doc-content-renderer·story-detail-panel 등)에서 클릭하면 기존 Dialog 모달이 뜬다(회귀 0)', async () => {
+    await act(async () => {
+      root.render(<EntityChip entityType="story" entityId="s-1" label="스토리 제목" href="/board?story=s-1" />);
+    });
+    await act(async () => { container.querySelector('button')!.click(); });
+    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
   });
 });
