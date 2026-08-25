@@ -87,6 +87,18 @@ def _schedule_wake_after_commit(db: AsyncSession, recipient_id: str, seq: int) -
 
 
 def _fire_pending_wakes(sync_session: Session) -> None:
+    """⚠️SAVEPOINT 유령 wake(story #3062, approval_delivery.py의 `_fire_pending_gate_created_
+    pushes`/PR#3467·카디르 QA REQUEST_CHANGES②와 완전히 동형 — 이 함수가 그 패턴의 원본) —
+    `after_commit`은 outer 최종 commit뿐 아니라 `begin_nested()` SAVEPOINT를
+    release(`nested.commit()`)할 때도 발화한다(실측: 콜백 안에서 `in_nested_transaction()`이
+    그 순간 True). outer 트랜잭션이 이후 rollback돼도 이미 wake가 나가버려, 존재하지 않게 될
+    recipient_seq를 가리키는 유령 재조회 신호가 라이브로 새는 결함이었다.
+    `in_nested_transaction()`이 True인 발화(=SAVEPOINT release)는 pending을 비우지 않고
+    그대로 둔다 — 언젠가 진짜 outer commit의 after_commit이 다시 발화할 때(그때는
+    in_nested_transaction()=False) 최종 발사된다. outer가 끝내 rollback되면 after_rollback
+    훅(_clear_pending_wakes_on_rollback)이 비운다."""
+    if sync_session.in_nested_transaction():
+        return
     pending = sync_session.info.pop(_PENDING_WAKES_KEY, None) or []
     if not pending:
         return
