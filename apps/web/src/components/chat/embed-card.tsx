@@ -14,6 +14,7 @@ import { docViewUrl } from '@/components/docs/lib/doc-project-url';
 import { resolveScopedEntityHref, storyBoardUrl, goalUrl, sprintUrl, assetStorageUrl } from '@/lib/entity-project-url';
 import { renderEntityStatusLabel, translateEntityStatus, type EntityStatusFetchState } from './entity-status-labels';
 import { ArtifactThumbnail } from '@/components/canvas/artifact-thumbnail';
+import { sanitizeDocHtml } from '@/components/docs/doc-content-renderer';
 import { fetchWithAuth } from '@/lib/db/client';
 import { parseEntityRef } from './entity-ref';
 // story #2888(S2a) — 이관 후 재수출(기존 소비처 4곳 import 경로 무변경, 회귀 0). 정본은
@@ -204,8 +205,23 @@ function renderEntityDetail(entityType: string, entityId: string, detail: Record
   }
 
   if (entityType === 'doc') {
-    const d = detail as { content?: string };
-    return d.content ? <MdBody content={d.content} /> : null;
+    // story #3776ccfe(FE·결재 카드, 선생님 실사용 발견) — content_format을 안 보고 항상
+    // MdBody(마크다운 전용)에 먹였다: html doc이면 태그가 렌더 안 되고 이스케이프 텍스트로
+    // 그대로 찍혔다(react-markdown은 rehype-raw 없이는 raw HTML을 실행 안 함). doc-content-
+    // renderer.tsx(전체 읽기 뷰)가 이미 쓰는 DOMPurify sanitize 정본(sanitizeDocHtml)을
+    // 재사용해 html이면 sanitize 後 dangerouslySetInnerHTML, 그 외(markdown 기본값)는
+    // 기존 MdBody 그대로(회귀 0) — sanitize를 우회할 새 경로를 만들지 않는다.
+    const d = detail as { content?: string; content_format?: string };
+    if (!d.content) return null;
+    if (d.content_format === 'html') {
+      return (
+        <div
+          className="text-sm leading-6 [&_h1]:mb-2 [&_h1]:text-lg [&_h1]:font-bold [&_h2]:mb-2 [&_h2]:text-base [&_h2]:font-bold [&_h3]:mb-1.5 [&_h3]:text-sm [&_h3]:font-bold [&_p]:mb-2 [&_ul]:mb-2 [&_ul]:ml-4 [&_ul]:list-disc [&_ol]:mb-2 [&_ol]:ml-4 [&_ol]:list-decimal"
+          dangerouslySetInnerHTML={{ __html: sanitizeDocHtml(d.content) }}
+        />
+      );
+    }
+    return <MdBody content={d.content} />;
   }
 
   // story #2614 — 부모(story/epic/doc)가 없는 독립 artifact(챗에 바로 올린 mockup 등)는 풋터에
