@@ -729,6 +729,170 @@ async def notify_gate_delegated_to_old_approver(
     )]
 
 
+async def dispatch_approval_card_toss(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    work_item_type: str,
+    work_item_id: uuid.UUID,
+    title: str,
+    gate_id: uuid.UUID,
+    designated_approver_id: uuid.UUID,
+    target_conversation_id: uuid.UUID,
+    tossed_by_id: uuid.UUID,
+) -> bool:
+    """story #3084(2026-08-25, 선생님 정렬 v1 층3) — designated 결재자 본인 또는 상신자가
+    카드를 다른(designated 본인이 참여한) conversation에 **복제** 심는다. #3001 delegate
+    ("사람" 축 — 정체성 재지정, 카드 1개 유지)와 다른 "방" 축 — 같은 designated에게로
+    가는 도달 경로를 하나 더 여는 것뿐이라, 과거 기각된 "여러 사람으로의 카드 확산" 정책과
+    상충하지 않는다(페드루 PO 정렬 확定 2026-08-25).
+
+    카드 스키마 신설 없음(미르코 FE 그라운딩) — dispatch_approval_request_cards와 동일
+    모양의 ConversationMessage를 대상 conversation에 한 번 더 심을 뿐, gate_id 역참조
+    (msg_metadata.approval_target.gate_id) 하나로 여러 conversation의 카드가 전부 같은
+    게이트를 가리키는 기존 다중-approver 배달 구조를 그대로 재사용한다 — 신규 잠금/멱등
+    메커니즘도 불요(Gate.status FOR UPDATE가 이미 SSOT, notify_gate_card_recipients_
+    resolved가 이미 gate_id 기준 전체 conversation을 커버).
+
+    멱등: 대상 conversation에 이미 이 gate_id를 가리키는 카드가 있으면 새로 심지 않고
+    False를 반환(호출부가 "이미 토스됨"으로 조용히 취급 — 에러 아님). 신규 삽입 시 True.
+
+    인가(호출자가 requester/designated 본인인지)·대상 검증(designated가 target_
+    conversation 참여자인지, 카드=지정 라인 전용 정책 유지)은 라우터(gates.py::
+    toss_gate_endpoint)가 이 함수 호출 **전에** 이미 강제한다 — 이 함수 자신은 인가를
+    다시 하지 않는다(SoD 판정은 단일 지점, #3001 delegate와 동일 분업)."""
+    existing = (await db.execute(
+        select(ConversationMessage.id).where(
+            ConversationMessage.conversation_id == target_conversation_id,
+            ConversationMessage.msg_metadata["approval_target"]["gate_id"].astext == str(gate_id),
+        ).limit(1)
+    )).first()
+    if existing is not None:
+        return False
+
+    from app.routers.conversations import _dispatch_conversation_event
+    from app.services.member_resolver import lookup_members_by_ids
+
+    members = await lookup_members_by_ids({designated_approver_id, tossed_by_id}, db)
+    tossed_by = members.get(tossed_by_id)
+    designated_member = members.get(designated_approver_id)
+    if tossed_by is None:
+        logger.warning("gate toss 카드 삽입 스킵 — tossed_by 미확인 gate=%s", gate_id)
+        return False
+
+    conv = (await db.execute(
+        select(Conversation).where(Conversation.id == target_conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if conv is None:
+        logger.warning(
+            "gate toss 카드 삽입 스킵 — 대상 conversation 미확인 gate=%s conv=%s",
+            gate_id, target_conversation_id,
+        )
+        return False
+
+    async with db.begin_nested():
+        msg = ConversationMessage(
+            conversation_id=conv.id,
+            sender_id=tossed_by_id,
+            content=f"'{title}' 결재 요청 (토스됨)",
+            mentioned_ids=[designated_approver_id],
+            msg_metadata={
+                "activation": {
+                    "audience": [str(designated_approver_id)],
+                    "kind": "request",
+                    "expects_response": True,
+                },
+                "approval_target": {
+                    "work_item_type": work_item_type,
+                    "work_item_id": str(work_item_id),
+                    "gate_id": str(gate_id),
+                    "actions": ["approve", "reject"],
+                    "designated": True,
+                    "designated_approver_name": designated_member.name if designated_member is not None else None,
+                    "tossed": True,
+                    "tossed_by_id": str(tossed_by_id),
+                },
+            },
+        )
+        db.add(msg)
+        await db.flush()
+        await _dispatch_conversation_event(db, conv, msg, org_id, tossed_by)
+    return True
+
+
+async def notify_gate_tossed(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    gate_id: uuid.UUID,
+    target_conversation_id: uuid.UUID,
+    tossed_by_id: uuid.UUID,
+) -> list[tuple[str, dict]]:
+    """story #3084 층3 — notify_gate_card_recipients_resolved/notify_gate_delegated_to_
+    old_approver와 동형(gate_id 기준 reverse-lookup, 새 ConversationMessage는 안 만듦,
+    순수 SSE) — 새 사본이 하나 더 생겼음을 **기존에 이미 카드를 갖고 있던 모든 conversation
+    의 수신자**에게 알린다. 미르코 FE 요건② — mux 구독(gate_resolved/gate_delegated와
+    동일 패턴)이 conversation_id 무관 gate_id 매칭이라, 이 이벤트 하나로 다방 동기 전이가
+    끝난다(이미 열린 화면 전부에 닿는다)."""
+    rows = (await db.execute(
+        select(ConversationMessage.conversation_id, ConversationMessage.mentioned_ids).where(
+            ConversationMessage.msg_metadata["approval_target"]["gate_id"].astext == str(gate_id),
+        )
+    )).all()
+    if not rows:
+        return []
+
+    conv_ids = {row.conversation_id for row in rows}
+    conv_project_ids = dict((await db.execute(
+        select(Conversation.id, Conversation.project_id).where(Conversation.id.in_(conv_ids))
+    )).all())
+
+    recipient_project_ids: dict[uuid.UUID, uuid.UUID] = {}
+    for row in rows:
+        proj_id = conv_project_ids.get(row.conversation_id)
+        if proj_id is None:
+            continue  # project 없는 conversation은 스킵(Event.project_id NOT NULL) — 조용히 건너뜀.
+        for mid in (row.mentioned_ids or []):
+            try:
+                recipient_project_ids[uuid.UUID(str(mid))] = proj_id
+            except (ValueError, TypeError, AttributeError):
+                continue  # 손상된/구형 payload — 지어내지 않고 건너뜀.
+    if not recipient_project_ids:
+        return []
+
+    from app.services.member_resolver import lookup_members_by_ids
+    members = await lookup_members_by_ids(set(recipient_project_ids), db)
+
+    payload_base = {
+        "gate_id": str(gate_id),
+        "target_conversation_id": str(target_conversation_id),
+        "tossed_by_id": str(tossed_by_id),
+    }
+
+    events: list[Event] = []
+    for member_id, proj_id in recipient_project_ids.items():
+        member = members.get(member_id)
+        m_type = member.type if member is not None else "human"
+        event = Event(
+            project_id=proj_id, org_id=org_id, event_type="conversation.gate_tossed",
+            source_entity_type="gate", source_entity_id=gate_id,
+            sender_id=tossed_by_id, recipient_id=member_id, recipient_type=m_type,
+            payload=payload_base, status="pending",
+        )
+        db.add(event)
+        events.append(event)
+
+    await db.flush()
+    pushes: list[tuple[str, dict]] = []
+    for event in events:
+        pushes.append((
+            str(event.recipient_id),
+            {"event_id": str(event.id), "event_type": "conversation.gate_tossed", **payload_base,
+             "recipient_id": str(event.recipient_id)},
+        ))
+    return pushes
+
+
 async def maybe_nudge_draft_doc_shared_in_chat(
     db: AsyncSession,
     *,

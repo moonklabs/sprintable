@@ -6,7 +6,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import get_current_user, get_scope_context, get_verified_org_id
@@ -844,6 +844,35 @@ async def list_gates(
         elif g.id in eligible_ids:
             filtered.append(resp)
     return filtered
+
+
+class GateDesignatedPendingCountResponse(BaseModel):
+    count: int
+
+
+@router.get("/designated-pending-count", response_model=GateDesignatedPendingCountResponse)
+async def get_designated_pending_count(
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> GateDesignatedPendingCountResponse:
+    """story #3084(2026-08-25, 정렬 v1 층1 — 도달 보장의 불변 바닥) — GNB "미확認" 뱃지 소스.
+
+    `assigned_to_me`(list_gates)는 WHO(승인 자격 — project access+not-author)를 묻는
+    넓은 집합이라, 이 스토리의 층1이 필요로 하는 좁은 질문("이 사람이 designated로 지정된
+    미해소 건이 몇 개인가")과 다르다 — 카드가 어느 conversation에 심겼든(페어와이즈 DM이든
+    토스 사본이든) 이 카운트는 그 방을 전혀 참조하지 않는 순수 Gate.designated_approver_id
+    쿼리라, "주 대화 추론"이 틀려도(층2가 best-effort인 이유) 이 뱃지는 항상 정확하다
+    (AC1이 이 층에서 닫히는 근거)."""
+    resolved = await resolve_member(auth, org_id, session)
+    count = (await session.execute(
+        select(func.count()).select_from(Gate).where(
+            Gate.org_id == org_id,
+            Gate.designated_approver_id == resolved.id,
+            Gate.status == "pending",
+        )
+    )).scalar_one()
+    return GateDesignatedPendingCountResponse(count=count)
 
 
 class HitlInboxItem(BaseModel):
@@ -1861,6 +1890,104 @@ async def delegate_gate_endpoint(
     await dispatch_gate_delegation(
         session, _gate, old_approver_id=old_approver_id, new_approver_id=body.new_approver_member_id,
     )
+
+    return GateResponse.model_validate(_gate)
+
+
+class GateTossRequest(BaseModel):
+    target_conversation_id: uuid.UUID
+
+
+@router.post("/{id}/toss", response_model=GateResponse)
+async def toss_gate_endpoint(
+    id: uuid.UUID,
+    body: GateTossRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> GateResponse:
+    """story #3084(2026-08-25, 선생님 지시 — 결재 카드 «토스») — 상신자 또는 designated
+    결재자 본인이, designated 본인이 참여한 다른 conversation에 카드 **사본**을 심는다
+    (원 카드 잔존). #3001 delegate("사람" 축 — 정체성 재지정)와 다른 "방" 축(같은
+    designated에게로 가는 도달 경로를 하나 더 여는 것) — 페드루 PO 정렬 확定(2026-08-25):
+    과거 기각된 "여러 사람으로의 카드 확산" 정책과는 축이 달라 상충하지 않는다. 권한 범위도
+    delegate와 달리 admin 확장 없이 requester+designated 본인 한정(PO 판정, 실사고 근거
+    없어 admin 확장 기각).
+
+    target_conversation_id 검증(designated 본인이 참여자인지)이 «카드=지정 라인 전용»
+    정책(#3001)의 집행 지점 — 임의 방으로 결재 액션 링크가 새는 것을 여기서 막는다."""
+    resolved = await resolve_member(auth, org_id, session)
+    _gate = (await session.execute(
+        select(Gate).where(Gate.id == id, Gate.org_id == org_id).with_for_update()
+    )).scalar_one_or_none()
+    if _gate is None:
+        raise HTTPException(status_code=404, detail="Gate not found")
+    if _gate.status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "gate_already_resolved", "message": "이미 처리된 결재는 토스할 수 없습니다."},
+        )
+    if _gate.designated_approver_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "no_designated_approver", "message": "지정 결재자가 없는 게이트는 토스할 수 없습니다."},
+        )
+
+    from app.services.gate_service import resolve_designatable_gate_context
+    ctx = await resolve_designatable_gate_context(session, _gate)
+    if ctx is None:
+        raise HTTPException(status_code=422, detail="이 게이트 유형은 토스를 지원하지 않습니다.")
+    title, project_id, requester_id = ctx
+
+    if resolved.id not in (requester_id, _gate.designated_approver_id):
+        raise HTTPException(status_code=403, detail="상신자 또는 지정 결재자 본인만 토스할 수 있습니다.")
+
+    # story #3001 정책 집행 — 대상 conversation에 designated 본인이 참여자여야 한다(카드=
+    # 지정 라인 전용, 임의 방으로 액션 링크가 새는 것 방지). org 스코프도 함께 강제.
+    from app.models.conversation import Conversation, ConversationParticipant
+    target_conv = (await session.execute(
+        select(Conversation).where(Conversation.id == body.target_conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if target_conv is None:
+        raise HTTPException(status_code=404, detail="Target conversation not found")
+    participant = (await session.execute(
+        select(ConversationParticipant.conversation_id).where(
+            ConversationParticipant.conversation_id == body.target_conversation_id,
+            ConversationParticipant.member_id == _gate.designated_approver_id,
+        ).limit(1)
+    )).first()
+    if participant is None:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "target_approver_not_participant",
+                "message": "대상 대화에 지정 결재자가 참여하고 있지 않습니다.",
+            },
+        )
+
+    from app.services.approval_delivery import dispatch_approval_card_toss
+    inserted = await dispatch_approval_card_toss(
+        session, org_id=org_id, work_item_type=_gate.work_item_type, work_item_id=_gate.work_item_id,
+        title=title, gate_id=_gate.id, designated_approver_id=_gate.designated_approver_id,
+        target_conversation_id=body.target_conversation_id, tossed_by_id=resolved.id,
+    )
+    if inserted:
+        from app.services.activity_log import ActivityLogService
+        await ActivityLogService(session).record(
+            org_id=org_id, action="gate_tossed", actor_id=resolved.id, actor_type="human",
+            entity_type="gate", entity_id=_gate.id,
+            context={"target_conversation_id": str(body.target_conversation_id)},
+        )
+    await session.commit()
+    await session.refresh(_gate)
+
+    if inserted:
+        # best-effort — 기존 사본 보유자 전체에 다방 동기 반영(브로드캐스트 실패가 토스
+        # 자체 — 위 commit으로 이미 확정된 카드 삽입+감사기록 — 를 막지 않는다).
+        from app.services.gate_service import dispatch_gate_toss
+        await dispatch_gate_toss(
+            session, _gate, target_conversation_id=body.target_conversation_id, tossed_by_id=resolved.id,
+        )
 
     return GateResponse.model_validate(_gate)
 
