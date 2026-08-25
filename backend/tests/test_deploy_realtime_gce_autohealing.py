@@ -71,3 +71,30 @@ def test_autohealing_step_runs_defensively_every_deploy_like_named_ports():
     autoheal_idx = text.index('gcloud compute instance-groups managed update "${MIG_NAME}"')
     backend_attach_idx = text.index("gcloud compute backend-services add-backend")
     assert named_ports_idx < autoheal_idx < backend_attach_idx
+
+
+def test_defensive_config_precedes_rolling_action_in_default_path():
+    """story #3482(2026-08-25, 카디르 QA 발견·PO 소스 재확認) 회귀가드 — 기본 경로(MIG가 이미
+    존재 + FORCE_MIG_RECREATE 미설정)에서 named-ports/autoHealingPolicies/backend-service 방어
+    블록이 rolling-action start-update보다 먼저 실행돼야 한다. 순서가 뒤집히면(과거 결함) prod
+    첫 재배포처럼 autoHealingPolicies가 아직 없는 MIG에 rolling-action이 먼저 제출돼, 신인스턴스
+    RUNNING=ready 오판→구인스턴스 조기삭제→502가 그 배포에서 그대로 재현된다.
+
+    'MIG가 이미 존재한다'고 판정하는 최초 분기(668행대 `if gcloud ... describe MIG_NAME`) 진입
+    직후에 방어 블록이 호출되는지를 확인 — 그 지점은 구조적으로 FORCE_MIG_RECREATE 분기와
+    rolling-action 둘 다보다 앞이므로, 이 위치 하나로 두 경로(recreate/rolling-update) 전부의
+    선행 보장을 검증한다."""
+    text = _script_text()
+    exists_branch_idx = text.index(
+        'if gcloud compute instance-groups managed describe "${MIG_NAME}" \\\n'
+        '        --region="${GCP_REGION}" --project="${GCP_PROJECT}" >/dev/null 2>&1; then'
+    )
+    rolling_action_idx = text.index(
+        'gcloud compute instance-groups managed rolling-action start-update "${MIG_NAME}"'
+    )
+    # exists_branch 진입 이후 첫 ensure_mig_defensive_config 호출 지점을 찾는다(정의부의
+    # 함수 시그니처 `ensure_mig_defensive_config() {`가 아니라 실제 호출문).
+    first_call_idx = text.index("    ensure_mig_defensive_config\n", exists_branch_idx)
+    assert exists_branch_idx < first_call_idx < rolling_action_idx, (
+        "방어 블록 호출이 'MIG 존재' 분기 진입 직후·rolling-action 이전이어야 한다"
+    )
