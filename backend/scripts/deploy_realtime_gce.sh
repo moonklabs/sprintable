@@ -501,17 +501,56 @@ trap 'rm -f "${STARTUP_SCRIPT_FILE}"' EXIT
     echo '# ⚠️반드시 gcr.io 호스팅 이미지 사용 — Docker Hub(google/cloud-sdk)는 PGA 커버 밖이라'
     echo '#   외부IP 없는 VM에서 pull 불가. gcr.io/google.com/cloudsdktool/cloud-sdk는 PGA로 도달.'
     echo 'docker pull gcr.io/google.com/cloudsdktool/cloud-sdk:slim >/dev/null'
-    echo '# 개별 secret을 컨테이너 gcloud로 읽어 bash 변수에 담는다(값은 stdout로만·디스크 미경유).'
+    echo ''
+    # story #3071(재발방지, 2026-08-25) — story #3070 그라운딩: 예전엔 시크릿 N개(+AR 토큰
+    # 1개)를 각각 별도 `docker run --rm cloud-sdk:slim gcloud ...`로 순차 fetch했다
+    # (컨테이너 N+1회 개별 기동 — 매 부팅마다 cold-start 오버헤드가 겹겹이 쌓여, 신규 서지
+    # VM이 실제로 `/api/v2/ready` 200을 내기까지 3분+ 걸렸고, 그 창에서 GCLB가 502를 냈다).
+    # 컨테이너 기동을 1회로 줄인다 — 안에서 gcloud 프로세스를 N+1번 호출하는 건 그대로지만
+    # (조회 자체를 배치 API로 묶을 만큼 값어치 있는 재작성은 아니다), 컨테이너 기동
+    # 오버헤드(수백ms~1s급)가 겹겹이 쌓이는 부분만 걷어낸다.
+    # NUL(\0) 구분자로 값을 나눈다 — GITHUB_APP_PRIVATE_KEY가 멀티라인 PEM이라 개행 기준
+    # 분리는 안전하지 않다. 각 값은 (기존 `$(...)` 개별 fetch와 동일하게) 후행 개행만
+    # 벗겨진 채로 bash 변수에 담긴다 — 바이트 동일, 회귀 0.
+    echo '# story #3071 — 시크릿 N개+AR 토큰을 한 컨테이너 안에서 순차 조회(컨테이너 기동은 1회).'
+    echo "cat > /tmp/fetch-secrets.sh <<'FETCH_SECRETS_EOF'"
+    echo '#!/bin/bash'
+    echo 'set -euo pipefail'
+    echo 'for name in "$@"; do'
+    echo '  if [ "$name" = "__AR_TOKEN__" ]; then'
+    echo '    val="$(gcloud auth print-access-token)"'
+    echo '  else'
+    echo '    val="$(gcloud secrets versions access latest --secret="$name" --project="$GCP_PROJECT")"'
+    echo '  fi'
+    echo '  printf '"'"'%s\0'"'"' "$val"'
+    echo 'done'
+    echo 'FETCH_SECRETS_EOF'
+    echo ''
+    _secret_names_literal=""
+    _secret_env_names_literal=""
     for pair in ${SECRET_PAIRS}; do
         secret_name="${pair%%:*}"
         env_name="${pair##*:}"
-        echo "${env_name}=\$(docker run --rm gcr.io/google.com/cloudsdktool/cloud-sdk:slim gcloud secrets versions access latest --secret=${secret_name} --project=${GCP_PROJECT})"
+        _secret_names_literal="${_secret_names_literal} '${secret_name}'"
+        _secret_env_names_literal="${_secret_env_names_literal} '${env_name}'"
     done
+    echo "_secret_names=(${_secret_names_literal} '__AR_TOKEN__')"
+    echo "_secret_env_names=(${_secret_env_names_literal} '_AR_TOKEN')"
+    echo "mapfile -d '' -t _secret_values < <(docker run --rm -e GCP_PROJECT=\"${GCP_PROJECT}\" -v /tmp/fetch-secrets.sh:/fetch-secrets.sh:ro gcr.io/google.com/cloudsdktool/cloud-sdk:slim bash /fetch-secrets.sh \"\${_secret_names[@]}\")"
+    echo '# 순서(secret_names/secret_values/env_names 셋)가 어긋나면 엉뚱한 시크릿이 엉뚱한'
+    echo '# env로 실릴 수 있다 — 개수 불일치를 fail-closed로 잡는다(조용한 어긋남보다 배포 중단이 낫다).'
+    echo 'if [ "${#_secret_values[@]}" -ne "${#_secret_names[@]}" ]; then'
+    echo '  echo "FATAL: fetched ${#_secret_values[@]} secrets, expected ${#_secret_names[@]}" >&2'
+    echo '  exit 1'
+    echo 'fi'
+    echo 'for _i in "${!_secret_env_names[@]}"; do'
+    echo '  declare "${_secret_env_names[$_i]}=${_secret_values[$_i]}"'
+    echo 'done'
+    echo '# story #3071 fetch-secrets block end (DRY_RUN sed 종료 마커 — 지우지 말 것)'
     echo ''
     echo '# 앱 이미지는 사설 Artifact Registry에 있어 docker 인증 필요 — COS docker는 AR 자동인증이'
     echo '# 안 된다(public gcr.io는 무인증 pull됐지만 사설 AR은 "Unauthenticated request" 거절, 실측).'
     echo '# VM SA(artifactregistry.reader 보유)의 access token으로 해당 AR 호스트에 docker login.'
-    echo "_AR_TOKEN=\$(docker run --rm gcr.io/google.com/cloudsdktool/cloud-sdk:slim gcloud auth print-access-token)"
     echo "echo \"\${_AR_TOKEN}\" | docker login -u oauth2accesstoken --password-stdin https://${_AR_HOST}"
     echo ''
     # ⛔story #2142(2026-07-23, 오르테가 지적 — 자기 지시가 만든 결함 자인) — 이전엔 여기서
@@ -576,6 +615,9 @@ if [ "${DRY_RUN}" = "1" ]; then
     # startup-script에 실제로 적힌 uvicorn 커맨드 그 줄 자체를 노출해, 변수→실제 산출물
     # 배선이 끊기지 않았는지 테스트가 직접 대조할 수 있게 한다.
     _GENERATED_UVICORN_CMD_LINE="$(grep '^  uvicorn ' "${STARTUP_SCRIPT_FILE}")"
+    # story #3071 — 같은 관례: 시크릿 배치 fetch 로직(embedded fetch-secrets.sh + 재조립
+    # 루프)이 실제로 생성된 그대로를 노출한다(요약 변수가 아니라 산출물 자체).
+    _GENERATED_FETCH_SECRETS_BLOCK_B64="$(sed -n '/^cat > \/tmp\/fetch-secrets\.sh/,/^# story #3071 fetch-secrets block end/p' "${STARTUP_SCRIPT_FILE}" | base64 | tr -d '\n')"
     cat <<EOF
 ENV=${ENV}
 MIG_NAME=${MIG_NAME}
@@ -591,6 +633,7 @@ SECRET_PAIRS=${SECRET_PAIRS}
 GENERATED_PLAIN_ENV_FILE_B64=${_GENERATED_PLAIN_ENV_FILE_B64}
 UVICORN_APP_MODULE=${UVICORN_APP_MODULE}
 GENERATED_UVICORN_CMD_LINE=${_GENERATED_UVICORN_CMD_LINE}
+GENERATED_FETCH_SECRETS_BLOCK_B64=${_GENERATED_FETCH_SECRETS_BLOCK_B64}
 EOF
     exit 0
 fi
