@@ -462,6 +462,21 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
         ),
         DeepLinkManifestEntry(
+            # story #2789: 요청자 자기-철회(withdraw) 결과가 designated_approver에게 회신되는
+            # 벨 알림 — agent_decision_resolved와 완전 동형(dispatch_approval_result_reply
+            # 파라미터화 재사용, gate 경유·reference_id=gate_id·읽기전용 FYI). 차이는 결과값이
+            # "승인/반려"가 아니라 "철회"라는 것뿐 — 착지 화면·조치 가능 여부는 동일.
+            app=DeepLinkAppFields(
+                type="agent_decision_withdrawn", target="gate_detail", parent_tab=ParentTab.approvals,
+                target_promotion_pending=True,
+            ),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
+            channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
+        ),
+        DeepLinkManifestEntry(
             # story #1715(카디르 QA, PR#3428) — merge gate(work_item_type="story") 해소
             # 결과가 상신자(participation.member_id)에게 회신되는 벨 알림. doc_approval_
             # resolved/agent_decision_resolved와 완전 동형(dispatch_approval_result_reply
