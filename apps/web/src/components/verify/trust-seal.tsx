@@ -1,5 +1,6 @@
 import { Bot, Check } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import { cn } from '@/lib/utils';
 import { initials } from '@/lib/storage/format';
 
@@ -46,7 +47,9 @@ export function TrustSeal(props: TrustSealProps) {
   if (props.variant === 'claimed') {
     return (
       <div className={cn('flex items-center gap-2 rounded-[10px] bg-proof-amber-soft px-2.5 py-2 text-[11.5px]', props.className)}>
-        <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full border border-proof-blue bg-proof-blue-soft text-[9px] font-bold text-proof-blue">
+        {/* story #3049(2984-S1) — AGENT_MARK_FILL_CLASS(헤어라인 border 유지·soft-fill
+            폐지) 채택. border는 이미 있었으니 배경만 투명으로 교체. */}
+        <span className={cn('flex size-[22px] shrink-0 items-center justify-center rounded-full border border-proof-blue text-[9px] font-bold', AGENT_MARK_FILL_CLASS)}>
           {props.agentInitial ?? <Bot className="size-3" aria-hidden="true" />}
         </span>
         <span className="min-w-0 flex-1 text-proof-ink-3">

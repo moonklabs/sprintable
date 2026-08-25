@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { X, Check } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { AgentIdentity } from '@/components/ui/agent-identity';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { buildPolicyDeniedMessage, parseAgentMessagePolicyDenied } from '@/lib/agent-message-policy-error';
@@ -122,11 +123,9 @@ export function AddParticipantModal({
                       {m.name?.slice(0, 2)?.toUpperCase() ?? '?'}
                     </div>
                     <span className="flex-1 truncate">{m.name}</span>
-                    {/* story #3000 로드맵 PR-B(L5) — 정적 Bot 배지 배경은 citron이 아니라
-                        proof-blue-soft(정체성 마킹). */}
-                    {m.type === 'agent' && (
-                      <span className="rounded-sm bg-proof-blue-soft px-1 py-0.5 text-[9px] font-medium text-foreground">Bot</span>
-                    )}
+                    {/* story #3049(2984-S1) — AgentIdentity 프리미티브(헤어라인+proof-blue
+                        신호 dot) 채택, soft-fill 폐지. */}
+                    {m.type === 'agent' && <AgentIdentity />}
                     {selected === m.id && <Check className="h-3.5 w-3.5 flex-shrink-0 text-primary" />}
                   </button>
                 </li>

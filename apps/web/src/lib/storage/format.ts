@@ -3,6 +3,7 @@
  * 파일 크기 포맷은 재구현 금지 → `formatFileSize`(file-node.tsx) 재사용. 여기엔 그 외 표시 유틸만.
  */
 
+import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import type { AssetSourceLink } from '@/lib/storage/types';
 
 /** 파일 아이콘 틴트 분류 — 목업 `.fic.*` 5종에 1:1 대응. */
@@ -56,7 +57,10 @@ export function fileTypeTint(contentType: string): FileTint {
  * 별도로 하드코딩하지 않게 한다(밝은 -soft 배경 위 흰 글자 가독성 문제 원천 차단).
  */
 export function avatarColor(isAgent: boolean): string {
-  return isAgent ? 'bg-proof-blue-soft text-proof-blue' : 'bg-proof-sunk text-proof-ink-2';
+  // story #3049(2984-S1) — agent 이니셜 배경은 AGENT_MARK_FILL_CLASS(투명·§2 형태로 이미
+  // 있는 ring/border가 경계를 짊어짐). human 배경(무채 sunk)은 재질 이전 대상 밖(신호 없는
+  // 중립 배경이라 SHIFT 항목이 아님) — 무변경.
+  return isAgent ? AGENT_MARK_FILL_CLASS : 'bg-proof-sunk text-proof-ink-2';
 }
 
 export function initials(name: string): string {

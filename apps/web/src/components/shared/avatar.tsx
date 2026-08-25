@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Bot, User } from 'lucide-react';
 import { PresenceDot, AGENT_LIVE_RING_CLASS, type PresenceStatus } from '@/components/chat/presence-dot';
+import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import { avatarColor, initials } from '@/lib/storage/format';
 import { cn } from '@/lib/utils';
 
@@ -97,11 +98,10 @@ export function Avatar({
       </div>
 
       {isAgent && (
-        // story #3000 로드맵 PR-B(L5, 페드루군 동승 판정) — 정적 "AI" 코너배지는 citron이
-        // 아니라 proof-blue 틴트(정체성 마킹 — citron은 live pulse 전용, AGENT_LIVE_RING_CLASS
-        // 참고). 텍스트는 기왕 text-foreground.
+        // story #3049(2984-S1) — AGENT_MARK_FILL_CLASS(헤어라인 border 유지·soft-fill
+        // 폐지) 채택. border는 이미 있었으니 배경/텍스트색만 교체(단일 정의 재사용).
         <span
-          className="absolute -right-1.5 -top-1.5 rounded border border-proof-blue/40 bg-proof-blue-soft font-bold text-foreground"
+          className={cn('absolute -right-1.5 -top-1.5 rounded border border-proof-blue/40 font-bold', AGENT_MARK_FILL_CLASS)}
           style={{ fontSize: Math.max(7, Math.round(badgeSize * 0.55)), lineHeight: 1, padding: '2px 3px' }}
         >
           AI
