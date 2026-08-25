@@ -1373,7 +1373,7 @@ async def _resolve_doc_gate(session: AsyncSession, gate: Gate, new_status: str) 
     await session.flush()
 
 
-async def _resolve_designatable_gate_context(
+async def resolve_designatable_gate_context(
     session: AsyncSession, gate: Gate,
 ) -> tuple[str, uuid.UUID, uuid.UUID] | None:
     """story #3001 — 위임(delegate) 대상 카드 배달용 (title, project_id, requester_id) 해소.
@@ -1417,7 +1417,7 @@ async def dispatch_gate_delegation(
 
     best-effort(카드/이벤트 배달 실패가 위임 자체 — gate.designated_approver_id 갱신+
     ActivityLog — 를 막지 않는다, 라우터가 이미 그 둘을 먼저 commit한 後 이 함수를 부른다)."""
-    ctx = await _resolve_designatable_gate_context(session, gate)
+    ctx = await resolve_designatable_gate_context(session, gate)
     if ctx is None:
         logger.warning("gate delegate 컨텍스트 해소 실패 gate=%s — 카드/이벤트 배달 스킵", gate.id)
         return
@@ -1451,6 +1451,34 @@ async def dispatch_gate_delegation(
             _push_to_agent(pid_str, payload)
     except Exception:  # noqa: BLE001 — best-effort, 실시간 반영 실패가 위임 자체를 막지 않음.
         logger.warning("gate delegate 실시간 반영 배선 실패 gate=%s", gate.id, exc_info=True)
+
+
+async def dispatch_gate_toss(
+    session: AsyncSession, gate: Gate, *, target_conversation_id: uuid.UUID, tossed_by_id: uuid.UUID,
+) -> None:
+    """story #3084(2026-08-25 정렬 v1 층3) — 토스의 브로드캐스트 절반만 담당. 카드 삽입
+    자체(dispatch_approval_card_toss)는 라우터(gates.py::toss_gate_endpoint)가 인가 검증
+    직후 이미 커밋했다 — "토스됐다"는 응답이 카드 존재를 보장해야 하므로 삽입은 best-effort가
+    아니다(#2142 "조용히 넘어가는 게 제일 나쁜 것" 원칙과 동형, dispatch_gate_delegation의
+    신규 카드 배달 단계와 대비되는 지점 — 위임은 새 지정자에게 처음 가는 카드라 best-effort로
+    족하지만, 토스는 "이미 있던 카드를 옮겼다"는 사용자 확인 응답 자체이므로 다르다).
+
+    여기서 하는 일은 기존 사본 보유자 전체에 대한 conversation.gate_tossed 다방 동기 반영
+    (notify_gate_tossed)뿐 — 이건 delegate의 notify_gate_delegated_to_old_approver와 동일
+    이유로 best-effort(실시간 반영 실패가 토스 자체를 무효화하지 않음, 재조회하면 결국
+    맞는 상태를 본다)."""
+    try:
+        from app.services.approval_delivery import notify_gate_tossed
+        pushes = await notify_gate_tossed(
+            session, org_id=gate.org_id, gate_id=gate.id,
+            target_conversation_id=target_conversation_id, tossed_by_id=tossed_by_id,
+        )
+        await session.commit()
+        for pid_str, payload in pushes:
+            from app.routers.events import _push_to_agent
+            _push_to_agent(pid_str, payload)
+    except Exception:  # noqa: BLE001 — best-effort, 실시간 반영 실패가 토스 자체를 막지 않음.
+        logger.warning("gate toss 실시간 반영 배선 실패 gate=%s", gate.id, exc_info=True)
 
 
 async def _notify_doc_gate_requester(session: AsyncSession, gate: Gate, new_status: str) -> None:
