@@ -16,6 +16,7 @@ import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk'
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
 
 /**
  * E-DG S28 + 24f5ae18/34360c54 — doc decision gate UI(doc 상세 상단). S24 hypothesis-gate-badge 어휘 미러·신규 토큰 0.
@@ -96,6 +97,9 @@ export function DocGateSection({
   const [loadingApprovers, setLoadingApprovers] = useState(false);
   const [selectedApprover, setSelectedApprover] = useState('');
   const [approverError, setApproverError] = useState<string | null>(null);
+  // story #3040 v3 — 동명 표시이름 오지정 실사고(선생님 실계정 vs PO 대행 계정, 둘 다
+  // "송윤재") 재발 방지. AC2: 동명이 실재할 때만 경고(음성 대조 — 비동명 org는 항상 false).
+  const [approverHasDuplicateNames, setApproverHasDuplicateNames] = useState(false);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const [gates, revsJson, membersJson] = await Promise.all([
@@ -162,13 +166,9 @@ export function DocGateSection({
       const json = await res.json().catch(() => null) as {
         data?: Array<{ id: string; user_id: string | null; name?: string | null; email?: string | null; role: 'owner' | 'admin' | 'member' }>;
       } | null;
-      const eligible = (json?.data ?? [])
-        .filter((m) => (m.role === 'owner' || m.role === 'admin') && m.id !== currentTeamMemberId)
-        .map((m) => ({
-          value: m.id,
-          label: (m.name?.trim() || null) ?? m.email?.split('@')[0] ?? m.user_id?.slice(0, 8) ?? m.id.slice(0, 8),
-        }));
-      setApproverOptions(eligible);
+      const { options, hasDuplicateNames } = buildApproverPickerOptions(json?.data ?? [], currentTeamMemberId);
+      setApproverOptions(options);
+      setApproverHasDuplicateNames(hasDuplicateNames);
     } catch {
       setApproverError(t('docGateTransitionErrorGeneric'));
     } finally {
@@ -286,6 +286,10 @@ export function DocGateSection({
         <div className="space-y-1.5">
           {approverError ? (
             <p role="alert" aria-live="assertive" className="text-[11px] text-foreground">{approverError}</p>
+          ) : null}
+          {/* story #3040 v3 AC2 — 동명 표시이름이 실재할 때만(음성 대조: 비동명 org는 렌더 0). */}
+          {approverHasDuplicateNames ? (
+            <p role="alert" className="text-[11px] text-warning-strong">{t('docGateApproverPickerDuplicateWarning')}</p>
           ) : null}
           <OperatorDropdownSelect
             value={selectedApprover}

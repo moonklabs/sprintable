@@ -19,6 +19,7 @@ import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
 
 export interface ApprovalTarget {
   work_item_type: string;
@@ -479,6 +480,9 @@ function DelegateApprovalControl({ gateId, onDelegated }: { gateId: string; onDe
   const [selected, setSelected] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // story #3040 v3 — 동명 표시이름 오지정 실사고(선생님 실계정 vs PO 대행 계정, 둘 다
+  // "송윤재") 재발 방지. AC2: 동명이 실재할 때만 경고(음성 대조 — 비동명 org는 항상 false).
+  const [hasDuplicateNames, setHasDuplicateNames] = useState(false);
 
   const openPicker = async () => {
     setOpen(true);
@@ -493,13 +497,11 @@ function DelegateApprovalControl({ gateId, onDelegated }: { gateId: string; onDe
       // story #3001 하드닝(PO 확定) — 위임 대상 자격은 BE가 400으로 최종 강제하지만(owner/admin
       // fresh 조회), 여기서도 같은 축(owner/admin·본인 제외)으로 미리 좁혀 자격 밖 클릭 자체를
       // 줄인다(지어낸 자격 판단이 아니라 BE와 같은 규칙 재사용 — org-members-section.tsx와 동형).
-      const eligible = (json?.data ?? [])
-        .filter((m) => (m.role === 'owner' || m.role === 'admin') && m.id !== currentTeamMemberId)
-        .map((m) => ({
-          value: m.id,
-          label: (m.name?.trim() || null) ?? m.email?.split('@')[0] ?? m.user_id?.slice(0, 8) ?? m.id.slice(0, 8),
-        }));
-      setMembers(eligible);
+      // story #3040 v3 — label 산출(이메일 병기)·동명 경고 판정은 doc-gate-section.tsx와
+      // 동일 소스(buildApproverPickerOptions)로 통일 — 지정 표면 두 곳이 갈리지 않게.
+      const { options, hasDuplicateNames: dup } = buildApproverPickerOptions(json?.data ?? [], currentTeamMemberId);
+      setMembers(options);
+      setHasDuplicateNames(dup);
     } catch {
       setError(t('hitlSendFailed'));
     } finally {
@@ -538,6 +540,10 @@ function DelegateApprovalControl({ gateId, onDelegated }: { gateId: string; onDe
   return (
     <div className="space-y-1.5">
       {error ? <p role="alert" aria-live="assertive" className="text-[11px] text-foreground">{error}</p> : null}
+      {/* story #3040 v3 AC2 — 동명 표시이름이 실재할 때만(음성 대조: 비동명 org는 렌더 0). */}
+      {hasDuplicateNames ? (
+        <p role="alert" className="text-[11px] text-warning-strong">{t('approvalRequestDelegateDuplicateWarning')}</p>
+      ) : null}
       <OperatorDropdownSelect
         value={selected}
         onValueChange={setSelected}
