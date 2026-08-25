@@ -317,7 +317,7 @@ class DecisionRequestCreate(BaseModel):
 async def _notify_decision_request_card(
     session: AsyncSession, org_id: uuid.UUID, gate: Gate, *, requester_id: uuid.UUID, project_id: uuid.UUID,
     designated_approver_id: uuid.UUID | None = None,
-) -> None:
+) -> list[tuple[str, dict]]:
     """story #8bc11434(2891) — request_decision(agent_decision_request 게이트) 상신 시 결재자
     (org owner/admin) 챗에 원탭 결재 카드 자동 발행. app/services/doc.py의
     _notify_doc_approval_requested()와 동형(approver 해소·best-effort try/except 관용구 그대로
@@ -338,14 +338,14 @@ async def _notify_decision_request_card(
         )).scalars().all())
     except Exception:  # noqa: BLE001 — 조회 실패는 상신 비중단.
         logger.warning("decision-request 결재자 조회 실패 gate=%s", gate.id, exc_info=True)
-        return
+        return []
 
     if not approver_ids:
-        return
+        return []
 
     try:
         from app.services.approval_delivery import dispatch_approval_request_cards
-        await dispatch_approval_request_cards(
+        return await dispatch_approval_request_cards(
             session, org_id=org_id, work_item_type="agent_decision", work_item_id=gate.id,
             project_id=project_id, title=gate.neutral_facts.get("question", "결정 요청") if gate.neutral_facts else "결정 요청",
             gate_id=gate.id, requester_id=requester_id, approver_ids=approver_ids,
@@ -353,6 +353,7 @@ async def _notify_decision_request_card(
         )
     except Exception:  # noqa: BLE001 — 카드 배달 실패는 상신 비중단(Gate inbox 폴백 항상 존재).
         logger.warning("decision-request 결재자 카드(챗) 배달 실패 gate=%s", gate.id, exc_info=True)
+        return []
 
 
 @router.post("/decisions", response_model=GateResponse, status_code=201)
@@ -436,12 +437,20 @@ async def create_decision_request(
         designated_approver_id=body.approver_member_id,
     )
     await session.flush()
-    await _notify_decision_request_card(
+    _created_pushes = await _notify_decision_request_card(
         session, org_id, gate, requester_id=caller_id, project_id=project_id,
         designated_approver_id=body.approver_member_id,
     )
     await session.commit()
     await session.refresh(gate)
+    # story #3044 — gate가 커밋돼 GET으로 읽힐 수 있게 된 後에만 push(read-your-writes 레이스
+    # 방지, dispatch_gate_delegation과 동일 원칙). best-effort — 실패해도 상신 자체는 이미 끝남.
+    for _pid_str, _payload in _created_pushes:
+        try:
+            from app.routers.events import _push_to_agent
+            _push_to_agent(_pid_str, _payload)
+        except Exception:  # noqa: BLE001
+            logger.warning("decision-request gate_created 실시간 반영 배선 실패 gate=%s", gate.id, exc_info=True)
     resp = GateResponse.model_validate(gate)
     resp.project_id = project_id
     # story #1972 SSOT 재사용(제네릭 create_gate_endpoint가 이 필드를 아예 안 채우는 기존

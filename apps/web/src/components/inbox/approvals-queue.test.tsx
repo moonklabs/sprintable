@@ -899,6 +899,45 @@ describe('ApprovalsQueue — 실시간 해소/위임 반영(story #2985 AC2)', (
     expect(container.textContent).not.toContain('실시간 대상 항목');
   });
 
+  // story #3044(PO 실사고 표본②, 2026-08-25) — fetchGates()는 마운트 1회뿐이고 gate_resolved/
+  // gate_delegated 둘 다 "새 게이트가 생겼다"는 못 알린다. conversation.gate_created 구독이
+  // 그 3번째 신호 — payload는 gate_id뿐이라 단건 GET으로 채워 prepend해야 한다.
+  it('mux가 conversation.gate_created를 쏘면 단건 GET으로 채워 목록 맨 앞에 즉시 추가된다(하드 리로드 불요)', async () => {
+    mockFetches([actionableGate()], []);
+    await mount();
+    expect(container.textContent).not.toContain('새로생긴카드');
+
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/g-new') {
+        return { ok: true, json: async () => gate({ id: 'g-new', work_item_summary: { title: '새로생긴카드', slug: null } }) };
+      }
+      return { ok: true, json: async () => [] };
+    }));
+
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_created');
+    expect(call).toBeTruthy();
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'g-new' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('새로생긴카드');
+  });
+
+  it('mux가 conversation.gate_created를 쏴도 이미 목록에 있는 gate_id면 중복 추가하지 않는다(레이스 가드)', async () => {
+    mockFetches([actionableGate()], []);
+    await mount();
+    const before = container.textContent;
+
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => actionableGate() })));
+
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_created');
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'g-live' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toBe(before);
+  });
+
   it('malformed payload는 크래시 없이 무시한다', async () => {
     mockFetches([actionableGate()], []);
     await mount();

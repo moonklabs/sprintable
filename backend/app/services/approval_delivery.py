@@ -105,7 +105,7 @@ async def dispatch_approval_request_cards(
     requester_id: uuid.UUID,
     approver_ids: list[uuid.UUID],
     designated_approver_id: uuid.UUID | None = None,
-) -> None:
+) -> list[tuple[str, dict]]:
     """승인자별 DM에 message_kind="request" 카드 메시지 게시 + SSE 이벤트(AC1/AC2).
 
     designated_approver_id: story #3001(선생님 정책 확定 2026-08-24, PR#3426 조건부→
@@ -133,7 +133,7 @@ async def dispatch_approval_request_cards(
     채울 수 없다.
     """
     if not project_id or not approver_ids:
-        return
+        return []
 
     # story #2985 — designated_approver_id는 반드시 approver_ids(해소 권한 실보유자) 안에
     # 있어야 유효하다. 벗어난 값(오탈자·이미 org를 떠난 member 등)을 그대로 믿으면 지정자가
@@ -154,7 +154,7 @@ async def dispatch_approval_request_cards(
         logger.warning(
             "approval-request 카드 배달 스킵 — requester 미확인 %s=%s", work_item_type, work_item_id,
         )
-        return
+        return []
 
     # story #2985 잔존 — designated_approver_name은 이제 정보성 카드가 아니라 "위임됨" 표기
     # (story #3001)에서도 쓰인다(원 지정자 카드가 "{새 지정자 이름}에게 위임됨"을 보여줄 때).
@@ -210,6 +210,101 @@ async def dispatch_approval_request_cards(
                 "approval-request 카드 배달 실패 %s=%s approver=%s",
                 work_item_type, work_item_id, approver_id, exc_info=True,
             )
+
+    # story #3044(2026-08-25) — 카드가 실제로 간 recipients와 정확히 같은 대상에게
+    # conversation.gate_created(순수 SSE, 새 챗버블 없음)도 심는다 — 결재함 목록이
+    # "새 게이트가 생겼다"를 아예 못 듣던 갭(notify_gate_created_to_recipients 문서 참고).
+    # best-effort — 실패해도 카드 배달(위 루프, 이미 끝남)은 막지 않는다.
+    try:
+        return await notify_gate_created_to_recipients(
+            db, org_id=org_id, project_id=project_id, gate_id=gate_id, recipient_ids=recipients,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "gate_created 목록 실시간 반영 배선 실패 %s=%s", work_item_type, work_item_id, exc_info=True,
+        )
+        return []
+
+
+async def notify_gate_created_to_recipients(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    gate_id: uuid.UUID,
+    recipient_ids: list[uuid.UUID],
+) -> list[tuple[str, dict]]:
+    """story #3044(PO 실사고 표본②, 2026-08-25 그라운딩) — 결재함(approvals-queue.tsx)이
+    마운트 1회만 fetch하고 이후는 conversation.gate_resolved/gate_delegated 2종 SSE로만
+    갱신되는 구조라 — 둘 다 **기존 항목의 상태 변화**만 다뤄, "새 게이트가 생겼다"를 알리는
+    신호 자체가 없었다(전수 grep 확認). 이미 열어둔 탭에 새 게이트가 생기면 하드 리로드
+    전까진 영원히 안 뜬다 — 챗 카드 직링크로만 도달 가능했던 실사고(gate 2a14c177)가 이 갭.
+
+    notify_gate_card_recipients_resolved(위, 이 파일)와 동형 — 새 ConversationMessage는
+    만들지 않는다(순수 SSE 신호, 카드는 dispatch_approval_request_cards가 이미 별도로
+    맡는다 — 이중 배달 아님). recipient_ids는 호출부가 이미 계산해 넘긴다(dispatch_
+    approval_request_cards의 `recipients` 산출과 동일 소스 — designated_approver_id가
+    있으면 그 1인, 없으면 approver_ids 전원, 카드가 실제로 간 대상과 정확히 일치).
+
+    ⚠️id 공간 매핑 경계(페드루 PO 요청, 2026-08-25) — `Event.recipient_id`는 `team_members.id`
+    FK(NOT NULL)다. `team_members`는 0088에서 프로젝션 **뷰**로 태어났다는 게 기존 주석의
+    설명이지만, 이 그라운딩 도중 실 PG로 재확認하니(psql 메타명령으로 스키마 직접 조회)
+    **오늘은 자체 PK+FK를
+    가진 진짜 base table**이다(그 사이 어느 마이그레이션이 뷰→테이블로 전환 — 옛 주석들이
+    스테일해진 것 자체가 부수 발견, 이 스토리 스코프 밖이라 정정만 하고 남김).
+
+    핵심은 여전히 유효 — `org_members`(role 권위 축, `get_project_role`의 "org owner/admin
+    floor"가 사는 곳)와 `team_members`(메시징 신원 축, 이 테이블에 명시 행이 있어야만 존재)
+    는 **독립된 두 테이블·두 id 공간**이다(OrgMember.id는 uuid4 자체 발급 — team_members.id와
+    무관). "org admin이지만 이 프로젝트엔 team_members 행이 없는" recipient_id는 authz(rule B
+    floor)로는 승인 자격이 있어도 이 FK를 항상 위반한다(실사고 재현: test_2891 fixture가
+    이 정확한 케이스 — org admin을 OrgMember만으로 seed, TeamMember 없음). 여기서 그 서브셋을
+    사전에 걸러 스킵한다(로그만, 예외 전파 안 함) — dispatch_approval_request_cards의 챗
+    카드 배달(다른 신원 경로, Conversation 참가자 자격)은 이 필터와 무관하게 그대로 간다."""
+    if not recipient_ids:
+        return []
+
+    from app.models.team import TeamMember
+    from app.services.member_resolver import lookup_members_by_ids
+
+    valid_ids = set((await db.execute(
+        select(TeamMember.id).where(TeamMember.id.in_(recipient_ids), TeamMember.project_id == project_id)
+    )).scalars().all())
+    skipped = set(recipient_ids) - valid_ids
+    if skipped:
+        logger.warning(
+            "gate_created SSE 스킵 — team_members(project_access) 신원 없음 gate=%s project=%s recipients=%s",
+            gate_id, project_id, skipped,
+        )
+    if not valid_ids:
+        return []
+
+    members = await lookup_members_by_ids(valid_ids, db)
+
+    payload_base = {"gate_id": str(gate_id)}
+
+    events: list[Event] = []
+    for recipient_id in valid_ids:
+        member = members.get(recipient_id)
+        m_type = member.type if member is not None else "human"
+        event = Event(
+            project_id=project_id, org_id=org_id, event_type="conversation.gate_created",
+            source_entity_type="gate", source_entity_id=gate_id,
+            sender_id=None, recipient_id=recipient_id, recipient_type=m_type,
+            payload=payload_base, status="pending",
+        )
+        db.add(event)
+        events.append(event)
+
+    await db.flush()
+    pushes: list[tuple[str, dict]] = []
+    for event in events:
+        pushes.append((
+            str(event.recipient_id),
+            {"event_id": str(event.id), "event_type": "conversation.gate_created", **payload_base,
+             "recipient_id": str(event.recipient_id)},
+        ))
+    return pushes
 
 
 async def dispatch_approval_result_reply(
