@@ -1129,6 +1129,8 @@ async def void_gate(
     gate_id: uuid.UUID,
     voider_id: uuid.UUID,
     reason: str,
+    *,
+    actor_type: str = "human",
 ) -> Gate:
     """⭐S30 admin recovery: 잘못 생성된 **pending** gate 를 무효화(voided).
 
@@ -1137,6 +1139,13 @@ async def void_gate(
     S23 RC① 패턴). audit = gate 행(status='voided'·resolver_id·resolution_note)이 distinct 추적
     (approve/reject 와 **status 로 구분**) + ActivityLog(story #2975 AC4, approve/reject/undo와
     동형 — 이전엔 logger.info뿐이라 DB 조회 불가였음). void=복구 액션이라 strict SoD 불요(PO Q4).
+
+    actor_type: story #2789(2026-08-24) — 이전엔 이 함수의 유일한 호출자(admin-only `/void`
+    엔드포인트)가 항상 사람이라 ActivityLog에 `actor_type="human"`을 하드코딩해도 참이었다.
+    이 스토리가 새 호출자(요청자 자기-철회 `/withdraw`, 에이전트도 호출 가능)를 추가하며
+    그 전제가 깨진다 — 호출부가 실제 caller 타입(agent_gateway.py 등에서 이미 쓰는
+    `app_metadata.api_key_id` 신호와 동형 판별)을 명시로 넘긴다. 기본값 "human"은 기존
+    admin `/void` 경로의 무회귀만 보존한다.
     """
     gate = (await session.execute(
         select(Gate).where(Gate.id == gate_id, Gate.org_id == org_id)
@@ -1163,7 +1172,8 @@ async def void_gate(
         )).scalar_one_or_none()
         if sr is not None:
             sr.status = "skipped"
-            sr.routing_reason = f"gate voided by admin: {reason}"[:500]
+            # story #2789 — "by admin"이 더는 항상 참이 아니다(요청자 자기-철회 경로 추가).
+            sr.routing_reason = f"gate voided by {actor_type}: {reason}"[:500]
             sr.resolved_at = datetime.now(timezone.utc)
 
     # story #2975 AC4(PO 확定 2026-08-24) — 위 주석이 남긴 이유(permission_audit_logs=member 전용·
@@ -1176,7 +1186,7 @@ async def void_gate(
         org_id=org_id,
         action="gate_voided",
         actor_id=voider_id,
-        actor_type="human",
+        actor_type=actor_type,
         entity_type="gate",
         entity_id=gate.id,
         context={
