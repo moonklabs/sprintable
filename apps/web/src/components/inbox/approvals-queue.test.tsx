@@ -12,10 +12,11 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import type { GateItem, HitlInboxItem } from '../kanban/types';
 
-const { useDashboardContextMock, pushMock, muxSubscribeMock } = vi.hoisted(() => ({
+const { useDashboardContextMock, pushMock, muxSubscribeMock, useSseMultiplexerContextMock } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
   pushMock: vi.fn(),
   muxSubscribeMock: vi.fn((_eventName: string, _handler: (raw: string, eventId?: string) => void) => () => {}),
+  useSseMultiplexerContextMock: vi.fn(),
 }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
@@ -27,8 +28,15 @@ vi.mock('next/navigation', () => ({
 }));
 
 // story #2985 AC2 — approval-request-card.test.tsx와 동일 전략.
+// story #3069(2026-08-25) — 이 파일이 이제 mux.subscribe를 직접 안 부르고
+// useSseNotifications(use-sse-notifications.ts)를 경유한다(그 훅이 mux 有/無를 갈라
+// 폴백까지 구조적으로 보장 — 컴포넌트는 mux를 몰라도 됨). 그 훅의 mux 분기가
+// subscribeMessage도 무조건 부르므로(NOTIFICATION_EVENT_NAMES 자체 구독과 무관하게)
+// 목(mock)에 없으면 런타임 TypeError — 완전한 SseMultiplexerHandle 형태로 맞춘다.
+// useSseMultiplexerContextMock을 vi.fn()으로 둬 개별 테스트가 null(=mux 비활성/미연결)로
+// override할 수 있게 한다 — «mux 폴백 부재» 재발을 막는 회귀가드(story #3069)의 핵심.
 vi.mock('@/components/realtime-provider', () => ({
-  useSseMultiplexerContext: () => ({ subscribe: muxSubscribeMock }),
+  useSseMultiplexerContext: () => useSseMultiplexerContextMock(),
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -91,8 +99,17 @@ beforeEach(() => {
     orgMemberships: [{ orgId: 'org-1', orgName: '뭉클랩' }],
     projectMemberships: [],
     currentMemberType: 'human',
+    currentTeamMemberId: 'member-1',
   });
   muxSubscribeMock.mockClear();
+  // 기본값 = mux 활성(기존 스위트 전부가 이 전제) — mux 비활성/폴백 경로를 검증하는
+  // 케이스만 개별로 useSseMultiplexerContextMock.mockReturnValueOnce(null) override.
+  useSseMultiplexerContextMock.mockReturnValue({
+    subscribe: muxSubscribeMock,
+    subscribeMessage: () => () => {},
+    subscribeReconnect: () => () => {},
+    connected: true,
+  });
 });
 
 afterEach(async () => {
@@ -946,5 +963,102 @@ describe('ApprovalsQueue — 실시간 해소/위임 반영(story #2985 AC2)', (
     const delegatedHandler = muxSubscribeMock.mock.calls.find(([e]) => e === 'conversation.gate_delegated')![1] as (raw: string) => void;
     expect(() => resolvedHandler('not-json{')).not.toThrow();
     expect(() => delegatedHandler('not-json{')).not.toThrow();
+  });
+});
+
+// story #3069(P1, 2026-08-25) — mux가 null(피처플래그 off·미연결 등)이어도 이 세 이벤트가
+// 여전히 최소 한 곳에서 리스닝돼야 한다는 불변식의 회귀가드. 예전엔 mux.subscribe만 있고
+// fallback이 없어 mux가 죽으면 이 세 이벤트가 페이지 전체에서 리스너 자체를 잃었다(실사고
+// — BE는 정상 delivered인데 화면 카드 0건). useSseNotifications의 독립 EventSource 폴백
+// (mux === null일 때만 타는 effect)을 거쳐 여기서도 정확히 살아있는지 직접 증명한다.
+class FakeEventSource {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 2;
+  static instances: FakeEventSource[] = [];
+  listeners: Record<string, Array<(e: { data: string; lastEventId?: string }) => void>> = {};
+  onopen: (() => void) | null = null;
+  onmessage: ((e: { data: string; lastEventId?: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  closed = false;
+  readyState = 0;
+  constructor(public url: string, _opts?: unknown) {
+    FakeEventSource.instances.push(this);
+  }
+  addEventListener(type: string, cb: (e: { data: string; lastEventId?: string }) => void) {
+    (this.listeners[type] ??= []).push(cb);
+  }
+  close() { this.closed = true; }
+  emit(type: string, data: string, lastEventId?: string) {
+    for (const cb of this.listeners[type] ?? []) cb({ data, lastEventId });
+  }
+}
+
+describe('ApprovalsQueue — mux 비활성 시 fallback EventSource(story #3069, 실사고 재발가드)', () => {
+  function actionableGate(overrides: Partial<GateItem> = {}): GateItem {
+    return gate({
+      id: 'g-live', gate_type: 'merge_gate', status: 'pending', requires_human: true,
+      can_approve: true, risk_grade: 'low', work_item_summary: { title: '실시간 대상 항목', slug: null },
+      ...overrides,
+    });
+  }
+
+  beforeEach(() => {
+    FakeEventSource.instances = [];
+    (globalThis as unknown as { EventSource: typeof FakeEventSource }).EventSource = FakeEventSource;
+    // 이 describe만 mux를 null로 — RealtimeProvider가 피처플래그 off거나 미연결일 때와 동형.
+    useSseMultiplexerContextMock.mockReturnValue(null);
+  });
+
+  it('mux가 null이어도 conversation.gate_resolved가 fallback EventSource로 리스닝된다', async () => {
+    mockFetches([actionableGate()], []);
+    await mount();
+
+    expect(FakeEventSource.instances.length).toBeGreaterThan(0);
+    const es = FakeEventSource.instances[0]!;
+    expect(es.listeners['conversation.gate_resolved']).toBeTruthy();
+
+    await act(async () => {
+      es.emit('conversation.gate_resolved', JSON.stringify({ gate_id: 'g-live', status: 'approved' }));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
+  });
+
+  it('mux가 null이어도 conversation.gate_delegated가 fallback EventSource로 리스닝된다', async () => {
+    mockFetches([actionableGate()], []);
+    await mount();
+    expect(container.textContent).toContain('실시간 대상 항목');
+
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => {
+      es.emit('conversation.gate_delegated', JSON.stringify({ gate_id: 'g-live' }));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).not.toContain('실시간 대상 항목');
+  });
+
+  it('mux가 null이어도 conversation.gate_created가 fallback EventSource로 리스닝돼 단건 GET 후 prepend된다', async () => {
+    mockFetches([actionableGate()], []);
+    await mount();
+    expect(container.textContent).not.toContain('새로생긴카드');
+
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gates/g-new') {
+        return { ok: true, json: async () => gate({ id: 'g-new', work_item_summary: { title: '새로생긴카드', slug: null } }) };
+      }
+      return { ok: true, json: async () => [] };
+    }));
+
+    const es = FakeEventSource.instances[0]!;
+    expect(es.listeners['conversation.gate_created']).toBeTruthy();
+    await act(async () => {
+      es.emit('conversation.gate_created', JSON.stringify({ gate_id: 'g-new' }));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain('새로생긴카드');
   });
 });

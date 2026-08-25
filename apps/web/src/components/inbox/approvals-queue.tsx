@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
@@ -16,7 +16,7 @@ import { GateSignatureApproval } from '@/components/cage/gate-signature-approval
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateInboxItem, GateItem, HitlInboxItem } from '@/components/kanban/types';
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
-import { useSseMultiplexerContext } from '@/components/realtime-provider';
+import { useSseNotifications } from '@/hooks/use-sse-notifications';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -116,7 +116,7 @@ export function ApprovalsQueue() {
   // 같은 버그클래스: 이 큐는 그 판정을 미리 안 보고 에이전트 계정에도 승인/반려 버튼을
   // 무조건 열었다. Gate와 달리 HitlInboxItem엔 per-item can_approve 필드가 없어(BE 응답
   // shape 차이) 계정 자체의 type(human/agent, DashboardContext #2103 신규)으로 게이팅한다.
-  const { orgMemberships, currentMemberType } = useDashboardContext();
+  const { orgMemberships, currentMemberType, currentTeamMemberId } = useDashboardContext();
   const canResolveHitl = currentMemberType === 'human';
   const [items, setItems] = useState<GateInboxItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -197,62 +197,66 @@ export function ApprovalsQueue() {
   // undo 버튼이 뜨면 안 된다, 위 resolvedAtMs 주석 참조). BE 계약은 approval-request-
   // card.tsx/gates/[id]/page.tsx와 동일(notify_gate_card_recipients_resolved, 신규 배관 0).
   // ⚠️items를 deps에 넣지 않는다(items.some(...) 멤버십 가드는 fetchGates 완료 前 빈
-  // 배열을 캡처한 stale effect가 재구독으로 안 씻겨나가는 함정이 있다 — mux.subscribe가
-  // 리스너 목록에 append만 하고 이전 것을 안 지우는 구현이면 첫 구독(빈 items)이 계속 살아
-  // 있어 항상 no-op이 된다). 대신 무조건 기록 — items에 없는 gate_id가 들어와도 그 키는
-  // 그냥 안 쓰일 뿐(렌더는 items.map()이 도는 항목만 resolvedGates[gate.id]를 읽는다).
-  const mux = useSseMultiplexerContext();
-  useEffect(() => {
-    if (!mux) return;
-    const unsub = mux.subscribe('conversation.gate_resolved', (raw) => {
-      try {
-        const payload = JSON.parse(raw) as { gate_id?: string; status?: 'approved' | 'rejected' };
-        if (!payload.gate_id || !payload.status) return;
-        setResolvedGates((prev) => ({ ...prev, [payload.gate_id!]: payload.status! }));
-      } catch { /* malformed — 무시 */ }
-    });
-    return unsub;
-  }, [mux]);
+  // 배열을 캡처한 stale effect가 재구독으로 안 씻겨나가는 함정이 있다). 대신 무조건 기록 —
+  // items에 없는 gate_id가 들어와도 그 키는 그냥 안 쓰일 뿐(렌더는 items.map()이 도는
+  // 항목만 resolvedGates[gate.id]를 읽는다).
+  //
+  // story #3069(P1, 2026-08-25 PO 실측·디디 그라운딩) — 이 세 이벤트를 예전엔
+  // `useSseMultiplexerContext()`가 준 mux에 직접 `mux.subscribe(...)`로만 걸었다. mux는
+  // 피처플래그(SSE_MULTIPLEX_ENABLED) off거나 이 컴포넌트 마운트 시점에 미연결이면 null을
+  // 주고, 그 경우 `if (!mux) return;`으로 조용히 no-op — 즉 폴백 경로가 아예 없어 세 이벤트
+  // 전부가 페이지 전체에서 리스너 자체를 잃었다(BE는 정상 발화·delivered 마킹했는데도 화면
+  // 카드는 0건, 실사고 재현). `use-chat-sse.ts`/`use-sse-notifications.ts`(원 3훅)는 이미
+  // mux 없으면 자체 독립 EventSource로 폴백하는 설계라 그 사이드에선 안 죽었다 — 이 컴포넌트만
+  // 그 불변식(мux 유무 무관 항상 최소 1곳에서 리스닝)을 안 지켰던 것.
+  // 처방: 새 EventSource를 직접 열지 않고(발명 0) `useSseNotifications`의 `extraEventNames`
+  // 경로를 재사용한다 — 그 훅이 mux 有=mux.subscribe, mux 無=자체 폴백 EventSource를 이미
+  // 구조적으로 갈라주므로 이 컴포넌트는 mux 존재 여부를 더 이상 알 필요가 없다(그 훅의 dedup
+  // ·backoff·visibility-reconnect·cursor 승격까지 전부 공짜로 상속).
+  const handleGateEvent = useCallback((eventName: string, data: unknown) => {
+    if (typeof data !== 'object' || data === null) return;
+    const payload = data as { gate_id?: string; status?: 'approved' | 'rejected' };
+    if (!payload.gate_id) return;
 
-  // story #3001(위임) — 이 큐는 assigned_to_me=true로 이미 스코프돼 있다. 지정자가
-  // 위임으로 밀려나면 그 게이트는 더 이상 "내 할 일"이 아니므로(재조회하면 안 옴), 목록에서
-  // 바로 제거한다 — gate_resolved(완료 오버레이 유지)와 다르게 여긴 실제 삭제가 재조회
-  // 결과와 정확히 일치한다.
-  useEffect(() => {
-    if (!mux) return;
-    const unsub = mux.subscribe('conversation.gate_delegated', (raw) => {
-      try {
-        const payload = JSON.parse(raw) as { gate_id?: string };
-        if (!payload.gate_id) return;
-        setItems((prev) => prev.filter((it) => it.id !== payload.gate_id));
-      } catch { /* malformed — 무시 */ }
-    });
-    return unsub;
-  }, [mux]);
+    if (eventName === 'conversation.gate_resolved') {
+      if (!payload.status) return;
+      setResolvedGates((prev) => ({ ...prev, [payload.gate_id!]: payload.status! }));
+      return;
+    }
 
-  // story #3044(PO 실사고 표본②, 2026-08-25) — fetchGates()는 마운트 1회뿐이고 위 두 SSE는
-  // 기존 항목의 상태 변화만 다뤄, "새 게이트가 생겼다"를 알리는 신호가 없었다(이미 열어둔
-  // 탭에 새 게이트가 생기면 하드 리로드 전까진 영원히 안 뜸 — gate 2a14c177 실사고). BE가
-  // notify_gate_created_to_recipients(approval_delivery.py)로 심는 conversation.gate_created를
-  // 구독 — payload는 gate_id뿐이라(다른 두 이벤트와 동형, 최소 payload 관례) 단건 GET으로
-  // 채워 prepend한다. 이미 목록에 있으면(레이스 — fetchGates()가 방금 같은 걸 받아왔거나
-  // 중복 이벤트) 지어내지 않고 skip.
-  useEffect(() => {
-    if (!mux) return;
-    const unsub = mux.subscribe('conversation.gate_created', (raw) => {
+    if (eventName === 'conversation.gate_delegated') {
+      // story #3001(위임) — 이 큐는 assigned_to_me=true로 이미 스코프돼 있다. 지정자가
+      // 위임으로 밀려나면 그 게이트는 더 이상 "내 할 일"이 아니므로(재조회하면 안 옴), 목록
+      // 에서 바로 제거한다 — gate_resolved(완료 오버레이 유지)와 다르게 여긴 실제 삭제가
+      // 재조회 결과와 정확히 일치한다.
+      setItems((prev) => prev.filter((it) => it.id !== payload.gate_id));
+      return;
+    }
+
+    if (eventName === 'conversation.gate_created') {
+      // story #3044(PO 실사고 표본②, 2026-08-25) — fetchGates()는 마운트 1회뿐이고 위 두
+      // SSE는 기존 항목의 상태 변화만 다뤄, "새 게이트가 생겼다"를 알리는 신호가 없었다
+      // (이미 열어둔 탭에 새 게이트가 생기면 하드 리로드 전까진 영원히 안 뜸 — gate
+      // 2a14c177 실사고). BE가 notify_gate_created_to_recipients(approval_delivery.py)로
+      // 심는 conversation.gate_created를 구독 — payload는 gate_id뿐이라(다른 두 이벤트와
+      // 동형, 최소 payload 관례) 단건 GET으로 채워 prepend한다. 이미 목록에 있으면(레이스
+      // — fetchGates()가 방금 같은 걸 받아왔거나 중복 이벤트) 지어내지 않고 skip.
       void (async () => {
         try {
-          const payload = JSON.parse(raw) as { gate_id?: string };
-          if (!payload.gate_id) return;
           const res = await fetchWithAuth(`/api/gates/${payload.gate_id}`);
           if (!res.ok) return;
           const gate = (await res.json()) as GateItem;
           setItems((prev) => (prev.some((it) => it.id === gate.id) ? prev : [gate, ...prev]));
-        } catch { /* malformed payload 또는 fetch 실패 — 무시(다음 하드 리로드가 흡수) */ }
+        } catch { /* fetch 실패 — 무시(다음 하드 리로드가 흡수) */ }
       })();
-    });
-    return unsub;
-  }, [mux]);
+    }
+  }, []);
+
+  useSseNotifications({
+    memberId: currentTeamMemberId,
+    extraEventNames: ['conversation.gate_resolved', 'conversation.gate_delegated', 'conversation.gate_created'],
+    onExtraEvent: handleGateEvent,
+  });
 
   // story #2054 AC3: HitlRequest는 상세 페이지가 없어 이 큐 안에서 바로 승인/반려한다 —
   // 승인 후 원래 작업(report-done)이 통과하는지는 사용자 왕복(재시도)으로 확認된다.
