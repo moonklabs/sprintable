@@ -55,6 +55,41 @@ def fire_and_forget(coro: "Coroutine[Any, Any, Any]") -> None:
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
+
+async def drain_background_tasks(timeout: float = 5.0) -> None:
+    """story #2041(그라운딩 doc 67b44d1e, PR-A) — shutdown 시 fire_and_forget() 미완료
+    태스크를 커넥션 붙든 채 강제종료시키지 않는다. main.py lifespan이 named task 5개
+    (listen_loop·l2_task·redis_shadow_task·outbox_dispatcher_task·delivery_dispatcher_task)를
+    이미 cancel+await한 **뒤**, `engine.dispose()` **전**에 호출할 것 — 그 순서 자체가
+    "새 작업 수락 중지"를 만족한다(위 5개가 fire_and_forget의 실질적 유일한 발사원이고,
+    lifespan shutdown은 in-flight HTTP 요청 drain 이후 실행되므로 이 시점 이후 새
+    pg_notify 발사가 구조적으로 없다 — 별도 accept-gate 플래그 불요). dispose가 먼저
+    실행되면 여기 남은 태스크의 `async_session_factory()`가 이미 닫힌 풀을 참조하게 된다.
+
+    페드루 PO 지시(2026-08-25, PR-A 착수 GO) 구현 주의 2건 반영:
+    ①`list(_background_tasks)`로 **스냅샷**을 떠서 대기한다 — 드레인 도중(bounded wait
+    구간) 이론상 새 task가 set에 더해져도 그 신규분까지 기다리며 무한정 늘어나지 않는다.
+    ②timeout은 파라미터로 명시(기본 5s — Dockerfile의 `--timeout-graceful-shutdown 5`와
+    동일 예산 공유, 그 안에서 끝나야 함).
+
+    best-effort — webhook/activity 등은 durable outbox가 아니라 fire-and-forget(pg_notify
+    자체가 로컬 SSE 전파용 사이드채널)이라, timeout 안에 못 끝나면 cancel한다. 이 함수의
+    목적은 데이터 유실 0 보장이 아니라 «커넥션을 붙든 채 강제종료»를 막는 것 — 유실 허용
+    범위는 pg_notify 자체가 이미 best-effort(실패해도 로컬 전파는 별도 유지)라는 이 모듈
+    상단 docstring과 동일선."""
+    pending = list(_background_tasks)
+    if not pending:
+        return
+    _, still_pending = await asyncio.wait(pending, timeout=timeout)
+    if not still_pending:
+        return
+    logger.warning(
+        "pg_pubsub drain timeout(%ss) — 미완료 태스크 %d건 cancel", timeout, len(still_pending),
+    )
+    for t in still_pending:
+        t.cancel()
+    await asyncio.gather(*still_pending, return_exceptions=True)
+
 # ── NOTIFY 발행 ────────────────────────────────────────────────────────────────
 
 async def pg_notify(
