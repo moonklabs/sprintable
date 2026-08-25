@@ -46,6 +46,9 @@ def _story(assignee_id):
     s.priority = "medium"
     s.story_points = None
     s.acceptance_criteria = None
+    # story #2254 — 신규 필드(MagicMock 자동 속성이 Pydantic 검증 실패시키므로 명시 세팅).
+    s.previous_description = None
+    s.previous_acceptance_criteria = None
     s.position = None
     s.is_excluded = False
     s.success_hypothesis = None
