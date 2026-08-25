@@ -98,6 +98,17 @@ describe('StoryCard — story #32dcc294 제목 파싱(카테고리 칩+lead)', (
     expect(markup).toContain('태그 없는 평범한 제목');
   });
 
+  // story #3050(2984-S2) — 카테고리 칩은 MaterialChip(S1, 헤어라인+fill 0)을 쓴다. 옛
+  // bg-muted 채움은 폐지.
+  it('story #3050 — 카테고리 칩이 MaterialChip(헤어라인)을 쓰고 bg-muted 채움은 안 쓴다', () => {
+    const markup = renderKo(
+      <StoryCard story={story({ title: '[Workcell·콘텐츠 ③] goal/DoD 구조화 소스 트랙' })} onClick={() => {}} />,
+    );
+    expect(markup).toContain('border-proof-line');
+    expect(markup).toContain('bg-transparent');
+    expect(markup).not.toContain('bg-muted px-1.5');
+  });
+
   it('story_number가 있으면 #번호가 별도 배지로 렌더되고, 더 이상 제목 문자열에 접두되지 않는다', () => {
     const markup = renderKo(<StoryCard story={story({ title: '번호배지 테스트', story_number: 3018 })} onClick={() => {}} />);
     expect(markup).toContain('#3018');

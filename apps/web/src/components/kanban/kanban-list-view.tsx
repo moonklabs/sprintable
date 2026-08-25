@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { COLUMNS, type KanbanStory, type KanbanMember, type LineStatusSummary } from './types';
 import { StoryCard } from './story-card';
 import type { LabelData } from '@/components/ui/label-chip';
+import { CountBadge } from '@/components/ui/count-badge';
 
 interface KanbanListViewProps {
   stories: KanbanStory[];
@@ -57,7 +58,9 @@ function StatusGroup({
       >
         {expanded ? <ChevronDown className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}
         <span>{label}</span>
-        <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{stories.length}</span>
+        {/* story #3050(2984-S2, 유나 design PASS 비차단 finding) — CountBadge(S1) 채택,
+            bg-muted 채움 폐지. */}
+        <CountBadge count={stories.length} className="ml-auto" />
       </button>
 
       {expanded && (
