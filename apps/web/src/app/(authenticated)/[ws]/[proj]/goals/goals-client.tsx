@@ -620,21 +620,26 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
           </div>
           <p className="min-w-0 flex-1 text-editorial-claim font-editorial-claim leading-snug text-foreground">{epic.title}</p>
           <div className="flex shrink-0 items-center gap-1.5">
+            {/* story #2e583f9e(2984-S7, 유나 확定 2026-08-25) — soft-fill(bg-proof-amber-soft)
+                SHIFT→헤어라인(MaterialChip). 색 신호(unconfirmed/제안 의미)는 dot로 KEEP —
+                계열색 텍스트를 헤어라인 위에 그대로 두면 라이트 AA 미달이라 text-foreground로
+                이전(대비표 정본 — 옅은 배경+같은 계열 글자 조합 자체가 문제). */}
             {sortable ? (
               curated ? (
-                <span className="inline-flex items-center gap-1 rounded bg-proof-amber-soft px-1.5 py-0.5 text-[10px] font-bold text-proof-amber">
+                <MaterialChip className="gap-1 text-[10px] text-foreground">
+                  <span className="size-1.5 rounded-full bg-proof-amber" aria-hidden="true" />
                   {t('steerCurated')} {epic.position}
-                </span>
+                </MaterialChip>
               ) : (
                 <span className="text-[10px] font-medium text-muted-foreground">{t('steerAuto')}</span>
               )
             ) : null}
-            {/* Loop 제안 hook — source_loop_id 배선(P3/v2) 전엔 미표시(no-fiction·sparkle 0·claimed amber 언어). */}
+            {/* Loop 제안 hook — source_loop_id 배선(P3/v2) 전엔 미표시(no-fiction·sparkle 0). */}
             {epic.source_loop_id ? (
-              <span className="inline-flex items-center gap-1 rounded bg-proof-amber-soft px-1.5 py-0.5 text-[10px] font-bold text-proof-amber">
+              <MaterialChip className="gap-1 text-[10px] text-foreground">
                 <span className="size-1 rounded-full bg-proof-amber" aria-hidden="true" />
                 {t('steerLoopSuggest')}
-              </span>
+              </MaterialChip>
             ) : null}
             <Badge variant={priorityBadgeVariant(epic.priority)}>{priorityLabel[epic.priority]}</Badge>
             {/* story #2104 — BE goals.py:352가 human-only로 삭제를 403 거부한다(되돌릴 수 없는
