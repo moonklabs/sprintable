@@ -686,12 +686,20 @@
   /* story #7d7634ee — §⑤가 그레인 강도/블렌드는 명시(다크 16%·overlay)했지만 --elev-lift/
      --emboss-press의 다크 수치는 안 줬다(라이트 전용 정본). 기존 --elev-card/--elev-inset의
      라이트→다크 축소비(검정 베이스로 교체+하이라이트를 .6~.85→.08로 대폭 축소)를 그대로
-     따라 유도했다 — 임의 신규값 아님, 이 파일 자체의 기존 다크 변환 관례 재사용. 유나
-     확認 대기(다른 수치를 원하면 이 블록만 교체하면 되도록 단일 지점에 묶어둠). */
-  --paper-grain-opacity: .16;
-  --paper-grain-blend: overlay;
+     따라 유도했다 — 임의 신규값 아님, 이 파일 자체의 기존 다크 변환 관례 재사용. */
   --elev-lift: 0 10px 24px -8px rgba(0, 0, 0, .55), 0 2px 6px -2px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 255, 255, .08);
   --emboss-press: inset 0 1px 2px rgba(0, 0, 0, .35), inset 0 -1px 0 rgba(255, 255, 255, .08);
+
+  /* story #7d7634ee — 카디르 QA 재측 발견: 최초 처방(다크 16%·overlay, 위 주석의 검정-베이스
+     축소 관례 그대로 적용)은 수학적으로 소멸한다 — near-black(#0B0C0D대) 패널 위에 "검정"
+     노이즈를 overlay하면 어두운 픽셀끼리 곱해져(overlay는 밝은 곳만 multiply, 어두운 곳은
+     거의 무변화) 실측상 거의 안 보였다(라이트 대비 7~8%). 유나 정정(RMS 정량 검증) — 다크는
+     흰-노이즈(feColorMatrix RGB=1·A=noise, 아래 SVG)+screen 블렌드+20% 로 라이트와 파리티
+     (RMS 20.6~22.7%, 라이트 22%와 근접) 달성. 라이트 정의(위 :root, 검정-노이즈·multiply·22%)
+     는 무변경 — 이 블록에서 다크만 --paper-grain 자체를 흰-노이즈로 오버라이드. */
+  --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.62' numOctaves='2' stitchTiles='stitch' result='noise'/%3E%3CfeColorMatrix in='noise' type='matrix' values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --paper-grain-opacity: .20;
+  --paper-grain-blend: screen;
 }
 
 /* Sidebar: open triggers get active background */
