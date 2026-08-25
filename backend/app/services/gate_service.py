@@ -1131,6 +1131,7 @@ async def void_gate(
     reason: str,
     *,
     actor_type: str = "human",
+    void_reason_label: str = "admin",
 ) -> Gate:
     """⭐S30 admin recovery: 잘못 생성된 **pending** gate 를 무효화(voided).
 
@@ -1146,6 +1147,15 @@ async def void_gate(
     그 전제가 깨진다 — 호출부가 실제 caller 타입(agent_gateway.py 등에서 이미 쓰는
     `app_metadata.api_key_id` 신호와 동형 판별)을 명시로 넘긴다. 기본값 "human"은 기존
     admin `/void` 경로의 무회귀만 보존한다.
+
+    void_reason_label: 카디르 QA(#3462, 2026-08-25) — 최초 구현이 이 값을 `actor_type`과
+    같은 변수로 합쳐 썼다가, 그 결과 step_run.routing_reason 리터럴이 기존 admin `/void`
+    경로에서도 "gate voided by admin: ..."(항상 이 고정 문구였음, git blame 확認)에서
+    "gate voided by human: ..."로 바뀌어버려 `test_edg_s30_void_recovery`가 실 PG에서
+    깨졌다(disposable PG 재현). `actor_type`(ActivityLog 감사축)과 `void_reason_label`
+    (routing_reason 표시축)은 서로 다른 축이라 분리한다 — 전자는 "누가"(agent/human),
+    후자는 "어떤 경로로"(admin 복구 vs 요청자 철회)를 나타낸다. 기본값 "admin"은 기존
+    admin `/void` 호출자의 출력을 byte-동일 보존한다.
     """
     gate = (await session.execute(
         select(Gate).where(Gate.id == gate_id, Gate.org_id == org_id)
@@ -1173,7 +1183,8 @@ async def void_gate(
         if sr is not None:
             sr.status = "skipped"
             # story #2789 — "by admin"이 더는 항상 참이 아니다(요청자 자기-철회 경로 추가).
-            sr.routing_reason = f"gate voided by {actor_type}: {reason}"[:500]
+            # 카디르 QA(#3462): actor_type과 혼용하면 기존 admin 경로 출력이 바뀐다 — 별도 축.
+            sr.routing_reason = f"gate voided by {void_reason_label}: {reason}"[:500]
             sr.resolved_at = datetime.now(timezone.utc)
 
     # story #2975 AC4(PO 확定 2026-08-24) — 위 주석이 남긴 이유(permission_audit_logs=member 전용·

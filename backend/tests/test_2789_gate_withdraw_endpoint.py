@@ -317,3 +317,101 @@ async def test_decision_label_withdrawn_is_not_mislabeled_as_rejected():
 
     assert "철회" in captured["content"]
     assert "반려" not in captured["content"]
+
+
+# ── 카디르 QA(#3462, 2026-08-25) 회귀가드 2건 ────────────────────────────────────
+def _void_gate_fixture():
+    """void_gate() 내부 3개 side-effect(Gate select·step_run select·find_active_step_run_
+    for_gate·ActivityLogService.record)를 전부 mock해 실PG 없이 직접호출 검증한다."""
+    org_id = uuid.uuid4()
+    gate_id = uuid.uuid4()
+    voider_id = uuid.uuid4()
+    fake_gate = SimpleNamespace(
+        id=gate_id, org_id=org_id, status="pending",
+        resolver_id=None, resolution_note=None, resolved_at=None,
+        status_entered_at=None, gate_type="agent_decision_request",
+        work_item_type="agent_decision", work_item_id=uuid.uuid4(),
+        github_check_run_sha=None,
+    )
+    fake_sr = SimpleNamespace(
+        id=uuid.uuid4(), status="gate_pending", routing_reason=None, resolved_at=None,
+    )
+
+    gate_result = SimpleNamespace(scalar_one_or_none=lambda: fake_gate)
+    sr_result = SimpleNamespace(scalar_one_or_none=lambda: fake_sr)
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[gate_result, sr_result])
+    return org_id, gate_id, voider_id, fake_gate, fake_sr, session
+
+
+@pytest.mark.anyio
+async def test_void_gate_default_preserves_original_admin_routing_reason_and_actor_type():
+    """⭐회귀가드① — actor_type/void_reason_label을 분리하기 前엔 이 둘을 한 변수로 합쳐
+    썼다가 기존 admin `/void` 경로의 routing_reason 리터럴이 "voided by admin"(git blame상
+    항상 이 고정문구)에서 "voided by human"으로 바뀌어 test_edg_s30_void_recovery가 실PG서
+    깨졌다(카디르 disposable PG 재현). 기본값(둘 다 인자 미지정)이면 byte-동일해야 한다."""
+    from app.services import gate_service as gs_mod
+
+    org_id, gate_id, voider_id, fake_gate, fake_sr, session = _void_gate_fixture()
+    activity_record = AsyncMock()
+
+    with patch(
+        "app.services.workflow_line_resolution.find_active_step_run_for_gate",
+        AsyncMock(return_value=fake_sr.id),
+    ), patch("app.services.activity_log.ActivityLogService") as ActivityLogServiceMock:
+        ActivityLogServiceMock.return_value.record = activity_record
+        result = await gs_mod.void_gate(session, org_id, gate_id, voider_id, "오발행")
+
+    assert result.status == "voided"
+    assert fake_sr.routing_reason == "gate voided by admin: 오발행"
+    assert activity_record.call_args.kwargs["actor_type"] == "human"
+
+
+@pytest.mark.anyio
+async def test_void_gate_withdraw_path_labels_requester_not_admin():
+    """withdraw 호출부가 명시로 void_reason_label="requester"를 넘기면 그 표시만 바뀌고
+    admin 기본값과 섞이지 않는다(두 축 분리 확인 — 라벨 축 vs actor_type 축)."""
+    from app.services import gate_service as gs_mod
+
+    org_id, gate_id, voider_id, fake_gate, fake_sr, session = _void_gate_fixture()
+    activity_record = AsyncMock()
+
+    with patch(
+        "app.services.workflow_line_resolution.find_active_step_run_for_gate",
+        AsyncMock(return_value=fake_sr.id),
+    ), patch("app.services.activity_log.ActivityLogService") as ActivityLogServiceMock:
+        ActivityLogServiceMock.return_value.record = activity_record
+        await gs_mod.void_gate(
+            session, org_id, gate_id, voider_id, "더 이상 필요 없음",
+            actor_type="agent", void_reason_label="requester",
+        )
+
+    assert fake_sr.routing_reason == "gate voided by requester: 더 이상 필요 없음"
+    assert activity_record.call_args.kwargs["actor_type"] == "agent"
+
+
+@pytest.mark.anyio
+async def test_withdraw_endpoint_malformed_requester_field_404_not_500():
+    """⭐회귀가드② — 카디르 probe 실측: requested_by_member_id가 손상된 비-UUID 문자열이면
+    uuid.UUID(...) 파싱이 uncaught ValueError→500을 낸다. 문자열비교로 바꿔 크래시 없이
+    똑같이 404(모든 유효 uuid 문자열과도 매치될 리 없으므로 결과는 이미 fail-closed)."""
+    from app.routers import gates as gates_mod
+    from app.routers.gates import GateVoidRequest, withdraw_gate_endpoint
+
+    caller = _resolved(uuid.uuid4())
+    gate = _fake_gate(requester_id=caller.id)
+    gate.neutral_facts = {"requested_by_member_id": "not-a-valid-uuid-at-all"}
+    voidfn = AsyncMock()
+    session = _session_returning(gate)
+
+    with patch.object(gates_mod, "resolve_member", AsyncMock(return_value=caller)), \
+         patch.object(gates_mod, "void_gate", voidfn):
+        with pytest.raises(HTTPException) as ei:
+            await withdraw_gate_endpoint(
+                id=gate.id, body=GateVoidRequest(reason="x"),
+                session=session, org_id=uuid.uuid4(),
+                auth=SimpleNamespace(user_id=str(caller.user_id), claims={}),
+            )
+
+    assert ei.value.status_code == 404
+    voidfn.assert_not_awaited()

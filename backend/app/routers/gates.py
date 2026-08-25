@@ -1582,8 +1582,13 @@ async def withdraw_gate_endpoint(
     if gate is None:
         raise HTTPException(status_code=404, detail="Gate not found")
 
+    # 카디르 QA(#3462, 2026-08-25 probe 실측): neutral_facts는 외부 JSONB라 requested_by_
+    # member_id가 손상된/비-UUID 문자열일 수 있다 — uuid.UUID(...) 파싱은 그 경우 uncaught
+    # ValueError로 500을 낸다(다른 gate 라우트가 쓰는 문자열비교 패턴을 그대로 재사용해
+    # 파싱 자체를 없앤다 — 손상값은 어차피 어떤 유효 uuid 문자열과도 안 같으므로 결과는
+    # 동일하게 404, 크래시만 사라진다).
     requester_raw = (gate.neutral_facts or {}).get("requested_by_member_id")
-    if not requester_raw or uuid.UUID(str(requester_raw)) != resolved.id:
+    if not requester_raw or str(requester_raw) != str(resolved.id):
         # 존재 비노출 관례(다른 gate 라우트와 동형) — 남의 게이트 존재 여부를 403으로
         # 흘리지 않는다. 본인 요청이 아니면 404(admin은 /void를 쓸 것).
         raise HTTPException(status_code=404, detail="Gate not found")
@@ -1592,7 +1597,10 @@ async def withdraw_gate_endpoint(
     actor_type = "agent" if is_api_key else "human"
 
     try:
-        gate = await void_gate(session, org_id, id, resolved.id, body.reason, actor_type=actor_type)
+        gate = await void_gate(
+            session, org_id, id, resolved.id, body.reason,
+            actor_type=actor_type, void_reason_label="requester",
+        )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
