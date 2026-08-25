@@ -87,6 +87,8 @@ case "${ENV}" in
         ZONES="${GCP_REGION}-a,${GCP_REGION}-b,${GCP_REGION}-c"
         # 재생성 시 detach 대상(provision_realtime_gclb.sh의 BACKEND_SERVICE_NAME과 동일해야 함).
         GCLB_BACKEND_SERVICE="realtime-gateway-dev-backend"
+        # story #3070/#3071 후속(2026-08-25) — GCLB_HEALTH_CHECK와 동일 리소스.
+        GCLB_HEALTH_CHECK="realtime-gateway-dev-health-check"
         MACHINE_TYPE="e2-small"
         SQL_INSTANCE_CONN="${GCP_PROJECT}:${GCP_REGION}:sprintable-dev"
         RUNTIME_SA="cloudrun-runtime-dev@${GCP_PROJECT}.iam.gserviceaccount.com"
@@ -138,6 +140,8 @@ case "${ENV}" in
         TARGET_SIZE=3
         ZONES="${GCP_REGION}-a,${GCP_REGION}-b,${GCP_REGION}-c"
         GCLB_BACKEND_SERVICE="realtime-gateway-prod-backend"
+        # story #3070/#3071 후속(2026-08-25) — GCLB_HEALTH_CHECK와 동일 리소스.
+        GCLB_HEALTH_CHECK="realtime-gateway-prod-health-check"
         MACHINE_TYPE="e2-small"
         SQL_INSTANCE_CONN="${GCP_PROJECT}:${GCP_REGION}:sprintable-prod"
         RUNTIME_SA="cloudrun-runtime-prod@${GCP_PROJECT}.iam.gserviceaccount.com"
@@ -626,6 +630,7 @@ IMAGE=${IMAGE}
 MACHINE_TYPE=${MACHINE_TYPE}
 TARGET_SIZE=${TARGET_SIZE}
 ZONES=${ZONES}
+GCLB_HEALTH_CHECK=${GCLB_HEALTH_CHECK}
 SQL_INSTANCE_CONN=${SQL_INSTANCE_CONN}
 RUNTIME_SA=${RUNTIME_SA}
 PLAIN_ENV_SPEC=${PLAIN_ENV_SPEC}
@@ -660,8 +665,77 @@ else
         --metadata-from-file=startup-script="${STARTUP_SCRIPT_FILE}"
 fi
 
+# story #3482(2026-08-25, 카디르 QA 발견·PO 소스 재확認) 근본수정 — 아래 named-ports/
+# autoHealingPolicies/backend-service 방어 블록은 원래 이 if/else 전체가 끝난 뒤(기본 경로
+# 재배포마다 무조건 보장)에서만 실행됐다. 그 위치가 기본 경로(rolling-update, 아래 else
+# 분기)의 rolling-action start-update(762행 부근)보다 **뒤**라 — prod 첫 재배포처럼
+# autoHealingPolicies가 아직 없는 상태에서 rolling-action이 먼저 제출되면, 그 rolling batch엔
+# 이 스크립트가 고치려는 정확히 그 결함(신인스턴스 RUNNING=ready 오판→구인스턴스 조기삭제→502)이
+# 그대로 재현된다. 함수로 뽑아 MIG가 이미 존재함이 확인된 이 분기 진입 직후(rolling-action보다
+# 앞)에 한 번 선제 실행하고, 아래(785행대)에서 recreate/신규생성 경로 커버용으로 다시 호출한다 —
+# 멱등이라 두 번 불려도 부작용 없다(함수 정의 내부 주석 참조).
+ensure_mig_defensive_config() {
+    # story #2142(2026-07-23, 오르테가 적발) 근본수정 — named-ports는 MIG 객체 자체의 속성(인스턴스
+    # 템플릿에는 없음)이라 신규 생성/강제재생성 경로에서는 항상 비어 있는 채로 시작한다. 그 상태로
+    # 두면 backend-service는 port-name="http"을 찾다 못 찾아 **기본 포트 80**으로 폴백하는데 앱은
+    # 8000에서 듣는다 — 502(헬스체크는 8000을 직접 찌르므로 이 단절과 무관하게 HEALTHY로 보이는
+    # 게 제일 고약한 부분). set-named-ports는 멱등(이미 같은 값이면 no-op에 가까움)이라 매 배포마다
+    # 무조건 실행 — provision_realtime_gclb.sh 스텝④와 동일 명령·동일 named-port 값 유지(SSOT 중복
+    # 아님 — 그 스크립트가 "1회성 프로비저닝"이라 재배포마다 자동으로 다시 안 돌기 때문에 여기서도
+    # 방어적으로 보장한다. 사람이 그 스크립트 재실행을 잊어도 이 스크립트 하나로 무결하게 닫힘).
+    NAMED_PORT="http:8000"
+    log "Ensuring named port ${NAMED_PORT} on ${MIG_NAME} (MIG 객체 속성 — 신규/재생성 시 비어있음)"
+    gcloud compute instance-groups managed set-named-ports "${MIG_NAME}" \
+        --project="${GCP_PROJECT}" --region="${GCP_REGION}" --named-ports="${NAMED_PORT}"
+
+    # story #3070/#3071 후속(2026-08-25, 페드루 PO GO) 근본수정 — MIG에 autoHealingPolicies가
+    # 없으면 롤링업데이트의 "새 인스턴스 준비됐다" 판정이 GCLB 헬스체크(앱 실제 응답 여부)와
+    # 완전히 분리된다 — 그 결과 신규 VM이 부팅 중(healthCheck 아직 UNHEALTHY)인데도 MIG가 구
+    # 인스턴스를 이미 삭제해 버려 무중단 창(max-unavailable=0)이 실제로는 ~2분 502로 새는
+    # 것을 실측 확認(오늘 10사이클 관측, insert→delete 간격이 앱 부팅시간과 거의 여유 0으로
+    # 맞물림 — 한 사이클만도 실 502 37건). --initial-delay는 이 스크립트가 아는 현재 부팅
+    # 시간(#3071 배치 fetch 처방 後 실측 기준, 여유 포함)보다 크게 잡는다 — 부팅이 나중에
+    # 다시 느려져도 자동으로 그만큼 더 기다리는 자기교정 구조(하드코딩된 sleep과 다름).
+    # named-ports/backend-service 부착과 동일 원칙 — MIG 객체 자체의 속성이라 신규/재생성
+    # 경로에서 항상 비어 있으므로 매 배포마다 무조건 보장한다(멱등 — 이미 같은 값이면 no-op).
+    # ⛔즉시완화로 gcloud beta ... update를 직접 실행해 dev에 이미 적용해 뒀으나(손 적용은
+    # 다음 재배포/재생성이 덮어씀), 이 블록이 정본(SSOT) — 이후 모든 배포가 이 값을 보장한다.
+    AUTOHEAL_INITIAL_DELAY_SEC=270
+    log "Ensuring autoHealingPolicies on ${MIG_NAME} (health-check=${GCLB_HEALTH_CHECK}, initial-delay=${AUTOHEAL_INITIAL_DELAY_SEC}s)"
+    gcloud compute instance-groups managed update "${MIG_NAME}" \
+        --project="${GCP_PROJECT}" --region="${GCP_REGION}" \
+        --health-check="${GCLB_HEALTH_CHECK}" --initial-delay="${AUTOHEAL_INITIAL_DELAY_SEC}"
+
+    # story #2142 근본수정 — backend-service 부착도 같은 이유로 이 스크립트가 방어적으로 보장한다
+    # (provision_realtime_gclb.sh 스텝④와 동일 멱등 로직 재사용). 이미 붙어 있으면 조용히 스킵.
+    if ! gcloud compute backend-services describe "${GCLB_BACKEND_SERVICE}" --global --project="${GCP_PROJECT}" \
+            --format='value(backends[].group)' 2>/dev/null | grep -q "${MIG_NAME}"; then
+        log "Attaching ${MIG_NAME} to backend-service ${GCLB_BACKEND_SERVICE}"
+        gcloud compute backend-services add-backend "${GCLB_BACKEND_SERVICE}" \
+            --project="${GCP_PROJECT}" \
+            --global \
+            --instance-group="${MIG_NAME}" \
+            --instance-group-region="${GCP_REGION}" \
+            --balancing-mode=UTILIZATION \
+            --max-utilization=0.8
+    else
+        log "${MIG_NAME} already attached to backend-service ${GCLB_BACKEND_SERVICE} — skip"
+    fi
+
+    # story #2142 근본수정 — "조용히 넘어가는 게 제일 나쁜 것"(오르테가). 위 attach 스텝이 어떤
+    # gcloud 이유로든 조용히 실패/no-op했다면, 트래픽을 전환하기 전에 반드시 여기서 크게 실패한다.
+    if ! gcloud compute backend-services describe "${GCLB_BACKEND_SERVICE}" --global --project="${GCP_PROJECT}" \
+            --format='value(backends[].group)' 2>/dev/null | grep -q "${MIG_NAME}"; then
+        log "⛔ FATAL: ${MIG_NAME} is NOT attached to backend-service ${GCLB_BACKEND_SERVICE} after deploy."
+        log "   트래픽을 이 상태로 전환하면 프로덕션이 조용히 502가 됩니다 — 전환 전 반드시 원인 확認."
+        exit 1
+    fi
+}
+
 if gcloud compute instance-groups managed describe "${MIG_NAME}" \
         --region="${GCP_REGION}" --project="${GCP_PROJECT}" >/dev/null 2>&1; then
+    ensure_mig_defensive_config
+
     # story #2110(S1) 이력: 그 당시 2-zone→3-zone 확장은 **zone 구성 자체를 바꾸는** 작업이었고,
     # regional MIG의 zone 구성은 불변(immutable — gcloud `update`엔 --zones 플래그가 없고,
     # Compute API patch로 distributionPolicy.zones를 넣으면 400 "Zone configuration is
@@ -777,43 +851,11 @@ else
         --instance-redistribution-type=none
 fi
 
-# story #2142(2026-07-23, 오르테가 적발) 근본수정 — named-ports는 MIG 객체 자체의 속성(인스턴스
-# 템플릿에는 없음)이라 신규 생성/강제재생성 경로에서는 항상 비어 있는 채로 시작한다. 그 상태로
-# 두면 backend-service는 port-name="http"을 찾다 못 찾아 **기본 포트 80**으로 폴백하는데 앱은
-# 8000에서 듣는다 — 502(헬스체크는 8000을 직접 찌르므로 이 단절과 무관하게 HEALTHY로 보이는
-# 게 제일 고약한 부분). set-named-ports는 멱등(이미 같은 값이면 no-op에 가까움)이라 매 배포마다
-# 무조건 실행 — provision_realtime_gclb.sh 스텝④와 동일 명령·동일 named-port 값 유지(SSOT 중복
-# 아님 — 그 스크립트가 "1회성 프로비저닝"이라 재배포마다 자동으로 다시 안 돌기 때문에 여기서도
-# 방어적으로 보장한다. 사람이 그 스크립트 재실행을 잊어도 이 스크립트 하나로 무결하게 닫힘).
-NAMED_PORT="http:8000"
-log "Ensuring named port ${NAMED_PORT} on ${MIG_NAME} (MIG 객체 속성 — 신규/재생성 시 비어있음)"
-gcloud compute instance-groups managed set-named-ports "${MIG_NAME}" \
-    --project="${GCP_PROJECT}" --region="${GCP_REGION}" --named-ports="${NAMED_PORT}"
-
-# story #2142 근본수정 — backend-service 부착도 같은 이유로 이 스크립트가 방어적으로 보장한다
-# (provision_realtime_gclb.sh 스텝④와 동일 멱등 로직 재사용). 이미 붙어 있으면 조용히 스킵.
-if ! gcloud compute backend-services describe "${GCLB_BACKEND_SERVICE}" --global --project="${GCP_PROJECT}" \
-        --format='value(backends[].group)' 2>/dev/null | grep -q "${MIG_NAME}"; then
-    log "Attaching ${MIG_NAME} to backend-service ${GCLB_BACKEND_SERVICE}"
-    gcloud compute backend-services add-backend "${GCLB_BACKEND_SERVICE}" \
-        --project="${GCP_PROJECT}" \
-        --global \
-        --instance-group="${MIG_NAME}" \
-        --instance-group-region="${GCP_REGION}" \
-        --balancing-mode=UTILIZATION \
-        --max-utilization=0.8
-else
-    log "${MIG_NAME} already attached to backend-service ${GCLB_BACKEND_SERVICE} — skip"
-fi
-
-# story #2142 근본수정 — "조용히 넘어가는 게 제일 나쁜 것"(오르테가). 위 attach 스텝이 어떤
-# gcloud 이유로든 조용히 실패/no-op했다면, 트래픽을 전환하기 전에 반드시 여기서 크게 실패한다.
-if ! gcloud compute backend-services describe "${GCLB_BACKEND_SERVICE}" --global --project="${GCP_PROJECT}" \
-        --format='value(backends[].group)' 2>/dev/null | grep -q "${MIG_NAME}"; then
-    log "⛔ FATAL: ${MIG_NAME} is NOT attached to backend-service ${GCLB_BACKEND_SERVICE} after deploy."
-    log "   트래픽을 이 상태로 전환하면 프로덕션이 조용히 502가 됩니다 — 전환 전 반드시 원인 확認."
-    exit 1
-fi
+# story #3482(2026-08-25) — MIG가 방금 신규 생성됐거나(바로 위 else 분기) FORCE_MIG_RECREATE로
+# delete+recreate됐다면(688행) named-ports/autoHealingPolicies/backend-service 부착이 전부
+# 비어 있는 새 MIG이므로 여기서 다시 보장한다(함수 정의는 668행 위 — 멱등이라 rolling-update
+# 분기에서 이미 한 번 불렸어도 재호출 무해).
+ensure_mig_defensive_config
 
 # story #2673(2026-08-15, 실사고: dev 배포가 quota INSTANCE_TEMPLATES(한도 300)로 실패 —
 # 배포마다 이 스크립트가 새 템플릿을 만들고 옛것을 영구 방치했다. dev 게이트웨이만 463개
