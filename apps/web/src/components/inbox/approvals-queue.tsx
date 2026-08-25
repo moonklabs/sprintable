@@ -230,6 +230,30 @@ export function ApprovalsQueue() {
     return unsub;
   }, [mux]);
 
+  // story #3044(PO 실사고 표본②, 2026-08-25) — fetchGates()는 마운트 1회뿐이고 위 두 SSE는
+  // 기존 항목의 상태 변화만 다뤄, "새 게이트가 생겼다"를 알리는 신호가 없었다(이미 열어둔
+  // 탭에 새 게이트가 생기면 하드 리로드 전까진 영원히 안 뜸 — gate 2a14c177 실사고). BE가
+  // notify_gate_created_to_recipients(approval_delivery.py)로 심는 conversation.gate_created를
+  // 구독 — payload는 gate_id뿐이라(다른 두 이벤트와 동형, 최소 payload 관례) 단건 GET으로
+  // 채워 prepend한다. 이미 목록에 있으면(레이스 — fetchGates()가 방금 같은 걸 받아왔거나
+  // 중복 이벤트) 지어내지 않고 skip.
+  useEffect(() => {
+    if (!mux) return;
+    const unsub = mux.subscribe('conversation.gate_created', (raw) => {
+      void (async () => {
+        try {
+          const payload = JSON.parse(raw) as { gate_id?: string };
+          if (!payload.gate_id) return;
+          const res = await fetchWithAuth(`/api/gates/${payload.gate_id}`);
+          if (!res.ok) return;
+          const gate = (await res.json()) as GateItem;
+          setItems((prev) => (prev.some((it) => it.id === gate.id) ? prev : [gate, ...prev]));
+        } catch { /* malformed payload 또는 fetch 실패 — 무시(다음 하드 리로드가 흡수) */ }
+      })();
+    });
+    return unsub;
+  }, [mux]);
+
   // story #2054 AC3: HitlRequest는 상세 페이지가 없어 이 큐 안에서 바로 승인/반려한다 —
   // 승인 후 원래 작업(report-done)이 통과하는지는 사용자 왕복(재시도)으로 확認된다.
   const resolveHitl = async (id: string, status: 'approved' | 'rejected') => {

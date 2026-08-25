@@ -14,8 +14,10 @@ from __future__ import annotations
 import logging
 import uuid
 
+from sqlalchemy import event as sa_event
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.doc import Doc
@@ -210,6 +212,167 @@ async def dispatch_approval_request_cards(
                 "approval-request 카드 배달 실패 %s=%s approver=%s",
                 work_item_type, work_item_id, approver_id, exc_info=True,
             )
+
+    # story #3044(2026-08-25) — 카드가 실제로 간 recipients와 정확히 같은 대상에게
+    # conversation.gate_created(순수 SSE, 새 챗버블 없음)도 심는다 — 결재함 목록이
+    # "새 게이트가 생겼다"를 아예 못 듣던 갭(notify_gate_created_to_recipients 문서 참고).
+    # after_commit 훅으로 자체 예약하므로(caller 협조 불요) 반환값을 스레딩할 필요가 없다.
+    # best-effort — 실패해도 카드 배달(위 루프, 이미 끝남)은 막지 않는다.
+    try:
+        await notify_gate_created_to_recipients(
+            db, org_id=org_id, project_id=project_id, gate_id=gate_id, recipient_ids=recipients,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "gate_created 목록 실시간 반영 배선 실패 %s=%s", work_item_type, work_item_id, exc_info=True,
+        )
+
+
+_GATE_CREATED_PENDING_KEY = "s3044_pending_gate_created_pushes"
+_GATE_CREATED_HOOKED_KEY = "s3044_gate_created_hook_installed"
+
+
+async def notify_gate_created_to_recipients(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    gate_id: uuid.UUID,
+    recipient_ids: list[uuid.UUID],
+) -> None:
+    """story #3044(PO 실사고 표본②, 2026-08-25 그라운딩) — 결재함(approvals-queue.tsx)이
+    마운트 1회만 fetch하고 이후는 conversation.gate_resolved/gate_delegated 2종 SSE로만
+    갱신되는 구조라 — 둘 다 **기존 항목의 상태 변화**만 다뤄, "새 게이트가 생겼다"를 알리는
+    신호 자체가 없었다(전수 grep 확認). 이미 열어둔 탭에 새 게이트가 생기면 하드 리로드
+    전까진 영원히 안 뜬다 — 챗 카드 직링크로만 도달 가능했던 실사고(gate 2a14c177)가 이 갭.
+
+    notify_gate_card_recipients_resolved(위, 이 파일)와 동형 — 새 ConversationMessage는
+    만들지 않는다(순수 SSE 신호, 카드는 dispatch_approval_request_cards가 이미 별도로
+    맡는다 — 이중 배달 아님). recipient_ids는 호출부가 이미 계산해 넘긴다(dispatch_
+    approval_request_cards의 `recipients` 산출과 동일 소스 — designated_approver_id가
+    있으면 그 1인, 없으면 approver_ids 전원, 카드가 실제로 간 대상과 정확히 일치).
+
+    ⚠️PO 정면 돌파 지시(2026-08-25, "우회/스킵 금지") — 이전 판은 caller가 반환값을 받아
+    caller 자신의 commit 직후 push하는 계약이었다(notify_gate_card_recipients_resolved와
+    동형). 그런데 dispatch_approval_request_cards의 실 호출부 4곳 중 gates.py(decision
+    request)·gate_service.py(delegation) 2곳만 안전한 commit 지점을 쉽게 찾을 수 있었고,
+    merge_verdict_gate.py(evaluate_merge_gate — 원 표본 2a14c177이 정확히 이 경로)·doc.py는
+    호출 지점 이후에도 같은 트랜잭션에서 더 쓰기가 이어져(evaluate_merge_gate는 이 함수
+    호출 뒤에도 gate.requires_human/decision_basis 등을 계속 쓰고 자기 자신은 commit을
+    한 번도 안 한다 — 커밋은 8개나 되는 자기 호출부 각각이 각자 시점에 한다) 안전한 commit
+    지점을 이 함수 안에서 특정할 수 없었다. **caller마다 반환값을 스레딩하는 대신**,
+    event_seq.py의 _schedule_wake_after_commit(story #2381, 이미 검증된 동일 클래스
+    문제의 기존 해법)과 완전히 동형으로 SQLAlchemy `after_commit` 세션 이벤트에 push를
+    예약한다 — 이 세션이 **실제로 commit에 성공한 후에만**(rollback 시엔 안 불림) 자동
+    발화되므로, 몇 개의 호출부가 있든·그 호출부가 어디서 commit하든 이 함수 자신은 몰라도
+    된다(caller 협조 불요 — 새 호출부가 미래에 생겨도 이 함수를 거치기만 하면 구조적으로
+    커버된다, "우회 없이" 8개 caller 전부를 실제로 돌파).
+
+    ⚠️id 공간 매핑 경계(페드루 PO 요청, 2026-08-25 — 카디르 QA #3467 REQUEST_CHANGES①로 정정) —
+    이 자리의 이전 판(커밋 e3bdb5e33)은 "team_members는 오늘 진짜 base table"이라 적었으나
+    **오判이었다**(로컬 psql 확認이 이 뷰가 도입되기 전 상태의 스테일한 스크래치 DB를 겨눔 —
+    카디르 CI 재현·본 세션에서 완전히 새로 만든 스크래치 DB 재확認으로 둘 다 반증). 정본:
+    `team_members`는 0088에서 도입된 프로젝션 **뷰**(members ⋈ project_access, UNION ALL
+    agent 분기)가 지금도 그대로다(`backend/alembic/baseline/schema.sql:2036`). `Event.
+    recipient_id`도 재확認 결과 DB 레벨 FK 제약 자체가 없다(NOT NULL만) — 그럼에도 아래 필터는
+    "team_members 뷰에 잡히지 않는 recipient는 메시징 신원이 없어 실제로 못 찾는다"는 응용
+    계층 규율이라 필터 자체는 유효(제거하지 않는다).
+
+    핵심은 여전히 유효 — `org_members`(role 권위 축, `get_project_role`의 "org owner/admin
+    floor"가 사는 곳)와 `team_members`(메시징 신원 축, 이 뷰에 투영될 members+project_access
+    명시 행이 있어야만 존재)는 **독립된 두 id 공간**이다(OrgMember.id는 uuid4 자체 발급 —
+    members.id와 무관). "org admin이지만 이 프로젝트엔 team_members 행이 없는" recipient_id는
+    authz(rule B floor)로는 승인 자격이 있어도 team_members 뷰엔 안 잡힌다(실사고 재현:
+    test_2891 fixture가 이 정확한 케이스 — org admin을 OrgMember만으로 seed, members/
+    project_access 없음). 여기서 그 서브셋을 사전에 걸러 스킵한다(로그만, 예외 전파 안 함) —
+    dispatch_approval_request_cards의 챗 카드 배달(다른 신원 경로, Conversation 참가자 자격)은
+    이 필터와 무관하게 그대로 간다."""
+    if not recipient_ids:
+        return
+
+    from app.models.team import TeamMember
+    from app.services.member_resolver import lookup_members_by_ids
+
+    valid_ids = set((await db.execute(
+        select(TeamMember.id).where(TeamMember.id.in_(recipient_ids), TeamMember.project_id == project_id)
+    )).scalars().all())
+    skipped = set(recipient_ids) - valid_ids
+    if skipped:
+        logger.warning(
+            "gate_created SSE 스킵 — team_members(project_access) 신원 없음 gate=%s project=%s recipients=%s",
+            gate_id, project_id, skipped,
+        )
+    if not valid_ids:
+        return
+
+    members = await lookup_members_by_ids(valid_ids, db)
+
+    payload_base = {"gate_id": str(gate_id)}
+
+    events: list[Event] = []
+    for recipient_id in valid_ids:
+        member = members.get(recipient_id)
+        m_type = member.type if member is not None else "human"
+        event = Event(
+            project_id=project_id, org_id=org_id, event_type="conversation.gate_created",
+            source_entity_type="gate", source_entity_id=gate_id,
+            sender_id=None, recipient_id=recipient_id, recipient_type=m_type,
+            payload=payload_base, status="pending",
+        )
+        db.add(event)
+        events.append(event)
+
+    await db.flush()
+    for event in events:
+        _schedule_gate_created_push_after_commit(
+            db, str(event.recipient_id),
+            {"event_id": str(event.id), "event_type": "conversation.gate_created", **payload_base,
+             "recipient_id": str(event.recipient_id)},
+        )
+
+
+def _schedule_gate_created_push_after_commit(db: AsyncSession, pid_str: str, payload: dict) -> None:
+    """event_seq.py의 _schedule_wake_after_commit과 완전히 동형(주석도 그쪽이 정본 — 여기선
+    요지만) — commit 성공 後에만(rollback 시 미발화) _push_to_agent가 정확히 한 번 불리도록
+    세션에 예약. MVCC 가시성 레이스 방지(commit 前 push하면 recipient가 GET해도 아직 안 보임)."""
+    sync_session = db.sync_session
+    if not isinstance(sync_session, Session):
+        logger.debug("gate_created push scheduling skipped — sync_session is not a real Session (test double?)")
+        return
+    pending: list[tuple[str, dict]] = sync_session.info.setdefault(_GATE_CREATED_PENDING_KEY, [])
+    pending.append((pid_str, payload))
+    if not sync_session.info.get(_GATE_CREATED_HOOKED_KEY):
+        sync_session.info[_GATE_CREATED_HOOKED_KEY] = True
+        sa_event.listen(sync_session, "after_commit", _fire_pending_gate_created_pushes)
+        sa_event.listen(sync_session, "after_rollback", _clear_pending_gate_created_pushes_on_rollback)
+
+
+def _fire_pending_gate_created_pushes(sync_session: Session) -> None:
+    """⚠️SAVEPOINT 유령 push(카디르 QA #3467 REQUEST_CHANGES②, 2026-08-25) — `after_commit`은
+    SQLAlchemy가 outer 최종 commit뿐 아니라 `begin_nested()` SAVEPOINT를
+    release(`nested.commit()`)할 때도 발화한다(실측: 콜백 안에서
+    `in_nested_transaction()`이 그 순간엔 True). outer 트랜잭션이 이후 rollback돼도 이미
+    push가 나가버려 "실은 durable하지 않은 이벤트"가 라이브로 새는 결함이었다.
+    `in_nested_transaction()`이 True인 발화(=SAVEPOINT release)는 pending을 비우지 않고
+    그대로 둔다 — 언젠가 진짜 outer commit의 after_commit이 다시 발화할 때(그때는
+    in_nested_transaction()=False) 최종 발사된다. outer가 끝내 rollback되면
+    after_rollback 훅(_clear_pending_gate_created_pushes_on_rollback)이 비운다."""
+    if sync_session.in_nested_transaction():
+        return
+    pending = sync_session.info.pop(_GATE_CREATED_PENDING_KEY, None) or []
+    if not pending:
+        return
+    from app.routers.events import _push_to_agent
+
+    for pid_str, payload in pending:
+        try:
+            _push_to_agent(pid_str, payload)
+        except Exception:  # noqa: BLE001
+            logger.warning("post-commit gate_created push failed recipient=%s", pid_str, exc_info=True)
+
+
+def _clear_pending_gate_created_pushes_on_rollback(sync_session: Session) -> None:
+    sync_session.info.pop(_GATE_CREATED_PENDING_KEY, None)
 
 
 async def dispatch_approval_result_reply(

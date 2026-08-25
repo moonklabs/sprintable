@@ -325,7 +325,12 @@ async def _notify_decision_request_card(
     org owner/admin임은 _non_doc_gate_approvable()(agent_decision은 project-agnostic이라
     project_id=None 분기, is_org_owner_or_admin)로 이미 확定돼 있어 별도 판단 아님. create_gate()
     의 generic 벨(gate.pending_approval)은 그대로 유지(notify=False 안 씀 — doc.py와 달리 이
-    gate_type엔 대체할 리치 벨이 없어 끄면 알림 자체가 0이 된다), 이 함수는 챗 카드만 추가."""
+    gate_type엔 대체할 리치 벨이 없어 끄면 알림 자체가 0이 된다), 이 함수는 챗 카드만 추가.
+
+    story #3044(2026-08-25) — dispatch_approval_request_cards가 이제 conversation.gate_created
+    (결재함 목록 실시간 반영)도 같은 자리에서 심는다. after_commit 훅으로 자체 예약하므로
+    (approval_delivery.py의 notify_gate_created_to_recipients 문서 참고) 이 함수·호출부
+    둘 다 반환값 스레딩·commit 타이밍을 신경 쓸 필요가 없다 — 회귀 0(원래도 -> None)."""
     try:
         from app.models.project import OrgMember
         approver_ids = list((await session.execute(

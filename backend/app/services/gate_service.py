@@ -1425,6 +1425,11 @@ async def dispatch_gate_delegation(
 
     try:
         from app.services.approval_delivery import dispatch_approval_request_cards
+        # story #3044 — 새 지정자의 결재함 목록도 새로고침 없이 이 게이트를 즉시 봐야 한다.
+        # dispatch_approval_request_cards가 내부에서 notify_gate_created_to_recipients를
+        # 부르고, 그 함수가 after_commit 훅으로 push를 자체 예약한다(approval_delivery.py
+        # 문서 참고) — 이 함수 자신은 커밋 타이밍을 몰라도 된다. 아래 gate_delegated의
+        # 기존 commit(이 함수의 원래 유일한 커밋)에서 같이 발화된다(별도 커밋 불요).
         await dispatch_approval_request_cards(
             session, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
             project_id=project_id, title=title, gate_id=gate.id,
