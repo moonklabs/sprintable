@@ -66,16 +66,16 @@ describe('Avatar — story #2887 S2g', () => {
     expect(container.querySelector('[role="img"]')).not.toBeNull(); // PresenceDot
   });
 
-  // story #3000 로드맵 PR-B(L5, 페드루군 동승 판정) — 정적 "AI" 코너배지는 citron이 아니라
-  // proof-blue 틴트여야 한다(정체성 마킹 — citron은 live pulse 전용).
-  it('AI 코너배지가 border-proof-blue/bg-proof-blue-soft를 쓰고 citron은 안 쓴다', async () => {
+  // story #3049(2984-S1) — 정적 "AI" 코너배지 border는 proof-blue 유지(정체성 마킹), 배경
+  // soft-fill은 폐지(AGENT_MARK_FILL_CLASS=투명, 헤어라인만 남김).
+  it('AI 코너배지가 border-proof-blue를 쓰고 soft-fill/citron은 안 쓴다', async () => {
     await act(async () => {
       root.render(wrap(<Avatar name="유나" avatarUrl={null} actorType="agent" />));
     });
     const badge = [...container.querySelectorAll('span')].find((s) => s.textContent === 'AI');
     expect(badge).toBeTruthy();
     expect(badge?.className).toContain('border-proof-blue/40');
-    expect(badge?.className).toContain('bg-proof-blue-soft');
+    expect(badge?.className).not.toContain('bg-proof-blue-soft');
     expect(badge?.className).not.toContain('accent-claim');
   });
 

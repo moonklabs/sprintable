@@ -7,6 +7,7 @@ import remarkBreaks from 'remark-breaks';
 import { Check, Copy, MessageSquare, Terminal } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
+import { AgentIdentity } from '@/components/ui/agent-identity';
 import { commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
 import { EmbedCard, EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { parseEntityRef } from '@/components/chat/entity-ref';
@@ -533,11 +534,9 @@ export function ChatBubble({
                 {displayName}
               </span>
               {isAgent && (
-                // story #3000 로드맵 PR-B(L5) — 정적(비-pulse) Bot 배지 배경은 citron이 아니라
-                // proof-blue-soft(정체성 마킹, story-card 아바타·avatar.tsx idle 링과 정합).
-                <span className="rounded-sm bg-proof-blue-soft px-1 py-0.5 text-[9px] font-medium text-foreground">
-                  Bot
-                </span>
+                // story #3049(2984-S1) — AgentIdentity 프리미티브(헤어라인+proof-blue 신호
+                // dot) 채택, soft-fill 폐지.
+                <AgentIdentity />
               )}
             </div>
           )}

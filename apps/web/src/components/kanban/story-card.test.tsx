@@ -37,13 +37,13 @@ describe('StoryCard — 로드맵 PR-A L1(floating 팝업 elev-overlay)', () => 
   });
 });
 
-// story #2998 로드맵 PR-A(L5) — agent 정적 아바타 테두리는 citron(live pulse 전용)이 아니라
-// proof-blue(정체성 마킹, avatar.tsx idle 링과 정합)여야 한다.
-describe('StoryCard — 로드맵 PR-A L5(agent 아바타 정적 identity=proof-blue)', () => {
-  it('agent assignee 아바타가 border-proof-blue/bg-proof-blue-soft를 쓰고 citron은 안 쓴다', () => {
+// story #3049(2984-S1) — agent 정적 아바타 테두리는 proof-blue(정체성 마킹, avatar.tsx idle
+// 링과 정합)를 유지하되, 배경 soft-fill은 폐지(AGENT_MARK_FILL_CLASS=투명, 헤어라인만 남김).
+describe('StoryCard — story #3049(agent 아바타 헤어라인, soft-fill 폐지)', () => {
+  it('agent assignee 아바타가 border-proof-blue를 쓰고 soft-fill/citron은 안 쓴다', () => {
     const markup = render(makeStory(), [{ id: 'a1', name: '에이전트군', type: 'agent' }]);
     expect(markup).toContain('border-proof-blue/30');
-    expect(markup).toContain('bg-proof-blue-soft');
+    expect(markup).not.toContain('bg-proof-blue-soft');
     expect(markup).not.toContain('border-accent-claim');
     expect(markup).not.toContain('bg-accent-claim/10');
   });

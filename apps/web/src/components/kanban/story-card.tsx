@@ -9,7 +9,9 @@ import type { KanbanStory, KanbanMember, LineStatusSummary } from './types';
 import { parseStoryCardTitle } from '@/lib/story-card-title';
 import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, ChevronRight, EyeOff, History, Pause, Rocket, Zap, ZapOff, type LucideIcon } from 'lucide-react';
+import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import { LabelChip } from '@/components/ui/label-chip';
+import { cn } from '@/lib/utils';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { TrustSeal } from '@/components/verify/trust-seal';
 import { deriveTrustStage } from '@/services/verify';
@@ -401,13 +403,14 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                     {assigneeList.slice(0, 3).map((m) => (
                       <div
                         key={m.id}
-                        // story #2998 로드맵 PR-A(L5) — 정적(비-pulse) agent 정체성 마킹은
-                        // proof-blue(avatar.tsx idle 링과 정합) — citron은 live pulse(실행) 전용.
-                        className={`relative flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-medium ring-1 ring-background ${
+                        // story #3049(2984-S1) — AGENT_MARK_FILL_CLASS(헤어라인 border 유지·
+                        // soft-fill 폐지) 채택. border는 이미 있었으니 배경/텍스트색만 교체.
+                        className={cn(
+                          'relative flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-medium ring-1 ring-background',
                           m.type === 'agent'
-                            ? 'border-proof-blue/30 bg-proof-blue-soft text-foreground'
-                            : 'border-border bg-muted text-muted-foreground'
-                        }`}
+                            ? cn('border-proof-blue/30', AGENT_MARK_FILL_CLASS)
+                            : 'border-border bg-muted text-muted-foreground',
+                        )}
                         title={m.name}
                       >
                         {getInitials(m.name)}
