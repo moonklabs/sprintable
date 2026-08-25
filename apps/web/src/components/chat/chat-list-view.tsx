@@ -423,7 +423,16 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // handleReconnect(fetchMessages 재호출)와 동형 — "재연결됐다"는 신호를 받으면 목록을
   // 통째로 다시 가져와 서버 truth로 백필한다. agent 탭은 이미 연 적 있을 때만(lazy 유지 원칙,
   // loadAgentConversationsOnce와 동일 가드).
+  // story #3081 — SSE onReconnect(연결 자체의 재연결)와 아래 visibility/focus 리스너가
+  // 근접 시점에 겹쳐 부르면(예: 짧은 네트워크 끊김 직후 탭 포커스 복귀) 같은 재fetch가
+  // 중복 실행된다. 결과 자체는 idempotent라 데이터 오염은 없지만 불필요한 API 처칭을
+  // 억제한다.
+  const lastReconnectFetchAtRef = useRef(0);
+  const RECONNECT_COALESCE_MS = 1_000;
   const handleReconnect = useCallback(() => {
+    const now = Date.now();
+    if (now - lastReconnectFetchAtRef.current < RECONNECT_COALESCE_MS) return;
+    lastReconnectFetchAtRef.current = now;
     void fetchConversations(0, false);
     if (agentLoadedRef.current) void fetchAllConversations(0, false);
   }, [fetchConversations, fetchAllConversations]);
@@ -438,12 +447,18 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // story #1978(트랙C) — onReconnect(SSE 커넥션 자체의 재연결)와는 다른 축: 탭이 백그라운드에
   // 있는 동안엔 SSE가 안 끊겨도(브라우저가 살려둘 수 있음) 목록이 갱신 안 됐을 수 있다.
   // use-chat-unread-total.ts와 동일 패턴(document.visibilitychange, !document.hidden에서만).
+  // story #3081 — 데스크톱 셸(창은 계속 visible)에서 OS 포커스만 잃었다 되찾는 경우
+  // visibilitychange는 안 fire하므로 window.focus를 같은 핸들러에 추가 배선한다.
   useEffect(() => {
     const handleVisibility = () => {
       if (!document.hidden) handleReconnect();
     };
     document.addEventListener('visibilitychange', handleVisibility);
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleVisibility);
+    };
   }, [handleReconnect]);
 
   const handleCreated = (conversationId: string) => {

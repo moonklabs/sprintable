@@ -318,6 +318,36 @@ describe('ChatListView — SSE 재연결·백그라운드 복귀 재fetch (story
   });
 });
 
+describe('ChatListView — window.focus 강제 재fetch·중복 coalescing (story #3081)', () => {
+  it('window.focus가 오면(visibilitychange 없이도) 목록이 재fetch된다', async () => {
+    stubFetch([]);
+    await mount();
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const beforeCount = countMyConversationsFetchCalls(fetchMock);
+
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(countMyConversationsFetchCalls(fetchMock)).toBe(beforeCount + 1);
+  });
+
+  it('SSE onReconnect와 focus가 근접 시점에 겹치면 재fetch가 1회로 coalesce된다', async () => {
+    stubFetch([]);
+    await mount();
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const beforeCount = countMyConversationsFetchCalls(fetchMock);
+
+    const opts = useChatSseMock.mock.calls.at(-1)?.[0] as { onReconnect?: () => void } | undefined;
+    await act(async () => {
+      opts!.onReconnect!();
+      window.dispatchEvent(new Event('focus'));
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(countMyConversationsFetchCalls(fetchMock)).toBe(beforeCount + 1); // 2가 아니라 1
+  });
+});
+
 // story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 대화명=Claim(600)로 재분류
 // (구조·크기 불변, preview는 이미 Body-small 부합이라 무편집).
 describe('ChatListView — 대화명 Claim 무게(story #2969 PR-5)', () => {

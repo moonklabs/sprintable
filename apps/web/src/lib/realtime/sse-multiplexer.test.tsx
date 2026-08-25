@@ -453,4 +453,49 @@ describe('useSseMultiplexer — story #2078', () => {
       vi.useRealTimers();
     });
   });
+
+  // story #3081(선생님 P0 지시) — visibilitychange만으론 "창은 계속 visible인 채 OS 포커스만
+  // 오간" 복귀를 못 잡는다(document.visibilityState가 한 번도 'hidden'이 안 되므로 위 #2987
+  // 로직 자체가 안 걸림). window.focus를 hidden 이력과 무관한 독립 신호로 추가.
+  describe('window.focus 강제 재연결(#3081, 가시성 축과 독립)', () => {
+    it('document.visibilityState가 계속 visible이었어도(hidden 이력 0) window.focus만으로 강제 재연결한다', async () => {
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      act(() => { instances[0]!.onopen?.(); });
+      expect(instances).toHaveLength(1);
+
+      act(() => { window.dispatchEvent(new Event('focus')); });
+
+      expect(instances).toHaveLength(2);
+      expect(instances[0]!.closed).toBe(true);
+    });
+
+    it('짧은 시간 내 중복 focus는 throttle되어 추가 재연결을 안 만든다', async () => {
+      vi.useFakeTimers();
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      act(() => { instances[0]!.onopen?.(); });
+
+      act(() => { window.dispatchEvent(new Event('focus')); });
+      expect(instances).toHaveLength(2);
+
+      act(() => { instances[1]!.onopen?.(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      act(() => { window.dispatchEvent(new Event('focus')); });
+
+      expect(instances).toHaveLength(2); // throttle 창(3s) 안 — 추가 재연결 없음
+      vi.useRealTimers();
+    });
+
+    it('focus 강제 재연결도 subscribeReconnect 핸들러를 불러 backfill을 트리거한다', async () => {
+      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      const onReconnect = vi.fn();
+      await act(async () => { handle!.subscribeReconnect(onReconnect); });
+      act(() => { instances[0]!.onopen?.(); });
+      expect(onReconnect).not.toHaveBeenCalled();
+
+      act(() => { window.dispatchEvent(new Event('focus')); });
+      act(() => { instances[1]!.onopen?.(); });
+
+      expect(onReconnect).toHaveBeenCalledTimes(1);
+    });
+  });
 });

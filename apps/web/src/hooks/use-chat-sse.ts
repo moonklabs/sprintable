@@ -324,8 +324,20 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
+    // story #3081 — visibilitychange 축과 독립: 데스크톱 셸(창은 계속 visible)에서 OS
+    // 포커스만 잃었다 되찾는 경우 위 handleVisibilityChange는 안 fire한다(sse-visibility-
+    // reconnect.ts의 onFocusRegained 주석 참고). sse-multiplexer.ts와 동일 처방.
+    const handleWindowFocus = () => {
+      if (visibilityState.onFocusRegained()) {
+        pendingForcedReconnect = true;
+        connect();
+      }
+    };
+    window.addEventListener('focus', handleWindowFocus);
+
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
       // #3388 카디르 QA MEDIUM과 동일 근거 — clearTimeout만으론 stale ref가 남아, 재마운트
       // (memberId 전환) 직후 대기 中이던 백오프 재시도가 stale ref에 걸려 건너뛸 수 있었다.
       if (reconnectTimerRef.current) {

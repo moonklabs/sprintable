@@ -192,10 +192,23 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
+    // story #3081(선생님 P0 지시) — visibilitychange 하나만으론 "창은 계속 visible인 채
+    // OS 포커스만 오간" 복귀를 못 잡는다(sse-visibility-reconnect.ts 모듈 docstring 참고 —
+    // onVisible()은 hidden 이력이 없으면 구조적으로 항상 false). window.focus를 독립
+    // 신호로 추가 — hidden 이력과 무관하게 강제 재연결하되 짧은 throttle로 중복 억제.
+    const handleWindowFocus = () => {
+      if (visibilityState.onFocusRegained()) {
+        pendingForcedReconnect = true;
+        connect();
+      }
+    };
+    window.addEventListener('focus', handleWindowFocus);
+
     return () => {
       closed = true;
       setConnected(false);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
       // 카디르 QA(PR#3388) MEDIUM — clearTimeout만으론 stale ref가 남아, 재마운트(예: memberId
       // 전환) 직후 대기 중이던 백오프 재시도의 scheduleRetry()가 `if (retryTimerRef.current)
       // return` 가드에 stale 값으로 걸려 재시도를 건너뛸 수 있었다. null로 명시 리셋.
