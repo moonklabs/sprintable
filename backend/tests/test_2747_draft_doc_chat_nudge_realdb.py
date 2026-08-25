@@ -354,3 +354,39 @@ async def test_delivery_failure_rolls_back_reservation_and_retry_succeeds():
             assert len(rows) == 1, f"재시도가 정상 성공하지 못함: {len(rows)}건"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_non_unique_integrity_error_is_logged_not_silently_treated_as_duplicate(caplog):
+    """⭐카디르 QA 4R(#3465) — reservation INSERT가 uq(org_id,doc_id) 위반이 아닌 다른
+    IntegrityError(예: FK 위반 — 실 Doc 행이 없는 doc_id)로 실패하면, "이미 예약됨"으로
+    조용히 삼키지 않고 예상 밖 실패로 로그해야 한다(진단성)."""
+    import logging
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            author_id = await _seed_human_member(s, org_id, project_id, name="Author")
+            sender_id = await _seed_human_member(s, org_id, project_id, name="Sender")
+
+        from app.services.approval_delivery import maybe_nudge_draft_doc_shared_in_chat
+
+        doc_id = uuid.uuid4()  # 의도적으로 실 Doc 행 없음 — FK 위반 유도.
+        async with Session() as s:
+            with caplog.at_level(logging.WARNING, logger="app.services.approval_delivery"):
+                await maybe_nudge_draft_doc_shared_in_chat(
+                    s, org_id=org_id, project_id=project_id, doc_id=doc_id,
+                    doc_title="유령 문서", doc_status="draft",
+                    doc_author_id=author_id, sender_id=sender_id,
+                )
+                await s.commit()
+
+        assert any("예상 밖" in r.message for r in caplog.records), (
+            "FK IntegrityError가 uq 중복과 구분 없이 조용히 삼켜짐(진단성 회귀)"
+        )
+        async with Session() as s:
+            rows = await _count_nudge_messages(s, doc_id)
+            assert len(rows) == 0
+    finally:
+        await engine.dispose()

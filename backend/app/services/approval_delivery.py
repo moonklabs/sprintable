@@ -656,8 +656,20 @@ async def maybe_nudge_draft_doc_shared_in_chat(
                     reference_type="doc", reference_id=doc_id,
                     source_project_id=project_id, via_outbox=True,
                 )
-    except IntegrityError:
-        return  # 이미 다른 호출이 성공적으로 예약+배달까지 마쳤다(같은 원자 단위였으므로).
+    except IntegrityError as e:
+        # 카디르 QA 4R(#3465, 2026-08-25) — `except IntegrityError: return`이 uq 위반이라는
+        # 의도된 케이스보다 넓었다: 같은 SAVEPOINT 안 배달 단계에서 나는 다른 IntegrityError
+        # (예: FK 위반)까지 "이미 예약됐다"로 오판해 무로그로 삼켰다 — 진단성 갭. 실 제약
+        # 이름으로 분기: uq_doc_chat_nudge_dispatch_org_doc**만** 의도된 중복(조용히 skip),
+        # 그 외는 예상 밖 실패로 로그(SAVEPOINT가 이미 reservation까지 롤백했으므로 이 doc은
+        # "미예약" 상태로 남아 다음 mention 시 정상 재시도된다 — 영구 침묵 아님).
+        constraint = getattr(getattr(e, "orig", None), "constraint_name", None)
+        if constraint == "uq_doc_chat_nudge_dispatch_org_doc":
+            return  # 이미 다른 호출이 성공적으로 예약+배달까지 마쳤다(같은 원자 단위였으므로).
+        logger.warning(
+            "draft doc 채팅공유 넛지 실패(비차단, 예상 밖 IntegrityError) doc=%s author=%s constraint=%s",
+            doc_id, doc_author_id, constraint, exc_info=True,
+        )
     except Exception:  # noqa: BLE001 — 넛지 실패는 메시지 전송 자체를 막지 않는다(best-effort).
         # SAVEPOINT가 reservation INSERT까지 함께 롤백했으므로 이 doc은 "미예약" 상태로
         # 남는다 — 다음 mention 시 정상 재시도된다(영구 침묵 아님).
