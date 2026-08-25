@@ -87,6 +87,8 @@ case "${ENV}" in
         ZONES="${GCP_REGION}-a,${GCP_REGION}-b,${GCP_REGION}-c"
         # 재생성 시 detach 대상(provision_realtime_gclb.sh의 BACKEND_SERVICE_NAME과 동일해야 함).
         GCLB_BACKEND_SERVICE="realtime-gateway-dev-backend"
+        # story #3070/#3071 후속(2026-08-25) — GCLB_HEALTH_CHECK와 동일 리소스.
+        GCLB_HEALTH_CHECK="realtime-gateway-dev-health-check"
         MACHINE_TYPE="e2-small"
         SQL_INSTANCE_CONN="${GCP_PROJECT}:${GCP_REGION}:sprintable-dev"
         RUNTIME_SA="cloudrun-runtime-dev@${GCP_PROJECT}.iam.gserviceaccount.com"
@@ -138,6 +140,8 @@ case "${ENV}" in
         TARGET_SIZE=3
         ZONES="${GCP_REGION}-a,${GCP_REGION}-b,${GCP_REGION}-c"
         GCLB_BACKEND_SERVICE="realtime-gateway-prod-backend"
+        # story #3070/#3071 후속(2026-08-25) — GCLB_HEALTH_CHECK와 동일 리소스.
+        GCLB_HEALTH_CHECK="realtime-gateway-prod-health-check"
         MACHINE_TYPE="e2-small"
         SQL_INSTANCE_CONN="${GCP_PROJECT}:${GCP_REGION}:sprintable-prod"
         RUNTIME_SA="cloudrun-runtime-prod@${GCP_PROJECT}.iam.gserviceaccount.com"
@@ -626,6 +630,7 @@ IMAGE=${IMAGE}
 MACHINE_TYPE=${MACHINE_TYPE}
 TARGET_SIZE=${TARGET_SIZE}
 ZONES=${ZONES}
+GCLB_HEALTH_CHECK=${GCLB_HEALTH_CHECK}
 SQL_INSTANCE_CONN=${SQL_INSTANCE_CONN}
 RUNTIME_SA=${RUNTIME_SA}
 PLAIN_ENV_SPEC=${PLAIN_ENV_SPEC}
@@ -789,6 +794,24 @@ NAMED_PORT="http:8000"
 log "Ensuring named port ${NAMED_PORT} on ${MIG_NAME} (MIG 객체 속성 — 신규/재생성 시 비어있음)"
 gcloud compute instance-groups managed set-named-ports "${MIG_NAME}" \
     --project="${GCP_PROJECT}" --region="${GCP_REGION}" --named-ports="${NAMED_PORT}"
+
+# story #3070/#3071 후속(2026-08-25, 페드루 PO GO) 근본수정 — MIG에 autoHealingPolicies가
+# 없으면 롤링업데이트의 "새 인스턴스 준비됐다" 판정이 GCLB 헬스체크(앱 실제 응답 여부)와
+# 완전히 분리된다 — 그 결과 신규 VM이 부팅 중(healthCheck 아직 UNHEALTHY)인데도 MIG가 구
+# 인스턴스를 이미 삭제해 버려 무중단 창(max-unavailable=0)이 실제로는 ~2분 502로 새는
+# 것을 실측 확認(오늘 10사이클 관측, insert→delete 간격이 앱 부팅시간과 거의 여유 0으로
+# 맞물림 — 한 사이클만도 실 502 37건). --initial-delay는 이 스크립트가 아는 현재 부팅
+# 시간(#3071 배치 fetch 처방 後 실측 기준, 여유 포함)보다 크게 잡는다 — 부팅이 나중에
+# 다시 느려져도 자동으로 그만큼 더 기다리는 자기교정 구조(하드코딩된 sleep과 다름).
+# named-ports/backend-service 부착과 동일 원칙 — MIG 객체 자체의 속성이라 신규/재생성
+# 경로에서 항상 비어 있으므로 매 배포마다 무조건 보장한다(멱등 — 이미 같은 값이면 no-op).
+# ⛔즉시완화로 gcloud beta ... update를 직접 실행해 dev에 이미 적용해 뒀으나(손 적용은
+# 다음 재배포/재생성이 덮어씀), 이 블록이 정본(SSOT) — 이후 모든 배포가 이 값을 보장한다.
+AUTOHEAL_INITIAL_DELAY_SEC=270
+log "Ensuring autoHealingPolicies on ${MIG_NAME} (health-check=${GCLB_HEALTH_CHECK}, initial-delay=${AUTOHEAL_INITIAL_DELAY_SEC}s)"
+gcloud compute instance-groups managed update "${MIG_NAME}" \
+    --project="${GCP_PROJECT}" --region="${GCP_REGION}" \
+    --health-check="${GCLB_HEALTH_CHECK}" --initial-delay="${AUTOHEAL_INITIAL_DELAY_SEC}"
 
 # story #2142 근본수정 — backend-service 부착도 같은 이유로 이 스크립트가 방어적으로 보장한다
 # (provision_realtime_gclb.sh 스텝④와 동일 멱등 로직 재사용). 이미 붙어 있으면 조용히 스킵.
