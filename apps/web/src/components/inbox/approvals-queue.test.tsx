@@ -211,6 +211,39 @@ describe('ApprovalsQueue', () => {
     expect(text).not.toContain('파일');
   });
 
+  it('story #3038 AC4(PO #3188 오서명 실사고) — 같은 work_item의 merge 게이트 2장이 pr_number로 서로 구분된다', async () => {
+    mockFetches(
+      [
+        gate({
+          id: 'g-pr-a', can_approve: true, requires_human: true,
+          work_item_id: 'w-2728', work_item_summary: { title: '2728 결제 게이팅', slug: null },
+          pr_number: 3187, github_check_run_sha: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+        }),
+        gate({
+          id: 'g-pr-b', can_approve: true, requires_human: true,
+          work_item_id: 'w-2728', work_item_summary: { title: '2728 결제 게이팅', slug: null },
+          pr_number: 3460, github_check_run_sha: 'f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5',
+        }),
+      ],
+      [],
+    );
+    await mount();
+    const text = container.textContent ?? '';
+    expect(text).toContain('PR #3187');
+    expect(text).toContain('a1b2c3d');
+    expect(text).toContain('PR #3460');
+    expect(text).toContain('f6e5d4c');
+  });
+
+  it('story #3038 AC4 — pr_number가 없는 게이트(doc_approval 등)는 PR 배지를 지어내지 않는다', async () => {
+    mockFetches(
+      [gate({ id: 'g-no-pr', can_approve: true, requires_human: true, pr_number: null })],
+      [],
+    );
+    await mount();
+    expect(container.textContent ?? '').not.toContain('PR #');
+  });
+
   it('risk_grade 칩(고위험/위험도 확인 중)은 어떤 경우에도 더 이상 렌더되지 않는다', async () => {
     mockFetches(
       [gate({ id: 'g-no-chip', can_approve: true, requires_human: true, risk_grade: 'high' })],

@@ -236,7 +236,7 @@ async def test_assigned_to_me_doc_approval_self_author_excluded():
 async def test_assigned_to_me_project_role_owner_included():
     g = _story_gate(gate_type="merge")
     out = await _call_list_gates(
-        [g], project_role="owner", story_rows=[(g.work_item_id, uuid.uuid4())],
+        [g], project_role="owner", story_rows=[(g.work_item_id, uuid.uuid4(), "T")],
     )
     assert len(out) == 1
     assert out[0].id == g.id
@@ -246,7 +246,7 @@ async def test_assigned_to_me_project_role_owner_included():
 async def test_assigned_to_me_project_role_member_excluded():
     g = _story_gate(gate_type="qa")
     out = await _call_list_gates(
-        [g], project_role="member", story_rows=[(g.work_item_id, uuid.uuid4())],
+        [g], project_role="member", story_rows=[(g.work_item_id, uuid.uuid4(), "T")],
     )
     assert out == []
 
@@ -275,7 +275,7 @@ async def test_assigned_to_me_held_status_included():
     시뮬레이션하듯 held 게이트를 직접 넘겨 eligibility 판정만 검증)."""
     g = _story_gate(gate_type="merge", status="held")
     out = await _call_list_gates(
-        [g], project_role="owner", story_rows=[(g.work_item_id, uuid.uuid4())],
+        [g], project_role="owner", story_rows=[(g.work_item_id, uuid.uuid4(), "T")],
     )
     assert len(out) == 1
     assert out[0].id == g.id
@@ -287,7 +287,7 @@ async def test_assigned_to_me_approved_status_included_when_role_eligible():
     필터링 책임은 전적으로 바깥 `status` 쿼리 파라미터(list_gates 최상단 select)에 있다."""
     g = _story_gate(gate_type="merge", status="approved")
     out = await _call_list_gates(
-        [g], project_role="owner", story_rows=[(g.work_item_id, uuid.uuid4())],
+        [g], project_role="owner", story_rows=[(g.work_item_id, uuid.uuid4(), "T")],
     )
     assert len(out) == 1
     assert out[0].id == g.id
@@ -300,7 +300,7 @@ async def test_assigned_to_me_agent_caller_returns_empty():
     g = _story_gate(gate_type="merge")
     out = await _call_list_gates(
         [g], resolved=_agent(uuid.uuid4()), project_role="owner",
-        story_rows=[(g.work_item_id, uuid.uuid4())],
+        story_rows=[(g.work_item_id, uuid.uuid4(), "T")],
     )
     assert out == []
 
@@ -320,7 +320,7 @@ async def test_assigned_to_me_mixed_gates_only_eligible_returned():
     org_g = _org_level_gate()
     out = await _call_list_gates(
         [doc_g, story_g, org_g], has_access=True, project_role="member", org_admin=True,
-        story_rows=[(story_g.work_item_id, uuid.uuid4())],
+        story_rows=[(story_g.work_item_id, uuid.uuid4(), "T")],
     )
     ids = {r.id for r in out}
     assert ids == {doc_g.id, org_g.id}  # story_g(member=불가)만 배제
@@ -342,7 +342,7 @@ async def test_default_assigned_to_me_false_returns_all_unfiltered_but_can_appro
     g = _story_gate(gate_type="merge")
     out = await _call_list_gates(
         [g], project_role="owner", assigned_to_me=False,
-        story_rows=[(g.work_item_id, uuid.uuid4())],
+        story_rows=[(g.work_item_id, uuid.uuid4(), "T")],
     )
     assert len(out) == 1
     assert out[0].id == g.id

@@ -59,6 +59,15 @@ function isHeld(gate: GateItem): boolean {
   return gate.status === 'held' || !!gate.held_until;
 }
 
+// story #3038 AC4(페드루 전언, PO #3188 오서명 실사고) — row 밀도(ProofCapsule)는 claim
+// 텍스트 1줄뿐이라 gateBody 카드처럼 별도 행을 못 얹는다. 같은 work_item(스토리)의 merge
+// 게이트가 여러 개(PR마다 1개, story #2893)면 제목만으론 동명 2장이 되므로, 있으면
+// 그 1줄 안에 PR 번호를 이어붙여 게이트 자신을 구분 가능하게 한다.
+function gateRowClaimLabel(gate: GateItem): string {
+  const identity = gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`;
+  return gate.pr_number ? `${identity} · PR #${gate.pr_number}` : identity;
+}
+
 // story #1961(P2-S5) — gates/[id]/page.tsx의 canAct 판정과 동일 규칙(중복 빌드 봉쇄 취지상
 // 판정 로직을 새로 짓지 않고 그대로 재사용 — gateNeedsAction만 import, doc/canonicalize
 // 특례·can_approve 게이팅까지 canonical 상세와 1:1).
@@ -369,9 +378,22 @@ export function ApprovalsQueue() {
                 content 폭까지 shrink-to-fit돼 ellipsis가 걸릴 폭 기준 자체가 없다(카드
                 우변에서 그냥 잘림). w-full로 폭을 부모 카드 전체로 고정해야 truncate가 실제로
                 동작한다. */}
-            <p className="w-full truncate text-sm text-foreground">
+            <p
+              className="w-full truncate text-sm text-foreground"
+              title={gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
+            >
               {gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
             </p>
+            {/* story #3038 AC4(페드루 전언, PO #3188 오서명 실사고) — 같은 work_item(스토리)의
+                merge 게이트가 여러 개(PR마다 1개, story #2893)면 제목만으론 동명 2장이 된다.
+                pr_number·head SHA는 이미 GateResponse에 있었지만(from_attributes 자동 채움)
+                카드가 안 그려 판별자가 못 됐다 — 이 게이트 자신의 고유 식별을 1행에 표기. */}
+            {gate.pr_number ? (
+              <p className="text-[11px] font-medium text-muted-foreground">
+                PR #{gate.pr_number}
+                {gate.github_check_run_sha ? ` · ${gate.github_check_run_sha.slice(0, 7)}` : ''}
+              </p>
+            ) : null}
             {orgName ? <p className="text-[11px] text-muted-foreground">{orgName}</p> : null}
             {diffFacts ? (
               <p className="text-[11px] text-muted-foreground">
@@ -456,7 +478,7 @@ export function ApprovalsQueue() {
                 density="row"
                 proofState={'amber' as ProofState}
                 stateLabel={held ? t('gateStatusHeld') : t('gateStatusPending')}
-                claim={gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
+                claim={gateRowClaimLabel(gate)}
                 duration={formatAge(gate.created_at, t)}
               />
             </button>
@@ -559,6 +581,14 @@ export function ApprovalsQueue() {
             <DialogTitle>
               {signatureGate ? (signatureGate.work_item_summary?.title ?? `#${signatureGate.work_item_id.slice(0, 8)}`) : ''}
             </DialogTitle>
+            {/* story #3038 AC4 — 서명 모달도 방어적으로 동형 표기(카드 단계에서 이미 구분
+                가능해졌지만, 모달 단독으로도 "이게 그 PR 맞나" 재확認 가능하게). */}
+            {signatureGate?.pr_number ? (
+              <p className="text-[11px] text-muted-foreground">
+                PR #{signatureGate.pr_number}
+                {signatureGate.github_check_run_sha ? ` · ${signatureGate.github_check_run_sha.slice(0, 7)}` : ''}
+              </p>
+            ) : null}
           </DialogHeader>
           {signatureGate ? (
             // story #2975(유나양 design 판정) 갭 자체발견(#2982 작업 중) — 동형 처방(SHA

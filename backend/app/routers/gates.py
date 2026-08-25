@@ -741,20 +741,29 @@ async def list_gates(
         # owner/admin(정본 담당자)에겐 assigned_to_me=true 인박스에서 사라졌다(회귀). VisualArtifact.
         # project_id는 NOT NULL이라 story/task와 동형으로 항상 배치 해소 가능.
         artifact_ids = {g.work_item_id for _, g in non_doc_gates if g.work_item_type == "visual_artifact"}
+        # story #3784a8d0(3038, 실사고 — 선생님 제보 2026-08-25) — work_item_summary가 doc만
+        # 배치 enrich됐다. merge 게이트(work_item_type=='story', 결재함 대다수)는 항상 None이라
+        # FE가 "#해시" 폴백만 그렸다 — `_resolve_work_item_summary`(단건 GET /{id} 경로, story
+        # #1970)는 story/task를 이미 커버하는데 이 목록/배치 경로만 doc-only로 남아 있던
+        # 드리프트. 새 쿼리를 추가하지 않고 이미 도는 이 project_id 배치 쿼리에 title을
+        # 얹는다(N+1 0 유지 — 이 파일이 이미 지켜온 관례 그대로).
+        summary_by_work_item: dict[uuid.UUID, WorkItemSummary] = {}
         if story_ids:
             rows = (await session.execute(
-                select(Story.id, Story.project_id).where(
+                select(Story.id, Story.project_id, Story.title).where(
                     Story.id.in_(story_ids), Story.org_id == org_id,
                 )
             )).all()
-            project_id_by_work_item.update({sid: pid for sid, pid in rows})
+            project_id_by_work_item.update({sid: pid for sid, pid, _ in rows})
+            summary_by_work_item.update({sid: WorkItemSummary(title=title) for sid, _, title in rows})
         if task_ids:
             rows = (await session.execute(
-                select(Task.id, Story.project_id)
+                select(Task.id, Story.project_id, Task.title)
                 .join(Story, Task.story_id == Story.id)
                 .where(Task.id.in_(task_ids), Task.org_id == org_id)
             )).all()
-            project_id_by_work_item.update({tid: pid for tid, pid in rows})
+            project_id_by_work_item.update({tid: pid for tid, pid, _ in rows})
+            summary_by_work_item.update({tid: WorkItemSummary(title=title) for tid, _, title in rows})
         if artifact_ids:
             rows = (await session.execute(
                 select(VisualArtifact.id, VisualArtifact.project_id).where(
@@ -762,6 +771,9 @@ async def list_gates(
                 )
             )).all()
             project_id_by_work_item.update({aid: pid for aid, pid in rows})
+        for resp in responses:
+            if resp.work_item_type in ("story", "task"):
+                resp.work_item_summary = summary_by_work_item.get(resp.work_item_id)
 
     # ⭐신규 enrich(원인 수정 본체): 위에서 이미 계산해 둔 project_id_by_work_item 을
     # can_approve 판정뿐 아니라 응답 필드 자체에도 대입한다 — 지금까지 이 값이 어디에도 안
