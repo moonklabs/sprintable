@@ -186,6 +186,32 @@ async def _deliver_one(job: dict) -> None:
                 async with async_session_factory() as session:
                     await _finalize_expo_push_dead_tokens(session, org_id, dead_tokens)
                     await session.commit()
+        elif kind == "apns_push":
+            from ee.services.apns_push import (
+                _fetch_apns_targets,
+                _finalize_apns_dead_tokens,
+                _send_apns_targets,
+            )
+
+            async with async_session_factory() as session:
+                targets = await _fetch_apns_targets(
+                    session, org_id, [uuid.UUID(m) for m in payload["member_ids"]],
+                    muted_member_ids=_uuid_set_or_none(payload.get("muted_member_ids")),
+                )
+                await session.commit()
+            dead_tokens = await _send_apns_targets(
+                targets, title=payload["title"], body=payload.get("body"),
+                event_type=payload["event_type"], org_id=org_id,
+                reference_type=payload.get("reference_type"),
+                reference_id=_uuid_or_none(payload.get("reference_id")),
+                project_id=_uuid_or_none(payload.get("project_id")),
+                story_id=_uuid_or_none(payload.get("story_id")),
+                sprint_id=_uuid_or_none(payload.get("sprint_id")),
+            )
+            if dead_tokens:
+                async with async_session_factory() as session:
+                    await _finalize_apns_dead_tokens(session, org_id, dead_tokens)
+                    await session.commit()
         else:
             raise ValueError(f"unknown delivery_job kind: {kind}")
 

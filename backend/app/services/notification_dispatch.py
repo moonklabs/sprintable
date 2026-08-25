@@ -513,6 +513,18 @@ async def dispatch_notification(
                     via_outbox=via_outbox,
                 )
 
+                # story #3064: macOS 네이티브 APNs 채널 — push_devices(platform='macos')로
+                # 자연 분리(fetch가 platform 필터), Expo 채널과 나란히 호출. 인증키 미도착
+                # 구간엔 deliver_apns_push 내부(settings.apns_configured)가 fail-closed.
+                from ee.services.apns_push import deliver_apns_push
+                await deliver_apns_push(
+                    db, org_id, enabled_member_ids, title=title, body=body, event_type=event_type,
+                    reference_type=reference_type, reference_id=reference_id, context=context,
+                    muted_member_ids=muted_member_ids,
+                    project_id=_push_project_id, story_id=story_id, sprint_id=sprint_id,
+                    via_outbox=via_outbox,
+                )
+
     except Exception:
         # BUG-1 수정: 에러 삼킴 제거 → 스택 트레이스 로깅
         logger.exception("dispatch_notification failed org_id=%s event_type=%s", org_id, event_type)
