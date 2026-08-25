@@ -190,4 +190,10 @@ def test_settings_field_env_keys_works_without_pydantic_settings_importable(monk
     # story #2822(2026-08-20): gotenberg_service_url 필드 신설(office_conversion.py의
     # os.environ 직접읽기를 Settings SSOT 경유로 교체)로 97→98. 가드가 신규 필드를 설계대로 잡은 것.
     assert "GOTENBERG_SERVICE_URL" in keys
-    assert len(keys) == 98
+    # story #3064(2026-08-25): apns_auth_key_p8·apns_key_id·apns_team_id·apns_bundle_id·
+    # apns_use_sandbox 5필드 신설(macOS 네이티브 APNs 발송기 설정)로 98→103.
+    # apns_configured는 @property(SSOT 파생값)라 env 필드로 안 잡힘 — 가드가 정확히 5개만
+    # 잡은 것. 가드가 신규 필드를 설계대로 잡은 것.
+    assert "APNS_AUTH_KEY_P8" in keys and "APNS_KEY_ID" in keys and "APNS_TEAM_ID" in keys
+    assert "APNS_BUNDLE_ID" in keys and "APNS_USE_SANDBOX" in keys
+    assert len(keys) == 103

@@ -261,8 +261,8 @@ async def test_push_device_register_macos_apns_round_trip_realdb():
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from app.dependencies.auth import get_verified_org_id
-    from app.dependencies.database import get_db
     from ee.routers import push_devices as pd
+    from tests.conftest import override_db_and_read
 
     app = FastAPI()
     app.include_router(pd.router, prefix="/api/v2/push")
@@ -289,7 +289,7 @@ async def test_push_device_register_macos_apns_round_trip_realdb():
             return member_id
         return _override
 
-    app.dependency_overrides[get_db] = _override_db
+    override_db_and_read(app, _override_db)
     app.dependency_overrides[get_verified_org_id] = lambda: ORG
     app.dependency_overrides[pd._get_caller_member_id] = _make_caller_override(MEMBER_X)
 
