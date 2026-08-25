@@ -109,6 +109,7 @@ async def _touch_api_key_last_used(api_key_id: uuid.UUID) -> None:
 
 async def _resolve_api_key(
     raw_key: str, db: AsyncSession, transport: str | None = None,
+    request: Request = None,  # type: ignore[assignment]
 ) -> AuthContext:
     """sk_live_* API key를 DB에서 조회하여 AuthContext 반환.
 
@@ -248,6 +249,13 @@ async def _resolve_api_key(
         await _persist_first_auth_seen(member_id, org_id, project_id, transport=transport)
     if _needs_touch:
         await _touch_api_key_last_used(api_key.id)
+
+    # story #2087 — 성공 인증마다 사용 이력 1행(스로틀 없음, last_used_at과 다름 — 위 모듈
+    # docstring/agent_api_key_usage.py 참조).
+    from app.services.agent_api_key_usage import record_api_key_usage
+    await record_api_key_usage(
+        api_key_id=api_key.id, org_id=uuid.UUID(org_id), member_id=member_id, request=request,
+    )
 
     return AuthContext(
         user_id=str(member_id),
@@ -444,6 +452,7 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     x_agent_api_key: str | None = Header(default=None, alias="x-agent-api-key"),
     x_mcp_transport: str | None = Header(default=None, alias="X-MCP-Transport"),
+    request: Request = None,  # type: ignore[assignment]
 ) -> AuthContext:
     """story #2459(§6 봉합①): 요청-수명 ``Depends(get_db)`` 대신 브랜치별 전용 단명 세션 —
     get_current_user_streaming(SSE 전용 변형, 아래)과 동일 패턴을 기본 경로에도 적용한다.
@@ -458,7 +467,7 @@ async def get_current_user(
     # x-agent-api-key 헤더 우선 처리 (SSE 브릿지 직접 연결용)
     if x_agent_api_key and x_agent_api_key.startswith("sk_live_"):
         async with async_session_factory() as db:
-            return await _resolve_api_key(x_agent_api_key, db, transport=x_mcp_transport)
+            return await _resolve_api_key(x_agent_api_key, db, transport=x_mcp_transport, request=request)
 
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
@@ -468,7 +477,7 @@ async def get_current_user(
     # sk_live_* prefix → API key 경로 (DB 조회)
     if token.startswith("sk_live_"):
         async with async_session_factory() as db:
-            return await _resolve_api_key(token, db, transport=x_mcp_transport)
+            return await _resolve_api_key(token, db, transport=x_mcp_transport, request=request)
 
     # story #1940 — hu_live_* 휴먼 개인 API key. ⛔의도적으로 x-agent-api-key 헤더 경로(위)에는
     # 이 분기를 안 붙인다 — 그 헤더는 이 코드베이스에서 "에이전트 SSE 브릿지 전용"으로 이미
@@ -996,6 +1005,7 @@ async def get_scope_context_no_key_scope_check(
 async def get_current_user_streaming(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     x_agent_api_key: str | None = Header(default=None, alias="x-agent-api-key"),
+    request: Request = None,  # type: ignore[assignment]
 ) -> AuthContext:
     """get_current_user의 SSE 전용 변형 — get_db 미점유.
 
@@ -1004,7 +1014,7 @@ async def get_current_user_streaming(
     """
     if x_agent_api_key and x_agent_api_key.startswith("sk_live_"):
         async with async_session_factory() as db:
-            return await _resolve_api_key(x_agent_api_key, db)
+            return await _resolve_api_key(x_agent_api_key, db, request=request)
 
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
@@ -1012,7 +1022,7 @@ async def get_current_user_streaming(
     token = credentials.credentials
     if token.startswith("sk_live_"):
         async with async_session_factory() as db:
-            return await _resolve_api_key(token, db)
+            return await _resolve_api_key(token, db, request=request)
 
     # story #1940 — get_current_user와 동형(x-agent-api-key 헤더 경로엔 의도적으로 안 붙임).
     if token.startswith("hu_live_"):
