@@ -663,7 +663,18 @@ async def maybe_nudge_draft_doc_shared_in_chat(
         # 이름으로 분기: uq_doc_chat_nudge_dispatch_org_doc**만** 의도된 중복(조용히 skip),
         # 그 외는 예상 밖 실패로 로그(SAVEPOINT가 이미 reservation까지 롤백했으므로 이 doc은
         # "미예약" 상태로 남아 다음 mention 시 정상 재시도된다 — 영구 침묵 아님).
-        constraint = getattr(getattr(e, "orig", None), "constraint_name", None)
+        #
+        # 카디르 QA 5R — 4R의 `e.orig.constraint_name`이 asyncpg에선 항상 None이었다(4R 자체
+        # 테스트가 "경고가 존재하나"만 봐서 no-op을 통과시킨 회귀). SQLAlchemy가 asyncpg
+        # 예외를 어댑터 래퍼(AsyncAdapt_asyncpg_dbapi.Error)로 한 번 더 감싸고(`raise ... from
+        # error` — `raise` 문 자체가 원본을 `__cause__`에 심는다) 실제 `constraint_name`은
+        # 그 원본(asyncpg.exceptions.*) 쪽에만 있다 — `e.orig`가 아니라 `e.orig.__cause__`.
+        # 드라이버별 차이를 흡수하려 `e.orig`도 먼저 보되(직접 노출하는 드라이버 대비),
+        # 없으면 `__cause__`로 폴백한다.
+        _orig = getattr(e, "orig", None)
+        constraint = getattr(_orig, "constraint_name", None) or getattr(
+            getattr(_orig, "__cause__", None), "constraint_name", None,
+        )
         if constraint == "uq_doc_chat_nudge_dispatch_org_doc":
             return  # 이미 다른 호출이 성공적으로 예약+배달까지 마쳤다(같은 원자 단위였으므로).
         logger.warning(

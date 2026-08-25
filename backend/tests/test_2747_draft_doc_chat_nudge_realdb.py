@@ -357,10 +357,14 @@ async def test_delivery_failure_rolls_back_reservation_and_retry_succeeds():
 
 
 @pytest.mark.anyio
-async def test_non_unique_integrity_error_is_logged_not_silently_treated_as_duplicate(caplog):
-    """⭐카디르 QA 4R(#3465) — reservation INSERT가 uq(org_id,doc_id) 위반이 아닌 다른
-    IntegrityError(예: FK 위반 — 실 Doc 행이 없는 doc_id)로 실패하면, "이미 예약됨"으로
-    조용히 삼키지 않고 예상 밖 실패로 로그해야 한다(진단성)."""
+async def test_integrity_error_branch_discriminates_uq_dup_from_other_bidirectional(caplog):
+    """⭐카디르 QA 5R(#3465) — 4R의 `e.orig.constraint_name` 추출이 asyncpg에선 실제로
+    항상 None이었다(SQLAlchemy가 asyncpg 예외를 어댑터 래퍼로 한 번 더 감싸고 진짜
+    constraint_name은 `e.orig.__cause__`에 있음) — 그런데 4R 테스트가 "경고가 존재하나"만
+    봐서 이 no-op을 통과시켰다(카디르 실PG 독립 재현). **양방향**으로 고정한다:
+    ①정상 uq 중복(같은 doc 두 번 호출) → "예상 밖" 경고 **0건**(조용히 skip 그대로) ②
+    비-uq IntegrityError(FK 위반) → "예상 밖" 경고 **정확히 1건**. 둘 다 봐야 추출 자체가
+    실제로 되는지(아니면 그냥 전부 skip해도 ①은 우연히 통과) 걸린다."""
     import logging
 
     engine, Session = await _session_factory()
@@ -369,24 +373,47 @@ async def test_non_unique_integrity_error_is_logged_not_silently_treated_as_dupl
             org_id, project_id = await _seed_org_project(s)
             author_id = await _seed_human_member(s, org_id, project_id, name="Author")
             sender_id = await _seed_human_member(s, org_id, project_id, name="Sender")
+            dup_doc_id = await _seed_doc(s, org_id, project_id, author_id)
 
         from app.services.approval_delivery import maybe_nudge_draft_doc_shared_in_chat
 
-        doc_id = uuid.uuid4()  # 의도적으로 실 Doc 행 없음 — FK 위반 유도.
-        async with Session() as s:
-            with caplog.at_level(logging.WARNING, logger="app.services.approval_delivery"):
+        with caplog.at_level(logging.WARNING, logger="app.services.approval_delivery"):
+            # ① 정상 uq 중복 — 두 번째 호출은 IntegrityError(uq) → 조용히 skip, 경고 0건.
+            async with Session() as s:
                 await maybe_nudge_draft_doc_shared_in_chat(
-                    s, org_id=org_id, project_id=project_id, doc_id=doc_id,
+                    s, org_id=org_id, project_id=project_id, doc_id=dup_doc_id,
+                    doc_title="온보딩 리서치", doc_status="draft",
+                    doc_author_id=author_id, sender_id=sender_id,
+                )
+                await s.commit()
+            async with Session() as s:
+                await maybe_nudge_draft_doc_shared_in_chat(
+                    s, org_id=org_id, project_id=project_id, doc_id=dup_doc_id,
+                    doc_title="온보딩 리서치", doc_status="draft",
+                    doc_author_id=author_id, sender_id=sender_id,
+                )
+                await s.commit()
+
+            dup_warnings = [r for r in caplog.records if "예상 밖" in r.message]
+            assert len(dup_warnings) == 0, (
+                f"정상 uq 중복인데 '예상 밖'으로 오분류됨(추출 실패): {len(dup_warnings)}건"
+            )
+
+            # ② 비-uq IntegrityError(FK 위반, 실 Doc 행 없는 doc_id) — 경고 정확히 1건.
+            ghost_doc_id = uuid.uuid4()
+            async with Session() as s:
+                await maybe_nudge_draft_doc_shared_in_chat(
+                    s, org_id=org_id, project_id=project_id, doc_id=ghost_doc_id,
                     doc_title="유령 문서", doc_status="draft",
                     doc_author_id=author_id, sender_id=sender_id,
                 )
                 await s.commit()
 
-        assert any("예상 밖" in r.message for r in caplog.records), (
-            "FK IntegrityError가 uq 중복과 구분 없이 조용히 삼켜짐(진단성 회귀)"
+        fk_warnings = [r for r in caplog.records if "예상 밖" in r.message]
+        assert len(fk_warnings) == 1, (
+            f"FK IntegrityError가 '예상 밖'으로 정확히 1건 로그되지 않음: {len(fk_warnings)}건"
         )
         async with Session() as s:
-            rows = await _count_nudge_messages(s, doc_id)
-            assert len(rows) == 0
+            assert len(await _count_nudge_messages(s, ghost_doc_id)) == 0
     finally:
         await engine.dispose()
