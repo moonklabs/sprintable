@@ -319,13 +319,14 @@ describe('EpicDetailPage — 결과 캡슐 재조립(§2 이중 신호·§4 신�
     expect(container.textContent).toContain('목표 생성');
   });
 
-  // story #3053(2984-S5) — Outcome Capsule은 헤어라인+elev(border-proof-line·bg-proof-panel·
-  // --elev-card)를 쓰고 bg-proof-blue-soft 채움은 안 쓴다.
-  it('결과 캡슐 — 헤어라인+elev를 쓰고 bg-proof-blue-soft는 안 쓴다', async () => {
+  // story #3053(2984-S5) — Outcome Capsule은 헤어라인+elev(border-proof-line·bg-proof-panel)를
+  // 쓰고 bg-proof-blue-soft 채움은 안 쓴다.
+  // story #7d7634ee(P0) — proof-cut(컷코너) 폐지, proof-surface-lift(재질 언어) 채택.
+  it('결과 캡슐 — 헤어라인+재질을 쓰고 bg-proof-blue-soft는 안 쓴다', async () => {
     await mountByUrl({ outcome_status: 'hit' });
-    const capsule = container.querySelector('.proof-cut.border-proof-line');
+    const capsule = container.querySelector('.proof-surface.border-proof-line');
     expect(capsule).toBeTruthy();
-    expect(capsule?.className).toContain('shadow-[var(--elev-card)]');
+    expect(capsule?.className).toContain('proof-surface-lift');
     expect(container.querySelector('.bg-proof-blue-soft')).toBeNull();
   });
 

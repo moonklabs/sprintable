@@ -92,13 +92,6 @@ describe('Card 신규 프리미티브 — variant·서브컴포넌트 (story #28
     expect(cardVariants({ surface: 'plain', radius: 'inline' })).not.toContain('shadow-sm');
   });
 
-  // story #2969 §1.4(doc proofline-system-layer-2969) — 히어로/시그니처 카드 전용 옵트인.
-  it('radius=signature는 rounded-* 대신 proof-cut(컷코너) 클래스를 낸다', () => {
-    const classes = cardVariants({ surface: 'solid', radius: 'signature' });
-    expect(classes).toContain('proof-cut');
-    expect(classes).not.toMatch(/rounded-(lg|xl|2xl)\b/);
-  });
-
   it('solid surface는 shadow-sm이 없다(§1.2 — 인라인 표면은 그림자 대신 hairline)', () => {
     expect(cardVariants({ surface: 'solid', radius: 'card' })).not.toContain('shadow-sm');
   });

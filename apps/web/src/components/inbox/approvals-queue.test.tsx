@@ -297,13 +297,12 @@ describe('ApprovalsQueue', () => {
   // story #2926(P0-F F3) — 클릭-스루 전용 항목은 ProofCapsule density="row"(컷코너+신뢰단계
   // 레일)로 셸이 바뀐다. 3버튼 인라인 결재 카드·resolved 카드는 F3 스코프 밖(현행 rounded-xl
   // border 카드 그대로 — 2923이 다룰 표면)이라 이 항목만 겨냥해 확認한다.
-  it('클릭-스루 항목(inlineResolvable=false·미해소)은 ProofCapsule row 셸(컷코너)로 렌더된다', async () => {
+  it('클릭-스루 항목(inlineResolvable=false·미해소)은 ProofCapsule row 셸(재질)로 렌더된다', async () => {
     mockFetches([gate({ id: 'g-row' })], []);
     await mount();
-    // ProofCapsule의 CutCornerShell 자체 시그니처 — 컷코너. story #2955 §5로 clip-path
-    // 지오메트리 계산이 인라인 style에서 globals.css `.proof-cut` 정본으로 이관돼, 이제
-    // 클래스명으로 식별한다(인라인 style엔 --proof-cut 변수 오버라이드만 남는다).
-    const capsule = container.querySelector('.proof-cut');
+    // ProofCapsule의 CutCornerShell 자체 시그니처. story #7d7634ee(P0)로 컷코너(clip-path)가
+    // proof-surface(재질)로 교체됐다 — 클래스명으로 식별.
+    const capsule = container.querySelector('.proof-surface');
     expect(capsule).toBeTruthy();
     expect(capsule?.className).toContain('bg-proof-panel');
   });

@@ -202,8 +202,10 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
   const { shown, overflow, overflowHasGate } = buildAttentionQueue(items, CAP);
 
   return (
-    // story #2955 §5 — 인라인 clip-path를 정본 `.proof-cut` 유틸(globals.css)로 이관(24px 기본값 그대로).
-    <div className="proof-cut overflow-hidden rounded-2xl border border-proof-line bg-proof-panel">
+    // story #7d7634ee(P0·선생님 직접 지시) — 컷코너(clip-path) 폐지, proof-surface(13px 균일
+    // 라운드)+proof-surface-lift(뜬 표면 재질) 채택. 옛 rounded-2xl은 proof-surface의
+    // --proof-radius-soft로 흡수(중복 라운드 선언 제거).
+    <div className="proof-surface proof-surface-lift overflow-hidden border border-proof-line bg-proof-panel">
       <div className="flex items-baseline justify-between gap-3 border-b border-proof-line-soft px-5 py-3.5">
         {/* story #3010(로드맵 P3, L5 대비) — text-proof-faint 라이트 대비 미달(story #2993
             유나 처방과 동일 클래스) → text-proof-ink-3(아래 kicker·empty body 2곳). */}

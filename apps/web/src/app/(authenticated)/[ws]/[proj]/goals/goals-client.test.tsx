@@ -218,21 +218,16 @@ describe('GoalsClient — 결과 원장 재조립(§2 이중 신호·§3 마스�
   // PR#3387 처방 갱신(유나 원작자 정본 채택, PO 2026-08-23) — 미르코의 첫 처방("done&&hit만
   // green")조차 두 축(작업/결과)을 섞는 것이었다. 최종 규율: **상태 칩은 green을 아예 안 쓴다**
   // (done+hit이어도) — green은 결과 필(OutcomeStatusBadge, bg-success-tint)에만 존재한다.
+  // ⚠️story #7d7634ee(P0) 작업 중 실측 발견 — 이 두 테스트는 `.proof-cut-xs` 셀렉터로 상태
+  // 칩을 찾았으나, story #3053(2984-S5)이 이미 상태 칩을 MaterialChip(proof-cut 계열 아님,
+  // rounded-md 헤어라인)으로 교체해서 origin/develop HEAD 기준으로도 이미 죽은 셀렉터였다
+  // (querySelector가 null 반환 → 두 테스트 다 무단언으로 조용히 깨져 있었음, #3399 clip-path
+  // 가드는 그 기제 자체가 이 요소엔 원래 없었으니 통째로 무의미해 삭제 — 아래 첫 테스트만
+  // MaterialChip의 새 `data-slot="material-chip"` 훅으로 셀렉터 갱신해 되살린다).
   it('상태 칩 — done+hit이어도 상태 칩 자체엔 green 클래스가 없다(두 축 분리)', async () => {
     stubFetch([{ id: 'e1', title: 'H', status: 'done', total_stories: 1, done_stories: 1, outcome_status: 'hit' }]);
     await mount();
-    expect(container.querySelector('.proof-cut-xs')?.className).not.toContain('proof-green');
-  });
-
-  // QA독립검증(카디르, PR#3399) — globals.css의 .proof-cut-xs는 --proof-cut 값만 바꾸고
-  // clip-path 자체를 여는 .proof-cut 베이스 클래스가 없으면 컷이 안 그려진다(#2958 원 커밋
-  // 버그, #3399가 수정). 이 회귀를 잡는 전용 테스트가 없었다 — 뮤테이션으로 확인(베이스 클래스
-  // 제거해도 기존 16건 전부 그대로 PASS) 후 신설. PR-2(card 층)에 편입 예정(PO 처분).
-  it('상태 칩이 proof-cut 베이스 클래스를 갖는다(proof-cut-xs만으론 clip-path 안 열림, #3399 회귀가드)', async () => {
-    stubFetch([{ id: 'e1', title: 'H', status: 'done', total_stories: 1, done_stories: 1 }]);
-    await mount();
-    const chip = container.querySelector('.proof-cut-xs');
-    expect(chip?.className.split(' ')).toContain('proof-cut');
+    expect(container.querySelector('[data-slot="material-chip"]')?.className).not.toContain('proof-green');
   });
 
   it('green은 결과 필(OutcomeStatusBadge)에서만 뜬다 — outcome=hit일 때 bg-success-tint가 존재', async () => {

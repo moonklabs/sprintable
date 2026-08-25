@@ -132,22 +132,20 @@ export function ProofCapsule({
   );
 }
 
-function CutCornerShell({ state, cut, className, children }: { state: ProofState; cut: number; className?: string; children: React.ReactNode }) {
-  // story #2955 §5 — 지오메트리 계산은 globals.css의 `.proof-cut`(단일 정본)에 위임하고,
-  // 이 컴포넌트는 `--proof-cut`만 오버라이드한다(24/16 두 호출부 그대로 — 값-SSOT는 여기가
-  // 아니라 CSS에 있다).
+function CutCornerShell({ state, className, children }: { state: ProofState; className?: string; children: React.ReactNode }) {
+  // story #7d7634ee(P0·선생님 직접 지시, 감確認 doc ea94dac4) — 컷코너(clip-path) 전면 폐지,
+  // 소프트 라운드(proof-surface, --proof-radius-soft 13px)+뜬 표면 그림자(proof-surface-lift)
+  // 로 교체. 옛 `cut`(24/16px) prop은 클립 크기 조절용이었는데 클립 자체가 없어져 무의미 —
+  // 제거(호출부 3곳 전부 --proof-cut 오버라이드가 아니라 그냥 균일 13px 라운드로 수렴).
   // story #2978(선생님 실사용 발견) — 이 셸의 `overflow-hidden`은 CSS flexbox 스펙상 자신의
   // "automatic minimum size"를 0으로 만든다(overflow!=visible인 flex item의 스펙 규칙). 즉
   // 세로 flex 체인(예: /gates/[id] 상세 뷰의 dashboard-shell overflow-y-auto 스크롤러 하위)
   // 안에서 뷰포트가 좁으면 이 셸이 컨텐츠 실제 높이보다 더 작게 "찌그러들며" 잘림을
   // overflow-hidden이 감춰버려 — 조상 스크롤러가 scrollHeight>clientHeight를 못 보고
   // 스크롤이 원천 봉쇄된다. shrink-0으로 자기 내용 실제 높이를 지키면 초과분이 정상적으로
-  // 조상 체인을 타고 올라가 진짜 스크롤러에서 스크롤 가능해진다(컷코너·헤어라인 결 무변경).
+  // 조상 체인을 타고 올라가 진짜 스크롤러에서 스크롤 가능해진다(재질만 바뀜, 이 규칙 무변경).
   return (
-    <div
-      className={cn('proof-cut flex shrink-0 overflow-hidden rounded-[6px] border border-proof-line bg-proof-panel', className)}
-      style={{ '--proof-cut': `${cut}px` } as React.CSSProperties}
-    >
+    <div className={cn('proof-surface proof-surface-lift flex shrink-0 overflow-hidden border border-proof-line bg-proof-panel', className)}>
       <Proofline state={state} />
       {children}
     </div>
@@ -264,7 +262,7 @@ function FullVariant({
   const t = useTranslations('proofCapsule');
   const sweep = useEvidenceSweep(evidence);
   return (
-    <CutCornerShell state={proofState} cut={24} className={className}>
+    <CutCornerShell state={proofState} className={className}>
       <div className="min-w-0 flex-1 px-4.5 py-4">
         <StateHeader state={proofState} label={stateLabel} />
         <div className="mb-1 mt-3 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-ink-3">
@@ -316,7 +314,7 @@ function CardVariant({
   proofState, stateLabel, claim, evidence, footer, className, onClaimClick, headerAside, cardHeader,
 }: Pick<ProofCapsuleProps, 'proofState' | 'stateLabel' | 'claim' | 'evidence' | 'footer' | 'className' | 'onClaimClick' | 'headerAside' | 'cardHeader'>) {
   return (
-    <CutCornerShell state={proofState} cut={16} className={cn('w-full max-w-[280px]', className)}>
+    <CutCornerShell state={proofState} className={cn('w-full max-w-[280px]', className)}>
       <div className="min-w-0 flex-1 px-3 py-2.5">
         {/* 카디르 QA(#3446) REQUEST_CHANGES 적출 — 이전엔 headerAside 유무와 무관하게
             justify-between div로 항상 감쌌다("영향 없음"은 시각적 얘기였을 뿐, DOM은
@@ -373,7 +371,7 @@ function InlineRow({
   proofState, stateLabel, claim, human, agent, gate, duration, className, typeBadge,
 }: Pick<ProofCapsuleProps, 'proofState' | 'stateLabel' | 'claim' | 'human' | 'agent' | 'gate' | 'duration' | 'className' | 'typeBadge'>) {
   return (
-    <CutCornerShell state={proofState} cut={16} className={cn('w-full', className)}>
+    <CutCornerShell state={proofState} className={cn('w-full', className)}>
       <div className="flex min-h-[52px] min-w-0 flex-1 items-center gap-2.5 px-3 py-2">
         <span className="flex shrink-0 items-center gap-1.5">
           {/* story #2923 AQ2(Yuna 확定 2026-08-22) — 개입유형(GATE/STEER/BLOCK/Q) compact

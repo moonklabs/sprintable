@@ -479,15 +479,16 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
                 )}
               </span>
             </button>
-            {/* story #2963 §2 — collapsible pill → .proof-cut 칩(선택=blue-soft/blue·비선택=
-                sunk/ink-3). selectedTags state·toggle 로직은 완전 무변경. */}
+            {/* story #2963 §2 — collapsible pill 칩. selectedTags state·toggle 로직은 완전
+                무변경. story #7d7634ee(P0) — proof-cut-xs(컷코너) 폐지, proof-surface-press
+                (재질 언어) 채택. */}
             {!tagsCollapsed && (
               <div className="flex max-h-[120px] flex-wrap gap-1 overflow-y-auto px-4 py-1">
                 {allTags.map((tag) => (
                   // story #3053(2984-S5) — 선택 상태는 subtle 헤어라인 채택, bg-proof-blue-soft
                   // 채움 폐지(비선택 bg-proof-sunk는 무채 중립 배경이라 SHIFT 대상 밖 — S1
                   // 선례와 동형).
-                  <button key={tag} type="button" onClick={() => setSelectedTags((prev) => prev.includes(tag) ? prev.filter((tg) => tg !== tag) : [...prev, tag])} className={`proof-cut-xs px-2 py-0.5 text-[11px] font-semibold transition ${selectedTags.includes(tag) ? 'border border-proof-line bg-transparent text-foreground' : 'bg-proof-sunk text-proof-ink-3 hover:bg-muted'}`}>
+                  <button key={tag} type="button" onClick={() => setSelectedTags((prev) => prev.includes(tag) ? prev.filter((tg) => tg !== tag) : [...prev, tag])} className={`proof-surface proof-surface-press px-2 py-0.5 text-[11px] font-semibold transition ${selectedTags.includes(tag) ? 'border border-proof-line bg-transparent text-foreground' : 'bg-proof-sunk text-proof-ink-3 hover:bg-muted'}`}>
                     #{tag}
                   </button>
                 ))}

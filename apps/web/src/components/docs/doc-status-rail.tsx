@@ -141,7 +141,7 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
   // draft — 접힌 박스의 "검토 요청" CTA를 그대로 상시 승격(§7: 새 상태·새 API 0).
   if (state === 'draft') {
     return (
-      <div className="proof-cut flex flex-wrap items-center gap-3 border border-proof-line bg-proof-panel px-4 py-3">
+      <div className="proof-surface proof-surface-lift flex flex-wrap items-center gap-3 border border-proof-line bg-proof-panel px-4 py-3">
         <Icon className="size-5 shrink-0 text-muted-foreground" />
         <p className="min-w-0 flex-1 text-sm text-muted-foreground">{t('docGateRequestReviewHint')}</p>
         <Button size="sm" className="focus-outset" disabled={busy} onClick={() => void docTransition('pending', onTransitioned)}>
@@ -153,7 +153,7 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
   }
 
   return (
-    <div className={`proof-cut flex flex-wrap items-center gap-3 border px-4 py-3.5 ${
+    <div className={`proof-surface proof-surface-lift flex flex-wrap items-center gap-3 border px-4 py-3.5 ${
       state === 'confirmed' ? 'border-success/30 bg-success-tint' : state === 'denied' ? 'border-destructive/30 bg-destructive/10' : 'border-warning/30 bg-warning-tint'
     }`}
     >
