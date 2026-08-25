@@ -527,4 +527,18 @@ describe('Workcell — story #5b3aea5e Brief 콘텐츠 층(마크다운 스트�
     expect(markup).not.toContain('##');
     expect(markup).not.toContain('- `tsc');
   });
+
+  // story #3054(2984-S6) — runNextNeed 콜아웃이 헤어라인을 쓰고 bg-proof-blue-soft 채움은
+  // 안 쓴다. ⚠️elev(--elev-card)는 안 쓴다 — bentoLayout=false "완전 복귀" 계약(§6, 아래
+  // 테스트)과 충돌하는 걸 실측으로 잡았던 자리(pre-fix 상태에서 이 회귀가 실제로 났었다).
+  it('runNextNeed 콜아웃이 헤어라인을 쓰고 bg-proof-blue-soft/elev-card 둘 다 안 쓴다', () => {
+    const markup = renderKo(<Workcell {...BASE} />);
+    expect(markup).toContain(BASE.run.nextNeed);
+    const idx = markup.indexOf(BASE.run.nextNeed);
+    const tagStart = markup.lastIndexOf('<div', idx);
+    const tag = markup.slice(tagStart, idx);
+    expect(tag).toContain('border-proof-line');
+    expect(tag).not.toContain('bg-proof-blue-soft');
+    expect(tag).not.toContain('shadow-[var(--elev-card)]');
+  });
 });

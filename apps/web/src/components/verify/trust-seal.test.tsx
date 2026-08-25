@@ -42,6 +42,16 @@ describe('TrustSeal (claimed — Green 무결성 SOUL-LOCK, claimed-vs-verified-
     expect(markup).toContain('에이전트 주장');
     expect(markup).not.toContain('undefined');
   });
+
+  // story #3054(2984-S6) — 컨테이너 재질이 헤어라인+엠보스 inset(VerificationStamp 재질
+  // 언어)을 쓰고 bg-proof-amber-soft 채움은 안 쓴다. Green 무결성 SOUL-LOCK은 위 테스트로
+  // 이미 고정 — 여기선 material만 본다.
+  it('story #3054 — 헤어라인+엠보스 inset을 쓰고 bg-proof-amber-soft는 안 쓴다', () => {
+    const markup = render({ variant: 'claimed', agentInitial: '미' });
+    expect(markup).toContain('border-proof-line');
+    expect(markup).toContain('shadow-[var(--elev-inset)]');
+    expect(markup).not.toContain('bg-proof-amber-soft');
+  });
 });
 
 describe('TrustSeal (verified — 인간 책임자 서명, spec §1.2)', () => {

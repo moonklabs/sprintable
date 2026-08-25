@@ -498,3 +498,53 @@ describe('ProofCapsule — story #32dcc294 headerAside/cardHeader(card 밀도 �
     expect(markup).toContain(BASE.claim);
   });
 });
+
+// story #3054(2984-S6) — gate action 버튼(full 밀도)+GATE_BUTTON_TONE 3톤이 헤어라인/elev를
+// 쓰고 bg-proof-blue-soft/bg-proof-green-soft 채움은 안 쓴다.
+describe('ProofCapsule — story #3054 gate 버튼 헤어라인(soft-fill 폐지)', () => {
+  it('full 밀도 gate 버튼이 헤어라인+elev를 쓰고 bg-proof-blue-soft는 안 쓴다', () => {
+    const markup = renderWithIntl(
+      <ProofCapsule {...BASE} gate={{ action: '승인', href: '/gates/g1' }} />,
+    );
+    expect(markup).toContain('border-proof-line');
+    expect(markup).toContain('shadow-[var(--elev-card)]');
+    expect(markup).not.toContain('bg-proof-blue-soft');
+  });
+
+  it('row 밀도 GATE_BUTTON_TONE 3톤(primary/neutral/ready) 전부 soft-fill이 없다', () => {
+    for (const tone of ['primary', 'neutral', 'ready'] as const) {
+      const markup = renderWithIntl(
+        <ProofCapsule {...BASE} density="row" gate={{ action: '진행', tone }} />,
+      );
+      expect(markup).not.toContain('bg-proof-blue-soft');
+      expect(markup).not.toContain('bg-proof-green-soft');
+    }
+  });
+});
+
+// story #3054(2984-S6 §3.4) — claim 헤드라인(full 밀도)은 proofState==='green'(검증됨)일
+// 때만 font-serif, 다른 상태는 sans 그대로. 본문/라벨/칩엔 serif 없음(2974 규율).
+describe('ProofCapsule — story #3054 serif 포인트(claim→Verified 전이만)', () => {
+  it('proofState=green이면 claim 헤드라인이 font-serif를 쓴다', () => {
+    const markup = renderWithIntl(<ProofCapsule {...BASE} proofState="green" />);
+    const claimIdx = markup.indexOf(BASE.claim);
+    const claimTagStart = markup.lastIndexOf('<div', claimIdx);
+    const claimTag = markup.slice(claimTagStart, claimIdx);
+    expect(claimTag).toContain('font-serif');
+  });
+
+  it('proofState=blue/amber/red는 claim 헤드라인에 font-serif가 없다', () => {
+    for (const state of ['blue', 'amber', 'red'] as const) {
+      const markup = renderWithIntl(<ProofCapsule {...BASE} proofState={state} />);
+      const claimIdx = markup.indexOf(BASE.claim);
+      const claimTagStart = markup.lastIndexOf('<div', claimIdx);
+      const claimTag = markup.slice(claimTagStart, claimIdx);
+      expect(claimTag).not.toContain('font-serif');
+    }
+  });
+
+  it('card 밀도(본문 규모)는 proofState=green이어도 font-serif가 없다(2974 — 본문/칩 금지)', () => {
+    const markup = renderWithIntl(<ProofCapsule {...BASE} density="card" proofState="green" />);
+    expect(markup).not.toContain('font-serif');
+  });
+});

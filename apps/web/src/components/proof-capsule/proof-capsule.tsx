@@ -229,9 +229,10 @@ function GateRow({ gate, human }: { gate: ProofCapsuleGate; human: ProofCapsuleH
         {gate.risk ? (
           <span className="font-mono text-[10.5px]">{t('gate.risk', { risk: t(`risk.${RISK_KEY[gate.risk]}`) })}</span>
         ) : null}
+        {/* story #3054(2984-S6) — 헤어라인+elev CTA 채택, bg-proof-blue-soft 채움 폐지. */}
         <a
           href={gate.href}
-          className="ml-auto inline-flex items-center gap-1 rounded-[6px] border border-proof-blue bg-proof-blue-soft px-3 py-1 text-[11.5px] font-semibold text-proof-blue transition-colors duration-[140ms] hover:bg-proof-blue hover:text-white"
+          className="ml-auto inline-flex items-center gap-1 rounded-[6px] border border-proof-line bg-proof-panel px-3 py-1 text-[11.5px] font-semibold text-foreground shadow-[var(--elev-card)] transition-colors duration-[140ms] hover:bg-muted"
         >
           {gate.action}
           <ArrowRight className="size-3" aria-hidden="true" />
@@ -269,7 +270,11 @@ function FullVariant({
         <div className="mb-1 mt-3 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-ink-3">
           {t('claim.label')}
         </div>
-        <div className="text-[19px] font-bold leading-[1.25] tracking-[-0.012em] text-proof-ink">{claim}</div>
+        {/* story #3054(2984-S6 §3.4) — serif는 claim→Verified 전이의 최종 판정 헤드라인
+            "포인트"에만(2974 규율: 본문/라벨/칩은 절대 금지) — proofState==='green'(검증됨)
+            일 때만 font-serif(Source Serif 4, layout.tsx 기배선) 켠다. 다른 상태(blue/amber/
+            red)는 무변경(sans 그대로). */}
+        <div className={cn('text-[19px] font-bold leading-[1.25] tracking-[-0.012em] text-proof-ink', proofState === 'green' && 'font-serif')}>{claim}</div>
         <div className="mt-2.5 flex flex-wrap items-center gap-3 text-[11px] text-proof-ink-3">
           {human ? (
             <span className="inline-flex items-center gap-1.5">
@@ -355,10 +360,13 @@ function CardVariant({
   );
 }
 
+// story #3054(2984-S6) — primary/ready 채움 폐지, 헤어라인 채택. neutral은 이미 헤어라인이라
+// 무변경(3톤 일관 확認) — border/text 색(blue=주요·green=준비됨)은 액션 의미 신호라 존치,
+// fill만 제거.
 const GATE_BUTTON_TONE: Record<NonNullable<ProofCapsuleGate['tone']>, string> = {
-  primary: 'border-proof-blue bg-proof-blue-soft text-proof-blue hover:bg-proof-blue hover:text-white',
+  primary: 'border-proof-blue text-proof-blue hover:bg-proof-sunk',
   neutral: 'border-proof-line text-proof-ink-2 hover:bg-proof-sunk',
-  ready: 'border-proof-green bg-proof-green-soft text-proof-green hover:bg-proof-green hover:text-white',
+  ready: 'border-proof-green text-proof-green hover:bg-proof-sunk',
 };
 
 function InlineRow({
