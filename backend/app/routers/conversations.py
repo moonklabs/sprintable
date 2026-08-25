@@ -1011,7 +1011,15 @@ async def _dispatch_discord_outbound(
     ChannelRouter가 discord 선택한 수신자 → webhook_configs Discord endpoint 발송.
     Discord 선택 시 SSE 동시 발송 금지 (AC10).
     Discord endpoint 미설정 시 sse fallback (AC11).
-    """
+
+    story #2041(그라운딩 doc 67b44d1e, PR-B) 근본수정 — 예전엔 DB 세션을 연 채로 discord
+    멤버 수만큼 `httpx.AsyncClient().post()`를 순차 호출했다(웹훅 URL 조회↔외부 POST가
+    루프 안에서 번갈아 일어남) — Discord가 느리거나 멤버가 많으면 그 시간만큼 커넥션
+    풀을 통째로 붙들었다. 처방: DB 세션 구간에서 웹훅 URL을 **평면값(dict)으로 전부
+    미리 뽑아둔** 뒤 세션을 닫고, 그 다음에야 외부 HTTP 호출 루프를 돈다 — 쿼리 자체
+    (조건·`.first()` 픽 규칙)는 원본과 동일, 실행 시점만 앞으로 당겼다(결과 기록 DB
+    write는 원래도 없었으므로 — 실패는 로그만 — "짧은 별도 트랜잭션"이 별도로 필요
+    없다)."""
     from app.core.database import async_session_factory
     from app.services.channel_router import ChannelRouterError, route_message
     from sqlalchemy import select
@@ -1027,9 +1035,11 @@ async def _dispatch_discord_outbound(
         if not discord_members:
             return
 
-        import httpx
+        # 세션이 열린 동안 웹훅 URL만 평면값(dict)으로 전부 뽑아둔다 — 쿼리·픽 규칙은
+        # 원본 그대로(member_id별 channel="discord"·is_active 필터·`.first()`), 실행
+        # 시점만 세션이 열린 이 구간 안으로 모았다(외부 I/O는 세션 밖에서 돈다).
+        webhook_url_by_member: dict[uuid.UUID, str] = {}
         for decision in discord_members:
-            # discord channel WebhookConfig 조회
             wh = (await db.execute(
                 select(WebhookConfig).where(
                     WebhookConfig.member_id == decision.member_id,
@@ -1037,33 +1047,39 @@ async def _dispatch_discord_outbound(
                     WebhookConfig.is_active.is_(True),
                 )
             )).scalars().first()
+            if wh is not None:
+                webhook_url_by_member[decision.member_id] = wh.url
 
-            if wh is None:
-                # AC11: Discord endpoint 미설정 → sse fallback (SSE는 이미 _dispatch_conversation_event에서 처리)
-                logger.info(
-                    "Discord endpoint not configured for member %s — SSE fallback already dispatched",
-                    decision.member_id,
-                )
-                continue
-
-            # Discord URL이면 content/embeds 포맷, 아니면 generic JSON
-            is_discord_url = (
-                "discord.com/api/webhooks" in wh.url
-                or "discordapp.com/api/webhooks" in wh.url
+    # 세션 닫힘 — 여기부터는 순수 외부 HTTP 호출뿐, DB 커넥션을 전혀 점유하지 않는다.
+    import httpx
+    for decision in discord_members:
+        wh_url = webhook_url_by_member.get(decision.member_id)
+        if wh_url is None:
+            # AC11: Discord endpoint 미설정 → sse fallback (SSE는 이미 _dispatch_conversation_event에서 처리)
+            logger.info(
+                "Discord endpoint not configured for member %s — SSE fallback already dispatched",
+                decision.member_id,
             )
-            content_text = f"[conversation:message] message_id: {message_id}"
-            if is_discord_url:
-                discord_payload: dict = {"content": content_text}
-            else:
-                discord_payload = {"event_type": "conversation.message_created", "message_id": str(message_id)}
+            continue
 
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    await client.post(wh.url, json=discord_payload)
-            except Exception:
-                logger.warning(
-                    "Discord outbound failed member_id=%s url=%s", decision.member_id, wh.url, exc_info=True
-                )
+        # Discord URL이면 content/embeds 포맷, 아니면 generic JSON
+        is_discord_url = (
+            "discord.com/api/webhooks" in wh_url
+            or "discordapp.com/api/webhooks" in wh_url
+        )
+        content_text = f"[conversation:message] message_id: {message_id}"
+        if is_discord_url:
+            discord_payload: dict = {"content": content_text}
+        else:
+            discord_payload = {"event_type": "conversation.message_created", "message_id": str(message_id)}
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.post(wh_url, json=discord_payload)
+        except Exception:
+            logger.warning(
+                "Discord outbound failed member_id=%s url=%s", decision.member_id, wh_url, exc_info=True
+            )
 
 
 async def _create_conversation_record(
