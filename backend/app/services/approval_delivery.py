@@ -256,7 +256,11 @@ async def dispatch_approval_result_reply(
         logger.warning("approval-result 회신 스킵 — resolver 미확인 work_item=%s", work_item_id)
         return
 
-    decision_label = "승인" if decision == "approved" else "반려"
+    # story #2789(2026-08-24) — 이 이진 매핑(approved 아니면 전부 "반려")은 "withdrawn"
+    # (요청자 자기-철회, 이 함수의 새 호출자)이 들어오면 승인 거부인 것처럼 잘못 라벨링한다
+    # — decision 값마다 명시로 라벨을 정한다(미지 값은 문자열 그대로, 지어내지 않는다).
+    _DECISION_LABELS = {"approved": "승인", "rejected": "반려", "withdrawn": "철회"}
+    decision_label = _DECISION_LABELS.get(decision, decision)
     content = f"'{title}' 결재 결과: {decision_label}"
     if resolution_note:
         content += f"\n사유: {resolution_note}"

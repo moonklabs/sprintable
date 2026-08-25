@@ -1560,6 +1560,87 @@ class GateVoidRequest(BaseModel):
     reason: str  # 사유 필수(audit·파괴적 액션). 빈 사유는 서비스서 422.
 
 
+@router.post("/{id}/withdraw", response_model=GateResponse)
+async def withdraw_gate_endpoint(
+    id: uuid.UUID,
+    body: GateVoidRequest,
+    session: AsyncSession = Depends(get_db),
+    org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth=Depends(get_current_user),
+) -> GateResponse:
+    """story #2789(2026-08-24, PO 판정) — 갭③: 요청자(에이전트 포함) 자기 결정 카드 철회.
+
+    `/void`(위)는 admin-only 복구 액션(잘못 생성된 게이트를 관리자가 무효화) — 그와는
+    **다른 인가 축**이다: 여기는 "이 게이트를 만든 사람 본인이 자기 질문을 철회"하는
+    것이라, admin 자격이 아니라 **본인이 원 요청자인가**만 검사한다(neutral_facts.
+    requested_by_member_id — /decisions 생성 시점에 caller_id로 stamp됨, gates.py:418).
+    admin이 아닌 에이전트가 자기 질문을 낸 뒤 스스로 취소할 방법이 지금까지 전무했다
+    (2026-08-19 실증: DELETE 405·withdraw/resolve/agent-decisions/* 전부 404) — 무효화된
+    질문 카드가 결재함에 영구 잔존하던 그 갭.
+
+    상태 전이·audit는 `void_gate()`(SSOT, admin `/void`와 동일 로직) 그대로 재사용 — 새
+    상태기계 발명 0. actor_type만 실 caller 신원(agent_gateway.py 등과 동형 api_key_id
+    판별)으로 정직하게 넘긴다(#2789 이전엔 이 함수의 유일한 호출자가 항상 사람이라
+    "human" 하드코딩이 참이었다 — 더는 아니다).
+
+    철회는 결재함(gate.status≠pending이 되는 순간 그 목록에서 자연히 빠짐, 별도 배선
+    불요)과 채팅(designated_approver에게 "철회" 결과 회신 — dispatch_approval_result_reply
+    재사용, approved/rejected와 동형의 반대방향 알림) 양쪽에 반영된다."""
+    resolved = await resolve_member(auth, org_id, session)
+
+    gate = (await session.execute(
+        select(Gate).where(Gate.id == id, Gate.org_id == org_id)
+    )).scalar_one_or_none()
+    if gate is None:
+        raise HTTPException(status_code=404, detail="Gate not found")
+
+    # 카디르 QA(#3462, 2026-08-25 probe 실측): neutral_facts는 외부 JSONB라 requested_by_
+    # member_id가 손상된/비-UUID 문자열일 수 있다 — uuid.UUID(...) 파싱은 그 경우 uncaught
+    # ValueError로 500을 낸다(다른 gate 라우트가 쓰는 문자열비교 패턴을 그대로 재사용해
+    # 파싱 자체를 없앤다 — 손상값은 어차피 어떤 유효 uuid 문자열과도 안 같으므로 결과는
+    # 동일하게 404, 크래시만 사라진다).
+    requester_raw = (gate.neutral_facts or {}).get("requested_by_member_id")
+    if not requester_raw or str(requester_raw) != str(resolved.id):
+        # 존재 비노출 관례(다른 gate 라우트와 동형) — 남의 게이트 존재 여부를 403으로
+        # 흘리지 않는다. 본인 요청이 아니면 404(admin은 /void를 쓸 것).
+        raise HTTPException(status_code=404, detail="Gate not found")
+
+    is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    actor_type = "agent" if is_api_key else "human"
+
+    try:
+        gate = await void_gate(
+            session, org_id, id, resolved.id, body.reason,
+            actor_type=actor_type, void_reason_label="requester",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    designated_approver_id = gate.designated_approver_id
+    if designated_approver_id is not None:
+        try:
+            from app.services.approval_delivery import dispatch_approval_result_reply
+            project_id_raw = (gate.neutral_facts or {}).get("project_id")
+            # dispatch_approval_result_reply 자체가 project_id falsy면 no-op(그 함수 첫 줄
+            # 가드) — 없으면 지어내지 않고 None 그대로 넘긴다.
+            await dispatch_approval_result_reply(
+                session, org_id=org_id, work_item_type=gate.work_item_type,
+                work_item_id=gate.work_item_id,
+                project_id=uuid.UUID(str(project_id_raw)) if project_id_raw else None,
+                title=(gate.neutral_facts or {}).get("question", "결정 요청"),
+                gate_id=gate.id, requester_id=designated_approver_id, resolver_id=resolved.id,
+                decision="withdrawn", resolution_note=body.reason,
+                event_type="agent_decision_withdrawn",
+            )
+        except Exception:  # noqa: BLE001 — 회신 실패가 철회 자체를 막지 않는다(결재함 반영은 이미 완료).
+            logger.warning("decision-request 철회 회신 실패 gate=%s", gate.id, exc_info=True)
+
+    await session.commit()
+    # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.
+    await session.refresh(gate)
+    return GateResponse.model_validate(gate)
+
+
 @router.post("/{id}/void", response_model=GateResponse)
 async def void_gate_endpoint(
     id: uuid.UUID,
