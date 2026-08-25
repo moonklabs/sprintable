@@ -332,3 +332,81 @@ describe('NotificationBell — 로드맵 P2·PR-E L1(드롭다운 패널 elevati
     expect(desktopPanel?.className).not.toMatch(/(^|\s)shadow-lg(\s|$)/);
   });
 });
+
+// story #3074 — 데스크톱 실 알림 발화 코드 신설. window.__sprintableBridge가 있으면 그 경로
+// «만»(브라우저 Notification 병행 금지), 없으면 기존 브라우저 경로 그대로(회귀 0).
+describe('NotificationBell — story #3074 데스크톱 브리지 notify_show', () => {
+  function stubBrowserNotification() {
+    const ctor = vi.fn();
+    vi.stubGlobal('Notification', Object.assign(ctor, { permission: 'granted' }));
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    return ctor;
+  }
+
+  function emitLiveNotification(overrides: Record<string, unknown> = {}) {
+    const es = FakeEventSource.instances[0]!;
+    return act(async () => {
+      es.emit('notification', {
+        id: 'live-1', event_type: 'story.status_changed', source_entity_type: 'epic', source_entity_id: 'e-9',
+        payload: { summary: '스토리 상태 변경', sender_name: '유나 홀름' }, read_at: null, created_at: '2026-08-25T01:00:00Z',
+        ...overrides,
+      });
+    });
+  }
+
+  it('브리지가 있으면 notify_show를 snake_case payload로 부르고, 브라우저 Notification은 안 부른다', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
+    const notificationCtor = stubBrowserNotification();
+    const notifyShow = vi.fn().mockResolvedValue(true);
+    (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge = { notify_show: notifyShow };
+
+    await openBell();
+    await emitLiveNotification();
+
+    expect(notifyShow).toHaveBeenCalledTimes(1);
+    expect(notifyShow).toHaveBeenCalledWith({
+      event_type: 'story.status_changed',
+      body: '유나 홀름 · 스토리 상태 변경',
+      deeplink_path: '/goals/e-9',
+    });
+    expect(notificationCtor).not.toHaveBeenCalled();
+
+    delete (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge;
+  });
+
+  it('브리지가 없으면(일반 브라우저) 기존 Notification 경로가 그대로 동작한다(회귀 0)', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
+    const notificationCtor = stubBrowserNotification();
+    delete (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge;
+
+    await openBell();
+    await emitLiveNotification();
+
+    expect(notificationCtor).toHaveBeenCalledTimes(1);
+    expect(notificationCtor).toHaveBeenCalledWith('스토리 상태 변경', { body: '유나 홀름', icon: '/favicon.ico' });
+  });
+
+  it('딥링크로 못 푸는 알림(source_entity_id 없음)이면 deeplink_path가 "/"로 안전 폴백한다', async () => {
+    FakeEventSource.instances = [];
+    vi.stubGlobal('EventSource', FakeEventSource);
+    stubFetchSequenceByOffset({ 0: { items: [], hasMore: false } });
+    stubBrowserNotification();
+    const notifyShow = vi.fn().mockResolvedValue(true);
+    (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge = { notify_show: notifyShow };
+
+    await openBell();
+    await emitLiveNotification({ source_entity_type: null, source_entity_id: null, payload: { summary: '시스템 공지' } });
+
+    expect(notifyShow).toHaveBeenCalledWith({
+      event_type: 'story.status_changed',
+      body: '시스템 공지',
+      deeplink_path: '/',
+    });
+
+    delete (window as unknown as { __sprintableBridge?: unknown }).__sprintableBridge;
+  });
+});
