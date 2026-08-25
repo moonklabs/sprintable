@@ -369,7 +369,10 @@ export function ApprovalsQueue() {
                 content 폭까지 shrink-to-fit돼 ellipsis가 걸릴 폭 기준 자체가 없다(카드
                 우변에서 그냥 잘림). w-full로 폭을 부모 카드 전체로 고정해야 truncate가 실제로
                 동작한다. */}
-            <p className="w-full truncate text-sm text-foreground">
+            <p
+              className="w-full truncate text-sm text-foreground"
+              title={gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
+            >
               {gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
             </p>
             {orgName ? <p className="text-[11px] text-muted-foreground">{orgName}</p> : null}

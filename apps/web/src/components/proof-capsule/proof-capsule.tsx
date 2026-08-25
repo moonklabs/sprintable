@@ -383,7 +383,7 @@ function InlineRow({
           ) : null}
           <StateHeader state={proofState} label={stateLabel} />
         </span>
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-proof-ink">{claim}</span>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-proof-ink" title={claim}>{claim}</span>
         <span className="inline-flex shrink-0 items-center gap-2">
           {duration ? <span className="shrink-0 text-[10.5px] font-medium text-proof-ink-3">{duration}</span> : null}
           {human ? <Avatar name={human.name} actorType="human" size={22} /> : null}
@@ -419,7 +419,7 @@ function AuditRow({ proofState, claim, now, human, agent, className }: Pick<Proo
   return (
     <div className={cn('flex items-center gap-2 rounded-[6px] border border-proof-line bg-proof-panel px-3 py-2 text-[11px]', className)}>
       <span className={cn('size-1.5 shrink-0 rounded-full', dotTone[proofState])} aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate font-medium text-proof-ink">{claim}</span>
+      <span className="min-w-0 flex-1 truncate font-medium text-proof-ink" title={claim}>{claim}</span>
       {actorName ? <Avatar name={actorName} actorType={agent ? 'agent' : 'human'} size={16} /> : null}
       <span className="shrink-0 font-mono text-[9.5px] text-proof-ink-3">{[now, actorName].filter(Boolean).join(' ')}</span>
     </div>

@@ -44,6 +44,17 @@ describe('ProofCapsule (density variants)', () => {
     }
   });
 
+  it('story #3038(선생님 실사고, 결재함 merge 카드 «#해시») — row/audit(단일행 truncate)의 claim에 title 툴팁으로 전문 노출', () => {
+    // AC1: "긴 제목은 truncate(툴팁 전문)" — truncate는 시각적으로만 잘릴 뿐, 마우스오버 시
+    // native title 속성으로 전문을 볼 수 있어야 한다(별도 팝오버 컴포넌트 신설 없이 최소 구현).
+    // full/card는 truncate가 아니라 line-clamp-2/줄바꿈이라 이 요구 범위 밖(생략 텍스트가 아님).
+    const longClaim = '[SID:9999] 아주 긴 스토리 제목이라 한 줄에 다 안 들어가고 잘려야 하는 케이스';
+    for (const density of ['row', 'audit'] as const) {
+      const markup = renderWithIntl(<ProofCapsule {...BASE} claim={longClaim} density={density} />);
+      expect(markup).toContain(`title="${longClaim}"`);
+    }
+  });
+
   it('applies a clip-path cut-corner on full/card/row (not a plain rounded-full pill anywhere)', () => {
     // story #2955 §5 — clip-path 지오메트리 계산이 인라인 style에서 globals.css의 `.proof-cut`
     // 단일 정본으로 이관됐다(CutCornerShell). 렌더 마크업엔 이제 'polygon(' 리터럴이 없다
