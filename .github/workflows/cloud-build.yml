@@ -383,6 +383,80 @@ jobs:
             echo "mcp_allowed_hosts=" >> "$GITHUB_OUTPUT"
           fi
 
+      # story #3079(2026-08-25, #3070/#3031/#2089 근본원인 공통수정) — realtime path-filter
+      # (GCE #2089 · Cloud Run #3031) 둘 다 merge 이후 단 한 번도 실제로 스킵을 실행한 적이
+      # 없었다: 실 root cause=Cloud Build가 `gcloud builds submit --source=.`(로컬소스 tarball
+      # 업로드)로 도는데 레포에 `.gcloudignore`가 없어 gcloud 기본 규칙(.gitignore 기반 자동
+      # 생성+`.git` 항상 제외)이 적용돼 Cloud Build 워크스페이스엔 `.git`이 아예 없었다 —
+      # 두 필터의 `git diff`/`git fetch`가 매번 "Not a git repository"(rc=129)로 실패해 각자의
+      # fail-safe("판별 불가 → 배포 진행")로 항상 떨어졌다(실 Cloud Build 로그 원문으로 확定).
+      #
+      # 처방: git diff 판정을 Cloud Build 안이 아니라 **여기(GHA, 실 .git 보유)**에서 계산해
+      # skip/deploy 결과만 substitution으로 넘긴다 — Cloud Build 워크스페이스에 `.git`을
+      # 살리려는 시도(`.gcloudignore`로 포함 허용 등)보다 안전(tarball 업로드 크기/보안 노출
+      # 우려 없음). `check_realtime_relevant_diff.sh`(#2089 SSOT)는 그대로 재사용 — 로직
+      # 이중선언 없음.
+      #
+      # ⛔fetch-depth: `actions/checkout@v4` 기본값(fetch-depth=1, shallow)이라 임의 과거
+      # last_sha와의 diff가 불가능 — `git fetch --unshallow`로 전체 이력을 먼저 받는다.
+      # ⛔fail-safe 방향(페드루 PO 재판단 요청, 2026-08-25): 필터가 실제로 한 번도 안 돌던
+      # 예전엔 "판별 불가 → 배포 진행"이 사실상 무해했다(항상 그 경로였으므로) — 이제 필터가
+      # 진짜로 돌면 **잘못된 skip 판정**(실제 관련 변경이 있는데 스킵)이 새로 생기는 위험이다.
+      # 그래도 방향은 유지한다 — `check_realtime_relevant_diff.sh` 자신의 원 설계 철학
+      # ("정확성을 빈도보다 우선" — 조용히 스킵보다 조용히 배포가 안전)과 동일 원칙이고,
+      # 판별 불가 상황(최초 배포·트래픽 스플릿 중·describe 실패)은 여전히 드물고 명시적으로
+      # 로그에 남으므로 사람이 알아챌 수 있다. REALTIME_RELEVANT_PATHS 목록의 완전성이
+      # 이제부터 진짜로 중요해진다는 점만 리뷰어가 유념할 것.
+      #
+      # #3031(Cloud Run path-filter "로그 도장")은 이 fix에 흡수됨 — 별도 후속 불요.
+      - name: Resolve realtime deploy path-filter (GHA — 실 git 보유, Cloud Build엔 없음)
+        id: realtime_gate
+        if: steps.env.outputs.target == 'dev'
+        env:
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          set -uo pipefail
+          AR_REGION="asia-northeast3"
+          git fetch --unshallow --quiet 2>/dev/null || git fetch --quiet 2>/dev/null || true
+
+          gce_skip="false"
+          current_template="$(gcloud compute instance-groups managed describe sprintable-realtime-gateway-dev \
+            --region="${AR_REGION}" --project="${GCP_PROJECT}" \
+            --format='value(versions[0].instanceTemplate)' 2>/dev/null | sed 's#.*/##' || echo '')"
+          gce_last_sha="$(echo "${current_template}" | grep -oE '[0-9a-f]{8}' | head -1 || echo '')"
+          if [ -z "${gce_last_sha}" ]; then
+            echo "[gce] 직전 SHA를 인스턴스 템플릿 이름에서 못 읽음(최초 배포이거나 이름 패턴 변경) — 배포 진행"
+          elif bash backend/scripts/check_realtime_relevant_diff.sh "${gce_last_sha}" "${GITHUB_SHA}"; then
+            echo "[gce] 관련 경로 변경 있음 — 배포 진행"
+          else
+            echo "[gce] ${gce_last_sha}..${GITHUB_SHA} 사이 realtime-관련 경로 변경 없음 — 스킵"
+            gce_skip="true"
+          fi
+
+          cloudrun_skip="false"
+          serving_revision="$(gcloud run services describe sprintable-realtime-dev \
+            --region="${AR_REGION}" --project="${GCP_PROJECT}" \
+            --format='value(status.traffic.filter(percent=100).revisionName)' 2>/dev/null || echo '')"
+          if [ -z "${serving_revision}" ]; then
+            echo "[cloudrun] 100% 트래픽 서빙 리비전을 못 읽음(최초 배포이거나 트래픽 스플릿 중) — 배포 진행"
+          else
+            last_image="$(gcloud run revisions describe "${serving_revision}" \
+              --region="${AR_REGION}" --project="${GCP_PROJECT}" \
+              --format='value(spec.containers[0].image)' 2>/dev/null || echo '')"
+            cloudrun_last_sha="${last_image##*:}"
+            if [ -z "${cloudrun_last_sha}" ] || [ "${cloudrun_last_sha}" = "${last_image}" ]; then
+              echo "[cloudrun] 서빙 리비전 이미지 태그를 못 읽음 — 배포 진행"
+            elif bash backend/scripts/check_realtime_relevant_diff.sh "${cloudrun_last_sha}" "${GITHUB_SHA}"; then
+              echo "[cloudrun] 관련 경로 변경 있음 — 배포 진행"
+            else
+              echo "[cloudrun] ${cloudrun_last_sha}..${GITHUB_SHA} 사이 realtime-관련 경로 변경 없음 — 스킵"
+              cloudrun_skip="true"
+            fi
+          fi
+
+          echo "gce_skip=${gce_skip}" >> "$GITHUB_OUTPUT"
+          echo "cloudrun_skip=${cloudrun_skip}" >> "$GITHUB_OUTPUT"
+
       # story #2827 P0 핫픽스 2차(2026-08-03, 페드루 dispatch-test 실측) — 1차 핫픽스가 조립
       # 로직을 "Set deploy environment" 스텝(위, 이미 표현식 1개+대량 주석으로 16000자대) 안에
       # 넣었더니 그 스텝이 "Exceeded max expression length 21000"으로 새로 걸렸다(주석 삭제로도
@@ -395,6 +469,11 @@ jobs:
         env:
           V_DEPLOY_ENV: ${{ steps.env.outputs.target }}
           V_FASTAPI_URL: ${{ steps.env.outputs.fastapi_url }}
+          # story #3079 — 위 gate 스텝이 prod에선 안 도므로(if: target==dev) 빈 문자열일 수
+          # 있다 — SUBST 조립부에서 빈 값을 "false"(=배포 진행, 기존 fail-safe 방향과 동일)로
+          # 명시 치환한다.
+          V_REALTIME_GCE_SKIP: ${{ steps.realtime_gate.outputs.gce_skip }}
+          V_REALTIME_CLOUDRUN_SKIP: ${{ steps.realtime_gate.outputs.cloudrun_skip }}
           V_BACKEND_MIN_INSTANCES: ${{ steps.env.outputs.backend_min_instances }}
           V_BACKEND_MAX_INSTANCES: ${{ steps.env.outputs.backend_max_instances }}
           V_DB_POOL_SIZE: ${{ steps.env.outputs.db_pool_size }}
@@ -425,7 +504,12 @@ jobs:
           V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED: ${{ steps.env.outputs.backend_sse_transient_replay_enabled }}
           V_MCP_ALLOWED_HOSTS: ${{ steps.env.outputs.mcp_allowed_hosts }}
         run: |
-          SUBST="_DEPLOY_ENV=\"${V_DEPLOY_ENV}\",_FASTAPI_URL=\"${V_FASTAPI_URL}\",_BACKEND_MIN_INSTANCES=\"${V_BACKEND_MIN_INSTANCES}\",_BACKEND_MAX_INSTANCES=\"${V_BACKEND_MAX_INSTANCES}\",_DB_POOL_SIZE=\"${V_DB_POOL_SIZE}\",_DB_MAX_OVERFLOW=\"${V_DB_MAX_OVERFLOW}\",_BACKEND_DB_PGBOUNCER=\"${V_BACKEND_DB_PGBOUNCER}\",_BACKEND_TIMEOUT=\"${V_BACKEND_TIMEOUT}\",_GA4_MEASUREMENT_ID=\"${V_GA4_MEASUREMENT_ID}\",_REALTIME_MIN_INSTANCES=\"${V_REALTIME_MIN_INSTANCES}\",_REALTIME_MAX_INSTANCES=\"${V_REALTIME_MAX_INSTANCES}\",_REALTIME_TIMEOUT=\"${V_REALTIME_TIMEOUT}\",_REALTIME_URL=\"${V_REALTIME_URL}\",_BACKEND_PG_LISTEN_ENABLED=\"${V_BACKEND_PG_LISTEN_ENABLED}\",_BACKEND_REDIS_CONSUME_ENABLED=\"${V_BACKEND_REDIS_CONSUME_ENABLED}\",_BACKEND_REDIS_DISPATCH_ENABLED=\"${V_BACKEND_REDIS_DISPATCH_ENABLED}\",_REDIS_URL=\"${V_REDIS_URL}\",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED=\"${V_BACKEND_REDIS_DUAL_PUBLISH_ENABLED}\",_BACKEND_FANOUT_WAKE_REDIS_ENABLED=\"${V_BACKEND_FANOUT_WAKE_REDIS_ENABLED}\",_SSE_MULTIPLEX_ENABLED=\"${V_SSE_MULTIPLEX_ENABLED}\",_BACKEND_PRESENCE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_REDIS_ENABLED}\",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED}\",_BACKEND_SSE_LEASE_REDIS_ENABLED=\"${V_BACKEND_SSE_LEASE_REDIS_ENABLED}\",_FRONTEND_MIN_INSTANCES=\"${V_FRONTEND_MIN_INSTANCES}\",_FRONTEND_MAX_INSTANCES=\"${V_FRONTEND_MAX_INSTANCES}\",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED=\"${V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}\",_MCP_ALLOWED_HOSTS=\"${V_MCP_ALLOWED_HOSTS}\",_EE_ENABLED=\"${V_EE_ENABLED}\",_LICENSE_CONSENT=\"${V_LICENSE_CONSENT}\",_TOSS_CLIENT_KEY=\"${V_TOSS_CLIENT_KEY}\",_NEXT_PUBLIC_APP_URL=\"${V_NEXT_PUBLIC_APP_URL}\""
+          # story #3079 — prod push는 위 gate 스텝이 안 돌아(if: target==dev) 빈 문자열이다.
+          # 빈 값을 "false"(=배포 진행, 기존 fail-safe 방향과 동일)로 명시 치환 — cloudbuild.yaml
+          # 쪽은 정확히 "true" 문자열만 스킵으로 취급하므로 다른 값은 전부 안전측(배포)이다.
+          V_REALTIME_GCE_SKIP="${V_REALTIME_GCE_SKIP:-false}"
+          V_REALTIME_CLOUDRUN_SKIP="${V_REALTIME_CLOUDRUN_SKIP:-false}"
+          SUBST="_DEPLOY_ENV=\"${V_DEPLOY_ENV}\",_FASTAPI_URL=\"${V_FASTAPI_URL}\",_BACKEND_MIN_INSTANCES=\"${V_BACKEND_MIN_INSTANCES}\",_BACKEND_MAX_INSTANCES=\"${V_BACKEND_MAX_INSTANCES}\",_DB_POOL_SIZE=\"${V_DB_POOL_SIZE}\",_DB_MAX_OVERFLOW=\"${V_DB_MAX_OVERFLOW}\",_BACKEND_DB_PGBOUNCER=\"${V_BACKEND_DB_PGBOUNCER}\",_BACKEND_TIMEOUT=\"${V_BACKEND_TIMEOUT}\",_GA4_MEASUREMENT_ID=\"${V_GA4_MEASUREMENT_ID}\",_REALTIME_MIN_INSTANCES=\"${V_REALTIME_MIN_INSTANCES}\",_REALTIME_MAX_INSTANCES=\"${V_REALTIME_MAX_INSTANCES}\",_REALTIME_TIMEOUT=\"${V_REALTIME_TIMEOUT}\",_REALTIME_URL=\"${V_REALTIME_URL}\",_BACKEND_PG_LISTEN_ENABLED=\"${V_BACKEND_PG_LISTEN_ENABLED}\",_BACKEND_REDIS_CONSUME_ENABLED=\"${V_BACKEND_REDIS_CONSUME_ENABLED}\",_BACKEND_REDIS_DISPATCH_ENABLED=\"${V_BACKEND_REDIS_DISPATCH_ENABLED}\",_REDIS_URL=\"${V_REDIS_URL}\",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED=\"${V_BACKEND_REDIS_DUAL_PUBLISH_ENABLED}\",_BACKEND_FANOUT_WAKE_REDIS_ENABLED=\"${V_BACKEND_FANOUT_WAKE_REDIS_ENABLED}\",_SSE_MULTIPLEX_ENABLED=\"${V_SSE_MULTIPLEX_ENABLED}\",_BACKEND_PRESENCE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_REDIS_ENABLED}\",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED}\",_BACKEND_SSE_LEASE_REDIS_ENABLED=\"${V_BACKEND_SSE_LEASE_REDIS_ENABLED}\",_FRONTEND_MIN_INSTANCES=\"${V_FRONTEND_MIN_INSTANCES}\",_FRONTEND_MAX_INSTANCES=\"${V_FRONTEND_MAX_INSTANCES}\",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED=\"${V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}\",_MCP_ALLOWED_HOSTS=\"${V_MCP_ALLOWED_HOSTS}\",_EE_ENABLED=\"${V_EE_ENABLED}\",_LICENSE_CONSENT=\"${V_LICENSE_CONSENT}\",_TOSS_CLIENT_KEY=\"${V_TOSS_CLIENT_KEY}\",_NEXT_PUBLIC_APP_URL=\"${V_NEXT_PUBLIC_APP_URL}\",_REALTIME_GCE_SKIP=\"${V_REALTIME_GCE_SKIP}\",_REALTIME_CLOUDRUN_SKIP=\"${V_REALTIME_CLOUDRUN_SKIP}\""
           echo "substitutions=${SUBST}" >> "$GITHUB_OUTPUT"
 
       - name: Submit Cloud Build
