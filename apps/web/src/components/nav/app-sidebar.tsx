@@ -183,11 +183,11 @@ export function AppSidebar({
       <div className="mx-2.5 mt-2">
         <Link
           href={CHAT_CENTER_ITEM.path}
-          // hover 시 solid fill로 전환하는 톤 자체는 GATE_BUTTON_TONE.primary(proof-capsule.tsx)와
-          // 동형이지만, 그 기존 패턴의 hover:text-white는 다크 모드에서 3.21(AA 4.5 미달·수동
-          // 확認)이라 그대로 베끼지 않고 여기서는 sidebar-primary-foreground(다크=근흑색, 위
-          // 배지와 동일 근거)로 바꿔 통과시킨다.
-          className="flex items-center gap-2 rounded-[9px] border border-proof-blue bg-proof-blue-soft px-2.5 py-2 text-proof-blue transition hover:bg-sidebar-primary hover:text-sidebar-primary-foreground"
+          // story #3054(2984-S6) — GATE_BUTTON_TONE.primary(proof-capsule.tsx)와 동형으로
+          // 헤어라인+elev 채택, bg-proof-blue-soft 채움 폐지. hover는 이제 solid 전환 대신
+          // bg-sidebar-accent(기존 다른 nav 항목의 hover 관례와 정합) — AA 대비 이슈였던
+          // hover:text-white/sidebar-primary-foreground 분기 자체가 불필요해졌다.
+          className="flex items-center gap-2 rounded-[9px] border border-proof-blue bg-transparent px-2.5 py-2 text-proof-blue shadow-[var(--elev-card)] transition hover:bg-sidebar-accent"
         >
           <MessageSquare className="size-[18px] shrink-0" />
           <span className="flex-1 truncate text-[13px] font-bold">{t(CHAT_CENTER_ITEM.labelKey)}</span>

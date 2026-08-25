@@ -428,7 +428,11 @@ function RunLayer({ run }: { run: WorkcellRun }) {
       <div className="mb-2 text-[11.5px] text-proof-ink-3">
         {t('runBlocked')}: <b className={cn('font-semibold', run.blocked ? 'text-proof-amber' : 'text-proof-ink-2')}>{run.blocked ?? t('none')}</b>
       </div>
-      <div className="flex items-center gap-1.5 rounded-[6px] border border-proof-blue/25 bg-proof-blue-soft px-2.5 py-1.5 text-[12.5px] text-proof-blue">
+      {/* story #3054(2984-S6) — 헤어라인 채택, bg-proof-blue-soft 채움 폐지. ⚠️elev(그림자)는
+          안 얹는다 — 이 콜아웃은 bentoLayout 여부와 무관하게 항상 렌더되는 공유 요소라
+          (story #2990 §6 가역성 1급 회귀가드가 실측으로 적발) elev를 얹으면 bentoLayout=false
+          "완전 복귀" 계약을 깬다. 순수 헤어라인만. */}
+      <div className="flex items-center gap-1.5 rounded-[6px] border border-proof-line bg-proof-panel px-2.5 py-1.5 text-[12.5px] text-foreground">
         → {t('runNextNeed')}: <b className="font-bold">{run.nextNeed}</b>
       </div>
     </div>

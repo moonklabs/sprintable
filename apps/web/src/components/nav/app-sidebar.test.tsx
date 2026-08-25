@@ -227,4 +227,15 @@ describe('AppSidebar — story #2681 NAV_GROUPS 렌더 회귀가드(AC1) + story
     const businessInfoToggle = [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-expanded') !== null);
     expect(businessInfoToggle).toBeDefined();
   });
+
+  // story #3054(2984-S6) — Chat Center CTA가 헤어라인+elev를 쓰고 bg-proof-blue-soft는
+  // 안 쓴다.
+  it('Chat Center CTA가 헤어라인+elev를 쓰고 bg-proof-blue-soft는 안 쓴다', async () => {
+    await mount();
+    const link = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/chats');
+    expect(link).toBeDefined();
+    expect(link!.className).toContain('border-proof-blue');
+    expect(link!.className).toContain('shadow-[var(--elev-card)]');
+    expect(link!.className).not.toContain('bg-proof-blue-soft');
+  });
 });
