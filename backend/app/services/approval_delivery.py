@@ -173,6 +173,13 @@ async def dispatch_approval_request_cards(
     # 안 갈 사람은 애초에 이 루프 자체에 안 들어온다).
     recipients = [designated_approver_id] if designated_approver_id is not None else approver_ids
 
+    # story #3084 층2(2026-08-25) — designated 케이스의 primary 카드가 실제로 심긴
+    # conversation.id를 기억해 둔다(아래 자동 심기 best-effort가 같은 방을 "또 다른 방"으로
+    # 오판해 무의미한 재삽입을 시도하지 않도록 — dispatch_approval_card_toss 자체는 멱등이라
+    # 안전하지만, 방금 만든 신규 DM이 "최근 활성 1위"로 잡혀 매번 같은 방만 고르는 흔한
+    # 케이스를 배제해야 층2가 실제로 의미가 있다).
+    _primary_conv_id_for_designated: uuid.UUID | None = None
+
     for approver_id in recipients:
         try:
             async with db.begin_nested():
@@ -183,6 +190,8 @@ async def dispatch_approval_request_cards(
                     requester_id=requester_id,
                     approver_id=approver_id,
                 )
+                if approver_id == designated_approver_id:
+                    _primary_conv_id_for_designated = conv.id
                 msg = ConversationMessage(
                     conversation_id=conv.id,
                     sender_id=requester_id,
@@ -226,6 +235,70 @@ async def dispatch_approval_request_cards(
         logger.warning(
             "gate_created 목록 실시간 반영 배선 실패 %s=%s", work_item_type, work_item_id, exc_info=True,
         )
+
+    # story #3084 층2(2026-08-25, 정렬 v1 후순위·best-effort) — designated의 "최근 활성"
+    # conversation(방금 심은 페어와이즈 DM과 다른 곳)에 카드 사본을 한 곳 더 심어본다.
+    # 층1(GNB 뱃지)이 이미 도달을 보장하므로 이 규칙은 정교할 필요가 없다(정렬 결론) — 엉뚱한
+    # 방을 고르거나 실패해도 사고가 아니다, 그래서 실패는 그냥 삼킨다(로그만·상신 자체는 이미
+    # 위에서 끝났다).
+    if designated_approver_id is not None and _primary_conv_id_for_designated is not None:
+        try:
+            await _maybe_auto_seed_designated_secondary_conversation(
+                db, org_id=org_id, project_id=project_id, work_item_type=work_item_type,
+                work_item_id=work_item_id, title=title, gate_id=gate_id,
+                designated_approver_id=designated_approver_id, requester_id=requester_id,
+                exclude_conversation_id=_primary_conv_id_for_designated,
+            )
+        except Exception:  # noqa: BLE001 — 정의상 best-effort.
+            logger.warning(
+                "gate 자동 심기(층2) 실패(비차단) %s=%s designated=%s",
+                work_item_type, work_item_id, designated_approver_id, exc_info=True,
+            )
+
+
+async def _maybe_auto_seed_designated_secondary_conversation(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    work_item_type: str,
+    work_item_id: uuid.UUID,
+    title: str,
+    gate_id: uuid.UUID,
+    designated_approver_id: uuid.UUID,
+    requester_id: uuid.UUID,
+    exclude_conversation_id: uuid.UUID,
+) -> None:
+    """story #3084 층2 — designated가 참여 중이고 방금 심은 페어와이즈 DM(exclude_
+    conversation_id)이 아닌 conversation 중 가장 최근 활성(Conversation.updated_at desc)
+    1곳에 한해 카드 사본을 추가 삽입. `dispatch_approval_card_toss`를 그대로 재사용(신규
+    삽입/멱등 로직 발명 0) — "시스템이 상신자를 대신해 미리 토스해 두는 것"과 동형이라
+    `tossed_by_id=requester_id`.
+
+    "최근 활성" 판정 오류(엉뚱한 방을 고름)는 사고가 아니다 — 층1(GNB 뱃지)이 이미 도달을
+    보장하므로 이 규칙은 최선 추정이면 충분하다(정렬 결론, 정교한 «주 대화 결정 규칙» 설계는
+    하지 않는다). 후보가 없으면(designated가 이 프로젝트에 다른 conversation이 없음) 조용히
+    반환 — 층1이 여전히 도달을 보장하므로 실패로 취급하지 않는다."""
+    candidate = (await db.execute(
+        select(Conversation.id)
+        .join(ConversationParticipant, ConversationParticipant.conversation_id == Conversation.id)
+        .where(
+            Conversation.org_id == org_id,
+            Conversation.project_id == project_id,
+            Conversation.id != exclude_conversation_id,
+            ConversationParticipant.member_id == designated_approver_id,
+        )
+        .order_by(Conversation.updated_at.desc())
+        .limit(1)
+    )).first()
+    if candidate is None:
+        return
+
+    await dispatch_approval_card_toss(
+        db, org_id=org_id, work_item_type=work_item_type, work_item_id=work_item_id, title=title,
+        gate_id=gate_id, designated_approver_id=designated_approver_id,
+        target_conversation_id=candidate[0], tossed_by_id=requester_id,
+    )
 
 
 _GATE_CREATED_PENDING_KEY = "s3044_pending_gate_created_pushes"
@@ -757,6 +830,13 @@ async def dispatch_approval_card_toss(
     멱등: 대상 conversation에 이미 이 gate_id를 가리키는 카드가 있으면 새로 심지 않고
     False를 반환(호출부가 "이미 토스됨"으로 조용히 취급 — 에러 아님). 신규 삽입 시 True.
 
+    ⚠️페드루 PO 비차단 관찰(PR#3488 리뷰, 2026-08-25) — False가 «멱등»과 «lookup 실패»
+    둘을 겸용하면 안 된다: 이 함수는 비-best-effort(카드 삽입=토스 "됐다"는 응답 그 자체,
+    #2142 "조용히 넘어가는 게 제일 나쁜 것" 원칙)라, tossed_by/target_conversation을 못
+    찾는 건 "이미 있다"와 의미가 완전히 다르다(전자는 예상 밖 실패, 후자는 정상 상태).
+    False는 **오직 멱등 no-op**만 의미하도록 좁히고, lookup 실패는 예외로 올려 caller가
+    (현재는 라우터의 사전 검증으로 도달 불가하지만) 침묵 200으로 착시되지 않게 한다.
+
     인가(호출자가 requester/designated 본인인지)·대상 검증(designated가 target_
     conversation 참여자인지, 카드=지정 라인 전용 정책 유지)은 라우터(gates.py::
     toss_gate_endpoint)가 이 함수 호출 **전에** 이미 강제한다 — 이 함수 자신은 인가를
@@ -777,18 +857,15 @@ async def dispatch_approval_card_toss(
     tossed_by = members.get(tossed_by_id)
     designated_member = members.get(designated_approver_id)
     if tossed_by is None:
-        logger.warning("gate toss 카드 삽입 스킵 — tossed_by 미확인 gate=%s", gate_id)
-        return False
+        raise RuntimeError(f"gate toss 카드 삽입 실패 — tossed_by 미확인 gate={gate_id} tossed_by_id={tossed_by_id}")
 
     conv = (await db.execute(
         select(Conversation).where(Conversation.id == target_conversation_id, Conversation.org_id == org_id)
     )).scalar_one_or_none()
     if conv is None:
-        logger.warning(
-            "gate toss 카드 삽입 스킵 — 대상 conversation 미확인 gate=%s conv=%s",
-            gate_id, target_conversation_id,
+        raise RuntimeError(
+            f"gate toss 카드 삽입 실패 — 대상 conversation 미확인 gate={gate_id} conv={target_conversation_id}",
         )
-        return False
 
     async with db.begin_nested():
         msg = ConversationMessage(
