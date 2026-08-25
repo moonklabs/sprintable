@@ -18,6 +18,7 @@ import { useSseNotifications, type SseEventNotification } from '@/hooks/use-sse-
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useMediaQuery } from '@/lib/use-media-query';
 import { getEventTypeCopy } from '@/services/notification-display';
+import { hasDesktopNotifyBridge, notifyViaDesktopBridge } from '@/lib/desktop-notify-bridge';
 
 type FilterTab = 'all' | 'story' | 'system';
 
@@ -54,7 +55,9 @@ export interface EventNotification {
 
 // export — story #2956 QA changes(카디르+codex, 2026-08-23) 회귀가드(notification-bell.test.tsx)가
 // 전체 컴포넌트 마운트 없이 딥링크 판정만 직접 검증.
-export function getEntityHref(notification: EventNotification): string | null {
+export function getEntityHref(
+  notification: Pick<EventNotification, 'source_entity_type' | 'source_entity_id' | 'payload'>,
+): string | null {
   const { source_entity_type, source_entity_id } = notification;
   if (!source_entity_id) return null;
   switch (source_entity_type) {
@@ -404,9 +407,23 @@ export function NotificationBell() {
       };
       return [notification, ...prev];
     });
+    // story #3074 — 데스크톱 셸(bridge-init.js가 top-frame+정확 origin에서만 window.__sprintableBridge를
+    // 노출)이 있으면 그 경로«만» 쓴다 — 중복/포커스 억제는 네이티브 단독 판정이라 document.hidden
+    // 조건 없이 항상 부른다. 브리지가 없을 때(일반 브라우저)만 기존 웹 Notification 경로(회귀 0).
+    const summary = incoming.payload?.summary ?? getEventTypeCopy(t, incoming.event_type);
+    if (hasDesktopNotifyBridge()) {
+      const body = incoming.payload?.sender_name ? `${incoming.payload.sender_name} · ${summary}` : summary;
+      void notifyViaDesktopBridge({
+        event_type: incoming.event_type,
+        body,
+        deeplink_path: getEntityHref(incoming) ?? '/',
+      });
+      return;
+    }
+
     // 탭 비활성 상태에서 브라우저 알림 표시
     if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-      void new Notification(incoming.payload?.summary ?? getEventTypeCopy(t, incoming.event_type), {
+      void new Notification(summary, {
         body: incoming.payload?.sender_name ?? undefined,
         icon: '/favicon.ico',
       });
