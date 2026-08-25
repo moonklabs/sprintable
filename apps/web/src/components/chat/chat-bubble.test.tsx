@@ -1771,6 +1771,20 @@ describe('ChatBubble — story #ec57c80c report성 메시지 밀도(kicker+리�
     expect(container.textContent).not.toContain('인라인 카드 elev-card 토큰 확認');
   });
 
+  // story #3052(2984-S4) — kicker는 MaterialChip(S1, 헤어라인+fill 0)을 쓴다. 옛
+  // bg-proof-blue-soft 채움은 폐지.
+  it('story #3052 — kicker가 MaterialChip(헤어라인)을 쓰고 bg-proof-blue-soft는 안 쓴다', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble message={{ ...baseMessage, content: REPORT_CONTENT, message_kind: 'result', references: [] }} isMine={false} />,
+      ));
+    });
+    const kicker = Array.from(container.querySelectorAll('span')).find((s) => s.textContent === '판정');
+    expect(kicker).toBeTruthy();
+    expect(kicker?.className).toContain('border-proof-line');
+    expect(kicker?.className).not.toContain('bg-proof-blue-soft');
+  });
+
   it('「전문 보기」 클릭 시 실제로 펼쳐져 하위 상세까지 전부 보인다(정보 소실 0) — 실 클릭 시뮬레이션', async () => {
     await act(async () => {
       root.render(wrap(
