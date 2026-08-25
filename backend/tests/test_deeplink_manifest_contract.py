@@ -98,7 +98,8 @@ def test_manifest_covers_all_30_dispatch_notification_event_types():
     story #2631: doc_approval_discussion_requested 신설로 27→28.
     story #2709: agent_decision_resolved 신설로 28→29.
     story #1715: merge_gate_resolved 신설로 29→30.
-    story #2789: agent_decision_withdrawn 신설로 30→31."""
+    story #2789: agent_decision_withdrawn 신설로 30→31.
+    story #2747: doc_draft_discussed_in_chat 신설로 31→32."""
     expected = {
         "sprint_closed", "task_completed", "story_assigned", "comment.created",
         "artifact.created", "artifact.exported", "artifact.updated", "artifact.canonicalized",
@@ -109,6 +110,7 @@ def test_manifest_covers_all_30_dispatch_notification_event_types():
         "conversation.unsupervised_chain_expired", "doc_approval_resolved",
         "conversation.circuit_breaker_opened", "doc_approval_discussion_requested",
         "agent_decision_resolved", "merge_gate_resolved", "agent_decision_withdrawn",
+        "doc_draft_discussed_in_chat",
     }
     actual = {e.app.type for e in DEEPLINK_MANIFEST.entries}
     missing = expected - actual
