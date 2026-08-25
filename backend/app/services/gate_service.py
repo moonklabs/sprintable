@@ -1425,20 +1425,17 @@ async def dispatch_gate_delegation(
 
     try:
         from app.services.approval_delivery import dispatch_approval_request_cards
-        _new_card_pushes = await dispatch_approval_request_cards(
+        # story #3044 — 새 지정자의 결재함 목록도 새로고침 없이 이 게이트를 즉시 봐야 한다.
+        # dispatch_approval_request_cards가 내부에서 notify_gate_created_to_recipients를
+        # 부르고, 그 함수가 after_commit 훅으로 push를 자체 예약한다(approval_delivery.py
+        # 문서 참고) — 이 함수 자신은 커밋 타이밍을 몰라도 된다. 아래 gate_delegated의
+        # 기존 commit(이 함수의 원래 유일한 커밋)에서 같이 발화된다(별도 커밋 불요).
+        await dispatch_approval_request_cards(
             session, org_id=gate.org_id, work_item_type=gate.work_item_type, work_item_id=gate.work_item_id,
             project_id=project_id, title=title, gate_id=gate.id,
             requester_id=requester_id, approver_ids=[new_approver_id],
             designated_approver_id=new_approver_id,
         )
-        # story #3044 — 새 지정자의 결재함 목록도 새로고침 없이 이 게이트를 즉시 봐야 한다
-        # (notify_gate_created_to_recipients, dispatch_approval_request_cards 내부에서 이미
-        # 계산·반환). 아래 gate_delegated 커밋과 같은 자리에서 함께 push(별도 커밋 불요 —
-        # 이 함수는 이미 caller가 gate.designated_approver_id 갱신을 먼저 commit했다는 전제).
-        await session.commit()
-        for _pid_str, _payload in _new_card_pushes:
-            from app.routers.events import _push_to_agent
-            _push_to_agent(_pid_str, _payload)
     except Exception:  # noqa: BLE001 — best-effort, 신규 카드 배달 실패가 위임 자체를 막지 않음.
         logger.warning("gate delegate 신규 카드 배달 실패 gate=%s new_approver=%s", gate.id, new_approver_id, exc_info=True)
 

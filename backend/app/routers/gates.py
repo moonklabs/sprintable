@@ -317,7 +317,7 @@ class DecisionRequestCreate(BaseModel):
 async def _notify_decision_request_card(
     session: AsyncSession, org_id: uuid.UUID, gate: Gate, *, requester_id: uuid.UUID, project_id: uuid.UUID,
     designated_approver_id: uuid.UUID | None = None,
-) -> list[tuple[str, dict]]:
+) -> None:
     """story #8bc11434(2891) — request_decision(agent_decision_request 게이트) 상신 시 결재자
     (org owner/admin) 챗에 원탭 결재 카드 자동 발행. app/services/doc.py의
     _notify_doc_approval_requested()와 동형(approver 해소·best-effort try/except 관용구 그대로
@@ -325,7 +325,12 @@ async def _notify_decision_request_card(
     org owner/admin임은 _non_doc_gate_approvable()(agent_decision은 project-agnostic이라
     project_id=None 분기, is_org_owner_or_admin)로 이미 확定돼 있어 별도 판단 아님. create_gate()
     의 generic 벨(gate.pending_approval)은 그대로 유지(notify=False 안 씀 — doc.py와 달리 이
-    gate_type엔 대체할 리치 벨이 없어 끄면 알림 자체가 0이 된다), 이 함수는 챗 카드만 추가."""
+    gate_type엔 대체할 리치 벨이 없어 끄면 알림 자체가 0이 된다), 이 함수는 챗 카드만 추가.
+
+    story #3044(2026-08-25) — dispatch_approval_request_cards가 이제 conversation.gate_created
+    (결재함 목록 실시간 반영)도 같은 자리에서 심는다. after_commit 훅으로 자체 예약하므로
+    (approval_delivery.py의 notify_gate_created_to_recipients 문서 참고) 이 함수·호출부
+    둘 다 반환값 스레딩·commit 타이밍을 신경 쓸 필요가 없다 — 회귀 0(원래도 -> None)."""
     try:
         from app.models.project import OrgMember
         approver_ids = list((await session.execute(
@@ -338,14 +343,14 @@ async def _notify_decision_request_card(
         )).scalars().all())
     except Exception:  # noqa: BLE001 — 조회 실패는 상신 비중단.
         logger.warning("decision-request 결재자 조회 실패 gate=%s", gate.id, exc_info=True)
-        return []
+        return
 
     if not approver_ids:
-        return []
+        return
 
     try:
         from app.services.approval_delivery import dispatch_approval_request_cards
-        return await dispatch_approval_request_cards(
+        await dispatch_approval_request_cards(
             session, org_id=org_id, work_item_type="agent_decision", work_item_id=gate.id,
             project_id=project_id, title=gate.neutral_facts.get("question", "결정 요청") if gate.neutral_facts else "결정 요청",
             gate_id=gate.id, requester_id=requester_id, approver_ids=approver_ids,
@@ -353,7 +358,6 @@ async def _notify_decision_request_card(
         )
     except Exception:  # noqa: BLE001 — 카드 배달 실패는 상신 비중단(Gate inbox 폴백 항상 존재).
         logger.warning("decision-request 결재자 카드(챗) 배달 실패 gate=%s", gate.id, exc_info=True)
-        return []
 
 
 @router.post("/decisions", response_model=GateResponse, status_code=201)
@@ -437,20 +441,12 @@ async def create_decision_request(
         designated_approver_id=body.approver_member_id,
     )
     await session.flush()
-    _created_pushes = await _notify_decision_request_card(
+    await _notify_decision_request_card(
         session, org_id, gate, requester_id=caller_id, project_id=project_id,
         designated_approver_id=body.approver_member_id,
     )
     await session.commit()
     await session.refresh(gate)
-    # story #3044 — gate가 커밋돼 GET으로 읽힐 수 있게 된 後에만 push(read-your-writes 레이스
-    # 방지, dispatch_gate_delegation과 동일 원칙). best-effort — 실패해도 상신 자체는 이미 끝남.
-    for _pid_str, _payload in _created_pushes:
-        try:
-            from app.routers.events import _push_to_agent
-            _push_to_agent(_pid_str, _payload)
-        except Exception:  # noqa: BLE001
-            logger.warning("decision-request gate_created 실시간 반영 배선 실패 gate=%s", gate.id, exc_info=True)
     resp = GateResponse.model_validate(gate)
     resp.project_id = project_id
     # story #1972 SSOT 재사용(제네릭 create_gate_endpoint가 이 필드를 아예 안 채우는 기존
