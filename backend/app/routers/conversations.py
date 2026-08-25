@@ -19,6 +19,7 @@ from app.core.pagination import assemble_page, decode_cursor
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db, get_read_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
+from app.models.doc import Doc
 from app.models.event import Event
 from app.models.gate import Gate
 from app.models.project import OrgMember, Project
@@ -2545,6 +2546,30 @@ async def send_message(
     msg_references = (
         await fetch_stored_references(db, org_id=org_id, source_type="chat_message", source_ids=[msg.id])
     ).get(msg.id, [])
+
+    # story #2747(2026-08-25, PO 판정) — 이 메시지가 draft 상태 doc을 mention했으면 작성자에게
+    # 1회성 넛지(결재 상신 여부를 묻는다). msg_references가 이미 이 메시지의 stored doc
+    # 참조를 갖고 있어(위) 재파싱 불요 — target_type=="doc"인 것만 실 Doc 행 조회.
+    _mentioned_doc_ids = {
+        uuid.UUID(r["target_id"]) for r in msg_references if r.get("target_type") == "doc"
+    }
+    if _mentioned_doc_ids and conv.project_id:
+        try:
+            from app.services.approval_delivery import maybe_nudge_draft_doc_shared_in_chat
+
+            _docs = (await db.execute(
+                select(Doc.id, Doc.title, Doc.status, Doc.created_by).where(
+                    Doc.id.in_(_mentioned_doc_ids), Doc.org_id == org_id, Doc.deleted_at.is_(None),
+                )
+            )).all()
+            for _doc_id, _doc_title, _doc_status, _doc_author_id in _docs:
+                await maybe_nudge_draft_doc_shared_in_chat(
+                    db, org_id=org_id, project_id=conv.project_id,
+                    doc_id=_doc_id, doc_title=_doc_title, doc_status=_doc_status,
+                    doc_author_id=_doc_author_id, sender_id=sender.id,
+                )
+        except Exception:  # noqa: BLE001 — 넛지 실패가 메시지 전송을 막지 않는다(best-effort).
+            logger.warning("draft doc 넛지 배선 실패(비차단) message=%s", msg.id, exc_info=True)
 
     # E-STORAGE-SSOT S2: 첨부를 asset registry로 동기화(SAVE-time·같은 트랜잭션·orphan 0).
     # S7: 반환 url→asset_id 로 JSONB asset_id 역기입(denorm·catch#4: asset_links=SSOT·JSONB=denorm).

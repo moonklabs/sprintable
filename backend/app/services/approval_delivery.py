@@ -564,3 +564,124 @@ async def notify_gate_delegated_to_old_approver(
         {"event_id": str(event.id), "event_type": "conversation.gate_delegated", **payload_base,
          "recipient_id": str(old_approver_id)},
     )]
+
+
+async def maybe_nudge_draft_doc_shared_in_chat(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+    doc_id: uuid.UUID,
+    doc_title: str,
+    doc_status: str,
+    doc_author_id: uuid.UUID | None,
+    sender_id: uuid.UUID,
+) -> None:
+    """story #2747(2026-08-25, PO 판정) — draft 상태 문서가 채팅에서 mention(=논의)되는
+    순간, 작성자에게 「결재 상신 여부」를 묻는 1회성 넛지. 제품이 그 갈림 자체를 안
+    묻던 갭(선생님 실증 2건, 2026-08-18)의 처방 — 후보 a(설계 스케치)의 「묻기」 절반만
+    이번 사이클 스코프(FE 뱃지·N회 카운트 nudge·에이전트 리마인더 격상은 각각 별도 스토리,
+    PO 확定 2026-08-25).
+
+    ⛔PO AC — ①**1회성이 실제로 1회**여야 한다: 같은 doc은 **발신자·대화 무관 작성자당
+    전역 1회**(서로 다른 두 사람이 각자 딴 시점·딴 DM에서 같은 draft doc을 mention해도
+    통산 1건만) ②수신자는 **doc 작성자만**(대화 참여자 전체 노이즈 금지).
+
+    카디르 QA(#3465, 2026-08-25) — 최초 구현은 (발신자,작성자) DM의 메시지 로그를
+    SSOT로 삼았는데, 키 축이 틀렸다(작성자당 전역이어야 할 게 DM당이 됨 — 서로 다른
+    발신자가 각자 새 DM에서 mention하면 각각 새 넛지가 나갔다, 실PG 2경로 재현:
+    동시 asyncio.gather·순차 2인 상이 대화) + SELECT→INSERT가 SAVEPOINT일 뿐이라
+    동시 호출 둘 다 SELECT를 통과할 수 있었다(격리 보장 아님). `DocChatNudgeDispatch`
+    uq(org_id, doc_id) UNIQUE 제약으로 "이 doc에 넛지를 보내겠다"를 **원자적 reservation
+    row INSERT**로 바꾼다 — 실패(IntegrityError=이미 있음)하면 DB가 직렬화해 준
+    사실 그대로 조용히 skip(app 레벨 락/텍스트비교 아닌 실 제약, PO 지시 그대로 새
+    테이블 도입).
+    """
+    if doc_status != "draft" or not doc_author_id or not project_id:
+        return
+    if doc_author_id == sender_id:
+        return  # 본인이 스스로 공유한 것 — 자기-알림 스킵(기존 관례 동형).
+
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models.doc_chat_nudge_dispatch import DocChatNudgeDispatch
+    from app.services.member_resolver import lookup_members_by_ids
+
+    author = (await lookup_members_by_ids({doc_author_id}, db)).get(doc_author_id)
+    if author is None:
+        return
+
+    # 카디르 QA 2R(#3465, 2026-08-25) — reservation INSERT와 실 배달(DM/메시지)을 **분리한
+    # 두 SAVEPOINT**로 짜면 반대편 구멍이 열린다: reservation이 먼저 release된 뒤 배달이
+    # 실패(예: 일시적 DB 오류)하면 그 예외는 흡수되고 reservation만 외부 트랜잭션에 남아
+    # 그 doc 넛지가 **영구 0건**(모든 미래 재시도가 "이미 있음"으로 오판)이 된다 — 중복
+    # (무해)보다 침묵 영구화(기능 무력화)가 더 나쁜 실패 모드였다(카디르 probe 실증).
+    # 반드시 **같은 SAVEPOINT 원자 단위**로 묶는다 — 배달이 실패하면 reservation도 함께
+    # 롤백돼 재시도 가능한 상태로 남는다. UNIQUE 위반(IntegrityError)은 이 단위 진입
+    # 직후(reservation INSERT 시점)에 발생하므로 중복 방어는 그대로 유지된다.
+    try:
+        async with db.begin_nested():
+            db.add(DocChatNudgeDispatch(
+                id=uuid.uuid4(), org_id=org_id, doc_id=doc_id, author_id=doc_author_id,
+            ))
+            await db.flush()  # UNIQUE(org_id, doc_id) 위반이면 여기서 IntegrityError.
+
+            conv = await _get_or_create_approval_dm(
+                db, org_id=org_id, project_id=project_id,
+                requester_id=sender_id, approver_id=doc_author_id,
+            )
+            msg = ConversationMessage(
+                conversation_id=conv.id,
+                sender_id=sender_id,
+                content=f"'{doc_title}' 문서가 채팅에서 논의됐는데 아직 draft — 결재 상신하시겠습니까?",
+                mentioned_ids=[doc_author_id],
+                msg_metadata={
+                    "activation": {
+                        "audience": [str(doc_author_id)], "kind": "request", "expects_response": False,
+                    },
+                    "nudge_target": {"doc_id": str(doc_id), "kind": "draft_doc_chat_share"},
+                },
+            )
+            db.add(msg)
+            await db.flush()
+            from app.routers.conversations import _dispatch_conversation_event
+            await _dispatch_conversation_event(db, conv, msg, org_id, author)
+            if author.type == "human":
+                from app.services.notification_dispatch import dispatch_notification
+                await dispatch_notification(
+                    db, org_id=org_id, event_type="doc_draft_discussed_in_chat",
+                    target_member_ids=[doc_author_id],
+                    title="draft 문서가 채팅에서 논의됐습니다",
+                    body=f"'{doc_title}' — 결재 상신 여부를 확認해 주세요.",
+                    reference_type="doc", reference_id=doc_id,
+                    source_project_id=project_id, via_outbox=True,
+                )
+    except IntegrityError as e:
+        # 카디르 QA 4R(#3465, 2026-08-25) — `except IntegrityError: return`이 uq 위반이라는
+        # 의도된 케이스보다 넓었다: 같은 SAVEPOINT 안 배달 단계에서 나는 다른 IntegrityError
+        # (예: FK 위반)까지 "이미 예약됐다"로 오판해 무로그로 삼켰다 — 진단성 갭. 실 제약
+        # 이름으로 분기: uq_doc_chat_nudge_dispatch_org_doc**만** 의도된 중복(조용히 skip),
+        # 그 외는 예상 밖 실패로 로그(SAVEPOINT가 이미 reservation까지 롤백했으므로 이 doc은
+        # "미예약" 상태로 남아 다음 mention 시 정상 재시도된다 — 영구 침묵 아님).
+        #
+        # 카디르 QA 5R — 4R의 `e.orig.constraint_name`이 asyncpg에선 항상 None이었다(4R 자체
+        # 테스트가 "경고가 존재하나"만 봐서 no-op을 통과시킨 회귀). SQLAlchemy가 asyncpg
+        # 예외를 어댑터 래퍼(AsyncAdapt_asyncpg_dbapi.Error)로 한 번 더 감싸고(`raise ... from
+        # error` — `raise` 문 자체가 원본을 `__cause__`에 심는다) 실제 `constraint_name`은
+        # 그 원본(asyncpg.exceptions.*) 쪽에만 있다 — `e.orig`가 아니라 `e.orig.__cause__`.
+        # 드라이버별 차이를 흡수하려 `e.orig`도 먼저 보되(직접 노출하는 드라이버 대비),
+        # 없으면 `__cause__`로 폴백한다.
+        _orig = getattr(e, "orig", None)
+        constraint = getattr(_orig, "constraint_name", None) or getattr(
+            getattr(_orig, "__cause__", None), "constraint_name", None,
+        )
+        if constraint == "uq_doc_chat_nudge_dispatch_org_doc":
+            return  # 이미 다른 호출이 성공적으로 예약+배달까지 마쳤다(같은 원자 단위였으므로).
+        logger.warning(
+            "draft doc 채팅공유 넛지 실패(비차단, 예상 밖 IntegrityError) doc=%s author=%s constraint=%s",
+            doc_id, doc_author_id, constraint, exc_info=True,
+        )
+    except Exception:  # noqa: BLE001 — 넛지 실패는 메시지 전송 자체를 막지 않는다(best-effort).
+        # SAVEPOINT가 reservation INSERT까지 함께 롤백했으므로 이 doc은 "미예약" 상태로
+        # 남는다 — 다음 mention 시 정상 재시도된다(영구 침묵 아님).
+        logger.warning("draft doc 채팅공유 넛지 실패(비차단) doc=%s author=%s", doc_id, doc_author_id, exc_info=True)

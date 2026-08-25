@@ -493,6 +493,19 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
         ),
         DeepLinkManifestEntry(
+            # story #2747: draft doc이 채팅에서 mention(논의)되면 작성자에게 1회성 넛지 —
+            # 결재 상신 여부를 「묻지 않던」 갭 처방(제품이 감지·유도). doc_detail 착지(gate
+            # 아직 없는 상태라 gate_detail 대상 아님) — 읽기전용 FYI 성격이라 grade b.
+            app=DeepLinkAppFields(
+                type="doc_draft_discussed_in_chat", target="doc_detail", parent_tab=ParentTab.all,
+            ),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=True,
+                required_payload=["reference_id"],
+            ),
+            channel=DeepLinkChannelFields(channel_grade=ChannelGrade.b),
+        ),
+        DeepLinkManifestEntry(
             # story #2631: 「보류(논의 필요)」 요청이 doc 결재 상신자에게 회신되는 벨 알림 —
             # doc_approval_resolved와 동형(gate 경유·reference_id=gate_id)이나 게이트가 아직
             # 결정 안 나고 pending인 채로 "3안 논의 요청"을 받은 것이라, 결재자가 그 카드로
