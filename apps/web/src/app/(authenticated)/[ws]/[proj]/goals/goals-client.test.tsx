@@ -182,7 +182,7 @@ describe('GoalsClient — 결과 원장 재조립(§2 이중 신호·§3 마스�
 
   // PR#3387 QA 처방 ①② — status==='done'만으론 상태 칩이 green이면 안 된다. outcome_status별
   // 명시 케이스로 고정(회귀 재발 시 바로 여기서 걸린다).
-  it('상태 칩 — done+miss는 초록이 아니라 중립(sunk)이다', async () => {
+  it('상태 칩 — done+miss는 초록이 아니라 중립(faint dot)이다', async () => {
     stubFetch([{ id: 'e1', title: 'M', status: 'done', total_stories: 1, done_stories: 1, outcome_status: 'miss' }]);
     await mount();
     expect(container.querySelector('.bg-proof-green-soft')).toBeNull();
@@ -193,7 +193,7 @@ describe('GoalsClient — 결과 원장 재조립(§2 이중 신호·§3 마스�
     expect(container.querySelector('.bg-proof-sunk')).toBeNull();
   });
 
-  it('상태 칩 — done+unmeasured는 초록이 아니라 중립(sunk)이다', async () => {
+  it('상태 칩 — done+unmeasured는 초록이 아니라 중립(faint dot)이다', async () => {
     stubFetch([{ id: 'e1', title: 'U', status: 'done', total_stories: 1, done_stories: 1, outcome_status: 'unmeasured' }]);
     await mount();
     expect(container.querySelector('.bg-proof-green-soft')).toBeNull();
@@ -204,7 +204,7 @@ describe('GoalsClient — 결과 원장 재조립(§2 이중 신호·§3 마스�
     expect(container.querySelector('.bg-proof-sunk')).toBeNull();
   });
 
-  it('상태 칩 — done+pending(아직 판정 없음)은 초록이 아니라 중립(sunk)이다', async () => {
+  it('상태 칩 — done+pending(아직 판정 없음)은 초록이 아니라 중립(faint dot)이다', async () => {
     stubFetch([{ id: 'e1', title: 'P', status: 'done', total_stories: 1, done_stories: 1, outcome_status: 'pending' }]);
     await mount();
     expect(container.querySelector('.bg-proof-green-soft')).toBeNull();
