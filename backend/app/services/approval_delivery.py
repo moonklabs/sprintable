@@ -268,21 +268,25 @@ async def notify_gate_created_to_recipients(
     된다(caller 협조 불요 — 새 호출부가 미래에 생겨도 이 함수를 거치기만 하면 구조적으로
     커버된다, "우회 없이" 8개 caller 전부를 실제로 돌파).
 
-    ⚠️id 공간 매핑 경계(페드루 PO 요청, 2026-08-25) — `Event.recipient_id`는 `team_members.id`
-    FK(NOT NULL)다. `team_members`는 0088에서 프로젝션 **뷰**로 태어났다는 게 기존 주석의
-    설명이지만, 이 그라운딩 도중 실 PG로 재확認하니(psql 메타명령으로 스키마 직접 조회)
-    **오늘은 자체 PK+FK를 가진 진짜 base table**이다(그 사이 어느 마이그레이션이 뷰→테이블로
-    전환 — 옛 주석들이 스테일해진 것 자체가 부수 발견, 이 스토리 스코프 밖이라 정정만 하고
-    남김·별도 스토리 등재).
+    ⚠️id 공간 매핑 경계(페드루 PO 요청, 2026-08-25 — 카디르 QA #3467 REQUEST_CHANGES①로 정정) —
+    이 자리의 이전 판(커밋 e3bdb5e33)은 "team_members는 오늘 진짜 base table"이라 적었으나
+    **오判이었다**(로컬 psql 확認이 이 뷰가 도입되기 전 상태의 스테일한 스크래치 DB를 겨눔 —
+    카디르 CI 재현·본 세션에서 완전히 새로 만든 스크래치 DB 재확認으로 둘 다 반증). 정본:
+    `team_members`는 0088에서 도입된 프로젝션 **뷰**(members ⋈ project_access, UNION ALL
+    agent 분기)가 지금도 그대로다(`backend/alembic/baseline/schema.sql:2036`). `Event.
+    recipient_id`도 재확認 결과 DB 레벨 FK 제약 자체가 없다(NOT NULL만) — 그럼에도 아래 필터는
+    "team_members 뷰에 잡히지 않는 recipient는 메시징 신원이 없어 실제로 못 찾는다"는 응용
+    계층 규율이라 필터 자체는 유효(제거하지 않는다).
 
     핵심은 여전히 유효 — `org_members`(role 권위 축, `get_project_role`의 "org owner/admin
-    floor"가 사는 곳)와 `team_members`(메시징 신원 축, 이 테이블에 명시 행이 있어야만 존재)
-    는 **독립된 두 테이블·두 id 공간**이다(OrgMember.id는 uuid4 자체 발급 — team_members.id와
-    무관). "org admin이지만 이 프로젝트엔 team_members 행이 없는" recipient_id는 authz(rule B
-    floor)로는 승인 자격이 있어도 이 FK를 항상 위반한다(실사고 재현: test_2891 fixture가
-    이 정확한 케이스 — org admin을 OrgMember만으로 seed, TeamMember 없음). 여기서 그 서브셋을
-    사전에 걸러 스킵한다(로그만, 예외 전파 안 함) — dispatch_approval_request_cards의 챗
-    카드 배달(다른 신원 경로, Conversation 참가자 자격)은 이 필터와 무관하게 그대로 간다."""
+    floor"가 사는 곳)와 `team_members`(메시징 신원 축, 이 뷰에 투영될 members+project_access
+    명시 행이 있어야만 존재)는 **독립된 두 id 공간**이다(OrgMember.id는 uuid4 자체 발급 —
+    members.id와 무관). "org admin이지만 이 프로젝트엔 team_members 행이 없는" recipient_id는
+    authz(rule B floor)로는 승인 자격이 있어도 team_members 뷰엔 안 잡힌다(실사고 재현:
+    test_2891 fixture가 이 정확한 케이스 — org admin을 OrgMember만으로 seed, members/
+    project_access 없음). 여기서 그 서브셋을 사전에 걸러 스킵한다(로그만, 예외 전파 안 함) —
+    dispatch_approval_request_cards의 챗 카드 배달(다른 신원 경로, Conversation 참가자 자격)은
+    이 필터와 무관하게 그대로 간다."""
     if not recipient_ids:
         return
 
@@ -344,6 +348,17 @@ def _schedule_gate_created_push_after_commit(db: AsyncSession, pid_str: str, pay
 
 
 def _fire_pending_gate_created_pushes(sync_session: Session) -> None:
+    """⚠️SAVEPOINT 유령 push(카디르 QA #3467 REQUEST_CHANGES②, 2026-08-25) — `after_commit`은
+    SQLAlchemy가 outer 최종 commit뿐 아니라 `begin_nested()` SAVEPOINT를
+    release(`nested.commit()`)할 때도 발화한다(실측: 콜백 안에서
+    `in_nested_transaction()`이 그 순간엔 True). outer 트랜잭션이 이후 rollback돼도 이미
+    push가 나가버려 "실은 durable하지 않은 이벤트"가 라이브로 새는 결함이었다.
+    `in_nested_transaction()`이 True인 발화(=SAVEPOINT release)는 pending을 비우지 않고
+    그대로 둔다 — 언젠가 진짜 outer commit의 after_commit이 다시 발화할 때(그때는
+    in_nested_transaction()=False) 최종 발사된다. outer가 끝내 rollback되면
+    after_rollback 훅(_clear_pending_gate_created_pushes_on_rollback)이 비운다."""
+    if sync_session.in_nested_transaction():
+        return
     pending = sync_session.info.pop(_GATE_CREATED_PENDING_KEY, None) or []
     if not pending:
         return

@@ -66,18 +66,41 @@ async def _seed_org_project(session):
 
 
 async def _seed_rostered_member(session, *, org_id, project_id):
-    """team_members는 (0088 project-view 시절과 달리) 오늘은 실 base table이다(psql \\d 실측 —
-    이 그라운딩 도중 발견: id PK+FK 실물, view 아님) — story #2604 _seed_human과 동형으로
-    직접 INSERT한다. Event.recipient_id FK를 통과하는 유일한 형태."""
-    from app.models.team import TeamMember
+    """⚠️team_members 그라운딩 정정(카디르 QA #3467 REQUEST_CHANGES①, 2026-08-25) — 이전 판
+    (커밋 e3bdb5e33)은 이 자리에서 "오늘은 실 base table"이라 적었으나 **오判이었다**. schema.sql
+    (backend/alembic/baseline/schema.sql:2036)이 명시하는 정본은 `CREATE VIEW public.team_members
+    AS ... FROM members m JOIN project_access pa ON pa.member_id = m.id ...` — UNION ALL을 포함한
+    비-자동-갱신 뷰(INSTEAD OF 트리거 없음)라 직접 INSERT가 실패한다("cannot insert into view",
+    카디르 CI 재현·본 세션에서 완전히 새로 만든 스크래치 DB로도 재확認). 이전 psql 확認은 이
+    뷰 도입(migration 0088, 훨씬 오래된 변경) 이전 상태의 스테일한 로컬 DB를 겨눴던 오류로
+    정정한다. 뷰의 SELECT 소스인 members+project_access에 직접 seed한다(story #2604의
+    _seed_human이 취했던 TeamMember() 직접 insert 경로도 동일하게 무효 — 이 스토리 스코프
+    밖이라 그쪽은 별도로 남긴다)."""
+    from app.models.member import Member
+    from app.models.project_access import ProjectAccess
+    from app.models.user import User
 
-    member = TeamMember(
-        id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="human",
-        name="Rostered", is_active=True,
-    )
-    session.add(member)
+    user_id = uuid.uuid4()
+    session.add(User(id=user_id, email=f"rostered-{user_id.hex[:8]}@test.com", hashed_password="x"))
     await session.commit()
-    return member.id
+    member_id = uuid.uuid4()
+    session.add(Member(id=member_id, org_id=org_id, type="human", user_id=user_id, name="Rostered"))
+    await session.commit()
+    session.add(ProjectAccess(id=uuid.uuid4(), project_id=project_id, member_id=member_id, role="member"))
+    await session.commit()
+    return member_id
+
+
+async def _seed_rostered_agent(session, *, org_id, project_id, name):
+    """에이전트판 — team_members 뷰의 두 번째 UNION ALL 분기(members ⋈ agent_project_profiles)."""
+    from app.models.member import AgentProjectProfile, Member
+
+    member_id = uuid.uuid4()
+    session.add(Member(id=member_id, org_id=org_id, type="agent", name=name))
+    await session.commit()
+    session.add(AgentProjectProfile(id=uuid.uuid4(), member_id=member_id, project_id=project_id))
+    await session.commit()
+    return member_id
 
 
 async def _seed_org_admin_no_roster(session, *, org_id):
@@ -112,8 +135,9 @@ async def test_notify_gate_created_inserts_durable_event_for_rostered_recipient(
             await s.commit()
             assert result is None, "caller 반환값 스레딩 없음(after_commit 훅으로 자체 예약)"
 
-            from app.models.event import Event
             from sqlalchemy import select
+
+            from app.models.event import Event
             rows = (await s.execute(
                 select(Event).where(Event.source_entity_id == gate_id, Event.event_type == "conversation.gate_created")
             )).scalars().all()
@@ -145,8 +169,9 @@ async def test_notify_gate_created_skips_org_admin_without_project_roster():
             )
             await s.commit()
 
-            from app.models.event import Event
             from sqlalchemy import select
+
+            from app.models.event import Event
             rows = (await s.execute(
                 select(Event.recipient_id).where(Event.source_entity_id == gate_id, Event.event_type == "conversation.gate_created")
             )).scalars().all()
@@ -174,8 +199,8 @@ async def test_push_fires_only_after_commit_not_before(monkeypatch):
     """event_seq.py의 test_2381 검증 패턴과 동형 — commit 前엔 push가 절대 안 나가고(다른
     커넥션에서 아직 안 보이는 row를 GET하러 보내는 레이스 방지), commit 성공 直後에 정확히
     한 번 나간다."""
-    from app.services.approval_delivery import notify_gate_created_to_recipients
     import app.routers.events as events_mod
+    from app.services.approval_delivery import notify_gate_created_to_recipients
 
     engine, Session = await _session_factory()
     try:
@@ -212,11 +237,13 @@ async def test_evaluate_merge_gate_creates_gate_created_event_too():
     대신 실제 진입점을 그대로 태워, after_commit 훅이 merge_verdict_gate.py를 단 1줄도 안
     건드리고도 실제로 커버함을 증명한다(caller 협조 불요 설계의 핵심 주장)."""
     from sqlalchemy import select
+
     from app.models.event import Event
     from app.models.hitl_config import OrgGatePolicy
+    from app.models.member import AgentProjectProfile, Member
     from app.models.participation import Participation, ParticipationRole
     from app.models.pm import Story
-    from app.models.team import TeamMember
+    from app.models.project_access import ProjectAccess
     from app.services.merge_verdict_gate import evaluate_merge_gate
 
     engine, Session = await _session_factory()
@@ -225,23 +252,29 @@ async def test_evaluate_merge_gate_creates_gate_created_event_too():
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s)
 
-            # 구현자(agent) — 상신자.
+            # 구현자(agent) — 상신자. team_members 뷰 UNION ALL의 agent 분기(members ⋈
+            # agent_project_profiles) — 직접 TeamMember() insert는 뷰라 실패한다(카디르 QA①).
             implementer_id = uuid.uuid4()
-            s.add(TeamMember(
-                id=implementer_id, org_id=org_id, project_id=project_id, type="agent",
-                name="디디", is_active=True,
-            ))
+            s.add(Member(id=implementer_id, org_id=org_id, type="agent", name="디디"))
+            await s.commit()
+            s.add(AgentProjectProfile(id=uuid.uuid4(), member_id=implementer_id, project_id=project_id))
             await s.commit()
 
-            # 승인자 — OrgMember(role 판정용)+같은 id의 TeamMember(메시징 신원용), test_2118의
-            # _seed_org_member와 동형(둘 다 필요한 이유는 이 파일 상단 id 공간 경계 설명 참고).
+            # 승인자 — OrgMember(role 판정용)+같은 id의 members/project_access 행(메시징 신원용),
+            # test_2118의 _seed_org_member와 동형(둘 다 필요한 이유는 이 파일 상단 id 공간 경계
+            # 설명 참고). 실무에선 org_members.id≠members.id(독립 uuid4)이지만, 이 테스트는
+            # evaluate_merge_gate가 실제로 무슨 id를 recipient로 넘기는지만 실증하면 되므로 두
+            # 공간이 같은 값으로 겹치는 케이스(현재 dev 실물 데이터의 흔한 형태)를 그대로 쓴다.
             from app.models.project import OrgMember
+            from app.models.user import User
+            approver_user_id = uuid.uuid4()
+            s.add(User(id=approver_user_id, email=f"approver-{approver_user_id.hex[:8]}@test.com", hashed_password="x"))
+            await s.commit()
             approver_id = uuid.uuid4()
-            s.add(OrgMember(id=approver_id, org_id=org_id, user_id=uuid.uuid4(), role="owner"))
-            s.add(TeamMember(
-                id=approver_id, org_id=org_id, project_id=project_id, type="human",
-                name="approver", is_active=True,
-            ))
+            s.add(OrgMember(id=approver_id, org_id=org_id, user_id=approver_user_id, role="owner"))
+            s.add(Member(id=approver_id, org_id=org_id, type="human", user_id=approver_user_id, name="approver"))
+            await s.commit()
+            s.add(ProjectAccess(id=uuid.uuid4(), project_id=project_id, member_id=approver_id, role="owner"))
             s.add_all([
                 ParticipationRole(id=role_id, org_id=org_id, key="implementation", label="구현", is_default=True),
                 Story(id=story_id, org_id=org_id, project_id=project_id, title="#3044 검증", status="in-review", story_points=3),
@@ -270,8 +303,8 @@ async def test_evaluate_merge_gate_creates_gate_created_event_too():
 
 
 async def test_push_never_fires_on_rollback(monkeypatch):
-    from app.services.approval_delivery import notify_gate_created_to_recipients
     import app.routers.events as events_mod
+    from app.services.approval_delivery import notify_gate_created_to_recipients
 
     engine, Session = await _session_factory()
     try:
@@ -289,5 +322,43 @@ async def test_push_never_fires_on_rollback(monkeypatch):
             await s.rollback()
 
         assert pushed == [], "rollback된 트랜잭션에서 push가 발화되면 안 된다"
+    finally:
+        await engine.dispose()
+
+
+async def test_savepoint_release_does_not_fire_push_but_outer_commit_does(monkeypatch):
+    """카디르 QA #3467 REQUEST_CHANGES② 최소재현 그대로 고정(2026-08-25) — SQLAlchemy
+    `after_commit`은 outer 최종 commit뿐 아니라 `begin_nested()` SAVEPOINT release(`nested
+    .commit()`)에도 발화한다(본 세션 repro로 실측: 콜백 안에서 `in_nested_transaction()`이
+    그 순간 True). outer가 그 뒤 rollback돼도 이미 push가 나가버리는 게 결함 — 이 테스트는
+    ①SAVEPOINT release=0회 ②outer commit=1회 ③outer rollback=0회를 정확히 고정한다."""
+    import app.routers.events as events_mod
+    from app.services.approval_delivery import _schedule_gate_created_push_after_commit
+
+    engine, Session = await _session_factory()
+    try:
+        pushed: list[tuple[str, dict]] = []
+        monkeypatch.setattr(events_mod, "_push_to_agent", lambda pid, payload: pushed.append((pid, payload)))
+
+        # ① SAVEPOINT release — push가 아직 나가면 안 된다(outer가 살아있다).
+        async with Session() as s:
+            nested = await s.begin_nested()
+            _schedule_gate_created_push_after_commit(s, "recipient-1", {"k": "v"})
+            await nested.commit()
+            assert pushed == [], "SAVEPOINT release에서 push가 나가면 안 된다(outer 미확定)"
+
+            # ② outer 진짜 commit — 이제서야 나간다.
+            await s.commit()
+            assert pushed == [("recipient-1", {"k": "v"})], "outer commit 直後 정확히 1회 발화해야 한다"
+
+        # ③ outer rollback 케이스 — 별도 세션으로 독립 재현.
+        pushed.clear()
+        async with Session() as s:
+            nested = await s.begin_nested()
+            _schedule_gate_created_push_after_commit(s, "recipient-2", {"k": "v2"})
+            await nested.commit()
+            assert pushed == [], "SAVEPOINT release에서 push가 나가면 안 된다"
+            await s.rollback()
+        assert pushed == [], "outer rollback 후에도 SAVEPOINT release 시점 push가 새면 안 된다"
     finally:
         await engine.dispose()
