@@ -73,7 +73,9 @@ function RowSkeleton() {
   return <div className="h-[52px] animate-pulse border-b border-proof-line-soft bg-proof-sunk/60 last:border-b-0" />;
 }
 
-function AttentionRow({ item, highlighted, onNavigate }: {
+// story #3052(2984-S4) — 헤어라인 액센트(회귀가드) 단위 테스트를 위해 export(전체 폴링
+// 생명주기를 시뮬레이션하지 않고 highlighted prop만 직접 검증).
+export function AttentionRow({ item, highlighted, onNavigate }: {
   item: AttentionQueueItem; highlighted: boolean; onNavigate: (href: string) => void;
 }) {
   // story #2923 AQ1(PO 실측, 2026-08-22) — inbox 병합 항목 중 origin_chain이 story/memo 어느
@@ -92,10 +94,12 @@ function AttentionRow({ item, highlighted, onNavigate }: {
         if (e.key === 'Enter') onNavigate(item.href!);
       } : undefined}
       className={cn(
-        'border-b border-proof-line-soft last:border-b-0',
+        'border-b border-b-proof-line-soft border-l-2 border-l-transparent last:border-b-0',
         navigable && 'cursor-pointer hover:bg-proof-sunk',
         'motion-safe:transition-colors motion-safe:duration-700',
-        highlighted && 'motion-safe:bg-proof-citron/15',
+        // story #3052(2984-S4) — "최근 변경" 신호는 fill(citron/15 배경 wash) 대신 헤어라인
+        // 액센트(좌측 테두리)로. 색 신호 자체는 KEEP(citron 유지) — fill만 제거.
+        highlighted && 'motion-safe:border-l-proof-citron',
       )}
     >
       <ProofCapsule

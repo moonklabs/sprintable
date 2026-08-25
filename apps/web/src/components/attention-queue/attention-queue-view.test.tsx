@@ -15,6 +15,8 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import { AttentionRow } from './attention-queue-view';
+import type { AttentionQueueItem } from './derive-attention-queue';
 
 const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
 
@@ -247,5 +249,34 @@ describe('AttentionQueueView — 로드맵 P3 L6(섹션 제목 editorial weight)
     expect(h2?.className).toContain('font-editorial-heading');
     expect(h2?.className).toContain('text-[19px]');
     expect(h2?.className).not.toContain('font-extrabold');
+  });
+});
+
+// story #3052(2984-S4) — "최근 변경" highlighted 행은 fill(bg-proof-citron/15 wash) 대신
+// 헤어라인 좌측 액센트(border-l-proof-citron)를 쓴다. 색 신호(citron) 자체는 KEEP.
+describe('AttentionRow — story #3052 헤어라인 액센트(citron fill 폐지)', () => {
+  const item: AttentionQueueItem = {
+    id: 'a1', kind: 'decision_needed', bucket: 'GATE', kindLabel: '게이트',
+    proofState: 'amber', claim: '테스트 항목', actor: null,
+    actionLabel: '검토', actionTone: 'primary', href: '/board?story=s1',
+    enteredStateAtMs: null, sortKey: 0,
+  };
+
+  it('highlighted=true면 border-l-proof-citron을 쓰고 bg-proof-citron 채움은 안 쓴다', async () => {
+    await act(async () => {
+      root.render(wrap(<AttentionRow item={item} highlighted onNavigate={() => {}} />));
+    });
+    const row = container.querySelector('[role="button"]');
+    expect(row?.className).toContain('border-l-proof-citron');
+    expect(row?.className).not.toContain('bg-proof-citron');
+  });
+
+  it('highlighted=false면 border-l-transparent만 쓴다', async () => {
+    await act(async () => {
+      root.render(wrap(<AttentionRow item={item} highlighted={false} onNavigate={() => {}} />));
+    });
+    const row = container.querySelector('[role="button"]');
+    expect(row?.className).toContain('border-l-transparent');
+    expect(row?.className).not.toContain('border-l-proof-citron');
   });
 });

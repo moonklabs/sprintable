@@ -7,6 +7,7 @@ import type { EntityStatusFetchState } from './entity-status-labels';
 import type { ReadingPanelTarget } from './reading-panel';
 import type { EventDefinitionSummary } from '@/lib/block-template';
 import { ChatMarkdown } from './chat-bubble';
+import { MaterialChip } from '@/components/ui/material-chip';
 import { computeReportDensity } from '@/lib/chat-report-density';
 
 interface ReportMessageSummaryProps {
@@ -55,9 +56,9 @@ export function ReportMessageSummary({
   return (
     <div>
       {density.kicker ? (
-        <span className="mb-1.5 inline-flex items-center gap-1 rounded-md bg-proof-blue-soft px-2 py-0.5 text-[10px] font-bold text-proof-blue">
-          {density.kicker}
-        </span>
+        // story #3052(2984-S4) — MaterialChip(S1, 헤어라인+fill 0) 채택, bg-proof-blue-soft
+        // 채움 폐지(§2 doc ⓒ kicker 판정 — 순수 SHIFT, 신호 아님).
+        <MaterialChip className="mb-1.5">{density.kicker}</MaterialChip>
       ) : null}
       <p className={`mb-1.5 text-sm font-medium leading-relaxed [overflow-wrap:anywhere] ${density.kicker ? '' : 'mt-0'}`}>
         {density.lead}
