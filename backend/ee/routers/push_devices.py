@@ -58,10 +58,11 @@ async def register_push_device(
     caller_member_id: uuid.UUID = Depends(_get_caller_member_id),
     _ee: None = Depends(_require_ee),
 ) -> PushDeviceResponse:
-    """디바이스 등록/재등록(upsert) — expo_push_token UNIQUE 멱등. member_id 는 caller 로 강제."""
+    """디바이스 등록/재등록(upsert) — 플랫폼별 토큰 UNIQUE 멱등. member_id 는 caller 로 강제."""
     device = await repo.upsert(
         member_id=caller_member_id,
         expo_push_token=body.expo_push_token,
+        apns_device_token=body.apns_device_token,
         platform=body.platform,
         device_id=body.device_id,
         app_version=body.app_version,

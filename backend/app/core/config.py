@@ -391,6 +391,20 @@ class Settings(BaseSettings):
     # 그냥 비활성) — 이 필드로 옮겨도 그 fail-closed 시맨틱은 그대로.
     gotenberg_service_url: str = ""
 
+    # story #3064(E-MOBILE·macOS): 네이티브 APNs 발송기 설정 — 전부 미설정이면 발송기가
+    # fail-closed(로그만·크래시 없음, gotenberg_service_url과 동일 시맨틱). apns_auth_key_p8은
+    # .p8 파일 내용 자체(PEM, 경로 아님 — Cloud Run은 파일시스템 대신 secret env 주입이 표준).
+    apns_auth_key_p8: str = ""
+    apns_key_id: str = ""
+    apns_team_id: str = ""
+    apns_bundle_id: str = "com.moonklabs.sprintable.desktop"
+    # 민군 entitlements(aps-environment) 확認값 기준 기본 production — sandbox 필요해지면 여기만 뒤집는다.
+    apns_use_sandbox: bool = False
+
+    @property
+    def apns_configured(self) -> bool:
+        return bool(self.apns_auth_key_p8 and self.apns_key_id and self.apns_team_id)
+
     @property
     def is_ee_enabled(self) -> bool:
         return self.license_consent.lower() == "agreed"
