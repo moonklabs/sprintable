@@ -420,7 +420,7 @@ export default function EpicDetailPage() {
             story #2974(PR-D0) delta — 아래 두 숫자는 doc상 Display 대상이 아니라(유나 확定)
             font-display는 안 붙이고 font-editorial-heading(무게 유틸, 820)만 유지한다. */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="proof-cut border border-border bg-card px-4 py-3.5">
+          <div className="proof-surface proof-surface-lift border border-border bg-card px-4 py-3.5">
             <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">{t('taskCapsuleTitle')}</div>
             <div className="mt-1.5 flex items-baseline gap-2">
               <span className="font-editorial-heading text-[26px] tracking-[-0.02em] text-foreground">{done}/{stories.length}</span>
@@ -433,9 +433,11 @@ export default function EpicDetailPage() {
           </div>
           {/* story #3053(2984-S5) — 헤어라인+elev(S1 재질 언어) 채택, bg-proof-blue-soft 채움
               폐지. 강조 색은 이 카드의 항상-고정 blue(상태별 분기 없음, 기존 동작 그대로)를
-              proof-line 헤어라인+elev-card 깊이로 이전 — 텍스트 강조는 유지(신호가 아니라
-              위계라 색 텍스트는 남긴다, MaterialChip류의 "장식 fill"과는 다른 자리). */}
-          <div className="proof-cut border border-proof-line bg-proof-panel px-4 py-3.5 shadow-[var(--elev-card)]">
+              proof-line 헤어라인+깊이로 이전 — 텍스트 강조는 유지(신호가 아니라 위계라 색
+              텍스트는 남긴다, MaterialChip류의 "장식 fill"과는 다른 자리).
+              story #7d7634ee(P0) — elev-card는 proof-surface-lift로 흡수(두 elevation
+              시스템 이중 적용 방지, box-shadow 충돌 제거). */}
+          <div className="proof-surface proof-surface-lift border border-proof-line bg-proof-panel px-4 py-3.5">
             <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-proof-blue">{t('outcomeCapsuleTitle')}</div>
             <div className="mt-1.5 font-editorial-heading text-[22px] tracking-[-0.02em] text-proof-blue">
               {epic.outcome_status === 'hit' ? t('outcomeCapsuleHit')

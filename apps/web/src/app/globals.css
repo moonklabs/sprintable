@@ -306,8 +306,9 @@
   --chart-5: oklch(0.274 0.006 286.033);
   /* story #2969 §1.1(PR-T, 유나 확定 2026-08-23) — 0.625rem(10px, shadcn 기본값)→0.25rem(4px).
      전 표면 균일 soft round(default 결)를 크리스프로. 파생 스케일(sm~4xl)은 이 값의 calc()라
-     자동 추종 — 별도 편집 불요. 시그니처면(히어로 카드·활성 상태 등)은 이 반경 대신 `.proof-cut`
-     컷코너를 쓴다(적용 표면 목록=doc proofline-system-layer-2969 §1.4가 정본, 이 PR은 토큰만). */
+     자동 추종 — 별도 편집 불요. 시그니처면(히어로 카드·활성 상태 등)은 이 반경 대신
+     `.proof-surface`(story #7d7634ee, 옛 `.proof-cut` 컷코너 폐지 후 계승)를 쓴다(적용
+     표면 목록=doc proofline-system-layer-2969 §1.4가 원 정본, 재질은 doc ea94dac4가 갱신). */
   --radius: 0.25rem;
   /* story #2917: sidebar도 --card/--primary/--muted/--border/--ring과 같은 값을 거울처럼
      따라간다(기존 #2318 불변식 — "안 맞추면 사이드바만 옛 파랑" 그대로 유지, 소스만 proof-*로). */
@@ -481,28 +482,57 @@
      더하는 2차 레이어 — elev-card/overlay(뜬 표면용)와 별개, 절대 함께 안 쓴다. */
   --elev-inset: inset 0 1px 0 rgba(255, 255, 255, .6), inset 0 -1px 0 rgba(20, 21, 15, .05);
 
-  /* story #2955 §5(doc docs-index-reader-redesign-handoff) — 컷코너 3단 토큰 정식화.
-     기존 산발 clip-path 4곳(proof-capsule.tsx CutCornerShell·attention-queue-view.tsx·
-     artifact-gallery-view.tsx·workcell.tsx)이 정본 없이 각자 인라인으로 같은 지오메트리를
-     반복하다 artifact-gallery-view.tsx만 22px로 드리프트했다(정본 부재가 벌린 값 그 자체가
-     정식화 근거). 라이트/다크 무관(색이 아니라 지오메트리)이라 이 블록 한 곳에서만 정의. */
-  --proof-cut: 24px;
-  --proof-cut-sm: 16px;
-  --proof-cut-xs: 8px;
+  /* story #7d7634ee(P0·선생님 직접 지시, 감確認 doc ea94dac4 §③~⑤) — 컷코너(clip-path 사선)
+     전면 폐지. "빼기"(헤어라인+옅은 그림자)가 질감으로 안 읽힌다는 질책 → "더하기"(그레인·
+     방향 깊이·엠보스)로 정정. 소프트 라운드 13px가 사선 클립을 대체한다. */
+  --proof-radius-soft: 13px;
+
+  /* §⑤ 정본 — SVG fractalNoise baseFrequency 0.62. RGB는 0으로 죽이고 alpha만 노이즈값을
+     실어 순수 그레인 텍스처로 쓴다(색조는 오버레이하는 쪽의 opacity/mix-blend-mode가 결정 —
+     라이트/다크가 같은 SVG를 공유해도 되는 이유). 강도(라이트 22%/다크 16%)와 블렌드모드
+     (라이트 multiply/다크 overlay)는 별도 변수로 분리해 테마별로만 오버라이드한다. */
+  --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.62' numOctaves='2' stitchTiles='stitch' result='noise'/%3E%3CfeColorMatrix in='noise' type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --paper-grain-opacity: .22;
+  --paper-grain-blend: multiply;
+
+  /* §⑤ 정본값 그대로 — "뜬" 표면(카드·캡슐)의 방향성 다층 그림자 + 상단 하이라이트. */
+  --elev-lift: 0 10px 24px -8px rgba(20, 21, 15, .20), 0 2px 6px -2px rgba(20, 21, 15, .14), inset 0 1px 0 rgba(255, 255, 255, .85);
+
+  /* §⑤ 정본값 그대로 — "눌린" 표면(씰·칩)의 인셋 프레스. */
+  --emboss-press: inset 0 1px 2px rgba(20, 21, 15, .14), inset 0 -1px 0 rgba(255, 255, 255, .7);
+
+  /* §⑤ — 프로스티드 글래스, 오버레이/모달 전용(이 PR의 A/B/C급 소비처엔 아직 없음 — 토큰만
+     선신설, 실 소비는 모달/오버레이 표면 착수 시). */
+  --glass-overlay-filter: blur(14px) saturate(1.3);
+  --glass-overlay-bg: rgba(252, 251, 247, .62);
 }
 
-/* story #2955 §5 — `.proof-cut`가 지오메트리 계산 유일 정본. 크기 모디파이어
-   (`.proof-cut-sm`/`.proof-cut-xs`)는 `--proof-cut` 값만 바꿔치기하고 계산식은 재정의하지
-   않는다(합성 — `className="proof-cut proof-cut-sm"`). 인스턴스별 임의값이 필요하면(예:
-   CutCornerShell의 동적 `cut` prop) 인라인 style로 `--proof-cut`만 오버라이드한다. */
-.proof-cut {
-  clip-path: polygon(0 0, calc(100% - var(--proof-cut)) 0, 100% var(--proof-cut), 100% 100%, 0 100%);
+/* story #7d7634ee — `.proof-surface`가 재질 지오메트리 유일 정본(구 `.proof-cut` 계승,
+   doc ea94dac4 유나 확定: "컷 소멸이라 재질명으로 리네임"). 그레인은 `::before`로 얹는다 —
+   `border-radius: inherit`가 배경을 부모 라운드 안에 자동으로 가둬 별도 overflow-hidden
+   불요(배경은 기본 border-box에서 클립된다). 깊이 방향은 합성 모디파이어로 분리:
+   `proof-surface-lift`(뜬 표면)·`proof-surface-press`(눌린 표면) 중 하나를 반드시 곁들인다
+   (`className="proof-surface proof-surface-lift"` 관례, 구 `-sm`/`-xs` 합성과 동형). */
+.proof-surface {
+  position: relative;
+  border-radius: var(--proof-radius-soft);
 }
-.proof-cut-sm {
-  --proof-cut: var(--proof-cut-sm);
+.proof-surface::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-image: var(--paper-grain);
+  background-repeat: repeat;
+  opacity: var(--paper-grain-opacity);
+  mix-blend-mode: var(--paper-grain-blend);
+  pointer-events: none;
 }
-.proof-cut-xs {
-  --proof-cut: var(--proof-cut-xs);
+.proof-surface-lift {
+  box-shadow: var(--elev-lift);
+}
+.proof-surface-press {
+  box-shadow: var(--emboss-press);
 }
 
 /* ─── Dark Mode (OKLCH zinc) ─── */
@@ -652,6 +682,16 @@
      패널(#17191C대)에 그대로 쓰면 과도하게 튀어(carbon-tint 위반) — 라이트보다 옅은 흰색
      상단 하이라이트(0.08)로 축소, 하단 그림자는 검정 자체가 배경과 거의 안 갈려 생략. */
   --elev-inset: inset 0 1px 0 rgba(255, 255, 255, .08);
+
+  /* story #7d7634ee — §⑤가 그레인 강도/블렌드는 명시(다크 16%·overlay)했지만 --elev-lift/
+     --emboss-press의 다크 수치는 안 줬다(라이트 전용 정본). 기존 --elev-card/--elev-inset의
+     라이트→다크 축소비(검정 베이스로 교체+하이라이트를 .6~.85→.08로 대폭 축소)를 그대로
+     따라 유도했다 — 임의 신규값 아님, 이 파일 자체의 기존 다크 변환 관례 재사용. 유나
+     확認 대기(다른 수치를 원하면 이 블록만 교체하면 되도록 단일 지점에 묶어둠). */
+  --paper-grain-opacity: .16;
+  --paper-grain-blend: overlay;
+  --elev-lift: 0 10px 24px -8px rgba(0, 0, 0, .55), 0 2px 6px -2px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 255, 255, .08);
+  --emboss-press: inset 0 1px 2px rgba(0, 0, 0, .35), inset 0 -1px 0 rgba(255, 255, 255, .08);
 }
 
 /* Sidebar: open triggers get active background */

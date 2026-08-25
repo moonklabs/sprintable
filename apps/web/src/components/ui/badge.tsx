@@ -5,15 +5,19 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const badgeVariants = cva(
-  // story #2969 §1.4/§2 PR-1(doc proofline-system-layer-2969) — badge.tsx는 §1.4 "proof-cut-xs
-  // 소 컷(태그·마커류)" 목록에 명시 등재. rounded-full→proof-cut+proof-cut-xs 컷태그로,
-  // shadow-sm 제거(§1.2: 인라인 표면은 그림자 대신 라인 — border-transparent(default/success
-  // 등)는 이미 그 자리 없이도 무회귀, 계열 variant는 기존 border-*/70 hairline이 그대로 그
-  // 역할). ⚠️mono 라벨(라틴 전용) 스타일은 이 공유 primitive에 넣지 않는다 — 이 앱 배지
-  // 소비처 대다수가 한글 텍스트라 전역 적용 시 [[feedback-ui-text-agent-tone]] 부류가 아니라
-  // 2967 교훈(mono가 한글서 흐림)을 그대로 재현한다. 라틴 전용 콘텐츠(있다면)는 호출부가
-  // 개별 className으로 옵트인.
-  "group/badge proof-cut proof-cut-xs inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-all focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3!",
+  // story #7d7634ee(P0·선생님 직접 지시, 감確認 doc ea94dac4) — 코너컷(proof-cut proof-cut-xs)
+  // 전면 폐지, 소프트 라운드+체감되는 재질(그레인+엠보스)로 교체. badge.tsx가 이 base
+  // className에 무조건 굽고 있던 게 앱 전체 76파일/223콜사이트의 "75곳" 체감 뿌리였다 —
+  // 이 한 줄 교체가 그 전부에 자동 캐스케이드된다. proof-surface-press(눌린 엠보스)는 doc
+  // §⑤ 토큰표가 "씰/칩"을 emboss-press의 명시 예시로 들었다.
+  // story #2969 §1.4/§2 PR-1(doc proofline-system-layer-2969) — shadow-sm 제거(§1.2: 인라인
+  // 표면은 그림자 대신 라인 — border-transparent(default/success 등)는 이미 그 자리 없이도
+  // 무회귀, 계열 variant는 기존 border-*/70 hairline이 그대로 그 역할). ⚠️mono 라벨(라틴
+  // 전용) 스타일은 이 공유 primitive에 넣지 않는다 — 이 앱 배지 소비처 대다수가 한글
+  // 텍스트라 전역 적용 시 [[feedback-ui-text-agent-tone]] 부류가 아니라 2967 교훈(mono가
+  // 한글서 흐림)을 그대로 재현한다. 라틴 전용 콘텐츠(있다면)는 호출부가 개별 className으로
+  // 옵트인.
+  "group/badge proof-surface proof-surface-press inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-all focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3!",
   {
     variants: {
       variant: {

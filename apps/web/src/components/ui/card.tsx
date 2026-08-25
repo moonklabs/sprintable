@@ -27,9 +27,9 @@ export const cardVariants = cva('border text-card-foreground', {
       card: 'rounded-lg',
       compact: 'rounded-xl',
       inline: 'rounded-lg',
-      // story #2969 §1.4 — 히어로/시그니처 카드(섹션 리드·활성·측정 중 카드 1종, 화면당 소수)
-      // 전용 옵트인. 라운드 대신 컷코너(큰 시그니처 컷, --proof-cut 기본 24px).
-      signature: 'proof-cut',
+      // story #7d7634ee(P0·선생님 직접 지시) — radius=signature(컷코너 옵트인, §2969 §1.4)
+      // 폐지. 실사용 0건이었고(전 코드베이스에서 radius="signature" 호출 자체가 없었다),
+      // proof-cut 전면 처분 대상이라 대체 없이 제거한다.
     },
   },
   defaultVariants: { surface: 'solid', radius: 'card' },

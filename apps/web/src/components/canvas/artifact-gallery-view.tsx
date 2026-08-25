@@ -366,9 +366,10 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
             {railContent}
           </div>
 
-          {/* story #2955 §5 — 정본 부재로 22px 드리프트(24px가 맞음)였다. `.proof-cut` 유틸
-              (globals.css)로 이관해 정본값으로 정정. */}
-          <div className="proof-cut overflow-hidden rounded-xl border border-border bg-card px-5 py-4">
+          {/* story #7d7634ee(P0·선생님 직접 지시) — 컷코너(clip-path, §2955 §5가 22px 드리프트를
+              24px 정본으로 정정했던 그 자리) 전면 폐지, proof-surface(13px 균일 라운드)+
+              proof-surface-lift(뜬 표면 재질) 채택. 옛 rounded-xl은 흡수. */}
+          <div className="proof-surface proof-surface-lift overflow-hidden border border-border bg-card px-5 py-4">
             <div className="mb-3 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{axisLabel(axis)}</div>
             {!selectedGroup || selectedGroup.artifacts.length === 0 ? (
               <p className="py-8 text-center text-[12.5px] text-muted-foreground">{t('galleryGroupEmpty')}</p>

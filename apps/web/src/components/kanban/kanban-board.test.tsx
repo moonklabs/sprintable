@@ -961,8 +961,9 @@ describe('KanbanBoard — story #3043 <lg 기본값=list(칸반 다열은 opt-in
     await mount();
 
     // CardVariant(ProofCapsule density="card")의 CutCornerShell 마커 — 예전 ListStoryRow
-    // 자체 마크업(rounded-lg border, proof-cut 없음)엔 없던 클래스라 진짜 atom 재사용의 증거.
-    expect(container.innerHTML).toContain('proof-cut');
+    // 자체 마크업(rounded-lg border, proof-surface 없음)엔 없던 클래스라 진짜 atom 재사용의
+    // 증거. story #7d7634ee(P0)로 컷코너(proof-cut)가 재질(proof-surface)로 교체됨.
+    expect(container.innerHTML).toContain('proof-surface');
     // max-w-[280px](desktop 컬럼 고정폭 전제) 캡이 이 경로에선 max-w-none으로 override돼야
     // full-width row가 된다 — cn()=twMerge라 나중 클래스가 이긴다(story-card.tsx 확認).
     expect(container.innerHTML).toContain('max-w-none');

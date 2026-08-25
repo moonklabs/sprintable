@@ -597,18 +597,18 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(); }}
       >
         <div className="flex items-start justify-between gap-2">
-          {/* story #2958 §2/§3 — 상태 칩(proof-cut-xs)+결과 필이 이중 신호의 «상태·결과» 열.
-              status 배지(원래 shadcn Badge)는 그대로 두되(우측 무리에 존속, 회귀 없음), 왼쪽에
-              proof 색규율을 따르는 신규 컷코너 칩을 하나 더 앞세운다 — outcome은 기존
-              OutcomeStatusBadge를 그대로 재사용(발명 0, 색 의미 불변).
+          {/* story #2958 §2/§3 — 상태 칩+결과 필이 이중 신호의 «상태·결과» 열. status 배지
+              (원래 shadcn Badge)는 그대로 두되(우측 무리에 존속, 회귀 없음), 왼쪽에 proof
+              색규율을 따르는 신규 칩을 하나 더 앞세운다 — outcome은 기존 OutcomeStatusBadge를
+              그대로 재사용(발명 0, 색 의미 불변). ⚠️상태 칩 자체는 story #3053(2984-S5)이 아래
+              MaterialChip으로 대체해 컷코너(proof-cut-xs)는 이 자리에서 이미 죽은 얘기다(주석만
+              #2969 PR-1의 원 버그·#2958 원 커밋 실수 이력을 참고용으로 남겨둠) — story
+              #7d7634ee(P0) 컷코너 전면 폐지와도 무관(여기는 애초에 clip-path가 없었음).
               ⚠️PR#3387 카디르 QA(2026-08-23)·유나 원작자 정본 채택(PO 갱신 지시) — **상태 칩은
               green을 아예 안 쓴다**(done+hit이어도). green은 결과(Verified) 필(OutcomeStatusBadge)
               전용 — 두 축이 색에서도 안 섞여야 "일 끝≠목표 달성"이 시각으로 선다(작업 축의 첫
               처방 "done&&hit만 green"조차 두 축을 섞는 것이라 유나 판정으로 대체됨). */}
           <div className="flex shrink-0 flex-col items-start gap-1">
-            {/* story #2969 PR-1 발견 버그 — 아래 proof-cut-xs가 --proof-cut 값만 바꾸고
-                clip-path 자체를 여는 proof-cut 베이스 클래스가 빠져 있어(#2958 원 커밋 실수)
-                컷 자체가 안 그려지고 있었다(globals.css 참고). 즉시 수정. */}
             {/* story #3053(2984-S5) — MaterialChip(S1, 헤어라인+fill 0) 채택, 상태별
                 bg-proof-blue-soft/bg-proof-sunk 채움 폐지. dot 신호(active=blue·비active=
                 faint)는 이미 있던 신호라 그대로 KEEP. */}

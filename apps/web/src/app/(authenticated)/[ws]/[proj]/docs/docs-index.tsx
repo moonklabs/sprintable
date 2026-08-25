@@ -36,12 +36,15 @@ type StatusFilter = DocStatusFilter;
 const STATUS_FILTERS: StatusFilter[] = ['confirmed', 'pending', 'denied', 'draft'];
 const UNCATEGORIZED = '__uncategorized__';
 
-function StatusChip({ status, size = 'sm' }: { status: string | undefined; size?: 'sm' | 'xs' }) {
+// story #7d7634ee(P0) — proof-cut(컷코너, 옛 sm/xs 사선 크기 모디파이어)는 폐지되고
+// proof-surface(13px 균일 라운드)로 수렴 — size prop이 지오메트리 결정에만 쓰였으므로 그
+// 존재 이유가 없어져 제거(호출부 중 유일하게 size="xs"를 넘기던 자리도 함께 정리).
+function StatusChip({ status }: { status: string | undefined }) {
   const t = useTranslations('docs');
   const s = toDocStatusFilter(status);
   const tone = DOC_STATUS_TONE[s];
   return (
-    <span className={`proof-cut proof-cut-${size} inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-[11.5px] font-bold ${tone.bg} ${tone.text}`}>
+    <span className={`proof-surface proof-surface-press inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-[11.5px] font-bold ${tone.bg} ${tone.text}`}>
       <span className={`size-1.5 rounded-full ${tone.dot}`} aria-hidden="true" />
       {t(docStatusLabelKey(s))}
     </span>
@@ -226,7 +229,7 @@ export function DocsIndex() {
               onClick={() => goToDoc(doc.slug)}
               className="flex flex-col items-start gap-2 rounded-lg border border-border bg-card p-4 text-left transition hover:border-foreground/30"
             >
-              <StatusChip status={doc.status} size="xs" />
+              <StatusChip status={doc.status} />
               <span className="text-editorial-claim font-editorial-claim text-foreground line-clamp-2">{doc.title}</span>
               <span className="mt-auto font-mono text-[10.5px] text-muted-foreground">{formatDate(doc.updated_at)}</span>
             </button>
