@@ -272,6 +272,42 @@ describe('useChatSse — 가시성 복귀 강제 재연결(#2987, standalone-fal
   });
 });
 
+// story #3081(선생님 P0 지시, standalone-fallback 경로) — sse-multiplexer.test.tsx의
+// "window.focus 강제 재연결" 회귀가드와 동형. 위 #2987 스위트(visibilitychange 축)와 달리
+// hidden 이력 없이 focus만으로도 재연결이 걸려야 한다.
+describe('useChatSse — window.focus 강제 재연결(#3081, 가시성 축과 독립, standalone-fallback)', () => {
+  it('hidden 이력 없이 window.focus만 와도 기존 커넥션을 닫고 새로 연다', async () => {
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" />); });
+    expect(FakeEventSource.instances).toHaveLength(1);
+
+    act(() => { window.dispatchEvent(new Event('focus')); });
+
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.instances[0]!.closed).toBe(true);
+  });
+
+  it('짧은 시간 내 중복 focus는 두 번째부터 throttle되어 재연결하지 않는다', async () => {
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" />); });
+
+    act(() => { window.dispatchEvent(new Event('focus')); });
+    expect(FakeEventSource.instances).toHaveLength(2);
+
+    act(() => { window.dispatchEvent(new Event('focus')); });
+    expect(FakeEventSource.instances).toHaveLength(2); // throttle(3s) 안 — 재연결 안 함
+  });
+
+  it('focus 강제 재연결이 열리면 onReconnect가 불린다(backfill 트리거)', async () => {
+    const onReconnect = vi.fn();
+    await act(async () => { root.render(<Harness currentTeamMemberId="m1" onReconnect={onReconnect} />); });
+    expect(onReconnect).not.toHaveBeenCalled();
+
+    act(() => { window.dispatchEvent(new Event('focus')); });
+    act(() => { FakeEventSource.instances[1]!.onopen?.(); });
+
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+  });
+});
+
 // story 6ddaa086(critical, 선생님 실사고) — 「연결이 끊겼어요」 배너가 실 연결(readyState=1
 // OPEN) 정상 도달 뒤에도 안 풀리던 결함. 근본원인: mux 핸들(sse-multiplexer.ts)이 #2144
 // 처방으로 참조안정적인데, chat-view의 배너는 mux.connected를 getter로 직접 읽어 그 값이

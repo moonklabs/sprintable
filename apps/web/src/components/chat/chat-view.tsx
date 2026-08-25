@@ -76,6 +76,25 @@ function groupByDate(messages: ChatMessage[]): MessageGroup[] {
   return Object.entries(groups).map(([date, msgs]) => ({ date, messages: msgs }));
 }
 
+// story #3081(정본 ⑤) — 재연결·focus 재조회(before 없는 fetchMessages 호출)가 서버 최신
+// 50개로 통째로 setMessages(data)하면 사용자가 위로 스크롤해 loadMore로 펼쳐 둔 과거
+// 페이지가 날아간다. data[0](가장 오래된 신규 항목)보다 더 과거인 prev 항목만 보존해
+// 앞에 붙인다 — dedup은 id로(data와 겹치는 구간은 새 값을 신뢰).
+export function mergeBackfilledMessages(prev: ChatMessage[], data: ChatMessage[]): ChatMessage[] {
+  if (!data.length) return prev;
+  const newIds = new Set(data.map((m) => m.id));
+  const olderKept = prev.filter((m) => !newIds.has(m.id) && m.created_at < data[0]!.created_at);
+  return [...olderKept, ...data];
+}
+
+// story #3081(정본 ③) — backfill(fetchMessages 재조회)이 채운 신규 메시지도 addMessage(SSE
+// 실시간 수신)와 동일하게 「활성 뷰어가 하단을 보고 있으면 mark-read」돼야 한다. 표시할
+// up_to 시각을 판정만 순수함수로 뽑는다(호출 자체는 handleReconnect가 한다).
+export function resolveBackfillMarkReadIso(latest: ChatMessage[] | undefined, nearBottom: boolean): string | null {
+  if (!latest?.length || !nearBottom) return null;
+  return latest[latest.length - 1]!.created_at;
+}
+
 export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref = '/chats', commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants }: ChatViewProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -248,24 +267,26 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     return el.scrollHeight - el.scrollTop - el.clientHeight <= 50;
   }, []);
 
-  const fetchMessages = useCallback(async (before?: string) => {
+  const fetchMessages = useCallback(async (before?: string): Promise<ChatMessage[] | undefined> => {
+    let merged: ChatMessage[] | undefined;
     try {
       const params = new URLSearchParams({ limit: '50' });
       if (before) params.set('before', before);
       const res = await fetch(`${apiPrefix}/${threadId}/messages?${params.toString()}`);
-      if (!res.ok) return;
+      if (!res.ok) return undefined;
       // Backend: { data: _to_chat_message[], meta: { next_cursor, has_more } }
       const raw = await res.json() as Record<string, unknown>;
       const rawData = (Array.isArray(raw) ? raw : (raw.data ?? [])) as Record<string, unknown>[];
       const meta = Array.isArray(raw) ? null : raw.meta as { next_cursor?: string; has_more?: boolean } | undefined;
       const data = rawData.map(normalizeToMessage);
       if (before) {
-        setMessages((prev) => [...data, ...prev]);
+        setMessages((prev) => { merged = [...data, ...prev]; return merged; });
       } else {
-        setMessages(data);
+        setMessages((prev) => { merged = mergeBackfilledMessages(prev, data); return merged; });
       }
       setCursor(meta?.next_cursor ?? null);
       setHasMore(meta?.has_more ?? false);
+      return merged;
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -343,9 +364,16 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   }, [threadId, addMessage]);
 
   // AC4: 재연결 시 누락 메시지 backfill
+  // story #3081(정본 ③) — backfill이 놓친 신규 메시지를 채워도 이 fetchMessages 경로는
+  // addMessage(SSE 실시간 수신)와 달리 markRead를 안 태웠다 — 활성 뷰어가 하단을 보고
+  // 있어도 배지가 안 꺼지는 갭. fetchMessages가 반환하는 실 데이터(merged 결과)로
+  // 최신 메시지를 판별해 addMessage와 동일 조건(isNearBottom)으로 mark-read한다.
   const handleReconnect = useCallback(() => {
-    fetchMessages();
-  }, [fetchMessages]);
+    void fetchMessages().then((latest) => {
+      const markReadIso = resolveBackfillMarkReadIso(latest, isNearBottom());
+      if (markReadIso) markRead(markReadIso);
+    });
+  }, [fetchMessages, isNearBottom, markRead]);
 
   // 1aeecdde P2: working 폴링(#1353 GET /working·in-memory 45s TTL) → typingAgents.
   // 이름=commandTargets(없으면 미표시 graceful). poll이 BE working 셋 그대로 반영(클라 TTL 불요).
