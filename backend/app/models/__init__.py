@@ -63,6 +63,7 @@ from app.models.story_assignee import StoryAssignee
 from app.models.project import OrgMember, Project
 from app.models.project_setting import ProjectSetting
 from app.models.pull_request_story_link import PullRequestStoryLink
+from app.models.doc_chat_nudge_dispatch import DocChatNudgeDispatch
 from app.models.retro import RetroAction, RetroItem, RetroSession, RetroVote
 from app.models.reward import RewardLedger
 from app.models.login_audit_log import LoginAuditLog

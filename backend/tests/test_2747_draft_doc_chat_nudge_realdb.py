@@ -104,6 +104,18 @@ async def _seed_org_project(session):
     return org.id, project.id
 
 
+async def _seed_doc(session, org_id, project_id, author_id, *, status="draft", title="Doc"):
+    from app.models.doc import Doc
+
+    doc = Doc(
+        id=uuid.uuid4(), org_id=org_id, project_id=project_id, created_by=author_id,
+        status=status, title=title, slug=f"{title.lower()}-{uuid.uuid4().hex[:8]}",
+    )
+    session.add(doc)
+    await session.commit()
+    return doc.id
+
+
 async def _count_nudge_messages(session, doc_id):
     from app.models.conversation import ConversationMessage
 
@@ -117,17 +129,17 @@ async def _count_nudge_messages(session, doc_id):
 
 @pytest.mark.anyio
 async def test_draft_doc_mention_nudges_author_once_even_if_called_twice():
-    """⭐PO AC① — 같은 draft doc을 같은 작성자 대상으로 두 번 호출해도 넛지 메시지는 1건뿐."""
+    """⭐PO AC① 기본형 — 같은 draft doc을 같은 작성자 대상으로 두 번 호출해도 넛지 메시지는
+    1건뿐(같은 sender·같은 세션이 반복 mention하는 가장 흔한 경우)."""
     engine, Session = await _session_factory()
     try:
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s)
             author_id = await _seed_human_member(s, org_id, project_id, name="Author")
             sender_id = await _seed_human_member(s, org_id, project_id, name="Sender")
+            doc_id = await _seed_doc(s, org_id, project_id, author_id)
 
         from app.services.approval_delivery import maybe_nudge_draft_doc_shared_in_chat
-
-        doc_id = uuid.uuid4()
         async with Session() as s:
             await maybe_nudge_draft_doc_shared_in_chat(
                 s, org_id=org_id, project_id=project_id, doc_id=doc_id,
@@ -141,7 +153,6 @@ async def test_draft_doc_mention_nudges_author_once_even_if_called_twice():
             assert len(rows) == 1
             assert rows[0].sender_id == sender_id
 
-        # 두번째 호출(예: 같은 doc이 다른 메시지에서 다시 mention) — 중복 발송 금지.
         async with Session() as s:
             await maybe_nudge_draft_doc_shared_in_chat(
                 s, org_id=org_id, project_id=project_id, doc_id=doc_id,
@@ -158,6 +169,80 @@ async def test_draft_doc_mention_nudges_author_once_even_if_called_twice():
 
 
 @pytest.mark.anyio
+async def test_two_different_senders_sequential_still_nudge_author_once():
+    """⭐카디르 QA(#3465) 재현 경로(b) — 서로 다른 두 발신자가 각자 딴 시점·딴 DM에서 같은
+    draft doc을 mention해도 작성자에게 가는 넛지는 통산 1건(원 구현은 DM당 1회라 여기서
+    2건이 나갔다 — 작성자당 전역 1회가 AC)."""
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            author_id = await _seed_human_member(s, org_id, project_id, name="Author")
+            sender_a = await _seed_human_member(s, org_id, project_id, name="SenderA")
+            sender_b = await _seed_human_member(s, org_id, project_id, name="SenderB")
+            doc_id = await _seed_doc(s, org_id, project_id, author_id)
+
+        from app.services.approval_delivery import maybe_nudge_draft_doc_shared_in_chat
+        async with Session() as s:
+            await maybe_nudge_draft_doc_shared_in_chat(
+                s, org_id=org_id, project_id=project_id, doc_id=doc_id,
+                doc_title="온보딩 리서치", doc_status="draft",
+                doc_author_id=author_id, sender_id=sender_a,
+            )
+            await s.commit()
+
+        async with Session() as s:
+            # sender_b는 sender_a와 완전히 다른 DM(참가자 쌍이 다름)에서 같은 doc을 mention.
+            await maybe_nudge_draft_doc_shared_in_chat(
+                s, org_id=org_id, project_id=project_id, doc_id=doc_id,
+                doc_title="온보딩 리서치", doc_status="draft",
+                doc_author_id=author_id, sender_id=sender_b,
+            )
+            await s.commit()
+
+        async with Session() as s:
+            rows = await _count_nudge_messages(s, doc_id)
+            assert len(rows) == 1, f"서로 다른 발신자가 각자 DM에서 mention해 중복 발송됨: {len(rows)}건"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_concurrent_mentions_still_nudge_author_once():
+    """⭐카디르 QA(#3465) 재현 경로(a) — asyncio.gather 동시 호출도 UNIQUE 제약(reservation
+    row)이 직렬화해 넛지는 정확히 1건(SELECT→INSERT SAVEPOINT는 이 레이스를 못 막았었다)."""
+    import asyncio
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org_project(s)
+            author_id = await _seed_human_member(s, org_id, project_id, name="Author")
+            sender_a = await _seed_human_member(s, org_id, project_id, name="SenderA")
+            sender_b = await _seed_human_member(s, org_id, project_id, name="SenderB")
+            doc_id = await _seed_doc(s, org_id, project_id, author_id)
+
+        from app.services.approval_delivery import maybe_nudge_draft_doc_shared_in_chat
+
+        async def _call(sender_id):
+            async with Session() as s:
+                await maybe_nudge_draft_doc_shared_in_chat(
+                    s, org_id=org_id, project_id=project_id, doc_id=doc_id,
+                    doc_title="온보딩 리서치", doc_status="draft",
+                    doc_author_id=author_id, sender_id=sender_id,
+                )
+                await s.commit()
+
+        await asyncio.gather(_call(sender_a), _call(sender_b))
+
+        async with Session() as s:
+            rows = await _count_nudge_messages(s, doc_id)
+            assert len(rows) == 1, f"동시 호출이 레이스로 중복 발송됨: {len(rows)}건"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_non_draft_doc_mention_does_not_nudge():
     """status != draft(confirmed 등)면 넛지 자체가 안 나간다."""
     engine, Session = await _session_factory()
@@ -166,10 +251,9 @@ async def test_non_draft_doc_mention_does_not_nudge():
             org_id, project_id = await _seed_org_project(s)
             author_id = await _seed_human_member(s, org_id, project_id, name="Author")
             sender_id = await _seed_human_member(s, org_id, project_id, name="Sender")
+            doc_id = await _seed_doc(s, org_id, project_id, author_id)
 
         from app.services.approval_delivery import maybe_nudge_draft_doc_shared_in_chat
-
-        doc_id = uuid.uuid4()
         async with Session() as s:
             await maybe_nudge_draft_doc_shared_in_chat(
                 s, org_id=org_id, project_id=project_id, doc_id=doc_id,
@@ -193,10 +277,9 @@ async def test_self_share_does_not_nudge():
         async with Session() as s:
             org_id, project_id = await _seed_org_project(s)
             author_id = await _seed_human_member(s, org_id, project_id, name="Author")
+            doc_id = await _seed_doc(s, org_id, project_id, author_id)
 
         from app.services.approval_delivery import maybe_nudge_draft_doc_shared_in_chat
-
-        doc_id = uuid.uuid4()
         async with Session() as s:
             await maybe_nudge_draft_doc_shared_in_chat(
                 s, org_id=org_id, project_id=project_id, doc_id=doc_id,

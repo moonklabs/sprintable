@@ -583,21 +583,44 @@ async def maybe_nudge_draft_doc_shared_in_chat(
     이번 사이클 스코프(FE 뱃지·N회 카운트 nudge·에이전트 리마인더 격상은 각각 별도 스토리,
     PO 확定 2026-08-25).
 
-    ⛔PO AC — ①**1회성이 실제로 1회**여야 한다(같은 draft doc이 채팅에서 반복 mention돼도
-    중복 발송 금지) ②수신자는 **doc 작성자만**(대화 참여자 전체 노이즈 금지). ①은 새
-    테이블/컬럼 없이 이 함수가 직접 쓰는 DM 자체를 SSOT로 삼아 보장한다 — 같은 (작성자,
-    doc_id) 조합에 대한 넛지 메시지가 이미 있으면(msg_metadata.nudge_target.doc_id로 조회)
-    새로 안 만든다(dispatch_approval_result_reply의 DM 패턴 재사용 — 새 배달경로 발명 0).
+    ⛔PO AC — ①**1회성이 실제로 1회**여야 한다: 같은 doc은 **발신자·대화 무관 작성자당
+    전역 1회**(서로 다른 두 사람이 각자 딴 시점·딴 DM에서 같은 draft doc을 mention해도
+    통산 1건만) ②수신자는 **doc 작성자만**(대화 참여자 전체 노이즈 금지).
+
+    카디르 QA(#3465, 2026-08-25) — 최초 구현은 (발신자,작성자) DM의 메시지 로그를
+    SSOT로 삼았는데, 키 축이 틀렸다(작성자당 전역이어야 할 게 DM당이 됨 — 서로 다른
+    발신자가 각자 새 DM에서 mention하면 각각 새 넛지가 나갔다, 실PG 2경로 재현:
+    동시 asyncio.gather·순차 2인 상이 대화) + SELECT→INSERT가 SAVEPOINT일 뿐이라
+    동시 호출 둘 다 SELECT를 통과할 수 있었다(격리 보장 아님). `DocChatNudgeDispatch`
+    uq(org_id, doc_id) UNIQUE 제약으로 "이 doc에 넛지를 보내겠다"를 **원자적 reservation
+    row INSERT**로 바꾼다 — 실패(IntegrityError=이미 있음)하면 DB가 직렬화해 준
+    사실 그대로 조용히 skip(app 레벨 락/텍스트비교 아닌 실 제약, PO 지시 그대로 새
+    테이블 도입).
     """
     if doc_status != "draft" or not doc_author_id or not project_id:
         return
     if doc_author_id == sender_id:
         return  # 본인이 스스로 공유한 것 — 자기-알림 스킵(기존 관례 동형).
 
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models.doc_chat_nudge_dispatch import DocChatNudgeDispatch
     from app.services.member_resolver import lookup_members_by_ids
 
     author = (await lookup_members_by_ids({doc_author_id}, db)).get(doc_author_id)
     if author is None:
+        return
+
+    # ①동시성-안전 1회성 anchor — DM/메시지 생성보다 *먼저*, 별도 SAVEPOINT로 시도한다.
+    # UNIQUE 위반은 "이미 누가 예약했다"는 확실한 신호라 여기서 조용히 반환(재시도 불요 —
+    # 그 다른 호출이 이미 실 배달을 책임진다).
+    try:
+        async with db.begin_nested():
+            db.add(DocChatNudgeDispatch(
+                id=uuid.uuid4(), org_id=org_id, doc_id=doc_id, author_id=doc_author_id,
+            ))
+            await db.flush()
+    except IntegrityError:
         return
 
     try:
@@ -606,15 +629,6 @@ async def maybe_nudge_draft_doc_shared_in_chat(
                 db, org_id=org_id, project_id=project_id,
                 requester_id=sender_id, approver_id=doc_author_id,
             )
-            existing = (await db.execute(
-                select(ConversationMessage.id).where(
-                    ConversationMessage.conversation_id == conv.id,
-                    ConversationMessage.msg_metadata["nudge_target"]["doc_id"].astext == str(doc_id),
-                ).limit(1)
-            )).scalar_one_or_none()
-            if existing is not None:
-                return  # ①실제 1회성 — 같은 DM에 같은 doc 넛지가 이미 있으면 재발송 안 함.
-
             msg = ConversationMessage(
                 conversation_id=conv.id,
                 sender_id=sender_id,
