@@ -800,7 +800,11 @@ function ShikiCodeBlock({
   );
 }
 
-function sanitizeDocHtml(content: string): string {
+// story #3776ccfe(FE·결재 카드) — embed-card.tsx의 doc 미리보기(renderEntityDetail)가
+// content_format='html' doc을 마크다운 전용 렌더러(MdBody)에 먹여 태그가 텍스트로 그대로
+// 찍히던 결함을 고치며 이 sanitize 정본을 재사용한다(사본 분화 금지 — decorateHtmlContent의
+// TOC/코드카피 장식은 그 소비처 전용이라 안 가져감, 순수 sanitize만).
+export function sanitizeDocHtml(content: string): string {
   const maybePurifier = DOMPurify as unknown as {
     sanitize?: (value: string) => string;
     default?: { sanitize?: (value: string) => string };
