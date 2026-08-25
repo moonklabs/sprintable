@@ -1363,22 +1363,19 @@ export function StoryDetailPanel({ story, tasks, nextTasksCursor = null, loading
               </DropdownMenu>
               {/* P0-04(trust-pipeline-minimal-decision) — in-flight 전용 신뢰 칩(입력 필요/병합
                   대기). done엔 렌더 0(TrustSeal 중복 방지)·무신호(gate 없음)면 칩 자체 미렌더. 5-status
-                  배지는 무변경(순수 additive 오버레이). 칸반 카드엔 안 얹음(Proofline이 이미 담당). */}
+                  배지는 무변경(순수 additive 오버레이). 칸반 카드엔 안 얹음(Proofline이 이미 담당).
+                  story #2e583f9e(2984-S7, 유나 확定 2026-08-25) — soft-fill SHIFT→헤어라인. dot은
+                  색 신호 그대로 KEEP(merge_ready=green·기타=amber) — 계열색 텍스트만 헤어라인 위에서
+                  라이트 AA 미달이라 text-foreground로 이전(대비표 정본). */}
               {trustChip && trustChipLabel ? (
-                <span
-                  className={
-                    trustChip === 'merge_ready'
-                      ? 'inline-flex items-center gap-1.5 rounded-[7px] bg-proof-green-soft px-2 py-0.5 text-[11px] font-semibold text-proof-green'
-                      : 'inline-flex items-center gap-1.5 rounded-[7px] bg-proof-amber-soft px-2 py-0.5 text-[11px] font-semibold text-proof-amber'
-                  }
-                >
+                <span className="inline-flex items-center gap-1.5 rounded-[7px] border border-proof-line px-2 py-0.5 text-[11px] font-semibold text-foreground">
                   <span className={`size-1.5 rounded-full ${trustChip === 'merge_ready' ? 'bg-proof-green' : 'bg-proof-amber'}`} aria-hidden="true" />
                   {trustChipLabel}
                 </span>
               ) : null}
               {/* story #2258 AC2 — 검증요청: pending "qa" gate가 없을 때만 요청 버튼, 있으면 대기 배지. */}
               {chipGates.some((g) => g.gate_type === 'qa' && g.status === 'pending') ? (
-                <span className="inline-flex items-center gap-1.5 rounded-[7px] bg-proof-amber-soft px-2 py-0.5 text-[11px] font-semibold text-proof-amber">
+                <span className="inline-flex items-center gap-1.5 rounded-[7px] border border-proof-line px-2 py-0.5 text-[11px] font-semibold text-foreground">
                   <span className="size-1.5 rounded-full bg-proof-amber" aria-hidden="true" />
                   {t('verificationPending')}
                 </span>
