@@ -447,3 +447,142 @@ describe('ApprovalRequestCard — 결재선 위임(story #3001, 선생님 정책
     expect(container.textContent).not.toContain(koMessages.chats.approvalRequestDelegateDuplicateWarning);
   });
 });
+
+// story #3084(2026-08-25, 유나 픽셀 규격 부록A — 상태 파생표) — 카드 5상태 중 pending 3분기
+// (designated/requester/관찰자)의 FE 분기. requesterId는 gate.neutral_facts.
+// requested_by_member_id에서 온다(BE #3084 doc 그라운딩 — merge/story/doc/loop 게이트 공용
+// 관례, gates.py can_approve_doc_gate_reason과 동일 소스).
+describe('ApprovalRequestCard — 토스(story #3084) pending 3분기 + 토스 트리거', () => {
+  async function mountWithRoles(designatedApproverId: string | null, requesterId: string | null) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/gates/')) {
+        return {
+          ok: true,
+          json: async () => ({
+            data: gate({
+              status: 'pending',
+              designated_approver_id: designatedApproverId,
+              neutral_facts: requesterId ? { requested_by_member_id: requesterId } : null,
+            }),
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('대기·designated — 승인/반려 버튼 + 토스 트리거(⋯)가 뜬다', async () => {
+    await mountWithRoles('member-1', 'member-2');
+    const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
+    expect(buttons.some((t) => t?.includes(koMessages.chats.approvalRequestTossTrigger))).toBe(true);
+  });
+
+  it('대기·requester — 승인/반려는 없고, 「대기 중」 문구 + 토스 버튼만 뜬다', async () => {
+    await mountWithRoles('member-2', 'member-1');
+    const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+    expect(buttons.some((t) => t?.includes(koMessages.chats.approvalRequestTossTrigger))).toBe(true);
+    expect(container.textContent).toContain('결재를 기다리는 중');
+    expect(container.textContent).not.toContain(koMessages.chats.approvalRequestDelegatedAway);
+  });
+
+  it('대기·관찰자(requester도 designated도 아님) — 「대기 중」 문구만, 토스·승인 버튼 없음', async () => {
+    await mountWithRoles('member-2', 'member-3');
+    const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
+    expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
+    expect(buttons.some((t) => t?.includes(koMessages.chats.approvalRequestTossTrigger))).toBe(false);
+    expect(container.textContent).toContain('결재를 기다리는 중');
+    // 진짜 위임(#3001)이 아니므로 "위임됨" 문구는 부정확 — 안 뜬다.
+    expect(container.textContent).not.toContain(koMessages.chats.approvalRequestDelegatedAway);
+  });
+
+  it('requesterId를 모르는(legacy) 게이트는 기존 「위임됨」 문구로 안전 폴백한다(회귀 0)', async () => {
+    await mountWithRoles('member-2', null);
+    expect(container.textContent).toContain(koMessages.chats.approvalRequestDelegatedAway);
+  });
+
+  it('토스 트리거 클릭 시 토스 시트가 열린다(projectId 있을 때)', async () => {
+    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'member-1', projectId: 'proj-1' });
+    await mountWithRoles('member-1', 'member-2');
+    const tossBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.chats.approvalRequestTossTrigger));
+    await act(async () => { tossBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(document.body.textContent).toContain(koMessages.chats.approvalRequestTossSheetTitle);
+  });
+
+  it('「남이 처리」 — 처리자 이름이 붙는다(gateDetailResolvedByStatus 재사용)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/team-members')) {
+        return { ok: true, json: async () => ({ data: [{ id: 'member-9', name: '올리베이라군' }] }) };
+      }
+      if (url.includes('/api/gates/')) {
+        return { ok: true, json: async () => ({ data: gate({ status: 'approved', resolver_id: 'member-9' }) }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1' }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('올리베이라군');
+  });
+
+  it('「내가 처리」 — 처리자 이름 줄이 안 붙는다(자명하므로)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/gates/')) {
+        return { ok: true, json: async () => ({ data: gate({ status: 'approved', resolver_id: 'member-1' }) }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1' }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).not.toContain('님이 처리');
+  });
+
+  it('mux가 conversation.gate_tossed(같은 gate_id)를 쏘면 fetchGate가 재호출된다', async () => {
+    let getCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/gates/')) {
+        getCount += 1;
+        return { ok: true, json: async () => ({ data: gate({ status: 'pending' }) }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ApprovalRequestCard target={{ work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] }} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(getCount).toBe(1);
+
+    const call = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_tossed');
+    expect(call).toBeTruthy();
+    const handler = call![1] as (raw: string, eventId?: string) => void;
+    await act(async () => { handler(JSON.stringify({ gate_id: 'g-1', target_conversation_id: 'conv-9' })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(getCount).toBe(2);
+  });
+});

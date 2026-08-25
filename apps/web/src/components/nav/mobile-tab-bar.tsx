@@ -6,7 +6,6 @@ import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { CircleDot, Inbox, MessageSquare, Grid2x2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { GateItem } from '@/components/kanban/types';
 import { MOBILE_BREAKPOINT } from '@/hooks/use-mobile';
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -108,10 +107,13 @@ export function MobileTabBar({ chatUnreadTotal }: { chatUnreadTotal: number }) {
     // 충분, 완전한 실시간 갱신은 #1960 결재함 큐 스코프).
     async function loadPendingCount() {
       try {
-        const res = await fetchWithAuth('/api/gates?status=pending&assigned_to_me=true');
+        // story #3084(2026-08-25 층1, PO 확定) — assigned_to_me(넓은 project-access 질문)를
+        // designated-pending-count(순수 "내가 지정 결재자인 미해소 건", room 추론 0)로 교체
+        // — app-sidebar.tsx와 동일 SSOT 전환(그 파일 주석 참고).
+        const res = await fetchWithAuth('/api/gates/designated-pending-count');
         if (!res.ok) return;
-        const gates = (await res.json()) as GateItem[];
-        if (!cancelled) setPendingCount(Array.isArray(gates) ? gates.length : 0);
+        const json = (await res.json()) as { count?: number };
+        if (!cancelled) setPendingCount(typeof json.count === 'number' ? json.count : 0);
       } catch {
         // 배지 카운트 실패는 치명적이지 않음 — 숫자 없이 탭만 정상 동작.
       }
