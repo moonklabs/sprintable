@@ -121,6 +121,58 @@ describe('extractLeadSentence (story #ec57c80c — 첫 문장 verbatim, 3015 규
         .toBe('매우 중요 그리고 일반 강조도 있다');
     });
   });
+
+  // story #3080(선생님 실사용 발견) — entity 참조 토큰이 안 벗겨져 raw `[라벨](entity:...)`
+  // 그대로 접힌 프리뷰에 노출됐다(스크린샷 실물). stripInlineMarkers가 볼드/코드만 다루고
+  // 참조 링크 문법은 처음부터 대상 밖이었다.
+  describe('story #3080 — entity 참조 토큰 스트립(라벨만 남기고 문법 벗김)', () => {
+    it('[라벨](entity:type:uuid)에서 라벨만 남는다', () => {
+      const uuid = '11111111-1111-1111-1111-111111111111';
+      expect(extractLeadSentence(`작업 완료 — [스토리 제목](entity:story:${uuid}) 확認했는.`))
+        .toBe(`작업 완료 — 스토리 제목 확認했는.`);
+    });
+
+    it('라벨 자체가 대괄호를 포함해도(팀 관례 "[P0·...] 제목") 백슬래시 이스케이프가 원복된다', () => {
+      const uuid = '22222222-2222-2222-2222-222222222222';
+      const raw = `[\\[P0·재질\\] 코너컷 처분](entity:story:${uuid}) 완주했는.`;
+      expect(extractLeadSentence(raw)).toBe('[P0·재질] 코너컷 처분 완주했는.');
+    });
+
+    it('한 줄에 참조가 여럿이어도 전부 벗겨진다', () => {
+      const a = '11111111-1111-1111-1111-111111111111';
+      const b = '22222222-2222-2222-2222-222222222222';
+      const raw = `[문서A](entity:doc:${a})와 [문서B](entity:doc:${b}) 둘 다 확認했는.`;
+      expect(extractLeadSentence(raw)).toBe('문서A와 문서B 둘 다 확認했는.');
+    });
+
+    it('라벨 안에 중첩된 볼드도 함께 벗겨진다(볼드 스트립이 먼저 돌아야 함)', () => {
+      const uuid = '33333333-3333-3333-3333-333333333333';
+      expect(extractLeadSentence(`[**강조 제목**](entity:story:${uuid}) 처리됨.`))
+        .toBe('강조 제목 처리됨.');
+    });
+
+    it('참조 토큰 중간에 마침표가 걸리면(마커 불균형) 전체 폴백으로 원문이 안전하게 보존된다', () => {
+      // 대괄호 균형이 깨지는 절단 지점(마침표가 라벨 안에 있음)은 건너뛰고 문자열 끝까지 간다
+      // — #3030과 동형의 "미절단 폴백" 정직 측 원칙(진짜 온전한 참조 토큰이 최종적으로 스트립됨).
+      const uuid = '44444444-4444-4444-4444-444444444444';
+      const raw = `[문장. 안에 마침표가 있는 라벨](entity:story:${uuid}) 뒤이어지는 내용.`;
+      const lead = extractLeadSentence(raw);
+      expect(lead).not.toContain('[문장');
+      expect(lead).not.toContain('](entity:');
+      expect(lead).toBe('문장. 안에 마침표가 있는 라벨 뒤이어지는 내용.');
+    });
+
+    it('라벨 내부 이스케이프(\\]) 다음에 마침표가 오면 조기 절단으로 오판하지 않는다(story #3486 카디르 QA #3448 재발견 — isBalancedCut 이스케이프 미처리)', () => {
+      // 카디르 재현: 원문 세는 대괄호 카운트가 `\]`를 실제 닫는 대괄호로 착각해 "[label \]."
+      // 에서 조기 절단 → entity 토큰 정규식과 안 맞아 raw `[label \].`가 그대로 샌다.
+      const uuid = '55555555-5555-5555-5555-555555555555';
+      const raw = `[label \\]. rest](entity:story:${uuid}) next.`;
+      const lead = extractLeadSentence(raw);
+      expect(lead).not.toContain('[label');
+      expect(lead).not.toContain('](entity:');
+      expect(lead).toBe('label ]. rest next.');
+    });
+  });
 });
 
 describe('extractTopLevelItems (story #ec57c80c — 최상위 목록만, 하위/표/산문 제외)', () => {

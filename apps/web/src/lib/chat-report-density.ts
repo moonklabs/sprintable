@@ -32,6 +32,14 @@ function stripInlineMarkers(text: string): string {
     .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/`([^`]*)`/g, '$1')
+    // story #3080(선생님 실사용 발견) — entity 참조 토큰 `[라벨](entity:type:uuid)`이 안
+    // 벗겨져 접힌 프리뷰에 원문 그대로(백슬래시 이스케이프 포함) 노출됐다. 이 팀 스토리
+    // 제목 관례("[P0·...] 제목")상 라벨 자체가 대괄호를 포함하는 경우가 흔해, 자동 참조
+    // 링커가 라벨 내부 대괄호를 `\[`/`\]`로 이스케이프해 저장한다 — 그 이스케이프까지
+    // 원복해 라벨만 남긴다(no-fiction: 원문 라벨 그대로, 참조 문법만 벗김). 볼드/코드
+    // 스트립보다 반드시 뒤에 와야 한다 — 라벨 안에 중첩된 `**`가 먼저 벗겨져 있어야
+    // 정확한 라벨을 얻는다(반대 순서면 `[**title**](entity:...)`의 라벨에 `**`가 남는다).
+    .replace(/\[((?:\\.|[^[\]\\])*)\]\(entity:\w+:[0-9a-f-]+\)/gi, (_m, label: string) => label.replace(/\\(.)/g, '$1'))
     .trim();
 }
 
@@ -59,10 +67,21 @@ export function deriveKicker(content: string, messageKind?: string | null): stri
 // 중간에 떨어지면 절단 결과가 "**Summary."(닫는 ** 없음)가 돼 미완성 마커가 그대로
 // 화면에 샌다. 굵게·인라인코드 마커(짝수 개수) 균형이 안 맞는 절단은 "미절단 폴백"(정직
 // 측)으로 건너뛴다.
+// story #3080 — entity 참조 토큰(`[라벨](entity:...)`)도 같은 결함 클래스: 마침표가 토큰
+// 중간(라벨 안·href 안)에 떨어지면 절단 결과가 여는 대괄호만 남은 `[라벨 일부`가 그대로
+// 샌다. 대괄호 개수 균형도 함께 본다 — 같은 "미절단 폴백" 정직 측 원칙 재사용.
+// story #3486(카디르 QA #3448 재발견) — 이 함수는 stripInlineMarkers(42행) 적용 前 원문
+// 위에서 세는데, 라벨 안 리터럴 대괄호를 이스케이프한 `\[`/`\]`(42행 관례)를 실제 여닫는
+// 대괄호로 착각해 균형을 오판한다("[label \]. rest]..."가 "\]"까지만 보고 1:1로 착각) —
+// 카운트용 사본에서 백슬래시 이스케이프 시퀀스부터 걷어낸다(42행의 원복과 달리 여기선
+// 문법 문자로도 안 세야 하므로 통째로 제거).
 function isBalancedCut(text: string): boolean {
-  const boldCount = (text.match(/\*\*/g) ?? []).length;
-  const codeCount = (text.match(/`/g) ?? []).length;
-  return boldCount % 2 === 0 && codeCount % 2 === 0;
+  const unescaped = text.replace(/\\./g, '');
+  const boldCount = (unescaped.match(/\*\*/g) ?? []).length;
+  const codeCount = (unescaped.match(/`/g) ?? []).length;
+  const openBracket = (unescaped.match(/\[/g) ?? []).length;
+  const closeBracket = (unescaped.match(/\]/g) ?? []).length;
+  return boldCount % 2 === 0 && codeCount % 2 === 0 && openBracket === closeBracket;
 }
 
 /** 첫 문장을 verbatim으로 추출(리라이트 0). 문장 경계 = 마침표/느낌표/물음표+공백(또는
