@@ -28,6 +28,19 @@ class ApiKeyCreatedResponse(ApiKeyResponse):
     api_key: str
 
 
+class ApiKeyUsageLogResponse(BaseModel):
+    """story #2087 — 키별 사용 이력 1행."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    api_key_id: uuid.UUID
+    endpoint: str
+    method: str
+    remote_ip: str | None = None
+    occurred_at: datetime
+
+
 class RotateApiKeyRequest(BaseModel):
     api_key_id: uuid.UUID
 
