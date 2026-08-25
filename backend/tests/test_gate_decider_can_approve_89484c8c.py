@@ -208,7 +208,7 @@ async def _run_non_doc_can_approve(project_role):
     gates_result = MagicMock()
     gates_result.scalars.return_value.all.return_value = [merge]
     story_batch = MagicMock()
-    story_batch.all.return_value = [(merge.work_item_id, uuid.uuid4())]
+    story_batch.all.return_value = [(merge.work_item_id, uuid.uuid4(), "T")]
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=[gates_result, story_batch])
     auth = SimpleNamespace(user_id=str(uuid.uuid4()))
