@@ -86,4 +86,18 @@ describe('EntityPreviewModal doc 미리보기 — content_format 분기(story #3
     expect(container.querySelector('h1')?.textContent).toBe('제목');
     expect(container.querySelector('strong')?.textContent).toBe('강조');
   });
+
+  // story #3776ccfe — 유나 design PASS 관찰(비차단, PR#3481): table/code가 미스타일이었다.
+  // sanitize된 원시 HTML엔 class가 없다 — 스타일은 래퍼 div의 Tailwind 자손 셀렉터
+  // ([&_table]:... 등)가 담당하므로, 그 래퍼가 규칙을 갖는지로 검증한다.
+  it('content_format=html의 table/code/pre 자손 셀렉터가 래퍼에 있다(유나 관찰 반영)', async () => {
+    await mount('<table><tr><th>열</th></tr><tr><td>값</td></tr></table><p>인라인 <code>코드</code></p>', 'html');
+    expect(container.querySelector('table')).not.toBeNull();
+    expect(container.querySelector('th')).not.toBeNull();
+    expect(container.querySelector('code')).not.toBeNull();
+    const wrapper = container.querySelector('table')?.parentElement;
+    expect(wrapper?.className).toContain('[&_table]:border-collapse');
+    expect(wrapper?.className).toContain('[&_th]:border');
+    expect(wrapper?.className).toContain('[&_code]:font-mono');
+  });
 });
