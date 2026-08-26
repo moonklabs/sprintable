@@ -609,9 +609,17 @@ steps:
         # 경유 시크릿으로 재바인딩(--update-secrets=additive, 기존 다른 시크릿 preserve — REDIS_URL_
         # PROD 등과 동일 컨벤션). prod는 이 플래그 자체를 안 넘겨 현재 DATABASE_URL_PROD 바인딩
         # 무변경. 시크릿 자체(DATABASE_URL_DEV_PGBOUNCER/DATABASE_URL_DIRECT_DEV)는 PO가 생성.
+        #
+        # story #3110 1보(2026-08-26, 보안 위생) — DATABASE_URL_DIRECT는 postgres 수퍼유저
+        # DSN(DATABASE_URL_DIRECT_DEV)이었다(pg_pubsub.py LISTEN/NOTIFY 전용 소비 — 애초에
+        # 수퍼유저가 필요 없는 경로). sprintable 앱 유저는 이미 public 197테이블 전부에 GRANT
+        # 보유(#3110 실측, postgres 116/197보다도 넓음) — 신규 시크릿 DATABASE_URL_DIRECT_DEV_
+        # SPRINTABLE(PO 발급·PO 실왕복 검증: current_user=sprintable·SELECT OK)로 전환.
+        # ⛔DATABASE_URL(PgBouncer 경유)은 이번 스코프 밖 — 유저 스왑이 PgBouncer userlist
+        # 갱신과 짝이라(안 맞추면 dev 서빙 인증 실패) #3110 2보로 분리.
         SECRETS_FLAG=""
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
-          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV:latest"
+          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest"
         elif [ "${_DEPLOY_ENV}" == "prod" ]; then
           # story #2445 Phase1(2026-08-04) — prod cutover: DATABASE_URL→PgBouncer VIP(DATABASE_URL_PROD_PGBOUNCER,
           # =10.178.0.111:6432), DATABASE_URL_DIRECT→직결(DATABASE_URL_PROD). _BACKEND_DB_PGBOUNCER=true와 짝.
