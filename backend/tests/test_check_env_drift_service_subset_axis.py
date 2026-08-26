@@ -134,6 +134,46 @@ def test_comment_only_service_name_is_not_a_real_declaration():
     assert mod._SERVICE_NAME_RE.findall(comment_only) == ["sprintable-ghost-dev"]
 
 
+def test_bucket_keyed_literal_is_not_a_service_declaration():
+    """⭐story #3117(2026-08-26, PR#3520 카디르 qa:changes) — GCS_AVATARS_BUCKET을 prod에도
+    명시 배선(`GCS_AVATARS_BUCKET=sprintable-avatars-prod`)하자 이 스캐너가 유령 서비스로
+    오탐해 CI를 3연쇄 실패시켰다. 개별 리터럴 예외 추가(밴드에이드)가 아니라 "BUCKET이 든
+    key/변수의 값"이라는 컨텍스트로 구조적으로 걸러지는지 확認 — 다음 버킷 리터럴에도
+    재발하지 않아야 하므로 avatars가 아닌 **다른** 버킷명으로 증명한다."""
+    mod = _load_check_env_drift()
+    for line in (
+        'GCS_WIDGETS_BUCKET=sprintable-widgets-prod',
+        '_GCS_WIDGETS_BUCKET: sprintable-widgets-dev',
+        'BUCKET="sprintable-widgets-prod"',
+    ):
+        m = mod._SERVICE_NAME_RE.search(line)
+        assert m is not None, f"테스트 전제 실패 — 정규식 자체가 {line!r}에서 매치 안 됨"
+        assert mod._looks_like_resource_literal(line, m.start()), (
+            f"{line!r}이 서비스 선언으로 오판됨(BUCKET 컨텍스트 제외 실패)"
+        )
+
+
+def test_gs_uri_prefixed_literal_is_not_a_service_declaration():
+    """`gs://` 직후 리터럴도 GCS 리소스로 컨텍스트 배제 — 버킷명에 BUCKET이 안 든 경우까지
+    커버(예: `gcloud storage buckets update gs://sprintable-x-prod`)."""
+    mod = _load_check_env_drift()
+    line = "gcloud storage buckets update gs://sprintable-x-prod --cors-file=foo.json"
+    m = mod._SERVICE_NAME_RE.search(line)
+    assert m is not None
+    assert mod._looks_like_resource_literal(line, m.start())
+
+
+def test_real_service_declaration_still_caught_beside_bucket_literal():
+    """음성대조 — 버킷 컨텍스트 제외가 과해서 진짜 서비스 선언까지 삼키면 안 된다. 같은 파일
+    안에 버킷 리터럴과 유령 서비스 선언이 같이 있으면 유령만 걸려야 한다."""
+    mod = _load_check_env_drift()
+    line = 'GCS_WIDGETS_BUCKET=sprintable-widgets-prod; gcloud run deploy sprintable-typo-dev'
+    matches = list(mod._SERVICE_NAME_RE.finditer(line))
+    assert len(matches) == 2, "테스트 전제 실패 — 매치 2건이어야 함"
+    kept = [m.group(0) for m in matches if not mod._looks_like_resource_literal(line, m.start())]
+    assert kept == ["sprintable-typo-dev"]
+
+
 def test_external_iac_wellformed_positive_control(tmp_path, monkeypatch):
     """실제 리포 파일 대신 임시 디렉터리에 유령 서비스명을 심어 위반이 잡히는지 증명 —
     리포 원본은 건드리지 않는다."""
