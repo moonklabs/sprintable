@@ -48,6 +48,8 @@ _DECLARED_SUBSTITUTIONS = {
     "_BACKEND_PRESENCE_REDIS_ENABLED", "_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED",
     "_BACKEND_SSE_LEASE_REDIS_ENABLED", "_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED",
     "_FRONTEND_MIN_INSTANCES", "_FRONTEND_MAX_INSTANCES", "_LICENSE_CONSENT",
+    # story aec3ec09([P1 후속] OAuth 핸드오프 활성화) — LICENSE_CONSENT와 동일 배선 클래스.
+    "_FIREBASE_OAUTH_HANDOFF_ENABLED",
     "_NEXT_PUBLIC_APP_URL", "_ADMIN_OPERATOR_AUDIENCE", "_ADMIN_OPERATOR_ALLOWLIST",
     # story #2771 — office-converter(Gotenberg) URL, deploy-office-converter 스텝과 짝.
     "_GOTENBERG_SERVICE_URL", "_OFFICE_CONVERTER_MAX_INSTANCES",
@@ -123,6 +125,8 @@ def _run_env_vars_assembly(deploy_env: str, redis_url: str, gotenberg_url: str =
         "_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED": "false",
         "_REDIS_URL": redis_url,
         "_LICENSE_CONSENT": "agreed",
+        # story aec3ec09 — set -u라 미설정이면 스크립트가 죽는다(LICENSE_CONSENT와 동일 이유).
+        "_FIREBASE_OAUTH_HANDOFF_ENABLED": "false",
         "_NEXT_PUBLIC_APP_URL": "https://example.run.app",
         "_ADMIN_OPERATOR_AUDIENCE": "https://example-audience.run.app",
         "_ADMIN_OPERATOR_ALLOWLIST": "operator@example.iam.gserviceaccount.com",
@@ -308,6 +312,7 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         "PRESENCE_ONLINE_REDIS_ENABLED=false,SSE_LEASE_REDIS_ENABLED=false,"
         "SSE_TRANSIENT_REPLAY_ENABLED=false,LICENSE_CONSENT=agreed,"
         "NEXT_PUBLIC_APP_URL=https://example.run.app,DEPLOY_ENV=dev,"
+        "FIREBASE_OAUTH_HANDOFF_ENABLED=false,"
         "REDIS_URL=redis://10.164.120.243:6379,"
         "ADMIN_OPERATOR_AUDIENCE=https://example-audience.run.app,"
         "ADMIN_OPERATOR_ALLOWLIST=operator@example.iam.gserviceaccount.com,"
