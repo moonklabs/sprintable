@@ -3490,6 +3490,8 @@
     "approvalRequestTossEmptyTitle": "보낼 수 있는 대화가 없습니다",
     "approvalRequestTossEmptyBody": "{name}님이 참여한 대화가 필요합니다",
     "approvalRequestTossSuccessToast": "{conversation}(으)로 보냈습니다",
+    "approvalRequestTossAlreadyThereChip": "이미 있음",
+    "approvalRequestTossAlreadyThereToast": "{conversation}에 이미 있습니다",
     "approvalRequestDelegate": "다른 결재자에게 위임",
     "approvalRequestDelegateLoading": "불러오는 중…",
     "approvalRequestDelegatePickPlaceholder": "위임할 결재자 선택",
