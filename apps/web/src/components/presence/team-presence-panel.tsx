@@ -5,6 +5,7 @@ import { KeyRound, X } from 'lucide-react';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { Avatar } from '@/components/shared/avatar';
 import { GlassPanel } from '@/components/ui/glass-panel';
+import { runtimeLabel } from '@/lib/runtime-capabilities';
 import { cn } from '@/lib/utils';
 import type { TeamPresenceItem } from './use-team-presence';
 import type { AgentAuthFailureInfo } from './use-agent-auth-failures';
@@ -61,7 +62,9 @@ function PresenceRow({ item, authFailure }: { item: TeamPresenceItem; authFailur
   const t = useTranslations('presence');
   const offline = !item.working && (item.presence_status === 'offline' || !item.presence_status);
   const dotStatus: PresenceStatus = item.presence_status ?? 'offline';
-  const fallback = [item.agent_role, item.runtime_type].filter(Boolean).join(' · ');
+  // story #3092(2단계, 표면1) — runtime_type 원값이 아니라 runtimeLabel()로 고유명사화
+  // (raw key「claude-code」 노출 금지, 전역 폴백 규칙).
+  const fallback = [item.agent_role, runtimeLabel(item.runtime_type)].filter(Boolean).join(' · ');
 
   return (
     <li className={cn('flex items-center gap-2.5 rounded-lg px-2 py-1.5', offline && 'opacity-60')}>
@@ -72,6 +75,7 @@ function PresenceRow({ item, authFailure }: { item: TeamPresenceItem; authFailur
         size={32}
         presenceStatus={dotStatus}
         isWorking={item.working}
+        runtimeType={item.runtime_type}
       />
 
       <div className="min-w-0 flex-1">

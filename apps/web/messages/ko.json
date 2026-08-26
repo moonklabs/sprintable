@@ -1274,6 +1274,7 @@
     "lastProjectMembership": "이 멤버의 마지막 활성 프로젝트 배정은 제거할 수 없습니다",
     "humanMember": "사람",
     "agentMember": "에이전트",
+    "connectorLabel": "커넥터",
     "noProjectMembers": "이 프로젝트에 배정된 멤버가 없습니다",
     "noProjectMembersHint": "새 멤버는 조직 멤버 탭에서 초대하세요.",
     "projectManagement": "프로젝트 관리",
