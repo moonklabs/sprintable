@@ -86,10 +86,17 @@ export function resolveRuntimeStatus(runtimeType: string | null | undefined): Ru
 
 /**
  * runtime_type 키 → 사람이 읽는 표시명 (E-CHAT-CMD S8 #1 — hint·경고 카피의 {runtime} 바인딩용).
- * 등록키 → label(claude-code→"Claude Code") · 미등록값 → 원값 보존(S2 ⑤ 패턴) ·
- * null/빈값 → null(호출부가 i18n "런타임 미설정"으로 치환 — 순수 util은 번역 컨텍스트 없음).
+ * 등록키 → label(claude-code→"Claude Code") · null/빈값/미등록값 → null(호출부가 i18n
+ * "런타임 미설정"으로 치환하거나 라벨 자체를 생략 — 순수 util은 번역 컨텍스트가 없다).
+ *
+ * story #3103(DS·후속, 3505 design 판정 필수) — 미등록값 「원값 보존」(구 S2 ⑤ 패턴)을
+ * 폐기했다. registry 미등재 runtime_type이 실제로 들어오면 raw key(예: "internal-beta")가
+ * UI에 그대로 노출되는 잠복 클래스였다 — 전역 폴백 규칙("raw key 노출 0")과 충돌. 소비처
+ * 전수 확認 결과 모든 호출부(command-hint-notice·chat-input·team-presence-panel·Avatar
+ * 툴팁·workforce 상세 배지)가 이미 `?? fallback` 또는 truthy 체크로 null을 우아하게
+ * 처리하고 있어 이 변경만으로 닫힌다(호출부 수정 0).
  */
 export function runtimeLabel(key: string | null | undefined): string | null {
   if (!key) return null;
-  return getRuntimeDef(key)?.label ?? key;
+  return getRuntimeDef(key)?.label ?? null;
 }

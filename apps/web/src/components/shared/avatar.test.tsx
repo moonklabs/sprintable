@@ -200,7 +200,10 @@ describe('Avatar — story #3092 2단계 커넥터 hover 툴팁', () => {
     expect(document.body.querySelector('[data-slot="tooltip-content"]')?.textContent).toBe('유나Agent');
   });
 
-  it('runtimeType이 registry 미등록 원값이어도 raw key를 그대로 노출하지 않고(runtimeLabel 계약) 보여준다', async () => {
+  // story #3103(DS·후속, 3505 design 판정 필수) — runtimeLabel() 미등록 폴백이
+  // `?? key`(원값 보존)에서 `?? null`로 바뀌었다(raw key 노출 0 전역 규칙과 정합). 이 테스트는
+  // 그 새 계약을 물려받아 "Agent" 단독 폴백으로 갱신한다(옛 원값 보존 기대치 폐기).
+  it('runtimeType이 registry 미등록 원값이면 raw key를 노출하지 않고 "Agent" 단독으로 폴백한다', async () => {
     await act(async () => {
       root.render(wrap(<Avatar name="유나" actorType="agent" runtimeType="unknown-runtime-x" />));
     });
@@ -209,8 +212,8 @@ describe('Avatar — story #3092 2단계 커넥터 hover 툴팁', () => {
       trigger.focus();
       await new Promise((r) => setTimeout(r, 900));
     });
-    // runtimeLabel()의 기존 계약(미등록값=원값 보존, S2 ⑤ 패턴)을 그대로 물려받는다 —
-    // 이 파일은 그 계약을 재정의하지 않는다. 여기선 "폴백이 죽지 않는다"만 고정.
-    expect(document.body.querySelector('[data-slot="tooltip-content"]')?.textContent).toBe('유나Agent · unknown-runtime-x');
+    const content = document.body.querySelector('[data-slot="tooltip-content"]')?.textContent;
+    expect(content).toBe('유나Agent');
+    expect(content).not.toContain('unknown-runtime-x');
   });
 });
