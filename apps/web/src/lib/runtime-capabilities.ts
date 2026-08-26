@@ -125,8 +125,17 @@ export interface ConnectorBadgeDef {
   /** kind='icon' 전용 — 'color'=브랜드 원색 유지(디스크=테마 bg-card). 'mono'=단색 마크
    * (디스크=고정 밝은 배경, 무테마 — 다크 테마에서도 검정 마크 대비 확保). */
   colorMode?: 'color' | 'mono';
-  /** kind='initials' 전용 — 디스크에 그릴 1~2자(중립 mono, 브랜드색/서체 미모사). */
+  /** kind='initials'일 때(디스크 항상 이니셜)이거나, kind='icon'인데 아바타가 minIconSize
+   * 미만이어서 아이콘 대신 보일 때(§ minIconSize 참고) 디스크에 그릴 1~2자(중립 mono,
+   * 브랜드색/서체 미모사). */
   initials?: string;
+  /** kind='icon' 전용, optional — 이 값(px, 아바타 기준) 미만이면 아이콘을 안 쓴다.
+   * 기본 28(전역 규격 §2, 대부분의 기하형 마크가 여기서도 식별됨). story #3092(5단계
+   * delta, 유나 실측) — hermes처럼 상세한 초상형 아이콘은 28~47에서 blob으로 뭉개지는
+   * 게 실측 확認돼 개별 override가 필요했다. 이 값 미만~28 이상 구간은 `initials`가
+   * 있으면 그걸로, 없으면 바로 "Agent" 텍스트로 강등(28 미만은 항상 "Agent" 텍스트,
+   * 전역 규칙 무변경). */
+  minIconSize?: number;
   /** 실행 패키지 §5/① 요건 — 실제 pull한 출처(공식 소스 우선·애그리게이터는 대조 후만). */
   sourceNote: string;
 }
@@ -148,5 +157,17 @@ export const CONNECTOR_BADGE_REGISTRY: Record<RuntimeKey, ConnectorBadgeDef> = {
   // 강등했던 판정이 "래스터도 안 찾아봤다"는 지적으로 재조사 — nousresearch.com 자체
   // HTML(og:image·apple-touch-icon·favicon 링크 전수)에서 실제 공식 래스터 발견,
   // 이니셜 폐기하고 아이콘으로 승격.
-  hermes: { kind: 'icon', asset: '/connector-icons/hermes.png', colorMode: 'mono', sourceNote: '1st-party: https://nousresearch.com/wp-content/uploads/2024/03/android-chrome-512x512-1-300x300.png(자사 사이트 자체 favicon/앱아이콘 세트 중 하나, 300×300 PNG — Nous Research 브랜드 마스코트 일러스트. 배경 투명·검정 단색 라인아트라 mono 취급). 3단계 "벡터 자산 부재" 판정은 hermes-agent repo의 유니코드 글리프 favicon만 조사한 것이었고, 공식 사이트 자체의 래스터 아이콘 세트는 미조사 상태였음(선생님 재지시로 발견) — 이 판정으로 대체' },
+  //
+  // story #3092(5단계 delta, 유나 실측 2026-08-26) — 이 마크는 기하형(별/스파클/큐브 등)이
+  // 아니라 상세 초상 일러스트라 av48 미만에서 검정 blob으로 뭉개짐이 실측 확認됨(av48=
+  // 로고 13px에서 확신 식별, av36 이하 실패). 전역 임계(28) 대신 minIconSize=48로
+  // override하고, 28~47 구간은 이니셜 "He"로 폴백(28 미만은 기존 규칙대로 "Agent" 텍스트).
+  hermes: {
+    kind: 'icon',
+    asset: '/connector-icons/hermes.png',
+    colorMode: 'mono',
+    minIconSize: 48,
+    initials: 'He',
+    sourceNote: '1st-party: https://nousresearch.com/wp-content/uploads/2024/03/android-chrome-512x512-1-300x300.png(자사 사이트 자체 favicon/앱아이콘 세트 중 하나, 300×300 PNG — Nous Research 브랜드 마스코트 일러스트. 배경 투명·검정 단색 라인아트라 mono 취급). 3단계 "벡터 자산 부재" 판정은 hermes-agent repo의 유니코드 글리프 favicon만 조사한 것이었고, 공식 사이트 자체의 래스터 아이콘 세트는 미조사 상태였음(선생님 재지시로 발견) — 이 판정으로 대체. minIconSize=48·이니셜 "He"는 유나 실측(av48 확신 식별·av36 이하 blob)',
+  },
 };

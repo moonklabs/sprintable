@@ -283,19 +283,51 @@ describe('Avatar — story #3092 3단계 커넥터 아이콘 배지', () => {
   // story #3092(5단계, 선생님 재지시 2026-08-26) — 3단계의 "벡터 자산 부재" 이니셜 강등은
   // hermes-agent repo만 조사한 결과였다. nousresearch.com 자체 favicon/앱아이콘 세트에서
   // 공식 래스터(PNG)를 발견해 아이콘으로 재승격 — 이니셜 폐기.
-  it('hermes는 5단계에서 공식 래스터(PNG) 아이콘으로 재승격됐다 — 라벨층(툴팁)은 그대로 "Hermes"', async () => {
+  //
+  // story #3092(5단계 delta, 유나 실측 2026-08-26) — 상세 초상형이라 av48 미만은 blob으로
+  // 뭉개짐 확認 → minIconSize=48 override + 28~47 구간 전용 이니셜 "He" 폴백. 3단 사다리:
+  // av≥48 아이콘 / av 28~47 이니셜 "He" / av<28 "Agent" 텍스트(다른 8종엔 무영향).
+  it('hermes 5단계 delta — av≥48 아이콘, av 28~47 이니셜 "He", av<28 "Agent" 텍스트(3단 사다리)', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={48} runtimeType="hermes" />));
+    });
+    let disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
+    expect(disk.className).toContain('bg-white');
+    expect(disk.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/hermes.png');
+
     await act(async () => {
       root.render(wrap(<Avatar name="유나" actorType="agent" size={32} runtimeType="hermes" />));
     });
-    const disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
-    expect(disk.className).toContain('bg-white');
-    expect(disk.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/hermes.png');
+    disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
+    expect(disk.querySelector('img')).toBeNull();
+    expect(disk.textContent).toBe('He');
+    expect(disk.className).toContain('bg-card');
+
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={24} runtimeType="hermes" />));
+    });
+    expect(container.querySelector('.rounded-full.ring-2.ring-background')).toBeNull();
+    expect(container.textContent).toContain('Agent');
+  });
+
+  it('hermes 라벨층(hover 툴팁)은 크기 사다리와 무관하게 그대로 "Agent · Hermes"', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={32} runtimeType="hermes" />));
+    });
     const trigger = container.querySelector('[data-slot="tooltip-trigger"]') as HTMLElement;
     await act(async () => {
       trigger.focus();
       await new Promise((r) => setTimeout(r, 900));
     });
     expect(document.body.querySelector('[data-slot="tooltip-content"]')?.textContent).toBe('유나Agent · Hermes');
+  });
+
+  it('다른 8종(예: cursor)은 minIconSize override가 없어 기존 임계(28) 그대로다(회귀 없음)', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={28} runtimeType="cursor" />));
+    });
+    const disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
+    expect(disk.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/cursor.svg');
   });
 
   it('runtime_type null이면 아이콘/이니셜 디스크 자체가 안 뜨고 옛 "Agent" 텍스트 배지만 뜬다(회귀 없음)', async () => {
