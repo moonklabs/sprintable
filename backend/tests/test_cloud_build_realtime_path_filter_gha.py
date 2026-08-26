@@ -12,11 +12,24 @@ cloudbuild.yaml에 넘긴다. 이 테스트는 그 GHA 스텝의 구조 계약�
 읽기 쪽 계약은 test_3031_realtime_cloudrun_deploy_path_filter.py가 별도로 고정)."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 _WORKFLOW_PATH = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "cloud-build.yml"
+
+# story #3098 delta(2026-08-26, 카디르 QA 반려) — 원래 잣대는 run.count("check_realtime_
+# relevant_diff.sh")로 파일명의 순수 텍스트 언급 수를 셌다. #3098이 설명 주석(문서·근거
+# 서술)에서 그 파일명을 한 번 더 적기만 했는데도(실 호출은 여전히 2곳 그대로) 오탐 RED가
+# 났다 — "언급 수"는 주석까지 세는 부서지기 쉬운 자다. 실 호출 패턴(`bash backend/scripts/
+# check_realtime_relevant_diff.sh`)만 세도록 좁힌다.
+_INVOCATION_PATTERN = re.compile(r"bash backend/scripts/check_realtime_relevant_diff\.sh\b")
+
+
+def _invocation_count(run: str) -> int:
+    return len(_INVOCATION_PATTERN.findall(run))
 
 
 def _load():
@@ -54,9 +67,21 @@ def test_gate_step_unshallows_before_diffing():
 
 def test_gate_step_reuses_shared_diff_script_for_both_targets():
     """GCE·Cloud Run 판정 로직이 이중선언되면 안 된다 — 둘 다 SSOT(check_realtime_relevant_diff.sh)
-    재사용."""
+    재사용. 잣대=실 호출 패턴 개수(_INVOCATION_PATTERN) — 주석·문서의 언급은 안 셈(위 모듈
+    독스트링 참조)."""
     run = _gate_step()["run"]
-    assert run.count("check_realtime_relevant_diff.sh") == 2
+    assert _invocation_count(run) == 2
+
+
+def test_gate_step_reuses_shared_diff_script_guard_catches_third_invocation():
+    """양성대조(카디르 QA 요구, 2026-08-26) — 잣대를 실 호출 패턴으로 좁혀도 가드 의도(제3의
+    실 호출 추가 시 genuine RED)는 그대로 살아 있는지 직접 증명한다. 호출 라인 하나를
+    그대로 복제(주석이 아니라 실행 가능한 코드로) — 이 복제가 없으면 위 테스트 하나만으론
+    "우연히 2"인지 "실제로 실 호출만 정확히 세고 있는지" 구분이 안 된다."""
+    run = _gate_step()["run"]
+    mutated = run + '\nbash backend/scripts/check_realtime_relevant_diff.sh "extra_from" "extra_to"\n'
+    with pytest.raises(AssertionError):
+        assert _invocation_count(mutated) == 2
 
 
 def test_gate_step_reads_serving_revision_not_template_spec_for_cloudrun():
