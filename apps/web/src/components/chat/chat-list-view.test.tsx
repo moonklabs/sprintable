@@ -275,7 +275,7 @@ describe('ChatListView — 리스트 아바타 실사진(story #2968)', () => {
 // story #3106(#3092 후속) — DM 상대(oneOnOneParticipant)의 runtime_type이 BE에서 이미
 // 내려와도 이 컴포넌트가 Avatar에 안 넘기면 여전히 "Agent" 폴백에 머문다.
 describe('ChatListView — story #3106 참가자 runtime_type → Avatar 배선', () => {
-  it('DM 상대(agent)의 runtime_type이 있으면 아바타에 커넥터 이니셜 디스크(CC)가 뜬다', async () => {
+  it('DM 상대(agent)의 runtime_type이 있으면 아바타에 커넥터 공식 아이콘이 뜬다', async () => {
     stubFetchWithConversations([{
       id: 'conv-dm-agent-1', type: 'dm', title: null,
       latest_message: null, updated_at: '2026-08-26T00:00:00Z', unread_count: 0,
@@ -286,7 +286,7 @@ describe('ChatListView — story #3106 참가자 runtime_type → Avatar 배선'
     }]);
     await mount();
     const disk = container.querySelector('.rounded-full.ring-2.ring-background');
-    expect(disk?.textContent).toBe('CC');
+    expect(disk?.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/claude-code.svg');
   });
 
   it('DM 상대(agent)의 runtime_type이 없으면(레거시) "Agent" 텍스트 폴백 그대로다(회귀 없음)', async () => {

@@ -1858,17 +1858,18 @@ describe('ChatBubble — story #ec57c80c report성 메시지 밀도(kicker+리�
 
 // story #3106(#3092 후속·선생님 실화면 지적, 2026-08-26) — sender.runtime_type이 BE payload에
 // 실려도 chat-bubble이 Avatar에 안 넘기면 여전히 "Agent" 폴백에 머문다. runtimeType="claude-code"
-// 는 아이콘 미승인이라 크기 무관 항상 이니셜 디스크("CC")로 렌더된다(avatar.test.tsx의
-// 「HIGH 미승인 커넥터」 스위트와 동형 — 여기선 배지 로직이 아니라 배선만 재확인).
+// 는 #3511(선생님 상표 확定, 이 PR과 같은 날 develop 착지)부로 아이콘 승인 커넥터라 아바타≥28
+// (버블 size=28)에서 공식 아이콘 디스크로 렌더된다(avatar.test.tsx 「claude-code는 아이콘
+// 승인 커넥터로 스왑됐다」 스위트와 동형 — 여기선 배지 로직이 아니라 배선만 재확인).
 describe('ChatBubble — story #3106 sender_runtime_type → Avatar 배선', () => {
-  it('agent sender_runtime_type이 있으면 아바타에 커넥터 이니셜 디스크(CC)가 뜬다', async () => {
+  it('agent sender_runtime_type이 있으면 아바타에 커넥터 공식 아이콘이 뜬다', async () => {
     await act(async () => {
       root.render(wrap(
         <ChatBubble message={{ ...baseMessage, sender_runtime_type: 'claude-code' }} isMine={false} />,
       ));
     });
     const disk = container.querySelector('.rounded-full.ring-2.ring-background');
-    expect(disk?.textContent).toBe('CC');
+    expect(disk?.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/claude-code.svg');
   });
 
   it('agent sender_runtime_type이 null(구서버·미배선)이면 여전히 "Agent" 텍스트 폴백이다(회귀 없음)', async () => {
