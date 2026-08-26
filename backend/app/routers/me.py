@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
+from app.routers.auth import _OAUTH_CONFIGS
 from app.models.member import Member
 from app.models.project import OrgMember
 from app.models.team import TeamMember
@@ -21,6 +22,12 @@ from app.schemas.human_api_key import (
 from app.schemas.me import MeResponse, UpdateMe
 
 router = APIRouter(prefix="/api/v2/me", tags=["me", "Organization"])
+
+
+def _linked_providers(user: User) -> list[str]:
+    """story #3122 — user에 붙은 provider_id 컬럼들을 _OAUTH_CONFIGS 등록 순서대로 나열.
+    새 provider가 auth.py에 등록되면 여기 손 안 대도 자동으로 잡힌다(단일 SSOT)."""
+    return [p for p in _OAUTH_CONFIGS if getattr(user, f"{p}_id", None) is not None]
 
 
 async def _resolve_current_human_member(
@@ -194,6 +201,7 @@ async def get_me(
                     role=org_member.role,
                     is_active=True,
                     has_password=bool(user.hashed_password) if user else None,
+                    linked_providers=_linked_providers(user) if user else [],
                 )
 
     if member is None:
@@ -208,6 +216,7 @@ async def get_me(
         user = user_result.scalar_one_or_none()
         if user:
             data.has_password = bool(user.hashed_password)
+            data.linked_providers = _linked_providers(user)
             data.email = user.email  # E-ONBOARDING S2: User.email 노출
 
     # S-MBR-03: org owner/admin → effective role 상속. /me role이 JWT role과 일치하도록.
@@ -382,6 +391,7 @@ async def update_me(
                     role=org_member.role,
                     is_active=True,
                     has_password=bool(user.hashed_password) if user else None,
+                    linked_providers=_linked_providers(user) if user else [],
                 )
 
     if member is None:

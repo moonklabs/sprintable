@@ -27,6 +27,7 @@ import { StandupDeadlineSection } from '@/components/settings/standup-deadline-s
 import { GateLevelMatrix } from '@/components/settings/gate-level-matrix';
 import { TwoFactorSection } from '@/components/settings/two-factor-section';
 import { SetPasswordSection } from '@/components/settings/set-password-section';
+import { LinkedAccountsSection } from '@/components/settings/linked-accounts-section';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { canSubmitOrgDelete } from './org-delete-gate';
 import { Badge } from '@/components/ui/badge';
@@ -794,6 +795,7 @@ export default function SettingsPage() {
               <div className="space-y-6">
                 <MyProfileSection />
                 <SetPasswordSection />
+                <LinkedAccountsSection />
                 <TwoFactorSection />
                 {currentProjectId && (
                   <MyNotificationChannelSection

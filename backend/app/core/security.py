@@ -236,8 +236,14 @@ def decode_email_verification_token(token: str) -> dict:
 OAUTH_STATE_EXPIRE_MINUTES = 10
 
 
-def create_oauth_state_token(provider: str) -> str:
-    """10분 만료 OAuth state JWT. CSRF 방지용."""
+def create_oauth_state_token(provider: str, *, link_user_id: str | None = None) -> str:
+    """10분 만료 OAuth state JWT. CSRF 방지용.
+
+    story #3122(계정 연결) — link_user_id가 있으면 이 state는 "로그인"이 아니라 "이미
+    로그인된 이 유저에게 provider를 연결"하는 요청이라는 신원을 자체 서명으로 실어 나른다.
+    self-signed HS256이라 왕복 중 위조 불가 — 콜백에서 이 값과 그 시점의 실제 로그인
+    유저를 대조하면(auth.py oauth_link_callback) 10분 창 안에 브라우저 탭에서 계정을
+    전환해도 엉뚱한 계정에 연결되는 걸 막는다."""
     now = datetime.now(timezone.utc)
     exp = now + timedelta(minutes=OAUTH_STATE_EXPIRE_MINUTES)
     payload = {
@@ -246,16 +252,22 @@ def create_oauth_state_token(provider: str) -> str:
         "iat": int(now.timestamp()),
         "exp": int(exp.timestamp()),
     }
+    if link_user_id is not None:
+        payload["link_user_id"] = link_user_id
     return jwt.encode(payload, _get_secret(), algorithm="HS256")
 
 
-def decode_oauth_state_token(token: str, expected_provider: str) -> None:
-    """OAuth state token 검증. 만료/타입/provider 불일치 시 JWTError."""
+def decode_oauth_state_token(token: str, expected_provider: str) -> dict:
+    """OAuth state token 검증. 만료/타입/provider 불일치 시 JWTError.
+
+    story #3122 — link_user_id를 호출부가 읽을 수 있도록 payload 전체를 반환하도록 확장
+    (기존 반환값 None은 호출부가 어차피 안 쓰고 있었다 — 무회귀)."""
     payload = decode_jwt(token)
     if payload.get("type") != "oauth_state":
         raise JWTError("Invalid state token type")
     if payload.get("provider") != expected_provider:
         raise JWTError("Provider mismatch in state token")
+    return payload
 
 
 # story #3118(Sign in with Apple) — Google과 달리 Apple의 OAuth client_secret은 고정

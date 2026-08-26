@@ -1088,6 +1088,67 @@ async def _verify_apple_id_token(client: httpx.AsyncClient, id_token: str, *, ex
     )
 
 
+class OAuthExchangeError(Exception):
+    """code→token/userinfo 교환 실패. .code/.message가 그대로 _err() 응답에 매핑된다.
+
+    story #3122 — 로그인 콜백(oauth_callback)과 계정연결 콜백(oauth_link_callback)이
+    같은 프로토콜 단계(code→token→userinfo, Apple이면 JWKS 서명검증까지)를 공유한다.
+    Apple id_token 검증 같은 보안 로직을 두 곳에 복붙해두면 한쪽만 고치고 잊는 사고가
+    나기 쉬워 단일 헬퍼(_exchange_oauth_code_for_userinfo)로 추출했다."""
+
+    def __init__(self, code: str, message: str) -> None:
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
+async def _exchange_oauth_code_for_userinfo(
+    client: httpx.AsyncClient, provider: str, cfg: dict, code: str,
+) -> tuple[str, str]:
+    """code→access_token 교환 후 (oauth_id, email) 반환. email은 provider가 안 주면 ""(빈
+    문자열) — Apple은 최초 인가 이후 재인가에서 email을 아예 안 돌려주는 게 공식 동작이라
+    "필수 여부" 판단은 호출부 책임으로 남긴다(oauth_callback은 신규가입에 이메일이 필수라
+    직접 검사하고, oauth_link_callback은 oauth_id만 있으면 충분 — 이메일로 아무것도 안 함)."""
+    token_resp = await client.post(
+        cfg["token_url"],
+        data={
+            "client_id": _client_id(provider),
+            "client_secret": _client_secret(provider),
+            "code": code,
+            "redirect_uri": _redirect_uri(provider),
+            "grant_type": "authorization_code",
+        },
+        headers={"Accept": "application/json"},
+    )
+    if token_resp.status_code != 200:
+        raise OAuthExchangeError("OAUTH_TOKEN_EXCHANGE_FAILED", "Failed to exchange code for token")
+    token_data = token_resp.json()
+    access_token = token_data.get("access_token")
+    if not access_token:
+        raise OAuthExchangeError("OAUTH_NO_TOKEN", "No access_token in response")
+
+    if provider == "apple":
+        id_token = token_data.get("id_token")
+        if not id_token:
+            raise OAuthExchangeError("OAUTH_NO_TOKEN", "No id_token in response")
+        try:
+            userinfo = await _verify_apple_id_token(client, id_token, expected_audience=_client_id(provider))
+        except JWTError:
+            raise OAuthExchangeError("OAUTH_USERINFO_FAILED", "Failed to verify Apple id_token")
+    else:
+        userinfo_resp = await client.get(
+            cfg["userinfo_url"],
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if userinfo_resp.status_code != 200:
+            raise OAuthExchangeError("OAUTH_USERINFO_FAILED", "Failed to fetch user info")
+        userinfo = userinfo_resp.json()
+
+    oauth_id = str(userinfo.get(cfg["id_field"], ""))
+    email = (userinfo.get(cfg["email_field"]) or "").lower().strip()
+    return oauth_id, email
+
+
 class OAuthCallbackRequest(BaseModel):
     provider: str
     code: str
@@ -1139,48 +1200,10 @@ async def oauth_callback(
         return _err("INVALID_STATE", "OAuth state is invalid or expired", 400)
 
     async with httpx.AsyncClient(timeout=15) as client:
-        # 1. code → access_token 교환
-        token_resp = await client.post(
-            cfg["token_url"],
-            data={
-                "client_id": _client_id(provider),
-                "client_secret": _client_secret(provider),
-                "code": body.code,
-                "redirect_uri": _redirect_uri(provider),
-                "grant_type": "authorization_code",
-            },
-            headers={"Accept": "application/json"},
-        )
-        if token_resp.status_code != 200:
-            return _err("OAUTH_TOKEN_EXCHANGE_FAILED", "Failed to exchange code for token", 400)
-        token_data = token_resp.json()
-        access_token = token_data.get("access_token")
-        if not access_token:
-            return _err("OAUTH_NO_TOKEN", "No access_token in response", 400)
-
-        # 2. userinfo 조회 — Apple은 userinfo 엔드포인트 자체가 없다(공식 스펙). id/email은
-        # 토큰교환 응답에 함께 온 id_token(JWT) 클레임 안에 실려있고, Apple JWKS로 서명을
-        # 검증해야 신뢰할 수 있다(디코드만 하고 검증 생략하면 위조 토큰을 그대로 신뢰하는
-        # 구멍이 된다). Google은 기존 그대로 bearer-token GET.
-        if provider == "apple":
-            id_token = token_data.get("id_token")
-            if not id_token:
-                return _err("OAUTH_NO_TOKEN", "No id_token in response", 400)
-            try:
-                userinfo = await _verify_apple_id_token(client, id_token, expected_audience=_client_id(provider))
-            except JWTError:
-                return _err("OAUTH_USERINFO_FAILED", "Failed to verify Apple id_token", 400)
-        else:
-            userinfo_resp = await client.get(
-                cfg["userinfo_url"],
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-            if userinfo_resp.status_code != 200:
-                return _err("OAUTH_USERINFO_FAILED", "Failed to fetch user info", 400)
-            userinfo = userinfo_resp.json()
-
-    oauth_id = str(userinfo.get(cfg["id_field"], ""))
-    email = (userinfo.get(cfg["email_field"]) or "").lower().strip()
+        try:
+            oauth_id, email = await _exchange_oauth_code_for_userinfo(client, provider, cfg, body.code)
+        except OAuthExchangeError as exc:
+            return _err(exc.code, exc.message, 400)
 
     if not oauth_id or not email:
         return _err("OAUTH_MISSING_INFO", "Missing id or email from provider", 400)
@@ -1255,6 +1278,144 @@ async def oauth_callback(
         "token_type": "bearer",
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     })
+
+
+# ─── OAuth Account Linking (story #3122) ──────────────────────────────────────
+# #3118(Sign in with Apple) 그라운딩: Apple private relay 이메일이면 자동 이메일 병합이
+# 원천 불가해(oauth_callback 위 주석 참고) 항상 신규 계정이 생긴다 — PO 확定 정책은
+# "자동 병합에 안 기댄다, 병합은 사용자 주도 수동 연결로"였다. 이 3개 엔드포인트가 그
+# link rail: authorize(로그인 rail과 별개 — 이미 로그인된 유저 전용)·callback(신규 JWT를
+# 안 민팅한다 — 기존 세션에 provider_id만 붙인다)·unlink(최소 1개 로그인 수단 보장).
+
+@router.get("/oauth/{provider}/link/authorize")
+async def oauth_link_authorize(
+    provider: str,
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    if provider not in _OAUTH_CONFIGS:
+        return _err("INVALID_PROVIDER", f"Unsupported provider: {provider}", 400)
+    cfg = _OAUTH_CONFIGS[provider]
+    # redirect_uri는 로그인 rail과 완전히 동일한 물리 경로(_redirect_uri) — Google/Apple
+    # 콘솔에 등록된 콜백 도메인을 이 스토리 때문에 새로 추가할 필요가 없다. link 여부는
+    # state의 link_user_id 클레임과 FE의 별도 oauth_link_{provider} 쿠키(BFF route)로만
+    # 갈린다 — provider 쪽에서 보면 로그인 요청과 구분되지 않는다(의도된 설계).
+    state = create_oauth_state_token(provider, link_user_id=auth.user_id)
+    params = {
+        "client_id": _client_id(provider),
+        "redirect_uri": _redirect_uri(provider),
+        "response_type": "code",
+        "scope": cfg["scope"],
+        "state": state,
+    }
+    if provider == "google":
+        params["access_type"] = "offline"
+        params["prompt"] = "select_account"
+    if provider == "apple":
+        params["response_mode"] = "form_post"
+    url = f"{cfg['authorize_url']}?{urlencode(params)}"
+    return _ok({"url": url, "state": state})
+
+
+class OAuthLinkCallbackRequest(BaseModel):
+    provider: str
+    code: str
+    state: str
+
+
+@router.post("/oauth/{provider}/link/callback")
+async def oauth_link_callback(
+    provider: str,
+    body: OAuthLinkCallbackRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    if provider not in _OAUTH_CONFIGS or provider != body.provider:
+        return _err("INVALID_PROVIDER", f"Unsupported provider: {provider}", 400)
+    cfg = _OAUTH_CONFIGS[provider]
+
+    try:
+        state_payload = decode_oauth_state_token(body.state, provider)
+    except JWTError:
+        return _err("INVALID_STATE", "OAuth state is invalid or expired", 400)
+
+    # 방어: state 발급 시점 유저 ≠ 콜백 시점 유저(10분 창 안에 로그아웃/계정전환) — 엉뚱한
+    # 계정에 연결되는 걸 막는다. authorize 자체가 auth 필수라 link_user_id는 항상 있다.
+    if state_payload.get("link_user_id") != auth.user_id:
+        return _err("LINK_SESSION_MISMATCH", "Your session changed during linking — please try again", 409)
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            oauth_id, _email = await _exchange_oauth_code_for_userinfo(client, provider, cfg, body.code)
+        except OAuthExchangeError as exc:
+            return _err(exc.code, exc.message, 400)
+
+    if not oauth_id:
+        return _err("OAUTH_MISSING_INFO", "Missing id from provider", 400)
+
+    id_col = getattr(User, f"{provider}_id")
+    existing = (await session.execute(
+        select(User).where(id_col == oauth_id, User.is_active.is_(True))
+    )).scalar_one_or_none()
+
+    current_user_id = uuid.UUID(auth.user_id)
+    if existing and existing.id != current_user_id:
+        # AC2 — 이미 다른 계정에 묶인 provider_id. 병합이 아니라 명시 거부(계정 탈취 방지).
+        await _write_audit(
+            session, "oauth_link_rejected_conflict", user_id=current_user_id,
+            detail=f"provider={provider} already_linked_to={existing.id}",
+            ip_address=request.client.host if request.client else None,
+        )
+        await session.commit()
+        return _err("PROVIDER_ALREADY_LINKED", f"This {provider} account is already linked to a different account", 409)
+
+    if existing and existing.id == current_user_id:
+        return _ok({"provider": provider, "linked": True})  # 멱등 — 이미 본인 계정에 연결됨
+
+    await session.execute(
+        update(User).where(User.id == current_user_id).values(**{f"{provider}_id": oauth_id})
+    )
+    await _write_audit(
+        session, "oauth_link", user_id=current_user_id, detail=f"provider={provider}",
+        ip_address=request.client.host if request.client else None,
+    )
+    await session.commit()
+    return _ok({"provider": provider, "linked": True})
+
+
+@router.post("/oauth/{provider}/unlink")
+async def oauth_unlink(
+    provider: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    if provider not in _OAUTH_CONFIGS:
+        return _err("INVALID_PROVIDER", f"Unsupported provider: {provider}", 400)
+
+    user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+
+    id_col_name = f"{provider}_id"
+    if getattr(user, id_col_name) is None:
+        return _err("PROVIDER_NOT_LINKED", f"No {provider} account linked", 400)
+
+    # AC3 — 로그인 수단이 이거 하나뿐이면 해제 거부(계정 잠금 방지). 비밀번호 + 등록된
+    # provider 전부를 센다(구글/애플뿐 아니라 향후 provider 추가돼도 자동 정합).
+    login_method_count = (1 if user.hashed_password else 0) + sum(
+        1 for p in _OAUTH_CONFIGS if getattr(user, f"{p}_id") is not None
+    )
+    if login_method_count <= 1:
+        return _err("LAST_LOGIN_METHOD", "Cannot unlink your only sign-in method", 400)
+
+    await session.execute(update(User).where(User.id == user.id).values(**{id_col_name: None}))
+    await _write_audit(
+        session, "oauth_unlink", user_id=user.id, detail=f"provider={provider}",
+        ip_address=request.client.host if request.client else None,
+    )
+    await session.commit()
+    return _ok({"provider": provider, "linked": False})
 
 
 # ─── Password Reset ───────────────────────────────────────────────────────────
