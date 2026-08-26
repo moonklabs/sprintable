@@ -106,8 +106,11 @@ const PIPELINE_STAGE_TRUST_COLOR: Partial<Record<WorkcellPipelineStage, ProofSta
   running: 'blue', needs_input: 'amber', claimed_done: 'blue', verified: 'green', merge_ready: 'green',
 };
 
+// story #3099(DS·AA 후속, #3090과 동형 문법) — 라벨 텍스트(9px)가 라이트에서 amber 3.64/
+// green 3.49 AA 미달이라 중립화(text-proof-ink). 색 신호는 아래 dot(BG/BORDER/RING)이
+// 그대로 싣는다 — red만 예외(kill=최강 신호·AA 통과).
 const TRUST_TEXT_CLASS: Record<ProofState, string> = {
-  blue: 'text-proof-blue', amber: 'text-proof-amber', green: 'text-proof-green', red: 'text-proof-red',
+  blue: 'text-proof-ink', amber: 'text-proof-ink', green: 'text-proof-ink', red: 'text-proof-red',
 };
 const TRUST_BG_CLASS: Record<ProofState, string> = {
   blue: 'bg-proof-blue', amber: 'bg-proof-amber', green: 'bg-proof-green', red: 'bg-proof-red',
@@ -428,7 +431,9 @@ function RunLayer({ run }: { run: WorkcellRun }) {
         {run.scopes.length > 0 ? <span className="min-w-0 break-words font-mono text-[10.5px]">{t('runScopes')} {run.scopes.join(', ')}</span> : null}
       </div>
       <div className="mb-2 text-[11.5px] text-proof-ink-3">
-        {t('runBlocked')}: <b className={cn('font-semibold', run.blocked ? 'text-proof-amber' : 'text-proof-ink-2')}>{run.blocked ?? t('none')}</b>
+        {/* story #3099(DS·AA 후속) — amber 소형텍스트(11.5px) AA 미달, text-proof-ink로 중립화
+            (별도 dot 없는 자리라 "Blocked: {값}" 문구 자체가 이미 의미를 병기 — no-fiction). */}
+        {t('runBlocked')}: <b className={cn('font-semibold', run.blocked ? 'text-proof-ink' : 'text-proof-ink-2')}>{run.blocked ?? t('none')}</b>
       </div>
       {/* story #3054(2984-S6) — 헤어라인 채택, bg-proof-blue-soft 채움 폐지. ⚠️elev(그림자)는
           안 얹는다 — 이 콜아웃은 bentoLayout 여부와 무관하게 항상 렌더되는 공유 요소라

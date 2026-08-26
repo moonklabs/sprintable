@@ -58,7 +58,9 @@ export function TrustSeal(props: TrustSealProps) {
         <span className="min-w-0 flex-1 text-proof-ink-3">
           <b className="font-bold text-proof-ink">{t('trustSealClaimedBy')}</b> · {t('trustSealAwaitingVerificationLong')}
         </span>
-        <span className="shrink-0 text-[10.5px] font-bold text-proof-amber">{t('trustSealAwaitingVerification')}</span>
+        {/* story #3099(DS·AA 후속) — amber 소형텍스트(10.5px) AA 미달, text-proof-ink로
+            중립화(별도 dot 없는 자리 — "검증 대기" 문구 자체가 이미 의미 병기). */}
+        <span className="shrink-0 text-[10.5px] font-bold text-proof-ink">{t('trustSealAwaitingVerification')}</span>
       </div>
     );
   }

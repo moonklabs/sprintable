@@ -161,11 +161,14 @@ describe('GoalsClient — 결과 원장 재조립(§2 이중 신호·§3 마스�
     expect(container.querySelector('.bg-primary')).toBeNull();
   });
 
-  it('결과(Verified) 줄 — outcome_status=hit이면 초록 톤 "적중" 텍스트가 뜬다', async () => {
+  // story #3099(DS·AA 후속) — green 소형텍스트 AA 미달로 text-proof-ink 중립화(#3090과 동형).
+  // "적중" 문구 자체가 이미 의미를 병기하므로 색 손실은 아니다.
+  it('결과(Verified) 줄 — outcome_status=hit이면 "적중" 텍스트가 중립 톤(text-proof-ink)으로 뜬다', async () => {
     stubFetch([{ id: 'e1', title: '달성 목표', status: 'done', total_stories: 2, done_stories: 2, outcome_status: 'hit' }]);
     await mount();
     expect(container.textContent).toContain('적중');
-    expect(container.querySelector('.text-proof-green')).not.toBeNull();
+    expect(container.querySelector('.text-proof-ink')).not.toBeNull();
+    expect(container.querySelector('.text-proof-green')).toBeNull();
   });
 
   // PR#3387 카디르 QA(2026-08-23)·PO soul-lock 확定 — 이 테스트가 "text-destructive 없음"만

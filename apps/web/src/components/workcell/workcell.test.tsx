@@ -180,24 +180,45 @@ describe('Workcell — story #2922 W6 스테퍼 트러스트-시맨틱 컬러(�
     return m[1];
   }
 
-  it('merge_ready가 current일 때, 이미 지나온 Running 단계는 강제로 green이 되지 않고 자기 고유색(blue) 유지', () => {
+  // story #3099(DS·AA 후속, #3090과 동형) — 라벨 텍스트는 amber/green/blue 전부 AA 미달이라
+  // text-proof-ink로 중립화됐다. 트러스트-시맨틱 색은 이제 dot(라벨 span 안의 두 번째
+  // class="..." — size-1.5 rounded-full span)만 싣는다.
+  function stageDotClass(markup: string, label: string): string {
+    const block = markup.split('role="listitem"').slice(1).find((b) => b.includes(`>${label}</span>`));
+    if (!block) throw new Error(`stage block not found for label: ${label}`);
+    const matches = [...block.matchAll(/class="([^"]*)"/g)];
+    if (matches.length < 2) throw new Error(`dot class attr not found for label: ${label}`);
+    return matches[1]![1];
+  }
+
+  it('라벨 텍스트는 상태와 무관하게 항상 중립(text-proof-ink) — 색 신호는 텍스트가 아니라 dot이 싣는다(AA 미달 방지)', () => {
     const markup = renderKo(<Workcell {...BASE} pipelineStage="merge_ready" bentoLayout={false} />);
-    const runningClass = stageWrapperClass(markup, 'Running');
-    expect(runningClass.split(/\s+/)).toContain('text-proof-blue');
-    expect(runningClass.split(/\s+/)).not.toContain('text-proof-green');
+    for (const label of ['Running', 'Needs input', 'Claimed done', 'Verified', 'Merge-ready']) {
+      const cls = stageWrapperClass(markup, label).split(/\s+/);
+      expect(cls).toContain('text-proof-ink');
+      expect(cls).not.toEqual(expect.arrayContaining(['text-proof-blue', 'text-proof-amber', 'text-proof-green']));
+    }
   });
 
-  it('verified가 current일 때 그 자신은 green(자기 색이 진짜 green이므로)', () => {
+  it('merge_ready가 current일 때, 이미 지나온 Running 단계는 강제로 green이 되지 않고 자기 고유색(blue) 유지 — dot 기준', () => {
+    const markup = renderKo(<Workcell {...BASE} pipelineStage="merge_ready" bentoLayout={false} />);
+    const runningDotClass = stageDotClass(markup, 'Running');
+    expect(runningDotClass.split(/\s+/)).toContain('border-proof-blue');
+    expect(runningDotClass.split(/\s+/)).not.toContain('bg-proof-green');
+  });
+
+  it('verified가 current일 때 그 자신은 green(자기 색이 진짜 green이므로) — dot 기준', () => {
     const markup = renderKo(<Workcell {...BASE} pipelineStage="verified" bentoLayout={false} />);
-    const verifiedClass = stageWrapperClass(markup, 'Verified');
-    expect(verifiedClass.split(/\s+/)).toContain('text-proof-green');
-    expect(verifiedClass.split(/\s+/)).toContain('font-bold');
+    const verifiedDotClass = stageDotClass(markup, 'Verified');
+    expect(verifiedDotClass.split(/\s+/)).toContain('bg-proof-green');
+    const verifiedWrapperClass = stageWrapperClass(markup, 'Verified');
+    expect(verifiedWrapperClass.split(/\s+/)).toContain('font-bold');
   });
 
-  it('claimed_done이 current일 때 그 자신은 blue(주장·미검증 — 아직 green 아님)', () => {
+  it('claimed_done이 current일 때 그 자신은 blue(주장·미검증 — 아직 green 아님) — dot 기준', () => {
     const markup = renderKo(<Workcell {...BASE} pipelineStage="claimed_done" bentoLayout={false} />);
-    const claimedClass = stageWrapperClass(markup, 'Claimed done');
-    expect(claimedClass.split(/\s+/)).toContain('text-proof-blue');
+    const claimedDotClass = stageDotClass(markup, 'Claimed done');
+    expect(claimedDotClass.split(/\s+/)).toContain('bg-proof-blue');
   });
 });
 
