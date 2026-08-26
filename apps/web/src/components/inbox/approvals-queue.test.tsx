@@ -1061,3 +1061,107 @@ describe('ApprovalsQueue — mux 비활성 시 fallback EventSource(story #3069,
     expect(container.textContent).toContain('새로생긴카드');
   });
 });
+
+// story #3113(실사고·선생님 2026-08-26) — 「결재 카드가 내용을 열 수가 없게 되어있어서
+// 보지도 못하고 그냥 승인했는」. agent_decision_request는 work_item_summary가 항상 null이라
+// 해시로만 식별됐고, question/assumption/options는 데이터가 있는데도 렌더되지 않았다.
+describe('ApprovalsQueue — story #3113 결정 게이트(agent_decision_request) 카드', () => {
+  function decisionGate(overrides: Partial<GateItem> = {}): GateItem {
+    return gate({
+      id: 'g-decision', work_item_id: 'g-decision', gate_type: 'agent_decision_request', status: 'pending', requires_human: true,
+      can_approve: true, risk_grade: 'low', work_item_summary: null,
+      neutral_facts: {
+        question: 'Apple Developer Program 등록 — 유형을 어느 쪽으로?',
+        assumption: 'PO 권고=A',
+        options: ['A) Organization', 'B) Individual', 'C) 보류'],
+      },
+      ...overrides,
+    });
+  }
+
+  it('AC1 — 카드 1행에 question 요지가 뜨고, 해시는 보조 캡션으로 강등된다(해시뿐 결함 fix)', async () => {
+    mockFetches([decisionGate()], []);
+    await mount();
+    expect(container.textContent).toContain('Apple Developer Program 등록 — 유형을 어느 쪽으로?');
+    expect(container.textContent).toContain('#g-decisi');
+  });
+
+  it('AC2 — 펼치기 전엔 assumption·options가 안 보이고, 펼치면 전문이 뜬다', async () => {
+    mockFetches([decisionGate()], []);
+    await mount();
+    expect(container.textContent).not.toContain('PO 권고=A');
+    expect(container.textContent).not.toContain('A) Organization');
+
+    const expandBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === koMessages.cage.decisionExpand,
+    );
+    expect(expandBtn).toBeTruthy();
+    await act(async () => { expandBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    expect(container.textContent).toContain('PO 권고=A');
+    expect(container.textContent).toContain('A) Organization');
+    expect(container.textContent).toContain('B) Individual');
+    expect(container.textContent).toContain('C) 보류');
+  });
+
+  it('AC3 — options가 있으면 안을 고르기 전엔 승인 버튼이 비활성이다', async () => {
+    mockFetches([decisionGate()], []);
+    await mount();
+    const expandBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === koMessages.cage.decisionExpand,
+    );
+    await act(async () => { expandBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const approveBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes(koMessages.cage.gateApprove),
+    ) as HTMLButtonElement;
+    expect(approveBtn.disabled).toBe(true);
+    expect(container.textContent).toContain(koMessages.cage.decisionSelectHint);
+  });
+
+  it('AC3 — 안을 고르면 승인 버튼이 활성화되고, 승인 시 선택안이 note로 전송·영구 기록된다', async () => {
+    const calls = mockFetches([decisionGate()], []);
+    await mount();
+    const expandBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === koMessages.cage.decisionExpand,
+    );
+    await act(async () => { expandBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const radios = Array.from(container.querySelectorAll('input[type="radio"]'));
+    expect(radios).toHaveLength(3);
+    await act(async () => { radios[1]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const approveBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes(koMessages.cage.gateApprove),
+    ) as HTMLButtonElement;
+    expect(approveBtn.disabled).toBe(false);
+
+    await act(async () => { approveBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const postCall = calls.find((c) => c.method === 'POST' && c.url.includes('/transition'));
+    expect(postCall?.url).toBe('/api/gates/g-decision/transition');
+    const body = JSON.parse(postCall?.body ?? '{}') as { status: string; note: string | null };
+    expect(body.status).toBe('approved');
+    expect(body.note).toBe('선택: B) Individual');
+  });
+
+  it('options가 없는 결정 게이트(question만)는 승인 버튼이 곧바로 활성이다(선택 강요 없음)', async () => {
+    mockFetches([decisionGate({ id: 'g-no-opts', neutral_facts: { question: '그냥 확인만 부탁' } })], []);
+    await mount();
+    const approveBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes(koMessages.cage.gateApprove),
+    ) as HTMLButtonElement;
+    expect(approveBtn.disabled).toBe(false);
+  });
+
+  it('거절은 안 선택 없이도 즉시 가능하다(반려는 안을 고르는 행위가 아님)', async () => {
+    const calls = mockFetches([decisionGate()], []);
+    await mount();
+    const rejectBtn = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent?.includes(koMessages.cage.sigRequestChanges),
+    ) as HTMLButtonElement;
+    expect(rejectBtn.disabled).toBe(false);
+    await act(async () => { rejectBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const postCall = calls.find((c) => c.method === 'POST' && c.url.includes('/transition'));
+    expect(JSON.parse(postCall?.body ?? '{}').status).toBe('rejected');
+  });
+});
