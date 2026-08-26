@@ -136,10 +136,15 @@ export function Avatar({
         <span
           className={cn(
             'absolute -right-1 -top-1 flex shrink-0 items-center justify-center overflow-hidden rounded-full ring-2 ring-background',
-            // 규격 §4 — 풀컬러 아이콘은 디스크=테마 토큰(원본색이 자체 대비를 싣는다),
-            // 모노(단색) 아이콘은 디스크를 테마 무관 고정 밝은색으로 박아 다크 테마에서도
-            // 검정 마크 대비를 확保(무변형 원칙상 아이콘 자체 색은 절대 안 건드린다).
-            badgeDef.colorMode === 'mono' ? 'bg-white' : 'bg-card',
+            // 규격 §4 — 모노(단색) 아이콘은 디스크를 테마 무관 고정 밝은색으로 박아 다크
+            // 테마에서도 검정 마크 대비를 확保(무변형 원칙상 아이콘 자체 색은 절대 안
+            // 건드린다), 마크는 디스크 안쪽 68%에 인셋. story #3119(유나 design 판정,
+            // 실렌더 대조 290c33cb) — 풀컬러(color) 아이콘 중 배경이 solid 브랜드색인
+            // 것(claude-code·openclaw jpg)은 68% 인셋+디스크 배경 조합이 사각 이미지와
+            // 원형 마스크 사이에 코너 갭을 남겨 다크 테마에서 특히 튀었다. color는
+            // full-bleed(디스크를 이미지로 꽉 채움)로 바꿔 디스크 자체 배경이 아예 안
+            // 보이게 한다 — 이미지 원본이 정사각 풀블리드라 크롭 왜곡 없음.
+            badgeDef.colorMode === 'mono' && 'bg-white',
           )}
           style={{ width: diskSize, height: diskSize }}
         >
@@ -147,7 +152,12 @@ export function Avatar({
               기본값) — 전역 설정을 이 배지 하나 때문에 바꾸지 않고, 기존 avatar_url과
               동형으로 raw img를 쓴다(로컬 정적 자산이라 CSP/원격도메인 우려는 없음). */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={badgeDef.asset} alt="" style={{ width: markSize, height: markSize }} />
+          <img
+            src={badgeDef.asset}
+            alt=""
+            className={badgeDef.colorMode === 'color' ? 'h-full w-full object-cover' : undefined}
+            style={badgeDef.colorMode === 'mono' ? { width: markSize, height: markSize } : undefined}
+          />
         </span>
       )}
       {isAgent && showInitialsBadge && (

@@ -236,13 +236,19 @@ describe('Avatar — story #3092 3단계 커넥터 아이콘 배지', () => {
     expect(container.textContent).not.toContain('Agent');
   });
 
-  it('아바타≥28 + 풀컬러 아이콘 커넥터(openclaw)는 디스크가 bg-card(테마 토큰)다', async () => {
+  // story #3119(유나 design 판정, 실렌더 대조 290c33cb) — colorMode='color'는 이제
+  // full-bleed(이미지가 디스크를 꽉 채움)라 디스크 자체 배경색은 안 보인다 — 68% 인셋+
+  // 디스크 배경 조합이던 옛 방식은 사각 이미지 vs 원형 마스크 사이 코너 갭을 남겼다.
+  it('아바타≥28 + 풀컬러 아이콘 커넥터(openclaw)는 디스크를 이미지로 꽉 채운다(full-bleed, bg-white 아님)', async () => {
     await act(async () => {
       root.render(wrap(<Avatar name="유나" actorType="agent" size={32} runtimeType="openclaw" />));
     });
     const disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
-    expect(disk.className).toContain('bg-card');
     expect(disk.className).not.toContain('bg-white');
+    const img = disk.querySelector('img');
+    expect(img?.className).toContain('h-full');
+    expect(img?.className).toContain('w-full');
+    expect(img?.className).toContain('object-cover');
   });
 
   it('아바타<28(마크<11px 존)이면 아이콘 승인 커넥터도 "Agent" 텍스트로 강등된다(구 사각 배지)', async () => {
@@ -258,15 +264,18 @@ describe('Avatar — story #3092 3단계 커넥터 아이콘 배지', () => {
   // 다른 아이콘 승인 커넥터와 동형으로 크기 사다리(≥28 아이콘 / <28 Agent 텍스트)를 탄다.
   //
   // story #3119(tokscale 소스 갱신, 선생님 지정 2026-08-26) — claude-code 에셋이 jpg로
-  // 바뀌며 배경이 solid 브랜드색(흰색 아님)이라 colorMode도 mono→color(bg-card)로
-  // 전환됐다(가짜 흰 배경 디스크보다 원색 배경을 그대로 두는 쪽이 자연스러움).
-  it('claude-code는 아이콘 승인 커넥터로 스왑됐다(아바타≥28→아이콘, <28→Agent 텍스트, tokscale jpg=colorMode color)', async () => {
+  // 바뀌며 배경이 solid 브랜드색(흰색 아님)이라 colorMode도 mono→color로 전환됐다(가짜
+  // 흰 배경 디스크보다 원색 배경을 그대로 두는 쪽이 자연스러움). 유나 design 판정
+  // (실렌더 대조 290c33cb) — color는 68% 인셋이 아니라 full-bleed로 디스크를 채운다.
+  it('claude-code는 아이콘 승인 커넥터로 스왑됐다(아바타≥28→아이콘, <28→Agent 텍스트, tokscale jpg=colorMode color·full-bleed)', async () => {
     await act(async () => {
       root.render(wrap(<Avatar name="유나" actorType="agent" size={32} runtimeType="claude-code" />));
     });
     const disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
-    expect(disk.className).toContain('bg-card');
-    expect(disk.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/claude-code.jpg');
+    expect(disk.className).not.toContain('bg-white');
+    const img = disk.querySelector('img');
+    expect(img?.getAttribute('src')).toBe('/connector-icons/claude-code.jpg');
+    expect(img?.className).toContain('object-cover');
 
     await act(async () => {
       root.render(wrap(<Avatar name="유나" actorType="agent" size={24} runtimeType="claude-code" />));
