@@ -145,7 +145,7 @@ def _mock_session_returning(scalar_value) -> AsyncMock:
 
 async def _link_callback_client(app, session: AsyncMock, ctx: MagicMock):
     from app.dependencies.auth import get_current_user
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
 
     async def _override_db():
         yield session
@@ -153,7 +153,9 @@ async def _link_callback_client(app, session: AsyncMock, ctx: MagicMock):
     async def _override_auth():
         return ctx
 
-    app.dependency_overrides[get_db] = _override_db
+    # story #2451(§6 Phase3) 가드 — get_db만 오버라이드하고 get_read_db를 놓치면
+    # read-replica 경유 라우트가 실 DB를 타 이 테스트의 mock 격리가 조용히 깨진다.
+    override_db_and_read(app, _override_db)
     app.dependency_overrides[get_current_user] = _override_auth
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 

@@ -62,7 +62,7 @@ export function LinkedAccountsSection() {
     setUnlinking(provider);
     setMessage(null);
     try {
-      const res = await fetch('/api/auth/oauth/unlink', {
+      const res = await fetchWithAuth('/api/auth/oauth/unlink', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider }),
