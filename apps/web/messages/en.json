@@ -2548,7 +2548,7 @@
     "packDialogAutomationAmount": "+{amount} automation units / mo",
     "packDialogStorageAmount": "+{amount}GB / mo",
     "packDialogChargeLabel": "Added charge",
-    "packDialogChargeValue": "{price}/mo (VAT included)",
+    "packDialogChargeValue": "{price}/mo (excl. VAT)",
     "packDialogAppliesLabel": "Applies",
     "packDialogAppliesValue": "Immediately · reflected from the next billing cycle",
     "packDialogCancel": "Cancel",
