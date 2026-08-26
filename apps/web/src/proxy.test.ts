@@ -809,6 +809,30 @@ describe('proxy — legacy resource redirect generalized to non-docs resources (
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/board?story=abc');
   });
 
+  // story #2227(2026-08-27, 판정: 「board와 같은 표·같은 제네릭 코드경로」라는 아키텍처
+  // 주장을 board처럼 직접 테스트로 pin — glance는 board와 똑같이 MIGRATED_RESOURCES에
+  // 등록돼 있는데도 이 파일에 자신의 회귀가드가 하나도 없었다(board만 있었다). 리소스별
+  // 특수분기가 코드에 전혀 없으므로(순수 표 조회) 동작이 board와 같을 거라는 추론은
+  // 맞았지만, 「맞을 것」과 「pin된 테스트로 증명됨」은 다르다.
+  it('story #2227: bare /glance?story=X → 301 /{ws}/{proj}/glance?story=X(board와 동일 MIGRATED_RESOURCES 경로, 쿼리 보존)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/me')) {
+        return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
+      }
+      if (url.includes('/api/v2/organizations/org-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+      }
+      if (url.includes('/api/v2/projects/proj-1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-1', slug: 'sprintable' }) });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    const response = await middleware(makeRequest('/glance?story=abc', { sp_at: token }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/glance?story=abc');
+  });
+
   it('story #1999: 쿠키와 JWT project_id가 다르면 쿠키 우선(명시 switch-project 결과 존중)', async () => {
     const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-old' });
     mockFetch.mockImplementation((url: string) => {
@@ -878,6 +902,16 @@ describe('proxy — 경로 리터럴 rename 301(story 8fc51517): [ws]/[proj]/boa
     expect(response.status).toBe(301);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
     // 3번째 세그먼트만 교체하는 순수 문자열 치환이라 org/project fetch가 전혀 없어야 한다.
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('story #2227: /{ws}/{proj}/glance → 301 /{ws}/{proj}/flow(glance도 RENAMED_RESOURCES 대상 — board와 짝인 회귀가드, 이 전엔 없었다)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const response = await middleware(makeRequest('/moonklabs/sprintable/glance', {
+      sp_at: token, sprintable_current_project_id: 'proj-1',
+    }));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
