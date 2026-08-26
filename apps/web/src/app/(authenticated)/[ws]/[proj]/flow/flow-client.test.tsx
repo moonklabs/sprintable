@@ -578,18 +578,30 @@ describe('FlowPageClient — story #2535 지구→대륙→도시 드릴다운',
     expect(container.textContent).not.toContain(koMessages.flow.ladderName_building);
   });
 
-  it('갈래(view=flow) 뷰에서는 축척 브레드크럼이 "도시"를 활성으로 보인다', async () => {
+  // story #3111(Board IA·D0 선행 하드픽스, 유나 D0 그라운딩 발견) — activeLevel 매핑 전수를
+  // "텍스트가 존재한다"(항상 참 — 5개 rung 이름은 활성 여부와 무관하게 전부 렌더된다)가
+  // 아니라 실제 active 강조 클래스(scale-ladder.test.tsx와 동일 패턴)로 핀한다. 이전엔
+  // view=list가 «건물»(작업)을 활성화했는데, 칸반(view=list)의 단위는 스토리이므로 오류였다.
+  it('갈래(view=flow) 뷰에서는 축척 브레드크럼이 "도시"를 활성으로 보인다(가설·목표·거리·건물은 비활성)', async () => {
     currentSearch = 'view=flow';
     await renderFlowClient();
 
-    expect(container.textContent).toContain(koMessages.flow.ladderName_city);
+    const rungs = Array.from(container.querySelector('.flex.overflow-hidden')?.children ?? []);
+    const cityRung = rungs.find((d) => d.textContent?.includes(koMessages.flow.ladderName_city));
+    expect(cityRung?.className).toContain('bg-gradient-to-b');
+    expect(rungs.filter((d) => d.className.includes('bg-gradient-to-b'))).toHaveLength(1);
   });
 
-  it('목록(view=list) 뷰에서는 축척 브레드크럼이 "건물"을 활성으로 보인다', async () => {
+  it('목록(view=list) 뷰에서는 축척 브레드크럼이 "스토리"를 활성으로 보인다 — 이전엔 "건물"(작업)로 오매핑됐다(#3111)', async () => {
     currentSearch = 'view=list';
     await renderFlowClient();
 
-    expect(container.textContent).toContain(koMessages.flow.ladderName_building);
+    const rungs = Array.from(container.querySelector('.flex.overflow-hidden')?.children ?? []);
+    const streetRung = rungs.find((d) => d.textContent?.includes(koMessages.flow.ladderName_street));
+    const buildingRung = rungs.find((d) => d.textContent?.includes(koMessages.flow.ladderName_building));
+    expect(streetRung?.className).toContain('bg-gradient-to-b');
+    expect(buildingRung?.className).not.toContain('bg-gradient-to-b');
+    expect(rungs.filter((d) => d.className.includes('bg-gradient-to-b'))).toHaveLength(1);
   });
 });
 
