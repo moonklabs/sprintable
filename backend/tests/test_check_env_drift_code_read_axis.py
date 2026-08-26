@@ -315,8 +315,11 @@ def test_ac4_real_repo_scan_counts_are_recorded():
     # 으로 떨어져 이 값들을 쓰는 백그라운드 워커 자체가 안 켜진다(story #2423 — 이 기능군은
     # 은퇴 상태). 값을 채워야 도는 게 아니라 안 채워야 지금 의도대로 도는 스위치라
     # code_read_exempt가 정확한 분류다(baseline의 "아직 triage 안 됨"과 다르다).
+    # 2026-08-26 story aec3ec09([P1 후속] OAuth 핸드오프 활성화) 후속으로
+    # FIREBASE_OAUTH_HANDOFF_ENABLED도 동형 배선(cloudbuild.yaml substitutions+GHA dev/prod
+    # 분기+deploy-backend ENV_VARS)해 IaC-covered로 전환·high 12→11(카디르 QA 실 CI 실패 적발).
     assert len(highest) == 1, highest
-    assert len(high) == 12, high
+    assert len(high) == 11, high
     assert len(low) == 9, low
     assert len(exempt) == 23
 
