@@ -280,12 +280,16 @@ describe('Avatar — story #3092 3단계 커넥터 아이콘 배지', () => {
     expect(disk.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/gemini.svg');
   });
 
-  it('hermes는 이번 스코프에서 벡터 자산 미확保로 이니셜("H")까지만 — 라벨층(툴팁)은 그대로 "Hermes"', async () => {
+  // story #3092(5단계, 선생님 재지시 2026-08-26) — 3단계의 "벡터 자산 부재" 이니셜 강등은
+  // hermes-agent repo만 조사한 결과였다. nousresearch.com 자체 favicon/앱아이콘 세트에서
+  // 공식 래스터(PNG)를 발견해 아이콘으로 재승격 — 이니셜 폐기.
+  it('hermes는 5단계에서 공식 래스터(PNG) 아이콘으로 재승격됐다 — 라벨층(툴팁)은 그대로 "Hermes"', async () => {
     await act(async () => {
       root.render(wrap(<Avatar name="유나" actorType="agent" size={32} runtimeType="hermes" />));
     });
     const disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
-    expect(disk?.textContent).toBe('H');
+    expect(disk.className).toContain('bg-white');
+    expect(disk.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/hermes.png');
     const trigger = container.querySelector('[data-slot="tooltip-trigger"]') as HTMLElement;
     await act(async () => {
       trigger.focus();
