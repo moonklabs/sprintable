@@ -118,6 +118,71 @@ describe('FlowMapCanvas — port button (AC1·AC2, 상시 가시성)', () => {
   });
 });
 
+// story #2353 가시성 후속(2026-08-27, 유나 확定分 — 3px가 라이브에서 "안 보인다"로 실증돼
+// 사이즈 갱신) — 토폴로지(AC2, 오른쪽 변 하나)는 페드루군 재확定으로 불변, 시각 크기·터치
+// 히트박스만 바뀐다.
+describe('FlowMapCanvas — port 가시성 사이징(2026-08-27, rest 10px/hover·active 14px)', () => {
+  it('rest 상태 — 시각 점이 10px, 테두리(1.6px)가 있다(3px 무테두리 회귀 없음)', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
+    await renderCanvas(lane);
+    const dot = getPort('n1').querySelector('span[aria-hidden="true"]')!;
+    expect(dot.className).toContain('h-[10px]');
+    expect(dot.className).toContain('w-[10px]');
+    expect(dot.className).toContain('border-[1.6px]');
+    expect(dot.className).not.toContain('h-[3px]');
+  });
+
+  it('hover 클래스가 14px + 브랜드 색으로 걸려 있다(호버 시 커지는 계약)', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
+    await renderCanvas(lane);
+    const dot = getPort('n1').querySelector('span[aria-hidden="true"]')!;
+    expect(dot.className).toContain('group-hover:h-[14px]');
+    expect(dot.className).toContain('group-hover:w-[14px]');
+    expect(dot.className).toContain('group-hover:bg-brand');
+  });
+
+  it('isLinkSource(드래그 원점)일 때 hover와 동일한 14px+브랜드 고정 상태로 렌더된다', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' }), makeNode({ id: 'u1', storyNumber: 2 })] });
+    await renderCanvas(lane);
+    const port = getPort('n1');
+    await act(async () => { dispatchPointer(port, 'pointerdown', { clientX: 10, clientY: 10 }); });
+    const dot = port.querySelector('span[aria-hidden="true"]')!;
+    expect(dot.className).toContain('h-[14px]');
+    expect(dot.className).toContain('w-[14px]');
+    expect(dot.className).toContain('bg-brand');
+  });
+
+  it('"+" 글리프가 렌더된다(rest에선 시각적으로 숨김·hover에서 드러남 — 레이아웃은 항상 존재)', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
+    await renderCanvas(lane);
+    const dot = getPort('n1').querySelector('span[aria-hidden="true"]')!;
+    expect(dot.textContent).toBe('+');
+    expect(dot.className).toContain('text-transparent');
+    expect(dot.className).toContain('group-hover:text-brand-foreground');
+  });
+
+  it('"+ 연결" 툴팁 트리거가 붙어 있다(TooltipTrigger)', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
+    await renderCanvas(lane);
+    const port = getPort('n1');
+    expect(port.getAttribute('data-slot')).toBe('tooltip-trigger');
+  });
+
+  it('버튼(터치 히트박스)이 44px 폭·38px 높이로 시각 점보다 넓게 확장돼 있다(투명 확장)', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
+    await renderCanvas(lane);
+    const port = getPort('n1');
+    expect(port.className).toContain('w-11'); // 44px
+    expect(port.className).toContain('h-[38px]');
+  });
+
+  it('crosshair 커서가 여전히 유지된다(회귀 없음)', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1' })] });
+    await renderCanvas(lane);
+    expect(getPort('n1').className).toContain('cursor-crosshair');
+  });
+});
+
 describe('FlowMapCanvas — 포인터 드래그 (AC3·AC4)', () => {
   it('pointerdown on a port then pointerup over a valid target opens the confirm dialog with the direction-echo sentence', async () => {
     const nowNode = makeNode({ id: 'n1', storyNumber: 101, kind: 'now' });

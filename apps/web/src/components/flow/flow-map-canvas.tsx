@@ -16,6 +16,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -181,22 +182,38 @@ function FlowMapNodeCard({
         <span className={`truncate ${superseded ? 'line-through' : ''}`}>{node.title}</span>
       </button>
       {/* ⑥ 포트(story #2353, doc `flow-port-slot-spec` ㉠) — 사람이 연결을 «만드는» 유일한
-          손잡이. 상시 보이되 아주 작게(3px, 무채) → 호버/포커스/드래그 원점일 때 커지고
-          색이 붙는다. 호버 전용이면 "있는 줄을 모른다"(AC1) — 그래서 기본 상태도 aria-hidden
-          없이 항상 렌더된다(스크린샷에 항상 잡힌다). 오른쪽 변 «하나만»(AC2) — 방향은
-          «끈 순서»가 정하므로 양쪽에 달지 않는다. */}
-      <button
-        type="button"
-        aria-label={t('portLinkStart', { n: node.storyNumber })}
-        onPointerDown={(e) => onPortPointerDown(e, node.id)}
-        onKeyDown={(e) => onPortKeyDown(e, node.id)}
-        className="focus-inset group absolute -right-2 top-1/2 flex h-4 w-4 -translate-y-1/2 cursor-crosshair items-center justify-center rounded-full"
-      >
-        <span
-          aria-hidden="true"
-          className={`rounded-full transition-all ${isLinkSource ? 'h-[7px] w-[7px] bg-info' : 'h-[3px] w-[3px] bg-muted-foreground group-hover:h-[7px] group-hover:w-[7px] group-hover:bg-info group-focus-visible:h-[7px] group-focus-visible:w-[7px] group-focus-visible:bg-info'}`}
-        />
-      </button>
+          손잡이. 상시 보이되 작게 → 호버/포커스/드래그 원점일 때 커지고 색이 붙는다. 호버
+          전용이면 "있는 줄을 모른다"(AC1) — 그래서 기본 상태도 aria-hidden 없이 항상
+          렌더된다(스크린샷에 항상 잡힌다). 오른쪽 변 «하나만»(AC2, 2026-08-27 재확定 —
+          토폴로지 불변) — 방향은 «끈 순서»가 정하므로 양쪽에 달지 않는다.
+          story #2353 가시성 후속(2026-08-27, 유나 확定分) — 3px가 라이브에서 "안 보인다"로
+          실증돼 rest 10px(테두리 1.6px)/hover·active 14px(브랜드+"+" 글리프)로 확대,
+          "+ 연결" 툴팁 신설. 터치 히트박스는 시각 크기와 분리해 44px 폭으로 투명 확장 —
+          ⚠️세로는 44 그대로 쓰지 않고 38px로 살짝 좁혔다: NODE_ROW_HEIGHT(32px)가 카드
+          (24px)보다 8px만 크고, 44를 그대로 중앙 배치하면 인접 행 카드 쪽으로 ~2px
+          파고들어 "인접 히트박스 간 ≥8px" 요건을 어긴다 — 가로는 카드 바깥쪽이라 이웃이
+          없어 44 그대로 유지. */}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              aria-label={t('portLinkStart', { n: node.storyNumber })}
+              onPointerDown={(e) => onPortPointerDown(e, node.id)}
+              onKeyDown={(e) => onPortKeyDown(e, node.id)}
+              className="focus-inset group absolute -right-[22px] top-1/2 flex h-[38px] w-11 -translate-y-1/2 cursor-crosshair items-center justify-center rounded-full"
+            />
+          }
+        >
+          <span
+            aria-hidden="true"
+            className={`flex items-center justify-center rounded-full border-[1.6px] text-[9px] font-bold leading-none transition-all ${isLinkSource ? 'h-[14px] w-[14px] border-brand bg-brand text-brand-foreground' : 'h-[10px] w-[10px] border-muted-foreground bg-background text-transparent group-hover:h-[14px] group-hover:w-[14px] group-hover:border-brand group-hover:bg-brand group-hover:text-brand-foreground group-focus-visible:h-[14px] group-focus-visible:w-[14px] group-focus-visible:border-brand group-focus-visible:bg-brand group-focus-visible:text-brand-foreground'}`}
+          >
+            +
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="right">{t('portLinkTooltip')}</TooltipContent>
+      </Tooltip>
     </div>
   );
 }
