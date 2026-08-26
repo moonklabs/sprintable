@@ -1869,7 +1869,7 @@ describe('ChatBubble — story #3106 sender_runtime_type → Avatar 배선', () 
       ));
     });
     const disk = container.querySelector('.rounded-full.ring-2.ring-background');
-    expect(disk?.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/claude-code.svg');
+    expect(disk?.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/claude-code.jpg');
   });
 
   it('agent sender_runtime_type이 null(구서버·미배선)이면 여전히 "Agent" 텍스트 폴백이다(회귀 없음)', async () => {

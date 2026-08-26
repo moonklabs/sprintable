@@ -101,7 +101,7 @@ describe('SenderProfilePopover — story #3106 runtimeType 배선', () => {
       root.render(<SenderProfilePopover x={0} y={0} name="오르테가" isAgent runtimeType="claude-code" onClose={NOOP} />);
     });
     const disk = container.querySelector('.rounded-full.ring-2.ring-background');
-    expect(disk?.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/claude-code.svg');
+    expect(disk?.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/claude-code.jpg');
   });
 
   it('runtimeType을 안 주면(레거시) "Agent" 텍스트 폴백 그대로다(회귀 없음)', async () => {

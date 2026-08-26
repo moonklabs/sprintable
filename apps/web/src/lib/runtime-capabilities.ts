@@ -129,8 +129,9 @@ export type ConnectorBadgeKind = 'icon' | 'initials';
 
 export interface ConnectorBadgeDef {
   kind: ConnectorBadgeKind;
-  /** kind='icon' 전용 — public/connector-icons/<key>.svg|png 상대경로(SVG 우선, 벡터
-   * 부재 시 고해상 PNG도 허용 — hermes가 선례). */
+  /** kind='icon' 전용 — public/connector-icons/<key>.svg|png|jpg 상대경로(SVG 우선,
+   * 벡터 부재 시 고해상 PNG도 허용 — hermes가 선례. story #3119(tokscale 소스)부터 JPG도
+   * 허용 — 지정 소스가 벡터를 안 주는 경우 원본 그대로 무변형 사용). */
   asset?: string;
   /** kind='icon' 전용 — 디스크 배경 전략(아이콘 자체 색상 수와는 무관 — 이름은 "단색
    * 마크" 유래지만 실제 의미는 "디스크 고정" 여부):
@@ -162,14 +163,33 @@ export const CONNECTOR_BADGE_REGISTRY: Record<RuntimeKey, ConnectorBadgeDef> = {
   // 문의 불요" 판정으로 이니셜→아이콘 스왑(승인 대기 해제). claude=Anthropic 제품 스타버스트
   // 마크(회사 삼각형 워드마크 "Anthropic"이 아니라 Claude 자체 마크 — claude-code 커넥터
   // 정체성과 더 정확히 대응). gemini=스파클 마크(유나 시안이 쓴 "Gemini 스파클"과 형태 일치.
-  'claude-code': { kind: 'icon', asset: '/connector-icons/claude-code.svg', colorMode: 'mono', sourceNote: 'LobeHub icons-static-svg claude.svg(Anthropic 공식 Claude 스타버스트 마크 대조) — anthropic.com에 공개 브랜드/프레스킷 페이지를 못 찾았고 claude.ai 앱 도메인은 자동화 접근 403이라 1차 소스 직접 확認 불가, 애그리게이터 사용. 선생님 확定(2026-08-26): 연동표시 목적 무변형 사용=통상 범위, 별도 상표 문의 불요' },
-  gemini: { kind: 'icon', asset: '/connector-icons/gemini.svg', colorMode: 'mono', sourceNote: 'LobeHub icons-static-svg gemini.svg(Google 공식 Gemini 스파클 마크 대조) — Google 브랜드 리소스 센터가 파트너 인증 포털(partnermarketinghub.withgoogle.com)로 리다이렉트돼 1차 소스 직접 확認 불가, 애그리게이터 사용. 선생님 확定(2026-08-26): 연동표시 목적 무변형 사용=통상 범위, 별도 상표 문의 불요' },
-  codex: { kind: 'icon', asset: '/connector-icons/codex.svg', colorMode: 'mono', sourceNote: 'LobeHub icons-static-svg codex.svg(OpenAI 공식 Codex 마크 대조) — openai.com/brand 직접 접근 차단(Cloudflare)으로 애그리게이터 사용' },
-  grok: { kind: 'icon', asset: '/connector-icons/grok.svg', colorMode: 'mono', sourceNote: 'LobeHub icons-static-svg grok.svg — x.ai/legal/brand-guidelines 직접 접근 차단(Cloudflare)으로 애그리게이터 사용' },
-  cursor: { kind: 'icon', asset: '/connector-icons/cursor.svg', colorMode: 'mono', sourceNote: 'simple-icons cursor.svg(PO/유나 사전 확保)' },
-  opencode: { kind: 'icon', asset: '/connector-icons/opencode.svg', colorMode: 'mono', sourceNote: 'simple-icons opencode.svg(PO/유나 사전 확保)' },
-  openclaw: { kind: 'icon', asset: '/connector-icons/openclaw.svg', colorMode: 'color', sourceNote: '1st-party: https://openclaw.ai/favicon.svg(공식 사이트 자체 favicon·헤더 로고와 동일 — repo README "🦞 the lobster way" 브랜딩과 정합)' },
-  pi: { kind: 'icon', asset: '/connector-icons/pi.svg', colorMode: 'mono', sourceNote: '1st-party: https://pi.dev/logo-auto.svg(github.com/earendil-works/pi README가 직접 링크하는 공식 자산). ⚠️내부에 prefers-color-scheme 미디어쿼리가 있어 OS 테마 기준으로 흑/백이 갈린다(앱 테마와 별개 축) — 무변형 원칙상 후처리로 강제하지 않음, 극단적 조합(라이트 앱+다크 OS 등)에서 대비가 낮아질 수 있는 자산 자체의 한계로 기록' },
+  // story #3119(선생님 지정 소스 2026-08-26) — tokscale(github.com/junhoyeo/tokscale
+  // .github/assets) 갱신. 5종은 실물 대조로 「기존보다 정확/공식적」 확認 후 스왑:
+  // claude=Anthropic 실제 앱아이콘 프레젠테이션(주황 배경+흰 스타버스트, 기존 LobeHub
+  // mono 단순화판보다 브랜드 원본에 가까움). codex=OpenAI 실제 6-잎 매듭 마크로 교체
+  // (기존 codex.svg는 대조해보니 OpenAI 마크가 아니라 범용 "터미널 말풍선" 글리프였음 —
+  // 이번 교체로 실제 오류 정정 겸함, «Codex» 라벨은 그대로 유지). gemini=Google 공식
+  // 멀티컬러 스파클 원본(기존 LobeHub mono 단색판 대비 업그레이드). jpg 3종(claude·
+  // openclaw)은 배경이 solid 브랜드색(흰색 아님 — 실측: claude #DA7757·openclaw
+  // #F70515)이라 bg-white 고정 디스크는 오히려 어색해 colorMode='color'(테마 bg-card)
+  // 유지 — 디스크 코너 갭(사각 이미지 vs 원형 마스크)은 브랜드 원색이 대부분을 채워
+  // 작다, 다크 테마 실렌더는 유나 판정 축.
+  'claude-code': { kind: 'icon', asset: '/connector-icons/claude-code.jpg', colorMode: 'color', sourceNote: 'tokscale(github.com/junhoyeo/tokscale .github/assets/client-claude.jpg, 선생님 지정 소스 2026-08-26) — Anthropic 공식 Claude 앱아이콘 프레젠테이션(주황 배경+흰 스타버스트). 배경 실측 solid #DA7757(흰색 아님) → colorMode=color 유지.' },
+  gemini: { kind: 'icon', asset: '/connector-icons/gemini.png', colorMode: 'mono', sourceNote: 'tokscale(github.com/junhoyeo/tokscale .github/assets/client-gemini.png, 선생님 지정 소스 2026-08-26) — Google 공식 멀티컬러 Gemini 스파클 원본(기존 LobeHub mono 단색판 대비 브랜드 정확도 업그레이드). 배경 실측 solid 흰색 → bg-white 고정 디스크 seamless.' },
+  codex: { kind: 'icon', asset: '/connector-icons/codex.jpg', colorMode: 'mono', sourceNote: 'tokscale(github.com/junhoyeo/tokscale .github/assets/client-openai.jpg, 선생님 지정 소스 2026-08-26) — OpenAI 공식 6-잎 매듭 마크(라벨은 «Codex» 그대로, 로고만 OpenAI). 기존 codex.svg(LobeHub)는 실물 대조 결과 OpenAI 마크가 아니라 범용 터미널 말풍선 글리프였음 — 이번 교체가 그 오류도 정정한다. 배경 실측 solid 흰색 → bg-white 고정 디스크 seamless.' },
+  grok: { kind: 'icon', asset: '/connector-icons/grok.svg', colorMode: 'mono', sourceNote: 'LobeHub icons-static-svg grok.svg — x.ai/legal/brand-guidelines 직접 접근 차단(Cloudflare)으로 애그리게이터 사용. story #3119: tokscale .github/assets에 grok 항목 부재 확認(PO 실측) — 스코프 밖, 무변경.' },
+  cursor: { kind: 'icon', asset: '/connector-icons/cursor.jpg', colorMode: 'mono', sourceNote: 'tokscale(github.com/junhoyeo/tokscale .github/assets/client-cursor.jpg, 선생님 지정 소스 2026-08-26) — Cursor 공식 큐브/화살표 마크(기존 simple-icons판과 동일 마크, 출처만 선생님 지정 소스로 정렬). 배경 실측 solid 흰색 → bg-white 고정 디스크 seamless.' },
+  // story #3119 — tokscale에 opencode·pi 항목이 있으나 실물 대조 결과 각 브랜드의 실제
+  // 마크가 아닌 것으로 판단해 스왑 보류(PO/선생님 확定 2026-08-26, 비교 스크린샷 PR
+  // 첨부): opencode는 검은 배경에 흰 사각형+회색 조각(자기네 각진 지오메트릭 마크와
+  // 무관 — 아마 tokscale 자신의 스크린샷/플레이스홀더), pi는 조잡한 픽셀 "P" 블록(과거
+  // #3092 3단계에서 겪은 "오인 Pi"—Inflection AI Pi와 혼동—재발 의심 케이스와 형태가
+  // 닮음). tokscale은 자기네 사용량 추적 툴의 클라이언트 아이콘 모음일 뿐 정식 로고
+  // 큐레이션 소스가 아니라 이 2종만은 기존 검증 자산(simple-icons·pi.dev 1st-party)을
+  // 유지한다.
+  opencode: { kind: 'icon', asset: '/connector-icons/opencode.svg', colorMode: 'mono', sourceNote: 'simple-icons opencode.svg(PO/유나 사전 확保). story #3119: tokscale client-opencode.png는 실물 대조 결과 OpenCode 실제 마크가 아닌 것으로 판단(검은 배경+흰 사각형/회색 조각, 자기네 지오메트릭 마크와 무관)돼 스왑 보류 — 기존 자산 유지.' },
+  openclaw: { kind: 'icon', asset: '/connector-icons/openclaw.jpg', colorMode: 'color', sourceNote: 'tokscale(github.com/junhoyeo/tokscale .github/assets/client-openclaw.jpg, 선생님 지정 소스 2026-08-26) — 상세 랍스터 마크(repo README "🦞 the lobster way" 브랜딩과 정합). 배경 실측 solid #F70515(흰색 아님) → colorMode=color 유지. 이전 자산(openclaw.ai/favicon.svg 1st-party)보다 provenance는 3rd-party 애그리게이터로 낮아지나 선생님이 이 소스를 직접 지정·소싱 승인(2026-08-26).' },
+  pi: { kind: 'icon', asset: '/connector-icons/pi.svg', colorMode: 'mono', sourceNote: '1st-party: https://pi.dev/logo-auto.svg(github.com/earendil-works/pi README가 직접 링크하는 공식 자산). ⚠️내부에 prefers-color-scheme 미디어쿼리가 있어 OS 테마 기준으로 흑/백이 갈린다(앱 테마와 별개 축) — 무변형 원칙상 후처리로 강제하지 않음, 극단적 조합(라이트 앱+다크 OS 등)에서 대비가 낮아질 수 있는 자산 자체의 한계로 기록. story #3119: tokscale client-pi.png는 실물 대조 결과 earendil-works/pi 실제 마크가 아닌 조잡한 픽셀 "P" 블록이었음(#3092 3단계의 "오인 Pi"—Inflection AI Pi 혼동—재발 의심) — 스왑 보류, 기존 1st-party 자산 유지.' },
   // story #3092(5단계, 선생님 재지시 2026-08-26) — 3단계에서 "벡터 자산 부재"로 이니셜
   // 강등했던 판정이 "래스터도 안 찾아봤다"는 지적으로 재조사 — nousresearch.com 자체
   // HTML(og:image·apple-touch-icon·favicon 링크 전수)에서 실제 공식 래스터 발견,

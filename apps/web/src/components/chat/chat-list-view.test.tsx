@@ -286,7 +286,7 @@ describe('ChatListView — story #3106 참가자 runtime_type → Avatar 배선'
     }]);
     await mount();
     const disk = container.querySelector('.rounded-full.ring-2.ring-background');
-    expect(disk?.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/claude-code.svg');
+    expect(disk?.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/claude-code.jpg');
   });
 
   it('DM 상대(agent)의 runtime_type이 없으면(레거시) "Agent" 텍스트 폴백 그대로다(회귀 없음)', async () => {
