@@ -319,21 +319,23 @@ describe('FlowPageClient — story #2365 후속(유나·PO, 2026-07-31) — 서�
   });
 });
 
-// story #2531(E-FLOW-V4 S1, PO 게이트 2026-08-08 재정의) — 「본체가 지도로 서는가」는
-// 이제 «칸반 탈피»가 아니라 «가설이 기본 랜딩(?view= 없음)으로 최상위를 차지하는가»다.
-// 그라운딩으로 밝혀진 대로 NextMakerScreen(갈래)은 이미 07-31에 칸반을 대체했었으므로,
-// 이 스토리가 실제로 바꾸는 것은 «기본값이 flow에서 hypothesis로 이동»한다는 것 하나 —
-// 그 값을 정확히 잰다.
-describe('FlowPageClient — story #2531(E-FLOW-V4 S1) 가설이 기본·최상위로 선다', () => {
-  it('?view= 없이 진입하면 기본으로 지구층(HypothesisEarthLayer)이 렌더된다 — 갈래·칸반이 아니다', async () => {
+// story #2531(E-FLOW-V4 S1, PO 게이트 2026-08-08 재정의) — 당시엔 「본체가 지도로
+// 서는가」를 «가설이 기본 랜딩(?view= 없음)으로 최상위를 차지하는가»로 판정해 데스크톱
+// 기본값을 hypothesis로 세웠다. ⛔story #3101(Board IA 1단계 B, PO 확定 2026-08-26)이
+// 그 판정을 다시 뒤집었다 — 탭 이름이 이미 "보드"인데 첫 착지가 가설 화면이면 명명과
+// 렌더가 어긋난다(§3043이 모바일에서 겪은 것과 같은 클래스, 이번엔 데스크톱) — 그래서
+// 데스크톱도 모바일처럼 list(칸반)가 기본이 됐다. 이 describe 이름·아래 첫 테스트는
+// #2531 당시의 값을 남겨두되(역사 기록), 실제 값은 #3101 기준으로 갱신한다.
+describe('FlowPageClient — story #2531→#3101 기본 랜딩 변천(현재=list/칸반)', () => {
+  it('?view= 없이 진입하면 기본으로 목록(KanbanBoard)이 렌더된다 — 가설·갈래가 아니다(#3101)', async () => {
     await renderFlowClient();
 
-    expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="kanban-board-stub"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).toBeNull();
     expect(container.querySelector('[data-testid="next-maker-screen-stub"]')).toBeNull();
-    expect(container.querySelector('[data-testid="kanban-board-stub"]')).toBeNull();
   });
 
-  it('세그에 가설·갈래·목록 3탭이 모두 뜨고, 가설 탭이 기본 활성 상태다', async () => {
+  it('세그에 가설·갈래·목록 3탭이 모두 뜬다', async () => {
     await renderFlowClient();
 
     const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
@@ -342,7 +344,7 @@ describe('FlowPageClient — story #2531(E-FLOW-V4 S1) 가설이 기본·최상�
     expect(buttons).toContain(koMessages.flow.viewList);
   });
 
-  it('갈래 탭(?view=flow)을 누르면 URL이 view=flow로 바뀌고(가설 기본에서 벗어남을 push로 확認)', async () => {
+  it('갈래 탭(?view=flow)을 누르면 URL이 view=flow로 바뀐다', async () => {
     await renderFlowClient();
 
     const flowTabButton = Array.from(container.querySelectorAll('button')).find(
@@ -358,7 +360,11 @@ describe('FlowPageClient — story #2531(E-FLOW-V4 S1) 가설이 기본·최상�
     expect(pushedUrl).toContain('view=flow');
   });
 
-  it('가설 탭으로 돌아가면(setView("hypothesis")) URL에서 view= 쿼리를 지운다(기본값=파라미터 없음)', async () => {
+  // story #3101 — 기본값이 list로 옮겨가며 "URL을 깨끗이 지워도 되는" 자격도 hypothesis에서
+  // list로 옮겨갔다(setView 주석 참고). 가설 탭을 누르면 이제 view=hypothesis를 명시로
+  // 남겨야 한다 — 예전처럼 지우면 parseView가 빈 URL을 list로 되돌려 읽어 가설 화면이
+  // 증발한다(G1 위반).
+  it('가설 탭을 누르면 URL에 view=hypothesis가 명시로 남는다(#3101, 기본값이 list로 바뀌어 지우면 안 됨)', async () => {
     currentSearch = 'view=flow';
     await renderFlowClient();
 
@@ -367,6 +373,21 @@ describe('FlowPageClient — story #2531(E-FLOW-V4 S1) 가설이 기본·최상�
     );
     await act(async () => {
       hypothesisTabButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const pushedUrl = pushMock.mock.calls[0]?.[0] as string;
+    expect(pushedUrl).toContain('view=hypothesis');
+  });
+
+  it('목록 탭으로 돌아가면(setView("list")) URL에서 view= 쿼리를 지운다(#3101, 기본값=파라미터 없음=list)', async () => {
+    currentSearch = 'view=flow';
+    await renderFlowClient();
+
+    const listTabButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === koMessages.flow.viewList,
+    );
+    await act(async () => {
+      listTabButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
     const pushedUrl = pushMock.mock.calls[0]?.[0] as string;
@@ -382,7 +403,7 @@ describe('FlowPageClient — story #2531(E-FLOW-V4 S1) 가설이 기본·최상�
 // dead-end였다(PO가 "모바일에 보드 없다"고 오답할 정도의 실사고). 이제 세그를 모바일에서도
 // 그대로 그리고(아래 새 describe), 파라미터 없을 때의 기본값도 list(칸반)로 바꾼다 — 원
 // 신고("보드가 안 보인다")에 가장 가까운 화면을 첫 진입 기본값으로 세운다.
-describe('FlowPageClient — story #3043(PO+유나 IA 확定) 모바일 기본값=list(칸반)', () => {
+describe('FlowPageClient — story #3043→#3101 기본값=list(칸반), 모바일·데스크톱 공용', () => {
   it('모바일(isMobile=true)·?view= 없음 이면 기본값이 list(KanbanBoard)다', async () => {
     isMobileMock = true;
     await renderFlowClient();
@@ -392,11 +413,16 @@ describe('FlowPageClient — story #3043(PO+유나 IA 확定) 모바일 기본�
     expect(container.querySelector('[data-testid="next-maker-screen-stub"]')).toBeNull();
   });
 
-  it('데스크톱(isMobile=false)·?view= 없음 이면 기존대로 가설이 기본값이다(회귀 없음)', async () => {
+  // story #3101(2026-08-26) — #2531 시절엔 이 케이스가 "가설이 기본값(회귀 없음)"이었으나,
+  // 그 판정 자체가 뒤집혔다(탭 이름="보드"인데 첫 착지가 가설이면 명명과 렌더가 어긋남).
+  // 이제 데스크톱도 모바일과 같은 기본값을 쓴다 — isMobile 분기가 parseView에서 아예
+  // 사라졌다(parseView 시그니처에서 isMobile 파라미터 제거).
+  it('데스크톱(isMobile=false)·?view= 없음 이면 이제 list(KanbanBoard)가 기본값이다(#3101)', async () => {
     isMobileMock = false;
     await renderFlowClient();
 
-    expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="kanban-board-stub"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).toBeNull();
   });
 
   it('모바일이라도 세그(가설|갈래|칸반)가 그려진다(예전엔 isMobile이면 렌더 자체를 안 했다)', async () => {
@@ -446,8 +472,10 @@ describe('FlowPageClient — story #3043(PO+유나 IA 확定) 모바일 기본�
 });
 
 describe('FlowPageClient — 카디르 QA fix(2026-08-09) ②패널 경계(구 2값 FlowView 잔재)', () => {
-  it('기본(가설) 뷰에서 ?story=<id>가 있어도 FlowNodeStoryPanel이 새지 않는다(가설 뷰엔 선택 UI 자체가 없다)', async () => {
-    currentSearch = 'story=story-leak';
+  it('가설 뷰에서 ?story=<id>가 있어도 FlowNodeStoryPanel이 새지 않는다(가설 뷰엔 선택 UI 자체가 없다)', async () => {
+    // story #3101 — 기본값이 list로 바뀌어(#2531 시절의 "기본=가설" 전제가 깨짐) 이 테스트가
+    // 실제로 검증하려는 뷰(가설)를 명시로 고정한다 — 기본값에 기대면 안 됨.
+    currentSearch = 'view=hypothesis&story=story-leak';
     await renderFlowClient();
 
     expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).not.toBeNull();
@@ -457,7 +485,10 @@ describe('FlowPageClient — 카디르 QA fix(2026-08-09) ②패널 경계(구 2
 
 // story #2533(E-FLOW-V4 S3) — 가설 카드 클릭→수직 서사 패널.
 describe('FlowPageClient — story #2533 가설 카드 클릭이 서사 패널을 연다', () => {
-  it('가설 카드를 선택하면 ?hypothesis=<id>가 URL에 붙고 패널이 뜬다(view는 안 건드림)', async () => {
+  it('가설 카드를 선택하면 ?hypothesis=<id>가 URL에 붙고 패널이 뜬다(기존 view는 안 건드림)', async () => {
+    // story #3101 — 기본값이 list로 바뀌어 가설 뷰(HypothesisEarthLayer가 실제로 마운트되는
+    // 상태)를 명시로 고정해야 한다.
+    currentSearch = 'view=hypothesis';
     await renderFlowClient();
     expect(container.querySelector('[data-testid="hypothesis-narrative-panel-stub"]')).toBeNull();
 
@@ -470,7 +501,10 @@ describe('FlowPageClient — story #2533 가설 카드 클릭이 서사 패널�
     expect(pushMock).toHaveBeenCalledTimes(1);
     const pushedUrl = pushMock.mock.calls[0]?.[0] as string;
     expect(pushedUrl).toContain('hypothesis=hyp-abc');
-    expect(pushedUrl).not.toContain('view=');
+    // handleSelectHypothesis는 view를 안 건드린다 — 기존 view=hypothesis가 그대로 보존됨을
+    // 확認(#3101 전엔 기본값=파라미터없음=hypothesis라 "view= 자체가 없음"으로 이 불변식을
+    // 쟀으나, 이제 기본값이 list라 hypothesis 뷰 자체가 view=hypothesis 명시를 요구한다).
+    expect(pushedUrl).toContain('view=hypothesis');
   });
 
   it('?hypothesis=<id>가 이미 URL에 있으면(딥링크) 마운트 즉시 패널이 열린다', async () => {
@@ -535,6 +569,8 @@ describe('FlowPageClient — story #2535 지구→대륙→도시 드릴다운',
   });
 
   it('축척 브레드크럼은 가설 뷰에서는 flow-client 레벨에서 안 뜬다(HypothesisEarthLayer가 자기 안에서 이미 그림, 중복 방지)', async () => {
+    // story #3101 — 기본값이 list로 바뀌어 가설 뷰를 명시로 고정해야 한다(기본값 의존 금지).
+    currentSearch = 'view=hypothesis';
     await renderFlowClient();
     // HypothesisEarthLayer는 얇은 스텁이라 사다리를 자체적으로 안 그린다 — 그런데도 사다리
     // 특유 라벨(대륙/건물)이 뜨면 flow-client.tsx가 중복으로 그리고 있다는 뜻이다.
@@ -559,6 +595,19 @@ describe('FlowPageClient — story #2535 지구→대륙→도시 드릴다운',
 
 // story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — TopBar 타이틀=Heading
 // 무게로 재분류(크기는 TopBar 유지·구조 불변).
+// story #3101(Board IA 1단계 B, 명명 정합) — 탭 이름(sidebar "보드")과 페이지 타이틀이
+// 그동안 갈려 있었다("흐름"). 첫 착지 렌더가 list(칸반)로 바뀐 것과 한 이름 계열로 맞춘다.
+describe('FlowPageClient — 페이지 타이틀 "보드"(story #3101 명명 정합)', () => {
+  it('TopBar 타이틀 h1 텍스트가 "보드"다(탭 이름과 동일 계열, 예전 "흐름" 아님)', async () => {
+    await renderFlowClient();
+
+    const h1 = container.querySelector('h1');
+    expect(h1?.textContent).toBe(koMessages.flow.title);
+    expect(h1?.textContent).toBe('보드');
+    expect(h1?.textContent).not.toBe('흐름');
+  });
+});
+
 describe('FlowPageClient — TopBar 타이틀 Heading 무게(story #2969 PR-5)', () => {
   it('TopBar 타이틀 h1이 font-extrabold를 갖고 크기(text-sm)는 그대로다', async () => {
     await renderFlowClient();
