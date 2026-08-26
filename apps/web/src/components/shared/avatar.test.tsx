@@ -253,24 +253,31 @@ describe('Avatar — story #3092 3단계 커넥터 아이콘 배지', () => {
     expect(container.querySelector('img[src="/connector-icons/cursor.svg"]')).toBeNull();
   });
 
-  it('HIGH 미승인 커넥터(claude-code)는 크기와 무관하게 항상 이니셜("CC") — 아이콘도 Agent 텍스트도 아니다', async () => {
-    for (const size of [16, 32, 48]) {
-      await act(async () => {
-        root.render(wrap(<Avatar name="유나" actorType="agent" size={size} runtimeType="claude-code" />));
-      });
-      const disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
-      expect(disk?.textContent).toBe('CC');
-      expect(disk?.className).toContain('bg-card');
-      expect(container.querySelector('img[src*="connector-icons"]')).toBeNull();
-    }
-  });
-
-  it('gemini도 크기 무관 항상 이니셜("G")', async () => {
+  // story #3092(4단계, 선생님 확定 2026-08-26) — "연동표시 목적 무변형 사용=통상 범위,
+  // 문의 불요" 판정으로 claude-code·gemini도 이니셜에서 아이콘으로 스왑(승인 대기 해제).
+  // 다른 아이콘 승인 커넥터와 동형으로 크기 사다리(≥28 아이콘 / <28 Agent 텍스트)를 탄다.
+  it('claude-code는 아이콘 승인 커넥터로 스왑됐다(아바타≥28→아이콘, <28→Agent 텍스트)', async () => {
     await act(async () => {
-      root.render(wrap(<Avatar name="유나" actorType="agent" size={16} runtimeType="gemini" />));
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={32} runtimeType="claude-code" />));
     });
     const disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
-    expect(disk?.textContent).toBe('G');
+    expect(disk.className).toContain('bg-white');
+    expect(disk.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/claude-code.svg');
+
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={24} runtimeType="claude-code" />));
+    });
+    expect(container.querySelector('.rounded-full.ring-2.ring-background')).toBeNull();
+    expect(container.textContent).toContain('Agent');
+  });
+
+  it('gemini도 아이콘 승인 커넥터로 스왑됐다(아바타≥28→아이콘)', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={32} runtimeType="gemini" />));
+    });
+    const disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
+    expect(disk.className).toContain('bg-white');
+    expect(disk.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/gemini.svg');
   });
 
   it('hermes는 이번 스코프에서 벡터 자산 미확保로 이니셜("H")까지만 — 라벨층(툴팁)은 그대로 "Hermes"', async () => {

@@ -103,12 +103,13 @@ export function runtimeLabel(key: string | null | undefined): string | null {
 
 /**
  * story #3092(3단계, 유나 규격 v3 doc cd8983c4 + 실행 패키지 doc 5745ad66) — 아바타 코너
- * 배지를 커넥터별 공식 아이콘으로 승격. 9종 중 claude-code·gemini는 상표 사인오프 전이라
- * 이니셜(«CC»·«G»)로 선출시(승인 나면 아이콘 자산 한 줄 교체) — 선생님 표대로 승인
- * (2026-08-26). hermes는 실행 패키지가 지정한 소스(Nous Research 공식/repo)를 조사했으나
- * 신뢰 가능한 벡터 자산이 없어(favicon이 시스템 폰트 의존 유니코드 글리프 "⚕" 뿐 — 렌더
- * 환경마다 모양이 달라지는 위험) 이니셜로 임시 강등(미르코 판단, 유나 재확認 요청 — 아래
- * sourceNote 참고).
+ * 배지를 커넥터별 공식 아이콘으로 승격. 9종 중 claude-code·gemini는 3단계 착수 시점엔
+ * 상표 사인오프 전이라 이니셜(«CC»·«G»)로 선출시했으나, **4단계(2026-08-26, 선생님 확定)**
+ * — "연동 표시 목적 무변형 사용=통상 범위, 별도 상표 문의 불요" 판정으로 두 종 모두
+ * 아이콘으로 스왑(승인 대기 해제). hermes는 실행 패키지가 지정한 소스(Nous Research
+ * 공식/repo)를 조사했으나 신뢰 가능한 벡터 자산이 없어(favicon이 시스템 폰트 의존 유니코드
+ * 글리프 "⚕" 뿐 — 렌더 환경마다 모양이 달라지는 위험) 이니셜로 확定(유나 design:pass,
+ * story #3092 3단계).
  *
  * `sourceNote`는 실행 패키지가 요구한 "각 아이콘 출처 URL 명기"를 코드에도 고정해 자산이
  * 바뀌어도 근거가 diff에 남게 한다(PR 본문과 이중 기록 — 실행 소스는 여기가 SSOT).
@@ -129,8 +130,12 @@ export interface ConnectorBadgeDef {
 }
 
 export const CONNECTOR_BADGE_REGISTRY: Record<RuntimeKey, ConnectorBadgeDef> = {
-  'claude-code': { kind: 'initials', initials: 'CC', sourceNote: 'Anthropic 상표 사전승인 대기(HIGH) — 승인 시 아이콘 자산 스왑' },
-  gemini: { kind: 'initials', initials: 'G', sourceNote: 'Google 브랜드 정책 검토 대기(HIGH) — 승인 시 아이콘 자산 스왑' },
+  // story #3092(4단계, 선생님 확定 2026-08-26) — "연동 표시 목적 무변형 사용=통상 범위,
+  // 문의 불요" 판정으로 이니셜→아이콘 스왑(승인 대기 해제). claude=Anthropic 제품 스타버스트
+  // 마크(회사 삼각형 워드마크 "Anthropic"이 아니라 Claude 자체 마크 — claude-code 커넥터
+  // 정체성과 더 정확히 대응). gemini=스파클 마크(유나 시안이 쓴 "Gemini 스파클"과 형태 일치.
+  'claude-code': { kind: 'icon', asset: '/connector-icons/claude-code.svg', colorMode: 'mono', sourceNote: 'LobeHub icons-static-svg claude.svg(Anthropic 공식 Claude 스타버스트 마크 대조) — anthropic.com에 공개 브랜드/프레스킷 페이지를 못 찾았고 claude.ai 앱 도메인은 자동화 접근 403이라 1차 소스 직접 확認 불가, 애그리게이터 사용. 선생님 확定(2026-08-26): 연동표시 목적 무변형 사용=통상 범위, 별도 상표 문의 불요' },
+  gemini: { kind: 'icon', asset: '/connector-icons/gemini.svg', colorMode: 'mono', sourceNote: 'LobeHub icons-static-svg gemini.svg(Google 공식 Gemini 스파클 마크 대조) — Google 브랜드 리소스 센터가 파트너 인증 포털(partnermarketinghub.withgoogle.com)로 리다이렉트돼 1차 소스 직접 확認 불가, 애그리게이터 사용. 선생님 확定(2026-08-26): 연동표시 목적 무변형 사용=통상 범위, 별도 상표 문의 불요' },
   codex: { kind: 'icon', asset: '/connector-icons/codex.svg', colorMode: 'mono', sourceNote: 'LobeHub icons-static-svg codex.svg(OpenAI 공식 Codex 마크 대조) — openai.com/brand 직접 접근 차단(Cloudflare)으로 애그리게이터 사용' },
   grok: { kind: 'icon', asset: '/connector-icons/grok.svg', colorMode: 'mono', sourceNote: 'LobeHub icons-static-svg grok.svg — x.ai/legal/brand-guidelines 직접 접근 차단(Cloudflare)으로 애그리게이터 사용' },
   cursor: { kind: 'icon', asset: '/connector-icons/cursor.svg', colorMode: 'mono', sourceNote: 'simple-icons cursor.svg(PO/유나 사전 확保)' },
