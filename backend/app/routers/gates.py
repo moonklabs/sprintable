@@ -1898,14 +1898,22 @@ class GateTossRequest(BaseModel):
     target_conversation_id: uuid.UUID
 
 
-@router.post("/{id}/toss", response_model=GateResponse)
+class GateTossResponse(GateResponse):
+    # story #3094(2026-08-26, #3492 리뷰 "알려진 축소" 잔여분) — dispatch_approval_card_toss가
+    # 이미 신규삽입/멱등no-op을 bool로 구분해 반환하는데(#3488 PO 비차단 관찰 — False는 오직
+    # 멱등만 의미) 이 값이 HTTP 응답까지 안 올라와 FE가 "이미 있음" 여부를 알 방법이 없었다.
+    # additive(GateResponse 상속, 기존 필드 비파괴) — 게이트 멱등 시맨틱스·단일 처리는 불변.
+    inserted: bool
+
+
+@router.post("/{id}/toss", response_model=GateTossResponse)
 async def toss_gate_endpoint(
     id: uuid.UUID,
     body: GateTossRequest,
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
     auth=Depends(get_current_user),
-) -> GateResponse:
+) -> GateTossResponse:
     """story #3084(2026-08-25, 선생님 지시 — 결재 카드 «토스») — 상신자 또는 designated
     결재자 본인이, designated 본인이 참여한 다른 conversation에 카드 **사본**을 심는다
     (원 카드 잔존). #3001 delegate("사람" 축 — 정체성 재지정)와 다른 "방" 축(같은
@@ -1989,7 +1997,7 @@ async def toss_gate_endpoint(
             session, _gate, target_conversation_id=body.target_conversation_id, tossed_by_id=resolved.id,
         )
 
-    return GateResponse.model_validate(_gate)
+    return GateTossResponse(**GateResponse.model_validate(_gate).model_dump(), inserted=inserted)
 
 
 class GateReassignRequest(BaseModel):
