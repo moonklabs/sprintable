@@ -231,7 +231,7 @@ describe('Avatar — story #3092 3단계 커넥터 아이콘 배지', () => {
     expect(disk).toBeTruthy();
     expect(disk.className).toContain('bg-white');
     const img = disk.querySelector('img');
-    expect(img?.getAttribute('src')).toBe('/connector-icons/cursor.svg');
+    expect(img?.getAttribute('src')).toBe('/connector-icons/cursor.jpg');
     // "Agent" 텍스트 배지(옛 사각 배지)는 안 뜬다 — 배타적 택일.
     expect(container.textContent).not.toContain('Agent');
   });
@@ -250,19 +250,23 @@ describe('Avatar — story #3092 3단계 커넥터 아이콘 배지', () => {
       root.render(wrap(<Avatar name="유나" actorType="agent" size={24} runtimeType="cursor" />));
     });
     expect(container.textContent).toContain('Agent');
-    expect(container.querySelector('img[src="/connector-icons/cursor.svg"]')).toBeNull();
+    expect(container.querySelector('img[src="/connector-icons/cursor.jpg"]')).toBeNull();
   });
 
   // story #3092(4단계, 선생님 확定 2026-08-26) — "연동표시 목적 무변형 사용=통상 범위,
   // 문의 불요" 판정으로 claude-code·gemini도 이니셜에서 아이콘으로 스왑(승인 대기 해제).
   // 다른 아이콘 승인 커넥터와 동형으로 크기 사다리(≥28 아이콘 / <28 Agent 텍스트)를 탄다.
-  it('claude-code는 아이콘 승인 커넥터로 스왑됐다(아바타≥28→아이콘, <28→Agent 텍스트)', async () => {
+  //
+  // story #3119(tokscale 소스 갱신, 선생님 지정 2026-08-26) — claude-code 에셋이 jpg로
+  // 바뀌며 배경이 solid 브랜드색(흰색 아님)이라 colorMode도 mono→color(bg-card)로
+  // 전환됐다(가짜 흰 배경 디스크보다 원색 배경을 그대로 두는 쪽이 자연스러움).
+  it('claude-code는 아이콘 승인 커넥터로 스왑됐다(아바타≥28→아이콘, <28→Agent 텍스트, tokscale jpg=colorMode color)', async () => {
     await act(async () => {
       root.render(wrap(<Avatar name="유나" actorType="agent" size={32} runtimeType="claude-code" />));
     });
     const disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
-    expect(disk.className).toContain('bg-white');
-    expect(disk.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/claude-code.svg');
+    expect(disk.className).toContain('bg-card');
+    expect(disk.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/claude-code.jpg');
 
     await act(async () => {
       root.render(wrap(<Avatar name="유나" actorType="agent" size={24} runtimeType="claude-code" />));
@@ -271,13 +275,24 @@ describe('Avatar — story #3092 3단계 커넥터 아이콘 배지', () => {
     expect(container.textContent).toContain('Agent');
   });
 
-  it('gemini도 아이콘 승인 커넥터로 스왑됐다(아바타≥28→아이콘)', async () => {
+  it('gemini도 아이콘 승인 커넥터로 스왑됐다(아바타≥28→아이콘, tokscale 멀티컬러 png=colorMode mono/bg-white)', async () => {
     await act(async () => {
       root.render(wrap(<Avatar name="유나" actorType="agent" size={32} runtimeType="gemini" />));
     });
     const disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
     expect(disk.className).toContain('bg-white');
-    expect(disk.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/gemini.svg');
+    expect(disk.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/gemini.png');
+  });
+
+  // story #3119 — codex는 라벨 «Codex» 유지·로고만 OpenAI 실제 마크로 교체(선생님 지시
+  // 2026-08-26). 기존 codex.svg가 OpenAI 마크가 아니었던 오류를 겸해 정정.
+  it('codex는 라벨을 유지한 채 OpenAI 로고로 교체됐다(tokscale jpg, colorMode mono/bg-white)', async () => {
+    await act(async () => {
+      root.render(wrap(<Avatar name="유나" actorType="agent" size={32} runtimeType="codex" />));
+    });
+    const disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
+    expect(disk.className).toContain('bg-white');
+    expect(disk.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/codex.jpg');
   });
 
   // story #3092(5단계, 선생님 재지시 2026-08-26) — 3단계의 "벡터 자산 부재" 이니셜 강등은
@@ -327,7 +342,7 @@ describe('Avatar — story #3092 3단계 커넥터 아이콘 배지', () => {
       root.render(wrap(<Avatar name="유나" actorType="agent" size={28} runtimeType="cursor" />));
     });
     const disk = container.querySelector('.rounded-full.ring-2.ring-background') as HTMLElement;
-    expect(disk.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/cursor.svg');
+    expect(disk.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/cursor.jpg');
   });
 
   it('runtime_type null이면 아이콘/이니셜 디스크 자체가 안 뜨고 옛 "Agent" 텍스트 배지만 뜬다(회귀 없음)', async () => {
