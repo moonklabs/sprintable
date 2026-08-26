@@ -222,6 +222,11 @@ jobs:
             # `tr '|' ','`로 콤마 복원한다(앱이 받는 최종 env var 값 자체는 무변경 — MCP_ALLOWED_HOSTS
             # 는 여전히 콤마구분).
             echo "mcp_allowed_hosts=sprintable-mcp-prod-787818285179.asia-northeast3.run.app|mcp.sprintable.ai" >> "$GITHUB_OUTPUT"
+            # [P1] iOS TestFlight 구글 로그인 후 404 인시던트(#3499 리뷰 delta) — AASA(apple-app-
+            # site-association) 라우트가 읽는 두 env. Team ID는 AASA 응답으로 공개되는 값이라
+            # 시크릿 아님(dev/prod 동일 계정). origin은 REALTIME_URL과 동일하게 호스트별로 갈린다.
+            echo "apple_team_id=JN798BC4KC" >> "$GITHUB_OUTPUT"
+            echo "mobile_app_link_origin=https://app.sprintable.ai" >> "$GITHUB_OUTPUT"
           else
             echo "target=dev" >> "$GITHUB_OUTPUT"
             echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
@@ -381,6 +386,10 @@ jobs:
             # cloudbuild.yaml deploy-mcp가 이 값이 비어 있으면 그 env var 자체를 안 실어(조건
             # 분기), dev 서비스에 새로 빈 문자열 env가 안 생긴다(오늘 실측 그대로 무변경).
             echo "mcp_allowed_hosts=" >> "$GITHUB_OUTPUT"
+            # [P1] iOS TestFlight 구글 로그인 후 404 인시던트(#3499 리뷰 delta) — prod 분기와
+            # 동일 이유, dev 호스트 값만 다르다.
+            echo "apple_team_id=JN798BC4KC" >> "$GITHUB_OUTPUT"
+            echo "mobile_app_link_origin=https://dev-app.sprintable.ai" >> "$GITHUB_OUTPUT"
           fi
 
       # story #3079(2026-08-25, #3070/#3031/#2089 근본원인 공통수정) — realtime path-filter
@@ -542,13 +551,17 @@ jobs:
           V_FRONTEND_MAX_INSTANCES: ${{ steps.env.outputs.frontend_max_instances }}
           V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED: ${{ steps.env.outputs.backend_sse_transient_replay_enabled }}
           V_MCP_ALLOWED_HOSTS: ${{ steps.env.outputs.mcp_allowed_hosts }}
+          # [P1] iOS TestFlight 구글 로그인 후 404 인시던트(#3499 리뷰 delta) — AASA 라우트가
+          # 읽는 env 2종. REALTIME_URL과 동일 패턴(env별 값·deploy-frontend --update-env-vars).
+          V_APPLE_TEAM_ID: ${{ steps.env.outputs.apple_team_id }}
+          V_MOBILE_APP_LINK_ORIGIN: ${{ steps.env.outputs.mobile_app_link_origin }}
         run: |
           # story #3079 — prod push는 위 gate 스텝이 안 돌아(if: target==dev) 빈 문자열이다.
           # 빈 값을 "false"(=배포 진행, 기존 fail-safe 방향과 동일)로 명시 치환 — cloudbuild.yaml
           # 쪽은 정확히 "true" 문자열만 스킵으로 취급하므로 다른 값은 전부 안전측(배포)이다.
           V_REALTIME_GCE_SKIP="${V_REALTIME_GCE_SKIP:-false}"
           V_REALTIME_CLOUDRUN_SKIP="${V_REALTIME_CLOUDRUN_SKIP:-false}"
-          SUBST="_DEPLOY_ENV=\"${V_DEPLOY_ENV}\",_FASTAPI_URL=\"${V_FASTAPI_URL}\",_BACKEND_MIN_INSTANCES=\"${V_BACKEND_MIN_INSTANCES}\",_BACKEND_MAX_INSTANCES=\"${V_BACKEND_MAX_INSTANCES}\",_DB_POOL_SIZE=\"${V_DB_POOL_SIZE}\",_DB_MAX_OVERFLOW=\"${V_DB_MAX_OVERFLOW}\",_BACKEND_DB_PGBOUNCER=\"${V_BACKEND_DB_PGBOUNCER}\",_BACKEND_TIMEOUT=\"${V_BACKEND_TIMEOUT}\",_GA4_MEASUREMENT_ID=\"${V_GA4_MEASUREMENT_ID}\",_REALTIME_MIN_INSTANCES=\"${V_REALTIME_MIN_INSTANCES}\",_REALTIME_MAX_INSTANCES=\"${V_REALTIME_MAX_INSTANCES}\",_REALTIME_TIMEOUT=\"${V_REALTIME_TIMEOUT}\",_REALTIME_URL=\"${V_REALTIME_URL}\",_BACKEND_PG_LISTEN_ENABLED=\"${V_BACKEND_PG_LISTEN_ENABLED}\",_BACKEND_REDIS_CONSUME_ENABLED=\"${V_BACKEND_REDIS_CONSUME_ENABLED}\",_BACKEND_REDIS_DISPATCH_ENABLED=\"${V_BACKEND_REDIS_DISPATCH_ENABLED}\",_REDIS_URL=\"${V_REDIS_URL}\",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED=\"${V_BACKEND_REDIS_DUAL_PUBLISH_ENABLED}\",_BACKEND_FANOUT_WAKE_REDIS_ENABLED=\"${V_BACKEND_FANOUT_WAKE_REDIS_ENABLED}\",_SSE_MULTIPLEX_ENABLED=\"${V_SSE_MULTIPLEX_ENABLED}\",_BACKEND_PRESENCE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_REDIS_ENABLED}\",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED}\",_BACKEND_SSE_LEASE_REDIS_ENABLED=\"${V_BACKEND_SSE_LEASE_REDIS_ENABLED}\",_FRONTEND_MIN_INSTANCES=\"${V_FRONTEND_MIN_INSTANCES}\",_FRONTEND_MAX_INSTANCES=\"${V_FRONTEND_MAX_INSTANCES}\",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED=\"${V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}\",_MCP_ALLOWED_HOSTS=\"${V_MCP_ALLOWED_HOSTS}\",_EE_ENABLED=\"${V_EE_ENABLED}\",_LICENSE_CONSENT=\"${V_LICENSE_CONSENT}\",_TOSS_CLIENT_KEY=\"${V_TOSS_CLIENT_KEY}\",_NEXT_PUBLIC_APP_URL=\"${V_NEXT_PUBLIC_APP_URL}\",_REALTIME_GCE_SKIP=\"${V_REALTIME_GCE_SKIP}\",_REALTIME_CLOUDRUN_SKIP=\"${V_REALTIME_CLOUDRUN_SKIP}\""
+          SUBST="_DEPLOY_ENV=\"${V_DEPLOY_ENV}\",_FASTAPI_URL=\"${V_FASTAPI_URL}\",_BACKEND_MIN_INSTANCES=\"${V_BACKEND_MIN_INSTANCES}\",_BACKEND_MAX_INSTANCES=\"${V_BACKEND_MAX_INSTANCES}\",_DB_POOL_SIZE=\"${V_DB_POOL_SIZE}\",_DB_MAX_OVERFLOW=\"${V_DB_MAX_OVERFLOW}\",_BACKEND_DB_PGBOUNCER=\"${V_BACKEND_DB_PGBOUNCER}\",_BACKEND_TIMEOUT=\"${V_BACKEND_TIMEOUT}\",_GA4_MEASUREMENT_ID=\"${V_GA4_MEASUREMENT_ID}\",_REALTIME_MIN_INSTANCES=\"${V_REALTIME_MIN_INSTANCES}\",_REALTIME_MAX_INSTANCES=\"${V_REALTIME_MAX_INSTANCES}\",_REALTIME_TIMEOUT=\"${V_REALTIME_TIMEOUT}\",_REALTIME_URL=\"${V_REALTIME_URL}\",_BACKEND_PG_LISTEN_ENABLED=\"${V_BACKEND_PG_LISTEN_ENABLED}\",_BACKEND_REDIS_CONSUME_ENABLED=\"${V_BACKEND_REDIS_CONSUME_ENABLED}\",_BACKEND_REDIS_DISPATCH_ENABLED=\"${V_BACKEND_REDIS_DISPATCH_ENABLED}\",_REDIS_URL=\"${V_REDIS_URL}\",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED=\"${V_BACKEND_REDIS_DUAL_PUBLISH_ENABLED}\",_BACKEND_FANOUT_WAKE_REDIS_ENABLED=\"${V_BACKEND_FANOUT_WAKE_REDIS_ENABLED}\",_SSE_MULTIPLEX_ENABLED=\"${V_SSE_MULTIPLEX_ENABLED}\",_BACKEND_PRESENCE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_REDIS_ENABLED}\",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED}\",_BACKEND_SSE_LEASE_REDIS_ENABLED=\"${V_BACKEND_SSE_LEASE_REDIS_ENABLED}\",_FRONTEND_MIN_INSTANCES=\"${V_FRONTEND_MIN_INSTANCES}\",_FRONTEND_MAX_INSTANCES=\"${V_FRONTEND_MAX_INSTANCES}\",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED=\"${V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}\",_MCP_ALLOWED_HOSTS=\"${V_MCP_ALLOWED_HOSTS}\",_EE_ENABLED=\"${V_EE_ENABLED}\",_LICENSE_CONSENT=\"${V_LICENSE_CONSENT}\",_TOSS_CLIENT_KEY=\"${V_TOSS_CLIENT_KEY}\",_NEXT_PUBLIC_APP_URL=\"${V_NEXT_PUBLIC_APP_URL}\",_REALTIME_GCE_SKIP=\"${V_REALTIME_GCE_SKIP}\",_REALTIME_CLOUDRUN_SKIP=\"${V_REALTIME_CLOUDRUN_SKIP}\",_APPLE_TEAM_ID=\"${V_APPLE_TEAM_ID}\",_MOBILE_APP_LINK_ORIGIN=\"${V_MOBILE_APP_LINK_ORIGIN}\""
           echo "substitutions=${SUBST}" >> "$GITHUB_OUTPUT"
 
       - name: Submit Cloud Build
