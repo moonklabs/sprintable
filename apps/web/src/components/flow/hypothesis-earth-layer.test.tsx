@@ -16,6 +16,15 @@ import type { Hypothesis } from '@sprintable/core-storage';
 import koMessages from '../../../messages/ko.json';
 import { HypothesisEarthLayer } from './hypothesis-earth-layer';
 
+// story #3112(Board IA·D0(a)) — 이 컴포넌트가 내부에서 그리는 ScaleLadder가 클릭 배선을
+// 위해 usePathname/useRouter/useSearchParams를 쓴다(scale-ladder.tsx 참고). 이 파일 자체의
+// 관심사는 아니라 최소 stub만 둔다.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => '/ws-1/proj-1/flow',
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;

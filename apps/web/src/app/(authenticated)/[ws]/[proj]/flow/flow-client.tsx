@@ -140,19 +140,6 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
     return () => { cancelledRef.cancelled = true; };
   }, [projectId, fetchData, orgSyncVersion]);
 
-  // story #3101 — 기본값(parseView의 파라미터-없음 폴백)이 'hypothesis'→'list'로
-  // 바뀌었으니, "URL을 깨끗이 지워도 되는" 뷰도 같이 옮겨야 한다. 예전 그대로 'hypothesis'
-  // 클릭 시 params.delete('view')를 두면 parseView가 그 빈 URL을 'list'로 되돌려 읽어
-  // 가설 탭을 눌러도 목록이 뜨는 회귀가 난다(G1 위반 — 가설 화면 증발) — 깨끗한 URL의
-  // 자격을 새 기본값(list)로 옮긴다.
-  const setView = useCallback((next: FlowView) => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (next === 'list') params.delete('view');
-    else params.set('view', next);
-    const qs = params.toString();
-    router.push(`/${wsSlug}/${projSlug}/flow${qs ? `?${qs}` : ''}`);
-  }, [router, searchParams, wsSlug, projSlug]);
-
   // AC6(판정선) — 패널을 닫아도 URL의 story는 지우지 않는다("누른 노드가 선택된 채로
   // 남는다" — selectedStoryId는 URL이 단일 소스, 열림/닫힘은 이 로컬 boolean만 관여). 다시
   // 그 노드를 누르면 handleSelectStory가 다시 panelOpen=true로 돌린다.
@@ -233,48 +220,21 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
 
       <div className="space-y-4 p-4">
         {/* story #2930(P0-G) I3 — nav에서 flow+sprints가 「보드」 단일 항목으로 접히며 사라진
-            sprints 진입점을 메우는 얕은 프레임(WorkspaceFrameTabs). 아래 3탭(가설|갈래|칸반)과
-            다른 층 — 그건 안 건드린다(E-FLOW-V4 기 확定). */}
+            sprints 진입점을 메우는 얕은 프레임(WorkspaceFrameTabs). 아래 ScaleLadder와 다른
+            층 — 그건 안 건드린다(E-FLOW-V4 기 확定). */}
         <WorkspaceFrameTabs active="board" />
 
-        {/* ② 세 칸 세그(가설|갈래|칸반) — story #2531(E-FLOW-V4 S1)에서 「가설」 칸을
-            맨 앞에 신설(v4 조직원리 §2, 축척 최상위=가설). 갈래·칸반 두 칸은 07-23
-            시안(`e15905e8`)에서 되찾은 것(IA 개정 때 조용히 지워졌던 것, 유나 지적
-            2026-07-30) 그대로 — 폐기 아니라 나란한 탭으로 유지(v3.4 계승). ⛔"현황판" 세
-            번째 칸은 선생님 재정정으로 지웠었다(그 자리에 이제 "가설"이 대신 선다 — 다른
-            이유·다른 칸). story #3043(PO+유나 IA 확定 ⓑ) — 예전엔 모바일에서 이 세그를
-            숨기고 #2225(미구현으로 그라운딩 확認) 대체 탭이 그 자리를 대신한다고 가정했으나,
-            그 대체물이 실재하지 않아 모바일에 세그도 대체도 둘 다 없는 dead-end였다. 이제
-            모바일에서도 그대로 그린다 — 새 모바일 전용 UI를 만들지 않고 데스크톱과 동일
-            컴포넌트를 재사용(회귀 위험 최소·유지보수 표면 1개). */}
-        <div className="flex items-center gap-1 border-b border-border pb-2">
-          <button
-            type="button"
-            onClick={() => setView('hypothesis')}
-            className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${view === 'hypothesis' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            {t('viewHypothesis')}
-          </button>
-          <button
-            type="button"
-            onClick={() => setView('flow')}
-            className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${view === 'flow' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            {t('viewFlow')}
-          </button>
-          <button
-            type="button"
-            onClick={() => setView('list')}
-            className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${view === 'list' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            {t('viewList')}
-          </button>
-        </div>
+        {/* story #3112(Board IA·D0(a), 선생님 승인 2026-08-26·카드 520beb8b) — 옛 3칸 렌즈
+            세그(가설|갈래|칸반, story #2531/#3043)를 여기서 제거했다. ScaleLadder가 «축척
+            네비게이터»로 승격되며 가설/갈래/스토리 3칸이 이 세그의 클릭 동작을 그대로
+            흡수했다(이중탭 중복 해소 — 조건②, 스펙 artifact c1f89cb5). 모바일 분기도 함께
+            사라진다 — ScaleLadder 자체가 compact 모드로 모바일에서도 그려진다(아래). */}
 
-        {/* story #2535(E-FLOW-V4 S5) — 축척 브레드크럼. 가설 뷰는 HypothesisEarthLayer가
-            자기 안에서 이미 사다리를 그리므로(지구=활성) 여기서 중복 안 그린다. 갈래=도시·
-            목록=거리(칸반의 단위는 스토리 — story #3111에서 «건물»=작업 오매핑 정정) —
-            「지금 보는 층 = 묻는 질문 전환」을 탭 전환마다 같은 자리에서 보인다. */}
+        {/* story #2535(E-FLOW-V4 S5) — 축척 네비게이터. 가설 뷰는 HypothesisEarthLayer가
+            자기 안에서 이미 그리므로(지구=활성) 여기서 중복 안 그린다. 갈래=도시·목록=거리
+            (칸반의 단위는 스토리 — story #3111에서 «건물»=작업 오매핑 정정) — 「지금 보는
+            층 = 묻는 질문 전환」을 탭 전환마다 같은 자리에서 보인다. story #3112 — 클릭
+            배선(렌즈 전환·목표 이동·작업 비활성)은 컴포넌트 자체가 갖는다(scale-ladder.tsx). */}
         {view !== 'hypothesis' ? (
           <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'street'} compact={isMobile} />
         ) : null}
