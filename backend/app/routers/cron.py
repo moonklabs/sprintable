@@ -752,13 +752,17 @@ _STORAGE_WARN_COOLDOWN = timedelta(days=7)
 @router.get("/assets-grace-hard-delete")
 async def assets_grace_hard_delete(
     request: Request,
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_worker_db),
 ) -> JSONResponse:
     """S8: soft-delete(deleted_at) 7일 경과 asset hard-delete — blob(provider)+row(asset_links FK CASCADE).
 
     best-effort: blob delete 성공(또는 이미 없음=멱등) 시에만 row 삭제. blob delete 실패 시 row 보존
     →다음 tick 재시도(orphan 0). tick당 최대 500건(폭주 방지).
-    """
+
+    story #2041(그라운딩 doc 67b44d1e, PR-D) 근본수정 — 최대 500건 순차 GCS 왕복(provider.
+    delete_object, 내부적으로 이미 to_thread 포장돼 이벤트루프는 안 막음) 동안 세션을 붙들고
+    있었다. `get_db`(요청 primary pool) 대신 `get_worker_db`(#2461과 동일 전용 소형 풀)로
+    이관 — 이 배치가 아무리 오래 걸려도 요청 커넥션 예산과 무관해진다."""
     verify_cron(request)
     try:
         cutoff = datetime.now(timezone.utc) - timedelta(days=_ASSET_GRACE_DAYS)
@@ -825,13 +829,17 @@ async def agent_run_timeout_sweep(
 @router.get("/storage-usage-warn")
 async def storage_usage_warn(
     request: Request,
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_worker_db),
 ) -> JSONResponse:
     """S8: SaaS org storage 사용량이 캡의 80%+ 면 owner/admin 경고 메일(dedup·cooldown 7일).
 
     org_subscription(active) 대상. 캡 미정의 tier=무제한(skip). 80% 미만 복귀 시 마커 re-arm(재크로싱 시
     즉시 재경고). 메일 실패는 best-effort(개별 흡수). cooldown 내 재발송 금지(storage_warn_notified_at).
-    """
+
+    story #2041(그라운딩 doc 67b44d1e, PR-D) 근본수정 — ①`get_db`→`get_worker_db`(#2461과
+    동일 전용 소형 풀). ②`send_email`이 완전 동기(blocking resend/smtplib)라 세션 점유+
+    이벤트루프 블록이 동시에 났다(그라운딩 판정 "storage 2크론 중 더 나쁨") — `asyncio.
+    to_thread`로 포장."""
     verify_cron(request)
     try:
         now = datetime.now(timezone.utc)
@@ -894,7 +902,7 @@ async def storage_usage_warn(
             )
             for em in emails:
                 try:
-                    send_email(em, subject, html)
+                    await asyncio.to_thread(send_email, em, subject, html)
                 except Exception:
                     logger.warning("storage-usage-warn email 실패 org=%s", sub.org_id, exc_info=True)
             await session.execute(
