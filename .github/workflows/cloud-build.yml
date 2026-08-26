@@ -419,6 +419,18 @@ jobs:
           AR_REGION="asia-northeast3"
           git fetch --unshallow --quiet 2>/dev/null || git fetch --quiet 2>/dev/null || true
 
+          # story #3098(2026-08-26) — 이 갈래 자체(describe 필드·sed·정규식)는 실측상 정상이다
+          # (동일 명령을 사람 계정으로 재현하면 "sprintable-realtime-gateway-dev-91ba3643-9a8753"
+          # 같은 실 템플릿명에서 8자 SHA가 그대로 뽑힌다 — 이름 패턴 불일치가 원인이 아니었다).
+          # 진짜 원인은 IAM: github-actions@${GCP_PROJECT}.iam.gserviceaccount.com에 부여된
+          # 역할이 artifactregistry.writer/cloudbuild.builds.editor/iam.serviceAccountUser/
+          # run.admin/secretmanager.secretAccessor/serviceusage.serviceUsageConsumer/
+          # storage.admin뿐 — compute.* 역할이 전무하다(project IAM policy 직접 조회로 확認).
+          # `compute.instanceGroupManagers.get` 권한이 없으니 이 describe는 매번 권한거부로
+          # 조용히 실패(stderr는 /dev/null)하고 빈 문자열만 돌아온다 — "최초 배포/이름 패턴
+          # 변경"이 아니라 "애초에 조회 권한이 없음"이 실제 사유. ⚠️IAM 부여는 인프라 lane
+          # (PO 전담) — 이 코드는 안 건드림. 필요한 조치: 이 SA에 roles/compute.viewer
+          # (또는 최소 compute.instanceGroupManagers.get) 부여, story #3098 참조.
           gce_skip="false"
           current_template="$(gcloud compute instance-groups managed describe sprintable-realtime-gateway-dev \
             --region="${AR_REGION}" --project="${GCP_PROJECT}" \
@@ -433,24 +445,51 @@ jobs:
             gce_skip="true"
           fi
 
+          # story #3098(2026-08-26, PO 실측 run 32919036744) — 이 갈래는 실측 결과 두 겹으로
+          # 깨져 있었다(둘 다 이번 delta로 해소):
+          # ①`--format='value(status.traffic.filter(percent=100).revisionName)'`가 gcloud
+          #   포맷 트랜스폼 파서 자체를 태워 매 호출 ERROR("Transform function expected") →
+          #   stderr는 /dev/null로 삼켜지고 serving_revision은 항상 빈 문자열. 실 트래픽
+          #   스플릿과 무관하게 100% 확定 실패(직접 재현·gcloud 에러 메시지 확認).
+          #   → json + jq로 percent==100 항목을 직접 골라낸다(gcloud 포맷 트랜스폼 문법에
+          #   더는 의존하지 않음, GHA ubuntu-latest 기본 이미지에 jq 상시 포함).
+          # ②①을 고쳐도 다음 겹이 바로 막는다 — Cloud Run은 `--image=...backend:${COMMIT_SHA}`
+          #   로 태그를 받아 배포해도 `describe`가 돌려주는 `spec.containers[0].image`는 항상
+          #   digest 고정형(`repo@sha256:...`)이다(Cloud Run 자체 동작 — 태그가 아니라
+          #   불변 digest로 리비전을 고정, 실측 확認). 기존 `${last_image##*:}`는 이 digest의
+          #   sha256 hex를 git SHA로 착각해 그대로 check_realtime_relevant_diff.sh에 넘겼다
+          #   (git이 못 알아들어 fail-safe로만 떨어지고 스킵은 영원히 못 탐 — ①만 고치면
+          #   증상이 "빈 값"에서 "매번 배포 진행"으로 바뀔 뿐 근본은 그대로였을 것).
+          #   → Artifact Registry에 그 digest를 가리키는 태그를 역질의해(같은 digest에
+          #   COMMIT_SHA 태그와 `latest-dev` 플로팅 태그가 동시에 붙어 있음, 실측 확認) 40자
+          #   git SHA 패턴만 골라낸다.
           cloudrun_skip="false"
           serving_revision="$(gcloud run services describe sprintable-realtime-dev \
             --region="${AR_REGION}" --project="${GCP_PROJECT}" \
-            --format='value(status.traffic.filter(percent=100).revisionName)' 2>/dev/null || echo '')"
+            --format=json 2>/dev/null \
+            | jq -r '.status.traffic[]? | select(.percent==100) | .revisionName' 2>/dev/null \
+            | head -1 || echo '')"
           if [ -z "${serving_revision}" ]; then
             echo "[cloudrun] 100% 트래픽 서빙 리비전을 못 읽음(최초 배포이거나 트래픽 스플릿 중) — 배포 진행"
           else
-            last_image="$(gcloud run revisions describe "${serving_revision}" \
+            serving_digest="$(gcloud run revisions describe "${serving_revision}" \
               --region="${AR_REGION}" --project="${GCP_PROJECT}" \
               --format='value(spec.containers[0].image)' 2>/dev/null || echo '')"
-            cloudrun_last_sha="${last_image##*:}"
-            if [ -z "${cloudrun_last_sha}" ] || [ "${cloudrun_last_sha}" = "${last_image}" ]; then
-              echo "[cloudrun] 서빙 리비전 이미지 태그를 못 읽음 — 배포 진행"
-            elif bash backend/scripts/check_realtime_relevant_diff.sh "${cloudrun_last_sha}" "${GITHUB_SHA}"; then
-              echo "[cloudrun] 관련 경로 변경 있음 — 배포 진행"
+            if [ -z "${serving_digest}" ] || [ "${serving_digest#*@}" = "${serving_digest}" ]; then
+              echo "[cloudrun] 서빙 리비전 이미지 digest를 못 읽음 — 배포 진행"
             else
-              echo "[cloudrun] ${cloudrun_last_sha}..${GITHUB_SHA} 사이 realtime-관련 경로 변경 없음 — 스킵"
-              cloudrun_skip="true"
+              cloudrun_last_sha="$(gcloud artifacts docker tags list "${serving_digest%@*}" \
+                --filter="version:${serving_digest#*@}" \
+                --format='value(tag)' 2>/dev/null \
+                | sed 's#.*/##' | grep -E '^[0-9a-f]{40}$' | head -1 || echo '')"
+              if [ -z "${cloudrun_last_sha}" ]; then
+                echo "[cloudrun] 서빙 digest를 가리키는 커밋 SHA 태그를 못 찾음 — 배포 진행"
+              elif bash backend/scripts/check_realtime_relevant_diff.sh "${cloudrun_last_sha}" "${GITHUB_SHA}"; then
+                echo "[cloudrun] 관련 경로 변경 있음 — 배포 진행"
+              else
+                echo "[cloudrun] ${cloudrun_last_sha}..${GITHUB_SHA} 사이 realtime-관련 경로 변경 없음 — 스킵"
+                cloudrun_skip="true"
+              fi
             fi
           fi
 
