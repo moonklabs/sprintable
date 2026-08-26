@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { Check } from 'lucide-react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -97,12 +98,17 @@ export function LinkedAccountsSection() {
       </SectionCardHeader>
       <SectionCardBody className="space-y-4">
         {message && (
+          // 유나 design:changes(2026-08-26, PR#3532) — 라이트 테마 text-success on 배경이
+          // 3.49:1로 AA(4.5) 미달 실측(StateHeader §654a74ba 선례 동형). 처방: 성공 텍스트는
+          // text-foreground(중립, 양테마 AA 보장)로 두고 상태 신호는 그래픽(체크 아이콘,
+          // 장식용 aria-hidden)으로만 준다 — "색은 그래픽·텍스트는 중립".
           <p
             role={message.type === 'success' ? 'status' : 'alert'}
             aria-live={message.type === 'success' ? 'polite' : 'assertive'}
             aria-atomic="true"
-            className={`text-sm ${message.type === 'success' ? 'text-success' : 'text-destructive'}`}
+            className={`flex items-center gap-1.5 text-sm ${message.type === 'success' ? 'text-foreground' : 'text-destructive'}`}
           >
+            {message.type === 'success' && <Check className="size-3.5 shrink-0 text-success" aria-hidden="true" />}
             {message.text}
           </p>
         )}
