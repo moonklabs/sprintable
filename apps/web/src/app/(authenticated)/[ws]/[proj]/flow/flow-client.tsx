@@ -55,12 +55,18 @@ type FlowView = 'hypothesis' | 'flow' | 'list';
 // 없으면(공유 링크·새로고침의 흔한 형태) 위 모바일 기본값(flow)이 이겨 서사 패널이
 // 렌더되지 않았다(패널은 view==='hypothesis'에서만 뜬다). hypothesis 파라미터가 있으면
 // «명시 view»와 동급으로 존중 — 모바일이어도 그 가설을 보러 온 것이 명백하므로.
-function parseView(raw: string | null, isMobile: boolean, hasHypothesisParam: boolean): FlowView {
+// story #3101(Board IA 1단계 B, 유나 규격 doc 85808039 SSOT, PO 확定 2026-08-26) — 데스크톱
+// 기본 랜딩도 모바일과 같은 이유로 'hypothesis'→'list'(보드/칸반)로 옮긴다: 탭 이름이 이미
+// "보드"인데(app-sidebar.tsx) 첫 착지가 가설 화면이면 명명과 렌더가 어긋난다(§2224/§3043이
+// 모바일에서 겪은 것과 같은 클래스, 이번엔 데스크톱). 불변식 「탭 이름=첫 착지 렌더」를 여기서
+// 만족시킨다. `?view=`/`?hypothesis=` 명시 파라미터는 그대로 존중(위 3줄 무변경) — 가설·갈래는
+// 세그 1클릭으로 여전히 도달 가능(G1, 매핑 고아 0).
+function parseView(raw: string | null, hasHypothesisParam: boolean): FlowView {
   if (raw === 'list' || raw === 'kanban') return 'list';
   if (raw === 'flow') return 'flow';
   if (raw === 'hypothesis') return 'hypothesis';
   if (hasHypothesisParam) return 'hypothesis';
-  return isMobile ? 'list' : 'hypothesis';
+  return 'list';
 }
 
 /**
@@ -90,10 +96,12 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
   // AC3와 같은 규율) — useIsMobile로 렌더 자체를 가른다. `?view=`는 모바일에서도 URL 정본
   // 그대로라 세그가 없어도 주소로 칸반 진입은 가능하다.
   const isMobile = useIsMobile();
-  // story #2531 — 기본값(파라미터 없음) 판정이 데스크톱/모바일에 따라 갈리므로 isMobile이
-  // 정해진 뒤에 view를 센다(카디르 ①HIGH fix). hasHypothesisParam은 카디르 재QA 비차단②
-  // (S3) — 모바일에서 `?hypothesis=`만 있는 공유링크/새로고침이 패널을 못 열던 것 fix.
-  const view = parseView(searchParams.get('view'), isMobile, searchParams.get('hypothesis') !== null);
+  // story #3101 — 기본값(파라미터 없음)이 이제 데스크톱/모바일 무관 'list' 하나로 고정돼
+  // parseView가 isMobile을 더는 받지 않는다(#2531 시절의 기기별 분기 fix는 여기서 소멸 —
+  // 애초에 「기본값이 기기마다 다르다」는 전제가 이번 정합으로 사라졌다). hasHypothesisParam은
+  // 카디르 재QA 비차단②(S3) — 모바일에서 `?hypothesis=`만 있는 공유링크/새로고침이 패널을
+  // 못 열던 것 fix, 이건 그대로 유지.
+  const view = parseView(searchParams.get('view'), searchParams.get('hypothesis') !== null);
 
   const [data, setData] = useState<GlanceData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -132,9 +140,14 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
     return () => { cancelledRef.cancelled = true; };
   }, [projectId, fetchData, orgSyncVersion]);
 
+  // story #3101 — 기본값(parseView의 파라미터-없음 폴백)이 'hypothesis'→'list'로
+  // 바뀌었으니, "URL을 깨끗이 지워도 되는" 뷰도 같이 옮겨야 한다. 예전 그대로 'hypothesis'
+  // 클릭 시 params.delete('view')를 두면 parseView가 그 빈 URL을 'list'로 되돌려 읽어
+  // 가설 탭을 눌러도 목록이 뜨는 회귀가 난다(G1 위반 — 가설 화면 증발) — 깨끗한 URL의
+  // 자격을 새 기본값(list)로 옮긴다.
   const setView = useCallback((next: FlowView) => {
     const params = new URLSearchParams(searchParams.toString());
-    if (next === 'hypothesis') params.delete('view');
+    if (next === 'list') params.delete('view');
     else params.set('view', next);
     const qs = params.toString();
     router.push(`/${wsSlug}/${projSlug}/flow${qs ? `?${qs}` : ''}`);

@@ -618,7 +618,7 @@
     "definerDerivedNone": "없음"
   },
   "flow": {
-    "title": "흐름",
+    "title": "보드",
     "loading": "불러오는 중…",
     "viewHypothesis": "가설",
     "viewFlow": "갈래",
