@@ -60,8 +60,16 @@ export function Avatar({
   // (아바타<28 조밀 리스트 또는 runtime_type=null).
   const runtimeDef = getRuntimeDef(runtimeType);
   const badgeDef = runtimeDef ? CONNECTOR_BADGE_REGISTRY[runtimeDef.key] : null;
-  const showIconBadge = badgeDef?.kind === 'icon' && size >= 28;
-  const showInitialsBadge = badgeDef?.kind === 'initials';
+  // story #3092(5단계 delta, 유나 실측 2026-08-26) — 상세 초상형 아이콘(hermes)은 전역
+  // 임계(28)에서 blob으로 뭉개짐(av36 이하 실측 확認) — 커넥터별 minIconSize override +
+  // 그 사이 구간(28~minIconSize) 전용 이니셜 폴백을 레지스트리 엔트리 필드로 얹는다(전역
+  // 상수 아님 — 기하 마크 8종은 필드 미설정이라 기존 동작 그대로, 단순 마크로 교체되면
+  // 필드만 지우면 원복).
+  const minIconSize = badgeDef?.kind === 'icon' ? (badgeDef.minIconSize ?? 28) : 28;
+  const showIconBadge = badgeDef?.kind === 'icon' && size >= minIconSize;
+  const showInitialsBadge =
+    badgeDef?.kind === 'initials' ||
+    (badgeDef?.kind === 'icon' && !showIconBadge && !!badgeDef.initials && size >= 28);
   const showTextBadge = !showIconBadge && !showInitialsBadge;
   // 디스크 지름 = clamp(16, 아바타×0.40, 30) · 마크 = 디스크×0.68(규격 §1~2).
   const diskSize = Math.min(30, Math.max(16, Math.round(size * 0.4)));
