@@ -2547,7 +2547,7 @@
     "packDialogAutomationAmount": "+{amount} 자동화 단위 / 월",
     "packDialogStorageAmount": "+{amount}GB / 월",
     "packDialogChargeLabel": "추가 청구",
-    "packDialogChargeValue": "월 {price} (VAT 별도)",
+    "packDialogChargeValue": "월 {price} (VAT 포함)",
     "packDialogAppliesLabel": "적용",
     "packDialogAppliesValue": "즉시 · 다음 결제부터 반영",
     "packDialogCancel": "취소",
