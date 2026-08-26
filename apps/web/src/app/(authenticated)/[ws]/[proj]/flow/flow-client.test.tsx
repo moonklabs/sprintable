@@ -23,6 +23,10 @@ const pushMock = vi.fn((url: string) => {
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock, replace: vi.fn() }),
   useSearchParams: () => new URLSearchParams(currentSearch),
+  // story #3112 — ScaleLadder가 클릭 배선을 위해 usePathname으로 ws/proj 세그먼트를
+  // 뽑는다(컴포넌트 레벨 배선). renderFlowClient가 넘기는 wsSlug="ws-1"·projSlug="proj-1"과
+  // 짝을 맞춘다.
+  usePathname: () => '/ws-1/proj-1/flow',
 }));
 
 vi.mock('@/components/nav/top-bar-slot', () => ({
@@ -335,24 +339,33 @@ describe('FlowPageClient — story #2531→#3101 기본 랜딩 변천(현재=lis
     expect(container.querySelector('[data-testid="next-maker-screen-stub"]')).toBeNull();
   });
 
-  it('세그에 가설·갈래·목록 3탭이 모두 뜬다', async () => {
+  // story #3112(Board IA·D0(a)) — 옛 3칸 렌즈 세그(가설|갈래|칸반)는 제거됐다. ScaleLadder가
+  // 그 클릭 동작을 흡수했으므로, 아래 3개 테스트는 이제 ScaleLadder의 가설/갈래/스토리
+  // rung을 대상으로 같은 계약(view= 쿼리 조립)을 잰다.
+  function findLadderRung(name: string): HTMLElement | undefined {
+    return Array.from(container.querySelector('.flex.overflow-hidden')?.children ?? []).find(
+      (el) => el.textContent?.includes(name),
+    ) as HTMLElement | undefined;
+  }
+
+  it('ScaleLadder에 가설·갈래·스토리·목표·작업 5칸이 모두 뜬다(렌즈 세그 흡수)', async () => {
     await renderFlowClient();
 
-    const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
-    expect(buttons).toContain(koMessages.flow.viewHypothesis);
-    expect(buttons).toContain(koMessages.flow.viewFlow);
-    expect(buttons).toContain(koMessages.flow.viewList);
+    const text = container.textContent ?? '';
+    expect(text).toContain(koMessages.flow.ladderName_earth);
+    expect(text).toContain(koMessages.flow.ladderName_city);
+    expect(text).toContain(koMessages.flow.ladderName_street);
+    expect(text).toContain(koMessages.flow.ladderName_continent);
+    expect(text).toContain(koMessages.flow.ladderName_building);
   });
 
-  it('갈래 탭(?view=flow)을 누르면 URL이 view=flow로 바뀐다', async () => {
+  it('갈래 rung(?view=flow)을 누르면 URL이 view=flow로 바뀐다', async () => {
     await renderFlowClient();
 
-    const flowTabButton = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent === koMessages.flow.viewFlow,
-    );
-    expect(flowTabButton).toBeTruthy();
+    const cityRung = findLadderRung(koMessages.flow.ladderName_city);
+    expect(cityRung).toBeTruthy();
     await act(async () => {
-      flowTabButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      cityRung!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
     expect(pushMock).toHaveBeenCalledTimes(1);
@@ -361,37 +374,53 @@ describe('FlowPageClient — story #2531→#3101 기본 랜딩 변천(현재=lis
   });
 
   // story #3101 — 기본값이 list로 옮겨가며 "URL을 깨끗이 지워도 되는" 자격도 hypothesis에서
-  // list로 옮겨갔다(setView 주석 참고). 가설 탭을 누르면 이제 view=hypothesis를 명시로
-  // 남겨야 한다 — 예전처럼 지우면 parseView가 빈 URL을 list로 되돌려 읽어 가설 화면이
-  // 증발한다(G1 위반).
-  it('가설 탭을 누르면 URL에 view=hypothesis가 명시로 남는다(#3101, 기본값이 list로 바뀌어 지우면 안 됨)', async () => {
+  // list로 옮겨갔다(ScaleLadder의 goToLens 주석 참고). 가설 rung을 누르면 이제
+  // view=hypothesis를 명시로 남겨야 한다 — 예전처럼 지우면 parseView가 빈 URL을 list로
+  // 되돌려 읽어 가설 화면이 증발한다(G1 위반).
+  it('가설 rung을 누르면 URL에 view=hypothesis가 명시로 남는다(#3101, 기본값이 list로 바뀌어 지우면 안 됨)', async () => {
     currentSearch = 'view=flow';
     await renderFlowClient();
 
-    const hypothesisTabButton = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent === koMessages.flow.viewHypothesis,
-    );
+    const earthRung = findLadderRung(koMessages.flow.ladderName_earth);
     await act(async () => {
-      hypothesisTabButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      earthRung!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
     const pushedUrl = pushMock.mock.calls[0]?.[0] as string;
     expect(pushedUrl).toContain('view=hypothesis');
   });
 
-  it('목록 탭으로 돌아가면(setView("list")) URL에서 view= 쿼리를 지운다(#3101, 기본값=파라미터 없음=list)', async () => {
+  it('스토리 rung으로 돌아가면(goToLens("list")) URL에서 view= 쿼리를 지운다(#3101, 기본값=파라미터 없음=list)', async () => {
     currentSearch = 'view=flow';
     await renderFlowClient();
 
-    const listTabButton = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent === koMessages.flow.viewList,
-    );
+    const streetRung = findLadderRung(koMessages.flow.ladderName_street);
     await act(async () => {
-      listTabButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      streetRung!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
     const pushedUrl = pushMock.mock.calls[0]?.[0] as string;
     expect(pushedUrl).not.toContain('view=');
+  });
+
+  it('목표 rung은 렌즈 전환이 아니라 /goals로 이동하는 링크다(조건① 이동 어포던스)', async () => {
+    await renderFlowClient();
+
+    const goalRung = findLadderRung(koMessages.flow.ladderName_continent);
+    expect(goalRung?.tagName).toBe('A');
+    expect(goalRung?.getAttribute('href')).toBe('/ws-1/proj-1/goals');
+  });
+
+  it('작업 rung은 비활성(전용 표면 없음 — 조건①, 클릭해도 push가 안 일어난다)', async () => {
+    await renderFlowClient();
+
+    const taskRung = findLadderRung(koMessages.flow.ladderName_building);
+    expect(taskRung?.tagName).not.toBe('BUTTON');
+    expect(taskRung?.tagName).not.toBe('A');
+    await act(async () => {
+      taskRung!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(pushMock).not.toHaveBeenCalled();
   });
 });
 
@@ -425,14 +454,26 @@ describe('FlowPageClient — story #3043→#3101 기본값=list(칸반), 모바�
     expect(container.querySelector('[data-testid="hypothesis-earth-layer-stub"]')).toBeNull();
   });
 
-  it('모바일이라도 세그(가설|갈래|칸반)가 그려진다(예전엔 isMobile이면 렌더 자체를 안 했다)', async () => {
+  // story #3112 — 옛 3버튼 세그는 제거됐다. 모바일은 ScaleLadder의 compact 칩열이 렌즈
+  // 전환의 유일한 경로라 클릭 배선이 여기서도 반드시 동작해야 한다(read-only면 렌즈
+  // 전환 자체가 증발 — scale-ladder.tsx 주석 참고).
+  it('모바일이라도 ScaleLadder(compact)가 그려지고 렌즈 rung 클릭이 동작한다(예전엔 isMobile이면 세그 렌더 자체를 안 했다)', async () => {
     isMobileMock = true;
     await renderFlowClient();
 
     const labels = Array.from(container.querySelectorAll('button')).map((b) => b.textContent);
-    expect(labels).toContain(koMessages.flow.viewHypothesis);
-    expect(labels).toContain(koMessages.flow.viewFlow);
-    expect(labels).toContain(koMessages.flow.viewList);
+    expect(labels).toContain(koMessages.flow.ladderName_earth);
+    expect(labels).toContain(koMessages.flow.ladderName_city);
+    expect(labels).toContain(koMessages.flow.ladderName_street);
+
+    const cityChip = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === koMessages.flow.ladderName_city,
+    );
+    await act(async () => {
+      cityChip!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    const pushedUrl = pushMock.mock.calls[0]?.[0] as string;
+    expect(pushedUrl).toContain('view=flow');
   });
 
   it('모바일이라도 ?view=flow가 명시돼 있으면 그 값을 그대로 존중한다(주소로 갈래 진입 회귀 없음)', async () => {
