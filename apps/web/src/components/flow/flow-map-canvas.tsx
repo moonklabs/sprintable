@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { Check, Circle } from 'lucide-react';
 import type { FlowMapLane, FlowMapNode, FlowMapEdgeKind, FlowMapEdgeGroup } from './derive-flow-map';
 import {
   FLOW_MAP_GRID_STEP, FLOW_MAP_NOW_LINE_X, FLOW_MAP_DEPTH0_X, computeLaneHeight, shouldShowNoDeeperReason,
@@ -120,6 +121,31 @@ function nodeToneClass(node: FlowMapNode): string {
   return 'border-l-border border-dashed'; // .n.queue — 아직 시작 안 한 것은 점선
 }
 
+// story #2224 후속(문 두 층, 2026-08-27, Yuna artifact f82f8804 방향안) — 게이트 pending을
+// 「대기 N」 숫자가 아니라 흐름 위 «표식»으로 보인다. gate_reason의 두 값(AnalyticsRepository.
+// _gate_reason SSOT — 지어내지 않음)이 이미 두 사정을 가른다:
+//   'evidence_insufficient' → 판정 재료 자체가 부족(검증 대기) → 원(circle) 글리프
+//   'pending_approval'      → 재료는 갖췄고 사람의 승인/반려만 남음               → 체크 글리프
+// (그 외 값 — 오늘은 없지만 구조를 안 못박는다) → 승인문으로 폴백(더 흔한 사정).
+type GateGlyphKind = 'approve' | 'verify';
+
+function gateGlyphKind(gateReason: string | null | undefined): GateGlyphKind {
+  return gateReason === 'evidence_insufficient' ? 'verify' : 'approve';
+}
+
+function GateGlyph({ node, t }: { node: FlowMapNode; t: ReturnType<typeof useTranslations> }) {
+  if (!node.gatePending) return null;
+  const kind = gateGlyphKind(node.gateReason);
+  const label = kind === 'verify' ? t('flowGateVerifyLabel') : t('flowGateApproveLabel');
+  return (
+    <span className="shrink-0" title={label} aria-label={label} role="img">
+      {kind === 'verify'
+        ? <Circle className="size-2.5 text-brand" strokeWidth={2.5} aria-hidden="true" />
+        : <Check className="size-2.5 text-success" strokeWidth={2.5} aria-hidden="true" />}
+    </span>
+  );
+}
+
 interface FlowMapNodeCardProps {
   node: FlowMapNode;
   left: number;
@@ -175,6 +201,7 @@ function FlowMapNodeCard({
         className={`focus-inset flex h-6 w-full items-center gap-1 rounded border border-l-[3px] border-border bg-card px-1.5 text-left text-[11px] shadow-sm hover:border-info/60 ${nodeToneClass(node)} ${dimmed ? 'opacity-50' : ''} ${selected || isDropHover ? 'ring-2 ring-brand ring-offset-1 ring-offset-background' : ''} ${isJustLinked ? 'ring-2 ring-success ring-offset-1 ring-offset-background' : ''}`}
       >
         <span className="shrink-0 font-mono text-[9px] text-muted-foreground">#{node.storyNumber}</span>
+        <GateGlyph node={node} t={t} />
         {/* 대체(확認됨)만 — "옛 노드"에 취소선(유나양 규격). 제안 상태는 절대 취소선을 넣지
             않는다(computeSupersededNodeIds가 확認 간선만 모으므로 이 자리는 값만 받는다 —
             "제안이면 안 흐린다"는 판단을 이 컴포넌트가 다시 하지 않는다). */}

@@ -603,3 +603,36 @@ describe('FlowMapCanvas — story #2369 가로 잘림 발견성(세로 접힘 �
     expect(scrollEl().scrollLeft).toBe(0);
   });
 });
+
+// story #2224 후속(문 두 층, 2026-08-27, Yuna artifact f82f8804 방향안) — 게이트 pending을
+// 대기 «숫자»가 아니라 흐름 위 표식으로 보인다. gate_reason의 두 값이 서로 다른 글리프를
+// 내는지(색만 다른 게 아니라 아이콘 자체가 다른지 — CVD/흑백 인쇄에서도 갈리게) 값으로 닫는다.
+describe('FlowMapCanvas — gate 두 층 글리프 (story #2224 문 레이어)', () => {
+  it('gatePending=false면 글리프가 렌더되지 않는다', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1', gatePending: false, gateReason: null })] });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    expect(container.querySelector('[role="img"]')).toBeNull();
+  });
+
+  it('gate_reason=evidence_insufficient → 검증문 글리프(원, text-brand)', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1', gatePending: true, gateReason: 'evidence_insufficient' })] });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    const glyph = container.querySelector('[role="img"]');
+    expect(glyph).not.toBeNull();
+    expect(glyph?.getAttribute('title')).toBe(koMessages.flow.flowGateVerifyLabel);
+    expect(glyph?.querySelector('svg.lucide-circle')).not.toBeNull();
+    expect(glyph?.querySelector('svg')?.classList.contains('text-brand')).toBe(true);
+    expect(glyph?.querySelector('svg.lucide-check')).toBeNull();
+  });
+
+  it('gate_reason=pending_approval → 승인문 글리프(체크, text-success)', async () => {
+    const lane = makeLane({ nowNodes: [makeNode({ id: 'n1', gatePending: true, gateReason: 'pending_approval' })] });
+    await act(async () => { root.render(wrap(<FlowMapCanvas lanes={[lane]} onSelectStory={() => {}} onTogglePastBundle={() => {}} loadingPastBundleEpicIds={EMPTY_EPIC_ID_SET} onCreateLink={NOOP_CREATE_LINK} onDeleteLink={NOOP_DELETE_LINK} onRejectLink={NOOP_REJECT_LINK} memberMap={{}} />)); });
+    const glyph = container.querySelector('[role="img"]');
+    expect(glyph).not.toBeNull();
+    expect(glyph?.getAttribute('title')).toBe(koMessages.flow.flowGateApproveLabel);
+    expect(glyph?.querySelector('svg.lucide-check')).not.toBeNull();
+    expect(glyph?.querySelector('svg')?.classList.contains('text-success')).toBe(true);
+    expect(glyph?.querySelector('svg.lucide-circle')).toBeNull();
+  });
+});

@@ -54,7 +54,10 @@ async function fetchAllDonePastItems(epicId: string): Promise<EpicFlowNodeItem[]
     const json: RawStoryListPage = await res.json();
     const rows = Array.isArray(json.data) ? json.data : [];
     for (const s of rows) {
-      items.push({ id: s.id, story_number: s.story_number, title: s.title, status: s.status, assignee_id: null, updated_at: '' });
+      // story #2224 후속(문 두 층) — /api/stories는 FlowNode 계약이 아니라 gate_pending/
+      // gate_reason을 안 준다. "지나온" 항목은 이미 끝난 일이라 게이트로 막힐 사정이 없는
+      // 게 정상 형태(BE 불변식 gate_pending=false ⇒ gate_reason=null)라 그 기본값을 그대로 쓴다.
+      items.push({ id: s.id, story_number: s.story_number, title: s.title, status: s.status, assignee_id: null, updated_at: '', gate_pending: false, gate_reason: null });
     }
     const page = parseCursorMeta(json.meta, 'FlowMultiLaneCanvas.fetchAllDonePastItems');
     if (!page.hasMore || !page.nextCursor) break;

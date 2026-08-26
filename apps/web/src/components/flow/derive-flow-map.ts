@@ -175,6 +175,15 @@ export interface FlowMapNode {
   kind: FlowMapNodeKind;
   /** queue 노드만 유의미(now는 지금선 바로 옆 고정 열). */
   depth: number;
+  // story #2224 후속(문 두 층, 2026-08-27) — BE FlowNode.gate_pending/gate_reason 그대로.
+  // gate_pending=false면 gateReason은 항상 null(BE 불변식, 여기서 재검증 안 함). optional —
+  // 이 순수 기하 함수들(computeNodePositions 등) 다수는 게이트와 무관해 기존 테스트 픽스처가
+  // 이 필드를 몰라도 되게 둔다(deriveFlowMapLane 산출 경로만 항상 채워 넘긴다).
+  // gate_reason 값의 뜻(AnalyticsRepository._gate_reason SSOT, 지어내지 않음):
+  //   'evidence_insufficient' — merge 게이트가 근거부족이라 판정 자체가 아직 안 섬(검증문)
+  //   'pending_approval'      — 판정 재료는 갖춰졌고 사람의 승인/반려만 남음(승인문)
+  gatePending?: boolean;
+  gateReason?: string | null;
 }
 
 export interface FlowMapOverflow {
@@ -233,6 +242,8 @@ export function deriveFlowMapLane(
     status: item.status,
     kind: 'now',
     depth: 0,
+    gatePending: item.gate_pending,
+    gateReason: item.gate_reason,
   }));
 
   const byDepth = new Map<number, FlowMapNode[]>();
@@ -245,6 +256,8 @@ export function deriveFlowMapLane(
       status: item.status,
       kind: 'queue',
       depth,
+      gatePending: item.gate_pending,
+      gateReason: item.gate_reason,
     };
     const list = byDepth.get(depth) ?? [];
     list.push(node);
@@ -273,6 +286,8 @@ export function deriveFlowMapLane(
     status: item.status,
     kind: 'past',
     depth: 0,
+    gatePending: item.gate_pending,
+    gateReason: item.gate_reason,
   }));
   const isPastExpanded = pastNodes.length > 0;
 

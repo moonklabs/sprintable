@@ -735,6 +735,8 @@
     "flowMapLaneEmpty": "Nothing to draw yet.",
     "flowMapNoDeeperReason": "Nothing past depth 1 yet — nothing has been connected.",
     "flowMapSlotDragHint": "Drop here to make it next",
+    "flowGateApproveLabel": "Awaiting approval — only a human decision is left",
+    "flowGateVerifyLabel": "Awaiting verification — evidence isn't sufficient yet",
     "portLinkStart": "Start a link from #{n}",
     "portConfirmSentence": "Connecting #{fromNumber} to #{toNumber}",
     "portLinkKind_spawned": "Came from here",

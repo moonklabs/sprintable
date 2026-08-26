@@ -10,7 +10,10 @@ import {
 import type { EpicFlowNodeItem } from './derive-flow';
 
 function makeItem(overrides: Partial<EpicFlowNodeItem> = {}): EpicFlowNodeItem {
-  return { id: 's1', story_number: 1, title: 'Story', status: 'backlog', assignee_id: null, updated_at: '2026-07-30T00:00:00Z', ...overrides };
+  return {
+    id: 's1', story_number: 1, title: 'Story', status: 'backlog', assignee_id: null,
+    updated_at: '2026-07-30T00:00:00Z', gate_pending: false, gate_reason: null, ...overrides,
+  };
 }
 
 // kind/confirmed는 대부분의 computeNodeDepth/deriveFlowMapLane 테스트에 무관(그 로직은
@@ -60,14 +63,29 @@ describe('computeNodeDepth', () => {
 describe('deriveFlowMapLane', () => {
   it('maps now items with kind=now and depth=0', () => {
     const lane = deriveFlowMapLane('e1', 'Epic 1', 10, [makeItem({ id: 'n1', status: 'in-progress' })], []);
-    expect(lane.nowNodes).toEqual([{ id: 'n1', storyNumber: 1, title: 'Story', status: 'in-progress', kind: 'now', depth: 0 }]);
+    expect(lane.nowNodes).toEqual([{ id: 'n1', storyNumber: 1, title: 'Story', status: 'in-progress', kind: 'now', depth: 0, gatePending: false, gateReason: null }]);
   });
 
   it('computes queue node depth from edges (no special-casing empty edges)', () => {
     const lane = deriveFlowMapLane('e1', 'Epic 1', 0, [], [makeItem({ id: 'u1' })], []);
     expect(lane.queueNodesByDepth.get(0)).toEqual([
-      { id: 'u1', storyNumber: 1, title: 'Story', status: 'backlog', kind: 'queue', depth: 0 },
+      { id: 'u1', storyNumber: 1, title: 'Story', status: 'backlog', kind: 'queue', depth: 0, gatePending: false, gateReason: null },
     ]);
+  });
+
+  // story #2224 후속(문 두 층, 2026-08-27) — gate_pending/gate_reason이 EpicFlowNodeItem→
+  // FlowMapNode 경계를 그대로 통과하는지(스네이크→카멜 변환 외 값 변형 없이).
+  it('carries gate_pending/gate_reason through to FlowMapNode for now/queue/past nodes', () => {
+    const lane = deriveFlowMapLane(
+      'e1', 'Epic 1', 1,
+      [makeItem({ id: 'n1', gate_pending: true, gate_reason: 'pending_approval' })],
+      [makeItem({ id: 'u1', gate_pending: true, gate_reason: 'evidence_insufficient' })],
+      [],
+      [makeItem({ id: 'p1', gate_pending: false, gate_reason: null })],
+    );
+    expect(lane.nowNodes[0]).toMatchObject({ gatePending: true, gateReason: 'pending_approval' });
+    expect(lane.queueNodesByDepth.get(0)?.[0]).toMatchObject({ gatePending: true, gateReason: 'evidence_insufficient' });
+    expect(lane.pastNodes[0]).toMatchObject({ gatePending: false, gateReason: null });
   });
 
   it('places queue nodes into different depth buckets when edges create a chain', () => {
@@ -195,7 +213,7 @@ describe('deriveFlowMapLane', () => {
     it('populates pastNodes from pastItems, kind="past"', () => {
       const pastItems = [makeItem({ id: 'p1', story_number: 10, title: 'Old story' })];
       const lane = deriveFlowMapLane('e1', 'Epic 1', 1, [], [], [], pastItems);
-      expect(lane.pastNodes).toEqual([{ id: 'p1', storyNumber: 10, title: 'Old story', status: 'backlog', kind: 'past', depth: 0 }]);
+      expect(lane.pastNodes).toEqual([{ id: 'p1', storyNumber: 10, title: 'Old story', status: 'backlog', kind: 'past', depth: 0, gatePending: false, gateReason: null }]);
     });
 
     it('draws a direct edge between two past nodes once both are expanded (no longer counted in internalCount)', () => {
